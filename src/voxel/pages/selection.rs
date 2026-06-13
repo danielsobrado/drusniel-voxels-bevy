@@ -13,7 +13,9 @@ use super::runtime::ClodPagesRuntime;
 use super::types::PageFootprint;
 use crate::gameplay::camera::controller::PlayerCamera;
 use crate::gameplay::player::Player;
-use crate::rendering::triplanar_material::TriplanarMaterial;
+use crate::rendering::triplanar_material::{
+    TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ClodPageNodeKey {
@@ -394,20 +396,47 @@ fn make_params(
 fn set_page_fade(
     materials: &mut Assets<TriplanarMaterial>,
     handle: &Handle<TriplanarMaterial>,
+    base_handle: &Handle<TriplanarMaterial>,
     fade: f32,
 ) {
     let fade = fade.clamp(0.0, 1.0);
     let dither = fade > 0.0 && fade < 0.999;
+    let base_material = materials.get(base_handle).cloned();
     if materials.get(handle).is_some_and(|material| {
         (material.uniforms.clod_fade - fade).abs() <= 0.0001
             && material.clod_page_dither == dither
+            && !page_material_needs_base_refresh(material, base_material.as_ref())
     }) {
         return;
     }
     if let Some(material) = materials.get_mut(handle) {
+        if let Some(base_material) = base_material.as_ref() {
+            if page_material_needs_base_refresh(material, Some(base_material)) {
+                *material = base_material.clone();
+                material.quality = TerrainMaterialQuality::FullTriplanar;
+            }
+        }
         material.uniforms.clod_fade = fade;
         material.clod_page_dither = dither;
     }
+}
+
+fn page_material_needs_base_refresh(
+    material: &TriplanarMaterial,
+    base_material: Option<&TriplanarMaterial>,
+) -> bool {
+    let Some(base_material) = base_material else {
+        return false;
+    };
+    material.grass_albedo.is_none()
+        && base_material.grass_albedo.is_some()
+        || material.grass_normal.is_none() && base_material.grass_normal.is_some()
+        || material.rock_albedo.is_none() && base_material.rock_albedo.is_some()
+        || material.rock_normal.is_none() && base_material.rock_normal.is_some()
+        || material.sand_albedo.is_none() && base_material.sand_albedo.is_some()
+        || material.sand_normal.is_none() && base_material.sand_normal.is_some()
+        || material.dirt_albedo.is_none() && base_material.dirt_albedo.is_some()
+        || material.dirt_normal.is_none() && base_material.dirt_normal.is_some()
 }
 
 fn hide_all_pages(
@@ -417,12 +446,13 @@ fn hide_all_pages(
         &MeshMaterial3d<TriplanarMaterial>,
     )>,
     materials: &mut Assets<TriplanarMaterial>,
+    base_handle: &Handle<TriplanarMaterial>,
 ) {
     for (_, mut visibility, material) in query.iter_mut() {
         if *visibility != Visibility::Hidden {
             *visibility = Visibility::Hidden;
         }
-        set_page_fade(materials, &material.0, 0.0);
+        set_page_fade(materials, &material.0, base_handle, 0.0);
     }
 }
 
@@ -445,8 +475,11 @@ pub(crate) fn clod_page_selection_system(
         &mut Visibility,
         &MeshMaterial3d<TriplanarMaterial>,
     )>,
+    triplanar_material: Res<TriplanarMaterialHandle>,
     mut materials: ResMut<Assets<TriplanarMaterial>>,
 ) {
+    let base_material_handle =
+        triplanar_material.handle_for_quality(TerrainMaterialQuality::FullTriplanar);
     if !runtime.enabled
         || show.0 == ClodPagesShowMode::Off
         || index.revision.is_none()
@@ -454,7 +487,7 @@ pub(crate) fn clod_page_selection_system(
     {
         state.clear();
         if !should_hold_current_page_visibility(gate.as_deref()) {
-            hide_all_pages(&mut pages, &mut materials);
+            hide_all_pages(&mut pages, &mut materials, &base_material_handle);
         }
         return;
     }
@@ -462,14 +495,14 @@ pub(crate) fn clod_page_selection_system(
     let Ok((camera_transform, projection)) = camera_query.single() else {
         if !should_hold_current_page_visibility(gate.as_deref()) {
             state.clear();
-            hide_all_pages(&mut pages, &mut materials);
+            hide_all_pages(&mut pages, &mut materials, &base_material_handle);
         }
         return;
     };
     let Ok(window) = window_query.single() else {
         if !should_hold_current_page_visibility(gate.as_deref()) {
             state.clear();
-            hide_all_pages(&mut pages, &mut materials);
+            hide_all_pages(&mut pages, &mut materials, &base_material_handle);
         }
         return;
     };
@@ -483,7 +516,7 @@ pub(crate) fn clod_page_selection_system(
     ) else {
         if !should_hold_current_page_visibility(gate.as_deref()) {
             state.clear();
-            hide_all_pages(&mut pages, &mut materials);
+            hide_all_pages(&mut pages, &mut materials, &base_material_handle);
         }
         return;
     };
@@ -534,7 +567,7 @@ pub(crate) fn clod_page_selection_system(
             state.fades.remove(&key);
         }
 
-        set_page_fade(&mut materials, &material.0, next);
+        set_page_fade(&mut materials, &material.0, &base_material_handle, next);
         let desired_visibility = if next > 0.0 {
             Visibility::Visible
         } else {
