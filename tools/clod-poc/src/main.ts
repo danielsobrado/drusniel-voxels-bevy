@@ -16,6 +16,7 @@ import {
   resimplifyParent,
   type NodeIndex,
 } from "./quadtree.js";
+import { emitAudio, setAudioEnabled, setMasterVolume, getAudioState } from "./audio/index.js";
 import {
   addDigEdit,
   type BrushOp,
@@ -309,7 +310,9 @@ async function main() {
     try {
       stagedImport = await consumeStagedProjectImport(importToken);
       if (!stagedImport) throw new Error("The staged project was not found or was already used");
+      emitAudio("project.import.success");
     } catch (error) {
+      emitAudio("project.import.error");
       info.textContent = `Project import failed: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       searchParams.delete("import");
@@ -449,6 +452,7 @@ async function main() {
   let terraformEditCheckbox: HTMLInputElement | null = null;
   const playerTerraformEditActive = () => terraformEditCheckbox?.checked ?? false;
   const exitPlayerMode = () => {
+    emitAudio("camera.mode.orbit");
     tabUiHold = false;
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
     playerPointerLocked = false;
@@ -495,6 +499,7 @@ async function main() {
     playerPitch = 0;
     player.spawn(hit.point);
     interaction.startPlaying();
+    emitAudio("camera.mode.player");
     controls.enabled = false;
     editToggleInput.checked = false;
     document.body.dataset.tfEdit = "false";
@@ -519,7 +524,11 @@ async function main() {
     }
   });
   renderer.domElement.addEventListener("pointerup", (event) => {
-    if (event.button === 0) digHeld = false;
+    if (event.button === 0 && digHeld) {
+      digHeld = false;
+    } else if (event.button === 0) {
+      digHeld = false;
+    }
     if (!digPointerDown || event.button !== 0) return;
     const moved = Math.hypot(event.clientX - digPointerDown.x, event.clientY - digPointerDown.y);
     digPointerDown = null;
@@ -678,6 +687,8 @@ async function main() {
     brushStrength: 1,
     brushFalloff: 0,
     brushFlowMs: DIG_HOLD_INTERVAL_MS,
+    audioEnabled: getAudioState().enabled,
+    audioVolume: getAudioState().masterVolume,
     grassEnabled: DEFAULT_GRASS_SETTINGS.enabled,
     grassDistance: DEFAULT_GRASS_SETTINGS.distance,
     grassBladeSpacing: DEFAULT_GRASS_SETTINGS.bladeSpacing,
@@ -1228,38 +1239,47 @@ async function main() {
     if (lowest === -1) return;
     const start = performance.now();
     let changed = false;
-    do {
-      let level = -1;
-      for (let L = 1; L <= topLevel; L++) {
-        if ((pendingByLevel.get(L)?.size ?? 0) > 0) { level = L; break; }
-      }
-      if (level === -1) break;
-      const set = pendingByLevel.get(level)!;
-      const key = set.values().next().value as string;
-      set.delete(key);
-      const t = performance.now();
-      const node = resimplifyParent(ancestorIndex, level, key, cfg);
-      pendingParentMs += performance.now() - t;
-      if (node) {
-        applyNodeMesh(node);
-        pendingParentNodes++;
-        changed = true;
-        const [nx, nz] = key.split(",").map(Number);
-        enqueueParent(level + 1, nx >> 1, nz >> 1);
-      }
-    } while (performance.now() - start < DRAIN_BUDGET_MS);
+    try {
+      do {
+        let level = -1;
+        for (let L = 1; L <= topLevel; L++) {
+          if ((pendingByLevel.get(L)?.size ?? 0) > 0) { level = L; break; }
+        }
+        if (level === -1) break;
+        const set = pendingByLevel.get(level)!;
+        const key = set.values().next().value as string;
+        set.delete(key);
+        const t = performance.now();
+        const node = resimplifyParent(ancestorIndex, level, key, cfg);
+        pendingParentMs += performance.now() - t;
+        if (node) {
+          applyNodeMesh(node);
+          pendingParentNodes++;
+          changed = true;
+          const [nx, nz] = key.split(",").map(Number);
+          enqueueParent(level + 1, nx >> 1, nz >> 1);
+        }
+      } while (performance.now() - start < DRAIN_BUDGET_MS);
 
-    const draining = [...pendingByLevel.values()].some((s) => s.size > 0);
-    if (changed) {
-      lastCutKey = "";
-      lastDebugKey = "";
-      if (!draining) {
-        // ancestors settled: fold their cost into the dig summary and refresh selection
-        lastDigSummary =
-          `${lastDigSummary} + ancestors ${pendingParentNodes}n ${pendingParentMs.toFixed(0)}ms`;
-        updateSelection();
-        updateInfo();
+      const draining = [...pendingByLevel.values()].some((s) => s.size > 0);
+      if (changed) {
+        lastCutKey = "";
+        lastDebugKey = "";
+        if (!draining) {
+          // ancestors settled: fold their cost into the dig summary and refresh selection
+          lastDigSummary =
+            `${lastDigSummary} + ancestors ${pendingParentNodes}n ${pendingParentMs.toFixed(0)}ms`;
+          updateSelection();
+          updateInfo();
+          // No completion chime here: it doubled up with the dig/raise sound on every edit.
+        }
       }
+    } catch (error) {
+      emitAudio("clod.rebuild.error");
+      if (error instanceof Error && error.name === "ClodBuildError") {
+        emitAudio("clod.validation.error");
+      }
+      throw error;
     }
   };
 
@@ -1281,39 +1301,51 @@ async function main() {
       material: state.brushOp === "add" ? state.brushMaterial : undefined,
       height: state.brushHeight, strength: state.brushStrength, falloff: state.brushFalloff,
     });
+
+    // One relevant terrain sound per edit: earthy "dig" for remove, "raise" for add.
+    emitAudio(state.brushOp === "add" ? "terrain.raise" : "terrain.dig.tick");
+
     const t0 = performance.now();
     const margin = radius + DIG_INFLUENCE_MARGIN;
-    const lod0 = rebuildDirtyLod0Pages(result, {
-      minX: hit.point.x - margin,
-      maxX: hit.point.x + margin,
-      minZ: hit.point.z - margin,
-      maxZ: hit.point.z + margin,
-    }, cfg, ancestorIndex);
+    try {
+      const lod0 = rebuildDirtyLod0Pages(result, {
+        minX: hit.point.x - margin,
+        maxX: hit.point.x + margin,
+        minZ: hit.point.z - margin,
+        maxZ: hit.point.z + margin,
+      }, cfg, ancestorIndex);
 
-    let colliderMs = 0;
-    for (const node of lod0.changed) colliderMs += applyNodeMesh(node);
-    if (state.grassEnabled && lod0.changed.length > 0) {
-      grassSystem.rebuildNodePatches(lod0.changed.map((node) => node.id));
-      state.grassBladeCount = grassSystem.getBladeCount();
-      grassBladeCountController?.updateDisplay();
+      let colliderMs = 0;
+      for (const node of lod0.changed) colliderMs += applyNodeMesh(node);
+      if (state.grassEnabled && lod0.changed.length > 0) {
+        grassSystem.rebuildNodePatches(lod0.changed.map((node) => node.id));
+        state.grassBladeCount = grassSystem.getBladeCount();
+        grassBladeCountController?.updateDisplay();
+      }
+      // seed the deferred ancestor chain from the dug LOD0 pages
+      pendingParentNodes = 0;
+      pendingParentMs = 0;
+      for (const [nx, nz] of lod0.dirtyCoords) enqueueParent(1, nx >> 1, nz >> 1);
+
+      const totalMs = performance.now() - t0;
+      lastDigSummary =
+        `${totalMs.toFixed(0)}ms now (LOD0 ${lod0.lod0Pages}p ${lod0.lod0Ms.toFixed(0)}ms · ` +
+        `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · collider ${colliderMs.toFixed(0)}ms)`;
+      console.log(
+        `[${state.brushOp} ${state.brushShape} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ancestors deferred`,
+      );
+      lastDigAt = performance.now();
+      lastCutKey = "";
+      lastDebugKey = "";
+      updateSelection();
+      updateInfo();
+    } catch (error) {
+      emitAudio("clod.rebuild.error");
+      if (error instanceof Error && error.name === "ClodBuildError") {
+        emitAudio("clod.validation.error");
+      }
+      throw error;
     }
-    // seed the deferred ancestor chain from the dug LOD0 pages
-    pendingParentNodes = 0;
-    pendingParentMs = 0;
-    for (const [nx, nz] of lod0.dirtyCoords) enqueueParent(1, nx >> 1, nz >> 1);
-
-    const totalMs = performance.now() - t0;
-    lastDigSummary =
-      `${totalMs.toFixed(0)}ms now (LOD0 ${lod0.lod0Pages}p ${lod0.lod0Ms.toFixed(0)}ms · ` +
-      `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · collider ${colliderMs.toFixed(0)}ms)`;
-    console.log(
-      `[${state.brushOp} ${state.brushShape} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ancestors deferred`,
-    );
-    lastDigAt = performance.now();
-    lastCutKey = "";
-    lastDebugKey = "";
-    updateSelection();
-    updateInfo();
   };
 
   updateLighting();
@@ -1351,16 +1383,32 @@ async function main() {
     updateSelection();
   });
   gui.add(state, "enforce21").name("2:1 constraint").onChange(updateSelection);
-  gui.add(state, "freeze").name("freeze selection");
-  gui.add(state, "showBounds").name("page boundaries").onChange(updateSelection);
-  gui.add(state, "showSeamPoints").name("same-LOD seam points").onChange(updateSelection);
-  gui.add(state, "showCrossLodBorders").name("cross-LOD borders").onChange(updateSelection);
+  gui.add(state, "freeze").name("freeze selection").onChange((on: boolean) => {
+    emitAudio(on ? "clod.selection.freeze.on" : "clod.selection.freeze.off");
+  });
+  gui.add(state, "showBounds").name("page boundaries").onChange(() => {
+    updateSelection();
+    emitAudio("clod.overlay.toggle");
+  });
+  gui.add(state, "showSeamPoints").name("same-LOD seam points").onChange(() => {
+    updateSelection();
+    emitAudio("clod.overlay.toggle");
+  });
+  gui.add(state, "showCrossLodBorders").name("cross-LOD borders").onChange(() => {
+    updateSelection();
+    emitAudio("clod.overlay.toggle");
+  });
   gui.add(state, "showNodeLabels").name("show floating node labels").onChange((on: boolean) => {
     nodeLabelOverlay.setVisible(on);
+    emitAudio("clod.overlay.toggle");
   });
-  gui.add(state, "showLockedBorderVertices").name("show locked border vertices").onChange(updateSelection);
+  gui.add(state, "showLockedBorderVertices").name("show locked border vertices").onChange(() => {
+    updateSelection();
+    emitAudio("clod.locked-border.toggle");
+  });
   gui.add(state, "wireframe").name("wireframe").onChange((on: boolean) => {
     for (const v of views.values()) v.mat.wireframe = on;
+    emitAudio("clod.wireframe.toggle");
   });
   gui.add(state, "normalColor").name("normal colours").onChange((on: boolean) => {
     forEachTerrainMaterial((m) => {
@@ -1393,6 +1441,15 @@ async function main() {
   colorByLodController = gui.add(state, "colorByLod").name("color by LOD").onChange((on: boolean) => {
     colorByLodUserOverride = true;
     applyColorByLodToMaterials(on);
+    emitAudio("clod.lod.toggle");
+  });
+
+  const audioFolder = gui.addFolder("Audio");
+  audioFolder.add(state, "audioEnabled").name("Audio feedback").onChange((enabled: boolean) => {
+    setAudioEnabled(enabled);
+  });
+  audioFolder.add(state, "audioVolume", 0, 1, 0.05).name("Master volume").onChange((volume: number) => {
+    setMasterVolume(volume);
   });
   const environmentFolder = gui.addFolder("sky + environment");
   const environmentControllers = [
@@ -1504,8 +1561,18 @@ async function main() {
     const file = normalInput.files?.[0];
     normalInput.value = "";
     if (file == null || pendingNormalLoad == null) return;
-    const result = await loadNormalMap(file);
-    if (result) setSlotNormal(pendingNormalLoad, result.texture, result.previewUrl, result.bytes, result.mimeType, result.extension);
+    emitAudio("texture.load.open");
+    try {
+      const result = await loadNormalMap(file);
+      if (result) {
+        emitAudio("texture.load.success");
+        setSlotNormal(pendingNormalLoad, result.texture, result.previewUrl, result.bytes, result.mimeType, result.extension);
+      } else {
+        emitAudio("texture.load.error");
+      }
+    } catch (error) {
+      emitAudio("texture.load.error");
+    }
     pendingNormalLoad = null;
     refreshTextureState();
   });
@@ -1712,6 +1779,7 @@ async function main() {
       syncTextureModalControls();
       updateTextureSlotPreviews();
       textureModal.hidden = false;
+      emitAudio("texture.dialog.open");
     },
     clearTexture: clearAllTextures,
   };
@@ -1770,31 +1838,44 @@ async function main() {
   textureInput.addEventListener("change", async () => {
     const files = Array.from(textureInput.files ?? []);
     if (files.length === 0) return;
-    if (pendingTextureLoad === "all") {
-      const loaded = await Promise.all(files.slice(0, MAX_TERRAIN_TEXTURES).map(loadTerrainTexture));
-      loaded.forEach((result, index) => {
-        while (textureSlots.length <= index) addTextureSlot(false);
-        if (result) setTextureSlot(
-          index,
-          result.texture,
-          files[index].name,
-          result.previewUrl,
-          result.bytes,
-          result.mimeType,
-          result.extension,
-        );
-      });
-    } else if (typeof pendingTextureLoad === "number") {
-      const result = await loadTerrainTexture(files[0]);
-      if (result) setTextureSlot(
-        pendingTextureLoad,
-        result.texture,
-        files[0].name,
-        result.previewUrl,
-        result.bytes,
-        result.mimeType,
-        result.extension,
-      );
+    emitAudio("texture.load.open");
+    try {
+      if (pendingTextureLoad === "all") {
+        const loaded = await Promise.all(files.slice(0, MAX_TERRAIN_TEXTURES).map(loadTerrainTexture));
+        const succeeded = loaded.some((x) => x !== null);
+        if (succeeded) emitAudio("texture.load.success");
+        else emitAudio("texture.load.error");
+        loaded.forEach((result, index) => {
+          while (textureSlots.length <= index) addTextureSlot(false);
+          if (result) setTextureSlot(
+            index,
+            result.texture,
+            files[index].name,
+            result.previewUrl,
+            result.bytes,
+            result.mimeType,
+            result.extension,
+          );
+        });
+      } else if (typeof pendingTextureLoad === "number") {
+        const result = await loadTerrainTexture(files[0]);
+        if (result) {
+          emitAudio("texture.load.success");
+          setTextureSlot(
+            pendingTextureLoad,
+            result.texture,
+            files[0].name,
+            result.previewUrl,
+            result.bytes,
+            result.mimeType,
+            result.extension,
+          );
+        } else {
+          emitAudio("texture.load.error");
+        }
+      }
+    } catch (error) {
+      emitAudio("texture.load.error");
     }
     pendingTextureLoad = null;
     refreshTextureState();
@@ -1878,6 +1959,7 @@ async function main() {
     card.querySelector<HTMLSelectElement>(`[data-slot-texture="${index}"]`)!.onchange = async (event) => {
       const select = event.target as HTMLSelectElement;
       const selectedId = select.value;
+      emitAudio("texture.slot.select");
       if (selectedId === "") {
         clearTextureSlot(index);
         refreshTextureState();
@@ -2040,15 +2122,19 @@ async function main() {
     textureInput.multiple = true;
     textureInput.click();
   });
+  const closeTextureModal = () => {
+    if (!textureModal.hidden) {
+      textureModal.hidden = true;
+      emitAudio("texture.dialog.close");
+    }
+  };
   textureModal.querySelector<HTMLElement>("[data-texture-clear]")!.addEventListener("click", clearAllTextures);
-  textureModal.querySelector<HTMLElement>("[data-texture-close]")!.addEventListener("click", () => {
-    textureModal.hidden = true;
-  });
+  textureModal.querySelector<HTMLElement>("[data-texture-close]")!.addEventListener("click", closeTextureModal);
   textureModal.addEventListener("click", (event) => {
-    if (event.target === textureModal) textureModal.hidden = true;
+    if (event.target === textureModal) closeTextureModal();
   });
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") textureModal.hidden = true;
+    if (event.key === "Escape") closeTextureModal();
   });
   const loadBuiltinTextureSlots = async (
     slots: readonly { index: number; selectedId: string; name: string }[],
@@ -2177,6 +2263,7 @@ async function main() {
     digRadiusController.updateDisplay();
     syncTerraformMenu();
     updateInfo();
+    emitAudio("terrain.brush.radius");
   });
 
   // ---- bottom-left terraform menu: material palette + optional brush/sculpt edit ----
@@ -2299,6 +2386,7 @@ async function main() {
       btn.addEventListener("click", () => {
         set(value);
         sync();
+        emitAudio("terrain.tool.select");
       });
       row.appendChild(btn);
       return { value, btn };
@@ -2325,6 +2413,7 @@ async function main() {
     sizeOut.textContent = String(state.digRadius);
     digRadiusController.updateDisplay();
     updateInfo();
+    emitAudio("terrain.brush.radius");
   });
   sizeWrap.append(sizeInput, sizeOut);
   brushRow.appendChild(sizeWrap);
@@ -2583,7 +2672,10 @@ async function main() {
     }
   };
 
-  importButton.addEventListener("click", () => projectImportInput.click());
+  importButton.addEventListener("click", () => {
+    emitAudio("project.import.open");
+    projectImportInput.click();
+  });
   projectImportInput.addEventListener("change", async () => {
     const file = projectImportInput.files?.[0];
     projectImportInput.value = "";
@@ -2595,11 +2687,13 @@ async function main() {
       await validateArchiveTextures(contents);
       setProjectBusy(true, "staging project for rebuild", 0.65);
       const token = await stageProjectImport(contents);
+      emitAudio("project.import.success");
       const next = new URLSearchParams(location.search);
       next.set("world", String(contents.manifest.worldSize));
       next.set("import", token);
       location.search = `?${next.toString()}`;
     } catch (error) {
+      emitAudio("project.import.error");
       setProjectBusy(false);
       showProjectError("Project import", error);
     }
@@ -2660,7 +2754,9 @@ async function main() {
       lastArchiveSummary = `export: ${(archive.byteLength / 1048576).toFixed(1)} MiB in ${(elapsed / 1000).toFixed(2)}s`;
       console.info(`[project export] ${lastArchiveSummary}; GLB ${(terrainGlb.byteLength / 1048576).toFixed(1)} MiB`);
       updateInfo();
+      emitAudio("project.export.success");
     } catch (error) {
+      emitAudio("project.export.error");
       showProjectError("Project export", error);
     } finally {
       setProjectBusy(false);
@@ -2793,6 +2889,49 @@ async function main() {
     postProcess.updateSettings(currentPostProcessSettings());
     postProcess.render(scene, camera);
   });
+
+  // Global click & hover feedback for UI elements
+  if (typeof window !== "undefined") {
+    window.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (!target) return;
+      const isInteractive =
+        target.tagName === "BUTTON" ||
+        target.tagName === "SELECT" ||
+        target.tagName === "A" ||
+        (target.tagName === "INPUT" && (target as HTMLInputElement).type === "checkbox") ||
+        target.classList.contains("tf-swatch") ||
+        target.classList.contains("texture-preview") ||
+        window.getComputedStyle(target).cursor === "pointer";
+      if (isInteractive) {
+        if (target.tagName === "INPUT" && (target as HTMLInputElement).type === "checkbox") {
+          emitAudio((target as HTMLInputElement).checked ? "ui.toggle.on" : "ui.toggle.off");
+        } else {
+          emitAudio("ui.click");
+        }
+      }
+    }, { capture: true, passive: true });
+
+    let lastHoveredElement: HTMLElement | null = null;
+    window.addEventListener("pointerover", (event) => {
+      const target = event.target as HTMLElement;
+      if (!target || target === lastHoveredElement) return;
+      lastHoveredElement = target;
+      const isInteractive =
+        target.tagName === "BUTTON" ||
+        target.tagName === "SELECT" ||
+        target.tagName === "A" ||
+        (target.tagName === "INPUT" && (target as HTMLInputElement).type === "checkbox") ||
+        target.classList.contains("tf-swatch") ||
+        target.classList.contains("texture-preview");
+      if (isInteractive) {
+        emitAudio("ui.hover");
+      }
+    }, { capture: true, passive: true });
+    window.addEventListener("pointerout", () => {
+      lastHoveredElement = null;
+    }, { capture: true, passive: true });
+  }
   window.addEventListener("beforeunload", () => {
     lockedBorderOverlay.dispose();
     grassSystem.dispose();

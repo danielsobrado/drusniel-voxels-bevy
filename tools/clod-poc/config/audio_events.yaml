@@ -1,0 +1,301 @@
+global:
+  enabled: true
+  master_volume: 0.55
+  ui_volume: 0.60
+  world_volume: 0.50
+  debug_volume: 0.40
+
+events:
+  ui.click:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 35
+    synth: click
+    pitch: 1400
+    duration_ms: 50
+  ui.hover:
+    enabled: true
+    volume: 0.08
+    cooldown_ms: 50
+    synth: soft_click
+    pitch: 900
+    duration_ms: 40
+  ui.error:
+    enabled: true
+    volume: 0.25
+    cooldown_ms: 100
+    synth: error
+    pitch: 220
+    duration_ms: 150
+  ui.warning:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 100
+    synth: warning
+    pitch: 440
+    duration_ms: 120
+  ui.success:
+    enabled: true
+    volume: 0.25
+    cooldown_ms: 100
+    synth: success
+    pitch: 523
+    duration_ms: 250
+  ui.toggle.on:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 50
+    synth: toggle_on
+    pitch: 660
+    duration_ms: 80
+  ui.toggle.off:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 50
+    synth: toggle_off
+    pitch: 660
+    duration_ms: 80
+
+  project.import.open:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 100
+    synth: click
+    pitch: 1200
+    duration_ms: 60
+  project.import.success:
+    enabled: true
+    volume: 0.30
+    cooldown_ms: 200
+    synth: success
+    pitch: 440
+    duration_ms: 300
+  project.import.error:
+    enabled: true
+    volume: 0.35
+    cooldown_ms: 200
+    synth: error
+    pitch: 180
+    duration_ms: 400
+  project.export.success:
+    enabled: true
+    volume: 0.30
+    cooldown_ms: 200
+    synth: success
+    pitch: 440
+    duration_ms: 300
+  project.export.error:
+    enabled: true
+    volume: 0.35
+    cooldown_ms: 200
+    synth: error
+    pitch: 180
+    duration_ms: 400
+
+  camera.mode.orbit:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 150
+    synth: toggle_off
+    pitch: 440
+    duration_ms: 100
+  camera.mode.player:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 150
+    synth: toggle_on
+    pitch: 440
+    duration_ms: 100
+
+  texture.dialog.open:
+    enabled: true
+    volume: 0.18
+    cooldown_ms: 150
+    synth: soft_click
+    pitch: 750
+    duration_ms: 90
+  texture.dialog.close:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 150
+    synth: soft_click
+    pitch: 550
+    duration_ms: 80
+  texture.slot.select:
+    enabled: true
+    volume: 0.18
+    cooldown_ms: 80
+    synth: click
+    pitch: 1100
+    duration_ms: 50
+  texture.load.open:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 100
+    synth: soft_click
+    pitch: 800
+    duration_ms: 70
+  texture.load.success:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 100
+    synth: success
+    pitch: 600
+    duration_ms: 180
+  texture.load.error:
+    enabled: true
+    volume: 0.28
+    cooldown_ms: 100
+    synth: error
+    pitch: 200
+    duration_ms: 250
+  material.paint:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 60
+    synth: paint
+    pitch: 500
+    duration_ms: 80
+
+  terrain.tool.select:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 100
+    synth: soft_click
+    pitch: 1000
+    duration_ms: 60
+  terrain.dig.start:
+    enabled: true
+    volume: 0.10
+    cooldown_ms: 100
+    synth: soft_click
+    pitch: 450
+    duration_ms: 40
+  terrain.dig.tick:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 120
+    synth: dig
+    pitch: 180
+    duration_ms: 100
+  terrain.dig.stop:
+    enabled: true
+    volume: 0.08
+    cooldown_ms: 100
+    synth: soft_click
+    pitch: 350
+    duration_ms: 30
+  terrain.raise:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 120
+    synth: raise
+    pitch: 220
+    duration_ms: 140
+  terrain.lower:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 120
+    synth: lower
+    pitch: 330
+    duration_ms: 140
+  terrain.smooth:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 120
+    synth: smooth
+    pitch: 280
+    duration_ms: 150
+  terrain.brush.radius:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 80
+    synth: soft_click
+    pitch: 1050
+    duration_ms: 60
+
+  clod.rebuild.start:
+    enabled: true
+    volume: 0.12
+    cooldown_ms: 150
+    synth: rebuild_start
+    pitch: 480
+    duration_ms: 70
+  clod.rebuild.done:
+    enabled: true
+    volume: 0.18
+    cooldown_ms: 150
+    synth: rebuild_done
+    pitch: 520
+    duration_ms: 180
+  clod.rebuild.error:
+    enabled: true
+    volume: 0.28
+    cooldown_ms: 150
+    synth: rebuild_error
+    pitch: 150
+    duration_ms: 350
+  clod.validation.warning:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 200
+    synth: validation_warning
+    pitch: 440
+    duration_ms: 200
+  clod.validation.error:
+    enabled: true
+    volume: 0.32
+    cooldown_ms: 200
+    synth: validation_error
+    pitch: 180
+    duration_ms: 400
+  clod.overlay.toggle:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 80
+    synth: soft_click
+    pitch: 950
+    duration_ms: 60
+  clod.selection.freeze.on:
+    enabled: true
+    volume: 0.18
+    cooldown_ms: 100
+    synth: toggle_on
+    pitch: 580
+    duration_ms: 100
+  clod.selection.freeze.off:
+    enabled: true
+    volume: 0.18
+    cooldown_ms: 100
+    synth: toggle_off
+    pitch: 580
+    duration_ms: 100
+  clod.lod.toggle:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 80
+    synth: soft_click
+    pitch: 850
+    duration_ms: 60
+  clod.wireframe.toggle:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 80
+    synth: soft_click
+    pitch: 900
+    duration_ms: 60
+  clod.locked-border.toggle:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 80
+    synth: soft_click
+    pitch: 900
+    duration_ms: 60
+  player.jump:
+    enabled: true
+    volume: 0.12
+    cooldown_ms: 250
+    synth: jump
+    pitch: 180
+    duration_ms: 120
+

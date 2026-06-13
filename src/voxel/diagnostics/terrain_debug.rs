@@ -1,5 +1,6 @@
 //! Runtime terrain wireframe / normal-visualisation debug modes.
 
+use crate::audio::events::{AudioEventId, GameAudioEvent};
 use crate::camera::controller::PlayerCamera;
 use crate::rendering::triplanar_material::{TerrainMaterialQuality, TriplanarMaterial};
 use crate::voxel::chunk::LodLevel;
@@ -222,6 +223,7 @@ pub fn setup_terrain_debug_indicator(mut commands: Commands) {
 pub fn toggle_terrain_debug_view(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut terrain_debug: ResMut<TerrainDebugView>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
     let shift_held = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
@@ -235,6 +237,7 @@ pub fn toggle_terrain_debug_view(
             "Terrain wireframe debug: {} (Alt+F7)",
             if terrain_debug.wireframe { "ON" } else { "OFF" }
         );
+        audio_events.write(GameAudioEvent::ui(AudioEventId::WireframeToggle));
     }
 
     if keyboard.just_pressed(KeyCode::F8) {
@@ -243,6 +246,11 @@ pub fn toggle_terrain_debug_view(
             "Terrain normal debug: {} (Alt+F8)",
             if terrain_debug.normals { "ON" } else { "OFF" }
         );
+        if terrain_debug.normals {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOn));
+        } else {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOff));
+        }
     }
 
     if keyboard.just_pressed(KeyCode::F9) {
@@ -251,6 +259,11 @@ pub fn toggle_terrain_debug_view(
             "Terrain iso-band debug: {} (Alt+F9)",
             if terrain_debug.iso_band { "ON" } else { "OFF" }
         );
+        if terrain_debug.iso_band {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOn));
+        } else {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOff));
+        }
     }
 
     if keyboard.just_pressed(KeyCode::F10) {
@@ -263,6 +276,11 @@ pub fn toggle_terrain_debug_view(
                 "OFF"
             }
         );
+        if terrain_debug.flat_unlit {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOn));
+        } else {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOff));
+        }
     }
 }
 

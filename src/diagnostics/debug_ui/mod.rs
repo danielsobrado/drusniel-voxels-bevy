@@ -1,3 +1,4 @@
+use crate::audio::events::{AudioEventId, GameAudioEvent};
 use crate::props::foliage::{FoliageFadeSettings, GrassPropWindSettings};
 use crate::rendering::ao_config::AmbientOcclusionConfig;
 use crate::rendering::array_loader::AtlasMapping;
@@ -136,11 +137,24 @@ fn should_show_inspector(state: Res<DebugUiState>) -> bool {
     state.show_inspector
 }
 
-fn toggle_debug_ui(mut state: ResMut<DebugUiState>, keys: Res<ButtonInput<KeyCode>>) {
+fn toggle_debug_ui(
+    mut state: ResMut<DebugUiState>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
+) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let control_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     if shift_held && keys.just_pressed(KeyCode::F4) {
+        let before = state.show_settings;
         state.toggle_shortcut(control_held);
+        let after = state.show_settings;
+        if before != after {
+            if after {
+                audio_events.write(GameAudioEvent::ui(AudioEventId::DebugPanelOpen));
+            } else {
+                audio_events.write(GameAudioEvent::ui(AudioEventId::DebugPanelClose));
+            }
+        }
     }
 }
 
@@ -571,6 +585,7 @@ fn toggle_naadf_split_view_key(
     mut notice: ResMut<VoxelRayBackendNotice>,
     #[cfg(feature = "naadf")] capabilities: Option<Res<GraphicsCapabilities>>,
     #[cfg(feature = "naadf")] mut naadf_config: Option<ResMut<NaadfConfig>>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
@@ -584,6 +599,7 @@ fn toggle_naadf_split_view_key(
         settings.fallback_reason = Some(NAADF_NOT_COMPILED_REASON.into());
         notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
         warn!("NAADF split view unchanged: {}", NAADF_NOT_COMPILED_REASON);
+        audio_events.write(GameAudioEvent::ui(AudioEventId::UiError));
         return;
     }
 
@@ -593,6 +609,7 @@ fn toggle_naadf_split_view_key(
             settings.fallback_reason = Some("NAADF config resource is unavailable".into());
             notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
             warn!("NAADF split view unchanged: NAADF config resource is unavailable");
+            audio_events.write(GameAudioEvent::ui(AudioEventId::UiError));
             return;
         };
 
@@ -604,6 +621,7 @@ fn toggle_naadf_split_view_key(
             settings.fallback_reason = None;
             notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
             info!("NAADF split view: OFF (Shift+N to toggle)");
+            audio_events.write(GameAudioEvent::ui(AudioEventId::NaadfToggle));
             return;
         }
 
@@ -615,6 +633,7 @@ fn toggle_naadf_split_view_key(
             } else {
                 warn!("NAADF split view unchanged: NAADF backend request was rejected");
             }
+            audio_events.write(GameAudioEvent::ui(AudioEventId::UiError));
             return;
         }
 
@@ -625,6 +644,7 @@ fn toggle_naadf_split_view_key(
         );
         notice.show_for(time.elapsed_secs_f64(), VOXEL_RAY_NOTICE_SECONDS);
         info!("NAADF split view: ON (Shift+N to toggle)");
+        audio_events.write(GameAudioEvent::ui(AudioEventId::NaadfToggle));
     }
 }
 
@@ -632,6 +652,7 @@ fn toggle_naadf_split_view_key(
 fn toggle_sun_shadows(
     mut sun_query: Query<&mut DirectionalLight>,
     keys: Res<ButtonInput<KeyCode>>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
@@ -643,12 +664,18 @@ fn toggle_sun_shadows(
                 "Sun Shadows: {} (F10 to toggle)",
                 if light.shadows_enabled { "ON" } else { "OFF" }
             );
+            if light.shadows_enabled {
+                audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOn));
+            } else {
+                audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOff));
+            }
         }
     }
 }
 fn toggle_ao_style(
     keys: Res<ButtonInput<KeyCode>>,
     mut terrain_style: ResMut<TerrainStyleSettings>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if keys.just_pressed(KeyCode::F8) {
         // Toggle between 0.0 (V0.3 look) and 1.0 (full AO)
@@ -663,6 +690,11 @@ fn toggle_ao_style(
             "Full AO"
         };
         info!("Terrain style: {} (F8 to toggle)", style_name);
+        if terrain_style.ao_strength >= 0.5 {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOn));
+        } else {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOff));
+        }
     }
 }
 
@@ -681,10 +713,16 @@ fn toggle_ssao_key(
         With<Camera3d>,
     >,
     mut ssao_enabled: Local<bool>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     if !shift_held && keys.just_pressed(KeyCode::F9) {
         *ssao_enabled = !*ssao_enabled;
+        if *ssao_enabled {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOn));
+        } else {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOff));
+        }
         for (entity, existing_ssao, existing_gtao) in cameras.iter() {
             if *ssao_enabled {
                 let use_gtao = ao_config
@@ -842,6 +880,7 @@ fn toggle_scene_visibility(
         Query<&mut Visibility, With<ProceduralGrassPatch>>,
     )>,
     mut toggles: Local<DebugVisibilityToggles>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     let mut water_changed = false;
     let mut grass_changed = false;
@@ -877,6 +916,11 @@ fn toggle_scene_visibility(
         }
 
         info!("Water visibility: {}", toggles.show_water);
+        if toggles.show_water {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOn));
+        } else {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOff));
+        }
     }
 
     if grass_changed {
@@ -895,5 +939,10 @@ fn toggle_scene_visibility(
         }
 
         info!("Grass visibility: {}", toggles.show_grass);
+        if toggles.show_grass {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOn));
+        } else {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::DebugToggleOff));
+        }
     }
 }

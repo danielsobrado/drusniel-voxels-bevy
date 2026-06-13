@@ -14,6 +14,7 @@ use bevy::window::{
 };
 
 use crate::atmosphere::{FogConfig, FogPreset, FogQuality, FogQualityTier};
+use crate::audio::events::{AudioEventId, GameAudioEvent};
 use crate::environment::{AtmosphereSettings, Sun};
 use crate::player::PlayerConfig;
 use crate::rendering::ray_tracing::RayTracingSettings;
@@ -2184,6 +2185,7 @@ pub fn handle_settings_tabs(
     mut settings_state: ResMut<SettingsState>,
     mut input_state: ResMut<SettingsInputState>,
     mut tab_query: Query<(&Interaction, &SettingsTabButton), (Changed<Interaction>, With<Button>)>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
         return;
@@ -2194,6 +2196,7 @@ pub fn handle_settings_tabs(
             continue;
         }
         info!("Switching settings tab");
+        audio_events.write(GameAudioEvent::ui(AudioEventId::SettingsTabChange));
 
         settings_state.active_tab = match *tab {
             SettingsTabButton::Graphics => SettingsTab::Graphics,
@@ -2683,10 +2686,12 @@ pub fn handle_close_settings(
     mut settings_state: ResMut<SettingsState>,
     mut drag_state: ResMut<SettingsDialogDrag>,
     query: Query<&Interaction, (Changed<Interaction>, With<CloseSettingsButton>)>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     for interaction in query.iter() {
         if *interaction == Interaction::Pressed {
             close_settings_dialog(&mut commands, &mut settings_state, &mut drag_state);
+            audio_events.write(GameAudioEvent::ui(AudioEventId::SettingsClose));
         }
     }
 }
@@ -4083,12 +4088,14 @@ pub fn handle_save_controls_interaction(
         (Changed<Interaction>, With<SaveControlsButton>),
     >,
     input_config: Res<crate::input::config::InputConfig>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     for (interaction, mut bg) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 *bg = BackgroundColor(DR_BUTTON_ACTIVE_BG);
                 crate::input::config::save_inputs(&input_config);
+                audio_events.write(GameAudioEvent::ui(AudioEventId::SettingsSave));
             }
             Interaction::Hovered => {
                 *bg = BackgroundColor(DR_BUTTON_HOVER_BG);
@@ -4111,11 +4118,13 @@ pub fn handle_save_settings_interaction(
     fog_quality: Res<FogQuality>,
     water_reflection: Res<WaterReflectionConfig>,
     atmosphere: Res<AtmosphereSettings>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     for (interaction, mut bg) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 *bg = BackgroundColor(DR_BUTTON_ACTIVE_BG);
+                audio_events.write(GameAudioEvent::ui(AudioEventId::SettingsSave));
                 match super::settings_persistence::save_settings_to_disk(
                     &settings_state,
                     &visual_settings,
@@ -4365,6 +4374,7 @@ pub fn handle_save_atlas_mapping(
     settings_state: Res<SettingsState>,
     mut atlas_mapping: ResMut<crate::rendering::array_loader::AtlasMapping>,
     query: Query<&Interaction, (Changed<Interaction>, With<SaveAtlasMappingButton>)>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if !state.open || settings_state.dialog_root.is_none() {
         return;
@@ -4377,8 +4387,14 @@ pub fn handle_save_atlas_mapping(
 
             // Save to YAML
             match atlas_mapping.save_to_yaml() {
-                Ok(()) => info!("Atlas mapping saved to atlas_mapping.yaml"),
-                Err(e) => error!("Failed to save atlas mapping: {}", e),
+                Ok(()) => {
+                    info!("Atlas mapping saved to atlas_mapping.yaml");
+                    audio_events.write(GameAudioEvent::ui(AudioEventId::SettingsSave));
+                }
+                Err(e) => {
+                    error!("Failed to save atlas mapping: {}", e);
+                    audio_events.write(GameAudioEvent::ui(AudioEventId::UiError));
+                }
             }
         }
     }

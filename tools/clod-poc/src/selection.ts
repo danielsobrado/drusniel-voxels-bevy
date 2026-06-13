@@ -5,6 +5,7 @@
 // cut. Adds hysteresis (split/merge band) and the 2:1 restricted-quadtree pass.
 
 import { ClodPageNode } from "./types.js";
+import { emitAudio } from "./audio/index.js";
 
 export interface SelectionParams {
   thresholdPx: number;
@@ -89,6 +90,7 @@ export function selectCut(
       if (params.forcedMaxLevel != null && node.level > params.forcedMaxLevel && !missingForcedChildrenWarnings.has(node.id)) {
         console.warn(`force max level ${params.forcedMaxLevel} could not split ${node.id}; no children available`);
         missingForcedChildrenWarnings.add(node.id);
+        emitAudio("clod.validation.warning");
       }
       rendered.push(node); // LOD0 leaf — finest available
       return;

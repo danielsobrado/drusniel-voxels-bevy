@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { CapsuleCollisionConfig, TerrainColliderSet } from "./terrain_collider.js";
+import { emitAudio } from "./audio/index.js";
 
 export type PlayerInteractionMode = "orbit" | "choosingSpawn" | "playing";
 
@@ -176,6 +177,7 @@ export class PlayerController {
       this.grounded = false;
       this.coyoteTimer = 0;
       this.jumpBufferTimer = 0;
+      emitAudio("player.jump");
     } else {
       this.velocity.y -= this.config.gravity * step;
     }

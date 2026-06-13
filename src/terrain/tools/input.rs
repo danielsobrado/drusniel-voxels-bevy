@@ -1,4 +1,5 @@
 use super::types::{TerrainTool, TerrainToolConfig, TerrainToolState};
+use crate::audio::events::{AudioEventId, GameAudioEvent};
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
@@ -8,6 +9,7 @@ pub fn handle_tool_input(
     mut scroll: MessageReader<MouseWheel>,
     mut state: ResMut<TerrainToolState>,
     config: Res<TerrainToolConfig>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     // Only process adjustments when in terraforming mode with an active tool
     if !state.terraforming_mode || state.active_tool == TerrainTool::None {
@@ -16,9 +18,17 @@ pub fn handle_tool_input(
 
     // Adjust radius with scroll + shift
     if keys.pressed(KeyCode::ShiftLeft) {
+        let mut radius_changed = false;
         for event in scroll.read() {
             let delta = event.y.signum() * config.radius_step;
-            state.radius = (state.radius + delta).clamp(config.min_radius, config.max_radius);
+            let new_radius = (state.radius + delta).clamp(config.min_radius, config.max_radius);
+            if new_radius != state.radius {
+                state.radius = new_radius;
+                radius_changed = true;
+            }
+        }
+        if radius_changed {
+            audio_events.write(GameAudioEvent::ui(AudioEventId::TerrainBrushRadius));
         }
     }
     // Adjust strength with scroll + ctrl
@@ -31,7 +41,13 @@ pub fn handle_tool_input(
     }
 }
 
-pub fn select_terrain_tool(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<TerrainToolState>) {
+pub fn select_terrain_tool(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<TerrainToolState>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
+) {
+    let before = state.active_tool;
+
     // T key toggles terraforming mode
     if keys.just_pressed(KeyCode::KeyT) {
         state.terraforming_mode = !state.terraforming_mode;
@@ -42,23 +58,18 @@ pub fn select_terrain_tool(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<Te
             // Clear active tool when exiting
             state.active_tool = TerrainTool::None;
         }
-        return;
     }
-
     // If not in terraforming mode, don't process tool selection
-    if !state.terraforming_mode {
+    else if !state.terraforming_mode {
         return;
     }
-
     // Escape exits terraforming mode
-    if keys.just_pressed(KeyCode::Escape) {
+    else if keys.just_pressed(KeyCode::Escape) {
         state.terraforming_mode = false;
         state.active_tool = TerrainTool::None;
-        return;
     }
-
     // Number keys 1-4 select tools when in terraforming mode
-    if keys.just_pressed(KeyCode::Digit1) {
+    else if keys.just_pressed(KeyCode::Digit1) {
         state.active_tool = TerrainTool::Raise;
     } else if keys.just_pressed(KeyCode::Digit2) {
         state.active_tool = TerrainTool::Lower;
@@ -67,5 +78,9 @@ pub fn select_terrain_tool(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<Te
         state.target_height = None; // Reset target
     } else if keys.just_pressed(KeyCode::Digit4) {
         state.active_tool = TerrainTool::Smooth;
+    }
+
+    if state.active_tool != before {
+        audio_events.write(GameAudioEvent::ui(AudioEventId::TerrainToolSelect));
     }
 }

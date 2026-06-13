@@ -26,6 +26,7 @@ pub use types::{
 use types::{ConnectTaskState, FavoritesList, PauseMenuButton, PauseMenuRoot, SettingsInputState};
 
 use crate::atmosphere::{FogConfig, FogQuality};
+use crate::audio::events::{AudioEventId, GameAudioEvent};
 use crate::chat::ChatState;
 use crate::environment::AtmosphereSettings;
 use crate::network::NetworkSession;
@@ -187,6 +188,7 @@ fn toggle_pause_menu(
     mut form_state: ResMut<MultiplayerFormState>,
     mut settings_state: ResMut<SettingsState>,
     mut drag_state: ResMut<SettingsDialogDrag>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
@@ -200,8 +202,10 @@ fn toggle_pause_menu(
             &mut settings_state,
             &mut drag_state,
         );
+        audio_events.write(GameAudioEvent::ui(AudioEventId::MenuClose));
     } else {
         open_menu(&mut commands, &asset_server, &mut state, &form_state);
+        audio_events.write(GameAudioEvent::ui(AudioEventId::MenuOpen));
     }
 }
 
@@ -285,6 +289,10 @@ pub struct SettingsResources<'w> {
     pub drag_state: ResMut<'w, SettingsDialogDrag>,
     pub active_layer: Res<'w, types::ActiveTextureLayer>,
     pub fog_quality: Res<'w, FogQuality>,
+    pub visual_settings: Res<'w, VisualSettings>,
+    pub fog_config: Res<'w, FogConfig>,
+    pub water_reflection: Res<'w, WaterReflectionConfig>,
+    pub atmosphere: Res<'w, AtmosphereSettings>,
 }
 
 /// Handles menu button clicks.
@@ -303,31 +311,40 @@ fn handle_menu_buttons(
     mut commands: Commands,
     capabilities: Res<GraphicsCapabilities>,
     world_config: Res<WorldConfig>,
-    visual_settings: Res<VisualSettings>,
-    fog_config: Res<FogConfig>,
-    water_reflection: Res<WaterReflectionConfig>,
-    atmosphere: Res<AtmosphereSettings>,
     mut preview: PreviewResources,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     for (interaction, action) in interaction_query.iter_mut() {
         if *interaction != Interaction::Pressed {
             continue;
         }
 
+        audio_events.write(GameAudioEvent::ui(AudioEventId::UiClick));
+
         match action {
             PauseMenuButton::Save => {
-                handle_save_button(
+                let success = handle_save_button(
                     &world,
                     &settings_res.settings_state,
-                    &visual_settings,
-                    &fog_config,
+                    &settings_res.visual_settings,
+                    &settings_res.fog_config,
                     &settings_res.fog_quality,
-                    &water_reflection,
-                    &atmosphere,
+                    &settings_res.water_reflection,
+                    &settings_res.atmosphere,
                 );
+                if success {
+                    audio_events.write(GameAudioEvent::ui(AudioEventId::SaveSuccess));
+                } else {
+                    audio_events.write(GameAudioEvent::ui(AudioEventId::SaveError));
+                }
             }
             PauseMenuButton::Load => {
-                handle_load_button(&mut commands, &chunk_meshes, &mut world);
+                let success = handle_load_button(&mut commands, &chunk_meshes, &mut world);
+                if success {
+                    audio_events.write(GameAudioEvent::ui(AudioEventId::LoadSuccess));
+                } else {
+                    audio_events.write(GameAudioEvent::ui(AudioEventId::LoadError));
+                }
             }
             PauseMenuButton::StartServer => {
                 multiplayer::handle_start_server(
@@ -345,6 +362,7 @@ fn handle_menu_buttons(
                 );
             }
             PauseMenuButton::Settings => {
+                let opened_before = settings_res.settings_state.dialog_root.is_some();
                 handle_settings_button(
                     &mut commands,
                     &asset_server,
@@ -354,6 +372,9 @@ fn handle_menu_buttons(
                     &world_config,
                     &mut preview,
                 );
+                if !opened_before && settings_res.settings_state.dialog_root.is_some() {
+                    audio_events.write(GameAudioEvent::ui(AudioEventId::SettingsOpen));
+                }
             }
             PauseMenuButton::Multiplayer => {
                 handle_multiplayer_button(
@@ -383,6 +404,7 @@ fn handle_menu_buttons(
                     &mut settings_res.settings_state,
                     &mut settings_res.drag_state,
                 );
+                audio_events.write(GameAudioEvent::ui(AudioEventId::MenuClose));
             }
         }
 
@@ -400,10 +422,14 @@ fn handle_save_button(
     fog_quality: &FogQuality,
     water_reflection: &WaterReflectionConfig,
     atmosphere: &AtmosphereSettings,
-) {
+) -> bool {
+    let mut success = true;
     match persistence::save_world(world) {
         Ok(()) => info!("World saved via pause menu"),
-        Err(err) => warn!("Failed to save world: {}", err),
+        Err(err) => {
+            warn!("Failed to save world: {}", err);
+            success = false;
+        }
     }
     match settings_persistence::save_settings_to_disk(
         settings_state,
@@ -414,15 +440,19 @@ fn handle_save_button(
         atmosphere,
     ) {
         Ok(()) => info!("Settings saved via pause menu"),
-        Err(err) => warn!("Failed to save settings: {}", err),
+        Err(err) => {
+            warn!("Failed to save settings: {}", err);
+            success = false;
+        }
     }
+    success
 }
 
 fn handle_load_button(
     commands: &mut Commands,
     chunk_meshes: &Query<Entity, With<ChunkMesh>>,
     world: &mut VoxelWorld,
-) {
+) -> bool {
     for entity in chunk_meshes.iter() {
         commands.entity(entity).despawn();
     }
@@ -430,8 +460,12 @@ fn handle_load_button(
         Ok(loaded_world) => {
             *world = loaded_world;
             info!("World loaded from disk via pause menu");
+            true
         }
-        Err(err) => warn!("Failed to load world: {}", err),
+        Err(err) => {
+            warn!("Failed to load world: {}", err);
+            false
+        }
     }
 }
 

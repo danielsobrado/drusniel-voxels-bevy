@@ -1,0 +1,338 @@
+global:
+  enabled: true
+  master_volume: 0.60
+  ui_volume: 0.55
+  inventory_volume: 0.50
+  map_volume: 0.50
+  chat_volume: 0.50
+  terrain_volume: 0.45
+  debug_volume: 0.35
+  world_volume: 0.50
+
+events:
+  # UI Category
+  ui-click:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 35
+    category: ui
+    asset: "audio/ui/click.ogg"
+  ui-hover:
+    enabled: true
+    volume: 0.08
+    cooldown_ms: 50
+    category: ui
+    asset: "audio/ui/hover.ogg"
+  ui-error:
+    enabled: true
+    volume: 0.25
+    cooldown_ms: 100
+    category: ui
+    asset: "audio/ui/error.ogg"
+  ui-warning:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 100
+    category: ui
+    asset: "audio/ui/warning.ogg"
+  ui-success:
+    enabled: true
+    volume: 0.25
+    cooldown_ms: 100
+    category: ui
+    asset: "audio/ui/success.ogg"
+  ui-toggle-on:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 50
+    category: ui
+    asset: "audio/ui/toggle_on.ogg"
+  ui-toggle-off:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 50
+    category: ui
+    asset: "audio/ui/toggle_off.ogg"
+
+  # Menu / Settings
+  menu-open:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 150
+    category: ui
+    asset: "audio/menu/open.ogg"
+  menu-close:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 150
+    category: ui
+    asset: "audio/menu/close.ogg"
+  settings-open:
+    enabled: true
+    volume: 0.18
+    cooldown_ms: 150
+    category: ui
+    asset: "audio/menu/settings_open.ogg"
+  settings-close:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 150
+    category: ui
+    asset: "audio/menu/settings_close.ogg"
+  settings-save:
+    enabled: true
+    volume: 0.25
+    cooldown_ms: 200
+    category: ui
+    asset: "audio/menu/settings_save.ogg"
+  settings-tab-change:
+    enabled: true
+    volume: 0.12
+    cooldown_ms: 100
+    category: ui
+    asset: "audio/menu/settings_tab.ogg"
+
+  # Inventory / Hotbar
+  inventory-open:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 150
+    category: inventory
+    asset: "audio/inventory/open.ogg"
+  inventory-close:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 150
+    category: inventory
+    asset: "audio/inventory/close.ogg"
+  inventory-slot-select:
+    enabled: true
+    volume: 0.10
+    cooldown_ms: 50
+    category: inventory
+    asset: "audio/inventory/slot_select.ogg"
+  inventory-item-pick-up:
+    enabled: true
+    volume: 0.18
+    cooldown_ms: 50
+    category: inventory
+    asset: "audio/inventory/item_pickup.ogg"
+  inventory-item-place:
+    enabled: true
+    volume: 0.18
+    cooldown_ms: 50
+    category: inventory
+    asset: "audio/inventory/item_place.ogg"
+  hotbar-select:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 50
+    category: inventory
+    asset: "audio/inventory/hotbar_select.ogg"
+  hotbar-blocked:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 150
+    category: inventory
+    asset: "audio/inventory/hotbar_blocked.ogg"
+
+  # Map / Chat
+  map-open:
+    enabled: true
+    volume: 0.18
+    cooldown_ms: 150
+    category: map
+    asset: "audio/map/open.ogg"
+  map-close:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 150
+    category: map
+    asset: "audio/map/close.ogg"
+  chat-open:
+    enabled: true
+    volume: 0.12
+    cooldown_ms: 100
+    category: chat
+    asset: "audio/chat/open.ogg"
+  chat-close:
+    enabled: true
+    volume: 0.10
+    cooldown_ms: 100
+    category: chat
+    asset: "audio/chat/close.ogg"
+  chat-submit:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 100
+    category: chat
+    asset: "audio/chat/submit.ogg"
+  chat-error:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 150
+    category: chat
+    asset: "audio/chat/error.ogg"
+
+  # Terrain Tools
+  terrain-tool-select:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 100
+    category: terrain
+    asset: "audio/terrain/tool_select.ogg"
+  terrain-dig-start:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 100
+    category: terrain
+    asset: "audio/terrain/dig_start.ogg"
+  terrain-dig-tick:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 120
+    category: terrain
+    asset: "audio/terrain/dig_tick.ogg"
+  terrain-dig-stop:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 100
+    category: terrain
+    asset: "audio/terrain/dig_stop.ogg"
+  terrain-raise:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 120
+    category: terrain
+    asset: "audio/terrain/raise.ogg"
+  terrain-lower:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 120
+    category: terrain
+    asset: "audio/terrain/lower.ogg"
+  terrain-smooth:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 120
+    category: terrain
+    asset: "audio/terrain/smooth.ogg"
+  terrain-paint:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 100
+    category: terrain
+    asset: "audio/terrain/paint.ogg"
+  terrain-brush-radius:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 80
+    category: terrain
+    asset: "audio/terrain/brush_radius.ogg"
+  terrain-edit-blocked:
+    enabled: true
+    volume: 0.22
+    cooldown_ms: 150
+    category: terrain
+    asset: "audio/terrain/blocked.ogg"
+
+  # Build / Project / World
+  save-success:
+    enabled: true
+    volume: 0.25
+    cooldown_ms: 200
+    category: world
+    asset: "audio/world/save_success.ogg"
+  save-error:
+    enabled: true
+    volume: 0.30
+    cooldown_ms: 200
+    category: world
+    asset: "audio/world/save_error.ogg"
+  load-success:
+    enabled: true
+    volume: 0.25
+    cooldown_ms: 200
+    category: world
+    asset: "audio/world/load_success.ogg"
+  load-error:
+    enabled: true
+    volume: 0.30
+    cooldown_ms: 200
+    category: world
+    asset: "audio/world/load_error.ogg"
+  world-warning:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 200
+    category: world
+    asset: "audio/world/warning.ogg"
+  world-error:
+    enabled: true
+    volume: 0.28
+    cooldown_ms: 200
+    category: world
+    asset: "audio/world/error.ogg"
+
+  # Debug / Render
+  debug-panel-open:
+    enabled: true
+    volume: 0.12
+    cooldown_ms: 150
+    category: debug
+    asset: "audio/debug/panel_open.ogg"
+  debug-panel-close:
+    enabled: true
+    volume: 0.10
+    cooldown_ms: 150
+    category: debug
+    asset: "audio/debug/panel_close.ogg"
+  debug-toggle-on:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 50
+    category: debug
+    asset: "audio/debug/toggle_on.ogg"
+  debug-toggle-off:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 50
+    category: debug
+    asset: "audio/debug/toggle_off.ogg"
+  lod-toggle:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 80
+    category: debug
+    asset: "audio/debug/lod_toggle.ogg"
+  wireframe-toggle:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 80
+    category: debug
+    asset: "audio/debug/wireframe_toggle.ogg"
+  naadf-toggle:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 80
+    category: debug
+    asset: "audio/debug/naadf_toggle.ogg"
+  validation-warning:
+    enabled: true
+    volume: 0.20
+    cooldown_ms: 200
+    category: debug
+    asset: "audio/debug/validation_warning.ogg"
+  validation-error:
+    enabled: true
+    volume: 0.28
+    cooldown_ms: 200
+    category: debug
+    asset: "audio/debug/validation_error.ogg"
+  player-jump:
+    enabled: true
+    volume: 0.15
+    cooldown_ms: 250
+    category: world
+    asset: "audio/player/jump.ogg"
+

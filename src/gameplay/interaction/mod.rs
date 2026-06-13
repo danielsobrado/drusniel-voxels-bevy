@@ -24,6 +24,7 @@ pub use targeting::{
 };
 
 use crate::atmosphere::{FogCamera, FogConfig, GlobalFogVolume};
+use crate::audio::events::{AudioEventId, GameAudioEvent};
 use crate::camera::controller::PlayerCamera;
 use crate::constants::ATTACK_DAMAGE;
 use crate::entity::Health;
@@ -145,6 +146,7 @@ pub fn break_block_system(
     time: Res<Time>,
     terrain_tool_state: Res<TerrainToolState>,
     protected_areas: Option<Res<ProtectedAreaRegistry>>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if editor_native_viewport_enabled() {
         return;
@@ -177,11 +179,15 @@ pub fn break_block_system(
                 position: center,
                 particle_type: ParticleType::Dig,
             });
+            // Single-click break emits only DigTick. DigStart/DigStop are reserved
+            // for held-dig lifecycle if implemented later.
+            audio_events.write(GameAudioEvent::world(AudioEventId::TerrainDigTick, center));
         }
         Err(err) => {
             // Only show error for actual failure (not just no target)
             if !matches!(err, BreakError::NoTarget) {
                 last_error.set(err.to_string(), time.elapsed_secs_f64());
+                audio_events.write(GameAudioEvent::ui(AudioEventId::TerrainEditBlocked));
             }
         }
     }
@@ -240,6 +246,7 @@ pub fn place_block_system(
     time: Res<Time>,
     terrain_tool_state: Res<TerrainToolState>,
     protected_areas: Option<Res<ProtectedAreaRegistry>>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if editor_native_viewport_enabled() {
         return;
@@ -269,10 +276,17 @@ pub fn place_block_system(
         &camera_query,
         protected_areas.as_deref(),
     );
-    if let Err(err) = result {
-        // Only show error for actual failure (not just no target)
-        if !matches!(err, PlacementError::NoTarget) {
-            last_error.set(err.to_string(), time.elapsed_secs_f64());
+    match result {
+        Ok(pos) => {
+            let center = Vec3::new(pos.x as f32 + 0.5, pos.y as f32 + 0.5, pos.z as f32 + 0.5);
+            audio_events.write(GameAudioEvent::world(AudioEventId::TerrainPaint, center));
+        }
+        Err(err) => {
+            // Only show error for actual failure (not just no target)
+            if !matches!(err, PlacementError::NoTarget) {
+                last_error.set(err.to_string(), time.elapsed_secs_f64());
+                audio_events.write(GameAudioEvent::ui(AudioEventId::TerrainEditBlocked));
+            }
         }
     }
 }

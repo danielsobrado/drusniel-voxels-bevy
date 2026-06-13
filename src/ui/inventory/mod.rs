@@ -18,6 +18,8 @@ use crate::ui::theme::{
 };
 use crate::ui::widgets::fantasy_slot_node;
 
+use crate::audio::events::{AudioEventId, GameAudioEvent};
+
 pub struct InventoryUiPlugin;
 
 fn editor_native_viewport_enabled() -> bool {
@@ -317,6 +319,7 @@ fn toggle_inventory_ui(
     mut dragged: ResMut<DraggedItem>,
     pause_menu: Res<PauseMenuState>,
     chat_state: Option<Res<ChatState>>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     let open_pressed = keys.just_pressed(KeyCode::KeyI);
     let close_pressed = keys.just_pressed(KeyCode::Escape);
@@ -326,6 +329,7 @@ fn toggle_inventory_ui(
             return;
         }
         close_inventory_ui(&mut commands, &mut state, &mut dragged);
+        audio_events.write(GameAudioEvent::ui(AudioEventId::InventoryClose));
         return;
     }
 
@@ -346,6 +350,7 @@ fn toggle_inventory_ui(
     );
     state.root_entity = Some(root);
     state.open = true;
+    audio_events.write(GameAudioEvent::ui(AudioEventId::InventoryOpen));
 }
 
 fn close_inventory_ui(
@@ -458,6 +463,7 @@ fn handle_inventory_slot_click(
     mut dragged: ResMut<DraggedItem>,
     mut state: ResMut<InventoryUiState>,
     mouse: Res<ButtonInput<MouseButton>>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     // Only handle left click
     if !mouse.pressed(MouseButton::Left) {
@@ -503,15 +509,18 @@ fn handle_inventory_slot_click(
                 dragged.item = old_slot.item;
                 dragged.quantity = old_slot.quantity;
             }
+            audio_events.write(GameAudioEvent::ui(AudioEventId::InventoryItemPlace));
         } else if slot.item.is_some() {
             // Pick up item
             dragged.item = slot.item;
             dragged.quantity = slot.quantity;
             dragged.slot_index = Some(slot_idx);
             inventory.slots[slot_idx] = InventorySlot::default();
+            audio_events.write(GameAudioEvent::ui(AudioEventId::InventoryItemPickUp));
         }
 
         state.selected_slot = Some(slot_idx);
+        audio_events.write(GameAudioEvent::ui(AudioEventId::InventorySlotSelect));
     }
 }
 
@@ -520,6 +529,7 @@ fn handle_inventory_slot_right_click(
     mut inventory: ResMut<Inventory>,
     mut dragged: ResMut<DraggedItem>,
     mouse: Res<ButtonInput<MouseButton>>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     // Only handle right click for stack splitting
     if !mouse.just_pressed(MouseButton::Right) {
@@ -546,6 +556,7 @@ fn handle_inventory_slot_right_click(
                 dragged.item = Some(item);
                 dragged.quantity = split_amount;
                 dragged.slot_index = None;
+                audio_events.write(GameAudioEvent::ui(AudioEventId::InventoryItemPickUp));
             }
         }
     }
@@ -557,6 +568,7 @@ fn handle_hotbar_input(
     pause_menu: Res<PauseMenuState>,
     chat_state: Option<Res<ChatState>>,
     terrain_state: Res<TerrainToolState>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if pause_menu.open
         || chat_state.as_ref().map(|c| c.active).unwrap_or(false)
@@ -579,6 +591,7 @@ fn handle_hotbar_input(
     for (index, key) in digit_keys.iter().enumerate() {
         if keys.just_pressed(*key) {
             hotbar.selected = index;
+            audio_events.write(GameAudioEvent::ui(AudioEventId::HotbarSelect));
             return;
         }
     }
@@ -588,6 +601,7 @@ fn handle_hotbar_slot_buttons(
     mut interactions: Query<(&Interaction, &HotbarSlot), Changed<Interaction>>,
     mut hotbar: ResMut<HotbarState>,
     mut dragged: ResMut<DraggedItem>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     for (interaction, slot) in interactions.iter_mut() {
         if *interaction != Interaction::Pressed {
@@ -599,15 +613,18 @@ fn handle_hotbar_slot_buttons(
             hotbar.selected = slot.0;
             dragged.quantity = 0;
             dragged.slot_index = None;
+            audio_events.write(GameAudioEvent::ui(AudioEventId::InventoryItemPlace));
         } else {
             hotbar.selected = slot.0;
         }
+        audio_events.write(GameAudioEvent::ui(AudioEventId::HotbarSelect));
     }
 }
 
 fn handle_inventory_category_buttons(
     mut interactions: Query<(&Interaction, &InventoryCategoryButton), Changed<Interaction>>,
     mut state: ResMut<InventoryUiState>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if !state.open {
         return;
@@ -617,6 +634,7 @@ fn handle_inventory_category_buttons(
         if *interaction == Interaction::Pressed && state.active_category != button.0 {
             state.active_category = button.0;
             state.selected_slot = None;
+            audio_events.write(GameAudioEvent::ui(AudioEventId::UiClick));
         }
     }
 }
@@ -626,6 +644,7 @@ fn handle_inventory_close_button(
     mut commands: Commands,
     mut state: ResMut<InventoryUiState>,
     mut dragged: ResMut<DraggedItem>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if !state.open {
         return;
@@ -634,6 +653,7 @@ fn handle_inventory_close_button(
     for interaction in interactions.iter() {
         if *interaction == Interaction::Pressed {
             close_inventory_ui(&mut commands, &mut state, &mut dragged);
+            audio_events.write(GameAudioEvent::ui(AudioEventId::InventoryClose));
             return;
         }
     }

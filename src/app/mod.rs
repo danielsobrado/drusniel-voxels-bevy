@@ -181,7 +181,8 @@ pub fn run() {
         .add_plugins(AtmospherePlugin)
         .add_plugins(AtmosphereIntegrationPlugin) // Physical sky rendering
         .add_plugins(FogPlugin)
-        .add_plugins(EntityPlugin);
+        .add_plugins(EntityPlugin)
+        .add_plugins(crate::audio::plugin::AudioEventsPlugin);
 
     let bench_skips_props = bench_config
         .as_ref()

@@ -3,6 +3,8 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy_tnua::prelude::*;
 
+use crate::audio::events::{AudioEventId, GameAudioEvent};
+
 use super::{Player, PlayerConfig, PlayerMovementScheme, PlayerMovementSchemeConfig};
 use crate::camera::controller::PlayerCamera;
 use crate::input::config::GameAction;
@@ -48,6 +50,7 @@ pub fn read_player_input(action_state: Res<ActionState>, mut input: ResMut<Playe
 /// Apply input to Tnua controller.
 pub fn apply_player_movement(
     input: Res<PlayerInput>,
+    action_state: Res<ActionState>,
     camera_query: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
     mut player_query: Query<
         (
@@ -62,6 +65,7 @@ pub fn apply_player_movement(
     world: Res<VoxelWorld>,
     cache: Res<TerrainCollisionCache>,
     collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
@@ -108,6 +112,10 @@ pub fn apply_player_movement(
 
     if input.jump {
         controller.action(PlayerMovementScheme::Jump(TnuaBuiltinJump::default()));
+    }
+
+    if action_state.just_pressed(GameAction::Jump) && controller.is_airborne().ok() == Some(false) {
+        audio_events.write(GameAudioEvent::ui(AudioEventId::PlayerJump));
     }
 }
 

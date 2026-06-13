@@ -1,5 +1,6 @@
 use super::preview::TerrainRaycastHit;
 use super::types::{TerrainTool, TerrainToolState};
+use crate::audio::events::{AudioEventId, GameAudioEvent};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::*;
@@ -10,6 +11,7 @@ pub fn apply_terrain_tool(
     state: Res<TerrainToolState>,
     hit: Option<Res<TerrainRaycastHit>>,
     mut world: ResMut<VoxelWorld>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     // Only apply on click (not held) for gradual control
     if !mouse.just_pressed(MouseButton::Left) {
@@ -43,6 +45,7 @@ pub fn apply_terrain_tool(
 
     match state.active_tool {
         TerrainTool::Raise => {
+            let mut success = false;
             // Raise: Add ONE solid block above the surface (gradual)
             for x in min_x..=max_x {
                 for z in min_z..=max_z {
@@ -81,14 +84,24 @@ pub fn apply_terrain_tool(
                         let place_pos = IVec3::new(x, sy + 1, z);
                         if let Some(existing) = world.get_voxel(place_pos) {
                             if existing == VoxelType::Air {
-                                apply_tool_edit(&mut world, place_pos, VoxelType::TopSoil);
+                                if apply_tool_edit(&mut world, place_pos, VoxelType::TopSoil)
+                                    == crate::voxel::world::VoxelEditResult::Applied
+                                {
+                                    success = true;
+                                }
                             }
                         }
                     }
                 }
             }
+            if success {
+                audio_events.write(GameAudioEvent::world(AudioEventId::TerrainRaise, center));
+            } else {
+                audio_events.write(GameAudioEvent::ui(AudioEventId::TerrainEditBlocked));
+            }
         }
         TerrainTool::Lower => {
+            let mut success = false;
             // Lower: Remove ONE solid block from the surface (gradual)
             for x in min_x..=max_x {
                 for z in min_z..=max_z {
@@ -115,15 +128,26 @@ pub fn apply_terrain_tool(
                         let check_pos = IVec3::new(x, y, z);
                         if let Some(voxel) = world.get_voxel(check_pos) {
                             if voxel.is_solid() && voxel != VoxelType::Bedrock {
-                                apply_tool_edit(&mut world, check_pos, VoxelType::Air);
+                                if apply_tool_edit(&mut world, check_pos, VoxelType::Air)
+                                    == crate::voxel::world::VoxelEditResult::Applied
+                                {
+                                    success = true;
+                                }
                                 break;
                             }
                         }
                     }
                 }
             }
+            if success {
+                audio_events.write(GameAudioEvent::world(AudioEventId::TerrainLower, center));
+            } else {
+                audio_events.write(GameAudioEvent::ui(AudioEventId::TerrainEditBlocked));
+            }
         }
         TerrainTool::Level => {
+            let mut raised = false;
+            let mut lowered = false;
             // Level: Flatten terrain to the hit point height (one block at a time)
             let target_height = center.y.floor() as i32;
 
@@ -165,7 +189,11 @@ pub fn apply_terrain_tool(
                             let place_pos = IVec3::new(x, sy + 1, z);
                             if let Some(existing) = world.get_voxel(place_pos) {
                                 if existing == VoxelType::Air {
-                                    apply_tool_edit(&mut world, place_pos, VoxelType::TopSoil);
+                                    if apply_tool_edit(&mut world, place_pos, VoxelType::TopSoil)
+                                        == crate::voxel::world::VoxelEditResult::Applied
+                                    {
+                                        raised = true;
+                                    }
                                 }
                             }
                         } else if sy > target_height {
@@ -173,15 +201,27 @@ pub fn apply_terrain_tool(
                             let remove_pos = IVec3::new(x, sy, z);
                             if let Some(existing) = world.get_voxel(remove_pos) {
                                 if existing.is_solid() && existing != VoxelType::Bedrock {
-                                    apply_tool_edit(&mut world, remove_pos, VoxelType::Air);
+                                    if apply_tool_edit(&mut world, remove_pos, VoxelType::Air)
+                                        == crate::voxel::world::VoxelEditResult::Applied
+                                    {
+                                        lowered = true;
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+            if raised || lowered {
+                // Level tool is semantically smoothing/flattening — emit a single event
+                // instead of overlapping Raise + Lower.
+                audio_events.write(GameAudioEvent::world(AudioEventId::TerrainSmooth, center));
+            } else {
+                audio_events.write(GameAudioEvent::ui(AudioEventId::TerrainEditBlocked));
+            }
         }
         TerrainTool::Smooth => {
+            let mut success = false;
             // Smooth: Average heights in the radius (one block at a time)
             // First pass: calculate average height
             let mut heights: Vec<(i32, i32, i32)> = Vec::new();
@@ -206,6 +246,7 @@ pub fn apply_terrain_tool(
             }
 
             if heights.is_empty() {
+                audio_events.write(GameAudioEvent::ui(AudioEventId::TerrainEditBlocked));
                 return;
             }
 
@@ -231,7 +272,11 @@ pub fn apply_terrain_tool(
                     let place_pos = IVec3::new(x, current_y + 1, z);
                     if let Some(existing) = world.get_voxel(place_pos) {
                         if existing == VoxelType::Air {
-                            apply_tool_edit(&mut world, place_pos, VoxelType::TopSoil);
+                            if apply_tool_edit(&mut world, place_pos, VoxelType::TopSoil)
+                                == crate::voxel::world::VoxelEditResult::Applied
+                            {
+                                success = true;
+                            }
                         }
                     }
                 } else if current_y > avg_height {
@@ -239,16 +284,29 @@ pub fn apply_terrain_tool(
                     let remove_pos = IVec3::new(x, current_y, z);
                     if let Some(existing) = world.get_voxel(remove_pos) {
                         if existing.is_solid() && existing != VoxelType::Bedrock {
-                            apply_tool_edit(&mut world, remove_pos, VoxelType::Air);
+                            if apply_tool_edit(&mut world, remove_pos, VoxelType::Air)
+                                == crate::voxel::world::VoxelEditResult::Applied
+                            {
+                                success = true;
+                            }
                         }
                     }
                 }
+            }
+            if success {
+                audio_events.write(GameAudioEvent::world(AudioEventId::TerrainSmooth, center));
+            } else {
+                audio_events.write(GameAudioEvent::ui(AudioEventId::TerrainEditBlocked));
             }
         }
         TerrainTool::None => {}
     }
 }
 
-fn apply_tool_edit(world: &mut VoxelWorld, pos: IVec3, voxel: VoxelType) {
-    let _ = world.set_voxel(pos, voxel);
+fn apply_tool_edit(
+    world: &mut VoxelWorld,
+    pos: IVec3,
+    voxel: VoxelType,
+) -> crate::voxel::world::VoxelEditResult {
+    world.set_voxel(pos, voxel)
 }

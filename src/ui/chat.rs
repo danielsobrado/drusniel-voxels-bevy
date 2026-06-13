@@ -1,3 +1,4 @@
+use crate::audio::events::{AudioEventId, GameAudioEvent};
 use avian3d::prelude::LinearVelocity;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
@@ -133,17 +134,23 @@ fn spawn_chat_overlay(mut commands: Commands, asset_server: Res<AssetServer>) {
         });
 }
 
-fn toggle_chat_input(keys: Res<ButtonInput<KeyCode>>, mut chat_state: ResMut<ChatState>) {
+fn toggle_chat_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut chat_state: ResMut<ChatState>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
+) {
     if keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
         && keys.just_pressed(KeyCode::KeyA)
     {
         chat_state.active = true;
         chat_state.buffer.clear();
+        audio_events.write(GameAudioEvent::ui(AudioEventId::ChatOpen));
     }
 
     if chat_state.active && keys.just_pressed(KeyCode::Escape) {
         chat_state.active = false;
         chat_state.buffer.clear();
+        audio_events.write(GameAudioEvent::ui(AudioEventId::ChatClose));
     }
 }
 
@@ -179,6 +186,7 @@ fn submit_chat_message(
     collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
     mut player_query: Query<(&mut Transform, Option<&mut LinearVelocity>), With<Player>>,
     mut spawn_state: Option<ResMut<PlayerSpawnState>>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     if !chat_state.active || !keys.just_pressed(KeyCode::Enter) {
         return;
@@ -186,6 +194,7 @@ fn submit_chat_message(
 
     if chat_state.buffer.is_empty() {
         chat_state.active = false;
+        audio_events.write(GameAudioEvent::ui(AudioEventId::ChatClose));
         return;
     }
 
@@ -200,15 +209,18 @@ fn submit_chat_message(
     ) {
         chat_state.buffer.clear();
         chat_state.active = false;
+        audio_events.write(GameAudioEvent::ui(AudioEventId::ChatSubmit));
         return;
     }
 
     if !network.is_connected() {
         chat_state.push_system("Cannot send chat: not connected");
+        audio_events.write(GameAudioEvent::ui(AudioEventId::ChatError));
     } else {
         let user = chat_state.username.clone();
         let content = submitted;
         chat_state.push_message(ChatMessage { user, content });
+        audio_events.write(GameAudioEvent::ui(AudioEventId::ChatSubmit));
     }
 
     chat_state.buffer.clear();

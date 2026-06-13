@@ -8,6 +8,7 @@
 use super::editing::{DeleteMode, DragState, EditMode};
 use super::targeting::TargetedBlock;
 use crate::atmosphere::{FogQuality, VolumetricFogRuntimeState};
+use crate::audio::events::{AudioEventId, GameAudioEvent};
 use crate::interaction::TargetedProp;
 use crate::network::NetworkSession;
 use crate::performance::{
@@ -515,12 +516,14 @@ pub fn toggle_mesh_mode(
 pub fn toggle_freeze_terrain_lod(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut lod_control: ResMut<crate::voxel::plugin::TerrainLodControl>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     let alt_held = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
     if !alt_held || !keyboard.just_pressed(KeyCode::F6) {
         return;
     }
     lod_control.freeze_lod = !lod_control.freeze_lod;
+    audio_events.write(GameAudioEvent::ui(AudioEventId::LodToggle));
     info!(
         "Terrain LOD updates: {} (Alt+F6). {}",
         if lod_control.freeze_lod {

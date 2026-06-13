@@ -16,6 +16,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::ui::{AlignItems, JustifyContent, PositionType, Val};
 
+use crate::audio::events::{AudioEventId, GameAudioEvent};
+
 pub struct MapPlugin;
 
 #[derive(Resource, Default)]
@@ -67,6 +69,7 @@ fn toggle_map_overlay(
     world: Res<VoxelWorld>,
     pause_menu: Res<PauseMenuState>,
     landmarks: Res<LandmarkLocations>,
+    mut audio_events: MessageWriter<GameAudioEvent>,
 ) {
     // ESC closes the map
     if state.open && keys.just_pressed(KeyCode::Escape) {
@@ -75,6 +78,7 @@ fn toggle_map_overlay(
         }
         state.map_container = None;
         state.open = false;
+        audio_events.write(GameAudioEvent::ui(AudioEventId::MapClose));
         return;
     }
 
@@ -94,6 +98,8 @@ fn toggle_map_overlay(
     if pause_menu.open {
         return;
     }
+
+    audio_events.write(GameAudioEvent::ui(AudioEventId::MapOpen));
 
     let existing_handle = state.map_texture.take();
     let texture = match existing_handle {

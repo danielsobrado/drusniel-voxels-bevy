@@ -1,6 +1,7 @@
 //! Library entrypoint for the Drusniel voxel runtime.
 
 pub mod app;
+pub mod audio;
 pub mod config;
 pub mod diagnostics;
 pub mod editor;
