@@ -1,9 +1,9 @@
 //! Phase 5 Step 3a — LOD0 live-mesh export cache maintenance.
 //!
-//! Default-ON (`ClodPagesRuntime.enabled`, D1-a) with `CLOD_PAGES=0` as the kill switch.
-//! Reuses the EXACT live mesher with all-LOD0 neighbors, so the eventual
-//! near/far bubble edge matches the live chunks by construction (I3.1). Off-thread
-//! decimation + page assembly + entity commit land in Step 3b; this only fills the cache.
+//! Default-OFF (`ClodPagesRuntime.enabled`, D4) for explicit A/B rollout.
+//! Reuses the exact live LOD0 mesher output, so the near/far bubble edge matches the live
+//! chunks by construction (I3.1). This module maintains the export cache consumed by the
+//! async page assembly, decimation, and entity commit pipeline.
 //!
 //! NOTE: terrain is chunked in Y too, so a page footprint spans several Y chunks; this
 //! caches per-chunk exports (all Y), and Step 3b groups them into P×P×Y page sources.
@@ -21,7 +21,7 @@ use crate::voxel::world::VoxelWorld;
 #[derive(Resource)]
 pub struct ClodPagesRuntime {
     pub cfg: ClodPagesConfig,
-    /// Master gate. Default true; `CLOD_PAGES=0` is the release kill switch.
+    /// Master gate. Default false; `CLOD_PAGES=1` opts into the page path.
     pub enabled: bool,
     /// LOD0 pages assembled per frame by the build queue.
     pub source_budget_per_frame: usize,
@@ -29,14 +29,31 @@ pub struct ClodPagesRuntime {
     pub source_radius_chunks: i32,
 }
 
-/// Reproducible bench/run A/B: pages default ON unless `CLOD_PAGES` is set false
-/// (`0`/`false`/`off`/`no`). Lets a scripted bench run old live LOD via env kill switch.
-/// `CLOD_PAGES_BUDGET` optionally overrides the per-frame page-source job budget.
-fn env_default_on(key: &str) -> bool {
-    !matches!(
-        std::env::var(key).ok().as_deref().map(str::trim),
-        Some("0") | Some("false") | Some("off") | Some("no")
-    )
+/// Parses conventional boolean environment values without mutating process-global state.
+/// Unknown values use `default` so each flag can choose its own rollout behavior.
+pub(super) fn parse_env_bool(value: Option<&str>, default: bool) -> bool {
+    let Some(value) = value.map(str::trim) else {
+        return default;
+    };
+    if value == "1"
+        || value.eq_ignore_ascii_case("true")
+        || value.eq_ignore_ascii_case("on")
+        || value.eq_ignore_ascii_case("yes")
+    {
+        true
+    } else if value == "0"
+        || value.eq_ignore_ascii_case("false")
+        || value.eq_ignore_ascii_case("off")
+        || value.eq_ignore_ascii_case("no")
+    {
+        false
+    } else {
+        default
+    }
+}
+
+pub(super) fn env_bool(key: &str, default: bool) -> bool {
+    parse_env_bool(std::env::var(key).ok().as_deref(), default)
 }
 
 impl Default for ClodPagesRuntime {
@@ -52,7 +69,7 @@ impl Default for ClodPagesRuntime {
             .unwrap_or(4);
         Self {
             cfg,
-            enabled: env_default_on("CLOD_PAGES"),
+            enabled: env_bool("CLOD_PAGES", false),
             source_budget_per_frame,
             source_radius_chunks,
         }
@@ -167,8 +184,12 @@ fn page_coord(chunk_pos: IVec3, chunks_per_page: i32) -> (i32, i32) {
 /// Logs the initial page state once so bench output records whether the A/B ran pages-on.
 pub fn clod_pages_startup_log_system(runtime: Res<ClodPagesRuntime>) {
     info!(
-        "CLOD PAGES: source cache {} at startup (default ON; CLOD_PAGES=0 disables); radius {} chunks, page-source budget {}/frame. Alt+F11 toggles.",
-        if runtime.enabled { "ON" } else { "OFF" },
+        "CLOD PAGES: {} at startup (default OFF; set CLOD_PAGES=1/true/on/yes to enable); radius {} chunks, page-source budget {}/frame. Alt+F11 toggles.",
+        if runtime.enabled {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        },
         runtime.source_radius_chunks,
         runtime.source_budget_per_frame
     );
@@ -215,4 +236,31 @@ pub fn clod_pages_source_meshing_system(
     cache.retain_in_radius(cam_chunk, far);
     cache.invalidate_dirty_exports(&world);
     cache.refresh_complete_pages(&world, runtime.cfg.page.chunks_per_page as i32);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_env_bool;
+
+    #[test]
+    fn parse_env_bool_accepts_case_insensitive_true_values() {
+        for value in ["1", "true", "TRUE", " on ", "Yes"] {
+            assert!(parse_env_bool(Some(value), false), "value={value:?}");
+        }
+    }
+
+    #[test]
+    fn parse_env_bool_accepts_case_insensitive_false_values() {
+        for value in ["0", "false", "FALSE", " off ", "No"] {
+            assert!(!parse_env_bool(Some(value), true), "value={value:?}");
+        }
+    }
+
+    #[test]
+    fn parse_env_bool_uses_default_for_missing_empty_or_unknown_values() {
+        for value in [None, Some(""), Some("unexpected")] {
+            assert!(!parse_env_bool(value, false), "value={value:?}");
+            assert!(parse_env_bool(value, true), "value={value:?}");
+        }
+    }
 }

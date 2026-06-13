@@ -167,6 +167,9 @@ Fail A3/A6 → larger pages. Fail A1 → bug, fix. Fail A4 with everything else 
 
 ## 7. Phase 5 — Bevy runtime integration
 
+Runtime rollout: CLOD pages are default-off. Set `CLOD_PAGES=1` (or `true`/`on`/`yes`) for
+pages-on A/B runs; `CLOD_PAGES=0` (or `false`/`off`/`no`) explicitly keeps the live path.
+
 - [ ] Plain `Mesh` asset per quadtree node, one entity per rendered node. Existing triplanar material. **No meshlets, no indirect draws, no custom render path** — revisit only if profiling demands it.
 - [ ] Port selection + hysteresis + 2:1 pass from Phase 2 as a Bevy system; cut changes swap entity visibility, crossfade via material alpha-hash param.
 - [ ] Near-field exclusion: no page rendering inside `near_field.radius_chunks`; live Surface Nets chunks own that region. Transition strategy: **page LOD0 = welded chunk meshes (3.1) makes the bubble edge exact** — so the transition is a **binary ownership switch per chunk footprint**: exactly one owner (live chunk or page) draws at any time, no overlap band. Crossfading identical co-planar geometry means both draw simultaneously -> z-fighting; do NOT add a fade band here.

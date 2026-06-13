@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
 use super::render::{ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
-use super::runtime::ClodPagesRuntime;
+use super::runtime::{ClodPagesRuntime, env_bool};
 #[cfg(test)]
 use super::selection::NearFieldBubble;
 use super::selection::{clod_near_field_bubble, near_field_intersects_footprint, ClodPageNodeKey};
@@ -52,7 +52,7 @@ pub(crate) struct ClodPageMeshGate {
 impl Default for ClodPageMeshGate {
     fn default() -> Self {
         Self {
-            enabled: env_default_on("CLOD_PAGES_MESH_GATE"),
+            enabled: false,
             pages_ready: false,
             pages_failed: false,
             pages_pending: false,
@@ -99,13 +99,6 @@ impl ClodPageMeshGate {
             column.x >= min_x && column.x < max_x && column.y >= min_z && column.y < max_z
         })
     }
-}
-
-fn env_default_on(key: &str) -> bool {
-    !matches!(
-        std::env::var(key).ok().as_deref().map(str::trim),
-        Some("0") | Some("false") | Some("off") | Some("no")
-    )
 }
 
 fn chunk_column(chunk_pos: IVec3) -> IVec2 {
@@ -302,7 +295,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
     mut gate: ResMut<ClodPageMeshGate>,
 ) {
-    gate.enabled = runtime.enabled && env_default_on("CLOD_PAGES_MESH_GATE");
+    gate.enabled = runtime.enabled && env_bool("CLOD_PAGES_MESH_GATE", true);
     if !gate.enabled {
         gate.pages_ready = false;
         gate.pages_failed = false;
@@ -532,5 +525,23 @@ mod tests {
             boundary_padding: 16.0,
         };
         assert!(!chunk_owned_by_page(chunk, near_bubble, &[page]));
+    }
+
+    #[test]
+    fn mesh_gate_requires_both_enablement_and_ready_pages() {
+        let chunk_pos = IVec3::new(3, 7, -2);
+        let mut gate = ClodPageMeshGate::default();
+        gate.owned_columns.insert(chunk_column(chunk_pos));
+
+        gate.enabled = false;
+        gate.pages_ready = true;
+        assert!(!gate.owns_chunk(chunk_pos));
+
+        gate.enabled = true;
+        gate.pages_ready = false;
+        assert!(!gate.owns_chunk(chunk_pos));
+
+        gate.pages_ready = true;
+        assert!(gate.owns_chunk(chunk_pos));
     }
 }

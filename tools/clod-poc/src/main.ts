@@ -238,6 +238,15 @@ function appendCrossLodBorderSegments(pts: number[], adjacency: CrossLodAdjacenc
 
 async function main() {
   const info = document.getElementById("info")!;
+  const infoPanel = document.getElementById("info-panel")!;
+  const infoClose = document.getElementById("info-close") as HTMLButtonElement;
+  const infoReopen = document.getElementById("info-reopen") as HTMLButtonElement;
+  const setInfoPanelVisible = (visible: boolean) => {
+    infoPanel.hidden = !visible;
+    infoReopen.hidden = visible;
+  };
+  infoClose.addEventListener("click", () => setInfoPanelVisible(false));
+  infoReopen.addEventListener("click", () => setInfoPanelVisible(true));
   createClodOverlay(document.getElementById("clod-overlay")!);
   const importButton = document.getElementById("project-import") as HTMLButtonElement;
   const exportButton = document.getElementById("project-export") as HTMLButtonElement;
@@ -583,7 +592,7 @@ async function main() {
     showCrossLodBorders: false,
     showNodeLabels: false,
     showLockedBorderVertices: false,
-    colorByLod: true,
+    colorByLod: false,
     normalColor: false,
     normalDivergence: false,
     divergenceGain: 8,
@@ -649,6 +658,9 @@ async function main() {
     grassBladeCount: 0,
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
+  let colorByLodUserOverride = stagedImport !== null;
+  let lastTexturesActive: boolean | null = null;
+  let colorByLodController: { updateDisplay: () => unknown } | null = null;
   const currentTerrainColorAdjustments = (): TerrainColorAdjustments => ({
     brightness: state.terrainBrightness,
     contrast: state.terrainContrast,
@@ -738,6 +750,26 @@ async function main() {
   const rebuildActiveTerrainSlots = () => {
     activeTerrainSlots = textureSlots.filter((slot) => slot.texture !== null);
   };
+  const texturesActive = () => state.albedo && activeTerrainSlots.length > 0;
+  const applyColorByLodToMaterials = (on: boolean) => {
+    for (const v of views.values()) {
+      (v.mat.uniforms.uColor.value as THREE.Color).set(
+        on ? LOD_COLORS[Math.min(v.node.level, 3)] : 0xb9c0c8,
+      );
+    }
+  };
+  const syncColorByLod = () => {
+    const active = texturesActive();
+    if (lastTexturesActive !== null && active !== lastTexturesActive) {
+      colorByLodUserOverride = false;
+    }
+    lastTexturesActive = active;
+    if (!colorByLodUserOverride) {
+      state.colorByLod = !active;
+      colorByLodController?.updateDisplay();
+    }
+    applyColorByLodToMaterials(state.colorByLod);
+  };
   const applyTerrainTextures = () => {
     rebuildActiveTerrainSlots();
     const enabled = state.albedo && activeTerrainSlots.length > 0;
@@ -782,6 +814,7 @@ async function main() {
       }
     }
     refreshTerraformSwatches();
+    syncColorByLod();
   };
 
   // One view per node; visibility/fade drive what's drawn.
@@ -1229,6 +1262,11 @@ async function main() {
 
     let colliderMs = 0;
     for (const node of lod0.changed) colliderMs += applyNodeMesh(node);
+    if (state.grassEnabled && lod0.changed.length > 0) {
+      grassSystem.rebuildNodePatches(lod0.changed.map((node) => node.id));
+      state.grassBladeCount = grassSystem.getBladeCount();
+      grassBladeCountController?.updateDisplay();
+    }
     // seed the deferred ancestor chain from the dug LOD0 pages
     pendingParentNodes = 0;
     pendingParentMs = 0;
@@ -1322,11 +1360,9 @@ async function main() {
       g.attributes.normal.needsUpdate = true;
     }
   });
-  gui.add(state, "colorByLod").name("color by LOD").onChange((on: boolean) => {
-    for (const v of views.values()) {
-      const c = on ? LOD_COLORS[Math.min(v.node.level, 3)] : 0xb9c0c8;
-      (v.mat.uniforms.uColor.value as THREE.Color).set(c);
-    }
+  colorByLodController = gui.add(state, "colorByLod").name("color by LOD").onChange((on: boolean) => {
+    colorByLodUserOverride = true;
+    applyColorByLodToMaterials(on);
   });
   const environmentFolder = gui.addFolder("sky + environment");
   const environmentControllers = [

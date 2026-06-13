@@ -6,18 +6,54 @@
     <title>CLOD Pages PoC</title>
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1d22; }
+      #clod-left-stack {
+        position: absolute; top: 8px; left: 8px; z-index: 13;
+        display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+        width: min(330px, calc(100vw - 286px));
+        pointer-events: none;
+      }
+      #clod-overlay { position: static; width: 100%; pointer-events: none; }
+      #info-panel {
+        pointer-events: auto;
+        border-radius: 5px;
+        background: rgba(8, 9, 12, 0.38);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+        backdrop-filter: blur(5px);
+      }
+      #info-panel[hidden] { display: none; }
+      .info-panel-header {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        padding: 4px 7px 0;
+        font: 10px/1.2 system-ui, -apple-system, Segoe UI, sans-serif;
+        color: #9fb0c0;
+      }
+      #info-close {
+        width: 20px; height: 20px; padding: 0; flex: none;
+        border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 3px;
+        color: #dce5ee; background: rgba(255, 255, 255, 0.06); cursor: pointer;
+        font: 14px/1 sans-serif;
+      }
+      #info-close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
       #info {
-        position: absolute; top: 8px; left: 8px; color: #eef3f8;
-        max-width: min(720px, calc(100vw - 286px));
-        padding: 7px 9px; border: 1px solid rgba(255, 255, 255, 0.14);
-        background: rgba(12, 15, 19, 0.68); border-radius: 4px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
-        font: 12px/1.45 monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+        position: static; color: #eef3f8;
+        padding: 4px 9px 7px; border: none; background: transparent; box-shadow: none;
+        font: 11px/1.45 monospace; white-space: pre-wrap; overflow-wrap: anywhere;
         pointer-events: none; box-sizing: border-box;
         text-shadow: 0 1px 1px #000;
-        backdrop-filter: blur(3px);
       }
-      @media (max-width: 760px) { #info { max-width: calc(100vw - 22px); } }
+      #info-reopen {
+        pointer-events: auto; align-self: flex-start;
+        padding: 3px 8px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 999px;
+        color: #cdd8e3; background: rgba(8, 9, 12, 0.42); cursor: pointer;
+        font: 10px/1.2 system-ui, -apple-system, Segoe UI, sans-serif;
+        backdrop-filter: blur(4px);
+      }
+      #info-reopen[hidden] { display: none; }
+      #info-reopen:hover { color: #fff; background: rgba(8, 9, 12, 0.62); }
+      @media (max-width: 760px) {
+        #clod-left-stack { width: calc(100vw - 22px); }
+      }
       #project-toolbar {
         position: absolute; top: 0; right: 0; z-index: 1002;
         width: 260px; height: 44px; box-sizing: border-box;
@@ -235,8 +271,17 @@
     <link rel="stylesheet" href="/src/ui/fantasy_theme.css" />
   </head>
   <body>
-    <div id="info">building…</div>
-    <div id="clod-overlay" aria-label="CLOD runtime overlay"></div>
+    <div id="clod-left-stack">
+      <div id="clod-overlay" aria-label="CLOD runtime overlay"></div>
+      <aside id="info-panel" aria-label="Runtime debug stats">
+        <header class="info-panel-header">
+          <span>Debug stats</span>
+          <button id="info-close" type="button" title="Hide stats" aria-label="Hide stats">×</button>
+        </header>
+        <div id="info">building…</div>
+      </aside>
+      <button id="info-reopen" type="button" hidden>Show stats</button>
+    </div>
     <nav id="project-toolbar" aria-label="Project and community links">
       <button id="project-import" type="button" title="Import project" aria-label="Import project">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 14v5h14v-5" /></svg>

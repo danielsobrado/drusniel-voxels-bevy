@@ -343,6 +343,24 @@ export class GrassSystem {
     this.root.visible = this.settings.enabled;
   }
 
+  /** Regenerate grass for edited LOD0 pages so blades track the current surface. */
+  rebuildNodePatches(nodeIds: Iterable<string>): void {
+    const ids = new Set(nodeIds);
+    if (ids.size === 0) return;
+    const retained: GrassPatch[] = [];
+    for (const patch of this.patches) {
+      if (ids.has(patch.nodeId)) {
+        this.root.remove(patch.mesh);
+        patch.mesh.geometry.dispose();
+        this.bladeCount -= patch.bladeCount;
+      } else {
+        retained.push(patch);
+      }
+    }
+    this.patches = retained;
+    this.refreshPatches(this.lastCenter);
+  }
+
   dispose(): void {
     this.clearPatches();
     this.root.clear();

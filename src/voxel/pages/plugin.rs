@@ -1,4 +1,4 @@
-//! CLOD pages Bevy plugin. Registers default-off source meshing and async page builds.
+//! CLOD pages Bevy plugin. Registers default-off source capture and async page builds.
 
 use bevy::prelude::*;
 

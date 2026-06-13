@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import {
   DEFAULT_GRASS_SETTINGS,
   acceptsGrassCandidate,
   generateGrassInstances,
   type GrassSettings,
 } from "./grass.js";
+import { addDigEdit, clearDigEdits, surfaceHeight } from "./terrain.js";
 import type { PageFootprint } from "./types.js";
 
 const footprint: PageFootprint = { minX: 0, minZ: 0, maxX: 16, maxZ: 16 };
@@ -55,5 +56,30 @@ describe("grass placement", () => {
 
   it("respects the maximum blade count", () => {
     expect(generateGrassInstances(footprint, settings, 7)).toHaveLength(7);
+  });
+
+  afterEach(() => {
+    clearDigEdits();
+  });
+
+  it("re-samples blade height after terrain is edited", () => {
+    clearDigEdits();
+    const before = generateGrassInstances(footprint, settings);
+    expect(before.length).toBeGreaterThan(0);
+    const target = before[0];
+    addDigEdit({
+      x: target.offset[0],
+      y: target.offset[1],
+      z: target.offset[2],
+      r: 3,
+      shape: "sphere",
+      op: "remove",
+    });
+    expect(surfaceHeight(target.offset[0], target.offset[2])).toBeLessThan(target.offset[1] - 0.01);
+    const after = generateGrassInstances(footprint, settings);
+    for (const blade of after) {
+      const groundY = surfaceHeight(blade.offset[0], blade.offset[2]);
+      expect(blade.offset[1]).toBeCloseTo(groundY + 0.02, 1);
+    }
   });
 });

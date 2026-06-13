@@ -8,11 +8,12 @@
 //! Lower LODs are NEVER re-extracted from voxels — always decimated from merged child
 //! meshes. Page borders are locked (by OPEN topological boundary, a sandbox finding — not
 //! by footprint plane: Surface Nets vertices sit inside cells, so borders are non-planar).
-//! Page builds never run on the frame path; the near-field bubble stays live LOD0 chunks.
+//! LOD0 export capture is throttled on the main thread; page assembly, simplification, and
+//! quadtree construction run on the async compute pool. The near-field bubble stays live LOD0.
 //!
-//! Step 1 (this commit): the §11.1 main-surface export from the chunk mesher. The builder
-//! (weld → lock → simplify → quadtree) and runtime selection follow in later steps, ported
-//! near-verbatim from `tools/clod-rs/src/*`.
+//! Phase 5 Steps 1-5 are present: structural main-surface export, the ported builder, async
+//! build/commit, runtime selection, and binary near-field ownership. Rollout remains
+//! default-off for A/B benching; set `CLOD_PAGES=1` to enable the complete page path.
 
 pub mod build_queue;
 pub mod config;

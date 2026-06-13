@@ -1,6 +1,6 @@
 # CLOD Pages — Phase 5 Implementation Plan (Bevy integration)
 
-Status: **proposal — awaiting approval before any engine edits.**
+Status: **implementation present behind a default-off runtime flag for A/B benching.**
 Prereq gate: Phase 3 A3 (visual density-scar judgement) must be confirmed by a human.
 Inputs validated: Phases 0–4 complete (PoC `tools/clod-poc`, Rust builder `tools/clod-rs`,
 all measured gate criteria PASS, builder matches PoC within epsilon).
@@ -29,8 +29,9 @@ bubble**." That is the big behavioural change and the main risk surface.
 
 **DECIDED (D1): pages fully replace per-chunk LOD1–3 beyond the bubble** (end-state a).
 Rollout vehicle to get there safely: land behind a feature flag (default off), render
-side-by-side for A/B + bench, then flip the default and **remove** the far-field per-chunk
-LOD1–3 extraction once benches prove pages win. The flag is the path, not the destination.
+side-by-side for A/B + bench, then flip the default once benches prove pages win. The current
+safe rollout remains default-off: set `CLOD_PAGES=1` (also `true`/`on`/`yes`) to enable it.
+Set `CLOD_PAGES=0` (also `false`/`off`/`no`) to disable it explicitly.
 
 ---
 

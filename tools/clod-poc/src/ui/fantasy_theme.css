@@ -13,7 +13,7 @@
   --clod-muted: #9b9279;
 }
 
-#info,
+#info-panel,
 #project-toolbar,
 #player-mode-bar,
 #terraform-menu,
@@ -32,7 +32,6 @@
     inset 0 0 22px rgba(0, 0, 0, 0.24);
 }
 
-#info,
 #player-mode-bar,
 #terraform-menu,
 #build-progress,
@@ -40,20 +39,35 @@
   font-family: var(--clod-ui-font);
 }
 
-#info {
-  top: 238px;
-  max-width: min(560px, calc(100vw - 286px));
-  border-radius: 5px;
-  color: #d8cfb7;
+#clod-left-stack {
+  width: min(330px, calc(100vw - 286px));
 }
 
 #clod-overlay {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 13;
-  width: min(330px, calc(100vw - 286px));
-  pointer-events: none;
+  position: static;
+  width: 100%;
+}
+
+#info-panel {
+  color: #d8cfb7;
+  background:
+    linear-gradient(180deg, rgba(12, 13, 18, 0.34), rgba(8, 9, 12, 0.28));
+  border-color: rgba(107, 87, 45, 0.38);
+  outline: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+}
+
+#info {
+  position: static;
+  top: auto;
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+  color: #d8cfb7;
+  font-family: var(--clod-ui-font);
 }
 
 .clod-overlay-panel {
@@ -241,12 +255,8 @@
 }
 
 @media (max-width: 760px) {
-  #clod-overlay {
+  #clod-left-stack {
     width: calc(100vw - 22px);
-  }
-
-  #info {
-    display: none;
   }
 }
 
