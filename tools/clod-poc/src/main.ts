@@ -143,6 +143,11 @@ interface NodeView {
 
 interface TextureSlot {
   texture: THREE.Texture | null;
+  normalTexture: THREE.Texture | null;
+  normalPreviewUrl: string | null;
+  normalBytes: Uint8Array | null;
+  normalMimeType: string | null;
+  normalExtension: string | null;
   name: string;
   previewUrl: string | null;
   selectedId: string;
@@ -359,7 +364,7 @@ async function main() {
       playerModeStatus.textContent = interaction.mode === "choosingSpawn"
         ? "Click the terrain to choose your starting position"
         : interaction.mode === "playing"
-          ? "WASD · Shift · Space · Esc · click digs · Shift+wheel radius"
+          ? `WASD · Shift · Space · Esc${playerTerraformEditActive() ? " · click digs" : ""} · Shift+wheel radius`
           : "Orbit camera";
     }
     document.body.dataset.tabUi = tabUiHold ? "true" : "false";
@@ -370,6 +375,7 @@ async function main() {
     document.body.dataset.tfEdit = terraformEditCheckbox.checked ? "true" : "false";
   };
   let terraformEditCheckbox: HTMLInputElement | null = null;
+  const playerTerraformEditActive = () => terraformEditCheckbox?.checked ?? false;
   const exitPlayerMode = () => {
     tabUiHold = false;
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
@@ -432,7 +438,7 @@ async function main() {
     if (interaction.mode === "choosingSpawn" && event.button === 0) startPlayerAtPointer(event);
     else if (interaction.mode === "playing" && event.button === 0 && document.pointerLockElement !== renderer.domElement) {
       void renderer.domElement.requestPointerLock();
-    } else if (interaction.mode === "playing" && event.button === 0 && state.digEnabled) {
+    } else if (interaction.mode === "playing" && event.button === 0 && state.digEnabled && playerTerraformEditActive()) {
       digHeld = true;
       camera.getWorldDirection(digDirection);
       performDig(new THREE.Ray(camera.position.clone(), digDirection.clone()));
@@ -558,6 +564,10 @@ async function main() {
     textureScale: 1,
     triplanar: true,
     albedo: true,
+    normalMap: false,
+    normalIntensity: 1,
+    roughness: 0.9,
+    metalness: 0,
     textureBlendMode: TEXTURE_BLEND_MODES[1] as TextureBlendMode,
     textureBlendWidth: 6,
     loadedTextureFiles: "none",
@@ -658,6 +668,11 @@ async function main() {
 
   const textureSlots: TextureSlot[] = Array.from({ length: MAX_TERRAIN_TEXTURES }, () => ({
     texture: null,
+    normalTexture: null,
+    normalPreviewUrl: null,
+    normalBytes: null,
+    normalMimeType: null,
+    normalExtension: null,
     name: "empty",
     previewUrl: null,
     selectedId: "",
@@ -698,10 +713,15 @@ async function main() {
     rebuildActiveTerrainSlots();
     const enabled = state.albedo && activeTerrainSlots.length > 0;
     const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
+    const normalUniforms = ["uTerrainNormal0", "uTerrainNormal1", "uTerrainNormal2", "uTerrainNormal3"];
     const rangeUniforms = ["uTextureRange0", "uTextureRange1", "uTextureRange2", "uTextureRange3"];
     const apply = (mat: THREE.ShaderMaterial) => {
       mat.uniforms.uUseTexture.value = enabled;
       mat.uniforms.uUseTriplanar.value = state.triplanar;
+      mat.uniforms.uUseNormalMap.value = state.normalMap;
+      mat.uniforms.uNormalIntensity.value = state.normalIntensity;
+      mat.uniforms.uRoughness.value = state.roughness;
+      mat.uniforms.uMetalness.value = state.metalness;
       mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
       mat.uniforms.uTextureScales.value.set(
         (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
@@ -709,11 +729,18 @@ async function main() {
         (activeTerrainSlots[2]?.scale ?? 1 / 64) * state.textureScale,
         (activeTerrainSlots[3]?.scale ?? 1 / 64) * state.textureScale,
       );
+      mat.uniforms.uNormalMapMask.value.set(
+        activeTerrainSlots[0]?.normalTexture ? 1 : 0,
+        activeTerrainSlots[1]?.normalTexture ? 1 : 0,
+        activeTerrainSlots[2]?.normalTexture ? 1 : 0,
+        activeTerrainSlots[3]?.normalTexture ? 1 : 0,
+      );
       mat.uniforms.uTextureBlendBands.value = state.textureBlendMode === "blend bands";
       mat.uniforms.uTextureBlendWidth.value = state.textureBlendWidth;
       for (let i = 0; i < textureUniforms.length; i++) {
         const slot = activeTerrainSlots[i];
         mat.uniforms[textureUniforms[i]].value = slot?.texture ?? null;
+        mat.uniforms[normalUniforms[i]].value = slot?.normalTexture ?? null;
         mat.uniforms[rangeUniforms[i]].value.set(slot?.heightMin ?? 0, slot?.heightMax ?? 0);
       }
     };
@@ -794,8 +821,13 @@ async function main() {
         mat.side = state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide;
         rebuildActiveTerrainSlots();
         const textureUniforms = ["uTerrainTexture0", "uTerrainTexture1", "uTerrainTexture2", "uTerrainTexture3"];
+        const normalUniforms = ["uTerrainNormal0", "uTerrainNormal1", "uTerrainNormal2", "uTerrainNormal3"];
         const rangeUniforms = ["uTextureRange0", "uTextureRange1", "uTextureRange2", "uTextureRange3"];
         mat.uniforms.uUseTexture.value = state.albedo && activeTerrainSlots.length > 0;
+        mat.uniforms.uUseNormalMap.value = state.normalMap;
+        mat.uniforms.uNormalIntensity.value = state.normalIntensity;
+        mat.uniforms.uRoughness.value = state.roughness;
+        mat.uniforms.uMetalness.value = state.metalness;
         mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
         mat.uniforms.uTextureScales.value.set(
           (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
@@ -803,11 +835,18 @@ async function main() {
           (activeTerrainSlots[2]?.scale ?? 1 / 64) * state.textureScale,
           (activeTerrainSlots[3]?.scale ?? 1 / 64) * state.textureScale,
         );
+        mat.uniforms.uNormalMapMask.value.set(
+          activeTerrainSlots[0]?.normalTexture ? 1 : 0,
+          activeTerrainSlots[1]?.normalTexture ? 1 : 0,
+          activeTerrainSlots[2]?.normalTexture ? 1 : 0,
+          activeTerrainSlots[3]?.normalTexture ? 1 : 0,
+        );
         mat.uniforms.uTextureBlendBands.value = state.textureBlendMode === "blend bands";
         mat.uniforms.uTextureBlendWidth.value = state.textureBlendWidth;
         for (let ti = 0; ti < textureUniforms.length; ti++) {
           const slot = activeTerrainSlots[ti];
           mat.uniforms[textureUniforms[ti]].value = slot?.texture ?? null;
+          mat.uniforms[normalUniforms[ti]].value = slot?.normalTexture ?? null;
           mat.uniforms[rangeUniforms[ti]].value.set(slot?.heightMin ?? 0, slot?.heightMax ?? 0);
         }
         applyLightingToMaterial(mat);
@@ -961,8 +1000,8 @@ async function main() {
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
       `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassBladeCount.toLocaleString()} blades\n` +
-      `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}` +
-      `${lastDigSummary ? `  last: ${lastDigSummary}` : ""}\n` +
+      `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
+      `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
       `${lastArchiveSummary ? `${lastArchiveSummary}\n` : ""}` +
       playerLine;
   };
@@ -1333,6 +1372,21 @@ async function main() {
   textureInput.multiple = true;
   textureInput.style.display = "none";
   document.body.appendChild(textureInput);
+  const normalInput = document.createElement("input");
+  normalInput.type = "file";
+  normalInput.accept = "image/*";
+  normalInput.style.display = "none";
+  document.body.appendChild(normalInput);
+  let pendingNormalLoad: number | null = null;
+  normalInput.addEventListener("change", async () => {
+    const file = normalInput.files?.[0];
+    normalInput.value = "";
+    if (file == null || pendingNormalLoad == null) return;
+    const result = await loadNormalMap(file);
+    if (result) setSlotNormal(pendingNormalLoad, result.texture, result.previewUrl, result.bytes, result.mimeType, result.extension);
+    pendingNormalLoad = null;
+    refreshTextureState();
+  });
   let pendingTextureLoad: number | "all" | null = null;
   const slotCards: HTMLElement[] = [];
   let loadedTextureController: { updateDisplay: () => unknown } | null = null;
@@ -1356,6 +1410,8 @@ async function main() {
       preview.textContent = slot.previewUrl ? "" : TERRAIN_TEXTURE_BANDS[index];
     }
     if (name) name.textContent = slot.texture ? slot.name : "empty";
+    const normalBtn = card.querySelector<HTMLElement>(".texture-normal-load");
+    if (normalBtn) normalBtn.textContent = slot.normalTexture ? "Normal map ✓" : "+ Normal map";
     card.title = `${TERRAIN_TEXTURE_BANDS[index]} height texture`;
   };
   const updateTextureSlotPreviews = () => {
@@ -1413,16 +1469,53 @@ async function main() {
   const clearTextureSlot = (index: number) => {
     const old = textureSlots[index];
     old.texture?.dispose();
+    old.normalTexture?.dispose();
     if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
+    if (old.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.normalPreviewUrl);
     textureSlots[index] = {
       ...old,
       texture: null,
+      normalTexture: null,
+      normalPreviewUrl: null,
       name: "empty",
       previewUrl: null,
       selectedId: "",
       customBytes: null,
       customMimeType: null,
       customExtension: null,
+    };
+  };
+  const setSlotNormal = (
+    index: number,
+    texture: THREE.Texture,
+    previewUrl: string,
+    bytes: Uint8Array,
+    mimeType: string,
+    extension: string,
+  ) => {
+    const old = textureSlots[index];
+    old.normalTexture?.dispose();
+    if (old.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.normalPreviewUrl);
+    textureSlots[index] = {
+      ...old,
+      normalTexture: texture,
+      normalPreviewUrl: previewUrl,
+      normalBytes: bytes.slice(),
+      normalMimeType: mimeType,
+      normalExtension: extension,
+    };
+  };
+  const clearSlotNormal = (index: number) => {
+    const old = textureSlots[index];
+    old.normalTexture?.dispose();
+    if (old.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.normalPreviewUrl);
+    textureSlots[index] = {
+      ...old,
+      normalTexture: null,
+      normalPreviewUrl: null,
+      normalBytes: null,
+      normalMimeType: null,
+      normalExtension: null,
     };
   };
   const clearAllTextures = () => {
@@ -1435,6 +1528,39 @@ async function main() {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     texture.needsUpdate = true;
+  };
+  // Normal maps are linear data, not colour — decoding them as sRGB skews the vectors.
+  const configureNormalTexture = (texture: THREE.Texture) => {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.NoColorSpace;
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    texture.needsUpdate = true;
+  };
+  const loadNormalMap = async (file: File): Promise<{
+    texture: THREE.Texture;
+    previewUrl: string;
+    bytes: Uint8Array;
+    mimeType: string;
+    extension: string;
+  } | null> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      new THREE.TextureLoader().load(
+        url,
+        (texture) => {
+          configureNormalTexture(texture);
+          const mimeType = file.type || "application/octet-stream";
+          resolve({ texture, previewUrl: url, bytes, mimeType, extension: extensionForTexture(file.name, mimeType) });
+        },
+        undefined,
+        () => {
+          URL.revokeObjectURL(url);
+          resolve(null);
+        },
+      );
+    });
   };
   const textureActions = {
     loadTexture: () => {
@@ -1602,11 +1728,23 @@ async function main() {
         <label class="texture-slot-param"><span>Low</span><input data-slot-low="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMin}" /></label>
         <label class="texture-slot-param"><span>High</span><input data-slot-high="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMax}" /></label>
       </div>
+      <div class="texture-slot-normal">
+        <button class="texture-normal-load" type="button">+ Normal map</button>
+        <button class="texture-normal-clear" type="button" title="clear normal map">✕</button>
+      </div>
     `;
     card.querySelector(".texture-preview")!.addEventListener("click", () => {
       pendingTextureLoad = i;
       textureInput.multiple = false;
       textureInput.click();
+    });
+    card.querySelector(".texture-normal-load")!.addEventListener("click", () => {
+      pendingNormalLoad = i;
+      normalInput.click();
+    });
+    card.querySelector(".texture-normal-clear")!.addEventListener("click", () => {
+      clearSlotNormal(i);
+      refreshTextureState();
     });
     slotCards.push(card);
     slotGrid.appendChild(card);
@@ -1731,6 +1869,30 @@ async function main() {
         );
       }
     }
+    // Restore normal maps after albedo, since the albedo setters reset the slot object.
+    // Normals attach to builtin or custom slots alike, so this pass is independent.
+    for (const imported of stagedImport.manifest.textures) {
+      if (!imported.normalPath) continue;
+      const bytes = stagedImport.customTextures.get(imported.normalPath);
+      if (!bytes) throw new Error(`Imported project is missing ${imported.normalPath}`);
+      const mimeType = imported.normalMimeType ?? "application/octet-stream";
+      const previewUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: mimeType }));
+      const texture = await new Promise<THREE.Texture | null>((resolve) => {
+        new THREE.TextureLoader().load(previewUrl, (t) => { configureNormalTexture(t); resolve(t); }, undefined, () => resolve(null));
+      });
+      if (!texture) {
+        URL.revokeObjectURL(previewUrl);
+        throw new Error(`Could not decode imported normal map for slot ${imported.index}`);
+      }
+      setSlotNormal(
+        imported.index,
+        texture,
+        previewUrl,
+        bytes,
+        mimeType,
+        imported.normalPath.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin",
+      );
+    }
   } else {
     await loadBuiltinTextureSlots(
       DEFAULT_TERRAIN_TEXTURE_PRESETS.map((preset, index) => ({
@@ -1748,8 +1910,12 @@ async function main() {
 
   const textureFolder = gui.addFolder("terrain texture");
   textureFolder.add(state, "albedo").name("albedo").onChange(applyTerrainTextures);
-  textureFolder.add(textureActions, "loadTexture").name("load albedo");
+  textureFolder.add(textureActions, "loadTexture").name("load albedo / normals");
   textureFolder.add(state, "triplanar").name("triplanar").onChange(applyTerrainTextures);
+  textureFolder.add(state, "normalMap").name("normal maps").onChange(applyTerrainTextures);
+  textureFolder.add(state, "normalIntensity", 0, 3, 0.05).name("normal intensity").onChange(applyTerrainTextures);
+  textureFolder.add(state, "roughness", 0, 1, 0.01).name("roughness").onChange(applyTerrainTextures);
+  textureFolder.add(state, "metalness", 0, 1, 0.01).name("metalness").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureScale", 0.25, 4, 0.05).name("scale multiplier").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureBlendMode", TEXTURE_BLEND_MODES).name("blend mode").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureBlendWidth", 0, 24, 0.5).name("blend height").onChange(applyTerrainTextures);
@@ -1796,6 +1962,11 @@ async function main() {
   editToggle.append(editToggleInput, document.createTextNode(" Edit"));
   editToggleInput.addEventListener("change", () => {
     document.body.dataset.tfEdit = editToggleInput.checked ? "true" : "false";
+    if (!editToggleInput.checked) {
+      digHeld = false;
+      digPreview.visible = false;
+    }
+    updatePlayerModeUi();
   });
   paletteSection.appendChild(editToggle);
   terraformMenu.appendChild(paletteSection);
@@ -1986,6 +2157,12 @@ async function main() {
     recomputedNormals: state.recomputedNormals,
     forceMaxLevel: state.forceMaxLevel as ProjectSessionState["forceMaxLevel"],
     textureScale: state.textureScale,
+    triplanar: state.triplanar,
+    albedo: state.albedo,
+    normalMap: state.normalMap,
+    normalIntensity: state.normalIntensity,
+    roughness: state.roughness,
+    metalness: state.metalness,
     textureBlendMode: state.textureBlendMode,
     textureBlendWidth: state.textureBlendWidth,
     terrainBrightness: state.terrainBrightness,
@@ -2041,6 +2218,9 @@ async function main() {
       ? "empty"
       : slot.selectedId === "custom" ? "custom" : "builtin";
     const customPath = source === "custom" ? `textures/slot-${index}${slot.customExtension ?? ".bin"}` : undefined;
+    // Normal maps persist for any slot that has one (builtin or custom albedo), since
+    // there are no builtin normals — they are always a user-loaded file.
+    const normalPath = slot.normalBytes ? `textures/slot-${index}-normal${slot.normalExtension ?? ".bin"}` : undefined;
     return {
       index,
       source,
@@ -2050,6 +2230,7 @@ async function main() {
       heightMin: slot.heightMin,
       heightMax: slot.heightMax,
       ...(customPath ? { customPath, mimeType: slot.customMimeType ?? "application/octet-stream" } : {}),
+      ...(normalPath ? { normalPath, normalMimeType: slot.normalMimeType ?? "application/octet-stream" } : {}),
     };
   });
 
@@ -2139,10 +2320,16 @@ async function main() {
       const textures = projectTextureMetadata();
       const customTextures = new Map<string, Uint8Array>();
       for (const texture of textures) {
-        if (texture.source !== "custom" || !texture.customPath) continue;
-        const bytes = textureSlots[texture.index].customBytes;
-        if (!bytes) throw new Error(`Custom texture slot ${texture.index} has no source bytes`);
-        customTextures.set(texture.customPath, bytes);
+        if (texture.source === "custom" && texture.customPath) {
+          const bytes = textureSlots[texture.index].customBytes;
+          if (!bytes) throw new Error(`Custom texture slot ${texture.index} has no source bytes`);
+          customTextures.set(texture.customPath, bytes);
+        }
+        if (texture.normalPath) {
+          const bytes = textureSlots[texture.index].normalBytes;
+          if (!bytes) throw new Error(`Normal-map slot ${texture.index} has no source bytes`);
+          customTextures.set(texture.normalPath, bytes);
+        }
       }
       const manifest: ClodProjectManifestV1 = {
         schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -2233,7 +2420,7 @@ async function main() {
 
     // hold-to-dig pickaxe cadence while playing
     if (
-      interaction.mode === "playing" && digHeld && state.digEnabled &&
+      interaction.mode === "playing" && digHeld && state.digEnabled && playerTerraformEditActive() &&
       document.pointerLockElement === renderer.domElement &&
       performance.now() - lastDigAt >= state.brushFlowMs
     ) {
@@ -2243,7 +2430,7 @@ async function main() {
 
     // dig preview reticle at the current aim point
     let digAimHit: TerrainSurfaceHit | null = null;
-    if (state.digEnabled && interaction.mode === "playing") {
+    if (state.digEnabled && interaction.mode === "playing" && playerTerraformEditActive()) {
       camera.getWorldDirection(digDirection);
       digAimRay.origin.copy(camera.position);
       digAimRay.direction.copy(digDirection);

@@ -12,7 +12,8 @@
         padding: 7px 9px; border: 1px solid rgba(255, 255, 255, 0.14);
         background: rgba(12, 15, 19, 0.68); border-radius: 4px;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
-        font: 12px/1.45 monospace; white-space: pre; pointer-events: none;
+        font: 12px/1.45 monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+        pointer-events: none; box-sizing: border-box;
         text-shadow: 0 1px 1px #000;
         backdrop-filter: blur(3px);
       }
@@ -215,6 +216,15 @@
         width: 100%; min-width: 0; box-sizing: border-box;
         background: #f6f7f8; border: 1px solid #545c68; color: #11161d;
       }
+      .texture-slot-normal {
+        display: flex; gap: 6px; margin-top: 6px;
+      }
+      .texture-slot-normal button {
+        font: inherit; font-size: 12px; cursor: pointer;
+        background: #f6f7f8; border: 1px solid #545c68; color: #11161d;
+        border-radius: 3px; padding: 3px 6px;
+      }
+      .texture-normal-load { flex: 1; min-width: 0; }
       .texture-actions {
         display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;
       }

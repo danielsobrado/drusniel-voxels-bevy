@@ -34,7 +34,9 @@ const state: ProjectSessionState = {
   showBounds: true, showSeamPoints: false, showCrossLodBorders: true,
   colorByLod: false, normalColor: false, normalDivergence: true, divergenceGain: 9,
   frontSideOnly: true, recomputedNormals: false, forceMaxLevel: "2",
-  textureScale: 1.5, textureBlendMode: "blend bands", textureBlendWidth: 5,
+  textureScale: 1.5, triplanar: true, albedo: true, normalMap: true, normalIntensity: 1.5,
+  roughness: 0.8, metalness: 0.2,
+  textureBlendMode: "blend bands", textureBlendWidth: 5,
   terrainBrightness: 1.1, terrainContrast: 0.9, terrainSaturation: 1.2, terrainWarmth: 0.1,
   sunAzimuthDeg: 120, sunElevationDeg: 40, sunIntensity: 1.2, skyIntensity: 0.8,
   groundIntensity: 0.4, exposure: 1.1, horizonSoftness: 0.8, sunDiskIntensity: 1.4,
@@ -64,7 +66,7 @@ function manifest(): ClodProjectManifestV1 {
     }],
     textures: [
       { index: 0, source: "custom", name: "soil.png", selectedId: "custom", scale: 0.02, heightMin: 0, heightMax: 40, customPath: "textures/slot-0.png", mimeType: "image/png" },
-      { index: 1, source: "builtin", name: "Rock", selectedId: "cobblestone-1", scale: 0.03, heightMin: 40, heightMax: 70 },
+      { index: 1, source: "builtin", name: "Rock", selectedId: "cobblestone-1", scale: 0.03, heightMin: 40, heightMax: 70, normalPath: "textures/slot-1-normal.png", normalMimeType: "image/png" },
       { index: 2, source: "empty", name: "empty", selectedId: "", scale: 0.04, heightMin: 70, heightMax: 95 },
       { index: 3, source: "empty", name: "empty", selectedId: "", scale: 0.05, heightMin: 95, heightMax: 120 },
     ],
@@ -85,13 +87,18 @@ describe("CLOD project archive", () => {
   it("round-trips complete session state and exact custom texture bytes", async () => {
     const source = manifest();
     const texture = new Uint8Array([137, 80, 78, 71, 1, 2, 3, 4]);
+    const normal = new Uint8Array([137, 80, 78, 71, 9, 8, 7, 6]);
     const terrainGlb = minimalGlb();
-    const archive = await createProjectArchive(source, terrainGlb, new Map([["textures/slot-0.png", texture]]));
+    const archive = await createProjectArchive(source, terrainGlb, new Map([
+      ["textures/slot-0.png", texture],
+      ["textures/slot-1-normal.png", normal],
+    ]));
     const parsed = await parseProjectArchive(archive);
 
     expect(parsed.manifest).toEqual(source);
     expect(parsed.terrainGlb).toEqual(terrainGlb);
     expect(parsed.customTextures.get("textures/slot-0.png")).toEqual(texture);
+    expect(parsed.customTextures.get("textures/slot-1-normal.png")).toEqual(normal);
     expect(Object.keys(unzipSync(archive))).not.toContain("textures/slot-1.jpg");
   });
 

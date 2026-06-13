@@ -26,6 +26,12 @@ export interface ProjectSessionState {
   recomputedNormals: boolean;
   forceMaxLevel: "auto" | "0" | "1" | "2" | "3";
   textureScale: number;
+  triplanar: boolean;
+  albedo: boolean;
+  normalMap: boolean;
+  normalIntensity: number;
+  roughness: number;
+  metalness: number;
   textureBlendMode: TextureBlendMode;
   textureBlendWidth: number;
   terrainBrightness: number;
@@ -86,6 +92,8 @@ export interface ProjectTextureSlot {
   heightMax: number;
   customPath?: string;
   mimeType?: string;
+  normalPath?: string;
+  normalMimeType?: string;
 }
 
 export interface ClodProjectManifestV1 {
@@ -116,7 +124,7 @@ interface StagedProjectImport {
 }
 
 const NUMBER_STATE_KEYS: (keyof ProjectSessionState)[] = [
-  "thresholdPx", "divergenceGain", "textureScale", "textureBlendWidth",
+  "thresholdPx", "divergenceGain", "textureScale", "normalIntensity", "roughness", "metalness", "textureBlendWidth",
   "terrainBrightness", "terrainContrast", "terrainSaturation", "terrainWarmth",
   "sunAzimuthDeg", "sunElevationDeg", "sunIntensity", "skyIntensity", "groundIntensity",
   "exposure", "horizonSoftness", "sunDiskIntensity", "sunGlowIntensity", "hazeIntensity",
@@ -131,6 +139,7 @@ const NUMBER_STATE_KEYS: (keyof ProjectSessionState)[] = [
 const BOOLEAN_STATE_KEYS: (keyof ProjectSessionState)[] = [
   "enforce21", "freeze", "wireframe", "showBounds", "showSeamPoints", "showCrossLodBorders",
   "colorByLod", "normalColor", "normalDivergence", "frontSideOnly", "recomputedNormals",
+  "triplanar", "albedo", "normalMap",
   "postProcessEnabled", "bubble", "tintBubble", "digEnabled", "grassEnabled",
 ];
 
@@ -252,6 +261,12 @@ function assertTextureSlot(value: unknown, index: number): asserts value is Proj
        typeof value.mimeType !== "string")) {
     throw new Error(`project.json textures[${index}] is missing custom texture metadata`);
   }
+  if (value.normalPath !== undefined &&
+      (typeof value.normalPath !== "string" ||
+       !new RegExp(`^textures/slot-${index}-normal\\.[a-z0-9]{1,8}$`, "i").test(value.normalPath) ||
+       typeof value.normalMimeType !== "string")) {
+    throw new Error(`project.json textures[${index}] has invalid normal-map metadata`);
+  }
 }
 
 export function validateProjectManifest(value: unknown): ClodProjectManifestV1 {
@@ -290,10 +305,16 @@ export async function createProjectArchive(
     [TERRAIN_FILE]: [terrainGlb, { level: 0 }],
   };
   for (const slot of manifest.textures) {
-    if (slot.source !== "custom" || !slot.customPath) continue;
-    const bytes = customTextures.get(slot.customPath);
-    if (!bytes) throw new Error(`Missing custom texture bytes for ${slot.customPath}`);
-    files[slot.customPath] = [bytes, { level: 0 }];
+    if (slot.source === "custom" && slot.customPath) {
+      const bytes = customTextures.get(slot.customPath);
+      if (!bytes) throw new Error(`Missing custom texture bytes for ${slot.customPath}`);
+      files[slot.customPath] = [bytes, { level: 0 }];
+    }
+    if (slot.normalPath) {
+      const bytes = customTextures.get(slot.normalPath);
+      if (!bytes) throw new Error(`Missing normal-map bytes for ${slot.normalPath}`);
+      files[slot.normalPath] = [bytes, { level: 0 }];
+    }
   }
   return zipSync(files);
 }
@@ -321,10 +342,16 @@ export async function parseProjectArchive(bytes: Uint8Array): Promise<ProjectArc
   const manifest = validateProjectManifest(rawManifest);
   const customTextures = new Map<string, Uint8Array>();
   for (const slot of manifest.textures) {
-    if (slot.source !== "custom" || !slot.customPath) continue;
-    const texture = files[slot.customPath];
-    if (!texture) throw new Error(`The archive is missing ${slot.customPath}`);
-    customTextures.set(slot.customPath, texture);
+    if (slot.source === "custom" && slot.customPath) {
+      const texture = files[slot.customPath];
+      if (!texture) throw new Error(`The archive is missing ${slot.customPath}`);
+      customTextures.set(slot.customPath, texture);
+    }
+    if (slot.normalPath) {
+      const normal = files[slot.normalPath];
+      if (!normal) throw new Error(`The archive is missing ${slot.normalPath}`);
+      customTextures.set(slot.normalPath, normal);
+    }
   }
   return { manifest, terrainGlb, customTextures };
 }

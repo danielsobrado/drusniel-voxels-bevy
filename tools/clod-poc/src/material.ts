@@ -56,6 +56,15 @@ const FRAG = /* glsl */ `
   uniform sampler2D uTerrainTexture1;
   uniform sampler2D uTerrainTexture2;
   uniform sampler2D uTerrainTexture3;
+  uniform bool uUseNormalMap;
+  uniform float uNormalIntensity;
+  uniform float uRoughness;
+  uniform float uMetalness;
+  uniform vec4 uNormalMapMask;   // per-slot 1.0 when a normal map is loaded
+  uniform sampler2D uTerrainNormal0;
+  uniform sampler2D uTerrainNormal1;
+  uniform sampler2D uTerrainNormal2;
+  uniform sampler2D uTerrainNormal3;
   uniform vec4 uTextureScales;
   uniform bool uTextureBlendBands;
   uniform float uTextureBlendWidth;
@@ -112,6 +121,40 @@ const FRAG = /* glsl */ `
     vec3 cx = texture2D(tex, worldPos.xy * scale).rgb;
     return cy * w.x + cz * w.y + cx * w.z;
   }
+  // Normal-map path ported from the engine shader: unpack_normal() + reorient_normal()
+  // + the three-plane blend in sample_normal_tp(). Reorient swizzles the tangent normal
+  // into world space per projection axis, keyed by the sign of the geometric normal.
+  vec3 unpackNormalMap(vec3 s) { return normalize(s * 2.0 - 1.0); }
+  vec3 reorientNormal(vec3 tn, vec3 wn, int axis) {
+    vec3 n = normalize(vec3(tn.xy * uNormalIntensity, tn.z));
+    if (axis == 0) return normalize(vec3(n.z * sign(wn.x), n.y, n.x));
+    if (axis == 1) return normalize(vec3(n.x, n.z * sign(wn.y), n.y));
+    return normalize(vec3(n.x, n.y, n.z * sign(wn.z)));
+  }
+  vec3 triplanarNormal(sampler2D nmap, vec3 worldPos, float scale, vec3 wn) {
+    vec3 w = triplanarWeights(wn);
+    vec3 n0 = reorientNormal(unpackNormalMap(texture2D(nmap, worldPos.yz * scale).rgb), wn, 0);
+    vec3 n1 = reorientNormal(unpackNormalMap(texture2D(nmap, worldPos.xz * scale).rgb), wn, 1);
+    vec3 n2 = reorientNormal(unpackNormalMap(texture2D(nmap, worldPos.xy * scale).rgb), wn, 2);
+    return normalize(n0 * w.x + n1 * w.y + n2 * w.z);
+  }
+  // Blend per-slot normal maps by the same height bands as the albedo. Slots without a
+  // normal map (mask 0) contribute the geometric normal so they stay flat-shaded.
+  vec3 sampleTerrainNormal(vec3 worldPos, vec3 baseN) {
+    float height = worldPos.y;
+    vec3 n0 = uNormalMapMask.x > 0.5 ? triplanarNormal(uTerrainNormal0, worldPos, uTextureScales.x, baseN) : baseN;
+    if (uTerrainTextureCount <= 1) return n0;
+    vec3 n1 = uNormalMapMask.y > 0.5 ? triplanarNormal(uTerrainNormal1, worldPos, uTextureScales.y, baseN) : baseN;
+    vec3 n2 = uNormalMapMask.z > 0.5 ? triplanarNormal(uTerrainNormal2, worldPos, uTextureScales.z, baseN) : baseN;
+    vec3 n3 = uNormalMapMask.w > 0.5 ? triplanarNormal(uTerrainNormal3, worldPos, uTextureScales.w, baseN) : baseN;
+    float w0 = rangeWeight(height, uTextureRange0);
+    float w1 = uTerrainTextureCount > 1 ? rangeWeight(height, uTextureRange1) : 0.0;
+    float w2 = uTerrainTextureCount > 2 ? rangeWeight(height, uTextureRange2) : 0.0;
+    float w3 = uTerrainTextureCount > 3 ? rangeWeight(height, uTextureRange3) : 0.0;
+    float wsum = w0 + w1 + w2 + w3;
+    if (wsum > 0.0) return normalize((n0 * w0 + n1 * w1 + n2 * w2 + n3 * w3) / wsum);
+    return baseN;
+  }
   vec3 sampleTerrainTexture(vec3 worldPos) {
     float height = worldPos.y;
     vec3 t0 = triplanarSample(uTerrainTexture0, worldPos, uTextureScales.x);
@@ -167,6 +210,9 @@ const FRAG = /* glsl */ `
       return;
     }
     vec3 n = normalize(vWorldNormal);
+    if (uUseNormalMap && uTerrainTextureCount > 0) {
+      n = sampleTerrainNormal(vWorldPos, n);
+    }
     float sun = max(dot(n, normalize(uLight)), 0.0);
     float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
     float paint = clamp(vMaterial.x + vMaterial.y + vMaterial.z + vMaterial.w, 0.0, 1.0);
@@ -191,7 +237,17 @@ const FRAG = /* glsl */ `
     baseColor = adjustColor(baseColor);
     vec3 hemi = mix(uGroundLight, uSkyLight, sky);
     vec3 light = hemi + uSunColor * pow(sun, 1.35);
-    gl_FragColor = vec4(baseColor * light, 1.0);
+    // Simplified roughness/metalness specular. The engine drives full PBR; here a
+    // Blinn-Phong lobe maps roughness -> highlight tightness/strength, and metalness
+    // tints the highlight with albedo while suppressing diffuse (conductor look).
+    float rough = clamp(uRoughness, 0.04, 1.0);
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    vec3 halfVec = normalize(normalize(uLight) + viewDir);
+    float shininess = mix(128.0, 4.0, rough);
+    float spec = pow(max(dot(n, halfVec), 0.0), shininess) * (1.0 - rough) * sun;
+    vec3 specColor = mix(vec3(1.0), baseColor, uMetalness);
+    vec3 diffuse = baseColor * light * (1.0 - 0.85 * uMetalness);
+    gl_FragColor = vec4(diffuse + uSunColor * spec * specColor, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -221,6 +277,15 @@ export function createTerrainMaterial(color: number): THREE.ShaderMaterial {
       uTerrainTexture1: { value: null },
       uTerrainTexture2: { value: null },
       uTerrainTexture3: { value: null },
+      uUseNormalMap: { value: false },
+      uNormalIntensity: { value: 1.0 },
+      uRoughness: { value: 0.9 },
+      uMetalness: { value: 0.0 },
+      uNormalMapMask: { value: new THREE.Vector4(0, 0, 0, 0) },
+      uTerrainNormal0: { value: null },
+      uTerrainNormal1: { value: null },
+      uTerrainNormal2: { value: null },
+      uTerrainNormal3: { value: null },
       uTextureScales: { value: new THREE.Vector4(1 / 64, 1 / 64, 1 / 64, 1 / 64) },
       uTextureBlendBands: { value: false },
       uTextureBlendWidth: { value: 6 },
