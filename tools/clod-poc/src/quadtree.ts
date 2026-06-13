@@ -330,32 +330,45 @@ export interface EditRebuildResult {
   parentMs: number;
 }
 
-/**
- * Rebuild the LOD0 pages whose cells intersect `dirty`, then every ancestor up the
- * quadtree (merge -> weld -> lock -> simplify), with the same hard-fail validation as
- * the full build. Nodes are mutated in place so viewer/selection references stay valid.
- * This is the per-edit cost CLOD pays for digging: the dug pages plus one node per
- * ancestor level.
- */
-export function rebuildDirtyPages(
-  result: BuildResult,
-  dirty: DirtyCellBounds,
-  cfg: ClodPagesConfig,
-): EditRebuildResult {
-  const eps = cfg.simplify.weld_epsilon_cells;
-  const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
-  const world = {
-    cellsX: result.worldPagesX * span,
-    cellsZ: result.worldPagesZ * span,
-  };
+/** Per-level node lookup keyed "nx,nz" (recovered from the build-time ids). */
+export type NodeIndex = Map<string, ClodPageNode>[];
 
-  // node lookup per level, keyed "nx,nz" (recovered from the build-time ids)
-  const index: Map<string, ClodPageNode>[] = [];
+export function buildNodeIndex(result: BuildResult): NodeIndex {
+  const index: NodeIndex = [];
   for (const [level, nodes] of result.nodesByLevel) {
     const m = new Map<string, ClodPageNode>();
     for (const n of nodes) m.set(n.id.slice(n.id.indexOf(":") + 1), n);
     index[level] = m;
   }
+  return index;
+}
+
+export interface Lod0RebuildResult {
+  /** LOD0 nodes re-extracted from the field, mutated in place. */
+  changed: ClodPageNode[];
+  /** Page coords of the rebuilt LOD0 nodes — the seed for the ancestor chain. */
+  dirtyCoords: [number, number][];
+  lod0Pages: number;
+  lod0Ms: number;
+}
+
+/**
+ * Phase 1 of an edit rebuild: re-extract the LOD0 pages whose cells intersect `dirty`,
+ * with the same hard-fail validation as the full build. Cheap relative to the ancestor
+ * chain and it's the surface the player is looking at, so the viewer applies this
+ * synchronously and defers {@link resimplifyParent} to later frames.
+ */
+export function rebuildDirtyLod0Pages(
+  result: BuildResult,
+  dirty: DirtyCellBounds,
+  cfg: ClodPagesConfig,
+  index: NodeIndex,
+): Lod0RebuildResult {
+  const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const world = {
+    cellsX: result.worldPagesX * span,
+    cellsZ: result.worldPagesZ * span,
+  };
 
   const minPx = Math.max(0, Math.floor(dirty.minX / span));
   const maxPx = Math.min(result.worldPagesX - 1, Math.floor(dirty.maxX / span));
@@ -363,7 +376,7 @@ export function rebuildDirtyPages(
   const maxPz = Math.min(result.worldPagesZ - 1, Math.floor(dirty.maxZ / span));
 
   const changed: ClodPageNode[] = [];
-  let dirtyCoords: [number, number][] = [];
+  const dirtyCoords: [number, number][] = [];
   const t0 = performance.now();
   for (let pz = minPz; pz <= maxPz; pz++) {
     for (let px = minPx; px <= maxPx; px++) {
@@ -378,30 +391,65 @@ export function rebuildDirtyPages(
       dirtyCoords.push([px, pz]);
     }
   }
-  const lod0Ms = performance.now() - t0;
-  const lod0Pages = changed.length;
+  return { changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - t0 };
+}
+
+/**
+ * Phase 2, one node at a time: re-simplify a single parent (merge 2x2 children -> weld
+ * old internal page borders -> lock new outer border -> simplify -> accumulate error),
+ * mutating it in place. Caller must have already rebuilt every dirty child at `level-1`
+ * (process strictly lowest-level-first), so the merge reads current child meshes.
+ * Returns the node, or null if it isn't in the tree.
+ */
+export function resimplifyParent(
+  index: NodeIndex,
+  level: number,
+  key: string,
+  cfg: ClodPagesConfig,
+): ClodPageNode | null {
+  const node = index[level]?.get(key);
+  if (!node) return null;
+  const children = node.children.filter((c): c is ClodPageNode => c !== null);
+  const merged = concat(children.map((c) => c.mesh));
+  const { mesh: welded } = weldVertices(merged, cfg.simplify.weld_epsilon_cells);
+  const locks = buildOuterBorderLocks(welded);
+  const sim = simplifyPage(welded, locks, cfg);
+  stripDegenerateTriangles(sim.mesh);
+  assertNoInternalBorders(sim.mesh, node.footprint);
+  node.mesh = sim.mesh;
+  node.bounds = boundsOf(sim.mesh);
+  node.errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
+  node.lowBenefit = sim.lowBenefit;
+  return node;
+}
+
+/**
+ * Rebuild the LOD0 pages whose cells intersect `dirty`, then every ancestor up the
+ * quadtree, with the same hard-fail validation as the full build. Nodes are mutated in
+ * place so viewer/selection references stay valid. Synchronous end-to-end — the viewer
+ * splits this into {@link rebuildDirtyLod0Pages} + per-frame {@link resimplifyParent};
+ * tests and headless callers use this all-at-once form.
+ */
+export function rebuildDirtyPages(
+  result: BuildResult,
+  dirty: DirtyCellBounds,
+  cfg: ClodPagesConfig,
+): EditRebuildResult {
+  const index = buildNodeIndex(result);
+  const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, index);
+  const changed = [...lod0.changed];
 
   const t1 = performance.now();
   let parentNodes = 0;
   const topLevel = Math.max(...result.nodesByLevel.keys());
+  let dirtyCoords = lod0.dirtyCoords;
   for (let level = 1; level <= topLevel && dirtyCoords.length > 0; level++) {
     const parents = new Map<string, [number, number]>();
     for (const [nx, nz] of dirtyCoords) parents.set(`${nx >> 1},${nz >> 1}`, [nx >> 1, nz >> 1]);
     dirtyCoords = [];
     for (const [key, coord] of parents) {
-      const node = index[level]?.get(key);
+      const node = resimplifyParent(index, level, key, cfg);
       if (!node) continue;
-      const children = node.children.filter((c): c is ClodPageNode => c !== null);
-      const merged = concat(children.map((c) => c.mesh));
-      const { mesh: welded } = weldVertices(merged, eps);
-      const locks = buildOuterBorderLocks(welded);
-      const sim = simplifyPage(welded, locks, cfg);
-      stripDegenerateTriangles(sim.mesh);
-      assertNoInternalBorders(sim.mesh, node.footprint);
-      node.mesh = sim.mesh;
-      node.bounds = boundsOf(sim.mesh);
-      node.errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
-      node.lowBenefit = sim.lowBenefit;
       changed.push(node);
       parentNodes++;
       dirtyCoords.push(coord);
@@ -409,5 +457,5 @@ export function rebuildDirtyPages(
   }
   const parentMs = performance.now() - t1;
 
-  return { changed, lod0Pages, parentNodes, lod0Ms, parentMs };
+  return { changed, lod0Pages: lod0.lod0Pages, parentNodes, lod0Ms: lod0.lod0Ms, parentMs };
 }

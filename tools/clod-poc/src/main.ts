@@ -10,7 +10,13 @@ import GUI from "lil-gui";
 import { parseConfig } from "./config.js";
 import configText from "../../../config/clod_pages.yaml?raw";
 import { initSimplifier } from "./simplify.js";
-import { buildWorldAsync, rebuildDirtyPages } from "./quadtree.js";
+import {
+  buildNodeIndex,
+  buildWorldAsync,
+  rebuildDirtyLod0Pages,
+  resimplifyParent,
+  type NodeIndex,
+} from "./quadtree.js";
 import { addDigEdit, digEditCount, DIG_INFLUENCE_MARGIN, meshChunk } from "./terrain.js";
 import { ClodPageNode, PageMesh } from "./types.js";
 import {
@@ -867,8 +873,101 @@ async function main() {
     }
   };
 
-  // Carve a sphere where the ray hits, then pay the CLOD edit cost synchronously:
-  // rebuild the dug LOD0 pages, re-simplify their ancestors, refresh collider BVHs.
+  // Swap a rebuilt node's mesh into its view (and, for LOD0, its collider + raw-chunk
+  // bubble). Returns the collider-update cost in ms (0 for parents). Shared by the
+  // synchronous LOD0 phase and the deferred ancestor drain.
+  const applyNodeMesh = (node: ClodPageNode): number => {
+    const v = views.get(node.id);
+    if (v) {
+      v.mesh.geometry.dispose();
+      v.mesh.geometry = toGeometry(node.mesh);
+      v.sourceNormals = node.mesh.normals;
+      v.recomputedNormals = computeGeometryNormals(node.mesh);
+      if (state.recomputedNormals) {
+        v.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(v.recomputedNormals, 3));
+      }
+    }
+    if (node.level !== 0) return 0;
+    const tc = performance.now();
+    const g = toGeometry(node.mesh);
+    terrainColliders.updatePage(node.id, g);
+    g.dispose();
+    // drop the cached raw-chunk bubble meshes; they regenerate lazily when owned
+    const chunkEntry = chunkGroups.get(node.id);
+    if (chunkEntry) {
+      scene.remove(chunkEntry.group);
+      for (const child of chunkEntry.group.children) (child as THREE.Mesh).geometry.dispose();
+      for (const m of chunkEntry.mats) m.dispose();
+      chunkGroups.delete(node.id);
+    }
+    return performance.now() - tc;
+  };
+
+  // Deferred ancestor re-simplification. Each dig applies its LOD0 pages immediately
+  // (that's the surface you're looking at), then queues the LOD1+ ancestor chain here.
+  // The animate loop drains it under a per-frame time budget so the tab keeps rendering
+  // instead of freezing for the full edit. Processed strictly lowest-level-first, so
+  // every parent re-merges from already-rebuilt children — same invariant as a full build.
+  const ancestorIndex: NodeIndex = buildNodeIndex(result);
+  const topLevel = Math.max(...result.nodesByLevel.keys());
+  const pendingByLevel = new Map<number, Set<string>>();
+  let pendingParentNodes = 0;
+  let pendingParentMs = 0;
+  const DRAIN_BUDGET_MS = 8;
+
+  const enqueueParent = (level: number, nx: number, nz: number) => {
+    if (level > topLevel) return;
+    let s = pendingByLevel.get(level);
+    if (!s) { s = new Set(); pendingByLevel.set(level, s); }
+    s.add(`${nx},${nz}`);
+  };
+
+  const drainAncestors = () => {
+    let lowest = -1;
+    for (let L = 1; L <= topLevel; L++) {
+      if ((pendingByLevel.get(L)?.size ?? 0) > 0) { lowest = L; break; }
+    }
+    if (lowest === -1) return;
+    const start = performance.now();
+    let changed = false;
+    do {
+      let level = -1;
+      for (let L = 1; L <= topLevel; L++) {
+        if ((pendingByLevel.get(L)?.size ?? 0) > 0) { level = L; break; }
+      }
+      if (level === -1) break;
+      const set = pendingByLevel.get(level)!;
+      const key = set.values().next().value as string;
+      set.delete(key);
+      const t = performance.now();
+      const node = resimplifyParent(ancestorIndex, level, key, cfg);
+      pendingParentMs += performance.now() - t;
+      if (node) {
+        applyNodeMesh(node);
+        pendingParentNodes++;
+        changed = true;
+        const [nx, nz] = key.split(",").map(Number);
+        enqueueParent(level + 1, nx >> 1, nz >> 1);
+      }
+    } while (performance.now() - start < DRAIN_BUDGET_MS);
+
+    const draining = [...pendingByLevel.values()].some((s) => s.size > 0);
+    if (changed) {
+      lastCutKey = "";
+      lastDebugKey = "";
+      if (!draining) {
+        // ancestors settled: fold their cost into the dig summary and refresh selection
+        lastDigSummary =
+          `${lastDigSummary} + ancestors ${pendingParentNodes}n ${pendingParentMs.toFixed(0)}ms`;
+        updateSelection();
+        updateInfo();
+      }
+    }
+  };
+
+  // Carve a sphere where the ray hits, then pay the CLOD edit cost. The LOD0 pages
+  // (the surface you're looking at) plus their colliders rebuild synchronously so the
+  // hole appears now; the LOD1+ ancestor chain is queued for the per-frame drain above.
   // The timing breakdown lands in the overlay + console — that's the experiment.
   const performDig = (ray: THREE.Ray) => {
     const hit = terrainColliders.raycastSurface(ray);
@@ -877,47 +976,26 @@ async function main() {
     addDigEdit({ x: hit.point.x, y: hit.point.y, z: hit.point.z, r: radius });
     const t0 = performance.now();
     const margin = radius + DIG_INFLUENCE_MARGIN;
-    const rebuild = rebuildDirtyPages(result, {
+    const lod0 = rebuildDirtyLod0Pages(result, {
       minX: hit.point.x - margin,
       maxX: hit.point.x + margin,
       minZ: hit.point.z - margin,
       maxZ: hit.point.z + margin,
-    }, cfg);
+    }, cfg, ancestorIndex);
 
     let colliderMs = 0;
-    for (const node of rebuild.changed) {
-      const v = views.get(node.id);
-      if (v) {
-        v.mesh.geometry.dispose();
-        v.mesh.geometry = toGeometry(node.mesh);
-        v.sourceNormals = node.mesh.normals;
-        v.recomputedNormals = computeGeometryNormals(node.mesh);
-        if (state.recomputedNormals) {
-          v.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(v.recomputedNormals, 3));
-        }
-      }
-      if (node.level === 0) {
-        const tc = performance.now();
-        const g = toGeometry(node.mesh);
-        terrainColliders.updatePage(node.id, g);
-        g.dispose();
-        colliderMs += performance.now() - tc;
-        // drop the cached raw-chunk bubble meshes; they regenerate lazily when owned
-        const chunkEntry = chunkGroups.get(node.id);
-        if (chunkEntry) {
-          scene.remove(chunkEntry.group);
-          for (const child of chunkEntry.group.children) (child as THREE.Mesh).geometry.dispose();
-          for (const m of chunkEntry.mats) m.dispose();
-          chunkGroups.delete(node.id);
-        }
-      }
-    }
+    for (const node of lod0.changed) colliderMs += applyNodeMesh(node);
+    // seed the deferred ancestor chain from the dug LOD0 pages
+    pendingParentNodes = 0;
+    pendingParentMs = 0;
+    for (const [nx, nz] of lod0.dirtyCoords) enqueueParent(1, nx >> 1, nz >> 1);
+
     const totalMs = performance.now() - t0;
     lastDigSummary =
-      `${totalMs.toFixed(0)}ms (LOD0 ${rebuild.lod0Pages}p ${rebuild.lod0Ms.toFixed(0)}ms · ` +
-      `parents ${rebuild.parentNodes}n ${rebuild.parentMs.toFixed(0)}ms · collider ${colliderMs.toFixed(0)}ms)`;
+      `${totalMs.toFixed(0)}ms now (LOD0 ${lod0.lod0Pages}p ${lod0.lod0Ms.toFixed(0)}ms · ` +
+      `collider ${colliderMs.toFixed(0)}ms)`;
     console.log(
-      `[dig] r=${radius} at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary}`,
+      `[dig] r=${radius} at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ancestors deferred`,
     );
     lastDigAt = performance.now();
     lastCutKey = "";
@@ -1431,6 +1509,9 @@ async function main() {
     }
     skyEnvironment.updateCamera(camera);
     if (!state.freeze) updateSelection();
+
+    // pay down any deferred ancestor re-simplification from recent digs
+    drainAncestors();
 
     // hold-to-dig pickaxe cadence while playing
     if (
