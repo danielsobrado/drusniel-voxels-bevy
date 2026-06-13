@@ -4,7 +4,8 @@
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { addDigEdit, clearDigEdits, density, surfaceHeight } from "./terrain.js";
-import { buildWorld, rebuildDirtyPages } from "./quadtree.js";
+import { buildNodeIndex, buildWorld, rebuildDirtyLod0Pages, rebuildDirtyPages } from "./quadtree.js";
+import { buildLod0PageSource } from "./source_mesh.js";
 import { initSimplifier } from "./simplify.js";
 import { assertBorderMatch, borderChain } from "./validate.js";
 import type { ClodPagesConfig } from "./config.js";
@@ -100,5 +101,28 @@ describe("rebuildDirtyPages", () => {
 
     expect(rebuild.lod0Pages).toBeGreaterThanOrEqual(1);
     expect(node.mesh.indices.length).toBeGreaterThan(trisBefore);
+  });
+
+  it("per-chunk rebuild re-meshes only the touched chunks, identical to a full page rebuild", () => {
+    const world = { cellsX: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size, cellsZ: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size };
+    const result = buildWorld(2, 2, cfg);
+    const node = result.nodesByLevel.get(0)!.find((n) => n.id === "L0:0,0")!;
+
+    // dig deep inside chunk (0,0) so its 6-cell reach can't touch the other 3 chunks
+    const x = 6, z = 6, r = 2;
+    const y = surfaceHeight(x, z) - 4;
+    addDigEdit({ x, y, z, r });
+    const margin = r + 4;
+    const dirty = { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin };
+
+    const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, buildNodeIndex(result));
+    expect(lod0.chunksTotal).toBe(cfg.page.chunks_per_page ** 2); // 4 chunks in the page
+    expect(lod0.chunksRemeshed).toBe(1); // only chunk (0,0)
+
+    // the per-chunk welded page must equal a from-scratch full extract of the same page
+    const full = buildLod0PageSource(0, 0, cfg, world);
+    expect(node.mesh.positions).toEqual(full.mesh.positions);
+    expect(node.mesh.indices).toEqual(full.mesh.indices);
+    expect(node.mesh.normals).toEqual(full.mesh.normals);
   });
 });

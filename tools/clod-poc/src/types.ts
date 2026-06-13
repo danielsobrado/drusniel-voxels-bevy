@@ -35,6 +35,12 @@ export interface ClodPageNode {
   /** error_world = simplification_error_world + max(child.error_world). Monotone up the tree. */
   errorWorld: number;
   lowBenefit: boolean;
+  /**
+   * LOD0 only: the unwelded per-chunk source meshes, row-major (dz*P + dx). Cached so an
+   * edit re-meshes just the chunks it touches and re-welds the page, instead of
+   * re-extracting all PxP chunks. The welded page mesh stays identical to a full rebuild.
+   */
+  chunkMeshes?: PageMesh[];
 }
 
 export interface BorderTolerances {

@@ -993,7 +993,7 @@ async function main() {
     const totalMs = performance.now() - t0;
     lastDigSummary =
       `${totalMs.toFixed(0)}ms now (LOD0 ${lod0.lod0Pages}p ${lod0.lod0Ms.toFixed(0)}ms · ` +
-      `collider ${colliderMs.toFixed(0)}ms)`;
+      `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · collider ${colliderMs.toFixed(0)}ms)`;
     console.log(
       `[dig] r=${radius} at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ancestors deferred`,
     );

@@ -10,7 +10,7 @@
 
 import { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
-import { buildLod0PageSource } from "./source_mesh.js";
+import { buildLod0PageSource, rebuildPageChunks } from "./source_mesh.js";
 import { concat } from "./source_mesh.js";
 import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks, countLocks } from "./lock.js";
@@ -116,6 +116,7 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
         bounds: boundsOf(src.mesh),
         errorWorld: 0,
         lowBenefit: false,
+        chunkMeshes: src.chunks,
       };
       lod0.push(node);
       lod0Index.set(`${px},${pz}`, node);
@@ -236,6 +237,7 @@ export async function buildWorldAsync(
         bounds: boundsOf(src.mesh),
         errorWorld: 0,
         lowBenefit: false,
+        chunkMeshes: src.chunks,
       };
       lod0.push(node);
       lod0Index.set(`${px},${pz}`, node);
@@ -350,6 +352,9 @@ export interface Lod0RebuildResult {
   dirtyCoords: [number, number][];
   lod0Pages: number;
   lod0Ms: number;
+  /** Chunks actually re-meshed vs. the chunks in the dirty pages (the per-chunk saving). */
+  chunksRemeshed: number;
+  chunksTotal: number;
 }
 
 /**
@@ -377,21 +382,40 @@ export function rebuildDirtyLod0Pages(
 
   const changed: ClodPageNode[] = [];
   const dirtyCoords: [number, number][] = [];
+  let chunksRemeshed = 0;
+  let chunksTotal = 0;
   const t0 = performance.now();
   for (let pz = minPz; pz <= maxPz; pz++) {
     for (let px = minPx; px <= maxPx; px++) {
       const node = index[0]?.get(`${px},${pz}`);
       if (!node) continue;
-      const src = buildLod0PageSource(px, pz, cfg, world);
-      stripDegenerateTriangles(src.mesh);
-      assertNoInternalBorders(src.mesh, src.footprint);
-      node.mesh = src.mesh;
-      node.bounds = boundsOf(src.mesh);
+      let mesh: PageMesh;
+      if (node.chunkMeshes) {
+        // re-mesh only the chunks the edit perturbs, then re-weld the page (== full rebuild)
+        const r = rebuildPageChunks(node.chunkMeshes, px, pz, cfg, world, dirty);
+        mesh = r.mesh;
+        chunksRemeshed += r.remeshed;
+        chunksTotal += node.chunkMeshes.length;
+      } else {
+        // no cached chunks (shouldn't happen post-build): full extract, then populate cache
+        const src = buildLod0PageSource(px, pz, cfg, world);
+        node.chunkMeshes = src.chunks;
+        mesh = src.mesh;
+        chunksRemeshed += src.chunks.length;
+        chunksTotal += src.chunks.length;
+      }
+      stripDegenerateTriangles(mesh);
+      assertNoInternalBorders(mesh, node.footprint);
+      node.mesh = mesh;
+      node.bounds = boundsOf(mesh);
       changed.push(node);
       dirtyCoords.push([px, pz]);
     }
   }
-  return { changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - t0 };
+  return {
+    changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - t0,
+    chunksRemeshed, chunksTotal,
+  };
 }
 
 /**
