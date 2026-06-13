@@ -58,6 +58,8 @@ const FRAG = /* glsl */ `
   uniform sampler2D uTerrainTexture3;
   uniform bool uUseNormalMap;
   uniform float uNormalIntensity;
+  uniform float uRoughness;
+  uniform float uMetalness;
   uniform vec4 uNormalMapMask;   // per-slot 1.0 when a normal map is loaded
   uniform sampler2D uTerrainNormal0;
   uniform sampler2D uTerrainNormal1;
@@ -235,7 +237,17 @@ const FRAG = /* glsl */ `
     baseColor = adjustColor(baseColor);
     vec3 hemi = mix(uGroundLight, uSkyLight, sky);
     vec3 light = hemi + uSunColor * pow(sun, 1.35);
-    gl_FragColor = vec4(baseColor * light, 1.0);
+    // Simplified roughness/metalness specular. The engine drives full PBR; here a
+    // Blinn-Phong lobe maps roughness -> highlight tightness/strength, and metalness
+    // tints the highlight with albedo while suppressing diffuse (conductor look).
+    float rough = clamp(uRoughness, 0.04, 1.0);
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    vec3 halfVec = normalize(normalize(uLight) + viewDir);
+    float shininess = mix(128.0, 4.0, rough);
+    float spec = pow(max(dot(n, halfVec), 0.0), shininess) * (1.0 - rough) * sun;
+    vec3 specColor = mix(vec3(1.0), baseColor, uMetalness);
+    vec3 diffuse = baseColor * light * (1.0 - 0.85 * uMetalness);
+    gl_FragColor = vec4(diffuse + uSunColor * spec * specColor, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -267,6 +279,8 @@ export function createTerrainMaterial(color: number): THREE.ShaderMaterial {
       uTerrainTexture3: { value: null },
       uUseNormalMap: { value: false },
       uNormalIntensity: { value: 1.0 },
+      uRoughness: { value: 0.9 },
+      uMetalness: { value: 0.0 },
       uNormalMapMask: { value: new THREE.Vector4(0, 0, 0, 0) },
       uTerrainNormal0: { value: null },
       uTerrainNormal1: { value: null },

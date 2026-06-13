@@ -30,6 +30,8 @@ export interface ProjectSessionState {
   albedo: boolean;
   normalMap: boolean;
   normalIntensity: number;
+  roughness: number;
+  metalness: number;
   textureBlendMode: TextureBlendMode;
   textureBlendWidth: number;
   terrainBrightness: number;
@@ -122,7 +124,7 @@ interface StagedProjectImport {
 }
 
 const NUMBER_STATE_KEYS: (keyof ProjectSessionState)[] = [
-  "thresholdPx", "divergenceGain", "textureScale", "textureBlendWidth",
+  "thresholdPx", "divergenceGain", "textureScale", "normalIntensity", "roughness", "metalness", "textureBlendWidth",
   "terrainBrightness", "terrainContrast", "terrainSaturation", "terrainWarmth",
   "sunAzimuthDeg", "sunElevationDeg", "sunIntensity", "skyIntensity", "groundIntensity",
   "exposure", "horizonSoftness", "sunDiskIntensity", "sunGlowIntensity", "hazeIntensity",
@@ -137,6 +139,7 @@ const NUMBER_STATE_KEYS: (keyof ProjectSessionState)[] = [
 const BOOLEAN_STATE_KEYS: (keyof ProjectSessionState)[] = [
   "enforce21", "freeze", "wireframe", "showBounds", "showSeamPoints", "showCrossLodBorders",
   "colorByLod", "normalColor", "normalDivergence", "frontSideOnly", "recomputedNormals",
+  "triplanar", "albedo", "normalMap",
   "postProcessEnabled", "bubble", "tintBubble", "digEnabled", "grassEnabled",
 ];
 
@@ -199,12 +202,6 @@ function assertSessionState(value: unknown): asserts value is ProjectSessionStat
   if (!["remove", "add"].includes(String(value.brushOp))) {
     throw new Error("project.json has an invalid brushOp");
   }
-  // Render toggles added after schema v1 shipped: backfill defaults so older archives
-  // (which predate these keys) still load instead of failing strict validation.
-  if (typeof value.triplanar !== "boolean") value.triplanar = true;
-  if (typeof value.albedo !== "boolean") value.albedo = true;
-  if (typeof value.normalMap !== "boolean") value.normalMap = false;
-  if (!isFiniteNumber(value.normalIntensity)) value.normalIntensity = 1;
   if (!["sphere", "cube", "cylinder"].includes(String(value.brushShape))) {
     throw new Error("project.json has an invalid brushShape");
   }

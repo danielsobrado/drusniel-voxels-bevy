@@ -364,7 +364,7 @@ async function main() {
       playerModeStatus.textContent = interaction.mode === "choosingSpawn"
         ? "Click the terrain to choose your starting position"
         : interaction.mode === "playing"
-          ? "WASD · Shift · Space · Esc · click digs · Shift+wheel radius"
+          ? `WASD · Shift · Space · Esc${playerTerraformEditActive() ? " · click digs" : ""} · Shift+wheel radius`
           : "Orbit camera";
     }
     document.body.dataset.tabUi = tabUiHold ? "true" : "false";
@@ -375,6 +375,7 @@ async function main() {
     document.body.dataset.tfEdit = terraformEditCheckbox.checked ? "true" : "false";
   };
   let terraformEditCheckbox: HTMLInputElement | null = null;
+  const playerTerraformEditActive = () => terraformEditCheckbox?.checked ?? false;
   const exitPlayerMode = () => {
     tabUiHold = false;
     if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
@@ -437,7 +438,7 @@ async function main() {
     if (interaction.mode === "choosingSpawn" && event.button === 0) startPlayerAtPointer(event);
     else if (interaction.mode === "playing" && event.button === 0 && document.pointerLockElement !== renderer.domElement) {
       void renderer.domElement.requestPointerLock();
-    } else if (interaction.mode === "playing" && event.button === 0 && state.digEnabled) {
+    } else if (interaction.mode === "playing" && event.button === 0 && state.digEnabled && playerTerraformEditActive()) {
       digHeld = true;
       camera.getWorldDirection(digDirection);
       performDig(new THREE.Ray(camera.position.clone(), digDirection.clone()));
@@ -565,6 +566,8 @@ async function main() {
     albedo: true,
     normalMap: false,
     normalIntensity: 1,
+    roughness: 0.9,
+    metalness: 0,
     textureBlendMode: TEXTURE_BLEND_MODES[1] as TextureBlendMode,
     textureBlendWidth: 6,
     loadedTextureFiles: "none",
@@ -717,6 +720,8 @@ async function main() {
       mat.uniforms.uUseTriplanar.value = state.triplanar;
       mat.uniforms.uUseNormalMap.value = state.normalMap;
       mat.uniforms.uNormalIntensity.value = state.normalIntensity;
+      mat.uniforms.uRoughness.value = state.roughness;
+      mat.uniforms.uMetalness.value = state.metalness;
       mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
       mat.uniforms.uTextureScales.value.set(
         (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
@@ -821,6 +826,8 @@ async function main() {
         mat.uniforms.uUseTexture.value = state.albedo && activeTerrainSlots.length > 0;
         mat.uniforms.uUseNormalMap.value = state.normalMap;
         mat.uniforms.uNormalIntensity.value = state.normalIntensity;
+        mat.uniforms.uRoughness.value = state.roughness;
+        mat.uniforms.uMetalness.value = state.metalness;
         mat.uniforms.uTerrainTextureCount.value = activeTerrainSlots.length;
         mat.uniforms.uTextureScales.value.set(
           (activeTerrainSlots[0]?.scale ?? 1 / 64) * state.textureScale,
@@ -993,8 +1000,8 @@ async function main() {
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
       `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassBladeCount.toLocaleString()} blades\n` +
-      `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}` +
-      `${lastDigSummary ? `  last: ${lastDigSummary}` : ""}\n` +
+      `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
+      `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
       `${lastArchiveSummary ? `${lastArchiveSummary}\n` : ""}` +
       playerLine;
   };
@@ -1907,6 +1914,8 @@ async function main() {
   textureFolder.add(state, "triplanar").name("triplanar").onChange(applyTerrainTextures);
   textureFolder.add(state, "normalMap").name("normal maps").onChange(applyTerrainTextures);
   textureFolder.add(state, "normalIntensity", 0, 3, 0.05).name("normal intensity").onChange(applyTerrainTextures);
+  textureFolder.add(state, "roughness", 0, 1, 0.01).name("roughness").onChange(applyTerrainTextures);
+  textureFolder.add(state, "metalness", 0, 1, 0.01).name("metalness").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureScale", 0.25, 4, 0.05).name("scale multiplier").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureBlendMode", TEXTURE_BLEND_MODES).name("blend mode").onChange(applyTerrainTextures);
   textureFolder.add(state, "textureBlendWidth", 0, 24, 0.5).name("blend height").onChange(applyTerrainTextures);
@@ -1953,6 +1962,11 @@ async function main() {
   editToggle.append(editToggleInput, document.createTextNode(" Edit"));
   editToggleInput.addEventListener("change", () => {
     document.body.dataset.tfEdit = editToggleInput.checked ? "true" : "false";
+    if (!editToggleInput.checked) {
+      digHeld = false;
+      digPreview.visible = false;
+    }
+    updatePlayerModeUi();
   });
   paletteSection.appendChild(editToggle);
   terraformMenu.appendChild(paletteSection);
@@ -2147,6 +2161,8 @@ async function main() {
     albedo: state.albedo,
     normalMap: state.normalMap,
     normalIntensity: state.normalIntensity,
+    roughness: state.roughness,
+    metalness: state.metalness,
     textureBlendMode: state.textureBlendMode,
     textureBlendWidth: state.textureBlendWidth,
     terrainBrightness: state.terrainBrightness,
@@ -2404,7 +2420,7 @@ async function main() {
 
     // hold-to-dig pickaxe cadence while playing
     if (
-      interaction.mode === "playing" && digHeld && state.digEnabled &&
+      interaction.mode === "playing" && digHeld && state.digEnabled && playerTerraformEditActive() &&
       document.pointerLockElement === renderer.domElement &&
       performance.now() - lastDigAt >= state.brushFlowMs
     ) {
@@ -2414,7 +2430,7 @@ async function main() {
 
     // dig preview reticle at the current aim point
     let digAimHit: TerrainSurfaceHit | null = null;
-    if (state.digEnabled && interaction.mode === "playing") {
+    if (state.digEnabled && interaction.mode === "playing" && playerTerraformEditActive()) {
       camera.getWorldDirection(digDirection);
       digAimRay.origin.copy(camera.position);
       digAimRay.direction.copy(digDirection);

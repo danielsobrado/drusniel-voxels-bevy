@@ -35,6 +35,7 @@ const state: ProjectSessionState = {
   colorByLod: false, normalColor: false, normalDivergence: true, divergenceGain: 9,
   frontSideOnly: true, recomputedNormals: false, forceMaxLevel: "2",
   textureScale: 1.5, triplanar: true, albedo: true, normalMap: true, normalIntensity: 1.5,
+  roughness: 0.8, metalness: 0.2,
   textureBlendMode: "blend bands", textureBlendWidth: 5,
   terrainBrightness: 1.1, terrainContrast: 0.9, terrainSaturation: 1.2, terrainWarmth: 0.1,
   sunAzimuthDeg: 120, sunElevationDeg: 40, sunIntensity: 1.2, skyIntensity: 0.8,
