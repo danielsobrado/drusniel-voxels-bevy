@@ -93,22 +93,27 @@
         border-color: #74b8f5; color: #fff; background: #245781;
       }
       .tf-swatch {
-        width: 48px; height: 48px; padding: 0; border-radius: 4px;
+        width: 68px; height: 68px; padding: 0; border-radius: 4px;
         background: #0b0d10 center / cover no-repeat; position: relative;
+        flex: none;
       }
       .tf-swatch[aria-pressed="true"] { border-color: #ffd479; box-shadow: 0 0 0 2px #ffd479; }
       .tf-swatch[disabled] { opacity: 0.32; cursor: not-allowed; }
       .tf-swatch span {
         position: absolute; left: 0; right: 0; bottom: 0; font-size: 9px; line-height: 1.25;
         background: rgba(0, 0, 0, 0.55); text-align: center; color: #e8edf3;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px;
       }
       .tf-size { display: flex; align-items: center; gap: 6px; }
       .tf-size input[type="range"] { width: 76px; }
       .tf-size output { width: 26px; text-align: right; color: #cdd8e3; }
-      .tf-slider { display: flex; align-items: center; gap: 5px; }
-      .tf-slider-label { color: #9fb0c0; }
+      .tf-slider { display: flex; align-items: center; gap: 5px; flex: none; }
+      .tf-slider-label { color: #9fb0c0; white-space: nowrap; }
       .tf-slider input[type="range"] { width: 66px; }
-      .tf-slider output { min-width: 30px; text-align: right; color: #cdd8e3; }
+      .tf-slider output { min-width: 30px; text-align: right; color: #cdd8e3; white-space: nowrap; }
+      .tf-row-sculpt { flex-wrap: nowrap; gap: 8px; }
+      .tf-row-sculpt .tf-slider input[type="range"] { width: 52px; }
+      .tf-row-sculpt .tf-slider output { min-width: 28px; font-size: 10px; }
       #build-progress[hidden] { display: none; }
       #build-progress {
         position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -135,7 +140,7 @@
       }
       .texture-panel {
         position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
-        width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+        width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
         overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
         background: #171a1f; border: 1px solid #3a414c;
         box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
@@ -176,10 +181,14 @@
         background: #f6f7f8; border: 1px solid #545c68; color: #11161d;
         font: inherit;
       }
+      .texture-slot-params {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+      }
       .texture-slot-param {
-        display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 6px;
+        display: grid; gap: 3px; min-width: 0;
         color: #aeb8c4;
       }
+      .texture-slot-param span { white-space: nowrap; }
       .texture-slot-param input {
         width: 100%; min-width: 0; box-sizing: border-box;
         background: #f6f7f8; border: 1px solid #545c68; color: #11161d;

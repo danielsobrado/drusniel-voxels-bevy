@@ -78,11 +78,11 @@ const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
 const MAX_TERRAIN_TEXTURES = 4;
 const TERRAIN_TEXTURE_BANDS = ["low", "mid low", "mid high", "high"];
-const DEFAULT_TEXTURE_RANGES = [
-  [14, 42],
-  [42, 70],
-  [70, 94],
-  [94, 118],
+const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
+  { id: "grass-2", scale: 0.06, heightMin: 12, heightMax: 18 },
+  { id: "earth-2", scale: 0.04, heightMin: 18, heightMax: 40 },
+  { id: "earth-1", scale: 0.04, heightMin: 40, heightMax: 60 },
+  { id: "snow-rocks-1", scale: 0.025, heightMin: 60, heightMax: 118 },
 ] as const;
 const DEMO_TEXTURE_BASE_URL =
   "https://raw.githubusercontent.com/danielsobrado/drusniel-voxels-bevy/main/tools/clod-poc/textures/";
@@ -620,8 +620,13 @@ async function main() {
     heightMax: 0,
   }));
   for (let i = 0; i < textureSlots.length; i++) {
-    textureSlots[i].heightMin = DEFAULT_TEXTURE_RANGES[i][0];
-    textureSlots[i].heightMax = DEFAULT_TEXTURE_RANGES[i][1];
+    const preset = DEFAULT_TERRAIN_TEXTURE_PRESETS[i];
+    const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === preset.id);
+    textureSlots[i].selectedId = preset.id;
+    textureSlots[i].scale = preset.scale;
+    textureSlots[i].heightMin = preset.heightMin;
+    textureSlots[i].heightMax = preset.heightMax;
+    textureSlots[i].name = builtin?.label ?? preset.id;
     const imported = stagedImport?.manifest.textures[i];
     if (imported) {
       textureSlots[i].name = imported.name;
@@ -1541,9 +1546,11 @@ async function main() {
       <button class="texture-preview" type="button">${TERRAIN_TEXTURE_BANDS[i]}</button>
       <span class="texture-slot-name">empty</span>
       <label class="texture-slot-select"><span>Use Demo Texture</span><select data-slot-texture="${i}">${textureOptionHtml}</select></label>
-      <label class="texture-slot-param">Scale <input data-slot-scale="${i}" type="number" min="${1 / 512}" max="${1 / 8}" step="${1 / 512}" value="${textureSlots[i].scale}" /></label>
-      <label class="texture-slot-param">Low <input data-slot-low="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMin}" /></label>
-      <label class="texture-slot-param">High <input data-slot-high="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMax}" /></label>
+      <div class="texture-slot-params">
+        <label class="texture-slot-param"><span>Scale</span><input data-slot-scale="${i}" type="number" min="${1 / 512}" max="${1 / 8}" step="${1 / 512}" value="${textureSlots[i].scale}" /></label>
+        <label class="texture-slot-param"><span>Low</span><input data-slot-low="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMin}" /></label>
+        <label class="texture-slot-param"><span>High</span><input data-slot-high="${i}" type="number" min="0" max="128" step="1" value="${textureSlots[i].heightMax}" /></label>
+      </div>
     `;
     card.querySelector(".texture-preview")!.addEventListener("click", () => {
       pendingTextureLoad = i;
@@ -1624,19 +1631,35 @@ async function main() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") textureModal.hidden = true;
   });
-  if (stagedImport) {
+  const loadBuiltinTextureSlots = async (
+    slots: readonly { index: number; selectedId: string; name: string }[],
+    phaseLabel: string,
+  ) => {
+    if (slots.length === 0) return;
     buildProgress.hidden = false;
-    buildProgressPhase.textContent = "restoring textures";
+    buildProgressPhase.textContent = phaseLabel;
     buildProgressPercent.textContent = "90%";
     buildProgressBar.value = 0.9;
+    for (const slot of slots) {
+      const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === slot.selectedId);
+      if (!builtin) throw new Error(`Unknown texture ${slot.selectedId}`);
+      const texture = await loadTerrainTextureUrl(builtin.url);
+      if (!texture) throw new Error(`Could not load texture ${slot.name}`);
+      setBuiltinTextureSlot(slot.index, texture, slot.name, builtin.url, builtin.id);
+    }
+  };
+  if (stagedImport) {
+    await loadBuiltinTextureSlots(
+      stagedImport.manifest.textures.filter((slot) => slot.source === "builtin").map((slot) => ({
+        index: slot.index,
+        selectedId: slot.selectedId,
+        name: slot.name,
+      })),
+      "restoring textures",
+    );
     for (const imported of stagedImport.manifest.textures) {
-      if (imported.source === "builtin") {
-        const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === imported.selectedId);
-        if (!builtin) throw new Error(`Imported project references unknown texture ${imported.selectedId}`);
-        const texture = await loadTerrainTextureUrl(builtin.url);
-        if (!texture) throw new Error(`Could not load imported texture ${builtin.label}`);
-        setBuiltinTextureSlot(imported.index, texture, imported.name, builtin.url, builtin.id);
-      } else if (imported.source === "custom" && imported.customPath) {
+      if (imported.source === "builtin") continue;
+      if (imported.source === "custom" && imported.customPath) {
         const bytes = stagedImport.customTextures.get(imported.customPath);
         if (!bytes) throw new Error(`Imported project is missing ${imported.customPath}`);
         const mimeType = imported.mimeType ?? "application/octet-stream";
@@ -1657,6 +1680,15 @@ async function main() {
         );
       }
     }
+  } else {
+    await loadBuiltinTextureSlots(
+      DEFAULT_TERRAIN_TEXTURE_PRESETS.map((preset, index) => ({
+        index,
+        selectedId: preset.id,
+        name: BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === preset.id)?.label ?? preset.id,
+      })),
+      "loading textures",
+    );
   }
   syncTextureModalControls();
   updateTextureSlotPreviews();
@@ -1822,22 +1854,22 @@ async function main() {
   };
 
   // sculpt sliders: how hard, how tall, how soft the edge, how fast when held
-  const sculptRow1 = makeRow("Sculpt");
+  const sculptRow = makeRow("Sculpt");
+  sculptRow.classList.add("tf-row-sculpt");
   const syncStrength = makeSlider(
-    sculptRow1, "Strength", 0, 1, 0.05,
+    sculptRow, "Strength", 0, 1, 0.05,
     () => state.brushStrength, (v) => { state.brushStrength = v; }, (v) => v.toFixed(2),
   );
   const syncHeight = makeSlider(
-    sculptRow1, "Height", 1, 16, 0.5,
+    sculptRow, "Height", 1, 16, 0.5,
     () => state.brushHeight, (v) => { state.brushHeight = v; },
   );
-  const sculptRow2 = makeRow("");
   const syncFalloff = makeSlider(
-    sculptRow2, "Falloff", 0, 1, 0.05,
+    sculptRow, "Falloff", 0, 1, 0.05,
     () => state.brushFalloff, (v) => { state.brushFalloff = v; }, (v) => v.toFixed(2),
   );
   const syncFlow = makeSlider(
-    sculptRow2, "Flow", 80, 600, 20,
+    sculptRow, "Flow", 80, 600, 20,
     () => state.brushFlowMs, (v) => { state.brushFlowMs = v; }, (v) => `${v}ms`,
   );
 
