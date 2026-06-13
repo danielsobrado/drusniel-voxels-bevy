@@ -9,16 +9,6 @@ mod mode;
 mod plugins;
 mod window;
 
-use bevy::asset::AssetPlugin;
-use bevy::diagnostic::{
-    EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
-};
-use bevy::log::LogPlugin;
-use bevy::prelude::*;
-use bevy::render::RenderPlugin;
-use bevy::render::settings::{RenderCreation, WgpuSettings};
-use bevy::window::{PresentMode, Window, WindowPlugin, WindowResolution};
-use clap::Parser;
 use crate::diagnostics::bench::{
     BenchPlugin, bench_scene_requires_gameplay, bench_scene_requires_inventory_ui,
     bench_scene_skips_props,
@@ -44,16 +34,28 @@ use crate::ui::inventory::InventoryUiPlugin;
 use crate::ui::map::MapPlugin;
 use crate::ui::menu::PauseMenuPlugin;
 use crate::voxel::plugin::VoxelPlugin;
+use crate::world::environment::AtmospherePlugin;
 use crate::world::environment::atmosphere::{AtmosphereIntegrationPlugin, FogPlugin};
 use crate::world::environment::vegetation::VegetationPlugin;
 use crate::world::environment::weather::WeatherPlugin;
-use crate::world::environment::AtmospherePlugin;
 use crate::world::rules::WorldRulesPlugin;
+use bevy::asset::AssetPlugin;
+use bevy::diagnostic::{
+    EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
+};
+use bevy::log::LogPlugin;
+use bevy::prelude::*;
+use bevy::render::RenderPlugin;
+use bevy::render::settings::{RenderCreation, WgpuSettings};
+use bevy::window::{PresentMode, Window, WindowPlugin, WindowResolution};
+use clap::Parser;
 
 use self::cli::{BenchCli, BenchConfig};
 use self::gpu::{detect_gpu_limits, visual_regression_bench_uses_vulkan};
 use self::logging::load_logging_config;
-use self::mode::{editor_native_viewport_requested, editor_runtime_requested, runtime_instance_kind};
+use self::mode::{
+    editor_native_viewport_requested, editor_runtime_requested, runtime_instance_kind,
+};
 use self::plugins::run_editor_runtime;
 use self::runtime_lock::RuntimeInstanceLock;
 use self::window::asset_file_path;

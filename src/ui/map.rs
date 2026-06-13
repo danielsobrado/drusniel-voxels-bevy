@@ -2,13 +2,19 @@ use crate::camera::controller::PlayerCamera;
 use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32};
 use crate::menu::PauseMenuState;
 use crate::props::LandmarkLocations;
+use crate::ui::theme::{
+    BODY_TEXT_SIZE, DR_DANGER, DR_GOLD, DR_GOLD_DIM, DR_OVERLAY_BG, DR_PANEL_BG,
+    DR_PANEL_BG_STRONG, DR_PANEL_BORDER, DR_PANEL_BORDER_STRONG, DR_SLOT_BG, DR_TEXT, PANEL_GAP,
+    PANEL_PADDING, WINDOW_TITLE_SIZE,
+};
+use crate::ui::widgets::fantasy_panel_node;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::ui::{AlignItems, FlexDirection, JustifyContent, PositionType, Val};
+use bevy::ui::{AlignItems, JustifyContent, PositionType, Val};
 
 pub struct MapPlugin;
 
@@ -35,6 +41,8 @@ struct MapCoordinatesText;
 const MAP_SIZE: f32 = 512.0;
 const MARKER_SIZE: f32 = 10.0;
 const LANDMARK_MARKER_SIZE: f32 = 8.0;
+const MAP_PLAYER_MARKER_COLOR: Color = DR_DANGER;
+const MAP_LANDMARK_MARKER_COLOR: Color = DR_GOLD;
 
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
@@ -118,31 +126,34 @@ fn toggle_map_overlay(
                 position_type: PositionType::Absolute,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.02, 0.05, 0.85)),
+            BackgroundColor(DR_OVERLAY_BG),
             MapRoot,
         ))
         .with_children(|parent| {
             parent
                 .spawn((
-                    Node {
-                        width: Val::Px(MAP_SIZE + 40.0),
-                        padding: UiRect::all(Val::Px(16.0)),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(12.0),
-                        align_items: AlignItems::Center,
-                        ..default()
+                    {
+                        let mut node = fantasy_panel_node();
+                        node.width = Val::Px(MAP_SIZE + 40.0);
+                        node.padding = UiRect::all(Val::Px(PANEL_PADDING));
+                        node.row_gap = Val::Px(PANEL_GAP);
+                        node.align_items = AlignItems::Center;
+                        node.border = UiRect::all(Val::Px(2.0));
+                        node.border_radius = BorderRadius::all(Val::Px(8.0));
+                        node
                     },
-                    BackgroundColor(Color::srgba(0.06, 0.08, 0.12, 0.9)),
+                    BackgroundColor(DR_PANEL_BG_STRONG),
+                    BorderColor::all(DR_PANEL_BORDER_STRONG),
                 ))
                 .with_children(|parent| {
                     parent.spawn((
                         Text::new("World Map (Press ESC to close)"),
                         TextFont {
                             font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-                            font_size: 22.0,
+                            font_size: WINDOW_TITLE_SIZE,
                             ..default()
                         },
-                        TextColor(Color::WHITE),
+                        TextColor(DR_GOLD),
                     ));
 
                     let map_container = parent
@@ -151,9 +162,12 @@ fn toggle_map_overlay(
                                 width: Val::Px(MAP_SIZE),
                                 height: Val::Px(MAP_SIZE),
                                 position_type: PositionType::Relative,
+                                border: UiRect::all(Val::Px(2.0)),
+                                border_radius: BorderRadius::all(Val::Px(5.0)),
                                 ..default()
                             },
-                            BackgroundColor(Color::srgb(0.06, 0.1, 0.16)),
+                            BackgroundColor(DR_SLOT_BG),
+                            BorderColor::all(DR_PANEL_BORDER),
                         ))
                         .with_children(|parent| {
                             parent.spawn((
@@ -172,9 +186,12 @@ fn toggle_map_overlay(
                                     position_type: PositionType::Absolute,
                                     left: Val::Px(0.0),
                                     top: Val::Px(0.0),
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    border_radius: BorderRadius::all(Val::Px(6.0)),
                                     ..default()
                                 },
-                                BackgroundColor(Color::srgb(0.9, 0.1, 0.2)),
+                                BackgroundColor(MAP_PLAYER_MARKER_COLOR),
+                                BorderColor::all(DR_GOLD_DIM),
                                 MapPlayerMarker,
                             ));
 
@@ -188,10 +205,10 @@ fn toggle_map_overlay(
                         Text::new("Position: --"),
                         TextFont {
                             font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-                            font_size: 18.0,
+                            font_size: BODY_TEXT_SIZE,
                             ..default()
                         },
-                        TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                        TextColor(DR_TEXT),
                         MapCoordinatesText,
                     ));
 
@@ -275,9 +292,12 @@ fn spawn_landmark_marker(parent: &mut ChildSpawnerCommands, world: &VoxelWorld, 
             position_type: PositionType::Absolute,
             left: Val::Px(left),
             top: Val::Px(top),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(5.0)),
             ..default()
         },
-        BackgroundColor(Color::srgb(0.98, 0.82, 0.24)),
+        BackgroundColor(MAP_LANDMARK_MARKER_COLOR),
+        BorderColor::all(DR_PANEL_BG),
         MapLandmarkMarker,
     ));
 }

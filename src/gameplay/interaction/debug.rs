@@ -27,9 +27,9 @@ use crate::vegetation::{FloatingParticle, ProceduralGrassPatch};
 use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::enclosure::{EnclosureMode, EnclosureOcclusionStats, EnclosureState};
 use crate::voxel::mc_transvoxel::McTransvoxelSettings;
-use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
 #[cfg(feature = "mc_transvoxel")]
 use crate::voxel::meshing::MeshMode;
+use crate::voxel::meshing::{ChunkMesh, Face, MeshSettings, get_blocky_material_index};
 use crate::voxel::occlusion::{OcclusionConfig, VisibleChunks};
 use crate::voxel::plugin::{
     ChunkGenerationState, LodSettings, RuntimeChunkStats, WaterBodyRegistry,

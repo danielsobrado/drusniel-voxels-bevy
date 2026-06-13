@@ -15,7 +15,8 @@ fn grid(n: usize) -> PageMesh {
     for z in 0..n {
         for x in 0..n {
             let (fx, fz) = (x as f32, z as f32);
-            m.positions.push([fx, (fx * 0.4).sin() * 1.5 + (fz * 0.3).cos() * 1.2, fz]);
+            m.positions
+                .push([fx, (fx * 0.4).sin() * 1.5 + (fz * 0.3).cos() * 1.2, fz]);
             m.normals.push([0.0, 1.0, 0.0]);
             m.materials.push([1.0, 0.0, 0.0, 0.0]);
         }
@@ -50,7 +51,12 @@ fn meshopt_reduces_in_engine_with_byte_stride() {
 fn weld_merges_coincident_and_rejects_conflicts() {
     // two coincident verts, identical attrs -> merge
     let mut m = PageMesh::default();
-    m.positions = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]];
+    m.positions = vec![
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 0.0],
+    ];
     m.normals = vec![[0.0, 1.0, 0.0]; 4];
     m.materials = vec![[1.0, 0.0, 0.0, 0.0]; 4];
     m.indices = vec![0, 1, 2, 3, 1, 2];
@@ -61,5 +67,8 @@ fn weld_merges_coincident_and_rejects_conflicts() {
     // coincident but conflicting normals -> hard fail
     let mut bad = m.clone();
     bad.normals[3] = [1.0, 0.0, 0.0];
-    assert!(weld_vertices(&bad, 0.001).is_err(), "attribute conflict must hard-fail");
+    assert!(
+        weld_vertices(&bad, 0.001).is_err(),
+        "attribute conflict must hard-fail"
+    );
 }

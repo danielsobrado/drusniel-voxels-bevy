@@ -91,9 +91,7 @@ pub use blocky::get_blocky_material_index;
 pub use data::*;
 #[cfg(test)]
 pub(crate) use lod_seam::snap_column_for_face;
-pub(crate) use lod_seam::{
-    scale_vertex_from_center, transition_target_lod,
-};
+pub(crate) use lod_seam::{scale_vertex_from_center, transition_target_lod};
 pub use pipeline::*;
 pub use sdf::{LodMeshConfig, lod_delta_gt_one_face_mask, mesher_smoothed_sdf_at_world_pos};
 pub(crate) use sdf::{

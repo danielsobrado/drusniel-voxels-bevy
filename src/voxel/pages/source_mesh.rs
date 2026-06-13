@@ -3,7 +3,7 @@
 use super::config::ClodPagesConfig;
 use super::export::TerrainMainSurfaceExport;
 use super::types::{ClodBuildError, PageFootprint, PageMesh};
-use super::weld::{weld_vertices, WeldReport};
+use super::weld::{WeldReport, weld_vertices};
 use crate::voxel::chunk::LodLevel;
 
 pub struct PageSource {
@@ -50,7 +50,9 @@ pub fn build_lod0_page_source(
     cfg: &ClodPagesConfig,
 ) -> Result<PageSource, ClodBuildError> {
     if exports.is_empty() {
-        return Err(ClodBuildError::PageIncomplete("no chunk exports for page".into()));
+        return Err(ClodBuildError::PageIncomplete(
+            "no chunk exports for page".into(),
+        ));
     }
     for e in exports {
         if !matches!(e.lod, LodLevel::Lod0) {
@@ -62,5 +64,9 @@ pub fn build_lod0_page_source(
     }
     let merged = concat_exports(exports);
     let (mesh, weld) = weld_vertices(&merged, cfg.simplify.weld_epsilon_cells)?;
-    Ok(PageSource { mesh, footprint, weld })
+    Ok(PageSource {
+        mesh,
+        footprint,
+        weld,
+    })
 }

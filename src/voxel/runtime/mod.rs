@@ -122,9 +122,8 @@ pub(crate) use generation::{
     PendingWorldGeneration, WorldGenerationQueue, WorldStats, assign_initial_lods_for_loaded_world,
     begin_world_generation, expected_world_chunk_count, generate_chunk_async,
     initial_lod_for_chunk, mark_surface_nets_halo_dirty, poll_chunk_generation_tasks,
-    poll_world_load_task, should_poll_chunk_generation_tasks,
-    spawn_queued_chunk_generation_tasks, start_pending_world_generation,
-    start_voxel_world_after_overlay_frame,
+    poll_world_load_task, should_poll_chunk_generation_tasks, spawn_queued_chunk_generation_tasks,
+    start_pending_world_generation, start_voxel_world_after_overlay_frame,
 };
 pub(crate) use mesh_scheduler::{
     McSpikeMeshParams, MeshDirtyQueueWarningState, MeshDirtyReasonCounts,

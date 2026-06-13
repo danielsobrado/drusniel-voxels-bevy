@@ -31,8 +31,7 @@ const NEAR_VISIBLE_WATER_DISTANCE: f32 = 24.0;
 /// `std::env::var_os` takes the process env lock on every call.
 fn force_reflection_active() -> bool {
     static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *CACHE
-        .get_or_init(|| std::env::var_os("VOXEL_FORCE_WATER_REFLECTION_ACTIVE").is_some())
+    *CACHE.get_or_init(|| std::env::var_os("VOXEL_FORCE_WATER_REFLECTION_ACTIVE").is_some())
 }
 
 /// The render layer used exclusively by the reflection camera.

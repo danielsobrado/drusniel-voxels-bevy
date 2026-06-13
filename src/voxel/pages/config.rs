@@ -3,7 +3,10 @@
 
 use serde::Deserialize;
 
-const CONFIG_YAML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/config/clod_pages.yaml"));
+const CONFIG_YAML: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/config/clod_pages.yaml"
+));
 
 #[derive(Deserialize, Clone)]
 pub struct PageCfg {

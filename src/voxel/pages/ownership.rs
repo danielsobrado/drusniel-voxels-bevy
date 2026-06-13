@@ -14,7 +14,7 @@ use super::render::{ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
 use super::runtime::{ClodPagesRuntime, env_bool};
 #[cfg(test)]
 use super::selection::NearFieldBubble;
-use super::selection::{clod_near_field_bubble, near_field_intersects_footprint, ClodPageNodeKey};
+use super::selection::{ClodPageNodeKey, clod_near_field_bubble, near_field_intersects_footprint};
 use super::types::PageFootprint;
 use crate::constants::CHUNK_SIZE_F32;
 use crate::gameplay::camera::controller::PlayerCamera;

@@ -3,6 +3,12 @@
 //! This module provides common UI elements used across the menu system.
 
 use super::types::*;
+use crate::ui::theme::{
+    BODY_TEXT_SIZE, DR_BUTTON_ACTIVE_BG, DR_BUTTON_BG, DR_BUTTON_BORDER, DR_BUTTON_HOVER_BG,
+    DR_GOLD, DR_GOLD_DIM, DR_OVERLAY_BG, DR_PANEL_BG, DR_PANEL_BG_STRONG, DR_PANEL_BORDER_STRONG,
+    DR_SLOT_BG, DR_TEXT, PANEL_GAP, PANEL_PADDING, WINDOW_TITLE_SIZE,
+};
+use crate::ui::widgets::fantasy_button_node;
 use bevy::prelude::*;
 
 // ============================================================================
@@ -10,28 +16,28 @@ use bevy::prelude::*;
 // ============================================================================
 
 /// Background color for active/selected buttons.
-pub const ACTIVE_BG: Color = Color::srgba(0.32, 0.42, 0.35, 0.95);
+pub const ACTIVE_BG: Color = DR_BUTTON_ACTIVE_BG;
 
 /// Background color for inactive buttons.
-pub const INACTIVE_BG: Color = Color::srgba(0.2, 0.2, 0.2, 0.9);
+pub const INACTIVE_BG: Color = DR_BUTTON_BG;
 
 /// Background color for active input fields.
-pub const INPUT_ACTIVE_BG: Color = Color::srgba(0.3, 0.35, 0.45, 0.95);
+pub const INPUT_ACTIVE_BG: Color = DR_BUTTON_HOVER_BG;
 
 /// Background color for inactive input fields.
-pub const INPUT_INACTIVE_BG: Color = Color::srgba(0.2, 0.2, 0.2, 0.95);
+pub const INPUT_INACTIVE_BG: Color = DR_SLOT_BG;
 
 /// Background color for the menu overlay.
-pub const MENU_OVERLAY_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.5);
+pub const MENU_OVERLAY_BG: Color = DR_OVERLAY_BG;
 
 /// Background color for menu panels.
-pub const MENU_PANEL_BG: Color = Color::srgba(0.1, 0.1, 0.1, 0.9);
+pub const MENU_PANEL_BG: Color = DR_PANEL_BG_STRONG;
 
 /// Background color for standard buttons.
-pub const BUTTON_BG: Color = Color::srgba(0.25, 0.25, 0.25, 0.9);
+pub const BUTTON_BG: Color = DR_BUTTON_BG;
 
 /// Background color for section containers.
-pub const SECTION_BG: Color = Color::srgba(0.15, 0.15, 0.15, 0.8);
+pub const SECTION_BG: Color = DR_PANEL_BG;
 
 // ============================================================================
 // Menu Root
@@ -68,10 +74,10 @@ pub fn spawn_menu_title(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, 
         Text::new(text),
         TextFont {
             font: font.clone(),
-            font_size: 32.0,
+            font_size: WINDOW_TITLE_SIZE,
             ..default()
         },
-        TextColor(Color::WHITE),
+        TextColor(DR_GOLD),
     ));
 }
 
@@ -81,10 +87,10 @@ pub fn spawn_section_title(parent: &mut ChildSpawnerCommands, font: &Handle<Font
         Text::new(text),
         TextFont {
             font: font.clone(),
-            font_size: 22.0,
+            font_size: BODY_TEXT_SIZE,
             ..default()
         },
-        TextColor(Color::WHITE),
+        TextColor(DR_GOLD_DIM),
     ));
 }
 
@@ -98,14 +104,9 @@ pub fn spawn_button(
     parent
         .spawn((
             Button,
-            Node {
-                width: Val::Px(160.0),
-                padding: UiRect::all(Val::Px(12.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
+            fantasy_button_node(Some(180.0)),
             BackgroundColor(BUTTON_BG),
+            BorderColor::all(DR_BUTTON_BORDER),
             action,
         ))
         .with_children(|button| {
@@ -113,10 +114,10 @@ pub fn spawn_button(
                 Text::new(label),
                 TextFont {
                     font: font.clone(),
-                    font_size: 20.0,
+                    font_size: BODY_TEXT_SIZE,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(DR_TEXT),
             ));
         });
 }
@@ -126,13 +127,17 @@ pub fn spawn_main_menu(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
         .spawn((
             Node {
+                width: Val::Px(260.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(16.0),
-                padding: UiRect::all(Val::Px(30.0)),
+                row_gap: Val::Px(PANEL_GAP),
+                padding: UiRect::all(Val::Px(PANEL_PADDING)),
+                border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(MENU_PANEL_BG),
+            BorderColor::all(DR_PANEL_BORDER_STRONG),
         ))
         .with_children(|menu| {
             spawn_menu_title(menu, font, "Game Menu");

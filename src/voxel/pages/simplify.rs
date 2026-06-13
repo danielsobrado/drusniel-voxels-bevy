@@ -4,7 +4,9 @@
 
 use super::config::ClodPagesConfig;
 use super::types::PageMesh;
-use meshopt::{simplify_scale, simplify_with_attributes_and_locks, SimplifyOptions, VertexDataAdapter};
+use meshopt::{
+    SimplifyOptions, VertexDataAdapter, simplify_scale, simplify_with_attributes_and_locks,
+};
 use std::collections::HashMap;
 
 const ATTR_STRIDE: usize = 7; // normal(3) + material(4)

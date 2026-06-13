@@ -10,6 +10,13 @@ use crate::chat::ChatState;
 use crate::entity::{EquippedItem, INVENTORY_SLOTS, Inventory, InventorySlot, ItemType};
 use crate::menu::PauseMenuState;
 use crate::terrain::tools::{TerrainTool, TerrainToolState};
+use crate::ui::icons::{UiIconAssets, icon_for_item, setup_ui_icons};
+use crate::ui::theme::{
+    DR_BUTTON_ACTIVE_BG, DR_BUTTON_BORDER, DR_BUTTON_HOVER_BG, DR_GOLD, DR_GOLD_DIM, DR_OVERLAY_BG,
+    DR_PANEL_BG_STRONG, DR_PANEL_BORDER, DR_PANEL_BORDER_STRONG, DR_SLOT_ACTIVE_BG, DR_SLOT_BG,
+    DR_TEXT, DR_TEXT_MUTED, HOTBAR_PANEL_PADDING, SMALL_TEXT_SIZE,
+};
+use crate::ui::widgets::fantasy_slot_node;
 
 pub struct InventoryUiPlugin;
 
@@ -208,6 +215,7 @@ impl Plugin for InventoryUiPlugin {
             .init_resource::<HotbarState>()
             .init_resource::<HotbarUiState>()
             .init_resource::<HotbarIconAssets>()
+            .init_resource::<UiIconAssets>()
             .init_resource::<DraggedItem>()
             .init_resource::<TerrainToolState>();
 
@@ -225,6 +233,7 @@ impl Plugin for InventoryUiPlugin {
                         handle_inventory_category_buttons,
                         handle_inventory_close_button,
                         update_inventory_category_button_colors,
+                        update_inventory_slot_colors,
                         refresh_inventory_ui,
                     )
                         .chain(),
@@ -232,25 +241,30 @@ impl Plugin for InventoryUiPlugin {
             return;
         }
 
-        app.add_systems(Startup, (setup_hotbar_icons, spawn_hotbar_ui).chain())
-            .add_systems(PreUpdate, apply_inventory_ui_bench_control)
-            .add_systems(
-                Update,
-                (
-                    handle_hotbar_input,
-                    handle_inventory_slot_click,
-                    handle_inventory_slot_right_click,
-                    handle_hotbar_slot_buttons,
-                    sync_equipped_from_hotbar,
-                    refresh_hotbar_ui,
-                    toggle_inventory_ui,
-                    handle_inventory_category_buttons,
-                    handle_inventory_close_button,
-                    update_inventory_category_button_colors,
-                    refresh_inventory_ui,
-                )
-                    .chain(),
-            );
+        app.add_systems(
+            Startup,
+            (setup_hotbar_icons, setup_ui_icons, spawn_hotbar_ui).chain(),
+        )
+        .add_systems(PreUpdate, apply_inventory_ui_bench_control)
+        .add_systems(
+            Update,
+            (
+                handle_hotbar_input,
+                handle_inventory_slot_click,
+                handle_inventory_slot_right_click,
+                handle_hotbar_slot_buttons,
+                update_hotbar_slot_colors,
+                sync_equipped_from_hotbar,
+                refresh_hotbar_ui,
+                toggle_inventory_ui,
+                handle_inventory_category_buttons,
+                handle_inventory_close_button,
+                update_inventory_category_button_colors,
+                update_inventory_slot_colors,
+                refresh_inventory_ui,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -356,6 +370,7 @@ fn spawn_hotbar_ui(
     dragged: Res<DraggedItem>,
     terrain_state: Res<TerrainToolState>,
     icons: Res<HotbarIconAssets>,
+    ui_icons: Res<UiIconAssets>,
     mut ui_state: ResMut<HotbarUiState>,
 ) {
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
@@ -376,23 +391,26 @@ fn spawn_hotbar_ui(
             parent
                 .spawn((
                     Node {
-                        padding: UiRect::all(Val::Px(10.0)),
+                        padding: UiRect::all(Val::Px(HOTBAR_PANEL_PADDING)),
                         row_gap: Val::Px(6.0),
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(0.04, 0.04, 0.06, 0.7)),
+                    BackgroundColor(DR_PANEL_BG_STRONG),
+                    BorderColor::all(DR_PANEL_BORDER),
                 ))
                 .with_children(|panel| {
                     panel.spawn((
                         Text::new("Hotbar (1-8)"),
                         TextFont {
                             font: font.clone(),
-                            font_size: 12.0,
+                            font_size: SMALL_TEXT_SIZE,
                             ..default()
                         },
-                        TextColor(Color::srgba(0.85, 0.85, 0.85, 0.9)),
+                        TextColor(DR_TEXT_MUTED),
                         HotbarTitleText,
                     ));
 
@@ -400,10 +418,10 @@ fn spawn_hotbar_ui(
                         Text::new(drag_label(&dragged)),
                         TextFont {
                             font: font.clone(),
-                            font_size: 12.0,
+                            font_size: SMALL_TEXT_SIZE,
                             ..default()
                         },
-                        TextColor(Color::srgba(0.95, 0.85, 0.6, 0.95)),
+                        TextColor(DR_GOLD),
                         HotbarDragText,
                     ));
 
@@ -418,7 +436,14 @@ fn spawn_hotbar_ui(
                             HotbarSlotList,
                         ))
                         .with_children(|list| {
-                            spawn_hotbar_slots(list, &hotbar, &terrain_state, &font, &icons);
+                            spawn_hotbar_slots(
+                                list,
+                                &hotbar,
+                                &terrain_state,
+                                &font,
+                                &icons,
+                                &ui_icons,
+                            );
                         });
                 });
         })
@@ -636,25 +661,99 @@ fn update_inventory_category_button_colors(
 
 fn category_button_fill(selected: bool, interaction: Interaction) -> Color {
     if selected {
-        return Color::srgba(0.48, 0.16, 0.82, 0.34);
+        return DR_SLOT_ACTIVE_BG;
     }
 
     match interaction {
-        Interaction::Pressed => Color::srgba(0.5, 0.18, 0.8, 0.28),
-        Interaction::Hovered => Color::srgba(0.38, 0.14, 0.62, 0.22),
+        Interaction::Pressed => DR_BUTTON_ACTIVE_BG,
+        Interaction::Hovered => DR_BUTTON_HOVER_BG,
         Interaction::None => Color::srgba(0.0, 0.0, 0.0, 0.0),
     }
 }
 
 fn category_button_border(selected: bool, interaction: Interaction) -> Color {
     if selected {
-        return Color::srgba(0.86, 0.54, 1.0, 0.92);
+        return DR_GOLD;
     }
 
     match interaction {
-        Interaction::Pressed => Color::srgba(0.82, 0.48, 1.0, 0.8),
-        Interaction::Hovered => Color::srgba(0.74, 0.42, 1.0, 0.62),
+        Interaction::Pressed => DR_GOLD_DIM,
+        Interaction::Hovered => DR_BUTTON_BORDER,
         Interaction::None => Color::srgba(0.0, 0.0, 0.0, 0.0),
+    }
+}
+
+fn update_inventory_slot_colors(
+    state: Res<InventoryUiState>,
+    mut slots: Query<(
+        &InventorySlotButton,
+        &Interaction,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
+) {
+    if !state.open {
+        return;
+    }
+
+    for (slot, interaction, mut background, mut border) in slots.iter_mut() {
+        let selected = state.selected_slot == Some(slot.0);
+        *background = BackgroundColor(slot_fill(selected, *interaction));
+        *border = BorderColor::all(slot_border(selected, *interaction));
+    }
+}
+
+fn update_hotbar_slot_colors(
+    hotbar: Res<HotbarState>,
+    terrain_state: Res<TerrainToolState>,
+    mut slots: Query<(
+        &HotbarSlot,
+        &Interaction,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
+) {
+    for (slot, interaction, mut background, mut border) in slots.iter_mut() {
+        let selected = if terrain_state.terraforming_mode {
+            terrain_tool_slot_selected(slot.0, terrain_state.active_tool)
+        } else {
+            slot.0 < HOTBAR_SLOTS && hotbar.selected == slot.0
+        };
+        *background = BackgroundColor(slot_fill(selected, *interaction));
+        *border = BorderColor::all(slot_border(selected, *interaction));
+    }
+}
+
+fn terrain_tool_slot_selected(slot_index: usize, active_tool: TerrainTool) -> bool {
+    let Some(tool_index) = slot_index.checked_sub(100) else {
+        return false;
+    };
+    TerrainTool::all_tools()
+        .get(tool_index)
+        .is_some_and(|tool| *tool == active_tool)
+}
+
+fn slot_fill(selected: bool, interaction: Interaction) -> Color {
+    if selected {
+        return DR_SLOT_ACTIVE_BG;
+    }
+
+    match interaction {
+        Interaction::Pressed => DR_BUTTON_ACTIVE_BG,
+        Interaction::Hovered => DR_BUTTON_HOVER_BG,
+        Interaction::None => DR_SLOT_BG,
+    }
+}
+
+fn slot_border(selected: bool, interaction: Interaction) -> Color {
+    if selected {
+        return DR_PANEL_BORDER_STRONG;
+    }
+
+    match interaction {
+        Interaction::Pressed => DR_GOLD_DIM,
+        Interaction::Hovered => DR_BUTTON_BORDER,
+        Interaction::None => DR_PANEL_BORDER,
     }
 }
 
@@ -735,6 +834,7 @@ fn refresh_hotbar_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     icons: Res<HotbarIconAssets>,
+    ui_icons: Res<UiIconAssets>,
 ) {
     if !hotbar.is_changed() && !dragged.is_changed() && !terrain_state.is_changed() {
         return;
@@ -760,7 +860,7 @@ fn refresh_hotbar_ui(
 
     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
     commands.entity(list_entity).with_children(|list| {
-        spawn_hotbar_slots(list, &hotbar, &terrain_state, &font, &icons);
+        spawn_hotbar_slots(list, &hotbar, &terrain_state, &font, &icons, &ui_icons);
     });
 }
 
@@ -785,7 +885,7 @@ fn spawn_inventory_ui(
                 position_type: PositionType::Absolute,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.02, 0.05, 0.75)),
+            BackgroundColor(DR_OVERLAY_BG),
             InventoryRoot,
         ))
         .with_children(|parent| {
@@ -796,8 +896,14 @@ fn spawn_inventory_ui(
                     max_height: Val::Percent(92.0),
                     aspect_ratio: Some(DRUSNIEL_UI_ASPECT),
                     position_type: PositionType::Relative,
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
                     ..default()
                 },))
+                .insert((
+                    BackgroundColor(DR_PANEL_BG_STRONG),
+                    BorderColor::all(DR_PANEL_BORDER_STRONG),
+                ))
                 .with_children(|panel| {
                     panel.spawn((
                         Node {
@@ -862,7 +968,7 @@ fn spawn_inventory_ui(
                                     font_size: 15.0,
                                     ..default()
                                 },
-                                TextColor(Color::srgba(0.86, 0.78, 0.95, 0.95)),
+                                TextColor(DR_TEXT),
                                 InventoryHeldText,
                             ));
                         });
@@ -899,7 +1005,7 @@ fn spawn_inventory_ui(
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
-                        BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                        BorderColor::all(DR_GOLD_DIM),
                         InventoryCloseButton,
                     ));
                 });
@@ -973,13 +1079,12 @@ fn spawn_inventory_slots(
                 width: Val::Px(SLOT_SIZE),
                 height: Val::Px(SLOT_SIZE),
                 position_type: PositionType::Relative,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(5.0)),
                 ..default()
             },
-            BackgroundColor(if is_selected {
-                Color::srgba(0.32, 0.42, 0.35, 0.95) // Green highlight
-            } else {
-                Color::srgba(0.2, 0.2, 0.2, 0.9)
-            }),
+            BackgroundColor(slot_fill(is_selected, Interaction::None)),
+            BorderColor::all(slot_border(is_selected, Interaction::None)),
             InventorySlotButton(slot_idx),
         ))
         .with_children(|slot_node| {
@@ -1037,7 +1142,7 @@ fn spawn_inventory_slots(
                                     font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(DR_TEXT),
                                 InventorySlotQuantity,
                             ));
                         });
@@ -1053,6 +1158,7 @@ fn spawn_hotbar_slots(
     terrain_state: &TerrainToolState,
     font: &Handle<Font>,
     icons: &HotbarIconAssets,
+    ui_icons: &UiIconAssets,
 ) {
     if terrain_state.terraforming_mode {
         // Render terrain tools (only 4 slots)
@@ -1068,24 +1174,22 @@ fn spawn_hotbar_slots(
                 TerrainTool::Smooth => ItemType::TerrainSmooth,
                 TerrainTool::None => ItemType::Pickaxe, // Should not happen in loop
             };
-            let icon_handle = icons.images.get(&item_type).cloned();
+            let icon_handle = icons
+                .images
+                .get(&item_type)
+                .cloned()
+                .or_else(|| icon_for_item(item_type).and_then(|id| ui_icons.get(id)));
 
             list.spawn((
                 Button,
-                Node {
-                    width: Val::Px(64.0),
-                    height: Val::Px(64.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    row_gap: Val::Px(2.0),
-                    ..default()
+                {
+                    let mut node = fantasy_slot_node(64.0);
+                    node.flex_direction = FlexDirection::Column;
+                    node.row_gap = Val::Px(2.0);
+                    node
                 },
-                BackgroundColor(if is_selected {
-                    Color::srgba(0.35, 0.45, 0.2, 0.9)
-                } else {
-                    Color::srgba(0.12, 0.12, 0.15, 0.85)
-                }),
+                BackgroundColor(slot_fill(is_selected, Interaction::None)),
+                BorderColor::all(slot_border(is_selected, Interaction::None)),
                 // Use a dummy index for hotbar slot component since we don't want these to be clickable/swappable like normal inventory
                 HotbarSlot(100 + index),
             ))
@@ -1097,7 +1201,7 @@ fn spawn_hotbar_slots(
                         font_size: 12.0,
                         ..default()
                     },
-                    TextColor(Color::srgba(0.9, 0.9, 0.9, 0.9)),
+                    TextColor(DR_GOLD),
                 ));
                 if let Some(icon) = icon_handle {
                     button.spawn((
@@ -1115,7 +1219,7 @@ fn spawn_hotbar_slots(
                             font_size: 10.0,
                             ..default()
                         },
-                        TextColor(Color::srgba(0.8, 0.8, 0.8, 0.8)),
+                        TextColor(DR_TEXT_MUTED),
                     ));
                 } else {
                     button.spawn((
@@ -1125,7 +1229,7 @@ fn spawn_hotbar_slots(
                             font_size: 13.0,
                             ..default()
                         },
-                        TextColor(Color::WHITE),
+                        TextColor(DR_TEXT),
                     ));
                 }
             });
@@ -1135,24 +1239,24 @@ fn spawn_hotbar_slots(
         for (index, slot) in hotbar.slots.iter().enumerate() {
             let is_selected = hotbar.selected == index;
             let label = slot.map(|item| item.display_name()).unwrap_or("Empty");
-            let icon_handle = slot.and_then(|item| icons.images.get(&item).cloned());
+            let icon_handle = slot.and_then(|item| {
+                icons
+                    .images
+                    .get(&item)
+                    .cloned()
+                    .or_else(|| icon_for_item(item).and_then(|id| ui_icons.get(id)))
+            });
 
             list.spawn((
                 Button,
-                Node {
-                    width: Val::Px(64.0),
-                    height: Val::Px(64.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    row_gap: Val::Px(2.0),
-                    ..default()
+                {
+                    let mut node = fantasy_slot_node(64.0);
+                    node.flex_direction = FlexDirection::Column;
+                    node.row_gap = Val::Px(2.0);
+                    node
                 },
-                BackgroundColor(if is_selected {
-                    Color::srgba(0.35, 0.45, 0.2, 0.9)
-                } else {
-                    Color::srgba(0.12, 0.12, 0.15, 0.85)
-                }),
+                BackgroundColor(slot_fill(is_selected, Interaction::None)),
+                BorderColor::all(slot_border(is_selected, Interaction::None)),
                 HotbarSlot(index),
             ))
             .with_children(|button| {
@@ -1163,7 +1267,7 @@ fn spawn_hotbar_slots(
                         font_size: 12.0,
                         ..default()
                     },
-                    TextColor(Color::srgba(0.9, 0.9, 0.9, 0.9)),
+                    TextColor(DR_GOLD),
                 ));
                 if let Some(icon) = icon_handle {
                     button.spawn((
@@ -1182,7 +1286,7 @@ fn spawn_hotbar_slots(
                             font_size: 13.0,
                             ..default()
                         },
-                        TextColor(Color::WHITE),
+                        TextColor(DR_TEXT),
                     ));
                 }
             });

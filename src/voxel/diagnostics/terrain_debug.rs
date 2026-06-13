@@ -264,7 +264,6 @@ pub fn toggle_terrain_debug_view(
             }
         );
     }
-
 }
 
 /// Returns true when Alt+F7 should toggle wireframe (not Alt+Shift+F7 capture).

@@ -16,7 +16,7 @@ use super::types::PageMesh;
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
 };
-use crate::voxel::meshing::{encode_barycentric_uv, TERRAIN_MESH_SECTION_MAIN};
+use crate::voxel::meshing::{TERRAIN_MESH_SECTION_MAIN, encode_barycentric_uv};
 const PAGE_MESH_COMMITS_PER_FRAME: usize = 4;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]

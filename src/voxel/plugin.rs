@@ -30,20 +30,19 @@ use crate::rendering::triplanar_material::TerrainMaterialQuality;
 use crate::voxel::chunk::{Chunk, LodLevel, MeshDirtyReason};
 use crate::voxel::diagnostics::seam_audit_pass::SeamAuditPassPlugin;
 use crate::voxel::enclosure::{
-    toggle_enclosure_culling, update_enclosure_state, EnclosureOcclusionStats, EnclosureState,
+    EnclosureOcclusionStats, EnclosureState, toggle_enclosure_culling, update_enclosure_state,
 };
 use crate::voxel::hole_probe::TerrainHoleProbePlugin;
 #[allow(unused_imports)]
 pub(crate) use crate::voxel::lod::{
-    build_base_terrain_neighbor_lods, build_terrain_neighbor_lods,
-    calculate_target_lod_with_hysteresis, chunk_contains_liquid, chunk_layer_intersects_waterline,
-    collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
-    forensics_forced_lod, forensics_mesh_mode_override, is_horizon_proxy_lod,
-    mesh_lod_level_for_surface_nets_cap, resolve_terrain_mesh_mode, should_defer_surface_nets_mesh,
-    target_terrain_mesh_mode_for_lod, terrain_lod_distance_xz, terrain_lod_hysteresis,
-    terrain_lod_requires_collider, terrain_material_quality_for_lod,
-    transition_refined_surface_nets_lod, water_shore_guarded_lod, LodSettings,
-    WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA,
+    LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, build_base_terrain_neighbor_lods,
+    build_terrain_neighbor_lods, calculate_target_lod_with_hysteresis, chunk_contains_liquid,
+    chunk_layer_intersects_waterline, collect_water_shore_lod_guard_chunks,
+    effective_terrain_mesh_lod_for_chunk, forensics_forced_lod, forensics_mesh_mode_override,
+    is_horizon_proxy_lod, mesh_lod_level_for_surface_nets_cap, resolve_terrain_mesh_mode,
+    should_defer_surface_nets_mesh, target_terrain_mesh_mode_for_lod, terrain_lod_distance_xz,
+    terrain_lod_hysteresis, terrain_lod_requires_collider, terrain_material_quality_for_lod,
+    transition_refined_surface_nets_lod, water_shore_guarded_lod,
 };
 use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings};
 use crate::voxel::mesh_commit::LodMeshTransactionState;
@@ -53,42 +52,40 @@ use crate::voxel::meshing::{ChunkMesh, MeshMode, MeshSettings, WaterMesh, WaterM
 #[cfg(test)]
 use crate::voxel::meshing::{WaterBodyKind, WaterBodyMaterialMode};
 use crate::voxel::occlusion::{
-    update_visible_chunks_system, OcclusionConfig, OcclusionUpdateTimer, VisibleChunks,
+    OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
 };
 use crate::voxel::persistence::WorldPersistence;
 #[cfg(test)]
 use crate::voxel::terrain::TerrainGenerator;
 use crate::voxel::world::{VoxelWorld, WorldBounds};
 
+pub use crate::voxel::runtime::{
+    ChunkGenerationState, RuntimeChunkStats, TerrainLodControl, VoxelTerrainSet, WaterBodyInfo,
+    WaterBodyRegistry, WorldConfig, apply_visibility_culling_system,
+};
+#[cfg(test)]
+use crate::voxel::runtime::{MAX_CHUNKS_PER_FRAME, MAX_STARTUP_CHUNKS_PER_FRAME};
 pub(crate) use crate::voxel::runtime::{
-    adjust_lod_for_integrated_gpu, draw_water_body_debug_overlay, log_mc_spike_build_tag,
-    mesh_dirty_chunks_system, poll_chunk_generation_tasks, poll_world_load_task,
-    spawn_queued_chunk_generation_tasks, spawn_world_startup_overlay,
+    MeshDirtyQueueWarningState, PendingWorldGeneration, TerrainLodTransitionState, WaterMaskProxy,
+    WorldGenerationQueue, WorldStartupLoadingFlames, WorldStartupOverlayState,
+    WorldStartupSetupState, adjust_lod_for_integrated_gpu, draw_water_body_debug_overlay,
+    log_mc_spike_build_tag, mesh_dirty_chunks_system, poll_chunk_generation_tasks,
+    poll_world_load_task, spawn_queued_chunk_generation_tasks, spawn_world_startup_overlay,
     start_pending_world_generation, start_voxel_world_after_overlay_frame,
     update_chunk_face_visibility_system, update_chunk_lod_system, update_terrain_material_lod,
     update_water_body_registry, update_water_material_lod, update_world_startup_background_cover,
-    update_world_startup_overlay, MeshDirtyQueueWarningState, PendingWorldGeneration,
-    TerrainLodTransitionState, WaterMaskProxy, WorldGenerationQueue, WorldStartupLoadingFlames,
-    WorldStartupOverlayState, WorldStartupSetupState,
-};
-pub use crate::voxel::runtime::{
-    apply_visibility_culling_system, ChunkGenerationState, RuntimeChunkStats, TerrainLodControl,
-    VoxelTerrainSet, WaterBodyInfo, WaterBodyRegistry, WorldConfig,
+    update_world_startup_overlay,
 };
 #[cfg(test)]
 use crate::voxel::runtime::{
+    MeshDirtyReasonCounts, WaterMeshBodySample, WorldStartupStage, WorldStats,
     build_water_body_group, chunks_per_frame_limit_for_dirty_meshes, desired_water_visibility,
     expected_world_chunk_count, generate_chunk_async, initial_lod_for_chunk,
     mark_surface_nets_halo_dirty, prioritize_dirty_chunks_for_camera,
     should_defer_runtime_chunk_stats_recompute, should_force_initial_runtime_chunk_stats,
     should_poll_chunk_generation_tasks, should_recompute_runtime_chunk_stats,
     terrain_material_quality_for_distance, water_body_edge_bit, water_body_material_mode,
-    world_startup_background_cover_size, world_startup_snapshot, MeshDirtyReasonCounts,
-    WaterMeshBodySample, WorldStartupStage, WorldStats,
-};
-#[cfg(test)]
-use crate::voxel::runtime::{
-    MAX_CHUNKS_PER_FRAME, MAX_STARTUP_CHUNKS_PER_FRAME,
+    world_startup_background_cover_size, world_startup_snapshot,
 };
 
 pub struct VoxelPlugin;

@@ -392,11 +392,7 @@ mod tests {
     fn editor_payload_reports_quality_gate() {
         let mut config = TerrainTexturingConfig::default();
         config.hex_tiling.enabled = true;
-        let payload = terrain_texturing_editor_payload(
-            &config,
-            None,
-            RenderQualityPreset::Low,
-        );
+        let payload = terrain_texturing_editor_payload(&config, None, RenderQualityPreset::Low);
         assert!(payload.configured.enabled);
         assert!(!payload.effective.enabled);
         assert!(payload.gated_by_low_quality);

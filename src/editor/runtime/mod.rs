@@ -48,12 +48,12 @@ use crate::rendering::god_rays::GodRayConfig;
 use crate::rendering::gtao::{GtaoSettings, gtao_settings_from_config};
 use crate::rendering::photo_mode::PhotoModeState;
 use crate::rendering::quality::RenderQualityPreset;
-use crate::rendering::terrain_hex_tiling::{
-    TerrainTexturingConfig, terrain_texturing_editor_payload,
-};
 use crate::rendering::ray_tracing::RayTracingSettings;
 use crate::rendering::shadow_budget::ShadowBudgetConfig;
 use crate::rendering::ssao::SsaoSupported;
+use crate::rendering::terrain_hex_tiling::{
+    TerrainTexturingConfig, terrain_texturing_editor_payload,
+};
 use crate::rendering::triplanar_material::{
     TerrainMaterialQuality, TriplanarMaterial, TriplanarMaterialHandle,
 };
@@ -2227,7 +2227,7 @@ pub fn validate_runtime_write_command(command: &RuntimeWriteCommand) -> Result<(
         | RuntimeWriteCommand::AlignEditorCameraToAxes { .. }
         | RuntimeWriteCommand::AddSavedEditorCamera { .. }
         | RuntimeWriteCommand::ExportEditorCameraTemplate {}
-        |         RuntimeWriteCommand::GetLightAtmosphere {}
+        | RuntimeWriteCommand::GetLightAtmosphere {}
         | RuntimeWriteCommand::UpdateTerrainTexturing { .. }
         | RuntimeWriteCommand::ExportLightAtmosphereTemplate {}
         | RuntimeWriteCommand::SetViewportDebugOverlay { .. }

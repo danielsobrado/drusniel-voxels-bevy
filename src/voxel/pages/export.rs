@@ -7,7 +7,7 @@
 //! ride on `MeshData.colors`; base positions are un-morphed (morph is GPU-only).
 
 use crate::voxel::chunk::LodLevel;
-use crate::voxel::meshing::{barycentric_section, MeshData, TERRAIN_MESH_SECTION_MAIN};
+use crate::voxel::meshing::{MeshData, TERRAIN_MESH_SECTION_MAIN, barycentric_section};
 use crate::voxel::world::VoxelWorld;
 use bevy::prelude::{IVec3, Vec3};
 use std::fmt;
@@ -36,9 +36,17 @@ impl TerrainMainSurfaceExport {
 #[derive(Debug)]
 pub enum ClodExportError {
     /// Section tags missing/mismatched — cannot exclude skirts structurally (plan §11.9 #2).
-    MissingSectionTags { chunk: IVec3, verts: usize, tags: usize },
+    MissingSectionTags {
+        chunk: IVec3,
+        verts: usize,
+        tags: usize,
+    },
     /// Surface Nets always emits per-vertex material weights in `colors`; absence is a bug.
-    MissingMaterialWeights { chunk: IVec3, verts: usize, colors: usize },
+    MissingMaterialWeights {
+        chunk: IVec3,
+        verts: usize,
+        colors: usize,
+    },
     /// Geometry exists but none of it is main surface — never bake skirt-only into a page.
     MainSurfaceEmptyWithGeometry { chunk: IVec3 },
 }
@@ -50,12 +58,19 @@ impl fmt::Display for ClodExportError {
                 f,
                 "MissingSectionTags at {chunk:?}: {verts} verts but {tags} section tags"
             ),
-            ClodExportError::MissingMaterialWeights { chunk, verts, colors } => write!(
+            ClodExportError::MissingMaterialWeights {
+                chunk,
+                verts,
+                colors,
+            } => write!(
                 f,
                 "MissingMaterialWeights at {chunk:?}: {verts} verts but {colors} colors"
             ),
             ClodExportError::MainSurfaceEmptyWithGeometry { chunk } => {
-                write!(f, "MainSurfaceEmptyWithGeometry at {chunk:?}: all geometry is non-main")
+                write!(
+                    f,
+                    "MainSurfaceEmptyWithGeometry at {chunk:?}: all geometry is non-main"
+                )
             }
         }
     }
@@ -103,7 +118,11 @@ pub fn extract_main_surface_for_clod(
 
     let mut indices = Vec::new();
     for tri in solid.indices.chunks_exact(3) {
-        let (a, b, c) = (remap[tri[0] as usize], remap[tri[1] as usize], remap[tri[2] as usize]);
+        let (a, b, c) = (
+            remap[tri[0] as usize],
+            remap[tri[1] as usize],
+            remap[tri[2] as usize],
+        );
         if a != u32::MAX && b != u32::MAX && c != u32::MAX {
             indices.extend_from_slice(&[a, b, c]);
         }
@@ -128,14 +147,15 @@ pub fn extract_main_surface_for_clod(
 mod tests {
     use super::*;
     use crate::voxel::meshing::{
-        encode_barycentric_uv, TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT, TERRAIN_MESH_SECTION_MAIN,
+        TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT, TERRAIN_MESH_SECTION_MAIN, encode_barycentric_uv,
     };
 
     fn push_vertex(m: &mut MeshData, pos: [f32; 3], section: u8) {
         m.positions.push(pos);
         m.normals.push([0.0, 1.0, 0.0]);
         m.colors.push([1.0, 0.0, 0.0, 0.0]);
-        m.barycentric_uvs.push(encode_barycentric_uv([0.0, 0.0], section, 0));
+        m.barycentric_uvs
+            .push(encode_barycentric_uv([0.0, 0.0], section, 0));
     }
 
     #[test]
@@ -146,12 +166,17 @@ mod tests {
             push_vertex(&mut m, [i as f32, 0.0, 0.0], TERRAIN_MESH_SECTION_MAIN);
         }
         for i in 0..3 {
-            push_vertex(&mut m, [i as f32, 9.0, 0.0], TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT);
+            push_vertex(
+                &mut m,
+                [i as f32, 9.0, 0.0],
+                TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT,
+            );
         }
         m.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]); // main
         m.indices.extend_from_slice(&[4, 5, 6]); // skirt
 
-        let out = extract_main_surface_for_clod(&m, IVec3::new(1, 0, 2), LodLevel::Lod0, 7).unwrap();
+        let out =
+            extract_main_surface_for_clod(&m, IVec3::new(1, 0, 2), LodLevel::Lod0, 7).unwrap();
         assert_eq!(out.local_positions.len(), 4, "only main verts kept");
         assert_eq!(out.indices.len(), 6, "only the 2 main triangles kept");
         assert_eq!(out.material_weights.len(), 4);
@@ -163,7 +188,11 @@ mod tests {
     fn rejects_skirt_only_geometry() {
         let mut m = MeshData::new();
         for i in 0..3 {
-            push_vertex(&mut m, [i as f32, 0.0, 0.0], TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT);
+            push_vertex(
+                &mut m,
+                [i as f32, 0.0, 0.0],
+                TERRAIN_MESH_SECTION_HORIZONTAL_SKIRT,
+            );
         }
         m.indices.extend_from_slice(&[0, 1, 2]);
         assert!(extract_main_surface_for_clod(&m, IVec3::ZERO, LodLevel::Lod0, 0).is_err());

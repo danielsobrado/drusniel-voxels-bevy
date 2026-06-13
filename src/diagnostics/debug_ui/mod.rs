@@ -19,6 +19,7 @@ use crate::rendering::ray_tracing::{
 };
 use crate::rendering::triplanar_material::{TriplanarMaterial, TriplanarMaterialHandle};
 use crate::rendering::water::WaterShaderToggles;
+use crate::ui::theme;
 use crate::vegetation::VegetationConfig;
 #[cfg(debug_assertions)]
 use crate::vegetation::{GrassBlade, ProceduralGrassPatch};
@@ -28,6 +29,33 @@ use crate::voxel::plugin::LodSettings;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, egui};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
+
+pub fn apply_drusniel_egui_style(ctx: &egui::Context) {
+    let mut style = (*ctx.style()).clone();
+    style.visuals = theme::fantasy_egui_visuals();
+    style.visuals.window_fill = theme::DR_EGUI_DEBUG_WINDOW_FILL;
+    style.visuals.panel_fill = theme::DR_EGUI_DEBUG_PANEL_FILL;
+    style.visuals.extreme_bg_color = theme::DR_EGUI_DEBUG_EXTREME_BG;
+    style.visuals.faint_bg_color = theme::DR_EGUI_DEBUG_FAINT_BG;
+    style.visuals.window_stroke = egui::Stroke::new(1.5, theme::DR_EGUI_PANEL_BORDER);
+    style.visuals.widgets.noninteractive.fg_stroke =
+        egui::Stroke::new(1.0, theme::DR_EGUI_TEXT_MUTED);
+    style.visuals.widgets.inactive.bg_stroke =
+        egui::Stroke::new(1.0, theme::DR_EGUI_DEBUG_INACTIVE_STROKE);
+    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, theme::DR_EGUI_GOLD);
+    style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.5, theme::DR_EGUI_GOLD);
+    style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(4);
+    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
+    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
+    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
+    style.visuals.widgets.open.corner_radius = egui::CornerRadius::same(4);
+    style.visuals.selection.bg_fill = theme::DR_EGUI_DEBUG_SELECTION_BG;
+    style.visuals.selection.stroke = egui::Stroke::new(1.0, theme::DR_EGUI_GOLD);
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    style.spacing.button_padding = egui::vec2(8.0, 5.0);
+    style.spacing.slider_width = 180.0;
+    ctx.set_style(style);
+}
 
 #[derive(Resource, Default)]
 pub struct DebugUiState {
@@ -136,9 +164,12 @@ fn debug_settings_ui(
         return;
     }
 
-    egui::Window::new("Game Tweaks").show(
-        contexts.ctx_mut().ok().expect("Failed to get Egui context"),
-        |ui| {
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    apply_drusniel_egui_style(ctx);
+
+    egui::Window::new("Game Tweaks").show(ctx, |ui| {
             ui.heading("LOD Settings");
             ui.add(
                 egui::Slider::new(&mut lod_settings.high_detail_distance, 32.0..=512.0)
@@ -530,8 +561,7 @@ fn debug_settings_ui(
             ui.label("Press Shift+N to toggle NAADF split view");
             ui.label("Press F11 to toggle NAADF fullscreen preview");
             ui.label("Press Shift+F11 to toggle enclosure culling");
-        },
-    );
+    });
 }
 
 fn toggle_naadf_split_view_key(

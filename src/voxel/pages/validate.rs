@@ -2,7 +2,7 @@
 //! Border detection is topological (open edges), not by footprint plane (Surface Nets
 //! vertices sit inside cells → non-planar borders). A sandbox finding.
 
-use super::types::{ClodBuildError, PageFootprint, PageMesh, DEFAULT_TOLERANCES};
+use super::types::{ClodBuildError, DEFAULT_TOLERANCES, PageFootprint, PageMesh};
 use std::collections::HashMap;
 
 fn edge_key(a: u32, b: u32) -> u64 {
@@ -51,7 +51,10 @@ fn dist_to_perimeter(x: f32, z: f32, fp: &PageFootprint) -> f32 {
 }
 
 /// Assert every open-boundary vertex hugs the footprint perimeter (no internal seam).
-pub fn assert_no_internal_borders(mesh: &PageMesh, fp: &PageFootprint) -> Result<(), ClodBuildError> {
+pub fn assert_no_internal_borders(
+    mesh: &PageMesh,
+    fp: &PageFootprint,
+) -> Result<(), ClodBuildError> {
     for (i, &open) in open_boundary_vertex_flags(mesh).iter().enumerate() {
         if !open {
             continue;
@@ -117,12 +120,16 @@ pub fn border_chain(mesh: &PageMesh, axis: Axis, plane: f32, fp: &PageFootprint)
         }
         match axis {
             Axis::X => {
-                if (p[2] - fp.min_z).abs() <= PERIMETER_BAND || (p[2] - fp.max_z).abs() <= PERIMETER_BAND {
+                if (p[2] - fp.min_z).abs() <= PERIMETER_BAND
+                    || (p[2] - fp.max_z).abs() <= PERIMETER_BAND
+                {
                     continue;
                 }
             }
             Axis::Z => {
-                if (p[0] - fp.min_x).abs() <= PERIMETER_BAND || (p[0] - fp.max_x).abs() <= PERIMETER_BAND {
+                if (p[0] - fp.min_x).abs() <= PERIMETER_BAND
+                    || (p[0] - fp.max_x).abs() <= PERIMETER_BAND
+                {
                     continue;
                 }
             }
@@ -158,7 +165,8 @@ pub fn assert_border_match(a: &BorderChain, b: &BorderChain) -> Result<(), ClodB
     }
     for i in 0..a.positions.len() {
         let (pa, pb) = (a.positions[i], b.positions[i]);
-        let dp = ((pa[0] - pb[0]).powi(2) + (pa[1] - pb[1]).powi(2) + (pa[2] - pb[2]).powi(2)).sqrt();
+        let dp =
+            ((pa[0] - pb[0]).powi(2) + (pa[1] - pb[1]).powi(2) + (pa[2] - pb[2]).powi(2)).sqrt();
         if dp > tol.position {
             return Err(ClodBuildError::BorderPositionMismatch(format!(
                 "pos delta {dp:.2e} at border vertex {i}"

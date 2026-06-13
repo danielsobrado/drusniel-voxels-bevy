@@ -428,8 +428,7 @@ fn page_material_needs_base_refresh(
     let Some(base_material) = base_material else {
         return false;
     };
-    material.grass_albedo.is_none()
-        && base_material.grass_albedo.is_some()
+    material.grass_albedo.is_none() && base_material.grass_albedo.is_some()
         || material.grass_normal.is_none() && base_material.grass_normal.is_some()
         || material.rock_albedo.is_none() && base_material.rock_albedo.is_some()
         || material.rock_normal.is_none() && base_material.rock_normal.is_some()
