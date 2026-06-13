@@ -10,8 +10,8 @@ import GUI from "lil-gui";
 import { parseConfig } from "./config.js";
 import configText from "../../../config/clod_pages.yaml?raw";
 import { initSimplifier } from "./simplify.js";
-import { buildWorldAsync } from "./quadtree.js";
-import { meshChunk } from "./terrain.js";
+import { buildWorldAsync, rebuildDirtyPages } from "./quadtree.js";
+import { addDigEdit, digEditCount, DIG_INFLUENCE_MARGIN, meshChunk } from "./terrain.js";
 import { ClodPageNode, PageMesh } from "./types.js";
 import {
   applyTerrainColorAdjustments,
@@ -32,7 +32,7 @@ import {
   type PlayerInputState,
 } from "./player_controller.js";
 import { selectCut, SelectionParams, SelectionState } from "./selection.js";
-import { TerrainColliderSet, type TerrainColliderPage } from "./terrain_collider.js";
+import { TerrainColliderSet, type TerrainColliderPage, type TerrainSurfaceHit } from "./terrain_collider.js";
 import { borderChain } from "./validate.js";
 import {
   DEFAULT_ENVIRONMENT_COLORS,
@@ -272,11 +272,21 @@ async function main() {
   let playerPitch = 0;
   let playerPointerLocked = false;
 
+  // Pickaxe state: hold-to-dig cadence while playing, hover preview in orbit mode.
+  const DIG_HOLD_INTERVAL_MS = 400;
+  let digHeld = false;
+  let lastDigAt = -Infinity;
+  const digDirection = new THREE.Vector3();
+  const digAimRay = new THREE.Ray();
+  const hoverPointer = new THREE.Vector2();
+  let hoverPointerValid = false;
+
   const resetPlayerInput = () => {
     playerInput.forward = 0;
     playerInput.right = 0;
     playerInput.sprint = false;
     playerInput.jump = false;
+    digHeld = false;
   };
   const updatePlayerModeUi = () => {
     document.body.dataset.playerMode = interaction.mode;
@@ -285,7 +295,7 @@ async function main() {
     playerModeStatus.textContent = interaction.mode === "choosingSpawn"
       ? "Click the terrain to choose your starting position"
       : interaction.mode === "playing"
-        ? "WASD · Shift · Space · Esc"
+        ? "WASD · Shift · Space · Esc · click digs · Shift+wheel radius"
         : "Orbit camera";
   };
   const exitPlayerMode = () => {
@@ -337,11 +347,44 @@ async function main() {
 
   orbitModeButton.addEventListener("click", exitPlayerMode);
   playerModeButton.addEventListener("click", choosePlayerSpawn);
+  // Orbit-mode digs fire on click-without-drag so OrbitControls rotation stays usable.
+  let digPointerDown: { x: number; y: number } | null = null;
   renderer.domElement.addEventListener("pointerdown", (event) => {
     if (interaction.mode === "choosingSpawn" && event.button === 0) startPlayerAtPointer(event);
     else if (interaction.mode === "playing" && event.button === 0 && document.pointerLockElement !== renderer.domElement) {
       void renderer.domElement.requestPointerLock();
+    } else if (interaction.mode === "playing" && event.button === 0 && state.digEnabled) {
+      digHeld = true;
+      camera.getWorldDirection(digDirection);
+      performDig(new THREE.Ray(camera.position.clone(), digDirection.clone()));
+    } else if (interaction.mode === "orbit" && event.button === 0 && state.digEnabled) {
+      digPointerDown = { x: event.clientX, y: event.clientY };
     }
+  });
+  renderer.domElement.addEventListener("pointerup", (event) => {
+    if (event.button === 0) digHeld = false;
+    if (!digPointerDown || event.button !== 0) return;
+    const moved = Math.hypot(event.clientX - digPointerDown.x, event.clientY - digPointerDown.y);
+    digPointerDown = null;
+    if (moved > 4 || interaction.mode !== "orbit" || !state.digEnabled) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    playerPointer.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    playerRaycaster.setFromCamera(playerPointer, camera);
+    performDig(playerRaycaster.ray);
+  });
+  renderer.domElement.addEventListener("pointermove", (event) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    hoverPointer.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    hoverPointerValid = true;
+  });
+  renderer.domElement.addEventListener("pointerleave", () => {
+    hoverPointerValid = false;
   });
   document.addEventListener("pointerlockchange", () => {
     if (document.pointerLockElement === renderer.domElement) {
@@ -433,6 +476,8 @@ async function main() {
     bubble: false,
     bubbleRadius: cfg.near_field.radius_chunks * cfg.page.chunk_size,
     tintBubble: true,
+    digEnabled: true,
+    digRadius: 3,
     grassEnabled: DEFAULT_GRASS_SETTINGS.enabled,
     grassDistance: DEFAULT_GRASS_SETTINGS.distance,
     grassBladeSpacing: DEFAULT_GRASS_SETTINGS.bladeSpacing,
@@ -566,6 +611,14 @@ async function main() {
   // page-boundary overlay (rebuilt on cut change)
   const boundaryGroup = new THREE.Group();
   scene.add(boundaryGroup);
+
+  // dig preview reticle: translucent sphere at the aim point, sized to the dig radius
+  const digPreview = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 24, 16),
+    new THREE.MeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.28, depthWrite: false }),
+  );
+  digPreview.visible = false;
+  scene.add(digPreview);
   const seamGroup = new THREE.Group();
   scene.add(seamGroup);
   const crossLodBorderGroup = new THREE.Group();
@@ -745,6 +798,7 @@ async function main() {
   let lastLevelSummary = "";
   let lastTriCount = 0;
   let averageFps = 0;
+  let lastDigSummary = "";
 
   const updateInfo = () => {
     const playerLine = interaction.mode === "playing"
@@ -758,6 +812,8 @@ async function main() {
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
       `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassBladeCount.toLocaleString()} blades\n` +
+      `dig: ${state.digEnabled ? "on" : "off"}  r=${state.digRadius}  edits=${digEditCount()}` +
+      `${lastDigSummary ? `  last: ${lastDigSummary}` : ""}\n` +
       playerLine;
   };
 
@@ -809,6 +865,65 @@ async function main() {
       lastDebugKey = debugKey;
       rebuildDebugOverlays(rendered, xLodAdjacencies);
     }
+  };
+
+  // Carve a sphere where the ray hits, then pay the CLOD edit cost synchronously:
+  // rebuild the dug LOD0 pages, re-simplify their ancestors, refresh collider BVHs.
+  // The timing breakdown lands in the overlay + console — that's the experiment.
+  const performDig = (ray: THREE.Ray) => {
+    const hit = terrainColliders.raycastSurface(ray);
+    if (!hit) return;
+    const radius = state.digRadius;
+    addDigEdit({ x: hit.point.x, y: hit.point.y, z: hit.point.z, r: radius });
+    const t0 = performance.now();
+    const margin = radius + DIG_INFLUENCE_MARGIN;
+    const rebuild = rebuildDirtyPages(result, {
+      minX: hit.point.x - margin,
+      maxX: hit.point.x + margin,
+      minZ: hit.point.z - margin,
+      maxZ: hit.point.z + margin,
+    }, cfg);
+
+    let colliderMs = 0;
+    for (const node of rebuild.changed) {
+      const v = views.get(node.id);
+      if (v) {
+        v.mesh.geometry.dispose();
+        v.mesh.geometry = toGeometry(node.mesh);
+        v.sourceNormals = node.mesh.normals;
+        v.recomputedNormals = computeGeometryNormals(node.mesh);
+        if (state.recomputedNormals) {
+          v.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(v.recomputedNormals, 3));
+        }
+      }
+      if (node.level === 0) {
+        const tc = performance.now();
+        const g = toGeometry(node.mesh);
+        terrainColliders.updatePage(node.id, g);
+        g.dispose();
+        colliderMs += performance.now() - tc;
+        // drop the cached raw-chunk bubble meshes; they regenerate lazily when owned
+        const chunkEntry = chunkGroups.get(node.id);
+        if (chunkEntry) {
+          scene.remove(chunkEntry.group);
+          for (const child of chunkEntry.group.children) (child as THREE.Mesh).geometry.dispose();
+          for (const m of chunkEntry.mats) m.dispose();
+          chunkGroups.delete(node.id);
+        }
+      }
+    }
+    const totalMs = performance.now() - t0;
+    lastDigSummary =
+      `${totalMs.toFixed(0)}ms (LOD0 ${rebuild.lod0Pages}p ${rebuild.lod0Ms.toFixed(0)}ms · ` +
+      `parents ${rebuild.parentNodes}n ${rebuild.parentMs.toFixed(0)}ms · collider ${colliderMs.toFixed(0)}ms)`;
+    console.log(
+      `[dig] r=${radius} at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary}`,
+    );
+    lastDigAt = performance.now();
+    lastCutKey = "";
+    lastDebugKey = "";
+    updateSelection();
+    updateInfo();
   };
 
   updateLighting();
@@ -1278,6 +1393,21 @@ async function main() {
     for (const { mats } of chunkGroups.values())
       for (const m of mats) (m.uniforms.uColor.value as THREE.Color).set(on ? 0xc94b4b : 0xffffff);
   });
+  const digFolder = gui.addFolder("digging");
+  digFolder.add(state, "digEnabled").name("dig on click").onChange(updateInfo);
+  const digRadiusController = digFolder
+    .add(state, "digRadius", 1, 8, 0.5)
+    .name("radius (cells)")
+    .onChange(updateInfo);
+  // Mirror the engine's Shift+scroll radius adjustment while playing (orbit scroll = zoom).
+  window.addEventListener("wheel", (event) => {
+    if (interaction.mode !== "playing" || !event.shiftKey) return;
+    const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX; // Shift+wheel maps to deltaX on Windows
+    if (delta === 0) return;
+    state.digRadius = THREE.MathUtils.clamp(state.digRadius - Math.sign(delta) * 0.5, 1, 8);
+    digRadiusController.updateDisplay();
+    updateInfo();
+  });
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -1301,6 +1431,33 @@ async function main() {
     }
     skyEnvironment.updateCamera(camera);
     if (!state.freeze) updateSelection();
+
+    // hold-to-dig pickaxe cadence while playing
+    if (
+      interaction.mode === "playing" && digHeld && state.digEnabled &&
+      document.pointerLockElement === renderer.domElement &&
+      performance.now() - lastDigAt >= DIG_HOLD_INTERVAL_MS
+    ) {
+      camera.getWorldDirection(digDirection);
+      performDig(new THREE.Ray(camera.position.clone(), digDirection.clone()));
+    }
+
+    // dig preview reticle at the current aim point
+    let digAimHit: TerrainSurfaceHit | null = null;
+    if (state.digEnabled && interaction.mode === "playing") {
+      camera.getWorldDirection(digDirection);
+      digAimRay.origin.copy(camera.position);
+      digAimRay.direction.copy(digDirection);
+      digAimHit = terrainColliders.raycastSurface(digAimRay);
+    } else if (state.digEnabled && interaction.mode === "orbit" && hoverPointerValid) {
+      playerRaycaster.setFromCamera(hoverPointer, camera);
+      digAimHit = terrainColliders.raycastSurface(playerRaycaster.ray);
+    }
+    if (digAimHit) {
+      digPreview.position.copy(digAimHit.point);
+      digPreview.scale.setScalar(state.digRadius);
+    }
+    digPreview.visible = digAimHit !== null;
 
     // advance crossfades
     for (const v of views.values()) {

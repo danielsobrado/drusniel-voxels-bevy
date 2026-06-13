@@ -26,6 +26,12 @@ export interface TerrainSpawnHit {
   pageId: string;
 }
 
+export interface TerrainSurfaceHit {
+  point: THREE.Vector3;
+  distance: number;
+  pageId: string;
+}
+
 export interface CapsuleCollisionResult {
   position: THREE.Vector3;
   velocity: THREE.Vector3;
@@ -91,6 +97,30 @@ export class TerrainColliderSet {
     }
 
     return nearest;
+  }
+
+  /** Nearest terrain hit with no slope filter — walls and ceilings count (dig targeting). */
+  raycastSurface(ray: THREE.Ray): TerrainSurfaceHit | null {
+    let nearest: TerrainSurfaceHit | null = null;
+    for (const entry of this.entries) {
+      const hit = entry.boundsTree.raycastFirst(ray, THREE.DoubleSide);
+      if (!hit) continue;
+      if (!nearest || hit.distance < nearest.distance) {
+        nearest = { point: hit.point.clone(), distance: hit.distance, pageId: entry.id };
+      }
+    }
+    return nearest;
+  }
+
+  /** Replace one page's collision geometry (after a terrain edit) and rebuild its BVH. */
+  updatePage(id: string, geometry: THREE.BufferGeometry): boolean {
+    const entry = this.entries.find((e) => e.id === id);
+    if (!entry) return false;
+    entry.geometry.dispose();
+    entry.geometry = geometry.clone();
+    entry.geometry.computeBoundingBox();
+    entry.boundsTree = new MeshBVH(entry.geometry);
+    return true;
   }
 
   resolveCapsule(

@@ -42,6 +42,17 @@
       }
       body[data-player-mode="choosingSpawn"] canvas { cursor: crosshair; }
       body[data-player-mode="playing"] canvas { cursor: none; }
+      #crosshair {
+        position: absolute; left: 50%; top: 50%; width: 14px; height: 14px;
+        margin: -7px 0 0 -7px; pointer-events: none; display: none; z-index: 11;
+      }
+      body[data-player-mode="playing"] #crosshair { display: block; }
+      #crosshair::before, #crosshair::after {
+        content: ""; position: absolute;
+        background: rgba(255, 255, 255, 0.85); box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+      }
+      #crosshair::before { left: 6px; top: 0; width: 2px; height: 14px; }
+      #crosshair::after { left: 0; top: 6px; width: 14px; height: 2px; }
       #build-progress[hidden] { display: none; }
       #build-progress {
         position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -127,6 +138,7 @@
   </head>
   <body>
     <div id="info">building…</div>
+    <div id="crosshair"></div>
     <div id="player-mode-bar" aria-label="View mode">
       <button id="orbit-mode" type="button" aria-pressed="true">Orbit</button>
       <button id="player-mode" type="button" aria-pressed="false">Player</button>

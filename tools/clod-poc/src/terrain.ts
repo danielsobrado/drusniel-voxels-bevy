@@ -197,9 +197,53 @@ export function surfaceHeight(x: number, z: number): number {
   return Math.min(cfg.height.max - 0.5, Math.max(minSurface, softenHeightCap(height, minSurface, cfg.height.max)));
 }
 
+// ---- dig edits -------------------------------------------------------------
+//
+// Runtime carve overlay, the PoC analogue of the engine's terrain "lower/dig" tool
+// (src/terrain/tools/operations.rs): each dig is a sphere of air subtracted from the
+// field via CSG min(base, |p-c| - r). The edits stay a pure function of (x,y,z), so
+// halo recomputation still emits byte-identical border vertices and welding holds.
+
+/** A carved-out sphere of air. */
+export interface DigEdit {
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+}
+
+/** Carving at or below this height is ignored — analogue of the engine's bedrock guard. */
+const BEDROCK_Y = 1;
+/** A carve can move the isosurface wherever |p-c| - r < base density; near the surface
+ *  |base| stays small, so r + this margin bounds the influence region. */
+export const DIG_INFLUENCE_MARGIN = 4;
+
+const digEdits: DigEdit[] = [];
+
+export function addDigEdit(edit: DigEdit): void {
+  digEdits.push(edit);
+}
+
+export function clearDigEdits(): void {
+  digEdits.length = 0;
+}
+
+export function digEditCount(): number {
+  return digEdits.length;
+}
+
 /** density > 0 = solid (below surface), < 0 = air. The isosurface is density = 0. */
 export function density(x: number, y: number, z: number): number {
-  return surfaceHeight(x, z) - y;
+  let d = surfaceHeight(x, z) - y;
+  if (digEdits.length > 0 && y > BEDROCK_Y) {
+    for (const e of digEdits) {
+      const reach = e.r + DIG_INFLUENCE_MARGIN;
+      const dx = x - e.x, dy = y - e.y, dz = z - e.z;
+      if (Math.abs(dx) > reach || Math.abs(dy) > reach || Math.abs(dz) > reach) continue;
+      d = Math.min(d, Math.hypot(dx, dy, dz) - e.r);
+    }
+  }
+  return d;
 }
 
 function gradient(x: number, y: number, z: number): [number, number, number] {
@@ -333,6 +377,12 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
   const x0 = cx * S, x1 = (cx + 1) * S;
   const z0 = cz * S, z1 = (cz + 1) * S;
 
+  // The per-column Y scan band follows the base surface; dig edits can carve crossings
+  // far below it, so widen the band for columns a nearby edit can reach.
+  const chunkEdits = digEdits.filter((e) =>
+    e.x + e.r + DIG_INFLUENCE_MARGIN >= x0 - 1 && e.x - e.r - DIG_INFLUENCE_MARGIN <= x1 &&
+    e.z + e.r + DIG_INFLUENCE_MARGIN >= z0 - 1 && e.z - e.r - DIG_INFLUENCE_MARGIN <= z1);
+
   for (let i = x0; i < x1; i++) {
     for (let k = z0; k < z1; k++) {
       const nearbyHeights = [
@@ -342,8 +392,13 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
         surfaceHeight(i, k + 1),
         surfaceHeight(i, k - 1),
       ];
-      const j0 = Math.max(0, Math.floor(Math.min(...nearbyHeights)) - 2);
-      const j1 = Math.min(Y_CELLS - 1, Math.ceil(Math.max(...nearbyHeights)) + 2);
+      let j0 = Math.max(0, Math.floor(Math.min(...nearbyHeights)) - 2);
+      let j1 = Math.min(Y_CELLS - 1, Math.ceil(Math.max(...nearbyHeights)) + 2);
+      for (const e of chunkEdits) {
+        if (Math.abs(i - e.x) > e.r + DIG_INFLUENCE_MARGIN || Math.abs(k - e.z) > e.r + DIG_INFLUENCE_MARGIN) continue;
+        j0 = Math.max(0, Math.min(j0, Math.floor(e.y - e.r - DIG_INFLUENCE_MARGIN)));
+        j1 = Math.min(Y_CELLS - 1, Math.max(j1, Math.ceil(e.y + e.r + DIG_INFLUENCE_MARGIN)));
+      }
       for (let j = j0; j <= j1; j++) {
         emitAxis("x", i, j, k, buf, indices, world);
         emitAxis("y", i, j, k, buf, indices, world);

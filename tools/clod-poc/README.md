@@ -176,9 +176,27 @@ more LOD3 roots and can still freeze briefly inside individual node builds. Get 
 one corner, then toggle the 2:1 constraint to see large neighbor LOD deltas appear and get
 bounded.
 
-Not yet built: floating per-node error labels + locked-border highlight, and an explicit carved cave
-tunnel (single-vertex Surface Nets can't split two sheets in one cell — a PoC mesher
-limit, not a CLOD one; the engine's mesher handles caves).
+The **digging** folder ports the engine's terrain-lower tool (`src/terrain/tools/`):
+click the terrain to carve a sphere of air. In orbit mode a click-without-drag digs at
+the cursor; in player mode a click digs at the crosshair, **holding** the button keeps
+digging on a fixed cadence, and **Shift+wheel** adjusts the radius (mirroring the
+engine's Shift+scroll). A translucent sphere previews the carve at the current aim
+point. Player movement uses acceleration-based horizontal control with reduced air
+control, plus coyote time and jump buffering, so cave hopping feels intentional. Each dig is a CSG subtraction on the global
+density field with a bedrock guard at y=1, so halo recomputation stays byte-identical and
+all weld/border invariants hold. The dug LOD0 pages are rebuilt synchronously, every
+ancestor is re-simplified (merge → weld → lock → simplify with the same hard-fail
+validation), the collider BVHs are refreshed (you can walk into the cave), and any cached
+near-field raw chunks are invalidated. The overlay's `dig:` line and the console report
+the per-edit cost breakdown — LOD0 page rebuild, parent re-simplify, collider — which is
+the number this experiment exists to measure: what a single terrain edit costs under
+CLOD's "decimate, never re-extract" rule. Digging below the surface carves real caves;
+the LOD1+ cuts show the simplified cave mouths. Known limits: grass placement is not
+re-sampled after digs (blades can float over holes), and single-vertex Surface Nets still
+can't split two surface sheets inside one cell, so very thin walls between digs can look
+chunky (a PoC mesher limit, not a CLOD one; the engine's mesher handles caves).
+
+Not yet built: floating per-node error labels + locked-border highlight.
 
 ## Module map (mirrors the Rust appendix §11)
 

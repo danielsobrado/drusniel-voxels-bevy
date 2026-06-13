@@ -32,6 +32,14 @@ export interface PlayerConfig extends CapsuleCollisionConfig {
   gravity: number;
   fixedStep: number;
   recoveryDepth: number;
+  /** Horizontal accel toward the desired velocity while grounded (units/s²). */
+  groundAcceleration: number;
+  /** Reduced horizontal accel while airborne — steerable but not instant. */
+  airAcceleration: number;
+  /** Grace window after leaving the ground in which a jump still fires (s). */
+  coyoteTime: number;
+  /** A jump pressed this long before landing still fires on touchdown (s). */
+  jumpBufferTime: number;
 }
 
 export const DEFAULT_PLAYER_CONFIG: Readonly<PlayerConfig> = Object.freeze({
@@ -46,6 +54,10 @@ export const DEFAULT_PLAYER_CONFIG: Readonly<PlayerConfig> = Object.freeze({
   gravity: 30,
   fixedStep: 1 / 120,
   recoveryDepth: 32,
+  groundAcceleration: 60,
+  airAcceleration: 16,
+  coyoteTime: 0.12,
+  jumpBufferTime: 0.15,
 });
 
 export class PlayerInteractionState {
@@ -99,6 +111,8 @@ export class PlayerController {
   lastPhysicsMs = 0;
   lastPagesTested = 0;
   private accumulator = 0;
+  private coyoteTimer = 0;
+  private jumpBufferTimer = 0;
   private readonly physicsSamples: number[] = [];
 
   constructor(
@@ -114,6 +128,8 @@ export class PlayerController {
     this.lastSafePosition.copy(this.position);
     this.grounded = false;
     this.accumulator = 0;
+    this.coyoteTimer = 0;
+    this.jumpBufferTimer = 0;
   }
 
   update(deltaSeconds: number, input: PlayerInputState, cameraForward: THREE.Vector3): void {
@@ -129,11 +145,9 @@ export class PlayerController {
       .multiplyScalar(normalized.speed);
 
     this.accumulator += Math.min(Math.max(deltaSeconds, 0), 0.1);
-    let jumpPending = normalized.jump;
     let steps = 0;
     while (this.accumulator >= this.config.fixedStep && steps < 12) {
-      this.fixedUpdate(this.config.fixedStep, desiredMotion, jumpPending);
-      jumpPending = false;
+      this.fixedUpdate(this.config.fixedStep, desiredMotion, normalized.jump);
       this.accumulator -= this.config.fixedStep;
       steps++;
     }
@@ -149,12 +163,19 @@ export class PlayerController {
     return sorted[Math.floor((sorted.length - 1) * 0.95)];
   }
 
-  private fixedUpdate(step: number, desiredMotion: THREE.Vector3, jump: boolean): void {
-    this.velocity.x = desiredMotion.x;
-    this.velocity.z = desiredMotion.z;
-    if (jump && this.grounded) {
+  private fixedUpdate(step: number, desiredMotion: THREE.Vector3, jumpHeld: boolean): void {
+    // Accelerate toward the desired velocity: full traction grounded, reduced in the air.
+    const accel = (this.grounded ? this.config.groundAcceleration : this.config.airAcceleration) * step;
+    this.velocity.x += THREE.MathUtils.clamp(desiredMotion.x - this.velocity.x, -accel, accel);
+    this.velocity.z += THREE.MathUtils.clamp(desiredMotion.z - this.velocity.z, -accel, accel);
+
+    this.coyoteTimer = this.grounded ? this.config.coyoteTime : Math.max(0, this.coyoteTimer - step);
+    this.jumpBufferTimer = jumpHeld ? this.config.jumpBufferTime : Math.max(0, this.jumpBufferTimer - step);
+    if (this.jumpBufferTimer > 0 && (this.grounded || this.coyoteTimer > 0)) {
       this.velocity.y = jumpVelocityForHeight(this.config.jumpHeight, this.config.gravity);
       this.grounded = false;
+      this.coyoteTimer = 0;
+      this.jumpBufferTimer = 0;
     } else {
       this.velocity.y -= this.config.gravity * step;
     }
