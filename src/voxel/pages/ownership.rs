@@ -1,18 +1,16 @@
 //! Phase 5 Step 5: binary live-chunk/page terrain ownership.
 //!
-//! CLOD pages and live chunks are mutually exclusive owners of a terrain footprint.
-//! Fresh LOD0 pages are built from the same main-surface chunk meshes as the live
-//! chunks, so drawing both causes coplanar z-fighting. Binary ownership switch per
-//! chunk footprint; complementary dither fade ONLY for stale (post-edit) geometry.
+//! CLOD pages own far-field rendering while live chunks remain visible only in the
+//! near-field bubble. Fresh pages are built from the same LOD0 chunk meshes, so the
+//! far live render entities stay hidden even while page replacements are unavailable.
+//! Complementary dither fade is used only for stale post-edit page geometry.
 
 use std::collections::HashSet;
 
 use bevy::prelude::*;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
-use super::render::ClodPageMeshTag;
 use super::runtime::ClodPagesRuntime;
-#[cfg(test)]
 use super::selection::NearFieldBubble;
 use super::selection::{ClodPageNodeKey, clod_near_field_bubble, near_field_intersects_footprint};
 use super::types::PageFootprint;
@@ -23,9 +21,6 @@ use crate::voxel::chunk::{LodLevel, MeshDirtyReason};
 use crate::voxel::meshing::{ChunkMesh, WaterMesh};
 use crate::voxel::runtime::mark_surface_nets_halo_dirty;
 use crate::voxel::world::VoxelWorld;
-
-#[cfg(test)]
-const FOOTPRINT_EPSILON: f32 = 0.001;
 
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub(crate) struct ClodPageOwnedChunk;
@@ -119,45 +114,15 @@ pub(crate) fn chunk_footprint(chunk_pos: IVec3) -> PageFootprint {
     }
 }
 
-#[cfg(test)]
-fn page_covers_chunk(page: PageFootprint, chunk: PageFootprint) -> bool {
-    page.min_x <= chunk.min_x + FOOTPRINT_EPSILON
-        && page.min_z <= chunk.min_z + FOOTPRINT_EPSILON
-        && page.max_x + FOOTPRINT_EPSILON >= chunk.max_x
-        && page.max_z + FOOTPRINT_EPSILON >= chunk.max_z
-}
-
-#[cfg(test)]
-fn visible_page_covers_chunk(page_footprints: &[PageFootprint], chunk: PageFootprint) -> bool {
-    page_footprints
-        .iter()
-        .any(|page| page_covers_chunk(*page, chunk))
-}
-
-#[cfg(test)]
-fn chunk_owned_by_page(
+fn live_chunk_hidden_by_clod(
     chunk: PageFootprint,
-    bubble: NearFieldBubble,
-    ready_visible_pages: &[PageFootprint],
+    bubble: Option<NearFieldBubble>,
+    pending_restore: bool,
 ) -> bool {
-    !near_field_intersects_footprint(chunk, bubble)
-        && visible_page_covers_chunk(ready_visible_pages, chunk)
-}
-
-fn ready_visible_page_keys(
-    tree: &ClodPageTree,
-    page_query: &Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
-) -> HashSet<ClodPageNodeKey> {
-    if !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready)) {
-        return HashSet::new();
-    }
-
-    page_query
-        .iter()
-        .filter_map(|(tag, visibility)| {
-            (*visibility == Visibility::Visible).then(|| ClodPageNodeKey::from(tag))
-        })
-        .collect()
+    pending_restore
+        || bubble
+            .map(|bubble| !near_field_intersects_footprint(chunk, bubble))
+            .unwrap_or(true)
 }
 
 pub(crate) fn chunk_page_coord(chunk_pos: IVec3, chunks_per_page: i32, level: usize) -> (i32, i32) {
@@ -258,25 +223,6 @@ fn refresh_terrain_mutation_restore_columns(gate: &mut ClodPageMeshGate, world: 
     gate.pending_restore_columns.extend(mutation_columns);
 }
 
-fn mark_lost_owned_columns_dirty(
-    gate: &mut ClodPageMeshGate,
-    world: &mut VoxelWorld,
-    lost_columns: HashSet<IVec2>,
-) {
-    if lost_columns.is_empty() {
-        return;
-    }
-
-    let positions = world
-        .chunk_entries()
-        .filter_map(|(pos, _)| lost_columns.contains(&chunk_column(*pos)).then_some(*pos))
-        .collect::<Vec<_>>();
-    for pos in positions {
-        world.mark_chunk_dirty_with_reason(pos, MeshDirtyReason::Generation);
-    }
-    gate.pending_restore_columns.extend(lost_columns);
-}
-
 pub(crate) fn refresh_clod_page_mesh_gate_system(
     runtime: Res<ClodPagesRuntime>,
     tree: Res<ClodPageTree>,
@@ -309,18 +255,17 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
         return;
     }
 
-    let previous_owned = std::mem::take(&mut gate.owned_columns);
     gate.tree_revision = Some(tree.revision);
     gate.world_chunk_count = world_chunk_count;
     gate.bubble_key = bubble_key;
 
     if !pages_ready {
-        mark_lost_owned_columns_dirty(&mut gate, &mut world, previous_owned);
+        gate.owned_columns.clear();
         return;
     }
 
     let Some(camera_transform) = camera_query.single().ok() else {
-        mark_lost_owned_columns_dirty(&mut gate, &mut world, previous_owned);
+        gate.owned_columns.clear();
         return;
     };
     let player_transform = player_query.single().ok();
@@ -342,12 +287,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
         }
     }
 
-    let lost_columns = previous_owned
-        .difference(&owned_columns)
-        .copied()
-        .collect::<HashSet<_>>();
     gate.owned_columns = owned_columns;
-    mark_lost_owned_columns_dirty(&mut gate, &mut world, lost_columns);
 }
 
 fn restore_clod_hidden_chunk(
@@ -370,10 +310,8 @@ fn restore_clod_hidden_chunk(
 pub(crate) fn clod_page_chunk_ownership_system(
     mut commands: Commands,
     runtime: Res<ClodPagesRuntime>,
-    tree: Res<ClodPageTree>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
-    page_query: Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
     mut chunk_query: Query<
         (
             Entity,
@@ -385,45 +323,22 @@ pub(crate) fn clod_page_chunk_ownership_system(
     >,
     page_mesh_gate: Option<Res<ClodPageMeshGate>>,
     world: Res<VoxelWorld>,
-    mut had_owned_chunks: Local<bool>,
 ) {
-    let pages_can_own = matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready));
-    if !pages_can_own && !*had_owned_chunks {
-        return;
-    }
-
-    let Ok(camera_transform) = camera_query.single() else {
-        if !*had_owned_chunks {
-            return;
-        }
-        for (entity, _, mut visibility, marker) in &mut chunk_query {
-            restore_clod_hidden_chunk(&mut commands, entity, &mut visibility, marker);
-        }
-        *had_owned_chunks = false;
-        return;
-    };
-
-    let player_transform = player_query.single().ok();
-    let bubble = clod_near_field_bubble(&runtime, camera_transform, player_transform);
-    let ready_pages = ready_visible_page_keys(&tree, &page_query);
-    if ready_pages.is_empty() && !*had_owned_chunks {
-        return;
-    }
-
-    let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
-    let level_count = tree.nodes_by_level.len();
-    let mut any_owned_chunks = false;
+    let bubble = camera_query.single().ok().map(|camera_transform| {
+        clod_near_field_bubble(&runtime, camera_transform, player_query.single().ok())
+    });
     for (entity, chunk_mesh, mut visibility, marker) in &mut chunk_query {
-        let chunk_footprint = chunk_footprint(chunk_mesh.chunk_position);
-        if !near_field_intersects_footprint(chunk_footprint, bubble)
-            && chunk_covered_by_visible_page(
-                chunk_mesh.chunk_position,
-                chunks_per_page,
-                level_count,
-                &ready_pages,
-            )
-        {
-            any_owned_chunks = true;
+        let pending_restore = page_mesh_gate
+            .as_deref()
+            .is_some_and(|gate| gate.chunk_pending_restore(chunk_mesh.chunk_position))
+            && world
+                .get_chunk(chunk_mesh.chunk_position)
+                .is_some_and(|chunk| chunk.is_dirty() || chunk.mesh_entity().is_none());
+        if live_chunk_hidden_by_clod(
+            chunk_footprint(chunk_mesh.chunk_position),
+            bubble,
+            pending_restore,
+        ) {
             if *visibility != Visibility::Hidden {
                 *visibility = Visibility::Hidden;
             }
@@ -431,20 +346,9 @@ pub(crate) fn clod_page_chunk_ownership_system(
                 commands.entity(entity).insert(ClodPageOwnedChunk);
             }
         } else {
-            if page_mesh_gate
-                .as_deref()
-                .is_some_and(|gate| gate.chunk_pending_restore(chunk_mesh.chunk_position))
-                && world
-                    .get_chunk(chunk_mesh.chunk_position)
-                    .is_some_and(|chunk| chunk.is_dirty() || chunk.mesh_entity().is_none())
-            {
-                any_owned_chunks = true;
-                continue;
-            }
             restore_clod_hidden_chunk(&mut commands, entity, &mut visibility, marker);
         }
     }
-    *had_owned_chunks = any_owned_chunks;
 }
 
 #[cfg(test)]
@@ -469,6 +373,15 @@ mod tests {
         }
     }
 
+    fn near_bubble() -> NearFieldBubble {
+        NearFieldBubble {
+            player_center: Some(Vec2::new(24.0, 24.0)),
+            camera_center: Vec2::new(1000.0, 1000.0),
+            radius: 96.0,
+            boundary_padding: 16.0,
+        }
+    }
+
     #[test]
     fn chunk_footprint_ignores_y_and_uses_world_xz() {
         let chunk = chunk_footprint(IVec3::new(-2, 7, 3));
@@ -479,20 +392,22 @@ mod tests {
     }
 
     #[test]
-    fn page_owner_requires_ready_visible_cover_and_outside_bubble() {
+    fn clod_hides_live_chunks_outside_the_near_field() {
         let chunk = footprint(16.0, 16.0, 32.0, 32.0);
-        let page = footprint(0.0, 0.0, 64.0, 64.0);
+        assert!(live_chunk_hidden_by_clod(chunk, Some(far_bubble()), false));
 
-        assert!(chunk_owned_by_page(chunk, far_bubble(), &[page]));
-        assert!(!chunk_owned_by_page(chunk, far_bubble(), &[]));
+        assert!(!live_chunk_hidden_by_clod(
+            chunk,
+            Some(near_bubble()),
+            false
+        ));
+    }
 
-        let near_bubble = NearFieldBubble {
-            player_center: Some(Vec2::new(24.0, 24.0)),
-            camera_center: Vec2::new(1000.0, 1000.0),
-            radius: 96.0,
-            boundary_padding: 16.0,
-        };
-        assert!(!chunk_owned_by_page(chunk, near_bubble, &[page]));
+    #[test]
+    fn clod_does_not_restore_live_chunks_without_a_camera_or_during_an_edit() {
+        let chunk = footprint(16.0, 16.0, 32.0, 32.0);
+        assert!(live_chunk_hidden_by_clod(chunk, None, false));
+        assert!(live_chunk_hidden_by_clod(chunk, Some(near_bubble()), true));
     }
 
     #[test]
