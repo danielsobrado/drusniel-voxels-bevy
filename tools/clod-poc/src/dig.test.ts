@@ -16,7 +16,7 @@ import { buildNodeIndex, buildWorld, rebuildDirtyLod0Pages, rebuildDirtyPages } 
 import { buildLod0PageSource } from "./source_mesh.js";
 import { initSimplifier } from "./simplify.js";
 import { assertBorderMatch, borderChain } from "./validate.js";
-import type { ClodPagesConfig } from "./config.js";
+import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "./config.js";
 
 // Small world: 2x2 pages of 2x2 chunks of 16 cells -> 64x64 cells, LOD0 + one LOD1 root.
 const cfg: ClodPagesConfig = {
@@ -28,6 +28,7 @@ const cfg: ClodPagesConfig = {
     weld_epsilon_cells: 0.001,
     attribute_weights: { normal: 0.5, material: 1.0 },
   },
+  polish: { diagonal_flip: DEFAULT_DIAGONAL_FLIP_CONFIG },
   selection: {
     error_threshold_px: 1,
     hysteresis_merge_factor: 1.5,

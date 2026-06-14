@@ -10,6 +10,7 @@ export interface ClodOverlaySnapshot {
   errorThreshold: number;
   buildStatus?: string;
   digCostLine?: string;
+  polishLine?: string;
 }
 
 export interface ClodOverlay {
@@ -45,6 +46,7 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
         <span data-overlay-status>preparing</span>
       </div>
       <p class="clod-overlay-dig"></p>
+      <p class="clod-overlay-polish"></p>
     </section>
   `;
   const meterRoot = root.querySelector<HTMLElement>(".clod-overlay-meters")!;
@@ -92,6 +94,9 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
       const dig = root.querySelector<HTMLElement>(".clod-overlay-dig")!;
       dig.hidden = !snapshot.digCostLine;
       dig.textContent = snapshot.digCostLine ? `Last edit: ${snapshot.digCostLine}` : "";
+      const polish = root.querySelector<HTMLElement>(".clod-overlay-polish")!;
+      polish.hidden = !snapshot.polishLine;
+      polish.textContent = snapshot.polishLine ?? "";
     },
   };
   activeOverlay = overlay;

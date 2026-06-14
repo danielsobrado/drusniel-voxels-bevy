@@ -4,6 +4,7 @@
 //! Lower LODs are NEVER re-extracted from voxels (I2).
 
 use super::config::ClodPagesConfig;
+use super::diagonal_polish::{DiagonalPolishStats, polish_diagonals};
 use super::lock::build_outer_border_locks;
 use super::simplify::simplify_page;
 use super::source_mesh::{PageSource, concat};
@@ -20,10 +21,12 @@ pub struct ClodPageNode {
     pub mesh: PageMesh,
     pub error_world: f32,
     pub low_benefit: bool,
+    pub polish: DiagonalPolishStats,
 }
 
 pub struct BuildResult {
     pub nodes_by_level: Vec<Vec<ClodPageNode>>,
+    pub polish: DiagonalPolishStats,
 }
 
 fn union(a: PageFootprint, b: PageFootprint) -> PageFootprint {
@@ -58,6 +61,8 @@ fn build_parent_node(
         (sim.mesh, sim.error_world, sim.low_benefit)
     };
     strip_degenerate_triangles(&mut mesh);
+    let polish_locks = build_outer_border_locks(&mesh);
+    let polish = polish_diagonals(&mut mesh, &polish_locks, &cfg.polish.diagonal_flip);
     assert_no_internal_borders(&mesh, &footprint)?;
     let max_child = children
         .iter()
@@ -70,6 +75,7 @@ fn build_parent_node(
         mesh,
         error_world: simplify_error + max_child,
         low_benefit,
+        polish,
     })
 }
 
@@ -146,6 +152,7 @@ pub fn build_quadtree(
             mesh,
             error_world: 0.0,
             low_benefit: false,
+            polish: DiagonalPolishStats::default(),
         });
     }
     nodes_by_level.push(level0);
@@ -176,5 +183,13 @@ pub fn build_quadtree(
         }
     }
 
-    Ok(BuildResult { nodes_by_level })
+    let mut polish = DiagonalPolishStats::default();
+    for node in nodes_by_level.iter().flatten() {
+        polish.add_assign(&node.polish);
+    }
+
+    Ok(BuildResult {
+        nodes_by_level,
+        polish,
+    })
 }

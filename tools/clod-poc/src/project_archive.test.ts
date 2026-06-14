@@ -1,6 +1,6 @@
 import { unzipSync, zipSync, strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
-import type { ClodPagesConfig } from "./config.js";
+import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "./config.js";
 import {
   createProjectArchive,
   parseProjectArchive,
@@ -19,6 +19,7 @@ const cfg: ClodPagesConfig = {
     weld_epsilon_cells: 0.001,
     attribute_weights: { normal: 0.5, material: 1 },
   },
+  polish: { diagonal_flip: DEFAULT_DIAGONAL_FLIP_CONFIG },
   selection: {
     error_threshold_px: 1,
     hysteresis_merge_factor: 1.5,

@@ -31,6 +31,38 @@ pub struct SimplifyCfg {
     pub attribute_weights: AttributeWeights,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DiagonalFlipConfig {
+    pub enabled: bool,
+    pub min_triangle_area: f32,
+    pub min_normal_dot: f32,
+    pub min_angle_improvement_degrees: f32,
+    pub normal_error_weight: f32,
+    pub angle_quality_weight: f32,
+    pub material_error_weight: f32,
+}
+
+impl Default for DiagonalFlipConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_triangle_area: 0.000001,
+            min_normal_dot: 0.05,
+            min_angle_improvement_degrees: 2.0,
+            normal_error_weight: 1.0,
+            angle_quality_weight: 1.0,
+            material_error_weight: 0.25,
+        }
+    }
+}
+
+#[derive(Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct PolishCfg {
+    pub diagonal_flip: DiagonalFlipConfig,
+}
+
 #[derive(Deserialize, Clone)]
 pub struct NearFieldCfg {
     pub radius_chunks: i32,
@@ -48,6 +80,8 @@ pub struct SelectionCfg {
 pub struct ClodPagesConfig {
     pub page: PageCfg,
     pub simplify: SimplifyCfg,
+    #[serde(default)]
+    pub polish: PolishCfg,
     pub selection: SelectionCfg,
     pub near_field: NearFieldCfg,
 }

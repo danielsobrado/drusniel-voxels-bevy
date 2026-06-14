@@ -80,6 +80,7 @@ import {
 import { iconDataUrl, type ClodIconKind } from "./ui/icons/index.js";
 import { setButtonIcon, setIconOnlyButton } from "./ui/dom_icons.js";
 import { createClodOverlay, updateClodOverlay, type ClodOverlaySnapshot } from "./ui/overlay_panel.js";
+import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "./diagonalPolish.js";
 import { LockedBorderOverlay } from "./ui/locked_border_overlay.js";
 import { NodeLabelOverlay } from "./ui/node_labels.js";
 import {
@@ -408,6 +409,7 @@ async function main() {
   });
   buildProgress.hidden = true;
   buildStatus = "ready";
+  const polishLine = formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish)));
   const allNodes: ClodPageNode[] = [...result.nodesByLevel.values()].flat();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -1154,6 +1156,7 @@ async function main() {
     errorThreshold: state.thresholdPx,
     buildStatus,
     digCostLine: lastDigSummary || undefined,
+    polishLine,
   });
 
   const updateInfo = () => {
@@ -1167,6 +1170,7 @@ async function main() {
       `bubble forced splits: ${lastNearFieldForced}   xLOD borders: ${lastCrossLodAdjacencyCount}\n` +
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
+      `${polishLine}\n` +
       `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassBladeCount.toLocaleString()} blades\n` +
       `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
       `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
