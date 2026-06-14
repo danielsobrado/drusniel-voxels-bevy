@@ -126,7 +126,9 @@ npm run dev
 
 Builds a 4×4 world in-browser and runs the real runtime (§4): per-frame **DAG-cut
 selection** (screen-space error + hysteresis), the optional **2:1 restricted-quadtree
-pass**, and a **dithered screen-door crossfade** when the cut changes. lil-gui controls:
+pass**, and a complementary screen-door crossfade when the cut changes. Incoming and
+outgoing pages use opposite masks, so each pixel is owned by exactly one page during the
+transition. lil-gui controls:
 error-threshold slider, 2:1 toggle, freeze-selection, page-boundary boxes, wireframe,
 colour-by-LOD, normal-colour/recomputed-normal diagnostics, same-LOD seam points, a
 camera-following procedural sky dome with sun disk, glow, horizon haze, and exposure
@@ -139,10 +141,13 @@ open the texture modal. It shows four
 square slots for low→high terrain bands; click a square to load or replace that single
 texture, or use "Load all" to fill slots from one multi-file selection. Each texture slot
 has its own low/high height range. The right-side `blend mode` control switches between
-hard bands, where the shader uses the range containing the current vertex height, and
-blend bands, where adjacent ranges crossfade across the configured `blend height`. Gaps
-fall back to the nearest loaded slot. Textures are sampled in world X/Z with repeat
-wrapping, and the global "texture scale" controls tiling density. With `colour by LOD`
+hard bands, where the shader uses the range containing the current vertex height. The
+optional blend-bands mode blends adjacent texture ranges across the configured
+`blend height`; that texture-band blend is independent of CLOD page selection. Gaps
+fall back to the nearest loaded slot. Textures default to world X/Z sampling with repeat
+wrapping so the textured preview is stable across LOD cuts; the `triplanar` toggle is
+available for inspecting projection quality separately. The global "texture scale"
+controls tiling density. With `colour by LOD`
 enabled the page colour is applied as a light tint over the texture, so the image remains
 visible on every LOD while ownership is still readable. Turn `colour by LOD` off for a
 neutral textured terrain pass.

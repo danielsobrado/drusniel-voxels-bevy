@@ -1,8 +1,5 @@
-// Dithered (screen-door) crossfade material. Plan §4.2.
-//
-// Topology-changing decimation can't geomorph cheaply, so the PoC crossfades with a
-// screen-door dither over `crossfade_frames` when the cut changes. Our terrain meshes
-// carry WORLD-space normals, so lighting uses them directly (no normalMatrix).
+// Terrain page material. Runtime LOD swaps use complementary screen-door masks.
+// Terrain meshes carry WORLD-space normals, so lighting uses them directly (no normalMatrix).
 
 import * as THREE from "three";
 import {

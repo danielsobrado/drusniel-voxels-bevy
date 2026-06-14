@@ -151,6 +151,7 @@ export function buildTerrainFragmentShader(): string {
   uniform vec3 uGroundLight;
   uniform float uFade;
   uniform bool uDither;
+  uniform bool uFadeIn;
   uniform bool uNormalColor;
   uniform bool uNormalDivergence;
   uniform float uDivergenceGain;
@@ -239,7 +240,14 @@ ${buildPaintedFallback()}
     return max(color, vec3(0.0));
   }
   void main() {
-    if (uDither && ign(gl_FragCoord.xy) > uFade) discard;
+    if (uDither) {
+      float n = ign(gl_FragCoord.xy);
+      if (uFadeIn) {
+        if (n > uFade) discard;
+      } else {
+        if (n <= 1.0 - uFade) discard;
+      }
+    }
     if (uNormalDivergence) {
       vec3 gN = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
       float div = 1.0 - abs(dot(normalize(vWorldNormal), gN));
@@ -293,6 +301,7 @@ export function createTerrainTextureUniforms(): Record<string, { value: unknown 
     uGroundLight: { value: new THREE.Color(0.18, 0.16, 0.13) },
     uFade: { value: 1 },
     uDither: { value: false },
+    uFadeIn: { value: true },
     uNormalColor: { value: false },
     uNormalDivergence: { value: false },
     uDivergenceGain: { value: 8.0 },

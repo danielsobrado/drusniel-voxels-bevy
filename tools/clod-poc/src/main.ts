@@ -1,7 +1,7 @@
 // Phase 2 runtime viewer. Plan §4.
 //
-// Per-frame DAG-cut selection (errorPx + hysteresis + optional 2:1), dithered crossfade on
-// cut changes, debug overlays, per-node screen labels and locked-border highlights.
+// Per-frame DAG-cut selection (errorPx + hysteresis + optional 2:1), debug overlays,
+// per-node screen labels and locked-border highlights.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -192,8 +192,9 @@ interface NodeView {
   mat: THREE.ShaderMaterial;
   sourceNormals: Float32Array;
   recomputedNormals: Float32Array | null;
-  fade: number; // current crossfade value
-  target: number; // 0 or 1
+  selected: boolean;
+  fade: number;
+  target: number;
 }
 
 interface TextureSlot {
@@ -708,13 +709,13 @@ async function main() {
     recomputedNormals: false,
     forceMaxLevel: "auto",
     textureScale: 1,
-    triplanar: !queryPerfMode,
+    triplanar: false,
     albedo: !queryPerfMode,
     normalMap: false,
     normalIntensity: 1,
     roughness: 0.9,
     metalness: 0,
-    textureBlendMode: TEXTURE_BLEND_MODES[1] as TextureBlendMode,
+    textureBlendMode: TEXTURE_BLEND_MODES[0] as TextureBlendMode,
     textureBlendWidth: 6,
     loadedTextureFiles: "none",
     terrainBrightness: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.brightness,
@@ -963,15 +964,17 @@ async function main() {
     }
     lastTexturesActive = active;
     if (!colorByLodUserOverride) {
-      state.colorByLod = !active;
+      state.colorByLod = state.clodPerfMode;
       colorByLodController?.updateDisplay();
     }
     applyColorByLodToMaterials(state.colorByLod);
   };
-  // One view per node; visibility/fade drive what's drawn.
+  // One view per node; selection visibility drives what's drawn.
   const views = new Map<string, NodeView>();
   for (const node of allNodes) {
-    const mat = createTerrainMaterial(LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)]);
+    const mat = createTerrainMaterial(
+      state.colorByLod ? LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)] : 0xb9c0c8,
+    );
     applyTerrainColorAdjustments(mat, currentTerrainColorAdjustments());
     applyLightingToMaterial(mat);
     const mesh = new THREE.Mesh(toGeometry(node.mesh), mat);
@@ -983,6 +986,7 @@ async function main() {
       mat,
       sourceNormals: node.mesh.normals,
       recomputedNormals: null,
+      selected: false,
       fade: 0,
       target: 0,
     });
@@ -1076,7 +1080,9 @@ async function main() {
   };
   let grass: GrassSystem | null = null;
   let selState: SelectionState = { split: new Set() };
-  const crossfadeStep = 1 / cfg.selection.crossfade_frames;
+  const crossfadeStep = cfg.selection.crossfade_frames > 0
+    ? 1 / cfg.selection.crossfade_frames
+    : 1;
   const forEachTerrainMaterial = (fn: (mat: THREE.ShaderMaterial) => void) => {
     for (const v of views.values()) fn(v.mat);
     for (const { mats } of chunkGroups.values()) for (const m of mats) fn(m);
@@ -1238,7 +1244,10 @@ async function main() {
     lastNearFieldForced = nearFieldForcedSplits;
 
     const cutIds = new Set(rendered.map((n) => n.id));
-    for (const v of views.values()) v.target = cutIds.has(v.node.id) ? 1 : 0;
+    for (const v of views.values()) {
+      v.selected = cutIds.has(v.node.id);
+      v.target = v.selected ? 1 : 0;
+    }
 
     const perLevel = new Map<number, number>();
     let tris = 0;
@@ -2926,13 +2935,15 @@ async function main() {
     }
     digPreview.visible = digAimHit !== null;
 
-    // advance crossfades
+    // Page LOD swaps use complementary screen-door masks: incoming pages draw
+    // noise <= fade, outgoing pages draw noise > 1 - fade.
     for (const v of views.values()) {
       if (v.fade < v.target) v.fade = Math.min(v.target, v.fade + crossfadeStep);
       else if (v.fade > v.target) v.fade = Math.max(v.target, v.fade - crossfadeStep);
       v.mesh.visible = v.fade > 0.001;
       v.mat.uniforms.uFade.value = v.fade;
-      v.mat.uniforms.uDither.value = v.fade < 0.999;
+      v.mat.uniforms.uFadeIn.value = v.target > 0.5;
+      v.mat.uniforms.uDither.value = v.fade > 0.001 && v.fade < 0.999;
     }
 
     // Near-field bubble: a LOD0 page within the radius is owned by its raw chunks instead.
@@ -2941,7 +2952,7 @@ async function main() {
       const owned =
         state.bubble &&
         v.node.level === 0 &&
-        v.target === 1 &&
+        v.target > 0.5 &&
         Math.hypot(
           (interaction.mode === "playing" ? player.position.x : controls.target.x) - (v.node.footprint.minX + v.node.footprint.maxX) / 2,
           (interaction.mode === "playing" ? player.position.z : controls.target.z) - (v.node.footprint.minZ + v.node.footprint.maxZ) / 2,
