@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
-use super::render::{ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
+use super::render::ClodPageMeshTag;
 use super::runtime::ClodPagesRuntime;
 #[cfg(test)]
 use super::selection::NearFieldBubble;
@@ -145,15 +145,10 @@ fn chunk_owned_by_page(
 }
 
 fn ready_visible_page_keys(
-    runtime: &ClodPagesRuntime,
-    show: &ClodPagesShow,
     tree: &ClodPageTree,
     page_query: &Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
 ) -> HashSet<ClodPageNodeKey> {
-    if !runtime.enabled
-        || show.0 == ClodPagesShowMode::Off
-        || !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
-    {
+    if !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready)) {
         return HashSet::new();
     }
 
@@ -284,39 +279,19 @@ fn mark_lost_owned_columns_dirty(
 
 pub(crate) fn refresh_clod_page_mesh_gate_system(
     runtime: Res<ClodPagesRuntime>,
-    show: Res<ClodPagesShow>,
     tree: Res<ClodPageTree>,
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
     mut gate: ResMut<ClodPageMeshGate>,
 ) {
-    gate.enabled = runtime.enabled && env_bool("CLOD_PAGES_MESH_GATE", true);
-    if !gate.enabled {
-        gate.pages_ready = false;
-        gate.pages_failed = false;
-        gate.pages_pending = false;
-        gate.tree_revision = None;
-        gate.world_chunk_count = world.chunk_count();
-        gate.bubble_key = None;
-        gate.owned_columns.clear();
-        gate.pending_restore_columns.clear();
-        return;
-    }
-
     refresh_pending_restore_columns(&mut gate, &world);
     refresh_terrain_mutation_restore_columns(&mut gate, &mut world);
 
-    let pages_ready = runtime.enabled
-        && show.0 != ClodPagesShowMode::Off
-        && matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready));
+    let pages_ready = matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready));
     gate.pages_ready = pages_ready;
-    gate.pages_failed = runtime.enabled
-        && show.0 != ClodPagesShowMode::Off
-        && matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Failed(_)));
-    gate.pages_pending = runtime.enabled
-        && show.0 != ClodPagesShowMode::Off
-        && matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Building));
+    gate.pages_failed = matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Failed(_)));
+    gate.pages_pending = matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Building));
 
     let bubble_key = camera_query.single().ok().map(|camera_transform| {
         let player_transform = player_query.single().ok();
@@ -395,7 +370,6 @@ fn restore_clod_hidden_chunk(
 pub(crate) fn clod_page_chunk_ownership_system(
     mut commands: Commands,
     runtime: Res<ClodPagesRuntime>,
-    show: Res<ClodPagesShow>,
     tree: Res<ClodPageTree>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
@@ -413,9 +387,7 @@ pub(crate) fn clod_page_chunk_ownership_system(
     world: Res<VoxelWorld>,
     mut had_owned_chunks: Local<bool>,
 ) {
-    let pages_can_own = runtime.enabled
-        && show.0 != ClodPagesShowMode::Off
-        && matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready));
+    let pages_can_own = matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready));
     if !pages_can_own && !*had_owned_chunks {
         return;
     }
@@ -433,7 +405,7 @@ pub(crate) fn clod_page_chunk_ownership_system(
 
     let player_transform = player_query.single().ok();
     let bubble = clod_near_field_bubble(&runtime, camera_transform, player_transform);
-    let ready_pages = ready_visible_page_keys(&runtime, &show, &tree, &page_query);
+    let ready_pages = ready_visible_page_keys(&tree, &page_query);
     if ready_pages.is_empty() && !*had_owned_chunks {
         return;
     }
@@ -524,16 +496,11 @@ mod tests {
     }
 
     #[test]
-    fn mesh_gate_requires_both_enablement_and_ready_pages() {
+    fn mesh_gate_requires_ready_pages() {
         let chunk_pos = IVec3::new(3, 7, -2);
         let mut gate = ClodPageMeshGate::default();
         gate.owned_columns.insert(chunk_column(chunk_pos));
 
-        gate.enabled = false;
-        gate.pages_ready = true;
-        assert!(!gate.owns_chunk(chunk_pos));
-
-        gate.enabled = true;
         gate.pages_ready = false;
         assert!(!gate.owns_chunk(chunk_pos));
 

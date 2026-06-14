@@ -457,7 +457,6 @@ mod tests {
             ..Default::default()
         };
         let mut gate = crate::voxel::pages::ClodPageMeshGate::default();
-        gate.enabled = true;
         gate.pages_ready = false;
         gate.pages_pending = true;
 

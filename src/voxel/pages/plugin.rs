@@ -11,10 +11,7 @@ use super::build_queue::{
 use super::ownership::{
     ClodPageMeshGate, clod_page_chunk_ownership_system, refresh_clod_page_mesh_gate_system,
 };
-use super::render::{
-    ClodPageMeshCommitState, ClodPagesShow, clod_page_mesh_commit_system,
-    clod_pages_show_startup_log_system,
-};
+use super::render::{ClodPageMeshCommitState, clod_page_mesh_commit_system};
 use super::runtime::{
     ClodPagesRuntime, PageExportCache, clod_pages_source_meshing_system,
     clod_pages_startup_log_system,
@@ -31,18 +28,11 @@ impl Plugin for ClodPagesPlugin {
             .init_resource::<PageExportCache>()
             .init_resource::<ClodPageBuildQueue>()
             .init_resource::<ClodPageTree>()
-            .init_resource::<ClodPagesShow>()
             .init_resource::<ClodPageMeshCommitState>()
             .init_resource::<ClodPageSelectionIndex>()
             .init_resource::<ClodPageSelectionState>()
             .init_resource::<ClodPageMeshGate>()
-            .add_systems(
-                Startup,
-                (
-                    clod_pages_startup_log_system,
-                    clod_pages_show_startup_log_system.after(clod_pages_startup_log_system),
-                ),
-            )
+            .add_systems(Startup, clod_pages_startup_log_system)
             // Reads VoxelWorld immutably; the scheduler serializes it after the dirty mesher.
             .add_systems(
                 Update,

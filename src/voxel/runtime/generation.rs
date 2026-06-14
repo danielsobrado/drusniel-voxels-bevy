@@ -993,5 +993,5 @@ fn clod_live_chunks_lod0_only(
     runtime: Option<&crate::voxel::pages::runtime::ClodPagesRuntime>,
     gate: Option<&crate::voxel::pages::ClodPageMeshGate>,
 ) -> bool {
-    runtime.is_some_and(|runtime| runtime.enabled) && gate.is_some_and(|gate| gate.enabled)
+    runtime.is_some() && gate.is_some()
 }

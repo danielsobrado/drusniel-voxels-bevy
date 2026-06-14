@@ -8,7 +8,7 @@ use bevy::window::PrimaryWindow;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
 use super::ownership::ClodPageMeshGate;
-use super::render::{ClodPageMeshBounds, ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
+use super::render::{ClodPageMeshBounds, ClodPageMeshTag};
 use super::runtime::ClodPagesRuntime;
 use super::types::PageFootprint;
 use crate::gameplay::camera::controller::PlayerCamera;
@@ -461,7 +461,6 @@ fn should_hold_current_page_visibility(gate: Option<&ClodPageMeshGate>) -> bool 
 
 pub(crate) fn clod_page_selection_system(
     runtime: Res<ClodPagesRuntime>,
-    show: Res<ClodPagesShow>,
     tree: Res<ClodPageTree>,
     index: Res<ClodPageSelectionIndex>,
     gate: Option<Res<ClodPageMeshGate>>,
@@ -479,8 +478,7 @@ pub(crate) fn clod_page_selection_system(
 ) {
     let base_material_handle =
         triplanar_material.handle_for_quality(TerrainMaterialQuality::FullTriplanar);
-    if show.0 == ClodPagesShowMode::Off
-        || index.revision.is_none()
+    if index.revision.is_none()
         || !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
     {
         state.clear();

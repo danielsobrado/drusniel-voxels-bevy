@@ -134,7 +134,7 @@ pub(crate) fn mesh_dirty_chunks_system(
     let dirty_chunks_seen = dirty_chunks.len();
     let mut chunks_skipped_page_owned = 0u32;
     if let Some(gate) = timing_params.page_mesh_gate.as_deref() {
-        if gate.enabled && gate.pages_ready {
+        if gate.pages_ready {
             let mut live_dirty_chunks = Vec::with_capacity(dirty_chunks.len());
             for chunk_pos in dirty_chunks {
                 let terrain_mutation = world
@@ -438,8 +438,7 @@ pub(crate) fn mesh_dirty_chunks_system(
                         && radius <= page_runtime.source_radius_chunks
                 })
                 .unwrap_or(false);
-            if page_runtime.enabled
-                && generation_complete
+            if generation_complete
                 && in_page_source_band
                 && mesh_lod_level == LodLevel::Lod0
                 && matches!(target_mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel)

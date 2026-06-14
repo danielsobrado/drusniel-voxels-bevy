@@ -680,7 +680,7 @@ pub(crate) fn world_startup_snapshot(
         };
     }
 
-    if page_mesh_gate.is_some_and(|gate| gate.enabled) {
+    if page_mesh_gate.is_some() {
         if page_mesh_gate.is_some_and(|gate| !gate.pages_ready && gate.pages_pending) {
             return WorldStartupSnapshot {
                 stage: WorldStartupStage::PreparingMeshes,

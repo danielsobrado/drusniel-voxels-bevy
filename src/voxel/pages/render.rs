@@ -1,7 +1,6 @@
 //! Phase 5 Step 3b part 2: commit completed page trees as hidden terrain mesh entities.
 
 use std::collections::{HashMap, VecDeque};
-use std::fmt;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
@@ -10,7 +9,6 @@ use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
-use super::runtime::ClodPagesRuntime;
 use super::selection::{ClodPageNodeKey, ClodPageSelectionIndex};
 use super::types::PageMesh;
 use crate::rendering::triplanar_material::{
@@ -31,55 +29,6 @@ pub struct ClodPageMeshBounds {
     pub max_y: f32,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ClodPagesShowMode {
-    #[default]
-    Selection,
-    Off,
-}
-
-impl fmt::Display for ClodPagesShowMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Selection => write!(f, "selection"),
-            Self::Off => write!(f, "off"),
-        }
-    }
-}
-
-#[derive(Resource, Debug)]
-pub struct ClodPagesShow(pub ClodPagesShowMode);
-
-impl Default for ClodPagesShow {
-    fn default() -> Self {
-        let mode = match std::env::var("CLOD_PAGES_SHOW") {
-            Ok(value) if value.trim().eq_ignore_ascii_case("off") => ClodPagesShowMode::Off,
-            Ok(value)
-                if value.trim().is_empty()
-                    || value.trim().eq_ignore_ascii_case("selection")
-                    || value.trim().eq_ignore_ascii_case("auto") =>
-            {
-                ClodPagesShowMode::Selection
-            }
-            Ok(value) if value.trim().eq_ignore_ascii_case("top") => {
-                warn!(
-                    "CLOD_PAGES_SHOW=top is retired; using runtime selection. Set CLOD_PAGES_SHOW=off to hide pages."
-                );
-                ClodPagesShowMode::Selection
-            }
-            Ok(value) => {
-                warn!(
-                    "unknown CLOD_PAGES_SHOW value {:?}; expected off, using runtime selection",
-                    value
-                );
-                ClodPagesShowMode::Selection
-            }
-            Err(_) => ClodPagesShowMode::Selection,
-        };
-        Self(mode)
-    }
-}
-
 #[derive(Resource, Default)]
 pub(crate) struct ClodPageMeshCommitState {
     committed_tree_revision: Option<u64>,
@@ -98,13 +47,6 @@ struct PendingMeshCommit {
     mesh_handles: Vec<Handle<Mesh>>,
     material_handles: Vec<Handle<TriplanarMaterial>>,
     bounds_by_node: HashMap<ClodPageNodeKey, ClodPageMeshBounds>,
-}
-
-pub(crate) fn clod_pages_show_startup_log_system(show: Res<ClodPagesShow>) {
-    info!(
-        "CLOD PAGES SHOW: {} (CLOD_PAGES_SHOW=off disables page visibility)",
-        show.0
-    );
 }
 
 fn page_mesh_y_bounds(page_mesh: &PageMesh) -> ClodPageMeshBounds {
@@ -305,6 +247,7 @@ pub(crate) fn clod_page_mesh_commit_system(
 
 #[cfg(test)]
 mod tests {
+    use super::super::runtime::ClodPagesRuntime;
     use super::*;
     use crate::voxel::pages::diagonal_polish::DiagonalPolishStats;
     use crate::voxel::pages::quadtree::ClodPageNode;
@@ -394,7 +337,6 @@ mod tests {
                 build_page_coords: vec![(0, 0)],
                 status: Some(ClodPageBuildStatus::Ready),
             })
-            .insert_resource(ClodPagesShow(ClodPagesShowMode::Off))
             .insert_resource(material_handles())
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<TriplanarMaterial>>()
