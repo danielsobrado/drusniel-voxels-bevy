@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 
 use super::config::ClodPagesConfig;
+use super::diagonal_polish::DiagonalPolishStats;
 use super::export::TerrainMainSurfaceExport;
 use super::quadtree::{BuildResult, ClodPageNode, build_quadtree};
 use super::runtime::{ClodPagesRuntime, PageExportCache};
@@ -38,6 +39,7 @@ pub enum ClodPageBuildStatus {
 #[derive(Resource, Default)]
 pub struct ClodPageTree {
     pub nodes_by_level: Vec<Vec<ClodPageNode>>,
+    pub polish: DiagonalPolishStats,
     /// Increments only when a complete replacement tree is published.
     pub revision: u64,
     /// Coordinates represented by `nodes_by_level`.
@@ -218,6 +220,7 @@ pub(crate) fn clod_pages_build_queue_system(
             || tree.status.is_some()
         {
             tree.nodes_by_level.clear();
+            tree.polish = DiagonalPolishStats::default();
             tree.page_coords.clear();
             tree.build_page_coords.clear();
             tree.status = None;
@@ -376,12 +379,24 @@ pub(crate) fn clod_pages_build_task_poll_system(
 
     match result {
         Ok(result) => {
+            let polish = result.polish;
             tree.nodes_by_level = result.nodes_by_level;
+            tree.polish = polish;
             tree.revision = tree.revision.wrapping_add(1);
             tree.page_coords = pending.page_coords.clone();
             tree.build_page_coords = pending.page_coords;
             tree.status = Some(ClodPageBuildStatus::Ready);
             queue.last_published_signature = Some(pending.signature);
+            info!(
+                "CLOD page diagonal polish: candidates={} flips={} rejected={} avg_gain={:.4}",
+                polish.candidate_quads,
+                polish.flipped,
+                polish.rejected_degenerate
+                    + polish.rejected_winding
+                    + polish.rejected_locked_border
+                    + polish.rejected_no_improvement,
+                polish.average_score_improvement
+            );
         }
         Err(error) => fail_build(&mut tree, pending.page_coords, error),
     }

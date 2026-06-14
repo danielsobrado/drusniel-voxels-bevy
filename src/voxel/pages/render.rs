@@ -331,6 +331,7 @@ pub(crate) fn clod_page_mesh_commit_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voxel::pages::diagonal_polish::DiagonalPolishStats;
     use crate::voxel::pages::quadtree::ClodPageNode;
     use crate::voxel::pages::types::PageFootprint;
     use bevy_mesh::VertexAttributeValues;
@@ -363,6 +364,7 @@ mod tests {
             mesh: PageMesh::default(),
             error_world: 0.0,
             low_benefit: false,
+            polish: DiagonalPolishStats::default(),
         }
     }
 
@@ -413,6 +415,7 @@ mod tests {
         app.insert_resource(runtime)
             .insert_resource(ClodPageTree {
                 nodes_by_level: vec![vec![node((0, 0))]],
+                polish: DiagonalPolishStats::default(),
                 revision: 1,
                 page_coords: vec![(0, 0)],
                 build_page_coords: vec![(0, 0)],

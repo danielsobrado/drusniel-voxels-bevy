@@ -71,6 +71,13 @@ function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: n
 
 const tris = (m: PageMesh) => m.indices.length / 3;
 
+function pageMeshPolishConfig(cfg: ClodPagesConfig) {
+  return {
+    ...cfg.polish.diagonal_flip,
+    material_error_weight: 0,
+  };
+}
+
 function estimatedNodeCount(worldPagesX: number, worldPagesZ: number, levels: number): number {
   let total = 0;
   let countX = worldPagesX;
@@ -163,7 +170,7 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
         const sim = simplifyPage(welded, locks, cfg);
         stripDegenerateTriangles(sim.mesh);
         const polishLocks = buildOuterBorderLocks(sim.mesh);
-        const polish = polishDiagonals(sim.mesh, polishLocks, cfg.polish.diagonal_flip);
+        const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -288,7 +295,7 @@ export async function buildWorldAsync(
         const sim = simplifyPage(welded, locks, cfg);
         stripDegenerateTriangles(sim.mesh);
         const polishLocks = buildOuterBorderLocks(sim.mesh);
-        const polish = polishDiagonals(sim.mesh, polishLocks, cfg.polish.diagonal_flip);
+        const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -454,7 +461,7 @@ export function resimplifyParent(
   const sim = simplifyPage(welded, locks, cfg);
   stripDegenerateTriangles(sim.mesh);
   const polishLocks = buildOuterBorderLocks(sim.mesh);
-  polishDiagonals(sim.mesh, polishLocks, cfg.polish.diagonal_flip);
+  polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
   assertNoInternalBorders(sim.mesh, node.footprint);
   node.mesh = sim.mesh;
   node.bounds = boundsOf(sim.mesh);

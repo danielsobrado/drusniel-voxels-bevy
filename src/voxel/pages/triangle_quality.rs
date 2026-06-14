@@ -74,7 +74,6 @@ fn angle_degrees(side_a: f32, side_b: f32, opposite: f32) -> f32 {
     if denom <= EPS {
         return 0.0;
     }
-    let cos =
-        ((side_a * side_a + side_b * side_b - opposite * opposite) / denom).clamp(-1.0, 1.0);
+    let cos = ((side_a * side_a + side_b * side_b - opposite * opposite) / denom).clamp(-1.0, 1.0);
     cos.acos().to_degrees()
 }

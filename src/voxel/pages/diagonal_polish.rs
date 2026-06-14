@@ -40,7 +40,7 @@ pub struct DiagonalDecision {
     pub score_improvement: f32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DiagonalPolishStats {
     pub candidate_quads: u32,
     pub flipped: u32,
@@ -48,6 +48,25 @@ pub struct DiagonalPolishStats {
     pub rejected_winding: u32,
     pub rejected_locked_border: u32,
     pub rejected_no_improvement: u32,
+    pub average_score_improvement: f32,
+}
+
+impl DiagonalPolishStats {
+    pub fn add_assign(&mut self, other: &Self) {
+        let total_improvement = self.average_score_improvement * self.flipped as f32
+            + other.average_score_improvement * other.flipped as f32;
+        self.candidate_quads += other.candidate_quads;
+        self.flipped += other.flipped;
+        self.rejected_degenerate += other.rejected_degenerate;
+        self.rejected_winding += other.rejected_winding;
+        self.rejected_locked_border += other.rejected_locked_border;
+        self.rejected_no_improvement += other.rejected_no_improvement;
+        self.average_score_improvement = if self.flipped > 0 {
+            total_improvement / self.flipped as f32
+        } else {
+            0.0
+        };
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -60,9 +79,6 @@ struct EdgeUse {
 struct CandidateMetrics {
     valid: bool,
     reason: Option<DiagonalRejectReason>,
-    min_angle_degrees: f32,
-    normal_error: f32,
-    material_error: f32,
     score: f32,
 }
 
@@ -123,34 +139,11 @@ pub fn choose_best_quad_diagonal(
         };
     }
 
-    let angle_diff = alternate.min_angle_degrees - current.min_angle_degrees;
-    if angle_diff.abs() >= config.min_angle_improvement_degrees {
-        return if angle_diff > 0.0 {
-            flip(alternate_diagonal, current.score - alternate.score)
-        } else {
-            keep(current_diagonal)
-        };
+    if alternate.score + EPS < current.score {
+        flip(alternate_diagonal, current.score - alternate.score)
+    } else {
+        keep(current_diagonal)
     }
-
-    let normal_diff = current.normal_error - alternate.normal_error;
-    if normal_diff.abs() > EPS {
-        return if normal_diff > 0.0 {
-            flip(alternate_diagonal, current.score - alternate.score)
-        } else {
-            keep(current_diagonal)
-        };
-    }
-
-    let material_diff = current.material_error - alternate.material_error;
-    if material_diff.abs() > EPS {
-        return if material_diff > 0.0 {
-            flip(alternate_diagonal, current.score - alternate.score)
-        } else {
-            keep(current_diagonal)
-        };
-    }
-
-    keep(current_diagonal)
 }
 
 pub fn polish_diagonals(
@@ -165,6 +158,7 @@ pub fn polish_diagonals(
 
     let edge_map = build_edge_map(&mesh.indices);
     let mut used_triangles = HashSet::new();
+    let mut total_improvement = 0.0;
     for ((a, c), uses) in edge_map {
         if uses.len() != 2 {
             continue;
@@ -184,7 +178,8 @@ pub fn polish_diagonals(
             continue;
         }
 
-        let Some((a, b, c, d)) = orient_current_diagonal(mesh, a, c, u0.opposite, u1.opposite, config)
+        let Some((a, b, c, d)) =
+            orient_current_diagonal(mesh, a, c, u0.opposite, u1.opposite, config)
         else {
             stats.rejected_winding += 1;
             used_triangles.insert(u0.tri_index);
@@ -207,6 +202,7 @@ pub fn polish_diagonals(
                 mesh.indices[u0.tri_start..u0.tri_start + 3].copy_from_slice(&[a, b, d]);
                 mesh.indices[u1.tri_start..u1.tri_start + 3].copy_from_slice(&[b, c, d]);
                 stats.flipped += 1;
+                total_improvement += decision.score_improvement;
             }
             DiagonalChoice::Reject => match decision.reason {
                 Some(DiagonalRejectReason::Degenerate) => stats.rejected_degenerate += 1,
@@ -218,6 +214,10 @@ pub fn polish_diagonals(
                 None => stats.rejected_no_improvement += 1,
             },
         }
+    }
+
+    if stats.flipped > 0 {
+        stats.average_score_improvement = total_improvement / stats.flipped as f32;
     }
 
     stats
@@ -287,9 +287,6 @@ fn evaluate_candidate(
     CandidateMetrics {
         valid: true,
         reason: None,
-        min_angle_degrees,
-        normal_error,
-        material_error,
         score: config.angle_quality_weight * angle_cost
             + config.normal_error_weight * normal_error
             + config.material_error_weight * material_error,
@@ -359,9 +356,6 @@ fn invalid(reason: DiagonalRejectReason) -> CandidateMetrics {
     CandidateMetrics {
         valid: false,
         reason: Some(reason),
-        min_angle_degrees: 0.0,
-        normal_error: f32::INFINITY,
-        material_error: f32::INFINITY,
         score: f32::INFINITY,
     }
 }
@@ -549,10 +543,29 @@ mod tests {
     }
 
     #[test]
+    fn material_weight_zero_does_not_choose_by_material() {
+        let cfg = DiagonalFlipConfig {
+            material_error_weight: 0.0,
+            ..Default::default()
+        };
+        let decision = choose_best_quad_diagonal(
+            &v([0.0, 0.0, 0.0], vec![1.0, 0.0, 0.0, 0.0]),
+            &v([0.0, 0.0, 1.0], vec![0.0, 1.0, 0.0, 0.0]),
+            &v([1.0, 0.0, 1.0], vec![0.0, 0.0, 1.0, 0.0]),
+            &v([1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0, 0.0]),
+            Diagonal::Ac,
+            &cfg,
+        );
+        assert_eq!(decision.choice, DiagonalChoice::Keep);
+        assert_eq!(decision.chosen_diagonal, Some(Diagonal::Ac));
+    }
+
+    #[test]
     fn shared_fixture_matches_expected_choice() {
-        let fixture: Fixture =
-            serde_json::from_str(include_str!("../../../tests/fixtures/clod/diagonal_polish.json"))
-                .expect("fixture parses");
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/clod/diagonal_polish.json"
+        ))
+        .expect("fixture parses");
         let vertices = (0..4)
             .map(|i| QuadVertex {
                 position: fixture.positions[i],
@@ -573,6 +586,9 @@ mod tests {
             current,
             &DiagonalFlipConfig::default(),
         );
-        assert_eq!(format!("{:?}", decision.choice).to_lowercase(), fixture.expected_choice);
+        assert_eq!(
+            format!("{:?}", decision.choice).to_lowercase(),
+            fixture.expected_choice
+        );
     }
 }

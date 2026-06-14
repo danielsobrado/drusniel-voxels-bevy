@@ -137,28 +137,9 @@ export function chooseBestQuadDiagonal(
     };
   }
 
-  const angleDiff = alternate.minAngleDegrees - current.minAngleDegrees;
-  if (Math.abs(angleDiff) >= config.min_angle_improvement_degrees) {
-    return angleDiff > 0
-      ? { choice: "flip", chosenDiagonal: alternateDiagonal, scoreImprovement: current.score - alternate.score }
-      : { choice: "keep", chosenDiagonal: currentDiagonal, scoreImprovement: 0 };
-  }
-
-  const normalDiff = current.normalError - alternate.normalError;
-  if (Math.abs(normalDiff) > EPS) {
-    return normalDiff > 0
-      ? { choice: "flip", chosenDiagonal: alternateDiagonal, scoreImprovement: current.score - alternate.score }
-      : { choice: "keep", chosenDiagonal: currentDiagonal, scoreImprovement: 0 };
-  }
-
-  const materialDiff = current.materialError - alternate.materialError;
-  if (Math.abs(materialDiff) > EPS) {
-    return materialDiff > 0
-      ? { choice: "flip", chosenDiagonal: alternateDiagonal, scoreImprovement: current.score - alternate.score }
-      : { choice: "keep", chosenDiagonal: currentDiagonal, scoreImprovement: 0 };
-  }
-
-  return { choice: "keep", chosenDiagonal: currentDiagonal, scoreImprovement: 0 };
+  return alternate.score + EPS < current.score
+    ? { choice: "flip", chosenDiagonal: alternateDiagonal, scoreImprovement: current.score - alternate.score }
+    : { choice: "keep", chosenDiagonal: currentDiagonal, scoreImprovement: 0 };
 }
 
 export function polishDiagonals(

@@ -104,6 +104,19 @@ describe("diagonal polish", () => {
     expect(decision.chosenDiagonal).toBe("bd");
   });
 
+  it("does not let material continuity choose when material weight is zero", () => {
+    const decision = chooseBestQuadDiagonal(
+      v([0, 0, 0], [1, 0, 0, 0]),
+      v([0, 0, 1], [0, 1, 0, 0]),
+      v([1, 0, 1], [0, 0, 1, 0]),
+      v([1, 0, 0], [0, 1, 0, 0]),
+      "ac",
+      { ...cfg, material_error_weight: 0 },
+    );
+    expect(decision.choice).toBe("keep");
+    expect(decision.chosenDiagonal).toBe("ac");
+  });
+
   it("matches the shared fixture diagonal choice", () => {
     const fixture = JSON.parse(
       readFileSync(new URL("../../../tests/fixtures/clod/diagonal_polish.json", import.meta.url), "utf8"),
