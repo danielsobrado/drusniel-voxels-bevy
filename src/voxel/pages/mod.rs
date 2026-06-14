@@ -17,6 +17,7 @@
 
 pub mod build_queue;
 pub mod config;
+pub mod diagonal_polish;
 pub mod export;
 pub mod lock;
 mod ownership;
@@ -27,6 +28,7 @@ pub mod runtime;
 mod selection;
 pub mod simplify;
 pub mod source_mesh;
+pub mod triangle_quality;
 pub mod types;
 pub mod validate;
 pub mod weld;

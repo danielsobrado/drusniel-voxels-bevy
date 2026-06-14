@@ -9,6 +9,7 @@ import { initSimplifier } from "./simplify.js";
 import { buildWorld } from "./quadtree.js";
 import { borderChain, assertBorderMatch } from "./validate.js";
 import { ClodPageNode } from "./types.js";
+import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "./diagonalPolish.js";
 
 function fmt(n: number, w = 8): string {
   return n.toLocaleString("en-US").padStart(w);
@@ -47,6 +48,7 @@ async function main() {
     topTris = tris;
   }
   console.log(`\ntotal build: ${totalMs.toFixed(1)} ms`);
+  console.log(formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish))));
 
   // Gate-relevant metrics (informational here; the formal gate is Phase 3).
   const allLowBenefit = result.stats.filter((s) => s.level >= 1 && s.level <= 2);

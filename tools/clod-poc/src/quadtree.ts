@@ -16,6 +16,11 @@ import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks, countLocks } from "./lock.js";
 import { simplifyPage } from "./simplify.js";
 import { assertNoInternalBorders, stripDegenerateTriangles } from "./validate.js";
+import {
+  emptyDiagonalPolishStats,
+  polishDiagonals,
+  type DiagonalPolishStats,
+} from "./diagonalPolish.js";
 
 export interface NodeBuildStat {
   id: string;
@@ -25,6 +30,7 @@ export interface NodeBuildStat {
   lockedVerts: number;
   errorWorld: number;
   lowBenefit: boolean;
+  polish: DiagonalPolishStats;
   buildMs: number;
 }
 
@@ -122,7 +128,8 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
       lod0Index.set(`${px},${pz}`, node);
       stats.push({
         id: node.id, level: 0, inputTris: tris(src.mesh), outputTris: tris(src.mesh),
-        lockedVerts: 0, errorWorld: 0, lowBenefit: false, buildMs: performance.now() - t0,
+        lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
+        buildMs: performance.now() - t0,
       });
     }
   }
@@ -155,6 +162,8 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
         stripDegenerateTriangles(sim.mesh);
+        const polishLocks = buildOuterBorderLocks(sim.mesh);
+        const polish = polishDiagonals(sim.mesh, polishLocks, cfg.polish.diagonal_flip);
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -173,6 +182,7 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
         stats.push({
           id: node.id, level, inputTris: tris(welded), outputTris: tris(sim.mesh),
           lockedVerts: countLocks(locks), errorWorld, lowBenefit: sim.lowBenefit,
+          polish,
           buildMs: performance.now() - t0,
         });
       }
@@ -243,7 +253,8 @@ export async function buildWorldAsync(
       lod0Index.set(`${px},${pz}`, node);
       stats.push({
         id: node.id, level: 0, inputTris: tris(src.mesh), outputTris: tris(src.mesh),
-        lockedVerts: 0, errorWorld: 0, lowBenefit: false, buildMs: performance.now() - t0,
+        lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
+        buildMs: performance.now() - t0,
       });
       await tick(0, "LOD0 pages");
     }
@@ -276,6 +287,8 @@ export async function buildWorldAsync(
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
         stripDegenerateTriangles(sim.mesh);
+        const polishLocks = buildOuterBorderLocks(sim.mesh);
+        const polish = polishDiagonals(sim.mesh, polishLocks, cfg.polish.diagonal_flip);
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -294,6 +307,7 @@ export async function buildWorldAsync(
         stats.push({
           id: node.id, level, inputTris: tris(welded), outputTris: tris(sim.mesh),
           lockedVerts: countLocks(locks), errorWorld, lowBenefit: sim.lowBenefit,
+          polish,
           buildMs: performance.now() - t0,
         });
         await tick(level, `LOD${level} parents`);
@@ -439,6 +453,8 @@ export function resimplifyParent(
   const locks = buildOuterBorderLocks(welded);
   const sim = simplifyPage(welded, locks, cfg);
   stripDegenerateTriangles(sim.mesh);
+  const polishLocks = buildOuterBorderLocks(sim.mesh);
+  polishDiagonals(sim.mesh, polishLocks, cfg.polish.diagonal_flip);
   assertNoInternalBorders(sim.mesh, node.footprint);
   node.mesh = sim.mesh;
   node.bounds = boundsOf(sim.mesh);

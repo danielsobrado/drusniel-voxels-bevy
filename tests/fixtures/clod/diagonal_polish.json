@@ -1,0 +1,25 @@
+{
+  "name": "material_boundary_prefers_bd_diagonal",
+  "positions": [
+    [0.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [1.0, 0.0, 1.0],
+    [1.0, 0.0, 0.0]
+  ],
+  "normals": [
+    [0.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0]
+  ],
+  "material_weights": [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0]
+  ],
+  "input_indices": [0, 1, 2, 0, 2, 3],
+  "current_diagonal": "ac",
+  "expected_choice": "flip",
+  "expected_indices": [0, 1, 3, 1, 2, 3]
+}

@@ -4,6 +4,7 @@
 //! Lower LODs are NEVER re-extracted from voxels (I2).
 
 use super::config::ClodPagesConfig;
+use super::diagonal_polish::polish_diagonals;
 use super::lock::build_outer_border_locks;
 use super::simplify::simplify_page;
 use super::source_mesh::{PageSource, concat};
@@ -58,6 +59,8 @@ fn build_parent_node(
         (sim.mesh, sim.error_world, sim.low_benefit)
     };
     strip_degenerate_triangles(&mut mesh);
+    let polish_locks = build_outer_border_locks(&mesh);
+    polish_diagonals(&mut mesh, &polish_locks, &cfg.polish.diagonal_flip);
     assert_no_internal_borders(&mesh, &footprint)?;
     let max_child = children
         .iter()

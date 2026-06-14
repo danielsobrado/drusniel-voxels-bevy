@@ -17,6 +17,16 @@ simplify:                     # zeux demo/nanite.cpp parameters — start here, 
     normal: 0.5
     material: 1.0
 
+polish:
+  diagonal_flip:
+    enabled: true
+    min_triangle_area: 0.000001
+    min_normal_dot: 0.05
+    min_angle_improvement_degrees: 2.0
+    normal_error_weight: 1.0
+    angle_quality_weight: 1.0
+    material_error_weight: 0.25
+
 selection:
   error_threshold_px: 1.0
   hysteresis_merge_factor: 1.5    # merge at 1.5px, split at 1.0px
