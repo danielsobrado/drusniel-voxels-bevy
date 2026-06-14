@@ -39,7 +39,7 @@ pub struct LocomotionState {
 }
 
 impl LocomotionState {
-    pub fn idle() -> Self {
+    pub const fn idle() -> Self {
         Self {
             speed: 0.0,
             moving: false,
@@ -54,22 +54,28 @@ pub fn update_locomotion(
     facing_radians: f32,
     dt_seconds: f32,
 ) -> LocomotionState {
+    let dt = if dt_seconds.is_finite() && dt_seconds > 0.0 {
+        dt_seconds
+    } else {
+        MIN_DT
+    };
     let distance = displacement_xz.length();
-    let mut speed = distance / dt_seconds.max(MIN_DT);
+    let speed = distance / dt;
     if speed > TELEPORT_SPEED {
-        speed = 0.0;
+        track.reset();
+        return LocomotionState::idle();
     }
 
     if speed > MOVE_ENTER_SPEED {
         track.move_hold = MOVE_HOLD_TIME;
     } else {
-        track.move_hold = (track.move_hold - dt_seconds).max(0.0);
+        track.move_hold = (track.move_hold - dt).max(0.0);
     }
     let moving = track.move_hold > 0.0;
 
     // Preserve cadence through transient stalls while the moving state is latched.
     if speed > MOVE_ENTER_SPEED || !moving {
-        let alpha = (dt_seconds * SPEED_SMOOTH_RATE).min(1.0);
+        let alpha = (dt * SPEED_SMOOTH_RATE).min(1.0);
         track.smooth_speed += (speed - track.smooth_speed) * alpha;
     }
 
@@ -183,6 +189,34 @@ mod tests {
     }
 
     #[test]
+    fn teleport_while_latched_clears_locomotion() {
+        let mut track = LocomotionTrack::default();
+        walk_step(&mut track);
+
+        let state = update_locomotion(&mut track, Vec2::new(50.0, 0.0), 0.0, FRAME_DT);
+
+        assert_eq!(state, LocomotionState::idle());
+        assert_eq!(track, LocomotionTrack::default());
+    }
+
+    #[test]
+    fn teleport_clears_backpedal_direction() {
+        let mut track = LocomotionTrack::default();
+        update_locomotion(
+            &mut track,
+            Vec2::new(0.0, -WALK_SPEED * FRAME_DT),
+            0.0,
+            FRAME_DT,
+        );
+        assert!(track.moving_backwards);
+
+        let state = update_locomotion(&mut track, Vec2::new(50.0, 0.0), 0.0, FRAME_DT);
+
+        assert_eq!(state, LocomotionState::idle());
+        assert!(!track.moving_backwards);
+    }
+
+    #[test]
     fn alternating_walk_stall_frames_do_not_lose_moving() {
         let mut track = LocomotionTrack::default();
         walk_step(&mut track);
@@ -218,5 +252,27 @@ mod tests {
         let state = update_locomotion(&mut track, Vec2::ZERO, 0.0, 0.0);
 
         assert!(state.speed.is_finite());
+    }
+
+    #[test]
+    fn negative_dt_does_not_increase_move_hold() {
+        let mut track = LocomotionTrack::default();
+        walk_step(&mut track);
+        let move_hold_before = track.move_hold;
+
+        update_locomotion(&mut track, Vec2::ZERO, 0.0, -FRAME_DT);
+
+        assert!(track.move_hold <= move_hold_before);
+    }
+
+    #[test]
+    fn nan_dt_does_not_make_state_non_finite() {
+        let mut track = LocomotionTrack::default();
+
+        let state = update_locomotion(&mut track, Vec2::ZERO, 0.0, f32::NAN);
+
+        assert!(state.speed.is_finite());
+        assert!(track.move_hold.is_finite());
+        assert!(track.smooth_speed.is_finite());
     }
 }
