@@ -150,8 +150,6 @@ Debug interpretation:
 - Holes: missing chunk, failed mesh, or wrong dirty flag. Check `missing_boundary_neighbors_at_mesh`.
 - Non-white edges at an altitude band: skirt hiding a real gap.
 
-MC+Transvoxel defaults are controlled by `assets/config/mc_transvoxel.yaml`; default builds include the `mc_transvoxel` feature. Bench replace mode uses `enabled: true` plus `mode: replace_surface_nets`, or `bench-runs/baseline-mctx/*.yaml`. Spike status: `docs/legacy/mc-transvoxel-plan.md`.
-
 ## Coding Conduct
 
 - State assumptions when ambiguity matters; ask when guessing would be risky.

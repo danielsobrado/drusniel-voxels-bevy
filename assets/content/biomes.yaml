@@ -2,6 +2,7 @@ biomes:
   - id: grassland
     legacy_biome_id: 0
     name: Grassland
+    selection_priority: 0
     default_material_id: top-soil
     water_material_id: water
     surface_material_ids: [top-soil]
@@ -13,6 +14,8 @@ biomes:
   - id: sandy
     legacy_biome_id: 1
     name: Sandy
+    selection_priority: 10
+    biome_noise_max: 0.25
     default_material_id: sand
     water_material_id: water
     surface_material_ids: [sand]
@@ -24,6 +27,9 @@ biomes:
   - id: rocky
     legacy_biome_id: 2
     name: Rocky
+    selection_priority: 30
+    biome_noise_min: 0.75
+    detail_noise_min: 0.5
     default_material_id: rock
     water_material_id: water
     surface_material_ids: [rock]
@@ -35,6 +41,10 @@ biomes:
   - id: clay
     legacy_biome_id: 3
     name: Clay
+    selection_priority: 20
+    biome_noise_min: 0.4
+    biome_noise_max: 0.5
+    detail_noise_min: 0.6
     default_material_id: top-soil
     water_material_id: water
     surface_material_ids: [top-soil]

@@ -220,8 +220,8 @@ fn stronger_water_metadata(
 mod tests {
     use super::*;
     use crate::constants::{
-        BIOME_CLAY_DETAIL_THRESHOLD, CAVE_SURFACE_OFFSET, CHUNK_SIZE_I32, DEFAULT_WORLD_CHUNKS_X,
-        DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z, MIN_BREAKABLE_Y,
+        CAVE_SURFACE_OFFSET, CHUNK_SIZE_I32, DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y,
+        DEFAULT_WORLD_CHUNKS_Z, MIN_BREAKABLE_Y,
     };
 
     use crate::terrain::generation::config::TerrainConfig;
@@ -246,7 +246,7 @@ mod tests {
             } else if (x - 30.0).abs() < 0.001 {
                 0.45
             } else if (x - 150.0).abs() < 0.001 {
-                BIOME_CLAY_DETAIL_THRESHOLD + 0.1
+                0.7
             } else {
                 0.5
             }
@@ -454,6 +454,32 @@ mod tests {
         assert_eq!(generator.get_biome(1000, 0), Biome::Grassland);
         assert_eq!(generator.get_biome(2000, 0), Biome::Rocky);
         assert_eq!(generator.get_biome(3000, 0), Biome::Clay);
+    }
+
+    #[test]
+    fn biome_selection_table_preserves_strict_threshold_boundaries() {
+        let table = BiomeTable::default();
+
+        assert_eq!(table.select(0.24, 0.0), Biome::Sandy);
+        assert_eq!(table.select(0.25, 0.0), Biome::Grassland);
+        assert_eq!(table.select(0.45, 0.7), Biome::Clay);
+        assert_eq!(table.select(0.4, 0.7), Biome::Grassland);
+        assert_eq!(table.select(0.8, 0.6), Biome::Rocky);
+        assert_eq!(table.select(0.75, 0.6), Biome::Grassland);
+    }
+
+    #[test]
+    fn biome_selection_changes_from_content_without_code_changes() {
+        let mut registry = crate::content::defaults::get_default_registry();
+        registry.biomes.get_mut("sandy").unwrap().biome_noise_max = Some(0.65);
+        let table = BiomeTable::from_content_registry(&registry).unwrap();
+        let generator = TerrainGenerator::with_config_and_biome_table(
+            BiomeCoverageNoise,
+            TerrainConfig::default(),
+            table,
+        );
+
+        assert_eq!(generator.get_biome(1000, 0), Biome::Sandy);
     }
 
     #[test]

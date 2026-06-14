@@ -575,4 +575,62 @@ mod tests {
                 .any(|issue| issue.code == "MISSING_LEGACY_MATERIAL_ID")
         );
     }
+
+    #[test]
+    fn test_biome_selection_requires_valid_ranges_and_priorities() {
+        let mut invalid_range = get_default_registry();
+        let sandy = invalid_range.biomes.get_mut("sandy").unwrap();
+        sandy.biome_noise_min = Some(0.5);
+        sandy.biome_noise_max = Some(0.25);
+        let range_report = validate_content_registry(&invalid_range);
+        assert!(
+            range_report
+                .errors
+                .iter()
+                .any(|issue| issue.code == "INVALID_BIOME_SELECTION_RANGE")
+        );
+
+        let mut duplicate_priority = get_default_registry();
+        duplicate_priority
+            .biomes
+            .get_mut("clay")
+            .unwrap()
+            .selection_priority = 30;
+        let priority_report = validate_content_registry(&duplicate_priority);
+        assert!(
+            priority_report
+                .errors
+                .iter()
+                .any(|issue| issue.code == "DUPLICATE_BIOME_SELECTION_PRIORITY")
+        );
+    }
+
+    #[test]
+    fn test_biome_selection_requires_exactly_one_low_priority_fallback() {
+        let mut missing_fallback = get_default_registry();
+        let grassland = missing_fallback.biomes.get_mut("grassland").unwrap();
+        grassland.biome_noise_min = Some(0.0);
+        grassland.selection_priority = 1;
+        let missing_report = validate_content_registry(&missing_fallback);
+        assert!(
+            missing_report
+                .errors
+                .iter()
+                .any(|issue| issue.code == "INVALID_BIOME_FALLBACK_COUNT")
+        );
+
+        let mut invalid_priority = get_default_registry();
+        invalid_priority
+            .biomes
+            .get_mut("grassland")
+            .unwrap()
+            .selection_priority = 4;
+        let priority_report = validate_content_registry(&invalid_priority);
+        assert!(
+            priority_report
+                .errors
+                .iter()
+                .any(|issue| issue.code == "INVALID_BIOME_FALLBACK_PRIORITY")
+        );
+    }
 }

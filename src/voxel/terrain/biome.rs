@@ -1,7 +1,4 @@
-use crate::constants::{
-    BIOME_CLAY_DETAIL_THRESHOLD, BIOME_CLAY_MAX, BIOME_CLAY_MIN, BIOME_ROCKY_DETAIL_THRESHOLD,
-    BIOME_ROCKY_THRESHOLD, BIOME_SANDY_THRESHOLD, TERRAIN_BIOME_FREQUENCY, TERRAIN_CAVE_FREQUENCY,
-};
+use crate::constants::{TERRAIN_BIOME_FREQUENCY, TERRAIN_CAVE_FREQUENCY};
 use bevy::prelude::Resource;
 
 use crate::content::ContentRegistry;
@@ -59,9 +56,36 @@ struct BiomeMaterialBands {
     shoreline: [VoxelType; BIOME_DEPTH_BANDS],
 }
 
-#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BiomeSelectionRule {
+    biome: Biome,
+    priority: u8,
+    biome_noise_min: Option<f32>,
+    biome_noise_max: Option<f32>,
+    detail_noise_min: Option<f32>,
+    detail_noise_max: Option<f32>,
+}
+
+impl BiomeSelectionRule {
+    fn matches(&self, biome_noise: f32, detail_noise: f32) -> bool {
+        self.biome_noise_min
+            .is_none_or(|minimum| biome_noise > minimum)
+            && self
+                .biome_noise_max
+                .is_none_or(|maximum| biome_noise < maximum)
+            && self
+                .detail_noise_min
+                .is_none_or(|minimum| detail_noise > minimum)
+            && self
+                .detail_noise_max
+                .is_none_or(|maximum| detail_noise < maximum)
+    }
+}
+
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct BiomeTable {
     biomes: [BiomeMaterialBands; Biome::COUNT],
+    selection_rules: [BiomeSelectionRule; Biome::COUNT],
 }
 
 impl BiomeTable {
@@ -73,6 +97,9 @@ impl BiomeTable {
             shoreline: [VoxelType::Air; BIOME_DEPTH_BANDS],
         };
         let mut resolved = [None; Biome::COUNT];
+        let mut selection_rules = [None; Biome::COUNT];
+        let mut selection_priorities = [false; 256];
+        let mut fallback_count = 0;
 
         for biome in registry.biomes.values() {
             let index = biome.legacy_biome_id as usize;
@@ -94,6 +121,49 @@ impl BiomeTable {
                     &format!("Legacy biome ID {} is duplicated.", biome.legacy_biome_id),
                 ));
             }
+            validate_selection_bounds(
+                &biome.id,
+                biome.biome_noise_min,
+                biome.biome_noise_max,
+                "biome_noise",
+            )?;
+            validate_selection_bounds(
+                &biome.id,
+                biome.detail_noise_min,
+                biome.detail_noise_max,
+                "detail_noise",
+            )?;
+            if selection_priorities[biome.selection_priority as usize] {
+                return Err(ContentValidationError::new(
+                    "DUPLICATE_BIOME_SELECTION_PRIORITY",
+                    &format!("biomes.{}.selection_priority", biome.id),
+                    &format!(
+                        "Biome selection priority {} is duplicated.",
+                        biome.selection_priority
+                    ),
+                ));
+            }
+            selection_priorities[biome.selection_priority as usize] = true;
+            let is_fallback = biome.biome_noise_min.is_none()
+                && biome.biome_noise_max.is_none()
+                && biome.detail_noise_min.is_none()
+                && biome.detail_noise_max.is_none();
+            if is_fallback {
+                fallback_count += 1;
+                if biome.selection_priority != 0 {
+                    return Err(ContentValidationError::new(
+                        "INVALID_BIOME_FALLBACK_PRIORITY",
+                        &format!("biomes.{}.selection_priority", biome.id),
+                        "The unbounded biome fallback must have selection priority 0.",
+                    ));
+                }
+            } else if biome.selection_priority == 0 {
+                return Err(ContentValidationError::new(
+                    "INVALID_BIOME_SELECTION_PRIORITY",
+                    &format!("biomes.{}.selection_priority", biome.id),
+                    "Constrained biome selection rules must have priority greater than 0.",
+                ));
+            }
 
             resolved[index] = Some(BiomeMaterialBands {
                 normal: resolve_material_bands(
@@ -113,6 +183,14 @@ impl BiomeTable {
                     &biome.shoreline_underground_material_ids,
                 )?,
             });
+            selection_rules[index] = Some(BiomeSelectionRule {
+                biome: Biome::from_id(biome.legacy_biome_id),
+                priority: biome.selection_priority,
+                biome_noise_min: biome.biome_noise_min,
+                biome_noise_max: biome.biome_noise_max,
+                detail_noise_min: biome.detail_noise_min,
+                detail_noise_max: biome.detail_noise_max,
+            });
         }
 
         let mut biomes = [empty; Biome::COUNT];
@@ -125,8 +203,34 @@ impl BiomeTable {
                 )
             })?;
         }
+        if fallback_count != 1 {
+            return Err(ContentValidationError::new(
+                "INVALID_BIOME_FALLBACK_COUNT",
+                "biomes",
+                &format!(
+                    "Exactly one unbounded biome fallback is required; found {fallback_count}."
+                ),
+            ));
+        }
 
-        Ok(Self { biomes })
+        let mut selection_rules = selection_rules.map(|rule| {
+            rule.expect("complete legacy biome IDs guarantee complete selection rules")
+        });
+        selection_rules.sort_unstable_by_key(|rule| std::cmp::Reverse(rule.priority));
+
+        Ok(Self {
+            biomes,
+            selection_rules,
+        })
+    }
+
+    #[inline]
+    pub fn select(&self, biome_noise: f32, detail_noise: f32) -> Biome {
+        self.selection_rules
+            .iter()
+            .find(|rule| rule.matches(biome_noise, detail_noise))
+            .map(|rule| rule.biome)
+            .expect("validated biome selection rules must include a fallback")
     }
 
     #[inline]
@@ -139,6 +243,31 @@ impl BiomeTable {
             bands.normal[depth]
         }
     }
+}
+
+fn validate_selection_bounds(
+    biome_id: &str,
+    minimum: Option<f32>,
+    maximum: Option<f32>,
+    field: &str,
+) -> Result<(), ContentValidationError> {
+    if minimum.is_some_and(|value| !value.is_finite())
+        || maximum.is_some_and(|value| !value.is_finite())
+    {
+        return Err(ContentValidationError::new(
+            "NON_FINITE_BIOME_SELECTION_BOUND",
+            &format!("biomes.{biome_id}.{field}"),
+            "Biome selection bounds must be finite.",
+        ));
+    }
+    if minimum.zip(maximum).is_some_and(|(min, max)| min >= max) {
+        return Err(ContentValidationError::new(
+            "INVALID_BIOME_SELECTION_RANGE",
+            &format!("biomes.{biome_id}.{field}"),
+            "Biome selection minimum must be less than its maximum.",
+        ));
+    }
+    Ok(())
 }
 
 impl Default for BiomeTable {
@@ -256,19 +385,7 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
             self.noise
                 .fbm_2d(x * TERRAIN_CAVE_FREQUENCY, z * TERRAIN_CAVE_FREQUENCY, 2);
 
-        if biome_noise < BIOME_SANDY_THRESHOLD {
-            Biome::Sandy
-        } else if biome_noise > BIOME_ROCKY_THRESHOLD && detail_noise > BIOME_ROCKY_DETAIL_THRESHOLD
-        {
-            Biome::Rocky
-        } else if biome_noise > BIOME_CLAY_MIN
-            && biome_noise < BIOME_CLAY_MAX
-            && detail_noise > BIOME_CLAY_DETAIL_THRESHOLD
-        {
-            Biome::Clay
-        } else {
-            Biome::Grassland
-        }
+        self.biome_table.select(biome_noise, detail_noise)
     }
 
     /// Determines the voxel type based on biome, depth, and water proximity.

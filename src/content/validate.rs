@@ -400,6 +400,8 @@ pub fn validate_content_registry(registry: &ContentRegistry) -> ContentValidatio
 
     // Biomes
     let mut biome_legacy_ids = HashSet::new();
+    let mut biome_selection_priorities = HashSet::new();
+    let mut biome_fallback_count = 0;
     for (id, biome) in &registry.biomes {
         let path = format!("biomes.{}", id);
         if !is_valid_content_id(id) {
@@ -430,6 +432,69 @@ pub fn validate_content_registry(registry: &ContentRegistry) -> ContentValidatio
                 "DUPLICATE_LEGACY_BIOME_ID",
                 &format!("{}.legacy_biome_id", path),
                 &format!("Duplicate legacy biome ID: {}", biome.legacy_biome_id),
+            );
+        }
+
+        if !biome_selection_priorities.insert(biome.selection_priority) {
+            add_issue(
+                ContentIssueSeverity::Error,
+                "DUPLICATE_BIOME_SELECTION_PRIORITY",
+                &format!("{}.selection_priority", path),
+                &format!(
+                    "Duplicate biome selection priority: {}",
+                    biome.selection_priority
+                ),
+            );
+        }
+        let selection_bounds = [
+            ("biome_noise", biome.biome_noise_min, biome.biome_noise_max),
+            (
+                "detail_noise",
+                biome.detail_noise_min,
+                biome.detail_noise_max,
+            ),
+        ];
+        for (field, minimum, maximum) in selection_bounds {
+            let field_path = format!("{}.{}", path, field);
+            if minimum.is_some_and(|value| !value.is_finite())
+                || maximum.is_some_and(|value| !value.is_finite())
+            {
+                add_issue(
+                    ContentIssueSeverity::Error,
+                    "NON_FINITE_BIOME_SELECTION_BOUND",
+                    &field_path,
+                    "Biome selection bounds must be finite.",
+                );
+            }
+            if minimum.zip(maximum).is_some_and(|(min, max)| min >= max) {
+                add_issue(
+                    ContentIssueSeverity::Error,
+                    "INVALID_BIOME_SELECTION_RANGE",
+                    &field_path,
+                    "Biome selection minimum must be less than its maximum.",
+                );
+            }
+        }
+        let is_fallback = biome.biome_noise_min.is_none()
+            && biome.biome_noise_max.is_none()
+            && biome.detail_noise_min.is_none()
+            && biome.detail_noise_max.is_none();
+        if is_fallback {
+            biome_fallback_count += 1;
+            if biome.selection_priority != 0 {
+                add_issue(
+                    ContentIssueSeverity::Error,
+                    "INVALID_BIOME_FALLBACK_PRIORITY",
+                    &format!("{}.selection_priority", path),
+                    "The unbounded biome fallback must have selection priority 0.",
+                );
+            }
+        } else if biome.selection_priority == 0 {
+            add_issue(
+                ContentIssueSeverity::Error,
+                "INVALID_BIOME_SELECTION_PRIORITY",
+                &format!("{}.selection_priority", path),
+                "Constrained biome selection rules must have priority greater than 0.",
             );
         }
 
@@ -551,6 +616,17 @@ pub fn validate_content_registry(registry: &ContentRegistry) -> ContentValidatio
                 &format!("No biome defines legacy biome ID {}.", legacy_id),
             );
         }
+    }
+    if biome_fallback_count != 1 {
+        add_issue(
+            ContentIssueSeverity::Error,
+            "INVALID_BIOME_FALLBACK_COUNT",
+            "biomes",
+            &format!(
+                "Exactly one unbounded biome fallback is required; found {}.",
+                biome_fallback_count
+            ),
+        );
     }
 
     // Props

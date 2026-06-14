@@ -177,28 +177,6 @@ pub const DUNGEON_ENTRANCE_MAX_Y: i32 = 50;
 /// Grid spacing for inner dungeon walls.
 pub const DUNGEON_WALL_SPACING: i32 = 8;
 
-// =============================================================================
-// Biome Thresholds
-// =============================================================================
-
-/// Noise threshold below which sandy biome is generated.
-pub const BIOME_SANDY_THRESHOLD: f32 = 0.25;
-
-/// Noise threshold above which rocky biome is possible.
-pub const BIOME_ROCKY_THRESHOLD: f32 = 0.75;
-
-/// Detail noise threshold for rocky outcrops.
-pub const BIOME_ROCKY_DETAIL_THRESHOLD: f32 = 0.5;
-
-/// Noise range for clay deposits (min).
-pub const BIOME_CLAY_MIN: f32 = 0.4;
-
-/// Noise range for clay deposits (max).
-pub const BIOME_CLAY_MAX: f32 = 0.5;
-
-/// Detail noise threshold for clay deposits.
-pub const BIOME_CLAY_DETAIL_THRESHOLD: f32 = 0.6;
-
 /// Height above water level considered "near water" for beach generation.
 pub const BEACH_HEIGHT_OFFSET: i32 = 2;
 
