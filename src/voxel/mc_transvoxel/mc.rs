@@ -121,10 +121,6 @@ pub fn generate_mc_chunk_mesh(input: McMeshInput<'_>) -> McMeshOutput {
             mc_transvoxel_stats: Some(stats),
             mc_triangle_sources: triangle_sources.map(|sources| McTriangleSources { sources }),
             generation_timing: MeshGenerationTimingStats::default(),
-            boundary_strips: Vec::new(),
-            seam_face_audit: [crate::voxel::meshing::seam_audit::SeamFaceAudit::default();
-                crate::voxel::meshing::seam_audit::XZ_FACE_COUNT],
-            seam_strip_debug: crate::voxel::meshing::TerrainSeamStripDebug::default(),
         },
         stats,
     }

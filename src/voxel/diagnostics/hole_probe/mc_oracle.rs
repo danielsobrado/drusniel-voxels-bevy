@@ -141,7 +141,6 @@ pub(super) fn build_mc_sdf_grid_probe(
         _chunk_collider,
         _collider,
         _rigid_body,
-        _seam_strip_debug,
     )) = terrain_entities.get(mesh_entity)
     else {
         return None;
@@ -523,7 +522,6 @@ pub(super) fn mc_cell_oracle_for_point(
         _chunk_collider,
         _collider,
         _rigid_body,
-        _seam_strip_debug,
     )) = terrain_entities.get(mesh_entity)
     else {
         return None;

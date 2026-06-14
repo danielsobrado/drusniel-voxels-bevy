@@ -38,7 +38,7 @@ pub(crate) use crate::voxel::lod::{
     LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, build_base_terrain_neighbor_lods,
     build_terrain_neighbor_lods, calculate_target_lod_with_hysteresis, chunk_contains_liquid,
     chunk_layer_intersects_waterline, collect_water_shore_lod_guard_chunks,
-    effective_terrain_mesh_lod_for_chunk, forensics_forced_lod, forensics_mesh_mode_override,
+    effective_terrain_mesh_lod_for_chunk, forensics_mesh_mode_override,
     is_horizon_proxy_lod, mesh_lod_level_for_surface_nets_cap, resolve_terrain_mesh_mode,
     should_defer_surface_nets_mesh, target_terrain_mesh_mode_for_lod, terrain_lod_distance_xz,
     terrain_lod_hysteresis, terrain_lod_requires_collider, terrain_material_quality_for_lod,
@@ -308,8 +308,7 @@ mod tests {
     fn initial_lod_assignment_uses_lod0_without_lod_dirty_reason() {
         let mut chunk = Chunk::new(IVec3::new(18, 0, 0));
         let lod_settings = LodSettings::default();
-        let initial_lod =
-            initial_lod_for_chunk(&chunk, Some(Vec3::ZERO), &lod_settings, None, false);
+        let initial_lod = initial_lod_for_chunk();
 
         assert_eq!(initial_lod, LodLevel::Lod0);
         chunk.set_initial_lod_level(initial_lod);
@@ -323,8 +322,7 @@ mod tests {
     fn initial_lod_assignment_uses_lod0_when_pages_own_far_field() {
         let chunk = Chunk::new(IVec3::new(18, 0, 0));
         let lod_settings = LodSettings::default();
-        let initial_lod =
-            initial_lod_for_chunk(&chunk, Some(Vec3::ZERO), &lod_settings, None, true);
+        let initial_lod = initial_lod_for_chunk();
 
         assert_eq!(initial_lod, LodLevel::Lod0);
     }

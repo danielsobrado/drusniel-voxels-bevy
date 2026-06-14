@@ -31,7 +31,7 @@ use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings
 use crate::voxel::meshing::{
     ChunkMesh, ChunkMeshResult, McTransitionForensicsMode, McTriangleSources, MeshForensicsOptions,
     MeshGenerationTimingStats, MeshMode, MeshRequest, MeshSettings, TerrainMeshDebug,
-    TerrainSeamStripDebug, WaterBodyKind, WaterMesh, WaterMeshDetail,
+    WaterBodyKind, WaterMesh, WaterMeshDetail,
     count_missing_in_bounds_boundary_neighbors, empty_chunk_has_surface_nets_boundary_surface,
     generate_chunk_mesh_for_request, lod_delta_gt_one_face_mask,
 };
@@ -115,7 +115,6 @@ pub(crate) struct PreparedLodChunkCommit {
     lod_level: LodLevel,
     terrain_quality: TerrainMaterialQuality,
     terrain_mesh_debug: TerrainMeshDebug,
-    seam_strip_debug: TerrainSeamStripDebug,
     solid_mesh_handle: Option<Handle<Mesh>>,
     vertex_count: u32,
     triangle_count: u32,
@@ -410,23 +409,14 @@ fn lod_churn_chunk_mesh_unchanged(
     if uniformity == ChunkUniformity::Empty && !empty_surface_neighbor {
         return false;
     }
-    let mesh_lod_level = mesh_lod_level_for_surface_nets_cap(
-        target_mode,
-        uniformity,
-        empty_surface_neighbor,
-        lod_level,
-    );
+    let mesh_lod_level = LodLevel::Lod0;
     let missing_boundary_neighbors = count_missing_in_bounds_boundary_neighbors(world, chunk_pos);
     if missing_boundary_neighbors > 0
         && should_defer_surface_nets_mesh(target_mode, missing_boundary_neighbors)
     {
         return false;
     }
-    let base_neighbor_lods =
-        build_base_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
     let neighbor_lods = build_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
-    let mesh_lod_level =
-        transition_refined_surface_nets_lod(target_mode, mesh_lod_level, base_neighbor_lods);
     terrain_mesh_dedup_key(target_mode, mesh_lod_level, &neighbor_lods) == stored_key
 }
 
@@ -660,7 +650,7 @@ fn prepare_lod_chunk_commit(
             chunk_pos,
             lod_level,
             target_mode,
-            mesh_lod_level_for_surface_nets_cap(target_mode, uniformity, false, lod_level),
+            LodLevel::Culled,
             NeighborLods::default(),
             0,
             false,
@@ -671,12 +661,7 @@ fn prepare_lod_chunk_commit(
     let empty_surface_neighbor = uniformity == ChunkUniformity::Empty
         && matches!(target_mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel)
         && empty_chunk_has_surface_nets_boundary_surface(world, chunk_pos);
-    let mesh_lod_level = mesh_lod_level_for_surface_nets_cap(
-        target_mode,
-        uniformity,
-        empty_surface_neighbor,
-        lod_level,
-    );
+    let mesh_lod_level = LodLevel::Lod0;
 
     if uniformity == ChunkUniformity::Empty {
         if empty_surface_neighbor {
@@ -708,11 +693,7 @@ fn prepare_lod_chunk_commit(
         return LodChunkPrepareOutcome::Skipped;
     }
 
-    let base_neighbor_lods =
-        build_base_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
     let neighbor_lods = build_terrain_neighbor_lods(world, chunk_pos, mesh_settings, lod_settings);
-    let mesh_lod_level =
-        transition_refined_surface_nets_lod(target_mode, mesh_lod_level, base_neighbor_lods);
     let mesh_start = Instant::now();
     let mesh_result = if let Some(chunk) = world.get_chunk(chunk_pos) {
         generate_chunk_mesh_for_request(MeshRequest {
@@ -744,9 +725,6 @@ fn prepare_lod_chunk_commit(
         mc_transvoxel_stats,
         mc_triangle_sources,
         generation_timing,
-        boundary_strips: _,
-        seam_face_audit,
-        seam_strip_debug,
     } = mesh_result;
     frame_stats.mesh_generation_timing.add(generation_timing);
 
@@ -791,7 +769,6 @@ fn prepare_lod_chunk_commit(
         lod_transition_snap_stats,
         mesh_section_stats,
         mc_transvoxel_stats,
-        seam_face_audit,
     };
 
     LodChunkPrepareOutcome::Prepared(PreparedLodChunkCommit {
@@ -800,7 +777,6 @@ fn prepare_lod_chunk_commit(
         lod_level,
         terrain_quality,
         terrain_mesh_debug,
-        seam_strip_debug,
         solid_mesh_handle,
         vertex_count,
         triangle_count,
@@ -854,10 +830,7 @@ impl PreparedLodChunkCommit {
                 lod_transition_snap_stats: Default::default(),
                 mesh_section_stats: Default::default(),
                 mc_transvoxel_stats: None,
-                seam_face_audit: [super::seam_audit::SeamFaceAudit::default();
-                    super::seam_audit::XZ_FACE_COUNT],
             },
-            seam_strip_debug: TerrainSeamStripDebug::default(),
             solid_mesh_handle: None,
             vertex_count: 0,
             triangle_count: 0,
@@ -911,21 +884,9 @@ fn prepared_lod_commit_stale_reason(
     let empty_surface_neighbor = uniformity == ChunkUniformity::Empty
         && matches!(target_mode, MeshMode::SurfaceNets | MeshMode::McTransvoxel)
         && empty_chunk_has_surface_nets_boundary_surface(world, commit.chunk_pos);
-    let mesh_lod_level = mesh_lod_level_for_surface_nets_cap(
-        target_mode,
-        uniformity,
-        empty_surface_neighbor,
-        lod_level,
-    );
-    let current_base_neighbor_lods =
-        build_base_terrain_neighbor_lods(world, commit.chunk_pos, mesh_settings, lod_settings);
+    let mesh_lod_level = LodLevel::Lod0;
     let current_neighbor_lods =
         build_terrain_neighbor_lods(world, commit.chunk_pos, mesh_settings, lod_settings);
-    let mesh_lod_level = transition_refined_surface_nets_lod(
-        target_mode,
-        mesh_lod_level,
-        current_base_neighbor_lods,
-    );
     if mesh_lod_level != commit.terrain_mesh_debug.effective_lod_at_mesh {
         return Some(LodMeshTransactionAbortReason::ValidationMeshLodChanged);
     }
@@ -1057,7 +1018,6 @@ fn apply_prepared_lod_chunk_commit(
         lod_level,
         terrain_quality,
         terrain_mesh_debug,
-        seam_strip_debug,
         solid_mesh_handle,
         vertex_count,
         triangle_count,
@@ -1118,7 +1078,6 @@ fn apply_prepared_lod_chunk_commit(
                                 MeshMaterial3d(blocky_mat.handle.clone()),
                                 chunk_mesh,
                                 terrain_mesh_debug,
-                                seam_strip_debug.clone(),
                             ))
                             .remove::<MeshMaterial3d<
                                 crate::rendering::triplanar_material::TriplanarMaterial,
@@ -1133,7 +1092,6 @@ fn apply_prepared_lod_chunk_commit(
                             MeshMaterial3d(triplanar_material.handle_for_quality(terrain_quality)),
                             chunk_mesh,
                             terrain_mesh_debug,
-                            seam_strip_debug.clone(),
                         ))
                         .remove::<MeshMaterial3d<
                             crate::rendering::blocky_material::BlockyMaterial,
@@ -1194,7 +1152,6 @@ fn apply_prepared_lod_chunk_commit(
                             ),
                             chunk_mesh,
                             terrain_mesh_debug,
-                            seam_strip_debug.clone(),
                             terrain_layers,
                         ))
                         .id()
@@ -1210,7 +1167,6 @@ fn apply_prepared_lod_chunk_commit(
                         ),
                         chunk_mesh,
                         terrain_mesh_debug,
-                        seam_strip_debug.clone(),
                         terrain_layers,
                     ))
                     .id(),

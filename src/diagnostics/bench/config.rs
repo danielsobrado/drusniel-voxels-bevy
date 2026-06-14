@@ -1,4 +1,4 @@
 pub use super::{
-    BenchConfig, BenchForensicsConfig, BenchForensicsMcTransitions, BenchForensicsTerrainLod,
-    BenchForensicsTerrainMesher, BenchRenderToggles, BenchTerrainMaterialQuality,
+    BenchConfig, BenchForensicsConfig, BenchForensicsMcTransitions, BenchForensicsTerrainMesher,
+    BenchRenderToggles, BenchTerrainMaterialQuality,
 };

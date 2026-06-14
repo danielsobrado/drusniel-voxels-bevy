@@ -7,7 +7,7 @@ use crate::constants::{
 use crate::voxel::chunk::{Chunk, LodLevel};
 use crate::voxel::skirt::{ChunkFace, NeighborLods};
 use crate::voxel::types::Voxel;
-use crate::voxel::world::{VoxelSample, VoxelWorld};
+use crate::voxel::world::VoxelWorld;
 use bevy::prelude::{IVec3, UVec3, Vec3, info};
 use ndshape::{ConstShape, ConstShape3u32};
 use std::sync::OnceLock;
@@ -256,104 +256,9 @@ pub(super) fn lod_transition_step(
 /// merely differing) neighbour. Because it only fires toward finer neighbours, two
 /// equal-LOD coarse chunks never apply it, so it introduces no new coarse-coarse
 /// seam.
-pub(super) fn apron_band_depth_for_finer_neighbor(
-    my_lod: LodLevel,
-    neighbor_lods: &NeighborLods,
-    px: u32,
-    py: u32,
-    pz: u32,
-    padded_size: u32,
-) -> Option<u8> {
-    let my_index = my_lod.lod_index()?;
-    let outer = padded_size.saturating_sub(1);
-    let mut best: Option<u8> = None;
-    for (face, depth) in [
-        (ChunkFace::NegX, px),
-        (ChunkFace::PosX, outer.saturating_sub(px)),
-        (ChunkFace::NegY, py),
-        (ChunkFace::PosY, outer.saturating_sub(py)),
-        (ChunkFace::NegZ, pz),
-        (ChunkFace::PosZ, outer.saturating_sub(pz)),
-    ] {
-        if depth > 1 {
-            continue; // only the outer two planes form the apron band
-        }
-        let Some(neighbor_lod) = neighbor_lod_for_face(neighbor_lods, face) else {
-            continue; // unloaded neighbour: no apron (nothing to overlap yet)
-        };
-        let Some(neighbor_index) = neighbor_lod.lod_index() else {
-            continue; // Culled / no LOD index
-        };
-        if neighbor_index < my_index {
-            let depth = depth as u8;
-            best = Some(best.map_or(depth, |b| b.min(depth)));
-        }
-    }
-    best
-}
-
-/// Coarse-LOD outward seam apron (env `VOXELS_COARSE_LOD_APRON`).
-///
-/// When enabled, a coarse chunk inflates its boundary band toward any *finer*
-/// neighbour (subtracts a small iso bias) so the coarse surface bulges outward and
-/// overlaps the finer surface, covering the LOD seam crack/lip. The fine-side
-/// stitch is untouched. **Off by default** for a clean A/B baseline; returns the
-/// bias magnitude (0.0 when disabled). Magnitude overridable via
-/// `VOXELS_COARSE_LOD_APRON_BIAS` (default 0.3, clamped to [0, 1]). Read once and
-/// cached so there is no per-chunk env IO on the meshing hot path.
-pub(super) fn coarse_lod_apron_bias() -> f32 {
-    static CACHE: OnceLock<f32> = OnceLock::new();
-    *CACHE.get_or_init(|| {
-        let enabled = std::env::var("VOXELS_COARSE_LOD_APRON")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        if !enabled {
-            return 0.0;
-        }
-        let bias = std::env::var("VOXELS_COARSE_LOD_APRON_BIAS")
-            .ok()
-            .and_then(|v| v.parse::<f32>().ok())
-            .unwrap_or(0.3)
-            .clamp(0.0, 1.0);
-        info!(
-            "Coarse-LOD seam apron: ENABLED (VOXELS_COARSE_LOD_APRON=1) — coarse boundary inflates toward finer neighbours, bias {bias}"
-        );
-        bias
-    })
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum BaseSdfTransitionMode {
     Coarsen,
-}
-
-pub(super) fn surface_nets_base_sdf_transition_mode() -> BaseSdfTransitionMode {
-    BaseSdfTransitionMode::Coarsen
-}
-
-pub(super) fn generate_low_lod_sdf<const N: usize>(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    padded_size: u32,
-    step: i32,
-    linearize: impl Fn([u32; 3]) -> u32,
-    my_lod: LodLevel,
-    neighbor_lods: &NeighborLods,
-) -> [f32; N] {
-    generate_low_lod_sdf_with_smoothing_and_transition_mode(
-        chunk,
-        world,
-        padded_size,
-        step,
-        linearize,
-        my_lod,
-        neighbor_lods,
-        coarse_terrain_sdf_smooth_enabled(),
-        surface_nets_base_sdf_transition_mode(),
-        // Surface Nets coarse path: inflate the boundary band toward finer
-        // neighbours (seam apron). 0.0 unless VOXELS_COARSE_LOD_APRON is set.
-        coarse_lod_apron_bias(),
-    )
 }
 
 pub(super) fn generate_low_lod_sdf_with_smoothing<const N: usize>(
@@ -376,10 +281,6 @@ pub(super) fn generate_low_lod_sdf_with_smoothing<const N: usize>(
         neighbor_lods,
         smooth_coarse,
         BaseSdfTransitionMode::Coarsen,
-        // MC/Transvoxel consumer (mc_support.rs) and unit tests: no apron. MC's
-        // case index is sign-sensitive, so the seam apron stays off here until
-        // validated separately.
-        0.0,
     )
 }
 
@@ -393,7 +294,6 @@ pub(super) fn generate_low_lod_sdf_with_smoothing_and_transition_mode<const N: u
     neighbor_lods: &NeighborLods,
     smooth_coarse: bool,
     transition_mode: BaseSdfTransitionMode,
-    apron_bias: f32,
 ) -> [f32; N] {
     let mut sdf = [1.0f32; N];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
@@ -434,29 +334,6 @@ pub(super) fn generate_low_lod_sdf_with_smoothing_and_transition_mode<const N: u
                     smoothed_terrain_sdf_at_world_pos(world, base_world_pos)
                 };
 
-                // Seam apron: on a coarse chunk, inflate the boundary band toward
-                // any *finer* neighbour so the coarse iso-surface bulges outward
-                // and overlaps the finer surface, covering the LOD seam crack/lip.
-                // This is a deliberate, graded outward push — NOT sign-preserving:
-                // it intentionally flips near-surface air cells negative to move
-                // the surface out. Clamp only the solid floor so we never exceed
-                // -1. Fires only toward finer neighbours, so two equal-LOD coarse
-                // chunks never apply it (no new coarse-coarse seam).
-                if apron_bias > 0.0 {
-                    if let Some(depth) = apron_band_depth_for_finer_neighbor(
-                        my_lod,
-                        neighbor_lods,
-                        x,
-                        y,
-                        z,
-                        padded_size,
-                    ) {
-                        // Full bias on the outermost plane, half one cell in, so
-                        // the apron is a graded ramp rather than an internal cliff.
-                        let falloff = if depth == 0 { 1.0 } else { 0.5 };
-                        sdf[idx] = (sdf[idx] - apron_bias * falloff).max(-1.0);
-                    }
-                }
             }
         }
     }
@@ -498,204 +375,6 @@ pub(super) fn sample_lod_sdf_at_world_pos(world: &VoxelWorld, world_pos: IVec3) 
     } else {
         1.0
     }
-}
-
-pub(super) fn sample_lod_sdf_at_world_pos_if_loaded(
-    world: &VoxelWorld,
-    world_pos: IVec3,
-) -> Option<f32> {
-    match world.sample_voxel_for_terrain_meshing(world_pos) {
-        VoxelSample::InBounds(voxel) => Some(if voxel.is_solid() || voxel.is_liquid() {
-            -1.0
-        } else {
-            1.0
-        }),
-        VoxelSample::OutsideAboveWorld
-        | VoxelSample::OutsideBelowWorld
-        | VoxelSample::OutsideHorizontalWorld
-        | VoxelSample::MissingChunkInsideBounds => None,
-    }
-}
-
-#[cfg(test)]
-pub(super) fn single_solid_to_air_iso_height(
-    samples: impl IntoIterator<Item = (i32, f32)>,
-) -> Option<f32> {
-    let mut samples = samples.into_iter();
-    let (mut prev_y, mut prev_sdf) = samples.next()?;
-    let mut crossing = None;
-    let mut sign_change_count = 0;
-
-    for (y, sdf) in samples {
-        if (prev_sdf > 0.0) != (sdf > 0.0) {
-            sign_change_count += 1;
-            if sign_change_count > 1 || !(prev_sdf < 0.0 && sdf > 0.0) {
-                return None;
-            }
-            let t = prev_sdf / (prev_sdf - sdf);
-            crossing = Some(prev_y as f32 + (y - prev_y) as f32 * t);
-        }
-        prev_y = y;
-        prev_sdf = sdf;
-    }
-
-    crossing
-}
-
-pub(crate) fn coarse_lod_iso_height_for_column(
-    world: &VoxelWorld,
-    world_x: i32,
-    world_z: i32,
-    coarse_lod: LodLevel,
-) -> Option<f32> {
-    coarse_lod_iso_height_for_column_with_smoothing(
-        world,
-        world_x,
-        world_z,
-        coarse_lod,
-        coarse_terrain_sdf_smooth_enabled(),
-    )
-}
-
-pub(super) fn coarse_lod_iso_height_for_column_with_smoothing(
-    world: &VoxelWorld,
-    world_x: i32,
-    world_z: i32,
-    coarse_lod: LodLevel,
-    smooth_coarse: bool,
-) -> Option<f32> {
-    let step = coarse_lod.step_size() as i32;
-    if step <= 1 {
-        return None;
-    }
-
-    let bounds = world.bounds();
-    if world_x < bounds.horizontal_min.x
-        || world_x > bounds.horizontal_max.x
-        || world_z < bounds.horizontal_min.y
-        || world_z > bounds.horizontal_max.y
-    {
-        return None;
-    }
-
-    let (x0, x1, tx) = coarse_lod_axis_bracket(
-        world_x,
-        bounds.horizontal_min.x,
-        bounds.horizontal_max.x,
-        step,
-    )?;
-    let (z0, z1, tz) = coarse_lod_axis_bracket(
-        world_z,
-        bounds.horizontal_min.y,
-        bounds.horizontal_max.y,
-        step,
-    )?;
-
-    if !smooth_coarse || (x0 == x1 && z0 == z1) {
-        return coarse_lod_iso_height_for_sample_column(world, x0, z0, coarse_lod, smooth_coarse);
-    }
-
-    let h00 = coarse_lod_iso_height_for_sample_column(world, x0, z0, coarse_lod, true)?;
-    let h10 = if x1 == x0 {
-        h00
-    } else {
-        coarse_lod_iso_height_for_sample_column(world, x1, z0, coarse_lod, true)?
-    };
-    let h01 = if z1 == z0 {
-        h00
-    } else {
-        coarse_lod_iso_height_for_sample_column(world, x0, z1, coarse_lod, true)?
-    };
-    let h11 = if x1 == x0 {
-        h01
-    } else if z1 == z0 {
-        h10
-    } else {
-        coarse_lod_iso_height_for_sample_column(world, x1, z1, coarse_lod, true)?
-    };
-
-    let hx0 = h00 + (h10 - h00) * tx;
-    let hx1 = h01 + (h11 - h01) * tx;
-    Some(hx0 + (hx1 - hx0) * tz)
-}
-
-pub(super) fn coarse_lod_axis_bracket(
-    value: i32,
-    min: i32,
-    max: i32,
-    step: i32,
-) -> Option<(i32, i32, f32)> {
-    if value < min || value > max || step <= 0 {
-        return None;
-    }
-
-    let lower = value.div_euclid(step) * step;
-    let upper = if value == lower {
-        lower
-    } else {
-        lower.saturating_add(step)
-    };
-    if upper > max {
-        return Some((lower, lower, 0.0));
-    }
-
-    let t = if upper == lower {
-        0.0
-    } else {
-        (value - lower) as f32 / (upper - lower) as f32
-    };
-    Some((lower, upper, t))
-}
-
-pub(super) fn coarse_lod_iso_height_for_sample_column(
-    world: &VoxelWorld,
-    sample_x: i32,
-    sample_z: i32,
-    coarse_lod: LodLevel,
-    smooth_coarse: bool,
-) -> Option<f32> {
-    let step = coarse_lod.step_size() as i32;
-    if step <= 1 {
-        return None;
-    }
-
-    let bounds = world.bounds();
-    if sample_x < bounds.horizontal_min.x
-        || sample_x > bounds.horizontal_max.x
-        || sample_z < bounds.horizontal_min.y
-        || sample_z > bounds.horizontal_max.y
-    {
-        return None;
-    }
-
-    let first_y = bounds.min_world_y.div_euclid(step) * step;
-    let mut prev: Option<(i32, f32)> = None;
-    let mut crossing = None;
-    let mut sign_change_count = 0;
-    let mut y = first_y;
-    while y <= bounds.max_world_y {
-        let sample_pos = IVec3::new(sample_x, y, sample_z);
-        let raw_sdf = sample_lod_sdf_at_world_pos_if_loaded(world, sample_pos)?;
-        let sdf = if smooth_coarse {
-            coarse_transition_smoothed_sdf_at_world_pos(world, sample_pos, step)
-        } else {
-            raw_sdf
-        };
-        if let Some((prev_y, prev_sdf)) = prev {
-            if (prev_sdf > 0.0) != (sdf > 0.0) {
-                sign_change_count += 1;
-                if sign_change_count > 1 || !(prev_sdf < 0.0 && sdf > 0.0) {
-                    return None;
-                }
-                let t = prev_sdf / (prev_sdf - sdf);
-                crossing = Some(prev_y as f32 + (y - prev_y) as f32 * t);
-            }
-        }
-        prev = Some((y, sdf));
-        y += step;
-    }
-
-    crossing
 }
 
 /// Per-mesh-generation memoized smoothed-SDF field for gradient-normal sampling.
@@ -1189,18 +868,23 @@ pub(super) fn coarse_terrain_sdf_smooth_enabled() -> bool {
 pub(super) fn generate_sdf(
     chunk: &Chunk,
     world: &VoxelWorld,
-    my_lod: LodLevel,
-    neighbor_lods: &NeighborLods,
     smooth: bool,
 ) -> [f32; 5832] {
-    generate_sdf_with_transition_mode(
-        chunk,
-        world,
-        my_lod,
-        neighbor_lods,
-        smooth,
-        surface_nets_base_sdf_transition_mode(),
-    )
+    let mut sdf = [1.0f32; PaddedChunkShape::USIZE];
+    let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
+    let smoothing_block = smooth.then(|| build_sdf_smoothing_block(world, chunk_origin));
+
+    for i in 0..PaddedChunkShape::USIZE {
+        let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
+        if let Some(block) = &smoothing_block {
+            sdf[i] = smoothed_sdf_from_block(block, px, py, pz);
+        } else {
+            let is_solid = sample_voxel_solid(chunk, world, chunk_origin, px, py, pz);
+            sdf[i] = if is_solid { -1.0 } else { 1.0 };
+        }
+    }
+
+    sdf
 }
 
 pub(super) fn generate_sdf_with_transition_mode(
@@ -1253,63 +937,3 @@ pub(super) fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) ->
     voxel.is_solid() || voxel.is_liquid()
 }
 
-/// Generate an SDF array at LOD1 (half resolution).
-/// Returns a 10x10x10 grid (1000 elements) instead of 18x18x18 (5832).
-/// Vertex positions must be scaled by step_size (2) after mesh generation.
-///
-/// Low-LOD samples use the same lattice-voxel convention as LOD0 to avoid
-/// phase-shifting terrain downward, then smooth only interior SDF values to
-/// reduce stair-stepping without moving boundary samples.
-pub(super) fn generate_sdf_lod1(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    neighbor_lods: &NeighborLods,
-) -> [f32; LOD1_GRID_VOLUME] {
-    generate_low_lod_sdf::<LOD1_GRID_VOLUME>(
-        chunk,
-        world,
-        LOD1_PADDED_SIZE,
-        LOD1_STEP_SIZE as i32,
-        LodShape1::linearize,
-        LodLevel::Lod1,
-        neighbor_lods,
-    )
-}
-
-/// Generate an SDF array at LOD2 (quarter resolution).
-/// Returns a 6x6x6 grid (216 elements).
-/// Vertex positions must be scaled by step_size (4) after mesh generation.
-pub(super) fn generate_sdf_lod2(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    neighbor_lods: &NeighborLods,
-) -> [f32; LOD2_GRID_VOLUME] {
-    generate_low_lod_sdf::<LOD2_GRID_VOLUME>(
-        chunk,
-        world,
-        LOD2_PADDED_SIZE,
-        LOD2_STEP_SIZE as i32,
-        LodShape2::linearize,
-        LodLevel::Lod2,
-        neighbor_lods,
-    )
-}
-
-/// Generate an SDF array at LOD3 (eighth resolution).
-/// Returns a 4x4x4 grid (64 elements).
-/// Vertex positions must be scaled by step_size (8) after mesh generation.
-pub(super) fn generate_sdf_lod3(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    neighbor_lods: &NeighborLods,
-) -> [f32; LOD3_GRID_VOLUME] {
-    generate_low_lod_sdf::<LOD3_GRID_VOLUME>(
-        chunk,
-        world,
-        LOD3_PADDED_SIZE,
-        LOD3_STEP_SIZE as i32,
-        LodShape3::linearize,
-        LodLevel::Lod3,
-        neighbor_lods,
-    )
-}

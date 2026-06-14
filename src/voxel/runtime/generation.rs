@@ -397,11 +397,6 @@ pub(crate) fn poll_world_load_task(
     mut pending_generation: ResMut<PendingWorldGeneration>,
     mut tasks: Query<(Entity, &mut WorldLoadTask)>,
     persistence_settings: Res<WorldPersistence>,
-    camera_query: Query<&Transform, With<PlayerCamera>>,
-    lod_settings: Res<LodSettings>,
-    bench_forensics: Option<Res<BenchForensicsConfig>>,
-    clod_pages_runtime: Option<Res<crate::voxel::pages::runtime::ClodPagesRuntime>>,
-    page_mesh_gate: Option<Res<crate::voxel::pages::ClodPageMeshGate>>,
 ) {
     for (entity, mut task) in tasks.iter_mut() {
         let Some(result) = block_on(poll_once(&mut task.task)) else {
@@ -434,21 +429,7 @@ pub(crate) fn poll_world_load_task(
                 }
 
                 *world = loaded_world;
-                let camera_pos = camera_query
-                    .single()
-                    .ok()
-                    .map(|transform| transform.translation);
-                let live_lod0_only = clod_live_chunks_lod0_only(
-                    clod_pages_runtime.as_deref(),
-                    page_mesh_gate.as_deref(),
-                );
-                assign_initial_lods_for_loaded_world(
-                    &mut world,
-                    camera_pos,
-                    &lod_settings,
-                    bench_forensics.as_deref(),
-                    live_lod0_only,
-                );
+                assign_initial_lods_for_loaded_world(&mut world);
                 gen_state.total_chunks = loaded_chunks as u32;
                 gen_state.chunks_completed = gen_state.total_chunks;
                 gen_state.is_complete = true;
@@ -839,11 +820,6 @@ pub(crate) fn poll_chunk_generation_tasks(
     mut gen_state: ResMut<ChunkGenerationState>,
     mut tasks: Query<(Entity, &mut ChunkGenerationTask)>,
     persistence_settings: Res<WorldPersistence>,
-    camera_query: Query<&Transform, With<PlayerCamera>>,
-    lod_settings: Res<LodSettings>,
-    bench_forensics: Option<Res<BenchForensicsConfig>>,
-    clod_pages_runtime: Option<Res<crate::voxel::pages::runtime::ClodPagesRuntime>>,
-    page_mesh_gate: Option<Res<crate::voxel::pages::ClodPageMeshGate>>,
     _lod_control: Res<TerrainLodControl>,
 ) {
     // NOTE: LOD freeze (Alt+F6) does NOT halt chunk insertion. Freeze only pauses LOD
@@ -858,13 +834,6 @@ pub(crate) fn poll_chunk_generation_tasks(
 
     // Poll all pending tasks
     let mut completed_count = 0u32;
-    let camera_pos = camera_query
-        .single()
-        .ok()
-        .map(|transform| transform.translation);
-    let live_lod0_only =
-        clod_live_chunks_lod0_only(clod_pages_runtime.as_deref(), page_mesh_gate.as_deref());
-
     for (entity, mut task) in tasks.iter_mut() {
         if let Some(result) = block_on(poll_once(&mut task.task)) {
             let ChunkGenerationResult { mut chunk, stats } = result;
@@ -889,13 +858,7 @@ pub(crate) fn poll_chunk_generation_tasks(
             gen_state.world_stats.add(&stats, uniformity);
 
             // Insert chunk into world
-            let initial_lod = initial_lod_for_chunk(
-                &chunk,
-                camera_pos,
-                &lod_settings,
-                bench_forensics.as_deref(),
-                live_lod0_only,
-            );
+            let initial_lod = initial_lod_for_chunk();
             chunk.set_initial_lod_level(initial_lod);
             world.insert_chunk(chunk);
             mark_surface_nets_halo_dirty(&mut world, chunk_pos);
@@ -951,36 +914,11 @@ pub(crate) fn mark_surface_nets_halo_dirty(world: &mut VoxelWorld, chunk_pos: IV
     world.mark_generation_face_neighbors_dirty(chunk_pos);
 }
 
-pub(crate) fn initial_lod_for_chunk(
-    chunk: &Chunk,
-    _camera_pos: Option<Vec3>,
-    _lod_settings: &LodSettings,
-    forensics: Option<&BenchForensicsConfig>,
-    _live_lod0_only: bool,
-) -> LodLevel {
-    if let Some(lod) = forensics_forced_lod(forensics) {
-        return lod;
-    }
-    let _ = chunk;
+pub(crate) fn initial_lod_for_chunk() -> LodLevel {
     LodLevel::Lod0
 }
 
-pub(crate) fn assign_initial_lods_for_loaded_world(
-    world: &mut VoxelWorld,
-    _camera_pos: Option<Vec3>,
-    _lod_settings: &LodSettings,
-    forensics: Option<&BenchForensicsConfig>,
-    _live_lod0_only: bool,
-) {
-    if let Some(lod) = forensics_forced_lod(forensics) {
-        let positions: Vec<IVec3> = world.chunk_positions().collect();
-        for chunk_pos in positions {
-            if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
-                chunk.set_initial_lod_level(lod);
-            }
-        }
-        return;
-    }
+pub(crate) fn assign_initial_lods_for_loaded_world(world: &mut VoxelWorld) {
     let positions: Vec<IVec3> = world.chunk_positions().collect();
     for chunk_pos in positions {
         if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
@@ -989,9 +927,3 @@ pub(crate) fn assign_initial_lods_for_loaded_world(
     }
 }
 
-fn clod_live_chunks_lod0_only(
-    runtime: Option<&crate::voxel::pages::runtime::ClodPagesRuntime>,
-    gate: Option<&crate::voxel::pages::ClodPageMeshGate>,
-) -> bool {
-    runtime.is_some() && gate.is_some()
-}

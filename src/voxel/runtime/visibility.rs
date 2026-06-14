@@ -147,7 +147,6 @@ pub fn apply_visibility_culling_system(
 pub(crate) fn update_chunk_lod_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
-    bench_forensics: Option<Res<BenchForensicsConfig>>,
     page_mesh_gate: Option<Res<crate::voxel::pages::ClodPageMeshGate>>,
     lod_control: Res<TerrainLodControl>,
     lod_transaction: Res<LodMeshTransactionState>,
@@ -263,17 +262,7 @@ pub(crate) fn update_chunk_lod_system(
             continue;
         }
         let current_lod = chunk.lod_level();
-        let page_restore_mutation = chunk.has_dirty_reason(MeshDirtyReason::TerrainMutation)
-            && page_mesh_gate
-                .as_deref()
-                .is_some_and(|gate| gate.chunk_pending_restore(*chunk_pos));
-        let target_lod = if page_restore_mutation {
-            LodLevel::Lod0
-        } else if let Some(lod) = forensics_forced_lod(bench_forensics.as_deref()) {
-            lod
-        } else {
-            LodLevel::Lod0
-        };
+        let target_lod = LodLevel::Lod0;
         desired.insert(*chunk_pos, target_lod);
         chunk_state.insert(*chunk_pos, current_lod);
     }

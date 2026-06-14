@@ -253,8 +253,6 @@ pub struct BenchForensicsConfig {
     #[serde(default)]
     pub terrain_mesher: BenchForensicsTerrainMesher,
     #[serde(default)]
-    pub terrain_lod: BenchForensicsTerrainLod,
-    #[serde(default)]
     pub mc_transitions: BenchForensicsMcTransitions,
 }
 
@@ -263,7 +261,6 @@ impl Default for BenchForensicsConfig {
         Self {
             enabled: false,
             terrain_mesher: BenchForensicsTerrainMesher::Auto,
-            terrain_lod: BenchForensicsTerrainLod::Auto,
             mc_transitions: BenchForensicsMcTransitions::Enabled,
         }
     }
@@ -276,15 +273,6 @@ pub enum BenchForensicsTerrainMesher {
     Auto,
     SurfaceNets,
     McTransvoxel,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum BenchForensicsTerrainLod {
-    #[default]
-    Auto,
-    AllLod0,
-    AllLod1,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -4586,7 +4574,6 @@ chunk_load_radius = 6
 
 [forensics]
 terrain_mesher = "mc_transvoxel"
-terrain_lod = "all_lod1"
 mc_transitions = "disabled_keep_boundary_rows"
 
 [[checkpoint]]
@@ -4607,7 +4594,6 @@ hold_frames = 90
             forensics.terrain_mesher,
             BenchForensicsTerrainMesher::McTransvoxel
         );
-        assert_eq!(forensics.terrain_lod, BenchForensicsTerrainLod::AllLod1);
         assert_eq!(
             forensics.mc_transitions,
             BenchForensicsMcTransitions::DisabledKeepBoundaryRows

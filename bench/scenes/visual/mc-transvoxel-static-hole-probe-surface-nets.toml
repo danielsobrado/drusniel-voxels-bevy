@@ -6,7 +6,6 @@ world_cache_path = "bench-runs/cache/visual-regression-world.bin"
 
 [forensics]
 terrain_mesher = "surface_nets"
-terrain_lod = "auto"
 mc_transitions = "enabled"
 
 [[checkpoint]]

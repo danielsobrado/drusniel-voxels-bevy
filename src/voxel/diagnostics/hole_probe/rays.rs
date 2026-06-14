@@ -159,22 +159,22 @@ pub(super) fn cast_down_ray(
             let hit_y = origin.y - hit.distance;
             let entity_probe = terrain_entities.get(hit.entity).ok();
             let chunk_position = entity_probe
-                .and_then(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _, _, _, _)| chunk_mesh)
+                .and_then(|(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _, _, _)| chunk_mesh)
                 .map(|chunk_mesh| chunk_mesh.chunk_position.into());
             let has_chunk_mesh = entity_probe.is_some_and(
-                |(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _, _, _, _)| chunk_mesh.is_some(),
+                |(_, _, _, chunk_mesh, _, _, _, _, _, _, _, _, _, _)| chunk_mesh.is_some(),
             );
             let has_chunk_collider = entity_probe.is_some_and(
-                |(_, _, _, _, _, _, _, _, _, _, _, chunk_collider, _, _, _)| {
+                |(_, _, _, _, _, _, _, _, _, _, _, chunk_collider, _, _)| {
                     chunk_collider.is_some()
                 },
             );
             let has_collider =
-                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, _, _, _, collider, _, _)| {
+                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, _, _, _, collider, _)| {
                     collider.is_some()
                 });
             let has_static_rigid_body =
-                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, _, _, _, _, body, _)| {
+                entity_probe.is_some_and(|(_, _, _, _, _, _, _, _, _, _, _, _, _, body)| {
                     matches!(body, Some(RigidBody::Static))
                 });
 
@@ -239,7 +239,7 @@ pub(super) fn sample_render_mesh_rays(
                 else {
                     continue;
                 };
-                let Ok((entity, mesh3d, transform, chunk_mesh, _, _, _, _, _, _, _, _, _, _, _)) =
+                let Ok((entity, mesh3d, transform, chunk_mesh, _, _, _, _, _, _, _, _, _, _)) =
                     terrain_entities.get(entity)
                 else {
                     continue;
@@ -879,7 +879,6 @@ pub(super) fn highest_render_mesh_hit_at(
                     _,
                     _,
                     _,
-                    _,
                 )) = terrain_entities.get(entity)
                 else {
                     continue;
@@ -961,7 +960,6 @@ pub(super) fn nearest_render_mesh_hit_along_ray(
                     transform,
                     chunk_mesh,
                     terrain_debug,
-                    _,
                     _,
                     _,
                     _,
@@ -1250,7 +1248,6 @@ pub(super) fn sample_camera_ray(
             chunk_mesh,
             terrain_debug,
             mc_triangle_sources,
-            _,
             _,
             _,
             _,

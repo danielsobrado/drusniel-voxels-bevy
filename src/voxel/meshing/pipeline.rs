@@ -2,8 +2,6 @@ use super::{
     ChunkMeshResult, LodTransitionSnapStats, MeshData, MeshForensicsOptions,
     MeshGenerationTimingStats, TerrainMeshSectionStats, WaterAirExposureMode, WaterMeshingStats,
     generate_blocky_chunk_mesh, generate_chunk_mesh_surface_nets,
-    generate_chunk_mesh_surface_nets_lod1, generate_chunk_mesh_surface_nets_lod2,
-    generate_chunk_mesh_surface_nets_lod3,
 };
 use crate::rendering::ao_config::BakedAoConfig;
 use crate::voxel::chunk::{Chunk, LodLevel};
@@ -176,39 +174,13 @@ fn generate_surface_nets_for_lod(request: &MeshRequest<'_>) -> ChunkMeshResult {
         LodLevel::Lod0 => generate_chunk_mesh_surface_nets(
             request.chunk,
             request.world,
-            request.mesh_lod,
-            request.neighbor_lods,
             request.ao_config,
             request.water_exposure_mode,
             request.timing_enabled,
         ),
-        LodLevel::Lod1 => generate_chunk_mesh_surface_nets_lod1(
-            request.chunk,
-            request.world,
-            request.mesh_lod,
-            request.neighbor_lods,
-            request.ao_config,
-            request.water_exposure_mode,
-            request.timing_enabled,
-        ),
-        LodLevel::Lod2 => generate_chunk_mesh_surface_nets_lod2(
-            request.chunk,
-            request.world,
-            request.mesh_lod,
-            request.neighbor_lods,
-            request.ao_config,
-            request.water_exposure_mode,
-            request.timing_enabled,
-        ),
-        LodLevel::Lod3 => generate_chunk_mesh_surface_nets_lod3(
-            request.chunk,
-            request.world,
-            request.mesh_lod,
-            request.neighbor_lods,
-            request.ao_config,
-            request.water_exposure_mode,
-            request.timing_enabled,
-        ),
+        LodLevel::Lod1 | LodLevel::Lod2 | LodLevel::Lod3 => {
+            unreachable!("live Surface Nets only supports LOD0")
+        }
         LodLevel::Culled => empty_mesh_result(),
     }
 }
@@ -223,10 +195,6 @@ fn empty_mesh_result() -> ChunkMeshResult {
         mc_transvoxel_stats: None,
         mc_triangle_sources: None,
         generation_timing: MeshGenerationTimingStats::default(),
-        boundary_strips: Vec::new(),
-        seam_face_audit: [super::seam_audit::SeamFaceAudit::default();
-            super::seam_audit::XZ_FACE_COUNT],
-        seam_strip_debug: super::TerrainSeamStripDebug::default(),
     }
 }
 

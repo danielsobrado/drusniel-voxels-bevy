@@ -825,7 +825,6 @@ pub(super) fn terrain_mesh_and_sources_for_chunk<'a>(
         _chunk_collider,
         _collider,
         _rigid_body,
-        _seam_strip_debug,
     )) = terrain_entities.get(entity)
     else {
         return None;
@@ -859,7 +858,6 @@ pub(super) fn terrain_triangle_sources_for_chunk<'a>(
         _chunk_collider,
         _collider,
         _rigid_body,
-        _seam_strip_debug,
     )) = terrain_entities.get(entity)
     else {
         return None;
@@ -899,7 +897,6 @@ pub(super) fn entity_probe(
         chunk_collider,
         collider,
         body,
-        _seam_strip_debug,
     ) = terrain_entities.get(entity).ok()?;
 
     Some(EntityProbe {
@@ -991,7 +988,6 @@ pub(super) fn render_entity_checklist_for_chunk(
                 _chunk_collider,
                 _collider,
                 _rigid_body,
-                _seam_strip_debug,
             )) => {
                 let mesh = mesh3d.and_then(|mesh3d| meshes.get(&mesh3d.0));
                 (
@@ -1093,7 +1089,6 @@ pub(super) fn terrain_mesh_debug_for_chunk(
         _chunk_collider,
         _collider,
         _rigid_body,
-        _seam_strip_debug,
     )) = terrain_entities.get(entity)
     else {
         return None;

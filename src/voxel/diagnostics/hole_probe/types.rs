@@ -860,7 +860,6 @@ pub type TerrainEntityQuery<'w, 's> = Query<
         Option<&'static ChunkCollider>,
         Option<&'static Collider>,
         Option<&'static RigidBody>,
-        Option<&'static crate::voxel::meshing::TerrainSeamStripDebug>,
     ),
 >;
 

@@ -71,17 +71,6 @@ pub struct TerrainMeshDebug {
     pub lod_transition_snap_stats: LodTransitionSnapStats,
     pub mesh_section_stats: TerrainMeshSectionStats,
     pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
-    /// Per-face X/Z seam audit (NegX, PosX, NegZ, PosZ). Filled at mesh time; render
-    /// probe fields updated by the bench seam-audit pass.
-    pub seam_face_audit: [super::seam_audit::SeamFaceAudit; super::seam_audit::XZ_FACE_COUNT],
-}
-
-/// Mesh-time projected boundary strips for seam overlap oracle (sibling to [`TerrainMeshDebug`]).
-#[derive(Component, Clone, Debug, Default)]
-pub struct TerrainSeamStripDebug {
-    /// One main-surface strip per X/Z face extracted at mesh time (this chunk's boundary).
-    pub strips: [Option<crate::voxel::lod_boundary_strip::CompactProjectedStrip>;
-        super::seam_audit::XZ_FACE_COUNT],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -166,19 +155,6 @@ impl LodTransitionSnapStats {
     #[inline]
     pub(super) fn face_mask(face: ChunkFace) -> u8 {
         1 << face as u8
-    }
-
-    #[inline]
-    pub(super) fn mark_snapped(&mut self, face: ChunkFace, vertex_count: usize) {
-        self.snapped_face_mask |= Self::face_mask(face);
-        self.snapped_vertex_count = self
-            .snapped_vertex_count
-            .saturating_add(vertex_count as u32);
-    }
-
-    #[inline]
-    pub(super) fn mark_fallback(&mut self, face: ChunkFace) {
-        self.fallback_face_mask |= Self::face_mask(face);
     }
 
     #[inline]
@@ -474,13 +450,4 @@ pub struct ChunkMeshResult {
     pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
     pub mc_triangle_sources: Option<McTriangleSources>,
     pub generation_timing: MeshGenerationTimingStats,
-    /// Main-surface boundary strips a chunk would export for a finer neighbour to weld to
-    /// (vertex-exact seam, Stage 1 of an unfinished plan). **Currently dormant:** the
-    /// Surface Nets path leaves this empty and `commit` discards it — the geometry stitch
-    /// (Stages 2–5) was never built, and CLOD pages are the far-field LOD path instead.
-    /// The extractor/cache in `src/voxel/lod/boundary_strip.rs` survive only for the bench
-    /// seam-audit oracle.
-    pub boundary_strips: Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip>,
-    pub seam_face_audit: [super::seam_audit::SeamFaceAudit; super::seam_audit::XZ_FACE_COUNT],
-    pub seam_strip_debug: TerrainSeamStripDebug,
 }

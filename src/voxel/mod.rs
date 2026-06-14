@@ -44,10 +44,6 @@ pub mod gravity {
     pub use super::simulation::gravity::*;
 }
 
-pub mod lod_boundary_strip {
-    pub use super::lod::boundary_strip::*;
-}
-
 pub mod materials {
     pub use super::core::materials::*;
 }
