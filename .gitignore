@@ -76,3 +76,4 @@ docs/lod/image/*.png
 pkg/mod/cache/
 pkg/sumdb/
 tools/clod-poc/package-lock.json
+tools/clod-rs/
