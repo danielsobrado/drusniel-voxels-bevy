@@ -7,6 +7,12 @@
 > `docs/lod/`
 > Owner: terrain/rendering
 >
+> **Stale references:** the suggested bindings here (`F7`/`F8`/`Shift+F7`) shipped under
+> **Alt** modifiers (`Alt+F7`/`Alt+F8`/`Alt+Shift+F7`), the debug input lives in
+> `src/voxel/diagnostics/terrain_debug.rs` (not `src/interaction/debug.rs`), and
+> `src/voxel/meshing.rs` is now the `src/voxel/meshing/` module. For the implemented
+> behaviour and key bindings see [`wireframe-debug-guide.md`](wireframe-debug-guide.md).
+>
 > Decision context: per peer advice ("check it in wireframe first; if the
 > geometry is stepped, it's the DC/QEF placement; if the geometry is smooth
 > but shading is stepped, it's normals"), we need a runtime wireframe

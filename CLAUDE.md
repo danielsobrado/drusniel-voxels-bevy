@@ -45,16 +45,19 @@ If a change was not benchmarked, say so directly.
 ## Terrain Debug Views
 
 Live in-game overlays for diagnosing terrain holes, normals, and page/live
-handoff. Implementation: [`src/voxel/terrain_debug.rs`](src/voxel/terrain_debug.rs).
-Plan + interpretation recipe: [`docs/lod/wireframe-debug-plan.md`](docs/lod/wireframe-debug-plan.md).
+handoff. Implementation: [`src/voxel/diagnostics/terrain_debug.rs`](src/voxel/diagnostics/terrain_debug.rs)
+(re-exported as `crate::voxel::terrain_debug`).
+Interpretation recipe: [`docs/lod/wireframe-debug-guide.md`](docs/lod/wireframe-debug-guide.md)
+(the historical plan is [`docs/lod/wireframe-debug-plan.md`](docs/lod/wireframe-debug-plan.md)).
 
 | Hotkey | What it does | Output |
 |---|---|---|
 | **Alt+F7** | Toggle wireframe overlay on terrain. Edges drawn from barycentric UVs, coloured by mesh section × LOD tint. | On-screen indicator: "TERRAIN DEBUG: WIRE ON" |
 | **Alt+F8** | Toggle normals-as-colour mode. Replaces lit terrain with `vec3(world_normal * 0.5 + 0.5)`. Combinable with Alt+F7. | On-screen indicator: "TERRAIN DEBUG: NORMALS ON" |
-| **Alt+Shift+F7** | Capture current frame. ⚠ Known bug: also fires the Alt+F7 toggle — state flips on every capture. | `debug/wireframe-<ts>.png` + `debug/wireframe-<ts>.json` (camera pose, FOV, mode flags, terrain settings hash) |
-| **Alt+F10** | Terrain hole-probe dump (per-chunk LOD, neighbor LODs, snap stats, missing-neighbor counts). Moved off Shift+F9 (Shift is fly-down). | `debug/terrain-hole-probe-<ts>.json` |
+| **Alt+F9** | Toggle mesher SDF iso-band overlay (magenta where `\|sdf\| < ε`, orange where the mesh sits off the zero crossing). Composable with the other modes. | On-screen indicator |
+| **Alt+F10** | ⚠ Two systems share this key: it toggles the flat-unlit terrain material **and** writes a hole-probe dump (per-chunk LOD, neighbor LODs, snap stats, missing-neighbor counts). Moved off Shift+F9 (Shift is fly-down); Alt+F9 was taken by the iso-band overlay. | `debug/terrain-hole-probe-<ts>.json` + on-screen indicator |
 | **Alt+F11** | Toggle CLOD page source meshing for A/B inspection. | Console log |
+| **Alt+Shift+F7** | Capture current frame. Capture-only — does not toggle wireframe. | `debug/wireframe-<ts>.png` + `debug/wireframe-<ts>.json` (camera pose, FOV, mode flags, terrain settings hash) |
 
 ### Wireframe colour key
 
@@ -76,7 +79,7 @@ LOD tint:
 
 ### Diagnostic recipe (friend's rule of thumb)
 
-Per [`docs/lod/wireframe-debug-plan.md`](docs/lod/wireframe-debug-plan.md) → WIRE-008:
+Per the full recipe table in [`docs/lod/wireframe-debug-guide.md`](docs/lod/wireframe-debug-guide.md):
 
 - **Stepped geometry** in wireframe → DC/QEF/SDF placement issue.
 - **Smooth geometry, stepped colour in Alt+F8** → normals issue (not geometry).

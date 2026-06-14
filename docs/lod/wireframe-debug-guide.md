@@ -68,6 +68,10 @@ depth test. Use this to separate real missing geometry from lighting, shadow,
 fog, texture, material, and normal-map artifacts. Combine with Alt+F7 when
 triangle ownership or LOD tint is useful.
 
+> **Note:** `Alt+F10` also triggers a terrain hole-probe dump
+> (`debug/terrain-hole-probe-<timestamp>.json`) — a separate system bound to the
+> same key — so each press both toggles flat-unlit and writes a probe dump.
+
 ### Capture (Alt+Shift+F7)
 
 Writes:

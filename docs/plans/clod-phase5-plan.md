@@ -89,8 +89,10 @@ Work:
   `lock.rs`/`validate.rs` keep **topological** border detection (both PoC findings).
 - Add `meshopt = "0.6"` to the crate `Cargo.toml`. **Bench/compile note:** meshopt builds the C
   lib via `cc` (first build only); confirm no impact on dynamic-linking dev iteration.
-- Golden test: `tools/clod-rs` outputs are the reference; an in-crate test feeds the same
-  exports and asserts watertight + monotone + reduction within epsilon (matches §6 already done).
+- Golden test: **done and now the sole reference.** `tools/clod-rs` has been removed; its
+  golden gate tests were moved into `src/voxel/pages/tests.rs` (synthetic terrain lives in
+  `src/voxel/pages/synthetic.rs`), asserting watertight + monotone + reduction + A2 border
+  match. Run with `cargo test -p voxel_builder --lib voxel::pages`.
 
 ## 5. Step 3 — page builds (FINDING: how to source far-field LOD0 geometry)
 

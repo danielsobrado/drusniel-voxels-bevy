@@ -474,10 +474,12 @@ pub struct ChunkMeshResult {
     pub mc_transvoxel_stats: Option<crate::voxel::mc_transvoxel::McTransvoxelStats>,
     pub mc_triangle_sources: Option<McTriangleSources>,
     pub generation_timing: MeshGenerationTimingStats,
-    /// Main-surface boundary strips this chunk exports for a finer neighbour to weld to
-    /// (vertex-exact seam, Stage 2). Empty unless morph is on and the chunk borders a
-    /// strictly finer neighbour. Extracted before skirts; published to
-    /// `LodBoundaryStripCache` at commit.
+    /// Main-surface boundary strips a chunk would export for a finer neighbour to weld to
+    /// (vertex-exact seam, Stage 1 of an unfinished plan). **Currently dormant:** the
+    /// Surface Nets path leaves this empty and `commit` discards it — the geometry stitch
+    /// (Stages 2–5) was never built, and CLOD pages are the far-field LOD path instead.
+    /// The extractor/cache in `src/voxel/lod/boundary_strip.rs` survive only for the bench
+    /// seam-audit oracle.
     pub boundary_strips: Vec<crate::voxel::lod_boundary_strip::LodBoundaryStrip>,
     pub seam_face_audit: [super::seam_audit::SeamFaceAudit; super::seam_audit::XZ_FACE_COUNT],
     pub seam_strip_debug: TerrainSeamStripDebug,

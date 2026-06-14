@@ -1,9 +1,17 @@
 # LOD Seam Closure Plan (Surface Nets) — Vertical + Horizontal
 
-> Created: 2026-05-22 · Status: Planning
+> Created: 2026-05-22 · Status: Historical plan; partially implemented.
 > Scope: `src/voxel/meshing.rs`, `src/voxel/skirt.rs`, `src/voxel/plugin.rs`,
 > `src/rendering/triplanar_material.rs`, `assets/shaders/triplanar_terrain.wgsl`
 > Owner: terrain/rendering
+>
+> **Stale references:** this doc predates the `src/voxel/meshing.rs` → `src/voxel/meshing/`
+> module split (now `surface_nets.rs`, `sdf.rs`, `lod_seam.rs`, `data.rs`), the rename
+> `lower_detail_transition_step_for_padded_size` → `lod_transition_step_for_padded_size`,
+> and the `Shift+F9` → `Alt+F10` hotkey move. The line numbers and several function names
+> below no longer resolve. Core pieces have since landed (Y-face SDF coarsening,
+> the legacy boundary snap in `lod_seam.rs`, per-vertex snap fallback, boundary strips);
+> for current debug behaviour see [`wireframe-debug-guide.md`](wireframe-debug-guide.md).
 
 ## Why this plan, not the MC+Transvoxel spike
 

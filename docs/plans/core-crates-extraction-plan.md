@@ -11,6 +11,15 @@ compile-proving skeleton, no Path-B compositor extraction (stays Bevy-coupled by
 Tickets below are formatted for any tracker (paste body as description). IDs are local
 (`CORE-n`). Each ticket carries a self-contained **Prompt** for the implementing AI.
 
+> **Update (post-port):** `tools/clod-rs` has been **deleted**. The Bevy CLOD pages path
+> (`src/voxel/pages/`) is the single live implementation, and the sandbox's golden gate
+> tests + synthetic terrain were moved into `src/voxel/pages/{tests,synthetic}.rs`. The
+> copy-drift this plan set out to stop (F2) is therefore already resolved. Tickets that
+> reconcile, depend on, or retire `tools/clod-rs` (notably **CORE-2** and **CORE-5**) are
+> moot as written — if `clod-core` extraction proceeds, treat `src/voxel/pages/` as the
+> source of truth and ignore the `tools/clod-rs` steps. `tools/clod-poc` (Three.js) is kept
+> for visual experiments only.
+
 ---
 
 ## 0. Verified repo facts (ground truth for every ticket)

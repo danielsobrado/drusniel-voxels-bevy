@@ -2,6 +2,8 @@
 
 Document status (2026-05-17): mixed implementation record and roadmap. The implemented building surface is `src/building/mod.rs`, `src/building/types.rs`, `src/building/grid.rs`, `src/building/snap.rs`, and `src/building/ghost.rs`. Sections for materials, stability, collapse, build zones, persistence, audio, and config assets remain roadmap targets unless the code tree adds those modules later.
 
+> Update (2026-06-14): the building module now lives under `src/gameplay/building/`, and the Phase 3 stability/collapse system is implemented in `src/gameplay/building/stability.rs`. For the intentional v1 trade-offs in the shipped stability and biome systems, see [construction-biome-known-limitations.md](construction-biome-known-limitations.md).
+
 ## Overview
 
 A modular building system inspired by Enshrouded/Valheim for the current Bevy 0.18.1 voxel game with Surface Nets terrain. Uses Avian physics, Valheim-style stability propagation, and precomputed physics-based collapse.

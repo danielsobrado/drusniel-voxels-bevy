@@ -41,4 +41,6 @@ pub use render::{ClodPageMeshBounds, ClodPageMeshTag, ClodPagesShow, ClodPagesSh
 pub use types::{ClodBuildError, PageFootprint, PageMesh};
 
 #[cfg(test)]
+mod synthetic;
+#[cfg(test)]
 mod tests;

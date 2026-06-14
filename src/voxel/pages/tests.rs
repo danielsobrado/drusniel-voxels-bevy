@@ -1,12 +1,18 @@
-//! In-engine guards for the ported builder. The full pipeline (watertight/monotone/gate)
-//! is validated in tools/clod-rs; here we prove the meshopt FFI links and behaves correctly
-//! inside the engine binary (notably the BYTES attribute stride), plus weld conflict rules.
+//! In-engine guards for the ported builder. These cover the full pipeline end-to-end —
+//! weld, lock, simplify, quadtree, and validate — on a synthetic terrain field (the golden
+//! gate tests originally lived in the now-removed `tools/clod-rs` sandbox). Notably this
+//! also proves the meshopt FFI links and behaves correctly inside the engine binary (the
+//! BYTES attribute stride), plus weld conflict rules.
 
 use super::config::ClodPagesConfig;
 use super::lock::build_outer_border_locks;
+use super::quadtree::build_quadtree;
 use super::simplify::simplify_page;
+use super::synthetic::build_lod0_world;
 use super::types::PageMesh;
+use super::validate::{Axis, assert_border_match, border_chain};
 use super::weld::weld_vertices;
+use std::collections::HashMap;
 
 /// Flat-ish grid with a relief, mirroring the spike: simplify must roughly halve it and
 /// keep the locked open border. Proves meshopt works in-engine with the byte attribute stride.
@@ -71,4 +77,85 @@ fn weld_merges_coincident_and_rejects_conflicts() {
         weld_vertices(&bad, 0.001).is_err(),
         "attribute conflict must hard-fail"
     );
+}
+
+/// Golden gate (ported from clod-rs): the full quadtree build over a synthetic 2x2 world is
+/// watertight (build_quadtree asserts internal-border welding internally, so a clean build
+/// proves A1), has monotone error up the tree, and decimates vs LOD0.
+#[test]
+fn builds_2x2_watertight_monotone_and_reduced() {
+    let cfg = ClodPagesConfig::load();
+    let lod0 = build_lod0_world(2, 2, &cfg).expect("2x2 source build");
+    let result = build_quadtree(lod0, &cfg).expect("2x2 build must be watertight");
+
+    assert_eq!(result.nodes_by_level[0].len(), 4, "2x2 has 4 LOD0 pages");
+    for n in &result.nodes_by_level[0] {
+        assert_eq!(n.error_world, 0.0, "LOD0 is the reference, error 0");
+    }
+
+    // error_world monotone up the tree (required for a stable DAG cut)
+    let max_per_level: Vec<f32> = result
+        .nodes_by_level
+        .iter()
+        .map(|ns| ns.iter().map(|n| n.error_world).fold(0.0, f32::max))
+        .collect();
+    for w in max_per_level.windows(2) {
+        assert!(
+            w[1] >= w[0],
+            "error must be monotone up the tree: {max_per_level:?}"
+        );
+    }
+
+    // top level decimates vs LOD0
+    let lod0_tris: usize = result.nodes_by_level[0]
+        .iter()
+        .map(|n| n.mesh.triangle_count())
+        .sum();
+    let top: usize = result
+        .nodes_by_level
+        .last()
+        .unwrap()
+        .iter()
+        .map(|n| n.mesh.triangle_count())
+        .sum();
+    assert!(
+        top * 2 <= lod0_tris,
+        "top level should roughly halve per level: {top} vs {lod0_tris}"
+    );
+}
+
+/// Golden gate (ported from clod-rs): adjacent same-level pages share a matching border
+/// chain (gate A2). Exercises the topological-border `validate` path end-to-end.
+#[test]
+fn adjacent_pages_share_matching_borders() {
+    let cfg = ClodPagesConfig::load();
+    let lod0 = build_lod0_world(4, 4, &cfg).expect("4x4 source build");
+    let result = build_quadtree(lod0, &cfg).expect("4x4 build");
+    let mut checks = 0;
+    for (lvl, nodes) in result.nodes_by_level.iter().enumerate() {
+        let span = ((1usize << lvl) * cfg.page.chunks_per_page * cfg.page.chunk_size) as f32;
+        let mut idx: HashMap<(i32, i32), usize> = HashMap::new();
+        for (i, n) in nodes.iter().enumerate() {
+            idx.insert(
+                (
+                    (n.footprint.min_x / span) as i32,
+                    (n.footprint.min_z / span) as i32,
+                ),
+                i,
+            );
+        }
+        for (&(nx, nz), &ai) in &idx {
+            let a = &nodes[ai];
+            if let Some(&ri) = idx.get(&(nx + 1, nz)) {
+                let r = &nodes[ri];
+                assert_border_match(
+                    &border_chain(&a.mesh, Axis::X, a.footprint.max_x, &a.footprint),
+                    &border_chain(&r.mesh, Axis::X, r.footprint.min_x, &r.footprint),
+                )
+                .expect("x border match");
+                checks += 1;
+            }
+        }
+    }
+    assert!(checks > 0, "expected adjacent page pairs to check");
 }
