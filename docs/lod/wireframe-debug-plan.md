@@ -23,7 +23,7 @@
 
 ## Why this, why now
 
-The original MC+Transvoxel spike (see [`mc-transvoxel-plan.md`](mc-transvoxel-plan.md))
+The original MC+Transvoxel spike (see [`mc-transvoxel-plan.md`](../legacy/mc-transvoxel-plan.md))
 is no longer part of the default D1-a path. The diagnostic remains useful for
 checking the live LOD0 bubble and CLOD page handoff:
 

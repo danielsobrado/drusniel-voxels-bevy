@@ -100,18 +100,6 @@ struct PendingMeshCommit {
     bounds_by_node: HashMap<ClodPageNodeKey, ClodPageMeshBounds>,
 }
 
-pub(crate) fn clod_page_mesh_commit_needed(
-    runtime: Res<ClodPagesRuntime>,
-    state: Res<ClodPageMeshCommitState>,
-) -> bool {
-    runtime.enabled
-        || state.committed_tree_revision.is_some()
-        || !state.entities.is_empty()
-        || !state.mesh_handles.is_empty()
-        || !state.retired_mesh_handles.is_empty()
-        || state.pending.is_some()
-}
-
 pub(crate) fn clod_pages_show_startup_log_system(show: Res<ClodPagesShow>) {
     info!(
         "CLOD PAGES SHOW: {} (CLOD_PAGES_SHOW=off disables page visibility)",
@@ -202,7 +190,6 @@ fn clod_page_material(
 
 pub(crate) fn clod_page_mesh_commit_system(
     mut commands: Commands,
-    runtime: Res<ClodPagesRuntime>,
     tree: Res<ClodPageTree>,
     triplanar_material: Res<TriplanarMaterialHandle>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -215,18 +202,6 @@ pub(crate) fn clod_page_mesh_commit_system(
         &mut materials,
         std::mem::take(&mut state.retired_material_handles),
     );
-
-    if !runtime.enabled {
-        clear_pending_commit(&mut commands, &mut meshes, &mut materials, &mut state);
-        for entity in state.entities.drain(..) {
-            commands.entity(entity).despawn();
-        }
-        remove_mesh_assets(&mut meshes, std::mem::take(&mut state.mesh_handles));
-        remove_material_assets(&mut materials, std::mem::take(&mut state.material_handles));
-        state.committed_tree_revision = None;
-        selection_index.clear();
-        return;
-    }
 
     if !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
         || state.committed_tree_revision == Some(tree.revision)
@@ -408,11 +383,9 @@ mod tests {
     }
 
     #[test]
-    fn replacement_is_atomic_and_disable_clears_entities() {
-        let mut runtime = ClodPagesRuntime::default();
-        runtime.enabled = true;
+    fn replacement_is_atomic() {
         let mut app = App::new();
-        app.insert_resource(runtime)
+        app.insert_resource(ClodPagesRuntime::default())
             .insert_resource(ClodPageTree {
                 nodes_by_level: vec![vec![node((0, 0))]],
                 polish: DiagonalPolishStats::default(),
@@ -427,10 +400,7 @@ mod tests {
             .init_resource::<Assets<TriplanarMaterial>>()
             .init_resource::<ClodPageMeshCommitState>()
             .init_resource::<ClodPageSelectionIndex>()
-            .add_systems(
-                Update,
-                clod_page_mesh_commit_system.run_if(clod_page_mesh_commit_needed),
-            );
+            .add_systems(Update, clod_page_mesh_commit_system);
 
         app.update();
         assert_eq!(
@@ -466,8 +436,5 @@ mod tests {
             }]
         );
 
-        app.world_mut().resource_mut::<ClodPagesRuntime>().enabled = false;
-        app.update();
-        assert!(committed_tags(&mut app).is_empty());
     }
 }

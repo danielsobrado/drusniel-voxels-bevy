@@ -541,7 +541,7 @@ explicitly says otherwise.
 - [LOD seam closure plan](lod-seam-closure-plan.md) — CPU snap/skirt context
 - [MC + Transvoxel plan](mc-transvoxel-plan.md) — parallel seam spike; go/no-go
 - [LOD terrain hole investigation](lod-terrain-hole-investigation.md) — SDF divergence
-- [Wireframe debug guide](wireframe-debug-guide.md) — Alt+F7 section colours
+- [Wireframe debug guide](../lod/wireframe-debug-guide.md) — Alt+F7 section colours
 
 ## Open questions
 

@@ -3,7 +3,7 @@
 Status: **planned**, default-off, feature-gated (`naadf`), phased.
 Last updated: 2026-05-18
 Related: `naadf-implementation-status.md`, `naadf-port-plan.md`,
-`naadf-local-lights-plan.md`, `docs/lod/lod-terrain-hole-investigation.md`
+`naadf-local-lights-plan.md`, `docs/legacy/lod-terrain-hole-investigation.md`
 (why the legacy mesh renderer cannot do seamless LOD).
 
 ---

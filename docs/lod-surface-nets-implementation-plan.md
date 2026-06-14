@@ -611,7 +611,7 @@ fn update_super_chunks(
 | Technique | Pros | Cons | Verdict |
 |-----------|------|------|---------|
 | **Octree Dual Contouring** | Preserves sharp features, adaptive detail | Complex implementation, major rewrite needed | Too invasive for our existing pipeline |
-| **Transvoxel** | Seamless transitions by design | Not used on the Surface Nets path | Separate optional spike: [`docs/lod/mc-transvoxel-plan.md`](lod/mc-transvoxel-plan.md) (`MeshMode::McTransvoxel`, feature-gated) |
+| **Transvoxel** | Seamless transitions by design | Not used on the Surface Nets path | Separate optional spike: [`docs/legacy/mc-transvoxel-plan.md`](legacy/mc-transvoxel-plan.md) (`MeshMode::McTransvoxel`, feature-gated) |
 | **Geometry Clipmaps** | Great for heightfield terrain | Poor for true 3D volumes (caves, overhangs) | Wrong fit for volumetric world |
 | **Mesh Decimation** | Optimal triangle reduction | Too slow for real-time, breaks seams | Rejected for dynamic terrain |
 | **Greedy Meshing (Low LOD)** | Very fast, huge polygon reduction | Visual discontinuity (blocky vs smooth) | Already tried, looks bad |

@@ -6,7 +6,7 @@
 > `assets/shaders/instanced_prop.wgsl`, `assets/config/`, `bench/scenes/forest/`,  
 > `bench/scenes/visual/visual-regression-performance100.toml`  
 > Owner: rendering / props  
-> Related: [`docs/lod/lod-implementation-and-review.md`](../lod/lod-implementation-and-review.md),  
+> Related: [`docs/legacy/lod-implementation-and-review.md`](../legacy/lod-implementation-and-review.md),  
 > [`docs/plans/clod-execution-plan.md`](clod-execution-plan.md) §9 (terrain meshlets deferred separately)
 
 ## Summary
@@ -526,7 +526,7 @@ If Bevy 0.18 meshlets remain too experimental for production:
 
 - [ ] Activate existing `decimation.rs` runtime mesh swap (`MeshLod` component) for 50–180 m band.
 - [ ] Wire `update_prop_mesh_lod` system (new) using distances already documented in
-  [`lod-implementation-and-review.md`](../lod/lod-implementation-and-review.md).
+  [`lod-implementation-and-review.md`](../legacy/lod-implementation-and-review.md).
 - [ ] Keep instancing + billboards; no `MeshletMesh3d`.
 - [ ] Do not delete decimation code — it is the fallback path.
 - [ ] Re-evaluate Bevy meshlet track quarterly (jms55 / Bevy `experimental::meshlet` changelog).
@@ -608,7 +608,7 @@ Phase 6  [ ] performance100 A/B  [ ] village/rock pilot A/B  [ ] bench_guard  [ 
 - `MeshletMesh3d`: `bevy::pbr::experimental::meshlet::MeshletMesh3d` (requires `meshlet` feature)
 - Current props instancing: `src/props/instanced_render.rs`
 - Instanced shader (visual reference): `assets/shaders/instanced_prop.wgsl`
-- Current LOD review: `docs/lod/lod-implementation-and-review.md` § Props LOD Pipeline
+- Current LOD review: `docs/legacy/lod-implementation-and-review.md` § Props LOD Pipeline
 - Prop reflection layers: `docs/implementation/prop-reflection-layers.md`
 - Profiling workflow: `docs/reference/profiling.md`, `AGENTS.md` § Profiling
 

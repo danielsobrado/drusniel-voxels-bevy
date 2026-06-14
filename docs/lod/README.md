@@ -1,21 +1,23 @@
 # LOD Documentation Index
 
-Document status (2026-05-17): current index/reference.
+Document status (2026-06-14): updated for the CLOD-only LOD path. The retired
+multi-LOD / seam-stitch documents have moved to [`../legacy/`](../legacy/).
 
-## Start here
+## Current (CLOD + decimation)
 
-- [LOD seam — master issues & solutions](lod-seam-issues-and-solutions.md) — consolidated index of every LOD-seam issue, root cause, fix, and remaining work for both meshers (2026-06-05)
+LOD is now CLOD pages — far terrain decimated from merged LOD0 child meshes with
+locked/welded borders — plus a live near-field LOD0 bubble. Design + execution:
 
-## LOD implementation and review
+- [CLOD execution plan](../plans/clod-execution-plan.md)
+- [CLOD phase 5 plan](../plans/clod-phase5-plan.md)
 
-- [LOD implementation and review](lod-implementation-and-review.md)
-- [LOD review handoff](lod-review-handoff.md)
-- [LOD terrain hole investigation](lod-terrain-hole-investigation.md)
-- [LOD visual artifact fixes](lod-visual-artifact-fixes.md)
-- [Terrain horizon proxy band](horizon-proxy-band.md)
-- [GPU terrain geomorph plan](gpu-terrain-geomorph-plan.md) — planning (2026-06-03)
-- [LOD terrace investigation](lod-terrace-investigation.md) — root cause, transition-boundary fix, and remaining perf caveat (2026-06-04)
+Retained live systems documented here:
 
-## LOD imagery
+- [Terrain horizon proxy band](horizon-proxy-band.md) — cheap far backdrop
+- [Wireframe & mesh debug guide](wireframe-debug-guide.md) — runtime terrain diagnostic (Alt+F7/F8/F9/F10)
+- [Wireframe & mesh debug plan](wireframe-debug-plan.md) — historical plan for the diagnostic above
 
-- [LOD image assets](./image/README.md)
+## Legacy (retired multi-LOD / seam stitch)
+
+Moved to [`../legacy/`](../legacy/): seam closure/audit/issues/lip/topology,
+MC+Transvoxel, GPU geomorph, and the LOD hole/terrace/artifact investigations.

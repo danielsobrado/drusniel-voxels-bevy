@@ -11,7 +11,7 @@
 > and the `Shift+F9` → `Alt+F10` hotkey move. The line numbers and several function names
 > below no longer resolve. Core pieces have since landed (Y-face SDF coarsening,
 > the legacy boundary snap in `lod_seam.rs`, per-vertex snap fallback, boundary strips);
-> for current debug behaviour see [`wireframe-debug-guide.md`](wireframe-debug-guide.md).
+> for current debug behaviour see [`wireframe-debug-guide.md`](../lod/wireframe-debug-guide.md).
 
 ## Why this plan, not the MC+Transvoxel spike
 

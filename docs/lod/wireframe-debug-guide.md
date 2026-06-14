@@ -119,5 +119,5 @@ The hash covers mesh mode, water air-exposure mode, and LOD distance bands — *
 ## Related docs
 
 - Plan: [`wireframe-debug-plan.md`](wireframe-debug-plan.md)
-- LOD seam context: [`lod-seam-closure-plan.md`](lod-seam-closure-plan.md)
-- Hole probe: [`lod-terrain-hole-investigation.md`](lod-terrain-hole-investigation.md)
+- LOD seam context (legacy): [`lod-seam-closure-plan.md`](../legacy/lod-seam-closure-plan.md)
+- Hole probe (legacy): [`lod-terrain-hole-investigation.md`](../legacy/lod-terrain-hole-investigation.md)

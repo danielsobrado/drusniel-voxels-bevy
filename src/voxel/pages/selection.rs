@@ -479,8 +479,7 @@ pub(crate) fn clod_page_selection_system(
 ) {
     let base_material_handle =
         triplanar_material.handle_for_quality(TerrainMaterialQuality::FullTriplanar);
-    if !runtime.enabled
-        || show.0 == ClodPagesShowMode::Off
+    if show.0 == ClodPagesShowMode::Off
         || index.revision.is_none()
         || !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready))
     {

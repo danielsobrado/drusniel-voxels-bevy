@@ -21,39 +21,10 @@ use crate::voxel::world::VoxelWorld;
 #[derive(Resource)]
 pub struct ClodPagesRuntime {
     pub cfg: ClodPagesConfig,
-    /// Master gate. Default false; `CLOD_PAGES=1` opts into the page path.
-    pub enabled: bool,
     /// LOD0 pages assembled per frame by the build queue.
     pub source_budget_per_frame: usize,
     /// Chebyshev radius (chunks) out to which page sources are pre-meshed.
     pub source_radius_chunks: i32,
-}
-
-/// Parses conventional boolean environment values without mutating process-global state.
-/// Unknown values use `default` so each flag can choose its own rollout behavior.
-pub(super) fn parse_env_bool(value: Option<&str>, default: bool) -> bool {
-    let Some(value) = value.map(str::trim) else {
-        return default;
-    };
-    if value == "1"
-        || value.eq_ignore_ascii_case("true")
-        || value.eq_ignore_ascii_case("on")
-        || value.eq_ignore_ascii_case("yes")
-    {
-        true
-    } else if value == "0"
-        || value.eq_ignore_ascii_case("false")
-        || value.eq_ignore_ascii_case("off")
-        || value.eq_ignore_ascii_case("no")
-    {
-        false
-    } else {
-        default
-    }
-}
-
-pub(super) fn env_bool(key: &str, default: bool) -> bool {
-    parse_env_bool(std::env::var(key).ok().as_deref(), default)
 }
 
 impl Default for ClodPagesRuntime {
@@ -69,7 +40,6 @@ impl Default for ClodPagesRuntime {
             .unwrap_or(4);
         Self {
             cfg,
-            enabled: env_bool("CLOD_PAGES", false),
             source_budget_per_frame,
             source_radius_chunks,
         }
@@ -181,49 +151,22 @@ fn page_coord(chunk_pos: IVec3, chunks_per_page: i32) -> (i32, i32) {
     )
 }
 
-/// Logs the initial page state once so bench output records whether the A/B ran pages-on.
+/// Logs the initial page state once for bench output.
 pub fn clod_pages_startup_log_system(runtime: Res<ClodPagesRuntime>) {
     info!(
-        "CLOD PAGES: {} at startup (default OFF; set CLOD_PAGES=1/true/on/yes to enable); radius {} chunks, page-source budget {}/frame. Alt+F11 toggles.",
-        if runtime.enabled {
-            "ENABLED"
-        } else {
-            "DISABLED"
-        },
-        runtime.source_radius_chunks,
-        runtime.source_budget_per_frame
+        "CLOD PAGES: always on; radius {} chunks, page-source budget {}/frame.",
+        runtime.source_radius_chunks, runtime.source_budget_per_frame
     );
-}
-
-/// Alt+F11 toggles CLOD page source meshing on/off for A/B inspection + benching.
-pub fn clod_pages_debug_toggle_system(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut runtime: ResMut<ClodPagesRuntime>,
-) {
-    let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
-    if alt && keys.just_pressed(KeyCode::F11) {
-        runtime.enabled = !runtime.enabled;
-        info!(
-            "CLOD PAGES: source cache {} (radius {} chunks, page-source budget {}/frame)",
-            if runtime.enabled { "ON" } else { "OFF" },
-            runtime.source_radius_chunks,
-            runtime.source_budget_per_frame
-        );
-    }
 }
 
 /// Maintains the page-source export cache filled by the live dirty mesher.
 pub fn clod_pages_source_meshing_system(
-    runtime: Res<ClodPagesRuntime>,
     gen_state: Res<ChunkGenerationState>,
     world: Res<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
+    runtime: Res<ClodPagesRuntime>,
     mut cache: ResMut<PageExportCache>,
 ) {
-    if !runtime.enabled {
-        cache.clear_all();
-        return;
-    }
     if !gen_state.is_complete {
         cache.clear_all();
         return;
@@ -236,31 +179,4 @@ pub fn clod_pages_source_meshing_system(
     cache.retain_in_radius(cam_chunk, far);
     cache.invalidate_dirty_exports(&world);
     cache.refresh_complete_pages(&world, runtime.cfg.page.chunks_per_page as i32);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_env_bool;
-
-    #[test]
-    fn parse_env_bool_accepts_case_insensitive_true_values() {
-        for value in ["1", "true", "TRUE", " on ", "Yes"] {
-            assert!(parse_env_bool(Some(value), false), "value={value:?}");
-        }
-    }
-
-    #[test]
-    fn parse_env_bool_accepts_case_insensitive_false_values() {
-        for value in ["0", "false", "FALSE", " off ", "No"] {
-            assert!(!parse_env_bool(Some(value), true), "value={value:?}");
-        }
-    }
-
-    #[test]
-    fn parse_env_bool_uses_default_for_missing_empty_or_unknown_values() {
-        for value in [None, Some(""), Some("unexpected")] {
-            assert!(!parse_env_bool(value, false), "value={value:?}");
-            assert!(parse_env_bool(value, true), "value={value:?}");
-        }
-    }
 }

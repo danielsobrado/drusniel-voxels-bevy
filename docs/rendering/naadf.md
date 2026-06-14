@@ -83,7 +83,7 @@ Still deferred:
 | Risks | [`naadf-risk-register.md`](naadf-risk-register.md) |
 | Using, debugging, and benching NAADF | [`naadf.md`](naadf.md), [`naadf-debugging.md`](naadf-debugging.md), [`naadf-benchmarks.md`](naadf-benchmarks.md) |
 | Local lights | [`naadf-local-lights-plan.md`](naadf-local-lights-plan.md) |
-| Legacy LOD-seam track, separate from NAADF Path B | [`docs/lod/lod-terrain-hole-investigation.md`](../lod/lod-terrain-hole-investigation.md) |
+| Legacy LOD-seam track, separate from NAADF Path B | [`docs/legacy/lod-terrain-hole-investigation.md`](../legacy/lod-terrain-hole-investigation.md) |
 
 ## Enable Manually
 

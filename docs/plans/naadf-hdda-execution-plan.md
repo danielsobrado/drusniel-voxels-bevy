@@ -51,7 +51,7 @@ target:             explicit chunk → block → voxel hierarchical DDA with spa
 
 **HDDA helps:** GI rays, sun visibility, terrain AO, contact shadows, fog/cave shafts, debug ray heatmaps.
 
-**HDDA does not fix:** Surface Nets LOD holes, stitch topology, T-junctions, skirts, morph lips. Those remain mesh problems — see [`docs/lod/seam-lip-fix-plan.md`](../lod/seam-lip-fix-plan.md).
+**HDDA does not fix:** Surface Nets LOD holes, stitch topology, T-junctions, skirts, morph lips. Those remain mesh problems — see [`docs/legacy/seam-lip-fix-plan.md`](../legacy/seam-lip-fix-plan.md).
 
 **Do not port OpenVDB wholesale.** Borrow the NanoVDB idea: same DDA state machine, variable stride from hierarchy (`getDim` / `span_dim_at`), read-only GPU snapshot. Drusniel's mutable `VoxelWorld` stays authoritative; NAADF chunks are the traversal cache.
 
@@ -552,7 +552,7 @@ Terrain HDDA and dynamic proxy overlay stay **separate buffers and traversal pas
 - [`naadf-voxel-traversal-unification.md`](naadf-voxel-traversal-unification.md) — Plan A (correctness); **required prerequisite** — dense Amanatides CPU/GPU parity before any HDDA work
 - [`docs/rendering/naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md) — shared traversal contract (both plans)
 - [`docs/rendering/naadf-completion-jira-plan.md`](../rendering/naadf-completion-jira-plan.md) — broader NAADF roadmap
-- [`docs/lod/seam-lip-fix-plan.md`](../lod/seam-lip-fix-plan.md) — mesh seams (orthogonal)
+- [`docs/legacy/seam-lip-fix-plan.md`](../legacy/seam-lip-fix-plan.md) — mesh seams (orthogonal)
 
 ---
 

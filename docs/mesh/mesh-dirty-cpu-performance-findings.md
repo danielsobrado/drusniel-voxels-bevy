@@ -22,7 +22,7 @@ The current workload is genuine LOD churn:
 - The transaction path prepares one chunk per frame, while hundreds remain queued.
 
 This matches the existing LOD diagnosis in
-`docs/lod/lod-seam-issues-and-solutions.md`: Surface Nets transition promotion is
+`docs/legacy/lod-seam-issues-and-solutions.md`: Surface Nets transition promotion is
 visually correct but structurally expensive.
 
 ## Bench Runs Reviewed
@@ -247,7 +247,7 @@ The productive directions remain the ones already captured in the LOD docs:
 
 Relevant docs:
 
-- `docs/lod/lod-seam-issues-and-solutions.md`
-- `docs/lod/mctx-decision.md`
-- `docs/lod/mc-transvoxel-hole-diagnosis.md`
+- `docs/legacy/lod-seam-issues-and-solutions.md`
+- `docs/legacy/mctx-decision.md`
+- `docs/legacy/mc-transvoxel-hole-diagnosis.md`
 

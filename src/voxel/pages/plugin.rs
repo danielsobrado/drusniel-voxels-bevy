@@ -12,12 +12,12 @@ use super::ownership::{
     ClodPageMeshGate, clod_page_chunk_ownership_system, refresh_clod_page_mesh_gate_system,
 };
 use super::render::{
-    ClodPageMeshCommitState, ClodPagesShow, clod_page_mesh_commit_needed,
-    clod_page_mesh_commit_system, clod_pages_show_startup_log_system,
+    ClodPageMeshCommitState, ClodPagesShow, clod_page_mesh_commit_system,
+    clod_pages_show_startup_log_system,
 };
 use super::runtime::{
-    ClodPagesRuntime, PageExportCache, clod_pages_debug_toggle_system,
-    clod_pages_source_meshing_system, clod_pages_startup_log_system,
+    ClodPagesRuntime, PageExportCache, clod_pages_source_meshing_system,
+    clod_pages_startup_log_system,
 };
 use super::selection::{
     ClodPageSelectionIndex, ClodPageSelectionState, clod_page_selection_system,
@@ -46,10 +46,7 @@ impl Plugin for ClodPagesPlugin {
             // Reads VoxelWorld immutably; the scheduler serializes it after the dirty mesher.
             .add_systems(
                 Update,
-                (
-                    clod_pages_debug_toggle_system,
-                    clod_pages_source_meshing_system.after(VoxelTerrainSet::MeshDirty),
-                ),
+                clod_pages_source_meshing_system.after(VoxelTerrainSet::MeshDirty),
             )
             .add_systems(
                 Update,
@@ -72,9 +69,7 @@ impl Plugin for ClodPagesPlugin {
             )
             .add_systems(
                 Update,
-                clod_page_mesh_commit_system
-                    .after(clod_pages_build_task_poll_system)
-                    .run_if(clod_page_mesh_commit_needed),
+                clod_page_mesh_commit_system.after(clod_pages_build_task_poll_system),
             )
             .add_systems(
                 Update,

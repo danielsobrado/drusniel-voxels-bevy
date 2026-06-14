@@ -43,7 +43,7 @@ CPU current-SDF, CPU NAADF, entity-volume overlays, and WGSL NAADF paths. Harden
 **This plan does not fix Surface Nets LOD seams, holes, or stitch topology.** Ray traversal
 accelerates queries (sun visibility, AO, contact shadows, fog shafts, editor picking, NAADF
 preview parity). Mesh seams still need transition/stitch geometry — see
-[`docs/lod/seam-lip-fix-plan.md`](../lod/seam-lip-fix-plan.md).
+[`docs/legacy/seam-lip-fix-plan.md`](../legacy/seam-lip-fix-plan.md).
 
 **HDDA (Plan B) is out of scope here.** Land dense Amanatides DDA CPU/GPU parity first
 (Phase 0–1), then hand off to [`naadf-hdda-execution-plan.md`](naadf-hdda-execution-plan.md).
@@ -352,7 +352,7 @@ Do not merge PR5 before PR2 equivalence tests are green.
 - [`docs/rendering/naadf-voxel-traversal-contract.md`](../rendering/naadf-voxel-traversal-contract.md) — shared semantics and runbook (both plans)
 - [`docs/rendering/naadf-completion-jira-plan.md`](../rendering/naadf-completion-jira-plan.md) — broader NAADF roadmap
 - [`docs/rendering/naadf-implementation-status.md`](../rendering/naadf-implementation-status.md) — landed milestones
-- [`docs/lod/seam-lip-fix-plan.md`](../lod/seam-lip-fix-plan.md) — mesh seam work (orthogonal)
+- [`docs/legacy/seam-lip-fix-plan.md`](../legacy/seam-lip-fix-plan.md) — mesh seam work (orthogonal)
 - [`docs/plans/clod-execution-plan.md`](clod-execution-plan.md) — CLOD pages (orthogonal)
 
 ---

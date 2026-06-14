@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
 use super::render::{ClodPageMeshTag, ClodPagesShow, ClodPagesShowMode};
-use super::runtime::{ClodPagesRuntime, env_bool};
+use super::runtime::ClodPagesRuntime;
 #[cfg(test)]
 use super::selection::NearFieldBubble;
 use super::selection::{ClodPageNodeKey, clod_near_field_bubble, near_field_intersects_footprint};
@@ -38,7 +38,6 @@ struct NearFieldChunkKey {
 
 #[derive(Resource, Debug)]
 pub(crate) struct ClodPageMeshGate {
-    pub(crate) enabled: bool,
     pub(crate) pages_ready: bool,
     pub(crate) pages_failed: bool,
     pub(crate) pages_pending: bool,
@@ -52,7 +51,6 @@ pub(crate) struct ClodPageMeshGate {
 impl Default for ClodPageMeshGate {
     fn default() -> Self {
         Self {
-            enabled: false,
             pages_ready: false,
             pages_failed: false,
             pages_pending: false,
@@ -67,18 +65,16 @@ impl Default for ClodPageMeshGate {
 
 impl ClodPageMeshGate {
     pub(crate) fn owns_chunk(&self, chunk_pos: IVec3) -> bool {
-        self.enabled && self.pages_ready && self.owned_columns.contains(&chunk_column(chunk_pos))
+        self.pages_ready && self.owned_columns.contains(&chunk_column(chunk_pos))
     }
 
     pub(crate) fn chunk_pending_restore(&self, chunk_pos: IVec3) -> bool {
-        self.enabled
-            && self
-                .pending_restore_columns
-                .contains(&chunk_column(chunk_pos))
+        self.pending_restore_columns
+            .contains(&chunk_column(chunk_pos))
     }
 
     pub(crate) fn should_hold_pages_visible(&self) -> bool {
-        self.enabled && !self.pending_restore_columns.is_empty()
+        !self.pending_restore_columns.is_empty()
     }
 
     pub(crate) fn node_has_pending_restore(
