@@ -926,4 +926,3 @@ pub(crate) fn assign_initial_lods_for_loaded_world(world: &mut VoxelWorld) {
         }
     }
 }
-

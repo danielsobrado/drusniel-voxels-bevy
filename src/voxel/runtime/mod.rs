@@ -45,13 +45,11 @@ use crate::voxel::enclosure::{
     EnclosureOcclusionStats, EnclosureState, toggle_enclosure_culling, update_enclosure_state,
 };
 use crate::voxel::lod::{
-    LodSettings, build_base_terrain_neighbor_lods, build_terrain_neighbor_lods,
-    calculate_target_lod_with_hysteresis, chunk_contains_liquid, chunk_layer_intersects_waterline,
-    collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
-    forensics_mesh_mode_override, is_horizon_proxy_lod,
-    mesh_lod_level_for_surface_nets_cap, resolve_terrain_mesh_mode, should_defer_surface_nets_mesh,
-    target_terrain_mesh_mode_for_lod, terrain_lod_distance_xz, terrain_lod_requires_collider,
-    terrain_material_quality_for_lod, transition_refined_surface_nets_lod, water_shore_guarded_lod,
+    LodSettings, build_terrain_neighbor_lods, chunk_contains_liquid,
+    chunk_layer_intersects_waterline, collect_water_shore_lod_guard_chunks,
+    effective_terrain_mesh_lod_for_chunk, forensics_mesh_mode_override, is_horizon_proxy_lod,
+    resolve_terrain_mesh_mode, should_defer_surface_nets_mesh, target_terrain_mesh_mode_for_lod,
+    terrain_lod_distance_xz, terrain_lod_requires_collider, terrain_material_quality_for_lod,
 };
 use crate::voxel::mc_transvoxel::{
     McTransvoxelLodDeltaPolicy, McTransvoxelRuntimeStats, McTransvoxelSettings,

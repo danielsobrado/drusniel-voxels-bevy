@@ -35,14 +35,12 @@ use crate::voxel::enclosure::{
 use crate::voxel::hole_probe::TerrainHoleProbePlugin;
 #[allow(unused_imports)]
 pub(crate) use crate::voxel::lod::{
-    LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, build_base_terrain_neighbor_lods,
-    build_terrain_neighbor_lods, calculate_target_lod_with_hysteresis, chunk_contains_liquid,
+    LodSettings, build_terrain_neighbor_lods, chunk_contains_liquid,
     chunk_layer_intersects_waterline, collect_water_shore_lod_guard_chunks,
-    effective_terrain_mesh_lod_for_chunk, forensics_mesh_mode_override,
-    is_horizon_proxy_lod, mesh_lod_level_for_surface_nets_cap, resolve_terrain_mesh_mode,
-    should_defer_surface_nets_mesh, target_terrain_mesh_mode_for_lod, terrain_lod_distance_xz,
-    terrain_lod_hysteresis, terrain_lod_requires_collider, terrain_material_quality_for_lod,
-    transition_refined_surface_nets_lod, water_shore_guarded_lod,
+    effective_terrain_mesh_lod_for_chunk, forensics_mesh_mode_override, is_horizon_proxy_lod,
+    resolve_terrain_mesh_mode, should_defer_surface_nets_mesh, target_terrain_mesh_mode_for_lod,
+    terrain_lod_distance_xz, terrain_lod_hysteresis, terrain_lod_requires_collider,
+    terrain_material_quality_for_lod,
 };
 use crate::voxel::mc_transvoxel::{McTransvoxelRuntimeStats, McTransvoxelSettings};
 use crate::voxel::mesh_commit::LodMeshTransactionState;
@@ -307,7 +305,6 @@ mod tests {
     #[test]
     fn initial_lod_assignment_uses_lod0_without_lod_dirty_reason() {
         let mut chunk = Chunk::new(IVec3::new(18, 0, 0));
-        let lod_settings = LodSettings::default();
         let initial_lod = initial_lod_for_chunk();
 
         assert_eq!(initial_lod, LodLevel::Lod0);
@@ -320,8 +317,6 @@ mod tests {
 
     #[test]
     fn initial_lod_assignment_uses_lod0_when_pages_own_far_field() {
-        let chunk = Chunk::new(IVec3::new(18, 0, 0));
-        let lod_settings = LodSettings::default();
         let initial_lod = initial_lod_for_chunk();
 
         assert_eq!(initial_lod, LodLevel::Lod0);
@@ -739,7 +734,7 @@ mod tests {
     fn live_terrain_material_stays_full_triplanar_by_distance() {
         assert_eq!(
             terrain_material_quality_for_lod(LodLevel::Lod1, None),
-            TerrainMaterialQuality::CheapTriplanar
+            TerrainMaterialQuality::FullTriplanar
         );
         assert_eq!(
             terrain_material_quality_for_distance(

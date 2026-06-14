@@ -6,9 +6,7 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
-use crate::bench::{
-    BenchForensicsConfig, BenchForensicsTerrainMesher, BenchRenderToggles,
-};
+use crate::bench::{BenchForensicsConfig, BenchForensicsTerrainMesher, BenchRenderToggles};
 use crate::constants::{
     CHUNK_SIZE_F32, CHUNK_SIZE_I32, DEFAULT_CULL_DISTANCE, DEFAULT_HIGH_DETAIL_DISTANCE,
     LOD_HYSTERESIS, WATER_LEVEL,
@@ -46,6 +44,7 @@ impl LodSettings {
         high_detail_distance + terrain_lod_hysteresis_for(high_detail_distance) * 4.0 + 1.0
     }
 
+    #[cfg(test)]
     pub(crate) fn has_valid_distance_bands(&self) -> bool {
         self.cull_distance
             > self.high_detail_distance
@@ -137,12 +136,7 @@ pub(crate) fn build_terrain_neighbor_lods(
     lod_settings: &LodSettings,
 ) -> NeighborLods {
     let effective_lod = |offset| {
-        effective_terrain_mesh_lod_for_chunk(
-            world,
-            chunk_pos + offset,
-            mesh_settings,
-            lod_settings,
-        )
+        effective_terrain_mesh_lod_for_chunk(world, chunk_pos + offset, mesh_settings, lod_settings)
     };
     NeighborLods {
         neg_x: effective_lod(IVec3::NEG_X),
@@ -167,9 +161,7 @@ pub(crate) fn terrain_material_quality_for_lod(
         return TerrainMaterialQuality::FullTriplanar;
     }
     match lod_level {
-        LodLevel::Lod0 | LodLevel::Lod1 | LodLevel::Lod2 => {
-            TerrainMaterialQuality::FullTriplanar
-        }
+        LodLevel::Lod0 | LodLevel::Lod1 | LodLevel::Lod2 => TerrainMaterialQuality::FullTriplanar,
         LodLevel::Lod3 | LodLevel::Culled => TerrainMaterialQuality::HorizonProxy,
     }
 }

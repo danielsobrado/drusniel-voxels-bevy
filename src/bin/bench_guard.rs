@@ -98,6 +98,7 @@ struct SeamAuditDump {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)] // Retains compatibility with historical seam-audit dumps.
 struct SeamAuditSummary {
     active_seam_faces: u32,
     partial_morph_uncovered_faces: u32,

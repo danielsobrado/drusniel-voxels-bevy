@@ -52,30 +52,18 @@ Interpretation recipe: [`docs/lod/wireframe-debug-guide.md`](docs/lod/wireframe-
 
 | Hotkey | What it does | Output |
 |---|---|---|
-| **Alt+F7** | Toggle wireframe overlay on terrain. Edges drawn from barycentric UVs, coloured by mesh section × LOD tint. | On-screen indicator: "TERRAIN DEBUG: WIRE ON" |
+| **Alt+F7** | Toggle wireframe overlay on live terrain. The supported live path is the white LOD0 main surface. | On-screen indicator: "TERRAIN DEBUG: WIRE ON" |
 | **Alt+F8** | Toggle normals-as-colour mode. Replaces lit terrain with `vec3(world_normal * 0.5 + 0.5)`. Combinable with Alt+F7. | On-screen indicator: "TERRAIN DEBUG: NORMALS ON" |
 | **Alt+F9** | Toggle mesher SDF iso-band overlay (magenta where `\|sdf\| < ε`, orange where the mesh sits off the zero crossing). Composable with the other modes. | On-screen indicator |
 | **Alt+F10** | ⚠ Two systems share this key: it toggles the flat-unlit terrain material **and** writes a hole-probe dump (per-chunk LOD, neighbor LODs, snap stats, missing-neighbor counts). Moved off Shift+F9 (Shift is fly-down); Alt+F9 was taken by the iso-band overlay. | `debug/terrain-hole-probe-<ts>.json` + on-screen indicator |
-| **Alt+F11** | Toggle CLOD page source meshing for A/B inspection. | Console log |
 | **Alt+Shift+F7** | Capture current frame. Capture-only — does not toggle wireframe. | `debug/wireframe-<ts>.png` + `debug/wireframe-<ts>.json` (camera pose, FOV, mode flags, terrain settings hash) |
 
 ### Wireframe colour key
 
-Section colour (multiplied by LOD tint):
-
-| Colour | Mesh section |
+| Colour | Meaning |
 |---|---|
-| White | Main Surface Nets mesh |
-| Cyan / Magenta / Yellow | Legacy seam sections; should not appear in the default CLOD live path |
-
-LOD tint:
-
-| Tint | LOD |
-|---|---|
-| White (no tint) | LOD0 |
-| Dark blue | LOD1 |
-| Green | LOD2 |
-| Orange | LOD3 / Culled |
+| White | Live LOD0 main Surface Nets mesh |
+| Any section colour or coarse-LOD tint | Stale legacy mesh/debug data; not produced by the live path |
 
 ### Diagnostic recipe (friend's rule of thumb)
 
@@ -84,7 +72,7 @@ Per the full recipe table in [`docs/lod/wireframe-debug-guide.md`](docs/lod/wire
 - **Stepped geometry** in wireframe → DC/QEF/SDF placement issue.
 - **Smooth geometry, stepped colour in Alt+F8** → normals issue (not geometry).
 - **Holes (no triangles where there should be some)** → missing chunk / failed mesh / wrong dirty flag. Cross-check `missing_boundary_neighbors_at_mesh` and page ownership state in the hole-probe dump.
-- **Coloured (non-white) seam-section edges in the default path** → stale legacy seam geometry or debug data; live terrain should be main Surface Nets inside the bubble, with pages outside it.
+- **Any non-white live-terrain edge** → stale legacy mesh/debug data; live terrain is the LOD0 main surface inside the bubble, with CLOD pages outside it.
 
 # Behavioral guidelines to reduce common LLM coding mistakes. 
 

@@ -1,6 +1,6 @@
 # Terrain Wireframe & Mesh Debug Guide
 
-Runtime diagnostic for classifying terrain artifacts as **geometry**, **shading**, **LOD boundary**, or **skirt/section** issues.
+Runtime diagnostic for classifying terrain artifacts as **geometry**, **shading**, or **live/page handoff** issues.
 
 ## Key bindings
 
@@ -23,18 +23,10 @@ While a mode is active, a one-line hint appears top-right (`TERRAIN DEBUG: WIRE 
 
 Renders triangle edges in-shader using barycentric UV1 data.
 
-- **Edge colour by mesh section**
-  - White: main Surface Nets surface
-  - Cyan: horizontal transition apron / seal
-  - Magenta: vertical drop curtain
-  - Yellow: reserved for future MC+Transvoxel aprons
-- **Edge tint by chunk LOD** (main surface uses the LOD colour directly; skirt sections blend section + LOD)
-  - LOD0: white
-  - LOD1: blue
-  - LOD2: green
-  - LOD3: orange (also used for **Culled** chunks that still have mesh entities)
+- **White edges:** the supported live LOD0 main Surface Nets surface.
+- **Any section colour or coarse-LOD tint:** stale legacy mesh/debug data. The live path no longer emits transition aprons, curtains, skirts, or coarse Surface Nets meshes.
 
-LOD index is baked into mesh UV1 at generation time (X slots) and mirrored in per-chunk debug material handles (`weather_flags` bits 24–31).
+The LOD index remains encoded in mesh UV1 and mirrored in per-chunk debug material handles (`weather_flags` bits 24–31) for diagnostics, but live terrain encodes LOD0.
 
 If you see stepped **triangle edges** on a slope, the artifact is geometric.
 
@@ -59,7 +51,7 @@ Overlays the **mesher SDF** (same field Surface Nets uses) on top of whatever mo
 
 The overlay samples a 64×48×64 world-space brick centered on the camera (rebuilt ~every 0.35 s or 12 m of movement). Disabled when off: `epsilon = 0` in the shader skips all sampling.
 
-Use this when wireframe shows continuous tris but you suspect the extracted surface is offset from the occupancy field (common at LOD seams).
+Use this when wireframe shows continuous tris but you suspect the extracted surface is offset from the occupancy field.
 
 ### Flat Unlit (Alt+F10)
 
@@ -93,8 +85,8 @@ The hash covers mesh mode, water air-exposure mode, and LOD distance bands — *
 |---|---|---|---|
 | Stair-step bands on slopes | Alt+F7 wireframe | Triangles themselves are stepped | **Geometry** — binary SDF / coarse extractor. Inspect SDF generation. |
 | Stair-step bands on slopes | Alt+F8 normals | Triangles smooth, normal-colour patchy | **Shading** — face-derived normals. Switch to SDF-gradient normals. |
-| Horizontal seam at altitude band | Alt+F7 + LOD tint | Different LOD colours meet, edges do not align | **LOD boundary mismatch** — MC+Transvoxel or seam-closure work. |
-| Horizontal seam at altitude band | Alt+F7 + section colour | Cyan/magenta skirt edges at the seam | **Skirt insufficient** — real gap exists behind the seal geometry. |
+| Gap at the live/page handoff | Alt+F7 | Live LOD0 triangles stop before page coverage begins | **Ownership/readiness mismatch** - inspect live bubble and CLOD page state. |
+| Non-white live-terrain edges | Alt+F7 | Section colour or coarse-LOD tint appears | **Stale legacy mesh/debug data** - the live path emits only the LOD0 main surface. |
 | Holes in the surface | Alt+F7 | No triangles where some should exist | **Missing mesh** — failed chunk, dirty flag, or neighbor gap. Check hole-probe `missing_boundary_neighbors`. |
 | Holes with tris nearby | Alt+F9 iso-band | Magenta band drifts away from mesh edge | **Mesh/SDF disagreement** — extractor placed surface off the mesher zero crossing. |
 | Dark patches on flats | Alt+F8 normals | Normal gradient looks smooth | **Lighting / AO**, not geometry or normals. |
@@ -105,19 +97,18 @@ The hash covers mesh mode, water air-exposure mode, and LOD distance bands — *
 
 1. Fly to the artifact. Press **Alt+F7** — are the triangle edges stepped?
 2. Press **Alt+F8** (keep wireframe on if helpful) — is the normal colour smooth or patchy?
-3. Note section edge colours (cyan/magenta = skirt geometry at the seam).
-4. Note LOD tints where chunks of different detail meet.
+3. Treat any non-white live-terrain edge as stale legacy mesh/debug data.
+4. At the bubble boundary, compare live mesh coverage with CLOD page ownership/readiness.
 5. **Alt+F9** if you need to see whether mesh vertices sit on the mesher SDF zero crossing.
 6. **Alt+F10** if you need to distinguish shading from missing geometry.
 7. **Alt+Shift+F7** to capture evidence; run hole-probe from the same camera if needed.
 
 ## Bench / editor activation
 
-- **Bench:** set `terrain_material_quality = "wireframe_debug"` in the scene TOML (uses the same shader path with LOD tinting once chunks load).
-- **Editor:** viewport Wireframe overlay toggles `RuntimeViewportDebugState.wireframe` and shares the same per-LOD debug materials.
+- **Bench:** set `terrain_material_quality = "wireframe_debug"` in the scene TOML (uses the same shader path once chunks load).
+- **Editor:** viewport Wireframe overlay toggles `RuntimeViewportDebugState.wireframe` and shares the same debug materials.
 
 ## Related docs
 
 - Plan: [`wireframe-debug-plan.md`](wireframe-debug-plan.md)
-- LOD seam context (legacy): [`lod-seam-closure-plan.md`](../legacy/lod-seam-closure-plan.md)
 - Hole probe (legacy): [`lod-terrain-hole-investigation.md`](../legacy/lod-terrain-hole-investigation.md)

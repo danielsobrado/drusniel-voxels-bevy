@@ -333,7 +333,6 @@ pub(super) fn generate_low_lod_sdf_with_smoothing_and_transition_mode<const N: u
                     // Legacy coarse field for A/B baselines.
                     smoothed_terrain_sdf_at_world_pos(world, base_world_pos)
                 };
-
             }
         }
     }
@@ -863,13 +862,8 @@ pub(super) fn coarse_terrain_sdf_smooth_enabled() -> bool {
 /// This is the LOD0 (high detail) version - samples every voxel.
 ///
 /// When `smooth` is set, cells get a world-space blurred SDF to remove terracing
-/// (see `smoothed_sdf_from_block`). With GPU morph active, the base mesh stays
-/// uniformly fine and coarse alignment is handled by the live LOD seam path.
-pub(super) fn generate_sdf(
-    chunk: &Chunk,
-    world: &VoxelWorld,
-    smooth: bool,
-) -> [f32; 5832] {
+/// (see `smoothed_sdf_from_block`). Live terrain remains uniformly fine at LOD0.
+pub(super) fn generate_sdf(chunk: &Chunk, world: &VoxelWorld, smooth: bool) -> [f32; 5832] {
     let mut sdf = [1.0f32; PaddedChunkShape::USIZE];
     let chunk_origin = VoxelWorld::chunk_to_world(chunk.position());
     let smoothing_block = smooth.then(|| build_sdf_smoothing_block(world, chunk_origin));
@@ -936,4 +930,3 @@ pub(super) fn sample_voxel_at_world_pos(world: &VoxelWorld, world_pos: IVec3) ->
     let voxel = terrain_meshing_voxel_at(world, world_pos);
     voxel.is_solid() || voxel.is_liquid()
 }
-

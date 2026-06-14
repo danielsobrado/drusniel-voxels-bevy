@@ -465,9 +465,9 @@ pub(super) fn sample_neighbor_chunks(
                 let water_entity = chunk.and_then(|chunk| chunk.water_mesh_entity());
                 let terrain_debug = mesh_entity
                     .and_then(|entity| terrain_entities.get(entity).ok())
-                    .and_then(
-                        |(_, _, _, _, terrain_debug, _, _, _, _, _, _, _, _, _)| terrain_debug,
-                    );
+                    .and_then(|(_, _, _, _, terrain_debug, _, _, _, _, _, _, _, _, _)| {
+                        terrain_debug
+                    });
 
                 chunks.push(ChunkProbe {
                     chunk_position: chunk_pos.into(),
@@ -521,13 +521,12 @@ pub(super) fn lod_eval_probe(
         .unwrap_or_default();
     let distance_xz = camera_pos.map(|camera_pos| terrain_lod_distance_xz(chunk_pos, camera_pos));
     let water_shore_guarded = water_lod_guard_chunks.contains(&chunk_pos);
-    let computed_target_lod = current_lod.zip(distance_xz).map(|(current_lod, distance)| {
-        water_shore_guarded_lod(
-            calculate_target_lod_with_hysteresis(distance, current_lod, lod_settings),
-            distance,
-            lod_settings,
-            water_shore_guarded,
-        )
+    let computed_target_lod = current_lod.map(|current_lod| {
+        if current_lod == LodLevel::Culled {
+            LodLevel::Culled
+        } else {
+            LodLevel::Lod0
+        }
     });
     let effective_mesh_lod_now =
         effective_terrain_mesh_lod_for_chunk(world, chunk_pos, mesh_settings, lod_settings);
@@ -544,8 +543,7 @@ pub(super) fn lod_eval_probe(
         current_lod: current_lod.map(lod_string),
         computed_target_lod: computed_target_lod.map(lod_string),
         water_shore_guarded,
-        water_guard_distance: lod_settings.high_detail_distance
-            + WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA,
+        water_guard_distance: 0.0,
         effective_mesh_lod_now: effective_mesh_lod_now.map(lod_string),
         last_logical_lod_at_mesh: terrain_debug.map(|debug| lod_string(debug.logical_lod_at_mesh)),
         last_meshed_lod: terrain_debug.map(|debug| lod_string(debug.effective_lod_at_mesh)),

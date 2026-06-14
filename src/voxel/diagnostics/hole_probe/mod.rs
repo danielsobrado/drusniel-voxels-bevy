@@ -24,9 +24,8 @@ use crate::voxel::meshing::{
     empty_chunk_has_surface_nets_boundary_surface,
 };
 use crate::voxel::plugin::{
-    LodSettings, WATER_SHORE_TERRAIN_LOD_GUARD_EXTRA, calculate_target_lod_with_hysteresis,
-    collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
-    terrain_lod_distance_xz, terrain_lod_hysteresis, water_shore_guarded_lod,
+    LodSettings, collect_water_shore_lod_guard_chunks, effective_terrain_mesh_lod_for_chunk,
+    terrain_lod_distance_xz, terrain_lod_hysteresis,
 };
 use crate::voxel::skirt::{ChunkFace, NeighborLods};
 use crate::voxel::types::{Voxel, VoxelType};
@@ -549,8 +548,6 @@ mod tests {
             lod_transition_snap_stats: LodTransitionSnapStats::default(),
             mesh_section_stats: TerrainMeshSectionStats::default(),
             mc_transvoxel_stats: None,
-            seam_face_audit: [crate::voxel::meshing::SeamFaceAudit::default();
-                crate::voxel::meshing::XZ_FACE_COUNT],
         };
 
         let mismatch =

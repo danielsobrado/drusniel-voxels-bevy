@@ -65,4 +65,3 @@ pub(crate) fn compute_vertex_material_weights(
         [0.0, 0.0, 0.0, 1.0]
     }
 }
-

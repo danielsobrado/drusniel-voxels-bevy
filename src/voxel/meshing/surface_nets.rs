@@ -116,11 +116,7 @@ fn compute_unique_vertex_attributes(
         attrs.valid[i] = true;
 
         // Subtract 1.0 to remove the padding offset (grid position 1 is the chunk start).
-        let local = Vec3::new(
-            position[0] - 1.0,
-            position[1] - 1.0,
-            position[2] - 1.0,
-        );
+        let local = Vec3::new(position[0] - 1.0, position[1] - 1.0, position[2] - 1.0);
         attrs.local[i] = local;
 
         // Shade terrain from the smoothed SDF rather than Surface Nets' cell
@@ -160,12 +156,7 @@ fn generate_chunk_mesh_surface_nets_impl(
     // Chunk center for scaling calculations
     let chunk_center = Vec3::splat(CHUNK_SIZE as f32 * 0.5) * VOXEL_SIZE;
 
-    let buffer = run_surface_nets(
-        chunk,
-        world,
-        timing_enabled,
-        &mut generation_timing,
-    );
+    let buffer = run_surface_nets(chunk, world, timing_enabled, &mut generation_timing);
 
     // Memoized smoothed-SDF field shared by vertex normals and the post-morph
     // seam normal recompute. Replaces per-tap world hashmap sampling.
