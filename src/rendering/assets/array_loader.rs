@@ -88,7 +88,59 @@ impl Default for AtlasMapping {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct BlockAtlasMapYaml {
+    top: u32,
+    side: u32,
+    bottom: u32,
+}
+
+#[derive(serde::Deserialize)]
+struct AtlasMappingYaml {
+    grass: BlockAtlasMapYaml,
+    dirt: BlockAtlasMapYaml,
+    rock: BlockAtlasMapYaml,
+    sand: BlockAtlasMapYaml,
+}
+
+#[derive(serde::Deserialize)]
+struct BlockyTexturesConfig {
+    atlas_mapping: Option<AtlasMappingYaml>,
+}
+
 impl AtlasMapping {
+    /// Load mapping from YAML from ContentRegistry
+    pub fn from_content_registry(registry: &crate::content::ContentRegistry) -> Option<Self> {
+        let grass = registry.atlas_mappings.get("grass")?;
+        let dirt = registry.atlas_mappings.get("dirt")?;
+        let rock = registry.atlas_mappings.get("rock")?;
+        let sand = registry.atlas_mappings.get("sand")?;
+
+        Some(Self {
+            grass: BlockAtlasMap {
+                top: grass.top,
+                side: grass.side,
+                bottom: grass.bottom,
+            },
+            dirt: BlockAtlasMap {
+                top: dirt.top,
+                side: dirt.side,
+                bottom: dirt.bottom,
+            },
+            rock: BlockAtlasMap {
+                top: rock.top,
+                side: rock.side,
+                bottom: rock.bottom,
+            },
+            sand: BlockAtlasMap {
+                top: sand.top,
+                side: sand.side,
+                bottom: sand.bottom,
+            },
+            needs_rebuild: false,
+        })
+    }
+
     /// Load mapping from YAML config file
     pub fn load_from_yaml() -> Self {
         let config_path = Path::new("config/blocky_textures.yaml");
@@ -98,51 +150,60 @@ impl AtlasMapping {
         }
 
         match fs::read_to_string(config_path) {
-            Ok(contents) => {
-                let mut mapping = Self::default();
-
-                if let Some(atlas_section) = contents.find("atlas_mapping:") {
-                    let section = &contents[atlas_section..];
-
-                    // Helper to parse line "  grass: { top: 3, side: 7, bottom: 0 }"
-                    for line in section.lines().skip(1) {
-                        let line = line.trim();
-                        if line.starts_with("grass:") {
-                            if let Some(map) = parse_block_map(line) {
-                                mapping.grass = map;
-                            }
-                        } else if line.starts_with("dirt:") {
-                            if let Some(map) = parse_block_map(line) {
-                                mapping.dirt = map;
-                            }
-                        } else if line.starts_with("rock:") {
-                            if let Some(map) = parse_block_map(line) {
-                                mapping.rock = map;
-                            }
-                        } else if line.starts_with("sand:") {
-                            if let Some(map) = parse_block_map(line) {
-                                mapping.sand = map;
-                            }
-                        }
+            Ok(contents) => match serde_yaml::from_str::<BlockyTexturesConfig>(&contents) {
+                Ok(config) => {
+                    if let Some(am) = config.atlas_mapping {
+                        let mapping = Self {
+                            grass: BlockAtlasMap {
+                                top: am.grass.top,
+                                side: am.grass.side,
+                                bottom: am.grass.bottom,
+                            },
+                            dirt: BlockAtlasMap {
+                                top: am.dirt.top,
+                                side: am.dirt.side,
+                                bottom: am.dirt.bottom,
+                            },
+                            rock: BlockAtlasMap {
+                                top: am.rock.top,
+                                side: am.rock.side,
+                                bottom: am.rock.bottom,
+                            },
+                            sand: BlockAtlasMap {
+                                top: am.sand.top,
+                                side: am.sand.side,
+                                bottom: am.sand.bottom,
+                            },
+                            needs_rebuild: false,
+                        };
+                        info!(
+                            "Loaded AtlasMapping from YAML: grass({},{},{}), dirt({},{},{}), rock({},{},{}), sand({},{},{})",
+                            mapping.grass.top,
+                            mapping.grass.side,
+                            mapping.grass.bottom,
+                            mapping.dirt.top,
+                            mapping.dirt.side,
+                            mapping.dirt.bottom,
+                            mapping.rock.top,
+                            mapping.rock.side,
+                            mapping.rock.bottom,
+                            mapping.sand.top,
+                            mapping.sand.side,
+                            mapping.sand.bottom
+                        );
+                        mapping
+                    } else {
+                        warn!(
+                            "blocky_textures.yaml is missing atlas_mapping section, using defaults"
+                        );
+                        Self::default()
                     }
                 }
-                info!(
-                    "Loaded AtlasMapping from YAML: grass({},{},{}), dirt({},{},{}), rock({},{},{}), sand({},{},{})",
-                    mapping.grass.top,
-                    mapping.grass.side,
-                    mapping.grass.bottom,
-                    mapping.dirt.top,
-                    mapping.dirt.side,
-                    mapping.dirt.bottom,
-                    mapping.rock.top,
-                    mapping.rock.side,
-                    mapping.rock.bottom,
-                    mapping.sand.top,
-                    mapping.sand.side,
-                    mapping.sand.bottom
-                );
-                mapping
-            }
+                Err(e) => {
+                    warn!("Failed to parse blocky_textures.yaml: {}", e);
+                    Self::default()
+                }
+            },
             Err(e) => {
                 warn!("Failed to read blocky_textures.yaml: {}", e);
                 Self::default()
@@ -227,32 +288,6 @@ atlas_mapping:
             self.sand.bottom,
         ]
     }
-}
-
-fn parse_block_map(line: &str) -> Option<BlockAtlasMap> {
-    // Line format: "grass: { top: 0, side: 7, bottom: 0 }"
-    // Find the opening brace and extract everything between { and }
-    let start = line.find('{')?;
-    let end = line.find('}')?;
-    let content = &line[start + 1..end];
-
-    let mut map = BlockAtlasMap::default();
-
-    for part in content.split(',') {
-        let part = part.trim();
-        if let Some(idx) = part.find(':') {
-            let key = part[..idx].trim();
-            let val = part[idx + 1..].trim().parse::<u32>().ok()?;
-
-            match key {
-                "top" => map.top = val,
-                "side" => map.side = val,
-                "bottom" => map.bottom = val,
-                _ => {}
-            }
-        }
-    }
-    Some(map)
 }
 
 /// Extract a single tile from the atlas as RGBA8 data

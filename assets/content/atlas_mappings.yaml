@@ -1,0 +1,59 @@
+texture_slots:
+  - id: grass
+    name: Grass
+    slot_index: 0
+    material_id: top-soil
+    top_tile: 3
+    side_tile: 7
+    bottom_tile: 0
+    tags: [terrain]
+  - id: dirt
+    name: Dirt
+    slot_index: 1
+    material_id: sub-soil
+    top_tile: 0
+    side_tile: 0
+    bottom_tile: 0
+    tags: [terrain]
+  - id: rock
+    name: Rock
+    slot_index: 2
+    material_id: rock
+    top_tile: 1
+    side_tile: 1
+    bottom_tile: 1
+    tags: [terrain]
+  - id: sand
+    name: Sand
+    slot_index: 3
+    material_id: sand
+    top_tile: 4
+    side_tile: 4
+    bottom_tile: 4
+    tags: [terrain]
+
+atlas_mappings:
+  - id: grass
+    name: Grass Mapping
+    material_id: top-soil
+    top: 3
+    side: 7
+    bottom: 0
+  - id: dirt
+    name: Dirt Mapping
+    material_id: sub-soil
+    top: 0
+    side: 0
+    bottom: 0
+  - id: rock
+    name: Rock Mapping
+    material_id: rock
+    top: 1
+    side: 1
+    bottom: 1
+  - id: sand
+    name: Sand Mapping
+    material_id: sand
+    top: 4
+    side: 4
+    bottom: 4

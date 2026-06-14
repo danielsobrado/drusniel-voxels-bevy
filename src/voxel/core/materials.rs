@@ -188,6 +188,125 @@ impl Default for MaterialCatalog {
 }
 
 impl MaterialCatalog {
+    pub fn from_content_registry(
+        registry: &crate::content::ContentRegistry,
+    ) -> Result<Self, crate::content::errors::ContentValidationError> {
+        let mut materials = Vec::new();
+        for mat in registry.materials.values() {
+            let legacy_id = mat.legacy_material_id.ok_or_else(|| {
+                crate::content::errors::ContentValidationError::new(
+                    "MISSING_LEGACY_ID",
+                    &format!("materials.{}", mat.id),
+                    "Material lacks legacy_material_id",
+                )
+            })?;
+
+            let default_voxel_str = mat.default_voxel.as_deref().unwrap_or("air");
+            let default_voxel = match default_voxel_str.to_lowercase().as_str() {
+                "air" => VoxelType::Air,
+                "topsoil" | "top-soil" => VoxelType::TopSoil,
+                "subsoil" | "sub-soil" => VoxelType::SubSoil,
+                "rock" => VoxelType::Rock,
+                "bedrock" => VoxelType::Bedrock,
+                "sand" => VoxelType::Sand,
+                "clay" => VoxelType::Clay,
+                "water" => VoxelType::Water,
+                "wood" => VoxelType::Wood,
+                "leaves" => VoxelType::Leaves,
+                "dungeonwall" | "dungeon-wall" => VoxelType::DungeonWall,
+                "dungeonfloor" | "dungeon-floor" => VoxelType::DungeonFloor,
+                _ => {
+                    return Err(crate::content::errors::ContentValidationError::new(
+                        "INVALID_DEFAULT_VOXEL",
+                        &format!("materials.{}", mat.id),
+                        &format!("Invalid default voxel type: {}", default_voxel_str),
+                    ));
+                }
+            };
+
+            materials.push(VoxelMaterialDefinition {
+                id: MaterialId(legacy_id),
+                name: mat.name.clone(),
+                material_type_id: mat.material_type_id.clone(),
+                color_rgb: mat.color_rgb,
+                metallic: mat.metallic,
+                smooth: mat.smooth,
+                emissive: mat.emissive,
+                surface_transmission: mat.surface_transmission,
+                absorption_length: mat.absorption_length,
+                scatter_length: mat.scatter_length,
+                index_of_refraction: mat.index_of_refraction,
+                phase: mat.phase,
+                strength: mat.strength,
+                default_voxel,
+            });
+        }
+        materials.sort_by_key(|m| m.id.0);
+
+        let mut material_types = Vec::new();
+        for mt in registry.material_types.values() {
+            let mut material_ids = Vec::new();
+            for mat_id in &mt.material_ids {
+                let mat = registry.materials.get(mat_id).ok_or_else(|| {
+                    crate::content::errors::ContentValidationError::new(
+                        "MISSING_MATERIAL_REF",
+                        &format!("material_types.{}", mt.id),
+                        &format!("Material type references missing material: {}", mat_id),
+                    )
+                })?;
+                let legacy_id = mat.legacy_material_id.ok_or_else(|| {
+                    crate::content::errors::ContentValidationError::new(
+                        "MISSING_LEGACY_ID",
+                        &format!("materials.{}", mat.id),
+                        "Material lacks legacy_material_id",
+                    )
+                })?;
+                material_ids.push(MaterialId(legacy_id));
+            }
+            material_types.push(MaterialTypeDefinition {
+                id: mt.id.clone(),
+                name: mt.name.clone(),
+                material_ids,
+            });
+        }
+        material_types.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let mut palettes = Vec::new();
+        for pal in registry.palettes.values() {
+            let mut material_ids = Vec::new();
+            for mat_id in &pal.material_ids {
+                let mat = registry.materials.get(mat_id).ok_or_else(|| {
+                    crate::content::errors::ContentValidationError::new(
+                        "MISSING_MATERIAL_REF",
+                        &format!("palettes.{}", pal.id),
+                        &format!("Palette references missing material: {}", mat_id),
+                    )
+                })?;
+                let legacy_id = mat.legacy_material_id.ok_or_else(|| {
+                    crate::content::errors::ContentValidationError::new(
+                        "MISSING_LEGACY_ID",
+                        &format!("materials.{}", mat.id),
+                        "Material lacks legacy_material_id",
+                    )
+                })?;
+                material_ids.push(MaterialId(legacy_id));
+            }
+            palettes.push(MaterialPaletteDefinition {
+                id: pal.id.clone(),
+                name: pal.name.clone(),
+                material_ids,
+            });
+        }
+        palettes.sort_by(|a, b| a.id.cmp(&b.id));
+
+        Ok(Self {
+            material_types,
+            materials,
+            palettes,
+            active_material_id: MaterialId(1),
+        })
+    }
+
     pub fn material(&self, id: MaterialId) -> Option<&VoxelMaterialDefinition> {
         self.materials.iter().find(|material| material.id == id)
     }

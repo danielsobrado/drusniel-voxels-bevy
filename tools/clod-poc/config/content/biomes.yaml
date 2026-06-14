@@ -1,0 +1,81 @@
+- id: test-plain
+  name: Test Plain
+  defaultMaterialId: top-soil
+  waterMaterialId: water
+  tags: [plain]
+  terrainBands:
+    - id: plain-low
+      name: Plain Low
+      minHeight: -50
+      maxHeight: 10
+      materialId: sand
+      textureSlotId: sand
+    - id: plain-mid
+      name: Plain Mid
+      minHeight: 10
+      maxHeight: 100
+      materialId: top-soil
+      textureSlotId: grass-top
+
+- id: rocky-hills
+  name: Rocky Hills
+  defaultMaterialId: sub-soil
+  waterMaterialId: water
+  tags: [hills]
+  terrainBands:
+    - id: hills-low
+      name: Hills Low
+      minHeight: -50
+      maxHeight: 30
+      materialId: sub-soil
+      textureSlotId: dirt
+    - id: hills-high
+      name: Hills High
+      minHeight: 30
+      maxHeight: 200
+      materialId: rock
+      textureSlotId: rock
+
+- id: lake-basin
+  name: Lake Basin
+  defaultMaterialId: clay
+  waterMaterialId: water
+  tags: [basin]
+  terrainBands:
+    - id: basin-floor
+      name: Basin Floor
+      minHeight: -100
+      maxHeight: -10
+      materialId: clay
+      textureSlotId: dirt
+    - id: basin-shore
+      name: Basin Shore
+      minHeight: -10
+      maxHeight: 5
+      materialId: sand
+      textureSlotId: sand
+    - id: basin-bank
+      name: Basin Bank
+      minHeight: 5
+      maxHeight: 50
+      materialId: top-soil
+      textureSlotId: grass-top
+
+- id: snow-peak
+  name: Snow Peak
+  defaultMaterialId: rock
+  waterMaterialId: water
+  tags: [mountain]
+  terrainBands:
+    - id: peak-lower
+      name: Peak Lower
+      minHeight: 0
+      maxHeight: 80
+      materialId: rock
+      textureSlotId: rock
+    - id: peak-upper
+      name: Peak Upper
+      minHeight: 80
+      maxHeight: 500
+      materialId: snow
+      textureSlotId: snow

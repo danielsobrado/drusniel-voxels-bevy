@@ -1,0 +1,45 @@
+biomes:
+  - id: grassland
+    legacy_biome_id: 0
+    name: Grassland
+    default_material_id: top-soil
+    water_material_id: water
+    surface_material_ids: [top-soil]
+    underground_material_ids: [sub-soil, sub-soil, rock]
+    shoreline_surface_material_ids: [sand]
+    shoreline_underground_material_ids: [sand, sand, sub-soil, rock]
+    prop_palette_ids: []
+    tags: [grassland]
+  - id: sandy
+    legacy_biome_id: 1
+    name: Sandy
+    default_material_id: sand
+    water_material_id: water
+    surface_material_ids: [sand]
+    underground_material_ids: [sand, sand, sub-soil, sub-soil, sub-soil, rock]
+    shoreline_surface_material_ids: [sand]
+    shoreline_underground_material_ids: [sand, sand, sub-soil, sub-soil, sub-soil, rock]
+    prop_palette_ids: []
+    tags: [sandy]
+  - id: rocky
+    legacy_biome_id: 2
+    name: Rocky
+    default_material_id: rock
+    water_material_id: water
+    surface_material_ids: [rock]
+    underground_material_ids: [rock, sub-soil, rock]
+    shoreline_surface_material_ids: [rock]
+    shoreline_underground_material_ids: [rock, sub-soil, rock]
+    prop_palette_ids: []
+    tags: [rocky]
+  - id: clay
+    legacy_biome_id: 3
+    name: Clay
+    default_material_id: top-soil
+    water_material_id: water
+    surface_material_ids: [top-soil]
+    underground_material_ids: [top-soil, clay, clay, clay, sub-soil, sub-soil, sub-soil, rock]
+    shoreline_surface_material_ids: [sand]
+    shoreline_underground_material_ids: [sand, clay, clay, clay, rock]
+    prop_palette_ids: []
+    tags: [clay]

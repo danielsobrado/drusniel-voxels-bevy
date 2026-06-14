@@ -216,7 +216,7 @@ export interface DigEdit {
   r: number;
   shape?: BrushShape; // default "sphere"
   op?: BrushOp; // default "remove"
-  material?: number; // add only: terrain texture slot index to paint the deposit with
+  material?: number; // add only: terrain texture slot index to paint the deposit with. TODO: Wire to content registry materialId.
   height?: number; // vertical half-extent (cells); default r (sphere becomes an ellipsoid)
   strength?: number; // 0..1 fraction of the full carve/fill applied; default 1 (hard edit)
   falloff?: number; // 0..1 edge softness: feather width as a fraction of r; default 0 (hard edge)
@@ -394,6 +394,7 @@ export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
     const t = Math.min(Math.max((sdf - MATERIAL_PAINT_BAND) / (PAINT_FADE - MATERIAL_PAINT_BAND), 0), 1);
     const w = 1 - t * t * (3 - 2 * t); // smoothstep falloff: 1 on the deposit, 0 at the fade edge
     if (w <= 0) continue;
+    // TODO: Map numeric slot index using getMaterialIdFromSlotIndex(slot, registry) for semantic resolution.
     const slot = Math.max(0, (e.material ?? 0) | 0);
     cover.set(slot, Math.max(cover.get(slot) ?? 0, w));
   }

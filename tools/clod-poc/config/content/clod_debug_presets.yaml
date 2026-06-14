@@ -1,0 +1,44 @@
+- id: default
+  name: Default View
+  showWireframe: false
+  showPageBoundaries: false
+  showLockedBorders: false
+  showNodeLabels: false
+  colorByLod: false
+  errorPx: 2.0
+
+- id: seam-debug
+  name: Seam Debug
+  showWireframe: true
+  showPageBoundaries: true
+  showLockedBorders: false
+  showNodeLabels: true
+  colorByLod: false
+  errorPx: 1.5
+
+- id: locked-border-debug
+  name: Locked Border Debug
+  showWireframe: true
+  showPageBoundaries: false
+  showLockedBorders: true
+  showNodeLabels: false
+  colorByLod: false
+  errorPx: 2.0
+
+- id: performance
+  name: Performance View
+  showWireframe: false
+  showPageBoundaries: false
+  showLockedBorders: false
+  showNodeLabels: false
+  colorByLod: true
+  errorPx: 4.0
+
+- id: validation
+  name: Validation View
+  showWireframe: true
+  showPageBoundaries: true
+  showLockedBorders: true
+  showNodeLabels: true
+  colorByLod: true
+  errorPx: 1.0

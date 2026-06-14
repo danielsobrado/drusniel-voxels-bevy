@@ -25,6 +25,7 @@ use crate::constants::{
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::voxel::enclosure::{EnclosureOcclusionStats, EnclosureState};
 use crate::voxel::occlusion::{OcclusionConfig, VisibleChunks};
+use crate::voxel::terrain::{BiomeTable, TerrainGenerator, ValueNoise};
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::ProtectedAreaRegistry;
 use persistence::{
@@ -479,6 +480,7 @@ fn regenerate_dirty_chunks(
     bounds_config: Res<instanced_render::PropBoundsConfig>,
     mut instancing_stats: ResMut<instancing::InstancingStats>,
     protected_areas: Option<Res<ProtectedAreaRegistry>>,
+    biome_table: Res<BiomeTable>,
 ) {
     // Check if we have any events
     if events.read().next().is_none() {
@@ -512,8 +514,7 @@ fn regenerate_dirty_chunks(
     let dirty: Vec<IVec2> = dirty_set.into_iter().collect();
     info!("Regenerating {} dirty prop chunks", dirty.len());
 
-    let generator =
-        crate::voxel::terrain::TerrainGenerator::<crate::voxel::terrain::ValueNoise>::default();
+    let generator = TerrainGenerator::with_biome_table(ValueNoise::default(), *biome_table);
     let placement_config = placement::PlacementConfig::default();
 
     let mut removed_regions = HashSet::new();

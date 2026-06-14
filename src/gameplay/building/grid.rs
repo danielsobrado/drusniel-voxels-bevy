@@ -1,7 +1,7 @@
 //! Spatial grid and snap point indexing for the building system.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::types::{BuildingPiece, PieceTypeId, SnapGroup};
 
@@ -35,8 +35,12 @@ impl Default for SnapConfig {
 /// Grid for tracking placed building pieces.
 #[derive(Resource, Default)]
 pub struct BuildingGrid {
-    /// Map from grid cell to placed piece entity.
-    pub cells: HashMap<IVec3, Entity>,
+    /// Map from grid cell to placed piece entities. Snapped pieces may share a coarse cell.
+    pub cells: HashMap<IVec3, HashSet<Entity>>,
+    /// Reverse lookup used to remove despawned pieces without their component data.
+    entity_cells: HashMap<Entity, IVec3>,
+    /// Undirected structural connections created by successful snap placement.
+    connections: HashMap<Entity, HashSet<Entity>>,
     /// Cell size in world units.
     pub cell_size: f32,
 }
@@ -72,22 +76,89 @@ impl BuildingGrid {
 
     /// Insert a piece into the grid.
     pub fn insert(&mut self, cell: IVec3, entity: Entity) {
-        self.cells.insert(cell, entity);
-    }
-
-    /// Remove a piece from the grid.
-    pub fn remove(&mut self, cell: IVec3) -> Option<Entity> {
-        self.cells.remove(&cell)
+        if let Some(previous_cell) = self.entity_cells.insert(entity, cell) {
+            if let Some(occupants) = self.cells.get_mut(&previous_cell) {
+                occupants.remove(&entity);
+                if occupants.is_empty() {
+                    self.cells.remove(&previous_cell);
+                }
+            }
+        }
+        self.cells.entry(cell).or_default().insert(entity);
+        self.connections.entry(entity).or_default();
     }
 
     /// Check if a cell is occupied.
     pub fn is_occupied(&self, cell: IVec3) -> bool {
-        self.cells.contains_key(&cell)
+        self.cells
+            .get(&cell)
+            .is_some_and(|entities| !entities.is_empty())
     }
 
-    /// Get the entity at a cell.
-    pub fn get(&self, cell: IVec3) -> Option<Entity> {
-        self.cells.get(&cell).copied()
+    /// Add an undirected structural edge between two snapped pieces.
+    pub fn connect(&mut self, a: Entity, b: Entity) {
+        if a == b || !self.entity_cells.contains_key(&a) || !self.entity_cells.contains_key(&b) {
+            return;
+        }
+        self.connections.entry(a).or_default().insert(b);
+        self.connections.entry(b).or_default().insert(a);
+    }
+
+    /// Return the structural neighbors of an entity.
+    pub fn neighbors(&self, entity: Entity) -> Vec<Entity> {
+        self.connections
+            .get(&entity)
+            .map(|neighbors| neighbors.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Remove an entity, its occupied cell, and all structural edges.
+    pub fn remove_entity(&mut self, entity: Entity) -> Vec<Entity> {
+        if let Some(cell) = self.entity_cells.remove(&entity) {
+            if let Some(occupants) = self.cells.get_mut(&cell) {
+                occupants.remove(&entity);
+                if occupants.is_empty() {
+                    self.cells.remove(&cell);
+                }
+            }
+        }
+        self.disconnect_entity(entity)
+    }
+
+    fn disconnect_entity(&mut self, entity: Entity) -> Vec<Entity> {
+        let neighbors: Vec<_> = self
+            .connections
+            .remove(&entity)
+            .map(|neighbors| neighbors.into_iter().collect())
+            .unwrap_or_default();
+        for neighbor in &neighbors {
+            if let Some(edges) = self.connections.get_mut(neighbor) {
+                edges.remove(&entity);
+            }
+        }
+        neighbors
+    }
+}
+
+#[cfg(test)]
+mod building_grid_tests {
+    use super::*;
+
+    #[test]
+    fn removing_one_piece_preserves_other_occupants_in_the_same_cell() {
+        let mut grid = BuildingGrid::default();
+        let cell = IVec3::ZERO;
+        let first = Entity::from_raw_u32(1).unwrap();
+        let second = Entity::from_raw_u32(2).unwrap();
+
+        grid.insert(cell, first);
+        grid.insert(cell, second);
+        grid.connect(first, second);
+
+        assert_eq!(grid.cells[&cell].len(), 2);
+        assert_eq!(grid.remove_entity(second), vec![first]);
+        assert!(grid.is_occupied(cell));
+        assert!(grid.neighbors(first).is_empty());
     }
 }
 

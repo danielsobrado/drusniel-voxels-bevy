@@ -1,0 +1,11 @@
+protected_areas:
+  - id: spawn-protection
+    name: Spawn Protection
+    shape: !box
+      center: [0.0, 0.0, 0.0]
+      half_extents: [10.0, 10.0, 10.0]
+    rule: protected
+    material_overrides: []
+    allow_building: false
+    allow_terrain_edit: false
+    allow_prop_edit: false

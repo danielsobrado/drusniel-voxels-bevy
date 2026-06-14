@@ -329,6 +329,7 @@ pub(crate) fn start_voxel_world_after_overlay_frame(
     persistence_settings: Res<WorldPersistence>,
     mut setup_state: ResMut<WorldStartupSetupState>,
     mut generation_queue: ResMut<WorldGenerationQueue>,
+    biome_table: Res<BiomeTable>,
 ) {
     if setup_state.started {
         return;
@@ -356,13 +357,14 @@ pub(crate) fn start_voxel_world_after_overlay_frame(
         return;
     }
 
-    begin_world_generation(&world, &mut gen_state, &mut generation_queue);
+    begin_world_generation(&world, &mut gen_state, &mut generation_queue, *biome_table);
 }
 
 pub(crate) fn begin_world_generation(
     world: &VoxelWorld,
     gen_state: &mut ChunkGenerationState,
     generation_queue: &mut WorldGenerationQueue,
+    biome_table: BiomeTable,
 ) {
     info!("Generating new world (async)...");
 
@@ -376,7 +378,10 @@ pub(crate) fn begin_world_generation(
     gen_state.world_stats = WorldStats::default();
     gen_state.start_time = Some(std::time::Instant::now());
 
-    let generator = Arc::new(TerrainGenerator::default());
+    let generator = Arc::new(TerrainGenerator::with_biome_table(
+        ValueNoise::default(),
+        biome_table,
+    ));
     generation_queue.begin(chunk_positions, generator);
     info!(
         "Queued {} async chunk generation tasks for batched startup spawning",
@@ -487,13 +492,14 @@ pub(crate) fn start_pending_world_generation(
     mut gen_state: ResMut<ChunkGenerationState>,
     mut pending_generation: ResMut<PendingWorldGeneration>,
     mut generation_queue: ResMut<WorldGenerationQueue>,
+    biome_table: Res<BiomeTable>,
 ) {
     if !pending_generation.requested {
         return;
     }
 
     pending_generation.requested = false;
-    begin_world_generation(&world, &mut gen_state, &mut generation_queue);
+    begin_world_generation(&world, &mut gen_state, &mut generation_queue, *biome_table);
 }
 
 pub(crate) fn spawn_queued_chunk_generation_tasks(

@@ -1,0 +1,274 @@
+material_types:
+  - id: system
+    name: System
+    material_ids: [air]
+  - id: terrain
+    name: Terrain
+    material_ids: [top-soil, sub-soil, rock, bedrock, sand, clay]
+  - id: water
+    name: Water
+    material_ids: [water]
+  - id: organic
+    name: Organic
+    material_ids: [wood, leaves]
+  - id: dungeon
+    name: Dungeon
+    material_ids: [dungeon-wall, dungeon-floor]
+
+materials:
+  - id: air
+    legacy_material_id: 0
+    name: Air
+    material_type_id: system
+    default_voxel: Air
+    color_rgb: [0, 0, 0]
+    metallic: 0.0
+    smooth: 0.0
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 0.0
+    transparent: true
+    liquid: false
+    solid: false
+    diggable: false
+    paintable: false
+
+  - id: top-soil
+    legacy_material_id: 1
+    name: Top Soil
+    material_type_id: terrain
+    default_voxel: TopSoil
+    color_rgb: [83, 128, 62]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 1.0
+    transparent: false
+    liquid: false
+    solid: true
+    diggable: true
+    paintable: true
+
+  - id: sub-soil
+    legacy_material_id: 2
+    name: Sub Soil
+    material_type_id: terrain
+    default_voxel: SubSoil
+    color_rgb: [112, 78, 48]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 1.0
+    transparent: false
+    liquid: false
+    solid: true
+    diggable: true
+    paintable: true
+
+  - id: rock
+    legacy_material_id: 3
+    name: Rock
+    material_type_id: terrain
+    default_voxel: Rock
+    color_rgb: [112, 112, 118]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 1.8
+    transparent: false
+    liquid: false
+    solid: true
+    diggable: true
+    paintable: true
+
+  - id: bedrock
+    legacy_material_id: 4
+    name: Bedrock
+    material_type_id: terrain
+    default_voxel: Bedrock
+    color_rgb: [52, 52, 58]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 10.0
+    transparent: false
+    liquid: false
+    solid: true
+    diggable: false
+    paintable: false
+
+  - id: sand
+    legacy_material_id: 5
+    name: Sand
+    material_type_id: terrain
+    default_voxel: Sand
+    color_rgb: [207, 184, 119]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 0.6
+    transparent: false
+    liquid: false
+    solid: true
+    diggable: true
+    paintable: true
+
+  - id: clay
+    legacy_material_id: 6
+    name: Clay
+    material_type_id: terrain
+    default_voxel: Clay
+    color_rgb: [142, 97, 86]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 0.8
+    transparent: false
+    liquid: false
+    solid: true
+    diggable: true
+    paintable: true
+
+  - id: water
+    legacy_material_id: 7
+    name: Water
+    material_type_id: water
+    default_voxel: Water
+    color_rgb: [66, 152, 210]
+    metallic: 0.0
+    smooth: 0.85
+    emissive: 0.0
+    surface_transmission: 0.72
+    absorption_length: 24.0
+    scatter_length: 96.0
+    index_of_refraction: 1.33
+    phase: 0.0
+    strength: 0.3
+    transparent: true
+    liquid: true
+    solid: false
+    diggable: false
+    paintable: false
+
+  - id: wood
+    legacy_material_id: 8
+    name: Wood
+    material_type_id: organic
+    default_voxel: Wood
+    color_rgb: [121, 82, 45]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 1.0
+    transparent: false
+    liquid: false
+    solid: true
+    diggable: true
+    paintable: true
+
+  - id: leaves
+    legacy_material_id: 9
+    name: Leaves
+    material_type_id: organic
+    default_voxel: Leaves
+    color_rgb: [65, 134, 59]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 0.4
+    transparent: true
+    liquid: false
+    solid: true
+    diggable: true
+    paintable: true
+
+  - id: dungeon-wall
+    legacy_material_id: 10
+    name: Dungeon Wall
+    material_type_id: dungeon
+    default_voxel: DungeonWall
+    color_rgb: [84, 82, 96]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 2.0
+    transparent: false
+    liquid: false
+    solid: true
+    diggable: true
+    paintable: true
+
+  - id: dungeon-floor
+    legacy_material_id: 11
+    name: Dungeon Floor
+    material_type_id: dungeon
+    default_voxel: DungeonFloor
+    color_rgb: [91, 87, 78]
+    metallic: 0.0
+    smooth: 0.45
+    emissive: 0.0
+    surface_transmission: 0.0
+    absorption_length: 0.0
+    scatter_length: 0.0
+    index_of_refraction: 1.0
+    phase: 0.0
+    strength: 1.6
+    transparent: false
+    liquid: false
+    solid: true
+    diggable: true
+    paintable: true
+
+palettes:
+  - id: default
+    name: Default
+    material_ids: [top-soil, sub-soil, rock, sand, clay, water, wood, leaves, dungeon-wall, dungeon-floor]

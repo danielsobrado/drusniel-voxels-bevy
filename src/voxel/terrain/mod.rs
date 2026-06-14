@@ -27,7 +27,7 @@ mod noise;
 mod trees;
 mod water;
 
-pub use biome::Biome;
+pub use biome::{BIOME_DEPTH_BANDS, Biome, BiomeTable};
 pub use noise::{NoiseGenerator, ValueNoise, hash_position, hash_position_seeded};
 pub use water::{GeneratedWaterBodyKind, WaterGenerationMetadata};
 
@@ -39,6 +39,7 @@ pub struct TerrainGenerator<N: NoiseGenerator = ValueNoise> {
     noise: N,
     config: TerrainConfig,
     seed: i32,
+    biome_table: BiomeTable,
 }
 
 impl Default for TerrainGenerator<ValueNoise> {
@@ -55,19 +56,42 @@ impl<N: NoiseGenerator> TerrainGenerator<N> {
 
     /// Creates a new terrain generator with custom config.
     pub fn with_config(noise: N, config: TerrainConfig) -> Self {
+        Self::with_config_and_biome_table(noise, config, BiomeTable::default())
+    }
+
+    pub fn with_biome_table(noise: N, biome_table: BiomeTable) -> Self {
+        Self::with_config_and_biome_table(noise, TerrainConfig::default(), biome_table)
+    }
+
+    pub fn with_config_and_biome_table(
+        noise: N,
+        config: TerrainConfig,
+        biome_table: BiomeTable,
+    ) -> Self {
         Self {
             noise,
             config,
             seed: 0,
+            biome_table,
         }
     }
 
     /// Creates a new terrain generator with custom config and a deterministic recipe seed.
     pub fn with_config_and_seed(noise: N, config: TerrainConfig, seed: i32) -> Self {
+        Self::with_config_seed_and_biome_table(noise, config, seed, BiomeTable::default())
+    }
+
+    pub fn with_config_seed_and_biome_table(
+        noise: N,
+        config: TerrainConfig,
+        seed: i32,
+        biome_table: BiomeTable,
+    ) -> Self {
         Self {
             noise,
             config,
             seed,
+            biome_table,
         }
     }
 
@@ -476,6 +500,38 @@ mod tests {
         assert_eq!(
             generator.get_biome_voxel(Biome::Clay, 8, false),
             VoxelType::Rock
+        );
+    }
+
+    #[test]
+    fn biome_table_resolves_normal_and_shoreline_bands_with_depth_clamping() {
+        let table =
+            BiomeTable::from_content_registry(&crate::content::defaults::get_default_registry())
+                .unwrap();
+
+        assert_eq!(table.voxel(Biome::Grassland, 0, false), VoxelType::TopSoil);
+        assert_eq!(table.voxel(Biome::Grassland, 2, false), VoxelType::SubSoil);
+        assert_eq!(table.voxel(Biome::Grassland, 200, false), VoxelType::Rock);
+        assert_eq!(table.voxel(Biome::Grassland, 0, true), VoxelType::Sand);
+        assert_eq!(table.voxel(Biome::Grassland, 3, true), VoxelType::SubSoil);
+        assert_eq!(table.voxel(Biome::Clay, 2, true), VoxelType::Clay);
+        assert_eq!(table.voxel(Biome::Clay, 200, true), VoxelType::Rock);
+    }
+
+    #[test]
+    fn biome_content_changes_generated_material_without_code_changes() {
+        let mut registry = crate::content::defaults::get_default_registry();
+        registry
+            .biomes
+            .get_mut("grassland")
+            .unwrap()
+            .surface_material_ids = vec!["sand".to_string()];
+        let table = BiomeTable::from_content_registry(&registry).unwrap();
+        let generator = TerrainGenerator::with_biome_table(ValueNoise::default(), table);
+
+        assert_eq!(
+            generator.get_biome_voxel(Biome::Grassland, 0, false),
+            VoxelType::Sand
         );
     }
 

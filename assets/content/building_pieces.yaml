@@ -1,0 +1,384 @@
+# Snap-point layouts mirror the legacy PieceDefinition constructors in
+# src/gameplay/building/types.rs. Floors expose 4 edges + 4 corners, walls
+# expose bottom/top plus two wall-side points so they snap edge-to-edge, and
+# pillars expose bottom/top. Directions are normalized at load time.
+building_pieces:
+  - id: wood-floor
+    legacy_piece_type_id: 1
+    name: Wood Floor
+    category: floor
+    dimensions: [2.0, 0.2, 2.0]
+    can_ground: true
+    material_type: wood
+    snap_points:
+      - id: edge-north
+        local_offset: [0.0, 0.0, -1.0]
+        direction: [0.0, 0.0, -1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: edge-south
+        local_offset: [0.0, 0.0, 1.0]
+        direction: [0.0, 0.0, 1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: edge-west
+        local_offset: [-1.0, 0.0, 0.0]
+        direction: [-1.0, 0.0, 0.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: edge-east
+        local_offset: [1.0, 0.0, 0.0]
+        direction: [1.0, 0.0, 0.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: corner-nw
+        local_offset: [-1.0, 0.0, -1.0]
+        direction: [-1.0, 0.0, -1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: corner-ne
+        local_offset: [1.0, 0.0, -1.0]
+        direction: [1.0, 0.0, -1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: corner-sw
+        local_offset: [-1.0, 0.0, 1.0]
+        direction: [-1.0, 0.0, 1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: corner-se
+        local_offset: [1.0, 0.0, 1.0]
+        direction: [1.0, 0.0, 1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+
+  - id: wood-wall
+    legacy_piece_type_id: 2
+    name: Wood Wall
+    category: wall
+    dimensions: [2.0, 2.0, 0.2]
+    can_ground: false
+    material_type: wood
+    snap_points:
+      - id: bottom
+        local_offset: [0.0, 0.0, 0.0]
+        direction: [0.0, -1.0, 0.0]
+        snap_group: wall-bottom
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: top
+        local_offset: [0.0, 2.0, 0.0]
+        direction: [0.0, 1.0, 0.0]
+        snap_group: wall-top
+        compatible_groups: [wall-top, roof-edge]
+        compatible_piece_ids: []
+      - id: left
+        local_offset: [-1.0, 1.0, 0.0]
+        direction: [-1.0, 0.0, 0.0]
+        snap_group: wall-side
+        compatible_groups: [wall-side]
+        compatible_piece_ids: []
+      - id: right
+        local_offset: [1.0, 1.0, 0.0]
+        direction: [1.0, 0.0, 0.0]
+        snap_group: wall-side
+        compatible_groups: [wall-side]
+        compatible_piece_ids: []
+
+  - id: wood-fence
+    legacy_piece_type_id: 3
+    name: Wood Fence
+    category: fence
+    dimensions: [2.0, 1.0, 0.1]
+    can_ground: true
+    material_type: wood
+    snap_points:
+      - id: bottom
+        local_offset: [0.0, 0.0, 0.0]
+        direction: [0.0, -1.0, 0.0]
+        snap_group: wall-bottom
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: left
+        local_offset: [-1.0, 0.5, 0.0]
+        direction: [-1.0, 0.0, 0.0]
+        snap_group: generic
+        compatible_groups: []
+        compatible_piece_ids: []
+      - id: right
+        local_offset: [1.0, 0.5, 0.0]
+        direction: [1.0, 0.0, 0.0]
+        snap_group: generic
+        compatible_groups: []
+        compatible_piece_ids: []
+
+  - id: wood-pillar
+    legacy_piece_type_id: 4
+    name: Wood Pillar
+    category: pillar
+    dimensions: [0.4, 2.0, 0.4]
+    can_ground: true
+    material_type: wood
+    support_profile:
+      max_support: 1.0
+      decay_per_hop: 0.05
+      class: wood
+    snap_points:
+      - id: bottom
+        local_offset: [0.0, 0.0, 0.0]
+        direction: [0.0, -1.0, 0.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: top
+        local_offset: [0.0, 2.0, 0.0]
+        direction: [0.0, 1.0, 0.0]
+        snap_group: wall-top
+        compatible_groups: [wall-top, roof-edge]
+        compatible_piece_ids: []
+
+  - id: stone-floor
+    legacy_piece_type_id: 10
+    name: Stone Floor
+    category: floor
+    dimensions: [2.0, 0.2, 2.0]
+    can_ground: true
+    material_type: stone
+    snap_points:
+      - id: edge-north
+        local_offset: [0.0, 0.0, -1.0]
+        direction: [0.0, 0.0, -1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: edge-south
+        local_offset: [0.0, 0.0, 1.0]
+        direction: [0.0, 0.0, 1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: edge-west
+        local_offset: [-1.0, 0.0, 0.0]
+        direction: [-1.0, 0.0, 0.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: edge-east
+        local_offset: [1.0, 0.0, 0.0]
+        direction: [1.0, 0.0, 0.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: corner-nw
+        local_offset: [-1.0, 0.0, -1.0]
+        direction: [-1.0, 0.0, -1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: corner-ne
+        local_offset: [1.0, 0.0, -1.0]
+        direction: [1.0, 0.0, -1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: corner-sw
+        local_offset: [-1.0, 0.0, 1.0]
+        direction: [-1.0, 0.0, 1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: corner-se
+        local_offset: [1.0, 0.0, 1.0]
+        direction: [1.0, 0.0, 1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+
+  - id: stone-wall
+    legacy_piece_type_id: 11
+    name: Stone Wall
+    category: wall
+    dimensions: [2.0, 2.0, 0.2]
+    can_ground: false
+    material_type: stone
+    snap_points:
+      - id: bottom
+        local_offset: [0.0, 0.0, 0.0]
+        direction: [0.0, -1.0, 0.0]
+        snap_group: wall-bottom
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: top
+        local_offset: [0.0, 2.0, 0.0]
+        direction: [0.0, 1.0, 0.0]
+        snap_group: wall-top
+        compatible_groups: [wall-top, roof-edge]
+        compatible_piece_ids: []
+      - id: left
+        local_offset: [-1.0, 1.0, 0.0]
+        direction: [-1.0, 0.0, 0.0]
+        snap_group: wall-side
+        compatible_groups: [wall-side]
+        compatible_piece_ids: []
+      - id: right
+        local_offset: [1.0, 1.0, 0.0]
+        direction: [1.0, 0.0, 0.0]
+        snap_group: wall-side
+        compatible_groups: [wall-side]
+        compatible_piece_ids: []
+
+  - id: stone-pillar
+    legacy_piece_type_id: 12
+    name: Stone Pillar
+    category: pillar
+    dimensions: [0.4, 2.0, 0.4]
+    can_ground: true
+    material_type: stone
+    support_profile:
+      max_support: 1.0
+      decay_per_hop: 0.08
+      class: stone
+    snap_points:
+      - id: bottom
+        local_offset: [0.0, 0.0, 0.0]
+        direction: [0.0, -1.0, 0.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: top
+        local_offset: [0.0, 2.0, 0.0]
+        direction: [0.0, 1.0, 0.0]
+        snap_group: wall-top
+        compatible_groups: [wall-top, roof-edge]
+        compatible_piece_ids: []
+
+  - id: metal-floor
+    legacy_piece_type_id: 20
+    name: Metal Floor
+    category: floor
+    dimensions: [2.0, 0.2, 2.0]
+    can_ground: true
+    material_type: metal
+    snap_points:
+      - id: edge-north
+        local_offset: [0.0, 0.0, -1.0]
+        direction: [0.0, 0.0, -1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: edge-south
+        local_offset: [0.0, 0.0, 1.0]
+        direction: [0.0, 0.0, 1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: edge-west
+        local_offset: [-1.0, 0.0, 0.0]
+        direction: [-1.0, 0.0, 0.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: edge-east
+        local_offset: [1.0, 0.0, 0.0]
+        direction: [1.0, 0.0, 0.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge, wall-bottom]
+        compatible_piece_ids: []
+      - id: corner-nw
+        local_offset: [-1.0, 0.0, -1.0]
+        direction: [-1.0, 0.0, -1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: corner-ne
+        local_offset: [1.0, 0.0, -1.0]
+        direction: [1.0, 0.0, -1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: corner-sw
+        local_offset: [-1.0, 0.0, 1.0]
+        direction: [-1.0, 0.0, 1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: corner-se
+        local_offset: [1.0, 0.0, 1.0]
+        direction: [1.0, 0.0, 1.0]
+        snap_group: floor-edge
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+
+  - id: metal-wall
+    legacy_piece_type_id: 21
+    name: Metal Wall
+    category: wall
+    dimensions: [2.0, 2.0, 0.2]
+    can_ground: false
+    material_type: metal
+    snap_points:
+      - id: bottom
+        local_offset: [0.0, 0.0, 0.0]
+        direction: [0.0, -1.0, 0.0]
+        snap_group: wall-bottom
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: top
+        local_offset: [0.0, 2.0, 0.0]
+        direction: [0.0, 1.0, 0.0]
+        snap_group: wall-top
+        compatible_groups: [wall-top, roof-edge]
+        compatible_piece_ids: []
+      - id: left
+        local_offset: [-1.0, 1.0, 0.0]
+        direction: [-1.0, 0.0, 0.0]
+        snap_group: wall-side
+        compatible_groups: [wall-side]
+        compatible_piece_ids: []
+      - id: right
+        local_offset: [1.0, 1.0, 0.0]
+        direction: [1.0, 0.0, 0.0]
+        snap_group: wall-side
+        compatible_groups: [wall-side]
+        compatible_piece_ids: []
+
+  - id: thatch-wall
+    legacy_piece_type_id: 30
+    name: Thatch Wall
+    category: wall
+    dimensions: [2.0, 2.0, 0.2]
+    can_ground: false
+    material_type: thatch
+    snap_points:
+      - id: bottom
+        local_offset: [0.0, 0.0, 0.0]
+        direction: [0.0, -1.0, 0.0]
+        snap_group: wall-bottom
+        compatible_groups: [floor-edge]
+        compatible_piece_ids: []
+      - id: top
+        local_offset: [0.0, 2.0, 0.0]
+        direction: [0.0, 1.0, 0.0]
+        snap_group: wall-top
+        compatible_groups: [wall-top, roof-edge]
+        compatible_piece_ids: []
+      - id: left
+        local_offset: [-1.0, 1.0, 0.0]
+        direction: [-1.0, 0.0, 0.0]
+        snap_group: wall-side
+        compatible_groups: [wall-side]
+        compatible_piece_ids: []
+      - id: right
+        local_offset: [1.0, 1.0, 0.0]
+        direction: [1.0, 0.0, 0.0]
+        snap_group: wall-side
+        compatible_groups: [wall-side]
+        compatible_piece_ids: []

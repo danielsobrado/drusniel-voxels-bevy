@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// The audio event vocabulary and lightweight feedback approach were inspired by
-/// the MIT-licensed world-of-claudecraft audio reference under docs/reference/world-of-claudecraft-audio.
+/// the MIT-licensed World of Claudecraft audio reference (© 2026 Levy Street).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]

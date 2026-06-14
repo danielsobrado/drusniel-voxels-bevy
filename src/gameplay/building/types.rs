@@ -5,6 +5,8 @@ use std::collections::HashMap;
 
 use crate::rendering::building_material::BuildingMaterialType;
 
+use super::stability::{SupportClass, SupportProfile};
+
 // ============================================================================
 // Snap Result Types (needed by BuildingState)
 // ============================================================================
@@ -152,6 +154,8 @@ pub struct PieceDefinition {
     pub can_ground: bool,
     /// Material type for this piece.
     pub material: BuildingMaterialType,
+    /// Structural support tuning for this specific piece.
+    pub support_profile: SupportProfile,
 }
 
 impl PieceDefinition {
@@ -176,6 +180,7 @@ impl PieceDefinition {
             mesh_path: None,
             can_ground: false,
             material,
+            support_profile: SupportProfile::for_material(material),
         }
     }
 
@@ -218,6 +223,7 @@ impl PieceDefinition {
             mesh_path: None,
             can_ground: true,
             material,
+            support_profile: SupportProfile::for_material(material),
         }
     }
 
@@ -240,13 +246,14 @@ impl PieceDefinition {
             mesh_path: None,
             can_ground: true,
             material,
+            support_profile: SupportProfile::for_material(material),
         }
     }
 
     /// Create a pillar piece (0.4m x 0.4m x 2m tall).
     pub fn pillar(id: u32, name: &str, material: BuildingMaterialType) -> Self {
         let piece_id = PieceTypeId(id);
-        Self {
+        let mut definition = Self {
             id: piece_id,
             name: name.to_string(),
             category: PieceCategory::Pillar,
@@ -260,7 +267,14 @@ impl PieceDefinition {
             mesh_path: None,
             can_ground: true,
             material,
-        }
+            support_profile: SupportProfile::for_material(material),
+        };
+        definition.support_profile.decay_per_hop = match material {
+            BuildingMaterialType::WoodPlank => 0.05,
+            BuildingMaterialType::StoneBrick => 0.08,
+            _ => definition.support_profile.decay_per_hop,
+        };
+        definition
     }
 }
 
@@ -274,6 +288,118 @@ pub struct BuildingPieceRegistry {
 }
 
 impl BuildingPieceRegistry {
+    /// Create registry from ContentRegistry
+    pub fn from_content_registry(registry: &crate::content::ContentRegistry) -> Self {
+        use crate::rendering::building_material::BuildingMaterialType;
+        let mut new_registry = Self::default();
+
+        // Sort by legacy piece id so registration order (and the by_category
+        // lists the building UI reads) is deterministic across runs. HashMap
+        // iteration order is otherwise randomized.
+        let mut pieces: Vec<_> = registry.building_pieces.values().collect();
+        pieces.sort_by_key(|pc| pc.legacy_piece_type_id.unwrap_or(u32::MAX));
+
+        for pc in pieces {
+            let legacy_id = match pc.legacy_piece_type_id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let piece_id = PieceTypeId(legacy_id);
+
+            let category = match pc.category.to_lowercase().as_str() {
+                "foundation" => PieceCategory::Foundation,
+                "wall" => PieceCategory::Wall,
+                "floor" => PieceCategory::Floor,
+                "ceiling" => PieceCategory::Ceiling,
+                "roof" => PieceCategory::Roof,
+                "stairs" => PieceCategory::Stairs,
+                "door" => PieceCategory::Door,
+                "window" => PieceCategory::Window,
+                "pillar" => PieceCategory::Pillar,
+                "beam" => PieceCategory::Beam,
+                "fence" => PieceCategory::Fence,
+                _ => PieceCategory::Wall,
+            };
+
+            let material = match pc.material_type.to_lowercase().as_str() {
+                "wood-plank" | "wood_plank" | "wood" | "woodplank" => {
+                    BuildingMaterialType::WoodPlank
+                }
+                "stone-brick" | "stone_brick" | "stone" | "stonebrick" => {
+                    BuildingMaterialType::StoneBrick
+                }
+                "metal-plate" | "metal_plate" | "metal" | "metalplate" => {
+                    BuildingMaterialType::MetalPlate
+                }
+                "thatch" => BuildingMaterialType::Thatch,
+                _ => BuildingMaterialType::WoodPlank,
+            };
+
+            let mut snap_points = Vec::new();
+            for sp in &pc.snap_points {
+                let group = match sp.snap_group.to_lowercase().as_str() {
+                    "floor-edge" | "floor_edge" => SnapGroup::FloorEdge,
+                    "wall-bottom" | "wall_bottom" => SnapGroup::WallBottom,
+                    "wall-top" | "wall_top" => SnapGroup::WallTop,
+                    "wall-side" | "wall_side" => SnapGroup::WallSide,
+                    "roof-edge" | "roof_edge" => SnapGroup::RoofEdge,
+                    "generic" => SnapGroup::Generic,
+                    _ => SnapGroup::Generic,
+                };
+
+                let direction = Vec3::from(sp.direction);
+                let direction = if direction.length_squared() > 0.0 {
+                    direction.normalize()
+                } else {
+                    Vec3::Y
+                };
+
+                let mut compatible_pieces = Vec::new();
+                for comp_id in &sp.compatible_piece_ids {
+                    if let Some(target_pc) = registry.building_pieces.get(comp_id) {
+                        if let Some(target_legacy_id) = target_pc.legacy_piece_type_id {
+                            compatible_pieces.push(PieceTypeId(target_legacy_id));
+                        }
+                    }
+                }
+
+                snap_points.push(SnapPointDef {
+                    local_offset: Vec3::from(sp.local_offset),
+                    direction,
+                    snap_group: group,
+                    compatible_pieces,
+                });
+            }
+
+            let def = PieceDefinition {
+                id: piece_id,
+                name: pc.name.clone(),
+                category,
+                dimensions: Vec3::from(pc.dimensions),
+                snap_points,
+                mesh_path: pc.mesh_path.clone(),
+                can_ground: pc.can_ground,
+                material,
+                support_profile: pc
+                    .support_profile
+                    .as_ref()
+                    .and_then(|profile| {
+                        SupportClass::parse(&profile.class).map(|class| SupportProfile {
+                            max_support: profile.max_support,
+                            decay_per_hop: profile.decay_per_hop,
+                            class,
+                        })
+                    })
+                    .unwrap_or_else(|| SupportProfile::for_material(material)),
+            };
+
+            new_registry.register(def);
+        }
+
+        new_registry
+    }
+
     /// Register a new piece definition.
     pub fn register(&mut self, piece: PieceDefinition) {
         let id = piece.id;
@@ -352,10 +478,31 @@ pub struct BuildingGhost {
     pub valid: bool,
     /// Whether currently snapped to another piece.
     pub snapped: bool,
+    /// Predicted support value if the current candidate were placed.
+    pub stability_value: f32,
+    /// Maximum support for the selected piece.
+    pub max_support: f32,
+    /// Whether the candidate directly touches terrain.
+    pub grounded: bool,
 }
 
 /// Setup the building piece registry with default pieces.
-pub fn setup_building_piece_registry(mut registry: ResMut<BuildingPieceRegistry>) {
+pub fn setup_building_piece_registry(
+    mut registry: ResMut<BuildingPieceRegistry>,
+    content_registry: Option<Res<crate::content::ContentRegistry>>,
+) {
+    if let Some(cr) = content_registry {
+        let loaded = BuildingPieceRegistry::from_content_registry(&cr);
+        if !loaded.pieces.is_empty() {
+            *registry = loaded;
+            info!(
+                "Building piece registry loaded from ContentRegistry with {} pieces",
+                registry.pieces.len()
+            );
+            return;
+        }
+    }
+
     use BuildingMaterialType::*;
 
     // Wood pieces

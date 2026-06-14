@@ -169,6 +169,7 @@ pub fn run() {
             EntityCountDiagnosticsPlugin::default(),
             SystemInformationDiagnosticsPlugin::default(),
         ))
+        .add_plugins(crate::content::ContentPlugin)
         .add_plugins(VoxelPlugin)
         .add_plugins(WeatherPlugin)
         .add_plugins(RenderingPlugin)

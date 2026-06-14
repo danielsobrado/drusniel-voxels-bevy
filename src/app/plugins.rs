@@ -6,7 +6,6 @@ use bevy::prelude::*;
 
 use crate::editor::bridge::EditorRuntimeBridgePlugin;
 use crate::editor::runtime::RuntimeWriteCommandPlugin;
-use crate::rendering::array_loader::AtlasMapping;
 use crate::rendering::quality::RenderQualityPreset;
 use crate::shared::constants::{
     DEFAULT_WORLD_CHUNKS_X, DEFAULT_WORLD_CHUNKS_Y, DEFAULT_WORLD_CHUNKS_Z,
@@ -44,7 +43,7 @@ pub(super) fn run_editor_runtime(log_filter: String) {
             ..default()
         })
         .insert_resource(RenderQualityPreset::default())
-        .insert_resource(AtlasMapping::default())
+        .add_plugins(crate::content::ContentPlugin)
         .insert_resource(ProtectedAreaRegistry::default())
         .add_plugins(RuntimeWriteCommandPlugin)
         .add_plugins(EditorRuntimeBridgePlugin::enabled());

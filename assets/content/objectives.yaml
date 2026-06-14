@@ -1,0 +1,18 @@
+objectives:
+  - id: gather-wood
+    name: Gather Wood
+    kind: collect
+    required_material_ids: [wood]
+    required_prop_ids: []
+    required_biome_ids: []
+    next_objective_ids: [build-shelter]
+    notes: Gather wood from trees.
+
+  - id: build-shelter
+    name: Build Shelter
+    kind: build
+    required_material_ids: []
+    required_prop_ids: []
+    required_biome_ids: []
+    next_objective_ids: []
+    notes: Build a simple shelter using wood floor and walls.

@@ -1,0 +1,54 @@
+- id: natural
+  name: Natural
+  slotIndex: 0
+  source: builtin
+  tags: [terrain]
+
+- id: grass-top
+  name: Grass Top
+  slotIndex: 1
+  source: builtin
+  materialId: top-soil
+  tags: [organic]
+
+- id: dirt
+  name: Dirt
+  slotIndex: 2
+  source: builtin
+  materialId: sub-soil
+  tags: [terrain]
+
+- id: rock
+  name: Rock
+  slotIndex: 3
+  source: builtin
+  materialId: rock
+  tags: [rock]
+
+- id: sand
+  name: Sand
+  slotIndex: 4
+  source: builtin
+  materialId: sand
+  tags: [terrain]
+
+- id: water
+  name: Water
+  slotIndex: 5
+  source: builtin
+  materialId: water
+  tags: [water]
+
+- id: snow
+  name: Snow
+  slotIndex: 6
+  source: builtin
+  materialId: snow
+  tags: [organic]
+
+- id: lava
+  name: Lava
+  slotIndex: 7
+  source: builtin
+  materialId: lava
+  tags: [terrain]

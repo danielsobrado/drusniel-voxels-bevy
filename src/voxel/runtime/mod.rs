@@ -75,7 +75,9 @@ use crate::voxel::occlusion::{
     OcclusionConfig, OcclusionUpdateTimer, VisibleChunks, update_visible_chunks_system,
 };
 use crate::voxel::persistence::{self, WorldPersistence};
-use crate::voxel::terrain::{Biome, TerrainGenerator, WaterGenerationMetadata};
+use crate::voxel::terrain::{
+    Biome, BiomeTable, TerrainGenerator, ValueNoise, WaterGenerationMetadata,
+};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::visibility::compute_face_visibility;
 use crate::voxel::world::{VoxelSample, VoxelWorld, WorldBounds};

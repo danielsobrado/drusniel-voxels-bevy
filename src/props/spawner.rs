@@ -25,11 +25,12 @@ use crate::props::persistence::{
 use crate::rendering::props_material::PropsMaterialHandle;
 use crate::voxel::persistence as voxel_persistence;
 use crate::voxel::persistence::WorldPersistence;
-use crate::voxel::terrain::{Biome, TerrainGenerator, ValueNoise};
+use crate::voxel::terrain::{Biome, BiomeTable, TerrainGenerator, ValueNoise};
 use crate::voxel::types::{Voxel, VoxelType};
 use crate::voxel::world::{VoxelEditResult, VoxelWorld};
 use crate::world_rules::ProtectedAreaRegistry;
 use bevy::diagnostic::FrameCount;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 const DEFAULT_MAX_PER_TYPE: u32 = 500;
@@ -73,6 +74,12 @@ pub struct PropsDebugSpawned(pub bool);
 #[derive(Resource, Default)]
 pub struct PropsLandmarksSpawned(pub bool);
 
+#[derive(SystemParam)]
+pub struct PropTerrainContext<'w> {
+    protected_areas: Option<Res<'w, ProtectedAreaRegistry>>,
+    biome_table: Res<'w, BiomeTable>,
+}
+
 /// Spawn props on terrain based on configuration.
 /// Uses persistence: loads from disk if available, otherwise generates and saves.
 /// When mesh cache is ready, uses GPU instancing for better performance.
@@ -92,7 +99,7 @@ pub fn spawn_props_on_terrain(
     mut instancing_stats: ResMut<InstancingStats>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
-    protected_areas: Option<Res<ProtectedAreaRegistry>>,
+    terrain_context: PropTerrainContext,
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Prop Spawn");
     if spawned.0 || !prop_assets.loaded {
@@ -161,7 +168,9 @@ pub fn spawn_props_on_terrain(
     };
     persistence_state.manifest = Some(manifest);
 
-    let generator = TerrainGenerator::<ValueNoise>::default();
+    let generator =
+        TerrainGenerator::with_biome_table(ValueNoise::default(), *terrain_context.biome_table);
+    let protected_areas = terrain_context.protected_areas;
     let placement_config = PlacementConfig::default();
 
     let mut total = 0u32;

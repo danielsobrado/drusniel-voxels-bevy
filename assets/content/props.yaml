@@ -1,0 +1,10 @@
+props:
+  - id: oak-tree
+    name: Oak Tree
+    category: organic
+    asset_path: models/oak_tree.glb
+    biome_ids: [grassland]
+    footprint: [2.0, 6.0, 2.0]
+    spawn_weight: 1.0
+    can_spawn_on_material_ids: [top-soil]
+    blocked_by_protected_area: true

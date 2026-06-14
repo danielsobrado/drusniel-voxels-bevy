@@ -74,7 +74,9 @@ use crate::voxel::meshing::{
 };
 use crate::voxel::persistence;
 use crate::voxel::plugin::WaterBodyRegistry;
-use crate::voxel::terrain::{Biome, GeneratedWaterBodyKind, TerrainGenerator, ValueNoise};
+use crate::voxel::terrain::{
+    Biome, BiomeTable, GeneratedWaterBodyKind, TerrainGenerator, ValueNoise,
+};
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::{VoxelEditResult, VoxelWorld};
 use crate::world_rules::{
@@ -2567,12 +2569,13 @@ fn default_terrain_recipe_payload() -> Value {
     })
 }
 
-fn terrain_preview_payload(request: &TerrainPreviewRequest) -> Value {
+fn terrain_preview_payload(request: &TerrainPreviewRequest, biome_table: BiomeTable) -> Value {
     let started = Instant::now();
-    let generator = TerrainGenerator::with_config_and_seed(
+    let generator = TerrainGenerator::with_config_seed_and_biome_table(
         ValueNoise::new(request.recipe.seed),
         request.recipe.config.clone(),
         request.recipe.seed,
+        biome_table,
     );
     let resolution = request.resolution;
     let denominator = (resolution - 1).max(1) as f32;
@@ -3070,7 +3073,8 @@ fn execute_runtime_write_command(
             RuntimeCommandResult::success(default_terrain_recipe_payload())
         }
         RuntimeWriteCommand::PreviewTerrainRecipe { request } => {
-            RuntimeCommandResult::success(terrain_preview_payload(&request))
+            let biome_table = *world.resource::<BiomeTable>();
+            RuntimeCommandResult::success(terrain_preview_payload(&request, biome_table))
         }
         RuntimeWriteCommand::SetVoxel { position, block } => {
             match set_runtime_voxel(
@@ -7083,8 +7087,8 @@ mod tests {
     #[test]
     fn terrain_recipe_preview_is_deterministic_for_same_seed() {
         let request = terrain_preview_request(17, 16);
-        let first = terrain_preview_payload(&request);
-        let second = terrain_preview_payload(&request);
+        let first = terrain_preview_payload(&request, BiomeTable::default());
+        let second = terrain_preview_payload(&request, BiomeTable::default());
 
         assert_eq!(first["samples"], second["samples"]);
         assert_eq!(first["stats"], second["stats"]);
@@ -7092,8 +7096,10 @@ mod tests {
 
     #[test]
     fn terrain_recipe_preview_changes_with_seed() {
-        let first = terrain_preview_payload(&terrain_preview_request(17, 16));
-        let second = terrain_preview_payload(&terrain_preview_request(23, 16));
+        let first =
+            terrain_preview_payload(&terrain_preview_request(17, 16), BiomeTable::default());
+        let second =
+            terrain_preview_payload(&terrain_preview_request(23, 16), BiomeTable::default());
 
         assert_ne!(first["samples"], second["samples"]);
     }

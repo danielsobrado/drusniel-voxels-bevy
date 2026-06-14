@@ -10,6 +10,10 @@ use crate::voxel::world::VoxelWorld;
 use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
 
 use super::grid::BuildingGrid;
+use super::stability::{
+    DirtyStabilityIslands, Stability, StabilityConfig, is_piece_grounded, predict_stability,
+    stability_color,
+};
 use super::types::{
     BuildingGhost, BuildingPiece, BuildingPieceRegistry, BuildingState, PieceTypeId,
 };
@@ -17,45 +21,52 @@ use super::types::{
 /// Materials for the building ghost.
 #[derive(Resource)]
 pub struct BuildingGhostMaterials {
-    /// Green material for valid placement.
-    pub valid: Handle<StandardMaterial>,
-    /// Red material for invalid placement.
+    pub grounded: Handle<StandardMaterial>,
+    pub strong: Handle<StandardMaterial>,
+    pub medium: Handle<StandardMaterial>,
+    pub weak: Handle<StandardMaterial>,
+    pub unstable: Handle<StandardMaterial>,
     pub invalid: Handle<StandardMaterial>,
-    /// Blue material for snapped placement.
-    pub snapped: Handle<StandardMaterial>,
 }
 
 /// Setup ghost materials.
 pub fn setup_ghost_materials(
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let valid = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.2, 0.9, 0.2, 0.5),
-        unlit: true,
-        alpha_mode: AlphaMode::Blend,
-        ..default()
-    });
+    let mut make_material = |color| {
+        materials.add(StandardMaterial {
+            base_color: color,
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        })
+    };
 
-    let invalid = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.9, 0.2, 0.2, 0.5),
-        unlit: true,
-        alpha_mode: AlphaMode::Blend,
-        ..default()
-    });
-
-    let snapped = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.2, 0.5, 0.9, 0.5),
-        unlit: true,
-        alpha_mode: AlphaMode::Blend,
-        ..default()
-    });
-
-    commands.insert_resource(BuildingGhostMaterials {
-        valid,
-        invalid,
-        snapped,
-    });
+    let ghost_materials = BuildingGhostMaterials {
+        grounded: make_material(Color::srgba(0.2, 0.5, 1.0, 0.45)),
+        strong: make_material(Color::srgba(0.2, 0.9, 0.2, 0.45)),
+        medium: make_material(Color::srgba(1.0, 0.9, 0.15, 0.45)),
+        weak: make_material(Color::srgba(1.0, 0.5, 0.1, 0.45)),
+        unstable: make_material(Color::srgba(0.95, 0.1, 0.1, 0.45)),
+        invalid: make_material(Color::srgba(0.95, 0.1, 0.1, 0.65)),
+    };
+    let initial_material = ghost_materials.unstable.clone();
+    commands.insert_resource(ghost_materials);
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+        MeshMaterial3d(initial_material),
+        Transform::default(),
+        Visibility::Hidden,
+        BuildingGhost {
+            valid: false,
+            snapped: false,
+            stability_value: 0.0,
+            max_support: 1.0,
+            grounded: false,
+        },
+    ));
 }
 
 /// Update the building ghost position and validity.
@@ -65,20 +76,28 @@ pub fn update_building_ghost(
     targeted: Res<TargetedBlock>,
     world: Res<VoxelWorld>,
     grid: Res<BuildingGrid>,
+    stability_config: Res<StabilityConfig>,
+    ghost_materials: Res<BuildingGhostMaterials>,
     protected_areas: Option<Res<ProtectedAreaRegistry>>,
-    mut ghost_query: Query<(&mut Transform, &mut BuildingGhost, &mut Visibility)>,
+    placed_pieces: Query<(&BuildingPiece, &Stability)>,
+    mut ghost_query: Query<(
+        &mut Transform,
+        &mut BuildingGhost,
+        &mut Visibility,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
     mut gizmos: Gizmos,
 ) {
     // If no piece selected or not in building mode, hide ghost
     if !state.active {
-        for (_, _, mut vis) in ghost_query.iter_mut() {
+        for (_, _, mut vis, _) in ghost_query.iter_mut() {
             *vis = Visibility::Hidden;
         }
         return;
     }
 
     let Some(piece_type) = state.selected_piece else {
-        for (_, _, mut vis) in ghost_query.iter_mut() {
+        for (_, _, mut vis, _) in ghost_query.iter_mut() {
             *vis = Visibility::Hidden;
         }
         return;
@@ -89,55 +108,99 @@ pub fn update_building_ghost(
     };
 
     // Calculate ghost position
-    let (ghost_pos, ghost_rot, valid, snapped) = if let Some(ref snap) = state.current_snap {
-        // Use snap result
-        (snap.world_position, snap.world_rotation, true, true)
-    } else if let (Some(block_pos), Some(normal)) = (targeted.position, targeted.normal) {
-        // Free placement on terrain
-        let place_pos = block_pos + normal;
-        let pos = Vec3::new(
-            place_pos.x as f32 + 0.5,
-            place_pos.y as f32 + 0.5,
-            place_pos.z as f32 + 0.5,
-        );
-        let rot = state.rotation_quat();
+    let (ghost_pos, ghost_rot, valid, snapped, predicted) =
+        if let Some(ref snap) = state.current_snap {
+            let valid = validate_placement(
+                snap.world_position,
+                piece_type,
+                state.rotation,
+                &world,
+                &grid,
+                &registry,
+                protected_areas.as_deref(),
+                true,
+            );
+            let grounded =
+                is_piece_grounded(piece_def, snap.world_position, snap.world_rotation, &world);
+            let source =
+                placed_pieces
+                    .get(snap.target_snap.entity)
+                    .ok()
+                    .and_then(|(piece, stability)| {
+                        registry
+                            .get(piece.piece_type)
+                            .map(|definition| (*stability, definition.support_profile))
+                    });
+            let predicted = predict_stability(grounded, piece_def.support_profile, source);
+            (
+                snap.world_position,
+                snap.world_rotation,
+                valid,
+                true,
+                predicted,
+            )
+        } else if let (Some(block_pos), Some(normal)) = (targeted.position, targeted.normal) {
+            // Free placement on terrain
+            let place_pos = block_pos + normal;
+            let pos = Vec3::new(
+                place_pos.x as f32 + 0.5,
+                place_pos.y as f32 + 0.5,
+                place_pos.z as f32 + 0.5,
+            );
+            let rot = state.rotation_quat();
 
-        // Check validity
-        let valid = validate_placement(
-            pos,
-            piece_type,
-            state.rotation,
-            &world,
-            &grid,
-            &registry,
-            protected_areas.as_deref(),
-        );
+            // Check validity
+            let valid = validate_placement(
+                pos,
+                piece_type,
+                state.rotation,
+                &world,
+                &grid,
+                &registry,
+                protected_areas.as_deref(),
+                false,
+            );
 
-        (pos, rot, valid, false)
-    } else {
-        // No valid target
-        for (_, _, mut vis) in ghost_query.iter_mut() {
-            *vis = Visibility::Hidden;
-        }
-        return;
-    };
+            let grounded = is_piece_grounded(piece_def, pos, rot, &world);
+            let predicted = predict_stability(grounded, piece_def.support_profile, None);
+            (pos, rot, valid, false, predicted)
+        } else {
+            // No valid target
+            for (_, _, mut vis, _) in ghost_query.iter_mut() {
+                *vis = Visibility::Hidden;
+            }
+            return;
+        };
 
     // Update ghost entity
-    for (mut transform, mut ghost, mut vis) in ghost_query.iter_mut() {
+    for (mut transform, mut ghost, mut vis, mut material) in ghost_query.iter_mut() {
         transform.translation = ghost_pos;
         transform.rotation = ghost_rot;
+        transform.scale = piece_def.dimensions;
         ghost.valid = valid;
         ghost.snapped = snapped;
+        ghost.stability_value = predicted.value;
+        ghost.max_support = piece_def.support_profile.max_support;
+        ghost.grounded = predicted.grounded;
+        material.0 = ghost_material_handle(
+            &ghost_materials,
+            valid,
+            predicted,
+            ghost.max_support,
+            stability_config.collapse_threshold,
+        );
         *vis = Visibility::Visible;
     }
 
     // Draw ghost outline with gizmos (temporary visualization)
-    let color = if snapped {
-        Color::srgba(0.2, 0.5, 0.9, 0.8)
-    } else if valid {
-        Color::srgba(0.2, 0.9, 0.2, 0.8)
-    } else {
+    let color = if !valid {
         Color::srgba(0.9, 0.2, 0.2, 0.8)
+    } else {
+        stability_color(
+            predicted,
+            piece_def.support_profile.max_support,
+            stability_config.collapse_threshold,
+        )
     };
 
     let half_size = piece_def.dimensions * 0.5;
@@ -158,6 +221,35 @@ pub fn update_building_ghost(
     }
 }
 
+fn ghost_material_handle(
+    materials: &BuildingGhostMaterials,
+    valid: bool,
+    stability: Stability,
+    max_support: f32,
+    collapse_threshold: f32,
+) -> Handle<StandardMaterial> {
+    if !valid {
+        return materials.invalid.clone();
+    }
+    if stability.grounded {
+        return materials.grounded.clone();
+    }
+    let ratio = if max_support > 0.0 {
+        stability.value / max_support
+    } else {
+        0.0
+    };
+    if ratio >= 0.67 {
+        materials.strong.clone()
+    } else if ratio >= 0.40 {
+        materials.medium.clone()
+    } else if ratio >= collapse_threshold {
+        materials.weak.clone()
+    } else {
+        materials.unstable.clone()
+    }
+}
+
 /// Validate whether a piece can be placed at the given position.
 pub fn validate_placement(
     position: Vec3,
@@ -167,6 +259,7 @@ pub fn validate_placement(
     grid: &BuildingGrid,
     registry: &BuildingPieceRegistry,
     protected_areas: Option<&ProtectedAreaRegistry>,
+    allow_occupied_cell: bool,
 ) -> bool {
     let Some(piece_def) = registry.get(piece_type) else {
         return false;
@@ -210,7 +303,7 @@ pub fn validate_placement(
 
     // Check grid for existing building pieces
     let grid_pos = grid.world_to_cell(position);
-    if grid.is_occupied(grid_pos) {
+    if !allow_occupied_cell && grid.is_occupied(grid_pos) {
         return false;
     }
 
@@ -235,6 +328,7 @@ pub fn place_building_piece(
     state: Res<BuildingState>,
     registry: Res<BuildingPieceRegistry>,
     mut grid: ResMut<BuildingGrid>,
+    mut dirty_stability: ResMut<DirtyStabilityIslands>,
     ghost_query: Query<(&Transform, &BuildingGhost)>,
     mut meshes: ResMut<Assets<Mesh>>,
     building_mat_handle: Option<Res<BuildingMaterialHandle>>,
@@ -295,6 +389,10 @@ pub fn place_building_piece(
                     rotation,
                     material: piece_def.material,
                 },
+                Stability {
+                    value: 0.0,
+                    grounded: ghost.grounded,
+                },
                 BuildingMesh {
                     material_type: piece_def.material,
                 },
@@ -333,12 +431,20 @@ pub fn place_building_piece(
                     rotation,
                     material: piece_def.material,
                 },
+                Stability {
+                    value: 0.0,
+                    grounded: ghost.grounded,
+                },
             ))
             .id()
     };
 
     // Add to grid
     grid.insert(grid_pos, entity);
+    if let Some(snap) = &state.current_snap {
+        grid.connect(entity, snap.target_snap.entity);
+    }
+    dirty_stability.mark(entity);
 
     info!(
         "Placed {} ({:?}) at {:?} (grid: {:?})",

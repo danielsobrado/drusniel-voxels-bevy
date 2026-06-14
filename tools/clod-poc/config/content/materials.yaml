@@ -1,0 +1,100 @@
+- id: air
+  name: Air
+  kind: system
+  colorRgb: [0, 0, 0]
+  strength: 0.0
+  transparent: true
+
+- id: top-soil
+  name: Top Soil
+  kind: organic
+  colorRgb: [85, 128, 43]
+  strength: 1.0
+  walkable: true
+  diggable: true
+  paintable: true
+
+- id: sub-soil
+  name: Sub Soil
+  kind: terrain
+  colorRgb: [120, 80, 50]
+  strength: 1.2
+  walkable: true
+  diggable: true
+  paintable: true
+
+- id: rock
+  name: Rock
+  kind: rock
+  colorRgb: [128, 128, 128]
+  strength: 5.0
+  walkable: true
+  diggable: true
+  paintable: true
+
+- id: bedrock
+  name: Bedrock
+  kind: rock
+  colorRgb: [64, 64, 64]
+  strength: 100.0
+  walkable: true
+  diggable: false
+  paintable: false
+
+- id: sand
+  name: Sand
+  kind: terrain
+  colorRgb: [220, 200, 140]
+  strength: 0.8
+  walkable: true
+  diggable: true
+  paintable: true
+
+- id: clay
+  name: Clay
+  kind: terrain
+  colorRgb: [180, 110, 80]
+  strength: 1.5
+  walkable: true
+  diggable: true
+  paintable: true
+
+- id: water
+  name: Water
+  kind: water
+  colorRgb: [0, 100, 200]
+  strength: 0.1
+  walkable: true
+  diggable: false
+  paintable: false
+  transparent: true
+
+- id: snow
+  name: Snow
+  kind: organic
+  colorRgb: [240, 240, 250]
+  strength: 0.5
+  walkable: true
+  diggable: true
+  paintable: true
+
+- id: lava
+  name: Lava
+  kind: terrain
+  colorRgb: [255, 60, 0]
+  strength: 10.0
+  walkable: false
+  diggable: false
+  paintable: false
+
+- id: debug-error
+  name: Debug Error
+  kind: debug
+  colorRgb: [255, 0, 255]
+  strength: 0.0
+
+- id: debug-locked-border
+  name: Debug Locked Border
+  kind: debug
+  colorRgb: [255, 255, 0]
+  strength: 0.0
