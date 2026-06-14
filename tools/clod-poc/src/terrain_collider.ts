@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { MeshBVH } from "three-mesh-bvh";
+import type { PageMesh } from "./types.js";
 
 export interface TerrainColliderFootprint {
   minX: number;
@@ -10,7 +11,8 @@ export interface TerrainColliderFootprint {
 
 export interface TerrainColliderPage {
   id: string;
-  geometry: THREE.BufferGeometry;
+  geometry?: THREE.BufferGeometry;
+  mesh?: PageMesh;
   footprint: TerrainColliderFootprint;
 }
 
@@ -42,11 +44,14 @@ export interface CapsuleCollisionResult {
 interface ColliderEntry {
   id: string;
   footprint: TerrainColliderFootprint;
-  geometry: THREE.BufferGeometry;
-  boundsTree: MeshBVH;
+  sourceGeometry: THREE.BufferGeometry | null;
+  sourceMesh: PageMesh | null;
+  geometry: THREE.BufferGeometry | null;
+  boundsTree: MeshBVH | null;
 }
 
 const tempBox = new THREE.Box3();
+const tempRayBox = new THREE.Box3();
 const tempSegment = new THREE.Line3();
 const trianglePoint = new THREE.Vector3();
 const capsulePoint = new THREE.Vector3();
@@ -60,20 +65,48 @@ function overlapsFootprint(box: THREE.Box3, footprint: TerrainColliderFootprint)
     && box.min.z <= footprint.maxZ;
 }
 
+function geometryFromPageMesh(mesh: PageMesh): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
+  geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+  return geometry;
+}
+
+function rayCanHitFootprint(ray: THREE.Ray, footprint: TerrainColliderFootprint): boolean {
+  tempRayBox.min.set(footprint.minX, -10000, footprint.minZ);
+  tempRayBox.max.set(footprint.maxX, 10000, footprint.maxZ);
+  return ray.intersectsBox(tempRayBox);
+}
+
 export class TerrainColliderSet {
   private readonly entries: ColliderEntry[];
 
   constructor(pages: readonly TerrainColliderPage[]) {
     this.entries = pages.map((page) => {
-      const geometry = page.geometry.clone();
-      geometry.computeBoundingBox();
+      if (!page.geometry && !page.mesh) throw new Error(`Collider page ${page.id} needs geometry or mesh source`);
       return {
         id: page.id,
         footprint: page.footprint,
-        geometry,
-        boundsTree: new MeshBVH(geometry),
+        sourceGeometry: page.geometry?.clone() ?? null,
+        sourceMesh: page.mesh ?? null,
+        geometry: null,
+        boundsTree: null,
       };
     });
+  }
+
+  loadedPageCount(): number {
+    return this.entries.filter((entry) => entry.boundsTree !== null).length;
+  }
+
+  private ensureEntry(entry: ColliderEntry): MeshBVH {
+    if (entry.boundsTree) return entry.boundsTree;
+    const geometry = entry.sourceGeometry?.clone() ?? (entry.sourceMesh ? geometryFromPageMesh(entry.sourceMesh) : null);
+    if (!geometry) throw new Error(`Collider page ${entry.id} has no source geometry`);
+    geometry.computeBoundingBox();
+    entry.geometry = geometry;
+    entry.boundsTree = new MeshBVH(geometry);
+    return entry.boundsTree;
   }
 
   raycastSpawn(ray: THREE.Ray): TerrainSpawnHit | null {
@@ -81,7 +114,8 @@ export class TerrainColliderSet {
     let nearestDistance = Number.POSITIVE_INFINITY;
 
     for (const entry of this.entries) {
-      const hit = entry.boundsTree.raycastFirst(ray, THREE.DoubleSide);
+      if (!rayCanHitFootprint(ray, entry.footprint)) continue;
+      const hit = this.ensureEntry(entry).raycastFirst(ray, THREE.DoubleSide);
       if (!hit || hit.distance >= nearestDistance || !hit.face) continue;
 
       const normal = hit.face.normal.clone().normalize();
@@ -103,7 +137,8 @@ export class TerrainColliderSet {
   raycastSurface(ray: THREE.Ray): TerrainSurfaceHit | null {
     let nearest: TerrainSurfaceHit | null = null;
     for (const entry of this.entries) {
-      const hit = entry.boundsTree.raycastFirst(ray, THREE.DoubleSide);
+      if (!rayCanHitFootprint(ray, entry.footprint)) continue;
+      const hit = this.ensureEntry(entry).raycastFirst(ray, THREE.DoubleSide);
       if (!hit) continue;
       if (!nearest || hit.distance < nearest.distance) {
         nearest = { point: hit.point.clone(), distance: hit.distance, pageId: entry.id };
@@ -113,13 +148,22 @@ export class TerrainColliderSet {
   }
 
   /** Replace one page's collision geometry (after a terrain edit) and rebuild its BVH. */
-  updatePage(id: string, geometry: THREE.BufferGeometry): boolean {
+  updatePage(id: string, source: THREE.BufferGeometry | PageMesh): boolean {
     const entry = this.entries.find((e) => e.id === id);
     if (!entry) return false;
-    entry.geometry.dispose();
-    entry.geometry = geometry.clone();
-    entry.geometry.computeBoundingBox();
-    entry.boundsTree = new MeshBVH(entry.geometry);
+    const wasLoaded = entry.boundsTree !== null;
+    entry.geometry?.dispose();
+    entry.sourceGeometry?.dispose();
+    entry.geometry = null;
+    entry.boundsTree = null;
+    if (source instanceof THREE.BufferGeometry) {
+      entry.sourceGeometry = source.clone();
+      entry.sourceMesh = null;
+    } else {
+      entry.sourceGeometry = null;
+      entry.sourceMesh = source;
+    }
+    if (wasLoaded) this.ensureEntry(entry);
     return true;
   }
 
@@ -144,7 +188,7 @@ export class TerrainColliderSet {
     for (const entry of this.entries) {
       if (!overlapsFootprint(tempBox, entry.footprint)) continue;
       pagesTested++;
-      entry.boundsTree.shapecast({
+      this.ensureEntry(entry).shapecast({
         intersectsBounds: (box) => box.intersectsBox(tempBox),
         intersectsTriangle: (triangle) => {
           const distance = triangle.closestPointToSegment(tempSegment, trianglePoint, capsulePoint);
@@ -187,6 +231,12 @@ export class TerrainColliderSet {
   }
 
   dispose(): void {
-    for (const entry of this.entries) entry.geometry.dispose();
+    for (const entry of this.entries) {
+      entry.geometry?.dispose();
+      entry.sourceGeometry?.dispose();
+      entry.geometry = null;
+      entry.sourceGeometry = null;
+      entry.boundsTree = null;
+    }
   }
 }

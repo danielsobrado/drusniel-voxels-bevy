@@ -18,8 +18,24 @@ export interface WeldResult {
   report: WeldReport;
 }
 
-function quantKey(x: number, y: number, z: number, inv: number): string {
-  return `${Math.round(x * inv)},${Math.round(y * inv)},${Math.round(z * inv)}`;
+type WeldKeyMap = Map<number, Map<number, Map<number, number>>>;
+
+function getCanonical(map: WeldKeyMap, qx: number, qy: number, qz: number): number | undefined {
+  return map.get(qx)?.get(qy)?.get(qz);
+}
+
+function setCanonical(map: WeldKeyMap, qx: number, qy: number, qz: number, value: number): void {
+  let yz = map.get(qx);
+  if (!yz) {
+    yz = new Map();
+    map.set(qx, yz);
+  }
+  let z = yz.get(qy);
+  if (!z) {
+    z = new Map();
+    yz.set(qy, z);
+  }
+  z.set(qz, value);
 }
 
 export function weldVertices(mesh: PageMesh, epsilon: number): WeldResult {
@@ -27,7 +43,7 @@ export function weldVertices(mesh: PageMesh, epsilon: number): WeldResult {
   const inv = 1 / epsilon;
   const tol = DEFAULT_TOLERANCES;
 
-  const canonical = new Map<string, number>(); // quant key -> canonical NEW index
+  const canonical: WeldKeyMap = new Map(); // quantized xyz -> canonical NEW index
   const remap = new Uint32Array(n); // old index -> new index
   const pos: number[] = [];
   const nrm: number[] = [];
@@ -35,11 +51,11 @@ export function weldVertices(mesh: PageMesh, epsilon: number): WeldResult {
 
   for (let i = 0; i < n; i++) {
     const px = mesh.positions[i * 3], py = mesh.positions[i * 3 + 1], pz = mesh.positions[i * 3 + 2];
-    const key = quantKey(px, py, pz, inv);
-    const found = canonical.get(key);
+    const qx = Math.round(px * inv), qy = Math.round(py * inv), qz = Math.round(pz * inv);
+    const found = getCanonical(canonical, qx, qy, qz);
     if (found === undefined) {
       const ni = pos.length / 3;
-      canonical.set(key, ni);
+      setCanonical(canonical, qx, qy, qz, ni);
       remap[i] = ni;
       pos.push(px, py, pz);
       nrm.push(mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]);

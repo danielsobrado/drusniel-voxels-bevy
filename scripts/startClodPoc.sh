@@ -1,18 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if command -v rtk >/dev/null 2>&1; then
-  rtk_cmd=(rtk)
-elif [[ -x /mnt/c/RTK/rtk.exe ]]; then
-  rtk_cmd=(/mnt/c/RTK/rtk.exe)
-else
-  echo "Could not find rtk or /mnt/c/RTK/rtk.exe." >&2
-  exit 1
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 poc_dir="$repo_root/tools/clod-poc"
-url="http://127.0.0.1:5173/drusniel-voxels-bevy/"
+base_path="/drusniel-voxels-bevy/"
+port=5173
 skip_build=0
 open_browser=1
 
@@ -38,20 +30,53 @@ if [[ ! -f "$poc_dir/package.json" ]]; then
   echo "Could not find tools/clod-poc/package.json from $repo_root" >&2
   exit 1
 fi
+if ! command -v npm >/dev/null 2>&1; then
+  echo "Could not find npm in WSL. Install Node.js/npm in WSL, not only Windows." >&2
+  exit 1
+fi
+if ! command -v curl >/dev/null 2>&1; then
+  echo "Could not find curl in WSL." >&2
+  exit 1
+fi
 
 cd "$poc_dir"
 if [[ ! -d node_modules ]]; then
   echo "Installing CLOD PoC dependencies..."
-  "${rtk_cmd[@]}" npm install
+  npm install
 fi
+
+node_major="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)"
+if [[ "$node_major" -ge 20 ]]; then
+  node_cmd=(node)
+else
+  if ! command -v npx >/dev/null 2>&1; then
+    echo "CLOD PoC needs Node 20+, and npx is unavailable to run node@20." >&2
+    exit 1
+  fi
+  echo "Using node@20 via npx because local node is $(node --version 2>/dev/null || echo missing)."
+  node_cmd=(npx -y node@20)
+fi
+
+port_in_use() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "sport = :$1" | grep -q LISTEN
+  else
+    (echo >/dev/tcp/127.0.0.1/"$1") >/dev/null 2>&1
+  fi
+}
+
+while port_in_use "$port"; do
+  port=$((port + 1))
+done
+url="http://127.0.0.1:${port}${base_path}"
 
 if [[ "$skip_build" -eq 0 ]]; then
   echo "Building CLOD PoC..."
-  "${rtk_cmd[@]}" npm run build
+  "${node_cmd[@]}" node_modules/vite/bin/vite.js build
 fi
 
 echo "Starting CLOD PoC at $url"
-"${rtk_cmd[@]}" npm run dev -- --host 0.0.0.0 &
+"${node_cmd[@]}" node_modules/vite/bin/vite.js --host 0.0.0.0 --port "$port" --strictPort &
 server_pid=$!
 cleanup() {
   kill "$server_pid" >/dev/null 2>&1 || true
@@ -65,7 +90,7 @@ for _ in {1..120}; do
     echo "Vite exited before the viewer became ready." >&2
     exit 1
   fi
-  if "${rtk_cmd[@]}" curl -fsS "$url" >/dev/null 2>&1; then
+  if curl -fsS "$url" >/dev/null 2>&1; then
     ready=1
     break
   fi

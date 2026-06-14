@@ -125,14 +125,56 @@ export function selectCut(
   return { rendered: finalRendered, state: { split: newSplit }, forcedSplits, nearFieldForcedSplits };
 }
 
-/** Two footprints share an edge (touch on a side with overlapping perpendicular range). */
-function adjacent(a: ClodPageNode, b: ClodPageNode): boolean {
-  const fa = a.footprint, fb = b.footprint;
-  const overlapZ = fa.minZ < fb.maxZ && fb.minZ < fa.maxZ;
-  const overlapX = fa.minX < fb.maxX && fb.minX < fa.maxX;
-  const touchX = (fa.maxX === fb.minX || fb.maxX === fa.minX) && overlapZ;
-  const touchZ = (fa.maxZ === fb.minZ || fb.maxZ === fa.minZ) && overlapX;
-  return touchX || touchZ;
+interface EdgeEntry {
+  node: ClodPageNode;
+  side: -1 | 1;
+  start: number;
+  end: number;
+}
+
+function addEdge(index: Map<number, EdgeEntry[]>, plane: number, entry: EdgeEntry): void {
+  let entries = index.get(plane);
+  if (!entries) {
+    entries = [];
+    index.set(plane, entries);
+  }
+  entries.push(entry);
+}
+
+function find21Violation(nodes: readonly ClodPageNode[]): ClodPageNode | null {
+  const xEdges = new Map<number, EdgeEntry[]>();
+  const zEdges = new Map<number, EdgeEntry[]>();
+  for (const node of nodes) {
+    const f = node.footprint;
+    addEdge(xEdges, f.minX, { node, side: -1, start: f.minZ, end: f.maxZ });
+    addEdge(xEdges, f.maxX, { node, side: 1, start: f.minZ, end: f.maxZ });
+    addEdge(zEdges, f.minZ, { node, side: -1, start: f.minX, end: f.maxX });
+    addEdge(zEdges, f.maxZ, { node, side: 1, start: f.minX, end: f.maxX });
+  }
+
+  const scan = (entries: EdgeEntry[]): ClodPageNode | null => {
+    entries.sort((a, b) => a.start - b.start || a.end - b.end);
+    for (let i = 0; i < entries.length; i++) {
+      const a = entries[i];
+      for (let j = i + 1; j < entries.length && entries[j].start < a.end; j++) {
+        const b = entries[j];
+        if (a.side === b.side || b.end <= a.start || Math.abs(a.node.level - b.node.level) <= 1) continue;
+        const coarser = a.node.level > b.node.level ? a.node : b.node;
+        if (kids(coarser).length > 0) return coarser;
+      }
+    }
+    return null;
+  };
+
+  for (const entries of xEdges.values()) {
+    const violation = scan(entries);
+    if (violation) return violation;
+  }
+  for (const entries of zEdges.values()) {
+    const violation = scan(entries);
+    if (violation) return violation;
+  }
+  return null;
 }
 
 /**
@@ -147,22 +189,12 @@ function enforce21(
 ): ClodPageNode[] {
   let work = [...rendered];
   for (let guard = 0; guard < 64; guard++) {
-    let didSplit = false;
-    outer: for (let i = 0; i < work.length; i++) {
-      for (let j = i + 1; j < work.length; j++) {
-        const a = work[i], b = work[j];
-        if (Math.abs(a.level - b.level) <= 1 || !adjacent(a, b)) continue;
-        const coarser = a.level > b.level ? a : b;
-        const children = kids(coarser);
-        if (children.length === 0) continue; // can't refine further
-        split.add(coarser.id);
-        onSplit();
-        work = work.filter((n) => n !== coarser).concat(children);
-        didSplit = true;
-        break outer;
-      }
-    }
-    if (!didSplit) break;
+    const coarser = find21Violation(work);
+    if (!coarser) break;
+    const children = kids(coarser);
+    split.add(coarser.id);
+    onSplit();
+    work = work.filter((n) => n !== coarser).concat(children);
   }
   return work;
 }

@@ -8,14 +8,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import GUI from "lil-gui";
 import { parseConfig } from "./config.js";
 import configText from "../../../config/clod_pages.yaml?raw";
-import { initSimplifier } from "./simplify.js";
-import {
-  buildNodeIndex,
-  buildWorldAsync,
-  rebuildDirtyLod0Pages,
-  resimplifyParent,
-  type NodeIndex,
-} from "./quadtree.js";
+import { ClodWorkerClient } from "./clod_worker_client.js";
 import { emitAudio, setAudioEnabled, setMasterVolume, getAudioState } from "./audio/index.js";
 import {
   addDigEdit,
@@ -142,23 +135,36 @@ const BUILTIN_TERRAIN_TEXTURES = [
 const TEXTURE_BLEND_MODES = ["hard bands", "blend bands"] as const;
 const TERRAIN_BAND_ICONS = ["grass", "earth", "rock", "snow"] as const;
 
+interface PaintAttributeCache {
+  slots: Float32Array;
+  weights: Float32Array;
+}
+
+const paintAttributeCache = new WeakMap<PageMesh, PaintAttributeCache>();
+
+function paintAttributesFor(mesh: PageMesh): PaintAttributeCache {
+  const cached = paintAttributeCache.get(mesh);
+  if (cached) return cached;
+  const vertexCount = mesh.positions.length / 3;
+  const slots = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
+  const weights = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
+  for (let i = 0; i < vertexCount; i++) {
+    const p = paintWeightsAt(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]);
+    for (let c = 0; c < PAINT_BLEND_CHANNELS; c++) {
+      slots[i * PAINT_BLEND_CHANNELS + c] = p.slots[c];
+      weights[i * PAINT_BLEND_CHANNELS + c] = p.weights[c];
+    }
+  }
+  const built = { slots, weights };
+  paintAttributeCache.set(mesh, built);
+  return built;
+}
+
 function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
   g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
-  // Painted-material blend, recomputed from vertex positions (a pure function of the edit
-  // list). Done here rather than carried through the simplifier because slot indices can't
-  // be linearly interpolated/decimated; positions can, and the blend is exact off them.
-  const vertexCount = mesh.positions.length / 3;
-  const paintSlots = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
-  const paintWeights = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
-  for (let i = 0; i < vertexCount; i++) {
-    const p = paintWeightsAt(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]);
-    for (let c = 0; c < PAINT_BLEND_CHANNELS; c++) {
-      paintSlots[i * PAINT_BLEND_CHANNELS + c] = p.slots[c];
-      paintWeights[i * PAINT_BLEND_CHANNELS + c] = p.weights[c];
-    }
-  }
+  const { slots: paintSlots, weights: paintWeights } = paintAttributesFor(mesh);
   g.setAttribute("paintSlots", new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS));
   g.setAttribute("paintWeights", new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS));
   g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
@@ -175,12 +181,17 @@ function computeGeometryNormals(mesh: PageMesh): Float32Array {
   return normals;
 }
 
+function recomputedNormalsFor(view: NodeView): Float32Array {
+  if (!view.recomputedNormals) view.recomputedNormals = computeGeometryNormals(view.node.mesh);
+  return view.recomputedNormals;
+}
+
 interface NodeView {
   node: ClodPageNode;
   mesh: THREE.Mesh;
   mat: THREE.ShaderMaterial;
   sourceNormals: Float32Array;
-  recomputedNormals: Float32Array;
+  recomputedNormals: Float32Array | null;
   fade: number; // current crossfade value
   target: number; // 0 or 1
 }
@@ -346,6 +357,7 @@ async function main() {
   setButtonIcon(orbitModeButton, "camera", "orbit", "Orbit");
   setButtonIcon(playerModeButton, "camera", "player", "Player");
   const searchParams = new URLSearchParams(location.search);
+  const queryPerfMode = searchParams.get("clodPerf") === "1";
   const importToken = searchParams.get("import");
   let stagedImport: ProjectArchiveContents | null = null;
   if (importToken) {
@@ -367,7 +379,11 @@ async function main() {
     }
   }
   const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
-  await initSimplifier();
+  const clodWorker = new ClodWorkerClient();
+  clodWorker.onError = (error) => {
+    emitAudio("clod.rebuild.error");
+    console.error("[clod worker]", error);
+  };
 
   // World size via ?world=. 8x8 gives full LOD0..LOD3 depth for A3 / delta-2-3
   // inspection; 16/32 keep the same max LOD with more roots and can freeze the tab longer.
@@ -387,8 +403,8 @@ async function main() {
   updateBuildOverlay();
   if (stagedImport) replaceDigEdits(stagedImport.manifest.terrainEdits);
   const buildNote =
-    WORLD >= 16 ? " (large build, tab will freeze longer)" :
-    WORLD >= 8 ? " (~8s, tab will freeze)" :
+    WORLD >= 16 ? " (worker build; large world may take a while)" :
+    WORLD >= 8 ? " (worker build)" :
     "";
   info.textContent = `building ${WORLD}x${WORLD} world…${buildNote}`;
   buildProgress.hidden = false;
@@ -398,7 +414,7 @@ async function main() {
   buildStatus = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
   updateBuildOverlay();
   await new Promise((r) => setTimeout(r, 16));
-  const result = await buildWorldAsync(WORLD, WORLD, cfg, ({ done, total, level, phase }) => {
+  const result = await clodWorker.buildWorld(WORLD, WORLD, cfg, getDigEditsSnapshot(), ({ done, total, level, phase }) => {
     const fraction = total > 0 ? Math.min(1, done / total) : 0;
     buildProgressBar.value = fraction;
     buildProgressPercent.textContent = `${Math.floor(fraction * 100)}%`;
@@ -437,11 +453,10 @@ async function main() {
     .filter((node) => node.level === 0)
     .map((node) => ({
       id: node.id,
-      geometry: toGeometry(node.mesh),
+      mesh: node.mesh,
       footprint: node.footprint,
     }));
   const terrainColliders = new TerrainColliderSet(colliderPages);
-  for (const page of colliderPages) page.geometry.dispose();
   const player = new PlayerController(terrainColliders, {
     minX: 0,
     minZ: 0,
@@ -675,6 +690,7 @@ async function main() {
   updatePlayerModeUi();
 
   const state = {
+    clodPerfMode: queryPerfMode,
     thresholdPx: cfg.selection.error_threshold_px,
     enforce21: true,
     freeze: false,
@@ -684,7 +700,7 @@ async function main() {
     showCrossLodBorders: false,
     showNodeLabels: false,
     showLockedBorderVertices: false,
-    colorByLod: false,
+    colorByLod: queryPerfMode,
     normalColor: false,
     normalDivergence: false,
     divergenceGain: 8,
@@ -692,8 +708,8 @@ async function main() {
     recomputedNormals: false,
     forceMaxLevel: "auto",
     textureScale: 1,
-    triplanar: true,
-    albedo: true,
+    triplanar: !queryPerfMode,
+    albedo: !queryPerfMode,
     normalMap: false,
     normalIntensity: 1,
     roughness: 0.9,
@@ -715,7 +731,7 @@ async function main() {
     sunDiskIntensity: DEFAULT_ENVIRONMENT_SETTINGS.sunDiskIntensity,
     sunGlowIntensity: DEFAULT_ENVIRONMENT_SETTINGS.sunGlowIntensity,
     hazeIntensity: DEFAULT_ENVIRONMENT_SETTINGS.hazeIntensity,
-    postProcessEnabled: DEFAULT_POST_PROCESS_SETTINGS.enabled,
+    postProcessEnabled: queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.enabled,
     postProcessOpacity: DEFAULT_POST_PROCESS_SETTINGS.opacity,
     postProcessExposure: DEFAULT_POST_PROCESS_SETTINGS.exposure,
     postProcessContrast: DEFAULT_POST_PROCESS_SETTINGS.contrast,
@@ -736,7 +752,7 @@ async function main() {
     brushFlowMs: DIG_HOLD_INTERVAL_MS,
     audioEnabled: getAudioState().enabled,
     audioVolume: getAudioState().masterVolume,
-    grassEnabled: DEFAULT_GRASS_SETTINGS.enabled,
+    grassEnabled: queryPerfMode ? false : DEFAULT_GRASS_SETTINGS.enabled,
     grassDistance: DEFAULT_GRASS_SETTINGS.distance,
     grassBladeSpacing: DEFAULT_GRASS_SETTINGS.bladeSpacing,
     grassBladeHeight: DEFAULT_GRASS_SETTINGS.bladeHeight,
@@ -752,6 +768,22 @@ async function main() {
     grassBladeCount: 0,
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
+  if (queryPerfMode) {
+    state.clodPerfMode = true;
+    state.colorByLod = true;
+    state.albedo = false;
+    state.normalMap = false;
+    state.triplanar = false;
+    state.postProcessEnabled = false;
+    state.postProcessDebugMode = "off";
+    state.bubble = false;
+    state.showBounds = false;
+    state.showSeamPoints = false;
+    state.showCrossLodBorders = false;
+    state.showNodeLabels = false;
+    state.showLockedBorderVertices = false;
+    state.grassEnabled = false;
+  }
   let colorByLodUserOverride = stagedImport !== null;
   let lastTexturesActive: boolean | null = null;
   let colorByLodController: { updateDisplay: () => unknown } | null = null;
@@ -791,6 +823,7 @@ async function main() {
     settings: currentEnvironmentSettings(),
     colors: DEFAULT_ENVIRONMENT_COLORS,
   });
+  skyEnvironment.setVisible(!state.clodPerfMode);
   const applyLightingToMaterial = (
     mat: THREE.ShaderMaterial,
     lighting: EnvironmentLighting = skyEnvironment.lighting(),
@@ -949,7 +982,7 @@ async function main() {
       mesh,
       mat,
       sourceNormals: node.mesh.normals,
-      recomputedNormals: computeGeometryNormals(node.mesh),
+      recomputedNormals: null,
       fade: 0,
       target: 0,
     });
@@ -1171,6 +1204,8 @@ async function main() {
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
       `${polishLine}\n` +
+      `worker: parents pending=${pendingParentCount} rebuilt=${pendingParentNodes} ${pendingParentMs.toFixed(0)}ms   ` +
+      `colliders loaded=${terrainColliders.loadedPageCount()}${state.clodPerfMode ? "   CLOD PERF" : ""}\n` +
       `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassBladeCount.toLocaleString()} blades\n` +
       `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
       `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
@@ -1242,16 +1277,14 @@ async function main() {
       v.mesh.geometry.dispose();
       v.mesh.geometry = toGeometry(node.mesh);
       v.sourceNormals = node.mesh.normals;
-      v.recomputedNormals = computeGeometryNormals(node.mesh);
+      v.recomputedNormals = null;
       if (state.recomputedNormals) {
-        v.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(v.recomputedNormals, 3));
+        v.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(v), 3));
       }
     }
     if (node.level !== 0) return 0;
     const tc = performance.now();
-    const g = toGeometry(node.mesh);
-    terrainColliders.updatePage(node.id, g);
-    g.dispose();
+    terrainColliders.updatePage(node.id, node.mesh);
     // drop the cached raw-chunk bubble meshes; they regenerate lazily when owned
     const chunkEntry = chunkGroups.get(node.id);
     if (chunkEntry) {
@@ -1263,108 +1296,67 @@ async function main() {
     return performance.now() - tc;
   };
 
-  // Deferred ancestor re-simplification. Each dig applies its LOD0 pages immediately
-  // (that's the surface you're looking at), then queues the LOD1+ ancestor chain here.
-  // The animate loop drains it under a per-frame time budget so the tab keeps rendering
-  // instead of freezing for the full edit. Processed strictly lowest-level-first, so
-  // every parent re-merges from already-rebuilt children — same invariant as a full build.
-  const ancestorIndex: NodeIndex = buildNodeIndex(result);
-  const topLevel = Math.max(...result.nodesByLevel.keys());
-  const pendingByLevel = new Map<number, Set<string>>();
   let pendingParentNodes = 0;
   let pendingParentMs = 0;
-  const DRAIN_BUDGET_MS = 8;
+  let pendingParentCount = 0;
 
-  const enqueueParent = (level: number, nx: number, nz: number) => {
-    if (level > topLevel) return;
-    let s = pendingByLevel.get(level);
-    if (!s) { s = new Set(); pendingByLevel.set(level, s); }
-    s.add(`${nx},${nz}`);
+  clodWorker.onParentRebuilt = (batch) => {
+    for (const node of batch.changed) applyNodeMesh(node);
+    pendingParentNodes = batch.parentNodes;
+    pendingParentMs = batch.parentMs;
+    pendingParentCount = batch.pendingParents;
+    lastCutKey = "";
+    lastDebugKey = "";
+    if (!state.freeze) updateSelection();
+    updateInfo();
+  };
+  clodWorker.onParentsComplete = (_requestId, parentNodes, parentMs) => {
+    pendingParentNodes = parentNodes;
+    pendingParentMs = parentMs;
+    pendingParentCount = 0;
+    if (parentNodes > 0) {
+      lastDigSummary = `${lastDigSummary} + ancestors ${parentNodes}n ${parentMs.toFixed(0)}ms`;
+    }
+    updateSelection();
+    updateInfo();
   };
 
-  const drainAncestors = () => {
-    let lowest = -1;
-    for (let L = 1; L <= topLevel; L++) {
-      if ((pendingByLevel.get(L)?.size ?? 0) > 0) { lowest = L; break; }
-    }
-    if (lowest === -1) return;
-    const start = performance.now();
-    let changed = false;
-    try {
-      do {
-        let level = -1;
-        for (let L = 1; L <= topLevel; L++) {
-          if ((pendingByLevel.get(L)?.size ?? 0) > 0) { level = L; break; }
-        }
-        if (level === -1) break;
-        const set = pendingByLevel.get(level)!;
-        const key = set.values().next().value as string;
-        set.delete(key);
-        const t = performance.now();
-        const node = resimplifyParent(ancestorIndex, level, key, cfg);
-        pendingParentMs += performance.now() - t;
-        if (node) {
-          applyNodeMesh(node);
-          pendingParentNodes++;
-          changed = true;
-          const [nx, nz] = key.split(",").map(Number);
-          enqueueParent(level + 1, nx >> 1, nz >> 1);
-        }
-      } while (performance.now() - start < DRAIN_BUDGET_MS);
-
-      const draining = [...pendingByLevel.values()].some((s) => s.size > 0);
-      if (changed) {
-        lastCutKey = "";
-        lastDebugKey = "";
-        if (!draining) {
-          // ancestors settled: fold their cost into the dig summary and refresh selection
-          lastDigSummary =
-            `${lastDigSummary} + ancestors ${pendingParentNodes}n ${pendingParentMs.toFixed(0)}ms`;
-          updateSelection();
-          updateInfo();
-          // No completion chime here: it doubled up with the dig/raise sound on every edit.
-        }
-      }
-    } catch (error) {
-      emitAudio("clod.rebuild.error");
-      if (error instanceof Error && error.name === "ClodBuildError") {
-        emitAudio("clod.validation.error");
-      }
-      throw error;
-    }
-  };
-
-  const flushAncestors = () => {
-    while ([...pendingByLevel.values()].some((pending) => pending.size > 0)) drainAncestors();
+  const flushAncestors = async () => {
+    await clodWorker.flushParents();
   };
 
   // Carve a sphere where the ray hits, then pay the CLOD edit cost. The LOD0 pages
   // (the surface you're looking at) plus their colliders rebuild synchronously so the
   // hole appears now; the LOD1+ ancestor chain is queued for the per-frame drain above.
   // The timing breakdown lands in the overlay + console — that's the experiment.
-  const performDig = (ray: THREE.Ray) => {
+  let digRebuildsInFlight = 0;
+  const performDig = async (ray: THREE.Ray) => {
+    if (digRebuildsInFlight > 0) return;
     const hit = terrainColliders.raycastSurface(ray);
     if (!hit) return;
     const radius = state.digRadius;
-    addDigEdit({
+    const edit = {
       x: hit.point.x, y: hit.point.y, z: hit.point.z, r: radius,
       shape: state.brushShape, op: state.brushOp,
       material: state.brushOp === "add" ? state.brushMaterial : undefined,
       height: state.brushHeight, strength: state.brushStrength, falloff: state.brushFalloff,
-    });
+    };
+    addDigEdit(edit);
 
     // One relevant terrain sound per edit: earthy "dig" for remove, "raise" for add.
     emitAudio(state.brushOp === "add" ? "terrain.raise" : "terrain.dig.tick");
 
     const t0 = performance.now();
     const margin = radius + DIG_INFLUENCE_MARGIN;
+    lastDigAt = t0;
+    digRebuildsInFlight++;
     try {
-      const lod0 = rebuildDirtyLod0Pages(result, {
+      const lod0 = await clodWorker.rebuildAfterDig(edit, {
         minX: hit.point.x - margin,
         maxX: hit.point.x + margin,
         minZ: hit.point.z - margin,
         maxZ: hit.point.z + margin,
-      }, cfg, ancestorIndex);
+      });
 
       let colliderMs = 0;
       for (const node of lod0.changed) colliderMs += applyNodeMesh(node);
@@ -1373,19 +1365,17 @@ async function main() {
         state.grassBladeCount = grassSystem.getBladeCount();
         grassBladeCountController?.updateDisplay();
       }
-      // seed the deferred ancestor chain from the dug LOD0 pages
       pendingParentNodes = 0;
       pendingParentMs = 0;
-      for (const [nx, nz] of lod0.dirtyCoords) enqueueParent(1, nx >> 1, nz >> 1);
+      pendingParentCount = lod0.pendingParents;
 
       const totalMs = performance.now() - t0;
       lastDigSummary =
-        `${totalMs.toFixed(0)}ms now (LOD0 ${lod0.lod0Pages}p ${lod0.lod0Ms.toFixed(0)}ms · ` +
+        `${totalMs.toFixed(0)}ms worker LOD0 (build ${lod0.lod0Ms.toFixed(0)}ms · ${lod0.lod0Pages}p · ` +
         `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · collider ${colliderMs.toFixed(0)}ms)`;
       console.log(
-        `[${state.brushOp} ${state.brushShape} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ancestors deferred`,
+        `[${state.brushOp} ${state.brushShape} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ${pendingParentCount} ancestors queued in worker`,
       );
-      lastDigAt = performance.now();
       lastCutKey = "";
       lastDebugKey = "";
       updateSelection();
@@ -1396,6 +1386,8 @@ async function main() {
         emitAudio("clod.validation.error");
       }
       throw error;
+    } finally {
+      digRebuildsInFlight--;
     }
   };
 
@@ -1421,13 +1413,53 @@ async function main() {
     }
   };
 
+  const setPerfModeQuery = (enabled: boolean) => {
+    const next = new URLSearchParams(location.search);
+    if (enabled) next.set("clodPerf", "1");
+    else next.delete("clodPerf");
+    history.replaceState(null, "", `${location.pathname}${next.toString() ? `?${next.toString()}` : ""}${location.hash}`);
+  };
+  const applyClodPerfMode = (enabled: boolean) => {
+    state.clodPerfMode = enabled;
+    if (enabled) {
+      state.colorByLod = true;
+      state.albedo = false;
+      state.normalMap = false;
+      state.triplanar = false;
+      state.postProcessEnabled = false;
+      state.postProcessDebugMode = "off";
+      state.bubble = false;
+      state.showBounds = false;
+      state.showSeamPoints = false;
+      state.showCrossLodBorders = false;
+      state.showNodeLabels = false;
+      state.showLockedBorderVertices = false;
+      state.grassEnabled = false;
+      colorByLodUserOverride = true;
+      applyColorByLodToMaterials(true);
+      nodeLabelOverlay.setVisible(false);
+      lockedBorderOverlay.rebuild(lastRenderedNodes, false);
+      grassSystem.setEnabled(false);
+      postProcess.updateSettings(currentPostProcessSettings());
+      applyTerrainTextures();
+    }
+    skyEnvironment.setVisible(!enabled);
+    setPerfModeQuery(enabled);
+    lastDebugKey = "";
+    updateSelection();
+    updateInfo();
+  };
+
   const gui = new GUI();
   gui
     .add({ world: String(WORLD) }, "world", WORLD_OPTIONS.map(String))
     .name("world size (reloads)")
     .onChange((w: string) => {
-      location.search = `?world=${w}`;
+      const next = new URLSearchParams(location.search);
+      next.set("world", w);
+      location.search = `?${next.toString()}`;
     });
+  gui.add(state, "clodPerfMode").name("CLOD perf mode").onChange(applyClodPerfMode);
   gui.add(state, "thresholdPx", 0.1, 6, 0.05).name("error threshold px").onChange(updateSelection);
   gui.add(state, "forceMaxLevel", ["auto", "0", "1", "2", "3"]).name("force max level").onChange(() => {
     selState = { split: new Set() };
@@ -1485,7 +1517,7 @@ async function main() {
   gui.add(state, "recomputedNormals").name("recomputed normals").onChange((on: boolean) => {
     for (const v of views.values()) {
       const g = v.mesh.geometry as THREE.BufferGeometry;
-      g.setAttribute("normal", new THREE.BufferAttribute(on ? v.recomputedNormals : v.sourceNormals, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(on ? recomputedNormalsFor(v) : v.sourceNormals, 3));
       g.attributes.normal.needsUpdate = true;
     }
   });
@@ -2264,7 +2296,7 @@ async function main() {
         imported.normalPath.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin",
       );
     }
-  } else {
+  } else if (!state.clodPerfMode) {
     await loadBuiltinTextureSlots(
       DEFAULT_TERRAIN_TEXTURE_PRESETS.map((preset, index) => ({
         index,
@@ -2273,6 +2305,8 @@ async function main() {
       })),
       "loading textures",
     );
+  } else {
+    state.loadedTextureFiles = "perf mode";
   }
   syncTextureModalControls();
   updateTextureSlotPreviews();
@@ -2755,7 +2789,7 @@ async function main() {
     try {
       setProjectBusy(true, "settling edited LODs", 0.05);
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      flushAncestors();
+      await flushAncestors();
       setProjectBusy(true, "exporting all LOD meshes", 0.25);
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const { exportAllLodsToGlb } = await import("./gltf_export.js");
@@ -2827,7 +2861,7 @@ async function main() {
       state.colorByLod ? LOD_COLORS[Math.min(view.node.level, 3)] : 0xb9c0c8,
     );
     if (state.recomputedNormals) {
-      view.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(view.recomputedNormals, 3));
+      view.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(view), 3));
     }
   }
   applyColorAdjustmentsToTerrain();
@@ -2860,9 +2894,6 @@ async function main() {
     }
     skyEnvironment.updateCamera(camera);
     if (!state.freeze) updateSelection();
-
-    // pay down any deferred ancestor re-simplification from recent digs
-    drainAncestors();
 
     // hold-to-dig pickaxe cadence while playing
     if (
@@ -2988,6 +3019,7 @@ async function main() {
     grassSystem.dispose();
     skyEnvironment.dispose();
     postProcess.dispose();
+    clodWorker.dispose();
   }, { once: true });
 }
 

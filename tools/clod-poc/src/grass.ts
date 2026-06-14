@@ -303,12 +303,15 @@ export class GrassSystem {
     this.lastCenter = new THREE.Vector3(this.worldCells * 0.5, 0, this.worldCells * 0.5);
     this.root.name = "grass";
     this.scene.add(this.root);
-    this.rebuild();
+    this.root.visible = this.settings.enabled;
+    if (this.settings.enabled) this.rebuild();
   }
 
   setEnabled(enabled: boolean): void {
+    const wasEnabled = this.settings.enabled;
     this.settings.enabled = enabled;
     this.root.visible = enabled;
+    if (enabled && !wasEnabled && this.patches.length === 0) this.refreshPatches(this.lastCenter);
   }
 
   updateSettings(settings: Partial<GrassSettings>): void {
@@ -339,7 +342,7 @@ export class GrassSystem {
 
   rebuild(): void {
     this.clearPatches();
-    this.refreshPatches(this.lastCenter);
+    if (this.settings.enabled) this.refreshPatches(this.lastCenter);
     this.root.visible = this.settings.enabled;
   }
 

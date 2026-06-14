@@ -212,6 +212,10 @@ export class SkyEnvironment {
     this.mesh.position.copy(camera.position);
   }
 
+  setVisible(visible: boolean): void {
+    this.mesh.visible = visible;
+  }
+
   lighting(): EnvironmentLighting {
     return {
       sunDirection: sunDirectionFromAngles(this.settings.sunAzimuthDeg, this.settings.sunElevationDeg),
