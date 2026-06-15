@@ -42,7 +42,8 @@ export function simplifyPage(
 
   const vc = vertexCount(mesh);
   const inputIndices = mesh.indices.length;
-  const targetIndices = Math.max(3, Math.floor(inputIndices * cfg.simplify.target_ratio_per_level));
+  const targetRaw = Math.floor(inputIndices * cfg.simplify.target_ratio_per_level);
+  const targetIndices = Math.min(inputIndices, Math.max(3, Math.floor(targetRaw / 3) * 3));
 
   // Interleave attributes: [n0 n1 n2 paintSlot] per vertex, stride 4.
   const ATTR_STRIDE = 4;

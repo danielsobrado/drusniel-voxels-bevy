@@ -165,6 +165,7 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
 
         const merged = concat(children.map((c) => c.mesh));
         const { mesh: welded } = weldVertices(merged, eps);
+        stripDegenerateTriangles(welded);
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
@@ -290,6 +291,7 @@ export async function buildWorldAsync(
 
         const merged = concat(children.map((c) => c.mesh));
         const { mesh: welded } = weldVertices(merged, eps);
+        stripDegenerateTriangles(welded);
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
@@ -457,6 +459,7 @@ export function resimplifyParent(
   const children = node.children.filter((c): c is ClodPageNode => c !== null);
   const merged = concat(children.map((c) => c.mesh));
   const { mesh: welded } = weldVertices(merged, cfg.simplify.weld_epsilon_cells);
+  stripDegenerateTriangles(welded);
   const locks = buildOuterBorderLocks(welded);
   const sim = simplifyPage(welded, locks, cfg);
   stripDegenerateTriangles(sim.mesh);

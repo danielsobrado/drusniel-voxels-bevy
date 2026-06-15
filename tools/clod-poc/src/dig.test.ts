@@ -40,6 +40,27 @@ const cfg: ClodPagesConfig = {
   meshopt_package_version: "0.22.0",
 };
 
+const uiCfg: ClodPagesConfig = {
+  page: { chunks_per_page: 4, chunk_size: 16, halo_chunks: 1, quadtree_levels: 4 },
+  simplify: {
+    target_ratio_per_level: 0.5,
+    abandon_ratio: 0.85,
+    target_error: 0.01,
+    weld_epsilon_cells: 0.001,
+    attribute_weights: { normal: 0.5, material: 1.0 },
+  },
+  polish: { diagonal_flip: DEFAULT_DIAGONAL_FLIP_CONFIG },
+  selection: {
+    error_threshold_px: 1,
+    hysteresis_merge_factor: 1.5,
+    neighbor_level_delta_max: 1,
+    transition_mode: "instant",
+    crossfade_frames: 0,
+  },
+  near_field: { radius_chunks: 6 },
+  meshopt_package_version: "0.22.0",
+};
+
 afterEach(clearDigEdits);
 
 describe("dig edits in the density field", () => {
@@ -232,4 +253,32 @@ describe("rebuildDirtyPages", () => {
     expect(node.mesh.indices).toEqual(full.mesh.indices);
     expect(node.mesh.normals).toEqual(full.mesh.normals);
   });
+
+  it("keeps UI-sized repeated raise edits valid through ancestor rebuilds", () => {
+    const result = buildWorld(4, 4, uiCfg);
+    const edits = [
+      [131.3, 27.3, 104.8],
+      [141.1, 23.9, 107.1],
+      [135.3, 28.5, 94.2],
+      [139.5, 35.9, 92.2],
+      [100.9, 16.9, 203.8],
+      [147.3, 18.0, 146.9],
+      [167.1, 21.2, 87.9],
+      [204.9, 22.6, 100.6],
+      [87.5, 21.3, 158.8],
+    ] as const;
+
+    for (const [x, y, z] of edits) {
+      const r = 6;
+      addDigEdit({ x, y, z, r, shape: "sphere", op: "add", material: 0 });
+      const margin = r + 4;
+      expect(() =>
+        rebuildDirtyPages(
+          result,
+          { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin },
+          uiCfg,
+        ),
+      ).not.toThrow();
+    }
+  }, 20000);
 });
