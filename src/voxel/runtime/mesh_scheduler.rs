@@ -1312,10 +1312,16 @@ pub(crate) fn update_terrain_material_lod(
             bench_toggles,
             *quality_preset,
         );
-        if target_quality == chunk_mesh.material_quality {
-            continue;
+        // Make the live handle match the target quality whenever it differs, not only
+        // when the quality *value* changes. Live terrain is now uniformly FullTriplanar,
+        // so quality never changes after commit; without this, a chunk committed with a
+        // stale/default handle (or left on a debug handle after toggling Alt+F7 off)
+        // would never be corrected and would keep rendering the flat HorizonProxy
+        // fallback even though its quality already reads FullTriplanar.
+        let desired_handle = triplanar_material.handle_for_quality(target_quality);
+        if **material != desired_handle {
+            **material = desired_handle;
         }
-        **material = triplanar_material.handle_for_quality(target_quality);
         chunk_mesh.material_quality = target_quality;
     }
 }
