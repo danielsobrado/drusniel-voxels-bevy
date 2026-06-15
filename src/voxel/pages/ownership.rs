@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
+use super::render::ClodPageMeshTag;
 use super::runtime::ClodPagesRuntime;
 use super::selection::NearFieldBubble;
 use super::selection::{ClodPageNodeKey, clod_near_field_bubble, near_field_intersects_footprint};
@@ -117,10 +118,14 @@ pub(crate) fn chunk_footprint(chunk_pos: IVec3) -> PageFootprint {
 fn live_chunk_hidden_by_clod(
     chunk: PageFootprint,
     bubble: Option<NearFieldBubble>,
-    pending_restore: bool,
+    page_covers: bool,
 ) -> bool {
-    pending_restore
-        || bubble
+    // Only hand a live chunk over to the pages when a ready, visible page actually
+    // covers it AND it sits outside the near-field bubble. Without the coverage
+    // requirement, far live terrain is hidden even where no page renders, which drops
+    // the far-field silhouette and leaves bare horizon/water bands.
+    page_covers
+        && bubble
             .map(|bubble| !near_field_intersects_footprint(chunk, bubble))
             .unwrap_or(true)
 }
@@ -132,6 +137,23 @@ pub(crate) fn chunk_page_coord(chunk_pos: IVec3, chunks_per_page: i32, level: us
         chunk_pos.x.div_euclid(chunks_per_node),
         chunk_pos.z.div_euclid(chunks_per_node),
     )
+}
+
+/// Keys of pages that are currently committed, visible, and from a Ready tree — i.e.
+/// the pages actually drawing this frame, which a live chunk may hand ownership to.
+fn ready_visible_page_keys(
+    tree: &ClodPageTree,
+    page_query: &Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
+) -> HashSet<ClodPageNodeKey> {
+    if !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready)) {
+        return HashSet::new();
+    }
+    page_query
+        .iter()
+        .filter_map(|(tag, visibility)| {
+            (*visibility == Visibility::Visible).then(|| ClodPageNodeKey::from(tag))
+        })
+        .collect()
 }
 
 fn chunk_covered_by_visible_page(
@@ -310,6 +332,7 @@ fn restore_clod_hidden_chunk(
 pub(crate) fn clod_page_chunk_ownership_system(
     mut commands: Commands,
     runtime: Res<ClodPagesRuntime>,
+    tree: Res<ClodPageTree>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
     mut chunk_query: Query<
@@ -321,23 +344,27 @@ pub(crate) fn clod_page_chunk_ownership_system(
         ),
         Without<WaterMesh>,
     >,
+    page_query: Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
     page_mesh_gate: Option<Res<ClodPageMeshGate>>,
     world: Res<VoxelWorld>,
 ) {
     let bubble = camera_query.single().ok().map(|camera_transform| {
         clod_near_field_bubble(&runtime, camera_transform, player_query.single().ok())
     });
+    let ready_pages = ready_visible_page_keys(&tree, &page_query);
+    let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
+    let level_count = tree.nodes_by_level.len();
     for (entity, chunk_mesh, mut visibility, marker) in &mut chunk_query {
-        let pending_restore = page_mesh_gate
-            .as_deref()
-            .is_some_and(|gate| gate.chunk_pending_restore(chunk_mesh.chunk_position))
-            && world
-                .get_chunk(chunk_mesh.chunk_position)
-                .is_some_and(|chunk| chunk.is_dirty() || chunk.mesh_entity().is_none());
+        let page_covers = chunk_covered_by_visible_page(
+            chunk_mesh.chunk_position,
+            chunks_per_page,
+            level_count,
+            &ready_pages,
+        );
         if live_chunk_hidden_by_clod(
             chunk_footprint(chunk_mesh.chunk_position),
             bubble,
-            pending_restore,
+            page_covers,
         ) {
             if *visibility != Visibility::Hidden {
                 *visibility = Visibility::Hidden;
@@ -345,9 +372,21 @@ pub(crate) fn clod_page_chunk_ownership_system(
             if marker.is_none() {
                 commands.entity(entity).insert(ClodPageOwnedChunk);
             }
-        } else {
-            restore_clod_hidden_chunk(&mut commands, entity, &mut visibility, marker);
+            continue;
         }
+        // Not owned by a page. Keep the live LOD0 terrain visible. While a recently
+        // edited owned chunk re-meshes, hold its current (hidden) state so the page
+        // stays up until the fresh LOD0 mesh lands (avoids a one-frame hole).
+        let pending_restore = page_mesh_gate
+            .as_deref()
+            .is_some_and(|gate| gate.chunk_pending_restore(chunk_mesh.chunk_position))
+            && world
+                .get_chunk(chunk_mesh.chunk_position)
+                .is_some_and(|chunk| chunk.is_dirty() || chunk.mesh_entity().is_none());
+        if pending_restore {
+            continue;
+        }
+        restore_clod_hidden_chunk(&mut commands, entity, &mut visibility, marker);
     }
 }
 
@@ -392,22 +431,23 @@ mod tests {
     }
 
     #[test]
-    fn clod_hides_live_chunks_outside_the_near_field() {
+    fn clod_hides_live_chunks_only_when_a_page_covers_them_outside_the_near_field() {
         let chunk = footprint(16.0, 16.0, 32.0, 32.0);
-        assert!(live_chunk_hidden_by_clod(chunk, Some(far_bubble()), false));
-
-        assert!(!live_chunk_hidden_by_clod(
-            chunk,
-            Some(near_bubble()),
-            false
-        ));
+        // Outside the near-field bubble AND covered by a ready, visible page -> page owns it.
+        assert!(live_chunk_hidden_by_clod(chunk, Some(far_bubble()), true));
+        // Outside the bubble but no page covers it -> keep live terrain visible (no hole).
+        assert!(!live_chunk_hidden_by_clod(chunk, Some(far_bubble()), false));
+        // Inside the near-field bubble -> always visible, even if a page exists.
+        assert!(!live_chunk_hidden_by_clod(chunk, Some(near_bubble()), true));
     }
 
     #[test]
-    fn clod_does_not_restore_live_chunks_without_a_camera_or_during_an_edit() {
+    fn clod_hides_covered_chunks_even_without_a_camera() {
         let chunk = footprint(16.0, 16.0, 32.0, 32.0);
-        assert!(live_chunk_hidden_by_clod(chunk, None, false));
-        assert!(live_chunk_hidden_by_clod(chunk, Some(near_bubble()), true));
+        // No camera/bubble: a covering page still owns the chunk.
+        assert!(live_chunk_hidden_by_clod(chunk, None, true));
+        // No camera and no covering page: keep live terrain visible.
+        assert!(!live_chunk_hidden_by_clod(chunk, None, false));
     }
 
     #[test]

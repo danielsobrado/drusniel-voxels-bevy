@@ -129,7 +129,19 @@ impl PageExportCache {
                 .push(pos);
         }
 
-        columns.retain(|_, positions| positions.iter().all(|pos| self.exports.contains_key(pos)));
+        // A page column is "complete" once every chunk that actually produced a surface
+        // mesh has an export. Uniform air/solid chunks are skipped by the mesher (no mesh
+        // entity, no export); requiring an export for them would leave every column with
+        // sky above the terrain — i.e. nearly all of them — permanently incomplete, so
+        // almost no pages would ever build and the far field would stay bare.
+        columns.retain(|_, positions| {
+            positions.iter().all(|pos| {
+                self.exports.contains_key(pos)
+                    || world
+                        .get_chunk(*pos)
+                        .is_some_and(|chunk| chunk.mesh_entity().is_none())
+            })
+        });
         for positions in columns.values_mut() {
             positions.sort_by_key(|pos| (pos.x, pos.z, pos.y));
         }
