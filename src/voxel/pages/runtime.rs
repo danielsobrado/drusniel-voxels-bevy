@@ -121,6 +121,13 @@ impl PageExportCache {
             return;
         }
 
+        // NOTE: a page column is only "complete" when every chunk in it has an export.
+        // Uniform air/solid chunks never export, so most columns stay incomplete and few
+        // pages build. That keeps the far field on the live LOD0 fallback (see
+        // `clod_page_chunk_ownership_system`), which is correct and fast. Do NOT loosen
+        // this to build partial pages until the page-source weld is watertight — partial
+        // columns weld with interior open borders and the builder fails every frame
+        // (`InternalBorderNotWelded`), spiking frame time and flickering the far field.
         let mut columns: BTreeMap<(i32, i32), Vec<IVec3>> = BTreeMap::new();
         for pos in world.chunk_positions() {
             columns
@@ -129,19 +136,7 @@ impl PageExportCache {
                 .push(pos);
         }
 
-        // A page column is "complete" once every chunk that actually produced a surface
-        // mesh has an export. Uniform air/solid chunks are skipped by the mesher (no mesh
-        // entity, no export); requiring an export for them would leave every column with
-        // sky above the terrain — i.e. nearly all of them — permanently incomplete, so
-        // almost no pages would ever build and the far field would stay bare.
-        columns.retain(|_, positions| {
-            positions.iter().all(|pos| {
-                self.exports.contains_key(pos)
-                    || world
-                        .get_chunk(*pos)
-                        .is_some_and(|chunk| chunk.mesh_entity().is_none())
-            })
-        });
+        columns.retain(|_, positions| positions.iter().all(|pos| self.exports.contains_key(pos)));
         for positions in columns.values_mut() {
             positions.sort_by_key(|pos| (pos.x, pos.z, pos.y));
         }
