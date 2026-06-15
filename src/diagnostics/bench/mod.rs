@@ -153,6 +153,8 @@ struct BenchSceneResource(BenchScene);
 #[derive(Resource, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct BenchRenderToggles {
     #[serde(default)]
+    pub disable_grass: bool,
+    #[serde(default)]
     pub disable_instanced_props: bool,
     #[serde(default)]
     pub disable_terrain_meshes: bool,
@@ -1039,6 +1041,11 @@ impl Plugin for BenchPlugin {
 
         let render_toggles = scene.render_toggles.clone();
         let forensics = scene.forensics.unwrap_or_default();
+        if render_toggles.disable_grass {
+            app.world_mut()
+                .resource_mut::<crate::vegetation::VegetationConfig>()
+                .grass_enabled = false;
+        }
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.insert_resource(render_toggles.clone());
         }
@@ -4598,6 +4605,31 @@ hold_frames = 90
             forensics.mc_transitions,
             BenchForensicsMcTransitions::DisabledKeepBoundaryRows
         );
+    }
+
+    #[test]
+    fn grass_bench_toggle_deserializes() {
+        let scene: BenchScene = toml::from_str(
+            r#"
+seed = 1
+duration_warmup_secs = 0.0
+median_runs = 1
+chunk_load_radius = 1
+
+[render_toggles]
+disable_grass = true
+
+[[checkpoint]]
+name = "startup"
+position = [0.0, 1.0, 2.0]
+look_at = [3.0, 4.0, 5.0]
+time_of_day = 0.25
+hold_frames = 30
+"#,
+        )
+        .expect("grass bench toggle should deserialize");
+
+        assert!(scene.render_toggles.disable_grass);
     }
 
     #[test]

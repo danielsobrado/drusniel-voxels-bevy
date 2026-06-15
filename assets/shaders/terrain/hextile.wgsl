@@ -23,15 +23,6 @@ const HEX_INV_SKEW: mat2x2<f32> = mat2x2<f32>(
     vec2<f32>(0.5, 0.8660254037844386),
 );
 
-struct HexTriangleGrid {
-    w1: f32,
-    w2: f32,
-    w3: f32,
-    vertex1: vec2<i32>,
-    vertex2: vec2<i32>,
-    vertex3: vec2<i32>,
-}
-
 fn hash_2d(p: vec2<f32>) -> vec2<f32> {
     let r = vec2<f32>(
         127.1 * p.x + 311.7 * p.y,
@@ -67,7 +58,16 @@ fn gain3(x: vec3<f32>, r: f32) -> vec3<f32> {
 // Port of mmikk `TriangleGrid`. `st` is the continuous tile-space coordinate;
 // the simplex cell is found via the grid's own floor/frac, so it tiles
 // seamlessly — never pre-wrap `st` with fract(), that reintroduces hard seams.
-fn triangle_grid(st: vec2<f32>) -> HexTriangleGrid {
+// naga_oil cannot compose a module-level struct used as a function return type
+// (it errors on the struct's first field, whatever it is named), so the triangle
+// grid is returned through `ptr<function, …>` out-params instead of a struct.
+fn triangle_grid(
+    st: vec2<f32>,
+    weights: ptr<function, vec3<f32>>,
+    vertex1: ptr<function, vec2<i32>>,
+    vertex2: ptr<function, vec2<i32>>,
+    vertex3: ptr<function, vec2<i32>>,
+) {
     let skewed = HEX_GRID_TO_SKEW * (st * HEX_GRID_SCALE);
     let base_id = vec2<i32>(i32(floor(skewed.x)), i32(floor(skewed.y)));
     let temp = fract(skewed);
@@ -77,14 +77,10 @@ fn triangle_grid(st: vec2<f32>) -> HexTriangleGrid {
     let s2 = 2.0 * s - 1.0;
     let s_i = i32(s);
 
-    var grid: HexTriangleGrid;
-    grid.w1 = -temp_z * s2;
-    grid.w2 = s - temp.y * s2;
-    grid.w3 = s - temp.x * s2;
-    grid.vertex1 = base_id + vec2<i32>(s_i, s_i);
-    grid.vertex2 = base_id + vec2<i32>(s_i, 1 - s_i);
-    grid.vertex3 = base_id + vec2<i32>(1 - s_i, s_i);
-    return grid;
+    *weights = vec3<f32>(-temp_z * s2, s - temp.y * s2, s - temp.x * s2);
+    *vertex1 = base_id + vec2<i32>(s_i, s_i);
+    *vertex2 = base_id + vec2<i32>(s_i, 1 - s_i);
+    *vertex3 = base_id + vec2<i32>(1 - s_i, s_i);
 }
 
 fn hex_color_sample(
@@ -96,22 +92,26 @@ fn hex_color_sample(
 ) -> vec4<f32> {
     let dst_dx = dpdx(st);
     let dst_dy = dpdy(st);
-    let grid = triangle_grid(st);
+    var grid_weights: vec3<f32>;
+    var vertex1: vec2<i32>;
+    var vertex2: vec2<i32>;
+    var vertex3: vec2<i32>;
+    triangle_grid(st, &grid_weights, &vertex1, &vertex2, &vertex3);
 
-    let rot1 = load_rotation_2x2(grid.vertex1, rot_strength);
-    let rot2 = load_rotation_2x2(grid.vertex2, rot_strength);
-    let rot3 = load_rotation_2x2(grid.vertex3, rot_strength);
+    let rot1 = load_rotation_2x2(vertex1, rot_strength);
+    let rot2 = load_rotation_2x2(vertex2, rot_strength);
+    let rot3 = load_rotation_2x2(vertex3, rot_strength);
 
-    let cen1 = make_center_st(grid.vertex1);
-    let cen2 = make_center_st(grid.vertex2);
-    let cen3 = make_center_st(grid.vertex3);
+    let cen1 = make_center_st(vertex1);
+    let cen2 = make_center_st(vertex2);
+    let cen3 = make_center_st(vertex3);
 
     let st1 = rot1 * (st - cen1) + cen1
-        + hash_2d(vec2<f32>(f32(grid.vertex1.x), f32(grid.vertex1.y)));
+        + hash_2d(vec2<f32>(f32(vertex1.x), f32(vertex1.y)));
     let st2 = rot2 * (st - cen2) + cen2
-        + hash_2d(vec2<f32>(f32(grid.vertex2.x), f32(grid.vertex2.y)));
+        + hash_2d(vec2<f32>(f32(vertex2.x), f32(vertex2.y)));
     let st3 = rot3 * (st - cen3) + cen3
-        + hash_2d(vec2<f32>(f32(grid.vertex3.x), f32(grid.vertex3.y)));
+        + hash_2d(vec2<f32>(f32(vertex3.x), f32(vertex3.y)));
 
     let c1 = textureSampleGrad(tex, samp, st1, rot1 * dst_dx, rot1 * dst_dy);
     let c2 = textureSampleGrad(tex, samp, st2, rot2 * dst_dx, rot2 * dst_dy);
@@ -123,7 +123,7 @@ fn hex_color_sample(
         dot(c3.xyz, HEX_LUM_WEIGHT),
     );
     dw = mix(vec3<f32>(1.0), dw, HEX_FALLOFF_CONTRAST);
-    var weights = dw * pow(vec3<f32>(grid.w1, grid.w2, grid.w3), vec3<f32>(HEX_WEIGHT_EXP));
+    var weights = dw * pow(grid_weights, vec3<f32>(HEX_WEIGHT_EXP));
     weights = weights / max(weights.x + weights.y + weights.z, 0.0001);
     if (border_contrast != 0.5) {
         weights = gain3(weights, border_contrast);
@@ -159,22 +159,26 @@ fn hex_normal_derivative(
 ) -> vec2<f32> {
     let dst_dx = dpdx(st);
     let dst_dy = dpdy(st);
-    let grid = triangle_grid(st);
+    var grid_weights: vec3<f32>;
+    var vertex1: vec2<i32>;
+    var vertex2: vec2<i32>;
+    var vertex3: vec2<i32>;
+    triangle_grid(st, &grid_weights, &vertex1, &vertex2, &vertex3);
 
-    let rot1 = load_rotation_2x2(grid.vertex1, rot_strength);
-    let rot2 = load_rotation_2x2(grid.vertex2, rot_strength);
-    let rot3 = load_rotation_2x2(grid.vertex3, rot_strength);
+    let rot1 = load_rotation_2x2(vertex1, rot_strength);
+    let rot2 = load_rotation_2x2(vertex2, rot_strength);
+    let rot3 = load_rotation_2x2(vertex3, rot_strength);
 
-    let cen1 = make_center_st(grid.vertex1);
-    let cen2 = make_center_st(grid.vertex2);
-    let cen3 = make_center_st(grid.vertex3);
+    let cen1 = make_center_st(vertex1);
+    let cen2 = make_center_st(vertex2);
+    let cen3 = make_center_st(vertex3);
 
     let st1 = rot1 * (st - cen1) + cen1
-        + hash_2d(vec2<f32>(f32(grid.vertex1.x), f32(grid.vertex1.y)));
+        + hash_2d(vec2<f32>(f32(vertex1.x), f32(vertex1.y)));
     let st2 = rot2 * (st - cen2) + cen2
-        + hash_2d(vec2<f32>(f32(grid.vertex2.x), f32(grid.vertex2.y)));
+        + hash_2d(vec2<f32>(f32(vertex2.x), f32(vertex2.y)));
     let st3 = rot3 * (st - cen3) + cen3
-        + hash_2d(vec2<f32>(f32(grid.vertex3.x), f32(grid.vertex3.y)));
+        + hash_2d(vec2<f32>(f32(vertex3.x), f32(vertex3.y)));
 
     var d1 = rot1 * sample_normal_derivative_grad(tex, samp, st1, rot1 * dst_dx, rot1 * dst_dy);
     var d2 = rot2 * sample_normal_derivative_grad(tex, samp, st2, rot2 * dst_dx, rot2 * dst_dy);
@@ -183,7 +187,7 @@ fn hex_normal_derivative(
     let deriv_mag = vec3<f32>(dot(d1, d1), dot(d2, d2), dot(d3, d3));
     var dw = sqrt(deriv_mag / (vec3<f32>(1.0) + deriv_mag));
     dw = mix(vec3<f32>(1.0), dw, HEX_FALLOFF_CONTRAST);
-    var weights = dw * pow(vec3<f32>(grid.w1, grid.w2, grid.w3), vec3<f32>(HEX_WEIGHT_EXP));
+    var weights = dw * pow(grid_weights, vec3<f32>(HEX_WEIGHT_EXP));
     weights = weights / max(weights.x + weights.y + weights.z, 0.0001);
     if (border_contrast != 0.5) {
         weights = gain3(weights, border_contrast);

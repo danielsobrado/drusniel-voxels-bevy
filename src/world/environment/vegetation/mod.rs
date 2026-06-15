@@ -102,6 +102,7 @@ pub fn invalidate_grass_for_changed_chunks(
 /// Configuration resource for vegetation
 #[derive(Resource)]
 pub struct VegetationConfig {
+    pub grass_enabled: bool,
     pub grass_density: u32,
     pub max_blades_per_chunk: usize,
     pub wind_strength: f32,
@@ -114,6 +115,7 @@ pub struct VegetationConfig {
 impl Default for VegetationConfig {
     fn default() -> Self {
         Self {
+            grass_enabled: true,
             grass_density: 2,
             max_blades_per_chunk: 200,
             wind_strength: 0.35,
@@ -201,6 +203,10 @@ pub fn attach_procedural_grass_to_chunks(
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
 ) {
+    if !veg_config.grass_enabled {
+        return;
+    }
+
     let _timer = area_timer(&mut timing, frame.0, "Grass Collect");
     let base_density = veg_config.grass_density;
     let base_max_count = veg_config.max_blades_per_chunk;
