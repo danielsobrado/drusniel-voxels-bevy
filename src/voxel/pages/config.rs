@@ -73,6 +73,7 @@ pub struct SelectionCfg {
     pub error_threshold_px: f32,
     pub hysteresis_merge_factor: f32,
     pub neighbor_level_delta_max: i32,
+    pub transition_mode: String,
     pub crossfade_frames: u32,
 }
 

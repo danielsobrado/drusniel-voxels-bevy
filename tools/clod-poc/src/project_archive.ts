@@ -174,6 +174,7 @@ function assertConfig(value: unknown): asserts value is ClodPagesConfig {
   const chunkSize = value.page.chunk_size;
   const quadtreeLevels = value.page.quadtree_levels;
   if (!numbers.every(isFiniteNumber) || typeof value.meshopt_package_version !== "string" ||
+      !["instant", "dither"].includes(String(value.selection.transition_mode)) ||
       !isFiniteNumber(chunksPerPage) || chunksPerPage < 1 || chunksPerPage > 16 ||
       !isFiniteNumber(chunkSize) || chunkSize < 4 || chunkSize > 128 ||
       !isFiniteNumber(quadtreeLevels) || quadtreeLevels < 1 || quadtreeLevels > 8) {

@@ -44,6 +44,7 @@ export interface ClodPagesConfig {
     error_threshold_px: number;
     hysteresis_merge_factor: number;
     neighbor_level_delta_max: number;
+    transition_mode: "instant" | "dither";
     crossfade_frames: number;
   };
   near_field: { radius_chunks: number };

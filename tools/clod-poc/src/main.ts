@@ -1080,6 +1080,10 @@ async function main() {
   };
   let grass: GrassSystem | null = null;
   let selState: SelectionState = { split: new Set() };
+  const pageTransitionMode = cfg.selection.transition_mode;
+  const crossfadeStep = cfg.selection.crossfade_frames > 0
+    ? 1 / cfg.selection.crossfade_frames
+    : 1;
   const forEachTerrainMaterial = (fn: (mat: THREE.ShaderMaterial) => void) => {
     for (const v of views.values()) fn(v.mat);
     for (const { mats } of chunkGroups.values()) for (const m of mats) fn(m);
@@ -2935,11 +2939,21 @@ async function main() {
     // Textured terrain page LOD swaps are atomic. Screen-door fades are visually
     // noisy on terrain, even with complementary masks.
     for (const v of views.values()) {
-      v.fade = v.target;
-      v.mesh.visible = v.target > 0.5;
-      v.mat.uniforms.uFade.value = 1;
+      if (pageTransitionMode === "instant") {
+        v.fade = v.target;
+        v.mesh.visible = v.target > 0.5;
+        v.mat.uniforms.uFade.value = 1;
+        v.mat.uniforms.uFadeIn.value = v.target > 0.5;
+        v.mat.uniforms.uDither.value = false;
+        continue;
+      }
+
+      if (v.fade < v.target) v.fade = Math.min(v.target, v.fade + crossfadeStep);
+      else if (v.fade > v.target) v.fade = Math.max(v.target, v.fade - crossfadeStep);
+      v.mesh.visible = v.fade > 0.001;
+      v.mat.uniforms.uFade.value = v.fade;
       v.mat.uniforms.uFadeIn.value = v.target > 0.5;
-      v.mat.uniforms.uDither.value = false;
+      v.mat.uniforms.uDither.value = v.fade > 0.001 && v.fade < 0.999;
     }
 
     // Near-field bubble: a LOD0 page within the radius is owned by its raw chunks instead.

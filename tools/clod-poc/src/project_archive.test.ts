@@ -24,6 +24,7 @@ const cfg: ClodPagesConfig = {
     error_threshold_px: 1,
     hysteresis_merge_factor: 1.5,
     neighbor_level_delta_max: 1,
+    transition_mode: "instant",
     crossfade_frames: 12,
   },
   near_field: { radius_chunks: 6 },
