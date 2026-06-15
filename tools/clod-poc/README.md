@@ -126,14 +126,14 @@ npm run dev
 
 Builds a 4×4 world in-browser and runs the real runtime (§4): per-frame **DAG-cut
 selection** (screen-space error + hysteresis), the optional **2:1 restricted-quadtree
-pass**, and a complementary screen-door crossfade when the cut changes. Incoming and
-outgoing pages use opposite masks, so each pixel is owned by exactly one page during the
-transition. lil-gui controls:
+pass**, and atomic page visibility swaps when the cut changes. Screen-door fades remain
+shader-supported for experiments, but normal runtime selection keeps dither disabled
+because textured terrain makes partial-coverage transitions visibly noisy. lil-gui controls:
 error-threshold slider, 2:1 toggle, freeze-selection, page-boundary boxes, wireframe,
 colour-by-LOD, normal-colour/recomputed-normal diagnostics, same-LOD seam points, a
 camera-following procedural sky dome with sun disk, glow, horizon haze, and exposure
 controls, and a **terrain
-texture** folder. The **grass shader** folder controls animated instanced grass with
+texture** folder. The **grass shader** folder is disabled by default and controls animated instanced grass with
 deterministic placement sampled from LOD0 terrain. Grass patches are independent from
 the active CLOD cut, so selection changes do not duplicate or pop blades; this remains a
 visual-only viewer feature and is not part of CLOD validation. Use "load image files" to
@@ -141,13 +141,11 @@ open the texture modal. It shows four
 square slots for low→high terrain bands; click a square to load or replace that single
 texture, or use "Load all" to fill slots from one multi-file selection. Each texture slot
 has its own low/high height range. The right-side `blend mode` control switches between
-hard bands, where the shader uses the range containing the current vertex height. The
-optional blend-bands mode blends adjacent texture ranges across the configured
-`blend height`; that texture-band blend is independent of CLOD page selection. Gaps
-fall back to the nearest loaded slot. Textures default to world X/Z sampling with repeat
-wrapping so the textured preview is stable across LOD cuts; the `triplanar` toggle is
-available for inspecting projection quality separately. The global "texture scale"
-controls tiling density. With `colour by LOD`
+hard bands, where the shader uses the range containing the current vertex height, and
+blend bands, where adjacent texture ranges blend across the configured `blend height`;
+that texture-band blend is independent of CLOD page selection. Gaps fall back to the
+nearest loaded slot. Textures default to triplanar sampling with repeat wrapping; the
+global "texture scale" controls tiling density. With `colour by LOD`
 enabled the page colour is applied as a light tint over the texture, so the image remains
 visible on every LOD while ownership is still readable. Turn `colour by LOD` off for a
 neutral textured terrain pass.

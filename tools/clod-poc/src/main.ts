@@ -709,13 +709,13 @@ async function main() {
     recomputedNormals: false,
     forceMaxLevel: "auto",
     textureScale: 1,
-    triplanar: false,
+    triplanar: !queryPerfMode,
     albedo: !queryPerfMode,
     normalMap: false,
     normalIntensity: 1,
     roughness: 0.9,
     metalness: 0,
-    textureBlendMode: TEXTURE_BLEND_MODES[0] as TextureBlendMode,
+    textureBlendMode: TEXTURE_BLEND_MODES[1] as TextureBlendMode,
     textureBlendWidth: 6,
     loadedTextureFiles: "none",
     terrainBrightness: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.brightness,
@@ -753,7 +753,7 @@ async function main() {
     brushFlowMs: DIG_HOLD_INTERVAL_MS,
     audioEnabled: getAudioState().enabled,
     audioVolume: getAudioState().masterVolume,
-    grassEnabled: queryPerfMode ? false : DEFAULT_GRASS_SETTINGS.enabled,
+    grassEnabled: false,
     grassDistance: DEFAULT_GRASS_SETTINGS.distance,
     grassBladeSpacing: DEFAULT_GRASS_SETTINGS.bladeSpacing,
     grassBladeHeight: DEFAULT_GRASS_SETTINGS.bladeHeight,
@@ -1080,9 +1080,6 @@ async function main() {
   };
   let grass: GrassSystem | null = null;
   let selState: SelectionState = { split: new Set() };
-  const crossfadeStep = cfg.selection.crossfade_frames > 0
-    ? 1 / cfg.selection.crossfade_frames
-    : 1;
   const forEachTerrainMaterial = (fn: (mat: THREE.ShaderMaterial) => void) => {
     for (const v of views.values()) fn(v.mat);
     for (const { mats } of chunkGroups.values()) for (const m of mats) fn(m);
@@ -2935,15 +2932,14 @@ async function main() {
     }
     digPreview.visible = digAimHit !== null;
 
-    // Page LOD swaps use complementary screen-door masks: incoming pages draw
-    // noise <= fade, outgoing pages draw noise > 1 - fade.
+    // Textured terrain page LOD swaps are atomic. Screen-door fades are visually
+    // noisy on terrain, even with complementary masks.
     for (const v of views.values()) {
-      if (v.fade < v.target) v.fade = Math.min(v.target, v.fade + crossfadeStep);
-      else if (v.fade > v.target) v.fade = Math.max(v.target, v.fade - crossfadeStep);
-      v.mesh.visible = v.fade > 0.001;
-      v.mat.uniforms.uFade.value = v.fade;
+      v.fade = v.target;
+      v.mesh.visible = v.target > 0.5;
+      v.mat.uniforms.uFade.value = 1;
       v.mat.uniforms.uFadeIn.value = v.target > 0.5;
-      v.mat.uniforms.uDither.value = v.fade > 0.001 && v.fade < 0.999;
+      v.mat.uniforms.uDither.value = false;
     }
 
     // Near-field bubble: a LOD0 page within the radius is owned by its raw chunks instead.
