@@ -51,24 +51,50 @@ TerrainQuery {
 - It is a **read facade over existing data** (density gen + `material_weights.rs` +
   `water_bodies.rs`), not a new authority. No new source of truth.
 
+Where staleness matters (props/water/editor disagreeing on a freshly edited cell), wrap
+results so a reader can see *where the answer came from* and *how fresh it is*:
+
+```text
+TerrainQueryResult<T> {
+  value:    T,
+  source:   QuerySource,   // LiveVoxel | GeneratedDensity | ClodPageSummary | Naadf | WaterBodyMetadata
+  revision: u64,           // bumped on edit; lets a consumer detect a stale read
+}
+```
+
+Deliberately **no `confidence` field** yet — nothing branches on it, so it would be
+speculative (CLAUDE.md simplicity). Add it the day a consumer needs it. `source` +
+`revision` earn their place now because the whole point of the facade is catching
+stale/wrong-owner reads across systems.
+
 ## Bevy plan
 
-### TQ-1 Extract the facade
-- Create `src/voxel/query/` (or `terrain/query.rs`) wrapping the existing density
-  generator, `material_weights.rs`, and `water_bodies.rs`. No behaviour change — it
-  forwards to what already exists.
-- **Verify:** unit tests show the facade matches the underlying functions to tolerance;
-  no bench movement (it's a wrapper).
+Split into a near-zero-cost **contract** that lands early (so river/detail bind to it
+from day one) and **migration** that lands opportunistically.
 
-### TQ-2 Route one consumer through it (prove the seam)
-- Pick the highest-duplication consumer (prop/grass placement or the editor preview)
-  and route it through `TerrainQuery`. Keep the old path until parity is shown.
+### TQ-0 Query contract only (lands first, with the VS-1 skeleton)
+- Define the `TerrainQuery` trait + `TerrainQueryResult<T>`/`QuerySource` structs.
+  **No migration, no new logic** — just the interface. Costs nothing at runtime.
+- **Verify:** it compiles; a trivial test constructs a result; nothing consumes it yet.
+
+### TQ-1 River/detail-only adapter (lands with Plan 3)
+- Implement **only** the methods the river + detail plans need: `water_depth`,
+  `slope`, `material_weights`, plus river-derived `river_depth`/`rapid_mask`/`bank_slope`
+  from [Plan 3](glacial-valley-braided-river-worldgen-plan.md). Forward to existing data
+  (density gen + `material_weights.rs` + `water_bodies.rs` + `river.rs`).
+- **Do not** migrate colliders, editor, or benches yet — this is the minimum that stops
+  Plans 3 and 5 from re-deriving the same math in four places.
+- **Verify:** adapter matches the underlying functions to tolerance (golden); Plan 3/5
+  consume it; no bench movement (it's a forwarding wrapper).
+
+### TQ-2 Route one heavy consumer through it (prove the seam)
+- Pick the highest-duplication remaining consumer (prop/grass placement or the editor
+  preview) and route it through `TerrainQuery`. Keep the old path until parity is shown.
 - **Verify (bench):** placement output identical (golden); `summary.json` flat.
 
 ### TQ-3 Migrate remaining consumers opportunistically
-- As [Plan 3](glacial-valley-braided-river-worldgen-plan.md) (river depth/rapid mask)
-  and [Plan 5](glacial-valley-biome-detail-masks-plan.md) (detail masks) land, have them
-  consume `TerrainQuery` from day one rather than re-deriving slope/water/material.
+- Migrate colliders/editor/benches only as the duplication actually bites. Each keeps
+  its golden output.
 - **Verify:** each migrated consumer keeps its golden output; benched if on a hot path.
 
 ## clod-poc plan
@@ -93,8 +119,12 @@ exposes `surfaceHeight`/`surfaceNormal`/`materialWeights` consumed by
   that flattens caves/overhangs. It reads the voxel field; it does not replace it.
 - **No new source of truth:** the facade forwards to existing data. If a query starts
   *computing* terrain instead of *reading* it, that's drift.
-- **Do this when duplication hurts**, not speculatively (CLAUDE.md simplicity rule);
-  Plans 3 and 5 are the forcing functions.
+- **TQ-G1 (no hot-path cost):** methods used by grass/prop/water placement must be
+  allocation-free and batchable; a per-call heap allocation in placement is a rejected
+  change.
+- **Scope discipline:** TQ-0 (contract) and TQ-1 (river/detail adapter) land early
+  because Plans 3 and 5 are immediate forcing functions; TQ-2/TQ-3 wait until the
+  duplication actually bites (CLAUDE.md simplicity rule).
 
 ## Reference index
 

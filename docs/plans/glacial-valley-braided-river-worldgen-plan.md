@@ -1,9 +1,10 @@
 # Plan 3 — Braided-River Worldgen (from glacial-valley)
 
 > Created: 2026-06-17 · Status: Planning
-> Scope (Bevy): `assets/config/terrain_generation.yaml`,
-> `src/voxel/terrain/{height.rs,noise.rs,water.rs,biome.rs}`,
-> `src/voxel/meshing/sdf.rs`, `src/voxel/runtime/water_bodies.rs`
+> Scope (Bevy): `assets/config/terrain_generation.yaml`, a **new**
+> `src/voxel/terrain/river.rs` (river fields + SDF stamp; do **not** put this in
+> `height.rs`), `src/voxel/terrain/{noise.rs,water.rs,biome.rs}`,
+> `src/voxel/meshing/sdf.rs`, `src/voxel/runtime/{generation.rs,water_bodies.rs}`
 > Scope (clod-poc): `tools/clod-poc/src/terrain.ts` (worldgen field)
 > Parent: [`glacial-valley-port-overview.md`](glacial-valley-port-overview.md)
 
@@ -63,11 +64,14 @@ clod-poc worldgen is JS, like the reference, so this is the validation surface.
 ## Bevy plan
 
 ### BR-4 River SDF stamp in the density field
-- Port `riverCenter/halfWidth/gravelBar` into [`src/voxel/terrain/noise.rs`](../../src/voxel/terrain/noise.rs)/
-  [`height.rs`](../../src/voxel/terrain/height.rs) as functions, and the bed as an
-  **SDF subtraction in [`src/voxel/meshing/sdf.rs`](../../src/voxel/meshing/sdf.rs)** /
-  the density generator ([`runtime/generation.rs`](../../src/voxel/runtime/generation.rs)),
-  config-driven from [`terrain_generation.yaml`](../../assets/config/terrain_generation.yaml)
+- Put `riverCenter/halfWidth/gravelBar` and the bed-SDF in a **new
+  [`src/voxel/terrain/river.rs`](../../src/voxel/terrain/river.rs)** (a density modifier),
+  not in `height.rs` — the filename matters: `river = height` is the wrong mental model
+  the firewall fights. `height.rs` may *call* `river.rs` only if legacy generation needs
+  it. Apply the bed as an **SDF subtraction in
+  [`src/voxel/meshing/sdf.rs`](../../src/voxel/meshing/sdf.rs)** / the density generator
+  ([`runtime/generation.rs`](../../src/voxel/runtime/generation.rs)), config-driven from
+  [`terrain_generation.yaml`](../../assets/config/terrain_generation.yaml)
   (`river.meander_*`, `river.half_width_*`, `river.bar_*`, `river.rivulet_*`).
 - **Critical (GV-G0):** the river edits **voxel density**, then the normal mesher
   extracts it. Do **not** special-case it in the mesher or add a height path.
@@ -87,6 +91,20 @@ clod-poc worldgen is JS, like the reference, so this is the validation surface.
   decals, and splash particles place against the same river data — glacial-valley's
   "one query drives placement" discipline, done the voxel way.
 - **Verify:** gravel bars get pebble/gravel material; willows hug banks; benched.
+
+## Acceptance gates
+
+- **BR-A1** — The river stamp is deterministic from seed + config (same seed → same
+  channel), covered by a golden test.
+- **BR-A2** — The stamp composes additively/subtractively with cave and overhang density
+  (a cave under the bank survives; the river doesn't fill it).
+- **BR-A3** — Disabling the river config restores previous terrain generation **exactly**
+  (golden diff = 0).
+- **BR-A4** — Water-body extraction must **not** infer water from a heightfield; it
+  consumes the river channel mask / connected-water metadata
+  ([`water_bodies.rs`](../../src/voxel/runtime/water_bodies.rs)).
+- **BR-A5** — Brush edits near the river dirty terrain, water-body metadata, CLOD pages,
+  **and** the far-visibility summary ([Plan 2 FV-A3](glacial-valley-far-field-sun-visibility-plan.md)).
 
 ## Guardrails
 

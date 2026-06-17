@@ -93,6 +93,16 @@ loop before the Bevy summary work, exactly as glacial-valley demonstrates it:
 - **Parity:** same march params (step growth 1.10, 44 steps, penumbra `/(d*0.035)`),
   same fog-tint formula names; clod-poc is the look-dev surface.
 
+## Acceptance gates
+
+- **FV-G1 (firewall hardening)** — A far sun-vis summary may be height-like **only if**
+  it is explicitly marked lossy, **derived from** voxel/CLOD/NAADF summaries, and
+  **never** queried for gameplay, collision, editing, near shadows, cave lighting, or
+  water depth. (Mirrors LAAS G2's "one owner, measured invariant" discipline.)
+- **FV-A3 (cache invalidation)** — Voxel edits dirty the owning far-visibility tile and
+  its ancestors. Stale visibility is allowed **only** outside the live bubble and must be
+  debug-tintable so a stale far tile is visible in a diagnostic view.
+
 ## Guardrails
 
 - **GV-G0:** the height-grid march owns **only** Zone 3 + coarse far summaries. Never

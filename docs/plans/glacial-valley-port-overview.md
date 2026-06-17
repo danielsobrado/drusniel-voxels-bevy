@@ -10,6 +10,10 @@ It states **what we take, what we refuse, and why**, then links the per-part pla
 It mirrors the role [`laas-cdlod-far-field-reference-plan.md`](laas-cdlod-far-field-reference-plan.md)
 plays for the LAAS demo: fix the boundary first so the borrow can't creep.
 
+> **Do not implement from this overview.** It is scope only. All implementation
+> happens through the per-plan phase gates (each plan's numbered steps + Verify). If a
+> step isn't in a per-plan gate, it isn't approved work yet.
+
 ## What glacial-valley actually is
 
 A static-sun alpine valley at sunrise. One height function (`terrainH`,
@@ -79,18 +83,31 @@ separate plan; it's a cross-cutting acceptance rule in Plans 1, 5, and 6.
 
 ## Recommended integration order (value × safety)
 
-1. **[Plan 1 — Glacial water preset](glacial-valley-water-preset-plan.md)** — highest
-   look-per-effort; rides on the already-planned water upgrade.
-2. **[Plan 3 — Braided-river worldgen spike](glacial-valley-braided-river-worldgen-plan.md)**
-   — biome-quality, clod-poc first, SDF stamps only.
-3. **[Plan 5 — Biome detail masks](glacial-valley-biome-detail-masks-plan.md)** — low
-   risk if culled; big "alive" payoff.
-4. **[Plan 6 — Biome visual-state vector](glacial-valley-biome-visual-state-plan.md)**
-   — makes 1/3/5 controllable and seasonal.
-5. **[Plan 2 — Far-field sun visibility / fog shafts](glacial-valley-far-field-sun-visibility-plan.md)**
+Two cheap "skeletons" lead so the later plans bind to shared structures instead of
+inventing private ones (the share-the-control-vector / share-the-query argument):
+
+1. **[Plan 6 · VS-1 skeleton only](glacial-valley-biome-visual-state-plan.md)** — the
+   `BiomeVisualState` resource + YAML + debug UI, **no shader consumers yet**. Cheap;
+   gives water/details/snowline/season one place to read from. (Rest of Plan 6 lands
+   later as VS-2/3.)
+2. **[Plan 4 · TQ-0 contract only](glacial-valley-terrain-query-discipline-plan.md)** —
+   the `TerrainQuery` trait + result structs, **no migration, no new logic**. So the
+   river/detail plans consume one query surface from day one instead of re-deriving
+   slope/water/visibility in four places.
+3. **[Plan 1 — Glacial water preset](glacial-valley-water-preset-plan.md)** — highest
+   look-per-effort; rides on the already-planned water upgrade; reads
+   `glacial_murkiness` from VS-1.
+4. **[Plan 3 — Braided-river worldgen spike](glacial-valley-braided-river-worldgen-plan.md)**
+   — biome-quality, clod-poc first, SDF stamps only; brings the **TQ-1 river/detail
+   adapter** with it.
+5. **[Plan 5 — Biome detail masks](glacial-valley-biome-detail-masks-plan.md)** — ship
+   **masks-as-debug-overlays first (DM-0)**, then one consumer at a time; reads VS-1 +
+   TQ-1.
+6. **[Plan 2 — Far-field sun visibility / fog shafts](glacial-valley-far-field-sun-visibility-plan.md)**
    — reference for the NAADF + far-shell work already on the roadmap.
-6. **[Plan 4 — Terrain query discipline](glacial-valley-terrain-query-discipline-plan.md)**
-   — the refactor that pays back the others; do it when the duplication hurts.
+7. **Finish [Plan 6](glacial-valley-biome-visual-state-plan.md) (VS-2/3) and
+   [Plan 4](glacial-valley-terrain-query-discipline-plan.md) (migrate remaining
+   consumers)** opportunistically, once their consumers exist.
 
 ## Reference index
 

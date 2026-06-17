@@ -38,9 +38,14 @@ composes these, in order:
 
 **Mapping to the sibling plan:** absorption + refraction = sibling Phase 1; Fresnel +
 reflection blend = Phase 2; flow ripples = Phase 3; slope foam = Phase 4; dark-bank
-rim = Phase 5. So glacial-valley **confirms and tunes** that roadmap. The two genuinely
+rim = Phase 5. So glacial-valley **confirms and tunes** that roadmap. The genuinely
 *new* contributions here are (a) the **rock-flour in-scatter color term** and (b) the
 **preset values** that say "cold turbid alpine," neither of which the LAAS plan carries.
+
+**Cost note:** rock-flour in-scatter and sun glitter are cheap (a couple of ALU ops on
+terms already computed). **Rapid foam is the expensive one** — it can pull extra bed-
+gradient, flow-field, and noise fetches. Keep foam behind its own gate and bench it
+separately (GW-3), and don't lump it into "cheap."
 
 ## Bevy plan
 
@@ -90,6 +95,18 @@ sibling plan's Phase 7 note. Two cases:
 
 - **Parity:** preset value names match `water.yaml`; clod-poc is the look-dev surface,
   Bevy is validated against it ([overview §clod-poc preview](glacial-valley-port-overview.md)).
+
+## Acceptance gates
+
+- **GW-A1** — With the glacial preset disabled, non-glacial water bodies produce
+  byte-identical config selection and visually unchanged output (A/B on the water bench).
+- **GW-A2** — Glacial scatter/rapid-foam terms sit behind a `shader_def` or branch that
+  is **off** for clear bodies (zero cost when unused).
+- **GW-A3** — The water debug view exposes the new terms in isolation: column thickness,
+  `absorption_rgb`, scatter amount, foam mask, glitter mask (extends the sibling plan's
+  `?waterdbg` ladder).
+- **GW-A4** — Preset values live only in `water.yaml`; no hard-coded glacial constants in
+  WGSL beyond safe defaults.
 
 ## Guardrails
 

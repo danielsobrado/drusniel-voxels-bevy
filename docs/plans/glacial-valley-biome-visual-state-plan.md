@@ -62,13 +62,16 @@ terrain + vegetation, `season_t` gates detail spawn/fade.
 
 ## Bevy plan
 
-### VS-1 Define the state resource + season curves
-- Add a `BiomeVisualState` resource + `atmosphere.yaml` block; compute season curves
-  (green/autumn/bloom/snowline) from the existing time-of-day/season clock à la
+### VS-1 State skeleton — **lands first, before Plans 1/3/5** (keep it light)
+- Add a `BiomeVisualState` resource + `atmosphere.yaml` block + a debug UI to scrub the
+  fields. Compute season curves (green/autumn/bloom/snowline) from the existing
+  time-of-day/season clock à la
   [updateDayNight:982-986](../reference/glacial-valley/main.js#L982-L986). Drive it from
-  the existing day-night system; do **not** add a second clock.
-- **Verify:** values animate across a season sweep; no bench movement yet (no shader
-  consumes it).
+  the existing day-night system; do **not** add a second clock. **No shader consumers and
+  no post work in VS-1** — this is the shared control vector the water/detail/snowline
+  plans bind to so they don't each invent private knobs.
+- **Verify:** values animate across a season sweep and via the debug UI; no bench
+  movement yet (nothing consumes it).
 
 ### VS-2 Route terrain + vegetation albedo through it
 - Feed `green`/`autumn`/`snowline_m` into terrain material + vegetation shaders
@@ -83,14 +86,15 @@ terrain + vegetation, `season_t` gates detail spawn/fade.
   `morning_mist`/`season_t` → detail masks ([Plan 5](glacial-valley-biome-detail-masks-plan.md)).
 - **Verify:** changing one state value moves water + mist together coherently; benched.
 
-### VS-4 (optional) Compact post grade + adaptive exposure
-- Only if the current post stack lacks it: add the small warm/cool + vignette + grain
-  grade and **adaptive exposure that stops down toward the sun**
-  ([main.js:1096-1100](../reference/glacial-valley/main.js#L1096-L1100)). Likely Drusniel
-  already tonemaps — in that case this is a *tuning reference*, not new code. State the
-  finding honestly per CLAUDE.md.
-- **Verify (bench):** exposure adapts looking into/away from sun; post cost flat; no
-  double-tonemap.
+### VS-4 Post-grade audit only — no new post code unless a gap is proven
+- Drusniel already has HDR/tonemapping, and the water-upgrade plan warns about
+  double-tonemap risk. So VS-4 is an **audit**, not a feature: confirm whether the
+  current post stack already does ACES + vignette + grain + adaptive exposure that stops
+  down toward the sun ([main.js:1096-1100](../reference/glacial-valley/main.js#L1096-L1100)).
+  If it does, record the finding and stop. Add new post code **only** if the audit proves
+  a missing, wanted gap — and never a second tonemap.
+- **Verify:** written finding (what exists vs what's missing); any added grade benched
+  with post cost flat and no double-tonemap.
 
 ## clod-poc plan
 

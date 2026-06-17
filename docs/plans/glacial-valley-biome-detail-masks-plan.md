@@ -60,6 +60,17 @@ Each detail is a **biome-masked particle/decal** consuming `TerrainQuery`
 infra ([`weather.yaml`](../../assets/config/weather.yaml)); do **not** build a new
 particle engine.
 
+### DM-0 Masks first, as debug overlays (do before any particle)
+- Generate and **debug-visualize** the masks alone: `mist_mask`, `rapid_splash_mask`,
+  `mote_visibility_mask`, `frost_mask`, `gravel_bar_mask` — each derived from
+  `TerrainQuery` (water depth, slope, sun vis) + visual state (season/mist). Render them
+  as terrain overlays (akin to the Alt+F8 family) with no spawned geometry yet.
+- Rationale: if a mask is wrong, every detail built on it is wrong. Validate placement
+  logic on the cheap, deterministic layer first.
+- **Verify:** each mask reads correctly in its overlay (mist hugs water, splash lights at
+  rapids, motes only where sun vis high, frost only in cold shade, gravel on bars); no
+  measurable frame cost (overlay only).
+
 ### DM-1 River mist (highest payoff)
 - Spawn wind-advected mist cards along water bodies (river/lake), height-soft-clipped to
   terrain, tinted by far-field sun vis. Config: `weather.yaml` `morning_mist.*` (density,
@@ -83,6 +94,16 @@ particle engine.
   bar mask); fish-rise rings on calm deep pools.
 - **Verify:** gravel reads on bars; rings only on calm water; benched.
 
+## Acceptance gates
+
+- **DM-A1** — Every detail has `max_instances`, `spawn_radius`, `fade_radius`, and
+  `update_period` in YAML.
+- **DM-A2** — Each detail can be disabled independently at runtime.
+- **DM-A3** — The `performance100` bench preset disables or heavily reduces all ambience
+  details (so the perf-ceiling scene isn't skewed by ambience).
+- **DM-A4** — Integrated-GPU profile disables mist sheets and motes by default unless
+  explicitly enabled.
+
 ## Guardrails
 
 - **Cull or it costs:** every detail must distance-cull + fade by visual-state; an
@@ -96,7 +117,7 @@ particle engine.
 ## Reference index
 
 - Mist: [`main.js:629-670`](../reference/glacial-valley/main.js#L629-L670), [`shaders.js:738-788`](../reference/glacial-valley/shaders.js#L738-L788)
-- Splash: [`main.js:762-810`](../reference/glacial-valley/main.js#L762-L810), [`shaders.js:1043+`](../reference/glacial-valley/shaders.js#L1043)
+- Splash placement: [`main.js:762-810`](../reference/glacial-valley/main.js#L762-L810) (splash shader lives in `shaders.js` ~L1000–1080; verify the exact range before porting)
 - Motes/insects: [`shaders.js:791-860`](../reference/glacial-valley/shaders.js#L791-L860)
 - Dew: [`main.js:471-488`](../reference/glacial-valley/main.js#L471-L488), [`shaders.js:863-890`](../reference/glacial-valley/shaders.js#L863-L890)
 - Fish rings: [`main.js:737-760`](../reference/glacial-valley/main.js#L737-L760)
