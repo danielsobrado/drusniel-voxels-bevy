@@ -1,10 +1,9 @@
-// Outer-border lock detection. Plan §3.2 / §11.4.
+// Outer-border lock detection.
 //
 // Only the CURRENT parent's outer footprint border is locked; old child borders must
-// already be welded and free. The plan's appendix suggests detecting the border by
-// quantized footprint-plane position, but Surface Nets places vertices INSIDE cells, so
-// the border is non-planar — a PoC finding. We instead lock the mesh's open (topological)
-// boundary, which after internal welding IS exactly the page's outer border (plan §3.1).
+// already be welded and free. Surface Nets places vertices INSIDE cells, so the border
+// is non-planar. We instead lock the mesh's open topological boundary, which after
+// internal welding is exactly the page's outer border.
 
 import { PageMesh } from "./types.js";
 import { openBoundaryVertexFlags } from "./validate.js";

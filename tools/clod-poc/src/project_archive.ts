@@ -1,4 +1,5 @@
 import type { ClodPagesConfig } from "./config.js";
+import { isGrassShaderMode, type GrassShaderMode } from "./grass.js";
 import type { BrushOp, BrushShape, DigEdit } from "./terrain.js";
 import { MAX_TERRAIN_TEXTURES } from "./terrain_textures.js";
 
@@ -10,7 +11,6 @@ const IMPORT_STORE = "projects";
 
 export type TextureBlendMode = "hard bands" | "blend bands";
 export type PostProcessDebugMode = "output" | "copy" | "off";
-
 export interface ProjectSessionState {
   thresholdPx: number;
   enforce21: boolean;
@@ -69,6 +69,8 @@ export interface ProjectSessionState {
   brushFalloff: number;
   brushFlowMs: number;
   grassEnabled: boolean;
+  grassShaderMode: GrassShaderMode;
+  grassAlphaToCoverage: boolean;
   grassDistance: number;
   grassBladeSpacing: number;
   grassBladeHeight: number;
@@ -142,6 +144,7 @@ const BOOLEAN_STATE_KEYS: (keyof ProjectSessionState)[] = [
   "colorByLod", "normalColor", "normalDivergence", "frontSideOnly", "recomputedNormals",
   "triplanar", "albedo", "normalMap",
   "postProcessEnabled", "bubble", "tintBubble", "digEnabled", "grassEnabled",
+  "grassAlphaToCoverage",
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -184,6 +187,11 @@ function assertConfig(value: unknown): asserts value is ClodPagesConfig {
 
 function assertSessionState(value: unknown): asserts value is ProjectSessionState {
   if (!isRecord(value)) throw new Error("project.json is missing session state");
+  // Backward compat: alpha-to-coverage was added after some projects were saved. Fill it in
+  // (default off) before the boolean-key check so older project.json files still load.
+  if (value.grassAlphaToCoverage === undefined) {
+    value.grassAlphaToCoverage = false;
+  }
   for (const key of NUMBER_STATE_KEYS) {
     if (!isFiniteNumber(value[key]) || Math.abs(value[key]) > 1_000_000) {
       throw new Error(`project.json state.${key} must be a safe finite number`);
@@ -200,6 +208,12 @@ function assertSessionState(value: unknown): asserts value is ProjectSessionStat
   }
   if (!["output", "copy", "off"].includes(String(value.postProcessDebugMode))) {
     throw new Error("project.json has an invalid postProcessDebugMode");
+  }
+  if (value.grassShaderMode === undefined) {
+    value.grassShaderMode = "classic";
+  }
+  if (!isGrassShaderMode(value.grassShaderMode)) {
+    throw new Error("project.json has an invalid grassShaderMode");
   }
   if (!["remove", "add"].includes(String(value.brushOp))) {
     throw new Error("project.json has an invalid brushOp");

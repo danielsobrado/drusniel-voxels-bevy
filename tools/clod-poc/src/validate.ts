@@ -1,4 +1,4 @@
-// Builder validation — errors, never warnings. Plan §3.3 / §11.7.
+// Builder validation - errors, never warnings.
 // Runs in every build (the builder is off the frame path; correctness > speed here).
 
 import { PageMesh, PageFootprint, ClodBuildError, DEFAULT_TOLERANCES, vertexCount } from "./types.js";
@@ -27,7 +27,7 @@ export function borderEdges(mesh: PageMesh): Set<number> {
 
 /**
  * Per-vertex flag: 1 if the vertex lies on the mesh's open (topological) boundary.
- * After internal welding this IS the page's outer border (plan §3.1). Surface-nets
+ * After internal welding this IS the page's outer border. Surface-nets
  * borders are non-planar, so detect them by topology, not by footprint-plane position.
  */
 export function openBoundaryVertexFlags(mesh: PageMesh): Uint8Array {
@@ -56,7 +56,7 @@ const PERIMETER_BAND = 1.0;
 
 /**
  * Assert every open-boundary vertex hugs the page footprint perimeter (within one cell),
- * i.e. no INTERNAL topological border survived welding (plan §3.2 "Weld" assert / §11.2 step 6).
+ * i.e. no INTERNAL topological border survived welding.
  */
 export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint): void {
   const flags = openBoundaryVertexFlags(mesh);
@@ -73,7 +73,7 @@ export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint
   }
 }
 
-/** Strip exactly-degenerate (zero-area / repeated-index) triangles. Plan §3.3. */
+/** Strip exactly-degenerate (zero-area / repeated-index) triangles. */
 export function stripDegenerateTriangles(mesh: PageMesh): number {
   const idx = mesh.indices;
   const kept: number[] = [];

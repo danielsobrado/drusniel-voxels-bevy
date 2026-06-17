@@ -5,11 +5,22 @@ import { describe, expect, it } from "vitest";
 import viteConfig from "../vite.config.js";
 
 const projectRoot = resolve(import.meta.dirname, "..");
-const repoRoot = resolve(projectRoot, "../..");
 
 describe("GitHub Pages deployment contract", () => {
-  it("builds assets beneath the repository project path", () => {
-    expect(viteConfig).toMatchObject({ base: "/drusniel-voxels-bevy/" });
+  it("builds assets beneath the repository project path", async () => {
+    // Config is command-aware (root base in dev, repo sub-path for builds). The deployment
+    // contract is about the production build, so resolve it for the "build" command.
+    const built = await (typeof viteConfig === "function"
+      ? viteConfig({ command: "build", mode: "production" })
+      : viteConfig);
+    expect(built).toMatchObject({ base: "/drusniel-voxels-web/" });
+  });
+
+  it("serves dev from root so the local URL needs no base path", async () => {
+    const served = await (typeof viteConfig === "function"
+      ? viteConfig({ command: "serve", mode: "development" })
+      : viteConfig);
+    expect(served).toMatchObject({ base: "/" });
   });
 
   it("provides standard static build and preview scripts", () => {
@@ -20,12 +31,11 @@ describe("GitHub Pages deployment contract", () => {
     expect(packageJson.scripts?.preview).toBe("vite preview");
   });
 
-  it("deploys only the CLOD dist directory through GitHub Pages", () => {
-    const workflow = readFileSync(resolve(repoRoot, ".github/workflows/deploy-clod-poc-pages.yml"), "utf8");
+  it("deploys the static build through GitHub Pages", () => {
+    const workflow = readFileSync(resolve(projectRoot, ".github/workflows/deploy-pages.yml"), "utf8");
     const parsed = load(workflow) as { jobs?: { build?: unknown; deploy?: unknown } };
     expect(parsed.jobs).toMatchObject({ build: expect.any(Object), deploy: expect.any(Object) });
-    expect(workflow).toContain("working-directory: tools/clod-poc");
-    expect(workflow).toContain("path: tools/clod-poc/dist");
+    expect(workflow).toContain("path: dist");
     expect(workflow).toContain("actions/deploy-pages");
   });
 
@@ -36,8 +46,8 @@ describe("GitHub Pages deployment contract", () => {
     expect(toolbar).toContain('aria-label="Import project"');
     expect(toolbar).toContain('aria-label="Export project"');
     expect(toolbar).toContain('href="https://discord.gg/JXrSfsDVF"');
-    expect(toolbar).toContain('href="https://github.com/danielsobrado/drusniel-voxels-bevy"');
-    expect(toolbar).toContain('title="Give me a start in the repo!"');
+    expect(toolbar).toContain('href="https://github.com/danielsobrado/drusniel-voxels-web"');
+    expect(toolbar).toContain('title="Star the repo"');
     expect(toolbar.match(/target="_blank" rel="noopener noreferrer"/g)).toHaveLength(2);
   });
 });

@@ -1,9 +1,5 @@
 /**
- * Procedural WebAudio sound effects for the CLOD PoC.
- * 
- * Source Attribution:
- * Adapted from the MIT-licensed world-of-claudecraft reference under
- * tools/clod-poc/reference/world-of-claudecraft-audio
+ * Procedural WebAudio sound effects for CLOD.
  */
 
 import { EventAudioConfig } from "./audio_config.js";

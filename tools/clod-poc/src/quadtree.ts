@@ -1,4 +1,4 @@
-// Quadtree build orchestration — the core Phase 1 deliverable. Plan §3.2 / §11.6.
+// Quadtree build orchestration.
 //
 // LOD0 node  = welded chunk meshes (source_mesh.ts), error_world = 0.
 // LODk node  = merge 2x2 children -> weld old internal page borders -> lock new outer
@@ -381,7 +381,7 @@ export interface Lod0RebuildResult {
 }
 
 /**
- * Phase 1 of an edit rebuild: re-extract the LOD0 pages whose cells intersect `dirty`,
+ * First stage of an edit rebuild: re-extract the LOD0 pages whose cells intersect `dirty`,
  * with the same hard-fail validation as the full build. Cheap relative to the ancestor
  * chain and it's the surface the player is looking at, so the viewer applies this
  * synchronously and defers {@link resimplifyParent} to later frames.
@@ -442,7 +442,7 @@ export function rebuildDirtyLod0Pages(
 }
 
 /**
- * Phase 2, one node at a time: re-simplify a single parent (merge 2x2 children -> weld
+ * Second stage, one node at a time: re-simplify a single parent (merge 2x2 children -> weld
  * old internal page borders -> lock new outer border -> simplify -> accumulate error),
  * mutating it in place. Caller must have already rebuilt every dirty child at `level-1`
  * (process strictly lowest-level-first), so the merge reads current child meshes.

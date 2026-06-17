@@ -77,3 +77,5 @@ pkg/mod/cache/
 pkg/sumdb/
 tools/clod-poc/package-lock.json
 tools/clod-rs/
+docs/reference/
+

@@ -2,7 +2,7 @@ import { compose, headlessIconData } from "./compose";
 import { FALLBACK_RECIPE, ICON_RECIPES } from "./recipes";
 import type { ClodIconKind, IconRecipe } from "./types";
 
-// Icon compositor adapted for CLOD from the MIT-licensed world-of-claudecraft reference.
+// Icon compositor for CLOD UI controls.
 
 export type { ClodIconKind } from "./types";
 

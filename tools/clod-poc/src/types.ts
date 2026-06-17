@@ -1,5 +1,4 @@
-// Shared data contracts for the CLOD pages PoC.
-// Mirrors the Rust contracts in the plan's appendix (§11) so the Phase 4 port is 1:1.
+// Shared data contracts for CLOD pages.
 
 /** Interleaved-free SOA mesh. Positions are world-space. */
 export interface PageMesh {
@@ -55,7 +54,7 @@ export const DEFAULT_TOLERANCES: BorderTolerances = {
   material: 1e-4,
 };
 
-/** Hard-fail builder error — never simplify dirty input (plan §3, §11.7). */
+/** Hard-fail builder error - never simplify dirty input. */
 export class ClodBuildError extends Error {
   constructor(public kind: string, message: string) {
     super(`${kind}: ${message}`);

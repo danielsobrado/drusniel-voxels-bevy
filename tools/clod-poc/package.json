@@ -1,9 +1,9 @@
 {
-  "name": "clod-poc",
+  "name": "drusniel-voxels-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Three.js/TS sandbox for the CLOD pages execution plan (Phases 0-3 gate).",
+  "description": "Standalone Three.js/TypeScript voxel terrain viewer.",
   "scripts": {
     "spike": "tsx src/spike.ts",
     "build-pages": "tsx src/build.ts",

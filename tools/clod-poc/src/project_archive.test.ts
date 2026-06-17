@@ -48,6 +48,7 @@ const state: ProjectSessionState = {
   bubble: true, bubbleRadius: 64, tintBubble: false, digEnabled: true, digRadius: 4,
   brushOp: "add", brushShape: "cylinder", brushMaterial: 2, brushHeight: 6,
   brushStrength: 0.75, brushFalloff: 0.25, brushFlowMs: 180, grassEnabled: true,
+  grassShaderMode: "terrain-patch-v2", grassAlphaToCoverage: true,
   grassDistance: 96, grassBladeSpacing: 1.6, grassBladeHeight: 1.15,
   grassBladeHeightVariation: 0.75, grassBladeWidth: 0.08, grassWindStrength: 0.32,
   grassWindSpeed: 1.35, grassSlopeMinY: 0.72, grassMinHeight: 20, grassMaxHeight: 86,
@@ -107,6 +108,12 @@ describe("CLOD project archive", () => {
   it("rejects unsupported schema versions", () => {
     const invalid = { ...manifest(), schemaVersion: 2 };
     expect(() => validateProjectManifest(invalid)).toThrow(/schema version/i);
+  });
+
+  it("defaults legacy grass shader mode to classic", () => {
+    const legacy = manifest() as unknown as { state: Partial<ProjectSessionState> };
+    delete legacy.state.grassShaderMode;
+    expect(validateProjectManifest(legacy).state.grassShaderMode).toBe("classic");
   });
 
   it("rejects malformed or incomplete archives", async () => {

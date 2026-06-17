@@ -103,6 +103,10 @@ export class PostProcessPipeline {
     this.target = new THREE.WebGLRenderTarget(1, 1, {
       depthBuffer: true,
       stencilBuffer: false,
+      // Multisampled so grass alpha-to-coverage (and general edge AA) survive this offscreen
+      // pass. Without it the post-process target is single-sample and A2C collapses to a hard
+      // 1-bit cutout. WebGL2 resolves the multisample buffer automatically on read.
+      samples: 4,
     });
     this.target.texture.name = "clod-poc-postprocess-color";
 

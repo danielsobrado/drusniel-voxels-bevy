@@ -1,4 +1,4 @@
-// Spatial-hash vertex weld. Plan §3.2 / §11.3.
+// Spatial-hash vertex weld.
 //
 // Welds vertices within `epsilon` by quantized position. A position match with a normal
 // or material mismatch is DirtyInput -> hard fail with the offending pair (never

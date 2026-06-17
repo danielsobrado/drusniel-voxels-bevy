@@ -1,4 +1,4 @@
-// Phase 0 — meshoptimizer API verification spike. Plan §2.
+// Meshoptimizer API verification spike.
 //
 // Confirms the four facts everything downstream depends on, against a small grid mesh:
 //   1. simplifyWithAttributes accepts a per-vertex lock array + attribute weights.
@@ -82,7 +82,7 @@ async function main() {
   for (let i = 0; i < vc; i++) if (locks[i] && used.has(i)) lockedSurvived++;
   const lockedTotal = lockedBefore.length;
 
-  console.log("=== Phase 0 meshoptimizer spike ===");
+  console.log("=== meshoptimizer spike ===");
   console.log(`package: meshoptimizer (simplifyWithAttributes present: ${typeof MeshoptSimplifier.simplifyWithAttributes === "function"})`);
   console.log(`input  : ${g.indices.length / 3} tris, ${vc} verts, ${lockedTotal} locked`);
   console.log(`output : ${outIndices.length / 3} tris`);

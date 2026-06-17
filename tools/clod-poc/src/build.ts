@@ -1,6 +1,6 @@
-// Phase 1 headless builder. Builds the quadtree, runs all assertions, prints the stats
+// Headless builder. Builds the quadtree, runs all assertions, prints the stats
 // panel (tris per level, build ms, low-benefit rate, error_world) and the cross-page
-// border-match check (gate A2, proven by induction on LOD1/LOD2 adjacency — plan §3.1).
+// border-match check.
 //
 // Run: npm run build-pages [worldPages]   (default 4x4 LOD0 pages)
 
@@ -50,7 +50,7 @@ async function main() {
   console.log(`\ntotal build: ${totalMs.toFixed(1)} ms`);
   console.log(formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish))));
 
-  // Gate-relevant metrics (informational here; the formal gate is Phase 3).
+  // Gate-relevant metrics.
   const allLowBenefit = result.stats.filter((s) => s.level >= 1 && s.level <= 2);
   const lowRate = allLowBenefit.length
     ? allLowBenefit.filter((s) => s.lowBenefit).length / allLowBenefit.length
@@ -89,7 +89,7 @@ async function main() {
   }
   console.log(`\nA2 border-match: ${checks} adjacent same-level page pairs matched (pos<=1e-3, dot>=0.9999, mat<=1e-4). PASS`);
 
-  // ---- Phase 3 acceptance gate verdict (plan §5) ----
+  // ---- Acceptance gate verdict ----
   const maxNodeMs = Math.max(...result.stats.map((s) => s.buildMs));
   const verdict = (ok: boolean) => (ok ? "PASS" : "FAIL");
   // A4 targets the deepest LOD. A world only reaches it when it is large enough to merge
@@ -103,7 +103,7 @@ async function main() {
   const a4 = perAreaReduction <= 0.15;
   const a5 = totalMs < 30_000 && maxNodeMs < 250; // seconds total, tens of ms per node
   const a6 = lowRate < 0.1;
-  console.log(isGateRun ? "\n=== Phase 3 acceptance gate (§5) ===" : "\n=== Acceptance metrics (informational) ===");
+  console.log(isGateRun ? "\n=== Acceptance gate ===" : "\n=== Acceptance metrics (informational) ===");
   console.log(`A1 watertight (no holes/lips; weld + border asserts): ${verdict(a1)}`);
   console.log(`A2 no dark seams (matched border attrs):              ${verdict(a2)}  (${checks} pairs)`);
   console.log(`A3 density scars acceptable:                          VISUAL — inspect in viewer (npm run dev)`);

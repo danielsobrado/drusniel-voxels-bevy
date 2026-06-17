@@ -49,7 +49,7 @@ describe("player interaction state", () => {
   });
 });
 
-describe("Bevy-equivalent movement helpers", () => {
+describe("player movement helpers", () => {
   it("keeps the migrated player defaults", () => {
     expect(DEFAULT_PLAYER_CONFIG).toMatchObject({
       walkSpeed: 8,
@@ -73,7 +73,7 @@ describe("Bevy-equivalent movement helpers", () => {
     expect(jumpVelocityForHeight(4, 30)).toBeCloseTo(Math.sqrt(240));
   });
 
-  it("clamps the player inside the Bevy-style world margin", () => {
+  it("clamps the player inside the world margin", () => {
     const position = new THREE.Vector3(2, 5, 127);
     clampPlayerToWorld(position, { minX: 0, minZ: 0, maxX: 128, maxZ: 128 }, 16);
     expect(position.toArray()).toEqual([16, 5, 112]);

@@ -1,5 +1,3 @@
-// Phase 2 runtime selection. Plan §4.1.
-//
 // DAG-cut over the quadtree each frame: render a node when its screen-space error is
 // within budget, else recurse. Monotone error_world (from the builder) guarantees a clean
 // cut. Adds hysteresis (split/merge band) and the 2:1 restricted-quadtree pass.
@@ -28,7 +26,7 @@ export interface SelectionState {
   split: Set<string>; // node ids currently split (recursed) — carries hysteresis frame to frame
 }
 
-/** error_world -> error_px. Plan §2 formula. distance = camera to bounding-sphere surface. */
+/** error_world -> error_px. distance = camera to bounding-sphere surface. */
 export function errorPx(node: ClodPageNode, p: SelectionParams): number {
   const c = node.bounds.center;
   const d = Math.hypot(p.camPos[0] - c[0], p.camPos[1] - c[1], p.camPos[2] - c[2]);
@@ -178,7 +176,7 @@ function find21Violation(nodes: readonly ClodPageNode[]): ClodPageNode | null {
 }
 
 /**
- * 2:1 restricted-quadtree pass (plan §4.1): force-split any rendered node whose edge
+ * 2:1 restricted-quadtree pass: force-split any rendered node whose edge
  * neighbor is more than one level apart, until stable. Bounds the visual density gradient;
  * locked borders already keep seams watertight, so this is about appearance, not cracks.
  */

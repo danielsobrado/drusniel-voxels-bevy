@@ -1,0 +1,38 @@
+# CLOD Pages configuration.
+page:
+  chunks_per_page: 4          # 4x4 chunks -> 64x64 cells footprint
+  chunk_size: 16
+  halo_chunks: 1              # generation halo for correct border normals
+  quadtree_levels: 4          # LOD0..LOD3 (LOD3 page = 8x8 LOD0 pages footprint)
+
+simplify:                     # zeux demo/nanite.cpp parameters — start here, tune later
+  target_ratio_per_level: 0.5     # 50% index count reduction per level
+  abandon_ratio: 0.85             # if result > 85% of input, stop this branch
+  target_error: 0.01              # meshopt relative error cap per pass
+  weld_epsilon_cells: 0.001       # quantization for internal-seam welding
+  # Normals matter less than materials for triplanar splat seams.
+  attribute_weights:
+    normal: 0.5
+    material: 1.0
+
+polish:
+  diagonal_flip:
+    enabled: true
+    min_triangle_area: 0.000001
+    min_normal_dot: 0.05
+    min_angle_improvement_degrees: 2.0
+    normal_error_weight: 1.0
+    angle_quality_weight: 1.0
+    material_error_weight: 0.25
+
+selection:
+  error_threshold_px: 1.0
+  hysteresis_merge_factor: 1.5    # merge at 1.5px, split at 1.0px
+  neighbor_level_delta_max: 1     # 2:1 restricted quadtree constraint
+  transition_mode: instant        # terrain pages swap atomically; dither is too noisy when textured
+  crossfade_frames: 0
+
+near_field:
+  radius_chunks: 6            # live editable Surface Nets bubble, no pages inside
+
+meshopt_package_version: "0.22.0"

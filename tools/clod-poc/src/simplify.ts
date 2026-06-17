@@ -1,7 +1,7 @@
-// SOLE meshoptimizer boundary. Plan §3.2 / §11.5.
+// SOLE meshoptimizer boundary.
 //
 // No other module imports meshoptimizer. quadtree.ts sees only this API.
-// simplify_sloppy is NEVER used (topology-breaking; the plan forbids it outright).
+// simplify_sloppy is NEVER used because it can break topology.
 
 import { MeshoptSimplifier } from "meshoptimizer";
 import { PageMesh, ClodBuildError, vertexCount } from "./types.js";

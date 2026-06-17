@@ -1,5 +1,4 @@
 // LOD0 page source — built by WELDING same-resolution chunk meshes, never re-extracted.
-// Plan §3.1 / §11.2 / invariant I2.
 
 import { PageMesh, PageFootprint, ClodBuildError } from "./types.js";
 import { ClodPagesConfig } from "./config.js";

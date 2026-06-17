@@ -119,7 +119,7 @@ describe("diagonal polish", () => {
 
   it("matches the shared fixture diagonal choice", () => {
     const fixture = JSON.parse(
-      readFileSync(new URL("../../../tests/fixtures/clod/diagonal_polish.json", import.meta.url), "utf8"),
+      readFileSync(new URL("../tests/fixtures/clod/diagonal_polish.json", import.meta.url), "utf8"),
     ) as Fixture;
     const vertices = fixture.positions.map((position, i): QuadVertex => ({
       position,

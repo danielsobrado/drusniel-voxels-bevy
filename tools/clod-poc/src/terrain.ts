@@ -1,18 +1,18 @@
 // Synthetic terrain stand-in for the engine's Surface Nets chunk mesher.
 //
-// The real engine feeds the page builder its existing same-resolution chunk meshes
-// (plan §3.1). The PoC has no engine, so we generate an equivalent: a GLOBAL scalar
+// The builder consumes same-resolution chunk meshes. This standalone viewer generates
+// an equivalent: a GLOBAL scalar
 // field, meshed PER CHUNK with a halo. Because every vertex/normal/material is a pure
 // function of the global field, two chunks that both touch a shared boundary cell emit
 // byte-identical copies of that vertex -> they weld cleanly and borders match by
-// construction. This is the property the engine guarantees and the page builder relies on.
+// construction. This is the property the page builder relies on.
 //
-// Chunking is in X/Z only (terrain is columnar), matching the plan's footprint model.
+// Chunking is in X/Z only because terrain is columnar.
 
 import { PageMesh } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
 
-const Y_CELLS = 128; // matches DEFAULT_WORLD_CHUNKS_Y * CHUNK_SIZE in the Bevy runtime.
+const Y_CELLS = 128;
 const WATER_LEVEL = 18;
 const MIN_NORMAL_TERRAIN_SURFACE_Y = WATER_LEVEL - 4;
 const BASE_TERRAIN_ELEVATION = MIN_NORMAL_TERRAIN_SURFACE_Y;
@@ -199,7 +199,7 @@ export function surfaceHeight(x: number, z: number): number {
 
 // ---- dig edits -------------------------------------------------------------
 //
-// Runtime carve overlay, the PoC analogue of the engine's terrain "lower/dig" tool
+// Runtime carve overlay for the terrain lower/dig tool
 // (src/terrain/tools/operations.rs): each dig is a sphere of air subtracted from the
 // field via CSG min(base, |p-c| - r). The edits stay a pure function of (x,y,z), so
 // halo recomputation still emits byte-identical border vertices and welding holds.

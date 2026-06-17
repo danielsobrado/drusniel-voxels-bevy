@@ -1,6 +1,8 @@
 import { describe, expect, it, afterEach } from "vitest";
 import {
+  DEFAULT_GRASS_SHADER_MODE,
   DEFAULT_GRASS_SETTINGS,
+  GRASS_SHADER_MODES,
   acceptsGrassCandidate,
   generateGrassInstances,
   type GrassSettings,
@@ -19,6 +21,12 @@ const settings: GrassSettings = {
 };
 
 describe("grass placement", () => {
+  it("defaults to the terrain patch shader while retaining the classic shader option", () => {
+    expect(DEFAULT_GRASS_SHADER_MODE).toBe("terrain-patch-v2");
+    expect(DEFAULT_GRASS_SETTINGS.shaderMode).toBe("terrain-patch-v2");
+    expect(GRASS_SHADER_MODES).toContain("classic");
+  });
+
   it("is deterministic for the same seed and footprint", () => {
     expect(generateGrassInstances(footprint, settings)).toEqual(generateGrassInstances(footprint, settings));
   });
@@ -56,6 +64,23 @@ describe("grass placement", () => {
 
   it("respects the maximum blade count", () => {
     expect(generateGrassInstances(footprint, settings, 7)).toHaveLength(7);
+  });
+
+  it("terrain-patch-v2 records generation stats and respects the blade budget", () => {
+    const stats = { generatedCandidates: 0, acceptedCandidates: 0, edgeSuppressedCandidates: 0 };
+    const blades = generateGrassInstances(
+      footprint,
+      { ...settings, shaderMode: "terrain-patch-v2" },
+      11,
+      stats,
+    );
+    expect(blades.length).toBeLessThanOrEqual(11);
+    expect(stats.generatedCandidates).toBeGreaterThan(0);
+    expect(stats.acceptedCandidates).toBeGreaterThanOrEqual(blades.length);
+    for (const blade of blades) {
+      expect(blade.edgeFade).toBeGreaterThanOrEqual(0.18);
+      expect(blade.normalY).toBeGreaterThanOrEqual(settings.slopeMinY);
+    }
   });
 
   afterEach(() => {

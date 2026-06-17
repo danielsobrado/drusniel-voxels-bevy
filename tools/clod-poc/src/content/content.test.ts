@@ -138,7 +138,7 @@ describe("Content Registry Validation Tests", () => {
     expect(report.errors.some(e => e.code === "UNNORMALIZABLE_DIRECTION")).toBe(true);
   });
 
-  it("11. unknown World of Claudecraft terms are rejected from production YAML if present", () => {
+  it("11. banned gameplay terms are rejected from production YAML if present", () => {
     const registry = loadContentRegistry();
     // Simulate banned term injection
     const piece = registry.snapPieces.get("wood-floor");
@@ -150,7 +150,7 @@ describe("Content Registry Validation Tests", () => {
     expect(report.errors.some(e => e.code === "BANNED_TERM")).toBe(true);
   });
 
-  it("12. production modules do not import from tools/clod-poc/reference", () => {
+  it("12. production modules do not import from external reference paths", () => {
     const srcDir = resolve(import.meta.dirname, "..");
     const files = getAllTsFiles(srcDir);
     expect(files.length).toBeGreaterThan(0);
@@ -162,8 +162,7 @@ describe("Content Registry Validation Tests", () => {
       const lines = content.split("\n");
       for (const line of lines) {
         if (/^\s*(import|const|let|var)\b/.test(line)) {
-          expect(line).not.toContain("tools/clod-poc/reference");
-          expect(line).not.toContain("world-of-claudecraft-content");
+          expect(line).not.toContain("/reference/");
         }
       }
     }

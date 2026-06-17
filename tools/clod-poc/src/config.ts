@@ -1,6 +1,5 @@
-// Shared config contract for the repo-root config/clod_pages.yaml — the same file the
-// Rust builder will consume. Node-side loading lives in config_node.ts so this module
-// (and the browser viewer) never pulls in node:fs.
+// Shared config contract. Node-side loading lives in config_node.ts so this module
+// and the browser viewer never pull in node:fs.
 import { load } from "js-yaml";
 
 export interface DiagonalFlipConfig {

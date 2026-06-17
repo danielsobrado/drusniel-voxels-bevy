@@ -43,7 +43,7 @@ export function validateContentRegistry(
             severity: "error",
             code: "BANNED_TERM",
             path,
-            message: `Value "${val}" contains banned MMO/World of Claudecraft term "${term}".`,
+            message: `Value "${val}" contains banned gameplay term "${term}".`,
           });
         }
       }
