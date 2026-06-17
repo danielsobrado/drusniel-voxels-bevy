@@ -1,0 +1,40 @@
+qa:
+  output_root: "bench-runs/qa"
+  baseline_root: "bench-baselines"
+  report_json_name: "qa-report.json"
+  report_markdown_name: "qa-report.md"
+  image_diff:
+    enabled: true
+    fail_when_baseline_missing: false
+    changed_pixel_threshold: 0.08
+    max_changed_ratio: 0.02
+    max_rmse: 6.0
+    max_mean_abs_error: 3.0
+    write_diff_images: true
+  timing:
+    enabled: true
+    fail_on_threshold: true
+  scenes:
+    - id: "visual_ridge_start"
+      bench_scene: "bench/scenes/visual/visual-regression.toml"
+      checkpoint: "ridge-run-noon"
+      screenshots:
+        - id: "start"
+          name: "start"
+      probes:
+        - id: "sky_has_signal"
+          type: "region_luminance"
+          screenshot: "start"
+          region: [0.0, 0.0, 1.0, 0.35]
+          min: 0.02
+          max: 0.98
+        - id: "frame_not_flat"
+          type: "region_variance"
+          screenshot: "start"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min_luminance_stddev: 0.01
+      timing:
+        - id: "frame_p99"
+          area: "__frame"
+          field: "p99_ms"
+          max_ms: 30.0

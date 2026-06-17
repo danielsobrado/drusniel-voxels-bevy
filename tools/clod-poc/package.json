@@ -7,6 +7,7 @@
   "scripts": {
     "spike": "tsx src/spike.ts",
     "build-pages": "tsx src/build.ts",
+    "qa": "tsx src/qa.ts",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "scene": "web",
+  "git_sha": "sample",
+  "git_dirty": true,
+  "build_profile": "dev",
+  "platform": "web",
+  "run_started_utc": "2026-06-17T00:00:00Z",
+  "duration_secs": 1.0,
+  "checkpoints": [
+    {
+      "name": "main",
+      "median_frame_ms": 12.0,
+      "p95_frame_ms": 18.0,
+      "p99_frame_ms": 22.0,
+      "areas": {
+        "renderer": {
+          "draw_calls": 128,
+          "triangles": 42000
+        }
+      },
+      "screenshots": [
+        {
+          "id": "viewport",
+          "name": "viewport",
+          "path": "sample://viewport",
+          "metrics": {
+            "luminance_mean": 0.48,
+            "luminance_stddev": 0.17
+          }
+        }
+      ]
+    }
+  ]
+}

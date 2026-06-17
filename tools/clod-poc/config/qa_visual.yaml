@@ -1,0 +1,45 @@
+qa:
+  output_root: "qa-runs"
+  baseline_root: "qa-baselines"
+  report_json_name: "qa-report.json"
+  report_markdown_name: "qa-report.md"
+  image_diff:
+    enabled: true
+    fail_when_baseline_missing: false
+    changed_pixel_threshold: 0.08
+    max_changed_ratio: 0.02
+    max_rmse: 6.0
+    max_mean_abs_error: 3.0
+    write_diff_images: false
+  timing:
+    enabled: true
+    fail_on_threshold: true
+  scenes:
+    - id: "clod_poc_main_view"
+      bench_scene: "web"
+      checkpoint: "main"
+      screenshots:
+        - id: "viewport"
+          name: "viewport"
+      probes:
+        - id: "viewport_has_signal"
+          type: "region_luminance"
+          screenshot: "viewport"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min: 0.02
+          max: 0.98
+        - id: "viewport_not_flat"
+          type: "region_variance"
+          screenshot: "viewport"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min_luminance_stddev: 0.01
+      timing:
+        - id: "frame_p95"
+          area: "__frame"
+          field: "p95_ms"
+          max_ms: 24.0
+        - id: "draws"
+          area: "renderer"
+          field: "draw_calls"
+          max_ms: 2000.0
+          optional: true

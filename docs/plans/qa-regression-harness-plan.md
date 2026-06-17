@@ -1,6 +1,10 @@
 # Plan: QA Regression Harness (steal the LAAS philosophy, adapt to Drusniel)
 
-Status: proposed. Owner: TBD. Created 2026-06-17.
+Status: in progress. Owner: TBD. Created 2026-06-17. First host-side slices
+landed: `src/bin/qa.rs` consumes an existing Bevy bench `summary.json`, runs
+image/probe/timing checks, and writes JSON/Markdown reports; clod-poc has a
+report-only Node/TS runner that consumes precomputed capture metrics. Browser
+capture / Playwright automation remains deferred.
 
 This plan adds a durable, repeatable QA layer to Drusniel, modelled on the
 verification harness in [`docs/reference/fable5-world-demo/`](../reference/fable5-world-demo/)
@@ -9,17 +13,17 @@ deterministic scenes, screenshots, image diffs, pixel/region probes, timing
 thresholds, and writes machine- + human-readable reports with clear failure
 reasons.
 
-It targets **two** code bases:
+The executable first targets are:
 
-1. **Rust / Bevy** — the main game. Extend the existing bench infrastructure in
-   [`src/diagnostics/bench/`](../../src/diagnostics/bench/). Do **not** fork it.
-2. **clod-poc** — the TypeScript / three.js / WebGPU sandbox at
-   [`tools/clod-poc/`](../../tools/clod-poc/). It has no harness yet; it gets the
-   closest port of the LAAS Playwright tooling.
+- **Rust / Bevy** — the main game. Extend the existing bench infrastructure in
+  [`src/diagnostics/bench/`](../../src/diagnostics/bench/). Do **not** fork it.
+- **clod-poc report-only QA** — a lightweight Node/TS runner that consumes a web
+  summary JSON with precomputed screenshot metrics. This is not the full browser
+  capture port.
 
-The two share one philosophy, one YAML config shape, and one report schema so a
-regression looks the same in both. Implementation phases below are written for
-the Rust side first; [§12](#12-clod-poc-port) maps each phase onto clod-poc.
+The later target is the full **clod-poc browser capture port**. It should reuse
+the YAML/report schema so a regression looks the same in both. [§12](#12-clod-poc-port)
+remains the deferred mapping.
 
 ---
 
@@ -95,16 +99,17 @@ log.** JSON + Markdown must stand alone.
 - **Output root** `bench-runs/` is **git-ignored** (`.gitignore`). Baselines must
   live elsewhere or be explicitly committed (see [§8](#8-baseline-workflow)).
 
-### clod-poc (no harness yet)
+### clod-poc (report runner exists; capture harness deferred)
 
 - TypeScript / three.js / Vite at [`tools/clod-poc/`](../../tools/clod-poc/).
   `vitest` for tests, `tsx` for scripts, **`js-yaml` already a dependency**
   (YAML config is natural here), config already YAML-driven
   (`config/audio_events.yaml`).
-- No `window.__*` hooks, no `tools/`, no Playwright. Needs the LAAS contract
-  (`window.__clod`) + a `tools/` harness. Will add `playwright` and one PNG
-  reader (`pngjs`, or `sharp` matching LAAS) as devDeps — see
-  [§12](#12-clod-poc-port).
+- Current v1 has `src/qa.ts` plus `scripts/qa-runner.mjs`; it does not boot a
+  browser or parse PNGs. No `window.__*` hooks, no Playwright capture command.
+  The full LAAS-style contract (`window.__clod`) + browser harness remains
+  deferred. When implemented, add `playwright` and one PNG reader (`pngjs`, or
+  `sharp` matching LAAS) as devDeps — see [§12](#12-clod-poc-port).
 
 ### Decision: extend, don't fork
 
@@ -296,16 +301,18 @@ required metric fails clearly.
 
 ## 7. Runner integration
 
-**Command (Rust):**
+**Command (Rust, current host-side v1):**
 
 ```
-cargo run --release -- --qa assets/config/qa_visual.yaml
+cargo run --bin qa -- --config assets/config/qa_visual.yaml \
+  --summary bench-runs/<run>/summary.json \
+  --output bench-runs/qa/<label>
 ```
 
-Add `--qa <path>` (and `--qa-update-baselines`, §8) to `BenchCli`. QA is
-**opt-in**: absent the flag, nothing QA-related runs — **no gameplay/startup path
-pays any cost** (acceptance #15). Existing `--bench` and `bench_guard` keep
-working untouched.
+QA is **opt-in** and currently lives in `src/bin/qa.rs`, not in `BenchCli`.
+Absent the separate binary invocation, nothing QA-related runs — **no gameplay/
+startup path pays any cost** (acceptance #15). Existing `--bench` and
+`bench_guard` keep working untouched.
 
 Runner flow per scene: load config → for each scene run/reuse the named bench
 scene → wait for the existing render-ready condition → capture named checkpoint
@@ -316,10 +323,11 @@ probes → apply timing thresholds → accumulate. Then write `qa-report.json` +
 Two viable wiring strategies (pick the smaller at implementation time, document
 which):
 
-- **A — orchestrator binary** `src/bin/qa.rs`: shells/`Command`s the existing
-  `--bench <scene> --bench-out <run>` once per scene, then post-processes the run
-  dirs (diff/probe/timing/report) purely on the host. Cleanest isolation, reuses
-  the bench unchanged, easiest to also point at clod-poc later.
+- **A — orchestrator binary** `src/bin/qa.rs`: current v1 post-processes existing
+  run dirs (diff/probe/timing/report) purely on the host. A follow-up may shell/
+  `Command` the existing `--bench <scene> --bench-out <run>` once per scene.
+  Cleanest isolation, reuses the bench unchanged, easiest to also point at
+  clod-poc later.
 - **B — in-process plugin**: a `QaPlugin` that drives scenes inside one app run.
   More invasive to the 5k-line bench module.
 
@@ -332,7 +340,10 @@ logic." Logging tag `[QA]` for progress; report is still the durable artifact.
 ## 8. Baseline workflow
 
 ```
-cargo run --release -- --qa assets/config/qa_visual.yaml --qa-update-baselines
+cargo run --bin qa -- --config assets/config/qa_visual.yaml \
+  --summary bench-runs/<run>/summary.json \
+  --output bench-runs/qa/<label> \
+  --update-baselines
 ```
 
 - Never overwrite baselines by default; updating is explicit.
@@ -403,7 +414,7 @@ probes for cases where time/cam/render state is fully frozen.
 
 ---
 
-## 12. clod-poc port
+## 12. clod-poc browser capture port
 
 clod-poc gets the **closest port of LAAS's harness** because it is the same
 shape (browser, three.js). Mirror, don't reinvent:
@@ -422,8 +433,9 @@ shape (browser, three.js). Mirror, don't reinvent:
    as devDeps. Document the WebGPU Playwright recipe from LAAS STATUS.md
    (`channel:'chromium'`, secure-context localhost) — that trap is already solved
    there.
-4. **Scripts** — `package.json`: `"qa": "tsx tools/qa.ts config/qa_visual.yaml"`,
-   `"qa:update-baselines": "… --update-baselines"`.
+4. **Scripts** — keep the current report-only `"qa"` command working, then add a
+   capture command such as `"qa:capture": "tsx tools/qa_capture.ts …"` and
+   `"qa:update-baselines": "… --update-baselines"` when browser capture lands.
 5. **Reports & baselines** — same JSON/MD schema and `baselines.json` manifest so
    a regression reads identically across both repos. clod-poc's `.gitignore` is
    tiny; apply the same smoke-baseline policy.
@@ -458,12 +470,12 @@ comments document durable invariants only, not this design.
 
 ## 15. Suggested execution order
 
-1. Phase 2 config + errors + validation (+ `serde_yaml` decision) → tests.
-2. Phase 4 image_diff → tests.
-3. Phase 5 probes → tests.
-4. Phase 6 timing (decide p95 field) → tests.
-5. Phase 3 report (JSON + MD) → round-trip test.
-6. Phase 7 runner (strategy A binary) → one lightweight pass.
+1. Phase 2 config + errors + validation (+ `serde_yaml` decision) -> tests. Done in v1.
+2. Phase 4 image_diff -> tests. Done in v1.
+3. Phase 5 probes -> tests. Done in v1.
+4. Phase 6 timing (decide p95 field) -> tests. v1 maps frame checks to existing `p99_frame_ms`; p95 remains deferred.
+5. Phase 3 report (JSON + MD) -> round-trip test. Done in v1.
+6. Phase 7 runner (strategy A binary) -> one lightweight pass. v1 consumes an existing `summary.json`; bench spawning is deferred.
 7. Phase 8 baselines + manifest + `.gitignore` policy.
 8. Phase 9 docs (`STATUS.md`, `visual-qa.md`).
 9. Phase 10 ship the three bug probes against real checkpoints.
