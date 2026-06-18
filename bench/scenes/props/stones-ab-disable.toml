@@ -1,0 +1,44 @@
+# A/B counterpart of props/stones-visual-regression.toml with the stone layer forced OFF.
+# Diff summary.json (frame time, draw calls, shadow pass) against the baseline to isolate the
+# stone cost; the screenshot set should match the baseline minus the ground stones.
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 6
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[render_toggles]
+enable_stones = true
+disable_stones = true
+
+[[checkpoint]]
+name = "ridge-run-noon"
+position = [256.0, 82.0, 220.0]
+look_at = [282.0, 64.0, 250.0]
+time_of_day = 0.42
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = false, photo_mode = false, cinematic_mode = false }
+motion = { kind = "run", end_position = [320.0, 82.0, 284.0], end_look_at = [344.0, 64.0, 304.0], look_sway_degrees = 10.0 }
+screenshot_points = [
+    { name = "start", frame = 0 },
+    { name = "mid", frame = 90 },
+    { name = "end", frame = 179 },
+]
+
+[[checkpoint]]
+name = "forest-look-sweep"
+position = [292.0, 88.0, 304.0]
+look_at = [246.0, 62.0, 260.0]
+time_of_day = 0.3
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = true, god_ray_intensity = 0.35, shadow_budget = true, ray_tracing = false, photo_mode = false, cinematic_mode = false }
+motion = { kind = "run_look_sweep", end_position = [264.0, 88.0, 277.0], end_look_at = [342.0, 62.0, 260.0], look_sway_degrees = 22.0 }
+screenshot_points = [
+    { name = "left", frame = 0 },
+    { name = "center", frame = 90 },
+    { name = "right", frame = 179 },
+]

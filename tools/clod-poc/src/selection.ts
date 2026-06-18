@@ -44,6 +44,10 @@ export interface SelectionResult {
   nearFieldForcedSplits: number; // how many nodes the near-field bubble forced to LOD0
 }
 
+export interface SelectionOptions {
+  errorPxLookup?: (node: ClodPageNode) => number | undefined;
+}
+
 function rectDistance2ToPoint(
   minX: number,
   minZ: number,
@@ -77,6 +81,7 @@ export function selectCut(
   roots: ClodPageNode[],
   params: SelectionParams,
   prev: SelectionState,
+  options: SelectionOptions = {},
 ): SelectionResult {
   const newSplit = new Set<string>();
   const rendered: ClodPageNode[] = [];
@@ -98,7 +103,7 @@ export function selectCut(
       for (const c of children) visit(c);
       return;
     }
-    const epx = errorPx(node, params);
+    const epx = options.errorPxLookup?.(node) ?? errorPx(node, params);
     const wasSplit = prev.split.has(node.id);
     const forcedByNearField = nearFieldForcesSplit(node, params);
     // Hysteresis: split at threshold, only merge back once under threshold / mergeFactor.

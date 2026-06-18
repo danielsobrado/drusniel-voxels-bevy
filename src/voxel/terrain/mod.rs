@@ -22,12 +22,14 @@ use crate::voxel::types::VoxelType;
 
 mod biome;
 mod caves;
+mod climate;
 mod height;
 mod noise;
 mod trees;
 mod water;
 
 pub use biome::{BIOME_DEPTH_BANDS, Biome, BiomeTable};
+pub use climate::ClimateSample;
 pub use noise::{NoiseGenerator, ValueNoise, hash_position, hash_position_seeded};
 pub use water::{GeneratedWaterBodyKind, WaterGenerationMetadata};
 

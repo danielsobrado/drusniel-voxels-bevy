@@ -68,6 +68,25 @@ If a visual change improves performance but regresses screenshots, document the 
 
 Outside bench mode, `VOXEL_RENDER_TIMING=1` enables equivalent render timing capture in the debug timing CSV.
 
+## clod-poc QA
+
+For `tools/clod-poc` web changes, run the Node/Vite checks plus the web QA harness when behavior, visuals, frame timing, CLOD selection, or WebGPU compute changes:
+
+```powershell
+rtk npm --prefix tools/clod-poc run typecheck
+rtk npm --prefix tools/clod-poc test
+rtk npm --prefix tools/clod-poc run build
+rtk npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json
+```
+
+The QA runner consumes a captured web summary JSON and writes `qa-report.json` / `qa-report.md` under `tools/clod-poc/qa-runs` by default. The sample summary is a smoke test only; for visual or performance claims, use a summary captured from the relevant browser scenario.
+
+For the current high-load CLOD/WebGPU selection scenario, start clod-poc and verify:
+
+```text
+http://127.0.0.1:5180/?world=16&clodPerf=1&webgpuSelection=1
+```
+
 ## NAADF Benches
 
 For NAADF preview or GI changes, measure startup visual stability:

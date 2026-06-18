@@ -1,0 +1,53 @@
+# Stone ground-detail props (size-stratified "no bare ground" layer).
+# Slope is terrain normal.y (1 = flat, lower = steeper). Stones are props, not terrain:
+# they never enter the voxel field or CLOD page geometry. Off by default — flip `enabled`.
+enabled: false
+seed_salt: 931777
+cell_size_m: 2.1
+max_instances: 350000
+density: 1.0
+
+# Slope acceptance (normal.y): no penalty at/above _start, fully rejected below _repose.
+slope_repose_start: 0.78
+slope_repose: 0.5
+# Reject candidates below the water surface + this margin.
+water_margin_m: 0.5
+# Extra large-stone weight in streambeds.
+stream_large_bias: 0.16
+# Uphill cliff probe distances (talus collects below cliffs).
+cliff_probe_near_m: 8.0
+cliff_probe_far_m: 18.0
+# bed = slope * sink_slope_multiplier + 1 (deeper sink on slopes).
+sink_slope_multiplier: 0.9
+# Max lean toward the terrain normal.
+normal_lean: 0.4
+
+large:
+  radius_min: 0.6
+  radius_max: 2.2
+  max_distance_m: 900.0
+  sink: 0.30
+  lod_details: [3, 2]
+  variants: 4
+  presets: [talus, boulder]
+  shadows: true
+
+medium:
+  radius_min: 0.2
+  radius_max: 0.6
+  max_distance_m: 280.0
+  sink: 0.26
+  lod_details: [2, 1]
+  variants: 4
+  presets: [cobble, talus]
+  shadows: false
+
+small:
+  radius_min: 0.06
+  radius_max: 0.2
+  max_distance_m: 90.0
+  sink: 0.22
+  lod_details: [1]
+  variants: 4
+  presets: [cobble]
+  shadows: false

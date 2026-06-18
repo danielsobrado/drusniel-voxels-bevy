@@ -18,10 +18,16 @@ npm install
 npm run dev
 ```
 
-The local dev URL uses the GitHub Pages base path:
+The local dev server is pinned to port 5180:
 
 ```text
-http://127.0.0.1:5173/drusniel-voxels-web/
+http://127.0.0.1:5180/
+```
+
+For the high-load CLOD/WebGPU selection path, use:
+
+```text
+http://127.0.0.1:5180/?world=16&clodPerf=1&webgpuSelection=1
 ```
 
 Convenience scripts are available:
@@ -53,6 +59,19 @@ npm run build-pages 8
 ```
 
 `npm run spike` verifies the `meshoptimizer` API behavior used by the builder.
+
+The clod-poc QA harness consumes a web summary JSON and writes JSON/Markdown reports.
+Use the sample summary as a smoke check:
+
+```bash
+npm run qa -- --summary tests/qa-sample-summary.json
+```
+
+To write reports to a named folder:
+
+```bash
+npm run qa -- --summary tests/qa-sample-summary.json --output qa-runs/local-smoke
+```
 
 ## GitHub Pages
 

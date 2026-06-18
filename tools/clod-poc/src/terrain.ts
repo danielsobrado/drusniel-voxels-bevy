@@ -13,7 +13,7 @@ import { PageMesh } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
 
 const Y_CELLS = 128;
-const WATER_LEVEL = 18;
+export const WATER_LEVEL = 18;
 const MIN_NORMAL_TERRAIN_SURFACE_Y = WATER_LEVEL - 4;
 const BASE_TERRAIN_ELEVATION = MIN_NORMAL_TERRAIN_SURFACE_Y;
 const TERRAIN_SEED = 0;

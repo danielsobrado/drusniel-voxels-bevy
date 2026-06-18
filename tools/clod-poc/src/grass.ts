@@ -486,7 +486,7 @@ const BLADE_PLANES = {
   ],
 } as const;
 
-function createBladeGeometry(
+export function createBladeGeometry(
   rows: readonly (readonly [number, number])[] = BLADE_ROWS,
   crossed = false,
 ): THREE.BufferGeometry {

@@ -10,6 +10,7 @@ pub mod merging;
 pub mod persistence;
 pub mod placement;
 pub mod spawner;
+pub mod stones;
 
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
@@ -38,6 +39,7 @@ pub struct PropsPlugin;
 impl Plugin for PropsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(instanced_render::PropInstancingPlugin)
+            .add_plugins(stones::StonesPlugin)
             .init_resource::<PropAssets>()
             .init_resource::<PropConfig>()
             .init_resource::<spawner::PropsSpawned>()

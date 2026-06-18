@@ -156,6 +156,12 @@ pub struct BenchRenderToggles {
     pub disable_grass: bool,
     #[serde(default)]
     pub disable_instanced_props: bool,
+    /// Force stones on for a bench baseline (they default off in config).
+    #[serde(default)]
+    pub enable_stones: bool,
+    /// A/B switch to force stones off regardless of config / `enable_stones`.
+    #[serde(default)]
+    pub disable_stones: bool,
     #[serde(default)]
     pub disable_terrain_meshes: bool,
     #[serde(default)]

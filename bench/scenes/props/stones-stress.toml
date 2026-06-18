@@ -1,0 +1,27 @@
+# Stone stress: hold a low, ground-grazing camera over varied terrain so the maximum number of
+# near-field stones (all three size classes + large-stone shadows) are on screen at once.
+# Watch frame time, draw calls, the shadow pass, and the Counter stones.* rows.
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 6
+world_cache_path = "bench-runs/cache/visual-regression-world.bin"
+
+[render_toggles]
+enable_stones = true
+
+[[checkpoint]]
+name = "stone-ground-graze"
+position = [288.0, 70.0, 268.0]
+look_at = [320.0, 64.0, 300.0]
+time_of_day = 0.42
+hold_frames = 240
+screenshot = true
+fog_tier = "off"
+render_features = { gtao = true, ssao = false, baked_ao_strength = 0.8, fog = false, god_rays = false, shadow_budget = true, ray_tracing = false, photo_mode = false, cinematic_mode = false }
+motion = { kind = "run_look_sweep", end_position = [330.0, 70.0, 310.0], end_look_at = [300.0, 64.0, 268.0], look_sway_degrees = 28.0 }
+screenshot_points = [
+    { name = "near", frame = 0 },
+    { name = "sweep", frame = 120 },
+    { name = "far", frame = 239 },
+]

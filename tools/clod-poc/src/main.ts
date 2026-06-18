@@ -34,13 +34,21 @@ import {
   type GrassSettings,
   type GrassStats,
 } from "./grass.js";
+import { DEFAULT_STONE_SETTINGS, STONE_CLASSES, type StoneClass } from "./stones/stone_config.js";
+import { StoneSystem, type StoneLighting, type StoneStats } from "./stones/stone_instances.js";
 import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
   PlayerInteractionState,
   type PlayerInputState,
 } from "./player_controller.js";
-import { selectCut, SelectionParams, SelectionState } from "./selection.js";
+import { errorPx, selectCut, type SelectionParams, type SelectionState } from "./selection.js";
+import {
+  ClodErrorPxCompute,
+  type ClodErrorMap,
+  type ClodErrorPxStats,
+} from "./gpu/clod_error_px_compute.js";
+import { requestWebGpuDevice } from "./gpu/webgpu_device.js";
 import { TerrainColliderSet, type TerrainColliderPage, type TerrainSurfaceHit } from "./terrain_collider.js";
 import { borderChain } from "./validate.js";
 import {
@@ -87,6 +95,9 @@ import {
 
 const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
+const WEBGPU_ERROR_MAX_AGE_FRAMES = 2;
+const WEBGPU_PARITY_INTERVAL_FRAMES = 60;
+const WEBGPU_ERROR_TOLERANCE_PX = 0.02;
 const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
   { id: "grass-2", scale: 0.06, heightMin: 12, heightMax: 18 },
   { id: "earth-2", scale: 0.04, heightMin: 18, heightMax: 40 },
@@ -356,6 +367,24 @@ async function main() {
   setButtonIcon(playerModeButton, "camera", "player", "Player");
   const searchParams = new URLSearchParams(location.search);
   const queryPerfMode = searchParams.get("clodPerf") === "1";
+  const queryWebGpuSelection = searchParams.get("webgpuSelection") === "1";
+  // CPU/GPU error_px parity is a full per-node sweep; opt-in keeps it from hitching the
+  // frame. Off: verify once when the first GPU map lands. On: re-verify periodically.
+  const queryWebGpuParity = searchParams.get("webgpuParity") === "1";
+  // Phase 1 WebGPURenderer de-risk spike (docs/webgpu-migration.md). Dynamically imported
+  // so `three/webgpu` stays out of the normal WebGL bundle; short-circuits the app.
+  if (searchParams.get("webgpuSpike") === "1") {
+    const { runWebGpuSpike } = await import("./gpu/webgpu_spike.js");
+    await runWebGpuSpike();
+    return;
+  }
+  // Phase 2 WebGPU terrain preview: real terrain meshes rendered with the ported terrain
+  // NodeMaterial, for material-parity QA before the full renderer abstraction lands.
+  if (searchParams.get("webgpu") === "1") {
+    const { runWebGpuPreview } = await import("./gpu/webgpu_preview.js");
+    await runWebGpuPreview(searchParams);
+    return;
+  }
   const importToken = searchParams.get("import");
   let stagedImport: ProjectArchiveContents | null = null;
   if (importToken) {
@@ -425,6 +454,42 @@ async function main() {
   buildStatus = "ready";
   const polishLine = formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish)));
   const allNodes: ClodPageNode[] = [...result.nodesByLevel.values()].flat();
+  let clodErrorCompute: ClodErrorPxCompute | null = null;
+  let webGpuUnavailableReason: string | null = null;
+  let webGpuInitPromise: Promise<void> | null = null;
+  // One shared device for the whole app (matches the fable5-world-demo pattern of a
+  // single renderer-owned device). Future GPU passes should be handed this device
+  // rather than each requesting their own.
+  let sharedWebGpuDevice: GPUDevice | null = null;
+  const ensureClodErrorCompute = (): Promise<void> => {
+    if (clodErrorCompute || webGpuUnavailableReason) return Promise.resolve();
+    if (!webGpuInitPromise) {
+      webGpuInitPromise = (async () => {
+        if (!sharedWebGpuDevice) {
+          const deviceResult = await requestWebGpuDevice();
+          if (!deviceResult.ok) {
+            webGpuUnavailableReason = deviceResult.message;
+            return;
+          }
+          sharedWebGpuDevice = deviceResult.device;
+        }
+        const { compute, unavailable } = await ClodErrorPxCompute.create(allNodes, sharedWebGpuDevice);
+        clodErrorCompute = compute;
+        webGpuUnavailableReason = unavailable?.message ?? null;
+      })()
+        .catch((error) => {
+          webGpuUnavailableReason = error instanceof Error ? error.message : String(error);
+        })
+        .finally(() => {
+          webGpuInitPromise = null;
+        });
+    }
+    return webGpuInitPromise;
+  };
+  if (queryWebGpuSelection) {
+    info.textContent = "initializing WebGPU CLOD compute…";
+    await ensureClodErrorCompute();
+  }
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -689,6 +754,7 @@ async function main() {
 
   const state = {
     clodPerfMode: queryPerfMode,
+    webgpuSelection: queryWebGpuSelection,
     thresholdPx: cfg.selection.error_threshold_px,
     enforce21: true,
     freeze: false,
@@ -771,6 +837,16 @@ async function main() {
     grassTierSummary: "0/0/0",
     grassEdgeSuppressed: 0,
     grassCandidateCount: 0,
+    stonesEnabled: false,
+    stoneDensity: DEFAULT_STONE_SETTINGS.density,
+    stoneMaxInstances: DEFAULT_STONE_SETTINGS.maxInstances,
+    stoneSeed: DEFAULT_STONE_SETTINGS.seed,
+    stoneShowLarge: true,
+    stoneShowMedium: true,
+    stoneShowSmall: true,
+    stoneTotal: 0,
+    stoneClassSummary: "0/0/0",
+    stoneVisible: 0,
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
   if (queryPerfMode) {
@@ -788,6 +864,7 @@ async function main() {
     state.showNodeLabels = false;
     state.showLockedBorderVertices = false;
     state.grassEnabled = false;
+    state.stonesEnabled = false;
   }
   let colorByLodUserOverride = stagedImport !== null;
   let lastTexturesActive: boolean | null = null;
@@ -922,8 +999,16 @@ async function main() {
     textureArraySignature = signature;
     albedoArrayTex?.dispose();
     normalArrayTex?.dispose();
-    albedoArrayTex = buildDataArray(textureSlots.map((s) => s.texture?.image ?? null), THREE.SRGBColorSpace);
-    normalArrayTex = buildDataArray(textureSlots.map((s) => s.normalTexture?.image ?? null), THREE.NoColorSpace);
+    // three r0.184 types Texture.image as `{}`; buildDataArray guards + casts to
+    // CanvasImageSource internally, so narrow at the call site.
+    albedoArrayTex = buildDataArray(
+      textureSlots.map((s) => (s.texture?.image as TexImageSource | undefined) ?? null),
+      THREE.SRGBColorSpace,
+    );
+    normalArrayTex = buildDataArray(
+      textureSlots.map((s) => (s.normalTexture?.image as TexImageSource | undefined) ?? null),
+      THREE.NoColorSpace,
+    );
   };
 
   const terrainTextureUniformOptions = () => {
@@ -1087,6 +1172,7 @@ async function main() {
   };
   let grass: GrassSystem | null = null;
   let grassStats: GrassStats | null = null;
+  let stones: StoneSystem | null = null;
   let selState: SelectionState = { split: new Set() };
   const pageTransitionMode = cfg.selection.transition_mode;
   const crossfadeStep = cfg.selection.crossfade_frames > 0
@@ -1110,6 +1196,12 @@ async function main() {
       skyLight: lighting.skyLight,
       groundLight: lighting.groundLight,
     });
+    stones?.updateLighting({
+      light: lighting.sunDirection,
+      sunColor: lighting.sunColor,
+      skyLight: lighting.skyLight,
+      groundLight: lighting.groundLight,
+    });
   };
   const grassSystem = new GrassSystem({
     scene,
@@ -1121,6 +1213,30 @@ async function main() {
   grass = grassSystem;
   state.grassBladeCount = grassSystem.getBladeCount();
   grassStats = grassSystem.getStats();
+
+  // Stone overlay (ground-detail props). Pure visual layer: scattered over the LOD0 page
+  // footprints and added to the scene, never fed into the page source mesh / weld path.
+  const makeStoneSettings = () => ({
+    ...DEFAULT_STONE_SETTINGS,
+    enabled: state.stonesEnabled,
+    density: state.stoneDensity,
+    maxInstances: state.stoneMaxInstances,
+    seed: state.stoneSeed,
+  });
+  const visibleStoneClasses = (): StoneClass[] =>
+    STONE_CLASSES.filter((cls) =>
+      cls === "large" ? state.stoneShowLarge : cls === "medium" ? state.stoneShowMedium : state.stoneShowSmall,
+    );
+  const stoneSystem = new StoneSystem({
+    scene,
+    nodes: allNodes.filter((node) => node.level === 0),
+    worldCells,
+    settings: makeStoneSettings(),
+    lighting: currentGrassLighting() as StoneLighting,
+  });
+  stoneSystem.setVisibleClasses(visibleStoneClasses());
+  stones = stoneSystem;
+  let stoneStats: StoneStats = stoneSystem.getStats();
 
   const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
@@ -1195,6 +1311,37 @@ async function main() {
   let averageFps = 0;
   let lastDigSummary = "";
   let lastArchiveSummary = "";
+  let selectionFrameId = 0;
+  let lastSelectionMs = 0;
+  let lastSelectionSource: "cpu" | "webgpu" = "cpu";
+  let lastParityFrame = -WEBGPU_PARITY_INTERVAL_FRAMES;
+  let parityVerified = false;
+  const emptyWebGpuStats = (): ClodErrorPxStats => ({
+    enabled: state.webgpuSelection,
+    available: false,
+    status: state.webgpuSelection ? "unavailable" : "disabled",
+    reason: webGpuUnavailableReason ?? (state.webgpuSelection ? "not initialized" : undefined),
+    nodeCount: allNodes.length,
+    version: 0,
+    latestAgeFrames: null,
+    dispatchMs: null,
+    readbackMs: null,
+    skippedDispatches: 0,
+    parity: "unchecked",
+    parityMaxDelta: null,
+  });
+  const currentWebGpuStats = (): ClodErrorPxStats =>
+    clodErrorCompute?.stats(selectionFrameId, state.webgpuSelection) ?? emptyWebGpuStats();
+  const formatWebGpuStats = (): string => {
+    const stats = currentWebGpuStats();
+    if (!state.webgpuSelection) return "webgpu=off";
+    if (!stats.available) return `webgpu=${stats.status}${stats.reason ? ` (${stats.reason})` : ""}`;
+    const age = stats.latestAgeFrames === null ? "none" : `${stats.latestAgeFrames}f`;
+    const dispatch = stats.dispatchMs === null ? "-" : `${stats.dispatchMs.toFixed(2)}ms`;
+    const readback = stats.readbackMs === null ? "-" : `${stats.readbackMs.toFixed(2)}ms`;
+    const parityDelta = stats.parityMaxDelta === null ? "" : ` d=${stats.parityMaxDelta.toFixed(4)}px`;
+    return `webgpu=${stats.status} age=${age} dispatch=${dispatch} read=${readback} parity=${stats.parity}${parityDelta}`;
+  };
   const currentOverlaySnapshot = (): ClodOverlaySnapshot => ({
     worldSize: WORLD,
     renderedTriangles: lastTriCount,
@@ -1219,6 +1366,7 @@ async function main() {
       `bubble forced splits: ${lastNearFieldForced}   xLOD borders: ${lastCrossLodAdjacencyCount}\n` +
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
+      `selection: ${lastSelectionSource} ${lastSelectionMs.toFixed(2)}ms   ${formatWebGpuStats()}\n` +
       `${polishLine}\n` +
       `worker: parents pending=${pendingParentCount} rebuilt=${pendingParentNodes} ${pendingParentMs.toFixed(0)}ms   ` +
       `colliders loaded=${terrainColliders.loadedPageCount()}${state.clodPerfMode ? "   CLOD PERF" : ""}\n` +
@@ -1234,7 +1382,42 @@ async function main() {
     updateClodOverlay(currentOverlaySnapshot());
   };
 
+  const verifyWebGpuParity = (map: ClodErrorMap, params: SelectionParams) => {
+    if (!clodErrorCompute) return;
+    // Default: one-shot verification once the first GPU map is available. The full
+    // per-node CPU sweep is a frame hitch, so only re-run it when explicitly enabled.
+    if (parityVerified && !queryWebGpuParity) return;
+    if (selectionFrameId - lastParityFrame < WEBGPU_PARITY_INTERVAL_FRAMES) return;
+    lastParityFrame = selectionFrameId;
+    parityVerified = true;
+    const parityParams: SelectionParams = {
+      ...params,
+      camPos: [...map.params.camPos],
+      viewportH: map.params.viewportH,
+      fovY: map.params.fovY,
+    };
+    let maxDelta = 0;
+    for (const node of allNodes) {
+      const gpuValue = clodErrorCompute.valueFor(node, map);
+      const cpuValue = errorPx(node, parityParams);
+      if (gpuValue === undefined || !Number.isFinite(cpuValue)) {
+        clodErrorCompute.markParityFailed("WebGPU CLOD error_px produced a non-finite result", Number.POSITIVE_INFINITY);
+        return;
+      }
+      maxDelta = Math.max(maxDelta, Math.abs(gpuValue - cpuValue));
+    }
+    if (maxDelta > WEBGPU_ERROR_TOLERANCE_PX) {
+      clodErrorCompute.markParityFailed(
+        `WebGPU CLOD error_px parity exceeded ${WEBGPU_ERROR_TOLERANCE_PX}px`,
+        maxDelta,
+      );
+      return;
+    }
+    clodErrorCompute.markParityOk(maxDelta);
+  };
+
   const updateSelection = () => {
+    const selectionStart = performance.now();
     const selectionCenter = interaction.mode === "playing" ? player.position : controls.target;
     const params: SelectionParams = {
       thresholdPx: state.thresholdPx,
@@ -1252,10 +1435,21 @@ async function main() {
       camPos: [camera.position.x, camera.position.y, camera.position.z],
       forcedMaxLevel: state.forceMaxLevel === "auto" ? null : Number(state.forceMaxLevel),
     };
-    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectCut(result.roots, params, selState);
+    const gpuMap = state.webgpuSelection
+      ? clodErrorCompute?.latestFor(selectionFrameId, WEBGPU_ERROR_MAX_AGE_FRAMES) ?? null
+      : null;
+    if (gpuMap) verifyWebGpuParity(gpuMap, params);
+    const errorPxLookup = gpuMap && clodErrorCompute ? clodErrorCompute.errorLookup(gpuMap) : undefined;
+    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectCut(
+      result.roots,
+      params,
+      selState,
+      { errorPxLookup },
+    );
     selState = ns;
     lastForced = forcedSplits;
     lastNearFieldForced = nearFieldForcedSplits;
+    lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
 
     const cutIds = new Set(rendered.map((n) => n.id));
     for (const v of views.values()) {
@@ -1289,6 +1483,10 @@ async function main() {
       rebuildDebugOverlays(rendered, xLodAdjacencies);
       lockedBorderOverlay.rebuild(rendered, state.showLockedBorderVertices);
     }
+    if (state.webgpuSelection && clodErrorCompute) {
+      clodErrorCompute.dispatch(params, selectionFrameId);
+    }
+    lastSelectionMs = performance.now() - selectionStart;
   };
 
   // Swap a rebuilt node's mesh into its view (and, for LOD0, its collider + raw-chunk
@@ -1325,6 +1523,7 @@ async function main() {
 
   clodWorker.onParentRebuilt = (batch) => {
     for (const node of batch.changed) applyNodeMesh(node);
+    clodErrorCompute?.patchNodes(batch.changed);
     pendingParentNodes = batch.parentNodes;
     pendingParentMs = batch.parentMs;
     pendingParentCount = batch.pendingParents;
@@ -1383,6 +1582,7 @@ async function main() {
 
       let colliderMs = 0;
       for (const node of lod0.changed) colliderMs += applyNodeMesh(node);
+      clodErrorCompute?.patchNodes(lod0.changed);
       if (state.grassEnabled && lod0.changed.length > 0) {
         grassSystem.rebuildNodePatches(lod0.changed.map((node) => node.id));
         refreshGrassStats();
@@ -1441,6 +1641,12 @@ async function main() {
     else next.delete("clodPerf");
     history.replaceState(null, "", `${location.pathname}${next.toString() ? `?${next.toString()}` : ""}${location.hash}`);
   };
+  const setWebGpuSelectionQuery = (enabled: boolean) => {
+    const next = new URLSearchParams(location.search);
+    if (enabled) next.set("webgpuSelection", "1");
+    else next.delete("webgpuSelection");
+    history.replaceState(null, "", `${location.pathname}${next.toString() ? `?${next.toString()}` : ""}${location.hash}`);
+  };
   const applyClodPerfMode = (enabled: boolean) => {
     state.clodPerfMode = enabled;
     if (enabled) {
@@ -1482,6 +1688,20 @@ async function main() {
       location.search = `?${next.toString()}`;
     });
   gui.add(state, "clodPerfMode").name("CLOD perf mode").onChange(applyClodPerfMode);
+  gui.add(state, "webgpuSelection").name("WebGPU selection").onChange((enabled: boolean) => {
+    setWebGpuSelectionQuery(enabled);
+    if (enabled) {
+      void ensureClodErrorCompute().then(() => {
+        lastCutKey = "";
+        updateSelection();
+        updateInfo();
+      });
+      return;
+    }
+    lastCutKey = "";
+    updateSelection();
+    updateInfo();
+  });
   gui.add(state, "thresholdPx", 0.1, 6, 0.05).name("error threshold px").onChange(updateSelection);
   gui.add(state, "forceMaxLevel", ["auto", "0", "1", "2", "3"]).name("force max level").onChange(() => {
     selState = { split: new Set() };
@@ -1680,6 +1900,44 @@ async function main() {
   grassEdgeSuppressedController = grassFolder.add(state, "grassEdgeSuppressed").name("edge suppressed").disable();
   grassCandidateCountController = grassFolder.add(state, "grassCandidateCount").name("candidates").disable();
   grassFolder.add(grassActions, "rebuild").name("rebuild");
+
+  let stoneTotalController: { updateDisplay: () => unknown } | null = null;
+  let stoneClassSummaryController: { updateDisplay: () => unknown } | null = null;
+  let stoneVisibleController: { updateDisplay: () => unknown } | null = null;
+  const refreshStoneStats = () => {
+    stoneStats = stoneSystem.getStats();
+    state.stoneTotal = stoneStats.total;
+    state.stoneClassSummary = `${stoneStats.large}/${stoneStats.medium}/${stoneStats.small}`;
+    state.stoneVisible = stoneStats.visible;
+    stoneTotalController?.updateDisplay();
+    stoneClassSummaryController?.updateDisplay();
+    stoneVisibleController?.updateDisplay();
+  };
+  const stoneActions = {
+    rebuild: () => {
+      stoneSystem.updateSettings(makeStoneSettings());
+      stoneSystem.setVisibleClasses(visibleStoneClasses());
+      refreshStoneStats();
+      updateInfo();
+    },
+  };
+  const stoneFolder = gui.addFolder("stones (props)");
+  stoneFolder.add(state, "stonesEnabled").name("enabled").onChange((enabled: boolean) => {
+    stoneSystem.setEnabled(enabled);
+    refreshStoneStats();
+    updateInfo();
+  });
+  stoneFolder.add(state, "stoneDensity", 0, 2, 0.05).name("density").onFinishChange(stoneActions.rebuild);
+  stoneFolder.add(state, "stoneMaxInstances", 0, 500000, 1000).name("max instances").onFinishChange(stoneActions.rebuild);
+  stoneFolder.add(state, "stoneSeed", 0, 1000000, 1).name("seed").onFinishChange(stoneActions.rebuild);
+  stoneFolder.add(state, "stoneShowLarge").name("show large").onChange(() => stoneSystem.setVisibleClasses(visibleStoneClasses()));
+  stoneFolder.add(state, "stoneShowMedium").name("show medium").onChange(() => stoneSystem.setVisibleClasses(visibleStoneClasses()));
+  stoneFolder.add(state, "stoneShowSmall").name("show small").onChange(() => stoneSystem.setVisibleClasses(visibleStoneClasses()));
+  stoneTotalController = stoneFolder.add(state, "stoneTotal").name("total").disable();
+  stoneClassSummaryController = stoneFolder.add(state, "stoneClassSummary").name("L/M/S").disable();
+  stoneVisibleController = stoneFolder.add(state, "stoneVisible").name("visible").disable();
+  stoneFolder.add(stoneActions, "rebuild").name("rebuild");
+
   const textureInput = document.createElement("input");
   textureInput.type = "file";
   textureInput.accept = "image/*";
@@ -2936,6 +3194,7 @@ async function main() {
 
   let elapsedSeconds = 0;
   renderer.setAnimationLoop(() => {
+    selectionFrameId++;
     const playerDelta = Math.min(playerClock.getDelta(), 0.1);
     elapsedSeconds += playerDelta;
     updateAverageFps();
@@ -3022,6 +3281,17 @@ async function main() {
     }
     const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
     grassSystem.update(elapsedSeconds, grassCenter);
+    stoneSystem.update(grassCenter);
+    const nextStoneStats = stoneSystem.getStats();
+    if (nextStoneStats.total !== stoneStats.total || nextStoneStats.visible !== stoneStats.visible) {
+      stoneStats = nextStoneStats;
+      state.stoneTotal = nextStoneStats.total;
+      state.stoneClassSummary = `${nextStoneStats.large}/${nextStoneStats.medium}/${nextStoneStats.small}`;
+      state.stoneVisible = nextStoneStats.visible;
+      stoneTotalController?.updateDisplay();
+      stoneClassSummaryController?.updateDisplay();
+      stoneVisibleController?.updateDisplay();
+    }
     const nextGrassStats = grassSystem.getStats();
     if (
       !grassStats ||
@@ -3102,8 +3372,10 @@ async function main() {
   window.addEventListener("beforeunload", () => {
     lockedBorderOverlay.dispose();
     grassSystem.dispose();
+    stoneSystem.dispose();
     skyEnvironment.dispose();
     postProcess.dispose();
+    clodErrorCompute?.destroy();
     clodWorker.dispose();
   }, { once: true });
 }

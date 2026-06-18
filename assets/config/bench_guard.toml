@@ -834,3 +834,37 @@ area = "Counter Seam Audit: Strip Incompatible Faces"
 field = "avg_ms"
 fail_gt = 0.0
 unit = "count"
+
+# --- Stone props (props/stones-visual-regression.toml) ---------------------------------------
+# `exists` guards confirm the stone layer is actually active (machine-independent). The count
+# upper bounds catch a stone explosion; tune warn_gt/fail_gt after a baseline run on the target
+# machine (and add __frame_total avg_ms/p99_ms checks then — p95 budget: <= +0.7 ms low/med,
+# <= +1.2 ms high vs props/stones-ab-disable.toml).
+[[check]]
+name = "stones_total_counter_exists"
+scene = "stones-visual-regression.toml"
+checkpoint = "ridge-run-noon"
+area = "Counter stones.total"
+field = "avg_ms"
+exists = true
+unit = "count"
+
+[[check]]
+name = "stones_total_upper_bound"
+scene = "stones-visual-regression.toml"
+checkpoint = "ridge-run-noon"
+area = "Counter stones.total"
+field = "avg_ms"
+warn_gt = 200000
+fail_gt = 350000
+unit = "count"
+
+[[check]]
+name = "stones_sweep_total_upper_bound"
+scene = "stones-visual-regression.toml"
+checkpoint = "forest-look-sweep"
+area = "Counter stones.total"
+field = "avg_ms"
+warn_gt = 200000
+fail_gt = 350000
+unit = "count"

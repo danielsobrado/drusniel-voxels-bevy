@@ -14,6 +14,25 @@ Keep profiling in the loop as features are added. Rendering work in this repo is
 - Do not sum broad timing rows such as Render Graph, Render Prepare, QueueMeshes, or nested prepare brackets. Treat them as separate symptoms.
 - Use the fixed screenshot checkpoints from the bench output to check visual stability.
 
+## clod-poc Web QA
+
+For `tools/clod-poc` changes, especially CLOD selection, WebGPU compute, browser visuals, or frame timing, run the clod-poc checks and QA harness:
+
+```powershell
+rtk npm --prefix tools/clod-poc run typecheck
+rtk npm --prefix tools/clod-poc test
+rtk npm --prefix tools/clod-poc run build
+rtk npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json
+```
+
+The QA runner reads a web summary JSON, validates configured screenshots, probes, and timing thresholds, then writes `qa-report.json` and `qa-report.md` under `tools/clod-poc/qa-runs` unless `--output` is provided. The sample summary is only a harness smoke test; use a captured summary for real browser visual/perf conclusions.
+
+The opt-in CLOD WebGPU selection scenario is:
+
+```text
+http://127.0.0.1:5180/?world=16&clodPerf=1&webgpuSelection=1
+```
+
 ## Regression Guard
 
 Use the bench guard for bottleneck checks:
