@@ -9,6 +9,7 @@ mod debug;
 mod hash;
 mod material;
 mod placement;
+mod persistence;
 mod rock_mesh;
 mod runtime;
 mod scatter;

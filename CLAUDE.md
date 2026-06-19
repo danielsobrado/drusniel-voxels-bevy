@@ -5,6 +5,7 @@ Keep profiling in the loop as features are added. Rendering work in this repo is
 ## Performance Expectations
 
 - Use `cargo run --release -- --bench ...` for any change that could affect frame time, render passes, terrain meshing, props, water, shadows, or post effects.
+- Do not run visual benches from WSL. This includes visual-regression, screenshot, and startup visual-stability bench scenes. Use a native Windows shell for those runs, or report that visual benches were not run because the current environment is WSL.
 - Prefer the deterministic visual bench scenes so runs are comparable:
   - `bench/scenes/visual/visual-regression.toml`
   - `bench/scenes/visual/visual-regression-high.toml`

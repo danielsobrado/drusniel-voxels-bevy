@@ -38,6 +38,8 @@ rtk make build        # Build production artifacts
 
 Profile any change that can affect rendering, terrain meshing, props, shadows, water, post-processing, or frame timing.
 
+Do not run visual benches from WSL. This includes visual-regression, screenshot, and startup visual-stability bench scenes. Use a native Windows shell for those runs, or report that visual benches were not run because the current environment is WSL.
+
 Expected workflow:
 
 1. Run a baseline bench for the relevant scene.

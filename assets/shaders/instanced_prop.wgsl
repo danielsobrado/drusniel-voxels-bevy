@@ -75,7 +75,18 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let texel = textureSample(albedo_texture, albedo_sampler, in.uv);
     // Prop GLTF vertex colors are often masks/AO data, not display color.
     // Multiplying them into albedo crushes foliage and bark toward black.
-    let shaded_albedo = texel * props.base_color * in.tint;
+    var shaded_albedo = texel * props.base_color * in.tint;
+    if (props._padding > 0.5) {
+        let hue = in.color.r;
+        let strata = in.color.g;
+        let moss = in.color.b;
+        let cavity_ao = in.color.a;
+        var stone_tone = mix(vec3<f32>(0.34, 0.33, 0.30), vec3<f32>(0.56, 0.54, 0.48), strata);
+        stone_tone = mix(stone_tone, vec3<f32>(0.22, 0.30, 0.20), moss * 0.35);
+        stone_tone *= mix(0.90, 1.10, hue);
+        stone_tone *= mix(0.70, 1.05, cavity_ao);
+        shaded_albedo = vec4<f32>(shaded_albedo.rgb * stone_tone, shaded_albedo.a);
+    }
     if (shaded_albedo.a <= props.alpha_cutoff) {
         discard;
     }

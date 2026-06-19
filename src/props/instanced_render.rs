@@ -260,6 +260,13 @@ pub struct PropInstanceBounds {
     pub sphere_radius: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct RawPropInstance {
+    pub transform: Transform,
+    pub tint: Vec4,
+    pub shadow_culled: bool,
+}
+
 #[derive(Clone, Copy, Eq)]
 struct PropGroupKey {
     region_pos: IVec2,
@@ -658,6 +665,73 @@ pub fn spawn_instanced_prop(
             ))
             .id(),
     )
+}
+
+pub fn spawn_raw_instanced_prop_batch(
+    commands: &mut Commands,
+    groups: &mut PropInstanceGroups,
+    mesh: Handle<Mesh>,
+    material: Handle<PropsMaterial>,
+    local_bounds: PropLocalBounds,
+    bounds_padding: f32,
+    prop_id: &str,
+    prop_type: PropType,
+    chunk_pos: IVec2,
+    instances: &[RawPropInstance],
+) -> Vec<Entity> {
+    if instances.is_empty() {
+        return Vec::new();
+    }
+
+    let prop_class = classify_prop_render_class(prop_id, prop_type);
+    let mut touched = Vec::new();
+    for raw in instances {
+        let instance_bounds =
+            transformed_prop_bounds(local_bounds, &raw.transform, bounds_padding);
+        let instance = PropInstance {
+            transform: raw.transform.to_matrix().to_cols_array_2d(),
+            tint: raw.tint.to_array(),
+        };
+
+        groups.record_bounds(true, instance_bounds, bounds_padding);
+        let (group, _slot) = get_or_create_group(
+            commands,
+            groups,
+            mesh.clone(),
+            material.clone(),
+            chunk_pos,
+            instance_bounds.min,
+            instance_bounds.max,
+            prop_type,
+        );
+        if !touched.contains(&group) {
+            touched.push(group);
+        }
+
+        groups
+            .pending
+            .entry(group)
+            .and_modify(|pending| {
+                pending.instances.push(instance);
+                pending.bounds.push(instance_bounds);
+                pending.prop_classes.push(prop_class);
+                pending.shadow_culled.push(raw.shadow_culled);
+                pending.min = pending.min.min(instance_bounds.min);
+                pending.max = pending.max.max(instance_bounds.max);
+                pending.prop_type_mask |= prop_type_mask(prop_type);
+            })
+            .or_insert_with(|| PendingPropGroupUpdate {
+                instances: vec![instance],
+                bounds: vec![instance_bounds],
+                prop_classes: vec![prop_class],
+                shadow_culled: vec![raw.shadow_culled],
+                min: instance_bounds.min,
+                max: instance_bounds.max,
+                prop_type_mask: prop_type_mask(prop_type),
+            });
+    }
+
+    touched
 }
 
 fn get_or_create_group(

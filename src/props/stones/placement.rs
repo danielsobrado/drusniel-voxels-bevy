@@ -5,7 +5,6 @@
 
 use bevy::prelude::*;
 
-use crate::constants::CHUNK_SIZE_I32;
 use crate::voxel::terrain::{BiomeTable, TerrainGenerator, ValueNoise};
 use crate::voxel::world::VoxelWorld;
 use crate::world_rules::ProtectedAreaRegistry;
@@ -31,7 +30,7 @@ pub fn generate_stones_for_chunk(
     let max_x = min_x + STONE_CHUNK_SIZE;
     let max_z = min_z + STONE_CHUNK_SIZE;
 
-    if outside_positive_world_bounds(world, min_x, min_z, max_x, max_z) {
+    if outside_world_bounds(world, min_x, min_z, max_x, max_z) {
         return Vec::new();
     }
 
@@ -51,15 +50,18 @@ pub fn generate_stones_for_chunk(
         .collect()
 }
 
-fn outside_positive_world_bounds(
+fn outside_world_bounds(
     world: &VoxelWorld,
     min_x: i32,
     min_z: i32,
     max_x: i32,
     max_z: i32,
 ) -> bool {
-    let size = world.world_size_chunks() * CHUNK_SIZE_I32;
-    max_x <= 0 || max_z <= 0 || min_x >= size.x || min_z >= size.z
+    let bounds = world.bounds();
+    max_x <= bounds.horizontal_min.x
+        || max_z <= bounds.horizontal_min.y
+        || min_x > bounds.horizontal_max.x
+        || min_z > bounds.horizontal_max.y
 }
 
 #[cfg(test)]

@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use super::rock_mesh::RockPreset;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum StoneClassId {
     Large,
     Medium,

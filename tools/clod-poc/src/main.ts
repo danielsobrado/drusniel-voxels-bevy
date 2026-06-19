@@ -38,6 +38,7 @@ import {
 } from "./grass.js";
 import { parseStoneConfig, STONE_CLASSES, type StoneClass } from "./stones/stone_config.js";
 import { StoneSystem, type StoneLighting, type StoneStats } from "./stones/stone_instances.js";
+import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "./stones/stone_validation.js";
 import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
@@ -1288,13 +1289,16 @@ async function main() {
     STONE_CLASSES.filter((cls) =>
       cls === "large" ? state.stoneShowLarge : cls === "medium" ? state.stoneShowMedium : state.stoneShowSmall,
     );
+  const stonePageNodes = allNodes.filter((node) => node.level === 0);
+  const stonePageSignaturesBefore = pageMeshSignatures(stonePageNodes);
   const stoneSystem = new StoneSystem({
     scene,
-    nodes: allNodes.filter((node) => node.level === 0),
+    nodes: stonePageNodes,
     worldCells,
     settings: makeStoneSettings(),
     lighting: currentGrassLighting() as StoneLighting,
   });
+  assertPageMeshSignaturesUnchanged(stonePageSignaturesBefore, pageMeshSignatures(stonePageNodes));
   stoneSystem.setVisibleClasses(visibleStoneClasses());
   stones = stoneSystem;
   let stoneStats: StoneStats = stoneSystem.getStats();
