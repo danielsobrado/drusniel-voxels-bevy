@@ -49,7 +49,7 @@ export interface TerrainNodeLighting {
   skyLight: THREE.Color;
   groundLight: THREE.Color;
   baseColor: THREE.Color;
-  /** Clamped 0.04..1; bakes specular shininess/gain (static for now). */
+  /** Clamped 0.04..1; drives specular shininess/gain. */
   roughness: number;
 }
 
@@ -74,9 +74,11 @@ export interface TerrainNodeTextures {
   blendBands: boolean;
   blendWidth: number;
   normalIntensity?: number;
+  triplanar?: boolean;
+  normalMapMask?: readonly number[] | Float32Array;
   procedural?: {
-    noiseA: THREE.DataTexture;
-    noiseB: THREE.DataTexture;
+    noiseA: THREE.Texture;
+    noiseB: THREE.Texture;
     microFadeStart: number;
     microFadeEnd: number;
     lodBias: number;
@@ -108,8 +110,12 @@ export const DEFAULT_TERRAIN_COLOR_ADJUST: TerrainColorAdjust = {
 
 export interface TerrainNodeMaterialHandle {
   material: MeshBasicNodeMaterial;
-  /** Update lighting/colour uniforms in place (roughness/textures are baked). */
+  /** Update lighting/colour uniforms in place. */
   setLighting(next: Partial<Omit<TerrainNodeLighting, "roughness">>): void;
+  setRoughness(roughness: number): void;
+  setTextureParams(params: { blendWidth: number; normalIntensity: number }): void;
+  setColorAdjust(adjust: TerrainColorAdjust): void;
+  setDebug(state: { normalColor: boolean; normalDivergence: boolean; divergenceGain: number }): void;
   /** Drive optional screen-door LOD fades. */
   setFade(fade: number, fadeIn: boolean, dither: boolean): void;
 }
@@ -134,8 +140,10 @@ function triplanarAlbedo(
   worldPos: TslNode,
   scale: number | TslNode,
   weights: TslNode,
+  useTriplanar: boolean,
 ): TslNode {
   const layerN: TslNode = typeof layer === "number" ? float(layer) : layer;
+  if (!useTriplanar) return texture(albedo, worldPos.xz.mul(scale)).depth(layerN).rgb;
   const cy = texture(albedo, worldPos.yz.mul(scale)).depth(layerN).rgb;
   const cz = texture(albedo, worldPos.xz.mul(scale)).depth(layerN).rgb;
   const cx = texture(albedo, worldPos.xy.mul(scale)).depth(layerN).rgb;
@@ -146,7 +154,7 @@ function unpackNormalMap(sample: TslNode): TslNode {
   return normalize(sample.mul(2.0).sub(1.0));
 }
 
-function reorientNormal(tn: TslNode, wn: TslNode, axis: 0 | 1 | 2, normalIntensity: number): TslNode {
+function reorientNormal(tn: TslNode, wn: TslNode, axis: 0 | 1 | 2, normalIntensity: TslNode): TslNode {
   const n: TslNode = normalize(vec3(tn.x.mul(normalIntensity), tn.y.mul(normalIntensity), tn.z));
   if (axis === 0) return normalize(vec3(n.z.mul(sign(wn.x)), n.y, n.x));
   if (axis === 1) return normalize(vec3(n.x, n.z.mul(sign(wn.y)), n.y));
@@ -159,7 +167,7 @@ function triplanarNormal(
   worldPos: TslNode,
   scale: number,
   baseNormal: TslNode,
-  normalIntensity: number,
+  normalIntensity: TslNode,
 ): TslNode {
   const layerN = float(layer);
   const weights = triplanarWeights(baseNormal);
@@ -175,14 +183,17 @@ function sampleTerrainNormal(
   worldPos: TslNode,
   baseNormal: TslNode,
   blendBands: boolean,
-  blendWidth: number,
-  normalIntensity: number,
+  blendWidth: TslNode,
+  normalIntensity: TslNode,
+  normalMapMask?: readonly number[] | Float32Array,
 ): TslNode {
   const height = worldPos.y;
   let acc: TslNode = vec3(0);
   let wsum: TslNode = float(0);
   slots.forEach((slot, i) => {
-    const sample = triplanarNormal(normalArray, i, worldPos, slot.scale, baseNormal, normalIntensity);
+    const sample = (normalMapMask?.[i] ?? 1) > 0.5
+      ? triplanarNormal(normalArray, i, worldPos, slot.scale, baseNormal, normalIntensity)
+      : baseNormal;
     const w = rangeWeight(height, slot, blendBands, blendWidth);
     acc = acc.add(sample.mul(w));
     wsum = wsum.add(w);
@@ -196,22 +207,28 @@ function sampleTerrainNormal(
 
 // step/smoothstep height band — matches terrain_shader.ts rangeWeight. min/max/width are
 // per-slot constants, so the band is baked per material instance.
-function rangeWeight(height: TslNode, slot: TerrainNodeTextureSlot, blendBands: boolean, blendWidth: number): TslNode {
+function rangeWeight(height: TslNode, slot: TerrainNodeTextureSlot, blendBands: boolean, blendWidth: TslNode): TslNode {
   if (!blendBands) {
     return step(slot.heightMin, height).mul(step(height, slot.heightMax));
   }
-  const w = Math.max(blendWidth, 0.0001);
-  const aboveLow = smoothstep(slot.heightMin - w, slot.heightMin + w, height);
-  const belowHigh = sub(1, smoothstep(slot.heightMax - w, slot.heightMax + w, height));
+  const w: TslNode = max(blendWidth, 0.0001);
+  const aboveLow = smoothstep(float(slot.heightMin).sub(w), float(slot.heightMin).add(w), height);
+  const belowHigh = sub(1, smoothstep(float(slot.heightMax).sub(w), float(slot.heightMax).add(w), height));
   return aboveLow.mul(belowHigh);
 }
 
-function adjustColor(color: TslNode, adj: TerrainColorAdjust): TslNode {
-  let c = color.mul(adj.brightness);
-  c = c.sub(0.5).mul(adj.contrast).add(0.5);
+function adjustColor(
+  color: TslNode,
+  brightness: TslNode,
+  contrast: TslNode,
+  saturation: TslNode,
+  warmth: TslNode,
+): TslNode {
+  let c = color.mul(brightness);
+  c = c.sub(0.5).mul(contrast).add(0.5);
   const luma = dot(c, vec3(0.299, 0.587, 0.114));
-  c = mix(vec3(luma), c, adj.saturation);
-  const warm = vec3(1 + adj.warmth * 0.16, 1 + adj.warmth * 0.05, 1 - adj.warmth * 0.12);
+  c = mix(vec3(luma), c, saturation);
+  const warm = vec3(warmth.mul(0.16).add(1), warmth.mul(0.05).add(1), warmth.mul(-0.12).add(1));
   return max(c.mul(warm), vec3(0));
 }
 
@@ -244,6 +261,7 @@ function paintedAlbedo(
   weights: TslNode,
   paintSlots: TslNode,
   paintWeights: TslNode,
+  useTriplanar: boolean,
 ): TslNode {
   const channels = [
     { slot: paintSlots.x, weight: paintWeights.x },
@@ -262,7 +280,7 @@ function paintedAlbedo(
     }
     // Drop unpainted channels (slot < -0.5), matching the WebGL guard.
     const w = channel.weight.mul(step(0.0, channel.slot.add(0.5)));
-    acc = acc.add(triplanarAlbedo(albedo, channel.slot, worldPos, scale, weights).mul(w));
+    acc = acc.add(triplanarAlbedo(albedo, channel.slot, worldPos, scale, weights, useTriplanar).mul(w));
     wsum = wsum.add(w);
   }
   return acc.div(max(wsum, 0.001));
@@ -278,6 +296,7 @@ export function createTerrainNodeMaterial(
   const lighting = options.lighting ?? DEFAULT_TERRAIN_NODE_LIGHTING;
   const adjust = options.adjust ?? DEFAULT_TERRAIN_COLOR_ADJUST;
   const textures = options.textures ?? null;
+  const useTriplanar = textures?.triplanar ?? true;
 
   // Raw vec3 uniforms (not Color uniforms) so values pass through unchanged, matching the
   // custom GLSL uniforms which were never colour-managed.
@@ -286,13 +305,19 @@ export function createTerrainNodeMaterial(
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
   const uColor = uniform(v3(lighting.baseColor));
+  const uBrightness = uniform(adjust.brightness);
+  const uContrast = uniform(adjust.contrast);
+  const uSaturation = uniform(adjust.saturation);
+  const uWarmth = uniform(adjust.warmth);
+  const uNormalColor = uniform(false);
   const uFade = uniform(1.0);
   const uFadeIn = uniform(true);
   const uDither = uniform(false);
-
+  const uBlendWidth = uniform(textures?.blendWidth ?? 2.5);
+  const uNormalIntensity = uniform(textures?.normalIntensity ?? 1.0);
   const rough = Math.min(Math.max(lighting.roughness, 0.04), 1.0);
-  const shininess = 128 * (1 - rough) + 4 * rough; // mix(128, 4, rough)
-  const specGain = 1 - rough;
+  const uShininess = uniform(128 * (1 - rough) + 4 * rough); // mix(128, 4, rough)
+  const uSpecGain = uniform(1 - rough);
 
   const geomN = normalize(normalGeometry);
   const worldPos = positionGeometry;
@@ -307,8 +332,8 @@ export function createTerrainNodeMaterial(
     let nearest: TslNode = vec3(0);
     let bestDist: TslNode = float(1e9);
     textures.slots.forEach((slot, i) => {
-      const sample = triplanarAlbedo(textures.albedoArray, i, worldPos, slot.scale, weights);
-      const w = rangeWeight(height, slot, textures.blendBands, textures.blendWidth);
+      const sample = triplanarAlbedo(textures.albedoArray, i, worldPos, slot.scale, weights, useTriplanar);
+      const w = rangeWeight(height, slot, textures.blendBands, uBlendWidth);
       acc = acc.add(sample.mul(w));
       wsum = wsum.add(w);
       // Track the nearest band (by distance to its centre) for the out-of-band fallback.
@@ -324,7 +349,11 @@ export function createTerrainNodeMaterial(
     const paintSlots: TslNode = attribute("paintSlots", "vec4");
     const paintWeights: TslNode = attribute("paintWeights", "vec4");
     const paint = clamp(dot(paintWeights, vec4(1)), 0.0, 1.0);
-    tex = mix(tex, paintedAlbedo(textures.albedoArray, textures.slots, worldPos, weights, paintSlots, paintWeights), paint);
+    tex = mix(
+      tex,
+      paintedAlbedo(textures.albedoArray, textures.slots, worldPos, weights, paintSlots, paintWeights, useTriplanar),
+      paint,
+    );
     if (textures.procedural) {
       tex = proceduralMacroTint(tex, worldPos, geomN, textures.procedural);
     }
@@ -332,7 +361,7 @@ export function createTerrainNodeMaterial(
     baseColor = tex.mul(mix(vec3(1), uColor, 0.35));
   }
 
-  baseColor = adjustColor(baseColor, adjust);
+  baseColor = adjustColor(baseColor, uBrightness, uContrast, uSaturation, uWarmth);
 
   let n: TslNode = geomN;
   if (textures?.normalArray && textures.slots.length > 0) {
@@ -342,8 +371,9 @@ export function createTerrainNodeMaterial(
         worldPos,
         geomN,
         textures.blendBands,
-        textures.blendWidth,
-        textures.normalIntensity ?? 1.0,
+        uBlendWidth,
+        uNormalIntensity,
+        textures.normalMapMask,
       );
     n = textures.procedural
       ? normalize(mix(geomN, detailN, proceduralMicroWeight(worldPos, textures.procedural)))
@@ -356,7 +386,7 @@ export function createTerrainNodeMaterial(
   const light = hemi.add(uSun.mul(pow(sun, 1.35)));
   const viewDir = normalize(cameraPosition.sub(worldPos));
   const halfVec = normalize(uLight.add(viewDir));
-  const spec = pow(max(dot(n, halfVec), 0.0), shininess).mul(specGain).mul(sun);
+  const spec = pow(max(dot(n, halfVec), 0.0), uShininess).mul(uSpecGain).mul(sun);
   const diffuse = baseColor.mul(light);
 
   // Unlit material: the lighting model is computed entirely in the node graph. The renderer
@@ -364,6 +394,7 @@ export function createTerrainNodeMaterial(
   // colorspace chunks), so colorNode is the linear pre-tonemap colour.
   const material = new MeshBasicNodeMaterial();
   let colorNode: TslNode = diffuse.add(uSun.mul(spec));
+  colorNode = uNormalColor.select(geomN.mul(0.5).add(0.5), colorNode);
   const ditherNoise = interleavedGradientNoise(screenCoordinate);
   const fade = clamp(uFade, 0.0, 1.0);
   const fadeInDiscard = ditherNoise.greaterThan(fade);
@@ -380,6 +411,26 @@ export function createTerrainNodeMaterial(
       if (next.skyLight) uSky.value.copy(v3(next.skyLight));
       if (next.groundLight) uGround.value.copy(v3(next.groundLight));
       if (next.baseColor) uColor.value.copy(v3(next.baseColor));
+    },
+    setRoughness(next) {
+      const clamped = Math.min(Math.max(next, 0.04), 1.0);
+      uShininess.value = 128 * (1 - clamped) + 4 * clamped;
+      uSpecGain.value = 1 - clamped;
+    },
+    setTextureParams(next) {
+      uBlendWidth.value = next.blendWidth;
+      uNormalIntensity.value = next.normalIntensity;
+    },
+    setColorAdjust(next) {
+      uBrightness.value = next.brightness;
+      uContrast.value = next.contrast;
+      uSaturation.value = next.saturation;
+      uWarmth.value = next.warmth;
+    },
+    setDebug(state) {
+      uNormalColor.value = state.normalColor;
+      void state.normalDivergence;
+      void state.divergenceGain;
     },
     setFade(fade, fadeIn, dither) {
       uFade.value = fade;

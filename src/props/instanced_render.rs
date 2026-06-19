@@ -686,8 +686,7 @@ pub fn spawn_raw_instanced_prop_batch(
     let prop_class = classify_prop_render_class(prop_id, prop_type);
     let mut touched = Vec::new();
     for raw in instances {
-        let instance_bounds =
-            transformed_prop_bounds(local_bounds, &raw.transform, bounds_padding);
+        let instance_bounds = transformed_prop_bounds(local_bounds, &raw.transform, bounds_padding);
         let instance = PropInstance {
             transform: raw.transform.to_matrix().to_cols_array_2d(),
             tint: raw.tint.to_array(),

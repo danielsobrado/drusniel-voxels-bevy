@@ -30,6 +30,8 @@ pub struct ProceduralTextureConfig {
     pub noise: NoiseBakeConfig,
     #[serde(default)]
     pub terrain: TerrainTextureConfig,
+    #[serde(default = "default_terrain_material_quality")]
+    pub terrain_material_quality: BTreeMap<String, TerrainMaterialQualityTier>,
     #[serde(default)]
     pub debug: ProceduralTextureDebugConfig,
 }
@@ -80,6 +82,11 @@ pub struct MicroNormalConfig {
     pub max_strength: f32,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TerrainMaterialQualityTier {
+    pub max_noise_fetches: u32,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ProceduralTextureDebugConfig {
     #[serde(default = "default_debug_mode")]
@@ -101,6 +108,7 @@ impl Default for ProceduralTextureConfig {
             cache_dir: default_cache_dir(),
             noise: NoiseBakeConfig::default(),
             terrain: TerrainTextureConfig::default(),
+            terrain_material_quality: default_terrain_material_quality(),
             debug: ProceduralTextureDebugConfig::default(),
         }
     }
@@ -234,6 +242,35 @@ fn default_micro_max_strength() -> f32 {
     0.35
 }
 
+fn default_terrain_material_quality() -> BTreeMap<String, TerrainMaterialQualityTier> {
+    BTreeMap::from([
+        (
+            "debug_flat".to_string(),
+            TerrainMaterialQualityTier {
+                max_noise_fetches: 0,
+            },
+        ),
+        (
+            "procedural_macro".to_string(),
+            TerrainMaterialQualityTier {
+                max_noise_fetches: 2,
+            },
+        ),
+        (
+            "procedural_medium".to_string(),
+            TerrainMaterialQualityTier {
+                max_noise_fetches: 6,
+            },
+        ),
+        (
+            "procedural_full".to_string(),
+            TerrainMaterialQualityTier {
+                max_noise_fetches: 10,
+            },
+        ),
+    ])
+}
+
 fn default_debug_mode() -> String {
     "final".to_string()
 }
@@ -314,6 +351,11 @@ procedural_textures:
   terrain:
     layer_resolution: 16
     material_order: [rock, grass]
+  terrain_material_quality:
+    debug_flat:
+      max_noise_fetches: 0
+    procedural_full:
+      max_noise_fetches: 10
 ",
         )
         .expect("parse config");
@@ -331,6 +373,14 @@ procedural_textures:
                 .terrain
                 .materials
                 .contains_key(&ProceduralMaterialId::WetSoil)
+        );
+        assert_eq!(
+            config.terrain_material_quality["debug_flat"].max_noise_fetches,
+            0
+        );
+        assert_eq!(
+            config.terrain_material_quality["procedural_full"].max_noise_fetches,
+            10
         );
     }
 }

@@ -46,7 +46,12 @@ pub fn load_chunk(
     {
         return None;
     }
-    Some(file.instances.into_iter().map(StoneInstance::from).collect())
+    Some(
+        file.instances
+            .into_iter()
+            .map(StoneInstance::from)
+            .collect(),
+    )
 }
 
 pub fn save_chunk(
@@ -65,7 +70,11 @@ pub fn save_chunk(
         config_hash,
         terrain_fingerprint,
         chunk: [chunk.x, chunk.y],
-        instances: instances.iter().copied().map(StoneInstanceFile::from).collect(),
+        instances: instances
+            .iter()
+            .copied()
+            .map(StoneInstanceFile::from)
+            .collect(),
     };
     let yaml = serde_yaml::to_string(&file).map_err(std::io::Error::other)?;
     fs::write(path, yaml)

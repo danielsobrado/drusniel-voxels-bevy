@@ -70,5 +70,15 @@ procedural_textures:
         macro_strength: 0.16
         normal_strength: 0.10
 
+  terrain_material_quality:
+    debug_flat:
+      max_noise_fetches: 0
+    procedural_macro:
+      max_noise_fetches: 2
+    procedural_medium:
+      max_noise_fetches: 6
+    procedural_full:
+      max_noise_fetches: 10
+
   debug:
     mode: final

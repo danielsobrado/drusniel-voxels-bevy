@@ -45,6 +45,7 @@ export interface ProceduralTextureConfig {
     material_order: ProceduralMaterialId[];
     materials: Record<ProceduralMaterialId, ProceduralMaterialRecipe>;
   };
+  terrain_material_quality: Record<string, { max_noise_fetches: number }>;
   debug: { mode: string };
 }
 
@@ -86,6 +87,12 @@ export const DEFAULT_PROCEDURAL_TEXTURE_CONFIG: ProceduralTextureConfig = {
       wet_soil: defaultRecipe([0.18, 0.13, 0.1], 0.38, 0.16, 0.1),
     },
   },
+  terrain_material_quality: {
+    debug_flat: { max_noise_fetches: 0 },
+    procedural_macro: { max_noise_fetches: 2 },
+    procedural_medium: { max_noise_fetches: 6 },
+    procedural_full: { max_noise_fetches: 10 },
+  },
   debug: { mode: "final" },
 };
 
@@ -117,6 +124,14 @@ function mergeRecipe(raw: unknown, fallback: ProceduralMaterialRecipe): Procedur
     moisture_bias: value.moisture_bias === undefined ? fallback.moisture_bias : readNumber(value.moisture_bias, fallback.moisture_bias ?? 0),
     sparkle_strength: value.sparkle_strength === undefined ? fallback.sparkle_strength : readNumber(value.sparkle_strength, fallback.sparkle_strength ?? 0),
   };
+}
+
+function readQualityTiers(raw: unknown, fallback: Record<string, { max_noise_fetches: number }>): Record<string, { max_noise_fetches: number }> {
+  const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  return Object.fromEntries(Object.entries(fallback).map(([key, tier]) => {
+    const rawTier = value[key] && typeof value[key] === "object" ? value[key] as Record<string, unknown> : {};
+    return [key, { max_noise_fetches: Math.floor(readNumber(rawTier.max_noise_fetches, tier.max_noise_fetches)) }];
+  }));
 }
 
 export function parseProceduralTextureConfig(text: string): ProceduralTextureConfig {
@@ -163,6 +178,7 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
       material_order: order.length > 0 ? order : defaults.terrain.material_order,
       materials,
     },
+    terrain_material_quality: readQualityTiers(root.terrain_material_quality, defaults.terrain_material_quality),
     debug: { mode: typeof root.debug === "object" && root.debug !== null && typeof (root.debug as Record<string, unknown>).mode === "string" ? (root.debug as Record<string, string>).mode : "final" },
   };
 }

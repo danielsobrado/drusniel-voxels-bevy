@@ -28,6 +28,7 @@ const V2_MID_INSTANCE_FRACTION = 0.35;
 const V2_EDGE_SAMPLE_SCALE = 1.25;
 const V2_EDGE_HEIGHT_SOFT = 1.5;
 const V2_EDGE_HEIGHT_HARD = 4.5;
+const PATCH_REFRESH_DISTANCE = 4;
 
 const VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
@@ -270,6 +271,9 @@ export interface GrassSystemOptions {
   worldCells: number;
   settings: GrassSettings;
   lighting: GrassLighting;
+  material?: GrassMaterialHandle;
+  createMaterial?: GrassMaterialFactory;
+  buildGeometry?: GrassGeometryBuilder;
 }
 
 export interface GrassBladeInstance {
@@ -281,6 +285,31 @@ export interface GrassBladeInstance {
   edgeFade: number;
   normalY: number;
 }
+
+export interface GrassGeometryOptions {
+  mode: GrassShaderMode;
+  tier: "near" | "mid";
+  crossed?: boolean;
+}
+
+export type GrassGeometryBuilder = (
+  instances: readonly GrassBladeInstance[],
+  options: GrassGeometryOptions,
+) => THREE.InstancedBufferGeometry;
+
+export interface GrassMaterialHandle {
+  material: THREE.Material;
+  setTime?(timeSeconds: number): void;
+  setFadeCenter?(x: number, z: number): void;
+  updateSettings?(settings: GrassSettings): void;
+  updateLighting?(lighting: GrassLighting): void;
+  dispose?(): void;
+}
+
+export type GrassMaterialFactory = (
+  settings: GrassSettings,
+  lighting: GrassLighting,
+) => GrassMaterialHandle;
 
 export interface GrassCandidateSample {
   height: number;
@@ -312,7 +341,7 @@ interface GrassGenerationStats {
 
 interface GrassPatch {
   nodeId: string;
-  meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>[];
+  meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[];
   centerX: number;
   centerZ: number;
   radius: number;
@@ -553,6 +582,15 @@ function createGrassMaterial(
   });
 }
 
+function cloneLighting(lighting: GrassLighting): GrassLighting {
+  return {
+    light: lighting.light.clone(),
+    sunColor: lighting.sunColor.clone(),
+    skyLight: lighting.skyLight.clone(),
+    groundLight: lighting.groundLight.clone(),
+  };
+}
+
 export class GrassSystem {
   private readonly scene: THREE.Scene;
   private readonly nodes: ClodPageNode[];
@@ -563,8 +601,14 @@ export class GrassSystem {
   private readonly terrainPatchNearCrossedGeometry = createBladeGeometry(V2_NEAR_BLADE_ROWS, true);
   private readonly terrainPatchMidGeometry = createBladeGeometry(V2_MID_BLADE_ROWS);
   private readonly materials = new Map<GrassShaderMode, THREE.ShaderMaterial>();
+  private injectedMaterial: GrassMaterialHandle | null;
+  private readonly injectedMaterialFactory: GrassMaterialFactory | null;
+  private readonly injectedGeometryBuilder: GrassGeometryBuilder | null;
+  private currentLighting: GrassLighting;
   private settings: GrassSettings;
   private patches: GrassPatch[] = [];
+  private patchesDirty = true;
+  private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   private bladeCount = 0;
   private generationStats: GrassGenerationStats = {
     generatedCandidates: 0,
@@ -594,8 +638,15 @@ export class GrassSystem {
       .sort((a, b) => a.footprint.minZ - b.footprint.minZ || a.footprint.minX - b.footprint.minX);
     this.worldCells = options.worldCells;
     this.settings = { ...options.settings };
-    for (const mode of GRASS_SHADER_MODES) {
-      this.materials.set(mode, createGrassMaterial(this.settings, options.lighting, mode));
+    this.currentLighting = cloneLighting(options.lighting);
+    this.injectedMaterialFactory = options.createMaterial ?? null;
+    this.injectedMaterial = options.material ?? null;
+    this.injectedGeometryBuilder = options.buildGeometry ?? null;
+    if (this.injectedMaterialFactory) this.replaceInjectedMaterial();
+    if (!this.injectedMaterial) {
+      for (const mode of GRASS_SHADER_MODES) {
+        this.materials.set(mode, createGrassMaterial(this.settings, options.lighting, mode));
+      }
     }
     this.lastCenter = new THREE.Vector3(this.worldCells * 0.5, 0, this.worldCells * 0.5);
     this.root.name = "grass";
@@ -608,16 +659,26 @@ export class GrassSystem {
     const wasEnabled = this.settings.enabled;
     this.settings.enabled = enabled;
     this.root.visible = enabled;
-    if (enabled && !wasEnabled && this.patches.length === 0) this.refreshPatches(this.lastCenter);
+    if (enabled && !wasEnabled && this.patches.length === 0) this.refreshForCenter(this.lastCenter);
   }
 
   updateSettings(settings: Partial<GrassSettings>): void {
+    const previousMode = this.settings.shaderMode;
     Object.assign(this.settings, settings);
+    if (this.injectedMaterialFactory && previousMode !== this.settings.shaderMode) {
+      this.replaceInjectedMaterial();
+    }
     this.updateMaterialUniforms();
+    this.patchesDirty = true;
     this.setEnabled(this.settings.enabled);
   }
 
   updateLighting(lighting: GrassLighting): void {
+    this.currentLighting = cloneLighting(lighting);
+    if (this.injectedMaterial) {
+      this.injectedMaterial.updateLighting?.(lighting);
+      return;
+    }
     for (const material of this.materials.values()) {
       material.uniforms.uLight.value.copy(lighting.light);
       material.uniforms.uSunColor.value.copy(lighting.sunColor);
@@ -627,25 +688,27 @@ export class GrassSystem {
   }
 
   update(timeSeconds: number, center: THREE.Vector3): void {
-    for (const material of this.materials.values()) {
-      material.uniforms.uTime.value = timeSeconds;
+    if (this.injectedMaterial) {
+      this.injectedMaterial.setTime?.(timeSeconds);
+      this.injectedMaterial.setFadeCenter?.(center.x, center.z);
+    } else {
+      for (const material of this.materials.values()) {
+        material.uniforms.uTime.value = timeSeconds;
+      }
     }
     this.lastCenter.copy(center);
     if (!this.settings.enabled) {
       this.updateStats();
       return;
     }
-    this.refreshPatches(center);
-    for (const patch of this.patches) {
-      const distance = Math.hypot(center.x - patch.centerX, center.z - patch.centerZ);
-      this.updatePatchVisibility(patch, distance);
+    if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= PATCH_REFRESH_DISTANCE) {
+      this.refreshForCenter(center);
     }
-    this.updateStats();
   }
 
   rebuild(): void {
     this.clearPatches();
-    if (this.settings.enabled) this.refreshPatches(this.lastCenter);
+    if (this.settings.enabled) this.refreshForCenter(this.lastCenter);
     this.root.visible = this.settings.enabled;
   }
 
@@ -663,7 +726,7 @@ export class GrassSystem {
       }
     }
     this.patches = retained;
-    this.refreshPatches(this.lastCenter);
+    this.refreshForCenter(this.lastCenter);
   }
 
   dispose(): void {
@@ -675,6 +738,7 @@ export class GrassSystem {
     this.terrainPatchNearCrossedGeometry.dispose();
     this.terrainPatchMidGeometry.dispose();
     for (const material of this.materials.values()) material.dispose();
+    this.injectedMaterial?.dispose?.();
   }
 
   getBladeCount(): number {
@@ -697,6 +761,17 @@ export class GrassSystem {
       acceptedCandidates: 0,
       edgeSuppressedCandidates: 0,
     };
+    this.updateStats();
+  }
+
+  private refreshForCenter(center: THREE.Vector3): void {
+    this.refreshPatches(center);
+    for (const patch of this.patches) {
+      const distance = Math.hypot(center.x - patch.centerX, center.z - patch.centerZ);
+      this.updatePatchVisibility(patch, distance);
+    }
+    this.lastRefreshCenter.copy(center);
+    this.patchesDirty = false;
     this.updateStats();
   }
 
@@ -749,8 +824,12 @@ export class GrassSystem {
     if (shader.patchStyle === "terrain-patch") {
       return this.createTerrainPatch(nodeId, footprint, instances);
     }
-    const geometry = new THREE.InstancedBufferGeometry();
-    this.populateGeometry(geometry, this.classicBladeGeometry, footprint, instances);
+    const geometry = this.injectedGeometryBuilder
+      ? this.injectedGeometryBuilder(instances, { mode: this.settings.shaderMode, tier: "near" })
+      : new THREE.InstancedBufferGeometry();
+    if (!this.injectedGeometryBuilder) {
+      this.populateGeometry(geometry, this.classicBladeGeometry, footprint, instances);
+    }
 
     const centerX = (footprint.minX + footprint.maxX) * 0.5;
     const centerZ = (footprint.minZ + footprint.maxZ) * 0.5;
@@ -771,8 +850,16 @@ export class GrassSystem {
     const nearBlade = this.settings.nearCrossedQuads
       ? this.terrainPatchNearCrossedGeometry
       : this.terrainPatchNearGeometry;
-    const nearGeometry = new THREE.InstancedBufferGeometry();
-    this.populateGeometry(nearGeometry, nearBlade, footprint, instances);
+    const nearGeometry = this.injectedGeometryBuilder
+      ? this.injectedGeometryBuilder(instances, {
+          mode: this.settings.shaderMode,
+          tier: "near",
+          crossed: this.settings.nearCrossedQuads,
+        })
+      : new THREE.InstancedBufferGeometry();
+    if (!this.injectedGeometryBuilder) {
+      this.populateGeometry(nearGeometry, nearBlade, footprint, instances);
+    }
 
     const midCount = Math.max(1, Math.floor(instances.length * V2_MID_INSTANCE_FRACTION));
     const midInstances = instances.slice(0, midCount).map((instance) => ({
@@ -780,8 +867,12 @@ export class GrassSystem {
       height: instance.height * 1.55,
       edgeFade: Math.min(1, instance.edgeFade * 1.15),
     }));
-    const midGeometry = new THREE.InstancedBufferGeometry();
-    this.populateGeometry(midGeometry, this.terrainPatchMidGeometry, footprint, midInstances);
+    const midGeometry = this.injectedGeometryBuilder
+      ? this.injectedGeometryBuilder(midInstances, { mode: this.settings.shaderMode, tier: "mid" })
+      : new THREE.InstancedBufferGeometry();
+    if (!this.injectedGeometryBuilder) {
+      this.populateGeometry(midGeometry, this.terrainPatchMidGeometry, footprint, midInstances);
+    }
 
     const centerX = (footprint.minX + footprint.maxX) * 0.5;
     const centerZ = (footprint.minZ + footprint.maxZ) * 0.5;
@@ -852,6 +943,10 @@ export class GrassSystem {
   }
 
   private updateMaterialUniforms(): void {
+    if (this.injectedMaterial) {
+      this.injectedMaterial.updateSettings?.(this.settings);
+      return;
+    }
     for (const [mode, material] of this.materials) {
       material.uniforms.uBladeWidth.value = this.settings.bladeWidth;
       material.uniforms.uWindStrength.value = this.settings.windStrength;
@@ -893,10 +988,21 @@ export class GrassSystem {
     }
   }
 
-  private materialFor(mode: GrassShaderMode): THREE.ShaderMaterial {
+  private materialFor(mode: GrassShaderMode): THREE.Material {
+    if (this.injectedMaterial) return this.injectedMaterial.material;
     const material = this.materials.get(mode);
     if (!material) throw new Error(`Missing grass material for shader mode: ${mode}`);
     return material;
+  }
+
+  private replaceInjectedMaterial(): void {
+    if (!this.injectedMaterialFactory) return;
+    const previous = this.injectedMaterial;
+    this.injectedMaterial = this.injectedMaterialFactory(this.settings, this.currentLighting);
+    for (const patch of this.patches) {
+      for (const mesh of patch.meshes) mesh.material = this.injectedMaterial.material;
+    }
+    previous?.dispose?.();
   }
 
   private updateStats(): void {

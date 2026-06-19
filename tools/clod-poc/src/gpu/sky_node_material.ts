@@ -35,6 +35,7 @@ const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 export interface SkyNodeHandle {
   material: MeshBasicNodeMaterial;
   lighting: EnvironmentLighting;
+  updateSettings(settings: EnvironmentSettings): void;
 }
 
 export function createSkyNodeMaterial(
@@ -47,26 +48,29 @@ export function createSkyNodeMaterial(
   const uHorizon = uniform(v3(colors.horizon));
   const uGround = uniform(v3(colors.ground));
   const uSunColor = uniform(v3(colors.sun).multiplyScalar(settings.sunIntensity));
-
-  const skyIntensity = settings.skyIntensity;
-  const groundIntensity = settings.groundIntensity;
-  const horizonSoftness = Math.max(settings.horizonSoftness, 0.01);
+  const uSkyIntensity = uniform(settings.skyIntensity);
+  const uGroundIntensity = uniform(settings.groundIntensity);
+  const uHorizonSoftness = uniform(Math.max(settings.horizonSoftness, 0.01));
+  const uSunDiskIntensity = uniform(settings.sunDiskIntensity);
+  const uSunGlowIntensity = uniform(settings.sunGlowIntensity);
+  const uHazeIntensity = uniform(settings.hazeIntensity);
+  let currentSettings = { ...settings };
 
   const dir: TslNode = normalize(positionGeometry);
   const up = clamp(dir.y.mul(0.5).add(0.5), 0, 1);
-  const skyGradient = pow(up, horizonSoftness);
-  const upperSky = mix(uHorizon, uZenith, skyGradient).mul(skyIntensity);
+  const skyGradient = pow(up, uHorizonSoftness);
+  const upperSky = mix(uHorizon, uZenith, skyGradient).mul(uSkyIntensity);
   const groundBlend = smoothstep(-0.18, 0.03, dir.y);
-  let sky: TslNode = mix(uGround.mul(groundIntensity), upperSky, groundBlend);
+  let sky: TslNode = mix(uGround.mul(uGroundIntensity), upperSky, groundBlend);
 
   // haze = exp(-abs(dir.y) * 12) * hazeIntensity, blended toward the horizon colour.
-  const haze = exp(abs(dir.y).mul(-12)).mul(settings.hazeIntensity);
-  sky = mix(sky, uHorizon.mul(skyIntensity), clamp(haze, 0, 1));
+  const haze = exp(abs(dir.y).mul(-12)).mul(uHazeIntensity);
+  sky = mix(sky, uHorizon.mul(uSkyIntensity), clamp(haze, 0, 1));
 
   const sunDot = max(dot(dir, uSunDir), 0);
   const aboveHorizon = smoothstep(-0.02, 0.02, dir.y);
-  const sunDisk = smoothstep(0.9995, 0.9999, sunDot).mul(settings.sunDiskIntensity);
-  const sunGlow = pow(sunDot, 18).mul(0.18).mul(settings.sunGlowIntensity);
+  const sunDisk = smoothstep(0.9995, 0.9999, sunDot).mul(uSunDiskIntensity);
+  const sunGlow = pow(sunDot, 18).mul(0.18).mul(uSunGlowIntensity);
   sky = sky.add(uSunColor.mul(sunDisk.add(sunGlow)).mul(aboveHorizon));
 
   const material = new MeshBasicNodeMaterial();
@@ -75,11 +79,32 @@ export function createSkyNodeMaterial(
   material.depthTest = false;
   material.depthWrite = false;
 
-  const lighting: EnvironmentLighting = {
-    sunDirection: sunDir.clone(),
-    sunColor: colors.sun.clone().multiplyScalar(settings.sunIntensity),
-    skyLight: colors.skyLight.clone().multiplyScalar(settings.skyIntensity),
-    groundLight: colors.groundLight.clone().multiplyScalar(settings.groundIntensity),
+  const handle: SkyNodeHandle = {
+    material,
+    lighting: {
+      sunDirection: sunDirectionFromAngles(currentSettings.sunAzimuthDeg, currentSettings.sunElevationDeg),
+      sunColor: colors.sun.clone().multiplyScalar(currentSettings.sunIntensity),
+      skyLight: colors.skyLight.clone().multiplyScalar(currentSettings.skyIntensity),
+      groundLight: colors.groundLight.clone().multiplyScalar(currentSettings.groundIntensity),
+    },
+    updateSettings(next) {
+      currentSettings = { ...next };
+      const nextSunDirection = sunDirectionFromAngles(next.sunAzimuthDeg, next.sunElevationDeg);
+      uSunDir.value.copy(nextSunDirection);
+      uSunColor.value.copy(v3(colors.sun)).multiplyScalar(next.sunIntensity);
+      uSkyIntensity.value = next.skyIntensity;
+      uGroundIntensity.value = next.groundIntensity;
+      uHorizonSoftness.value = Math.max(next.horizonSoftness, 0.01);
+      uSunDiskIntensity.value = next.sunDiskIntensity;
+      uSunGlowIntensity.value = next.sunGlowIntensity;
+      uHazeIntensity.value = next.hazeIntensity;
+      handle.lighting = {
+        sunDirection: nextSunDirection,
+        sunColor: colors.sun.clone().multiplyScalar(next.sunIntensity),
+        skyLight: colors.skyLight.clone().multiplyScalar(next.skyIntensity),
+        groundLight: colors.groundLight.clone().multiplyScalar(next.groundIntensity),
+      };
+    },
   };
-  return { material, lighting };
+  return handle;
 }

@@ -1,13 +1,22 @@
-export const PROCEDURAL_TEXTURE_SCHEMA_VERSION = 1;
+export const PROCEDURAL_TEXTURE_SCHEMA_VERSION = 2;
 
 export interface ProceduralTextureManifest {
   schemaVersion: number;
   seed: number;
   configHash: string;
+  shaderHash: string;
   generatedAt: string;
   noiseResolution: number;
   layerResolution: number;
   materialOrder: string[];
+  outputs: ProceduralTextureManifestOutputs;
+}
+
+export interface ProceduralTextureManifestOutputs {
+  noiseA: string;
+  noiseB: string;
+  terrainAlbedo: string[];
+  terrainNormalRoughness: string[];
 }
 
 export function stableStringify(value: unknown): string {
@@ -28,9 +37,18 @@ export function stableHash(value: unknown): string {
   return hash.toString(16).padStart(16, "0");
 }
 
+function textureProducingConfig(config: unknown): unknown {
+  const record = config && typeof config === "object" ? config as Record<string, unknown> : {};
+  return {
+    noise: record.noise,
+    terrain: record.terrain,
+  };
+}
+
 export function createProceduralTextureManifest(input: {
   seed: number;
   config: unknown;
+  shaderInput?: unknown;
   noiseResolution: number;
   layerResolution: number;
   materialOrder: string[];
@@ -42,11 +60,18 @@ export function createProceduralTextureManifest(input: {
     configHash: stableHash({
       schemaVersion: PROCEDURAL_TEXTURE_SCHEMA_VERSION,
       seed: input.seed,
-      config: input.config,
+      textureConfig: textureProducingConfig(input.config),
     }),
+    shaderHash: stableHash(input.shaderInput ?? "clod-poc-procedural-terrain-shader-v1"),
     generatedAt: input.generatedAt ?? "runtime",
     noiseResolution: input.noiseResolution,
     layerResolution: input.layerResolution,
     materialOrder: [...input.materialOrder],
+    outputs: {
+      noiseA: "noise_a.png",
+      noiseB: "noise_b.png",
+      terrainAlbedo: input.materialOrder.map((id) => `${id}_albedo.png`),
+      terrainNormalRoughness: input.materialOrder.map((id) => `${id}_normal_roughness.png`),
+    },
   };
 }

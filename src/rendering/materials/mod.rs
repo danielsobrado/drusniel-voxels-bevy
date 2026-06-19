@@ -811,7 +811,21 @@ pub fn apply_procedural_textures_to_triplanar_material(
     material.sand_normal = Some(handles.sand_normal.clone());
     material.dirt_albedo = Some(handles.dirt_albedo.clone());
     material.dirt_normal = Some(handles.dirt_normal.clone());
-    material.uniforms.procedural_textures_enabled = 1.0;
+    material.uniforms.procedural_textures_enabled =
+        if procedural_sampling_enabled_for_quality(material.quality) {
+            1.0
+        } else {
+            0.0
+        };
+}
+
+fn procedural_sampling_enabled_for_quality(quality: TerrainMaterialQuality) -> bool {
+    matches!(
+        quality,
+        TerrainMaterialQuality::FullTriplanar
+            | TerrainMaterialQuality::CheapTriplanar
+            | TerrainMaterialQuality::SingleProjectionFar
+    )
 }
 
 /// Ensure all triplanar textures use Repeat address mode for seamless tiling with proper mipmaps

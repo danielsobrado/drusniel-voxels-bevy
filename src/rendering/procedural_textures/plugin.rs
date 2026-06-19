@@ -153,7 +153,7 @@ pub fn setup_procedural_terrain_textures(
         }
     };
     let cache_files_ready = cache_status == ManifestStatus::Match
-        && cache::all_bevy_slot_cache_files_exist(&config.cache_dir);
+        && cache::manifest_cache_files_exist(&config.cache_dir, &expected_manifest);
 
     if cache_files_ready && config.runtime_mode != ProceduralTextureRuntimeMode::ForceRegenerate {
         let handles = handles_from_cache(&config, expected_manifest, &asset_server);

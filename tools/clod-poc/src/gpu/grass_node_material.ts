@@ -25,7 +25,12 @@ import {
   vec3,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment.js";
-import { createBladeGeometry, type GrassBladeInstance } from "../grass.js";
+import {
+  createBladeGeometry,
+  type GrassBladeInstance,
+  type GrassLighting,
+  type GrassSettings,
+} from "../grass.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -63,6 +68,8 @@ export interface GrassNodeMaterialHandle {
   setTime(t: number): void;
   /** Update the XZ point used by terrain-patch-v2 distance fading. */
   setFadeCenter(x: number, z: number): void;
+  updateSettings(settings: Pick<GrassSettings, "bladeWidth" | "windStrength" | "windSpeed" | "distance" | "alphaToCoverage">): void;
+  updateLighting(lighting: EnvironmentLighting | GrassLighting): void;
 }
 
 export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMaterialHandle {
@@ -76,7 +83,7 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const uSky = uniform(v3(params.lighting.skyLight));
   const uGround = uniform(v3(params.lighting.groundLight));
   const isPatchV2 = params.mode === "terrain-patch-v2";
-  const useAlphaToCoverage = isPatchV2 && params.alphaToCoverage === true;
+  let useAlphaToCoverage = isPatchV2 && params.alphaToCoverage === true;
   const debugAttributes = isPatchV2 && params.debugAttributes === true;
 
   // Per-instance attributes (InstancedBufferAttribute on the geometry).
@@ -94,10 +101,11 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   let localY: TslNode;
   let localZ: TslNode;
   let grassColor: TslNode;
-  let coverage: TslNode | null = null;
   const pos: TslNode = positionGeometry;
 
   if (isPatchV2) {
+    const edge: TslNode = clamp(attribute("aEdgeFade", "float"), 0.0, 1.0);
+    const normalY: TslNode = clamp(attribute("aNormalY", "float"), 0.0, 1.0);
     localX = pos.x.mul(uBladeWidth).add(wind.x);
     localY = pos.y.mul(aHeight);
     localZ = pos.z.mul(uBladeWidth).add(wind.y);
@@ -110,8 +118,6 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     grassColor = mix(grassColor, tip, smoothstep(0.62, 1.0, uvY));
     grassColor = mix(grassColor, dry, aColorMix.mul(0.42));
     if (debugAttributes) {
-      const edge: TslNode = clamp(attribute("aEdgeFade", "float"), 0.0, 1.0);
-      const normalY: TslNode = clamp(attribute("aNormalY", "float"), 0.0, 1.0);
       grassColor = vec3(edge, normalY, 0.08);
     }
   } else {
@@ -164,7 +170,6 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const material = new MeshBasicNodeMaterial();
   material.positionNode = worldPos; // identity model transform -> local == world
   material.colorNode = litColor;
-  if (coverage && useAlphaToCoverage) material.opacityNode = coverage;
   material.side = THREE.DoubleSide;
   material.transparent = false;
   material.depthWrite = true;
@@ -177,6 +182,21 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     },
     setFadeCenter(x, z) {
       uFadeCenter.value.set(x, z);
+    },
+    updateSettings(settings) {
+      uBladeWidth.value = settings.bladeWidth;
+      uWindStrength.value = settings.windStrength;
+      uWindSpeed.value = settings.windSpeed;
+      useAlphaToCoverage = isPatchV2 && settings.alphaToCoverage === true;
+      material.alphaToCoverage = useAlphaToCoverage;
+      material.needsUpdate = true;
+    },
+    updateLighting(lighting) {
+      const light = "sunDirection" in lighting ? lighting.sunDirection : lighting.light;
+      uLight.value.copy(light).normalize();
+      uSun.value.copy(v3(lighting.sunColor));
+      uSky.value.copy(v3(lighting.skyLight));
+      uGround.value.copy(v3(lighting.groundLight));
     },
   };
 }
@@ -216,6 +236,12 @@ export function buildGrassInstancedGeometry(
   const colorMix = new Float32Array(count);
   const edgeFade = new Float32Array(count);
   const normalY = new Float32Array(count);
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
   instances.forEach((b, i) => {
     offset[i * 3] = b.offset[0];
     offset[i * 3 + 1] = b.offset[1];
@@ -229,6 +255,12 @@ export function buildGrassInstancedGeometry(
     colorMix[i] = b.colorMix;
     edgeFade[i] = b.edgeFade;
     normalY[i] = b.normalY;
+    minX = Math.min(minX, b.offset[0]);
+    minY = Math.min(minY, b.offset[1]);
+    minZ = Math.min(minZ, b.offset[2]);
+    maxX = Math.max(maxX, b.offset[0]);
+    maxY = Math.max(maxY, b.offset[1] + height[i]);
+    maxZ = Math.max(maxZ, b.offset[2]);
   });
   geo.setAttribute("aOffset", new THREE.InstancedBufferAttribute(offset, 3));
   geo.setAttribute("aHeight", new THREE.InstancedBufferAttribute(height, 1));
@@ -238,6 +270,12 @@ export function buildGrassInstancedGeometry(
   geo.setAttribute("aEdgeFade", new THREE.InstancedBufferAttribute(edgeFade, 1));
   geo.setAttribute("aNormalY", new THREE.InstancedBufferAttribute(normalY, 1));
   geo.instanceCount = count;
+  const margin = 4;
+  geo.boundingBox = new THREE.Box3(
+    new THREE.Vector3(minX - margin, minY - margin, minZ - margin),
+    new THREE.Vector3(maxX + margin, maxY + margin, maxZ + margin),
+  );
+  geo.boundingSphere = geo.boundingBox.getBoundingSphere(new THREE.Sphere());
   base.dispose();
   return geo;
 }

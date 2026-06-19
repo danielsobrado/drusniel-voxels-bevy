@@ -111,14 +111,20 @@ pub fn write_rgba_png(
     })
 }
 
-pub fn all_bevy_slot_cache_files_exist(cache_dir: &str) -> bool {
-    ProceduralMaterialId::BEVY_TERRAIN_SLOTS
-        .into_iter()
-        .all(|id| {
-            let root = cache_root(cache_dir);
-            root.join(material_albedo_filename(id)).exists()
-                && root.join(material_normal_filename(id)).exists()
-        })
+pub fn manifest_cache_files_exist(cache_dir: &str, manifest: &ProceduralTextureManifest) -> bool {
+    let root = cache_root(cache_dir);
+    root.join(&manifest.outputs.noise_a).exists()
+        && root.join(&manifest.outputs.noise_b).exists()
+        && manifest
+            .outputs
+            .terrain_albedo
+            .iter()
+            .all(|filename| root.join(filename).exists())
+        && manifest
+            .outputs
+            .terrain_normal_roughness
+            .iter()
+            .all(|filename| root.join(filename).exists())
 }
 
 #[cfg(test)]
@@ -148,5 +154,16 @@ mod tests {
             material_normal_filename(ProceduralMaterialId::WetSoil),
             "wet_soil_normal_roughness.png"
         );
+    }
+
+    #[test]
+    fn manifest_cache_file_check_includes_noise_outputs() {
+        let config = ProceduralTextureConfig::default();
+        let manifest = ProceduralTextureManifest::expected(&config).expect("manifest");
+
+        assert!(!manifest_cache_files_exist(
+            "generated/procedural_missing_for_test",
+            &manifest
+        ));
     }
 }

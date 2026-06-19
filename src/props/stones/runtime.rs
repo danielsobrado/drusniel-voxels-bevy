@@ -31,8 +31,8 @@ use super::config::{StoneClassId, StoneConfig};
 use super::constants::{MAX_STONE_CHUNK_SPAWNS_PER_FRAME, STONE_CHUNK_SIZE};
 use super::debug;
 use super::material::{prepare_stone_instancing_mesh, stone_props_material};
-use super::placement::generate_stones_for_chunk;
 use super::persistence;
+use super::placement::generate_stones_for_chunk;
 use super::rock_mesh::{RockPreset, build_rock};
 use super::scatter::StoneInstance;
 use super::stats::StoneRuntimeStats;
@@ -169,12 +169,7 @@ fn build_stone_mesh_pool(
                 for (lod_index, detail) in lod_details.iter().copied().enumerate() {
                     let (mesh, _tris) = build_rock(preset, seed, detail);
                     let (mesh, local_bounds) = prepare_stone_instancing_mesh(mesh);
-                    let key = (
-                        class,
-                        preset,
-                        variant.min(u8::MAX as u32) as u8,
-                        lod_index,
-                    );
+                    let key = (class, preset, variant.min(u8::MAX as u32) as u8, lod_index);
                     pool.meshes.insert(
                         key,
                         StoneMeshEntry {
@@ -336,10 +331,12 @@ fn spawn_chunk(
             continue;
         }
         let lod_index = stone_lod_index(config, instance.class_id, horizontal_distance);
-        if !pool
-            .meshes
-            .contains_key(&(instance.class_id, instance.preset, instance.variant, lod_index))
-        {
+        if !pool.meshes.contains_key(&(
+            instance.class_id,
+            instance.preset,
+            instance.variant,
+            lod_index,
+        )) {
             continue;
         }
         let rotation = Quat::from_euler(
@@ -355,7 +352,12 @@ fn spawn_chunk(
         };
         let tint = stone_tint(instance);
         batches
-            .entry((instance.class_id, instance.preset, instance.variant, lod_index))
+            .entry((
+                instance.class_id,
+                instance.preset,
+                instance.variant,
+                lod_index,
+            ))
             .or_default()
             .push(RawPropInstance {
                 transform,
@@ -588,9 +590,21 @@ fn record_stone_counters(
         timing.record_count(frame.0, debug::STONES_VISIBLE, total as f64);
         timing.record_count(frame.0, debug::STONES_LOD0, spawned.lod_counts[0] as f64);
         timing.record_count(frame.0, debug::STONES_LOD1, spawned.lod_counts[1] as f64);
-        timing.record_count(frame.0, debug::STONES_REJECTED_WATER, stats.rejected_water as f64);
-        timing.record_count(frame.0, debug::STONES_REJECTED_SLOPE, stats.rejected_slope as f64);
-        timing.record_count(frame.0, debug::STONES_REJECTED_SNOW, stats.rejected_snow as f64);
+        timing.record_count(
+            frame.0,
+            debug::STONES_REJECTED_WATER,
+            stats.rejected_water as f64,
+        );
+        timing.record_count(
+            frame.0,
+            debug::STONES_REJECTED_SLOPE,
+            stats.rejected_slope as f64,
+        );
+        timing.record_count(
+            frame.0,
+            debug::STONES_REJECTED_SNOW,
+            stats.rejected_snow as f64,
+        );
         timing.record_count(
             frame.0,
             debug::STONES_REJECTED_PROTECTED,

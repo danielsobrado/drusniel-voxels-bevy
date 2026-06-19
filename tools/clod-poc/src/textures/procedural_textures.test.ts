@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
+import * as THREE from "three";
 import { buildTerrainFragmentShader } from "../terrain_shader.js";
-import { bakeNoiseTextures } from "./noiseBake.js";
+import {
+  bakeNoiseTextures,
+  periodicFbm2,
+  periodicRidged2,
+  periodicValueNoise2,
+  periodicWorleyF1,
+} from "./noiseBake.js";
 import {
   DEFAULT_PROCEDURAL_TEXTURE_CONFIG,
   parseProceduralTextureConfig,
@@ -48,6 +55,32 @@ describe("procedural terrain textures", () => {
     expect([...second.dataB]).toEqual([...first.dataB]);
   });
 
+  it("uses periodic noise for baked scalar and gradient fields", () => {
+    const seed = 42;
+    const period = 8;
+    const x = 3.375;
+    const y = 5.125;
+
+    expect(periodicValueNoise2(x + period, y, period, seed)).toBeCloseTo(periodicValueNoise2(x, y, period, seed), 8);
+    expect(periodicFbm2(x, y + period, period, seed)).toBeCloseTo(periodicFbm2(x, y, period, seed), 8);
+    expect(periodicRidged2(x + period, y + period, period, seed)).toBeCloseTo(periodicRidged2(x, y, period, seed), 8);
+    expect(periodicWorleyF1(x + period, y, period, seed)).toBeCloseTo(periodicWorleyF1(x, y, period, seed), 8);
+  });
+
+  it("sets baked noise textures to repeat rather than mirrored repeat", () => {
+    const config = tinyConfig();
+    const bake = bakeNoiseTextures({
+      seed: config.seed,
+      resolution: config.noise.resolution,
+      periods: config.noise.periods,
+    });
+
+    expect(bake.noiseA.wrapS).toBe(THREE.RepeatWrapping);
+    expect(bake.noiseA.wrapT).toBe(THREE.RepeatWrapping);
+    expect(bake.noiseB.wrapS).toBe(THREE.RepeatWrapping);
+    expect(bake.noiseB.wrapT).toBe(THREE.RepeatWrapping);
+  });
+
   it("changes manifest hash when seed, config, or schema input changes", () => {
     const config = tinyConfig();
     const base = createProceduralTextureManifest({
@@ -68,6 +101,18 @@ describe("procedural terrain textures", () => {
     expect(differentSeed.configHash).not.toBe(base.configHash);
     expect(stableHash({ schemaVersion: 1, config })).not.toBe(stableHash({ schemaVersion: 2, config }));
     expect(stableHash({ config })).not.toBe(stableHash({ config: { ...config, noise: { ...config.noise, resolution: 32 } } }));
+    expect(base.shaderHash).toHaveLength(16);
+    expect(base.outputs.noiseA).toBe("noise_a.png");
+    expect(base.outputs.terrainAlbedo).toContain("grass_albedo.png");
+
+    const changedRuntimeOnly = createProceduralTextureManifest({
+      seed: config.seed,
+      config: { ...config, enabled: !config.enabled, runtime_mode: "cache_only" },
+      noiseResolution: config.noise.resolution,
+      layerResolution: config.terrain.layer_resolution,
+      materialOrder: config.terrain.material_order,
+    });
+    expect(changedRuntimeOnly.configHash).toBe(base.configHash);
   });
 
   it("generates deterministic terrain array dimensions and metadata", () => {
@@ -109,6 +154,8 @@ procedural_textures:
     expect(config.terrain.material_order).toEqual(["rock", "grass"]);
     expect(config.terrain.materials.grass.base_color).toEqual([0.1, 0.4, 0.2]);
     expect(config.terrain.materials.wet_soil.base_color).toEqual(DEFAULT_PROCEDURAL_TEXTURE_CONFIG.terrain.materials.wet_soil.base_color);
+    expect(config.terrain_material_quality.debug_flat.max_noise_fetches).toBe(0);
+    expect(config.terrain_material_quality.procedural_full.max_noise_fetches).toBe(10);
   });
 
   it("binds procedural terrain uniforms and keeps world-position sampling in the terrain shader", () => {

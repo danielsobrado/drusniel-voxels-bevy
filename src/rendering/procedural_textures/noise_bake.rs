@@ -32,49 +32,65 @@ fn smooth(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-pub fn value_noise_2d(x: f32, y: f32, seed: u32) -> f32 {
+fn wrap_lattice(value: i32, period: i32) -> i32 {
+    value.rem_euclid(period.max(1))
+}
+
+fn period_cells(period: f32) -> i32 {
+    period.round().max(1.0) as i32
+}
+
+pub fn periodic_value_noise_2d(x: f32, y: f32, period: i32, seed: u32) -> f32 {
     let ix = x.floor() as i32;
     let iy = y.floor() as i32;
     let fx = x - ix as f32;
     let fy = y - iy as f32;
     let ux = smooth(fx);
     let uy = smooth(fy);
-    let a = hash2(ix, iy, seed);
-    let b = hash2(ix + 1, iy, seed);
-    let c = hash2(ix, iy + 1, seed);
-    let d = hash2(ix + 1, iy + 1, seed);
+    let x0i = wrap_lattice(ix, period);
+    let x1i = wrap_lattice(ix + 1, period);
+    let y0i = wrap_lattice(iy, period);
+    let y1i = wrap_lattice(iy + 1, period);
+    let a = hash2(x0i, y0i, seed);
+    let b = hash2(x1i, y0i, seed);
+    let c = hash2(x0i, y1i, seed);
+    let d = hash2(x1i, y1i, seed);
     let x0 = a + (b - a) * ux;
     let x1 = c + (d - c) * ux;
     x0 + (x1 - x0) * uy
 }
 
-pub fn fbm_2d(x: f32, y: f32, seed: u32, octaves: u32) -> f32 {
+pub fn periodic_fbm_2d(x: f32, y: f32, period: i32, seed: u32, octaves: u32) -> f32 {
     let mut amp = 0.5;
-    let mut freq = 1.0;
+    let mut freq = 1;
     let mut sum = 0.0;
     let mut norm = 0.0;
     for octave in 0..octaves {
-        sum += value_noise_2d(
-            x * freq + octave as f32 * 17.13,
-            y * freq - octave as f32 * 9.71,
+        let octave_period = period.saturating_mul(freq).max(1);
+        sum += periodic_value_noise_2d(
+            x * freq as f32 + octave as f32 * 17.0,
+            y * freq as f32 - octave as f32 * 9.0,
+            octave_period,
             seed + octave * 1013,
         ) * amp;
         norm += amp;
         amp *= 0.5;
-        freq *= 2.02;
+        freq *= 2;
     }
     sum / norm.max(0.0001)
 }
 
-pub fn ridged_2d(x: f32, y: f32, seed: u32, octaves: u32) -> f32 {
+pub fn periodic_ridged_2d(x: f32, y: f32, period: i32, seed: u32, octaves: u32) -> f32 {
     let mut amp = 0.5;
-    let mut freq = 1.0;
+    let mut freq = 1;
     let mut sum = 0.0;
     let mut norm = 0.0;
     for octave in 0..octaves {
-        let n = (value_noise_2d(
-            x * freq + octave as f32 * 13.7,
-            y * freq + octave as f32 * 5.2,
+        let octave_period = period.saturating_mul(freq).max(1);
+        let n = (periodic_value_noise_2d(
+            x * freq as f32 + octave as f32 * 13.0,
+            y * freq as f32 + octave as f32 * 5.0,
+            octave_period,
             seed ^ 0x6c8e_9cf5,
         ) * 2.0
             - 1.0)
@@ -83,12 +99,12 @@ pub fn ridged_2d(x: f32, y: f32, seed: u32, octaves: u32) -> f32 {
         sum += r * r * amp;
         norm += amp;
         amp *= 0.53;
-        freq *= 2.1;
+        freq *= 2;
     }
     sum / norm.max(0.0001)
 }
 
-pub fn worley_f1(x: f32, y: f32, seed: u32) -> f32 {
+pub fn periodic_worley_f1(x: f32, y: f32, period: i32, seed: u32) -> f32 {
     let ix = x.floor() as i32;
     let iy = y.floor() as i32;
     let fx = x - ix as f32;
@@ -96,7 +112,11 @@ pub fn worley_f1(x: f32, y: f32, seed: u32) -> f32 {
     let mut best: f32 = 8.0;
     for oy in -1..=1 {
         for ox in -1..=1 {
-            let [hx, hy] = hash22(ix + ox, iy + oy, seed);
+            let [hx, hy] = hash22(
+                wrap_lattice(ix + ox, period),
+                wrap_lattice(iy + oy, period),
+                seed,
+            );
             let dx = ox as f32 + hx - fx;
             let dy = oy as f32 + hy - fy;
             best = best.min((dx * dx + dy * dy).sqrt());
@@ -119,6 +139,10 @@ pub fn bake_noise_textures(config: &NoiseBakeConfig, seed: u32) -> NoiseBake {
     let mut data_b = vec![0u8; (resolution * resolution * 4) as usize];
     let e_fbm = (config.periods.fbm / resolution as f32) * 0.5;
     let e_rid = (config.periods.ridged / resolution as f32) * 0.5;
+    let value_period = period_cells(config.periods.value);
+    let fbm_period = period_cells(config.periods.fbm);
+    let ridged_period = period_cells(config.periods.ridged);
+    let worley_period = period_cells(config.periods.worley);
     let grad_range = 2.0;
 
     for y in 0..resolution {
@@ -126,22 +150,36 @@ pub fn bake_noise_textures(config: &NoiseBakeConfig, seed: u32) -> NoiseBake {
             let i = ((y * resolution + x) * 4) as usize;
             let u = (x as f32 + 0.5) / resolution as f32;
             let v = (y as f32 + 0.5) / resolution as f32;
-            let value = value_noise_2d(u * config.periods.value, v * config.periods.value, seed);
+            let value = periodic_value_noise_2d(
+                u * config.periods.value,
+                v * config.periods.value,
+                value_period,
+                seed,
+            );
             let fx = u * config.periods.fbm;
             let fy = v * config.periods.fbm;
-            let fbm = fbm_2d(fx, fy, seed, 3);
-            let fdx =
-                (fbm_2d(fx + e_fbm, fy, seed, 3) - fbm_2d(fx - e_fbm, fy, seed, 3)) / (2.0 * e_fbm);
-            let fdy =
-                (fbm_2d(fx, fy + e_fbm, seed, 3) - fbm_2d(fx, fy - e_fbm, seed, 3)) / (2.0 * e_fbm);
+            let fbm = periodic_fbm_2d(fx, fy, fbm_period, seed, 3);
+            let fdx = (periodic_fbm_2d(fx + e_fbm, fy, fbm_period, seed, 3)
+                - periodic_fbm_2d(fx - e_fbm, fy, fbm_period, seed, 3))
+                / (2.0 * e_fbm);
+            let fdy = (periodic_fbm_2d(fx, fy + e_fbm, fbm_period, seed, 3)
+                - periodic_fbm_2d(fx, fy - e_fbm, fbm_period, seed, 3))
+                / (2.0 * e_fbm);
             let rx = u * config.periods.ridged;
             let ry = v * config.periods.ridged;
-            let ridged = ridged_2d(rx, ry, seed, 3);
-            let rdx = (ridged_2d(rx + e_rid, ry, seed, 3) - ridged_2d(rx - e_rid, ry, seed, 3))
+            let ridged = periodic_ridged_2d(rx, ry, ridged_period, seed, 3);
+            let rdx = (periodic_ridged_2d(rx + e_rid, ry, ridged_period, seed, 3)
+                - periodic_ridged_2d(rx - e_rid, ry, ridged_period, seed, 3))
                 / (2.0 * e_rid);
-            let rdy = (ridged_2d(rx, ry + e_rid, seed, 3) - ridged_2d(rx, ry - e_rid, seed, 3))
+            let rdy = (periodic_ridged_2d(rx, ry + e_rid, ridged_period, seed, 3)
+                - periodic_ridged_2d(rx, ry - e_rid, ridged_period, seed, 3))
                 / (2.0 * e_rid);
-            let worley = worley_f1(u * config.periods.worley, v * config.periods.worley, seed);
+            let worley = periodic_worley_f1(
+                u * config.periods.worley,
+                v * config.periods.worley,
+                worley_period,
+                seed,
+            );
 
             data_a[i] = enc01(value);
             data_a[i + 1] = enc01(fbm);
@@ -191,5 +229,68 @@ mod tests {
         assert_eq!(first.data_a, second.data_a);
         assert_eq!(first.data_b, second.data_b);
         assert_ne!(first.data_a, changed.data_a);
+    }
+
+    #[test]
+    fn procedural_noise_functions_are_periodic() {
+        let seed = 42;
+        let period = 8;
+        let x = 3.375;
+        let y = 5.125;
+        let eps = 0.00001;
+
+        assert!(
+            (periodic_value_noise_2d(x, y, period, seed)
+                - periodic_value_noise_2d(x + period as f32, y, period, seed))
+            .abs()
+                < eps
+        );
+        assert!(
+            (periodic_fbm_2d(x, y, period, seed, 3)
+                - periodic_fbm_2d(x, y + period as f32, period, seed, 3))
+            .abs()
+                < eps
+        );
+        assert!(
+            (periodic_ridged_2d(x, y, period, seed, 3)
+                - periodic_ridged_2d(x + period as f32, y + period as f32, period, seed, 3))
+            .abs()
+                < eps
+        );
+        assert!(
+            (periodic_worley_f1(x, y, period, seed)
+                - periodic_worley_f1(x + period as f32, y, period, seed))
+            .abs()
+                < eps
+        );
+    }
+
+    #[test]
+    fn packed_gradient_channels_match_across_periodic_domain() {
+        let config = NoiseBakeConfig {
+            resolution: 16,
+            periods: NoiseBakePeriods {
+                value: 8.0,
+                fbm: 8.0,
+                ridged: 8.0,
+                worley: 8.0,
+            },
+        };
+        let bake = bake_noise_textures(&config, 9);
+        let u = 0.28125;
+        let v = 0.65625;
+
+        for channel in [2, 3] {
+            assert_eq!(
+                sample_noise_channel(&bake.data_a, bake.resolution, u, v, channel),
+                sample_noise_channel(&bake.data_a, bake.resolution, u + 1.0, v, channel)
+            );
+        }
+        for channel in [0, 1] {
+            assert_eq!(
+                sample_noise_channel(&bake.data_b, bake.resolution, u, v, channel),
+                sample_noise_channel(&bake.data_b, bake.resolution, u, v + 1.0, channel)
+            );
+        }
     }
 }

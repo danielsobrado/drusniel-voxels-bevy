@@ -22,12 +22,19 @@ import {
 import { loadContentRegistry, validateContentRegistry } from "./content/index.js";
 import { ClodPageNode, PageMesh } from "./types.js";
 import {
-  applyTerrainColorAdjustments,
-  applyTerrainTextureUniforms,
-  createTerrainMaterial,
   DEFAULT_TERRAIN_COLOR_ADJUSTMENTS,
   type TerrainColorAdjustments,
 } from "./material.js";
+import {
+  createWebGlTerrainMaterial,
+  type TerrainMaterialHandle,
+} from "./rendering/terrain_material.js";
+import {
+  createWebGlAppRenderer,
+  createWebGpuAppRenderer,
+  parseRendererBackend,
+} from "./rendering/renderer_backend.js";
+import { createWebGpuTerrainMaterial } from "./rendering/terrain_material_webgpu.js";
 import {
   DEFAULT_GRASS_SETTINGS,
   GRASS_SHADER_MODES,
@@ -67,6 +74,13 @@ import {
   type PostProcessSettings,
 } from "./postprocess.js";
 import {
+  buildGrassInstancedGeometry,
+  createGrassNodeMaterial,
+} from "./gpu/grass_node_material.js";
+import { createStoneNodeMaterial } from "./gpu/stone_node_material.js";
+import { createSkyNodeMaterial, type SkyNodeHandle } from "./gpu/sky_node_material.js";
+import { WebGpuPostProcessPipeline } from "./gpu/webgpu_postprocess.js";
+import {
   consumeStagedProjectImport,
   createProjectArchive,
   parseProjectArchive,
@@ -103,7 +117,8 @@ import {
 
 const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
-const WEBGPU_ERROR_MAX_AGE_FRAMES = 2;
+const WEBGPU_ERROR_MAX_AGE_FRAMES = 6;
+const WEBGPU_DISPATCH_INTERVAL_FRAMES = 2;
 const WEBGPU_PARITY_INTERVAL_FRAMES = 60;
 const WEBGPU_ERROR_TOLERANCE_PX = 0.02;
 const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
@@ -218,7 +233,7 @@ function recomputedNormalsFor(view: NodeView): Float32Array {
 interface NodeView {
   node: ClodPageNode;
   mesh: THREE.Mesh;
-  mat: THREE.ShaderMaterial;
+  mat: TerrainMaterialHandle;
   sourceNormals: Float32Array;
   recomputedNormals: Float32Array | null;
   selected: boolean;
@@ -250,6 +265,99 @@ interface SharedEdge {
   bPlane: number;
 }
 
+interface AppSky {
+  lighting(): EnvironmentLighting;
+  setVisible(visible: boolean): void;
+  updateCamera(camera: THREE.Camera): void;
+  updateSettings(settings: Partial<EnvironmentSettings>): void;
+  dispose(): void;
+}
+
+interface AppPostProcess {
+  render(scene: THREE.Scene, camera: THREE.Camera): void;
+  setSize(width: number, height: number): void;
+  updateSettings(settings: Partial<PostProcessSettings>): void;
+  dispose(): void;
+}
+
+class WebGpuSkyEnvironment implements AppSky {
+  private readonly scene: THREE.Scene;
+  private readonly renderer: { toneMappingExposure: number };
+  private readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.Material>;
+  private readonly previousBackground: THREE.Scene["background"];
+  private readonly background = new THREE.Color();
+  private readonly settings: EnvironmentSettings;
+  private readonly colors = {
+    sun: DEFAULT_ENVIRONMENT_COLORS.sun.clone(),
+    zenith: DEFAULT_ENVIRONMENT_COLORS.zenith.clone(),
+    horizon: DEFAULT_ENVIRONMENT_COLORS.horizon.clone(),
+    ground: DEFAULT_ENVIRONMENT_COLORS.ground.clone(),
+    skyLight: DEFAULT_ENVIRONMENT_COLORS.skyLight.clone(),
+    groundLight: DEFAULT_ENVIRONMENT_COLORS.groundLight.clone(),
+  };
+  private handle: SkyNodeHandle;
+  private disposed = false;
+
+  constructor(options: {
+    scene: THREE.Scene;
+    renderer: THREE.WebGLRenderer | { toneMappingExposure: number };
+    radius: number;
+    settings: EnvironmentSettings;
+  }) {
+    this.scene = options.scene;
+    this.renderer = options.renderer;
+    this.settings = { ...options.settings };
+    this.previousBackground = this.scene.background;
+    this.handle = createSkyNodeMaterial(this.settings, this.colors);
+    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(options.radius, 48, 24), this.handle.material);
+    this.mesh.name = "webgpu-sky-environment";
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = -1000;
+    this.scene.add(this.mesh);
+    this.renderer.toneMappingExposure = this.settings.exposure;
+    this.updateBackground();
+  }
+
+  lighting(): EnvironmentLighting {
+    const lighting = this.handle.lighting;
+    return {
+      sunDirection: lighting.sunDirection.clone(),
+      sunColor: lighting.sunColor.clone(),
+      skyLight: lighting.skyLight.clone(),
+      groundLight: lighting.groundLight.clone(),
+    };
+  }
+
+  setVisible(visible: boolean): void {
+    this.mesh.visible = visible;
+  }
+
+  updateCamera(camera: THREE.Camera): void {
+    this.mesh.position.copy(camera.position);
+  }
+
+  updateSettings(settings: Partial<EnvironmentSettings>): void {
+    Object.assign(this.settings, settings);
+    this.handle.updateSettings(this.settings);
+    this.renderer.toneMappingExposure = this.settings.exposure;
+    this.updateBackground();
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.scene.remove(this.mesh);
+    this.mesh.geometry.dispose();
+    this.mesh.material.dispose();
+    if (this.scene.background === this.background) this.scene.background = this.previousBackground;
+  }
+
+  private updateBackground(): void {
+    this.background.copy(this.colors.horizon).multiplyScalar(this.settings.skyIntensity);
+    this.scene.background = this.background;
+  }
+}
+
 interface CrossLodAdjacency {
   a: ClodPageNode;
   b: ClodPageNode;
@@ -269,6 +377,19 @@ function sharedEdge(a: ClodPageNode, b: ClodPageNode): SharedEdge | null {
     if (fb.maxZ === fa.minZ) return { axis: "z", aPlane: fa.minZ, bPlane: fb.maxZ };
   }
   return null;
+}
+
+// Cheap cut-change detector: FNV-1a rolling hash over render-order node ids. selectCut is
+// deterministic, so an unchanged cut hashes identically — avoids a per-frame O(R log R)
+// sort + giant string join just to detect changes.
+function hashRenderedCut(rendered: readonly ClodPageNode[]): number {
+  let h = 2166136261;
+  for (const n of rendered) {
+    const id = n.id;
+    for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+    h = Math.imul(h ^ 0x2c, 16777619); // id separator
+  }
+  return h >>> 0;
 }
 
 function crossLodAdjacencies(rendered: ClodPageNode[]): CrossLodAdjacency[] {
@@ -483,23 +604,39 @@ async function main() {
   let clodErrorCompute: ClodErrorPxCompute | null = null;
   let webGpuUnavailableReason: string | null = null;
   let webGpuInitPromise: Promise<void> | null = null;
-  // One shared device for the whole app (matches the fable5-world-demo pattern of a
-  // single renderer-owned device). Future GPU passes should be handed this device
-  // rather than each requesting their own.
-  let sharedWebGpuDevice: GPUDevice | null = null;
+  let standaloneComputeDevice: GPUDevice | null = null;
+
+  const rendererBackend = parseRendererBackend(searchParams);
+  const app = rendererBackend === "webgpu" ? await createWebGpuAppRenderer() : createWebGlAppRenderer();
+  const renderer = app.renderer;
+  const maxAnisotropy = app.maxAnisotropy;
+  const isWebGpu = app.isWebGpu;
+  const rendererWebGpuDevice = app.isWebGpu
+    ? (app.renderer.backend as unknown as { device?: GPUDevice }).device ?? null
+    : null;
   const ensureClodErrorCompute = (): Promise<void> => {
     if (clodErrorCompute || webGpuUnavailableReason) return Promise.resolve();
     if (!webGpuInitPromise) {
       webGpuInitPromise = (async () => {
-        if (!sharedWebGpuDevice) {
-          const deviceResult = await requestWebGpuDevice();
-          if (!deviceResult.ok) {
-            webGpuUnavailableReason = deviceResult.message;
+        let device: GPUDevice | undefined;
+        if (app.isWebGpu) {
+          if (!rendererWebGpuDevice) {
+            webGpuUnavailableReason = "WebGPU renderer did not expose a GPUDevice";
             return;
           }
-          sharedWebGpuDevice = deviceResult.device;
+          device = rendererWebGpuDevice;
+        } else {
+          if (!standaloneComputeDevice) {
+            const deviceResult = await requestWebGpuDevice();
+            if (!deviceResult.ok) {
+              webGpuUnavailableReason = deviceResult.message;
+              return;
+            }
+            standaloneComputeDevice = deviceResult.device;
+          }
+          device = standaloneComputeDevice;
         }
-        const { compute, unavailable } = await ClodErrorPxCompute.create(allNodes, sharedWebGpuDevice);
+        const { compute, unavailable } = await ClodErrorPxCompute.create(allNodes, device);
         clodErrorCompute = compute;
         webGpuUnavailableReason = unavailable?.message ?? null;
       })()
@@ -516,8 +653,30 @@ async function main() {
     info.textContent = "initializing WebGPU CLOD compute…";
     await ensureClodErrorCompute();
   }
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // Backend-agnostic terrain material: NodeMaterial under WebGPU, ShaderMaterial under WebGL.
+  //
+  // Under WebGPU with atomic page swaps (transition_mode "instant"), every terrain mesh can
+  // share ONE node material — there is no per-view dither fade, so the only per-mesh state
+  // would be base colour, and that is uniform terrain colour by default. Sharing collapses
+  // thousands of distinct TSL graphs/pipelines into one, killing the per-mesh material cost on
+  // zoom-out and page entry. Trade-off: per-node `colorByLod` tint and the red bubble tint are
+  // not shown on this shared path (debug-only views; frame timing is unaffected). WebGL and the
+  // "dither" transition keep per-view materials, so those paths are unchanged.
+  const poolTerrainMaterial = isWebGpu && cfg.selection.transition_mode === "instant";
+  // Unique live terrain handles; forEachTerrainMaterial iterates these so global state is
+  // applied once (not once per sharer, which would rebuild the shared graph N times).
+  const terrainMaterials = new Set<TerrainMaterialHandle>();
+  let sharedTerrainMaterial: TerrainMaterialHandle | null = null;
+  const makeTerrainMaterial = (color: number): TerrainMaterialHandle => {
+    if (poolTerrainMaterial) {
+      sharedTerrainMaterial ??= createWebGpuTerrainMaterial(0xb9c0c8);
+      terrainMaterials.add(sharedTerrainMaterial);
+      return sharedTerrainMaterial;
+    }
+    const handle = isWebGpu ? createWebGpuTerrainMaterial(color) : createWebGlTerrainMaterial(color);
+    terrainMaterials.add(handle);
+    return handle;
+  };
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(devicePixelRatio);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -878,6 +1037,7 @@ async function main() {
     stoneVisible: 0,
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
+  if (isWebGpu) state.normalDivergence = false;
   if (queryPerfMode) {
     state.clodPerfMode = true;
     state.colorByLod = true;
@@ -928,24 +1088,31 @@ async function main() {
     vignette: state.postProcessVignette,
     debugMode: state.postProcessDebugMode,
   });
-  const postProcess = new PostProcessPipeline(renderer, currentPostProcessSettings());
+  const postProcess: AppPostProcess = app.isWebGpu
+    ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings())
+    : new PostProcessPipeline(app.renderer, currentPostProcessSettings());
   postProcess.setSize(window.innerWidth, window.innerHeight);
-  const skyEnvironment = new SkyEnvironment({
-    scene,
-    renderer,
-    radius: Math.max(1600, worldCells * 5),
-    settings: currentEnvironmentSettings(),
-    colors: DEFAULT_ENVIRONMENT_COLORS,
-  });
+  const skyEnvironment: AppSky = app.isWebGpu
+    ? new WebGpuSkyEnvironment({
+        scene,
+        renderer: app.renderer,
+        radius: Math.max(1600, worldCells * 5),
+        settings: currentEnvironmentSettings(),
+      })
+    : new SkyEnvironment({
+        scene,
+        renderer: app.renderer,
+        radius: Math.max(1600, worldCells * 5),
+        settings: currentEnvironmentSettings(),
+        colors: DEFAULT_ENVIRONMENT_COLORS,
+      });
   skyEnvironment.setVisible(!state.clodPerfMode);
+  const currentLighting = (): EnvironmentLighting => skyEnvironment.lighting();
   const applyLightingToMaterial = (
-    mat: THREE.ShaderMaterial,
-    lighting: EnvironmentLighting = skyEnvironment.lighting(),
+    mat: TerrainMaterialHandle,
+    lighting: EnvironmentLighting = currentLighting(),
   ) => {
-    mat.uniforms.uLight.value.copy(lighting.sunDirection);
-    mat.uniforms.uSunColor.value.copy(lighting.sunColor);
-    mat.uniforms.uSkyLight.value.copy(lighting.skyLight);
-    mat.uniforms.uGroundLight.value.copy(lighting.groundLight);
+    mat.setLighting(lighting);
   };
 
   // TODO: Wire content registry textureSlots here instead of hardcoding initial slots.
@@ -1028,7 +1195,7 @@ async function main() {
     tex.generateMipmaps = true;
     tex.minFilter = THREE.LinearMipmapLinearFilter;
     tex.magFilter = THREE.LinearFilter;
-    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    tex.anisotropy = maxAnisotropy;
     tex.needsUpdate = true;
     return tex;
   };
@@ -1091,21 +1258,17 @@ async function main() {
   const applyTerrainTextures = () => {
     rebuildActiveTerrainSlots();
     const slots = activeTerrainSlots();
-    const apply = (mat: THREE.ShaderMaterial) => {
-      applyTerrainTextureUniforms(mat, slots, terrainTextureUniformOptions());
-    };
-    for (const v of views.values()) apply(v.mat);
-    for (const { mats } of chunkGroups.values()) {
-      for (const m of mats) apply(m);
-    }
+    const options = terrainTextureUniformOptions();
+    // Iterate UNIQUE handles: a shared material must get setTextures once, not once per sharer.
+    for (const m of terrainMaterials) m.setTextures(slots, options);
     refreshTerraformSwatches();
     syncColorByLod();
   };
   const applyColorByLodToMaterials = (on: boolean) => {
+    // The shared WebGPU material carries one base colour, so per-node LOD tint is not shown.
+    if (poolTerrainMaterial) return;
     for (const v of views.values()) {
-      (v.mat.uniforms.uColor.value as THREE.Color).set(
-        on ? LOD_COLORS[Math.min(v.node.level, 3)] : 0xb9c0c8,
-      );
+      v.mat.setBaseColor(on ? LOD_COLORS[Math.min(v.node.level, 3)] : 0xb9c0c8);
     }
   };
   const syncColorByLod = () => {
@@ -1123,12 +1286,15 @@ async function main() {
   // One view per node; selection visibility drives what's drawn.
   const views = new Map<string, NodeView>();
   for (const node of allNodes) {
-    const mat = createTerrainMaterial(
+    const mat = makeTerrainMaterial(
       state.colorByLod ? LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)] : 0xb9c0c8,
     );
-    applyTerrainColorAdjustments(mat, currentTerrainColorAdjustments());
+    mat.setColorAdjust(currentTerrainColorAdjustments());
     applyLightingToMaterial(mat);
-    const mesh = new THREE.Mesh(toGeometry(node.mesh), mat);
+    const mesh = new THREE.Mesh(toGeometry(node.mesh), mat.material);
+    mat.onMaterialChanged((material) => {
+      mesh.material = material;
+    });
     mesh.visible = false;
     scene.add(mesh);
     views.set(node.id, {
@@ -1175,32 +1341,50 @@ async function main() {
   // Page LOD0 = welded chunks, so with tint off the bubble edge must be invisible (§4.4).
   const worldBounds = { cellsX: worldCells, cellsZ: worldCells };
   const P = cfg.page.chunks_per_page;
-  const chunkGroups = new Map<string, { group: THREE.Group; mats: THREE.ShaderMaterial[] }>();
+  // Max bubble pages whose raw chunk groups (P^2 meshChunk each) we build per frame. Caps the
+  // walk spike from many pages entering the bubble at once; un-built pages keep their welded
+  // LOD0 page mesh visible meanwhile, so it's a latency/seamlessness trade, not a visual gap.
+  const CHUNK_GROUP_BUILD_BUDGET = 1;
+  const chunkGroups = new Map<
+    string,
+    { group: THREE.Group; mats: TerrainMaterialHandle[]; unsubs: Array<() => void> }
+  >();
   const ensureChunkGroup = (node: ClodPageNode) => {
     let entry = chunkGroups.get(node.id);
     if (entry) return entry;
     const [px, pz] = node.id.slice(3).split(",").map(Number);
     const group = new THREE.Group();
-    const mats: THREE.ShaderMaterial[] = [];
+    const mats: TerrainMaterialHandle[] = [];
+    const unsubs: Array<() => void> = [];
     for (let dz = 0; dz < P; dz++) {
       for (let dx = 0; dx < P; dx++) {
         const cm = meshChunk(px * P + dx, pz * P + dz, cfg, worldBounds);
-        const mat = createTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
-        mat.uniforms.uNormalColor.value = state.normalColor;
-        mat.uniforms.uUseTriplanar.value = state.triplanar;
-        mat.uniforms.uNormalDivergence.value = state.normalDivergence;
-        mat.uniforms.uDivergenceGain.value = state.divergenceGain;
-        applyTerrainColorAdjustments(mat, currentTerrainColorAdjustments());
-        mat.side = state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide;
-        rebuildActiveTerrainSlots();
-        applyTerrainTextureUniforms(mat, textureSlots, terrainTextureUniformOptions());
-        applyLightingToMaterial(mat);
-        group.add(new THREE.Mesh(toGeometry(cm), mat));
+        const mat = makeTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
+        // Pooled: the shared material already carries global state (textures/lighting/etc.);
+        // re-applying it per chunk would rebuild the shared graph P^2 times per page entry.
+        if (!poolTerrainMaterial) {
+          mat.setDebug({
+            normalColor: state.normalColor,
+            normalDivergence: state.normalDivergence,
+            divergenceGain: state.divergenceGain,
+          });
+          mat.setTriplanar(state.triplanar);
+          mat.setColorAdjust(currentTerrainColorAdjustments());
+          mat.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
+          rebuildActiveTerrainSlots();
+          mat.setTextures(textureSlots, terrainTextureUniformOptions());
+          applyLightingToMaterial(mat);
+        }
+        const mesh = new THREE.Mesh(toGeometry(cm), mat.material);
+        unsubs.push(mat.onMaterialChanged((material) => {
+          mesh.material = material;
+        }));
+        group.add(mesh);
         mats.push(mat);
       }
     }
     scene.add(group);
-    entry = { group, mats };
+    entry = { group, mats, unsubs };
     chunkGroups.set(node.id, entry);
     return entry;
   };
@@ -1224,7 +1408,7 @@ async function main() {
     seed: state.grassSeed,
   });
   const currentGrassLighting = (): GrassLighting => {
-    const lighting = skyEnvironment.lighting();
+    const lighting = currentLighting();
     return {
       light: lighting.sunDirection,
       sunColor: lighting.sunColor,
@@ -1232,25 +1416,33 @@ async function main() {
       groundLight: lighting.groundLight,
     };
   };
+  const grassLightingToEnvironment = (lighting: GrassLighting): EnvironmentLighting => ({
+    sunDirection: lighting.light,
+    sunColor: lighting.sunColor,
+    skyLight: lighting.skyLight,
+    groundLight: lighting.groundLight,
+  });
   let grass: GrassSystem | null = null;
   let grassStats: GrassStats | null = null;
   let stones: StoneSystem | null = null;
+  let webGpuStoneMaterial: ReturnType<typeof createStoneNodeMaterial> | null = null;
   let selState: SelectionState = { split: new Set() };
   const pageTransitionMode = cfg.selection.transition_mode;
   const crossfadeStep = cfg.selection.crossfade_frames > 0
     ? 1 / cfg.selection.crossfade_frames
     : 1;
-  const forEachTerrainMaterial = (fn: (mat: THREE.ShaderMaterial) => void) => {
-    for (const v of views.values()) fn(v.mat);
-    for (const { mats } of chunkGroups.values()) for (const m of mats) fn(m);
+  const forEachTerrainMaterial = (fn: (mat: TerrainMaterialHandle) => void) => {
+    // Unique handles only — a shared material would otherwise get global state (and graph
+    // rebuilds) applied once per sharing mesh.
+    for (const m of terrainMaterials) fn(m);
   };
   const applyColorAdjustmentsToTerrain = () => {
     const adjustments = currentTerrainColorAdjustments();
-    forEachTerrainMaterial((mat) => applyTerrainColorAdjustments(mat, adjustments));
+    forEachTerrainMaterial((mat) => mat.setColorAdjust(adjustments));
   };
   const updateLighting = () => {
-    skyEnvironment.updateSettings(currentEnvironmentSettings());
-    const lighting = skyEnvironment.lighting();
+    skyEnvironment?.updateSettings(currentEnvironmentSettings());
+    const lighting = currentLighting();
     forEachTerrainMaterial((mat) => applyLightingToMaterial(mat, lighting));
     grass?.updateLighting({
       light: lighting.sunDirection,
@@ -1258,12 +1450,14 @@ async function main() {
       skyLight: lighting.skyLight,
       groundLight: lighting.groundLight,
     });
-    stones?.updateLighting({
+    const stoneLighting = {
       light: lighting.sunDirection,
       sunColor: lighting.sunColor,
       skyLight: lighting.skyLight,
       groundLight: lighting.groundLight,
-    });
+    };
+    stones?.updateLighting(stoneLighting);
+    webGpuStoneMaterial?.setLighting(stoneLighting);
   };
   const grassSystem = new GrassSystem({
     scene,
@@ -1271,6 +1465,22 @@ async function main() {
     worldCells,
     settings: makeGrassSettings(),
     lighting: currentGrassLighting(),
+    ...(isWebGpu
+      ? {
+          createMaterial: (settings: GrassSettings, lighting: GrassLighting) =>
+            createGrassNodeMaterial({
+              lighting: grassLightingToEnvironment(lighting),
+              bladeWidth: settings.bladeWidth,
+              windStrength: settings.windStrength,
+              windSpeed: settings.windSpeed,
+              mode: settings.shaderMode,
+              alphaToCoverage: settings.alphaToCoverage,
+              distance: settings.distance,
+              fadeCenter: new THREE.Vector2(controls.target.x, controls.target.z),
+            }),
+          buildGeometry: buildGrassInstancedGeometry,
+        }
+      : {}),
   });
   grass = grassSystem;
   state.grassBladeCount = grassSystem.getBladeCount();
@@ -1291,17 +1501,19 @@ async function main() {
     );
   const stonePageNodes = allNodes.filter((node) => node.level === 0);
   const stonePageSignaturesBefore = pageMeshSignatures(stonePageNodes);
+  if (isWebGpu) webGpuStoneMaterial = createStoneNodeMaterial(currentGrassLighting() as StoneLighting);
   const stoneSystem = new StoneSystem({
     scene,
     nodes: stonePageNodes,
     worldCells,
     settings: makeStoneSettings(),
     lighting: currentGrassLighting() as StoneLighting,
+    material: webGpuStoneMaterial?.material,
   });
   assertPageMeshSignaturesUnchanged(stonePageSignaturesBefore, pageMeshSignatures(stonePageNodes));
   stoneSystem.setVisibleClasses(visibleStoneClasses());
   stones = stoneSystem;
-  let stoneStats: StoneStats = stoneSystem.getStats();
+  let stoneStats: StoneStats | null = stoneSystem.getStats();
 
   const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
@@ -1363,13 +1575,15 @@ async function main() {
     }
   };
 
-  let lastCutKey = "";
+  let lastCutHash = -1;
   let lastDebugKey = "";
   let lastForced = 0;
   let lastNearFieldForced = 0;
   let lastCrossLodAdjacencyCount = 0;
   let lastRenderedCount = 0;
   let lastRenderedNodes: ClodPageNode[] = [];
+  let currentTerrainViews = new Set<NodeView>();
+  const activeTerrainViews = new Set<NodeView>();
   let lastLevelSummary = "";
   let lastNodesByLod: Record<number, number> = {};
   let lastTriCount = 0;
@@ -1378,9 +1592,14 @@ async function main() {
   let lastArchiveSummary = "";
   let selectionFrameId = 0;
   let lastSelectionMs = 0;
+  // ?profile=1 sub-phase breakdown of the updateSelection bracket, so a slow "selection"
+  // frame tells us which line (cut traversal vs bookkeeping vs info text vs overlays) cost it.
+  const selSub = { cut: 0, book: 0, info: 0, overlays: 0 };
   let lastSelectionSource: "cpu" | "webgpu" = "cpu";
   let lastParityFrame = -WEBGPU_PARITY_INTERVAL_FRAMES;
   let parityVerified = false;
+  let lastWebGpuDispatchFrame = -WEBGPU_DISPATCH_INTERVAL_FRAMES;
+  let lastWebGpuDispatchKey = "";
   const emptyWebGpuStats = (): ClodErrorPxStats => ({
     enabled: state.webgpuSelection,
     available: false,
@@ -1431,7 +1650,7 @@ async function main() {
       `bubble forced splits: ${lastNearFieldForced}   xLOD borders: ${lastCrossLodAdjacencyCount}\n` +
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
-      `selection: ${lastSelectionSource} ${lastSelectionMs.toFixed(2)}ms   ${formatWebGpuStats()}\n` +
+      `renderer: ${isWebGpu ? "WebGPU" : "WebGL"}   selection: ${lastSelectionSource} ${lastSelectionMs.toFixed(2)}ms   gpu-compute: ${formatWebGpuStats()}\n` +
       `${polishLine}\n` +
       `worker: parents pending=${pendingParentCount} rebuilt=${pendingParentNodes} ${pendingParentMs.toFixed(0)}ms   ` +
       `colliders loaded=${terrainColliders.loadedPageCount()}${state.clodPerfMode ? "   CLOD PERF" : ""}\n` +
@@ -1481,6 +1700,25 @@ async function main() {
     clodErrorCompute.markParityOk(maxDelta);
   };
 
+  const webGpuDispatchKey = (params: SelectionParams): string => {
+    const q = (value: number, step = 0.25) => Math.round(value / step);
+    const near = params.nearField;
+    return [
+      q(params.camPos[0]),
+      q(params.camPos[1]),
+      q(params.camPos[2]),
+      q(params.viewportH, 1),
+      q(params.fovY, 0.0005),
+      q(params.thresholdPx, 0.01),
+      params.enforce21 ? 1 : 0,
+      params.forcedMaxLevel ?? -1,
+      near?.enabled ? 1 : 0,
+      q(near?.centerX ?? 0),
+      q(near?.centerZ ?? 0),
+      q(near?.radius ?? 0),
+    ].join(":");
+  };
+
   const updateSelection = () => {
     const selectionStart = performance.now();
     const selectionCenter = interaction.mode === "playing" ? player.position : controls.target;
@@ -1505,22 +1743,40 @@ async function main() {
       : null;
     if (gpuMap) verifyWebGpuParity(gpuMap, params);
     const errorPxLookup = gpuMap && clodErrorCompute ? clodErrorCompute.errorLookup(gpuMap) : undefined;
+    const tSelectCut = performance.now();
     const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectCut(
       result.roots,
       params,
       selState,
       { errorPxLookup },
     );
+    selSub.cut = performance.now() - tSelectCut;
     selState = ns;
     lastForced = forcedSplits;
     lastNearFieldForced = nearFieldForcedSplits;
     lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
 
     const cutIds = new Set(rendered.map((n) => n.id));
-    for (const v of views.values()) {
-      v.selected = cutIds.has(v.node.id);
-      v.target = v.selected ? 1 : 0;
+    const nextTerrainViews = new Set<NodeView>();
+    for (const node of rendered) {
+      const view = views.get(node.id);
+      if (!view) continue;
+      view.selected = true;
+      if (view.target !== 1) {
+        view.target = 1;
+        activeTerrainViews.add(view);
+      }
+      nextTerrainViews.add(view);
     }
+    for (const view of currentTerrainViews) {
+      if (cutIds.has(view.node.id)) continue;
+      view.selected = false;
+      if (view.target !== 0) {
+        view.target = 0;
+        activeTerrainViews.add(view);
+      }
+    }
+    currentTerrainViews = nextTerrainViews;
 
     const perLevel = new Map<number, number>();
     let tris = 0;
@@ -1528,28 +1784,42 @@ async function main() {
       perLevel.set(n.level, (perLevel.get(n.level) ?? 0) + 1);
       tris += n.mesh.indices.length / 3;
     }
-    const xLodAdjacencies = crossLodAdjacencies(rendered);
-    lastCrossLodAdjacencyCount = xLodAdjacencies.length;
     lastRenderedCount = rendered.length;
     lastRenderedNodes = rendered;
     lastNodesByLod = Object.fromEntries([...perLevel.entries()]);
     lastLevelSummary = [...perLevel.keys()].sort().map((l) => `L${l}:${perLevel.get(l)}`).join("  ");
     lastTriCount = tris;
 
-    const cutKey = [...cutIds].sort().join("|");
-    if (cutKey !== lastCutKey) {
-      lastCutKey = cutKey;
+    const tInfo = performance.now();
+    selSub.book = tInfo - tSelectCut - selSub.cut;
+    const cutHash = hashRenderedCut(rendered);
+    if (cutHash !== lastCutHash) {
+      lastCutHash = cutHash;
       updateInfo();
     }
+    selSub.info = performance.now() - tInfo;
+    const tOverlays = performance.now();
     const debugKey =
-      `${cutKey}|bounds:${state.showBounds}|seams:${state.showSeamPoints}|xlod:${state.showCrossLodBorders}|locks:${state.showLockedBorderVertices}`;
+      `${cutHash}|bounds:${state.showBounds}|seams:${state.showSeamPoints}|xlod:${state.showCrossLodBorders}|locks:${state.showLockedBorderVertices}`;
     if (debugKey !== lastDebugKey) {
       lastDebugKey = debugKey;
+      // crossLodAdjacencies is O(R^2) and only the cross-LOD border overlay consumes it —
+      // compute it solely when that overlay is on and the cut/flags changed, not every frame.
+      const xLodAdjacencies = state.showCrossLodBorders ? crossLodAdjacencies(rendered) : [];
+      lastCrossLodAdjacencyCount = xLodAdjacencies.length;
       rebuildDebugOverlays(rendered, xLodAdjacencies);
       lockedBorderOverlay.rebuild(rendered, state.showLockedBorderVertices);
     }
+    selSub.overlays = performance.now() - tOverlays;
     if (state.webgpuSelection && clodErrorCompute) {
-      clodErrorCompute.dispatch(params, selectionFrameId);
+      const dispatchKey = webGpuDispatchKey(params);
+      const dispatchDue = selectionFrameId - lastWebGpuDispatchFrame >= WEBGPU_DISPATCH_INTERVAL_FRAMES;
+      if (dispatchDue && (!gpuMap || dispatchKey !== lastWebGpuDispatchKey)) {
+        if (clodErrorCompute.dispatch(params, selectionFrameId)) {
+          lastWebGpuDispatchFrame = selectionFrameId;
+          lastWebGpuDispatchKey = dispatchKey;
+        }
+      }
     }
     lastSelectionMs = performance.now() - selectionStart;
   };
@@ -1576,7 +1846,13 @@ async function main() {
     if (chunkEntry) {
       scene.remove(chunkEntry.group);
       for (const child of chunkEntry.group.children) (child as THREE.Mesh).geometry.dispose();
-      for (const m of chunkEntry.mats) m.dispose();
+      for (const unsub of chunkEntry.unsubs) unsub();
+      for (const m of chunkEntry.mats) {
+        // Never dispose the shared pooled material (still used by every other terrain mesh).
+        if (m === sharedTerrainMaterial) continue;
+        terrainMaterials.delete(m);
+        m.material.dispose();
+      }
       chunkGroups.delete(node.id);
     }
     return performance.now() - tc;
@@ -1592,7 +1868,7 @@ async function main() {
     pendingParentNodes = batch.parentNodes;
     pendingParentMs = batch.parentMs;
     pendingParentCount = batch.pendingParents;
-    lastCutKey = "";
+    lastCutHash = -1;
     lastDebugKey = "";
     if (!state.freeze) updateSelection();
     updateInfo();
@@ -1649,7 +1925,7 @@ async function main() {
       for (const node of lod0.changed) colliderMs += applyNodeMesh(node);
       clodErrorCompute?.patchNodes(lod0.changed);
       if (state.grassEnabled && lod0.changed.length > 0) {
-        grassSystem.rebuildNodePatches(lod0.changed.map((node) => node.id));
+        grassSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
         refreshGrassStats();
       }
       pendingParentNodes = 0;
@@ -1663,7 +1939,7 @@ async function main() {
       console.log(
         `[${state.brushOp} ${state.brushShape} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ${pendingParentCount} ancestors queued in worker`,
       );
-      lastCutKey = "";
+      lastCutHash = -1;
       lastDebugKey = "";
       updateSelection();
       updateInfo();
@@ -1732,11 +2008,11 @@ async function main() {
       applyColorByLodToMaterials(true);
       nodeLabelOverlay.setVisible(false);
       lockedBorderOverlay.rebuild(lastRenderedNodes, false);
-      grassSystem.setEnabled(false);
-      postProcess.updateSettings(currentPostProcessSettings());
+      grassSystem?.setEnabled(false);
+      postProcess?.updateSettings(currentPostProcessSettings());
       applyTerrainTextures();
     }
-    skyEnvironment.setVisible(!enabled);
+    skyEnvironment?.setVisible(!enabled);
     setPerfModeQuery(enabled);
     lastDebugKey = "";
     updateSelection();
@@ -1757,13 +2033,13 @@ async function main() {
     setWebGpuSelectionQuery(enabled);
     if (enabled) {
       void ensureClodErrorCompute().then(() => {
-        lastCutKey = "";
+        lastCutHash = -1;
         updateSelection();
         updateInfo();
       });
       return;
     }
-    lastCutKey = "";
+    lastCutHash = -1;
     updateSelection();
     updateInfo();
   });
@@ -1797,29 +2073,31 @@ async function main() {
     emitAudio("clod.locked-border.toggle");
   });
   gui.add(state, "wireframe").name("wireframe").onChange((on: boolean) => {
-    for (const v of views.values()) v.mat.wireframe = on;
+    for (const v of views.values()) v.mat.setWireframe(on);
     emitAudio("clod.wireframe.toggle");
   });
   gui.add(state, "normalColor").name("normal colours").onChange((on: boolean) => {
-    forEachTerrainMaterial((m) => {
-      m.uniforms.uNormalColor.value = on;
-    });
+    forEachTerrainMaterial((m) =>
+      m.setDebug({ normalColor: on, normalDivergence: state.normalDivergence, divergenceGain: state.divergenceGain }),
+    );
   });
-  gui.add(state, "normalDivergence").name("normal divergence").onChange((on: boolean) => {
-    forEachTerrainMaterial((m) => {
-      m.uniforms.uNormalDivergence.value = on;
-    });
+  const normalDivergenceController = gui.add(state, "normalDivergence").name("normal divergence").onChange((on: boolean) => {
+    forEachTerrainMaterial((m) =>
+      m.setDebug({ normalColor: state.normalColor, normalDivergence: on, divergenceGain: state.divergenceGain }),
+    );
   });
-  gui.add(state, "divergenceGain", 1, 32, 0.5).name("divergence gain").onChange((gain: number) => {
-    forEachTerrainMaterial((m) => {
-      m.uniforms.uDivergenceGain.value = gain;
-    });
+  const divergenceGainController = gui.add(state, "divergenceGain", 1, 32, 0.5).name("divergence gain").onChange((gain: number) => {
+    forEachTerrainMaterial((m) =>
+      m.setDebug({ normalColor: state.normalColor, normalDivergence: state.normalDivergence, divergenceGain: gain }),
+    );
   });
+  if (isWebGpu) {
+    normalDivergenceController.name("normal divergence (WebGL)");
+    normalDivergenceController.disable();
+    divergenceGainController.disable();
+  }
   gui.add(state, "frontSideOnly").name("front side only").onChange((on: boolean) => {
-    forEachTerrainMaterial((m) => {
-      m.side = on ? THREE.FrontSide : THREE.DoubleSide;
-      m.needsUpdate = true;
-    });
+    forEachTerrainMaterial((m) => m.setSide(on ? THREE.FrontSide : THREE.DoubleSide));
   });
   gui.add(state, "recomputedNormals").name("recomputed normals").onChange((on: boolean) => {
     for (const v of views.values()) {
@@ -1900,7 +2178,7 @@ async function main() {
       state.postProcessSaturation = DEFAULT_POST_PROCESS_SETTINGS.saturation;
       state.postProcessVignette = DEFAULT_POST_PROCESS_SETTINGS.vignette;
       state.postProcessDebugMode = DEFAULT_POST_PROCESS_SETTINGS.debugMode;
-      postProcess.updateSettings(currentPostProcessSettings());
+      postProcess?.updateSettings(currentPostProcessSettings());
       for (const controller of postControllers) controller.updateDisplay();
     },
   };
@@ -1911,6 +2189,7 @@ async function main() {
   let grassEdgeSuppressedController: { updateDisplay: () => unknown } | null = null;
   let grassCandidateCountController: { updateDisplay: () => unknown } | null = null;
   const refreshGrassStats = () => {
+    if (!grassSystem) return;
     grassStats = grassSystem.getStats();
     state.grassBladeCount = grassStats.blades;
     state.grassVisiblePatches = `${grassStats.visiblePatches}/${grassStats.patches}`;
@@ -1925,13 +2204,13 @@ async function main() {
   };
   const grassActions = {
     rebuild: () => {
-      grassSystem.updateSettings(makeGrassSettings());
-      grassSystem.rebuild();
+      grassSystem?.updateSettings(makeGrassSettings());
+      grassSystem?.rebuild();
       refreshGrassStats();
       updateInfo();
     },
   };
-  const updateGrassUniforms = () => grassSystem.updateSettings(makeGrassSettings());
+  const updateGrassUniforms = () => grassSystem?.updateSettings(makeGrassSettings());
   const grassFolder = gui.addFolder("grass shader");
   const grassShaderOptions = Object.fromEntries(
     GRASS_SHADER_MODES.map((mode) => [
@@ -1940,7 +2219,7 @@ async function main() {
     ]),
   );
   grassFolder.add(state, "grassEnabled").name("enabled").onChange((enabled: boolean) => {
-    grassSystem.setEnabled(enabled);
+    grassSystem?.setEnabled(enabled);
     refreshGrassStats();
     updateInfo();
   });
@@ -1970,6 +2249,7 @@ async function main() {
   let stoneClassSummaryController: { updateDisplay: () => unknown } | null = null;
   let stoneVisibleController: { updateDisplay: () => unknown } | null = null;
   const refreshStoneStats = () => {
+    if (!stoneSystem) return;
     stoneStats = stoneSystem.getStats();
     state.stoneTotal = stoneStats.total;
     state.stoneClassSummary = `${stoneStats.large}/${stoneStats.medium}/${stoneStats.small}`;
@@ -1980,24 +2260,24 @@ async function main() {
   };
   const stoneActions = {
     rebuild: () => {
-      stoneSystem.updateSettings(makeStoneSettings());
-      stoneSystem.setVisibleClasses(visibleStoneClasses());
+      stoneSystem?.updateSettings(makeStoneSettings());
+      stoneSystem?.setVisibleClasses(visibleStoneClasses());
       refreshStoneStats();
       updateInfo();
     },
   };
   const stoneFolder = gui.addFolder("stones (props)");
   stoneFolder.add(state, "stonesEnabled").name("enabled").onChange((enabled: boolean) => {
-    stoneSystem.setEnabled(enabled);
+    stoneSystem?.setEnabled(enabled);
     refreshStoneStats();
     updateInfo();
   });
   stoneFolder.add(state, "stoneDensity", 0, 2, 0.05).name("density").onFinishChange(stoneActions.rebuild);
   stoneFolder.add(state, "stoneMaxInstances", 0, 500000, 1000).name("max instances").onFinishChange(stoneActions.rebuild);
   stoneFolder.add(state, "stoneSeed", 0, 1000000, 1).name("seed").onFinishChange(stoneActions.rebuild);
-  stoneFolder.add(state, "stoneShowLarge").name("show large").onChange(() => stoneSystem.setVisibleClasses(visibleStoneClasses()));
-  stoneFolder.add(state, "stoneShowMedium").name("show medium").onChange(() => stoneSystem.setVisibleClasses(visibleStoneClasses()));
-  stoneFolder.add(state, "stoneShowSmall").name("show small").onChange(() => stoneSystem.setVisibleClasses(visibleStoneClasses()));
+  stoneFolder.add(state, "stoneShowLarge").name("show large").onChange(() => stoneSystem?.setVisibleClasses(visibleStoneClasses()));
+  stoneFolder.add(state, "stoneShowMedium").name("show medium").onChange(() => stoneSystem?.setVisibleClasses(visibleStoneClasses()));
+  stoneFolder.add(state, "stoneShowSmall").name("show small").onChange(() => stoneSystem?.setVisibleClasses(visibleStoneClasses()));
   stoneTotalController = stoneFolder.add(state, "stoneTotal").name("total").disable();
   stoneClassSummaryController = stoneFolder.add(state, "stoneClassSummary").name("L/M/S").disable();
   stoneVisibleController = stoneFolder.add(state, "stoneVisible").name("visible").disable();
@@ -2196,7 +2476,7 @@ async function main() {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    texture.anisotropy = maxAnisotropy;
     texture.needsUpdate = true;
   };
   // Normal maps are linear data, not colour — decoding them as sRGB skews the vectors.
@@ -2204,7 +2484,7 @@ async function main() {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.colorSpace = THREE.NoColorSpace;
-    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    texture.anisotropy = maxAnisotropy;
     texture.needsUpdate = true;
   };
   const loadNormalMap = async (file: File): Promise<{
@@ -2712,7 +2992,7 @@ async function main() {
   bubbleFolder.add(state, "bubbleRadius", 16, 160, 1).name("radius (cells)").onChange(updateSelection);
   bubbleFolder.add(state, "tintBubble").name("tint bubble red").onChange((on: boolean) => {
     for (const { mats } of chunkGroups.values())
-      for (const m of mats) (m.uniforms.uColor.value as THREE.Color).set(on ? 0xc94b4b : 0xffffff);
+      for (const m of mats) m.setBaseColor(on ? 0xc94b4b : 0xffffff);
   });
   const digFolder = gui.addFolder("digging");
   digFolder.add(state, "digEnabled").name("dig on click").onChange(updateInfo);
@@ -3234,16 +3514,16 @@ async function main() {
 
   // Imported controller values need the same side effects as interactive GUI changes.
   forEachTerrainMaterial((material) => {
-    material.wireframe = state.wireframe;
-    material.uniforms.uNormalColor.value = state.normalColor;
-    material.uniforms.uNormalDivergence.value = state.normalDivergence;
-    material.uniforms.uDivergenceGain.value = state.divergenceGain;
-    material.side = state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide;
+    material.setWireframe(state.wireframe);
+    material.setDebug({
+      normalColor: state.normalColor,
+      normalDivergence: state.normalDivergence,
+      divergenceGain: state.divergenceGain,
+    });
+    material.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
   });
   for (const view of views.values()) {
-    (view.mat.uniforms.uColor.value as THREE.Color).set(
-      state.colorByLod ? LOD_COLORS[Math.min(view.node.level, 3)] : 0xb9c0c8,
-    );
+    view.mat.setBaseColor(state.colorByLod ? LOD_COLORS[Math.min(view.node.level, 3)] : 0xb9c0c8);
     if (state.recomputedNormals) {
       view.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(view), 3));
     }
@@ -3251,8 +3531,8 @@ async function main() {
   applyColorAdjustmentsToTerrain();
   updateLighting();
   applyTerrainTextures();
-  grassSystem.setEnabled(state.grassEnabled);
-  grassSystem.updateSettings(makeGrassSettings());
+  grassSystem?.setEnabled(state.grassEnabled);
+  grassSystem?.updateSettings(makeGrassSettings());
   refreshGrassStats();
   updateSelection();
   updateInfo();
@@ -3261,11 +3541,19 @@ async function main() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-    postProcess.setSize(window.innerWidth, window.innerHeight);
+    postProcess?.setSize(window.innerWidth, window.innerHeight);
   });
 
   let elapsedSeconds = 0;
+  // ?profile=1 logs a per-phase breakdown for any frame slower than this (ms). Helps locate
+  // transient zoom/walk stutters (chunk meshing, geometry upload, render/pipeline stalls).
+  const profileEnabled = searchParams.get("profile") === "1";
+  const profileFrameMs = (() => {
+    const v = Number(searchParams.get("profileMs"));
+    return Number.isFinite(v) && v > 0 ? v : 24;
+  })();
   renderer.setAnimationLoop(() => {
+    const frameStart = performance.now();
     selectionFrameId++;
     const playerDelta = Math.min(playerClock.getDelta(), 0.1);
     elapsedSeconds += playerDelta;
@@ -3278,7 +3566,7 @@ async function main() {
     } else {
       controls.update();
     }
-    skyEnvironment.updateCamera(camera);
+    skyEnvironment?.updateCamera(camera);
     if (!state.freeze) updateSelection();
 
     // hold-to-dig pickaxe cadence while playing
@@ -3313,49 +3601,68 @@ async function main() {
     digPreview.visible = digAimHit !== null;
 
     // Textured terrain page LOD swaps are atomic. Screen-door fades are visually
-    // noisy on terrain, even with complementary masks.
-    for (const v of views.values()) {
+    // noisy on terrain, even with complementary masks. Only views entering/leaving the cut
+    // need per-frame work; stable visible/hidden pages keep their last material state.
+    for (const v of activeTerrainViews) {
       if (pageTransitionMode === "instant") {
         v.fade = v.target;
         v.mesh.visible = v.target > 0.5;
-        v.mat.uniforms.uFade.value = 1;
-        v.mat.uniforms.uFadeIn.value = v.target > 0.5;
-        v.mat.uniforms.uDither.value = false;
+        v.mat.setFade(1, v.target > 0.5, false);
+        activeTerrainViews.delete(v);
         continue;
       }
 
       if (v.fade < v.target) v.fade = Math.min(v.target, v.fade + crossfadeStep);
       else if (v.fade > v.target) v.fade = Math.max(v.target, v.fade - crossfadeStep);
       v.mesh.visible = v.fade > 0.001;
-      v.mat.uniforms.uFade.value = v.fade;
-      v.mat.uniforms.uFadeIn.value = v.target > 0.5;
-      v.mat.uniforms.uDither.value = v.fade > 0.001 && v.fade < 0.999;
+      v.mat.setFade(v.fade, v.target > 0.5, v.fade > 0.001 && v.fade < 0.999);
+      if (v.fade === v.target) activeTerrainViews.delete(v);
     }
 
+    const tBubbleStart = performance.now();
     // Near-field bubble: a LOD0 page within the radius is owned by its raw chunks instead.
     // Binary per-page ownership (no overlap band) — both draw the same welded surface.
-    for (const v of views.values()) {
-      const owned =
-        state.bubble &&
-        v.node.level === 0 &&
-        v.target > 0.5 &&
-        Math.hypot(
-          (interaction.mode === "playing" ? player.position.x : controls.target.x) - (v.node.footprint.minX + v.node.footprint.maxX) / 2,
-          (interaction.mode === "playing" ? player.position.z : controls.target.z) - (v.node.footprint.minZ + v.node.footprint.maxZ) / 2,
-        ) < state.bubbleRadius;
-      if (owned) {
-        v.mesh.visible = false;
-        ensureChunkGroup(v.node).group.visible = true;
-      } else {
-        const grp = chunkGroups.get(v.node.id);
-        if (grp) grp.group.visible = false;
+    let chunkGroupsBuiltThisFrame = 0;
+    if (state.bubble) {
+      const bubbleViews = new Set([...currentTerrainViews, ...activeTerrainViews]);
+      const bubbleCenter = interaction.mode === "playing" ? player.position : controls.target;
+      for (const v of bubbleViews) {
+        const owned =
+          v.node.level === 0 &&
+          v.target > 0.5 &&
+          Math.hypot(
+            bubbleCenter.x - (v.node.footprint.minX + v.node.footprint.maxX) / 2,
+            bubbleCenter.z - (v.node.footprint.minZ + v.node.footprint.maxZ) / 2,
+          ) < state.bubbleRadius;
+        if (owned) {
+          // Building a page's raw chunk group is P^2 synchronous meshChunk calls. When walking,
+          // many pages cross the bubble edge in one frame; building them all at once is the walk
+          // spike. Budget builds per frame and keep showing the welded LOD0 page mesh (same
+          // surface) until this page's chunk group is ready, so the swap stays seamless.
+          let grp = chunkGroups.get(v.node.id);
+          if (!grp) {
+            if (chunkGroupsBuiltThisFrame >= CHUNK_GROUP_BUILD_BUDGET) continue; // page mesh stays visible
+            grp = ensureChunkGroup(v.node);
+            chunkGroupsBuiltThisFrame++;
+          }
+          v.mesh.visible = false;
+          grp.group.visible = true;
+        } else {
+          const grp = chunkGroups.get(v.node.id);
+          if (grp) grp.group.visible = false;
+        }
+      }
+    } else if (chunkGroups.size > 0) {
+      for (const { group } of chunkGroups.values()) {
+        group.visible = false;
       }
     }
+    const tPropsStart = performance.now();
     const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
-    grassSystem.update(elapsedSeconds, grassCenter);
-    stoneSystem.update(grassCenter);
-    const nextStoneStats = stoneSystem.getStats();
-    if (nextStoneStats.total !== stoneStats.total || nextStoneStats.visible !== stoneStats.visible) {
+    grassSystem?.update(elapsedSeconds, grassCenter);
+    stoneSystem?.update(grassCenter);
+    const nextStoneStats = stoneSystem?.getStats();
+    if (nextStoneStats && (!stoneStats || nextStoneStats.total !== stoneStats.total || nextStoneStats.visible !== stoneStats.visible)) {
       stoneStats = nextStoneStats;
       state.stoneTotal = nextStoneStats.total;
       state.stoneClassSummary = `${nextStoneStats.large}/${nextStoneStats.medium}/${nextStoneStats.small}`;
@@ -3364,8 +3671,9 @@ async function main() {
       stoneClassSummaryController?.updateDisplay();
       stoneVisibleController?.updateDisplay();
     }
-    const nextGrassStats = grassSystem.getStats();
+    const nextGrassStats = grassSystem?.getStats();
     if (
+      nextGrassStats && (
       !grassStats ||
       nextGrassStats.blades !== grassStats.blades ||
       nextGrassStats.visiblePatches !== grassStats.visiblePatches ||
@@ -3374,7 +3682,7 @@ async function main() {
       nextGrassStats.midPatches !== grassStats.midPatches ||
       nextGrassStats.coveragePatches !== grassStats.coveragePatches ||
       nextGrassStats.edgeSuppressedCandidates !== grassStats.edgeSuppressedCandidates ||
-      nextGrassStats.generatedCandidates !== grassStats.generatedCandidates
+      nextGrassStats.generatedCandidates !== grassStats.generatedCandidates)
     ) {
       grassStats = nextGrassStats;
       state.grassBladeCount = nextGrassStats.blades;
@@ -3395,8 +3703,32 @@ async function main() {
       viewportHeight: renderer.domElement.height,
       fovY: THREE.MathUtils.degToRad(camera.fov),
     });
-    postProcess.updateSettings(currentPostProcessSettings());
-    postProcess.render(scene, camera);
+    postProcess?.updateSettings(currentPostProcessSettings());
+    const tRenderStart = performance.now();
+    if (postProcess) postProcess.render(scene, camera);
+    else renderer.render(scene, camera);
+
+    if (profileEnabled) {
+      const end = performance.now();
+      const frameMs = end - frameStart;
+      if (frameMs >= profileFrameMs) {
+        const bubbleMs = tPropsStart - tBubbleStart;
+        const propsMs = tRenderStart - tPropsStart;
+        const renderMs = end - tRenderStart;
+        const otherMs = frameMs - lastSelectionMs - bubbleMs - propsMs - renderMs;
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[profile] frame ${frameMs.toFixed(1)}ms` +
+            ` | selection ${lastSelectionMs.toFixed(1)}` +
+            ` (cut ${selSub.cut.toFixed(1)} book ${selSub.book.toFixed(1)} info ${selSub.info.toFixed(1)} overlays ${selSub.overlays.toFixed(1)})` +
+            ` bubble/chunks ${bubbleMs.toFixed(1)} (built ${chunkGroupsBuiltThisFrame})` +
+            ` grass+stones ${propsMs.toFixed(1)}` +
+            ` render ${renderMs.toFixed(1)}` +
+            ` other ${otherMs.toFixed(1)}` +
+            ` | cut=${lastRenderedCount} chunkGroups=${chunkGroups.size} mode=${interaction.mode}`,
+        );
+      }
+    }
   });
 
   // Global click & hover feedback for UI elements
@@ -3443,10 +3775,10 @@ async function main() {
   }
   window.addEventListener("beforeunload", () => {
     lockedBorderOverlay.dispose();
-    grassSystem.dispose();
-    stoneSystem.dispose();
-    skyEnvironment.dispose();
-    postProcess.dispose();
+    grassSystem?.dispose();
+    stoneSystem?.dispose();
+    skyEnvironment?.dispose();
+    postProcess?.dispose();
     clodErrorCompute?.destroy();
     clodWorker.dispose();
   }, { once: true });

@@ -178,3 +178,5 @@ Debug interpretation:
 - Touch only files and lines needed for the task. Match existing style.
 - Clean up unused imports, variables, or functions created by your own change.
 - Turn work into verifiable goals. For bug fixes, prefer a reproducing test before the fix; for refactors, verify before and after behavior when practical.
+
+Understand first if you are under Windows or WSL and use the command accordingly and the paths

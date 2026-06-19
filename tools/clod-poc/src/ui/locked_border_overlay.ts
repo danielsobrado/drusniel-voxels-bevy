@@ -20,6 +20,9 @@ export class LockedBorderOverlay {
 
   rebuild(nodes: readonly ClodPageNode[], visible: boolean): void {
     this.disposePoints();
+    // buildOuterBorderLocks scans every node's mesh; skip it entirely when the overlay is off
+    // (the default). Callers re-invoke on toggle since debugKey encodes the lock flag.
+    if (!visible) return;
     const positions: number[] = [];
     for (const node of nodes) {
       const locks = buildOuterBorderLocks(node.mesh);
