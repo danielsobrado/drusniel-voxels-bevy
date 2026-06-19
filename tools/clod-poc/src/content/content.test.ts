@@ -104,6 +104,17 @@ describe("Content Registry Validation Tests", () => {
     expect(report.errors.some(e => e.code === "INVALID_SLOT_INDEX")).toBe(true);
   });
 
+  it("7b. invalid texture slot source fails", () => {
+    const registry = loadContentRegistry();
+    const slot = registry.textureSlots.get("natural");
+    if (slot) {
+      slot.source = "external" as any;
+    }
+    const report = validateContentRegistry(registry);
+    expect(report.ok).toBe(false);
+    expect(report.errors.some(e => e.code === "INVALID_TEXTURE_SOURCE")).toBe(true);
+  });
+
   it("8. invalid terrain band range fails", () => {
     const registry = loadContentRegistry();
     const biome = registry.biomes.get("test-plain");

@@ -166,7 +166,7 @@ impl QaReport {
         ));
         out.push_str("## Reproduce\n\n");
         out.push_str(&format!(
-            "```\ncargo run --bin qa -- --config {} --summary {} --output {}\n```\n\n",
+            "```\nrtk cargo run --bin qa -- --config {} --summary {} --output {}\n```\n\n",
             self.config_path, self.summary_path, self.output_dir,
         ));
         out.push_str("## Scenes\n\n");

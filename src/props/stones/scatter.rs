@@ -14,8 +14,6 @@ use super::site_sample::{StoneSiteSample, sample_site};
 use super::{deterministic_hash, hash_to_seed};
 
 const TAU: f32 = std::f32::consts::TAU;
-/// Coarse clustering cell (multiples of cell size) so stones gather in fans, not uniform noise.
-const CLUMP_CELL_MULT: f32 = 3.0;
 
 fn seeded_hash(cfg: &StoneConfig, x: i32, z: i32, id: &str) -> f32 {
     deterministic_hash(
@@ -41,7 +39,8 @@ pub struct StoneInstance {
     pub lean: Vec2,
     pub class_id: StoneClassId,
     pub preset: RockPreset,
-    pub variant: u32,
+    pub variant: u8,
+    pub seed: u64,
 }
 
 /// Combined acceptance weight (≥0; >1 means certain).
@@ -49,20 +48,20 @@ fn stone_weight(site: &StoneSiteSample, cfg: &StoneConfig, gx: i32, gz: i32) -> 
     if site.standing_water || site.repose <= 0.0 {
         return 0.0;
     }
-    let clump = (cfg.cell_size_m * CLUMP_CELL_MULT).max(1.0);
-    let patch_clump = 0.35
+    let clump = (cfg.cell_size_m * cfg.patch_clump_cell_mult).max(1.0);
+    let patch_clump = cfg.patch_clump_min
         + seeded_hash(
             cfg,
             (gx as f32 / clump).floor() as i32,
             (gz as f32 / clump).floor() as i32,
             "stone_clump",
         );
-    let base = site.rock_exposure * 0.85
-        + site.scree * 0.85
-        + site.streambed * 1.5
-        + site.cliff_above * 1.15
-        + 0.16;
-    cfg.density * base * patch_clump * site.repose * (1.0 - site.snow * 0.85)
+    let base = site.rock_exposure * cfg.rock_exposure_weight
+        + site.scree * cfg.scree_weight
+        + site.streambed * cfg.stream_weight
+        + site.cliff_above * cfg.cliff_above_weight
+        + cfg.base_soil_weight;
+    cfg.density * base * patch_clump * site.repose * (1.0 - site.snow * cfg.snow_fade)
 }
 
 fn select_class(site: &StoneSiteSample, cfg: &StoneConfig, roll: f32) -> StoneClassId {
@@ -122,13 +121,28 @@ pub fn generate_stones_in_area<N: NoiseGenerator>(
     max_z: i32,
     cfg: &StoneConfig,
 ) -> Vec<StoneInstance> {
+    generate_ranked_stones_in_area(terrain, min_x, min_z, max_x, max_z, cfg)
+        .into_iter()
+        .take(cfg.max_instances)
+        .map(|(_, instance)| instance)
+        .collect()
+}
+
+pub fn generate_ranked_stones_in_area<N: NoiseGenerator>(
+    terrain: &TerrainGenerator<N>,
+    min_x: i32,
+    min_z: i32,
+    max_x: i32,
+    max_z: i32,
+    cfg: &StoneConfig,
+) -> Vec<(f32, StoneInstance)> {
     if cfg.density <= 0.0 || cfg.max_instances == 0 {
         return Vec::new();
     }
     let spacing = cfg.cell_size_m.max(0.1);
     let columns = (((max_x - min_x) as f32) / spacing).floor().max(0.0) as i32;
     let rows = (((max_z - min_z) as f32) / spacing).floor().max(0.0) as i32;
-    let water_floor = WATER_LEVEL as f32 + cfg.water_margin_m;
+    let water_floor = WATER_LEVEL as f32 + cfg.water_margin_m + cfg.standing_water_cutoff_m;
 
     let mut ranked: Vec<(f32, StoneInstance)> = Vec::new();
     for row in 0..rows {
@@ -156,12 +170,13 @@ pub fn generate_stones_in_area<N: NoiseGenerator>(
 
             // Per-cell strong PRNG for the categorical / continuous draws (the single-round
             // spatial hashes band on the structured grid; sfc32 does not).
-            let mut rng = StoneRng::new(seeded_seed(cfg, grid_x, grid_z, "stone") as u32);
+            let seed = seeded_seed(cfg, grid_x, grid_z, "stone");
+            let mut rng = StoneRng::new(seed as u32);
             let class = select_class(&site, cfg, rng.next_f32());
             let class_cfg = cfg.class(class);
             let preset = select_preset(class, &site, cfg, rng.next_f32());
-            let variants = class_cfg.variants.max(1);
-            let variant = rng.next_u32() % variants;
+            let variants = class_cfg.variants.max(1).min(u8::MAX as u32);
+            let variant = (rng.next_u32() % variants) as u8;
 
             let target_radius = class_cfg.radius_min
                 + (class_cfg.radius_max - class_cfg.radius_min) * rng.next_f32();
@@ -184,14 +199,14 @@ pub fn generate_stones_in_area<N: NoiseGenerator>(
                     class_id: class,
                     preset,
                     variant,
+                    seed,
                 },
             ));
         }
     }
 
     ranked.sort_by(|a, b| a.0.total_cmp(&b.0));
-    ranked.truncate(cfg.max_instances);
-    ranked.into_iter().map(|(_, instance)| instance).collect()
+    ranked
 }
 
 /// Class-share breakdown for tests / debug.

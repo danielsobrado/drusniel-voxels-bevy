@@ -18,7 +18,7 @@ describe("stone_scatter", () => {
 
   it("differs for a different seed", () => {
     const a = generateStoneInstances(footprint, settings);
-    const b = generateStoneInstances(footprint, { ...settings, seed: settings.seed + 1 });
+    const b = generateStoneInstances(footprint, { ...settings, seedSalt: settings.seedSalt + 1 });
     expect(a).not.toEqual(b);
   });
 
@@ -32,7 +32,9 @@ describe("stone_scatter", () => {
 
   it("never places stones in or below standing water", () => {
     for (const stone of generateStoneInstances(footprint, settings)) {
-      expect(surfaceHeight(stone.x, stone.z)).toBeGreaterThanOrEqual(WATER_LEVEL + settings.waterMargin);
+      expect(surfaceHeight(stone.x, stone.z)).toBeGreaterThanOrEqual(
+        WATER_LEVEL + settings.waterMarginM + settings.standingWaterCutoffM,
+      );
     }
   });
 

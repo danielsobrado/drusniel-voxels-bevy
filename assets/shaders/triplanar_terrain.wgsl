@@ -10,6 +10,9 @@
 #import bevy_pbr::mesh_view_bindings::view
 #import water_caustics
 #import weather_common
+#import "shaders/procedural/terrain_material_common.wgsl"::{
+    sample_procedural_terrain_material,
+}
 
 #ifdef TERRAIN_HEX_TILING
 #import "shaders/terrain/hextile.wgsl"::{
@@ -42,6 +45,7 @@ struct TriplanarUniforms {
     weather_time: f32,
     weather_flags: u32,
     clod_fade: f32,
+    procedural_textures_enabled: f32,
 };
 
 // Uniform roughness values per terrain material (no texture maps needed)
@@ -754,6 +758,24 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
         roughness = mix(roughness, 0.78, snow_mask);
     }
 
+    var final_ao = ao_factor;
+    if (uniforms.procedural_textures_enabled > 0.5) {
+        let procedural_material = sample_procedural_terrain_material(
+            world_pos,
+            world_normal,
+            w,
+            frag_dist,
+            final_albedo.rgb,
+            blended_n,
+            roughness,
+            ao_factor,
+        );
+        final_albedo = vec4<f32>(procedural_material.albedo, final_albedo.a);
+        blended_n = procedural_material.normal_ws;
+        roughness = procedural_material.roughness;
+        final_ao = procedural_material.ao;
+    }
+
     if ((uniforms.weather_flags & WEATHER_DEBUG_PUDDLE) != 0u) {
         final_albedo = vec4<f32>(vec3<f32>(puddle_mask), 1.0);
         roughness = 0.9;
@@ -769,8 +791,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     pbr_input.material.perceptual_roughness = clamp(roughness, 0.04, 1.0);
     pbr_input.material.metallic = 0.0;
     pbr_input.N = blended_n;
-    pbr_input.diffuse_occlusion = vec3<f32>(ao_factor);
-    pbr_input.specular_occlusion = ao_factor;
+    pbr_input.diffuse_occlusion = vec3<f32>(final_ao);
+    pbr_input.specular_occlusion = final_ao;
     pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT;
     pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
     // The lit path currently collapses sampled terrain albedo to the fog color on DX12.

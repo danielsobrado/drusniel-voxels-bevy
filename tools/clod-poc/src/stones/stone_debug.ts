@@ -29,9 +29,9 @@ export function stoneDebugValue(
   switch (field) {
     case "accepted": {
       const weight = stoneWeight(site, settings, x, z);
-      const gx = Math.floor(x / settings.cellSize);
-      const gz = Math.floor(z / settings.cellSize);
-      return weight > 0 && hash2(gx, gz, settings.seed + ACCEPT_SALT) < weight ? 1 : 0;
+      const gx = Math.floor(x / settings.cellSizeM);
+      const gz = Math.floor(z / settings.cellSizeM);
+      return weight > 0 && hash2(gx, gz, settings.seedSalt + ACCEPT_SALT) < weight ? 1 : 0;
     }
     case "weight":
       return Math.min(1, stoneWeight(site, settings, x, z));

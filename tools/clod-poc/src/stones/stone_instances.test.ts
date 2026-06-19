@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
+import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
+import { buildWorld } from "../quadtree.js";
 import type { ClodPageNode } from "../types.js";
 import { DEFAULT_STONE_SETTINGS, type StoneClass, type StoneSettings } from "./stone_config.js";
 import { StoneSystem } from "./stone_instances.js";
 import type { StoneInstance } from "./stone_scatter.js";
+import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "./stone_validation.js";
 
 function node(id: string, minX: number, minZ: number, maxX: number, maxZ: number): ClodPageNode {
   return {
@@ -58,6 +61,27 @@ function stoneSystem(settings: StoneSettings): StoneSystem {
   });
 }
 
+const pageCfg: ClodPagesConfig = {
+  page: { chunks_per_page: 2, chunk_size: 16, halo_chunks: 1, quadtree_levels: 1 },
+  simplify: {
+    target_ratio_per_level: 0.5,
+    abandon_ratio: 0.85,
+    target_error: 0.01,
+    weld_epsilon_cells: 0.001,
+    attribute_weights: { normal: 0.5, material: 1 },
+  },
+  polish: { diagonal_flip: DEFAULT_DIAGONAL_FLIP_CONFIG },
+  selection: {
+    error_threshold_px: 1,
+    hysteresis_merge_factor: 1.5,
+    neighbor_level_delta_max: 1,
+    transition_mode: "instant",
+    crossfade_frames: 0,
+  },
+  near_field: { radius_chunks: 6 },
+  meshopt_package_version: "0.22.0",
+};
+
 function groups(system: StoneSystem): Array<{ classId: StoneClass; instances: StoneInstance[] }> {
   return (system as unknown as { groups: Array<{ classId: StoneClass; instances: StoneInstance[] }> }).groups;
 }
@@ -84,14 +108,32 @@ describe("StoneSystem", () => {
   });
 
   it("rebuilds from current settings after disabling and changing the seed", () => {
-    const system = stoneSystem(mixedClassSettings({ seed: 11 }));
+    const system = stoneSystem(mixedClassSettings({ seedSalt: 11 }));
     try {
       const first = signature(system);
       system.setEnabled(false);
       expect(groups(system)).toHaveLength(0);
-      system.updateSettings({ seed: 12 });
+      system.updateSettings({ seedSalt: 12 });
       system.setEnabled(true);
       expect(signature(system)).not.toBe(first);
+    } finally {
+      system.dispose();
+    }
+  });
+
+  it("does not mutate CLOD page mesh signatures when enabled", () => {
+    const built = buildWorld(1, 1, pageCfg);
+    const nodes = built.nodesByLevel.get(0)!;
+    const before = pageMeshSignatures(nodes);
+    const system = new StoneSystem({
+      scene: new THREE.Scene(),
+      nodes,
+      worldCells: pageCfg.page.chunks_per_page * pageCfg.page.chunk_size,
+      settings: mixedClassSettings({ maxInstances: 100 }),
+      lighting: lighting(),
+    });
+    try {
+      assertPageMeshSignaturesUnchanged(before, pageMeshSignatures(nodes));
     } finally {
       system.dispose();
     }

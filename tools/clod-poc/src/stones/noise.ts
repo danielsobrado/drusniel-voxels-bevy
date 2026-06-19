@@ -1,6 +1,6 @@
-// CPU-side deterministic noise — used by the stone mesh generator, where geometry is
-// built once on the CPU. Vendored (verbatim) from the LAAS reference `src/core/NoiseJS.ts`
-// so the ported RockBuilder field evaluates identically across detail levels.
+// CPU-side deterministic noise used by the stone mesh generator, where geometry is built
+// once on the CPU. Small local value-noise helpers keep rock LODs reproducible without an
+// external asset dependency.
 
 import { mix32 } from "./seed.js";
 

@@ -38,6 +38,7 @@ use crate::rendering::materials::{
     sync_fog_to_materials, sync_hex_tiling_to_materials, sync_voxel_water_material_overrides,
     sync_weather_to_materials,
 };
+use crate::rendering::procedural_textures::ProceduralTexturePlugin;
 use crate::rendering::shadows::pcss::PcssPlugin;
 use crate::rendering::shadows::shadow_budget::ShadowBudgetPlugin;
 use crate::rendering::terrain_hex_tiling::TerrainTexturingConfig;
@@ -98,6 +99,8 @@ impl Plugin for RenderingPlugin {
             .add_plugins(ShadowBudgetPlugin)
             // Path A lighting backend: inactive unless NAADF is selected and query routing is enabled.
             .add_plugins(RadianceCascadesPlugin)
+            // Deterministic generated terrain textures for existing triplanar material slots.
+            .add_plugins(ProceduralTexturePlugin)
             .add_plugins(naadf_plugin())
             // ScreenSpaceReflectionsPlugin is already included by DefaultPlugins via PbrPlugin.
             // Register TriplanarMaterial as a custom material type

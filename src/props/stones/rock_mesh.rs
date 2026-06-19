@@ -1,7 +1,7 @@
 //! Procedural rock mesh generator — welded icosphere displaced by a layered field:
 //! ellipsoid squash → macro warp → tilted strata ledges → ridged creases → planar fracture
-//! cuts → micro grain. Rust port of the CLOD-PoC `rock_builder.ts` (itself from the LAAS
-//! reference). The same field evaluated at lower subdivision gives consistent-silhouette LODs.
+//! cuts → micro grain. The same field evaluated at lower subdivision gives
+//! consistent-silhouette LODs.
 //!
 //! Deterministic: same preset + seed + detail ⇒ identical buffers.
 //!
@@ -21,7 +21,7 @@ use super::hash::{StoneRng, fbm3, ridged3};
 pub const ATTRIBUTE_VDATA: MeshVertexAttribute =
     MeshVertexAttribute::new("Vdata", 0x570e_da7a, VertexFormat::Float32x4);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RockPreset {
     Boulder,

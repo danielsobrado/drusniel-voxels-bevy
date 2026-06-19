@@ -18,6 +18,7 @@ pub mod diagnostics;
 pub mod effects;
 pub mod lighting;
 pub mod materials;
+pub mod procedural_textures;
 pub mod shadows;
 pub mod water;
 
@@ -42,6 +43,7 @@ pub use materials::building::{
     BuildingMaterial, BuildingMaterialHandle, BuildingMaterialType, BuildingMesh,
 };
 pub use materials::props::{PropMesh, PropsMaterial, PropsMaterialHandle, PropsMaterialType};
+pub use procedural_textures::ProceduralTexturePlugin;
 pub use terrain_hex_tiling::TerrainTexturingConfig;
 
 pub mod adaptive_gi {

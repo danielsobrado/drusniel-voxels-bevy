@@ -1,7 +1,6 @@
-// Deterministic seeding for the stone overlay. Vendored (trimmed) from the LAAS
-// reference `src/core/Seed.ts` so the ported RockBuilder keeps byte-identical output:
-// the rock mesh generator draws from an sfc32 `Rng`, and stone placement derives
-// decorrelated streams from a single world seed via string-keyed combination.
+// Deterministic seeding for the stone overlay. Rock mesh generation draws from an sfc32
+// `Rng`, and stone placement derives decorrelated streams from a single world seed via
+// string-keyed combination.
 
 /** FNV-1a 32-bit over a string, for stream derivation. */
 export function hashString(s: string): number {

@@ -36,6 +36,8 @@ pub struct TriplanarUniforms {
     pub weather_flags: u32,
     /// CLOD page screen-door fade: 0 = fully dithered out, 1 = fully visible.
     pub clod_fade: f32,
+    /// 1.0 when generated procedural terrain textures are active for this material.
+    pub procedural_textures_enabled: f32,
 }
 
 /// High byte of `weather_flags` stores chunk LOD (0–3) for debug wireframe tinting.
@@ -113,6 +115,7 @@ impl Default for TriplanarUniforms {
             weather_time: 0.0,
             weather_flags: 0,
             clod_fade: 1.0,
+            procedural_textures_enabled: 0.0,
         }
     }
 }

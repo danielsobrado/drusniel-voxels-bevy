@@ -9,6 +9,7 @@ use crate::rendering::building_material::{
     BuildingMaterial, BuildingMaterialHandle, BuildingUniforms,
 };
 use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::procedural_textures::ProceduralTerrainTextureHandles;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle, PropsUniforms};
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::terrain_hex_tiling::{
@@ -626,6 +627,7 @@ pub fn setup_triplanar_material(
     mut materials: ResMut<Assets<TriplanarMaterial>>,
     mut images: ResMut<Assets<Image>>,
     capabilities: Option<Res<GraphicsCapabilities>>,
+    procedural_textures: Option<Res<ProceduralTerrainTextureHandles>>,
     asset_server: Res<AssetServer>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
@@ -636,7 +638,7 @@ pub fn setup_triplanar_material(
         .map(|capabilities| capabilities.integrated_gpu)
         .unwrap_or(false);
 
-    let base_material = if integrated {
+    let mut base_material = if integrated {
         TriplanarMaterial {
             uniforms: TriplanarUniforms {
                 base_color: LinearRgba::WHITE,
@@ -693,6 +695,10 @@ pub fn setup_triplanar_material(
             hex_tiling: HexTilingUniform::default(),
         }
     };
+
+    if let Some(handles) = procedural_textures.as_deref() {
+        apply_procedural_textures_to_triplanar_material(&mut base_material, handles);
+    }
 
     let mut full_material = base_material.clone();
     full_material.quality = TerrainMaterialQuality::FullTriplanar;
@@ -791,6 +797,21 @@ pub fn setup_triplanar_material(
     commands.insert_resource(crate::voxel::terrain_iso_band::TerrainIsoBandVolume::new(
         iso_band_texture,
     ));
+}
+
+pub fn apply_procedural_textures_to_triplanar_material(
+    material: &mut TriplanarMaterial,
+    handles: &ProceduralTerrainTextureHandles,
+) {
+    material.grass_albedo = Some(handles.grass_albedo.clone());
+    material.grass_normal = Some(handles.grass_normal.clone());
+    material.rock_albedo = Some(handles.rock_albedo.clone());
+    material.rock_normal = Some(handles.rock_normal.clone());
+    material.sand_albedo = Some(handles.sand_albedo.clone());
+    material.sand_normal = Some(handles.sand_normal.clone());
+    material.dirt_albedo = Some(handles.dirt_albedo.clone());
+    material.dirt_normal = Some(handles.dirt_normal.clone());
+    material.uniforms.procedural_textures_enabled = 1.0;
 }
 
 /// Ensure all triplanar textures use Repeat address mode for seamless tiling with proper mipmaps

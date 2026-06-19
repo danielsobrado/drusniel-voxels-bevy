@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "seed": 1337,
+  "config_hash": "892085d68040e2d0",
+  "generated_at": "runtime",
+  "noise_resolution": 1024,
+  "layer_resolution": 1024,
+  "material_order": [
+    "grass",
+    "rock",
+    "sand",
+    "snow",
+    "dirt",
+    "moss",
+    "gravel",
+    "wet_soil"
+  ]
+}

@@ -1,0 +1,74 @@
+procedural_textures:
+  enabled: true
+  seed: 1337
+  runtime_mode: generate_if_missing
+
+  noise:
+    resolution: 1024
+    periods:
+      value: 256
+      fbm: 64
+      ridged: 32
+      worley: 128
+    channels:
+      noise_a: [value, fbm3, fbm3_dx, fbm3_dz]
+      noise_b: [ridged_dx, ridged_dz, ridged3, worley_f1]
+
+  terrain:
+    layer_resolution: 1024
+    macro_variation_m: [2.0, 50.0]
+    meso_variation_m: [0.8, 4.0]
+    micro_variation_m: [0.05, 0.4]
+    micro_normal:
+      enabled: true
+      fade_start_m: 45.0
+      fade_end_m: 85.0
+      max_strength: 0.35
+    material_order: [grass, rock, sand, snow, dirt, moss, gravel, wet_soil]
+    materials:
+      grass:
+        base_color: [0.24, 0.42, 0.16]
+        roughness: 0.85
+        macro_strength: 0.22
+        normal_strength: 0.18
+      rock:
+        base_color: [0.37, 0.36, 0.33]
+        roughness: 0.78
+        macro_strength: 0.16
+        strata_strength: 0.45
+        normal_strength: 0.32
+      sand:
+        base_color: [0.62, 0.54, 0.36]
+        roughness: 0.95
+        macro_strength: 0.12
+        normal_strength: 0.08
+      snow:
+        base_color: [0.82, 0.86, 0.88]
+        roughness: 0.55
+        macro_strength: 0.06
+        sparkle_strength: 0.04
+        normal_strength: 0.06
+      dirt:
+        base_color: [0.34, 0.23, 0.14]
+        roughness: 0.92
+        macro_strength: 0.18
+        normal_strength: 0.12
+      moss:
+        base_color: [0.16, 0.31, 0.13]
+        roughness: 0.98
+        macro_strength: 0.24
+        moisture_bias: 0.65
+        normal_strength: 0.10
+      gravel:
+        base_color: [0.42, 0.41, 0.39]
+        roughness: 0.88
+        macro_strength: 0.14
+        normal_strength: 0.22
+      wet_soil:
+        base_color: [0.18, 0.13, 0.10]
+        roughness: 0.38
+        macro_strength: 0.16
+        normal_strength: 0.10
+
+  debug:
+    mode: final

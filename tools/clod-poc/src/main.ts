@@ -3,6 +3,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import GUI from "lil-gui";
 import { parseConfig } from "./config.js";
 import configText from "../config/clod_pages.yaml?raw";
+import stoneConfigText from "../config/stones.yaml?raw";
+import proceduralConfigText from "../config/procedural_textures.yaml?raw";
 import { ClodWorkerClient } from "./clod_worker_client.js";
 import { emitAudio, setAudioEnabled, setMasterVolume, getAudioState } from "./audio/index.js";
 import {
@@ -34,7 +36,7 @@ import {
   type GrassSettings,
   type GrassStats,
 } from "./grass.js";
-import { DEFAULT_STONE_SETTINGS, STONE_CLASSES, type StoneClass } from "./stones/stone_config.js";
+import { parseStoneConfig, STONE_CLASSES, type StoneClass } from "./stones/stone_config.js";
 import { StoneSystem, type StoneLighting, type StoneStats } from "./stones/stone_instances.js";
 import {
   DEFAULT_PLAYER_CONFIG,
@@ -92,6 +94,11 @@ import {
   MAX_TERRAIN_TEXTURES,
   terrainTextureSlotLabel,
 } from "./terrain_textures.js";
+import { parseProceduralTextureConfig } from "./textures/materialRecipes.js";
+import {
+  createProceduralTerrainTextures,
+  type ProceduralTerrainSlot,
+} from "./textures/terrainTextureArrays.js";
 
 const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
@@ -141,6 +148,19 @@ const BUILTIN_TERRAIN_TEXTURES = [
   { id: "snow-rocks-1", label: "Snow rocks 1", url: demoTextureUrl("snow-rocks-1.jpg") },
 ] as const;
 const TEXTURE_BLEND_MODES = ["hard bands", "blend bands"] as const;
+const TERRAIN_MATERIAL_SOURCES = ["procedural", "external_pbr", "debug_flat"] as const;
+type TerrainMaterialSource = typeof TERRAIN_MATERIAL_SOURCES[number];
+const PROCEDURAL_DEBUG_MODES = {
+  final: 0,
+  "macro noise": 1,
+  "paint weights": 2,
+  "albedo layer": 3,
+  "normal strength": 4,
+  roughness: 5,
+  "page LOD": 6,
+  "seam stress": 7,
+} as const;
+type ProceduralDebugMode = keyof typeof PROCEDURAL_DEBUG_MODES;
 const TERRAIN_BAND_ICONS = ["grass", "earth", "rock", "snow"] as const;
 
 interface PaintAttributeCache {
@@ -406,6 +426,11 @@ async function main() {
     }
   }
   const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
+  const stoneConfig = parseStoneConfig(stoneConfigText);
+  const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
+  const proceduralTerrain = proceduralTextureConfig.enabled
+    ? createProceduralTerrainTextures(proceduralTextureConfig)
+    : null;
   const clodWorker = new ClodWorkerClient();
   clodWorker.onError = (error) => {
     emitAudio("clod.rebuild.error");
@@ -771,6 +796,9 @@ async function main() {
     frontSideOnly: false,
     recomputedNormals: false,
     forceMaxLevel: "auto",
+    terrainMaterialSource: (queryPerfMode || !proceduralTerrain ? "external_pbr" : "procedural") as TerrainMaterialSource,
+    proceduralDebugMode: "final" as ProceduralDebugMode,
+    proceduralMicroNormals: true,
     textureScale: 1,
     triplanar: !queryPerfMode,
     albedo: !queryPerfMode,
@@ -837,10 +865,10 @@ async function main() {
     grassTierSummary: "0/0/0",
     grassEdgeSuppressed: 0,
     grassCandidateCount: 0,
-    stonesEnabled: false,
-    stoneDensity: DEFAULT_STONE_SETTINGS.density,
-    stoneMaxInstances: DEFAULT_STONE_SETTINGS.maxInstances,
-    stoneSeed: DEFAULT_STONE_SETTINGS.seed,
+    stonesEnabled: stoneConfig.enabled,
+    stoneDensity: stoneConfig.density,
+    stoneMaxInstances: stoneConfig.maxInstances,
+    stoneSeed: stoneConfig.seedSalt,
     stoneShowLarge: true,
     stoneShowMedium: true,
     stoneShowSmall: true,
@@ -855,6 +883,9 @@ async function main() {
     state.albedo = false;
     state.normalMap = false;
     state.triplanar = false;
+    state.terrainMaterialSource = "debug_flat";
+    state.proceduralDebugMode = "page LOD";
+    state.proceduralMicroNormals = false;
     state.postProcessEnabled = false;
     state.postProcessDebugMode = "off";
     state.bubble = false;
@@ -944,7 +975,16 @@ async function main() {
   let refreshTerraformSwatches: () => void = () => {};
   let syncTerraformMenu: () => void = () => {};
   const rebuildActiveTerrainSlots = () => {};
-  const texturesActive = () => state.albedo && textureSlots.some((slot) => slot.texture !== null);
+  type TerrainSlotView = TextureSlot | ProceduralTerrainSlot;
+  const activeTerrainSlots = (): readonly TerrainSlotView[] => {
+    if (state.terrainMaterialSource === "procedural" && proceduralTerrain) return proceduralTerrain.slots;
+    if (state.terrainMaterialSource === "debug_flat") return [];
+    return textureSlots;
+  };
+  const texturesActive = () => state.albedo && (
+    (state.terrainMaterialSource === "procedural" && proceduralTerrain !== null) ||
+    (state.terrainMaterialSource === "external_pbr" && textureSlots.some((slot) => slot.texture !== null))
+  );
 
   // The shader binds two layered textures (albedo + normal), one layer per slot, instead of
   // 32 individual samplers. Slot images can differ in size, so each layer is rasterised to a
@@ -992,6 +1032,7 @@ async function main() {
     return tex;
   };
   const ensureTextureArrays = () => {
+    if (state.terrainMaterialSource !== "external_pbr") return;
     const signature = textureSlots
       .map((s) => `${s.texture?.uuid ?? "_"}:${s.normalTexture?.uuid ?? "_"}`)
       .join("|");
@@ -1012,25 +1053,45 @@ async function main() {
   };
 
   const terrainTextureUniformOptions = () => {
-    ensureTextureArrays();
+    const proceduralActive = state.terrainMaterialSource === "procedural" && proceduralTerrain !== null;
+    if (!proceduralActive) ensureTextureArrays();
     return {
       enabled: texturesActive(),
       triplanar: state.triplanar,
-      normalMap: state.normalMap,
+      normalMap: proceduralActive ? state.proceduralMicroNormals : state.normalMap,
       normalIntensity: state.normalIntensity,
       roughness: state.roughness,
       metalness: state.metalness,
       textureScale: state.textureScale,
       blendBands: state.textureBlendMode === "blend bands",
       blendWidth: state.textureBlendWidth,
-      albedoArray: albedoArrayTex,
-      normalArray: normalArrayTex,
+      albedoArray: proceduralActive ? proceduralTerrain.albedoArray : albedoArrayTex,
+      normalArray: proceduralActive ? proceduralTerrain.normalArray : normalArrayTex,
+      procedural: proceduralActive ? {
+        enabled: true,
+        noiseA: proceduralTerrain.noise.noiseA,
+        noiseB: proceduralTerrain.noise.noiseB,
+        debugMode: PROCEDURAL_DEBUG_MODES[state.proceduralDebugMode],
+        microFadeStart: proceduralTextureConfig.terrain.micro_normal.fade_start_m,
+        microFadeEnd: proceduralTextureConfig.terrain.micro_normal.fade_end_m,
+        lodBias: state.colorByLod ? 40 : 0,
+        normalMapMask: proceduralTerrain.normalMapMask,
+      } : {
+        enabled: false,
+        noiseA: null,
+        noiseB: null,
+        debugMode: 0,
+        microFadeStart: 45,
+        microFadeEnd: 85,
+        lodBias: 0,
+      },
     };
   };
   const applyTerrainTextures = () => {
     rebuildActiveTerrainSlots();
+    const slots = activeTerrainSlots();
     const apply = (mat: THREE.ShaderMaterial) => {
-      applyTerrainTextureUniforms(mat, textureSlots, terrainTextureUniformOptions());
+      applyTerrainTextureUniforms(mat, slots, terrainTextureUniformOptions());
     };
     for (const v of views.values()) apply(v.mat);
     for (const { mats } of chunkGroups.values()) {
@@ -1217,11 +1278,11 @@ async function main() {
   // Stone overlay (ground-detail props). Pure visual layer: scattered over the LOD0 page
   // footprints and added to the scene, never fed into the page source mesh / weld path.
   const makeStoneSettings = () => ({
-    ...DEFAULT_STONE_SETTINGS,
+    ...stoneConfig,
     enabled: state.stonesEnabled,
     density: state.stoneDensity,
     maxInstances: state.stoneMaxInstances,
-    seed: state.stoneSeed,
+    seedSalt: state.stoneSeed,
   });
   const visibleStoneClasses = (): StoneClass[] =>
     STONE_CLASSES.filter((cls) =>
@@ -2624,6 +2685,12 @@ async function main() {
   buildProgress.hidden = true;
 
   const textureFolder = gui.addFolder("terrain texture");
+  textureFolder.add(state, "terrainMaterialSource", TERRAIN_MATERIAL_SOURCES).name("source").onChange(() => {
+    refreshTextureState();
+    updateInfo();
+  });
+  textureFolder.add(state, "proceduralDebugMode", Object.keys(PROCEDURAL_DEBUG_MODES)).name("procedural debug").onChange(applyTerrainTextures);
+  textureFolder.add(state, "proceduralMicroNormals").name("procedural micro normals").onChange(applyTerrainTextures);
   textureFolder.add(state, "albedo").name("albedo").onChange(applyTerrainTextures);
   textureFolder.add(textureActions, "loadTexture").name("load albedo / normals");
   textureFolder.add(state, "triplanar").name("triplanar").onChange(applyTerrainTextures);
@@ -2743,7 +2810,7 @@ async function main() {
     }
   };
   const syncMaterialCarousel = () => {
-    const count = textureSlots.length;
+    const count = activeTerrainSlots().length;
     const bounds = materialCarouselBounds(count, materialSwatchPage);
     materialSwatchPage = bounds.page;
     materialCarousel.classList.toggle("tf-material-carousel-active", bounds.needsCarousel);
@@ -2759,7 +2826,7 @@ async function main() {
     syncMaterialCarousel();
   });
   carouselNext.addEventListener("click", () => {
-    const { maxPage } = materialCarouselBounds(textureSlots.length, materialSwatchPage);
+    const { maxPage } = materialCarouselBounds(activeTerrainSlots().length, materialSwatchPage);
     materialSwatchPage = Math.min(maxPage, materialSwatchPage + 1);
     syncMaterialCarousel();
   });
@@ -2892,18 +2959,19 @@ async function main() {
 
   refreshTerraformSwatches = () => {
     rebuildActiveTerrainSlots();
-    if (state.brushMaterial >= textureSlots.length) state.brushMaterial = 0;
+    const slots = activeTerrainSlots();
+    if (state.brushMaterial >= slots.length) state.brushMaterial = 0;
     materialSwatchPage = materialCarouselPageForSelection(
       state.brushMaterial,
       materialSwatchPage,
-      textureSlots.length,
+      slots.length,
     );
-    for (let i = 0; i < textureSlots.length; i++) {
+    for (let i = 0; i < slots.length; i++) {
       ensureSwatchButton(i);
       const btn = swatchButtons[i];
-      const slot = textureSlots[i];
+      const slot = slots[i];
       const label = btn.firstChild as HTMLSpanElement;
-      btn.disabled = !slot.texture;
+      btn.disabled = state.terrainMaterialSource === "external_pbr" && !slot.texture;
       btn.style.backgroundImage = slot.previewUrl ? `url("${slot.previewUrl}")` : "";
       btn.style.backgroundColor = slot.previewUrl ? "transparent" : PAINT_SWATCH_COLORS[i % PAINT_SWATCH_COLORS.length];
       const displayName = slot.name && slot.name !== "empty" ? slot.name : terrainTextureSlotLabel(i);

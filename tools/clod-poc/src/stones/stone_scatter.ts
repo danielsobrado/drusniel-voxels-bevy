@@ -16,10 +16,10 @@ import {
 
 const TWO_PI = Math.PI * 2;
 
-/** Salt for the per-cell acceptance roll (added to settings.seed). Shared with the debug sampler. */
+/** Salt for the per-cell acceptance roll (added to settings.seedSalt). Shared with the debug sampler. */
 export const ACCEPT_SALT = 307;
 
-// Decorrelated salt offsets per decision stream (added to settings.seed).
+// Decorrelated salt offsets per decision stream (added to settings.seedSalt).
 const SALT = {
   jitterX: 101,
   jitterZ: 211,
@@ -31,9 +31,6 @@ const SALT = {
   radius: 859,
   priority: 977,
 } as const;
-
-/** Coarse clustering cell so stones gather in fans/patches instead of uniform noise. */
-const CLUMP_CELL_MULT = 3;
 
 export interface StoneInstance {
   x: number;
@@ -79,7 +76,7 @@ export function sampleStoneSite(x: number, z: number, settings: StoneSettings): 
   const normalY = normal[1];
   const [, rock, sand, snow] = materialWeights(height, normalY);
 
-  const standingWater = height < WATER_LEVEL + settings.waterMargin;
+  const standingWater = height < WATER_LEVEL + settings.waterMarginM + settings.standingWaterCutoffM;
   const repose = clamp01(
     (normalY - settings.slopeRepose) / Math.max(1e-3, settings.slopeReposeStart - settings.slopeRepose),
   );
@@ -90,19 +87,21 @@ export function sampleStoneSite(x: number, z: number, settings: StoneSettings): 
   ) * repose;
 
   // Streambed proxy: PoC has no river field, so use the near-water sand band just above water.
-  const streambed = standingWater ? 0 : clamp01(sand);
+  const streambed = standingWater
+    ? 0
+    : smoothstep(settings.streambedSandStart, settings.streambedSandEnd, sand);
 
   // Talus: probe uphill (steepest-ascent direction = -normal.xz) for a steep rise above the site.
   const up = Math.hypot(normal[0], normal[2]);
   const ux = up > 1e-4 ? -normal[0] / up : 0;
   const uz = up > 1e-4 ? -normal[2] / up : 0;
-  const near = settings.cliffProbeNear;
-  const far = settings.cliffProbeFar;
+  const near = settings.cliffProbeNearM;
+  const far = settings.cliffProbeFarM;
   const hNear = surfaceHeight(x + ux * near, z + uz * near);
   const hFar = surfaceHeight(x + ux * far, z + uz * far);
   const riseNear = (hNear - height) / Math.max(1e-3, near);
   const riseFar = (hFar - hNear) / Math.max(1e-3, far - near);
-  const cliffAbove = smoothstep(0.7, 1.3, Math.max(riseNear, riseFar));
+  const cliffAbove = smoothstep(settings.cliffRiseStart, settings.cliffRiseEnd, Math.max(riseNear, riseFar));
 
   return { height, normalY, rockExposure: rock, snow, sand, scree, streambed, cliffAbove, repose, standingWater };
 }
@@ -110,17 +109,17 @@ export function sampleStoneSite(x: number, z: number, settings: StoneSettings): 
 /** Combined acceptance weight (≥0; >1 means certain). */
 export function stoneWeight(site: StoneSiteSample, settings: StoneSettings, x: number, z: number): number {
   if (site.standingWater || site.repose <= 0) return 0;
-  const clumpCell = Math.max(1, settings.cellSize * CLUMP_CELL_MULT);
+  const clumpCell = Math.max(1, settings.cellSizeM * settings.patchClumpCellMult);
   const patchClump =
-    0.35 +
-    hash2(Math.floor(x / clumpCell), Math.floor(z / clumpCell), settings.seed + SALT.clump);
+    settings.patchClumpMin +
+    hash2(Math.floor(x / clumpCell), Math.floor(z / clumpCell), settings.seedSalt + SALT.clump);
   const base =
-    site.rockExposure * 0.85 +
-    site.scree * 0.85 +
-    site.streambed * 1.5 +
-    site.cliffAbove * 1.15 +
-    0.16;
-  return settings.density * base * patchClump * site.repose * (1 - site.snow * 0.85);
+    site.rockExposure * settings.rockExposureWeight +
+    site.scree * settings.screeWeight +
+    site.streambed * settings.streamWeight +
+    site.cliffAbove * settings.cliffAboveWeight +
+    settings.baseSoilWeight;
+  return settings.density * base * patchClump * site.repose * (1 - site.snow * settings.snowFade);
 }
 
 function selectClass(site: StoneSiteSample, settings: StoneSettings, roll: number): StoneClass {
@@ -165,7 +164,7 @@ export function generateRankedStoneInstances(
   settings: StoneSettings,
 ): RankedStoneInstance[] {
   const ranked: RankedStoneInstance[] = [];
-  const spacing = Math.max(0.1, settings.cellSize);
+  const spacing = Math.max(0.1, settings.cellSizeM);
   const columns = Math.max(0, Math.floor((footprint.maxX - footprint.minX) / spacing));
   const rows = Math.max(0, Math.floor((footprint.maxZ - footprint.minZ) / spacing));
   if (settings.density <= 0) return [];
@@ -174,24 +173,24 @@ export function generateRankedStoneInstances(
     for (let column = 0; column < columns; column++) {
       const gridX = Math.floor(footprint.minX / spacing) + column;
       const gridZ = Math.floor(footprint.minZ / spacing) + row;
-      const jx = (hash2(gridX, gridZ, settings.seed + SALT.jitterX) * 2 - 1) * spacing * 0.34;
-      const jz = (hash2(gridX, gridZ, settings.seed + SALT.jitterZ) * 2 - 1) * spacing * 0.34;
+      const jx = (hash2(gridX, gridZ, settings.seedSalt + SALT.jitterX) * 2 - 1) * spacing * 0.34;
+      const jz = (hash2(gridX, gridZ, settings.seedSalt + SALT.jitterZ) * 2 - 1) * spacing * 0.34;
       const x = Math.min(footprint.maxX - 1e-3, Math.max(footprint.minX + 1e-3, footprint.minX + (column + 0.5) * spacing + jx));
       const z = Math.min(footprint.maxZ - 1e-3, Math.max(footprint.minZ + 1e-3, footprint.minZ + (row + 0.5) * spacing + jz));
 
       const site = sampleStoneSite(x, z, settings);
       const weight = stoneWeight(site, settings, x, z);
       if (weight <= 0) continue;
-      if (hash2(gridX, gridZ, settings.seed + SALT.accept) >= weight) continue;
+      if (hash2(gridX, gridZ, settings.seedSalt + SALT.accept) >= weight) continue;
 
-      const cls = selectClass(site, settings, hash2(gridX, gridZ, settings.seed + SALT.classRoll));
+      const cls = selectClass(site, settings, hash2(gridX, gridZ, settings.seedSalt + SALT.classRoll));
       const classCfg = settings.classes[cls];
-      const preset = selectPreset(cls, site, settings, hash2(gridX, gridZ, settings.seed + SALT.presetRoll));
-      const variant = hashU32(gridX, gridZ, settings.seed + SALT.variantRoll) % Math.max(1, classCfg.variants);
+      const preset = selectPreset(cls, site, settings, hash2(gridX, gridZ, settings.seedSalt + SALT.presetRoll));
+      const variant = hashU32(gridX, gridZ, settings.seedSalt + SALT.variantRoll) % Math.max(1, classCfg.variants);
 
       const targetRadius =
         classCfg.radiusMin +
-        (classCfg.radiusMax - classCfg.radiusMin) * hash2(gridX, gridZ, settings.seed + SALT.radius);
+        (classCfg.radiusMax - classCfg.radiusMin) * hash2(gridX, gridZ, settings.seedSalt + SALT.radius);
       const scale = targetRadius / ROCK_PRESETS[preset].radius;
 
       // Bed deeper on slopes so stones rest in the ground rather than balancing on it.
@@ -202,10 +201,10 @@ export function generateRankedStoneInstances(
       const normal = surfaceNormal(x, z);
       const leanX = normal[2] * settings.normalLean * slopeAmt;
       const leanZ = -normal[0] * settings.normalLean * slopeAmt;
-      const yaw = hash2(gridX, gridZ, settings.seed + SALT.classRoll + 13) * TWO_PI;
+      const yaw = hash2(gridX, gridZ, settings.seedSalt + SALT.classRoll + 13) * TWO_PI;
 
       ranked.push({
-        priority: hash2(gridX, gridZ, settings.seed + SALT.priority),
+        priority: hash2(gridX, gridZ, settings.seedSalt + SALT.priority),
         instance: { x, y, z, scale, yaw, leanX, leanZ, classId: cls, preset, variant },
       });
     }

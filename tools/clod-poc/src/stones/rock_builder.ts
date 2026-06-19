@@ -4,9 +4,8 @@
  * planar fracture cuts → micro grain. The same field evaluated at lower
  * subdivision gives consistent-silhouette LODs.
  *
- * Ported near-verbatim from the LAAS reference `src/vegetation/RockBuilder.ts`.
- * Deterministic: same `Rng` seed + preset + detail ⇒ byte-identical geometry, which
- * the stone overlay relies on for reproducible scatter snapshots.
+ * Deterministic local reimplementation: same `Rng` seed + preset + detail yields
+ * byte-identical geometry, which the stone overlay relies on for reproducible scatter snapshots.
  *
  * vdata: x hue (set per-instance later), y strataT (drives albedo banding),
  * z moss/lichen openness (upness before squash), w cavity AO (concavity proxy).

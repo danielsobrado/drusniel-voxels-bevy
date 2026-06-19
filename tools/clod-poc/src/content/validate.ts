@@ -20,6 +20,7 @@ const BANNED_TERMS = [
 ];
 
 const KNOWN_SNAP_GROUPS = new Set(["floor-edge", "wall-bottom", "wall-top", "wall-side", "roof-edge", "generic"]);
+const KNOWN_TEXTURE_SLOT_SOURCES = new Set(["builtin", "user", "generated"]);
 
 export function validateContentRegistry(
   registry: ContentRegistry,
@@ -142,6 +143,15 @@ export function validateContentRegistry(
         code: "MISSING_MATERIAL_REF",
         path: `${prefix}.materialId`,
         message: `Texture slot "${id}" references missing material "${slot.materialId}".`,
+      });
+    }
+
+    if (!KNOWN_TEXTURE_SLOT_SOURCES.has(slot.source)) {
+      issues.push({
+        severity: "error",
+        code: "INVALID_TEXTURE_SOURCE",
+        path: `${prefix}.source`,
+        message: `Texture slot "${id}" source must be builtin, user, or generated.`,
       });
     }
 

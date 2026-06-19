@@ -89,6 +89,7 @@ export interface StoneSystemOptions {
   worldCells: number;
   settings: StoneSettings;
   lighting: StoneLighting;
+  material?: THREE.Material;
 }
 
 export interface StoneStats {
@@ -120,7 +121,7 @@ export class StoneSystem {
   private readonly nodes: ClodPageNode[];
   private readonly worldCells: number;
   private readonly root = new THREE.Group();
-  private readonly material: THREE.ShaderMaterial;
+  private readonly material: THREE.Material;
   private settings: StoneSettings;
   private groups: StoneGroup[] = [];
   private visibleClasses = new Set<StoneClass>(STONE_CLASSES);
@@ -139,17 +140,19 @@ export class StoneSystem {
       .sort((a, b) => a.footprint.minZ - b.footprint.minZ || a.footprint.minX - b.footprint.minX);
     this.worldCells = options.worldCells;
     this.settings = { ...options.settings };
-    this.material = new THREE.ShaderMaterial({
-      uniforms: {
-        uLight: { value: options.lighting.light.clone() },
-        uSunColor: { value: options.lighting.sunColor.clone() },
-        uSkyLight: { value: options.lighting.skyLight.clone() },
-        uGroundLight: { value: options.lighting.groundLight.clone() },
-      },
-      vertexShader: VERTEX_SHADER,
-      fragmentShader: FRAGMENT_SHADER,
-      side: THREE.FrontSide,
-    });
+    this.material =
+      options.material ??
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uLight: { value: options.lighting.light.clone() },
+          uSunColor: { value: options.lighting.sunColor.clone() },
+          uSkyLight: { value: options.lighting.skyLight.clone() },
+          uGroundLight: { value: options.lighting.groundLight.clone() },
+        },
+        vertexShader: VERTEX_SHADER,
+        fragmentShader: FRAGMENT_SHADER,
+        side: THREE.FrontSide,
+      });
     this.root.name = "stones";
     this.scene.add(this.root);
     this.root.visible = this.settings.enabled;
@@ -171,10 +174,12 @@ export class StoneSystem {
   }
 
   updateLighting(lighting: StoneLighting): void {
-    this.material.uniforms.uLight.value.copy(lighting.light);
-    this.material.uniforms.uSunColor.value.copy(lighting.sunColor);
-    this.material.uniforms.uSkyLight.value.copy(lighting.skyLight);
-    this.material.uniforms.uGroundLight.value.copy(lighting.groundLight);
+    const uniforms = (this.material as Partial<THREE.ShaderMaterial>).uniforms;
+    if (!uniforms) return;
+    uniforms.uLight.value.copy(lighting.light);
+    uniforms.uSunColor.value.copy(lighting.sunColor);
+    uniforms.uSkyLight.value.copy(lighting.skyLight);
+    uniforms.uGroundLight.value.copy(lighting.groundLight);
   }
 
   /** Show only the given size classes (debug). */
@@ -202,7 +207,7 @@ export class StoneSystem {
       const variant = Number(variantText);
       const details = this.settings.classes[classId].lodDetails;
       // Same variant seed for every LOD level => consistent silhouette across detail levels.
-      const variantSeed = hashCombine(this.settings.seed >>> 0, hashString(`stone:${preset}:${variant}`));
+      const variantSeed = hashCombine(this.settings.seedSalt >>> 0, hashString(`stone:${preset}:${variant}`));
       const lods: LodMesh[] = details.map((detail) => {
         const built = buildRock(preset as StoneInstance["preset"], new Rng(variantSeed), detail);
         const mesh = new THREE.InstancedMesh(built.geometry, this.material, bucket.length);

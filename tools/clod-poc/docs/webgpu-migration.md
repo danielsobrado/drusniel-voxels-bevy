@@ -20,11 +20,11 @@ a big-bang.
 
 | Surface | File | Notes / risk |
 |---|---|---|
-| Terrain | [src/material.ts](../src/material.ts), [src/terrain_shader.ts](../src/terrain_shader.ts) | ~290-line fragment shader. `sampler2DArray` (DataArrayTexture) albedo+normal, triplanar, per-vertex paint blend (paintSlots/paintWeights attrs), dithered LOD cross-fade (`discard`), `dFdx/dFdy` normal-divergence debug, hemi+spec lighting, world-space normals. Highest effort. |
-| Grass | [src/grass.ts](../src/grass.ts) | ~930 lines, `InstancedBufferGeometry` + custom instance attrs (aOffset/aHeight/aRotY/aPhase/aColorMix/aEdgeFade/aNormalY), wind vertex animation, 2 shader modes, **alpha-to-coverage** (needs MSAA target) + ordered-dither fallback. |
-| Stones | [src/stones/stone_instances.ts](../src/stones/stone_instances.ts) | Instanced, smaller GLSL surface. |
+| Terrain | [src/material.ts](../src/material.ts), [src/terrain_shader.ts](../src/terrain_shader.ts), [src/gpu/terrain_node_material.ts](../src/gpu/terrain_node_material.ts) | WebGPU preview has default lighting, the app's generated procedural terrain texture arrays behind `?tex=1`, triplanar normal maps behind `?normal=1`, a closer procedural parity comparison behind `?texParity=1` (macro tint + camera-distance micro-normal fade), height-band blending, per-vertex paint blend (`paintSlots`/`paintWeights`), and screen-door LOD fades behind `?lodFade=1`. Still deferred: external PBR texture-slot imports, procedural roughness/debug modes, non-triplanar path, `dFdx/dFdy` normal-divergence debug. |
+| Grass | [src/grass.ts](../src/grass.ts), [src/gpu/grass_node_material.ts](../src/gpu/grass_node_material.ts) | WebGPU preview has classic grass behind `?grass=1` and terrain-patch-v2 placement/near-mid tiers behind `?grass=1&grassMode=v2`. `?grassDebugAttrs=1` colors v2 grass from `aEdgeFade`/`aNormalY`; `?grassEdgeShape=1` applies a CPU-baked `aEdgeFade` height multiplier to avoid the WebGPU vertex-stage attribute-read failure. The v2 slope/distance dither/A2C shader fades are temporarily disabled while v2 visibility is validated. |
+| Stones | [src/stones/stone_instances.ts](../src/stones/stone_instances.ts), [src/gpu/stone_node_material.ts](../src/gpu/stone_node_material.ts) | WebGPU preview port behind `?webgpu=1&stones=1`; reuses the existing scatter/grouping/LOD system with an injected TSL material. |
 | Sky/env | [src/environment.ts](../src/environment.ts) | Sky dome shader, hooks `renderer` type. |
-| Post-process | [src/postprocess.ts](../src/postprocess.ts) | Offscreen `WebGLRenderTarget` @ 4× MSAA + fullscreen copy/output passes (exposure/contrast/saturation/vignette), `tonemapping_fragment`/`colorspace_fragment` chunks. Replaced by the WebGPU post pipeline (PostProcessing/`pass`). |
+| Post-process | [src/postprocess.ts](../src/postprocess.ts), [src/gpu/webgpu_postprocess.ts](../src/gpu/webgpu_postprocess.ts) | WebGPU preview port behind `?webgpu=1&post=1`: `RenderPipeline` + `pass(scene,camera)` + TSL exposure/contrast/saturation/vignette. |
 
 Renderer plumbing: `THREE.WebGLRenderer` created in [src/main.ts](../src/main.ts) (~L464),
 render loop at `setAnimationLoop` (~L3174) drives `postProcess.render(scene, camera)`.
@@ -57,12 +57,29 @@ render loop at `setAnimationLoop` (~L3174) drives `postProcess.render(scene, cam
 ### Phase 3 — grass + stones
 - Instanced NodeMaterials with instance attributes via TSL; reproduce wind animation and the
   alpha-to-coverage / dither fade (WebGPU MSAA target).
+- Current preview status: classic grass is behind `?webgpu=1&grass=1`; terrain-patch-v2
+  grass is behind `?webgpu=1&grass=1&grassMode=v2` with optional `grassA2C=1`. Stones are
+  behind `?webgpu=1&stones=1` and reuse `StoneSystem`; the WebGL default still uses its
+  original ShaderMaterial.
 - **Gate:** grass density/fade/AA and stones match reference shots.
 
 ### Phase 4 — sky/env + post-process
 - Port sky dome; replace PostProcessPipeline with the WebGPU post chain (exposure/contrast/
   saturation/vignette/tonemapping/colorspace). Retire the WebGL MSAA render target.
+- Current preview status: sky is already on the isolated WebGPU path; postprocess is now
+  available behind `?webgpu=1&post=1` for QA before it is made part of the full app path.
 - **Gate:** full-scene parity; WebGPU becomes default, WebGL kept as fallback flag.
+
+### Dig editing preview gate
+- Current preview status: `?webgpu=1&dig=1` enables orbit-click sphere carving in the
+  isolated WebGPU path. It uses `TerrainColliderSet` for targeting, `addDigEdit()` for the
+  shared density overlay, synchronous `rebuildDirtyPages()` for the small preview worlds,
+  and swaps geometry for changed nodes already realized in the scene.
+- `?digOp=add&digMaterial=<slot>` is available as a QA-only painted deposit path. WebGPU
+  terrain geometry now carries `paintSlots`/`paintWeights`, and the terrain NodeMaterial
+  blends painted texture layers over natural height bands.
+- Deferred: worker-backed rebuild scheduling, player-mode hold-to-dig, full brush UI,
+  cube/cylinder controls, and grass patch refresh after edits.
 
 ### Phase 5 — single shared device for compute (the payoff)
 - Hand the renderer-owned `GPUDevice` to `ClodErrorPxCompute.create(nodes, device)` (already

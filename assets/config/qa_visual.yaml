@@ -38,3 +38,95 @@ qa:
           area: "__frame"
           field: "p99_ms"
           max_ms: 30.0
+    - id: "visual_water_sunset"
+      bench_scene: "bench/scenes/visual/visual-regression.toml"
+      checkpoint: "jump-water-sunset"
+      screenshots:
+        - id: "apex"
+          name: "apex"
+      probes:
+        - id: "water_sky_signal"
+          type: "region_luminance"
+          screenshot: "apex"
+          region: [0.0, 0.0, 1.0, 0.45]
+          min: 0.02
+          max: 0.98
+        - id: "water_frame_not_flat"
+          type: "region_variance"
+          screenshot: "apex"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min_luminance_stddev: 0.01
+      timing:
+        - id: "frame_p99"
+          area: "__frame"
+          field: "p99_ms"
+          max_ms: 60.0
+    - id: "visual_forest_sweep"
+      bench_scene: "bench/scenes/visual/visual-regression.toml"
+      checkpoint: "forest-look-sweep"
+      screenshots:
+        - id: "center"
+          name: "center"
+      probes:
+        - id: "forest_has_signal"
+          type: "region_luminance"
+          screenshot: "center"
+          region: [0.0, 0.1, 1.0, 0.95]
+          min: 0.02
+          max: 0.98
+        - id: "forest_not_flat"
+          type: "region_variance"
+          screenshot: "center"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min_luminance_stddev: 0.01
+      timing:
+        - id: "frame_p99"
+          area: "__frame"
+          field: "p99_ms"
+          max_ms: 110.0
+    - id: "visual_fog_god_rays"
+      bench_scene: "bench/scenes/visual/visual-regression.toml"
+      checkpoint: "ridge-fog-god-rays"
+      screenshots:
+        - id: "fog"
+          name: "fog"
+      probes:
+        - id: "fog_has_signal"
+          type: "region_luminance"
+          screenshot: "fog"
+          region: [0.0, 0.0, 1.0, 0.55]
+          min: 0.02
+          max: 0.98
+        - id: "fog_frame_not_flat"
+          type: "region_variance"
+          screenshot: "fog"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min_luminance_stddev: 0.01
+      timing:
+        - id: "frame_p99"
+          area: "__frame"
+          field: "p99_ms"
+          max_ms: 90.0
+    - id: "visual_shadow_ray_flag"
+      bench_scene: "bench/scenes/visual/visual-regression.toml"
+      checkpoint: "forest-shadow-ray-flag"
+      screenshots:
+        - id: "shadow_ray"
+          name: "shadow-ray"
+      probes:
+        - id: "shadow_has_signal"
+          type: "region_luminance"
+          screenshot: "shadow_ray"
+          region: [0.0, 0.1, 1.0, 0.95]
+          min: 0.02
+          max: 0.98
+        - id: "shadow_frame_not_flat"
+          type: "region_variance"
+          screenshot: "shadow_ray"
+          region: [0.0, 0.0, 1.0, 1.0]
+          min_luminance_stddev: 0.01
+      timing:
+        - id: "frame_p99"
+          area: "__frame"
+          field: "p99_ms"
+          max_ms: 110.0

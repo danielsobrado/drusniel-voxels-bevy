@@ -436,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn world_startup_snapshot_gate_waits_for_pages_and_live_queue() {
+    fn world_startup_snapshot_gate_waits_for_pages_but_not_background_live_queue() {
         let gen_state = ChunkGenerationState {
             total_chunks: 100,
             chunks_completed: 100,
@@ -470,11 +470,23 @@ mod tests {
         gate.pages_failed = false;
         gate.pages_ready = true;
         chunk_stats.dirty_chunks_queued = 2;
-        let waiting_live = world_startup_snapshot(&gen_state, &chunk_stats, true, Some(&gate));
-        assert_eq!(waiting_live.stage, WorldStartupStage::PreparingMeshes);
-        assert!(waiting_live.detail.contains("live terrain meshes"));
+        chunk_stats.mesh_entities = 0;
+        let waiting_live_without_mesh =
+            world_startup_snapshot(&gen_state, &chunk_stats, true, Some(&gate));
+        assert_eq!(
+            waiting_live_without_mesh.stage,
+            WorldStartupStage::PreparingMeshes
+        );
+        assert!(!waiting_live_without_mesh.complete);
+
+        chunk_stats.mesh_entities = 10;
+        let ready_with_background_queue =
+            world_startup_snapshot(&gen_state, &chunk_stats, true, Some(&gate));
+        assert_eq!(ready_with_background_queue.stage, WorldStartupStage::Ready);
+        assert!(ready_with_background_queue.complete);
 
         chunk_stats.dirty_chunks_queued = 0;
+        chunk_stats.mesh_entities = 10;
         let ready = world_startup_snapshot(&gen_state, &chunk_stats, true, Some(&gate));
         assert_eq!(ready.stage, WorldStartupStage::Ready);
         assert!(ready.complete);

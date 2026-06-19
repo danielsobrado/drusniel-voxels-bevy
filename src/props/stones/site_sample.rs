@@ -70,7 +70,7 @@ pub fn sample_site<N: NoiseGenerator>(
     let scree = clamp01((cfg.slope_repose_start - normal_y) / denom) * repose;
 
     // Real river depth from the terrain generator drives the streambed signal.
-    let streambed = clamp01(climate.river_depth / 6.0);
+    let streambed = clamp01(climate.river_depth / cfg.streambed_depth_scale.max(1e-3));
 
     // Cliff-above: probe uphill (steepest ascent = +gradient direction) for a steep rise.
     let uphill = Vec2::new(dhx, dhz);
@@ -88,7 +88,11 @@ pub fn sample_site<N: NoiseGenerator>(
         ) as f32;
         let rise_near = (h_near - height) / near.max(1e-3);
         let rise_far = (h_far - h_near) / (far - near).max(1e-3);
-        smoothstep(0.7, 1.3, rise_near.max(rise_far))
+        smoothstep(
+            cfg.cliff_rise_start,
+            cfg.cliff_rise_end,
+            rise_near.max(rise_far),
+        )
     } else {
         0.0
     };

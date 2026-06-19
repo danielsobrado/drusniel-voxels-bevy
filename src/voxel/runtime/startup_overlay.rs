@@ -690,7 +690,10 @@ pub(crate) fn world_startup_snapshot(
             };
         }
 
-        if chunk_stats.dirty_chunks_queued > 0 || chunk_stats.generation_dirty_chunks_queued > 0 {
+        if chunk_stats.mesh_entities == 0
+            && (chunk_stats.dirty_chunks_queued > 0
+                || chunk_stats.generation_dirty_chunks_queued > 0)
+        {
             return WorldStartupSnapshot {
                 stage: WorldStartupStage::PreparingMeshes,
                 progress: 0.98,
