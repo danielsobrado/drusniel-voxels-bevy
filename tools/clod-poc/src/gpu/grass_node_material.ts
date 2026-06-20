@@ -27,9 +27,11 @@ import {
 import type { EnvironmentLighting } from "../environment.js";
 import {
   createBladeGeometry,
+  createGrassTuftGeometry,
   type GrassBladeInstance,
   type GrassLighting,
   type GrassSettings,
+  type GrassTier,
 } from "../grass.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -55,7 +57,7 @@ export interface GrassNodeParams {
   bladeWidth: number;
   windStrength: number;
   windSpeed: number;
-  mode?: "classic" | "terrain-patch-v2";
+  mode?: GrassSettings["shaderMode"];
   alphaToCoverage?: boolean;
   distance?: number;
   fadeCenter?: THREE.Vector2;
@@ -82,16 +84,25 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const uSun = uniform(v3(params.lighting.sunColor));
   const uSky = uniform(v3(params.lighting.skyLight));
   const uGround = uniform(v3(params.lighting.groundLight));
-  const isPatchV2 = params.mode === "terrain-patch-v2";
+  const isPatchV2 = params.mode === "terrain-patch-v2" || params.mode === "webgpu-ring-v1";
   let useAlphaToCoverage = isPatchV2 && params.alphaToCoverage === true;
   const debugAttributes = isPatchV2 && params.debugAttributes === true;
 
   // Per-instance attributes (InstancedBufferAttribute on the geometry).
-  const aOffset: TslNode = attribute("aOffset", "vec3");
-  const aHeight: TslNode = attribute("aHeight", "float");
-  const aRotY: TslNode = attribute("aRotY", "float");
-  const aPhase: TslNode = attribute("aPhase", "float");
-  const aColorMix: TslNode = attribute("aColorMix", "float");
+  const aOffset4: TslNode = attribute("aOffset", "vec4");
+  const aOffset: TslNode = aOffset4.xyz;
+  // Packed to stay below WebGPU's common 8 vertex-buffer limit:
+  // x=height, y=rotY, z=phase, w=colorMix.
+  const aPacked0: TslNode = attribute("aPacked0", "vec4");
+  // x=edgeFade, y=normalY, z=widthScale, w=unused.
+  const aPacked1: TslNode = attribute("aPacked1", "vec4");
+  const aTerrainNormal4: TslNode = attribute("aTerrainNormal", "vec4");
+  const aTerrainNormal: TslNode = aTerrainNormal4.xyz;
+  const aHeight: TslNode = aPacked0.x;
+  const aRotY: TslNode = aPacked0.y;
+  const aPhase: TslNode = aPacked0.z;
+  const aColorMix: TslNode = aPacked0.w;
+  const aWidthScale: TslNode = aPacked1.z;
   const uvY: TslNode = uv().y;
   const bend: TslNode = uvY.mul(uvY);
   const windTime: TslNode = uTime.mul(uWindSpeed).add(aPhase).add(aOffset.x.mul(0.071)).add(aOffset.z.mul(0.053));
@@ -104,11 +115,12 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const pos: TslNode = positionGeometry;
 
   if (isPatchV2) {
-    const edge: TslNode = clamp(attribute("aEdgeFade", "float"), 0.0, 1.0);
-    const normalY: TslNode = clamp(attribute("aNormalY", "float"), 0.0, 1.0);
-    localX = pos.x.mul(uBladeWidth).add(wind.x);
+    const edge: TslNode = clamp(aPacked1.x, 0.0, 1.0);
+    const terrainNormal: TslNode = normalize(aTerrainNormal);
+    const normalY: TslNode = clamp(terrainNormal.y, 0.0, 1.0);
+    localX = pos.x.mul(uBladeWidth).mul(aWidthScale).add(wind.x);
     localY = pos.y.mul(aHeight);
-    localZ = pos.z.mul(uBladeWidth).add(wind.y);
+    localZ = pos.z.mul(uBladeWidth).mul(aWidthScale).add(wind.y);
 
     const base = vec3(0.04, 0.16, 0.035);
     const mid = vec3(0.16, 0.36, 0.075);
@@ -121,9 +133,9 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
       grassColor = vec3(edge, normalY, 0.08);
     }
   } else {
-    localX = pos.x.mul(uBladeWidth).add(wind.x);
+    localX = pos.x.mul(uBladeWidth).mul(aWidthScale).add(wind.x);
     localY = pos.y.mul(aHeight);
-    localZ = pos.z.add(wind.y);
+    localZ = pos.z.mul(uBladeWidth).mul(aWidthScale).add(wind.y);
 
     const darkGreen = vec3(0.035, 0.12, 0.025);
     const midGreen = vec3(0.12, 0.34, 0.055);
@@ -144,9 +156,13 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const localNormal: TslNode = normalize(
     vec3(nrmComponent("x").sub(wind.x.mul(0.35)), nrmComponent("y").add(bend.mul(0.16)), nrmComponent("z").sub(wind.y.mul(0.35))),
   );
-  const worldNormal: TslNode = normalize(
+  const bladeNormal: TslNode = normalize(
     vec3(c.mul(localNormal.x).add(s.mul(localNormal.z)), localNormal.y, s.mul(localNormal.x).negate().add(c.mul(localNormal.z))),
   );
+  const terrainNormalPull: TslNode = isPatchV2 ? smoothstep(0.18, 1.0, uvY).mul(0.35) : 0.0;
+  const worldNormal: TslNode = isPatchV2
+    ? normalize(mix(bladeNormal, normalize(aTerrainNormal), terrainNormalPull))
+    : bladeNormal;
 
   // Flip the normal on back faces (double-sided blades).
   const n: TslNode = frontFacing.select(worldNormal, worldNormal.negate());
@@ -160,11 +176,13 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     const wrap: TslNode = clamp(dot(n, lightDir).mul(0.45).add(0.55), 0.0, 1.0);
     const direct: TslNode = uSun.mul(sun.mul(0.65).add(wrap.mul(0.28)));
     const transmission: TslNode = vec3(0.42, 0.52, 0.12).mul(back).mul(uvY.mul(0.42).add(0.14));
-    litColor = grassColor.mul(hemi.add(direct)).add(transmission.mul(grassColor));
+    const ambientFloor: TslNode = grassColor.mul(0.24);
+    litColor = ambientFloor.add(grassColor.mul(hemi.add(direct))).add(transmission.mul(grassColor));
   } else {
     const direct: TslNode = uSun.mul(pow(sun, 1.25));
     const transmission: TslNode = vec3(0.46, 0.55, 0.12).mul(back).mul(uvY.mul(0.5).add(0.16));
-    litColor = grassColor.mul(hemi.add(direct)).add(transmission.mul(grassColor));
+    const ambientFloor: TslNode = grassColor.mul(0.24);
+    litColor = ambientFloor.add(grassColor.mul(hemi.add(direct))).add(transmission.mul(grassColor));
   }
 
   const material = new MeshBasicNodeMaterial();
@@ -207,10 +225,77 @@ function nrmComponent(axis: "x" | "y" | "z"): TslNode {
 }
 
 export interface GrassInstancedGeometryOptions {
-  mode?: "classic" | "terrain-patch-v2";
-  tier?: "near" | "mid";
+  mode?: GrassSettings["shaderMode"];
+  tier?: GrassTier;
   crossed?: boolean;
   edgeShape?: boolean;
+}
+
+function makeDeterministicRandom(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function transformedBladeGeometry(
+  blades: number,
+  rows: readonly (readonly [number, number])[],
+  seed: number,
+): THREE.BufferGeometry {
+  const rnd = makeDeterministicRandom(seed + blades * 97 + rows.length * 17);
+  const source = createBladeGeometry(rows, false);
+  const sourcePosition = source.getAttribute("position");
+  const sourceNormal = source.getAttribute("normal");
+  const sourceUv = source.getAttribute("uv");
+  const sourceIndex = source.getIndex();
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  for (let blade = 0; blade < blades; blade++) {
+    const yaw = rnd() * Math.PI * 2;
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+    const offsetX = (rnd() - 0.5) * 0.18;
+    const offsetZ = (rnd() - 0.5) * 0.18;
+    const heightScale = 0.62 + rnd() * 0.7;
+    const widthScale = 0.82 + rnd() * 0.55;
+    const lean = (rnd() - 0.5) * 0.34;
+    const baseVertex = positions.length / 3;
+
+    for (let i = 0; i < sourcePosition.count; i++) {
+      const x = sourcePosition.getX(i) * widthScale;
+      const y = sourcePosition.getY(i) * heightScale;
+      const z = sourcePosition.getZ(i);
+      const shearX = x + lean * y;
+      positions.push(
+        shearX * cosYaw + z * sinYaw + offsetX,
+        y,
+        z * cosYaw - shearX * sinYaw + offsetZ,
+      );
+      normals.push(
+        sourceNormal.getX(i) * cosYaw + sourceNormal.getZ(i) * sinYaw,
+        sourceNormal.getY(i),
+        sourceNormal.getZ(i) * cosYaw - sourceNormal.getX(i) * sinYaw,
+      );
+      uvs.push(sourceUv.getX(i), sourceUv.getY(i));
+    }
+
+    if (sourceIndex) {
+      for (let i = 0; i < sourceIndex.count; i++) indices.push(baseVertex + sourceIndex.getX(i));
+    }
+  }
+
+  source.dispose();
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  return geometry;
 }
 
 // Build an InstancedBufferGeometry: the shared classic blade geometry plus one set of
@@ -220,8 +305,20 @@ export function buildGrassInstancedGeometry(
   options: GrassInstancedGeometryOptions = {},
 ): THREE.InstancedBufferGeometry {
   const mode = options.mode ?? "classic";
-  const rows = mode === "terrain-patch-v2" && options.tier === "mid" ? V2_MID_BLADE_ROWS : mode === "terrain-patch-v2" ? V2_NEAR_BLADE_ROWS : undefined;
-  const base = rows ? createBladeGeometry(rows, options.crossed === true && options.tier !== "mid") : createBladeGeometry();
+  const terrainPatchMode = mode === "terrain-patch-v2" || mode === "webgpu-ring-v1";
+  const rows = terrainPatchMode && options.tier === "mid" ? V2_MID_BLADE_ROWS : terrainPatchMode ? V2_NEAR_BLADE_ROWS : undefined;
+  let base: THREE.BufferGeometry;
+  if (mode === "webgpu-ring-v1" && options.tier === "near") {
+    base = transformedBladeGeometry(5, V2_NEAR_BLADE_ROWS, 0x9e3779b9);
+  } else if (mode === "webgpu-ring-v1" && options.tier === "mid") {
+    base = transformedBladeGeometry(3, V2_MID_BLADE_ROWS, 0x85ebca6b);
+  } else if (terrainPatchMode && options.tier === "far") {
+    base = createGrassTuftGeometry(0.2);
+  } else if (terrainPatchMode && options.tier === "super") {
+    base = createGrassTuftGeometry(0.34);
+  } else {
+    base = rows ? createBladeGeometry(rows, options.crossed === true && options.tier !== "mid") : createBladeGeometry();
+  }
   const geo = new THREE.InstancedBufferGeometry();
   geo.index = base.index;
   geo.setAttribute("position", base.getAttribute("position"));
@@ -229,13 +326,10 @@ export function buildGrassInstancedGeometry(
   geo.setAttribute("normal", base.getAttribute("normal"));
 
   const count = instances.length;
-  const offset = new Float32Array(count * 3);
-  const height = new Float32Array(count);
-  const rotY = new Float32Array(count);
-  const phase = new Float32Array(count);
-  const colorMix = new Float32Array(count);
-  const edgeFade = new Float32Array(count);
-  const normalY = new Float32Array(count);
+  const offset = new Float32Array(count * 4);
+  const packed0 = new Float32Array(count * 4);
+  const packed1 = new Float32Array(count * 4);
+  const terrainNormal = new Float32Array(count * 4);
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let minZ = Number.POSITIVE_INFINITY;
@@ -243,32 +337,38 @@ export function buildGrassInstancedGeometry(
   let maxY = Number.NEGATIVE_INFINITY;
   let maxZ = Number.NEGATIVE_INFINITY;
   instances.forEach((b, i) => {
-    offset[i * 3] = b.offset[0];
-    offset[i * 3 + 1] = b.offset[1];
-    offset[i * 3 + 2] = b.offset[2];
-    const edgeMultiplier = options.edgeShape === true && mode === "terrain-patch-v2"
+    offset[i * 4] = b.offset[0];
+    offset[i * 4 + 1] = b.offset[1];
+    offset[i * 4 + 2] = b.offset[2];
+    offset[i * 4 + 3] = 1;
+    const edgeMultiplier = options.edgeShape === true && terrainPatchMode
       ? THREE.MathUtils.lerp(0.35, 1.0, THREE.MathUtils.clamp(b.edgeFade, 0, 1))
       : 1;
-    height[i] = b.height * edgeMultiplier;
-    rotY[i] = b.rotationY;
-    phase[i] = b.phase;
-    colorMix[i] = b.colorMix;
-    edgeFade[i] = b.edgeFade;
-    normalY[i] = b.normalY;
+    const height = b.height * edgeMultiplier;
+    packed0[i * 4] = height;
+    packed0[i * 4 + 1] = b.rotationY;
+    packed0[i * 4 + 2] = b.phase;
+    packed0[i * 4 + 3] = b.colorMix;
+    packed1[i * 4] = b.edgeFade;
+    packed1[i * 4 + 1] = b.normalY;
+    packed1[i * 4 + 2] = b.widthScale ?? 1;
+    packed1[i * 4 + 3] = 0;
+    const normal = b.terrainNormal;
+    terrainNormal[i * 4] = normal[0];
+    terrainNormal[i * 4 + 1] = normal[1];
+    terrainNormal[i * 4 + 2] = normal[2];
+    terrainNormal[i * 4 + 3] = 0;
     minX = Math.min(minX, b.offset[0]);
     minY = Math.min(minY, b.offset[1]);
     minZ = Math.min(minZ, b.offset[2]);
     maxX = Math.max(maxX, b.offset[0]);
-    maxY = Math.max(maxY, b.offset[1] + height[i]);
+    maxY = Math.max(maxY, b.offset[1] + height);
     maxZ = Math.max(maxZ, b.offset[2]);
   });
-  geo.setAttribute("aOffset", new THREE.InstancedBufferAttribute(offset, 3));
-  geo.setAttribute("aHeight", new THREE.InstancedBufferAttribute(height, 1));
-  geo.setAttribute("aRotY", new THREE.InstancedBufferAttribute(rotY, 1));
-  geo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phase, 1));
-  geo.setAttribute("aColorMix", new THREE.InstancedBufferAttribute(colorMix, 1));
-  geo.setAttribute("aEdgeFade", new THREE.InstancedBufferAttribute(edgeFade, 1));
-  geo.setAttribute("aNormalY", new THREE.InstancedBufferAttribute(normalY, 1));
+  geo.setAttribute("aOffset", new THREE.InstancedBufferAttribute(offset, 4));
+  geo.setAttribute("aPacked0", new THREE.InstancedBufferAttribute(packed0, 4));
+  geo.setAttribute("aPacked1", new THREE.InstancedBufferAttribute(packed1, 4));
+  geo.setAttribute("aTerrainNormal", new THREE.InstancedBufferAttribute(terrainNormal, 4));
   geo.instanceCount = count;
   const margin = 4;
   geo.boundingBox = new THREE.Box3(

@@ -1025,7 +1025,7 @@ async function main() {
     grassSeed: DEFAULT_GRASS_SETTINGS.seed,
     grassBladeCount: 0,
     grassVisiblePatches: "0/0",
-    grassTierSummary: "0/0/0",
+    grassTierSummary: "0/0/0/0",
     grassEdgeSuppressed: 0,
     grassCandidateCount: 0,
     stonesEnabled: stoneConfig.enabled,
@@ -1564,6 +1564,13 @@ async function main() {
     worldCells,
     settings: makeGrassSettings(),
     lighting: currentGrassLighting(),
+    supportsRing: isWebGpu,
+    gpuDevice: rendererWebGpuDevice,
+    gpuBackend: isWebGpu ? app.renderer.backend as unknown as {
+      createStorageAttribute(attribute: THREE.BufferAttribute): void;
+      createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
+      get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
+    } : null,
     ...(isWebGpu
       ? {
           createMaterial: (settings: GrassSettings, lighting: GrassLighting) =>
@@ -1756,8 +1763,13 @@ async function main() {
       `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassShaderMode} ` +
       `${state.grassBladeCount.toLocaleString()} blades` +
       `${grassStats ? ` patches=${grassStats.visiblePatches}/${grassStats.patches} ` +
-      `tiers n/m/c=${grassStats.nearPatches}/${grassStats.midPatches}/${grassStats.coveragePatches} ` +
-      `edge-skip=${grassStats.edgeSuppressedCandidates}` : ""}\n` +
+      `tiers n/m/f/s=${grassStats.nearPatches}/${grassStats.midPatches}/${grassStats.coveragePatches}/${grassStats.superPatches} ` +
+      `edge-skip=${grassStats.edgeSuppressedCandidates}` : ""}` +
+      `${grassStats && grassStats.gpuRingStatus !== "disabled"
+        ? ` gpu-grass=${grassStats.gpuRingStatus}` +
+          ` gpu-n/m/f/s=${grassStats.gpuRingVisibleNear}/${grassStats.gpuRingVisibleMid}/${grassStats.gpuRingVisibleFar}/${grassStats.gpuRingVisibleSuper}` +
+          ` gpu-dispatch=${grassStats.gpuRingDispatchMs === null ? "-" : grassStats.gpuRingDispatchMs.toFixed(2)}ms`
+        : ""}\n` +
       `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
       `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
       `${lastArchiveSummary ? `${lastArchiveSummary}\n` : ""}` +
@@ -2292,7 +2304,7 @@ async function main() {
     grassStats = grassSystem.getStats();
     state.grassBladeCount = grassStats.blades;
     state.grassVisiblePatches = `${grassStats.visiblePatches}/${grassStats.patches}`;
-    state.grassTierSummary = `${grassStats.nearPatches}/${grassStats.midPatches}/${grassStats.coveragePatches}`;
+    state.grassTierSummary = `${grassStats.nearPatches}/${grassStats.midPatches}/${grassStats.coveragePatches}/${grassStats.superPatches}`;
     state.grassEdgeSuppressed = grassStats.edgeSuppressedCandidates;
     state.grassCandidateCount = grassStats.generatedCandidates;
     grassBladeCountController?.updateDisplay();
@@ -2313,7 +2325,9 @@ async function main() {
   const grassFolder = gui.addFolder("grass shader");
   const grassShaderOptions = Object.fromEntries(
     GRASS_SHADER_MODES.map((mode) => [
-      mode === "terrain-patch-v2" ? "terrain patch v2" : "classic",
+      mode === "terrain-patch-v2"
+        ? "terrain patch v2"
+        : mode === "webgpu-ring-v1" ? "webgpu ring v1" : "classic",
       mode,
     ]),
   );
@@ -2339,7 +2353,7 @@ async function main() {
   grassFolder.add(state, "grassSeed", 0, 100000, 1).name("seed").onFinishChange(grassActions.rebuild);
   grassBladeCountController = grassFolder.add(state, "grassBladeCount").name("blade count").disable();
   grassVisiblePatchesController = grassFolder.add(state, "grassVisiblePatches").name("visible patches").disable();
-  grassTierSummaryController = grassFolder.add(state, "grassTierSummary").name("near/mid/coverage").disable();
+  grassTierSummaryController = grassFolder.add(state, "grassTierSummary").name("near/mid/far/super").disable();
   grassEdgeSuppressedController = grassFolder.add(state, "grassEdgeSuppressed").name("edge suppressed").disable();
   grassCandidateCountController = grassFolder.add(state, "grassCandidateCount").name("candidates").disable();
   grassFolder.add(grassActions, "rebuild").name("rebuild");
@@ -3792,13 +3806,19 @@ async function main() {
       nextGrassStats.nearPatches !== grassStats.nearPatches ||
       nextGrassStats.midPatches !== grassStats.midPatches ||
       nextGrassStats.coveragePatches !== grassStats.coveragePatches ||
+      nextGrassStats.superPatches !== grassStats.superPatches ||
+      nextGrassStats.gpuRingStatus !== grassStats.gpuRingStatus ||
+      nextGrassStats.gpuRingVisibleNear !== grassStats.gpuRingVisibleNear ||
+      nextGrassStats.gpuRingVisibleMid !== grassStats.gpuRingVisibleMid ||
+      nextGrassStats.gpuRingVisibleFar !== grassStats.gpuRingVisibleFar ||
+      nextGrassStats.gpuRingVisibleSuper !== grassStats.gpuRingVisibleSuper ||
       nextGrassStats.edgeSuppressedCandidates !== grassStats.edgeSuppressedCandidates ||
       nextGrassStats.generatedCandidates !== grassStats.generatedCandidates)
     ) {
       grassStats = nextGrassStats;
       state.grassBladeCount = nextGrassStats.blades;
       state.grassVisiblePatches = `${nextGrassStats.visiblePatches}/${nextGrassStats.patches}`;
-      state.grassTierSummary = `${nextGrassStats.nearPatches}/${nextGrassStats.midPatches}/${nextGrassStats.coveragePatches}`;
+      state.grassTierSummary = `${nextGrassStats.nearPatches}/${nextGrassStats.midPatches}/${nextGrassStats.coveragePatches}/${nextGrassStats.superPatches}`;
       state.grassEdgeSuppressed = nextGrassStats.edgeSuppressedCandidates;
       state.grassCandidateCount = nextGrassStats.generatedCandidates;
       grassBladeCountController?.updateDisplay();
