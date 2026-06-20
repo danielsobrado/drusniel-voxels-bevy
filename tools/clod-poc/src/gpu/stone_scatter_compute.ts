@@ -13,7 +13,7 @@ const INDIRECT_ARGS_PER_CLASS = 5;
 const INDIRECT_BYTES = CLASS_COUNT * INDIRECT_ARGS_PER_CLASS * Uint32Array.BYTES_PER_ELEMENT;
 // Storage buffers in the bind group: counters, indirect_args, instance_a, instance_b, digEdits.
 // (bindings 0 and 6 are uniforms and don't count against this limit.)
-const STORAGE_BINDINGS = 5;
+export const STONE_GPU_SCATTER_STORAGE_BINDINGS = 5;
 
 export type StoneGpuClassIndex = 0 | 1 | 2;
 
@@ -45,8 +45,8 @@ type PipelineName = "clear_counters" | "scatter_stones" | "build_indirect_args";
 
 export function stoneGpuScatterUnsupportedReason(device: GPUDevice): string | null {
   const maxStorageBuffers = device.limits.maxStorageBuffersPerShaderStage;
-  if (maxStorageBuffers >= STORAGE_BINDINGS) return null;
-  return `stone GPU scatter requires ${STORAGE_BINDINGS} storage buffers per shader stage; device limit is ${maxStorageBuffers}`;
+  if (maxStorageBuffers >= STONE_GPU_SCATTER_STORAGE_BINDINGS) return null;
+  return `stone GPU scatter requires ${STONE_GPU_SCATTER_STORAGE_BINDINGS} storage buffers per shader stage; device limit is ${maxStorageBuffers}`;
 }
 
 export function stoneGpuClassRegion(classIndex: number, maxInstances: number): StoneGpuClassRegion {

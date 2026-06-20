@@ -372,14 +372,24 @@ const PAINT_FADE = 3.0;
  * Per-vertex painted-material blend: up to `PAINT_BLEND_CHANNELS` (slot, weight) pairs.
  * An `add` edit assigns its slot to a channel across the whole fade zone (`sdf <= PAINT_FADE`)
  * so the slot *index* stays constant there, while the coverage `weight` falls smoothly from 1
- * (on the deposited surface) to 0 at the fade edge. Keeping the index constant matters: it is
- * interpolated across the mesh, and a varying index would sample the wrong textures in the
- * blend zone — only the weight should vary. Channels are ordered by slot index so neighbouring
- * vertices agree on the channel layout. Pure function of position, so welded borders match.
+ * (on the deposited surface) to 0 at the fade edge. Slot indices are chosen globally from the
+ * active add edits and written even at zero coverage. Keeping them global matters: attributes
+ * are interpolated across triangles, and interpolating a layer id toward -1 samples the wrong
+ * texture while the weight is still fading. Only the weights should vary by position.
  */
 export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
+  const channelSlots: number[] = [];
+  for (let i = digEdits.length - 1; i >= 0 && channelSlots.length < PAINT_BLEND_CHANNELS; i--) {
+    const e = digEdits[i];
+    if (e.op !== "add") continue;
+    const slot = Math.max(0, (e.material ?? 0) | 0);
+    if (!channelSlots.includes(slot)) channelSlots.push(slot);
+  }
+  channelSlots.sort((a, b) => a - b);
+
   const slots = new Array<number>(PAINT_BLEND_CHANNELS).fill(-1);
   const weights = new Array<number>(PAINT_BLEND_CHANNELS).fill(0);
+  for (let c = 0; c < channelSlots.length; c++) slots[c] = channelSlots[c];
   if (digEdits.length === 0) return { slots, weights };
   const cover = new Map<number, number>();
   for (let i = digEdits.length - 1; i >= 0; i--) {
@@ -398,10 +408,8 @@ export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
     const slot = Math.max(0, (e.material ?? 0) | 0);
     cover.set(slot, Math.max(cover.get(slot) ?? 0, w));
   }
-  const ordered = [...cover.keys()].sort((a, b) => a - b).slice(0, PAINT_BLEND_CHANNELS);
-  for (let c = 0; c < ordered.length; c++) {
-    slots[c] = ordered[c];
-    weights[c] = cover.get(ordered[c])!;
+  for (let c = 0; c < channelSlots.length; c++) {
+    weights[c] = cover.get(channelSlots[c]) ?? 0;
   }
   return { slots, weights };
 }

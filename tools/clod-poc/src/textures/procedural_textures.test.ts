@@ -352,8 +352,13 @@ procedural_textures:
     expect(shader).toContain("uniform int uProceduralDebugMode");
     expect(shader).toContain("uniform vec4 uProceduralSnowMask");
     expect(shader).toContain("uniform vec4 uProceduralMaterialRoughness");
-    expect(shader).toContain("proceduralMacroTint(tex, vWorldPos");
+    const tintIndex = shader.indexOf("tex = proceduralMacroTint(tex, vWorldPos");
+    const paintIndex = shader.indexOf("tex = mix(tex, blendPaintedAlbedo(vWorldPos), paint)");
+    expect(tintIndex).toBeGreaterThan(-1);
+    expect(paintIndex).toBeGreaterThan(tintIndex);
+    expect(shader).toContain("blendPaintedNormal(vWorldPos, geomN)");
     expect(shader).toContain("sampleTextureSlot(int(vPaintSlots");
+    expect(shader).toContain("sampleNormalSlot(int(vPaintSlots");
     expect(shader).not.toContain("vUv");
   });
 });

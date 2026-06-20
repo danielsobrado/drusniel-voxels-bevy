@@ -19,11 +19,13 @@ Keep profiling in the loop as features are added. Rendering work in this repo is
 
 For `tools/clod-poc` changes, especially CLOD selection, WebGPU compute, browser visuals, or frame timing, run the clod-poc checks and QA harness:
 
+> ⚠️ **Never run the Vite-based commands through `rtk`.** `rtk` silently breaks Vite tooling: `vitest` fails with `TypeError: Cannot read properties of undefined (reading 'config')` and collects **0 tests in every suite**; `vite build` fails with `[vite:html-inline-proxy] No matching HTML proxy module found`. The identical commands pass when run directly with `npm`/`npx`. The failure mimics a code or dependency bug and will send you chasing phantom CRLF/version/cache issues — don't. Only plain `tsc` typecheck is safe under `rtk`. Also: a running dev server locks `node_modules/@rollup/*.node` + `node_modules/.vite`; stop it before any reinstall.
+
 ```powershell
-rtk npm --prefix tools/clod-poc run typecheck
-rtk npm --prefix tools/clod-poc test
-rtk npm --prefix tools/clod-poc run build
-rtk npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json
+rtk npm --prefix tools/clod-poc run typecheck   # tsc only — rtk OK
+npm --prefix tools/clod-poc test                # vitest — NO rtk
+npm --prefix tools/clod-poc run build           # vite build — NO rtk
+npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json   # builds — NO rtk
 ```
 
 The QA runner reads a web summary JSON, validates configured screenshots, probes, and timing thresholds, then writes `qa-report.json` and `qa-report.md` under `tools/clod-poc/qa-runs` unless `--output` is provided. The sample summary is only a harness smoke test; use a captured summary for real browser visual/perf conclusions.

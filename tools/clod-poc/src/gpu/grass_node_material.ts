@@ -13,6 +13,7 @@ import {
   float,
   fract,
   frontFacing,
+  instanceIndex,
   max,
   mix,
   normalGeometry,
@@ -22,6 +23,7 @@ import {
   screenCoordinate,
   sin,
   smoothstep,
+  storage,
   uniform,
   uv,
   vec2,
@@ -33,6 +35,7 @@ import {
   createGrassTuftGeometry,
   type GrassBladeInstance,
   type GrassLighting,
+  type GrassRingInstanceBuffers,
   type GrassSettings,
   type GrassTier,
 } from "../grass.js";
@@ -70,6 +73,8 @@ export interface GrassNodeParams {
   distance?: number;
   fadeCenter?: THREE.Vector2;
   debugAttributes?: boolean;
+  /** When set (webgpu-ring-v1), instances are read from these storage buffers, not attributes. */
+  ringInstanceBuffers?: GrassRingInstanceBuffers;
 }
 
 export interface GrassNodeMaterialHandle {
@@ -100,15 +105,34 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   let useAlphaToCoverage = isPatchV2 && params.alphaToCoverage === true;
   const debugAttributes = isPatchV2 && params.debugAttributes === true;
 
-  // Per-instance attributes (InstancedBufferAttribute on the geometry).
-  const aOffset4: TslNode = attribute("aOffset", "vec4");
+  // Per-instance data. CPU-patch path: InstancedBufferAttribute read via attribute(). GPU-ring
+  // path: storage buffers read via storage().element(instanceIndex) — instanceIndex carries the
+  // per-tier firstInstance from the indirect args, so one material serves all four tiers. Read-only
+  // because a vertex stage may not bind read_write storage. Layout matches grass_ring.compute.wgsl:
+  //   offset = (x, y, z, 1) ; packed0 = (height, rotY, phase, colorMix) ;
+  //   packed1 = (edgeFade, normalY, widthScale, tier) ; terrainNormal = (nx, ny, nz, 0).
+  const ring = params.ringInstanceBuffers;
+  let aOffset4: TslNode;
+  let aPacked0: TslNode;
+  let aPacked1: TslNode;
+  let aTerrainNormal4: TslNode;
+  if (ring) {
+    // toReadOnly() on the storage node (a vertex stage may not bind read_write storage), then index.
+    const offsetStore: TslNode = storage(ring.offset, "vec4", ring.capacity).toReadOnly();
+    const packed0Store: TslNode = storage(ring.packed0, "vec4", ring.capacity).toReadOnly();
+    const packed1Store: TslNode = storage(ring.packed1, "vec4", ring.capacity).toReadOnly();
+    const terrainNormalStore: TslNode = storage(ring.terrainNormal, "vec4", ring.capacity).toReadOnly();
+    aOffset4 = offsetStore.element(instanceIndex);
+    aPacked0 = packed0Store.element(instanceIndex);
+    aPacked1 = packed1Store.element(instanceIndex);
+    aTerrainNormal4 = terrainNormalStore.element(instanceIndex);
+  } else {
+    aOffset4 = attribute("aOffset", "vec4");
+    aPacked0 = attribute("aPacked0", "vec4");
+    aPacked1 = attribute("aPacked1", "vec4");
+    aTerrainNormal4 = attribute("aTerrainNormal", "vec4");
+  }
   const aOffset: TslNode = aOffset4.xyz;
-  // Packed to stay below WebGPU's common 8 vertex-buffer limit:
-  // x=height, y=rotY, z=phase, w=colorMix.
-  const aPacked0: TslNode = attribute("aPacked0", "vec4");
-  // x=edgeFade, y=normalY, z=widthScale, w=unused.
-  const aPacked1: TslNode = attribute("aPacked1", "vec4");
-  const aTerrainNormal4: TslNode = attribute("aTerrainNormal", "vec4");
   const aTerrainNormal: TslNode = aTerrainNormal4.xyz;
   const aHeight: TslNode = aPacked0.x;
   const aRotY: TslNode = aPacked0.y;

@@ -12,8 +12,11 @@ const INDIRECT_BYTES = TIER_COUNT * INDIRECT_ARGS_PER_TIER * Uint32Array.BYTES_P
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
 
-export const GRASS_GPU_RING_GRID = 384;
-export const GRASS_GPU_RING_CELL = 1.25;
+// Toroidal slot grid: GRID² candidate cells, CELL m apart → ±(GRID·CELL/2) m ring. Density polish:
+// a denser grid (smaller CELL) gives a lusher near field; survivors widen by 1/√thin to conserve
+// coverage. ~245 m ring at ~2 slots/m². Cull is one dispatch over GRID² (cheap on GPU).
+export const GRASS_GPU_RING_GRID = 700;
+export const GRASS_GPU_RING_CELL = 0.7;
 export const GRASS_GPU_RING_SLOT_COUNT = GRASS_GPU_RING_GRID * GRASS_GPU_RING_GRID;
 export const GRASS_GPU_RING_STORAGE_BINDINGS = 7;
 

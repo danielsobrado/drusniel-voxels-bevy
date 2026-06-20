@@ -122,15 +122,19 @@ export function stoneWeight(site: StoneSiteSample, settings: StoneSettings, x: n
   return settings.density * base * patchClump * site.repose * (1 - site.snow * settings.snowFade);
 }
 
-function selectClass(site: StoneSiteSample, settings: StoneSettings, roll: number): StoneClass {
+export function stoneClassWeights(site: StoneSiteSample, settings: StoneSettings): Record<StoneClass, number> {
   // Large stones gain weight where scree, streambeds, and cliff-fans collect bigger blocks.
   const largeBias =
     1 + site.scree + site.cliffAbove + site.streambed * settings.streamLargeBias * 6;
-  const weights: Record<StoneClass, number> = {
+  return {
     large: CLASS_BASE_WEIGHTS.large * largeBias,
     medium: CLASS_BASE_WEIGHTS.medium,
     small: CLASS_BASE_WEIGHTS.small,
   };
+}
+
+export function selectStoneClass(site: StoneSiteSample, settings: StoneSettings, roll: number): StoneClass {
+  const weights = stoneClassWeights(site, settings);
   const total = weights.large + weights.medium + weights.small;
   let acc = 0;
   const target = roll * total;
@@ -183,7 +187,7 @@ export function generateRankedStoneInstances(
       if (weight <= 0) continue;
       if (hash2(gridX, gridZ, settings.seedSalt + SALT.accept) >= weight) continue;
 
-      const cls = selectClass(site, settings, hash2(gridX, gridZ, settings.seedSalt + SALT.classRoll));
+      const cls = selectStoneClass(site, settings, hash2(gridX, gridZ, settings.seedSalt + SALT.classRoll));
       const classCfg = settings.classes[cls];
       const preset = selectPreset(cls, site, settings, hash2(gridX, gridZ, settings.seedSalt + SALT.presetRoll));
       const variant = hashU32(gridX, gridZ, settings.seedSalt + SALT.variantRoll) % Math.max(1, classCfg.variants);

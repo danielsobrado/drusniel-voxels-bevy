@@ -9,6 +9,7 @@ import {
   density,
   getDigEditsSnapshot,
   paintMaterialAt,
+  paintWeightsAt,
   replaceDigEdits,
   surfaceHeight,
 } from "./terrain.js";
@@ -99,6 +100,25 @@ describe("dig edits in the density field", () => {
     // deposited vertices carry a one-hot weight on the chosen slot; far field stays natural
     expect(paintMaterialAt(x, sy, z)).toBe(3);
     expect(paintMaterialAt(x + 50, sy, z)).toBe(0);
+  });
+
+  it("keeps paint slot ids stable while coverage fades to zero", () => {
+    const x = 30, z = 30;
+    const sy = surfaceHeight(x, z);
+    addDigEdit({ x, y: sy, z, r: 4, op: "add", material: 3 });
+
+    const painted = paintWeightsAt(x, sy, z);
+    const unpainted = paintWeightsAt(x + 50, sy, z);
+
+    expect(painted.slots[0]).toBe(3);
+    expect(painted.weights[0]).toBe(1);
+    expect(unpainted.slots[0]).toBe(3);
+    expect(unpainted.weights[0]).toBe(0);
+
+    const interpolatedSlot = (painted.slots[0] + unpainted.slots[0]) * 0.5;
+    const interpolatedWeight = (painted.weights[0] + unpainted.weights[0]) * 0.5;
+    expect(Math.floor(interpolatedSlot + 0.5)).toBe(3);
+    expect(interpolatedWeight).toBeGreaterThan(0);
   });
 
   it("strength scales how much an edit moves the field", () => {

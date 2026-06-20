@@ -72,13 +72,17 @@ Outside bench mode, `VOXEL_RENDER_TIMING=1` enables equivalent render timing cap
 
 ## clod-poc QA
 
-For `tools/clod-poc` web changes, run the Node/Vite checks plus the web QA harness when behavior, visuals, frame timing, CLOD selection, or WebGPU compute changes:
+For `tools/clod-poc` web changes, run the Node/Vite checks plus the web QA harness when behavior, visuals, frame timing, CLOD selection, or WebGPU compute changes.
+
+> ⚠️ **Do NOT run the Vite-based commands through `rtk`.** `rtk` breaks Vite tooling: `vitest` reports `TypeError: Cannot read properties of undefined (reading 'config')` (all suites collect 0 tests) and `vite build` fails with `[vite:html-inline-proxy] No matching HTML proxy module found`. The exact same commands pass when run directly. This is silent and looks like a code/dependency bug — it is not. Run `vitest`/`vite build` (and `qa`, which builds) **without** `rtk`. Plain `tsc` typecheck is fine either way. If the dev server is left running it locks `node_modules/@rollup/*.node` and `node_modules/.vite`; stop it before `npm ci`.
 
 ```powershell
+# typecheck (tsc, no Vite) — rtk is fine:
 rtk npm --prefix tools/clod-poc run typecheck
-rtk npm --prefix tools/clod-poc test
-rtk npm --prefix tools/clod-poc run build
-rtk npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json
+# Vite-based — run WITHOUT rtk:
+npm --prefix tools/clod-poc test
+npm --prefix tools/clod-poc run build
+npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json
 ```
 
 The QA runner consumes a captured web summary JSON and writes `qa-report.json` / `qa-report.md` under `tools/clod-poc/qa-runs` by default. The sample summary is a smoke test only; for visual or performance claims, use a summary captured from the relevant browser scenario.

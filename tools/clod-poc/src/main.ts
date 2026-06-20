@@ -81,7 +81,6 @@ import {
   buildGrassInstancedGeometry,
   createGrassNodeMaterial,
 } from "./gpu/grass_node_material.js";
-import { createStoneNodeMaterial } from "./gpu/stone_node_material.js";
 import { createSkyNodeMaterial, type SkyNodeHandle } from "./gpu/sky_node_material.js";
 import { WebGpuPostProcessPipeline } from "./gpu/webgpu_postprocess.js";
 import {
@@ -1041,6 +1040,7 @@ async function main() {
     audioEnabled: getAudioState().enabled,
     audioVolume: getAudioState().masterVolume,
     grassEnabled: false,
+    grassRingDebug: searchParams.get("grassRingDebug") === "1",
     grassShaderMode: DEFAULT_GRASS_SETTINGS.shaderMode,
     grassAlphaToCoverage: DEFAULT_GRASS_SETTINGS.alphaToCoverage,
     grassNearCrossedQuads: DEFAULT_GRASS_SETTINGS.nearCrossedQuads,
@@ -1094,6 +1094,8 @@ async function main() {
     state.grassEnabled = false;
     state.stonesEnabled = false;
   }
+  if (searchParams.get("stones") === "1") state.stonesEnabled = true;
+  if (searchParams.get("stones") === "0") state.stonesEnabled = false;
   let colorByLodUserOverride = stagedImport !== null;
   let lastTexturesActive: boolean | null = null;
   let colorByLodController: { updateDisplay: () => unknown } | null = null;
@@ -1557,7 +1559,6 @@ async function main() {
   let grass: GrassSystem | null = null;
   let grassStats: GrassStats | null = null;
   let stones: StoneSystem | null = null;
-  let webGpuStoneMaterial: ReturnType<typeof createStoneNodeMaterial> | null = null;
   let selState: SelectionState = { split: new Set() };
   const pageTransitionMode = cfg.selection.transition_mode;
   const crossfadeStep = cfg.selection.crossfade_frames > 0
@@ -1589,7 +1590,6 @@ async function main() {
       groundLight: lighting.groundLight,
     };
     stones?.updateLighting(stoneLighting);
-    webGpuStoneMaterial?.setLighting(stoneLighting);
   };
   const grassSystem = new GrassSystem({
     scene,
@@ -1606,7 +1606,7 @@ async function main() {
     } : null,
     ...(isWebGpu
       ? {
-          createMaterial: (settings: GrassSettings, lighting: GrassLighting) =>
+          createMaterial: (settings: GrassSettings, lighting: GrassLighting, ringInstanceBuffers) =>
             createGrassNodeMaterial({
               lighting: grassLightingToEnvironment(lighting),
               bladeWidth: settings.bladeWidth,
@@ -1616,6 +1616,7 @@ async function main() {
               alphaToCoverage: settings.alphaToCoverage,
               distance: settings.distance,
               fadeCenter: new THREE.Vector2(controls.target.x, controls.target.z),
+              ringInstanceBuffers,
             }),
           buildGeometry: buildGrassInstancedGeometry,
         }
@@ -1640,14 +1641,22 @@ async function main() {
     );
   const stonePageNodes = allNodes.filter((node) => node.level === 0);
   const stonePageSignaturesBefore = pageMeshSignatures(stonePageNodes);
-  if (isWebGpu) webGpuStoneMaterial = createStoneNodeMaterial(currentGrassLighting() as StoneLighting);
+  // Set once the stone GUI/stat refresh helper exists; called when boot scatter completes.
+  let onStoneScatterComplete: (() => void) | null = null;
   const stoneSystem = new StoneSystem({
     scene,
     nodes: stonePageNodes,
     worldCells,
     settings: makeStoneSettings(),
     lighting: currentGrassLighting() as StoneLighting,
-    material: webGpuStoneMaterial?.material,
+    gpuDevice: rendererWebGpuDevice,
+    gpuBackend: isWebGpu ? app.renderer.backend as unknown as {
+      createStorageAttribute(attribute: THREE.BufferAttribute): void;
+      createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
+      get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
+    } : null,
+    // Boot scatter resolves async; refresh the HUD once counts are valid.
+    onStats: () => onStoneScatterComplete?.(),
   });
   assertPageMeshSignaturesUnchanged(stonePageSignaturesBefore, pageMeshSignatures(stonePageNodes));
   stoneSystem.setVisibleClasses(visibleStoneClasses());
@@ -1802,7 +1811,7 @@ async function main() {
         ? ` gpu-grass=${grassStats.gpuRingStatus}` +
           ` gpu-n/m/f/s=${grassStats.gpuRingVisibleNear}/${grassStats.gpuRingVisibleMid}/${grassStats.gpuRingVisibleFar}/${grassStats.gpuRingVisibleSuper}` +
           ` gpu-dispatch=${grassStats.gpuRingDispatchMs === null ? "-" : grassStats.gpuRingDispatchMs.toFixed(2)}ms`
-        : ""}\n` +
+        : grassStats ? ` gpu-grass=${grassStats.gpuRingStatus}` : ""}\n` +
       `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
       `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
       `${lastArchiveSummary ? `${lastArchiveSummary}\n` : ""}` +
@@ -2373,6 +2382,9 @@ async function main() {
     refreshGrassStats();
     updateInfo();
   });
+  grassFolder.add(state, "grassRingDebug").name("ring debug log").onChange((on: boolean) => {
+    grassSystem?.setRingDebug(on);
+  });
   grassFolder.add(state, "grassShaderMode", grassShaderOptions).name("shader").onChange(grassActions.rebuild);
   grassFolder.add(state, "grassAlphaToCoverage").name("alpha to coverage").onChange(updateGrassUniforms);
   grassFolder.add(state, "grassNearCrossedQuads").name("near crossed quads").onChange(grassActions.rebuild);
@@ -2407,6 +2419,10 @@ async function main() {
     stoneTotalController?.updateDisplay();
     stoneClassSummaryController?.updateDisplay();
     stoneVisibleController?.updateDisplay();
+  };
+  onStoneScatterComplete = () => {
+    refreshStoneStats();
+    updateInfo();
   };
   const stoneActions = {
     rebuild: () => {
@@ -3799,24 +3815,40 @@ async function main() {
           // surface) until this page's chunk group is ready, so the swap stays seamless.
           let grp = chunkGroups.get(v.node.id);
           if (!grp) {
-            if (chunkGroupsBuiltThisFrame >= CHUNK_GROUP_BUILD_BUDGET) continue; // page mesh stays visible
+            // No group yet — entering the bubble, or a dig just dropped this page's cached chunks
+            // (applyNodeMesh). The welded LOD0 page mesh (already rebuilt with the edit) MUST stay
+            // visible or the page flashes a hole until its chunk group is rebuilt.
+            if (chunkGroupsBuiltThisFrame >= CHUNK_GROUP_BUILD_BUDGET) {
+              v.mesh.visible = true;
+              continue;
+            }
             grp = ensureChunkGroup(v.node);
             chunkGroupsBuiltThisFrame++;
           }
           // Only swap to the raw chunk group once it's fully built (GPU meshing is async); until
-          // then the welded LOD0 page mesh stays visible so there's no hole.
+          // then keep the welded page mesh visible and the partial group hidden so there's no hole.
           if (grp.ready) {
             v.mesh.visible = false;
             grp.group.visible = true;
+          } else {
+            v.mesh.visible = true;
+            grp.group.visible = false;
           }
         } else {
+          // Page left the bubble: hide its raw chunks and restore the welded LOD0 mesh, or the
+          // page goes black (it was hidden while the chunks owned it).
           const grp = chunkGroups.get(v.node.id);
           if (grp) grp.group.visible = false;
+          v.mesh.visible = v.fade > 0.001;
         }
       }
     } else if (chunkGroups.size > 0) {
-      for (const { group } of chunkGroups.values()) {
+      // Bubble turned off: hide every cached chunk group and restore the welded page meshes the
+      // bubble had hidden, otherwise the previously-bubbled pages stay black.
+      for (const [nodeId, { group }] of chunkGroups) {
         group.visible = false;
+        const view = views.get(nodeId);
+        if (view) view.mesh.visible = view.fade > 0.001;
       }
     }
     const tPropsStart = performance.now();

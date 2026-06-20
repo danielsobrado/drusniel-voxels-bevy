@@ -41,7 +41,6 @@ import {
   GRASS_V2_MID_DISTANCE_FRACTION,
   GRASS_V2_NEAR_DISTANCE_FRACTION,
 } from "./grass_node_material.js";
-import { createStoneNodeMaterial } from "./stone_node_material.js";
 import { WebGpuPostProcessPipeline } from "./webgpu_postprocess.js";
 import {
   createTerrainNodeMaterial,
@@ -327,8 +326,7 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
     }
   };
 
-  // Optional stones (?stones=1): reuse the app's StoneSystem scatter/grouping/LOD update,
-  // with its internal GLSL material replaced by a TSL NodeMaterial.
+  // Optional stones (?stones=1): boot-scattered GPU storage instances plus indirect draws.
   const useStones = searchParams.get("stones") === "1";
   let stones: StoneSystem | null = null;
   if (useStones) {
@@ -338,14 +336,18 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
       skyLight: sky.lighting.skyLight,
       groundLight: sky.lighting.groundLight,
     };
-    const stoneMaterial = createStoneNodeMaterial(lighting);
     stones = new StoneSystem({
       scene,
       nodes: allNodes,
       worldCells,
       settings: { ...DEFAULT_STONE_SETTINGS, enabled: true },
       lighting,
-      material: stoneMaterial.material,
+      gpuDevice: device ?? null,
+      gpuBackend: renderer.backend as unknown as {
+        createStorageAttribute(attribute: THREE.BufferAttribute): void;
+        createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
+        get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
+      },
     });
   }
 

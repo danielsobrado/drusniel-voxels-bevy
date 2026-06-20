@@ -358,6 +358,7 @@ export interface GrassMaterialHandle {
 export type GrassMaterialFactory = (
   settings: GrassSettings,
   lighting: GrassLighting,
+  ringInstanceBuffers?: GrassRingInstanceBuffers,
 ) => GrassMaterialHandle;
 
 export interface GrassCandidateSample {
@@ -435,6 +436,16 @@ interface GrassGpuTierDrawResources {
 }
 
 type GrassGpuSharedDrawAttributes = Omit<GrassGpuTierDrawResources, "mesh">;
+
+/**
+ * GPU-ring per-instance storage buffers handed to the node material. They hold 4*maxInstancesPerTier
+ * vec4 and must be read as storage (storage().element), never via attribute() — that exceeds the
+ * 64KB uniform-binding limit on the indirect-draw path. See grass_node_material.ts.
+ */
+export type GrassRingInstanceBuffers = GrassGpuSharedDrawAttributes & {
+  /** vec4 element count of each buffer = sharedInstanceCount = 4 * maxInstancesPerTier */
+  capacity: number;
+};
 
 type IndirectInstancedBufferGeometry = THREE.InstancedBufferGeometry & {
   setIndirect?(attribute: THREE.BufferAttribute, offset: number): void;
@@ -1117,7 +1128,9 @@ export class GrassSystem {
   private readonly injectedMaterialFactory: GrassMaterialFactory | null;
   private readonly injectedGeometryBuilder: GrassGeometryBuilder | null;
   private readonly useGrassPrepass: boolean;
-  private readonly useGrassRingDebug: boolean;
+  private useGrassRingDebug: boolean;
+  private lastRingDebugKey = "";
+  private lastRingDebugTime = 0;
   private currentLighting: GrassLighting;
   private settings: GrassSettings;
   private patches: GrassPatch[] = [];
@@ -1392,12 +1405,47 @@ export class GrassSystem {
     return this.supportsRing && this.settings.shaderMode === "webgpu-ring-v1";
   }
 
+  /** ?grassRingDebug=1: surface why the ring is/ isn't producing instances (one log per state change). */
+  /** Runtime toggle for the ?grassRingDebug console logging (GUI checkbox). */
+  setRingDebug(enabled: boolean): void {
+    this.useGrassRingDebug = enabled;
+    this.lastRingDebugKey = "";
+  }
+
+  private logRingDebug(stage: string): void {
+    if (!this.useGrassRingDebug) return;
+    const s = this.gpuRingStats;
+    // Dedupe on the state transition (not the live blade count); additionally rate-limit to once
+    // every 2s so a state that oscillates every frame can't flood the console (still readable).
+    // Key on stage + reason only — NOT status, which flips ready/running every readback and would
+    // re-log forever. The 2s window is a backstop for anything else that oscillates.
+    const key = `${stage}|${s.reason ?? ""}`;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (key === this.lastRingDebugKey) return;
+    if (now - this.lastRingDebugTime < 2000) return;
+    this.lastRingDebugKey = key;
+    this.lastRingDebugTime = now;
+    // eslint-disable-next-line no-console
+    console.info("[grass-ring-debug] state", {
+      stage,
+      status: s.status,
+      reason: s.reason,
+      hasDevice: !!this.gpuDevice,
+      hasBackend: !!this.gpuBackend,
+      isRingMode: this.isRingMode(),
+      unsupported: this.gpuRingUnsupportedReason,
+      counts: this.ringTierCounts,
+      blades: this.ringBladeCount,
+    });
+  }
+
   private updateGpuRingCounters(center: THREE.Vector3, camera?: THREE.Camera): void {
     if (!this.gpuDevice || !this.gpuBackend || !this.isRingMode()) {
       this.gpuRingStats = {
         ...this.gpuRingStats,
         status: "disabled",
       };
+      this.logRingDebug("disabled");
       return;
     }
     if (this.gpuRingUnsupportedReason) {
@@ -1406,14 +1454,19 @@ export class GrassSystem {
         status: "disabled",
         reason: this.gpuRingUnsupportedReason,
       };
+      this.logRingDebug("unsupported");
       return;
     }
 
     this.ensureGpuRingCompute();
-    if (!this.gpuRingCompute) return;
+    if (!this.gpuRingCompute) {
+      this.logRingDebug("no-compute");
+      return;
+    }
     const frustumPlanes = this.frustumPlanes(camera);
     if (!frustumPlanes) {
       this.gpuRingStats = this.gpuRingCompute.stats(this.settings.enabled);
+      this.logRingDebug("no-frustum");
       return;
     }
     this.gpuRingCompute.dispatch({
@@ -1443,6 +1496,7 @@ export class GrassSystem {
       super: this.gpuRingStats.counts.super,
     };
     this.ringBladeCount = this.ringTierCounts.near + this.ringTierCounts.mid + this.ringTierCounts.far + this.ringTierCounts.super;
+    this.logRingDebug("dispatched");
   }
 
   private ensureGpuRingCompute(): void {
@@ -1536,6 +1590,10 @@ export class GrassSystem {
       packed1: this.createStorageInstancedAttribute("shared-packed1", sharedInstanceCount),
       terrainNormal: this.createStorageInstancedAttribute("shared-terrain-normal", sharedInstanceCount),
     };
+    // Rebuild the node material to read these storage buffers (not attribute()) before the tier
+    // meshes pick it up via materialFor — the 4*maxBlades vec4 buffers exceed the 64KB uniform limit
+    // if bound as instanced attributes.
+    this.rebuildInjectedRingMaterial({ ...sharedAttributes, capacity: sharedInstanceCount });
 
     const tiers = {
       near: this.createGpuRingTierDraw("near", count, this.ringNearGeometry, indirect, 0, sharedAttributes),
@@ -1579,11 +1637,10 @@ export class GrassSystem {
     geometry.setAttribute("uv", bladeGeometry.getAttribute("uv"));
     geometry.setAttribute("normal", bladeGeometry.getAttribute("normal"));
     geometry.setIndex(bladeGeometry.getIndex());
+    // Per-instance data is read by the material as STORAGE buffers (storage().element(instanceIndex)),
+    // not vertex attributes — binding these 4*maxBlades-vec4 buffers as instanced attributes overflows
+    // the 64KB uniform limit. The buffers still live in sharedAttributes (compute output / material input).
     const { offset, packed0, packed1, terrainNormal } = sharedAttributes;
-    geometry.setAttribute("aOffset", offset);
-    geometry.setAttribute("aPacked0", packed0);
-    geometry.setAttribute("aPacked1", packed1);
-    geometry.setAttribute("aTerrainNormal", terrainNormal);
     geometry.instanceCount = count;
     this.setGpuRingIndirect(geometry, indirect, indirectOffset);
     geometry.boundingBox = new THREE.Box3(
@@ -1961,6 +2018,19 @@ export class GrassSystem {
     for (const patch of this.patches) {
       for (const mesh of patch.meshes) mesh.material = this.injectedMaterial.material;
     }
+    previous?.dispose?.();
+  }
+
+  /**
+   * Rebuild the injected node material to read per-instance data from the GPU-ring storage buffers
+   * (storage().element) instead of vertex attributes. Called from createGpuRingDrawResources once
+   * the buffers exist, before the tier meshes are built, so materialFor returns the storage-reading
+   * material. Ring meshes are rebuilt in the same pass, so no live meshes reference the old material.
+   */
+  private rebuildInjectedRingMaterial(ringInstanceBuffers: GrassRingInstanceBuffers): void {
+    if (!this.injectedMaterialFactory) return;
+    const previous = this.injectedMaterial;
+    this.injectedMaterial = this.injectedMaterialFactory(this.settings, this.currentLighting, ringInstanceBuffers);
     previous?.dispose?.();
   }
 

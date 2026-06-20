@@ -8,17 +8,22 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   attribute,
   clamp,
+  cos,
   dot,
   floor,
   fract,
   frontFacing,
+  instanceIndex,
   max,
   mix,
+  normalGeometry,
   normalWorld,
   normalize,
+  positionGeometry,
   positionWorld,
   sin,
   smoothstep,
+  storage,
   uniform,
   vec2,
   vec3,
@@ -35,19 +40,51 @@ export interface StoneNodeMaterialHandle {
   setLighting(lighting: StoneLighting): void;
 }
 
+export interface StoneStorageInstanceBuffers {
+  instanceA: THREE.BufferAttribute;
+  instanceB: THREE.BufferAttribute;
+  capacity: number;
+}
+
 function hash2(p: TslNode): TslNode {
   return fract(sin(dot(p, vec2(41.3, 289.1))).mul(43758.5453));
 }
 
-export function createStoneNodeMaterial(lighting: StoneLighting): StoneNodeMaterialHandle {
+export function createStoneNodeMaterial(
+  lighting: StoneLighting,
+  instanceBuffers?: StoneStorageInstanceBuffers,
+): StoneNodeMaterialHandle {
   const uLight = uniform(lighting.light.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
 
-  const worldPos: TslNode = positionWorld;
+  let worldPos: TslNode = positionWorld;
+  let normalNode: TslNode = normalize(normalWorld);
+  if (instanceBuffers) {
+    const instAStore: TslNode = storage(instanceBuffers.instanceA, "vec4", instanceBuffers.capacity).toReadOnly();
+    const instBStore: TslNode = storage(instanceBuffers.instanceB, "vec4", instanceBuffers.capacity).toReadOnly();
+    const instA: TslNode = instAStore.element(instanceIndex);
+    const instB: TslNode = instBStore.element(instanceIndex);
+    const c: TslNode = cos(instB.x);
+    const s: TslNode = sin(instB.x);
+    const local: TslNode = positionGeometry.mul(instA.w);
+    const rx: TslNode = c.mul(local.x).add(s.mul(local.z));
+    const rz: TslNode = s.mul(local.x).negate().add(c.mul(local.z));
+    worldPos = vec3(
+      rx.add(instB.y.mul(local.y)).add(instA.x),
+      local.y.add(instA.y),
+      rz.add(instB.z.mul(local.y)).add(instA.z),
+    );
+    const nrm: TslNode = normalGeometry;
+    normalNode = normalize(vec3(
+      c.mul(nrm.x).add(s.mul(nrm.z)),
+      nrm.y,
+      s.mul(nrm.x).negate().add(c.mul(nrm.z)),
+    ));
+  }
   const vdata: TslNode = attribute("vdata", "vec4");
-  const n0: TslNode = normalize(normalWorld);
+  const n0: TslNode = normalNode;
   const n: TslNode = frontFacing.select(n0, n0.negate());
 
   const hue = hash2(floor(worldPos.xz.mul(0.5)));
@@ -72,6 +109,7 @@ export function createStoneNodeMaterial(lighting: StoneLighting): StoneNodeMater
   const direct = uSun.mul(sun);
 
   const material = new MeshBasicNodeMaterial();
+  if (instanceBuffers) material.positionNode = worldPos;
   material.colorNode = rock.mul(hemi.add(direct)).mul(ao);
   material.side = THREE.FrontSide;
 

@@ -146,6 +146,21 @@ ${body}
   }`;
 }
 
+function buildPaintedNormal(): string {
+  const body = PAINT_CHANNELS.map(
+    (c) => `    if (vPaintWeights.${c} > 0.0 && vPaintSlots.${c} > -0.5) {
+      acc += sampleNormalSlot(int(vPaintSlots.${c} + 0.5), worldPos, baseN) * vPaintWeights.${c};
+      wsum += vPaintWeights.${c};
+    }`,
+  ).join("\n");
+  return `  vec3 blendPaintedNormal(vec3 worldPos, vec3 baseN) {
+    vec3 acc = vec3(0.0);
+    float wsum = 0.0;
+${body}
+    return wsum > 0.0 ? normalize(acc / wsum) : baseN;
+  }`;
+}
+
 function buildPaintedFallback(): string {
   const body = PAINT_CHANNELS.map(
     (c) => `    if (vPaintWeights.${c} > 0.0 && vPaintSlots.${c} > -0.5) {
@@ -326,6 +341,7 @@ ${buildSampleNormalSlot()}
 ${buildSampleTerrainNormal()}
 ${buildSampleTerrainTexture()}
 ${buildPaintedAlbedo()}
+${buildPaintedNormal()}
 ${buildPaintedFallback()}
   vec3 adjustColor(vec3 color) {
     color *= uBrightness;
@@ -357,21 +373,24 @@ ${buildPaintedFallback()}
     }
     vec3 geomN = normalize(vWorldNormal);
     vec3 n = geomN;
+    float paint = clamp(dot(vPaintWeights, vec4(1.0)), 0.0, 1.0);
     if (uUseNormalMap && uTerrainTextureCount > 0) {
       vec3 detailN = sampleTerrainNormal(vWorldPos, n);
+      if (paint > 0.0) {
+        detailN = mix(detailN, blendPaintedNormal(vWorldPos, geomN), paint);
+      }
       n = normalize(mix(geomN, detailN, proceduralMicroWeight(vWorldPos)));
     }
     float sun = max(dot(n, normalize(uLight)), 0.0);
     float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
-    float paint = clamp(dot(vPaintWeights, vec4(1.0)), 0.0, 1.0);
     vec3 baseColor = uColor;
     if (uUseTexture) {
       vec3 tex = sampleTerrainTexture(vWorldPos);
-      if (paint > 0.0) {
-        tex = mix(tex, blendPaintedAlbedo(vWorldPos), paint);
-      }
       if (uUseProceduralTerrain) {
         tex = proceduralMacroTint(tex, vWorldPos, n);
+      }
+      if (paint > 0.0) {
+        tex = mix(tex, blendPaintedAlbedo(vWorldPos), paint);
       }
       baseColor = tex * mix(vec3(1.0), uColor, 0.35);
     } else if (paint > 0.0) {

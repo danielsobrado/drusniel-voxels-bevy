@@ -175,8 +175,8 @@ describe("grass placement", () => {
   });
 
   it("uses a fixed GPU slot grid instead of a CPU candidate buffer", () => {
-    expect(GRASS_GPU_RING_GRID).toBe(384);
-    expect(GRASS_GPU_RING_CELL).toBe(1.25);
+    expect(GRASS_GPU_RING_GRID).toBe(700);
+    expect(GRASS_GPU_RING_CELL).toBe(0.7);
     expect(GRASS_GPU_RING_SLOT_COUNT).toBe(GRASS_GPU_RING_GRID * GRASS_GPU_RING_GRID);
     expect(GRASS_GPU_RING_GRID * GRASS_GPU_RING_CELL * 0.5).toBeGreaterThan(220);
   });

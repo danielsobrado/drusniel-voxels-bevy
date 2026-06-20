@@ -54,7 +54,7 @@ fn material_weights(height: f32) -> vec4<f32> {
   return vec4<f32>(grass, rock, sand, snow) / sum;
 }
 
-fn smooth01(edge0: f32, edge1: f32, value: f32) -> f32 {
+fn stone_smooth_range(edge0: f32, edge1: f32, value: f32) -> f32 {
   if (abs(edge1 - edge0) <= 0.000001) {
     return select(0.0, 1.0, value >= edge1);
   }
@@ -87,11 +87,11 @@ fn pick_class(site_scree: f32, streambed: f32, cliff_above: f32, roll: f32) -> u
   let w_large = 0.1 * large_bias;
   let w_medium = 0.32;
   let w_small = 0.58;
-  let target = roll * (w_large + w_medium + w_small);
-  if (target < w_large) {
+  let class_pick = roll * (w_large + w_medium + w_small);
+  if (class_pick < w_large) {
     return CLASS_LARGE;
   }
-  if (target < w_large + w_medium) {
+  if (class_pick < w_large + w_medium) {
     return CLASS_MEDIUM;
   }
   return CLASS_SMALL;
@@ -128,7 +128,7 @@ fn process_cell(slot: u32) {
     return;
   }
   let scree = clamp((params.slope_water.x - normal.y) / denom, 0.0, 1.0) * repose;
-  let streambed = smooth01(params.stream_snow_lean.x, params.stream_snow_lean.y, sand);
+  let streambed = stone_smooth_range(params.stream_snow_lean.x, params.stream_snow_lean.y, sand);
 
   let n_xz_len = max(0.0001, length(normal.xz));
   let uphill = -normal.xz / n_xz_len;
@@ -136,7 +136,7 @@ fn process_cell(slot: u32) {
   let h_far = surfaceHeightField(wpos.x + uphill.x * params.cliff.y, wpos.y + uphill.y * params.cliff.y);
   let rise_near = (h_near - h) / max(0.001, params.cliff.x);
   let rise_far = (h_far - h_near) / max(0.001, params.cliff.y - params.cliff.x);
-  let cliff_above = smooth01(params.cliff.z, params.cliff.w, max(rise_near, rise_far));
+  let cliff_above = stone_smooth_range(params.cliff.z, params.cliff.w, max(rise_near, rise_far));
 
   let clump_cell = max(1.0, params.world.y * params.weights_b.z);
   let clump = params.weights_b.y + pcg2d(floor(wpos / clump_cell), seed + 419u).x;

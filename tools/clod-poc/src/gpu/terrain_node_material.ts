@@ -163,7 +163,7 @@ function reorientNormal(tn: TslNode, wn: TslNode, axis: 0 | 1 | 2, normalIntensi
 
 function triplanarNormal(
   normalArray: THREE.DataArrayTexture,
-  layer: number,
+  layer: number | TslNode,
   worldPos: TslNode,
   scale: number,
   baseNormal: TslNode,
@@ -272,18 +272,56 @@ function paintedAlbedo(
   let acc: TslNode = vec3(0);
   let wsum: TslNode = float(0);
   for (const channel of channels) {
+    const layer = max(channel.slot, 0.0);
     // Sample the painted slot ONCE with a dynamic array layer, selecting that slot's scale
     // with cheap scalar mixes — instead of triplanar-sampling every slot per channel.
     let scale: TslNode = float(slots[0].scale);
     for (let i = 1; i < slots.length; i++) {
-      scale = mix(scale, float(slots[i].scale), step(abs(channel.slot.sub(i)), 0.5));
+      scale = mix(scale, float(slots[i].scale), step(abs(layer.sub(i)), 0.5));
     }
     // Drop unpainted channels (slot < -0.5), matching the WebGL guard.
     const w = channel.weight.mul(step(0.0, channel.slot.add(0.5)));
-    acc = acc.add(triplanarAlbedo(albedo, channel.slot, worldPos, scale, weights, useTriplanar).mul(w));
+    acc = acc.add(triplanarAlbedo(albedo, layer, worldPos, scale, weights, useTriplanar).mul(w));
     wsum = wsum.add(w);
   }
   return acc.div(max(wsum, 0.001));
+}
+
+function paintedNormal(
+  normalArray: THREE.DataArrayTexture,
+  slots: readonly TerrainNodeTextureSlot[],
+  worldPos: TslNode,
+  baseNormal: TslNode,
+  paintSlots: TslNode,
+  paintWeights: TslNode,
+  normalIntensity: TslNode,
+  normalMapMask?: readonly number[] | Float32Array,
+): TslNode {
+  const channels = [
+    { slot: paintSlots.x, weight: paintWeights.x },
+    { slot: paintSlots.y, weight: paintWeights.y },
+    { slot: paintSlots.z, weight: paintWeights.z },
+    { slot: paintSlots.w, weight: paintWeights.w },
+  ];
+  let acc: TslNode = vec3(0);
+  let wsum: TslNode = float(0);
+  for (const channel of channels) {
+    const layer = max(channel.slot, 0.0);
+    let scale: TslNode = float(slots[0].scale);
+    let hasNormal: TslNode = float((normalMapMask?.[0] ?? 1) > 0.5 ? 1 : 0);
+    for (let i = 1; i < slots.length; i++) {
+      const selected = step(abs(layer.sub(i)), 0.5);
+      scale = mix(scale, float(slots[i].scale), selected);
+      hasNormal = mix(hasNormal, float((normalMapMask?.[i] ?? 1) > 0.5 ? 1 : 0), selected);
+    }
+    const w = channel.weight.mul(step(0.0, channel.slot.add(0.5)));
+    const sample = mix(baseNormal, triplanarNormal(normalArray, layer, worldPos, scale, baseNormal, normalIntensity), hasNormal);
+    acc = acc.add(sample.mul(w));
+    wsum = wsum.add(w);
+  }
+  const detail: TslNode = acc.div(max(wsum, 0.001));
+  const blended: TslNode = mix(baseNormal, detail, step(0.0001, wsum));
+  return normalize(blended);
 }
 
 function interleavedGradientNoise(p: TslNode): TslNode {
@@ -327,6 +365,9 @@ export function createTerrainNodeMaterial(
 
   const geomN = normalize(normalGeometry);
   const worldPos = positionGeometry;
+  const paintSlots: TslNode = attribute("paintSlots", "vec4");
+  const paintWeights: TslNode = attribute("paintWeights", "vec4");
+  const paint = clamp(dot(paintWeights, vec4(1)), 0.0, 1.0);
 
   // baseColor: textured triplanar height-band blend, else flat uColor.
   let baseColor: TslNode = uColor;
@@ -352,17 +393,14 @@ export function createTerrainNodeMaterial(
     // Out-of-band (terrain raised above / dug below all bands): fall back to the nearest band
     // instead of black. Matches terrain_shader.ts sampleTerrainTexture.
     let tex: TslNode = mix(nearest, acc.div(max(wsum, 0.001)), step(0.0001, wsum));
-    const paintSlots: TslNode = attribute("paintSlots", "vec4");
-    const paintWeights: TslNode = attribute("paintWeights", "vec4");
-    const paint = clamp(dot(paintWeights, vec4(1)), 0.0, 1.0);
+    if (textures.procedural) {
+      tex = proceduralMacroTint(tex, worldPos, geomN, textures.procedural);
+    }
     tex = mix(
       tex,
       paintedAlbedo(textures.albedoArray, textures.slots, worldPos, weights, paintSlots, paintWeights, useTriplanar),
       paint,
     );
-    if (textures.procedural) {
-      tex = proceduralMacroTint(tex, worldPos, geomN, textures.procedural);
-    }
     // baseColor = tex * mix(vec3(1), uColor, 0.35)  (see main.ts texturing branch)
     baseColor = tex.mul(mix(vec3(1), uColor, 0.35));
   }
@@ -371,7 +409,7 @@ export function createTerrainNodeMaterial(
 
   let n: TslNode = geomN;
   if (textures?.normalArray && textures.slots.length > 0) {
-    const detailN: TslNode = sampleTerrainNormal(
+    let detailN: TslNode = sampleTerrainNormal(
         textures.normalArray,
         textures.slots,
         worldPos,
@@ -381,6 +419,11 @@ export function createTerrainNodeMaterial(
         uNormalIntensity,
         textures.normalMapMask,
       );
+    detailN = mix(
+      detailN,
+      paintedNormal(textures.normalArray, textures.slots, worldPos, geomN, paintSlots, paintWeights, uNormalIntensity, textures.normalMapMask),
+      paint,
+    );
     n = textures.procedural
       ? normalize(mix(geomN, detailN, proceduralMicroWeight(worldPos, textures.procedural)))
       : detailN;

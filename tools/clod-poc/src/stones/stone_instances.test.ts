@@ -1,30 +1,24 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
+import {
+  STONE_GPU_SCATTER_STORAGE_BINDINGS,
+  stoneGpuClassRegion,
+  stoneGpuOutputIndex,
+  stoneGpuScatterUnsupportedReason,
+} from "../gpu/stone_scatter_compute.js";
+import fieldShaderSource from "../gpu/shaders/terrain_field.wgsl?raw";
+import shaderSource from "../gpu/shaders/stone_scatter.compute.wgsl?raw";
 import { buildWorld } from "../quadtree.js";
 import type { ClodPageNode } from "../types.js";
-import { DEFAULT_STONE_SETTINGS, type StoneClass, type StoneSettings } from "./stone_config.js";
+import { DEFAULT_STONE_SETTINGS, type StoneSettings } from "./stone_config.js";
 import { StoneSystem } from "./stone_instances.js";
-import type { StoneInstance } from "./stone_scatter.js";
+import {
+  sampleStoneSite,
+  selectStoneClass,
+  stoneClassWeights,
+} from "./stone_scatter.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "./stone_validation.js";
-
-function node(id: string, minX: number, minZ: number, maxX: number, maxZ: number): ClodPageNode {
-  return {
-    id,
-    level: 0,
-    children: [],
-    footprint: { minX, minZ, maxX, maxZ },
-    mesh: {
-      positions: new Float32Array(),
-      normals: new Float32Array(),
-      materials: new Float32Array(),
-      indices: new Uint32Array(),
-    },
-    bounds: { center: [(minX + maxX) * 0.5, 0, (minZ + maxZ) * 0.5], radius: Math.hypot(maxX - minX, maxZ - minZ) },
-    errorWorld: 0,
-    lowBenefit: false,
-  };
-}
 
 function lighting() {
   return {
@@ -36,29 +30,13 @@ function lighting() {
 }
 
 function mixedClassSettings(overrides: Partial<StoneSettings> = {}): StoneSettings {
-  const shared = { presets: ["cobble" as const], variants: 1 };
   return {
     ...DEFAULT_STONE_SETTINGS,
     enabled: true,
     density: 2,
     maxInstances: 2000,
-    classes: {
-      large: { ...DEFAULT_STONE_SETTINGS.classes.large, ...shared },
-      medium: { ...DEFAULT_STONE_SETTINGS.classes.medium, ...shared },
-      small: { ...DEFAULT_STONE_SETTINGS.classes.small, ...shared },
-    },
     ...overrides,
   };
-}
-
-function stoneSystem(settings: StoneSettings): StoneSystem {
-  return new StoneSystem({
-    scene: new THREE.Scene(),
-    nodes: [node("L0:0,0", 0, 0, 256, 256), node("L0:1,0", 256, 0, 512, 256)],
-    worldCells: 512,
-    settings,
-    lighting: lighting(),
-  });
 }
 
 const pageCfg: ClodPagesConfig = {
@@ -82,58 +60,69 @@ const pageCfg: ClodPagesConfig = {
   meshopt_package_version: "0.22.0",
 };
 
-function groups(system: StoneSystem): Array<{ classId: StoneClass; instances: StoneInstance[] }> {
-  return (system as unknown as { groups: Array<{ classId: StoneClass; instances: StoneInstance[] }> }).groups;
-}
+describe("GPU stone instance layout", () => {
+  function deviceWithStorageBufferLimit(limit: number): GPUDevice {
+    return {
+      limits: {
+        maxStorageBuffersPerShaderStage: limit,
+      },
+    } as unknown as GPUDevice;
+  }
 
-function signature(system: StoneSystem): string {
-  return groups(system)
-    .flatMap((group) => group.instances.slice(0, 8))
-    .map((stone) => `${stone.classId}:${stone.x.toFixed(2)},${stone.z.toFixed(2)}`)
-    .join("|");
-}
-
-describe("StoneSystem", () => {
-  it("keeps instanced batches class-homogeneous even when presets and variants overlap", () => {
-    const system = stoneSystem(mixedClassSettings());
-    try {
-      const builtGroups = groups(system);
-      expect(builtGroups.length).toBeGreaterThan(1);
-      for (const group of builtGroups) {
-        expect(group.instances.every((stone) => stone.classId === group.classId)).toBe(true);
-      }
-    } finally {
-      system.dispose();
-    }
+  it("partitions direct storage regions by size class", () => {
+    expect(stoneGpuClassRegion(0, 100)).toEqual({ start: 0, end: 100, firstInstance: 0 });
+    expect(stoneGpuClassRegion(1, 100)).toEqual({ start: 100, end: 200, firstInstance: 100 });
+    expect(stoneGpuClassRegion(2, 100)).toEqual({ start: 200, end: 300, firstInstance: 200 });
+    expect(stoneGpuOutputIndex(2, 7, 100)).toBe(207);
   });
 
-  it("rebuilds from current settings after disabling and changing the seed", () => {
-    const system = stoneSystem(mixedClassSettings({ seedSalt: 11 }));
-    try {
-      const first = signature(system);
-      system.setEnabled(false);
-      expect(groups(system)).toHaveLength(0);
-      system.updateSettings({ seedSalt: 12 });
-      system.setEnabled(true);
-      expect(signature(system)).not.toBe(first);
-    } finally {
-      system.dispose();
-    }
+  it("keeps the CPU class-pick oracle biased toward large streambed/cliff stones", () => {
+    const settings = mixedClassSettings();
+    const flat = sampleStoneSite(64, 64, settings);
+    const rocky = { ...flat, scree: 1, cliffAbove: 1, streambed: 1 };
+    expect(stoneClassWeights(rocky, settings).large).toBeGreaterThan(stoneClassWeights(flat, settings).large);
+    expect(selectStoneClass(rocky, settings, 0)).toBe("large");
+    expect(selectStoneClass(rocky, settings, 0.99)).toBe("small");
   });
 
-  it("does not mutate CLOD page mesh signatures when enabled", () => {
+  it("keeps the WGSL storage-buffer declarations within the advertised safe limit", () => {
+    const storageBindings = `${fieldShaderSource}\n${shaderSource}`.match(/var<storage/g) ?? [];
+
+    expect(storageBindings).toHaveLength(STONE_GPU_SCATTER_STORAGE_BINDINGS);
+    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(4))).toContain("5 storage buffers");
+    expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(5))).toBeNull();
+  });
+
+  it("does not use WGSL reserved keywords as local identifiers", () => {
+    expect(shaderSource).not.toMatch(/\blet\s+target\b/);
+    expect(shaderSource).toContain("let class_pick =");
+  });
+
+  it("does not redeclare terrain-field WGSL helper functions", () => {
+    const functionNames = (source: string): string[] =>
+      Array.from(source.matchAll(/^fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm), (match) => match[1]!);
+    const terrainFunctions = new Set(functionNames(fieldShaderSource));
+    const collisions = functionNames(shaderSource).filter((name) => terrainFunctions.has(name));
+
+    expect(collisions).toEqual([]);
+  });
+});
+
+describe("StoneSystem GPU shell", () => {
+  it("does not mutate CLOD page mesh signatures when enabled without a WebGPU device", () => {
     const built = buildWorld(1, 1, pageCfg);
     const nodes = built.nodesByLevel.get(0)!;
     const before = pageMeshSignatures(nodes);
     const system = new StoneSystem({
       scene: new THREE.Scene(),
-      nodes,
+      nodes: nodes as ClodPageNode[],
       worldCells: pageCfg.page.chunks_per_page * pageCfg.page.chunk_size,
       settings: mixedClassSettings({ maxInstances: 100 }),
       lighting: lighting(),
     });
     try {
       assertPageMeshSignaturesUnchanged(before, pageMeshSignatures(nodes));
+      expect(system.getStats().total).toBe(0);
     } finally {
       system.dispose();
     }
