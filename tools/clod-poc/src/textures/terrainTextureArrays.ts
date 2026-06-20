@@ -114,7 +114,7 @@ function materialAlbedo(id: ProceduralMaterialId, recipe: ProceduralMaterialReci
 }
 
 function makeArrayTexture(data: Uint8Array, size: number, layers: number, colorSpace: THREE.ColorSpace): THREE.DataArrayTexture {
-  const texture = new THREE.DataArrayTexture(data, size, size, layers);
+  const texture = new THREE.DataArrayTexture(data as Uint8Array<ArrayBuffer>, size, size, layers);
   texture.format = THREE.RGBAFormat;
   texture.type = THREE.UnsignedByteType;
   texture.wrapS = THREE.RepeatWrapping;

@@ -146,7 +146,7 @@ function barkHeight(params: BarkParams, u: number, v: number, seed: number): num
 }
 
 function makeBarkTexture(data: Float32Array, resolution: number): THREE.DataTexture {
-  const texture = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat, THREE.FloatType);
+  const texture = new THREE.DataTexture(data as Float32Array<ArrayBuffer>, resolution, resolution, THREE.RGBAFormat, THREE.FloatType);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.generateMipmaps = true;

@@ -26,7 +26,7 @@ function enc01(value: number): number {
 }
 
 function makeDataTexture(data: Uint8Array, resolution: number): THREE.DataTexture {
-  const tex = new THREE.DataTexture(data, resolution, resolution, THREE.RGBAFormat, THREE.UnsignedByteType);
+  const tex = new THREE.DataTexture(data as Uint8Array<ArrayBuffer>, resolution, resolution, THREE.RGBAFormat, THREE.UnsignedByteType);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.magFilter = THREE.LinearFilter;

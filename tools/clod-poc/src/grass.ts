@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {
-  IndirectStorageBufferAttribute,
+  StorageBufferAttribute,
   StorageInstancedBufferAttribute,
 } from "three/webgpu";
 import { materialWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "./terrain.js";
@@ -8,6 +8,7 @@ import type { ClodPageNode, PageFootprint } from "./types.js";
 import {
   GRASS_GPU_CANDIDATE_FLOATS,
   GrassGpuRingCompute,
+  grassGpuRingComputeUnsupportedReason,
   type GrassGpuCandidateBuffer,
   type GrassGpuRingOutputBuffers,
   type GrassGpuRingStats,
@@ -430,9 +431,22 @@ interface GrassGpuTierDrawResources {
   terrainNormal: StorageInstancedBufferAttribute;
 }
 
+type GrassGpuSharedDrawAttributes = Omit<GrassGpuTierDrawResources, "mesh">;
+
+type IndirectInstancedBufferGeometry = THREE.InstancedBufferGeometry & {
+  setIndirect?(attribute: THREE.BufferAttribute, offset: number): void;
+};
+
+function grassGpuRingDrawUnsupportedReason(): string | null {
+  const prototype = THREE.InstancedBufferGeometry.prototype as IndirectInstancedBufferGeometry;
+  return typeof prototype.setIndirect === "function"
+    ? null
+    : "webgpu-ring-v1 requires InstancedBufferGeometry.setIndirect support";
+}
+
 interface GrassGpuRingDrawResources {
   tiers: Record<GrassTier, GrassGpuTierDrawResources>;
-  indirect: IndirectStorageBufferAttribute;
+  indirect: StorageBufferAttribute;
   outputBuffers: GrassGpuRingOutputBuffers;
 }
 
@@ -1017,6 +1031,7 @@ export class GrassSystem {
   private readonly supportsRing: boolean;
   private readonly gpuDevice: GPUDevice | null;
   private readonly gpuBackend: GrassWebGpuBackendAccess | null;
+  private readonly gpuRingUnsupportedReason: string | null;
   private gpuRingCompute: GrassGpuRingCompute | null = null;
   private gpuRingInit: Promise<void> | null = null;
   private gpuRingKey = "";
@@ -1086,6 +1101,10 @@ export class GrassSystem {
     this.supportsRing = options.supportsRing === true;
     this.gpuDevice = options.gpuDevice ?? null;
     this.gpuBackend = options.gpuBackend ?? null;
+    const computeUnsupportedReason = this.gpuDevice
+      ? grassGpuRingComputeUnsupportedReason(this.gpuDevice)
+      : null;
+    this.gpuRingUnsupportedReason = computeUnsupportedReason ?? grassGpuRingDrawUnsupportedReason();
     this.currentLighting = cloneLighting(options.lighting);
     this.injectedMaterialFactory = options.createMaterial ?? null;
     this.injectedMaterial = options.material ?? null;
@@ -1299,6 +1318,14 @@ export class GrassSystem {
       };
       return;
     }
+    if (this.gpuRingUnsupportedReason) {
+      this.gpuRingStats = {
+        ...this.gpuRingStats,
+        status: "disabled",
+        reason: this.gpuRingUnsupportedReason,
+      };
+      return;
+    }
 
     this.ensureGpuRingCompute();
     if (!this.gpuRingCompute) return;
@@ -1378,25 +1405,32 @@ export class GrassSystem {
   private createGpuRingDrawResources(candidateCount: number): GrassGpuRingDrawResources {
     if (!this.gpuBackend) throw new Error("Cannot create WebGPU grass draw resources without a backend");
     const count = Math.max(1, candidateCount);
-    const indirect = new IndirectStorageBufferAttribute(new Uint32Array(4 * 5), 5);
+    const sharedInstanceCount = count * 4;
+    const indirect = new StorageBufferAttribute(new Uint32Array(4 * 5), 5);
     indirect.name = "grass-ring-indirect";
     this.gpuBackend.createIndirectStorageAttribute(indirect);
+    const sharedAttributes: GrassGpuSharedDrawAttributes = {
+      offset: this.createStorageInstancedAttribute("shared-offset", sharedInstanceCount),
+      packed0: this.createStorageInstancedAttribute("shared-packed0", sharedInstanceCount),
+      packed1: this.createStorageInstancedAttribute("shared-packed1", sharedInstanceCount),
+      terrainNormal: this.createStorageInstancedAttribute("shared-terrain-normal", sharedInstanceCount),
+    };
 
     const tiers = {
-      near: this.createGpuRingTierDraw("near", count, this.ringNearGeometry, indirect, 0),
-      mid: this.createGpuRingTierDraw("mid", count, this.ringMidGeometry, indirect, 5 * Uint32Array.BYTES_PER_ELEMENT),
-      far: this.createGpuRingTierDraw("far", count, this.ringFarGeometry, indirect, 10 * Uint32Array.BYTES_PER_ELEMENT),
-      super: this.createGpuRingTierDraw("super", count, this.ringSuperGeometry, indirect, 15 * Uint32Array.BYTES_PER_ELEMENT),
+      near: this.createGpuRingTierDraw("near", count, this.ringNearGeometry, indirect, 0, sharedAttributes),
+      mid: this.createGpuRingTierDraw("mid", count, this.ringMidGeometry, indirect, 5 * Uint32Array.BYTES_PER_ELEMENT, sharedAttributes),
+      far: this.createGpuRingTierDraw("far", count, this.ringFarGeometry, indirect, 10 * Uint32Array.BYTES_PER_ELEMENT, sharedAttributes),
+      super: this.createGpuRingTierDraw("super", count, this.ringSuperGeometry, indirect, 15 * Uint32Array.BYTES_PER_ELEMENT, sharedAttributes),
     } satisfies Record<GrassTier, GrassGpuTierDrawResources>;
 
     return {
       tiers,
       indirect,
       outputBuffers: {
-        near: this.gpuBuffersForTier(tiers.near),
-        mid: this.gpuBuffersForTier(tiers.mid),
-        far: this.gpuBuffersForTier(tiers.far),
-        super: this.gpuBuffersForTier(tiers.super),
+        near: this.gpuBuffersForTier(sharedAttributes),
+        mid: this.gpuBuffersForTier(sharedAttributes),
+        far: this.gpuBuffersForTier(sharedAttributes),
+        super: this.gpuBuffersForTier(sharedAttributes),
         indirectArgs: this.gpuBufferForAttribute(indirect),
       },
     };
@@ -1406,24 +1440,22 @@ export class GrassSystem {
     tier: GrassTier,
     count: number,
     bladeGeometry: THREE.BufferGeometry,
-    indirect: IndirectStorageBufferAttribute,
+    indirect: StorageBufferAttribute,
     indirectOffset: number,
+    sharedAttributes: GrassGpuSharedDrawAttributes,
   ): GrassGpuTierDrawResources {
     const geometry = new THREE.InstancedBufferGeometry();
     geometry.setAttribute("position", bladeGeometry.getAttribute("position"));
     geometry.setAttribute("uv", bladeGeometry.getAttribute("uv"));
     geometry.setAttribute("normal", bladeGeometry.getAttribute("normal"));
     geometry.setIndex(bladeGeometry.getIndex());
-    const offset = this.createStorageInstancedAttribute(`${tier}-offset`, count);
-    const packed0 = this.createStorageInstancedAttribute(`${tier}-packed0`, count);
-    const packed1 = this.createStorageInstancedAttribute(`${tier}-packed1`, count);
-    const terrainNormal = this.createStorageInstancedAttribute(`${tier}-terrain-normal`, count);
+    const { offset, packed0, packed1, terrainNormal } = sharedAttributes;
     geometry.setAttribute("aOffset", offset);
     geometry.setAttribute("aPacked0", packed0);
     geometry.setAttribute("aPacked1", packed1);
     geometry.setAttribute("aTerrainNormal", terrainNormal);
     geometry.instanceCount = count;
-    geometry.setIndirect(indirect, indirectOffset);
+    this.setGpuRingIndirect(geometry, indirect, indirectOffset);
     geometry.boundingBox = new THREE.Box3(
       new THREE.Vector3(-1, -1, -1),
       new THREE.Vector3(this.worldCells + 1, 256, this.worldCells + 1),
@@ -1443,7 +1475,19 @@ export class GrassSystem {
     return attribute;
   }
 
-  private gpuBuffersForTier(tier: GrassGpuTierDrawResources): GrassGpuTierOutputBuffers {
+  private setGpuRingIndirect(
+    geometry: THREE.InstancedBufferGeometry,
+    indirect: StorageBufferAttribute,
+    indirectOffset: number,
+  ): void {
+    const indirectGeometry = geometry as IndirectInstancedBufferGeometry;
+    if (!indirectGeometry.setIndirect) {
+      throw new Error(grassGpuRingDrawUnsupportedReason() ?? "Missing WebGPU indirect geometry support");
+    }
+    indirectGeometry.setIndirect(indirect, indirectOffset);
+  }
+
+  private gpuBuffersForTier(tier: GrassGpuSharedDrawAttributes): GrassGpuTierOutputBuffers {
     return {
       offset: this.gpuBufferForAttribute(tier.offset),
       packed0: this.gpuBufferForAttribute(tier.packed0),

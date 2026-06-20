@@ -9,6 +9,13 @@ const INDIRECT_BYTES = TIER_COUNT * INDIRECT_ARGS_PER_TIER * Uint32Array.BYTES_P
 const READBACK_SLOTS = 2;
 
 export const GRASS_GPU_CANDIDATE_FLOATS = 12;
+export const GRASS_GPU_RING_STORAGE_BINDINGS = 7;
+
+export function grassGpuRingComputeUnsupportedReason(device: GPUDevice): string | null {
+  const maxStorageBuffers = device.limits.maxStorageBuffersPerShaderStage;
+  if (maxStorageBuffers >= GRASS_GPU_RING_STORAGE_BINDINGS) return null;
+  return `grass ring compute requires ${GRASS_GPU_RING_STORAGE_BINDINGS} storage buffers per shader stage; device limit is ${maxStorageBuffers}`;
+}
 
 export interface GrassGpuCandidateBuffer {
   data: Float32Array;
@@ -173,11 +180,10 @@ export class GrassGpuRingCompute {
         { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
         { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
-        ...Array.from({ length: 16 }, (_, i): GPUBindGroupLayoutEntry => ({
-          binding: 4 + i,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: "storage" },
-        })),
+        { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+        { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+        { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+        { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -227,7 +233,7 @@ export class GrassGpuRingCompute {
     this.paramU32[10] = indexCounts.mid;
     this.paramU32[11] = indexCounts.far;
     this.paramU32[12] = indexCounts.super;
-    this.paramU32[13] = 0;
+    this.paramU32[13] = this.candidateInfo.count;
     this.paramU32[14] = 0;
     this.paramU32[15] = 0;
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
@@ -312,34 +318,27 @@ export class GrassGpuRingCompute {
 
   private outputBindGroupEntries(): GPUBindGroupEntry[] {
     const fallback = this.outputBuffers ?? this.createFallbackOutputBuffers();
-    const tiers = [fallback.near, fallback.mid, fallback.far, fallback.super];
-    const entries: GPUBindGroupEntry[] = [];
-    for (let tier = 0; tier < tiers.length; tier++) {
-      const base = 4 + tier * 4;
-      const buffers = tiers[tier];
-      entries.push(
-        { binding: base + 0, resource: { buffer: buffers.offset } },
-        { binding: base + 1, resource: { buffer: buffers.packed0 } },
-        { binding: base + 2, resource: { buffer: buffers.packed1 } },
-        { binding: base + 3, resource: { buffer: buffers.terrainNormal } },
-      );
-    }
-    return entries;
+    return [
+      { binding: 4, resource: { buffer: fallback.near.offset } },
+      { binding: 5, resource: { buffer: fallback.near.packed0 } },
+      { binding: 6, resource: { buffer: fallback.near.packed1 } },
+      { binding: 7, resource: { buffer: fallback.near.terrainNormal } },
+    ];
   }
 
   private createFallbackOutputBuffers(): GrassGpuRingOutputBuffers {
-    const bytes = Math.max(16, this.candidateInfo.count * 4 * Float32Array.BYTES_PER_ELEMENT);
-    const makeTier = (label: string): GrassGpuTierOutputBuffers => ({
-      offset: this.device.createBuffer({ label: `${label} fallback offset`, size: bytes, usage: GPUBufferUsage.STORAGE }),
-      packed0: this.device.createBuffer({ label: `${label} fallback packed0`, size: bytes, usage: GPUBufferUsage.STORAGE }),
-      packed1: this.device.createBuffer({ label: `${label} fallback packed1`, size: bytes, usage: GPUBufferUsage.STORAGE }),
-      terrainNormal: this.device.createBuffer({ label: `${label} fallback normal`, size: bytes, usage: GPUBufferUsage.STORAGE }),
-    });
+    const bytes = Math.max(16, this.candidateInfo.count * TIER_COUNT * 4 * Float32Array.BYTES_PER_ELEMENT);
+    const shared: GrassGpuTierOutputBuffers = {
+      offset: this.device.createBuffer({ label: "grass ring fallback offset", size: bytes, usage: GPUBufferUsage.STORAGE }),
+      packed0: this.device.createBuffer({ label: "grass ring fallback packed0", size: bytes, usage: GPUBufferUsage.STORAGE }),
+      packed1: this.device.createBuffer({ label: "grass ring fallback packed1", size: bytes, usage: GPUBufferUsage.STORAGE }),
+      terrainNormal: this.device.createBuffer({ label: "grass ring fallback normal", size: bytes, usage: GPUBufferUsage.STORAGE }),
+    };
     return {
-      near: makeTier("near"),
-      mid: makeTier("mid"),
-      far: makeTier("far"),
-      super: makeTier("super"),
+      near: shared,
+      mid: shared,
+      far: shared,
+      super: shared,
       indirectArgs: this.indirectArgs,
     };
   }

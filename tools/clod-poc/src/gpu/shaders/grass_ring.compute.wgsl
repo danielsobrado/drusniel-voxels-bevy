@@ -22,22 +22,10 @@ struct Params {
 @group(0) @binding(1) var<uniform> params: Params;
 @group(0) @binding(2) var<storage, read_write> counters: array<atomic<u32>>;
 @group(0) @binding(3) var<storage, read_write> indirect_args: array<u32>;
-@group(0) @binding(4) var<storage, read_write> near_offset: array<vec4<f32>>;
-@group(0) @binding(5) var<storage, read_write> near_packed0: array<vec4<f32>>;
-@group(0) @binding(6) var<storage, read_write> near_packed1: array<vec4<f32>>;
-@group(0) @binding(7) var<storage, read_write> near_normal: array<vec4<f32>>;
-@group(0) @binding(8) var<storage, read_write> mid_offset: array<vec4<f32>>;
-@group(0) @binding(9) var<storage, read_write> mid_packed0: array<vec4<f32>>;
-@group(0) @binding(10) var<storage, read_write> mid_packed1: array<vec4<f32>>;
-@group(0) @binding(11) var<storage, read_write> mid_normal: array<vec4<f32>>;
-@group(0) @binding(12) var<storage, read_write> far_offset: array<vec4<f32>>;
-@group(0) @binding(13) var<storage, read_write> far_packed0: array<vec4<f32>>;
-@group(0) @binding(14) var<storage, read_write> far_packed1: array<vec4<f32>>;
-@group(0) @binding(15) var<storage, read_write> far_normal: array<vec4<f32>>;
-@group(0) @binding(16) var<storage, read_write> super_offset: array<vec4<f32>>;
-@group(0) @binding(17) var<storage, read_write> super_packed0: array<vec4<f32>>;
-@group(0) @binding(18) var<storage, read_write> super_packed1: array<vec4<f32>>;
-@group(0) @binding(19) var<storage, read_write> super_normal: array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read_write> out_offset: array<vec4<f32>>;
+@group(0) @binding(5) var<storage, read_write> out_packed0: array<vec4<f32>>;
+@group(0) @binding(6) var<storage, read_write> out_packed1: array<vec4<f32>>;
+@group(0) @binding(7) var<storage, read_write> out_normal: array<vec4<f32>>;
 
 fn candidate_distance(index: u32) -> f32 {
   let p = candidates[index].pos_height;
@@ -62,6 +50,7 @@ fn grass_thin(distance: f32) -> f32 {
 
 fn write_candidate(tier: u32, slot: u32, index: u32, dist: f32) {
   let c = candidates[index];
+  let out_index = tier * params.counts_b.y + slot;
   let thin = grass_thin(dist);
   var height_mul = 1.0;
   var width_mul = clamp(1.0 / sqrt(thin), 1.0, 4.0);
@@ -79,27 +68,10 @@ fn write_candidate(tier: u32, slot: u32, index: u32, dist: f32) {
   let packed1 = vec4<f32>(c.normal_edge.w, c.normal_edge.y, width_mul, 0.0);
   let normal = vec4<f32>(c.normal_edge.xyz, 0.0);
 
-  if (tier == TIER_NEAR) {
-    near_offset[slot] = offset;
-    near_packed0[slot] = packed0;
-    near_packed1[slot] = packed1;
-    near_normal[slot] = normal;
-  } else if (tier == TIER_MID) {
-    mid_offset[slot] = offset;
-    mid_packed0[slot] = packed0;
-    mid_packed1[slot] = packed1;
-    mid_normal[slot] = normal;
-  } else if (tier == TIER_FAR) {
-    far_offset[slot] = offset;
-    far_packed0[slot] = packed0;
-    far_packed1[slot] = packed1;
-    far_normal[slot] = normal;
-  } else {
-    super_offset[slot] = offset;
-    super_packed0[slot] = packed0;
-    super_packed1[slot] = packed1;
-    super_normal[slot] = normal;
-  }
+  out_offset[out_index] = offset;
+  out_packed0[out_index] = packed0;
+  out_packed1[out_index] = packed1;
+  out_normal[out_index] = normal;
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
@@ -143,7 +115,7 @@ fn write_draw_args(tier: u32, index_count: u32, instance_count: u32) {
   indirect_args[base + 1u] = instance_count;
   indirect_args[base + 2u] = 0u;
   indirect_args[base + 3u] = 0u;
-  indirect_args[base + 4u] = 0u;
+  indirect_args[base + 4u] = tier * params.counts_b.y;
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
