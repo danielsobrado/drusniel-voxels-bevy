@@ -1,15 +1,16 @@
-use super::errors::ProceduralTextureError;
+use super::errors::ProceduralSupportMapError;
 use super::recipes::{ProceduralMaterialId, ProceduralMaterialRecipe};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-pub const DEFAULT_PROCEDURAL_TEXTURE_CONFIG_PATH: &str = "assets/config/procedural_textures.yaml";
+pub const DEFAULT_PROCEDURAL_SUPPORT_MAP_CONFIG_PATH: &str =
+    "assets/config/procedural_support_maps.yaml";
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProceduralTextureRuntimeMode {
+pub enum ProceduralSupportMapRuntimeMode {
     CacheOnly,
     #[default]
     GenerateIfMissing,
@@ -17,13 +18,13 @@ pub enum ProceduralTextureRuntimeMode {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ProceduralTextureConfig {
-    #[serde(default = "default_procedural_textures_enabled")]
+pub struct ProceduralSupportMapConfig {
+    #[serde(default = "default_procedural_support_maps_enabled")]
     pub enabled: bool,
     #[serde(default = "default_seed")]
     pub seed: u32,
     #[serde(default)]
-    pub runtime_mode: ProceduralTextureRuntimeMode,
+    pub runtime_mode: ProceduralSupportMapRuntimeMode,
     #[serde(default = "default_cache_dir")]
     pub cache_dir: String,
     #[serde(default)]
@@ -35,7 +36,7 @@ pub struct ProceduralTextureConfig {
     #[serde(default = "default_terrain_material_quality")]
     pub terrain_material_quality: BTreeMap<String, TerrainMaterialQualityTier>,
     #[serde(default)]
-    pub debug: ProceduralTextureDebugConfig,
+    pub debug: ProceduralSupportMapDebugConfig,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -171,29 +172,29 @@ pub struct TerrainMaterialQualityTier {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ProceduralTextureDebugConfig {
+pub struct ProceduralSupportMapDebugConfig {
     #[serde(default = "default_debug_mode")]
     pub mode: String,
 }
 
 #[derive(Deserialize)]
-struct ProceduralTextureConfigFile {
+struct ProceduralSupportMapConfigFile {
     #[serde(default)]
-    procedural_textures: ProceduralTextureConfig,
+    procedural_support_maps: ProceduralSupportMapConfig,
 }
 
-impl Default for ProceduralTextureConfig {
+impl Default for ProceduralSupportMapConfig {
     fn default() -> Self {
         Self {
-            enabled: default_procedural_textures_enabled(),
+            enabled: default_procedural_support_maps_enabled(),
             seed: default_seed(),
-            runtime_mode: ProceduralTextureRuntimeMode::GenerateIfMissing,
+            runtime_mode: ProceduralSupportMapRuntimeMode::GenerateIfMissing,
             cache_dir: default_cache_dir(),
             noise: NoiseBakeConfig::default(),
             terrain: TerrainTextureConfig::default(),
             bark: BarkTextureConfig::default(),
             terrain_material_quality: default_terrain_material_quality(),
-            debug: ProceduralTextureDebugConfig::default(),
+            debug: ProceduralSupportMapDebugConfig::default(),
         }
     }
 }
@@ -281,7 +282,7 @@ impl Default for BarkTextureConfig {
     }
 }
 
-impl Default for ProceduralTextureDebugConfig {
+impl Default for ProceduralSupportMapDebugConfig {
     fn default() -> Self {
         Self {
             mode: default_debug_mode(),
@@ -289,38 +290,39 @@ impl Default for ProceduralTextureDebugConfig {
     }
 }
 
-impl ProceduralTextureConfig {
-    pub fn from_yaml_str(text: &str) -> Result<Self, ProceduralTextureError> {
-        let file: ProceduralTextureConfigFile =
-            serde_yaml::from_str(text).map_err(|source| ProceduralTextureError::ParseConfig {
-                path: "<memory>".to_string(),
-                source,
+impl ProceduralSupportMapConfig {
+    pub fn from_yaml_str(text: &str) -> Result<Self, ProceduralSupportMapError> {
+        let file: ProceduralSupportMapConfigFile =
+            serde_yaml::from_str(text).map_err(|source| {
+                ProceduralSupportMapError::ParseConfig {
+                    path: "<memory>".to_string(),
+                    source,
+                }
             })?;
-        Ok(file.procedural_textures)
+        Ok(file.procedural_support_maps)
     }
 
-    pub fn load_or_default() -> Result<Self, ProceduralTextureError> {
-        let path = Path::new(DEFAULT_PROCEDURAL_TEXTURE_CONFIG_PATH);
+    pub fn load_or_default() -> Result<Self, ProceduralSupportMapError> {
+        let path = Path::new(DEFAULT_PROCEDURAL_SUPPORT_MAP_CONFIG_PATH);
         if !path.exists() {
             return Ok(Self::default());
         }
         let text =
-            fs::read_to_string(path).map_err(|source| ProceduralTextureError::ReadConfig {
+            fs::read_to_string(path).map_err(|source| ProceduralSupportMapError::ReadConfig {
                 path: path.display().to_string(),
                 source,
             })?;
-        serde_yaml::from_str::<ProceduralTextureConfigFile>(&text)
-            .map(|file| file.procedural_textures)
-            .map_err(|source| ProceduralTextureError::ParseConfig {
+        serde_yaml::from_str::<ProceduralSupportMapConfigFile>(&text)
+            .map(|file| file.procedural_support_maps)
+            .map_err(|source| ProceduralSupportMapError::ParseConfig {
                 path: path.display().to_string(),
                 source,
             })
     }
 }
 
-/// Procedural terrain textures are opt-in: they add a startup bake and a per-fragment terrain
-/// material pass, so they stay off unless explicitly enabled in the config.
-fn default_procedural_textures_enabled() -> bool {
+/// Procedural support maps are opt-in and should usually be loaded from cache.
+fn default_procedural_support_maps_enabled() -> bool {
     false
 }
 
@@ -671,10 +673,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_procedural_texture_config_overrides() {
-        let config = ProceduralTextureConfig::from_yaml_str(
+    fn parses_procedural_support_map_config_overrides() {
+        let config = ProceduralSupportMapConfig::from_yaml_str(
             "
-procedural_textures:
+procedural_support_maps:
   seed: 17
   runtime_mode: cache_only
   noise:
@@ -716,7 +718,10 @@ procedural_textures:
         .expect("parse config");
 
         assert_eq!(config.seed, 17);
-        assert_eq!(config.runtime_mode, ProceduralTextureRuntimeMode::CacheOnly);
+        assert_eq!(
+            config.runtime_mode,
+            ProceduralSupportMapRuntimeMode::CacheOnly
+        );
         assert_eq!(config.noise.resolution, 32);
         assert_eq!(config.terrain.layer_resolution, 16);
         assert_eq!(

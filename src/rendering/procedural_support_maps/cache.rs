@@ -1,6 +1,5 @@
-use super::errors::ProceduralTextureError;
-use super::manifest::ProceduralTextureManifest;
-use super::recipes::ProceduralMaterialId;
+use super::errors::ProceduralSupportMapError;
+use super::manifest::ProceduralSupportMapManifest;
 use image::ImageFormat;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,14 +21,6 @@ pub fn asset_path(cache_dir: &str, filename: &str) -> String {
 
 pub fn manifest_path(cache_dir: &str) -> PathBuf {
     cache_root(cache_dir).join("manifest.json")
-}
-
-pub fn material_albedo_filename(id: ProceduralMaterialId) -> String {
-    format!("{}_albedo.png", id.cache_name())
-}
-
-pub fn material_normal_filename(id: ProceduralMaterialId) -> String {
-    format!("{}_normal_roughness.png", id.cache_name())
 }
 
 pub fn bark_cache_name(id: &str) -> String {
@@ -62,28 +53,28 @@ pub fn bark_normal_filename(id: &str) -> String {
 
 pub fn read_manifest(
     cache_dir: &str,
-) -> Result<Option<ProceduralTextureManifest>, ProceduralTextureError> {
+) -> Result<Option<ProceduralSupportMapManifest>, ProceduralSupportMapError> {
     let path = manifest_path(cache_dir);
     if !path.exists() {
         return Ok(None);
     }
     let text =
-        fs::read_to_string(&path).map_err(|source| ProceduralTextureError::ReadManifest {
+        fs::read_to_string(&path).map_err(|source| ProceduralSupportMapError::ReadManifest {
             path: path.display().to_string(),
             source,
         })?;
-    serde_json::from_str(&text)
-        .map(Some)
-        .map_err(|source| ProceduralTextureError::ParseManifest {
+    serde_json::from_str(&text).map(Some).map_err(|source| {
+        ProceduralSupportMapError::ParseManifest {
             path: path.display().to_string(),
             source,
-        })
+        }
+    })
 }
 
 pub fn manifest_status(
     cache_dir: &str,
-    expected: &ProceduralTextureManifest,
-) -> Result<ManifestStatus, ProceduralTextureError> {
+    expected: &ProceduralSupportMapManifest,
+) -> Result<ManifestStatus, ProceduralSupportMapError> {
     let Some(on_disk) = read_manifest(cache_dir)? else {
         return Ok(ManifestStatus::Missing);
     };
@@ -96,17 +87,17 @@ pub fn manifest_status(
 
 pub fn write_manifest(
     cache_dir: &str,
-    manifest: &ProceduralTextureManifest,
-) -> Result<(), ProceduralTextureError> {
+    manifest: &ProceduralSupportMapManifest,
+) -> Result<(), ProceduralSupportMapError> {
     let root = cache_root(cache_dir);
-    fs::create_dir_all(&root).map_err(|source| ProceduralTextureError::WriteCache {
+    fs::create_dir_all(&root).map_err(|source| ProceduralSupportMapError::WriteCache {
         path: root.display().to_string(),
         source,
     })?;
     let path = manifest_path(cache_dir);
     let text = serde_json::to_string_pretty(manifest)
-        .map_err(ProceduralTextureError::SerializeManifest)?;
-    fs::write(&path, text).map_err(|source| ProceduralTextureError::WriteCache {
+        .map_err(ProceduralSupportMapError::SerializeManifest)?;
+    fs::write(&path, text).map_err(|source| ProceduralSupportMapError::WriteCache {
         path: path.display().to_string(),
         source,
     })
@@ -118,9 +109,9 @@ pub fn write_rgba_png(
     width: u32,
     height: u32,
     rgba: &[u8],
-) -> Result<(), ProceduralTextureError> {
+) -> Result<(), ProceduralSupportMapError> {
     let root = cache_root(cache_dir);
-    fs::create_dir_all(&root).map_err(|source| ProceduralTextureError::WriteCache {
+    fs::create_dir_all(&root).map_err(|source| ProceduralSupportMapError::WriteCache {
         path: root.display().to_string(),
         source,
     })?;
@@ -133,48 +124,34 @@ pub fn write_rgba_png(
         image::ColorType::Rgba8,
         ImageFormat::Png,
     )
-    .map_err(|source| ProceduralTextureError::WriteImage {
+    .map_err(|source| ProceduralSupportMapError::WriteImage {
         path: path.display().to_string(),
         source,
     })
 }
 
-pub fn manifest_cache_files_exist(cache_dir: &str, manifest: &ProceduralTextureManifest) -> bool {
+pub fn manifest_cache_files_exist(
+    cache_dir: &str,
+    manifest: &ProceduralSupportMapManifest,
+) -> bool {
     let root = cache_root(cache_dir);
     root.join(&manifest.outputs.noise_a).exists()
         && root.join(&manifest.outputs.noise_b).exists()
-        && manifest
-            .outputs
-            .terrain_albedo
-            .iter()
-            .all(|filename| root.join(filename).exists())
-        && manifest
-            .outputs
-            .terrain_normal_roughness
-            .iter()
-            .all(|filename| root.join(filename).exists())
-        && manifest
-            .outputs
-            .bark_albedo
-            .iter()
-            .all(|filename| root.join(filename).exists())
-        && manifest
-            .outputs
-            .bark_normal_roughness_height
-            .iter()
-            .all(|filename| root.join(filename).exists())
+        && root
+            .join(&manifest.outputs.terrain_classification_a)
+            .exists()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rendering::procedural_textures::config::ProceduralTextureConfig;
-    use crate::rendering::procedural_textures::manifest::ProceduralTextureManifest;
+    use crate::rendering::procedural_support_maps::config::ProceduralSupportMapConfig;
+    use crate::rendering::procedural_support_maps::manifest::ProceduralSupportMapManifest;
 
     #[test]
     fn manifest_stale_detection_uses_config_hash() {
-        let config = ProceduralTextureConfig::default();
-        let expected = ProceduralTextureManifest::expected(&config).expect("manifest");
+        let config = ProceduralSupportMapConfig::default();
+        let expected = ProceduralSupportMapManifest::expected(&config).expect("manifest");
         let mut stale = expected.clone();
         stale.config_hash = "different".to_string();
 
@@ -183,15 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn material_cache_filenames_are_stable() {
-        assert_eq!(
-            material_albedo_filename(ProceduralMaterialId::Grass),
-            "grass_albedo.png"
-        );
-        assert_eq!(
-            material_normal_filename(ProceduralMaterialId::WetSoil),
-            "wet_soil_normal_roughness.png"
-        );
+    fn auxiliary_cache_filenames_are_stable() {
         assert_eq!(
             bark_albedo_filename("Karst Gnarl"),
             "bark_karst_gnarl_albedo.png"
@@ -204,8 +173,8 @@ mod tests {
 
     #[test]
     fn manifest_cache_file_check_includes_noise_outputs() {
-        let config = ProceduralTextureConfig::default();
-        let manifest = ProceduralTextureManifest::expected(&config).expect("manifest");
+        let config = ProceduralSupportMapConfig::default();
+        let manifest = ProceduralSupportMapManifest::expected(&config).expect("manifest");
 
         assert!(!manifest_cache_files_exist(
             "generated/procedural_missing_for_test",

@@ -9,9 +9,6 @@ use crate::rendering::building_material::{
     BuildingMaterial, BuildingMaterialHandle, BuildingUniforms,
 };
 use crate::rendering::capabilities::GraphicsCapabilities;
-use crate::rendering::procedural_textures::ProceduralTerrainTextureHandles;
-use crate::rendering::procedural_textures::config::default_material_recipes;
-use crate::rendering::procedural_textures::recipes::ProceduralMaterialId;
 use crate::rendering::props_material::{PropsMaterial, PropsMaterialHandle, PropsUniforms};
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::terrain_hex_tiling::{
@@ -629,7 +626,6 @@ pub fn setup_triplanar_material(
     mut materials: ResMut<Assets<TriplanarMaterial>>,
     mut images: ResMut<Assets<Image>>,
     capabilities: Option<Res<GraphicsCapabilities>>,
-    procedural_textures: Option<Res<ProceduralTerrainTextureHandles>>,
     asset_server: Res<AssetServer>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
@@ -640,7 +636,7 @@ pub fn setup_triplanar_material(
         .map(|capabilities| capabilities.integrated_gpu)
         .unwrap_or(false);
 
-    let mut base_material = if integrated {
+    let base_material = if integrated {
         TriplanarMaterial {
             uniforms: TriplanarUniforms {
                 base_color: LinearRgba::WHITE,
@@ -698,10 +694,6 @@ pub fn setup_triplanar_material(
         }
     };
 
-    if let Some(handles) = procedural_textures.as_deref() {
-        apply_procedural_textures_to_triplanar_material(&mut base_material, handles);
-    }
-
     let mut full_material = base_material.clone();
     full_material.quality = TerrainMaterialQuality::FullTriplanar;
     let mut cheap_material = base_material.clone();
@@ -722,26 +714,6 @@ pub fn setup_triplanar_material(
     flat_unlit_debug_material.quality = TerrainMaterialQuality::FlatUnlitDebug;
     let mut wireframe_flat_unlit_debug_material = base_material.clone();
     wireframe_flat_unlit_debug_material.quality = TerrainMaterialQuality::WireframeFlatUnlitDebug;
-    for material in [
-        &mut full_material,
-        &mut cheap_material,
-        &mut single_projection_far_material,
-        &mut horizon_proxy_material,
-        &mut atlas_only_debug_material,
-        &mut wireframe_debug_material,
-        &mut normals_debug_material,
-        &mut wireframe_normals_debug_material,
-        &mut flat_unlit_debug_material,
-        &mut wireframe_flat_unlit_debug_material,
-    ] {
-        material.uniforms.procedural_textures_enabled =
-            if procedural_sampling_enabled_for_quality(material.quality) {
-                material.uniforms.procedural_textures_enabled
-            } else {
-                0.0
-            };
-    }
-
     let iso_band_image = crate::voxel::terrain_iso_band::create_iso_band_volume_image();
     let iso_band_texture = images.add(iso_band_image);
     let attach_iso_band = |material: &mut TriplanarMaterial| {
@@ -818,103 +790,6 @@ pub fn setup_triplanar_material(
     commands.insert_resource(crate::voxel::terrain_iso_band::TerrainIsoBandVolume::new(
         iso_band_texture,
     ));
-}
-
-pub fn apply_procedural_textures_to_triplanar_material(
-    material: &mut TriplanarMaterial,
-    handles: &ProceduralTerrainTextureHandles,
-) {
-    material.grass_albedo = Some(handles.grass_albedo.clone());
-    material.grass_normal = Some(handles.grass_normal.clone());
-    material.rock_albedo = Some(handles.rock_albedo.clone());
-    material.rock_normal = Some(handles.rock_normal.clone());
-    material.sand_albedo = Some(handles.sand_albedo.clone());
-    material.sand_normal = Some(handles.sand_normal.clone());
-    material.dirt_albedo = Some(handles.dirt_albedo.clone());
-    material.dirt_normal = Some(handles.dirt_normal.clone());
-    material.uniforms.procedural_textures_enabled =
-        if procedural_sampling_enabled_for_quality(material.quality) {
-            1.0
-        } else {
-            0.0
-        };
-    let masks = handles.config.terrain.masks;
-    let fallback_recipes = default_material_recipes();
-    let roughness = |id: ProceduralMaterialId| {
-        handles
-            .config
-            .terrain
-            .materials
-            .get(&id)
-            .or_else(|| fallback_recipes.get(&id))
-            .map(|recipe| recipe.roughness)
-            .unwrap_or(0.9)
-    };
-    material.uniforms.procedural_snow_mask = Vec4::new(
-        masks.snow_height[0],
-        masks.snow_height[1],
-        masks.snow_upness[0],
-        masks.snow_upness[1],
-    );
-    material.uniforms.procedural_wet_mask = Vec4::new(
-        masks.wet_height[0],
-        masks.wet_height[1],
-        masks.wet_upness[0],
-        masks.wet_upness[1],
-    );
-    material.uniforms.procedural_slope_masks = Vec4::new(
-        masks.moss_upness[0],
-        masks.moss_upness[1],
-        masks.gravel_slope[0],
-        masks.gravel_slope[1],
-    );
-    material.uniforms.procedural_tint_strengths = Vec4::new(
-        masks.snow_tint_strength,
-        masks.moss_tint_strength,
-        masks.gravel_tint_strength,
-        masks.wet_tint_strength,
-    );
-    material.uniforms.procedural_material_roughness = Vec4::new(
-        roughness(ProceduralMaterialId::Grass),
-        roughness(ProceduralMaterialId::Rock),
-        roughness(ProceduralMaterialId::Sand),
-        roughness(ProceduralMaterialId::Dirt),
-    );
-    material.uniforms.procedural_moss_tint = Vec4::new(
-        masks.moss_tint[0],
-        masks.moss_tint[1],
-        masks.moss_tint[2],
-        0.0,
-    );
-    material.uniforms.procedural_gravel_tint = Vec4::new(
-        masks.gravel_tint[0],
-        masks.gravel_tint[1],
-        masks.gravel_tint[2],
-        0.0,
-    );
-    material.uniforms.procedural_wet_tint =
-        Vec4::new(masks.wet_tint[0], masks.wet_tint[1], masks.wet_tint[2], 0.0);
-    material.uniforms.procedural_snow_tint = Vec4::new(
-        masks.snow_tint[0],
-        masks.snow_tint[1],
-        masks.snow_tint[2],
-        0.0,
-    );
-    material.uniforms.procedural_material_params = Vec4::new(
-        handles.config.terrain.micro_normal.fade_start_m,
-        handles.config.terrain.micro_normal.fade_end_m,
-        masks.wet_roughness,
-        masks.wet_roughness_strength,
-    );
-}
-
-fn procedural_sampling_enabled_for_quality(quality: TerrainMaterialQuality) -> bool {
-    matches!(
-        quality,
-        TerrainMaterialQuality::FullTriplanar
-            | TerrainMaterialQuality::CheapTriplanar
-            | TerrainMaterialQuality::SingleProjectionFar
-    )
 }
 
 /// Ensure all triplanar textures use Repeat address mode for seamless tiling with proper mipmaps

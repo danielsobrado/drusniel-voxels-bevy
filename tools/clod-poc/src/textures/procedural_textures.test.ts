@@ -26,6 +26,7 @@ import { createProceduralTerrainTextures } from "./terrainTextureArrays.js";
 import { deriveSeedStreams, stableSeedStream } from "./seedStreams.js";
 import { createProceduralTextureManifest, stableHash } from "./textureManifest.js";
 import { BARK_TABLE, bakeBarkTextures } from "./barkSynth.js";
+import { bakeTerrainClassificationTexture } from "./terrainClassificationBake.js";
 
 function tinyConfig(seed = 1337): ProceduralTextureConfig {
   const defaults = DEFAULT_PROCEDURAL_TEXTURE_CONFIG;
@@ -110,6 +111,7 @@ describe("procedural terrain textures", () => {
       resolution: config.noise.resolution,
       periods: config.noise.periods,
     });
+    const classification = bakeTerrainClassificationTexture({ config, noise });
     const commonInput = {
       worldPos: [37.25, 22.5, -14.75] as const,
       normalWs: [0.12, 0.96, -0.08] as const,
@@ -117,6 +119,7 @@ describe("procedural terrain textures", () => {
       pageLod: 0,
       cameraDistance: 24,
       noise,
+      classification,
       config,
     };
 
@@ -187,6 +190,7 @@ describe("procedural terrain textures", () => {
     expect(stableHash({ config })).not.toBe(stableHash({ config: { ...config, noise: { ...config.noise, resolution: 32 } } }));
     expect(base.shaderHash).toHaveLength(16);
     expect(base.outputs.noiseA).toBe("noise_a.png");
+    expect(base.outputs.classificationA).toBe("classification_a.png");
     expect(base.outputs.terrainAlbedo).toContain("grass_albedo.png");
 
     const changedRuntimeOnly = createProceduralTextureManifest({
@@ -220,6 +224,27 @@ describe("procedural terrain textures", () => {
     expect(shouldGenerateProceduralOutputs({ runtime_mode: "force_regenerate" }, "match")).toBe(true);
   });
 
+  it("bakes deterministic terrain classification support maps", () => {
+    const config = tinyConfig();
+    const noise = bakeNoiseTextures({
+      seed: config.seed,
+      resolution: config.noise.resolution,
+      periods: config.noise.periods,
+    });
+    const first = bakeTerrainClassificationTexture({ config, noise, resolution: 8 });
+    const second = bakeTerrainClassificationTexture({ config, noise, resolution: 8 });
+
+    expect(first.resolution).toBe(8);
+    expect(first.dataA.length).toBe(8 * 8 * 4);
+    expect([...first.dataA]).toEqual([...second.dataA]);
+    expect(first.classificationA.wrapS).toBe(THREE.RepeatWrapping);
+    expect(first.classificationA.wrapT).toBe(THREE.RepeatWrapping);
+    for (const value of first.dataA) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(255);
+    }
+  });
+
   it("generates deterministic terrain array dimensions and metadata", () => {
     const config = tinyConfig();
     const first = createProceduralTerrainTextures(config);
@@ -229,6 +254,8 @@ describe("procedural terrain textures", () => {
     expect(first.albedoArray.image.height).toBe(8);
     expect(first.albedoArray.image.depth).toBe(4);
     expect(first.normalArray.image.depth).toBe(4);
+    expect(first.classification.resolution).toBe(config.noise.resolution);
+    expect(first.manifest.outputs.classificationA).toBe("classification_a.png");
     expect(first.slots.map((slot) => slot.selectedId)).toEqual([
       "generated:grass",
       "generated:rock",

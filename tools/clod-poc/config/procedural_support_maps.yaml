@@ -1,0 +1,43 @@
+procedural_textures:
+  # Support maps are shared procedural inputs for terrain material parity,
+  # CLOD pages, water/material effects, and debug views.
+  seed: 1337
+  runtime_mode: generate_if_missing
+  noise:
+    resolution: 1024
+    periods:
+      value: 256
+      fbm: 64
+      ridged: 32
+      worley: 128
+  terrain:
+    layer_resolution: 1024
+    macro_variation_m: [2.0, 50.0]
+    meso_variation_m: [0.8, 4.0]
+    micro_variation_m: [0.05, 0.4]
+    micro_normal:
+      enabled: true
+      fade_start_m: 45.0
+      fade_end_m: 85.0
+      max_strength: 0.35
+    masks:
+      slope_damp: [0.18, 0.92]
+      snow_height: [76.0, 130.0]
+      snow_upness: [0.58, 0.92]
+      moss_upness: [0.55, 0.92]
+      gravel_slope: [0.28, 0.72]
+      wet_height: [18.0, 28.0]
+      wet_upness: [0.42, 0.86]
+      wet_level_m: 18.0
+      page_lod_normal_fade_m: 16.0
+      meso_albedo_strength: 0.08
+      wet_roughness: 0.35
+      wet_roughness_strength: 0.30
+      snow_tint_strength: 0.22
+      moss_tint_strength: 0.08
+      gravel_tint_strength: 0.10
+      wet_tint_strength: 0.20
+      moss_tint: [0.18, 0.32, 0.13]
+      gravel_tint: [0.42, 0.41, 0.39]
+      wet_tint: [0.18, 0.15, 0.12]
+      snow_tint: [0.86, 0.89, 0.90]

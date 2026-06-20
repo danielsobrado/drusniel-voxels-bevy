@@ -36,8 +36,8 @@ pub struct TriplanarUniforms {
     pub weather_flags: u32,
     /// CLOD page screen-door fade: 0 = fully dithered out, 1 = fully visible.
     pub clod_fade: f32,
-    /// 1.0 when generated procedural terrain textures are active for this material.
-    pub procedural_textures_enabled: f32,
+    /// 1.0 when generated procedural support maps are active for this material.
+    pub procedural_support_maps_enabled: f32,
     pub procedural_snow_mask: Vec4,
     pub procedural_wet_mask: Vec4,
     pub procedural_slope_masks: Vec4,
@@ -125,7 +125,7 @@ impl Default for TriplanarUniforms {
             weather_time: 0.0,
             weather_flags: 0,
             clod_fade: 1.0,
-            procedural_textures_enabled: 0.0,
+            procedural_support_maps_enabled: 0.0,
             procedural_snow_mask: Vec4::new(76.0, 130.0, 0.58, 0.92),
             procedural_wet_mask: Vec4::new(18.0, 28.0, 0.42, 0.86),
             procedural_slope_masks: Vec4::new(0.55, 0.92, 0.28, 0.72),

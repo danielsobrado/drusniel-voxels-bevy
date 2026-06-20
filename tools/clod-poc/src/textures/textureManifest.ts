@@ -1,4 +1,4 @@
-export const PROCEDURAL_TEXTURE_SCHEMA_VERSION = 2;
+export const PROCEDURAL_TEXTURE_SCHEMA_VERSION = 3;
 
 export interface ProceduralTextureManifest {
   schemaVersion: number;
@@ -15,6 +15,7 @@ export interface ProceduralTextureManifest {
 export interface ProceduralTextureManifestOutputs {
   noiseA: string;
   noiseB: string;
+  classificationA: string;
   terrainAlbedo: string[];
   terrainNormalRoughness: string[];
 }
@@ -42,6 +43,7 @@ function textureProducingConfig(config: unknown): unknown {
   return {
     noise: record.noise,
     terrain: record.terrain,
+    supportMaps: record.support_maps,
   };
 }
 
@@ -70,6 +72,7 @@ export function createProceduralTextureManifest(input: {
     outputs: {
       noiseA: "noise_a.png",
       noiseB: "noise_b.png",
+      classificationA: "classification_a.png",
       terrainAlbedo: input.materialOrder.map((id) => `${id}_albedo.png`),
       terrainNormalRoughness: input.materialOrder.map((id) => `${id}_normal_roughness.png`),
     },

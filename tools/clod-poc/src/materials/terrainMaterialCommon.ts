@@ -1,5 +1,9 @@
 import { sampleNoiseChannel, type NoiseBakeResult } from "../textures/noiseBake.js";
 import {
+  sampleClassificationChannel,
+  type TerrainClassificationBakeResult,
+} from "../textures/terrainClassificationBake.js";
+import {
   DEFAULT_PROCEDURAL_TEXTURE_CONFIG,
   type ProceduralMaterialId,
   type ProceduralTextureConfig,
@@ -15,6 +19,7 @@ export interface DrusnielTerrainMaterialInput {
   pageLod: number;
   cameraDistance: number;
   noise: NoiseBakeResult;
+  classification?: TerrainClassificationBakeResult;
   config?: ProceduralTextureConfig;
   lodBias?: number;
 }
@@ -89,6 +94,17 @@ export function sampleDrusnielTerrainMaterial(input: DrusnielTerrainMaterialInpu
     input.worldPos[2] / Math.max(config.terrain.meso_variation_m[1] * 8, 0.001),
     2,
   );
+  const classificationU = input.worldPos[0] / Math.max(config.terrain.macro_variation_m[1] * 4, 0.001);
+  const classificationV = input.worldPos[2] / Math.max(config.terrain.macro_variation_m[1] * 4, 0.001);
+  const supportSnow = input.classification
+    ? sampleClassificationChannel(input.classification.dataA, input.classification.resolution, classificationU, classificationV, 0)
+    : undefined;
+  const supportWetness = input.classification
+    ? sampleClassificationChannel(input.classification.dataA, input.classification.resolution, classificationU, classificationV, 1)
+    : undefined;
+  const supportRockExposure = input.classification
+    ? sampleClassificationChannel(input.classification.dataA, input.classification.resolution, classificationU, classificationV, 3)
+    : undefined;
 
   const baseColor = BEVY_TERRAIN_SLOT_IDS.reduce<[number, number, number]>((sum, id, index) => {
     const recipe = config.terrain.materials[id];
@@ -110,13 +126,16 @@ export function sampleDrusnielTerrainMaterial(input: DrusnielTerrainMaterialInpu
     : 0;
   const normalStrength = recipeNormal * config.terrain.micro_normal.max_strength * micro * (0.5 + ridged * 0.5) * slopeDamp;
   const materialId = dominantMaterialId(weights);
-  const snowMask = smoothstep(masks.snow_height[0], masks.snow_height[1], input.worldPos[1])
+  const computedSnowMask = smoothstep(masks.snow_height[0], masks.snow_height[1], input.worldPos[1])
     * smoothstep(masks.snow_upness[0], masks.snow_upness[1], upness);
+  const snowMask = supportSnow === undefined ? computedSnowMask : Math.max(computedSnowMask, supportSnow);
   const mossMask = weights[0] * smoothstep(masks.moss_upness[0], masks.moss_upness[1], upness);
-  const gravelMask = weights[1] * smoothstep(masks.gravel_slope[0], masks.gravel_slope[1], slope);
-  const wetMask = weights[2]
+  const computedGravelMask = weights[1] * smoothstep(masks.gravel_slope[0], masks.gravel_slope[1], slope);
+  const gravelMask = supportRockExposure === undefined ? computedGravelMask : Math.max(computedGravelMask, supportRockExposure * weights[1]);
+  const computedWetMask = weights[2]
     * (1 - smoothstep(masks.wet_height[0], masks.wet_height[1], input.worldPos[1]))
     * smoothstep(masks.wet_upness[0], masks.wet_upness[1], upness);
+  const wetMask = supportWetness === undefined ? computedWetMask : Math.max(computedWetMask, supportWetness * weights[2]);
   let albedo: Vec3 = [
     clamp01(baseColor[0] * variation),
     clamp01(baseColor[1] * variation),

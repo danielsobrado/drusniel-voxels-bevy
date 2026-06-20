@@ -45,7 +45,7 @@ struct TriplanarUniforms {
     weather_time: f32,
     weather_flags: u32,
     clod_fade: f32,
-    procedural_textures_enabled: f32,
+    procedural_support_maps_enabled: f32,
     procedural_snow_mask: vec4<f32>,
     procedural_wet_mask: vec4<f32>,
     procedural_slope_masks: vec4<f32>,
@@ -769,7 +769,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
     }
 
     var final_ao = ao_factor;
-    if (uniforms.procedural_textures_enabled > 0.5) {
+    if (uniforms.procedural_support_maps_enabled > 0.5) {
         let procedural_material = sample_procedural_terrain_material(
             world_pos,
             world_normal,

@@ -1,18 +1,18 @@
 pub mod bark_synth;
 pub mod cache;
+pub mod classification_bake;
 pub mod config;
 pub mod errors;
 pub mod manifest;
+pub mod material_bindings;
 pub mod noise_bake;
 pub mod plugin;
 pub mod recipes;
 pub mod seed_streams;
 pub mod texture_images;
 
-pub use plugin::{
-    ProceduralBarkTextureHandle, ProceduralBarkTextureHandles, ProceduralTerrainTextureHandles,
-    ProceduralTexturePlugin,
-};
+pub use material_bindings::ProceduralTerrainSupportMapHandles;
+pub use plugin::ProceduralSupportMapPlugin;
 
 #[cfg(test)]
 mod tests {

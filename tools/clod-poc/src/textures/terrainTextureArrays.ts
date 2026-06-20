@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { bakeNoiseTextures, sampleNoiseChannel, type NoiseBakeResult } from "./noiseBake.js";
+import { bakeTerrainClassificationTexture, type TerrainClassificationBakeResult } from "./terrainClassificationBake.js";
 import {
   type ProceduralMaterialId,
   type ProceduralMaterialRecipe,
@@ -23,6 +24,7 @@ export interface ProceduralTerrainSlot {
 
 export interface ProceduralTerrainTextures {
   noise: NoiseBakeResult;
+  classification: TerrainClassificationBakeResult;
   albedoArray: THREE.DataArrayTexture;
   normalArray: THREE.DataArrayTexture;
   slots: ProceduralTerrainSlot[];
@@ -131,6 +133,7 @@ export function createProceduralTerrainTextures(config: ProceduralTextureConfig)
     resolution: config.noise.resolution,
     periods: config.noise.periods,
   });
+  const classification = bakeTerrainClassificationTexture({ config, noise });
   const layerSize = Math.max(2, Math.floor(config.terrain.layer_resolution));
   const order = config.terrain.material_order;
   const layers = order.length;
@@ -192,5 +195,5 @@ export function createProceduralTerrainTextures(config: ProceduralTextureConfig)
     materialOrder: order,
   });
 
-  return { noise, albedoArray, normalArray, slots, normalMapMask, roughnessByLayer, manifest };
+  return { noise, classification, albedoArray, normalArray, slots, normalMapMask, roughnessByLayer, manifest };
 }

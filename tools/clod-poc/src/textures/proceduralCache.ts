@@ -12,6 +12,7 @@ export function manifestOutputFiles(manifest: ProceduralTextureManifest): string
   return [
     manifest.outputs.noiseA,
     manifest.outputs.noiseB,
+    manifest.outputs.classificationA,
     ...manifest.outputs.terrainAlbedo,
     ...manifest.outputs.terrainNormalRoughness,
   ];

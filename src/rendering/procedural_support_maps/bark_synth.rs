@@ -136,7 +136,7 @@ pub fn bake_bark_textures(config: &BarkTextureConfig, seed: u32) -> Vec<Generate
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rendering::procedural_textures::config::default_bark_species;
+    use crate::rendering::procedural_support_maps::config::default_bark_species;
 
     fn tiny_bark_config() -> BarkTextureConfig {
         BarkTextureConfig {
