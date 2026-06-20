@@ -18,6 +18,7 @@ import {
   PAINT_BLEND_CHANNELS,
   paintWeightsAt,
   replaceDigEdits,
+  surfaceHeight,
 } from "./terrain.js";
 import { GpuChunkMesher } from "./gpu/gpu_chunk_mesher.js";
 import { resolveDigEdits } from "./gpu/terrain_field_core.js";
@@ -717,6 +718,38 @@ async function main() {
   const interaction = new PlayerInteractionState();
   const playerInput: PlayerInputState = { forward: 0, right: 0, sprint: false, jump: false };
   const playerRaycaster = new THREE.Raycaster();
+  const raycastTerrainHeightfield = (ray: THREE.Ray): TerrainSurfaceHit | null => {
+    const maxDistance = Math.max(8000, worldCells * 8);
+    const step = 2;
+    let previousT = 0;
+    const previousPoint = ray.at(previousT, new THREE.Vector3());
+    let previousSigned = previousPoint.y - surfaceHeight(previousPoint.x, previousPoint.z);
+
+    for (let t = step; t <= maxDistance; t += step) {
+      const point = ray.at(t, new THREE.Vector3());
+      const inWorld = point.x >= 0 && point.x <= worldCells && point.z >= 0 && point.z <= worldCells;
+      const signed = inWorld ? point.y - surfaceHeight(point.x, point.z) : Number.POSITIVE_INFINITY;
+      if (inWorld && previousSigned >= 0 && signed <= 0) {
+        let lo = previousT;
+        let hi = t;
+        const hit = new THREE.Vector3();
+        for (let i = 0; i < 12; i++) {
+          const midT = (lo + hi) * 0.5;
+          ray.at(midT, hit);
+          const midSigned = hit.y - surfaceHeight(hit.x, hit.z);
+          if (midSigned > 0) lo = midT;
+          else hi = midT;
+        }
+        ray.at(hi, hit);
+        return { point: hit.clone(), distance: hi, pageId: "heightfield" };
+      }
+      previousT = t;
+      previousSigned = signed;
+    }
+    return null;
+  };
+  const raycastEditableTerrain = (ray: THREE.Ray): TerrainSurfaceHit | null =>
+    terrainColliders.raycastSurface(ray) ?? raycastTerrainHeightfield(ray);
   const playerPointer = new THREE.Vector2();
   const playerForward = new THREE.Vector3();
   const orbitReturnTarget = new THREE.Vector3();
@@ -814,8 +847,8 @@ async function main() {
     interaction.startPlaying();
     emitAudio("camera.mode.player");
     controls.enabled = false;
-    editToggleInput.checked = false;
-    document.body.dataset.tfEdit = "false";
+    editToggleInput.checked = true;
+    document.body.dataset.tfEdit = "true";
     updatePlayerModeUi();
     void renderer.domElement.requestPointerLock();
   };
@@ -2006,8 +2039,12 @@ async function main() {
   let digRebuildsInFlight = 0;
   const performDig = async (ray: THREE.Ray) => {
     if (digRebuildsInFlight > 0) return;
-    const hit = terrainColliders.raycastSurface(ray);
-    if (!hit) return;
+    const hit = raycastEditableTerrain(ray);
+    if (!hit) {
+      lastDigSummary = "no terrain under brush";
+      updateInfo();
+      return;
+    }
     const radius = state.digRadius;
     const edit = {
       x: hit.point.x, y: hit.point.y, z: hit.point.z, r: radius,
@@ -3706,10 +3743,10 @@ async function main() {
       camera.getWorldDirection(digDirection);
       digAimRay.origin.copy(camera.position);
       digAimRay.direction.copy(digDirection);
-      digAimHit = terrainColliders.raycastSurface(digAimRay);
+      digAimHit = raycastEditableTerrain(digAimRay);
     } else if (state.digEnabled && interaction.mode === "orbit" && hoverPointerValid) {
       playerRaycaster.setFromCamera(hoverPointer, camera);
-      digAimHit = terrainColliders.raycastSurface(playerRaycaster.ray);
+      digAimHit = raycastEditableTerrain(playerRaycaster.ray);
     }
     if (digAimHit) {
       digPreview.position.copy(digAimHit.point);
@@ -3784,7 +3821,7 @@ async function main() {
     }
     const tPropsStart = performance.now();
     const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
-    grassSystem?.update(elapsedSeconds, grassCenter);
+    grassSystem?.update(elapsedSeconds, grassCenter, camera);
     stoneSystem?.update(grassCenter);
     const nextStoneStats = stoneSystem?.getStats();
     if (nextStoneStats && (!stoneStats || nextStoneStats.total !== stoneStats.total || nextStoneStats.visible !== stoneStats.visible)) {

@@ -309,10 +309,16 @@ export function createTerrainNodeMaterial(
   const uContrast = uniform(adjust.contrast);
   const uSaturation = uniform(adjust.saturation);
   const uWarmth = uniform(adjust.warmth);
-  const uNormalColor = uniform(false);
+  // WGSL has no `bool` uniform type (WGSLNodeBuilder.getNodeUniform throws "Uniform 'bool' not
+  // declared"); only WebGL/GLSL tolerates it. Back these toggles with 0/1 float uniforms and
+  // derive bool nodes via comparison so the same graph builds on both backends.
+  const uNormalColor = uniform(0);
   const uFade = uniform(1.0);
-  const uFadeIn = uniform(true);
-  const uDither = uniform(false);
+  const uFadeIn = uniform(1);
+  const uDither = uniform(0);
+  const normalColorOn = uNormalColor.greaterThan(0.5);
+  const fadeInOn = uFadeIn.greaterThan(0.5);
+  const ditherOn = uDither.greaterThan(0.5);
   const uBlendWidth = uniform(textures?.blendWidth ?? 2.5);
   const uNormalIntensity = uniform(textures?.normalIntensity ?? 1.0);
   const rough = Math.min(Math.max(lighting.roughness, 0.04), 1.0);
@@ -394,12 +400,12 @@ export function createTerrainNodeMaterial(
   // colorspace chunks), so colorNode is the linear pre-tonemap colour.
   const material = new MeshBasicNodeMaterial();
   let colorNode: TslNode = diffuse.add(uSun.mul(spec));
-  colorNode = uNormalColor.select(geomN.mul(0.5).add(0.5), colorNode);
+  colorNode = normalColorOn.select(geomN.mul(0.5).add(0.5), colorNode);
   const ditherNoise = interleavedGradientNoise(screenCoordinate);
   const fade = clamp(uFade, 0.0, 1.0);
   const fadeInDiscard = ditherNoise.greaterThan(fade);
   const fadeOutDiscard = ditherNoise.lessThanEqual(fade.oneMinus());
-  colorNode = colorNode.bypass(or(uFadeIn.and(fadeInDiscard), not(uFadeIn).and(fadeOutDiscard)).and(uDither).discard());
+  colorNode = colorNode.bypass(or(fadeInOn.and(fadeInDiscard), not(fadeInOn).and(fadeOutDiscard)).and(ditherOn).discard());
   material.colorNode = colorNode;
   material.side = THREE.DoubleSide;
 
@@ -428,14 +434,14 @@ export function createTerrainNodeMaterial(
       uWarmth.value = next.warmth;
     },
     setDebug(state) {
-      uNormalColor.value = state.normalColor;
+      uNormalColor.value = state.normalColor ? 1 : 0;
       void state.normalDivergence;
       void state.divergenceGain;
     },
     setFade(fade, fadeIn, dither) {
       uFade.value = fade;
-      uFadeIn.value = fadeIn;
-      uDither.value = dither;
+      uFadeIn.value = fadeIn ? 1 : 0;
+      uDither.value = dither ? 1 : 0;
     },
   };
 }

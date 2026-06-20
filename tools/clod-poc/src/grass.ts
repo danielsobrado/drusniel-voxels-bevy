@@ -3,17 +3,21 @@ import {
   StorageBufferAttribute,
   StorageInstancedBufferAttribute,
 } from "three/webgpu";
-import { materialWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "./terrain.js";
+import { getDigEditsSnapshot, materialWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "./terrain.js";
 import type { ClodPageNode, PageFootprint } from "./types.js";
 import {
-  GRASS_GPU_CANDIDATE_FLOATS,
+  GRASS_GPU_RING_CELL,
+  GRASS_GPU_RING_GRID,
+  GRASS_GPU_RING_SLOT_COUNT,
   GrassGpuRingCompute,
+  grassGpuRingTierRegion,
   grassGpuRingComputeUnsupportedReason,
-  type GrassGpuCandidateBuffer,
   type GrassGpuRingOutputBuffers,
   type GrassGpuRingStats,
   type GrassGpuTierOutputBuffers,
 } from "./gpu/grass_ring_compute.js";
+import { resolveDigEdits } from "./gpu/terrain_field_core.js";
+import { depthPrepassTwin } from "./rendering/veg_prepass.js";
 
 const TWO_PI = Math.PI * 2;
 const MIN_GRASS_WEIGHT = 0.05;
@@ -34,7 +38,7 @@ const V2_MID_BLADE_ROWS = [
 ] as const;
 export const GRASS_SHADER_MODES = ["terrain-patch-v2", "webgpu-ring-v1", "classic"] as const;
 export type GrassShaderMode = typeof GRASS_SHADER_MODES[number];
-export const DEFAULT_GRASS_SHADER_MODE: GrassShaderMode = "terrain-patch-v2";
+export const DEFAULT_GRASS_SHADER_MODE: GrassShaderMode = "webgpu-ring-v1";
 const V2_NEAR_DISTANCE_FRACTION = 0.42;
 const V2_MID_DISTANCE_FRACTION = 0.78;
 const V2_MID_INSTANCE_FRACTION = 0.35;
@@ -44,7 +48,6 @@ const V2_EDGE_SAMPLE_SCALE = 1.25;
 const V2_EDGE_HEIGHT_SOFT = 1.5;
 const V2_EDGE_HEIGHT_HARD = 4.5;
 const PATCH_REFRESH_DISTANCE = 4;
-const RING_REFRESH_CELLS = 4;
 const RING_MAX_RADIUS = 220;
 const RING_MAX_AXIS_CELLS = 220;
 const RING_NEAR_METERS = 36;
@@ -481,7 +484,7 @@ export const DEFAULT_GRASS_SETTINGS: GrassSettings = {
   windSpeed: 1.35,
   slopeMinY: 0.72,
   minHeight: 12,
-  maxHeight: 24,
+  maxHeight: 128,
   maxBlades: 48000,
   seed: 1337,
 };
@@ -535,6 +538,41 @@ export function randomSigned(x: number, z: number, seed: number): number {
   return hash2(x, z, seed) * 2 - 1;
 }
 
+export function pcg2d(cellX: number, cellZ: number, salt: number): [number, number] {
+  const m = 1664525;
+  const c = 1013904223;
+  const a0 = (Math.trunc(cellX) + 40000 + (salt & 0x3fff)) >>> 0;
+  const b0 = (Math.trunc(cellZ) + 40000 + ((salt >>> 14) & 0x3fff)) >>> 0;
+  const a1 = (Math.imul(a0, m) + c) >>> 0;
+  const b1 = (Math.imul(b0, m) + c) >>> 0;
+  const a2 = (a1 + Math.imul(b1, m)) >>> 0;
+  const b2 = (b1 + Math.imul(a2, m)) >>> 0;
+  const a3 = (a2 ^ (a2 >>> 16)) >>> 0;
+  const b3 = (b2 ^ (b2 >>> 16)) >>> 0;
+  const a4 = (a3 + Math.imul(b3, m)) >>> 0;
+  const b4 = (b3 + Math.imul(a4, m)) >>> 0;
+  const a5 = (a4 ^ (a4 >>> 16)) >>> 0;
+  const b5 = (b4 ^ (b4 >>> 16)) >>> 0;
+  const inv = 1 / 16777216;
+  return [(a5 & 0xffffff) * inv, (b5 & 0xffffff) * inv];
+}
+
+export function grassWorldCell(
+  slotX: number,
+  slotZ: number,
+  grid: number,
+  cellSize: number,
+  cameraX: number,
+  cameraZ: number,
+): [number, number] {
+  const camCellX = cameraX / cellSize;
+  const camCellZ = cameraZ / cellSize;
+  return [
+    Math.round((camCellX - slotX) / grid) * grid + slotX,
+    Math.round((camCellZ - slotZ) / grid) * grid + slotZ,
+  ];
+}
+
 export function acceptsGrassCandidate(settings: GrassSettings, sample: GrassCandidateSample): boolean {
   return sample.normalY >= settings.slopeMinY
     && sample.height >= settings.minHeight
@@ -571,87 +609,49 @@ function grassFadeDistance(settings: Pick<GrassSettings, "distance" | "shaderMod
     : settings.distance;
 }
 
-function grassGpuCandidateKey(settings: GrassSettings, worldCells: number): string {
+function grassGpuRingKey(settings: GrassSettings, worldCells: number): string {
   return [
     worldCells,
-    settings.distance,
-    settings.bladeSpacing,
-    settings.bladeHeight,
-    settings.bladeHeightVariation,
-    settings.slopeMinY,
-    settings.minHeight,
-    settings.maxHeight,
     settings.maxBlades,
-    settings.seed,
+    GRASS_GPU_RING_GRID,
+    GRASS_GPU_RING_CELL,
   ].join("|");
 }
 
-export function buildGrassGpuCandidateBuffer(
-  settings: GrassSettings,
-  worldCells: number,
-  maxCandidates = Math.max(settings.maxBlades, settings.maxBlades * 4),
-): GrassGpuCandidateBuffer {
-  const bands = grassRingBands(settings);
-  const spacing = ringCellSize(settings, bands.radius);
-  const columns = Math.max(0, Math.ceil(worldCells / spacing));
-  const rows = columns;
-  const stats = {
-    generatedCandidates: 0,
-    acceptedCandidates: 0,
-  };
-  const ranked: { priority: number; values: number[] }[] = [];
+function grassGpuRingTierCapacity(settings: GrassSettings): number {
+  return Math.max(0, Math.floor(settings.maxBlades));
+}
 
-  for (let row = 0; row < rows; row++) {
-    for (let column = 0; column < columns; column++) {
-      stats.generatedCandidates++;
-      const jitterX = randomSigned(column, row, settings.seed + 5101) * spacing * 0.42;
-      const jitterZ = randomSigned(column, row, settings.seed + 5209) * spacing * 0.42;
-      const x = THREE.MathUtils.clamp((column + 0.5) * spacing + jitterX, 0.001, worldCells - 0.001);
-      const z = THREE.MathUtils.clamp((row + 0.5) * spacing + jitterZ, 0.001, worldCells - 0.001);
-      const site = sampleGrassTerrainSite(x, z, settings);
-      if (!acceptsGrassCandidate(settings, {
-        height: site.height,
-        normalY: site.normalY,
-        grassWeight: site.grassMask,
-        waterDepth: site.waterDepth,
-        rockWeight: site.rockWeight,
-        snowWeight: site.snowWeight,
-        threshold: hash2(column, row, settings.seed + 5303),
-      })) continue;
-      const edgeFade = edgeFadeForCandidate(x, z, site.height, site.normalY, spacing);
-      if (edgeFade < 0.18) continue;
-
-      stats.acceptedCandidates++;
-      const heightScale = Math.max(
-        0.1,
-        1 + randomSigned(column, row, settings.seed + 5407) * settings.bladeHeightVariation,
-      );
-      ranked.push({
-        priority: hash2(column, row, settings.seed + 5501),
-        values: [
-          x, site.height + 0.02, z, settings.bladeHeight * heightScale,
-          site.terrainNormal[0], site.terrainNormal[1], site.terrainNormal[2], edgeFade,
-          site.grassMask,
-          hash2(column, row, settings.seed + 5603) * TWO_PI,
-          hash2(column, row, settings.seed + 5701) * TWO_PI,
-          Math.min(1, Math.pow(hash2(column, row, settings.seed + 5801), 2) + site.wetBank * 0.16 + site.sandWeight * 0.12),
-        ],
-      });
-    }
-  }
-
-  ranked.sort((a, b) => a.priority - b.priority);
-  const count = Math.min(ranked.length, Math.max(0, Math.floor(maxCandidates)));
-  const data = new Float32Array(Math.max(1, count) * GRASS_GPU_CANDIDATE_FLOATS);
-  for (let i = 0; i < count; i++) {
-    data.set(ranked[i].values, i * GRASS_GPU_CANDIDATE_FLOATS);
-  }
-  return {
-    data,
-    count,
-    generatedCandidates: stats.generatedCandidates,
-    acceptedCandidates: stats.acceptedCandidates,
-  };
+export function grassMaskForHeightNormal(
+  height: number,
+  normalY: number,
+  settings: Pick<GrassSettings, "slopeMinY" | "minHeight" | "maxHeight"> = DEFAULT_GRASS_SETTINGS,
+  distanceFromCamera = Number.POSITIVE_INFINITY,
+): number {
+  if (height < settings.minHeight || height > settings.maxHeight) return 0;
+  const [grassWeight, rockWeight, , snowWeight] = materialWeights(height, normalY);
+  if (height < WATER_LEVEL + GRASS_WATER_CLEARANCE || rockWeight >= 0.82 || snowWeight >= 0.55) return 0;
+  const aboveWaterMask = THREE.MathUtils.smoothstep(height, WATER_LEVEL + GRASS_WATER_CLEARANCE, WATER_LEVEL + 3.5);
+  const slopeMask = THREE.MathUtils.smoothstep(
+    normalY,
+    Math.max(0, settings.slopeMinY - 0.04),
+    Math.min(1, settings.slopeMinY + 0.16),
+  );
+  const rockReject = THREE.MathUtils.smoothstep(rockWeight, 0.48, 0.84);
+  const snowReject = THREE.MathUtils.smoothstep(snowWeight, 0.08, 0.55);
+  const bankHeight = (1 - THREE.MathUtils.smoothstep(height, WATER_LEVEL + 1.0, WATER_LEVEL + 8.0))
+    * THREE.MathUtils.smoothstep(height, WATER_LEVEL + GRASS_WATER_CLEARANCE, WATER_LEVEL + 2.5);
+  const wetBank = bankHeight * THREE.MathUtils.smoothstep(normalY, 0.42, 0.82);
+  const wetBankThinning = 1 - wetBank * 0.58;
+  const viableMask = aboveWaterMask * slopeMask * (1 - rockReject) * (1 - snowReject);
+  const scruff = (1 - THREE.MathUtils.smoothstep(distanceFromCamera, RING_SCRUFF_METERS * 0.45, RING_SCRUFF_METERS))
+    * viableMask
+    * 0.18;
+  return THREE.MathUtils.clamp(
+    Math.max(grassWeight * viableMask * wetBankThinning, scruff),
+    0,
+    1,
+  );
 }
 
 export function sampleGrassTerrainSite(
@@ -968,6 +968,73 @@ export function createGrassTuftGeometry(width = 1): THREE.BufferGeometry {
   return geometry;
 }
 
+function makeDeterministicRandom(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function createGrassBladeClumpGeometry(
+  blades: number,
+  rows: readonly (readonly [number, number])[],
+  seed: number,
+): THREE.BufferGeometry {
+  const random = makeDeterministicRandom(seed + blades * 97 + rows.length * 17);
+  const source = createBladeGeometry(rows, false);
+  const sourcePosition = source.getAttribute("position");
+  const sourceNormal = source.getAttribute("normal");
+  const sourceUv = source.getAttribute("uv");
+  const sourceIndex = source.getIndex();
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  for (let blade = 0; blade < blades; blade++) {
+    const yaw = random() * TWO_PI;
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+    const offsetX = (random() - 0.5) * 0.18;
+    const offsetZ = (random() - 0.5) * 0.18;
+    const heightScale = 0.62 + random() * 0.7;
+    const widthScale = 0.82 + random() * 0.55;
+    const lean = (random() - 0.5) * 0.34;
+    const baseVertex = positions.length / 3;
+
+    for (let i = 0; i < sourcePosition.count; i++) {
+      const x = sourcePosition.getX(i) * widthScale;
+      const y = sourcePosition.getY(i) * heightScale;
+      const z = sourcePosition.getZ(i);
+      const shearX = x + lean * y;
+      positions.push(
+        shearX * cosYaw + z * sinYaw + offsetX,
+        y,
+        z * cosYaw - shearX * sinYaw + offsetZ,
+      );
+      normals.push(
+        sourceNormal.getX(i) * cosYaw + sourceNormal.getZ(i) * sinYaw,
+        sourceNormal.getY(i),
+        sourceNormal.getZ(i) * cosYaw - sourceNormal.getX(i) * sinYaw,
+      );
+      uvs.push(sourceUv.getX(i), sourceUv.getY(i));
+    }
+
+    if (sourceIndex) {
+      for (let i = 0; i < sourceIndex.count; i++) indices.push(baseVertex + sourceIndex.getX(i));
+    }
+  }
+
+  source.dispose();
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  return geometry;
+}
+
 function createGrassMaterial(
   settings: GrassSettings,
   lighting: GrassLighting,
@@ -1023,8 +1090,8 @@ export class GrassSystem {
   private readonly terrainPatchMidGeometry = createBladeGeometry(V2_MID_BLADE_ROWS);
   private readonly terrainPatchFarGeometry = createGrassTuftGeometry(1.25);
   private readonly terrainPatchSuperGeometry = createGrassTuftGeometry(1.85);
-  private readonly ringNearGeometry = createBladeGeometry(V2_NEAR_BLADE_ROWS, true);
-  private readonly ringMidGeometry = createBladeGeometry(V2_MID_BLADE_ROWS, true);
+  private readonly ringNearGeometry = createGrassBladeClumpGeometry(5, V2_NEAR_BLADE_ROWS, 0x9e3779b9);
+  private readonly ringMidGeometry = createGrassBladeClumpGeometry(3, V2_MID_BLADE_ROWS, 0x85ebca6b);
   private readonly ringFarGeometry = createGrassTuftGeometry(1.15);
   private readonly ringSuperGeometry = createGrassTuftGeometry(1.85);
   private readonly materials = new Map<GrassShaderMode, THREE.ShaderMaterial>();
@@ -1049,17 +1116,21 @@ export class GrassSystem {
   private injectedMaterial: GrassMaterialHandle | null;
   private readonly injectedMaterialFactory: GrassMaterialFactory | null;
   private readonly injectedGeometryBuilder: GrassGeometryBuilder | null;
+  private readonly useGrassPrepass: boolean;
+  private readonly useGrassRingDebug: boolean;
   private currentLighting: GrassLighting;
   private settings: GrassSettings;
   private patches: GrassPatch[] = [];
   private patchesDirty = true;
   private ringMeshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[] = [];
-  private ringDirty = true;
+  private ringPrepassTwins: THREE.Mesh[] = [];
   private ringBladeCount = 0;
   private ringTierCounts: Record<GrassTier, number> = { near: 0, mid: 0, far: 0, super: 0 };
-  private ringCenterCellX = Number.POSITIVE_INFINITY;
-  private ringCenterCellZ = Number.POSITIVE_INFINITY;
   private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
+  private readonly frustum = new THREE.Frustum();
+  private readonly frustumMatrix = new THREE.Matrix4();
+  private readonly frustumPlaneScratch = new Float32Array(24);
+  private hasGpuRingFrustum = false;
   private bladeCount = 0;
   private generationStats: GrassGenerationStats = {
     generatedCandidates: 0,
@@ -1109,6 +1180,11 @@ export class GrassSystem {
     this.injectedMaterialFactory = options.createMaterial ?? null;
     this.injectedMaterial = options.material ?? null;
     this.injectedGeometryBuilder = options.buildGeometry ?? null;
+    this.useGrassPrepass = typeof location === "undefined"
+      ? true
+      : new URLSearchParams(location.search).get("prepass") !== "0";
+    this.useGrassRingDebug = typeof location !== "undefined"
+      && new URLSearchParams(location.search).get("grassRingDebug") === "1";
     if (this.injectedMaterialFactory) this.replaceInjectedMaterial();
     if (!this.injectedMaterial) {
       for (const mode of GRASS_SHADER_MODES) {
@@ -1129,7 +1205,6 @@ export class GrassSystem {
     if (enabled && !wasEnabled) {
       if (this.isRingMode()) {
         this.updateGpuRingCounters(this.lastCenter);
-        this.refreshRingForCenter(this.lastCenter, true);
       }
       else if (this.patches.length === 0) this.refreshForCenter(this.lastCenter);
     }
@@ -1150,7 +1225,6 @@ export class GrassSystem {
     }
     this.updateMaterialUniforms();
     this.patchesDirty = true;
-    this.ringDirty = true;
     this.setEnabled(this.settings.enabled);
   }
 
@@ -1168,7 +1242,7 @@ export class GrassSystem {
     }
   }
 
-  update(timeSeconds: number, center: THREE.Vector3): void {
+  update(timeSeconds: number, center: THREE.Vector3, camera?: THREE.Camera): void {
     if (this.injectedMaterial) {
       this.injectedMaterial.setTime?.(timeSeconds);
       this.injectedMaterial.setFadeCenter?.(center.x, center.z);
@@ -1183,8 +1257,7 @@ export class GrassSystem {
       return;
     }
     if (this.isRingMode()) {
-      this.updateGpuRingCounters(center);
-      this.refreshRingForCenter(center);
+      this.updateGpuRingCounters(center, camera);
       return;
     }
     if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= PATCH_REFRESH_DISTANCE) {
@@ -1199,7 +1272,6 @@ export class GrassSystem {
     if (this.settings.enabled) {
       if (this.isRingMode()) {
         this.updateGpuRingCounters(this.lastCenter);
-        this.refreshRingForCenter(this.lastCenter, true);
       }
       else this.refreshForCenter(this.lastCenter);
     }
@@ -1211,10 +1283,8 @@ export class GrassSystem {
     const ids = new Set(nodeIds);
     if (ids.size === 0) return;
     if (this.isRingMode()) {
-      this.ringDirty = true;
       this.clearGpuRingCompute();
       this.updateGpuRingCounters(this.lastCenter);
-      this.refreshRingForCenter(this.lastCenter, true);
       return;
     }
     const retained: GrassPatch[] = [];
@@ -1275,17 +1345,28 @@ export class GrassSystem {
   }
 
   private clearRing(): void {
+    for (const twin of this.ringPrepassTwins) {
+      this.root.remove(twin);
+      if (Array.isArray(twin.material)) {
+        for (const material of twin.material) material.dispose();
+      } else {
+        twin.material.dispose();
+      }
+    }
+    this.ringPrepassTwins = [];
+    const sharedMaterials = new Set<THREE.Material>([
+      ...this.materials.values(),
+      ...(this.injectedMaterial ? [this.injectedMaterial.material] : []),
+    ]);
     for (const mesh of this.ringMeshes) {
       this.root.remove(mesh);
       mesh.geometry.dispose();
+      if (!sharedMaterials.has(mesh.material)) mesh.material.dispose();
     }
     this.ringMeshes = [];
     this.gpuRingDraw = null;
     this.ringBladeCount = 0;
     this.ringTierCounts = { near: 0, mid: 0, far: 0, super: 0 };
-    this.ringCenterCellX = Number.POSITIVE_INFINITY;
-    this.ringCenterCellZ = Number.POSITIVE_INFINITY;
-    this.ringDirty = true;
     this.updateStats();
   }
 
@@ -1294,6 +1375,7 @@ export class GrassSystem {
     this.gpuRingCompute = null;
     this.gpuRingInit = null;
     this.gpuRingKey = "";
+    this.hasGpuRingFrustum = false;
     this.gpuRingStats = {
       status: this.gpuDevice ? "idle" : "disabled",
       candidateCount: 0,
@@ -1310,7 +1392,7 @@ export class GrassSystem {
     return this.supportsRing && this.settings.shaderMode === "webgpu-ring-v1";
   }
 
-  private updateGpuRingCounters(center: THREE.Vector3): void {
+  private updateGpuRingCounters(center: THREE.Vector3, camera?: THREE.Camera): void {
     if (!this.gpuDevice || !this.gpuBackend || !this.isRingMode()) {
       this.gpuRingStats = {
         ...this.gpuRingStats,
@@ -1329,10 +1411,24 @@ export class GrassSystem {
 
     this.ensureGpuRingCompute();
     if (!this.gpuRingCompute) return;
+    const frustumPlanes = this.frustumPlanes(camera);
+    if (!frustumPlanes) {
+      this.gpuRingStats = this.gpuRingCompute.stats(this.settings.enabled);
+      return;
+    }
     this.gpuRingCompute.dispatch({
       centerX: center.x,
       centerZ: center.z,
+      worldCells: this.worldCells,
       bands: grassRingBands(this.settings),
+      bladeHeight: this.settings.bladeHeight,
+      bladeHeightVariation: this.settings.bladeHeightVariation,
+      slopeMinY: this.settings.slopeMinY,
+      minHeight: this.settings.minHeight,
+      maxHeight: this.settings.maxHeight,
+      maxInstancesPerTier: grassGpuRingTierCapacity(this.settings),
+      seed: this.settings.seed,
+      frustumPlanes,
     }, {
       near: this.indexCountFor(this.ringNearGeometry),
       mid: this.indexCountFor(this.ringMidGeometry),
@@ -1351,7 +1447,7 @@ export class GrassSystem {
 
   private ensureGpuRingCompute(): void {
     if (!this.gpuDevice || !this.gpuBackend || !this.isRingMode()) return;
-    const key = grassGpuCandidateKey(this.settings, this.worldCells);
+    const key = grassGpuRingKey(this.settings, this.worldCells);
     if (this.gpuRingCompute && this.gpuRingKey === key) {
       this.gpuRingStats = this.gpuRingCompute.stats(this.settings.enabled);
       return;
@@ -1361,22 +1457,28 @@ export class GrassSystem {
     this.clearGpuRingCompute();
     this.clearRing();
     this.gpuRingKey = key;
-    const candidates = buildGrassGpuCandidateBuffer(this.settings, this.worldCells);
-    this.gpuRingDraw = this.createGpuRingDrawResources(candidates.count);
+    const tierCapacity = grassGpuRingTierCapacity(this.settings);
+    this.gpuRingDraw = this.createGpuRingDrawResources(tierCapacity);
     this.ringMeshes = Object.values(this.gpuRingDraw.tiers).map((tier) => tier.mesh);
     for (const mesh of this.ringMeshes) this.root.add(mesh);
+    this.generationStats = {
+      generatedCandidates: GRASS_GPU_RING_SLOT_COUNT,
+      acceptedCandidates: 0,
+      edgeSuppressedCandidates: 0,
+    };
     this.gpuRingStats = {
       status: "initializing",
-      candidateCount: candidates.count,
-      generatedCandidates: candidates.generatedCandidates,
-      acceptedCandidates: candidates.acceptedCandidates,
+      candidateCount: GRASS_GPU_RING_SLOT_COUNT,
+      generatedCandidates: GRASS_GPU_RING_SLOT_COUNT,
+      acceptedCandidates: 0,
       counts: { near: 0, mid: 0, far: 0, super: 0 },
       dispatchMs: null,
       readbackMs: null,
       skippedDispatches: 0,
     };
     const initKey = key;
-    this.gpuRingInit = GrassGpuRingCompute.create(this.gpuDevice, candidates, this.gpuRingDraw.outputBuffers)
+    const edits = resolveDigEdits(getDigEditsSnapshot());
+    this.gpuRingInit = GrassGpuRingCompute.create(this.gpuDevice, edits, this.gpuRingDraw.outputBuffers)
       .then((compute) => {
         if (this.gpuRingKey !== initKey) {
           compute.destroy();
@@ -1396,6 +1498,25 @@ export class GrassSystem {
       .finally(() => {
         if (this.gpuRingKey === initKey) this.gpuRingInit = null;
       });
+  }
+
+  private frustumPlanes(camera?: THREE.Camera): Float32Array | null {
+    if (!camera) {
+      return this.hasGpuRingFrustum ? this.frustumPlaneScratch : null;
+    }
+    camera.updateMatrixWorld();
+    this.frustumMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.frustumMatrix);
+    for (let i = 0; i < 6; i++) {
+      const plane = this.frustum.planes[i];
+      const offset = i * 4;
+      this.frustumPlaneScratch[offset] = plane.normal.x;
+      this.frustumPlaneScratch[offset + 1] = plane.normal.y;
+      this.frustumPlaneScratch[offset + 2] = plane.normal.z;
+      this.frustumPlaneScratch[offset + 3] = plane.constant;
+    }
+    this.hasGpuRingFrustum = true;
+    return this.frustumPlaneScratch;
   }
 
   private indexCountFor(geometry: THREE.BufferGeometry): number {
@@ -1422,6 +1543,7 @@ export class GrassSystem {
       far: this.createGpuRingTierDraw("far", count, this.ringFarGeometry, indirect, 10 * Uint32Array.BYTES_PER_ELEMENT, sharedAttributes),
       super: this.createGpuRingTierDraw("super", count, this.ringSuperGeometry, indirect, 15 * Uint32Array.BYTES_PER_ELEMENT, sharedAttributes),
     } satisfies Record<GrassTier, GrassGpuTierDrawResources>;
+    if (this.useGrassRingDebug) this.logGpuRingRegions(count);
 
     return {
       tiers,
@@ -1434,6 +1556,14 @@ export class GrassSystem {
         indirectArgs: this.gpuBufferForAttribute(indirect),
       },
     };
+  }
+
+  private logGpuRingRegions(maxInstancesPerTier: number): void {
+    const rows = (["near", "mid", "far", "super"] as const).map((tier, index) => ({
+      tier,
+      ...grassGpuRingTierRegion(index, maxInstancesPerTier),
+    }));
+    console.info("[grass-ring-debug] compact tier regions", rows);
   }
 
   private createGpuRingTierDraw(
@@ -1461,10 +1591,30 @@ export class GrassSystem {
       new THREE.Vector3(this.worldCells + 1, 256, this.worldCells + 1),
     );
     geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
-    const mesh = new THREE.Mesh(geometry, this.materialFor(this.settings.shaderMode));
+    const baseMaterial = this.materialFor(this.settings.shaderMode);
+    const material = this.usesGpuRingPrepass(tier) ? baseMaterial.clone() : baseMaterial;
+    const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `grass-ring-gpu-${tier}`;
     mesh.frustumCulled = false;
+    this.addGpuRingPrepassTwin(tier, mesh);
     return { mesh, offset, packed0, packed1, terrainNormal };
+  }
+
+  private usesGpuRingPrepass(tier: GrassTier): boolean {
+    return this.useGrassPrepass && (tier === "near" || tier === "mid");
+  }
+
+  private addGpuRingPrepassTwin(tier: GrassTier, mesh: THREE.Mesh): void {
+    if (!this.usesGpuRingPrepass(tier)) return;
+    const materialNodes = mesh.material as unknown as { positionNode?: unknown; maskNode?: unknown };
+    if (!materialNodes.positionNode) return;
+    const twin = depthPrepassTwin(mesh, {
+      positionNode: materialNodes.positionNode,
+      maskNode: materialNodes.maskNode,
+      side: THREE.DoubleSide,
+    });
+    this.ringPrepassTwins.push(twin);
+    this.root.add(twin);
   }
 
   private createStorageInstancedAttribute(name: string, count: number): StorageInstancedBufferAttribute {
@@ -1501,81 +1651,6 @@ export class GrassSystem {
     const buffer = this.gpuBackend.get(attribute).buffer;
     if (!buffer) throw new Error(`Missing GPU buffer for ${attribute.name || "grass attribute"}`);
     return buffer;
-  }
-
-  private refreshRingForCenter(center: THREE.Vector3, force = false): void {
-    if (this.gpuRingDraw) {
-      this.updateStats();
-      return;
-    }
-    const radius = Math.max(0, Math.min(this.settings.distance, RING_MAX_RADIUS));
-    const cellSize = ringCellSize(this.settings, radius);
-    const centerCellX = Math.floor(center.x / cellSize);
-    const centerCellZ = Math.floor(center.z / cellSize);
-    const cellDelta = Math.max(
-      Math.abs(centerCellX - this.ringCenterCellX),
-      Math.abs(centerCellZ - this.ringCenterCellZ),
-    );
-    if (!force && !this.ringDirty && cellDelta < RING_REFRESH_CELLS) {
-      this.updateStats();
-      return;
-    }
-
-    const ring = generateGrassRingInstances(center, this.settings, this.worldCells);
-    this.clearRing();
-    this.generationStats = ring.stats;
-    this.ringCenterCellX = ring.centerCellX;
-    this.ringCenterCellZ = ring.centerCellZ;
-    this.ringDirty = false;
-    this.addRingTier("near", ring.near, this.ringNearGeometry);
-    this.addRingTier("mid", ring.mid, this.ringMidGeometry);
-    this.addRingTier("far", ring.far, this.ringFarGeometry);
-    this.addRingTier("super", ring.super, this.ringSuperGeometry);
-    this.ringBladeCount = ring.near.length + ring.mid.length + ring.far.length + ring.super.length;
-    this.ringTierCounts = {
-      near: ring.near.length,
-      mid: ring.mid.length,
-      far: ring.far.length,
-      super: ring.super.length,
-    };
-    this.updateStats();
-  }
-
-  private addRingTier(
-    tier: GrassTier,
-    instances: GrassBladeInstance[],
-    bladeGeometry: THREE.BufferGeometry,
-  ): void {
-    if (instances.length === 0) return;
-    const geometry = this.injectedGeometryBuilder
-      ? this.injectedGeometryBuilder(instances, {
-          mode: this.settings.shaderMode,
-          tier,
-          crossed: true,
-        })
-      : new THREE.InstancedBufferGeometry();
-    if (!this.injectedGeometryBuilder) {
-      this.populateGeometry(geometry, bladeGeometry, this.instancesFootprint(instances), instances);
-    }
-    const mesh = new THREE.Mesh(geometry, this.materialFor(this.settings.shaderMode));
-    mesh.name = `grass-ring-${tier}`;
-    mesh.frustumCulled = true;
-    this.ringMeshes.push(mesh);
-    this.root.add(mesh);
-  }
-
-  private instancesFootprint(instances: readonly GrassBladeInstance[]): PageFootprint {
-    let minX = Number.POSITIVE_INFINITY;
-    let minZ = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxZ = Number.NEGATIVE_INFINITY;
-    for (const instance of instances) {
-      minX = Math.min(minX, instance.offset[0]);
-      minZ = Math.min(minZ, instance.offset[2]);
-      maxX = Math.max(maxX, instance.offset[0]);
-      maxZ = Math.max(maxZ, instance.offset[2]);
-    }
-    return { minX, minZ, maxX, maxZ };
   }
 
   private refreshForCenter(center: THREE.Vector3): void {
@@ -1814,6 +1889,7 @@ export class GrassSystem {
   private updateMaterialUniforms(): void {
     if (this.injectedMaterial) {
       this.injectedMaterial.updateSettings?.(this.settings);
+      this.syncGpuRingMaterialClones();
       return;
     }
     for (const [mode, material] of this.materials) {
@@ -1828,6 +1904,16 @@ export class GrassSystem {
         grassShaderDefinition(mode).patchStyle === "terrain-patch" && this.settings.alphaToCoverage;
       material.alphaToCoverage = useAlphaToCoverage;
       material.uniforms.uAlphaToCoverage.value = useAlphaToCoverage ? 1 : 0;
+    }
+  }
+
+  private syncGpuRingMaterialClones(): void {
+    if (!this.injectedMaterial) return;
+    const source = this.injectedMaterial.material;
+    for (const mesh of this.ringMeshes) {
+      if (mesh.material === source) continue;
+      mesh.material.alphaToCoverage = source.alphaToCoverage;
+      mesh.material.needsUpdate = true;
     }
   }
 
@@ -1894,8 +1980,8 @@ export class GrassSystem {
         midPatches: this.ringTierCounts.mid > 0 ? 1 : 0,
         coveragePatches: this.ringTierCounts.far > 0 ? 1 : 0,
         superPatches: this.ringTierCounts.super > 0 ? 1 : 0,
-        generatedCandidates: this.generationStats.generatedCandidates,
-        acceptedCandidates: this.generationStats.acceptedCandidates,
+        generatedCandidates: ringGpu.generatedCandidates,
+        acceptedCandidates: ringGpu.acceptedCandidates,
         edgeSuppressedCandidates: this.generationStats.edgeSuppressedCandidates,
         midBladeCount: this.ringTierCounts.mid + this.ringTierCounts.far + this.ringTierCounts.super,
         gpuRingStatus: ringGpu.status,

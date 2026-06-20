@@ -17,6 +17,7 @@ export default defineConfig(({ command }) => ({
     target: "es2022",
   },
   test: {
+    setupFiles: ["./src/test-setup.ts"],
     exclude: [
       "**/node_modules/**",
       "**/dist/**",

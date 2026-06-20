@@ -4,14 +4,17 @@ import {
   DEFAULT_GRASS_SETTINGS,
   GRASS_SHADER_MODES,
   acceptsGrassCandidate,
-  buildGrassGpuCandidateBuffer,
   generateGrassRingInstances,
   generateGrassInstances,
+  grassMaskForHeightNormal,
   grassThin,
+  grassWorldCell,
+  pcg2d,
   sampleGrassTerrainSite,
   type GrassTerrainSite,
   type GrassSettings,
 } from "./grass.js";
+import { GRASS_GPU_RING_CELL, GRASS_GPU_RING_GRID, GRASS_GPU_RING_SLOT_COUNT } from "./gpu/grass_ring_compute.js";
 import { addDigEdit, clearDigEdits, surfaceHeight } from "./terrain.js";
 import { buildGrassInstancedGeometry } from "./gpu/grass_node_material.js";
 import type { PageFootprint } from "./types.js";
@@ -37,9 +40,11 @@ function findSite(predicate: (site: GrassTerrainSite) => boolean): { x: number; 
 }
 
 describe("grass placement", () => {
-  it("defaults to the terrain patch shader while retaining the classic shader option", () => {
-    expect(DEFAULT_GRASS_SHADER_MODE).toBe("terrain-patch-v2");
-    expect(DEFAULT_GRASS_SETTINGS.shaderMode).toBe("terrain-patch-v2");
+  it("defaults to the WebGPU ring shader while retaining fallback shader options", () => {
+    expect(DEFAULT_GRASS_SHADER_MODE).toBe("webgpu-ring-v1");
+    expect(DEFAULT_GRASS_SETTINGS.shaderMode).toBe("webgpu-ring-v1");
+    expect(DEFAULT_GRASS_SETTINGS.maxHeight).toBe(128);
+    expect(GRASS_SHADER_MODES).toContain("terrain-patch-v2");
     expect(GRASS_SHADER_MODES).toContain("webgpu-ring-v1");
     expect(GRASS_SHADER_MODES).toContain("classic");
   });
@@ -169,21 +174,39 @@ describe("grass placement", () => {
     expect(ring.super.length).toBeGreaterThan(0);
   });
 
-  it("builds deterministic one-time GPU ring candidate buffers", () => {
-    const gpuSettings = {
-      ...settings,
-      shaderMode: "webgpu-ring-v1" as const,
-      distance: 96,
-      bladeSpacing: 2.5,
-      maxBlades: 128,
-    };
-    const first = buildGrassGpuCandidateBuffer(gpuSettings, 128);
-    const second = buildGrassGpuCandidateBuffer(gpuSettings, 128);
-    expect(second).toEqual(first);
-    expect(first.count).toBeGreaterThan(0);
-    expect(first.count).toBeLessThanOrEqual(gpuSettings.maxBlades * 4);
-    expect(first.data.length).toBeGreaterThanOrEqual(first.count * 12);
-    expect(first.generatedCandidates).toBeGreaterThan(first.acceptedCandidates);
+  it("uses a fixed GPU slot grid instead of a CPU candidate buffer", () => {
+    expect(GRASS_GPU_RING_GRID).toBe(384);
+    expect(GRASS_GPU_RING_CELL).toBe(1.25);
+    expect(GRASS_GPU_RING_SLOT_COUNT).toBe(GRASS_GPU_RING_GRID * GRASS_GPU_RING_GRID);
+    expect(GRASS_GPU_RING_GRID * GRASS_GPU_RING_CELL * 0.5).toBeGreaterThan(220);
+  });
+
+  it("mirrors GPU pcg2d deterministically", () => {
+    expect(pcg2d(12, -7, 1337)).toEqual(pcg2d(12, -7, 1337));
+    expect(pcg2d(12, -7, 1337)).not.toEqual(pcg2d(13, -7, 1337));
+    for (const value of pcg2d(-2048, 4096, 0x9e3779b9)) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(1);
+    }
+  });
+
+  it("maps toroidal slots to the nearest congruent world cell", () => {
+    const grid = 8;
+    const cell = 2;
+    expect(grassWorldCell(3, 5, grid, cell, 18, 22)).toEqual([11, 13]);
+    expect(grassWorldCell(3, 5, grid, cell, -5, -9)).toEqual([-5, -3]);
+  });
+
+  it("mirrors the grass mask math used by sampleGrassTerrainSite", () => {
+    const viable = findSite((site) =>
+      site.waterDepth === 0 &&
+      site.rockWeight < 0.4 &&
+      site.snowWeight < 0.08 &&
+      site.normalY >= settings.slopeMinY);
+    expect(viable).not.toBeNull();
+    if (!viable) return;
+    const site = sampleGrassTerrainSite(viable.x, viable.z, settings, 32);
+    expect(grassMaskForHeightNormal(site.height, site.normalY, settings, 32)).toBeCloseTo(site.grassMask, 12);
   });
 
   it("widens ring survivors as thinning reduces accepted density", () => {

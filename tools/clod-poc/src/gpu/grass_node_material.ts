@@ -10,6 +10,8 @@ import {
   clamp,
   cos,
   dot,
+  float,
+  fract,
   frontFacing,
   max,
   mix,
@@ -17,6 +19,7 @@ import {
   normalize,
   positionGeometry,
   pow,
+  screenCoordinate,
   sin,
   smoothstep,
   uniform,
@@ -51,6 +54,11 @@ const V2_MID_BLADE_ROWS = [
 export const GRASS_V2_NEAR_DISTANCE_FRACTION = 0.42;
 export const GRASS_V2_MID_DISTANCE_FRACTION = 0.78;
 const V2_MID_INSTANCE_FRACTION = 0.35;
+const RING_FAR_DISTANCE_FRACTION = 0.94;
+const RING_NEAR_METERS = 36;
+const RING_MID_METERS = 110;
+const RING_FAR_METERS = 170;
+const RING_BAND_METERS = 12;
 
 export interface GrassNodeParams {
   lighting: EnvironmentLighting;
@@ -80,6 +88,10 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const uWindStrength = uniform(params.windStrength);
   const uWindSpeed = uniform(params.windSpeed);
   const uFadeCenter = uniform(params.fadeCenter?.clone() ?? new THREE.Vector2());
+  const uNearDistance = uniform(Math.min((params.distance ?? 96) * GRASS_V2_NEAR_DISTANCE_FRACTION, RING_NEAR_METERS));
+  const uMidDistance = uniform(Math.min((params.distance ?? 96) * GRASS_V2_MID_DISTANCE_FRACTION, RING_MID_METERS));
+  const uFarDistance = uniform(Math.min((params.distance ?? 96) * RING_FAR_DISTANCE_FRACTION, RING_FAR_METERS));
+  const uBandDistance = uniform(RING_BAND_METERS);
   const uLight = uniform(params.lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(params.lighting.sunColor));
   const uSky = uniform(v3(params.lighting.skyLight));
@@ -103,6 +115,7 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const aPhase: TslNode = aPacked0.z;
   const aColorMix: TslNode = aPacked0.w;
   const aWidthScale: TslNode = aPacked1.z;
+  const aTier: TslNode = aPacked1.w;
   const uvY: TslNode = uv().y;
   const bend: TslNode = uvY.mul(uvY);
   const windTime: TslNode = uTime.mul(uWindSpeed).add(aPhase).add(aOffset.x.mul(0.071)).add(aOffset.z.mul(0.053));
@@ -188,6 +201,11 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const material = new MeshBasicNodeMaterial();
   material.positionNode = worldPos; // identity model transform -> local == world
   material.colorNode = litColor;
+  if (params.mode === "webgpu-ring-v1") {
+    const dist: TslNode = vec2(aOffset.x, aOffset.z).sub(uFadeCenter).length();
+    (material as unknown as { maskNode: TslNode }).maskNode =
+      grassRingBandMask(aTier, dist, uNearDistance, uMidDistance, uFarDistance, uBandDistance);
+  }
   material.side = THREE.DoubleSide;
   material.transparent = false;
   material.depthWrite = true;
@@ -205,6 +223,9 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
       uBladeWidth.value = settings.bladeWidth;
       uWindStrength.value = settings.windStrength;
       uWindSpeed.value = settings.windSpeed;
+      uNearDistance.value = Math.min(settings.distance * GRASS_V2_NEAR_DISTANCE_FRACTION, RING_NEAR_METERS);
+      uMidDistance.value = Math.min(settings.distance * GRASS_V2_MID_DISTANCE_FRACTION, RING_MID_METERS);
+      uFarDistance.value = Math.min(settings.distance * RING_FAR_DISTANCE_FRACTION, RING_FAR_METERS);
       useAlphaToCoverage = isPatchV2 && settings.alphaToCoverage === true;
       material.alphaToCoverage = useAlphaToCoverage;
       material.needsUpdate = true;
@@ -222,6 +243,32 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
 function nrmComponent(axis: "x" | "y" | "z"): TslNode {
   const nrm: TslNode = normalGeometry;
   return nrm[axis];
+}
+
+function interleavedGradientNoise(p: TslNode): TslNode {
+  return fract(fract(p.x.mul(0.06711056).add(p.y.mul(0.00583715))).mul(52.9829189));
+}
+
+function grassRingBandMask(
+  tier: TslNode,
+  dist: TslNode,
+  nearDistance: TslNode,
+  midDistance: TslNode,
+  farDistance: TslNode,
+  bandDistance: TslNode,
+): TslNode {
+  const ign = interleavedGradientNoise(screenCoordinate);
+  const fadeIn = (distance: TslNode): TslNode => smoothstep(distance.sub(bandDistance), distance.add(bandDistance), dist);
+  const fadeOut = (distance: TslNode): TslNode => float(1).sub(smoothstep(distance.sub(bandDistance), distance.add(bandDistance), dist));
+  const passIn = (fade: TslNode): TslNode => ign.greaterThanEqual(float(1).sub(fade));
+  const passOut = (fade: TslNode): TslNode => ign.lessThan(fade);
+  const nearPass = tier.lessThan(0.5).and(passOut(fadeOut(nearDistance)));
+  const midPass = tier.greaterThanEqual(0.5).and(tier.lessThan(1.5))
+    .and(passIn(fadeIn(nearDistance))).and(passOut(fadeOut(midDistance)));
+  const farPass = tier.greaterThanEqual(1.5).and(tier.lessThan(2.5))
+    .and(passIn(fadeIn(midDistance))).and(passOut(fadeOut(farDistance)));
+  const superPass = tier.greaterThanEqual(2.5).and(passIn(fadeIn(farDistance)));
+  return nearPass.or(midPass).or(farPass).or(superPass);
 }
 
 export interface GrassInstancedGeometryOptions {
@@ -352,7 +399,7 @@ export function buildGrassInstancedGeometry(
     packed1[i * 4] = b.edgeFade;
     packed1[i * 4 + 1] = b.normalY;
     packed1[i * 4 + 2] = b.widthScale ?? 1;
-    packed1[i * 4 + 3] = 0;
+    packed1[i * 4 + 3] = tierIndex(options.tier);
     const normal = b.terrainNormal;
     terrainNormal[i * 4] = normal[0];
     terrainNormal[i * 4 + 1] = normal[1];
@@ -378,6 +425,13 @@ export function buildGrassInstancedGeometry(
   geo.boundingSphere = geo.boundingBox.getBoundingSphere(new THREE.Sphere());
   base.dispose();
   return geo;
+}
+
+function tierIndex(tier: GrassTier | undefined): number {
+  if (tier === "mid") return 1;
+  if (tier === "far") return 2;
+  if (tier === "super") return 3;
+  return 0;
 }
 
 export function grassMidInstances(instances: readonly GrassBladeInstance[]): GrassBladeInstance[] {

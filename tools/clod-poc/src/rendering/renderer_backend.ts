@@ -7,6 +7,7 @@
 
 import * as THREE from "three";
 import { WebGPURenderer } from "three/webgpu";
+import { installPositionInvariance } from "./veg_prepass.js";
 
 export type RendererBackend = "webgl" | "webgpu";
 
@@ -37,6 +38,7 @@ export function createWebGlAppRenderer(): WebGlAppRenderer {
 export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
   const renderer = new WebGPURenderer({ antialias: true });
   await renderer.init();
+  installPositionInvariance(renderer);
   // fail-loud: surface WebGPU validation errors instead of silent black frames.
   const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
   if (device) {
