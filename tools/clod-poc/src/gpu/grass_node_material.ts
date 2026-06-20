@@ -33,6 +33,7 @@ import type { EnvironmentLighting } from "../environment.js";
 import {
   createBladeGeometry,
   createGrassTuftGeometry,
+  DEFAULT_GRASS_SETTINGS,
   type GrassBladeInstance,
   type GrassLighting,
   type GrassRingInstanceBuffers,
@@ -57,11 +58,6 @@ const V2_MID_BLADE_ROWS = [
 export const GRASS_V2_NEAR_DISTANCE_FRACTION = 0.42;
 export const GRASS_V2_MID_DISTANCE_FRACTION = 0.78;
 const V2_MID_INSTANCE_FRACTION = 0.35;
-const RING_FAR_DISTANCE_FRACTION = 0.94;
-const RING_NEAR_METERS = 36;
-const RING_MID_METERS = 110;
-const RING_FAR_METERS = 170;
-const RING_BAND_METERS = 12;
 
 export interface GrassNodeParams {
   lighting: EnvironmentLighting;
@@ -71,6 +67,7 @@ export interface GrassNodeParams {
   mode?: GrassSettings["shaderMode"];
   alphaToCoverage?: boolean;
   distance?: number;
+  ring?: GrassSettings["ring"];
   fadeCenter?: THREE.Vector2;
   debugAttributes?: boolean;
   /** When set (webgpu-ring-v1), instances are read from these storage buffers, not attributes. */
@@ -83,7 +80,7 @@ export interface GrassNodeMaterialHandle {
   setTime(t: number): void;
   /** Update the XZ point used by terrain-patch-v2 distance fading. */
   setFadeCenter(x: number, z: number): void;
-  updateSettings(settings: Pick<GrassSettings, "bladeWidth" | "windStrength" | "windSpeed" | "distance" | "alphaToCoverage">): void;
+  updateSettings(settings: Pick<GrassSettings, "bladeWidth" | "windStrength" | "windSpeed" | "distance" | "alphaToCoverage" | "ring">): void;
   updateLighting(lighting: EnvironmentLighting | GrassLighting): void;
 }
 
@@ -93,10 +90,11 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const uWindStrength = uniform(params.windStrength);
   const uWindSpeed = uniform(params.windSpeed);
   const uFadeCenter = uniform(params.fadeCenter?.clone() ?? new THREE.Vector2());
-  const uNearDistance = uniform(Math.min((params.distance ?? 96) * GRASS_V2_NEAR_DISTANCE_FRACTION, RING_NEAR_METERS));
-  const uMidDistance = uniform(Math.min((params.distance ?? 96) * GRASS_V2_MID_DISTANCE_FRACTION, RING_MID_METERS));
-  const uFarDistance = uniform(Math.min((params.distance ?? 96) * RING_FAR_DISTANCE_FRACTION, RING_FAR_METERS));
-  const uBandDistance = uniform(RING_BAND_METERS);
+  const ringSettings = params.ring ?? DEFAULT_GRASS_SETTINGS.ring;
+  const uNearDistance = uniform(Math.min((params.distance ?? 96) * GRASS_V2_NEAR_DISTANCE_FRACTION, ringSettings.nearMeters));
+  const uMidDistance = uniform(Math.min((params.distance ?? 96) * GRASS_V2_MID_DISTANCE_FRACTION, ringSettings.midMeters));
+  const uFarDistance = uniform(Math.min((params.distance ?? 96) * ringSettings.farDistanceFraction, ringSettings.farMeters));
+  const uBandDistance = uniform(ringSettings.bandMeters);
   const uLight = uniform(params.lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(params.lighting.sunColor));
   const uSky = uniform(v3(params.lighting.skyLight));
@@ -247,9 +245,10 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
       uBladeWidth.value = settings.bladeWidth;
       uWindStrength.value = settings.windStrength;
       uWindSpeed.value = settings.windSpeed;
-      uNearDistance.value = Math.min(settings.distance * GRASS_V2_NEAR_DISTANCE_FRACTION, RING_NEAR_METERS);
-      uMidDistance.value = Math.min(settings.distance * GRASS_V2_MID_DISTANCE_FRACTION, RING_MID_METERS);
-      uFarDistance.value = Math.min(settings.distance * RING_FAR_DISTANCE_FRACTION, RING_FAR_METERS);
+      uNearDistance.value = Math.min(settings.distance * GRASS_V2_NEAR_DISTANCE_FRACTION, settings.ring.nearMeters);
+      uMidDistance.value = Math.min(settings.distance * GRASS_V2_MID_DISTANCE_FRACTION, settings.ring.midMeters);
+      uFarDistance.value = Math.min(settings.distance * settings.ring.farDistanceFraction, settings.ring.farMeters);
+      uBandDistance.value = settings.ring.bandMeters;
       useAlphaToCoverage = isPatchV2 && settings.alphaToCoverage === true;
       material.alphaToCoverage = useAlphaToCoverage;
       material.needsUpdate = true;

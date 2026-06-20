@@ -4,12 +4,6 @@ import {
   DEFAULT_GRASS_SETTINGS,
   GRASS_WATER_CLEARANCE,
   MIN_GRASS_WEIGHT,
-  RING_MAX_RADIUS,
-  RING_FAR_DISTANCE_FRACTION,
-  RING_FAR_METERS,
-  RING_MID_METERS,
-  RING_NEAR_METERS,
-  RING_SCRUFF_METERS,
   V2_MID_DISTANCE_FRACTION,
   V2_NEAR_DISTANCE_FRACTION,
   type GrassCandidateSample,
@@ -84,23 +78,23 @@ export function grassThin(distance: number): number {
 
 export function grassRingBands(settings: GrassSettings): { near: number; mid: number; far: number; radius: number } {
   return {
-    radius: Math.max(0, Math.min(settings.distance, RING_MAX_RADIUS)),
-    near: Math.min(settings.distance * V2_NEAR_DISTANCE_FRACTION, RING_NEAR_METERS),
-    mid: Math.min(settings.distance * V2_MID_DISTANCE_FRACTION, RING_MID_METERS),
-    far: Math.min(settings.distance * RING_FAR_DISTANCE_FRACTION, RING_FAR_METERS),
+    radius: Math.max(0, Math.min(settings.distance, settings.ring.maxRadius)),
+    near: Math.min(settings.distance * V2_NEAR_DISTANCE_FRACTION, settings.ring.nearMeters),
+    mid: Math.min(settings.distance * V2_MID_DISTANCE_FRACTION, settings.ring.midMeters),
+    far: Math.min(settings.distance * settings.ring.farDistanceFraction, settings.ring.farMeters),
   };
 }
 
-export function grassFadeDistance(settings: Pick<GrassSettings, "distance" | "shaderMode">): number {
+export function grassFadeDistance(settings: GrassSettings): number {
   return settings.shaderMode === "webgpu-ring-v1"
-    ? Math.min(settings.distance, RING_MAX_RADIUS)
+    ? Math.min(settings.distance, settings.ring.maxRadius)
     : settings.distance;
 }
 
 export function grassMaskForHeightNormal(
   height: number,
   normalY: number,
-  settings: Pick<GrassSettings, "slopeMinY" | "minHeight" | "maxHeight"> = DEFAULT_GRASS_SETTINGS,
+  settings: Pick<GrassSettings, "slopeMinY" | "minHeight" | "maxHeight" | "ring"> = DEFAULT_GRASS_SETTINGS,
   distanceFromCamera = Number.POSITIVE_INFINITY,
 ): number {
   if (height < settings.minHeight || height > settings.maxHeight) return 0;
@@ -119,7 +113,11 @@ export function grassMaskForHeightNormal(
   const wetBank = bankHeight * THREE.MathUtils.smoothstep(normalY, 0.42, 0.82);
   const wetBankThinning = 1 - wetBank * 0.58;
   const viableMask = aboveWaterMask * slopeMask * (1 - rockReject) * (1 - snowReject);
-  const scruff = (1 - THREE.MathUtils.smoothstep(distanceFromCamera, RING_SCRUFF_METERS * 0.45, RING_SCRUFF_METERS))
+  const scruff = (1 - THREE.MathUtils.smoothstep(
+    distanceFromCamera,
+    settings.ring.scruffMeters * 0.45,
+    settings.ring.scruffMeters,
+  ))
     * viableMask
     * 0.18;
   return THREE.MathUtils.clamp(
@@ -132,7 +130,7 @@ export function grassMaskForHeightNormal(
 export function sampleGrassTerrainSite(
   x: number,
   z: number,
-  settings: Pick<GrassSettings, "slopeMinY"> = DEFAULT_GRASS_SETTINGS,
+  settings: Pick<GrassSettings, "slopeMinY" | "ring"> = DEFAULT_GRASS_SETTINGS,
   distanceFromCamera = Number.POSITIVE_INFINITY,
 ): GrassTerrainSite {
   const height = surfaceHeight(x, z);
@@ -154,7 +152,11 @@ export function sampleGrassTerrainSite(
   const wetBank = bankHeight * THREE.MathUtils.smoothstep(normalY, 0.42, 0.82);
   const wetBankThinning = 1 - wetBank * 0.58;
   const viableMask = aboveWaterMask * slopeMask * (1 - rockReject) * (1 - snowReject);
-  const scruff = (1 - THREE.MathUtils.smoothstep(distanceFromCamera, RING_SCRUFF_METERS * 0.45, RING_SCRUFF_METERS))
+  const scruff = (1 - THREE.MathUtils.smoothstep(
+    distanceFromCamera,
+    settings.ring.scruffMeters * 0.45,
+    settings.ring.scruffMeters,
+  ))
     * viableMask
     * 0.18;
   const grassMask = THREE.MathUtils.clamp(
@@ -177,4 +179,3 @@ export function sampleGrassTerrainSite(
     slopeMask,
   };
 }
-

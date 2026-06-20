@@ -6,7 +6,6 @@ const TIER_SUPER: u32 = 3u;
 const INDIRECT_STRIDE_U32: u32 = 5u;
 const TAU: f32 = 6.28318530718;
 const GRASS_WATER_CLEARANCE: f32 = 0.18;
-const RING_SCRUFF_METERS: f32 = 24.0;
 
 struct Params {
   center_radius: vec4<f32>,
@@ -91,7 +90,8 @@ fn grass_mask(height: f32, normal_y: f32, distance: f32) -> f32 {
   let snow_reject = smoothstep(0.08, 0.55, snow_weight);
   let viable = above_water * slope_mask * (1.0 - rock_reject) * (1.0 - snow_reject);
   let bank = wet_bank(height, normal_y);
-  let scruff = (1.0 - smoothstep(RING_SCRUFF_METERS * 0.45, RING_SCRUFF_METERS, distance))
+  let scruff_meters = params.settings_b.z;
+  let scruff = (1.0 - smoothstep(scruff_meters * 0.45, scruff_meters, distance))
     * viable * 0.18;
   return clamp(max(grass_weight * viable * (1.0 - bank * 0.58), scruff), 0.0, 1.0);
 }

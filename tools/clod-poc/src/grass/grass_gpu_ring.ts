@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import {
-  GRASS_GPU_RING_CELL,
-  GRASS_GPU_RING_GRID,
+  grassGpuRingCell,
+  grassGpuRingGrid,
   type GrassGpuRingOutputBuffers,
   type GrassGpuTierOutputBuffers,
 } from "../gpu/grass_ring_compute.js";
@@ -83,8 +83,15 @@ export function grassGpuRingKey(settings: GrassSettings, worldCells: number): st
   return [
     worldCells,
     settings.maxBlades,
-    GRASS_GPU_RING_GRID,
-    GRASS_GPU_RING_CELL,
+    grassGpuRingGrid(settings.ring),
+    grassGpuRingCell(settings.ring),
+    settings.ring.maxRadius,
+    settings.ring.nearMeters,
+    settings.ring.midMeters,
+    settings.ring.farMeters,
+    settings.ring.farDistanceFraction,
+    settings.ring.bandMeters,
+    settings.ring.scruffMeters,
   ].join("|");
 }
 
@@ -208,4 +215,3 @@ export function generateGrassRingInstances(
     centerCellZ,
   };
 }
-

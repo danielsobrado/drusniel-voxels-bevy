@@ -1,0 +1,35 @@
+grass:
+  enabled: false
+  shader_mode: webgpu-ring-v1
+  alpha_to_coverage: false
+  near_crossed_quads: true
+
+  distance: 96
+  blade_spacing: 1.6
+  blade_height: 1.15
+  blade_height_variation: 0.75
+  blade_width: 0.08
+
+  wind_strength: 0.32
+  wind_speed: 1.35
+
+  slope_min_y: 0.72
+  min_height: 12
+  max_height: 128
+  max_blades: 48000
+  seed: 1337
+
+  ring:
+    grid: 700
+    cell: 0.7
+    max_radius: 220
+    near_meters: 36
+    mid_meters: 110
+    far_meters: 170
+    far_distance_fraction: 0.94
+    band_meters: 12
+    scruff_meters: 24
+
+  patch_fallback:
+    max_new_patches_per_refresh: 2
+    refresh_distance: 4

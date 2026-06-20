@@ -3,9 +3,9 @@ import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/w
 import { getDigEditsSnapshot } from "../terrain.js";
 import type { ClodPageNode, PageFootprint } from "../types.js";
 import {
-  GRASS_GPU_RING_SLOT_COUNT,
   GrassGpuRingCompute,
   grassGpuRingComputeUnsupportedReason,
+  grassGpuRingSlotCount,
   grassGpuRingTierRegion,
   type GrassGpuRingStats,
 } from "../gpu/grass_ring_compute.js";
@@ -14,9 +14,6 @@ import { depthPrepassTwin } from "../rendering/veg_prepass.js";
 import {
   DEFAULT_GRASS_SHADER_MODE,
   GRASS_SHADER_MODES,
-  MAX_NEW_PATCHES_PER_REFRESH,
-  PATCH_REFRESH_DISTANCE,
-  RING_FAR_DISTANCE_FRACTION,
   V2_FAR_INSTANCE_FRACTION,
   V2_MID_DISTANCE_FRACTION,
   V2_MID_INSTANCE_FRACTION,
@@ -265,7 +262,7 @@ export class GrassSystem {
       this.updateGpuRingCounters(center, camera);
       return;
     }
-    if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= PATCH_REFRESH_DISTANCE) {
+    if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.patchFallback.refreshDistance) {
       this.refreshForCenter(center);
     }
   }
@@ -503,19 +500,20 @@ export class GrassSystem {
     this.clearGpuRingCompute();
     this.clearRing();
     this.gpuRingKey = key;
+    const slotCount = grassGpuRingSlotCount(this.settings.ring);
     const tierCapacity = grassGpuRingTierCapacity(this.settings);
     this.gpuRingDraw = this.createGpuRingDrawResources(tierCapacity);
     this.ringMeshes = Object.values(this.gpuRingDraw.tiers).map((tier) => tier.mesh);
     for (const mesh of this.ringMeshes) this.root.add(mesh);
     this.generationStats = {
-      generatedCandidates: GRASS_GPU_RING_SLOT_COUNT,
+      generatedCandidates: slotCount,
       acceptedCandidates: 0,
       edgeSuppressedCandidates: 0,
     };
     this.gpuRingStats = {
       status: "initializing",
-      candidateCount: GRASS_GPU_RING_SLOT_COUNT,
-      generatedCandidates: GRASS_GPU_RING_SLOT_COUNT,
+      candidateCount: slotCount,
+      generatedCandidates: slotCount,
       acceptedCandidates: 0,
       counts: { near: 0, mid: 0, far: 0, super: 0 },
       dispatchMs: null,
@@ -524,7 +522,7 @@ export class GrassSystem {
     };
     const initKey = key;
     const edits = resolveDigEdits(getDigEditsSnapshot());
-    this.gpuRingInit = GrassGpuRingCompute.create(this.gpuDevice, edits, this.gpuRingDraw.outputBuffers)
+    this.gpuRingInit = GrassGpuRingCompute.create(this.gpuDevice, edits, this.gpuRingDraw.outputBuffers, this.settings.ring)
       .then((compute) => {
         if (this.gpuRingKey !== initKey) {
           compute.destroy();
@@ -694,7 +692,7 @@ export class GrassSystem {
   }
 
   private refreshForCenter(center: THREE.Vector3): void {
-    // refreshPatches builds at most MAX_NEW_PATCHES_PER_REFRESH new patches and returns true if it
+    // refreshPatches builds at most maxNewPatchesPerRefresh new patches and returns true if it
     // deferred more; keep patchesDirty set so update() finishes them over the next frames instead
     // of scattering every newly-in-range patch in one frame (the walk stutter).
     const deferred = this.refreshPatches(center);
@@ -735,7 +733,7 @@ export class GrassSystem {
     for (let index = 0; index < newNodes.length && remainingBudget > 0; index++) {
       // Each createPatch scatters blades + builds an InstancedBufferGeometry. Building every
       // newly-in-range node in one frame is the walk stutter; cap per frame and defer the rest.
-      if (built >= MAX_NEW_PATCHES_PER_REFRESH) return true;
+      if (built >= this.settings.patchFallback.maxNewPatchesPerRefresh) return true;
       const node = newNodes[index];
       const source = node.footprint;
       const footprint: PageFootprint = {
@@ -911,7 +909,7 @@ export class GrassSystem {
 
     const nearDistance = this.settings.distance * V2_NEAR_DISTANCE_FRACTION + patch.radius;
     const midDistance = this.settings.distance * V2_MID_DISTANCE_FRACTION + patch.radius;
-    const farDistance = this.settings.distance * RING_FAR_DISTANCE_FRACTION + patch.radius;
+    const farDistance = this.settings.distance * this.settings.ring.farDistanceFraction + patch.radius;
     const coverageDistance = this.settings.distance + patch.radius;
     patch.meshes[0].visible = distance <= nearDistance;
     patch.meshes[1].visible = distance > nearDistance && distance <= midDistance;

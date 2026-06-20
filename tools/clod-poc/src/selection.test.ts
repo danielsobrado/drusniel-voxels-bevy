@@ -81,6 +81,34 @@ describe("selectCut 2:1 enforcement", () => {
     expect(injected.rendered.map((rendered) => rendered.id)).toEqual(["L1:0,0"]);
   });
 
+  it("force-splits stale edited ancestors even when their error is under budget", () => {
+    const children = [
+      node("L0:0,0", 0, { minX: 0, minZ: 0, maxX: 1, maxZ: 1 }),
+      node("L0:1,0", 0, { minX: 1, minZ: 0, maxX: 2, maxZ: 1 }),
+      node("L0:0,1", 0, { minX: 0, minZ: 1, maxX: 1, maxZ: 2 }),
+      node("L0:1,1", 0, { minX: 1, minZ: 1, maxX: 2, maxZ: 2 }),
+    ];
+    const coarse = node("L1:0,0", 1, { minX: 0, minZ: 0, maxX: 2, maxZ: 2 }, children, 0.0001);
+    const params: SelectionParams = {
+      thresholdPx: 1000,
+      hysteresisMergeFactor: 1.5,
+      enforce21: false,
+      viewportH: 720,
+      fovY: Math.PI / 3,
+      camPos: [10, 10, 10],
+    };
+
+    const result = selectCut(
+      [coarse],
+      params,
+      { split: new Set() },
+      { forceSplitIds: new Set(["L1:0,0"]) },
+    );
+
+    expect(result.rendered.map((rendered) => rendered.id)).toEqual(children.map((child) => child.id));
+    expect(result.state.split.has("L1:0,0")).toBe(true);
+  });
+
   it("matches CPU selection with a fake GPU error map", () => {
     const children = [
       node("L0:0,0", 0, { minX: 0, minZ: 0, maxX: 1, maxZ: 1 }),

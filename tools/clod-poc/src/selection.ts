@@ -46,6 +46,7 @@ export interface SelectionResult {
 
 export interface SelectionOptions {
   errorPxLookup?: (node: ClodPageNode) => number | undefined;
+  forceSplitIds?: ReadonlySet<string>;
 }
 
 function rectDistance2ToPoint(
@@ -99,6 +100,11 @@ export function selectCut(
       return;
     }
     if (params.forcedMaxLevel != null && node.level > params.forcedMaxLevel) {
+      newSplit.add(node.id);
+      for (const c of children) visit(c);
+      return;
+    }
+    if (options.forceSplitIds?.has(node.id)) {
       newSplit.add(node.id);
       for (const c of children) visit(c);
       return;

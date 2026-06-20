@@ -6,15 +6,27 @@ import {
   acceptsGrassCandidate,
   generateGrassRingInstances,
   generateGrassInstances,
+  grassFadeDistance,
   grassMaskForHeightNormal,
+  grassGpuRingKey,
+  grassRingBands,
   grassThin,
   grassWorldCell,
+  parseGrassConfig,
   pcg2d,
   sampleGrassTerrainSite,
   type GrassTerrainSite,
   type GrassSettings,
 } from "./grass.js";
-import { GRASS_GPU_RING_CELL, GRASS_GPU_RING_GRID, GRASS_GPU_RING_SLOT_COUNT } from "./gpu/grass_ring_compute.js";
+import grassYamlText from "../config/grass.yaml?raw";
+import {
+  GRASS_GPU_RING_CELL,
+  GRASS_GPU_RING_GRID,
+  GRASS_GPU_RING_SLOT_COUNT,
+  grassGpuRingCell,
+  grassGpuRingGrid,
+  grassGpuRingSlotCount,
+} from "./gpu/grass_ring_compute.js";
 import { addDigEdit, clearDigEdits, surfaceHeight } from "./terrain.js";
 import { buildGrassInstancedGeometry } from "./gpu/grass_node_material.js";
 import type { PageFootprint } from "./types.js";
@@ -41,12 +53,94 @@ function findSite(predicate: (site: GrassTerrainSite) => boolean): { x: number; 
 
 describe("grass placement", () => {
   it("defaults to the WebGPU ring shader while retaining fallback shader options", () => {
+    expect(DEFAULT_GRASS_SETTINGS.enabled).toBe(false);
     expect(DEFAULT_GRASS_SHADER_MODE).toBe("webgpu-ring-v1");
     expect(DEFAULT_GRASS_SETTINGS.shaderMode).toBe("webgpu-ring-v1");
     expect(DEFAULT_GRASS_SETTINGS.maxHeight).toBe(128);
+    expect(DEFAULT_GRASS_SETTINGS.ring.grid).toBe(700);
+    expect(DEFAULT_GRASS_SETTINGS.ring.cell).toBe(0.7);
+    expect(DEFAULT_GRASS_SETTINGS.patchFallback.maxNewPatchesPerRefresh).toBe(2);
     expect(GRASS_SHADER_MODES).toContain("terrain-patch-v2");
     expect(GRASS_SHADER_MODES).toContain("webgpu-ring-v1");
     expect(GRASS_SHADER_MODES).toContain("classic");
+  });
+
+  it("parses config/grass.yaml to the typed defaults", () => {
+    expect(parseGrassConfig(grassYamlText, null)).toEqual(DEFAULT_GRASS_SETTINGS);
+  });
+
+  it("falls back to default grass settings when config text is missing", () => {
+    expect(parseGrassConfig(undefined, null)).toEqual(DEFAULT_GRASS_SETTINGS);
+    expect(parseGrassConfig("", null)).toEqual(DEFAULT_GRASS_SETTINGS);
+  });
+
+  it("falls back clearly for an invalid grass shader mode", () => {
+    const warnings: string[] = [];
+    const parsed = parseGrassConfig("grass:\n  shader_mode: unknown-mode\n", (message) => warnings.push(message));
+
+    expect(parsed.shaderMode).toBe(DEFAULT_GRASS_SHADER_MODE);
+    expect(warnings[0]).toContain("invalid shader_mode");
+    expect(warnings[0]).toContain("unknown-mode");
+  });
+
+  it("applies configured WebGPU ring sizing to derived helpers and keys", () => {
+    const parsed = parseGrassConfig(`
+grass:
+  distance: 140
+  ring:
+    grid: 128
+    cell: 1.25
+    max_radius: 112
+    near_meters: 24
+    mid_meters: 72
+    far_meters: 96
+    far_distance_fraction: 0.75
+    band_meters: 5
+    scruff_meters: 10
+`, null);
+
+    expect(grassGpuRingGrid(parsed.ring)).toBe(128);
+    expect(grassGpuRingCell(parsed.ring)).toBe(1.25);
+    expect(grassGpuRingSlotCount(parsed.ring)).toBe(128 * 128);
+    expect(grassRingBands(parsed)).toEqual({ radius: 112, near: 24, mid: 72, far: 96 });
+    expect(grassFadeDistance(parsed)).toBe(112);
+    expect(grassGpuRingKey(parsed, 256)).toContain("128|1.25|112|24|72|96|0.75|5|10");
+  });
+
+  it("clamps unsafe grass config sizes before they reach GPU dispatch", () => {
+    const parsed = parseGrassConfig(`
+grass:
+  max_blades: -10
+  ring:
+    grid: 0
+    cell: -3
+    max_radius: -1
+    band_meters: -2
+    scruff_meters: -4
+  patch_fallback:
+    max_new_patches_per_refresh: 0
+    refresh_distance: -1
+`, null);
+
+    expect(parsed.maxBlades).toBe(0);
+    expect(parsed.ring.grid).toBe(1);
+    expect(parsed.ring.cell).toBe(0.1);
+    expect(parsed.ring.maxRadius).toBe(0);
+    expect(parsed.ring.bandMeters).toBe(0);
+    expect(parsed.ring.scruffMeters).toBe(0);
+    expect(parsed.patchFallback.maxNewPatchesPerRefresh).toBe(1);
+    expect(parsed.patchFallback.refreshDistance).toBe(0.1);
+  });
+
+  it("keeps the ./grass.js compatibility exports available", () => {
+    expect(DEFAULT_GRASS_SETTINGS).toBeDefined();
+    expect(DEFAULT_GRASS_SHADER_MODE).toBe("webgpu-ring-v1");
+    expect(GRASS_SHADER_MODES).toContain("webgpu-ring-v1");
+    expect(typeof grassThin).toBe("function");
+    expect(typeof grassWorldCell).toBe("function");
+    expect(typeof sampleGrassTerrainSite).toBe("function");
+    expect(typeof generateGrassInstances).toBe("function");
+    expect(typeof generateGrassRingInstances).toBe("function");
   });
 
   it("is deterministic for the same seed and footprint", () => {

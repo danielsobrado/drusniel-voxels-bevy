@@ -5,6 +5,7 @@ import { parseConfig } from "./config.js";
 import configText from "../config/clod_pages.yaml?raw";
 import stoneConfigText from "../config/stones.yaml?raw";
 import proceduralConfigText from "../config/procedural_textures.yaml?raw";
+import grassConfigText from "../config/grass.yaml?raw";
 import { ClodWorkerClient } from "./clod_worker_client.js";
 import { emitAudio, setAudioEnabled, setMasterVolume, getAudioState } from "./audio/index.js";
 import {
@@ -40,9 +41,9 @@ import {
 } from "./rendering/renderer_backend.js";
 import { createWebGpuTerrainMaterial } from "./rendering/terrain_material_webgpu.js";
 import {
-  DEFAULT_GRASS_SETTINGS,
   GRASS_SHADER_MODES,
   GrassSystem,
+  parseGrassConfig,
   type GrassLighting,
   type GrassSettings,
   type GrassStats,
@@ -530,6 +531,11 @@ async function main() {
     await runWebGpuPreview(searchParams);
     return;
   }
+  if (searchParams.get("grassFirstInstanceSmoke") === "1") {
+    const { runGrassFirstInstanceSmoke } = await import("./gpu/grass_first_instance_smoke.js");
+    await runGrassFirstInstanceSmoke();
+    return;
+  }
   const importToken = searchParams.get("import");
   let stagedImport: ProjectArchiveContents | null = null;
   if (importToken) {
@@ -552,6 +558,7 @@ async function main() {
   }
   const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
   const stoneConfig = parseStoneConfig(stoneConfigText);
+  const grassConfig = parseGrassConfig(grassConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
   const proceduralTerrain = proceduralTextureConfig.enabled
     ? createProceduralTerrainTextures(proceduralTextureConfig)
@@ -604,6 +611,26 @@ async function main() {
   buildStatus = "ready";
   const polishLine = formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish)));
   const allNodes: ClodPageNode[] = [...result.nodesByLevel.values()].flat();
+  const maxTerrainLevel = Math.max(...result.nodesByLevel.keys());
+  const staleEditedAncestorIds = new Set<string>();
+  const nodeGridCoord = (node: ClodPageNode): [number, number] | null => {
+    const coord = node.id.slice(node.id.indexOf(":") + 1).split(",");
+    if (coord.length !== 2) return null;
+    const x = Number(coord[0]);
+    const z = Number(coord[1]);
+    return Number.isFinite(x) && Number.isFinite(z) ? [x, z] : null;
+  };
+  const markEditedAncestorsStale = (lod0Nodes: readonly ClodPageNode[]): void => {
+    for (const node of lod0Nodes) {
+      if (node.level !== 0) continue;
+      const coord = nodeGridCoord(node);
+      if (!coord) continue;
+      const [x, z] = coord;
+      for (let level = 1; level <= maxTerrainLevel; level++) {
+        staleEditedAncestorIds.add(`L${level}:${x >> level},${z >> level}`);
+      }
+    }
+  };
   let clodErrorCompute: ClodErrorPxCompute | null = null;
   let webGpuUnavailableReason: string | null = null;
   let webGpuInitPromise: Promise<void> | null = null;
@@ -1039,23 +1066,23 @@ async function main() {
     brushFlowMs: DIG_HOLD_INTERVAL_MS,
     audioEnabled: getAudioState().enabled,
     audioVolume: getAudioState().masterVolume,
-    grassEnabled: false,
+    grassEnabled: grassConfig.enabled,
     grassRingDebug: searchParams.get("grassRingDebug") === "1",
-    grassShaderMode: DEFAULT_GRASS_SETTINGS.shaderMode,
-    grassAlphaToCoverage: DEFAULT_GRASS_SETTINGS.alphaToCoverage,
-    grassNearCrossedQuads: DEFAULT_GRASS_SETTINGS.nearCrossedQuads,
-    grassDistance: DEFAULT_GRASS_SETTINGS.distance,
-    grassBladeSpacing: DEFAULT_GRASS_SETTINGS.bladeSpacing,
-    grassBladeHeight: DEFAULT_GRASS_SETTINGS.bladeHeight,
-    grassBladeHeightVariation: DEFAULT_GRASS_SETTINGS.bladeHeightVariation,
-    grassBladeWidth: DEFAULT_GRASS_SETTINGS.bladeWidth,
-    grassWindStrength: DEFAULT_GRASS_SETTINGS.windStrength,
-    grassWindSpeed: DEFAULT_GRASS_SETTINGS.windSpeed,
-    grassSlopeMinY: DEFAULT_GRASS_SETTINGS.slopeMinY,
-    grassMinHeight: DEFAULT_GRASS_SETTINGS.minHeight,
-    grassMaxHeight: DEFAULT_GRASS_SETTINGS.maxHeight,
-    grassMaxBlades: DEFAULT_GRASS_SETTINGS.maxBlades,
-    grassSeed: DEFAULT_GRASS_SETTINGS.seed,
+    grassShaderMode: grassConfig.shaderMode,
+    grassAlphaToCoverage: grassConfig.alphaToCoverage,
+    grassNearCrossedQuads: grassConfig.nearCrossedQuads,
+    grassDistance: grassConfig.distance,
+    grassBladeSpacing: grassConfig.bladeSpacing,
+    grassBladeHeight: grassConfig.bladeHeight,
+    grassBladeHeightVariation: grassConfig.bladeHeightVariation,
+    grassBladeWidth: grassConfig.bladeWidth,
+    grassWindStrength: grassConfig.windStrength,
+    grassWindSpeed: grassConfig.windSpeed,
+    grassSlopeMinY: grassConfig.slopeMinY,
+    grassMinHeight: grassConfig.minHeight,
+    grassMaxHeight: grassConfig.maxHeight,
+    grassMaxBlades: grassConfig.maxBlades,
+    grassSeed: grassConfig.seed,
     grassBladeCount: 0,
     grassVisiblePatches: "0/0",
     grassTierSummary: "0/0/0/0",
@@ -1540,6 +1567,8 @@ async function main() {
     maxHeight: state.grassMaxHeight,
     maxBlades: state.grassMaxBlades,
     seed: state.grassSeed,
+    ring: { ...grassConfig.ring },
+    patchFallback: { ...grassConfig.patchFallback },
   });
   const currentGrassLighting = (): GrassLighting => {
     const lighting = currentLighting();
@@ -1615,6 +1644,7 @@ async function main() {
               mode: settings.shaderMode,
               alphaToCoverage: settings.alphaToCoverage,
               distance: settings.distance,
+              ring: settings.ring,
               fadeCenter: new THREE.Vector2(controls.target.x, controls.target.z),
               ringInstanceBuffers,
             }),
@@ -1901,7 +1931,7 @@ async function main() {
       result.roots,
       params,
       selState,
-      { errorPxLookup },
+      { errorPxLookup, forceSplitIds: staleEditedAncestorIds },
     );
     selSub.cut = performance.now() - tSelectCut;
     selState = ns;
@@ -2016,7 +2046,10 @@ async function main() {
   let pendingParentCount = 0;
 
   clodWorker.onParentRebuilt = (batch) => {
-    for (const node of batch.changed) applyNodeMesh(node);
+    for (const node of batch.changed) {
+      applyNodeMesh(node);
+      staleEditedAncestorIds.delete(node.id);
+    }
     clodErrorCompute?.patchNodes(batch.changed);
     pendingParentNodes = batch.parentNodes;
     pendingParentMs = batch.parentMs;
@@ -2030,6 +2063,7 @@ async function main() {
     pendingParentNodes = parentNodes;
     pendingParentMs = parentMs;
     pendingParentCount = 0;
+    staleEditedAncestorIds.clear();
     if (parentNodes > 0) {
       lastDigSummary = `${lastDigSummary} + ancestors ${parentNodes}n ${parentMs.toFixed(0)}ms`;
     }
@@ -2080,6 +2114,7 @@ async function main() {
 
       let colliderMs = 0;
       for (const node of lod0.changed) colliderMs += applyNodeMesh(node);
+      if (lod0.pendingParents > 0) markEditedAncestorsStale(lod0.changed);
       clodErrorCompute?.patchNodes(lod0.changed);
       if (state.grassEnabled && lod0.changed.length > 0) {
         grassSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
@@ -3722,6 +3757,34 @@ async function main() {
   // ?profile=1 logs a per-phase breakdown for any frame slower than this (ms). Helps locate
   // transient zoom/walk stutters (chunk meshing, geometry upload, render/pipeline stalls).
   const profileEnabled = searchParams.get("profile") === "1";
+  const grassProfileEnabled = searchParams.get("grassProfile") === "1";
+  const grassPrepassEnabled = searchParams.get("prepass") !== "0";
+  let grassProfileFrame = 0;
+  const grassProfileMs = (value: number | null): string => value === null ? "-" : `${value.toFixed(2)}ms`;
+  const logGrassProfile = (stats: GrassStats, grassAndPropsMs: number): void => {
+    if (!grassProfileEnabled) return;
+    const settings = makeGrassSettings();
+    const visible = stats.gpuRingVisibleNear
+      + stats.gpuRingVisibleMid
+      + stats.gpuRingVisibleFar
+      + stats.gpuRingVisibleSuper;
+    // eslint-disable-next-line no-console
+    console.info(
+      `[grass-profile] mode=${stats.mode}` +
+        ` dispatch=${grassProfileMs(stats.gpuRingDispatchMs)}` +
+        ` readback=${grassProfileMs(stats.gpuRingReadbackMs)}` +
+        ` visible=${visible}` +
+        ` near=${stats.gpuRingVisibleNear}` +
+        ` mid=${stats.gpuRingVisibleMid}` +
+        ` far=${stats.gpuRingVisibleFar}` +
+        ` super=${stats.gpuRingVisibleSuper}` +
+        ` prepass=${grassPrepassEnabled ? "on" : "off"}` +
+        ` grid=${settings.ring.grid}` +
+        ` cell=${settings.ring.cell}` +
+        ` slots=${settings.ring.grid * settings.ring.grid}` +
+        ` grass+props=${grassAndPropsMs.toFixed(2)}ms`,
+    );
+  };
   const profileFrameMs = (() => {
     const v = Number(searchParams.get("profileMs"));
     return Number.isFinite(v) && v > 0 ? v : 24;
@@ -3896,6 +3959,7 @@ async function main() {
       grassEdgeSuppressedController?.updateDisplay();
       grassCandidateCountController?.updateDisplay();
     }
+    const currentGrassStats = nextGrassStats ?? grassStats;
     nodeLabelOverlay.update({
       nodes: lastRenderedNodes,
       camera,
@@ -3905,6 +3969,9 @@ async function main() {
     });
     postProcess?.updateSettings(currentPostProcessSettings());
     const tRenderStart = performance.now();
+    if (grassProfileEnabled && currentGrassStats && grassProfileFrame++ % 60 === 0) {
+      logGrassProfile(currentGrassStats, tRenderStart - tPropsStart);
+    }
     if (postProcess) postProcess.render(scene, camera);
     else renderer.render(scene, camera);
 

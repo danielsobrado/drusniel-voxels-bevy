@@ -1,6 +1,7 @@
 import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
+import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings } from "../grass/grass_config.js";
 
 const WORKGROUP_SIZE = 64;
 const PARAM_BYTES = 16 * 12;
@@ -14,10 +15,25 @@ const READBACK_INTERVAL_FRAMES = 90;
 // Toroidal slot grid: GRID² candidate cells, CELL m apart → ±(GRID·CELL/2) m ring. Density polish:
 // a denser grid (smaller CELL) gives a lusher near field; survivors widen by 1/√thin to conserve
 // coverage. ~245 m ring at ~2 slots/m². Cull is one dispatch over GRID² (cheap on GPU).
-export const GRASS_GPU_RING_GRID = 700;
-export const GRASS_GPU_RING_CELL = 0.7;
+export const GRASS_GPU_RING_GRID = DEFAULT_GRASS_SETTINGS.ring.grid;
+export const GRASS_GPU_RING_CELL = DEFAULT_GRASS_SETTINGS.ring.cell;
 export const GRASS_GPU_RING_SLOT_COUNT = GRASS_GPU_RING_GRID * GRASS_GPU_RING_GRID;
 export const GRASS_GPU_RING_STORAGE_BINDINGS = 7;
+
+export function grassGpuRingGrid(ring: Pick<GrassRingSettings, "grid"> = DEFAULT_GRASS_SETTINGS.ring): number {
+  const grid = Number.isFinite(ring.grid) ? ring.grid : DEFAULT_GRASS_SETTINGS.ring.grid;
+  return Math.max(1, Math.floor(grid));
+}
+
+export function grassGpuRingCell(ring: Pick<GrassRingSettings, "cell"> = DEFAULT_GRASS_SETTINGS.ring): number {
+  const cell = Number.isFinite(ring.cell) ? ring.cell : DEFAULT_GRASS_SETTINGS.ring.cell;
+  return Math.max(0.1, cell);
+}
+
+export function grassGpuRingSlotCount(ring: Pick<GrassRingSettings, "grid"> = DEFAULT_GRASS_SETTINGS.ring): number {
+  const grid = grassGpuRingGrid(ring);
+  return grid * grid;
+}
 
 export function grassGpuRingComputeUnsupportedReason(device: GPUDevice): string | null {
   const maxStorageBuffers = device.limits.maxStorageBuffersPerShaderStage;
@@ -143,6 +159,7 @@ export class GrassGpuRingCompute {
     pipelines: Record<PipelineName, GPUComputePipeline>,
     edits: readonly ResolvedDigEdit[],
     outputBuffers: GrassGpuRingOutputBuffers | null,
+    private readonly ring: GrassRingSettings,
   ) {
     this.pipelines = pipelines;
     this.outputBuffers = outputBuffers;
@@ -207,6 +224,7 @@ export class GrassGpuRingCompute {
     device: GPUDevice,
     edits: readonly ResolvedDigEdit[],
     outputBuffers: GrassGpuRingOutputBuffers | null = null,
+    ring: GrassRingSettings = DEFAULT_GRASS_SETTINGS.ring,
   ): Promise<GrassGpuRingCompute> {
     const module = device.createShaderModule({
       label: "grass ring compute shader",
@@ -251,7 +269,7 @@ export class GrassGpuRingCompute {
       clear_counters: clearCounters,
       grass_cull: cull,
       build_indirect_args: buildIndirectArgs,
-    }, edits, outputBuffers);
+    }, edits, outputBuffers, { ...ring });
   }
 
   dispatch(params: GrassGpuRingDispatchParams, indexCounts: GrassGpuRingIndexCounts): boolean {
@@ -272,19 +290,20 @@ export class GrassGpuRingCompute {
     this.paramF32[4] = params.bands.near;
     this.paramF32[5] = params.bands.mid;
     this.paramF32[6] = params.bands.far;
-    this.paramF32[7] = 12;
-    this.paramF32[8] = GRASS_GPU_RING_CELL;
+    this.paramF32[7] = this.ring.bandMeters;
+    this.paramF32[8] = grassGpuRingCell(this.ring);
     this.paramF32[9] = params.bladeHeight;
     this.paramF32[10] = params.bladeHeightVariation;
     this.paramF32[11] = params.slopeMinY;
     this.paramF32[12] = params.minHeight;
     this.paramF32[13] = params.maxHeight;
+    this.paramF32[14] = this.ring.scruffMeters;
     this.paramU32[16] = indexCounts.near;
     this.paramU32[17] = indexCounts.mid;
     this.paramU32[18] = indexCounts.far;
     this.paramU32[19] = indexCounts.super;
     this.paramU32[20] = Math.max(0, Math.floor(params.maxInstancesPerTier));
-    this.paramU32[21] = GRASS_GPU_RING_GRID;
+    this.paramU32[21] = grassGpuRingGrid(this.ring);
     this.paramU32[22] = params.seed >>> 0;
     if (params.frustumPlanes) {
       for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) {
@@ -295,7 +314,7 @@ export class GrassGpuRingCompute {
 
     const encoder = this.device.createCommandEncoder({ label: "grass ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, 1);
-    const slotWorkgroups = Math.ceil(GRASS_GPU_RING_SLOT_COUNT / WORKGROUP_SIZE);
+    const slotWorkgroups = Math.ceil(grassGpuRingSlotCount(this.ring) / WORKGROUP_SIZE);
     this.dispatchPipeline(encoder, this.pipelines.grass_cull, slotWorkgroups);
     this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, 1);
     if (readbackSlot) {
@@ -343,6 +362,7 @@ export class GrassGpuRingCompute {
 
   stats(enabled: boolean): GrassGpuRingStats {
     const accepted = this.counts.near + this.counts.mid + this.counts.far + this.counts.super;
+    const slotCount = grassGpuRingSlotCount(this.ring);
     return {
       status: !enabled
         ? "disabled"
@@ -350,8 +370,8 @@ export class GrassGpuRingCompute {
           ? "failed"
           : this.runningReadbacks > 0 ? "running" : "ready",
       reason: this.failedReason ?? undefined,
-      candidateCount: GRASS_GPU_RING_SLOT_COUNT,
-      generatedCandidates: GRASS_GPU_RING_SLOT_COUNT,
+      candidateCount: slotCount,
+      generatedCandidates: slotCount,
       acceptedCandidates: accepted,
       counts: { ...this.counts },
       dispatchMs: this.dispatchMs,
@@ -392,7 +412,7 @@ export class GrassGpuRingCompute {
   }
 
   private createFallbackOutputBuffers(): GrassGpuRingOutputBuffers {
-    const bytes = Math.max(16, GRASS_GPU_RING_SLOT_COUNT * TIER_COUNT * 4 * Float32Array.BYTES_PER_ELEMENT);
+    const bytes = Math.max(16, grassGpuRingSlotCount(this.ring) * TIER_COUNT * 4 * Float32Array.BYTES_PER_ELEMENT);
     const shared: GrassGpuTierOutputBuffers = {
       offset: this.device.createBuffer({ label: "grass ring fallback offset", size: bytes, usage: GPUBufferUsage.STORAGE }),
       packed0: this.device.createBuffer({ label: "grass ring fallback packed0", size: bytes, usage: GPUBufferUsage.STORAGE }),
