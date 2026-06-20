@@ -3,9 +3,6 @@ import { materialWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "../t
 import {
   DEFAULT_GRASS_SETTINGS,
   GRASS_WATER_CLEARANCE,
-  MIN_GRASS_WEIGHT,
-  V2_MID_DISTANCE_FRACTION,
-  V2_NEAR_DISTANCE_FRACTION,
   type GrassCandidateSample,
   type GrassSettings,
   type GrassTerrainSite,
@@ -66,21 +63,36 @@ export function acceptsGrassCandidate(settings: GrassSettings, sample: GrassCand
     && (sample.waterDepth ?? 0) <= 0
     && (sample.rockWeight ?? 0) < 0.82
     && (sample.snowWeight ?? 0) < 0.55
-    && sample.grassWeight > MIN_GRASS_WEIGHT
+    && sample.grassWeight > settings.placement.minGrassWeight
     && sample.threshold < sample.grassWeight;
 }
 
-export function grassThin(distance: number): number {
-  const base = Math.min(1, 58 / (Math.max(1, distance) + 42)) ** 1.15;
-  const far = (120 / Math.max(distance, 120)) ** 1.6;
-  return THREE.MathUtils.clamp(base * far, 0.02, 1);
+export function computeGrassDensityScale(distance: number, settings: GrassSettings): number {
+  const nearDistance = settings.distance * settings.lod.nearFraction;
+  const midDistance = settings.distance * settings.lod.midFraction;
+  if (distance <= nearDistance) return 1;
+  if (distance <= midDistance) {
+    const t = THREE.MathUtils.smoothstep(distance, nearDistance, midDistance);
+    return THREE.MathUtils.lerp(1, settings.lod.midInstanceFraction, t);
+  }
+  const farEnd = Math.max(midDistance + 0.001, settings.distance, settings.ring.farMeters);
+  const t = THREE.MathUtils.smoothstep(distance, midDistance, farEnd);
+  return THREE.MathUtils.clamp(
+    THREE.MathUtils.lerp(settings.lod.midInstanceFraction, settings.lod.farDensityRatio, t),
+    settings.lod.farDensityRatio,
+    1,
+  );
+}
+
+export function grassThin(distance: number, settings: GrassSettings = DEFAULT_GRASS_SETTINGS): number {
+  return computeGrassDensityScale(distance, settings);
 }
 
 export function grassRingBands(settings: GrassSettings): { near: number; mid: number; far: number; radius: number } {
   return {
     radius: Math.max(0, Math.min(settings.distance, settings.ring.maxRadius)),
-    near: Math.min(settings.distance * V2_NEAR_DISTANCE_FRACTION, settings.ring.nearMeters),
-    mid: Math.min(settings.distance * V2_MID_DISTANCE_FRACTION, settings.ring.midMeters),
+    near: Math.min(settings.distance * settings.lod.nearFraction, settings.ring.nearMeters),
+    mid: Math.min(settings.distance * settings.lod.midFraction, settings.ring.midMeters),
     far: Math.min(settings.distance * settings.ring.farDistanceFraction, settings.ring.farMeters),
   };
 }
@@ -167,7 +179,7 @@ export function sampleGrassTerrainSite(
   return {
     height,
     normalY,
-    terrainNormal: [normal[0], normal[1], normal[2]],
+    terrainNormal: safeTerrainNormal(normal),
     materialWeights: weights,
     grassMask,
     grassWeight,
@@ -178,4 +190,13 @@ export function sampleGrassTerrainSite(
     waterDepth,
     slopeMask,
   };
+}
+
+export function safeTerrainNormal(normal: readonly number[] | null | undefined): [number, number, number] {
+  const x = normal?.[0] ?? 0;
+  const y = normal?.[1] ?? 1;
+  const z = normal?.[2] ?? 0;
+  const len = Math.hypot(x, y, z);
+  if (!Number.isFinite(len) || len < 1e-5) return [0, 1, 0];
+  return [x / len, y / len, z / len];
 }

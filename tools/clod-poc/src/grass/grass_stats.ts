@@ -14,6 +14,8 @@ export interface GrassStats {
   generatedCandidates: number;
   acceptedCandidates: number;
   edgeSuppressedCandidates: number;
+  patchRebuildCount: number;
+  buildMs: number;
   midBladeCount: number;
   gpuRingStatus: GrassGpuRingStats["status"];
   gpuRingCandidateCount: number;
@@ -30,4 +32,3 @@ export interface GrassGenerationStats {
   acceptedCandidates: number;
   edgeSuppressedCandidates: number;
 }
-

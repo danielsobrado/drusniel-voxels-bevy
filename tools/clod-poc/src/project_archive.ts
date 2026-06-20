@@ -83,6 +83,10 @@ export interface ProjectSessionState {
   grassMaxHeight: number;
   grassMaxBlades: number;
   grassSeed: number;
+  treesEnabled?: boolean;
+  treeDistance?: number;
+  treeMaxInstances?: number;
+  treeDebugColorByLod?: boolean;
 }
 
 export interface ProjectTextureSlot {

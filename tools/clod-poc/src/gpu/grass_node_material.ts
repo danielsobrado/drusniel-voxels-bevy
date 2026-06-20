@@ -32,8 +32,10 @@ import {
 import type { EnvironmentLighting } from "../environment.js";
 import {
   createBladeGeometry,
+  createGrassClumpGeometry,
   createGrassTuftGeometry,
   DEFAULT_GRASS_SETTINGS,
+  grassRowsForSegments,
   type GrassBladeInstance,
   type GrassLighting,
   type GrassRingInstanceBuffers,
@@ -46,18 +48,8 @@ type TslNode = any;
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 
-const V2_NEAR_BLADE_ROWS = [
-  [0, 1],
-  [0.55, 0.6],
-  [1, 0],
-] as const;
-const V2_MID_BLADE_ROWS = [
-  [0, 0.78],
-  [1, 0],
-] as const;
-export const GRASS_V2_NEAR_DISTANCE_FRACTION = 0.42;
-export const GRASS_V2_MID_DISTANCE_FRACTION = 0.78;
-const V2_MID_INSTANCE_FRACTION = 0.35;
+export const GRASS_V2_NEAR_DISTANCE_FRACTION = DEFAULT_GRASS_SETTINGS.lod.nearFraction;
+export const GRASS_V2_MID_DISTANCE_FRACTION = DEFAULT_GRASS_SETTINGS.lod.midFraction;
 
 export interface GrassNodeParams {
   lighting: EnvironmentLighting;
@@ -68,6 +60,7 @@ export interface GrassNodeParams {
   alphaToCoverage?: boolean;
   distance?: number;
   ring?: GrassSettings["ring"];
+  lod?: GrassSettings["lod"];
   fadeCenter?: THREE.Vector2;
   debugAttributes?: boolean;
   /** When set (webgpu-ring-v1), instances are read from these storage buffers, not attributes. */
@@ -80,7 +73,7 @@ export interface GrassNodeMaterialHandle {
   setTime(t: number): void;
   /** Update the XZ point used by terrain-patch-v2 distance fading. */
   setFadeCenter(x: number, z: number): void;
-  updateSettings(settings: Pick<GrassSettings, "bladeWidth" | "windStrength" | "windSpeed" | "distance" | "alphaToCoverage" | "ring">): void;
+  updateSettings(settings: Pick<GrassSettings, "bladeWidth" | "windStrength" | "windSpeed" | "distance" | "alphaToCoverage" | "ring" | "lod">): void;
   updateLighting(lighting: EnvironmentLighting | GrassLighting): void;
 }
 
@@ -91,9 +84,11 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const uWindSpeed = uniform(params.windSpeed);
   const uFadeCenter = uniform(params.fadeCenter?.clone() ?? new THREE.Vector2());
   const ringSettings = params.ring ?? DEFAULT_GRASS_SETTINGS.ring;
-  const uNearDistance = uniform(Math.min((params.distance ?? 96) * GRASS_V2_NEAR_DISTANCE_FRACTION, ringSettings.nearMeters));
-  const uMidDistance = uniform(Math.min((params.distance ?? 96) * GRASS_V2_MID_DISTANCE_FRACTION, ringSettings.midMeters));
-  const uFarDistance = uniform(Math.min((params.distance ?? 96) * ringSettings.farDistanceFraction, ringSettings.farMeters));
+  const lodSettings = params.lod ?? DEFAULT_GRASS_SETTINGS.lod;
+  const distance = params.distance ?? DEFAULT_GRASS_SETTINGS.distance;
+  const uNearDistance = uniform(Math.min(distance * lodSettings.nearFraction, ringSettings.nearMeters));
+  const uMidDistance = uniform(Math.min(distance * lodSettings.midFraction, ringSettings.midMeters));
+  const uFarDistance = uniform(Math.min(distance * ringSettings.farDistanceFraction, ringSettings.farMeters));
   const uBandDistance = uniform(ringSettings.bandMeters);
   const uLight = uniform(params.lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(params.lighting.sunColor));
@@ -245,8 +240,8 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
       uBladeWidth.value = settings.bladeWidth;
       uWindStrength.value = settings.windStrength;
       uWindSpeed.value = settings.windSpeed;
-      uNearDistance.value = Math.min(settings.distance * GRASS_V2_NEAR_DISTANCE_FRACTION, settings.ring.nearMeters);
-      uMidDistance.value = Math.min(settings.distance * GRASS_V2_MID_DISTANCE_FRACTION, settings.ring.midMeters);
+      uNearDistance.value = Math.min(settings.distance * settings.lod.nearFraction, settings.ring.nearMeters);
+      uMidDistance.value = Math.min(settings.distance * settings.lod.midFraction, settings.ring.midMeters);
       uFarDistance.value = Math.min(settings.distance * settings.ring.farDistanceFraction, settings.ring.farMeters);
       uBandDistance.value = settings.ring.bandMeters;
       useAlphaToCoverage = isPatchV2 && settings.alphaToCoverage === true;
@@ -299,73 +294,7 @@ export interface GrassInstancedGeometryOptions {
   tier?: GrassTier;
   crossed?: boolean;
   edgeShape?: boolean;
-}
-
-function makeDeterministicRandom(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-}
-
-function transformedBladeGeometry(
-  blades: number,
-  rows: readonly (readonly [number, number])[],
-  seed: number,
-): THREE.BufferGeometry {
-  const rnd = makeDeterministicRandom(seed + blades * 97 + rows.length * 17);
-  const source = createBladeGeometry(rows, false);
-  const sourcePosition = source.getAttribute("position");
-  const sourceNormal = source.getAttribute("normal");
-  const sourceUv = source.getAttribute("uv");
-  const sourceIndex = source.getIndex();
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-
-  for (let blade = 0; blade < blades; blade++) {
-    const yaw = rnd() * Math.PI * 2;
-    const cosYaw = Math.cos(yaw);
-    const sinYaw = Math.sin(yaw);
-    const offsetX = (rnd() - 0.5) * 0.18;
-    const offsetZ = (rnd() - 0.5) * 0.18;
-    const heightScale = 0.62 + rnd() * 0.7;
-    const widthScale = 0.82 + rnd() * 0.55;
-    const lean = (rnd() - 0.5) * 0.34;
-    const baseVertex = positions.length / 3;
-
-    for (let i = 0; i < sourcePosition.count; i++) {
-      const x = sourcePosition.getX(i) * widthScale;
-      const y = sourcePosition.getY(i) * heightScale;
-      const z = sourcePosition.getZ(i);
-      const shearX = x + lean * y;
-      positions.push(
-        shearX * cosYaw + z * sinYaw + offsetX,
-        y,
-        z * cosYaw - shearX * sinYaw + offsetZ,
-      );
-      normals.push(
-        sourceNormal.getX(i) * cosYaw + sourceNormal.getZ(i) * sinYaw,
-        sourceNormal.getY(i),
-        sourceNormal.getZ(i) * cosYaw - sourceNormal.getX(i) * sinYaw,
-      );
-      uvs.push(sourceUv.getX(i), sourceUv.getY(i));
-    }
-
-    if (sourceIndex) {
-      for (let i = 0; i < sourceIndex.count; i++) indices.push(baseVertex + sourceIndex.getX(i));
-    }
-  }
-
-  source.dispose();
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  return geometry;
+  settings?: GrassSettings;
 }
 
 // Build an InstancedBufferGeometry: the shared classic blade geometry plus one set of
@@ -376,16 +305,19 @@ export function buildGrassInstancedGeometry(
 ): THREE.InstancedBufferGeometry {
   const mode = options.mode ?? "classic";
   const terrainPatchMode = mode === "terrain-patch-v2" || mode === "webgpu-ring-v1";
-  const rows = terrainPatchMode && options.tier === "mid" ? V2_MID_BLADE_ROWS : terrainPatchMode ? V2_NEAR_BLADE_ROWS : undefined;
+  const settings = options.settings ?? DEFAULT_GRASS_SETTINGS;
+  const nearRows = grassRowsForSegments(settings.blade.nearSegments);
+  const midRows = grassRowsForSegments(settings.blade.midSegments, 0);
+  const rows = terrainPatchMode && options.tier === "mid" ? midRows : terrainPatchMode ? nearRows : undefined;
   let base: THREE.BufferGeometry;
   if (mode === "webgpu-ring-v1" && options.tier === "near") {
-    base = transformedBladeGeometry(5, V2_NEAR_BLADE_ROWS, 0x9e3779b9);
+    base = createGrassClumpGeometry(settings.blade.nearBladesPerInstance, settings.blade.nearSegments, settings);
   } else if (mode === "webgpu-ring-v1" && options.tier === "mid") {
-    base = transformedBladeGeometry(3, V2_MID_BLADE_ROWS, 0x85ebca6b);
+    base = createGrassClumpGeometry(settings.blade.midBladesPerInstance, settings.blade.midSegments, settings);
   } else if (terrainPatchMode && options.tier === "far") {
-    base = createGrassTuftGeometry(0.2);
+    base = createGrassTuftGeometry(settings);
   } else if (terrainPatchMode && options.tier === "super") {
-    base = createGrassTuftGeometry(0.34);
+    base = createGrassTuftGeometry(settings.blade.farTuftWidthM * 1.45 / Math.max(settings.blade.widthM, 0.001));
   } else {
     base = rows ? createBladeGeometry(rows, options.crossed === true && options.tier !== "mid") : createBladeGeometry();
   }
@@ -458,7 +390,7 @@ function tierIndex(tier: GrassTier | undefined): number {
 }
 
 export function grassMidInstances(instances: readonly GrassBladeInstance[]): GrassBladeInstance[] {
-  const midCount = Math.max(1, Math.floor(instances.length * V2_MID_INSTANCE_FRACTION));
+  const midCount = Math.max(1, Math.floor(instances.length * DEFAULT_GRASS_SETTINGS.lod.midInstanceFraction));
   return instances.slice(0, midCount).map((instance) => ({
     ...instance,
     height: instance.height * 1.55,

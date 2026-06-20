@@ -1,9 +1,13 @@
 import { describe, expect, it, afterEach } from "vitest";
+import * as THREE from "three";
 import {
   DEFAULT_GRASS_SHADER_MODE,
   DEFAULT_GRASS_SETTINGS,
   GRASS_SHADER_MODES,
   acceptsGrassCandidate,
+  computeGrassDensityScale,
+  createGrassClumpGeometry,
+  createGrassTuftGeometry,
   generateGrassRingInstances,
   generateGrassInstances,
   grassFadeDistance,
@@ -13,6 +17,7 @@ import {
   grassThin,
   grassWorldCell,
   parseGrassConfig,
+  populateGrassGeometry,
   pcg2d,
   sampleGrassTerrainSite,
   type GrassTerrainSite,
@@ -53,10 +58,10 @@ function findSite(predicate: (site: GrassTerrainSite) => boolean): { x: number; 
 
 describe("grass placement", () => {
   it("defaults to the WebGPU ring shader while retaining fallback shader options", () => {
-    expect(DEFAULT_GRASS_SETTINGS.enabled).toBe(false);
+    expect(DEFAULT_GRASS_SETTINGS.enabled).toBe(true);
     expect(DEFAULT_GRASS_SHADER_MODE).toBe("webgpu-ring-v1");
     expect(DEFAULT_GRASS_SETTINGS.shaderMode).toBe("webgpu-ring-v1");
-    expect(DEFAULT_GRASS_SETTINGS.maxHeight).toBe(128);
+    expect(DEFAULT_GRASS_SETTINGS.maxHeight).toBe(28);
     expect(DEFAULT_GRASS_SETTINGS.ring.grid).toBe(700);
     expect(DEFAULT_GRASS_SETTINGS.ring.cell).toBe(0.7);
     expect(DEFAULT_GRASS_SETTINGS.patchFallback.maxNewPatchesPerRefresh).toBe(2);
@@ -122,7 +127,7 @@ grass:
     refresh_distance: -1
 `, null);
 
-    expect(parsed.maxBlades).toBe(0);
+    expect(parsed.maxBlades).toBe(1);
     expect(parsed.ring.grid).toBe(1);
     expect(parsed.ring.cell).toBe(0.1);
     expect(parsed.ring.maxRadius).toBe(0);
@@ -130,6 +135,53 @@ grass:
     expect(parsed.ring.scruffMeters).toBe(0);
     expect(parsed.patchFallback.maxNewPatchesPerRefresh).toBe(1);
     expect(parsed.patchFallback.refreshDistance).toBe(0.1);
+  });
+
+  it("clamps invalid nested grass YAML values", () => {
+    const parsed = parseGrassConfig(`
+grass:
+  distance_m: -1
+  max_instances: -99
+  placement:
+    spacing_m: 0
+    jitter: 4
+    slope_min_y: -0.5
+    min_height_m: 40
+    max_height_m: 12
+    min_grass_weight: 3
+  lod:
+    near_fraction: 0.9
+    mid_fraction: 0.2
+    far_density_ratio: -1
+    mid_instance_fraction: 2
+    far_instance_fraction: -2
+  blade:
+    near_blades_per_instance: 0
+    mid_blades_per_instance: -2
+    near_segments: 0
+    mid_segments: -1
+    max_width_compensation: 0.2
+  wind:
+    direction: [0, 0]
+`, null);
+
+    expect(parsed.distance).toBeGreaterThan(0);
+    expect(parsed.maxBlades).toBe(1);
+    expect(parsed.placement.spacingM).toBe(0.05);
+    expect(parsed.placement.jitter).toBe(1);
+    expect(parsed.placement.slopeMinY).toBe(0);
+    expect(parsed.placement.maxHeightM).toBe(parsed.placement.minHeightM);
+    expect(parsed.placement.minGrassWeight).toBe(1);
+    expect(parsed.lod.midFraction).toBeGreaterThan(parsed.lod.nearFraction);
+    expect(parsed.lod.farDensityRatio).toBe(0);
+    expect(parsed.lod.midInstanceFraction).toBe(1);
+    expect(parsed.lod.farInstanceFraction).toBe(0);
+    expect(parsed.blade.nearBladesPerInstance).toBe(1);
+    expect(parsed.blade.midBladesPerInstance).toBe(1);
+    expect(parsed.blade.nearSegments).toBe(1);
+    expect(parsed.blade.midSegments).toBe(1);
+    expect(parsed.blade.maxWidthCompensation).toBe(1);
+    expect(parsed.wind.direction).toEqual(DEFAULT_GRASS_SETTINGS.wind.direction);
   });
 
   it("keeps the ./grass.js compatibility exports available", () => {
@@ -306,6 +358,8 @@ grass:
   it("widens ring survivors as thinning reduces accepted density", () => {
     expect(grassThin(16)).toBeGreaterThan(grassThin(120));
     expect(grassThin(120)).toBeGreaterThan(grassThin(155));
+    expect(computeGrassDensityScale(1, settings)).toBe(1);
+    expect(computeGrassDensityScale(settings.distance * 0.8, settings)).toBeLessThan(1);
     const ring = generateGrassRingInstances(
       { x: 32, z: 32 },
       { ...settings, shaderMode: "webgpu-ring-v1", distance: 96, bladeSpacing: 1.4, maxBlades: 250 },
@@ -313,6 +367,41 @@ grass:
     );
     const survivors = [...ring.near, ...ring.mid, ...ring.far, ...ring.super];
     expect(survivors.some((blade) => (blade.widthScale ?? 1) > 1)).toBe(true);
+  });
+
+  it("builds real clump and far tuft source geometry without NaN attributes", () => {
+    const clump = createGrassClumpGeometry(5, 4, settings);
+    const tuft = createGrassTuftGeometry(settings);
+    expect(clump.getAttribute("position").count).toBeGreaterThan(tuft.getAttribute("position").count);
+    expect(clump.getIndex()?.count ?? 0).toBeGreaterThan(0);
+    expect(tuft.getIndex()?.count ?? 0).toBeGreaterThan(0);
+    for (const geometry of [clump, tuft]) {
+      for (const name of ["position", "normal", "uv"]) {
+        const attribute = geometry.getAttribute(name);
+        expect(attribute).toBeDefined();
+        for (const value of attribute.array as Float32Array) {
+          expect(Number.isFinite(value)).toBe(true);
+        }
+      }
+    }
+    clump.dispose();
+    tuft.dispose();
+  });
+
+  it("uploads full terrain normal attributes matching instance count", () => {
+    const instances = generateGrassInstances(footprint, { ...settings, shaderMode: "terrain-patch-v2" }, 6);
+    expect(instances.length).toBeGreaterThan(0);
+    const source = createGrassClumpGeometry(3, 2, settings);
+    const geometry = new THREE.InstancedBufferGeometry();
+    populateGrassGeometry(geometry, source, footprint, instances, settings);
+    const terrainNormal = geometry.getAttribute("aTerrainNormal");
+    expect(terrainNormal.itemSize).toBe(3);
+    expect(terrainNormal.count).toBe(instances.length);
+    for (const value of terrainNormal.array as Float32Array) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
+    source.dispose();
+    geometry.dispose();
   });
 
   it("builds packed multi-blade WebGPU ring geometry", () => {

@@ -3,9 +3,6 @@ import type { PageFootprint } from "../types.js";
 import { surfaceHeight } from "../terrain.js";
 import {
   TWO_PI,
-  V2_EDGE_HEIGHT_HARD,
-  V2_EDGE_HEIGHT_SOFT,
-  V2_EDGE_SAMPLE_SCALE,
   type GrassSettings,
 } from "./grass_config.js";
 import type { GrassGenerationStats } from "./grass_stats.js";
@@ -24,7 +21,7 @@ export interface GrassBladeInstance {
 }
 
 export function edgeFadeForCandidate(x: number, z: number, height: number, normalY: number, spacing: number): number {
-  const sampleDistance = Math.max(0.75, spacing * V2_EDGE_SAMPLE_SCALE);
+  const sampleDistance = Math.max(0.75, spacing * 1.25);
   const samples = [
     surfaceHeight(x + sampleDistance, z),
     surfaceHeight(x - sampleDistance, z),
@@ -32,7 +29,7 @@ export function edgeFadeForCandidate(x: number, z: number, height: number, norma
     surfaceHeight(x, z - sampleDistance),
   ];
   const maxDelta = samples.reduce((max, neighbor) => Math.max(max, Math.abs(neighbor - height)), 0);
-  const heightFade = 1 - THREE.MathUtils.smoothstep(maxDelta, V2_EDGE_HEIGHT_SOFT, V2_EDGE_HEIGHT_HARD);
+  const heightFade = 1 - THREE.MathUtils.smoothstep(maxDelta, 1.5, 4.5);
   const slopeFade = THREE.MathUtils.smoothstep(normalY, 0.55, 0.9);
   return THREE.MathUtils.clamp(heightFade * slopeFade, 0, 1);
 }
@@ -45,6 +42,7 @@ export function generateGrassInstances(
 ): GrassBladeInstance[] {
   const rankedInstances: { priority: number; instance: GrassBladeInstance }[] = [];
   const spacing = Math.max(0.05, settings.bladeSpacing);
+  const jitter = settings.placement.jitter;
   const columns = Math.max(0, Math.floor((footprint.maxX - footprint.minX) / spacing));
   const rows = Math.max(0, Math.floor((footprint.maxZ - footprint.minZ) / spacing));
   const limit = Math.max(0, Math.floor(maxBlades));
@@ -58,12 +56,12 @@ export function generateGrassInstances(
       const baseX = footprint.minX + (column + 0.5) * spacing;
       const baseZ = footprint.minZ + (row + 0.5) * spacing;
       const x = THREE.MathUtils.clamp(
-        baseX + randomSigned(gridX, gridZ, settings.seed + 101) * spacing * 0.34,
+        baseX + randomSigned(gridX, gridZ, settings.seed + 101) * spacing * jitter,
         footprint.minX + 0.001,
         footprint.maxX - 0.001,
       );
       const z = THREE.MathUtils.clamp(
-        baseZ + randomSigned(gridX, gridZ, settings.seed + 211) * spacing * 0.34,
+        baseZ + randomSigned(gridX, gridZ, settings.seed + 211) * spacing * jitter,
         footprint.minZ + 0.001,
         footprint.maxZ - 0.001,
       );
@@ -106,4 +104,3 @@ export function generateGrassInstances(
   rankedInstances.sort((a, b) => a.priority - b.priority);
   return rankedInstances.slice(0, limit).map(({ instance }) => instance);
 }
-

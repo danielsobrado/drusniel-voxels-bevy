@@ -1,23 +1,53 @@
 grass:
-  enabled: false
+  enabled: true
   shader_mode: webgpu-ring-v1
-  alpha_to_coverage: false
-  near_crossed_quads: true
-
-  distance: 96
-  blade_spacing: 1.6
-  blade_height: 1.15
-  blade_height_variation: 0.75
-  blade_width: 0.08
-
-  wind_strength: 0.32
-  wind_speed: 1.35
-
-  slope_min_y: 0.72
-  min_height: 12
-  max_height: 128
-  max_blades: 48000
   seed: 1337
+  distance_m: 120
+  refresh_distance_m: 4
+  max_new_patches_per_frame: 2
+  max_instances: 48000
+
+  placement:
+    spacing_m: 1.45
+    jitter: 0.34
+    slope_min_y: 0.72
+    min_height_m: 12
+    max_height_m: 28
+    min_grass_weight: 0.05
+
+  lod:
+    near_fraction: 0.42
+    mid_fraction: 0.78
+    far_density_ratio: 0.18
+    mid_instance_fraction: 0.35
+    far_instance_fraction: 0.12
+    dither_band_m: 12
+
+  blade:
+    height_m: 1.15
+    height_variation: 0.75
+    width_m: 0.08
+    near_blades_per_instance: 5
+    mid_blades_per_instance: 3
+    near_segments: 4
+    mid_segments: 2
+    far_tuft_width_m: 0.28
+    near_crossed_quads: true
+    max_width_compensation: 2.6
+
+  wind:
+    direction: [0.8, 0.6]
+    strength: 0.32
+    speed: 1.35
+    gust_strength: 0.15
+
+  render:
+    alpha_to_coverage: false
+    dither_fade: true
+
+  debug:
+    show_lod_colors: false
+    show_patch_bounds: false
 
   ring:
     grid: 700
@@ -27,9 +57,4 @@ grass:
     mid_meters: 110
     far_meters: 170
     far_distance_fraction: 0.94
-    band_meters: 12
     scruff_meters: 24
-
-  patch_fallback:
-    max_new_patches_per_refresh: 2
-    refresh_distance: 4

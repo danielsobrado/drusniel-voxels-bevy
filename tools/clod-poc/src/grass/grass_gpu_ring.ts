@@ -142,8 +142,8 @@ export function generateGrassRingInstances(
       stats.generatedCandidates++;
       const cellX = centerCellX + dx;
       const cellZ = centerCellZ + dz;
-      const jitterX = randomSigned(cellX, cellZ, settings.seed + 1103) * cellSize * 0.42;
-      const jitterZ = randomSigned(cellX, cellZ, settings.seed + 1201) * cellSize * 0.42;
+      const jitterX = randomSigned(cellX, cellZ, settings.seed + 1103) * cellSize * settings.placement.jitter;
+      const jitterZ = randomSigned(cellX, cellZ, settings.seed + 1201) * cellSize * settings.placement.jitter;
       const x = THREE.MathUtils.clamp((cellX + 0.5) * cellSize + jitterX, 0.001, worldCells - 0.001);
       const z = THREE.MathUtils.clamp((cellZ + 0.5) * cellSize + jitterZ, 0.001, worldCells - 0.001);
       const distance = Math.hypot(center.x - x, center.z - z);
@@ -166,7 +166,7 @@ export function generateGrassRingInstances(
         continue;
       }
 
-      const thin = grassThin(distance);
+      const thin = grassThin(distance, settings);
       const ringEdge = 1 - THREE.MathUtils.smoothstep(distance, radius * 0.9, radius);
       if (hash2(cellX, cellZ, settings.seed + 1409) >= site.grassMask * edgeFade * thin * ringEdge) continue;
 
@@ -175,7 +175,7 @@ export function generateGrassRingInstances(
         0.1,
         1 + randomSigned(cellX, cellZ, settings.seed + 1501) * settings.bladeHeightVariation,
       );
-      const widthScale = THREE.MathUtils.clamp(1 / Math.sqrt(thin), 1, 4);
+      const widthScale = THREE.MathUtils.clamp(1 / Math.sqrt(Math.max(thin, 0.001)), 1, settings.blade.maxWidthCompensation);
       const tier: GrassTier = distance <= nearDistance
         ? "near"
         : distance <= midDistance ? "mid" : distance <= farDistance ? "far" : "super";
@@ -192,7 +192,7 @@ export function generateGrassRingInstances(
           edgeFade,
           normalY: site.normalY,
           terrainNormal: site.terrainNormal,
-          widthScale: tier === "super" ? Math.min(4.8, widthScale * 1.35) : widthScale,
+          widthScale: tier === "super" ? Math.min(settings.blade.maxWidthCompensation, widthScale * 1.35) : widthScale,
         },
       });
     }

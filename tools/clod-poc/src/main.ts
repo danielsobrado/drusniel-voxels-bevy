@@ -6,6 +6,7 @@ import configText from "../config/clod_pages.yaml?raw";
 import stoneConfigText from "../config/stones.yaml?raw";
 import proceduralConfigText from "../config/procedural_textures.yaml?raw";
 import grassConfigText from "../config/grass.yaml?raw";
+import treeConfigText from "../config/trees.yaml?raw";
 import { ClodWorkerClient } from "./clod_worker_client.js";
 import { emitAudio, setAudioEnabled, setMasterVolume, getAudioState } from "./audio/index.js";
 import {
@@ -51,6 +52,7 @@ import {
 import { parseStoneConfig, STONE_CLASSES, type StoneClass } from "./stones/stone_config.js";
 import { StoneSystem, type StoneLighting, type StoneStats } from "./stones/stone_instances.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "./stones/stone_validation.js";
+import { parseTreeConfig, TreeSystem, type TreeSettings, type TreeStats } from "./trees/index.js";
 import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
@@ -512,6 +514,8 @@ async function main() {
   setButtonIcon(orbitModeButton, "camera", "orbit", "Orbit");
   setButtonIcon(playerModeButton, "camera", "player", "Player");
   const searchParams = new URLSearchParams(location.search);
+  const queryScene = searchParams.get("scene");
+  const queryGrassPerfScene = queryScene === "grass-perf";
   const queryPerfMode = searchParams.get("clodPerf") === "1";
   const queryWebGpuSelection = searchParams.get("webgpuSelection") === "1";
   // CPU/GPU error_px parity is a full per-node sweep; opt-in keeps it from hitching the
@@ -559,6 +563,7 @@ async function main() {
   const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
   const stoneConfig = parseStoneConfig(stoneConfigText);
   const grassConfig = parseGrassConfig(grassConfigText);
+  const treeConfig = parseTreeConfig(treeConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
   const proceduralTerrain = proceduralTextureConfig.enabled
     ? createProceduralTerrainTextures(proceduralTextureConfig)
@@ -572,7 +577,7 @@ async function main() {
   // World size via ?world=. 8x8 gives full LOD0..LOD3 depth for A3 / delta-2-3
   // inspection; 16/32 keep the same max LOD with more roots and can freeze the tab longer.
   const requested = Number(searchParams.get("world"));
-  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : 4);
+  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : queryGrassPerfScene ? 16 : 4);
   let buildStatus = "preparing";
   const updateBuildOverlay = () => updateClodOverlay({
     worldSize: WORLD,
@@ -723,6 +728,11 @@ async function main() {
   if (stagedImport) {
     camera.position.fromArray(stagedImport.manifest.camera.position);
     controls.target.fromArray(stagedImport.manifest.camera.target);
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (queryGrassPerfScene) {
+    controls.target.set(mid, 20, mid);
+    camera.position.set(mid - worldCells * 0.24, 46, mid + worldCells * 0.34);
     camera.lookAt(controls.target);
     controls.update();
   }
@@ -1088,6 +1098,15 @@ async function main() {
     grassTierSummary: "0/0/0/0",
     grassEdgeSuppressed: 0,
     grassCandidateCount: 0,
+    grassPatchRebuildCount: 0,
+    grassBuildMs: 0,
+    treesEnabled: treeConfig.enabled,
+    treeDistance: treeConfig.distanceM,
+    treeMaxInstances: treeConfig.maxInstances,
+    treeDebugColorByLod: treeConfig.render.debugColorByLod,
+    treeTotal: 0,
+    treeVisiblePatches: "0/0",
+    treeLodSummary: "0/0/0",
     stonesEnabled: stoneConfig.enabled,
     stoneDensity: stoneConfig.density,
     stoneMaxInstances: stoneConfig.maxInstances,
@@ -1120,6 +1139,21 @@ async function main() {
     state.showLockedBorderVertices = false;
     state.grassEnabled = false;
     state.stonesEnabled = false;
+  }
+  if (queryGrassPerfScene) {
+    state.grassEnabled = true;
+    state.grassShaderMode = isWebGpu ? "webgpu-ring-v1" : "terrain-patch-v2";
+    state.grassDistance = grassConfig.distance;
+    state.grassMaxBlades = grassConfig.maxBlades;
+    state.stonesEnabled = false;
+    state.treesEnabled = false;
+    state.postProcessEnabled = false;
+    state.postProcessDebugMode = "off";
+    state.showBounds = false;
+    state.showSeamPoints = false;
+    state.showCrossLodBorders = false;
+    state.showNodeLabels = false;
+    state.showLockedBorderVertices = false;
   }
   if (searchParams.get("stones") === "1") state.stonesEnabled = true;
   if (searchParams.get("stones") === "0") state.stonesEnabled = false;
@@ -1551,8 +1585,34 @@ async function main() {
   };
 
   const makeGrassSettings = (): GrassSettings => ({
+    ...grassConfig,
     enabled: state.grassEnabled,
     shaderMode: state.grassShaderMode,
+    distanceM: state.grassDistance,
+    maxInstances: state.grassMaxBlades,
+    placement: {
+      ...grassConfig.placement,
+      spacingM: state.grassBladeSpacing,
+      slopeMinY: state.grassSlopeMinY,
+      minHeightM: state.grassMinHeight,
+      maxHeightM: state.grassMaxHeight,
+    },
+    blade: {
+      ...grassConfig.blade,
+      heightM: state.grassBladeHeight,
+      heightVariation: state.grassBladeHeightVariation,
+      widthM: state.grassBladeWidth,
+      nearCrossedQuads: state.grassNearCrossedQuads,
+    },
+    wind: {
+      ...grassConfig.wind,
+      strength: state.grassWindStrength,
+      speed: state.grassWindSpeed,
+    },
+    render: {
+      ...grassConfig.render,
+      alphaToCoverage: state.grassAlphaToCoverage,
+    },
     alphaToCoverage: state.grassAlphaToCoverage,
     nearCrossedQuads: state.grassNearCrossedQuads,
     distance: state.grassDistance,
@@ -1569,6 +1629,16 @@ async function main() {
     seed: state.grassSeed,
     ring: { ...grassConfig.ring },
     patchFallback: { ...grassConfig.patchFallback },
+  });
+  const makeTreeSettings = (): TreeSettings => ({
+    ...treeConfig,
+    enabled: state.treesEnabled,
+    distanceM: state.treeDistance,
+    maxInstances: state.treeMaxInstances,
+    render: {
+      ...treeConfig.render,
+      debugColorByLod: state.treeDebugColorByLod,
+    },
   });
   const currentGrassLighting = (): GrassLighting => {
     const lighting = currentLighting();
@@ -1587,6 +1657,8 @@ async function main() {
   });
   let grass: GrassSystem | null = null;
   let grassStats: GrassStats | null = null;
+  let treeSystem: TreeSystem | null = null;
+  let treeStats: TreeStats | null = null;
   let stones: StoneSystem | null = null;
   let selState: SelectionState = { split: new Set() };
   const pageTransitionMode = cfg.selection.transition_mode;
@@ -1645,6 +1717,7 @@ async function main() {
               alphaToCoverage: settings.alphaToCoverage,
               distance: settings.distance,
               ring: settings.ring,
+              lod: settings.lod,
               fadeCenter: new THREE.Vector2(controls.target.x, controls.target.z),
               ringInstanceBuffers,
             }),
@@ -1655,6 +1728,20 @@ async function main() {
   grass = grassSystem;
   state.grassBladeCount = grassSystem.getBladeCount();
   grassStats = grassSystem.getStats();
+
+  const treePageNodes = allNodes.filter((node) => node.level === 0);
+  const treePageSignaturesBefore = pageMeshSignatures(treePageNodes);
+  treeSystem = new TreeSystem({
+    scene,
+    nodes: treePageNodes,
+    worldCells,
+    settings: makeTreeSettings(),
+  });
+  assertPageMeshSignaturesUnchanged(treePageSignaturesBefore, pageMeshSignatures(treePageNodes));
+  treeStats = treeSystem.getStats();
+  state.treeTotal = treeStats.totalTrees;
+  state.treeVisiblePatches = `${treeStats.visiblePatches}/${treeStats.patches}`;
+  state.treeLodSummary = `${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}`;
 
   // Stone overlay (ground-detail props). Pure visual layer: scattered over the LOD0 page
   // footprints and added to the scene, never fed into the page source mesh / weld path.
@@ -1822,7 +1909,7 @@ async function main() {
       ? `player: grounded=${player.grounded}  physics p95=${player.physicsP95Ms().toFixed(2)} ms  collider pages=${player.lastPagesTested}`
       : `view: ${interaction.mode}`;
     info.textContent =
-      `Drusniel Voxels Web — ${WORLD}x${WORLD} pages\n` +
+      `Drusniel Voxels Web — ${WORLD}x${WORLD} pages${queryGrassPerfScene ? "  GRASS PERF" : ""}\n` +
       `cut: ${lastRenderedCount} nodes  (${lastLevelSummary})\n` +
       `tris rendered: ${lastTriCount.toLocaleString()}   2:1 forced splits: ${lastForced}   ` +
       `bubble forced splits: ${lastNearFieldForced}   xLOD borders: ${lastCrossLodAdjacencyCount}\n` +
@@ -1836,12 +1923,15 @@ async function main() {
       `${state.grassBladeCount.toLocaleString()} blades` +
       `${grassStats ? ` patches=${grassStats.visiblePatches}/${grassStats.patches} ` +
       `tiers n/m/f/s=${grassStats.nearPatches}/${grassStats.midPatches}/${grassStats.coveragePatches}/${grassStats.superPatches} ` +
-      `edge-skip=${grassStats.edgeSuppressedCandidates}` : ""}` +
+      `edge-skip=${grassStats.edgeSuppressedCandidates} rebuilds=${grassStats.patchRebuildCount} build=${grassStats.buildMs.toFixed(1)}ms` : ""}` +
       `${grassStats && grassStats.gpuRingStatus !== "disabled"
         ? ` gpu-grass=${grassStats.gpuRingStatus}` +
           ` gpu-n/m/f/s=${grassStats.gpuRingVisibleNear}/${grassStats.gpuRingVisibleMid}/${grassStats.gpuRingVisibleFar}/${grassStats.gpuRingVisibleSuper}` +
           ` gpu-dispatch=${grassStats.gpuRingDispatchMs === null ? "-" : grassStats.gpuRingDispatchMs.toFixed(2)}ms`
         : grassStats ? ` gpu-grass=${grassStats.gpuRingStatus}` : ""}\n` +
+      `trees: ${state.treesEnabled ? "enabled" : "disabled"} ${state.treeTotal.toLocaleString()} trees ` +
+      `${treeStats ? `patches=${treeStats.visiblePatches}/${treeStats.patches} ` +
+      `lod n/m/f=${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}` : ""}\n` +
       `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
       `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
       `${lastArchiveSummary ? `${lastArchiveSummary}\n` : ""}` +
@@ -2120,6 +2210,10 @@ async function main() {
         grassSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
         refreshGrassStats();
       }
+      if (state.treesEnabled && lod0.changed.length > 0) {
+        treeSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
+        refreshTreeStats();
+      }
       pendingParentNodes = 0;
       pendingParentMs = 0;
       pendingParentCount = lod0.pendingParents;
@@ -2380,6 +2474,8 @@ async function main() {
   let grassTierSummaryController: { updateDisplay: () => unknown } | null = null;
   let grassEdgeSuppressedController: { updateDisplay: () => unknown } | null = null;
   let grassCandidateCountController: { updateDisplay: () => unknown } | null = null;
+  let grassPatchRebuildCountController: { updateDisplay: () => unknown } | null = null;
+  let grassBuildMsController: { updateDisplay: () => unknown } | null = null;
   const refreshGrassStats = () => {
     if (!grassSystem) return;
     grassStats = grassSystem.getStats();
@@ -2388,11 +2484,15 @@ async function main() {
     state.grassTierSummary = `${grassStats.nearPatches}/${grassStats.midPatches}/${grassStats.coveragePatches}/${grassStats.superPatches}`;
     state.grassEdgeSuppressed = grassStats.edgeSuppressedCandidates;
     state.grassCandidateCount = grassStats.generatedCandidates;
+    state.grassPatchRebuildCount = grassStats.patchRebuildCount;
+    state.grassBuildMs = Number(grassStats.buildMs.toFixed(2));
     grassBladeCountController?.updateDisplay();
     grassVisiblePatchesController?.updateDisplay();
     grassTierSummaryController?.updateDisplay();
     grassEdgeSuppressedController?.updateDisplay();
     grassCandidateCountController?.updateDisplay();
+    grassPatchRebuildCountController?.updateDisplay();
+    grassBuildMsController?.updateDisplay();
   };
   const grassActions = {
     rebuild: () => {
@@ -2440,7 +2540,44 @@ async function main() {
   grassTierSummaryController = grassFolder.add(state, "grassTierSummary").name("near/mid/far/super").disable();
   grassEdgeSuppressedController = grassFolder.add(state, "grassEdgeSuppressed").name("edge suppressed").disable();
   grassCandidateCountController = grassFolder.add(state, "grassCandidateCount").name("candidates").disable();
+  grassPatchRebuildCountController = grassFolder.add(state, "grassPatchRebuildCount").name("patch rebuilds").disable();
+  grassBuildMsController = grassFolder.add(state, "grassBuildMs").name("build ms").disable();
   grassFolder.add(grassActions, "rebuild").name("rebuild");
+
+  let treeTotalController: { updateDisplay: () => unknown } | null = null;
+  let treeVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
+  let treeLodSummaryController: { updateDisplay: () => unknown } | null = null;
+  const refreshTreeStats = () => {
+    if (!treeSystem) return;
+    treeStats = treeSystem.getStats();
+    state.treeTotal = treeStats.totalTrees;
+    state.treeVisiblePatches = `${treeStats.visiblePatches}/${treeStats.patches}`;
+    state.treeLodSummary = `${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}`;
+    treeTotalController?.updateDisplay();
+    treeVisiblePatchesController?.updateDisplay();
+    treeLodSummaryController?.updateDisplay();
+  };
+  const treeActions = {
+    rebuild: () => {
+      treeSystem?.updateSettings(makeTreeSettings());
+      treeSystem?.rebuild();
+      refreshTreeStats();
+      updateInfo();
+    },
+  };
+  const treeFolder = gui.addFolder("trees (props)");
+  treeFolder.add(state, "treesEnabled").name("enabled").onChange((enabled: boolean) => {
+    treeSystem?.setEnabled(enabled);
+    refreshTreeStats();
+    updateInfo();
+  });
+  treeFolder.add(state, "treeDistance", 32, 512, 1).name("distance").onChange(treeActions.rebuild);
+  treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild);
+  treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(treeActions.rebuild);
+  treeTotalController = treeFolder.add(state, "treeTotal").name("tree count").disable();
+  treeVisiblePatchesController = treeFolder.add(state, "treeVisiblePatches").name("visible patches").disable();
+  treeLodSummaryController = treeFolder.add(state, "treeLodSummary").name("near/mid/far").disable();
+  treeFolder.add(treeActions, "rebuild").name("rebuild");
 
   let stoneTotalController: { updateDisplay: () => unknown } | null = null;
   let stoneClassSummaryController: { updateDisplay: () => unknown } | null = null;
@@ -3555,6 +3692,10 @@ async function main() {
     grassMaxHeight: state.grassMaxHeight,
     grassMaxBlades: state.grassMaxBlades,
     grassSeed: state.grassSeed,
+    treesEnabled: state.treesEnabled,
+    treeDistance: state.treeDistance,
+    treeMaxInstances: state.treeMaxInstances,
+    treeDebugColorByLod: state.treeDebugColorByLod,
   });
 
   const projectTextureMetadata = (): ProjectTextureSlot[] => textureSlots.map((slot, index) => {
@@ -3743,6 +3884,10 @@ async function main() {
   grassSystem?.setEnabled(state.grassEnabled);
   grassSystem?.updateSettings(makeGrassSettings());
   refreshGrassStats();
+  treeSystem?.setEnabled(state.treesEnabled);
+  treeSystem?.updateSettings(makeTreeSettings());
+  treeSystem?.rebuild();
+  refreshTreeStats();
   updateSelection();
   updateInfo();
 
@@ -3917,6 +4062,7 @@ async function main() {
     const tPropsStart = performance.now();
     const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
     grassSystem?.update(elapsedSeconds, grassCenter, camera);
+    treeSystem?.update(elapsedSeconds, grassCenter);
     stoneSystem?.update(grassCenter);
     const nextStoneStats = stoneSystem?.getStats();
     if (nextStoneStats && (!stoneStats || nextStoneStats.total !== stoneStats.total || nextStoneStats.visible !== stoneStats.visible)) {
@@ -3960,6 +4106,25 @@ async function main() {
       grassCandidateCountController?.updateDisplay();
     }
     const currentGrassStats = nextGrassStats ?? grassStats;
+    const nextTreeStats = treeSystem?.getStats();
+    if (
+      nextTreeStats && (
+      !treeStats ||
+      nextTreeStats.totalTrees !== treeStats.totalTrees ||
+      nextTreeStats.visiblePatches !== treeStats.visiblePatches ||
+      nextTreeStats.patches !== treeStats.patches ||
+      nextTreeStats.nearTrees !== treeStats.nearTrees ||
+      nextTreeStats.midTrees !== treeStats.midTrees ||
+      nextTreeStats.farTrees !== treeStats.farTrees)
+    ) {
+      treeStats = nextTreeStats;
+      state.treeTotal = nextTreeStats.totalTrees;
+      state.treeVisiblePatches = `${nextTreeStats.visiblePatches}/${nextTreeStats.patches}`;
+      state.treeLodSummary = `${nextTreeStats.nearTrees}/${nextTreeStats.midTrees}/${nextTreeStats.farTrees}`;
+      treeTotalController?.updateDisplay();
+      treeVisiblePatchesController?.updateDisplay();
+      treeLodSummaryController?.updateDisplay();
+    }
     nodeLabelOverlay.update({
       nodes: lastRenderedNodes,
       camera,
@@ -4043,6 +4208,7 @@ async function main() {
   window.addEventListener("beforeunload", () => {
     lockedBorderOverlay.dispose();
     grassSystem?.dispose();
+    treeSystem?.dispose();
     stoneSystem?.dispose();
     skyEnvironment?.dispose();
     postProcess?.dispose();

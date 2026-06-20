@@ -14,13 +14,8 @@ import { depthPrepassTwin } from "../rendering/veg_prepass.js";
 import {
   DEFAULT_GRASS_SHADER_MODE,
   GRASS_SHADER_MODES,
-  V2_FAR_INSTANCE_FRACTION,
-  V2_MID_DISTANCE_FRACTION,
-  V2_MID_INSTANCE_FRACTION,
-  V2_NEAR_BLADE_ROWS,
-  V2_NEAR_DISTANCE_FRACTION,
-  V2_MID_BLADE_ROWS,
-  V2_SUPER_INSTANCE_FRACTION,
+  grassRowsForSegments,
+  resolveGrassSettings,
   type GrassLighting,
   type GrassSettings,
   type GrassShaderMode,
@@ -31,6 +26,7 @@ import {
   cloneLighting,
   createBladeGeometry,
   createGrassBladeClumpGeometry,
+  createGrassClumpGeometry,
   createGrassMaterial,
   createGrassTuftGeometry,
   grassShaderDefinition,
@@ -85,15 +81,15 @@ export class GrassSystem {
   private readonly worldCells: number;
   private readonly root = new THREE.Group();
   private readonly classicBladeGeometry = createBladeGeometry();
-  private readonly terrainPatchNearGeometry = createBladeGeometry(V2_NEAR_BLADE_ROWS);
-  private readonly terrainPatchNearCrossedGeometry = createBladeGeometry(V2_NEAR_BLADE_ROWS, true);
-  private readonly terrainPatchMidGeometry = createBladeGeometry(V2_MID_BLADE_ROWS);
-  private readonly terrainPatchFarGeometry = createGrassTuftGeometry(1.25);
-  private readonly terrainPatchSuperGeometry = createGrassTuftGeometry(1.85);
-  private readonly ringNearGeometry = createGrassBladeClumpGeometry(5, V2_NEAR_BLADE_ROWS, 0x9e3779b9);
-  private readonly ringMidGeometry = createGrassBladeClumpGeometry(3, V2_MID_BLADE_ROWS, 0x85ebca6b);
-  private readonly ringFarGeometry = createGrassTuftGeometry(1.15);
-  private readonly ringSuperGeometry = createGrassTuftGeometry(1.85);
+  private terrainPatchNearGeometry!: THREE.BufferGeometry;
+  private terrainPatchNearCrossedGeometry!: THREE.BufferGeometry;
+  private terrainPatchMidGeometry!: THREE.BufferGeometry;
+  private terrainPatchFarGeometry!: THREE.BufferGeometry;
+  private terrainPatchSuperGeometry!: THREE.BufferGeometry;
+  private ringNearGeometry!: THREE.BufferGeometry;
+  private ringMidGeometry!: THREE.BufferGeometry;
+  private ringFarGeometry!: THREE.BufferGeometry;
+  private ringSuperGeometry!: THREE.BufferGeometry;
   private readonly materials = new Map<GrassShaderMode, THREE.ShaderMaterial>();
   private readonly supportsRing: boolean;
   private readonly gpuDevice: GPUDevice | null;
@@ -122,6 +118,7 @@ export class GrassSystem {
   private lastRingDebugTime = 0;
   private currentLighting: GrassLighting;
   private settings: GrassSettings;
+  private sharedGeometryKey = "";
   private patches: GrassPatch[] = [];
   private patchesDirty = true;
   private ringMeshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[] = [];
@@ -134,6 +131,8 @@ export class GrassSystem {
   private readonly frustumPlaneScratch = new Float32Array(24);
   private hasGpuRingFrustum = false;
   private bladeCount = 0;
+  private patchRebuildCount = 0;
+  private grassBuildMs = 0;
   private generationStats: GrassGenerationStats = {
     generatedCandidates: 0,
     acceptedCandidates: 0,
@@ -152,6 +151,8 @@ export class GrassSystem {
     generatedCandidates: 0,
     acceptedCandidates: 0,
     edgeSuppressedCandidates: 0,
+    patchRebuildCount: 0,
+    buildMs: 0,
     midBladeCount: 0,
     gpuRingStatus: "disabled",
     gpuRingCandidateCount: 0,
@@ -170,7 +171,8 @@ export class GrassSystem {
       .filter((node) => node.level === 0)
       .sort((a, b) => a.footprint.minZ - b.footprint.minZ || a.footprint.minX - b.footprint.minX);
     this.worldCells = options.worldCells;
-    this.settings = { ...options.settings };
+    this.settings = resolveGrassSettings(options.settings);
+    this.rebuildSharedGeometries();
     this.supportsRing = options.supportsRing === true;
     this.gpuDevice = options.gpuDevice ?? null;
     this.gpuBackend = options.gpuBackend ?? null;
@@ -215,7 +217,14 @@ export class GrassSystem {
   updateSettings(settings: Partial<GrassSettings>): void {
     const wasRing = this.isRingMode();
     const previousMode = this.settings.shaderMode;
-    Object.assign(this.settings, settings);
+    const previousGeometryKey = this.grassGeometryKey(this.settings);
+    this.settings = resolveGrassSettings({ ...this.settings, ...settings });
+    if (this.grassGeometryKey(this.settings) !== previousGeometryKey) {
+      this.rebuildSharedGeometries();
+      this.clearPatches();
+      this.clearRing();
+      this.clearGpuRingCompute();
+    }
     const nowRing = this.isRingMode();
     if (wasRing !== nowRing) {
       this.clearPatches();
@@ -322,6 +331,57 @@ export class GrassSystem {
     this.injectedMaterial?.dispose?.();
   }
 
+  private rebuildSharedGeometries(): void {
+    const key = this.grassGeometryKey(this.settings);
+    if (key === this.sharedGeometryKey) return;
+    this.sharedGeometryKey = key;
+    this.terrainPatchNearGeometry?.dispose();
+    this.terrainPatchNearCrossedGeometry?.dispose();
+    this.terrainPatchMidGeometry?.dispose();
+    this.terrainPatchFarGeometry?.dispose();
+    this.terrainPatchSuperGeometry?.dispose();
+    this.ringNearGeometry?.dispose();
+    this.ringMidGeometry?.dispose();
+    this.ringFarGeometry?.dispose();
+    this.ringSuperGeometry?.dispose();
+
+    const nearRows = grassRowsForSegments(this.settings.blade.nearSegments);
+    const midRows = grassRowsForSegments(this.settings.blade.midSegments, 0);
+    this.terrainPatchNearGeometry = createGrassClumpGeometry(
+      this.settings.blade.nearBladesPerInstance,
+      this.settings.blade.nearSegments,
+      this.settings,
+    );
+    this.terrainPatchNearCrossedGeometry = createGrassBladeClumpGeometry(
+      this.settings.blade.nearBladesPerInstance,
+      nearRows,
+      this.settings.seed + 0x9e3779b9,
+    );
+    this.terrainPatchMidGeometry = createGrassClumpGeometry(
+      this.settings.blade.midBladesPerInstance,
+      this.settings.blade.midSegments,
+      this.settings,
+    );
+    this.terrainPatchFarGeometry = createGrassTuftGeometry(this.settings);
+    this.terrainPatchSuperGeometry = createGrassTuftGeometry(this.settings.blade.farTuftWidthM * 1.45 / Math.max(this.settings.blade.widthM, 0.001));
+    this.ringNearGeometry = createGrassBladeClumpGeometry(this.settings.blade.nearBladesPerInstance, nearRows, 0x9e3779b9);
+    this.ringMidGeometry = createGrassBladeClumpGeometry(this.settings.blade.midBladesPerInstance, midRows, 0x85ebca6b);
+    this.ringFarGeometry = createGrassTuftGeometry(this.settings);
+    this.ringSuperGeometry = createGrassTuftGeometry(this.settings.blade.farTuftWidthM * 1.45 / Math.max(this.settings.blade.widthM, 0.001));
+  }
+
+  private grassGeometryKey(settings: GrassSettings): string {
+    return [
+      settings.seed,
+      settings.blade.nearBladesPerInstance,
+      settings.blade.midBladesPerInstance,
+      settings.blade.nearSegments,
+      settings.blade.midSegments,
+      settings.blade.farTuftWidthM,
+      settings.blade.widthM,
+    ].join("|");
+  }
+
   getBladeCount(): number {
     if (this.isRingMode()) return this.ringBladeCount;
     return this.bladeCount;
@@ -338,6 +398,8 @@ export class GrassSystem {
     }
     this.patches = [];
     this.bladeCount = 0;
+    this.patchRebuildCount = 0;
+    this.grassBuildMs = 0;
     this.generationStats = {
       generatedCandidates: 0,
       acceptedCandidates: 0,
@@ -744,9 +806,12 @@ export class GrassSystem {
       };
       const remainingNodes = newNodes.length - index;
       const patchBudget = Math.ceil(remainingBudget / remainingNodes);
+      const buildStart = performance.now();
       const instances = generateGrassInstances(footprint, this.settings, patchBudget, this.generationStats);
       if (instances.length === 0) continue;
       const patch = this.createPatch(node.id, footprint, instances);
+      this.grassBuildMs += performance.now() - buildStart;
+      this.patchRebuildCount++;
       this.patches.push(patch);
       for (const mesh of patch.meshes) this.root.add(mesh);
       this.bladeCount += patch.bladeCount;
@@ -762,7 +827,7 @@ export class GrassSystem {
       return this.createTerrainPatch(nodeId, footprint, instances);
     }
     const geometry = this.injectedGeometryBuilder
-      ? this.injectedGeometryBuilder(instances, { mode: this.settings.shaderMode, tier: "near" })
+      ? this.injectedGeometryBuilder(instances, { mode: this.settings.shaderMode, tier: "near", settings: this.settings })
       : new THREE.InstancedBufferGeometry();
     if (!this.injectedGeometryBuilder) {
       populateGrassGeometry(geometry, this.classicBladeGeometry, footprint, instances, this.settings);
@@ -792,56 +857,62 @@ export class GrassSystem {
           mode: this.settings.shaderMode,
           tier: "near",
           crossed: this.settings.nearCrossedQuads,
+          settings: this.settings,
         })
       : new THREE.InstancedBufferGeometry();
     if (!this.injectedGeometryBuilder) {
       populateGrassGeometry(nearGeometry, nearBlade, footprint, instances, this.settings);
     }
 
-    const midCount = Math.max(1, Math.floor(instances.length * V2_MID_INSTANCE_FRACTION));
+    const midThinRatio = this.settings.lod.midInstanceFraction;
+    const farThinRatio = this.settings.lod.farInstanceFraction || this.settings.lod.farDensityRatio;
+    const midCount = this.thinnedCount(instances.length, midThinRatio);
     const midInstances = instances.slice(0, midCount).map((instance) => ({
       ...instance,
       height: instance.height * 1.55,
       edgeFade: Math.min(1, instance.edgeFade * 1.15),
-      widthScale: (instance.widthScale ?? 1) * 1.25,
+      widthScale: (instance.widthScale ?? 1) * this.widthCompensation(midThinRatio),
     }));
     const midGeometry = this.injectedGeometryBuilder
-      ? this.injectedGeometryBuilder(midInstances, { mode: this.settings.shaderMode, tier: "mid" })
+      ? this.injectedGeometryBuilder(midInstances, { mode: this.settings.shaderMode, tier: "mid", settings: this.settings })
       : new THREE.InstancedBufferGeometry();
     if (!this.injectedGeometryBuilder) {
       populateGrassGeometry(midGeometry, this.terrainPatchMidGeometry, footprint, midInstances, this.settings);
     }
 
-    const farCount = Math.max(1, Math.floor(instances.length * V2_FAR_INSTANCE_FRACTION));
+    const farCount = this.thinnedCount(instances.length, farThinRatio);
     const farInstances = instances.slice(0, farCount).map((instance) => ({
       ...instance,
       height: instance.height * 1.9,
       edgeFade: Math.min(1, instance.edgeFade * 1.25),
-      widthScale: (instance.widthScale ?? 1) * 2.6,
+      widthScale: (instance.widthScale ?? 1) * this.widthCompensation(farThinRatio),
     }));
     const farGeometry = this.injectedGeometryBuilder
       ? this.injectedGeometryBuilder(farInstances, {
           mode: this.settings.shaderMode,
           tier: "far",
           crossed: true,
+          settings: this.settings,
         })
       : new THREE.InstancedBufferGeometry();
     if (!this.injectedGeometryBuilder) {
       populateGrassGeometry(farGeometry, this.terrainPatchFarGeometry, footprint, farInstances, this.settings);
     }
 
-    const superCount = Math.max(1, Math.floor(instances.length * V2_SUPER_INSTANCE_FRACTION));
+    const superThinRatio = Math.max(0.001, farThinRatio * 0.5);
+    const superCount = this.thinnedCount(instances.length, superThinRatio);
     const superInstances = instances.slice(0, superCount).map((instance) => ({
       ...instance,
       height: instance.height * 2.35,
       edgeFade: Math.min(1, instance.edgeFade * 1.35),
-      widthScale: (instance.widthScale ?? 1) * 3.8,
+      widthScale: (instance.widthScale ?? 1) * this.widthCompensation(superThinRatio),
     }));
     const superGeometry = this.injectedGeometryBuilder
       ? this.injectedGeometryBuilder(superInstances, {
           mode: this.settings.shaderMode,
           tier: "super",
           crossed: true,
+          settings: this.settings,
         })
       : new THREE.InstancedBufferGeometry();
     if (!this.injectedGeometryBuilder) {
@@ -868,6 +939,19 @@ export class GrassSystem {
     };
   }
 
+  private thinnedCount(instanceCount: number, thinRatio: number): number {
+    if (instanceCount <= 0) return 0;
+    return Math.max(1, Math.floor(instanceCount * THREE.MathUtils.clamp(thinRatio, 0, 1)));
+  }
+
+  private widthCompensation(thinRatio: number): number {
+    return THREE.MathUtils.clamp(
+      1 / Math.sqrt(Math.max(thinRatio, 0.001)),
+      1,
+      this.settings.blade.maxWidthCompensation,
+    );
+  }
+
   private updateMaterialUniforms(): void {
     if (this.injectedMaterial) {
       this.injectedMaterial.updateSettings?.(this.settings);
@@ -876,10 +960,11 @@ export class GrassSystem {
     }
     for (const [mode, material] of this.materials) {
       material.uniforms.uBladeWidth.value = this.settings.bladeWidth;
+      material.uniforms.uWindDirection.value.set(this.settings.wind.direction[0], this.settings.wind.direction[1]);
       material.uniforms.uWindStrength.value = this.settings.windStrength;
       material.uniforms.uWindSpeed.value = this.settings.windSpeed;
-      material.uniforms.uNearDistance.value = this.settings.distance * V2_NEAR_DISTANCE_FRACTION;
-      material.uniforms.uMidDistance.value = this.settings.distance * V2_MID_DISTANCE_FRACTION;
+      material.uniforms.uNearDistance.value = this.settings.distance * this.settings.lod.nearFraction;
+      material.uniforms.uMidDistance.value = this.settings.distance * this.settings.lod.midFraction;
       material.uniforms.uFadeDistance.value = grassFadeDistance(this.settings);
       // Toggling alpha-to-coverage only flips a material flag + uniform (no recompile/rebuild).
       const useAlphaToCoverage =
@@ -907,8 +992,8 @@ export class GrassSystem {
       return;
     }
 
-    const nearDistance = this.settings.distance * V2_NEAR_DISTANCE_FRACTION + patch.radius;
-    const midDistance = this.settings.distance * V2_MID_DISTANCE_FRACTION + patch.radius;
+    const nearDistance = this.settings.distance * this.settings.lod.nearFraction + patch.radius;
+    const midDistance = this.settings.distance * this.settings.lod.midFraction + patch.radius;
     const farDistance = this.settings.distance * this.settings.ring.farDistanceFraction + patch.radius;
     const coverageDistance = this.settings.distance + patch.radius;
     patch.meshes[0].visible = distance <= nearDistance;
@@ -978,6 +1063,8 @@ export class GrassSystem {
         generatedCandidates: ringGpu.generatedCandidates,
         acceptedCandidates: ringGpu.acceptedCandidates,
         edgeSuppressedCandidates: this.generationStats.edgeSuppressedCandidates,
+        patchRebuildCount: this.patchRebuildCount,
+        buildMs: this.grassBuildMs,
         midBladeCount: this.ringTierCounts.mid + this.ringTierCounts.far + this.ringTierCounts.super,
         gpuRingStatus: ringGpu.status,
         gpuRingCandidateCount: ringGpu.candidateCount,
@@ -1017,6 +1104,8 @@ export class GrassSystem {
       generatedCandidates: this.generationStats.generatedCandidates,
       acceptedCandidates: this.generationStats.acceptedCandidates,
       edgeSuppressedCandidates: this.generationStats.edgeSuppressedCandidates,
+      patchRebuildCount: this.patchRebuildCount,
+      buildMs: this.grassBuildMs,
       midBladeCount,
       gpuRingStatus: gpu.status,
       gpuRingCandidateCount: gpu.candidateCount,

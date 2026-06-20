@@ -3,8 +3,7 @@ import type { PageFootprint } from "../types.js";
 import {
   BLADE_ROWS,
   TWO_PI,
-  V2_MID_DISTANCE_FRACTION,
-  V2_NEAR_DISTANCE_FRACTION,
+  grassRowsForSegments,
   type GrassLighting,
   type GrassSettings,
   type GrassShaderMode,
@@ -17,6 +16,7 @@ import { grassFadeDistance } from "./grass_math.js";
 const VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
   uniform float uBladeWidth;
+  uniform vec2 uWindDirection;
   uniform float uWindStrength;
   uniform float uWindSpeed;
   attribute vec3 aOffset;
@@ -33,7 +33,8 @@ const VERTEX_SHADER = /* glsl */ `
   void main() {
     float bend = uv.y * uv.y;
     float windTime = uTime * uWindSpeed + aPhase + aOffset.x * 0.071 + aOffset.z * 0.053;
-    vec2 wind = vec2(sin(windTime), cos(windTime * 0.83 + aPhase * 0.37));
+    vec2 lateralWind = vec2(sin(windTime), cos(windTime * 0.83 + aPhase * 0.37));
+    vec2 wind = normalize(uWindDirection + lateralWind * 0.35);
     wind *= uWindStrength * aHeight * bend;
 
     vec3 localPosition = vec3(position.x * uBladeWidth * aWidthScale, position.y * aHeight, position.z * uBladeWidth * aWidthScale);
@@ -101,6 +102,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 const TERRAIN_PATCH_VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
   uniform float uBladeWidth;
+  uniform vec2 uWindDirection;
   uniform float uWindStrength;
   uniform float uWindSpeed;
   uniform float uNearDistance;
@@ -132,10 +134,11 @@ const TERRAIN_PATCH_VERTEX_SHADER = /* glsl */ `
     float bendPower = heightFactor * edge * (0.55 + nearWeight * 0.45);
 
     float windTime = uTime * uWindSpeed + aPhase + aOffset.x * 0.049 + aOffset.z * 0.037;
-    vec2 wind = vec2(
+    vec2 lateralWind = vec2(
       sin(windTime),
       sin(windTime * 0.61 + aOffset.z * 0.021)
-    ) * uWindStrength * aHeight * bendPower;
+    );
+    vec2 wind = normalize(uWindDirection + lateralWind * 0.35) * uWindStrength * aHeight * bendPower;
 
     float edgeHeight = mix(0.35, 1.0, edge);
     float slopeHeight = mix(0.55, 1.0, slope);
@@ -235,6 +238,7 @@ export interface GrassGeometryOptions {
   mode: GrassShaderMode;
   tier: GrassTier;
   crossed?: boolean;
+  settings?: GrassSettings;
 }
 
 export type GrassGeometryBuilder = (
@@ -335,7 +339,10 @@ export function createBladeGeometry(
   return geometry;
 }
 
-export function createGrassTuftGeometry(width = 1): THREE.BufferGeometry {
+export function createGrassTuftGeometry(widthOrSettings: number | GrassSettings = 1): THREE.BufferGeometry {
+  const width = typeof widthOrSettings === "number"
+    ? widthOrSettings
+    : widthOrSettings.blade.farTuftWidthM / Math.max(widthOrSettings.blade.widthM, 0.001);
   const positions: number[] = [];
   const uvs: number[] = [];
   const normals: number[] = [];
@@ -432,6 +439,18 @@ export function createGrassBladeClumpGeometry(
   return geometry;
 }
 
+export function createGrassClumpGeometry(
+  bladesPerInstance: number,
+  segments: number,
+  settings: GrassSettings,
+): THREE.BufferGeometry {
+  return createGrassBladeClumpGeometry(
+    bladesPerInstance,
+    grassRowsForSegments(segments),
+    settings.seed + bladesPerInstance * 409 + segments * 37,
+  );
+}
+
 export function createGrassMaterial(
   settings: GrassSettings,
   lighting: GrassLighting,
@@ -443,10 +462,11 @@ export function createGrassMaterial(
     uniforms: {
       uTime: { value: 0 },
       uBladeWidth: { value: settings.bladeWidth },
+      uWindDirection: { value: new THREE.Vector2(settings.wind.direction[0], settings.wind.direction[1]) },
       uWindStrength: { value: settings.windStrength },
       uWindSpeed: { value: settings.windSpeed },
-      uNearDistance: { value: settings.distance * V2_NEAR_DISTANCE_FRACTION },
-      uMidDistance: { value: settings.distance * V2_MID_DISTANCE_FRACTION },
+      uNearDistance: { value: settings.distance * settings.lod.nearFraction },
+      uMidDistance: { value: settings.distance * settings.lod.midFraction },
       uFadeDistance: { value: grassFadeDistance(settings) },
       uLight: { value: lighting.light.clone() },
       uSunColor: { value: lighting.sunColor.clone() },
@@ -532,4 +552,3 @@ export function populateGrassGeometry(
     );
     geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
   }
-
