@@ -29,6 +29,10 @@ const V2_EDGE_SAMPLE_SCALE = 1.25;
 const V2_EDGE_HEIGHT_SOFT = 1.5;
 const V2_EDGE_HEIGHT_HARD = 4.5;
 const PATCH_REFRESH_DISTANCE = 4;
+// Max new grass patches (scatter + InstancedBufferGeometry build) per refreshPatches call. Caps
+// the per-frame cost so walking across page boundaries doesn't scatter many patches in one frame;
+// the rest build over the next frames via patchesDirty. Trade: grass fills in over a few frames.
+const MAX_NEW_PATCHES_PER_REFRESH = 2;
 
 const VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
@@ -765,17 +769,21 @@ export class GrassSystem {
   }
 
   private refreshForCenter(center: THREE.Vector3): void {
-    this.refreshPatches(center);
+    // refreshPatches builds at most MAX_NEW_PATCHES_PER_REFRESH new patches and returns true if it
+    // deferred more; keep patchesDirty set so update() finishes them over the next frames instead
+    // of scattering every newly-in-range patch in one frame (the walk stutter).
+    const deferred = this.refreshPatches(center);
     for (const patch of this.patches) {
       const distance = Math.hypot(center.x - patch.centerX, center.z - patch.centerZ);
       this.updatePatchVisibility(patch, distance);
     }
     this.lastRefreshCenter.copy(center);
-    this.patchesDirty = false;
+    this.patchesDirty = deferred;
     this.updateStats();
   }
 
-  private refreshPatches(center: THREE.Vector3): void {
+  /** Returns true if it hit the per-frame patch budget and left more nodes to build later. */
+  private refreshPatches(center: THREE.Vector3): boolean {
     const nearbyNodes = this.nodes.filter((node) => {
       const footprint = node.footprint;
       const centerX = (footprint.minX + footprint.maxX) * 0.5;
@@ -798,7 +806,11 @@ export class GrassSystem {
     const retainedIds = new Set(this.patches.map((patch) => patch.nodeId));
     const newNodes = nearbyNodes.filter((node) => !retainedIds.has(node.id));
     let remainingBudget = Math.max(0, Math.floor(this.settings.maxBlades) - this.bladeCount);
+    let built = 0;
     for (let index = 0; index < newNodes.length && remainingBudget > 0; index++) {
+      // Each createPatch scatters blades + builds an InstancedBufferGeometry. Building every
+      // newly-in-range node in one frame is the walk stutter; cap per frame and defer the rest.
+      if (built >= MAX_NEW_PATCHES_PER_REFRESH) return true;
       const node = newNodes[index];
       const source = node.footprint;
       const footprint: PageFootprint = {
@@ -816,7 +828,9 @@ export class GrassSystem {
       for (const mesh of patch.meshes) this.root.add(mesh);
       this.bladeCount += patch.bladeCount;
       remainingBudget -= patch.bladeCount;
+      built++;
     }
+    return false;
   }
 
   private createPatch(nodeId: string, footprint: PageFootprint, instances: GrassBladeInstance[]): GrassPatch {

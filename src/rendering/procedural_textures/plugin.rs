@@ -27,6 +27,22 @@ pub struct ProceduralTerrainTextureHandles {
     pub sand_normal: Handle<Image>,
     pub dirt_albedo: Handle<Image>,
     pub dirt_normal: Handle<Image>,
+    pub config: ProceduralTextureConfig,
+    pub manifest: ProceduralTextureManifest,
+    pub source: ProceduralTextureSource,
+}
+
+#[derive(Clone)]
+pub struct ProceduralBarkTextureHandle {
+    pub id: String,
+    pub label: String,
+    pub albedo: Handle<Image>,
+    pub normal_roughness_height: Handle<Image>,
+}
+
+#[derive(Clone, Resource)]
+pub struct ProceduralBarkTextureHandles {
+    pub textures: Vec<ProceduralBarkTextureHandle>,
     pub manifest: ProceduralTextureManifest,
     pub source: ProceduralTextureSource,
 }
@@ -48,11 +64,20 @@ impl Plugin for ProceduralTexturePlugin {
 
 fn handles_from_generated(
     generated: GeneratedProceduralTextureSet,
+    config: ProceduralTextureConfig,
     images: &mut Assets<Image>,
-) -> ProceduralTerrainTextureHandles {
-    let manifest = generated.manifest.clone();
+) -> (
+    ProceduralTerrainTextureHandles,
+    ProceduralBarkTextureHandles,
+) {
+    let GeneratedProceduralTextureSet {
+        manifest,
+        materials,
+        bark,
+        ..
+    } = generated;
     let mut by_id = BTreeMap::new();
-    for material in generated.materials {
+    for material in materials {
         by_id.insert(
             material.id,
             (
@@ -61,11 +86,36 @@ fn handles_from_generated(
             ),
         );
     }
+    let bark_textures = bark
+        .into_iter()
+        .map(|bark| {
+            let albedo = images.add(bark.albedo_image());
+            let normal_roughness_height = images.add(bark.normal_image());
+            ProceduralBarkTextureHandle {
+                id: bark.id,
+                label: bark.label,
+                albedo,
+                normal_roughness_height,
+            }
+        })
+        .collect();
 
-    handles_from_map(manifest, ProceduralTextureSource::GeneratedRuntime, by_id)
+    (
+        handles_from_map(
+            manifest.clone(),
+            config,
+            ProceduralTextureSource::GeneratedRuntime,
+            by_id,
+        ),
+        ProceduralBarkTextureHandles {
+            textures: bark_textures,
+            manifest,
+            source: ProceduralTextureSource::GeneratedRuntime,
+        },
+    )
 }
 
-fn handles_from_cache(
+fn terrain_handles_from_cache(
     config: &ProceduralTextureConfig,
     manifest: ProceduralTextureManifest,
     asset_server: &AssetServer,
@@ -86,11 +136,50 @@ fn handles_from_cache(
             ),
         );
     }
-    handles_from_map(manifest, ProceduralTextureSource::CachedAsset, by_id)
+    handles_from_map(
+        manifest,
+        config.clone(),
+        ProceduralTextureSource::CachedAsset,
+        by_id,
+    )
+}
+
+fn bark_handles_from_cache(
+    config: &ProceduralTextureConfig,
+    manifest: ProceduralTextureManifest,
+    asset_server: &AssetServer,
+) -> ProceduralBarkTextureHandles {
+    let textures = if config.bark.enabled {
+        config
+            .bark
+            .species
+            .iter()
+            .map(|species| ProceduralBarkTextureHandle {
+                id: species.id.clone(),
+                label: species.label.clone(),
+                albedo: asset_server.load(cache::asset_path(
+                    &config.cache_dir,
+                    &cache::bark_albedo_filename(&species.id),
+                )),
+                normal_roughness_height: asset_server.load(cache::asset_path(
+                    &config.cache_dir,
+                    &cache::bark_normal_filename(&species.id),
+                )),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    ProceduralBarkTextureHandles {
+        textures,
+        manifest,
+        source: ProceduralTextureSource::CachedAsset,
+    }
 }
 
 fn handles_from_map(
     manifest: ProceduralTextureManifest,
+    config: ProceduralTextureConfig,
     source: ProceduralTextureSource,
     mut by_id: BTreeMap<ProceduralMaterialId, (Handle<Image>, Handle<Image>)>,
 ) -> ProceduralTerrainTextureHandles {
@@ -115,6 +204,7 @@ fn handles_from_map(
         sand_normal,
         dirt_albedo,
         dirt_normal,
+        config,
         manifest,
         source,
     }
@@ -156,8 +246,11 @@ pub fn setup_procedural_terrain_textures(
         && cache::manifest_cache_files_exist(&config.cache_dir, &expected_manifest);
 
     if cache_files_ready && config.runtime_mode != ProceduralTextureRuntimeMode::ForceRegenerate {
-        let handles = handles_from_cache(&config, expected_manifest, &asset_server);
-        commands.insert_resource(handles);
+        let terrain_handles =
+            terrain_handles_from_cache(&config, expected_manifest.clone(), &asset_server);
+        let bark_handles = bark_handles_from_cache(&config, expected_manifest, &asset_server);
+        commands.insert_resource(terrain_handles);
+        commands.insert_resource(bark_handles);
         info!("Procedural terrain textures loaded from cache");
         return;
     }
@@ -182,8 +275,9 @@ pub fn setup_procedural_terrain_textures(
     if let Err(error) = generated.write_cache(&config.cache_dir) {
         warn!("Procedural terrain texture cache write failed: {error}");
     }
-    let handles = handles_from_generated(generated, &mut images);
-    commands.insert_resource(handles);
+    let (terrain_handles, bark_handles) = handles_from_generated(generated, config, &mut images);
+    commands.insert_resource(terrain_handles);
+    commands.insert_resource(bark_handles);
     info!("Procedural terrain textures generated for Bevy triplanar terrain");
 }
 

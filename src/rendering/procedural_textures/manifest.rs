@@ -29,6 +29,8 @@ pub struct ProceduralTextureManifestOutputs {
     pub noise_b: String,
     pub terrain_albedo: Vec<String>,
     pub terrain_normal_roughness: Vec<String>,
+    pub bark_albedo: Vec<String>,
+    pub bark_normal_roughness_height: Vec<String>,
 }
 
 impl ProceduralTextureManifest {
@@ -43,6 +45,7 @@ impl ProceduralTextureManifest {
                 "texture_config": {
                     "noise": config.noise,
                     "terrain": config.terrain,
+                    "bark": config.bark,
                 },
             }))?,
             shader_hash,
@@ -50,7 +53,7 @@ impl ProceduralTextureManifest {
             noise_resolution: config.noise.resolution,
             layer_resolution: config.terrain.layer_resolution,
             material_order: config.terrain.material_order.clone(),
-            outputs: ProceduralTextureManifestOutputs::for_bevy_slots(),
+            outputs: ProceduralTextureManifestOutputs::for_config(config),
         })
     }
 
@@ -67,7 +70,12 @@ impl ProceduralTextureManifest {
 }
 
 impl ProceduralTextureManifestOutputs {
-    pub fn for_bevy_slots() -> Self {
+    pub fn for_config(config: &ProceduralTextureConfig) -> Self {
+        let bark_species = if config.bark.enabled {
+            config.bark.species.as_slice()
+        } else {
+            &[]
+        };
         Self {
             noise_a: "noise_a.png".to_string(),
             noise_b: "noise_b.png".to_string(),
@@ -78,6 +86,18 @@ impl ProceduralTextureManifestOutputs {
             terrain_normal_roughness: ProceduralMaterialId::BEVY_TERRAIN_SLOTS
                 .into_iter()
                 .map(|id| format!("{}_normal_roughness.png", id.cache_name()))
+                .collect(),
+            bark_albedo: bark_species
+                .iter()
+                .map(|species| {
+                    crate::rendering::procedural_textures::cache::bark_albedo_filename(&species.id)
+                })
+                .collect(),
+            bark_normal_roughness_height: bark_species
+                .iter()
+                .map(|species| {
+                    crate::rendering::procedural_textures::cache::bark_normal_filename(&species.id)
+                })
                 .collect(),
         }
     }
@@ -149,10 +169,14 @@ mod tests {
         changed_terrain.terrain.layer_resolution += 1;
         let changed_terrain =
             ProceduralTextureManifest::expected(&changed_terrain).expect("manifest");
+        let mut changed_bark = config.clone();
+        changed_bark.bark.resolution += 1;
+        let changed_bark = ProceduralTextureManifest::expected(&changed_bark).expect("manifest");
 
         assert_ne!(base.config_hash, changed_seed.config_hash);
         assert_eq!(base.config_hash, changed_runtime.config_hash);
         assert_ne!(base.config_hash, changed_terrain.config_hash);
+        assert_ne!(base.config_hash, changed_bark.config_hash);
         assert_ne!(
             stable_hash_str(r#"{"schema_version":1}"#),
             stable_hash_str(r#"{"schema_version":2}"#)
@@ -162,6 +186,16 @@ mod tests {
             base.outputs
                 .terrain_albedo
                 .contains(&"grass_albedo.png".to_string())
+        );
+        assert!(
+            base.outputs
+                .bark_albedo
+                .contains(&"bark_spruce_albedo.png".to_string())
+        );
+        assert!(
+            base.outputs
+                .bark_normal_roughness_height
+                .contains(&"bark_snag_normal_roughness_height.png".to_string())
         );
     }
 

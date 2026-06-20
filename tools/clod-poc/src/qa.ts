@@ -38,6 +38,7 @@ interface QaSceneConfig {
   screenshots: QaScreenshotConfig[];
   probes?: QaProbeConfig[];
   timing?: QaTimingThreshold[];
+  checks?: QaCheckThreshold[];
 }
 
 interface QaScreenshotConfig {
@@ -76,6 +77,19 @@ interface QaTimingThreshold {
   area: string;
   field: string;
   max_ms: number;
+  optional?: boolean;
+}
+
+// Generic numeric assertion on a counter the browser harness writes into a checkpoint's `areas`
+// (e.g. GPU mesh parity drift or asset-load errors), gated by any of min/max/equals. Timing
+// thresholds stay separate because they read frame-time fields and only ever bound a max.
+interface QaCheckThreshold {
+  id: string;
+  area: string;
+  field: string;
+  max?: number;
+  min?: number;
+  equals?: number;
   optional?: boolean;
 }
 
@@ -135,6 +149,7 @@ interface QaSceneReport {
   screenshots: QaScreenshotReport[];
   probes: QaProbeResult[];
   timing: QaTimingResult[];
+  checks: QaCheckResult[];
   failures: string[];
 }
 
@@ -164,6 +179,16 @@ interface QaTimingResult {
   status: Status;
   observed_ms?: number;
   max_ms: number;
+  failure?: string;
+}
+
+interface QaCheckResult {
+  id: string;
+  area: string;
+  field: string;
+  status: Status;
+  observed?: number;
+  expected: string;
   failure?: string;
 }
 
@@ -220,6 +245,15 @@ export function validateConfig(config: QaConfig): void {
       if ("region" in probe && !validRegion(probe.region)) throw new Error(`probe ${probe.id} has invalid region`);
       if ("pixel" in probe && !validPixel(probe.pixel)) throw new Error(`probe ${probe.id} has invalid pixel`);
     }
+    const checkIds = new Set<string>();
+    for (const check of scene.checks ?? []) {
+      if (checkIds.has(check.id)) throw new Error(`duplicate check id ${check.id} in scene ${scene.id}`);
+      checkIds.add(check.id);
+      if (!check.area || !check.field) throw new Error(`check ${check.id} must name an area and field`);
+      if (check.max === undefined && check.min === undefined && check.equals === undefined) {
+        throw new Error(`check ${check.id} must set at least one of min/max/equals`);
+      }
+    }
   }
 }
 
@@ -257,6 +291,7 @@ function evaluateScene(config: QaConfig, scene: QaSceneConfig, summary: WebQaSum
       screenshots: [],
       probes: [],
       timing: [],
+      checks: [],
       failures: [`configured bench_scene ${scene.bench_scene} does not match summary scene ${summary.scene}; likely wrong summary JSON`],
     };
   }
@@ -269,6 +304,7 @@ function evaluateScene(config: QaConfig, scene: QaSceneConfig, summary: WebQaSum
       screenshots: [],
       probes: [],
       timing: [],
+      checks: [],
       failures: [`configured checkpoint ${scene.checkpoint} is missing from summary scene ${summary.scene}; likely a wrong checkpoint name or a summary from a different scene`],
     };
   }
@@ -290,13 +326,15 @@ function evaluateScene(config: QaConfig, scene: QaSceneConfig, summary: WebQaSum
 
   const probes = (scene.probes ?? []).map((probe) => evaluateProbe(probe, screenshotsById));
   const timing = (scene.timing ?? []).map((threshold) => evaluateTiming(config, checkpoint, threshold));
+  const checks = (scene.checks ?? []).map((check) => evaluateCheck(checkpoint, check));
   const failures = [
     ...screenshots.flatMap((screenshot) => screenshot.failure ? [`screenshot ${screenshot.id}: ${screenshot.failure}`] : []),
     ...probes.flatMap((probe) => probe.failure ? [`probe ${probe.id}: ${probe.failure}`] : []),
     ...timing.flatMap((result) => result.failure ? [`timing ${result.id}: ${result.failure}`] : []),
+    ...checks.flatMap((result) => result.failure ? [`check ${result.id}: ${result.failure}`] : []),
   ];
   const status: Status = failures.length ? "fail" : screenshots.some((screenshot) => screenshot.status === "baseline_missing") ? "baseline_missing" : "pass";
-  return { id: scene.id, checkpoint: scene.checkpoint, status, screenshots, probes, timing, failures };
+  return { id: scene.id, checkpoint: scene.checkpoint, status, screenshots, probes, timing, checks, failures };
 }
 
 function evaluateScreenshot(
@@ -420,6 +458,46 @@ function evaluateTiming(config: QaConfig, checkpoint: WebQaCheckpoint, threshold
   };
 }
 
+function evaluateCheck(checkpoint: WebQaCheckpoint, check: QaCheckThreshold): QaCheckResult {
+  const observed = metricValue(checkpoint, check.area, check.field);
+  const expected = describeCheck(check);
+  if (observed === undefined) {
+    if (check.optional) {
+      return { id: check.id, area: check.area, field: check.field, status: "missing_optional", expected };
+    }
+    return {
+      id: check.id,
+      area: check.area,
+      field: check.field,
+      status: "fail",
+      expected,
+      failure: `missing required metric ${check.area}.${check.field}`,
+    };
+  }
+  const violations: string[] = [];
+  if (check.max !== undefined && observed > check.max) violations.push(`> max ${check.max}`);
+  if (check.min !== undefined && observed < check.min) violations.push(`< min ${check.min}`);
+  if (check.equals !== undefined && observed !== check.equals) violations.push(`!= ${check.equals}`);
+  const failed = violations.length > 0;
+  return {
+    id: check.id,
+    area: check.area,
+    field: check.field,
+    status: failed ? "fail" : "pass",
+    observed,
+    expected,
+    failure: failed ? `${check.area}.${check.field} ${observed} (${violations.join(", ")})` : undefined,
+  };
+}
+
+function describeCheck(check: QaCheckThreshold): string {
+  const parts: string[] = [];
+  if (check.min !== undefined) parts.push(`>= ${check.min}`);
+  if (check.max !== undefined) parts.push(`<= ${check.max}`);
+  if (check.equals !== undefined) parts.push(`== ${check.equals}`);
+  return parts.length ? parts.join(" and ") : "any";
+}
+
 function metricValue(checkpoint: WebQaCheckpoint, area: string, field: string): number | undefined {
   if (area === "__frame") {
     if (field === "median_ms" || field === "avg_ms") return checkpoint.median_frame_ms;
@@ -478,11 +556,11 @@ function renderMarkdown(report: QaReport): string {
     "",
     "## Scenes",
     "",
-    "| scene | checkpoint | status | screenshots | probes | timing |",
-    "|---|---|---|---:|---:|---:|",
+    "| scene | checkpoint | status | screenshots | probes | timing | checks |",
+    "|---|---|---|---:|---:|---:|---:|",
   ];
   for (const scene of report.scenes) {
-    lines.push(`| ${scene.id} | ${scene.checkpoint} | ${scene.status} | ${scene.screenshots.length} | ${scene.probes.length} | ${scene.timing.length} |`);
+    lines.push(`| ${scene.id} | ${scene.checkpoint} | ${scene.status} | ${scene.screenshots.length} | ${scene.probes.length} | ${scene.timing.length} | ${scene.checks.length} |`);
   }
   if (report.failures.length) {
     lines.push("", "## Failures", "");
@@ -521,5 +599,6 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename
 export const testOnly = {
   evaluateProbe,
   evaluateTiming,
+  evaluateCheck,
   metricValue,
 };

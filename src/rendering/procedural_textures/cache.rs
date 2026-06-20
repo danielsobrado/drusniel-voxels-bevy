@@ -32,6 +32,34 @@ pub fn material_normal_filename(id: ProceduralMaterialId) -> String {
     format!("{}_normal_roughness.png", id.cache_name())
 }
 
+pub fn bark_cache_name(id: &str) -> String {
+    let mut name = String::with_capacity(id.len());
+    let mut last_was_underscore = false;
+    for ch in id.chars() {
+        if ch.is_ascii_alphanumeric() {
+            name.push(ch.to_ascii_lowercase());
+            last_was_underscore = false;
+        } else if !last_was_underscore {
+            name.push('_');
+            last_was_underscore = true;
+        }
+    }
+    let trimmed = name.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        "bark".to_string()
+    } else {
+        trimmed
+    }
+}
+
+pub fn bark_albedo_filename(id: &str) -> String {
+    format!("bark_{}_albedo.png", bark_cache_name(id))
+}
+
+pub fn bark_normal_filename(id: &str) -> String {
+    format!("bark_{}_normal_roughness_height.png", bark_cache_name(id))
+}
+
 pub fn read_manifest(
     cache_dir: &str,
 ) -> Result<Option<ProceduralTextureManifest>, ProceduralTextureError> {
@@ -125,6 +153,16 @@ pub fn manifest_cache_files_exist(cache_dir: &str, manifest: &ProceduralTextureM
             .terrain_normal_roughness
             .iter()
             .all(|filename| root.join(filename).exists())
+        && manifest
+            .outputs
+            .bark_albedo
+            .iter()
+            .all(|filename| root.join(filename).exists())
+        && manifest
+            .outputs
+            .bark_normal_roughness_height
+            .iter()
+            .all(|filename| root.join(filename).exists())
 }
 
 #[cfg(test)]
@@ -153,6 +191,14 @@ mod tests {
         assert_eq!(
             material_normal_filename(ProceduralMaterialId::WetSoil),
             "wet_soil_normal_roughness.png"
+        );
+        assert_eq!(
+            bark_albedo_filename("Karst Gnarl"),
+            "bark_karst_gnarl_albedo.png"
+        );
+        assert_eq!(
+            bark_normal_filename("snag"),
+            "bark_snag_normal_roughness_height.png"
         );
     }
 

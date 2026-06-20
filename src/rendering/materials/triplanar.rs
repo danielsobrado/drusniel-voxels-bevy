@@ -38,6 +38,16 @@ pub struct TriplanarUniforms {
     pub clod_fade: f32,
     /// 1.0 when generated procedural terrain textures are active for this material.
     pub procedural_textures_enabled: f32,
+    pub procedural_snow_mask: Vec4,
+    pub procedural_wet_mask: Vec4,
+    pub procedural_slope_masks: Vec4,
+    pub procedural_tint_strengths: Vec4,
+    pub procedural_material_roughness: Vec4,
+    pub procedural_moss_tint: Vec4,
+    pub procedural_gravel_tint: Vec4,
+    pub procedural_wet_tint: Vec4,
+    pub procedural_snow_tint: Vec4,
+    pub procedural_material_params: Vec4,
 }
 
 /// High byte of `weather_flags` stores chunk LOD (0–3) for debug wireframe tinting.
@@ -116,6 +126,16 @@ impl Default for TriplanarUniforms {
             weather_flags: 0,
             clod_fade: 1.0,
             procedural_textures_enabled: 0.0,
+            procedural_snow_mask: Vec4::new(76.0, 130.0, 0.58, 0.92),
+            procedural_wet_mask: Vec4::new(18.0, 28.0, 0.42, 0.86),
+            procedural_slope_masks: Vec4::new(0.55, 0.92, 0.28, 0.72),
+            procedural_tint_strengths: Vec4::new(0.22, 0.08, 0.10, 0.20),
+            procedural_material_roughness: Vec4::new(0.85, 0.78, 0.95, 0.92),
+            procedural_moss_tint: Vec4::new(0.18, 0.32, 0.13, 0.0),
+            procedural_gravel_tint: Vec4::new(0.42, 0.41, 0.39, 0.0),
+            procedural_wet_tint: Vec4::new(0.18, 0.15, 0.12, 0.0),
+            procedural_snow_tint: Vec4::new(0.86, 0.89, 0.90, 0.0),
+            procedural_material_params: Vec4::new(45.0, 85.0, 0.35, 0.30),
         }
     }
 }

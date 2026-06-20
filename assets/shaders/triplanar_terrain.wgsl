@@ -46,6 +46,16 @@ struct TriplanarUniforms {
     weather_flags: u32,
     clod_fade: f32,
     procedural_textures_enabled: f32,
+    procedural_snow_mask: vec4<f32>,
+    procedural_wet_mask: vec4<f32>,
+    procedural_slope_masks: vec4<f32>,
+    procedural_tint_strengths: vec4<f32>,
+    procedural_material_roughness: vec4<f32>,
+    procedural_moss_tint: vec4<f32>,
+    procedural_gravel_tint: vec4<f32>,
+    procedural_wet_tint: vec4<f32>,
+    procedural_snow_tint: vec4<f32>,
+    procedural_material_params: vec4<f32>,
 };
 
 // Uniform roughness values per terrain material (no texture maps needed)
@@ -769,6 +779,16 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> @locatio
             blended_n,
             roughness,
             ao_factor,
+            uniforms.procedural_snow_mask,
+            uniforms.procedural_wet_mask,
+            uniforms.procedural_slope_masks,
+            uniforms.procedural_tint_strengths,
+            uniforms.procedural_material_roughness,
+            uniforms.procedural_moss_tint,
+            uniforms.procedural_gravel_tint,
+            uniforms.procedural_wet_tint,
+            uniforms.procedural_snow_tint,
+            uniforms.procedural_material_params,
         );
         final_albedo = vec4<f32>(procedural_material.albedo, final_albedo.a);
         blended_n = procedural_material.normal_ws;

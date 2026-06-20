@@ -23,7 +23,17 @@ function buildProceduralUniformDecls(): string {
   uniform int uProceduralDebugMode;
   uniform float uProceduralMicroFadeStart;
   uniform float uProceduralMicroFadeEnd;
-  uniform float uProceduralLodBias;`;
+  uniform float uProceduralLodBias;
+  uniform vec4 uProceduralScales;
+  uniform vec4 uProceduralSnowMask;
+  uniform vec4 uProceduralWetMask;
+  uniform vec4 uProceduralSlopeMasks;
+  uniform vec4 uProceduralTintStrengths;
+  uniform vec4 uProceduralMaterialRoughness;
+  uniform vec3 uProceduralMossTint;
+  uniform vec3 uProceduralGravelTint;
+  uniform vec3 uProceduralWetTint;
+  uniform vec3 uProceduralSnowTint;`;
 }
 
 function buildPaintFallbackFn(): string {
@@ -218,35 +228,37 @@ ${buildPaintFallbackFn()}
     return 1.0 - smoothstep(uProceduralMicroFadeStart, max(uProceduralMicroFadeEnd, uProceduralMicroFadeStart + 0.001), dist);
   }
   vec3 proceduralMacroTint(vec3 baseColor, vec3 worldPos, vec3 normalWs) {
-    vec4 na = proceduralNoiseA(worldPos, 43.7);
-    vec4 nb = proceduralNoiseB(worldPos, 23.0);
+    vec4 na = proceduralNoiseA(worldPos, uProceduralScales.x);
+    vec4 nb = proceduralNoiseB(worldPos, uProceduralScales.y);
     float macroMix = na.r * 0.65 + na.g * 0.35;
-    float slope = clamp(1.0 - max(normalWs.y, 0.0), 0.0, 1.0);
+    float upness = clamp(normalWs.y * 0.5 + 0.5, 0.0, 1.0);
+    float slope = clamp(1.0 - upness, 0.0, 1.0);
     vec3 tinted = baseColor * (1.0 + (macroMix - 0.5) * 0.16);
-    vec3 moss = vec3(0.11, 0.19, 0.07);
-    vec3 wet = tinted * vec3(0.64, 0.68, 0.72);
-    tinted = mix(tinted, moss, smoothstep(0.58, 0.86, nb.a) * smoothstep(0.28, 0.72, slope) * 0.28);
-    tinted = mix(tinted, wet, smoothstep(0.02, 0.0, worldPos.y - 18.0) * 0.38);
+    float snowMask = smoothstep(uProceduralSnowMask.x, uProceduralSnowMask.y, worldPos.y) * smoothstep(uProceduralSnowMask.z, uProceduralSnowMask.w, upness);
+    float mossMask = smoothstep(uProceduralSlopeMasks.x, uProceduralSlopeMasks.y, upness) * nb.a;
+    float gravelMask = smoothstep(uProceduralSlopeMasks.z, uProceduralSlopeMasks.w, slope);
+    float wetMask = (1.0 - smoothstep(uProceduralWetMask.x, uProceduralWetMask.y, worldPos.y)) * smoothstep(uProceduralWetMask.z, uProceduralWetMask.w, upness);
+    tinted = mix(tinted, uProceduralSnowTint, snowMask * uProceduralTintStrengths.x);
+    tinted = mix(tinted, uProceduralMossTint, mossMask * uProceduralTintStrengths.y);
+    tinted = mix(tinted, uProceduralGravelTint, gravelMask * uProceduralTintStrengths.z);
+    tinted = mix(tinted, uProceduralWetTint, wetMask * uProceduralTintStrengths.w);
     return max(tinted, vec3(0.0));
   }
   float proceduralRoughness(vec3 worldPos, vec4 weights) {
     float base = uRoughness;
     if (uTerrainTextureCount > 0 && dot(weights, vec4(1.0)) > 0.001) {
       base = clamp(
-        weights.x * 0.85 +
-        weights.y * 0.78 +
-        weights.z * 0.95 +
-        weights.w * 0.55,
+        dot(weights, uProceduralMaterialRoughness),
         0.04,
         1.0
       );
     }
-    float wet = smoothstep(0.04, 0.0, worldPos.y - 18.0);
-    return mix(base, 0.32, wet * 0.45);
+    float wet = 1.0 - smoothstep(uProceduralWetMask.x, uProceduralWetMask.y, worldPos.y);
+    return mix(base, uProceduralScales.w, wet * 0.45);
   }
   vec3 proceduralDebugColor(vec3 worldPos, vec3 normalWs, vec4 paintWeights, vec3 litNormal, float roughness) {
     if (uProceduralDebugMode == 1) {
-      float m = proceduralNoiseA(worldPos, 43.7).r;
+      float m = proceduralNoiseA(worldPos, uProceduralScales.x).r;
       return vec3(m);
     }
     if (uProceduralDebugMode == 2) {
@@ -417,6 +429,16 @@ export function createTerrainTextureUniforms(): Record<string, { value: unknown 
     uProceduralMicroFadeStart: { value: 45 },
     uProceduralMicroFadeEnd: { value: 85 },
     uProceduralLodBias: { value: 0 },
+    uProceduralScales: { value: new THREE.Vector4(50, 4, 16, 0.35) },
+    uProceduralSnowMask: { value: new THREE.Vector4(76, 130, 0.58, 0.92) },
+    uProceduralWetMask: { value: new THREE.Vector4(18, 28, 0.42, 0.86) },
+    uProceduralSlopeMasks: { value: new THREE.Vector4(0.55, 0.92, 0.28, 0.72) },
+    uProceduralTintStrengths: { value: new THREE.Vector4(0.22, 0.08, 0.10, 0.20) },
+    uProceduralMaterialRoughness: { value: new THREE.Vector4(0.85, 0.78, 0.95, 0.92) },
+    uProceduralMossTint: { value: new THREE.Vector3(0.18, 0.32, 0.13) },
+    uProceduralGravelTint: { value: new THREE.Vector3(0.42, 0.41, 0.39) },
+    uProceduralWetTint: { value: new THREE.Vector3(0.18, 0.15, 0.12) },
+    uProceduralSnowTint: { value: new THREE.Vector3(0.86, 0.89, 0.90) },
     uUseNormalMap: { value: false },
     uNormalIntensity: { value: 1.0 },
     uRoughness: { value: 0.9 },
@@ -467,6 +489,16 @@ export function applyTerrainTextureUniforms(
       microFadeStart: number;
       microFadeEnd: number;
       lodBias: number;
+      scales?: readonly number[];
+      snowMask?: readonly number[];
+      wetMask?: readonly number[];
+      slopeMasks?: readonly number[];
+      tintStrengths?: readonly number[];
+      materialRoughness?: readonly number[];
+      mossTint?: readonly number[];
+      gravelTint?: readonly number[];
+      wetTint?: readonly number[];
+      snowTint?: readonly number[];
       normalMapMask?: Float32Array | readonly number[];
     };
   },
@@ -489,6 +521,17 @@ export function applyTerrainTextureUniforms(
   mat.uniforms.uProceduralMicroFadeStart.value = options.procedural?.microFadeStart ?? 45;
   mat.uniforms.uProceduralMicroFadeEnd.value = options.procedural?.microFadeEnd ?? 85;
   mat.uniforms.uProceduralLodBias.value = options.procedural?.lodBias ?? 0;
+  const p = options.procedural;
+  (mat.uniforms.uProceduralScales.value as THREE.Vector4).fromArray(p?.scales ?? [50, 4, 16, 0.35]);
+  (mat.uniforms.uProceduralSnowMask.value as THREE.Vector4).fromArray(p?.snowMask ?? [76, 130, 0.58, 0.92]);
+  (mat.uniforms.uProceduralWetMask.value as THREE.Vector4).fromArray(p?.wetMask ?? [18, 28, 0.42, 0.86]);
+  (mat.uniforms.uProceduralSlopeMasks.value as THREE.Vector4).fromArray(p?.slopeMasks ?? [0.55, 0.92, 0.28, 0.72]);
+  (mat.uniforms.uProceduralTintStrengths.value as THREE.Vector4).fromArray(p?.tintStrengths ?? [0.22, 0.08, 0.10, 0.20]);
+  (mat.uniforms.uProceduralMaterialRoughness.value as THREE.Vector4).fromArray(p?.materialRoughness ?? [0.85, 0.78, 0.95, 0.92]);
+  (mat.uniforms.uProceduralMossTint.value as THREE.Vector3).fromArray(p?.mossTint ?? [0.18, 0.32, 0.13]);
+  (mat.uniforms.uProceduralGravelTint.value as THREE.Vector3).fromArray(p?.gravelTint ?? [0.42, 0.41, 0.39]);
+  (mat.uniforms.uProceduralWetTint.value as THREE.Vector3).fromArray(p?.wetTint ?? [0.18, 0.15, 0.12]);
+  (mat.uniforms.uProceduralSnowTint.value as THREE.Vector3).fromArray(p?.snowTint ?? [0.86, 0.89, 0.90]);
   const scales = mat.uniforms.uTextureScales.value as Float32Array;
   const masks = mat.uniforms.uNormalMapMask.value as Float32Array;
   for (let i = 0; i < MAX_TERRAIN_TEXTURES; i++) {

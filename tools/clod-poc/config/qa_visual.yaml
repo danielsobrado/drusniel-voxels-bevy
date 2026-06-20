@@ -43,3 +43,22 @@ qa:
           field: "draw_calls"
           max_ms: 2000.0
           optional: true
+      # Numeric counter gates. The browser capture must emit these into the checkpoint `areas`:
+      #   gpu_mesh.parity_unmatched / parity_max_vertex_delta  <- compareChunkSurfaces result
+      #     (run with ?gpuMesh=1&gpuMeshVerify=1). unmatched>0 is real GPU-vs-CPU surface drift;
+      #     halo vertices are expected and not counted.
+      #   assets.texture_load_errors  <- count of built-in textures that failed to load at init.
+      checks:
+        - id: "gpu_mesh_parity_unmatched"
+          area: "gpu_mesh"
+          field: "parity_unmatched"
+          max: 0
+        - id: "gpu_mesh_parity_delta"
+          area: "gpu_mesh"
+          field: "parity_max_vertex_delta"
+          max: 0.02
+        - id: "texture_load_errors"
+          area: "assets"
+          field: "texture_load_errors"
+          max: 0
+          optional: true

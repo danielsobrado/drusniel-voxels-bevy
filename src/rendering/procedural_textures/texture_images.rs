@@ -1,3 +1,4 @@
+use super::bark_synth::{GeneratedBarkImages, bake_bark_textures};
 use super::cache;
 use super::config::ProceduralTextureConfig;
 use super::errors::ProceduralTextureError;
@@ -23,9 +24,30 @@ pub struct GeneratedProceduralTextureSet {
     pub manifest: ProceduralTextureManifest,
     pub noise: NoiseBake,
     pub materials: Vec<GeneratedMaterialImages>,
+    pub bark: Vec<GeneratedBarkImages>,
 }
 
 impl GeneratedMaterialImages {
+    pub fn albedo_image(&self) -> Image {
+        image_from_rgba(
+            self.width,
+            self.height,
+            self.albedo_rgba.clone(),
+            TextureFormat::Rgba8UnormSrgb,
+        )
+    }
+
+    pub fn normal_image(&self) -> Image {
+        image_from_rgba(
+            self.width,
+            self.height,
+            self.normal_rgba.clone(),
+            TextureFormat::Rgba8Unorm,
+        )
+    }
+}
+
+impl GeneratedBarkImages {
     pub fn albedo_image(&self) -> Image {
         image_from_rgba(
             self.width,
@@ -77,6 +99,22 @@ impl GeneratedProceduralTextureSet {
                 &material.normal_rgba,
             )?;
         }
+        for bark in &self.bark {
+            cache::write_rgba_png(
+                cache_dir,
+                &cache::bark_albedo_filename(&bark.id),
+                bark.width,
+                bark.height,
+                &bark.albedo_rgba,
+            )?;
+            cache::write_rgba_png(
+                cache_dir,
+                &cache::bark_normal_filename(&bark.id),
+                bark.width,
+                bark.height,
+                &bark.normal_rgba,
+            )?;
+        }
         cache::write_manifest(cache_dir, &self.manifest)
     }
 }
@@ -123,10 +161,11 @@ fn material_albedo(
     micro_noise: f32,
     worley: f32,
     y01: f32,
+    meso_albedo_strength: f32,
 ) -> [f32; 3] {
     let [mut r, mut g, mut b] = recipe.base_color;
     let macro_shift = (macro_noise - 0.5) * recipe.macro_strength;
-    let meso_shift = (meso_noise - 0.5) * 0.22;
+    let meso_shift = (meso_noise - 0.5) * meso_albedo_strength;
     r *= 1.0 + macro_shift + meso_shift;
     g *= 1.0 + macro_shift + meso_shift;
     b *= 1.0 + macro_shift + meso_shift;
@@ -173,6 +212,7 @@ pub fn generate_procedural_texture_set(
     config: &ProceduralTextureConfig,
 ) -> Result<GeneratedProceduralTextureSet, ProceduralTextureError> {
     let noise = bake_noise_textures(&config.noise, config.seed);
+    let bark = bake_bark_textures(&config.bark, config.seed);
     let layer_size = config.terrain.layer_resolution.max(2);
     let manifest = ProceduralTextureManifest::expected(config)?;
     let mut materials = Vec::new();
@@ -237,8 +277,16 @@ pub fn generate_procedural_texture_set(
                     v * 15.0 + 0.61,
                     0,
                 );
-                let [r, g, b] =
-                    material_albedo(id, recipe, macro_noise, meso_noise, micro_noise, worley, v);
+                let [r, g, b] = material_albedo(
+                    id,
+                    recipe,
+                    macro_noise,
+                    meso_noise,
+                    micro_noise,
+                    worley,
+                    v,
+                    config.terrain.masks.meso_albedo_strength,
+                );
                 let i = ((y * layer_size + x) * 4) as usize;
                 albedo_rgba[i] = color_byte(r);
                 albedo_rgba[i + 1] = color_byte(g);
@@ -273,6 +321,7 @@ pub fn generate_procedural_texture_set(
         manifest,
         noise,
         materials,
+        bark,
     })
 }
 
@@ -286,9 +335,11 @@ mod tests {
         let mut config = ProceduralTextureConfig::default();
         config.noise.resolution = 8;
         config.terrain.layer_resolution = 8;
+        config.bark.resolution = 8;
 
         let generated = generate_procedural_texture_set(&config).expect("generate textures");
         assert_eq!(generated.materials.len(), 4);
+        assert_eq!(generated.bark.len(), 6);
         for material in &generated.materials {
             assert_eq!(material.width, 8);
             assert_eq!(material.height, 8);
@@ -300,6 +351,20 @@ mod tests {
             );
             assert_eq!(
                 material.normal_image().texture_descriptor.format,
+                TextureFormat::Rgba8Unorm
+            );
+        }
+        for bark in &generated.bark {
+            assert_eq!(bark.width, 8);
+            assert_eq!(bark.height, 8);
+            assert_eq!(bark.albedo_rgba.len(), 8 * 8 * 4);
+            assert_eq!(bark.normal_rgba.len(), 8 * 8 * 4);
+            assert_eq!(
+                bark.albedo_image().texture_descriptor.format,
+                TextureFormat::Rgba8UnormSrgb
+            );
+            assert_eq!(
+                bark.normal_image().texture_descriptor.format,
                 TextureFormat::Rgba8Unorm
             );
         }

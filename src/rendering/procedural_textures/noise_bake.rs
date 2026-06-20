@@ -1,4 +1,5 @@
 use super::config::{NoiseBakeConfig, NoiseBakePeriods};
+use super::seed_streams::derive_seed_streams;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NoiseBake {
@@ -125,6 +126,41 @@ pub fn periodic_worley_f1(x: f32, y: f32, period: i32, seed: u32) -> f32 {
     clamp01(best / std::f32::consts::SQRT_2)
 }
 
+pub fn periodic_worley_f1_edge(
+    x: f32,
+    y: f32,
+    period_x: f32,
+    period_y: f32,
+    seed: u32,
+) -> [f32; 2] {
+    let px = period_cells(period_x);
+    let py = period_cells(period_y);
+    let ix = x.floor() as i32;
+    let iy = y.floor() as i32;
+    let fx = x - ix as f32;
+    let fy = y - iy as f32;
+    let mut best = f32::INFINITY;
+    let mut second = f32::INFINITY;
+    for oy in -1..=1 {
+        for ox in -1..=1 {
+            let [hx, hy] = hash22(wrap_lattice(ix + ox, px), wrap_lattice(iy + oy, py), seed);
+            let dx = ox as f32 + hx - fx;
+            let dy = oy as f32 + hy - fy;
+            let d = (dx * dx + dy * dy).sqrt();
+            if d < best {
+                second = best;
+                best = d;
+            } else if d < second && d > best + 0.00001 {
+                second = d;
+            }
+        }
+    }
+    [
+        clamp01(best / std::f32::consts::SQRT_2),
+        clamp01((second - best) / std::f32::consts::SQRT_2),
+    ]
+}
+
 fn enc01(value: f32) -> u8 {
     (clamp01(value) * 255.0).round() as u8
 }
@@ -143,6 +179,7 @@ pub fn bake_noise_textures(config: &NoiseBakeConfig, seed: u32) -> NoiseBake {
     let fbm_period = period_cells(config.periods.fbm);
     let ridged_period = period_cells(config.periods.ridged);
     let worley_period = period_cells(config.periods.worley);
+    let streams = derive_seed_streams(seed);
     let grad_range = 2.0;
 
     for y in 0..resolution {
@@ -154,31 +191,31 @@ pub fn bake_noise_textures(config: &NoiseBakeConfig, seed: u32) -> NoiseBake {
                 u * config.periods.value,
                 v * config.periods.value,
                 value_period,
-                seed,
+                streams.noise_value,
             );
             let fx = u * config.periods.fbm;
             let fy = v * config.periods.fbm;
-            let fbm = periodic_fbm_2d(fx, fy, fbm_period, seed, 3);
-            let fdx = (periodic_fbm_2d(fx + e_fbm, fy, fbm_period, seed, 3)
-                - periodic_fbm_2d(fx - e_fbm, fy, fbm_period, seed, 3))
+            let fbm = periodic_fbm_2d(fx, fy, fbm_period, streams.noise_fbm, 3);
+            let fdx = (periodic_fbm_2d(fx + e_fbm, fy, fbm_period, streams.noise_fbm, 3)
+                - periodic_fbm_2d(fx - e_fbm, fy, fbm_period, streams.noise_fbm, 3))
                 / (2.0 * e_fbm);
-            let fdy = (periodic_fbm_2d(fx, fy + e_fbm, fbm_period, seed, 3)
-                - periodic_fbm_2d(fx, fy - e_fbm, fbm_period, seed, 3))
+            let fdy = (periodic_fbm_2d(fx, fy + e_fbm, fbm_period, streams.noise_fbm, 3)
+                - periodic_fbm_2d(fx, fy - e_fbm, fbm_period, streams.noise_fbm, 3))
                 / (2.0 * e_fbm);
             let rx = u * config.periods.ridged;
             let ry = v * config.periods.ridged;
-            let ridged = periodic_ridged_2d(rx, ry, ridged_period, seed, 3);
-            let rdx = (periodic_ridged_2d(rx + e_rid, ry, ridged_period, seed, 3)
-                - periodic_ridged_2d(rx - e_rid, ry, ridged_period, seed, 3))
+            let ridged = periodic_ridged_2d(rx, ry, ridged_period, streams.noise_ridged, 3);
+            let rdx = (periodic_ridged_2d(rx + e_rid, ry, ridged_period, streams.noise_ridged, 3)
+                - periodic_ridged_2d(rx - e_rid, ry, ridged_period, streams.noise_ridged, 3))
                 / (2.0 * e_rid);
-            let rdy = (periodic_ridged_2d(rx, ry + e_rid, ridged_period, seed, 3)
-                - periodic_ridged_2d(rx, ry - e_rid, ridged_period, seed, 3))
+            let rdy = (periodic_ridged_2d(rx, ry + e_rid, ridged_period, streams.noise_ridged, 3)
+                - periodic_ridged_2d(rx, ry - e_rid, ridged_period, streams.noise_ridged, 3))
                 / (2.0 * e_rid);
             let worley = periodic_worley_f1(
                 u * config.periods.worley,
                 v * config.periods.worley,
                 worley_period,
-                seed,
+                streams.noise_worley,
             );
 
             data_a[i] = enc01(value);
@@ -261,6 +298,18 @@ mod tests {
             (periodic_worley_f1(x, y, period, seed)
                 - periodic_worley_f1(x + period as f32, y, period, seed))
             .abs()
+                < eps
+        );
+        assert!(
+            (periodic_worley_f1_edge(x, y, 9.0, 5.0, seed)[0]
+                - periodic_worley_f1_edge(x + 9.0, y, 9.0, 5.0, seed)[0])
+                .abs()
+                < eps
+        );
+        assert!(
+            (periodic_worley_f1_edge(x, y, 9.0, 5.0, seed)[1]
+                - periodic_worley_f1_edge(x, y + 5.0, 9.0, 5.0, seed)[1])
+                .abs()
                 < eps
         );
     }

@@ -17,6 +17,13 @@
         "renderer": {
           "draw_calls": 128,
           "triangles": 42000
+        },
+        "gpu_mesh": {
+          "parity_unmatched": 0,
+          "parity_max_vertex_delta": 0.0006
+        },
+        "assets": {
+          "texture_load_errors": 0
         }
       },
       "screenshots": [

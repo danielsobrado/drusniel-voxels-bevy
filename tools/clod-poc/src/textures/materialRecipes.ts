@@ -42,6 +42,28 @@ export interface ProceduralTextureConfig {
       fade_end_m: number;
       max_strength: number;
     };
+    masks: {
+      slope_damp: [number, number];
+      snow_height: [number, number];
+      snow_upness: [number, number];
+      moss_upness: [number, number];
+      gravel_slope: [number, number];
+      wet_height: [number, number];
+      wet_upness: [number, number];
+      wet_level_m: number;
+      page_lod_normal_fade_m: number;
+      meso_albedo_strength: number;
+      wet_roughness: number;
+      wet_roughness_strength: number;
+      snow_tint_strength: number;
+      moss_tint_strength: number;
+      gravel_tint_strength: number;
+      wet_tint_strength: number;
+      moss_tint: [number, number, number];
+      gravel_tint: [number, number, number];
+      wet_tint: [number, number, number];
+      snow_tint: [number, number, number];
+    };
     material_order: ProceduralMaterialId[];
     materials: Record<ProceduralMaterialId, ProceduralMaterialRecipe>;
   };
@@ -74,6 +96,28 @@ export const DEFAULT_PROCEDURAL_TEXTURE_CONFIG: ProceduralTextureConfig = {
       fade_start_m: 45,
       fade_end_m: 85,
       max_strength: 0.35,
+    },
+    masks: {
+      slope_damp: [0.18, 0.92],
+      snow_height: [76, 130],
+      snow_upness: [0.58, 0.92],
+      moss_upness: [0.55, 0.92],
+      gravel_slope: [0.28, 0.72],
+      wet_height: [18, 28],
+      wet_upness: [0.42, 0.86],
+      wet_level_m: 18,
+      page_lod_normal_fade_m: 16,
+      meso_albedo_strength: 0.08,
+      wet_roughness: 0.35,
+      wet_roughness_strength: 0.3,
+      snow_tint_strength: 0.22,
+      moss_tint_strength: 0.08,
+      gravel_tint_strength: 0.1,
+      wet_tint_strength: 0.2,
+      moss_tint: [0.18, 0.32, 0.13],
+      gravel_tint: [0.42, 0.41, 0.39],
+      wet_tint: [0.18, 0.15, 0.12],
+      snow_tint: [0.86, 0.89, 0.9],
     },
     material_order: [...PROCEDURAL_MATERIAL_IDS],
     materials: {
@@ -113,6 +157,11 @@ function readColor(value: unknown, fallback: [number, number, number]): [number,
   ];
 }
 
+function readRange(value: unknown, fallback: [number, number]): [number, number] {
+  if (!Array.isArray(value) || value.length !== 2) return fallback;
+  return [readNumber(value[0], fallback[0]), readNumber(value[1], fallback[1])];
+}
+
 function mergeRecipe(raw: unknown, fallback: ProceduralMaterialRecipe): ProceduralMaterialRecipe {
   const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
   return {
@@ -142,6 +191,7 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
   const periods = noise.periods && typeof noise.periods === "object" ? noise.periods as Record<string, unknown> : {};
   const terrain = root.terrain && typeof root.terrain === "object" ? root.terrain as Record<string, unknown> : {};
   const micro = terrain.micro_normal && typeof terrain.micro_normal === "object" ? terrain.micro_normal as Record<string, unknown> : {};
+  const masks = terrain.masks && typeof terrain.masks === "object" ? terrain.masks as Record<string, unknown> : {};
   const rawMaterials = terrain.materials && typeof terrain.materials === "object" ? terrain.materials as Record<string, unknown> : {};
   const materials = Object.fromEntries(PROCEDURAL_MATERIAL_IDS.map((id) => [
     id,
@@ -174,6 +224,28 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
         fade_start_m: readNumber(micro.fade_start_m, defaults.terrain.micro_normal.fade_start_m),
         fade_end_m: readNumber(micro.fade_end_m, defaults.terrain.micro_normal.fade_end_m),
         max_strength: readNumber(micro.max_strength, defaults.terrain.micro_normal.max_strength),
+      },
+      masks: {
+        slope_damp: readRange(masks.slope_damp, defaults.terrain.masks.slope_damp),
+        snow_height: readRange(masks.snow_height, defaults.terrain.masks.snow_height),
+        snow_upness: readRange(masks.snow_upness, defaults.terrain.masks.snow_upness),
+        moss_upness: readRange(masks.moss_upness, defaults.terrain.masks.moss_upness),
+        gravel_slope: readRange(masks.gravel_slope, defaults.terrain.masks.gravel_slope),
+        wet_height: readRange(masks.wet_height, defaults.terrain.masks.wet_height),
+        wet_upness: readRange(masks.wet_upness, defaults.terrain.masks.wet_upness),
+        wet_level_m: readNumber(masks.wet_level_m, defaults.terrain.masks.wet_level_m),
+        page_lod_normal_fade_m: readNumber(masks.page_lod_normal_fade_m, defaults.terrain.masks.page_lod_normal_fade_m),
+        meso_albedo_strength: readNumber(masks.meso_albedo_strength, defaults.terrain.masks.meso_albedo_strength),
+        wet_roughness: readNumber(masks.wet_roughness, defaults.terrain.masks.wet_roughness),
+        wet_roughness_strength: readNumber(masks.wet_roughness_strength, defaults.terrain.masks.wet_roughness_strength),
+        snow_tint_strength: readNumber(masks.snow_tint_strength, defaults.terrain.masks.snow_tint_strength),
+        moss_tint_strength: readNumber(masks.moss_tint_strength, defaults.terrain.masks.moss_tint_strength),
+        gravel_tint_strength: readNumber(masks.gravel_tint_strength, defaults.terrain.masks.gravel_tint_strength),
+        wet_tint_strength: readNumber(masks.wet_tint_strength, defaults.terrain.masks.wet_tint_strength),
+        moss_tint: readColor(masks.moss_tint, defaults.terrain.masks.moss_tint),
+        gravel_tint: readColor(masks.gravel_tint, defaults.terrain.masks.gravel_tint),
+        wet_tint: readColor(masks.wet_tint, defaults.terrain.masks.wet_tint),
+        snow_tint: readColor(masks.snow_tint, defaults.terrain.masks.snow_tint),
       },
       material_order: order.length > 0 ? order : defaults.terrain.material_order,
       materials,

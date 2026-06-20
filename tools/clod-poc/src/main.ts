@@ -19,6 +19,9 @@ import {
   paintWeightsAt,
   replaceDigEdits,
 } from "./terrain.js";
+import { GpuChunkMesher } from "./gpu/gpu_chunk_mesher.js";
+import { resolveDigEdits } from "./gpu/terrain_field_core.js";
+import { compareChunkSurfaces } from "./gpu/gpu_mesh_parity.js";
 import { loadContentRegistry, validateContentRegistry } from "./content/index.js";
 import { ClodPageNode, PageMesh } from "./types.js";
 import {
@@ -1223,6 +1226,8 @@ async function main() {
   const terrainTextureUniformOptions = () => {
     const proceduralActive = state.terrainMaterialSource === "procedural" && proceduralTerrain !== null;
     if (!proceduralActive) ensureTextureArrays();
+    const masks = proceduralTextureConfig.terrain.masks;
+    const materials = proceduralTextureConfig.terrain.materials;
     return {
       enabled: texturesActive(),
       triplanar: state.triplanar,
@@ -1243,6 +1248,26 @@ async function main() {
         microFadeStart: proceduralTextureConfig.terrain.micro_normal.fade_start_m,
         microFadeEnd: proceduralTextureConfig.terrain.micro_normal.fade_end_m,
         lodBias: state.colorByLod ? 40 : 0,
+        scales: [
+          proceduralTextureConfig.terrain.macro_variation_m[1],
+          proceduralTextureConfig.terrain.meso_variation_m[1],
+          masks.page_lod_normal_fade_m,
+          masks.wet_roughness,
+        ],
+        snowMask: [masks.snow_height[0], masks.snow_height[1], masks.snow_upness[0], masks.snow_upness[1]],
+        wetMask: [masks.wet_height[0], masks.wet_height[1], masks.wet_upness[0], masks.wet_upness[1]],
+        slopeMasks: [masks.moss_upness[0], masks.moss_upness[1], masks.gravel_slope[0], masks.gravel_slope[1]],
+        tintStrengths: [masks.snow_tint_strength, masks.moss_tint_strength, masks.gravel_tint_strength, masks.wet_tint_strength],
+        materialRoughness: [
+          materials.grass.roughness,
+          materials.rock.roughness,
+          materials.sand.roughness,
+          materials.dirt.roughness,
+        ],
+        mossTint: masks.moss_tint,
+        gravelTint: masks.gravel_tint,
+        wetTint: masks.wet_tint,
+        snowTint: masks.snow_tint,
         normalMapMask: proceduralTerrain.normalMapMask,
       } : {
         enabled: false,
@@ -1345,46 +1370,120 @@ async function main() {
   // walk spike from many pages entering the bubble at once; un-built pages keep their welded
   // LOD0 page mesh visible meanwhile, so it's a latency/seamlessness trade, not a visual gap.
   const CHUNK_GROUP_BUILD_BUDGET = 1;
+  // Opt-in (?gpuMesh=1): mesh bubble chunks on WebGPU compute (gpu_chunk_mesher) instead of CPU
+  // meshChunk. Async, so pages build progressively and the welded LOD0 page mesh stays visible
+  // until a page's chunks are ready (entry.ready). CPU meshChunk stays the default safety net.
+  const gpuMeshEnabled = searchParams.get("gpuMesh") === "1";
+  const gpuMeshVerify = searchParams.get("gpuMeshVerify") === "1";
+  let gpuMesher: GpuChunkMesher | null = null;
+  if (gpuMeshEnabled) {
+    void GpuChunkMesher.create(cfg.page.chunk_size).then(async (res) => {
+      if (!res.mesher) {
+        console.warn("[gpuMesh] WebGPU unavailable; using CPU meshChunk", res.unavailable);
+        return;
+      }
+      gpuMesher = res.mesher;
+      console.info("[gpuMesh] GPU chunk mesher ready");
+      // Opt-in parity self-check: mesh a few chunks on GPU, compare to CPU meshChunk, log deltas.
+      // Quantifies f32-vs-f64 drift so a live run is a number, not a guess. Read-only.
+      if (gpuMeshVerify) {
+        const edits = resolveDigEdits(getDigEditsSnapshot());
+        for (const [cx, cz] of [[0, 0], [2, 2], [4, 4]] as const) {
+          try {
+            const g = await res.mesher.meshChunk(cx, cz, worldBounds, edits);
+            const c = meshChunk(cx, cz, cfg, worldBounds);
+            const cmp = compareChunkSurfaces(c, g, 0.05);
+            console.info(
+              `[gpuMesh] parity chunk(${cx},${cz}) tris G/C ${cmp.gpuTriangles}/${cmp.cpuTriangles}` +
+                ` verts ${cmp.gpuVertices}/${cmp.cpuVertices} (halo ${cmp.haloVertices})` +
+                ` maxDelta ${cmp.maxVertexDelta.toFixed(4)}` +
+                ` unmatched ${cmp.unmatched} ${cmp.withinTol ? "OK" : "DRIFT"}`,
+            );
+          } catch (e) {
+            console.error(`[gpuMesh] parity chunk(${cx},${cz}) failed`, e);
+          }
+        }
+      }
+    });
+  }
   const chunkGroups = new Map<
     string,
-    { group: THREE.Group; mats: TerrainMaterialHandle[]; unsubs: Array<() => void> }
+    { group: THREE.Group; mats: TerrainMaterialHandle[]; unsubs: Array<() => void>; ready: boolean }
   >();
+  const buildChunkMaterial = (): TerrainMaterialHandle => {
+    const mat = makeTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
+    // Pooled: the shared material already carries global state (textures/lighting/etc.);
+    // re-applying it per chunk would rebuild the shared graph P^2 times per page entry.
+    if (!poolTerrainMaterial) {
+      mat.setDebug({
+        normalColor: state.normalColor,
+        normalDivergence: state.normalDivergence,
+        divergenceGain: state.divergenceGain,
+      });
+      mat.setTriplanar(state.triplanar);
+      mat.setColorAdjust(currentTerrainColorAdjustments());
+      mat.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
+      rebuildActiveTerrainSlots();
+      mat.setTextures(textureSlots, terrainTextureUniformOptions());
+      applyLightingToMaterial(mat);
+    }
+    return mat;
+  };
+  const addChunkMesh = (
+    group: THREE.Group,
+    mats: TerrainMaterialHandle[],
+    unsubs: Array<() => void>,
+    cm: PageMesh,
+  ) => {
+    const mat = buildChunkMaterial();
+    const mesh = new THREE.Mesh(toGeometry(cm), mat.material);
+    unsubs.push(mat.onMaterialChanged((material) => {
+      mesh.material = material;
+    }));
+    group.add(mesh);
+    mats.push(mat);
+  };
   const ensureChunkGroup = (node: ClodPageNode) => {
-    let entry = chunkGroups.get(node.id);
-    if (entry) return entry;
+    const existing = chunkGroups.get(node.id);
+    if (existing) return existing;
     const [px, pz] = node.id.slice(3).split(",").map(Number);
     const group = new THREE.Group();
     const mats: TerrainMaterialHandle[] = [];
     const unsubs: Array<() => void> = [];
+
+    if (gpuMesher) {
+      // GPU path: dispatch P^2 chunk meshes async; the group stays hidden until all resolve.
+      const mesher = gpuMesher;
+      const entry = { group, mats, unsubs, ready: false };
+      group.visible = false;
+      scene.add(group);
+      chunkGroups.set(node.id, entry);
+      const edits = resolveDigEdits(getDigEditsSnapshot());
+      let pending = P * P;
+      const settle = () => { if (--pending === 0) entry.ready = true; };
+      for (let dz = 0; dz < P; dz++) {
+        for (let dx = 0; dx < P; dx++) {
+          mesher.meshChunk(px * P + dx, pz * P + dz, worldBounds, edits)
+            .then((cm) => {
+              // Bail if a dig (applyNodeMesh) replaced this group while meshing.
+              if (chunkGroups.get(node.id) !== entry) return;
+              if (cm.indices.length > 0) addChunkMesh(group, mats, unsubs, cm);
+              settle();
+            })
+            .catch(() => settle());
+        }
+      }
+      return entry;
+    }
+
+    // CPU path (default): synchronous build, ready immediately.
     for (let dz = 0; dz < P; dz++) {
       for (let dx = 0; dx < P; dx++) {
-        const cm = meshChunk(px * P + dx, pz * P + dz, cfg, worldBounds);
-        const mat = makeTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
-        // Pooled: the shared material already carries global state (textures/lighting/etc.);
-        // re-applying it per chunk would rebuild the shared graph P^2 times per page entry.
-        if (!poolTerrainMaterial) {
-          mat.setDebug({
-            normalColor: state.normalColor,
-            normalDivergence: state.normalDivergence,
-            divergenceGain: state.divergenceGain,
-          });
-          mat.setTriplanar(state.triplanar);
-          mat.setColorAdjust(currentTerrainColorAdjustments());
-          mat.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
-          rebuildActiveTerrainSlots();
-          mat.setTextures(textureSlots, terrainTextureUniformOptions());
-          applyLightingToMaterial(mat);
-        }
-        const mesh = new THREE.Mesh(toGeometry(cm), mat.material);
-        unsubs.push(mat.onMaterialChanged((material) => {
-          mesh.material = material;
-        }));
-        group.add(mesh);
-        mats.push(mat);
+        addChunkMesh(group, mats, unsubs, meshChunk(px * P + dx, pz * P + dz, cfg, worldBounds));
       }
     }
     scene.add(group);
-    entry = { group, mats, unsubs };
+    const entry = { group, mats, unsubs, ready: true };
     chunkGroups.set(node.id, entry);
     return entry;
   };
@@ -2883,13 +2982,21 @@ async function main() {
     buildProgressPhase.textContent = phaseLabel;
     buildProgressPercent.textContent = "90%";
     buildProgressBar.value = 0.9;
+    const failed: string[] = [];
     for (const slot of slots) {
       const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === slot.selectedId);
       if (!builtin) throw new Error(`Unknown texture ${slot.selectedId}`);
       const texture = await loadTerrainTextureUrl(builtin.url);
-      if (!texture) throw new Error(`Could not load texture ${slot.name}`);
+      if (!texture) {
+        // A single texture that fails to decode must not abort the whole renderer init. Skip it,
+        // keep loading the rest, and surface the failures so they are still visible/QA-able.
+        console.error(`[textures] could not load ${slot.name} (${builtin.url}); continuing without it`);
+        failed.push(slot.name);
+        continue;
+      }
       setBuiltinTextureSlot(slot.index, texture, slot.name, builtin.url, builtin.id);
     }
+    if (failed.length) console.warn(`[textures] ${failed.length} built-in texture(s) failed to load: ${failed.join(", ")}`);
   };
   if (stagedImport) {
     while (textureSlots.length < stagedImport.manifest.textures.length) {
@@ -3645,8 +3752,12 @@ async function main() {
             grp = ensureChunkGroup(v.node);
             chunkGroupsBuiltThisFrame++;
           }
-          v.mesh.visible = false;
-          grp.group.visible = true;
+          // Only swap to the raw chunk group once it's fully built (GPU meshing is async); until
+          // then the welded LOD0 page mesh stays visible so there's no hole.
+          if (grp.ready) {
+            v.mesh.visible = false;
+            grp.group.visible = true;
+          }
         } else {
           const grp = chunkGroups.get(v.node.id);
           if (grp) grp.group.visible = false;

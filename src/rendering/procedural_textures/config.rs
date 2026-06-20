@@ -30,6 +30,8 @@ pub struct ProceduralTextureConfig {
     pub noise: NoiseBakeConfig,
     #[serde(default)]
     pub terrain: TerrainTextureConfig,
+    #[serde(default)]
+    pub bark: BarkTextureConfig,
     #[serde(default = "default_terrain_material_quality")]
     pub terrain_material_quality: BTreeMap<String, TerrainMaterialQualityTier>,
     #[serde(default)]
@@ -64,10 +66,47 @@ pub struct TerrainTextureConfig {
     pub micro_variation_m: [f32; 2],
     #[serde(default)]
     pub micro_normal: MicroNormalConfig,
+    #[serde(default)]
+    pub masks: TerrainMasksConfig,
     #[serde(default = "default_material_order")]
     pub material_order: Vec<ProceduralMaterialId>,
     #[serde(default = "default_material_recipes")]
     pub materials: BTreeMap<ProceduralMaterialId, ProceduralMaterialRecipe>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct BarkTextureConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_bark_resolution")]
+    pub resolution: u32,
+    #[serde(default = "default_bark_species")]
+    pub species: Vec<BarkSpeciesConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct BarkSpeciesConfig {
+    pub id: String,
+    pub label: String,
+    pub params: BarkSynthesisParams,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct BarkSynthesisParams {
+    pub plates: [f32; 2],
+    pub warp: f32,
+    pub fissure_w: f32,
+    pub fissure_depth: f32,
+    pub plate_round: f32,
+    pub micro: f32,
+    pub vert_crack: f32,
+    pub lenticels: f32,
+    pub deep: [f32; 3],
+    pub high: [f32; 3],
+    pub mottle: f32,
+    pub rough_base: f32,
+    pub rough_var: f32,
+    pub normal_k: f32,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -80,6 +119,50 @@ pub struct MicroNormalConfig {
     pub fade_end_m: f32,
     #[serde(default = "default_micro_max_strength")]
     pub max_strength: f32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct TerrainMasksConfig {
+    #[serde(default = "default_slope_damp")]
+    pub slope_damp: [f32; 2],
+    #[serde(default = "default_snow_height")]
+    pub snow_height: [f32; 2],
+    #[serde(default = "default_snow_upness")]
+    pub snow_upness: [f32; 2],
+    #[serde(default = "default_moss_upness")]
+    pub moss_upness: [f32; 2],
+    #[serde(default = "default_gravel_slope")]
+    pub gravel_slope: [f32; 2],
+    #[serde(default = "default_wet_height")]
+    pub wet_height: [f32; 2],
+    #[serde(default = "default_wet_upness")]
+    pub wet_upness: [f32; 2],
+    #[serde(default = "default_wet_level")]
+    pub wet_level_m: f32,
+    #[serde(default = "default_page_lod_normal_fade")]
+    pub page_lod_normal_fade_m: f32,
+    #[serde(default = "default_meso_albedo_strength")]
+    pub meso_albedo_strength: f32,
+    #[serde(default = "default_wet_roughness")]
+    pub wet_roughness: f32,
+    #[serde(default = "default_wet_roughness_strength")]
+    pub wet_roughness_strength: f32,
+    #[serde(default = "default_snow_tint_strength")]
+    pub snow_tint_strength: f32,
+    #[serde(default = "default_moss_tint_strength")]
+    pub moss_tint_strength: f32,
+    #[serde(default = "default_gravel_tint_strength")]
+    pub gravel_tint_strength: f32,
+    #[serde(default = "default_wet_tint_strength")]
+    pub wet_tint_strength: f32,
+    #[serde(default = "default_moss_tint")]
+    pub moss_tint: [f32; 3],
+    #[serde(default = "default_gravel_tint")]
+    pub gravel_tint: [f32; 3],
+    #[serde(default = "default_wet_tint")]
+    pub wet_tint: [f32; 3],
+    #[serde(default = "default_snow_tint")]
+    pub snow_tint: [f32; 3],
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -108,6 +191,7 @@ impl Default for ProceduralTextureConfig {
             cache_dir: default_cache_dir(),
             noise: NoiseBakeConfig::default(),
             terrain: TerrainTextureConfig::default(),
+            bark: BarkTextureConfig::default(),
             terrain_material_quality: default_terrain_material_quality(),
             debug: ProceduralTextureDebugConfig::default(),
         }
@@ -142,6 +226,7 @@ impl Default for TerrainTextureConfig {
             meso_variation_m: default_meso_variation(),
             micro_variation_m: default_micro_variation(),
             micro_normal: MicroNormalConfig::default(),
+            masks: TerrainMasksConfig::default(),
             material_order: default_material_order(),
             materials: default_material_recipes(),
         }
@@ -155,6 +240,43 @@ impl Default for MicroNormalConfig {
             fade_start_m: default_micro_fade_start(),
             fade_end_m: default_micro_fade_end(),
             max_strength: default_micro_max_strength(),
+        }
+    }
+}
+
+impl Default for TerrainMasksConfig {
+    fn default() -> Self {
+        Self {
+            slope_damp: default_slope_damp(),
+            snow_height: default_snow_height(),
+            snow_upness: default_snow_upness(),
+            moss_upness: default_moss_upness(),
+            gravel_slope: default_gravel_slope(),
+            wet_height: default_wet_height(),
+            wet_upness: default_wet_upness(),
+            wet_level_m: default_wet_level(),
+            page_lod_normal_fade_m: default_page_lod_normal_fade(),
+            meso_albedo_strength: default_meso_albedo_strength(),
+            wet_roughness: default_wet_roughness(),
+            wet_roughness_strength: default_wet_roughness_strength(),
+            snow_tint_strength: default_snow_tint_strength(),
+            moss_tint_strength: default_moss_tint_strength(),
+            gravel_tint_strength: default_gravel_tint_strength(),
+            wet_tint_strength: default_wet_tint_strength(),
+            moss_tint: default_moss_tint(),
+            gravel_tint: default_gravel_tint(),
+            wet_tint: default_wet_tint(),
+            snow_tint: default_snow_tint(),
+        }
+    }
+}
+
+impl Default for BarkTextureConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            resolution: default_bark_resolution(),
+            species: default_bark_species(),
         }
     }
 }
@@ -214,6 +336,10 @@ fn default_resolution() -> u32 {
     1024
 }
 
+fn default_bark_resolution() -> u32 {
+    2048
+}
+
 fn default_cache_dir() -> String {
     "generated/procedural".to_string()
 }
@@ -240,6 +366,86 @@ fn default_micro_fade_end() -> f32 {
 
 fn default_micro_max_strength() -> f32 {
     0.35
+}
+
+fn default_slope_damp() -> [f32; 2] {
+    [0.18, 0.92]
+}
+
+fn default_snow_height() -> [f32; 2] {
+    [76.0, 130.0]
+}
+
+fn default_snow_upness() -> [f32; 2] {
+    [0.58, 0.92]
+}
+
+fn default_moss_upness() -> [f32; 2] {
+    [0.55, 0.92]
+}
+
+fn default_gravel_slope() -> [f32; 2] {
+    [0.28, 0.72]
+}
+
+fn default_wet_height() -> [f32; 2] {
+    [18.0, 28.0]
+}
+
+fn default_wet_upness() -> [f32; 2] {
+    [0.42, 0.86]
+}
+
+fn default_wet_level() -> f32 {
+    18.0
+}
+
+fn default_page_lod_normal_fade() -> f32 {
+    16.0
+}
+
+fn default_meso_albedo_strength() -> f32 {
+    0.08
+}
+
+fn default_wet_roughness() -> f32 {
+    0.35
+}
+
+fn default_wet_roughness_strength() -> f32 {
+    0.30
+}
+
+fn default_snow_tint_strength() -> f32 {
+    0.22
+}
+
+fn default_moss_tint_strength() -> f32 {
+    0.08
+}
+
+fn default_gravel_tint_strength() -> f32 {
+    0.10
+}
+
+fn default_wet_tint_strength() -> f32 {
+    0.20
+}
+
+fn default_moss_tint() -> [f32; 3] {
+    [0.18, 0.32, 0.13]
+}
+
+fn default_gravel_tint() -> [f32; 3] {
+    [0.42, 0.41, 0.39]
+}
+
+fn default_wet_tint() -> [f32; 3] {
+    [0.18, 0.15, 0.12]
+}
+
+fn default_snow_tint() -> [f32; 3] {
+    [0.86, 0.89, 0.90]
 }
 
 fn default_terrain_material_quality() -> BTreeMap<String, TerrainMaterialQualityTier> {
@@ -335,6 +541,131 @@ pub fn default_material_recipes() -> BTreeMap<ProceduralMaterialId, ProceduralMa
     recipes
 }
 
+pub fn default_bark_species() -> Vec<BarkSpeciesConfig> {
+    vec![
+        BarkSpeciesConfig {
+            id: "spruce".to_string(),
+            label: "Spruce".to_string(),
+            params: BarkSynthesisParams {
+                plates: [16.0, 4.0],
+                warp: 0.5,
+                fissure_w: 0.34,
+                fissure_depth: 0.85,
+                plate_round: 0.25,
+                micro: 0.3,
+                vert_crack: 0.55,
+                lenticels: 0.0,
+                deep: [0.045, 0.032, 0.026],
+                high: [0.21, 0.155, 0.115],
+                mottle: 0.25,
+                rough_base: 0.92,
+                rough_var: 0.07,
+                normal_k: 2.6,
+            },
+        },
+        BarkSpeciesConfig {
+            id: "pine".to_string(),
+            label: "Pine".to_string(),
+            params: BarkSynthesisParams {
+                plates: [7.0, 9.0],
+                warp: 0.35,
+                fissure_w: 0.42,
+                fissure_depth: 1.0,
+                plate_round: 0.55,
+                micro: 0.22,
+                vert_crack: 0.1,
+                lenticels: 0.0,
+                deep: [0.05, 0.027, 0.016],
+                high: [0.30, 0.155, 0.075],
+                mottle: 0.35,
+                rough_base: 0.88,
+                rough_var: 0.1,
+                normal_k: 3.0,
+            },
+        },
+        BarkSpeciesConfig {
+            id: "beech".to_string(),
+            label: "Beech".to_string(),
+            params: BarkSynthesisParams {
+                plates: [5.0, 5.0],
+                warp: 0.6,
+                fissure_w: 0.85,
+                fissure_depth: 0.12,
+                plate_round: 0.1,
+                micro: 0.12,
+                vert_crack: 0.0,
+                lenticels: 0.0,
+                deep: [0.16, 0.15, 0.135],
+                high: [0.30, 0.285, 0.25],
+                mottle: 0.5,
+                rough_base: 0.78,
+                rough_var: 0.08,
+                normal_k: 0.9,
+            },
+        },
+        BarkSpeciesConfig {
+            id: "birch".to_string(),
+            label: "Birch".to_string(),
+            params: BarkSynthesisParams {
+                plates: [4.0, 3.0],
+                warp: 0.3,
+                fissure_w: 0.9,
+                fissure_depth: 0.06,
+                plate_round: 0.05,
+                micro: 0.1,
+                vert_crack: 0.0,
+                lenticels: 1.0,
+                deep: [0.46, 0.44, 0.42],
+                high: [0.80, 0.79, 0.76],
+                mottle: 0.22,
+                rough_base: 0.62,
+                rough_var: 0.18,
+                normal_k: 0.7,
+            },
+        },
+        BarkSpeciesConfig {
+            id: "karst_gnarl".to_string(),
+            label: "Karst gnarl".to_string(),
+            params: BarkSynthesisParams {
+                plates: [9.0, 3.0],
+                warp: 1.4,
+                fissure_w: 0.5,
+                fissure_depth: 0.9,
+                plate_round: 0.3,
+                micro: 0.34,
+                vert_crack: 0.3,
+                lenticels: 0.0,
+                deep: [0.05, 0.043, 0.036],
+                high: [0.205, 0.18, 0.15],
+                mottle: 0.3,
+                rough_base: 0.93,
+                rough_var: 0.05,
+                normal_k: 2.8,
+            },
+        },
+        BarkSpeciesConfig {
+            id: "snag".to_string(),
+            label: "Snag".to_string(),
+            params: BarkSynthesisParams {
+                plates: [11.0, 2.0],
+                warp: 0.4,
+                fissure_w: 0.3,
+                fissure_depth: 0.7,
+                plate_round: 0.15,
+                micro: 0.26,
+                vert_crack: 0.8,
+                lenticels: 0.0,
+                deep: [0.07, 0.065, 0.06],
+                high: [0.26, 0.25, 0.23],
+                mottle: 0.2,
+                rough_base: 0.9,
+                rough_var: 0.06,
+                normal_k: 2.2,
+            },
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,6 +682,30 @@ procedural_textures:
   terrain:
     layer_resolution: 16
     material_order: [rock, grass]
+    masks:
+      slope_damp: [0.2, 0.8]
+      meso_albedo_strength: 0.11
+      snow_tint: [0.9, 0.91, 0.92]
+  bark:
+    resolution: 64
+    species:
+      - id: test_bark
+        label: Test bark
+        params:
+          plates: [3.0, 4.0]
+          warp: 0.25
+          fissure_w: 0.5
+          fissure_depth: 0.75
+          plate_round: 0.2
+          micro: 0.1
+          vert_crack: 0.3
+          lenticels: 0.0
+          deep: [0.1, 0.08, 0.06]
+          high: [0.3, 0.25, 0.2]
+          mottle: 0.2
+          rough_base: 0.8
+          rough_var: 0.1
+          normal_k: 2.0
   terrain_material_quality:
     debug_flat:
       max_noise_fetches: 0
@@ -374,6 +729,13 @@ procedural_textures:
                 .materials
                 .contains_key(&ProceduralMaterialId::WetSoil)
         );
+        assert_eq!(config.terrain.masks.slope_damp, [0.2, 0.8]);
+        assert_eq!(config.terrain.masks.meso_albedo_strength, 0.11);
+        assert_eq!(config.terrain.masks.snow_tint, [0.9, 0.91, 0.92]);
+        assert_eq!(config.bark.resolution, 64);
+        assert_eq!(config.bark.species.len(), 1);
+        assert_eq!(config.bark.species[0].id, "test_bark");
+        assert_eq!(config.bark.species[0].params.plates, [3.0, 4.0]);
         assert_eq!(
             config.terrain_material_quality["debug_flat"].max_noise_fetches,
             0
