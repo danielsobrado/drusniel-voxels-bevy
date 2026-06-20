@@ -1,5 +1,5 @@
-// GPU Surface Nets compute pass. Concatenated AFTER terrain_field.wgsl, which provides
-// densityField / densityGradient / paintMaterialAt(*) and owns group(0) bindings 0–1.
+// GPU Surface Nets compute pass. Concatenated after terrain field bindings and common logic,
+// which provide densityField / densityGradient and own group(0) bindings 0-1.
 // Transliteration of src/gpu/surface_nets_core.ts, which is proven (surface_nets_core.test.ts)
 // to emit the same surface as terrain.ts meshChunk. Two passes over the chunk cell grid:
 //   vertexPass: one invocation per grid cell. If the cell has a sign change, atomically claim a
@@ -42,7 +42,7 @@ fn slotIndex(gx : i32, gy : i32, gz : i32) -> i32 {
 }
 
 // Inline paintMaterialAt (mirror of terrain_field_core.paintMaterialAtCore). digEdits/fieldParams
-// come from terrain_field.wgsl.
+// come from the terrain field binding wrapper.
 fn paintMaterialAt(x : f32, y : f32, z : f32) -> f32 {
   let count = i32(fieldParams.editCount);
   for (var i : i32 = count - 1; i >= 0; i = i - 1) {

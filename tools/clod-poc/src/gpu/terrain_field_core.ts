@@ -2,7 +2,7 @@
 //
 // This is the *spec* for the GPU compute mesher: every function here is written the way the
 // WGSL is structured — explicit parameters, no module-global dig-edit array, resolved edit
-// records instead of optional fields — so the shader in shaders/terrain_field.wgsl is a
+// records instead of optional fields — so the shader in shaders/terrain_field_common.wgsl is a
 // mechanical transliteration of this file. terrain_field_core.test.ts pins this core to the
 // canonical f64 CPU field (terrain.ts) to the bit, so any GPU mismatch the user sees in-browser
 // is a precision/pipeline issue (f32 vs f64, sqrt-of-dot vs Math.hypot), never a logic error.

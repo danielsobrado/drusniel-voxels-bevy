@@ -1,13 +1,6 @@
-// Terrain SDF field for the GPU compute mesher. Mechanical transliteration of
-// src/gpu/terrain_field_core.ts, which is pinned bit-for-bit to the canonical CPU field
-// (src/terrain.ts) by terrain_field_core.test.ts. Logic is verified there; the only expected
-// divergence is precision (f32 here vs f64 on CPU) and sqrt-of-dot vs Math.hypot. All GPU-meshed
-// chunks share THIS field, so they remain mutually consistent and weld cleanly by construction.
-//
-// Bindings owned by this module (the mesher shader, concatenated after this file, must use
-// group(0) bindings >= 2 or a separate group):
-//   @group(0) @binding(0) digEdits : storage array<DigEdit>   (stride 40 bytes, see core)
-//   @group(0) @binding(1) fieldParams : uniform               (editCount in .x)
+// Shared terrain SDF field for GPU compute shaders. Concrete digEdits and fieldParams
+// bindings are supplied by small wrapper modules before this file is concatenated.
+// Keep this as the mechanical WGSL transliteration of src/gpu/terrain_field_core.ts.
 
 struct DigEdit {
   x : f32,
@@ -29,8 +22,6 @@ struct FieldParams {
   _pad2 : u32,
 };
 
-@group(0) @binding(0) var<storage, read> digEdits : array<DigEdit>;
-@group(0) @binding(1) var<uniform> fieldParams : FieldParams;
 
 const WATER_LEVEL : f32 = 18.0;
 const MIN_NORMAL_TERRAIN_SURFACE_Y : f32 = 14.0;   // WATER_LEVEL - 4

@@ -1,4 +1,4 @@
-// Verifies host buffer packing matches the WGSL struct layouts in surface_nets.compute.wgsl
+// Verifies host buffer packing matches the WGSL struct layouts in terrain_field_entry.wgsl
 // (a byte-offset mismatch silently feeds the GPU garbage), and that assembling readback arrays
 // reproduces the canonical surface end-to-end.
 

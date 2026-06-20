@@ -1,5 +1,5 @@
 // Pins the GPU-shaped field core to the canonical f64 CPU field (terrain.ts). If this passes,
-// the WGSL transliteration (shaders/terrain_field.wgsl) has a verified logic spec, so any GPU
+// the WGSL transliteration (shaders/terrain_field_common.wgsl) has a verified logic spec, so any GPU
 // mismatch is precision/pipeline, not a port bug. Same f64 ops => exact equality expected.
 
 import { describe, it, expect, afterEach } from "vitest";

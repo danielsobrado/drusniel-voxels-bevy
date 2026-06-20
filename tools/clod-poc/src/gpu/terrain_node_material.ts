@@ -258,10 +258,8 @@ function paintedAlbedo(
   albedo: THREE.DataArrayTexture,
   slots: readonly TerrainNodeTextureSlot[],
   worldPos: TslNode,
-  weights: TslNode,
   paintSlots: TslNode,
   paintWeights: TslNode,
-  useTriplanar: boolean,
 ): TslNode {
   const channels = [
     { slot: paintSlots.x, weight: paintWeights.x },
@@ -281,7 +279,7 @@ function paintedAlbedo(
     }
     // Drop unpainted channels (slot < -0.5), matching the WebGL guard.
     const w = channel.weight.mul(step(0.0, channel.slot.add(0.5)));
-    acc = acc.add(triplanarAlbedo(albedo, layer, worldPos, scale, weights, useTriplanar).mul(w));
+    acc = acc.add(texture(albedo, worldPos.xz.mul(scale)).depth(layer).rgb.mul(w));
     wsum = wsum.add(w);
   }
   return acc.div(max(wsum, 0.001));
@@ -398,7 +396,7 @@ export function createTerrainNodeMaterial(
     }
     tex = mix(
       tex,
-      paintedAlbedo(textures.albedoArray, textures.slots, worldPos, weights, paintSlots, paintWeights, useTriplanar),
+      paintedAlbedo(textures.albedoArray, textures.slots, worldPos, paintSlots, paintWeights),
       paint,
     );
     // baseColor = tex * mix(vec3(1), uColor, 0.35)  (see main.ts texturing branch)

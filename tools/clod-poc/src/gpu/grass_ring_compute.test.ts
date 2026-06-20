@@ -5,7 +5,7 @@ import {
   grassGpuRingTierRegion,
   grassGpuRingComputeUnsupportedReason,
 } from "./grass_ring_compute.js";
-import fieldShaderSource from "./shaders/terrain_field.wgsl?raw";
+import { composeGrassRingShader } from "./wgsl_modules.js";
 import shaderSource from "./shaders/grass_ring.compute.wgsl?raw";
 
 function deviceWithStorageBufferLimit(limit: number): GPUDevice {
@@ -32,7 +32,7 @@ describe("grass ring compute capabilities", () => {
   });
 
   it("keeps the WGSL storage-buffer declarations within the advertised safe limit", () => {
-    const storageBindings = `${fieldShaderSource}\n${shaderSource}`.match(/var<storage/g) ?? [];
+    const storageBindings = composeGrassRingShader().match(/var<storage/g) ?? [];
 
     expect(storageBindings).toHaveLength(GRASS_GPU_RING_STORAGE_BINDINGS);
   });

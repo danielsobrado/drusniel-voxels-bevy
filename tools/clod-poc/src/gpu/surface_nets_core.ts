@@ -1,5 +1,5 @@
 // GPU-shaped Surface Nets mesher for one chunk — the *spec* for the WGSL compute pass
-// (shaders/surface_nets.compute.wgsl). Structured the way the shader runs: two passes over a
+// (shaders/terrain_field_entry.wgsl). Structured the way the shader runs: two passes over a
 // dense cell-indexed grid (no hash map, no on-demand vertex allocation), full-Y scan instead of
 // the CPU per-column band. surface_nets_core.test.ts proves this produces the SAME surface as
 // canonical terrain.ts meshChunk (identical triangle set), so the WGSL is a transliteration of

@@ -7,7 +7,8 @@ import {
   stoneGpuOutputIndex,
   stoneGpuScatterUnsupportedReason,
 } from "../gpu/stone_scatter_compute.js";
-import fieldShaderSource from "../gpu/shaders/terrain_field.wgsl?raw";
+import { composeStoneScatterShader } from "../gpu/wgsl_modules.js";
+import terrainCommonSource from "../gpu/shaders/terrain_field_common.wgsl?raw";
 import shaderSource from "../gpu/shaders/stone_scatter.compute.wgsl?raw";
 import { buildWorld } from "../quadtree.js";
 import type { ClodPageNode } from "../types.js";
@@ -86,7 +87,7 @@ describe("GPU stone instance layout", () => {
   });
 
   it("keeps the WGSL storage-buffer declarations within the advertised safe limit", () => {
-    const storageBindings = `${fieldShaderSource}\n${shaderSource}`.match(/var<storage/g) ?? [];
+    const storageBindings = composeStoneScatterShader().match(/var<storage/g) ?? [];
 
     expect(storageBindings).toHaveLength(STONE_GPU_SCATTER_STORAGE_BINDINGS);
     expect(stoneGpuScatterUnsupportedReason(deviceWithStorageBufferLimit(4))).toContain("5 storage buffers");
@@ -101,7 +102,7 @@ describe("GPU stone instance layout", () => {
   it("does not redeclare terrain-field WGSL helper functions", () => {
     const functionNames = (source: string): string[] =>
       Array.from(source.matchAll(/^fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm), (match) => match[1]!);
-    const terrainFunctions = new Set(functionNames(fieldShaderSource));
+    const terrainFunctions = new Set(functionNames(terrainCommonSource));
     const collisions = functionNames(shaderSource).filter((name) => terrainFunctions.has(name));
 
     expect(collisions).toEqual([]);

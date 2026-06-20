@@ -1,6 +1,6 @@
 // Pure host-side buffer math + packing for the GPU Surface Nets mesher. Split out from the GPU
 // driver (gpu_chunk_mesher.ts) so the byte layouts — which must match the WGSL structs in
-// shaders/surface_nets.compute.wgsl exactly or the GPU reads garbage — are unit-testable headless
+// shaders/terrain_field_entry.wgsl exactly or the GPU reads garbage — are unit-testable headless
 // (gpu_mesh_buffers.test.ts). No WebGPU here.
 
 import { ResolvedDigEdit } from "./terrain_field_core.js";

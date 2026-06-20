@@ -1,7 +1,6 @@
 import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
-import fieldShader from "./shaders/terrain_field.wgsl?raw";
-import shaderSource from "./shaders/grass_ring.compute.wgsl?raw";
+import { composeGrassRingShader } from "./wgsl_modules.js";
 
 const WORKGROUP_SIZE = 64;
 const PARAM_BYTES = 16 * 12;
@@ -116,12 +115,6 @@ export function grassGpuRingOutputIndex(tier: number, slot: number, maxInstances
   return grassGpuRingTierRegion(tier, maxInstancesPerTier).start + Math.max(0, Math.floor(slot));
 }
 
-function remapTerrainFieldBindings(source: string): string {
-  return source
-    .replace(/@group\(0\) @binding\(0\) var<storage, read> digEdits/g, "@group(0) @binding(7) var<storage, read> digEdits")
-    .replace(/@group\(0\) @binding\(1\) var<uniform> fieldParams/g, "@group(0) @binding(8) var<uniform> fieldParams");
-}
-
 export class GrassGpuRingCompute {
   private readonly paramBuffer: GPUBuffer;
   private readonly counterBuffer: GPUBuffer;
@@ -217,7 +210,7 @@ export class GrassGpuRingCompute {
   ): Promise<GrassGpuRingCompute> {
     const module = device.createShaderModule({
       label: "grass ring compute shader",
-      code: `${remapTerrainFieldBindings(fieldShader)}\n${shaderSource}`,
+      code: composeGrassRingShader(),
     });
     const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({
       binding,

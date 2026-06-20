@@ -1,8 +1,7 @@
 import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import type { StoneSettings } from "../stones/stone_config.js";
-import fieldShader from "./shaders/terrain_field.wgsl?raw";
-import shaderSource from "./shaders/stone_scatter.compute.wgsl?raw";
+import { composeStoneScatterShader } from "./wgsl_modules.js";
 
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
@@ -60,12 +59,6 @@ export function stoneGpuClassRegion(classIndex: number, maxInstances: number): S
 
 export function stoneGpuOutputIndex(classIndex: number, slot: number, maxInstances: number): number {
   return stoneGpuClassRegion(classIndex, maxInstances).start + Math.max(0, Math.floor(slot));
-}
-
-function remapTerrainFieldBindings(source: string): string {
-  return source
-    .replace(/@group\(0\) @binding\(0\) var<storage, read> digEdits/g, "@group(0) @binding(5) var<storage, read> digEdits")
-    .replace(/@group\(0\) @binding\(1\) var<uniform> fieldParams/g, "@group(0) @binding(6) var<uniform> fieldParams");
 }
 
 export class StoneGpuScatterCompute {
@@ -144,7 +137,7 @@ export class StoneGpuScatterCompute {
   ): Promise<StoneGpuScatterCompute> {
     const module = device.createShaderModule({
       label: "stone scatter compute shader",
-      code: `${remapTerrainFieldBindings(fieldShader)}\n${shaderSource}`,
+      code: composeStoneScatterShader(),
     });
     const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({
       binding,

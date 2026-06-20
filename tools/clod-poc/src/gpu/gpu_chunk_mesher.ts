@@ -1,5 +1,6 @@
-// GPU Surface Nets driver: runs vertexPass + quadPass (shaders/surface_nets.compute.wgsl, atop
-// terrain_field.wgsl) for one chunk and reads back the compact mesh, so the heavy field + meshing
+// GPU Surface Nets driver: runs vertexPass + quadPass (shaders/terrain_field_entry.wgsl,
+// composed with terrain field bindings/common) for one chunk and reads back the compact mesh, so
+// the heavy field + meshing
 // math leaves the main thread. The compute math is verified equivalent to terrain.ts meshChunk via
 // surface_nets_core.test.ts; this driver's pure parts (buffer layout/packing) are verified by
 // gpu_mesh_buffers.test.ts. The GPU dispatch + readback wiring itself is browser-QA only (WebGPU
@@ -18,8 +19,7 @@ import {
   assembleChunkMesh,
   DIG_EDIT_BYTES,
 } from "./gpu_mesh_buffers.js";
-import fieldShader from "./shaders/terrain_field.wgsl?raw";
-import meshShader from "./shaders/surface_nets.compute.wgsl?raw";
+import { composeTerrainFieldShader } from "./wgsl_modules.js";
 
 const WORKGROUP_SIZE = 64;
 const F32 = Float32Array.BYTES_PER_ELEMENT;
@@ -129,7 +129,7 @@ export class GpuChunkMesher {
     }
     const module = device.createShaderModule({
       label: "gpu mesher shader",
-      code: `${fieldShader}\n${meshShader}`,
+      code: composeTerrainFieldShader(),
     });
     const storage = (i: number): GPUBindGroupLayoutEntry => ({
       binding: i,

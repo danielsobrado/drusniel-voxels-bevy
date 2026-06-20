@@ -357,7 +357,9 @@ procedural_textures:
     expect(tintIndex).toBeGreaterThan(-1);
     expect(paintIndex).toBeGreaterThan(tintIndex);
     expect(shader).toContain("blendPaintedNormal(vWorldPos, geomN)");
-    expect(shader).toContain("sampleTextureSlot(int(vPaintSlots");
+    expect(shader).toContain("samplePaintTextureSlot(int(vPaintSlots");
+    expect(shader).toContain("vec3 samplePaintTextureSlot(int slot, vec3 worldPos)");
+    expect(shader).toContain("worldPos.xz * uTextureScales[slot], float(slot)");
     expect(shader).toContain("sampleNormalSlot(int(vPaintSlots");
     expect(shader).not.toContain("vUv");
   });

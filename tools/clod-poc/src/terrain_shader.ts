@@ -67,6 +67,12 @@ function buildSampleTextureSlot(): string {
   }`;
 }
 
+function buildSamplePaintTextureSlot(): string {
+  return `  vec3 samplePaintTextureSlot(int slot, vec3 worldPos) {
+    return texture(uTerrainAlbedoArray, vec3(worldPos.xz * uTextureScales[slot], float(slot))).rgb;
+  }`;
+}
+
 function buildSampleNormalSlot(): string {
   return `  vec3 sampleNormalSlot(int slot, vec3 worldPos, vec3 baseN) {
     return uNormalMapMask[slot] > 0.5 ? triplanarNormal(float(slot), worldPos, uTextureScales[slot], baseN) : baseN;
@@ -134,7 +140,7 @@ const PAINT_CHANNELS = ["x", "y", "z", "w"] as const;
 function buildPaintedAlbedo(): string {
   const body = PAINT_CHANNELS.map(
     (c) => `    if (vPaintWeights.${c} > 0.0 && vPaintSlots.${c} > -0.5) {
-      acc += sampleTextureSlot(int(vPaintSlots.${c} + 0.5), worldPos) * vPaintWeights.${c};
+      acc += samplePaintTextureSlot(int(vPaintSlots.${c} + 0.5), worldPos) * vPaintWeights.${c};
       wsum += vPaintWeights.${c};
     }`,
   ).join("\n");
@@ -337,6 +343,7 @@ ${buildPaintFallbackFn()}
     return normalize(n0 * w.x + n1 * w.y + n2 * w.z);
   }
 ${buildSampleTextureSlot()}
+${buildSamplePaintTextureSlot()}
 ${buildSampleNormalSlot()}
 ${buildSampleTerrainNormal()}
 ${buildSampleTerrainTexture()}
