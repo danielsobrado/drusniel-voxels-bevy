@@ -5,6 +5,7 @@ import type { ClodPageNode, PageFootprint } from "../types.js";
 import {
   GrassGpuRingCompute,
   grassGpuRingComputeUnsupportedReason,
+  grassGpuRingDensityParams,
   grassGpuRingSlotCount,
   grassGpuRingTierRegion,
   type GrassGpuRingStats,
@@ -73,6 +74,13 @@ interface GrassPatch {
   bladeCount: number;
   midBladeCount: number;
   visibleTier: "hidden" | GrassTier;
+}
+
+export function grassThinnedInstanceCount(instanceCount: number, thinRatio: number): number {
+  if (instanceCount <= 0) return 0;
+  const clamped = THREE.MathUtils.clamp(thinRatio, 0, 1);
+  if (clamped <= 0) return 0;
+  return Math.max(1, Math.floor(instanceCount * clamped));
 }
 
 export class GrassSystem {
@@ -525,6 +533,7 @@ export class GrassSystem {
       centerZ: center.z,
       worldCells: this.worldCells,
       bands: grassRingBands(this.settings),
+      density: grassGpuRingDensityParams(this.settings),
       bladeHeight: this.settings.bladeHeight,
       bladeHeightVariation: this.settings.bladeHeightVariation,
       slopeMinY: this.settings.slopeMinY,
@@ -865,8 +874,10 @@ export class GrassSystem {
     }
 
     const midThinRatio = this.settings.lod.midInstanceFraction;
-    const farThinRatio = this.settings.lod.farInstanceFraction || this.settings.lod.farDensityRatio;
-    const midCount = this.thinnedCount(instances.length, midThinRatio);
+    const farThinRatio = Number.isFinite(this.settings.lod.farInstanceFraction)
+      ? this.settings.lod.farInstanceFraction
+      : this.settings.lod.farDensityRatio;
+    const midCount = grassThinnedInstanceCount(instances.length, midThinRatio);
     const midInstances = instances.slice(0, midCount).map((instance) => ({
       ...instance,
       height: instance.height * 1.55,
@@ -880,7 +891,7 @@ export class GrassSystem {
       populateGrassGeometry(midGeometry, this.terrainPatchMidGeometry, footprint, midInstances, this.settings);
     }
 
-    const farCount = this.thinnedCount(instances.length, farThinRatio);
+    const farCount = grassThinnedInstanceCount(instances.length, farThinRatio);
     const farInstances = instances.slice(0, farCount).map((instance) => ({
       ...instance,
       height: instance.height * 1.9,
@@ -900,7 +911,7 @@ export class GrassSystem {
     }
 
     const superThinRatio = Math.max(0.001, farThinRatio * 0.5);
-    const superCount = this.thinnedCount(instances.length, superThinRatio);
+    const superCount = grassThinnedInstanceCount(instances.length, superThinRatio);
     const superInstances = instances.slice(0, superCount).map((instance) => ({
       ...instance,
       height: instance.height * 2.35,
@@ -937,11 +948,6 @@ export class GrassSystem {
       midBladeCount: midInstances.length + farInstances.length + superInstances.length,
       visibleTier: "hidden",
     };
-  }
-
-  private thinnedCount(instanceCount: number, thinRatio: number): number {
-    if (instanceCount <= 0) return 0;
-    return Math.max(1, Math.floor(instanceCount * THREE.MathUtils.clamp(thinRatio, 0, 1)));
   }
 
   private widthCompensation(thinRatio: number): number {

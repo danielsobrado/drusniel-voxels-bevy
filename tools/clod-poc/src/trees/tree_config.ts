@@ -168,6 +168,10 @@ function readNumberAtLeast(value: unknown, fallback: number, min: number): numbe
   return Math.max(min, readNumber(value, fallback));
 }
 
+function readFraction(value: unknown, fallback: number): number {
+  return Math.min(1, Math.max(0, readNumber(value, fallback)));
+}
+
 function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
@@ -188,6 +192,22 @@ function warnTreeConfig(message: string, warn?: (message: string) => void): void
   warn?.(`[tree-config] ${message}`);
 }
 
+function readTreeLodSettings(
+  raw: NonNullable<TreeYamlConfig["trees"]>["lod"] | undefined,
+  fallback: TreeLodSettings,
+  enabled: boolean,
+): TreeLodSettings {
+  const lod = {
+    nearFraction: readFraction(raw?.near_fraction, fallback.nearFraction),
+    midFraction: readFraction(raw?.mid_fraction, fallback.midFraction),
+    farFraction: readFraction(raw?.far_fraction, fallback.farFraction),
+  };
+  if (enabled && lod.farFraction < 0.01) lod.farFraction = 0.01;
+  if (lod.midFraction <= lod.nearFraction) lod.midFraction = Math.min(1, lod.nearFraction + 0.01);
+  if (lod.farFraction <= lod.midFraction) lod.farFraction = Math.min(1, lod.midFraction + 0.01);
+  return lod;
+}
+
 export function parseTreeConfig(
   text: string | null | undefined,
   warn: ((message: string) => void) | null = console.warn,
@@ -204,8 +224,9 @@ export function parseTreeConfig(
   }
 
   const raw = rawConfig.trees ?? {};
+  const enabled = readBoolean(raw.enabled, fallback.enabled);
   return {
-    enabled: readBoolean(raw.enabled, fallback.enabled),
+    enabled,
     seed: Math.floor(readNumber(raw.seed, fallback.seed)),
     distanceM: readNumberAtLeast(raw.distance_m, fallback.distanceM, 0),
     refreshDistanceM: readNumberAtLeast(raw.refresh_distance_m, fallback.refreshDistanceM, 0.1),
@@ -224,11 +245,7 @@ export function parseTreeConfig(
       minGroundWeight: readNumberAtLeast(raw.placement?.min_ground_weight, fallback.placement.minGroundWeight, 0),
       minSpacingM: readNumberAtLeast(raw.placement?.min_spacing_m, fallback.placement.minSpacingM, 0),
     },
-    lod: {
-      nearFraction: readNumberAtLeast(raw.lod?.near_fraction, fallback.lod.nearFraction, 0),
-      midFraction: readNumberAtLeast(raw.lod?.mid_fraction, fallback.lod.midFraction, 0),
-      farFraction: readNumberAtLeast(raw.lod?.far_fraction, fallback.lod.farFraction, 0),
-    },
+    lod: readTreeLodSettings(raw.lod, fallback.lod, enabled),
     species: {
       oak: readSpecies(fallback.species.oak, raw.species?.oak),
       pine: readSpecies(fallback.species.pine, raw.species?.pine),

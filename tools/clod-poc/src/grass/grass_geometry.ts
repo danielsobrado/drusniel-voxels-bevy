@@ -517,21 +517,39 @@ export function populateGrassGeometry(
     const normalYs = new Float32Array(instances.length);
     const terrainNormals = new Float32Array(instances.length * 3);
     const widthScales = new Float32Array(instances.length);
+    if (!bladeGeometry.boundingBox) bladeGeometry.computeBoundingBox();
+    const sourceBounds = bladeGeometry.boundingBox;
+    const sourceMinY = sourceBounds?.min.y ?? 0;
+    const sourceMaxY = sourceBounds?.max.y ?? 1;
+    const sourceHorizontalExtent = sourceBounds
+      ? Math.max(
+          Math.abs(sourceBounds.min.x),
+          Math.abs(sourceBounds.max.x),
+          Math.abs(sourceBounds.min.z),
+          Math.abs(sourceBounds.max.z),
+        )
+      : 1;
     let minY = Number.POSITIVE_INFINITY;
     let maxY = Number.NEGATIVE_INFINITY;
+    let maxHeight = 0;
+    let maxWidthScale = 1;
     for (let index = 0; index < instances.length; index++) {
       const instance = instances[index];
+      const height = instance.height;
+      const widthScale = instance.widthScale ?? 1;
       offsets.set(instance.offset, index * 3);
-      heights[index] = instance.height;
+      heights[index] = height;
       rotations[index] = instance.rotationY;
       phases[index] = instance.phase;
       colorMixes[index] = instance.colorMix;
       edgeFades[index] = instance.edgeFade;
       normalYs[index] = instance.normalY;
       terrainNormals.set(instance.terrainNormal, index * 3);
-      widthScales[index] = instance.widthScale ?? 1;
-      minY = Math.min(minY, instance.offset[1]);
-      maxY = Math.max(maxY, instance.offset[1] + instance.height);
+      widthScales[index] = widthScale;
+      minY = Math.min(minY, instance.offset[1] + sourceMinY * height);
+      maxY = Math.max(maxY, instance.offset[1] + sourceMaxY * height);
+      maxHeight = Math.max(maxHeight, height);
+      maxWidthScale = Math.max(maxWidthScale, widthScale);
     }
     geometry.setAttribute("aOffset", new THREE.InstancedBufferAttribute(offsets, 3));
     geometry.setAttribute("aHeight", new THREE.InstancedBufferAttribute(heights, 1));
@@ -544,8 +562,12 @@ export function populateGrassGeometry(
     geometry.setAttribute("aWidthScale", new THREE.InstancedBufferAttribute(widthScales, 1));
     geometry.instanceCount = instances.length;
 
-    const margin = settings.bladeWidth
-      + settings.bladeHeight * (1 + settings.bladeHeightVariation) * settings.windStrength * 2;
+    if (instances.length === 0) {
+      minY = 0;
+      maxY = 0;
+    }
+    const margin = sourceHorizontalExtent * settings.bladeWidth * maxWidthScale
+      + maxHeight * settings.windStrength * 2;
     geometry.boundingBox = new THREE.Box3(
       new THREE.Vector3(footprint.minX - margin, minY, footprint.minZ - margin),
       new THREE.Vector3(footprint.maxX + margin, maxY, footprint.maxZ + margin),

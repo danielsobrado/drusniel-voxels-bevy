@@ -15,6 +15,7 @@ import {
   grassGpuRingKey,
   grassRingBands,
   grassThin,
+  grassThinnedInstanceCount,
   grassWorldCell,
   parseGrassConfig,
   populateGrassGeometry,
@@ -369,6 +370,13 @@ grass:
     expect(survivors.some((blade) => (blade.widthScale ?? 1) > 1)).toBe(true);
   });
 
+  it("allows explicit zero thinning to disable generated tier instances", () => {
+    expect(grassThinnedInstanceCount(100, 0)).toBe(0);
+    expect(grassThinnedInstanceCount(100, -1)).toBe(0);
+    expect(grassThinnedInstanceCount(100, 0.001)).toBe(1);
+    expect(grassThinnedInstanceCount(100, 0.35)).toBe(35);
+  });
+
   it("builds real clump and far tuft source geometry without NaN attributes", () => {
     const clump = createGrassClumpGeometry(5, 4, settings);
     const tuft = createGrassTuftGeometry(settings);
@@ -400,6 +408,30 @@ grass:
     for (const value of terrainNormal.array as Float32Array) {
       expect(Number.isFinite(value)).toBe(true);
     }
+    source.dispose();
+    geometry.dispose();
+  });
+
+  it("expands grass bounds for actual source width and instance width scale", () => {
+    const boundedSettings = { ...settings, bladeWidth: 0.08, windStrength: 0 };
+    const source = createGrassTuftGeometry(boundedSettings);
+    const geometry = new THREE.InstancedBufferGeometry();
+    populateGrassGeometry(geometry, source, { minX: 8, minZ: 8, maxX: 8, maxZ: 8 }, [{
+      offset: [8, 10, 8] as [number, number, number],
+      height: 2,
+      rotationY: 0,
+      phase: 0,
+      colorMix: 0,
+      edgeFade: 1,
+      normalY: 1,
+      terrainNormal: [0, 1, 0] as [number, number, number],
+      widthScale: 2.6,
+    }], boundedSettings);
+
+    expect(geometry.boundingBox).not.toBeNull();
+    expect(geometry.boundingBox?.min.x).toBeLessThan(7.5);
+    expect(geometry.boundingBox?.max.x).toBeGreaterThan(8.5);
+    expect(geometry.boundingBox?.max.y).toBeCloseTo(12);
     source.dispose();
     geometry.dispose();
   });

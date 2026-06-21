@@ -1,10 +1,10 @@
 import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
-import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings } from "../grass/grass_config.js";
+import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings, type GrassSettings } from "../grass/grass_config.js";
 
 const WORKGROUP_SIZE = 64;
-const PARAM_BYTES = 16 * 12;
+const PARAM_BYTES = 16 * 14;
 const COUNTER_BYTES = 4 * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_TIER = 5;
 const TIER_COUNT = 4;
@@ -53,6 +53,7 @@ export interface GrassGpuRingDispatchParams {
   centerZ: number;
   worldCells: number;
   bands: GrassGpuRingBands;
+  density: GrassGpuRingDensityParams;
   bladeHeight: number;
   bladeHeightVariation: number;
   slopeMinY: number;
@@ -61,6 +62,16 @@ export interface GrassGpuRingDispatchParams {
   maxInstancesPerTier: number;
   seed: number;
   frustumPlanes?: ArrayLike<number>;
+}
+
+export interface GrassGpuRingDensityParams {
+  nearDistance: number;
+  midDistance: number;
+  farEnd: number;
+  midInstanceFraction: number;
+  farDensityRatio: number;
+  farInstanceFraction: number;
+  maxWidthCompensation: number;
 }
 
 export interface GrassGpuRingIndexCounts {
@@ -131,6 +142,69 @@ export function grassGpuRingOutputIndex(tier: number, slot: number, maxInstances
   return grassGpuRingTierRegion(tier, maxInstancesPerTier).start + Math.max(0, Math.floor(slot));
 }
 
+export function grassGpuRingDensityParams(
+  settings: Pick<GrassSettings, "distance" | "lod" | "ring" | "blade">,
+): GrassGpuRingDensityParams {
+  const nearDistance = settings.distance * settings.lod.nearFraction;
+  const midDistance = settings.distance * settings.lod.midFraction;
+  return {
+    nearDistance,
+    midDistance,
+    farEnd: Math.max(midDistance + 0.001, settings.distance, settings.ring.farMeters),
+    midInstanceFraction: settings.lod.midInstanceFraction,
+    farDensityRatio: settings.lod.farDensityRatio,
+    farInstanceFraction: settings.lod.farInstanceFraction,
+    maxWidthCompensation: settings.blade.maxWidthCompensation,
+  };
+}
+
+export function packGrassGpuRingParams(
+  params: GrassGpuRingDispatchParams,
+  indexCounts: GrassGpuRingIndexCounts,
+  ring: GrassRingSettings = DEFAULT_GRASS_SETTINGS.ring,
+  scratch: ArrayBuffer = new ArrayBuffer(PARAM_BYTES),
+): ArrayBuffer {
+  const f32 = new Float32Array(scratch);
+  const u32 = new Uint32Array(scratch);
+  f32.fill(0);
+  u32.fill(0);
+  f32[0] = params.centerX;
+  f32[1] = params.centerZ;
+  f32[2] = params.bands.radius;
+  f32[3] = params.worldCells;
+  f32[4] = params.bands.near;
+  f32[5] = params.bands.mid;
+  f32[6] = params.bands.far;
+  f32[7] = ring.bandMeters;
+  f32[8] = grassGpuRingCell(ring);
+  f32[9] = params.bladeHeight;
+  f32[10] = params.bladeHeightVariation;
+  f32[11] = params.slopeMinY;
+  f32[12] = params.minHeight;
+  f32[13] = params.maxHeight;
+  f32[14] = ring.scruffMeters;
+  f32[15] = params.density.maxWidthCompensation;
+  u32[16] = indexCounts.near;
+  u32[17] = indexCounts.mid;
+  u32[18] = indexCounts.far;
+  u32[19] = indexCounts.super;
+  u32[20] = Math.max(0, Math.floor(params.maxInstancesPerTier));
+  u32[21] = grassGpuRingGrid(ring);
+  u32[22] = params.seed >>> 0;
+  f32[24] = params.density.nearDistance;
+  f32[25] = params.density.midDistance;
+  f32[26] = params.density.farEnd;
+  f32[27] = params.density.midInstanceFraction;
+  f32[28] = params.density.farDensityRatio;
+  f32[29] = params.density.farInstanceFraction;
+  if (params.frustumPlanes) {
+    for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) {
+      f32[32 + i] = params.frustumPlanes[i] ?? 0;
+    }
+  }
+  return scratch;
+}
+
 export class GrassGpuRingCompute {
   private readonly paramBuffer: GPUBuffer;
   private readonly counterBuffer: GPUBuffer;
@@ -141,8 +215,6 @@ export class GrassGpuRingCompute {
   private digEdits: GPUBuffer;
   private readonly bindGroup: GPUBindGroup;
   private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
-  private readonly paramF32 = new Float32Array(this.paramScratch);
-  private readonly paramU32 = new Uint32Array(this.paramScratch);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private counts: GrassGpuRingCounts = { near: 0, mid: 0, far: 0, super: 0 };
   private runningReadbacks = 0;
@@ -281,35 +353,7 @@ export class GrassGpuRingCompute {
       : null;
     if (requestReadback && !readbackSlot) this.skippedDispatches++;
 
-    this.paramF32.fill(0);
-    this.paramU32.fill(0);
-    this.paramF32[0] = params.centerX;
-    this.paramF32[1] = params.centerZ;
-    this.paramF32[2] = params.bands.radius;
-    this.paramF32[3] = params.worldCells;
-    this.paramF32[4] = params.bands.near;
-    this.paramF32[5] = params.bands.mid;
-    this.paramF32[6] = params.bands.far;
-    this.paramF32[7] = this.ring.bandMeters;
-    this.paramF32[8] = grassGpuRingCell(this.ring);
-    this.paramF32[9] = params.bladeHeight;
-    this.paramF32[10] = params.bladeHeightVariation;
-    this.paramF32[11] = params.slopeMinY;
-    this.paramF32[12] = params.minHeight;
-    this.paramF32[13] = params.maxHeight;
-    this.paramF32[14] = this.ring.scruffMeters;
-    this.paramU32[16] = indexCounts.near;
-    this.paramU32[17] = indexCounts.mid;
-    this.paramU32[18] = indexCounts.far;
-    this.paramU32[19] = indexCounts.super;
-    this.paramU32[20] = Math.max(0, Math.floor(params.maxInstancesPerTier));
-    this.paramU32[21] = grassGpuRingGrid(this.ring);
-    this.paramU32[22] = params.seed >>> 0;
-    if (params.frustumPlanes) {
-      for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) {
-        this.paramF32[24 + i] = params.frustumPlanes[i] ?? 0;
-      }
-    }
+    packGrassGpuRingParams(params, indexCounts, this.ring, this.paramScratch);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
 
     const encoder = this.device.createCommandEncoder({ label: "grass ring compute encoder" });

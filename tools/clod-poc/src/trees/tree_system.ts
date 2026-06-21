@@ -67,17 +67,20 @@ export class TreeSystem {
   private readonly scale = new THREE.Vector3();
   private readonly rotation = new THREE.Quaternion();
   private readonly translation = new THREE.Vector3();
+  private readonly upAxis = new THREE.Vector3(0, 1, 0);
   private settings: TreeSettings;
   private geometries: TreeGeometryMap;
   private readonly regularMaterial = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.95,
     metalness: 0,
+    side: THREE.DoubleSide,
+    transparent: false,
   });
   private readonly debugMaterials: Record<TreeLod, THREE.MeshBasicMaterial> = {
-    near: new THREE.MeshBasicMaterial({ color: LOD_COLORS.near }),
-    mid: new THREE.MeshBasicMaterial({ color: LOD_COLORS.mid }),
-    far: new THREE.MeshBasicMaterial({ color: LOD_COLORS.far }),
+    near: new THREE.MeshBasicMaterial({ color: LOD_COLORS.near, side: THREE.DoubleSide, transparent: false }),
+    mid: new THREE.MeshBasicMaterial({ color: LOD_COLORS.mid, side: THREE.DoubleSide, transparent: false }),
+    far: new THREE.MeshBasicMaterial({ color: LOD_COLORS.far, side: THREE.DoubleSide, transparent: false }),
   };
   private patches: TreePatch[] = [];
   private patchesDirty = true;
@@ -224,7 +227,8 @@ export class TreeSystem {
         );
         mesh.name = `trees-${node.id}-${species}-${lod}`;
         mesh.count = 0;
-        mesh.frustumCulled = true;
+        // Instance matrices are world-space while InstancedMesh bounds remain at origin; disable culling until per-patch bounds exist.
+        mesh.frustumCulled = false;
         mesh.castShadow = this.settings.render.shadowsNearOnly && lod === "near";
         mesh.receiveShadow = false;
         meshes[species][lod] = mesh;
@@ -268,7 +272,7 @@ export class TreeSystem {
         const index = counts.get(mesh) ?? 0;
         if (index >= mesh.instanceMatrix.count) continue;
         this.translation.set(instance.position[0], instance.position[1], instance.position[2]);
-        this.rotation.setFromAxisAngle(new THREE.Vector3(0, 1, 0), instance.rotationY);
+        this.rotation.setFromAxisAngle(this.upAxis, instance.rotationY);
         this.scale.setScalar(instance.scale);
         this.matrix.compose(this.translation, this.rotation, this.scale);
         mesh.setMatrixAt(index, this.matrix);

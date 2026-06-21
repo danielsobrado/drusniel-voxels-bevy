@@ -14,6 +14,8 @@ struct Params {
   settings_b: vec4<f32>,
   counts_a: vec4<u32>,
   counts_b: vec4<u32>,
+  density_a: vec4<f32>,
+  density_b: vec4<f32>,
   planes: array<vec4<f32>, 6>,
 };
 
@@ -97,9 +99,20 @@ fn grass_mask(height: f32, normal_y: f32, distance: f32) -> f32 {
 }
 
 fn grass_thin(distance: f32) -> f32 {
-  let base = pow(min(1.0, 58.0 / (max(1.0, distance) + 42.0)), 1.15);
-  let far = pow(120.0 / max(distance, 120.0), 1.6);
-  return clamp(base * far, 0.02, 1.0);
+  let near_distance = params.density_a.x;
+  let mid_distance = max(near_distance + 0.001, params.density_a.y);
+  let far_end = max(mid_distance + 0.001, params.density_a.z);
+  let mid_fraction = clamp(params.density_a.w, 0.0, 1.0);
+  let far_density = clamp(params.density_b.x, 0.0, 1.0);
+  if (distance <= near_distance) {
+    return 1.0;
+  }
+  if (distance <= mid_distance) {
+    let t = smoothstep(near_distance, mid_distance, distance);
+    return mix(1.0, mid_fraction, t);
+  }
+  let t = smoothstep(mid_distance, far_end, distance);
+  return clamp(mix(mid_fraction, far_density, t), far_density, 1.0);
 }
 
 fn edge_fade(wpos: vec2<f32>, height: f32, normal_y: f32) -> f32 {
@@ -132,15 +145,16 @@ fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, norm
   }
 
   let seed = params.counts_b.z;
+  let max_width_mul = max(1.0, params.settings_b.w);
   var height_mul = 1.0;
-  var width_mul = clamp(1.0 / sqrt(thin), 1.0, 4.0);
+  var width_mul = clamp(1.0 / sqrt(thin), 1.0, max_width_mul);
   if (tier == TIER_MID) {
     height_mul = 1.35;
   } else if (tier == TIER_FAR) {
     height_mul = 1.75;
   } else if (tier == TIER_SUPER) {
     height_mul = 2.25;
-    width_mul = min(4.8, width_mul * 1.35);
+    width_mul = min(max_width_mul, width_mul * 1.35);
   }
 
   let weights = material_weights(height, normal.y);

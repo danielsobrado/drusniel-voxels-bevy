@@ -13,17 +13,50 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($RepoRoot)) {
 $PocDir = Join-Path $RepoRoot "tools\clod-poc"
 $PackageJson = Join-Path $PocDir "package.json"
 $NodeModules = Join-Path $PocDir "node_modules"
-$Url = "http://127.0.0.1:5173/drusniel-voxels-bevy/"
+$Port = 5180
+$Url = "http://127.0.0.1:$Port/"
+$NpmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if (-not $NpmCommand) {
+    $NpmCommand = Get-Command npm -ErrorAction Stop
+}
+$Npm = $NpmCommand.Source
 
 if (-not (Test-Path -LiteralPath $PackageJson -PathType Leaf)) {
     throw "Could not find tools/clod-poc/package.json from $RepoRoot"
+}
+
+function Test-PortInUse {
+    param([int]$Port)
+    try {
+        $Client = [System.Net.Sockets.TcpClient]::new()
+        $Async = $Client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        $Ready = $Async.AsyncWaitHandle.WaitOne(150)
+        if ($Ready) {
+            $Client.EndConnect($Async)
+            return $true
+        }
+        return $false
+    } catch {
+        return $false
+    } finally {
+        if ($Client) { $Client.Dispose() }
+    }
+}
+
+function Stop-ProcessTree {
+    param([int]$ProcessId)
+    $Children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue
+    foreach ($Child in $Children) {
+        Stop-ProcessTree -ProcessId $Child.ProcessId
+    }
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
 }
 
 Push-Location -LiteralPath $PocDir
 try {
     if (-not (Test-Path -LiteralPath $NodeModules -PathType Container)) {
         Write-Host "Installing CLOD PoC dependencies..."
-        & rtk npm install
+        & $Npm install
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }
@@ -31,15 +64,19 @@ try {
 
     if (-not $SkipBuild) {
         Write-Host "Building CLOD PoC..."
-        & rtk npm run build
+        & $Npm run build
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }
     }
 
+    if (Test-PortInUse -Port $Port) {
+        throw "Port $Port is already in use. Stop the existing CLOD PoC server or free the port before launching."
+    }
+
     Write-Host "Starting CLOD PoC at $Url"
-    $Server = Start-Process -FilePath "rtk" -ArgumentList @(
-        "npm", "run", "dev", "--", "--host", "127.0.0.1"
+    $Server = Start-Process -FilePath $Npm -ArgumentList @(
+        "run", "dev", "--", "--host", "127.0.0.1", "--port", "$Port", "--strictPort"
     ) -WorkingDirectory $PocDir -NoNewWindow -PassThru
 
     try {
@@ -65,9 +102,12 @@ try {
         }
         Write-Host "Press Ctrl+C to stop the server."
         Wait-Process -Id $Server.Id
+        if ($Server.ExitCode -ne 0) {
+            exit $Server.ExitCode
+        }
     } finally {
         if (-not $Server.HasExited) {
-            Stop-Process -Id $Server.Id -Force -ErrorAction SilentlyContinue
+            Stop-ProcessTree -ProcessId $Server.Id
         }
     }
 } finally {
