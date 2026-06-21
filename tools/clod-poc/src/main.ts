@@ -52,7 +52,7 @@ import {
 import { parseStoneConfig, STONE_CLASSES, type StoneClass } from "./stones/stone_config.js";
 import { StoneSystem, type StoneLighting, type StoneStats } from "./stones/stone_instances.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "./stones/stone_validation.js";
-import { parseTreeConfig, TreeSystem, type TreeStats } from "./trees/index.js";
+import { formatTreeInfoLine, parseTreeConfig, TreeSystem, type TreeStats } from "./trees/index.js";
 import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
@@ -516,6 +516,7 @@ async function main() {
   const searchParams = new URLSearchParams(location.search);
   const queryScene = searchParams.get("scene");
   const queryGrassPerfScene = queryScene === "grass-perf";
+  const queryTreePerfScene = queryScene === "trees-perf" || searchParams.get("treesPerf") === "1";
   const queryPerfMode = searchParams.get("clodPerf") === "1";
   const queryWebGpuSelection = searchParams.get("webgpuSelection") === "1";
   // CPU/GPU error_px parity is a full per-node sweep; opt-in keeps it from hitching the
@@ -577,7 +578,7 @@ async function main() {
   // World size via ?world=. 8x8 gives full LOD0..LOD3 depth for A3 / delta-2-3
   // inspection; 16/32 keep the same max LOD with more roots and can freeze the tab longer.
   const requested = Number(searchParams.get("world"));
-  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : queryGrassPerfScene ? 16 : 4);
+  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : queryGrassPerfScene || queryTreePerfScene ? 16 : 4);
   let buildStatus = "preparing";
   const updateBuildOverlay = () => updateClodOverlay({
     worldSize: WORLD,
@@ -733,6 +734,11 @@ async function main() {
   } else if (queryGrassPerfScene) {
     controls.target.set(mid, 20, mid);
     camera.position.set(mid - worldCells * 0.24, 46, mid + worldCells * 0.34);
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (queryTreePerfScene) {
+    controls.target.set(mid, 24, mid);
+    camera.position.set(mid - worldCells * 0.28, 58, mid + worldCells * 0.38);
     camera.lookAt(controls.target);
     controls.update();
   }
@@ -1111,6 +1117,9 @@ async function main() {
     stoneClassSummary: "0/0/0",
     stoneVisible: 0,
     treesEnabled: treeConfig.enabled,
+    treeDistance: treeConfig.distanceM,
+    treeMaxInstances: treeConfig.maxInstances,
+    treeDebugColorByLod: treeConfig.render.debugColorByLod,
     treeWindEnabled: treeConfig.wind.enabled,
     treeWindStrength: treeConfig.wind.strength,
     treeWindSpeed: treeConfig.wind.speed,
@@ -1151,6 +1160,18 @@ async function main() {
     state.grassMaxBlades = grassConfig.maxBlades;
     state.stonesEnabled = false;
     state.treesEnabled = false;
+    state.postProcessEnabled = false;
+    state.postProcessDebugMode = "off";
+    state.showBounds = false;
+    state.showSeamPoints = false;
+    state.showCrossLodBorders = false;
+    state.showNodeLabels = false;
+    state.showLockedBorderVertices = false;
+  }
+  if (queryTreePerfScene) {
+    state.grassEnabled = false;
+    state.stonesEnabled = false;
+    state.treesEnabled = true;
     state.postProcessEnabled = false;
     state.postProcessDebugMode = "off";
     state.showBounds = false;
@@ -1765,6 +1786,8 @@ async function main() {
   const makeTreeSettings = () => ({
     ...treeConfig,
     enabled: state.treesEnabled,
+    distanceM: state.treeDistance,
+    maxInstances: state.treeMaxInstances,
     wind: {
       ...treeConfig.wind,
       enabled: state.treeWindEnabled,
@@ -1774,7 +1797,10 @@ async function main() {
       trunkSwayStrength: state.treeTrunkSwayStrength,
       leafFlutterStrength: state.treeLeafFlutterStrength,
     },
-    render: { ...treeConfig.render },
+    render: {
+      ...treeConfig.render,
+      debugColorByLod: state.treeDebugColorByLod,
+    },
   });
   const treePageNodes = allNodes.filter((node) => node.level === 0);
   const treePageSignaturesBefore = pageMeshSignatures(treePageNodes);
@@ -1915,8 +1941,9 @@ async function main() {
     const playerLine = interaction.mode === "playing"
       ? `player: grounded=${player.grounded}  physics p95=${player.physicsP95Ms().toFixed(2)} ms  collider pages=${player.lastPagesTested}`
       : `view: ${interaction.mode}`;
+    const sceneLabel = queryGrassPerfScene ? "  GRASS PERF" : queryTreePerfScene ? "  TREE PERF" : "";
     info.textContent =
-      `Drusniel Voxels Web — ${WORLD}x${WORLD} pages${queryGrassPerfScene ? "  GRASS PERF" : ""}\n` +
+      `Drusniel Voxels Web — ${WORLD}x${WORLD} pages${sceneLabel}\n` +
       `cut: ${lastRenderedCount} nodes  (${lastLevelSummary})\n` +
       `tris rendered: ${lastTriCount.toLocaleString()}   2:1 forced splits: ${lastForced}   ` +
       `bubble forced splits: ${lastNearFieldForced}   xLOD borders: ${lastCrossLodAdjacencyCount}\n` +
@@ -1936,6 +1963,7 @@ async function main() {
           ` gpu-n/m/f/s=${grassStats.gpuRingVisibleNear}/${grassStats.gpuRingVisibleMid}/${grassStats.gpuRingVisibleFar}/${grassStats.gpuRingVisibleSuper}` +
           ` gpu-dispatch=${grassStats.gpuRingDispatchMs === null ? "-" : grassStats.gpuRingDispatchMs.toFixed(2)}ms`
         : grassStats ? ` gpu-grass=${grassStats.gpuRingStatus}` : ""}\n` +
+      `${formatTreeInfoLine(state.treesEnabled, state.treeTotal, treeStats)}\n` +
       `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
       `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
       `${lastArchiveSummary ? `${lastArchiveSummary}\n` : ""}` +
@@ -2602,7 +2630,23 @@ async function main() {
     treeVisiblePatchesController?.updateDisplay();
     treeLodSummaryController?.updateDisplay();
   };
-  const updateTreeWindSettings = () => treeSystem?.updateSettings(makeTreeSettings());
+  const updateTreeWindSettings = () => treeSystem?.updateSettings({
+    wind: {
+      ...treeConfig.wind,
+      enabled: state.treeWindEnabled,
+      strength: state.treeWindStrength,
+      speed: state.treeWindSpeed,
+      gustStrength: state.treeGustStrength,
+      trunkSwayStrength: state.treeTrunkSwayStrength,
+      leafFlutterStrength: state.treeLeafFlutterStrength,
+    },
+  });
+  const updateTreeRenderSettings = () => treeSystem?.updateSettings({
+    render: {
+      ...treeConfig.render,
+      debugColorByLod: state.treeDebugColorByLod,
+    },
+  });
   const treeActions = {
     rebuild: () => {
       treeSystem?.updateSettings(makeTreeSettings());
@@ -2617,6 +2661,9 @@ async function main() {
     refreshTreeStats();
     updateInfo();
   });
+  treeFolder.add(state, "treeDistance", 0, 600, 5).name("distance").onFinishChange(treeActions.rebuild);
+  treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild);
+  treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(updateTreeRenderSettings);
   treeFolder.add(state, "treeWindEnabled").name("wind enabled").onChange(updateTreeWindSettings);
   treeFolder.add(state, "treeWindStrength", 0, 1, 0.01).name("wind strength").onChange(updateTreeWindSettings);
   treeFolder.add(state, "treeWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateTreeWindSettings);
@@ -3700,6 +3747,9 @@ async function main() {
     grassMaxBlades: state.grassMaxBlades,
     grassSeed: state.grassSeed,
     treesEnabled: state.treesEnabled,
+    treeDistance: state.treeDistance,
+    treeMaxInstances: state.treeMaxInstances,
+    treeDebugColorByLod: state.treeDebugColorByLod,
     treeWindEnabled: state.treeWindEnabled,
     treeWindStrength: state.treeWindStrength,
     treeWindSpeed: state.treeWindSpeed,

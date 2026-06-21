@@ -3,10 +3,13 @@ import * as THREE from "three";
 import type { ClodPageNode, PageMesh } from "../types.js";
 import type { PageFootprint } from "../types.js";
 import {
+  cloneTreeSettings,
   DEFAULT_TREE_SETTINGS,
+  DEFAULT_TREE_WIND_SETTINGS,
   createTreeGeometryMap,
   createTreeMaterialHandle,
   disposeTreeGeometryMap,
+  formatTreeInfoLine,
   generateTreeInstances,
   injectTreeWindShader,
   parseTreeConfig,
@@ -55,14 +58,17 @@ function pageMesh(): PageMesh {
   };
 }
 
-function pageNode(mesh: PageMesh = pageMesh()): ClodPageNode {
+function pageNode(mesh: PageMesh = pageMesh(), nodeFootprint: PageFootprint = footprint): ClodPageNode {
   return {
     id: "L0:0,0",
     level: 0,
     children: [],
     mesh,
-    footprint,
-    bounds: { center: [16, 24, 16], radius: Math.hypot(32, 32) * 0.5 },
+    footprint: nodeFootprint,
+    bounds: {
+      center: [(nodeFootprint.minX + nodeFootprint.maxX) * 0.5, 24, (nodeFootprint.minZ + nodeFootprint.maxZ) * 0.5],
+      radius: Math.hypot(nodeFootprint.maxX - nodeFootprint.minX, nodeFootprint.maxZ - nodeFootprint.minZ) * 0.5,
+    },
     errorWorld: 0,
     lowBenefit: false,
   };
@@ -85,7 +91,28 @@ function instancedTreeMeshes(scene: THREE.Scene): THREE.InstancedMesh[] {
   return meshes;
 }
 
+function treeLodForPosition(position: readonly [number, number, number], center: THREE.Vector3, treeSettings: TreeSettings): string {
+  const distance = Math.hypot(center.x - position[0], center.z - position[2]);
+  if (distance <= treeSettings.distanceM * treeSettings.lod.nearFraction) return "near";
+  if (distance <= treeSettings.distanceM * treeSettings.lod.midFraction) return "mid";
+  return "far";
+}
+
 describe("tree placement", () => {
+  it("keeps default tree wind settings independent from the shared wind defaults", () => {
+    expect(DEFAULT_TREE_SETTINGS.wind).not.toBe(DEFAULT_TREE_WIND_SETTINGS);
+    expect(DEFAULT_TREE_SETTINGS.wind.direction).not.toBe(DEFAULT_TREE_WIND_SETTINGS.direction);
+    expect(DEFAULT_TREE_SETTINGS.wind).toEqual(DEFAULT_TREE_WIND_SETTINGS);
+  });
+
+  it("deep-clones tree wind direction", () => {
+    const cloned = cloneTreeSettings();
+    expect(cloned.wind).not.toBe(DEFAULT_TREE_SETTINGS.wind);
+    expect(cloned.wind.direction).not.toBe(DEFAULT_TREE_SETTINGS.wind.direction);
+    cloned.wind.direction[0] = -1;
+    expect(DEFAULT_TREE_SETTINGS.wind.direction[0]).toBe(DEFAULT_TREE_WIND_SETTINGS.direction[0]);
+  });
+
   it("parses config/trees.yaml to the typed defaults", () => {
     expect(parseTreeConfig(treeYamlText, null)).toEqual(DEFAULT_TREE_SETTINGS);
   });
@@ -314,7 +341,44 @@ void main() {
 });
 
 describe("TreeSystem", () => {
-  it("uses double-sided far card materials and disables origin-based frustum culling", () => {
+  it("uses patch-local instance matrices and keeps tree counts stable", () => {
+    const scene = new THREE.Scene();
+    const localSettings = { ...settings, maxInstances: 100, distanceM: 80 };
+    const node = pageNode();
+    const system = new TreeSystem({
+      scene,
+      nodes: [node],
+      worldCells: 32,
+      settings: localSettings,
+      sampler,
+    });
+    try {
+      const expectedTrees = generateTreeInstances(footprint, localSettings, localSettings.maxInstances, undefined, sampler, 32);
+      expect(expectedTrees.length).toBeGreaterThan(0);
+      const patchGroup = scene.getObjectByName("tree-patch-L0:0,0");
+      expect(patchGroup).toBeDefined();
+      expect(patchGroup?.position.x).toBeCloseTo(16);
+      expect(patchGroup?.position.z).toBeCloseTo(16);
+
+      const firstTree = expectedTrees[0];
+      const lod = treeLodForPosition(firstTree.position, new THREE.Vector3(16, 0, 16), localSettings);
+      const mesh = instancedTreeMeshes(scene).find((candidate) =>
+        candidate.name === `trees-L0:0,0-${firstTree.species}-${lod}`,
+      );
+      expect(mesh).toBeDefined();
+      const matrix = new THREE.Matrix4();
+      mesh!.getMatrixAt(0, matrix);
+      const translation = new THREE.Vector3().setFromMatrixPosition(matrix);
+      expect(translation.x).toBeCloseTo(firstTree.position[0] - 16);
+      expect(translation.y).toBeCloseTo(firstTree.position[1]);
+      expect(translation.z).toBeCloseTo(firstTree.position[2] - 16);
+      expect(system.getStats().totalTrees).toBe(expectedTrees.length);
+    } finally {
+      system.dispose();
+    }
+  });
+
+  it("uses double-sided far card materials and valid instanced frustum bounds", () => {
     const scene = new THREE.Scene();
     const system = new TreeSystem({
       scene,
@@ -326,7 +390,7 @@ describe("TreeSystem", () => {
     try {
       const meshes = instancedTreeMeshes(scene);
       expect(meshes).toHaveLength(TREE_SPECIES.length * TREE_LODS.length);
-      expect(meshes.every((mesh) => mesh.frustumCulled === false)).toBe(true);
+      expect(meshes.every((mesh) => mesh.frustumCulled === true)).toBe(true);
 
       const farMeshes = meshes.filter((mesh) => mesh.name.endsWith("-far"));
       expect(farMeshes).toHaveLength(TREE_SPECIES.length);
@@ -335,6 +399,46 @@ describe("TreeSystem", () => {
         expect(material.side).toBe(THREE.DoubleSide);
         expect(material.transparent).toBe(false);
       }
+
+      const activeMeshes = meshes.filter((mesh) => mesh.count > 0);
+      expect(activeMeshes.length).toBeGreaterThan(0);
+      for (const mesh of activeMeshes) {
+        expect(mesh.boundingSphere).not.toBeNull();
+        expect(mesh.boundingSphere!.radius).toBeGreaterThan(0);
+        expect(Number.isFinite(mesh.boundingSphere!.radius)).toBe(true);
+        expect(mesh.boundingBox).not.toBeNull();
+        expect(mesh.boundingBox!.isEmpty()).toBe(false);
+      }
+    } finally {
+      system.dispose();
+    }
+  });
+
+  it("keeps bounds finite and local to an offset tree patch", () => {
+    const scene = new THREE.Scene();
+    const offsetFootprint: PageFootprint = { minX: 1000, minZ: 2000, maxX: 1032, maxZ: 2032 };
+    const system = new TreeSystem({
+      scene,
+      nodes: [pageNode(pageMesh(), offsetFootprint)],
+      worldCells: 4096,
+      settings: { ...settings, maxInstances: 100, distanceM: 80 },
+      sampler,
+    });
+    try {
+      system.update(0, new THREE.Vector3(1016, 0, 2016));
+      const patchGroup = scene.getObjectByName("tree-patch-L0:0,0");
+      expect(patchGroup?.position.x).toBeCloseTo(1016);
+      expect(patchGroup?.position.z).toBeCloseTo(2016);
+
+      const mesh = instancedTreeMeshes(scene).find((candidate) => candidate.count > 0);
+      expect(mesh).toBeDefined();
+      expect(mesh!.boundingSphere).not.toBeNull();
+      expect(mesh!.boundingSphere!.radius).toBeGreaterThan(0);
+      expect(mesh!.boundingSphere!.radius).toBeLessThan(80);
+      expect(Math.abs(mesh!.boundingSphere!.center.x)).toBeLessThan(32);
+      expect(Math.abs(mesh!.boundingSphere!.center.z)).toBeLessThan(32);
+      expect(mesh!.boundingBox).not.toBeNull();
+      expect(mesh!.boundingBox!.isEmpty()).toBe(false);
     } finally {
       system.dispose();
     }
@@ -384,6 +488,24 @@ describe("TreeSystem", () => {
     } finally {
       system.dispose();
     }
+  });
+
+  it("formats tree stats for the main HUD line", () => {
+    expect(formatTreeInfoLine(true, 1234, {
+      totalTrees: 1234,
+      patches: 9,
+      visiblePatches: 4,
+      culledPatches: 5,
+      nearTrees: 11,
+      midTrees: 22,
+      farTrees: 33,
+      generatedCandidates: 1234,
+      acceptedCandidates: 1234,
+      rejectedSlope: 0,
+      rejectedHeight: 0,
+      rejectedMaterial: 0,
+    })).toBe("trees: enabled 1,234 trees patches=4/9 lod n/m/f=11/22/33");
+    expect(formatTreeInfoLine(false, 0, null)).toBe("trees: disabled 0 trees");
   });
 });
 

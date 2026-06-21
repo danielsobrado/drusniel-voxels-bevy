@@ -141,7 +141,10 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
     midFraction: 0.70,
     farFraction: 1.0,
   },
-  wind: DEFAULT_TREE_WIND_SETTINGS,
+  wind: {
+    ...DEFAULT_TREE_WIND_SETTINGS,
+    direction: [...DEFAULT_TREE_WIND_SETTINGS.direction],
+  },
   species: {
     oak: {
       enabled: true,
