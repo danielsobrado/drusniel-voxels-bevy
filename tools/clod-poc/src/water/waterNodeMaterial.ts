@@ -55,6 +55,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uDebugMode = uniform(u.uDebugMode.value) as TslNode;
   const uCameraPos = uniform(u.uCameraPos.value) as TslNode;
   const uSunDir = uniform(u.uSunDir.value) as TslNode;
+  const uWorldBounds = uniform(u.uWorldBounds.value) as TslNode;
 
   const aTerrainY = attribute("aTerrainY", "float") as TslNode;
   const aBodyMask = attribute("aBodyMask", "float") as TslNode;
@@ -66,13 +67,26 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const fragment = Fn(() => {
     const px: TslNode = worldPos.x;
     const pz: TslNode = worldPos.z;
+    const outsideWorld: TslNode = px.lessThan(float(0))
+      .or(px.greaterThan(uWorldBounds.x))
+      .or(pz.lessThan(float(0)))
+      .or(pz.greaterThan(uWorldBounds.y));
     const insideInner: TslNode = px.greaterThan(uInnerRect.x)
       .and(px.lessThan(uInnerRect.z))
       .and(pz.greaterThan(uInnerRect.y))
       .and(pz.lessThan(uInnerRect.w));
     const depth: TslNode = worldPos.y.sub(aTerrainY);
-    // Discard clipmap-hole pixels and dry vertices in one bool node.
-    or(insideInner, depth.lessThanEqual(float(0))).discard();
+    // Discard clipmap-hole pixels, dry vertices, outside world, and outside body mask.
+    or(
+      outsideWorld,
+      or(
+        insideInner,
+        or(
+          depth.lessThanEqual(float(0)),
+          aBodyMask.lessThanEqual(float(0))
+        )
+      )
+    ).discard();
 
     const depthNorm: TslNode = clamp(depth.div(uMaxDepth), 0.0, 1.0);
     const flowDir: TslNode = vec3(aFlow.x, 0.0, aFlow.y);

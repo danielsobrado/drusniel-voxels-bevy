@@ -20,6 +20,7 @@ export interface WaterMaterialParams {
   debugMode: WaterDebugModeId;
   sunDirection: THREE.Vector3;
   cameraPosition: THREE.Vector3;
+  worldBounds: { cellsX: number; cellsZ: number };
 }
 
 export interface WaterMaterialHandle {
@@ -96,6 +97,7 @@ const WATER_FRAG = /* glsl */ `
   uniform int uDebugMode;
   uniform vec3 uCameraPos;
   uniform vec3 uSunDir;
+  uniform vec2 uWorldBounds;
   varying vec3 vWorldPos;
   varying float vTerrainY;
   varying float vBodyMask;
@@ -106,8 +108,15 @@ const WATER_FRAG = /* glsl */ `
 
   void main() {
     vec3 worldPos = vWorldPos;
+    if (worldPos.x < 0.0 || worldPos.x > uWorldBounds.x ||
+        worldPos.z < 0.0 || worldPos.z > uWorldBounds.y) {
+      discard;
+    }
     if (worldPos.x > uInnerRect.x && worldPos.x < uInnerRect.z &&
         worldPos.z > uInnerRect.y && worldPos.z < uInnerRect.w) {
+      discard;
+    }
+    if (vBodyMask <= 0.0) {
       discard;
     }
     float depth = worldPos.y - vTerrainY;
@@ -166,6 +175,7 @@ export interface WaterUniforms {
   uDebugMode: { value: number };
   uCameraPos: { value: THREE.Vector3 };
   uSunDir: { value: THREE.Vector3 };
+  uWorldBounds: { value: THREE.Vector2 };
 }
 
 export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
@@ -186,6 +196,7 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uDebugMode: { value: params.debugMode },
     uCameraPos: { value: params.cameraPosition.clone() },
     uSunDir: { value: params.sunDirection.clone().normalize() },
+    uWorldBounds: { value: new THREE.Vector2(params.worldBounds.cellsX, params.worldBounds.cellsZ) },
   };
 }
 

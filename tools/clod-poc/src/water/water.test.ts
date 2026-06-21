@@ -137,6 +137,7 @@ describe("WaterClipmap", () => {
       createMaterial: (params) => createWaterShaderMaterial(params),
       sunDirection: new THREE.Vector3(0.4, 0.8, 0.3),
       cameraPosition: new THREE.Vector3(0, 50, 0),
+      worldBounds: { cellsX: 128, cellsZ: 128 },
     });
     expect(clipmap.levelCount).toBe(cfg.cellSizes.length);
     const root = scene.children.find((child) => child.name === "water-clipmap-root");
@@ -172,6 +173,7 @@ describe("WaterClipmap", () => {
       createMaterial: (params) => createWaterShaderMaterial(params),
       sunDirection: new THREE.Vector3(0.4, 0.8, 0.3),
       cameraPosition: new THREE.Vector3(0, 50, 0),
+      worldBounds: { cellsX: 8, cellsZ: 8 },
     });
     // Drive several frames across the lake so the clipmap fills vertices.
     for (let i = 0; i < 5; i++) {
@@ -203,6 +205,7 @@ describe("WaterClipmap", () => {
       createMaterial: (params) => createWaterShaderMaterial(params),
       sunDirection: new THREE.Vector3(0.4, 0.8, 0.3),
       cameraPosition: new THREE.Vector3(0, 50, 0),
+      worldBounds: { cellsX: 128, cellsZ: 128 },
     });
     clipmap.update(0.016, new THREE.Vector3(0, 50, 0));
 
@@ -263,5 +266,55 @@ describe("parseWaterConfig empty arrays", () => {
     const cfg = parseWaterConfig(yaml, null);
     expect(cfg.fakeBodies.lakes).toHaveLength(1);
     expect(cfg.fakeBodies.rivers).toHaveLength(0);
+  });
+});
+
+describe("Water world-bounds and body-mask clipping constraints", () => {
+  it("satisfies the clipping, dry, and wet point assertions", () => {
+    const cfg = cloneWaterConfig(parseWaterConfig(waterYamlText, null));
+    const field = new WaterField(cfg, sampler);
+
+    // 1. A dry point outside any body -> bodyMask = 0 and depth <= 0
+    const dryResult = field.sample(1000, 1000);
+    expect(dryResult.bodyMask).toBe(0);
+    expect(dryResult.depth).toBeLessThanOrEqual(0);
+
+    // 2. A wet point inside a configured lake -> bodyMask > 0 and depth > 0
+    const lake = cfg.fakeBodies.lakes[0];
+    const wetResult = field.sample(lake.center[0], lake.center[1]);
+    expect(wetResult.bodyMask).toBeGreaterThan(0);
+    expect(wetResult.depth).toBeGreaterThan(0);
+
+    // 3. A point outside world bounds -> not renderable (CPU refill sets attributes to 0/sentinel)
+    const scene = new THREE.Scene();
+    const clipmap = new WaterClipmap({
+      scene,
+      config: cfg,
+      field,
+      createMaterial: (params) => createWaterShaderMaterial(params),
+      sunDirection: new THREE.Vector3(0.4, 0.8, 0.3),
+      cameraPosition: new THREE.Vector3(0, 50, 0),
+      worldBounds: { cellsX: 100, cellsZ: 100 },
+    });
+    clipmap.update(0.016, new THREE.Vector3(0, 50, 0));
+    const root = scene.children.find((c) => c.name === "water-clipmap-root")!;
+    const mesh = root.children[0] as THREE.Mesh;
+    const pos = (mesh.geometry.getAttribute("position") as THREE.BufferAttribute).array;
+    const bodyMaskAttr = (mesh.geometry.getAttribute("aBodyMask") as THREE.BufferAttribute).array;
+    const terrainYAttr = (mesh.geometry.getAttribute("aTerrainY") as THREE.BufferAttribute).array;
+
+    let countOutside = 0;
+    for (let i = 0; i < pos.length; i += 3) {
+      const wx = pos[i];
+      const wz = pos[i + 2];
+      const vi = i / 3;
+      if (wx < 0 || wx > 100 || wz < 0 || wz > 100) {
+        countOutside++;
+        expect(bodyMaskAttr[vi]).toBe(0);
+        expect(terrainYAttr[vi]).toBe(0);
+      }
+    }
+    expect(countOutside).toBeGreaterThan(0);
+    clipmap.dispose();
   });
 });

@@ -31,6 +31,7 @@ export interface WaterClipmapOptions {
   createMaterial: (params: WaterMaterialParams) => WaterMaterialHandle;
   sunDirection: THREE.Vector3;
   cameraPosition: THREE.Vector3;
+  worldBounds: { cellsX: number; cellsZ: number };
 }
 
 const DEGENERATE_INNER: WaterRect = { minX: 1e30, minZ: 1e30, maxX: -1e30, maxZ: -1e30 };
@@ -43,6 +44,7 @@ class WaterLevel {
   private readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
   private readonly handle: WaterMaterialHandle;
   private readonly field: WaterField;
+  private readonly worldBounds: { cellsX: number; cellsZ: number };
   private readonly positions: Float32Array;
   private readonly terrainY: Float32Array;
   private readonly bodyMask: Float32Array;
@@ -60,6 +62,7 @@ class WaterLevel {
     cellsPerLevel: number,
     field: WaterField,
     handle: WaterMaterialHandle,
+    worldBounds: { cellsX: number; cellsZ: number },
   ) {
     this.index = index;
     this.cellSize = cellSize;
@@ -67,6 +70,7 @@ class WaterLevel {
     this.cellsPerLevel = cellsPerLevel;
     this.field = field;
     this.handle = handle;
+    this.worldBounds = worldBounds;
 
     const vertsPerEdge = cellsPerLevel + 1;
     const vertexCount = vertsPerEdge * vertsPerEdge;
@@ -116,7 +120,7 @@ class WaterLevel {
   }
 
   private refillVertices(originX: number, originZ: number, half: number): void {
-    const { cellsPerLevel, cellSize, field, positions, terrainY, bodyMask, flow } = this;
+    const { cellsPerLevel, cellSize, field, positions, terrainY, bodyMask, flow, worldBounds } = this;
     const vertsPerEdge = cellsPerLevel + 1;
     let vi = 0;
     let fi = 0;
@@ -124,15 +128,27 @@ class WaterLevel {
       const worldZ = originZ + iz * cellSize - half;
       for (let ix = 0; ix < vertsPerEdge; ix++) {
         const worldX = originX + ix * cellSize - half;
-        const sample = field.sample(worldX, worldZ);
-        positions[vi] = worldX;
-        positions[vi + 1] = sample.waterY;
-        positions[vi + 2] = worldZ;
-        terrainY[vi / 3] = sample.terrainY;
-        bodyMask[vi / 3] = sample.bodyMask;
-        flow[fi] = sample.flow.x;
-        flow[fi + 1] = sample.flow.z;
-        flow[fi + 2] = sample.flow.speed;
+        const inBounds = worldX >= 0 && worldX <= worldBounds.cellsX && worldZ >= 0 && worldZ <= worldBounds.cellsZ;
+        if (inBounds) {
+          const sample = field.sample(worldX, worldZ);
+          positions[vi] = worldX;
+          positions[vi + 1] = sample.waterY;
+          positions[vi + 2] = worldZ;
+          terrainY[vi / 3] = sample.terrainY;
+          bodyMask[vi / 3] = sample.bodyMask;
+          flow[fi] = sample.flow.x;
+          flow[fi + 1] = sample.flow.z;
+          flow[fi + 2] = sample.flow.speed;
+        } else {
+          positions[vi] = worldX;
+          positions[vi + 1] = 0;
+          positions[vi + 2] = worldZ;
+          terrainY[vi / 3] = 0;
+          bodyMask[vi / 3] = 0;
+          flow[fi] = 0;
+          flow[fi + 1] = 0;
+          flow[fi + 2] = 0;
+        }
         vi += 3;
         fi += 3;
       }
@@ -192,6 +208,7 @@ export class WaterClipmap {
         debugMode: this.debugMode,
         sunDirection: this.sunDirection,
         cameraPosition: this.cameraPosition,
+        worldBounds: opts.worldBounds,
       });
       const level = new WaterLevel(
         index,
@@ -200,6 +217,7 @@ export class WaterClipmap {
         opts.config.cellsPerLevel,
         this.field,
         handle,
+        opts.worldBounds,
       );
       handle.setDebugMode(this.debugMode);
       handle.setInnerRect(DEGENERATE_INNER.minX, DEGENERATE_INNER.minZ, DEGENERATE_INNER.maxX, DEGENERATE_INNER.maxZ);

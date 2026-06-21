@@ -1879,6 +1879,7 @@ async function main() {
     createMaterial: waterMaterialFactory,
     sunDirection: currentLighting().sunDirection.clone(),
     cameraPosition: camera.position,
+    worldBounds: { cellsX: worldCells, cellsZ: worldCells },
   });
   waterClipmap.setVisible(state.waterEnabled);
   assertPageMeshSignaturesUnchanged(waterPageSignaturesBefore, pageMeshSignatures(waterPageNodes));
@@ -4233,10 +4234,14 @@ async function main() {
       waterDevLogged = true;
       const rect = waterClipmap.getLevelRect(0);
       console.log("[DEV LOG] Water System Initialized:", {
-        enabled: waterConfig.enabled,
-        lakeCenters: waterConfig.fakeBodies.lakes.map((l) => l.center),
-        riverPointCount: waterConfig.fakeBodies.rivers.reduce((sum, r) => sum + r.points.length, 0),
-        clipmapLevelCount: waterClipmap.levelCount,
+        worldBounds: { cellsX: worldCells, cellsZ: worldCells },
+        waterConfigSummary: {
+          enabled: waterConfig.enabled,
+          lakesCount: waterConfig.fakeBodies.lakes.length,
+          riversCount: waterConfig.fakeBodies.rivers.length,
+          cellSizes: waterConfig.cellSizes,
+          snapCells: waterConfig.snapCells,
+        },
         firstLevelRect: rect ? { minX: rect.minX, minZ: rect.minZ, maxX: rect.maxX, maxZ: rect.maxZ } : null,
       });
     }
