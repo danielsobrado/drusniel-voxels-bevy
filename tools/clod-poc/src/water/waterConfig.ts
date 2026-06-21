@@ -68,7 +68,7 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
   foamColor: [0.82, 0.88, 0.84],
   alpha: 0.82,
   fresnelPower: 5.0,
-  rippleAmp: 0.018,
+  rippleAmp: 1.0,
   rippleSpeed: 0.45,
   shoreFoamStart: 0.03,
   shoreFoamEnd: 0.16,
@@ -249,21 +249,26 @@ export function parseWaterConfig(
   const raw = rawConfig.water ?? {};
   const fb = DEFAULT_WATER_CONFIG;
 
+  const rawLakes = raw.fake_bodies?.lakes;
   const lakes: LakeBodyConfig[] = [];
-  for (const rawLake of raw.fake_bodies?.lakes ?? []) {
+  for (const rawLake of rawLakes ?? []) {
     lakes.push({
       center: readVec2(rawLake.center, fb.fakeBodies.lakes[0].center),
       radius: readVec2(rawLake.radius, fb.fakeBodies.lakes[0].radius),
       levelOffset: readNumber(rawLake.level_offset, fb.fakeBodies.lakes[0].levelOffset),
     });
   }
-  if (lakes.length === 0 && (raw.fake_bodies?.lakes ?? []).length > 0) {
+  if (lakes.length === 0 && (rawLakes ?? []).length > 0) {
     warnWater("all lake entries invalid; using default lakes", warn ?? undefined);
   }
-  const fallbackLakes = lakes.length > 0 ? lakes : fb.fakeBodies.lakes;
+  // Explicit empty array means "no lakes"; missing key or all-invalid falls back to defaults.
+  const fallbackLakes = lakes.length > 0 ? lakes
+    : (rawLakes !== undefined && rawLakes.length === 0) ? []
+    : fb.fakeBodies.lakes;
 
+  const rawRivers = raw.fake_bodies?.rivers;
   const rivers: RiverBodyConfig[] = [];
-  for (const rawRiver of raw.fake_bodies?.rivers ?? []) {
+  for (const rawRiver of rawRivers ?? []) {
     const points = readPointArray(rawRiver.points, fb.fakeBodies.rivers[0].points);
     rivers.push({
       points,
@@ -272,10 +277,12 @@ export function parseWaterConfig(
       downstreamDrop: readNumber(rawRiver.downstream_drop, fb.fakeBodies.rivers[0].downstreamDrop),
     });
   }
-  if (rivers.length === 0 && (raw.fake_bodies?.rivers ?? []).length > 0) {
+  if (rivers.length === 0 && (rawRivers ?? []).length > 0) {
     warnWater("all river entries invalid; using default rivers", warn ?? undefined);
   }
-  const fallbackRivers = rivers.length > 0 ? rivers : fb.fakeBodies.rivers;
+  const fallbackRivers = rivers.length > 0 ? rivers
+    : (rawRivers !== undefined && rawRivers.length === 0) ? []
+    : fb.fakeBodies.rivers;
 
   const v = raw.visual ?? {};
   const visual: WaterVisualConfig = {

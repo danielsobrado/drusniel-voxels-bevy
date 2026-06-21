@@ -105,24 +105,25 @@ class WaterLevel {
     this.originX = originX;
     this.originZ = originZ;
     this.initialized = true;
-    this.refillVertices(originX, originZ);
+    const half = this.cellsPerLevel * this.cellSize * 0.5;
+    this.refillVertices(originX, originZ, half);
     this.rect = {
-      minX: originX,
-      minZ: originZ,
-      maxX: originX + this.cellsPerLevel * this.cellSize,
-      maxZ: originZ + this.cellsPerLevel * this.cellSize,
+      minX: originX - half,
+      minZ: originZ - half,
+      maxX: originX + half,
+      maxZ: originZ + half,
     };
   }
 
-  private refillVertices(originX: number, originZ: number): void {
+  private refillVertices(originX: number, originZ: number, half: number): void {
     const { cellsPerLevel, cellSize, field, positions, terrainY, bodyMask, flow } = this;
     const vertsPerEdge = cellsPerLevel + 1;
     let vi = 0;
     let fi = 0;
     for (let iz = 0; iz < vertsPerEdge; iz++) {
-      const worldZ = originZ + iz * cellSize;
+      const worldZ = originZ + iz * cellSize - half;
       for (let ix = 0; ix < vertsPerEdge; ix++) {
-        const worldX = originX + ix * cellSize;
+        const worldX = originX + ix * cellSize - half;
         const sample = field.sample(worldX, worldZ);
         positions[vi] = worldX;
         positions[vi + 1] = sample.waterY;
@@ -247,6 +248,12 @@ export class WaterClipmap {
 
   get debugModeId(): WaterDebugModeId { return this.debugMode; }
   get levelCount(): number { return this.levels.length; }
+  getLevelRect(index: number): WaterRect | null {
+    if (index >= 0 && index < this.levels.length) {
+      return this.levels[index].currentRect;
+    }
+    return null;
+  }
   get isEnabled(): boolean { return this.visible; }
 
   dispose(): void {

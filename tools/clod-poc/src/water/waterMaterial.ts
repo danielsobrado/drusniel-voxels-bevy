@@ -121,6 +121,8 @@ const WATER_FRAG = /* glsl */ `
     float t = uTime * uRippleSpeed + flowPhase;
     float g1x = cos(worldPos.x * 0.18 + t * 1.3) * 0.18 + cos((worldPos.x + worldPos.z) * 0.13 + t * 0.7) * 0.13;
     float g1z = -sin(worldPos.z * 0.21 - t * 1.1) * 0.21 + cos((worldPos.x + worldPos.z) * 0.13 + t * 0.7) * 0.13;
+    g1x *= uRippleAmp;
+    g1z *= uRippleAmp;
     vec3 normal = normalize(vec3(-g1x, 1.0, -g1z));
 
     vec3 viewDir = normalize(uCameraPos - worldPos);

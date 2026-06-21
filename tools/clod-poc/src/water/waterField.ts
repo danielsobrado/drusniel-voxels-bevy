@@ -172,8 +172,9 @@ export class WaterField {
       const weight = 1 - smoothMask(edgeStart, 1.0, r2);
       if (weight > 0) {
         maxLakeMask = Math.max(maxLakeMask, weight);
-        // Inside the lake the water level is flat; never let it drop below the bed.
-        const level = Math.max(lake.waterLevel, terrainY + 0.05);
+        // Inside the lake the water level is flat; if terrain is above the lake,
+        // depth goes negative and the shader discards.
+        const level = lake.waterLevel;
         if (weight > bestLakeWeight) {
           bestLakeWeight = weight;
           bestLakeLevel = level;
@@ -224,7 +225,7 @@ export class WaterField {
         const weight = inside ? 1 : proximity;
         const frac = bestAccLen / river.totalLength;
         const sloped = river.startLevel - frac * river.downstreamDrop;
-        const level = Math.max(sloped, terrainY + 0.05);
+        const level = sloped;
         if (weight > bestRiverWeight) {
           bestRiverWeight = weight;
           bestRiverLevel = level;

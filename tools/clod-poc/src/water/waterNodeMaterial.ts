@@ -47,6 +47,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uAlpha = uniform(u.uAlpha.value) as TslNode;
   const uFresnelPower = uniform(u.uFresnelPower.value) as TslNode;
   const uRippleSpeed = uniform(u.uRippleSpeed.value) as TslNode;
+  const uRippleAmp = uniform(u.uRippleAmp.value) as TslNode;
   const uShoreFoamStart = uniform(u.uShoreFoamStart.value) as TslNode;
   const uShoreFoamEnd = uniform(u.uShoreFoamEnd.value) as TslNode;
   const uMaxDepth = uniform(u.uMaxDepthForColor.value) as TslNode;
@@ -77,8 +78,8 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const flowDir: TslNode = vec3(aFlow.x, 0.0, aFlow.y);
     const flowPhase: TslNode = dot(flowDir.xz, worldPos.xz).mul(0.15).mul(aFlow.z);
     const t: TslNode = uTime.mul(uRippleSpeed).add(flowPhase);
-    const g1x: TslNode = cos(px.mul(0.18).add(t.mul(1.3))).mul(0.18).add(cos(px.add(pz).mul(0.13).add(t.mul(0.7))).mul(0.13));
-    const g1z: TslNode = sin(pz.mul(0.21).sub(t.mul(1.1))).negate().mul(0.21).add(cos(px.add(pz).mul(0.13).add(t.mul(0.7))).mul(0.13));
+    const g1x: TslNode = cos(px.mul(0.18).add(t.mul(1.3))).mul(0.18).add(cos(px.add(pz).mul(0.13).add(t.mul(0.7))).mul(0.13)).mul(uRippleAmp);
+    const g1z: TslNode = sin(pz.mul(0.21).sub(t.mul(1.1))).negate().mul(0.21).add(cos(px.add(pz).mul(0.13).add(t.mul(0.7))).mul(0.13)).mul(uRippleAmp);
     const normal: TslNode = normalize(vec3(g1x.negate(), float(1), g1z.negate()));
     const viewDir: TslNode = normalize(uCameraPos.sub(worldPos));
     const fres: TslNode = pow(float(1).sub(max(dot(viewDir, normal), 0.0)), uFresnelPower);
@@ -135,6 +136,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     uFoam.value.copy(u.uFoamColor.value);
     uAlpha.value = v.alpha;
     uFresnelPower.value = v.fresnelPower;
+    uRippleAmp.value = v.rippleAmp;
     uRippleSpeed.value = v.rippleSpeed;
     uShoreFoamStart.value = v.shoreFoamStart;
     uShoreFoamEnd.value = v.shoreFoamEnd;

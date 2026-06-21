@@ -29,7 +29,7 @@ water:
     foam_color: [0.82, 0.88, 0.84]
     alpha: 0.82
     fresnel_power: 5.0
-    ripple_amp: 0.018
+    ripple_amp: 1.0
     ripple_speed: 0.45
     shore_foam_start: 0.03
     shore_foam_end: 0.16

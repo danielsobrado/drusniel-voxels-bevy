@@ -763,10 +763,10 @@ async function main() {
     }));
   const terrainColliders = new TerrainColliderSet(colliderPages);
   const player = new PlayerController(terrainColliders, {
-    minX: 0,
-    minZ: 0,
-    maxX: worldCells,
-    maxZ: worldCells,
+    minX: -1000,
+    minZ: -1000,
+    maxX: Math.max(worldCells, 1000),
+    maxZ: Math.max(worldCells, 1000),
   });
   const interaction = new PlayerInteractionState();
   const playerInput: PlayerInputState = { forward: 0, right: 0, sprint: false, jump: false };
@@ -1024,6 +1024,33 @@ async function main() {
       updatePlayerModeUi();
     }
   });
+
+  const qx = searchParams.get("x");
+  const qz = searchParams.get("z");
+  const qyaw = searchParams.get("yaw");
+  if (qx !== null && qz !== null) {
+    const xVal = Number(qx);
+    const zVal = Number(qz);
+    const yawVal = qyaw !== null ? Number(qyaw) : 0;
+    const terrainY = surfaceHeight(xVal, zVal);
+
+    controls.target.set(xVal, terrainY, zVal);
+    camera.position.set(xVal, terrainY + 15, zVal + 20);
+    camera.lookAt(controls.target);
+    controls.update();
+
+    player.spawn(new THREE.Vector3(xVal, terrainY, zVal));
+    playerYaw = yawVal;
+    playerPitch = 0;
+    playerForward.set(-Math.sin(playerYaw), 0, -Math.cos(playerYaw));
+
+    interaction.startPlaying();
+    controls.enabled = false;
+
+    camera.position.copy(player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, DEFAULT_PLAYER_CONFIG.eyeHeight);
+    camera.rotation.set(0, playerYaw, 0, "YXZ");
+  }
+
   updatePlayerModeUi();
 
   const state = {
@@ -1141,7 +1168,7 @@ async function main() {
     treeVisiblePatches: "0/0",
     treeLodSummary: "0/0/0/0",
     waterEnabled: waterConfig.enabled,
-    waterDebugMode: "final" as keyof typeof WATER_DEBUG_MODES,
+    waterDebugMode: (Object.entries(WATER_DEBUG_MODES).find(([, v]) => v === waterConfig.debug.mode)?.[0] ?? "final") as keyof typeof WATER_DEBUG_MODES,
     waterDepthWrite: waterConfig.visual.depthWrite,
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
@@ -1855,6 +1882,7 @@ async function main() {
   });
   waterClipmap.setVisible(state.waterEnabled);
   assertPageMeshSignaturesUnchanged(waterPageSignaturesBefore, pageMeshSignatures(waterPageNodes));
+  let waterDevLogged = false;
   const waterDebugState: WaterDebugState = {
     enabled: state.waterEnabled,
     mode: state.waterDebugMode,
@@ -4201,6 +4229,17 @@ async function main() {
     // fake lake/river clipmap keeps tracking the viewer while CLOD pages can be
     // frozen. Updated after camera movement and before the render call below.
     waterClipmap.update(Math.min(playerDelta, 0.1), camera.position);
+    if (!waterDevLogged) {
+      waterDevLogged = true;
+      const rect = waterClipmap.getLevelRect(0);
+      console.log("[DEV LOG] Water System Initialized:", {
+        enabled: waterConfig.enabled,
+        lakeCenters: waterConfig.fakeBodies.lakes.map((l) => l.center),
+        riverPointCount: waterConfig.fakeBodies.rivers.reduce((sum, r) => sum + r.points.length, 0),
+        clipmapLevelCount: waterClipmap.levelCount,
+        firstLevelRect: rect ? { minX: rect.minX, minZ: rect.minZ, maxX: rect.maxX, maxZ: rect.maxZ } : null,
+      });
+    }
     const nextTreeStats = treeSystem?.getStats();
     if (
       nextTreeStats && (

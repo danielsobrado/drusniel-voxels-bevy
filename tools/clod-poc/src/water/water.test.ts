@@ -186,4 +186,82 @@ describe("WaterClipmap", () => {
     expect(page.mesh.positions[0]).toBe(before.firstPos);
     expect(page.mesh.positions[page.mesh.positions.length - 1]).toBe(before.lastPos);
   });
+
+  // Regression: the clipmap grid must be centered around the camera so water
+  // covers all four quadrants, not just +X/+Z from the snapped origin.
+  it("centers the grid around the camera in all four quadrants", () => {
+    const waterCfg = cloneWaterConfig(parseWaterConfig(waterYamlText, null));
+    // Use a single coarse level for easy reasoning.
+    waterCfg.cellSizes = [4.0];
+    waterCfg.cellsPerLevel = 8;
+    const scene = new THREE.Scene();
+    const field = new WaterField(waterCfg, sampler);
+    const clipmap = new WaterClipmap({
+      scene,
+      config: waterCfg,
+      field,
+      createMaterial: (params) => createWaterShaderMaterial(params),
+      sunDirection: new THREE.Vector3(0.4, 0.8, 0.3),
+      cameraPosition: new THREE.Vector3(0, 50, 0),
+    });
+    clipmap.update(0.016, new THREE.Vector3(0, 50, 0));
+
+    const root = scene.children.find((c) => c.name === "water-clipmap-root")!;
+    const mesh = root.children[0] as THREE.Mesh;
+    const pos = (mesh.geometry.getAttribute("position") as THREE.BufferAttribute).array;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (let i = 0; i < pos.length; i += 3) {
+      minX = Math.min(minX, pos[i]);
+      maxX = Math.max(maxX, pos[i]);
+      minZ = Math.min(minZ, pos[i + 2]);
+      maxZ = Math.max(maxZ, pos[i + 2]);
+    }
+    // Camera at (0,_,0): grid should extend into negative AND positive territory.
+    expect(minX).toBeLessThan(0);
+    expect(maxX).toBeGreaterThan(0);
+    expect(minZ).toBeLessThan(0);
+    expect(maxZ).toBeGreaterThan(0);
+    clipmap.dispose();
+  });
+});
+
+describe("WaterField terrain-above-water", () => {
+  // Regression: when terrain is higher than the lake water level inside the
+  // lake mask, depth must be negative so the shader discards. The old
+  // Math.max(lake.waterLevel, terrainY + 0.05) clamped water above the terrain.
+  it("produces negative depth when terrain is above lake level", () => {
+    const cfg = cloneWaterConfig();
+    cfg.fakeBodies.lakes = [{ center: [0, 0], radius: [100, 100], levelOffset: 1.0 }];
+    cfg.fakeBodies.rivers = [];
+    // Sampler that returns different heights: low at center (x=0), high elsewhere.
+    // Lake waterLevel is baked from center terrain at construction: 50 + 1.0 = 51.
+    // At x=10 (inside the 100-radius lake): terrain=300, waterY=51 (flat), depth=-249.
+    const varySampler: TerrainHeightSampler = {
+      surfaceHeight: (x: number) => (x === 0 ? 50 : 300),
+    };
+    const field = new WaterField(cfg, varySampler);
+    // Lake waterLevel = surfaceHeight(0) + 1 = 51 (baked at construction from center).
+    // At x=10 (inside the 100-radius lake): terrain=300, waterY should be 51 (flat).
+    // depth = 51 - 300 = -249, negative => shader discards.
+    const result = field.sample(10, 0);
+    expect(result.waterY).toBe(51);
+    expect(result.depth).toBeLessThan(0);
+    expect(result.bodyMask).toBeGreaterThan(0);
+  });
+});
+
+describe("parseWaterConfig empty arrays", () => {
+  it("explicit empty lakes array produces no lakes", () => {
+    const yaml = `water:\n  fake_bodies:\n    lakes: []\n    rivers:\n      - points: [[-10, -10], [10, 10]]\n        width: 5\n`;
+    const cfg = parseWaterConfig(yaml, null);
+    expect(cfg.fakeBodies.lakes).toHaveLength(0);
+    expect(cfg.fakeBodies.rivers).toHaveLength(1);
+  });
+
+  it("explicit empty rivers array produces no rivers", () => {
+    const yaml = `water:\n  fake_bodies:\n    lakes:\n      - center: [0, 0]\n        radius: [50, 50]\n        level_offset: 1\n    rivers: []\n`;
+    const cfg = parseWaterConfig(yaml, null);
+    expect(cfg.fakeBodies.lakes).toHaveLength(1);
+    expect(cfg.fakeBodies.rivers).toHaveLength(0);
+  });
 });
