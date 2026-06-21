@@ -4,7 +4,11 @@ import type { ClodPageNode, PageMesh } from "../types.js";
 import type { PageFootprint } from "../types.js";
 import {
   DEFAULT_TREE_SETTINGS,
+  createTreeGeometryMap,
+  createTreeMaterialHandle,
+  disposeTreeGeometryMap,
   generateTreeInstances,
+  injectTreeWindShader,
   parseTreeConfig,
   selectTreeSpecies,
   TreeSystem,
@@ -134,6 +138,49 @@ trees:
     expect(parsed.lod.farFraction).toBeGreaterThanOrEqual(parsed.lod.midFraction);
   });
 
+  it("parses and normalizes tree wind settings", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  wind:
+    enabled: false
+    direction: [3, 4]
+    strength: 0.5
+    speed: 2
+    gust_strength: 0.25
+    trunk_sway_strength: 0.6
+    leaf_flutter_strength: 0.35
+`, null);
+
+    expect(parsed.wind.enabled).toBe(false);
+    expect(parsed.wind.direction[0]).toBeCloseTo(0.6);
+    expect(parsed.wind.direction[1]).toBeCloseTo(0.8);
+    expect(parsed.wind.strength).toBe(0.5);
+    expect(parsed.wind.speed).toBe(2);
+    expect(parsed.wind.gustStrength).toBe(0.25);
+    expect(parsed.wind.trunkSwayStrength).toBe(0.6);
+    expect(parsed.wind.leafFlutterStrength).toBe(0.35);
+  });
+
+  it("falls back for invalid wind direction and clamps negative wind values", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  wind:
+    direction: [0, 0]
+    strength: -1
+    speed: -2
+    gust_strength: -3
+    trunk_sway_strength: -4
+    leaf_flutter_strength: -5
+`, null);
+
+    expect(parsed.wind.direction).toEqual(DEFAULT_TREE_SETTINGS.wind.direction);
+    expect(parsed.wind.strength).toBe(0);
+    expect(parsed.wind.speed).toBe(0);
+    expect(parsed.wind.gustStrength).toBe(0);
+    expect(parsed.wind.trunkSwayStrength).toBe(0);
+    expect(parsed.wind.leafFlutterStrength).toBe(0);
+  });
+
   it("is deterministic for the same footprint, seed, and config", () => {
     expect(generateTreeInstances(footprint, settings, settings.maxInstances, undefined, sampler, 32))
       .toEqual(generateTreeInstances(footprint, settings, settings.maxInstances, undefined, sampler, 32));
@@ -198,6 +245,71 @@ trees:
     expect(stats.generatedCandidates).toBe(
       stats.acceptedCandidates + stats.rejectedSlope + stats.rejectedHeight + stats.rejectedMaterial,
     );
+  });
+});
+
+describe("tree geometry", () => {
+  it("includes wind and flutter attributes that match position counts", () => {
+    const geometries = createTreeGeometryMap(settings);
+    try {
+      for (const species of TREE_SPECIES) {
+        for (const lod of TREE_LODS) {
+          const geometry = geometries[species][lod];
+          const position = geometry.getAttribute("position");
+          const wind = geometry.getAttribute("treeWindWeight");
+          const flutter = geometry.getAttribute("treeFlutterWeight");
+          expect(wind).toBeDefined();
+          expect(flutter).toBeDefined();
+          expect(wind.count).toBe(position.count);
+          expect(flutter.count).toBe(position.count);
+          expect(maxAttributeValue(wind)).toBeGreaterThan(0);
+        }
+      }
+    } finally {
+      disposeTreeGeometryMap(geometries);
+    }
+  });
+
+  it("gives far oak and pine cards flutter weights", () => {
+    const geometries = createTreeGeometryMap(settings);
+    try {
+      expect(maxAttributeValue(geometries.oak.far.getAttribute("treeFlutterWeight"))).toBeGreaterThan(0);
+      expect(maxAttributeValue(geometries.pine.far.getAttribute("treeFlutterWeight"))).toBeGreaterThan(0);
+    } finally {
+      disposeTreeGeometryMap(geometries);
+    }
+  });
+});
+
+describe("tree materials", () => {
+  it("injects tree wind uniforms and local vertex displacement", () => {
+    const shader = injectTreeWindShader(`
+#include <common>
+void main() {
+  vec3 transformed = vec3(position);
+  #include <begin_vertex>
+}`);
+
+    expect(shader).toContain("uniform float uTreeTime");
+    expect(shader).toContain("uniform vec2 uTreeWindDirection");
+    expect(shader).toContain("attribute float treeWindWeight");
+    expect(shader).toContain("attribute float treeFlutterWeight");
+    expect(shader).toContain("instanceMatrix[3].xz");
+    expect(shader).toContain("transformed.xz +=");
+  });
+
+  it("keeps regular and debug tree materials double-sided and opaque", () => {
+    const handle = createTreeMaterialHandle(settings);
+    try {
+      expect(handle.regularMaterial.side).toBe(THREE.DoubleSide);
+      expect(handle.regularMaterial.transparent).toBe(false);
+      for (const material of Object.values(handle.debugMaterials)) {
+        expect(material.side).toBe(THREE.DoubleSide);
+        expect(material.transparent).toBe(false);
+      }
+    } finally {
+      handle.dispose();
+    }
   });
 });
 
@@ -274,3 +386,9 @@ describe("TreeSystem", () => {
     }
   });
 });
+
+function maxAttributeValue(attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute): number {
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < attribute.count; i++) max = Math.max(max, attribute.getX(i));
+  return max;
+}

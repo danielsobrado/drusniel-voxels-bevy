@@ -87,6 +87,12 @@ export interface ProjectSessionState {
   treeDistance?: number;
   treeMaxInstances?: number;
   treeDebugColorByLod?: boolean;
+  treeWindEnabled?: boolean;
+  treeWindStrength?: number;
+  treeWindSpeed?: number;
+  treeGustStrength?: number;
+  treeTrunkSwayStrength?: number;
+  treeLeafFlutterStrength?: number;
 }
 
 export interface ProjectTextureSlot {

@@ -19,6 +19,7 @@ import {
   type TreeInstance,
   type TreeTerrainSampler,
 } from "./tree_instances.js";
+import { createTreeMaterialHandle, type TreeMaterialHandle } from "./tree_material.js";
 
 export interface TreeSystemOptions {
   scene: THREE.Scene;
@@ -51,12 +52,6 @@ interface TreePatch {
   generationStats: TreeGenerationStats;
 }
 
-const LOD_COLORS: Record<TreeLod, number> = {
-  near: 0x2e7d32,
-  mid: 0xd98032,
-  far: 0x3a6ea5,
-};
-
 export class TreeSystem {
   private readonly scene: THREE.Scene;
   private readonly nodes: ClodPageNode[];
@@ -70,18 +65,7 @@ export class TreeSystem {
   private readonly upAxis = new THREE.Vector3(0, 1, 0);
   private settings: TreeSettings;
   private geometries: TreeGeometryMap;
-  private readonly regularMaterial = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.95,
-    metalness: 0,
-    side: THREE.DoubleSide,
-    transparent: false,
-  });
-  private readonly debugMaterials: Record<TreeLod, THREE.MeshBasicMaterial> = {
-    near: new THREE.MeshBasicMaterial({ color: LOD_COLORS.near, side: THREE.DoubleSide, transparent: false }),
-    mid: new THREE.MeshBasicMaterial({ color: LOD_COLORS.mid, side: THREE.DoubleSide, transparent: false }),
-    far: new THREE.MeshBasicMaterial({ color: LOD_COLORS.far, side: THREE.DoubleSide, transparent: false }),
-  };
+  private readonly materialHandle: TreeMaterialHandle;
   private patches: TreePatch[] = [];
   private patchesDirty = true;
   private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
@@ -97,6 +81,7 @@ export class TreeSystem {
     this.settings = { ...options.settings };
     this.sampler = options.sampler;
     this.geometries = createTreeGeometryMap(this.settings);
+    this.materialHandle = createTreeMaterialHandle(this.settings);
     this.lastCenter = new THREE.Vector3(this.worldCells * 0.5, 0, this.worldCells * 0.5);
     this.root.name = "trees";
     this.scene.add(this.root);
@@ -120,12 +105,14 @@ export class TreeSystem {
       this.geometries = createTreeGeometryMap(this.settings);
       this.clearPatches();
     }
+    this.materialHandle.updateSettings(this.settings);
     this.applyMaterials();
     this.patchesDirty = true;
     this.setEnabled(this.settings.enabled);
   }
 
-  update(_timeSeconds: number, center: THREE.Vector3): void {
+  update(timeSeconds: number, center: THREE.Vector3): void {
+    this.materialHandle.setTime(timeSeconds);
     this.lastCenter.copy(center);
     if (!this.settings.enabled) {
       this.updateStats();
@@ -159,8 +146,7 @@ export class TreeSystem {
     this.clearPatches();
     this.scene.remove(this.root);
     disposeTreeGeometryMap(this.geometries);
-    this.regularMaterial.dispose();
-    for (const material of Object.values(this.debugMaterials)) material.dispose();
+    this.materialHandle.dispose();
   }
 
   getStats(): TreeStats {
@@ -290,7 +276,7 @@ export class TreeSystem {
   }
 
   private materialFor(lod: TreeLod): THREE.Material {
-    return this.settings.render.debugColorByLod ? this.debugMaterials[lod] : this.regularMaterial;
+    return this.settings.render.debugColorByLod ? this.materialHandle.debugMaterials[lod] : this.materialHandle.regularMaterial;
   }
 
   private applyMaterials(): void {

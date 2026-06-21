@@ -4,6 +4,7 @@ import GUI from "lil-gui";
 import { parseConfig } from "./config.js";
 import configText from "../config/clod_pages.yaml?raw";
 import stoneConfigText from "../config/stones.yaml?raw";
+import treeConfigText from "../config/trees.yaml?raw";
 import proceduralConfigText from "../config/procedural_textures.yaml?raw";
 import grassConfigText from "../config/grass.yaml?raw";
 import { ClodWorkerClient } from "./clod_worker_client.js";
@@ -51,6 +52,7 @@ import {
 import { parseStoneConfig, STONE_CLASSES, type StoneClass } from "./stones/stone_config.js";
 import { StoneSystem, type StoneLighting, type StoneStats } from "./stones/stone_instances.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "./stones/stone_validation.js";
+import { parseTreeConfig, TreeSystem, type TreeStats } from "./trees/index.js";
 import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
@@ -560,6 +562,7 @@ async function main() {
   }
   const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
   const stoneConfig = parseStoneConfig(stoneConfigText);
+  const treeConfig = parseTreeConfig(treeConfigText);
   const grassConfig = parseGrassConfig(grassConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
   const proceduralTerrain = proceduralTextureConfig.enabled
@@ -1107,6 +1110,16 @@ async function main() {
     stoneTotal: 0,
     stoneClassSummary: "0/0/0",
     stoneVisible: 0,
+    treesEnabled: treeConfig.enabled,
+    treeWindEnabled: treeConfig.wind.enabled,
+    treeWindStrength: treeConfig.wind.strength,
+    treeWindSpeed: treeConfig.wind.speed,
+    treeGustStrength: treeConfig.wind.gustStrength,
+    treeTrunkSwayStrength: treeConfig.wind.trunkSwayStrength,
+    treeLeafFlutterStrength: treeConfig.wind.leafFlutterStrength,
+    treeTotal: 0,
+    treeVisiblePatches: "0/0",
+    treeLodSummary: "0/0/0",
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
   if (isWebGpu) state.normalDivergence = false;
@@ -1129,6 +1142,7 @@ async function main() {
     state.showLockedBorderVertices = false;
     state.grassEnabled = false;
     state.stonesEnabled = false;
+    state.treesEnabled = false;
   }
   if (queryGrassPerfScene) {
     state.grassEnabled = true;
@@ -1136,6 +1150,7 @@ async function main() {
     state.grassDistance = grassConfig.distance;
     state.grassMaxBlades = grassConfig.maxBlades;
     state.stonesEnabled = false;
+    state.treesEnabled = false;
     state.postProcessEnabled = false;
     state.postProcessDebugMode = "off";
     state.showBounds = false;
@@ -1146,6 +1161,8 @@ async function main() {
   }
   if (searchParams.get("stones") === "1") state.stonesEnabled = true;
   if (searchParams.get("stones") === "0") state.stonesEnabled = false;
+  if (searchParams.get("trees") === "1") state.treesEnabled = true;
+  if (searchParams.get("trees") === "0") state.treesEnabled = false;
   let colorByLodUserOverride = stagedImport !== null;
   let lastTexturesActive: boolean | null = null;
   let colorByLodController: { updateDisplay: () => unknown } | null = null;
@@ -1743,6 +1760,31 @@ async function main() {
   stones = stoneSystem;
   let stoneStats: StoneStats | null = stoneSystem.getStats();
 
+  const makeTreeSettings = () => ({
+    ...treeConfig,
+    enabled: state.treesEnabled,
+    wind: {
+      ...treeConfig.wind,
+      enabled: state.treeWindEnabled,
+      strength: state.treeWindStrength,
+      speed: state.treeWindSpeed,
+      gustStrength: state.treeGustStrength,
+      trunkSwayStrength: state.treeTrunkSwayStrength,
+      leafFlutterStrength: state.treeLeafFlutterStrength,
+    },
+    render: { ...treeConfig.render },
+  });
+  const treePageNodes = allNodes.filter((node) => node.level === 0);
+  const treePageSignaturesBefore = pageMeshSignatures(treePageNodes);
+  const treeSystem = new TreeSystem({
+    scene,
+    nodes: treePageNodes,
+    worldCells,
+    settings: makeTreeSettings(),
+  });
+  assertPageMeshSignaturesUnchanged(treePageSignaturesBefore, pageMeshSignatures(treePageNodes));
+  let treeStats: TreeStats | null = treeSystem.getStats();
+
   const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
     if (state.showBounds) {
@@ -2170,6 +2212,9 @@ async function main() {
         grassSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
         refreshGrassStats();
       }
+      if (state.treesEnabled && lod0.changed.length > 0) {
+        treeSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
+      }
       pendingParentNodes = 0;
       pendingParentMs = 0;
       pendingParentCount = lod0.pendingParents;
@@ -2541,6 +2586,45 @@ async function main() {
   stoneClassSummaryController = stoneFolder.add(state, "stoneClassSummary").name("L/M/S").disable();
   stoneVisibleController = stoneFolder.add(state, "stoneVisible").name("visible").disable();
   stoneFolder.add(stoneActions, "rebuild").name("rebuild");
+
+  let treeTotalController: { updateDisplay: () => unknown } | null = null;
+  let treeVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
+  let treeLodSummaryController: { updateDisplay: () => unknown } | null = null;
+  const refreshTreeStats = () => {
+    if (!treeSystem) return;
+    treeStats = treeSystem.getStats();
+    state.treeTotal = treeStats.totalTrees;
+    state.treeVisiblePatches = `${treeStats.visiblePatches}/${treeStats.patches}`;
+    state.treeLodSummary = `${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}`;
+    treeTotalController?.updateDisplay();
+    treeVisiblePatchesController?.updateDisplay();
+    treeLodSummaryController?.updateDisplay();
+  };
+  const updateTreeWindSettings = () => treeSystem?.updateSettings(makeTreeSettings());
+  const treeActions = {
+    rebuild: () => {
+      treeSystem?.updateSettings(makeTreeSettings());
+      treeSystem?.rebuild();
+      refreshTreeStats();
+      updateInfo();
+    },
+  };
+  const treeFolder = gui.addFolder("trees (props)");
+  treeFolder.add(state, "treesEnabled").name("enabled").onChange((enabled: boolean) => {
+    treeSystem?.setEnabled(enabled);
+    refreshTreeStats();
+    updateInfo();
+  });
+  treeFolder.add(state, "treeWindEnabled").name("wind enabled").onChange(updateTreeWindSettings);
+  treeFolder.add(state, "treeWindStrength", 0, 1, 0.01).name("wind strength").onChange(updateTreeWindSettings);
+  treeFolder.add(state, "treeWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateTreeWindSettings);
+  treeFolder.add(state, "treeGustStrength", 0, 1, 0.01).name("gust strength").onChange(updateTreeWindSettings);
+  treeFolder.add(state, "treeTrunkSwayStrength", 0, 1, 0.01).name("trunk sway").onChange(updateTreeWindSettings);
+  treeFolder.add(state, "treeLeafFlutterStrength", 0, 1, 0.01).name("leaf flutter").onChange(updateTreeWindSettings);
+  treeTotalController = treeFolder.add(state, "treeTotal").name("total").disable();
+  treeVisiblePatchesController = treeFolder.add(state, "treeVisiblePatches").name("visible patches").disable();
+  treeLodSummaryController = treeFolder.add(state, "treeLodSummary").name("near/mid/far").disable();
+  treeFolder.add(treeActions, "rebuild").name("rebuild");
 
   const textureInput = document.createElement("input");
   textureInput.type = "file";
@@ -3613,6 +3697,13 @@ async function main() {
     grassMaxHeight: state.grassMaxHeight,
     grassMaxBlades: state.grassMaxBlades,
     grassSeed: state.grassSeed,
+    treesEnabled: state.treesEnabled,
+    treeWindEnabled: state.treeWindEnabled,
+    treeWindStrength: state.treeWindStrength,
+    treeWindSpeed: state.treeWindSpeed,
+    treeGustStrength: state.treeGustStrength,
+    treeTrunkSwayStrength: state.treeTrunkSwayStrength,
+    treeLeafFlutterStrength: state.treeLeafFlutterStrength,
   });
 
   const projectTextureMetadata = (): ProjectTextureSlot[] => textureSlots.map((slot, index) => {
@@ -3801,6 +3892,9 @@ async function main() {
   grassSystem?.setEnabled(state.grassEnabled);
   grassSystem?.updateSettings(makeGrassSettings());
   refreshGrassStats();
+  treeSystem?.setEnabled(state.treesEnabled);
+  treeSystem?.updateSettings(makeTreeSettings());
+  refreshTreeStats();
   updateSelection();
   updateInfo();
 
@@ -3975,7 +4069,27 @@ async function main() {
     const tPropsStart = performance.now();
     const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
     grassSystem?.update(elapsedSeconds, grassCenter, camera);
+    treeSystem?.update(elapsedSeconds, grassCenter);
     stoneSystem?.update(grassCenter);
+    const nextTreeStats = treeSystem?.getStats();
+    if (
+      nextTreeStats && (
+      !treeStats ||
+      nextTreeStats.totalTrees !== treeStats.totalTrees ||
+      nextTreeStats.visiblePatches !== treeStats.visiblePatches ||
+      nextTreeStats.patches !== treeStats.patches ||
+      nextTreeStats.nearTrees !== treeStats.nearTrees ||
+      nextTreeStats.midTrees !== treeStats.midTrees ||
+      nextTreeStats.farTrees !== treeStats.farTrees)
+    ) {
+      treeStats = nextTreeStats;
+      state.treeTotal = nextTreeStats.totalTrees;
+      state.treeVisiblePatches = `${nextTreeStats.visiblePatches}/${nextTreeStats.patches}`;
+      state.treeLodSummary = `${nextTreeStats.nearTrees}/${nextTreeStats.midTrees}/${nextTreeStats.farTrees}`;
+      treeTotalController?.updateDisplay();
+      treeVisiblePatchesController?.updateDisplay();
+      treeLodSummaryController?.updateDisplay();
+    }
     const nextStoneStats = stoneSystem?.getStats();
     if (nextStoneStats && (!stoneStats || nextStoneStats.total !== stoneStats.total || nextStoneStats.visible !== stoneStats.visible)) {
       stoneStats = nextStoneStats;
@@ -4047,7 +4161,7 @@ async function main() {
             ` | selection ${lastSelectionMs.toFixed(1)}` +
             ` (cut ${selSub.cut.toFixed(1)} book ${selSub.book.toFixed(1)} info ${selSub.info.toFixed(1)} overlays ${selSub.overlays.toFixed(1)})` +
             ` bubble/chunks ${bubbleMs.toFixed(1)} (built ${chunkGroupsBuiltThisFrame})` +
-            ` grass+stones ${propsMs.toFixed(1)}` +
+            ` props ${propsMs.toFixed(1)}` +
             ` render ${renderMs.toFixed(1)}` +
             ` other ${otherMs.toFixed(1)}` +
             ` | cut=${lastRenderedCount} chunkGroups=${chunkGroups.size} mode=${interaction.mode}`,
@@ -4101,6 +4215,7 @@ async function main() {
   window.addEventListener("beforeunload", () => {
     lockedBorderOverlay.dispose();
     grassSystem?.dispose();
+    treeSystem?.dispose();
     stoneSystem?.dispose();
     skyEnvironment?.dispose();
     postProcess?.dispose();

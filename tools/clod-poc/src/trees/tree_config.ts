@@ -37,6 +37,16 @@ export interface TreeRenderSettings {
   debugColorByLod: boolean;
 }
 
+export interface TreeWindSettings {
+  enabled: boolean;
+  direction: [number, number];
+  strength: number;
+  speed: number;
+  gustStrength: number;
+  trunkSwayStrength: number;
+  leafFlutterStrength: number;
+}
+
 export interface TreeSettings {
   enabled: boolean;
   seed: number;
@@ -46,6 +56,7 @@ export interface TreeSettings {
   maxInstances: number;
   placement: TreePlacementSettings;
   lod: TreeLodSettings;
+  wind: TreeWindSettings;
   species: Record<TreeSpeciesId, TreeSpeciesSettings>;
   render: TreeRenderSettings;
 }
@@ -82,6 +93,15 @@ interface TreeYamlConfig {
       mid_fraction?: number;
       far_fraction?: number;
     };
+    wind?: {
+      enabled?: boolean;
+      direction?: unknown;
+      strength?: number;
+      speed?: number;
+      gust_strength?: number;
+      trunk_sway_strength?: number;
+      leaf_flutter_strength?: number;
+    };
     species?: Partial<Record<TreeSpeciesId, TreeYamlSpecies>>;
     render?: {
       shadows_near_only?: boolean;
@@ -89,6 +109,16 @@ interface TreeYamlConfig {
     };
   };
 }
+
+export const DEFAULT_TREE_WIND_SETTINGS: TreeWindSettings = {
+  enabled: true,
+  direction: [0.8, 0.6],
+  strength: 0.18,
+  speed: 0.9,
+  gustStrength: 0.12,
+  trunkSwayStrength: 0.45,
+  leafFlutterStrength: 0.18,
+};
 
 export const DEFAULT_TREE_SETTINGS: TreeSettings = {
   enabled: true,
@@ -111,6 +141,7 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
     midFraction: 0.70,
     farFraction: 1.0,
   },
+  wind: DEFAULT_TREE_WIND_SETTINGS,
   species: {
     oak: {
       enabled: true,
@@ -151,6 +182,7 @@ export function cloneTreeSettings(settings: TreeSettings = DEFAULT_TREE_SETTINGS
     ...settings,
     placement: { ...settings.placement },
     lod: { ...settings.lod },
+    wind: { ...settings.wind, direction: [...settings.wind.direction] },
     render: { ...settings.render },
     species: {
       oak: { ...settings.species.oak },
@@ -190,6 +222,30 @@ function readSpecies(base: TreeSpeciesSettings, raw: TreeYamlSpecies | undefined
 
 function warnTreeConfig(message: string, warn?: (message: string) => void): void {
   warn?.(`[tree-config] ${message}`);
+}
+
+function readWindDirection(value: unknown, fallback: [number, number]): [number, number] {
+  if (!Array.isArray(value) || value.length < 2) return [...fallback];
+  const x = readNumber(value[0], Number.NaN);
+  const z = readNumber(value[1], Number.NaN);
+  const length = Math.hypot(x, z);
+  if (!Number.isFinite(length) || length <= 1e-5) return [...fallback];
+  return [x / length, z / length];
+}
+
+function readTreeWindSettings(
+  raw: NonNullable<TreeYamlConfig["trees"]>["wind"] | undefined,
+  fallback: TreeWindSettings,
+): TreeWindSettings {
+  return {
+    enabled: readBoolean(raw?.enabled, fallback.enabled),
+    direction: readWindDirection(raw?.direction, fallback.direction),
+    strength: readNumberAtLeast(raw?.strength, fallback.strength, 0),
+    speed: readNumberAtLeast(raw?.speed, fallback.speed, 0),
+    gustStrength: readNumberAtLeast(raw?.gust_strength, fallback.gustStrength, 0),
+    trunkSwayStrength: readNumberAtLeast(raw?.trunk_sway_strength, fallback.trunkSwayStrength, 0),
+    leafFlutterStrength: readNumberAtLeast(raw?.leaf_flutter_strength, fallback.leafFlutterStrength, 0),
+  };
 }
 
 function readTreeLodSettings(
@@ -246,6 +302,7 @@ export function parseTreeConfig(
       minSpacingM: readNumberAtLeast(raw.placement?.min_spacing_m, fallback.placement.minSpacingM, 0),
     },
     lod: readTreeLodSettings(raw.lod, fallback.lod, enabled),
+    wind: readTreeWindSettings(raw.wind, fallback.wind),
     species: {
       oak: readSpecies(fallback.species.oak, raw.species?.oak),
       pine: readSpecies(fallback.species.pine, raw.species?.pine),

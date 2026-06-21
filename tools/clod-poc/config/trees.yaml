@@ -20,6 +20,15 @@ trees:
     mid_fraction: 0.70
     far_fraction: 1.0
 
+  wind:
+    enabled: true
+    direction: [0.8, 0.6]
+    strength: 0.18
+    speed: 0.9
+    gust_strength: 0.12
+    trunk_sway_strength: 0.45
+    leaf_flutter_strength: 0.18
+
   species:
     oak:
       enabled: true

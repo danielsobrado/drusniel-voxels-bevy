@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 
 export type TreeGeometryMap = Record<TreeSpeciesId, Record<TreeLod, THREE.BufferGeometry>>;
+type WeightSource = number | ((position: THREE.Vector3) => number);
 
 const BARK = new THREE.Color(0x5b3a22);
 const DEAD_BARK = new THREE.Color(0x7a6653);
@@ -35,6 +36,8 @@ function createTreeGeometry(species: TreeSpeciesId, lod: TreeLod, settings: Tree
     new THREE.CylinderGeometry(trunkRadius * 0.72, trunkRadius, trunkHeight, trunkSegments, 1),
     new THREE.Matrix4().makeTranslation(0, trunkHeight * 0.5, 0),
     species === "dead" ? DEAD_BARK : BARK,
+    (position) => THREE.MathUtils.clamp(position.y / trunkHeight, 0, 1) * (species === "dead" ? 0.35 : 0.65),
+    0,
   );
 
   if (species === "oak") appendOakCrown(builder, lod, trunkHeight, config.crownRadiusM);
@@ -60,7 +63,7 @@ function appendOakCrown(builder: GeometryBuilder, lod: TreeLod, trunkHeight: num
     : [[0, trunkHeight + radius * 0.62, 0, radius * 0.95]];
   for (const [x, y, z, r] of clusters) {
     const sphere = new THREE.SphereGeometry(r, lod === "near" ? 7 : 5, lod === "near" ? 5 : 4);
-    builder.append(sphere, new THREE.Matrix4().makeTranslation(x, y, z), OAK_LEAF);
+    builder.append(sphere, new THREE.Matrix4().makeTranslation(x, y, z), OAK_LEAF, 0.9, 0.8);
   }
 }
 
@@ -70,10 +73,10 @@ function appendPineCrown(builder: GeometryBuilder, lod: TreeLod, trunkHeight: nu
     return;
   }
   const cone = new THREE.ConeGeometry(radius, radius * (lod === "near" ? 2.6 : 2.1), lod === "near" ? 7 : 5, 1);
-  builder.append(cone, new THREE.Matrix4().makeTranslation(0, trunkHeight + radius, 0), PINE_LEAF);
+  builder.append(cone, new THREE.Matrix4().makeTranslation(0, trunkHeight + radius, 0), PINE_LEAF, 0.75, 0.5);
   if (lod === "near") {
     const lower = new THREE.ConeGeometry(radius * 1.12, radius * 1.6, 7, 1);
-    builder.append(lower, new THREE.Matrix4().makeTranslation(0, trunkHeight + radius * 0.25, 0), PINE_LEAF);
+    builder.append(lower, new THREE.Matrix4().makeTranslation(0, trunkHeight + radius * 0.25, 0), PINE_LEAF, 0.65, 0.35);
   }
 }
 
@@ -86,7 +89,7 @@ function appendDeadBranches(builder: GeometryBuilder, lod: TreeLod, trunkHeight:
       .makeRotationZ(i === 0 ? -0.88 : 0.72)
       .premultiply(new THREE.Matrix4().makeRotationY(i === 0 ? 0.35 : -0.8))
       .setPosition(i === 0 ? trunkRadius * 1.2 : -trunkRadius, trunkHeight * (0.62 + i * 0.12), i === 0 ? 0 : trunkRadius * 0.7);
-    builder.append(branch, matrix, DEAD_BARK);
+    builder.append(branch, matrix, DEAD_BARK, 0.28, 0.04);
   }
 }
 
@@ -102,7 +105,7 @@ function appendCrossCards(
     const matrix = new THREE.Matrix4()
       .makeRotationY(rotation)
       .premultiply(new THREE.Matrix4().makeTranslation(0, centerY, 0));
-    builder.append(plane, matrix, color);
+    builder.append(plane, matrix, color, 1, 1);
   }
 }
 
@@ -110,9 +113,17 @@ class GeometryBuilder {
   private readonly positions: number[] = [];
   private readonly normals: number[] = [];
   private readonly colors: number[] = [];
+  private readonly windWeights: number[] = [];
+  private readonly flutterWeights: number[] = [];
   private readonly indices: number[] = [];
 
-  append(source: THREE.BufferGeometry, matrix: THREE.Matrix4, color: THREE.Color): void {
+  append(
+    source: THREE.BufferGeometry,
+    matrix: THREE.Matrix4,
+    color: THREE.Color,
+    windWeight: WeightSource = 0,
+    flutterWeight: WeightSource = 0,
+  ): void {
     const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
     const position = source.getAttribute("position");
     const normal = source.getAttribute("normal");
@@ -123,6 +134,8 @@ class GeometryBuilder {
     for (let i = 0; i < position.count; i++) {
       p.fromBufferAttribute(position, i).applyMatrix4(matrix);
       this.positions.push(p.x, p.y, p.z);
+      this.windWeights.push(readWeight(windWeight, p));
+      this.flutterWeights.push(readWeight(flutterWeight, p));
       if (normal) n.fromBufferAttribute(normal, i).applyMatrix3(normalMatrix).normalize();
       else n.set(0, 1, 0);
       this.normals.push(n.x, n.y, n.z);
@@ -141,7 +154,14 @@ class GeometryBuilder {
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(this.positions, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(this.normals, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(this.colors, 3));
+    geometry.setAttribute("treeWindWeight", new THREE.Float32BufferAttribute(this.windWeights, 1));
+    geometry.setAttribute("treeFlutterWeight", new THREE.Float32BufferAttribute(this.flutterWeights, 1));
     geometry.setIndex(this.indices);
     return geometry;
   }
+}
+
+function readWeight(source: WeightSource, position: THREE.Vector3): number {
+  const value = typeof source === "function" ? source(position) : source;
+  return THREE.MathUtils.clamp(Number.isFinite(value) ? value : 0, 0, 1);
 }
