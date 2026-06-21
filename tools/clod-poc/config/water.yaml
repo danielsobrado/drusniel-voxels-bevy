@@ -1,0 +1,40 @@
+# Fable5-style fake water clipmap for the CLOD-POC viewer.
+# This is a visual POC only: no hydrology, no SSR, no caustics, no physics.
+# Water is a separate render layer and is NEVER fed into the CLOD page source
+# mesh, meshoptimizer, page borders, LOD selection, colliders, or validation.
+water:
+  enabled: true
+  cells_per_level: 128
+  cell_sizes: [1.5, 3.0, 6.0, 12.0, 24.0]
+  snap_cells: 2
+  dry_sentinel_depth: 2.0
+
+  fake_bodies:
+    lakes:
+      - center: [80, -70]
+        radius: [85, 55]
+        level_offset: 1.2
+      - center: [-180, 120]
+        radius: [60, 45]
+        level_offset: 0.8
+    rivers:
+      - points: [[-260, -180], [-140, -90], [-20, -40], [90, -20], [230, 70]]
+        width: 18.0
+        level_offset: 0.9
+        downstream_drop: 3.5
+
+  visual:
+    shallow_color: [0.16, 0.38, 0.36]
+    deep_color: [0.02, 0.08, 0.12]
+    foam_color: [0.82, 0.88, 0.84]
+    alpha: 0.82
+    fresnel_power: 5.0
+    ripple_amp: 0.018
+    ripple_speed: 0.45
+    shore_foam_start: 0.03
+    shore_foam_end: 0.16
+    max_depth_for_color: 4.0
+    depth_write: false
+
+  debug:
+    mode: 0

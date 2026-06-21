@@ -7,6 +7,7 @@ import stoneConfigText from "../config/stones.yaml?raw";
 import treeConfigText from "../config/trees.yaml?raw";
 import proceduralConfigText from "../config/procedural_textures.yaml?raw";
 import grassConfigText from "../config/grass.yaml?raw";
+import waterConfigText from "../config/water.yaml?raw";
 import { ClodWorkerClient } from "./clod_worker_client.js";
 import { emitAudio, setAudioEnabled, setMasterVolume, getAudioState } from "./audio/index.js";
 import {
@@ -84,6 +85,15 @@ import {
   buildGrassInstancedGeometry,
   createGrassNodeMaterial,
 } from "./gpu/grass_node_material.js";
+import {
+  parseWaterConfig,
+  WaterClipmap,
+  WaterField,
+  addWaterDebugFolder,
+  type WaterDebugState,
+  WATER_DEBUG_MODES,
+} from "./water/index.js";
+import { createWaterShaderMaterial } from "./water/waterMaterial.js";
 import { createSkyNodeMaterial, type SkyNodeHandle } from "./gpu/sky_node_material.js";
 import { WebGpuPostProcessPipeline } from "./gpu/webgpu_postprocess.js";
 import {
@@ -565,6 +575,7 @@ async function main() {
   const stoneConfig = parseStoneConfig(stoneConfigText);
   const treeConfig = parseTreeConfig(treeConfigText);
   const grassConfig = parseGrassConfig(grassConfigText);
+  const waterConfig = parseWaterConfig(waterConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
   const proceduralTerrain = proceduralTextureConfig.enabled
     ? createProceduralTerrainTextures(proceduralTextureConfig)
@@ -1129,6 +1140,9 @@ async function main() {
     treeTotal: 0,
     treeVisiblePatches: "0/0",
     treeLodSummary: "0/0/0/0",
+    waterEnabled: waterConfig.enabled,
+    waterDebugMode: "final" as keyof typeof WATER_DEBUG_MODES,
+    waterDepthWrite: waterConfig.visual.depthWrite,
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
   if (isWebGpu) state.normalDivergence = false;
@@ -1152,6 +1166,7 @@ async function main() {
     state.grassEnabled = false;
     state.stonesEnabled = false;
     state.treesEnabled = false;
+    state.waterEnabled = false;
   }
   if (queryGrassPerfScene) {
     state.grassEnabled = true;
@@ -1708,6 +1723,7 @@ async function main() {
       groundLight: lighting.groundLight,
     };
     stones?.updateLighting(stoneLighting);
+    waterClipmap.updateSunDirection(lighting.sunDirection);
   };
   const grassSystem = new GrassSystem({
     scene,
@@ -1819,6 +1835,35 @@ async function main() {
       updateInfo();
     });
   }
+
+  // Fake Fable5-style water clipmap (visual POC only). Separate render layer that
+  // follows the camera and never feeds the CLOD page source path. The page-source
+  // exclusion assertion below mirrors the stones/trees guard.
+  const waterPageNodes = allNodes.filter((node) => node.level === 0);
+  const waterPageSignaturesBefore = pageMeshSignatures(waterPageNodes);
+  const waterField = new WaterField(waterConfig, { surfaceHeight });
+  const waterMaterialFactory = isWebGpu
+    ? (await import("./water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
+    : createWaterShaderMaterial;
+  const waterClipmap = new WaterClipmap({
+    scene,
+    config: waterConfig,
+    field: waterField,
+    createMaterial: waterMaterialFactory,
+    sunDirection: currentLighting().sunDirection.clone(),
+    cameraPosition: camera.position,
+  });
+  waterClipmap.setVisible(state.waterEnabled);
+  assertPageMeshSignaturesUnchanged(waterPageSignaturesBefore, pageMeshSignatures(waterPageNodes));
+  const waterDebugState: WaterDebugState = {
+    enabled: state.waterEnabled,
+    mode: state.waterDebugMode,
+    depthWrite: state.waterDepthWrite,
+  };
+  const makeWaterVisual = () => ({
+    ...waterConfig.visual,
+    depthWrite: state.waterDepthWrite,
+  });
 
   const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
@@ -2683,6 +2728,26 @@ async function main() {
   treeVisiblePatchesController = treeFolder.add(state, "treeVisiblePatches").name("visible patches").disable();
   treeLodSummaryController = treeFolder.add(state, "treeLodSummary").name("near/mid/far/impostor").disable();
   treeFolder.add(treeActions, "rebuild").name("rebuild");
+
+  // Water (fake clipmap) debug folder. The existing "freeze selection" toggle
+  // (state.freeze) already freezes CLOD page selection while water keeps
+  // following the camera, because waterClipmap.update runs every frame.
+  addWaterDebugFolder(gui, waterDebugState, {
+    onEnabled: (enabled) => {
+      state.waterEnabled = enabled;
+      waterClipmap.setVisible(enabled);
+    },
+    onMode: (mode) => {
+      state.waterDebugMode = mode;
+      waterClipmap.setDebugMode(WATER_DEBUG_MODES[mode]);
+    },
+    onDepthWrite: (on) => {
+      state.waterDepthWrite = on;
+    },
+    onRebuildVisual: () => {
+      waterClipmap.updateVisual(makeWaterVisual());
+    },
+  });
 
   const textureInput = document.createElement("input");
   textureInput.type = "file";
@@ -4132,6 +4197,10 @@ async function main() {
     grassSystem?.update(elapsedSeconds, grassCenter, camera);
     treeSystem?.update(elapsedSeconds, grassCenter, camera.position);
     stoneSystem?.update(grassCenter);
+    // Water follows the camera every frame, independent of state.freeze, so the
+    // fake lake/river clipmap keeps tracking the viewer while CLOD pages can be
+    // frozen. Updated after camera movement and before the render call below.
+    waterClipmap.update(Math.min(playerDelta, 0.1), camera.position);
     const nextTreeStats = treeSystem?.getStats();
     if (
       nextTreeStats && (
@@ -4279,6 +4348,7 @@ async function main() {
     grassSystem?.dispose();
     treeSystem?.dispose();
     stoneSystem?.dispose();
+    waterClipmap.dispose();
     skyEnvironment?.dispose();
     postProcess?.dispose();
     clodErrorCompute?.destroy();

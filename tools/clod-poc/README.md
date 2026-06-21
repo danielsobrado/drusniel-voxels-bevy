@@ -128,6 +128,7 @@ Available controls include:
 - Near-field bubble visualization
 - Digging and raising terrain edits
 - Player and orbit camera modes
+- Fake water clipmap (lake/river visual POC)
 
 ## Terrain Editing
 
@@ -137,6 +138,48 @@ near-field chunks are invalidated.
 
 The overlay reports the per-edit cost breakdown for LOD0 rebuilds, parent rebuilds, and
 collider refreshes.
+
+## Water (fake clipmap)
+
+A visual POC water layer (`config/water.yaml`, `src/water/`) renders fake lakes and
+rivers as a clipmap that follows the camera. It is not hydrology, not
+main Rust Bevy water, and not production water: no SSR, planar reflections,
+caustics, or physics in this first pass.
+
+The water layer is strictly separate from the CLOD page pipeline:
+
+- Water meshes are a dedicated render layer and are never included in CLOD page
+  source meshes, meshoptimizer simplification, page borders, page LOD selection,
+  terrain colliders, or page validation.
+- The dependency direction is scene -> water, never pages -> water.
+- A page-source signature assertion (`src/water/water.test.ts`) guards that
+  building and updating the water clipmap does not mutate page mesh signatures.
+
+Each clipmap level is a square grid (`cells_per_level + 1` vertices per edge) at a
+configured cell size. Per frame, after camera movement, every level snaps its
+origin to `cell_size * snap_cells` and refills vertex Y from the `WaterField`
+(`terrainY - dry_sentinel_depth` in dry areas, flat lake level, sloped river
+level). The shader discards pixels inside the previous (finer) level's world
+rectangle so only the ring between levels is drawn. Dry vertices (depth <= 0) are
+also discarded, so dry areas never show water above terrain.
+
+The `WaterField` exposes `waterYAt`, `depthAt`, `flowAt`, and `bodyMaskAt` and
+reads terrain height through a small adapter over `surfaceHeight`. Lakes are flat
+at `terrainHeight(center) + level_offset`; rivers use a capsule distance to the
+polyline with a sloped level via `downstream_drop`; lake flow is near-zero with a
+faint breeze fallback in the material, river flow follows the closest segment.
+
+Controls (lil-gui "water (fake clipmap)" folder):
+
+- `enabled` — show/hide the water layer.
+- `debug mode` — `0 final`, `1 water depth`, `2 foam`, `3 fresnel`, `4 body mask`,
+  `5 clipmap level color`.
+- `depth write` — toggle water depth writes (off by default to avoid transparent
+  sorting artifacts with grass).
+
+The existing "freeze selection" toggle freezes CLOD page selection while water
+keeps following the camera, because the water update runs every frame independent
+of the freeze flag.
 
 ## Project Archives
 
@@ -154,8 +197,10 @@ edits, and restores the GUI, texture slots, grass settings, and orbit camera.
 | Path | Role |
 |---|---|
 | `config/clod_pages.yaml` | CLOD page and selection settings |
+| `config/water.yaml` | Fake water clipmap settings (lakes, rivers, visuals, debug) |
 | `config/audio_events.yaml` | Audio event settings |
 | `config/content/` | Materials, biomes, texture slots, snap pieces, and debug presets |
+| `src/water/` | Fake water clipmap: config, field, material, clipmap, debug |
 | `src/terrain.ts` | Deterministic terrain field and chunk meshing |
 | `src/source_mesh.ts` | LOD0 page source mesh assembly |
 | `src/weld.ts` | Spatial-hash vertex welding |
