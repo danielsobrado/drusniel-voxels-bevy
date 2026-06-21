@@ -52,6 +52,43 @@ function Stop-ProcessTree {
     Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
 }
 
+function Get-ListeningProcessIds {
+    param([int]$Port)
+    $Connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    return @($Connections | Where-Object { $_.OwningProcess -gt 0 } | Select-Object -ExpandProperty OwningProcess -Unique)
+}
+
+function Stop-ProcessesUsingPort {
+    param([int]$Port)
+    $ProcessIds = @(Get-ListeningProcessIds -Port $Port)
+    if ($ProcessIds.Count -eq 0) {
+        throw "Port $Port is already in use, but Windows did not report an owning process."
+    }
+
+    $NormalizedPocDir = [System.IO.Path]::GetFullPath($PocDir).TrimEnd("\")
+    foreach ($ProcessId in $ProcessIds) {
+        $Process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        $ProcessName = if ($Process) { $Process.ProcessName } else { "unknown" }
+        $ProcessDetails = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+        $Fingerprint = "$($ProcessDetails.ExecutablePath) $($ProcessDetails.CommandLine)".Replace("/", "\")
+        if ($Fingerprint.IndexOf($NormalizedPocDir, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            throw "Port $Port is owned by PID $ProcessId ($ProcessName), which does not look like this CLOD PoC. Stop it manually or free the port before launching."
+        }
+
+        Write-Host "Stopping existing CLOD PoC listener on port $Port (PID $ProcessId, $ProcessName)..."
+        Stop-ProcessTree -ProcessId $ProcessId
+    }
+
+    $Deadline = (Get-Date).AddSeconds(10)
+    while ((Test-PortInUse -Port $Port) -and (Get-Date) -lt $Deadline) {
+        Start-Sleep -Milliseconds 250
+    }
+
+    if (Test-PortInUse -Port $Port) {
+        throw "Port $Port is still in use after stopping the previous listener."
+    }
+}
+
 Push-Location -LiteralPath $PocDir
 try {
     if (-not (Test-Path -LiteralPath $NodeModules -PathType Container)) {
@@ -71,7 +108,7 @@ try {
     }
 
     if (Test-PortInUse -Port $Port) {
-        throw "Port $Port is already in use. Stop the existing CLOD PoC server or free the port before launching."
+        Stop-ProcessesUsingPort -Port $Port
     }
 
     Write-Host "Starting CLOD PoC at $Url"

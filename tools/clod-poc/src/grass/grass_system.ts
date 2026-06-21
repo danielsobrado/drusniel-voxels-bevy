@@ -910,7 +910,7 @@ export class GrassSystem {
       populateGrassGeometry(farGeometry, this.terrainPatchFarGeometry, footprint, farInstances, this.settings);
     }
 
-    const superThinRatio = Math.max(0.001, farThinRatio * 0.5);
+    const superThinRatio = farThinRatio <= 0 ? 0 : farThinRatio * 0.5;
     const superCount = grassThinnedInstanceCount(instances.length, superThinRatio);
     const superInstances = instances.slice(0, superCount).map((instance) => ({
       ...instance,

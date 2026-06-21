@@ -10,6 +10,7 @@ import {
   createGrassTuftGeometry,
   generateGrassRingInstances,
   generateGrassInstances,
+  GrassSystem,
   grassFadeDistance,
   grassMaskForHeightNormal,
   grassGpuRingKey,
@@ -375,6 +376,68 @@ grass:
     expect(grassThinnedInstanceCount(100, -1)).toBe(0);
     expect(grassThinnedInstanceCount(100, 0.001)).toBe(1);
     expect(grassThinnedInstanceCount(100, 0.35)).toBe(35);
+  });
+
+  it("does not generate far or super terrain patch instances when far thinning is zero", () => {
+    const tierCounts = new Map<string, number>();
+    const material = new THREE.MeshBasicMaterial();
+    const lighting = {
+      light: new THREE.Vector3(0, 1, 0),
+      sunColor: new THREE.Color(1, 1, 1),
+      skyLight: new THREE.Color(0.5, 0.6, 0.7),
+      groundLight: new THREE.Color(0.2, 0.18, 0.16),
+    };
+    const system = new GrassSystem({
+      scene: new THREE.Scene(),
+      nodes: [{
+        id: "L0:0,0",
+        level: 0,
+        children: [],
+        mesh: {
+          positions: new Float32Array(),
+          normals: new Float32Array(),
+          materials: new Float32Array(),
+          indices: new Uint32Array(),
+        },
+        footprint,
+        bounds: { center: [8, 0, 8], radius: 12 },
+        errorWorld: 0,
+        lowBenefit: false,
+      }],
+      worldCells: 16,
+      settings: {
+        ...settings,
+        enabled: false,
+        shaderMode: "terrain-patch-v2",
+        lod: {
+          ...settings.lod,
+          midInstanceFraction: 0.5,
+          farDensityRatio: 0.5,
+          farInstanceFraction: 0,
+        },
+      },
+      lighting,
+      material: { material },
+      buildGeometry: (instances, options) => {
+        tierCounts.set(options.tier, instances.length);
+        return new THREE.InstancedBufferGeometry();
+      },
+    });
+    const blades = generateGrassInstances(footprint, { ...settings, shaderMode: "terrain-patch-v2" }, 100);
+    expect(blades.length).toBeGreaterThan(0);
+
+    const patch = (system as unknown as {
+      createTerrainPatch(nodeId: string, patchFootprint: PageFootprint, instances: typeof blades): {
+        meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[];
+      };
+    }).createTerrainPatch("L0:0,0", footprint, blades);
+
+    expect(tierCounts.get("near")).toBe(blades.length);
+    expect(tierCounts.get("mid")).toBeGreaterThan(0);
+    expect(tierCounts.get("far")).toBe(0);
+    expect(tierCounts.get("super")).toBe(0);
+    for (const mesh of patch.meshes) mesh.geometry.dispose();
+    material.dispose();
   });
 
   it("builds real clump and far tuft source geometry without NaN attributes", () => {

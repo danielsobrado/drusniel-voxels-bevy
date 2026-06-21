@@ -195,6 +195,7 @@ function toNodeTextures(
     normalIntensity: options.normalIntensity,
     triplanar: options.triplanar,
     normalMapMask,
+    debugMode: options.procedural?.debugMode ?? 0,
     procedural: options.procedural?.enabled && options.procedural.noiseA && options.procedural.noiseB
       ? {
           noiseA: options.procedural.noiseA,

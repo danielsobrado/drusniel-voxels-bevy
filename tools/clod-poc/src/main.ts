@@ -1028,7 +1028,7 @@ async function main() {
     frontSideOnly: false,
     recomputedNormals: false,
     forceMaxLevel: "auto",
-    terrainMaterialSource: (queryPerfMode || !proceduralTerrain ? "external_pbr" : "procedural") as TerrainMaterialSource,
+    terrainMaterialSource: "external_pbr" as TerrainMaterialSource,
     proceduralDebugMode: "final" as ProceduralDebugMode,
     proceduralMicroNormals: true,
     textureScale: 1,
@@ -1375,7 +1375,9 @@ async function main() {
         enabled: false,
         noiseA: null,
         noiseB: null,
-        debugMode: 0,
+        // Carry the debug-view selection even for external_pbr so the "procedural debug" dropdown
+        // works on the non-procedural source too (paint weights / albedo layer views).
+        debugMode: PROCEDURAL_DEBUG_MODES[state.proceduralDebugMode],
         microFadeStart: 45,
         microFadeEnd: 85,
         lodBias: 0,

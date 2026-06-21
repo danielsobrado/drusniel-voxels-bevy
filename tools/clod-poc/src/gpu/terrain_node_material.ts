@@ -21,6 +21,7 @@ import {
   clamp,
   dot,
   float,
+  floor,
   fract,
   max,
   min,
@@ -76,6 +77,8 @@ export interface TerrainNodeTextures {
   normalIntensity?: number;
   triplanar?: boolean;
   normalMapMask?: readonly number[] | Float32Array;
+  /** PROCEDURAL_DEBUG_MODES index; 0 = final. Drives the debug view overrides. */
+  debugMode?: number;
   procedural?: {
     noiseA: THREE.Texture;
     noiseB: THREE.Texture;
@@ -260,6 +263,8 @@ function paintedAlbedo(
   worldPos: TslNode,
   paintSlots: TslNode,
   paintWeights: TslNode,
+  weights: TslNode,
+  useTriplanar: boolean,
 ): TslNode {
   const channels = [
     { slot: paintSlots.x, weight: paintWeights.x },
@@ -270,16 +275,23 @@ function paintedAlbedo(
   let acc: TslNode = vec3(0);
   let wsum: TslNode = float(0);
   for (const channel of channels) {
-    const layer = max(channel.slot, 0.0);
-    // Sample the painted slot ONCE with a dynamic array layer, selecting that slot's scale
-    // with cheap scalar mixes — instead of triplanar-sampling every slot per channel.
+    // Round to the nearest integer layer. `channel.slot` is an interpolated vertex attribute, so
+    // even when it is "3.0" at every vertex, FP interpolation yields 3.0±ε per pixel; the array
+    // index conversion then flips between adjacent layers → screen-door speckle on painted terrain
+    // (worst on layers > 0; layer 0 is clamped so it stayed clean). The natural band path is clean
+    // because it indexes with a literal float(i). Snapping here removes the jitter.
+    const layer = floor(max(channel.slot, 0.0).add(0.5));
     let scale: TslNode = float(slots[0].scale);
     for (let i = 1; i < slots.length; i++) {
       scale = mix(scale, float(slots[i].scale), step(abs(layer.sub(i)), 0.5));
     }
     // Drop unpainted channels (slot < -0.5), matching the WebGL guard.
     const w = channel.weight.mul(step(0.0, channel.slot.add(0.5)));
-    acc = acc.add(texture(albedo, worldPos.xz.mul(scale)).depth(layer).rgb.mul(w));
+    // Triplanar-sample like paintedNormal and the natural band path. The previous planar (xz-only)
+    // sample projected the painted texture top-down, so on steep/vertical painted faces it
+    // degenerated into streaks/aliasing (the cube speckle) while the natural triplanar terrain
+    // stayed clean.
+    acc = acc.add(triplanarAlbedo(albedo, layer, worldPos, scale, weights, useTriplanar).mul(w));
     wsum = wsum.add(w);
   }
   return acc.div(max(wsum, 0.001));
@@ -304,7 +316,9 @@ function paintedNormal(
   let acc: TslNode = vec3(0);
   let wsum: TslNode = float(0);
   for (const channel of channels) {
-    const layer = max(channel.slot, 0.0);
+    // Round the interpolated layer index (see paintedAlbedo) to avoid per-pixel FP jitter between
+    // adjacent array layers.
+    const layer = floor(max(channel.slot, 0.0).add(0.5));
     let scale: TslNode = float(slots[0].scale);
     let hasNormal: TslNode = float((normalMapMask?.[0] ?? 1) > 0.5 ? 1 : 0);
     for (let i = 1; i < slots.length; i++) {
@@ -396,7 +410,7 @@ export function createTerrainNodeMaterial(
     }
     tex = mix(
       tex,
-      paintedAlbedo(textures.albedoArray, textures.slots, worldPos, paintSlots, paintWeights),
+      paintedAlbedo(textures.albedoArray, textures.slots, worldPos, paintSlots, paintWeights, weights, useTriplanar),
       paint,
     );
     // baseColor = tex * mix(vec3(1), uColor, 0.35)  (see main.ts texturing branch)
@@ -442,6 +456,16 @@ export function createTerrainNodeMaterial(
   const material = new MeshBasicNodeMaterial();
   let colorNode: TslNode = diffuse.add(uSun.mul(spec));
   colorNode = normalColorOn.select(geomN.mul(0.5).add(0.5), colorNode);
+  // Debug view overrides (creation-time constant from PROCEDURAL_DEBUG_MODES). These were never
+  // implemented on the WebGPU node material, so the "procedural debug" dropdown was a no-op here.
+  // 2 = paint weights (white where painted, black on natural terrain — reveals noisy paint coverage);
+  // 3 = albedo layer (the painted slot indices as RGB — reveals a jittering per-pixel layer index).
+  const debugMode = textures?.debugMode ?? 0;
+  if (debugMode === 2) {
+    colorNode = vec3(paint);
+  } else if (debugMode === 3) {
+    colorNode = vec3(max(paintSlots.x, 0.0), max(paintSlots.y, 0.0), max(paintSlots.z, 0.0)).div(8.0);
+  }
   const ditherNoise = interleavedGradientNoise(screenCoordinate);
   const fade = clamp(uFade, 0.0, 1.0);
   const fadeInDiscard = ditherNoise.greaterThan(fade);
