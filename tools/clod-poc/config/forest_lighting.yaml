@@ -1,0 +1,51 @@
+forest_lighting:
+  enabled: true
+  seed: 42491
+
+  field:
+    resolution: 128
+    update_distance_m: 8
+    max_update_pages_per_frame: 2
+    blur_radius_cells: 2
+    canopy_influence_radius_m: 7.5
+    understory_influence_radius_m: 2.5
+    density_falloff_power: 2.0
+
+  canopy:
+    enabled: true
+    min_tree_scale: 0.35
+    height_weight: 0.65
+    crown_radius_weight: 1.0
+    density_strength: 0.85
+    edge_softness: 0.45
+
+  ambient_occlusion:
+    enabled: true
+    strength: 0.32
+    min_occlusion: 0.0
+    max_occlusion: 0.72
+    terrain_contact_strength: 0.18
+    understory_strength: 0.12
+
+  shadow_proxy:
+    enabled: true
+    strength: 0.28
+    sun_direction_weight: 0.55
+    projection_distance_m: 9
+    softness_m: 5
+    max_shadow: 0.65
+
+  atmosphere:
+    enabled: true
+    forest_fog_strength: 0.22
+    forest_fog_height_m: 12
+    edge_fog_boost: 0.18
+    aerial_tint_strength: 0.12
+    sun_shafts_strength: 0.18
+    sun_shafts_threshold: 0.55
+
+  material_integration:
+    terrain_enabled: true
+    tree_enabled: true
+    understory_enabled: true
+    debug_mode: off

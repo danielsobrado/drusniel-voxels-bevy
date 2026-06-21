@@ -67,6 +67,24 @@ export interface TreeRenderSettings {
   debugColorByLod: boolean;
 }
 
+export interface TreeGpuSettings {
+  enabled: boolean;
+  preferWebGpu: boolean;
+  fallbackToCpu: boolean;
+  cullEnabled: boolean;
+  scatterEnabled: boolean;
+  readbackVisibleLists: boolean;
+  maxCandidates: number;
+  maxVisible: number;
+  workgroupSize: 32 | 64 | 128 | 256;
+  cullDistancePaddingM: number;
+  lodHysteresisM: number;
+  debugForceCpu: boolean;
+  debugShowGpuCounts: boolean;
+  debugValidateAgainstCpu: boolean;
+  debugReadbackLimit: number;
+}
+
 export interface TreeImpostorSettings {
   enabled: boolean;
   bakeOnStart: boolean;
@@ -186,6 +204,7 @@ export interface TreeSettings {
   ecology: TreeEcologySettings;
   foliage: TreeFoliageSettings;
   impostors: TreeImpostorSettings;
+  gpu: TreeGpuSettings;
   species: Record<TreeSpeciesId, TreeSpeciesSettings>;
   render: TreeRenderSettings;
 }
@@ -222,6 +241,23 @@ interface TreeYamlConfig {
     refresh_distance_m?: number;
     max_new_patches_per_frame?: number;
     max_instances?: number;
+    gpu?: {
+      enabled?: boolean;
+      prefer_webgpu?: boolean;
+      fallback_to_cpu?: boolean;
+      cull_enabled?: boolean;
+      scatter_enabled?: boolean;
+      readback_visible_lists?: boolean;
+      max_candidates?: number;
+      max_visible?: number;
+      workgroup_size?: number;
+      cull_distance_padding_m?: number;
+      lod_hysteresis_m?: number;
+      debug_force_cpu?: boolean;
+      debug_show_gpu_counts?: boolean;
+      debug_validate_against_cpu?: boolean;
+      debug_readback_limit?: number;
+    };
     placement?: {
       spacing_m?: number;
       jitter?: number;
@@ -471,6 +507,24 @@ export const DEFAULT_TREE_IMPOSTOR_SETTINGS: TreeImpostorSettings = {
   futureNormalDepth: false,
 };
 
+export const DEFAULT_TREE_GPU_SETTINGS: TreeGpuSettings = {
+  enabled: false,
+  preferWebGpu: true,
+  fallbackToCpu: true,
+  cullEnabled: true,
+  scatterEnabled: false,
+  readbackVisibleLists: true,
+  maxCandidates: 200_000,
+  maxVisible: 50_000,
+  workgroupSize: 64,
+  cullDistancePaddingM: 8,
+  lodHysteresisM: 8,
+  debugForceCpu: false,
+  debugShowGpuCounts: true,
+  debugValidateAgainstCpu: false,
+  debugReadbackLimit: 4096,
+};
+
 export const DEFAULT_TREE_SETTINGS: TreeSettings = {
   enabled: true,
   seed: 7331,
@@ -526,6 +580,7 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
     pine: { ...DEFAULT_TREE_FOLIAGE_SETTINGS.pine },
   },
   impostors: { ...DEFAULT_TREE_IMPOSTOR_SETTINGS },
+  gpu: { ...DEFAULT_TREE_GPU_SETTINGS },
   species: {
     oak: {
       enabled: true,
@@ -626,6 +681,7 @@ export function cloneTreeSettings(settings: TreeSettings = DEFAULT_TREE_SETTINGS
       pine: { ...settings.foliage.pine },
     },
     impostors: { ...settings.impostors },
+    gpu: { ...settings.gpu },
     render: { ...settings.render },
     species: {
       oak: { ...settings.species.oak, morphology: { ...settings.species.oak.morphology } },
@@ -661,6 +717,10 @@ function readFraction(value: unknown, fallback: number): number {
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function readTreeGpuWorkgroupSize(value: unknown, fallback: TreeGpuSettings["workgroupSize"]): TreeGpuSettings["workgroupSize"] {
+  return value === 32 || value === 64 || value === 128 || value === 256 ? value : fallback;
 }
 
 function readHeightPreference(value: unknown, fallback: TreeSpeciesZoneSettings["heightPreference"]): TreeSpeciesZoneSettings["heightPreference"] {
@@ -826,6 +886,29 @@ function readTreeWindSettings(
   };
 }
 
+function readTreeGpuSettings(
+  raw: NonNullable<TreeYamlConfig["trees"]>["gpu"] | undefined,
+  fallback: TreeGpuSettings,
+): TreeGpuSettings {
+  return {
+    enabled: readBoolean(raw?.enabled, fallback.enabled),
+    preferWebGpu: readBoolean(raw?.prefer_webgpu, fallback.preferWebGpu),
+    fallbackToCpu: readBoolean(raw?.fallback_to_cpu, fallback.fallbackToCpu),
+    cullEnabled: readBoolean(raw?.cull_enabled, fallback.cullEnabled),
+    scatterEnabled: readBoolean(raw?.scatter_enabled, fallback.scatterEnabled),
+    readbackVisibleLists: readBoolean(raw?.readback_visible_lists, fallback.readbackVisibleLists),
+    maxCandidates: readIntegerInRange(raw?.max_candidates, fallback.maxCandidates, 0, 2_000_000),
+    maxVisible: readIntegerInRange(raw?.max_visible, fallback.maxVisible, 0, 500_000),
+    workgroupSize: readTreeGpuWorkgroupSize(raw?.workgroup_size, fallback.workgroupSize),
+    cullDistancePaddingM: readNumberInRange(raw?.cull_distance_padding_m, fallback.cullDistancePaddingM, 0, 64),
+    lodHysteresisM: readNumberInRange(raw?.lod_hysteresis_m, fallback.lodHysteresisM, 0, 64),
+    debugForceCpu: readBoolean(raw?.debug_force_cpu, fallback.debugForceCpu),
+    debugShowGpuCounts: readBoolean(raw?.debug_show_gpu_counts, fallback.debugShowGpuCounts),
+    debugValidateAgainstCpu: readBoolean(raw?.debug_validate_against_cpu, fallback.debugValidateAgainstCpu),
+    debugReadbackLimit: readIntegerInRange(raw?.debug_readback_limit, fallback.debugReadbackLimit, 0, 100_000),
+  };
+}
+
 function readTreeLodSettings(
   raw: NonNullable<TreeYamlConfig["trees"]>["lod"] | undefined,
   fallback: TreeLodSettings,
@@ -937,6 +1020,7 @@ export function parseTreeConfig(
     ecology: readTreeEcologySettings(raw.ecology, fallback.ecology),
     foliage: readTreeFoliageSettings(raw.foliage, fallback.foliage),
     impostors: readTreeImpostorSettings(raw.impostors, fallback.impostors),
+    gpu: readTreeGpuSettings(raw.gpu, fallback.gpu),
     species: {
       oak: readSpecies(fallback.species.oak, raw.species?.oak),
       pine: readSpecies(fallback.species.pine, raw.species?.pine),

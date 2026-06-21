@@ -11,17 +11,17 @@ water:
 
   fake_bodies:
     lakes:
-      - center: [80, -70]
+      - center_norm: [0.52, 0.46]
         radius: [85, 55]
-        level_offset: 1.2
-      - center: [-180, 120]
+        level_offset: 5.0
+      - center_norm: [0.20, 0.80]
         radius: [60, 45]
-        level_offset: 0.8
+        level_offset: 4.5
     rivers:
-      - points: [[-260, -180], [-140, -90], [-20, -40], [90, -20], [230, 70]]
+      - points_norm: [[0.18, 0.38], [0.33, 0.45], [0.50, 0.48], [0.68, 0.55], [0.82, 0.62]]
         width: 18.0
-        level_offset: 0.9
-        downstream_drop: 3.5
+        level_offset: 4.8
+        downstream_drop: 1.5
 
   visual:
     shallow_color: [0.16, 0.38, 0.36]

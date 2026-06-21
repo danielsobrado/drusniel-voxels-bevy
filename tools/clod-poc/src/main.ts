@@ -5,9 +5,11 @@ import { parseConfig } from "./config.js";
 import configText from "../config/clod_pages.yaml?raw";
 import stoneConfigText from "../config/stones.yaml?raw";
 import treeConfigText from "../config/trees.yaml?raw";
+import understoryConfigText from "../config/understory.yaml?raw";
 import proceduralConfigText from "../config/procedural_textures.yaml?raw";
 import grassConfigText from "../config/grass.yaml?raw";
 import waterConfigText from "../config/water.yaml?raw";
+import forestLightingConfigText from "../config/forest_lighting.yaml?raw";
 import { ClodWorkerClient } from "./clod_worker_client.js";
 import { emitAudio, setAudioEnabled, setMasterVolume, getAudioState } from "./audio/index.js";
 import {
@@ -55,6 +57,21 @@ import { StoneSystem, type StoneLighting, type StoneStats } from "./stones/stone
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "./stones/stone_validation.js";
 import { formatTreeInfoLine, parseTreeConfig, TreeSystem, type TreeStats } from "./trees/index.js";
 import {
+  formatUnderstoryInfoLine,
+  parseUnderstoryConfig,
+  UnderstorySystem,
+  type UnderstorySettings,
+  type UnderstoryStats,
+} from "./understory/index.js";
+import {
+  ForestLightingSystem,
+  formatForestLightingInfoLine,
+  parseForestLightingConfig,
+  type ForestLightingDebugMode,
+  type ForestLightingSettings,
+  type ForestLightingStats,
+} from "./forest_lighting/index.js";
+import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
   PlayerInteractionState,
@@ -92,6 +109,7 @@ import {
   addWaterDebugFolder,
   type WaterDebugState,
   WATER_DEBUG_MODES,
+  resolveWaterConfig,
 } from "./water/index.js";
 import { createWaterShaderMaterial } from "./water/waterMaterial.js";
 import { createSkyNodeMaterial, type SkyNodeHandle } from "./gpu/sky_node_material.js";
@@ -527,6 +545,8 @@ async function main() {
   const queryScene = searchParams.get("scene");
   const queryGrassPerfScene = queryScene === "grass-perf";
   const queryTreePerfScene = queryScene === "trees-perf" || searchParams.get("treesPerf") === "1";
+  const queryTreeGpuRing = searchParams.get("treeGpu") === "1";
+  const queryForestFloorScene = queryScene === "forest-floor";
   const queryPerfMode = searchParams.get("clodPerf") === "1";
   const queryWebGpuSelection = searchParams.get("webgpuSelection") === "1";
   // CPU/GPU error_px parity is a full per-node sweep; opt-in keeps it from hitching the
@@ -574,8 +594,10 @@ async function main() {
   const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
   const stoneConfig = parseStoneConfig(stoneConfigText);
   const treeConfig = parseTreeConfig(treeConfigText);
+  const understoryConfig = parseUnderstoryConfig(understoryConfigText);
+  const forestLightingConfig = parseForestLightingConfig(forestLightingConfigText);
   const grassConfig = parseGrassConfig(grassConfigText);
-  const waterConfig = parseWaterConfig(waterConfigText);
+  let waterConfig = parseWaterConfig(waterConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
   const proceduralTerrain = proceduralTextureConfig.enabled
     ? createProceduralTerrainTextures(proceduralTextureConfig)
@@ -589,7 +611,7 @@ async function main() {
   // World size via ?world=. 8x8 gives full LOD0..LOD3 depth for A3 / delta-2-3
   // inspection; 16/32 keep the same max LOD with more roots and can freeze the tab longer.
   const requested = Number(searchParams.get("world"));
-  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : queryGrassPerfScene || queryTreePerfScene ? 16 : 4);
+  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : queryGrassPerfScene || queryTreePerfScene || queryForestFloorScene ? 16 : 4);
   let buildStatus = "preparing";
   const updateBuildOverlay = () => updateClodOverlay({
     worldSize: WORLD,
@@ -732,6 +754,28 @@ async function main() {
 
   const scene = new THREE.Scene();
   const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
+  waterConfig = resolveWaterConfig(waterConfig, worldCells);
+  let anyBodyInWorld = false;
+  for (const lake of waterConfig.fakeBodies.lakes) {
+    if (lake.center[0] >= 0 && lake.center[0] <= worldCells && lake.center[1] >= 0 && lake.center[1] <= worldCells) {
+      anyBodyInWorld = true;
+      break;
+    }
+  }
+  if (!anyBodyInWorld) {
+    for (const river of waterConfig.fakeBodies.rivers) {
+      for (const pt of river.points) {
+        if (pt[0] >= 0 && pt[0] <= worldCells && pt[1] >= 0 && pt[1] <= worldCells) {
+          anyBodyInWorld = true;
+          break;
+        }
+      }
+      if (anyBodyInWorld) break;
+    }
+  }
+  if (waterConfig.enabled && !anyBodyInWorld && (waterConfig.fakeBodies.lakes.length > 0 || waterConfig.fakeBodies.rivers.length > 0)) {
+    console.warn("[water] no fake water bodies inside world bounds; water will be invisible");
+  }
   const mid = worldCells / 2;
   const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 8000);
   camera.position.set(mid, worldCells * 0.7, mid + worldCells * 1.1);
@@ -1164,9 +1208,28 @@ async function main() {
     treeGustStrength: treeConfig.wind.gustStrength,
     treeTrunkSwayStrength: treeConfig.wind.trunkSwayStrength,
     treeLeafFlutterStrength: treeConfig.wind.leafFlutterStrength,
+    treeGpuEnabled: treeConfig.gpu.enabled,
+    treeGpuValidateCpu: treeConfig.gpu.debugValidateAgainstCpu,
+    treeGpuForceCpu: treeConfig.gpu.debugForceCpu,
+    treeGpuShowCounts: treeConfig.gpu.debugShowGpuCounts,
     treeTotal: 0,
     treeVisiblePatches: "0/0",
     treeLodSummary: "0/0/0/0",
+    treeGpuSummary: "disabled",
+    understoryEnabled: understoryConfig.enabled,
+    understoryDistance: understoryConfig.distanceM,
+    understoryMaxInstances: understoryConfig.maxInstances,
+    understoryDebugColorByClass: understoryConfig.render.debugColorByClass,
+    understoryTotal: 0,
+    understoryVisiblePatches: "0/0",
+    understoryClassSummary: "0/0/0/0/0/0",
+    forestLightingEnabled: forestLightingConfig.enabled,
+    forestLightingAoStrength: forestLightingConfig.ambientOcclusion.strength,
+    forestLightingShadowStrength: forestLightingConfig.shadowProxy.strength,
+    forestLightingFogStrength: forestLightingConfig.atmosphere.forestFogStrength,
+    forestLightingSunShaftsStrength: forestLightingConfig.atmosphere.sunShaftsStrength,
+    forestLightingDebugMode: forestLightingConfig.materialIntegration.debugMode as ForestLightingDebugMode,
+    forestLightingStats: "pending",
     waterEnabled: waterConfig.enabled,
     waterDebugMode: (Object.entries(WATER_DEBUG_MODES).find(([, v]) => v === waterConfig.debug.mode)?.[0] ?? "final") as keyof typeof WATER_DEBUG_MODES,
     waterDepthWrite: waterConfig.visual.depthWrite,
@@ -1214,6 +1277,20 @@ async function main() {
     state.grassEnabled = false;
     state.stonesEnabled = false;
     state.treesEnabled = true;
+    state.understoryEnabled = searchParams.get("understory") === "1";
+    state.postProcessEnabled = false;
+    state.postProcessDebugMode = "off";
+    state.showBounds = false;
+    state.showSeamPoints = false;
+    state.showCrossLodBorders = false;
+    state.showNodeLabels = false;
+    state.showLockedBorderVertices = false;
+  }
+  if (queryForestFloorScene) {
+    state.grassEnabled = true;
+    state.stonesEnabled = false;
+    state.treesEnabled = true;
+    state.understoryEnabled = true;
     state.postProcessEnabled = false;
     state.postProcessDebugMode = "off";
     state.showBounds = false;
@@ -1226,6 +1303,12 @@ async function main() {
   if (searchParams.get("stones") === "0") state.stonesEnabled = false;
   if (searchParams.get("trees") === "1") state.treesEnabled = true;
   if (searchParams.get("trees") === "0") state.treesEnabled = false;
+  if (queryTreeGpuRing) {
+    state.treesEnabled = true;
+    state.treeGpuEnabled = true;
+  }
+  if (searchParams.get("understory") === "1") state.understoryEnabled = true;
+  if (searchParams.get("understory") === "0") state.understoryEnabled = false;
   let colorByLodUserOverride = stagedImport !== null;
   let lastTexturesActive: boolean | null = null;
   let colorByLodController: { updateDisplay: () => unknown } | null = null;
@@ -1750,6 +1833,7 @@ async function main() {
       groundLight: lighting.groundLight,
     };
     stones?.updateLighting(stoneLighting);
+    treeSystem?.updateLighting(lighting);
     waterClipmap.updateSunDirection(lighting.sunDirection);
   };
   const grassSystem = new GrassSystem({
@@ -1844,6 +1928,58 @@ async function main() {
       ...treeConfig.render,
       debugColorByLod: state.treeDebugColorByLod,
     },
+    gpu: {
+      ...treeConfig.gpu,
+      enabled: state.treeGpuEnabled,
+      scatterEnabled: queryTreeGpuRing || treeConfig.gpu.scatterEnabled,
+      readbackVisibleLists: queryTreeGpuRing ? false : treeConfig.gpu.readbackVisibleLists,
+      debugValidateAgainstCpu: state.treeGpuValidateCpu,
+      debugForceCpu: state.treeGpuForceCpu,
+      debugShowGpuCounts: state.treeGpuShowCounts,
+    },
+  });
+  const makeUnderstorySettings = (): UnderstorySettings => ({
+    ...understoryConfig,
+    enabled: state.understoryEnabled,
+    distanceM: state.understoryDistance,
+    maxInstances: state.understoryMaxInstances,
+    placement: { ...understoryConfig.placement },
+    ecology: { ...understoryConfig.ecology },
+    classes: {
+      shrub: { ...understoryConfig.classes.shrub },
+      fern: { ...understoryConfig.classes.fern },
+      sapling: { ...understoryConfig.classes.sapling },
+      flower: { ...understoryConfig.classes.flower },
+      dead_log: { ...understoryConfig.classes.dead_log },
+      stump: { ...understoryConfig.classes.stump },
+    },
+    render: {
+      ...understoryConfig.render,
+      debugColorByClass: state.understoryDebugColorByClass,
+    },
+  });
+  const makeForestLightingSettings = (): ForestLightingSettings => ({
+    ...forestLightingConfig,
+    enabled: state.forestLightingEnabled,
+    field: { ...forestLightingConfig.field },
+    canopy: { ...forestLightingConfig.canopy },
+    ambientOcclusion: {
+      ...forestLightingConfig.ambientOcclusion,
+      strength: state.forestLightingAoStrength,
+    },
+    shadowProxy: {
+      ...forestLightingConfig.shadowProxy,
+      strength: state.forestLightingShadowStrength,
+    },
+    atmosphere: {
+      ...forestLightingConfig.atmosphere,
+      forestFogStrength: state.forestLightingFogStrength,
+      sunShaftsStrength: state.forestLightingSunShaftsStrength,
+    },
+    materialIntegration: {
+      ...forestLightingConfig.materialIntegration,
+      debugMode: state.forestLightingDebugMode,
+    },
   });
   const treePageNodes = allNodes.filter((node) => node.level === 0);
   const treePageSignaturesBefore = pageMeshSignatures(treePageNodes);
@@ -1852,16 +1988,40 @@ async function main() {
     nodes: treePageNodes,
     worldCells,
     settings: makeTreeSettings(),
+    webgpu: isWebGpu,
+    lighting: currentLighting(),
+    gpuDevice: rendererWebGpuDevice,
+    gpuBackend: isWebGpu ? app.renderer.backend as unknown as {
+      createStorageAttribute(attribute: THREE.BufferAttribute): void;
+      createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
+      get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
+    } : null,
+    supportsGpuTrees: isWebGpu,
   });
   assertPageMeshSignaturesUnchanged(treePageSignaturesBefore, pageMeshSignatures(treePageNodes));
   let treeStats: TreeStats | null = treeSystem.getStats();
-  if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
-    void treeSystem.bakeImpostors(renderer).then((result) => {
-      if (!result.supported) console.info(`[trees] impostor baking fallback: ${result.reason ?? "unsupported"}`);
-      refreshTreeStats();
-      updateInfo();
-    });
-  }
+
+  const understoryPageNodes = allNodes.filter((node) => node.level === 0);
+  const understoryPageSignaturesBefore = pageMeshSignatures(understoryPageNodes);
+  const understorySystem = new UnderstorySystem({
+    scene,
+    nodes: understoryPageNodes,
+    worldCells,
+    settings: makeUnderstorySettings(),
+  });
+  assertPageMeshSignaturesUnchanged(understoryPageSignaturesBefore, pageMeshSignatures(understoryPageNodes));
+  let understoryStats: UnderstoryStats | null = understorySystem.getStats();
+  const forestLightingSystem = new ForestLightingSystem({
+    worldCells,
+    settings: makeForestLightingSettings(),
+  });
+  let forestLightingStats: ForestLightingStats | null = forestLightingSystem.getStats();
+  const applyForestLightingToPropMaterials = () => {
+    const materialState = forestLightingSystem.getMaterialState();
+    treeSystem.updateForestLighting(materialState);
+    understorySystem.updateForestLighting(materialState);
+  };
+  applyForestLightingToPropMaterials();
 
   // Fake Fable5-style water clipmap (visual POC only). Separate render layer that
   // follows the camera and never feeds the CLOD page source path. The page-source
@@ -1869,6 +2029,19 @@ async function main() {
   const waterPageNodes = allNodes.filter((node) => node.level === 0);
   const waterPageSignaturesBefore = pageMeshSignatures(waterPageNodes);
   const waterField = new WaterField(waterConfig, { surfaceHeight });
+  (window as any).waterProbe = (x: number, z: number) => {
+    const s = waterField.sample(x, z);
+    console.log(`[water probe] (${x}, ${z}):`, s);
+    return s;
+  };
+  (window as any).waterProbeCenter = () => {
+    const firstLake = waterConfig.fakeBodies.lakes[0];
+    if (firstLake) {
+      return (window as any).waterProbe(firstLake.center[0], firstLake.center[1]);
+    }
+    console.warn("[water probe] no fake lakes configured");
+    return null;
+  };
   const waterMaterialFactory = isWebGpu
     ? (await import("./water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
     : createWaterShaderMaterial;
@@ -2022,7 +2195,7 @@ async function main() {
     const playerLine = interaction.mode === "playing"
       ? `player: grounded=${player.grounded}  physics p95=${player.physicsP95Ms().toFixed(2)} ms  collider pages=${player.lastPagesTested}`
       : `view: ${interaction.mode}`;
-    const sceneLabel = queryGrassPerfScene ? "  GRASS PERF" : queryTreePerfScene ? "  TREE PERF" : "";
+    const sceneLabel = queryGrassPerfScene ? "  GRASS PERF" : queryTreePerfScene ? "  TREE PERF" : queryForestFloorScene ? "  FOREST FLOOR" : "";
     info.textContent =
       `Drusniel Voxels Web — ${WORLD}x${WORLD} pages${sceneLabel}\n` +
       `cut: ${lastRenderedCount} nodes  (${lastLevelSummary})\n` +
@@ -2045,6 +2218,8 @@ async function main() {
           ` gpu-dispatch=${grassStats.gpuRingDispatchMs === null ? "-" : grassStats.gpuRingDispatchMs.toFixed(2)}ms`
         : grassStats ? ` gpu-grass=${grassStats.gpuRingStatus}` : ""}\n` +
       `${formatTreeInfoLine(state.treesEnabled, state.treeTotal, treeStats)}\n` +
+      `${formatUnderstoryInfoLine(state.understoryEnabled, state.understoryTotal, understoryStats)}\n` +
+      `${formatForestLightingInfoLine(state.forestLightingEnabled, forestLightingStats)}\n` +
       `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
       `${lastDigSummary ? `last: ${lastDigSummary}\n` : ""}` +
       `${lastArchiveSummary ? `${lastArchiveSummary}\n` : ""}` +
@@ -2326,6 +2501,10 @@ async function main() {
       if (state.treesEnabled && lod0.changed.length > 0) {
         treeSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
         refreshTreeStats();
+      }
+      if (state.understoryEnabled && lod0.changed.length > 0) {
+        understorySystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
+        refreshUnderstoryStats();
       }
       pendingParentNodes = 0;
       pendingParentMs = 0;
@@ -2702,16 +2881,33 @@ async function main() {
   let treeTotalController: { updateDisplay: () => unknown } | null = null;
   let treeVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
   let treeLodSummaryController: { updateDisplay: () => unknown } | null = null;
+  let treeGpuSummaryController: { updateDisplay: () => unknown } | null = null;
+  const formatTreeGpuSummary = (stats: TreeStats): string =>
+    stats.gpuStatus === "disabled"
+      ? "disabled"
+      : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}`;
   const refreshTreeStats = () => {
     if (!treeSystem) return;
     treeStats = treeSystem.getStats();
     state.treeTotal = treeStats.totalTrees;
     state.treeVisiblePatches = `${treeStats.visiblePatches}/${treeStats.patches}`;
     state.treeLodSummary = `${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}`;
+    state.treeGpuSummary = formatTreeGpuSummary(treeStats);
     treeTotalController?.updateDisplay();
     treeVisiblePatchesController?.updateDisplay();
     treeLodSummaryController?.updateDisplay();
+    treeGpuSummaryController?.updateDisplay();
   };
+  // Kicked off here (not at TreeSystem construction) so the fire-and-forget
+  // `.then` — which resolves immediately on WebGPU, where baking is unsupported —
+  // can safely call refreshTreeStats/updateInfo, which are defined by this point.
+  if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
+    void treeSystem.bakeImpostors(renderer).then((result) => {
+      if (!result.supported) console.info(`[trees] impostor baking fallback: ${result.reason ?? "unsupported"}`);
+      refreshTreeStats();
+      updateInfo();
+    });
+  }
   const updateTreeWindSettings = () => treeSystem?.updateSettings({
     wind: {
       ...treeConfig.wind,
@@ -2729,6 +2925,21 @@ async function main() {
       debugColorByLod: state.treeDebugColorByLod,
     },
   });
+  const updateTreeGpuSettings = () => {
+    treeSystem?.updateSettings({
+      gpu: {
+        ...treeConfig.gpu,
+        enabled: state.treeGpuEnabled,
+        scatterEnabled: queryTreeGpuRing || treeConfig.gpu.scatterEnabled,
+        readbackVisibleLists: queryTreeGpuRing ? false : treeConfig.gpu.readbackVisibleLists,
+        debugValidateAgainstCpu: state.treeGpuValidateCpu,
+        debugForceCpu: state.treeGpuForceCpu,
+        debugShowGpuCounts: state.treeGpuShowCounts,
+      },
+    });
+    refreshTreeStats();
+    updateInfo();
+  };
   const treeActions = {
     rebuild: () => {
       treeSystem?.updateSettings(makeTreeSettings());
@@ -2747,6 +2958,10 @@ async function main() {
   treeFolder.add(state, "treeDistance", 0, 600, 5).name("distance").onFinishChange(treeActions.rebuild);
   treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild);
   treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(updateTreeRenderSettings);
+  treeFolder.add(state, "treeGpuEnabled").name("GPU cull").onChange(updateTreeGpuSettings);
+  treeFolder.add(state, "treeGpuValidateCpu").name("GPU validate CPU").onChange(updateTreeGpuSettings);
+  treeFolder.add(state, "treeGpuForceCpu").name("force CPU").onChange(updateTreeGpuSettings);
+  treeFolder.add(state, "treeGpuShowCounts").name("show GPU counts").onChange(updateTreeGpuSettings);
   treeFolder.add(state, "treeWindEnabled").name("wind enabled").onChange(updateTreeWindSettings);
   treeFolder.add(state, "treeWindStrength", 0, 1, 0.01).name("wind strength").onChange(updateTreeWindSettings);
   treeFolder.add(state, "treeWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateTreeWindSettings);
@@ -2756,7 +2971,82 @@ async function main() {
   treeTotalController = treeFolder.add(state, "treeTotal").name("total").disable();
   treeVisiblePatchesController = treeFolder.add(state, "treeVisiblePatches").name("visible patches").disable();
   treeLodSummaryController = treeFolder.add(state, "treeLodSummary").name("near/mid/far/impostor").disable();
+  treeGpuSummaryController = treeFolder.add(state, "treeGpuSummary").name("GPU").disable();
   treeFolder.add(treeActions, "rebuild").name("rebuild");
+
+  let understoryTotalController: { updateDisplay: () => unknown } | null = null;
+  let understoryVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
+  let understoryClassSummaryController: { updateDisplay: () => unknown } | null = null;
+  const refreshUnderstoryStats = () => {
+    if (!understorySystem) return;
+    understoryStats = understorySystem.getStats();
+    state.understoryTotal = understoryStats.totalInstances;
+    state.understoryVisiblePatches = `${understoryStats.visiblePatches}/${understoryStats.patches}`;
+    state.understoryClassSummary =
+      `${understoryStats.shrub}/${understoryStats.fern}/${understoryStats.sapling}/${understoryStats.flower}/${understoryStats.deadLog}/${understoryStats.stump}`;
+    understoryTotalController?.updateDisplay();
+    understoryVisiblePatchesController?.updateDisplay();
+    understoryClassSummaryController?.updateDisplay();
+  };
+  const updateUnderstoryRenderSettings = () => {
+    understorySystem?.updateSettings({
+      render: {
+        ...understoryConfig.render,
+        debugColorByClass: state.understoryDebugColorByClass,
+      },
+    });
+    refreshUnderstoryStats();
+    updateInfo();
+  };
+  const understoryActions = {
+    rebuild: () => {
+      understorySystem?.updateSettings(makeUnderstorySettings());
+      understorySystem?.rebuild();
+      refreshUnderstoryStats();
+      updateInfo();
+    },
+  };
+  const understoryFolder = gui.addFolder("understory (props)");
+  understoryFolder.add(state, "understoryEnabled").name("enabled").onChange((enabled: boolean) => {
+    understorySystem?.setEnabled(enabled);
+    refreshUnderstoryStats();
+    updateInfo();
+  });
+  understoryFolder.add(state, "understoryDistance", 0, 600, 5).name("distance").onFinishChange(understoryActions.rebuild);
+  understoryFolder.add(state, "understoryMaxInstances", 0, 100000, 100).name("max instances").onFinishChange(understoryActions.rebuild);
+  understoryFolder.add(state, "understoryDebugColorByClass").name("debug color by class").onChange(updateUnderstoryRenderSettings);
+  understoryTotalController = understoryFolder.add(state, "understoryTotal").name("total").disable();
+  understoryVisiblePatchesController = understoryFolder.add(state, "understoryVisiblePatches").name("visible patches").disable();
+  understoryClassSummaryController = understoryFolder.add(state, "understoryClassSummary").name("sh/f/sap/fl/log/stump").disable();
+  understoryFolder.add(understoryActions, "rebuild").name("rebuild");
+
+  let forestLightingStatsController: { updateDisplay: () => unknown } | null = null;
+  const refreshForestLightingStats = () => {
+    forestLightingStats = forestLightingSystem.getStats();
+    state.forestLightingStats = forestLightingStats.enabled
+      ? `canopy=${forestLightingStats.maxCanopy.toFixed(2)} ao=${forestLightingStats.maxAo.toFixed(2)} ` +
+        `shadow=${forestLightingStats.maxShadow.toFixed(2)} fog=${forestLightingStats.maxFog.toFixed(2)}`
+      : "disabled";
+    forestLightingStatsController?.updateDisplay();
+  };
+  const updateForestLightingSettings = () => {
+    forestLightingSystem.updateSettings(makeForestLightingSettings());
+    applyForestLightingToPropMaterials();
+    refreshForestLightingStats();
+    updateInfo();
+  };
+  const forestLightingFolder = gui.addFolder("forest lighting");
+  forestLightingFolder.add(state, "forestLightingEnabled").name("enabled").onChange(updateForestLightingSettings);
+  forestLightingFolder.add(state, "forestLightingAoStrength", 0, 1, 0.01).name("AO strength").onChange(updateForestLightingSettings);
+  forestLightingFolder.add(state, "forestLightingShadowStrength", 0, 1, 0.01).name("shadow strength").onChange(updateForestLightingSettings);
+  forestLightingFolder.add(state, "forestLightingFogStrength", 0, 1, 0.01).name("forest fog").onChange(updateForestLightingSettings);
+  forestLightingFolder.add(state, "forestLightingSunShaftsStrength", 0, 1, 0.01).name("sun shafts").onChange(updateForestLightingSettings);
+  forestLightingFolder.add(
+    state,
+    "forestLightingDebugMode",
+    ["off", "canopy", "ao", "shadow", "fog", "sun_shafts", "combined"],
+  ).name("debug mode").onChange(updateForestLightingSettings);
+  forestLightingStatsController = forestLightingFolder.add(state, "forestLightingStats").name("stats").disable();
 
   // Water (fake clipmap) debug folder. The existing "freeze selection" toggle
   // (state.freeze) already freezes CLOD page selection while water keeps
@@ -4050,6 +4340,12 @@ async function main() {
   treeSystem?.setEnabled(state.treesEnabled);
   treeSystem?.updateSettings(makeTreeSettings());
   refreshTreeStats();
+  understorySystem?.setEnabled(state.understoryEnabled);
+  understorySystem?.updateSettings(makeUnderstorySettings());
+  refreshUnderstoryStats();
+  forestLightingSystem.updateSettings(makeForestLightingSettings());
+  applyForestLightingToPropMaterials();
+  refreshForestLightingStats();
   updateSelection();
   updateInfo();
 
@@ -4225,6 +4521,13 @@ async function main() {
     const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
     grassSystem?.update(elapsedSeconds, grassCenter, camera);
     treeSystem?.update(elapsedSeconds, grassCenter, camera.position);
+    understorySystem?.update(elapsedSeconds, grassCenter);
+    forestLightingSystem.update(elapsedSeconds, grassCenter, {
+      treeProxies: treeSystem.getLightingProxies(),
+      understoryProxies: understorySystem.getLightingProxies(),
+      sunDirection: currentLighting().sunDirection,
+    });
+    applyForestLightingToPropMaterials();
     stoneSystem?.update(grassCenter);
     // Water follows the camera every frame, independent of state.freeze, so the
     // fake lake/river clipmap keeps tracking the viewer while CLOD pages can be
@@ -4233,15 +4536,35 @@ async function main() {
     if (!waterDevLogged) {
       waterDevLogged = true;
       const rect = waterClipmap.getLevelRect(0);
+      const firstLake = waterConfig.fakeBodies.lakes[0];
+      const lakeCenterSample = firstLake ? waterField.sample(firstLake.center[0], firstLake.center[1]) : null;
+      const firstRiver = waterConfig.fakeBodies.rivers[0];
+      let riverMidSample = null;
+      if (firstRiver && firstRiver.points.length >= 2) {
+        const midIdx = Math.floor(firstRiver.points.length / 2);
+        const p1 = firstRiver.points[midIdx - 1];
+        const p2 = firstRiver.points[midIdx];
+        const midX = (p1[0] + p2[0]) / 2;
+        const midZ = (p1[1] + p2[1]) / 2;
+        riverMidSample = waterField.sample(midX, midZ);
+      }
       console.log("[DEV LOG] Water System Initialized:", {
-        worldBounds: { cellsX: worldCells, cellsZ: worldCells },
-        waterConfigSummary: {
-          enabled: waterConfig.enabled,
-          lakesCount: waterConfig.fakeBodies.lakes.length,
-          riversCount: waterConfig.fakeBodies.rivers.length,
-          cellSizes: waterConfig.cellSizes,
-          snapCells: waterConfig.snapCells,
-        },
+        worldCells,
+        worldBounds: { minX: 0, minZ: 0, maxX: worldCells, maxZ: worldCells },
+        resolvedLakes: waterConfig.fakeBodies.lakes.map((l) => ({ center: l.center, radius: l.radius, levelOffset: l.levelOffset })),
+        resolvedRivers: waterConfig.fakeBodies.rivers.map((r) => r.points),
+        lakeCenterSample: lakeCenterSample ? {
+          terrainY: lakeCenterSample.terrainY,
+          waterY: lakeCenterSample.waterY,
+          depth: lakeCenterSample.depth,
+          bodyMask: lakeCenterSample.bodyMask,
+        } : null,
+        riverMidpointSample: riverMidSample ? {
+          terrainY: riverMidSample.terrainY,
+          waterY: riverMidSample.waterY,
+          depth: riverMidSample.depth,
+          bodyMask: riverMidSample.bodyMask,
+        } : null,
         firstLevelRect: rect ? { minX: rect.minX, minZ: rect.minZ, maxX: rect.maxX, maxZ: rect.maxZ } : null,
       });
     }
@@ -4255,15 +4578,21 @@ async function main() {
       nextTreeStats.nearTrees !== treeStats.nearTrees ||
       nextTreeStats.midTrees !== treeStats.midTrees ||
       nextTreeStats.farTrees !== treeStats.farTrees ||
-      nextTreeStats.impostorTrees !== treeStats.impostorTrees)
+      nextTreeStats.impostorTrees !== treeStats.impostorTrees ||
+      nextTreeStats.gpuStatus !== treeStats.gpuStatus ||
+      nextTreeStats.gpuCandidateCount !== treeStats.gpuCandidateCount ||
+      nextTreeStats.gpuVisibleCount !== treeStats.gpuVisibleCount ||
+      nextTreeStats.gpuOverflowed !== treeStats.gpuOverflowed)
     ) {
       treeStats = nextTreeStats;
       state.treeTotal = nextTreeStats.totalTrees;
       state.treeVisiblePatches = `${nextTreeStats.visiblePatches}/${nextTreeStats.patches}`;
       state.treeLodSummary = `${nextTreeStats.nearTrees}/${nextTreeStats.midTrees}/${nextTreeStats.farTrees}/${nextTreeStats.impostorTrees}`;
+      state.treeGpuSummary = formatTreeGpuSummary(nextTreeStats);
       treeTotalController?.updateDisplay();
       treeVisiblePatchesController?.updateDisplay();
       treeLodSummaryController?.updateDisplay();
+      treeGpuSummaryController?.updateDisplay();
     }
     const nextStoneStats = stoneSystem?.getStats();
     if (nextStoneStats && (!stoneStats || nextStoneStats.total !== stoneStats.total || nextStoneStats.visible !== stoneStats.visible)) {
@@ -4274,6 +4603,38 @@ async function main() {
       stoneTotalController?.updateDisplay();
       stoneClassSummaryController?.updateDisplay();
       stoneVisibleController?.updateDisplay();
+    }
+    const nextUnderstoryStats = understorySystem?.getStats();
+    if (
+      nextUnderstoryStats && (
+      !understoryStats ||
+      nextUnderstoryStats.totalInstances !== understoryStats.totalInstances ||
+      nextUnderstoryStats.visiblePatches !== understoryStats.visiblePatches ||
+      nextUnderstoryStats.patches !== understoryStats.patches)
+    ) {
+      understoryStats = nextUnderstoryStats;
+      state.understoryTotal = nextUnderstoryStats.totalInstances;
+      state.understoryVisiblePatches = `${nextUnderstoryStats.visiblePatches}/${nextUnderstoryStats.patches}`;
+      state.understoryClassSummary =
+        `${nextUnderstoryStats.shrub}/${nextUnderstoryStats.fern}/${nextUnderstoryStats.sapling}/${nextUnderstoryStats.flower}/${nextUnderstoryStats.deadLog}/${nextUnderstoryStats.stump}`;
+      understoryTotalController?.updateDisplay();
+      understoryVisiblePatchesController?.updateDisplay();
+      understoryClassSummaryController?.updateDisplay();
+    }
+    const nextForestLightingStats = forestLightingSystem.getStats();
+    if (
+      !forestLightingStats ||
+      nextForestLightingStats.textureUpdates !== forestLightingStats.textureUpdates ||
+      nextForestLightingStats.enabled !== forestLightingStats.enabled ||
+      nextForestLightingStats.treeProxies !== forestLightingStats.treeProxies ||
+      nextForestLightingStats.understoryProxies !== forestLightingStats.understoryProxies
+    ) {
+      forestLightingStats = nextForestLightingStats;
+      state.forestLightingStats = nextForestLightingStats.enabled
+        ? `canopy=${nextForestLightingStats.maxCanopy.toFixed(2)} ao=${nextForestLightingStats.maxAo.toFixed(2)} ` +
+          `shadow=${nextForestLightingStats.maxShadow.toFixed(2)} fog=${nextForestLightingStats.maxFog.toFixed(2)}`
+        : "disabled";
+      forestLightingStatsController?.updateDisplay();
     }
     const nextGrassStats = grassSystem?.getStats();
     if (
@@ -4390,6 +4751,7 @@ async function main() {
   window.addEventListener("beforeunload", () => {
     lockedBorderOverlay.dispose();
     grassSystem?.dispose();
+    forestLightingSystem.dispose();
     treeSystem?.dispose();
     stoneSystem?.dispose();
     waterClipmap.dispose();

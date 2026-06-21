@@ -1,10 +1,12 @@
 import terrainBindings from "./shaders/terrain_field_bindings_terrain.wgsl?raw";
 import grassBindings from "./shaders/terrain_field_bindings_grass.wgsl?raw";
 import stoneBindings from "./shaders/terrain_field_bindings_stone.wgsl?raw";
+import treeBindings from "./shaders/terrain_field_bindings_tree.wgsl?raw";
 import terrainCommon from "./shaders/terrain_field_common.wgsl?raw";
 import terrainEntry from "./shaders/terrain_field_entry.wgsl?raw";
 import grassRingEntry from "./shaders/grass_ring.compute.wgsl?raw";
 import stoneScatterEntry from "./shaders/stone_scatter.compute.wgsl?raw";
+import treeRingEntry from "./shaders/tree_ring.compute.wgsl?raw";
 
 const FIELD_GLOBALS = ["digEdits", "fieldParams"] as const;
 
@@ -33,4 +35,8 @@ export function composeGrassRingShader(): string {
 
 export function composeStoneScatterShader(): string {
   return composeShader("stone scatter shader", [stoneBindings, terrainCommon, stoneScatterEntry]);
+}
+
+export function composeTreeRingShader(): string {
+  return composeShader("tree ring shader", [treeBindings, terrainCommon, treeRingEntry]);
 }

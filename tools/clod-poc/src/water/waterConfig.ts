@@ -19,12 +19,14 @@ export type WaterDebugModeId = typeof WATER_DEBUG_MODES[WaterDebugMode];
 
 export interface LakeBodyConfig {
   center: [number, number];
+  centerNorm?: [number, number];
   radius: [number, number];
   levelOffset: number;
 }
 
 export interface RiverBodyConfig {
   points: Array<[number, number]>;
+  pointsNorm?: Array<[number, number]>;
   width: number;
   levelOffset: number;
   downstreamDrop: number;
@@ -84,15 +86,16 @@ export const DEFAULT_WATER_CONFIG: WaterConfig = {
   drySentinelDepth: 2.0,
   fakeBodies: {
     lakes: [
-      { center: [80, -70], radius: [85, 55], levelOffset: 1.2 },
-      { center: [-180, 120], radius: [60, 45], levelOffset: 0.8 },
+      { center: [0, 0], centerNorm: [0.52, 0.46], radius: [85, 55], levelOffset: 5.0 },
+      { center: [0, 0], centerNorm: [0.20, 0.80], radius: [60, 45], levelOffset: 4.5 },
     ],
     rivers: [
       {
-        points: [[-260, -180], [-140, -90], [-20, -40], [90, -20], [230, 70]],
+        points: [],
+        pointsNorm: [[0.18, 0.38], [0.33, 0.45], [0.50, 0.48], [0.68, 0.55], [0.82, 0.62]],
         width: 18.0,
-        levelOffset: 0.9,
-        downstreamDrop: 3.5,
+        levelOffset: 4.8,
+        downstreamDrop: 1.5,
       },
     ],
   },
@@ -107,11 +110,13 @@ export function cloneWaterConfig(config: WaterConfig = DEFAULT_WATER_CONFIG): Wa
     fakeBodies: {
       lakes: config.fakeBodies.lakes.map((lake) => ({
         center: [...lake.center] as [number, number],
+        centerNorm: lake.centerNorm ? [...lake.centerNorm] as [number, number] : undefined,
         radius: [...lake.radius] as [number, number],
         levelOffset: lake.levelOffset,
       })),
       rivers: config.fakeBodies.rivers.map((river) => ({
         points: river.points.map((p) => [...p] as [number, number]),
+        pointsNorm: river.pointsNorm ? river.pointsNorm.map((p) => [...p] as [number, number]) : undefined,
         width: river.width,
         levelOffset: river.levelOffset,
         downstreamDrop: river.downstreamDrop,
@@ -197,11 +202,13 @@ interface WaterYamlConfig {
     fake_bodies?: {
       lakes?: Array<{
         center?: unknown;
+        center_norm?: unknown;
         radius?: unknown;
         level_offset?: unknown;
       }>;
       rivers?: Array<{
         points?: unknown;
+        points_norm?: unknown;
         width?: unknown;
         level_offset?: unknown;
         downstream_drop?: unknown;
@@ -252,8 +259,11 @@ export function parseWaterConfig(
   const rawLakes = raw.fake_bodies?.lakes;
   const lakes: LakeBodyConfig[] = [];
   for (const rawLake of rawLakes ?? []) {
+    const center = readVec2(rawLake.center, rawLake.center_norm ? [0, 0] : fb.fakeBodies.lakes[0].center);
+    const centerNorm = rawLake.center_norm ? readVec2(rawLake.center_norm, [0.5, 0.5]) : undefined;
     lakes.push({
-      center: readVec2(rawLake.center, fb.fakeBodies.lakes[0].center),
+      center,
+      centerNorm,
       radius: readVec2(rawLake.radius, fb.fakeBodies.lakes[0].radius),
       levelOffset: readNumber(rawLake.level_offset, fb.fakeBodies.lakes[0].levelOffset),
     });
@@ -269,9 +279,11 @@ export function parseWaterConfig(
   const rawRivers = raw.fake_bodies?.rivers;
   const rivers: RiverBodyConfig[] = [];
   for (const rawRiver of rawRivers ?? []) {
-    const points = readPointArray(rawRiver.points, fb.fakeBodies.rivers[0].points);
+    const points = readPointArray(rawRiver.points, rawRiver.points_norm ? [] : fb.fakeBodies.rivers[0].points);
+    const pointsNorm = rawRiver.points_norm ? readPointArray(rawRiver.points_norm, []) : undefined;
     rivers.push({
       points,
+      pointsNorm,
       width: readNumberAtLeast(rawRiver.width, fb.fakeBodies.rivers[0].width, 0.1),
       levelOffset: readNumber(rawRiver.level_offset, fb.fakeBodies.rivers[0].levelOffset),
       downstreamDrop: readNumber(rawRiver.downstream_drop, fb.fakeBodies.rivers[0].downstreamDrop),
@@ -322,4 +334,20 @@ export function parseWaterConfig(
     visual,
     debug: { mode: debugMode },
   };
+}
+
+/** Resolves normalized fake bodies to absolute coordinate space. */
+export function resolveWaterConfig(config: WaterConfig, worldCells: number): WaterConfig {
+  const resolved = cloneWaterConfig(config);
+  for (const lake of resolved.fakeBodies.lakes) {
+    if (lake.centerNorm) {
+      lake.center = [lake.centerNorm[0] * worldCells, lake.centerNorm[1] * worldCells];
+    }
+  }
+  for (const river of resolved.fakeBodies.rivers) {
+    if (river.pointsNorm) {
+      river.points = river.pointsNorm.map((p) => [p[0] * worldCells, p[1] * worldCells]);
+    }
+  }
+  return resolved;
 }

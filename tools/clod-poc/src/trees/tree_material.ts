@@ -1,13 +1,26 @@
 import * as THREE from "three";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
+import type { EnvironmentLighting } from "../environment.js";
+import {
+  createForestLightingUniforms,
+  injectForestLightingFragmentShader,
+  injectForestLightingVertexShader,
+  updateForestLightingUniforms,
+  type ForestLightingMaterialState,
+  type ForestLightingUniforms,
+} from "../forest_lighting/index.js";
 
 export interface TreeMaterialHandle {
-  regularMaterial: THREE.MeshStandardMaterial;
-  debugMaterials: Record<TreeLod, THREE.MeshBasicMaterial>;
+  regularMaterial: THREE.Material;
+  debugMaterials: Record<TreeLod, THREE.Material>;
   setTime(timeSeconds: number): void;
+  setFadeCenter?(x: number, z: number): void;
   updateSettings(settings: TreeSettings): void;
   dispose(): void;
+  /** WebGPU node path only; the classic WebGL path lights via scene lights. */
+  updateLighting?(lighting: EnvironmentLighting): void;
+  updateForestLighting?(state: ForestLightingMaterialState | null): void;
 }
 
 const LOD_COLORS: Record<TreeLod, number> = {
@@ -29,6 +42,7 @@ interface TreeWindUniforms {
 
 export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHandle {
   const uniforms = createTreeWindUniforms(settings);
+  const forestUniforms = createForestLightingUniforms();
   let foliageAtlas: TreeFoliageAtlas | null = null;
   const regularMaterial = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -42,7 +56,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     foliageAtlas?.dispose();
     foliageAtlas = atlas;
   });
-  attachTreeShader(regularMaterial, uniforms);
+  attachTreeShader(regularMaterial, uniforms, forestUniforms);
 
   const debugMaterials = {} as Record<TreeLod, THREE.MeshBasicMaterial>;
   for (const lod of TREE_LODS) {
@@ -51,7 +65,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
       side: THREE.DoubleSide,
       transparent: false,
     });
-    attachTreeShader(material, uniforms);
+    attachTreeShader(material, uniforms, forestUniforms);
     debugMaterials[lod] = material;
   }
 
@@ -68,6 +82,9 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
         foliageAtlas = atlas;
       });
     },
+    updateForestLighting(state) {
+      updateForestLightingUniforms(forestUniforms, state, "tree");
+    },
     dispose() {
       foliageAtlas?.dispose();
       regularMaterial.dispose();
@@ -81,9 +98,10 @@ export function injectTreeWindShader(vertexShader: string): string {
     .replace(
       "#include <common>",
       `#include <common>
-attribute float treeWindWeight;
-attribute float treeFlutterWeight;
+attribute vec2 treeWind;
 attribute vec2 treeWorldXZ;
+attribute float treeLodFade;
+varying float vTreeLodFade;
 uniform float uTreeTime;
 uniform vec2 uTreeWindDirection;
 uniform float uTreeWindStrength;
@@ -99,6 +117,7 @@ float treeWindHash(vec2 value) {
     .replace(
       "#include <begin_vertex>",
       `#include <begin_vertex>
+vTreeLodFade = treeLodFade;
 #ifdef USE_INSTANCING
 vec2 treeInstanceWorldXZ = treeWorldXZ;
 #else
@@ -108,9 +127,9 @@ float treePhase = treeWindHash(treeInstanceWorldXZ);
 float treeTime = uTreeTime * uTreeWindSpeed;
 float treeWave = sin(treeTime + treePhase * 6.2831853 + dot(treeInstanceWorldXZ, uTreeWindDirection) * 0.035);
 float treeGust = sin(treeTime * 0.37 + treePhase * 12.9898) * uTreeGustStrength;
-float treeSway = (treeWave * uTreeWindStrength + treeGust) * treeWindWeight * uTreeTrunkSwayStrength;
+float treeSway = (treeWave * uTreeWindStrength + treeGust) * treeWind.x * uTreeTrunkSwayStrength;
 float treeFlutter = sin(treeTime * 7.0 + treePhase * 19.19 + position.y * 2.3) *
-  uTreeWindStrength * uTreeLeafFlutterStrength * treeFlutterWeight;
+  uTreeWindStrength * uTreeLeafFlutterStrength * treeWind.y;
 transformed.xz += uTreeWindDirection * (treeSway + treeFlutter);`,
     );
 }
@@ -142,11 +161,35 @@ diffuseColor.a = mix(1.0, diffuseColor.a, clamp(vTreeFoliageMask, 0.0, 1.0));
   );
 }
 
-function attachTreeShader(material: THREE.Material, uniforms: TreeWindUniforms): void {
+/**
+ * Screen-door LOD crossfade discard. Kept separate from the foliage injection so
+ * it is only applied to the regular/debug materials (which carry the per-instance
+ * `treeLodFade` attribute) and never to the impostor bake material.
+ */
+export function injectTreeLodFadeFragmentShader(fragmentShader: string): string {
+  return fragmentShader.replace(
+    "#include <common>",
+    `#include <common>
+varying float vTreeLodFade;`,
+  ).replace(
+    "#include <clipping_planes_fragment>",
+    `#include <clipping_planes_fragment>
+float treeLodIgn = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+if (treeLodIgn >= vTreeLodFade) discard;`,
+  );
+}
+
+function attachTreeShader(
+  material: THREE.Material,
+  uniforms: TreeWindUniforms,
+  forestUniforms: ForestLightingUniforms,
+): void {
   material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms);
-    shader.vertexShader = injectTreeWindShader(shader.vertexShader);
-    shader.fragmentShader = injectTreeFoliageFragmentShader(shader.fragmentShader);
+    Object.assign(shader.uniforms, uniforms, forestUniforms);
+    shader.vertexShader = injectForestLightingVertexShader(injectTreeWindShader(shader.vertexShader), "treeWorldXZ", false);
+    shader.fragmentShader = injectTreeLodFadeFragmentShader(
+      injectForestLightingFragmentShader(injectTreeFoliageFragmentShader(shader.fragmentShader)),
+    );
   };
 }
 

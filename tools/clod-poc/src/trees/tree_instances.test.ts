@@ -19,6 +19,7 @@ import {
   injectTreeWindShader,
   parseTreeConfig,
   selectTreeSpecies,
+  treeGeometryKey,
   treeGeometrySummary,
   TreeSystem,
   TREE_LODS,
@@ -150,6 +151,15 @@ describe("tree placement", () => {
     expect(DEFAULT_TREE_SETTINGS.lod.budgets.impostorMaxVertices).toBe(240);
   });
 
+  it("deep-clones tree GPU settings", () => {
+    const cloned = cloneTreeSettings();
+    expect(cloned.gpu).not.toBe(DEFAULT_TREE_SETTINGS.gpu);
+    cloned.gpu.enabled = true;
+    cloned.gpu.maxCandidates = 1;
+    expect(DEFAULT_TREE_SETTINGS.gpu.enabled).toBe(false);
+    expect(DEFAULT_TREE_SETTINGS.gpu.maxCandidates).toBe(200_000);
+  });
+
   it("parses config/trees.yaml to the typed defaults", () => {
     expect(parseTreeConfig(treeYamlText, null)).toEqual(DEFAULT_TREE_SETTINGS);
   });
@@ -183,6 +193,39 @@ trees:
 `, null);
 
     expect(parsed.foliage).toEqual(DEFAULT_TREE_SETTINGS.foliage);
+  });
+
+  it("uses default GPU tree settings when the gpu block is missing", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  enabled: true
+`, null);
+
+    expect(parsed.gpu).toEqual(DEFAULT_TREE_SETTINGS.gpu);
+  });
+
+  it("clamps invalid GPU tree settings to safe ranges", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  gpu:
+    enabled: true
+    max_candidates: 9999999
+    max_visible: 9999999
+    workgroup_size: 96
+    cull_distance_padding_m: -4
+    lod_hysteresis_m: 999
+    debug_readback_limit: 999999
+`, null);
+
+    expect(parsed.gpu).toMatchObject({
+      enabled: true,
+      maxCandidates: 2_000_000,
+      maxVisible: 500_000,
+      workgroupSize: DEFAULT_TREE_SETTINGS.gpu.workgroupSize,
+      cullDistancePaddingM: 0,
+      lodHysteresisM: 64,
+      debugReadbackLimit: 100_000,
+    });
   });
 
   it("clamps invalid foliage values to safe ranges", () => {
@@ -658,8 +701,7 @@ describe("tree geometry", () => {
           const normal = geometry.getAttribute("normal");
           const color = geometry.getAttribute("color");
           const uv = geometry.getAttribute("uv");
-          const wind = geometry.getAttribute("treeWindWeight");
-          const flutter = geometry.getAttribute("treeFlutterWeight");
+          const wind = geometry.getAttribute("treeWind");
           const foliageMask = geometry.getAttribute("treeFoliageMask");
           const index = geometry.getIndex();
           expect(position).toBeDefined();
@@ -667,13 +709,12 @@ describe("tree geometry", () => {
           expect(color).toBeDefined();
           expect(uv).toBeDefined();
           expect(wind).toBeDefined();
-          expect(flutter).toBeDefined();
+          expect(wind.itemSize).toBe(2);
           expect(foliageMask).toBeDefined();
           expect(normal.count).toBe(position.count);
           expect(color.count).toBe(position.count);
           expect(uv.count).toBe(position.count);
           expect(wind.count).toBe(position.count);
-          expect(flutter.count).toBe(position.count);
           expect(foliageMask.count).toBe(position.count);
           expect(index).toBeDefined();
           expect(index!.count).toBeGreaterThan(0);
@@ -762,11 +803,15 @@ describe("tree geometry", () => {
       for (const species of TREE_SPECIES) {
         for (const lod of TREE_LODS) {
           const geometry = geometries[species][lod];
-          const wind = geometry.getAttribute("treeWindWeight");
-          const flutter = geometry.getAttribute("treeFlutterWeight");
+          // treeWind packs wind weight in x, flutter weight in y.
+          const wind = geometry.getAttribute("treeWind");
           expect(maxAttributeValue(wind)).toBeGreaterThan(0);
           expect(attributeValuesAreFinite(wind)).toBe(true);
-          expect(attributeValuesAreFinite(flutter)).toBe(true);
+          let flutterFinite = true;
+          for (let i = 0; i < wind.count; i++) {
+            if (!Number.isFinite(wind.getY(i))) flutterFinite = false;
+          }
+          expect(flutterFinite).toBe(true);
         }
       }
     } finally {
@@ -804,8 +849,7 @@ void main() {
 
     expect(shader).toContain("uniform float uTreeTime");
     expect(shader).toContain("uniform vec2 uTreeWindDirection");
-    expect(shader).toContain("attribute float treeWindWeight");
-    expect(shader).toContain("attribute float treeFlutterWeight");
+    expect(shader).toContain("attribute vec2 treeWind");
     expect(shader).toContain("attribute vec2 treeWorldXZ");
     expect(shader).toContain("treeInstanceWorldXZ = treeWorldXZ");
     expect(shader).not.toContain("instanceMatrix[3].xz");
@@ -819,12 +863,13 @@ void main() {
       expect(handle.regularMaterial.transparent).toBe(false);
       expect(handle.regularMaterial.depthWrite).toBe(true);
       expect(handle.regularMaterial.alphaTest).toBe(settings.foliage.alphaTest);
-      expect(handle.regularMaterial.map).toBeDefined();
+      expect((handle.regularMaterial as THREE.MeshStandardMaterial).map).toBeDefined();
       for (const material of Object.values(handle.debugMaterials)) {
         expect(material.side).toBe(THREE.DoubleSide);
         expect(material.transparent).toBe(false);
       }
-      expect(handle.debugMaterials.impostor.color.getHex()).not.toBe(handle.debugMaterials.far.color.getHex());
+      expect((handle.debugMaterials.impostor as THREE.MeshBasicMaterial).color.getHex())
+        .not.toBe((handle.debugMaterials.far as THREE.MeshBasicMaterial).color.getHex());
     } finally {
       handle.dispose();
     }
@@ -1063,6 +1108,36 @@ describe("TreeSystem", () => {
     }
   });
 
+  it("falls back to CPU tree LODs when GPU trees are enabled without a device", () => {
+    const scene = new THREE.Scene();
+    const system = new TreeSystem({
+      scene,
+      nodes: [pageNode()],
+      worldCells: 32,
+      settings: {
+        ...settings,
+        maxInstances: 100,
+        distanceM: 80,
+        gpu: {
+          ...settings.gpu,
+          enabled: true,
+          fallbackToCpu: true,
+        },
+      },
+      sampler,
+      supportsGpuTrees: false,
+      gpuDevice: null,
+    });
+    try {
+      system.update(0, new THREE.Vector3(16, 0, 16));
+      const stats = system.getStats();
+      expect(stats.gpuStatus).toBe("fallback-cpu");
+      expect(stats.nearTrees + stats.midTrees + stats.farTrees + stats.impostorTrees).toBe(stats.totalTrees);
+    } finally {
+      system.dispose();
+    }
+  });
+
   it("formats tree stats for the main HUD line", () => {
     expect(formatTreeInfoLine(true, 1234, {
       totalTrees: 1234,
@@ -1073,6 +1148,15 @@ describe("TreeSystem", () => {
       midTrees: 22,
       farTrees: 33,
       impostorTrees: 0,
+      gpuStatus: "disabled",
+      gpuCandidateCount: 0,
+      gpuVisibleCount: 0,
+      gpuOverflowed: false,
+      gpuDispatchMs: null,
+      gpuReadbackMs: null,
+      gpuShowCounts: true,
+      impostorStatus: "disabled",
+      impostorReason: null,
       generatedCandidates: 1234,
       acceptedCandidates: 1234,
       rejectedSlope: 0,
@@ -1080,6 +1164,104 @@ describe("TreeSystem", () => {
       rejectedMaterial: 0,
     })).toBe("trees: enabled 1,234 trees patches=4/9 lod n/m/f/i=11/22/33/0");
     expect(formatTreeInfoLine(false, 0, null)).toBe("trees: disabled 0 trees");
+  });
+});
+
+describe("tree review fixes", () => {
+  function collectLodFades(scene: THREE.Scene): number[] {
+    const fades: number[] = [];
+    for (const mesh of instancedTreeMeshes(scene)) {
+      if (!mesh.visible || mesh.count === 0) continue;
+      const attribute = mesh.geometry.getAttribute("treeLodFade");
+      for (let i = 0; i < mesh.count; i++) fades.push(attribute.getX(i));
+    }
+    return fades;
+  }
+
+  it("geometry key ignores render-only changes but tracks seed/morphology/foliage (#2)", () => {
+    const base = cloneTreeSettings();
+    const key = treeGeometryKey(base);
+
+    const renderOnly = cloneTreeSettings();
+    renderOnly.render.debugColorByLod = !renderOnly.render.debugColorByLod;
+    expect(treeGeometryKey(renderOnly)).toBe(key);
+
+    const seeded = cloneTreeSettings();
+    seeded.seed += 1;
+    expect(treeGeometryKey(seeded)).not.toBe(key);
+
+    const morphed = cloneTreeSettings();
+    morphed.species.oak.morphology.branchLevels += 1;
+    expect(treeGeometryKey(morphed)).not.toBe(key);
+
+    const foliage = cloneTreeSettings();
+    foliage.foliage.oak.cardCountNear += 5;
+    expect(treeGeometryKey(foliage)).not.toBe(key);
+  });
+
+  it("dithers treeLodFade across the crossfade band and stays solid when disabled (#1)", () => {
+    const make = (crossfadeEnabled: boolean): THREE.Scene => {
+      const scene = new THREE.Scene();
+      const system = new TreeSystem({
+        scene,
+        nodes: [pageNode()],
+        worldCells: 32,
+        settings: {
+          ...settings,
+          distanceM: 40,
+          lod: { ...settings.lod, crossfadeEnabled, ditherEnabled: true, crossfadeBandM: 60 },
+        },
+        sampler,
+      });
+      system.update(0, new THREE.Vector3(16, 0, 16));
+      const stats = system.getStats();
+      // Primary-LOD counts still sum to the visible instance count despite the
+      // crossfade secondary draws.
+      expect(stats.nearTrees + stats.midTrees + stats.farTrees + stats.impostorTrees).toBe(stats.totalTrees);
+      return scene;
+    };
+
+    const crossfaded = collectLodFades(make(true));
+    expect(crossfaded.length).toBeGreaterThan(0);
+    expect(crossfaded.some((fade) => fade > 0.001 && fade < 0.999)).toBe(true);
+
+    const solid = collectLodFades(make(false));
+    expect(solid.length).toBeGreaterThan(0);
+    expect(solid.every((fade) => fade === 1)).toBe(true);
+  });
+
+  it("clamps the impostor band to far when no atlas and fallbackToPlaceholder is false (#3)", () => {
+    const build = (fallbackToPlaceholder: boolean) => {
+      const system = new TreeSystem({
+        scene: new THREE.Scene(),
+        nodes: [pageNode()],
+        worldCells: 32,
+        settings: {
+          ...settings,
+          distanceM: 40,
+          lod: {
+            ...settings.lod,
+            crossfadeEnabled: false,
+            nearFraction: 0.05,
+            midFraction: 0.06,
+            farFraction: 0.07,
+            impostorFraction: 1.0,
+          },
+          impostors: { ...settings.impostors, enabled: true, bakeOnStart: false, fallbackToPlaceholder },
+        },
+        sampler,
+      });
+      system.update(0, new THREE.Vector3(16, 0, 16));
+      const stats = system.getStats();
+      system.dispose();
+      return stats;
+    };
+
+    const withPlaceholder = build(true);
+    const clamped = build(false);
+    expect(withPlaceholder.impostorTrees).toBeGreaterThan(0);
+    expect(clamped.impostorTrees).toBe(0);
+    expect(clamped.farTrees).toBe(withPlaceholder.farTrees + withPlaceholder.impostorTrees);
   });
 });
 
@@ -1108,8 +1290,7 @@ function geometrySnapshot(geometry: THREE.BufferGeometry) {
     normal: Array.from(geometry.getAttribute("normal").array),
     color: Array.from(geometry.getAttribute("color").array),
     uv: Array.from(geometry.getAttribute("uv").array),
-    wind: Array.from(geometry.getAttribute("treeWindWeight").array),
-    flutter: Array.from(geometry.getAttribute("treeFlutterWeight").array),
+    wind: Array.from(geometry.getAttribute("treeWind").array),
     foliageMask: Array.from(geometry.getAttribute("treeFoliageMask").array),
     index: Array.from(geometry.getIndex()!.array),
   };

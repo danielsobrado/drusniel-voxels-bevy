@@ -10,6 +10,7 @@ import {
   WaterField,
   cloneWaterConfig,
   parseWaterConfig,
+  resolveWaterConfig,
   type TerrainHeightSampler,
 } from "./index.js";
 import { createWaterShaderMaterial } from "./waterMaterial.js";
@@ -42,14 +43,18 @@ function makeConfig(): ClodPagesConfig {
 
 describe("parseWaterConfig", () => {
   it("parses the bundled config/water.yaml", () => {
-    const cfg = parseWaterConfig(waterYamlText, null);
-    expect(cfg.enabled).toBe(true);
-    expect(cfg.cellsPerLevel).toBe(128);
-    expect(cfg.cellSizes).toEqual([1.5, 3.0, 6.0, 12.0, 24.0]);
-    expect(cfg.snapCells).toBe(2);
-    expect(cfg.drySentinelDepth).toBe(2.0);
-    expect(cfg.fakeBodies.lakes).toHaveLength(2);
-    expect(cfg.fakeBodies.rivers).toHaveLength(1);
+    const parsed = parseWaterConfig(waterYamlText, null);
+    expect(parsed.enabled).toBe(true);
+    expect(parsed.cellsPerLevel).toBe(128);
+    expect(parsed.cellSizes).toEqual([1.5, 3.0, 6.0, 12.0, 24.0]);
+    expect(parsed.snapCells).toBe(2);
+    expect(parsed.drySentinelDepth).toBe(2.0);
+    expect(parsed.fakeBodies.lakes).toHaveLength(2);
+    expect(parsed.fakeBodies.rivers).toHaveLength(1);
+    expect(parsed.fakeBodies.rivers[0].pointsNorm).toBeDefined();
+    expect(parsed.fakeBodies.rivers[0].pointsNorm!.length).toBe(5);
+
+    const cfg = resolveWaterConfig(parsed, 128);
     expect(cfg.fakeBodies.rivers[0].points).toHaveLength(5);
     expect(cfg.visual.alpha).toBeCloseTo(0.82);
     expect(cfg.debug.mode).toBe(WATER_DEBUG_MODES.final);
@@ -68,7 +73,7 @@ describe("parseWaterConfig", () => {
 });
 
 describe("WaterField", () => {
-  const cfg = parseWaterConfig(waterYamlText, null);
+  const cfg = resolveWaterConfig(parseWaterConfig(waterYamlText, null), 1000);
   const field = new WaterField(cfg, sampler);
 
   it("returns terrainY - sentinel in dry areas (far from any body)", () => {
@@ -127,7 +132,7 @@ describe("WaterField", () => {
 
 describe("WaterClipmap", () => {
   it("creates one mesh per cell size and follows the camera", () => {
-    const cfg = cloneWaterConfig(parseWaterConfig(waterYamlText, null));
+    const cfg = resolveWaterConfig(parseWaterConfig(waterYamlText, null), 1000);
     const scene = new THREE.Scene();
     const field = new WaterField(cfg, sampler);
     const clipmap = new WaterClipmap({
@@ -137,7 +142,7 @@ describe("WaterClipmap", () => {
       createMaterial: (params) => createWaterShaderMaterial(params),
       sunDirection: new THREE.Vector3(0.4, 0.8, 0.3),
       cameraPosition: new THREE.Vector3(0, 50, 0),
-      worldBounds: { cellsX: 128, cellsZ: 128 },
+      worldBounds: { cellsX: 1000, cellsZ: 1000 },
     });
     expect(clipmap.levelCount).toBe(cfg.cellSizes.length);
     const root = scene.children.find((child) => child.name === "water-clipmap-root");
@@ -163,7 +168,7 @@ describe("WaterClipmap", () => {
       lastPos: page.mesh.positions[page.mesh.positions.length - 1],
     };
 
-    const waterCfg = cloneWaterConfig(parseWaterConfig(waterYamlText, null));
+    const waterCfg = resolveWaterConfig(parseWaterConfig(waterYamlText, null), 8);
     const scene = new THREE.Scene();
     const field = new WaterField(waterCfg, sampler);
     const clipmap = new WaterClipmap({
@@ -192,7 +197,7 @@ describe("WaterClipmap", () => {
   // Regression: the clipmap grid must be centered around the camera so water
   // covers all four quadrants, not just +X/+Z from the snapped origin.
   it("centers the grid around the camera in all four quadrants", () => {
-    const waterCfg = cloneWaterConfig(parseWaterConfig(waterYamlText, null));
+    const waterCfg = resolveWaterConfig(parseWaterConfig(waterYamlText, null), 1000);
     // Use a single coarse level for easy reasoning.
     waterCfg.cellSizes = [4.0];
     waterCfg.cellsPerLevel = 8;
@@ -205,7 +210,7 @@ describe("WaterClipmap", () => {
       createMaterial: (params) => createWaterShaderMaterial(params),
       sunDirection: new THREE.Vector3(0.4, 0.8, 0.3),
       cameraPosition: new THREE.Vector3(0, 50, 0),
-      worldBounds: { cellsX: 128, cellsZ: 128 },
+      worldBounds: { cellsX: 1000, cellsZ: 1000 },
     });
     clipmap.update(0.016, new THREE.Vector3(0, 50, 0));
 
@@ -271,7 +276,7 @@ describe("parseWaterConfig empty arrays", () => {
 
 describe("Water world-bounds and body-mask clipping constraints", () => {
   it("satisfies the clipping, dry, and wet point assertions", () => {
-    const cfg = cloneWaterConfig(parseWaterConfig(waterYamlText, null));
+    const cfg = resolveWaterConfig(parseWaterConfig(waterYamlText, null), 1000);
     const field = new WaterField(cfg, sampler);
 
     // 1. A dry point outside any body -> bodyMask = 0 and depth <= 0
@@ -294,7 +299,7 @@ describe("Water world-bounds and body-mask clipping constraints", () => {
       createMaterial: (params) => createWaterShaderMaterial(params),
       sunDirection: new THREE.Vector3(0.4, 0.8, 0.3),
       cameraPosition: new THREE.Vector3(0, 50, 0),
-      worldBounds: { cellsX: 100, cellsZ: 100 },
+      worldBounds: { cellsX: 1000, cellsZ: 1000 },
     });
     clipmap.update(0.016, new THREE.Vector3(0, 50, 0));
     const root = scene.children.find((c) => c.name === "water-clipmap-root")!;
@@ -308,7 +313,7 @@ describe("Water world-bounds and body-mask clipping constraints", () => {
       const wx = pos[i];
       const wz = pos[i + 2];
       const vi = i / 3;
-      if (wx < 0 || wx > 100 || wz < 0 || wz > 100) {
+      if (wx < 0 || wx > 1000 || wz < 0 || wz > 1000) {
         countOutside++;
         expect(bodyMaskAttr[vi]).toBe(0);
         expect(terrainYAttr[vi]).toBe(0);

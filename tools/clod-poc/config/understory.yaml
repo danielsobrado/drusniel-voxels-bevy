@@ -1,0 +1,107 @@
+understory:
+  enabled: true
+  seed: 9137
+  distance_m: 150
+  refresh_distance_m: 12
+  max_new_patches_per_frame: 2
+  max_instances: 12000
+
+  placement:
+    spacing_m: 3.0
+    jitter: 0.55
+    slope_min_y: 0.68
+    min_height_m: 8
+    max_height_m: 52
+    min_ground_weight: 0.12
+    min_tree_influence: 0.0
+
+  ecology:
+    enabled: true
+    forest_influence_scale_m: 36
+    forest_edge_width_m: 18
+    clearing_preference: 0.55
+    moisture_noise_scale_m: 80
+    moisture_strength: 0.65
+    shade_strength: 0.75
+    density_noise_scale_m: 28
+    density_noise_strength: 0.55
+    deadfall_old_forest_bias: 0.75
+
+  classes:
+    shrub:
+      enabled: true
+      weight: 0.30
+      density: 1.0
+      min_scale: 0.7
+      max_scale: 1.6
+      height_preference: any
+      shade_preference: 0.55
+      moisture_preference: 0.45
+      forest_edge_bias: 0.65
+      wind_weight: 0.35
+
+    fern:
+      enabled: true
+      weight: 0.24
+      density: 1.0
+      min_scale: 0.55
+      max_scale: 1.25
+      height_preference: low
+      shade_preference: 0.85
+      moisture_preference: 0.80
+      forest_edge_bias: 0.25
+      wind_weight: 0.55
+
+    sapling:
+      enabled: true
+      weight: 0.16
+      density: 0.55
+      min_scale: 0.45
+      max_scale: 1.15
+      height_preference: any
+      shade_preference: 0.45
+      moisture_preference: 0.50
+      forest_edge_bias: 0.55
+      wind_weight: 0.45
+
+    flower:
+      enabled: true
+      weight: 0.18
+      density: 0.85
+      min_scale: 0.35
+      max_scale: 0.95
+      height_preference: low
+      shade_preference: 0.15
+      moisture_preference: 0.45
+      forest_edge_bias: 0.85
+      wind_weight: 0.65
+
+    dead_log:
+      enabled: true
+      weight: 0.08
+      density: 0.22
+      min_scale: 0.8
+      max_scale: 1.9
+      height_preference: any
+      shade_preference: 0.75
+      moisture_preference: 0.55
+      forest_edge_bias: 0.30
+      wind_weight: 0.0
+
+    stump:
+      enabled: true
+      weight: 0.04
+      density: 0.16
+      min_scale: 0.7
+      max_scale: 1.4
+      height_preference: any
+      shade_preference: 0.65
+      moisture_preference: 0.45
+      forest_edge_bias: 0.25
+      wind_weight: 0.0
+
+  render:
+    debug_color_by_class: false
+    alpha_test: 0.45
+    shadows: false
+    max_shadow_class: shrub

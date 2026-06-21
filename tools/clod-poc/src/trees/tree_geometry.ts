@@ -35,6 +35,24 @@ export function disposeTreeGeometryMap(map: TreeGeometryMap): void {
   }
 }
 
+/**
+ * Stable signature of every setting that `createTreeGeometry` consumes: seed,
+ * foliage card layout/atlas, LOD vertex budgets, and per-species trunk/crown
+ * dimensions + morphology. Compare two keys to decide whether tree geometry must
+ * be rebuilt, instead of a fragile `settings.species` object-reference compare.
+ */
+export function treeGeometryKey(settings: TreeSettings): string {
+  return JSON.stringify({
+    seed: settings.seed,
+    foliage: settings.foliage,
+    budgets: settings.lod.budgets,
+    species: TREE_SPECIES.map((species) => {
+      const config = settings.species[species];
+      return [config.trunkHeightM, config.trunkRadiusM, config.crownRadiusM, config.morphology];
+    }),
+  });
+}
+
 export function createTreeBakedImpostorGeometry(
   species: TreeSpeciesId,
   settings: TreeSettings,
@@ -80,8 +98,8 @@ export function treeGeometrySummary(geometry: THREE.BufferGeometry): {
   return {
     vertexCount: geometry.getAttribute("position")?.count ?? 0,
     indexCount: geometry.getIndex()?.count ?? 0,
-    maxWindWeight: maxAttributeValue(geometry.getAttribute("treeWindWeight")),
-    maxFlutterWeight: maxAttributeValue(geometry.getAttribute("treeFlutterWeight")),
+    maxWindWeight: maxAttributeComponent(geometry.getAttribute("treeWind"), "x"),
+    maxFlutterWeight: maxAttributeComponent(geometry.getAttribute("treeWind"), "y"),
     colorCount: geometry.getAttribute("color")?.count ?? 0,
     maxFoliageMask: maxAttributeValue(geometry.getAttribute("treeFoliageMask")),
   };
@@ -451,8 +469,14 @@ class GeometryBuilder {
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(this.normals, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(this.colors, 3));
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(this.uvs, 2));
-    geometry.setAttribute("treeWindWeight", new THREE.Float32BufferAttribute(this.windWeights, 1));
-    geometry.setAttribute("treeFlutterWeight", new THREE.Float32BufferAttribute(this.flutterWeights, 1));
+    // Wind (x) + flutter (y) packed into one vec2 buffer: keeps the tree node
+    // material at/under WebGPU's 8 vertex-buffer limit.
+    const treeWind = new Float32Array(this.windWeights.length * 2);
+    for (let i = 0; i < this.windWeights.length; i++) {
+      treeWind[i * 2] = this.windWeights[i];
+      treeWind[i * 2 + 1] = this.flutterWeights[i];
+    }
+    geometry.setAttribute("treeWind", new THREE.Float32BufferAttribute(treeWind, 2));
     geometry.setAttribute("treeFoliageMask", new THREE.Float32BufferAttribute(this.foliageMasks, 1));
     geometry.setIndex(this.indices);
     return geometry;
@@ -505,6 +529,18 @@ function maxAttributeValue(attribute: THREE.BufferAttribute | THREE.InterleavedB
   if (!attribute) return 0;
   let max = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < attribute.count; i++) max = Math.max(max, attribute.getX(i));
+  return max;
+}
+
+function maxAttributeComponent(
+  attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined,
+  axis: "x" | "y",
+): number {
+  if (!attribute) return 0;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < attribute.count; i++) {
+    max = Math.max(max, axis === "x" ? attribute.getX(i) : attribute.getY(i));
+  }
   return max;
 }
 

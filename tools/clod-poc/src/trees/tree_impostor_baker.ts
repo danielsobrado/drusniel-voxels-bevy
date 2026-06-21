@@ -57,8 +57,13 @@ export async function bakeTreeImpostorAtlases(
 
   try {
     const atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>> = {};
-    for (const species of TREE_SPECIES) {
+    // Spread bakes across frames so startup never hitches: bake at most
+    // `maxBakesPerFrame` species, then yield a frame before the next batch.
+    const batch = Math.max(1, options.settings.impostors.maxBakesPerFrame);
+    for (let i = 0; i < TREE_SPECIES.length; i++) {
+      const species = TREE_SPECIES[i];
       atlases[species] = bakeSpeciesAtlas(options.renderer, species, options);
+      if ((i + 1) % batch === 0 && i + 1 < TREE_SPECIES.length) await nextFrame();
     }
     return { atlases, supported: true, reason: null };
   } catch (error) {
@@ -154,6 +159,13 @@ function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettin
     shader.fragmentShader = injectTreeFoliageFragmentShader(shader.fragmentShader);
   };
   return material;
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+    else setTimeout(resolve, 0);
+  });
 }
 
 function isWebGlRenderTargetRenderer(renderer: unknown): renderer is WebGlRenderTargetRenderer {
