@@ -24,6 +24,7 @@ import {
   sin,
   smoothstep,
   storage,
+  texture,
   uniform,
   uv,
   vec2,
@@ -65,6 +66,17 @@ export interface GrassNodeParams {
   debugAttributes?: boolean;
   /** When set (webgpu-ring-v1), instances are read from these storage buffers, not attributes. */
   ringInstanceBuffers?: GrassRingInstanceBuffers;
+  /**
+   * Hydrology water-surface texture (R = water Y; dry cells carry a below-ground
+   * sentinel). When set, blades whose ground sits under the water surface are
+   * discarded so grass stops floating over hydrology lakes/rivers. (Stage 1 — does
+   * not move blades; the terrain carve itself is a later stage.)
+   */
+  hydrologyWaterTexture?: THREE.Texture | null;
+  /** World size (worldCells) used to map instance XZ → hydrology texture UV. */
+  worldSize?: number;
+  /** Metres of blade base allowed below the water surface before discard. */
+  waterClearance?: number;
 }
 
 export interface GrassNodeMaterialHandle {
@@ -126,6 +138,18 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     aTerrainNormal4 = attribute("aTerrainNormal", "vec4");
   }
   const aOffset: TslNode = aOffset4.xyz;
+  // Hydrology field (R = waterY, G = wetMask, B = carved-bed Y). Snap the blade's
+  // ground onto the carved bed (the height the mesh is built at) so grass stops
+  // floating over carved terrain; reuse the sample for the under-water discard.
+  let groundY: TslNode = aOffset.y;
+  let hydroWaterY: TslNode | null = null;
+  if (params.hydrologyWaterTexture) {
+    const uHydroWorldSize = uniform(params.worldSize ?? 1);
+    const hydroUv: TslNode = vec2(aOffset.x, aOffset.z).div(uHydroWorldSize);
+    const hydro: TslNode = texture(params.hydrologyWaterTexture, hydroUv);
+    hydroWaterY = hydro.x;
+    groundY = hydro.z;
+  }
   const aTerrainNormal: TslNode = aTerrainNormal4.xyz;
   const aHeight: TslNode = aPacked0.x;
   const aRotY: TslNode = aPacked0.y;
@@ -181,7 +205,7 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   // Y-rotation of the wind-displaced local position, then world-place at aOffset.
   const rotX: TslNode = c.mul(localX).add(s.mul(localZ));
   const rotZ: TslNode = s.mul(localX).negate().add(c.mul(localZ));
-  const worldPos: TslNode = aOffset.add(vec3(rotX, localY, rotZ));
+  const worldPos: TslNode = vec3(aOffset.x, groundY, aOffset.z).add(vec3(rotX, localY, rotZ));
 
   const localNormal: TslNode = normalize(
     vec3(nrmComponent("x").sub(wind.x.mul(0.35)), nrmComponent("y").add(bend.mul(0.16)), nrmComponent("z").sub(wind.y.mul(0.35))),
@@ -215,13 +239,24 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     litColor = ambientFloor.add(grassColor.mul(hemi.add(direct))).add(transmission.mul(grassColor));
   }
 
+  // Discard blades whose (carved-bed) ground is under the hydrology water surface,
+  // keeping land grass (dry cells store a below-ground sentinel water Y).
+  let aboveWater: TslNode | null = null;
+  if (hydroWaterY) {
+    const uWaterClearance = uniform(params.waterClearance ?? 0.5);
+    aboveWater = groundY.greaterThan(hydroWaterY.add(uWaterClearance));
+  }
+
   const material = new MeshBasicNodeMaterial();
   material.positionNode = worldPos; // identity model transform -> local == world
   material.colorNode = litColor;
   if (params.mode === "webgpu-ring-v1") {
     const dist: TslNode = vec2(aOffset.x, aOffset.z).sub(uFadeCenter).length();
+    const bandMask: TslNode = grassRingBandMask(aTier, dist, uNearDistance, uMidDistance, uFarDistance, uBandDistance);
     (material as unknown as { maskNode: TslNode }).maskNode =
-      grassRingBandMask(aTier, dist, uNearDistance, uMidDistance, uFarDistance, uBandDistance);
+      aboveWater ? bandMask.and(aboveWater) : bandMask;
+  } else if (aboveWater) {
+    (material as unknown as { maskNode: TslNode }).maskNode = aboveWater;
   }
   material.side = THREE.DoubleSide;
   material.transparent = false;

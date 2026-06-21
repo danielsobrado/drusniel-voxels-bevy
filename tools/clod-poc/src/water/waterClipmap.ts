@@ -50,6 +50,7 @@ class WaterLevel {
   private readonly bodyMask: Float32Array;
   private readonly flow: Float32Array;
   private readonly levelAttr: Float32Array;
+  private readonly indices: Uint32Array;
   private originX = Number.NaN;
   private originZ = Number.NaN;
   private rect: WaterRect = { ...DEGENERATE_INNER };
@@ -81,14 +82,15 @@ class WaterLevel {
     this.levelAttr = new Float32Array(vertexCount);
     this.levelAttr.fill(index);
 
-    const indices = buildGridIndices(cellsPerLevel);
+    this.indices = new Uint32Array(cellsPerLevel * cellsPerLevel * 6);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
     geometry.setAttribute("aTerrainY", new THREE.BufferAttribute(this.terrainY, 1));
     geometry.setAttribute("aBodyMask", new THREE.BufferAttribute(this.bodyMask, 1));
     geometry.setAttribute("aFlow", new THREE.BufferAttribute(this.flow, 4));
     geometry.setAttribute("aLevel", new THREE.BufferAttribute(this.levelAttr, 1));
-    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.setIndex(new THREE.BufferAttribute(this.indices, 1));
+    geometry.setDrawRange(0, 0);
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Number.MAX_VALUE);
 
     this.mesh = new THREE.Mesh(geometry, handle.material);
@@ -155,30 +157,61 @@ class WaterLevel {
         fi += 4;
       }
     }
+    const indexCount = this.refillIndices();
     const geo = this.mesh.geometry;
     (geo.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
     (geo.getAttribute("aTerrainY") as THREE.BufferAttribute).needsUpdate = true;
     (geo.getAttribute("aBodyMask") as THREE.BufferAttribute).needsUpdate = true;
     (geo.getAttribute("aFlow") as THREE.BufferAttribute).needsUpdate = true;
+    (geo.getIndex() as THREE.BufferAttribute).needsUpdate = true;
+    geo.setDrawRange(0, indexCount);
+  }
+
+  private refillIndices(): number {
+    const { cellsPerLevel, positions, terrainY, bodyMask, flow, worldBounds, indices } = this;
+    const vertsPerEdge = cellsPerLevel + 1;
+    const maskEpsilon = 1e-4;
+    let p = 0;
+    for (let iz = 0; iz < cellsPerLevel; iz++) {
+      for (let ix = 0; ix < cellsPerLevel; ix++) {
+        const a = iz * vertsPerEdge + ix;
+        const b = a + 1;
+        const c = a + vertsPerEdge;
+        const d = c + 1;
+        if (!waterQuadRenderable([a, b, c, d], positions, terrainY, bodyMask, flow, worldBounds, maskEpsilon)) continue;
+        indices[p++] = a; indices[p++] = c; indices[p++] = b;
+        indices[p++] = b; indices[p++] = c; indices[p++] = d;
+      }
+    }
+    return p;
   }
 }
 
-function buildGridIndices(cellsPerLevel: number): Uint32Array {
-  const vertsPerEdge = cellsPerLevel + 1;
-  const quadCount = cellsPerLevel * cellsPerLevel;
-  const indices = new Uint32Array(quadCount * 6);
-  let p = 0;
-  for (let iz = 0; iz < cellsPerLevel; iz++) {
-    for (let ix = 0; ix < cellsPerLevel; ix++) {
-      const a = iz * vertsPerEdge + ix;
-      const b = a + 1;
-      const c = a + vertsPerEdge;
-      const d = c + 1;
-      indices[p++] = a; indices[p++] = c; indices[p++] = b;
-      indices[p++] = b; indices[p++] = c; indices[p++] = d;
-    }
+export function waterQuadRenderable(
+  corners: readonly [number, number, number, number],
+  positions: Float32Array,
+  terrainY: Float32Array,
+  bodyMask: Float32Array,
+  flow: Float32Array,
+  worldBounds: { cellsX: number; cellsZ: number },
+  maskEpsilon = 1e-4,
+): boolean {
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let maxFlow = 0;
+  for (const vi of corners) {
+    const px = positions[vi * 3];
+    const py = positions[vi * 3 + 1];
+    const pz = positions[vi * 3 + 2];
+    if (px < 0 || px > worldBounds.cellsX || pz < 0 || pz > worldBounds.cellsZ) return false;
+    if (bodyMask[vi] <= maskEpsilon) return false;
+    if (py - terrainY[vi] <= 0) return false;
+    minY = Math.min(minY, py);
+    maxY = Math.max(maxY, py);
+    maxFlow = Math.max(maxFlow, flow[vi * 4 + 2]);
   }
-  return indices;
+  const threshold = maxFlow > 0.02 ? 1.25 : 0.45;
+  return maxY - minY <= threshold;
 }
 
 export class WaterClipmap {

@@ -14,7 +14,9 @@ import {
   type UnderstoryTerrainSampler,
 } from "./understory_instances.js";
 import { createUnderstoryMaterialHandle, type UnderstoryMaterialHandle } from "./understory_material.js";
+import { createUnderstoryNodeMaterialHandle } from "./understory_node_material.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
+import type { EnvironmentLighting } from "../environment.js";
 
 export interface UnderstorySystemOptions {
   scene: THREE.Scene;
@@ -22,6 +24,10 @@ export interface UnderstorySystemOptions {
   worldCells: number;
   settings: UnderstorySettings;
   sampler?: UnderstoryTerrainSampler;
+  /** Use the WebGPU node material path instead of the classic WebGL material. */
+  webgpu?: boolean;
+  /** Initial lighting for the WebGPU node material path. */
+  lighting?: EnvironmentLighting;
 }
 
 export interface UnderstoryStats extends UnderstoryGenerationStats {
@@ -89,7 +95,9 @@ export class UnderstorySystem {
     this.settings = options.settings;
     this.sampler = options.sampler;
     this.geometries = createUnderstoryGeometryMap(this.settings);
-    this.materialHandle = createUnderstoryMaterialHandle(this.settings);
+    this.materialHandle = options.webgpu
+      ? createUnderstoryNodeMaterialHandle(this.settings, options.lighting)
+      : createUnderstoryMaterialHandle(this.settings);
     this.lastCenter = new THREE.Vector3(this.worldCells * 0.5, 0, this.worldCells * 0.5);
     this.root.name = "understory";
     this.root.visible = this.settings.enabled;
@@ -174,6 +182,10 @@ export class UnderstorySystem {
 
   updateForestLighting(state: ForestLightingMaterialState | null): void {
     this.materialHandle.updateForestLighting(state);
+  }
+
+  updateLighting(lighting: EnvironmentLighting): void {
+    this.materialHandle.updateLighting?.(lighting);
   }
 
   getLightingProxies(): UnderstoryLightingProxy[] {

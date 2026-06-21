@@ -10,6 +10,7 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
+  abs,
   attribute,
   clamp,
   cos,
@@ -37,6 +38,7 @@ import {
 import type { EnvironmentLighting } from "../environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
+import { bakeBarkTextures, type BarkTextures } from "../textures/barkSynth.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
@@ -45,6 +47,62 @@ import type { TreeMaterialHandle } from "./tree_material.js";
 type TslNode = any;
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
+
+// Object-space bark tiling: positionGeometry is metres, so 0.8 repeats the bark
+// atlas roughly every 1.25 m on a trunk.
+const BARK_TILE_SCALE = 0.8;
+const BARK_RESOLUTION = 256;
+
+// One furrowed-bark atlas, baked once and shared across every tree material handle
+// (the CPU InstancedMesh path plus the four per-LOD ring handles), keyed by seed.
+// Long-lived for the app: handles never dispose it. The bake produces a float
+// texture; we repack its height/AO channel into an 8-bit texture because WebGPU
+// cannot linearly filter rgba32float without the (unrequested) float32-filterable
+// feature.
+let sharedBark: { seed: number; texture: THREE.Texture } | null = null;
+function sharedBarkTexture(seed: number): THREE.Texture {
+  if (!sharedBark || sharedBark.seed !== seed) {
+    const baked: BarkTextures = bakeBarkTextures({ layer: 0, seed, resolution: BARK_RESOLUTION });
+    const texelCount = baked.resolution * baked.resolution;
+    const bytes = new Uint8Array(texelCount * 4);
+    for (let i = 0; i < texelCount; i++) {
+      const height = Math.round(Math.min(1, Math.max(0, baked.dataA[i * 4 + 3])) * 255);
+      bytes[i * 4] = height;
+      bytes[i * 4 + 1] = height;
+      bytes[i * 4 + 2] = height;
+      bytes[i * 4 + 3] = height;
+    }
+    const texture = new THREE.DataTexture(bytes, baked.resolution, baked.resolution, THREE.RGBAFormat, THREE.UnsignedByteType);
+    texture.name = "tree-bark-height";
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+    baked.texA.dispose();
+    baked.texB.dispose();
+    sharedBark = { seed, texture };
+  }
+  return sharedBark.texture;
+}
+
+// Triplanar bark height/AO (range 0.3..1.0) from the object-space geometry, blended
+// by the object-space normal so angled branches read correctly. Used to shade the
+// trunk/branch vertex colour into furrowed bark.
+function triplanarBarkShade(barkTexture: THREE.Texture): TslNode {
+  const p: TslNode = positionGeometry.mul(BARK_TILE_SCALE);
+  const an: TslNode = abs(normalGeometry);
+  const wsum: TslNode = an.x.add(an.y).add(an.z).add(0.0001);
+  const sx: TslNode = texture(barkTexture, vec2(p.z, p.y)).w;
+  const sy: TslNode = texture(barkTexture, vec2(p.x, p.z)).w;
+  const sz: TslNode = texture(barkTexture, vec2(p.x, p.y)).w;
+  return sx.mul(an.x).add(sy.mul(an.y)).add(sz.mul(an.z)).div(wsum);
+}
+
+function barkTrunkAlbedo(vertexColor: TslNode, barkTexture: THREE.Texture): TslNode {
+  return vertexColor.mul(triplanarBarkShade(barkTexture).mul(0.85).add(0.2));
+}
 
 const LOD_COLORS: Record<TreeLod, THREE.Color> = {
   near: new THREE.Color(0x2e7d32),
@@ -77,9 +135,28 @@ export interface TreeRingInstanceBuffers {
   capacity: number;
 }
 
+export interface TreeHydrologyWater {
+  /** RGBA32F hydrology field; G channel = wet mask (1 inside a water body). */
+  texture: THREE.Texture | null;
+  /** World size (worldCells) mapping instance XZ → hydrology UV. */
+  worldSize: number;
+}
+
+/**
+ * Keep-mask that drops trees standing in a hydrology water body (so they stop
+ * floating over lakes/rivers). XZ-only via the wet mask, so it works for both the
+ * CPU InstancedMesh path and the GPU ring path. Returns null when no hydrology.
+ */
+function treeAboveWaterKeep(hydrology: TreeHydrologyWater | undefined, worldXZ: TslNode): TslNode | null {
+  if (!hydrology?.texture) return null;
+  const wetUv: TslNode = worldXZ.div(float(hydrology.worldSize || 1));
+  return texture(hydrology.texture, wetUv).y.lessThan(0.5);
+}
+
 export function createTreeNodeMaterialHandle(
   settings: TreeSettings,
   lighting: EnvironmentLighting = fallbackLighting(),
+  hydrology?: TreeHydrologyWater,
 ): TreeMaterialHandle {
   const wind: TreeWindNodeUniforms = {
     uTime: uniform(0),
@@ -113,7 +190,8 @@ export function createTreeNodeMaterialHandle(
 
   // Shared per-vertex / per-instance attribute nodes (rebuilt per material to avoid
   // sharing a node instance across compiled materials).
-  const buildMaterial = (albedoFactory: (vertexColor: TslNode, mapRgb: TslNode) => TslNode): MeshBasicNodeMaterial => {
+  const barkTexture = sharedBarkTexture(settings.seed);
+  const buildMaterial = (albedoFactory: (vertexColor: TslNode, mapRgb: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
     const aWind: TslNode = attribute("treeWind", "vec2");
@@ -126,7 +204,12 @@ export function createTreeNodeMaterialHandle(
     const forestUv: TslNode = clamp(aWorldXZ.div(uForestWorldSize), vec2(0), vec2(1));
     const forestPacked: TslNode = texture(neutralForestTexture, forestUv);
     forestMapNodes.push(forestPacked);
-    const albedo: TslNode = albedoFactory(aColor, mapNode.xyz);
+    const foliageAlbedo: TslNode = albedoFactory(aColor, mapNode.xyz);
+    // Trunk/branch verts (treeFoliageMask 0) get triplanar bark; foliage cards keep
+    // the leaf atlas. Debug materials stay flat.
+    const albedo: TslNode = withBark
+      ? mix(barkTrunkAlbedo(aColor, barkTexture), foliageAlbedo, aFoliageMask)
+      : foliageAlbedo;
     const opacity: TslNode = mix(float(1), mapNode.w, aFoliageMask.mul(uUseFoliageAlpha));
 
     // Wind sway/flutter, matching injectTreeWindShader() so the WebGL and WebGPU paths
@@ -152,7 +235,10 @@ export function createTreeNodeMaterialHandle(
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const direct: TslNode = uSun.mul(sun);
-    const litBase: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct)));
+    // Leaf translucency: sun coming from behind a leaf card glows through it.
+    const back: TslNode = max(dot(n.negate(), uLight), 0.0);
+    const transmission: TslNode = albedo.mul(uSun).mul(back).mul(aFoliageMask).mul(0.5);
+    const litBase: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct))).add(transmission);
     const forestDarken: TslNode = clamp(
       forestPacked.x.mul(uForestAoStrength).add(forestPacked.y.mul(uForestShadowStrength)),
       0.0,
@@ -174,7 +260,9 @@ export function createTreeNodeMaterialHandle(
     material.positionNode = positionNode;
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
-    (material as unknown as { maskNode: TslNode }).maskNode = ign.lessThan(aLodFade);
+    const lodMask: TslNode = ign.lessThan(aLodFade);
+    const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
+    (material as unknown as { maskNode: TslNode }).maskNode = aboveWater ? lodMask.and(aboveWater) : lodMask;
     material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
@@ -183,12 +271,12 @@ export function createTreeNodeMaterialHandle(
     return material;
   };
 
-  const regularMaterial = buildMaterial((vertexColor, mapRgb) => vertexColor.mul(mapRgb));
+  const regularMaterial = buildMaterial((vertexColor, mapRgb) => vertexColor.mul(mapRgb), true);
 
   const debugMaterials = {} as Record<TreeLod, THREE.Material>;
   for (const lod of TREE_LODS) {
     const color = LOD_COLORS[lod];
-    debugMaterials[lod] = buildMaterial(() => vec3(color.r, color.g, color.b));
+    debugMaterials[lod] = buildMaterial(() => vec3(color.r, color.g, color.b), false);
   }
 
   return {
@@ -241,6 +329,7 @@ export function createTreeRingNodeMaterialHandle(
   buffers: TreeRingInstanceBuffers,
   lod: TreeLod,
   lighting: EnvironmentLighting = fallbackLighting(),
+  hydrology?: TreeHydrologyWater,
 ): TreeMaterialHandle {
   const wind: TreeWindNodeUniforms = {
     uTime: uniform(0),
@@ -266,12 +355,13 @@ export function createTreeRingNodeMaterialHandle(
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
   let foliageAtlas: TreeFoliageAtlas = createTreeFoliageAtlas(settings);
+  const barkTexture = sharedBarkTexture(settings.seed);
   const mapNodes: TslNode[] = [];
   const materials: MeshBasicNodeMaterial[] = [];
   let debugColorByLod = settings.render.debugColorByLod;
   const prepassNodes = new Map<MeshBasicNodeMaterial, PrepassNodes>();
 
-  const buildMaterial = (albedoFactory: (vertexColor: TslNode, mapRgb: TslNode, tint: TslNode) => TslNode): MeshBasicNodeMaterial => {
+  const buildMaterial = (albedoFactory: (vertexColor: TslNode, mapRgb: TslNode, tint: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
     const aWind: TslNode = attribute("treeWind", "vec2");
@@ -289,7 +379,10 @@ export function createTreeRingNodeMaterialHandle(
 
     const mapNode: TslNode = texture(foliageAtlas.texture, uv());
     mapNodes.push(mapNode);
-    const albedo: TslNode = albedoFactory(aColor, mapNode.xyz, aTint);
+    const foliageAlbedo: TslNode = albedoFactory(aColor, mapNode.xyz, aTint);
+    const albedo: TslNode = withBark
+      ? mix(barkTrunkAlbedo(aColor, barkTexture), foliageAlbedo, aFoliageMask)
+      : foliageAlbedo;
     const opacity: TslNode = mix(float(1), mapNode.w, aFoliageMask.mul(uUseFoliageAlpha));
 
     const phase: TslNode = fract(sin(dot(aWorldXZ, vec2(127.1, 311.7))).mul(43758.5453123));
@@ -320,13 +413,16 @@ export function createTreeRingNodeMaterialHandle(
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const direct: TslNode = uSun.mul(sun);
-    const lit: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct)));
+    // Leaf translucency: sun coming from behind a leaf card glows through it.
+    const back: TslNode = max(dot(n.negate(), uLight), 0.0);
+    const transmission: TslNode = albedo.mul(uSun).mul(back).mul(aFoliageMask).mul(0.5);
+    const lit: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct))).add(transmission);
 
     const material = new MeshBasicNodeMaterial();
     material.positionNode = positionNode;
     material.colorNode = lit;
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
-    (material as unknown as { maskNode: TslNode }).maskNode = treeRingLodMask(
+    const lodMask: TslNode = treeRingLodMask(
       uLodIndex,
       aWorldXZ.sub(uFadeCenter).length(),
       uNearDistance,
@@ -334,6 +430,8 @@ export function createTreeRingNodeMaterialHandle(
       uFarDistance,
       uBandDistance,
     );
+    const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
+    (material as unknown as { maskNode: TslNode }).maskNode = aboveWater ? lodMask.and(aboveWater) : lodMask;
     material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
@@ -349,11 +447,12 @@ export function createTreeRingNodeMaterialHandle(
 
   const regularMaterial = buildMaterial((vertexColor, mapRgb, tint) =>
     vertexColor.mul(mapRgb).mul(mix(vec3(0.88, 0.93, 0.82), vec3(1.08, 1.02, 0.9), tint)),
+    true,
   );
   const debugMaterials = {} as Record<TreeLod, THREE.Material>;
   for (const lod of TREE_LODS) {
     const color = LOD_COLORS[lod];
-    debugMaterials[lod] = buildMaterial(() => vec3(color.r, color.g, color.b));
+    debugMaterials[lod] = buildMaterial(() => vec3(color.r, color.g, color.b), false);
   }
 
   return {

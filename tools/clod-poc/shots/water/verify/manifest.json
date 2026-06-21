@@ -1,0 +1,91 @@
+{
+  "appUrl": "http://127.0.0.1:5181/?world=16&waterDebug=1",
+  "worldCells": 1024,
+  "seed": null,
+  "scenes": [
+    {
+      "scene": "lake-shoreline",
+      "pose": {
+        "x": 568,
+        "z": 710,
+        "yaw": -1.5707963267948966,
+        "distance": 26,
+        "pitch": -0.35,
+        "depth": 0.29440134338801727,
+        "wetFraction": 0.6172839506172839,
+        "kind": "lake"
+      },
+      "files": [
+        "final.png",
+        "depth.png",
+        "foam.png",
+        "fresnel.png",
+        "flow.png",
+        "clipmap-level.png"
+      ]
+    },
+    {
+      "scene": "river-bend",
+      "pose": {
+        "x": 226,
+        "z": 602,
+        "yaw": -0.2617993877991494,
+        "distance": 26,
+        "pitch": -0.35,
+        "depth": 0.33508672316384036,
+        "wetFraction": 0.7160493827160493,
+        "kind": "river"
+      },
+      "files": [
+        "final.png",
+        "depth.png",
+        "foam.png",
+        "fresnel.png",
+        "flow.png",
+        "clipmap-level.png"
+      ]
+    },
+    {
+      "scene": "dry-to-water-crossing",
+      "pose": {
+        "x": 546,
+        "z": 72,
+        "yaw": 1.8325957145940457,
+        "distance": 26,
+        "pitch": -0.35,
+        "depth": 0.48934547473618295,
+        "wetFraction": 0.8395061728395061,
+        "kind": "river"
+      },
+      "files": [
+        "final.png",
+        "depth.png",
+        "foam.png",
+        "fresnel.png",
+        "flow.png",
+        "clipmap-level.png"
+      ]
+    },
+    {
+      "scene": "clipmap-boundary",
+      "pose": {
+        "x": 226,
+        "z": 602,
+        "yaw": -0.2617993877991494,
+        "distance": 26,
+        "pitch": -0.35,
+        "depth": 0.33508672316384036,
+        "wetFraction": 0.7160493827160493,
+        "kind": "river"
+      },
+      "files": [
+        "final.png",
+        "depth.png",
+        "foam.png",
+        "fresnel.png",
+        "flow.png",
+        "clipmap-level.png"
+      ]
+    }
+  ]
+}

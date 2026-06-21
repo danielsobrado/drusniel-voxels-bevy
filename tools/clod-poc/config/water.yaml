@@ -1,27 +1,70 @@
-# Fable5-style fake water clipmap for the CLOD-POC viewer.
-# This is a visual POC only: no hydrology, no SSR, no caustics, no physics.
+# Fable5-style terrain-derived hydrology for the CLOD-POC viewer.
+# Water is a visual layer only: no SSR, no caustics, no physics.
 # Water is a separate render layer and is NEVER fed into the CLOD page source
 # mesh, meshoptimizer, page borders, LOD selection, colliders, or validation.
 water:
   enabled: true
+  source: hydrology # hydrology | fake_bodies
   cells_per_level: 128
   cell_sizes: [1.5, 3.0, 6.0, 12.0, 24.0]
   snap_cells: 2
   dry_sentinel_depth: 2.0
 
-  fake_bodies:
-    lakes:
-      - center_norm: [0.52, 0.46]
-        radius: [85, 55]
-        level_offset: 5.0
-      - center_norm: [0.20, 0.80]
-        radius: [60, 45]
-        level_offset: 4.5
+  hydrology:
+    enabled: true
+    sim_res: 256
+    dry_sentinel_depth: 2.0
+    fill:
+      enabled: true
+      iterations: 900
+      epsilon_per_cell: 0.0045
+      lake_delta: 2.2
+      marsh_delta: 0.15
+    accumulation:
+      particles: 350000
+      max_steps: 220
+      flat_gradient_stop: 0.012
+      inertia: 0.45
+      jitter_seed: 12345
     rivers:
-      - points_norm: [[0.18, 0.38], [0.33, 0.45], [0.50, 0.48], [0.68, 0.55], [0.82, 0.62]]
-        width: 18.0
-        level_offset: 4.8
-        downstream_drop: 1.5
+      river_threshold_add: 14
+      visible_water_threshold_add: 320
+      widen_radius: 2
+      carve_depth_m: 7.5
+      carve_power: 1.35
+      visible_depth_m: 3.3
+      visible_depth_power: 2.2
+      slope_gate_start: 0.50
+      slope_gate_end: 0.24
+      min_visible_depth: 0.05
+    water_surface:
+      wet_smooth_iterations: 2
+      wet_to_wet_cliff_slope_max: 0.35
+      far_reduce_factor: 8
+    talus:
+      enabled: true
+      iterations: 8
+      strength: 0.12
+    debug:
+      show_fill: false
+      show_accumulation: false
+      show_carved_bed: false
+      show_water_y: false
+
+  fake_bodies:
+    carve_terrain: true
+    lakes:
+      - center_norm: [0.50, 0.50]
+        radius: [42, 30]
+        level_offset: 1.2
+      - center_norm: [0.25, 0.72]
+        radius: [32, 24]
+        level_offset: 1.0
+    rivers:
+      - points_norm: [[0.16, 0.34], [0.30, 0.42], [0.48, 0.48], [0.66, 0.57], [0.84, 0.66]]
+        width: 9.0
+        level_offset: 0.8
+        downstream_drop: 3.0
 
   visual:
     shallow_color: [0.16, 0.38, 0.36]

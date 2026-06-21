@@ -9,6 +9,12 @@ import type {
 import type { DigEdit } from "./terrain.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 
+export interface SerializedHydrologyTerrain {
+  res: number;
+  worldCells: number;
+  carvedBed: Float32Array;
+}
+
 export interface SerializedClodNode {
   id: string;
   level: number;
@@ -36,6 +42,7 @@ export type ClodWorkerRequest =
       worldPagesZ: number;
       cfg: ClodPagesConfig;
       edits: DigEdit[];
+      hydrologyTerrain?: SerializedHydrologyTerrain | null;
     }
   | {
       type: "dig";

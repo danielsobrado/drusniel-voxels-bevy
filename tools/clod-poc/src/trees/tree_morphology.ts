@@ -66,8 +66,8 @@ export function buildTreeMorphology(
   const leafCards = species === "dead" || isCheapLod(lod)
     ? []
     : species === "pine"
-      ? buildPineLeafCards(seed, lod, config.trunkHeightM, config.crownRadiusM, morphology, settings)
-      : buildOakLeafCards(seed, lod, config.trunkHeightM, config.crownRadiusM, crownCenters, morphology, settings);
+      ? buildPineLeafCards(seed, lod, config.trunkHeightM, config.crownRadiusM, branches, morphology, settings)
+      : buildOakLeafCards(seed, lod, config.trunkHeightM, config.crownRadiusM, branches, morphology, settings);
   return { branches, leafCards, crownCenters };
 }
 
@@ -221,7 +221,7 @@ function buildOakLeafCards(
   lod: TreeLod,
   trunkHeight: number,
   crownRadius: number,
-  crownCenters: THREE.Vector3[],
+  branches: TreeBranchNode[],
   morphology: TreeSettings["species"][TreeSpeciesId]["morphology"],
   settings: TreeSettings,
 ): TreeLeafCard[] {
@@ -229,28 +229,33 @@ function buildOakLeafCards(
   const count = settings.foliage.enabled
     ? lod === "near" ? foliage.cardCountNear : lod === "mid" ? foliage.cardCountMid : 0
     : Math.round(morphology.leafCardCount * lodScale(lod, 1, 0.48, 0));
-  if (count <= 0 || crownCenters.length === 0) return [];
+  // Anchor foliage to the branch structure (a leafy mass clustered around each
+  // branch's outer third → tip) instead of a free-floating crown volume.
+  const level0 = branches.filter((branch) => branch.level === 0);
+  const anchors = level0.length > 0 ? level0 : branches;
+  if (count <= 0 || anchors.length === 0) return [];
   const cards: TreeLeafCard[] = [];
   for (let i = 0; i < count; i++) {
-    const cluster = crownCenters[i % crownCenters.length];
-    const angle = Math.PI * 2 * random(seed, i, 41);
-    const radius = foliage.clusterSpreadM * morphology.crownIrregularity * random(seed, i, 42);
-    const center = cluster.clone().add(new THREE.Vector3(
-      Math.cos(angle) * radius,
-      signed(seed, i, 43) * crownRadius * 0.38 / Math.max(0.35, morphology.crownFlattening),
-      Math.sin(angle) * radius,
-    ));
-    center.y = Math.max(trunkHeight * 0.82, center.y);
+    const branch = anchors[i % anchors.length];
+    const dir = branch.end.clone().sub(branch.start);
+    const along = Math.min(1.1, 0.58 + random(seed, i, 41) * 0.55);
+    const center = branch.start.clone().addScaledVector(dir, along);
+    const spread = Math.min(crownRadius, foliage.clusterSpreadM * (0.4 + random(seed, i, 42) * 0.7));
+    const sa = Math.PI * 2 * random(seed, i, 49);
+    center.x += Math.cos(sa) * spread;
+    center.z += Math.sin(sa) * spread;
+    center.y += signed(seed, i, 43) * spread * 0.65 / Math.max(0.35, morphology.crownFlattening);
+    center.y = Math.max(trunkHeight * 0.7, center.y);
     const sizeMix = 1 + signed(seed, i, 44) * foliage.cardSizeVariation;
     cards.push({
       center,
       width: foliage.cardWidthM * sizeMix,
       height: foliage.cardHeightM * sizeMix,
-      rotationY: angle + Math.PI * 0.5,
-      tilt: signed(seed, i, 45) * 0.34,
-      colorMix: random(seed, i, 46),
-      windWeight: 0.74 + random(seed, i, 47) * 0.22,
-      flutterWeight: 0.48 + random(seed, i, 48) * 0.45,
+      rotationY: Math.PI * 2 * random(seed, i, 45),
+      tilt: signed(seed, i, 46) * 0.5,
+      colorMix: random(seed, i, 47),
+      windWeight: 0.74 + random(seed, i, 48) * 0.22,
+      flutterWeight: 0.48 + random(seed, i, 50) * 0.45,
     });
   }
   return cards;
@@ -261,6 +266,7 @@ function buildPineLeafCards(
   lod: TreeLod,
   trunkHeight: number,
   crownRadius: number,
+  branches: TreeBranchNode[],
   morphology: TreeSettings["species"][TreeSpeciesId]["morphology"],
   settings: TreeSettings,
 ): TreeLeafCard[] {
@@ -268,21 +274,31 @@ function buildPineLeafCards(
   const count = settings.foliage.enabled
     ? lod === "near" ? foliage.cardCountNear : lod === "mid" ? foliage.cardCountMid : 0
     : Math.round(morphology.leafCardCount * lodScale(lod, 1, 0.5, 0));
+  // Conifer fronds: cards strung along each branch from mid-branch through the tip,
+  // drooping — anchored to the branch structure instead of a free-floating cone.
+  const level0 = branches.filter((branch) => branch.level === 0);
+  const anchors = level0.length > 0 ? level0 : branches;
+  if (count <= 0 || anchors.length === 0) return [];
   const cards: TreeLeafCard[] = [];
   for (let i = 0; i < count; i++) {
-    const t = count <= 1 ? 0.5 : i / (count - 1);
-    const angle = Math.PI * 2 * ((i * 0.618) % 1 + random(seed, i, 51) * 0.06);
-    const tierRadius = foliage.clusterSpreadM * (1.06 - t * 0.82) * (0.72 + random(seed, i, 52) * 0.22);
-    const y = trunkHeight * 0.72 + crownRadius * 2.35 * t;
+    const branch = anchors[i % anchors.length];
+    const dir = branch.end.clone().sub(branch.start);
+    const along = 0.4 + random(seed, i, 51) * 0.75;
+    const center = branch.start.clone().addScaledVector(dir, along);
+    const jitter = foliage.clusterSpreadM * 0.3;
+    center.x += signed(seed, i, 52) * jitter;
+    center.z += signed(seed, i, 57) * jitter;
+    center.y -= random(seed, i, 58) * crownRadius * 0.3; // fronds droop
+    center.y = Math.max(trunkHeight * 0.35, center.y);
     const sizeMix = 1 + signed(seed, i, 56) * foliage.cardSizeVariation;
     cards.push({
-      center: new THREE.Vector3(Math.cos(angle) * tierRadius, y, Math.sin(angle) * tierRadius),
-      width: foliage.cardWidthM * (1.08 - t * 0.22) * sizeMix,
-      height: foliage.cardHeightM * (1.08 - t * 0.18) * sizeMix,
-      rotationY: angle + Math.PI * 0.5,
-      tilt: -0.18 + signed(seed, i, 53) * 0.12,
+      center,
+      width: foliage.cardWidthM * sizeMix,
+      height: foliage.cardHeightM * (1.25 + along * 0.5) * sizeMix, // longer toward tips
+      rotationY: Math.atan2(dir.z, dir.x), // aligned along the branch
+      tilt: -0.4 - random(seed, i, 53) * 0.35, // droop downward
       colorMix: random(seed, i, 54),
-      windWeight: 0.62 + t * 0.28,
+      windWeight: 0.62 + along * 0.24,
       flutterWeight: 0.24 + random(seed, i, 55) * 0.34,
     });
   }

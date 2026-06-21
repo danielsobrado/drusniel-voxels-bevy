@@ -9,6 +9,7 @@
 // This module has NO dependency on the CLOD page builder. It only reads the
 // terrain height sampler (an adapter) so water can track the terrain surface.
 import type { LakeBodyConfig, RiverBodyConfig, WaterConfig } from "./waterConfig.js";
+import type { HydrologySystem } from "./hydrologySystem.js";
 
 /** Adapter for the terrain surface height used to anchor fake water levels. */
 export interface TerrainHeightSampler {
@@ -44,30 +45,44 @@ interface LakeRuntime {
 interface RiverRuntime {
   points: Array<[number, number]>;
   segLengths: number[];
+  levelPrefix: number[];
+  levels: number[];
   totalLength: number;
   halfWidth: number;
   levelOffset: number;
   downstreamDrop: number;
-  /** Water level at the polyline start; slopes down by downstreamDrop over totalLength. */
-  startLevel: number;
 }
 
 function buildLakeRuntime(lake: LakeBodyConfig, sampler: TerrainHeightSampler): LakeRuntime {
   const rx = Math.max(0.001, lake.radius[0]);
   const rz = Math.max(0.001, lake.radius[1]);
-  const centerTerrainY = sampler.surfaceHeight(lake.center[0], lake.center[1]);
+  const terrainSamples: number[] = [];
+  const step = Math.max(2, Math.min(rx, rz) / 8);
+  for (let dz = -rz; dz <= rz; dz += step) {
+    for (let dx = -rx; dx <= rx; dx += step) {
+      const nx = dx / rx;
+      const nz = dz / rz;
+      if (nx * nx + nz * nz <= 1) {
+        terrainSamples.push(sampler.surfaceHeight(lake.center[0] + dx, lake.center[1] + dz));
+      }
+    }
+  }
+  if (terrainSamples.length === 0) terrainSamples.push(sampler.surfaceHeight(lake.center[0], lake.center[1]));
+  terrainSamples.sort((a, b) => a - b);
+  const p20 = terrainSamples[Math.min(terrainSamples.length - 1, Math.max(0, Math.floor((terrainSamples.length - 1) * 0.2)))];
   return {
     center: [...lake.center] as [number, number],
     radius: [rx, rz],
     invRadius: [1 / rx, 1 / rz],
     levelOffset: lake.levelOffset,
-    waterLevel: centerTerrainY + lake.levelOffset,
+    waterLevel: p20 + lake.levelOffset,
   };
 }
 
 function buildRiverRuntime(river: RiverBodyConfig, sampler: TerrainHeightSampler): RiverRuntime {
   const points = river.points.map((p) => [...p] as [number, number]);
   const segLengths: number[] = [];
+  const levelPrefix: number[] = [0];
   let totalLength = 0;
   for (let i = 1; i < points.length; i++) {
     const dx = points[i][0] - points[i - 1][0];
@@ -75,16 +90,23 @@ function buildRiverRuntime(river: RiverBodyConfig, sampler: TerrainHeightSampler
     const len = Math.hypot(dx, dz);
     segLengths.push(len);
     totalLength += len;
+    levelPrefix.push(totalLength);
   }
-  const startTerrainY = sampler.surfaceHeight(points[0][0], points[0][1]);
+  const levels = points.map((p) => sampler.surfaceHeight(p[0], p[1]) + river.levelOffset);
+  for (let i = 1; i < levels.length; i++) levels[i] = Math.min(levels[i], levels[i - 1] - 0.02);
+  if (river.downstreamDrop > 0 && levels.length > 1) {
+    levels[levels.length - 1] = Math.min(levels[levels.length - 1], levels[0] - river.downstreamDrop);
+    for (let i = levels.length - 2; i >= 0; i--) levels[i] = Math.max(levels[i], levels[i + 1] + 0.02);
+  }
   return {
     points,
     segLengths,
+    levelPrefix,
+    levels,
     totalLength: Math.max(1e-3, totalLength),
     halfWidth: Math.max(0.05, river.width * 0.5),
     levelOffset: river.levelOffset,
     downstreamDrop: river.downstreamDrop,
-    startLevel: startTerrainY + river.levelOffset,
   };
 }
 
@@ -123,16 +145,23 @@ export class WaterField {
   private readonly drySentinelDepth: number;
   private readonly lakes: LakeRuntime[];
   private readonly rivers: RiverRuntime[];
+  private readonly hydrology: HydrologySystem | null;
+  private readonly source: WaterConfig["source"];
 
-  constructor(config: WaterConfig, sampler: TerrainHeightSampler) {
+  constructor(config: WaterConfig, sampler: TerrainHeightSampler, hydrology: HydrologySystem | null = null) {
     this.sampler = sampler;
     this.drySentinelDepth = config.drySentinelDepth;
+    this.hydrology = hydrology;
+    this.source = config.source;
     this.lakes = config.fakeBodies.lakes.map((lake) => buildLakeRuntime(lake, sampler));
-    this.rivers = config.fakeBodies.rivers.map((river) => buildRiverRuntime(river, sampler));
+    this.rivers = config.fakeBodies.rivers
+      .filter((river) => river.points.length >= 2)
+      .map((river) => buildRiverRuntime(river, sampler));
   }
 
   /** Terrain surface height at (x,z), exposed for the clipmap vertex fill. */
   terrainYAt(x: number, z: number): number {
+    if (this.source === "hydrology" && this.hydrology) return this.hydrology.terrainHeight(x, z);
     return this.sampler.surfaceHeight(x, z);
   }
 
@@ -158,6 +187,27 @@ export class WaterField {
 
   /** Full result in one pass (cheaper than four separate calls for vertex fill). */
   sample(x: number, z: number): WaterFieldResult {
+    if (this.source === "hydrology" && this.hydrology) {
+      const s = this.hydrology.sample(x, z);
+      const depth = s.waterY - s.terrainY;
+      const flowLen = Math.hypot(s.flowX, s.flowZ);
+      return {
+        waterY: s.waterY,
+        terrainY: s.terrainY,
+        depth,
+        bodyMask: depth > 0 ? s.bodyMask : 0,
+        flow: flowLen > FLOW_EPSILON
+          ? {
+              x: s.flowX / flowLen,
+              z: s.flowZ / flowLen,
+              speed: flowLen,
+              progress: 0,
+              drop: s.riverDepth,
+            }
+          : { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
+      };
+    }
+
     const terrainY = this.sampler.surfaceHeight(x, z);
 
     let bestLakeLevel = Number.POSITIVE_INFINITY;
@@ -227,9 +277,10 @@ export class WaterField {
       const proximity = 1 - smoothMask(river.halfWidth * 0.9, river.halfWidth, bestDist);
       if (inside || proximity > 0) {
         const weight = inside ? 1 : proximity;
-        const frac = bestAccLen / river.totalLength;
-        const sloped = river.startLevel - frac * river.downstreamDrop;
-        const level = sloped;
+        const segStart = river.levelPrefix[bestSegIdx] ?? 0;
+        const segLen = Math.max(FLOW_EPSILON, river.segLengths[bestSegIdx] ?? 1);
+        const segT = Math.min(1, Math.max(0, (bestAccLen - segStart) / segLen));
+        const level = river.levels[bestSegIdx] * (1 - segT) + river.levels[bestSegIdx + 1] * segT;
         if (weight > bestRiverWeight) {
           bestRiverWeight = weight;
           bestRiverLevel = level;

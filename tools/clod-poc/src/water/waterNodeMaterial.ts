@@ -182,7 +182,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const material = new MeshBasicNodeMaterial();
   material.fragmentNode = fragment();
   material.transparent = true;
-  material.depthWrite = params.visual.depthWrite;
+  material.depthWrite = false;
   material.depthTest = true;
   material.side = THREE.DoubleSide;
   material.name = "water-node";
@@ -222,7 +222,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     uFresnelNormalFlatten.value = v.fresnel.normalFlatten;
     uDepthScale.value = v.color.depthScale;
     uTurbidity.value = v.color.turbidity;
-    material.depthWrite = v.depthWrite;
+    material.depthWrite = false;
     material.needsUpdate = true;
   };
 

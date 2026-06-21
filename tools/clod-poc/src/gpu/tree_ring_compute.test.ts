@@ -6,8 +6,10 @@ import {
   TREE_GPU_RING_CELL,
   TREE_GPU_RING_GROUP_COUNT,
   packTreeGpuRingParams,
+  resolveTreeGpuRingReadbackCounts,
   treeGpuRingCullWorkgroups,
   treeGpuRingGroupCapacity,
+  treeGpuRingGroupIndex,
   treeGpuRingGrid,
   treeGpuRingKey,
   treeGpuRingRequestsDebugReadback,
@@ -96,7 +98,7 @@ describe("tree GPU ring compute helpers", () => {
     expect(treeGpuRingKey(settings, 256)).not.toBe(treeGpuRingKey(DEFAULT_TREE_SETTINGS, 256));
   });
 
-  it("gates periodic debug counter readback behind readbackVisibleLists and HUD counts", () => {
+  it("gates periodic debug counter readback behind readbackVisibleLists and debug consumers", () => {
     const enabled = {
       ...DEFAULT_TREE_SETTINGS,
       gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: true },
@@ -109,11 +111,35 @@ describe("tree GPU ring compute helpers", () => {
       ...DEFAULT_TREE_SETTINGS,
       gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: false },
     };
+    const validateOnly = {
+      ...DEFAULT_TREE_SETTINGS,
+      gpu: {
+        ...DEFAULT_TREE_SETTINGS.gpu,
+        readbackVisibleLists: true,
+        debugShowGpuCounts: false,
+        debugValidateAgainstCpu: true,
+      },
+    };
 
     expect(treeGpuRingRequestsDebugReadback(enabled, 0)).toBe(true);
     expect(treeGpuRingRequestsDebugReadback(enabled, 1)).toBe(false);
     expect(treeGpuRingRequestsDebugReadback(noReadback, 0)).toBe(false);
     expect(treeGpuRingRequestsDebugReadback(hiddenCounts, 0)).toBe(false);
+    expect(treeGpuRingRequestsDebugReadback(validateOnly, 0)).toBe(true);
+  });
+
+  it("reports overflow from raw readback counters before clamping draw counts", () => {
+    const raw = new Uint32Array(TREE_GPU_RING_GROUP_COUNT);
+    raw[treeGpuRingGroupIndex("oak", "near")] = 5;
+    raw[treeGpuRingGroupIndex("pine", "near")] = 2;
+    raw[treeGpuRingGroupIndex("dead", "far")] = 3;
+
+    const resolved = resolveTreeGpuRingReadbackCounts(raw, 3);
+
+    expect(resolved.overflowed).toBe(true);
+    expect(resolved.groupCounts[treeGpuRingGroupIndex("oak", "near")]).toBe(3);
+    expect(resolved.counts.near).toBe(5);
+    expect(resolved.counts.far).toBe(3);
   });
 });
 

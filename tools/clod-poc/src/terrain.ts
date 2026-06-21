@@ -155,8 +155,16 @@ function softenHeightCap(height: number, minHeight: number, maxHeight: number): 
   return ceilingStart + (range * excess) / (excess + range);
 }
 
-/** Terrain surface height at (x,z). */
-export function surfaceHeight(x: number, z: number): number {
+export type TerrainSurfaceOverride = (x: number, z: number) => number;
+
+let terrainSurfaceOverride: TerrainSurfaceOverride | null = null;
+
+export function setTerrainSurfaceOverride(override: TerrainSurfaceOverride | null): void {
+  terrainSurfaceOverride = override;
+}
+
+/** Base procedural terrain surface before runtime dig edits or hydrology carving. */
+export function baseSurfaceHeight(x: number, z: number): number {
   const cfg = TERRAIN_CONFIG;
   const continentNoise = fbmConfigurable(
     x,
@@ -195,6 +203,11 @@ export function surfaceHeight(x: number, z: number): number {
   const minSurface = Math.max(cfg.height.min, MIN_NORMAL_TERRAIN_SURFACE_Y);
   const height = BASE_TERRAIN_ELEVATION + continent + mountains + mountainUplift + hills + detail - valleyCarve;
   return Math.min(cfg.height.max - 0.5, Math.max(minSurface, softenHeightCap(height, minSurface, cfg.height.max)));
+}
+
+/** Terrain surface height at (x,z). */
+export function surfaceHeight(x: number, z: number): number {
+  return terrainSurfaceOverride ? terrainSurfaceOverride(x, z) : baseSurfaceHeight(x, z);
 }
 
 // ---- dig edits -------------------------------------------------------------

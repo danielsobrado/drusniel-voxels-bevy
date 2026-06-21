@@ -4,6 +4,7 @@ import { getDigEditsSnapshot } from "../terrain.js";
 import type { ClodPageNode, PageFootprint } from "../types.js";
 import { depthPrepassTwin } from "../rendering/veg_prepass.js";
 import {
+  TREE_GPU_RING_CELL,
   TreeGpuRingCompute,
   treeGpuRingComputeUnsupportedReason,
   treeGpuRingGroupCapacity,
@@ -36,6 +37,7 @@ import {
 } from "./tree_impostor_baker.js";
 import {
   createTreeImpostorMaterial,
+  createTreeImpostorNodeMaterial,
   updateTreeImpostorMaterialSettings,
 } from "./tree_impostor_material.js";
 import { octFrameIndexForDirection } from "./tree_impostor_octahedral.js";
@@ -49,12 +51,14 @@ import {
 } from "./tree_instances.js";
 import {
   generateTreeRingLightingProxies,
+  generateTreeRingValidationCounts,
   treeRingLightingProxyKey,
 } from "./tree_ring_lighting_proxies.js";
 import { createTreeMaterialHandle, type TreeMaterialHandle } from "./tree_material.js";
 import {
   createTreeNodeMaterialHandle,
   createTreeRingNodeMaterialHandle,
+  type TreeHydrologyWater,
   type TreeRingInstanceBuffers,
 } from "./tree_node_material.js";
 import type { EnvironmentLighting } from "../environment.js";
@@ -106,6 +110,8 @@ export interface TreeSystemOptions {
   lighting?: EnvironmentLighting;
   gpuDevice?: GPUDevice | null;
   gpuBackend?: TreeWebGpuBackendAccess | null;
+  /** Hydrology water field (RGBA32F; G = wet mask) to drop trees standing in water. */
+  hydrologyWaterTexture?: THREE.Texture | null;
   supportsGpuTrees?: boolean;
 }
 
@@ -213,6 +219,8 @@ export class TreeSystem {
   private bakedImpostorGeometries: Partial<Record<TreeSpeciesId, THREE.BufferGeometry>> = {};
   private impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>> = {};
   private impostorMaterials: Partial<Record<TreeSpeciesId, THREE.Material>> = {};
+  private readonly webgpu: boolean;
+  private readonly hydrologyWater: TreeHydrologyWater | undefined;
   private readonly materialHandle: TreeMaterialHandle;
   private readonly meshBoundsState = new WeakMap<THREE.InstancedMesh, TreeMeshBoundsState>();
   private patches: TreePatch[] = [];
@@ -235,12 +243,13 @@ export class TreeSystem {
     acceptedCandidates: 0,
     counts: { near: 0, mid: 0, far: 0, impostor: 0 },
     groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
+    overflowed: false,
     dispatchMs: null,
     readbackMs: null,
     skippedDispatches: 0,
   };
   private readonly frustumPlaneScratch = new Float32Array(24);
-  private warnedGpuValidationUnsupported = false;
+  private lastGpuValidationSignature = "";
   private currentLighting: EnvironmentLighting | undefined;
   private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   private readonly lastCenter: THREE.Vector3;
@@ -272,8 +281,12 @@ export class TreeSystem {
       ? "pending"
       : "disabled";
     this.currentLighting = options.lighting;
-    this.materialHandle = options.webgpu
-      ? createTreeNodeMaterialHandle(this.settings, options.lighting)
+    this.webgpu = options.webgpu ?? false;
+    this.hydrologyWater = options.hydrologyWaterTexture
+      ? { texture: options.hydrologyWaterTexture, worldSize: this.worldCells }
+      : undefined;
+    this.materialHandle = this.webgpu
+      ? createTreeNodeMaterialHandle(this.settings, options.lighting, this.hydrologyWater)
       : createTreeMaterialHandle(this.settings);
     this.lastCenter = new THREE.Vector3(this.worldCells * 0.5, 0, this.worldCells * 0.5);
     this.useTreePrepass = typeof location === "undefined"
@@ -764,10 +777,6 @@ export class TreeSystem {
 
   private updateGpuRingTrees(center: THREE.Vector3, camera?: THREE.Camera): boolean {
     const gpu = this.settings.gpu;
-    if (gpu.debugValidateAgainstCpu && !this.warnedGpuValidationUnsupported) {
-      this.warnedGpuValidationUnsupported = true;
-      console.warn("[trees-gpu-ring] debugValidateAgainstCpu is parsed but full GPU/CPU validation is not implemented");
-    }
     if (!this.supportsGpuTrees || !this.gpuDevice || !this.gpuBackend) {
       this.gpuStatus = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
       this.clearGpuRing();
@@ -804,6 +813,7 @@ export class TreeSystem {
         frustumPlanes,
       });
       this.gpuRingStats = this.gpuRingCompute.stats(true);
+      this.validateGpuRingAgainstCpu(center, frustumPlanes);
     }
 
     this.resetLodCounts();
@@ -816,10 +826,44 @@ export class TreeSystem {
       + this.gpuRingStats.counts.mid
       + this.gpuRingStats.counts.far
       + this.gpuRingStats.counts.impostor;
-    this.gpuOverflowed = false;
+    this.gpuOverflowed = this.gpuRingStats.overflowed;
     this.gpuDispatchMs = this.gpuRingStats.dispatchMs;
     this.updateStats();
     return true;
+  }
+
+  private validateGpuRingAgainstCpu(center: THREE.Vector3, frustumPlanes: ArrayLike<number>): void {
+    if (!this.settings.gpu.debugValidateAgainstCpu || this.gpuRingStats.readbackMs === null) return;
+
+    const signature = [
+      Math.round(center.x / TREE_GPU_RING_CELL),
+      Math.round(center.z / TREE_GPU_RING_CELL),
+      this.gpuRingStats.groupCounts.join(","),
+      this.gpuRingStats.overflowed ? 1 : 0,
+    ].join("|");
+    if (signature === this.lastGpuValidationSignature) return;
+    this.lastGpuValidationSignature = signature;
+
+    const expected = generateTreeRingValidationCounts({
+      centerX: center.x,
+      centerZ: center.z,
+      worldCells: this.worldCells,
+      settings: this.settings,
+      sampler: this.sampler,
+      maxInstancesPerGroup: treeGpuRingGroupCapacity(this.settings),
+      frustumPlanes,
+    });
+    const deltas = TREE_LODS.map((lod) => Math.abs((this.gpuRingStats.counts[lod] ?? 0) - (expected.counts[lod] ?? 0)));
+    const maxDelta = Math.max(...deltas);
+    const tolerance = Math.max(4, Math.ceil(Math.max(visibleTreeCount(expected.counts), visibleTreeCount(this.gpuRingStats.counts)) * 0.02));
+    if (maxDelta > tolerance || expected.overflowed !== this.gpuRingStats.overflowed) {
+      console.warn(
+        "[trees-gpu-ring] CPU/GPU count parity failed " +
+        `gpu=${formatLodCounts(this.gpuRingStats.counts)} cpu=${formatLodCounts(expected.counts)} ` +
+        `maxDelta=${maxDelta} tolerance=${tolerance} ` +
+        `overflow gpu=${this.gpuRingStats.overflowed} cpu=${expected.overflowed}`,
+      );
+    }
   }
 
   private ensureGpuRingCompute(): void {
@@ -839,6 +883,7 @@ export class TreeSystem {
       acceptedCandidates: 0,
       counts: { near: 0, mid: 0, far: 0, impostor: 0 },
       groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
+      overflowed: false,
       dispatchMs: null,
       readbackMs: null,
       skippedDispatches: 0,
@@ -891,8 +936,8 @@ export class TreeSystem {
     const materialHandles = {} as Record<TreeLod, TreeMaterialHandle>;
     for (const lod of TREE_LODS) {
       materialHandles[lod] = this.currentLighting
-        ? createTreeRingNodeMaterialHandle(this.settings, ringBuffers, lod, this.currentLighting)
-        : createTreeRingNodeMaterialHandle(this.settings, ringBuffers, lod);
+        ? createTreeRingNodeMaterialHandle(this.settings, ringBuffers, lod, this.currentLighting, this.hydrologyWater)
+        : createTreeRingNodeMaterialHandle(this.settings, ringBuffers, lod, undefined, this.hydrologyWater);
     }
     const meshes: TreeGpuRingMesh[] = [];
     for (const species of TREE_SPECIES) {
@@ -1204,7 +1249,9 @@ export class TreeSystem {
     for (const species of TREE_SPECIES) {
       const atlas = this.impostorAtlases[species];
       if (!atlas?.ready) continue;
-      this.impostorMaterials[species] ??= createTreeImpostorMaterial(this.settings, atlas);
+      this.impostorMaterials[species] ??= this.webgpu
+        ? createTreeImpostorNodeMaterial(this.settings, atlas)
+        : createTreeImpostorMaterial(this.settings, atlas);
       updateTreeImpostorMaterialSettings(this.impostorMaterials[species]!, this.settings);
     }
   }
@@ -1262,11 +1309,13 @@ export class TreeSystem {
       acceptedCandidates: 0,
       counts: { near: 0, mid: 0, far: 0, impostor: 0 },
       groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
+      overflowed: false,
       dispatchMs: null,
       readbackMs: null,
       skippedDispatches: 0,
     };
     this.gpuLightingProxyCache = null;
+    this.lastGpuValidationSignature = "";
   }
 
   private clearGpuRingDraw(): void {
@@ -1385,4 +1434,8 @@ function distance2d(ax: number, az: number, bx: number, bz: number): number {
 
 function visibleTreeCount(counts: Record<TreeLod, number>): number {
   return counts.near + counts.mid + counts.far + counts.impostor;
+}
+
+function formatLodCounts(counts: Record<TreeLod, number>): string {
+  return `${counts.near}/${counts.mid}/${counts.far}/${counts.impostor}`;
 }

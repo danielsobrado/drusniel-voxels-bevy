@@ -8,6 +8,7 @@ import {
   rehydrateBuildResult,
   type ClodWorkerRequest,
   type ClodWorkerResponse,
+  type SerializedHydrologyTerrain,
   type SerializedParentBatch,
 } from "./clod_worker_protocol.js";
 
@@ -63,9 +64,10 @@ export class ClodWorkerClient {
     cfg: ClodPagesConfig,
     edits: DigEdit[],
     onProgress: (progress: BuildProgress) => void,
+    hydrologyTerrain: SerializedHydrologyTerrain | null = null,
   ): Promise<BuildResult> {
     const requestId = this.nextRequestId++;
-    const request: ClodWorkerRequest = { type: "build", requestId, worldPagesX, worldPagesZ, cfg, edits };
+    const request: ClodWorkerRequest = { type: "build", requestId, worldPagesX, worldPagesZ, cfg, edits, hydrologyTerrain };
     this.progressHandlers.set(requestId, onProgress);
     return new Promise((resolve, reject) => {
       this.buildRequests.set(requestId, { resolve, reject });

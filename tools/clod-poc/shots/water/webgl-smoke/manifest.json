@@ -1,0 +1,23 @@
+{
+  "appUrl": "http://127.0.0.1:5182/?renderer=webgl&world=16&waterDebug=1",
+  "worldCells": 1024,
+  "seed": null,
+  "scenes": [
+    {
+      "scene": "lake-shoreline",
+      "pose": {
+        "x": 568,
+        "z": 710,
+        "yaw": -1.5707963267948966,
+        "distance": 26,
+        "pitch": -0.35,
+        "depth": 0.29440134338801727,
+        "wetFraction": 0.6172839506172839,
+        "kind": "lake"
+      },
+      "files": [
+        "final.png"
+      ]
+    }
+  ]
+}

@@ -29,6 +29,7 @@ export interface TreeGpuRingStats {
   acceptedCandidates: number;
   counts: TreeGpuRingCounts;
   groupCounts: number[];
+  overflowed: boolean;
   dispatchMs: number | null;
   readbackMs: number | null;
   skippedDispatches: number;
@@ -46,6 +47,7 @@ export interface TreeGpuRingDispatchParams {
 interface ReadbackSlot {
   buffer: GPUBuffer;
   busy: boolean;
+  destroyAfterMap: boolean;
   cpu: Uint32Array;
 }
 
@@ -91,8 +93,24 @@ export function treeGpuRingCullWorkgroups(settings: TreeSettings): number {
 
 export function treeGpuRingRequestsDebugReadback(settings: TreeSettings, frame: number): boolean {
   return settings.gpu.readbackVisibleLists &&
-    settings.gpu.debugShowGpuCounts &&
+    (settings.gpu.debugShowGpuCounts || settings.gpu.debugValidateAgainstCpu) &&
     frame % READBACK_INTERVAL_FRAMES === 0;
+}
+
+export function resolveTreeGpuRingReadbackCounts(
+  rawGroupCounts: ArrayLike<number>,
+  maxInstancesPerGroup: number,
+): { counts: TreeGpuRingCounts; groupCounts: number[]; overflowed: boolean } {
+  const cap = Math.max(0, Math.floor(maxInstancesPerGroup));
+  const rawCounts = Array.from({ length: TREE_GPU_RING_GROUP_COUNT }, (_, group) =>
+    Math.max(0, Math.floor(rawGroupCounts[group] ?? 0)),
+  );
+  const groupCounts = rawCounts.map((count) => Math.min(count, cap));
+  return {
+    counts: aggregateLodCounts(groupCounts),
+    groupCounts,
+    overflowed: rawCounts.some((count) => count > cap),
+  };
 }
 
 export function treeGpuRingKey(settings: TreeSettings, worldCells: number): string {
@@ -195,6 +213,7 @@ export class TreeGpuRingCompute {
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private counts: TreeGpuRingCounts = emptyTreeGpuRingCounts();
   private groupCounts = new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0);
+  private overflowed = false;
   private runningReadbacks = 0;
   private failedReason: string | null = null;
   private dispatchMs: number | null = null;
@@ -248,6 +267,7 @@ export class TreeGpuRingCompute {
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       }),
       busy: false,
+      destroyAfterMap: false,
       cpu: new Uint32Array(TREE_GPU_RING_GROUP_COUNT),
     }));
     this.bindGroup = device.createBindGroup({
@@ -338,6 +358,7 @@ export class TreeGpuRingCompute {
     const submitStart = performance.now();
     if (readbackSlot) {
       readbackSlot.busy = true;
+      readbackSlot.destroyAfterMap = false;
       this.runningReadbacks++;
     }
     this.device.queue.submit([encoder.finish()]);
@@ -348,6 +369,10 @@ export class TreeGpuRingCompute {
       const readbackStart = performance.now();
       void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
         if (submittedGeneration !== this.generation) {
+          slot.busy = false;
+          slot.destroyAfterMap = false;
+          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+          slot.buffer.unmap();
           slot.buffer.destroy();
           return;
         }
@@ -356,13 +381,29 @@ export class TreeGpuRingCompute {
         slot.busy = false;
         this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
         this.readbackMs = performance.now() - readbackStart;
-        const cap = Math.max(0, Math.floor(params.maxInstancesPerGroup));
-        this.groupCounts = Array.from(slot.cpu, (count) => Math.min(count, cap));
-        this.counts = aggregateLodCounts(this.groupCounts);
+        const resolved = resolveTreeGpuRingReadbackCounts(slot.cpu, params.maxInstancesPerGroup);
+        this.groupCounts = resolved.groupCounts;
+        this.counts = resolved.counts;
+        this.overflowed = resolved.overflowed;
+        if (slot.destroyAfterMap) {
+          slot.destroyAfterMap = false;
+          slot.buffer.destroy();
+        }
       }).catch((error) => {
-        if (submittedGeneration !== this.generation) return;
+        if (submittedGeneration !== this.generation) {
+          slot.busy = false;
+          slot.destroyAfterMap = false;
+          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+          slot.buffer.destroy();
+          return;
+        }
         slot.busy = false;
         this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+        if (slot.destroyAfterMap) {
+          slot.destroyAfterMap = false;
+          slot.buffer.destroy();
+          return;
+        }
         this.failedReason = error instanceof Error ? error.message : String(error);
       });
     }
@@ -382,6 +423,7 @@ export class TreeGpuRingCompute {
       acceptedCandidates,
       counts: { ...this.counts },
       groupCounts: [...this.groupCounts],
+      overflowed: this.overflowed,
       dispatchMs: this.dispatchMs,
       readbackMs: this.readbackMs,
       skippedDispatches: this.skippedDispatches,
@@ -396,7 +438,8 @@ export class TreeGpuRingCompute {
     this.digEdits.destroy();
     this.fieldParams.destroy();
     for (const slot of this.counterReadbacks) {
-      if (!slot.busy) slot.buffer.destroy();
+      if (slot.busy) slot.destroyAfterMap = true;
+      else slot.buffer.destroy();
     }
   }
 

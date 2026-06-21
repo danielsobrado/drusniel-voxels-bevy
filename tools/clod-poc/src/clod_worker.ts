@@ -7,12 +7,13 @@ import {
   type BuildResult,
   type NodeIndex,
 } from "./quadtree.js";
-import { addDigEdit, replaceDigEdits } from "./terrain.js";
+import { addDigEdit, replaceDigEdits, setTerrainSurfaceOverride } from "./terrain.js";
 import {
   serializeBuildResult,
   serializeNodes,
   type ClodWorkerRequest,
   type ClodWorkerResponse,
+  type SerializedHydrologyTerrain,
 } from "./clod_worker_protocol.js";
 import type { ClodPagesConfig } from "./config.js";
 
@@ -30,6 +31,28 @@ let parentNodes = 0;
 let parentMs = 0;
 let drainScheduled = false;
 const pendingByLevel = new Map<number, Set<string>>();
+
+function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | undefined): void {
+  if (!terrain) {
+    setTerrainSurfaceOverride(null);
+    return;
+  }
+  const { res, worldCells, carvedBed } = terrain;
+  const scale = (res - 1) / Math.max(1e-6, worldCells);
+  setTerrainSurfaceOverride((x, z) => {
+    const gx = Math.max(0, Math.min(res - 1, x * scale));
+    const gz = Math.max(0, Math.min(res - 1, z * scale));
+    const x0 = Math.floor(gx);
+    const z0 = Math.floor(gz);
+    const x1 = Math.min(res - 1, x0 + 1);
+    const z1 = Math.min(res - 1, z0 + 1);
+    const fx = gx - x0;
+    const fz = gz - z0;
+    const a = carvedBed[z0 * res + x0] * (1 - fx) + carvedBed[z0 * res + x1] * fx;
+    const b = carvedBed[z1 * res + x0] * (1 - fx) + carvedBed[z1 * res + x1] * fx;
+    return a * (1 - fz) + b * fz;
+  });
+}
 
 function post(message: ClodWorkerResponse): void {
   ctx.postMessage(message);
@@ -129,6 +152,7 @@ function scheduleParentDrain(): void {
 async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }>): Promise<void> {
   cfg = request.cfg;
   replaceDigEdits(request.edits);
+  installHydrologyTerrain(request.hydrologyTerrain);
   pendingByLevel.clear();
   activeParentRequestId = null;
   parentNodes = 0;

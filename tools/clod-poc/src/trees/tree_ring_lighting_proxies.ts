@@ -1,16 +1,20 @@
 import {
   TREE_GPU_RING_CELL,
+  TREE_GPU_RING_GROUP_COUNT,
+  treeGpuRingGroupIndex,
   treeGpuRingGrid,
   treeGpuRingSlotCount,
 } from "../gpu/tree_ring_compute.js";
-import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
+import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import {
   defaultTreeTerrainSampler,
   type TreeTerrainSampler,
 } from "./tree_instances.js";
 import {
   treeAcceptMask,
+  treeLodRing,
   treeRingAcceptParams,
+  treeRingLodParams,
   treeWorldCellFromSlot,
 } from "./tree_ring_math.js";
 
@@ -32,6 +36,17 @@ export interface TreeRingLightingProxyOptions {
   settings: TreeSettings;
   sampler?: TreeTerrainSampler;
   maxProxies?: number;
+}
+
+export interface TreeRingValidationCountOptions extends TreeRingLightingProxyOptions {
+  frustumPlanes?: ArrayLike<number>;
+  maxInstancesPerGroup: number;
+}
+
+export interface TreeRingValidationCounts {
+  counts: Record<TreeLod, number>;
+  groupCounts: number[];
+  overflowed: boolean;
 }
 
 export function treeRingLightingProxyKey(options: TreeRingLightingProxyOptions): string {
@@ -104,6 +119,59 @@ export function generateTreeRingLightingProxies(options: TreeRingLightingProxyOp
   return ranked.slice(0, maxProxies).map(({ proxy }) => proxy);
 }
 
+export function generateTreeRingValidationCounts(options: TreeRingValidationCountOptions): TreeRingValidationCounts {
+  const counts: Record<TreeLod, number> = { near: 0, mid: 0, far: 0, impostor: 0 };
+  const rawGroupCounts = new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0);
+  if (!options.settings.enabled) return { counts, groupCounts: rawGroupCounts, overflowed: false };
+
+  const sampler = options.sampler ?? defaultTreeTerrainSampler;
+  const settings = options.settings;
+  const grid = treeGpuRingGrid(settings);
+  const slots = treeGpuRingSlotCount(settings);
+  const acceptParams = treeRingAcceptParams(settings);
+  const lodParams = treeRingLodParams(settings);
+  const ringLodParams = { ...lodParams, radius: Math.min(settings.distanceM, lodParams.radius) };
+  const maxInstancesPerGroup = Math.max(0, Math.floor(options.maxInstancesPerGroup));
+
+  for (let slot = 0; slot < slots; slot++) {
+    const [cellX, cellZ] = treeWorldCellFromSlot(slot, grid, TREE_GPU_RING_CELL, options.centerX, options.centerZ);
+    const x = (cellX + treeRingHash(cellX, cellZ, settings.seed, 1103)) * TREE_GPU_RING_CELL;
+    const z = (cellZ + treeRingHash(cellX, cellZ, settings.seed, 1200)) * TREE_GPU_RING_CELL;
+    if (x <= 0 || z <= 0 || x >= options.worldCells || z >= options.worldCells) continue;
+
+    const distance = Math.hypot(x - options.centerX, z - options.centerZ);
+    if (distance > ringLodParams.radius + ringLodParams.band) continue;
+
+    const terrainHeight = sampler.surfaceHeight(x, z);
+    const normalY = sampler.surfaceNormal(x, z)[1];
+    const accept = treeAcceptMask(terrainHeight, normalY, x, z, acceptParams);
+    if (treeRingHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
+    if (!treeRingPointInFrustum(x, terrainHeight + 4, z, 8, options.frustumPlanes)) continue;
+
+    const species = selectRingSpecies(settings, treeRingHash(cellX, cellZ, settings.seed, 409));
+    if (!species) continue;
+
+    const ring = treeLodRing(distance, ringLodParams);
+    for (const lod of TREE_LODS) {
+      if (!ring.active[lod]) continue;
+      rawGroupCounts[treeGpuRingGroupIndex(species, lod)]++;
+    }
+  }
+
+  const groupCounts = rawGroupCounts.map((count) => Math.min(count, maxInstancesPerGroup));
+  for (const species of TREE_SPECIES) {
+    for (const lod of TREE_LODS) {
+      counts[lod] += groupCounts[treeGpuRingGroupIndex(species, lod)] ?? 0;
+    }
+  }
+
+  return {
+    counts,
+    groupCounts,
+    overflowed: rawGroupCounts.some((count) => count > maxInstancesPerGroup),
+  };
+}
+
 function treeRingHash(cellX: number, cellZ: number, seed: number, salt: number): number {
   const x = cellX + seed + salt;
   const z = cellZ + seed * 0.37 + salt * 1.17;
@@ -120,6 +188,26 @@ function selectRingSpecies(settings: TreeSettings, roll: number): TreeSpeciesId 
     if (cursor <= 0) return entry.species;
   }
   return weights[weights.length - 1]?.species ?? null;
+}
+
+function treeRingPointInFrustum(
+  x: number,
+  y: number,
+  z: number,
+  slack: number,
+  planes?: ArrayLike<number>,
+): boolean {
+  if (!planes) return true;
+  for (let plane = 0; plane < 6; plane++) {
+    const offset = plane * 4;
+    const distance =
+      (planes[offset] ?? 0) * x +
+      (planes[offset + 1] ?? 0) * y +
+      (planes[offset + 2] ?? 0) * z +
+      (planes[offset + 3] ?? 0);
+    if (distance < -slack) return false;
+  }
+  return true;
 }
 
 function speciesWeight(settings: TreeSettings, species: TreeSpeciesId): number {

@@ -121,7 +121,7 @@ const WATER_FRAG = /* glsl */ `
   varying vec3 vWorldPos;
   varying float vTerrainY;
   varying float vBodyMask;
-  varying vec3 vFlow;
+  varying vec4 vFlow;
   varying float vLevel;
 
   ${levelColorGlsl()}
@@ -335,7 +335,7 @@ export function createWaterShaderMaterial(params: WaterMaterialParams): WaterMat
     fragmentShader: WATER_FRAG,
     transparent: true,
     depthTest: true,
-    depthWrite: params.visual.depthWrite,
+    depthWrite: false,
     side: THREE.DoubleSide,
   });
   material.name = "water-shader";
@@ -351,7 +351,7 @@ export function createWaterShaderMaterial(params: WaterMaterialParams): WaterMat
     updateSunDirection: (dir) => { uniforms.uSunDir.value.copy(dir).normalize(); },
     updateVisual: (v) => {
       applyWaterVisual(uniforms, v);
-      material.depthWrite = v.depthWrite;
+      material.depthWrite = false;
       material.needsUpdate = true;
     },
     dispose: () => { material.dispose(); },

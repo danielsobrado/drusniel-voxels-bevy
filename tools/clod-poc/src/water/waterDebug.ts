@@ -37,6 +37,11 @@ const WATER_MODE_OPTIONS: Record<string, WaterDebugMode> = {
   "body mask (4)": "bodyMask",
   "clipmap level (5)": "clipmapLevel",
   "flow (6)": "flow",
+  "hydrology fill (7)": "hydrologyFill",
+  "accumulation (8)": "accumulation",
+  "carved bed (9)": "carvedBed",
+  "waterY (10)": "waterY",
+  "classification (11)": "classification",
 };
 
 export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugState {
@@ -54,7 +59,7 @@ export function addWaterDebugFolder(
   state: WaterDebugState,
   bindings: WaterDebugBindings,
 ): WaterDebugController {
-  const folder = gui.addFolder("water (fake clipmap)");
+  const folder = gui.addFolder("water");
   folder.add(state, "enabled").name("enabled").onChange((enabled: boolean) => {
     bindings.onEnabled(enabled);
   });

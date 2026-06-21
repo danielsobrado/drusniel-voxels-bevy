@@ -4,6 +4,11 @@
 // meshoptimizer simplification, page borders, LOD selection, colliders, or
 // validation. The dependency direction is scene -> water, never pages -> water.
 import { load } from "js-yaml";
+import {
+  DEFAULT_HYDROLOGY_CONFIG,
+  cloneHydrologyConfig,
+  type HydrologyConfig,
+} from "./hydrologyConfig.js";
 
 /** Debug render modes for the water material. */
 export const WATER_DEBUG_MODES = {
@@ -14,6 +19,11 @@ export const WATER_DEBUG_MODES = {
   bodyMask: 4,
   clipmapLevel: 5,
   flow: 6,
+  hydrologyFill: 7,
+  accumulation: 8,
+  carvedBed: 9,
+  waterY: 10,
+  classification: 11,
 } as const;
 export type WaterDebugMode = keyof typeof WATER_DEBUG_MODES;
 export type WaterDebugModeId = typeof WATER_DEBUG_MODES[WaterDebugMode];
@@ -86,14 +96,17 @@ export interface WaterColorVisualConfig {
 
 export interface WaterConfig {
   enabled: boolean;
+  source: "hydrology" | "fake_bodies";
   cellsPerLevel: number;
   cellSizes: number[];
   snapCells: number;
   drySentinelDepth: number;
   fakeBodies: {
+    carveTerrain: boolean;
     lakes: LakeBodyConfig[];
     rivers: RiverBodyConfig[];
   };
+  hydrology: HydrologyConfig;
   visual: WaterVisualConfig;
   debug: WaterDebugConfig;
 }
@@ -139,25 +152,28 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
 
 export const DEFAULT_WATER_CONFIG: WaterConfig = {
   enabled: true,
+  source: "hydrology",
   cellsPerLevel: 128,
   cellSizes: [1.5, 3.0, 6.0, 12.0, 24.0],
   snapCells: 2,
   drySentinelDepth: 2.0,
   fakeBodies: {
+    carveTerrain: true,
     lakes: [
-      { center: [0, 0], centerNorm: [0.52, 0.46], radius: [85, 55], levelOffset: 5.0 },
-      { center: [0, 0], centerNorm: [0.20, 0.80], radius: [60, 45], levelOffset: 4.5 },
+      { center: [0, 0], centerNorm: [0.50, 0.50], radius: [42, 30], levelOffset: 1.2 },
+      { center: [0, 0], centerNorm: [0.25, 0.72], radius: [32, 24], levelOffset: 1.0 },
     ],
     rivers: [
       {
         points: [],
-        pointsNorm: [[0.18, 0.38], [0.33, 0.45], [0.50, 0.48], [0.68, 0.55], [0.82, 0.62]],
-        width: 18.0,
-        levelOffset: 4.8,
-        downstreamDrop: 1.5,
+        pointsNorm: [[0.16, 0.34], [0.30, 0.42], [0.48, 0.48], [0.66, 0.57], [0.84, 0.66]],
+        width: 9.0,
+        levelOffset: 0.8,
+        downstreamDrop: 3.0,
       },
     ],
   },
+  hydrology: cloneHydrologyConfig(),
   visual: { ...DEFAULT_WATER_VISUAL },
   debug: { mode: WATER_DEBUG_MODES.final, clipmapTint: false, wireframe: false },
 };
@@ -165,8 +181,10 @@ export const DEFAULT_WATER_CONFIG: WaterConfig = {
 export function cloneWaterConfig(config: WaterConfig = DEFAULT_WATER_CONFIG): WaterConfig {
   return {
     ...config,
+    hydrology: cloneHydrologyConfig(config.hydrology),
     cellSizes: [...config.cellSizes],
     fakeBodies: {
+      carveTerrain: config.fakeBodies.carveTerrain,
       lakes: config.fakeBodies.lakes.map((lake) => ({
         center: [...lake.center] as [number, number],
         centerNorm: lake.centerNorm ? [...lake.centerNorm] as [number, number] : undefined,
@@ -239,8 +257,8 @@ function readNumberArray(value: unknown, fallback: number[]): number[] {
   return out.length > 0 ? out : [...fallback];
 }
 
-function readPointArray(value: unknown, fallback: Array<[number, number]>): Array<[number, number]> {
-  if (!Array.isArray(value) || value.length < 2) return fallback.map((p) => [...p] as [number, number]);
+function readPointArray(value: unknown): Array<[number, number]> | undefined {
+  if (!Array.isArray(value) || value.length < 2) return undefined;
   const out: Array<[number, number]> = [];
   for (const entry of value) {
     if (!Array.isArray(entry) || entry.length < 2) continue;
@@ -248,7 +266,11 @@ function readPointArray(value: unknown, fallback: Array<[number, number]>): Arra
     const b = readNumber(entry[1], Number.NaN);
     if (Number.isFinite(a) && Number.isFinite(b)) out.push([a, b]);
   }
-  return out.length >= 2 ? out : fallback.map((p) => [...p] as [number, number]);
+  return out.length >= 2 ? out : undefined;
+}
+
+function readSource(value: unknown, fallback: WaterConfig["source"]): WaterConfig["source"] {
+  return value === "hydrology" || value === "fake_bodies" ? value : fallback;
 }
 
 function warnWater(message: string, warn?: (message: string) => void): void {
@@ -258,11 +280,13 @@ function warnWater(message: string, warn?: (message: string) => void): void {
 interface WaterYamlConfig {
   water?: {
     enabled?: unknown;
+    source?: unknown;
     cells_per_level?: unknown;
     cell_sizes?: unknown;
     snap_cells?: unknown;
     dry_sentinel_depth?: unknown;
     fake_bodies?: {
+      carve_terrain?: unknown;
       lakes?: Array<{
         center?: unknown;
         center_norm?: unknown;
@@ -276,6 +300,53 @@ interface WaterYamlConfig {
         level_offset?: unknown;
         downstream_drop?: unknown;
       }>;
+    };
+    hydrology?: {
+      enabled?: unknown;
+      sim_res?: unknown;
+      dry_sentinel_depth?: unknown;
+      fill?: {
+        enabled?: unknown;
+        iterations?: unknown;
+        epsilon_per_cell?: unknown;
+        lake_delta?: unknown;
+        marsh_delta?: unknown;
+      };
+      accumulation?: {
+        particles?: unknown;
+        max_steps?: unknown;
+        flat_gradient_stop?: unknown;
+        inertia?: unknown;
+        jitter_seed?: unknown;
+      };
+      rivers?: {
+        river_threshold_add?: unknown;
+        visible_water_threshold_add?: unknown;
+        widen_radius?: unknown;
+        carve_depth_m?: unknown;
+        carve_power?: unknown;
+        visible_depth_m?: unknown;
+        visible_depth_power?: unknown;
+        slope_gate_start?: unknown;
+        slope_gate_end?: unknown;
+        min_visible_depth?: unknown;
+      };
+      water_surface?: {
+        wet_smooth_iterations?: unknown;
+        wet_to_wet_cliff_slope_max?: unknown;
+        far_reduce_factor?: unknown;
+      };
+      talus?: {
+        enabled?: unknown;
+        iterations?: unknown;
+        strength?: unknown;
+      };
+      debug?: {
+        show_fill?: unknown;
+        show_accumulation?: unknown;
+        show_carved_bed?: unknown;
+        show_water_y?: unknown;
+      };
     };
     visual?: {
       shallow_color?: unknown;
@@ -324,7 +395,7 @@ interface WaterYamlConfig {
 }
 
 function isWaterDebugModeId(value: unknown): value is WaterDebugModeId {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 6;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 11;
 }
 
 export function parseWaterConfig(
@@ -370,11 +441,15 @@ export function parseWaterConfig(
 
   const rawRivers = raw.fake_bodies?.rivers;
   const rivers: RiverBodyConfig[] = [];
-  for (const rawRiver of rawRivers ?? []) {
-    const points = readPointArray(rawRiver.points, rawRiver.points_norm ? [] : fb.fakeBodies.rivers[0].points);
-    const pointsNorm = rawRiver.points_norm ? readPointArray(rawRiver.points_norm, []) : undefined;
+  for (const [idx, rawRiver] of (rawRivers ?? []).entries()) {
+    const points = readPointArray(rawRiver.points);
+    const pointsNorm = readPointArray(rawRiver.points_norm);
+    if (!points && !pointsNorm) {
+      warnWater(`skipping river entry ${idx}: expected at least 2 valid points or points_norm entries`, warn ?? undefined);
+      continue;
+    }
     rivers.push({
-      points,
+      points: points ?? [],
       pointsNorm,
       width: readNumberAtLeast(rawRiver.width, fb.fakeBodies.rivers[0].width, 0.1),
       levelOffset: readNumber(rawRiver.level_offset, fb.fakeBodies.rivers[0].levelOffset),
@@ -382,10 +457,11 @@ export function parseWaterConfig(
     });
   }
   if (rivers.length === 0 && (rawRivers ?? []).length > 0) {
-    warnWater("all river entries invalid; using default rivers", warn ?? undefined);
+    warnWater("all river entries invalid; using no rivers", warn ?? undefined);
   }
   const fallbackRivers = rivers.length > 0 ? rivers
     : (rawRivers !== undefined && rawRivers.length === 0) ? []
+    : (rawRivers !== undefined) ? []
     : fb.fakeBodies.rivers;
 
   const v = raw.visual ?? {};
@@ -446,14 +522,72 @@ export function parseWaterConfig(
   const cellsPerLevel = readIntegerAtLeast(raw.cells_per_level, fb.cellsPerLevel, 4);
   const snapCells = readIntegerAtLeast(raw.snap_cells, fb.snapCells, 1);
   const drySentinelDepth = readNumberAtLeast(raw.dry_sentinel_depth, fb.drySentinelDepth, 0.1);
+  const hydRaw = raw.hydrology ?? {};
+  const hfb = DEFAULT_HYDROLOGY_CONFIG;
+  const hydrology: HydrologyConfig = {
+    enabled: readBoolean(hydRaw.enabled, hfb.enabled),
+    simRes: readIntegerAtLeast(hydRaw.sim_res, hfb.simRes, 8),
+    drySentinelDepth: readNumberAtLeast(hydRaw.dry_sentinel_depth, hfb.drySentinelDepth, 0.1),
+    fill: {
+      enabled: readBoolean(hydRaw.fill?.enabled, hfb.fill.enabled),
+      iterations: readIntegerAtLeast(hydRaw.fill?.iterations, hfb.fill.iterations, 0),
+      epsilonPerCell: readNumberAtLeast(hydRaw.fill?.epsilon_per_cell, hfb.fill.epsilonPerCell, 0),
+      lakeDelta: readNumberAtLeast(hydRaw.fill?.lake_delta, hfb.fill.lakeDelta, 0.01),
+      marshDelta: readNumberAtLeast(hydRaw.fill?.marsh_delta, hfb.fill.marshDelta, 0),
+    },
+    accumulation: {
+      particles: readIntegerAtLeast(hydRaw.accumulation?.particles, hfb.accumulation.particles, 0),
+      maxSteps: readIntegerAtLeast(hydRaw.accumulation?.max_steps, hfb.accumulation.maxSteps, 1),
+      flatGradientStop: readNumberAtLeast(hydRaw.accumulation?.flat_gradient_stop, hfb.accumulation.flatGradientStop, 0),
+      inertia: Math.min(0.98, Math.max(0, readNumber(hydRaw.accumulation?.inertia, hfb.accumulation.inertia))),
+      jitterSeed: readIntegerAtLeast(hydRaw.accumulation?.jitter_seed, hfb.accumulation.jitterSeed, 0),
+    },
+    rivers: {
+      riverThresholdAdd: readNumberAtLeast(hydRaw.rivers?.river_threshold_add, hfb.rivers.riverThresholdAdd, 0),
+      visibleWaterThresholdAdd: readNumberAtLeast(hydRaw.rivers?.visible_water_threshold_add, hfb.rivers.visibleWaterThresholdAdd, 0),
+      widenRadius: readIntegerAtLeast(hydRaw.rivers?.widen_radius, hfb.rivers.widenRadius, 0),
+      carveDepthM: readNumberAtLeast(hydRaw.rivers?.carve_depth_m, hfb.rivers.carveDepthM, 0),
+      carvePower: readNumberAtLeast(hydRaw.rivers?.carve_power, hfb.rivers.carvePower, 0.01),
+      visibleDepthM: readNumberAtLeast(hydRaw.rivers?.visible_depth_m, hfb.rivers.visibleDepthM, 0),
+      visibleDepthPower: readNumberAtLeast(hydRaw.rivers?.visible_depth_power, hfb.rivers.visibleDepthPower, 0.01),
+      slopeGateStart: readNumberAtLeast(hydRaw.rivers?.slope_gate_start, hfb.rivers.slopeGateStart, 0),
+      slopeGateEnd: readNumberAtLeast(hydRaw.rivers?.slope_gate_end, hfb.rivers.slopeGateEnd, 0),
+      minVisibleDepth: readNumberAtLeast(hydRaw.rivers?.min_visible_depth, hfb.rivers.minVisibleDepth, 0),
+    },
+    waterSurface: {
+      wetSmoothIterations: readIntegerAtLeast(hydRaw.water_surface?.wet_smooth_iterations, hfb.waterSurface.wetSmoothIterations, 0),
+      wetToWetCliffSlopeMax: readNumberAtLeast(hydRaw.water_surface?.wet_to_wet_cliff_slope_max, hfb.waterSurface.wetToWetCliffSlopeMax, 0.001),
+      farReduceFactor: readIntegerAtLeast(hydRaw.water_surface?.far_reduce_factor, hfb.waterSurface.farReduceFactor, 1),
+    },
+    talus: {
+      enabled: readBoolean(hydRaw.talus?.enabled, hfb.talus.enabled),
+      iterations: readIntegerAtLeast(hydRaw.talus?.iterations, hfb.talus.iterations, 0),
+      strength: Math.max(0, readNumber(hydRaw.talus?.strength, hfb.talus.strength)),
+    },
+    debug: {
+      showFill: readBoolean(hydRaw.debug?.show_fill, hfb.debug.showFill),
+      showAccumulation: readBoolean(hydRaw.debug?.show_accumulation, hfb.debug.showAccumulation),
+      showCarvedBed: readBoolean(hydRaw.debug?.show_carved_bed, hfb.debug.showCarvedBed),
+      showWaterY: readBoolean(hydRaw.debug?.show_water_y, hfb.debug.showWaterY),
+    },
+  };
+  if (hydrology.rivers.slopeGateEnd > hydrology.rivers.slopeGateStart) {
+    hydrology.rivers.slopeGateEnd = hydrology.rivers.slopeGateStart;
+  }
 
   return {
     enabled: readBoolean(raw.enabled, fb.enabled),
+    source: readSource(raw.source, fb.source),
     cellsPerLevel,
     cellSizes,
     snapCells,
     drySentinelDepth,
-    fakeBodies: { lakes: fallbackLakes, rivers: fallbackRivers },
+    fakeBodies: {
+      carveTerrain: readBoolean(raw.fake_bodies?.carve_terrain, fb.fakeBodies.carveTerrain),
+      lakes: fallbackLakes,
+      rivers: fallbackRivers,
+    },
+    hydrology,
     visual,
     debug: {
       mode: debugMode,
