@@ -29,6 +29,8 @@ export interface WaterMaterialHandle {
   setDebugMode(mode: WaterDebugModeId): void;
   setInnerRect(minX: number, minZ: number, maxX: number, maxZ: number): void;
   setLevelId(level: number): void;
+  setClipmapTint(enabled: boolean): void;
+  setWireframe(enabled: boolean): void;
   updateCamera(pos: THREE.Vector3): void;
   updateSunDirection(dir: THREE.Vector3): void;
   updateVisual(visual: WaterVisualConfig): void;
@@ -50,12 +52,12 @@ export function waterLevelColor(level: number): [number, number, number] {
 const WATER_VERT = /* glsl */ `
   attribute float aTerrainY;
   attribute float aBodyMask;
-  attribute vec3 aFlow;
+  attribute vec4 aFlow;
   attribute float aLevel;
   varying vec3 vWorldPos;
   varying float vTerrainY;
   varying float vBodyMask;
-  varying vec3 vFlow;
+  varying vec4 vFlow;
   varying float vLevel;
 
   void main() {
@@ -87,12 +89,30 @@ const WATER_FRAG = /* glsl */ `
   uniform vec3 uDeepColor;
   uniform vec3 uFoamColor;
   uniform float uAlpha;
+  uniform float uRippleCycle;
   uniform float uFresnelPower;
   uniform float uRippleAmp;
   uniform float uRippleSpeed;
+  uniform float uRippleScaleA;
+  uniform float uRippleScaleB;
+  uniform float uRippleStrengthA;
+  uniform float uRippleStrengthB;
+  uniform float uRippleLoopDistance;
+  uniform vec2 uLakeBreeze;
   uniform float uShoreFoamStart;
   uniform float uShoreFoamEnd;
-  uniform float uMaxDepthForColor;
+  uniform float uFoamNoiseScale;
+  uniform float uFoamShoreStrength;
+  uniform float uFoamRiverStrength;
+  uniform float uFoamSpeedStart;
+  uniform float uFoamSpeedEnd;
+  uniform float uFoamDropStart;
+  uniform float uFoamDropEnd;
+  uniform float uFresnelBase;
+  uniform float uFresnelNormalFlatten;
+  uniform float uDepthScale;
+  uniform float uTurbidity;
+  uniform float uClipmapTint;
   uniform vec4 uInnerRect; // minX, minZ, maxX, maxZ
   uniform int uDebugMode;
   uniform vec3 uCameraPos;
@@ -105,6 +125,31 @@ const WATER_FRAG = /* glsl */ `
   varying float vLevel;
 
   ${levelColorGlsl()}
+
+  float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+
+  float noise2(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
+      mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
+      u.y
+    );
+  }
+
+  vec2 rippleGrad(vec2 uv, float phase) {
+    float tau = 6.28318530718;
+    return vec2(
+      cos(uv.x + phase * tau) * uRippleStrengthA + cos((uv.x + uv.y) * 0.73 - phase * tau * 0.7) * uRippleStrengthB,
+      -sin(uv.y - phase * tau) * uRippleStrengthA + cos((uv.x - uv.y) * 0.61 + phase * tau * 0.9) * uRippleStrengthB
+    );
+  }
 
   void main() {
     vec3 worldPos = vWorldPos;
@@ -121,37 +166,52 @@ const WATER_FRAG = /* glsl */ `
     }
     float depth = worldPos.y - vTerrainY;
     if (depth <= 0.0) discard;
-    float depthNorm = clamp(depth / uMaxDepthForColor, 0.0, 1.0);
+    float depthNorm = clamp(depth / uDepthScale, 0.0, 1.0);
 
-    // Rivers bias ripple phase along their flow direction; lakes have flowSpeed 0
-    // and fall back to the ambient time-driven breeze.
-    vec2 flowDir = vec2(vFlow.x, vFlow.y);
-    float flowPhase = dot(flowDir, worldPos.xz) * 0.15 * vFlow.z;
-    float t = uTime * uRippleSpeed + flowPhase;
-    float g1x = cos(worldPos.x * 0.18 + t * 1.3) * 0.18 + cos((worldPos.x + worldPos.z) * 0.13 + t * 0.7) * 0.13;
-    float g1z = -sin(worldPos.z * 0.21 - t * 1.1) * 0.21 + cos((worldPos.x + worldPos.z) * 0.13 + t * 0.7) * 0.13;
-    g1x *= uRippleAmp;
-    g1z *= uRippleAmp;
-    vec3 normal = normalize(vec3(-g1x, 1.0, -g1z));
+    vec2 riverDir = normalize(vec2(vFlow.x, vFlow.y) + vec2(0.00001, 0.0));
+    vec2 breezeDir = normalize(uLakeBreeze + vec2(0.00001, 0.0));
+    float riverWeight = smoothstep(0.001, 0.02, vFlow.z);
+    vec2 advectDir = normalize(mix(breezeDir, riverDir, riverWeight));
+    float advectSpeed = max(length(uLakeBreeze), vFlow.z) * uRippleSpeed;
+    float phaseA = fract(uTime * uRippleCycle);
+    float phaseB = fract(uTime * uRippleCycle + 0.5);
+    float blend = abs(phaseA - 0.5) * 2.0;
+    vec2 advectA = advectDir * (phaseA * uRippleLoopDistance * advectSpeed);
+    vec2 advectB = advectDir * (phaseB * uRippleLoopDistance * advectSpeed);
+    vec2 gradA = rippleGrad(worldPos.xz * uRippleScaleA + advectA, phaseA);
+    vec2 gradB = rippleGrad(worldPos.xz * uRippleScaleB + advectB + vec2(17.31, -9.47), phaseB);
+    vec2 grad = mix(gradA, gradB, blend) * uRippleAmp;
+    vec3 normal = normalize(vec3(-grad.x, 1.0, -grad.y));
 
     vec3 viewDir = normalize(uCameraPos - worldPos);
-    float fres = pow(1.0 - max(dot(viewDir, normal), 0.0), uFresnelPower);
+    vec3 fresnelNormal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), uFresnelNormalFlatten));
+    float fres = uFresnelBase + (1.0 - uFresnelBase) * pow(1.0 - max(dot(viewDir, fresnelNormal), 0.0), uFresnelPower);
     vec3 waterColor = mix(uShallowColor, uDeepColor, depthNorm);
+    waterColor = mix(waterColor, uShallowColor, uTurbidity * (1.0 - depthNorm) * 0.45);
     vec3 sunDir = normalize(uSunDir);
     vec3 reflDir = reflect(-sunDir, normal);
     float spec = pow(max(dot(reflDir, viewDir), 0.0), 32.0);
-    waterColor += spec * 0.15;
+    waterColor += spec * 0.12 + fres * 0.08;
 
-    float shore = 1.0 - smoothstep(uShoreFoamStart, uShoreFoamEnd, depth);
-    vec3 finalColor = mix(waterColor, uFoamColor, shore * 0.6);
+    float foamNoise = noise2(worldPos.xz * uFoamNoiseScale + advectDir * uTime * 0.05);
+    float breakup = smoothstep(0.22, 0.82, foamNoise);
+    float wetFade = smoothstep(0.005, 0.05, depth) * vBodyMask;
+    float shore = (1.0 - smoothstep(uShoreFoamStart, uShoreFoamEnd, depth)) * wetFade * breakup * uFoamShoreStrength;
+    float riverFast = smoothstep(uFoamSpeedStart, uFoamSpeedEnd, vFlow.z);
+    float riverDrop = smoothstep(uFoamDropStart, uFoamDropEnd, vFlow.w);
+    float riverFoam = riverFast * riverDrop * uFoamRiverStrength * wetFade * (0.25 + 0.75 * breakup);
+    float foam = clamp(shore + riverFoam, 0.0, 1.0);
+    vec3 finalColor = mix(waterColor, uFoamColor, foam);
+    finalColor = mix(finalColor, waterLevelColor(vLevel), uClipmapTint * 0.18);
     float alpha = clamp(uAlpha + fres * 0.18, 0.0, 1.0);
 
     vec3 outCol;
     if (uDebugMode == 1) outCol = vec3(depthNorm);
-    else if (uDebugMode == 2) outCol = vec3(shore);
+    else if (uDebugMode == 2) outCol = vec3(foam);
     else if (uDebugMode == 3) outCol = vec3(fres);
     else if (uDebugMode == 4) outCol = vec3(vBodyMask);
     else if (uDebugMode == 5) outCol = waterLevelColor(vLevel);
+    else if (uDebugMode == 6) outCol = vec3(riverDir * 0.5 + 0.5, clamp(vFlow.z / max(uFoamSpeedEnd, 0.001), 0.0, 1.0));
     else outCol = finalColor;
     float outAlpha = uDebugMode == 0 ? alpha : 1.0;
 
@@ -165,12 +225,30 @@ export interface WaterUniforms {
   uDeepColor: { value: THREE.Color };
   uFoamColor: { value: THREE.Color };
   uAlpha: { value: number };
+  uRippleCycle: { value: number };
   uFresnelPower: { value: number };
   uRippleAmp: { value: number };
   uRippleSpeed: { value: number };
+  uRippleScaleA: { value: number };
+  uRippleScaleB: { value: number };
+  uRippleStrengthA: { value: number };
+  uRippleStrengthB: { value: number };
+  uRippleLoopDistance: { value: number };
+  uLakeBreeze: { value: THREE.Vector2 };
   uShoreFoamStart: { value: number };
   uShoreFoamEnd: { value: number };
-  uMaxDepthForColor: { value: number };
+  uFoamNoiseScale: { value: number };
+  uFoamShoreStrength: { value: number };
+  uFoamRiverStrength: { value: number };
+  uFoamSpeedStart: { value: number };
+  uFoamSpeedEnd: { value: number };
+  uFoamDropStart: { value: number };
+  uFoamDropEnd: { value: number };
+  uFresnelBase: { value: number };
+  uFresnelNormalFlatten: { value: number };
+  uDepthScale: { value: number };
+  uTurbidity: { value: number };
+  uClipmapTint: { value: number };
   uInnerRect: { value: THREE.Vector4 };
   uDebugMode: { value: number };
   uCameraPos: { value: THREE.Vector3 };
@@ -186,12 +264,30 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uDeepColor: { value: new THREE.Color(v.deepColor[0], v.deepColor[1], v.deepColor[2]) },
     uFoamColor: { value: new THREE.Color(v.foamColor[0], v.foamColor[1], v.foamColor[2]) },
     uAlpha: { value: v.alpha },
-    uFresnelPower: { value: v.fresnelPower },
+    uRippleCycle: { value: v.rippleCycle },
+    uFresnelPower: { value: v.fresnel.power },
     uRippleAmp: { value: v.rippleAmp },
     uRippleSpeed: { value: v.rippleSpeed },
+    uRippleScaleA: { value: v.rippleScaleA },
+    uRippleScaleB: { value: v.rippleScaleB },
+    uRippleStrengthA: { value: v.rippleStrengthA },
+    uRippleStrengthB: { value: v.rippleStrengthB },
+    uRippleLoopDistance: { value: v.rippleLoopDistance },
+    uLakeBreeze: { value: new THREE.Vector2(v.lakeBreeze[0], v.lakeBreeze[1]) },
     uShoreFoamStart: { value: v.shoreFoamStart },
     uShoreFoamEnd: { value: v.shoreFoamEnd },
-    uMaxDepthForColor: { value: v.maxDepthForColor },
+    uFoamNoiseScale: { value: v.foam.noiseScale },
+    uFoamShoreStrength: { value: v.foam.shoreStrength },
+    uFoamRiverStrength: { value: v.foam.riverStrength },
+    uFoamSpeedStart: { value: v.foam.speedStart },
+    uFoamSpeedEnd: { value: v.foam.speedEnd },
+    uFoamDropStart: { value: v.foam.dropStart },
+    uFoamDropEnd: { value: v.foam.dropEnd },
+    uFresnelBase: { value: v.fresnel.base },
+    uFresnelNormalFlatten: { value: v.fresnel.normalFlatten },
+    uDepthScale: { value: v.color.depthScale },
+    uTurbidity: { value: v.color.turbidity },
+    uClipmapTint: { value: 0 },
     uInnerRect: { value: new THREE.Vector4(0, 0, 0, 0) },
     uDebugMode: { value: params.debugMode },
     uCameraPos: { value: params.cameraPosition.clone() },
@@ -205,12 +301,29 @@ export function applyWaterVisual(uniforms: WaterUniforms, v: WaterVisualConfig):
   uniforms.uDeepColor.value.setRGB(v.deepColor[0], v.deepColor[1], v.deepColor[2]);
   uniforms.uFoamColor.value.setRGB(v.foamColor[0], v.foamColor[1], v.foamColor[2]);
   uniforms.uAlpha.value = v.alpha;
-  uniforms.uFresnelPower.value = v.fresnelPower;
+  uniforms.uRippleCycle.value = v.rippleCycle;
+  uniforms.uFresnelPower.value = v.fresnel.power;
   uniforms.uRippleAmp.value = v.rippleAmp;
   uniforms.uRippleSpeed.value = v.rippleSpeed;
+  uniforms.uRippleScaleA.value = v.rippleScaleA;
+  uniforms.uRippleScaleB.value = v.rippleScaleB;
+  uniforms.uRippleStrengthA.value = v.rippleStrengthA;
+  uniforms.uRippleStrengthB.value = v.rippleStrengthB;
+  uniforms.uRippleLoopDistance.value = v.rippleLoopDistance;
+  uniforms.uLakeBreeze.value.set(v.lakeBreeze[0], v.lakeBreeze[1]);
   uniforms.uShoreFoamStart.value = v.shoreFoamStart;
   uniforms.uShoreFoamEnd.value = v.shoreFoamEnd;
-  uniforms.uMaxDepthForColor.value = v.maxDepthForColor;
+  uniforms.uFoamNoiseScale.value = v.foam.noiseScale;
+  uniforms.uFoamShoreStrength.value = v.foam.shoreStrength;
+  uniforms.uFoamRiverStrength.value = v.foam.riverStrength;
+  uniforms.uFoamSpeedStart.value = v.foam.speedStart;
+  uniforms.uFoamSpeedEnd.value = v.foam.speedEnd;
+  uniforms.uFoamDropStart.value = v.foam.dropStart;
+  uniforms.uFoamDropEnd.value = v.foam.dropEnd;
+  uniforms.uFresnelBase.value = v.fresnel.base;
+  uniforms.uFresnelNormalFlatten.value = v.fresnel.normalFlatten;
+  uniforms.uDepthScale.value = v.color.depthScale;
+  uniforms.uTurbidity.value = v.color.turbidity;
 }
 
 /** WebGL fallback material (GLSL ShaderMaterial). */
@@ -232,6 +345,8 @@ export function createWaterShaderMaterial(params: WaterMaterialParams): WaterMat
     setDebugMode: (mode) => { uniforms.uDebugMode.value = mode; },
     setInnerRect: (minX, minZ, maxX, maxZ) => { uniforms.uInnerRect.value.set(minX, minZ, maxX, maxZ); },
     setLevelId: () => { /* level carried per-vertex; uniform not used on GLSL path */ },
+    setClipmapTint: (enabled) => { uniforms.uClipmapTint.value = enabled ? 1 : 0; },
+    setWireframe: (enabled) => { material.wireframe = enabled; },
     updateCamera: (pos) => { uniforms.uCameraPos.value.copy(pos); },
     updateSunDirection: (dir) => { uniforms.uSunDir.value.copy(dir).normalize(); },
     updateVisual: (v) => {

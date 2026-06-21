@@ -1,14 +1,17 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import type { ClodPageNode, PageFootprint, PageMesh } from "../types.js";
 import { cloneTreeSettings, TreeSystem, type TreeTerrainSampler } from "../trees/index.js";
 import { createTreeMaterialHandle } from "../trees/tree_material.js";
 import { createUnderstoryMaterialHandle, cloneUnderstorySettings } from "../understory/index.js";
 import {
+  applyForestLightingMaterialStateIfChanged,
   cloneForestLightingSettings,
   createForestLightingField,
   createForestLightingTexture,
   ForestLightingSystem,
+  type ForestLightingMaterialState,
+  type ForestLightingMaterialUpdateSignature,
   type ForestLightingTreeProxy,
 } from "./index.js";
 
@@ -84,6 +87,67 @@ describe("forest lighting material integration", () => {
       expect(shader.fragmentShader).toContain("texture2D(uForestLightingMap");
     } finally {
       handle.dispose();
+    }
+  });
+
+  it("applies prop material state when texture updates change but not on unchanged frames", () => {
+    const { state, signature, dispose } = materialStateFixture();
+    const tree = { updateForestLighting: vi.fn() };
+    const understory = { updateForestLighting: vi.fn() };
+    let previous: ForestLightingMaterialUpdateSignature | null = null;
+
+    try {
+      previous = applyForestLightingMaterialStateIfChanged(previous, signature, state, [tree, understory]);
+      previous = applyForestLightingMaterialStateIfChanged(previous, signature, state, [tree, understory]);
+      expect(tree.updateForestLighting).toHaveBeenCalledTimes(1);
+      expect(understory.updateForestLighting).toHaveBeenCalledTimes(1);
+
+      previous = applyForestLightingMaterialStateIfChanged(
+        previous,
+        { ...signature, textureUpdates: signature.textureUpdates + 1 },
+        state,
+        [tree, understory],
+      );
+      expect(tree.updateForestLighting).toHaveBeenCalledTimes(2);
+      expect(understory.updateForestLighting).toHaveBeenCalledTimes(2);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("applies prop material state immediately when settings or texture handles change", () => {
+    const first = materialStateFixture();
+    const second = materialStateFixture();
+    const tree = { updateForestLighting: vi.fn() };
+    const understory = { updateForestLighting: vi.fn() };
+    let previous: ForestLightingMaterialUpdateSignature | null = null;
+
+    try {
+      previous = applyForestLightingMaterialStateIfChanged(previous, first.signature, first.state, [tree, understory]);
+      previous = applyForestLightingMaterialStateIfChanged(
+        previous,
+        { ...first.signature, settingsVersion: first.signature.settingsVersion + 1 },
+        first.state,
+        [tree, understory],
+      );
+      previous = applyForestLightingMaterialStateIfChanged(
+        previous,
+        { ...first.signature, settingsVersion: first.signature.settingsVersion + 1 },
+        first.state,
+        [tree, understory],
+      );
+      previous = applyForestLightingMaterialStateIfChanged(
+        previous,
+        { ...first.signature, textureHandle: second.state.textureHandle },
+        second.state,
+        [tree, understory],
+      );
+
+      expect(tree.updateForestLighting).toHaveBeenCalledTimes(3);
+      expect(understory.updateForestLighting).toHaveBeenCalledTimes(3);
+    } finally {
+      first.dispose();
+      second.dispose();
     }
   });
 });
@@ -166,6 +230,51 @@ describe("tree lighting proxies", () => {
     expect(first[0]!.x).not.toBeCloseTo(first[0]!.z);
     expect(meshSignature(page.mesh)).toEqual(before);
   });
+
+  it("accepts GPU ring tree proxies and produces canopy lighting", () => {
+    const treeSettings = cloneTreeSettings();
+    treeSettings.enabled = true;
+    treeSettings.seed = 17;
+    treeSettings.distanceM = 120;
+    treeSettings.placement.slopeMinY = 0;
+    treeSettings.placement.minHeightM = 0;
+    treeSettings.placement.maxHeightM = 100;
+    treeSettings.placement.minGroundWeight = 0;
+    treeSettings.ecology.density.baseDensity = 1;
+    treeSettings.ecology.clustering.clusterStrength = 0;
+    treeSettings.species.oak.minHeightM = 0;
+    treeSettings.species.oak.maxHeightM = 100;
+    treeSettings.species.pine.minHeightM = 0;
+    treeSettings.species.pine.maxHeightM = 100;
+    treeSettings.species.dead.minHeightM = 0;
+    treeSettings.species.dead.maxHeightM = 100;
+    treeSettings.gpu.enabled = true;
+    treeSettings.gpu.fallbackToCpu = false;
+    const treeSystem = new TreeSystem({
+      scene: new THREE.Scene(),
+      nodes: [node("L0:0,0", 0, { minX: 0, minZ: 0, maxX: 256, maxZ: 256 })],
+      worldCells: 256,
+      settings: treeSettings,
+      sampler: flatSampler(),
+    });
+    treeSystems.push(treeSystem);
+    (treeSystem as unknown as { gpuStatus: "ring" }).gpuStatus = "ring";
+    const proxies = treeSystem.getLightingProxies();
+    expect(proxies.length).toBeGreaterThan(0);
+
+    const lightingSettings = cloneForestLightingSettings();
+    lightingSettings.field.resolution = 32;
+    const lighting = new ForestLightingSystem({ worldCells: 256, settings: lightingSettings });
+    lighting.update(0, new THREE.Vector3(128, 0, 128), {
+      treeProxies: proxies,
+      sunDirection: new THREE.Vector3(1, 1, 0).normalize(),
+      force: true,
+    });
+    const stats = lighting.getStats();
+    expect(stats.treeProxies).toBe(proxies.length);
+    expect(stats.maxCanopy).toBeGreaterThan(0);
+    lighting.dispose();
+  });
 });
 
 function shaderStub(): THREE.WebGLProgramParametersWithUniforms {
@@ -174,6 +283,29 @@ function shaderStub(): THREE.WebGLProgramParametersWithUniforms {
     vertexShader: "#include <common>\nvoid main(){\n#include <begin_vertex>\n}",
     fragmentShader: "#include <common>\nvoid main(){\nvec4 diffuseColor=vec4(1.0);\n#include <map_fragment>\n#include <color_fragment>\n#include <clipping_planes_fragment>\n}",
   } as unknown as THREE.WebGLProgramParametersWithUniforms;
+}
+
+function materialStateFixture(): {
+  state: ForestLightingMaterialState;
+  signature: ForestLightingMaterialUpdateSignature;
+  dispose: () => void;
+} {
+  const settings = cloneForestLightingSettings();
+  settings.field.resolution = 4;
+  const field = createForestLightingField(16, settings);
+  const textureHandle = createForestLightingTexture(field);
+  const state: ForestLightingMaterialState = { textureHandle, settings, worldCells: 16 };
+  return {
+    state,
+    signature: {
+      textureHandle,
+      textureUpdates: 0,
+      settingsVersion: 0,
+      enabled: settings.enabled,
+      debugMode: settings.materialIntegration.debugMode,
+    },
+    dispose: () => textureHandle.dispose(),
+  };
 }
 
 function tree(overrides: Partial<ForestLightingTreeProxy> = {}): ForestLightingTreeProxy {

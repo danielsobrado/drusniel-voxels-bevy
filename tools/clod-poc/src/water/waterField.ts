@@ -19,6 +19,8 @@ export interface WaterFlow {
   x: number;
   z: number;
   speed: number;
+  progress: number;
+  drop: number;
 }
 
 export interface WaterFieldResult {
@@ -190,6 +192,8 @@ export class WaterField {
     let bestFlowX = 0;
     let bestFlowZ = 0;
     let bestFlowWeight = 0;
+    let bestFlowProgress = 0;
+    let bestFlowDrop = 0;
 
     for (const river of this.rivers) {
       let bestDist = Infinity;
@@ -247,9 +251,13 @@ export class WaterField {
           dirZ /= len;
           if (flowProximity > bestFlowWeight) {
             bestFlowWeight = flowProximity;
-            bestFlowSpeed = (river.downstreamDrop / Math.max(1, river.totalLength)) * 60;
+            const centerFade = 1 - smoothMask(0, river.halfWidth, bestDist);
+            const dropSpeed = (river.downstreamDrop / Math.max(1, river.totalLength)) * 60;
+            bestFlowSpeed = dropSpeed * centerFade;
             bestFlowX = dirX;
             bestFlowZ = dirZ;
+            bestFlowProgress = Math.min(1, Math.max(0, bestAccLen / river.totalLength));
+            bestFlowDrop = Math.max(0, river.downstreamDrop);
           }
         }
       }
@@ -267,8 +275,14 @@ export class WaterField {
     }
 
     const flow = bestFlowWeight > 0
-      ? { x: bestFlowX, z: bestFlowZ, speed: bestFlowSpeed }
-      : { x: 0, z: 0, speed: 0 };
+      ? {
+          x: bestFlowX,
+          z: bestFlowZ,
+          speed: bestFlowSpeed,
+          progress: bestFlowProgress,
+          drop: bestFlowDrop,
+        }
+      : { x: 0, z: 0, speed: 0, progress: 0, drop: 0 };
 
     return {
       waterY,

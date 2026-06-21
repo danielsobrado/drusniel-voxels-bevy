@@ -4,7 +4,6 @@ import { composeTreeRingShader } from "./wgsl_modules.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "../trees/tree_config.js";
 import { treeRingAcceptParams, treeRingLodParams } from "../trees/tree_ring_math.js";
 
-const WORKGROUP_SIZE = 64;
 export const TREE_GPU_RING_LOD_COUNT = TREE_LODS.length;
 export const TREE_GPU_RING_GROUP_COUNT = TREE_SPECIES.length * TREE_GPU_RING_LOD_COUNT;
 const PARAM_BYTES = 16 * 18;
@@ -82,6 +81,20 @@ export function treeGpuRingGroupCapacity(settings: TreeSettings): number {
   return Math.max(1, Math.floor(settings.gpu.maxVisible / TREE_GPU_RING_GROUP_COUNT));
 }
 
+export function treeGpuRingWorkgroupSize(settings: TreeSettings): number {
+  return settings.gpu.workgroupSize;
+}
+
+export function treeGpuRingCullWorkgroups(settings: TreeSettings): number {
+  return Math.ceil(treeGpuRingSlotCount(settings) / treeGpuRingWorkgroupSize(settings));
+}
+
+export function treeGpuRingRequestsDebugReadback(settings: TreeSettings, frame: number): boolean {
+  return settings.gpu.readbackVisibleLists &&
+    settings.gpu.debugShowGpuCounts &&
+    frame % READBACK_INTERVAL_FRAMES === 0;
+}
+
 export function treeGpuRingKey(settings: TreeSettings, worldCells: number): string {
   const lod = treeRingLodParams(settings);
   const accept = treeRingAcceptParams(settings);
@@ -105,6 +118,7 @@ export function treeGpuRingKey(settings: TreeSettings, worldCells: number): stri
     speciesWeight(settings, "oak"),
     speciesWeight(settings, "pine"),
     speciesWeight(settings, "dead"),
+    treeGpuRingWorkgroupSize(settings),
   ].join("|");
 }
 
@@ -258,7 +272,7 @@ export class TreeGpuRingCompute {
   ): Promise<TreeGpuRingCompute> {
     const module = device.createShaderModule({
       label: "tree ring compute shader",
-      code: composeTreeRingShader(),
+      code: composeTreeRingShader(treeGpuRingWorkgroupSize(settings)),
     });
     const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({
       binding,
@@ -298,7 +312,8 @@ export class TreeGpuRingCompute {
   dispatch(params: TreeGpuRingDispatchParams): boolean {
     if (this.failedReason) return false;
 
-    const requestReadback = this.frame++ % READBACK_INTERVAL_FRAMES === 0;
+    const frame = this.frame++;
+    const requestReadback = treeGpuRingRequestsDebugReadback(this.settings, frame);
     const readbackSlot = requestReadback
       ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null
       : null;
@@ -309,7 +324,11 @@ export class TreeGpuRingCompute {
 
     const encoder = this.device.createCommandEncoder({ label: "tree ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, 1);
-    this.dispatchPipeline(encoder, this.pipelines.tree_cull, Math.ceil(treeGpuRingSlotCount(this.settings) / WORKGROUP_SIZE));
+    this.dispatchPipeline(
+      encoder,
+      this.pipelines.tree_cull,
+      treeGpuRingCullWorkgroups(this.settings),
+    );
     this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, 1);
     if (readbackSlot) {
       encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, COUNTER_BYTES);

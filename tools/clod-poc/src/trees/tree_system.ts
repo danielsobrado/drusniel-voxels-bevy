@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import { getDigEditsSnapshot } from "../terrain.js";
 import type { ClodPageNode, PageFootprint } from "../types.js";
+import { depthPrepassTwin } from "../rendering/veg_prepass.js";
 import {
   TreeGpuRingCompute,
   treeGpuRingComputeUnsupportedReason,
@@ -46,6 +47,10 @@ import {
   type TreeInstance,
   type TreeTerrainSampler,
 } from "./tree_instances.js";
+import {
+  generateTreeRingLightingProxies,
+  treeRingLightingProxyKey,
+} from "./tree_ring_lighting_proxies.js";
 import { createTreeMaterialHandle, type TreeMaterialHandle } from "./tree_material.js";
 import {
   createTreeNodeMaterialHandle,
@@ -57,6 +62,36 @@ import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 
 const TREE_BOUNDS_REFRESH_DISTANCE_M = 1.0;
 const TREE_INSTANCE_ATTRIBUTE_EPSILON = 1e-5;
+const TREE_GPU_FRUSTUM_MATRIX = new THREE.Matrix4();
+const TREE_GPU_FRUSTUM = new THREE.Frustum();
+
+export function treeUsesGpuRingDraw(settings: TreeSettings): boolean {
+  const gpu = settings.gpu;
+  return settings.enabled && gpu.enabled && gpu.scatterEnabled && gpu.cullEnabled && !gpu.debugForceCpu;
+}
+
+export function packTreeGpuFrustumPlanes(camera?: THREE.Camera, out = new Float32Array(24)): Float32Array {
+  if (!camera) {
+    out.fill(0);
+    for (let i = 0; i < 6; i++) out[i * 4 + 3] = 1_000_000;
+    return out;
+  }
+
+  (camera as THREE.Camera & { updateProjectionMatrix?: () => void }).updateProjectionMatrix?.();
+  camera.updateMatrixWorld(true);
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  TREE_GPU_FRUSTUM_MATRIX.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  TREE_GPU_FRUSTUM.setFromProjectionMatrix(TREE_GPU_FRUSTUM_MATRIX);
+  for (let i = 0; i < 6; i++) {
+    const plane = TREE_GPU_FRUSTUM.planes[i];
+    const offset = i * 4;
+    out[offset] = plane.normal.x;
+    out[offset + 1] = plane.normal.y;
+    out[offset + 2] = plane.normal.z;
+    out[offset + 3] = plane.constant;
+  }
+  return out;
+}
 
 export interface TreeSystemOptions {
   scene: THREE.Scene;
@@ -89,12 +124,12 @@ export interface TreeStats extends TreeGenerationStats {
   midTrees: number;
   farTrees: number;
   impostorTrees: number;
-  gpuStatus: "disabled" | "unsupported" | "ready" | "fallback-cpu" | "error";
+  gpuStatus: "disabled" | "unsupported" | "ring" | "fallback-cpu" | "error";
   gpuCandidateCount: number;
+  gpuAcceptedCount: number;
   gpuVisibleCount: number;
   gpuOverflowed: boolean;
   gpuDispatchMs: number | null;
-  gpuReadbackMs: number | null;
   gpuShowCounts: boolean;
   impostorStatus: TreeImpostorStatus;
   impostorReason: string | null;
@@ -186,13 +221,14 @@ export class TreeSystem {
   private gpuVisibleCount = 0;
   private gpuOverflowed = false;
   private gpuDispatchMs: number | null = null;
-  private gpuReadbackMs: number | null = null;
   private gpuLoggedError: string | null = null;
   private gpuRingCompute: TreeGpuRingCompute | null = null;
   private gpuRingInit: Promise<void> | null = null;
   private gpuRingKey = "";
+  private gpuRingGeneration = 0;
   private gpuRingDraw: TreeGpuRingDrawResources | null = null;
   private ringMeshes: TreeGpuRingMesh[] = [];
+  private ringPrepassTwins: THREE.Mesh[] = [];
   private gpuRingStats: TreeGpuRingStats = {
     status: "disabled",
     candidateCount: 0,
@@ -204,14 +240,16 @@ export class TreeSystem {
     skippedDispatches: 0,
   };
   private readonly frustumPlaneScratch = new Float32Array(24);
-  private hasGpuRingFrustum = false;
+  private warnedGpuValidationUnsupported = false;
   private currentLighting: EnvironmentLighting | undefined;
   private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   private readonly lastCenter: THREE.Vector3;
+  private readonly useTreePrepass: boolean;
   // Visible instance count per *primary* LOD (crossfade secondary draws excluded),
   // so the reported LOD distribution still sums to the visible instance count.
   private readonly lodCounts: Record<TreeLod, number> = { near: 0, mid: 0, far: 0, impostor: 0 };
   private stats: TreeStats = emptyTreeStats();
+  private gpuLightingProxyCache: { key: string; proxies: TreeLightingProxy[] } | null = null;
 
   constructor(options: TreeSystemOptions) {
     this.scene = options.scene;
@@ -238,6 +276,9 @@ export class TreeSystem {
       ? createTreeNodeMaterialHandle(this.settings, options.lighting)
       : createTreeMaterialHandle(this.settings);
     this.lastCenter = new THREE.Vector3(this.worldCells * 0.5, 0, this.worldCells * 0.5);
+    this.useTreePrepass = typeof location === "undefined"
+      ? true
+      : new URLSearchParams(location.search).get("prepass") !== "0";
     this.root.name = "trees";
     this.scene.add(this.root);
     this.root.visible = this.settings.enabled;
@@ -272,6 +313,7 @@ export class TreeSystem {
 
   updateSettings(settings: Partial<TreeSettings>): void {
     Object.assign(this.settings, settings);
+    this.gpuLightingProxyCache = null;
     const nextGeometryKey = treeGeometryKey(this.settings);
     const needsGeometry = nextGeometryKey !== this.geometryKey;
     const needsPatchRefresh =
@@ -302,13 +344,14 @@ export class TreeSystem {
     this.setEnabled(this.settings.enabled);
   }
 
-  update(timeSeconds: number, center: THREE.Vector3, cameraPosition?: THREE.Vector3): void {
+  update(timeSeconds: number, center: THREE.Vector3, camera?: THREE.Camera): void {
     this.materialHandle.setTime(timeSeconds);
     for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
       handle.setTime(timeSeconds);
       handle.setFadeCenter?.(center.x, center.z);
     }
     this.lastCenter.copy(center);
+    const cameraPosition = camera?.position ?? center;
     if (!this.settings.enabled) {
       this.resetLodCounts();
       this.updateStats();
@@ -316,14 +359,15 @@ export class TreeSystem {
     }
     if (this.usesGpuRingDraw()) {
       if (this.patches.length > 0) this.clearPatches();
-      if (this.updateGpuRingTrees(center, cameraPosition ?? center)) return;
+      if (this.updateGpuRingTrees(center, camera)) return;
     } else {
       this.clearGpuRing();
+      this.updateCpuFallbackGpuStatus();
     }
     if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) {
       this.refreshForCenter(center);
     }
-    this.updatePatchLods(center, cameraPosition ?? center);
+    this.updatePatchLods(center, cameraPosition);
   }
 
   rebuild(): void {
@@ -340,6 +384,19 @@ export class TreeSystem {
   rebuildNodePatches(nodeIds: Iterable<string>): void {
     const ids = new Set(nodeIds);
     if (ids.size === 0) return;
+    if (this.usesGpuRingDraw()) {
+      this.clearGpuRing();
+      this.resetLodCounts();
+      this.gpuVisibleCount = 0;
+      this.gpuOverflowed = false;
+      this.gpuDispatchMs = null;
+      this.gpuStatus = (!this.supportsGpuTrees || !this.gpuDevice || !this.gpuBackend || this.gpuRingUnsupportedReason)
+        ? this.settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported"
+        : "ring";
+      this.root.visible = this.settings.enabled;
+      this.updateStats();
+      return;
+    }
     const retained: TreePatch[] = [];
     for (const patch of this.patches) {
       if (ids.has(patch.nodeId)) this.removePatch(patch);
@@ -367,6 +424,7 @@ export class TreeSystem {
 
   getLightingProxies(): TreeLightingProxy[] {
     if (!this.settings.enabled) return [];
+    if (this.reportsGpuRingStats()) return this.getGpuRingLightingProxies();
     const proxies: TreeLightingProxy[] = [];
     for (const patch of this.patches) {
       if (!patch.visible) continue;
@@ -384,6 +442,29 @@ export class TreeSystem {
       }
     }
     return proxies;
+  }
+
+  private getGpuRingLightingProxies(): TreeLightingProxy[] {
+    const key = treeRingLightingProxyKey({
+      centerX: this.lastCenter.x,
+      centerZ: this.lastCenter.z,
+      worldCells: this.worldCells,
+      settings: this.settings,
+      sampler: this.sampler,
+    });
+    if (this.gpuLightingProxyCache?.key !== key) {
+      this.gpuLightingProxyCache = {
+        key,
+        proxies: generateTreeRingLightingProxies({
+          centerX: this.lastCenter.x,
+          centerZ: this.lastCenter.z,
+          worldCells: this.worldCells,
+          settings: this.settings,
+          sampler: this.sampler,
+        }),
+      };
+    }
+    return this.gpuLightingProxyCache.proxies.map((proxy) => ({ ...proxy }));
   }
 
   async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {
@@ -660,13 +741,33 @@ export class TreeSystem {
   }
 
   private usesGpuRingDraw(): boolean {
-    const gpu = this.settings.gpu;
-    return this.settings.enabled && gpu.enabled && !gpu.debugForceCpu;
+    return treeUsesGpuRingDraw(this.settings);
   }
 
-  private updateGpuRingTrees(center: THREE.Vector3, cameraPosition: THREE.Vector3): boolean {
-    void cameraPosition;
+  private updateCpuFallbackGpuStatus(): void {
+    if (!this.settings.gpu.enabled) {
+      this.gpuStatus = "disabled";
+      return;
+    }
+    this.gpuStatus = this.settings.gpu.fallbackToCpu ? "fallback-cpu" : "disabled";
+  }
+
+  private reportsGpuRingStats(): boolean {
+    if (!this.usesGpuRingDraw()) return false;
+    if (this.gpuStatus === "fallback-cpu" || this.gpuStatus === "unsupported") return false;
+    return this.gpuStatus === "ring" ||
+      this.gpuStatus === "error" ||
+      !!this.gpuRingDraw ||
+      !!this.gpuRingCompute ||
+      (this.gpuRingStats.status !== "disabled" && this.gpuRingStats.status !== "idle");
+  }
+
+  private updateGpuRingTrees(center: THREE.Vector3, camera?: THREE.Camera): boolean {
     const gpu = this.settings.gpu;
+    if (gpu.debugValidateAgainstCpu && !this.warnedGpuValidationUnsupported) {
+      this.warnedGpuValidationUnsupported = true;
+      console.warn("[trees-gpu-ring] debugValidateAgainstCpu is parsed but full GPU/CPU validation is not implemented");
+    }
     if (!this.supportsGpuTrees || !this.gpuDevice || !this.gpuBackend) {
       this.gpuStatus = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
       this.clearGpuRing();
@@ -693,7 +794,7 @@ export class TreeSystem {
       return false;
     }
     if (this.gpuRingCompute && this.gpuRingDraw) {
-      const frustumPlanes = this.frustumPlanes();
+      const frustumPlanes = this.frustumPlanes(camera);
       this.gpuRingCompute.dispatch({
         centerX: center.x,
         centerZ: center.z,
@@ -710,14 +811,13 @@ export class TreeSystem {
     this.lodCounts.mid = this.gpuRingStats.counts.mid;
     this.lodCounts.far = this.gpuRingStats.counts.far;
     this.lodCounts.impostor = this.gpuRingStats.counts.impostor;
-    this.gpuStatus = this.gpuRingStats.status === "failed" ? "error" : "ready";
+    this.gpuStatus = this.gpuRingStats.status === "failed" ? "error" : "ring";
     this.gpuVisibleCount = this.gpuRingStats.counts.near
       + this.gpuRingStats.counts.mid
       + this.gpuRingStats.counts.far
       + this.gpuRingStats.counts.impostor;
     this.gpuOverflowed = false;
     this.gpuDispatchMs = this.gpuRingStats.dispatchMs;
-    this.gpuReadbackMs = this.gpuRingStats.readbackMs;
     this.updateStats();
     return true;
   }
@@ -744,10 +844,11 @@ export class TreeSystem {
       skippedDispatches: 0,
     };
     const initKey = key;
+    const initGeneration = this.gpuRingGeneration;
     const edits = resolveDigEdits(getDigEditsSnapshot());
     this.gpuRingInit = TreeGpuRingCompute.create(this.gpuDevice, edits, this.gpuRingDraw.outputBuffers, this.settings)
       .then((compute) => {
-        if (this.gpuRingKey !== initKey) {
+        if (this.gpuRingKey !== initKey || this.gpuRingGeneration !== initGeneration) {
           compute.destroy();
           return;
         }
@@ -755,7 +856,7 @@ export class TreeSystem {
         this.gpuRingStats = compute.stats(this.settings.enabled);
       })
       .catch((error) => {
-        if (this.gpuRingKey !== initKey) return;
+        if (this.gpuRingKey !== initKey || this.gpuRingGeneration !== initGeneration) return;
         this.gpuRingStats = {
           ...this.gpuRingStats,
           status: "failed",
@@ -763,7 +864,7 @@ export class TreeSystem {
         };
       })
       .finally(() => {
-        if (this.gpuRingKey === initKey) this.gpuRingInit = null;
+        if (this.gpuRingKey === initKey && this.gpuRingGeneration === initGeneration) this.gpuRingInit = null;
       });
   }
 
@@ -846,9 +947,24 @@ export class TreeSystem {
     );
     mesh.name = `trees-ring-gpu-${species}-${lod}`;
     mesh.frustumCulled = false;
+    // clod-poc has no real-time shadow-map pass; shadow-caster prepass work is N/A here.
     mesh.castShadow = this.treeLodCastsShadow(lod);
     mesh.receiveShadow = false;
+    this.addGpuRingPrepassTwin(lod, mesh, materialHandle);
     return mesh;
+  }
+
+  private usesGpuRingPrepass(lod: TreeLod): boolean {
+    return this.useTreePrepass && lod !== "impostor";
+  }
+
+  private addGpuRingPrepassTwin(lod: TreeLod, mesh: THREE.Mesh, materialHandle: TreeMaterialHandle): void {
+    if (!this.usesGpuRingPrepass(lod)) return;
+    const nodes = materialHandle.prepassNodesFor?.(lod);
+    if (!nodes) return;
+    const twin = depthPrepassTwin(mesh, nodes);
+    this.ringPrepassTwins.push(twin);
+    this.root.add(twin);
   }
 
   private createStorageInstancedAttribute(name: string, count: number): StorageInstancedBufferAttribute {
@@ -878,14 +994,8 @@ export class TreeSystem {
     return buffer;
   }
 
-  private frustumPlanes(): Float32Array {
-    // Stage 1 uses a conservative always-inside frustum if the app does not pass a camera.
-    if (!this.hasGpuRingFrustum) {
-      this.frustumPlaneScratch.fill(0);
-      for (let i = 0; i < 6; i++) this.frustumPlaneScratch[i * 4 + 3] = 1_000_000;
-      this.hasGpuRingFrustum = true;
-    }
-    return this.frustumPlaneScratch;
+  private frustumPlanes(camera?: THREE.Camera): Float32Array {
+    return packTreeGpuFrustumPlanes(camera, this.frustumPlaneScratch);
   }
 
   private indexCountFor(geometry: THREE.BufferGeometry): number {
@@ -1140,11 +1250,11 @@ export class TreeSystem {
   }
 
   private clearGpuRing(): void {
+    this.gpuRingGeneration++;
     this.gpuRingCompute?.destroy();
     this.gpuRingCompute = null;
     this.gpuRingInit = null;
     this.gpuRingKey = "";
-    this.hasGpuRingFrustum = false;
     this.clearGpuRingDraw();
     this.gpuRingStats = {
       status: this.gpuDevice ? "idle" : "disabled",
@@ -1156,9 +1266,19 @@ export class TreeSystem {
       readbackMs: null,
       skippedDispatches: 0,
     };
+    this.gpuLightingProxyCache = null;
   }
 
   private clearGpuRingDraw(): void {
+    for (const twin of this.ringPrepassTwins) {
+      this.root.remove(twin);
+      if (Array.isArray(twin.material)) {
+        for (const material of twin.material) material.dispose();
+      } else {
+        twin.material.dispose();
+      }
+    }
+    this.ringPrepassTwins = [];
     for (const mesh of this.ringMeshes) {
       this.root.remove(mesh);
       mesh.geometry.dispose();
@@ -1183,27 +1303,36 @@ export class TreeSystem {
 
   private updateStats(): void {
     const stats = emptyTreeStats();
-    for (const patch of this.patches) {
-      stats.totalTrees += patch.instances.length;
-      stats.patches++;
-      if (patch.visible) stats.visiblePatches++;
-      else stats.culledPatches++;
-      stats.generatedCandidates += patch.generationStats.generatedCandidates;
-      stats.acceptedCandidates += patch.generationStats.acceptedCandidates;
-      stats.rejectedSlope += patch.generationStats.rejectedSlope;
-      stats.rejectedHeight += patch.generationStats.rejectedHeight;
-      stats.rejectedMaterial += patch.generationStats.rejectedMaterial;
+    const gpuRing = this.reportsGpuRingStats();
+    if (gpuRing) {
+      const gpuVisible = this.gpuVisibleCount || visibleTreeCount(this.gpuRingStats.counts);
+      const gpuAccepted = this.gpuRingStats.acceptedCandidates || gpuVisible;
+      stats.totalTrees = gpuVisible;
+      stats.generatedCandidates = this.gpuRingStats.candidateCount;
+      stats.acceptedCandidates = gpuAccepted;
+    } else {
+      for (const patch of this.patches) {
+        stats.totalTrees += patch.instances.length;
+        stats.patches++;
+        if (patch.visible) stats.visiblePatches++;
+        else stats.culledPatches++;
+        stats.generatedCandidates += patch.generationStats.generatedCandidates;
+        stats.acceptedCandidates += patch.generationStats.acceptedCandidates;
+        stats.rejectedSlope += patch.generationStats.rejectedSlope;
+        stats.rejectedHeight += patch.generationStats.rejectedHeight;
+        stats.rejectedMaterial += patch.generationStats.rejectedMaterial;
+      }
     }
     stats.nearTrees = this.lodCounts.near;
     stats.midTrees = this.lodCounts.mid;
     stats.farTrees = this.lodCounts.far;
     stats.impostorTrees = this.lodCounts.impostor;
     stats.gpuStatus = this.gpuStatus;
-    stats.gpuCandidateCount = this.usesGpuRingDraw() ? this.gpuRingStats.candidateCount : 0;
-    stats.gpuVisibleCount = this.gpuVisibleCount;
+    stats.gpuCandidateCount = gpuRing ? this.gpuRingStats.candidateCount : 0;
+    stats.gpuAcceptedCount = gpuRing ? (this.gpuRingStats.acceptedCandidates || visibleTreeCount(this.gpuRingStats.counts)) : 0;
+    stats.gpuVisibleCount = gpuRing ? (this.gpuVisibleCount || visibleTreeCount(this.gpuRingStats.counts)) : 0;
     stats.gpuOverflowed = this.gpuOverflowed;
     stats.gpuDispatchMs = this.gpuDispatchMs;
-    stats.gpuReadbackMs = this.gpuReadbackMs;
     stats.gpuShowCounts = this.settings.gpu.debugShowGpuCounts;
     stats.impostorStatus = this.impostorStatus;
     stats.impostorReason = this.impostorReason;
@@ -1223,10 +1352,10 @@ function emptyTreeStats(): TreeStats {
     impostorTrees: 0,
     gpuStatus: "disabled",
     gpuCandidateCount: 0,
+    gpuAcceptedCount: 0,
     gpuVisibleCount: 0,
     gpuOverflowed: false,
     gpuDispatchMs: null,
-    gpuReadbackMs: null,
     gpuShowCounts: true,
     impostorStatus: "disabled",
     impostorReason: null,
@@ -1252,4 +1381,8 @@ function footprintRadius(footprint: PageFootprint): number {
 
 function distance2d(ax: number, az: number, bx: number, bz: number): number {
   return Math.hypot(ax - bx, az - bz);
+}
+
+function visibleTreeCount(counts: Record<TreeLod, number>): number {
+  return counts.near + counts.mid + counts.far + counts.impostor;
 }

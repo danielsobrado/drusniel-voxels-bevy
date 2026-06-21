@@ -13,7 +13,17 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "water:find": "tsx tools/find-water-shots.ts",
+    "water:probe": "tsx tools/probe-water-margin.ts",
+    "water:shot": "tsx tools/shoot-water.ts",
+    "water:shot:lake-final": "npm run water:shot -- --scene lake-shoreline --debug final --out shots/water/lake-final",
+    "water:shot:river-final": "npm run water:shot -- --scene river-bend --debug final --out shots/water/river-final",
+    "water:shot:lake-depth": "npm run water:shot -- --scene lake-shoreline --debug depth --out shots/water/lake-depth",
+    "water:shot:river-foam": "npm run water:shot -- --scene river-bend --debug foam --out shots/water/river-foam",
+    "water:shot:flow": "npm run water:shot -- --scene river-bend --debug flow --out shots/water/flow-debug",
+    "water:shot:clipmap": "npm run water:shot -- --scene clipmap-boundary --debug clipmap-level --out shots/water/clipmap-debug",
+    "water:verify": "npm run water:find && npm run water:probe && npm run water:shot -- --scene all --out shots/water/verify"
   },
   "dependencies": {
     "fflate": "^0.8.3",

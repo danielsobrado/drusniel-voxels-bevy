@@ -64,10 +64,13 @@ import {
   type UnderstoryStats,
 } from "./understory/index.js";
 import {
+  applyForestLightingMaterialStateIfChanged,
+  createForestLightingIntegrationWarner,
   ForestLightingSystem,
   formatForestLightingInfoLine,
   parseForestLightingConfig,
   type ForestLightingDebugMode,
+  type ForestLightingMaterialUpdateSignature,
   type ForestLightingSettings,
   type ForestLightingStats,
 } from "./forest_lighting/index.js";
@@ -596,6 +599,7 @@ async function main() {
   const treeConfig = parseTreeConfig(treeConfigText);
   const understoryConfig = parseUnderstoryConfig(understoryConfigText);
   const forestLightingConfig = parseForestLightingConfig(forestLightingConfigText);
+  createForestLightingIntegrationWarner()(forestLightingConfig);
   const grassConfig = parseGrassConfig(grassConfigText);
   let waterConfig = parseWaterConfig(waterConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
@@ -1209,7 +1213,6 @@ async function main() {
     treeTrunkSwayStrength: treeConfig.wind.trunkSwayStrength,
     treeLeafFlutterStrength: treeConfig.wind.leafFlutterStrength,
     treeGpuEnabled: treeConfig.gpu.enabled,
-    treeGpuValidateCpu: treeConfig.gpu.debugValidateAgainstCpu,
     treeGpuForceCpu: treeConfig.gpu.debugForceCpu,
     treeGpuShowCounts: treeConfig.gpu.debugShowGpuCounts,
     treeTotal: 0,
@@ -1232,6 +1235,8 @@ async function main() {
     forestLightingStats: "pending",
     waterEnabled: waterConfig.enabled,
     waterDebugMode: (Object.entries(WATER_DEBUG_MODES).find(([, v]) => v === waterConfig.debug.mode)?.[0] ?? "final") as keyof typeof WATER_DEBUG_MODES,
+    waterClipmapTint: waterConfig.debug.clipmapTint,
+    waterWireframe: waterConfig.debug.wireframe,
     waterDepthWrite: waterConfig.visual.depthWrite,
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
@@ -1931,9 +1936,6 @@ async function main() {
     gpu: {
       ...treeConfig.gpu,
       enabled: state.treeGpuEnabled,
-      scatterEnabled: queryTreeGpuRing || treeConfig.gpu.scatterEnabled,
-      readbackVisibleLists: queryTreeGpuRing ? false : treeConfig.gpu.readbackVisibleLists,
-      debugValidateAgainstCpu: state.treeGpuValidateCpu,
       debugForceCpu: state.treeGpuForceCpu,
       debugShowGpuCounts: state.treeGpuShowCounts,
     },
@@ -2016,10 +2018,25 @@ async function main() {
     settings: makeForestLightingSettings(),
   });
   let forestLightingStats: ForestLightingStats | null = forestLightingSystem.getStats();
+  let forestLightingSettingsVersion = 0;
+  let lastAppliedForestLightingSignature: ForestLightingMaterialUpdateSignature | null = null;
+  const forestLightingMaterialTargets = [treeSystem, understorySystem];
   const applyForestLightingToPropMaterials = () => {
+    const stats = forestLightingSystem.getStats();
     const materialState = forestLightingSystem.getMaterialState();
-    treeSystem.updateForestLighting(materialState);
-    understorySystem.updateForestLighting(materialState);
+    const signature: ForestLightingMaterialUpdateSignature = {
+      textureHandle: materialState.textureHandle,
+      textureUpdates: stats.textureUpdates,
+      settingsVersion: forestLightingSettingsVersion,
+      enabled: materialState.settings.enabled,
+      debugMode: materialState.settings.materialIntegration.debugMode,
+    };
+    lastAppliedForestLightingSignature = applyForestLightingMaterialStateIfChanged(
+      lastAppliedForestLightingSignature,
+      signature,
+      materialState,
+      forestLightingMaterialTargets,
+    );
   };
   applyForestLightingToPropMaterials();
 
@@ -2029,19 +2046,6 @@ async function main() {
   const waterPageNodes = allNodes.filter((node) => node.level === 0);
   const waterPageSignaturesBefore = pageMeshSignatures(waterPageNodes);
   const waterField = new WaterField(waterConfig, { surfaceHeight });
-  (window as any).waterProbe = (x: number, z: number) => {
-    const s = waterField.sample(x, z);
-    console.log(`[water probe] (${x}, ${z}):`, s);
-    return s;
-  };
-  (window as any).waterProbeCenter = () => {
-    const firstLake = waterConfig.fakeBodies.lakes[0];
-    if (firstLake) {
-      return (window as any).waterProbe(firstLake.center[0], firstLake.center[1]);
-    }
-    console.warn("[water probe] no fake lakes configured");
-    return null;
-  };
   const waterMaterialFactory = isWebGpu
     ? (await import("./water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
     : createWaterShaderMaterial;
@@ -2055,17 +2059,111 @@ async function main() {
     worldBounds: { cellsX: worldCells, cellsZ: worldCells },
   });
   waterClipmap.setVisible(state.waterEnabled);
+  waterClipmap.setClipmapTint(state.waterClipmapTint);
+  waterClipmap.setWireframe(state.waterWireframe);
   assertPageMeshSignaturesUnchanged(waterPageSignaturesBefore, pageMeshSignatures(waterPageNodes));
   let waterDevLogged = false;
   const waterDebugState: WaterDebugState = {
     enabled: state.waterEnabled,
     mode: state.waterDebugMode,
+    clipmapTint: state.waterClipmapTint,
+    wireframe: state.waterWireframe,
     depthWrite: state.waterDepthWrite,
   };
   const makeWaterVisual = () => ({
     ...waterConfig.visual,
     depthWrite: state.waterDepthWrite,
   });
+  const waterDebugApiEnabled = import.meta.env.DEV || searchParams.get("waterDebug") === "1" || searchParams.get("debug") === "1";
+  if (waterDebugApiEnabled) {
+    const sampleForDebug = (x: number, z: number) => {
+      const s = waterField.sample(x, z);
+      return {
+        terrain: s.terrainY,
+        water: s.waterY,
+        depth: s.depth,
+        flowX: s.flow.x,
+        flowZ: s.flow.z,
+        flowSpeed: s.flow.speed,
+        flowProgress: s.flow.progress,
+        flowDrop: s.flow.drop,
+        bodyMask: s.bodyMask,
+      };
+    };
+    const setWaterDebugMode = (mode: keyof typeof WATER_DEBUG_MODES | number) => {
+      const id = typeof mode === "number" ? mode : WATER_DEBUG_MODES[mode];
+      if (id === undefined || !Object.values(WATER_DEBUG_MODES).includes(id as typeof WATER_DEBUG_MODES[keyof typeof WATER_DEBUG_MODES])) {
+        throw new Error(`unknown water debug mode: ${String(mode)}`);
+      }
+      state.waterDebugMode = (Object.entries(WATER_DEBUG_MODES).find(([, v]) => v === id)?.[0] ?? "final") as keyof typeof WATER_DEBUG_MODES;
+      waterDebugState.mode = state.waterDebugMode;
+      waterClipmap.setDebugMode(id as typeof WATER_DEBUG_MODES[keyof typeof WATER_DEBUG_MODES]);
+      return { mode: state.waterDebugMode, id };
+    };
+    const setCameraPose = (pose: { x: number; z: number; yaw?: number; y?: number; distance?: number; pitch?: number }) => {
+      const x = Number(pose.x);
+      const z = Number(pose.z);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) throw new Error("setCameraPose requires finite x and z");
+      const yaw = Number.isFinite(pose.yaw) ? Number(pose.yaw) : 0;
+      const targetY = waterField.sample(x, z).terrainY;
+      const pitch = Number.isFinite(pose.pitch) ? Number(pose.pitch) : -0.35;
+      const distance = Math.max(2, Number.isFinite(pose.distance) ? Number(pose.distance) : 26);
+      const horizontal = Math.max(1, Math.cos(Math.abs(pitch)) * distance);
+      const height = Math.max(3, Math.sin(Math.abs(pitch)) * distance);
+      const dirX = Math.sin(yaw);
+      const dirZ = -Math.cos(yaw);
+      interaction.exitToOrbit();
+      resetPlayerInput();
+      controls.enabled = true;
+      controls.target.set(x, targetY, z);
+      camera.position.set(
+        x - dirX * horizontal,
+        Number.isFinite(pose.y) ? Number(pose.y) : targetY + height,
+        z - dirZ * horizontal,
+      );
+      camera.lookAt(controls.target);
+      controls.update();
+      updatePlayerModeUi();
+      waterClipmap.update(0, camera.position);
+      updateSelection();
+      return {
+        position: [camera.position.x, camera.position.y, camera.position.z],
+        target: [controls.target.x, controls.target.y, controls.target.z],
+        yaw,
+      };
+    };
+    const waterDebugInfo = () => ({
+      worldCells,
+      enabled: waterClipmap.isEnabled,
+      debugMode: state.waterDebugMode,
+      clipmapTint: state.waterClipmapTint,
+      wireframe: state.waterWireframe,
+      debugModes: { ...WATER_DEBUG_MODES },
+      clipmap: {
+        levelCount: waterClipmap.levelCount,
+        levels: Array.from({ length: waterClipmap.levelCount }, (_, index) => waterClipmap.getLevelRect(index)),
+      },
+      fakeBodies: {
+        lakes: waterConfig.fakeBodies.lakes.map((lake) => ({
+          center: [...lake.center],
+          radius: [...lake.radius],
+          levelOffset: lake.levelOffset,
+        })),
+        rivers: waterConfig.fakeBodies.rivers.map((river) => ({
+          points: river.points.map((point) => [...point]),
+          width: river.width,
+          levelOffset: river.levelOffset,
+          downstreamDrop: river.downstreamDrop,
+        })),
+      },
+    });
+    Object.assign(window, {
+      waterProbe: sampleForDebug,
+      setWaterDebugMode,
+      setCameraPose,
+      waterDebugInfo,
+    });
+  }
 
   const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
@@ -2885,7 +2983,7 @@ async function main() {
   const formatTreeGpuSummary = (stats: TreeStats): string =>
     stats.gpuStatus === "disabled"
       ? "disabled"
-      : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}`;
+      : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}`;
   const refreshTreeStats = () => {
     if (!treeSystem) return;
     treeStats = treeSystem.getStats();
@@ -2930,9 +3028,6 @@ async function main() {
       gpu: {
         ...treeConfig.gpu,
         enabled: state.treeGpuEnabled,
-        scatterEnabled: queryTreeGpuRing || treeConfig.gpu.scatterEnabled,
-        readbackVisibleLists: queryTreeGpuRing ? false : treeConfig.gpu.readbackVisibleLists,
-        debugValidateAgainstCpu: state.treeGpuValidateCpu,
         debugForceCpu: state.treeGpuForceCpu,
         debugShowGpuCounts: state.treeGpuShowCounts,
       },
@@ -2958,8 +3053,7 @@ async function main() {
   treeFolder.add(state, "treeDistance", 0, 600, 5).name("distance").onFinishChange(treeActions.rebuild);
   treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild);
   treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(updateTreeRenderSettings);
-  treeFolder.add(state, "treeGpuEnabled").name("GPU cull").onChange(updateTreeGpuSettings);
-  treeFolder.add(state, "treeGpuValidateCpu").name("GPU validate CPU").onChange(updateTreeGpuSettings);
+  treeFolder.add(state, "treeGpuEnabled").name("GPU ring").onChange(updateTreeGpuSettings);
   treeFolder.add(state, "treeGpuForceCpu").name("force CPU").onChange(updateTreeGpuSettings);
   treeFolder.add(state, "treeGpuShowCounts").name("show GPU counts").onChange(updateTreeGpuSettings);
   treeFolder.add(state, "treeWindEnabled").name("wind enabled").onChange(updateTreeWindSettings);
@@ -3030,6 +3124,7 @@ async function main() {
     forestLightingStatsController?.updateDisplay();
   };
   const updateForestLightingSettings = () => {
+    forestLightingSettingsVersion++;
     forestLightingSystem.updateSettings(makeForestLightingSettings());
     applyForestLightingToPropMaterials();
     refreshForestLightingStats();
@@ -3059,6 +3154,14 @@ async function main() {
     onMode: (mode) => {
       state.waterDebugMode = mode;
       waterClipmap.setDebugMode(WATER_DEBUG_MODES[mode]);
+    },
+    onClipmapTint: (enabled) => {
+      state.waterClipmapTint = enabled;
+      waterClipmap.setClipmapTint(enabled);
+    },
+    onWireframe: (enabled) => {
+      state.waterWireframe = enabled;
+      waterClipmap.setWireframe(enabled);
     },
     onDepthWrite: (on) => {
       state.waterDepthWrite = on;
@@ -4343,6 +4446,7 @@ async function main() {
   understorySystem?.setEnabled(state.understoryEnabled);
   understorySystem?.updateSettings(makeUnderstorySettings());
   refreshUnderstoryStats();
+  forestLightingSettingsVersion++;
   forestLightingSystem.updateSettings(makeForestLightingSettings());
   applyForestLightingToPropMaterials();
   refreshForestLightingStats();
@@ -4520,7 +4624,7 @@ async function main() {
     const tPropsStart = performance.now();
     const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
     grassSystem?.update(elapsedSeconds, grassCenter, camera);
-    treeSystem?.update(elapsedSeconds, grassCenter, camera.position);
+    treeSystem?.update(elapsedSeconds, grassCenter, camera);
     understorySystem?.update(elapsedSeconds, grassCenter);
     forestLightingSystem.update(elapsedSeconds, grassCenter, {
       treeProxies: treeSystem.getLightingProxies(),
@@ -4581,6 +4685,7 @@ async function main() {
       nextTreeStats.impostorTrees !== treeStats.impostorTrees ||
       nextTreeStats.gpuStatus !== treeStats.gpuStatus ||
       nextTreeStats.gpuCandidateCount !== treeStats.gpuCandidateCount ||
+      nextTreeStats.gpuAcceptedCount !== treeStats.gpuAcceptedCount ||
       nextTreeStats.gpuVisibleCount !== treeStats.gpuVisibleCount ||
       nextTreeStats.gpuOverflowed !== treeStats.gpuOverflowed)
     ) {

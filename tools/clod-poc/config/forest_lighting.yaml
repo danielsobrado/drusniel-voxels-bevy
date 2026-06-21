@@ -45,7 +45,8 @@ forest_lighting:
     sun_shafts_threshold: 0.55
 
   material_integration:
-    terrain_enabled: true
+    # Terrain forest-lighting integration is deferred; current integration targets trees and understory.
+    terrain_enabled: false
     tree_enabled: true
     understory_enabled: true
     debug_mode: off

@@ -36,6 +36,7 @@ import {
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
+import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
@@ -267,6 +268,8 @@ export function createTreeRingNodeMaterialHandle(
   let foliageAtlas: TreeFoliageAtlas = createTreeFoliageAtlas(settings);
   const mapNodes: TslNode[] = [];
   const materials: MeshBasicNodeMaterial[] = [];
+  let debugColorByLod = settings.render.debugColorByLod;
+  const prepassNodes = new Map<MeshBasicNodeMaterial, PrepassNodes>();
 
   const buildMaterial = (albedoFactory: (vertexColor: TslNode, mapRgb: TslNode, tint: TslNode) => TslNode): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
@@ -336,6 +339,11 @@ export function createTreeRingNodeMaterialHandle(
     material.transparent = false;
     material.depthWrite = true;
     materials.push(material);
+    prepassNodes.set(material, {
+      positionNode,
+      maskNode: (material as unknown as { maskNode: TslNode }).maskNode,
+      side: material.side,
+    });
     return material;
   };
 
@@ -357,7 +365,12 @@ export function createTreeRingNodeMaterialHandle(
     setFadeCenter(x: number, z: number) {
       uFadeCenter.value.set(x, z);
     },
+    prepassNodesFor(prepassLod: TreeLod) {
+      const material = debugColorByLod ? debugMaterials[prepassLod] : regularMaterial;
+      return prepassNodes.get(material as MeshBasicNodeMaterial);
+    },
     updateSettings(next: TreeSettings) {
+      debugColorByLod = next.render.debugColorByLod;
       applyWindUniforms(wind, next);
       uUseFoliageAlpha.value = next.foliage.enabled ? 1 : 0;
       uNearDistance.value = next.distanceM * next.lod.nearFraction;

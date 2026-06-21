@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { EnvironmentLighting } from "../environment.js";
@@ -16,6 +17,7 @@ export interface TreeMaterialHandle {
   debugMaterials: Record<TreeLod, THREE.Material>;
   setTime(timeSeconds: number): void;
   setFadeCenter?(x: number, z: number): void;
+  prepassNodesFor?(lod: TreeLod): PrepassNodes | undefined;
   updateSettings(settings: TreeSettings): void;
   dispose(): void;
   /** WebGPU node path only; the classic WebGL path lights via scene lights. */

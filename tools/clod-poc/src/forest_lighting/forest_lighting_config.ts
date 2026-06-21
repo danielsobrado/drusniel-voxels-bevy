@@ -67,6 +67,9 @@ export interface ForestLightingSettings {
   materialIntegration: ForestLightingMaterialIntegrationSettings;
 }
 
+export const FOREST_LIGHTING_TERRAIN_INTEGRATION_WARNING =
+  "[forest-lighting] terrain integration is configured but not implemented; trees/understory only";
+
 interface ForestLightingYamlConfig {
   forest_lighting?: {
     enabled?: boolean;
@@ -168,7 +171,8 @@ export const DEFAULT_FOREST_LIGHTING_SETTINGS: ForestLightingSettings = {
     sunShaftsThreshold: 0.55,
   },
   materialIntegration: {
-    terrainEnabled: true,
+    // Terrain forest-lighting integration is deferred; current integration targets trees and understory.
+    terrainEnabled: false,
     treeEnabled: true,
     understoryEnabled: true,
     debugMode: "off",
@@ -186,6 +190,17 @@ export function cloneForestLightingSettings(
     shadowProxy: { ...settings.shadowProxy },
     atmosphere: { ...settings.atmosphere },
     materialIntegration: { ...settings.materialIntegration },
+  };
+}
+
+export function createForestLightingIntegrationWarner(
+  warn: ((message: string) => void) | null = console.warn,
+): (settings: ForestLightingSettings) => void {
+  let terrainWarningEmitted = false;
+  return (settings: ForestLightingSettings) => {
+    if (!settings.materialIntegration.terrainEnabled || terrainWarningEmitted) return;
+    terrainWarningEmitted = true;
+    warn?.(FOREST_LIGHTING_TERRAIN_INTEGRATION_WARNING);
   };
 }
 

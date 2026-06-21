@@ -13,6 +13,7 @@ export const WATER_DEBUG_MODES = {
   fresnel: 3,
   bodyMask: 4,
   clipmapLevel: 5,
+  flow: 6,
 } as const;
 export type WaterDebugMode = keyof typeof WATER_DEBUG_MODES;
 export type WaterDebugModeId = typeof WATER_DEBUG_MODES[WaterDebugMode];
@@ -37,17 +38,50 @@ export interface WaterVisualConfig {
   deepColor: [number, number, number];
   foamColor: [number, number, number];
   alpha: number;
+  rippleCycle: number;
   fresnelPower: number;
   rippleAmp: number;
   rippleSpeed: number;
+  rippleScaleA: number;
+  rippleScaleB: number;
+  rippleStrengthA: number;
+  rippleStrengthB: number;
+  rippleLoopDistance: number;
+  lakeBreeze: [number, number];
   shoreFoamStart: number;
   shoreFoamEnd: number;
   maxDepthForColor: number;
+  foam: WaterFoamVisualConfig;
+  fresnel: WaterFresnelVisualConfig;
+  color: WaterColorVisualConfig;
   depthWrite: boolean;
 }
 
 export interface WaterDebugConfig {
   mode: WaterDebugModeId;
+  clipmapTint: boolean;
+  wireframe: boolean;
+}
+
+export interface WaterFoamVisualConfig {
+  noiseScale: number;
+  shoreStrength: number;
+  riverStrength: number;
+  speedStart: number;
+  speedEnd: number;
+  dropStart: number;
+  dropEnd: number;
+}
+
+export interface WaterFresnelVisualConfig {
+  base: number;
+  power: number;
+  normalFlatten: number;
+}
+
+export interface WaterColorVisualConfig {
+  depthScale: number;
+  turbidity: number;
 }
 
 export interface WaterConfig {
@@ -69,12 +103,37 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
   deepColor: [0.02, 0.08, 0.12],
   foamColor: [0.82, 0.88, 0.84],
   alpha: 0.82,
+  rippleCycle: 0.065,
   fresnelPower: 5.0,
   rippleAmp: 1.0,
   rippleSpeed: 0.45,
+  rippleScaleA: 0.18,
+  rippleScaleB: 0.115,
+  rippleStrengthA: 0.20,
+  rippleStrengthB: 0.13,
+  rippleLoopDistance: 18.0,
+  lakeBreeze: [0.18, 0.06],
   shoreFoamStart: 0.03,
   shoreFoamEnd: 0.16,
   maxDepthForColor: 4.0,
+  foam: {
+    noiseScale: 0.09,
+    shoreStrength: 0.58,
+    riverStrength: 0.42,
+    speedStart: 0.25,
+    speedEnd: 1.0,
+    dropStart: 0.5,
+    dropEnd: 2.0,
+  },
+  fresnel: {
+    base: 0.08,
+    power: 4.5,
+    normalFlatten: 0.72,
+  },
+  color: {
+    depthScale: 4.0,
+    turbidity: 0.18,
+  },
   depthWrite: false,
 };
 
@@ -100,7 +159,7 @@ export const DEFAULT_WATER_CONFIG: WaterConfig = {
     ],
   },
   visual: { ...DEFAULT_WATER_VISUAL },
-  debug: { mode: WATER_DEBUG_MODES.final },
+  debug: { mode: WATER_DEBUG_MODES.final, clipmapTint: false, wireframe: false },
 };
 
 export function cloneWaterConfig(config: WaterConfig = DEFAULT_WATER_CONFIG): WaterConfig {
@@ -127,6 +186,10 @@ export function cloneWaterConfig(config: WaterConfig = DEFAULT_WATER_CONFIG): Wa
       shallowColor: [...config.visual.shallowColor] as [number, number, number],
       deepColor: [...config.visual.deepColor] as [number, number, number],
       foamColor: [...config.visual.foamColor] as [number, number, number],
+      lakeBreeze: [...config.visual.lakeBreeze] as [number, number],
+      foam: { ...config.visual.foam },
+      fresnel: { ...config.visual.fresnel },
+      color: { ...config.visual.color },
     },
     debug: { ...config.debug },
   };
@@ -219,20 +282,49 @@ interface WaterYamlConfig {
       deep_color?: unknown;
       foam_color?: unknown;
       alpha?: unknown;
+      ripple_cycle?: unknown;
       fresnel_power?: unknown;
       ripple_amp?: unknown;
       ripple_speed?: unknown;
+      ripple_scale_a?: unknown;
+      ripple_scale_b?: unknown;
+      ripple_strength_a?: unknown;
+      ripple_strength_b?: unknown;
+      ripple_loop_distance?: unknown;
+      lake_breeze?: unknown;
       shore_foam_start?: unknown;
       shore_foam_end?: unknown;
       max_depth_for_color?: unknown;
+      foam?: {
+        noise_scale?: unknown;
+        shore_strength?: unknown;
+        river_strength?: unknown;
+        speed_start?: unknown;
+        speed_end?: unknown;
+        drop_start?: unknown;
+        drop_end?: unknown;
+      };
+      fresnel?: {
+        base?: unknown;
+        power?: unknown;
+        normal_flatten?: unknown;
+      };
+      color?: {
+        depth_scale?: unknown;
+        turbidity?: unknown;
+      };
       depth_write?: unknown;
     };
-    debug?: { mode?: unknown };
+    debug?: {
+      mode?: unknown;
+      clipmap_tint?: unknown;
+      wireframe?: unknown;
+    };
   };
 }
 
 function isWaterDebugModeId(value: unknown): value is WaterDebugModeId {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 5;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 6;
 }
 
 export function parseWaterConfig(
@@ -297,22 +389,53 @@ export function parseWaterConfig(
     : fb.fakeBodies.rivers;
 
   const v = raw.visual ?? {};
+  const foamRaw = v.foam ?? {};
+  const fresnelRaw = v.fresnel ?? {};
+  const colorRaw = v.color ?? {};
+  const depthScale = readNumberAtLeast(colorRaw.depth_scale ?? v.max_depth_for_color, fb.visual.color.depthScale, 0.1);
   const visual: WaterVisualConfig = {
     shallowColor: readVec3(v.shallow_color, fb.visual.shallowColor),
     deepColor: readVec3(v.deep_color, fb.visual.deepColor),
     foamColor: readVec3(v.foam_color, fb.visual.foamColor),
     alpha: Math.min(1, Math.max(0, readNumber(v.alpha, fb.visual.alpha))),
-    fresnelPower: readNumberAtLeast(v.fresnel_power, fb.visual.fresnelPower, 0.1),
+    rippleCycle: readNumberAtLeast(v.ripple_cycle, fb.visual.rippleCycle, 0.0001),
+    fresnelPower: readNumberAtLeast(v.fresnel_power ?? fresnelRaw.power, fb.visual.fresnelPower, 0.1),
     rippleAmp: readNumberAtLeast(v.ripple_amp, fb.visual.rippleAmp, 0),
     rippleSpeed: readNumberAtLeast(v.ripple_speed, fb.visual.rippleSpeed, 0),
+    rippleScaleA: readNumberAtLeast(v.ripple_scale_a, fb.visual.rippleScaleA, 0.0001),
+    rippleScaleB: readNumberAtLeast(v.ripple_scale_b, fb.visual.rippleScaleB, 0.0001),
+    rippleStrengthA: readNumberAtLeast(v.ripple_strength_a, fb.visual.rippleStrengthA, 0),
+    rippleStrengthB: readNumberAtLeast(v.ripple_strength_b, fb.visual.rippleStrengthB, 0),
+    rippleLoopDistance: readNumberAtLeast(v.ripple_loop_distance, fb.visual.rippleLoopDistance, 0.001),
+    lakeBreeze: readVec2(v.lake_breeze, fb.visual.lakeBreeze),
     shoreFoamStart: readNumber(v.shore_foam_start, fb.visual.shoreFoamStart),
     shoreFoamEnd: readNumber(v.shore_foam_end, fb.visual.shoreFoamEnd),
-    maxDepthForColor: readNumberAtLeast(v.max_depth_for_color, fb.visual.maxDepthForColor, 0.1),
+    maxDepthForColor: depthScale,
+    foam: {
+      noiseScale: readNumberAtLeast(foamRaw.noise_scale, fb.visual.foam.noiseScale, 0.0001),
+      shoreStrength: Math.min(1, Math.max(0, readNumber(foamRaw.shore_strength, fb.visual.foam.shoreStrength))),
+      riverStrength: Math.min(1, Math.max(0, readNumber(foamRaw.river_strength, fb.visual.foam.riverStrength))),
+      speedStart: readNumberAtLeast(foamRaw.speed_start, fb.visual.foam.speedStart, 0),
+      speedEnd: readNumberAtLeast(foamRaw.speed_end, fb.visual.foam.speedEnd, 0),
+      dropStart: readNumberAtLeast(foamRaw.drop_start, fb.visual.foam.dropStart, 0),
+      dropEnd: readNumberAtLeast(foamRaw.drop_end, fb.visual.foam.dropEnd, 0),
+    },
+    fresnel: {
+      base: Math.min(1, Math.max(0, readNumber(fresnelRaw.base, fb.visual.fresnel.base))),
+      power: readNumberAtLeast(fresnelRaw.power ?? v.fresnel_power, fb.visual.fresnel.power, 0.1),
+      normalFlatten: Math.min(1, Math.max(0, readNumber(fresnelRaw.normal_flatten, fb.visual.fresnel.normalFlatten))),
+    },
+    color: {
+      depthScale,
+      turbidity: Math.min(1, Math.max(0, readNumber(colorRaw.turbidity, fb.visual.color.turbidity))),
+    },
     depthWrite: readBoolean(v.depth_write, fb.visual.depthWrite),
   };
   if (visual.shoreFoamEnd < visual.shoreFoamStart) {
     visual.shoreFoamEnd = visual.shoreFoamStart;
   }
+  if (visual.foam.speedEnd < visual.foam.speedStart) visual.foam.speedEnd = visual.foam.speedStart;
+  if (visual.foam.dropEnd < visual.foam.dropStart) visual.foam.dropEnd = visual.foam.dropStart;
 
   const debugModeRaw = raw.debug?.mode;
   const debugMode: WaterDebugModeId = isWaterDebugModeId(debugModeRaw)
@@ -332,7 +455,11 @@ export function parseWaterConfig(
     drySentinelDepth,
     fakeBodies: { lakes: fallbackLakes, rivers: fallbackRivers },
     visual,
-    debug: { mode: debugMode },
+    debug: {
+      mode: debugMode,
+      clipmapTint: readBoolean(raw.debug?.clipmap_tint, fb.debug.clipmapTint),
+      wireframe: readBoolean(raw.debug?.wireframe, fb.debug.wireframe),
+    },
   };
 }
 

@@ -77,7 +77,7 @@ class WaterLevel {
     this.positions = new Float32Array(vertexCount * 3);
     this.terrainY = new Float32Array(vertexCount);
     this.bodyMask = new Float32Array(vertexCount);
-    this.flow = new Float32Array(vertexCount * 3);
+    this.flow = new Float32Array(vertexCount * 4);
     this.levelAttr = new Float32Array(vertexCount);
     this.levelAttr.fill(index);
 
@@ -86,7 +86,7 @@ class WaterLevel {
     geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
     geometry.setAttribute("aTerrainY", new THREE.BufferAttribute(this.terrainY, 1));
     geometry.setAttribute("aBodyMask", new THREE.BufferAttribute(this.bodyMask, 1));
-    geometry.setAttribute("aFlow", new THREE.BufferAttribute(this.flow, 3));
+    geometry.setAttribute("aFlow", new THREE.BufferAttribute(this.flow, 4));
     geometry.setAttribute("aLevel", new THREE.BufferAttribute(this.levelAttr, 1));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Number.MAX_VALUE);
@@ -139,6 +139,7 @@ class WaterLevel {
           flow[fi] = sample.flow.x;
           flow[fi + 1] = sample.flow.z;
           flow[fi + 2] = sample.flow.speed;
+          flow[fi + 3] = sample.flow.drop;
         } else {
           positions[vi] = worldX;
           positions[vi + 1] = 0;
@@ -148,9 +149,10 @@ class WaterLevel {
           flow[fi] = 0;
           flow[fi + 1] = 0;
           flow[fi + 2] = 0;
+          flow[fi + 3] = 0;
         }
         vi += 3;
-        fi += 3;
+        fi += 4;
       }
     }
     const geo = this.mesh.geometry;
@@ -190,6 +192,9 @@ export class WaterClipmap {
   private debugMode: WaterDebugModeId;
   private visual: WaterVisualConfig;
   private visible: boolean;
+  private clipmapTint: boolean;
+  private wireframe: boolean;
+  private warnedMissingCamera = false;
 
   constructor(opts: WaterClipmapOptions) {
     this.scene = opts.scene;
@@ -199,6 +204,8 @@ export class WaterClipmap {
     this.debugMode = opts.config.debug.mode;
     this.visual = opts.config.visual;
     this.visible = opts.config.enabled;
+    this.clipmapTint = opts.config.debug.clipmapTint;
+    this.wireframe = opts.config.debug.wireframe;
     this.root.name = "water-clipmap-root";
     this.scene.add(this.root);
 
@@ -220,6 +227,8 @@ export class WaterClipmap {
         opts.worldBounds,
       );
       handle.setDebugMode(this.debugMode);
+      handle.setClipmapTint(this.clipmapTint);
+      handle.setWireframe(this.wireframe);
       handle.setInnerRect(DEGENERATE_INNER.minX, DEGENERATE_INNER.minZ, DEGENERATE_INNER.maxX, DEGENERATE_INNER.maxZ);
       this.root.add(level.object);
       return level;
@@ -231,6 +240,18 @@ export class WaterClipmap {
   /** Advance animation and snap every level to the camera. Call after camera move. */
   update(deltaSeconds: number, cameraPosition: THREE.Vector3): void {
     if (!this.visible) return;
+    if (
+      !cameraPosition ||
+      !Number.isFinite(cameraPosition.x) ||
+      !Number.isFinite(cameraPosition.y) ||
+      !Number.isFinite(cameraPosition.z)
+    ) {
+      if (!this.warnedMissingCamera) {
+        console.warn("[water] clipmap update skipped: camera position is missing or invalid");
+        this.warnedMissingCamera = true;
+      }
+      return;
+    }
     this.time += deltaSeconds;
     this.cameraPosition.copy(cameraPosition);
     const cx = cameraPosition.x;
@@ -252,6 +273,16 @@ export class WaterClipmap {
   setDebugMode(mode: WaterDebugModeId): void {
     this.debugMode = mode;
     for (const level of this.levels) level.materialHandle.setDebugMode(mode);
+  }
+
+  setClipmapTint(enabled: boolean): void {
+    this.clipmapTint = enabled;
+    for (const level of this.levels) level.materialHandle.setClipmapTint(enabled);
+  }
+
+  setWireframe(enabled: boolean): void {
+    this.wireframe = enabled;
+    for (const level of this.levels) level.materialHandle.setWireframe(enabled);
   }
 
   updateVisual(visual: WaterVisualConfig): void {

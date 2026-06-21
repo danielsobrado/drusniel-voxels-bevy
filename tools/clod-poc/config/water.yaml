@@ -28,13 +28,35 @@ water:
     deep_color: [0.02, 0.08, 0.12]
     foam_color: [0.82, 0.88, 0.84]
     alpha: 0.82
-    fresnel_power: 5.0
+    ripple_cycle: 0.065
     ripple_amp: 1.0
     ripple_speed: 0.45
+    ripple_scale_a: 0.18
+    ripple_scale_b: 0.115
+    ripple_strength_a: 0.20
+    ripple_strength_b: 0.13
+    ripple_loop_distance: 18.0
+    lake_breeze: [0.18, 0.06]
     shore_foam_start: 0.03
     shore_foam_end: 0.16
-    max_depth_for_color: 4.0
+    foam:
+      noise_scale: 0.09
+      shore_strength: 0.58
+      river_strength: 0.42
+      speed_start: 0.25
+      speed_end: 1.0
+      drop_start: 0.5
+      drop_end: 2.0
+    fresnel:
+      base: 0.08
+      power: 4.5
+      normal_flatten: 0.72
+    color:
+      depth_scale: 4.0
+      turbidity: 0.18
     depth_write: false
 
   debug:
     mode: 0
+    clipmap_tint: false
+    wireframe: false

@@ -6,11 +6,14 @@ import {
   TREE_GPU_RING_CELL,
   TREE_GPU_RING_GROUP_COUNT,
   packTreeGpuRingParams,
+  treeGpuRingCullWorkgroups,
   treeGpuRingGroupCapacity,
   treeGpuRingGrid,
   treeGpuRingKey,
+  treeGpuRingRequestsDebugReadback,
   treeGpuRingSlotCount,
 } from "./tree_ring_compute.js";
+import { composeTreeRingShader } from "./wgsl_modules.js";
 
 describe("tree GPU ring compute helpers", () => {
   it("derives a stable slot grid from the tree bubble distance", () => {
@@ -80,6 +83,37 @@ describe("tree GPU ring compute helpers", () => {
       ...DEFAULT_TREE_SETTINGS,
       gpu: { ...DEFAULT_TREE_SETTINGS.gpu, maxVisible: 99 },
     })).toBe(8);
+  });
+
+  it("uses configured workgroup size for shader composition and cull dispatch sizing", () => {
+    const settings = {
+      ...DEFAULT_TREE_SETTINGS,
+      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, workgroupSize: 128 as const },
+    };
+
+    expect(composeTreeRingShader(128)).toContain("const TREE_WORKGROUP_SIZE: u32 = 128u;");
+    expect(treeGpuRingCullWorkgroups(settings)).toBe(Math.ceil(treeGpuRingSlotCount(settings) / 128));
+    expect(treeGpuRingKey(settings, 256)).not.toBe(treeGpuRingKey(DEFAULT_TREE_SETTINGS, 256));
+  });
+
+  it("gates periodic debug counter readback behind readbackVisibleLists and HUD counts", () => {
+    const enabled = {
+      ...DEFAULT_TREE_SETTINGS,
+      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: true },
+    };
+    const noReadback = {
+      ...DEFAULT_TREE_SETTINGS,
+      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: false, debugShowGpuCounts: true },
+    };
+    const hiddenCounts = {
+      ...DEFAULT_TREE_SETTINGS,
+      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: false },
+    };
+
+    expect(treeGpuRingRequestsDebugReadback(enabled, 0)).toBe(true);
+    expect(treeGpuRingRequestsDebugReadback(enabled, 1)).toBe(false);
+    expect(treeGpuRingRequestsDebugReadback(noReadback, 0)).toBe(false);
+    expect(treeGpuRingRequestsDebugReadback(hiddenCounts, 0)).toBe(false);
   });
 });
 

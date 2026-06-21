@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import type { ClodPageNode, PageMesh } from "../types.js";
 import type { PageFootprint } from "../types.js";
@@ -11,22 +11,29 @@ import {
   createTreeFoliageAtlas,
   createTreeGeometryMap,
   createTreeMaterialHandle,
+  createTreeRingNodeMaterialHandle,
   disposeTreeGeometryMap,
   formatTreeInfoLine,
   generateTreeInstances,
+  generateTreeRingLightingProxies,
   injectTreeFoliageFragmentShader,
   injectTreeFoliageVertexShader,
   injectTreeWindShader,
   parseTreeConfig,
+  packTreeGpuFrustumPlanes,
   selectTreeSpecies,
   treeGeometryKey,
   treeGeometrySummary,
+  treeUsesGpuRingDraw,
   TreeSystem,
   TREE_LODS,
+  TREE_GPU_RING_LIGHTING_PROXY_CAP,
   TREE_SPECIES,
+  type TreeLod,
   type TreeSettings,
   type TreeTerrainSampler,
 } from "./index.js";
+import type { TreeGpuRingStats } from "../gpu/tree_ring_compute.js";
 import treeYamlText from "../../config/trees.yaml?raw";
 
 const footprint: PageFootprint = { minX: 0, minZ: 0, maxX: 32, maxZ: 32 };
@@ -98,11 +105,47 @@ function instancedTreeMeshes(scene: THREE.Scene): THREE.InstancedMesh[] {
   return meshes;
 }
 
+function fakeGpuDevice(): GPUDevice {
+  return {
+    limits: {
+      maxStorageBuffersPerShaderStage: 99,
+    },
+  } as unknown as GPUDevice;
+}
+
+function fakeRingStats() {
+  return {
+    status: "ready" as const,
+    candidateCount: 8,
+    acceptedCandidates: 3,
+    counts: { near: 1, mid: 1, far: 1, impostor: 0 },
+    groupCounts: [],
+    dispatchMs: 0.25,
+    readbackMs: null,
+    skippedDispatches: 0,
+  };
+}
+
 function treeLodForPosition(position: readonly [number, number, number], center: THREE.Vector3, treeSettings: TreeSettings): string {
   const distance = Math.hypot(center.x - position[0], center.z - position[2]);
   if (distance <= treeSettings.distanceM * treeSettings.lod.nearFraction) return "near";
   if (distance <= treeSettings.distanceM * treeSettings.lod.midFraction) return "mid";
   return "far";
+}
+
+function pointPassesPlanes(planes: ArrayLike<number>, point: THREE.Vector3): boolean {
+  for (let i = 0; i < 6; i++) {
+    const offset = i * 4;
+    if (
+      planes[offset] * point.x +
+      planes[offset + 1] * point.y +
+      planes[offset + 2] * point.z +
+      planes[offset + 3] < 0
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 describe("tree placement", () => {
@@ -155,9 +198,9 @@ describe("tree placement", () => {
     const cloned = cloneTreeSettings();
     expect(cloned.gpu).not.toBe(DEFAULT_TREE_SETTINGS.gpu);
     cloned.gpu.enabled = true;
-    cloned.gpu.maxCandidates = 1;
+    cloned.gpu.maxVisible = 1;
     expect(DEFAULT_TREE_SETTINGS.gpu.enabled).toBe(false);
-    expect(DEFAULT_TREE_SETTINGS.gpu.maxCandidates).toBe(200_000);
+    expect(DEFAULT_TREE_SETTINGS.gpu.maxVisible).toBe(50_000);
   });
 
   it("parses config/trees.yaml to the typed defaults", () => {
@@ -209,23 +252,30 @@ trees:
 trees:
   gpu:
     enabled: true
-    max_candidates: 9999999
     max_visible: 9999999
-    workgroup_size: 96
-    cull_distance_padding_m: -4
-    lod_hysteresis_m: 999
-    debug_readback_limit: 999999
 `, null);
 
     expect(parsed.gpu).toMatchObject({
       enabled: true,
-      maxCandidates: 2_000_000,
       maxVisible: 500_000,
-      workgroupSize: DEFAULT_TREE_SETTINGS.gpu.workgroupSize,
-      cullDistancePaddingM: 0,
-      lodHysteresisM: 64,
-      debugReadbackLimit: 100_000,
     });
+  });
+
+  it("exposes the ring material nodes used by the depth prepass", () => {
+    const buffers = {
+      cell: new THREE.BufferAttribute(new Float32Array(4), 4),
+      capacity: 1,
+    };
+    const handle = createTreeRingNodeMaterialHandle(DEFAULT_TREE_SETTINGS, buffers, "near");
+    try {
+      const materialNodes = handle.regularMaterial as unknown as { positionNode: unknown; maskNode: unknown };
+      const prepassNodes = handle.prepassNodesFor?.("near");
+      expect(prepassNodes?.positionNode).toBe(materialNodes.positionNode);
+      expect(prepassNodes?.maskNode).toBe(materialNodes.maskNode);
+      expect(prepassNodes?.side).toBe(THREE.DoubleSide);
+    } finally {
+      handle.dispose();
+    }
   });
 
   it("clamps invalid foliage values to safe ranges", () => {
@@ -896,6 +946,72 @@ void main() {
 });
 
 describe("TreeSystem", () => {
+  it("selects GPU ring mode only when all required GPU flags are enabled", () => {
+    const eligible = {
+      ...settings,
+      gpu: {
+        ...settings.gpu,
+        enabled: true,
+        scatterEnabled: true,
+        cullEnabled: true,
+        debugForceCpu: false,
+      },
+    };
+
+    expect(treeUsesGpuRingDraw({ ...eligible, gpu: { ...eligible.gpu, enabled: false } })).toBe(false);
+    expect(treeUsesGpuRingDraw({ ...eligible, gpu: { ...eligible.gpu, scatterEnabled: false } })).toBe(false);
+    expect(treeUsesGpuRingDraw({ ...eligible, gpu: { ...eligible.gpu, cullEnabled: false } })).toBe(false);
+    expect(treeUsesGpuRingDraw({ ...eligible, gpu: { ...eligible.gpu, debugForceCpu: true } })).toBe(false);
+    expect(treeUsesGpuRingDraw(eligible)).toBe(true);
+  });
+
+  it("reports CPU fallback when GPU trees are enabled but scatter or cull is disabled", () => {
+    for (const gpuOverride of [{ scatterEnabled: false }, { cullEnabled: false }]) {
+      const system = new TreeSystem({
+        scene: new THREE.Scene(),
+        nodes: [pageNode()],
+        worldCells: 32,
+        settings: {
+          ...settings,
+          maxInstances: 100,
+          distanceM: 80,
+          gpu: {
+            ...settings.gpu,
+            enabled: true,
+            fallbackToCpu: true,
+            scatterEnabled: true,
+            cullEnabled: true,
+            ...gpuOverride,
+          },
+        },
+        sampler,
+        supportsGpuTrees: false,
+        gpuDevice: null,
+      });
+      try {
+        system.update(0, new THREE.Vector3(16, 0, 16));
+        expect(system.getStats().gpuStatus).toBe("fallback-cpu");
+      } finally {
+        system.dispose();
+      }
+    }
+  });
+
+  it("packs real GPU frustum planes and keeps the no-camera fallback conservative", () => {
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.position.set(0, 0, 0);
+    camera.lookAt(0, 0, -1);
+
+    const planes = packTreeGpuFrustumPlanes(camera);
+    expect([...planes].every(Number.isFinite)).toBe(true);
+    expect(pointPassesPlanes(planes, new THREE.Vector3(0, 0, -5))).toBe(true);
+    expect(pointPassesPlanes(planes, new THREE.Vector3(0, 0, 5))).toBe(false);
+    expect(pointPassesPlanes(planes, new THREE.Vector3(1000, 0, -5))).toBe(false);
+
+    const fallback = packTreeGpuFrustumPlanes();
+    expect(pointPassesPlanes(fallback, new THREE.Vector3(1_000_000, -1_000_000, 1_000_000))).toBe(true);
+  });
+
   it("uses patch-local instance matrices and keeps tree counts stable", () => {
     const scene = new THREE.Scene();
     const localSettings = { ...settings, maxInstances: 100, distanceM: 80 };
@@ -1108,6 +1224,192 @@ describe("TreeSystem", () => {
     }
   });
 
+  it("rebuildNodePatches removes only affected CPU patches", () => {
+    const scene = new THREE.Scene();
+    const secondFootprint: PageFootprint = { minX: 32, minZ: 0, maxX: 64, maxZ: 32 };
+    const firstNode = pageNode();
+    const secondNode = { ...pageNode(pageMesh(), secondFootprint), id: "L0:1,0" };
+    const system = new TreeSystem({
+      scene,
+      nodes: [firstNode, secondNode],
+      worldCells: 64,
+      settings: {
+        ...settings,
+        maxInstances: 1000,
+        maxNewPatchesPerFrame: 10,
+        distanceM: 96,
+      },
+      sampler,
+    });
+    try {
+      const firstBefore = scene.getObjectByName("tree-patch-L0:0,0");
+      const secondBefore = scene.getObjectByName("tree-patch-L0:1,0");
+      expect(firstBefore).toBeDefined();
+      expect(secondBefore).toBeDefined();
+
+      system.rebuildNodePatches(["L0:0,0"]);
+
+      expect(scene.getObjectByName("tree-patch-L0:0,0")).toBeDefined();
+      expect(scene.getObjectByName("tree-patch-L0:0,0")).not.toBe(firstBefore);
+      expect(scene.getObjectByName("tree-patch-L0:1,0")).toBe(secondBefore);
+      expect(system.getStats().patches).toBe(2);
+    } finally {
+      system.dispose();
+    }
+  });
+
+  it("invalidates GPU ring tree state on node rebuild without refreshing CPU patches", () => {
+    const scene = new THREE.Scene();
+    const system = new TreeSystem({
+      scene,
+      nodes: [pageNode()],
+      worldCells: 32,
+      settings: {
+        ...settings,
+        maxInstances: 100,
+        distanceM: 80,
+        gpu: {
+          ...settings.gpu,
+          enabled: true,
+          fallbackToCpu: true,
+        },
+      },
+      sampler,
+      supportsGpuTrees: true,
+      gpuDevice: fakeGpuDevice(),
+      gpuBackend: {} as never,
+    });
+    const internal = system as unknown as {
+      root: THREE.Group;
+      ringMeshes: THREE.Mesh[];
+      gpuRingCompute: { destroy: () => void } | null;
+      gpuRingDraw: unknown;
+      gpuRingKey: string;
+      gpuRingStats: { status: string };
+    };
+    const destroyCompute = vi.fn();
+    const disposeMaterial = vi.fn();
+    const ringMesh = new THREE.Mesh(new THREE.InstancedBufferGeometry(), new THREE.MeshBasicMaterial());
+    internal.root.add(ringMesh);
+    internal.ringMeshes = [ringMesh];
+    internal.gpuRingCompute = { destroy: destroyCompute };
+    internal.gpuRingDraw = {
+      materialHandles: {
+        near: { dispose: disposeMaterial },
+        mid: { dispose: disposeMaterial },
+        far: { dispose: disposeMaterial },
+        impostor: { dispose: disposeMaterial },
+      },
+    };
+    internal.gpuRingKey = "stale-key";
+
+    try {
+      system.rebuildNodePatches(["L0:0,0"]);
+
+      expect(destroyCompute).toHaveBeenCalledTimes(1);
+      expect(disposeMaterial).toHaveBeenCalledTimes(4);
+      expect(internal.root.children).not.toContain(ringMesh);
+      expect(internal.ringMeshes).toEqual([]);
+      expect(internal.gpuRingCompute).toBeNull();
+      expect(internal.gpuRingDraw).toBeNull();
+      expect(internal.gpuRingKey).toBe("");
+      expect(internal.gpuRingStats.status).toBe("idle");
+      expect(scene.getObjectByName("tree-patch-L0:0,0")).toBeUndefined();
+      expect(system.getStats().patches).toBe(0);
+      expect(system.getStats().gpuStatus).toBe("ring");
+    } finally {
+      system.dispose();
+    }
+  });
+
+  it("invalidates GPU ring mode safely when no GPU device exists", () => {
+    const scene = new THREE.Scene();
+    const system = new TreeSystem({
+      scene,
+      nodes: [pageNode()],
+      worldCells: 32,
+      settings: {
+        ...settings,
+        maxInstances: 100,
+        distanceM: 80,
+        gpu: {
+          ...settings.gpu,
+          enabled: true,
+          fallbackToCpu: true,
+        },
+      },
+      sampler,
+      supportsGpuTrees: false,
+      gpuDevice: null,
+    });
+    try {
+      expect(() => system.rebuildNodePatches(["L0:0,0"])).not.toThrow();
+      const stats = system.getStats();
+      expect(stats.patches).toBe(0);
+      expect(stats.gpuStatus).toBe("fallback-cpu");
+      expect(scene.getObjectByName("tree-patch-L0:0,0")).toBeUndefined();
+    } finally {
+      system.dispose();
+    }
+  });
+
+  it("can initialize GPU ring again on the update after terrain edit invalidation", () => {
+    const scene = new THREE.Scene();
+    const system = new TreeSystem({
+      scene,
+      nodes: [pageNode()],
+      worldCells: 32,
+      settings: {
+        ...settings,
+        maxInstances: 100,
+        distanceM: 80,
+        gpu: {
+          ...settings.gpu,
+          enabled: true,
+          fallbackToCpu: true,
+        },
+      },
+      sampler,
+      supportsGpuTrees: true,
+      gpuDevice: fakeGpuDevice(),
+      gpuBackend: {} as never,
+    });
+    const dispatch = vi.fn(() => true);
+    const stats = fakeRingStats();
+    const internal = system as unknown as {
+      ensureGpuRingCompute: () => void;
+      gpuRingCompute: unknown;
+      gpuRingDraw: unknown;
+      gpuRingStats: typeof stats;
+    };
+    let ensureCalls = 0;
+    internal.ensureGpuRingCompute = () => {
+      ensureCalls++;
+      internal.gpuRingStats = stats;
+      internal.gpuRingCompute = {
+        stats: () => stats,
+        dispatch,
+        destroy: vi.fn(),
+      };
+      internal.gpuRingDraw = {};
+    };
+
+    try {
+      system.rebuildNodePatches(["L0:0,0"]);
+      system.update(1, new THREE.Vector3(16, 0, 16));
+
+      expect(ensureCalls).toBe(1);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      const nextStats = system.getStats();
+      expect(nextStats.gpuStatus).toBe("ring");
+      expect(nextStats.gpuVisibleCount).toBe(3);
+      expect(nextStats.patches).toBe(0);
+      expect(scene.getObjectByName("tree-patch-L0:0,0")).toBeUndefined();
+    } finally {
+      system.dispose();
+    }
+  });
+
   it("falls back to CPU tree LODs when GPU trees are enabled without a device", () => {
     const scene = new THREE.Scene();
     const system = new TreeSystem({
@@ -1138,6 +1440,84 @@ describe("TreeSystem", () => {
     }
   });
 
+  it("reports GPU ring stats from readback counts without CPU patches", () => {
+    const scene = new THREE.Scene();
+    const system = new TreeSystem({
+      scene,
+      nodes: [pageNode()],
+      worldCells: 128,
+      settings: {
+        ...settings,
+        gpu: { ...settings.gpu, enabled: true, fallbackToCpu: false },
+      },
+      sampler,
+    });
+    try {
+      const internals = system as unknown as {
+        gpuStatus: "ring";
+        gpuVisibleCount: number;
+        gpuRingStats: TreeGpuRingStats;
+        lodCounts: Record<TreeLod, number>;
+        updateStats(): void;
+      };
+      internals.gpuStatus = "ring";
+      internals.gpuVisibleCount = 37;
+      internals.gpuRingStats = {
+        status: "ready",
+        candidateCount: 121,
+        acceptedCandidates: 37,
+        counts: { near: 5, mid: 11, far: 13, impostor: 8 },
+        groupCounts: [],
+        dispatchMs: 1.25,
+        readbackMs: 0.5,
+        skippedDispatches: 0,
+      };
+      internals.lodCounts.near = 5;
+      internals.lodCounts.mid = 11;
+      internals.lodCounts.far = 13;
+      internals.lodCounts.impostor = 8;
+      internals.updateStats();
+
+      const stats = system.getStats();
+      expect(stats.patches).toBe(0);
+      expect(stats.visiblePatches).toBe(0);
+      expect(stats.generatedCandidates).toBe(121);
+      expect(stats.acceptedCandidates).toBe(37);
+      expect(stats.totalTrees).toBe(37);
+      expect(stats.gpuCandidateCount).toBe(121);
+      expect(stats.gpuAcceptedCount).toBe(37);
+      expect(stats.gpuVisibleCount).toBe(37);
+      expect(stats.nearTrees).toBe(5);
+      expect(stats.midTrees).toBe(11);
+      expect(stats.farTrees).toBe(13);
+      expect(stats.impostorTrees).toBe(8);
+    } finally {
+      system.dispose();
+    }
+  });
+
+  it("keeps CPU patch stats unchanged when GPU is disabled", () => {
+    const scene = new THREE.Scene();
+    const system = new TreeSystem({
+      scene,
+      nodes: [pageNode()],
+      worldCells: 32,
+      settings: { ...settings, maxInstances: 100, distanceM: 80 },
+      sampler,
+    });
+    try {
+      const expectedTrees = generateTreeInstances(footprint, { ...settings, maxInstances: 100, distanceM: 80 }, 100, undefined, sampler, 32);
+      const stats = system.getStats();
+      expect(stats.totalTrees).toBe(expectedTrees.length);
+      expect(stats.generatedCandidates).toBeGreaterThanOrEqual(stats.acceptedCandidates);
+      expect(stats.gpuCandidateCount).toBe(0);
+      expect(stats.gpuAcceptedCount).toBe(0);
+      expect(stats.gpuVisibleCount).toBe(0);
+    } finally {
+      system.dispose();
+    }
+  });
+
   it("formats tree stats for the main HUD line", () => {
     expect(formatTreeInfoLine(true, 1234, {
       totalTrees: 1234,
@@ -1148,12 +1528,12 @@ describe("TreeSystem", () => {
       midTrees: 22,
       farTrees: 33,
       impostorTrees: 0,
-      gpuStatus: "disabled",
-      gpuCandidateCount: 0,
-      gpuVisibleCount: 0,
+      gpuStatus: "ring",
+      gpuCandidateCount: 44,
+      gpuAcceptedCount: 40,
+      gpuVisibleCount: 37,
       gpuOverflowed: false,
       gpuDispatchMs: null,
-      gpuReadbackMs: null,
       gpuShowCounts: true,
       impostorStatus: "disabled",
       impostorReason: null,
@@ -1162,8 +1542,97 @@ describe("TreeSystem", () => {
       rejectedSlope: 0,
       rejectedHeight: 0,
       rejectedMaterial: 0,
-    })).toBe("trees: enabled 1,234 trees patches=4/9 lod n/m/f/i=11/22/33/0");
+    })).toBe("trees: enabled 1,234 trees patches=4/9 lod n/m/f/i=11/22/33/0 gpu=ring candidates=44 accepted=40 visible=37");
     expect(formatTreeInfoLine(false, 0, null)).toBe("trees: disabled 0 trees");
+  });
+});
+
+describe("GPU tree ring lighting proxies", () => {
+  function proxySettings(seed = 10): TreeSettings {
+    return {
+      ...settings,
+      seed,
+      enabled: true,
+      distanceM: 120,
+      gpu: { ...settings.gpu, enabled: true, fallbackToCpu: false },
+      ecology: {
+        ...settings.ecology,
+        density: { ...settings.ecology.density, baseDensity: 1 },
+        clustering: {
+          ...settings.ecology.clustering,
+          clusterStrength: 0,
+          clusterThreshold: 0,
+        },
+      },
+      species: {
+        oak: { ...settings.species.oak, minHeightM: 0, maxHeightM: 80 },
+        pine: { ...settings.species.pine, minHeightM: 0, maxHeightM: 80 },
+        dead: { ...settings.species.dead, minHeightM: 0, maxHeightM: 80 },
+      },
+    };
+  }
+
+  it("is deterministic, seed/center sensitive, finite, valid, and bounded", () => {
+    const base = {
+      centerX: 64,
+      centerZ: 64,
+      worldCells: 256,
+      settings: proxySettings(),
+      sampler,
+    };
+    const first = generateTreeRingLightingProxies(base);
+    const second = generateTreeRingLightingProxies(base);
+    const reseeded = generateTreeRingLightingProxies({ ...base, settings: proxySettings(11) });
+    const recentered = generateTreeRingLightingProxies({ ...base, centerX: 96, centerZ: 96 });
+
+    expect(first.length).toBeGreaterThan(0);
+    expect(first).toEqual(second);
+    expect(first).not.toEqual(reseeded);
+    expect(first).not.toEqual(recentered);
+    expect(first.length).toBeLessThanOrEqual(TREE_GPU_RING_LIGHTING_PROXY_CAP);
+    for (const proxy of first) {
+      expect(Number.isFinite(proxy.x)).toBe(true);
+      expect(Number.isFinite(proxy.z)).toBe(true);
+      expect(Number.isFinite(proxy.height)).toBe(true);
+      expect(Number.isFinite(proxy.scale)).toBe(true);
+      expect(Number.isFinite(proxy.crownRadius)).toBe(true);
+      expect(proxy.height).toBeGreaterThan(0);
+      expect(proxy.scale).toBeGreaterThan(0);
+      expect(TREE_SPECIES).toContain(proxy.species);
+    }
+  });
+
+  it("returns no lighting proxies when trees are disabled", () => {
+    const disabled = proxySettings();
+    disabled.enabled = false;
+    expect(generateTreeRingLightingProxies({
+      centerX: 64,
+      centerZ: 64,
+      worldCells: 256,
+      settings: disabled,
+      sampler,
+    })).toEqual([]);
+  });
+
+  it("returns immutable GPU ring proxy copies from TreeSystem", () => {
+    const system = new TreeSystem({
+      scene: new THREE.Scene(),
+      nodes: [pageNode()],
+      worldCells: 256,
+      settings: proxySettings(),
+      sampler,
+    });
+    try {
+      (system as unknown as { gpuStatus: "ring" }).gpuStatus = "ring";
+      const first = system.getLightingProxies();
+      const second = system.getLightingProxies();
+      expect(first.length).toBeGreaterThan(0);
+      expect(first).toEqual(second);
+      first[0]!.x = -999;
+      expect(system.getLightingProxies()[0]!.x).not.toBe(-999);
+    } finally {
+      system.dispose();
+    }
   });
 });
 

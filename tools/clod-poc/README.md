@@ -173,13 +173,54 @@ Controls (lil-gui "water (fake clipmap)" folder):
 
 - `enabled` — show/hide the water layer.
 - `debug mode` — `0 final`, `1 water depth`, `2 foam`, `3 fresnel`, `4 body mask`,
-  `5 clipmap level color`.
+- `5 clipmap level color`, `6 flow direction/speed`.
+- `clipmap tint` — faintly tint final water by clipmap level.
+- `wireframe` — show the water clipmap grid where supported by the renderer.
 - `depth write` — toggle water depth writes (off by default to avoid transparent
   sorting artifacts with grass).
 
 The existing "freeze selection" toggle freezes CLOD page selection while water
 keeps following the camera, because the water update runs every frame independent
 of the freeze flag.
+
+Visual config is in `config/water.yaml`. The POC water deliberately stays fake
+and local: two-phase procedural ripples use `ripple_cycle`, `ripple_scale_a/b`,
+`ripple_strength_a/b`, `ripple_loop_distance`, and `lake_breeze`; foam uses
+`foam.noise_scale`, `foam.shore_strength`, `foam.river_strength`,
+`foam.speed_start/end`, and `foam.drop_start/end`; Fresnel uses
+`fresnel.base`, `fresnel.power`, and `fresnel.normal_flatten`; depth colour uses
+`color.depth_scale` and `color.turbidity`. These controls affect only the water
+render layer and do not feed CLOD page meshes or simplification.
+
+Water verification helpers:
+
+```bash
+npm run water:find
+npm run water:probe
+npm run water:probe -- --transect --ox 230 --oz 220 --yaw 1.57
+npm run water:shot -- --x 266 --z 236 --yaw 1.57
+npm run water:shot:lake-final
+npm run water:shot:river-final
+npm run water:shot:lake-depth
+npm run water:shot:river-foam
+npm run water:shot:flow
+npm run water:shot:clipmap
+npm run water:verify
+```
+
+The tools launch the dev viewer with `?waterDebug=1`, use the small `window`
+debug API (`waterProbe`, `setWaterDebugMode`, `setCameraPose`, `waterDebugInfo`),
+and save screenshots under `shots/water/<timestamp-or-seed>/`. Use
+`--scene all` on `water:shot` to capture the four acceptance scenes:
+lake shoreline, river bend, dry-to-water crossing, and clipmap-boundary movement.
+
+Manual water checklist:
+
+- No water in dry terrain.
+- No clipmap seams.
+- No water/page ownership overlap.
+- No CLOD page source contamination.
+- Foam only near shore or shallow river edges.
 
 ## Project Archives
 

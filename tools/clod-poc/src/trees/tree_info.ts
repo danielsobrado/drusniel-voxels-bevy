@@ -20,8 +20,8 @@ function formatTreeImpostorStatus(treeStats: TreeStats): string {
 
 function formatTreeGpuStats(treeStats: TreeStats): string {
   if (treeStats.gpuStatus === "disabled") return "";
-  if (!treeStats.gpuShowCounts && treeStats.gpuStatus === "ready") return "";
   if (!treeStats.gpuShowCounts) return ` gpu=${treeStats.gpuStatus}`;
   const overflow = treeStats.gpuOverflowed ? " overflow" : "";
-  return ` gpu=${treeStats.gpuStatus} candidates=${treeStats.gpuCandidateCount} visible=${treeStats.gpuVisibleCount}${overflow}`;
+  return ` gpu=${treeStats.gpuStatus} candidates=${treeStats.gpuCandidateCount}` +
+    ` accepted=${treeStats.gpuAcceptedCount} visible=${treeStats.gpuVisibleCount}${overflow}`;
 }

@@ -167,16 +167,18 @@ WebGPU render-to-atlas pass, or (b) use the procedural impostor cards (already i
 frame selection moves into the vertex stage (camera-to-instance direction → atlas UV rect),
 as the impostor material already computes on CPU today.
 
-**Stage 4 — overdraw + shadow correctness (quality parity).**
-Depth-prepass twin per draw (port `VegPrepass`), `@invariant` clip position for Metal
-depth-EQUAL, and a separate `maskShadowNode` so casters keep full density through LOD bands.
-Add the per-instance tint (`slotHash`) to break population uniformity.
+**Stage 4 — overdraw + shadow correctness (quality parity). Done.**
+Depth-prepass twins now use the existing `VegPrepass` helper for foliage-card tree ring
+draws, sharing the exact color-pass `positionNode` and complementary-dither `maskNode`;
+the WebGPU renderer already installs `@invariant` clip position for Metal depth-EQUAL.
+The LAAS shadow-caster half is N/A in clod-poc because there is no real-time shadow-map
+pass.
 
-**Stage 5 — wire as a TreeSystem mode + retire the readback path.**
-`TreeSystem` gains a `gpu-draw` mode that owns the ring compute + indirect meshes instead of
-patches/`InstancedMesh`. Keep the CPU patch path for WebGL and as the parity oracle. Remove
-`tree_gpu_cull` readback + `applyGpuVisibleRecords` once the draw path is validated. Update
-`TreeStats`/`tree_info.ts` (`gpu=ring`, candidate/visible counts from async counters).
+**Stage 5 — wire as a TreeSystem mode + retire the readback path. Done.**
+The ring compute + indirect meshes are the single TreeSystem GPU route; the CPU patch path
+remains the WebGL/default fallback. The old `tree_gpu_*` readback path and
+`tree_cull.compute.wgsl` have been removed. `TreeStats`/`tree_info.ts` report `gpu=ring`
+with candidate/accepted/visible counts from ring stats.
 
 ---
 
@@ -224,5 +226,6 @@ patches/`InstancedMesh`. Keep the CPU patch path for WebGL and as the parity ora
 3. **tree_gpu_cull transition path**: **Decision: replace in place.** The pure GPU
    ring path is the TreeSystem GPU route; do not keep the readback route wired through
    runtime selection.
-4. **Scope of this effort now** - Stages 0-2 (validate pipeline + crossfade) as a first
-   milestone, or commit to all 5 stages?
+4. **Scope of this effort now**: **Decision: all stages.** Stages 0-5 are complete for the
+   pure-GPU ring path, with clod-poc-specific shadow-caster work explicitly N/A because the
+   app has no real-time shadow-map pass.

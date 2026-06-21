@@ -57,6 +57,9 @@ describe("parseWaterConfig", () => {
     const cfg = resolveWaterConfig(parsed, 128);
     expect(cfg.fakeBodies.rivers[0].points).toHaveLength(5);
     expect(cfg.visual.alpha).toBeCloseTo(0.82);
+    expect(cfg.visual.foam.noiseScale).toBeGreaterThan(0);
+    expect(cfg.visual.fresnel.normalFlatten).toBeGreaterThan(0);
+    expect(cfg.visual.color.depthScale).toBeGreaterThan(0);
     expect(cfg.debug.mode).toBe(WATER_DEBUG_MODES.final);
   });
 
@@ -127,6 +130,71 @@ describe("WaterField", () => {
     const lake = cfg.fakeBodies.lakes[0];
     const flow = field.flowAt(lake.center[0], lake.center[1]);
     expect(flow.speed).toBe(0);
+  });
+
+  it("keeps lake mask high inside and fades outside the ellipse", () => {
+    const local = cloneWaterConfig();
+    local.fakeBodies.lakes = [{ center: [50, 50], radius: [20, 10], levelOffset: 5 }];
+    local.fakeBodies.rivers = [];
+    const lakeField = new WaterField(local, { surfaceHeight: () => 10 });
+    expect(lakeField.bodyMaskAt(50, 50)).toBeGreaterThan(0.95);
+    expect(lakeField.bodyMaskAt(70, 50)).toBe(0);
+    expect(lakeField.bodyMaskAt(50, 61)).toBe(0);
+  });
+
+  it("uses a river capsule mask around the configured polyline", () => {
+    const local = cloneWaterConfig();
+    local.fakeBodies.lakes = [];
+    local.fakeBodies.rivers = [{ points: [[0, 0], [100, 0]], width: 20, levelOffset: 4, downstreamDrop: 2 }];
+    const riverField = new WaterField(local, { surfaceHeight: () => 10 });
+    expect(riverField.bodyMaskAt(50, 0)).toBeGreaterThan(0.95);
+    expect(riverField.bodyMaskAt(50, 9)).toBeGreaterThan(0);
+    expect(riverField.bodyMaskAt(50, 11)).toBe(0);
+  });
+
+  it("keeps the dry sentinel below terrain outside any body", () => {
+    const local = cloneWaterConfig();
+    local.drySentinelDepth = 3.5;
+    local.fakeBodies.lakes = [];
+    local.fakeBodies.rivers = [];
+    const dryField = new WaterField(local, { surfaceHeight: () => 42 });
+    const s = dryField.sample(10, 10);
+    expect(s.waterY).toBeCloseTo(38.5);
+    expect(s.depth).toBeCloseTo(-3.5);
+    expect(s.waterY).toBeLessThan(s.terrainY);
+  });
+
+  it("follows the closest river segment and fades flow speed near banks", () => {
+    const local = cloneWaterConfig();
+    local.fakeBodies.lakes = [];
+    local.fakeBodies.rivers = [{ points: [[0, 0], [100, 0], [100, 100]], width: 20, levelOffset: 4, downstreamDrop: 4 }];
+    const riverField = new WaterField(local, { surfaceHeight: () => 10 });
+    const center = riverField.flowAt(50, 0);
+    const bank = riverField.flowAt(50, 8);
+    const turn = riverField.flowAt(100, 50);
+    expect(center.x).toBeCloseTo(1, 4);
+    expect(center.z).toBeCloseTo(0, 4);
+    expect(bank.speed).toBeLessThan(center.speed);
+    expect(turn.x).toBeCloseTo(0, 4);
+    expect(turn.z).toBeCloseTo(1, 4);
+    expect(center.drop).toBeCloseTo(4);
+  });
+
+  it("does not return NaN or Infinity for a grid of samples", () => {
+    for (let z = 0; z <= 1000; z += 50) {
+      for (let x = 0; x <= 1000; x += 50) {
+        const s = field.sample(x, z);
+        expect(Number.isFinite(s.waterY)).toBe(true);
+        expect(Number.isFinite(s.terrainY)).toBe(true);
+        expect(Number.isFinite(s.depth)).toBe(true);
+        expect(Number.isFinite(s.bodyMask)).toBe(true);
+        expect(Number.isFinite(s.flow.x)).toBe(true);
+        expect(Number.isFinite(s.flow.z)).toBe(true);
+        expect(Number.isFinite(s.flow.speed)).toBe(true);
+        expect(Number.isFinite(s.flow.progress)).toBe(true);
+        expect(Number.isFinite(s.flow.drop)).toBe(true);
+      }
+    }
   });
 });
 

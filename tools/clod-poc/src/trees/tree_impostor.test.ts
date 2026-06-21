@@ -49,6 +49,12 @@ const settings: TreeSettings = {
   },
 };
 
+function cameraAt(position: THREE.Vector3): THREE.PerspectiveCamera {
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+  camera.position.copy(position);
+  return camera;
+}
+
 describe("tree impostor config", () => {
   it("uses default impostor settings when the block is missing", () => {
     const parsed = parseTreeConfig("trees:\n  enabled: true\n", null);
@@ -162,7 +168,7 @@ describe("TreeSystem baked impostors", () => {
       impostorAtlases: { oak: atlas },
     });
     try {
-      system.update(0, new THREE.Vector3(-105, 0, 16), new THREE.Vector3(-105, 0, 16));
+      system.update(0, new THREE.Vector3(-105, 0, 16), cameraAt(new THREE.Vector3(-105, 0, 16)));
       const mesh = impostorMesh(scene, "oak");
       const uvRect = mesh.geometry.getAttribute("treeImpostorUvRect");
       expect(uvRect).toBeDefined();
@@ -190,11 +196,11 @@ describe("TreeSystem baked impostors", () => {
       impostorAtlases: { oak: fakeAtlas("oak") },
     });
     try {
-      system.update(0, new THREE.Vector3(-105, 0, 16), new THREE.Vector3(-105, 0, 16));
+      system.update(0, new THREE.Vector3(-105, 0, 16), cameraAt(new THREE.Vector3(-105, 0, 16)));
       const mesh = impostorMesh(scene, "oak");
       const uvRect = mesh.geometry.getAttribute("treeImpostorUvRect");
       const first = [uvRect.getX(0), uvRect.getY(0), uvRect.getZ(0), uvRect.getW(0)];
-      system.update(0, new THREE.Vector3(-105, 0, 16), new THREE.Vector3(220, 0, 16));
+      system.update(0, new THREE.Vector3(-105, 0, 16), cameraAt(new THREE.Vector3(220, 0, 16)));
       const second = [uvRect.getX(0), uvRect.getY(0), uvRect.getZ(0), uvRect.getW(0)];
       expect(second).not.toEqual(first);
     } finally {
@@ -215,7 +221,7 @@ describe("TreeSystem baked impostors", () => {
       sampler,
     });
     try {
-      system.update(0, new THREE.Vector3(-105, 0, 16), new THREE.Vector3(-105, 0, 16));
+      system.update(0, new THREE.Vector3(-105, 0, 16), cameraAt(new THREE.Vector3(-105, 0, 16)));
       const stats = system.getStats();
       expect(stats.impostorTrees).toBeGreaterThan(0);
       expect(impostorMesh(scene).geometry.getAttribute("treeImpostorUvRect")).toBeDefined();

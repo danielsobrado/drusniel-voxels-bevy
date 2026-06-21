@@ -71,18 +71,14 @@ export interface TreeGpuSettings {
   enabled: boolean;
   preferWebGpu: boolean;
   fallbackToCpu: boolean;
-  cullEnabled: boolean;
   scatterEnabled: boolean;
-  readbackVisibleLists: boolean;
-  maxCandidates: number;
+  cullEnabled: boolean;
   maxVisible: number;
   workgroupSize: 32 | 64 | 128 | 256;
-  cullDistancePaddingM: number;
-  lodHysteresisM: number;
+  readbackVisibleLists: boolean;
   debugForceCpu: boolean;
   debugShowGpuCounts: boolean;
   debugValidateAgainstCpu: boolean;
-  debugReadbackLimit: number;
 }
 
 export interface TreeImpostorSettings {
@@ -245,18 +241,14 @@ interface TreeYamlConfig {
       enabled?: boolean;
       prefer_webgpu?: boolean;
       fallback_to_cpu?: boolean;
-      cull_enabled?: boolean;
       scatter_enabled?: boolean;
-      readback_visible_lists?: boolean;
-      max_candidates?: number;
+      cull_enabled?: boolean;
       max_visible?: number;
       workgroup_size?: number;
-      cull_distance_padding_m?: number;
-      lod_hysteresis_m?: number;
+      readback_visible_lists?: boolean;
       debug_force_cpu?: boolean;
       debug_show_gpu_counts?: boolean;
       debug_validate_against_cpu?: boolean;
-      debug_readback_limit?: number;
     };
     placement?: {
       spacing_m?: number;
@@ -511,18 +503,14 @@ export const DEFAULT_TREE_GPU_SETTINGS: TreeGpuSettings = {
   enabled: false,
   preferWebGpu: true,
   fallbackToCpu: true,
+  scatterEnabled: true,
   cullEnabled: true,
-  scatterEnabled: false,
-  readbackVisibleLists: true,
-  maxCandidates: 200_000,
   maxVisible: 50_000,
   workgroupSize: 64,
-  cullDistancePaddingM: 8,
-  lodHysteresisM: 8,
+  readbackVisibleLists: true,
   debugForceCpu: false,
   debugShowGpuCounts: true,
   debugValidateAgainstCpu: false,
-  debugReadbackLimit: 4096,
 };
 
 export const DEFAULT_TREE_SETTINGS: TreeSettings = {
@@ -719,10 +707,6 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function readTreeGpuWorkgroupSize(value: unknown, fallback: TreeGpuSettings["workgroupSize"]): TreeGpuSettings["workgroupSize"] {
-  return value === 32 || value === 64 || value === 128 || value === 256 ? value : fallback;
-}
-
 function readHeightPreference(value: unknown, fallback: TreeSpeciesZoneSettings["heightPreference"]): TreeSpeciesZoneSettings["heightPreference"] {
   return value === "low" || value === "high" || value === "any" ? value : fallback;
 }
@@ -894,19 +878,19 @@ function readTreeGpuSettings(
     enabled: readBoolean(raw?.enabled, fallback.enabled),
     preferWebGpu: readBoolean(raw?.prefer_webgpu, fallback.preferWebGpu),
     fallbackToCpu: readBoolean(raw?.fallback_to_cpu, fallback.fallbackToCpu),
-    cullEnabled: readBoolean(raw?.cull_enabled, fallback.cullEnabled),
     scatterEnabled: readBoolean(raw?.scatter_enabled, fallback.scatterEnabled),
-    readbackVisibleLists: readBoolean(raw?.readback_visible_lists, fallback.readbackVisibleLists),
-    maxCandidates: readIntegerInRange(raw?.max_candidates, fallback.maxCandidates, 0, 2_000_000),
+    cullEnabled: readBoolean(raw?.cull_enabled, fallback.cullEnabled),
     maxVisible: readIntegerInRange(raw?.max_visible, fallback.maxVisible, 0, 500_000),
     workgroupSize: readTreeGpuWorkgroupSize(raw?.workgroup_size, fallback.workgroupSize),
-    cullDistancePaddingM: readNumberInRange(raw?.cull_distance_padding_m, fallback.cullDistancePaddingM, 0, 64),
-    lodHysteresisM: readNumberInRange(raw?.lod_hysteresis_m, fallback.lodHysteresisM, 0, 64),
+    readbackVisibleLists: readBoolean(raw?.readback_visible_lists, fallback.readbackVisibleLists),
     debugForceCpu: readBoolean(raw?.debug_force_cpu, fallback.debugForceCpu),
     debugShowGpuCounts: readBoolean(raw?.debug_show_gpu_counts, fallback.debugShowGpuCounts),
     debugValidateAgainstCpu: readBoolean(raw?.debug_validate_against_cpu, fallback.debugValidateAgainstCpu),
-    debugReadbackLimit: readIntegerInRange(raw?.debug_readback_limit, fallback.debugReadbackLimit, 0, 100_000),
   };
+}
+
+function readTreeGpuWorkgroupSize(value: unknown, fallback: TreeGpuSettings["workgroupSize"]): TreeGpuSettings["workgroupSize"] {
+  return value === 32 || value === 64 || value === 128 || value === 256 ? value : fallback;
 }
 
 function readTreeLodSettings(

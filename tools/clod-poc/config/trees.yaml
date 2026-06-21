@@ -10,18 +10,14 @@ trees:
     enabled: false
     prefer_webgpu: true
     fallback_to_cpu: true
+    scatter_enabled: true
     cull_enabled: true
-    scatter_enabled: false
-    readback_visible_lists: true
-    max_candidates: 200000
     max_visible: 50000
     workgroup_size: 64
-    cull_distance_padding_m: 8
-    lod_hysteresis_m: 8
+    readback_visible_lists: true
     debug_force_cpu: false
     debug_show_gpu_counts: true
     debug_validate_against_cpu: false
-    debug_readback_limit: 4096
 
   placement:
     spacing_m: 14

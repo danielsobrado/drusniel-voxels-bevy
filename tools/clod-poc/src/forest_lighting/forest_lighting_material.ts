@@ -8,6 +8,18 @@ export interface ForestLightingMaterialState {
   worldCells: number;
 }
 
+export interface ForestLightingMaterialUpdateSignature {
+  textureHandle: ForestLightingTextureHandle;
+  textureUpdates: number;
+  settingsVersion: number;
+  enabled: boolean;
+  debugMode: ForestLightingDebugMode;
+}
+
+export interface ForestLightingMaterialUpdateTarget {
+  updateForestLighting(state: ForestLightingMaterialState): void;
+}
+
 export interface ForestLightingUniforms {
   uForestLightingMap: { value: THREE.Texture | null };
   uForestLightingAuxMap: { value: THREE.Texture | null };
@@ -18,6 +30,29 @@ export interface ForestLightingUniforms {
   uForestFogStrength: { value: number };
   uForestFogColor: { value: THREE.Color };
   uForestDebugMode: { value: number };
+}
+
+export function forestLightingMaterialSignatureChanged(
+  previous: ForestLightingMaterialUpdateSignature | null,
+  next: ForestLightingMaterialUpdateSignature,
+): boolean {
+  return !previous ||
+    previous.textureHandle !== next.textureHandle ||
+    previous.textureUpdates !== next.textureUpdates ||
+    previous.settingsVersion !== next.settingsVersion ||
+    previous.enabled !== next.enabled ||
+    previous.debugMode !== next.debugMode;
+}
+
+export function applyForestLightingMaterialStateIfChanged(
+  previous: ForestLightingMaterialUpdateSignature | null,
+  next: ForestLightingMaterialUpdateSignature,
+  state: ForestLightingMaterialState,
+  targets: readonly ForestLightingMaterialUpdateTarget[],
+): ForestLightingMaterialUpdateSignature {
+  if (!forestLightingMaterialSignatureChanged(previous, next)) return previous ?? next;
+  for (const target of targets) target.updateForestLighting(state);
+  return next;
 }
 
 export function createForestLightingUniforms(): ForestLightingUniforms {

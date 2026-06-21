@@ -37,6 +37,13 @@ export function composeStoneScatterShader(): string {
   return composeShader("stone scatter shader", [stoneBindings, terrainCommon, stoneScatterEntry]);
 }
 
-export function composeTreeRingShader(): string {
-  return composeShader("tree ring shader", [treeBindings, terrainCommon, treeRingEntry]);
+export function composeTreeRingShader(workgroupSize = 64): string {
+  const size = workgroupSize === 32 || workgroupSize === 64 || workgroupSize === 128 || workgroupSize === 256
+    ? workgroupSize
+    : 64;
+  const treeEntry = treeRingEntry.replace(
+    /const TREE_WORKGROUP_SIZE: u32 = \d+u;/,
+    `const TREE_WORKGROUP_SIZE: u32 = ${size}u;`,
+  );
+  return composeShader("tree ring shader", [treeBindings, terrainCommon, treeEntry]);
 }
