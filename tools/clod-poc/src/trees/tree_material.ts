@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
+import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
 
 export interface TreeMaterialHandle {
   regularMaterial: THREE.MeshStandardMaterial;
@@ -13,6 +14,7 @@ const LOD_COLORS: Record<TreeLod, number> = {
   near: 0x2e7d32,
   mid: 0xd98032,
   far: 0x3a6ea5,
+  impostor: 0x7755aa,
 };
 
 interface TreeWindUniforms {
@@ -27,14 +29,20 @@ interface TreeWindUniforms {
 
 export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHandle {
   const uniforms = createTreeWindUniforms(settings);
+  let foliageAtlas: TreeFoliageAtlas | null = null;
   const regularMaterial = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.95,
     metalness: 0,
     side: THREE.DoubleSide,
     transparent: false,
+    depthWrite: true,
   });
-  attachTreeWindShader(regularMaterial, uniforms);
+  applyFoliageMaterialSettings(regularMaterial, settings, (atlas) => {
+    foliageAtlas?.dispose();
+    foliageAtlas = atlas;
+  });
+  attachTreeShader(regularMaterial, uniforms);
 
   const debugMaterials = {} as Record<TreeLod, THREE.MeshBasicMaterial>;
   for (const lod of TREE_LODS) {
@@ -43,7 +51,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
       side: THREE.DoubleSide,
       transparent: false,
     });
-    attachTreeWindShader(material, uniforms);
+    attachTreeShader(material, uniforms);
     debugMaterials[lod] = material;
   }
 
@@ -55,8 +63,13 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     },
     updateSettings(nextSettings: TreeSettings) {
       updateTreeWindUniforms(uniforms, nextSettings);
+      applyFoliageMaterialSettings(regularMaterial, nextSettings, (atlas) => {
+        foliageAtlas?.dispose();
+        foliageAtlas = atlas;
+      });
     },
     dispose() {
+      foliageAtlas?.dispose();
       regularMaterial.dispose();
       for (const material of Object.values(debugMaterials)) material.dispose();
     },
@@ -64,12 +77,13 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
 }
 
 export function injectTreeWindShader(vertexShader: string): string {
-  return vertexShader
+  return injectTreeFoliageVertexShader(vertexShader)
     .replace(
       "#include <common>",
       `#include <common>
 attribute float treeWindWeight;
 attribute float treeFlutterWeight;
+attribute vec2 treeWorldXZ;
 uniform float uTreeTime;
 uniform vec2 uTreeWindDirection;
 uniform float uTreeWindStrength;
@@ -86,7 +100,7 @@ float treeWindHash(vec2 value) {
       "#include <begin_vertex>",
       `#include <begin_vertex>
 #ifdef USE_INSTANCING
-vec2 treeInstanceWorldXZ = instanceMatrix[3].xz;
+vec2 treeInstanceWorldXZ = treeWorldXZ;
 #else
 vec2 treeInstanceWorldXZ = vec2(0.0);
 #endif
@@ -101,11 +115,59 @@ transformed.xz += uTreeWindDirection * (treeSway + treeFlutter);`,
     );
 }
 
-function attachTreeWindShader(material: THREE.Material, uniforms: TreeWindUniforms): void {
+export function injectTreeFoliageVertexShader(vertexShader: string): string {
+  return vertexShader.replace(
+    "#include <common>",
+    `#include <common>
+attribute float treeFoliageMask;
+varying float vTreeFoliageMask;`,
+  ).replace(
+    "#include <begin_vertex>",
+    `#include <begin_vertex>
+vTreeFoliageMask = treeFoliageMask;`,
+  );
+}
+
+export function injectTreeFoliageFragmentShader(fragmentShader: string): string {
+  return fragmentShader.replace(
+    "#include <common>",
+    `#include <common>
+varying float vTreeFoliageMask;`,
+  ).replace(
+    "#include <map_fragment>",
+    `#include <map_fragment>
+#ifdef USE_MAP
+diffuseColor.a = mix(1.0, diffuseColor.a, clamp(vTreeFoliageMask, 0.0, 1.0));
+#endif`,
+  );
+}
+
+function attachTreeShader(material: THREE.Material, uniforms: TreeWindUniforms): void {
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = injectTreeWindShader(shader.vertexShader);
+    shader.fragmentShader = injectTreeFoliageFragmentShader(shader.fragmentShader);
   };
+}
+
+function applyFoliageMaterialSettings(
+  material: THREE.MeshStandardMaterial,
+  settings: TreeSettings,
+  replaceAtlas: (atlas: TreeFoliageAtlas | null) => void,
+): void {
+  material.side = THREE.DoubleSide;
+  material.transparent = false;
+  material.depthWrite = true;
+  material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
+  if (settings.foliage.enabled) {
+    const atlas = createTreeFoliageAtlas(settings);
+    material.map = atlas.texture;
+    replaceAtlas(atlas);
+  } else {
+    material.map = null;
+    replaceAtlas(null);
+  }
+  material.needsUpdate = true;
 }
 
 function createTreeWindUniforms(settings: TreeSettings): TreeWindUniforms {

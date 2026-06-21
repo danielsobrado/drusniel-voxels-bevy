@@ -16,9 +16,37 @@ trees:
     min_spacing_m: 8
 
   lod:
-    near_fraction: 0.35
-    mid_fraction: 0.70
-    far_fraction: 1.0
+    near_fraction: 0.28
+    mid_fraction: 0.52
+    far_fraction: 0.78
+    impostor_fraction: 1.0
+    hysteresis_m: 8
+    crossfade_enabled: true
+    crossfade_band_m: 12
+    dither_enabled: true
+    shadows_max_lod: near
+    budgets:
+      near_max_vertices: 8000
+      mid_max_vertices: 3500
+      far_max_vertices: 900
+      impostor_max_vertices: 240
+
+  impostors:
+    enabled: true
+    bake_on_start: true
+    fallback_to_placeholder: true
+    source_lod: mid
+    resolution_px: 128
+    octahedral_grid_size: 4
+    atlas_padding_px: 2
+    alpha_test: 0.45
+    frame_update_distance_m: 2.0
+    axial_billboard: true
+    preserve_vertical: true
+    max_bakes_per_frame: 1
+    debug_show_frames: false
+    debug_freeze_frame: -1
+    future_normal_depth: false
 
   wind:
     enabled: true
@@ -29,6 +57,87 @@ trees:
     trunk_sway_strength: 0.45
     leaf_flutter_strength: 0.18
 
+  ecology:
+    enabled: true
+    density:
+      base_density: 1.0
+      forest_noise_scale_m: 96
+      forest_noise_strength: 0.85
+      clearing_noise_scale_m: 180
+      clearing_threshold: 0.68
+      clearing_softness: 0.18
+      edge_softness_m: 12
+    terrain:
+      lowland_height_m: 16
+      highland_height_m: 42
+      height_fade_m: 8
+      slope_fade_start_y: 0.72
+      slope_fade_end_y: 0.92
+      material_weight_power: 1.4
+    clustering:
+      cluster_scale_m: 42
+      cluster_strength: 0.75
+      cluster_threshold: 0.42
+      min_spacing_jitter: 0.35
+    age:
+      young_probability: 0.24
+      old_probability: 0.18
+      scale_young: 0.65
+      scale_mature: 1.0
+      scale_old: 1.28
+      scale_variation: 0.22
+    species_zones:
+      oak:
+        height_preference: low
+        moisture_preference: 0.65
+        slope_tolerance: 0.55
+        cluster_bias: 0.75
+      pine:
+        height_preference: high
+        moisture_preference: 0.35
+        slope_tolerance: 0.85
+        cluster_bias: 0.9
+      dead:
+        height_preference: any
+        moisture_preference: 0.45
+        slope_tolerance: 0.75
+        cluster_bias: 1.0
+        old_forest_bias: 0.85
+
+  foliage:
+    enabled: true
+    alpha_test: 0.45
+    mask_resolution_px: 64
+    texture_atlas_columns: 4
+    texture_atlas_rows: 2
+    debug_show_alpha_cards: false
+    oak:
+      card_count_near: 64
+      card_count_mid: 28
+      card_count_far: 4
+      card_width_m: 1.35
+      card_height_m: 0.92
+      card_size_variation: 0.35
+      cluster_spread_m: 2.4
+      crown_flattening: 0.72
+      tint_variation: 0.18
+      edge_noise: 0.34
+      lobe_count: 7
+      cutout_roundness: 0.72
+    pine:
+      card_count_near: 56
+      card_count_mid: 24
+      card_count_far: 4
+      card_width_m: 1.05
+      card_height_m: 1.35
+      card_size_variation: 0.28
+      cluster_spread_m: 1.8
+      crown_flattening: 1.45
+      tint_variation: 0.12
+      edge_noise: 0.22
+      lobe_count: 5
+      cutout_roundness: 0.48
+
   species:
     oak:
       enabled: true
@@ -38,6 +147,19 @@ trees:
       trunk_height_m: 4.5
       trunk_radius_m: 0.35
       crown_radius_m: 2.8
+      morphology:
+        trunk_bend: 0.18
+        trunk_taper: 0.62
+        branch_levels: 2
+        primary_branch_count: 7
+        secondary_branch_count: 2
+        branch_spread: 0.85
+        branch_up_sweep: 0.42
+        branch_length: 2.4
+        crown_flattening: 0.72
+        crown_irregularity: 0.28
+        leaf_cluster_count: 18
+        leaf_card_count: 44
     pine:
       enabled: true
       weight: 0.35
@@ -46,6 +168,19 @@ trees:
       trunk_height_m: 6.5
       trunk_radius_m: 0.28
       crown_radius_m: 2.4
+      morphology:
+        trunk_bend: 0.08
+        trunk_taper: 0.42
+        branch_levels: 3
+        primary_branch_count: 9
+        secondary_branch_count: 1
+        branch_spread: 0.58
+        branch_up_sweep: -0.08
+        branch_length: 2.0
+        crown_flattening: 1.45
+        crown_irregularity: 0.16
+        leaf_cluster_count: 12
+        leaf_card_count: 36
     dead:
       enabled: true
       weight: 0.10
@@ -54,7 +189,19 @@ trees:
       trunk_height_m: 5.2
       trunk_radius_m: 0.25
       crown_radius_m: 0.0
+      morphology:
+        trunk_bend: 0.26
+        trunk_taper: 0.58
+        branch_levels: 1
+        primary_branch_count: 5
+        secondary_branch_count: 0
+        branch_spread: 0.9
+        branch_up_sweep: 0.18
+        branch_length: 1.9
+        crown_flattening: 1.0
+        crown_irregularity: 0.45
+        leaf_cluster_count: 0
+        leaf_card_count: 0
 
   render:
-    shadows_near_only: false
     debug_color_by_lod: false

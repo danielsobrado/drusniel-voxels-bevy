@@ -4,6 +4,6 @@ export function formatTreeInfoLine(treesEnabled: boolean, totalTrees: number, tr
   return `trees: ${treesEnabled ? "enabled" : "disabled"} ${totalTrees.toLocaleString()} trees` +
     (treeStats
       ? ` patches=${treeStats.visiblePatches}/${treeStats.patches}` +
-        ` lod n/m/f=${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}`
+        ` lod n/m/f/i=${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}`
       : "");
 }

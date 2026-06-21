@@ -1128,7 +1128,7 @@ async function main() {
     treeLeafFlutterStrength: treeConfig.wind.leafFlutterStrength,
     treeTotal: 0,
     treeVisiblePatches: "0/0",
-    treeLodSummary: "0/0/0",
+    treeLodSummary: "0/0/0/0",
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
   if (isWebGpu) state.normalDivergence = false;
@@ -1812,6 +1812,13 @@ async function main() {
   });
   assertPageMeshSignaturesUnchanged(treePageSignaturesBefore, pageMeshSignatures(treePageNodes));
   let treeStats: TreeStats | null = treeSystem.getStats();
+  if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
+    void treeSystem.bakeImpostors(renderer).then((result) => {
+      if (!result.supported) console.info(`[trees] impostor baking fallback: ${result.reason ?? "unsupported"}`);
+      refreshTreeStats();
+      updateInfo();
+    });
+  }
 
   const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
@@ -2244,6 +2251,7 @@ async function main() {
       }
       if (state.treesEnabled && lod0.changed.length > 0) {
         treeSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
+        refreshTreeStats();
       }
       pendingParentNodes = 0;
       pendingParentMs = 0;
@@ -2625,7 +2633,7 @@ async function main() {
     treeStats = treeSystem.getStats();
     state.treeTotal = treeStats.totalTrees;
     state.treeVisiblePatches = `${treeStats.visiblePatches}/${treeStats.patches}`;
-    state.treeLodSummary = `${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}`;
+    state.treeLodSummary = `${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}`;
     treeTotalController?.updateDisplay();
     treeVisiblePatchesController?.updateDisplay();
     treeLodSummaryController?.updateDisplay();
@@ -2651,6 +2659,7 @@ async function main() {
     rebuild: () => {
       treeSystem?.updateSettings(makeTreeSettings());
       treeSystem?.rebuild();
+      if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) void treeSystem?.bakeImpostors(renderer);
       refreshTreeStats();
       updateInfo();
     },
@@ -2672,7 +2681,7 @@ async function main() {
   treeFolder.add(state, "treeLeafFlutterStrength", 0, 1, 0.01).name("leaf flutter").onChange(updateTreeWindSettings);
   treeTotalController = treeFolder.add(state, "treeTotal").name("total").disable();
   treeVisiblePatchesController = treeFolder.add(state, "treeVisiblePatches").name("visible patches").disable();
-  treeLodSummaryController = treeFolder.add(state, "treeLodSummary").name("near/mid/far").disable();
+  treeLodSummaryController = treeFolder.add(state, "treeLodSummary").name("near/mid/far/impostor").disable();
   treeFolder.add(treeActions, "rebuild").name("rebuild");
 
   const textureInput = document.createElement("input");
@@ -4121,7 +4130,7 @@ async function main() {
     const tPropsStart = performance.now();
     const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
     grassSystem?.update(elapsedSeconds, grassCenter, camera);
-    treeSystem?.update(elapsedSeconds, grassCenter);
+    treeSystem?.update(elapsedSeconds, grassCenter, camera.position);
     stoneSystem?.update(grassCenter);
     const nextTreeStats = treeSystem?.getStats();
     if (
@@ -4132,12 +4141,13 @@ async function main() {
       nextTreeStats.patches !== treeStats.patches ||
       nextTreeStats.nearTrees !== treeStats.nearTrees ||
       nextTreeStats.midTrees !== treeStats.midTrees ||
-      nextTreeStats.farTrees !== treeStats.farTrees)
+      nextTreeStats.farTrees !== treeStats.farTrees ||
+      nextTreeStats.impostorTrees !== treeStats.impostorTrees)
     ) {
       treeStats = nextTreeStats;
       state.treeTotal = nextTreeStats.totalTrees;
       state.treeVisiblePatches = `${nextTreeStats.visiblePatches}/${nextTreeStats.patches}`;
-      state.treeLodSummary = `${nextTreeStats.nearTrees}/${nextTreeStats.midTrees}/${nextTreeStats.farTrees}`;
+      state.treeLodSummary = `${nextTreeStats.nearTrees}/${nextTreeStats.midTrees}/${nextTreeStats.farTrees}/${nextTreeStats.impostorTrees}`;
       treeTotalController?.updateDisplay();
       treeVisiblePatchesController?.updateDisplay();
       treeLodSummaryController?.updateDisplay();

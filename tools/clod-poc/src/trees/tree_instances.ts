@@ -4,6 +4,12 @@ import type { PageFootprint } from "../types.js";
 import { treeHash2, treeRandomSigned } from "./tree_hash.js";
 import { selectTreeSpecies } from "./tree_species.js";
 import type { TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import {
+  ecologyAcceptanceProbability,
+  sampleTreeEcology,
+  speciesEcologyWeight,
+  type TreeEcologySample,
+} from "./tree_ecology.js";
 
 export interface TreeTerrainSampler {
   surfaceHeight(x: number, z: number): number;
@@ -55,7 +61,7 @@ export function generateTreeInstances(
   const columns = Math.max(0, Math.floor((footprint.maxX - footprint.minX) / spacing));
   const rows = Math.max(0, Math.floor((footprint.maxZ - footprint.minZ) / spacing));
   const limit = Math.max(0, Math.floor(maxInstances));
-  const ranked: { priority: number; instance: TreeInstance }[] = [];
+  const ranked: { priority: number; instance: TreeInstance; suppressionRadius: number }[] = [];
   const minSpacingSq = settings.placement.minSpacingM * settings.placement.minSpacingM;
 
   for (let row = 0; row < rows; row++) {
@@ -94,12 +100,22 @@ export function generateTreeInstances(
       const weights = sampler.materialWeights(height, normalY);
       const groundWeight = weights[0] + weights[1] * 0.25;
       const threshold = treeHash2(gridX, gridZ, settings.seed + 307);
-      if (groundWeight < settings.placement.minGroundWeight || threshold > groundWeight) {
+      if (groundWeight < settings.placement.minGroundWeight || (!settings.ecology.enabled && threshold > groundWeight)) {
         stats.rejectedMaterial++;
         continue;
       }
 
-      const species = selectTreeSpecies(settings, treeHash2(gridX, gridZ, settings.seed + 409));
+      const ecology = settings.ecology.enabled
+        ? sampleTreeEcology(x, z, height, normalY, groundWeight, settings)
+        : null;
+      if (ecology && treeHash2(gridX, gridZ, settings.seed + 809) > ecologyAcceptanceProbability(ecology, settings)) {
+        stats.rejectedMaterial++;
+        continue;
+      }
+
+      const species = ecology
+        ? selectEcologySpecies(settings, ecology, height, normalY, treeHash2(gridX, gridZ, settings.seed + 409))
+        : selectTreeSpecies(settings, treeHash2(gridX, gridZ, settings.seed + 409));
       if (!species) {
         stats.rejectedMaterial++;
         continue;
@@ -110,22 +126,28 @@ export function generateTreeInstances(
         continue;
       }
 
-      if (minSpacingSq > 0 && ranked.some(({ instance }) => {
+      const suppressionRadius = ecology
+        ? treeSuppressionRadius(species, ecology, settings, gridX, gridZ)
+        : settings.placement.minSpacingM;
+      if (minSpacingSq > 0 && ranked.some(({ instance, suppressionRadius: acceptedRadius }) => {
         const dx = instance.position[0] - x;
         const dz = instance.position[2] - z;
-        return dx * dx + dz * dz < minSpacingSq;
+        const radius = Math.max(suppressionRadius, acceptedRadius);
+        return dx * dx + dz * dz < radius * radius;
       })) {
         stats.rejectedMaterial++;
         continue;
       }
 
       stats.acceptedCandidates++;
+      const baseScale = 0.82 + treeHash2(gridX, gridZ, settings.seed + 601) * 0.42;
       ranked.push({
         priority: treeHash2(gridX, gridZ, settings.seed + 503),
+        suppressionRadius,
         instance: {
           position: [x, height, z],
           species,
-          scale: 0.82 + treeHash2(gridX, gridZ, settings.seed + 601) * 0.42,
+          scale: baseScale * (ecology?.scaleMultiplier ?? 1),
           rotationY: treeHash2(gridX, gridZ, settings.seed + 701) * Math.PI * 2,
           normalY,
         },
@@ -135,4 +157,40 @@ export function generateTreeInstances(
 
   ranked.sort((a, b) => a.priority - b.priority);
   return ranked.slice(0, limit).map(({ instance }) => instance);
+}
+
+function selectEcologySpecies(
+  settings: TreeSettings,
+  ecology: TreeEcologySample,
+  height: number,
+  normalY: number,
+  roll: number,
+): TreeSpeciesId | null {
+  const weights: { species: TreeSpeciesId; weight: number }[] = [
+    { species: "oak", weight: speciesEcologyWeight("oak", ecology, height, normalY, settings) },
+    { species: "pine", weight: speciesEcologyWeight("pine", ecology, height, normalY, settings) },
+    { species: "dead", weight: speciesEcologyWeight("dead", ecology, height, normalY, settings) },
+  ];
+  const total = weights.reduce((sum, entry) => sum + entry.weight, 0);
+  if (total <= 0) return null;
+  let cursor = roll * total;
+  for (const entry of weights) {
+    cursor -= entry.weight;
+    if (cursor <= 0) return entry.species;
+  }
+  return weights[weights.length - 1]?.species ?? null;
+}
+
+function treeSuppressionRadius(
+  species: TreeSpeciesId,
+  ecology: TreeEcologySample,
+  settings: TreeSettings,
+  gridX: number,
+  gridZ: number,
+): number {
+  const base = settings.placement.minSpacingM;
+  const speciesFactor = species === "oak" ? 1.15 : species === "pine" ? 0.95 : 0.8;
+  const jitterRange = settings.ecology.clustering.minSpacingJitter;
+  const jitter = 1 + (treeHash2(gridX, gridZ, settings.seed + 907) * 2 - 1) * jitterRange;
+  return Math.max(0, base * speciesFactor * ecology.scaleMultiplier * jitter);
 }

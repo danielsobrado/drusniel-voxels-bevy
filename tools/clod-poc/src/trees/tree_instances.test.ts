@@ -4,16 +4,22 @@ import type { ClodPageNode, PageMesh } from "../types.js";
 import type { PageFootprint } from "../types.js";
 import {
   cloneTreeSettings,
+  DEFAULT_TREE_ECOLOGY_SETTINGS,
+  DEFAULT_TREE_FOLIAGE_SETTINGS,
   DEFAULT_TREE_SETTINGS,
   DEFAULT_TREE_WIND_SETTINGS,
+  createTreeFoliageAtlas,
   createTreeGeometryMap,
   createTreeMaterialHandle,
   disposeTreeGeometryMap,
   formatTreeInfoLine,
   generateTreeInstances,
+  injectTreeFoliageFragmentShader,
+  injectTreeFoliageVertexShader,
   injectTreeWindShader,
   parseTreeConfig,
   selectTreeSpecies,
+  treeGeometrySummary,
   TreeSystem,
   TREE_LODS,
   TREE_SPECIES,
@@ -113,8 +119,266 @@ describe("tree placement", () => {
     expect(DEFAULT_TREE_SETTINGS.wind.direction[0]).toBe(DEFAULT_TREE_WIND_SETTINGS.direction[0]);
   });
 
+  it("deep-clones tree ecology settings", () => {
+    const cloned = cloneTreeSettings();
+    expect(cloned.ecology).not.toBe(DEFAULT_TREE_SETTINGS.ecology);
+    expect(cloned.ecology.density).not.toBe(DEFAULT_TREE_SETTINGS.ecology.density);
+    expect(cloned.ecology.speciesZones.oak).not.toBe(DEFAULT_TREE_SETTINGS.ecology.speciesZones.oak);
+    cloned.ecology.density.baseDensity = 0.25;
+    cloned.ecology.speciesZones.oak.moisturePreference = 0.1;
+    expect(DEFAULT_TREE_SETTINGS.ecology.density.baseDensity).toBe(DEFAULT_TREE_ECOLOGY_SETTINGS.density.baseDensity);
+    expect(DEFAULT_TREE_SETTINGS.ecology.speciesZones.oak.moisturePreference)
+      .toBe(DEFAULT_TREE_ECOLOGY_SETTINGS.speciesZones.oak.moisturePreference);
+  });
+
+  it("deep-clones tree foliage settings", () => {
+    const cloned = cloneTreeSettings();
+    expect(cloned.foliage).not.toBe(DEFAULT_TREE_SETTINGS.foliage);
+    expect(cloned.foliage.oak).not.toBe(DEFAULT_TREE_SETTINGS.foliage.oak);
+    expect(cloned.foliage.pine).not.toBe(DEFAULT_TREE_SETTINGS.foliage.pine);
+    cloned.foliage.oak.cardCountNear = 1;
+    cloned.foliage.pine.edgeNoise = 0;
+    expect(DEFAULT_TREE_SETTINGS.foliage.oak.cardCountNear).toBe(DEFAULT_TREE_FOLIAGE_SETTINGS.oak.cardCountNear);
+    expect(DEFAULT_TREE_SETTINGS.foliage.pine.edgeNoise).toBe(DEFAULT_TREE_FOLIAGE_SETTINGS.pine.edgeNoise);
+  });
+
+  it("deep-clones tree LOD budget settings", () => {
+    const cloned = cloneTreeSettings();
+    expect(cloned.lod).not.toBe(DEFAULT_TREE_SETTINGS.lod);
+    expect(cloned.lod.budgets).not.toBe(DEFAULT_TREE_SETTINGS.lod.budgets);
+    cloned.lod.budgets.impostorMaxVertices = 1;
+    expect(DEFAULT_TREE_SETTINGS.lod.budgets.impostorMaxVertices).toBe(240);
+  });
+
   it("parses config/trees.yaml to the typed defaults", () => {
     expect(parseTreeConfig(treeYamlText, null)).toEqual(DEFAULT_TREE_SETTINGS);
+  });
+
+  it("uses default morphology when species morphology is missing", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  species:
+    oak:
+      enabled: true
+      weight: 0.7
+`, null);
+
+    expect(parsed.species.oak.morphology).toEqual(DEFAULT_TREE_SETTINGS.species.oak.morphology);
+    expect(parsed.species.pine.morphology).toEqual(DEFAULT_TREE_SETTINGS.species.pine.morphology);
+  });
+
+  it("uses default ecology when the ecology block is missing", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  enabled: true
+`, null);
+
+    expect(parsed.ecology).toEqual(DEFAULT_TREE_SETTINGS.ecology);
+  });
+
+  it("uses default foliage when the foliage block is missing", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  enabled: true
+`, null);
+
+    expect(parsed.foliage).toEqual(DEFAULT_TREE_SETTINGS.foliage);
+  });
+
+  it("clamps invalid foliage values to safe ranges", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  foliage:
+    alpha_test: -1
+    mask_resolution_px: 999
+    texture_atlas_columns: 0
+    texture_atlas_rows: 99
+    oak:
+      card_count_near: 999
+      card_count_mid: -1
+      card_count_far: 99
+      card_width_m: -1
+      card_height_m: 99
+      card_size_variation: 3
+      cluster_spread_m: -2
+      crown_flattening: -4
+      tint_variation: 2
+      edge_noise: -2
+      lobe_count: 99
+      cutout_roundness: 4
+`, null);
+
+    expect(parsed.foliage.alphaTest).toBe(0);
+    expect(parsed.foliage.maskResolutionPx).toBe(256);
+    expect(parsed.foliage.textureAtlasColumns).toBe(1);
+    expect(parsed.foliage.textureAtlasRows).toBe(8);
+    expect(parsed.foliage.oak).toMatchObject({
+      cardCountNear: 256,
+      cardCountMid: 0,
+      cardCountFar: 16,
+      cardWidthM: 0.05,
+      cardHeightM: 8,
+      cardSizeVariation: 1,
+      clusterSpreadM: 0,
+      crownFlattening: 0.25,
+      tintVariation: 1,
+      edgeNoise: 0,
+      lobeCount: 16,
+      cutoutRoundness: 1,
+    });
+  });
+
+  it("clamps invalid ecology values to safe ranges", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  ecology:
+    enabled: true
+    density:
+      base_density: -1
+      forest_noise_scale_m: -2
+      forest_noise_strength: 9
+      clearing_noise_scale_m: 99999
+      clearing_threshold: -4
+      clearing_softness: 0
+      edge_softness_m: -8
+    terrain:
+      lowland_height_m: -999
+      highland_height_m: 99999
+      height_fade_m: -1
+      slope_fade_start_y: -1
+      slope_fade_end_y: 2
+      material_weight_power: -1
+    clustering:
+      cluster_scale_m: -1
+      cluster_strength: 4
+      cluster_threshold: -2
+      min_spacing_jitter: 3
+    age:
+      young_probability: -1
+      old_probability: 5
+      scale_young: -1
+      scale_mature: 9
+      scale_old: 9
+      scale_variation: 9
+    species_zones:
+      oak:
+        height_preference: sideways
+        moisture_preference: -3
+        slope_tolerance: 5
+        cluster_bias: 9
+        old_forest_bias: 9
+`, null);
+
+    expect(parsed.ecology.density).toMatchObject({
+      baseDensity: 0,
+      forestNoiseScaleM: 4,
+      forestNoiseStrength: 1,
+      clearingNoiseScaleM: 2048,
+      clearingThreshold: 0,
+      clearingSoftness: 0.001,
+      edgeSoftnessM: 0,
+    });
+    expect(parsed.ecology.terrain).toMatchObject({
+      lowlandHeightM: -256,
+      highlandHeightM: 4096,
+      heightFadeM: 0.001,
+      slopeFadeStartY: 0,
+      slopeFadeEndY: 1,
+      materialWeightPower: 0.1,
+    });
+    expect(parsed.ecology.clustering).toMatchObject({
+      clusterScaleM: 4,
+      clusterStrength: 1,
+      clusterThreshold: 0,
+      minSpacingJitter: 1,
+    });
+    expect(parsed.ecology.age).toMatchObject({
+      youngProbability: 0,
+      oldProbability: 1,
+      scaleYoung: 0.1,
+      scaleMature: 3,
+      scaleOld: 4,
+      scaleVariation: 1,
+    });
+    expect(parsed.ecology.speciesZones.oak).toMatchObject({
+      heightPreference: DEFAULT_TREE_SETTINGS.ecology.speciesZones.oak.heightPreference,
+      moisturePreference: 0,
+      slopeTolerance: 1,
+      clusterBias: 2,
+      oldForestBias: 2,
+    });
+  });
+
+  it("clamps negative morphology values to sane minimums", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  species:
+    oak:
+      morphology:
+        trunk_bend: -1
+        trunk_taper: -1
+        branch_levels: -3
+        primary_branch_count: -7
+        secondary_branch_count: -2
+        branch_spread: -1
+        branch_up_sweep: -3
+        branch_length: -5
+        crown_flattening: -2
+        crown_irregularity: -1
+        leaf_cluster_count: -4
+        leaf_card_count: -8
+`, null);
+
+    expect(parsed.species.oak.morphology).toMatchObject({
+      trunkBend: 0,
+      trunkTaper: 0,
+      branchLevels: 0,
+      primaryBranchCount: 0,
+      secondaryBranchCount: 0,
+      branchSpread: 0,
+      branchUpSweep: -1,
+      branchLength: 0,
+      crownFlattening: 0.25,
+      crownIrregularity: 0,
+      leafClusterCount: 0,
+      leafCardCount: 0,
+    });
+  });
+
+  it("clamps large morphology values to safe maximums", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  species:
+    oak:
+      morphology:
+        trunk_bend: 10
+        trunk_taper: 10
+        branch_levels: 99
+        primary_branch_count: 99
+        secondary_branch_count: 99
+        branch_spread: 10
+        branch_up_sweep: 10
+        branch_length: 99
+        crown_flattening: 10
+        crown_irregularity: 10
+        leaf_cluster_count: 999
+        leaf_card_count: 999
+`, null);
+
+    expect(parsed.species.oak.morphology).toMatchObject({
+      trunkBend: 1.5,
+      trunkTaper: 0.95,
+      branchLevels: 4,
+      primaryBranchCount: 24,
+      secondaryBranchCount: 8,
+      branchSpread: 2,
+      branchUpSweep: 1.5,
+      branchLength: 8,
+      crownFlattening: 3,
+      crownIrregularity: 1,
+      leafClusterCount: 96,
+      leafCardCount: 192,
+    });
   });
 
   it("clamps invalid tree LOD fractions to fractions", () => {
@@ -127,10 +391,11 @@ trees:
     far_fraction: 2
 `, null);
 
-    expect(parsed.lod).toEqual({
+    expect(parsed.lod).toMatchObject({
       nearFraction: 0,
       midFraction: 1,
       farFraction: 1,
+      impostorFraction: 1,
     });
   });
 
@@ -145,11 +410,12 @@ trees:
 `, null);
 
     expect(parsed.lod.nearFraction).toBeCloseTo(0.8);
-    expect(parsed.lod.midFraction).toBeCloseTo(0.81);
-    expect(parsed.lod.farFraction).toBeCloseTo(0.82);
+    expect(parsed.lod.midFraction).toBeCloseTo(0.8);
+    expect(parsed.lod.farFraction).toBeCloseTo(0.8);
+    expect(parsed.lod.impostorFraction).toBeCloseTo(1.0);
   });
 
-  it("keeps enabled tree far LOD distance non-zero", () => {
+  it("keeps enabled tree impostor LOD distance non-zero", () => {
     const parsed = parseTreeConfig(`
 trees:
   enabled: true
@@ -161,8 +427,56 @@ trees:
 
     expect(parsed.lod.nearFraction).toBe(0);
     expect(parsed.lod.midFraction).toBeGreaterThanOrEqual(parsed.lod.nearFraction);
-    expect(parsed.lod.farFraction).toBeGreaterThanOrEqual(0.01);
+    expect(parsed.lod.impostorFraction).toBeGreaterThanOrEqual(0.01);
     expect(parsed.lod.farFraction).toBeGreaterThanOrEqual(parsed.lod.midFraction);
+    expect(parsed.lod.impostorFraction).toBeGreaterThanOrEqual(parsed.lod.farFraction);
+  });
+
+  it("uses defaults for missing impostor LOD settings", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  lod:
+    near_fraction: 0.2
+    mid_fraction: 0.4
+    far_fraction: 0.6
+`, null);
+
+    expect(parsed.lod.impostorFraction).toBe(DEFAULT_TREE_SETTINGS.lod.impostorFraction);
+    expect(parsed.lod.hysteresisM).toBe(DEFAULT_TREE_SETTINGS.lod.hysteresisM);
+    expect(parsed.lod.crossfadeEnabled).toBe(DEFAULT_TREE_SETTINGS.lod.crossfadeEnabled);
+    expect(parsed.lod.crossfadeBandM).toBe(DEFAULT_TREE_SETTINGS.lod.crossfadeBandM);
+    expect(parsed.lod.ditherEnabled).toBe(DEFAULT_TREE_SETTINGS.lod.ditherEnabled);
+    expect(parsed.lod.shadowsMaxLod).toBe(DEFAULT_TREE_SETTINGS.lod.shadowsMaxLod);
+    expect(parsed.lod.budgets).toEqual(DEFAULT_TREE_SETTINGS.lod.budgets);
+  });
+
+  it("clamps LOD transition settings, shadows, and budgets", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  lod:
+    hysteresis_m: -5
+    crossfade_enabled: false
+    crossfade_band_m: -2
+    dither_enabled: false
+    shadows_max_lod: sideways
+    budgets:
+      near_max_vertices: -10
+      mid_max_vertices: 0
+      far_max_vertices: -1
+      impostor_max_vertices: 0
+`, null);
+
+    expect(parsed.lod.hysteresisM).toBe(0);
+    expect(parsed.lod.crossfadeEnabled).toBe(false);
+    expect(parsed.lod.crossfadeBandM).toBe(0);
+    expect(parsed.lod.ditherEnabled).toBe(false);
+    expect(parsed.lod.shadowsMaxLod).toBe(DEFAULT_TREE_SETTINGS.lod.shadowsMaxLod);
+    expect(parsed.lod.budgets).toEqual({
+      nearMaxVertices: 1,
+      midMaxVertices: 1,
+      farMaxVertices: 1,
+      impostorMaxVertices: 1,
+    });
   });
 
   it("parses and normalizes tree wind settings", () => {
@@ -276,20 +590,93 @@ trees:
 });
 
 describe("tree geometry", () => {
-  it("includes wind and flutter attributes that match position counts", () => {
+  it("generates deterministic alpha mask atlases with oak and pine cutouts", () => {
+    const first = createTreeFoliageAtlas(settings);
+    const second = createTreeFoliageAtlas(settings);
+    try {
+      const firstData = first.texture.image.data as Uint8Array;
+      const secondData = second.texture.image.data as Uint8Array;
+      expect(first.texture.image.width).toBe(settings.foliage.textureAtlasColumns * settings.foliage.maskResolutionPx);
+      expect(first.texture.image.height).toBe(settings.foliage.textureAtlasRows * settings.foliage.maskResolutionPx);
+      expect(Array.from(firstData)).toEqual(Array.from(secondData));
+      expect(alphaRange(firstData).min).toBe(0);
+      expect(alphaRange(firstData).max).toBeGreaterThanOrEqual(250);
+      expect(atlasCellAlpha(firstData, first.texture.image.width, settings.foliage.maskResolutionPx, 0))
+        .not.toEqual(atlasCellAlpha(firstData, first.texture.image.width, settings.foliage.maskResolutionPx, 4));
+    } finally {
+      first.dispose();
+      second.dispose();
+    }
+  });
+
+  it("is deterministic for the same settings", () => {
+    const first = createTreeGeometryMap(settings);
+    const second = createTreeGeometryMap(settings);
+    try {
+      for (const species of TREE_SPECIES) {
+        for (const lod of TREE_LODS) {
+          expect(geometrySnapshot(first[species][lod])).toEqual(geometrySnapshot(second[species][lod]));
+        }
+      }
+    } finally {
+      disposeTreeGeometryMap(first);
+      disposeTreeGeometryMap(second);
+    }
+  });
+
+  it("changes geometry output when morphology changes", () => {
+    const base = createTreeGeometryMap(settings);
+    const changedSettings: TreeSettings = {
+      ...settings,
+      species: {
+        ...settings.species,
+        oak: {
+          ...settings.species.oak,
+          morphology: {
+            ...settings.species.oak.morphology,
+            branchLength: settings.species.oak.morphology.branchLength + 0.5,
+          },
+        },
+      },
+    };
+    const changed = createTreeGeometryMap(changedSettings);
+    try {
+      expect(geometrySnapshot(changed.oak.near)).not.toEqual(geometrySnapshot(base.oak.near));
+    } finally {
+      disposeTreeGeometryMap(base);
+      disposeTreeGeometryMap(changed);
+    }
+  });
+
+  it("includes required attributes that match position counts for every species and LOD", () => {
     const geometries = createTreeGeometryMap(settings);
     try {
       for (const species of TREE_SPECIES) {
         for (const lod of TREE_LODS) {
           const geometry = geometries[species][lod];
           const position = geometry.getAttribute("position");
+          const normal = geometry.getAttribute("normal");
+          const color = geometry.getAttribute("color");
+          const uv = geometry.getAttribute("uv");
           const wind = geometry.getAttribute("treeWindWeight");
           const flutter = geometry.getAttribute("treeFlutterWeight");
+          const foliageMask = geometry.getAttribute("treeFoliageMask");
+          const index = geometry.getIndex();
+          expect(position).toBeDefined();
+          expect(normal).toBeDefined();
+          expect(color).toBeDefined();
+          expect(uv).toBeDefined();
           expect(wind).toBeDefined();
           expect(flutter).toBeDefined();
+          expect(foliageMask).toBeDefined();
+          expect(normal.count).toBe(position.count);
+          expect(color.count).toBe(position.count);
+          expect(uv.count).toBe(position.count);
           expect(wind.count).toBe(position.count);
           expect(flutter.count).toBe(position.count);
-          expect(maxAttributeValue(wind)).toBeGreaterThan(0);
+          expect(foliageMask.count).toBe(position.count);
+          expect(index).toBeDefined();
+          expect(index!.count).toBeGreaterThan(0);
         }
       }
     } finally {
@@ -297,11 +684,109 @@ describe("tree geometry", () => {
     }
   });
 
-  it("gives far oak and pine cards flutter weights", () => {
+  it("reduces oak and pine vertex counts by LOD", () => {
     const geometries = createTreeGeometryMap(settings);
     try {
-      expect(maxAttributeValue(geometries.oak.far.getAttribute("treeFlutterWeight"))).toBeGreaterThan(0);
-      expect(maxAttributeValue(geometries.pine.far.getAttribute("treeFlutterWeight"))).toBeGreaterThan(0);
+      for (const species of ["oak", "pine"] as const) {
+        const near = treeGeometrySummary(geometries[species].near).vertexCount;
+        const mid = treeGeometrySummary(geometries[species].mid).vertexCount;
+        const far = treeGeometrySummary(geometries[species].far).vertexCount;
+        const impostor = treeGeometrySummary(geometries[species].impostor).vertexCount;
+        expect(near).toBeGreaterThan(mid);
+        expect(mid).toBeGreaterThan(far);
+        expect(far).toBeGreaterThanOrEqual(impostor);
+      }
+      expect(treeGeometrySummary(geometries.dead.near).vertexCount)
+        .toBeGreaterThanOrEqual(treeGeometrySummary(geometries.dead.mid).vertexCount);
+      expect(treeGeometrySummary(geometries.dead.far).vertexCount).toBeLessThan(500);
+      expect(treeGeometrySummary(geometries.dead.impostor).vertexCount)
+        .toBeLessThanOrEqual(settings.lod.budgets.impostorMaxVertices);
+    } finally {
+      disposeTreeGeometryMap(geometries);
+    }
+  });
+
+  it("keeps species flutter behavior bounded", () => {
+    const geometries = createTreeGeometryMap(settings);
+    try {
+      expect(treeGeometrySummary(geometries.oak.near).maxFlutterWeight).toBeGreaterThan(0);
+      expect(treeGeometrySummary(geometries.oak.mid).maxFlutterWeight).toBeGreaterThan(0);
+      expect(treeGeometrySummary(geometries.pine.near).maxFlutterWeight).toBeGreaterThan(0);
+      expect(treeGeometrySummary(geometries.pine.mid).maxFlutterWeight).toBeGreaterThan(0);
+      for (const lod of TREE_LODS) {
+        expect(treeGeometrySummary(geometries.dead[lod]).maxFlutterWeight).toBeLessThanOrEqual(0.1);
+      }
+    } finally {
+      disposeTreeGeometryMap(geometries);
+    }
+  });
+
+  it("marks foliage cards without applying foliage masks to dead trees", () => {
+    const geometries = createTreeGeometryMap(settings);
+    try {
+      for (const lod of TREE_LODS) {
+        expect(treeGeometrySummary(geometries.oak[lod]).maxFoliageMask).toBe(1);
+        expect(treeGeometrySummary(geometries.pine[lod]).maxFoliageMask).toBe(1);
+        expect(treeGeometrySummary(geometries.dead[lod]).maxFoliageMask).toBe(0);
+        expect(minAttributeValue(geometries.oak[lod].getAttribute("treeFoliageMask"))).toBe(0);
+        expect(minAttributeValue(geometries.pine[lod].getAttribute("treeFoliageMask"))).toBe(0);
+      }
+    } finally {
+      disposeTreeGeometryMap(geometries);
+    }
+  });
+
+  it("keeps foliage atlas UVs finite and inside texture bounds", () => {
+    const geometries = createTreeGeometryMap(settings);
+    try {
+      for (const species of TREE_SPECIES) {
+        for (const lod of TREE_LODS) {
+          const uv = geometries[species][lod].getAttribute("uv");
+          expect(attributeValuesAreFinite(uv)).toBe(true);
+          for (let i = 0; i < uv.count; i++) {
+            expect(uv.getX(i)).toBeGreaterThanOrEqual(0);
+            expect(uv.getX(i)).toBeLessThanOrEqual(1);
+            expect(uv.getY(i)).toBeGreaterThanOrEqual(0);
+            expect(uv.getY(i)).toBeLessThanOrEqual(1);
+          }
+        }
+      }
+    } finally {
+      disposeTreeGeometryMap(geometries);
+    }
+  });
+
+  it("keeps wind and flutter weights finite", () => {
+    const geometries = createTreeGeometryMap(settings);
+    try {
+      for (const species of TREE_SPECIES) {
+        for (const lod of TREE_LODS) {
+          const geometry = geometries[species][lod];
+          const wind = geometry.getAttribute("treeWindWeight");
+          const flutter = geometry.getAttribute("treeFlutterWeight");
+          expect(maxAttributeValue(wind)).toBeGreaterThan(0);
+          expect(attributeValuesAreFinite(wind)).toBe(true);
+          expect(attributeValuesAreFinite(flutter)).toBe(true);
+        }
+      }
+    } finally {
+      disposeTreeGeometryMap(geometries);
+    }
+  });
+
+  it("keeps generated tree geometry inside guardrail budgets", () => {
+    const geometries = createTreeGeometryMap(settings);
+    try {
+      for (const species of TREE_SPECIES) {
+        expect(treeGeometrySummary(geometries[species].near).vertexCount)
+          .toBeLessThanOrEqual(settings.lod.budgets.nearMaxVertices);
+        expect(treeGeometrySummary(geometries[species].mid).vertexCount)
+          .toBeLessThanOrEqual(settings.lod.budgets.midMaxVertices);
+        expect(treeGeometrySummary(geometries[species].far).vertexCount)
+          .toBeLessThanOrEqual(settings.lod.budgets.farMaxVertices);
+        expect(treeGeometrySummary(geometries[species].impostor).vertexCount)
+          .toBeLessThanOrEqual(settings.lod.budgets.impostorMaxVertices);
+      }
     } finally {
       disposeTreeGeometryMap(geometries);
     }
@@ -321,7 +806,9 @@ void main() {
     expect(shader).toContain("uniform vec2 uTreeWindDirection");
     expect(shader).toContain("attribute float treeWindWeight");
     expect(shader).toContain("attribute float treeFlutterWeight");
-    expect(shader).toContain("instanceMatrix[3].xz");
+    expect(shader).toContain("attribute vec2 treeWorldXZ");
+    expect(shader).toContain("treeInstanceWorldXZ = treeWorldXZ");
+    expect(shader).not.toContain("instanceMatrix[3].xz");
     expect(shader).toContain("transformed.xz +=");
   });
 
@@ -330,13 +817,36 @@ void main() {
     try {
       expect(handle.regularMaterial.side).toBe(THREE.DoubleSide);
       expect(handle.regularMaterial.transparent).toBe(false);
+      expect(handle.regularMaterial.depthWrite).toBe(true);
+      expect(handle.regularMaterial.alphaTest).toBe(settings.foliage.alphaTest);
+      expect(handle.regularMaterial.map).toBeDefined();
       for (const material of Object.values(handle.debugMaterials)) {
         expect(material.side).toBe(THREE.DoubleSide);
         expect(material.transparent).toBe(false);
       }
+      expect(handle.debugMaterials.impostor.color.getHex()).not.toBe(handle.debugMaterials.far.color.getHex());
     } finally {
       handle.dispose();
     }
+  });
+
+  it("injects foliage mask shader protection for alpha cutouts", () => {
+    const vertex = injectTreeFoliageVertexShader(`
+#include <common>
+void main() {
+  #include <begin_vertex>
+}`);
+    const fragment = injectTreeFoliageFragmentShader(`
+#include <common>
+void main() {
+  vec4 diffuseColor = vec4(1.0);
+  #include <map_fragment>
+}`);
+
+    expect(vertex).toContain("attribute float treeFoliageMask");
+    expect(vertex).toContain("varying float vTreeFoliageMask");
+    expect(fragment).toContain("varying float vTreeFoliageMask");
+    expect(fragment).toContain("mix(1.0, diffuseColor.a");
   });
 });
 
@@ -403,6 +913,9 @@ describe("TreeSystem", () => {
       const activeMeshes = meshes.filter((mesh) => mesh.count > 0);
       expect(activeMeshes.length).toBeGreaterThan(0);
       for (const mesh of activeMeshes) {
+        const treeWorldXZ = mesh.geometry.getAttribute("treeWorldXZ");
+        expect(treeWorldXZ).toBeDefined();
+        expect(treeWorldXZ.itemSize).toBe(2);
         expect(mesh.boundingSphere).not.toBeNull();
         expect(mesh.boundingSphere!.radius).toBeGreaterThan(0);
         expect(Number.isFinite(mesh.boundingSphere!.radius)).toBe(true);
@@ -432,6 +945,13 @@ describe("TreeSystem", () => {
 
       const mesh = instancedTreeMeshes(scene).find((candidate) => candidate.count > 0);
       expect(mesh).toBeDefined();
+      const treeWorldXZ = mesh!.geometry.getAttribute("treeWorldXZ");
+      expect(treeWorldXZ).toBeDefined();
+      expect(treeWorldXZ.itemSize).toBe(2);
+      expect(treeWorldXZ.getX(0)).toBeGreaterThanOrEqual(offsetFootprint.minX);
+      expect(treeWorldXZ.getX(0)).toBeLessThan(offsetFootprint.maxX);
+      expect(treeWorldXZ.getY(0)).toBeGreaterThanOrEqual(offsetFootprint.minZ);
+      expect(treeWorldXZ.getY(0)).toBeLessThan(offsetFootprint.maxZ);
       expect(mesh!.boundingSphere).not.toBeNull();
       expect(mesh!.boundingSphere!.radius).toBeGreaterThan(0);
       expect(mesh!.boundingSphere!.radius).toBeLessThan(80);
@@ -471,6 +991,59 @@ describe("TreeSystem", () => {
     }
   });
 
+  it("counts impostor LOD trees and keeps visible counts coherent", () => {
+    const scene = new THREE.Scene();
+    const localSettings = { ...settings, maxInstances: 100, distanceM: 160 };
+    const system = new TreeSystem({
+      scene,
+      nodes: [pageNode()],
+      worldCells: 32,
+      settings: localSettings,
+      sampler,
+    });
+    try {
+      system.update(0, new THREE.Vector3(-105, 0, 16));
+      const stats = system.getStats();
+      expect(stats.impostorTrees).toBeGreaterThan(0);
+      expect(stats.nearTrees + stats.midTrees + stats.farTrees + stats.impostorTrees).toBe(stats.totalTrees);
+    } finally {
+      system.dispose();
+    }
+  });
+
+  it("applies shadows_max_lod to tree meshes", () => {
+    const cases = [
+      { shadowsMaxLod: "none", enabled: [] },
+      { shadowsMaxLod: "near", enabled: ["near"] },
+      { shadowsMaxLod: "mid", enabled: ["near", "mid"] },
+      { shadowsMaxLod: "impostor", enabled: ["near", "mid", "far", "impostor"] },
+    ] as const;
+
+    for (const testCase of cases) {
+      const scene = new THREE.Scene();
+      const system = new TreeSystem({
+        scene,
+        nodes: [pageNode()],
+        worldCells: 32,
+        settings: {
+          ...settings,
+          maxInstances: 20,
+          lod: { ...settings.lod, shadowsMaxLod: testCase.shadowsMaxLod },
+        },
+        sampler,
+      });
+      try {
+        const expected = new Set<string>(testCase.enabled);
+        for (const mesh of instancedTreeMeshes(scene)) {
+          const lod = mesh.name.split("-").at(-1);
+          expect(mesh.castShadow).toBe(expected.has(lod ?? ""));
+        }
+      } finally {
+        system.dispose();
+      }
+    }
+  });
+
   it("does not mutate CLOD page meshes", () => {
     const mesh = pageMesh();
     const before = meshSnapshot(mesh);
@@ -499,12 +1072,13 @@ describe("TreeSystem", () => {
       nearTrees: 11,
       midTrees: 22,
       farTrees: 33,
+      impostorTrees: 0,
       generatedCandidates: 1234,
       acceptedCandidates: 1234,
       rejectedSlope: 0,
       rejectedHeight: 0,
       rejectedMaterial: 0,
-    })).toBe("trees: enabled 1,234 trees patches=4/9 lod n/m/f=11/22/33");
+    })).toBe("trees: enabled 1,234 trees patches=4/9 lod n/m/f/i=11/22/33/0");
     expect(formatTreeInfoLine(false, 0, null)).toBe("trees: disabled 0 trees");
   });
 });
@@ -513,4 +1087,53 @@ function maxAttributeValue(attribute: THREE.BufferAttribute | THREE.InterleavedB
   let max = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < attribute.count; i++) max = Math.max(max, attribute.getX(i));
   return max;
+}
+
+function minAttributeValue(attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute): number {
+  let min = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < attribute.count; i++) min = Math.min(min, attribute.getX(i));
+  return min;
+}
+
+function attributeValuesAreFinite(attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute): boolean {
+  for (let i = 0; i < attribute.count; i++) {
+    if (!Number.isFinite(attribute.getX(i))) return false;
+  }
+  return true;
+}
+
+function geometrySnapshot(geometry: THREE.BufferGeometry) {
+  return {
+    position: Array.from(geometry.getAttribute("position").array),
+    normal: Array.from(geometry.getAttribute("normal").array),
+    color: Array.from(geometry.getAttribute("color").array),
+    uv: Array.from(geometry.getAttribute("uv").array),
+    wind: Array.from(geometry.getAttribute("treeWindWeight").array),
+    flutter: Array.from(geometry.getAttribute("treeFlutterWeight").array),
+    foliageMask: Array.from(geometry.getAttribute("treeFoliageMask").array),
+    index: Array.from(geometry.getIndex()!.array),
+  };
+}
+
+function alphaRange(data: Uint8Array): { min: number; max: number } {
+  let min = 255;
+  let max = 0;
+  for (let i = 3; i < data.length; i += 4) {
+    min = Math.min(min, data[i]);
+    max = Math.max(max, data[i]);
+  }
+  return { min, max };
+}
+
+function atlasCellAlpha(data: Uint8Array, textureWidth: number, cellSize: number, cell: number): number[] {
+  const columns = textureWidth / cellSize;
+  const cellX = cell % columns;
+  const cellY = Math.floor(cell / columns);
+  const out: number[] = [];
+  for (let y = 0; y < cellSize; y += 4) {
+    for (let x = 0; x < cellSize; x += 4) {
+      out.push(data[((cellY * cellSize + y) * textureWidth + cellX * cellSize + x) * 4 + 3]);
+    }
+  }
+  return out;
 }
