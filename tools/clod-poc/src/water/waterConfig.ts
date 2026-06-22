@@ -330,11 +330,22 @@ interface WaterYamlConfig {
         slope_gate_start?: unknown;
         slope_gate_end?: unknown;
         min_visible_depth?: unknown;
+        lake_surface_drop_m?: unknown;
       };
       water_surface?: {
         wet_smooth_iterations?: unknown;
         wet_to_wet_cliff_slope_max?: unknown;
         far_reduce_factor?: unknown;
+        far_level_min_cell_size?: unknown;
+        dry_sentinel_depth?: unknown;
+      };
+      moisture?: {
+        enabled?: unknown;
+        blur_radius?: unknown;
+        lake_source?: unknown;
+        river_source?: unknown;
+        marsh_source?: unknown;
+        dry_decay?: unknown;
       };
       talus?: {
         enabled?: unknown;
@@ -346,6 +357,8 @@ interface WaterYamlConfig {
         show_accumulation?: unknown;
         show_carved_bed?: unknown;
         show_water_y?: unknown;
+        dump_fields?: unknown;
+        dump_dir?: unknown;
       };
     };
     visual?: {
@@ -553,11 +566,26 @@ export function parseWaterConfig(
       slopeGateStart: readNumberAtLeast(hydRaw.rivers?.slope_gate_start, hfb.rivers.slopeGateStart, 0),
       slopeGateEnd: readNumberAtLeast(hydRaw.rivers?.slope_gate_end, hfb.rivers.slopeGateEnd, 0),
       minVisibleDepth: readNumberAtLeast(hydRaw.rivers?.min_visible_depth, hfb.rivers.minVisibleDepth, 0),
+      lakeSurfaceDropM: readNumberAtLeast(hydRaw.rivers?.lake_surface_drop_m, hfb.rivers.lakeSurfaceDropM, 0),
     },
     waterSurface: {
       wetSmoothIterations: readIntegerAtLeast(hydRaw.water_surface?.wet_smooth_iterations, hfb.waterSurface.wetSmoothIterations, 0),
       wetToWetCliffSlopeMax: readNumberAtLeast(hydRaw.water_surface?.wet_to_wet_cliff_slope_max, hfb.waterSurface.wetToWetCliffSlopeMax, 0.001),
       farReduceFactor: readIntegerAtLeast(hydRaw.water_surface?.far_reduce_factor, hfb.waterSurface.farReduceFactor, 1),
+      farLevelMinCellSize: readNumberAtLeast(hydRaw.water_surface?.far_level_min_cell_size, hfb.waterSurface.farLevelMinCellSize, 0),
+      drySentinelDepth: readNumberAtLeast(
+        hydRaw.water_surface?.dry_sentinel_depth ?? hydRaw.dry_sentinel_depth,
+        hfb.waterSurface.drySentinelDepth,
+        0.1,
+      ),
+    },
+    moisture: {
+      enabled: readBoolean(hydRaw.moisture?.enabled, hfb.moisture.enabled),
+      blurRadius: readIntegerAtLeast(hydRaw.moisture?.blur_radius, hfb.moisture.blurRadius, 0),
+      lakeSource: Math.min(1, Math.max(0, readNumber(hydRaw.moisture?.lake_source, hfb.moisture.lakeSource))),
+      riverSource: Math.min(1, Math.max(0, readNumber(hydRaw.moisture?.river_source, hfb.moisture.riverSource))),
+      marshSource: Math.min(1, Math.max(0, readNumber(hydRaw.moisture?.marsh_source, hfb.moisture.marshSource))),
+      dryDecay: Math.min(1, Math.max(0, readNumber(hydRaw.moisture?.dry_decay, hfb.moisture.dryDecay))),
     },
     talus: {
       enabled: readBoolean(hydRaw.talus?.enabled, hfb.talus.enabled),
@@ -569,6 +597,10 @@ export function parseWaterConfig(
       showAccumulation: readBoolean(hydRaw.debug?.show_accumulation, hfb.debug.showAccumulation),
       showCarvedBed: readBoolean(hydRaw.debug?.show_carved_bed, hfb.debug.showCarvedBed),
       showWaterY: readBoolean(hydRaw.debug?.show_water_y, hfb.debug.showWaterY),
+      dumpFields: readBoolean(hydRaw.debug?.dump_fields, hfb.debug.dumpFields),
+      dumpDir: typeof hydRaw.debug?.dump_dir === "string" && hydRaw.debug.dump_dir.trim() !== ""
+        ? hydRaw.debug.dump_dir
+        : hfb.debug.dumpDir,
     },
   };
   if (hydrology.rivers.slopeGateEnd > hydrology.rivers.slopeGateStart) {

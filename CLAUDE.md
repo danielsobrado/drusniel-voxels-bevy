@@ -36,6 +36,42 @@ The opt-in CLOD WebGPU selection scenario is:
 http://127.0.0.1:5180/?world=16&clodPerf=1&webgpuSelection=1
 ```
 
+### Shot Harness, Hooks, Fail-Loud Boot
+
+For deterministic clod-poc visual checks, use the Playwright shot harness and `window.__drusnielClod` hooks rather than manual screenshots.
+
+Start the local server:
+
+```powershell
+npm --prefix tools/clod-poc run dev -- --host 127.0.0.1
+```
+
+Run deterministic shots and batteries with the Vite URL in `CLOD_POC_BASE_URL`:
+
+```powershell
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run shoot -- --scene sanity --seed 1 --freeze 1 --hud 1 --framealign 0 --out shots/phase-0/sanity.png --stats shots/phase-0/sanity-stats.json"
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run shoot -- --scene phase1-terrain --seed 1 --world 8 --terrainGrid 2048 --terrainDebug final --freeze 1 --hud 1 --framealign 0 --out shots/phase-1/terrain-final.png --stats shots/phase-1/terrain-stats.json"
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run battery"
+```
+
+`window.__drusnielClod` is the automation contract:
+
+- `ready` / `error`: readiness or fail-loud boot failure.
+- `diag`: WebGPU diagnostics; required for gated WebGPU scenes.
+- `stats`: FPS, frame ms, draw calls, triangles, counters, and GPU pass timings.
+- `setPose()` / `getPose()`: deterministic camera pose control.
+- `settle(frames)`: wait frame-stable captures.
+- `flyCamEnabled(on)`: let tooling disable interactive input.
+
+Gated scenes such as `scene=sanity` and `scene=phase1-terrain` must run browser gate + WebGPU diagnostics before renderer/world work. If WebGPU is unavailable or the GPU pipeline breaks, call `failLoud()` and set `window.__drusnielClod.error`; never silently fall back to WebGL in these paths.
+
+Deterministic scene URLs:
+
+- Phase 0 sanity: `?scene=sanity&seed=1&freeze=1&hud=1`
+- Phase 1 terrain: `?scene=phase1-terrain&seed=1&world=8&terrainGrid=2048&terrainDebug=lod&freeze=1&hud=1`
+
+When reporting visual or runtime changes, include the shot path, stats JSON path, and relevant counters such as `phase1.heightSignature`, `phase1.nodesRendered`, `phase1.trianglesRendered`, and GPU timestamp support.
+
 ## Regression Guard
 
 Use the bench guard for bottleneck checks:

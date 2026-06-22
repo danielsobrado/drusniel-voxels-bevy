@@ -132,7 +132,7 @@ class WaterLevel {
         const worldX = originX + ix * cellSize - half;
         const inBounds = worldX >= 0 && worldX <= worldBounds.cellsX && worldZ >= 0 && worldZ <= worldBounds.cellsZ;
         if (inBounds) {
-          const sample = field.sample(worldX, worldZ);
+          const sample = field.sampleForCellSize(worldX, worldZ, cellSize);
           positions[vi] = worldX;
           positions[vi + 1] = sample.waterY;
           positions[vi + 2] = worldZ;

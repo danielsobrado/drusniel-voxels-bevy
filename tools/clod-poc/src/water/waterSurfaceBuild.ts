@@ -1,5 +1,5 @@
 import type { HydrologyWaterSurfaceConfig } from "./hydrologyConfig.js";
-import { clampGridCoord, gridIndex, type HydrologyGrid } from "./hydrologyGrid.js";
+import { HYDROLOGY_BODY_DRY, clampGridCoord, gridIndex, type HydrologyGrid } from "./hydrologyGrid.js";
 
 export function buildWaterSurface(grid: HydrologyGrid, config: HydrologyWaterSurfaceConfig, drySentinelDepth: number): void {
   const { res, carvedBed, waterYRaw, waterY, wetMask } = grid;
@@ -66,6 +66,7 @@ export function buildWaterSurface(grid: HydrologyGrid, config: HydrologyWaterSur
         wetMask[i] = 0;
         grid.lakeMask[i] = 0;
         grid.riverMask[i] = 0;
+        grid.bodyKind[i] = HYDROLOGY_BODY_DRY;
       }
     }
   }

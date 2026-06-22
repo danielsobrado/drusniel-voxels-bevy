@@ -93,6 +93,42 @@ For the current high-load CLOD/WebGPU selection scenario, start clod-poc and ver
 http://127.0.0.1:5180/?world=16&clodPerf=1&webgpuSelection=1
 ```
 
+### clod-poc Shot Harness, Hooks, And Deterministic Scenes
+
+For deterministic clod-poc browser verification, use the Phase-0/Phase-1 shot harness instead of ad hoc screenshots.
+
+Start the dev server first:
+
+```powershell
+npm --prefix tools/clod-poc run dev -- --host 127.0.0.1
+```
+
+Then run shots with the configured Vite URL. Keep Vite-based commands direct, not through `rtk`; using `rtk cmd /c` only sets the environment for the Node tool:
+
+```powershell
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run shoot -- --scene sanity --seed 1 --freeze 1 --hud 1 --framealign 0 --out shots/phase-0/sanity.png --stats shots/phase-0/sanity-stats.json"
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run shoot -- --scene phase1-terrain --seed 1 --world 8 --terrainGrid 2048 --terrainDebug final --freeze 1 --hud 1 --framealign 0 --out shots/phase-1/terrain-final.png --stats shots/phase-1/terrain-stats.json"
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run battery"
+```
+
+The app exposes `window.__drusnielClod` for tooling:
+
+- `ready` / `error`: shot harness waits for one of these before capture.
+- `diag`: WebGPU adapter/features/limits from fail-loud boot diagnostics.
+- `stats`: FPS, frame time, draw calls, triangles, counters, and GPU pass timing.
+- `setPose(pose)` / `getPose()`: stable camera control. Pose shape is `{ p: [x, y, z], yaw, pitch, fov? }`.
+- `settle(frames)`: wait deterministic frames before screenshots.
+- `flyCamEnabled(on)`: disable interactive fly input when tooling drives the camera.
+
+Gated WebGPU scenes must call the browser gate and diagnostics before renderer/world work. Unsupported browser/GPU paths must use `failLoud()` and set `window.__drusnielClod.error`; do not silently fall back to WebGL in `scene=sanity` or `scene=phase1-terrain`.
+
+Use deterministic URLs for reproducible captures:
+
+- Phase 0: `?scene=sanity&seed=1&freeze=1&hud=1`
+- Phase 1: `?scene=phase1-terrain&seed=1&world=8&terrainGrid=2048&terrainDebug=lod&freeze=1&hud=1`
+
+Always report the generated `shots/.../*.png` and `*-stats.json` counters when making visual, CLOD selection, WebGPU, or frame-timing claims.
+
 ## NAADF Benches
 
 For NAADF preview or GI changes, measure startup visual stability:

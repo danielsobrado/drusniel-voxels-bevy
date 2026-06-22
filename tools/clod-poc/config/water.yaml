@@ -38,9 +38,18 @@ water:
       slope_gate_end: 0.24
       min_visible_depth: 0.05
     water_surface:
+      far_reduce_factor: 8
+      far_level_min_cell_size: 12.0
+      dry_sentinel_depth: 2.0
       wet_smooth_iterations: 2
       wet_to_wet_cliff_slope_max: 0.35
-      far_reduce_factor: 8
+    moisture:
+      enabled: true
+      blur_radius: 4
+      lake_source: 1.0
+      river_source: 0.85
+      marsh_source: 0.65
+      dry_decay: 0.82
     talus:
       enabled: true
       iterations: 8
@@ -50,6 +59,8 @@ water:
       show_accumulation: false
       show_carved_bed: false
       show_water_y: false
+      dump_fields: false
+      dump_dir: qa-runs/hydrology-fields
 
   fake_bodies:
     carve_terrain: true

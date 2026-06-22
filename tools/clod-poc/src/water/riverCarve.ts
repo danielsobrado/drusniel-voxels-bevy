@@ -1,5 +1,14 @@
 import type { HydrologyFillConfig, HydrologyRiversConfig, HydrologyTalusConfig } from "./hydrologyConfig.js";
-import { clampGridCoord, gridIndex, smoothstep, triangleBlur, type HydrologyGrid } from "./hydrologyGrid.js";
+import {
+  HYDROLOGY_BODY_DRY,
+  HYDROLOGY_BODY_LAKE,
+  HYDROLOGY_BODY_RIVER,
+  clampGridCoord,
+  gridIndex,
+  smoothstep,
+  triangleBlur,
+  type HydrologyGrid,
+} from "./hydrologyGrid.js";
 
 export function carveRiversAndClassifyWater(
   grid: HydrologyGrid,
@@ -10,8 +19,12 @@ export function carveRiversAndClassifyWater(
   const { res, texel, originalBed, carvedBed, filledSurface } = grid;
   carvedBed.set(originalBed);
 
+  // Lower lake surfaces below the fill spill level; the shoreline recedes to the
+  // new (lower) water contour, so lakes read lower and smaller instead of brimming.
+  const lakeDrop = Math.max(0, riversConfig.lakeSurfaceDropM ?? 0);
+  const lakeSurface = (i: number): number => filledSurface[i] - lakeDrop;
   const lakeDepth = new Float32Array(res * res);
-  for (let i = 0; i < lakeDepth.length; i++) lakeDepth[i] = Math.max(0, filledSurface[i] - originalBed[i]);
+  for (let i = 0; i < lakeDepth.length; i++) lakeDepth[i] = Math.max(0, lakeSurface(i) - originalBed[i]);
   triangleBlur(lakeDepth, res, 3);
 
   for (let z = 0; z < res; z++) {
@@ -36,9 +49,10 @@ export function carveRiversAndClassifyWater(
 
       if (isLake) {
         grid.riverDepth[i] = lakeD;
-        grid.waterYRaw[i] = filledSurface[i];
+        grid.waterYRaw[i] = lakeSurface(i);
         grid.wetMask[i] = 1;
         grid.riverMask[i] = 0;
+        grid.bodyKind[i] = HYDROLOGY_BODY_LAKE;
         grid.flowDirX[i] = 0;
         grid.flowDirZ[i] = 0;
         continue;
@@ -57,6 +71,7 @@ export function carveRiversAndClassifyWater(
       grid.riverDepth[i] = riverWet ? riverSurfaceDepth : 0;
       grid.riverMask[i] = riverWet ? 1 : 0;
       grid.wetMask[i] = riverWet ? 1 : 0;
+      grid.bodyKind[i] = riverWet ? HYDROLOGY_BODY_RIVER : HYDROLOGY_BODY_DRY;
       grid.waterYRaw[i] = riverWet ? carvedBed[i] + riverSurfaceDepth : -1e4;
     }
   }

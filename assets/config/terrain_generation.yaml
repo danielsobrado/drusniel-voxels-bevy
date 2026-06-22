@@ -85,6 +85,20 @@ terrain:
       noise_scale: 0.045
       threshold: 0.84
 
+  # Derived, render-oriented hydrology field. This does not change voxel water
+  # generation, filling, collisions, persistence, or water mesh generation.
+  visual_hydrology:
+    enabled: true
+    resolution: 512
+    far_reduce_factor: 8
+    dry_sink_offset: 2.0
+    wet_smooth_iterations: 2
+    wet_cliff_gradient_max: 0.35
+    moisture_blur_radius: 4
+    river_flow_min_slope: 0.002
+    river_flow_speed_scale: 1.0
+    debug_dump: false
+
   # Biome influence on height
   biome_modifiers:
     plains: 0.3       # Flatten

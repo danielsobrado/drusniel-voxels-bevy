@@ -1,14 +1,22 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { surfaceHeight } from "../terrain.js";
 import { buildLod0PageSource } from "../source_mesh.js";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
 import {
   DEFAULT_WATER_CONFIG,
   HydrologySystem,
+  HYDROLOGY_BODY_LAKE,
+  HYDROLOGY_BODY_RIVER,
   WATER_DEBUG_MODES,
   WaterClipmap,
   WaterField,
+  buildFarWaterSurface,
+  buildMoistureField,
+  buildVisualHydrologyField,
   buildWaterSurface,
   cloneWaterConfig,
   computeFlowAccumulation,
@@ -18,8 +26,10 @@ import {
   resolveWaterConfig,
   carveRiversAndClassifyWater,
   type TerrainHeightSampler,
+  sampleVisualHydrologyField,
   waterQuadRenderable,
 } from "./index.js";
+import { writeHydrologyDebugDump } from "./hydrologyDump.js";
 import { createWaterShaderMaterial } from "./waterMaterial.js";
 import waterYamlText from "../../config/water.yaml?raw";
 
@@ -60,6 +70,13 @@ describe("parseWaterConfig", () => {
     expect(parsed.fakeBodies.rivers).toHaveLength(1);
     expect(parsed.fakeBodies.rivers[0].pointsNorm).toBeDefined();
     expect(parsed.fakeBodies.rivers[0].pointsNorm!.length).toBe(5);
+    expect(parsed.hydrology.waterSurface.farReduceFactor).toBe(8);
+    expect(parsed.hydrology.waterSurface.farLevelMinCellSize).toBe(12);
+    expect(parsed.hydrology.waterSurface.drySentinelDepth).toBe(2);
+    expect(parsed.hydrology.moisture.enabled).toBe(true);
+    expect(parsed.hydrology.moisture.blurRadius).toBe(4);
+    expect(parsed.hydrology.debug.dumpFields).toBe(false);
+    expect(parsed.hydrology.debug.dumpDir).toBe("qa-runs/hydrology-fields");
 
     const cfg = resolveWaterConfig(parsed, 128);
     expect(cfg.fakeBodies.rivers[0].points).toHaveLength(5);
@@ -232,6 +249,61 @@ describe("WaterField", () => {
         expect(Number.isFinite(s.flow.drop)).toBe(true);
       }
     }
+  });
+});
+
+describe("VisualHydrologyField", () => {
+  it("derives the render-oriented hydrology contract from the existing grid", () => {
+    const grid = createHydrologyGrid(4, 4, { surfaceHeight: (x, z) => x + z }, 2);
+    const wet = 1 * grid.res + 1;
+    const river = 2 * grid.res + 2;
+    grid.waterY.fill(-2);
+    grid.waterY[wet] = 5;
+    grid.waterY[river] = 4;
+    grid.wetMask[wet] = 1;
+    grid.wetMask[river] = 1;
+    grid.lakeMask[wet] = 1;
+    grid.riverMask[river] = 1;
+    grid.bodyKind[wet] = HYDROLOGY_BODY_LAKE;
+    grid.bodyKind[river] = HYDROLOGY_BODY_RIVER;
+    grid.moisture[wet] = 1;
+    grid.flowDirX[river] = 0.6;
+    grid.flowDirZ[river] = 0.8;
+    grid.flowStrength[river] = 0.5;
+    grid.riverDepth[river] = 2.5;
+    buildFarWaterSurface(grid, 2);
+
+    const field = buildVisualHydrologyField(grid, { farReduceFactor: 2, moistureBlurRadius: 1 });
+
+    expect(field.metadata.resolution).toBe(4);
+    expect(field.metadata.farResolution).toBe(2);
+    expect(field.waterY).toHaveLength(16);
+    expect(field.waterYFar).toHaveLength(4);
+    expect(field.wetMask[wet]).toBe(255);
+    expect(field.bodyKind[wet]).toBe("LakeBasin");
+    expect(field.bodyKind[river]).toBe("RiverChannel");
+    expect(field.flowDirSpeed[river * 2]).toBeCloseTo(0.3);
+    expect(field.flowDirSpeed[river * 2 + 1]).toBeCloseTo(0.4);
+    expect(field.riverDepth[river]).toBeCloseTo(2.5);
+    expect(field.moisture[wet]).toBeGreaterThan(0);
+  });
+
+  it("samples visual hydrology without mutating the source grid", () => {
+    const grid = createHydrologyGrid(4, 4, { surfaceHeight: () => 10 });
+    const i = 1 * grid.res + 1;
+    grid.waterY[i] = 12;
+    grid.wetMask[i] = 1;
+    grid.lakeMask[i] = 1;
+    grid.bodyKind[i] = HYDROLOGY_BODY_LAKE;
+    const before = grid.waterY[i];
+
+    const field = buildVisualHydrologyField(grid, { farReduceFactor: 4, moistureBlurRadius: 0 });
+    const sample = sampleVisualHydrologyField(field, 1.4, 1.4);
+
+    expect(sample.waterY).toBeGreaterThan(0);
+    expect(sample.wetMask).toBe(1);
+    expect(sample.bodyKind).toBe("LakeBasin");
+    expect(grid.waterY[i]).toBe(before);
   });
 });
 
@@ -428,6 +500,17 @@ describe("Water world-bounds and body-mask clipping constraints", () => {
 });
 
 describe("CPU hydrology modules", () => {
+  const surfaceCfg = cloneWaterConfig().hydrology.waterSurface;
+
+  it("createHydrologyGrid allocates render contract fields", () => {
+    const grid = createHydrologyGrid(8, 8, { surfaceHeight: () => 10 }, 4);
+    expect(grid.waterYFar).toHaveLength(4);
+    expect(grid.farRes).toBe(2);
+    expect(grid.farReduceFactor).toBe(4);
+    expect(grid.moisture).toHaveLength(64);
+    expect(grid.bodyKind).toHaveLength(64);
+  });
+
   it("depression fill raises an enclosed basin and leaves borders drainable", () => {
     const grid = createHydrologyGrid(5, 4, { surfaceHeight: () => 10 });
     grid.originalBed.fill(10);
@@ -451,7 +534,12 @@ describe("CPU hydrology modules", () => {
     for (let z = 2; z <= 6; z++) {
       for (let x = 2; x <= 6; x++) grid.originalBed[z * 9 + x] = 6;
     }
-    carveRiversAndClassifyWater(grid, cloneWaterConfig().hydrology.fill, cloneWaterConfig().hydrology.rivers, { enabled: false, iterations: 0, strength: 0 });
+    carveRiversAndClassifyWater(
+      grid,
+      cloneWaterConfig().hydrology.fill,
+      { ...cloneWaterConfig().hydrology.rivers, lakeSurfaceDropM: 0 },
+      { enabled: false, iterations: 0, strength: 0 },
+    );
     expect(grid.lakeMask[4 * 9 + 4]).toBe(1);
     expect(grid.waterYRaw[4 * 9 + 4]).toBe(10);
   });
@@ -503,7 +591,7 @@ describe("CPU hydrology modules", () => {
     grid.carvedBed.fill(10);
     grid.carvedBed[0] = 4;
     grid.waterYRaw.fill(-1e4);
-    buildWaterSurface(grid, { wetSmoothIterations: 0, wetToWetCliffSlopeMax: 1, farReduceFactor: 8 }, 2);
+    buildWaterSurface(grid, { ...surfaceCfg, wetSmoothIterations: 0, wetToWetCliffSlopeMax: 1 }, 2);
     expect(grid.waterY[4]).toBe(2);
   });
 
@@ -512,7 +600,7 @@ describe("CPU hydrology modules", () => {
     grid.carvedBed.fill(10);
     grid.waterYRaw.fill(-1e4);
     grid.waterYRaw[4] = 12;
-    buildWaterSurface(grid, { wetSmoothIterations: 2, wetToWetCliffSlopeMax: 10, farReduceFactor: 8 }, 2);
+    buildWaterSurface(grid, { ...surfaceCfg, wetSmoothIterations: 2, wetToWetCliffSlopeMax: 10 }, 2);
     expect(grid.waterY[0]).toBe(8);
     expect(grid.wetMask[0]).toBe(0);
   });
@@ -523,8 +611,43 @@ describe("CPU hydrology modules", () => {
     grid.waterYRaw.fill(-1e4);
     grid.waterYRaw[4] = 10;
     grid.waterYRaw[5] = 20;
-    buildWaterSurface(grid, { wetSmoothIterations: 0, wetToWetCliffSlopeMax: 0.1, farReduceFactor: 8 }, 2);
+    buildWaterSurface(grid, { ...surfaceCfg, wetSmoothIterations: 0, wetToWetCliffSlopeMax: 0.1 }, 2);
     expect(grid.wetMask[4] + grid.wetMask[5]).toBeLessThan(2);
+  });
+
+  it("buildWaterSurface produces finite waterY values", () => {
+    const grid = createHydrologyGrid(4, 4, { surfaceHeight: (x, z) => x + z });
+    grid.carvedBed.set(grid.originalBed);
+    grid.waterYRaw.fill(-1e4);
+    grid.waterYRaw[5] = 8;
+    buildWaterSurface(grid, surfaceCfg, 2);
+    for (const waterY of grid.waterY) expect(Number.isFinite(waterY)).toBe(true);
+  });
+
+  it("buildFarWaterSurface uses conservative min reduction", () => {
+    const grid = createHydrologyGrid(4, 4, { surfaceHeight: () => 0 }, 2);
+    grid.waterY.set([
+      9, 8, 7, 6,
+      5, 4, 3, 2,
+      1, 0, -1, -2,
+      -3, -4, -5, -6,
+    ]);
+    buildFarWaterSurface(grid, 2);
+    expect(grid.farRes).toBe(2);
+    expect(Array.from(grid.waterYFar)).toEqual([4, 2, -4, -6]);
+  });
+
+  it("moisture stays finite and clamped", () => {
+    const grid = createHydrologyGrid(5, 5, { surfaceHeight: () => 0 });
+    grid.bodyKind[12] = HYDROLOGY_BODY_LAKE;
+    grid.wetMask[12] = 1;
+    buildMoistureField(grid, { ...cloneWaterConfig().hydrology.moisture, blurRadius: 2 });
+    for (const value of grid.moisture) {
+      expect(Number.isFinite(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(1);
+    }
+    expect(grid.moisture[12]).toBeGreaterThan(0);
   });
 
   it("WaterField bilinear hydrology sampling returns finite values", () => {
@@ -540,6 +663,54 @@ describe("CPU hydrology modules", () => {
     expect(Number.isFinite(s.waterY)).toBe(true);
     expect(Number.isFinite(s.terrainY)).toBe(true);
     expect(Number.isFinite(s.depth)).toBe(true);
+  });
+
+  it("river cells can carry flow while lake cells remain calm", () => {
+    const cfg = cloneWaterConfig().hydrology;
+    const grid = createHydrologyGrid(5, 4, { surfaceHeight: () => 20 });
+    const river = 2 * 5 + 2;
+    const lake = 1 * 5 + 1;
+    grid.bodyKind[river] = HYDROLOGY_BODY_RIVER;
+    grid.riverMask[river] = 1;
+    grid.flowStrength[river] = 0.75;
+    grid.flowDirX[river] = 1;
+    grid.bodyKind[lake] = HYDROLOGY_BODY_LAKE;
+    grid.lakeMask[lake] = 1;
+    expect(grid.flowStrength[river]).toBeGreaterThan(0);
+    expect(Math.hypot(grid.flowDirX[lake], grid.flowDirZ[lake]) * cfg.rivers.visibleDepthM).toBe(0);
+  });
+
+  it("sampleForCellSize uses far water only for coarse levels", () => {
+    const cfg = cloneWaterConfig();
+    cfg.source = "hydrology";
+    cfg.hydrology.simRes = 8;
+    cfg.hydrology.waterSurface.farLevelMinCellSize = 4;
+    cfg.hydrology.accumulation.particles = 0;
+    cfg.hydrology.fill.iterations = 0;
+    const hydrology = HydrologySystem.build(cfg.hydrology, 8, { surfaceHeight: () => 0 });
+    hydrology.grid.carvedBed.fill(0);
+    hydrology.grid.wetMask.fill(1);
+    hydrology.grid.waterY.fill(10);
+    hydrology.grid.waterYFar.fill(6);
+    const field = new WaterField(cfg, { surfaceHeight: () => 0 }, hydrology);
+    expect(field.sampleForCellSize(2, 2, 1).waterY).toBeCloseTo(10);
+    expect(field.sampleForCellSize(2, 2, 4).waterY).toBeCloseTo(6);
+  });
+
+  it("debug dump writes tiny synthetic fields", async () => {
+    const grid = createHydrologyGrid(2, 2, { surfaceHeight: () => 1 }, 1);
+    grid.waterY.fill(1);
+    grid.waterYFar.fill(1);
+    const dir = await mkdtemp(join(tmpdir(), "clod-hydrology-"));
+    try {
+      await writeHydrologyDebugDump(grid, dir);
+      const files = await readdir(dir);
+      expect(files).toContain("wet-mask.pgm");
+      expect(files).toContain("water-y-far.pgm");
+      expect(files).toContain("body-kind.ppm");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

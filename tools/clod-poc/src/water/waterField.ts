@@ -147,12 +147,14 @@ export class WaterField {
   private readonly rivers: RiverRuntime[];
   private readonly hydrology: HydrologySystem | null;
   private readonly source: WaterConfig["source"];
+  private readonly farLevelMinCellSize: number;
 
   constructor(config: WaterConfig, sampler: TerrainHeightSampler, hydrology: HydrologySystem | null = null) {
     this.sampler = sampler;
     this.drySentinelDepth = config.drySentinelDepth;
     this.hydrology = hydrology;
     this.source = config.source;
+    this.farLevelMinCellSize = config.hydrology.waterSurface.farLevelMinCellSize;
     this.lakes = config.fakeBodies.lakes.map((lake) => buildLakeRuntime(lake, sampler));
     this.rivers = config.fakeBodies.rivers
       .filter((river) => river.points.length >= 2)
@@ -187,12 +189,18 @@ export class WaterField {
 
   /** Full result in one pass (cheaper than four separate calls for vertex fill). */
   sample(x: number, z: number): WaterFieldResult {
+    return this.sampleForCellSize(x, z, 0);
+  }
+
+  sampleForCellSize(x: number, z: number, cellSize: number): WaterFieldResult {
     if (this.source === "hydrology" && this.hydrology) {
       const s = this.hydrology.sample(x, z);
-      const depth = s.waterY - s.terrainY;
+      const useFar = cellSize >= this.farLevelMinCellSize;
+      const waterY = useFar ? s.waterYFar : s.waterY;
+      const depth = waterY - s.terrainY;
       const flowLen = Math.hypot(s.flowX, s.flowZ);
       return {
-        waterY: s.waterY,
+        waterY,
         terrainY: s.terrainY,
         depth,
         bodyMask: depth > 0 ? s.bodyMask : 0,

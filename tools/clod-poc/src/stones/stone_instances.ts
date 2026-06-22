@@ -18,6 +18,7 @@ import {
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import {
   createStoneNodeMaterial,
+  type StoneHydrologyWater,
   type StoneNodeMaterialHandle,
 } from "../gpu/stone_node_material.js";
 import { buildRock, type RockPreset } from "./rock_builder.js";
@@ -45,6 +46,9 @@ export interface StoneSystemOptions {
   lighting: StoneLighting;
   gpuDevice?: GPUDevice | null;
   gpuBackend?: StoneWebGpuBackendAccess | null;
+  /** Hydrology water field (RGBA32F; G = wet mask, B = carved-bed Y) so GPU stones
+   *  snap to the carved terrain instead of floating, and drop in water bodies. */
+  hydrologyWaterTexture?: THREE.Texture | null;
   /** Called when async boot scatter finishes and `getStats()` counts become valid. */
   onStats?: (stats: StoneStats) => void;
 }
@@ -91,6 +95,7 @@ export class StoneSystem {
   private visibleClasses = new Set<StoneClass>(STONE_CLASSES);
   private draws: StoneDraw[] = [];
   private materialHandle: StoneNodeMaterialHandle | null = null;
+  private readonly hydrologyWater: StoneHydrologyWater | undefined;
   private scatterCompute: StoneGpuScatterCompute | null = null;
   private generation = 0;
   private stats: StoneStats = emptyStats();
@@ -99,6 +104,9 @@ export class StoneSystem {
     this.scene = options.scene;
     void options.nodes;
     this.worldCells = options.worldCells;
+    this.hydrologyWater = options.hydrologyWaterTexture
+      ? { texture: options.hydrologyWaterTexture, worldSize: options.worldCells }
+      : undefined;
     this.settings = { ...options.settings };
     this.currentLighting = cloneLighting(options.lighting);
     this.gpuDevice = options.gpuDevice ?? null;
@@ -154,7 +162,7 @@ export class StoneSystem {
     const indirect = new StorageBufferAttribute(new Uint32Array(STONE_GPU_CLASS_COUNT * 5), 5);
     indirect.name = "stone-gpu-indirect";
     this.gpuBackend.createIndirectStorageAttribute(indirect);
-    this.materialHandle = createStoneNodeMaterial(this.currentLighting, { instanceA, instanceB, capacity });
+    this.materialHandle = createStoneNodeMaterial(this.currentLighting, { instanceA, instanceB, capacity }, this.hydrologyWater);
 
     const indexCounts: [number, number, number] = [0, 0, 0];
     for (const classId of STONE_CLASSES) {

@@ -24,11 +24,19 @@ import {
   sin,
   smoothstep,
   storage,
+  texture,
   uniform,
   vec2,
   vec3,
 } from "three/tsl";
 import type { StoneLighting } from "../stones/stone_instances.js";
+
+export interface StoneHydrologyWater {
+  /** RGBA32F hydrology field; G = wet mask, B = carved-bed Y. */
+  texture: THREE.Texture | null;
+  /** World size (worldCells) mapping instance XZ → hydrology UV. */
+  worldSize: number;
+}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -53,6 +61,7 @@ function hash2(p: TslNode): TslNode {
 export function createStoneNodeMaterial(
   lighting: StoneLighting,
   instanceBuffers?: StoneStorageInstanceBuffers,
+  hydrology?: StoneHydrologyWater,
 ): StoneNodeMaterialHandle {
   const uLight = uniform(lighting.light.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
@@ -61,6 +70,7 @@ export function createStoneNodeMaterial(
 
   let worldPos: TslNode = positionWorld;
   let normalNode: TslNode = normalize(normalWorld);
+  let aboveWater: TslNode | null = null;
   if (instanceBuffers) {
     const instAStore: TslNode = storage(instanceBuffers.instanceA, "vec4", instanceBuffers.capacity).toReadOnly();
     const instBStore: TslNode = storage(instanceBuffers.instanceB, "vec4", instanceBuffers.capacity).toReadOnly();
@@ -71,9 +81,18 @@ export function createStoneNodeMaterial(
     const local: TslNode = positionGeometry.mul(instA.w);
     const rx: TslNode = c.mul(local.x).add(s.mul(local.z));
     const rz: TslNode = s.mul(local.x).negate().add(c.mul(local.z));
+    // Snap the stone's ground to the carved-bed height (hydrology B channel) so it
+    // sits on the carved terrain instead of floating on the un-carved base height.
+    let groundY: TslNode = instA.y;
+    if (hydrology?.texture) {
+      const uHydroWorldSize: TslNode = uniform(hydrology.worldSize);
+      const hydro: TslNode = texture(hydrology.texture, vec2(instA.x, instA.z).div(uHydroWorldSize));
+      groundY = hydro.z; // carved-bed height (B channel)
+      aboveWater = hydro.y.lessThan(0.5); // G = wet mask; drop stones in water bodies
+    }
     worldPos = vec3(
       rx.add(instB.y.mul(local.y)).add(instA.x),
-      local.y.add(instA.y),
+      local.y.add(groundY),
       rz.add(instB.z.mul(local.y)).add(instA.z),
     );
     const nrm: TslNode = normalGeometry;
@@ -111,6 +130,7 @@ export function createStoneNodeMaterial(
   const material = new MeshBasicNodeMaterial();
   if (instanceBuffers) material.positionNode = worldPos;
   material.colorNode = rock.mul(hemi.add(direct)).mul(ao);
+  if (aboveWater) (material as unknown as { maskNode: TslNode }).maskNode = aboveWater;
   material.side = THREE.FrontSide;
 
   return {

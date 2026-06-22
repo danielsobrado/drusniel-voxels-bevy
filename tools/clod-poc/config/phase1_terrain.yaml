@@ -1,0 +1,53 @@
+phase1:
+  world:
+    size_m: 4096
+    height_scale_m: 220
+    sea_level_m: 18
+    base_grid: 1024
+    high_grid: 2048
+    target_grid: 4096
+  macro:
+    massif_center: [0.68, 0.28]
+    valley_axis_angle_deg: 38
+    karst_weight: 0.35
+    ridge_weight: 0.55
+    lake_weight: 0.18
+  erosion:
+    enabled: true
+    iterations: 256
+    thermal_iterations: 32
+    flow_particles: 200000
+    seed_stream: "phase1.erosion"
+  material:
+    height_bands:
+      - id: grass
+        min_m: 0
+        max_m: 50
+      - id: dirt
+        min_m: 35
+        max_m: 95
+      - id: rock
+        min_m: 75
+        max_m: 170
+      - id: snow
+        min_m: 145
+        max_m: 10000
+    slope_rock_start: 0.42
+    slope_rock_full: 0.72
+    snow_slope_fade: 0.55
+  runtime:
+    default_scene: "phase1-terrain"
+    max_world_pages_for_realtime_build: 8
+    screenshot_world_pages: 8
+    far_view_m: 4096
+  debug:
+    default_mode: "final"
+    modes:
+      - final
+      - lod
+      - height
+      - slope
+      - normal
+      - flow
+      - biome
+      - paint_weights

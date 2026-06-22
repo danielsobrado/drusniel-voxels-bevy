@@ -1,5 +1,12 @@
 import type { TerrainHeightSampler } from "./waterField.js";
 
+export const HYDROLOGY_BODY_DRY = 0;
+export const HYDROLOGY_BODY_OCEAN = 1;
+export const HYDROLOGY_BODY_LAKE = 2;
+export const HYDROLOGY_BODY_RIVER = 3;
+export const HYDROLOGY_BODY_POND = 4;
+export const HYDROLOGY_BODY_MARSH = 5;
+
 export interface HydrologyGrid {
   res: number;
   worldCells: number;
@@ -13,9 +20,14 @@ export interface HydrologyGrid {
   riverDepth: Float32Array;
   waterYRaw: Float32Array;
   waterY: Float32Array;
+  waterYFar: Float32Array;
+  farRes: number;
+  farReduceFactor: number;
   wetMask: Float32Array;
   lakeMask: Float32Array;
   riverMask: Float32Array;
+  moisture: Float32Array;
+  bodyKind: Uint8Array;
   flowDirX: Float32Array;
   flowDirZ: Float32Array;
 }
@@ -30,10 +42,20 @@ export interface HydrologySample {
   flowZ: number;
   flowStrength: number;
   riverDepth: number;
+  waterYFar: number;
+  moisture: number;
+  bodyKind: number;
 }
 
-export function createHydrologyGrid(res: number, worldCells: number, sampler: TerrainHeightSampler): HydrologyGrid {
+export function createHydrologyGrid(
+  res: number,
+  worldCells: number,
+  sampler: TerrainHeightSampler,
+  farReduceFactor = 1,
+): HydrologyGrid {
   const count = res * res;
+  const reduce = Math.max(1, Math.floor(farReduceFactor));
+  const farRes = Math.max(1, Math.floor(res / reduce));
   const originalBed = new Float32Array(count);
   const texel = worldCells / Math.max(1, res - 1);
   for (let z = 0; z < res; z++) {
@@ -56,9 +78,14 @@ export function createHydrologyGrid(res: number, worldCells: number, sampler: Te
     riverDepth: new Float32Array(count),
     waterYRaw: new Float32Array(count),
     waterY: new Float32Array(count),
+    waterYFar: new Float32Array(farRes * farRes),
+    farRes,
+    farReduceFactor: reduce,
     wetMask: new Float32Array(count),
     lakeMask: new Float32Array(count),
     riverMask: new Float32Array(count),
+    moisture: new Float32Array(count),
+    bodyKind: new Uint8Array(count),
     flowDirX: new Float32Array(count),
     flowDirZ: new Float32Array(count),
   };
@@ -83,6 +110,28 @@ export function worldToGrid(grid: HydrologyGrid, x: number, z: number): { gx: nu
 export function sampleGridBilinear(grid: HydrologyGrid, field: Float32Array, x: number, z: number): number {
   const { gx, gz } = worldToGrid(grid, x, z);
   return sampleArrayAtGrid(field, grid.res, gx, gz);
+}
+
+export function sampleGridBilinearByRes(
+  field: Float32Array,
+  res: number,
+  worldCells: number,
+  x: number,
+  z: number,
+): number {
+  const scale = (res - 1) / Math.max(1e-6, worldCells);
+  return sampleArrayAtGrid(field, res, x * scale, z * scale);
+}
+
+export function sampleWaterYFar(grid: HydrologyGrid, x: number, z: number): number {
+  return sampleGridBilinearByRes(grid.waterYFar, grid.farRes, grid.worldCells, x, z);
+}
+
+export function sampleBodyKindNearest(grid: HydrologyGrid, x: number, z: number): number {
+  const { gx, gz } = worldToGrid(grid, x, z);
+  const ix = Math.round(clampGridCoord(grid.res, gx));
+  const iz = Math.round(clampGridCoord(grid.res, gz));
+  return grid.bodyKind[gridIndex(grid.res, ix, iz)];
 }
 
 export function sampleArrayAtGrid(field: Float32Array, res: number, gx: number, gz: number): number {
@@ -113,6 +162,9 @@ export function sampleHydrologyGrid(grid: HydrologyGrid, x: number, z: number): 
     flowZ: sampleGridBilinear(grid, grid.flowDirZ, x, z),
     flowStrength: sampleGridBilinear(grid, grid.flowStrength, x, z),
     riverDepth: sampleGridBilinear(grid, grid.riverDepth, x, z),
+    waterYFar: sampleWaterYFar(grid, x, z),
+    moisture: sampleGridBilinear(grid, grid.moisture, x, z),
+    bodyKind: sampleBodyKindNearest(grid, x, z),
   };
 }
 

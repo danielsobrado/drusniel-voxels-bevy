@@ -1,0 +1,73 @@
+{
+  "ready": true,
+  "error": null,
+  "diag": {
+    "ok": true,
+    "vendor": "nvidia",
+    "architecture": "lovelace",
+    "device": "",
+    "description": "",
+    "features": [
+      "bgra8unorm-storage",
+      "clip-distances",
+      "core-features-and-limits",
+      "depth-clip-control",
+      "depth32float-stencil8",
+      "dual-source-blending",
+      "float32-blendable",
+      "float32-filterable",
+      "indirect-first-instance",
+      "primitive-index",
+      "rg11b10ufloat-renderable",
+      "shader-f16",
+      "subgroups",
+      "texture-component-swizzle",
+      "texture-compression-bc",
+      "texture-compression-bc-sliced-3d",
+      "texture-formats-tier1",
+      "texture-formats-tier2",
+      "timestamp-query"
+    ],
+    "limits": {
+      "maxTextureDimension2D": 16384,
+      "maxTextureDimension3D": 2048,
+      "maxBindGroups": 4,
+      "maxStorageBufferBindingSize": 2147483644,
+      "maxBufferSize": 2147483648,
+      "maxComputeWorkgroupSizeX": 1024,
+      "maxComputeWorkgroupsPerDimension": 65535,
+      "maxComputeInvocationsPerWorkgroup": 1024,
+      "maxStorageBuffersPerShaderStage": 16,
+      "maxStorageTexturesPerShaderStage": 8,
+      "maxSampledTexturesPerShaderStage": 48,
+      "maxUniformBuffersPerShaderStage": 12
+    }
+  },
+  "fps": 143.99773597380067,
+  "frameMs": 6.899999999999636,
+  "frameMsP95": 7,
+  "drawCalls": 7,
+  "triangles": 5833,
+  "frame": 1040,
+  "counters": {
+    "phase0.timestampQuerySupported": 1,
+    "phase1.gridSize": 2048,
+    "phase1.worldSizeM": 4096,
+    "phase1.heightMin100": 0,
+    "phase1.heightMax100": 18740,
+    "phase1.heightSignature": 47536498,
+    "phase1.buildMs100": 193540,
+    "phase1.debugMode": 0,
+    "phase1.nodesRendered": 28,
+    "phase1.trianglesRendered": 41472,
+    "phase1.lod0Nodes": 16,
+    "phase1.lod1Nodes": 12,
+    "phase1.lod2Nodes": 0,
+    "phase1.lod3Nodes": 0,
+    "phase1.selectionMs100": 0
+  },
+  "gpuPasses": {
+    "render": 0.331776,
+    "compute": 0
+  }
+}

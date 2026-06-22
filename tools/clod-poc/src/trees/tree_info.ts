@@ -1,13 +1,31 @@
 import type { TreeStats } from "./tree_system.js";
 
-export function formatTreeInfoLine(treesEnabled: boolean, totalTrees: number, treeStats: TreeStats | null): string {
-  return `trees: ${treesEnabled ? "enabled" : "disabled"} ${totalTrees.toLocaleString()} trees` +
+export type TreeTotalDisplay = number | string;
+
+export function formatTreeTotalDisplay(treeStats: TreeStats | null): TreeTotalDisplay {
+  if (treeStats && treeGpuCountsHidden(treeStats)) return "counts off";
+  return treeStats?.totalTrees ?? 0;
+}
+
+export function formatTreeInfoLine(treesEnabled: boolean, totalTrees: TreeTotalDisplay, treeStats: TreeStats | null): string {
+  if (treeStats && treeGpuCountsHidden(treeStats)) {
+    return `trees: ${treesEnabled ? "enabled" : "disabled"} gpu=${treeStats.gpuStatus} counts=off`;
+  }
+  return `trees: ${treesEnabled ? "enabled" : "disabled"} ${formatTreeTotal(totalTrees)} trees` +
     (treeStats
       ? ` patches=${treeStats.visiblePatches}/${treeStats.patches}` +
         ` lod n/m/f/i=${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}` +
         formatTreeImpostorStatus(treeStats) +
         formatTreeGpuStats(treeStats)
       : "");
+}
+
+function treeGpuCountsHidden(treeStats: TreeStats): boolean {
+  return treeStats.gpuStatus === "ring" && !treeStats.gpuShowCounts;
+}
+
+function formatTreeTotal(totalTrees: TreeTotalDisplay): string {
+  return typeof totalTrees === "number" ? totalTrees.toLocaleString() : totalTrees;
 }
 
 function formatTreeImpostorStatus(treeStats: TreeStats): string {

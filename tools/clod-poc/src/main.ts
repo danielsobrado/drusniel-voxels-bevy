@@ -57,7 +57,7 @@ import {
 import { parseStoneConfig, STONE_CLASSES, type StoneClass } from "./stones/stone_config.js";
 import { StoneSystem, type StoneLighting, type StoneStats } from "./stones/stone_instances.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "./stones/stone_validation.js";
-import { formatTreeInfoLine, parseTreeConfig, TreeSystem, type TreeStats } from "./trees/index.js";
+import { formatTreeInfoLine, formatTreeTotalDisplay, parseTreeConfig, TreeSystem, type TreeStats } from "./trees/index.js";
 import {
   formatUnderstoryInfoLine,
   parseUnderstoryConfig,
@@ -480,6 +480,23 @@ function appendCrossLodBorderSegments(pts: number[], adjacency: CrossLodAdjacenc
 
 async function main() {
   const info = document.getElementById("info")!;
+  const earlySearchParams = new URLSearchParams(location.search);
+  const earlyScene = earlySearchParams.get("scene");
+  if (
+    (earlyScene === "sanity" || earlyScene === "phase1-terrain") &&
+    earlySearchParams.get("webgpuSpike") !== "1" &&
+    earlySearchParams.get("webgpu") !== "1" &&
+    earlySearchParams.get("grassFirstInstanceSmoke") !== "1"
+  ) {
+    if (earlyScene === "phase1-terrain") {
+      const { runPhase1TerrainScene } = await import("./phase1/phase1_scene.js");
+      await runPhase1TerrainScene();
+    } else {
+      const { runPhase0SanityScene } = await import("./debug/sanity_scene.js");
+      await runPhase0SanityScene();
+    }
+    return;
+  }
 
   // Load and validate Content Registry
   try {
@@ -552,7 +569,7 @@ async function main() {
   const queryScene = searchParams.get("scene");
   const queryGrassPerfScene = queryScene === "grass-perf";
   const queryTreePerfScene = queryScene === "trees-perf" || searchParams.get("treesPerf") === "1";
-  const queryTreeGpuRing = searchParams.get("treeGpu") === "1";
+  const queryTreeGpuRing = searchParams.get("treeGpu") === "1" || searchParams.get("treeGpuRing") === "1";
   const queryForestFloorScene = queryScene === "forest-floor";
   const queryPerfMode = searchParams.get("clodPerf") === "1";
   const queryWebGpuSelection = searchParams.get("webgpuSelection") === "1";
@@ -1238,7 +1255,7 @@ async function main() {
     treeGpuEnabled: treeConfig.gpu.enabled,
     treeGpuForceCpu: treeConfig.gpu.debugForceCpu,
     treeGpuShowCounts: treeConfig.gpu.debugShowGpuCounts,
-    treeTotal: 0,
+    treeTotal: 0 as number | string,
     treeVisiblePatches: "0/0",
     treeLodSummary: "0/0/0/0",
     treeGpuSummary: "disabled",
@@ -1928,6 +1945,7 @@ async function main() {
     worldCells,
     settings: makeStoneSettings(),
     lighting: currentGrassLighting() as StoneLighting,
+    hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
     gpuDevice: rendererWebGpuDevice,
     gpuBackend: isWebGpu ? app.renderer.backend as unknown as {
       createStorageAttribute(attribute: THREE.BufferAttribute): void;
@@ -3017,7 +3035,7 @@ async function main() {
   const refreshTreeStats = () => {
     if (!treeSystem) return;
     treeStats = treeSystem.getStats();
-    state.treeTotal = treeStats.totalTrees;
+    state.treeTotal = formatTreeTotalDisplay(treeStats);
     state.treeVisiblePatches = `${treeStats.visiblePatches}/${treeStats.patches}`;
     state.treeLodSummary = `${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}`;
     state.treeGpuSummary = formatTreeGpuSummary(treeStats);
@@ -4720,7 +4738,7 @@ async function main() {
       nextTreeStats.gpuOverflowed !== treeStats.gpuOverflowed)
     ) {
       treeStats = nextTreeStats;
-      state.treeTotal = nextTreeStats.totalTrees;
+      state.treeTotal = formatTreeTotalDisplay(nextTreeStats);
       state.treeVisiblePatches = `${nextTreeStats.visiblePatches}/${nextTreeStats.patches}`;
       state.treeLodSummary = `${nextTreeStats.nearTrees}/${nextTreeStats.midTrees}/${nextTreeStats.farTrees}/${nextTreeStats.impostorTrees}`;
       state.treeGpuSummary = formatTreeGpuSummary(nextTreeStats);

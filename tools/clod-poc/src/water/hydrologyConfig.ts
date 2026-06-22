@@ -25,12 +25,26 @@ export interface HydrologyRiversConfig {
   slopeGateStart: number;
   slopeGateEnd: number;
   minVisibleDepth: number;
+  /** Metres to lower lake surfaces below the fill spill level (and recede the
+   *  shoreline to the new contour). Higher = lower, smaller lakes. */
+  lakeSurfaceDropM: number;
 }
 
 export interface HydrologyWaterSurfaceConfig {
   wetSmoothIterations: number;
   wetToWetCliffSlopeMax: number;
   farReduceFactor: number;
+  farLevelMinCellSize: number;
+  drySentinelDepth: number;
+}
+
+export interface HydrologyMoistureConfig {
+  enabled: boolean;
+  blurRadius: number;
+  lakeSource: number;
+  riverSource: number;
+  marshSource: number;
+  dryDecay: number;
 }
 
 export interface HydrologyTalusConfig {
@@ -44,6 +58,8 @@ export interface HydrologyDebugConfig {
   showAccumulation: boolean;
   showCarvedBed: boolean;
   showWaterY: boolean;
+  dumpFields: boolean;
+  dumpDir: string;
 }
 
 export interface HydrologyConfig {
@@ -54,6 +70,7 @@ export interface HydrologyConfig {
   accumulation: HydrologyAccumulationConfig;
   rivers: HydrologyRiversConfig;
   waterSurface: HydrologyWaterSurfaceConfig;
+  moisture: HydrologyMoistureConfig;
   talus: HydrologyTalusConfig;
   debug: HydrologyDebugConfig;
 }
@@ -87,11 +104,22 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     slopeGateStart: 0.50,
     slopeGateEnd: 0.24,
     minVisibleDepth: 0.05,
+    lakeSurfaceDropM: 2.0,
   },
   waterSurface: {
     wetSmoothIterations: 2,
     wetToWetCliffSlopeMax: 0.35,
     farReduceFactor: 8,
+    farLevelMinCellSize: 12.0,
+    drySentinelDepth: 2.0,
+  },
+  moisture: {
+    enabled: true,
+    blurRadius: 4,
+    lakeSource: 1.0,
+    riverSource: 0.85,
+    marshSource: 0.65,
+    dryDecay: 0.82,
   },
   talus: {
     enabled: true,
@@ -103,6 +131,8 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     showAccumulation: false,
     showCarvedBed: false,
     showWaterY: false,
+    dumpFields: false,
+    dumpDir: "qa-runs/hydrology-fields",
   },
 };
 
@@ -113,6 +143,7 @@ export function cloneHydrologyConfig(config: HydrologyConfig = DEFAULT_HYDROLOGY
     accumulation: { ...config.accumulation },
     rivers: { ...config.rivers },
     waterSurface: { ...config.waterSurface },
+    moisture: { ...config.moisture },
     talus: { ...config.talus },
     debug: { ...config.debug },
   };

@@ -11,3 +11,6 @@ export * from "./riverCarve.js";
 export * from "./waterSurfaceBuild.js";
 export * from "./hydrologySystem.js";
 export * from "./fakeBodyCarve.js";
+export * from "./visualHydrologyField.js";
+export * from "./farWaterSurface.js";
+export * from "./moistureField.js";

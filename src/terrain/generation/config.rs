@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::terrain::hydrology::VisualHydrologyConfig;
+
 pub const TERRAIN_CONFIG_PATH: &str = "assets/config/terrain_generation.yaml";
 pub const TERRAIN_MATERIALS_PATH: &str = "assets/content/materials.yaml";
 pub const TERRAIN_BIOMES_PATH: &str = "assets/content/biomes.yaml";
@@ -27,6 +29,8 @@ pub struct TerrainConfig {
     pub rivers: RiverConfig,
     #[serde(default)]
     pub water_bodies: WaterBodyGenerationConfig,
+    #[serde(default)]
+    pub visual_hydrology: VisualHydrologyConfig,
     #[serde(default)]
     pub biome_modifiers: HashMap<String, f32>,
 }
@@ -238,6 +242,7 @@ impl Default for TerrainConfig {
             caves: CaveConfig::default(),
             rivers: RiverConfig::default(),
             water_bodies: WaterBodyGenerationConfig::default(),
+            visual_hydrology: VisualHydrologyConfig::default(),
             biome_modifiers: HashMap::new(),
         }
     }
@@ -350,6 +355,14 @@ mod tests {
         assert_eq!(
             loaded.water_bodies.aquifers.enabled,
             defaults.water_bodies.aquifers.enabled
+        );
+        assert_eq!(
+            loaded.visual_hydrology.resolution,
+            defaults.visual_hydrology.resolution
+        );
+        assert_eq!(
+            loaded.visual_hydrology.far_reduce_factor,
+            defaults.visual_hydrology.far_reduce_factor
         );
     }
 

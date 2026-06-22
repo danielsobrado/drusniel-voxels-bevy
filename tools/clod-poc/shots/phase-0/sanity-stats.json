@@ -1,0 +1,66 @@
+{
+  "ready": true,
+  "error": null,
+  "diag": {
+    "ok": true,
+    "vendor": "nvidia",
+    "architecture": "lovelace",
+    "device": "",
+    "description": "",
+    "features": [
+      "bgra8unorm-storage",
+      "clip-distances",
+      "core-features-and-limits",
+      "depth-clip-control",
+      "depth32float-stencil8",
+      "dual-source-blending",
+      "float32-blendable",
+      "float32-filterable",
+      "indirect-first-instance",
+      "primitive-index",
+      "rg11b10ufloat-renderable",
+      "shader-f16",
+      "subgroups",
+      "texture-component-swizzle",
+      "texture-compression-bc",
+      "texture-compression-bc-sliced-3d",
+      "texture-formats-tier1",
+      "texture-formats-tier2",
+      "timestamp-query"
+    ],
+    "limits": {
+      "maxTextureDimension2D": 16384,
+      "maxTextureDimension3D": 2048,
+      "maxBindGroups": 4,
+      "maxStorageBufferBindingSize": 2147483644,
+      "maxBufferSize": 2147483648,
+      "maxComputeWorkgroupSizeX": 1024,
+      "maxComputeWorkgroupsPerDimension": 65535,
+      "maxComputeInvocationsPerWorkgroup": 1024,
+      "maxStorageBuffersPerShaderStage": 16,
+      "maxStorageTexturesPerShaderStage": 8,
+      "maxSampledTexturesPerShaderStage": 48,
+      "maxUniformBuffersPerShaderStage": 12
+    }
+  },
+  "fps": 143.9610654761343,
+  "frameMs": 7,
+  "frameMsP95": 7,
+  "drawCalls": 5,
+  "triangles": 180515,
+  "frame": 1035,
+  "counters": {
+    "phase0.timestampQuerySupported": 1,
+    "phase0.storageTextureBake": 1,
+    "phase0.storageInstances": 2048,
+    "phase0.indirectDraws": 1,
+    "phase0.cpuProceduralVerts": 2025,
+    "phase0.cpuProceduralTris": 3872,
+    "phase0.tslDisplacement": 1,
+    "phase0.seedSignature": 151023802
+  },
+  "gpuPasses": {
+    "render": 0.360448,
+    "compute": 0.010976
+  }
+}
