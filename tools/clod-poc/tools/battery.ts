@@ -61,6 +61,7 @@ function validatePhase1Stats(): void {
   assertCounter(stats, "phase1.parentDirectResample", (value) => value === 0);
   assertCounter(stats, "phase1.maxErrorWorld100", (value) => value >= 0);
   assertCounter(stats, "phase1.borderChainsChecked", (value) => value > 0);
+  assertCounter(stats, "phase1.internalBorderChecks", (value) => value > 0);
   assertCounter(stats, "phase1.nodesRendered", (value) => value > 0);
   assertCounter(stats, "phase1.trianglesRendered", (value) => value > 0);
   assertCounter(stats, "phase1.buildMs100", (value) => Number.isFinite(value));

@@ -43,12 +43,12 @@
       "maxUniformBuffersPerShaderStage": 12
     }
   },
-  "fps": 143.99773597380067,
+  "fps": 144.03091134518803,
   "frameMs": 6.899999999999636,
-  "frameMsP95": 7,
+  "frameMsP95": 7.100000000000364,
   "drawCalls": 7,
-  "triangles": 5833,
-  "frame": 1040,
+  "triangles": 4407,
+  "frame": 1044,
   "counters": {
     "phase0.timestampQuerySupported": 1,
     "phase1.gridSize": 2048,
@@ -56,18 +56,32 @@
     "phase1.heightMin100": 0,
     "phase1.heightMax100": 18740,
     "phase1.heightSignature": 47536498,
-    "phase1.buildMs100": 193540,
+    "phase1.leafNodes": 64,
+    "phase1.parentNodes": 21,
+    "phase1.maxLevel": 3,
+    "phase1.parentDerived": 1,
+    "phase1.parentDirectResample": 0,
+    "phase1.maxErrorWorld100": 2297,
+    "phase1.borderChainsChecked": 84,
+    "phase1.internalBorderChecks": 42,
+    "phase1.selectionErrorThresholdPx100": 2400,
+    "phase1.selectionHysteresis100": 135,
+    "phase1.buildMs100": 225340,
     "phase1.debugMode": 0,
     "phase1.nodesRendered": 28,
-    "phase1.trianglesRendered": 41472,
+    "phase1.trianglesRendered": 24360,
     "phase1.lod0Nodes": 16,
     "phase1.lod1Nodes": 12,
     "phase1.lod2Nodes": 0,
     "phase1.lod3Nodes": 0,
+    "phase1.builtLod0Nodes": 64,
+    "phase1.builtLod1Nodes": 16,
+    "phase1.builtLod2Nodes": 4,
+    "phase1.builtLod3Nodes": 1,
     "phase1.selectionMs100": 0
   },
   "gpuPasses": {
-    "render": 0.331776,
+    "render": 0.109568,
     "compute": 0
   }
 }

@@ -205,12 +205,13 @@ export function createTreeNodeMaterialHandle(
     const forestPacked: TslNode = texture(neutralForestTexture, forestUv);
     forestMapNodes.push(forestPacked);
     const foliageAlbedo: TslNode = albedoFactory(aColor, mapNode.xyz);
-    // Trunk/branch verts (treeFoliageMask 0) get triplanar bark; foliage cards keep
-    // the leaf atlas. Debug materials stay flat.
+    // Trunk/branch verts (treeFoliageMask 0) get triplanar bark; foliage verts
+    // (mask 1) are real leaf/needle meshes lit by their vertex colour. The old
+    // alpha-card atlas cutout is retired — foliage is opaque geometry now.
     const albedo: TslNode = withBark
       ? mix(barkTrunkAlbedo(aColor, barkTexture), foliageAlbedo, aFoliageMask)
       : foliageAlbedo;
-    const opacity: TslNode = mix(float(1), mapNode.w, aFoliageMask.mul(uUseFoliageAlpha));
+    const opacity: TslNode = float(1);
 
     // Wind sway/flutter, matching injectTreeWindShader() so the WebGL and WebGPU paths
     // animate identically. Applied in object space before the instance matrix, exactly
@@ -271,7 +272,7 @@ export function createTreeNodeMaterialHandle(
     return material;
   };
 
-  const regularMaterial = buildMaterial((vertexColor, mapRgb) => vertexColor.mul(mapRgb), true);
+  const regularMaterial = buildMaterial((vertexColor) => vertexColor, true);
 
   const debugMaterials = {} as Record<TreeLod, THREE.Material>;
   for (const lod of TREE_LODS) {

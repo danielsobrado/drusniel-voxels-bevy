@@ -540,9 +540,12 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
     ditherEnabled: true,
     shadowsMaxLod: "near",
     budgets: {
-      nearMaxVertices: 8000,
-      midMaxVertices: 3500,
-      farMaxVertices: 900,
+      // Raised for the procedural grammar trees (real leaf/needle meshes instead
+      // of alpha cards): a full-density pine near-LOD is ~26k verts. See
+      // docs/plans/vegetation-grammar-port-plan.md §3.3 (DECISION: raise budgets).
+      nearMaxVertices: 30000,
+      midMaxVertices: 13000,
+      farMaxVertices: 6500,
       impostorMaxVertices: 240,
     },
   },

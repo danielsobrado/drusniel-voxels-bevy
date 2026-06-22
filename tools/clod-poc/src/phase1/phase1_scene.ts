@@ -86,6 +86,14 @@ function updateProgress(progress: number, message: string): void {
   window.__drusnielClod.progressMsg = message;
 }
 
+function failDetails(error: unknown): string[] {
+  const details = [error instanceof Error ? error.message : String(error)];
+  if (error instanceof Error && error.stack) details.push(error.stack);
+  const progress = window.__drusnielClod?.progressMsg;
+  if (progress) details.push(`progress: ${progress}`);
+  return details;
+}
+
 function allNodes(nodesByLevel: Map<number, ClodPageNode[]>): ClodPageNode[] {
   return [...nodesByLevel.values()].flat();
 }
@@ -110,8 +118,6 @@ export async function runPhase1TerrainScene(): Promise<void> {
     return;
   }
 
-  const config = parsePhase1Config(phase1ConfigText);
-  const params = parseSceneParams();
   updateProgress(0.05, "phase1: probing WebGPU");
   const diagnostics = await probeWebGPU();
   hooks.diag = diagnostics;
@@ -120,55 +126,72 @@ export async function runPhase1TerrainScene(): Promise<void> {
     return;
   }
 
-  updateProgress(0.12, "phase1: creating renderer");
-  const renderer = new WebGPURenderer({
-    antialias: true,
-    trackTimestamp: true,
-    requiredLimits: buildRequiredLimits(diagnostics),
-  });
-  await renderer.init();
-  const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
-  if (device) {
-    let reported = 0;
-    device.onuncapturederror = (event: GPUUncapturedErrorEvent) => {
-      if (reported++ < 8) console.error("[phase1] WebGPU uncaptured error:", event.error.message);
-    };
+  let config: ReturnType<typeof parsePhase1Config>;
+  let params: Phase1SceneParams;
+  let renderer: WebGPURenderer;
+  let scene: THREE.Scene;
+  let heightfield: ReturnType<typeof generatePhase1Heightfield>;
+  let sampler: HeightfieldSampler;
+  let pageTree: ReturnType<typeof buildDerivedClodTree>;
+  let nodeMeshes: Map<string, THREE.Mesh>;
+  let buildMs: number;
+  try {
+    config = parsePhase1Config(phase1ConfigText);
+    params = parseSceneParams();
+
+    updateProgress(0.12, "phase1: creating renderer");
+    renderer = new WebGPURenderer({
+      antialias: true,
+      trackTimestamp: true,
+      requiredLimits: buildRequiredLimits(diagnostics),
+    });
+    await renderer.init();
+    const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
+    if (device) {
+      let reported = 0;
+      device.onuncapturederror = (event: GPUUncapturedErrorEvent) => {
+        if (reported++ < 8) console.error("[phase1] WebGPU uncaptured error:", event.error.message);
+      };
+    }
+    renderer.setPixelRatio(params.dpr ?? Math.min(window.devicePixelRatio, PHASE0.dprCap));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    document.body.appendChild(renderer.domElement);
+
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x101923);
+    scene.add(new THREE.HemisphereLight(0xb8d7ff, 0x3b3328, 0.72));
+    const sun = new THREE.DirectionalLight(0xfff0d0, 2.2);
+    sun.position.set(1800, 2600, 1200);
+    scene.add(sun);
+
+    updateProgress(0.2, "phase1: synthesizing heightfield");
+    const buildStart = performance.now();
+    heightfield = generatePhase1Heightfield(params.seed, config, params.terrainGrid);
+    sampler = new HeightfieldSampler(heightfield);
+
+    updateProgress(0.52, "phase1: building page cache");
+    await initSimplifier();
+    const leaves = buildHeightfieldLeafNodes(params.worldPages, sampler, config);
+    pageTree = buildDerivedClodTree(leaves.leafNodes, leaves.worldPages, {
+      ...config.clod,
+      maxParentLevel: config.clod.maxParentLevel,
+    });
+    const material = createPhase1TerrainMaterial(params.debugMode);
+    nodeMeshes = new Map<string, THREE.Mesh>();
+    for (const node of allNodes(pageTree.nodesByLevel)) {
+      const mesh = new THREE.Mesh(geometryForPhase1Node(node, sampler, config, params.debugMode), material);
+      mesh.name = `phase1-${node.id}`;
+      mesh.visible = false;
+      nodeMeshes.set(node.id, mesh);
+      scene.add(mesh);
+    }
+    buildMs = performance.now() - buildStart;
+  } catch (error) {
+    failLoud("Phase-1 terrain failed", failDetails(error));
+    return;
   }
-  renderer.setPixelRatio(params.dpr ?? Math.min(window.devicePixelRatio, PHASE0.dprCap));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.toneMapping = ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
-  document.body.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x101923);
-  scene.add(new THREE.HemisphereLight(0xb8d7ff, 0x3b3328, 0.72));
-  const sun = new THREE.DirectionalLight(0xfff0d0, 2.2);
-  sun.position.set(1800, 2600, 1200);
-  scene.add(sun);
-
-  updateProgress(0.2, "phase1: synthesizing heightfield");
-  const buildStart = performance.now();
-  const heightfield = generatePhase1Heightfield(params.seed, config, params.terrainGrid);
-  const sampler = new HeightfieldSampler(heightfield);
-
-  updateProgress(0.52, "phase1: building page cache");
-  await initSimplifier();
-  const leaves = buildHeightfieldLeafNodes(params.worldPages, sampler, config);
-  const pageTree = buildDerivedClodTree(leaves.leafNodes, leaves.worldPages, {
-    ...config.clod,
-    maxParentLevel: config.clod.maxParentLevel,
-  });
-  const material = createPhase1TerrainMaterial(params.debugMode);
-  const nodeMeshes = new Map<string, THREE.Mesh>();
-  for (const node of allNodes(pageTree.nodesByLevel)) {
-    const mesh = new THREE.Mesh(geometryForPhase1Node(node, sampler, config, params.debugMode), material);
-    mesh.name = `phase1-${node.id}`;
-    mesh.visible = false;
-    nodeMeshes.set(node.id, mesh);
-    scene.add(mesh);
-  }
-  const buildMs = performance.now() - buildStart;
 
   const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, config.runtime.farViewM * 2);
   const flyCamera = new FlyCamera(camera, renderer.domElement);
@@ -192,6 +215,7 @@ export async function runPhase1TerrainScene(): Promise<void> {
   stats.stats.counters["phase1.parentDirectResample"] = 0;
   stats.stats.counters["phase1.maxErrorWorld100"] = Math.round(pageTree.maxErrorWorld * 100);
   stats.stats.counters["phase1.borderChainsChecked"] = pageTree.borderChainsChecked;
+  stats.stats.counters["phase1.internalBorderChecks"] = pageTree.internalBorderChecks;
   stats.stats.counters["phase1.selectionErrorThresholdPx100"] = Math.round(config.selection.errorThresholdPx * 100);
   stats.stats.counters["phase1.selectionHysteresis100"] = Math.round(config.selection.hysteresisMergeFactor * 100);
   stats.stats.counters["phase1.buildMs100"] = Math.round(buildMs * 100);

@@ -40,6 +40,14 @@ function updateProgress(progress: number, message: string): void {
   window.__drusnielClod.progressMsg = message;
 }
 
+function failDetails(error: unknown): string[] {
+  const details = [error instanceof Error ? error.message : String(error)];
+  if (error instanceof Error && error.stack) details.push(error.stack);
+  const progress = window.__drusnielClod?.progressMsg;
+  if (progress) details.push(`progress: ${progress}`);
+  return details;
+}
+
 function createCpuTerrain(seed: WorldSeed): { mesh: THREE.Mesh; verts: number; tris: number } {
   const segments = PHASE0.cpuTerrainSegments;
   const size = PHASE0.cpuTerrainSize;
@@ -149,35 +157,44 @@ export async function runPhase0SanityScene(): Promise<void> {
     return;
   }
 
-  updateProgress(0.1, "phase0: creating renderer");
-  const renderer = new WebGPURenderer({
-    antialias: true,
-    trackTimestamp: true,
-    requiredLimits: buildRequiredLimits(diagnostics),
-  });
-  await renderer.init();
-  const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
-  if (device) {
-    let reported = 0;
-    device.onuncapturederror = (event: GPUUncapturedErrorEvent) => {
-      if (reported++ < 8) console.error("[phase0] WebGPU uncaptured error:", event.error.message);
-    };
+  let renderer: WebGPURenderer;
+  let scene: THREE.Scene;
+  let camera: THREE.PerspectiveCamera;
+  let stats: EngineStatsTracker;
+  try {
+    updateProgress(0.1, "phase0: creating renderer");
+    renderer = new WebGPURenderer({
+      antialias: true,
+      trackTimestamp: true,
+      requiredLimits: buildRequiredLimits(diagnostics),
+    });
+    await renderer.init();
+    const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
+    if (device) {
+      let reported = 0;
+      device.onuncapturederror = (event: GPUUncapturedErrorEvent) => {
+        if (reported++ < 8) console.error("[phase0] WebGPU uncaptured error:", event.error.message);
+      };
+    }
+
+    const dpr = params.dpr ?? Math.min(window.devicePixelRatio, PHASE0.dprCap);
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(PHASE0_LIGHTING.background);
+    camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.2, 1000);
+    stats = new EngineStatsTracker(renderer, hooks, diagnostics.features.includes("timestamp-query"));
+    const seed = new WorldSeed(params.seed);
+    await buildSanityScene(renderer, scene, stats, seed);
+  } catch (error) {
+    failLoud("Phase-0 sanity failed", failDetails(error));
+    return;
   }
-
-  const dpr = params.dpr ?? Math.min(window.devicePixelRatio, PHASE0.dprCap);
-  renderer.setPixelRatio(dpr);
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.toneMapping = ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
-  renderer.shadowMap.enabled = true;
-  document.body.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(PHASE0_LIGHTING.background);
-  const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.2, 1000);
-  const stats = new EngineStatsTracker(renderer, hooks, diagnostics.features.includes("timestamp-query"));
-  const seed = new WorldSeed(params.seed);
-  await buildSanityScene(renderer, scene, stats, seed);
 
   const flyCamera = new FlyCamera(camera, renderer.domElement);
   flyCamera.setPose(parseCamString(params.cam ?? PHASE0.initialCam) ?? parseCamString(PHASE0.initialCam)!);

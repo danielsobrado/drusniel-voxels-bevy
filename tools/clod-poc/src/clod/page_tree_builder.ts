@@ -9,6 +9,7 @@ export interface DerivedClodTree {
   maxLevel: number;
   maxErrorWorld: number;
   borderChainsChecked: number;
+  internalBorderChecks: number;
 }
 
 export function buildDerivedClodTree(
@@ -28,6 +29,7 @@ export function buildDerivedClodTree(
 
   let parentNodes = 0;
   let borderChainsChecked = 0;
+  let internalBorderChecks = 0;
   let maxErrorWorld = 0;
   let prevCount = Math.max(1, Math.floor(worldPages));
   for (let level = 1; level <= config.maxParentLevel && prevCount > 1; level++) {
@@ -41,6 +43,7 @@ export function buildDerivedClodTree(
         levelNodes.push(derived.node);
         parentNodes++;
         borderChainsChecked += derived.borderChainsChecked;
+        internalBorderChecks += derived.internalBorderChecks;
         maxErrorWorld = Math.max(maxErrorWorld, derived.node.errorWorld);
       }
     }
@@ -60,6 +63,7 @@ export function buildDerivedClodTree(
     maxLevel,
     maxErrorWorld,
     borderChainsChecked,
+    internalBorderChecks,
   };
 }
 

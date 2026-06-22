@@ -109,6 +109,7 @@ export function borderChain(
   axis: "x" | "z",
   plane: number,
   footprint: PageFootprint,
+  perimeterBand = PERIMETER_BAND,
 ): BorderChain {
   const n = vertexCount(mesh);
   const open = openBoundaryVertexFlags(mesh);
@@ -117,12 +118,12 @@ export function borderChain(
     if (!open[i]) continue;
     const x = mesh.positions[i * 3], z = mesh.positions[i * 3 + 2];
     const val = axis === "x" ? x : z;
-    if (Math.abs(val - plane) > PERIMETER_BAND) continue;
+    if (Math.abs(val - plane) > perimeterBand) continue;
     // trim the two perpendicular corners
     if (axis === "x") {
-      if (Math.abs(z - footprint.minZ) <= PERIMETER_BAND || Math.abs(z - footprint.maxZ) <= PERIMETER_BAND) continue;
+      if (Math.abs(z - footprint.minZ) <= perimeterBand || Math.abs(z - footprint.maxZ) <= perimeterBand) continue;
     } else {
-      if (Math.abs(x - footprint.minX) <= PERIMETER_BAND || Math.abs(x - footprint.maxX) <= PERIMETER_BAND) continue;
+      if (Math.abs(x - footprint.minX) <= perimeterBand || Math.abs(x - footprint.maxX) <= perimeterBand) continue;
     }
     out.push({
       p: [mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]],

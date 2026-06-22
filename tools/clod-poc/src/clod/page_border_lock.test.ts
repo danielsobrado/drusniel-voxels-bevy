@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PageFootprint, PageMesh } from "../types.js";
+import { assertNoInternalBorders } from "../validate.js";
 import { collectOuterBorderVertexKeys, validatePageBorderChains } from "./page_border_lock.js";
 
 function gridMesh(): { mesh: PageMesh; footprint: PageFootprint } {
@@ -43,6 +44,28 @@ describe("page border locks", () => {
 
   it("validates border chains on footprint edges", () => {
     const { mesh, footprint } = gridMesh();
-    expect(validatePageBorderChains(mesh, footprint, 0.001)).toBe(4);
+    expect(validatePageBorderChains(mesh, footprint, 0.001, 1)).toBe(4);
+  });
+
+  it("rejects an internal open seam before it can be treated as an outer border", () => {
+    const footprint = { minX: 0, minZ: 0, maxX: 8, maxZ: 8 };
+    const mesh: PageMesh = {
+      positions: new Float32Array([
+        3, 0, 3,
+        5, 0, 3,
+        3, 0, 5,
+        5, 0, 5,
+      ]),
+      normals: new Float32Array([
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0,
+      ]),
+      materials: new Float32Array([1, 1, 1, 1]),
+      indices: new Uint32Array([0, 2, 1, 1, 2, 3]),
+    };
+
+    expect(() => assertNoInternalBorders(mesh, footprint)).toThrow(/InternalBorderNotWelded/);
   });
 });

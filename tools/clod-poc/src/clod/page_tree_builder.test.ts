@@ -25,6 +25,7 @@ describe("buildDerivedClodTree", () => {
     expect(tree.parentNodes).toBeGreaterThan(0);
     expect(tree.maxLevel).toBeGreaterThanOrEqual(1);
     expect(tree.borderChainsChecked).toBeGreaterThan(0);
+    expect(tree.internalBorderChecks).toBeGreaterThan(0);
     const parent = tree.nodesByLevel.get(1)?.[0];
     expect(parent?.children.length).toBeGreaterThan(0);
     expect(parent?.children[0]).toBe(leaves.leafNodes[0]);

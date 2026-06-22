@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
-import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
+import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { EnvironmentLighting } from "../environment.js";
 import {
   createForestLightingUniforms,
@@ -54,7 +54,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     transparent: false,
     depthWrite: true,
   });
-  applyFoliageMaterialSettings(regularMaterial, settings, (atlas) => {
+  applyFoliageMaterialSettings(regularMaterial, (atlas) => {
     foliageAtlas?.dispose();
     foliageAtlas = atlas;
   });
@@ -79,7 +79,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     },
     updateSettings(nextSettings: TreeSettings) {
       updateTreeWindUniforms(uniforms, nextSettings);
-      applyFoliageMaterialSettings(regularMaterial, nextSettings, (atlas) => {
+      applyFoliageMaterialSettings(regularMaterial, (atlas) => {
         foliageAtlas?.dispose();
         foliageAtlas = atlas;
       });
@@ -197,21 +197,16 @@ function attachTreeShader(
 
 function applyFoliageMaterialSettings(
   material: THREE.MeshStandardMaterial,
-  settings: TreeSettings,
   replaceAtlas: (atlas: TreeFoliageAtlas | null) => void,
 ): void {
   material.side = THREE.DoubleSide;
   material.transparent = false;
   material.depthWrite = true;
-  material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
-  if (settings.foliage.enabled) {
-    const atlas = createTreeFoliageAtlas(settings);
-    material.map = atlas.texture;
-    replaceAtlas(atlas);
-  } else {
-    material.map = null;
-    replaceAtlas(null);
-  }
+  // Foliage is real leaf/needle geometry lit by vertex colour now — the alpha-card
+  // atlas + cutout is retired, so no map and no alpha test (opaque meshes).
+  material.alphaTest = 0;
+  material.map = null;
+  replaceAtlas(null);
   material.needsUpdate = true;
 }
 

@@ -1,13 +1,9 @@
 import * as THREE from "three";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
-import {
-  buildTreeMorphology,
-  treeMorphologySeed,
-  trunkPoint,
-  type TreeBranchNode,
-  type TreeLeafCard,
-} from "./tree_morphology.js";
 import { foliageAtlasCell } from "./tree_alpha_mask.js";
+import { buildTree, type VegLod } from "../veg/veg_tree_builder.js";
+import { vegRng } from "../veg/veg_rng.js";
+import { VEG_BARK_COLOR, VEG_TREE_SPECIES } from "../veg/veg_species.js";
 
 export type TreeGeometryMap = Record<TreeSpeciesId, Record<TreeLod, THREE.BufferGeometry>>;
 
@@ -105,11 +101,25 @@ export function treeGeometrySummary(geometry: THREE.BufferGeometry): {
   };
 }
 
+/** discrete grammar LOD for each non-impostor tree LOD */
+const GRAMMAR_LOD: Record<Exclude<TreeLod, "impostor">, VegLod> = { near: 0, mid: 1, far: 2 };
+
+/**
+ * Visual height the procedural grammar tree is scaled to, so placement, LOD
+ * distance bands and per-instance age scaling keep matching the configured
+ * per-species dimensions (mirrors the old far-silhouette / impostor sizing).
+ */
+function targetTreeHeight(species: TreeSpeciesId, config: TreeSettings["species"][TreeSpeciesId]): number {
+  if (species === "pine") return config.trunkHeightM + config.crownRadiusM * 2.85;
+  if (species === "oak") return config.trunkHeightM + config.crownRadiusM * 1.7;
+  return config.trunkHeightM * 1.08; // dead snag (no crown)
+}
+
 function createTreeGeometry(species: TreeSpeciesId, lod: TreeLod, settings: TreeSettings): THREE.BufferGeometry {
   const config = settings.species[species];
-  const builder = new GeometryBuilder();
 
   if (lod === "impostor") {
+    const builder = new GeometryBuilder();
     appendImpostorTree(builder, species, config, settings);
     const geometry = builder.build();
     geometry.computeBoundingSphere();
@@ -117,130 +127,19 @@ function createTreeGeometry(species: TreeSpeciesId, lod: TreeLod, settings: Tree
     return geometry;
   }
 
-  const morphology = buildTreeMorphology(species, lod, settings);
-  appendSegmentedTrunk(builder, species, lod, settings.seed, config);
-  if (lod === "far" && species !== "dead") {
-    appendFarLeafSilhouette(builder, species, config.trunkHeightM, config.crownRadiusM, config.morphology, settings);
-  } else {
-    for (const branch of morphology.branches) appendBranch(builder, branch, species, lod);
-    for (let i = 0; i < morphology.leafCards.length; i++) appendLeafCard(builder, morphology.leafCards[i], species, settings, i);
+  // near / mid / far: procedural grammar (bark tubes + real leaf/needle meshes).
+  const sp = VEG_TREE_SPECIES[species];
+  const rng = vegRng(settings.seed, `tree/${species}/${lod}`);
+  const built = buildTree(sp, rng, { lod: GRAMMAR_LOD[lod], barkColor: VEG_BARK_COLOR[species] });
+  const geometry = built.geometry;
+  const target = targetTreeHeight(species, config);
+  if (built.stats.height > 1e-3 && target > 1e-3) {
+    const s = target / built.stats.height;
+    geometry.scale(s, s, s);
   }
-
-  const geometry = builder.build();
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
-}
-
-function appendSegmentedTrunk(
-  builder: GeometryBuilder,
-  species: TreeSpeciesId,
-  lod: TreeLod,
-  seed: number,
-  config: TreeSettings["species"][TreeSpeciesId],
-): void {
-  const verticalSegments = lod === "near" ? 8 : lod === "mid" ? 6 : 4;
-  const radialSegments = lod === "near" ? 8 : lod === "mid" ? 6 : 5;
-  const topWind = species === "dead" ? 0.42 : 0.68;
-  const bark = species === "dead" ? DEAD_BARK : BARK;
-  const rings: number[][] = [];
-
-  for (let ySegment = 0; ySegment <= verticalSegments; ySegment++) {
-    const t = ySegment / verticalSegments;
-    const center = trunkPoint(treeMorphologySeed(seed, species, lod), config.trunkHeightM, config.trunkRadiusM, config.morphology.trunkBend, t);
-    const radius = Math.max(config.trunkRadiusM * 0.08, config.trunkRadiusM * (1 - config.morphology.trunkTaper * t));
-    const ring: number[] = [];
-    for (let radial = 0; radial < radialSegments; radial++) {
-      const angle = (radial / radialSegments) * Math.PI * 2;
-      const normal = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
-      const position = center.clone().addScaledVector(normal, radius);
-      ring.push(builder.addVertex(position, normal, bark, t * topWind, 0));
-    }
-    rings.push(ring);
-  }
-
-  for (let ySegment = 0; ySegment < verticalSegments; ySegment++) {
-    const lower = rings[ySegment];
-    const upper = rings[ySegment + 1];
-    for (let radial = 0; radial < radialSegments; radial++) {
-      const next = (radial + 1) % radialSegments;
-      builder.addQuad(lower[radial], lower[next], upper[next], upper[radial]);
-    }
-  }
-  builder.addFan(rings[0], true);
-  builder.addFan(rings[rings.length - 1], false);
-}
-
-function appendBranch(builder: GeometryBuilder, branch: TreeBranchNode, species: TreeSpeciesId, lod: TreeLod): void {
-  const radialSegments = lod === "near" ? 5 : 4;
-  const bark = species === "dead" ? DEAD_BARK : BARK;
-  builder.addTaperedCylinder(
-    branch.start,
-    branch.end,
-    branch.radiusStart,
-    branch.radiusEnd,
-    radialSegments,
-    bark,
-    branch.windWeight,
-    Math.min(1, branch.windWeight + 0.16),
-    species === "dead" ? 0.03 : 0,
-  );
-}
-
-function appendLeafCard(
-  builder: GeometryBuilder,
-  card: TreeLeafCard,
-  species: TreeSpeciesId,
-  settings: TreeSettings,
-  index: number,
-): void {
-  if (species === "dead") return;
-  const base = species === "pine" ? PINE_LEAF_LOW : OAK_LEAF_LOW;
-  const highlight = species === "pine" ? PINE_LEAF_HIGH : OAK_LEAF_HIGH;
-  const foliage = species === "pine" ? settings.foliage.pine : settings.foliage.oak;
-  const mix = THREE.MathUtils.clamp(0.5 + (card.colorMix - 0.5) * (1 + foliage.tintVariation), 0, 1);
-  const color = base.clone().lerp(highlight, mix);
-  builder.addLeafCard(
-    card.center,
-    card.width,
-    card.height,
-    card.rotationY,
-    card.tilt,
-    color,
-    card.windWeight,
-    card.flutterWeight,
-    atlasFrame(foliageAtlasCell(species, index, settings), settings),
-  );
-}
-
-function appendFarLeafSilhouette(
-  builder: GeometryBuilder,
-  species: TreeSpeciesId,
-  trunkHeight: number,
-  crownRadius: number,
-  morphology: TreeSettings["species"][TreeSpeciesId]["morphology"],
-  settings: TreeSettings,
-): void {
-  if (species === "dead") return;
-  const color = species === "pine" ? PINE_LEAF_LOW.clone().lerp(PINE_LEAF_HIGH, 0.35) : OAK_LEAF_LOW.clone().lerp(OAK_LEAF_HIGH, 0.45);
-  const height = species === "pine" ? crownRadius * 2.55 * morphology.crownFlattening : crownRadius * 1.55 / Math.max(0.55, morphology.crownFlattening);
-  const width = species === "pine" ? crownRadius * 1.55 : crownRadius * 2.55;
-  const centerY = species === "pine" ? trunkHeight + height * 0.42 : trunkHeight + height * 0.54;
-  const count = species === "pine" ? settings.foliage.pine.cardCountFar : settings.foliage.oak.cardCountFar;
-  for (let i = 0; i < count; i++) {
-    const rotation = (i / Math.max(1, count)) * Math.PI;
-    builder.addLeafCard(
-      new THREE.Vector3(0, centerY, 0),
-      width,
-      height,
-      rotation,
-      species === "pine" ? -0.08 : 0.04,
-      color,
-      0.88,
-      species === "pine" ? 0.34 : 0.58,
-      atlasFrame(foliageAtlasCell(species, i, settings), settings),
-    );
-  }
 }
 
 function appendImpostorTree(
@@ -353,61 +252,6 @@ class GeometryBuilder {
 
   addQuad(a: number, b: number, c: number, d: number): void {
     this.indices.push(a, b, c, a, c, d);
-  }
-
-  addFan(ring: readonly number[], reverse: boolean): void {
-    if (ring.length < 3) return;
-    for (let i = 1; i < ring.length - 1; i++) {
-      if (reverse) this.indices.push(ring[0], ring[i + 1], ring[i]);
-      else this.indices.push(ring[0], ring[i], ring[i + 1]);
-    }
-  }
-
-  addTaperedCylinder(
-    start: THREE.Vector3,
-    end: THREE.Vector3,
-    radiusStart: number,
-    radiusEnd: number,
-    radialSegments: number,
-    color: THREE.Color,
-    windStart: number,
-    windEnd: number,
-    flutter: number,
-  ): void {
-    const axis = end.clone().sub(start);
-    if (axis.lengthSq() <= 1e-8) return;
-    axis.normalize();
-    const reference = Math.abs(axis.y) > 0.92 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-    const tangent = new THREE.Vector3().crossVectors(axis, reference).normalize();
-    const bitangent = new THREE.Vector3().crossVectors(axis, tangent).normalize();
-    const lower: number[] = [];
-    const upper: number[] = [];
-    for (let radial = 0; radial < radialSegments; radial++) {
-      const angle = (radial / radialSegments) * Math.PI * 2;
-      const normal = tangent.clone().multiplyScalar(Math.cos(angle)).addScaledVector(bitangent, Math.sin(angle)).normalize();
-      lower.push(this.addVertex(start.clone().addScaledVector(normal, radiusStart), normal, color, windStart, flutter));
-      upper.push(this.addVertex(end.clone().addScaledVector(normal, radiusEnd), normal, color, windEnd, flutter));
-    }
-    for (let radial = 0; radial < radialSegments; radial++) {
-      const next = (radial + 1) % radialSegments;
-      this.addQuad(lower[radial], lower[next], upper[next], upper[radial]);
-    }
-    this.addFan(lower, true);
-    this.addFan(upper, false);
-  }
-
-  addLeafCard(
-    center: THREE.Vector3,
-    width: number,
-    height: number,
-    rotationY: number,
-    tilt: number,
-    color: THREE.Color,
-    windWeight: number,
-    flutterWeight: number,
-    frame: AtlasFrame,
-  ): void {
-    this.addFlatCard(center, width, height, rotationY, tilt, color, windWeight, flutterWeight, frame, 1);
   }
 
   addFlatCard(

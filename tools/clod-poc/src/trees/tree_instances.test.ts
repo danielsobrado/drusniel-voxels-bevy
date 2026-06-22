@@ -719,21 +719,11 @@ describe("tree geometry", () => {
     }
   });
 
-  it("changes geometry output when morphology changes", () => {
+  it("changes geometry output when the seed changes", () => {
+    // The procedural grammar trees are grown from `settings.seed`, so reseeding
+    // must produce different bark/foliage geometry.
     const base = createTreeGeometryMap(settings);
-    const changedSettings: TreeSettings = {
-      ...settings,
-      species: {
-        ...settings.species,
-        oak: {
-          ...settings.species.oak,
-          morphology: {
-            ...settings.species.oak.morphology,
-            branchLength: settings.species.oak.morphology.branchLength + 0.5,
-          },
-        },
-      },
-    };
+    const changedSettings: TreeSettings = { ...settings, seed: settings.seed + 1 };
     const changed = createTreeGeometryMap(changedSettings);
     try {
       expect(geometrySnapshot(changed.oak.near)).not.toEqual(geometrySnapshot(base.oak.near));
@@ -829,18 +819,23 @@ describe("tree geometry", () => {
     }
   });
 
-  it("keeps foliage atlas UVs finite and inside texture bounds", () => {
+  it("keeps tree UVs finite (bark tiles; foliage atlas retired)", () => {
+    // Procedural grammar bark tiles its UVs (>1 is fine — the material reads bark
+    // via triplanar, and real-mesh foliage no longer samples an atlas). The
+    // impostor LOD still uses [0,1] atlas-frame UVs.
     const geometries = createTreeGeometryMap(settings);
     try {
       for (const species of TREE_SPECIES) {
         for (const lod of TREE_LODS) {
           const uv = geometries[species][lod].getAttribute("uv");
           expect(attributeValuesAreFinite(uv)).toBe(true);
-          for (let i = 0; i < uv.count; i++) {
-            expect(uv.getX(i)).toBeGreaterThanOrEqual(0);
-            expect(uv.getX(i)).toBeLessThanOrEqual(1);
-            expect(uv.getY(i)).toBeGreaterThanOrEqual(0);
-            expect(uv.getY(i)).toBeLessThanOrEqual(1);
+          if (lod === "impostor") {
+            for (let i = 0; i < uv.count; i++) {
+              expect(uv.getX(i)).toBeGreaterThanOrEqual(0);
+              expect(uv.getX(i)).toBeLessThanOrEqual(1);
+              expect(uv.getY(i)).toBeGreaterThanOrEqual(0);
+              expect(uv.getY(i)).toBeLessThanOrEqual(1);
+            }
           }
         }
       }
@@ -914,8 +909,10 @@ void main() {
       expect(handle.regularMaterial.side).toBe(THREE.DoubleSide);
       expect(handle.regularMaterial.transparent).toBe(false);
       expect(handle.regularMaterial.depthWrite).toBe(true);
-      expect(handle.regularMaterial.alphaTest).toBe(settings.foliage.alphaTest);
-      expect((handle.regularMaterial as THREE.MeshStandardMaterial).map).toBeDefined();
+      // Foliage is real leaf/needle geometry now (opaque, vertex-colour); the
+      // alpha-card atlas + cutout is retired, so no alpha test and no map.
+      expect(handle.regularMaterial.alphaTest).toBe(0);
+      expect((handle.regularMaterial as THREE.MeshStandardMaterial).map).toBeNull();
       for (const material of Object.values(handle.debugMaterials)) {
         expect(material.side).toBe(THREE.DoubleSide);
         expect(material.transparent).toBe(false);

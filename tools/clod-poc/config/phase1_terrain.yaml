@@ -41,6 +41,7 @@ phase1:
     simplify_target_ratio: 0.45
     min_parent_segments: 8
     border_lock_epsilon_m: 0.001
+    border_chain_search_band_m: 1.0
     error_scale: 1.0
   selection:
     error_threshold_px: 24

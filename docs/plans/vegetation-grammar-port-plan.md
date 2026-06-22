@@ -132,6 +132,27 @@ it.
 
 ---
 
+## Implementation status (live)
+
+- **Stage 0 ✅** — `src/veg/veg_rng.ts` (sfc32 Rng + `.fork`), `veg_types.ts`. Tests: `veg_rng.test.ts`.
+- **Stage 1 ✅** — understory leaf/needle assembly (`understory_geometry.ts`).
+- **Stage 2 ✅** — `veg_mesh_grower.ts` (clod-poc attribute model + bendNormals/crownAO), `veg_tube_mesh.ts`. Tests: `veg_tube_mesh.test.ts`.
+- **Stage 3 ✅** — `veg_skeleton.ts` (`growSkeleton`). Tests: `veg_skeleton.test.ts`.
+- **Stage 4 ✅** — `veg_leaf_mesh.ts` + `veg_tree_builder.ts` (`buildTree`, mesh-only foliage). Tests: `veg_tree_builder.test.ts`.
+- **Stage 6 ✅** — `veg_species.ts` (oak/pine/dead lean presets + bark colours).
+- **Stage 7 ✅ (logic)** — budgets raised (`tree_config.ts` + `config/trees.yaml`: near 30k / mid 13k / far 6.5k); `tree_geometry.ts` `createTreeGeometry` grows near/mid/far via the grammar (impostor LOD unchanged); **foliage atlas alpha-cut retired** in both `tree_node_material.ts` (WebGPU) and `tree_material.ts` (WebGL) — foliage is opaque vertex-colour real meshes. All 435 clod-poc tests pass; typecheck + `vite build` clean.
+- **Stage 5 ⏸️** — capture atlas / card LOD: deferred (impostor baker re-bakes the real meshes; no atlas needed near-field).
+
+**Measured vertex counts** (`vegRng(42)`): oak 3703/1618/814, pine 26050/11516/5716, dead 289/184/103 (near/mid/far).
+
+**Follow-ups / not yet done:**
+- ⚠️ **Browser + WebGPU visual QA and a perf bench have NOT been run** (no WebGPU browser in this env). Trees are unverified in-app: confirm foliage renders lit (not black), LOD transitions, impostor bake looks right, and run the clod-poc QA harness with a captured summary + a frame-time bench before trusting the look/cost (budgets were raised → trees are heavier).
+- Dead code to remove once verified: the foliage-atlas plumbing in `tree_node_material.ts` (now unused), `tree_alpha_mask.ts`, and `tree_morphology.ts` (no longer used by geometry; still re-exported from `trees/index.ts`).
+- `treeGeometryKey` still hashes `foliage`/`morphology` settings the grammar ignores → harmless redundant rebuilds; simplify to seed + species dims.
+- Per-species size reconciliation uses `targetTreeHeight()` scaling; eyeball against terrain scale during QA.
+
+---
+
 ## 4. Stages
 
 Each task lists a **verify** check. Run `npm --prefix tools/clod-poc run typecheck`

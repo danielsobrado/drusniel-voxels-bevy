@@ -48,6 +48,7 @@ export interface Phase1TerrainConfig {
     simplifyTargetRatio: number;
     minParentSegments: number;
     borderLockEpsilonM: number;
+    borderChainSearchBandM: number;
     errorScale: number;
   };
   selection: {
@@ -145,6 +146,12 @@ export function parsePhase1Config(text: string): Phase1TerrainConfig {
   const defaultMode = debugMode(debug["default_mode"], "phase1.debug.default_mode");
   if (!modes.includes(defaultMode)) throw new Error("phase1.debug.default_mode must be listed in phase1.debug.modes");
 
+  const borderLockEpsilonM = numberAt(clod, "border_lock_epsilon_m", "phase1.clod", Number.MIN_VALUE);
+  const borderChainSearchBandM = numberAt(clod, "border_chain_search_band_m", "phase1.clod", Number.MIN_VALUE);
+  if (borderChainSearchBandM < borderLockEpsilonM) {
+    throw new Error("phase1.clod.border_chain_search_band_m must be >= phase1.clod.border_lock_epsilon_m");
+  }
+
   return {
     world: {
       sizeM: numberAt(world, "size_m", "phase1.world", 1),
@@ -179,7 +186,8 @@ export function parsePhase1Config(text: string): Phase1TerrainConfig {
       maxParentLevel: intAt(clod, "max_parent_level", "phase1.clod", 1),
       simplifyTargetRatio: ratioAt(clod, "simplify_target_ratio", "phase1.clod"),
       minParentSegments: intAt(clod, "min_parent_segments", "phase1.clod", 2),
-      borderLockEpsilonM: numberAt(clod, "border_lock_epsilon_m", "phase1.clod", Number.MIN_VALUE),
+      borderLockEpsilonM,
+      borderChainSearchBandM,
       errorScale: numberAt(clod, "error_scale", "phase1.clod", 0),
     },
     selection: {

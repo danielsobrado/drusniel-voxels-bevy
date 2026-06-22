@@ -39,9 +39,11 @@ trees:
     dither_enabled: true
     shadows_max_lod: near
     budgets:
-      near_max_vertices: 8000
-      mid_max_vertices: 3500
-      far_max_vertices: 900
+      # Raised for procedural grammar trees (real leaf/needle meshes vs alpha
+      # cards). See docs/plans/vegetation-grammar-port-plan.md §3.3.
+      near_max_vertices: 30000
+      mid_max_vertices: 13000
+      far_max_vertices: 6500
       impostor_max_vertices: 240
 
   impostors:

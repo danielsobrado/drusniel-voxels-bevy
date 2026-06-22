@@ -2,7 +2,7 @@ import type { ClodPagesConfig } from "../config.js";
 import { countLocks } from "../lock.js";
 import { simplifyPage } from "../simplify.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "../types.js";
-import { stripDegenerateTriangles } from "../validate.js";
+import { assertNoInternalBorders, stripDegenerateTriangles } from "../validate.js";
 import { buildOuterBorderLocks } from "../lock.js";
 import { boundsOf } from "./heightfield_leaf_source.js";
 import { validatePageBorderChains } from "./page_border_lock.js";
@@ -13,6 +13,7 @@ export interface ClodDerivationConfig {
   simplifyTargetRatio: number;
   minParentSegments: number;
   borderLockEpsilonM: number;
+  borderChainSearchBandM: number;
   errorScale: number;
 }
 
@@ -22,6 +23,7 @@ export interface DerivedParentPage {
   lockedVertices: number;
   sourceTriangles: number;
   outputTriangles: number;
+  internalBorderChecks: number;
 }
 
 export function deriveParentPage(
@@ -36,13 +38,20 @@ export function deriveParentPage(
   const sourceMesh = mergeChildPageMeshes(children, config.borderLockEpsilonM);
   stripDegenerateTriangles(sourceMesh);
   recomputeNormals(sourceMesh);
+  assertNoInternalBorders(sourceMesh, footprint);
 
   const locks = buildOuterBorderLocks(sourceMesh);
   const simplified = simplifyPage(sourceMesh, locks, simplifyConfig(config), { preserveMaterials: true });
   stripDegenerateTriangles(simplified.mesh);
   recomputeNormals(simplified.mesh);
+  assertNoInternalBorders(simplified.mesh, footprint);
   validateFiniteMesh(simplified.mesh, `L${level}:${nx},${nz}`);
-  const borderChainsChecked = validatePageBorderChains(simplified.mesh, footprint, config.borderLockEpsilonM);
+  const borderChainsChecked = validatePageBorderChains(
+    simplified.mesh,
+    footprint,
+    config.borderLockEpsilonM,
+    config.borderChainSearchBandM,
+  );
   const computedError = computeParentErrorWorld(simplified.mesh, sourceMesh, children) * config.errorScale;
   const childError = Math.max(...children.map((child) => child.errorWorld));
   const errorWorld = Math.max(computedError, childError);
@@ -62,6 +71,7 @@ export function deriveParentPage(
     lockedVertices: countLocks(locks),
     sourceTriangles: sourceMesh.indices.length / 3,
     outputTriangles: simplified.mesh.indices.length / 3,
+    internalBorderChecks: 2,
   };
 }
 
@@ -112,6 +122,9 @@ export function recomputeNormals(mesh: PageMesh): void {
 }
 
 function simplifyConfig(config: ClodDerivationConfig): ClodPagesConfig {
+  // Only simplify.* fields are consumed by simplifyPage(). Selection fields here are
+  // inert placeholders required by the current ClodPagesConfig type.
+  // TODO: split SimplifyConfig from ClodPagesConfig.
   return {
     page: {
       chunks_per_page: 1,
