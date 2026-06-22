@@ -35,6 +35,17 @@ phase1:
     slope_rock_start: 0.42
     slope_rock_full: 0.72
     snow_slope_fade: 0.55
+  clod:
+    leaf_segments: 18
+    max_parent_level: 6
+    simplify_target_ratio: 0.45
+    min_parent_segments: 8
+    border_lock_epsilon_m: 0.001
+    error_scale: 1.0
+  selection:
+    error_threshold_px: 24
+    hysteresis_merge_factor: 1.35
+    enforce_21: true
   runtime:
     default_scene: "phase1-terrain"
     max_world_pages_for_realtime_build: 8

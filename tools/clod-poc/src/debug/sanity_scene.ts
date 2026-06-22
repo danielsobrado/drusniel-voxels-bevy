@@ -16,6 +16,7 @@ import { initHooks } from "../core/hooks.js";
 import { parseCamString, parseClodParams } from "../core/params.js";
 import { WorldSeed } from "../core/seed.js";
 import { createPhase0DisplacementMaterial } from "../gpu/phase0_displacement_material.js";
+import { createPhase0IndirectInstances } from "../gpu/phase0_indirect_instancing.js";
 import { createPhase0StorageInstances } from "../gpu/phase0_storage_instancing.js";
 import {
   createPhase0StorageTexture,
@@ -93,7 +94,13 @@ async function buildSanityScene(
   const instances = await createPhase0StorageInstances(renderer, PHASE0.storageInstanceCount, seed.sub("storage-instances"));
   scene.add(instances.mesh);
   stats.stats.counters["phase0.storageInstances"] = instances.count;
-  stats.stats.counters["phase0.indirectDraws"] = 1;
+  stats.stats.counters["phase0.storageInstancedDraws"] = 1;
+
+  updateProgress(0.54, "phase0: indirect draw compute");
+  const indirect = await createPhase0IndirectInstances(renderer, PHASE0.indirectInstanceCount, seed.sub("indirect-instances"));
+  scene.add(indirect.mesh);
+  stats.stats.counters["phase0.indirectInstances"] = indirect.count;
+  stats.stats.counters["phase0.indirectDraws"] = indirect.indirectDraws;
 
   updateProgress(0.62, "phase0: cpu procedural geometry");
   const cpuTerrain = createCpuTerrain(seed);

@@ -14,4 +14,18 @@ describe("parsePhase1Config", () => {
     const invalid = phase1ConfigText.replace("size_m: 4096", "size_m: -1");
     expect(() => parsePhase1Config(invalid)).toThrow(/size_m/);
   });
+
+  it("rejects invalid debug mode", () => {
+    const invalid = phase1ConfigText.replace('default_mode: "final"', 'default_mode: "bad"');
+    expect(() => parsePhase1Config(invalid)).toThrow(/default_mode/);
+  });
+
+  it("parses clod and selection fields", () => {
+    const config = parsePhase1Config(phase1ConfigText);
+    expect(config.clod.leafSegments).toBe(18);
+    expect(config.clod.simplifyTargetRatio).toBeCloseTo(0.45);
+    expect(config.selection.errorThresholdPx).toBe(24);
+    expect(config.selection.hysteresisMergeFactor).toBeCloseTo(1.35);
+    expect(config.selection.enforce21).toBe(true);
+  });
 });

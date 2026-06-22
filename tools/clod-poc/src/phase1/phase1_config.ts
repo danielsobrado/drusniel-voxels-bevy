@@ -42,6 +42,19 @@ export interface Phase1TerrainConfig {
     slopeRockFull: number;
     snowSlopeFade: number;
   };
+  clod: {
+    leafSegments: number;
+    maxParentLevel: number;
+    simplifyTargetRatio: number;
+    minParentSegments: number;
+    borderLockEpsilonM: number;
+    errorScale: number;
+  };
+  selection: {
+    errorThresholdPx: number;
+    hysteresisMergeFactor: number;
+    enforce21: boolean;
+  };
   runtime: {
     defaultScene: string;
     maxWorldPagesForRealtimeBuild: number;
@@ -85,6 +98,18 @@ function gridAt(raw: Record<string, unknown>, key: string, path: string): number
   return value;
 }
 
+function intAt(raw: Record<string, unknown>, key: string, path: string, min: number): number {
+  const value = numberAt(raw, key, path, min);
+  if (!Number.isInteger(value)) throw new Error(`${path}.${key} must be an integer`);
+  return value;
+}
+
+function ratioAt(raw: Record<string, unknown>, key: string, path: string): number {
+  const value = numberAt(raw, key, path, Number.MIN_VALUE);
+  if (value > 1) throw new Error(`${path}.${key} must be <= 1`);
+  return value;
+}
+
 function debugMode(value: unknown, path: string): Phase1DebugMode {
   if (typeof value === "string" && PHASE1_DEBUG_MODES.includes(value as Phase1DebugMode)) return value as Phase1DebugMode;
   throw new Error(`${path} must be one of ${PHASE1_DEBUG_MODES.join(", ")}`);
@@ -97,6 +122,8 @@ export function parsePhase1Config(text: string): Phase1TerrainConfig {
   const macro = asRecord(phase1["macro"], "phase1.macro");
   const erosion = asRecord(phase1["erosion"], "phase1.erosion");
   const material = asRecord(phase1["material"], "phase1.material");
+  const clod = asRecord(phase1["clod"], "phase1.clod");
+  const selection = asRecord(phase1["selection"], "phase1.selection");
   const runtime = asRecord(phase1["runtime"], "phase1.runtime");
   const debug = asRecord(phase1["debug"], "phase1.debug");
 
@@ -115,6 +142,8 @@ export function parsePhase1Config(text: string): Phase1TerrainConfig {
   const modesRaw = debug["modes"];
   if (!Array.isArray(modesRaw) || modesRaw.length === 0) throw new Error("phase1.debug.modes must be non-empty");
   const modes = modesRaw.map((mode, index) => debugMode(mode, `phase1.debug.modes[${index}]`));
+  const defaultMode = debugMode(debug["default_mode"], "phase1.debug.default_mode");
+  if (!modes.includes(defaultMode)) throw new Error("phase1.debug.default_mode must be listed in phase1.debug.modes");
 
   return {
     world: {
@@ -145,6 +174,19 @@ export function parsePhase1Config(text: string): Phase1TerrainConfig {
       slopeRockFull: numberAt(material, "slope_rock_full", "phase1.material", 0),
       snowSlopeFade: numberAt(material, "snow_slope_fade", "phase1.material", 0),
     },
+    clod: {
+      leafSegments: intAt(clod, "leaf_segments", "phase1.clod", 4),
+      maxParentLevel: intAt(clod, "max_parent_level", "phase1.clod", 1),
+      simplifyTargetRatio: ratioAt(clod, "simplify_target_ratio", "phase1.clod"),
+      minParentSegments: intAt(clod, "min_parent_segments", "phase1.clod", 2),
+      borderLockEpsilonM: numberAt(clod, "border_lock_epsilon_m", "phase1.clod", Number.MIN_VALUE),
+      errorScale: numberAt(clod, "error_scale", "phase1.clod", 0),
+    },
+    selection: {
+      errorThresholdPx: numberAt(selection, "error_threshold_px", "phase1.selection", Number.MIN_VALUE),
+      hysteresisMergeFactor: numberAt(selection, "hysteresis_merge_factor", "phase1.selection", 1),
+      enforce21: boolAt(selection, "enforce_21", "phase1.selection"),
+    },
     runtime: {
       defaultScene: stringAt(runtime, "default_scene", "phase1.runtime"),
       maxWorldPagesForRealtimeBuild: numberAt(runtime, "max_world_pages_for_realtime_build", "phase1.runtime", 1),
@@ -152,7 +194,7 @@ export function parsePhase1Config(text: string): Phase1TerrainConfig {
       farViewM: numberAt(runtime, "far_view_m", "phase1.runtime", 1),
     },
     debug: {
-      defaultMode: debugMode(debug["default_mode"], "phase1.debug.default_mode"),
+      defaultMode,
       modes,
     },
   };

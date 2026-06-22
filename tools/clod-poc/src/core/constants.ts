@@ -5,6 +5,7 @@ export const PHASE0 = {
   p95Window: 120,
   settleReadyFrames: 6,
   storageInstanceCount: 2048,
+  indirectInstanceCount: 512,
   storageTextureSize: 256,
   cpuTerrainSegments: 44,
   cpuTerrainSize: 58,

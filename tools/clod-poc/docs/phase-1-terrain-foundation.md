@@ -1,27 +1,38 @@
 # Phase 1 Terrain Foundation
 
-Phase 1 proves a deterministic, large-domain terrain foundation for `tools/clod-poc`.
-It is a WebGPU-gated runtime scene, reached with `?scene=phase1-terrain`, and it reuses the
-Phase-0 browser gate, diagnostics, hooks, fly camera, HUD, screenshot harness, and compare tool.
+Phase 1 proves a deterministic 4 km terrain foundation for `tools/clod-poc` through
+the WebGPU-gated `?scene=phase1-terrain` path. It reuses the Phase-0 browser gate,
+diagnostics, hooks, fly camera, HUD, screenshot harness, and compare tool.
 
-## What This Proves
+## What Phase 1 Proves
 
-- Deterministic world-scale terrain synthesis from `?seed=N`.
-- A 4096 m terrain domain for long-view experiments.
-- CPU heightfield data with height, slope, flow, biome, min/max, and signature outputs.
-- A CLOD page runtime cut driven by the existing `selectCut()` path.
-- Debug terrain materials for `final`, `lod`, `height`, `slope`, `normal`, `flow`, `biome`, and `paint_weights`.
-- Stable Playwright screenshots and stats through `window.__drusnielClod`.
+- Deterministic terrain input from `?seed=N`.
+- LOD0 pages generated from a heightfield source.
+- Parent CLOD pages derived from child page meshes.
+- Parent derivation runs merge, border locking, simplification, normal recompute, and error accumulation.
+- Runtime selection uses the shared `selectCut()` path.
+- Debug captures for `final`, `lod`, `height`, `slope`, `normal`, `flow`, `biome`, and `paint_weights`.
+- Page building completes before the animation loop.
 
-## Drusniel CLOD, Not Fable5 CDLOD
+## Shared CLOD Modules
 
-The fable5 reference uses a CDLOD-style terrain view. Drusniel keeps its CLOD page model:
+Phase 1 scene code is intentionally thin. Reusable CLOD logic lives under `src/clod`:
 
-- `VoxelWorld` remains the authoritative production terrain model.
-- Pages remain derived caches.
-- Page build happens before the render loop, not on the frame path.
-- Runtime work is selection and visibility, not page generation.
-- This phase uses a deterministic heightfield adapter to exercise the visual/runtime gate without replacing the voxel page architecture.
+- `heightfield_leaf_source.ts` adapts a deterministic heightfield into LOD0 pages.
+- `page_mesh_merge.ts` merges child page meshes in deterministic order.
+- `page_border_lock.ts` validates and counts outer border chains.
+- `page_error_metric.ts` computes geometric parent error from source and parent meshes.
+- `parent_page_derivation.ts` derives one parent from child nodes.
+- `page_tree_builder.ts` builds the derived quadtree.
+
+This keeps Phase 1 from becoming a parallel fake CLOD demo.
+
+## Parent Derivation Rule
+
+Parent pages are never directly sampled from the heightfield. Direct resampling would
+hide cracks and error issues by creating a second terrain source per LOD. Drusniel CLOD
+requires parent pages to be caches derived from child pages, so accumulated error and
+border behavior remain honest.
 
 ## Commands
 
@@ -35,17 +46,15 @@ npm run dev
 With the dev server running:
 
 ```powershell
-npm run shoot -- --scene phase1-terrain --seed 1 --world 8 --terrainGrid 2048 --terrainDebug final --freeze 1 --hud 1 --framealign 0 --out shots/phase-1/terrain-final.png --stats shots/phase-1/terrain-stats.json
-npm run shoot -- --scene phase1-terrain --seed 1 --world 8 --terrainGrid 2048 --terrainDebug lod --freeze 1 --hud 1 --framealign 0 --out shots/phase-1/terrain-lod.png
-npm run shoot -- --scene phase1-terrain --seed 1 --world 8 --terrainGrid 2048 --terrainDebug height --freeze 1 --hud 1 --framealign 0 --out shots/phase-1/terrain-height.png
-npm run shoot -- --scene phase1-terrain --seed 1 --world 8 --terrainGrid 2048 --terrainDebug slope --freeze 1 --hud 1 --framealign 0 --out shots/phase-1/terrain-slope.png
+npm run shoot -- --scene phase1-terrain --seed 1 --world 8 --terrainGrid 2048 --terrainDebug final --freeze 1 --hud 1 --framealign 0 --cam "1800,360,3200,2.6500,-0.4300,55" --out shots/phase-1/terrain-final.png --stats shots/phase-1/terrain-stats.json
 npm run battery
 ```
 
 ## Deferred Work
 
-- Full GPU 4096^2 terrain synthesis.
-- Real hydrology and water rendering.
+- Better simplification quality.
+- GPU heightfield generation.
+- Real hydrology and water.
 - Vegetation.
-- Advanced atmosphere and clouds.
-- Rust/Bevy port of the terrain foundation.
+- Atmosphere.
+- Rust/Bevy integration.

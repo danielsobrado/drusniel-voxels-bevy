@@ -29,6 +29,10 @@ export interface SimplifyOutput {
   lowBenefit: boolean;
 }
 
+export interface SimplifyOptions {
+  preserveMaterials?: boolean;
+}
+
 /**
  * Decimate `mesh` toward target_ratio_per_level, carrying normals + material weights and
  * honouring per-vertex locks. Returns the simplified mesh plus world-space error.
@@ -37,6 +41,7 @@ export function simplifyPage(
   mesh: PageMesh,
   locks: Uint8Array,
   cfg: ClodPagesConfig,
+  options: SimplifyOptions = {},
 ): SimplifyOutput {
   if (!ready) throw new ClodBuildError("SimplifierApiUnavailable", "call initSimplifier() first");
 
@@ -80,7 +85,7 @@ export function simplifyPage(
 
   // meshopt keeps the original vertex buffer; unused vertices are simply unreferenced.
   // Compact to referenced vertices so downstream weld/lock/stats stay tight.
-  const compacted = compact(mesh, newIndices, cfg.simplify.weld_epsilon_cells);
+  const compacted = compact(mesh, newIndices, cfg.simplify.weld_epsilon_cells, options);
 
   const errorWorld = resultError * simplifyScale(mesh);
   const lowBenefit = newIndices.length > cfg.simplify.abandon_ratio * inputIndices;
@@ -93,7 +98,7 @@ function snap(value: number, epsilon: number): number {
   return Math.round(value / epsilon) * epsilon;
 }
 
-function compact(mesh: PageMesh, indices: Uint32Array, snapEpsilon: number): PageMesh {
+function compact(mesh: PageMesh, indices: Uint32Array, snapEpsilon: number, options: SimplifyOptions): PageMesh {
   const remap = new Map<number, number>();
   const pos: number[] = [], nrm: number[] = [], mat: number[] = [];
   const out = new Uint32Array(indices.length);
@@ -108,7 +113,7 @@ function compact(mesh: PageMesh, indices: Uint32Array, snapEpsilon: number): Pag
       const pz = snap(mesh.positions[old * 3 + 2], snapEpsilon);
       pos.push(px, py, pz);
       nrm.push(mesh.normals[old * 3], mesh.normals[old * 3 + 1], mesh.normals[old * 3 + 2]);
-      mat.push(paintMaterialAt(px, py, pz));
+      mat.push(options.preserveMaterials ? mesh.materials[old] : paintMaterialAt(px, py, pz));
     }
     out[i] = ni;
   }

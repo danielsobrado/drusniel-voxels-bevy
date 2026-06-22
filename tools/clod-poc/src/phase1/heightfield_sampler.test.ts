@@ -30,4 +30,10 @@ describe("HeightfieldSampler", () => {
     expect(sampler.sample(-100, -100).height).toBe(0);
     expect(sampler.sample(100, 100).height).toBe(30);
   });
+
+  it("normalAt returns a normalized vector", () => {
+    const sampler = new HeightfieldSampler(tinyField());
+    const normal = sampler.normalAt(5, 5);
+    expect(Math.hypot(...normal)).toBeCloseTo(1);
+  });
 });

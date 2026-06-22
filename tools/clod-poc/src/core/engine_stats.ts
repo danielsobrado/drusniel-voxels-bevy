@@ -61,8 +61,8 @@ export class EngineStatsTracker {
           this.stats.gpuPasses["compute"] = info.compute?.timestamp ?? 0;
         })
         .catch(() => {
-          this.stats.gpuPasses["render"] = -1;
-          this.stats.gpuPasses["compute"] = -1;
+          delete this.stats.gpuPasses["render"];
+          delete this.stats.gpuPasses["compute"];
         })
         .finally(() => {
           this.timestampPending = false;

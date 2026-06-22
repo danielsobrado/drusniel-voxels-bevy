@@ -37,6 +37,9 @@ function validateStats(): void {
   assertCounter(stats, "phase0.tslDisplacement", (value) => value === 1);
   assertCounter(stats, "phase0.storageTextureBake", (value) => value === 1);
   assertCounter(stats, "phase0.storageInstances", (value) => value > 0);
+  assertCounter(stats, "phase0.storageInstancedDraws", (value) => value > 0);
+  assertCounter(stats, "phase0.indirectInstances", (value) => value > 0);
+  assertCounter(stats, "phase0.indirectDraws", (value) => value > 0);
   assertCounter(stats, "phase0.seedSignature", (value) => Number.isFinite(value));
 }
 
@@ -51,6 +54,13 @@ function validatePhase1Stats(): void {
   assertCounter(stats, "phase1.gridSize", (value) => value >= 1024);
   assertCounter(stats, "phase1.worldSizeM", (value) => value === 4096);
   assertCounter(stats, "phase1.heightSignature", (value) => Number.isFinite(value));
+  assertCounter(stats, "phase1.leafNodes", (value) => value > 0);
+  assertCounter(stats, "phase1.parentNodes", (value) => value > 0);
+  assertCounter(stats, "phase1.maxLevel", (value) => value >= 1);
+  assertCounter(stats, "phase1.parentDerived", (value) => value === 1);
+  assertCounter(stats, "phase1.parentDirectResample", (value) => value === 0);
+  assertCounter(stats, "phase1.maxErrorWorld100", (value) => value >= 0);
+  assertCounter(stats, "phase1.borderChainsChecked", (value) => value > 0);
   assertCounter(stats, "phase1.nodesRendered", (value) => value > 0);
   assertCounter(stats, "phase1.trianglesRendered", (value) => value > 0);
   assertCounter(stats, "phase1.buildMs100", (value) => Number.isFinite(value));
@@ -68,7 +78,7 @@ function runPhase1Shots(): void {
     "--framealign", "0",
     "--cam", PHASE1_CAM,
   ];
-  const modes = ["final", "lod", "height", "slope", "flow"] as const;
+  const modes = ["final", "lod", "height", "slope", "normal", "flow", "biome", "paint_weights"] as const;
   for (const mode of modes) {
     const out = mode === "final" ? PHASE1_FINAL : `${PHASE1_DIR}/terrain-${mode}.png`;
     const args = ["run", "shoot", "--", ...common, "--terrainDebug", mode, "--out", out];

@@ -15,10 +15,12 @@ import { EngineStatsTracker } from "../core/engine_stats.js";
 import { FlyCamera } from "../core/fly_camera.js";
 import { initHooks } from "../core/hooks.js";
 import { parseCamString } from "../core/params.js";
+import { buildHeightfieldLeafNodes } from "../clod/heightfield_leaf_source.js";
+import { buildDerivedClodTree } from "../clod/page_tree_builder.js";
 import { selectCut, type SelectionState } from "../selection.js";
+import { initSimplifier } from "../simplify.js";
 import type { ClodPageNode } from "../types.js";
 import { HeightfieldSampler } from "./heightfield_sampler.js";
-import { buildPhase1PageTree } from "./phase1_page_source.js";
 import { normalizePhase1DebugMode, parsePhase1Config, type Phase1DebugMode } from "./phase1_config.js";
 import { geometryForPhase1Node, createPhase1TerrainMaterial } from "./phase1_terrain_material.js";
 import { generatePhase1Heightfield } from "./terrain_synthesis.js";
@@ -92,6 +94,10 @@ function countLevel(rendered: readonly ClodPageNode[], level: number): number {
   return rendered.filter((node) => node.level === level).length;
 }
 
+function countBuiltLevel(nodesByLevel: Map<number, ClodPageNode[]>, level: number): number {
+  return nodesByLevel.get(level)?.length ?? 0;
+}
+
 export async function runPhase1TerrainScene(): Promise<void> {
   hideNormalAppChrome();
   const hooks = initHooks();
@@ -147,7 +153,12 @@ export async function runPhase1TerrainScene(): Promise<void> {
   const sampler = new HeightfieldSampler(heightfield);
 
   updateProgress(0.52, "phase1: building page cache");
-  const pageTree = buildPhase1PageTree(params.worldPages, sampler);
+  await initSimplifier();
+  const leaves = buildHeightfieldLeafNodes(params.worldPages, sampler, config);
+  const pageTree = buildDerivedClodTree(leaves.leafNodes, leaves.worldPages, {
+    ...config.clod,
+    maxParentLevel: config.clod.maxParentLevel,
+  });
   const material = createPhase1TerrainMaterial(params.debugMode);
   const nodeMeshes = new Map<string, THREE.Mesh>();
   for (const node of allNodes(pageTree.nodesByLevel)) {
@@ -174,6 +185,15 @@ export async function runPhase1TerrainScene(): Promise<void> {
   stats.stats.counters["phase1.heightMin100"] = Math.round(heightfield.minHeight * 100);
   stats.stats.counters["phase1.heightMax100"] = Math.round(heightfield.maxHeight * 100);
   stats.stats.counters["phase1.heightSignature"] = heightfield.signature;
+  stats.stats.counters["phase1.leafNodes"] = pageTree.leafNodes;
+  stats.stats.counters["phase1.parentNodes"] = pageTree.parentNodes;
+  stats.stats.counters["phase1.maxLevel"] = pageTree.maxLevel;
+  stats.stats.counters["phase1.parentDerived"] = 1;
+  stats.stats.counters["phase1.parentDirectResample"] = 0;
+  stats.stats.counters["phase1.maxErrorWorld100"] = Math.round(pageTree.maxErrorWorld * 100);
+  stats.stats.counters["phase1.borderChainsChecked"] = pageTree.borderChainsChecked;
+  stats.stats.counters["phase1.selectionErrorThresholdPx100"] = Math.round(config.selection.errorThresholdPx * 100);
+  stats.stats.counters["phase1.selectionHysteresis100"] = Math.round(config.selection.hysteresisMergeFactor * 100);
   stats.stats.counters["phase1.buildMs100"] = Math.round(buildMs * 100);
   stats.stats.counters["phase1.debugMode"] = config.debug.modes.indexOf(params.debugMode);
 
@@ -208,9 +228,9 @@ export async function runPhase1TerrainScene(): Promise<void> {
 
     const selectStart = performance.now();
     const selection = selectCut(pageTree.roots, {
-      thresholdPx: 24,
-      hysteresisMergeFactor: 1.35,
-      enforce21: true,
+      thresholdPx: config.selection.errorThresholdPx,
+      hysteresisMergeFactor: config.selection.hysteresisMergeFactor,
+      enforce21: config.selection.enforce21,
       viewportH: renderer.domElement.height,
       fovY: THREE.MathUtils.degToRad(camera.fov),
       camPos: [camera.position.x, camera.position.y, camera.position.z],
@@ -236,6 +256,10 @@ export async function runPhase1TerrainScene(): Promise<void> {
     stats.stats.counters["phase1.lod1Nodes"] = countLevel(selection.rendered, 1);
     stats.stats.counters["phase1.lod2Nodes"] = countLevel(selection.rendered, 2);
     stats.stats.counters["phase1.lod3Nodes"] = countLevel(selection.rendered, 3);
+    stats.stats.counters["phase1.builtLod0Nodes"] = countBuiltLevel(pageTree.nodesByLevel, 0);
+    stats.stats.counters["phase1.builtLod1Nodes"] = countBuiltLevel(pageTree.nodesByLevel, 1);
+    stats.stats.counters["phase1.builtLod2Nodes"] = countBuiltLevel(pageTree.nodesByLevel, 2);
+    stats.stats.counters["phase1.builtLod3Nodes"] = countBuiltLevel(pageTree.nodesByLevel, 3);
     stats.stats.counters["phase1.selectionMs100"] = Math.round(selectionMs * 100);
 
     renderer.render(scene, camera);
