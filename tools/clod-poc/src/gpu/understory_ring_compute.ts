@@ -11,6 +11,7 @@ import {
   understoryRingGroupIndex,
   UNDERSTORY_RING_CLASS_STRIDE_F32,
   UNDERSTORY_RING_GROUP_COUNT,
+  UNDERSTORY_RING_PARAM_BYTES,
   understoryRingGroupCapacity,
   packUnderstoryRingClassParams,
   packUnderstoryRingParams,
@@ -22,7 +23,6 @@ import {
 } from "../understory/understory_ring_math.js";
 import type { EnvironmentLighting } from "../environment.js";
 
-const PARAM_BYTES = 16 * 8;
 const CLASS_PARAMS_BYTES = UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32 * Float32Array.BYTES_PER_ELEMENT;
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
@@ -79,7 +79,7 @@ export class UnderstoryGpuRingCompute {
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
   private readonly bindGroup: GPUBindGroup;
-  private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
+  private readonly paramScratch = new ArrayBuffer(UNDERSTORY_RING_PARAM_BYTES);
   private readonly classParamsScratch = new Float32Array(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private counts: UnderstoryRingCounts = { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 };
@@ -104,7 +104,7 @@ export class UnderstoryGpuRingCompute {
     this.pipelines = pipelines;
     this.paramBuffer = device.createBuffer({
       label: "understory ring params",
-      size: PARAM_BYTES,
+      size: UNDERSTORY_RING_PARAM_BYTES,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.classParamsBuffer = device.createBuffer({

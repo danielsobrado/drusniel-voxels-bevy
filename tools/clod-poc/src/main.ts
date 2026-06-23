@@ -1416,6 +1416,7 @@ async function main() {
     understoryTotal: 0,
     understoryVisiblePatches: "0/0",
     understoryClassSummary: "0/0/0/0/0/0",
+    understoryGpuSummary: "disabled",
     forestLightingEnabled: forestLightingConfig.enabled,
     forestLightingAoStrength: forestLightingConfig.ambientOcclusion.strength,
     forestLightingShadowStrength: forestLightingConfig.shadowProxy.strength,
@@ -3508,6 +3509,11 @@ async function main() {
   let understoryTotalController: { updateDisplay: () => unknown } | null = null;
   let understoryVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
   let understoryClassSummaryController: { updateDisplay: () => unknown } | null = null;
+  let understoryGpuSummaryController: { updateDisplay: () => unknown } | null = null;
+  const formatUnderstoryGpuSummary = (stats: UnderstoryStats): string =>
+    stats.gpuStatus === "disabled"
+      ? "disabled"
+      : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}${stats.gpuDispatchMs !== null ? ` ${stats.gpuDispatchMs.toFixed(1)}ms` : ""}`;
   const refreshUnderstoryStats = () => {
     if (!understorySystem) return;
     understoryStats = understorySystem.getStats();
@@ -3515,9 +3521,11 @@ async function main() {
     state.understoryVisiblePatches = `${understoryStats.visiblePatches}/${understoryStats.patches}`;
     state.understoryClassSummary =
       `${understoryStats.shrub}/${understoryStats.fern}/${understoryStats.sapling}/${understoryStats.flower}/${understoryStats.deadLog}/${understoryStats.stump}`;
+    state.understoryGpuSummary = formatUnderstoryGpuSummary(understoryStats);
     understoryTotalController?.updateDisplay();
     understoryVisiblePatchesController?.updateDisplay();
     understoryClassSummaryController?.updateDisplay();
+    understoryGpuSummaryController?.updateDisplay();
   };
   const updateUnderstoryRenderSettings = () => {
     understorySystem?.updateSettings({
@@ -3549,6 +3557,7 @@ async function main() {
   understoryTotalController = understoryFolder.add(state, "understoryTotal").name("total").disable();
   understoryVisiblePatchesController = understoryFolder.add(state, "understoryVisiblePatches").name("visible patches").disable();
   understoryClassSummaryController = understoryFolder.add(state, "understoryClassSummary").name("sh/f/sap/fl/log/stump").disable();
+  understoryGpuSummaryController = understoryFolder.add(state, "understoryGpuSummary").name("GPU").disable();
   understoryFolder.add(understoryActions, "rebuild").name("rebuild");
 
   let forestLightingStatsController: { updateDisplay: () => unknown } | null = null;
@@ -5101,7 +5110,7 @@ async function main() {
     );
     grassSystem?.update(elapsedSeconds, ringCenter, camera);
     treeSystem?.update(elapsedSeconds, ringCenter, camera);
-    understorySystem?.update(elapsedSeconds, grassCenter, camera);
+    understorySystem?.update(elapsedSeconds, ringCenter, camera);
     forestLightingSystem.update(elapsedSeconds, grassCenter, {
       treeProxies: treeSystem.getLightingProxies(),
       understoryProxies: understorySystem.getLightingProxies(),
@@ -5198,16 +5207,21 @@ async function main() {
       !understoryStats ||
       nextUnderstoryStats.totalInstances !== understoryStats.totalInstances ||
       nextUnderstoryStats.visiblePatches !== understoryStats.visiblePatches ||
-      nextUnderstoryStats.patches !== understoryStats.patches)
+      nextUnderstoryStats.patches !== understoryStats.patches ||
+      nextUnderstoryStats.gpuStatus !== understoryStats.gpuStatus ||
+      nextUnderstoryStats.gpuVisibleCount !== understoryStats.gpuVisibleCount ||
+      nextUnderstoryStats.gpuOverflowed !== understoryStats.gpuOverflowed)
     ) {
       understoryStats = nextUnderstoryStats;
       state.understoryTotal = nextUnderstoryStats.totalInstances;
       state.understoryVisiblePatches = `${nextUnderstoryStats.visiblePatches}/${nextUnderstoryStats.patches}`;
       state.understoryClassSummary =
         `${nextUnderstoryStats.shrub}/${nextUnderstoryStats.fern}/${nextUnderstoryStats.sapling}/${nextUnderstoryStats.flower}/${nextUnderstoryStats.deadLog}/${nextUnderstoryStats.stump}`;
+      state.understoryGpuSummary = formatUnderstoryGpuSummary(nextUnderstoryStats);
       understoryTotalController?.updateDisplay();
       understoryVisiblePatchesController?.updateDisplay();
       understoryClassSummaryController?.updateDisplay();
+      understoryGpuSummaryController?.updateDisplay();
     }
     const nextForestLightingStats = forestLightingSystem.getStats();
     if (

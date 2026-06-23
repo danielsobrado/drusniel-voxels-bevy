@@ -320,8 +320,9 @@ fn process_understory_slot(slot: u32) {
 
   let cell_size = params.accept_a.x;
   let wc = understory_world_cell_from_slot(slot, grid, cell_size, params.center_radius.xy);
-  let jitter = understory_pcg2d(wc, 1103u);
-  let wpos = (wc + jitter) * cell_size;
+  let jitter_x = understory_hash(wc, 1103u);
+  let jitter_z = understory_hash(wc, 1200u);
+  let wpos = (wc + vec2<f32>(jitter_x, jitter_z)) * cell_size;
 
   let world_max = params.center_radius.w;
   if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max) { return; }

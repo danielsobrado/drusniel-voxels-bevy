@@ -195,12 +195,18 @@ export class UnderstorySystem {
     }
     this.materialHandle.updateSettings(this.settings);
     this.applyMaterials();
+    for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
+      handle.updateSettings(this.settings);
+    }
     if (needsPatchRefresh) this.patchesDirty = true;
     this.setEnabled(this.settings.enabled);
   }
 
   update(timeSeconds: number, center: THREE.Vector3, camera?: THREE.Camera): void {
     this.materialHandle.setTime(timeSeconds);
+    for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
+      handle.setTime(timeSeconds);
+    }
     this.lastCenter.copy(center);
     if (!this.settings.enabled) {
       this.updateStats();
@@ -253,10 +259,16 @@ export class UnderstorySystem {
 
   updateForestLighting(state: ForestLightingMaterialState | null): void {
     this.materialHandle.updateForestLighting(state);
+    for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
+      handle.updateForestLighting(state);
+    }
   }
 
   updateLighting(lighting: EnvironmentLighting): void {
     this.materialHandle.updateLighting?.(lighting);
+    for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
+      handle.updateLighting?.(lighting);
+    }
   }
 
   getLightingProxies(): UnderstoryLightingProxy[] {

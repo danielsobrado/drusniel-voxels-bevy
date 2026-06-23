@@ -7,6 +7,7 @@ import {
   understoryRingHash,
   understoryRingSlotCount,
   understoryRingTerrainGate,
+  understoryPcg2d,
   understoryWorldCellFromSlot,
   type UnderstoryRingCounts,
 } from "./understory_ring_math.js";
@@ -113,7 +114,7 @@ export function generateUnderstoryRingValidationCounts(
     if (selectedGroup === 4 || selectedGroup === 5) {
       const parentX = Math.floor(wc[0] / 2);
       const parentZ = Math.floor(wc[1] / 2);
-      const parentHash = fractalHash2(parentX, parentZ, settings.seed + 7777);
+      const parentHash = understoryPcg2d(parentX, parentZ, settings.seed + 7777)[0];
       if (parentHash > 0.55) continue;
     }
 
@@ -133,10 +134,4 @@ export function generateUnderstoryRingValidationCounts(
     candidateCount,
     acceptedCandidates,
   };
-}
-
-function fractalHash2(cellX: number, cellZ: number, seed: number): number {
-  const x = cellX + seed;
-  const z = cellZ + seed * 0.37;
-  return Math.abs(Math.sin(x * 41.3 + z * 289.1) * 43758.5453) % 1;
 }
