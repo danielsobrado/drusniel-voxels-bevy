@@ -2,10 +2,10 @@ grass:
   enabled: true
   shader_mode: webgpu-ring-v1
   seed: 1337
-  distance_m: 120
+  patch_distance_m: 120
   refresh_distance_m: 4
   max_new_patches_per_frame: 2
-  max_instances: 64000
+  max_instances_per_tier: 64000
 
   placement:
     spacing_m: 1.45
@@ -53,6 +53,7 @@ grass:
     grid: 700
     cell: 0.7
     max_radius: 220
+    ring_distance: 220
     near_meters: 36
     mid_meters: 110
     far_meters: 170

@@ -68,17 +68,41 @@ fn material_weights(height: f32, normal_y: f32) -> vec4<f32> {
   return vec4<f32>(grass, rock, sand, snow) / sum;
 }
 
+fn paintMaterialAt(wx: f32, wz: f32, height: f32) -> i32 {
+  let fade = 3.0;
+  for (var i = arrayLength(&digEdits) - 1u; i >= 0u; i = i - 1u) {
+    let e = digEdits[i];
+    if (e.opAdd == 0) { continue; }
+    let dx = wx - e.x;
+    let dy = height - e.y;
+    let dz = wz - e.z;
+    let d = sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < e.r + fade) { return e.material; }
+  }
+  return -1;
+}
+
+fn material_weights_with_paint(height: f32, normal_y: f32, wx: f32, wz: f32) -> vec4<f32> {
+  let base = material_weights(height, normal_y);
+  let slot = paintMaterialAt(wx, wz, height);
+  if (slot < 0) { return base; }
+  if (slot == 1) { return vec4<f32>(0.0, 1.0, 0.0, 0.0); }
+  if (slot == 2) { return vec4<f32>(0.0, 0.0, 1.0, 0.0); }
+  if (slot == 3) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+  return base;
+}
+
 fn wet_bank(height: f32, normal_y: f32) -> f32 {
   let bank_height = (1.0 - smoothstep(WATER_LEVEL + 1.0, WATER_LEVEL + 8.0, height))
     * smoothstep(WATER_LEVEL + GRASS_WATER_CLEARANCE, WATER_LEVEL + 2.5, height);
   return bank_height * smoothstep(0.42, 0.82, normal_y);
 }
 
-fn grass_mask(height: f32, normal_y: f32, distance: f32) -> f32 {
+fn grass_mask(height: f32, normal_y: f32, distance: f32, wx: f32, wz: f32) -> f32 {
   if (height < params.settings_b.x || height > params.settings_b.y) {
     return 0.0;
   }
-  let weights = material_weights(height, normal_y);
+  let weights = material_weights_with_paint(height, normal_y, wx, wz);
   let grass_weight = weights.x;
   let rock_weight = weights.y;
   let snow_weight = weights.w;
@@ -154,7 +178,7 @@ fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, norm
     width_mul = min(max_width_mul, width_mul * 1.35);
   }
 
-  let weights = material_weights(height, normal.y);
+  let weights = material_weights_with_paint(height, normal.y, wpos.x, wpos.y);
   let bank = wet_bank(height, normal.y);
   let height_jit = pcg2d(wc, seed + 1501u).x * 2.0 - 1.0;
   let height_scale = max(0.1, 1.0 + height_jit * params.settings_a.z);
@@ -178,8 +202,10 @@ fn process_slot(slot: u32) {
   }
   let wc = world_cell(slot);
   let seed = params.counts_b.z;
-  let jitter = pcg2d(wc, seed + 1103u);
-  let wpos = (wc + jitter) * params.settings_a.x;
+  let jitter_scale = params.density_b.w;
+  let raw_jitter = pcg2d(wc, seed + 1103u);
+  let jitter = (raw_jitter - vec2<f32>(0.5, 0.5)) * jitter_scale;
+  let wpos = (wc + vec2<f32>(0.5, 0.5) + jitter) * params.settings_a.x;
   let world_max = params.center_radius.w;
   if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max) {
     return;
@@ -191,7 +217,7 @@ fn process_slot(slot: u32) {
 
   let height = surfaceHeightField(wpos.x, wpos.y);
   let normal = normalize(densityGradient(wpos.x, height, wpos.y));
-  let mask = grass_mask(height, normal.y, dist);
+  let mask = grass_mask(height, normal.y, dist, wpos.x, wpos.y);
   let thin = grass_thin(dist);
   let ring_edge = 1.0 - smoothstep(params.center_radius.z * 0.9, params.center_radius.z, dist);
   let accept = mask * ring_edge * thin;

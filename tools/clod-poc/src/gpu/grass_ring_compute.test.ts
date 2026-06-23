@@ -89,6 +89,7 @@ describe("grass ring compute capabilities", () => {
       maxHeight: settings.maxHeight,
       maxInstancesPerTier: 1234,
       seed: settings.seed,
+      jitter: 0.34,
       frustumPlanes: [1, 2, 3, 4],
     }, { near: 11, mid: 13, far: 17, super: 19 }, settings.ring);
     const f32 = new Float32Array(scratch);

@@ -13,7 +13,9 @@
 // terrain-noise port is required. Dry vertices (depth <= 0) and vertices inside
 // the finer level's innerRect are discarded.
 import * as THREE from "three";
-import type { WaterDebugModeId, WaterVisualConfig } from "./waterConfig.js";
+import type { WaterDebugModeId, WaterRefractionConfig, WaterReflectionConfig, WaterVisualConfig } from "./waterConfig.js";
+import type { CausticsConfig } from "./causticsConfig.js";
+import { DEFAULT_CAUSTICS_CONFIG } from "./causticsConfig.js";
 
 export interface WaterMaterialParams {
   visual: WaterVisualConfig;
@@ -21,6 +23,7 @@ export interface WaterMaterialParams {
   sunDirection: THREE.Vector3;
   cameraPosition: THREE.Vector3;
   worldBounds: { cellsX: number; cellsZ: number };
+  caustics?: CausticsConfig;
 }
 
 export interface WaterMaterialHandle {
@@ -43,6 +46,7 @@ const LEVEL_PALETTE: Array<[number, number, number]> = [
   [0.94, 0.74, 0.30],
   [0.95, 0.42, 0.46],
   [0.66, 0.46, 0.94],
+  [0.42, 0.78, 0.92],
 ];
 
 export function waterLevelColor(level: number): [number, number, number] {
@@ -73,12 +77,13 @@ const WATER_VERT = /* glsl */ `
 function levelColorGlsl(): string {
   return `
   vec3 waterLevelColor(float level) {
-    int idx = int(clamp(floor(level), 0.0, 4.0));
+    int idx = int(clamp(floor(level), 0.0, 5.0));
     if (idx == 0) return vec3(0.36, 0.62, 0.95);
     if (idx == 1) return vec3(0.30, 0.86, 0.58);
     if (idx == 2) return vec3(0.94, 0.74, 0.30);
     if (idx == 3) return vec3(0.95, 0.42, 0.46);
-    return vec3(0.66, 0.46, 0.94);
+    if (idx == 4) return vec3(0.66, 0.46, 0.94);
+    return vec3(0.42, 0.78, 0.92);
   }`;
 }
 
@@ -118,6 +123,10 @@ const WATER_FRAG = /* glsl */ `
   uniform vec3 uCameraPos;
   uniform vec3 uSunDir;
   uniform vec2 uWorldBounds;
+  uniform float uCausticsEnabled;
+  uniform float uCausticsGain;
+  uniform float uCausticsScale;
+  uniform float uCausticsSpeed;
   varying vec3 vWorldPos;
   varying float vTerrainY;
   varying float vBodyMask;
@@ -168,6 +177,22 @@ const WATER_FRAG = /* glsl */ `
     if (depth <= 0.0) discard;
     float depthNorm = clamp(depth / uDepthScale, 0.0, 1.0);
 
+    // Procedural caustics: layered sine waves advected by flow, fading with depth.
+    float caustic = 0.0;
+    if (uCausticsEnabled > 0.5) {
+      vec2 causticUV = worldPos.xz * uCausticsScale;
+      float t = uTime * uCausticsSpeed;
+      float c1 = sin(causticUV.x * 3.7 + t * 1.1 + causticUV.y * 2.3) *
+                 cos(causticUV.y * 4.1 - t * 0.9 + causticUV.x * 1.7);
+      float c2 = sin(causticUV.x * 5.3 - t * 0.7 + causticUV.y * 3.9) *
+                 cos(causticUV.y * 2.9 + t * 1.3 - causticUV.x * 2.1);
+      caustic = (c1 * 0.6 + c2 * 0.4) * 0.5 + 0.5;
+      caustic = smoothstep(0.3, 0.8, caustic);
+      float depthFade = exp(-depth * 0.32);
+      float focalFade = smoothstep(0.04, 0.5, depth);
+      caustic *= depthFade * focalFade * uCausticsGain;
+    }
+
     vec2 riverDir = normalize(vec2(vFlow.x, vFlow.y) + vec2(0.00001, 0.0));
     vec2 breezeDir = normalize(uLakeBreeze + vec2(0.00001, 0.0));
     float riverWeight = smoothstep(0.001, 0.02, vFlow.z);
@@ -191,12 +216,22 @@ const WATER_FRAG = /* glsl */ `
     vec3 sunDir = normalize(uSunDir);
     vec3 reflDir = reflect(-sunDir, normal);
     float spec = pow(max(dot(reflDir, viewDir), 0.0), 32.0);
-    waterColor += spec * 0.12 + fres * 0.08;
+    waterColor += spec * 0.12 + fres * 0.08 + caustic * vec3(0.12, 0.18, 0.15);
 
-    float foamNoise = noise2(worldPos.xz * uFoamNoiseScale + advectDir * uTime * 0.05);
-    float breakup = smoothstep(0.22, 0.82, foamNoise);
+    // Two-phase decorrelated foam (Fable5-style): two noise scales, each blended
+    // across both phases, with variance renormalization to avoid flat midpoints.
+    float foamA1 = noise2(worldPos.xz * uFoamNoiseScale + advectA * 0.7);
+    float foamB1 = noise2((worldPos.xz + vec2(3.71, 1.13)) * uFoamNoiseScale + advectB * 0.7);
+    float foamA2 = noise2(worldPos.xz * uFoamNoiseScale * 0.37 + advectA * 0.41 + vec2(5.17, -3.29));
+    float foamB2 = noise2((worldPos.xz + vec2(7.43, 2.81)) * uFoamNoiseScale * 0.37 + advectB * 0.41);
+    float varNorm = sqrt(blend * blend + (1.0 - blend) * (1.0 - blend));
+    float foamBlend = (mix(foamA1, foamB1, blend) - 0.5) / max(varNorm, 0.01) + 0.5;
+    float foamDetail = (mix(foamA2, foamB2, blend) - 0.5) / max(varNorm, 0.01) + 0.5;
+    float breakup = smoothstep(0.35, 0.82, foamBlend * 0.62 + foamDetail * 0.38);
     float wetFade = smoothstep(0.005, 0.05, depth) * vBodyMask;
     float shore = (1.0 - smoothstep(uShoreFoamStart, uShoreFoamEnd, depth)) * wetFade * breakup * uFoamShoreStrength;
+    // Rapids: speed + per-vertex drop from aFlow.w (Fable5-style).
+    // Only fast + steep water froths — a large calm river stays clear.
     float riverFast = smoothstep(uFoamSpeedStart, uFoamSpeedEnd, vFlow.z);
     float riverDrop = smoothstep(uFoamDropStart, uFoamDropEnd, vFlow.w);
     float riverFoam = riverFast * riverDrop * uFoamRiverStrength * wetFade * (0.25 + 0.75 * breakup);
@@ -254,6 +289,9 @@ export interface WaterUniforms {
   uCameraPos: { value: THREE.Vector3 };
   uSunDir: { value: THREE.Vector3 };
   uWorldBounds: { value: THREE.Vector2 };
+  uRefraction: WaterRefractionConfig;
+  uReflection: WaterReflectionConfig;
+  uCaustics: CausticsConfig;
 }
 
 export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
@@ -293,6 +331,9 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uCameraPos: { value: params.cameraPosition.clone() },
     uSunDir: { value: params.sunDirection.clone().normalize() },
     uWorldBounds: { value: new THREE.Vector2(params.worldBounds.cellsX, params.worldBounds.cellsZ) },
+    uRefraction: { ...v.refraction },
+    uReflection: { ...v.reflection },
+    uCaustics: { ...(params.caustics ?? DEFAULT_CAUSTICS_CONFIG) },
   };
 }
 

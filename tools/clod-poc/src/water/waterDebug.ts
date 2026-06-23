@@ -42,6 +42,9 @@ const WATER_MODE_OPTIONS: Record<string, WaterDebugMode> = {
   "carved bed (9)": "carvedBed",
   "waterY (10)": "waterY",
   "classification (11)": "classification",
+  "refraction (12)": "refraction",
+  "reflection (13)": "reflection",
+  "SSR hit (14)": "ssrHit",
 };
 
 export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugState {

@@ -132,7 +132,7 @@ export class UnderstorySystem {
     counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 },
     groupCounts: [],
     overflowed: false,
-    dispatchMs: null,
+    submitMs: null,
     readbackMs: null,
     skippedDispatches: 0,
   };
@@ -338,7 +338,7 @@ export class UnderstorySystem {
       this.root.add(mesh);
       this.ringMeshes.push(mesh);
     }
-    this.gpuRingStats = { status: "initializing", candidateCount: 0, acceptedCandidates: 0, counts: this.gpuRingStats.counts, groupCounts: [], overflowed: false, dispatchMs: null, readbackMs: null, skippedDispatches: 0 };
+    this.gpuRingStats = { status: "initializing", candidateCount: 0, acceptedCandidates: 0, counts: this.gpuRingStats.counts, groupCounts: [], overflowed: false, submitMs: null, readbackMs: null, skippedDispatches: 0 };
 
     const initKey = key;
     const initGeneration = this.gpuRingGeneration;
@@ -405,7 +405,7 @@ export class UnderstorySystem {
     const c = this.gpuRingStats.counts;
     this.gpuVisibleCount = c.shrub + c.fern + c.sapling + c.flower + c.dead_log + c.stump;
     this.gpuOverflowed = this.gpuRingStats.overflowed;
-    this.gpuDispatchMs = this.gpuRingStats.dispatchMs;
+    this.gpuDispatchMs = this.gpuRingStats.submitMs;
     this.gpuStatus = this.gpuRingStats.status === "failed" ? "error" : "ring";
     this.updateStats();
   }
@@ -494,7 +494,7 @@ export class UnderstorySystem {
     this.gpuOverflowed = false;
     this.gpuDispatchMs = null;
     this.lastGpuValidationSignature = "";
-    this.gpuRingStats = { status: this.gpuDevice ? "idle" : "disabled", candidateCount: 0, acceptedCandidates: 0, counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 }, groupCounts: [], overflowed: false, dispatchMs: null, readbackMs: null, skippedDispatches: 0 };
+    this.gpuRingStats = { status: this.gpuDevice ? "idle" : "disabled", candidateCount: 0, acceptedCandidates: 0, counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 }, groupCounts: [], overflowed: false, submitMs: null, readbackMs: null, skippedDispatches: 0 };
   }
 
   private clearGpuRingDraw(): void {

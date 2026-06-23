@@ -30,7 +30,7 @@ export interface TreeGpuRingStats {
   counts: TreeGpuRingCounts;
   groupCounts: number[];
   overflowed: boolean;
-  dispatchMs: number | null;
+  submitMs: number | null;
   readbackMs: number | null;
   skippedDispatches: number;
 }
@@ -216,7 +216,7 @@ export class TreeGpuRingCompute {
   private overflowed = false;
   private runningReadbacks = 0;
   private failedReason: string | null = null;
-  private dispatchMs: number | null = null;
+  private submitMs: number | null = null;
   private readbackMs: number | null = null;
   private skippedDispatches = 0;
   private generation = 0;
@@ -362,7 +362,7 @@ export class TreeGpuRingCompute {
       this.runningReadbacks++;
     }
     this.device.queue.submit([encoder.finish()]);
-    this.dispatchMs = performance.now() - submitStart;
+    this.submitMs = performance.now() - submitStart;
 
     if (readbackSlot) {
       const slot = readbackSlot;
@@ -424,7 +424,7 @@ export class TreeGpuRingCompute {
       counts: { ...this.counts },
       groupCounts: [...this.groupCounts],
       overflowed: this.overflowed,
-      dispatchMs: this.dispatchMs,
+      submitMs: this.submitMs,
       readbackMs: this.readbackMs,
       skippedDispatches: this.skippedDispatches,
     };

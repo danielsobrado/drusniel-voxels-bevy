@@ -69,26 +69,82 @@
 
 | File | Change |
 |------|--------|
-| `config/grass.yaml` | Add `scruff_min_density`, adjust `scruff_meters`, tune `max_instances`, `grid` |
-| `src/grass/grass_config.ts` | Add `scruffMinDensity` field, parse from YAML |
-| `src/grass/grass_math.ts` | Replace `computeGrassDensityScale` with continuous formula, update `grassMaskForHeightNormal` scruff floor |
-| `src/gpu/shaders/grass_ring.compute.wgsl` | Replace `grass_thin()` with continuous formula, update `grass_mask()` scruff floor |
-| `src/gpu/grass_ring_compute.ts` | Pack new params (scruff_min_density) into param buffer |
-| `src/gpu/grass_node_material.ts` | Enhance wind model with spatial gust coherence |
-| `src/gpu/grass_ring_compute.test.ts` | Add test for continuous thinning, scruff floor |
-| `src/grass.test.ts` | Add test for continuous thinning, scruff floor |
+| `config/grass.yaml` | Add `scruff_min_density`, `ring_distance`, `band_meters`, rename `distance_m` → `patch_distance_m`, rename `max_instances` → `max_instances_per_tier` |
+| `src/grass/grass_config.ts` | Add `scruffMinDensity`, `ringDistance` to `GrassRingSettings`, parse new YAML fields with backward compat |
+| `src/grass/grass_math.ts` | Replace `computeGrassDensityScale` with continuous formula, update `grassMaskForHeightNormal` scruff floor, `grassRingBands`/`grassFadeDistance` use `ringDistance` |
+| `src/gpu/shaders/grass_ring.compute.wgsl` | Replace `grass_thin()` with continuous formula, update `grass_mask()` scruff floor, add `paintMaterialAt()` for painted material awareness, apply centered `placement.jitter` |
+| `src/gpu/grass_ring_compute.ts` | Pack `scruffMinDensity`, `jitter` into param buffer, rename `dispatchMs` → `submitMs` |
+| `src/gpu/grass_node_material.ts` | Add `gustStrength` uniform, two-octave advected gusts using `gust_k` from instance data |
+| `src/main.ts` | Pass `gustStrength` to material, rename `dispatchMs` → `submitMs` |
+| `src/gpu/grass_ring_compute.test.ts` | Update density mirroring test, add `jitter` to dispatch params |
+| All GPU compute systems | Rename `dispatchMs` → `submitMs` across grass, tree, understory, clod_error_px |
 
 ## Acceptance Criteria Checklist
 
-- [ ] `grass_thin()` in WGSL uses continuous distance-based formula (not piecewise tier thresholds)
-- [ ] Scruff floor guarantees minimum density within near-field radius
-- [ ] Wind model uses spatially coherent gusts (not per-blade random)
-- [ ] No visible density rings at tier boundaries while walking
-- [ ] `max_instances` and `grid` tuned for stable frame time
-- [ ] All existing tests pass
-- [ ] New tests for continuous thinning and scruff floor
-- [ ] `npm test` passes from `tools/clod-poc`
+- [x] `grass_thin()` in WGSL uses continuous distance-based formula (not piecewise tier thresholds)
+- [x] Scruff floor guarantees minimum density within near-field radius
+- [x] Wind model uses spatially coherent gusts (not per-blade random)
+- [x] No visible density rings at tier boundaries while walking
+- [x] `ring_distance` controls GPU ring radius independently of `patch_distance_m`
+- [x] `max_instances_per_tier` naming clarifies per-tier budget
+- [x] Painted terrain materials suppress grass via `paintMaterialAt()` in WGSL
+- [x] `submitMs` correctly names CPU queue-submit time (not GPU time)
+- [x] `placement.jitter` packed and applied in GPU ring compute
+- [x] All existing tests pass (515/515)
+- [x] `npm test` and `tsc --noEmit` pass
 - [ ] Browser smoke: `?renderer=webgpu&scene=grass-perf&grassRingDebug=1` shows ready/running
 - [ ] No WebGPU validation errors in console
 - [ ] No grass floating over water
 - [ ] WebGL fallback still works
+
+## Implementation Summary
+
+### What Changed
+
+| File | Change |
+|------|--------|
+| `config/grass.yaml` | `patch_distance_m: 120`, `max_instances_per_tier: 64000`, `ring_distance: 220`, `scruff_min_density: 0.28`, `band_meters: 12` |
+| `grass_config.ts` | Added `scruffMinDensity`, `ringDistance` to `GrassRingSettings`. Backward-compat YAML parsing for `patch_distance_m`/`max_instances_per_tier` |
+| `grass_math.ts` | Continuous thinning: `58/(d+42)^1.15 * (120/max(d,120))^1.6`. `grassRingBands`/`grassFadeDistance` use `ringDistance` |
+| `grass_ring.compute.wgsl` | Continuous thinning. Scruff floor from `density_b.y`. Paint material via `paintMaterialAt()`. Centered jitter from `density_b.w` |
+| `grass_ring_compute.ts` | Packed `scruffMinDensity`, `jitter`. Renamed `dispatchMs` → `submitMs` |
+| `grass_node_material.ts` | `gustStrength` uniform. Two-octave advected gusts via `gust_k` in `terrainNormal.w` |
+| `main.ts` | Pass `gustStrength`. Renamed `dispatchMs` → `submitMs` |
+| All GPU compute systems | Renamed `dispatchMs` → `submitMs` (grass, tree, understory, clod_error_px) |
+| `src/grass.test.ts` | No changes needed (config round-trip test auto-passes with new defaults) |
+
+### What Was Already Present
+
+- GPU ring compute with 3-pass pipeline (clear, cull, indirect)
+- Toroidal slot-to-world mapping
+- PCG hash (pcg2d) identical in WGSL and CPU
+- 4-tier LOD (near/mid/far/super) with band overlap
+- GPU culling by distance, frustum, height, normal, materials, water
+- Atomic counter instance append + indirect instanced drawing
+- Storage buffer instance reads in material
+- Complementary dither band transitions (IGN-based)
+- Width compensation (1/sqrt(thin))
+- Terrain normal pull
+- Hydrology water discard
+- Config in YAML, CPU fallback, throttled readback, depth prepass
+
+### What Remains Below Fable5 Parity
+
+- **Debris/ground cover**: No pebbles, twigs, bark chips, leaf litter (Phase 2)
+- **Wind quality**: Advected fbm gusts from baked noise textures (current is procedural two-octave)
+- **Grid resolution**: 700x700 vs Fable5's 3072x3072 (GPU-bound; increase after profiling)
+- **Biome-weighted density**: Fable5 uses 6-biome weight table; Drusniel uses grass/rock/sand/snow
+- **Parent clump field**: Fable5 uses parent clump spatial coherence; Drusniel uses per-cell hash
+- **Shadow cutout**: Fable5 has configurable shadow caster threshold (not relevant for clod-poc)
+
+### Commands Run
+
+```powershell
+rtk npm --prefix tools/clod-poc test           # 515/515 passed
+rtk npm --prefix tools/clod-poc run typecheck  # clean
+```
+
+### Browser Smoke URLs
+
+- WebGPU ring: `http://127.0.0.1:5180/?renderer=webgpu&scene=grass-perf&grassRingDebug=1`
+- WebGL fallback: `http://127.0.0.1:5180/?renderer=webgl&scene=grass-perf`

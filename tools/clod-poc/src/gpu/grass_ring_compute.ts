@@ -61,6 +61,7 @@ export interface GrassGpuRingDispatchParams {
   maxHeight: number;
   maxInstancesPerTier: number;
   seed: number;
+  jitter: number;
   frustumPlanes?: ArrayLike<number>;
 }
 
@@ -112,7 +113,7 @@ export interface GrassGpuRingStats {
   generatedCandidates: number;
   acceptedCandidates: number;
   counts: GrassGpuRingCounts;
-  dispatchMs: number | null;
+  submitMs: number | null;
   readbackMs: number | null;
   skippedDispatches: number;
 }
@@ -203,7 +204,7 @@ export function packGrassGpuRingParams(
   f32[28] = params.density.farDensityRatio;
   f32[29] = params.density.farInstanceFraction;
   f32[30] = params.density.scruffMinDensity;
-  f32[31] = params.density.gustStrength;
+  f32[31] = params.jitter;
   if (params.frustumPlanes) {
     for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) {
       f32[32 + i] = params.frustumPlanes[i] ?? 0;
@@ -226,7 +227,7 @@ export class GrassGpuRingCompute {
   private counts: GrassGpuRingCounts = { near: 0, mid: 0, far: 0, super: 0 };
   private runningReadbacks = 0;
   private failedReason: string | null = null;
-  private dispatchMs: number | null = null;
+  private submitMs: number | null = null;
   private readbackMs: number | null = null;
   private skippedDispatches = 0;
   private generation = 0;
@@ -381,7 +382,7 @@ export class GrassGpuRingCompute {
       this.runningReadbacks++;
     }
     this.device.queue.submit([encoder.finish()]);
-    this.dispatchMs = performance.now() - submitStart;
+    this.submitMs = performance.now() - submitStart;
 
     if (readbackSlot) {
       const slot = readbackSlot;
@@ -446,7 +447,7 @@ export class GrassGpuRingCompute {
       generatedCandidates: slotCount,
       acceptedCandidates: accepted,
       counts: { ...this.counts },
-      dispatchMs: this.dispatchMs,
+      submitMs: this.submitMs,
       readbackMs: this.readbackMs,
       skippedDispatches: this.skippedDispatches,
     };

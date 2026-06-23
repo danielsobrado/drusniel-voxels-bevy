@@ -124,7 +124,7 @@ function fakeRingStats() {
     counts: { near: 1, mid: 1, far: 1, impostor: 0 },
     groupCounts: [],
     overflowed: false,
-    dispatchMs: 0.25,
+    submitMs: 0.25,
     readbackMs: null,
     skippedDispatches: 0,
   };
@@ -1470,7 +1470,7 @@ describe("TreeSystem", () => {
         counts: { near: 5, mid: 11, far: 13, impostor: 8 },
         groupCounts: [],
         overflowed: false,
-        dispatchMs: 1.25,
+        submitMs: 1.25,
         readbackMs: 0.5,
         skippedDispatches: 0,
       };

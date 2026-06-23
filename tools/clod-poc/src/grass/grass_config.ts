@@ -87,6 +87,7 @@ export interface GrassRingSettings {
   grid: number;
   cell: number;
   maxRadius: number;
+  ringDistance: number;
   nearMeters: number;
   midMeters: number;
   farMeters: number;
@@ -216,6 +217,7 @@ export const DEFAULT_GRASS_RING_SETTINGS: GrassRingSettings = {
   grid: 700,
   cell: 0.7,
   maxRadius: 220,
+  ringDistance: 220,
   nearMeters: 36,
   midMeters: 110,
   farMeters: 170,
@@ -270,8 +272,10 @@ interface GrassYamlConfig {
     enabled?: boolean;
     shader_mode?: unknown;
     distance_m?: number;
+    patch_distance_m?: number;
     refresh_distance_m?: number;
     max_new_patches_per_frame?: number;
+    max_instances_per_tier?: number;
     max_instances?: number;
     placement?: {
       spacing_m?: number;
@@ -333,6 +337,7 @@ interface GrassYamlConfig {
       grid?: number;
       cell?: number;
       max_radius?: number;
+      ring_distance?: number;
       near_meters?: number;
       mid_meters?: number;
       far_meters?: number;
@@ -509,6 +514,7 @@ export function resolveGrassSettings(settings: GrassSettings): GrassSettings {
     maxBlades: maxInstances,
     ring: {
       ...settings.ring,
+      ringDistance: settings.ring.ringDistance,
       bandMeters: settings.ring.bandMeters,
       farDistanceFraction: settings.ring.farDistanceFraction,
     },
@@ -586,14 +592,14 @@ export function parseGrassConfig(
   const parsed: GrassSettings = {
     enabled: readBoolean(raw.enabled, fallback.enabled),
     shaderMode,
-    distanceM: readNumberAtLeast(raw.distance_m ?? raw.distance, fallback.distanceM, 0.1),
+    distanceM: readNumberAtLeast(raw.patch_distance_m ?? raw.distance_m ?? raw.distance, fallback.distanceM, 0.1),
     refreshDistanceM: readNumberAtLeast(raw.refresh_distance_m ?? raw.patch_fallback?.refresh_distance, fallback.refreshDistanceM, 0.1),
     maxNewPatchesPerFrame: readIntegerAtLeast(
       raw.max_new_patches_per_frame ?? raw.patch_fallback?.max_new_patches_per_refresh,
       fallback.maxNewPatchesPerFrame,
       1,
     ),
-    maxInstances: readIntegerAtLeast(raw.max_instances ?? raw.max_blades, fallback.maxInstances, 0),
+    maxInstances: readIntegerAtLeast(raw.max_instances_per_tier ?? raw.max_instances ?? raw.max_blades, fallback.maxInstances, 0),
     placement,
     lod,
     blade,
@@ -602,7 +608,7 @@ export function parseGrassConfig(
     debug,
     alphaToCoverage: render.alphaToCoverage,
     nearCrossedQuads: blade.nearCrossedQuads,
-    distance: readNumberAtLeast(raw.distance_m ?? raw.distance, fallback.distance, 0.1),
+    distance: readNumberAtLeast(raw.patch_distance_m ?? raw.distance_m ?? raw.distance, fallback.distance, 0.1),
     bladeSpacing: placement.spacingM,
     bladeHeight: blade.heightM,
     bladeHeightVariation: blade.heightVariation,
@@ -612,12 +618,13 @@ export function parseGrassConfig(
     slopeMinY: placement.slopeMinY,
     minHeight: placement.minHeightM,
     maxHeight: placement.maxHeightM,
-    maxBlades: readIntegerAtLeast(raw.max_instances ?? raw.max_blades, fallback.maxBlades, 0),
+    maxBlades: readIntegerAtLeast(raw.max_instances_per_tier ?? raw.max_instances ?? raw.max_blades, fallback.maxBlades, 0),
     seed: Math.floor(readNumber(raw.seed, fallback.seed)),
     ring: {
       grid: Math.floor(readNumberAtLeast(raw.ring?.grid, fallback.ring.grid, 1)),
       cell: readNumberAtLeast(raw.ring?.cell, fallback.ring.cell, 0.1),
       maxRadius: readNumberAtLeast(raw.ring?.max_radius, fallback.ring.maxRadius, 0),
+      ringDistance: readNumberAtLeast(raw.ring?.ring_distance, fallback.ring.ringDistance, 0),
       nearMeters: readNumberAtLeast(raw.ring?.near_meters, fallback.ring.nearMeters, 0),
       midMeters: readNumberAtLeast(raw.ring?.mid_meters, fallback.ring.midMeters, 0),
       farMeters: readNumberAtLeast(raw.ring?.far_meters, fallback.ring.farMeters, 0),

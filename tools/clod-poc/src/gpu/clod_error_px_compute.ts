@@ -38,7 +38,7 @@ export interface ClodErrorPxStats {
   nodeCount: number;
   version: number;
   latestAgeFrames: number | null;
-  dispatchMs: number | null;
+  submitMs: number | null;
   readbackMs: number | null;
   skippedDispatches: number;
   parity: "unchecked" | "ok" | "failed" | "disabled";
@@ -98,7 +98,7 @@ export class ClodErrorPxCompute {
   private generation = 0;
   private running = 0;
   private failedReason: string | null = null;
-  private dispatchMs: number | null = null;
+  private submitMs: number | null = null;
   private readbackMs: number | null = null;
   private skippedDispatches = 0;
   private parity: ClodErrorPxStats["parity"] = "unchecked";
@@ -325,7 +325,7 @@ export class ClodErrorPxCompute {
     }
     this.running++;
     this.device.queue.submit([encoder.finish()]);
-    this.dispatchMs = performance.now() - submitStart;
+    this.submitMs = performance.now() - submitStart;
 
     if (!readback || !slot) {
       this.dispatchOnlyFrames++;
@@ -413,7 +413,7 @@ export class ClodErrorPxCompute {
       nodeCount: this.nodeCount,
       version: this.version,
       latestAgeFrames,
-      dispatchMs: this.dispatchMs,
+      submitMs: this.submitMs,
       readbackMs: this.readbackMs,
       skippedDispatches: this.skippedDispatches,
       parity: this.parity,

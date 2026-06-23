@@ -6,7 +6,7 @@ water:
   enabled: true
   source: hydrology # hydrology | fake_bodies
   cells_per_level: 128
-  cell_sizes: [1.5, 3.0, 6.0, 12.0, 24.0]
+  cell_sizes: [1.5, 3.0, 6.0, 12.0, 24.0, 48.0]
   snap_cells: 2
   dry_sentinel_depth: 2.0
 
@@ -108,9 +108,38 @@ water:
     color:
       depth_scale: 4.0
       turbidity: 0.18
+    refraction:
+      enabled: true
+      strength: 0.055
+      depth_validation_bias: 0.02
+      absorption_r: 0.42
+      absorption_g: 0.135
+      absorption_b: 0.095
+      turbidity_strength: 0.032
+      max_thickness: 8.0
+    reflection:
+      mode: fake
+      ssr_enabled: false
+      max_steps: 18
+      step_scale: 0.09
+      edge_fade_start: 1.0
+      edge_fade_end: 0.82
+      sky_fallback_strength: 0.65
+      terrain_fallback_strength: 0.18
     depth_write: false
 
   debug:
     mode: 0
     clipmap_tint: false
     wireframe: false
+
+  caustics:
+    enabled: false
+    gain: 1.3
+    depth_fade: 0.32
+    focal_depth: 0.5
+    sun_gate_start: 0.03
+    sun_gate_end: 0.16
+    flow_advection: 1.9
+    scale: 0.12
+    speed: 0.7

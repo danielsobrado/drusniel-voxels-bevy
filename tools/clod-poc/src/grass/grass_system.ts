@@ -122,7 +122,7 @@ export class GrassSystem {
     generatedCandidates: 0,
     acceptedCandidates: 0,
     counts: { near: 0, mid: 0, far: 0, super: 0 },
-    dispatchMs: null,
+    submitMs: null,
     readbackMs: null,
     skippedDispatches: 0,
   };
@@ -494,7 +494,7 @@ export class GrassSystem {
       generatedCandidates: 0,
       acceptedCandidates: 0,
       counts: { near: 0, mid: 0, far: 0, super: 0 },
-      dispatchMs: null,
+      submitMs: null,
       readbackMs: null,
       skippedDispatches: 0,
     };
@@ -630,6 +630,7 @@ export class GrassSystem {
       maxHeight: this.settings.maxHeight,
       maxInstancesPerTier: grassGpuRingTierCapacity(this.settings),
       seed: this.settings.seed,
+      jitter: this.settings.placement.jitter,
       frustumPlanes,
     }, {
       near: this.indexCountFor(this.ringNearGeometry),
@@ -684,7 +685,7 @@ export class GrassSystem {
       generatedCandidates: slotCount,
       acceptedCandidates: 0,
       counts: { near: 0, mid: 0, far: 0, super: 0 },
-      dispatchMs: null,
+      submitMs: null,
       readbackMs: null,
       skippedDispatches: 0,
     };
@@ -1184,7 +1185,7 @@ export class GrassSystem {
         gpuRingVisibleMid: ringGpu.counts.mid,
         gpuRingVisibleFar: ringGpu.counts.far,
         gpuRingVisibleSuper: ringGpu.counts.super,
-        gpuRingDispatchMs: ringGpu.dispatchMs,
+        gpuRingDispatchMs: ringGpu.submitMs,
         gpuRingReadbackMs: ringGpu.readbackMs,
       };
       return;
@@ -1225,7 +1226,7 @@ export class GrassSystem {
       gpuRingVisibleMid: gpu.counts.mid,
       gpuRingVisibleFar: gpu.counts.far,
       gpuRingVisibleSuper: gpu.counts.super,
-      gpuRingDispatchMs: gpu.dispatchMs,
+      gpuRingDispatchMs: gpu.submitMs,
       gpuRingReadbackMs: gpu.readbackMs,
     };
   }

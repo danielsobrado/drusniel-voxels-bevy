@@ -80,17 +80,18 @@ export function grassThin(distance: number, settings: GrassSettings = DEFAULT_GR
 }
 
 export function grassRingBands(settings: GrassSettings): { near: number; mid: number; far: number; radius: number } {
+  const ringDist = settings.ring.ringDistance;
   return {
-    radius: Math.max(0, Math.min(settings.distance, settings.ring.maxRadius)),
-    near: Math.min(settings.distance * settings.lod.nearFraction, settings.ring.nearMeters),
-    mid: Math.min(settings.distance * settings.lod.midFraction, settings.ring.midMeters),
-    far: Math.min(settings.distance * settings.ring.farDistanceFraction, settings.ring.farMeters),
+    radius: Math.max(0, Math.min(ringDist, settings.ring.maxRadius)),
+    near: Math.min(ringDist * settings.lod.nearFraction, settings.ring.nearMeters),
+    mid: Math.min(ringDist * settings.lod.midFraction, settings.ring.midMeters),
+    far: Math.min(ringDist * settings.ring.farDistanceFraction, settings.ring.farMeters),
   };
 }
 
 export function grassFadeDistance(settings: GrassSettings): number {
   return settings.shaderMode === "webgpu-ring-v1"
-    ? Math.min(settings.distance, settings.ring.maxRadius)
+    ? Math.min(settings.ring.ringDistance, settings.ring.maxRadius)
     : settings.distance;
 }
 

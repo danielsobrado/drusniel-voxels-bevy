@@ -244,7 +244,7 @@ export class TreeSystem {
     counts: { near: 0, mid: 0, far: 0, impostor: 0 },
     groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
     overflowed: false,
-    dispatchMs: null,
+    submitMs: null,
     readbackMs: null,
     skippedDispatches: 0,
   };
@@ -827,7 +827,7 @@ export class TreeSystem {
       + this.gpuRingStats.counts.far
       + this.gpuRingStats.counts.impostor;
     this.gpuOverflowed = this.gpuRingStats.overflowed;
-    this.gpuDispatchMs = this.gpuRingStats.dispatchMs;
+    this.gpuDispatchMs = this.gpuRingStats.submitMs;
     this.updateStats();
     return true;
   }
@@ -884,7 +884,7 @@ export class TreeSystem {
       counts: { near: 0, mid: 0, far: 0, impostor: 0 },
       groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
       overflowed: false,
-      dispatchMs: null,
+      submitMs: null,
       readbackMs: null,
       skippedDispatches: 0,
     };
@@ -1310,7 +1310,7 @@ export class TreeSystem {
       counts: { near: 0, mid: 0, far: 0, impostor: 0 },
       groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
       overflowed: false,
-      dispatchMs: null,
+      submitMs: null,
       readbackMs: null,
       skippedDispatches: 0,
     };

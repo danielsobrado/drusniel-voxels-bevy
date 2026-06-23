@@ -143,8 +143,7 @@ collider refreshes.
 
 A visual POC water layer (`config/water.yaml`, `src/water/`) renders fake lakes and
 rivers as a clipmap that follows the camera. It is not hydrology, not
-main Rust Bevy water, and not production water: no SSR, planar reflections,
-caustics, or physics in this first pass.
+main Rust Bevy water, and not production water.
 
 The water layer is strictly separate from the CLOD page pipeline:
 
@@ -163,17 +162,44 @@ level). The shader discards pixels inside the previous (finer) level's world
 rectangle so only the ring between levels is drawn. Dry vertices (depth <= 0) are
 also discarded, so dry areas never show water above terrain.
 
+Six clipmap levels span 1.5 m to 48 m cells, matching Fable5's far-water range.
+The outermost level covers approximately ±3 km from the camera.
+
 The `WaterField` exposes `waterYAt`, `depthAt`, `flowAt`, and `bodyMaskAt` and
 reads terrain height through a small adapter over `surfaceHeight`. Lakes are flat
 at `terrainHeight(center) + level_offset`; rivers use a capsule distance to the
 polyline with a sloped level via `downstream_drop`; lake flow is near-zero with a
 faint breeze fallback in the material, river flow follows the closest segment.
 
+### Features ported from Fable5
+
+- **Two-phase decorrelated foam**: two noise scales blended across both phases
+  with variance renormalization to avoid flat midpoints and visible loop snaps.
+- **Body-aware far water reduction**: lake-dominated blocks use median waterY
+  (stable far-water level), river blocks use conservative min (rivers vanish at
+  distance), preventing dark rim bands on far lakes.
+- **Depth-validated refraction** (WebGPU only): ripple-normal-shifted screen UV,
+  depth-buffer validation to prevent foreground leaks, Beer-Lambert absorption,
+  turbidity in-scatter.
+- **Screen-space reflection** (WebGPU only): SSR march with jitter, edge fade,
+  sky fallback. Disabled by default (`reflection.mode: fake`).
+- **Procedural caustics** (optional, disabled by default): layered sine waves
+  advected by flow, depth fading, focal ramp.
+
+### Features intentionally not ported
+
+- GPU compute hydrology (CLOD-POC keeps CPU-side hydrology for PoC simplicity)
+- Planar reflections (SSR is a better match for this PoC)
+- Compute-baked caustic textures (procedural caustic is simpler; TODO for later)
+- Physics/buoyancy
+- Main Rust/Bevy water integration
+
 Controls (lil-gui "water (fake clipmap)" folder):
 
 - `enabled` — show/hide the water layer.
 - `debug mode` — `0 final`, `1 water depth`, `2 foam`, `3 fresnel`, `4 body mask`,
-- `5 clipmap level color`, `6 flow direction/speed`.
+  `5 clipmap level color`, `6 flow direction/speed`, `12 refraction`, `13 reflection`,
+  `14 SSR hit`.
 - `clipmap tint` — faintly tint final water by clipmap level.
 - `wireframe` — show the water clipmap grid where supported by the renderer.
 - `depth write` — toggle water depth writes (off by default to avoid transparent
@@ -189,8 +215,10 @@ and local: two-phase procedural ripples use `ripple_cycle`, `ripple_scale_a/b`,
 `foam.noise_scale`, `foam.shore_strength`, `foam.river_strength`,
 `foam.speed_start/end`, and `foam.drop_start/end`; Fresnel uses
 `fresnel.base`, `fresnel.power`, and `fresnel.normal_flatten`; depth colour uses
-`color.depth_scale` and `color.turbidity`. These controls affect only the water
-render layer and do not feed CLOD page meshes or simplification.
+`color.depth_scale` and `color.turbidity`. Refraction uses `refraction.*` settings
+(WebGPU only). SSR uses `reflection.*` settings (WebGPU only, disabled by default).
+Caustics use `caustics.*` settings (disabled by default). These controls affect
+only the water render layer and do not feed CLOD page meshes or simplification.
 
 Water verification helpers:
 
@@ -205,6 +233,9 @@ npm run water:shot:lake-depth
 npm run water:shot:river-foam
 npm run water:shot:flow
 npm run water:shot:clipmap
+npm run water:shot:refraction
+npm run water:shot:reflection
+npm run water:shot:ssr-hit
 npm run water:verify
 ```
 

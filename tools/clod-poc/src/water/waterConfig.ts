@@ -9,6 +9,7 @@ import {
   cloneHydrologyConfig,
   type HydrologyConfig,
 } from "./hydrologyConfig.js";
+import { DEFAULT_CAUSTICS_CONFIG, type CausticsConfig } from "./causticsConfig.js";
 
 /** Debug render modes for the water material. */
 export const WATER_DEBUG_MODES = {
@@ -24,6 +25,9 @@ export const WATER_DEBUG_MODES = {
   carvedBed: 9,
   waterY: 10,
   classification: 11,
+  refraction: 12,
+  reflection: 13,
+  ssrHit: 14,
 } as const;
 export type WaterDebugMode = keyof typeof WATER_DEBUG_MODES;
 export type WaterDebugModeId = typeof WATER_DEBUG_MODES[WaterDebugMode];
@@ -64,6 +68,8 @@ export interface WaterVisualConfig {
   foam: WaterFoamVisualConfig;
   fresnel: WaterFresnelVisualConfig;
   color: WaterColorVisualConfig;
+  refraction: WaterRefractionConfig;
+  reflection: WaterReflectionConfig;
   depthWrite: boolean;
 }
 
@@ -94,6 +100,28 @@ export interface WaterColorVisualConfig {
   turbidity: number;
 }
 
+export interface WaterRefractionConfig {
+  enabled: boolean;
+  strength: number;
+  depthValidationBias: number;
+  absorptionR: number;
+  absorptionG: number;
+  absorptionB: number;
+  turbidityStrength: number;
+  maxThickness: number;
+}
+
+export interface WaterReflectionConfig {
+  mode: "fake" | "ssr";
+  ssrEnabled: boolean;
+  maxSteps: number;
+  stepScale: number;
+  edgeFadeStart: number;
+  edgeFadeEnd: number;
+  skyFallbackStrength: number;
+  terrainFallbackStrength: number;
+}
+
 export interface WaterConfig {
   enabled: boolean;
   source: "hydrology" | "fake_bodies";
@@ -108,6 +136,7 @@ export interface WaterConfig {
   };
   hydrology: HydrologyConfig;
   visual: WaterVisualConfig;
+  caustics: CausticsConfig;
   debug: WaterDebugConfig;
 }
 
@@ -147,6 +176,26 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
     depthScale: 4.0,
     turbidity: 0.18,
   },
+  refraction: {
+    enabled: true,
+    strength: 0.055,
+    depthValidationBias: 0.02,
+    absorptionR: 0.42,
+    absorptionG: 0.135,
+    absorptionB: 0.095,
+    turbidityStrength: 0.032,
+    maxThickness: 8.0,
+  },
+  reflection: {
+    mode: "fake",
+    ssrEnabled: false,
+    maxSteps: 18,
+    stepScale: 0.09,
+    edgeFadeStart: 1.0,
+    edgeFadeEnd: 0.82,
+    skyFallbackStrength: 0.65,
+    terrainFallbackStrength: 0.18,
+  },
   depthWrite: false,
 };
 
@@ -154,7 +203,7 @@ export const DEFAULT_WATER_CONFIG: WaterConfig = {
   enabled: true,
   source: "hydrology",
   cellsPerLevel: 128,
-  cellSizes: [1.5, 3.0, 6.0, 12.0, 24.0],
+  cellSizes: [1.5, 3.0, 6.0, 12.0, 24.0, 48.0],
   snapCells: 2,
   drySentinelDepth: 2.0,
   fakeBodies: {
@@ -175,6 +224,7 @@ export const DEFAULT_WATER_CONFIG: WaterConfig = {
   },
   hydrology: cloneHydrologyConfig(),
   visual: { ...DEFAULT_WATER_VISUAL },
+  caustics: { ...DEFAULT_CAUSTICS_CONFIG },
   debug: { mode: WATER_DEBUG_MODES.final, clipmapTint: false, wireframe: false },
 };
 
@@ -183,6 +233,7 @@ export function cloneWaterConfig(config: WaterConfig = DEFAULT_WATER_CONFIG): Wa
     ...config,
     hydrology: cloneHydrologyConfig(config.hydrology),
     cellSizes: [...config.cellSizes],
+    caustics: { ...config.caustics },
     fakeBodies: {
       carveTerrain: config.fakeBodies.carveTerrain,
       lakes: config.fakeBodies.lakes.map((lake) => ({
@@ -208,6 +259,8 @@ export function cloneWaterConfig(config: WaterConfig = DEFAULT_WATER_CONFIG): Wa
       foam: { ...config.visual.foam },
       fresnel: { ...config.visual.fresnel },
       color: { ...config.visual.color },
+      refraction: { ...config.visual.refraction },
+      reflection: { ...config.visual.reflection },
     },
     debug: { ...config.debug },
   };
@@ -397,6 +450,26 @@ interface WaterYamlConfig {
         depth_scale?: unknown;
         turbidity?: unknown;
       };
+      refraction?: {
+        enabled?: unknown;
+        strength?: unknown;
+        depth_validation_bias?: unknown;
+        absorption_r?: unknown;
+        absorption_g?: unknown;
+        absorption_b?: unknown;
+        turbidity_strength?: unknown;
+        max_thickness?: unknown;
+      };
+      reflection?: {
+        mode?: unknown;
+        ssr_enabled?: unknown;
+        max_steps?: unknown;
+        step_scale?: unknown;
+        edge_fade_start?: unknown;
+        edge_fade_end?: unknown;
+        sky_fallback_strength?: unknown;
+        terrain_fallback_strength?: unknown;
+      };
       depth_write?: unknown;
     };
     debug?: {
@@ -404,11 +477,22 @@ interface WaterYamlConfig {
       clipmap_tint?: unknown;
       wireframe?: unknown;
     };
+    caustics?: {
+      enabled?: unknown;
+      gain?: unknown;
+      depth_fade?: unknown;
+      focal_depth?: unknown;
+      sun_gate_start?: unknown;
+      sun_gate_end?: unknown;
+      flow_advection?: unknown;
+      scale?: unknown;
+      speed?: unknown;
+    };
   };
 }
 
 function isWaterDebugModeId(value: unknown): value is WaterDebugModeId {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 11;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 14;
 }
 
 export function parseWaterConfig(
@@ -518,6 +602,26 @@ export function parseWaterConfig(
       depthScale,
       turbidity: Math.min(1, Math.max(0, readNumber(colorRaw.turbidity, fb.visual.color.turbidity))),
     },
+    refraction: {
+      enabled: readBoolean(v.refraction?.enabled, fb.visual.refraction.enabled),
+      strength: readNumberAtLeast(v.refraction?.strength, fb.visual.refraction.strength, 0),
+      depthValidationBias: readNumberAtLeast(v.refraction?.depth_validation_bias, fb.visual.refraction.depthValidationBias, 0),
+      absorptionR: readNumberAtLeast(v.refraction?.absorption_r, fb.visual.refraction.absorptionR, 0),
+      absorptionG: readNumberAtLeast(v.refraction?.absorption_g, fb.visual.refraction.absorptionG, 0),
+      absorptionB: readNumberAtLeast(v.refraction?.absorption_b, fb.visual.refraction.absorptionB, 0),
+      turbidityStrength: readNumberAtLeast(v.refraction?.turbidity_strength, fb.visual.refraction.turbidityStrength, 0),
+      maxThickness: readNumberAtLeast(v.refraction?.max_thickness, fb.visual.refraction.maxThickness, 0.1),
+    },
+    reflection: {
+      mode: (v.reflection?.mode === "ssr" || v.reflection?.mode === "fake") ? v.reflection.mode : fb.visual.reflection.mode,
+      ssrEnabled: readBoolean(v.reflection?.ssr_enabled, fb.visual.reflection.ssrEnabled),
+      maxSteps: readIntegerAtLeast(v.reflection?.max_steps, fb.visual.reflection.maxSteps, 1),
+      stepScale: readNumberAtLeast(v.reflection?.step_scale, fb.visual.reflection.stepScale, 0.001),
+      edgeFadeStart: readNumberAtLeast(v.reflection?.edge_fade_start, fb.visual.reflection.edgeFadeStart, 0),
+      edgeFadeEnd: readNumberAtLeast(v.reflection?.edge_fade_end, fb.visual.reflection.edgeFadeEnd, 0),
+      skyFallbackStrength: readNumberAtLeast(v.reflection?.sky_fallback_strength, fb.visual.reflection.skyFallbackStrength, 0),
+      terrainFallbackStrength: readNumberAtLeast(v.reflection?.terrain_fallback_strength, fb.visual.reflection.terrainFallbackStrength, 0),
+    },
     depthWrite: readBoolean(v.depth_write, fb.visual.depthWrite),
   };
   if (visual.shoreFoamEnd < visual.shoreFoamStart) {
@@ -621,6 +725,17 @@ export function parseWaterConfig(
     },
     hydrology,
     visual,
+    caustics: {
+      enabled: readBoolean(raw.caustics?.enabled, DEFAULT_CAUSTICS_CONFIG.enabled),
+      gain: readNumberAtLeast(raw.caustics?.gain, DEFAULT_CAUSTICS_CONFIG.gain, 0),
+      depthFade: readNumberAtLeast(raw.caustics?.depth_fade, DEFAULT_CAUSTICS_CONFIG.depthFade, 0),
+      focalDepth: readNumberAtLeast(raw.caustics?.focal_depth, DEFAULT_CAUSTICS_CONFIG.focalDepth, 0),
+      sunGateStart: readNumberAtLeast(raw.caustics?.sun_gate_start, DEFAULT_CAUSTICS_CONFIG.sunGateStart, 0),
+      sunGateEnd: readNumberAtLeast(raw.caustics?.sun_gate_end, DEFAULT_CAUSTICS_CONFIG.sunGateEnd, 0),
+      flowAdvection: readNumberAtLeast(raw.caustics?.flow_advection, DEFAULT_CAUSTICS_CONFIG.flowAdvection, 0),
+      scale: readNumberAtLeast(raw.caustics?.scale, DEFAULT_CAUSTICS_CONFIG.scale, 0.001),
+      speed: readNumberAtLeast(raw.caustics?.speed, DEFAULT_CAUSTICS_CONFIG.speed, 0),
+    },
     debug: {
       mode: debugMode,
       clipmapTint: readBoolean(raw.debug?.clipmap_tint, fb.debug.clipmapTint),

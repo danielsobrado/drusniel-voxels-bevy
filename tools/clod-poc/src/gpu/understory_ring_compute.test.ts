@@ -318,7 +318,7 @@ describe("UnderstoryGpuRingCompute.dispatch", () => {
     expect(dispatched).toBe(true);
     const stats = compute.stats(true);
     expect(stats.status).toBe("running");
-    expect(stats.dispatchMs).toBeGreaterThanOrEqual(0);
+    expect(stats.submitMs).toBeGreaterThanOrEqual(0);
     compute.destroy();
   });
 });

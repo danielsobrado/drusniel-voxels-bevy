@@ -249,6 +249,7 @@ export class WaterClipmap {
         sunDirection: this.sunDirection,
         cameraPosition: this.cameraPosition,
         worldBounds: opts.worldBounds,
+        caustics: opts.config.caustics,
       });
       const level = new WaterLevel(
         index,

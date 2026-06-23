@@ -2618,7 +2618,7 @@ async function main() {
     nodeCount: allNodes.length,
     version: 0,
     latestAgeFrames: null,
-    dispatchMs: null,
+    submitMs: null,
     readbackMs: null,
     skippedDispatches: 0,
     parity: "unchecked",
@@ -2634,7 +2634,7 @@ async function main() {
     if (!state.webgpuSelection) return "webgpu=off";
     if (!stats.available) return `webgpu=${stats.status}${stats.reason ? ` (${stats.reason})` : ""}`;
     const age = stats.latestAgeFrames === null ? "none" : `${stats.latestAgeFrames}f`;
-    const dispatch = stats.dispatchMs === null ? "-" : `${stats.dispatchMs.toFixed(2)}ms`;
+    const dispatch = stats.submitMs === null ? "-" : `${stats.submitMs.toFixed(2)}ms`;
     const readback = stats.readbackMs === null ? "-" : `${stats.readbackMs.toFixed(2)}ms`;
     const parityDelta = stats.parityMaxDelta === null ? "" : ` d=${stats.parityMaxDelta.toFixed(4)}px`;
     return `webgpu=${stats.status} rb=${stats.readbackMode} age=${age} dispatch=${dispatch} read=${readback} parity=${stats.parity}${parityDelta} dOnly=${stats.dispatchOnlyFrames}`;
@@ -3550,7 +3550,7 @@ async function main() {
   let understoryVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
   let understoryClassSummaryController: { updateDisplay: () => unknown } | null = null;
   let understoryGpuSummaryController: { updateDisplay: () => unknown } | null = null;
-  const dispatchMsChanged = (a: number | null, b: number | null): boolean =>
+  const submitMsChanged = (a: number | null, b: number | null): boolean =>
     a === b ? false : a === null || b === null ? true : Math.abs(a - b) >= 0.05;
   const formatUnderstoryGpuSummary = (stats: UnderstoryStats): string =>
     stats.gpuStatus === "disabled"
@@ -5255,7 +5255,7 @@ async function main() {
       nextUnderstoryStats.gpuCandidateCount !== understoryStats.gpuCandidateCount ||
       nextUnderstoryStats.gpuAcceptedCount !== understoryStats.gpuAcceptedCount ||
       nextUnderstoryStats.gpuOverflowed !== understoryStats.gpuOverflowed ||
-      dispatchMsChanged(nextUnderstoryStats.gpuDispatchMs, understoryStats.gpuDispatchMs))
+      submitMsChanged(nextUnderstoryStats.gpuDispatchMs, understoryStats.gpuDispatchMs))
     ) {
       understoryStats = nextUnderstoryStats;
       state.understoryTotal = nextUnderstoryStats.totalInstances;

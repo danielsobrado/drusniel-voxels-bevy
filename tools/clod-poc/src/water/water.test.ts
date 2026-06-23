@@ -63,7 +63,7 @@ describe("parseWaterConfig", () => {
     const parsed = parseWaterConfig(waterYamlText, null);
     expect(parsed.enabled).toBe(true);
     expect(parsed.cellsPerLevel).toBe(128);
-    expect(parsed.cellSizes).toEqual([1.5, 3.0, 6.0, 12.0, 24.0]);
+    expect(parsed.cellSizes).toEqual([1.5, 3.0, 6.0, 12.0, 24.0, 48.0]);
     expect(parsed.snapCells).toBe(2);
     expect(parsed.drySentinelDepth).toBe(2.0);
     expect(parsed.fakeBodies.lakes).toHaveLength(2);
