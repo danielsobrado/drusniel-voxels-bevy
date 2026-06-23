@@ -107,6 +107,48 @@ describe("understory system", () => {
   });
 });
 
+describe("understory GPU status", () => {
+  it("reports disabled when gpu.enabled is false", () => {
+    const scene = new THREE.Scene();
+    const settings = systemSettings();
+    settings.gpu.enabled = false;
+    const system = new UnderstorySystem({ scene, nodes: [], worldCells: 64, settings, sampler: flatSampler() });
+    systems.push(system);
+    system.update(0, new THREE.Vector3(16, 0, 16));
+    expect(system.getStats().gpuStatus).toBe("disabled");
+  });
+
+  it("reports fallback-cpu when debugForceCpu is true", () => {
+    const scene = new THREE.Scene();
+    const settings = systemSettings();
+    settings.gpu.debugForceCpu = true;
+    const system = new UnderstorySystem({ scene, nodes: [], worldCells: 64, settings, sampler: flatSampler() });
+    systems.push(system);
+    system.update(0, new THREE.Vector3(16, 0, 16));
+    expect(system.getStats().gpuStatus).toBe("fallback-cpu");
+  });
+
+  it("reports disabled when system is disabled", () => {
+    const scene = new THREE.Scene();
+    const settings = systemSettings();
+    const system = new UnderstorySystem({ scene, nodes: [], worldCells: 64, settings, sampler: flatSampler() });
+    systems.push(system);
+    system.setEnabled(false);
+    expect(system.getStats().gpuStatus).toBe("disabled");
+  });
+
+  it("reports fallback-cpu when no GPU device provided and fallbackToCpu is true", () => {
+    const scene = new THREE.Scene();
+    const settings = systemSettings();
+    settings.gpu.debugForceCpu = false;
+    const system = new UnderstorySystem({ scene, nodes: [], worldCells: 64, settings, sampler: flatSampler() });
+    systems.push(system);
+    system.update(0, new THREE.Vector3(16, 0, 16));
+    const stats = system.getStats();
+    expect(stats.gpuStatus).toBe("fallback-cpu");
+  });
+});
+
 function systemSettings() {
   const settings = cloneUnderstorySettings();
   settings.distanceM = 80;

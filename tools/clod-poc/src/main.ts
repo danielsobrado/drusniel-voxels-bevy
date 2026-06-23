@@ -3510,6 +3510,8 @@ async function main() {
   let understoryVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
   let understoryClassSummaryController: { updateDisplay: () => unknown } | null = null;
   let understoryGpuSummaryController: { updateDisplay: () => unknown } | null = null;
+  const dispatchMsChanged = (a: number | null, b: number | null): boolean =>
+    a === b ? false : a === null || b === null ? true : Math.abs(a - b) >= 0.05;
   const formatUnderstoryGpuSummary = (stats: UnderstoryStats): string =>
     stats.gpuStatus === "disabled"
       ? "disabled"
@@ -5210,7 +5212,10 @@ async function main() {
       nextUnderstoryStats.patches !== understoryStats.patches ||
       nextUnderstoryStats.gpuStatus !== understoryStats.gpuStatus ||
       nextUnderstoryStats.gpuVisibleCount !== understoryStats.gpuVisibleCount ||
-      nextUnderstoryStats.gpuOverflowed !== understoryStats.gpuOverflowed)
+      nextUnderstoryStats.gpuCandidateCount !== understoryStats.gpuCandidateCount ||
+      nextUnderstoryStats.gpuAcceptedCount !== understoryStats.gpuAcceptedCount ||
+      nextUnderstoryStats.gpuOverflowed !== understoryStats.gpuOverflowed ||
+      dispatchMsChanged(nextUnderstoryStats.gpuDispatchMs, understoryStats.gpuDispatchMs))
     ) {
       understoryStats = nextUnderstoryStats;
       state.understoryTotal = nextUnderstoryStats.totalInstances;

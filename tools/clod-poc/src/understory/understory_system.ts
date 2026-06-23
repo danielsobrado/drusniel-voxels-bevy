@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { ClodPageNode, PageFootprint } from "../types.js";
-import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
+import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstoryClassSettings, type UnderstorySettings } from "./understory_config.js";
 import {
   createUnderstoryGeometryMap,
   disposeUnderstoryGeometryMap,
@@ -168,12 +168,32 @@ export class UnderstorySystem {
     const wasEnabled = this.settings.enabled;
     this.settings.enabled = enabled;
     this.root.visible = enabled;
-    if (enabled && !wasEnabled) this.refreshForCenter(this.lastCenter);
-    if (!enabled) this.updateStats();
+    if (!enabled) {
+      this.gpuStatus = "disabled";
+      this.updateStats();
+      return;
+    }
+    if (!wasEnabled) this.refreshForCenter(this.lastCenter);
   }
 
   private usesGpuRingDraw(): boolean {
     return understoryUsesGpuRingDraw(this.settings) && this.supportsGpu && !!this.gpuDevice && !this.gpuRingUnsupportedReason;
+  }
+
+  private updateCpuFallbackGpuStatus(): void {
+    if (!this.settings.gpu.enabled) {
+      this.gpuStatus = "disabled";
+      return;
+    }
+    if (!this.supportsGpu || !this.gpuDevice || !this.gpuBackend) {
+      this.gpuStatus = this.settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+      return;
+    }
+    if (this.gpuRingUnsupportedReason) {
+      this.gpuStatus = this.settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+      return;
+    }
+    this.gpuStatus = this.settings.gpu.fallbackToCpu ? "fallback-cpu" : "disabled";
   }
 
   updateSettings(settings: Partial<UnderstorySettings>): void {
@@ -217,7 +237,10 @@ export class UnderstorySystem {
       this.updateGpuRingUnderstory(center, camera);
       return;
     }
-    this.clearGpuRing();
+    if (this.gpuRingCompute || this.gpuRingInit || this.gpuRingDraw || this.ringMeshes.length > 0) {
+      this.clearGpuRing();
+    }
+    this.updateCpuFallbackGpuStatus();
     if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) {
       this.refreshForCenter(center);
     } else {
@@ -228,7 +251,16 @@ export class UnderstorySystem {
   rebuild(): void {
     this.clearGpuRing();
     this.clearPatches();
-    if (this.settings.enabled && !this.usesGpuRingDraw()) this.refreshForCenter(this.lastCenter);
+    if (this.settings.enabled) {
+      if (this.usesGpuRingDraw()) {
+        this.gpuStatus = "ring";
+      } else {
+        this.updateCpuFallbackGpuStatus();
+        this.refreshForCenter(this.lastCenter);
+      }
+    } else {
+      this.gpuStatus = "disabled";
+    }
     this.root.visible = this.settings.enabled;
   }
 
@@ -446,6 +478,7 @@ export class UnderstorySystem {
   }
 
   private clearGpuRing(): void {
+    if (!this.gpuRingCompute && !this.gpuRingInit && !this.gpuRingDraw && this.ringMeshes.length === 0) return;
     this.gpuRingGeneration++;
     this.gpuRingCompute?.destroy();
     this.gpuRingCompute = null;
@@ -453,7 +486,6 @@ export class UnderstorySystem {
     this.gpuRingKey = "";
     this.clearGpuRingDraw();
     this.gpuRingStats = { status: this.gpuDevice ? "idle" : "disabled", candidateCount: 0, acceptedCandidates: 0, counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 }, groupCounts: [], overflowed: false, dispatchMs: null, readbackMs: null, skippedDispatches: 0 };
-    this.gpuStatus = "disabled";
   }
 
   private clearGpuRingDraw(): void {
@@ -733,28 +765,42 @@ function distance2d(ax: number, az: number, bx: number, bz: number): number {
   return Math.hypot(ax - bx, az - bz);
 }
 
+function classKeyRow(cls: UnderstoryClassSettings): string {
+  return `${cls.enabled ? 1 : 0}:${cls.weight}:${cls.density}:${cls.minScale}:${cls.maxScale}:${cls.heightPreference}:${cls.shadePreference}:${cls.moisturePreference}:${cls.forestEdgeBias}:${cls.windWeight}`;
+}
+
 function understoryGpuRingKey(settings: UnderstorySettings, worldCells: number): string {
   const gpu = settings.gpu;
+  const eco = settings.ecology;
+  const cls = settings.classes;
   return [
     worldCells,
     settings.seed,
+    settings.distanceM,
     gpu.maxVisible,
     gpu.workgroupSize,
     settings.placement.spacingM,
-    settings.placement.jitter,
     settings.placement.slopeMinY,
     settings.placement.minHeightM,
     settings.placement.maxHeightM,
     settings.placement.minGroundWeight,
     settings.placement.minTreeInfluence,
-    settings.ecology.forestInfluenceScaleM,
-    settings.ecology.forestEdgeWidthM,
-    settings.classes.shrub.weight,
-    settings.classes.fern.weight,
-    settings.classes.sapling.weight,
-    settings.classes.flower.weight,
-    settings.classes.dead_log.weight,
-    settings.classes.stump.weight,
+    eco.enabled ? 1 : 0,
+    eco.forestInfluenceScaleM,
+    eco.forestEdgeWidthM,
+    eco.clearingPreference,
+    eco.moistureNoiseScaleM,
+    eco.moistureStrength,
+    eco.shadeStrength,
+    eco.densityNoiseScaleM,
+    eco.densityNoiseStrength,
+    eco.deadfallOldForestBias,
+    classKeyRow(cls.shrub),
+    classKeyRow(cls.fern),
+    classKeyRow(cls.sapling),
+    classKeyRow(cls.flower),
+    classKeyRow(cls.dead_log),
+    classKeyRow(cls.stump),
     getDigEditRevision(),
   ].join(":");
 }
