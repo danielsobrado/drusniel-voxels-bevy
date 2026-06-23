@@ -572,4 +572,141 @@ grass:
       expect(blade.offset[1]).toBeCloseTo(groundY + 0.02, 1);
     }
   });
+
+  it("falls back to CPU patches when shaderMode is webgpu-ring-v1 but no GPU device", () => {
+    const scene = new THREE.Scene();
+    const lighting = {
+      light: new THREE.Vector3(0, 1, 0),
+      sunColor: new THREE.Color(1, 1, 1),
+      skyLight: new THREE.Color(0.5, 0.6, 0.7),
+      groundLight: new THREE.Color(0.2, 0.18, 0.16),
+    };
+    const system = new GrassSystem({
+      scene,
+      nodes: [{
+        id: "L0:0,0",
+        level: 0,
+        children: [],
+        mesh: {
+          positions: new Float32Array(),
+          normals: new Float32Array(),
+          materials: new Float32Array(),
+          indices: new Uint32Array(),
+        },
+        footprint,
+        bounds: { center: [8, 0, 8], radius: 12, minY: 0, maxY: 0 },
+        errorWorld: 0,
+        lowBenefit: false,
+      }],
+      worldCells: 16,
+      settings: {
+        ...settings,
+        shaderMode: "webgpu-ring-v1",
+      },
+      lighting,
+      supportsRing: true,
+      gpuDevice: null,
+      gpuBackend: null,
+    });
+    const center = new THREE.Vector3(8, 0, 8);
+    system.update(0, center);
+    const stats = system.getStats();
+    expect(stats.blades).toBeGreaterThan(0);
+    expect(stats.gpuRingStatus).toBe("fallback-cpu");
+    system.dispose();
+  });
+
+  it("uses CPU patches when shaderMode is terrain-patch-v2", () => {
+    const scene = new THREE.Scene();
+    const lighting = {
+      light: new THREE.Vector3(0, 1, 0),
+      sunColor: new THREE.Color(1, 1, 1),
+      skyLight: new THREE.Color(0.5, 0.6, 0.7),
+      groundLight: new THREE.Color(0.2, 0.18, 0.16),
+    };
+    const system = new GrassSystem({
+      scene,
+      nodes: [{
+        id: "L0:0,0",
+        level: 0,
+        children: [],
+        mesh: {
+          positions: new Float32Array(),
+          normals: new Float32Array(),
+          materials: new Float32Array(),
+          indices: new Uint32Array(),
+        },
+        footprint,
+        bounds: { center: [8, 0, 8], radius: 12, minY: 0, maxY: 0 },
+        errorWorld: 0,
+        lowBenefit: false,
+      }],
+      worldCells: 16,
+      settings: {
+        ...settings,
+        shaderMode: "terrain-patch-v2",
+      },
+      lighting,
+    });
+    const center = new THREE.Vector3(8, 0, 8);
+    system.update(0, center);
+    const stats = system.getStats();
+    expect(stats.blades).toBeGreaterThan(0);
+    expect(stats.gpuRingStatus).toBe("disabled");
+    system.dispose();
+  });
+
+  it("changes GPU ring key when dig edits are added", () => {
+    clearDigEdits();
+    const keyBefore = grassGpuRingKey(settings, 16);
+    addDigEdit({
+      x: 8,
+      y: 10,
+      z: 8,
+      r: 3,
+      shape: "sphere",
+      op: "remove",
+    });
+    const keyAfter = grassGpuRingKey(settings, 16);
+    expect(keyAfter).not.toBe(keyBefore);
+    clearDigEdits();
+  });
+
+  it("shares the same material across all ring draw meshes", () => {
+    const scene = new THREE.Scene();
+    const lighting = {
+      light: new THREE.Vector3(0, 1, 0),
+      sunColor: new THREE.Color(1, 1, 1),
+      skyLight: new THREE.Color(0.5, 0.6, 0.7),
+      groundLight: new THREE.Color(0.2, 0.18, 0.16),
+    };
+    const system = new GrassSystem({
+      scene,
+      nodes: [{
+        id: "L0:0,0",
+        level: 0,
+        children: [],
+        mesh: {
+          positions: new Float32Array(),
+          normals: new Float32Array(),
+          materials: new Float32Array(),
+          indices: new Uint32Array(),
+        },
+        footprint,
+        bounds: { center: [8, 0, 8], radius: 12, minY: 0, maxY: 0 },
+        errorWorld: 0,
+        lowBenefit: false,
+      }],
+      worldCells: 16,
+      settings: {
+        ...settings,
+        enabled: false,
+        shaderMode: "terrain-patch-v2",
+      },
+      lighting,
+    });
+    const ringMeshes = (system as unknown as { ringMeshes: THREE.Mesh[] }).ringMeshes;
+    expect(ringMeshes.length).toBe(0);
+    system.dispose();
+  });
 });

@@ -16,6 +16,7 @@ import type { GrassBladeInstance } from "./grass_cpu_patch.js";
 import { edgeFadeForCandidate } from "./grass_cpu_patch.js";
 import type { GrassGenerationStats } from "./grass_stats.js";
 import { acceptsGrassCandidate, grassRingBands, grassThin, hash2, randomSigned, sampleGrassTerrainSite } from "./grass_math.js";
+import { getDigEditRevision } from "../terrain.js";
 
 interface GrassRingTierInstances {
   near: GrassBladeInstance[];
@@ -79,7 +80,7 @@ export function ringCellSize(settings: GrassSettings, radius: number): number {
   return Math.max(0.5, settings.bladeSpacing, (radius * 2) / RING_MAX_AXIS_CELLS);
 }
 
-export function grassGpuRingKey(settings: GrassSettings, worldCells: number): string {
+export function grassGpuRingKey(settings: GrassSettings, worldCells: number, digRevision = getDigEditRevision()): string {
   return [
     worldCells,
     settings.maxBlades,
@@ -92,6 +93,7 @@ export function grassGpuRingKey(settings: GrassSettings, worldCells: number): st
     settings.ring.farDistanceFraction,
     settings.ring.bandMeters,
     settings.ring.scruffMeters,
+    digRevision,
   ].join("|");
 }
 

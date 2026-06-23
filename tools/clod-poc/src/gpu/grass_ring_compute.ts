@@ -104,7 +104,7 @@ export interface GrassGpuRingCounts {
 }
 
 export interface GrassGpuRingStats {
-  status: "initializing" | "idle" | "running" | "ready" | "failed" | "disabled";
+  status: "initializing" | "idle" | "running" | "ready" | "failed" | "disabled" | "fallback-cpu" | "unsupported";
   reason?: string;
   candidateCount: number;
   generatedCandidates: number;
@@ -118,6 +118,7 @@ export interface GrassGpuRingStats {
 interface ReadbackSlot {
   buffer: GPUBuffer;
   busy: boolean;
+  destroyAfterMap: boolean;
   cpu: Uint32Array;
 }
 
@@ -276,6 +277,7 @@ export class GrassGpuRingCompute {
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       }),
       busy: false,
+      destroyAfterMap: false,
       cpu: new Uint32Array(TIER_COUNT),
     }));
     this.bindGroup = device.createBindGroup({
@@ -369,6 +371,7 @@ export class GrassGpuRingCompute {
     const submitStart = performance.now();
     if (readbackSlot) {
       readbackSlot.busy = true;
+      readbackSlot.destroyAfterMap = false;
       this.runningReadbacks++;
     }
     this.device.queue.submit([encoder.finish()]);
@@ -379,6 +382,10 @@ export class GrassGpuRingCompute {
       const readbackStart = performance.now();
       void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
         if (submittedGeneration !== this.generation) {
+          slot.busy = false;
+          slot.destroyAfterMap = false;
+          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+          slot.buffer.unmap();
           slot.buffer.destroy();
           return;
         }
@@ -394,10 +401,25 @@ export class GrassGpuRingCompute {
           far: Math.min(slot.cpu[2] ?? 0, cap),
           super: Math.min(slot.cpu[3] ?? 0, cap),
         };
+        if (slot.destroyAfterMap) {
+          slot.destroyAfterMap = false;
+          slot.buffer.destroy();
+        }
       }).catch((error) => {
-        if (submittedGeneration !== this.generation) return;
+        if (submittedGeneration !== this.generation) {
+          slot.busy = false;
+          slot.destroyAfterMap = false;
+          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+          slot.buffer.destroy();
+          return;
+        }
         slot.busy = false;
         this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
+        if (slot.destroyAfterMap) {
+          slot.destroyAfterMap = false;
+          slot.buffer.destroy();
+          return;
+        }
         this.failedReason = error instanceof Error ? error.message : String(error);
       });
     }
@@ -433,7 +455,8 @@ export class GrassGpuRingCompute {
     this.fieldParams.destroy();
     if (!this.outputBuffers) this.indirectArgs.destroy();
     for (const slot of this.counterReadbacks) {
-      if (!slot.busy) slot.buffer.destroy();
+      if (slot.busy) slot.destroyAfterMap = true;
+      else slot.buffer.destroy();
     }
   }
 
