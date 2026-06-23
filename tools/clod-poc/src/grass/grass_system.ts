@@ -299,8 +299,8 @@ export class GrassSystem {
       return;
     }
     if (this.canUseGpuRingDraw()) {
-      if (this.patches.length > 0) this.clearPatches();
       if (this.updateGpuRingCounters(center, camera)) {
+        if (this.patches.length > 0) this.clearPatches();
         return;
       }
       this.clearRing();
@@ -504,13 +504,18 @@ export class GrassSystem {
     return this.supportsRing && this.settings.shaderMode === "webgpu-ring-v1";
   }
 
+  private currentGpuRingKey(): string {
+    return grassGpuRingKey(this.settings, this.worldCells, getDigEditRevision());
+  }
+
   private canUseGpuRingDraw(): boolean {
     return this.settings.enabled
       && this.settings.shaderMode === "webgpu-ring-v1"
       && this.supportsRing
       && !!this.gpuDevice
       && !!this.gpuBackend
-      && !this.gpuRingUnsupportedReason;
+      && !this.gpuRingUnsupportedReason
+      && this.gpuRingFailedKey !== this.currentGpuRingKey();
   }
 
   private updateCpuFallbackGpuStatus(): void {

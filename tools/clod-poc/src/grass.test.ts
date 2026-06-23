@@ -705,16 +705,18 @@ grass:
       },
       lighting,
       supportsRing: true,
-      gpuDevice: null,
-      gpuBackend: null,
+      gpuDevice: { limits: { maxStorageBuffersPerShaderStage: 8 } } as unknown as GPUDevice,
+      gpuBackend: {
+        createStorageAttribute() {},
+        createIndirectStorageAttribute() {},
+        get() { return { buffer: {} as unknown as GPUBuffer }; },
+      },
     });
     const state = system as unknown as {
       gpuRingFailedKey: string;
-      gpuRingKey: string;
-      patchesDirty: boolean;
+      currentGpuRingKey(): string;
     };
-    state.gpuRingFailedKey = "simulated-failure-key";
-    state.gpuRingKey = "simulated-failure-key";
+    state.gpuRingFailedKey = state.currentGpuRingKey();
     system.updateSettings({ enabled: true });
     const stats = system.getStats();
     expect(stats.blades).toBeGreaterThan(0);
@@ -755,15 +757,18 @@ grass:
       },
       lighting,
       supportsRing: true,
-      gpuDevice: null,
-      gpuBackend: null,
+      gpuDevice: { limits: { maxStorageBuffersPerShaderStage: 8 } } as unknown as GPUDevice,
+      gpuBackend: {
+        createStorageAttribute() {},
+        createIndirectStorageAttribute() {},
+        get() { return { buffer: {} as unknown as GPUBuffer }; },
+      },
     });
     const state = system as unknown as {
       gpuRingFailedKey: string;
-      gpuRingKey: string;
+      currentGpuRingKey(): string;
     };
-    state.gpuRingFailedKey = "dispatch-fail-key";
-    state.gpuRingKey = "dispatch-fail-key";
+    state.gpuRingFailedKey = state.currentGpuRingKey();
     system.updateSettings({ enabled: true });
     const stats = system.getStats();
     expect(stats.blades).toBeGreaterThan(0);
