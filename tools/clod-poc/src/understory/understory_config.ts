@@ -58,10 +58,12 @@ export interface UnderstoryRenderSettings {
 // GPU-ring scatter settings (mirrors TreeGpuSettings). When the renderer is
 // WebGPU and `enabled`, understory is scattered + culled on the GPU and drawn
 // indirectly instead of the CPU per-frame patch scatter. `fallbackToCpu` keeps
-// the legacy CPU path for WebGL / low-limit devices.
+// the legacy CPU path when GPU init/dispatch fails or the device is unsupported.
+// `debugForceCpu` forces the CPU path unconditionally for profiling.
 export interface UnderstoryGpuSettings {
   enabled: boolean;
   fallbackToCpu: boolean;
+  debugForceCpu: boolean;
   maxVisible: number;
   workgroupSize: 32 | 64 | 128 | 256;
   readbackVisibleLists: boolean;
@@ -139,6 +141,7 @@ interface UnderstoryYamlConfig {
 interface UnderstoryYamlGpu {
   enabled?: boolean;
   fallback_to_cpu?: boolean;
+  debug_force_cpu?: boolean;
   max_visible?: number;
   workgroup_size?: number;
   readback_visible_lists?: boolean;
@@ -149,6 +152,7 @@ interface UnderstoryYamlGpu {
 export const DEFAULT_UNDERSTORY_GPU_SETTINGS: UnderstoryGpuSettings = {
   enabled: true,
   fallbackToCpu: true,
+  debugForceCpu: false,
   maxVisible: 12_000,
   workgroupSize: 64,
   readbackVisibleLists: true,
@@ -288,6 +292,7 @@ function readUnderstoryGpuSettings(
   return {
     enabled: readBoolean(raw?.enabled, fallback.enabled),
     fallbackToCpu: readBoolean(raw?.fallback_to_cpu, fallback.fallbackToCpu),
+    debugForceCpu: readBoolean(raw?.debug_force_cpu, fallback.debugForceCpu),
     maxVisible: readIntegerInRange(raw?.max_visible, fallback.maxVisible, 0, 2_000_000),
     workgroupSize: readUnderstoryGpuWorkgroupSize(raw?.workgroup_size, fallback.workgroupSize),
     readbackVisibleLists: readBoolean(raw?.readback_visible_lists, fallback.readbackVisibleLists),

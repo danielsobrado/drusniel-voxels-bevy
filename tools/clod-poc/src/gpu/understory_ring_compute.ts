@@ -27,7 +27,7 @@ const CLASS_PARAMS_BYTES = UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_S
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
 
-export const UNDERSTORY_GPU_RING_STORAGE_BINDINGS = 7;
+export const UNDERSTORY_GPU_RING_STORAGE_BINDINGS = 5;
 
 export interface UnderstoryGpuRingOutputBuffers {
   cell: GPUBuffer;
@@ -52,7 +52,8 @@ export interface UnderstoryGpuRingDispatchParams {
   centerZ: number;
   worldCells: number;
   maxInstancesPerGroup: number;
-  indexCount: number;
+  indexCounts: [number, number, number, number, number, number];
+  frustumPlanes: ArrayLike<number>;
 }
 
 interface ReadbackSlot {
@@ -348,7 +349,7 @@ export interface UnderstoryGpuRingDrawResources {
   cell: StorageInstancedBufferAttribute;
   indirect: StorageBufferAttribute;
   outputBuffers: UnderstoryGpuRingOutputBuffers;
-  materialHandle: UnderstoryMaterialHandle;
+  materialHandles: Record<UnderstoryClass, UnderstoryMaterialHandle>;
   geometries: UnderstoryGeometryMap;
 }
 
@@ -377,12 +378,15 @@ export function createGpuRingDrawResources(
   gpuBackend.createStorageAttribute(cell);
 
   const ringBuffers: UnderstoryRingInstanceBuffers = { cell, capacity: sharedInstanceCount };
-  const materialHandle = createUnderstoryRingNodeMaterialHandle(settings, ringBuffers, lighting);
 
   const geometries = createUnderstoryGeometryMap(settings);
   const meshes: UnderstoryGpuRingMesh[] = [];
+  const materialHandles = {} as Record<UnderstoryClass, UnderstoryMaterialHandle>;
 
   for (const cls of UNDERSTORY_CLASSES) {
+    const clsSettings = settings.classes[cls];
+    const handle = createUnderstoryRingNodeMaterialHandle(settings, ringBuffers, lighting, clsSettings.minScale, clsSettings.maxScale);
+    materialHandles[cls] = handle;
     const group = understoryRingGroupIndex(cls);
     meshes.push(createGpuRingTierDraw(
       settings,
@@ -390,7 +394,7 @@ export function createGpuRingDrawResources(
       count,
       indirect,
       group * 5 * Uint32Array.BYTES_PER_ELEMENT,
-      materialHandle,
+      handle,
       geometries,
       worldCells,
     ));
@@ -404,7 +408,7 @@ export function createGpuRingDrawResources(
       cell: gpuBufferForAttribute(cell, gpuBackend),
       indirectArgs: gpuBufferForAttribute(indirect, gpuBackend),
     },
-    materialHandle,
+    materialHandles,
     geometries,
   };
 }
@@ -466,6 +470,8 @@ export function clearGpuRingDraw(draw: UnderstoryGpuRingDrawResources | null): v
   for (const mesh of draw.meshes) {
     mesh.geometry.dispose();
   }
-  draw.materialHandle.dispose();
+  for (const handle of Object.values(draw.materialHandles)) {
+    handle.dispose();
+  }
   disposeUnderstoryGeometryMap(draw.geometries);
 }

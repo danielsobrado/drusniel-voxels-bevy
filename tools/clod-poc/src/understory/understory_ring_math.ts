@@ -18,8 +18,8 @@ import {
 
 export const UNDERSTORY_RING_GROUP_COUNT = UNDERSTORY_CLASSES.length;
 
-// std140 uniform: 8 vec4 lanes of globals (see packUnderstoryRingParams).
-export const UNDERSTORY_RING_PARAM_BYTES = 16 * 8;
+// std140 uniform: 15 vec4 lanes (9 globals + 6 frustum planes).
+export const UNDERSTORY_RING_PARAM_BYTES = 16 * 15;
 // Per-class selection params: 8 floats per class (see packUnderstoryRingClassParams).
 export const UNDERSTORY_RING_CLASS_STRIDE_F32 = 8;
 
@@ -28,7 +28,8 @@ export interface UnderstoryRingDispatchParams {
   centerZ: number;
   worldCells: number;
   maxInstancesPerGroup: number;
-  indexCount: number;
+  indexCounts: [number, number, number, number, number, number];
+  frustumPlanes: ArrayLike<number>;
 }
 
 export interface UnderstoryRingAcceptParams {
@@ -294,7 +295,24 @@ export function packUnderstoryRingParams(
   u32[25] = understoryRingGrid(settings) >>> 0;
   u32[26] = settings.seed >>> 0;
   u32[27] = UNDERSTORY_RING_GROUP_COUNT >>> 0;
-  // lane 7 — settings_extra (u32)
-  u32[28] = Math.max(0, Math.floor(params.indexCount)) >>> 0;
+  // lane 7 — settings_extra (u32): counts 4 and 5 (dead_log, stump)
+  const ic = params.indexCounts;
+  u32[28] = Math.max(0, Math.floor(ic[4])) >>> 0;
+  u32[29] = Math.max(0, Math.floor(ic[5])) >>> 0;
+  // lane 8 — class_index_counts (u32 × 4): counts 0..3 (shrub, fern, sapling, flower)
+  u32[32] = Math.max(0, Math.floor(ic[0])) >>> 0;
+  u32[33] = Math.max(0, Math.floor(ic[1])) >>> 0;
+  u32[34] = Math.max(0, Math.floor(ic[2])) >>> 0;
+  u32[35] = Math.max(0, Math.floor(ic[3])) >>> 0;
+  // lanes 9-14 — frustum planes (6 × vec4)
+  const fp = params.frustumPlanes;
+  for (let p = 0; p < 6; p++) {
+    const src = p * 4;
+    const dst = 36 + p * 4;
+    f32[dst] = fp[src] ?? 0;
+    f32[dst + 1] = fp[src + 1] ?? 0;
+    f32[dst + 2] = fp[src + 2] ?? 0;
+    f32[dst + 3] = fp[src + 3] ?? 0;
+  }
   return scratch;
 }

@@ -26,9 +26,10 @@ import {
   type UnderstoryGpuRingStats,
   type UnderstoryWebGpuBackendAccess,
 } from "../gpu/understory_ring_compute.js";
-import { understoryRingGroupCapacity } from "./understory_ring_math.js";
-import { getDigEditsSnapshot } from "../terrain.js";
+import { understoryRingGroupCapacity, understoryRingCell } from "./understory_ring_math.js";
+import { getDigEditsSnapshot, getDigEditRevision } from "../terrain.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
+import { generateUnderstoryRingValidationCounts } from "./understory_ring_validation.js";
 
 export interface UnderstorySystemOptions {
   scene: THREE.Scene;
@@ -46,8 +47,7 @@ export interface UnderstorySystemOptions {
 }
 
 export function understoryUsesGpuRingDraw(settings: UnderstorySettings): boolean {
-  const gpu = settings.gpu;
-  return settings.enabled && gpu.enabled && !gpu.fallbackToCpu;
+  return settings.enabled && settings.gpu.enabled && !settings.gpu.debugForceCpu;
 }
 
 export interface UnderstoryStats extends UnderstoryGenerationStats {
@@ -136,6 +136,8 @@ export class UnderstorySystem {
     readbackMs: null,
     skippedDispatches: 0,
   };
+  private lastGpuValidationSignature = "";
+  private readonly frustumPlaneScratch = new Float32Array(24);
 
   constructor(options: UnderstorySystemOptions) {
     this.scene = options.scene;
@@ -197,7 +199,7 @@ export class UnderstorySystem {
     this.setEnabled(this.settings.enabled);
   }
 
-  update(timeSeconds: number, center: THREE.Vector3): void {
+  update(timeSeconds: number, center: THREE.Vector3, camera?: THREE.Camera): void {
     this.materialHandle.setTime(timeSeconds);
     this.lastCenter.copy(center);
     if (!this.settings.enabled) {
@@ -206,7 +208,7 @@ export class UnderstorySystem {
     }
     if (this.usesGpuRingDraw()) {
       if (this.patches.length > 0) this.clearPatches();
-      this.updateGpuRingUnderstory(center);
+      this.updateGpuRingUnderstory(center, camera);
       return;
     }
     this.clearGpuRing();
@@ -308,9 +310,10 @@ export class UnderstorySystem {
     }).finally(() => { this.gpuRingInit = null; });
   }
 
-  private updateGpuRingUnderstory(center: THREE.Vector3): void {
+  private updateGpuRingUnderstory(center: THREE.Vector3, camera?: THREE.Camera): void {
     if (!this.supportsGpu || !this.gpuDevice || !this.gpuBackend) {
-      this.gpuStatus = "unsupported";
+      this.gpuStatus = this.gpuDevice ? "unsupported" : "disabled";
+      this.gpuRingStats = { ...this.gpuRingStats, status: "failed", reason: this.gpuDevice ? "unsupported" : "no device" };
       this.updateStats();
       return;
     }
@@ -327,7 +330,6 @@ export class UnderstorySystem {
     const gpu = this.settings.gpu;
     if (this.gpuRingStats.status === "failed" && gpu.fallbackToCpu) {
       this.gpuStatus = "fallback-cpu";
-      this.gpuRingStats = { ...this.gpuRingStats, status: "failed" };
       this.updateStats();
       if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) {
         this.refreshForCenter(center);
@@ -338,14 +340,17 @@ export class UnderstorySystem {
     }
 
     if (this.gpuRingCompute && this.gpuRingDraw) {
+      const indexCounts = this.gpuRingIndexCounts();
       this.gpuRingCompute.dispatch({
         centerX: center.x,
         centerZ: center.z,
         worldCells: this.worldCells,
         maxInstancesPerGroup: understoryRingGroupCapacity(this.settings),
-        indexCount: this.gpuRingDraw.meshes.length > 0 ? this.gpuRingDraw.meshes[0].geometry.instanceCount : 0,
+        indexCounts,
+        frustumPlanes: this.frustumPlanes(camera),
       });
       this.gpuRingStats = this.gpuRingCompute.stats(true);
+      this.validateGpuRingAgainstCpu(center, camera);
     }
 
     const c = this.gpuRingStats.counts;
@@ -354,6 +359,78 @@ export class UnderstorySystem {
     this.gpuDispatchMs = this.gpuRingStats.dispatchMs;
     this.gpuStatus = this.gpuRingStats.status === "failed" ? "error" : "ring";
     this.updateStats();
+  }
+
+  private validateGpuRingAgainstCpu(center: THREE.Vector3, camera?: THREE.Camera): void {
+    if (!this.settings.gpu.debugValidateAgainstCpu || this.gpuRingStats.readbackMs === null) return;
+
+    const signature = [
+      Math.round(center.x / understoryRingCell(this.settings)),
+      Math.round(center.z / understoryRingCell(this.settings)),
+      this.gpuRingStats.groupCounts.join(","),
+      this.gpuRingStats.overflowed ? 1 : 0,
+    ].join("|");
+    if (signature === this.lastGpuValidationSignature) return;
+    this.lastGpuValidationSignature = signature;
+
+    const expected = generateUnderstoryRingValidationCounts({
+      centerX: center.x,
+      centerZ: center.z,
+      worldCells: this.worldCells,
+      settings: this.settings,
+      sampler: this.sampler,
+      maxInstancesPerGroup: understoryRingGroupCapacity(this.settings),
+      frustumPlanes: this.frustumPlanes(camera),
+    });
+    const maxDelta = UNDERSTORY_CLASSES.reduce((max, cls) =>
+      Math.max(max, Math.abs((this.gpuRingStats.counts[cls] ?? 0) - (expected.counts[cls] ?? 0))),
+    0);
+    const gpuTotal = this.gpuVisibleCount;
+    const cpuTotal = UNDERSTORY_CLASSES.reduce((sum, cls) => sum + (expected.counts[cls] ?? 0), 0);
+    const tolerance = Math.max(4, Math.ceil(Math.max(cpuTotal, gpuTotal) * 0.02));
+    if (maxDelta > tolerance || expected.overflowed !== this.gpuRingStats.overflowed) {
+      console.warn(
+        "[understory-gpu-ring] CPU/GPU count parity failed " +
+        `gpu=${JSON.stringify(this.gpuRingStats.counts)} cpu=${JSON.stringify(expected.counts)} ` +
+        `maxDelta=${maxDelta} tolerance=${tolerance} ` +
+        `overflow gpu=${this.gpuRingStats.overflowed} cpu=${expected.overflowed}`,
+      );
+    }
+  }
+
+  private frustumPlanes(camera?: THREE.Camera): Float32Array {
+    if (!camera) {
+      this.frustumPlaneScratch.fill(0);
+      for (let i = 0; i < 6; i++) this.frustumPlaneScratch[i * 4 + 3] = 1_000_000;
+      return this.frustumPlaneScratch;
+    }
+    const frustum = new THREE.Frustum();
+    const projScreenMatrix = new THREE.Matrix4();
+    (camera as THREE.Camera & { updateProjectionMatrix?: () => void }).updateProjectionMatrix?.();
+    camera.updateMatrixWorld(true);
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+    projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(projScreenMatrix);
+    for (let i = 0; i < 6; i++) {
+      const plane = frustum.planes[i];
+      const offset = i * 4;
+      this.frustumPlaneScratch[offset] = plane.normal.x;
+      this.frustumPlaneScratch[offset + 1] = plane.normal.y;
+      this.frustumPlaneScratch[offset + 2] = plane.normal.z;
+      this.frustumPlaneScratch[offset + 3] = plane.constant;
+    }
+    return this.frustumPlaneScratch;
+  }
+
+  private gpuRingIndexCounts(): [number, number, number, number, number, number] {
+    const counts = [0, 0, 0, 0, 0, 0] as [number, number, number, number, number, number];
+    if (!this.gpuRingDraw) return counts;
+    for (let i = 0; i < UNDERSTORY_CLASSES.length && i < this.gpuRingDraw.meshes.length; i++) {
+      const geom = this.gpuRingDraw.meshes[i].geometry;
+      const idx = geom.getIndex();
+      counts[i] = idx ? idx.count : 0;
+    }
+    return counts;
   }
 
   private clearGpuRing(): void {
@@ -370,7 +447,6 @@ export class UnderstorySystem {
   private clearGpuRingDraw(): void {
     for (const mesh of this.ringMeshes) {
       this.root.remove(mesh);
-      mesh.geometry.dispose();
     }
     this.ringMeshes = [];
     clearGpuRingDraw(this.gpuRingDraw);
@@ -667,5 +743,6 @@ function understoryGpuRingKey(settings: UnderstorySettings, worldCells: number):
     settings.classes.flower.weight,
     settings.classes.dead_log.weight,
     settings.classes.stump.weight,
+    getDigEditRevision(),
   ].join(":");
 }

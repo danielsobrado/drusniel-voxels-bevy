@@ -12,6 +12,8 @@ struct UnderstoryRingParams {
   ecology_c: vec4<f32>,
   settings_u: vec4<u32>,
   settings_extra: vec4<u32>,
+  class_index_counts: vec4<u32>,
+  planes: array<vec4<f32>, 6>,
 };
 
 @group(0) @binding(0) var<uniform> params: UnderstoryRingParams;
@@ -289,9 +291,12 @@ fn understory_class_weight(group: u32, ecology: EcologySample, height: f32, norm
 // --- Frustum test ---
 
 fn in_frustum(center: vec3<f32>, slack: f32) -> bool {
-  // Simplified: accept all candidates (full frustum culling can be added later via params)
-  _ = center;
-  _ = slack;
+  for (var p = 0u; p < 6u; p = p + 1u) {
+    let plane = params.planes[p];
+    if (dot(plane.xyz, center) + plane.w < -slack) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -325,6 +330,7 @@ fn process_understory_slot(slot: u32) {
   if (dist > params.center_radius.z) { return; }
 
   let height = surfaceHeightField(wpos.x, wpos.y);
+  if (!in_frustum(vec3<f32>(wpos.x, height + 4.0, wpos.y), 8.0)) { return; }
   let normal = normalize(densityGradient(wpos.x, height, wpos.y));
   let ground = understory_terrain_gate(height, normal.y, wpos);
   if (ground < 0.0) { return; }
@@ -404,6 +410,11 @@ fn write_draw_args(group: u32, index_count: u32, instance_count: u32) {
 fn build_indirect_args(@builtin(global_invocation_id) id: vec3<u32>) {
   let group = id.x;
   if (group >= UNDERSTORY_GROUP_COUNT) { return; }
-  let index_count = params.settings_extra.x;
+  var index_count: u32;
+  if (group < 4u) {
+    index_count = params.class_index_counts[group];
+  } else {
+    index_count = params.settings_extra[group - 4u];
+  }
   write_draw_args(group, index_count, atomicLoad(&counters[group]));
 }

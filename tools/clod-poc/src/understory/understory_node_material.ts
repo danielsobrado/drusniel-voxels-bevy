@@ -140,6 +140,8 @@ export function createUnderstoryRingNodeMaterialHandle(
   settings: UnderstorySettings,
   buffers: UnderstoryRingInstanceBuffers,
   lighting: EnvironmentLighting = fallbackLighting(),
+  classMinScale?: number,
+  classMaxScale?: number,
 ): UnderstoryMaterialHandle {
   const uTime = uniform(0);
   const windDir = new THREE.Vector2(0.8, 0.6).normalize();
@@ -166,7 +168,9 @@ export function createUnderstoryRingNodeMaterialHandle(
     const aWorldXZ: TslNode = worldCell.add(jitter).mul(uCellSize);
     const aHeight: TslNode = aCell.z;
 
-    const aScale: TslNode = understoryRingHash(worldCell, uSeed, 601).mul(0.5).add(0.75);
+    const minS = classMinScale ?? 0.5;
+    const maxS = classMaxScale ?? 1.25;
+    const aScale: TslNode = understoryRingHash(worldCell, uSeed, 601).mul(maxS - minS).add(minS);
     const aYaw: TslNode = understoryRingHash(worldCell, uSeed, 701).mul(6.28318530718);
     const aWindPhase: TslNode = understoryRingHash(worldCell, uSeed, 809).mul(6.28318530718);
 

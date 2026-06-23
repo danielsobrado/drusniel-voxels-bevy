@@ -242,9 +242,11 @@ const BEDROCK_Y = 1;
 export const DIG_INFLUENCE_MARGIN = 4;
 
 const digEdits: DigEdit[] = [];
+let digEditRevision = 0;
 
 export function addDigEdit(edit: DigEdit): void {
   digEdits.push({ ...edit });
+  digEditRevision++;
 }
 
 /** Return a defensive copy suitable for persistence or diagnostics. */
@@ -256,14 +258,20 @@ export function getDigEditsSnapshot(): DigEdit[] {
 export function replaceDigEdits(edits: readonly DigEdit[]): void {
   digEdits.length = 0;
   for (const edit of edits) digEdits.push({ ...edit });
+  digEditRevision++;
 }
 
 export function clearDigEdits(): void {
   digEdits.length = 0;
+  digEditRevision++;
 }
 
 export function digEditCount(): number {
   return digEdits.length;
+}
+
+export function getDigEditRevision(): number {
+  return digEditRevision;
 }
 
 /** Signed distance to a brush volume centred at the offset (dx,dy,dz), horizontal half-size

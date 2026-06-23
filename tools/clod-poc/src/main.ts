@@ -5101,7 +5101,7 @@ async function main() {
     );
     grassSystem?.update(elapsedSeconds, ringCenter, camera);
     treeSystem?.update(elapsedSeconds, ringCenter, camera);
-    understorySystem?.update(elapsedSeconds, grassCenter);
+    understorySystem?.update(elapsedSeconds, grassCenter, camera);
     forestLightingSystem.update(elapsedSeconds, grassCenter, {
       treeProxies: treeSystem.getLightingProxies(),
       understoryProxies: understorySystem.getLightingProxies(),
