@@ -52,6 +52,7 @@ import {
   createWebGpuAppRenderer,
   parseRendererBackend,
 } from "./rendering/renderer_backend.js";
+import { getRendererGpuDevice } from "./rendering/webgpu_device_bridge.js";
 import { createWebGpuTerrainMaterial } from "./rendering/terrain_material_webgpu.js";
 import {
   GRASS_SHADER_MODES,
@@ -94,8 +95,10 @@ import {
   ClodErrorPxCompute,
   type ClodErrorMap,
   type ClodErrorPxStats,
+  type DispatchOptions,
 } from "./gpu/clod_error_px_compute.js";
 import { requestWebGpuDevice } from "./gpu/webgpu_device.js";
+import { parseReadbackMode, type WebGpuReadbackMode } from "./core/webgpu_readback_mode.js";
 import { TerrainColliderSet, type TerrainColliderPage, type TerrainSurfaceHit } from "./terrain_collider.js";
 import { borderChain } from "./validate.js";
 import {
@@ -597,6 +600,7 @@ async function main() {
   const queryCanopy = searchParams.get("canopy") === "1";
   const queryPerfMode = searchParams.get("clodPerf") === "1";
   const queryWebGpuSelection = searchParams.get("webgpuSelection") === "1";
+  const queryReadbackMode: WebGpuReadbackMode = parseReadbackMode(searchParams);
   const queryMaterialTiers = searchParams.get("materialTiers") === "1";
   // CPU/GPU error_px parity is a full per-node sweep; opt-in keeps it from hitching the
   // frame. Off: verify once when the first GPU map lands. On: re-verify periodically.
@@ -782,9 +786,7 @@ async function main() {
   const renderer = app.renderer;
   const maxAnisotropy = app.maxAnisotropy;
   const isWebGpu = app.isWebGpu;
-  const rendererWebGpuDevice = app.isWebGpu
-    ? (app.renderer.backend as unknown as { device?: GPUDevice }).device ?? null
-    : null;
+  const rendererWebGpuDevice = getRendererGpuDevice(app);
 
   // LV-0: Attach stats to long-view hooks after renderer is available.
   if (longViewHooks) {
@@ -2605,6 +2607,8 @@ async function main() {
   let parityVerified = false;
   let lastWebGpuDispatchFrame = -WEBGPU_DISPATCH_INTERVAL_FRAMES;
   let lastWebGpuDispatchKey = "";
+  let readbackOnceConsumed = false;
+  let lastReadbackOnceVersion = -1;
   const emptyWebGpuStats = (): ClodErrorPxStats => ({
     enabled: state.webgpuSelection,
     available: false,
@@ -2618,6 +2622,9 @@ async function main() {
     skippedDispatches: 0,
     parity: "unchecked",
     parityMaxDelta: null,
+    readbackMode: queryReadbackMode,
+    dispatchOnlyFrames: 0,
+    readbackFrames: 0,
   });
   const currentWebGpuStats = (): ClodErrorPxStats =>
     clodErrorCompute?.stats(selectionFrameId, state.webgpuSelection) ?? emptyWebGpuStats();
@@ -2629,7 +2636,7 @@ async function main() {
     const dispatch = stats.dispatchMs === null ? "-" : `${stats.dispatchMs.toFixed(2)}ms`;
     const readback = stats.readbackMs === null ? "-" : `${stats.readbackMs.toFixed(2)}ms`;
     const parityDelta = stats.parityMaxDelta === null ? "" : ` d=${stats.parityMaxDelta.toFixed(4)}px`;
-    return `webgpu=${stats.status} age=${age} dispatch=${dispatch} read=${readback} parity=${stats.parity}${parityDelta}`;
+    return `webgpu=${stats.status} rb=${stats.readbackMode} age=${age} dispatch=${dispatch} read=${readback} parity=${stats.parity}${parityDelta} dOnly=${stats.dispatchOnlyFrames}`;
   };
   const currentOverlaySnapshot = (): ClodOverlaySnapshot => ({
     worldSize: WORLD,
@@ -2752,9 +2759,26 @@ async function main() {
       camPos: [camera.position.x, camera.position.y, camera.position.z],
       forcedMaxLevel: state.forceMaxLevel === "auto" ? null : Number(state.forceMaxLevel),
     };
-    const gpuMap = state.webgpuSelection
-      ? clodErrorCompute?.latestFor(selectionFrameId, WEBGPU_ERROR_MAX_AGE_FRAMES) ?? null
-      : null;
+    let gpuMap: ClodErrorMap | null = null;
+    if (state.webgpuSelection && clodErrorCompute) {
+      const candidate = clodErrorCompute.latestFor(selectionFrameId, WEBGPU_ERROR_MAX_AGE_FRAMES);
+      if (candidate) {
+        switch (queryReadbackMode) {
+          case "off":
+            break;
+          case "once":
+            if (!readbackOnceConsumed) {
+              gpuMap = candidate;
+              readbackOnceConsumed = true;
+              lastReadbackOnceVersion = candidate.version;
+            }
+            break;
+          default:
+            gpuMap = candidate;
+            break;
+        }
+      }
+    }
     if (gpuMap) verifyWebGpuParity(gpuMap, params);
     const errorPxLookup = gpuMap && clodErrorCompute ? clodErrorCompute.errorLookup(gpuMap) : undefined;
     const tSelectCut = performance.now();
@@ -2840,7 +2864,22 @@ async function main() {
       const dispatchKey = webGpuDispatchKey(params);
       const dispatchDue = selectionFrameId - lastWebGpuDispatchFrame >= WEBGPU_DISPATCH_INTERVAL_FRAMES;
       if (dispatchDue && (!gpuMap || dispatchKey !== lastWebGpuDispatchKey)) {
-        if (clodErrorCompute.dispatch(params, selectionFrameId)) {
+        let dispatchOptions: DispatchOptions;
+        switch (queryReadbackMode) {
+          case "off":
+            dispatchOptions = { readback: false };
+            break;
+          case "once": {
+            const cv = clodErrorCompute.currentVersion();
+            const shouldReadback = !readbackOnceConsumed || lastReadbackOnceVersion !== cv;
+            dispatchOptions = { readback: shouldReadback };
+            break;
+          }
+          default:
+            dispatchOptions = { readback: true };
+            break;
+        }
+        if (clodErrorCompute.dispatch(params, selectionFrameId, dispatchOptions)) {
           lastWebGpuDispatchFrame = selectionFrameId;
           lastWebGpuDispatchKey = dispatchKey;
         }

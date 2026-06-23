@@ -1,4 +1,5 @@
 import type { SelectionParams } from "../selection.js";
+import type { WebGpuReadbackMode } from "../core/webgpu_readback_mode.js";
 import type { ClodPageNode } from "../types.js";
 import {
   CLOD_NODE_RECORD_BYTES,
@@ -42,6 +43,14 @@ export interface ClodErrorPxStats {
   skippedDispatches: number;
   parity: "unchecked" | "ok" | "failed" | "disabled";
   parityMaxDelta: number | null;
+  readbackMode: WebGpuReadbackMode;
+  dispatchOnlyFrames: number;
+  readbackFrames: number;
+}
+
+export interface DispatchOptions {
+  /** When false, dispatch compute for timing/parity only without MAP_READ readback. */
+  readback: boolean;
 }
 
 export interface ClodErrorPxComputeCreateResult {
@@ -97,6 +106,9 @@ export class ClodErrorPxCompute {
   private version = 0;
   private nodeIndexById = new Map<string, number>();
   private nodeCount = 0;
+  private readbackMode: WebGpuReadbackMode = "async";
+  private dispatchOnlyFrames = 0;
+  private readbackFrames = 0;
 
   private constructor(
     private readonly device: GPUDevice,
@@ -135,6 +147,14 @@ export class ClodErrorPxCompute {
       ],
     });
     writeFloat32Buffer(this.device, this.nodeBuffer, 0, packed.data);
+  }
+
+  setReadbackMode(mode: WebGpuReadbackMode): void {
+    this.readbackMode = mode;
+  }
+
+  currentVersion(): number {
+    return this.version;
   }
 
   private createReadbackSlots(outputBytes: number): ReadbackSlot[] {
@@ -257,13 +277,9 @@ export class ClodErrorPxCompute {
     }
   }
 
-  dispatch(selectionParams: SelectionParams, frameId: number): boolean {
+  dispatch(selectionParams: SelectionParams, frameId: number, options?: DispatchOptions): boolean {
     if (this.failedReason || this.nodeCount === 0) return false;
-    const slot = this.readbacks.find((candidate) => !candidate.busy);
-    if (!slot) {
-      this.skippedDispatches++;
-      return false;
-    }
+    const readback = options?.readback ?? true;
 
     const params = paramsFromSelection(selectionParams);
     this.paramScratch[0] = params.camPos[0];
@@ -282,39 +298,57 @@ export class ClodErrorPxCompute {
     pass.setBindGroup(0, this.bindGroup);
     pass.dispatchWorkgroups(Math.ceil(this.nodeCount / WORKGROUP_SIZE));
     pass.end();
-    encoder.copyBufferToBuffer(
-      this.outputBuffer,
-      0,
-      slot.buffer,
-      0,
-      this.nodeCount * Float32Array.BYTES_PER_ELEMENT,
-    );
+
+    let slot: ReadbackSlot | undefined;
+    if (readback) {
+      slot = this.readbacks.find((candidate) => !candidate.busy);
+      if (!slot) {
+        this.skippedDispatches++;
+        return false;
+      }
+      encoder.copyBufferToBuffer(
+        this.outputBuffer,
+        0,
+        slot.buffer,
+        0,
+        this.nodeCount * Float32Array.BYTES_PER_ELEMENT,
+      );
+    }
 
     const submittedVersion = this.version;
     const submittedGeneration = this.generation;
     const submittedParams = cloneParams(params);
     const submitStart = performance.now();
     const valueBytes = this.nodeCount * Float32Array.BYTES_PER_ELEMENT;
-    slot.busy = true;
+    if (slot) {
+      slot.busy = true;
+    }
     this.running++;
     this.device.queue.submit([encoder.finish()]);
     this.dispatchMs = performance.now() - submitStart;
+
+    if (!readback || !slot) {
+      this.dispatchOnlyFrames++;
+      return true;
+    }
+
+    this.readbackFrames++;
     const readbackStart = performance.now();
     void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
       // setNodes/destroy replaced the buffers under us: this slot is orphaned. Release
       // its buffer (the new generation owns fresh ones) and do not publish a stale map.
       if (submittedGeneration !== this.generation) {
-        slot.buffer.destroy();
+        slot!.buffer.destroy();
         return;
       }
-      const mapped = slot.buffer.getMappedRange(0, valueBytes);
-      slot.cpu.set(new Float32Array(mapped));
-      slot.buffer.unmap();
-      slot.busy = false;
+      const mapped = slot!.buffer.getMappedRange(0, valueBytes);
+      slot!.cpu.set(new Float32Array(mapped));
+      slot!.buffer.unmap();
+      slot!.busy = false;
       this.running = Math.max(0, this.running - 1);
       this.readbackMs = performance.now() - readbackStart;
       this.latest = {
-        values: slot.cpu,
+        values: slot!.cpu,
         version: submittedVersion,
         frameId,
         completedAt: performance.now(),
@@ -324,7 +358,7 @@ export class ClodErrorPxCompute {
       // A rejection from an orphaned slot (buffer destroyed by setNodes/destroy) is
       // expected; only a live-generation rejection is a real device failure.
       if (submittedGeneration !== this.generation) return;
-      slot.busy = false;
+      slot!.busy = false;
       this.running = Math.max(0, this.running - 1);
       this.failedReason = error instanceof Error ? error.message : String(error);
     });
@@ -384,6 +418,9 @@ export class ClodErrorPxCompute {
       skippedDispatches: this.skippedDispatches,
       parity: this.parity,
       parityMaxDelta: this.parityMaxDelta,
+      readbackMode: this.readbackMode,
+      dispatchOnlyFrames: this.dispatchOnlyFrames,
+      readbackFrames: this.readbackFrames,
     };
   }
 
