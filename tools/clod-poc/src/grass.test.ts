@@ -672,7 +672,7 @@ grass:
     clearDigEdits();
   });
 
-  it("shares the same material across all ring draw meshes", () => {
+  it("falls back to CPU patches after GPU ring init failure", () => {
     const scene = new THREE.Scene();
     const lighting = {
       light: new THREE.Vector3(0, 1, 0),
@@ -701,12 +701,73 @@ grass:
       settings: {
         ...settings,
         enabled: false,
-        shaderMode: "terrain-patch-v2",
+        shaderMode: "webgpu-ring-v1",
       },
       lighting,
+      supportsRing: true,
+      gpuDevice: null,
+      gpuBackend: null,
     });
-    const ringMeshes = (system as unknown as { ringMeshes: THREE.Mesh[] }).ringMeshes;
-    expect(ringMeshes.length).toBe(0);
+    const state = system as unknown as {
+      gpuRingFailedKey: string;
+      gpuRingKey: string;
+      patchesDirty: boolean;
+    };
+    state.gpuRingFailedKey = "simulated-failure-key";
+    state.gpuRingKey = "simulated-failure-key";
+    system.updateSettings({ enabled: true });
+    const stats = system.getStats();
+    expect(stats.blades).toBeGreaterThan(0);
+    expect(stats.gpuRingStatus).toBe("fallback-cpu");
+    system.dispose();
+  });
+
+  it("falls back to CPU patches after GPU ring dispatch failure", () => {
+    const scene = new THREE.Scene();
+    const lighting = {
+      light: new THREE.Vector3(0, 1, 0),
+      sunColor: new THREE.Color(1, 1, 1),
+      skyLight: new THREE.Color(0.5, 0.6, 0.7),
+      groundLight: new THREE.Color(0.2, 0.18, 0.16),
+    };
+    const system = new GrassSystem({
+      scene,
+      nodes: [{
+        id: "L0:0,0",
+        level: 0,
+        children: [],
+        mesh: {
+          positions: new Float32Array(),
+          normals: new Float32Array(),
+          materials: new Float32Array(),
+          indices: new Uint32Array(),
+        },
+        footprint,
+        bounds: { center: [8, 0, 8], radius: 12, minY: 0, maxY: 0 },
+        errorWorld: 0,
+        lowBenefit: false,
+      }],
+      worldCells: 16,
+      settings: {
+        ...settings,
+        enabled: false,
+        shaderMode: "webgpu-ring-v1",
+      },
+      lighting,
+      supportsRing: true,
+      gpuDevice: null,
+      gpuBackend: null,
+    });
+    const state = system as unknown as {
+      gpuRingFailedKey: string;
+      gpuRingKey: string;
+    };
+    state.gpuRingFailedKey = "dispatch-fail-key";
+    state.gpuRingKey = "dispatch-fail-key";
+    system.updateSettings({ enabled: true });
+    const stats = system.getStats();
+    expect(stats.blades).toBeGreaterThan(0);
+    expect(stats.gpuRingStatus).toBe("fallback-cpu");
     system.dispose();
   });
 });

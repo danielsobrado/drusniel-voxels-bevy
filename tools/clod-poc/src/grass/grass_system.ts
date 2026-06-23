@@ -51,6 +51,13 @@ import {
 import type { GrassGenerationStats, GrassStats } from "./grass_stats.js";
 import { grassFadeDistance, grassRingBands } from "./grass_math.js";
 
+export type GrassGpuRingComputeFactory = (
+  device: GPUDevice,
+  edits: readonly import("../gpu/terrain_field_core.js").ResolvedDigEdit[],
+  outputBuffers: import("../gpu/grass_ring_compute.js").GrassGpuRingOutputBuffers | null,
+  ring: import("./grass_config.js").GrassRingSettings,
+) => Promise<GrassGpuRingCompute>;
+
 export interface GrassSystemOptions {
   scene: THREE.Scene;
   nodes: ClodPageNode[];
@@ -63,6 +70,7 @@ export interface GrassSystemOptions {
   material?: GrassMaterialHandle;
   createMaterial?: GrassMaterialFactory;
   buildGeometry?: GrassGeometryBuilder;
+  createGpuRingCompute?: GrassGpuRingComputeFactory;
 }
 
 interface GrassPatch {
@@ -121,6 +129,7 @@ export class GrassSystem {
   private injectedMaterial: GrassMaterialHandle | null;
   private readonly injectedMaterialFactory: GrassMaterialFactory | null;
   private readonly injectedGeometryBuilder: GrassGeometryBuilder | null;
+  private readonly injectedGpuRingComputeFactory: GrassGpuRingComputeFactory | null;
   private readonly useGrassPrepass: boolean;
   private useGrassRingDebug: boolean;
   private lastRingDebugKey = "";
@@ -193,6 +202,7 @@ export class GrassSystem {
     this.injectedMaterialFactory = options.createMaterial ?? null;
     this.injectedMaterial = options.material ?? null;
     this.injectedGeometryBuilder = options.buildGeometry ?? null;
+    this.injectedGpuRingComputeFactory = options.createGpuRingCompute ?? null;
     this.useGrassPrepass = typeof location === "undefined"
       ? true
       : new URLSearchParams(location.search).get("prepass") !== "0";
@@ -216,8 +226,8 @@ export class GrassSystem {
     this.settings.enabled = enabled;
     this.root.visible = enabled;
     if (enabled && !wasEnabled) {
-      if (this.canUseGpuRingDraw()) {
-        this.updateGpuRingCounters(this.lastCenter);
+      if (this.canUseGpuRingDraw() && this.updateGpuRingCounters(this.lastCenter)) {
+        // GPU ring is active.
       }
       else if (this.patches.length === 0) this.refreshForCenter(this.lastCenter);
     }
@@ -225,6 +235,7 @@ export class GrassSystem {
 
   updateSettings(settings: Partial<GrassSettings>): void {
     const wasRing = this.isRingMode();
+    const wasEnabled = this.settings.enabled;
     const previousMode = this.settings.shaderMode;
     const previousGeometryKey = this.grassGeometryKey(this.settings);
     this.settings = resolveGrassSettings({ ...this.settings, ...settings });
@@ -247,7 +258,16 @@ export class GrassSystem {
     }
     this.updateMaterialUniforms();
     this.patchesDirty = true;
-    this.setEnabled(this.settings.enabled);
+    if (this.settings.enabled && !wasEnabled) {
+      this.updateCpuFallbackGpuStatus();
+      if (this.canUseGpuRingDraw() && this.updateGpuRingCounters(this.lastCenter)) {
+        // GPU ring is active.
+      }
+      else if (this.patches.length === 0) this.refreshForCenter(this.lastCenter);
+    }
+    else {
+      this.root.visible = this.settings.enabled;
+    }
   }
 
   updateLighting(lighting: GrassLighting): void {
@@ -280,8 +300,12 @@ export class GrassSystem {
     }
     if (this.canUseGpuRingDraw()) {
       if (this.patches.length > 0) this.clearPatches();
-      this.updateGpuRingCounters(center, camera);
-      return;
+      if (this.updateGpuRingCounters(center, camera)) {
+        return;
+      }
+      this.clearRing();
+      this.clearGpuRingCompute();
+      this.updateCpuFallbackGpuStatus();
     }
     if (this.gpuRingCompute || this.gpuRingInit || this.gpuRingDraw || this.ringMeshes.length > 0) {
       this.clearRing();
@@ -299,10 +323,12 @@ export class GrassSystem {
     this.clearGpuRingCompute();
     this.gpuRingFailedKey = "";
     if (this.settings.enabled) {
-      if (this.canUseGpuRingDraw()) {
-        this.updateGpuRingCounters(this.lastCenter);
+      if (this.canUseGpuRingDraw() && this.updateGpuRingCounters(this.lastCenter)) {
+        // GPU ring is active.
       }
       else {
+        this.clearRing();
+        this.clearGpuRingCompute();
         this.updateCpuFallbackGpuStatus();
         this.refreshForCenter(this.lastCenter);
       }
@@ -316,8 +342,9 @@ export class GrassSystem {
     if (ids.size === 0) return;
     if (this.canUseGpuRingDraw()) {
       this.clearGpuRingCompute();
-      this.updateGpuRingCounters(this.lastCenter);
-      return;
+      if (this.updateGpuRingCounters(this.lastCenter)) return;
+      this.clearRing();
+      this.updateCpuFallbackGpuStatus();
     }
     const retained: GrassPatch[] = [];
     for (const patch of this.patches) {
@@ -551,14 +578,14 @@ export class GrassSystem {
     });
   }
 
-  private updateGpuRingCounters(center: THREE.Vector3, camera?: THREE.Camera): void {
+  private updateGpuRingCounters(center: THREE.Vector3, camera?: THREE.Camera): boolean {
     if (!this.gpuDevice || !this.gpuBackend || !this.canUseGpuRingDraw()) {
       this.gpuRingStats = {
         ...this.gpuRingStats,
         status: "disabled",
       };
       this.logRingDebug("disabled");
-      return;
+      return false;
     }
     if (this.gpuRingUnsupportedReason) {
       this.gpuRingStats = {
@@ -567,19 +594,23 @@ export class GrassSystem {
         reason: this.gpuRingUnsupportedReason,
       };
       this.logRingDebug("unsupported");
-      return;
+      return false;
     }
 
     this.ensureGpuRingCompute();
     if (!this.gpuRingCompute) {
+      if (this.gpuRingFailedKey) {
+        this.logRingDebug("init-failed");
+        return false;
+      }
       this.logRingDebug("no-compute");
-      return;
+      return true;
     }
     const frustumPlanes = this.frustumPlanes(camera);
     if (!frustumPlanes) {
       this.gpuRingStats = this.gpuRingCompute.stats(this.settings.enabled);
       this.logRingDebug("no-frustum");
-      return;
+      return true;
     }
     const dispatched = this.gpuRingCompute.dispatch({
       centerX: center.x,
@@ -605,7 +636,7 @@ export class GrassSystem {
       this.gpuRingStats = this.gpuRingCompute.stats(this.settings.enabled);
       this.handleGpuRingFailure(this.gpuRingStats.reason ?? "dispatch failed");
       this.logRingDebug("dispatch-failed");
-      return;
+      return false;
     }
     this.gpuRingStats = this.gpuRingCompute.stats(this.settings.enabled);
     this.ringTierCounts = {
@@ -616,6 +647,7 @@ export class GrassSystem {
     };
     this.ringBladeCount = this.ringTierCounts.near + this.ringTierCounts.mid + this.ringTierCounts.far + this.ringTierCounts.super;
     this.logRingDebug("dispatched");
+    return true;
   }
 
   private ensureGpuRingCompute(): void {
@@ -653,7 +685,8 @@ export class GrassSystem {
     };
     const initKey = key;
     const edits = resolveDigEdits(getDigEditsSnapshot());
-    this.gpuRingInit = GrassGpuRingCompute.create(this.gpuDevice, edits, this.gpuRingDraw.outputBuffers, this.settings.ring)
+    const createCompute = this.injectedGpuRingComputeFactory ?? GrassGpuRingCompute.create;
+    this.gpuRingInit = createCompute(this.gpuDevice, edits, this.gpuRingDraw.outputBuffers, this.settings.ring)
       .then((compute) => {
         if (this.gpuRingKey !== initKey) {
           compute.destroy();
