@@ -128,6 +128,17 @@ describe("understory GPU status", () => {
     expect(system.getStats().gpuStatus).toBe("fallback-cpu");
   });
 
+  it("reports fallback-cpu when debugForceCpu is true even if fallbackToCpu is false", () => {
+    const scene = new THREE.Scene();
+    const settings = systemSettings();
+    settings.gpu.debugForceCpu = true;
+    settings.gpu.fallbackToCpu = false;
+    const system = new UnderstorySystem({ scene, nodes: [], worldCells: 64, settings, sampler: flatSampler() });
+    systems.push(system);
+    system.update(0, new THREE.Vector3(16, 0, 16));
+    expect(system.getStats().gpuStatus).toBe("fallback-cpu");
+  });
+
   it("reports disabled when system is disabled", () => {
     const scene = new THREE.Scene();
     const settings = systemSettings();

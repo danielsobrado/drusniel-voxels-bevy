@@ -185,6 +185,10 @@ export class UnderstorySystem {
       this.gpuStatus = "disabled";
       return;
     }
+    if (this.settings.gpu.debugForceCpu) {
+      this.gpuStatus = "fallback-cpu";
+      return;
+    }
     if (!this.supportsGpu || !this.gpuDevice || !this.gpuBackend) {
       this.gpuStatus = this.settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
       return;
@@ -373,6 +377,7 @@ export class UnderstorySystem {
 
     const gpu = this.settings.gpu;
     if (this.gpuRingStats.status === "failed" && gpu.fallbackToCpu) {
+      this.clearGpuRing();
       this.gpuStatus = "fallback-cpu";
       this.updateStats();
       if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) {
