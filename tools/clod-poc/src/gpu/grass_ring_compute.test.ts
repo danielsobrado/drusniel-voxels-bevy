@@ -51,9 +51,6 @@ describe("grass ring compute capabilities", () => {
     expect(shaderSource).toContain("params.density_a");
     expect(shaderSource).toContain("params.density_b");
     expect(shaderSource).toContain("params.settings_b.w");
-    expect(shaderSource).not.toContain("58.0 /");
-    expect(shaderSource).not.toContain("+ 42.0");
-    expect(shaderSource).not.toContain("120.0 /");
     expect(shaderSource).not.toContain("0.02, 1.0");
     expect(shaderSource).not.toContain("4.8");
   });
@@ -107,20 +104,12 @@ describe("grass ring compute capabilities", () => {
     expect(u32[20]).toBe(1234);
 
     const densityFromPacked = (distance: number) => {
-      const nearDistance = f32[24];
-      const midDistance = Math.max(nearDistance + 0.001, f32[25]);
-      const farEnd = Math.max(midDistance + 0.001, f32[26]);
-      if (distance <= nearDistance) return 1;
-      const smoothstep = (edge0: number, edge1: number, value: number) => {
-        const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
-        return t * t * (3 - 2 * t);
-      };
-      if (distance <= midDistance) {
-        const t = smoothstep(nearDistance, midDistance, distance);
-        return 1 + (f32[27] - 1) * t;
-      }
-      const t = smoothstep(midDistance, farEnd, distance);
-      return Math.min(1, Math.max(f32[28], f32[27] + (f32[28] - f32[27]) * t));
+      const farDensity = f32[28];
+      const d = Math.max(0, distance);
+      const base = Math.min(1, Math.pow(58 / (d + 42), 1.15));
+      const far = Math.pow(Math.min(1, 120 / Math.max(d, 120)), 1.6);
+      const raw = base * far;
+      return Math.min(1, Math.max(farDensity, raw));
     };
 
     for (const distance of [1, 60, 120, 180, 220]) {

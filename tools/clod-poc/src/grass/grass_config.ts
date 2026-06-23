@@ -93,6 +93,7 @@ export interface GrassRingSettings {
   farDistanceFraction: number;
   bandMeters: number;
   scruffMeters: number;
+  scruffMinDensity: number;
 }
 
 export interface GrassPatchFallbackSettings {
@@ -220,7 +221,8 @@ export const DEFAULT_GRASS_RING_SETTINGS: GrassRingSettings = {
   farMeters: 170,
   farDistanceFraction: 0.94,
   bandMeters: DEFAULT_GRASS_LOD_SETTINGS.ditherBandM,
-  scruffMeters: 24,
+  scruffMeters: 30,
+  scruffMinDensity: 0.28,
 };
 
 export const DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS: GrassPatchFallbackSettings = {
@@ -234,7 +236,7 @@ export const DEFAULT_GRASS_SETTINGS: GrassSettings = {
   distanceM: 120,
   refreshDistanceM: DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS.refreshDistance,
   maxNewPatchesPerFrame: DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS.maxNewPatchesPerRefresh,
-  maxInstances: 48000,
+  maxInstances: 64000,
   placement: { ...DEFAULT_GRASS_PLACEMENT_SETTINGS },
   lod: { ...DEFAULT_GRASS_LOD_SETTINGS },
   blade: { ...DEFAULT_GRASS_BLADE_SETTINGS },
@@ -253,7 +255,7 @@ export const DEFAULT_GRASS_SETTINGS: GrassSettings = {
   slopeMinY: DEFAULT_GRASS_PLACEMENT_SETTINGS.slopeMinY,
   minHeight: DEFAULT_GRASS_PLACEMENT_SETTINGS.minHeightM,
   maxHeight: DEFAULT_GRASS_PLACEMENT_SETTINGS.maxHeightM,
-  maxBlades: 48000,
+  maxBlades: 64000,
   seed: 1337,
   ring: { ...DEFAULT_GRASS_RING_SETTINGS },
   patchFallback: { ...DEFAULT_GRASS_PATCH_FALLBACK_SETTINGS },
@@ -337,6 +339,7 @@ interface GrassYamlConfig {
       far_distance_fraction?: number;
       band_meters?: number;
       scruff_meters?: number;
+      scruff_min_density?: number;
     };
     patch_fallback?: {
       max_new_patches_per_refresh?: number;
@@ -621,6 +624,7 @@ export function parseGrassConfig(
       farDistanceFraction: readNumberAtLeast(raw.ring?.far_distance_fraction, fallback.ring.farDistanceFraction, 0),
       bandMeters: readNumberAtLeast(raw.ring?.band_meters ?? raw.lod?.dither_band_m, fallback.ring.bandMeters, 0),
       scruffMeters: readNumberAtLeast(raw.ring?.scruff_meters, fallback.ring.scruffMeters, 0),
+      scruffMinDensity: readFraction(raw.ring?.scruff_min_density, fallback.ring.scruffMinDensity),
     },
     patchFallback: {
       maxNewPatchesPerRefresh: readIntegerAtLeast(

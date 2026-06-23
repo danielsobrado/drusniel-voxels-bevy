@@ -93,8 +93,9 @@ fn grass_mask(height: f32, normal_y: f32, distance: f32) -> f32 {
   let viable = above_water * slope_mask * (1.0 - rock_reject) * (1.0 - snow_reject);
   let bank = wet_bank(height, normal_y);
   let scruff_meters = params.settings_b.z;
+  let scruff_min = params.density_b.y;
   let scruff = (1.0 - smoothstep(scruff_meters * 0.45, scruff_meters, distance))
-    * viable * 0.18;
+    * viable * scruff_min;
   return clamp(max(grass_weight * viable * (1.0 - bank * 0.58), scruff), 0.0, 1.0);
 }
 
@@ -104,15 +105,11 @@ fn grass_thin(distance: f32) -> f32 {
   let far_end = max(mid_distance + 0.001, params.density_a.z);
   let mid_fraction = clamp(params.density_a.w, 0.0, 1.0);
   let far_density = clamp(params.density_b.x, 0.0, 1.0);
-  if (distance <= near_distance) {
-    return 1.0;
-  }
-  if (distance <= mid_distance) {
-    let t = smoothstep(near_distance, mid_distance, distance);
-    return mix(1.0, mid_fraction, t);
-  }
-  let t = smoothstep(mid_distance, far_end, distance);
-  return clamp(mix(mid_fraction, far_density, t), far_density, 1.0);
+  let d = max(distance, 0.0);
+  let base = min(1.0, pow(58.0 / (d + 42.0), 1.15));
+  let far = pow(min(1.0, 120.0 / max(d, 120.0)), 1.6);
+  let raw = base * far;
+  return clamp(raw, far_density, 1.0);
 }
 
 fn edge_fade(wpos: vec2<f32>, height: f32, normal_y: f32) -> f32 {
@@ -165,12 +162,13 @@ fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, norm
   let phase = pcg2d(wc, seed + 1801u).x * TAU;
   let color_hash = pcg2d(wc, seed + 1901u).x;
   let color_mix = min(1.0, color_hash * color_hash + bank * 0.16 + weights.z * 0.12);
+  let gust_k = pcg2d(wc, seed + 2003u).x * 0.6 + 0.7;
   let out_index = tier * max_per_tier + slot;
 
   out_offset[out_index] = vec4<f32>(wpos.x, height + 0.02, wpos.y, 1.0);
   out_packed0[out_index] = vec4<f32>(params.settings_a.y * height_scale * height_mul, yaw, phase, color_mix);
   out_packed1[out_index] = vec4<f32>(min(edge, ring_edge), normal.y, width_mul, f32(tier));
-  out_normal[out_index] = vec4<f32>(normal, 0.0);
+  out_normal[out_index] = vec4<f32>(normal, gust_k);
 }
 
 fn process_slot(slot: u32) {

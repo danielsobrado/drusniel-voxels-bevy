@@ -72,6 +72,8 @@ export interface GrassGpuRingDensityParams {
   farDensityRatio: number;
   farInstanceFraction: number;
   maxWidthCompensation: number;
+  scruffMinDensity: number;
+  gustStrength: number;
 }
 
 export interface GrassGpuRingIndexCounts {
@@ -144,7 +146,7 @@ export function grassGpuRingOutputIndex(tier: number, slot: number, maxInstances
 }
 
 export function grassGpuRingDensityParams(
-  settings: Pick<GrassSettings, "distance" | "lod" | "ring" | "blade">,
+  settings: Pick<GrassSettings, "distance" | "lod" | "ring" | "blade" | "wind">,
 ): GrassGpuRingDensityParams {
   const nearDistance = settings.distance * settings.lod.nearFraction;
   const midDistance = settings.distance * settings.lod.midFraction;
@@ -156,6 +158,8 @@ export function grassGpuRingDensityParams(
     farDensityRatio: settings.lod.farDensityRatio,
     farInstanceFraction: settings.lod.farInstanceFraction,
     maxWidthCompensation: settings.blade.maxWidthCompensation,
+    scruffMinDensity: settings.ring.scruffMinDensity,
+    gustStrength: settings.wind.gustStrength,
   };
 }
 
@@ -198,6 +202,8 @@ export function packGrassGpuRingParams(
   f32[27] = params.density.midInstanceFraction;
   f32[28] = params.density.farDensityRatio;
   f32[29] = params.density.farInstanceFraction;
+  f32[30] = params.density.scruffMinDensity;
+  f32[31] = params.density.gustStrength;
   if (params.frustumPlanes) {
     for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) {
       f32[32 + i] = params.frustumPlanes[i] ?? 0;

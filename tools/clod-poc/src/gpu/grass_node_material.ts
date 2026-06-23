@@ -57,6 +57,7 @@ export interface GrassNodeParams {
   bladeWidth: number;
   windStrength: number;
   windSpeed: number;
+  gustStrength?: number;
   mode?: GrassSettings["shaderMode"];
   alphaToCoverage?: boolean;
   distance?: number;
@@ -94,6 +95,7 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const uBladeWidth = uniform(params.bladeWidth);
   const uWindStrength = uniform(params.windStrength);
   const uWindSpeed = uniform(params.windSpeed);
+  const uGustStrength = uniform(params.gustStrength ?? 0.15);
   const uFadeCenter = uniform(params.fadeCenter?.clone() ?? new THREE.Vector2());
   const ringSettings = params.ring ?? DEFAULT_GRASS_SETTINGS.ring;
   const lodSettings = params.lod ?? DEFAULT_GRASS_SETTINGS.lod;
@@ -160,8 +162,13 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const uvY: TslNode = uv().y;
   const bend: TslNode = uvY.mul(uvY);
   const windTime: TslNode = uTime.mul(uWindSpeed).add(aPhase).add(aOffset.x.mul(0.071)).add(aOffset.z.mul(0.053));
+  const gustBase: TslNode = sin(windTime.mul(0.13)).mul(0.5).add(0.5);
+  const gustDetail: TslNode = sin(windTime.mul(0.73).add(aOffset.x.mul(0.19).add(aOffset.z.mul(0.14)))).mul(0.5).add(0.5);
+  const gust: TslNode = gustBase.mul(0.6).add(gustDetail.mul(0.4));
+  const gustK: TslNode = aTerrainNormal4.w;
+  const windAmp: TslNode = uWindStrength.mul(aHeight).mul(bend).mul(uGustStrength.mul(gust).mul(gustK).add(1.0).sub(uGustStrength));
   const wind: TslNode = vec2(sin(windTime), cos(windTime.mul(0.83).add(aPhase.mul(0.37))))
-    .mul(uWindStrength.mul(aHeight).mul(bend));
+    .mul(windAmp);
   let localX: TslNode;
   let localY: TslNode;
   let localZ: TslNode;
@@ -275,6 +282,7 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
       uBladeWidth.value = settings.bladeWidth;
       uWindStrength.value = settings.windStrength;
       uWindSpeed.value = settings.windSpeed;
+      if ("gustStrength" in settings) uGustStrength.value = (settings as { gustStrength?: number }).gustStrength ?? 0.15;
       uNearDistance.value = Math.min(settings.distance * settings.lod.nearFraction, settings.ring.nearMeters);
       uMidDistance.value = Math.min(settings.distance * settings.lod.midFraction, settings.ring.midMeters);
       uFarDistance.value = Math.min(settings.distance * settings.ring.farDistanceFraction, settings.ring.farMeters);

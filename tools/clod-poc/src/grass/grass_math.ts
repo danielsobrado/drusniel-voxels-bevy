@@ -68,20 +68,11 @@ export function acceptsGrassCandidate(settings: GrassSettings, sample: GrassCand
 }
 
 export function computeGrassDensityScale(distance: number, settings: GrassSettings): number {
-  const nearDistance = settings.distance * settings.lod.nearFraction;
-  const midDistance = settings.distance * settings.lod.midFraction;
-  if (distance <= nearDistance) return 1;
-  if (distance <= midDistance) {
-    const t = THREE.MathUtils.smoothstep(distance, nearDistance, midDistance);
-    return THREE.MathUtils.lerp(1, settings.lod.midInstanceFraction, t);
-  }
-  const farEnd = Math.max(midDistance + 0.001, settings.distance, settings.ring.farMeters);
-  const t = THREE.MathUtils.smoothstep(distance, midDistance, farEnd);
-  return THREE.MathUtils.clamp(
-    THREE.MathUtils.lerp(settings.lod.midInstanceFraction, settings.lod.farDensityRatio, t),
-    settings.lod.farDensityRatio,
-    1,
-  );
+  const d = Math.max(0, distance);
+  const base = Math.min(1, Math.pow(58 / (d + 42), 1.15));
+  const far = Math.pow(Math.min(1, 120 / Math.max(d, 120)), 1.6);
+  const raw = base * far;
+  return THREE.MathUtils.clamp(raw, settings.lod.farDensityRatio, 1);
 }
 
 export function grassThin(distance: number, settings: GrassSettings = DEFAULT_GRASS_SETTINGS): number {
@@ -131,7 +122,7 @@ export function grassMaskForHeightNormal(
     settings.ring.scruffMeters,
   ))
     * viableMask
-    * 0.18;
+    * settings.ring.scruffMinDensity;
   return THREE.MathUtils.clamp(
     Math.max(grassWeight * viableMask * wetBankThinning, scruff),
     0,
@@ -170,7 +161,7 @@ export function sampleGrassTerrainSite(
     settings.ring.scruffMeters,
   ))
     * viableMask
-    * 0.18;
+    * settings.ring.scruffMinDensity;
   const grassMask = THREE.MathUtils.clamp(
     Math.max(grassWeight * viableMask * wetBankThinning, scruff),
     0,

@@ -2180,6 +2180,7 @@ async function main() {
               bladeWidth: settings.bladeWidth,
               windStrength: settings.windStrength,
               windSpeed: settings.windSpeed,
+              gustStrength: settings.wind.gustStrength,
               mode: settings.shaderMode,
               alphaToCoverage: settings.alphaToCoverage,
               distance: settings.distance,
