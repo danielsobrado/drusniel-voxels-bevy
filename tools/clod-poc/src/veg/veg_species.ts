@@ -1,6 +1,6 @@
 /**
  * Grammar species presets for clod-poc, keyed by the existing `TreeSpeciesId`
- * (oak / pine / dead). Adapted from the fable5-world-demo reference
+ * (oak / pine / dead). Adapted from the reference vegetation implementation.
  * (`vegetation/Species.ts`: BEECH → oak, PINE → pine, snag → dead) but tuned
  * LEAN: clod-poc instances trees through a tight vertex budget (near = 8000),
  * far below the reference's hero trees, so densities/levels are reduced.

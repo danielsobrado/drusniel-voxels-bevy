@@ -55,13 +55,14 @@ export function deriveParentPage(
   const computedError = computeParentErrorWorld(simplified.mesh, sourceMesh, children) * config.errorScale;
   const childError = Math.max(...children.map((child) => child.errorWorld));
   const errorWorld = Math.max(computedError, childError);
+  const b = boundsOf(simplified.mesh);
   const node: ClodPageNode = {
     id: `L${level}:${nx},${nz}`,
     level,
     children: [...children],
     mesh: simplified.mesh,
     footprint,
-    bounds: boundsOf(simplified.mesh),
+    bounds: b,
     errorWorld,
     lowBenefit: simplified.lowBenefit,
   };

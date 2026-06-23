@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use bevy::asset::AssetId;
-use bevy::camera::primitives::{Aabb, Frustum, Sphere};
+use bevy::camera::primitives::{Aabb, CascadesFrusta, Frustum, Sphere};
 use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::core_3d::{
     AlphaMask3d, CORE_3D_DEPTH_FORMAT, Opaque3d, Opaque3dBatchSetKey, Opaque3dBinKey, Transparent3d,
@@ -58,6 +58,10 @@ use crate::rendering::water_reflection::REFLECTION_RENDER_LAYER;
 
 const SHADER_ASSET_PATH: &str = "shaders/instanced_prop.wgsl";
 const INTEGRATED_GROUP_INSTANCE_LIMIT: usize = 2048;
+
+#[cfg(feature = "gpu_vegetation")]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, bevy::render::render_graph::RenderLabel)]
+struct GpuVegetationCullLabel;
 const DEDICATED_GROUP_INSTANCE_LIMIT: usize = 65_536;
 const PROP_GROUP_REGION_CHUNKS: i32 = 2;
 const MIN_BINNED_PROP_GROUP_INSTANCES: usize = 4;
@@ -73,6 +77,7 @@ const TINY_CLUTTER_LOOKAHEAD_HEIGHT_RANGE: f32 = 40.0;
 const TINY_CLUTTER_LOOKAHEAD_FRONT_COS: f32 = 0.35;
 const TINY_CLUTTER_LOOKAHEAD_MAX_EXTRA_DISTANCE: f32 = 48.0;
 const TINY_CLUTTER_LOOKAHEAD_FULL_FRACTION: f32 = 0.5;
+const SHADOW_CASTER_BUDGET_PER_CASCADE: usize = 2048;
 const PROP_SUBCLUSTER_MIN_GROUP_INSTANCES: usize = 24;
 const PROP_SUBCLUSTER_MIN_CLUSTER_INSTANCES: usize = 8;
 const PROP_SUBCLUSTER_MAX_CLUSTERS_PER_GROUP: usize = 3;
@@ -189,6 +194,7 @@ pub struct InstancedPropGroup {
     instance_bounds: Vec<PropInstanceBounds>,
     pub shadow_instances: Vec<PropInstance>,
     shadow_culled: Vec<bool>,
+    cascade_shadow_instances: Vec<Vec<PropInstance>>,
     tint_enabled: bool,
     pub diagnostic_prop_type_mask: u8,
     pub version: u64,
@@ -196,6 +202,16 @@ pub struct InstancedPropGroup {
 }
 
 impl InstancedPropGroup {
+    /// Returns a reference to the source instances (used by GPU vegetation pipeline).
+    pub fn source_instances(&self) -> &[PropInstance] {
+        &self.source_instances
+    }
+
+    /// Returns whether tint is enabled for this group (used by GPU vegetation pipeline).
+    pub fn is_tint_enabled(&self) -> bool {
+        self.tint_enabled
+    }
+
     fn render_world_clone(&self) -> Self {
         Self {
             mesh: self.mesh.clone(),
@@ -208,6 +224,7 @@ impl InstancedPropGroup {
             instance_bounds: self.instance_bounds.clone(),
             shadow_instances: self.shadow_instances.clone(),
             shadow_culled: self.shadow_culled.clone(),
+            cascade_shadow_instances: self.cascade_shadow_instances.clone(),
             tint_enabled: self.tint_enabled,
             diagnostic_prop_type_mask: self.diagnostic_prop_type_mask,
             version: self.version,
@@ -232,6 +249,20 @@ pub struct PropVisualRefs {
 
 #[derive(Component)]
 pub struct PropTransformDirty;
+
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct CascadeIndex(pub usize);
+
+#[derive(Resource, Default, Debug)]
+pub struct CascadeShadowBuffers {
+    pub buffers: HashMap<(Entity, usize), CascadeShadowEntry>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CascadeShadowEntry {
+    pub buffer: Buffer,
+    pub length: usize,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct PropLocalBounds {
@@ -515,6 +546,7 @@ impl Plugin for PropInstancingPlugin {
         app.init_resource::<PropInstanceGroups>()
             .init_resource::<PropBoundsConfig>()
             .init_resource::<PropBoundsDebugSettings>()
+            .init_resource::<CascadeShadowBuffers>()
             .add_systems(Startup, configure_prop_instancing_limits)
             .add_systems(
                 Update,
@@ -548,6 +580,46 @@ impl Plugin for PropInstancingPlugin {
                     queue_instanced_prop_shadows.in_set(RenderSystems::QueueMeshes),
                 ),
             );
+
+        #[cfg(feature = "gpu_vegetation")]
+        {
+            use crate::props::gpu_vegetation;
+            use crate::props::gpu_vegetation_cull;
+
+            app.sub_app_mut(RenderApp)
+                .init_resource::<gpu_vegetation::GpuVegetationSourceBuffer>()
+                .add_systems(
+                    ExtractSchedule,
+                    (
+                        gpu_vegetation::extract_gpu_vegetation_source_instances,
+                        gpu_vegetation_cull::extract_gpu_cull_params,
+                    ),
+                )
+                .add_systems(
+                    Render,
+                    (
+                        gpu_vegetation::prepare_gpu_vegetation_source_buffer
+                            .in_set(RenderSystems::PrepareResources),
+                        gpu_vegetation_cull::prepare_gpu_cull_dispatch
+                            .in_set(RenderSystems::PrepareResources)
+                            .after(gpu_vegetation::prepare_gpu_vegetation_source_buffer),
+                        prepare_instance_buffers
+                            .in_set(RenderSystems::PrepareResources)
+                            .after(gpu_vegetation_cull::prepare_gpu_cull_dispatch),
+                    ),
+                )
+                .add_systems(
+                    RenderStartup,
+                    gpu_vegetation_cull::init_gpu_cull_pipeline,
+                );
+
+            // Register the compute cull node in the Core3d render graph.
+            use bevy::core_pipeline::core_3d::graph::Core3d;
+            use bevy::render::render_graph::RenderGraphExt;
+            app.sub_app_mut(RenderApp).add_render_graph_node::<
+                bevy::render::render_graph::ViewNodeRunner<gpu_vegetation_cull::GpuVegetationCullNode>,
+            >(Core3d, GpuVegetationCullLabel);
+        }
     }
 }
 
@@ -780,6 +852,7 @@ fn get_or_create_group(
                         instance_bounds: Vec::new(),
                         shadow_instances: Vec::new(),
                         shadow_culled: Vec::new(),
+                        cascade_shadow_instances: Vec::new(),
                         tint_enabled: !groups.integrated_gpu,
                         diagnostic_prop_type_mask: prop_type_mask(prop_type),
                         version: 1,
@@ -1034,7 +1107,7 @@ fn rebuild_visible_and_shadow_instances_with_options(
         }
         visible_instances.push(*instance);
         visible_bounds.push(*bounds);
-        if !*shadow_culled && (disable_shadow_lod || *lod == PropInstanceLod::Full) {
+        if !*shadow_culled && (disable_shadow_lod || *lod == PropInstanceLod::Full || *lod == PropInstanceLod::Mid) {
             shadow_instances.push(*instance);
         }
     }
@@ -1054,6 +1127,110 @@ fn rebuild_visible_and_shadow_instances_with_options(
     }
 
     (visible_dirty, shadow_dirty)
+}
+
+fn rebuild_visible_and_shadow_instances_with_cascades(
+    group: &mut InstancedPropGroup,
+    disable_shadow_lod: bool,
+    cascade_frusta: &[Frustum],
+    camera_pos: Vec3,
+    cascade_overflow: &mut Vec<usize>,
+) -> (bool, bool, bool) {
+    let mut visible_instances = Vec::with_capacity(group.source_instances.len());
+    let mut visible_bounds = Vec::with_capacity(group.source_bounds.len());
+    let mut shadow_instances = Vec::with_capacity(group.source_instances.len());
+    let num_cascades = cascade_frusta.len();
+    let mut cascade_lists: Vec<Vec<PropInstance>> = vec![Vec::new(); num_cascades];
+
+    for (((instance, bounds), lod), shadow_culled) in group
+        .source_instances
+        .iter()
+        .zip(group.source_bounds.iter())
+        .zip(group.lod_states.iter())
+        .zip(group.shadow_culled.iter())
+    {
+        if *lod == PropInstanceLod::Hidden {
+            continue;
+        }
+        visible_instances.push(*instance);
+        visible_bounds.push(*bounds);
+
+        let is_shadow_capable = !*shadow_culled
+            && (disable_shadow_lod || *lod == PropInstanceLod::Full || *lod == PropInstanceLod::Mid);
+
+        if !is_shadow_capable {
+            continue;
+        }
+
+        shadow_instances.push(*instance);
+
+        if num_cascades > 0 {
+            let sphere = Sphere {
+                center: Vec3A::from(bounds.sphere_center),
+                radius: bounds.sphere_radius,
+            };
+            for (cascade_idx, frustum) in cascade_frusta.iter().enumerate() {
+                if frustum.intersects_sphere(&sphere, true) {
+                    cascade_lists[cascade_idx].push(*instance);
+                }
+            }
+        }
+    }
+
+    for (cascade_idx, cascade_list) in cascade_lists.iter_mut().enumerate() {
+        if cascade_list.len() <= SHADOW_CASTER_BUDGET_PER_CASCADE {
+            continue;
+        }
+        let overflow = cascade_list.len() - SHADOW_CASTER_BUDGET_PER_CASCADE;
+        cascade_overflow[cascade_idx] += overflow;
+        let mut dist_keys: Vec<f32> = cascade_list
+            .iter()
+            .map(|inst| {
+                camera_pos.distance(Vec3::new(
+                    inst.transform[3][0],
+                    inst.transform[3][1],
+                    inst.transform[3][2],
+                ))
+            })
+            .collect();
+        let mut indices: Vec<usize> = (0..cascade_list.len()).collect();
+        indices.sort_unstable_by(|&a, &b| {
+            dist_keys[a]
+                .partial_cmp(&dist_keys[b])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        indices.truncate(SHADOW_CASTER_BUDGET_PER_CASCADE);
+        let mut truncated = indices
+            .into_iter()
+            .map(|i| {
+                dist_keys[i] = 0.0;
+                cascade_list[i]
+            })
+            .collect::<Vec<_>>();
+        std::mem::swap(cascade_list, &mut truncated);
+    }
+
+    let visible_dirty =
+        group.instances != visible_instances || group.instance_bounds != visible_bounds;
+    if visible_dirty {
+        group.instances = visible_instances;
+        group.instance_bounds = visible_bounds;
+        bump_version(group);
+    }
+
+    let shadow_dirty = group.shadow_instances != shadow_instances;
+    if shadow_dirty {
+        group.shadow_instances = shadow_instances;
+        bump_shadow_version(group);
+    }
+
+    let cascade_dirty = group.cascade_shadow_instances != cascade_lists;
+    if cascade_dirty {
+        group.cascade_shadow_instances = cascade_lists;
+        bump_shadow_version(group);
+    }
+
+    (visible_dirty, shadow_dirty, cascade_dirty)
 }
 
 fn source_bounds_aabb(bounds: &[PropInstanceBounds]) -> Option<(Vec3, Vec3)> {
@@ -1083,6 +1260,7 @@ fn update_instanced_prop_lod(
     timing: Option<Res<RenderTimingSink>>,
     bench_toggles: Option<Res<BenchRenderToggles>>,
     quality_preset: Res<RenderQualityPreset>,
+    directional_lights: Query<&CascadesFrusta, With<DirectionalLight>>,
     mut last_update: Local<f32>,
 ) {
     let now = time.elapsed_secs();
@@ -1105,11 +1283,28 @@ fn update_instanced_prop_lod(
     let lod_distance_scale = quality_preset.prop_lod_distance_scale();
     let shadow_distance_scale = quality_preset.prop_shadow_distance_scale();
 
+    let cascade_frusta_list = {
+        let mut all_frusta = Vec::new();
+        for cascades_frusta in &directional_lights {
+            for (_view_entity, frusta) in &cascades_frusta.frusta {
+                if all_frusta.is_empty() {
+                    all_frusta = frusta.clone();
+                }
+                break;
+            }
+            break;
+        }
+        all_frusta
+    };
+
     let mut full_instances = 0usize;
     let mut mid_instances = 0usize;
     let mut hidden_instances = 0usize;
     let mut shadows_disabled = 0usize;
     let mut groups_dirtied = 0usize;
+    let num_cascades = cascade_frusta_list.len();
+    let mut cascade_overflow = vec![0usize; num_cascades];
+    let mut cascade_caster_counts = vec![0usize; num_cascades];
 
     for (entity, mut group) in &mut groups {
         let mut lod_changed = false;
@@ -1171,9 +1366,15 @@ fn update_instanced_prop_lod(
         }
 
         if lod_changed {
-            let (visible_dirty, shadow_dirty) =
-                rebuild_visible_and_shadow_instances_with_options(&mut group, disable_shadow_lod);
-            if visible_dirty || shadow_dirty {
+            let (visible_dirty, shadow_dirty, cascade_dirty) =
+                rebuild_visible_and_shadow_instances_with_cascades(
+                    &mut group,
+                    disable_shadow_lod,
+                    &cascade_frusta_list,
+                    camera_pos,
+                    &mut cascade_overflow,
+                );
+            if visible_dirty || shadow_dirty || cascade_dirty {
                 groups_dirtied += 1;
             }
             if visible_dirty {
@@ -1185,6 +1386,9 @@ fn update_instanced_prop_lod(
                 commands.entity(entity).insert(visibility);
             }
         }
+        for (ci, cascade_instances) in group.cascade_shadow_instances.iter().enumerate() {
+            cascade_caster_counts[ci] += cascade_instances.len();
+        }
     }
 
     if let Some(sink) = timing.as_deref() {
@@ -1193,6 +1397,18 @@ fn update_instanced_prop_lod(
         sink.push_count("Prop LOD Hidden Instances", hidden_instances as f64);
         sink.push_count("Prop Shadows Disabled By LOD", shadows_disabled as f64);
         sink.push_count("Instanced Groups Dirtied By LOD", groups_dirtied as f64);
+        for (idx, &overflow) in cascade_overflow.iter().enumerate() {
+            sink.push_count(
+                format!("Prop Shadow Cascade {idx} Budget Overflow"),
+                overflow as f64,
+            );
+        }
+        for (idx, &count) in cascade_caster_counts.iter().enumerate() {
+            sink.push_count(
+                format!("Prop Shadow Cascade {idx} Total Casters"),
+                count as f64,
+            );
+        }
     }
 }
 
@@ -1360,8 +1576,9 @@ fn extract_instanced_prop_groups(
             target.version != source.version || target.instances.len() != source.instances.len();
         let shadow_dirty = target.shadow_version != source.shadow_version
             || target.shadow_instances.len() != source.shadow_instances.len();
+        let cascade_dirty = target.cascade_shadow_instances != source.cascade_shadow_instances;
 
-        if !metadata_dirty && !visible_dirty && !shadow_dirty {
+        if !metadata_dirty && !visible_dirty && !shadow_dirty && !cascade_dirty {
             groups_skipped += 1;
             continue;
         }
@@ -1391,6 +1608,12 @@ fn extract_instanced_prop_groups(
             target.shadow_version = source.shadow_version;
             shadow_vectors_cloned += 1;
             shadow_instances_cloned += source.shadow_instances.len();
+        }
+
+        if cascade_dirty {
+            target
+                .cascade_shadow_instances
+                .clone_from(&source.cascade_shadow_instances);
         }
     }
 
@@ -1444,10 +1667,17 @@ pub struct InstanceBuffer {
     pub shadow_capacity: usize,
     pub shadow_length: usize,
     pub uploaded_shadow_version: u64,
+    pub cascade_shadow_count: usize,
     subcluster_grid: u8,
     subcluster_source_version: u64,
     subcluster_visibility_mask: u64,
     subclusters: Vec<PreparedPropSubcluster>,
+    /// GPU cull: draw args buffer for indirect draw (None = CPU path).
+    pub gpu_cull_draw_args_buffer: Option<Buffer>,
+    /// GPU cull: visible instances buffer for vertex shader (STORAGE | VERTEX).
+    pub gpu_cull_visible_buffer: Option<Buffer>,
+    /// GPU cull: byte offset into the draw args buffer for this entity's group.
+    pub gpu_cull_draw_args_offset: u64,
 }
 
 #[derive(Clone)]
@@ -1738,6 +1968,9 @@ fn prepare_instance_buffers(
     render_queue: Res<RenderQueue>,
     timing: Option<Res<RenderTimingSink>>,
     bench_toggles: Option<Res<BenchRenderToggles>>,
+    mut cascade_buffers: ResMut<CascadeShadowBuffers>,
+    #[cfg(feature = "gpu_vegetation")]
+    gpu_cull_buffers: Option<Res<crate::props::gpu_vegetation_cull::GpuVegetationCullBuffers>>,
 ) {
     let sink = timing.as_deref();
     let _timer = render_timing_guard(sink, "Render Instancing Prepare Buffers");
@@ -1818,10 +2051,14 @@ fn prepare_instance_buffers(
                         shadow_capacity: existing.shadow_capacity,
                         shadow_length: 0,
                         uploaded_shadow_version: group.shadow_version,
+                        cascade_shadow_count: 0,
                         subcluster_grid: 0,
                         subcluster_source_version: 0,
                         subcluster_visibility_mask: 0,
                         subclusters: Vec::new(),
+                        gpu_cull_draw_args_buffer: None,
+                        gpu_cull_visible_buffer: None,
+                        gpu_cull_draw_args_offset: 0,
                     });
                 }
             }
@@ -2011,7 +2248,29 @@ fn prepare_instance_buffers(
         } else {
             Vec::new()
         };
-        commands.entity(entity).insert(InstanceBuffer {
+        // GPU cull: look up draw args buffer and offset for this entity.
+        #[cfg(feature = "gpu_vegetation")]
+        let (gpu_cull_draw_args_buffer, gpu_cull_visible_buffer, gpu_cull_draw_args_offset) =
+            if let Some(ref cull_buffers) = gpu_cull_buffers {
+                if let Some(group_idx) = cull_buffers.group_index_for_entity(entity) {
+                    let stride = std::mem::size_of::<crate::props::gpu_vegetation_cull::GpuDrawArgsTemplate>() as u64;
+                    (
+                        cull_buffers.draw_args_buffer().cloned(),
+                        cull_buffers.visible_instances_buffer().cloned(),
+                        group_idx as u64 * stride,
+                    )
+                } else {
+                    (None, None, 0)
+                }
+            } else {
+                (None, None, 0)
+            };
+        #[cfg(not(feature = "gpu_vegetation"))]
+        let (gpu_cull_draw_args_buffer, gpu_cull_visible_buffer, gpu_cull_draw_args_offset): (Option<Buffer>, Option<Buffer>, u64) = (None, None, 0);
+        let mut entity_cmd = commands.entity(entity);
+        #[allow(unused_variables)]
+        let gpu_cull_active = gpu_cull_draw_args_buffer.is_some();
+        entity_cmd.insert(InstanceBuffer {
             buffer,
             capacity,
             length,
@@ -2020,11 +2279,56 @@ fn prepare_instance_buffers(
             shadow_capacity,
             shadow_length,
             uploaded_shadow_version,
+            cascade_shadow_count: group.cascade_shadow_instances.len(),
             subcluster_grid,
             subcluster_source_version: if subcluster_mode { group.version } else { 0 },
             subcluster_visibility_mask,
             subclusters: subclusters_to_store,
+            gpu_cull_draw_args_buffer,
+            gpu_cull_visible_buffer,
+            gpu_cull_draw_args_offset,
         });
+        #[cfg(feature = "gpu_vegetation")]
+        if gpu_cull_active {
+            entity_cmd.insert(GpuCullActive);
+        }
+
+        cascade_buffers.buffers.retain(|(e, _), _| *e != entity);
+        for (cascade_idx, cascade_instances) in group.cascade_shadow_instances.iter().enumerate() {
+            if cascade_instances.is_empty() {
+                continue;
+            }
+            let cascade_no_tint: Vec<PropInstanceNoTint>;
+            let cascade_contents: &[u8] = if group.tint_enabled {
+                bytemuck::cast_slice(cascade_instances.as_slice())
+            } else {
+                cascade_no_tint = cascade_instances
+                    .iter()
+                    .map(|inst| PropInstanceNoTint {
+                        transform: inst.transform,
+                    })
+                    .collect();
+                bytemuck::cast_slice(cascade_no_tint.as_slice())
+            };
+            let required_len = cascade_instances.len();
+            let new_capacity = required_len.next_power_of_two().max(1);
+            let size = (new_capacity * instance_stride(group.tint_enabled)) as u64;
+            let buf = render_device.create_buffer(&BufferDescriptor {
+                label: Some("instanced prop cascade shadow buffer"),
+                size,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            render_queue.write_buffer(&buf, 0, cascade_contents);
+            bytes_uploaded += cascade_contents.len();
+            cascade_buffers.buffers.insert(
+                (entity, cascade_idx),
+                CascadeShadowEntry {
+                    buffer: buf,
+                    length: required_len,
+                },
+            );
+        }
     }
 
     if let Some(sink) = sink {
@@ -2117,6 +2421,7 @@ struct PropInstancingPipeline {
     shader: Handle<Shader>,
     mesh_pipeline: MeshPipeline,
     material_layout: BindGroupLayoutDescriptor,
+    gpu_cull_vertex_entries: Option<&'static [BindGroupLayoutEntry]>,
 }
 
 #[derive(Resource)]
@@ -2137,10 +2442,17 @@ fn init_prop_instancing_pipeline(
 ) {
     let material_layout = PropsMaterial::bind_group_layout_descriptor(&render_device);
     let _ = pipeline_cache.get_bind_group_layout(&material_layout);
+    #[cfg(feature = "gpu_vegetation")]
+    let gpu_cull_vertex_entries = Some(
+        crate::props::gpu_vegetation_cull::gpu_cull_vertex_bind_group_entries(),
+    );
+    #[cfg(not(feature = "gpu_vegetation"))]
+    let gpu_cull_vertex_entries = None;
     commands.insert_resource(PropInstancingPipeline {
         shader: asset_server.load(SHADER_ASSET_PATH),
         mesh_pipeline: mesh_pipeline.clone(),
         material_layout,
+        gpu_cull_vertex_entries,
     });
     if let Some(prepass_pipeline) = prepass_pipeline {
         commands.insert_resource(PropInstancingShadowPipeline {
@@ -2216,21 +2528,52 @@ impl SpecializedMeshPipeline for PropInstancingPipeline {
             .mesh_key
             .intersection(MeshPipelineKey::BLEND_RESERVED_BITS)
             == MeshPipelineKey::BLEND_ALPHA;
-        descriptor
-            .vertex
-            .buffers
-            .push(instance_vertex_buffer_layout(key.tint_enabled));
-        if let Some(fragment) = descriptor.fragment.as_mut() {
-            fragment.shader = self.shader.clone();
-            fragment.shader_defs.push(ShaderDefVal::UInt(
-                "MATERIAL_BIND_GROUP".into(),
-                MATERIAL_BIND_GROUP_INDEX as u32,
-            ));
-            if key.tint_enabled {
-                fragment.shader_defs.push("PROP_INSTANCE_TINT".into());
+        if key.gpu_cull {
+            // GPU cull: vertex shader reads instance data from storage buffer (bind group 4).
+            // No instance vertex buffer layout needed.
+            descriptor
+                .vertex
+                .shader_defs
+                .push("GPU_VEGETATION".into());
+            if let Some(entries) = self.gpu_cull_vertex_entries {
+                descriptor.layout.push(BindGroupLayoutDescriptor {
+                    label: std::borrow::Cow::Borrowed("gpu_cull_vertex_bg_layout"),
+                    entries: entries.to_vec(),
+                });
             }
-            if blends_alpha {
-                fragment.shader_defs.push("PROP_BLEND_ALPHA".into());
+            if let Some(fragment) = descriptor.fragment.as_mut() {
+                fragment.shader = self.shader.clone();
+                fragment.shader_defs.push(ShaderDefVal::UInt(
+                    "MATERIAL_BIND_GROUP".into(),
+                    MATERIAL_BIND_GROUP_INDEX as u32,
+                ));
+                if key.tint_enabled {
+                    fragment.shader_defs.push("PROP_INSTANCE_TINT".into());
+                }
+                if blends_alpha {
+                    fragment.shader_defs.push("PROP_BLEND_ALPHA".into());
+                }
+                fragment
+                    .shader_defs
+                    .push("GPU_VEGETATION".into());
+            }
+        } else {
+            descriptor
+                .vertex
+                .buffers
+                .push(instance_vertex_buffer_layout(key.tint_enabled));
+            if let Some(fragment) = descriptor.fragment.as_mut() {
+                fragment.shader = self.shader.clone();
+                fragment.shader_defs.push(ShaderDefVal::UInt(
+                    "MATERIAL_BIND_GROUP".into(),
+                    MATERIAL_BIND_GROUP_INDEX as u32,
+                ));
+                if key.tint_enabled {
+                    fragment.shader_defs.push("PROP_INSTANCE_TINT".into());
+                }
+                if blends_alpha {
+                    fragment.shader_defs.push("PROP_BLEND_ALPHA".into());
+                }
             }
         }
         descriptor
@@ -2244,6 +2587,7 @@ impl SpecializedMeshPipeline for PropInstancingPipeline {
 struct PropInstancingPipelineKey {
     mesh_key: MeshPipelineKey,
     tint_enabled: bool,
+    gpu_cull: bool,
 }
 
 impl SpecializedMeshPipeline for PropInstancingShadowPipeline {
@@ -2494,6 +2838,7 @@ fn queue_instanced_props(
             let key = PropInstancingPipelineKey {
                 mesh_key,
                 tint_enabled: group.tint_enabled,
+                gpu_cull: instance_buffer.gpu_cull_draw_args_buffer.is_some(),
             };
             let Ok(pipeline_id) = params.pipelines.specialize(
                 &params.pipeline_cache,
@@ -2818,6 +3163,7 @@ fn queue_instanced_prop_shadows(
         Query<&RenderCascadesVisibleEntities, With<ExtractedDirectionalLight>>,
         Query<&RenderCubemapVisibleEntities, With<ExtractedPointLight>>,
         Query<&RenderVisibleMeshEntities, With<ExtractedPointLight>>,
+        Res<CascadeShadowBuffers>,
     )>,
     view_key_cache: Res<ViewKeyCache>,
     timing: Option<Res<RenderTimingSink>>,
@@ -2848,6 +3194,10 @@ fn queue_instanced_prop_shadows(
     let mut lights_seen = 0usize;
     let mut draws_queued = 0usize;
     let mut instances_queued = 0usize;
+    let mut cascade_buffer_hits = 0usize;
+    let mut cascade_buffer_fallbacks = 0usize;
+    let mut per_cascade_directional_draws = 0usize;
+    let mut per_cascade_directional_instances = 0usize;
     let draw_function = shadow_draw_functions.read().id::<DrawInstancedPropShadow>();
 
     for (camera_entity, view_lights, camera_layers) in &view_lights {
@@ -2907,12 +3257,32 @@ fn queue_instanced_prop_shadows(
                 continue;
             }
 
+            let is_directional = matches!(light_entity, LightEntity::Directional { .. });
+            let cascade_index = match light_entity {
+                LightEntity::Directional {
+                    cascade_index,
+                    ..
+                } => Some(*cascade_index),
+                _ => None,
+            };
+
             for (render_entity, main_entity) in visible_entities {
                 let Ok((group, instance_buffer)) = groups.get(render_entity) else {
                     continue;
                 };
                 if instance_buffer.shadow_length == 0 {
                     continue;
+                }
+                if is_directional {
+                    if cascade_index.is_some_and(|ci| {
+                        light_visible_entities.p3()
+                            .buffers
+                            .contains_key(&(render_entity, ci))
+                    }) {
+                        cascade_buffer_hits += 1;
+                    } else {
+                        cascade_buffer_fallbacks += 1;
+                    }
                 }
                 let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(main_entity)
                 else {
@@ -2942,6 +3312,7 @@ fn queue_instanced_prop_shadows(
                 let key = PropInstancingPipelineKey {
                     mesh_key,
                     tint_enabled: group.tint_enabled,
+                    gpu_cull: false,
                 };
                 let Ok(pipeline_id) =
                     pipelines.specialize(&pipeline_cache, &pipeline, key, &mesh.layout)
@@ -2972,6 +3343,10 @@ fn queue_instanced_prop_shadows(
                 );
                 draws_queued += 1;
                 instances_queued += instance_buffer.shadow_length;
+                if is_directional {
+                    per_cascade_directional_draws += 1;
+                    per_cascade_directional_instances += instance_buffer.shadow_length;
+                }
             }
         }
     }
@@ -2984,6 +3359,22 @@ fn queue_instanced_prop_shadows(
             "Render Instancing Shadow Instances",
             instances_queued as f64,
         );
+        sink.push_count(
+            "Render Instancing Shadow Cascade Buffer Hits",
+            cascade_buffer_hits as f64,
+        );
+        sink.push_count(
+            "Render Instancing Shadow Cascade Buffer Fallbacks",
+            cascade_buffer_fallbacks as f64,
+        );
+        sink.push_count(
+            "Render Instancing Shadow Per-Cascade Directional Draws",
+            per_cascade_directional_draws as f64,
+        );
+        sink.push_count(
+            "Render Instancing Shadow Per-Cascade Directional Instances",
+            per_cascade_directional_instances as f64,
+        );
     }
 }
 
@@ -2993,6 +3384,7 @@ type DrawInstancedProp = (
     SetMeshViewBindingArrayBindGroup<1>,
     SetMeshBindGroup<2>,
     SetInstancedPropMaterialBindGroup<MATERIAL_BIND_GROUP_INDEX>,
+    SetGpuCullBindGroup<4>,
     DrawMeshInstanced,
 );
 
@@ -3041,6 +3433,71 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetInstancedPropMaterial
     }
 }
 
+/// Marker component: entity uses GPU cull path (indirect draw).
+#[cfg(feature = "gpu_vegetation")]
+#[derive(Component, Clone, Copy)]
+pub struct GpuCullActive;
+
+#[cfg(feature = "gpu_vegetation")]
+mod gpu_cull_bind_group {
+    use super::*;
+    use bevy::render::render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass};
+    use bevy::ecs::system::SystemParamItem;
+
+    /// Bind group 4: visible instances storage buffer for GPU cull vertex shader path.
+    pub struct SetGpuCullBindGroup<const I: usize>;
+
+    impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetGpuCullBindGroup<I> {
+        type Param = SRes<crate::props::gpu_vegetation_cull::GpuVegetationCullBuffers>;
+        type ViewQuery = ();
+        type ItemQuery = Read<GpuCullActive>;
+
+        fn render<'w>(
+            _item: &P,
+            _view: (),
+            active: Option<&'w GpuCullActive>,
+            cull_buffers: SystemParamItem<'w, '_, Self::Param>,
+            pass: &mut TrackedRenderPass<'w>,
+        ) -> RenderCommandResult {
+            if active.is_none() {
+                return RenderCommandResult::Skip;
+            }
+            let cull_buffers = cull_buffers.into_inner();
+            let Some(bind_group) = &cull_buffers.vertex_bind_group else {
+                return RenderCommandResult::Skip;
+            };
+            pass.set_bind_group(I, bind_group, &[]);
+            RenderCommandResult::Success
+        }
+    }
+}
+
+#[cfg(not(feature = "gpu_vegetation"))]
+mod gpu_cull_bind_group {
+    use bevy::render::render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass};
+    use bevy::ecs::system::SystemParamItem;
+
+    pub struct SetGpuCullBindGroup<const I: usize>;
+
+    impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetGpuCullBindGroup<I> {
+        type Param = ();
+        type ViewQuery = ();
+        type ItemQuery = ();
+
+        fn render<'w>(
+            _item: &P,
+            _view: (),
+            _entity: Option<()>,
+            _params: SystemParamItem<'w, '_, Self::Param>,
+            _pass: &mut TrackedRenderPass<'w>,
+        ) -> RenderCommandResult {
+            RenderCommandResult::Skip
+        }
+    }
+}
+
+use gpu_cull_bind_group::SetGpuCullBindGroup;
+
 struct DrawMeshInstanced;
 
 impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstanced {
@@ -3077,6 +3534,37 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstanced {
         };
 
         pass.set_vertex_buffer(0, vertex_buffer_slice.buffer.slice(..));
+
+        // GPU cull path: use draw_indexed_indirect.
+        // Instance data comes from bind group 4 (storage buffer), not vertex buffer 1.
+        if let Some(ref draw_args_buffer) = instance_buffer.gpu_cull_draw_args_buffer {
+            match &gpu_mesh.buffer_info {
+                RenderMeshBufferInfo::Indexed {
+                    index_format,
+                    ..
+                } => {
+                    let Some(index_buffer_slice) =
+                        mesh_allocator.mesh_index_slice(&mesh_instance.mesh_asset_id)
+                    else {
+                        return RenderCommandResult::Skip;
+                    };
+                    pass.set_index_buffer(index_buffer_slice.buffer.slice(..), *index_format);
+                    pass.draw_indexed_indirect(
+                        draw_args_buffer,
+                        instance_buffer.gpu_cull_draw_args_offset,
+                    );
+                }
+                RenderMeshBufferInfo::NonIndexed => {
+                    pass.draw_indirect(
+                        draw_args_buffer,
+                        instance_buffer.gpu_cull_draw_args_offset,
+                    );
+                }
+            }
+            return RenderCommandResult::Success;
+        }
+
+        // CPU path: standard instanced draw.
         pass.set_vertex_buffer(1, instance_buffer.buffer.slice(..));
 
         match &gpu_mesh.buffer_info {
@@ -3106,20 +3594,27 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstanced {
 
 struct DrawMeshInstancedShadow;
 
+#[cfg(feature = "gpu_vegetation")]
 impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
     type Param = (
         SRes<RenderAssets<RenderMesh>>,
         SRes<RenderMeshInstances>,
         SRes<MeshAllocator>,
+        SRes<CascadeShadowBuffers>,
+        SRes<crate::props::gpu_vegetation_cull::GpuVegetationCullBuffers>,
     );
-    type ViewQuery = ();
-    type ItemQuery = Read<InstanceBuffer>;
+    type ViewQuery = Read<LightEntity>;
+    type ItemQuery = (Read<InstanceBuffer>, Option<Read<GpuCullActive>>);
 
     fn render<'w>(
         item: &P,
-        _view: (),
-        instance_buffer: Option<&'w InstanceBuffer>,
-        (meshes, render_mesh_instances, mesh_allocator): SystemParamItem<'w, '_, Self::Param>,
+        light_entity: &'w LightEntity,
+        query_item: Option<(&'w InstanceBuffer, Option<&'w GpuCullActive>)>,
+        (meshes, render_mesh_instances, mesh_allocator, cascade_buffers, gpu_cull_buffers): SystemParamItem<
+            'w,
+            '_,
+            Self::Param,
+        >,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let mesh_allocator = mesh_allocator.into_inner();
@@ -3130,10 +3625,81 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
         let Some(gpu_mesh) = meshes.into_inner().get(mesh_instance.mesh_asset_id) else {
             return RenderCommandResult::Skip;
         };
-        let Some(instance_buffer) = instance_buffer else {
+        let Some((instance_buffer, gpu_cull_active)) = query_item else {
             return RenderCommandResult::Skip;
         };
-        if instance_buffer.shadow_length == 0 {
+
+        let render_entity = item.entity();
+        let cascade_index = match light_entity {
+            LightEntity::Directional {
+                cascade_index,
+                ..
+            } => Some(*cascade_index),
+            _ => None,
+        };
+
+        let gpu_cull = gpu_cull_buffers.into_inner();
+
+        // GPU cull path: use compute-written shadow buffers.
+        if gpu_cull_active.is_some() {
+            if let (Some(ci), Some(group_idx)) = (
+                cascade_index,
+                gpu_cull.group_index_for_entity(render_entity),
+            ) {
+                if let Some(sc) = gpu_cull.shadow_cascades.get(ci) {
+                    if let (Some(visible_buf), Some(draw_args_buf)) =
+                        (&sc.visible_buffer, &sc.draw_args_buffer)
+                    {
+                        let Some(vertex_buffer_slice) =
+                            mesh_allocator.mesh_vertex_slice(&mesh_instance.mesh_asset_id)
+                        else {
+                            return RenderCommandResult::Skip;
+                        };
+                        pass.set_vertex_buffer(0, vertex_buffer_slice.buffer.slice(..));
+                        pass.set_vertex_buffer(1, visible_buf.slice(..));
+
+                        let args_offset =
+                            group_idx as u64 * std::mem::size_of::<crate::props::gpu_vegetation_cull::GpuDrawArgsTemplate>() as u64;
+
+                        match &gpu_mesh.buffer_info {
+                            RenderMeshBufferInfo::Indexed {
+                                index_format,
+                                ..
+                            } => {
+                                let Some(index_buffer_slice) =
+                                    mesh_allocator.mesh_index_slice(&mesh_instance.mesh_asset_id)
+                                else {
+                                    return RenderCommandResult::Skip;
+                                };
+                                pass.set_index_buffer(
+                                    index_buffer_slice.buffer.slice(..),
+                                    *index_format,
+                                );
+                                pass.draw_indexed_indirect(draw_args_buf, args_offset);
+                            }
+                            RenderMeshBufferInfo::NonIndexed => {
+                                pass.draw_indirect(draw_args_buf, args_offset);
+                            }
+                        }
+                        return RenderCommandResult::Success;
+                    }
+                }
+            }
+        }
+
+        // CPU path: standard shadow buffer.
+        let cascade_buffers_ref = cascade_buffers.into_inner();
+        let (shadow_buf, shadow_len) = if let Some(ci) = cascade_index {
+            if let Some(entry) = cascade_buffers_ref.buffers.get(&(render_entity, ci)) {
+                (&entry.buffer, entry.length)
+            } else {
+                (&instance_buffer.shadow_buffer, instance_buffer.shadow_length)
+            }
+        } else {
+            (&instance_buffer.shadow_buffer, instance_buffer.shadow_length)
+        };
+
+        if shadow_len == 0 {
             return RenderCommandResult::Skip;
         }
         let Some(vertex_buffer_slice) =
@@ -3143,7 +3709,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
         };
 
         pass.set_vertex_buffer(0, vertex_buffer_slice.buffer.slice(..));
-        pass.set_vertex_buffer(1, instance_buffer.shadow_buffer.slice(..));
+        pass.set_vertex_buffer(1, shadow_buf.slice(..));
 
         match &gpu_mesh.buffer_info {
             RenderMeshBufferInfo::Indexed {
@@ -3159,14 +3725,101 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
                 pass.draw_indexed(
                     index_buffer_slice.range.start..(index_buffer_slice.range.start + count),
                     vertex_buffer_slice.range.start as i32,
-                    0..instance_buffer.shadow_length as u32,
+                    0..shadow_len as u32,
                 );
             }
             RenderMeshBufferInfo::NonIndexed => {
-                pass.draw(
-                    vertex_buffer_slice.range,
-                    0..instance_buffer.shadow_length as u32,
+                pass.draw(vertex_buffer_slice.range, 0..shadow_len as u32);
+            }
+        }
+        RenderCommandResult::Success
+    }
+}
+
+#[cfg(not(feature = "gpu_vegetation"))]
+impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
+    type Param = (
+        SRes<RenderAssets<RenderMesh>>,
+        SRes<RenderMeshInstances>,
+        SRes<MeshAllocator>,
+        SRes<CascadeShadowBuffers>,
+    );
+    type ViewQuery = Read<LightEntity>;
+    type ItemQuery = Read<InstanceBuffer>;
+
+    fn render<'w>(
+        item: &P,
+        light_entity: &'w LightEntity,
+        instance_buffer: Option<&'w InstanceBuffer>,
+        (meshes, render_mesh_instances, mesh_allocator, cascade_buffers): SystemParamItem<
+            'w,
+            '_,
+            Self::Param,
+        >,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let mesh_allocator = mesh_allocator.into_inner();
+        let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(item.main_entity())
+        else {
+            return RenderCommandResult::Skip;
+        };
+        let Some(gpu_mesh) = meshes.into_inner().get(mesh_instance.mesh_asset_id) else {
+            return RenderCommandResult::Skip;
+        };
+        let Some(instance_buffer) = instance_buffer else {
+            return RenderCommandResult::Skip;
+        };
+
+        let render_entity = item.entity();
+        let cascade_index = match light_entity {
+            LightEntity::Directional {
+                cascade_index,
+                ..
+            } => Some(*cascade_index),
+            _ => None,
+        };
+        let cascade_buffers_ref = cascade_buffers.into_inner();
+        let (shadow_buf, shadow_len) = if let Some(ci) = cascade_index {
+            if let Some(entry) = cascade_buffers_ref.buffers.get(&(render_entity, ci)) {
+                (&entry.buffer, entry.length)
+            } else {
+                (&instance_buffer.shadow_buffer, instance_buffer.shadow_length)
+            }
+        } else {
+            (&instance_buffer.shadow_buffer, instance_buffer.shadow_length)
+        };
+
+        if shadow_len == 0 {
+            return RenderCommandResult::Skip;
+        }
+        let Some(vertex_buffer_slice) =
+            mesh_allocator.mesh_vertex_slice(&mesh_instance.mesh_asset_id)
+        else {
+            return RenderCommandResult::Skip;
+        };
+
+        pass.set_vertex_buffer(0, vertex_buffer_slice.buffer.slice(..));
+        pass.set_vertex_buffer(1, shadow_buf.slice(..));
+
+        match &gpu_mesh.buffer_info {
+            RenderMeshBufferInfo::Indexed {
+                index_format,
+                count,
+            } => {
+                let Some(index_buffer_slice) =
+                    mesh_allocator.mesh_index_slice(&mesh_instance.mesh_asset_id)
+                else {
+                    return RenderCommandResult::Skip;
+                };
+                pass.set_index_buffer(index_buffer_slice.buffer.slice(..), *index_format);
+                pass.draw_indexed(
+                    index_buffer_slice.range.start..(index_buffer_slice.range.start + count),
+                    vertex_buffer_slice.range.start as i32,
+                    0..shadow_len as u32,
                 );
+            }
+            RenderMeshBufferInfo::NonIndexed => {
+                pass.draw(vertex_buffer_slice.range, 0..shadow_len as u32);
             }
         }
         RenderCommandResult::Success

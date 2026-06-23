@@ -183,8 +183,9 @@ the feature gate.
 ### Phase 4 — Separate shadow-cascade cull lists
 - Add `cull_shadow` compute per cascade against cascade frustums/bounds (shorter
   distance, LOD bias), writing per-cascade visible lists + indirect args. The CPU
-  pipeline already separates `shadow_instances` / `shadow_culled` — mirror that on
-  GPU.
+  pipeline already implements per-cascade shadow caster culling
+  (`rebuild_visible_and_shadow_instances_with_cascades`, `CascadeShadowBuffers`,
+  budget enforcement) — mirror that on GPU.
 - **Verify:** off-screen-but-shadow-casting props retained; shadow caster count ≤ the
   current budget; no new cascade-edge popping.
 

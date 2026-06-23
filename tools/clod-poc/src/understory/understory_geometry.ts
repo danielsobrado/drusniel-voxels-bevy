@@ -14,8 +14,7 @@ const BARK = new THREE.Color(0x6a4932);
 const BARK_DARK = new THREE.Color(0x3f2a1e);
 const DEAD_WOOD = new THREE.Color(0x80694e);
 
-// Leaf/needle assembly ported from the fable5-world-demo reference
-// (docs/reference/fable5-world-demo/src/vegetation/{LeafMesh,Understory}.ts).
+// Leaf/needle assembly ported from the reference vegetation implementation
 // The reference packs (hue, flex, phase, AO) into a vdata vec4; here those fold
 // into the existing clod-poc attributes: flex → understoryWindWeight, AO/hue →
 // vertex colour. Per-instance phase/worldXZ stay on the instanced attributes.

@@ -5,7 +5,7 @@
  * parent with whorled or spiral phyllotaxis, their length shaped by a crown
  * envelope + light-competition asymmetry. Deterministic per Rng stream.
  *
- * Ported verbatim (logic) from the fable5-world-demo reference
+ * Ported verbatim (logic) from the reference vegetation implementation.
  * (`vegetation/Skeleton.ts`); only the `three` / `Rng` imports differ.
  */
 

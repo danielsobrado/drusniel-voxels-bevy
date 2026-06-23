@@ -1,0 +1,23 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 6
+freeze_terrain_lod_after_ready = true
+
+[render_toggles]
+disable_gpu_vegetation = true
+
+[[checkpoint]]
+name = "forest-look-sweep"
+position = [292.0, 88.0, 304.0]
+look_at = [246.0, 62.0, 260.0]
+time_of_day = 0.3
+hold_frames = 180
+screenshot = true
+fog_tier = "off"
+motion = { kind = "run_look_sweep", end_position = [264.0, 88.0, 277.0], end_look_at = [342.0, 62.0, 260.0], look_sway_degrees = 22.0 }
+screenshot_points = [
+    { name = "left", frame = 0 },
+    { name = "center", frame = 90 },
+    { name = "right", frame = 179 },
+]

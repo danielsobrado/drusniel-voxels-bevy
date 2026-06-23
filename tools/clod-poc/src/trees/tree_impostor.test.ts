@@ -247,7 +247,7 @@ function pageNode(): ClodPageNode {
     children: [],
     mesh: pageMesh(),
     footprint,
-    bounds: { center: [16, 24, 16], radius: Math.hypot(32, 32) * 0.5 },
+    bounds: { center: [16, 24, 16], radius: Math.hypot(32, 32) * 0.5, minY: 0, maxY: 0 },
     errorWorld: 0,
     lowBenefit: false,
   };

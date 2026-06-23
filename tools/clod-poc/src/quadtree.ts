@@ -54,7 +54,7 @@ function footprintFor(level: number, nx: number, nz: number, cfg: ClodPagesConfi
   return { minX: nx * span, minZ: nz * span, maxX: (nx + 1) * span, maxZ: (nz + 1) * span };
 }
 
-function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: number } {
+function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: number; minY: number; maxY: number } {
   let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (let i = 0; i < mesh.positions.length; i += 3) {
     minX = Math.min(minX, mesh.positions[i]); maxX = Math.max(maxX, mesh.positions[i]);
@@ -66,7 +66,7 @@ function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: n
   for (let i = 0; i < mesh.positions.length; i += 3) {
     r = Math.max(r, Math.hypot(mesh.positions[i] - center[0], mesh.positions[i + 1] - center[1], mesh.positions[i + 2] - center[2]));
   }
-  return { center, radius: r };
+  return { center, radius: r, minY, maxY };
 }
 
 const tris = (m: PageMesh) => m.indices.length / 3;
@@ -120,13 +120,14 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
       const src = buildLod0PageSource(px, pz, cfg, world);
       stripDegenerateTriangles(src.mesh);
       assertNoInternalBorders(src.mesh, src.footprint);
+      const b = boundsOf(src.mesh);
       const node: ClodPageNode = {
         id: `L0:${px},${pz}`,
         level: 0,
         children: [],
         mesh: src.mesh,
         footprint: src.footprint,
-        bounds: boundsOf(src.mesh),
+        bounds: b,
         errorWorld: 0,
         lowBenefit: false,
         chunkMeshes: src.chunks,
@@ -175,13 +176,14 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
+        const b = boundsOf(sim.mesh);
         const node: ClodPageNode = {
           id: `L${level}:${nx},${nz}`,
           level,
           children,
           mesh: sim.mesh,
           footprint,
-          bounds: boundsOf(sim.mesh),
+          bounds: b,
           errorWorld,
           lowBenefit: sim.lowBenefit,
         };
@@ -246,13 +248,14 @@ export async function buildWorldAsync(
       const src = buildLod0PageSource(px, pz, cfg, world);
       stripDegenerateTriangles(src.mesh);
       assertNoInternalBorders(src.mesh, src.footprint);
+      const b = boundsOf(src.mesh);
       const node: ClodPageNode = {
         id: `L0:${px},${pz}`,
         level: 0,
         children: [],
         mesh: src.mesh,
         footprint: src.footprint,
-        bounds: boundsOf(src.mesh),
+        bounds: b,
         errorWorld: 0,
         lowBenefit: false,
         chunkMeshes: src.chunks,
@@ -301,13 +304,14 @@ export async function buildWorldAsync(
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
+        const b = boundsOf(sim.mesh);
         const node: ClodPageNode = {
           id: `L${level}:${nx},${nz}`,
           level,
           children,
           mesh: sim.mesh,
           footprint,
-          bounds: boundsOf(sim.mesh),
+          bounds: b,
           errorWorld,
           lowBenefit: sim.lowBenefit,
         };

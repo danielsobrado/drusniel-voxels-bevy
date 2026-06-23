@@ -1,4 +1,4 @@
-// WaterClipmap — Fable5-style clipmap ring of grid meshes that follow the camera.
+// WaterClipmap — camera-following clipmap ring of grid meshes.
 //
 // One reusable square grid geometry per level (cells_per_level+1 vertices per edge).
 // Each level uses a different cell size from config; coarser levels always surround

@@ -86,6 +86,14 @@ export interface TerrainNodeTextures {
     microFadeEnd: number;
     lodBias: number;
   } | null;
+  /**
+   * LV-6: Pre-baked macro tint texture (RGB = tinted colour per world XZ).
+   * Far tiers sample this instead of evaluating proceduralMacroTint per pixel.
+   * Layout: res×res, RGB, covering [0, worldSize] with the same UV mapping as noiseA.
+   */
+  bakedMacroTint?: THREE.Texture | null;
+  /** World extent in cells — needed to map worldPos.xz to [0,1] UV for bakedMacroTint. */
+  worldSize?: number;
 }
 
 export interface TerrainNodeMaterialOptions {
@@ -121,6 +129,11 @@ export interface TerrainNodeMaterialHandle {
   setDebug(state: { normalColor: boolean; normalDivergence: boolean; divergenceGain: number }): void;
   /** Drive optional screen-door LOD fades. */
   setFade(fade: number, fadeIn: boolean, dither: boolean): void;
+  /**
+   * LV-6: Set material quality tier.
+   * 0 = near (full triplanar + procedural), 1 = mid (simplified), 2 = far (baked + single-proj).
+   */
+  setTier(tier: number): void;
 }
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
@@ -340,6 +353,86 @@ function interleavedGradientNoise(p: TslNode): TslNode {
   return fract(fract(p.x.mul(0.06711056).add(p.y.mul(0.00583715))).mul(52.9829189));
 }
 
+/**
+ * LV-6: Bake the proceduralMacroTint result into a DataTexture.
+ *
+ * The CPU-side equivalent of the TSL `proceduralMacroTint()` function. Samples noiseA (R=value,
+ * G=fbm) and noiseB (A=worley) to produce a tinted base colour per world XZ texel. Far terrain
+ * tiers sample this texture instead of evaluating the noise per pixel.
+ *
+ * @param noiseA  The noiseA DataTexture (RGBA, Uint8, RepeatWrapping)
+ * @param noiseB  The noiseB DataTexture (RGBA, Uint8, RepeatWrapping)
+ * @param resolution  Texture resolution (e.g. 512)
+ * @param worldSize  World extent in cells (for UV mapping)
+ */
+export function bakeMacroTint(
+  noiseA: THREE.DataTexture,
+  noiseB: THREE.DataTexture,
+  resolution: number,
+  worldSize: number,
+): THREE.DataTexture {
+  const res = Math.max(2, Math.floor(resolution));
+  const dataA = noiseA.image.data as Uint8Array;
+  const dataB = noiseB.image.data as Uint8Array;
+  const srcRes = noiseA.image.width;
+  const out = new Uint8Array(res * res * 4);
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  const smoothstepF = (e0: number, e1: number, v: number) => {
+    const t = clamp01((v - e0) / Math.max(e1 - e0, 0.0001));
+    return t * t * (3 - 2 * t);
+  };
+  for (let z = 0; z < res; z++) {
+    for (let x = 0; x < res; x++) {
+      const u = (x + 0.5) / res;
+      const v = (z + 0.5) / res;
+      // Sample noiseA: R=value, G=fbm (same UV scale as TSL: worldPos.xz / 43.7)
+      const uA = ((u * worldSize) / 43.7) % 1;
+      const vA = ((v * worldSize) / 43.7) % 1;
+      const ax = Math.floor(uA * srcRes) % srcRes;
+      const az = Math.floor(vA * srcRes) % srcRes;
+      const ai = (az * srcRes + ax) * 4;
+      const value = dataA[ai] / 255;
+      const fbm = dataA[ai + 1] / 255;
+      // Sample noiseB: A=worley (same UV scale: worldPos.xz / 23.0)
+      const uB = ((u * worldSize) / 23.0) % 1;
+      const vB = ((v * worldSize) / 23.0) % 1;
+      const bx = Math.floor(uB * srcRes) % srcRes;
+      const bz = Math.floor(vB * srcRes) % srcRes;
+      const bi = (bz * srcRes + bx) * 4;
+      const worley = dataB[bi + 3] / 255;
+      // proceduralMacroTint base: baseColor(0.30, 0.34, 0.22) * macroMix
+      const macroMix = value * 0.65 + fbm * 0.35;
+      const baseR = 0.30 * (macroMix - 0.5) * 0.16 + 1.0;
+      const baseG = 0.34 * (macroMix - 0.5) * 0.16 + 1.0;
+      const baseB = 0.22 * (macroMix - 0.5) * 0.16 + 1.0;
+      // Moss tint (slope-dependent, baked at slope=0.3 as a representative mid-slope)
+      const slope = 0.3;
+      const mossFactor = smoothstepF(0.58, 0.86, worley) * smoothstepF(0.28, 0.72, slope) * 0.28;
+      const mossR = 0.11, mossG = 0.19, mossB = 0.07;
+      let r = baseR * (1 - mossFactor) + mossR * mossFactor;
+      let g = baseG * (1 - mossFactor) + mossG * mossFactor;
+      let b = baseB * (1 - mossFactor) + mossB * mossFactor;
+      // Wet tint (baked at y=18 as the threshold)
+      const wetFactor = smoothstepF(0.04, 0.0, 18.0 - 18.0) * 0.38;
+      r = r * (1 - wetFactor) + r * 0.64 * wetFactor;
+      g = g * (1 - wetFactor) + g * 0.68 * wetFactor;
+      b = b * (1 - wetFactor) + b * 0.72 * wetFactor;
+      const oi = (z * res + x) * 4;
+      out[oi] = Math.round(clamp01(r) * 255);
+      out[oi + 1] = Math.round(clamp01(g) * 255);
+      out[oi + 2] = Math.round(clamp01(b) * 255);
+      out[oi + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(out, res, res, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export function createTerrainNodeMaterial(
   options: TerrainNodeMaterialOptions = {},
 ): TerrainNodeMaterialHandle {
@@ -374,12 +467,16 @@ export function createTerrainNodeMaterial(
   const rough = Math.min(Math.max(lighting.roughness, 0.04), 1.0);
   const uShininess = uniform(128 * (1 - rough) + 4 * rough); // mix(128, 4, rough)
   const uSpecGain = uniform(1 - rough);
+  // LV-6: Material quality tier. 0=near, 1=mid, 2=far.
+  const uTier = uniform(0);
 
   const geomN = normalize(normalGeometry);
   const worldPos = positionGeometry;
   const paintSlots: TslNode = attribute("paintSlots", "vec4");
   const paintWeights: TslNode = attribute("paintWeights", "vec4");
   const paint = clamp(dot(paintWeights, vec4(1)), 0.0, 1.0);
+  // LV-6: Tier comparisons (used in baseColor section below).
+  const isFarTier = uTier.greaterThan(1.5);
 
   // baseColor: textured triplanar height-band blend, else flat uColor.
   let baseColor: TslNode = uColor;
@@ -405,8 +502,16 @@ export function createTerrainNodeMaterial(
     // Out-of-band (terrain raised above / dug below all bands): fall back to the nearest band
     // instead of black. Matches terrain_shader.ts sampleTerrainTexture.
     let tex: TslNode = mix(nearest, acc.div(max(wsum, 0.001)), step(0.0001, wsum));
+    // LV-6: Tier-based procedural tint. Tier 0 (near) = live macro tint. Tier 2 (far) = baked.
     if (textures.procedural) {
       tex = proceduralMacroTint(tex, worldPos, geomN, textures.procedural);
+    }
+    // Far tier override: replace live procedural with baked macro tint if available.
+    // UV = worldPos.xz / worldSize so the texture covers [0, worldSize] in world space.
+    if (textures.bakedMacroTint) {
+      const ws = textures.worldSize ?? 1024;
+      const baked = texture(textures.bakedMacroTint, worldPos.xz.div(ws));
+      tex = isFarTier.select(baked, tex);
     }
     tex = mix(
       tex,
@@ -421,6 +526,9 @@ export function createTerrainNodeMaterial(
 
   let n: TslNode = geomN;
   if (textures?.normalArray && textures.slots.length > 0) {
+    // LV-6: Zero out normal map contribution on far tier (tier 2) at runtime.
+    // Build-time `if` cannot gate TSL nodes; use a uniform weight instead.
+    const normalWeight = isFarTier.select(0.0, 1.0);
     let detailN: TslNode = sampleTerrainNormal(
         textures.normalArray,
         textures.slots,
@@ -436,9 +544,11 @@ export function createTerrainNodeMaterial(
       paintedNormal(textures.normalArray, textures.slots, worldPos, geomN, paintSlots, paintWeights, uNormalIntensity, textures.normalMapMask),
       paint,
     );
-    n = textures.procedural
+    const computedN = textures.procedural
       ? normalize(mix(geomN, detailN, proceduralMicroWeight(worldPos, textures.procedural)))
       : detailN;
+    // LV-6: On far tier, normalWeight=0 → use geometry normal; near/mid → full detail normal.
+    n = mix(geomN, computedN, normalWeight);
   }
 
   const sun = max(dot(n, uLight), 0.0);
@@ -507,6 +617,9 @@ export function createTerrainNodeMaterial(
       uFade.value = fade;
       uFadeIn.value = fadeIn ? 1 : 0;
       uDither.value = dither ? 1 : 0;
+    },
+    setTier(tier) {
+      uTier.value = Math.min(2, Math.max(0, Math.floor(tier)));
     },
   };
 }

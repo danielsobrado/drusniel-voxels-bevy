@@ -28,7 +28,7 @@ export async function runWebGpuSpike(): Promise<void> {
 
   const renderer = new WebGPURenderer({ antialias: true });
   // fail-loud: surface WebGPU validation errors, otherwise they show as silent black
-  // frames (per the fable5 Engine bring-up).
+  // frames (per the reference engine bring-up).
   try {
     await renderer.init();
   } catch (error) {

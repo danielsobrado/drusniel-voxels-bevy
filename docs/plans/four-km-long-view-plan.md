@@ -465,6 +465,55 @@ At 4 km vista in long-view-4km.toml:
 > Report before/after `summary.json` (far_shell_triangles, far_shell_gpu_ms, terrain_triangles)
 > and any visual artifact.
 
+### LV-2b — Far shell + canopy beyond the world edge (clod-poc follow-up; also covers LV-4)
+
+**Why:** the first clod-poc cut of the far shell/canopy builds a grid *inside* the page-covered
+world `[0, worldSize]` with a circular hole, so it sheets a flat lid over the real terrain
+(the terrain pokes through). At WORLD≥16 the pages fill the whole world, so there is no region
+*beyond* it for a vista. Fix: extend the shells **outside** the world edge (Fable5's
+`FAR_RADIUS=14000` sits well outside `WORLD_HALF=2048` — [`TerrainTiles.ts:330-381`](../reference/fable5-world-demo/src/world/TerrainTiles.ts#L330), [`WorldConst.ts`](../reference/fable5-world-demo/src/world/WorldConst.ts)).
+
+> **Implementation prompt — LV-2b (clod-poc)**
+>
+> Turn the far terrain shell ([`tools/clod-poc/src/gpu/far_terrain_shell.ts`](../../tools/clod-poc/src/gpu/far_terrain_shell.ts))
+> and canopy shell ([`far_canopy_shell.ts`](../../tools/clod-poc/src/gpu/far_canopy_shell.ts)) from
+> *rings inside the built world* into a **horizon skirt surrounding the world**. Read both files
+> first (geometry loops, `sampleHeightBlend`/`shellY`, the `startRadius` cutout). Changes, both
+> files:
+> 1. **Grid extent.** Add `farRadius` (world units, default `worldSize * 1.5`). Build over the
+>    square `[center − farRadius, center + farRadius]` (`center = worldSize/2`), not `[0, worldSize]`.
+> 2. **Inner exclusion = the world SQUARE, not a circle.** Skip a quad only when fully inside
+>    `[inset, worldSize − inset]²` (`inset ≈ worldSize*0.04` so the skirt overlaps the edge for a
+>    seamless join). Pages own the interior; the skirt owns everything outside. A circular hole
+>    over a square world is what leaves the corners covered — use a square test.
+> 3. **Height beyond the world = analytic terrain, not a clamped edge.** Inside `[0, worldSize]`
+>    sample the summary as today; **outside** it sample [`surfaceHeightCore(wx,wz)`](../../tools/clod-poc/src/gpu/terrain_field_core.ts)
+>    directly (it continues infinitely) so the skirt is natural receding terrain, not a flat
+>    extrusion of the edge. Cross-fade the two over a band near the edge (Fable5 `mix(baked, farMacro, edgeBlend)`).
+>    For the canopy this is the base height under the coverage lift.
+> 4. **Far falloff + aerial fade.** Lower the skirt height gently with distance beyond the edge,
+>    and fade its colour toward the sky/haze colour near `farRadius` so the rim dissolves into the
+>    horizon (no hard line). Keep `MeshBasicNodeMaterial` + the manual hemispheric+sun lighting
+>    already in both materials (a lit/PBR material renders black — no scene lights). Canopy keeps
+>    its screen-door dither-in.
+> 5. **Call sites** in [`main.ts`](../../tools/clod-poc/src/main.ts): pass `farRadius` (e.g.
+>    `worldSizeCells * 1.5`) to `buildFarTerrainShell` (in `buildFarShellInstance`) and
+>    `buildFarCanopyShell`. The shells now sit outside the world, so drop the in-world `startRadius`
+>    dev/long-view split (or repurpose it as the square `inset`). Keep the `?farShell=1`/`?canopy=1`
+>    toggles + gui checkboxes working.
+> **Constraints:** `MeshBasicNodeMaterial` + manual lighting only (no classic/PBR → black). No
+> bool WGSL uniforms. Summary stays corner-origin `[0, worldSize]`; clamp/branch for out-of-range.
+> Build geometry once (off the render loop).
+> **Verify** (vitest/build WITHOUT rtk; `tsc` via rtk OK): `typecheck`, `test`, `build`. Browser
+> `?world=16&webgpuSelection=1&farShell=1&canopy=1` and `?scene=long-view-4km&world=16&webgpuSelection=1`:
+> real terrain in the centre, far skirt extending to a hazy horizon, no flat lid, no hard
+> world-edge line, continuous terrain↔skirt seam. Add a `far_terrain_shell` test asserting no
+> emitted triangle has all three vertices inside `[inset, worldSize−inset]²` and some vertices lie
+> beyond `worldSize`. Report a before/after `shoot`.
+> **Acceptance:** far shell + canopy form a horizon skirt around the world (interior = pages,
+> exterior = skirt), beyond-world height from the analytic field fading into haze, materials stay
+> unlit-TSL, toggles + long-view scene still work, `tsc` + `vitest` + `vite build` green.
+
 ---
 
 ## LV-3 — Far terrain shadow proxy
@@ -529,6 +578,9 @@ hash bumps`; forestless cells **sink below terrain and z-fail away**; normals fr
 differences shade it as rolling foliage; it **dithers IN** past the impostor mid-range
 (`FADE_IN=620`, `FADE_BAND=90`) and owns the 600 m → edge band with sparse impostors.
 
+> **clod-poc note:** the canopy's "extend beyond the world edge" follow-up shares the far-shell
+> work — see [LV-2b](#lv-2b--far-shell--canopy-beyond-the-world-edge-clod-poc-follow-up-also-covers-lv-4).
+
 **Drusniel mapping:**
 - Fill the **`coverage` channel of `TerrainSummaryField` (LV-1b)** from persisted prop/tree placement (the prop persistence system) — not live per-frame scatter (memory: grass/props must be GPU-driven, no CPU per-frame scatter). The canopy shell then reads `sample_coverage` + `sample_height` from that one field; no separate coverage map subsystem.
 - `FarForestCanopyShellPlugin`: one grid mesh (`canopy_shell.grid`) above terrain, height = `sample_height` + coverage lift (`height_lift_m`) + crown bumps; cells with no coverage sink and z-fail (exactly Fable5 `CanopyShell.ts`). Dither in past `fade_in_m`/`fade_band_m` — **reuse the `clod_page_dither` screen-door path**, not a new one. Optional macro canopy shadow via the LV-3 proxy (`canopy_shell.shadow_proxy`).
@@ -583,6 +635,17 @@ cull → LOD-ring classify → compact → indirect draw) and
 specifically found that culling shadow casters by the main view frustum drops off-screen
 casters that still need to cast visible shadows).
 
+**clod-poc (WebGPU) status — sandbox side already built.** Unlike LV-0–LV-4, the GPU
+vegetation already exists in clod-poc: [`grass_ring_compute.ts`](../../tools/clod-poc/src/gpu/grass_ring_compute.ts),
+[`tree_ring_compute.ts`](../../tools/clod-poc/src/gpu/tree_ring_compute.ts), and
+[`stone_scatter_compute.ts`](../../tools/clod-poc/src/gpu/stone_scatter_compute.ts) already
+do GPU cull → pack → indirect draw (visible live in the debug overlay: `webgpu-ring-v1`,
+`gpu-grass`, `gpu-dispatch`). So the clod-poc work here is only to **validate the existing
+rings at the long-view distances** (draw calls / frame time at 4 km) and extend ring range
+if a gap shows — not to build them. The Bevy delegation below is the net-new work.
+Per-cascade shadow-caster culling is Bevy-specific (clod-poc uses
+`forestLightingConfig.shadowProxy`, not CSM cascades).
+
 **Why after terrain:** terrain rings must be stable first (CLAUDE.md: profiling in the loop;
 get the cheap layers right before the expensive GPU-driven vegetation rewrite).
 
@@ -628,7 +691,22 @@ splat material doing many live noise evaluations per pixel was a major cost; bak
 fBM/ridged noise + pre-derived gradient textures took heavy views from ~73–134 ms GPU down
 to ~19–23 ms at 1080p (their numbers). Bake periods in `NoiseBake` (`PERIOD_FBM/RID/VAL`).
 
-**Drusniel mapping — the variants already exist, this stage assigns + bakes.** The enum
+**clod-poc (WebGPU) Phase A — do this first.** On the WebGPU side the terrain material is the
+TSL [`terrain_node_material.ts`](../../tools/clod-poc/src/gpu/terrain_node_material.ts)
+(`MeshBasicNodeMaterial`), shared by CLOD pages via
+[`pageTerrainMaterial.ts`](../../tools/clod-poc/src/materials/pageTerrainMaterial.ts) →
+[`terrainMaterialCommon.ts`](../../tools/clod-poc/src/materials/terrainMaterialCommon.ts). It
+already evaluates the live per-pixel noise this stage targets (`proceduralMacroTint` /
+`proceduralMicroWeight`) and already has the screen-door LOD cross-fade dither (`uFade`/
+`uDither`). The LV-2 far shell's simplified `MeshBasicNodeMaterial` (hemispheric only) is the
+cheapest tier / horizon-proxy equivalent. So Phase A = (1) select a material tier by
+distance/LOD (full triplanar+procedural near → cheap mid → far-shell horizon proxy), reusing
+`uFade` for the cross-fade; (2) **bake** `proceduralMacroTint`/`proceduralMicroWeight` into a
+texture (Fable5 `NoiseBake` `PERIOD_FBM/RID/VAL` pattern) so far tiers sample it instead of
+evaluating noise per pixel. Validate frame time with `npm run qa` + `shoot` at the LV-0
+long-view camera. Phase B (Bevy) is the mapping below.
+
+**Drusniel mapping (Phase B — Bevy) — the variants already exist, this stage assigns + bakes.** The enum
 [`TerrainMaterialQuality`](../../src/rendering/materials/triplanar.rs#L199) already has
 `FullTriplanar`, `CheapTriplanar`, `SingleProjectionFar`, `HorizonProxy`, each with a WGSL
 `shader_def` and a prebuilt handle ([`triplanar.rs:296`](../../src/rendering/materials/triplanar.rs#L296)).

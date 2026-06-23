@@ -36,7 +36,7 @@ async function main(): Promise<void> {
 
   const consumed = new Set([
     "scene", "seed", "cam", "out", "w", "h", "hud", "settle", "timeout", "stats",
-    "framealign", "gpusample", "freeze",
+    "framealign", "gpusample", "freeze", "world", "clodPerf", "webgpuSelection",
   ]);
   const extra: Record<string, string> = {};
   for (const [key, value] of Object.entries(args)) {
@@ -138,6 +138,62 @@ async function main(): Promise<void> {
     if (statsOut) {
       mkdirSync(dirname(statsOut), { recursive: true });
       writeFileSync(statsOut, stats);
+
+      // LV-0: Also write a QA-compatible summary.json alongside the raw stats.
+      // The QA runner (src/qa.ts) expects a checkpoints[].areas{} structure.
+      const rawStats = JSON.parse(stats) as Record<string, unknown>;
+      const counters = (rawStats["counters"] as Record<string, number>) ?? {};
+      const qaSummary = {
+        schema_version: 1,
+        scene: scene,
+        platform: "web",
+        checkpoints: [{
+          name: "main",
+          median_frame_ms: rawStats["frameMs"] ?? 0,
+          p95_frame_ms: rawStats["frameMsP95"] ?? 0,
+          areas: {
+            renderer: {
+              draw_calls: rawStats["drawCalls"] ?? 0,
+              triangles: rawStats["triangles"] ?? 0,
+            },
+            clod: {
+              terrain_draw_calls: counters["terrain_draw_calls"] ?? 0,
+              terrain_triangles: counters["terrain_triangles"] ?? 0,
+              horizon_hole_ratio: counters["horizon_hole_ratio"] ?? 0,
+              ...Object.fromEntries(
+                Object.entries(counters).filter(([k]) => k.startsWith("clod_page_count_")),
+              ),
+            },
+            far_shell: {
+              triangles: counters["far_shell_tris"] ?? 0,
+              gpu_ms: counters["far_shell_gpu_ms"] ?? 0,
+            },
+            shadow_proxy: {
+              shadow_pass_triangles: counters["shadow_proxy_tris"] ?? 0,
+            },
+            canopy_shell: {
+              triangles: counters["canopy_tris"] ?? 0,
+            },
+            // LV-5: GPU vegetation ring stats for long-view validation.
+            gpu_grass: {
+              visible: counters["gpu_grass_visible"] ?? 0,
+              dispatch_ms: counters["gpu_grass_dispatch_ms"] ?? 0,
+            },
+            gpu_tree: {
+              visible: counters["gpu_tree_visible"] ?? 0,
+              dispatch_ms: counters["gpu_tree_dispatch_ms"] ?? 0,
+            },
+            gpu_stone: {
+              visible: counters["gpu_stone_visible"] ?? 0,
+              drawn_near: counters["gpu_stone_drawn_near"] ?? 0,
+              drawn_far: counters["gpu_stone_drawn_far"] ?? 0,
+            },
+          },
+        }],
+      };
+      const summaryPath = statsOut.replace(/-stats\.json$/, "-summary.json");
+      writeFileSync(summaryPath, JSON.stringify(qaSummary, null, 2));
+      console.log(`[shoot] QA summary written to ${summaryPath}`);
     }
 
     console.log(`[shoot] wrote ${out}`);

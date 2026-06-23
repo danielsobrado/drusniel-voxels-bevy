@@ -2,6 +2,12 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import GUI from "lil-gui";
 import { parseConfig } from "./config.js";
+import { initHooks, type ClodHooks } from "./core/hooks.js";
+import { buildTerrainSummary, createHeightTexture, createExtendedHeightTexture, createExtendedCanopyTexture } from "./clod/terrain_summary.js";
+import { buildFarTerrainShell } from "./gpu/far_terrain_shell.js";
+import { buildFarTerrainShadowProxy } from "./gpu/far_terrain_shadow_proxy.js";
+import { bakeMacroTint } from "./gpu/terrain_node_material.js";
+import { buildFarCanopyShell } from "./gpu/far_canopy_shell.js";
 import configText from "../config/clod_pages.yaml?raw";
 import stoneConfigText from "../config/stones.yaml?raw";
 import treeConfigText from "../config/trees.yaml?raw";
@@ -25,6 +31,7 @@ import {
   paintWeightsAt,
   replaceDigEdits,
   setTerrainSurfaceOverride,
+  surfaceNormal,
   surfaceHeight,
 } from "./terrain.js";
 import { GpuChunkMesher } from "./gpu/gpu_chunk_mesher.js";
@@ -155,9 +162,21 @@ import {
   createProceduralTerrainTextures,
   type ProceduralTerrainSlot,
 } from "./textures/terrainTextureArrays.js";
+import {
+  DEFAULT_RAIN_WEATHER_SETTINGS,
+  DEFAULT_SANDSTORM_WEATHER_SETTINGS,
+  DEFAULT_SNOW_WEATHER_SETTINGS,
+  RainWeatherSystem,
+  SandstormWeatherSystem,
+  SnowWeatherSystem,
+  type RainWeatherSettings,
+  type SandstormWeatherSettings,
+  type SnowWeatherSettings,
+} from "./weather/rain.js";
 
 const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 const WORLD_OPTIONS = [2, 4, 8, 16, 32];
+const WEATHER_MODE_OPTIONS = ["off", "rain", "snow", "sandstorm"] as const;
 const WEBGPU_ERROR_MAX_AGE_FRAMES = 6;
 const WEBGPU_DISPATCH_INTERVAL_FRAMES = 2;
 const WEBGPU_PARITY_INTERVAL_FRAMES = 60;
@@ -168,6 +187,8 @@ const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
   { id: "earth-1", scale: 0.04, heightMin: 40, heightMax: 60 },
   { id: "snow-rocks-1", scale: 0.025, heightMin: 60, heightMax: 118 },
 ] as const;
+
+type WeatherMode = typeof WEATHER_MODE_OPTIONS[number];
 // Bundle the texture files with the app so they are served same-origin. Fetching them
 // cross-origin from raw.githubusercontent.com fails: that host sends no
 // Access-Control-Allow-Origin header, so a crossOrigin="anonymous" TextureLoader request
@@ -571,8 +592,12 @@ async function main() {
   const queryTreePerfScene = queryScene === "trees-perf" || searchParams.get("treesPerf") === "1";
   const queryTreeGpuRing = searchParams.get("treeGpu") === "1" || searchParams.get("treeGpuRing") === "1";
   const queryForestFloorScene = queryScene === "forest-floor";
+  const queryLongViewScene = queryScene === "long-view-4km" || queryScene === "long-view-forest-4km" || queryScene === "long-view-edit-stress";
+  const queryFarShell = searchParams.get("farShell") === "1";
+  const queryCanopy = searchParams.get("canopy") === "1";
   const queryPerfMode = searchParams.get("clodPerf") === "1";
   const queryWebGpuSelection = searchParams.get("webgpuSelection") === "1";
+  const queryMaterialTiers = searchParams.get("materialTiers") === "1";
   // CPU/GPU error_px parity is a full per-node sweep; opt-in keeps it from hitching the
   // frame. Off: verify once when the first GPU map lands. On: re-verify periodically.
   const queryWebGpuParity = searchParams.get("webgpuParity") === "1";
@@ -636,8 +661,19 @@ async function main() {
   // World size via ?world=. 8x8 gives full LOD0..LOD3 depth for A3 / delta-2-3
   // inspection; 16/32 keep the same max LOD with more roots and can freeze the tab longer.
   const requested = Number(searchParams.get("world"));
-  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : queryGrassPerfScene || queryTreePerfScene || queryForestFloorScene ? 16 : 4);
+  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : queryGrassPerfScene || queryTreePerfScene || queryForestFloorScene || queryLongViewScene ? 16 : 4);
   const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
+  // LV-6: Bake the proceduralMacroTint result into a texture for far-tier sampling.
+  let bakedMacroTint: THREE.DataTexture | null = null;
+  if (proceduralTerrain) {
+    const bakeRes = Math.min(512, proceduralTerrain.noise.resolution);
+    bakedMacroTint = bakeMacroTint(
+      proceduralTerrain.noise.noiseA,
+      proceduralTerrain.noise.noiseB,
+      bakeRes,
+      worldCells,
+    );
+  }
   waterConfig = resolveWaterConfig(waterConfig, worldCells);
   let buildStatus = "preparing";
   const updateBuildOverlay = () => updateClodOverlay({
@@ -697,6 +733,26 @@ async function main() {
   const polishLine = formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish)));
   const allNodes: ClodPageNode[] = [...result.nodesByLevel.values()].flat();
   const maxTerrainLevel = Math.max(...result.nodesByLevel.keys());
+
+  // LV-1b: Build the shared coarse terrain summary field (height + normal + coverage).
+  // Used by LV-2 (far shell), LV-3 (shadow proxy), LV-4 (canopy shell).
+  const worldSizeCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const terrainSummary = buildTerrainSummary(allNodes, worldSizeCells, 8);
+  // Expose to LV-2/3/4 stages via window (matches the hooks pattern).
+  (window as unknown as Record<string, unknown>).__drusnielTerrainSummary = terrainSummary;
+
+  // LV-0: Long-view hooks + stats — only when launched as a long-view QA scene.
+  let longViewHooks: ClodHooks | null = null;
+  const isLongView = queryLongViewScene;
+  const longViewSettleWaiters: { frames: number; resolve: () => void }[] = [];
+  if (isLongView) {
+    longViewHooks = initHooks();
+    longViewHooks.progress = 0.5;
+    longViewHooks.progressMsg = "building world";
+    longViewHooks.settle = (frames = 8) => new Promise((resolve) => longViewSettleWaiters.push({ frames, resolve }));
+    longViewHooks.flyCamEnabled = (_on) => { /* orbit-only in main app */ };
+  }
+
   const staleEditedAncestorIds = new Set<string>();
   const nodeGridCoord = (node: ClodPageNode): [number, number] | null => {
     const coord = node.id.slice(node.id.indexOf(":") + 1).split(",");
@@ -729,6 +785,32 @@ async function main() {
   const rendererWebGpuDevice = app.isWebGpu
     ? (app.renderer.backend as unknown as { device?: GPUDevice }).device ?? null
     : null;
+
+  // LV-0: Attach stats to long-view hooks after renderer is available.
+  if (longViewHooks) {
+    const lvStats: import("./core/hooks.js").EngineStats = {
+      fps: 0, frameMs: 0, frameMsP95: 0, drawCalls: 0, triangles: 0,
+      frame: 0, counters: {}, gpuPasses: {},
+    };
+    longViewHooks.stats = lvStats;
+    // Seed placeholder counters for layers not yet built (LV-1..6 fill them).
+    const maxLvl = maxTerrainLevel;
+    for (let lvl = 0; lvl <= maxLvl; lvl++) {
+      lvStats.counters[`clod_page_count_lod${lvl}`] = 0;
+    }
+    lvStats.counters["far_shell_tris"] = 0; // updated after shell build
+    lvStats.counters["far_shell_gpu_ms"] = 0;
+    lvStats.counters["shadow_proxy_tris"] = 0;
+    lvStats.counters["canopy_tris"] = 0;
+    lvStats.counters["horizon_hole_ratio"] = 0;
+    lvStats.counters["gpu_grass_visible"] = 0;
+    lvStats.counters["gpu_grass_dispatch_ms"] = 0;
+    lvStats.counters["gpu_tree_visible"] = 0;
+    lvStats.counters["gpu_tree_dispatch_ms"] = 0;
+    lvStats.counters["gpu_stone_visible"] = 0;
+    lvStats.counters["gpu_stone_drawn_near"] = 0;
+    lvStats.counters["gpu_stone_drawn_far"] = 0;
+  }
   const ensureClodErrorCompute = (): Promise<void> => {
     if (clodErrorCompute || webGpuUnavailableReason) return Promise.resolve();
     if (!webGpuInitPromise) {
@@ -840,6 +922,39 @@ async function main() {
     camera.position.set(mid - worldCells * 0.28, 58, mid + worldCells * 0.38);
     camera.lookAt(controls.target);
     controls.update();
+  } else if (queryLongViewScene) {
+    // LV-0: long-view camera. An explicit ?cam=tx,ty,tz,yaw,pitch,fov overrides; otherwise
+    // frame the built world from a high vantage so the far layers are actually in view. (The
+    // old hardcoded 1800,360,3200 default pointed outside any world smaller than ~4 km.)
+    const camParam = searchParams.get("cam");
+    const parts = camParam ? camParam.split(",").map(Number) : [];
+    if (camParam && parts.length >= 4 && parts.every(Number.isFinite)) {
+      controls.target.set(parts[0], parts[1], parts[2]);
+      camera.position.set(parts[0], parts[1] + 20, parts[2] + 40);
+      camera.rotation.set(parts[4] ?? 0, parts[3] ?? 0, 0, "YXZ");
+      if (parts[5]) { camera.fov = parts[5]; camera.updateProjectionMatrix(); }
+      controls.update();
+    } else {
+      controls.target.set(mid, 64, mid + worldCells * 0.4);
+      camera.position.set(mid - worldCells * 0.15, worldCells * 0.45, mid + worldCells * 0.55);
+      camera.lookAt(controls.target);
+      controls.update();
+    }
+  }
+
+  // LV-0: Wire setPose/getPose after controls + camera exist.
+  if (longViewHooks) {
+    longViewHooks.setPose = (pose) => {
+      controls.target.set(pose.p[0], pose.p[1], pose.p[2]);
+      camera.rotation.set(pose.pitch, pose.yaw, 0, "YXZ");
+      if (pose.fov) { camera.fov = pose.fov; camera.updateProjectionMatrix(); }
+    };
+    longViewHooks.getPose = () => ({
+      p: [controls.target.x, controls.target.y, controls.target.z],
+      yaw: camera.rotation.y,
+      pitch: camera.rotation.x,
+      fov: camera.fov,
+    });
   }
 
   const colliderPages: TerrainColliderPage[] = allNodes
@@ -1141,9 +1256,44 @@ async function main() {
 
   updatePlayerModeUi();
 
+  const weatherParam = searchParams.get("weather");
+  const queryWeatherMode: WeatherMode = searchParams.get("sandstorm") === "1" || searchParams.get("sand") === "1" || weatherParam === "sandstorm" || weatherParam === "sand"
+    ? "sandstorm"
+    : searchParams.get("snow") === "1" || weatherParam === "snow"
+    ? "snow"
+    : searchParams.get("rain") === "1" || weatherParam === "rain"
+      ? "rain"
+      : "off";
+  const weatherDefaults = queryWeatherMode === "sandstorm"
+    ? DEFAULT_SANDSTORM_WEATHER_SETTINGS
+    : queryWeatherMode === "snow"
+      ? DEFAULT_SNOW_WEATHER_SETTINGS
+      : DEFAULT_RAIN_WEATHER_SETTINGS;
+  const weatherIntensityParam = searchParams.get("weatherIntensity")
+    ?? (queryWeatherMode === "sandstorm"
+      ? searchParams.get("sandstormIntensity") ?? searchParams.get("sandIntensity")
+      : queryWeatherMode === "snow"
+        ? searchParams.get("snowIntensity")
+        : searchParams.get("rainIntensity"));
+  const weatherWindXParam = searchParams.get("weatherWindX")
+    ?? (queryWeatherMode === "sandstorm"
+      ? searchParams.get("sandstormWindX") ?? searchParams.get("sandWindX")
+      : queryWeatherMode === "snow"
+        ? searchParams.get("snowWindX")
+        : searchParams.get("rainWindX"));
+  const weatherWindZParam = searchParams.get("weatherWindZ")
+    ?? (queryWeatherMode === "sandstorm"
+      ? searchParams.get("sandstormWindZ") ?? searchParams.get("sandWindZ")
+      : queryWeatherMode === "snow"
+        ? searchParams.get("snowWindZ")
+        : searchParams.get("rainWindZ"));
+  const queryWeatherIntensity = weatherIntensityParam === null ? Number.NaN : Number(weatherIntensityParam);
+  const queryWeatherWindX = weatherWindXParam === null ? Number.NaN : Number(weatherWindXParam);
+  const queryWeatherWindZ = weatherWindZParam === null ? Number.NaN : Number(weatherWindZParam);
   const state = {
     clodPerfMode: queryPerfMode,
     webgpuSelection: queryWebGpuSelection,
+    materialTiers: queryMaterialTiers,
     thresholdPx: cfg.selection.error_threshold_px,
     enforce21: true,
     freeze: false,
@@ -1273,11 +1423,23 @@ async function main() {
     forestLightingSunShaftsStrength: forestLightingConfig.atmosphere.sunShaftsStrength,
     forestLightingDebugMode: forestLightingConfig.materialIntegration.debugMode as ForestLightingDebugMode,
     forestLightingStats: "pending",
+    profileEnabled: searchParams.get("profile") === "1",
+    farShellEnabled: queryFarShell || isLongView,
+    farShellRadiusFactor: 1.5,
+    farShellHeightBias: 0.6,
+    farShellHeightDrop: 2,
     waterEnabled: waterConfig.enabled,
     waterDebugMode: (Object.entries(WATER_DEBUG_MODES).find(([, v]) => v === waterConfig.debug.mode)?.[0] ?? "final") as keyof typeof WATER_DEBUG_MODES,
     waterClipmapTint: waterConfig.debug.clipmapTint,
     waterWireframe: waterConfig.debug.wireframe,
     waterDepthWrite: waterConfig.visual.depthWrite,
+    weatherMode: queryWeatherMode,
+    weatherIntensity: Number.isFinite(queryWeatherIntensity)
+      ? THREE.MathUtils.clamp(queryWeatherIntensity, 0, 1.6)
+      : weatherDefaults.intensity,
+    weatherWindX: Number.isFinite(queryWeatherWindX) ? queryWeatherWindX : weatherDefaults.windX,
+    weatherWindZ: Number.isFinite(queryWeatherWindZ) ? queryWeatherWindZ : weatherDefaults.windZ,
+    weatherStats: "off",
   };
   if (stagedImport) Object.assign(state, stagedImport.manifest.state);
   if (isWebGpu) state.normalDivergence = false;
@@ -1302,6 +1464,7 @@ async function main() {
     state.stonesEnabled = false;
     state.treesEnabled = false;
     state.waterEnabled = false;
+    state.weatherMode = "off";
   }
   if (queryGrassPerfScene) {
     state.grassEnabled = true;
@@ -1383,6 +1546,24 @@ async function main() {
     saturation: state.postProcessSaturation,
     vignette: state.postProcessVignette,
     debugMode: state.postProcessDebugMode,
+  });
+  const currentRainWeatherSettings = (): RainWeatherSettings => ({
+    enabled: state.weatherMode === "rain",
+    intensity: state.weatherIntensity,
+    windX: state.weatherWindX,
+    windZ: state.weatherWindZ,
+  });
+  const currentSnowWeatherSettings = (): SnowWeatherSettings => ({
+    enabled: state.weatherMode === "snow",
+    intensity: state.weatherIntensity,
+    windX: state.weatherWindX,
+    windZ: state.weatherWindZ,
+  });
+  const currentSandstormWeatherSettings = (): SandstormWeatherSettings => ({
+    enabled: state.weatherMode === "sandstorm",
+    intensity: state.weatherIntensity,
+    windX: state.weatherWindX,
+    windZ: state.weatherWindZ,
   });
   const postProcess: AppPostProcess = app.isWebGpu
     ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings())
@@ -1573,6 +1754,9 @@ async function main() {
         microFadeEnd: 85,
         lodBias: 0,
       },
+      // LV-6: baked macro tint texture + world size for far-tier UV mapping.
+      bakedMacroTint: bakedMacroTint ?? undefined,
+      worldSize: worldCells,
     };
   };
   const applyTerrainTextures = () => {
@@ -1627,6 +1811,96 @@ async function main() {
       fade: 0,
       target: 0,
     });
+  }
+
+  // LV-2: Far terrain vista shell (~1.8–4 km). Height from the terrain summary, no shadow.
+  // Mutable handle — rebuilt on control changes (dev toggle) or at init for long-view.
+  interface FarShellResult { mesh: THREE.Mesh; triangleCount: number; dispose: () => void }
+  const farShellState = {
+    current: null as FarShellResult | null,
+    rebuild: (() => { /* wired below */ }) as () => void,
+  };
+  function buildFarShellInstance(
+    radiusFactor: number,
+    heightBias: number,
+    heightDrop: number,
+  ): FarShellResult {
+    if (farShellState.current) {
+      scene.remove(farShellState.current.mesh);
+      farShellState.current.dispose();
+    }
+    const result = buildFarTerrainShell(terrainSummary, {
+      sunDirection: currentLighting().sunDirection,
+      sunColor: currentLighting().sunColor,
+      skyLight: currentLighting().skyLight,
+      groundLight: currentLighting().groundLight,
+    }, {
+      farRadius: worldSizeCells * radiusFactor,
+      gridRes: 128,
+      heightDrop,
+      heightBias,
+    });
+    farShellState.current = result;
+    scene.add(result.mesh);
+    if (longViewHooks?.stats) {
+      longViewHooks.stats.counters["far_shell_tris"] = result.triangleCount;
+    }
+    return result;
+  }
+  // The skirt surrounds the world out to farRadius = worldSizeCells * radiusFactor.
+  farShellState.current = buildFarShellInstance(1.5, 0.6, 2);
+  // In long-view the shell is always on; dev path adds it via the toggle below.
+  if (!isLongView && !queryFarShell) {
+    scene.remove(farShellState.current.mesh);
+  }
+  // Wire rebuild to read live state values.
+  farShellState.rebuild = () => {
+    buildFarShellInstance(state.farShellRadiusFactor, state.farShellHeightBias, state.farShellHeightDrop);
+    if (!state.farShellEnabled && !isLongView) {
+      scene.remove(farShellState.current!.mesh);
+    }
+  };
+
+  // LV-3: Far terrain shadow proxy (~128 m – 3.2 km).
+  // Coarse shadow grid: 512² grid, TSL positionNode lifts to heightfield,
+  // colorWrite/depthWrite/depthTest off → main pass vertex-only, shadow pass depth material.
+  const shadowHeightTexture = createHeightTexture(terrainSummary);
+  const shadowProxyResult = buildFarTerrainShadowProxy(shadowHeightTexture, worldSizeCells, {
+    grid: 512,
+  });
+  // Far horizon feature — only in the long-view scene (built always so dispose() stays valid).
+  if (isLongView) {
+    scene.add(shadowProxyResult.mesh);
+  }
+  if (longViewHooks?.stats) {
+    longViewHooks.stats.counters["shadow_proxy_tris"] = shadowProxyResult.triangleCount;
+  }
+
+  // LV-4: Far forest canopy shell (~600 m – 4 km).
+  // Static heightfield grid pattern: grid above terrain, height = terrain + coverage lift +
+  // crown bumps, forestless cells z-fail, dither-in past impostor range.
+  // Extended height/coverage textures cover the skirt extent [center-farRadius, center+farRadius]
+  // so the canopy base beyond the world is the analytic terrain, not a flat extrusion of the edge.
+  // Built lazily — the extended height texture samples the analytic field per texel, so it is only
+  // worth paying when the canopy is actually shown (long-view scene or ?canopy=1).
+  const canopyFarRadius = worldSizeCells * 1.5;
+  let canopyShellResult: FarShellResult | null = null;
+  if (isLongView || queryCanopy) {
+    const canopyHeightTexture = createExtendedHeightTexture(terrainSummary, canopyFarRadius);
+    const canopyCoverageTexture = createExtendedCanopyTexture(terrainSummary, canopyFarRadius, 42);
+    canopyShellResult = buildFarCanopyShell(canopyHeightTexture, canopyCoverageTexture, worldSizeCells, {
+      sunDirection: currentLighting().sunDirection,
+      sunColor: currentLighting().sunColor,
+      skyLight: currentLighting().skyLight,
+      groundLight: currentLighting().groundLight,
+    }, {
+      grid: 256,
+      farRadius: canopyFarRadius,
+    });
+    scene.add(canopyShellResult.mesh);
+    if (longViewHooks?.stats) {
+      longViewHooks.stats.counters["canopy_tris"] = canopyShellResult.triangleCount;
+    }
   }
 
   // page-boundary overlay (rebuilt on cut change)
@@ -2088,7 +2362,7 @@ async function main() {
   };
   applyForestLightingToPropMaterials();
 
-  // Fake Fable5-style water clipmap (visual POC only). Separate render layer that
+  // Camera-following clipmap ring (visual POC only). Separate render layer that
   // follows the camera and never feeds the CLOD page source path. The page-source
   // exclusion assertion below mirrors the stones/trees guard.
   const waterPageNodes = allNodes.filter((node) => node.level === 0);
@@ -2212,6 +2486,31 @@ async function main() {
       waterDebugInfo,
     });
   }
+  const rainWeather = new RainWeatherSystem({
+    scene,
+    isWebGpu,
+    worldCells,
+    seed: 0xdecafbad,
+    samplers: {
+      surfaceHeight,
+      surfaceNormal,
+      waterSample: (x, z) => waterField.sample(x, z),
+    },
+  });
+  rainWeather.applySettings(currentRainWeatherSettings());
+  const snowWeather = new SnowWeatherSystem({
+    scene,
+    isWebGpu,
+    seed: 0x51eaf00d,
+  });
+  snowWeather.applySettings(currentSnowWeatherSettings());
+  const sandstormWeather = new SandstormWeatherSystem({
+    scene,
+    camera,
+    isWebGpu,
+    seed: 0x5a4d570d,
+  });
+  sandstormWeather.applySettings(currentSandstormWeatherSettings());
 
   const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
     boundaryGroup.clear();
@@ -2485,6 +2784,17 @@ async function main() {
     }
     currentTerrainViews = nextTerrainViews;
 
+    // LV-6: Assign material quality tier per visible page by LOD level.
+    // Tier 0 = LOD0 (near, full triplanar + procedural), 1 = LOD1, 2 = LOD2+ (far, baked).
+    // Shared material (poolTerrainMaterial) stays at tier 0 — instant transitions are brief.
+    // Gated by the "material tiers" toggle (?materialTiers=1).
+    if (state.materialTiers && !poolTerrainMaterial) {
+      for (const v of currentTerrainViews) {
+        const tier = v.node.level <= 0 ? 0 : v.node.level === 1 ? 1 : 2;
+        v.mat.setTier(tier);
+      }
+    }
+
     const perLevel = new Map<number, number>();
     let tris = 0;
     for (const n of rendered) {
@@ -2712,6 +3022,12 @@ async function main() {
     else next.delete("webgpuSelection");
     history.replaceState(null, "", `${location.pathname}${next.toString() ? `?${next.toString()}` : ""}${location.hash}`);
   };
+  const setMaterialTiersQuery = (enabled: boolean) => {
+    const next = new URLSearchParams(location.search);
+    if (enabled) next.set("materialTiers", "1");
+    else next.delete("materialTiers");
+    history.replaceState(null, "", `${location.pathname}${next.toString() ? `?${next.toString()}` : ""}${location.hash}`);
+  };
   const applyClodPerfMode = (enabled: boolean) => {
     state.clodPerfMode = enabled;
     if (enabled) {
@@ -2753,6 +3069,13 @@ async function main() {
       location.search = `?${next.toString()}`;
     });
   gui.add(state, "clodPerfMode").name("CLOD perf mode").onChange(applyClodPerfMode);
+  gui.add(state, "materialTiers").name("material tiers").onChange((enabled: boolean) => {
+    setMaterialTiersQuery(enabled);
+    // When disabling, reset all visible pages to near tier (0).
+    if (!enabled) {
+      for (const v of views.values()) v.mat.setTier(0);
+    }
+  });
   gui.add(state, "webgpuSelection").name("WebGPU selection").onChange((enabled: boolean) => {
     setWebGpuSelectionQuery(enabled);
     if (enabled) {
@@ -2767,6 +3090,12 @@ async function main() {
     updateSelection();
     updateInfo();
   });
+  gui.add(state, "farShellEnabled").name("far shell").onChange((on: boolean) => {
+    if (!farShellState.current) return;
+    if (on) scene.add(farShellState.current.mesh);
+    else scene.remove(farShellState.current.mesh);
+  });
+  gui.add(state, "profileEnabled").name("profiling");
   gui.add(state, "thresholdPx", 0.1, 6, 0.05).name("error threshold px").onChange(updateSelection);
   gui.add(state, "forceMaxLevel", ["auto", "0", "1", "2", "3"]).name("force max level").onChange(() => {
     selState = { split: new Set() };
@@ -2907,6 +3236,34 @@ async function main() {
     },
   };
   postFolder.add(postActions, "reset").name("reset");
+  const weatherFolder = gui.addFolder("weather");
+  let weatherStatsController: { updateDisplay: () => unknown } | null = null;
+  const updateWeatherStats = () => {
+    if (state.weatherMode === "rain") {
+      const stats = rainWeather.getStats();
+      state.weatherStats = `rain terrain ${stats.hardSplashes} / water ${stats.waterSplashes}`;
+    } else if (state.weatherMode === "snow") {
+      const stats = snowWeather.getStats();
+      state.weatherStats = `snow ${stats.flakes} flakes`;
+    } else if (state.weatherMode === "sandstorm") {
+      const stats = sandstormWeather.getStats();
+      state.weatherStats = `sandstorm ${stats.particles} puffs${stats.haze ? " + haze" : ""}`;
+    } else {
+      state.weatherStats = "off";
+    }
+  };
+  const applyWeatherSettings = () => {
+    rainWeather.applySettings(currentRainWeatherSettings());
+    snowWeather.applySettings(currentSnowWeatherSettings());
+    sandstormWeather.applySettings(currentSandstormWeatherSettings());
+    updateWeatherStats();
+    weatherStatsController?.updateDisplay();
+  };
+  weatherFolder.add(state, "weatherMode", WEATHER_MODE_OPTIONS).name("mode").onChange(applyWeatherSettings);
+  weatherFolder.add(state, "weatherIntensity", 0, 1.6, 0.05).name("intensity").onChange(applyWeatherSettings);
+  weatherFolder.add(state, "weatherWindX", -5, 5, 0.05).name("wind X").onChange(applyWeatherSettings);
+  weatherFolder.add(state, "weatherWindZ", -5, 5, 0.05).name("wind Z").onChange(applyWeatherSettings);
+  weatherStatsController = weatherFolder.add(state, "weatherStats").name("shader stats").disable();
   let grassBladeCountController: { updateDisplay: () => unknown } | null = null;
   let grassVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
   let grassTierSummaryController: { updateDisplay: () => unknown } | null = null;
@@ -2981,6 +3338,31 @@ async function main() {
   grassPatchRebuildCountController = grassFolder.add(state, "grassPatchRebuildCount").name("patch rebuilds").disable();
   grassBuildMsController = grassFolder.add(state, "grassBuildMs").name("build ms").disable();
   grassFolder.add(grassActions, "rebuild").name("rebuild");
+
+  // LV-2: Far terrain shell dev controls (visible when ?farShell=1 or long-view).
+  const farShellFolder = gui.addFolder("far shell");
+  farShellFolder.add(state, "farShellEnabled").name("enabled").onChange((enabled: boolean) => {
+    if (enabled) {
+      if (!farShellState.current) {
+        farShellState.rebuild();
+      } else {
+        scene.add(farShellState.current.mesh);
+      }
+    } else if (farShellState.current) {
+      scene.remove(farShellState.current.mesh);
+    }
+    updateInfo();
+  });
+  farShellFolder.add(state, "farShellRadiusFactor", 1.0, 2.5, 0.05)
+    .name("far radius (×world)")
+    .onFinishChange(() => farShellState.rebuild());
+  farShellFolder.add(state, "farShellHeightBias", 0, 1, 0.01)
+    .name("height bias")
+    .onFinishChange(() => farShellState.rebuild());
+  farShellFolder.add(state, "farShellHeightDrop", 0, 10, 0.1)
+    .name("height drop")
+    .onFinishChange(() => farShellState.rebuild());
+  farShellFolder.add({ rebuild: () => farShellState.rebuild() }, "rebuild").name("rebuild");
 
   let stoneTotalController: { updateDisplay: () => unknown } | null = null;
   let stoneClassSummaryController: { updateDisplay: () => unknown } | null = null;
@@ -4509,9 +4891,9 @@ async function main() {
   });
 
   let elapsedSeconds = 0;
-  // ?profile=1 logs a per-phase breakdown for any frame slower than this (ms). Helps locate
-  // transient zoom/walk stutters (chunk meshing, geometry upload, render/pipeline stalls).
-  const profileEnabled = searchParams.get("profile") === "1";
+  // ?profile=1 (or the "profiling" gui toggle → state.profileEnabled) logs a per-phase
+  // breakdown for any frame slower than profileFrameMs. Helps locate transient zoom/walk
+  // stutters (chunk meshing, geometry upload, render/pipeline stalls).
   const grassProfileEnabled = searchParams.get("grassProfile") === "1";
   const grassPrepassEnabled = searchParams.get("prepass") !== "0";
   let grassProfileFrame = 0;
@@ -4560,6 +4942,37 @@ async function main() {
     }
     skyEnvironment?.updateCamera(camera);
     if (!state.freeze) updateSelection();
+
+    // LV-0: Emit long-view counters into hooks.stats for the shot harness / QA.
+    if (longViewHooks?.stats) {
+      const s = longViewHooks.stats;
+      s.fps = averageFps;
+      s.frameMs = performance.now() - frameStart;
+      s.frame++;
+      const info = renderer.info as unknown as { render: { drawCalls?: number; triangles?: number } };
+      s.drawCalls = info.render.drawCalls ?? 0;
+      s.triangles = info.render.triangles ?? 0;
+      for (let lvl = 0; lvl <= maxTerrainLevel; lvl++) {
+        s.counters[`clod_page_count_lod${lvl}`] = lastNodesByLod[lvl] ?? 0;
+      }
+      s.counters["terrain_draw_calls"] = lastRenderedCount;
+      s.counters["terrain_triangles"] = lastTriCount;
+      // LV-5: Vegetation ring stats for long-view validation.
+      if (grassStats) {
+        s.counters["gpu_grass_visible"] = grassStats.gpuRingVisibleNear + grassStats.gpuRingVisibleMid
+          + grassStats.gpuRingVisibleFar + grassStats.gpuRingVisibleSuper;
+        s.counters["gpu_grass_dispatch_ms"] = grassStats.gpuRingDispatchMs ?? 0;
+      }
+      if (treeStats) {
+        s.counters["gpu_tree_visible"] = treeStats.gpuVisibleCount;
+        s.counters["gpu_tree_dispatch_ms"] = treeStats.gpuDispatchMs ?? 0;
+      }
+      if (stoneStats) {
+        s.counters["gpu_stone_visible"] = stoneStats.visible;
+        s.counters["gpu_stone_drawn_near"] = stoneStats.drawnNear;
+        s.counters["gpu_stone_drawn_far"] = stoneStats.drawnFar;
+      }
+    }
 
     // hold-to-dig pickaxe cadence while playing
     if (
@@ -4671,8 +5084,16 @@ async function main() {
     }
     const tPropsStart = performance.now();
     const grassCenter = interaction.mode === "playing" ? player.position : controls.target;
-    grassSystem?.update(elapsedSeconds, grassCenter, camera);
-    treeSystem?.update(elapsedSeconds, grassCenter, camera);
+    // LV-5: Clamp ring center to world bounds so GPU vegetation rings produce candidates
+    // when the camera is outside the terrain (long-view scenes at 4 km).
+    const ringClampMargin = 2;
+    const ringCenter = new THREE.Vector3(
+      THREE.MathUtils.clamp(grassCenter.x, ringClampMargin, worldCells - ringClampMargin),
+      grassCenter.y,
+      THREE.MathUtils.clamp(grassCenter.z, ringClampMargin, worldCells - ringClampMargin),
+    );
+    grassSystem?.update(elapsedSeconds, ringCenter, camera);
+    treeSystem?.update(elapsedSeconds, ringCenter, camera);
     understorySystem?.update(elapsedSeconds, grassCenter);
     forestLightingSystem.update(elapsedSeconds, grassCenter, {
       treeProxies: treeSystem.getLightingProxies(),
@@ -4680,11 +5101,18 @@ async function main() {
       sunDirection: currentLighting().sunDirection,
     });
     applyForestLightingToPropMaterials();
-    stoneSystem?.update(grassCenter);
+    stoneSystem?.update(ringCenter);
     // Water follows the camera every frame, independent of state.freeze, so the
     // fake lake/river clipmap keeps tracking the viewer while CLOD pages can be
     // frozen. Updated after camera movement and before the render call below.
     waterClipmap.update(Math.min(playerDelta, 0.1), camera.position);
+    rainWeather.update(playerDelta, elapsedSeconds, camera.position, grassCenter);
+    snowWeather.update(playerDelta, elapsedSeconds, camera.position);
+    sandstormWeather.update(playerDelta, elapsedSeconds, camera.position);
+    if (state.weatherMode !== "off" && selectionFrameId % 30 === 0) {
+      updateWeatherStats();
+      weatherStatsController?.updateDisplay();
+    }
     if (!waterDevLogged) {
       waterDevLogged = true;
       const rect = waterClipmap.getLevelRect(0);
@@ -4836,7 +5264,20 @@ async function main() {
     if (postProcess) postProcess.render(scene, camera);
     else renderer.render(scene, camera);
 
-    if (profileEnabled) {
+    // LV-0: Signal ready to the shot harness after the first rendered frame.
+    if (longViewHooks && !longViewHooks.ready) {
+      longViewHooks.ready = true;
+      longViewHooks.progress = 1;
+      longViewHooks.progressMsg = "ready";
+    }
+
+    // LV-0: Drain settle waiters for the shot harness.
+    for (const waiter of longViewSettleWaiters) waiter.frames -= 1;
+    const doneWaiters = longViewSettleWaiters.filter((w) => w.frames <= 0);
+    for (const waiter of doneWaiters) waiter.resolve();
+    for (const waiter of doneWaiters) longViewSettleWaiters.splice(longViewSettleWaiters.indexOf(waiter), 1);
+
+    if (state.profileEnabled) {
       const end = performance.now();
       const frameMs = end - frameStart;
       if (frameMs >= profileFrameMs) {
@@ -4908,10 +5349,16 @@ async function main() {
     treeSystem?.dispose();
     stoneSystem?.dispose();
     waterClipmap.dispose();
+    rainWeather.dispose();
+    snowWeather.dispose();
+    sandstormWeather.dispose();
     skyEnvironment?.dispose();
     postProcess?.dispose();
     clodErrorCompute?.destroy();
     clodWorker.dispose();
+    farShellState.current?.dispose();
+    shadowProxyResult.dispose();
+    canopyShellResult?.dispose();
   }, { once: true });
 }
 

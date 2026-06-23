@@ -1,5 +1,5 @@
 /**
- * Mesh assembly for the vegetation grammar. Ported from the fable5-world-demo
+ * Mesh assembly for the vegetation grammar. Ported from the reference vegetation implementation.
  * reference (`vegetation/TubeMesh.ts` `MeshGrower`). Accumulates one indexed
  * buffer so a whole tree is 1–2 draw calls.
  *

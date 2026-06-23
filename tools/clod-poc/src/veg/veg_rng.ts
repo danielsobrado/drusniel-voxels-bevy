@@ -1,6 +1,6 @@
 /**
  * Deterministic seeding for the vegetation grammar. Ported from the
- * fable5-world-demo reference (`core/Seed.ts`): an sfc32 PRNG with string-keyed
+ * Reference PRNG implementation: an sfc32 PRNG with string-keyed
  * stream derivation so independent producers (skeleton, tubes, foliage) get
  * decorrelated sequences and `.fork(label)` never shifts a sibling's stream.
  */

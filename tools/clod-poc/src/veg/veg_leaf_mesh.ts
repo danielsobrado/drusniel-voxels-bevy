@@ -1,6 +1,6 @@
 /**
  * Real foliage geometry for the vegetation grammar — folded/curled leaf strips
- * and needle sprays, no alpha cards. Ported from the fable5-world-demo reference
+ * and needle sprays, no alpha cards. Ported from the reference vegetation implementation.
  * (`vegetation/LeafMesh.ts`), adapted to the clod-poc `VegMeshGrower` attribute
  * model: foliage verts carry `treeFoliageMask = 1` (leaf lighting), vertex
  * `color` folds the reference's hue jitter + edge AO, `treeWind.x` = sway flex,

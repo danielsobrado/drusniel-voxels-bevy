@@ -17,7 +17,7 @@ function node(level: number, id: string): ClodPageNode {
     children: [],
     mesh,
     footprint: { minX: 0, minZ: 0, maxX: 16 << level, maxZ: 16 << level },
-    bounds: { center: [0.5, 0, 0.5], radius: 1 },
+    bounds: { center: [0.5, 0, 0.5], radius: 1, minY: 0, maxY: 0 },
     errorWorld: level * 0.5,
     lowBenefit: false,
   };

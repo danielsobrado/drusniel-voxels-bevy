@@ -31,7 +31,16 @@ export function errorPx(node: ClodPageNode, p: SelectionParams): number {
   const c = node.bounds.center;
   const d = Math.hypot(p.camPos[0] - c[0], p.camPos[1] - c[1], p.camPos[2] - c[2]);
   const dist = Math.max(0.001, d - node.bounds.radius);
-  return (node.errorWorld * p.viewportH) / (2 * dist * Math.tan(p.fovY / 2));
+  const base = (node.errorWorld * p.viewportH) / (2 * dist * Math.tan(p.fovY / 2));
+  // LV-1: relief bias — nodes with more vertical extent split earlier.
+  // The boost is applied to screen-space error only, NOT to stored errorWorld (which must
+  // stay monotonic for the DAG-cut invariant).  Relief bias from height-range / page-span ratio.
+  const pageSpan = node.footprint.maxX - node.footprint.minX;
+  const heightRange = node.bounds.maxY - node.bounds.minY;
+  const reliefBoost = pageSpan > 0
+    ? Math.min(1.8, Math.max(1, 1 + (heightRange / pageSpan) * 0.8))
+    : 1;
+  return base * reliefBoost;
 }
 
 const kids = (n: ClodPageNode): ClodPageNode[] => n.children.filter((c): c is ClodPageNode => !!c);

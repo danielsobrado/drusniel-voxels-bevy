@@ -1,5 +1,5 @@
 /**
- * Shared vegetation grammar types. Ported from the fable5-world-demo reference
+ * Shared vegetation grammar types. Ported from the reference vegetation implementation.
  * (`vegetation/VegTypes.ts`). A species is a parameter bundle for the growth
  * grammar (`veg_skeleton.ts`) + meshing (`veg_tube_mesh.ts` / `veg_leaf_mesh.ts`).
  * Every plant is grown from its own deterministic Rng stream.

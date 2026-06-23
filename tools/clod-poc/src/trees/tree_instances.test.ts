@@ -83,6 +83,8 @@ function pageNode(mesh: PageMesh = pageMesh(), nodeFootprint: PageFootprint = fo
     bounds: {
       center: [(nodeFootprint.minX + nodeFootprint.maxX) * 0.5, 24, (nodeFootprint.minZ + nodeFootprint.maxZ) * 0.5],
       radius: Math.hypot(nodeFootprint.maxX - nodeFootprint.minX, nodeFootprint.maxZ - nodeFootprint.minZ) * 0.5,
+      minY: 0,
+      maxY: 0,
     },
     errorWorld: 0,
     lowBenefit: false,

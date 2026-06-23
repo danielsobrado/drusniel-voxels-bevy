@@ -21,7 +21,7 @@ export interface SerializedClodNode {
   childIds: (string | null)[];
   mesh: PageMesh;
   footprint: PageFootprint;
-  bounds: { center: [number, number, number]; radius: number };
+  bounds: { center: [number, number, number]; radius: number; minY: number; maxY: number };
   errorWorld: number;
   lowBenefit: boolean;
 }
@@ -99,7 +99,7 @@ export function serializeNode(node: ClodPageNode): SerializedClodNode {
     childIds: node.children.map((child) => child?.id ?? null),
     mesh: cloneMesh(node.mesh),
     footprint: { ...node.footprint },
-    bounds: { center: [...node.bounds.center], radius: node.bounds.radius },
+    bounds: { center: [...node.bounds.center], radius: node.bounds.radius, minY: node.bounds.minY, maxY: node.bounds.maxY },
     errorWorld: node.errorWorld,
     lowBenefit: node.lowBenefit,
   };

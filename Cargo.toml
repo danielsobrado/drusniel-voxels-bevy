@@ -15,6 +15,8 @@ naadf = []
 naadf_debug = ["naadf"]
 # Legacy MC + Transvoxel LOD seam spike (kept off default while the CLOD path owns far field).
 mc_transvoxel = ["dep:transvoxel-data"]
+# GPU-driven prop cull/indirect-draw path (default off; CPU path is the fallback).
+gpu_vegetation = []
 
 [dependencies]
 # CLOD pages decimation (src/voxel/pages). meshopt builds the C meshoptimizer via cc on

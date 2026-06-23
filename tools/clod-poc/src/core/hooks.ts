@@ -43,6 +43,7 @@ export interface ClodHooks {
 declare global {
   interface Window {
     __drusnielClod?: ClodHooks;
+    __drusnielTerrainSummary?: import("../clod/terrain_summary.js").TerrainSummaryField;
   }
 }
 

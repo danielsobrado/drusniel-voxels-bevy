@@ -62,3 +62,89 @@ qa:
           field: "texture_load_errors"
           max: 0
           optional: true
+
+    # LV-0: 4 km long-view benchmark scene — baseline for all LV-1..6 stages.
+    # Launch with: ?scene=long-view-4km&seed=12345&world=16&clodPerf=1&webgpuSelection=1
+    - id: "long_view_4km"
+      bench_scene: "long-view-4km"
+      checkpoint: "main"
+      optional: true
+      screenshots:
+        - id: "viewport"
+          name: "viewport"
+      probes:
+        - id: "horizon_has_signal"
+          type: "region_luminance"
+          screenshot: "viewport"
+          # Top 20% of the viewport = horizon/sky band
+          region: [0.0, 0.0, 1.0, 0.2]
+          min: 0.02
+          max: 0.98
+        - id: "horizon_not_flat"
+          type: "region_variance"
+          screenshot: "viewport"
+          region: [0.0, 0.0, 1.0, 0.2]
+          min_luminance_stddev: 0.005
+        - id: "far_band_has_silhouette"
+          type: "region_variance"
+          screenshot: "viewport"
+          # Middle 40% = far terrain band
+          region: [0.0, 0.2, 1.0, 0.6]
+          min_luminance_stddev: 0.01
+      timing:
+        - id: "frame_p95"
+          area: "__frame"
+          field: "p95_ms"
+          max_ms: 24.0
+        - id: "draws"
+          area: "renderer"
+          field: "draw_calls"
+          max_ms: 4000.0
+          optional: true
+      checks:
+        - id: "terrain_triangles_exist"
+          area: "clod"
+          field: "terrain_triangles"
+          min: 1000
+        - id: "terrain_draw_calls_exist"
+          area: "clod"
+          field: "terrain_draw_calls"
+          min: 1
+        - id: "far_shell_tris_exist"
+          area: "far_shell"
+          field: "far_shell_tris"
+          min: 1000
+          optional: true
+        # LV-3/LV-4 are built (gated to the long-view scene). Advisory existence checks only —
+        # min: 0 never fails; optional skips when the metric is absent (e.g. non-long-view runs).
+        - id: "shadow_proxy_tris_exist"
+          area: "shadow_proxy"
+          field: "shadow_proxy_tris"
+          min: 0
+          optional: true
+        - id: "canopy_tris_exist"
+          area: "canopy_shell"
+          field: "canopy_tris"
+          min: 0
+          optional: true
+        # LV-5: GPU vegetation ring checks — verify rings produce output at long-view distances.
+        - id: "gpu_grass_visible"
+          area: "gpu_grass"
+          field: "visible"
+          min: 1
+          optional: true
+        - id: "gpu_tree_visible"
+          area: "gpu_tree"
+          field: "visible"
+          min: 1
+          optional: true
+        - id: "gpu_stone_visible"
+          area: "gpu_stone"
+          field: "visible"
+          min: 1
+          optional: true
+        - id: "horizon_hole_ratio_zero"
+          area: "clod"
+          field: "horizon_hole_ratio"
+          max: 0.05
+          optional: true

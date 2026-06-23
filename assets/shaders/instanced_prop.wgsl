@@ -18,17 +18,31 @@ struct PropsUniforms {
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var albedo_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var albedo_sampler: sampler;
 
+#ifdef GPU_VEGETATION
+struct GpuVisibleInstance {
+    col0: vec4<f32>,
+    col1: vec4<f32>,
+    col2: vec4<f32>,
+    col3: vec4<f32>,
+    tint: vec4<f32>,
+};
+
+@group(4) @binding(0) var<storage, read> visible_instances: array<GpuVisibleInstance>;
+#endif
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(3) color: vec4<f32>,
+#ifndef GPU_VEGETATION
     @location(4) i_model_0: vec4<f32>,
     @location(5) i_model_1: vec4<f32>,
     @location(6) i_model_2: vec4<f32>,
     @location(7) i_model_3: vec4<f32>,
 #ifdef PROP_INSTANCE_TINT
     @location(8) i_tint: vec4<f32>,
+#endif
 #endif
 };
 
@@ -45,12 +59,27 @@ const EXPOSURE_BLENDER: f32 = 0.0010019079;
 
 @vertex
 fn vertex(vertex: VertexInput) -> VertexOutput {
-    let model = mat4x4<f32>(
+    var model: mat4x4<f32>;
+    var tint: vec4<f32> = vec4<f32>(1.0);
+
+#ifdef GPU_VEGETATION
+    let inst = visible_instances[@builtin(instance_index)];
+    model = mat4x4<f32>(inst.col0, inst.col1, inst.col2, inst.col3);
+#ifdef PROP_INSTANCE_TINT
+    tint = inst.tint;
+#endif
+#else
+    model = mat4x4<f32>(
         vertex.i_model_0,
         vertex.i_model_1,
         vertex.i_model_2,
         vertex.i_model_3
     );
+#ifdef PROP_INSTANCE_TINT
+    tint = vertex.i_tint;
+#endif
+#endif
+
     let world_position = model * vec4<f32>(vertex.position, 1.0);
     var out: VertexOutput;
     out.clip_position = view.clip_from_world * world_position;
@@ -58,11 +87,7 @@ fn vertex(vertex: VertexInput) -> VertexOutput {
     out.world_normal = normalize((model * vec4<f32>(vertex.normal, 0.0)).xyz);
     out.uv = vertex.uv;
     out.color = vertex.color;
-#ifdef PROP_INSTANCE_TINT
-    out.tint = vertex.i_tint;
-#else
-    out.tint = vec4<f32>(1.0);
-#endif
+    out.tint = tint;
     return out;
 }
 

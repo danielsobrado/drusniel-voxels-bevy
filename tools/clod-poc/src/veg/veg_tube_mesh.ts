@@ -1,6 +1,6 @@
 /**
  * Generalized-cylinder bark meshing for the vegetation grammar. Ported from the
- * fable5-world-demo reference (`vegetation/TubeMesh.ts`): each skeleton branch
+ * Reference vegetation implementation: each skeleton branch
  * becomes a tube via parallel-transport frames, with trunk root flare and jagged
  * caps on broken branches. Emits clod-poc bark verts (foliageMask 0, flutter 0,
  * windWeight = sway flex; bark colour hue-jittered per branch).

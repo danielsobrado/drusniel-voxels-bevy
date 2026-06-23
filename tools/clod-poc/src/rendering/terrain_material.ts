@@ -39,6 +39,12 @@ export interface TerrainMaterialHandle {
   setSide(side: THREE.Side): void;
   setWireframe(on: boolean): void;
   setFade(fade: number, fadeIn: boolean, dither: boolean): void;
+  /**
+   * LV-6: Set material quality tier.
+   * 0 = near (full triplanar + procedural), 1 = mid (simplified), 2 = far (baked + single-proj).
+   * No-op on WebGL path (uniform not present).
+   */
+  setTier(tier: number): void;
 }
 
 export function createWebGlTerrainMaterial(color: number): TerrainMaterialHandle {
@@ -84,6 +90,9 @@ export function createWebGlTerrainMaterial(color: number): TerrainMaterialHandle
       u.uFade.value = fade;
       u.uFadeIn.value = fadeIn;
       u.uDither.value = dither;
+    },
+    setTier() {
+      // No-op on WebGL: no tier uniform in the classic ShaderMaterial.
     },
   };
 }

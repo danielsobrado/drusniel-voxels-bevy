@@ -55,6 +55,20 @@ export interface UnderstoryRenderSettings {
   maxShadowClass: UnderstoryClass;
 }
 
+// GPU-ring scatter settings (mirrors TreeGpuSettings). When the renderer is
+// WebGPU and `enabled`, understory is scattered + culled on the GPU and drawn
+// indirectly instead of the CPU per-frame patch scatter. `fallbackToCpu` keeps
+// the legacy CPU path for WebGL / low-limit devices.
+export interface UnderstoryGpuSettings {
+  enabled: boolean;
+  fallbackToCpu: boolean;
+  maxVisible: number;
+  workgroupSize: 32 | 64 | 128 | 256;
+  readbackVisibleLists: boolean;
+  debugShowGpuCounts: boolean;
+  debugValidateAgainstCpu: boolean;
+}
+
 export interface UnderstorySettings {
   enabled: boolean;
   seed: number;
@@ -66,6 +80,7 @@ export interface UnderstorySettings {
   ecology: UnderstoryEcologySettings;
   classes: Record<UnderstoryClass, UnderstoryClassSettings>;
   render: UnderstoryRenderSettings;
+  gpu: UnderstoryGpuSettings;
 }
 
 interface UnderstoryYamlClass {
@@ -117,8 +132,29 @@ interface UnderstoryYamlConfig {
       shadows?: boolean;
       max_shadow_class?: unknown;
     };
+    gpu?: UnderstoryYamlGpu;
   };
 }
+
+interface UnderstoryYamlGpu {
+  enabled?: boolean;
+  fallback_to_cpu?: boolean;
+  max_visible?: number;
+  workgroup_size?: number;
+  readback_visible_lists?: boolean;
+  debug_show_gpu_counts?: boolean;
+  debug_validate_against_cpu?: boolean;
+}
+
+export const DEFAULT_UNDERSTORY_GPU_SETTINGS: UnderstoryGpuSettings = {
+  enabled: true,
+  fallbackToCpu: true,
+  maxVisible: 12_000,
+  workgroupSize: 64,
+  readbackVisibleLists: true,
+  debugShowGpuCounts: true,
+  debugValidateAgainstCpu: false,
+};
 
 export const DEFAULT_UNDERSTORY_SETTINGS: UnderstorySettings = {
   enabled: true,
@@ -162,6 +198,7 @@ export const DEFAULT_UNDERSTORY_SETTINGS: UnderstorySettings = {
     shadows: false,
     maxShadowClass: "shrub",
   },
+  gpu: { ...DEFAULT_UNDERSTORY_GPU_SETTINGS },
 };
 
 export function cloneUnderstorySettings(settings: UnderstorySettings = DEFAULT_UNDERSTORY_SETTINGS): UnderstorySettings {
@@ -178,6 +215,7 @@ export function cloneUnderstorySettings(settings: UnderstorySettings = DEFAULT_U
       stump: { ...settings.classes.stump },
     },
     render: { ...settings.render },
+    gpu: { ...settings.gpu },
   };
 }
 
@@ -239,7 +277,31 @@ export function parseUnderstoryConfig(
       shadows: readBoolean(raw.render?.shadows, fallback.render.shadows),
       maxShadowClass: readUnderstoryClass(raw.render?.max_shadow_class, fallback.render.maxShadowClass),
     },
+    gpu: readUnderstoryGpuSettings(raw.gpu, fallback.gpu),
   };
+}
+
+function readUnderstoryGpuSettings(
+  raw: UnderstoryYamlGpu | undefined,
+  fallback: UnderstoryGpuSettings,
+): UnderstoryGpuSettings {
+  return {
+    enabled: readBoolean(raw?.enabled, fallback.enabled),
+    fallbackToCpu: readBoolean(raw?.fallback_to_cpu, fallback.fallbackToCpu),
+    maxVisible: readIntegerInRange(raw?.max_visible, fallback.maxVisible, 0, 2_000_000),
+    workgroupSize: readUnderstoryGpuWorkgroupSize(raw?.workgroup_size, fallback.workgroupSize),
+    readbackVisibleLists: readBoolean(raw?.readback_visible_lists, fallback.readbackVisibleLists),
+    debugShowGpuCounts: readBoolean(raw?.debug_show_gpu_counts, fallback.debugShowGpuCounts),
+    debugValidateAgainstCpu: readBoolean(raw?.debug_validate_against_cpu, fallback.debugValidateAgainstCpu),
+  };
+}
+
+function readUnderstoryGpuWorkgroupSize(
+  value: unknown,
+  fallback: UnderstoryGpuSettings["workgroupSize"],
+): UnderstoryGpuSettings["workgroupSize"] {
+  if (value === 32 || value === 64 || value === 128 || value === 256) return value;
+  return fallback;
 }
 
 function classDefaults(

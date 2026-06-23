@@ -136,7 +136,7 @@ function node(id: string, level: number, footprint: PageFootprint): ClodPageNode
     children: [],
     mesh: mesh(),
     footprint,
-    bounds: { center: [0, 0, 0], radius: 1 },
+    bounds: { center: [0, 0, 0], radius: 1, minY: 0, maxY: 0 },
     errorWorld: 0,
     lowBenefit: false,
   };

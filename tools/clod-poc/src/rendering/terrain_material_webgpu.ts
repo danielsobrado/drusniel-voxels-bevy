@@ -135,6 +135,9 @@ export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandl
       dither = nextDither;
       node.setFade(fade, fadeIn, dither);
     },
+    setTier(tier) {
+      node.setTier(tier);
+    },
   };
 }
 
@@ -165,6 +168,11 @@ function textureOptionsSignature(
     procedural?.microFadeEnd ?? 85,
     procedural?.lodBias ?? 0,
     normalMapMask,
+    // LV-6: baked macro tint + world size (change triggers rebuild).
+    (options as Record<string, unknown>).bakedMacroTint
+      ? ((options as Record<string, unknown>).bakedMacroTint as THREE.Texture).uuid
+      : "_",
+    (options as Record<string, unknown>).worldSize ?? "_",
     slots.map((slot) => [
       slot.texture?.uuid ?? "_",
       slot.normalTexture?.uuid ?? "_",
@@ -205,5 +213,8 @@ function toNodeTextures(
           lodBias: options.procedural.lodBias,
         }
       : null,
+    // LV-6: baked macro tint + world size, passed through from main.ts options.
+    bakedMacroTint: (options as Record<string, unknown>).bakedMacroTint as THREE.Texture | null | undefined,
+    worldSize: (options as Record<string, unknown>).worldSize as number | undefined,
   };
 }

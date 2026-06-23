@@ -675,3 +675,24 @@ style:
     # Reduce photoreal shading detail
     disable_normal_maps: true
     disable_occlusion_maps: true
+
+# GPU-driven prop cull/indirect-draw pipeline (default off; CPU path is the fallback).
+gpu_vegetation:
+  enabled: false
+  force_cpu_fallback: false
+  disable_on_integrated_gpu: true
+  target_layer: "props_foliage"
+  buffers:
+    max_source_instances: 262144
+    max_visible_main: 131072
+    max_visible_shadow_per_cascade: 65536
+  culling:
+    max_draw_distance_m: 160.0
+    lod_end_m: [32.0, 72.0, 128.0]
+    fade_band_m: 12.0
+    hysteresis_m: 8.0
+    shadows: true
+    max_shadow_distance_m: 96.0
+  debug:
+    allow_gpu_readback: false
+    emit_metrics: true

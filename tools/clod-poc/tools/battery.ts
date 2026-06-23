@@ -11,6 +11,11 @@ const PHASE1_FINAL = `${PHASE1_DIR}/terrain-final.png`;
 const PHASE1_STATS = `${PHASE1_DIR}/terrain-stats.json`;
 const PHASE1_CMP = `${PHASE1_DIR}/cmp_terrain_vs_scene1.png`;
 const PHASE1_CAM = "1800,360,3200,2.6500,-0.4300,55";
+const LONG_VIEW_DIR = "shots/long-view";
+const LONG_VIEW_SHOT = `${LONG_VIEW_DIR}/long-view-4km.png`;
+const LONG_VIEW_STATS = `${LONG_VIEW_DIR}/long-view-4km-stats.json`;
+const LONG_VIEW_SUMMARY = `${LONG_VIEW_DIR}/long-view-4km-summary.json`;
+const LONG_VIEW_CAM = "1800,360,3200,2.6500,-0.4300,55";
 
 function run(label: string, args: string[]): void {
   console.log(`[battery] ${label}`);
@@ -67,6 +72,26 @@ function validatePhase1Stats(): void {
   assertCounter(stats, "phase1.buildMs100", (value) => Number.isFinite(value));
 }
 
+function validateLongViewStats(): void {
+  const stats = JSON.parse(readFileSync(LONG_VIEW_STATS, "utf8")) as Record<string, unknown>;
+  if (stats["ready"] !== true) throw new Error("long-view stats ready flag is not true");
+  if (stats["error"] !== null) throw new Error(`long-view stats error is not null: ${String(stats["error"])}`);
+  if (typeof stats["drawCalls"] !== "number" || stats["drawCalls"] <= 0) throw new Error("long-view drawCalls must be > 0");
+  if (typeof stats["triangles"] !== "number" || stats["triangles"] <= 0) throw new Error("long-view triangles must be > 0");
+  assertCounter(stats, "terrain_draw_calls", (value) => value > 0);
+  assertCounter(stats, "terrain_triangles", (value) => value > 0);
+  // LV-0 baseline: placeholder counters should be 0 (layers not built yet).
+  assertCounter(stats, "far_shell_tris", (value) => value === 0);
+  assertCounter(stats, "shadow_proxy_tris", (value) => value === 0);
+  assertCounter(stats, "canopy_tris", (value) => value === 0);
+  // Per-LOD page counts: at least one LOD level should have nodes.
+  const counters = stats["counters"] as Record<string, unknown> | undefined;
+  const hasAnyLod = counters && Object.keys(counters).some((k) => k.startsWith("clod_page_count_lod") && typeof counters[k] === "number" && (counters[k] as number) > 0);
+  if (!hasAnyLod) throw new Error("long-view: no clod_page_count_lod* counter > 0");
+  // Verify QA summary was also written.
+  if (!existsSync(LONG_VIEW_SUMMARY)) throw new Error(`long-view QA summary not found at ${LONG_VIEW_SUMMARY}`);
+}
+
 function runPhase1Shots(): void {
   mkdirSync(PHASE1_DIR, { recursive: true });
   const common = [
@@ -116,6 +141,24 @@ function main(): void {
   }
   validateStats();
   runPhase1Shots();
+
+  // LV-0: Long-view 4 km benchmark shot.
+  mkdirSync(LONG_VIEW_DIR, { recursive: true });
+  run("shoot long-view-4km", [
+    "run", "shoot", "--",
+    "--scene", "long-view-4km",
+    "--seed", "12345",
+    "--world", "16",
+    "--cam", LONG_VIEW_CAM,
+    "--freeze", "1",
+    "--hud", "1",
+    "--framealign", "0",
+    "--clodPerf", "1",
+    "--webgpuSelection", "1",
+    "--out", LONG_VIEW_SHOT,
+    "--stats", LONG_VIEW_STATS,
+  ]);
+  validateLongViewStats();
   console.log("[battery] ok");
 }
 

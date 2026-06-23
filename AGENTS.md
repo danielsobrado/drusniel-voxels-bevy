@@ -220,3 +220,6 @@ Debug interpretation:
 - Turn work into verifiable goals. For bug fixes, prefer a reproducing test before the fix; for refactors, verify before and after behavior when practical.
 
 Understand first if you are under Windows or WSL and use the command accordingly and the paths
+
+
+Do not mention the name of the refernece in the code comments like Fable 5 for example.

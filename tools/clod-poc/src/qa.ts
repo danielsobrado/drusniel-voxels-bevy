@@ -39,6 +39,7 @@ interface QaSceneConfig {
   probes?: QaProbeConfig[];
   timing?: QaTimingThreshold[];
   checks?: QaCheckThreshold[];
+  optional?: boolean;
 }
 
 interface QaScreenshotConfig {
@@ -284,6 +285,18 @@ export function runQa(config: QaConfig, summary: WebQaSummary, summaryPath: stri
 
 function evaluateScene(config: QaConfig, scene: QaSceneConfig, summary: WebQaSummary): QaSceneReport {
   if (scene.bench_scene && !sceneMatches(summary.scene, scene.bench_scene)) {
+    if (scene.optional) {
+      return {
+        id: scene.id,
+        checkpoint: scene.checkpoint,
+        status: "missing_optional",
+        screenshots: [],
+        probes: [],
+        timing: [],
+        checks: [],
+        failures: [],
+      };
+    }
     return {
       id: scene.id,
       checkpoint: scene.checkpoint,

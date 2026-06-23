@@ -400,7 +400,7 @@ grass:
           indices: new Uint32Array(),
         },
         footprint,
-        bounds: { center: [8, 0, 8], radius: 12 },
+        bounds: { center: [8, 0, 8], radius: 12, minY: 0, maxY: 0 },
         errorWorld: 0,
         lowBenefit: false,
       }],

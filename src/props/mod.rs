@@ -1,6 +1,10 @@
 pub mod billboard;
 pub mod decimation;
 pub mod foliage;
+#[cfg(feature = "gpu_vegetation")]
+pub mod gpu_vegetation;
+#[cfg(feature = "gpu_vegetation")]
+pub mod gpu_vegetation_cull;
 pub mod instanced_render;
 pub mod instancing;
 pub mod loader;
@@ -267,6 +271,8 @@ pub struct PropConfig {
     pub style: StyleConfig,
     #[serde(default)]
     pub persistence: PersistenceConfig,
+    #[serde(default)]
+    pub gpu_vegetation: GpuVegetationConfig,
 }
 
 /// Configuration for prop persistence
@@ -302,6 +308,175 @@ fn default_save_directory() -> String {
 }
 
 fn default_pretty_json() -> bool {
+    true
+}
+
+/// GPU-driven prop cull/indirect-draw configuration.
+/// Default off — the CPU path is the fallback.
+#[derive(Resource, Deserialize, Clone, Debug)]
+pub struct GpuVegetationConfig {
+    /// Master switch. When false (default), the CPU path runs unchanged.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Force CPU path even when GPU is available (debug/comparison).
+    #[serde(default)]
+    pub force_cpu_fallback: bool,
+    /// Automatically disable on integrated GPUs (default true).
+    #[serde(default = "default_disable_on_integrated_gpu")]
+    pub disable_on_integrated_gpu: bool,
+    /// Which prop layer to target first (default "props_foliage").
+    #[serde(default = "default_target_layer")]
+    pub target_layer: String,
+    /// GPU buffer capacity limits.
+    #[serde(default)]
+    pub buffers: GpuVegetationBuffers,
+    /// Culling parameters.
+    #[serde(default)]
+    pub culling: GpuVegetationCulling,
+    /// Debug/diagnostic settings.
+    #[serde(default)]
+    pub debug: GpuVegetationDebug,
+}
+
+impl Default for GpuVegetationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            force_cpu_fallback: false,
+            disable_on_integrated_gpu: true,
+            target_layer: "props_foliage".to_string(),
+            buffers: GpuVegetationBuffers::default(),
+            culling: GpuVegetationCulling::default(),
+            debug: GpuVegetationDebug::default(),
+        }
+    }
+}
+
+fn default_disable_on_integrated_gpu() -> bool {
+    true
+}
+
+fn default_target_layer() -> String {
+    "props_foliage".to_string()
+}
+
+/// GPU buffer capacity limits for the vegetation pipeline.
+#[derive(Deserialize, Clone, Debug)]
+pub struct GpuVegetationBuffers {
+    /// Maximum source instances that can be uploaded to the GPU.
+    #[serde(default = "default_max_source_instances")]
+    pub max_source_instances: u32,
+    /// Maximum visible instances in the main-view compacted buffer.
+    #[serde(default = "default_max_visible_main")]
+    pub max_visible_main: u32,
+    /// Maximum visible shadow casters per cascade.
+    #[serde(default = "default_max_visible_shadow_per_cascade")]
+    pub max_visible_shadow_per_cascade: u32,
+}
+
+impl Default for GpuVegetationBuffers {
+    fn default() -> Self {
+        Self {
+            max_source_instances: 262_144,
+            max_visible_main: 131_072,
+            max_visible_shadow_per_cascade: 65_536,
+        }
+    }
+}
+
+fn default_max_source_instances() -> u32 {
+    262_144
+}
+
+fn default_max_visible_main() -> u32 {
+    131_072
+}
+
+fn default_max_visible_shadow_per_cascade() -> u32 {
+    65_536
+}
+
+/// Culling parameters for the GPU vegetation pipeline.
+#[derive(Deserialize, Clone, Debug)]
+pub struct GpuVegetationCulling {
+    /// Maximum distance for main-view culling (meters).
+    #[serde(default = "default_max_draw_distance")]
+    pub max_draw_distance_m: f32,
+    /// LOD transition end distances (strictly increasing, one per LOD level).
+    #[serde(default = "default_lod_end_m")]
+    pub lod_end_m: Vec<f32>,
+    /// Distance band for cross-fade between LOD levels (meters).
+    #[serde(default = "default_fade_band")]
+    pub fade_band_m: f32,
+    /// Hysteresis at LOD boundaries (meters).
+    #[serde(default = "default_hysteresis")]
+    pub hysteresis_m: f32,
+    /// Whether shadow culling is enabled.
+    #[serde(default = "default_shadows_enabled")]
+    pub shadows: bool,
+    /// Maximum distance for shadow culling (meters).
+    #[serde(default = "default_max_shadow_distance")]
+    pub max_shadow_distance_m: f32,
+}
+
+impl Default for GpuVegetationCulling {
+    fn default() -> Self {
+        Self {
+            max_draw_distance_m: 160.0,
+            lod_end_m: vec![32.0, 72.0, 128.0],
+            fade_band_m: 12.0,
+            hysteresis_m: 8.0,
+            shadows: true,
+            max_shadow_distance_m: 96.0,
+        }
+    }
+}
+
+fn default_max_draw_distance() -> f32 {
+    160.0
+}
+
+fn default_lod_end_m() -> Vec<f32> {
+    vec![32.0, 72.0, 128.0]
+}
+
+fn default_fade_band() -> f32 {
+    12.0
+}
+
+fn default_hysteresis() -> f32 {
+    8.0
+}
+
+fn default_shadows_enabled() -> bool {
+    true
+}
+
+fn default_max_shadow_distance() -> f32 {
+    96.0
+}
+
+/// Debug and diagnostic settings for the GPU vegetation pipeline.
+#[derive(Deserialize, Clone, Debug)]
+pub struct GpuVegetationDebug {
+    /// Allow GPU readback for validation (debug/bench only, default off).
+    #[serde(default)]
+    pub allow_gpu_readback: bool,
+    /// Emit per-frame metrics into the diagnostics output.
+    #[serde(default = "default_emit_metrics")]
+    pub emit_metrics: bool,
+}
+
+impl Default for GpuVegetationDebug {
+    fn default() -> Self {
+        Self {
+            allow_gpu_readback: false,
+            emit_metrics: true,
+        }
+    }
+}
+
+fn default_emit_metrics() -> bool {
     true
 }
 

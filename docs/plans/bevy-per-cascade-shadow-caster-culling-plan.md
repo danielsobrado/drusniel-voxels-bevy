@@ -1,6 +1,6 @@
 # Per-Cascade Shadow Caster Culling (Bevy) — Plan
 
-> Created: 2026-06-17 · Status: Planning
+> Created: 2026-06-17 · Status: Complete (Phases 0-4 implemented; Phase 4 debug view deferred)
 > Scope: `src/props/instanced_render.rs` (`rebuild_visible_and_shadow_instances`,
 > `queue_instanced_prop_shadows`), `src/rendering/lighting/`, `assets/config/props.yaml`,
 > `bench/scenes/forest/`

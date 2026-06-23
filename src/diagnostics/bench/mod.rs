@@ -252,6 +252,12 @@ pub struct BenchRenderToggles {
     pub naadf_use_for_terrain_ao: Option<bool>,
     #[serde(default)]
     pub naadf_use_for_contact_shadows: Option<bool>,
+    /// Force GPU vegetation cull off (CPU path).
+    #[serde(default)]
+    pub disable_gpu_vegetation: Option<bool>,
+    /// Force GPU vegetation cull on (ignore config.enabled).
+    #[serde(default)]
+    pub force_gpu_vegetation: Option<bool>,
 }
 
 #[derive(Resource, Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

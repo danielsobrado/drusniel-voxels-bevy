@@ -20,13 +20,14 @@ export function buildHeightfieldLeafNodes(
       const footprint = footprintFor(0, nx, nz, pageSizeM);
       const mesh = buildLeafMesh(footprint, config.clod.leafSegments, sampler);
       validateLeafMesh(mesh, footprint, `L0:${nx},${nz}`);
+      const b = boundsOf(mesh);
       leafNodes.push({
         id: `L0:${nx},${nz}`,
         level: 0,
         children: [],
         mesh,
         footprint,
-        bounds: boundsOf(mesh),
+        bounds: b,
         errorWorld: 0,
         lowBenefit: false,
       });
@@ -81,7 +82,7 @@ function buildLeafMesh(footprint: PageFootprint, segments: number, sampler: Heig
   return { positions, normals, materials, indices };
 }
 
-export function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: number } {
+export function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: number; minY: number; maxY: number } {
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (let i = 0; i < mesh.positions.length; i += 3) {
@@ -97,7 +98,7 @@ export function boundsOf(mesh: PageMesh): { center: [number, number, number]; ra
   for (let i = 0; i < mesh.positions.length; i += 3) {
     radius = Math.max(radius, Math.hypot(mesh.positions[i] - center[0], mesh.positions[i + 1] - center[1], mesh.positions[i + 2] - center[2]));
   }
-  return { center, radius };
+  return { center, radius, minY, maxY };
 }
 
 export function validateLeafMesh(mesh: PageMesh, footprint: PageFootprint, id: string): void {

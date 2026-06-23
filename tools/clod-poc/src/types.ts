@@ -30,7 +30,7 @@ export interface ClodPageNode {
   children: (ClodPageNode | null)[]; // up to 4, quadtree order
   mesh: PageMesh;
   footprint: PageFootprint;
-  bounds: { center: [number, number, number]; radius: number };
+  bounds: { center: [number, number, number]; radius: number; minY: number; maxY: number };
   /** error_world = simplification_error_world + max(child.error_world). Monotone up the tree. */
   errorWorld: number;
   lowBenefit: boolean;

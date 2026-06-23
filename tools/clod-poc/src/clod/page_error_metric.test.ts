@@ -18,7 +18,7 @@ function child(errorWorld: number): ClodPageNode {
     children: [],
     mesh: flatMesh(0),
     footprint: { minX: 0, minZ: 0, maxX: 1, maxZ: 1 },
-    bounds: { center: [0.5, 0, 0.5], radius: 1 },
+    bounds: { center: [0.5, 0, 0.5], radius: 1, minY: 0, maxY: 0 },
     errorWorld,
     lowBenefit: false,
   };

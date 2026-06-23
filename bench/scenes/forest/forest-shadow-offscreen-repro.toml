@@ -1,0 +1,28 @@
+seed = 12345
+duration_warmup_secs = 1.0
+median_runs = 1
+chunk_load_radius = 6
+freeze_terrain_lod_after_ready = true
+
+# Phase 0 repro: camera looks away from a tree whose shadow should remain
+# visible.  The tree is off-screen (behind the camera) but close enough that
+# its shadow falls into a near cascade.  With the current flat shadow_instances
+# list keyed on camera-distance LOD, the tree drops out of shadows when its
+# camera LOD falls below Full, causing the shadow to disappear.
+
+[[checkpoint]]
+name = "shadow-offscreen-repro"
+# Position camera in the forest looking north-east; a cluster of trees sits
+# to the south-west (behind the camera).  Those trees should still cast
+# shadows into the south-west cascade.
+position = [310.0, 88.0, 280.0]
+look_at = [350.0, 70.0, 320.0]
+time_of_day = 0.3
+hold_frames = 120
+screenshot = true
+fog_tier = "off"
+screenshot_points = [
+    { name = "frame0", frame = 0 },
+    { name = "frame60", frame = 60 },
+    { name = "frame119", frame = 119 },
+]
