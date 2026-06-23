@@ -490,6 +490,10 @@ export class UnderstorySystem {
     this.gpuRingInit = null;
     this.gpuRingKey = "";
     this.clearGpuRingDraw();
+    this.gpuVisibleCount = 0;
+    this.gpuOverflowed = false;
+    this.gpuDispatchMs = null;
+    this.lastGpuValidationSignature = "";
     this.gpuRingStats = { status: this.gpuDevice ? "idle" : "disabled", candidateCount: 0, acceptedCandidates: 0, counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 }, groupCounts: [], overflowed: false, dispatchMs: null, readbackMs: null, skippedDispatches: 0 };
   }
 
