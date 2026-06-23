@@ -18,8 +18,8 @@ import {
 
 export const UNDERSTORY_RING_GROUP_COUNT = UNDERSTORY_CLASSES.length;
 
-// std140 uniform: 7 vec4 lanes of globals (see packUnderstoryRingParams).
-export const UNDERSTORY_RING_PARAM_BYTES = 16 * 7;
+// std140 uniform: 8 vec4 lanes of globals (see packUnderstoryRingParams).
+export const UNDERSTORY_RING_PARAM_BYTES = 16 * 8;
 // Per-class selection params: 8 floats per class (see packUnderstoryRingClassParams).
 export const UNDERSTORY_RING_CLASS_STRIDE_F32 = 8;
 
@@ -28,6 +28,7 @@ export interface UnderstoryRingDispatchParams {
   centerZ: number;
   worldCells: number;
   maxInstancesPerGroup: number;
+  indexCount: number;
 }
 
 export interface UnderstoryRingAcceptParams {
@@ -76,6 +77,14 @@ export function understoryRingWorkgroupSize(settings: UnderstorySettings = DEFAU
 
 export function understoryRingCullWorkgroups(settings: UnderstorySettings = DEFAULT_UNDERSTORY_SETTINGS): number {
   return Math.ceil(understoryRingSlotCount(settings) / understoryRingWorkgroupSize(settings));
+}
+
+const READBACK_INTERVAL_FRAMES = 90;
+
+export function understoryRingRequestsDebugReadback(settings: UnderstorySettings, frame: number): boolean {
+  return settings.gpu.readbackVisibleLists &&
+    (settings.gpu.debugShowGpuCounts || settings.gpu.debugValidateAgainstCpu) &&
+    frame % READBACK_INTERVAL_FRAMES === 0;
 }
 
 export function understoryRingGroupRegion(
@@ -285,5 +294,7 @@ export function packUnderstoryRingParams(
   u32[25] = understoryRingGrid(settings) >>> 0;
   u32[26] = settings.seed >>> 0;
   u32[27] = UNDERSTORY_RING_GROUP_COUNT >>> 0;
+  // lane 7 — settings_extra (u32)
+  u32[28] = Math.max(0, Math.floor(params.indexCount)) >>> 0;
   return scratch;
 }

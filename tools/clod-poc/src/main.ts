@@ -2332,6 +2332,13 @@ async function main() {
     settings: makeUnderstorySettings(),
     webgpu: isWebGpu,
     lighting: currentLighting(),
+    gpuDevice: rendererWebGpuDevice,
+    gpuBackend: isWebGpu ? app.renderer.backend as unknown as {
+      createStorageAttribute(attribute: THREE.BufferAttribute): void;
+      createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
+      get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
+    } : null,
+    supportsGpu: isWebGpu,
   });
   assertPageMeshSignaturesUnchanged(understoryPageSignaturesBefore, pageMeshSignatures(understoryPageNodes));
   let understoryStats: UnderstoryStats | null = understorySystem.getStats();

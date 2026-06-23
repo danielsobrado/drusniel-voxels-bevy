@@ -166,6 +166,7 @@ describe("understory ring param packing", () => {
       centerZ: 200,
       worldCells: 1024,
       maxInstancesPerGroup: 2000,
+      indexCount: 36,
     });
     expect(buffer.byteLength).toBe(UNDERSTORY_RING_PARAM_BYTES);
     const f32 = new Float32Array(buffer);
@@ -180,6 +181,7 @@ describe("understory ring param packing", () => {
     expect(u32[25]).toBe(understoryRingGrid(s));
     expect(u32[26]).toBe(4242);
     expect(u32[27]).toBe(UNDERSTORY_RING_GROUP_COUNT);
+    expect(u32[28]).toBe(36);
   });
 
   it("packs one class param row per class", () => {

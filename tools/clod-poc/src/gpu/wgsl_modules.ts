@@ -7,6 +7,8 @@ import terrainEntry from "./shaders/terrain_field_entry.wgsl?raw";
 import grassRingEntry from "./shaders/grass_ring.compute.wgsl?raw";
 import stoneScatterEntry from "./shaders/stone_scatter.compute.wgsl?raw";
 import treeRingEntry from "./shaders/tree_ring.compute.wgsl?raw";
+import understoryBindings from "./shaders/terrain_field_bindings_understory.wgsl?raw";
+import understoryRingEntry from "./shaders/understory_ring.compute.wgsl?raw";
 
 const FIELD_GLOBALS = ["digEdits", "fieldParams"] as const;
 
@@ -46,4 +48,15 @@ export function composeTreeRingShader(workgroupSize = 64): string {
     `const TREE_WORKGROUP_SIZE: u32 = ${size}u;`,
   );
   return composeShader("tree ring shader", [treeBindings, terrainCommon, treeEntry]);
+}
+
+export function composeUnderstoryRingShader(workgroupSize = 64): string {
+  const size = workgroupSize === 32 || workgroupSize === 64 || workgroupSize === 128 || workgroupSize === 256
+    ? workgroupSize
+    : 64;
+  const entry = understoryRingEntry.replace(
+    /const UNDERSTORY_WORKGROUP_SIZE: u32 = \d+u;/,
+    `const UNDERSTORY_WORKGROUP_SIZE: u32 = ${size}u;`,
+  );
+  return composeShader("understory ring shader", [understoryBindings, terrainCommon, entry]);
 }

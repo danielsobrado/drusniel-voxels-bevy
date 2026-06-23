@@ -17,6 +17,18 @@ import { createUnderstoryMaterialHandle, type UnderstoryMaterialHandle } from ".
 import { createUnderstoryNodeMaterialHandle } from "./understory_node_material.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { EnvironmentLighting } from "../environment.js";
+import {
+  UnderstoryGpuRingCompute,
+  understoryGpuRingComputeUnsupportedReason,
+  createGpuRingDrawResources,
+  clearGpuRingDraw,
+  type UnderstoryGpuRingDrawResources,
+  type UnderstoryGpuRingStats,
+  type UnderstoryWebGpuBackendAccess,
+} from "../gpu/understory_ring_compute.js";
+import { understoryRingGroupCapacity } from "./understory_ring_math.js";
+import { getDigEditsSnapshot } from "../terrain.js";
+import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 
 export interface UnderstorySystemOptions {
   scene: THREE.Scene;
@@ -28,6 +40,14 @@ export interface UnderstorySystemOptions {
   webgpu?: boolean;
   /** Initial lighting for the WebGPU node material path. */
   lighting?: EnvironmentLighting;
+  gpuDevice?: GPUDevice | null;
+  gpuBackend?: UnderstoryWebGpuBackendAccess | null;
+  supportsGpu?: boolean;
+}
+
+export function understoryUsesGpuRingDraw(settings: UnderstorySettings): boolean {
+  const gpu = settings.gpu;
+  return settings.enabled && gpu.enabled && !gpu.fallbackToCpu;
 }
 
 export interface UnderstoryStats extends UnderstoryGenerationStats {
@@ -41,6 +61,12 @@ export interface UnderstoryStats extends UnderstoryGenerationStats {
   flower: number;
   deadLog: number;
   stump: number;
+  gpuStatus: "disabled" | "unsupported" | "ring" | "fallback-cpu" | "error";
+  gpuCandidateCount: number;
+  gpuAcceptedCount: number;
+  gpuVisibleCount: number;
+  gpuOverflowed: boolean;
+  gpuDispatchMs: number | null;
 }
 
 export interface UnderstoryLightingProxy {
@@ -85,6 +111,31 @@ export class UnderstorySystem {
   private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   private readonly lastCenter: THREE.Vector3;
   private stats: UnderstoryStats = emptyUnderstoryStats();
+  private readonly gpuDevice: GPUDevice | null;
+  private readonly gpuBackend: UnderstoryWebGpuBackendAccess | null;
+  private readonly supportsGpu: boolean;
+  private readonly gpuRingUnsupportedReason: string | null;
+  private gpuStatus: UnderstoryStats["gpuStatus"] = "disabled";
+  private gpuVisibleCount = 0;
+  private gpuOverflowed = false;
+  private gpuDispatchMs: number | null = null;
+  private gpuRingCompute: UnderstoryGpuRingCompute | null = null;
+  private gpuRingInit: Promise<void> | null = null;
+  private gpuRingKey = "";
+  private gpuRingGeneration = 0;
+  private gpuRingDraw: UnderstoryGpuRingDrawResources | null = null;
+  private ringMeshes: THREE.Mesh[] = [];
+  private gpuRingStats: UnderstoryGpuRingStats = {
+    status: "disabled",
+    candidateCount: 0,
+    acceptedCandidates: 0,
+    counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 },
+    groupCounts: [],
+    overflowed: false,
+    dispatchMs: null,
+    readbackMs: null,
+    skippedDispatches: 0,
+  };
 
   constructor(options: UnderstorySystemOptions) {
     this.scene = options.scene;
@@ -94,6 +145,12 @@ export class UnderstorySystem {
     this.worldCells = options.worldCells;
     this.settings = options.settings;
     this.sampler = options.sampler;
+    this.gpuDevice = options.gpuDevice ?? null;
+    this.gpuBackend = options.gpuBackend ?? null;
+    this.supportsGpu = options.supportsGpu ?? !!this.gpuDevice;
+    this.gpuRingUnsupportedReason = this.gpuDevice
+      ? understoryGpuRingComputeUnsupportedReason(this.gpuDevice)
+      : null;
     this.geometries = createUnderstoryGeometryMap(this.settings);
     this.materialHandle = options.webgpu
       ? createUnderstoryNodeMaterialHandle(this.settings, options.lighting)
@@ -102,7 +159,7 @@ export class UnderstorySystem {
     this.root.name = "understory";
     this.root.visible = this.settings.enabled;
     this.scene.add(this.root);
-    if (this.settings.enabled) this.rebuild();
+    if (this.settings.enabled && !this.usesGpuRingDraw()) this.rebuild();
   }
 
   setEnabled(enabled: boolean): void {
@@ -111,6 +168,10 @@ export class UnderstorySystem {
     this.root.visible = enabled;
     if (enabled && !wasEnabled) this.refreshForCenter(this.lastCenter);
     if (!enabled) this.updateStats();
+  }
+
+  private usesGpuRingDraw(): boolean {
+    return understoryUsesGpuRingDraw(this.settings) && this.supportsGpu && !!this.gpuDevice && !this.gpuRingUnsupportedReason;
   }
 
   updateSettings(settings: Partial<UnderstorySettings>): void {
@@ -143,6 +204,12 @@ export class UnderstorySystem {
       this.updateStats();
       return;
     }
+    if (this.usesGpuRingDraw()) {
+      if (this.patches.length > 0) this.clearPatches();
+      this.updateGpuRingUnderstory(center);
+      return;
+    }
+    this.clearGpuRing();
     if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) {
       this.refreshForCenter(center);
     } else {
@@ -151,8 +218,9 @@ export class UnderstorySystem {
   }
 
   rebuild(): void {
+    this.clearGpuRing();
     this.clearPatches();
-    if (this.settings.enabled) this.refreshForCenter(this.lastCenter);
+    if (this.settings.enabled && !this.usesGpuRingDraw()) this.refreshForCenter(this.lastCenter);
     this.root.visible = this.settings.enabled;
   }
 
@@ -169,6 +237,7 @@ export class UnderstorySystem {
   }
 
   dispose(): void {
+    this.clearGpuRing();
     this.clearPatches();
     this.scene.remove(this.root);
     disposeUnderstoryGeometryMap(this.geometries);
@@ -204,6 +273,108 @@ export class UnderstorySystem {
       }
     }
     return proxies;
+  }
+
+  private ensureGpuRingCompute(): void {
+    if (!this.gpuDevice || !this.gpuBackend || !this.usesGpuRingDraw()) return;
+    const key = understoryGpuRingKey(this.settings, this.worldCells);
+    if (this.gpuRingCompute && this.gpuRingKey === key) return;
+    if (this.gpuRingInit && this.gpuRingKey === key) return;
+
+    this.clearGpuRingDraw();
+    this.gpuRingKey = key;
+    this.gpuRingDraw = createGpuRingDrawResources(this.settings, this.worldCells, this.gpuBackend);
+    for (const mesh of this.gpuRingDraw.meshes) {
+      this.root.add(mesh);
+      this.ringMeshes.push(mesh);
+    }
+    this.gpuRingStats = { status: "initializing", candidateCount: 0, acceptedCandidates: 0, counts: this.gpuRingStats.counts, groupCounts: [], overflowed: false, dispatchMs: null, readbackMs: null, skippedDispatches: 0 };
+
+    const initKey = key;
+    const initGeneration = this.gpuRingGeneration;
+    const edits = resolveDigEdits(getDigEditsSnapshot());
+    this.gpuRingInit = UnderstoryGpuRingCompute.create(
+      this.gpuDevice, edits, this.gpuRingDraw.outputBuffers, this.settings,
+    ).then((compute) => {
+      if (this.gpuRingKey !== initKey || this.gpuRingGeneration !== initGeneration) {
+        compute.destroy();
+        return;
+      }
+      this.gpuRingCompute = compute;
+      this.gpuRingStats = compute.stats(this.settings.enabled);
+    }).catch((error) => {
+      console.warn("[understory] GPU ring compute init failed:", error);
+      this.gpuRingStats = { ...this.gpuRingStats, status: "failed", reason: String(error) };
+    }).finally(() => { this.gpuRingInit = null; });
+  }
+
+  private updateGpuRingUnderstory(center: THREE.Vector3): void {
+    if (!this.supportsGpu || !this.gpuDevice || !this.gpuBackend) {
+      this.gpuStatus = "unsupported";
+      this.updateStats();
+      return;
+    }
+    if (this.gpuRingUnsupportedReason) {
+      this.gpuStatus = "unsupported";
+      this.gpuRingStats = { ...this.gpuRingStats, status: "failed", reason: this.gpuRingUnsupportedReason };
+      this.updateStats();
+      return;
+    }
+
+    this.ensureGpuRingCompute();
+    this.gpuRingStats = this.gpuRingCompute?.stats(true) ?? this.gpuRingStats;
+
+    const gpu = this.settings.gpu;
+    if (this.gpuRingStats.status === "failed" && gpu.fallbackToCpu) {
+      this.gpuStatus = "fallback-cpu";
+      this.gpuRingStats = { ...this.gpuRingStats, status: "failed" };
+      this.updateStats();
+      if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) {
+        this.refreshForCenter(center);
+      } else {
+        this.updatePatchVisibility(center);
+      }
+      return;
+    }
+
+    if (this.gpuRingCompute && this.gpuRingDraw) {
+      this.gpuRingCompute.dispatch({
+        centerX: center.x,
+        centerZ: center.z,
+        worldCells: this.worldCells,
+        maxInstancesPerGroup: understoryRingGroupCapacity(this.settings),
+        indexCount: this.gpuRingDraw.meshes.length > 0 ? this.gpuRingDraw.meshes[0].geometry.instanceCount : 0,
+      });
+      this.gpuRingStats = this.gpuRingCompute.stats(true);
+    }
+
+    const c = this.gpuRingStats.counts;
+    this.gpuVisibleCount = c.shrub + c.fern + c.sapling + c.flower + c.dead_log + c.stump;
+    this.gpuOverflowed = this.gpuRingStats.overflowed;
+    this.gpuDispatchMs = this.gpuRingStats.dispatchMs;
+    this.gpuStatus = this.gpuRingStats.status === "failed" ? "error" : "ring";
+    this.updateStats();
+  }
+
+  private clearGpuRing(): void {
+    this.gpuRingGeneration++;
+    this.gpuRingCompute?.destroy();
+    this.gpuRingCompute = null;
+    this.gpuRingInit = null;
+    this.gpuRingKey = "";
+    this.clearGpuRingDraw();
+    this.gpuRingStats = { status: this.gpuDevice ? "idle" : "disabled", candidateCount: 0, acceptedCandidates: 0, counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 }, groupCounts: [], overflowed: false, dispatchMs: null, readbackMs: null, skippedDispatches: 0 };
+    this.gpuStatus = "disabled";
+  }
+
+  private clearGpuRingDraw(): void {
+    for (const mesh of this.ringMeshes) {
+      this.root.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this.ringMeshes = [];
+    clearGpuRingDraw(this.gpuRingDraw);
+    this.gpuRingDraw = null;
   }
 
   private refreshForCenter(center: THREE.Vector3): void {
@@ -371,21 +542,41 @@ export class UnderstorySystem {
 
   private updateStats(): void {
     const stats = emptyUnderstoryStats();
-    for (const patch of this.patches) {
-      stats.totalInstances += patch.instances.length;
-      stats.patches++;
-      if (patch.visible) stats.visiblePatches++;
-      else stats.culledPatches++;
-      mergeGenerationStats(stats, patch.generationStats);
-      for (const instance of patch.instances) {
-        if (instance.classId === "shrub") stats.shrub++;
-        else if (instance.classId === "fern") stats.fern++;
-        else if (instance.classId === "sapling") stats.sapling++;
-        else if (instance.classId === "flower") stats.flower++;
-        else if (instance.classId === "dead_log") stats.deadLog++;
-        else stats.stump++;
+    const gpuRing = this.gpuStatus === "ring" || this.gpuStatus === "error";
+    if (gpuRing) {
+      const c = this.gpuRingStats.counts;
+      stats.totalInstances = this.gpuVisibleCount;
+      stats.shrub = c.shrub;
+      stats.fern = c.fern;
+      stats.sapling = c.sapling;
+      stats.flower = c.flower;
+      stats.deadLog = c.dead_log;
+      stats.stump = c.stump;
+      stats.generatedCandidates = this.gpuRingStats.candidateCount;
+      stats.acceptedCandidates = this.gpuRingStats.acceptedCandidates || this.gpuVisibleCount;
+    } else {
+      for (const patch of this.patches) {
+        stats.totalInstances += patch.instances.length;
+        stats.patches++;
+        if (patch.visible) stats.visiblePatches++;
+        else stats.culledPatches++;
+        mergeGenerationStats(stats, patch.generationStats);
+        for (const instance of patch.instances) {
+          if (instance.classId === "shrub") stats.shrub++;
+          else if (instance.classId === "fern") stats.fern++;
+          else if (instance.classId === "sapling") stats.sapling++;
+          else if (instance.classId === "flower") stats.flower++;
+          else if (instance.classId === "dead_log") stats.deadLog++;
+          else stats.stump++;
+        }
       }
     }
+    stats.gpuStatus = this.gpuStatus;
+    stats.gpuCandidateCount = gpuRing ? this.gpuRingStats.candidateCount : 0;
+    stats.gpuAcceptedCount = gpuRing ? (this.gpuRingStats.acceptedCandidates || this.gpuVisibleCount) : 0;
+    stats.gpuVisibleCount = gpuRing ? this.gpuVisibleCount : 0;
+    stats.gpuOverflowed = this.gpuOverflowed;
+    stats.gpuDispatchMs = this.gpuDispatchMs;
     this.stats = stats;
   }
 }
@@ -402,6 +593,12 @@ export function emptyUnderstoryStats(): UnderstoryStats {
     flower: 0,
     deadLog: 0,
     stump: 0,
+    gpuStatus: "disabled",
+    gpuCandidateCount: 0,
+    gpuAcceptedCount: 0,
+    gpuVisibleCount: 0,
+    gpuOverflowed: false,
+    gpuDispatchMs: null,
     ...emptyUnderstoryGenerationStats(),
   };
 }
@@ -446,4 +643,29 @@ function footprintRadius(footprint: PageFootprint): number {
 function distance2d(ax: number, az: number, bx: number, bz: number): number {
   if (Math.abs(ax - bx) < INSTANCE_ATTRIBUTE_EPSILON && Math.abs(az - bz) < INSTANCE_ATTRIBUTE_EPSILON) return 0;
   return Math.hypot(ax - bx, az - bz);
+}
+
+function understoryGpuRingKey(settings: UnderstorySettings, worldCells: number): string {
+  const gpu = settings.gpu;
+  return [
+    worldCells,
+    settings.seed,
+    gpu.maxVisible,
+    gpu.workgroupSize,
+    settings.placement.spacingM,
+    settings.placement.jitter,
+    settings.placement.slopeMinY,
+    settings.placement.minHeightM,
+    settings.placement.maxHeightM,
+    settings.placement.minGroundWeight,
+    settings.placement.minTreeInfluence,
+    settings.ecology.forestInfluenceScaleM,
+    settings.ecology.forestEdgeWidthM,
+    settings.classes.shrub.weight,
+    settings.classes.fern.weight,
+    settings.classes.sapling.weight,
+    settings.classes.flower.weight,
+    settings.classes.dead_log.weight,
+    settings.classes.stump.weight,
+  ].join(":");
 }
