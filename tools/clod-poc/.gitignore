@@ -4,3 +4,4 @@ coverage/
 *.log
 qa-runs/
 qa-baselines/
+phase0-runs/

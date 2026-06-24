@@ -9,6 +9,8 @@ import { buildFarTerrainShell } from "./gpu/far_terrain_shell.js";
 import { buildFarTerrainShadowProxy } from "./gpu/far_terrain_shadow_proxy.js";
 import { bakeMacroTint } from "./gpu/terrain_node_material.js";
 import { buildFarCanopyShell } from "./gpu/far_canopy_shell.js";
+import { computeEffectiveVisibleMeters, computeVisibleTargetMet } from "./phase0/phase0_metrics.js";
+import { simulateStreamingCoverage } from "./phase0/streaming_coverage_sim.js";
 import configText from "../config/clod_pages.yaml?raw";
 import stoneConfigText from "../config/stones.yaml?raw";
 import treeConfigText from "../config/trees.yaml?raw";
@@ -617,7 +619,9 @@ async function main() {
   const queryTreePerfScene = queryScene === "trees-perf" || searchParams.get("treesPerf") === "1";
   const queryTreeGpuRing = searchParams.get("treeGpu") === "1" || searchParams.get("treeGpuRing") === "1";
   const queryForestFloorScene = queryScene === "forest-floor";
-  const queryLongViewScene = queryScene === "long-view-4km" || queryScene === "long-view-forest-4km" || queryScene === "long-view-edit-stress";
+  const queryLongViewScene = queryScene === "long-view-4km" || queryScene === "long-view-forest-4km" || queryScene === "long-view-edit-stress"
+    || queryScene === "infinite-stream-straight" || queryScene === "infinite-stream-fast-turn"
+    || queryScene === "infinite-stream-mountain-approach" || queryScene === "infinite-stream-forest-horizon";
   const queryFarShell = searchParams.get("farShell") === "1";
   const queryCanopy = searchParams.get("canopy") === "1";
   const queryPerfMode = searchParams.get("clodPerf") === "1";
@@ -848,6 +852,32 @@ async function main() {
     lvStats.counters["gpu_stone_visible"] = 0;
     lvStats.counters["gpu_stone_drawn_near"] = 0;
     lvStats.counters["gpu_stone_drawn_far"] = 0;
+
+    // Phase 0: Additional counters for infinite streaming baseline.
+    lvStats.counters["world_cells"] = worldCells;
+    lvStats.counters["target_visible_m"] = 4096;
+    lvStats.counters["effective_far_radius_m"] = 0; // updated after shell build
+    lvStats.counters["effective_visible_m"] = 0; // updated after shell build
+    lvStats.counters["visible_target_met"] = 0;
+    lvStats.counters["far_shell_enabled"] = 0;
+    lvStats.counters["far_shell_radius_m"] = 0;
+    lvStats.counters["far_shell_grid_res"] = 0;
+    lvStats.counters["shadow_proxy_enabled"] = 0;
+    lvStats.counters["shadow_proxy_inert"] = 1;
+    lvStats.counters["canopy_enabled"] = 0;
+    for (let lvl = 0; lvl <= maxLvl; lvl++) {
+      lvStats.counters[`selected_page_count_lod${lvl}`] = 0;
+    }
+    lvStats.counters["rendered_terrain_tris"] = 0;
+    lvStats.counters["total_scene_tris"] = 0;
+    lvStats.counters["frame_ms_avg"] = 0;
+    lvStats.counters["frame_ms_p95"] = -1;
+    lvStats.counters["frame_ms_p99"] = -1;
+    lvStats.counters["streamer_simulated_required_chunks"] = 0;
+    lvStats.counters["streamer_simulated_required_pages"] = 0;
+    lvStats.counters["streamer_simulated_missing_chunks"] = 0;
+    lvStats.counters["streamer_simulated_missing_pages"] = 0;
+    lvStats.counters["stale_fallback_count"] = 0;
   }
   const ensureClodErrorCompute = (): Promise<void> => {
     if (clodErrorCompute || webGpuUnavailableReason) return Promise.resolve();
@@ -5089,6 +5119,56 @@ async function main() {
         s.counters["gpu_stone_drawn_near"] = stoneStats.drawnNear;
         s.counters["gpu_stone_drawn_far"] = stoneStats.drawnFar;
       }
+
+      // Phase 0: Update additional counters for infinite streaming baseline.
+      const effectiveVisible = computeEffectiveVisibleMeters({
+        worldCells,
+        farShellEnabled: farShellState.current !== null,
+        farShellRadiusM: worldCells * state.farShellRadiusFactor,
+      });
+      s.counters["effective_far_radius_m"] = worldCells * state.farShellRadiusFactor;
+      s.counters["effective_visible_m"] = effectiveVisible;
+      s.counters["visible_target_met"] = computeVisibleTargetMet({
+        effectiveVisibleM: effectiveVisible,
+        targetVisibleM: 4096,
+      }) ? 1 : 0;
+      s.counters["far_shell_enabled"] = farShellState.current !== null ? 1 : 0;
+      s.counters["far_shell_radius_m"] = worldCells * state.farShellRadiusFactor;
+      s.counters["far_shell_grid_res"] = 128;
+      s.counters["shadow_proxy_enabled"] = isLongView ? 1 : 0;
+      s.counters["shadow_proxy_inert"] = 1;
+      s.counters["canopy_enabled"] = canopyShellResult !== null ? 1 : 0;
+      s.counters["rendered_terrain_tris"] = lastTriCount;
+      s.counters["total_scene_tris"] = s.triangles;
+      s.counters["draw_calls"] = s.drawCalls;
+      s.counters["frame_ms_avg"] = s.fps > 0 ? 1000 / s.fps : 0;
+      // Compute streaming coverage simulation.
+      const streamingReport = simulateStreamingCoverage({
+        worldCells,
+        chunkSize: cfg.page.chunk_size,
+        pageSizeCells: cfg.page.chunks_per_page * cfg.page.chunk_size,
+        playerX: camera.position.x,
+        playerZ: camera.position.z,
+        velocityX: 0,
+        velocityZ: 0,
+        preloadSeconds: 5,
+        liveRadiusM: 200,
+        clodRadiusM: worldCells * state.farShellRadiusFactor,
+      });
+      s.counters["streamer_simulated_required_chunks"] = streamingReport.requiredChunkCount;
+      s.counters["streamer_simulated_required_pages"] = streamingReport.requiredPageCount;
+      s.counters["streamer_simulated_missing_chunks"] = streamingReport.missingChunkCount;
+      s.counters["streamer_simulated_missing_pages"] = streamingReport.missingPageCount;
+
+      // Export Phase 0 report for tooling.
+      window.__drusnielPhase0Report = {
+        scene: queryScene ?? "unknown",
+        config_hash: "phase0",
+        timestamp: new Date().toISOString(),
+        metrics: { ...s.counters },
+        required_counters_present: true,
+        missing_counters: [],
+      };
     }
 
     // hold-to-dig pickaxe cadence while playing

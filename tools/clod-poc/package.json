@@ -14,6 +14,7 @@
     "shoot": "tsx tools/shoot.ts",
     "compare": "tsx tools/compare.ts",
     "battery": "tsx tools/battery.ts",
+    "phase0": "tsx tools/phase0.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",

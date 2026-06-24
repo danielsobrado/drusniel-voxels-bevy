@@ -1,0 +1,104 @@
+phase0:
+  target_visible_m: 4096
+  target_future_visible_m: 8192
+
+  scenes:
+    long_view_4km:
+      world: 16
+      camera:
+        mode: fixed
+        x_ratio: 0.50
+        z_ratio: 0.50
+        y_offset_m: 260
+        look_distance_m: 4096
+      require_visible_m: 4096
+
+    long_view_forest_4km:
+      world: 16
+      camera:
+        mode: fixed
+        x_ratio: 0.45
+        z_ratio: 0.45
+        y_offset_m: 320
+        look_distance_m: 4096
+      require_visible_m: 4096
+      require_canopy_metrics: true
+
+    long_view_edit_stress:
+      world: 16
+      camera:
+        mode: scripted
+        x_ratio: 0.50
+        z_ratio: 0.50
+        y_offset_m: 180
+        look_distance_m: 4096
+      scripted_edits: true
+      require_visible_m: 4096
+
+    infinite_stream_straight:
+      world: 16
+      camera:
+        mode: scripted
+        start_x_ratio: 0.20
+        start_z_ratio: 0.50
+        direction_degrees: 90
+        speed_mps: 18
+        duration_seconds: 20
+        look_distance_m: 4096
+      simulated_streaming_only: true
+
+    infinite_stream_fast_turn:
+      world: 16
+      camera:
+        mode: scripted
+        start_x_ratio: 0.50
+        start_z_ratio: 0.50
+        speed_mps: 12
+        duration_seconds: 20
+        turn_degrees_per_second: 90
+        look_distance_m: 4096
+      simulated_streaming_only: true
+
+metrics:
+  required_counters:
+    - world_cells
+    - target_visible_m
+    - effective_far_radius_m
+    - effective_visible_m
+    - visible_target_met
+    - far_shell_enabled
+    - far_shell_tris
+    - far_shell_radius_m
+    - far_shell_grid_res
+    - shadow_proxy_enabled
+    - shadow_proxy_inert
+    - shadow_proxy_tris
+    - canopy_enabled
+    - canopy_tris
+    - clod_page_count_lod0
+    - clod_page_count_lod1
+    - clod_page_count_lod2
+    - clod_page_count_lod3
+    - selected_page_count_lod0
+    - selected_page_count_lod1
+    - selected_page_count_lod2
+    - selected_page_count_lod3
+    - rendered_terrain_tris
+    - total_scene_tris
+    - draw_calls
+    - frame_ms_avg
+    - frame_ms_p95
+    - frame_ms_p99
+    - streamer_simulated_required_chunks
+    - streamer_simulated_required_pages
+    - streamer_simulated_missing_chunks
+    - streamer_simulated_missing_pages
+    - horizon_hole_ratio
+    - stale_fallback_count
+
+acceptance:
+  allow_current_4km_failure: true
+  visible_target_required_for_future_phases: true
+  max_horizon_hole_ratio: 0.0
+  max_streamer_simulated_missing_chunks: 0
+  max_streamer_simulated_missing_pages: 0

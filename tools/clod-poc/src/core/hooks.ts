@@ -40,10 +40,20 @@ export interface ClodHooks {
   flyCamEnabled: ((on: boolean) => void) | null;
 }
 
+export interface Phase0SceneReport {
+  scene: string;
+  config_hash: string;
+  timestamp: string;
+  metrics: Record<string, number | boolean>;
+  required_counters_present: boolean;
+  missing_counters: string[];
+}
+
 declare global {
   interface Window {
     __drusnielClod?: ClodHooks;
     __drusnielTerrainSummary?: import("../clod/terrain_summary.js").TerrainSummaryField;
+    __drusnielPhase0Report?: Phase0SceneReport;
   }
 }
 
