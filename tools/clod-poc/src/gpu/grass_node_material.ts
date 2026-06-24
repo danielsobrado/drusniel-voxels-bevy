@@ -78,6 +78,8 @@ export interface GrassNodeParams {
   worldSize?: number;
   /** Metres of blade base allowed below the water surface before discard. */
   waterClearance?: number;
+  /** Explicit tier base offset into the shared storage buffer (tier * maxPerTier). When set, the material reads instanceIndex + tierBaseOffset instead of relying on indirect firstInstance. */
+  tierBaseOffset?: number;
 }
 
 export interface GrassNodeMaterialHandle {
@@ -119,20 +121,26 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   //   offset = (x, y, z, 1) ; packed0 = (height, rotY, phase, colorMix) ;
   //   packed1 = (edgeFade, normalY, widthScale, tier) ; terrainNormal = (nx, ny, nz, 0).
   const ring = params.ringInstanceBuffers;
+  const uTierBaseOffset = uniform(params.tierBaseOffset ?? 0) as TslNode;
   let aOffset4: TslNode;
   let aPacked0: TslNode;
   let aPacked1: TslNode;
   let aTerrainNormal4: TslNode;
   if (ring) {
     // toReadOnly() on the storage node (a vertex stage may not bind read_write storage), then index.
+    // instanceIndex includes the per-tier firstInstance from indirect draw args, so one material
+    // serves all four tiers. The optional tierBaseOffset uniform (set when per-tier materials are
+    // used) adds an explicit offset for safety; when omitted it defaults to 0 and the indirect
+    // firstInstance provides the tier separation.
     const offsetStore: TslNode = storage(ring.offset, "vec4", ring.capacity).toReadOnly();
     const packed0Store: TslNode = storage(ring.packed0, "vec4", ring.capacity).toReadOnly();
     const packed1Store: TslNode = storage(ring.packed1, "vec4", ring.capacity).toReadOnly();
     const terrainNormalStore: TslNode = storage(ring.terrainNormal, "vec4", ring.capacity).toReadOnly();
-    aOffset4 = offsetStore.element(instanceIndex);
-    aPacked0 = packed0Store.element(instanceIndex);
-    aPacked1 = packed1Store.element(instanceIndex);
-    aTerrainNormal4 = terrainNormalStore.element(instanceIndex);
+    const storageIndex: TslNode = instanceIndex.add(uTierBaseOffset);
+    aOffset4 = offsetStore.element(storageIndex);
+    aPacked0 = packed0Store.element(storageIndex);
+    aPacked1 = packed1Store.element(storageIndex);
+    aTerrainNormal4 = terrainNormalStore.element(storageIndex);
   } else {
     aOffset4 = attribute("aOffset", "vec4");
     aPacked0 = attribute("aPacked0", "vec4");

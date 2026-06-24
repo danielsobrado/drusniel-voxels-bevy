@@ -12,6 +12,7 @@ import {
   understoryPcg2d,
   understoryRingAcceptParams,
   understoryRingCell,
+  understoryRingClassBaseOffset,
   understoryRingCullWorkgroups,
   understoryRingGrid,
   understoryRingGroupCapacity,
@@ -202,5 +203,34 @@ describe("understory ring param packing", () => {
       expect(rows[base + 1]).toBeCloseTo(s.classes[cls].density);
       expect(rows[base + 6]).toBe(s.classes[cls].enabled ? 1 : 0);
     });
+  });
+});
+
+describe("understory ring class base offset", () => {
+  it("computes non-overlapping offsets per group", () => {
+    const maxPerGroup = 2000;
+    for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
+      const offset = understoryRingClassBaseOffset(group, maxPerGroup);
+      expect(offset).toBe(group * maxPerGroup);
+    }
+  });
+
+  it("matches understoryRingGroupRegion.start for each group", () => {
+    const maxPerGroup = 1500;
+    for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
+      const region = understoryRingGroupRegion(group, maxPerGroup);
+      const offset = understoryRingClassBaseOffset(group, maxPerGroup);
+      expect(offset).toBe(region.start);
+    }
+  });
+
+  it("returns 0 for group 0 regardless of capacity", () => {
+    expect(understoryRingClassBaseOffset(0, 100)).toBe(0);
+    expect(understoryRingClassBaseOffset(0, 9999)).toBe(0);
+  });
+
+  it("floors negative or fractional inputs safely", () => {
+    expect(understoryRingClassBaseOffset(-1, 100)).toBe(0);
+    expect(understoryRingClassBaseOffset(2.7, 100)).toBe(200);
   });
 });

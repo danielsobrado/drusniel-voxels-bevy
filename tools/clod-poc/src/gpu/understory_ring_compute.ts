@@ -8,6 +8,7 @@ import { createUnderstoryGeometryMap, disposeUnderstoryGeometryMap, type Underst
 import { createUnderstoryRingNodeMaterialHandle, type UnderstoryRingInstanceBuffers } from "../understory/understory_node_material.js";
 import type { UnderstoryMaterialHandle } from "../understory/understory_material.js";
 import {
+  understoryRingClassBaseOffset,
   understoryRingGroupIndex,
   UNDERSTORY_RING_CLASS_STRIDE_F32,
   UNDERSTORY_RING_GROUP_COUNT,
@@ -27,11 +28,17 @@ const CLASS_PARAMS_BYTES = UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_S
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
 
-export const UNDERSTORY_GPU_RING_STORAGE_BINDINGS = 5;
+export const UNDERSTORY_GPU_RING_STORAGE_BINDINGS = 7;
 
 export interface UnderstoryGpuRingOutputBuffers {
   cell: GPUBuffer;
   indirectArgs: GPUBuffer;
+}
+
+export interface UnderstoryHydrologyData {
+  res: number;
+  worldCells: number;
+  data: Float32Array;
 }
 
 export interface UnderstoryGpuRingStats {
@@ -54,6 +61,7 @@ export interface UnderstoryGpuRingDispatchParams {
   maxInstancesPerGroup: number;
   indexCounts: [number, number, number, number, number, number];
   frustumPlanes: ArrayLike<number>;
+  hydroEnabled?: boolean;
 }
 
 interface ReadbackSlot {
@@ -79,6 +87,7 @@ export class UnderstoryGpuRingCompute {
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
   private readonly bindGroup: GPUBindGroup;
+  private readonly hydroTexture: GPUTexture;
   private readonly paramScratch = new ArrayBuffer(UNDERSTORY_RING_PARAM_BYTES);
   private readonly classParamsScratch = new Float32Array(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
@@ -100,6 +109,7 @@ export class UnderstoryGpuRingCompute {
     edits: readonly ResolvedDigEdit[],
     outputBuffers: UnderstoryGpuRingOutputBuffers,
     private readonly settings: UnderstorySettings,
+    hydroData: UnderstoryHydrologyData | null,
   ) {
     this.pipelines = pipelines;
     this.paramBuffer = device.createBuffer({
@@ -146,6 +156,33 @@ export class UnderstoryGpuRingCompute {
       destroyAfterMap: false,
       cpu: new Uint32Array(UNDERSTORY_RING_GROUP_COUNT),
     }));
+    // Create hydrology texture from raw data, or a 1x1 fallback
+    if (hydroData && hydroData.data.length > 0) {
+      this.hydroTexture = device.createTexture({
+        label: "understory ring hydro texture",
+        size: { width: hydroData.res, height: hydroData.res },
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      device.queue.writeTexture(
+        { texture: this.hydroTexture },
+        hydroData.data.buffer as ArrayBuffer,
+        { bytesPerRow: hydroData.res * 16 },
+        { width: hydroData.res, height: hydroData.res },
+      );
+    } else {
+      this.hydroTexture = device.createTexture({
+        label: "understory ring fallback hydro texture",
+        size: { width: 1, height: 1 },
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING,
+      });
+    }
+    const hydroSampler = device.createSampler({
+      label: "understory ring hydro sampler",
+      magFilter: "nearest",
+      minFilter: "nearest",
+    });
     this.bindGroup = device.createBindGroup({
       label: "understory ring bind group",
       layout,
@@ -155,6 +192,8 @@ export class UnderstoryGpuRingCompute {
         { binding: 2, resource: { buffer: outputBuffers.indirectArgs } },
         { binding: 3, resource: { buffer: outputBuffers.cell } },
         { binding: 4, resource: { buffer: this.classParamsBuffer } },
+        { binding: 5, resource: this.hydroTexture.createView() },
+        { binding: 6, resource: hydroSampler },
         { binding: 7, resource: { buffer: this.digEdits } },
         { binding: 8, resource: { buffer: this.fieldParams } },
       ],
@@ -166,6 +205,7 @@ export class UnderstoryGpuRingCompute {
     edits: readonly ResolvedDigEdit[],
     outputBuffers: UnderstoryGpuRingOutputBuffers,
     settings: UnderstorySettings,
+    hydroData: UnderstoryHydrologyData | null = null,
   ): Promise<UnderstoryGpuRingCompute> {
     const module = device.createShaderModule({
       label: "understory ring compute shader",
@@ -184,6 +224,8 @@ export class UnderstoryGpuRingCompute {
         storage(2),
         storage(3),
         storage(4, "read-only-storage"),
+        { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+        { binding: 6, visibility: GPUShaderStage.COMPUTE, sampler: {} },
         storage(7, "read-only-storage"),
         { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       ],
@@ -204,7 +246,7 @@ export class UnderstoryGpuRingCompute {
       clear_counters: clearCounters,
       understory_cull: cull,
       build_indirect_args: buildIndirectArgs,
-    }, edits, outputBuffers, { ...settings });
+    }, edits, outputBuffers, { ...settings }, hydroData);
   }
 
   dispatch(params: UnderstoryGpuRingDispatchParams): boolean {
@@ -319,6 +361,7 @@ export class UnderstoryGpuRingCompute {
     this.counterBuffer.destroy();
     this.digEdits.destroy();
     this.fieldParams.destroy();
+    this.hydroTexture.destroy();
     for (const slot of this.counterReadbacks) {
       if (slot.busy) slot.destroyAfterMap = true;
       else slot.buffer.destroy();
@@ -385,9 +428,10 @@ export function createGpuRingDrawResources(
 
   for (const cls of UNDERSTORY_CLASSES) {
     const clsSettings = settings.classes[cls];
-    const handle = createUnderstoryRingNodeMaterialHandle(settings, ringBuffers, lighting, clsSettings.minScale, clsSettings.maxScale);
-    materialHandles[cls] = handle;
     const group = understoryRingGroupIndex(cls);
+    const classBaseOffset = understoryRingClassBaseOffset(group, count);
+    const handle = createUnderstoryRingNodeMaterialHandle(settings, ringBuffers, lighting, clsSettings.minScale, clsSettings.maxScale, classBaseOffset);
+    materialHandles[cls] = handle;
     meshes.push(createGpuRingTierDraw(
       settings,
       cls,

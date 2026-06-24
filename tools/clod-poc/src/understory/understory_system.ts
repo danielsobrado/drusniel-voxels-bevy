@@ -25,6 +25,7 @@ import {
   type UnderstoryGpuRingDrawResources,
   type UnderstoryGpuRingStats,
   type UnderstoryWebGpuBackendAccess,
+  type UnderstoryHydrologyData,
 } from "../gpu/understory_ring_compute.js";
 import { understoryRingGroupCapacity, understoryRingCell } from "./understory_ring_math.js";
 import { getDigEditsSnapshot, getDigEditRevision } from "../terrain.js";
@@ -44,6 +45,8 @@ export interface UnderstorySystemOptions {
   gpuDevice?: GPUDevice | null;
   gpuBackend?: UnderstoryWebGpuBackendAccess | null;
   supportsGpu?: boolean;
+  /** Hydrology water-surface data (R=waterY, G=wetMask, B=carvedBed). When set, GPU understory uses carved-bed height in flat areas and rejects water bodies. */
+  hydrologyData?: UnderstoryHydrologyData | null;
 }
 
 export function understoryUsesGpuRingDraw(settings: UnderstorySettings): boolean {
@@ -138,6 +141,7 @@ export class UnderstorySystem {
   };
   private lastGpuValidationSignature = "";
   private readonly frustumPlaneScratch = new Float32Array(24);
+  private readonly hydrologyData: UnderstoryHydrologyData | null;
 
   constructor(options: UnderstorySystemOptions) {
     this.scene = options.scene;
@@ -150,6 +154,7 @@ export class UnderstorySystem {
     this.gpuDevice = options.gpuDevice ?? null;
     this.gpuBackend = options.gpuBackend ?? null;
     this.supportsGpu = options.supportsGpu ?? !!this.gpuDevice;
+    this.hydrologyData = options.hydrologyData ?? null;
     this.gpuRingUnsupportedReason = this.gpuDevice
       ? understoryGpuRingComputeUnsupportedReason(this.gpuDevice)
       : null;
@@ -344,7 +349,7 @@ export class UnderstorySystem {
     const initGeneration = this.gpuRingGeneration;
     const edits = resolveDigEdits(getDigEditsSnapshot());
     this.gpuRingInit = UnderstoryGpuRingCompute.create(
-      this.gpuDevice, edits, this.gpuRingDraw.outputBuffers, this.settings,
+      this.gpuDevice, edits, this.gpuRingDraw.outputBuffers, this.settings, this.hydrologyData,
     ).then((compute) => {
       if (this.gpuRingKey !== initKey || this.gpuRingGeneration !== initGeneration) {
         compute.destroy();
@@ -397,6 +402,7 @@ export class UnderstorySystem {
         maxInstancesPerGroup: understoryRingGroupCapacity(this.settings),
         indexCounts,
         frustumPlanes: this.frustumPlanes(camera),
+        hydroEnabled: !!this.hydrologyData,
       });
       this.gpuRingStats = this.gpuRingCompute.stats(true);
       this.validateGpuRingAgainstCpu(center, camera);

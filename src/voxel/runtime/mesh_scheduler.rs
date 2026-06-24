@@ -615,8 +615,9 @@ pub(crate) fn mesh_dirty_chunks_system(
                             .remove::<CollisionMargin>()
                             .remove::<CollisionLayers>()
                             .remove::<ChunkCollider>()
-                            .insert(terrain_layers)
-                            .remove::<NotShadowCaster>();
+                            .insert(terrain_layers);
+                        // Do NOT remove NotShadowCaster here — the shadow budget system
+                        // is the sole authority on terrain shadow state.
                     }
                     if let Some(sources) = mc_triangle_sources.clone() {
                         entity_cmd.insert(sources);

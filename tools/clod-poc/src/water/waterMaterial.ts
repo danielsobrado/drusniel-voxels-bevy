@@ -247,6 +247,9 @@ const WATER_FRAG = /* glsl */ `
     else if (uDebugMode == 4) outCol = vec3(vBodyMask);
     else if (uDebugMode == 5) outCol = waterLevelColor(vLevel);
     else if (uDebugMode == 6) outCol = vec3(riverDir * 0.5 + 0.5, clamp(vFlow.z / max(uFoamSpeedEnd, 0.001), 0.0, 1.0));
+    else if (uDebugMode == 12) outCol = vec3(0.5, 0.5, 0.7);
+    else if (uDebugMode == 13) outCol = vec3(0.7, 0.5, 0.5);
+    else if (uDebugMode == 14) outCol = vec3(0.0);
     else outCol = finalColor;
     float outAlpha = uDebugMode == 0 ? alpha : 1.0;
 

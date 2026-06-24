@@ -1124,8 +1124,10 @@ fn apply_prepared_lod_chunk_commit(
                     .remove::<CollisionMargin>()
                     .remove::<CollisionLayers>()
                     .remove::<ChunkCollider>()
-                    .insert(terrain_layers)
-                    .remove::<NotShadowCaster>();
+                    .insert(terrain_layers);
+                // Do NOT remove NotShadowCaster here — the shadow budget system
+                // is the sole authority on terrain shadow state. Budget-owned
+                // chunks retain their shadow state across mesh rebuilds.
             }
             if let Some(sources) = mc_triangle_sources.clone() {
                 entity_cmd.insert(sources);

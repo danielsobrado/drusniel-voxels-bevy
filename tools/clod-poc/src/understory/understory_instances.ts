@@ -47,6 +47,10 @@ export const defaultUnderstoryTerrainSampler: UnderstoryTerrainSampler = {
   surfaceHeight,
   surfaceNormal,
   materialWeights,
+  // Note: when hydrology is active, surfaceHeight() returns the carved bed via terrainSurfaceOverride.
+  // The GPU compute shader (understory_ring.compute.wgsl) uses surfaceHeightField() which is the
+  // base procedural terrain without hydrology carving. This creates a CPU/GPU height mismatch in
+  // hydrology regions. See TODO in understory_ring.compute.wgsl for the fix.
 };
 
 export function emptyUnderstoryGenerationStats(): UnderstoryGenerationStats {

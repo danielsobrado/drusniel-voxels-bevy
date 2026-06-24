@@ -77,7 +77,9 @@ const TINY_CLUTTER_LOOKAHEAD_HEIGHT_RANGE: f32 = 40.0;
 const TINY_CLUTTER_LOOKAHEAD_FRONT_COS: f32 = 0.35;
 const TINY_CLUTTER_LOOKAHEAD_MAX_EXTRA_DISTANCE: f32 = 48.0;
 const TINY_CLUTTER_LOOKAHEAD_FULL_FRACTION: f32 = 0.5;
-const SHADOW_CASTER_BUDGET_PER_CASCADE: usize = 2048;
+/// Max shadow-casting prop instances per group per cascade. Enforced per
+/// `InstancedPropGroup`, so the true per-cascade budget is this × number of groups.
+const SHADOW_CASTER_BUDGET_PER_GROUP_CASCADE: usize = 2048;
 const PROP_SUBCLUSTER_MIN_GROUP_INSTANCES: usize = 24;
 const PROP_SUBCLUSTER_MIN_CLUSTER_INSTANCES: usize = 8;
 const PROP_SUBCLUSTER_MAX_CLUSTERS_PER_GROUP: usize = 3;
@@ -195,10 +197,25 @@ pub struct InstancedPropGroup {
     pub shadow_instances: Vec<PropInstance>,
     shadow_culled: Vec<bool>,
     cascade_shadow_instances: Vec<Vec<PropInstance>>,
+    /// Fingerprint of the cascade frusta used to build `cascade_shadow_instances`.
+    /// Compared each tick to decide whether per-group cascade rebuild is needed.
+    cascade_frusta_fingerprint: CascadeFrustaFingerprint,
     tint_enabled: bool,
     pub diagnostic_prop_type_mask: u8,
     pub version: u64,
     pub shadow_version: u64,
+}
+
+/// Lightweight fingerprint of cascade frusta state, derived from camera position
+/// and directional light direction. Used to detect per-group cascade staleness.
+#[derive(Clone, Copy, Default, PartialEq)]
+struct CascadeFrustaFingerprint {
+    cam_x: f32,
+    cam_y: f32,
+    cam_z: f32,
+    light_dir_x: f32,
+    light_dir_y: f32,
+    light_dir_z: f32,
 }
 
 impl InstancedPropGroup {
@@ -225,6 +242,7 @@ impl InstancedPropGroup {
             shadow_instances: self.shadow_instances.clone(),
             shadow_culled: self.shadow_culled.clone(),
             cascade_shadow_instances: self.cascade_shadow_instances.clone(),
+            cascade_frusta_fingerprint: self.cascade_frusta_fingerprint,
             tint_enabled: self.tint_enabled,
             diagnostic_prop_type_mask: self.diagnostic_prop_type_mask,
             version: self.version,
@@ -853,6 +871,7 @@ fn get_or_create_group(
                         shadow_instances: Vec::new(),
                         shadow_culled: Vec::new(),
                         cascade_shadow_instances: Vec::new(),
+                        cascade_frusta_fingerprint: CascadeFrustaFingerprint::default(),
                         tint_enabled: !groups.integrated_gpu,
                         diagnostic_prop_type_mask: prop_type_mask(prop_type),
                         version: 1,
@@ -1107,7 +1126,7 @@ fn rebuild_visible_and_shadow_instances_with_options(
         }
         visible_instances.push(*instance);
         visible_bounds.push(*bounds);
-        if !*shadow_culled && (disable_shadow_lod || *lod == PropInstanceLod::Full || *lod == PropInstanceLod::Mid) {
+        if !*shadow_culled && (disable_shadow_lod || *lod == PropInstanceLod::Full) {
             shadow_instances.push(*instance);
         }
     }
@@ -1156,7 +1175,7 @@ fn rebuild_visible_and_shadow_instances_with_cascades(
         visible_bounds.push(*bounds);
 
         let is_shadow_capable = !*shadow_culled
-            && (disable_shadow_lod || *lod == PropInstanceLod::Full || *lod == PropInstanceLod::Mid);
+            && (disable_shadow_lod || *lod == PropInstanceLod::Full);
 
         if !is_shadow_capable {
             continue;
@@ -1178,10 +1197,10 @@ fn rebuild_visible_and_shadow_instances_with_cascades(
     }
 
     for (cascade_idx, cascade_list) in cascade_lists.iter_mut().enumerate() {
-        if cascade_list.len() <= SHADOW_CASTER_BUDGET_PER_CASCADE {
+        if cascade_list.len() <= SHADOW_CASTER_BUDGET_PER_GROUP_CASCADE {
             continue;
         }
-        let overflow = cascade_list.len() - SHADOW_CASTER_BUDGET_PER_CASCADE;
+        let overflow = cascade_list.len() - SHADOW_CASTER_BUDGET_PER_GROUP_CASCADE;
         cascade_overflow[cascade_idx] += overflow;
         let mut dist_keys: Vec<f32> = cascade_list
             .iter()
@@ -1199,7 +1218,7 @@ fn rebuild_visible_and_shadow_instances_with_cascades(
                 .partial_cmp(&dist_keys[b])
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        indices.truncate(SHADOW_CASTER_BUDGET_PER_CASCADE);
+        indices.truncate(SHADOW_CASTER_BUDGET_PER_GROUP_CASCADE);
         let mut truncated = indices
             .into_iter()
             .map(|i| {
@@ -1260,7 +1279,7 @@ fn update_instanced_prop_lod(
     timing: Option<Res<RenderTimingSink>>,
     bench_toggles: Option<Res<BenchRenderToggles>>,
     quality_preset: Res<RenderQualityPreset>,
-    directional_lights: Query<&CascadesFrusta, With<DirectionalLight>>,
+    directional_lights: Query<(&CascadesFrusta, &GlobalTransform), With<DirectionalLight>>,
     mut last_update: Local<f32>,
 ) {
     let now = time.elapsed_secs();
@@ -1285,7 +1304,7 @@ fn update_instanced_prop_lod(
 
     let cascade_frusta_list = {
         let mut all_frusta = Vec::new();
-        for cascades_frusta in &directional_lights {
+        for (cascades_frusta, _light_transform) in &directional_lights {
             for (_view_entity, frusta) in &cascades_frusta.frusta {
                 if all_frusta.is_empty() {
                     all_frusta = frusta.clone();
@@ -1295,6 +1314,21 @@ fn update_instanced_prop_lod(
             break;
         }
         all_frusta
+    };
+
+    // Compute frusta fingerprint from camera position + first directional light direction.
+    // This uniquely identifies the cascade configuration for per-group staleness checks.
+    let current_fingerprint = {
+        let (cam_x, cam_y, cam_z) = (camera_pos.x, camera_pos.y, camera_pos.z);
+        let (ldx, ldy, ldz) = directional_lights
+            .iter()
+            .next()
+            .map(|(_, transform)| {
+                let forward = transform.forward().as_vec3();
+                (forward.x, forward.y, forward.z)
+            })
+            .unwrap_or((0.0, -1.0, 0.0));
+        CascadeFrustaFingerprint { cam_x, cam_y, cam_z, light_dir_x: ldx, light_dir_y: ldy, light_dir_z: ldz }
     };
 
     let mut full_instances = 0usize;
@@ -1365,7 +1399,9 @@ fn update_instanced_prop_lod(
             }
         }
 
-        if lod_changed {
+        let frusta_changed_for_group = group.cascade_frusta_fingerprint != current_fingerprint;
+
+        if lod_changed || frusta_changed_for_group {
             let (visible_dirty, shadow_dirty, cascade_dirty) =
                 rebuild_visible_and_shadow_instances_with_cascades(
                     &mut group,
@@ -1385,6 +1421,7 @@ fn update_instanced_prop_lod(
                 };
                 commands.entity(entity).insert(visibility);
             }
+            group.cascade_frusta_fingerprint = current_fingerprint;
         }
         for (ci, cascade_instances) in group.cascade_shadow_instances.iter().enumerate() {
             cascade_caster_counts[ci] += cascade_instances.len();

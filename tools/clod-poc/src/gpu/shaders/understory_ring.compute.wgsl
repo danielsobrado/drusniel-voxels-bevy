@@ -13,6 +13,7 @@ struct UnderstoryRingParams {
   settings_u: vec4<u32>,
   settings_extra: vec4<u32>,
   class_index_counts: vec4<u32>,
+  hydro_params: vec4<f32>,
   planes: array<vec4<f32>, 6>,
 };
 
@@ -21,6 +22,8 @@ struct UnderstoryRingParams {
 @group(0) @binding(2) var<storage, read_write> indirect_args: array<u32>;
 @group(0) @binding(3) var<storage, read_write> out_cell: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> class_params: array<f32>;
+@group(0) @binding(5) var hydro_texture: texture_2d<f32>;
+@group(0) @binding(6) var hydro_sampler: sampler;
 
 // --- Hash functions (matching tree_noise.ts hash2 / valueNoise2D / fractalNoise2D) ---
 
@@ -101,6 +104,41 @@ fn understory_hash(cell: vec2<f32>, salt: u32) -> f32 {
   let seed = f32(params.settings_u.z);
   let salt_f = f32(salt);
   return fract(sin(dot(cell + vec2<f32>(seed + salt_f, seed * 0.37 + salt_f * 1.17), vec2<f32>(41.3, 289.1))) * 43758.5453);
+}
+
+// --- Hydrology texture sampling ---
+// The hydrology water-surface texture (RGBA32F) channels:
+//   R = water-surface Y (dry cells carry a below-ground sentinel)
+//   G = wet mask (1 inside a water body, else 0)
+//   B = carved-bed Y (the height the terrain mesh is built at)
+//   A = water Y (same as R)
+// world_size is the world-space extent (worldCells) for UV mapping.
+
+fn sampleHydrology(wx: f32, wz: f32, world_size: f32) -> vec4<f32> {
+  let safe_size = max(world_size, 1.0);
+  let uv = vec2<f32>(wx / safe_size, wz / safe_size);
+  return textureSampleLevel(hydro_texture, hydro_sampler, uv, 0.0);
+}
+
+// Returns the carved-bed height if hydrology is active AND the terrain is flat enough,
+// otherwise falls back to the base procedural height. Also outputs the wet mask for
+// water-body rejection. Flat areas (normal_y > 0.7) use the carved bed so vegetation
+// snaps to the visible terrain. Steep slopes keep the procedural height — the terrain
+// gate will reject them anyway.
+fn hydrologyHeight(wx: f32, wz: f32, base_height: f32, normal_y: f32) -> vec2<f32> {
+  let world_size = params.hydro_params.x;
+  let hydro_enabled = params.hydro_params.y;
+  if (hydro_enabled < 0.5 || world_size <= 0.0) {
+    return vec2<f32>(base_height, 0.0);
+  }
+  let hydro = sampleHydrology(wx, wz, world_size);
+  let carved_bed = hydro.z;
+  let wet_mask = hydro.y;
+  // Use carved bed in flat areas; steep slopes keep procedural height
+  let flat_enough = normal_y > 0.7;
+  let height_diff = abs(carved_bed - base_height);
+  let height = select(base_height, carved_bed, flat_enough && height_diff > 0.01);
+  return vec2<f32>(height, wet_mask);
 }
 
 // --- Toroidal cell derivation ---
@@ -330,8 +368,16 @@ fn process_understory_slot(slot: u32) {
   let dist = distance(wpos, params.center_radius.xy);
   if (dist > params.center_radius.z) { return; }
 
-  let height = surfaceHeightField(wpos.x, wpos.y);
+  let base_height = surfaceHeightField(wpos.x, wpos.y);
+  let base_normal = normalize(densityGradient(wpos.x, base_height, wpos.y));
+  // Sample hydrology: use carved bed in flat areas, reject water bodies
+  let hydro = hydrologyHeight(wpos.x, wpos.y, base_height, base_normal.y);
+  let height = hydro.x;
+  let wet_mask = hydro.y;
+  // Reject props inside water bodies (wet_mask > 0.5 means underwater)
+  if (wet_mask > 0.5) { return; }
   if (!in_frustum(vec3<f32>(wpos.x, height + 4.0, wpos.y), 8.0)) { return; }
+  // Recompute normal at the adjusted height for accurate slope/terrain gate
   let normal = normalize(densityGradient(wpos.x, height, wpos.y));
   let ground = understory_terrain_gate(height, normal.y, wpos);
   if (ground < 0.0) { return; }
@@ -404,7 +450,7 @@ fn write_draw_args(group: u32, index_count: u32, instance_count: u32) {
   indirect_args[base + 1u] = min(instance_count, params.settings_u.x);
   indirect_args[base + 2u] = 0u;
   indirect_args[base + 3u] = 0u;
-  indirect_args[base + 4u] = group * params.settings_u.x;
+  indirect_args[base + 4u] = 0u;
 }
 
 @compute @workgroup_size(UNDERSTORY_WORKGROUP_SIZE)

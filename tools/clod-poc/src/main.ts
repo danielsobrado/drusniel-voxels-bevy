@@ -73,6 +73,7 @@ import {
   type UnderstorySettings,
   type UnderstoryStats,
 } from "./understory/index.js";
+import type { UnderstoryHydrologyData } from "./gpu/understory_ring_compute.js";
 import {
   applyForestLightingMaterialStateIfChanged,
   createForestLightingIntegrationWarner,
@@ -500,6 +501,18 @@ function appendCrossLodBorderSegments(pts: number[], adjacency: CrossLodAdjacenc
     appendBorderChainSegments(pts, a, edge.axis, edge.aPlane, minX, maxX);
     appendBorderChainSegments(pts, b, edge.axis, edge.bPlane, minX, maxX);
   }
+}
+
+function packHydrologyData(hydrology: { grid: { res: number; worldCells: number; waterY: Float32Array; wetMask: Float32Array; carvedBed: Float32Array } }): UnderstoryHydrologyData {
+  const { res, worldCells, waterY, wetMask, carvedBed } = hydrology.grid;
+  const data = new Float32Array(res * res * 4);
+  for (let i = 0; i < res * res; i++) {
+    data[i * 4] = waterY[i];
+    data[i * 4 + 1] = wetMask[i];
+    data[i * 4 + 2] = carvedBed[i];
+    data[i * 4 + 3] = waterY[i];
+  }
+  return { res, worldCells, data };
 }
 
 async function main() {
@@ -2343,6 +2356,7 @@ async function main() {
       get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
     } : null,
     supportsGpu: isWebGpu,
+    hydrologyData: hydrologySystem ? packHydrologyData(hydrologySystem) : null,
   });
   assertPageMeshSignaturesUnchanged(understoryPageSignaturesBefore, pageMeshSignatures(understoryPageNodes));
   let understoryStats: UnderstoryStats | null = understorySystem.getStats();

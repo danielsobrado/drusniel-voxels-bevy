@@ -18,8 +18,8 @@ import {
 
 export const UNDERSTORY_RING_GROUP_COUNT = UNDERSTORY_CLASSES.length;
 
-// std140 uniform: 15 vec4 lanes (9 globals + 6 frustum planes).
-export const UNDERSTORY_RING_PARAM_BYTES = 16 * 15;
+// std140 uniform: 16 vec4 lanes (10 globals + 6 frustum planes).
+export const UNDERSTORY_RING_PARAM_BYTES = 16 * 16;
 // Per-class selection params: 8 floats per class (see packUnderstoryRingClassParams).
 export const UNDERSTORY_RING_CLASS_STRIDE_F32 = 8;
 
@@ -30,6 +30,7 @@ export interface UnderstoryRingDispatchParams {
   maxInstancesPerGroup: number;
   indexCounts: [number, number, number, number, number, number];
   frustumPlanes: ArrayLike<number>;
+  hydroEnabled?: boolean;
 }
 
 export interface UnderstoryRingAcceptParams {
@@ -95,6 +96,10 @@ export function understoryRingGroupRegion(
   const cap = Math.max(0, Math.floor(maxInstancesPerGroup));
   const start = Math.max(0, Math.floor(group)) * cap;
   return { start, end: start + cap, firstInstance: start };
+}
+
+export function understoryRingClassBaseOffset(group: number, maxPerGroup: number): number {
+  return Math.max(0, Math.floor(group)) * Math.max(0, Math.floor(maxPerGroup));
 }
 
 // PCG-style 2D hash returning two floats in [0, 1). Matches the WGSL
@@ -248,7 +253,7 @@ export function packUnderstoryRingClassParams(
   return scratch;
 }
 
-// Global ring uniform (7 vec4 lanes). The cull shader reads this as
+// Global ring uniform (16 vec4 lanes). The cull shader reads this as
 // UnderstoryRingParams; Phase 2 WGSL must keep this layout in sync.
 export function packUnderstoryRingParams(
   settings: UnderstorySettings,
@@ -304,11 +309,16 @@ export function packUnderstoryRingParams(
   u32[33] = Math.max(0, Math.floor(ic[1])) >>> 0;
   u32[34] = Math.max(0, Math.floor(ic[2])) >>> 0;
   u32[35] = Math.max(0, Math.floor(ic[3])) >>> 0;
-  // lanes 9-14 — frustum planes (6 × vec4)
+  // lane 9 — hydro_params (f32): x=worldCells, y=hydroEnabled(0/1)
+  f32[36] = params.worldCells;
+  f32[37] = params.hydroEnabled ? 1.0 : 0.0;
+  f32[38] = 0;
+  f32[39] = 0;
+  // lanes 10-15 — frustum planes (6 × vec4)
   const fp = params.frustumPlanes;
   for (let p = 0; p < 6; p++) {
     const src = p * 4;
-    const dst = 36 + p * 4;
+    const dst = 40 + p * 4;
     f32[dst] = fp[src] ?? 0;
     f32[dst + 1] = fp[src + 1] ?? 0;
     f32[dst + 2] = fp[src + 2] ?? 0;

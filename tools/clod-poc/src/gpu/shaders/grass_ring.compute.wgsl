@@ -216,6 +216,12 @@ fn process_slot(slot: u32) {
   }
 
   let height = surfaceHeightField(wpos.x, wpos.y);
+  // TODO: surfaceHeightField() is the base procedural terrain without hydrology carving.
+  // When hydrology is active, visible terrain uses the carved bed, so GPU grass blades
+  // may float above carved terrain in hydrology regions. The grass node material already
+  // samples hydrologyWaterTexture to discard blades under water, but blade Y is still
+  // snapped to the uncarved procedural height. Fix: sample a hydrology height texture
+  // in the compute shader and snap height to the carved bed when available.
   let normal = normalize(densityGradient(wpos.x, height, wpos.y));
   let mask = grass_mask(height, normal.y, dist, wpos.x, wpos.y);
   let thin = grass_thin(dist);
@@ -272,6 +278,9 @@ fn write_draw_args(tier: u32, index_count: u32, instance_count: u32) {
   indirect_args[base + 1u] = min(instance_count, params.counts_b.x);
   indirect_args[base + 2u] = 0u;
   indirect_args[base + 3u] = 0u;
+  // Grass relies on instanceIndex including firstInstance from indirect draw args.
+  // The smoke test (grass_first_instance_smoke.ts) proves this works correctly in WebGPU.
+  // Explicit tierBaseOffset is available in createGrassNodeMaterial for future use.
   indirect_args[base + 4u] = tier * params.counts_b.x;
 }
 

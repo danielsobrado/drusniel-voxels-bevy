@@ -1,6 +1,5 @@
 import {
   gridIndex,
-  HYDROLOGY_BODY_DRY,
   type HydrologyGrid,
 } from "./hydrologyGrid.js";
 

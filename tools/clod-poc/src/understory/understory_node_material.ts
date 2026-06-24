@@ -142,6 +142,7 @@ export function createUnderstoryRingNodeMaterialHandle(
   lighting: EnvironmentLighting = fallbackLighting(),
   classMinScale?: number,
   classMaxScale?: number,
+  classBaseOffset = 0,
 ): UnderstoryMaterialHandle {
   const uTime = uniform(0);
   const windDir = new THREE.Vector2(0.8, 0.6).normalize();
@@ -155,6 +156,7 @@ export function createUnderstoryRingNodeMaterialHandle(
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
+  const uClassBaseOffset = uniform(classBaseOffset) as TslNode;
   const materials: MeshBasicNodeMaterial[] = [];
 
   const buildMaterial = (albedoFactory: (vertexColor: TslNode) => TslNode): MeshBasicNodeMaterial => {
@@ -162,7 +164,8 @@ export function createUnderstoryRingNodeMaterialHandle(
     const aWindWeight: TslNode = attribute("understoryWindWeight", "float");
 
     const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
-    const aCell: TslNode = cellStore.element(instanceIndex);
+    const storageIndex: TslNode = instanceIndex.add(uClassBaseOffset);
+    const aCell: TslNode = cellStore.element(storageIndex);
     const worldCell: TslNode = aCell.xy;
     const jitter: TslNode = vec2(understoryRingHash(worldCell, uSeed, 1103), understoryRingHash(worldCell, uSeed, 1200));
     const aWorldXZ: TslNode = worldCell.add(jitter).mul(uCellSize);

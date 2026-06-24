@@ -129,4 +129,13 @@ describe("grass ring compute capabilities", () => {
       expect(grassGpuRingOutputIndex(tier, 17, maxPerTier)).toBe(region.firstInstance + 17);
     }
   });
+
+  it("grass WGSL sets firstInstance per tier (instanceIndex includes firstInstance)", () => {
+    // Grass relies on WebGPU instanceIndex including the indirect firstInstance.
+    // The smoke test (grass_first_instance_smoke.ts) proves this works.
+    // Unlike understory, grass uses a single material for all tiers, so the tier
+    // separation comes from the indirect firstInstance baked into instanceIndex.
+    // Explicit tierBaseOffset is available in createGrassNodeMaterial for future use.
+    expect(shaderSource).toContain("indirect_args[base + 4u] = tier * params.counts_b.x");
+  });
 });

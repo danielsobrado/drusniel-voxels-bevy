@@ -1,0 +1,27 @@
+# Shadow budget configuration
+# Controls terrain shadow culling, point light shadow limits, and instanced prop shadow budgets.
+shadow_budget:
+  enabled: true
+
+  terrain:
+    # Distance beyond which terrain chunks stop casting shadows.
+    shadow_distance: 192.0
+    # Hysteresis to prevent terrain shadow toggling flicker.
+    hysteresis: 16.0
+    # Update interval in seconds for terrain shadow checks.
+    update_interval: 0.2
+
+  point_lights:
+    # Max point lights with shadows enabled simultaneously.
+    max_shadow: 4
+    # Distance beyond which point light shadows are disabled.
+    shadow_distance: 80.0
+    # Hysteresis for point light shadow toggling.
+    hysteresis: 5.0
+    # Update interval in seconds for point light shadow checks.
+    update_interval: 0.1
+
+  instanced_props:
+    # Max shadow-casting prop instances per group per cascade.
+    # True per-cascade budget is this * number of groups.
+    shadow_caster_budget_per_group_cascade: 2048

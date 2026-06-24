@@ -10,6 +10,7 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   abs,
   attribute,
+  Break,
   cameraFar,
   cameraNear,
   cameraPosition,
@@ -18,13 +19,14 @@ import {
   clamp,
   cos,
   dot,
+  exp,
   float,
   Fn,
   fract,
   getScreenPosition,
+  If,
   interleavedGradientNoise,
   Loop,
-  Break,
   max,
   mix,
   normalize,
@@ -38,8 +40,6 @@ import {
   screenUV,
   sin,
   smoothstep,
-  texture,
-  time,
   uniform,
   vec2,
   vec3,
@@ -113,7 +113,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uReflTerrainStrength = uniform(u.uReflection.terrainFallbackStrength) as TslNode;
 
   // Caustics uniforms
-  const uCausticsEnabled = uniform(u.uCaustics.enabled ? 1 : 0) as TslNode;
   const uCausticsGain = uniform(u.uCaustics.gain) as TslNode;
   const uCausticsScale = uniform(u.uCaustics.scale) as TslNode;
   const uCausticsSpeed = uniform(u.uCaustics.speed) as TslNode;
@@ -206,7 +205,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const refrCol: TslNode = Fn(() => {
       const dist: TslNode = cameraPosition.sub(worldPos).length();
       const refrK: TslNode = clamp(float(9).div(dist.max(1)), 0.04, 1).mul(uRefrStrength);
-      const ruv: TslNode = screenUV.add(n.xz.mul(refrK));
+      const ruv: TslNode = screenUV.add(normal.xz.mul(refrK));
       const refrDepthSample: TslNode = viewportDepthTexture(ruv);
       const zR: TslNode = perspectiveDepthToViewZ(refrDepthSample.x, cameraNear, cameraFar);
       const leaked: TslNode = zR.greaterThan(positionView.z.add(uRefrValidationBias));
@@ -216,9 +215,9 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       const thick: TslNode = positionView.z.sub(zScene).max(0);
       const absorb: TslNode = thick.mul(1.25);
       const T: TslNode = vec3(
-        exp(absorb.mul(uRefrAbsorption.r.negate())),
-        exp(absorb.mul(uRefrAbsorption.g.negate())),
-        exp(absorb.mul(uRefrAbsorption.b.negate())),
+        exp(absorb.mul(uRefrAbsorption.x.negate())),
+        exp(absorb.mul(uRefrAbsorption.y.negate())),
+        exp(absorb.mul(uRefrAbsorption.z.negate())),
       );
       const inscat: TslNode = vec3(0.013, 0.036, 0.032).mul(uRefrTurbidity);
       return sceneCol.mul(T).add(inscat.mul(float(1).sub(T)));
@@ -229,7 +228,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       const toCam: TslNode = cameraPosition.sub(worldPos);
       const camDist: TslNode = toCam.length();
       const viewDirN: TslNode = toCam.div(camDist.max(1e-4));
-      const rdir: TslNode = reflect(viewDirN.negate(), vec3(n.x.mul(0.55), n.y, n.z.mul(0.55)).normalize());
+      const rdir: TslNode = reflect(viewDirN.negate(), vec3(normal.x.mul(0.55), normal.y, normal.z.mul(0.55)).normalize());
       const dirV: TslNode = cameraViewMatrix.mul(vec4(rdir, 0)).xyz;
       const stepLen: TslNode = clamp(camDist.mul(uReflStepScale), 0.25, 28);
       const jitter: TslNode = interleavedGradientNoise(screenCoordinate.xy);

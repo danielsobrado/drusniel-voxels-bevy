@@ -23,6 +23,7 @@ import {
   understoryGpuRingComputeUnsupportedReason,
 } from "./understory_ring_compute.js";
 import type { UnderstoryGpuRingOutputBuffers } from "./understory_ring_compute.js";
+import { understoryRingClassBaseOffset } from "../understory/understory_ring_math.js";
 
 const GPU_COMPUTE = 0x04;
 if (typeof globalThis.GPUShaderStage === "undefined") {
@@ -37,6 +38,11 @@ if (typeof globalThis.GPUBufferUsage === "undefined") {
 }
 if (typeof globalThis.GPUMapMode === "undefined") {
   (globalThis as Record<string, unknown>).GPUMapMode = { READ: 0x0001, WRITE: 0x0002 };
+}
+if (typeof globalThis.GPUTextureUsage === "undefined") {
+  (globalThis as Record<string, unknown>).GPUTextureUsage = {
+    COPY_SRC: 0x01, COPY_DST: 0x02, TEXTURE_BINDING: 0x04, STORAGE_BINDING: 0x08, RENDER_ATTACHMENT: 0x10,
+  };
 }
 
 describe("understory GPU ring compute helpers", () => {
@@ -221,6 +227,11 @@ describe("understory GPU ring shader source", () => {
     expect(understoryRingShader).toContain("params.settings_extra[group - 4u]");
   });
 
+  it("sets firstInstance to 0 for all groups (explicit class offset replaces indirect firstInstance)", () => {
+    expect(understoryRingShader).toContain("indirect_args[base + 4u] = 0u;");
+    expect(understoryRingShader).not.toContain("indirect_args[base + 4u] = group * params.settings_u.x");
+  });
+
   it("tests frustum planes in the cull path", () => {
     expect(understoryRingShader).toContain("planes: array<vec4<f32>, 6>");
     expect(understoryRingShader).toContain("fn in_frustum");
@@ -251,6 +262,11 @@ function createMockGpuDevice(overrides?: { limits?: Record<string, number> }): G
       ...overrides?.limits,
     },
     createBuffer: (_opts?: GPUBufferDescriptor) => buffer(),
+    createTexture: (_opts?: GPUTextureDescriptor) => ({
+      createView: () => ({}) as unknown as GPUTextureView,
+      destroy: noop,
+    }) as unknown as GPUTexture,
+    createSampler: (_opts?: GPUSamplerDescriptor) => ({}) as unknown as GPUSampler,
     createShaderModule: () => ({}) as unknown as GPUShaderModule,
     createBindGroupLayout: () => ({}) as unknown as GPUBindGroupLayout,
     createBindGroup: () => ({}) as unknown as GPUBindGroup,
@@ -268,6 +284,7 @@ function createMockGpuDevice(overrides?: { limits?: Record<string, number> }): G
     }),
     queue: {
       writeBuffer: noop,
+      writeTexture: noop,
       submit: noop,
     },
   } as unknown as GPUDevice;
@@ -358,5 +375,35 @@ describe("understory ring gate function", () => {
       gpu: { ...DEFAULT_UNDERSTORY_SETTINGS.gpu, enabled: true, fallbackToCpu: true, debugForceCpu: false },
     };
     expect(understoryUsesGpuRingDraw(fallback)).toBe(true);
+  });
+});
+
+describe("understory ring class base offset contract", () => {
+  it("class base offset equals group * capacity for every group", () => {
+    const capacity = 2000;
+    for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
+      const offset = understoryRingClassBaseOffset(group, capacity);
+      expect(offset).toBe(group * capacity);
+    }
+  });
+
+  it("class base offset regions are contiguous and non-overlapping", () => {
+    const capacity = 1500;
+    for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
+      const start = understoryRingClassBaseOffset(group, capacity);
+      const end = start + capacity;
+      if (group > 0) {
+        const prevEnd = understoryRingClassBaseOffset(group - 1, capacity) + capacity;
+        expect(start).toBe(prevEnd);
+      }
+      expect(end - start).toBe(capacity);
+    }
+  });
+
+  it("total shared buffer size covers all groups", () => {
+    const capacity = 2000;
+    const totalExpected = UNDERSTORY_RING_GROUP_COUNT * capacity;
+    const lastOffset = understoryRingClassBaseOffset(UNDERSTORY_RING_GROUP_COUNT - 1, capacity);
+    expect(lastOffset + capacity).toBe(totalExpected);
   });
 });
