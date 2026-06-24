@@ -15,14 +15,14 @@ export interface Phase0Metrics {
   shadow_proxy_tris: number;
   canopy_enabled: boolean;
   canopy_tris: number;
-  clod_page_count_lod0: number;
-  clod_page_count_lod1: number;
-  clod_page_count_lod2: number;
-  clod_page_count_lod3: number;
-  selected_page_count_lod0: number;
-  selected_page_count_lod1: number;
-  selected_page_count_lod2: number;
-  selected_page_count_lod3: number;
+  built_page_count_lod0: number;
+  built_page_count_lod1: number;
+  built_page_count_lod2: number;
+  built_page_count_lod3: number;
+  rendered_page_count_lod0: number;
+  rendered_page_count_lod1: number;
+  rendered_page_count_lod2: number;
+  rendered_page_count_lod3: number;
   rendered_terrain_tris: number;
   total_scene_tris: number;
   draw_calls: number;
@@ -134,14 +134,14 @@ export function buildDefaultMetrics(): Phase0Metrics {
     shadow_proxy_tris: 0,
     canopy_enabled: false,
     canopy_tris: 0,
-    clod_page_count_lod0: 0,
-    clod_page_count_lod1: 0,
-    clod_page_count_lod2: 0,
-    clod_page_count_lod3: 0,
-    selected_page_count_lod0: 0,
-    selected_page_count_lod1: 0,
-    selected_page_count_lod2: 0,
-    selected_page_count_lod3: 0,
+    built_page_count_lod0: 0,
+    built_page_count_lod1: 0,
+    built_page_count_lod2: 0,
+    built_page_count_lod3: 0,
+    rendered_page_count_lod0: 0,
+    rendered_page_count_lod1: 0,
+    rendered_page_count_lod2: 0,
+    rendered_page_count_lod3: 0,
     rendered_terrain_tris: 0,
     total_scene_tris: 0,
     draw_calls: 0,

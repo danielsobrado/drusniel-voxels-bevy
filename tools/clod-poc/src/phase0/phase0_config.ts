@@ -23,9 +23,16 @@ export interface Phase0SceneConfig {
   simulated_streaming_only?: boolean;
 }
 
+export interface Phase0StreamingConfig {
+  preload_seconds: number;
+  live_radius_m: number;
+  clod_radius_m: number;
+}
+
 export interface Phase0Settings {
   target_visible_m: number;
   target_future_visible_m: number;
+  streaming: Phase0StreamingConfig;
   scenes: Record<string, Phase0SceneConfig>;
 }
 
@@ -112,6 +119,17 @@ export function parsePhase0Config(rawYaml: string): Phase0Config {
     throw new Error(`Phase0 config: phase0.target_future_visible_m (${target_future_visible_m}) must be >= phase0.target_visible_m (${target_visible_m})`);
   }
 
+  const rawStreaming = p0["streaming"];
+  if (!rawStreaming || typeof rawStreaming !== "object") {
+    throw new Error("Phase0 config: missing 'phase0.streaming' section");
+  }
+  const st = rawStreaming as Record<string, unknown>;
+  const streaming: Phase0StreamingConfig = {
+    preload_seconds: requireNumber(st["preload_seconds"], "phase0.streaming.preload_seconds", 0.1),
+    live_radius_m: requireNumber(st["live_radius_m"], "phase0.streaming.live_radius_m", 1),
+    clod_radius_m: requireNumber(st["clod_radius_m"], "phase0.streaming.clod_radius_m", 1),
+  };
+
   const rawScenes = p0["scenes"];
   if (!rawScenes || typeof rawScenes !== "object") {
     throw new Error("Phase0 config: missing 'phase0.scenes' section");
@@ -154,7 +172,7 @@ export function parsePhase0Config(rawYaml: string): Phase0Config {
   };
 
   return {
-    phase0: { target_visible_m, target_future_visible_m, scenes },
+    phase0: { target_visible_m, target_future_visible_m, streaming, scenes },
     metrics: { required_counters },
     acceptance,
   };

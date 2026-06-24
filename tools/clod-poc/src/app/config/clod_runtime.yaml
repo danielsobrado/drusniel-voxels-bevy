@@ -1,0 +1,20 @@
+runtime:
+  world_options: [2, 4, 8, 16, 32]
+
+webgpu_selection:
+  error_max_age_frames: 6
+  dispatch_interval_frames: 2
+  parity_interval_frames: 60
+  error_tolerance_px: 0.02
+
+terrain_textures:
+  texture_array_size: 512
+
+near_field:
+  chunk_group_build_budget: 1
+
+digging:
+  hold_interval_ms: 400
+
+profiling:
+  slow_frame_ms: 24

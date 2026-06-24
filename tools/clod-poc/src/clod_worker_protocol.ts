@@ -61,6 +61,8 @@ export interface SerializedLod0RebuildResult {
   dirtyCoords: [number, number][];
   lod0Pages: number;
   lod0Ms: number;
+  serializeMs: number;
+  serializedBytes: number;
   chunksRemeshed: number;
   chunksTotal: number;
   pendingParents: number;
@@ -109,13 +111,15 @@ export function serializeNodes(nodes: readonly ClodPageNode[]): SerializedClodNo
   return nodes.map(serializeNode);
 }
 
-export function serializeLod0Rebuild(result: Lod0RebuildResult, pendingParents: number): SerializedLod0RebuildResult {
+export function serializeLod0Rebuild(result: Lod0RebuildResult, pendingParents: number, serializeMs: number, serializedBytes: number): SerializedLod0RebuildResult {
   return {
     requestId: 0,
     changed: serializeNodes(result.changed),
     dirtyCoords: result.dirtyCoords.map(([x, z]) => [x, z]),
     lod0Pages: result.lod0Pages,
     lod0Ms: result.lod0Ms,
+    serializeMs,
+    serializedBytes,
     chunksRemeshed: result.chunksRemeshed,
     chunksTotal: result.chunksTotal,
     pendingParents,

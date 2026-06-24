@@ -1,6 +1,10 @@
 phase0:
   target_visible_m: 4096
   target_future_visible_m: 8192
+  streaming:
+    preload_seconds: 4.0
+    live_radius_m: 200
+    clod_radius_m: 2048
 
   scenes:
     long_view_4km:
@@ -75,14 +79,14 @@ metrics:
     - shadow_proxy_tris
     - canopy_enabled
     - canopy_tris
-    - clod_page_count_lod0
-    - clod_page_count_lod1
-    - clod_page_count_lod2
-    - clod_page_count_lod3
-    - selected_page_count_lod0
-    - selected_page_count_lod1
-    - selected_page_count_lod2
-    - selected_page_count_lod3
+    - built_page_count_lod0
+    - built_page_count_lod1
+    - built_page_count_lod2
+    - built_page_count_lod3
+    - rendered_page_count_lod0
+    - rendered_page_count_lod1
+    - rendered_page_count_lod2
+    - rendered_page_count_lod3
     - rendered_terrain_tris
     - total_scene_tris
     - draw_calls

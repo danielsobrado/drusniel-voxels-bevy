@@ -336,8 +336,14 @@ export class GrassSystem {
     this.root.visible = this.settings.enabled;
   }
 
-  /** Regenerate grass for edited LOD0 pages so blades track the current surface. */
-  rebuildNodePatches(nodeIds: Iterable<string>): void {
+  /** Schedule deferred re-scatter on the next update cycle. */
+  markPatchesDirty(): void {
+    this.patchesDirty = true;
+  }
+
+  /** Remove patches for edited LOD0 nodes (fast path — no re-scatter).
+   *  Caller must trigger refreshForCenter later. */
+  removePatchesForNodes(nodeIds: Iterable<string>): void {
     const ids = new Set(nodeIds);
     if (ids.size === 0) return;
     if (this.canUseGpuRingDraw()) {
@@ -356,6 +362,11 @@ export class GrassSystem {
       }
     }
     this.patches = retained;
+  }
+
+  /** Regenerate grass for edited LOD0 pages so blades track the current surface. */
+  rebuildNodePatches(nodeIds: Iterable<string>): void {
+    this.removePatchesForNodes(nodeIds);
     this.refreshForCenter(this.lastCenter);
   }
 

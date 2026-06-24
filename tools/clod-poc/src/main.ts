@@ -1,14 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import GUI from "lil-gui";
+import { createClodPocGui, createClodPocTerrainMaterialGui } from "./ui/gui/gui_root.js";
 import { parseConfig } from "./config.js";
 import { initHooks, type ClodHooks } from "./core/hooks.js";
 import { failLoud, installGlobalErrorHooks } from "./core/diagnostics.js";
-import { buildTerrainSummary, createHeightTexture, createExtendedHeightTexture, createExtendedCanopyTexture } from "./clod/terrain_summary.js";
-import { buildFarTerrainShell } from "./gpu/far_terrain_shell.js";
+import { buildTerrainSummary, createHeightTexture } from "./clod/terrain_summary.js";
 import { buildFarTerrainShadowProxy } from "./gpu/far_terrain_shadow_proxy.js";
 import { bakeMacroTint } from "./gpu/terrain_node_material.js";
-import { buildFarCanopyShell } from "./gpu/far_canopy_shell.js";
 import { computeEffectiveVisibleMeters, computeVisibleTargetMet } from "./phase0/phase0_metrics.js";
 import { simulateStreamingCoverage } from "./phase0/streaming_coverage_sim.js";
 import { parsePhase0Config, type Phase0Config } from "./phase0/phase0_config.js";
@@ -22,18 +20,14 @@ import grassConfigText from "../config/grass.yaml?raw";
 import waterConfigText from "../config/water.yaml?raw";
 import forestLightingConfigText from "../config/forest_lighting.yaml?raw";
 import { ClodWorkerClient } from "./clod_worker_client.js";
-import { emitAudio, setAudioEnabled, setMasterVolume, getAudioState } from "./audio/index.js";
+import { emitAudio, getAudioState } from "./audio/index.js";
 import {
-  addDigEdit,
   baseSurfaceHeight,
   type BrushOp,
   type BrushShape,
   digEditCount,
-  DIG_INFLUENCE_MARGIN,
   getDigEditsSnapshot,
   meshChunk,
-  PAINT_BLEND_CHANNELS,
-  paintWeightsAt,
   replaceDigEdits,
   setTerrainSurfaceOverride,
   surfaceNormal,
@@ -49,7 +43,6 @@ import {
   type TerrainColorAdjustments,
 } from "./material.js";
 import {
-  createWebGlTerrainMaterial,
   type TerrainMaterialHandle,
 } from "./rendering/terrain_material.js";
 import {
@@ -58,55 +51,35 @@ import {
   parseRendererBackend,
 } from "./rendering/renderer_backend.js";
 import { getRendererGpuDevice } from "./rendering/webgpu_device_bridge.js";
-import { createWebGpuTerrainMaterial } from "./rendering/terrain_material_webgpu.js";
 import {
-  GRASS_SHADER_MODES,
-  GrassSystem,
   parseGrassConfig,
   type GrassLighting,
   type GrassSettings,
   type GrassStats,
 } from "./grass.js";
-import { parseStoneConfig, STONE_CLASSES, type StoneClass } from "./stones/stone_config.js";
-import { StoneSystem, type StoneLighting, type StoneStats } from "./stones/stone_instances.js";
-import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "./stones/stone_validation.js";
-import { formatTreeInfoLine, formatTreeTotalDisplay, parseTreeConfig, TreeSystem, type TreeStats } from "./trees/index.js";
+import { parseStoneConfig } from "./stones/stone_config.js";
+import { type StoneStats } from "./stones/stone_instances.js";
+import { formatTreeInfoLine, formatTreeTotalDisplay, parseTreeConfig, type TreeStats } from "./trees/index.js";
 import {
   formatUnderstoryInfoLine,
   parseUnderstoryConfig,
-  UnderstorySystem,
-  type UnderstorySettings,
   type UnderstoryStats,
 } from "./understory/index.js";
-import type { UnderstoryHydrologyData } from "./gpu/understory_ring_compute.js";
 import {
-  applyForestLightingMaterialStateIfChanged,
   createForestLightingIntegrationWarner,
-  ForestLightingSystem,
   formatForestLightingInfoLine,
   parseForestLightingConfig,
   type ForestLightingDebugMode,
-  type ForestLightingMaterialUpdateSignature,
-  type ForestLightingSettings,
   type ForestLightingStats,
 } from "./forest_lighting/index.js";
 import {
-  DEFAULT_PLAYER_CONFIG,
   PlayerController,
   PlayerInteractionState,
-  type PlayerInputState,
 } from "./player_controller.js";
-import { errorPx, selectCut, type SelectionParams, type SelectionState } from "./selection.js";
-import {
-  ClodErrorPxCompute,
-  type ClodErrorMap,
-  type ClodErrorPxStats,
-  type DispatchOptions,
-} from "./gpu/clod_error_px_compute.js";
+import { ClodErrorPxCompute } from "./gpu/clod_error_px_compute.js";
 import { requestWebGpuDevice } from "./gpu/webgpu_device.js";
 import { parseReadbackMode, type WebGpuReadbackMode } from "./core/webgpu_readback_mode.js";
-import { TerrainColliderSet, type TerrainColliderPage, type TerrainSurfaceHit } from "./terrain_collider.js";
-import { borderChain } from "./validate.js";
+import { TerrainColliderSet, type TerrainColliderPage } from "./terrain_collider.js";
 import {
   DEFAULT_ENVIRONMENT_COLORS,
   DEFAULT_ENVIRONMENT_SETTINGS,
@@ -125,16 +98,11 @@ import {
 } from "./gpu/grass_node_material.js";
 import {
   parseWaterConfig,
-  WaterClipmap,
-  WaterField,
-  addWaterDebugFolder,
-  type WaterDebugState,
   WATER_DEBUG_MODES,
   resolveWaterConfig,
   HydrologySystem,
   makeFakeBodyCarvedSampler,
 } from "./water/index.js";
-import { createWaterShaderMaterial } from "./water/waterMaterial.js";
 import { createSkyNodeMaterial, type SkyNodeHandle } from "./gpu/sky_node_material.js";
 import { WebGpuPostProcessPipeline } from "./gpu/webgpu_postprocess.js";
 import {
@@ -146,10 +114,9 @@ import {
   type ClodProjectManifestV1,
   type ProjectArchiveContents,
   type ProjectSessionState,
-  type ProjectTextureSlot,
   type TextureBlendMode,
 } from "./project_archive.js";
-import { iconDataUrl, type ClodIconKind } from "./ui/icons/index.js";
+import { type ClodIconKind } from "./ui/icons/index.js";
 import { setButtonIcon, setIconOnlyButton } from "./ui/dom_icons.js";
 import { createClodOverlay, updateClodOverlay, type ClodOverlaySnapshot } from "./ui/overlay_panel.js";
 import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "./diagonalPolish.js";
@@ -158,150 +125,51 @@ import { NodeLabelOverlay } from "./ui/node_labels.js";
 import {
   materialCarouselBounds,
   materialCarouselPageForSelection,
-  TEXTURE_MODAL_PAGE_SIZE,
 } from "./material_carousel.js";
-import {
-  emptyTextureSlotState,
-  INITIAL_TERRAIN_TEXTURE_COUNT,
-  MAX_TERRAIN_TEXTURES,
-  terrainTextureSlotLabel,
-} from "./terrain_textures.js";
+import { terrainTextureSlotLabel } from "./terrain_textures.js";
 import { parseProceduralTextureConfig } from "./textures/materialRecipes.js";
-import {
-  createProceduralTerrainTextures,
-  type ProceduralTerrainSlot,
-} from "./textures/terrainTextureArrays.js";
+import { createProceduralTerrainTextures } from "./textures/terrainTextureArrays.js";
 import {
   DEFAULT_RAIN_WEATHER_SETTINGS,
   DEFAULT_SANDSTORM_WEATHER_SETTINGS,
   DEFAULT_SNOW_WEATHER_SETTINGS,
-  RainWeatherSystem,
-  SandstormWeatherSystem,
-  SnowWeatherSystem,
-  type RainWeatherSettings,
-  type SandstormWeatherSettings,
-  type SnowWeatherSettings,
 } from "./weather/rain.js";
+import { LOD_COLORS, PAINT_SWATCH_COLORS, type WeatherMode } from "./app/clod_constants.js";
+import { parseClodRuntimeConfig, resolveSlowFrameMsThreshold } from "./app/runtime_config.js";
+import { computeGeometryNormals, toGeometry } from "./terrain_runtime/page_geometry.js";
+import { createClodSelectionController } from "./terrain_runtime/clod_selection_controller.js";
+import { packHydrologyData } from "./systems/hydrology_packing.js";
+import { type TerrainTextureLoadOptions } from "./terrain_runtime/texture_loader.js";
+import { BUILTIN_TERRAIN_TEXTURES } from "./terrain_runtime/terrain_builtin_textures.js";
+import { createTerrainTextureController } from "./terrain_runtime/terrain_texture_controller.js";
+import { createTerrainMaterialController } from "./terrain_runtime/terrain_material_controller.js";
+import {
+  TEXTURE_BLEND_MODES,
+  terrainMaterialSourceParam,
+  type ProceduralDebugMode,
+  type TerrainMaterialSource,
+} from "./terrain_runtime/terrain_material_constants.js";
+import { createTerrainTextureModal } from "./terrain_runtime/terrain_texture_modal.js";
+import { createFarShellController } from "./systems/far_shell_controller.js";
+import { createGrassController } from "./systems/grass_controller.js";
+import { createStoneController } from "./systems/stone_controller.js";
+import { createTreeController } from "./systems/tree_controller.js";
+import { createUnderstoryController } from "./systems/understory_controller.js";
+import { createForestLightingController } from "./systems/forest_lighting_controller.js";
+import { createWaterController } from "./systems/water_controller.js";
+import { createWeatherController } from "./systems/weather_controller.js";
+import { drainVegetationDirty, type VegetationDirtyQueue } from "./systems/vegetation_dirty.js";
+import { createTerrainRaycastService } from "./player/terrain_raycast_service.js";
+import { createBrushPreviewController } from "./player/brush_preview_controller.js";
+import { createPlayerModeController } from "./player/player_mode_controller.js";
+import { createPlayerInputController } from "./player/player_input_controller.js";
+import { createTerrainEditService } from "./terrain_runtime/terrain_edit_service.js";
 
-const LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
-const WORLD_OPTIONS = [2, 4, 8, 16, 32];
-const WEATHER_MODE_OPTIONS = ["off", "rain", "snow", "sandstorm"] as const;
-const WEBGPU_ERROR_MAX_AGE_FRAMES = 6;
-const WEBGPU_DISPATCH_INTERVAL_FRAMES = 2;
-const WEBGPU_PARITY_INTERVAL_FRAMES = 60;
-const WEBGPU_ERROR_TOLERANCE_PX = 0.02;
-const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
-  { id: "grass-2", scale: 0.06, heightMin: 12, heightMax: 18 },
-  { id: "earth-2", scale: 0.04, heightMin: 18, heightMax: 40 },
-  { id: "earth-1", scale: 0.04, heightMin: 40, heightMax: 60 },
-  { id: "snow-rocks-1", scale: 0.025, heightMin: 60, heightMax: 118 },
-] as const;
-
-type WeatherMode = typeof WEATHER_MODE_OPTIONS[number];
-// Bundle the texture files with the app so they are served same-origin. Fetching them
-// cross-origin from raw.githubusercontent.com fails: that host sends no
-// Access-Control-Allow-Origin header, so a crossOrigin="anonymous" TextureLoader request
-// is rejected and the built-in texture load throws, aborting the rest of init.
-const BUNDLED_TEXTURE_URLS = import.meta.glob<string>("../textures/*.jpg", {
-  eager: true,
-  query: "?url",
-  import: "default",
-});
-const demoTextureUrl = (file: string): string => {
-  const entry = Object.entries(BUNDLED_TEXTURE_URLS).find(([path]) => path.endsWith(`/${file}`));
-  if (!entry) throw new Error(`Bundled texture not found: ${file}`);
-  return entry[1];
-};
-const BUILTIN_TERRAIN_TEXTURES = [
-  { id: "earth-1", label: "Earth 1", url: demoTextureUrl("earth-1.jpg") },
-  { id: "earth-2", label: "Earth 2", url: demoTextureUrl("earth-2.jpg") },
-  { id: "grass-1", label: "Grass 1", url: demoTextureUrl("grass-1.jpg") },
-  { id: "grass-2", label: "Grass 2", url: demoTextureUrl("grass-2.jpg") },
-  { id: "cobblestone-1", label: "Cobblestone 1", url: demoTextureUrl("cobblestone-1.jpg") },
-  { id: "cobblestone-2", label: "Cobblestone 2", url: demoTextureUrl("cobblestone-2.jpg") },
-  { id: "bedrock-1", label: "Bedrock 1", url: demoTextureUrl("bedrock-1.jpg") },
-  { id: "bedrock-2", label: "Bedrock 2", url: demoTextureUrl("bedrock-2.jpg") },
-  { id: "sand-1", label: "Sand 1", url: demoTextureUrl("sand-1.jpg") },
-  { id: "sand-2", label: "Sand 2", url: demoTextureUrl("sand-2.jpg") },
-  { id: "terracotta-1", label: "Terracotta 1", url: demoTextureUrl("terracotta-1.jpg") },
-  { id: "terracotta-2", label: "Terracotta 2", url: demoTextureUrl("terracotta-2.jpg") },
-  { id: "water-1", label: "Water 1", url: demoTextureUrl("water-1.jpg") },
-  { id: "water-2", label: "Water 2", url: demoTextureUrl("water-2.jpg") },
-  { id: "oak-bark-1", label: "Oak bark 1", url: demoTextureUrl("oak-bark-1.jpg") },
-  { id: "oak-bark-2", label: "Oak bark 2", url: demoTextureUrl("oak-bark-2.jpg") },
-  { id: "oak-leaf-1", label: "Oak leaf 1", url: demoTextureUrl("oak-leaf-1.jpg") },
-  { id: "oak-leaf-2", label: "Oak leaf 2", url: demoTextureUrl("oak-leaf-2.jpg") },
-  { id: "snow-1", label: "Snow 1", url: demoTextureUrl("snow-1.jpg") },
-  { id: "snow-rocks-1", label: "Snow rocks 1", url: demoTextureUrl("snow-rocks-1.jpg") },
-] as const;
-const TEXTURE_BLEND_MODES = ["hard bands", "blend bands"] as const;
-const TERRAIN_MATERIAL_SOURCES = ["procedural", "external_pbr", "debug_flat"] as const;
-type TerrainMaterialSource = typeof TERRAIN_MATERIAL_SOURCES[number];
-const terrainMaterialSourceParam = (value: string | null): TerrainMaterialSource | null =>
-  TERRAIN_MATERIAL_SOURCES.includes(value as TerrainMaterialSource) ? value as TerrainMaterialSource : null;
 const positiveNumberParam = (value: string | null): number | null => {
   if (value === null) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
-const PROCEDURAL_DEBUG_MODES = {
-  final: 0,
-  "macro noise": 1,
-  "paint weights": 2,
-  "albedo layer": 3,
-  "normal strength": 4,
-  roughness: 5,
-  "page LOD": 6,
-  "seam stress": 7,
-} as const;
-type ProceduralDebugMode = keyof typeof PROCEDURAL_DEBUG_MODES;
-const TERRAIN_BAND_ICONS = ["grass", "earth", "rock", "snow"] as const;
-
-interface PaintAttributeCache {
-  slots: Float32Array;
-  weights: Float32Array;
-}
-
-const paintAttributeCache = new WeakMap<PageMesh, PaintAttributeCache>();
-
-function paintAttributesFor(mesh: PageMesh): PaintAttributeCache {
-  const cached = paintAttributeCache.get(mesh);
-  if (cached) return cached;
-  const vertexCount = mesh.positions.length / 3;
-  const slots = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
-  const weights = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
-  for (let i = 0; i < vertexCount; i++) {
-    const p = paintWeightsAt(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]);
-    for (let c = 0; c < PAINT_BLEND_CHANNELS; c++) {
-      slots[i * PAINT_BLEND_CHANNELS + c] = p.slots[c];
-      weights[i * PAINT_BLEND_CHANNELS + c] = p.weights[c];
-    }
-  }
-  const built = { slots, weights };
-  paintAttributeCache.set(mesh, built);
-  return built;
-}
-
-function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
-  g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
-  const { slots: paintSlots, weights: paintWeights } = paintAttributesFor(mesh);
-  g.setAttribute("paintSlots", new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS));
-  g.setAttribute("paintWeights", new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS));
-  g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-  return g;
-}
-
-function computeGeometryNormals(mesh: PageMesh): Float32Array {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
-  g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-  g.computeVertexNormals();
-  const normals = (g.getAttribute("normal").array as Float32Array).slice();
-  g.dispose();
-  return normals;
-}
 
 function recomputedNormalsFor(view: NodeView): Float32Array {
   if (!view.recomputedNormals) view.recomputedNormals = computeGeometryNormals(view.node.mesh);
@@ -317,30 +185,6 @@ interface NodeView {
   selected: boolean;
   fade: number;
   target: number;
-}
-
-interface TextureSlot {
-  texture: THREE.Texture | null;
-  normalTexture: THREE.Texture | null;
-  normalPreviewUrl: string | null;
-  normalBytes: Uint8Array | null;
-  normalMimeType: string | null;
-  normalExtension: string | null;
-  name: string;
-  previewUrl: string | null;
-  selectedId: string;
-  customBytes: Uint8Array | null;
-  customMimeType: string | null;
-  customExtension: string | null;
-  scale: number;
-  heightMin: number;
-  heightMax: number;
-}
-
-interface SharedEdge {
-  axis: "x" | "z";
-  aPlane: number;
-  bPlane: number;
 }
 
 interface AppSky {
@@ -436,97 +280,6 @@ class WebGpuSkyEnvironment implements AppSky {
   }
 }
 
-interface CrossLodAdjacency {
-  a: ClodPageNode;
-  b: ClodPageNode;
-  edge: SharedEdge;
-}
-
-function sharedEdge(a: ClodPageNode, b: ClodPageNode): SharedEdge | null {
-  const fa = a.footprint, fb = b.footprint;
-  const overlapZ = fa.minZ < fb.maxZ && fb.minZ < fa.maxZ;
-  const overlapX = fa.minX < fb.maxX && fb.minX < fa.maxX;
-  if (overlapZ) {
-    if (fa.maxX === fb.minX) return { axis: "x", aPlane: fa.maxX, bPlane: fb.minX };
-    if (fb.maxX === fa.minX) return { axis: "x", aPlane: fa.minX, bPlane: fb.maxX };
-  }
-  if (overlapX) {
-    if (fa.maxZ === fb.minZ) return { axis: "z", aPlane: fa.maxZ, bPlane: fb.minZ };
-    if (fb.maxZ === fa.minZ) return { axis: "z", aPlane: fa.minZ, bPlane: fb.maxZ };
-  }
-  return null;
-}
-
-// Cheap cut-change detector: FNV-1a rolling hash over render-order node ids. selectCut is
-// deterministic, so an unchanged cut hashes identically — avoids a per-frame O(R log R)
-// sort + giant string join just to detect changes.
-function hashRenderedCut(rendered: readonly ClodPageNode[]): number {
-  let h = 2166136261;
-  for (const n of rendered) {
-    const id = n.id;
-    for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
-    h = Math.imul(h ^ 0x2c, 16777619); // id separator
-  }
-  return h >>> 0;
-}
-
-function crossLodAdjacencies(rendered: ClodPageNode[]): CrossLodAdjacency[] {
-  const out: CrossLodAdjacency[] = [];
-  for (let i = 0; i < rendered.length; i++) {
-    for (let j = i + 1; j < rendered.length; j++) {
-      const a = rendered[i], b = rendered[j];
-      if (a.level === b.level) continue;
-      const edge = sharedEdge(a, b);
-      if (edge) out.push({ a, b, edge });
-    }
-  }
-  return out;
-}
-
-function appendBorderChainSegments(
-  pts: number[],
-  node: ClodPageNode,
-  axis: "x" | "z",
-  plane: number,
-  minAlong: number,
-  maxAlong: number,
-): void {
-  const free = axis === "x" ? 2 : 0;
-  const chain = borderChain(node.mesh, axis, plane, node.footprint).positions
-    .filter((p) => p[free] >= minAlong - 0.001 && p[free] <= maxAlong + 0.001);
-  for (let i = 1; i < chain.length; i++) {
-    const a = chain[i - 1], b = chain[i];
-    pts.push(a[0], a[1] + 0.12, a[2], b[0], b[1] + 0.12, b[2]);
-  }
-}
-
-function appendCrossLodBorderSegments(pts: number[], adjacency: CrossLodAdjacency): void {
-  const { a, b, edge } = adjacency;
-  if (edge.axis === "x") {
-    const minZ = Math.max(a.footprint.minZ, b.footprint.minZ);
-    const maxZ = Math.min(a.footprint.maxZ, b.footprint.maxZ);
-    appendBorderChainSegments(pts, a, edge.axis, edge.aPlane, minZ, maxZ);
-    appendBorderChainSegments(pts, b, edge.axis, edge.bPlane, minZ, maxZ);
-  } else {
-    const minX = Math.max(a.footprint.minX, b.footprint.minX);
-    const maxX = Math.min(a.footprint.maxX, b.footprint.maxX);
-    appendBorderChainSegments(pts, a, edge.axis, edge.aPlane, minX, maxX);
-    appendBorderChainSegments(pts, b, edge.axis, edge.bPlane, minX, maxX);
-  }
-}
-
-function packHydrologyData(hydrology: { grid: { res: number; worldCells: number; waterY: Float32Array; wetMask: Float32Array; carvedBed: Float32Array } }): UnderstoryHydrologyData {
-  const { res, worldCells, waterY, wetMask, carvedBed } = hydrology.grid;
-  const data = new Float32Array(res * res * 4);
-  for (let i = 0; i < res * res; i++) {
-    data[i * 4] = waterY[i];
-    data[i * 4 + 1] = wetMask[i];
-    data[i * 4 + 2] = carvedBed[i];
-    data[i * 4 + 3] = waterY[i];
-  }
-  return { res, worldCells, data };
-}
-
 async function main() {
   const info = document.getElementById("info")!;
   const earlySearchParams = new URLSearchParams(location.search);
@@ -547,6 +300,7 @@ async function main() {
     return;
   }
   installGlobalErrorHooks();
+  const clodRuntime = parseClodRuntimeConfig();
 
   // Load and validate Content Registry
   try {
@@ -622,8 +376,7 @@ async function main() {
   const queryTreeGpuRing = searchParams.get("treeGpu") === "1" || searchParams.get("treeGpuRing") === "1";
   const queryForestFloorScene = queryScene === "forest-floor";
   const queryLongViewScene = queryScene === "long-view-4km" || queryScene === "long-view-forest-4km" || queryScene === "long-view-edit-stress"
-    || queryScene === "infinite-stream-straight" || queryScene === "infinite-stream-fast-turn"
-    || queryScene === "infinite-stream-mountain-approach" || queryScene === "infinite-stream-forest-horizon";
+    || queryScene === "infinite-stream-straight" || queryScene === "infinite-stream-fast-turn";
   // Phase 0: Parse infinite streaming config and resolve active scene.
   const phase0Config: Phase0Config = parsePhase0Config(phase0ConfigText);
   const sceneNameToConfigKey: Record<string, string> = {
@@ -632,25 +385,20 @@ async function main() {
     "long-view-edit-stress": "long_view_edit_stress",
     "infinite-stream-straight": "infinite_stream_straight",
     "infinite-stream-fast-turn": "infinite_stream_fast_turn",
-    "infinite-stream-mountain-approach": "infinite_stream_straight",
-    "infinite-stream-forest-horizon": "infinite_stream_fast_turn",
   };
   const activePhase0SceneKey = queryScene ? sceneNameToConfigKey[queryScene] : undefined;
   const activePhase0Scene = activePhase0SceneKey ? phase0Config.phase0.scenes[activePhase0SceneKey] : undefined;
   const phase0TargetVisibleM = activePhase0Scene?.require_visible_m ?? phase0Config.phase0.target_visible_m;
-  // Resolve streaming simulation velocity from scene config.
+  // Resolve streaming simulation parameters from config.
+  const phase0Streaming = phase0Config.phase0.streaming;
   let phase0VelocityX = 0;
   let phase0VelocityZ = 0;
-  let phase0PreloadSeconds = 5;
-  let phase0LiveRadiusM = 200;
   if (activePhase0Scene?.camera.mode === "scripted" && activePhase0Scene.camera.speed_mps !== undefined) {
     const speed = activePhase0Scene.camera.speed_mps;
     const dirDeg = activePhase0Scene.camera.direction_degrees ?? 90;
     const dirRad = (dirDeg * Math.PI) / 180;
     phase0VelocityX = Math.cos(dirRad) * speed;
     phase0VelocityZ = Math.sin(dirRad) * speed;
-    phase0PreloadSeconds = activePhase0Scene.camera.duration_seconds ?? 5;
-    phase0LiveRadiusM = phase0TargetVisibleM * 0.5;
   }
   const queryFarShell = searchParams.get("farShell") === "1";
   const queryCanopy = searchParams.get("canopy") === "1";
@@ -721,7 +469,7 @@ async function main() {
   // World size via ?world=. 8x8 gives full LOD0..LOD3 depth for A3 / delta-2-3
   // inspection; 16/32 keep the same max LOD with more roots and can freeze the tab longer.
   const requested = Number(searchParams.get("world"));
-  const WORLD = stagedImport?.manifest.worldSize ?? (WORLD_OPTIONS.includes(requested) ? requested : queryGrassPerfScene || queryTreePerfScene || queryForestFloorScene || queryLongViewScene ? 16 : 4);
+  const WORLD = stagedImport?.manifest.worldSize ?? (clodRuntime.runtime.worldOptions.includes(requested) ? requested : queryGrassPerfScene || queryTreePerfScene || queryForestFloorScene || queryLongViewScene ? 16 : 4);
   const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
   // LV-6: Bake the proceduralMacroTint result into a texture for far-tier sampling.
   let bakedMacroTint: THREE.DataTexture | null = null;
@@ -814,6 +562,7 @@ async function main() {
   }
 
   const staleEditedAncestorIds = new Set<string>();
+  const vegetationDirtyQueue: VegetationDirtyQueue = { nodeIds: [], grass: false, trees: false, understory: false };
   const nodeGridCoord = (node: ClodPageNode): [number, number] | null => {
     const coord = node.id.slice(node.id.indexOf(":") + 1).split(",");
     if (coord.length !== 2) return null;
@@ -868,7 +617,7 @@ async function main() {
     // Seed placeholder counters for layers not yet built (LV-1..6 fill them).
     const maxLvl = maxTerrainLevel;
     for (let lvl = 0; lvl <= maxLvl; lvl++) {
-      lvStats.counters[`clod_page_count_lod${lvl}`] = 0;
+      lvStats.counters[`built_page_count_lod${lvl}`] = 0;
     }
     lvStats.counters["far_shell_tris"] = 0; // updated after shell build
     lvStats.counters["far_shell_gpu_ms"] = 0;
@@ -896,7 +645,7 @@ async function main() {
     lvStats.counters["shadow_proxy_inert"] = 1;
     lvStats.counters["canopy_enabled"] = 0;
     for (let lvl = 0; lvl <= maxLvl; lvl++) {
-      lvStats.counters[`selected_page_count_lod${lvl}`] = 0;
+      lvStats.counters[`rendered_page_count_lod${lvl}`] = 0;
     }
     lvStats.counters["rendered_terrain_tris"] = 0;
     lvStats.counters["total_scene_tris"] = 0;
@@ -959,20 +708,6 @@ async function main() {
   // not shown on this shared path (debug-only views; frame timing is unaffected). WebGL and the
   // "dither" transition keep per-view materials, so those paths are unchanged.
   const poolTerrainMaterial = isWebGpu && cfg.selection.transition_mode === "instant";
-  // Unique live terrain handles; forEachTerrainMaterial iterates these so global state is
-  // applied once (not once per sharer, which would rebuild the shared graph N times).
-  const terrainMaterials = new Set<TerrainMaterialHandle>();
-  let sharedTerrainMaterial: TerrainMaterialHandle | null = null;
-  const makeTerrainMaterial = (color: number): TerrainMaterialHandle => {
-    if (poolTerrainMaterial) {
-      sharedTerrainMaterial ??= createWebGpuTerrainMaterial(0xb9c0c8);
-      terrainMaterials.add(sharedTerrainMaterial);
-      return sharedTerrainMaterial;
-    }
-    const handle = isWebGpu ? createWebGpuTerrainMaterial(color) : createWebGlTerrainMaterial(color);
-    terrainMaterials.add(handle);
-    return handle;
-  };
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(devicePixelRatio);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1033,6 +768,18 @@ async function main() {
       camera.rotation.set(parts[4] ?? 0, parts[3] ?? 0, 0, "YXZ");
       if (parts[5]) { camera.fov = parts[5]; camera.updateProjectionMatrix(); }
       controls.update();
+    } else if (activePhase0Scene) {
+      const cam = activePhase0Scene.camera;
+      const xRatio = cam.x_ratio ?? cam.start_x_ratio ?? 0.5;
+      const zRatio = cam.z_ratio ?? cam.start_z_ratio ?? 0.5;
+      const yOffset = cam.y_offset_m ?? worldCells * 0.45;
+      const lookDist = cam.look_distance_m ?? worldCells;
+      const cx = worldCells * xRatio;
+      const cz = worldCells * zRatio;
+      controls.target.set(cx, 64, cz + lookDist * 0.1);
+      camera.position.set(cx - worldCells * 0.15, yOffset, cz + lookDist * 0.15);
+      camera.lookAt(controls.target);
+      controls.update();
     } else {
       controls.target.set(mid, 64, mid + worldCells * 0.4);
       camera.position.set(mid - worldCells * 0.15, worldCells * 0.45, mid + worldCells * 0.55);
@@ -1071,290 +818,11 @@ async function main() {
     maxZ: Math.max(worldCells, 1000),
   });
   const interaction = new PlayerInteractionState();
-  const playerInput: PlayerInputState = { forward: 0, right: 0, sprint: false, jump: false };
-  const playerRaycaster = new THREE.Raycaster();
-  const raycastTerrainHeightfield = (ray: THREE.Ray): TerrainSurfaceHit | null => {
-    const maxDistance = Math.max(8000, worldCells * 8);
-    const step = 2;
-    let previousT = 0;
-    const previousPoint = ray.at(previousT, new THREE.Vector3());
-    let previousSigned = previousPoint.y - surfaceHeight(previousPoint.x, previousPoint.z);
-
-    for (let t = step; t <= maxDistance; t += step) {
-      const point = ray.at(t, new THREE.Vector3());
-      const inWorld = point.x >= 0 && point.x <= worldCells && point.z >= 0 && point.z <= worldCells;
-      const signed = inWorld ? point.y - surfaceHeight(point.x, point.z) : Number.POSITIVE_INFINITY;
-      if (inWorld && previousSigned >= 0 && signed <= 0) {
-        let lo = previousT;
-        let hi = t;
-        const hit = new THREE.Vector3();
-        for (let i = 0; i < 12; i++) {
-          const midT = (lo + hi) * 0.5;
-          ray.at(midT, hit);
-          const midSigned = hit.y - surfaceHeight(hit.x, hit.z);
-          if (midSigned > 0) lo = midT;
-          else hi = midT;
-        }
-        ray.at(hi, hit);
-        return { point: hit.clone(), distance: hi, pageId: "heightfield" };
-      }
-      previousT = t;
-      previousSigned = signed;
-    }
-    return null;
-  };
-  const raycastEditableTerrain = (ray: THREE.Ray): TerrainSurfaceHit | null =>
-    terrainColliders.raycastSurface(ray) ?? raycastTerrainHeightfield(ray);
-  const playerPointer = new THREE.Vector2();
-  const playerForward = new THREE.Vector3();
-  const orbitReturnTarget = new THREE.Vector3();
-  const playerTimer = new THREE.Timer();
-  playerTimer.connect(document);
-  let playerYaw = 0;
-  let playerPitch = 0;
-  let playerPointerLocked = false;
-  let tabUiHold = false;
-
-  // Pickaxe state: hold-to-dig cadence while playing, hover preview in orbit mode.
-  const DIG_HOLD_INTERVAL_MS = 400;
-  let digHeld = false;
-  let lastDigAt = -Infinity;
-  const digDirection = new THREE.Vector3();
-  const digAimRay = new THREE.Ray();
-  const hoverPointer = new THREE.Vector2();
-  let hoverPointerValid = false;
-
-  const resetPlayerInput = () => {
-    playerInput.forward = 0;
-    playerInput.right = 0;
-    playerInput.sprint = false;
-    playerInput.jump = false;
-    digHeld = false;
-  };
-  const updatePlayerModeUi = () => {
-    document.body.dataset.playerMode = interaction.mode;
-    orbitModeButton.setAttribute("aria-pressed", String(interaction.mode === "orbit"));
-    playerModeButton.setAttribute("aria-pressed", String(interaction.mode !== "orbit"));
-    if (tabUiHold && interaction.mode === "playing") {
-      playerModeStatus.textContent = "Tab held — click palette · release Tab to look";
-    } else {
-      playerModeStatus.textContent = interaction.mode === "choosingSpawn"
-        ? "Click the terrain to choose your starting position"
-        : interaction.mode === "playing"
-          ? `WASD · Shift · Space · Esc${playerTerraformEditActive() ? " · click digs" : ""} · Shift+wheel radius`
-          : "Orbit camera";
-    }
-    document.body.dataset.tabUi = tabUiHold ? "true" : "false";
-    syncTerraformEditMode();
-  };
-  const syncTerraformEditMode = () => {
-    if (!terraformEditCheckbox) return;
-    document.body.dataset.tfEdit = terraformEditCheckbox.checked ? "true" : "false";
-  };
-  let terraformEditCheckbox: HTMLInputElement | null = null;
-  const playerTerraformEditActive = () => terraformEditCheckbox?.checked ?? false;
-  const exitPlayerMode = () => {
-    emitAudio("camera.mode.orbit");
-    tabUiHold = false;
-    if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
-    playerPointerLocked = false;
-    if (interaction.mode === "playing") {
-      orbitReturnTarget.copy(player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, DEFAULT_PLAYER_CONFIG.eyeHeight * 0.65);
-      controls.target.copy(orbitReturnTarget);
-      camera.position.copy(orbitReturnTarget).add(new THREE.Vector3(8, 6, 8));
-      camera.lookAt(orbitReturnTarget);
-    }
-    interaction.exitToOrbit();
-    resetPlayerInput();
-    controls.enabled = true;
-    controls.update();
-    if (terraformEditCheckbox) {
-      terraformEditCheckbox.checked = true;
-      document.body.dataset.tfEdit = "true";
-    }
-    updatePlayerModeUi();
-  };
-  const choosePlayerSpawn = () => {
-    interaction.chooseSpawn();
-    resetPlayerInput();
-    controls.enabled = false;
-    updatePlayerModeUi();
-  };
-  const startPlayerAtPointer = (event: PointerEvent) => {
-    const rect = renderer.domElement.getBoundingClientRect();
-    playerPointer.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
-    );
-    playerRaycaster.setFromCamera(playerPointer, camera);
-    const hit = terrainColliders.raycastSpawn(playerRaycaster.ray);
-    if (!hit) {
-      playerModeStatus.textContent = "No playable terrain there";
-      return;
-    }
-
-    camera.getWorldDirection(playerForward);
-    playerForward.y = 0;
-    if (playerForward.lengthSq() < 1e-8) playerForward.set(0, 0, -1);
-    else playerForward.normalize();
-    playerYaw = Math.atan2(-playerForward.x, -playerForward.z);
-    playerPitch = 0;
-    player.spawn(hit.point);
-    interaction.startPlaying();
-    emitAudio("camera.mode.player");
-    controls.enabled = false;
-    editToggleInput.checked = true;
-    document.body.dataset.tfEdit = "true";
-    updatePlayerModeUi();
-    void renderer.domElement.requestPointerLock();
-  };
-
-  orbitModeButton.addEventListener("click", exitPlayerMode);
-  playerModeButton.addEventListener("click", choosePlayerSpawn);
-  // Orbit-mode digs fire on click-without-drag so OrbitControls rotation stays usable.
-  let digPointerDown: { x: number; y: number } | null = null;
-  renderer.domElement.addEventListener("pointerdown", (event) => {
-    if (interaction.mode === "choosingSpawn" && event.button === 0) startPlayerAtPointer(event);
-    else if (interaction.mode === "playing" && event.button === 0 && document.pointerLockElement !== renderer.domElement) {
-      void renderer.domElement.requestPointerLock();
-    } else if (interaction.mode === "playing" && event.button === 0 && state.digEnabled && playerTerraformEditActive()) {
-      digHeld = true;
-      camera.getWorldDirection(digDirection);
-      performDig(new THREE.Ray(camera.position.clone(), digDirection.clone()));
-    } else if (interaction.mode === "orbit" && event.button === 0 && state.digEnabled) {
-      digPointerDown = { x: event.clientX, y: event.clientY };
-    }
+  const terrainRaycast = createTerrainRaycastService({
+    terrainColliders,
+    surfaceHeight,
+    worldCells,
   });
-  renderer.domElement.addEventListener("pointerup", (event) => {
-    if (event.button === 0 && digHeld) {
-      digHeld = false;
-    } else if (event.button === 0) {
-      digHeld = false;
-    }
-    if (!digPointerDown || event.button !== 0) return;
-    const moved = Math.hypot(event.clientX - digPointerDown.x, event.clientY - digPointerDown.y);
-    digPointerDown = null;
-    if (moved > 4 || interaction.mode !== "orbit" || !state.digEnabled) return;
-    const rect = renderer.domElement.getBoundingClientRect();
-    playerPointer.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
-    );
-    playerRaycaster.setFromCamera(playerPointer, camera);
-    performDig(playerRaycaster.ray);
-  });
-  renderer.domElement.addEventListener("pointermove", (event) => {
-    const rect = renderer.domElement.getBoundingClientRect();
-    hoverPointer.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
-    );
-    hoverPointerValid = true;
-  });
-  renderer.domElement.addEventListener("pointerleave", () => {
-    hoverPointerValid = false;
-  });
-  document.addEventListener("pointerlockchange", () => {
-    if (document.pointerLockElement === renderer.domElement) {
-      playerPointerLocked = true;
-      tabUiHold = false;
-      updatePlayerModeUi();
-    } else if (interaction.mode === "playing" && playerPointerLocked) {
-      playerPointerLocked = false;
-      if (tabUiHold) {
-        updatePlayerModeUi();
-        return;
-      }
-      exitPlayerMode();
-    }
-  });
-  document.addEventListener("pointerlockerror", () => {
-    if (interaction.mode === "playing") playerModeStatus.textContent = "Click viewport to capture mouse";
-  });
-  document.addEventListener("mousemove", (event) => {
-    if (interaction.mode !== "playing" || document.pointerLockElement !== renderer.domElement) return;
-    playerYaw -= event.movementX * 0.002;
-    playerPitch = THREE.MathUtils.clamp(playerPitch - event.movementY * 0.002, -1.5, 1.5);
-  });
-  window.addEventListener("keydown", (event) => {
-    if (event.code === "Escape" && interaction.mode === "choosingSpawn") {
-      exitPlayerMode();
-      return;
-    }
-    if (event.code === "Escape" && interaction.mode === "playing" && !playerPointerLocked) {
-      exitPlayerMode();
-      return;
-    }
-    if (event.code === "Tab" && interaction.mode === "playing") {
-      event.preventDefault();
-      if (document.pointerLockElement === renderer.domElement) {
-        tabUiHold = true;
-        document.exitPointerLock();
-      }
-      return;
-    }
-    if (interaction.mode !== "playing") return;
-    if (["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ShiftRight", "Space"].includes(event.code)) {
-      event.preventDefault();
-    }
-    if (event.code === "KeyW") playerInput.forward = 1;
-    if (event.code === "KeyS") playerInput.forward = -1;
-    if (event.code === "KeyA") playerInput.right = -1;
-    if (event.code === "KeyD") playerInput.right = 1;
-    if (event.code === "ShiftLeft" || event.code === "ShiftRight") playerInput.sprint = true;
-    if (event.code === "Space") playerInput.jump = true;
-  });
-  window.addEventListener("keyup", (event) => {
-    if (event.code === "Tab" && interaction.mode === "playing" && tabUiHold) {
-      tabUiHold = false;
-      updatePlayerModeUi();
-      if (document.pointerLockElement !== renderer.domElement) {
-        void renderer.domElement.requestPointerLock();
-      }
-      return;
-    }
-    if (event.code === "KeyW" && playerInput.forward > 0) playerInput.forward = 0;
-    if (event.code === "KeyS" && playerInput.forward < 0) playerInput.forward = 0;
-    if (event.code === "KeyA" && playerInput.right < 0) playerInput.right = 0;
-    if (event.code === "KeyD" && playerInput.right > 0) playerInput.right = 0;
-    if (event.code === "ShiftLeft" || event.code === "ShiftRight") playerInput.sprint = false;
-    if (event.code === "Space") playerInput.jump = false;
-  });
-  window.addEventListener("blur", () => {
-    resetPlayerInput();
-    if (tabUiHold) {
-      tabUiHold = false;
-      updatePlayerModeUi();
-    }
-  });
-
-  const qx = searchParams.get("x");
-  const qz = searchParams.get("z");
-  const qyaw = searchParams.get("yaw");
-  if (qx !== null && qz !== null) {
-    const xVal = Number(qx);
-    const zVal = Number(qz);
-    const yawVal = qyaw !== null ? Number(qyaw) : 0;
-    const terrainY = surfaceHeight(xVal, zVal);
-
-    controls.target.set(xVal, terrainY, zVal);
-    camera.position.set(xVal, terrainY + 15, zVal + 20);
-    camera.lookAt(controls.target);
-    controls.update();
-
-    player.spawn(new THREE.Vector3(xVal, terrainY, zVal));
-    playerYaw = yawVal;
-    playerPitch = 0;
-    playerForward.set(-Math.sin(playerYaw), 0, -Math.cos(playerYaw));
-
-    interaction.startPlaying();
-    controls.enabled = false;
-
-    camera.position.copy(player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, DEFAULT_PLAYER_CONFIG.eyeHeight);
-    camera.rotation.set(0, playerYaw, 0, "YXZ");
-  }
-
-  updatePlayerModeUi();
 
   const weatherParam = searchParams.get("weather");
   const queryWeatherMode: WeatherMode = searchParams.get("sandstorm") === "1" || searchParams.get("sand") === "1" || weatherParam === "sandstorm" || weatherParam === "sand"
@@ -1392,8 +860,10 @@ async function main() {
   const queryWeatherWindZ = weatherWindZParam === null ? Number.NaN : Number(weatherWindZParam);
   const queryTerrainMaterialSource = terrainMaterialSourceParam(searchParams.get("terrainMaterial"));
   const textureMipmapsEnabled = searchParams.get("textureMipmaps") !== "0";
+  const textureLoadOptions: TerrainTextureLoadOptions = { textureMipmapsEnabled, maxAnisotropy };
   const queryGrassRingGrid = positiveNumberParam(searchParams.get("grassRingGrid"));
   const queryGrassRingCell = positiveNumberParam(searchParams.get("grassRingCell"));
+  const digHoldIntervalMs = clodRuntime.digging.holdIntervalMs;
   const state = {
     clodPerfMode: queryPerfMode,
     webgpuSelection: queryWebGpuSelection,
@@ -1459,7 +929,7 @@ async function main() {
     brushHeight: 3,
     brushStrength: 1,
     brushFalloff: 0,
-    brushFlowMs: DIG_HOLD_INTERVAL_MS,
+    brushFlowMs: digHoldIntervalMs,
     audioEnabled: getAudioState().enabled,
     audioVolume: getAudioState().masterVolume,
     grassEnabled: grassConfig.enabled,
@@ -1625,7 +1095,6 @@ async function main() {
   if (searchParams.get("understory") === "1") state.understoryEnabled = true;
   if (searchParams.get("understory") === "0") state.understoryEnabled = false;
   let colorByLodUserOverride = stagedImport !== null;
-  let lastTexturesActive: boolean | null = null;
   let colorByLodController: { updateDisplay: () => unknown } | null = null;
   const currentTerrainColorAdjustments = (): TerrainColorAdjustments => ({
     brightness: state.terrainBrightness,
@@ -1654,24 +1123,6 @@ async function main() {
     vignette: state.postProcessVignette,
     debugMode: state.postProcessDebugMode,
   });
-  const currentRainWeatherSettings = (): RainWeatherSettings => ({
-    enabled: state.weatherMode === "rain",
-    intensity: state.weatherIntensity,
-    windX: state.weatherWindX,
-    windZ: state.weatherWindZ,
-  });
-  const currentSnowWeatherSettings = (): SnowWeatherSettings => ({
-    enabled: state.weatherMode === "snow",
-    intensity: state.weatherIntensity,
-    windX: state.weatherWindX,
-    windZ: state.weatherWindZ,
-  });
-  const currentSandstormWeatherSettings = (): SandstormWeatherSettings => ({
-    enabled: state.weatherMode === "sandstorm",
-    intensity: state.weatherIntensity,
-    windX: state.weatherWindX,
-    windZ: state.weatherWindZ,
-  });
   const postProcess: AppPostProcess = app.isWebGpu
     ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings())
     : new PostProcessPipeline(app.renderer, currentPostProcessSettings());
@@ -1692,218 +1143,52 @@ async function main() {
       });
   skyEnvironment.setVisible(!state.clodPerfMode);
   const currentLighting = (): EnvironmentLighting => skyEnvironment.lighting();
-  const applyLightingToMaterial = (
-    mat: TerrainMaterialHandle,
-    lighting: EnvironmentLighting = currentLighting(),
-  ) => {
-    mat.setLighting(lighting);
-  };
 
-  // TODO: Wire content registry textureSlots here instead of hardcoding initial slots.
-  // Example: Use getTextureSlotIdFromIndex(i, registry) to retrieve the semantic ID.
-  const textureSlots: TextureSlot[] = Array.from({ length: INITIAL_TERRAIN_TEXTURE_COUNT }, () => ({
-    ...emptyTextureSlotState(),
-  }));
-  for (let i = 0; i < textureSlots.length; i++) {
-    const preset = DEFAULT_TERRAIN_TEXTURE_PRESETS[i];
-    const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === preset.id);
-    textureSlots[i].selectedId = preset.id;
-    textureSlots[i].scale = preset.scale;
-    textureSlots[i].heightMin = preset.heightMin;
-    textureSlots[i].heightMax = preset.heightMax;
-    textureSlots[i].name = builtin?.label ?? preset.id;
-    const imported = stagedImport?.manifest.textures[i];
-    if (imported) {
-      textureSlots[i].name = imported.name;
-      textureSlots[i].selectedId = imported.selectedId;
-      textureSlots[i].scale = imported.scale;
-      textureSlots[i].heightMin = imported.heightMin;
-      textureSlots[i].heightMax = imported.heightMax;
-      textureSlots[i].customMimeType = imported.mimeType ?? null;
-      textureSlots[i].customExtension = imported.customPath?.match(/(\.[a-z0-9]+)$/i)?.[1] ?? null;
-    }
-  }
-  // assigned when the terraform menu is built; refreshes the material swatches after textures change
+  const views = new Map<string, NodeView>();
   let refreshTerraformSwatches: () => void = () => {};
   let syncTerraformMenu: () => void = () => {};
-  const rebuildActiveTerrainSlots = () => {};
-  type TerrainSlotView = TextureSlot | ProceduralTerrainSlot;
-  const activeTerrainSlots = (): readonly TerrainSlotView[] => {
-    if (state.terrainMaterialSource === "procedural" && proceduralTerrain) return proceduralTerrain.slots;
-    if (state.terrainMaterialSource === "debug_flat") return [];
-    return textureSlots;
-  };
-  const texturesActive = () => state.albedo && (
-    (state.terrainMaterialSource === "procedural" && proceduralTerrain !== null) ||
-    (state.terrainMaterialSource === "external_pbr" && textureSlots.some((slot) => slot.texture !== null))
-  );
+  let resetPlayerInput: () => void = () => {};
+  let updatePlayerModeUi: () => void = () => {};
+  let refreshGrassStats: () => void = () => {};
+  let refreshTreeStats: () => void = () => {};
+  let refreshUnderstoryStats: () => void = () => {};
 
-  // The shader binds two layered textures (albedo + normal), one layer per slot, instead of
-  // 32 individual samplers. Slot images can differ in size, so each layer is rasterised to a
-  // fixed square via canvas. Rebuilt only when the set of source images changes (tracked by
-  // signature) so slider tweaks stay cheap.
-  const TEXTURE_ARRAY_SIZE = 512;
-  let albedoArrayTex: THREE.DataArrayTexture | null = null;
-  let normalArrayTex: THREE.DataArrayTexture | null = null;
-  let textureArraySignature = "";
-  const arrayBuildCanvas = document.createElement("canvas");
-  arrayBuildCanvas.width = TEXTURE_ARRAY_SIZE;
-  arrayBuildCanvas.height = TEXTURE_ARRAY_SIZE;
-  const arrayBuildCtx = arrayBuildCanvas.getContext("2d", { willReadFrequently: true })!;
-  const buildDataArray = (
-    images: readonly (TexImageSource | null)[],
-    colorSpace: THREE.ColorSpace,
-  ): THREE.DataArrayTexture | null => {
-    if (images.every((img) => img === null)) return null;
-    const size = TEXTURE_ARRAY_SIZE;
-    const layerStride = size * size * 4;
-    const data = new Uint8Array(layerStride * images.length);
-    for (let i = 0; i < images.length; i++) {
-      arrayBuildCtx.save();
-      arrayBuildCtx.clearRect(0, 0, size, size);
-      // Match the flipY=true that TextureLoader applies to a normal Texture: a
-      // DataArrayTexture is built from raw pixels and is not auto-flipped, and an
-      // unflipped normal map inverts the green channel -> wrong slope lighting.
-      arrayBuildCtx.translate(0, size);
-      arrayBuildCtx.scale(1, -1);
-      if (images[i]) arrayBuildCtx.drawImage(images[i] as CanvasImageSource, 0, 0, size, size);
-      arrayBuildCtx.restore();
-      data.set(arrayBuildCtx.getImageData(0, 0, size, size).data, i * layerStride);
-    }
-    const tex = new THREE.DataArrayTexture(data, size, size, images.length);
-    tex.format = THREE.RGBAFormat;
-    tex.type = THREE.UnsignedByteType;
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.colorSpace = colorSpace;
-    tex.generateMipmaps = textureMipmapsEnabled;
-    tex.minFilter = textureMipmapsEnabled ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
-    tex.anisotropy = textureMipmapsEnabled ? maxAnisotropy : 1;
-    tex.needsUpdate = true;
-    return tex;
-  };
-  const ensureTextureArrays = () => {
-    if (state.terrainMaterialSource !== "external_pbr") return;
-    const signature = textureSlots
-      .map((s) => `${s.texture?.uuid ?? "_"}:${s.normalTexture?.uuid ?? "_"}`)
-      .join("|");
-    if (signature === textureArraySignature) return;
-    textureArraySignature = signature;
-    albedoArrayTex?.dispose();
-    normalArrayTex?.dispose();
-    // three r0.184 types Texture.image as `{}`; buildDataArray guards + casts to
-    // CanvasImageSource internally, so narrow at the call site.
-    albedoArrayTex = buildDataArray(
-      textureSlots.map((s) => (s.texture?.image as TexImageSource | undefined) ?? null),
-      THREE.SRGBColorSpace,
-    );
-    normalArrayTex = buildDataArray(
-      textureSlots.map((s) => (s.normalTexture?.image as TexImageSource | undefined) ?? null),
-      THREE.NoColorSpace,
-    );
-  };
+  const textureController = createTerrainTextureController({
+    textureArraySize: clodRuntime.terrainTextures.textureArraySize,
+    textureMipmapsEnabled,
+    maxAnisotropy,
+    textureLoadOptions,
+    stagedImport,
+  });
+  const materialController = createTerrainMaterialController({
+    isWebGpu,
+    poolTerrainMaterial,
+    worldCells,
+    bakedMacroTint,
+    proceduralTerrain,
+    proceduralTextureConfig,
+    textureController,
+    getMaterialState: () => state,
+    getColorAdjustments: currentTerrainColorAdjustments,
+    getLighting: currentLighting,
+    getViews: () => views.values(),
+    onTexturesApplied: () => refreshTerraformSwatches(),
+    onColorByLodChanged: () => {},
+    getColorByLodUserOverride: () => colorByLodUserOverride,
+    setColorByLodUserOverride: (value) => { colorByLodUserOverride = value; },
+    getColorByLodController: () => colorByLodController,
+  });
+  const applyTerrainTextures = () => materialController.applyTerrainTextures();
+  const applyColorByLodToMaterials = (on: boolean) => materialController.applyColorByLodToMaterials(on);
+  const activeTerrainSlots = () => materialController.activeTerrainSlots();
 
-  const terrainTextureUniformOptions = () => {
-    const proceduralActive = state.terrainMaterialSource === "procedural" && proceduralTerrain !== null;
-    if (!proceduralActive) ensureTextureArrays();
-    const painted = getDigEditsSnapshot().some((edit) => edit.op === "add");
-    const masks = proceduralTextureConfig.terrain.masks;
-    const materials = proceduralTextureConfig.terrain.materials;
-    return {
-      enabled: texturesActive(),
-      triplanar: state.triplanar,
-      normalMap: proceduralActive ? state.proceduralMicroNormals : state.normalMap,
-      normalIntensity: state.normalIntensity,
-      roughness: state.roughness,
-      metalness: state.metalness,
-      textureScale: state.textureScale,
-      blendBands: state.textureBlendMode === "blend bands",
-      blendWidth: state.textureBlendWidth,
-      painted,
-      albedoArray: proceduralActive ? proceduralTerrain.albedoArray : albedoArrayTex,
-      normalArray: proceduralActive ? proceduralTerrain.normalArray : normalArrayTex,
-      procedural: proceduralActive ? {
-        enabled: true,
-        noiseA: proceduralTerrain.noise.noiseA,
-        noiseB: proceduralTerrain.noise.noiseB,
-        debugMode: PROCEDURAL_DEBUG_MODES[state.proceduralDebugMode],
-        microFadeStart: proceduralTextureConfig.terrain.micro_normal.fade_start_m,
-        microFadeEnd: proceduralTextureConfig.terrain.micro_normal.fade_end_m,
-        lodBias: state.colorByLod ? 40 : 0,
-        scales: [
-          proceduralTextureConfig.terrain.macro_variation_m[1],
-          proceduralTextureConfig.terrain.meso_variation_m[1],
-          masks.page_lod_normal_fade_m,
-          masks.wet_roughness,
-        ],
-        snowMask: [masks.snow_height[0], masks.snow_height[1], masks.snow_upness[0], masks.snow_upness[1]],
-        wetMask: [masks.wet_height[0], masks.wet_height[1], masks.wet_upness[0], masks.wet_upness[1]],
-        slopeMasks: [masks.moss_upness[0], masks.moss_upness[1], masks.gravel_slope[0], masks.gravel_slope[1]],
-        tintStrengths: [masks.snow_tint_strength, masks.moss_tint_strength, masks.gravel_tint_strength, masks.wet_tint_strength],
-        materialRoughness: [
-          materials.grass.roughness,
-          materials.rock.roughness,
-          materials.sand.roughness,
-          materials.dirt.roughness,
-        ],
-        mossTint: masks.moss_tint,
-        gravelTint: masks.gravel_tint,
-        wetTint: masks.wet_tint,
-        snowTint: masks.snow_tint,
-        normalMapMask: proceduralTerrain.normalMapMask,
-      } : {
-        enabled: false,
-        noiseA: null,
-        noiseB: null,
-        // Carry the debug-view selection even for external_pbr so the "procedural debug" dropdown
-        // works on the non-procedural source too (paint weights / albedo layer views).
-        debugMode: PROCEDURAL_DEBUG_MODES[state.proceduralDebugMode],
-        microFadeStart: 45,
-        microFadeEnd: 85,
-        lodBias: 0,
-      },
-      // LV-6: baked macro tint texture + world size for far-tier UV mapping.
-      bakedMacroTint: bakedMacroTint ?? undefined,
-      worldSize: worldCells,
-    };
-  };
-  const applyTerrainTextures = () => {
-    rebuildActiveTerrainSlots();
-    const slots = activeTerrainSlots();
-    const options = terrainTextureUniformOptions();
-    // Iterate UNIQUE handles: a shared material must get setTextures once, not once per sharer.
-    for (const m of terrainMaterials) m.setTextures(slots, options);
-    refreshTerraformSwatches();
-    syncColorByLod();
-  };
-  const applyColorByLodToMaterials = (on: boolean) => {
-    // The shared WebGPU material carries one base colour, so per-node LOD tint is not shown.
-    if (poolTerrainMaterial) return;
-    for (const v of views.values()) {
-      v.mat.setBaseColor(on ? LOD_COLORS[Math.min(v.node.level, 3)] : 0xb9c0c8);
-    }
-  };
-  const syncColorByLod = () => {
-    const active = texturesActive();
-    if (lastTexturesActive !== null && active !== lastTexturesActive) {
-      colorByLodUserOverride = false;
-    }
-    lastTexturesActive = active;
-    if (!colorByLodUserOverride) {
-      state.colorByLod = state.clodPerfMode;
-      colorByLodController?.updateDisplay();
-    }
-    applyColorByLodToMaterials(state.colorByLod);
-  };
   // One view per node; selection visibility drives what's drawn.
-  const views = new Map<string, NodeView>();
   for (const node of allNodes) {
-    const mat = makeTerrainMaterial(
+    const mat = materialController.makeTerrainMaterial(
       state.colorByLod ? LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)] : 0xb9c0c8,
     );
     mat.setColorAdjust(currentTerrainColorAdjustments());
-    applyLightingToMaterial(mat);
+    materialController.applyLighting(mat);
     const mesh = new THREE.Mesh(toGeometry(node.mesh), mat.material);
     mat.onMaterialChanged((material) => {
       mesh.material = material;
@@ -1922,62 +1207,30 @@ async function main() {
     });
   }
 
-  // LV-2: Far terrain vista shell (~1.8–4 km). Height from the terrain summary, no shadow.
-  // Mutable handle — rebuilt on control changes (dev toggle) or at init for long-view.
-  interface FarShellResult { mesh: THREE.Mesh; triangleCount: number; dispose: () => void }
-  const farShellState = {
-    current: null as FarShellResult | null,
-    rebuild: (() => { /* wired below */ }) as () => void,
-  };
-  function buildFarShellInstance(
-    radiusFactor: number,
-    heightBias: number,
-    heightDrop: number,
-  ): FarShellResult {
-    if (farShellState.current) {
-      scene.remove(farShellState.current.mesh);
-      farShellState.current.dispose();
-    }
-    const result = buildFarTerrainShell(terrainSummary, {
-      sunDirection: currentLighting().sunDirection,
-      sunColor: currentLighting().sunColor,
-      skyLight: currentLighting().skyLight,
-      groundLight: currentLighting().groundLight,
-    }, {
-      farRadius: worldSizeCells * radiusFactor,
-      gridRes: 128,
-      heightDrop,
-      heightBias,
-    });
-    farShellState.current = result;
-    scene.add(result.mesh);
-    if (longViewHooks?.stats) {
-      longViewHooks.stats.counters["far_shell_tris"] = result.triangleCount;
-    }
-    return result;
-  }
-  // The skirt surrounds the world out to farRadius = worldSizeCells * radiusFactor.
-  farShellState.current = buildFarShellInstance(1.5, 0.6, 2);
-  // In long-view the shell is always on; dev path adds it via the toggle below.
-  if (!isLongView && !queryFarShell) {
-    scene.remove(farShellState.current.mesh);
-  }
-  // Wire rebuild to read live state values.
-  farShellState.rebuild = () => {
-    buildFarShellInstance(state.farShellRadiusFactor, state.farShellHeightBias, state.farShellHeightDrop);
-    if (!state.farShellEnabled && !isLongView) {
-      scene.remove(farShellState.current!.mesh);
-    }
-  };
+  const farShellController = createFarShellController({
+    scene,
+    terrainSummary,
+    worldSizeCells,
+    isLongView,
+    queryFarShell,
+    queryCanopy,
+    getLighting: currentLighting,
+    getSettings: () => ({
+      enabled: state.farShellEnabled,
+      radiusFactor: state.farShellRadiusFactor,
+      heightBias: state.farShellHeightBias,
+      heightDrop: state.farShellHeightDrop,
+    }),
+    onTriangleCount: (counter, count) => {
+      if (longViewHooks?.stats) longViewHooks.stats.counters[counter] = count;
+    },
+  });
 
   // LV-3: Far terrain shadow proxy (~128 m – 3.2 km).
-  // Coarse shadow grid: 512² grid, TSL positionNode lifts to heightfield,
-  // colorWrite/depthWrite/depthTest off → main pass vertex-only, shadow pass depth material.
   const shadowHeightTexture = createHeightTexture(terrainSummary);
   const shadowProxyResult = buildFarTerrainShadowProxy(shadowHeightTexture, worldSizeCells, {
     grid: 512,
   });
-  // Far horizon feature — only in the long-view scene (built always so dispose() stays valid).
   if (isLongView) {
     scene.add(shadowProxyResult.mesh);
   }
@@ -1985,51 +1238,12 @@ async function main() {
     longViewHooks.stats.counters["shadow_proxy_tris"] = shadowProxyResult.triangleCount;
   }
 
-  // LV-4: Far forest canopy shell (~600 m – 4 km).
-  // Static heightfield grid pattern: grid above terrain, height = terrain + coverage lift +
-  // crown bumps, forestless cells z-fail, dither-in past impostor range.
-  // Extended height/coverage textures cover the skirt extent [center-farRadius, center+farRadius]
-  // so the canopy base beyond the world is the analytic terrain, not a flat extrusion of the edge.
-  // Built lazily — the extended height texture samples the analytic field per texel, so it is only
-  // worth paying when the canopy is actually shown (long-view scene or ?canopy=1).
-  const canopyFarRadius = worldSizeCells * 1.5;
-  let canopyShellResult: FarShellResult | null = null;
-  if (isLongView || queryCanopy) {
-    const canopyHeightTexture = createExtendedHeightTexture(terrainSummary, canopyFarRadius);
-    const canopyCoverageTexture = createExtendedCanopyTexture(terrainSummary, canopyFarRadius, 42);
-    canopyShellResult = buildFarCanopyShell(canopyHeightTexture, canopyCoverageTexture, worldSizeCells, {
-      sunDirection: currentLighting().sunDirection,
-      sunColor: currentLighting().sunColor,
-      skyLight: currentLighting().skyLight,
-      groundLight: currentLighting().groundLight,
-    }, {
-      grid: 256,
-      farRadius: canopyFarRadius,
-    });
-    scene.add(canopyShellResult.mesh);
-    if (longViewHooks?.stats) {
-      longViewHooks.stats.counters["canopy_tris"] = canopyShellResult.triangleCount;
-    }
-  }
-
   // page-boundary overlay (rebuilt on cut change)
   const boundaryGroup = new THREE.Group();
   scene.add(boundaryGroup);
 
-  // brush preview reticle: translucent volume at the aim point, sized to the brush radius,
-  // shaped to the active brush and tinted by op (remove = red, add = green). Geometries are
-  // unit-sized so a uniform scale by the radius matches the brush SDFs exactly.
-  const brushPreviewGeometries: Record<BrushShape, THREE.BufferGeometry> = {
-    sphere: new THREE.SphereGeometry(1, 24, 16),
-    cube: new THREE.BoxGeometry(2, 2, 2),
-    cylinder: new THREE.CylinderGeometry(1, 1, 2, 28),
-  };
-  const digPreview = new THREE.Mesh(
-    brushPreviewGeometries.sphere,
-    new THREE.MeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.28, depthWrite: false }),
-  );
-  digPreview.visible = false;
-  scene.add(digPreview);
+  const brushPreview = createBrushPreviewController(scene);
+
   const seamGroup = new THREE.Group();
   scene.add(seamGroup);
   const crossLodBorderGroup = new THREE.Group();
@@ -2047,7 +1261,7 @@ async function main() {
   // Max bubble pages whose raw chunk groups (P^2 meshChunk each) we build per frame. Caps the
   // walk spike from many pages entering the bubble at once; un-built pages keep their welded
   // LOD0 page mesh visible meanwhile, so it's a latency/seamlessness trade, not a visual gap.
-  const CHUNK_GROUP_BUILD_BUDGET = 1;
+  const chunkGroupBuildBudget = clodRuntime.nearField.chunkGroupBuildBudget;
   // Opt-in (?gpuMesh=1): mesh bubble chunks on WebGPU compute (gpu_chunk_mesher) instead of CPU
   // meshChunk. Async, so pages build progressively and the welded LOD0 page mesh stays visible
   // until a page's chunks are ready (entry.ready). CPU meshChunk stays the default safety net.
@@ -2089,22 +1303,8 @@ async function main() {
     { group: THREE.Group; mats: TerrainMaterialHandle[]; unsubs: Array<() => void>; ready: boolean }
   >();
   const buildChunkMaterial = (): TerrainMaterialHandle => {
-    const mat = makeTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
-    // Pooled: the shared material already carries global state (textures/lighting/etc.);
-    // re-applying it per chunk would rebuild the shared graph P^2 times per page entry.
-    if (!poolTerrainMaterial) {
-      mat.setDebug({
-        normalColor: state.normalColor,
-        normalDivergence: state.normalDivergence,
-        divergenceGain: state.divergenceGain,
-      });
-      mat.setTriplanar(state.triplanar);
-      mat.setColorAdjust(currentTerrainColorAdjustments());
-      mat.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
-      rebuildActiveTerrainSlots();
-      mat.setTextures(textureSlots, terrainTextureUniformOptions());
-      applyLightingToMaterial(mat);
-    }
+    const mat = materialController.makeTerrainMaterial(state.tintBubble ? 0xc94b4b : 0xffffff);
+    materialController.configureChunkMaterial(mat);
     return mat;
   };
   const addChunkMesh = (
@@ -2166,56 +1366,14 @@ async function main() {
     return entry;
   };
 
-  const makeGrassSettings = (): GrassSettings => ({
-    ...grassConfig,
-    enabled: state.grassEnabled,
-    shaderMode: state.grassShaderMode,
-    distanceM: state.grassDistance,
-    maxInstances: state.grassMaxBlades,
-    placement: {
-      ...grassConfig.placement,
-      spacingM: state.grassBladeSpacing,
-      slopeMinY: state.grassSlopeMinY,
-      minHeightM: state.grassMinHeight,
-      maxHeightM: state.grassMaxHeight,
-    },
-    blade: {
-      ...grassConfig.blade,
-      heightM: state.grassBladeHeight,
-      heightVariation: state.grassBladeHeightVariation,
-      widthM: state.grassBladeWidth,
-      nearCrossedQuads: state.grassNearCrossedQuads,
-    },
-    wind: {
-      ...grassConfig.wind,
-      strength: state.grassWindStrength,
-      speed: state.grassWindSpeed,
-    },
-    render: {
-      ...grassConfig.render,
-      alphaToCoverage: state.grassAlphaToCoverage,
-    },
-    alphaToCoverage: state.grassAlphaToCoverage,
-    nearCrossedQuads: state.grassNearCrossedQuads,
-    distance: state.grassDistance,
-    bladeSpacing: state.grassBladeSpacing,
-    bladeHeight: state.grassBladeHeight,
-    bladeHeightVariation: state.grassBladeHeightVariation,
-    bladeWidth: state.grassBladeWidth,
-    windStrength: state.grassWindStrength,
-    windSpeed: state.grassWindSpeed,
-    slopeMinY: state.grassSlopeMinY,
-    minHeight: state.grassMinHeight,
-    maxHeight: state.grassMaxHeight,
-    maxBlades: state.grassMaxBlades,
-    seed: state.grassSeed,
-    ring: {
-      ...grassConfig.ring,
-      grid: Math.floor(queryGrassRingGrid ?? grassConfig.ring.grid),
-      cell: queryGrassRingCell ?? grassConfig.ring.cell,
-    },
-    patchFallback: { ...grassConfig.patchFallback },
-  });
+  const pageTransitionMode = cfg.selection.transition_mode;
+  const crossfadeStep = cfg.selection.crossfade_frames > 0
+    ? 1 / cfg.selection.crossfade_frames
+    : 1;
+  const applyColorAdjustmentsToTerrain = () => {
+    materialController.applyColorAdjustments();
+  };
+
   const currentGrassLighting = (): GrassLighting => {
     const lighting = currentLighting();
     return {
@@ -2231,57 +1389,25 @@ async function main() {
     skyLight: lighting.skyLight,
     groundLight: lighting.groundLight,
   });
-  let grass: GrassSystem | null = null;
   let grassStats: GrassStats | null = null;
-  let stones: StoneSystem | null = null;
-  let selState: SelectionState = { split: new Set() };
-  const pageTransitionMode = cfg.selection.transition_mode;
-  const crossfadeStep = cfg.selection.crossfade_frames > 0
-    ? 1 / cfg.selection.crossfade_frames
-    : 1;
-  const forEachTerrainMaterial = (fn: (mat: TerrainMaterialHandle) => void) => {
-    // Unique handles only — a shared material would otherwise get global state (and graph
-    // rebuilds) applied once per sharing mesh.
-    for (const m of terrainMaterials) fn(m);
-  };
-  const applyColorAdjustmentsToTerrain = () => {
-    const adjustments = currentTerrainColorAdjustments();
-    forEachTerrainMaterial((mat) => mat.setColorAdjust(adjustments));
-  };
-  const updateLighting = () => {
-    skyEnvironment?.updateSettings(currentEnvironmentSettings());
-    const lighting = currentLighting();
-    forEachTerrainMaterial((mat) => applyLightingToMaterial(mat, lighting));
-    grass?.updateLighting({
-      light: lighting.sunDirection,
-      sunColor: lighting.sunColor,
-      skyLight: lighting.skyLight,
-      groundLight: lighting.groundLight,
-    });
-    const stoneLighting = {
-      light: lighting.sunDirection,
-      sunColor: lighting.sunColor,
-      skyLight: lighting.skyLight,
-      groundLight: lighting.groundLight,
-    };
-    stones?.updateLighting(stoneLighting);
-    treeSystem?.updateLighting(lighting);
-    understorySystem?.updateLighting(lighting);
-    waterClipmap.updateSunDirection(lighting.sunDirection);
-  };
-  const grassSystem = new GrassSystem({
+  const lod0PageNodes = allNodes.filter((node) => node.level === 0);
+  const gpuBackend = isWebGpu ? app.renderer.backend as unknown as {
+    createStorageAttribute(attribute: THREE.BufferAttribute): void;
+    createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
+    get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
+  } : null;
+  const grassController = createGrassController({
     scene,
-    nodes: allNodes.filter((node) => node.level === 0),
+    nodes: lod0PageNodes,
     worldCells,
-    settings: makeGrassSettings(),
-    lighting: currentGrassLighting(),
+    grassConfig,
+    queryGrassRingGrid,
+    queryGrassRingCell,
     supportsRing: isWebGpu,
     gpuDevice: rendererWebGpuDevice,
-    gpuBackend: isWebGpu ? app.renderer.backend as unknown as {
-      createStorageAttribute(attribute: THREE.BufferAttribute): void;
-      createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
-      get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
-    } : null,
+    gpuBackend,
+    getUiState: () => state,
+    getLighting: currentGrassLighting,
     ...(isWebGpu
       ? {
           createMaterial: (settings: GrassSettings, lighting: GrassLighting, ringInstanceBuffers) =>
@@ -2305,480 +1431,287 @@ async function main() {
           buildGeometry: buildGrassInstancedGeometry,
         }
       : {}),
+    syncStatsToState: (stats) => {
+      grassStats = stats;
+      state.grassBladeCount = stats.blades;
+      state.grassVisiblePatches = `${stats.visiblePatches}/${stats.patches}`;
+      state.grassTierSummary = `${stats.nearPatches}/${stats.midPatches}/${stats.coveragePatches}/${stats.superPatches}`;
+      state.grassEdgeSuppressed = stats.edgeSuppressedCandidates;
+      state.grassCandidateCount = stats.generatedCandidates;
+      state.grassPatchRebuildCount = stats.patchRebuildCount;
+      state.grassBuildMs = Number(stats.buildMs.toFixed(2));
+    },
   });
-  grass = grassSystem;
+  const grassSystem = grassController.system;
+  const makeGrassSettings = () => grassController.makeSettings();
   state.grassBladeCount = grassSystem.getBladeCount();
   grassStats = grassSystem.getStats();
 
-  // Stone overlay (ground-detail props). Pure visual layer: scattered over the LOD0 page
-  // footprints and added to the scene, never fed into the page source mesh / weld path.
-  const makeStoneSettings = () => ({
-    ...stoneConfig,
-    enabled: state.stonesEnabled,
-    density: state.stoneDensity,
-    maxInstances: state.stoneMaxInstances,
-    seedSalt: state.stoneSeed,
-  });
-  const visibleStoneClasses = (): StoneClass[] =>
-    STONE_CLASSES.filter((cls) =>
-      cls === "large" ? state.stoneShowLarge : cls === "medium" ? state.stoneShowMedium : state.stoneShowSmall,
-    );
-  const stonePageNodes = allNodes.filter((node) => node.level === 0);
-  const stonePageSignaturesBefore = pageMeshSignatures(stonePageNodes);
-  // Set once the stone GUI/stat refresh helper exists; called when boot scatter completes.
   let onStoneScatterComplete: (() => void) | null = null;
-  const stoneSystem = new StoneSystem({
+  let stoneTotalController: { updateDisplay: () => unknown } | null = null;
+  let stoneClassSummaryController: { updateDisplay: () => unknown } | null = null;
+  let stoneVisibleController: { updateDisplay: () => unknown } | null = null;
+  let treeTotalController: { updateDisplay: () => unknown } | null = null;
+  let treeVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
+  let treeLodSummaryController: { updateDisplay: () => unknown } | null = null;
+  let treeGpuSummaryController: { updateDisplay: () => unknown } | null = null;
+  let understoryTotalController: { updateDisplay: () => unknown } | null = null;
+  let understoryVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
+  let understoryClassSummaryController: { updateDisplay: () => unknown } | null = null;
+  let understoryGpuSummaryController: { updateDisplay: () => unknown } | null = null;
+  const formatTreeGpuSummary = (stats: TreeStats): string =>
+    stats.gpuStatus === "disabled"
+      ? "disabled"
+      : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}`;
+  const formatUnderstoryGpuSummary = (stats: UnderstoryStats): string =>
+    stats.gpuStatus === "disabled"
+      ? "disabled"
+      : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}${stats.gpuDispatchMs !== null ? ` ${stats.gpuDispatchMs.toFixed(1)}ms` : ""}`;
+  const stoneController = createStoneController({
     scene,
-    nodes: stonePageNodes,
+    nodes: lod0PageNodes,
     worldCells,
-    settings: makeStoneSettings(),
-    lighting: currentGrassLighting() as StoneLighting,
+    stoneConfig,
     hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
     gpuDevice: rendererWebGpuDevice,
-    gpuBackend: isWebGpu ? app.renderer.backend as unknown as {
-      createStorageAttribute(attribute: THREE.BufferAttribute): void;
-      createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
-      get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
-    } : null,
-    // Boot scatter resolves async; refresh the HUD once counts are valid.
-    onStats: () => onStoneScatterComplete?.(),
+    gpuBackend,
+    getUiState: () => state,
+    getLighting: currentGrassLighting,
+    onScatterStats: () => onStoneScatterComplete?.(),
+    syncStatsToState: (stats) => {
+      stoneStats = stats;
+      state.stoneTotal = stats.total;
+      state.stoneClassSummary = `${stats.large}/${stats.medium}/${stats.small}`;
+      state.stoneVisible = stats.visible;
+      stoneTotalController?.updateDisplay();
+      stoneClassSummaryController?.updateDisplay();
+      stoneVisibleController?.updateDisplay();
+    },
   });
-  assertPageMeshSignaturesUnchanged(stonePageSignaturesBefore, pageMeshSignatures(stonePageNodes));
-  stoneSystem.setVisibleClasses(visibleStoneClasses());
-  stones = stoneSystem;
+  const stoneSystem = stoneController.system;
+  const visibleStoneClasses = () => stoneController.visibleClasses();
   let stoneStats: StoneStats | null = stoneSystem.getStats();
 
-  const makeTreeSettings = () => ({
-    ...treeConfig,
-    enabled: state.treesEnabled,
-    distanceM: state.treeDistance,
-    maxInstances: state.treeMaxInstances,
-    wind: {
-      ...treeConfig.wind,
-      enabled: state.treeWindEnabled,
-      strength: state.treeWindStrength,
-      speed: state.treeWindSpeed,
-      gustStrength: state.treeGustStrength,
-      trunkSwayStrength: state.treeTrunkSwayStrength,
-      leafFlutterStrength: state.treeLeafFlutterStrength,
-    },
-    render: {
-      ...treeConfig.render,
-      debugColorByLod: state.treeDebugColorByLod,
-    },
-    gpu: {
-      ...treeConfig.gpu,
-      enabled: state.treeGpuEnabled,
-      debugForceCpu: state.treeGpuForceCpu,
-      debugShowGpuCounts: state.treeGpuShowCounts,
-    },
-  });
-  const makeUnderstorySettings = (): UnderstorySettings => ({
-    ...understoryConfig,
-    enabled: state.understoryEnabled,
-    distanceM: state.understoryDistance,
-    maxInstances: state.understoryMaxInstances,
-    placement: { ...understoryConfig.placement },
-    ecology: { ...understoryConfig.ecology },
-    classes: {
-      shrub: { ...understoryConfig.classes.shrub },
-      fern: { ...understoryConfig.classes.fern },
-      sapling: { ...understoryConfig.classes.sapling },
-      flower: { ...understoryConfig.classes.flower },
-      dead_log: { ...understoryConfig.classes.dead_log },
-      stump: { ...understoryConfig.classes.stump },
-    },
-    render: {
-      ...understoryConfig.render,
-      debugColorByClass: state.understoryDebugColorByClass,
-    },
-  });
-  const makeForestLightingSettings = (): ForestLightingSettings => ({
-    ...forestLightingConfig,
-    enabled: state.forestLightingEnabled,
-    field: { ...forestLightingConfig.field },
-    canopy: { ...forestLightingConfig.canopy },
-    ambientOcclusion: {
-      ...forestLightingConfig.ambientOcclusion,
-      strength: state.forestLightingAoStrength,
-    },
-    shadowProxy: {
-      ...forestLightingConfig.shadowProxy,
-      strength: state.forestLightingShadowStrength,
-    },
-    atmosphere: {
-      ...forestLightingConfig.atmosphere,
-      forestFogStrength: state.forestLightingFogStrength,
-      sunShaftsStrength: state.forestLightingSunShaftsStrength,
-    },
-    materialIntegration: {
-      ...forestLightingConfig.materialIntegration,
-      debugMode: state.forestLightingDebugMode,
-    },
-  });
-  const treePageNodes = allNodes.filter((node) => node.level === 0);
-  const treePageSignaturesBefore = pageMeshSignatures(treePageNodes);
-  const treeSystem = new TreeSystem({
+  const treeController = createTreeController({
     scene,
-    nodes: treePageNodes,
+    nodes: lod0PageNodes,
     worldCells,
-    settings: makeTreeSettings(),
+    treeConfig,
     webgpu: isWebGpu,
-    lighting: currentLighting(),
     hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
     gpuDevice: rendererWebGpuDevice,
-    gpuBackend: isWebGpu ? app.renderer.backend as unknown as {
-      createStorageAttribute(attribute: THREE.BufferAttribute): void;
-      createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
-      get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
-    } : null,
-    supportsGpuTrees: isWebGpu,
-  });
-  assertPageMeshSignaturesUnchanged(treePageSignaturesBefore, pageMeshSignatures(treePageNodes));
-  let treeStats: TreeStats | null = treeSystem.getStats();
-
-  const understoryPageNodes = allNodes.filter((node) => node.level === 0);
-  const understoryPageSignaturesBefore = pageMeshSignatures(understoryPageNodes);
-  const understorySystem = new UnderstorySystem({
-    scene,
-    nodes: understoryPageNodes,
-    worldCells,
-    settings: makeUnderstorySettings(),
-    webgpu: isWebGpu,
-    lighting: currentLighting(),
-    gpuDevice: rendererWebGpuDevice,
-    gpuBackend: isWebGpu ? app.renderer.backend as unknown as {
-      createStorageAttribute(attribute: THREE.BufferAttribute): void;
-      createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
-      get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
-    } : null,
-    supportsGpu: isWebGpu,
-    hydrologyData: hydrologySystem ? packHydrologyData(hydrologySystem) : null,
-  });
-  assertPageMeshSignaturesUnchanged(understoryPageSignaturesBefore, pageMeshSignatures(understoryPageNodes));
-  let understoryStats: UnderstoryStats | null = understorySystem.getStats();
-  const forestLightingSystem = new ForestLightingSystem({
-    worldCells,
-    settings: makeForestLightingSettings(),
-  });
-  let forestLightingStats: ForestLightingStats | null = forestLightingSystem.getStats();
-  let forestLightingSettingsVersion = 0;
-  let lastAppliedForestLightingSignature: ForestLightingMaterialUpdateSignature | null = null;
-  const forestLightingMaterialTargets = [treeSystem, understorySystem];
-  const applyForestLightingToPropMaterials = () => {
-    const stats = forestLightingSystem.getStats();
-    const materialState = forestLightingSystem.getMaterialState();
-    const signature: ForestLightingMaterialUpdateSignature = {
-      textureHandle: materialState.textureHandle,
-      textureUpdates: stats.textureUpdates,
-      settingsVersion: forestLightingSettingsVersion,
-      enabled: materialState.settings.enabled,
-      debugMode: materialState.settings.materialIntegration.debugMode,
-    };
-    lastAppliedForestLightingSignature = applyForestLightingMaterialStateIfChanged(
-      lastAppliedForestLightingSignature,
-      signature,
-      materialState,
-      forestLightingMaterialTargets,
-    );
-  };
-  applyForestLightingToPropMaterials();
-
-  // Camera-following clipmap ring (visual POC only). Separate render layer that
-  // follows the camera and never feeds the CLOD page source path. The page-source
-  // exclusion assertion below mirrors the stones/trees guard.
-  const waterPageNodes = allNodes.filter((node) => node.level === 0);
-  const waterPageSignaturesBefore = pageMeshSignatures(waterPageNodes);
-  const waterField = new WaterField(waterConfig, { surfaceHeight }, hydrologySystem);
-  const waterMaterialFactory = isWebGpu
-    ? (await import("./water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
-    : createWaterShaderMaterial;
-  const waterClipmap = new WaterClipmap({
-    scene,
-    config: waterConfig,
-    field: waterField,
-    createMaterial: waterMaterialFactory,
-    sunDirection: currentLighting().sunDirection.clone(),
-    cameraPosition: camera.position,
-    worldBounds: { cellsX: worldCells, cellsZ: worldCells },
-  });
-  waterClipmap.setVisible(state.waterEnabled);
-  waterClipmap.setClipmapTint(state.waterClipmapTint);
-  waterClipmap.setWireframe(state.waterWireframe);
-  assertPageMeshSignaturesUnchanged(waterPageSignaturesBefore, pageMeshSignatures(waterPageNodes));
-  let waterDevLogged = false;
-  const waterDebugState: WaterDebugState = {
-    enabled: state.waterEnabled,
-    mode: state.waterDebugMode,
-    clipmapTint: state.waterClipmapTint,
-    wireframe: state.waterWireframe,
-    depthWrite: state.waterDepthWrite,
-  };
-  const makeWaterVisual = () => ({
-    ...waterConfig.visual,
-    depthWrite: state.waterDepthWrite,
-  });
-  const waterDebugApiEnabled = import.meta.env.DEV || searchParams.get("waterDebug") === "1" || searchParams.get("debug") === "1";
-  if (waterDebugApiEnabled) {
-    const sampleForDebug = (x: number, z: number) => {
-      const s = waterField.sample(x, z);
-      return {
-        terrain: s.terrainY,
-        water: s.waterY,
-        depth: s.depth,
-        flowX: s.flow.x,
-        flowZ: s.flow.z,
-        flowSpeed: s.flow.speed,
-        flowProgress: s.flow.progress,
-        flowDrop: s.flow.drop,
-        bodyMask: s.bodyMask,
-      };
-    };
-    const setWaterDebugMode = (mode: keyof typeof WATER_DEBUG_MODES | number) => {
-      const id = typeof mode === "number" ? mode : WATER_DEBUG_MODES[mode];
-      if (id === undefined || !Object.values(WATER_DEBUG_MODES).includes(id as typeof WATER_DEBUG_MODES[keyof typeof WATER_DEBUG_MODES])) {
-        throw new Error(`unknown water debug mode: ${String(mode)}`);
-      }
-      state.waterDebugMode = (Object.entries(WATER_DEBUG_MODES).find(([, v]) => v === id)?.[0] ?? "final") as keyof typeof WATER_DEBUG_MODES;
-      waterDebugState.mode = state.waterDebugMode;
-      waterClipmap.setDebugMode(id as typeof WATER_DEBUG_MODES[keyof typeof WATER_DEBUG_MODES]);
-      return { mode: state.waterDebugMode, id };
-    };
-    const setCameraPose = (pose: { x: number; z: number; yaw?: number; y?: number; distance?: number; pitch?: number }) => {
-      const x = Number(pose.x);
-      const z = Number(pose.z);
-      if (!Number.isFinite(x) || !Number.isFinite(z)) throw new Error("setCameraPose requires finite x and z");
-      const yaw = Number.isFinite(pose.yaw) ? Number(pose.yaw) : 0;
-      const targetY = waterField.sample(x, z).terrainY;
-      const pitch = Number.isFinite(pose.pitch) ? Number(pose.pitch) : -0.35;
-      const distance = Math.max(2, Number.isFinite(pose.distance) ? Number(pose.distance) : 26);
-      const horizontal = Math.max(1, Math.cos(Math.abs(pitch)) * distance);
-      const height = Math.max(3, Math.sin(Math.abs(pitch)) * distance);
-      const dirX = Math.sin(yaw);
-      const dirZ = -Math.cos(yaw);
-      interaction.exitToOrbit();
-      resetPlayerInput();
-      controls.enabled = true;
-      controls.target.set(x, targetY, z);
-      camera.position.set(
-        x - dirX * horizontal,
-        Number.isFinite(pose.y) ? Number(pose.y) : targetY + height,
-        z - dirZ * horizontal,
-      );
-      camera.lookAt(controls.target);
-      controls.update();
-      updatePlayerModeUi();
-      waterClipmap.update(0, camera.position);
-      updateSelection();
-      return {
-        position: [camera.position.x, camera.position.y, camera.position.z],
-        target: [controls.target.x, controls.target.y, controls.target.z],
-        yaw,
-      };
-    };
-    const waterDebugInfo = () => ({
-      worldCells,
-      enabled: waterClipmap.isEnabled,
-      debugMode: state.waterDebugMode,
-      clipmapTint: state.waterClipmapTint,
-      wireframe: state.waterWireframe,
-      debugModes: { ...WATER_DEBUG_MODES },
-      clipmap: {
-        levelCount: waterClipmap.levelCount,
-        levels: Array.from({ length: waterClipmap.levelCount }, (_, index) => waterClipmap.getLevelRect(index)),
-      },
-      fakeBodies: {
-        lakes: waterConfig.fakeBodies.lakes.map((lake) => ({
-          center: [...lake.center],
-          radius: [...lake.radius],
-          levelOffset: lake.levelOffset,
-        })),
-        rivers: waterConfig.fakeBodies.rivers.map((river) => ({
-          points: river.points.map((point) => [...point]),
-          width: river.width,
-          levelOffset: river.levelOffset,
-          downstreamDrop: river.downstreamDrop,
-        })),
-      },
-    });
-    Object.assign(window, {
-      waterProbe: sampleForDebug,
-      setWaterDebugMode,
-      setCameraPose,
-      waterDebugInfo,
-    });
-  }
-  const rainWeather = new RainWeatherSystem({
-    scene,
-    isWebGpu,
-    worldCells,
-    seed: 0xdecafbad,
-    samplers: {
-      surfaceHeight,
-      surfaceNormal,
-      waterSample: (x, z) => waterField.sample(x, z),
+    gpuBackend,
+    getUiState: () => state,
+    getLighting: currentLighting,
+    syncStatsToState: (stats) => {
+      treeStats = stats;
+      state.treeTotal = formatTreeTotalDisplay(stats);
+      state.treeVisiblePatches = `${stats.visiblePatches}/${stats.patches}`;
+      state.treeLodSummary = `${stats.nearTrees}/${stats.midTrees}/${stats.farTrees}/${stats.impostorTrees}`;
+      state.treeGpuSummary = formatTreeGpuSummary(stats);
+      treeTotalController?.updateDisplay();
+      treeVisiblePatchesController?.updateDisplay();
+      treeLodSummaryController?.updateDisplay();
+      treeGpuSummaryController?.updateDisplay();
     },
   });
-  rainWeather.applySettings(currentRainWeatherSettings());
-  const snowWeather = new SnowWeatherSystem({
+  const treeSystem = treeController.system;
+  const fallingTrees = treeController.fallingTrees;
+  let treeStats: TreeStats | null = treeSystem.getStats();
+
+  const understoryController = createUnderstoryController({
     scene,
-    isWebGpu,
-    seed: 0x51eaf00d,
+    nodes: lod0PageNodes,
+    worldCells,
+    understoryConfig,
+    webgpu: isWebGpu,
+    hydrologyData: hydrologySystem ? packHydrologyData(hydrologySystem) : null,
+    gpuDevice: rendererWebGpuDevice,
+    gpuBackend,
+    getUiState: () => state,
+    getLighting: currentLighting,
+    syncStatsToState: (stats) => {
+      understoryStats = stats;
+      state.understoryTotal = stats.totalInstances;
+      state.understoryVisiblePatches = `${stats.visiblePatches}/${stats.patches}`;
+      state.understoryClassSummary =
+        `${stats.shrub}/${stats.fern}/${stats.sapling}/${stats.flower}/${stats.deadLog}/${stats.stump}`;
+      state.understoryGpuSummary = formatUnderstoryGpuSummary(stats);
+      understoryTotalController?.updateDisplay();
+      understoryVisiblePatchesController?.updateDisplay();
+      understoryClassSummaryController?.updateDisplay();
+      understoryGpuSummaryController?.updateDisplay();
+    },
   });
-  snowWeather.applySettings(currentSnowWeatherSettings());
-  const sandstormWeather = new SandstormWeatherSystem({
+  const understorySystem = understoryController.system;
+  let understoryStats: UnderstoryStats | null = understorySystem.getStats();
+
+  let forestLightingStatsController: { updateDisplay: () => unknown } | null = null;
+  let forestLightingStats: ForestLightingStats | null = null;
+  const forestLightingController = createForestLightingController({
+    worldCells,
+    forestLightingConfig,
+    getUiState: () => state,
+    getTreeSystem: () => treeSystem,
+    getUnderstorySystem: () => understorySystem,
+    syncStatsToState: (stats, statsText) => {
+      forestLightingStats = stats;
+      state.forestLightingStats = statsText;
+      forestLightingStatsController?.updateDisplay();
+    },
+  });
+  const forestLightingSystem = forestLightingController.system;
+  const applyForestLightingToPropMaterials = () => forestLightingController.applyToPropMaterials();
+  forestLightingStats = forestLightingSystem.getStats();
+
+  const waterController = await createWaterController({
+    scene,
+    nodes: lod0PageNodes,
+    waterConfig,
+    worldCells,
+    isWebGpu,
+    surfaceHeight,
+    hydrologySystem,
+    camera,
+    getSunDirection: () => currentLighting().sunDirection,
+    getUiState: () => state,
+    searchParams,
+    devMode: import.meta.env.DEV,
+  });
+  const waterField = waterController.field;
+  const waterDebugState = waterController.debugState;
+  const makeWaterVisual = () => waterController.makeVisual();
+
+  const weatherController = createWeatherController({
     scene,
     camera,
     isWebGpu,
-    seed: 0x5a4d570d,
+    worldCells,
+    surfaceHeight,
+    surfaceNormal,
+    waterSample: (x, z) => waterField.sample(x, z),
+    getSettings: () => ({
+      weatherMode: state.weatherMode,
+      weatherIntensity: state.weatherIntensity,
+      weatherWindX: state.weatherWindX,
+      weatherWindZ: state.weatherWindZ,
+    }),
+    setStatsText: (text) => { state.weatherStats = text; },
   });
-  sandstormWeather.applySettings(currentSandstormWeatherSettings());
+  const applyWeatherSettings = () => weatherController.applySettings();
+  const updateWeatherStats = () => weatherController.refreshStats();
 
-  const rebuildDebugOverlays = (rendered: ClodPageNode[], xLodAdjacencies: CrossLodAdjacency[]) => {
-    boundaryGroup.clear();
-    if (state.showBounds) {
-      for (const n of rendered) {
-        const box = new THREE.Box3(
-          new THREE.Vector3(n.footprint.minX, n.bounds.center[1] - n.bounds.radius, n.footprint.minZ),
-          new THREE.Vector3(n.footprint.maxX, n.bounds.center[1] + n.bounds.radius, n.footprint.maxZ),
-        );
-        boundaryGroup.add(new THREE.Box3Helper(box, new THREE.Color(LOD_COLORS[Math.min(n.level, 3)])));
-      }
-    }
-
-    seamGroup.clear();
-    if (state.showSeamPoints) {
-      const pts: number[] = [];
-      for (let i = 0; i < rendered.length; i++) {
-        for (let j = i + 1; j < rendered.length; j++) {
-          const a = rendered[i], b = rendered[j];
-          if (a.level !== b.level) continue;
-          const edge = sharedEdge(a, b);
-          if (!edge) continue;
-          const ca = borderChain(a.mesh, edge.axis, edge.aPlane, a.footprint);
-          const cb = borderChain(b.mesh, edge.axis, edge.bPlane, b.footprint);
-          for (const p of ca.positions) pts.push(p[0], p[1], p[2]);
-          for (const p of cb.positions) pts.push(p[0], p[1], p[2]);
-        }
-      }
-      if (pts.length > 0) {
-        const geom = new THREE.BufferGeometry();
-        geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pts), 3));
-        const mat = new THREE.PointsMaterial({
-          color: 0xff2448,
-          size: 4,
-          sizeAttenuation: false,
-          depthTest: false,
-        });
-        const pointCloud = new THREE.Points(geom, mat);
-        pointCloud.renderOrder = 20;
-        seamGroup.add(pointCloud);
-      }
-    }
-
-    crossLodBorderGroup.clear();
-    if (!state.showCrossLodBorders) return;
-    const borderPts: number[] = [];
-    for (const adjacency of xLodAdjacencies) appendCrossLodBorderSegments(borderPts, adjacency);
-    if (borderPts.length > 0) {
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(borderPts), 3));
-      const mat = new THREE.LineBasicMaterial({
-        color: 0x00ffff,
-        depthTest: false,
-        depthWrite: false,
-      });
-      const lines = new THREE.LineSegments(geom, mat);
-      lines.renderOrder = 21;
-      crossLodBorderGroup.add(lines);
-    }
+  const updateLighting = () => {
+    skyEnvironment?.updateSettings(currentEnvironmentSettings());
+    const lighting = currentLighting();
+    materialController.forEachMaterial((mat) => materialController.applyLighting(mat, lighting));
+    grassController.updateLighting({
+      light: lighting.sunDirection,
+      sunColor: lighting.sunColor,
+      skyLight: lighting.skyLight,
+      groundLight: lighting.groundLight,
+    });
+    const stoneLighting = {
+      light: lighting.sunDirection,
+      sunColor: lighting.sunColor,
+      skyLight: lighting.skyLight,
+      groundLight: lighting.groundLight,
+    };
+    stoneController.updateLighting(stoneLighting);
+    treeController.updateLighting(lighting);
+    understoryController.updateLighting(lighting);
+    waterController.updateSunDirection(lighting.sunDirection);
   };
 
-  let lastCutHash = -1;
-  let lastDebugKey = "";
-  let lastForced = 0;
-  let lastNearFieldForced = 0;
-  let lastCrossLodAdjacencyCount = 0;
-  let lastRenderedCount = 0;
-  let lastRenderedNodes: ClodPageNode[] = [];
-  let currentTerrainViews = new Set<NodeView>();
-  const activeTerrainViews = new Set<NodeView>();
-  let lastLevelSummary = "";
-  let lastNodesByLod: Record<number, number> = {};
-  let lastTriCount = 0;
   let averageFps = 0;
   // Phase 0: Rolling frame-time buffer for p95/p99 computation.
   const phase0FrameMsBuffer: number[] = [];
   const PHASE0_P95_WINDOW = 120;
   let lastDigSummary = "";
   let lastArchiveSummary = "";
-  let selectionFrameId = 0;
-  let lastSelectionMs = 0;
-  // ?profile=1 sub-phase breakdown of the updateSelection bracket, so a slow "selection"
-  // frame tells us which line (cut traversal vs bookkeeping vs info text vs overlays) cost it.
-  const selSub = { cut: 0, book: 0, info: 0, overlays: 0 };
-  let lastSelectionSource: "cpu" | "webgpu" = "cpu";
-  let lastParityFrame = -WEBGPU_PARITY_INTERVAL_FRAMES;
-  let parityVerified = false;
-  let lastWebGpuDispatchFrame = -WEBGPU_DISPATCH_INTERVAL_FRAMES;
-  let lastWebGpuDispatchKey = "";
-  let readbackOnceConsumed = false;
-  let lastReadbackOnceVersion = -1;
-  const emptyWebGpuStats = (): ClodErrorPxStats => ({
-    enabled: state.webgpuSelection,
-    available: false,
-    status: state.webgpuSelection ? "unavailable" : "disabled",
-    reason: webGpuUnavailableReason ?? (state.webgpuSelection ? "not initialized" : undefined),
-    nodeCount: allNodes.length,
-    version: 0,
-    latestAgeFrames: null,
-    submitMs: null,
-    readbackMs: null,
-    skippedDispatches: 0,
-    parity: "unchecked",
-    parityMaxDelta: null,
-    readbackMode: queryReadbackMode,
-    dispatchOnlyFrames: 0,
-    readbackFrames: 0,
+
+  const cutChangedRef: { fn: () => void } = { fn: () => {} };
+  const selectionController = createClodSelectionController({
+    config: {
+      clodRuntime,
+      hysteresisMergeFactor: cfg.selection.hysteresis_merge_factor,
+      chunksPerPage: cfg.page.chunks_per_page,
+      chunkSize: cfg.page.chunk_size,
+      readbackMode: queryReadbackMode,
+      forceContinuousParity: queryWebGpuParity,
+      webGpuUnavailableReason,
+      poolTerrainMaterial,
+    },
+    roots: result.roots,
+    allNodes,
+    views,
+    getClodErrorCompute: () => clodErrorCompute,
+    getSettings: () => ({
+      thresholdPx: state.thresholdPx,
+      enforce21: state.enforce21,
+      bubble: state.bubble,
+      bubbleRadius: state.bubbleRadius,
+      forceMaxLevel: state.forceMaxLevel as number | "auto",
+      webgpuSelection: state.webgpuSelection,
+      showBounds: state.showBounds,
+      showSeamPoints: state.showSeamPoints,
+      showCrossLodBorders: state.showCrossLodBorders,
+      showLockedBorderVertices: state.showLockedBorderVertices,
+      materialTiers: state.materialTiers,
+    }),
+    getSelectionCenter: () => interaction.mode === "playing" ? player.position : controls.target,
+    renderer,
+    camera,
+    overlays: { boundaryGroup, seamGroup, crossLodBorderGroup },
+    lockedBorderOverlay,
+    staleEditedAncestorIds,
+    onCutChanged: () => cutChangedRef.fn(),
   });
-  const currentWebGpuStats = (): ClodErrorPxStats =>
-    clodErrorCompute?.stats(selectionFrameId, state.webgpuSelection) ?? emptyWebGpuStats();
-  const formatWebGpuStats = (): string => {
-    const stats = currentWebGpuStats();
-    if (!state.webgpuSelection) return "webgpu=off";
-    if (!stats.available) return `webgpu=${stats.status}${stats.reason ? ` (${stats.reason})` : ""}`;
-    const age = stats.latestAgeFrames === null ? "none" : `${stats.latestAgeFrames}f`;
-    const dispatch = stats.submitMs === null ? "-" : `${stats.submitMs.toFixed(2)}ms`;
-    const readback = stats.readbackMs === null ? "-" : `${stats.readbackMs.toFixed(2)}ms`;
-    const parityDelta = stats.parityMaxDelta === null ? "" : ` d=${stats.parityMaxDelta.toFixed(4)}px`;
-    return `webgpu=${stats.status} rb=${stats.readbackMode} age=${age} dispatch=${dispatch} read=${readback} parity=${stats.parity}${parityDelta} dOnly=${stats.dispatchOnlyFrames}`;
-  };
-  const currentOverlaySnapshot = (): ClodOverlaySnapshot => ({
-    worldSize: WORLD,
-    renderedTriangles: lastTriCount,
-    nodesByLod: lastNodesByLod,
-    forcedSplits: lastForced,
-    bubbleForcedSplits: lastNearFieldForced,
-    cutFrozen: state.freeze,
-    errorThreshold: state.thresholdPx,
-    buildStatus,
-    digCostLine: lastDigSummary || undefined,
-    polishLine,
+  const updateSelection = () => selectionController.update();
+
+  waterController.installDebugApi({
+    exitToOrbit: () => interaction.exitToOrbit(),
+    resetPlayerInput: () => resetPlayerInput(),
+    setControlsEnabled: (enabled) => { controls.enabled = enabled; },
+    setControlsTarget: (x, y, z) => { controls.target.set(x, y, z); },
+    setCameraPosition: (x, y, z) => { camera.position.set(x, y, z); },
+    cameraLookAt: (x, y, z) => { camera.lookAt(x, y, z); },
+    controlsUpdate: () => { controls.update(); },
+    updatePlayerModeUi: () => updatePlayerModeUi(),
+    updateSelection: () => updateSelection(),
+    setWaterDebugModeState: (mode) => { state.waterDebugMode = mode; },
   });
 
+  const currentOverlaySnapshot = (): ClodOverlaySnapshot => {
+    const selection = selectionController.stats();
+    return {
+      worldSize: WORLD,
+      renderedTriangles: selection.triCount,
+      nodesByLod: selection.nodesByLod,
+      forcedSplits: selection.forcedSplits,
+      bubbleForcedSplits: selection.nearFieldForcedSplits,
+      cutFrozen: state.freeze,
+      errorThreshold: state.thresholdPx,
+      buildStatus,
+      digCostLine: lastDigSummary || undefined,
+      polishLine,
+    };
+  };
+
   const updateInfo = () => {
+    const selection = selectionController.stats();
     const playerLine = interaction.mode === "playing"
       ? `player: grounded=${player.grounded}  physics p95=${player.physicsP95Ms().toFixed(2)} ms  collider pages=${player.lastPagesTested}`
       : `view: ${interaction.mode}`;
     const sceneLabel = queryGrassPerfScene ? "  GRASS PERF" : queryTreePerfScene ? "  TREE PERF" : queryForestFloorScene ? "  FOREST FLOOR" : "";
     info.textContent =
       `Drusniel Voxels Web — ${WORLD}x${WORLD} pages${sceneLabel}\n` +
-      `cut: ${lastRenderedCount} nodes  (${lastLevelSummary})\n` +
-      `tris rendered: ${lastTriCount.toLocaleString()}   2:1 forced splits: ${lastForced}   ` +
-      `bubble forced splits: ${lastNearFieldForced}   xLOD borders: ${lastCrossLodAdjacencyCount}\n` +
+      `cut: ${selection.renderedCount} nodes  (${selection.levelSummary})\n` +
+      `tris rendered: ${selection.triCount.toLocaleString()}   2:1 forced splits: ${selection.forcedSplits}   ` +
+      `bubble forced splits: ${selection.nearFieldForcedSplits}   xLOD borders: ${selection.crossLodAdjacencyCount}\n` +
       `threshold: ${state.thresholdPx.toFixed(2)} px   avg FPS: ${averageFps.toFixed(1)}   ` +
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
-      `renderer: ${isWebGpu ? "WebGPU" : "WebGL"}   selection: ${lastSelectionSource} ${lastSelectionMs.toFixed(2)}ms   gpu-compute: ${formatWebGpuStats()}\n` +
+      `renderer: ${isWebGpu ? "WebGPU" : "WebGL"}   selection: ${selection.selectionSource} ${selection.selectionMs.toFixed(2)}ms   gpu-compute: ${selectionController.formatWebGpuStats(state.webgpuSelection)}\n` +
       `${polishLine}\n` +
       `worker: parents pending=${pendingParentCount} rebuilt=${pendingParentNodes} ${pendingParentMs.toFixed(0)}ms   ` +
       `colliders loaded=${terrainColliders.loadedPageCount()}${state.clodPerfMode ? "   CLOD PERF" : ""}\n` +
@@ -2801,214 +1734,16 @@ async function main() {
       playerLine;
     updateClodOverlay(currentOverlaySnapshot());
   };
-
-  const verifyWebGpuParity = (map: ClodErrorMap, params: SelectionParams) => {
-    if (!clodErrorCompute) return;
-    // Default: one-shot verification once the first GPU map is available. The full
-    // per-node CPU sweep is a frame hitch, so only re-run it when explicitly enabled.
-    if (parityVerified && !queryWebGpuParity) return;
-    if (selectionFrameId - lastParityFrame < WEBGPU_PARITY_INTERVAL_FRAMES) return;
-    lastParityFrame = selectionFrameId;
-    parityVerified = true;
-    const parityParams: SelectionParams = {
-      ...params,
-      camPos: [...map.params.camPos],
-      viewportH: map.params.viewportH,
-      fovY: map.params.fovY,
-    };
-    let maxDelta = 0;
-    for (const node of allNodes) {
-      const gpuValue = clodErrorCompute.valueFor(node, map);
-      const cpuValue = errorPx(node, parityParams);
-      if (gpuValue === undefined || !Number.isFinite(cpuValue)) {
-        clodErrorCompute.markParityFailed("WebGPU CLOD error_px produced a non-finite result", Number.POSITIVE_INFINITY);
-        return;
-      }
-      maxDelta = Math.max(maxDelta, Math.abs(gpuValue - cpuValue));
-    }
-    if (maxDelta > WEBGPU_ERROR_TOLERANCE_PX) {
-      clodErrorCompute.markParityFailed(
-        `WebGPU CLOD error_px parity exceeded ${WEBGPU_ERROR_TOLERANCE_PX}px`,
-        maxDelta,
-      );
-      return;
-    }
-    clodErrorCompute.markParityOk(maxDelta);
-  };
-
-  const webGpuDispatchKey = (params: SelectionParams): string => {
-    const q = (value: number, step = 0.25) => Math.round(value / step);
-    const near = params.nearField;
-    return [
-      q(params.camPos[0]),
-      q(params.camPos[1]),
-      q(params.camPos[2]),
-      q(params.viewportH, 1),
-      q(params.fovY, 0.0005),
-      q(params.thresholdPx, 0.01),
-      params.enforce21 ? 1 : 0,
-      params.forcedMaxLevel ?? -1,
-      near?.enabled ? 1 : 0,
-      q(near?.centerX ?? 0),
-      q(near?.centerZ ?? 0),
-      q(near?.radius ?? 0),
-    ].join(":");
-  };
-
-  const updateSelection = () => {
-    const selectionStart = performance.now();
-    const selectionCenter = interaction.mode === "playing" ? player.position : controls.target;
-    const params: SelectionParams = {
-      thresholdPx: state.thresholdPx,
-      hysteresisMergeFactor: cfg.selection.hysteresis_merge_factor,
-      enforce21: state.enforce21,
-      nearField: {
-        enabled: state.bubble,
-        centerX: selectionCenter.x,
-        centerZ: selectionCenter.z,
-        radius: state.bubbleRadius,
-        boundaryPadding: cfg.page.chunks_per_page * cfg.page.chunk_size,
-      },
-      viewportH: renderer.domElement.height,
-      fovY: THREE.MathUtils.degToRad(camera.fov),
-      camPos: [camera.position.x, camera.position.y, camera.position.z],
-      forcedMaxLevel: state.forceMaxLevel === "auto" ? null : Number(state.forceMaxLevel),
-    };
-    let gpuMap: ClodErrorMap | null = null;
-    if (state.webgpuSelection && clodErrorCompute) {
-      const candidate = clodErrorCompute.latestFor(selectionFrameId, WEBGPU_ERROR_MAX_AGE_FRAMES);
-      if (candidate) {
-        switch (queryReadbackMode) {
-          case "off":
-            break;
-          case "once":
-            if (!readbackOnceConsumed) {
-              gpuMap = candidate;
-              readbackOnceConsumed = true;
-              lastReadbackOnceVersion = candidate.version;
-            }
-            break;
-          default:
-            gpuMap = candidate;
-            break;
-        }
-      }
-    }
-    if (gpuMap) verifyWebGpuParity(gpuMap, params);
-    const errorPxLookup = gpuMap && clodErrorCompute ? clodErrorCompute.errorLookup(gpuMap) : undefined;
-    const tSelectCut = performance.now();
-    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectCut(
-      result.roots,
-      params,
-      selState,
-      { errorPxLookup, forceSplitIds: staleEditedAncestorIds },
-    );
-    selSub.cut = performance.now() - tSelectCut;
-    selState = ns;
-    lastForced = forcedSplits;
-    lastNearFieldForced = nearFieldForcedSplits;
-    lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
-
-    const cutIds = new Set(rendered.map((n) => n.id));
-    const nextTerrainViews = new Set<NodeView>();
-    for (const node of rendered) {
-      const view = views.get(node.id);
-      if (!view) continue;
-      view.selected = true;
-      if (view.target !== 1) {
-        view.target = 1;
-        activeTerrainViews.add(view);
-      }
-      nextTerrainViews.add(view);
-    }
-    for (const view of currentTerrainViews) {
-      if (cutIds.has(view.node.id)) continue;
-      view.selected = false;
-      if (view.target !== 0) {
-        view.target = 0;
-        activeTerrainViews.add(view);
-      }
-    }
-    currentTerrainViews = nextTerrainViews;
-
-    // LV-6: Assign material quality tier per visible page by LOD level.
-    // Tier 0 = LOD0 (near, full triplanar + procedural), 1 = LOD1, 2 = LOD2+ (far, baked).
-    // Shared material (poolTerrainMaterial) stays at tier 0 — instant transitions are brief.
-    // Gated by the "material tiers" toggle (?materialTiers=1).
-    if (state.materialTiers && !poolTerrainMaterial) {
-      for (const v of currentTerrainViews) {
-        const tier = v.node.level <= 0 ? 0 : v.node.level === 1 ? 1 : 2;
-        v.mat.setTier(tier);
-      }
-    }
-
-    const perLevel = new Map<number, number>();
-    let tris = 0;
-    for (const n of rendered) {
-      perLevel.set(n.level, (perLevel.get(n.level) ?? 0) + 1);
-      tris += n.mesh.indices.length / 3;
-    }
-    lastRenderedCount = rendered.length;
-    lastRenderedNodes = rendered;
-    lastNodesByLod = Object.fromEntries([...perLevel.entries()]);
-    lastLevelSummary = [...perLevel.keys()].sort().map((l) => `L${l}:${perLevel.get(l)}`).join("  ");
-    lastTriCount = tris;
-
-    const tInfo = performance.now();
-    selSub.book = tInfo - tSelectCut - selSub.cut;
-    const cutHash = hashRenderedCut(rendered);
-    if (cutHash !== lastCutHash) {
-      lastCutHash = cutHash;
-      updateInfo();
-    }
-    selSub.info = performance.now() - tInfo;
-    const tOverlays = performance.now();
-    const debugKey =
-      `${cutHash}|bounds:${state.showBounds}|seams:${state.showSeamPoints}|xlod:${state.showCrossLodBorders}|locks:${state.showLockedBorderVertices}`;
-    if (debugKey !== lastDebugKey) {
-      lastDebugKey = debugKey;
-      // crossLodAdjacencies is O(R^2) and only the cross-LOD border overlay consumes it —
-      // compute it solely when that overlay is on and the cut/flags changed, not every frame.
-      const xLodAdjacencies = state.showCrossLodBorders ? crossLodAdjacencies(rendered) : [];
-      lastCrossLodAdjacencyCount = xLodAdjacencies.length;
-      rebuildDebugOverlays(rendered, xLodAdjacencies);
-      lockedBorderOverlay.rebuild(rendered, state.showLockedBorderVertices);
-    }
-    selSub.overlays = performance.now() - tOverlays;
-    if (state.webgpuSelection && clodErrorCompute) {
-      const dispatchKey = webGpuDispatchKey(params);
-      const dispatchDue = selectionFrameId - lastWebGpuDispatchFrame >= WEBGPU_DISPATCH_INTERVAL_FRAMES;
-      if (dispatchDue && (!gpuMap || dispatchKey !== lastWebGpuDispatchKey)) {
-        let dispatchOptions: DispatchOptions;
-        switch (queryReadbackMode) {
-          case "off":
-            dispatchOptions = { readback: false };
-            break;
-          case "once": {
-            const cv = clodErrorCompute.currentVersion();
-            const shouldReadback = !readbackOnceConsumed || lastReadbackOnceVersion !== cv;
-            dispatchOptions = { readback: shouldReadback };
-            break;
-          }
-          default:
-            dispatchOptions = { readback: true };
-            break;
-        }
-        if (clodErrorCompute.dispatch(params, selectionFrameId, dispatchOptions)) {
-          lastWebGpuDispatchFrame = selectionFrameId;
-          lastWebGpuDispatchKey = dispatchKey;
-        }
-      }
-    }
-    lastSelectionMs = performance.now() - selectionStart;
-  };
+  cutChangedRef.fn = updateInfo;
 
   // Swap a rebuilt node's mesh into its view (and, for LOD0, its collider + raw-chunk
-  // bubble). Returns the collider-update cost in ms (0 for parents). Shared by the
-  // synchronous LOD0 phase and the deferred ancestor drain.
-  const applyNodeMesh = (node: ClodPageNode): number => {
+  // bubble). Returns geometry-swap and collider-update cost in ms (0 for parents).
+  // Shared by the synchronous LOD0 phase and the deferred ancestor drain.
+  const applyNodeMesh = (node: ClodPageNode): { geometrySwapMs: number; colliderMs: number } => {
     const v = views.get(node.id);
+    let geometrySwapMs = 0;
     if (v) {
+      const gs = performance.now();
       v.mesh.geometry.dispose();
       v.mesh.geometry = toGeometry(node.mesh);
       v.sourceNormals = node.mesh.normals;
@@ -3016,8 +1751,9 @@ async function main() {
       if (state.recomputedNormals) {
         v.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(v), 3));
       }
+      geometrySwapMs = performance.now() - gs;
     }
-    if (node.level !== 0) return 0;
+    if (node.level !== 0) return { geometrySwapMs, colliderMs: 0 };
     const tc = performance.now();
     terrainColliders.updatePage(node.id, node.mesh);
     // drop the cached raw-chunk bubble meshes; they regenerate lazily when owned
@@ -3028,13 +1764,13 @@ async function main() {
       for (const unsub of chunkEntry.unsubs) unsub();
       for (const m of chunkEntry.mats) {
         // Never dispose the shared pooled material (still used by every other terrain mesh).
-        if (m === sharedTerrainMaterial) continue;
-        terrainMaterials.delete(m);
+        if (m === materialController.sharedMaterial) continue;
+        materialController.materials.delete(m);
         m.material.dispose();
       }
       chunkGroups.delete(node.id);
     }
-    return performance.now() - tc;
+    return { geometrySwapMs, colliderMs: performance.now() - tc };
   };
 
   let pendingParentNodes = 0;
@@ -3046,12 +1782,11 @@ async function main() {
       applyNodeMesh(node);
       staleEditedAncestorIds.delete(node.id);
     }
-    clodErrorCompute?.patchNodes(batch.changed);
+    selectionController.patchNodes(batch.changed);
     pendingParentNodes = batch.parentNodes;
     pendingParentMs = batch.parentMs;
     pendingParentCount = batch.pendingParents;
-    lastCutHash = -1;
-    lastDebugKey = "";
+    selectionController.invalidate();
     if (!state.freeze) updateSelection();
     updateInfo();
   };
@@ -3067,89 +1802,117 @@ async function main() {
     updateInfo();
   };
 
-  const flushAncestors = async () => {
-    await clodWorker.flushParents();
+  let terraformEditCheckbox: HTMLInputElement | null = null;
+  const playerTerraformEditActive = () => terraformEditCheckbox?.checked ?? false;
+
+  const terrainEditService = createTerrainEditService({
+    clodWorker,
+    terrainRaycast,
+    getBrushParams: () => ({
+      digRadius: state.digRadius,
+      brushShape: state.brushShape,
+      brushOp: state.brushOp,
+      brushMaterial: state.brushMaterial,
+      brushHeight: state.brushHeight,
+      brushStrength: state.brushStrength,
+      brushFalloff: state.brushFalloff,
+    }),
+    getVegetationState: () => ({
+      grassEnabled: state.grassEnabled,
+      treesEnabled: state.treesEnabled,
+      understoryEnabled: state.understoryEnabled,
+    }),
+    applyNodeMesh,
+    markEditedAncestorsStale,
+    selectionController,
+    applyTerrainTextures,
+    grassSystem,
+    treeSystem,
+    understorySystem,
+    vegetationDirtyQueue,
+    fallingTrees,
+    refreshGrassStats,
+    refreshTreeStats,
+    refreshUnderstoryStats,
+    updateInfo,
+    getLastDigSummary: () => lastDigSummary,
+    setLastDigSummary: (summary) => { lastDigSummary = summary; },
+    setPendingParentCount: (count) => { pendingParentCount = count; },
+    setPendingParentNodes: (nodes) => { pendingParentNodes = nodes; },
+    setPendingParentMs: (ms) => { pendingParentMs = ms; },
+  });
+  const flushAncestors = () => terrainEditService.flushAncestors();
+  const scheduleDig = (ray: THREE.Ray) => terrainEditService.scheduleDig(ray);
+
+  let playerModeController!: ReturnType<typeof createPlayerModeController>;
+  let playerInputController!: ReturnType<typeof createPlayerInputController>;
+  let digRadiusController!: { updateDisplay: () => unknown };
+
+  const wirePlayerControllers = () => {
+    playerInputController = createPlayerInputController({
+      renderer,
+      camera,
+      controls,
+      player,
+      interaction,
+      getDigEnabled: () => state.digEnabled,
+      getTerraformEditActive: playerTerraformEditActive,
+      getBrushFlowMs: () => state.brushFlowMs,
+      scheduleDig,
+      getLastDigAt: () => terrainEditService.lastDigAt,
+      onTabUiHoldChange: () => { playerModeController.updatePlayerModeUi(); },
+      onPlayerModeUiChange: () => { playerModeController.updatePlayerModeUi(); },
+      exitPlayerMode: () => playerModeController.exitPlayerMode(),
+      adjustDigRadius: (delta) => {
+        state.digRadius = THREE.MathUtils.clamp(state.digRadius - Math.sign(delta) * 0.5, 1, 8);
+        digRadiusController.updateDisplay();
+        syncTerraformMenu();
+        updateInfo();
+      },
+    });
+    playerModeController = createPlayerModeController({
+      renderer,
+      camera,
+      controls,
+      player,
+      interaction,
+      terrainColliders,
+      surfaceHeight,
+      orbitModeButton,
+      playerModeButton,
+      playerModeStatus,
+      searchParams,
+      getTerraformEditActive: playerTerraformEditActive,
+      getTabUiHold: () => playerInputController.tabUiHold,
+      onBeforeExitMode: () => playerInputController.onBeforeExitMode(),
+      resetPlayerInput: () => playerInputController.resetPlayerInput(),
+      onStartPlayingFacing: (yaw, pitch) => playerInputController.setPlayerYawPitch(yaw, pitch),
+    });
+    resetPlayerInput = () => playerInputController.resetPlayerInput();
+    updatePlayerModeUi = () => playerModeController.updatePlayerModeUi();
+    playerModeController.applyQuerySpawn();
+    playerModeController.updatePlayerModeUi();
   };
 
-  // Carve a sphere where the ray hits, then pay the CLOD edit cost. The LOD0 pages
-  // (the surface you're looking at) plus their colliders rebuild synchronously so the
-  // hole appears now; the LOD1+ ancestor chain is queued for the per-frame drain above.
-  // The timing breakdown lands in the overlay + console — that's the experiment.
-  let digRebuildsInFlight = 0;
-  const performDig = async (ray: THREE.Ray) => {
-    if (digRebuildsInFlight > 0) return;
-    const hit = raycastEditableTerrain(ray);
-    if (!hit) {
-      lastDigSummary = "no terrain under brush";
-      updateInfo();
-      return;
-    }
-    const radius = state.digRadius;
-    const edit = {
-      x: hit.point.x, y: hit.point.y, z: hit.point.z, r: radius,
-      shape: state.brushShape, op: state.brushOp,
-      material: state.brushOp === "add" ? state.brushMaterial : undefined,
-      height: state.brushHeight, strength: state.brushStrength, falloff: state.brushFalloff,
-    };
-    const hadPaintedTerrain = getDigEditsSnapshot().some((existing) => existing.op === "add");
-    addDigEdit(edit);
-    if (!hadPaintedTerrain && edit.op === "add") applyTerrainTextures();
-
-    // One relevant terrain sound per edit: earthy "dig" for remove, "raise" for add.
-    emitAudio(state.brushOp === "add" ? "terrain.raise" : "terrain.dig.tick");
-
-    const t0 = performance.now();
-    const margin = radius + DIG_INFLUENCE_MARGIN;
-    lastDigAt = t0;
-    digRebuildsInFlight++;
-    try {
-      const lod0 = await clodWorker.rebuildAfterDig(edit, {
-        minX: hit.point.x - margin,
-        maxX: hit.point.x + margin,
-        minZ: hit.point.z - margin,
-        maxZ: hit.point.z + margin,
-      });
-
-      let colliderMs = 0;
-      for (const node of lod0.changed) colliderMs += applyNodeMesh(node);
-      if (lod0.pendingParents > 0) markEditedAncestorsStale(lod0.changed);
-      clodErrorCompute?.patchNodes(lod0.changed);
-      if (state.grassEnabled && lod0.changed.length > 0) {
-        grassSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
+  const drainVegetationDirtyQueue = (): void => {
+    drainVegetationDirty({
+      queue: vegetationDirtyQueue,
+      grassEnabled: state.grassEnabled,
+      treesEnabled: state.treesEnabled,
+      understoryEnabled: state.understoryEnabled,
+      markGrassDirty: () => {
+        grassSystem.markPatchesDirty();
         refreshGrassStats();
-      }
-      if (state.treesEnabled && lod0.changed.length > 0) {
-        treeSystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
+      },
+      markTreesDirty: () => {
+        treeController.markPatchesDirty();
         refreshTreeStats();
-      }
-      if (state.understoryEnabled && lod0.changed.length > 0) {
-        understorySystem?.rebuildNodePatches(lod0.changed.map((node) => node.id));
+      },
+      markUnderstoryDirty: () => {
+        understoryController.markPatchesDirty();
         refreshUnderstoryStats();
-      }
-      pendingParentNodes = 0;
-      pendingParentMs = 0;
-      pendingParentCount = lod0.pendingParents;
-
-      const totalMs = performance.now() - t0;
-      lastDigSummary =
-        `${totalMs.toFixed(0)}ms worker LOD0 (build ${lod0.lod0Ms.toFixed(0)}ms · ${lod0.lod0Pages}p · ` +
-        `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · collider ${colliderMs.toFixed(0)}ms)`;
-      console.log(
-        `[${state.brushOp} ${state.brushShape} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${lastDigSummary} — ${pendingParentCount} ancestors queued in worker`,
-      );
-      lastCutHash = -1;
-      lastDebugKey = "";
-      updateSelection();
-      updateInfo();
-    } catch (error) {
-      emitAudio("clod.rebuild.error");
-      if (error instanceof Error && error.name === "ClodBuildError") {
-        emitAudio("clod.validation.error");
-      }
-      throw error;
-    } finally {
-      digRebuildsInFlight--;
-    }
+      },
+    });
   };
 
   updateLighting();
@@ -3211,1317 +1974,157 @@ async function main() {
       colorByLodUserOverride = true;
       applyColorByLodToMaterials(true);
       nodeLabelOverlay.setVisible(false);
-      lockedBorderOverlay.rebuild(lastRenderedNodes, false);
+      lockedBorderOverlay.rebuild(selectionController.stats().renderedNodes, false);
       grassSystem?.setEnabled(false);
       postProcess?.updateSettings(currentPostProcessSettings());
       applyTerrainTextures();
     }
     skyEnvironment?.setVisible(!enabled);
     setPerfModeQuery(enabled);
-    lastDebugKey = "";
+    selectionController.invalidate();
     updateSelection();
     updateInfo();
   };
 
-  const gui = new GUI();
-  gui
-    .add({ world: String(WORLD) }, "world", WORLD_OPTIONS.map(String))
-    .name("world size (reloads)")
-    .onChange((w: string) => {
-      const next = new URLSearchParams(location.search);
-      next.set("world", w);
-      location.search = `?${next.toString()}`;
-    });
-  gui.add(state, "clodPerfMode").name("CLOD perf mode").onChange(applyClodPerfMode);
-  gui.add(state, "materialTiers").name("material tiers").onChange((enabled: boolean) => {
-    setMaterialTiersQuery(enabled);
-    // When disabling, reset all visible pages to near tier (0).
-    if (!enabled) {
-      for (const v of views.values()) v.mat.setTier(0);
-    }
-  });
-  gui.add(state, "webgpuSelection").name("WebGPU selection").onChange((enabled: boolean) => {
-    setWebGpuSelectionQuery(enabled);
-    if (enabled) {
-      void ensureClodErrorCompute().then(() => {
-        lastCutHash = -1;
-        updateSelection();
-        updateInfo();
-      });
-      return;
-    }
-    lastCutHash = -1;
-    updateSelection();
-    updateInfo();
-  });
-  gui.add(state, "farShellEnabled").name("far shell").onChange((on: boolean) => {
-    if (!farShellState.current) return;
-    if (on) scene.add(farShellState.current.mesh);
-    else scene.remove(farShellState.current.mesh);
-  });
-  gui.add(state, "profileEnabled").name("profiling");
-  gui.add(state, "thresholdPx", 0.1, 6, 0.05).name("error threshold px").onChange(updateSelection);
-  gui.add(state, "forceMaxLevel", ["auto", "0", "1", "2", "3"]).name("force max level").onChange(() => {
-    selState = { split: new Set() };
-    updateSelection();
-  });
-  gui.add(state, "enforce21").name("2:1 constraint").onChange(updateSelection);
-  gui.add(state, "freeze").name("freeze selection").onChange((on: boolean) => {
-    emitAudio(on ? "clod.selection.freeze.on" : "clod.selection.freeze.off");
-  });
-  gui.add(state, "showBounds").name("page boundaries").onChange(() => {
-    updateSelection();
-    emitAudio("clod.overlay.toggle");
-  });
-  gui.add(state, "showSeamPoints").name("same-LOD seam points").onChange(() => {
-    updateSelection();
-    emitAudio("clod.overlay.toggle");
-  });
-  gui.add(state, "showCrossLodBorders").name("cross-LOD borders").onChange(() => {
-    updateSelection();
-    emitAudio("clod.overlay.toggle");
-  });
-  gui.add(state, "showNodeLabels").name("show floating node labels").onChange((on: boolean) => {
-    nodeLabelOverlay.setVisible(on);
-    emitAudio("clod.overlay.toggle");
-  });
-  gui.add(state, "showLockedBorderVertices").name("show locked border vertices").onChange(() => {
-    updateSelection();
-    emitAudio("clod.locked-border.toggle");
-  });
-  gui.add(state, "wireframe").name("wireframe").onChange((on: boolean) => {
-    for (const v of views.values()) v.mat.setWireframe(on);
-    emitAudio("clod.wireframe.toggle");
-  });
-  gui.add(state, "normalColor").name("normal colours").onChange((on: boolean) => {
-    forEachTerrainMaterial((m) =>
-      m.setDebug({ normalColor: on, normalDivergence: state.normalDivergence, divergenceGain: state.divergenceGain }),
-    );
-  });
-  const normalDivergenceController = gui.add(state, "normalDivergence").name("normal divergence").onChange((on: boolean) => {
-    forEachTerrainMaterial((m) =>
-      m.setDebug({ normalColor: state.normalColor, normalDivergence: on, divergenceGain: state.divergenceGain }),
-    );
-  });
-  const divergenceGainController = gui.add(state, "divergenceGain", 1, 32, 0.5).name("divergence gain").onChange((gain: number) => {
-    forEachTerrainMaterial((m) =>
-      m.setDebug({ normalColor: state.normalColor, normalDivergence: state.normalDivergence, divergenceGain: gain }),
-    );
-  });
-  if (isWebGpu) {
-    normalDivergenceController.name("normal divergence (WebGL)");
-    normalDivergenceController.disable();
-    divergenceGainController.disable();
-  }
-  gui.add(state, "frontSideOnly").name("front side only").onChange((on: boolean) => {
-    forEachTerrainMaterial((m) => m.setSide(on ? THREE.FrontSide : THREE.DoubleSide));
-  });
-  gui.add(state, "recomputedNormals").name("recomputed normals").onChange((on: boolean) => {
-    for (const v of views.values()) {
-      const g = v.mesh.geometry as THREE.BufferGeometry;
-      g.setAttribute("normal", new THREE.BufferAttribute(on ? recomputedNormalsFor(v) : v.sourceNormals, 3));
-      g.attributes.normal.needsUpdate = true;
-    }
-  });
-  colorByLodController = gui.add(state, "colorByLod").name("color by LOD").onChange((on: boolean) => {
-    colorByLodUserOverride = true;
-    applyColorByLodToMaterials(on);
-    emitAudio("clod.lod.toggle");
-  });
-
-  const audioFolder = gui.addFolder("Audio");
-  audioFolder.add(state, "audioEnabled").name("Audio feedback").onChange((enabled: boolean) => {
-    setAudioEnabled(enabled);
-  });
-  audioFolder.add(state, "audioVolume", 0, 1, 0.05).name("Master volume").onChange((volume: number) => {
-    setMasterVolume(volume);
-  });
-  const environmentFolder = gui.addFolder("sky + environment");
-  const environmentControllers = [
-    environmentFolder.add(state, "sunAzimuthDeg", 0, 360, 1).name("sun azimuth").onChange(updateLighting),
-    environmentFolder.add(state, "sunElevationDeg", 5, 85, 1).name("sun elevation").onChange(updateLighting),
-    environmentFolder.add(state, "sunIntensity", 0, 2.5, 0.05).name("sun intensity").onChange(updateLighting),
-    environmentFolder.add(state, "skyIntensity", 0, 2, 0.05).name("sky fill").onChange(updateLighting),
-    environmentFolder.add(state, "groundIntensity", 0, 2, 0.05).name("ground fill").onChange(updateLighting),
-    environmentFolder.add(state, "exposure", 0.4, 2, 0.05).name("exposure").onChange(updateLighting),
-    environmentFolder.add(state, "horizonSoftness", 0.2, 2.5, 0.01).name("horizon softness").onChange(updateLighting),
-    environmentFolder.add(state, "sunDiskIntensity", 0, 4, 0.05).name("sun disk").onChange(updateLighting),
-    environmentFolder.add(state, "sunGlowIntensity", 0, 4, 0.05).name("sun glow").onChange(updateLighting),
-    environmentFolder.add(state, "hazeIntensity", 0, 1.5, 0.01).name("haze").onChange(updateLighting),
-  ];
-  const environmentActions = {
-    reset: () => {
-      Object.assign(state, DEFAULT_ENVIRONMENT_SETTINGS);
-      updateLighting();
-      for (const controller of environmentControllers) controller.updateDisplay();
-    },
-  };
-  environmentFolder.add(environmentActions, "reset").name("reset");
-  // TODO: Add editable sky color controls after the environment module is stable.
-  const colorFolder = gui.addFolder("terrain color");
-  const colorControllers = [
-    colorFolder.add(state, "terrainBrightness", 0.2, 2.5, 0.01).name("brightness").onChange(applyColorAdjustmentsToTerrain),
-    colorFolder.add(state, "terrainContrast", 0.2, 2.5, 0.01).name("contrast").onChange(applyColorAdjustmentsToTerrain),
-    colorFolder.add(state, "terrainSaturation", 0.0, 2.5, 0.01).name("saturation").onChange(applyColorAdjustmentsToTerrain),
-    colorFolder.add(state, "terrainWarmth", -1.0, 1.0, 0.01).name("warmth").onChange(applyColorAdjustmentsToTerrain),
-  ];
-  const colorActions = {
-    reset: () => {
-      state.terrainBrightness = DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.brightness;
-      state.terrainContrast = DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.contrast;
-      state.terrainSaturation = DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.saturation;
-      state.terrainWarmth = DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.warmth;
-      applyColorAdjustmentsToTerrain();
-      for (const controller of colorControllers) controller.updateDisplay();
-    },
-  };
-  colorFolder.add(colorActions, "reset").name("reset");
-  const postFolder = gui.addFolder("postprocess");
-  const postControllers = [
-    postFolder.add(state, "postProcessEnabled").name("enabled"),
-    postFolder.add(state, "postProcessDebugMode", ["output", "copy", "off"]).name("mode"),
-    postFolder.add(state, "postProcessOpacity", 0, 1, 0.01).name("copy opacity"),
-    postFolder.add(state, "postProcessExposure", 0.25, 2.5, 0.01).name("pass exposure"),
-    postFolder.add(state, "postProcessContrast", 0.25, 2.5, 0.01).name("contrast"),
-    postFolder.add(state, "postProcessSaturation", 0, 2.5, 0.01).name("saturation"),
-    postFolder.add(state, "postProcessVignette", 0, 1.5, 0.01).name("vignette"),
-  ];
-  const postActions = {
-    reset: () => {
-      state.postProcessEnabled = DEFAULT_POST_PROCESS_SETTINGS.enabled;
-      state.postProcessOpacity = DEFAULT_POST_PROCESS_SETTINGS.opacity;
-      state.postProcessExposure = DEFAULT_POST_PROCESS_SETTINGS.exposure;
-      state.postProcessContrast = DEFAULT_POST_PROCESS_SETTINGS.contrast;
-      state.postProcessSaturation = DEFAULT_POST_PROCESS_SETTINGS.saturation;
-      state.postProcessVignette = DEFAULT_POST_PROCESS_SETTINGS.vignette;
-      state.postProcessDebugMode = DEFAULT_POST_PROCESS_SETTINGS.debugMode;
-      postProcess?.updateSettings(currentPostProcessSettings());
-      for (const controller of postControllers) controller.updateDisplay();
-    },
-  };
-  postFolder.add(postActions, "reset").name("reset");
-  const weatherFolder = gui.addFolder("weather");
   let weatherStatsController: { updateDisplay: () => unknown } | null = null;
-  const updateWeatherStats = () => {
-    if (state.weatherMode === "rain") {
-      const stats = rainWeather.getStats();
-      state.weatherStats = `rain terrain ${stats.hardSplashes} / water ${stats.waterSplashes}`;
-    } else if (state.weatherMode === "snow") {
-      const stats = snowWeather.getStats();
-      state.weatherStats = `snow ${stats.flakes} flakes`;
-    } else if (state.weatherMode === "sandstorm") {
-      const stats = sandstormWeather.getStats();
-      state.weatherStats = `sandstorm ${stats.particles} puffs${stats.haze ? " + haze" : ""}`;
-    } else {
-      state.weatherStats = "off";
-    }
-  };
-  const applyWeatherSettings = () => {
-    rainWeather.applySettings(currentRainWeatherSettings());
-    snowWeather.applySettings(currentSnowWeatherSettings());
-    sandstormWeather.applySettings(currentSandstormWeatherSettings());
-    updateWeatherStats();
-    weatherStatsController?.updateDisplay();
-  };
-  weatherFolder.add(state, "weatherMode", WEATHER_MODE_OPTIONS).name("mode").onChange(applyWeatherSettings);
-  weatherFolder.add(state, "weatherIntensity", 0, 1.6, 0.05).name("intensity").onChange(applyWeatherSettings);
-  weatherFolder.add(state, "weatherWindX", -5, 5, 0.05).name("wind X").onChange(applyWeatherSettings);
-  weatherFolder.add(state, "weatherWindZ", -5, 5, 0.05).name("wind Z").onChange(applyWeatherSettings);
-  weatherStatsController = weatherFolder.add(state, "weatherStats").name("shader stats").disable();
   let grassBladeCountController: { updateDisplay: () => unknown } | null = null;
   let grassVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
   let grassTierSummaryController: { updateDisplay: () => unknown } | null = null;
   let grassEdgeSuppressedController: { updateDisplay: () => unknown } | null = null;
   let grassCandidateCountController: { updateDisplay: () => unknown } | null = null;
-  let grassPatchRebuildCountController: { updateDisplay: () => unknown } | null = null;
-  let grassBuildMsController: { updateDisplay: () => unknown } | null = null;
-  const refreshGrassStats = () => {
-    if (!grassSystem) return;
-    grassStats = grassSystem.getStats();
-    state.grassBladeCount = grassStats.blades;
-    state.grassVisiblePatches = `${grassStats.visiblePatches}/${grassStats.patches}`;
-    state.grassTierSummary = `${grassStats.nearPatches}/${grassStats.midPatches}/${grassStats.coveragePatches}/${grassStats.superPatches}`;
-    state.grassEdgeSuppressed = grassStats.edgeSuppressedCandidates;
-    state.grassCandidateCount = grassStats.generatedCandidates;
-    state.grassPatchRebuildCount = grassStats.patchRebuildCount;
-    state.grassBuildMs = Number(grassStats.buildMs.toFixed(2));
-    grassBladeCountController?.updateDisplay();
-    grassVisiblePatchesController?.updateDisplay();
-    grassTierSummaryController?.updateDisplay();
-    grassEdgeSuppressedController?.updateDisplay();
-    grassCandidateCountController?.updateDisplay();
-    grassPatchRebuildCountController?.updateDisplay();
-    grassBuildMsController?.updateDisplay();
-  };
-  const grassActions = {
-    rebuild: () => {
-      grassSystem?.updateSettings(makeGrassSettings());
-      grassSystem?.rebuild();
-      refreshGrassStats();
-      updateInfo();
+  const guiResult = createClodPocGui(state, {
+    clod: {
+      world: WORLD,
+      worldOptions: clodRuntime.runtime.worldOptions,
+      isWebGpu,
+      views: views.values(),
+      materialController,
+      selectionController,
+      farShellController,
+      nodeLabelOverlay,
+      applyClodPerfMode,
+      setMaterialTiersQuery,
+      setWebGpuSelectionQuery,
+      ensureClodErrorCompute,
+      updateSelection,
+      updateInfo,
+      applyColorByLodToMaterials,
+      setColorByLodUserOverride: (on) => { colorByLodUserOverride = on; },
+      recomputedNormalsFor: (view) => recomputedNormalsFor(view as NodeView),
     },
-  };
-  const updateGrassUniforms = () => grassSystem?.updateSettings(makeGrassSettings());
-  const grassFolder = gui.addFolder("grass shader");
-  const grassShaderOptions = Object.fromEntries(
-    GRASS_SHADER_MODES.map((mode) => [
-      mode === "terrain-patch-v2"
-        ? "terrain patch v2"
-        : mode === "webgpu-ring-v1" ? "webgpu ring v1" : "classic",
-      mode,
-    ]),
-  );
-  grassFolder.add(state, "grassEnabled").name("enabled").onChange((enabled: boolean) => {
-    grassSystem?.setEnabled(enabled);
-    refreshGrassStats();
-    updateInfo();
+    environment: {
+      updateLighting,
+      applyColorAdjustmentsToTerrain,
+      currentPostProcessSettings,
+      postProcess,
+    },
+    weather: {
+      weatherController,
+      applyWeatherSettings,
+    },
+    vegetation: {
+      grassController,
+      stoneController,
+      treeController,
+      understoryController,
+      forestLightingController,
+      farShellController,
+      treeSystem,
+      understorySystem,
+      treeConfig,
+      understoryConfig,
+      renderer,
+      visibleStoneClasses,
+      updateInfo,
+      bakeImpostorsOnStart: treeConfig.impostors.bakeOnStart,
+      impostorsEnabled: treeConfig.impostors.enabled,
+    },
+    water: {
+      waterController,
+      waterDebugState,
+      makeWaterVisual,
+      setWaterEnabled: (enabled) => { state.waterEnabled = enabled; },
+      setWaterDebugMode: (mode) => { state.waterDebugMode = mode; },
+      setWaterClipmapTint: (enabled) => { state.waterClipmapTint = enabled; },
+      setWaterWireframe: (enabled) => { state.waterWireframe = enabled; },
+      setWaterDepthWrite: (on) => { state.waterDepthWrite = on; },
+    },
   });
-  grassFolder.add(state, "grassRingDebug").name("ring debug log").onChange((on: boolean) => {
-    grassSystem?.setRingDebug(on);
-  });
-  grassFolder.add(state, "grassShaderMode", grassShaderOptions).name("shader").onChange(grassActions.rebuild);
-  grassFolder.add(state, "grassAlphaToCoverage").name("alpha to coverage").onChange(updateGrassUniforms);
-  grassFolder.add(state, "grassNearCrossedQuads").name("near crossed quads").onChange(grassActions.rebuild);
-  grassFolder.add(state, "grassDistance", 16, 512, 1).name("distance").onChange(updateGrassUniforms);
-  grassFolder.add(state, "grassBladeSpacing", 0.4, 6, 0.1).name("blade spacing").onFinishChange(grassActions.rebuild);
-  grassFolder.add(state, "grassBladeHeight", 0.2, 4, 0.05).name("blade height").onFinishChange(grassActions.rebuild);
-  grassFolder.add(state, "grassBladeHeightVariation", 0, 1, 0.05).name("height variation").onFinishChange(grassActions.rebuild);
-  grassFolder.add(state, "grassBladeWidth", 0.01, 0.4, 0.01).name("blade width").onChange(updateGrassUniforms);
-  grassFolder.add(state, "grassWindStrength", 0, 1.5, 0.01).name("wind strength").onChange(updateGrassUniforms);
-  grassFolder.add(state, "grassWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateGrassUniforms);
-  grassFolder.add(state, "grassSlopeMinY", 0, 1, 0.01).name("slope min Y").onFinishChange(grassActions.rebuild);
-  grassFolder.add(state, "grassMinHeight", 0, 128, 1).name("min height").onFinishChange(grassActions.rebuild);
-  grassFolder.add(state, "grassMaxHeight", 0, 128, 1).name("max height").onFinishChange(grassActions.rebuild);
-  grassFolder.add(state, "grassMaxBlades", 0, 100000, 1000).name("max blades").onFinishChange(grassActions.rebuild);
-  grassFolder.add(state, "grassSeed", 0, 100000, 1).name("seed").onFinishChange(grassActions.rebuild);
-  grassBladeCountController = grassFolder.add(state, "grassBladeCount").name("blade count").disable();
-  grassVisiblePatchesController = grassFolder.add(state, "grassVisiblePatches").name("visible patches").disable();
-  grassTierSummaryController = grassFolder.add(state, "grassTierSummary").name("near/mid/far/super").disable();
-  grassEdgeSuppressedController = grassFolder.add(state, "grassEdgeSuppressed").name("edge suppressed").disable();
-  grassCandidateCountController = grassFolder.add(state, "grassCandidateCount").name("candidates").disable();
-  grassPatchRebuildCountController = grassFolder.add(state, "grassPatchRebuildCount").name("patch rebuilds").disable();
-  grassBuildMsController = grassFolder.add(state, "grassBuildMs").name("build ms").disable();
-  grassFolder.add(grassActions, "rebuild").name("rebuild");
+  const gui = guiResult.gui;
+  colorByLodController = guiResult.colorByLodController;
+  weatherStatsController = guiResult.weatherStatsController;
+  refreshGrassStats = guiResult.refreshGrassStats;
+  refreshTreeStats = guiResult.refreshTreeStats;
+  refreshUnderstoryStats = guiResult.refreshUnderstoryStats;
+  onStoneScatterComplete = guiResult.onStoneScatterComplete;
+  forestLightingStatsController = guiResult.forestLightingStatsController;
+  ({
+    grassBladeCount: grassBladeCountController,
+    grassVisiblePatches: grassVisiblePatchesController,
+    grassTierSummary: grassTierSummaryController,
+    grassEdgeSuppressed: grassEdgeSuppressedController,
+    grassCandidateCount: grassCandidateCountController,
+    stoneTotal: stoneTotalController,
+    stoneClassSummary: stoneClassSummaryController,
+    stoneVisible: stoneVisibleController,
+    treeTotal: treeTotalController,
+    treeVisiblePatches: treeVisiblePatchesController,
+    treeLodSummary: treeLodSummaryController,
+    treeGpuSummary: treeGpuSummaryController,
+    understoryTotal: understoryTotalController,
+    understoryVisiblePatches: understoryVisiblePatchesController,
+    understoryClassSummary: understoryClassSummaryController,
+    understoryGpuSummary: understoryGpuSummaryController,
+  } = guiResult.statControllers);
 
-  // LV-2: Far terrain shell dev controls (visible when ?farShell=1 or long-view).
-  const farShellFolder = gui.addFolder("far shell");
-  farShellFolder.add(state, "farShellEnabled").name("enabled").onChange((enabled: boolean) => {
-    if (enabled) {
-      if (!farShellState.current) {
-        farShellState.rebuild();
-      } else {
-        scene.add(farShellState.current.mesh);
-      }
-    } else if (farShellState.current) {
-      scene.remove(farShellState.current.mesh);
-    }
-    updateInfo();
-  });
-  farShellFolder.add(state, "farShellRadiusFactor", 1.0, 2.5, 0.05)
-    .name("far radius (×world)")
-    .onFinishChange(() => farShellState.rebuild());
-  farShellFolder.add(state, "farShellHeightBias", 0, 1, 0.01)
-    .name("height bias")
-    .onFinishChange(() => farShellState.rebuild());
-  farShellFolder.add(state, "farShellHeightDrop", 0, 10, 0.1)
-    .name("height drop")
-    .onFinishChange(() => farShellState.rebuild());
-  farShellFolder.add({ rebuild: () => farShellState.rebuild() }, "rebuild").name("rebuild");
-
-  let stoneTotalController: { updateDisplay: () => unknown } | null = null;
-  let stoneClassSummaryController: { updateDisplay: () => unknown } | null = null;
-  let stoneVisibleController: { updateDisplay: () => unknown } | null = null;
-  const refreshStoneStats = () => {
-    if (!stoneSystem) return;
-    stoneStats = stoneSystem.getStats();
-    state.stoneTotal = stoneStats.total;
-    state.stoneClassSummary = `${stoneStats.large}/${stoneStats.medium}/${stoneStats.small}`;
-    state.stoneVisible = stoneStats.visible;
-    stoneTotalController?.updateDisplay();
-    stoneClassSummaryController?.updateDisplay();
-    stoneVisibleController?.updateDisplay();
-  };
-  onStoneScatterComplete = () => {
-    refreshStoneStats();
-    updateInfo();
-  };
-  const stoneActions = {
-    rebuild: () => {
-      stoneSystem?.updateSettings(makeStoneSettings());
-      stoneSystem?.setVisibleClasses(visibleStoneClasses());
-      refreshStoneStats();
-      updateInfo();
+  const textureProgress = {
+    setPhase: (label: string, fraction: number) => {
+      buildProgress.hidden = false;
+      buildProgressPhase.textContent = label;
+      buildProgressPercent.textContent = `${Math.round(fraction * 100)}%`;
+      buildProgressBar.value = fraction;
     },
   };
-  const stoneFolder = gui.addFolder("stones (props)");
-  stoneFolder.add(state, "stonesEnabled").name("enabled").onChange((enabled: boolean) => {
-    stoneSystem?.setEnabled(enabled);
-    refreshStoneStats();
-    updateInfo();
-  });
-  stoneFolder.add(state, "stoneDensity", 0, 2, 0.05).name("density").onFinishChange(stoneActions.rebuild);
-  stoneFolder.add(state, "stoneMaxInstances", 0, 500000, 1000).name("max instances").onFinishChange(stoneActions.rebuild);
-  stoneFolder.add(state, "stoneSeed", 0, 1000000, 1).name("seed").onFinishChange(stoneActions.rebuild);
-  stoneFolder.add(state, "stoneShowLarge").name("show large").onChange(() => stoneSystem?.setVisibleClasses(visibleStoneClasses()));
-  stoneFolder.add(state, "stoneShowMedium").name("show medium").onChange(() => stoneSystem?.setVisibleClasses(visibleStoneClasses()));
-  stoneFolder.add(state, "stoneShowSmall").name("show small").onChange(() => stoneSystem?.setVisibleClasses(visibleStoneClasses()));
-  stoneTotalController = stoneFolder.add(state, "stoneTotal").name("total").disable();
-  stoneClassSummaryController = stoneFolder.add(state, "stoneClassSummary").name("L/M/S").disable();
-  stoneVisibleController = stoneFolder.add(state, "stoneVisible").name("visible").disable();
-  stoneFolder.add(stoneActions, "rebuild").name("rebuild");
-
-  let treeTotalController: { updateDisplay: () => unknown } | null = null;
-  let treeVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
-  let treeLodSummaryController: { updateDisplay: () => unknown } | null = null;
-  let treeGpuSummaryController: { updateDisplay: () => unknown } | null = null;
-  const formatTreeGpuSummary = (stats: TreeStats): string =>
-    stats.gpuStatus === "disabled"
-      ? "disabled"
-      : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}`;
-  const refreshTreeStats = () => {
-    if (!treeSystem) return;
-    treeStats = treeSystem.getStats();
-    state.treeTotal = formatTreeTotalDisplay(treeStats);
-    state.treeVisiblePatches = `${treeStats.visiblePatches}/${treeStats.patches}`;
-    state.treeLodSummary = `${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}`;
-    state.treeGpuSummary = formatTreeGpuSummary(treeStats);
-    treeTotalController?.updateDisplay();
-    treeVisiblePatchesController?.updateDisplay();
-    treeLodSummaryController?.updateDisplay();
-    treeGpuSummaryController?.updateDisplay();
-  };
-  // Kicked off here (not at TreeSystem construction) so the fire-and-forget
-  // `.then` — which resolves immediately on WebGPU, where baking is unsupported —
-  // can safely call refreshTreeStats/updateInfo, which are defined by this point.
-  if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
-    void treeSystem.bakeImpostors(renderer).then((result) => {
-      if (!result.supported) console.info(`[trees] impostor baking fallback: ${result.reason ?? "unsupported"}`);
-      refreshTreeStats();
-      updateInfo();
-    });
-  }
-  const updateTreeWindSettings = () => treeSystem?.updateSettings({
-    wind: {
-      ...treeConfig.wind,
-      enabled: state.treeWindEnabled,
-      strength: state.treeWindStrength,
-      speed: state.treeWindSpeed,
-      gustStrength: state.treeGustStrength,
-      trunkSwayStrength: state.treeTrunkSwayStrength,
-      leafFlutterStrength: state.treeLeafFlutterStrength,
+  const textureModal = createTerrainTextureModal({
+    textureController,
+    textureLoadOptions,
+    applyTerrainTextures,
+    setLoadedTextureFiles: (value) => {
+      state.loadedTextureFiles = value;
+    },
+    onBrushMaterialClamped: (maxIndex) => {
+      if (state.brushMaterial > maxIndex) state.brushMaterial = 0;
     },
   });
-  const updateTreeRenderSettings = () => treeSystem?.updateSettings({
-    render: {
-      ...treeConfig.render,
-      debugColorByLod: state.treeDebugColorByLod,
-    },
-  });
-  const updateTreeGpuSettings = () => {
-    treeSystem?.updateSettings({
-      gpu: {
-        ...treeConfig.gpu,
-        enabled: state.treeGpuEnabled,
-        debugForceCpu: state.treeGpuForceCpu,
-        debugShowGpuCounts: state.treeGpuShowCounts,
-      },
-    });
-    refreshTreeStats();
-    updateInfo();
-  };
-  const treeActions = {
-    rebuild: () => {
-      treeSystem?.updateSettings(makeTreeSettings());
-      treeSystem?.rebuild();
-      if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) void treeSystem?.bakeImpostors(renderer);
-      refreshTreeStats();
-      updateInfo();
-    },
-  };
-  const treeFolder = gui.addFolder("trees (props)");
-  treeFolder.add(state, "treesEnabled").name("enabled").onChange((enabled: boolean) => {
-    treeSystem?.setEnabled(enabled);
-    refreshTreeStats();
-    updateInfo();
-  });
-  treeFolder.add(state, "treeDistance", 0, 600, 5).name("distance").onFinishChange(treeActions.rebuild);
-  treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild);
-  treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(updateTreeRenderSettings);
-  treeFolder.add(state, "treeGpuEnabled").name("GPU ring").onChange(updateTreeGpuSettings);
-  treeFolder.add(state, "treeGpuForceCpu").name("force CPU").onChange(updateTreeGpuSettings);
-  treeFolder.add(state, "treeGpuShowCounts").name("show GPU counts").onChange(updateTreeGpuSettings);
-  treeFolder.add(state, "treeWindEnabled").name("wind enabled").onChange(updateTreeWindSettings);
-  treeFolder.add(state, "treeWindStrength", 0, 1, 0.01).name("wind strength").onChange(updateTreeWindSettings);
-  treeFolder.add(state, "treeWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateTreeWindSettings);
-  treeFolder.add(state, "treeGustStrength", 0, 1, 0.01).name("gust strength").onChange(updateTreeWindSettings);
-  treeFolder.add(state, "treeTrunkSwayStrength", 0, 1, 0.01).name("trunk sway").onChange(updateTreeWindSettings);
-  treeFolder.add(state, "treeLeafFlutterStrength", 0, 1, 0.01).name("leaf flutter").onChange(updateTreeWindSettings);
-  treeTotalController = treeFolder.add(state, "treeTotal").name("total").disable();
-  treeVisiblePatchesController = treeFolder.add(state, "treeVisiblePatches").name("visible patches").disable();
-  treeLodSummaryController = treeFolder.add(state, "treeLodSummary").name("near/mid/far/impostor").disable();
-  treeGpuSummaryController = treeFolder.add(state, "treeGpuSummary").name("GPU").disable();
-  treeFolder.add(treeActions, "rebuild").name("rebuild");
-
-  let understoryTotalController: { updateDisplay: () => unknown } | null = null;
-  let understoryVisiblePatchesController: { updateDisplay: () => unknown } | null = null;
-  let understoryClassSummaryController: { updateDisplay: () => unknown } | null = null;
-  let understoryGpuSummaryController: { updateDisplay: () => unknown } | null = null;
-  const submitMsChanged = (a: number | null, b: number | null): boolean =>
-    a === b ? false : a === null || b === null ? true : Math.abs(a - b) >= 0.05;
-  const formatUnderstoryGpuSummary = (stats: UnderstoryStats): string =>
-    stats.gpuStatus === "disabled"
-      ? "disabled"
-      : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}${stats.gpuDispatchMs !== null ? ` ${stats.gpuDispatchMs.toFixed(1)}ms` : ""}`;
-  const refreshUnderstoryStats = () => {
-    if (!understorySystem) return;
-    understoryStats = understorySystem.getStats();
-    state.understoryTotal = understoryStats.totalInstances;
-    state.understoryVisiblePatches = `${understoryStats.visiblePatches}/${understoryStats.patches}`;
-    state.understoryClassSummary =
-      `${understoryStats.shrub}/${understoryStats.fern}/${understoryStats.sapling}/${understoryStats.flower}/${understoryStats.deadLog}/${understoryStats.stump}`;
-    state.understoryGpuSummary = formatUnderstoryGpuSummary(understoryStats);
-    understoryTotalController?.updateDisplay();
-    understoryVisiblePatchesController?.updateDisplay();
-    understoryClassSummaryController?.updateDisplay();
-    understoryGpuSummaryController?.updateDisplay();
-  };
-  const updateUnderstoryRenderSettings = () => {
-    understorySystem?.updateSettings({
-      render: {
-        ...understoryConfig.render,
-        debugColorByClass: state.understoryDebugColorByClass,
-      },
-    });
-    refreshUnderstoryStats();
-    updateInfo();
-  };
-  const understoryActions = {
-    rebuild: () => {
-      understorySystem?.updateSettings(makeUnderstorySettings());
-      understorySystem?.rebuild();
-      refreshUnderstoryStats();
-      updateInfo();
-    },
-  };
-  const understoryFolder = gui.addFolder("understory (props)");
-  understoryFolder.add(state, "understoryEnabled").name("enabled").onChange((enabled: boolean) => {
-    understorySystem?.setEnabled(enabled);
-    refreshUnderstoryStats();
-    updateInfo();
-  });
-  understoryFolder.add(state, "understoryDistance", 0, 600, 5).name("distance").onFinishChange(understoryActions.rebuild);
-  understoryFolder.add(state, "understoryMaxInstances", 0, 100000, 100).name("max instances").onFinishChange(understoryActions.rebuild);
-  understoryFolder.add(state, "understoryDebugColorByClass").name("debug color by class").onChange(updateUnderstoryRenderSettings);
-  understoryTotalController = understoryFolder.add(state, "understoryTotal").name("total").disable();
-  understoryVisiblePatchesController = understoryFolder.add(state, "understoryVisiblePatches").name("visible patches").disable();
-  understoryClassSummaryController = understoryFolder.add(state, "understoryClassSummary").name("sh/f/sap/fl/log/stump").disable();
-  understoryGpuSummaryController = understoryFolder.add(state, "understoryGpuSummary").name("GPU").disable();
-  understoryFolder.add(understoryActions, "rebuild").name("rebuild");
-
-  let forestLightingStatsController: { updateDisplay: () => unknown } | null = null;
-  const refreshForestLightingStats = () => {
-    forestLightingStats = forestLightingSystem.getStats();
-    state.forestLightingStats = forestLightingStats.enabled
-      ? `canopy=${forestLightingStats.maxCanopy.toFixed(2)} ao=${forestLightingStats.maxAo.toFixed(2)} ` +
-        `shadow=${forestLightingStats.maxShadow.toFixed(2)} fog=${forestLightingStats.maxFog.toFixed(2)}`
-      : "disabled";
-    forestLightingStatsController?.updateDisplay();
-  };
-  const updateForestLightingSettings = () => {
-    forestLightingSettingsVersion++;
-    forestLightingSystem.updateSettings(makeForestLightingSettings());
-    applyForestLightingToPropMaterials();
-    refreshForestLightingStats();
-    updateInfo();
-  };
-  const forestLightingFolder = gui.addFolder("forest lighting");
-  forestLightingFolder.add(state, "forestLightingEnabled").name("enabled").onChange(updateForestLightingSettings);
-  forestLightingFolder.add(state, "forestLightingAoStrength", 0, 1, 0.01).name("AO strength").onChange(updateForestLightingSettings);
-  forestLightingFolder.add(state, "forestLightingShadowStrength", 0, 1, 0.01).name("shadow strength").onChange(updateForestLightingSettings);
-  forestLightingFolder.add(state, "forestLightingFogStrength", 0, 1, 0.01).name("forest fog").onChange(updateForestLightingSettings);
-  forestLightingFolder.add(state, "forestLightingSunShaftsStrength", 0, 1, 0.01).name("sun shafts").onChange(updateForestLightingSettings);
-  forestLightingFolder.add(
-    state,
-    "forestLightingDebugMode",
-    ["off", "canopy", "ao", "shadow", "fog", "sun_shafts", "combined"],
-  ).name("debug mode").onChange(updateForestLightingSettings);
-  forestLightingStatsController = forestLightingFolder.add(state, "forestLightingStats").name("stats").disable();
-
-  // Water (fake clipmap) debug folder. The existing "freeze selection" toggle
-  // (state.freeze) already freezes CLOD page selection while water keeps
-  // following the camera, because waterClipmap.update runs every frame.
-  addWaterDebugFolder(gui, waterDebugState, {
-    onEnabled: (enabled) => {
-      state.waterEnabled = enabled;
-      waterClipmap.setVisible(enabled);
-    },
-    onMode: (mode) => {
-      state.waterDebugMode = mode;
-      waterClipmap.setDebugMode(WATER_DEBUG_MODES[mode]);
-    },
-    onClipmapTint: (enabled) => {
-      state.waterClipmapTint = enabled;
-      waterClipmap.setClipmapTint(enabled);
-    },
-    onWireframe: (enabled) => {
-      state.waterWireframe = enabled;
-      waterClipmap.setWireframe(enabled);
-    },
-    onDepthWrite: (on) => {
-      state.waterDepthWrite = on;
-    },
-    onRebuildVisual: () => {
-      waterClipmap.updateVisual(makeWaterVisual());
-    },
-  });
-
-  const textureInput = document.createElement("input");
-  textureInput.type = "file";
-  textureInput.accept = "image/*";
-  textureInput.multiple = true;
-  textureInput.style.display = "none";
-  document.body.appendChild(textureInput);
-  const normalInput = document.createElement("input");
-  normalInput.type = "file";
-  normalInput.accept = "image/*";
-  normalInput.style.display = "none";
-  document.body.appendChild(normalInput);
-  let pendingNormalLoad: number | null = null;
-  normalInput.addEventListener("change", async () => {
-    const file = normalInput.files?.[0];
-    normalInput.value = "";
-    if (file == null || pendingNormalLoad == null) return;
-    emitAudio("texture.load.open");
-    try {
-      const result = await loadNormalMap(file);
-      if (result) {
-        emitAudio("texture.load.success");
-        setSlotNormal(pendingNormalLoad, result.texture, result.previewUrl, result.bytes, result.mimeType, result.extension);
-      } else {
-        emitAudio("texture.load.error");
-      }
-    } catch (error) {
-      emitAudio("texture.load.error");
-    }
-    pendingNormalLoad = null;
-    refreshTextureState();
-  });
-  let pendingTextureLoad: number | "all" | null = null;
-  const slotCards: HTMLElement[] = [];
-  let loadedTextureController: { updateDisplay: () => unknown } | null = null;
-  let syncTextureModalControls = () => {};
-  const terrainIconForTexture = (slot: TextureSlot, index: number): string => {
-    const id = `${slot.selectedId} ${slot.name}`.toLowerCase();
-    if (id.includes("water")) return "water";
-    if (id.includes("snow")) return "snow";
-    if (id.includes("rock") || id.includes("cobble") || id.includes("bedrock")) return "rock";
-    if (id.includes("sand")) return "sand";
-    if (id.includes("earth") || id.includes("terracotta") || id.includes("bark")) return "earth";
-    if (id.includes("grass") || id.includes("leaf")) return "grass";
-    return TERRAIN_BAND_ICONS[index] ?? "earth";
-  };
-
-  const updateLoadedTextureDisplay = () => {
-    const loaded = textureSlots
-      .map((slot, index) => (slot.texture ? `${terrainTextureSlotLabel(index)}: ${slot.name}` : ""))
-      .filter(Boolean);
-    state.loadedTextureFiles = loaded.length > 0 ? loaded.join(" | ") : "none";
-    loadedTextureController?.updateDisplay();
-  };
-  const updateTextureSlotPreview = (index: number) => {
-    const card = slotCards[index];
-    if (!card) return;
-    const slot = textureSlots[index];
-    const preview = card.querySelector<HTMLElement>(".texture-preview");
-    const name = card.querySelector<HTMLElement>(".texture-slot-name");
-    const band = card.querySelector<HTMLElement>(".clod-texture-band");
-    const badge = card.querySelector<HTMLElement>(".clod-material-badge");
-    const isLoaded = slot.texture !== null;
-    card.classList.toggle("is-loaded", isLoaded);
-    card.classList.toggle("is-empty", !isLoaded);
-    if (preview) {
-      preview.style.backgroundImage = slot.previewUrl ? `url("${slot.previewUrl}")` : "";
-      preview.style.setProperty("--clod-preview-icon", `url("${iconDataUrl("terrain", terrainIconForTexture(slot, index), 64)}")`);
-      if (band) {
-        band.textContent = terrainTextureSlotLabel(index);
-      } else {
-        preview.textContent = slot.previewUrl ? "" : terrainTextureSlotLabel(index);
-      }
-    }
-    if (name) name.textContent = slot.texture ? slot.name : "empty";
-    if (badge) badge.textContent = slot.texture ? "Loaded" : "Empty";
-    const normalBtn = card.querySelector<HTMLElement>(".texture-normal-load");
-    if (normalBtn) normalBtn.textContent = slot.normalTexture ? "Normal map ✓" : "+ Normal map";
-    card.title = `${terrainTextureSlotLabel(index)} height texture`;
-    const removeBtn = card.querySelector<HTMLButtonElement>(".texture-slot-remove");
-    if (removeBtn) removeBtn.hidden = textureSlots.length <= INITIAL_TERRAIN_TEXTURE_COUNT;
-  };
-  const updateTextureSlotPreviews = () => {
-    for (let i = 0; i < textureSlots.length; i++) updateTextureSlotPreview(i);
-  };
-  const textureOptionHtml = [
-    `<option value="">None</option>`,
-    ...BUILTIN_TERRAIN_TEXTURES.map((texture) => `<option value="${texture.id}">${texture.label}</option>`),
-    `<option value="custom">Custom file...</option>`,
-  ].join("");
-  const refreshTextureState = () => {
-    updateLoadedTextureDisplay();
-    updateTextureSlotPreviews();
-    syncTextureModalControls();
-    applyTerrainTextures();
-  };
-  const setTextureSlot = (
-    index: number,
-    texture: THREE.Texture,
-    name: string,
-    previewUrl: string,
-    customBytes: Uint8Array,
-    customMimeType: string,
-    customExtension: string,
-  ) => {
-    const old = textureSlots[index];
-    old.texture?.dispose();
-    if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
-    textureSlots[index] = {
-      ...old,
-      texture,
-      name,
-      previewUrl,
-      selectedId: "custom",
-      customBytes: customBytes.slice(),
-      customMimeType,
-      customExtension,
-    };
-  };
-  const setBuiltinTextureSlot = (index: number, texture: THREE.Texture, name: string, previewUrl: string, selectedId: string) => {
-    const old = textureSlots[index];
-    old.texture?.dispose();
-    if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
-    textureSlots[index] = {
-      ...old,
-      texture,
-      name,
-      previewUrl,
-      selectedId,
-      customBytes: null,
-      customMimeType: null,
-      customExtension: null,
-    };
-  };
-  const clearTextureSlot = (index: number) => {
-    const old = textureSlots[index];
-    old.texture?.dispose();
-    old.normalTexture?.dispose();
-    if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
-    if (old.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.normalPreviewUrl);
-    textureSlots[index] = {
-      ...old,
-      texture: null,
-      normalTexture: null,
-      normalPreviewUrl: null,
-      name: "empty",
-      previewUrl: null,
-      selectedId: "",
-      customBytes: null,
-      customMimeType: null,
-      customExtension: null,
-    };
-  };
-  const setSlotNormal = (
-    index: number,
-    texture: THREE.Texture,
-    previewUrl: string,
-    bytes: Uint8Array,
-    mimeType: string,
-    extension: string,
-  ) => {
-    const old = textureSlots[index];
-    old.normalTexture?.dispose();
-    if (old.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.normalPreviewUrl);
-    textureSlots[index] = {
-      ...old,
-      normalTexture: texture,
-      normalPreviewUrl: previewUrl,
-      normalBytes: bytes.slice(),
-      normalMimeType: mimeType,
-      normalExtension: extension,
-    };
-  };
-  const clearSlotNormal = (index: number) => {
-    const old = textureSlots[index];
-    old.normalTexture?.dispose();
-    if (old.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.normalPreviewUrl);
-    textureSlots[index] = {
-      ...old,
-      normalTexture: null,
-      normalPreviewUrl: null,
-      normalBytes: null,
-      normalMimeType: null,
-      normalExtension: null,
-    };
-  };
-  const clearAllTextures = () => {
-    for (let i = 0; i < textureSlots.length; i++) clearTextureSlot(i);
-    refreshTextureState();
-  };
-  const configureTerrainTexture = (texture: THREE.Texture) => {
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.generateMipmaps = textureMipmapsEnabled;
-    texture.minFilter = textureMipmapsEnabled ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.anisotropy = textureMipmapsEnabled ? maxAnisotropy : 1;
-    texture.needsUpdate = true;
-  };
-  // Normal maps are linear data, not colour — decoding them as sRGB skews the vectors.
-  const configureNormalTexture = (texture: THREE.Texture) => {
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.colorSpace = THREE.NoColorSpace;
-    texture.generateMipmaps = textureMipmapsEnabled;
-    texture.minFilter = textureMipmapsEnabled ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.anisotropy = textureMipmapsEnabled ? maxAnisotropy : 1;
-    texture.needsUpdate = true;
-  };
-  const loadNormalMap = async (file: File): Promise<{
-    texture: THREE.Texture;
-    previewUrl: string;
-    bytes: Uint8Array;
-    mimeType: string;
-    extension: string;
-  } | null> => {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    return new Promise((resolve) => {
-      const url = URL.createObjectURL(file);
-      new THREE.TextureLoader().load(
-        url,
-        (texture) => {
-          configureNormalTexture(texture);
-          const mimeType = file.type || "application/octet-stream";
-          resolve({ texture, previewUrl: url, bytes, mimeType, extension: extensionForTexture(file.name, mimeType) });
-        },
-        undefined,
-        () => {
-          URL.revokeObjectURL(url);
-          resolve(null);
-        },
-      );
-    });
-  };
-  const textureActions = {
-    loadTexture: () => {
-      syncTextureModalControls();
-      updateTextureSlotPreviews();
-      textureModal.hidden = false;
-      emitAudio("texture.dialog.open");
-    },
-    clearTexture: clearAllTextures,
-  };
-  const loadTerrainTextureUrl = (url: string): Promise<THREE.Texture | null> =>
-    new Promise((resolve) => {
-      const loader = new THREE.TextureLoader();
-      loader.setCrossOrigin("anonymous");
-      loader.load(
-        url,
-        (texture) => {
-          configureTerrainTexture(texture);
-          resolve(texture);
-        },
-        undefined,
-        () => resolve(null),
-      );
-    });
-  const extensionForTexture = (name: string, mimeType: string): string => {
-    const fromName = name.match(/(\.[a-z0-9]+)$/i)?.[1]?.toLowerCase();
-    if (fromName && fromName.length <= 8) return fromName;
-    if (mimeType === "image/png") return ".png";
-    if (mimeType === "image/webp") return ".webp";
-    return ".jpg";
-  };
-  const loadTerrainTexture = async (file: File): Promise<{
-    texture: THREE.Texture;
-    previewUrl: string;
-    bytes: Uint8Array;
-    mimeType: string;
-    extension: string;
-  } | null> => {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    return new Promise((resolve) => {
-      const url = URL.createObjectURL(file);
-      new THREE.TextureLoader().load(
-        url,
-        (texture) => {
-          configureTerrainTexture(texture);
-          const mimeType = file.type || "application/octet-stream";
-          resolve({
-            texture,
-            previewUrl: url,
-            bytes,
-            mimeType,
-            extension: extensionForTexture(file.name, mimeType),
-          });
-        },
-        undefined,
-        () => {
-          URL.revokeObjectURL(url);
-          resolve(null);
-        },
-      );
-    });
-  };
-  textureInput.addEventListener("change", async () => {
-    const files = Array.from(textureInput.files ?? []);
-    if (files.length === 0) return;
-    emitAudio("texture.load.open");
-    try {
-      if (pendingTextureLoad === "all") {
-        const loaded = await Promise.all(files.slice(0, MAX_TERRAIN_TEXTURES).map(loadTerrainTexture));
-        const succeeded = loaded.some((x) => x !== null);
-        if (succeeded) emitAudio("texture.load.success");
-        else emitAudio("texture.load.error");
-        loaded.forEach((result, index) => {
-          while (textureSlots.length <= index) addTextureSlot(false);
-          if (result) setTextureSlot(
-            index,
-            result.texture,
-            files[index].name,
-            result.previewUrl,
-            result.bytes,
-            result.mimeType,
-            result.extension,
-          );
-        });
-      } else if (typeof pendingTextureLoad === "number") {
-        const result = await loadTerrainTexture(files[0]);
-        if (result) {
-          emitAudio("texture.load.success");
-          setTextureSlot(
-            pendingTextureLoad,
-            result.texture,
-            files[0].name,
-            result.previewUrl,
-            result.bytes,
-            result.mimeType,
-            result.extension,
-          );
-        } else {
-          emitAudio("texture.load.error");
-        }
-      }
-    } catch (error) {
-      emitAudio("texture.load.error");
-    }
-    pendingTextureLoad = null;
-    refreshTextureState();
-    textureInput.value = "";
-  });
-
-  const textureModal = document.createElement("div");
-  textureModal.id = "texture-modal";
-  textureModal.className = "clod-texture-dialog";
-  textureModal.hidden = true;
-  textureModal.innerHTML = `
-    <section class="texture-panel clod-texture-dialog" role="dialog" aria-modal="true" aria-labelledby="texture-modal-title">
-      <header>
-        <h2 id="texture-modal-title">Terrain materials</h2>
-        <button type="button" data-texture-close>Close</button>
-      </header>
-      <div class="texture-panel-body">
-        <div class="texture-slot-carousel">
-          <button type="button" class="texture-carousel-nav texture-carousel-prev" aria-label="Previous materials">‹</button>
-          <div class="texture-slot-grid"></div>
-          <button type="button" class="texture-carousel-nav texture-carousel-next" aria-label="Next materials">›</button>
-        </div>
-        <div class="texture-actions">
-          <button type="button" data-texture-add>+ Add material</button>
-          <button type="button" data-texture-load-all>Load custom set</button>
-          <button type="button" data-texture-clear>Clear</button>
-        </div>
-      </div>
-    </section>
-  `;
-  document.body.appendChild(textureModal);
-  const texturePanel = textureModal.querySelector<HTMLElement>(".texture-panel")!;
-  const texturePanelHeader = texturePanel.querySelector<HTMLElement>("header")!;
-  let texturePanelDrag:
-    | {
-        pointerId: number;
-        offsetX: number;
-        offsetY: number;
-      }
-    | null = null;
-  const clampTexturePanelPosition = (left: number, top: number) => {
-    const rect = texturePanel.getBoundingClientRect();
-    const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
-    const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
-    texturePanel.style.left = `${THREE.MathUtils.clamp(left, 8, maxLeft)}px`;
-    texturePanel.style.top = `${THREE.MathUtils.clamp(top, 8, maxTop)}px`;
-    texturePanel.style.transform = "none";
-  };
-  texturePanelHeader.addEventListener("pointerdown", (event) => {
-    if ((event.target as HTMLElement).closest("button")) return;
-    const rect = texturePanel.getBoundingClientRect();
-    texturePanelDrag = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-    };
-    texturePanelHeader.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  });
-  texturePanelHeader.addEventListener("pointermove", (event) => {
-    if (!texturePanelDrag || texturePanelDrag.pointerId !== event.pointerId) return;
-    clampTexturePanelPosition(event.clientX - texturePanelDrag.offsetX, event.clientY - texturePanelDrag.offsetY);
-  });
-  const stopTexturePanelDrag = (event: PointerEvent) => {
-    if (!texturePanelDrag || texturePanelDrag.pointerId !== event.pointerId) return;
-    texturePanelDrag = null;
-    if (texturePanelHeader.hasPointerCapture(event.pointerId)) {
-      texturePanelHeader.releasePointerCapture(event.pointerId);
-    }
-  };
-  texturePanelHeader.addEventListener("pointerup", stopTexturePanelDrag);
-  texturePanelHeader.addEventListener("pointercancel", stopTexturePanelDrag);
-  const slotCarousel = textureModal.querySelector<HTMLElement>(".texture-slot-carousel")!;
-  const slotGrid = textureModal.querySelector<HTMLElement>(".texture-slot-grid")!;
-  const textureCarouselPrev = textureModal.querySelector<HTMLButtonElement>(".texture-carousel-prev")!;
-  const textureCarouselNext = textureModal.querySelector<HTMLButtonElement>(".texture-carousel-next")!;
-  let textureModalPage = 0;
-  const wireTextureSlotControls = (index: number) => {
-    const card = slotCards[index];
-    if (!card) return;
-    card.querySelector<HTMLSelectElement>(`[data-slot-texture="${index}"]`)!.onchange = async (event) => {
-      const select = event.target as HTMLSelectElement;
-      const selectedId = select.value;
-      emitAudio("texture.slot.select");
-      if (selectedId === "") {
-        clearTextureSlot(index);
-        refreshTextureState();
-        return;
-      }
-      if (selectedId === "custom") {
-        pendingTextureLoad = index;
-        textureInput.multiple = false;
-        textureInput.click();
-        syncTextureModalControls();
-        return;
-      }
-      const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === selectedId);
-      if (!builtin) return;
-      const previousName = textureSlots[index].name;
-      textureSlots[index].name = "loading...";
-      updateTextureSlotPreview(index);
-      const texture = await loadTerrainTextureUrl(builtin.url);
-      if (!texture) {
-        textureSlots[index].name = previousName;
-        select.value = textureSlots[index].selectedId;
-        refreshTextureState();
-        return;
-      }
-      setBuiltinTextureSlot(index, texture, builtin.label, builtin.url, builtin.id);
-      refreshTextureState();
-    };
-    card.querySelector<HTMLInputElement>(`[data-slot-low="${index}"]`)!.onchange = (event) => {
-      textureSlots[index].heightMin = Number((event.target as HTMLInputElement).value);
-      refreshTextureState();
-    };
-    card.querySelector<HTMLInputElement>(`[data-slot-high="${index}"]`)!.onchange = (event) => {
-      textureSlots[index].heightMax = Number((event.target as HTMLInputElement).value);
-      refreshTextureState();
-    };
-    card.querySelector<HTMLInputElement>(`[data-slot-scale="${index}"]`)!.onchange = (event) => {
-      textureSlots[index].scale = Number((event.target as HTMLInputElement).value);
-      refreshTextureState();
-    };
-  };
-  const mountTextureSlotCard = (index: number) => {
-    const card = document.createElement("article");
-    card.className = "texture-slot clod-texture-slot is-empty";
-    const bandIcon = iconDataUrl("terrain", TERRAIN_BAND_ICONS[index] ?? "earth", 64);
-    card.innerHTML = `
-      <button class="texture-preview clod-texture-preview" type="button" style="--clod-preview-icon: url('${bandIcon}')">
-        <span class="clod-texture-band">${terrainTextureSlotLabel(index)}</span>
-        <span class="clod-material-badge">Empty</span>
-      </button>
-      <span class="texture-slot-name">empty</span>
-      <label class="texture-slot-select"><span>Built-in texture</span><select data-slot-texture="${index}">${textureOptionHtml}</select></label>
-      <div class="texture-slot-params">
-        <label class="texture-slot-param"><span>Scale</span><input data-slot-scale="${index}" type="number" min="${1 / 512}" max="${1 / 8}" step="${1 / 512}" value="${textureSlots[index].scale}" /></label>
-        <label class="texture-slot-param"><span>Low</span><input data-slot-low="${index}" type="number" min="0" max="128" step="1" value="${textureSlots[index].heightMin}" /></label>
-        <label class="texture-slot-param"><span>High</span><input data-slot-high="${index}" type="number" min="0" max="128" step="1" value="${textureSlots[index].heightMax}" /></label>
-      </div>
-      <div class="texture-slot-normal">
-        <button class="texture-normal-load" type="button">+ Normal map</button>
-        <button class="texture-normal-clear" type="button" title="clear normal map">✕</button>
-        <button class="texture-slot-remove" type="button" title="Remove material">Remove</button>
-      </div>
-    `;
-    card.querySelector(".texture-preview")!.addEventListener("click", () => {
-      pendingTextureLoad = index;
-      textureInput.multiple = false;
-      textureInput.click();
-    });
-    card.querySelector(".texture-normal-load")!.addEventListener("click", () => {
-      pendingNormalLoad = index;
-      normalInput.click();
-    });
-    card.querySelector(".texture-normal-clear")!.addEventListener("click", () => {
-      clearSlotNormal(index);
-      refreshTextureState();
-    });
-    card.querySelector(".texture-slot-remove")!.addEventListener("click", () => {
-      removeTextureSlot(index);
-    });
-    slotCards[index] = card;
-    slotGrid.appendChild(card);
-    wireTextureSlotControls(index);
-    updateTextureSlotPreview(index);
-  };
-  const rebuildTextureSlotCards = () => {
-    slotGrid.replaceChildren();
-    slotCards.length = 0;
-    for (let i = 0; i < textureSlots.length; i++) mountTextureSlotCard(i);
-    syncTextureModalCarousel();
-  };
-  const syncTextureModalCarousel = () => {
-    const count = textureSlots.length;
-    const bounds = materialCarouselBounds(count, textureModalPage, TEXTURE_MODAL_PAGE_SIZE);
-    textureModalPage = bounds.page;
-    slotCarousel.classList.toggle("texture-slot-carousel-active", bounds.needsCarousel);
-    textureCarouselPrev.disabled = bounds.page <= 0;
-    textureCarouselNext.disabled = bounds.page >= bounds.maxPage;
-    for (let i = 0; i < slotCards.length; i++) {
-      const card = slotCards[i];
-      if (!card) continue;
-      card.style.display = !bounds.needsCarousel || (i >= bounds.start && i < bounds.end) ? "" : "none";
-    }
-    const addBtn = textureModal.querySelector<HTMLButtonElement>("[data-texture-add]")!;
-    addBtn.disabled = textureSlots.length >= MAX_TERRAIN_TEXTURES;
-  };
-  const addTextureSlot = (refresh = true) => {
-    if (textureSlots.length >= MAX_TERRAIN_TEXTURES) return;
-    // New slots default to an empty [0,0] band, which rangeWeight() zeroes out at every
-    // terrain height, so a freshly-loaded texture would never render. Default to the full
-    // height range so the texture is visible immediately; the user narrows Low/High after.
-    textureSlots.push({ ...emptyTextureSlotState(), heightMin: 0, heightMax: 128 });
-    mountTextureSlotCard(textureSlots.length - 1);
-    syncTextureModalCarousel();
-    if (refresh) refreshTextureState();
-  };
-  const removeTextureSlot = (index: number) => {
-    if (textureSlots.length <= INITIAL_TERRAIN_TEXTURE_COUNT) return;
-    clearTextureSlot(index);
-    textureSlots.splice(index, 1);
-    if (state.brushMaterial >= textureSlots.length) state.brushMaterial = 0;
-    rebuildTextureSlotCards();
-    refreshTextureState();
-  };
-  textureCarouselPrev.addEventListener("click", () => {
-    textureModalPage = Math.max(0, textureModalPage - 1);
-    syncTextureModalCarousel();
-  });
-  textureCarouselNext.addEventListener("click", () => {
-    const { maxPage } = materialCarouselBounds(textureSlots.length, textureModalPage, TEXTURE_MODAL_PAGE_SIZE);
-    textureModalPage = Math.min(maxPage, textureModalPage + 1);
-    syncTextureModalCarousel();
-  });
-  rebuildTextureSlotCards();
-  setButtonIcon(textureModal.querySelector<HTMLElement>("[data-texture-close]")!, "system", "warning", "Close");
-  setButtonIcon(textureModal.querySelector<HTMLElement>("[data-texture-load-all]")!, "texture", "load", "Load custom set");
-  setButtonIcon(textureModal.querySelector<HTMLElement>("[data-texture-clear]")!, "texture", "slot", "Clear");
-  syncTextureModalControls = () => {
-    for (let i = 0; i < textureSlots.length; i++) {
-      const low = textureModal.querySelector<HTMLInputElement>(`[data-slot-low="${i}"]`);
-      const high = textureModal.querySelector<HTMLInputElement>(`[data-slot-high="${i}"]`);
-      const scale = textureModal.querySelector<HTMLInputElement>(`[data-slot-scale="${i}"]`);
-      const select = textureModal.querySelector<HTMLSelectElement>(`[data-slot-texture="${i}"]`);
-      if (low) low.value = String(textureSlots[i].heightMin);
-      if (high) high.value = String(textureSlots[i].heightMax);
-      if (scale) scale.value = String(textureSlots[i].scale);
-      if (select) select.value = textureSlots[i].selectedId;
-    }
-    syncTextureModalCarousel();
-  };
-  textureModal.querySelector<HTMLElement>("[data-texture-add]")!.addEventListener("click", () => {
-    addTextureSlot();
-    textureModalPage = materialCarouselBounds(
-      textureSlots.length,
-      textureModalPage,
-      TEXTURE_MODAL_PAGE_SIZE,
-    ).maxPage;
-    syncTextureModalCarousel();
-  });
-  textureModal.querySelector<HTMLElement>("[data-texture-load-all]")!.addEventListener("click", () => {
-    pendingTextureLoad = "all";
-    textureInput.multiple = true;
-    textureInput.click();
-  });
-  const closeTextureModal = () => {
-    if (!textureModal.hidden) {
-      textureModal.hidden = true;
-      emitAudio("texture.dialog.close");
-    }
-  };
-  textureModal.querySelector<HTMLElement>("[data-texture-clear]")!.addEventListener("click", clearAllTextures);
-  textureModal.querySelector<HTMLElement>("[data-texture-close]")!.addEventListener("click", closeTextureModal);
-  textureModal.addEventListener("click", (event) => {
-    if (event.target === textureModal) closeTextureModal();
-  });
-  window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeTextureModal();
-  });
-  const loadBuiltinTextureSlots = async (
-    slots: readonly { index: number; selectedId: string; name: string }[],
-    phaseLabel: string,
-  ) => {
-    if (slots.length === 0) return;
-    buildProgress.hidden = false;
-    buildProgressPhase.textContent = phaseLabel;
-    buildProgressPercent.textContent = "90%";
-    buildProgressBar.value = 0.9;
-    const failed: string[] = [];
-    for (const slot of slots) {
-      const builtin = BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === slot.selectedId);
-      if (!builtin) throw new Error(`Unknown texture ${slot.selectedId}`);
-      const texture = await loadTerrainTextureUrl(builtin.url);
-      if (!texture) {
-        // A single texture that fails to decode must not abort the whole renderer init. Skip it,
-        // keep loading the rest, and surface the failures so they are still visible/QA-able.
-        console.error(`[textures] could not load ${slot.name} (${builtin.url}); continuing without it`);
-        failed.push(slot.name);
-        continue;
-      }
-      setBuiltinTextureSlot(slot.index, texture, slot.name, builtin.url, builtin.id);
-    }
-    if (failed.length) console.warn(`[textures] ${failed.length} built-in texture(s) failed to load: ${failed.join(", ")}`);
-  };
   if (stagedImport) {
-    while (textureSlots.length < stagedImport.manifest.textures.length) {
-      textureSlots.push({ ...emptyTextureSlotState() });
-    }
-    rebuildTextureSlotCards();
-    await loadBuiltinTextureSlots(
-      stagedImport.manifest.textures.filter((slot) => slot.source === "builtin").map((slot) => ({
-        index: slot.index,
-        selectedId: slot.selectedId,
-        name: slot.name,
-      })),
-      "restoring textures",
-    );
-    for (const imported of stagedImport.manifest.textures) {
-      if (imported.source === "builtin") continue;
-      if (imported.source === "custom" && imported.customPath) {
-        const bytes = stagedImport.customTextures.get(imported.customPath);
-        if (!bytes) throw new Error(`Imported project is missing ${imported.customPath}`);
-        const mimeType = imported.mimeType ?? "application/octet-stream";
-        const previewUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: mimeType }));
-        const texture = await loadTerrainTextureUrl(previewUrl);
-        if (!texture) {
-          URL.revokeObjectURL(previewUrl);
-          throw new Error(`Could not decode imported texture ${imported.name}`);
-        }
-        setTextureSlot(
-          imported.index,
-          texture,
-          imported.name,
-          previewUrl,
-          bytes,
-          mimeType,
-          imported.customPath.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin",
-        );
-      }
-    }
-    // Restore normal maps after albedo, since the albedo setters reset the slot object.
-    // Normals attach to builtin or custom slots alike, so this pass is independent.
-    for (const imported of stagedImport.manifest.textures) {
-      if (!imported.normalPath) continue;
-      const bytes = stagedImport.customTextures.get(imported.normalPath);
-      if (!bytes) throw new Error(`Imported project is missing ${imported.normalPath}`);
-      const mimeType = imported.normalMimeType ?? "application/octet-stream";
-      const previewUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: mimeType }));
-      const texture = await new Promise<THREE.Texture | null>((resolve) => {
-        new THREE.TextureLoader().load(previewUrl, (t) => { configureNormalTexture(t); resolve(t); }, undefined, () => resolve(null));
-      });
-      if (!texture) {
-        URL.revokeObjectURL(previewUrl);
-        throw new Error(`Could not decode imported normal map for slot ${imported.index}`);
-      }
-      setSlotNormal(
-        imported.index,
-        texture,
-        previewUrl,
-        bytes,
-        mimeType,
-        imported.normalPath.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin",
-      );
-    }
+    textureModal.rebuildTextureSlotCards();
+    await textureController.restoreStagedImport(textureProgress);
   } else if (!state.clodPerfMode && state.terrainMaterialSource === "external_pbr") {
-    await loadBuiltinTextureSlots(
-      DEFAULT_TERRAIN_TEXTURE_PRESETS.map((preset, index) => ({
-        index,
-        selectedId: preset.id,
-        name: BUILTIN_TERRAIN_TEXTURES.find((texture) => texture.id === preset.id)?.label ?? preset.id,
-      })),
-      "loading textures",
-    );
+    await textureController.loadDefaultBuiltinTextures(textureProgress);
   } else {
     state.loadedTextureFiles = state.clodPerfMode ? "perf mode" : state.terrainMaterialSource;
   }
-  syncTextureModalControls();
-  updateTextureSlotPreviews();
-  refreshTextureState();
+  textureModal.syncTextureModalControls();
+  textureModal.updateTextureSlotPreviews();
+  textureModal.refreshTextureState();
   buildProgress.hidden = true;
 
-  const textureFolder = gui.addFolder("terrain texture");
-  textureFolder.add(state, "terrainMaterialSource", TERRAIN_MATERIAL_SOURCES).name("source").onChange(() => {
-    refreshTextureState();
-    updateInfo();
+  const { digRadiusController: digRadiusGuiController } = createClodPocTerrainMaterialGui(gui, state, {
+    terrainMaterial: {
+      textureModal,
+      applyTerrainTextures,
+      updateSelection,
+      updateInfo,
+      chunkGroups: chunkGroups.values(),
+    },
   });
-  textureFolder.add(state, "proceduralDebugMode", Object.keys(PROCEDURAL_DEBUG_MODES)).name("procedural debug").onChange(applyTerrainTextures);
-  textureFolder.add(state, "proceduralMicroNormals").name("procedural micro normals").onChange(applyTerrainTextures);
-  textureFolder.add(state, "albedo").name("albedo").onChange(applyTerrainTextures);
-  textureFolder.add(textureActions, "loadTexture").name("load albedo / normals");
-  textureFolder.add(state, "triplanar").name("triplanar").onChange(applyTerrainTextures);
-  textureFolder.add(state, "normalMap").name("normal maps").onChange(applyTerrainTextures);
-  textureFolder.add(state, "normalIntensity", 0, 3, 0.05).name("normal intensity").onChange(applyTerrainTextures);
-  textureFolder.add(state, "roughness", 0, 1, 0.01).name("roughness").onChange(applyTerrainTextures);
-  textureFolder.add(state, "metalness", 0, 1, 0.01).name("metalness").onChange(applyTerrainTextures);
-  textureFolder.add(state, "textureScale", 0.25, 4, 0.05).name("scale multiplier").onChange(applyTerrainTextures);
-  textureFolder.add(state, "textureBlendMode", TEXTURE_BLEND_MODES).name("blend mode").onChange(applyTerrainTextures);
-  textureFolder.add(state, "textureBlendWidth", 0, 24, 0.5).name("blend height").onChange(applyTerrainTextures);
-  loadedTextureController = textureFolder.add(state, "loadedTextureFiles").name("loaded").disable();
-  textureFolder.add(textureActions, "clearTexture").name("clear texture");
-  const bubbleFolder = gui.addFolder("near-field bubble (§4.4)");
-  bubbleFolder.add(state, "bubble").name("enable (raw chunks)").onChange(updateSelection);
-  bubbleFolder.add(state, "bubbleRadius", 16, 160, 1).name("radius (cells)").onChange(updateSelection);
-  bubbleFolder.add(state, "tintBubble").name("tint bubble red").onChange((on: boolean) => {
-    for (const { mats } of chunkGroups.values())
-      for (const m of mats) m.setBaseColor(on ? 0xc94b4b : 0xffffff);
-  });
-  const digFolder = gui.addFolder("digging");
-  digFolder.add(state, "digEnabled").name("dig on click").onChange(updateInfo);
-  const digRadiusController = digFolder
-    .add(state, "digRadius", 1, 8, 0.5)
-    .name("radius (cells)")
-    .onChange(updateInfo);
-  // Mirror the engine's Shift+scroll radius adjustment while playing (orbit scroll = zoom).
-  window.addEventListener("wheel", (event) => {
-    if (interaction.mode !== "playing" || !event.shiftKey) return;
-    const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX; // Shift+wheel maps to deltaX on Windows
-    if (delta === 0) return;
-    state.digRadius = THREE.MathUtils.clamp(state.digRadius - Math.sign(delta) * 0.5, 1, 8);
-    digRadiusController.updateDisplay();
-    syncTerraformMenu();
-    updateInfo();
-    emitAudio("terrain.brush.radius");
-  });
+  digRadiusController = digRadiusGuiController;
+
+  wirePlayerControllers();
 
   // ---- bottom-left terraform menu: material palette + optional brush/sculpt edit ----
   // Material swatches map to terrain texture slots 0..3 (what `add` deposits paint with);
   // brush controls drive the same global state the click handlers and preview read.
-  const PAINT_SWATCH_COLORS = ["#6b9b4d", "#8c8580", "#d9c78d", "#f5f7ff"];
   const terraformMenu = document.getElementById("terraform-menu")!;
   const menuHeader = document.createElement("div");
   menuHeader.className = "tf-menu-header";
@@ -4534,14 +2137,16 @@ async function main() {
   editToggleInput.type = "checkbox";
   editToggleInput.checked = true;
   terraformEditCheckbox = editToggleInput;
+  playerModeController.bindTerraformEditCheckbox(editToggleInput);
+  playerModeController.bindEditToggleInput(editToggleInput);
   editToggle.append(editToggleInput, document.createTextNode(" Edit"));
   editToggleInput.addEventListener("change", () => {
     document.body.dataset.tfEdit = editToggleInput.checked ? "true" : "false";
     if (!editToggleInput.checked) {
-      digHeld = false;
-      digPreview.visible = false;
+      playerInputController.clearDigHold();
+      brushPreview.hide();
     }
-    updatePlayerModeUi();
+    playerModeController.updatePlayerModeUi();
   });
   menuHeader.appendChild(editToggle);
   terraformMenu.appendChild(menuHeader);
@@ -4748,7 +2353,6 @@ async function main() {
   );
 
   refreshTerraformSwatches = () => {
-    rebuildActiveTerrainSlots();
     const slots = activeTerrainSlots();
     if (state.brushMaterial >= slots.length) state.brushMaterial = 0;
     materialSwatchPage = materialCarouselPageForSelection(
@@ -4864,27 +2468,6 @@ async function main() {
     treeLeafFlutterStrength: state.treeLeafFlutterStrength,
   });
 
-  const projectTextureMetadata = (): ProjectTextureSlot[] => textureSlots.map((slot, index) => {
-    const source: ProjectTextureSlot["source"] = slot.texture === null
-      ? "empty"
-      : slot.selectedId === "custom" ? "custom" : "builtin";
-    const customPath = source === "custom" ? `textures/slot-${index}${slot.customExtension ?? ".bin"}` : undefined;
-    // Normal maps persist for any slot that has one (builtin or custom albedo), since
-    // there are no builtin normals — they are always a user-loaded file.
-    const normalPath = slot.normalBytes ? `textures/slot-${index}-normal${slot.normalExtension ?? ".bin"}` : undefined;
-    return {
-      index,
-      source,
-      name: source === "empty" ? "empty" : slot.name,
-      selectedId: source === "empty" ? "" : slot.selectedId,
-      scale: slot.scale,
-      heightMin: slot.heightMin,
-      heightMax: slot.heightMax,
-      ...(customPath ? { customPath, mimeType: slot.customMimeType ?? "application/octet-stream" } : {}),
-      ...(normalPath ? { normalPath, normalMimeType: slot.normalMimeType ?? "application/octet-stream" } : {}),
-    };
-  });
-
   const setProjectBusy = (busy: boolean, phase = "preparing", fraction = 0) => {
     importButton.disabled = busy;
     exportButton.disabled = busy;
@@ -4975,16 +2558,16 @@ async function main() {
       const { exportAllLodsToGlb } = await import("./gltf_export.js");
       const terrainGlb = await exportAllLodsToGlb(result.nodesByLevel);
       setProjectBusy(true, "packing project archive", 0.8);
-      const textures = projectTextureMetadata();
+      const textures = textureController.projectTextureMetadata();
       const customTextures = new Map<string, Uint8Array>();
       for (const texture of textures) {
         if (texture.source === "custom" && texture.customPath) {
-          const bytes = textureSlots[texture.index].customBytes;
+          const bytes = textureController.slots[texture.index].customBytes;
           if (!bytes) throw new Error(`Custom texture slot ${texture.index} has no source bytes`);
           customTextures.set(texture.customPath, bytes);
         }
         if (texture.normalPath) {
-          const bytes = textureSlots[texture.index].normalBytes;
+          const bytes = textureController.slots[texture.index].normalBytes;
           if (!bytes) throw new Error(`Normal-map slot ${texture.index} has no source bytes`);
           customTextures.set(texture.normalPath, bytes);
         }
@@ -5029,7 +2612,7 @@ async function main() {
   });
 
   // Imported controller values need the same side effects as interactive GUI changes.
-  forEachTerrainMaterial((material) => {
+  materialController.forEachMaterial((material) => {
     material.setWireframe(state.wireframe);
     material.setDebug({
       normalColor: state.normalColor,
@@ -5050,16 +2633,14 @@ async function main() {
   grassSystem?.setEnabled(state.grassEnabled);
   grassSystem?.updateSettings(makeGrassSettings());
   refreshGrassStats();
-  treeSystem?.setEnabled(state.treesEnabled);
-  treeSystem?.updateSettings(makeTreeSettings());
+  treeSystem.setEnabled(state.treesEnabled);
+  treeController.applySettings();
   refreshTreeStats();
-  understorySystem?.setEnabled(state.understoryEnabled);
-  understorySystem?.updateSettings(makeUnderstorySettings());
+  understorySystem.setEnabled(state.understoryEnabled);
+  understoryController.applySettings();
   refreshUnderstoryStats();
-  forestLightingSettingsVersion++;
-  forestLightingSystem.updateSettings(makeForestLightingSettings());
-  applyForestLightingToPropMaterials();
-  refreshForestLightingStats();
+  forestLightingController.bumpSettingsVersion();
+  forestLightingController.applySettings();
   updateSelection();
   updateInfo();
 
@@ -5102,26 +2683,23 @@ async function main() {
         ` grass+props=${grassAndPropsMs.toFixed(2)}ms`,
     );
   };
-  const profileFrameMs = (() => {
-    const v = Number(searchParams.get("profileMs"));
-    return Number.isFinite(v) && v > 0 ? v : 24;
-  })();
+  const profileFrameMs = resolveSlowFrameMsThreshold(searchParams, clodRuntime.profiling.slowFrameMs);
+  const submitMsChanged = (a: number | null, b: number | null): boolean =>
+    a === b ? false : a === null || b === null ? true : Math.abs(a - b) >= 0.05;
   renderer.setAnimationLoop(() => {
     const frameStart = performance.now();
-    selectionFrameId++;
-    playerTimer.update();
-    const playerDelta = Math.min(playerTimer.getDelta(), 0.1);
+    selectionController.advanceFrame();
+    const selectionStats = selectionController.stats();
+    const activeTerrainViews = selectionController.activeTerrainViews();
+    const currentTerrainViews = selectionController.currentTerrainViews();
+    playerInputController.playerTimer.update();
+    const playerDelta = Math.min(playerInputController.playerTimer.getDelta(), 0.1);
     elapsedSeconds += playerDelta;
     updateAverageFps();
-    if (interaction.mode === "playing") {
-      playerForward.set(-Math.sin(playerYaw), 0, -Math.cos(playerYaw));
-      player.update(playerDelta, playerInput, playerForward);
-      camera.position.copy(player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, DEFAULT_PLAYER_CONFIG.eyeHeight);
-      camera.rotation.set(playerPitch, playerYaw, 0, "YXZ");
-    } else {
-      controls.update();
-    }
+    playerInputController.updateFrame(playerDelta);
     skyEnvironment?.updateCamera(camera);
+    drainVegetationDirtyQueue();
+    treeController.updateFallingTrees(playerDelta);
     if (!state.freeze) updateSelection();
 
     // LV-0: Emit long-view counters into hooks.stats for the shot harness / QA.
@@ -5134,10 +2712,10 @@ async function main() {
       s.drawCalls = info.render.drawCalls ?? 0;
       s.triangles = info.render.triangles ?? 0;
       for (let lvl = 0; lvl <= maxTerrainLevel; lvl++) {
-        s.counters[`clod_page_count_lod${lvl}`] = lastNodesByLod[lvl] ?? 0;
+        s.counters[`built_page_count_lod${lvl}`] = selectionStats.nodesByLod[lvl] ?? 0;
       }
-      s.counters["terrain_draw_calls"] = lastRenderedCount;
-      s.counters["terrain_triangles"] = lastTriCount;
+      s.counters["terrain_draw_calls"] = selectionStats.renderedCount;
+      s.counters["terrain_triangles"] = selectionStats.triCount;
       // LV-5: Vegetation ring stats for long-view validation.
       if (grassStats) {
         s.counters["gpu_grass_visible"] = grassStats.gpuRingVisibleNear + grassStats.gpuRingVisibleMid
@@ -5157,7 +2735,7 @@ async function main() {
       // Phase 0: Update additional counters for infinite streaming baseline.
       const effectiveVisible = computeEffectiveVisibleMeters({
         worldCells,
-        farShellEnabled: farShellState.current !== null,
+        farShellEnabled: farShellController.isBuilt(),
         farShellRadiusM: worldCells * state.farShellRadiusFactor,
       });
       s.counters["effective_far_radius_m"] = worldCells * state.farShellRadiusFactor;
@@ -5166,17 +2744,17 @@ async function main() {
         effectiveVisibleM: effectiveVisible,
         targetVisibleM: phase0TargetVisibleM,
       }) ? 1 : 0;
-      s.counters["far_shell_enabled"] = farShellState.current !== null ? 1 : 0;
+      s.counters["far_shell_enabled"] = farShellController.isBuilt() ? 1 : 0;
       s.counters["far_shell_radius_m"] = worldCells * state.farShellRadiusFactor;
       s.counters["far_shell_grid_res"] = 128;
       s.counters["shadow_proxy_enabled"] = isLongView ? 1 : 0;
       s.counters["shadow_proxy_inert"] = 1;
-      s.counters["canopy_enabled"] = canopyShellResult !== null ? 1 : 0;
-      // selected_page_count_lod* mirrors the rendered cut (same as clod_page_count_lod* for now).
+      s.counters["canopy_enabled"] = farShellController.canopyShell !== null ? 1 : 0;
+      // rendered_page_count_lod* mirrors the rendered cut (same as built for now).
       for (let lvl = 0; lvl <= maxTerrainLevel; lvl++) {
-        s.counters[`selected_page_count_lod${lvl}`] = lastNodesByLod[lvl] ?? 0;
+        s.counters[`rendered_page_count_lod${lvl}`] = selectionStats.nodesByLod[lvl] ?? 0;
       }
-      s.counters["rendered_terrain_tris"] = lastTriCount;
+      s.counters["rendered_terrain_tris"] = selectionStats.triCount;
       s.counters["total_scene_tris"] = s.triangles;
       s.counters["draw_calls"] = s.drawCalls;
       s.counters["frame_ms_avg"] = s.fps > 0 ? 1000 / s.fps : 0;
@@ -5198,9 +2776,9 @@ async function main() {
         playerZ: camera.position.z,
         velocityX: phase0VelocityX,
         velocityZ: phase0VelocityZ,
-        preloadSeconds: phase0PreloadSeconds,
-        liveRadiusM: phase0LiveRadiusM,
-        clodRadiusM: worldCells * state.farShellRadiusFactor,
+        preloadSeconds: phase0Streaming.preload_seconds,
+        liveRadiusM: phase0Streaming.live_radius_m,
+        clodRadiusM: phase0Streaming.clod_radius_m,
       });
       s.counters["streamer_simulated_required_chunks"] = streamingReport.requiredChunkCount;
       s.counters["streamer_simulated_required_pages"] = streamingReport.requiredPageCount;
@@ -5220,36 +2798,20 @@ async function main() {
       };
     }
 
-    // hold-to-dig pickaxe cadence while playing
-    if (
-      interaction.mode === "playing" && digHeld && state.digEnabled && playerTerraformEditActive() &&
-      document.pointerLockElement === renderer.domElement &&
-      performance.now() - lastDigAt >= state.brushFlowMs
-    ) {
-      camera.getWorldDirection(digDirection);
-      performDig(new THREE.Ray(camera.position.clone(), digDirection.clone()));
-    }
+    playerInputController.updateHoldToDig();
 
-    // dig preview reticle at the current aim point
-    let digAimHit: TerrainSurfaceHit | null = null;
-    if (state.digEnabled && interaction.mode === "playing" && playerTerraformEditActive()) {
-      camera.getWorldDirection(digDirection);
-      digAimRay.origin.copy(camera.position);
-      digAimRay.direction.copy(digDirection);
-      digAimHit = raycastEditableTerrain(digAimRay);
-    } else if (state.digEnabled && interaction.mode === "orbit" && hoverPointerValid) {
-      playerRaycaster.setFromCamera(hoverPointer, camera);
-      digAimHit = raycastEditableTerrain(playerRaycaster.ray);
-    }
-    if (digAimHit) {
-      digPreview.position.copy(digAimHit.point);
-      digPreview.scale.set(state.digRadius, state.brushHeight, state.digRadius);
-      digPreview.geometry = brushPreviewGeometries[state.brushShape];
-      (digPreview.material as THREE.MeshBasicMaterial).color.setHex(
-        state.brushOp === "add" ? 0x55dd66 : 0xff5533,
-      );
-    }
-    digPreview.visible = digAimHit !== null;
+    brushPreview.update({
+      digEnabled: state.digEnabled,
+      interactionMode: interaction.mode,
+      terraformEditActive: playerTerraformEditActive(),
+      brushShape: state.brushShape,
+      brushOp: state.brushOp,
+      digRadius: state.digRadius,
+      brushHeight: state.brushHeight,
+      raycastEditableTerrain: terrainRaycast.raycastEditableTerrain,
+      getPlayingAimRay: () => playerInputController.getPlayingAimRay(),
+      getOrbitHoverRay: () => playerInputController.getOrbitHoverRay(),
+    });
 
     // Textured terrain page LOD swaps are atomic. Screen-door fades are visually
     // noisy on terrain, even with complementary masks. Only views entering/leaving the cut
@@ -5295,7 +2857,7 @@ async function main() {
             // No group yet — entering the bubble, or a dig just dropped this page's cached chunks
             // (applyNodeMesh). The welded LOD0 page mesh (already rebuilt with the edit) MUST stay
             // visible or the page flashes a hole until its chunk group is rebuilt.
-            if (chunkGroupsBuiltThisFrame >= CHUNK_GROUP_BUILD_BUDGET) {
+            if (chunkGroupsBuiltThisFrame >= chunkGroupBuildBudget) {
               v.mesh.visible = true;
               continue;
             }
@@ -5338,62 +2900,26 @@ async function main() {
       grassCenter.y,
       THREE.MathUtils.clamp(grassCenter.z, ringClampMargin, worldCells - ringClampMargin),
     );
-    grassSystem?.update(elapsedSeconds, ringCenter, camera);
-    treeSystem?.update(elapsedSeconds, ringCenter, camera);
-    understorySystem?.update(elapsedSeconds, ringCenter, camera);
-    forestLightingSystem.update(elapsedSeconds, grassCenter, {
+    grassController.update(elapsedSeconds, ringCenter, camera);
+    treeController.update(elapsedSeconds, ringCenter, camera);
+    understoryController.update(elapsedSeconds, ringCenter, camera);
+    forestLightingController.update(elapsedSeconds, grassCenter, {
       treeProxies: treeSystem.getLightingProxies(),
       understoryProxies: understorySystem.getLightingProxies(),
       sunDirection: currentLighting().sunDirection,
     });
     applyForestLightingToPropMaterials();
-    stoneSystem?.update(ringCenter);
+    stoneController.update(ringCenter);
     // Water follows the camera every frame, independent of state.freeze, so the
     // fake lake/river clipmap keeps tracking the viewer while CLOD pages can be
     // frozen. Updated after camera movement and before the render call below.
-    waterClipmap.update(Math.min(playerDelta, 0.1), camera.position);
-    rainWeather.update(playerDelta, elapsedSeconds, camera.position, grassCenter);
-    snowWeather.update(playerDelta, elapsedSeconds, camera.position);
-    sandstormWeather.update(playerDelta, elapsedSeconds, camera.position);
-    if (state.weatherMode !== "off" && selectionFrameId % 30 === 0) {
+    waterController.update(Math.min(playerDelta, 0.1), camera.position);
+    weatherController.update(playerDelta, elapsedSeconds, camera.position, grassCenter);
+    if (state.weatherMode !== "off" && selectionStats.frameId % 30 === 0) {
       updateWeatherStats();
       weatherStatsController?.updateDisplay();
     }
-    if (!waterDevLogged) {
-      waterDevLogged = true;
-      const rect = waterClipmap.getLevelRect(0);
-      const firstLake = waterConfig.fakeBodies.lakes[0];
-      const lakeCenterSample = firstLake ? waterField.sample(firstLake.center[0], firstLake.center[1]) : null;
-      const firstRiver = waterConfig.fakeBodies.rivers[0];
-      let riverMidSample = null;
-      if (firstRiver && firstRiver.points.length >= 2) {
-        const midIdx = Math.floor(firstRiver.points.length / 2);
-        const p1 = firstRiver.points[midIdx - 1];
-        const p2 = firstRiver.points[midIdx];
-        const midX = (p1[0] + p2[0]) / 2;
-        const midZ = (p1[1] + p2[1]) / 2;
-        riverMidSample = waterField.sample(midX, midZ);
-      }
-      console.log("[DEV LOG] Water System Initialized:", {
-        worldCells,
-        worldBounds: { minX: 0, minZ: 0, maxX: worldCells, maxZ: worldCells },
-        resolvedLakes: waterConfig.fakeBodies.lakes.map((l) => ({ center: l.center, radius: l.radius, levelOffset: l.levelOffset })),
-        resolvedRivers: waterConfig.fakeBodies.rivers.map((r) => r.points),
-        lakeCenterSample: lakeCenterSample ? {
-          terrainY: lakeCenterSample.terrainY,
-          waterY: lakeCenterSample.waterY,
-          depth: lakeCenterSample.depth,
-          bodyMask: lakeCenterSample.bodyMask,
-        } : null,
-        riverMidpointSample: riverMidSample ? {
-          terrainY: riverMidSample.terrainY,
-          waterY: riverMidSample.waterY,
-          depth: riverMidSample.depth,
-          bodyMask: riverMidSample.bodyMask,
-        } : null,
-        firstLevelRect: rect ? { minX: rect.minX, minZ: rect.minZ, maxX: rect.maxX, maxZ: rect.maxZ } : null,
-      });
-    }
+    waterController.logDevInitOnce(worldCells);
     const nextTreeStats = treeSystem?.getStats();
     if (
       nextTreeStats && (
@@ -5504,7 +3030,7 @@ async function main() {
     }
     const currentGrassStats = nextGrassStats ?? grassStats;
     nodeLabelOverlay.update({
-      nodes: lastRenderedNodes,
+      nodes: selectionStats.renderedNodes,
       camera,
       viewport: renderer.domElement,
       viewportHeight: renderer.domElement.height,
@@ -5538,17 +3064,17 @@ async function main() {
         const bubbleMs = tPropsStart - tBubbleStart;
         const propsMs = tRenderStart - tPropsStart;
         const renderMs = end - tRenderStart;
-        const otherMs = frameMs - lastSelectionMs - bubbleMs - propsMs - renderMs;
+        const otherMs = frameMs - selectionStats.selectionMs - bubbleMs - propsMs - renderMs;
         // eslint-disable-next-line no-console
         console.warn(
           `[profile] frame ${frameMs.toFixed(1)}ms` +
-            ` | selection ${lastSelectionMs.toFixed(1)}` +
-            ` (cut ${selSub.cut.toFixed(1)} book ${selSub.book.toFixed(1)} info ${selSub.info.toFixed(1)} overlays ${selSub.overlays.toFixed(1)})` +
+            ` | selection ${selectionStats.selectionMs.toFixed(1)}` +
+            ` (cut ${selectionStats.subphases.cut.toFixed(1)} book ${selectionStats.subphases.book.toFixed(1)} info ${selectionStats.subphases.info.toFixed(1)} overlays ${selectionStats.subphases.overlays.toFixed(1)})` +
             ` bubble/chunks ${bubbleMs.toFixed(1)} (built ${chunkGroupsBuiltThisFrame})` +
             ` props ${propsMs.toFixed(1)}` +
             ` render ${renderMs.toFixed(1)}` +
             ` other ${otherMs.toFixed(1)}` +
-            ` | cut=${lastRenderedCount} chunkGroups=${chunkGroups.size} mode=${interaction.mode}`,
+            ` | cut=${selectionStats.renderedCount} chunkGroups=${chunkGroups.size} mode=${interaction.mode}`,
         );
       }
     }
@@ -5598,21 +3124,18 @@ async function main() {
   }
   window.addEventListener("beforeunload", () => {
     lockedBorderOverlay.dispose();
-    grassSystem?.dispose();
-    forestLightingSystem.dispose();
-    treeSystem?.dispose();
-    stoneSystem?.dispose();
-    waterClipmap.dispose();
-    rainWeather.dispose();
-    snowWeather.dispose();
-    sandstormWeather.dispose();
+    grassSystem.dispose();
+    forestLightingController.dispose();
+    treeController.dispose();
+    stoneSystem.dispose();
+    waterController.dispose();
+    weatherController.dispose();
     skyEnvironment?.dispose();
     postProcess?.dispose();
     clodErrorCompute?.destroy();
     clodWorker.dispose();
-    farShellState.current?.dispose();
+    farShellController.dispose();
     shadowProxyResult.dispose();
-    canopyShellResult?.dispose();
   }, { once: true });
 }
 

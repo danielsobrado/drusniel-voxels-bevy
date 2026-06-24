@@ -7,6 +7,10 @@ const VALID_YAML = `
 phase0:
   target_visible_m: 4096
   target_future_visible_m: 8192
+  streaming:
+    preload_seconds: 4.0
+    live_radius_m: 200
+    clod_radius_m: 2048
   scenes:
     long_view_4km:
       world: 16

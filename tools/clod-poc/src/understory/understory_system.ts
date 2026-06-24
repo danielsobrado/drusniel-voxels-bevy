@@ -273,7 +273,14 @@ export class UnderstorySystem {
     this.root.visible = this.settings.enabled;
   }
 
-  rebuildNodePatches(nodeIds: Iterable<string>): void {
+  /** Schedule deferred re-scatter on the next update cycle. */
+  markPatchesDirty(): void {
+    this.patchesDirty = true;
+  }
+
+  /** Remove patches for edited LOD0 nodes (fast path — no re-scatter).
+   *  Caller must trigger refreshForCenter later. */
+  removePatchesForNodes(nodeIds: Iterable<string>): void {
     const ids = new Set(nodeIds);
     if (ids.size === 0) return;
     const retained: UnderstoryPatch[] = [];
@@ -282,6 +289,10 @@ export class UnderstorySystem {
       else retained.push(patch);
     }
     this.patches = retained;
+  }
+
+  rebuildNodePatches(nodeIds: Iterable<string>): void {
+    this.removePatchesForNodes(nodeIds);
     this.refreshForCenter(this.lastCenter);
   }
 

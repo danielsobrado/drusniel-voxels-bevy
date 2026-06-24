@@ -11,6 +11,10 @@ const MINIMAL_CONFIG_YAML = `
 phase0:
   target_visible_m: 4096
   target_future_visible_m: 8192
+  streaming:
+    preload_seconds: 4.0
+    live_radius_m: 200
+    clod_radius_m: 2048
   scenes:
     test_scene:
       world: 16

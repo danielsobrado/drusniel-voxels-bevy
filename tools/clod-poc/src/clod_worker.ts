@@ -18,7 +18,7 @@ import {
 import type { ClodPagesConfig } from "./config.js";
 
 const ctx = self as unknown as {
-  postMessage: (message: ClodWorkerResponse) => void;
+  postMessage: (message: ClodWorkerResponse, transfer?: Transferable[]) => void;
   onmessage: ((event: MessageEvent<ClodWorkerRequest>) => void) | null;
 };
 
@@ -54,8 +54,8 @@ function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | un
   });
 }
 
-function post(message: ClodWorkerResponse): void {
-  ctx.postMessage(message);
+function post(message: ClodWorkerResponse, transfer?: Transferable[]): void {
+  ctx.postMessage(message, transfer);
 }
 
 function errorResponse(requestId: number | null, error: unknown): ClodWorkerResponse {
@@ -115,14 +115,24 @@ function drainParents(budgetMs: number): void {
   }
 
   if (changed.length > 0) {
+    const serialized = serializeNodes(changed);
+    const transferables: Transferable[] = [];
+    for (const node of serialized) {
+      transferables.push(
+        node.mesh.positions.buffer,
+        node.mesh.normals.buffer,
+        node.mesh.materials.buffer,
+        node.mesh.indices.buffer,
+      );
+    }
     post({
       type: "parentRebuilt",
       requestId: activeParentRequestId,
-      changed: serializeNodes(changed),
+      changed: serialized,
       parentNodes,
       parentMs,
       pendingParents: pendingParentCount(),
-    });
+    }, transferables);
   }
 
   if (pendingParentCount() === 0 && activeParentRequestId !== null) {
@@ -179,17 +189,37 @@ function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   parentMs = 0;
   for (const [nx, nz] of lod0.dirtyCoords) enqueueParent(1, nx >> 1, nz >> 1);
 
+  const tSer = performance.now();
+  const changed = serializeNodes(lod0.changed);
+  const serializeMs = performance.now() - tSer;
+  let serializedBytes = 0;
+  const transferables: Transferable[] = [];
+  for (const node of changed) {
+    serializedBytes += node.mesh.positions.byteLength
+      + node.mesh.normals.byteLength
+      + node.mesh.materials.byteLength
+      + node.mesh.indices.byteLength;
+    transferables.push(
+      node.mesh.positions.buffer,
+      node.mesh.normals.buffer,
+      node.mesh.materials.buffer,
+      node.mesh.indices.buffer,
+    );
+  }
+
   post({
     type: "lod0Rebuilt",
     requestId: request.requestId,
-    changed: serializeNodes(lod0.changed),
+    changed,
     dirtyCoords: lod0.dirtyCoords.map(([x, z]) => [x, z]),
     lod0Pages: lod0.lod0Pages,
     lod0Ms: lod0.lod0Ms,
+    serializeMs,
+    serializedBytes,
     chunksRemeshed: lod0.chunksRemeshed,
     chunksTotal: lod0.chunksTotal,
     pendingParents: pendingParentCount(),
-  });
+  }, transferables);
   scheduleParentDrain();
 }
 

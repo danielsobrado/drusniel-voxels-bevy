@@ -241,33 +241,90 @@ const BEDROCK_Y = 1;
  *  |base| stays small, so r + this margin bounds the influence region. */
 export const DIG_INFLUENCE_MARGIN = 4;
 
-const digEdits: DigEdit[] = [];
+/**
+ * Spatial index for dig edits — O(1) density lookups by cell grid.
+ * Cell size = 16 (matches chunk size).
+ */
+const CELL_SHIFT = 4; // 2^4 = 16
+const CELL_SIZE = 16;
+
+type CellKey = number;
+
+function cellKey(x: number, y: number, z: number): CellKey {
+  return ((x >> CELL_SHIFT) * 1048576 + (y >> CELL_SHIFT)) * 1048576 + (z >> CELL_SHIFT);
+}
+
+function overlappingCells(ex: number, ey: number, ez: number, r: number, h: number): CellKey[] {
+  const minX = Math.floor((ex - r) / CELL_SIZE);
+  const maxX = Math.floor((ex + r) / CELL_SIZE);
+  const minY = Math.floor((ey - h) / CELL_SIZE);
+  const maxY = Math.floor((ey + h) / CELL_SIZE);
+  const minZ = Math.floor((ez - r) / CELL_SIZE);
+  const maxZ = Math.floor((ez + r) / CELL_SIZE);
+  const keys: CellKey[] = [];
+  for (let cx = minX; cx <= maxX; cx++) {
+    for (let cy = minY; cy <= maxY; cy++) {
+      for (let cz = minZ; cz <= maxZ; cz++) {
+        keys.push(((cx * 1048576 + cy) * 1048576 + cz));
+      }
+    }
+  }
+  return keys;
+}
+
+const editIndex = new Map<CellKey, DigEdit[]>();
 let digEditRevision = 0;
+const editIds = new WeakMap<DigEdit, number>();
+let editIdCounter = 0;
 
 export function addDigEdit(edit: DigEdit): void {
-  digEdits.push({ ...edit });
+  const id = ++editIdCounter;
+  const h = editHeight(edit);
+  const r = edit.r + DIG_INFLUENCE_MARGIN;
+  for (const key of overlappingCells(edit.x, edit.y, edit.z, r, h)) {
+    let bucket = editIndex.get(key);
+    if (!bucket) {
+      bucket = [];
+      editIndex.set(key, bucket);
+    }
+    const copy = { ...edit };
+    editIds.set(copy, id);
+    bucket.push(copy);
+  }
   digEditRevision++;
 }
 
-/** Return a defensive copy suitable for persistence or diagnostics. */
+/** Return all unique edits across all cells (for persistence or diagnostics). */
 export function getDigEditsSnapshot(): DigEdit[] {
-  return digEdits.map((edit) => ({ ...edit }));
+  const seen = new Set<number>();
+  const all: DigEdit[] = [];
+  for (const bucket of editIndex.values()) {
+    for (const edit of bucket) {
+      const id = editIds.get(edit) ?? 0;
+      if (!seen.has(id)) {
+        seen.add(id);
+        all.push(edit);
+      }
+    }
+  }
+  return all;
 }
 
 /** Replace the runtime edit history without exposing the mutable backing array. */
 export function replaceDigEdits(edits: readonly DigEdit[]): void {
-  digEdits.length = 0;
-  for (const edit of edits) digEdits.push({ ...edit });
-  digEditRevision++;
+  editIndex.clear();
+  for (const edit of edits) addDigEdit(edit);
 }
 
 export function clearDigEdits(): void {
-  digEdits.length = 0;
+  editIndex.clear();
   digEditRevision++;
 }
 
 export function digEditCount(): number {
-  return digEdits.length;
+  let n = 0;
+  for (const bucket of editIndex.values()) n += bucket.length;
+  return n;
 }
 
 export function getDigEditRevision(): number {
@@ -289,7 +346,7 @@ function brushSdf(shape: BrushShape | undefined, dx: number, dy: number, dz: num
       return outside + Math.min(Math.max(dRadial, dAxial), 0);
     }
     default:
-      return Math.hypot(dx, (dy * r) / h, dz) - r; // sphere -> ellipsoid when h != r
+      return Math.hypot(dx, (dy * r) / h, dz) - r;
   }
 }
 
@@ -301,20 +358,19 @@ function editHeight(e: DigEdit): number {
 /** density > 0 = solid (below surface), < 0 = air. The isosurface is density = 0. */
 export function density(x: number, y: number, z: number): number {
   let d = surfaceHeight(x, z) - y;
-  if (digEdits.length > 0 && y > BEDROCK_Y) {
-    for (const e of digEdits) {
-      const h = editHeight(e);
-      const reachXZ = e.r + DIG_INFLUENCE_MARGIN, reachY = h + DIG_INFLUENCE_MARGIN;
-      const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-      if (Math.abs(dx) > reachXZ || Math.abs(dy) > reachY || Math.abs(dz) > reachXZ) continue;
-      const sdf = brushSdf(e.shape, dx, dy, dz, e.r, h);
-      // add: union solid (max with the inverted SDF); remove: subtract air (min with the SDF)
-      const full = (e.op === "add") ? Math.max(d, -sdf) : Math.min(d, sdf);
-      // strength scales the edit; falloff feathers it to zero over a band inside the surface,
-      // so strength 1 / falloff 0 reproduces the hard CSG edit exactly.
-      const feather = Math.max(1e-3, (e.falloff ?? 0) * e.r);
-      const weight = Math.min(1, Math.max(0, -sdf / feather)) * (e.strength ?? 1);
-      d += (full - d) * weight;
+  if (editIndex.size > 0 && y > BEDROCK_Y) {
+    const key = cellKey(x, y, z);
+    const bucket = editIndex.get(key);
+    if (bucket) {
+      for (const e of bucket) {
+        const h = editHeight(e);
+        const dx = x - e.x, dy = y - e.y, dz = z - e.z;
+        const sdf = brushSdf(e.shape, dx, dy, dz, e.r, h);
+        const full = (e.op === "add") ? Math.max(d, -sdf) : Math.min(d, sdf);
+        const feather = Math.max(1e-3, (e.falloff ?? 0) * e.r);
+        const weight = Math.min(1, Math.max(0, -sdf / feather)) * (e.strength ?? 1);
+        d += (full - d) * weight;
+      }
     }
   }
   return d;
@@ -359,17 +415,19 @@ const MATERIAL_PAINT_BAND = 0.75;
  * position, so coincident border vertices agree and the weld holds.
  */
 export function paintMaterialAt(x: number, y: number, z: number): number {
-  if (digEdits.length > 0) {
-    for (let i = digEdits.length - 1; i >= 0; i--) {
-      const e = digEdits[i];
-      if (e.op !== "add") continue;
-      const h = editHeight(e);
-      const reachXZ = e.r + DIG_INFLUENCE_MARGIN, reachY = h + DIG_INFLUENCE_MARGIN;
-      const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-      if (Math.abs(dx) > reachXZ || Math.abs(dy) > reachY || Math.abs(dz) > reachXZ) continue;
-      if (brushSdf(e.shape, dx, dy, dz, e.r, h) <= MATERIAL_PAINT_BAND) {
-        const slot = Math.max(0, (e.material ?? 0) | 0);
-        return slot + 1;
+  if (editIndex.size > 0) {
+    const key = cellKey(x, y, z);
+    const bucket = editIndex.get(key);
+    if (bucket) {
+      for (let i = bucket.length - 1; i >= 0; i--) {
+        const e = bucket[i];
+        if (e.op !== "add") continue;
+        const h = editHeight(e);
+        const dx = x - e.x, dy = y - e.y, dz = z - e.z;
+        if (brushSdf(e.shape, dx, dy, dz, e.r, h) <= MATERIAL_PAINT_BAND) {
+          const slot = Math.max(0, (e.material ?? 0) | 0);
+          return slot + 1;
+        }
       }
     }
   }
@@ -399,33 +457,33 @@ const PAINT_FADE = 3.0;
  * texture while the weight is still fading. Only the weights should vary by position.
  */
 export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
+  const slots = new Array<number>(PAINT_BLEND_CHANNELS).fill(-1);
+  const weights = new Array<number>(PAINT_BLEND_CHANNELS).fill(0);
+
+  const bucket = editIndex.size > 0 ? editIndex.get(cellKey(x, y, z)) : undefined;
+  if (!bucket) return { slots, weights };
+
   const channelSlots: number[] = [];
-  for (let i = digEdits.length - 1; i >= 0 && channelSlots.length < PAINT_BLEND_CHANNELS; i--) {
-    const e = digEdits[i];
+  for (let i = bucket.length - 1; i >= 0 && channelSlots.length < PAINT_BLEND_CHANNELS; i--) {
+    const e = bucket[i];
     if (e.op !== "add") continue;
     const slot = Math.max(0, (e.material ?? 0) | 0);
     if (!channelSlots.includes(slot)) channelSlots.push(slot);
   }
   channelSlots.sort((a, b) => a - b);
 
-  const slots = new Array<number>(PAINT_BLEND_CHANNELS).fill(-1);
-  const weights = new Array<number>(PAINT_BLEND_CHANNELS).fill(0);
   for (let c = 0; c < channelSlots.length; c++) slots[c] = channelSlots[c];
-  if (digEdits.length === 0) return { slots, weights };
   const cover = new Map<number, number>();
-  for (let i = digEdits.length - 1; i >= 0; i--) {
-    const e = digEdits[i];
+  for (let i = bucket.length - 1; i >= 0; i--) {
+    const e = bucket[i];
     if (e.op !== "add") continue;
     const h = editHeight(e);
-    const reachXZ = e.r + DIG_INFLUENCE_MARGIN, reachY = h + DIG_INFLUENCE_MARGIN;
     const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-    if (Math.abs(dx) > reachXZ || Math.abs(dy) > reachY || Math.abs(dz) > reachXZ) continue;
     const sdf = brushSdf(e.shape, dx, dy, dz, e.r, h);
     if (sdf >= PAINT_FADE) continue;
     const t = Math.min(Math.max((sdf - MATERIAL_PAINT_BAND) / (PAINT_FADE - MATERIAL_PAINT_BAND), 0), 1);
-    const w = 1 - t * t * (3 - 2 * t); // smoothstep falloff: 1 on the deposit, 0 at the fade edge
+    const w = 1 - t * t * (3 - 2 * t);
     if (w <= 0) continue;
-    // TODO: Map numeric slot index using getMaterialIdFromSlotIndex(slot, registry) for semantic resolution.
     const slot = Math.max(0, (e.material ?? 0) | 0);
     cover.set(slot, Math.max(cover.get(slot) ?? 0, w));
   }
@@ -466,7 +524,7 @@ interface VertBuf {
   index: Map<number, number>; // packed cell key -> local vertex index
 }
 
-function cellKey(ci: number, cj: number, ck: number): number {
+function cellKeySN(ci: number, cj: number, ck: number): number {
   // packs into a single number; ranges are small and non-negative after offset.
   return ((ci + 512) * 2048 + (cj + 512)) * 2048 + (ck + 512);
 }
@@ -508,7 +566,7 @@ function cellVertex(ci: number, cj: number, ck: number): [number, number, number
 }
 
 function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number): number | null {
-  const key = cellKey(ci, cj, ck);
+  const key = cellKeySN(ci, cj, ck);
   const existing = buf.index.get(key);
   if (existing !== undefined) return existing;
   const p = cellVertex(ci, cj, ck);
@@ -539,9 +597,30 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
 
   // The per-column Y scan band follows the base surface; dig edits can carve crossings
   // far below it, so widen the band for columns a nearby edit can reach.
-  const chunkEdits = digEdits.filter((e) =>
-    e.x + e.r + DIG_INFLUENCE_MARGIN >= x0 - 1 && e.x - e.r - DIG_INFLUENCE_MARGIN <= x1 &&
-    e.z + e.r + DIG_INFLUENCE_MARGIN >= z0 - 1 && e.z - e.r - DIG_INFLUENCE_MARGIN <= z1);
+  // Collect unique edits from all cells whose XZ grid cell overlaps this chunk.
+  const visited = new Set<number>();
+  const chunkEdits: DigEdit[] = [];
+  const minGX = Math.max(0, Math.floor(x0 / CELL_SIZE) - 1);
+  const maxGX = Math.floor((x1 - 1) / CELL_SIZE) + 1;
+  const minGZ = Math.max(0, Math.floor(z0 / CELL_SIZE) - 1);
+  const maxGZ = Math.floor((z1 - 1) / CELL_SIZE) + 1;
+  for (let gx = minGX; gx <= maxGX; gx++) {
+    for (let gz = minGZ; gz <= maxGZ; gz++) {
+      // Iterate Y cells; limit to reasonable Y range to bound the search
+      for (let gy = 0; gy < 32; gy++) {
+        const key = (gx * 1048576 + gy) * 1048576 + gz;
+        const bucket = editIndex.get(key);
+        if (!bucket) continue;
+        for (const e of bucket) {
+          const id = editIds.get(e) ?? 0;
+          if (!visited.has(id)) {
+            visited.add(id);
+            chunkEdits.push(e);
+          }
+        }
+      }
+    }
+  }
 
   for (let i = x0; i < x1; i++) {
     for (let k = z0; k < z1; k++) {

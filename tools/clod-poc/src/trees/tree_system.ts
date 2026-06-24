@@ -166,6 +166,17 @@ interface TreePatch {
   generationStats: TreeGenerationStats;
 }
 
+/** A tree instance that lost its terrain support and is falling under gravity. */
+export interface FallingTree {
+  position: [number, number, number];
+  velocity: number;
+  originalY: number;
+  species: TreeSpeciesId;
+  scale: number;
+  rotationY: number;
+  normalY: number;
+}
+
 interface TreeMeshBoundsState {
   count: number;
   centerX: number;
@@ -394,9 +405,16 @@ export class TreeSystem {
     this.root.visible = this.settings.enabled;
   }
 
-  rebuildNodePatches(nodeIds: Iterable<string>): void {
+  /** Schedule deferred re-scatter on the next update cycle. */
+  markPatchesDirty(): void {
+    this.patchesDirty = true;
+  }
+
+  /** Remove patches for edited LOD0 nodes (fast path — no re-scatter).
+   *  Returns tree instances whose support was removed (for falling animation). */
+  removePatchesForNodes(nodeIds: Iterable<string>): FallingTree[] {
     const ids = new Set(nodeIds);
-    if (ids.size === 0) return;
+    if (ids.size === 0) return [];
     if (this.usesGpuRingDraw()) {
       this.clearGpuRing();
       this.resetLodCounts();
@@ -408,14 +426,34 @@ export class TreeSystem {
         : "ring";
       this.root.visible = this.settings.enabled;
       this.updateStats();
-      return;
+      return [];
     }
     const retained: TreePatch[] = [];
+    const fallen: FallingTree[] = [];
     for (const patch of this.patches) {
-      if (ids.has(patch.nodeId)) this.removePatch(patch);
-      else retained.push(patch);
+      if (ids.has(patch.nodeId)) {
+        for (const inst of patch.instances) {
+          fallen.push({
+            position: [...inst.position],
+            velocity: 0,
+            originalY: inst.position[1],
+            species: inst.species,
+            scale: inst.scale,
+            rotationY: inst.rotationY,
+            normalY: inst.normalY,
+          });
+        }
+        this.removePatch(patch);
+      } else {
+        retained.push(patch);
+      }
     }
     this.patches = retained;
+    return fallen;
+  }
+
+  rebuildNodePatches(nodeIds: Iterable<string>): void {
+    this.removePatchesForNodes(nodeIds);
     this.refreshForCenter(this.lastCenter);
   }
 

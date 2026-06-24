@@ -17,6 +17,8 @@ export interface WorkerLod0Rebuild {
   dirtyCoords: [number, number][];
   lod0Pages: number;
   lod0Ms: number;
+  serializeMs: number;
+  serializedBytes: number;
   chunksRemeshed: number;
   chunksTotal: number;
   pendingParents: number;
@@ -127,6 +129,8 @@ export class ClodWorkerClient {
           dirtyCoords: message.dirtyCoords,
           lod0Pages: message.lod0Pages,
           lod0Ms: message.lod0Ms,
+          serializeMs: message.serializeMs,
+          serializedBytes: message.serializedBytes,
           chunksRemeshed: message.chunksRemeshed,
           chunksTotal: message.chunksTotal,
           pendingParents: message.pendingParents,
