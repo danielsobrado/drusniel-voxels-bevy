@@ -2,7 +2,7 @@
 // scene pass -> exposure/contrast/saturation/vignette -> renderer tone mapping/output color.
 
 import * as THREE from "three";
-import { PostProcessing, type WebGPURenderer } from "three/webgpu";
+import { RenderPipeline, type WebGPURenderer } from "three/webgpu";
 import {
   clamp,
   dot,
@@ -26,7 +26,7 @@ type TslNode = any;
 
 export class WebGpuPostProcessPipeline {
   private readonly renderer: WebGPURenderer;
-  private readonly pipeline: PostProcessing;
+  private readonly pipeline: RenderPipeline;
   private readonly scenePass: ReturnType<typeof pass>;
   private readonly uOpacity = uniform(DEFAULT_POST_PROCESS_SETTINGS.opacity);
   private readonly uExposure = uniform(DEFAULT_POST_PROCESS_SETTINGS.exposure);
@@ -48,7 +48,7 @@ export class WebGpuPostProcessPipeline {
       stencilBuffer: false,
       samples: 4,
     });
-    this.pipeline = new PostProcessing(renderer);
+    this.pipeline = new RenderPipeline(renderer);
     // updateSettings() rebuilds the output graph (mode keys are defined here), so no
     // separate rebuildOutput() call is needed.
     this.updateSettings(this.settings);

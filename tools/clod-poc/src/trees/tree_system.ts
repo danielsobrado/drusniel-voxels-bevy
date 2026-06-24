@@ -804,7 +804,7 @@ export class TreeSystem {
     }
     if (this.gpuRingCompute && this.gpuRingDraw) {
       const frustumPlanes = this.frustumPlanes(camera);
-      this.gpuRingCompute.dispatch({
+      const dispatched = this.gpuRingCompute.dispatch({
         centerX: center.x,
         centerZ: center.z,
         worldCells: this.worldCells,
@@ -812,6 +812,7 @@ export class TreeSystem {
         indexCounts: this.gpuRingIndexCounts(),
         frustumPlanes,
       });
+      if (dispatched) this.setRingDrawsVisible(true);
       this.gpuRingStats = this.gpuRingCompute.stats(true);
       this.validateGpuRingAgainstCpu(center, frustumPlanes);
     }
@@ -876,6 +877,7 @@ export class TreeSystem {
     this.gpuRingKey = key;
     this.gpuRingDraw = this.createGpuRingDrawResources(treeGpuRingGroupCapacity(this.settings));
     this.ringMeshes = this.gpuRingDraw.meshes;
+    this.setRingDrawsVisible(false);
     for (const mesh of this.ringMeshes) this.root.add(mesh);
     this.gpuRingStats = {
       status: "initializing",
@@ -1018,6 +1020,11 @@ export class TreeSystem {
     attribute.name = `tree-ring-${name}`;
     this.gpuBackend.createStorageAttribute(attribute);
     return attribute;
+  }
+
+  private setRingDrawsVisible(visible: boolean): void {
+    for (const mesh of this.ringMeshes) mesh.visible = visible;
+    for (const twin of this.ringPrepassTwins) twin.visible = visible;
   }
 
   private setGpuRingIndirect(

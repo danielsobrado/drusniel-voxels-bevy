@@ -70,7 +70,8 @@ fn material_weights(height: f32, normal_y: f32) -> vec4<f32> {
 
 fn paintMaterialAt(wx: f32, wz: f32, height: f32) -> i32 {
   let fade = 3.0;
-  for (var i = arrayLength(&digEdits) - 1u; i >= 0u; i = i - 1u) {
+  let count = arrayLength(&digEdits);
+  for (var i = 0u; i < count; i = i + 1u) {
     let e = digEdits[i];
     if (e.opAdd == 0) { continue; }
     let dx = wx - e.x;

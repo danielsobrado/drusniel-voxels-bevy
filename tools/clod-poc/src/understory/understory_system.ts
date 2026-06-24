@@ -340,6 +340,7 @@ export class UnderstorySystem {
     this.gpuRingKey = key;
     this.gpuRingDraw = createGpuRingDrawResources(this.settings, this.worldCells, this.gpuBackend);
     for (const mesh of this.gpuRingDraw.meshes) {
+      mesh.visible = false;
       this.root.add(mesh);
       this.ringMeshes.push(mesh);
     }
@@ -395,7 +396,7 @@ export class UnderstorySystem {
 
     if (this.gpuRingCompute && this.gpuRingDraw) {
       const indexCounts = this.gpuRingIndexCounts();
-      this.gpuRingCompute.dispatch({
+      const dispatched = this.gpuRingCompute.dispatch({
         centerX: center.x,
         centerZ: center.z,
         worldCells: this.worldCells,
@@ -404,6 +405,9 @@ export class UnderstorySystem {
         frustumPlanes: this.frustumPlanes(camera),
         hydroEnabled: !!this.hydrologyData,
       });
+      if (dispatched) {
+        for (const mesh of this.ringMeshes) mesh.visible = true;
+      }
       this.gpuRingStats = this.gpuRingCompute.stats(true);
       this.validateGpuRingAgainstCpu(center, camera);
     }

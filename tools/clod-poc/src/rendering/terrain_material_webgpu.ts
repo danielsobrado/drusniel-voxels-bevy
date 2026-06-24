@@ -8,6 +8,7 @@ import {
   DEFAULT_TERRAIN_COLOR_ADJUST,
   DEFAULT_TERRAIN_NODE_LIGHTING,
   type TerrainColorAdjust,
+  type TerrainArraySamplingMode,
   type TerrainNodeLighting,
   type TerrainNodeMaterialHandle,
   type TerrainNodeTextures,
@@ -160,6 +161,8 @@ function textureOptionsSignature(
     options.normalMap ? 1 : 0,
     options.textureScale,
     options.blendBands ? 1 : 0,
+    ((options as Record<string, unknown>).arraySampling as string | undefined) ?? "triplanar",
+    options.painted ? 1 : 0,
     procedural?.enabled ? 1 : 0,
     procedural?.noiseA?.uuid ?? "_",
     procedural?.noiseB?.uuid ?? "_",
@@ -202,7 +205,9 @@ function toNodeTextures(
     blendWidth: options.blendWidth,
     normalIntensity: options.normalIntensity,
     triplanar: options.triplanar,
+    arraySampling: (((options as Record<string, unknown>).arraySampling as TerrainArraySamplingMode | undefined) ?? "triplanar"),
     normalMapMask,
+    painted: options.painted ?? false,
     debugMode: options.procedural?.debugMode ?? 0,
     procedural: options.procedural?.enabled && options.procedural.noiseA && options.procedural.noiseB
       ? {

@@ -11,6 +11,7 @@ const TIER_COUNT = 4;
 const INDIRECT_BYTES = TIER_COUNT * INDIRECT_ARGS_PER_TIER * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
+export const GRASS_GPU_RING_MAX_SAFE_GRID = 384;
 
 // Toroidal slot grid: GRID² candidate cells, CELL m apart → ±(GRID·CELL/2) m ring. Density polish:
 // a denser grid (smaller CELL) gives a lusher near field; survivors widen by 1/√thin to conserve
@@ -22,7 +23,7 @@ export const GRASS_GPU_RING_STORAGE_BINDINGS = 7;
 
 export function grassGpuRingGrid(ring: Pick<GrassRingSettings, "grid"> = DEFAULT_GRASS_SETTINGS.ring): number {
   const grid = Number.isFinite(ring.grid) ? ring.grid : DEFAULT_GRASS_SETTINGS.ring.grid;
-  return Math.max(1, Math.floor(grid));
+  return Math.min(GRASS_GPU_RING_MAX_SAFE_GRID, Math.max(1, Math.floor(grid)));
 }
 
 export function grassGpuRingCell(ring: Pick<GrassRingSettings, "cell"> = DEFAULT_GRASS_SETTINGS.ring): number {

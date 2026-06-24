@@ -98,6 +98,7 @@ export class StoneSystem {
   private readonly hydrologyWater: StoneHydrologyWater | undefined;
   private scatterCompute: StoneGpuScatterCompute | null = null;
   private generation = 0;
+  private drawsReady = false;
   private stats: StoneStats = emptyStats();
 
   constructor(options: StoneSystemOptions) {
@@ -156,6 +157,7 @@ export class StoneSystem {
     if (maxInstances === 0 || this.settings.density <= 0) return;
 
     const generation = ++this.generation;
+    this.drawsReady = false;
     const capacity = maxInstances * STONE_GPU_CLASS_COUNT;
     const instanceA = this.createStorageInstancedAttribute("instance-a", capacity);
     const instanceB = this.createStorageInstancedAttribute("instance-b", capacity);
@@ -197,6 +199,7 @@ export class StoneSystem {
         }
         compute.destroy();
         this.scatterCompute = null;
+        this.drawsReady = true;
         this.stats.large = counts.large;
         this.stats.medium = counts.medium;
         this.stats.small = counts.small;
@@ -278,7 +281,7 @@ export class StoneSystem {
 
   private applyClassVisibility(): void {
     for (const draw of this.draws) {
-      draw.mesh.visible = this.visibleClasses.has(draw.classId);
+      draw.mesh.visible = this.drawsReady && this.visibleClasses.has(draw.classId);
     }
     this.refreshVisibleStats();
   }
@@ -297,6 +300,7 @@ export class StoneSystem {
     this.generation++;
     this.scatterCompute?.destroy();
     this.scatterCompute = null;
+    this.drawsReady = false;
     for (const draw of this.draws) {
       this.root.remove(draw.mesh);
       draw.mesh.geometry.dispose();

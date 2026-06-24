@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import GUI from "lil-gui";
 import { parseConfig } from "./config.js";
 import { initHooks, type ClodHooks } from "./core/hooks.js";
+import { failLoud, installGlobalErrorHooks } from "./core/diagnostics.js";
 import { buildTerrainSummary, createHeightTexture, createExtendedHeightTexture, createExtendedCanopyTexture } from "./clod/terrain_summary.js";
 import { buildFarTerrainShell } from "./gpu/far_terrain_shell.js";
 import { buildFarTerrainShadowProxy } from "./gpu/far_terrain_shadow_proxy.js";
@@ -232,6 +233,13 @@ const BUILTIN_TERRAIN_TEXTURES = [
 const TEXTURE_BLEND_MODES = ["hard bands", "blend bands"] as const;
 const TERRAIN_MATERIAL_SOURCES = ["procedural", "external_pbr", "debug_flat"] as const;
 type TerrainMaterialSource = typeof TERRAIN_MATERIAL_SOURCES[number];
+const terrainMaterialSourceParam = (value: string | null): TerrainMaterialSource | null =>
+  TERRAIN_MATERIAL_SOURCES.includes(value as TerrainMaterialSource) ? value as TerrainMaterialSource : null;
+const positiveNumberParam = (value: string | null): number | null => {
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
 const PROCEDURAL_DEBUG_MODES = {
   final: 0,
   "macro noise": 1,
@@ -534,6 +542,7 @@ async function main() {
     }
     return;
   }
+  installGlobalErrorHooks();
 
   // Load and validate Content Registry
   try {
@@ -795,7 +804,21 @@ async function main() {
   let standaloneComputeDevice: GPUDevice | null = null;
 
   const rendererBackend = parseRendererBackend(searchParams);
-  const app = rendererBackend === "webgpu" ? await createWebGpuAppRenderer() : createWebGlAppRenderer();
+  let app: Awaited<ReturnType<typeof createWebGpuAppRenderer>> | ReturnType<typeof createWebGlAppRenderer>;
+  try {
+    app = rendererBackend === "webgpu" ? await createWebGpuAppRenderer() : createWebGlAppRenderer();
+  } catch (error) {
+    const details = [
+      error instanceof Error ? error.message : String(error),
+      "",
+      "Recovery:",
+      "- Hard-reload after closing other tabs that used this WebGPU app.",
+      "- If Chrome keeps reporting DXGI_ERROR_DEVICE_HUNG, restart the browser.",
+      "- Use ?renderer=webgl to open the app without WebGPU.",
+    ];
+    failLoud("Renderer initialization failed", details);
+    return;
+  }
   const renderer = app.renderer;
   const maxAnisotropy = app.maxAnisotropy;
   const isWebGpu = app.isWebGpu;
@@ -1024,7 +1047,8 @@ async function main() {
   const playerPointer = new THREE.Vector2();
   const playerForward = new THREE.Vector3();
   const orbitReturnTarget = new THREE.Vector3();
-  const playerClock = new THREE.Clock();
+  const playerTimer = new THREE.Timer();
+  playerTimer.connect(document);
   let playerYaw = 0;
   let playerPitch = 0;
   let playerPointerLocked = false;
@@ -1305,6 +1329,10 @@ async function main() {
   const queryWeatherIntensity = weatherIntensityParam === null ? Number.NaN : Number(weatherIntensityParam);
   const queryWeatherWindX = weatherWindXParam === null ? Number.NaN : Number(weatherWindXParam);
   const queryWeatherWindZ = weatherWindZParam === null ? Number.NaN : Number(weatherWindZParam);
+  const queryTerrainMaterialSource = terrainMaterialSourceParam(searchParams.get("terrainMaterial"));
+  const textureMipmapsEnabled = searchParams.get("textureMipmaps") !== "0";
+  const queryGrassRingGrid = positiveNumberParam(searchParams.get("grassRingGrid"));
+  const queryGrassRingCell = positiveNumberParam(searchParams.get("grassRingCell"));
   const state = {
     clodPerfMode: queryPerfMode,
     webgpuSelection: queryWebGpuSelection,
@@ -1325,11 +1353,11 @@ async function main() {
     frontSideOnly: false,
     recomputedNormals: false,
     forceMaxLevel: "auto",
-    terrainMaterialSource: "external_pbr" as TerrainMaterialSource,
+    terrainMaterialSource: (queryTerrainMaterialSource ?? "external_pbr") as TerrainMaterialSource,
     proceduralDebugMode: "final" as ProceduralDebugMode,
     proceduralMicroNormals: true,
     textureScale: 1,
-    triplanar: !queryPerfMode,
+    triplanar: !queryPerfMode && searchParams.get("terrainTriplanar") !== "0", // [DEBUG-tdr] isolate triplanar 3x sample cost
     albedo: !queryPerfMode,
     normalMap: false,
     normalIntensity: 1,
@@ -1525,6 +1553,8 @@ async function main() {
   }
   if (searchParams.get("stones") === "1") state.stonesEnabled = true;
   if (searchParams.get("stones") === "0") state.stonesEnabled = false;
+  if (searchParams.get("grass") === "1") state.grassEnabled = true;
+  if (searchParams.get("grass") === "0") state.grassEnabled = false;
   if (searchParams.get("trees") === "1") state.treesEnabled = true;
   if (searchParams.get("trees") === "0") state.treesEnabled = false;
   if (queryTreeGpuRing) {
@@ -1685,10 +1715,10 @@ async function main() {
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
     tex.colorSpace = colorSpace;
-    tex.generateMipmaps = true;
-    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = textureMipmapsEnabled;
+    tex.minFilter = textureMipmapsEnabled ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
-    tex.anisotropy = maxAnisotropy;
+    tex.anisotropy = textureMipmapsEnabled ? maxAnisotropy : 1;
     tex.needsUpdate = true;
     return tex;
   };
@@ -1716,6 +1746,7 @@ async function main() {
   const terrainTextureUniformOptions = () => {
     const proceduralActive = state.terrainMaterialSource === "procedural" && proceduralTerrain !== null;
     if (!proceduralActive) ensureTextureArrays();
+    const painted = getDigEditsSnapshot().some((edit) => edit.op === "add");
     const masks = proceduralTextureConfig.terrain.masks;
     const materials = proceduralTextureConfig.terrain.materials;
     return {
@@ -1728,6 +1759,7 @@ async function main() {
       textureScale: state.textureScale,
       blendBands: state.textureBlendMode === "blend bands",
       blendWidth: state.textureBlendWidth,
+      painted,
       albedoArray: proceduralActive ? proceduralTerrain.albedoArray : albedoArrayTex,
       normalArray: proceduralActive ? proceduralTerrain.normalArray : normalArrayTex,
       procedural: proceduralActive ? {
@@ -1962,7 +1994,7 @@ async function main() {
   const gpuMeshVerify = searchParams.get("gpuMeshVerify") === "1";
   let gpuMesher: GpuChunkMesher | null = null;
   if (gpuMeshEnabled) {
-    void GpuChunkMesher.create(cfg.page.chunk_size).then(async (res) => {
+    void GpuChunkMesher.create(cfg.page.chunk_size, { sharedDevice: rendererWebGpuDevice ?? undefined }).then(async (res) => {
       if (!res.mesher) {
         console.warn("[gpuMesh] WebGPU unavailable; using CPU meshChunk", res.unavailable);
         return;
@@ -2116,7 +2148,11 @@ async function main() {
     maxHeight: state.grassMaxHeight,
     maxBlades: state.grassMaxBlades,
     seed: state.grassSeed,
-    ring: { ...grassConfig.ring },
+    ring: {
+      ...grassConfig.ring,
+      grid: Math.floor(queryGrassRingGrid ?? grassConfig.ring.grid),
+      cell: queryGrassRingCell ?? grassConfig.ring.cell,
+    },
     patchFallback: { ...grassConfig.patchFallback },
   });
   const currentGrassLighting = (): GrassLighting => {
@@ -2991,7 +3027,9 @@ async function main() {
       material: state.brushOp === "add" ? state.brushMaterial : undefined,
       height: state.brushHeight, strength: state.brushStrength, falloff: state.brushFalloff,
     };
+    const hadPaintedTerrain = getDigEditsSnapshot().some((existing) => existing.op === "add");
     addDigEdit(edit);
+    if (!hadPaintedTerrain && edit.op === "add") applyTerrainTextures();
 
     // One relevant terrain sound per edit: earthy "dig" for remove, "raise" for add.
     emitAudio(state.brushOp === "add" ? "terrain.raise" : "terrain.dig.tick");
@@ -3866,7 +3904,10 @@ async function main() {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = maxAnisotropy;
+    texture.generateMipmaps = textureMipmapsEnabled;
+    texture.minFilter = textureMipmapsEnabled ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = textureMipmapsEnabled ? maxAnisotropy : 1;
     texture.needsUpdate = true;
   };
   // Normal maps are linear data, not colour — decoding them as sRGB skews the vectors.
@@ -3874,7 +3915,10 @@ async function main() {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.colorSpace = THREE.NoColorSpace;
-    texture.anisotropy = maxAnisotropy;
+    texture.generateMipmaps = textureMipmapsEnabled;
+    texture.minFilter = textureMipmapsEnabled ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = textureMipmapsEnabled ? maxAnisotropy : 1;
     texture.needsUpdate = true;
   };
   const loadNormalMap = async (file: File): Promise<{
@@ -4349,7 +4393,7 @@ async function main() {
         imported.normalPath.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin",
       );
     }
-  } else if (!state.clodPerfMode) {
+  } else if (!state.clodPerfMode && state.terrainMaterialSource === "external_pbr") {
     await loadBuiltinTextureSlots(
       DEFAULT_TERRAIN_TEXTURE_PRESETS.map((preset, index) => ({
         index,
@@ -4359,7 +4403,7 @@ async function main() {
       "loading textures",
     );
   } else {
-    state.loadedTextureFiles = "perf mode";
+    state.loadedTextureFiles = state.clodPerfMode ? "perf mode" : state.terrainMaterialSource;
   }
   syncTextureModalControls();
   updateTextureSlotPreviews();
@@ -5001,7 +5045,8 @@ async function main() {
   renderer.setAnimationLoop(() => {
     const frameStart = performance.now();
     selectionFrameId++;
-    const playerDelta = Math.min(playerClock.getDelta(), 0.1);
+    playerTimer.update();
+    const playerDelta = Math.min(playerTimer.getDelta(), 0.1);
     elapsedSeconds += playerDelta;
     updateAverageFps();
     if (interaction.mode === "playing") {

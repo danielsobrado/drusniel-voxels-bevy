@@ -97,6 +97,7 @@ class WaterLevel {
     this.mesh.name = `water-clipmap-L${index}`;
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 10;
+    this.mesh.visible = false;
   }
 
   get object(): THREE.Object3D { return this.mesh; }
@@ -165,6 +166,7 @@ class WaterLevel {
     (geo.getAttribute("aFlow") as THREE.BufferAttribute).needsUpdate = true;
     (geo.getIndex() as THREE.BufferAttribute).needsUpdate = true;
     geo.setDrawRange(0, indexCount);
+    this.mesh.visible = indexCount > 0;
   }
 
   private refillIndices(): number {

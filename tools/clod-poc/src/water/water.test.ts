@@ -325,6 +325,11 @@ describe("WaterClipmap", () => {
     const root = scene.children.find((child) => child.name === "water-clipmap-root");
     expect(root).toBeDefined();
     expect(root!.children.length).toBe(cfg.cellSizes.length);
+    for (const child of root!.children) {
+      const mesh = child as THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
+      expect(mesh.visible).toBe(false);
+      expect(mesh.geometry.drawRange.count).toBe(0);
+    }
     clipmap.update(0.016, new THREE.Vector3(80, 50, -70));
     clipmap.dispose();
   });

@@ -43,12 +43,12 @@
       "maxUniformBuffersPerShaderStage": 12
     }
   },
-  "fps": 144.03091134518803,
+  "fps": 143.97804803587883,
   "frameMs": 6.899999999999636,
   "frameMsP95": 7.100000000000364,
   "drawCalls": 7,
   "triangles": 4407,
-  "frame": 1044,
+  "frame": 1046,
   "counters": {
     "phase0.timestampQuerySupported": 1,
     "phase1.gridSize": 2048,
@@ -66,7 +66,7 @@
     "phase1.internalBorderChecks": 42,
     "phase1.selectionErrorThresholdPx100": 2400,
     "phase1.selectionHysteresis100": 135,
-    "phase1.buildMs100": 225340,
+    "phase1.buildMs100": 269380,
     "phase1.debugMode": 0,
     "phase1.nodesRendered": 28,
     "phase1.trianglesRendered": 24360,
@@ -78,10 +78,10 @@
     "phase1.builtLod1Nodes": 16,
     "phase1.builtLod2Nodes": 4,
     "phase1.builtLod3Nodes": 1,
-    "phase1.selectionMs100": 0
+    "phase1.selectionMs100": 10
   },
   "gpuPasses": {
-    "render": 0.109568,
+    "render": 0.290816,
     "compute": 0
   }
 }

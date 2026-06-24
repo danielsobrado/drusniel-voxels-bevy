@@ -7,6 +7,7 @@
 
 import * as THREE from "three";
 import { WebGPURenderer } from "three/webgpu";
+import { buildRequiredLimits, describeDiagnostics, probeWebGPU } from "../core/diagnostics.js";
 import { installPositionInvariance } from "./veg_prepass.js";
 
 export type RendererBackend = "webgl" | "webgpu";
@@ -36,8 +37,30 @@ export function createWebGlAppRenderer(): WebGlAppRenderer {
 }
 
 export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
-  const renderer = new WebGPURenderer({ antialias: true });
-  await renderer.init();
+  const diagnostics = await probeWebGPU();
+  if (!diagnostics.ok) {
+    throw new Error([
+      diagnostics.reason ?? "WebGPU probe failed.",
+      "Try a hard browser restart or add ?renderer=webgl while the D3D12 device is recovering.",
+    ].join("\n"));
+  }
+
+  const renderer = new WebGPURenderer({
+    antialias: true,
+    requiredLimits: buildRequiredLimits(diagnostics),
+  });
+  try {
+    await renderer.init();
+  } catch (error) {
+    renderer.dispose();
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error([
+      `WebGPU renderer init failed: ${message}`,
+      "This usually means Chrome/Dawn is still holding a removed D3D12 device after a GPU hang.",
+      "Close all tabs using this app, restart the browser if needed, or use ?renderer=webgl to recover the page.",
+      ...describeDiagnostics(diagnostics),
+    ].join("\n"));
+  }
   installPositionInvariance(renderer);
   // fail-loud: surface WebGPU validation errors instead of silent black frames.
   const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
@@ -46,6 +69,12 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
     device.onuncapturederror = (e: GPUUncapturedErrorEvent): void => {
       if (reported++ < 8) console.error("[webgpu] uncaptured error:", e.error.message);
     };
+    void device.lost.then((info) => {
+      console.error("[webgpu] device lost:", info.reason, info.message);
+      if (window.__drusnielClod) {
+        window.__drusnielClod.error = `WebGPU device lost: ${info.reason || "unknown"}\n${info.message}`;
+      }
+    });
   }
   // WebGPU exposes a high anisotropy limit; 16 matches typical hardware and the WebGL default.
   return { isWebGpu: true, renderer, maxAnisotropy: 16 };

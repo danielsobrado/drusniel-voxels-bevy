@@ -527,6 +527,7 @@ export function applyTerrainTextureUniforms(
       snowTint?: readonly number[];
       normalMapMask?: Float32Array | readonly number[];
     };
+    painted?: boolean;
   },
 ): void {
   mat.uniforms.uUseTexture.value = options.enabled;

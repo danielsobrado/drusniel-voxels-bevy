@@ -68,6 +68,8 @@ export interface TerrainNodeTextureSlot {
   heightMax: number;
 }
 
+export type TerrainArraySamplingMode = "off" | "planar" | "triplanar";
+
 export interface TerrainNodeTextures {
   albedoArray: THREE.DataArrayTexture;
   normalArray?: THREE.DataArrayTexture | null;
@@ -76,7 +78,9 @@ export interface TerrainNodeTextures {
   blendWidth: number;
   normalIntensity?: number;
   triplanar?: boolean;
+  arraySampling?: TerrainArraySamplingMode;
   normalMapMask?: readonly number[] | Float32Array;
+  painted?: boolean;
   /** PROCEDURAL_DEBUG_MODES index; 0 = final. Drives the debug view overrides. */
   debugMode?: number;
   procedural?: {
@@ -147,6 +151,20 @@ function triplanarWeights(n: TslNode): TslNode {
   const a: TslNode = abs(n);
   const w: TslNode = vec3(pow(a.x, 4), pow(a.y, 4), pow(a.z, 4));
   return w.div(max(w.x.add(w.y).add(w.z), 0.001));
+}
+
+function terrainBandColor(index: number): TslNode {
+  const colors = [
+    vec3(0.36, 0.48, 0.24),
+    vec3(0.42, 0.34, 0.24),
+    vec3(0.42, 0.40, 0.37),
+    vec3(0.82, 0.84, 0.82),
+    vec3(0.48, 0.43, 0.35),
+    vec3(0.30, 0.38, 0.22),
+    vec3(0.46, 0.44, 0.40),
+    vec3(0.30, 0.26, 0.20),
+  ];
+  return colors[index % colors.length];
 }
 
 // Triplanar sample of one array layer (yz/xz/xy planes blended by weights).
@@ -439,7 +457,9 @@ export function createTerrainNodeMaterial(
   const lighting = options.lighting ?? DEFAULT_TERRAIN_NODE_LIGHTING;
   const adjust = options.adjust ?? DEFAULT_TERRAIN_COLOR_ADJUST;
   const textures = options.textures ?? null;
-  const useTriplanar = textures?.triplanar ?? true;
+  const arraySampling = textures?.arraySampling ?? "triplanar";
+  const useArrayTextures = arraySampling !== "off";
+  const useTriplanar = arraySampling === "triplanar" && (textures?.triplanar ?? true);
 
   // Raw vec3 uniforms (not Color uniforms) so values pass through unchanged, matching the
   // custom GLSL uniforms which were never colour-managed.
@@ -481,6 +501,7 @@ export function createTerrainNodeMaterial(
   // baseColor: textured triplanar height-band blend, else flat uColor.
   let baseColor: TslNode = uColor;
   if (textures && textures.slots.length > 0) {
+    const usePaintedTextures = textures.painted ?? false;
     const weights = triplanarWeights(geomN);
     const height = worldPos.y;
     let acc: TslNode = vec3(0);
@@ -488,7 +509,9 @@ export function createTerrainNodeMaterial(
     let nearest: TslNode = vec3(0);
     let bestDist: TslNode = float(1e9);
     textures.slots.forEach((slot, i) => {
-      const sample = triplanarAlbedo(textures.albedoArray, i, worldPos, slot.scale, weights, useTriplanar);
+      const sample = useArrayTextures
+        ? triplanarAlbedo(textures.albedoArray, i, worldPos, slot.scale, weights, useTriplanar)
+        : terrainBandColor(i);
       const w = rangeWeight(height, slot, textures.blendBands, uBlendWidth);
       acc = acc.add(sample.mul(w));
       wsum = wsum.add(w);
@@ -513,11 +536,13 @@ export function createTerrainNodeMaterial(
       const baked = texture(textures.bakedMacroTint, worldPos.xz.div(ws));
       tex = isFarTier.select(baked, tex);
     }
-    tex = mix(
-      tex,
-      paintedAlbedo(textures.albedoArray, textures.slots, worldPos, paintSlots, paintWeights, weights, useTriplanar),
-      paint,
-    );
+    if (usePaintedTextures && useArrayTextures) {
+      tex = mix(
+        tex,
+        paintedAlbedo(textures.albedoArray, textures.slots, worldPos, paintSlots, paintWeights, weights, useTriplanar),
+        paint,
+      );
+    }
     // baseColor = tex * mix(vec3(1), uColor, 0.35)  (see main.ts texturing branch)
     baseColor = tex.mul(mix(vec3(1), uColor, 0.35));
   }
@@ -525,7 +550,7 @@ export function createTerrainNodeMaterial(
   baseColor = adjustColor(baseColor, uBrightness, uContrast, uSaturation, uWarmth);
 
   let n: TslNode = geomN;
-  if (textures?.normalArray && textures.slots.length > 0) {
+  if (textures?.normalArray && textures.slots.length > 0 && useArrayTextures) {
     // LV-6: Zero out normal map contribution on far tier (tier 2) at runtime.
     // Build-time `if` cannot gate TSL nodes; use a uniform weight instead.
     const normalWeight = isFarTier.select(0.0, 1.0);
@@ -539,11 +564,13 @@ export function createTerrainNodeMaterial(
         uNormalIntensity,
         textures.normalMapMask,
       );
-    detailN = mix(
-      detailN,
-      paintedNormal(textures.normalArray, textures.slots, worldPos, geomN, paintSlots, paintWeights, uNormalIntensity, textures.normalMapMask),
-      paint,
-    );
+    if (textures.painted ?? false) {
+      detailN = mix(
+        detailN,
+        paintedNormal(textures.normalArray, textures.slots, worldPos, geomN, paintSlots, paintWeights, uNormalIntensity, textures.normalMapMask),
+        paint,
+      );
+    }
     const computedN = textures.procedural
       ? normalize(mix(geomN, detailN, proceduralMicroWeight(worldPos, textures.procedural)))
       : detailN;

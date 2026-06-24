@@ -644,6 +644,7 @@ export class GrassSystem {
       this.logRingDebug("dispatch-failed");
       return false;
     }
+    this.setRingDrawsVisible(true);
     this.gpuRingStats = this.gpuRingCompute.stats(this.settings.enabled);
     this.ringTierCounts = {
       near: this.gpuRingStats.counts.near,
@@ -673,6 +674,7 @@ export class GrassSystem {
     const tierCapacity = grassGpuRingTierCapacity(this.settings);
     this.gpuRingDraw = this.createGpuRingDrawResources(tierCapacity);
     this.ringMeshes = Object.values(this.gpuRingDraw.tiers).map((tier) => tier.mesh);
+    this.setRingDrawsVisible(false);
     for (const mesh of this.ringMeshes) this.root.add(mesh);
     this.generationStats = {
       generatedCandidates: slotCount,
@@ -857,6 +859,11 @@ export class GrassSystem {
       throw new Error(grassGpuRingDrawUnsupportedReason() ?? "Missing WebGPU indirect geometry support");
     }
     indirectGeometry.setIndirect(indirect, indirectOffset);
+  }
+
+  private setRingDrawsVisible(visible: boolean): void {
+    for (const mesh of this.ringMeshes) mesh.visible = visible;
+    for (const twin of this.ringPrepassTwins) twin.visible = visible;
   }
 
   private gpuBufferForAttribute(attribute: THREE.BufferAttribute): GPUBuffer {

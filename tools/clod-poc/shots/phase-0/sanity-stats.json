@@ -43,12 +43,12 @@
       "maxUniformBuffersPerShaderStage": 12
     }
   },
-  "fps": 143.9993859006903,
+  "fps": 143.9654041515026,
   "frameMs": 6.899999999999636,
   "frameMsP95": 7,
   "drawCalls": 6,
   "triangles": 186659,
-  "frame": 1036,
+  "frame": 1045,
   "counters": {
     "phase0.timestampQuerySupported": 1,
     "phase0.storageTextureBake": 1,
@@ -62,7 +62,7 @@
     "phase0.seedSignature": 151023802
   },
   "gpuPasses": {
-    "render": 0.18431999999999998,
-    "compute": 0.012544
+    "render": 0.079872,
+    "compute": 0.018656
   }
 }
