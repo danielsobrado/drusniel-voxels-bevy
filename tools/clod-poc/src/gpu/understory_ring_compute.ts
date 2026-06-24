@@ -28,7 +28,7 @@ const CLASS_PARAMS_BYTES = UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_S
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
 
-export const UNDERSTORY_GPU_RING_STORAGE_BINDINGS = 7;
+export const UNDERSTORY_GPU_RING_STORAGE_BINDINGS = 5;
 
 export interface UnderstoryGpuRingOutputBuffers {
   cell: GPUBuffer;
@@ -457,6 +457,11 @@ export function createGpuRingDrawResources(
   };
 }
 
+function gpuRingClassCastsShadow(settings: UnderstorySettings, cls: UnderstoryClass): boolean {
+  if (!settings.render.shadows) return false;
+  return UNDERSTORY_CLASSES.indexOf(cls) <= UNDERSTORY_CLASSES.indexOf(settings.render.maxShadowClass);
+}
+
 function createGpuRingTierDraw(
   settings: UnderstorySettings,
   cls: UnderstoryClass,
@@ -486,7 +491,7 @@ function createGpuRingTierDraw(
   );
   mesh.name = `understory-ring-gpu-${cls}`;
   mesh.frustumCulled = false;
-  mesh.castShadow = false;
+  mesh.castShadow = gpuRingClassCastsShadow(settings, cls);
   mesh.receiveShadow = false;
   return mesh;
 }

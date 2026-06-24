@@ -310,6 +310,9 @@ export function packUnderstoryRingParams(
   u32[34] = Math.max(0, Math.floor(ic[2])) >>> 0;
   u32[35] = Math.max(0, Math.floor(ic[3])) >>> 0;
   // lane 9 — hydro_params (f32): x=worldCells, y=hydroEnabled(0/1)
+  // worldCells also appears in lane 0.w (center_radius); the duplicate is
+  // intentional — lane 0.w is the bounds-check world_max, lane 9.x is the
+  // hydrology texture scale.
   f32[36] = params.worldCells;
   f32[37] = params.hydroEnabled ? 1.0 : 0.0;
   f32[38] = 0;

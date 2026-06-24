@@ -67,6 +67,10 @@ export function generateUnderstoryRingValidationCounts(
     candidateCount++;
     const height = sampler.surfaceHeight(wx, wz);
     const normalY = sampler.surfaceNormal(wx, wz)[1];
+    // NOTE: The GPU cull shader (understory_ring.compute.wgsl:hydrologyHeight) can
+    // substitute the carved-bed height in flat wet areas. This CPU parity reference
+    // always uses the base surface height, so counts may diverge past the 2%
+    // tolerance near water when debugValidateAgainstCpu=true.
 
     const fp = options.frustumPlanes;
     if (fp && fp.length >= 24) {
