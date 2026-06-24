@@ -11,6 +11,8 @@ import { bakeMacroTint } from "./gpu/terrain_node_material.js";
 import { buildFarCanopyShell } from "./gpu/far_canopy_shell.js";
 import { computeEffectiveVisibleMeters, computeVisibleTargetMet } from "./phase0/phase0_metrics.js";
 import { simulateStreamingCoverage } from "./phase0/streaming_coverage_sim.js";
+import { parsePhase0Config, type Phase0Config } from "./phase0/phase0_config.js";
+import phase0ConfigText from "../config/infinite_streaming_phase0.yaml?raw";
 import configText from "../config/clod_pages.yaml?raw";
 import stoneConfigText from "../config/stones.yaml?raw";
 import treeConfigText from "../config/trees.yaml?raw";
@@ -622,6 +624,34 @@ async function main() {
   const queryLongViewScene = queryScene === "long-view-4km" || queryScene === "long-view-forest-4km" || queryScene === "long-view-edit-stress"
     || queryScene === "infinite-stream-straight" || queryScene === "infinite-stream-fast-turn"
     || queryScene === "infinite-stream-mountain-approach" || queryScene === "infinite-stream-forest-horizon";
+  // Phase 0: Parse infinite streaming config and resolve active scene.
+  const phase0Config: Phase0Config = parsePhase0Config(phase0ConfigText);
+  const sceneNameToConfigKey: Record<string, string> = {
+    "long-view-4km": "long_view_4km",
+    "long-view-forest-4km": "long_view_forest_4km",
+    "long-view-edit-stress": "long_view_edit_stress",
+    "infinite-stream-straight": "infinite_stream_straight",
+    "infinite-stream-fast-turn": "infinite_stream_fast_turn",
+    "infinite-stream-mountain-approach": "infinite_stream_straight",
+    "infinite-stream-forest-horizon": "infinite_stream_fast_turn",
+  };
+  const activePhase0SceneKey = queryScene ? sceneNameToConfigKey[queryScene] : undefined;
+  const activePhase0Scene = activePhase0SceneKey ? phase0Config.phase0.scenes[activePhase0SceneKey] : undefined;
+  const phase0TargetVisibleM = activePhase0Scene?.require_visible_m ?? phase0Config.phase0.target_visible_m;
+  // Resolve streaming simulation velocity from scene config.
+  let phase0VelocityX = 0;
+  let phase0VelocityZ = 0;
+  let phase0PreloadSeconds = 5;
+  let phase0LiveRadiusM = 200;
+  if (activePhase0Scene?.camera.mode === "scripted" && activePhase0Scene.camera.speed_mps !== undefined) {
+    const speed = activePhase0Scene.camera.speed_mps;
+    const dirDeg = activePhase0Scene.camera.direction_degrees ?? 90;
+    const dirRad = (dirDeg * Math.PI) / 180;
+    phase0VelocityX = Math.cos(dirRad) * speed;
+    phase0VelocityZ = Math.sin(dirRad) * speed;
+    phase0PreloadSeconds = activePhase0Scene.camera.duration_seconds ?? 5;
+    phase0LiveRadiusM = phase0TargetVisibleM * 0.5;
+  }
   const queryFarShell = searchParams.get("farShell") === "1";
   const queryCanopy = searchParams.get("canopy") === "1";
   const queryPerfMode = searchParams.get("clodPerf") === "1";
@@ -844,7 +874,7 @@ async function main() {
     lvStats.counters["far_shell_gpu_ms"] = 0;
     lvStats.counters["shadow_proxy_tris"] = 0;
     lvStats.counters["canopy_tris"] = 0;
-    lvStats.counters["horizon_hole_ratio"] = 0;
+    lvStats.counters["horizon_hole_ratio"] = -1; // -1 = no real detector implemented yet
     lvStats.counters["gpu_grass_visible"] = 0;
     lvStats.counters["gpu_grass_dispatch_ms"] = 0;
     lvStats.counters["gpu_tree_visible"] = 0;
@@ -855,7 +885,7 @@ async function main() {
 
     // Phase 0: Additional counters for infinite streaming baseline.
     lvStats.counters["world_cells"] = worldCells;
-    lvStats.counters["target_visible_m"] = 4096;
+    lvStats.counters["target_visible_m"] = phase0TargetVisibleM;
     lvStats.counters["effective_far_radius_m"] = 0; // updated after shell build
     lvStats.counters["effective_visible_m"] = 0; // updated after shell build
     lvStats.counters["visible_target_met"] = 0;
@@ -877,6 +907,7 @@ async function main() {
     lvStats.counters["streamer_simulated_required_pages"] = 0;
     lvStats.counters["streamer_simulated_missing_chunks"] = 0;
     lvStats.counters["streamer_simulated_missing_pages"] = 0;
+    lvStats.counters["horizon_hole_ratio"] = -1;
     lvStats.counters["stale_fallback_count"] = 0;
   }
   const ensureClodErrorCompute = (): Promise<void> => {
@@ -2676,6 +2707,9 @@ async function main() {
   let lastNodesByLod: Record<number, number> = {};
   let lastTriCount = 0;
   let averageFps = 0;
+  // Phase 0: Rolling frame-time buffer for p95/p99 computation.
+  const phase0FrameMsBuffer: number[] = [];
+  const PHASE0_P95_WINDOW = 120;
   let lastDigSummary = "";
   let lastArchiveSummary = "";
   let selectionFrameId = 0;
@@ -5130,7 +5164,7 @@ async function main() {
       s.counters["effective_visible_m"] = effectiveVisible;
       s.counters["visible_target_met"] = computeVisibleTargetMet({
         effectiveVisibleM: effectiveVisible,
-        targetVisibleM: 4096,
+        targetVisibleM: phase0TargetVisibleM,
       }) ? 1 : 0;
       s.counters["far_shell_enabled"] = farShellState.current !== null ? 1 : 0;
       s.counters["far_shell_radius_m"] = worldCells * state.farShellRadiusFactor;
@@ -5138,21 +5172,34 @@ async function main() {
       s.counters["shadow_proxy_enabled"] = isLongView ? 1 : 0;
       s.counters["shadow_proxy_inert"] = 1;
       s.counters["canopy_enabled"] = canopyShellResult !== null ? 1 : 0;
+      // selected_page_count_lod* mirrors the rendered cut (same as clod_page_count_lod* for now).
+      for (let lvl = 0; lvl <= maxTerrainLevel; lvl++) {
+        s.counters[`selected_page_count_lod${lvl}`] = lastNodesByLod[lvl] ?? 0;
+      }
       s.counters["rendered_terrain_tris"] = lastTriCount;
       s.counters["total_scene_tris"] = s.triangles;
       s.counters["draw_calls"] = s.drawCalls;
       s.counters["frame_ms_avg"] = s.fps > 0 ? 1000 / s.fps : 0;
-      // Compute streaming coverage simulation.
+      // Phase 0: Compute p95/p99 from rolling frame-time buffer.
+      phase0FrameMsBuffer.push(s.frameMs);
+      if (phase0FrameMsBuffer.length > PHASE0_P95_WINDOW) phase0FrameMsBuffer.shift();
+      if (phase0FrameMsBuffer.length >= 10) {
+        const sorted = [...phase0FrameMsBuffer].sort((a, b) => a - b);
+        s.counters["frame_ms_p95"] = sorted[Math.floor(sorted.length * 0.95)] ?? -1;
+        s.counters["frame_ms_p99"] = sorted[Math.floor(sorted.length * 0.99)] ?? -1;
+      }
+      s.counters["horizon_hole_ratio"] = -1; // -1 = no real detector implemented yet
+      // Compute streaming coverage simulation using config-derived velocity.
       const streamingReport = simulateStreamingCoverage({
         worldCells,
         chunkSize: cfg.page.chunk_size,
         pageSizeCells: cfg.page.chunks_per_page * cfg.page.chunk_size,
         playerX: camera.position.x,
         playerZ: camera.position.z,
-        velocityX: 0,
-        velocityZ: 0,
-        preloadSeconds: 5,
-        liveRadiusM: 200,
+        velocityX: phase0VelocityX,
+        velocityZ: phase0VelocityZ,
+        preloadSeconds: phase0PreloadSeconds,
+        liveRadiusM: phase0LiveRadiusM,
         clodRadiusM: worldCells * state.farShellRadiusFactor,
       });
       s.counters["streamer_simulated_required_chunks"] = streamingReport.requiredChunkCount;
@@ -5160,14 +5207,16 @@ async function main() {
       s.counters["streamer_simulated_missing_chunks"] = streamingReport.missingChunkCount;
       s.counters["streamer_simulated_missing_pages"] = streamingReport.missingPageCount;
 
+      // Validate required counters from config (fix 2).
+      const missingCounters = phase0Config.metrics.required_counters.filter((k) => !(k in s.counters));
       // Export Phase 0 report for tooling.
       window.__drusnielPhase0Report = {
         scene: queryScene ?? "unknown",
         config_hash: "phase0",
         timestamp: new Date().toISOString(),
         metrics: { ...s.counters },
-        required_counters_present: true,
-        missing_counters: [],
+        required_counters_present: missingCounters.length === 0,
+        missing_counters: missingCounters,
       };
     }
 
