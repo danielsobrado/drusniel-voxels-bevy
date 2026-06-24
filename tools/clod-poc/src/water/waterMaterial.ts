@@ -294,7 +294,10 @@ export interface WaterUniforms {
   uWorldBounds: { value: THREE.Vector2 };
   uRefraction: WaterRefractionConfig;
   uReflection: WaterReflectionConfig;
-  uCaustics: CausticsConfig;
+  uCausticsEnabled: { value: number };
+  uCausticsGain: { value: number };
+  uCausticsScale: { value: number };
+  uCausticsSpeed: { value: number };
 }
 
 export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
@@ -336,7 +339,10 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uWorldBounds: { value: new THREE.Vector2(params.worldBounds.cellsX, params.worldBounds.cellsZ) },
     uRefraction: { ...v.refraction },
     uReflection: { ...v.reflection },
-    uCaustics: { ...(params.caustics ?? DEFAULT_CAUSTICS_CONFIG) },
+    uCausticsEnabled: { value: (params.caustics ?? DEFAULT_CAUSTICS_CONFIG).enabled ? 1 : 0 },
+    uCausticsGain: { value: (params.caustics ?? DEFAULT_CAUSTICS_CONFIG).gain },
+    uCausticsScale: { value: (params.caustics ?? DEFAULT_CAUSTICS_CONFIG).scale },
+    uCausticsSpeed: { value: (params.caustics ?? DEFAULT_CAUSTICS_CONFIG).speed },
   };
 }
 
@@ -379,7 +385,7 @@ export function createWaterShaderMaterial(params: WaterMaterialParams): WaterMat
     fragmentShader: WATER_FRAG,
     transparent: true,
     depthTest: true,
-    depthWrite: false,
+    depthWrite: params.visual.depthWrite,
     side: THREE.DoubleSide,
   });
   material.name = "water-shader";
@@ -395,7 +401,7 @@ export function createWaterShaderMaterial(params: WaterMaterialParams): WaterMat
     updateSunDirection: (dir) => { uniforms.uSunDir.value.copy(dir).normalize(); },
     updateVisual: (v) => {
       applyWaterVisual(uniforms, v);
-      material.depthWrite = false;
+      material.depthWrite = v.depthWrite;
       material.needsUpdate = true;
     },
     dispose: () => { material.dispose(); },

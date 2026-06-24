@@ -2,10 +2,7 @@ pub mod grass_material;
 pub mod wind;
 
 use crate::camera::controller::PlayerCamera;
-use crate::constants::{
-    CHUNK_SIZE_F32, GRASS_CULL_DISTANCE, GRASS_CULL_HYSTERESIS, GRASS_CULL_UPDATE_INTERVAL,
-    GRASS_FULL_DISTANCE, GRASS_HALF_DISTANCE,
-};
+use crate::constants::CHUNK_SIZE_F32;
 use crate::performance::{AreaTimingRecorder, area_timer};
 use crate::rendering::blocky_material::BlockyMaterial;
 use crate::rendering::triplanar_material::TriplanarMaterial;
@@ -21,12 +18,6 @@ use std::collections::HashSet;
 
 pub use grass_material::{GrassMaterial, GrassMaterialHandles, GrassMaterialPlugin};
 pub use wind::{WindAffected, WindAnimationType, WindConfig, WindPlugin, WindState};
-
-const GRASS_LOOKAHEAD_HEIGHT_START: f32 = 8.0;
-const GRASS_LOOKAHEAD_HEIGHT_RANGE: f32 = 48.0;
-const GRASS_LOOKAHEAD_FRONT_COS: f32 = 0.25;
-const GRASS_LOOKAHEAD_MAX_EXTRA_DISTANCE: f32 = 64.0;
-const GRASS_LOOKAHEAD_MAX_COUNT_DIVISOR: usize = 3;
 
 /// Minimal info for a single grass blade instance
 struct GrassInstance {
@@ -110,6 +101,28 @@ pub struct VegetationConfig {
     pub near_fade_start: f32,
     pub near_fade_end: f32,
     pub near_fade_min_alpha: f32,
+    /// Distance within which grass renders at full density.
+    pub full_distance: f32,
+    /// Distance within which grass renders at half density.
+    pub half_distance: f32,
+    /// Distance beyond which grass is not spawned.
+    pub cull_distance: f32,
+    /// Hysteresis for grass distance culling to prevent flickering.
+    pub cull_hysteresis: f32,
+    /// Update interval for grass distance culling checks (seconds).
+    pub cull_update_interval: f32,
+    /// Camera height above which forward lookahead begins extending grass distance.
+    pub lookahead_height_start: f32,
+    /// Camera height range over which lookahead ramps to max extension.
+    pub lookahead_height_range: f32,
+    /// Cosine of the angle between camera forward and horizontal; lookahead only when looking down.
+    pub lookahead_front_cos: f32,
+    /// Maximum extra distance added by forward lookahead.
+    pub lookahead_max_extra_distance: f32,
+    /// Divisor for max blades when using lookahead (reduces density at distance).
+    pub lookahead_max_count_divisor: usize,
+    /// If true, GPU ring grass plugin is enabled (requires WebGPU-compatible renderer).
+    pub gpu_ring_enabled: bool,
 }
 
 impl Default for VegetationConfig {
@@ -123,6 +136,17 @@ impl Default for VegetationConfig {
             near_fade_start: 0.6,
             near_fade_end: 2.0,
             near_fade_min_alpha: 0.2,
+            full_distance: 64.0,
+            half_distance: 96.0,
+            cull_distance: 128.0,
+            cull_hysteresis: 8.0,
+            cull_update_interval: 0.3,
+            lookahead_height_start: 8.0,
+            lookahead_height_range: 48.0,
+            lookahead_front_cos: 0.25,
+            lookahead_max_extra_distance: 64.0,
+            lookahead_max_count_divisor: 3,
+            gpu_ring_enabled: false,
         }
     }
 }
@@ -177,6 +201,7 @@ pub fn attach_procedural_grass_to_chunks(
     assets: Res<GrassPatchAssets>,
     veg_config: Res<VegetationConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
+    world: Res<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     // Query chunks with BlockyMaterial (blocky mode)
     blocky_chunk_query: Query<
@@ -225,10 +250,10 @@ pub fn attach_procedural_grass_to_chunks(
     for (entity, chunk, chunk_mesh, _material, transform) in blocky_chunk_query.iter() {
         let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = camera_pos.distance(chunk_center);
-        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center);
+        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center, &veg_config);
 
         let Some((density, max_count)) =
-            grass_spawn_budget(distance, lookahead_distance, base_density, base_max_count)
+            grass_spawn_budget(distance, lookahead_distance, base_density, base_max_count, &veg_config)
         else {
             continue;
         };
@@ -238,6 +263,7 @@ pub fn attach_procedural_grass_to_chunks(
             &mut commands,
             &assets,
             &mut meshes,
+            &world,
             entity,
             chunk,
             chunk_mesh,
@@ -258,10 +284,10 @@ pub fn attach_procedural_grass_to_chunks(
     for (entity, chunk, chunk_mesh, _material, transform) in triplanar_chunk_query.iter() {
         let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = camera_pos.distance(chunk_center);
-        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center);
+        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center, &veg_config);
 
         let Some((density, max_count)) =
-            grass_spawn_budget(distance, lookahead_distance, base_density, base_max_count)
+            grass_spawn_budget(distance, lookahead_distance, base_density, base_max_count, &veg_config)
         else {
             continue;
         };
@@ -271,6 +297,7 @@ pub fn attach_procedural_grass_to_chunks(
             &mut commands,
             &assets,
             &mut meshes,
+            &world,
             entity,
             chunk,
             chunk_mesh,
@@ -299,19 +326,20 @@ fn grass_spawn_budget(
     lookahead_distance: f32,
     base_density: u32,
     base_max_count: usize,
+    config: &VegetationConfig,
 ) -> Option<(u32, usize)> {
-    if distance > GRASS_CULL_DISTANCE + lookahead_distance {
+    if distance > config.cull_distance + lookahead_distance {
         return None;
     }
 
-    let budget = if distance > GRASS_CULL_DISTANCE {
+    let budget = if distance > config.cull_distance {
         (
             1,
-            (base_max_count / GRASS_LOOKAHEAD_MAX_COUNT_DIVISOR).max(1),
+            (base_max_count / config.lookahead_max_count_divisor).max(1),
         )
-    } else if distance > GRASS_HALF_DISTANCE {
+    } else if distance > config.half_distance {
         (base_density.max(1) / 2, base_max_count / 2)
-    } else if distance > GRASS_FULL_DISTANCE {
+    } else if distance > config.full_distance {
         (base_density, (base_max_count * 3) / 4)
     } else {
         (base_density, base_max_count)
@@ -320,7 +348,12 @@ fn grass_spawn_budget(
     Some((budget.0.max(1), budget.1.max(1)))
 }
 
-fn grass_lookahead_distance(camera_pos: Vec3, camera_forward: Vec3, chunk_center: Vec3) -> f32 {
+fn grass_lookahead_distance(
+    camera_pos: Vec3,
+    camera_forward: Vec3,
+    chunk_center: Vec3,
+    config: &VegetationConfig,
+) -> f32 {
     let mut forward_xz = Vec2::new(camera_forward.x, camera_forward.z);
     if forward_xz.length_squared() < 0.0001 {
         return 0.0;
@@ -334,19 +367,19 @@ fn grass_lookahead_distance(camera_pos: Vec3, camera_forward: Vec3, chunk_center
     }
 
     let alignment = (to_chunk / distance_sq.sqrt()).dot(forward_xz);
-    if alignment <= GRASS_LOOKAHEAD_FRONT_COS {
+    if alignment <= config.lookahead_front_cos {
         return 0.0;
     }
 
-    let camera_height_above_chunk = camera_pos.y - chunk_center.y - GRASS_LOOKAHEAD_HEIGHT_START;
-    let height_t = smoothstep01(camera_height_above_chunk / GRASS_LOOKAHEAD_HEIGHT_RANGE);
+    let camera_height_above_chunk = camera_pos.y - chunk_center.y - config.lookahead_height_start;
+    let height_t = smoothstep01(camera_height_above_chunk / config.lookahead_height_range);
     if height_t <= 0.0 {
         return 0.0;
     }
 
     let alignment_t =
-        smoothstep01((alignment - GRASS_LOOKAHEAD_FRONT_COS) / (1.0 - GRASS_LOOKAHEAD_FRONT_COS));
-    GRASS_LOOKAHEAD_MAX_EXTRA_DISTANCE * height_t * alignment_t
+        smoothstep01((alignment - config.lookahead_front_cos) / (1.0 - config.lookahead_front_cos));
+    config.lookahead_max_extra_distance * height_t * alignment_t
 }
 
 /// Helper function to spawn grass on a chunk
@@ -354,6 +387,7 @@ fn process_chunk_for_grass(
     commands: &mut Commands,
     assets: &Res<GrassPatchAssets>,
     meshes: &mut ResMut<Assets<Mesh>>,
+    world: &VoxelWorld,
     entity: Entity,
     chunk: &ChunkMesh,
     chunk_mesh: &Mesh3d,
@@ -365,7 +399,7 @@ fn process_chunk_for_grass(
         return GrassProcessResult::Deferred;
     };
 
-    let instances = collect_grass_instances(chunk_source_mesh, transform, density, max_count);
+    let instances = collect_grass_instances(chunk_source_mesh, transform, density, max_count, world);
     if instances.is_empty() {
         commands.entity(entity).try_insert(ChunkGrassAttached {
             mesh: chunk_mesh.0.clone(),
@@ -412,25 +446,19 @@ fn process_chunk_for_grass(
     GrassProcessResult::Spawned(instance_count)
 }
 
-/// Extract grass instances from a mesh by sampling upward-facing triangles
+/// Extract grass instances from a mesh by sampling upward-facing triangles.
+/// Rejects triangles on ineligible voxel types (rock, snow, sand, water, air).
 fn collect_grass_instances(
     mesh: &Mesh,
     transform: &Transform,
     density: u32,
     max_count: usize,
+    world: &VoxelWorld,
 ) -> Vec<GrassInstance> {
     let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
         Some(VertexAttributeValues::Float32x3(values)) => values,
         _ => {
             warn!("Mesh has no POSITION attribute");
-            return Vec::new();
-        }
-    };
-
-    let normals = match mesh.attribute(Mesh::ATTRIBUTE_NORMAL) {
-        Some(VertexAttributeValues::Float32x3(values)) => values,
-        _ => {
-            warn!("Mesh has no NORMAL attribute");
             return Vec::new();
         }
     };
@@ -469,22 +497,6 @@ fn collect_grass_instances(
             continue;
         }
 
-        // Use the stored normal from the first vertex of the triangle (all 3 should be the same for flat faces).
-        // Reject side and bottom faces before transforming vertices; most chunk triangles cannot grow grass.
-        let normal_local = Vec3::from(normals[tri[0] as usize]);
-        let normal_world = transform.rotation * normal_local;
-        let normal_len_sq = normal_world.length_squared();
-
-        if normal_len_sq <= 0.0001 || normal_world.y <= 0.0 {
-            _rejected_normal += 1;
-            continue;
-        }
-
-        if normal_world.y * normal_world.y <= 0.0625 * normal_len_sq {
-            _rejected_normal += 1;
-            continue;
-        }
-
         let v0 = transform.transform_point(Vec3::from(positions[tri[0] as usize]));
         let v1 = transform.transform_point(Vec3::from(positions[tri[1] as usize]));
         let v2 = transform.transform_point(Vec3::from(positions[tri[2] as usize]));
@@ -493,13 +505,31 @@ fn collect_grass_instances(
             continue;
         }
 
-        let normal = (v1 - v0).cross(v2 - v0);
-        let area = normal.length() * 0.5;
+        // Compute geometric face normal for slope rejection (not the smoothed vertex normal).
+        // Surface Nets smoothed normals can differ from geometric slope.
+        let face_normal = (v1 - v0).cross(v2 - v0);
+        let face_area = face_normal.length();
 
-        if area <= 0.0001 {
+        if face_area <= 0.0001 {
             _rejected_area += 1;
             continue;
         }
+
+        let normal_world = face_normal / face_area;
+        let normal_len_sq: f32 = 1.0; // already normalized
+
+        if normal_world.y <= 0.0 {
+            _rejected_normal += 1;
+            continue;
+        }
+
+        // Reject slopes steeper than ~25 degrees (normal.y < cos(25°) ≈ 0.25)
+        if normal_world.y <= 0.25 {
+            _rejected_normal += 1;
+            continue;
+        }
+
+        let area = face_area * 0.5;
 
         // Skip fully submerged triangles; water surface (and waves) sits at WATER_LEVEL.
         let max_y = v0.y.max(v1.y.max(v2.y));
@@ -543,6 +573,24 @@ fn collect_grass_instances(
             let position = v0 * bary.x + v1 * bary.y + v2 * bary.z;
             if position.y <= water_cutoff {
                 continue;
+            }
+
+            // Reject grass on ineligible voxel types (rock, sand, clay, bedrock, water, air).
+            let voxel_pos = IVec3::new(
+                position.x.floor() as i32,
+                position.y.floor() as i32,
+                position.z.floor() as i32,
+            );
+            if let Some(voxel) = world.get_voxel(voxel_pos) {
+                match voxel {
+                    VoxelType::Rock
+                    | VoxelType::Sand
+                    | VoxelType::Clay
+                    | VoxelType::Bedrock
+                    | VoxelType::Water
+                    | VoxelType::Air => continue,
+                    _ => {}
+                }
             }
 
             instances.push(GrassInstance {
@@ -676,171 +724,6 @@ pub struct FloatingParticle {
     pub phase: f32,
     pub speed: f32,
     pub drift: Vec3,
-}
-
-/// Spawn grass blades on grass block surfaces with wind shader
-pub fn spawn_grass_blades_unused(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut grass_materials: ResMut<Assets<GrassMaterial>>,
-    mut material_handles: ResMut<GrassMaterialHandles>,
-    world: Res<VoxelWorld>,
-    mut spawned: ResMut<GrassSpawned>,
-) {
-    if spawned.0 {
-        return;
-    }
-
-    // Wait until world has at least one chunk loaded
-    if world.get_chunk(IVec3::ZERO).is_none() {
-        return;
-    }
-
-    spawned.0 = true;
-
-    // Create grass blade mesh (thin vertical quad)
-    let grass_mesh = meshes.add(create_grass_blade_mesh());
-
-    // Create grass materials with different color variations
-    let grass_material_configs = vec![
-        // Golden/yellow grass (dominant in Valheim meadows)
-        GrassMaterial::new(
-            LinearRgba::new(0.25, 0.20, 0.08, 1.0),
-            LinearRgba::new(0.95, 0.85, 0.45, 1.0),
-            0.35,
-            1.8,
-            0.08,
-        ),
-        // Warm tan grass
-        GrassMaterial::new(
-            LinearRgba::new(0.30, 0.22, 0.10, 1.0),
-            LinearRgba::new(0.85, 0.75, 0.50, 1.0),
-            0.30,
-            1.5,
-            0.10,
-        ),
-        // Light green-gold mix
-        GrassMaterial::new(
-            LinearRgba::new(0.15, 0.20, 0.08, 1.0),
-            LinearRgba::new(0.70, 0.80, 0.40, 1.0),
-            0.40,
-            2.0,
-            0.07,
-        ),
-        // Pale straw color
-        GrassMaterial::new(
-            LinearRgba::new(0.35, 0.30, 0.15, 1.0),
-            LinearRgba::new(0.95, 0.90, 0.60, 1.0),
-            0.32,
-            1.6,
-            0.09,
-        ),
-    ];
-
-    // Create handles and store them for time updates
-    let grass_handles: Vec<Handle<GrassMaterial>> = grass_material_configs
-        .into_iter()
-        .map(|mat| grass_materials.add(mat))
-        .collect();
-
-    material_handles.handles = grass_handles.clone();
-
-    let mut grass_count = 0;
-    let max_grass = 15000; // Higher limit for denser grass
-
-    // Iterate through world and find grass block tops
-    for chunk_x in 0..32 {
-        for chunk_z in 0..32 {
-            for chunk_y in 0..4 {
-                let chunk_pos = IVec3::new(chunk_x, chunk_y, chunk_z);
-                if let Some(chunk) = world.get_chunk(chunk_pos) {
-                    let chunk_origin = VoxelWorld::chunk_to_world(chunk_pos);
-
-                    for x in 0..16 {
-                        for z in 0..16 {
-                            for y in 0..16 {
-                                if grass_count >= max_grass {
-                                    break;
-                                }
-
-                                let local = bevy::math::UVec3::new(x, y, z);
-                                let voxel = chunk.get(local);
-
-                                // Check if this is a grass block with air above
-                                if voxel == VoxelType::TopSoil {
-                                    let world_pos =
-                                        chunk_origin + IVec3::new(x as i32, y as i32, z as i32);
-                                    let above = world_pos + IVec3::Y;
-
-                                    if let Some(above_voxel) = world.get_voxel(above) {
-                                        if above_voxel == VoxelType::Air {
-                                            // Spawn grass blades with some randomness
-                                            let hash = simple_hash(world_pos.x, world_pos.z);
-
-                                            // Spawn on ~60% of grass blocks for denser coverage
-                                            if hash > 0.4 {
-                                                let blade_count = 3 + (hash * 4.0) as i32;
-
-                                                for i in 0..blade_count {
-                                                    let offset_x = (simple_hash(
-                                                        world_pos.x + i * 17,
-                                                        world_pos.z,
-                                                    ) - 0.5)
-                                                        * 0.9;
-                                                    let offset_z = (simple_hash(
-                                                        world_pos.x,
-                                                        world_pos.z + i * 23,
-                                                    ) - 0.5)
-                                                        * 0.9;
-                                                    let rotation = simple_hash(
-                                                        world_pos.x * 7 + i,
-                                                        world_pos.z * 11,
-                                                    ) * std::f32::consts::TAU;
-                                                    let scale = 0.6
-                                                        + simple_hash(
-                                                            world_pos.x + i,
-                                                            world_pos.z + i * 5,
-                                                        ) * 0.8;
-
-                                                    // Pick material based on hash for color variation
-                                                    let material_idx = ((simple_hash(
-                                                        world_pos.x + i * 3,
-                                                        world_pos.z + i * 7,
-                                                    ) * 4.0)
-                                                        as usize)
-                                                        % grass_handles.len();
-
-                                                    commands.spawn((
-                                                        Mesh3d(grass_mesh.clone()),
-                                                        MeshMaterial3d(
-                                                            grass_handles[material_idx].clone(),
-                                                        ),
-                                                        Transform::from_xyz(
-                                                            world_pos.x as f32 + 0.5 + offset_x,
-                                                            world_pos.y as f32 + 1.0,
-                                                            world_pos.z as f32 + 0.5 + offset_z,
-                                                        )
-                                                        .with_rotation(Quat::from_rotation_y(
-                                                            rotation,
-                                                        ))
-                                                        .with_scale(Vec3::splat(scale)),
-                                                        GrassBlade,
-                                                    ));
-                                                    grass_count += 1;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    info!("Spawned {} grass blades with wind animation", grass_count);
 }
 
 /// Create a grass blade mesh (crossed quads) - taller for Valheim look
@@ -1223,6 +1106,7 @@ pub fn sync_grass_wind_config(
 pub fn cull_distant_grass(
     mut commands: Commands,
     time: Res<Time>,
+    veg_config: Res<VegetationConfig>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     grass_query: Query<(Entity, &ChildOf), With<ProceduralGrassPatch>>,
     chunk_query: Query<&Transform, With<ChunkMesh>>,
@@ -1232,7 +1116,7 @@ pub fn cull_distant_grass(
 ) {
     let _timer = area_timer(&mut timing, frame.0, "Grass Cull");
     let now = time.elapsed_secs();
-    if now - *last_update < GRASS_CULL_UPDATE_INTERVAL {
+    if now - *last_update < veg_config.cull_update_interval {
         return;
     }
     *last_update = now;
@@ -1244,7 +1128,7 @@ pub fn cull_distant_grass(
     let camera_forward = camera_tf.forward().as_vec3();
 
     // Use hysteresis: despawn only beyond cull + hysteresis
-    let cull_threshold = GRASS_CULL_DISTANCE + GRASS_CULL_HYSTERESIS;
+    let cull_threshold = veg_config.cull_distance + veg_config.cull_hysteresis;
     let mut checked = 0usize;
     let mut despawned = 0usize;
 
@@ -1256,7 +1140,8 @@ pub fn cull_distant_grass(
         };
         let chunk_center = chunk_tf.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = camera_pos.distance(chunk_center);
-        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center);
+        let lookahead_distance =
+            grass_lookahead_distance(camera_pos, camera_forward, chunk_center, &veg_config);
 
         if distance > cull_threshold + lookahead_distance {
             despawned += 1;
@@ -1273,6 +1158,17 @@ pub fn cull_distant_grass(
 }
 
 pub struct VegetationPlugin;
+
+/// Stub plugin for GPU ring grass. When enabled via `VegetationConfig.gpu_ring_enabled`,
+/// this will eventually replace the CPU chunk-patch grass with a GPU-driven toroidal ring.
+/// For now it logs a warning that the feature is not yet implemented.
+pub struct GrassGpuRingPlugin;
+
+impl Plugin for GrassGpuRingPlugin {
+    fn build(&self, _app: &mut App) {
+        info!("GrassGpuRingPlugin registered (stub — GPU ring grass not yet implemented)");
+    }
+}
 
 impl Plugin for VegetationPlugin {
     fn build(&self, app: &mut App) {
@@ -1297,6 +1193,11 @@ impl Plugin for VegetationPlugin {
                     animate_particles,
                 ),
             );
+
+        // Conditionally register the GPU ring grass plugin
+        if app.world().resource::<VegetationConfig>().gpu_ring_enabled {
+            app.add_plugins(GrassGpuRingPlugin);
+        }
     }
 }
 
@@ -1304,14 +1205,20 @@ impl Plugin for VegetationPlugin {
 mod tests {
     use super::*;
 
+    fn test_config() -> VegetationConfig {
+        VegetationConfig::default()
+    }
+
     #[test]
     fn grass_lookahead_requires_elevated_forward_chunk() {
+        let config = test_config();
         let camera_pos = Vec3::new(0.0, 56.0, 0.0);
         let forward = Vec3::NEG_Z;
         let ahead = grass_lookahead_distance(
             camera_pos,
             forward,
-            Vec3::new(0.0, 8.0, -GRASS_CULL_DISTANCE),
+            Vec3::new(0.0, 8.0, -config.cull_distance),
+            &config,
         );
         assert!(
             ahead > 24.0,
@@ -1321,29 +1228,62 @@ mod tests {
         let side = grass_lookahead_distance(
             camera_pos,
             forward,
-            Vec3::new(GRASS_CULL_DISTANCE, 8.0, 0.0),
+            Vec3::new(config.cull_distance, 8.0, 0.0),
+            &config,
         );
         assert_eq!(side, 0.0);
 
         let low_camera = grass_lookahead_distance(
             Vec3::new(0.0, 12.0, 0.0),
             forward,
-            Vec3::new(0.0, 8.0, -GRASS_CULL_DISTANCE),
+            Vec3::new(0.0, 8.0, -config.cull_distance),
+            &config,
         );
         assert_eq!(low_camera, 0.0);
     }
 
     #[test]
     fn grass_spawn_budget_prewarms_forward_chunks_at_low_density() {
-        assert!(grass_spawn_budget(GRASS_CULL_DISTANCE + 12.0, 0.0, 2, 200).is_none());
+        let config = test_config();
+        assert!(grass_spawn_budget(config.cull_distance + 12.0, 0.0, 2, 200, &config).is_none());
 
         let Some((density, max_count)) =
-            grass_spawn_budget(GRASS_CULL_DISTANCE + 12.0, 48.0, 2, 200)
+            grass_spawn_budget(config.cull_distance + 12.0, 48.0, 2, 200, &config)
         else {
             panic!("expected lookahead grass spawn budget");
         };
 
         assert_eq!(density, 1);
         assert_eq!(max_count, 66);
+    }
+
+    #[test]
+    fn vegetation_config_has_sane_defaults() {
+        let config = VegetationConfig::default();
+        assert!(config.grass_enabled);
+        assert!(config.full_distance < config.half_distance);
+        assert!(config.half_distance < config.cull_distance);
+        assert!(config.cull_hysteresis > 0.0);
+        assert!(config.cull_update_interval > 0.0);
+        assert!(config.lookahead_max_extra_distance > 0.0);
+        assert!(config.lookahead_max_count_divisor > 0);
+    }
+
+    #[test]
+    fn grass_spawn_budget_rejects_beyond_cull_without_lookahead() {
+        let config = test_config();
+        let result = grass_spawn_budget(config.cull_distance + 1.0, 0.0, 2, 200, &config);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn grass_spawn_budget_halves_density_beyond_half_distance() {
+        let config = test_config();
+        let beyond_half = config.half_distance + 1.0;
+        let Some((density, max_count)) = grass_spawn_budget(beyond_half, 0.0, 4, 200, &config) else {
+            panic!("expected budget beyond half distance");
+        };
+        assert_eq!(density, 2);
+        assert_eq!(max_count, 100);
     }
 }
