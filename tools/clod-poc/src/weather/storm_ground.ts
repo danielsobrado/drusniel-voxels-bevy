@@ -265,6 +265,63 @@ function setStrikeAttributes(geometry: THREE.InstancedBufferGeometry, buffers: S
   geometry.setAttribute("aLightningParams", new THREE.InstancedBufferAttribute(buffers.params, 4));
 }
 
+const FLASH_GLSL = /* glsl */ `
+float lightningFlash(float uTime, float uRate, float uIntensity, float vSeed, float vActive) {
+  float stormStrength = clamp(uIntensity / 1.6, 0.0, 1.0);
+  float eventTime = uTime * uRate * mix(1.05, 1.65, stormStrength) + vSeed * 7.0;
+  float localTime = fract(eventTime);
+  float cycle = floor(eventTime);
+  float gate = smoothstep(mix(0.66, 0.28, stormStrength), 0.98, hash12(vec2(cycle, vSeed)));
+  float flashA = 1.0 - smoothstep(0.0, 0.18, localTime);
+  float flashB = (1.0 - smoothstep(0.0, 0.08, abs(localTime - 0.24))) * 0.48;
+  return max(flashA, flashB) * gate * vActive;
+}
+`;
+
+const NOISE_GLSL = /* glsl */ `
+float hash12(vec2 p) {
+  return fract(cos(mod(dot(p, vec2(13.9898, 8.141)), 3.14)) * 43758.5453);
+}
+
+vec2 hash22(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return 2.0 * fract(sin(p) * 43758.5453123);
+}
+
+float noise(vec2 p) {
+  vec2 iuv = floor(p);
+  vec2 fuv = fract(p);
+  vec2 blur = smoothstep(0.0, 1.0, fuv);
+  float a = dot(hash22(iuv + vec2(0.0, 0.0)), fuv - vec2(0.0, 0.0));
+  float b = dot(hash22(iuv + vec2(1.0, 0.0)), fuv - vec2(1.0, 0.0));
+  float c = dot(hash22(iuv + vec2(0.0, 1.0)), fuv - vec2(0.0, 1.0));
+  float d = dot(hash22(iuv + vec2(1.0, 1.0)), fuv - vec2(1.0, 1.0));
+  return mix(mix(a, b, blur.x), mix(c, d, blur.x), blur.y) + 0.5;
+}
+
+float fbm(vec2 p) {
+  float value = 0.0;
+  float amplitude = 0.5;
+  for (int i = 0; i < 8; i++) {
+    value += amplitude * noise(p);
+    p *= 2.0;
+    amplitude *= 0.5;
+  }
+  return value;
+}
+
+float godotLightningField(vec2 p, float seed, float time, float xSize, float ySize, float width) {
+  vec2 modifiedUv = p;
+  modifiedUv.y *= ySize;
+  modifiedUv.x *= xSize;
+  modifiedUv.x -= 0.5;
+  modifiedUv += fbm(modifiedUv + vec2(time * 3.0 + seed * 17.0));
+  modifiedUv.x += 0.0;
+  float dist = abs(modifiedUv.x);
+  return width / max(dist, 0.012);
+}
+`;
+
 const STORM_VERTEX = /* glsl */ `
 attribute vec3 aLightningCenter;
 attribute vec3 aLightningNormal;
@@ -303,58 +360,17 @@ varying vec2 vUv;
 varying float vSeed;
 varying float vActive;
 
-float hash12(vec2 p) {
-  return fract(cos(mod(dot(p, vec2(13.9898, 8.141)), 3.14)) * 43758.5453);
-}
-
-vec2 hash22(vec2 p) {
-  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-  return 2.0 * fract(sin(p) * 43758.5453123);
-}
-
-float noise(vec2 p) {
-  vec2 iuv = floor(p);
-  vec2 fuv = fract(p);
-  vec2 blur = smoothstep(0.0, 1.0, fuv);
-  float a = dot(hash22(iuv + vec2(0.0, 0.0)), fuv - vec2(0.0, 0.0));
-  float b = dot(hash22(iuv + vec2(1.0, 0.0)), fuv - vec2(1.0, 0.0));
-  float c = dot(hash22(iuv + vec2(0.0, 1.0)), fuv - vec2(0.0, 1.0));
-  float d = dot(hash22(iuv + vec2(1.0, 1.0)), fuv - vec2(1.0, 1.0));
-  return mix(mix(a, b, blur.x), mix(c, d, blur.x), blur.y) + 0.5;
-}
-
-float fbm(vec2 p) {
-  float value = 0.0;
-  float amplitude = 0.5;
-  for (int i = 0; i < 8; i++) {
-    value += amplitude * noise(p);
-    p *= 2.0;
-    amplitude *= 0.5;
-  }
-  return value;
-}
+${NOISE_GLSL}
+${FLASH_GLSL}
 
 void main() {
-  float stormStrength = clamp(uIntensity / 1.6, 0.0, 1.0);
-  float eventTime = uTime * uRate * mix(1.05, 1.65, stormStrength) + vSeed * 7.0;
-  float localTime = fract(eventTime);
-  float cycle = floor(eventTime);
-  float gate = smoothstep(mix(0.66, 0.28, stormStrength), 0.98, hash12(vec2(cycle, vSeed)));
-  float flashA = 1.0 - smoothstep(0.0, 0.18, localTime);
-  float flashB = (1.0 - smoothstep(0.0, 0.08, abs(localTime - 0.24))) * 0.48;
-  float flash = max(flashA, flashB) * gate * vActive;
+  float flash = lightningFlash(uTime, uRate, uIntensity, vSeed, vActive);
   if (flash < 0.002) discard;
 
-  vec2 modifiedUv = 2.0 * vUv - 1.0;
-  modifiedUv.y *= 4.0;
-  modifiedUv.x *= 1.15;
-  modifiedUv.x -= 0.5;
-  modifiedUv += fbm(modifiedUv + vec2(uTime * 3.0 + vSeed * 17.0));
-
-  float dist = abs(modifiedUv.x);
-  float godotCore = 0.055 / max(dist, 0.012);
-  float body = smoothstep(0.72, 2.8, godotCore);
-  float glow = smoothstep(0.12, 1.25, godotCore);
+  vec2 p = 2.0 * vUv - 1.0;
+  float field = godotLightningField(p, vSeed, uTime, 1.15, 4.0, 0.055);
+  float body = smoothstep(0.72, 2.8, field);
+  float glow = smoothstep(0.12, 1.25, field);
   float groundBloom = (1.0 - smoothstep(0.0, 0.17, vUv.y)) * (1.0 - smoothstep(0.0, 0.9, abs(vUv.x * 2.0 - 1.0))) * 0.55;
   float alpha = min((body + glow * 0.42 + groundBloom) * flash * clamp(uIntensity, 0.0, 1.6), 1.0);
   if (alpha < 0.003) discard;
@@ -377,7 +393,7 @@ void main() {
   vec3 ref = abs(n.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
   vec3 tangent = normalize(cross(ref, n));
   vec3 bitangent = normalize(cross(n, tangent));
-  float radius = aLightningParams.y * 5.2 + 0.45;
+  float radius = aLightningParams.y * 4.8 + 0.35;
   vec3 worldPosition = aLightningCenter
     + (tangent * position.x + bitangent * position.y) * radius
     + n * ${IMPACT_SURFACE_OFFSET.toFixed(3)};
@@ -400,36 +416,40 @@ varying vec2 vLocal;
 varying float vSeed;
 varying float vActive;
 
-float hash12(vec2 p) {
-  return fract(cos(mod(dot(p, vec2(13.9898, 8.141)), 3.14)) * 43758.5453);
+${NOISE_GLSL}
+${FLASH_GLSL}
+
+float godotRoot(vec2 p, float seed, float time, float angle, float lengthScale, float width) {
+  float c = cos(angle);
+  float s = sin(angle);
+  vec2 q = vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+  q.y = abs(q.y);
+  float taper = (1.0 - smoothstep(0.08, 1.0, q.y)) * (1.0 - smoothstep(0.72, 1.08, length(p)));
+  float field = godotLightningField(vec2(q.x, q.y * lengthScale), seed, time, 1.7, 2.6, width);
+  return field * taper;
 }
 
 void main() {
-  float r = length(vLocal);
-  if (r > 1.05) discard;
+  float radius = length(vLocal);
+  if (radius > 1.08) discard;
 
-  float stormStrength = clamp(uIntensity / 1.6, 0.0, 1.0);
-  float eventTime = uTime * uRate * mix(1.05, 1.65, stormStrength) + vSeed * 7.0;
-  float localTime = fract(eventTime);
-  float cycle = floor(eventTime);
-  float gate = smoothstep(mix(0.66, 0.28, stormStrength), 0.98, hash12(vec2(cycle, vSeed)));
-  float flashA = 1.0 - smoothstep(0.0, 0.18, localTime);
-  float flashB = (1.0 - smoothstep(0.0, 0.08, abs(localTime - 0.24))) * 0.48;
-  float flash = max(flashA, flashB) * gate * vActive;
+  float flash = lightningFlash(uTime, uRate, uIntensity, vSeed, vActive);
   if (flash < 0.002) discard;
 
-  float ringRadius = mix(0.22, 0.72, smoothstep(0.0, 0.24, localTime));
-  float center = 1.0 - smoothstep(0.0, 0.2, r);
-  float ring = 1.0 - smoothstep(0.025, 0.085, abs(r - ringRadius));
-  float bloom = 1.0 - smoothstep(0.18, 1.0, r);
-  float axis = min(abs(vLocal.x), abs(vLocal.y));
-  float diag = min(abs(vLocal.x + vLocal.y), abs(vLocal.x - vLocal.y)) * 0.72;
-  float spokes = (1.0 - smoothstep(0.018, 0.11, min(axis, diag))) * smoothstep(0.1, 0.55, r) * (1.0 - smoothstep(0.62, 1.0, r));
-
-  float alpha = min((center * 0.92 + ring * 0.74 + bloom * 0.45 + spokes * 0.32) * flash * clamp(uIntensity, 0.0, 1.6), 1.0);
+  float time = uTime + vSeed * 13.0;
+  float rootA = godotRoot(vLocal, vSeed + 0.13, time, 0.0, 1.0, 0.038);
+  float rootB = godotRoot(vLocal, vSeed + 0.37, time, 1.57, 1.15, 0.03);
+  float rootC = godotRoot(vLocal, vSeed + 0.61, time, 0.78, 1.25, 0.022);
+  float rootD = godotRoot(vLocal, vSeed + 0.83, time, -0.78, 1.25, 0.022);
+  float field = max(max(rootA, rootB), max(rootC, rootD));
+  float centerGlow = 0.055 / max(radius, 0.045);
+  float body = smoothstep(0.68, 2.5, field);
+  float glow = smoothstep(0.1, 1.25, field);
+  float core = smoothstep(0.32, 1.2, centerGlow) * (1.0 - smoothstep(0.0, 0.9, radius));
+  float alpha = min((body + glow * 0.48 + core * 0.55) * flash * clamp(uIntensity, 0.0, 1.6), 1.0);
   if (alpha < 0.003) discard;
 
-  vec3 color = uEffectColor * uMainColor * (center * 2.1 + ring * 1.35 + bloom * 0.92 + spokes * 0.75) * uEmissionPower;
+  vec3 color = uEffectColor * uMainColor * (body * 2.4 + glow * 1.1 + core * 1.45) * uEmissionPower;
   gl_FragColor = vec4(color, alpha);
 }
 `;
@@ -439,7 +459,7 @@ function createStormShaderMaterial(): RainWeatherShaderHandle {
 }
 
 function createImpactShaderMaterial(): RainWeatherShaderHandle {
-  return createCommonShaderMaterial("weather-storm-impact-shader", IMPACT_VERTEX, IMPACT_FRAGMENT, 2.7);
+  return createCommonShaderMaterial("weather-storm-impact-shader", IMPACT_VERTEX, IMPACT_FRAGMENT, 2.65);
 }
 
 function createCommonShaderMaterial(name: string, vertexShader: string, fragmentShader: string, emissionPower: number): RainWeatherShaderHandle {
@@ -555,7 +575,7 @@ function createImpactNodeMaterial(): RainWeatherShaderHandle {
   const uTime = uniform(0) as TslNode;
   const uIntensity = uniform(1) as TslNode;
   const uRate = uniform(0.78) as TslNode;
-  const uEmissionPower = uniform(2.7) as TslNode;
+  const uEmissionPower = uniform(2.65) as TslNode;
   const uEffectColor = uniform(new THREE.Color(0.55, 0.62, 1.0)) as TslNode;
   const uMainColor = uniform(new THREE.Color(1.0, 1.0, 1.0)) as TslNode;
 
@@ -567,7 +587,7 @@ function createImpactNodeMaterial(): RainWeatherShaderHandle {
   const ref: TslNode = abs(n.y).lessThan(0.95).select(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0));
   const tangent: TslNode = normalize(cross(ref, n));
   const bitangent: TslNode = normalize(cross(n, tangent));
-  const radius: TslNode = aParams.y.mul(5.2).add(0.45);
+  const radius: TslNode = aParams.y.mul(4.8).add(0.35);
   const local: TslNode = vec2(pos.x, pos.y);
   const worldPosition: TslNode = aCenter
     .add(tangent.mul(pos.x).add(bitangent.mul(pos.y)).mul(radius))
@@ -578,23 +598,20 @@ function createImpactNodeMaterial(): RainWeatherShaderHandle {
     flash.lessThan(0.002).discard();
 
     const r2: TslNode = dot(local, local);
-    r2.greaterThan(1.1025).discard();
-    const eventTime: TslNode = uTime.mul(uRate).add(aParams.z.mul(7.0));
-    const localTime: TslNode = fract(eventTime);
-    const ringRadius2: TslNode = mix(0.048, 0.52, smoothstep(0.0, 0.24, localTime));
-    const center: TslNode = float(1).sub(smoothstep(0.0, 0.04, r2));
-    const ring: TslNode = float(1).sub(smoothstep(0.002, 0.08, abs(r2.sub(ringRadius2))));
-    const bloom: TslNode = float(1).sub(smoothstep(0.03, 1.0, r2));
-    const axis: TslNode = min(abs(local.x), abs(local.y));
-    const diag: TslNode = min(abs(local.x.add(local.y)), abs(local.x.sub(local.y))).mul(0.72);
-    const spokes: TslNode = float(1).sub(smoothstep(0.018, 0.11, min(axis, diag)))
-      .mul(smoothstep(0.01, 0.3, r2))
-      .mul(float(1).sub(smoothstep(0.38, 1.0, r2)));
-    const alpha: TslNode = min(center.mul(0.92).add(ring.mul(0.74)).add(bloom.mul(0.45)).add(spokes.mul(0.32))
+    r2.greaterThan(1.1664).discard();
+    const center: TslNode = float(1).sub(smoothstep(0.0, 0.055, r2));
+    const rootX: TslNode = float(1).sub(smoothstep(0.0, 0.075, abs(local.y.sub(sin(local.x.mul(8.0).add(aParams.z.mul(41.0)).add(uTime.mul(3.0))).mul(0.08)))));
+    const rootY: TslNode = float(1).sub(smoothstep(0.0, 0.075, abs(local.x.sub(sin(local.y.mul(8.0).add(aParams.z.mul(57.0)).add(uTime.mul(2.3))).mul(0.08)))));
+    const diagA: TslNode = float(1).sub(smoothstep(0.0, 0.08, abs(local.x.add(local.y).sub(sin(local.x.mul(6.0).add(aParams.z.mul(19.0))).mul(0.08)))));
+    const diagB: TslNode = float(1).sub(smoothstep(0.0, 0.08, abs(local.x.sub(local.y).sub(sin(local.y.mul(6.0).add(aParams.z.mul(23.0))).mul(0.08)))));
+    const radialFade: TslNode = float(1).sub(smoothstep(0.18, 1.08, r2));
+    const roots: TslNode = max(max(rootX, rootY), max(diagA.mul(0.72), diagB.mul(0.72))).mul(radialFade);
+    const glow: TslNode = float(1).sub(smoothstep(0.02, 0.95, r2));
+    const alpha: TslNode = min(center.mul(0.85).add(roots.mul(0.8)).add(glow.mul(0.22))
       .mul(flash).mul(clamp(uIntensity, 0.0, 1.6)), 1.0);
     alpha.lessThan(0.003).discard();
 
-    const brightness: TslNode = center.mul(2.1).add(ring.mul(1.35)).add(bloom.mul(0.92)).add(spokes.mul(0.75));
+    const brightness: TslNode = center.mul(1.9).add(roots.mul(1.55)).add(glow.mul(0.55));
     return vec4(uEffectColor.mul(uMainColor).mul(brightness).mul(uEmissionPower), alpha);
   });
 
