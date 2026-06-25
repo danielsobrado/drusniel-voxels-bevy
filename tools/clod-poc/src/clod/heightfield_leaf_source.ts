@@ -1,6 +1,7 @@
 import type { ClodPageNode, PageFootprint, PageMesh } from "../types.js";
 import type { Phase1TerrainConfig } from "../phase1/phase1_config.js";
 import type { HeightfieldSampler } from "../phase1/heightfield_sampler.js";
+import { filterPageSourceSections } from "./pageSource.js";
 
 export interface HeightfieldLeafBuild {
   leafNodes: ClodPageNode[];
@@ -18,7 +19,14 @@ export function buildHeightfieldLeafNodes(
   for (let nz = 0; nz < pages; nz++) {
     for (let nx = 0; nx < pages; nx++) {
       const footprint = footprintFor(0, nx, nz, pageSizeM);
-      const mesh = buildLeafMesh(footprint, config.clod.leafSegments, sampler);
+      const extractedMesh = buildLeafMesh(footprint, config.clod.leafSegments, sampler);
+      const mesh = filterPageSourceSections([{
+        kind: "mainTerrain",
+        terrainClass: "inland",
+        positionSource: "extracted",
+        label: `heightfield-L0:${nx},${nz}`,
+        mesh: extractedMesh,
+      }]).mesh;
       validateLeafMesh(mesh, footprint, `L0:${nx},${nz}`);
       const b = boundsOf(mesh);
       leafNodes.push({
@@ -46,6 +54,7 @@ function buildLeafMesh(footprint: PageFootprint, segments: number, sampler: Heig
   const positions = new Float32Array(side * side * 3);
   const normals = new Float32Array(side * side * 3);
   const materials = new Float32Array(side * side);
+  const materialWeights = new Float32Array(side * side * 4);
   const indices = new Uint32Array(segments * segments * 6);
   let vi = 0;
   for (let z = 0; z <= segments; z++) {
@@ -61,6 +70,9 @@ function buildLeafMesh(footprint: PageFootprint, segments: number, sampler: Heig
       normals[vi * 3 + 1] = normal[1];
       normals[vi * 3 + 2] = normal[2];
       materials[vi] = sample.biome;
+      for (let slot = 0; slot < 4; slot += 1) {
+        materialWeights[vi * 4 + slot] = sample.materialWeights[slot];
+      }
       vi++;
     }
   }
@@ -78,12 +90,6 @@ function buildLeafMesh(footprint: PageFootprint, segments: number, sampler: Heig
       indices[ii++] = c;
       indices[ii++] = d;
     }
-  }
-  const nv = positions.length / 3;
-  const materialWeights = new Float32Array(nv * 4);
-  for (let i = 0; i < nv; i++) {
-    const slot = Math.min(Math.max(0, materials[i]), 3);
-    materialWeights[i * 4 + slot] = 1.0;
   }
   return { positions, normals, paintSlots: materials, materialWeights, materialWeightStride: 4, indices };
 }

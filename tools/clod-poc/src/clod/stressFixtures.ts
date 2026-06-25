@@ -3,12 +3,16 @@ import type { PageMesh, TerrainChunkMainSurface, Vec3 } from "../types.js";
 export type HeightFn = (x: number, z: number) => number;
 export type NormalFn = (x: number, z: number) => [number, number, number];
 export type MaterialFn = (x: number, z: number) => number;
+export type MaterialWeightsFn = (x: number, z: number) => [number, number, number, number];
+export type DebugColorFn = (x: number, z: number) => [number, number, number];
 
 export interface FixtureDef {
   name: string;
   description: string;
   height: HeightFn;
   material: MaterialFn;
+  materialWeights?: MaterialWeightsFn;
+  coastTypeColor?: DebugColorFn;
 }
 
 function normalFromHeight(fn: HeightFn, eps = 0.01): NormalFn {

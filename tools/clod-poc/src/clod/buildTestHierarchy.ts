@@ -1,5 +1,5 @@
 import type { ClodPagesConfig } from "../config.js";
-import { concat } from "./source_mesh.js";
+import { concatPageSourceMeshes as concat } from "./pageSource.js";
 import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks } from "../lock.js";
 import { simplifyPage } from "./simplify.js";

@@ -9,6 +9,7 @@ export const PHASE1_DEBUG_MODES = [
   "flow",
   "biome",
   "paint_weights",
+  "page_source_sections",
 ] as const;
 
 export type Phase1DebugMode = typeof PHASE1_DEBUG_MODES[number];

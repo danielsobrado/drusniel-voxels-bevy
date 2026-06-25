@@ -1,4 +1,4 @@
-import { concat } from "./source_mesh.js";
+import { concatPageSourceMeshes } from "./pageSource.js";
 import type { ClodPageNode, PageMesh } from "../types.js";
 import { assertMaterialWeights } from "../material/material_weights.js";
 
@@ -8,7 +8,10 @@ export function mergeChildPageMeshes(children: readonly ClodPageNode[], epsilon:
     a.footprint.minX - b.footprint.minX ||
     a.id.localeCompare(b.id)
   );
-  const mesh = weldMergedChildVertices(concat(ordered.map((child) => child.mesh)), epsilon);
+  const mesh = weldMergedChildVertices(
+    concatPageSourceMeshes(ordered.map((child) => child.mesh)),
+    epsilon,
+  );
   validateFiniteMesh(mesh, "merged child page mesh");
   return mesh;
 }

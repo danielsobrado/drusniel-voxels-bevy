@@ -6,6 +6,10 @@ export const STRESS_SCENE_NAMES = [
   "near_field_bubble",
   "flat",
   "rolling_hill",
+  "border_beach",
+  "border_cliff",
+  "border_cove",
+  "border_corner",
 ] as const;
 
 export type StressSceneName = typeof STRESS_SCENE_NAMES[number];

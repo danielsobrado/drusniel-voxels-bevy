@@ -10,6 +10,12 @@ function tinyField(): Phase1Heightfield {
     slope: new Float32Array([0, 0.2, 0.4, 0.6]),
     flow: new Float32Array([0, 0.25, 0.5, 1]),
     biome: new Uint8Array([0, 1, 2, 3]),
+    materialWeights: new Float32Array([
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1,
+    ]),
     minHeight: 0,
     maxHeight: 30,
     signature: 1,
@@ -23,6 +29,7 @@ describe("HeightfieldSampler", () => {
     expect(sample.height).toBeCloseTo(15);
     expect(sample.slope).toBeCloseTo(0.3);
     expect(sample.flow).toBeCloseTo(0.4375);
+    expect(sample.materialWeights).toEqual([0.25, 0.25, 0.25, 0.25]);
   });
 
   it("clamps world coordinates to the heightfield domain", () => {

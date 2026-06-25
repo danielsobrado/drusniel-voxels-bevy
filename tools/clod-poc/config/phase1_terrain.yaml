@@ -63,3 +63,4 @@ phase1:
       - flow
       - biome
       - paint_weights
+      - page_source_sections

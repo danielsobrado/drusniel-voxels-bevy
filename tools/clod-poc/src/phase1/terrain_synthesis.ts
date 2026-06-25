@@ -1,4 +1,10 @@
 import { hashCombine, hashString, mix32, WorldSeed } from "../core/seed.js";
+import {
+  defaultBorderCoastOceanConfig,
+  type BorderCoastOceanConfig,
+} from "../config/borderCoastOceanConfig.js";
+import { shapeCoastTerrain } from "../terrain/coastTerrain.js";
+import { buildCoastMaterialWeights } from "../terrain/coastMaterials.js";
 import type { Phase1TerrainConfig } from "./phase1_config.js";
 import { buildFlowAccumulation } from "./erosion.js";
 
@@ -9,6 +15,7 @@ export interface Phase1Heightfield {
   slope: Float32Array;
   flow: Float32Array;
   biome: Uint8Array;
+  materialWeights: Float32Array;
   minHeight: number;
   maxHeight: number;
   signature: number;
@@ -62,17 +69,23 @@ export function generatePhase1Heightfield(
   seedValue: number,
   config: Phase1TerrainConfig,
   gridSize: number,
+  coastConfig: BorderCoastOceanConfig = defaultBorderCoastOceanConfig,
 ): Phase1Heightfield {
   const size = Math.max(2, Math.floor(gridSize));
   const seed = new WorldSeed(seedValue >>> 0);
   const macroSeed = seed.sub("phase1.macro");
   const ridgeSeed = seed.sub("phase1.ridges");
   const karstSeed = seed.sub("phase1.karst");
+  const baseHeights = new Float32Array(size * size);
   const heights = new Float32Array(size * size);
   const slope = new Float32Array(size * size);
   const biome = new Uint8Array(size * size);
+  const materialWeights = new Float32Array(size * size * 4);
   const worldSizeM = config.world.sizeM;
   const cellM = worldSizeM / (size - 1);
+  const coastBounds = coastConfig.world.bounds;
+  const coastWidthM = coastBounds.max_x - coastBounds.min_x;
+  const coastDepthM = coastBounds.max_z - coastBounds.min_z;
   const valleyAngle = config.macro.valleyAxisAngleDeg * Math.PI / 180;
   const valleyX = Math.cos(valleyAngle);
   const valleyZ = Math.sin(valleyAngle);
@@ -101,8 +114,18 @@ export function generatePhase1Heightfield(
         karst * config.macro.karstWeight * 0.18 -
         lakeBasin * config.macro.lakeWeight;
       h01 = Math.max(0, Math.min(1, h01));
-      const h = h01 * config.world.heightScaleM;
+      const baseHeight = h01 * config.world.heightScaleM;
+      const coastX = coastBounds.min_x + nx * coastWidthM;
+      const coastZ = coastBounds.min_z + nz * coastDepthM;
+      const coastSample = shapeCoastTerrain(
+        { x: coastX, z: coastZ },
+        baseHeight,
+        coastConfig,
+        seedValue,
+      );
+      const h = coastSample.height;
       const i = z * size + x;
+      baseHeights[i] = baseHeight;
       heights[i] = h;
       minHeight = Math.min(minHeight, h);
       maxHeight = Math.max(maxHeight, h);
@@ -125,11 +148,43 @@ export function generatePhase1Heightfield(
   let signature = hashCombine(seed.seed, hashString(`phase1:${size}`));
   const stride = Math.max(1, Math.floor((size * size) / 16384));
   for (let i = 0; i < heights.length; i++) {
-    biome[i] = classifyBiome(heights[i], slope[i], flow[i], config);
+    const inlandBiome = classifyBiome(heights[i], slope[i], flow[i], config);
+    const x = i % size;
+    const z = Math.floor(i / size);
+    const nx = x / (size - 1);
+    const nz = z / (size - 1);
+    const coastSample = shapeCoastTerrain(
+      {
+        x: coastBounds.min_x + nx * coastWidthM,
+        z: coastBounds.min_z + nz * coastDepthM,
+      },
+      baseHeights[i],
+      coastConfig,
+      seedValue,
+    );
+    const inlandWeights = [0, 0, 0, 0];
+    inlandWeights[inlandBiome] = 1;
+    const coastalWeights = buildCoastMaterialWeights({
+      coast: coastSample,
+      materials: coastConfig.materials,
+      palette: { materialIds: config.material.heightBands.map((band) => band.id) },
+      inlandWeights,
+    });
+    const weightOffset = i * 4;
+    for (let slot = 0; slot < 4; slot += 1) {
+      materialWeights[weightOffset + slot] = coastalWeights.weights[slot] ?? 0;
+    }
+    biome[i] = coastalWeights.dominantSlot;
     if (i % stride === 0) {
       signature = hashCombine(signature, Math.round(heights[i] * 100) >>> 0);
       signature = hashCombine(signature, Math.round(slope[i] * 10000) >>> 0);
       signature = hashCombine(signature, biome[i]);
+      for (let slot = 0; slot < 4; slot += 1) {
+        signature = hashCombine(
+          signature,
+          Math.round(materialWeights[i * 4 + slot] * 10000) >>> 0,
+        );
+      }
     }
   }
 
@@ -140,6 +195,7 @@ export function generatePhase1Heightfield(
     slope,
     flow,
     biome,
+    materialWeights,
     minHeight,
     maxHeight,
     signature: signature >>> 0,

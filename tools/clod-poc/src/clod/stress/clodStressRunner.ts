@@ -6,6 +6,10 @@ import { buildCliffCornerScene } from "./cliffCornerScene.js";
 import { buildCaveMouthBorderScene } from "./caveMouthBorderScene.js";
 import { buildThinBridgeScene } from "./thinBridgeScene.js";
 import { buildNearFieldBubbleScene } from "./nearFieldBubbleScene.js";
+import { buildBorderBeachScene } from "../../scenes/stress/borderBeachScene.js";
+import { buildBorderCliffScene } from "../../scenes/stress/borderCliffScene.js";
+import { buildBorderCoveScene } from "../../scenes/stress/borderCoveScene.js";
+import { buildBorderCornerScene } from "../../scenes/stress/borderCornerScene.js";
 
 export interface StressSceneResult {
   rootNodeIds: ClodNodeId[];
@@ -18,6 +22,10 @@ const SCENE_BUILDERS: Record<string, (scene: THREE.Scene, params: StressScenePar
   cave_mouth_border: buildCaveMouthBorderScene,
   thin_bridge: buildThinBridgeScene,
   near_field_bubble: buildNearFieldBubbleScene,
+  border_beach: buildBorderBeachScene,
+  border_cliff: buildBorderCliffScene,
+  border_cove: buildBorderCoveScene,
+  border_corner: buildBorderCornerScene,
 };
 
 export function buildStressScene(

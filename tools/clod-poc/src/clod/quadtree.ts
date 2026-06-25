@@ -11,7 +11,7 @@
 import { ClodPageNode, PageFootprint, PageMesh, ClodBuildError } from "../types.js";
 import { ClodPagesConfig } from "../config.js";
 import { buildLod0PageSource, rebuildPageChunks } from "./source_mesh.js";
-import { concat } from "./source_mesh.js";
+import { concatPageSourceMeshes as concat } from "./pageSource.js";
 import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks, countLocks } from "../lock.js";
 import { simplifyPage } from "./simplify.js";

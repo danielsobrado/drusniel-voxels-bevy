@@ -5,6 +5,7 @@ export interface HeightfieldSample {
   slope: number;
   flow: number;
   biome: number;
+  materialWeights: [number, number, number, number];
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -29,7 +30,21 @@ export class HeightfieldSampler {
       slope: this.sampleArray(this.field.slope, gx, gz),
       flow: this.sampleArray(this.field.flow, gx, gz),
       biome: Math.round(this.sampleArray(this.field.biome, gx, gz)),
+      materialWeights: this.sampleMaterialWeights(gx, gz),
     };
+  }
+
+  private sampleMaterialWeights(gx: number, gz: number): [number, number, number, number] {
+    const weights: [number, number, number, number] = [0, 0, 0, 0];
+    let sum = 0;
+    for (let slot = 0; slot < 4; slot += 1) {
+      weights[slot] = this.sampleInterleaved(this.field.materialWeights, gx, gz, 4, slot);
+      sum += weights[slot];
+    }
+    if (sum > Number.EPSILON) {
+      for (let slot = 0; slot < 4; slot += 1) weights[slot] /= sum;
+    }
+    return weights;
   }
 
   normalAt(x: number, z: number): [number, number, number] {
@@ -57,6 +72,29 @@ export class HeightfieldSampler {
     const b = array[z0 * size + x1] ?? 0;
     const c = array[z1 * size + x0] ?? 0;
     const d = array[z1 * size + x1] ?? 0;
+    const ab = a + (b - a) * fx;
+    const cd = c + (d - c) * fx;
+    return ab + (cd - ab) * fz;
+  }
+
+  private sampleInterleaved(
+    array: Float32Array,
+    gx: number,
+    gz: number,
+    stride: number,
+    slot: number,
+  ): number {
+    const size = this.field.size;
+    const x0 = Math.floor(gx);
+    const z0 = Math.floor(gz);
+    const x1 = Math.min(size - 1, x0 + 1);
+    const z1 = Math.min(size - 1, z0 + 1);
+    const fx = gx - x0;
+    const fz = gz - z0;
+    const a = array[(z0 * size + x0) * stride + slot] ?? 0;
+    const b = array[(z0 * size + x1) * stride + slot] ?? 0;
+    const c = array[(z1 * size + x0) * stride + slot] ?? 0;
+    const d = array[(z1 * size + x1) * stride + slot] ?? 0;
     const ab = a + (b - a) * fx;
     const cd = c + (d - c) * fx;
     return ab + (cd - ab) * fz;

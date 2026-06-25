@@ -12,6 +12,10 @@ import { ClodLockedBorderOverlay } from "../clod/debug/clodLockedBorderOverlay.j
 import { ClodErrorLabelOverlay } from "../clod/debug/clodErrorLabelOverlay.js";
 import { ClodStatsPanel } from "../clod/debug/clodStatsPanel.js";
 import { buildStressScene, type StressSceneResult } from "../clod/stress/clodStressRunner.js";
+import {
+  setStressTerrainDebugMode,
+  type StressTerrainDebugMode,
+} from "../clod/stress/stressTerrainFactory.js";
 import { STRESS_SCENE_NAMES, type StressSceneName, type StressSceneParams, DEFAULT_STRESS_PARAMS } from "../clod/stress/stressSceneConfig.js";
 import { logger } from "../clod/runtime/clodLogger.js";
 import configYaml from "../../config/clod_pages.yaml?raw";
@@ -140,6 +144,16 @@ export async function runPhase2Scene(): Promise<void> {
   statsPanel.setVisible(cfg.debug.showStatsPanel);
 
   const gui = new GUI({ title: "CLOD Phase 2" });
+  const coastDebug = { mode: "final" as StressTerrainDebugMode };
+  gui.add(coastDebug, "mode", [
+    "final",
+    "lod",
+    "coastType",
+    "materialWeights",
+    "pageSourceSections",
+  ]).name("coast debug").onChange((mode: StressTerrainDebugMode) => {
+    setStressTerrainDebugMode(currentBuild, mode);
+  });
 
   const guiState = createClodDebugGui(
     gui,
@@ -184,6 +198,7 @@ export async function runPhase2Scene(): Promise<void> {
         ...stressParams,
         sceneName,
       });
+      setStressTerrainDebugMode(currentBuild, coastDebug.mode);
       for (const [, node] of currentBuild.nodes) {
         if (node.mesh) {
           const triCount = node.mesh.geometry.index

@@ -42,6 +42,15 @@ function paintWeightColor(sample: { height: number; slope: number; flow: number;
   return new THREE.Color(0.15 + rock * 0.7, 0.2 + (1 - rock) * 0.45, 0.2 + snow * 0.75);
 }
 
+function pageSourceSectionColor(sample: { materialWeights: [number, number, number, number] }): THREE.Color {
+  const grass = sample.materialWeights[0];
+  const sandOrDirt = sample.materialWeights[1];
+  const rock = sample.materialWeights[2];
+  if (rock > sandOrDirt && rock > grass) return new THREE.Color(0xd96b38);
+  if (sandOrDirt > grass) return new THREE.Color(0xe3c66d);
+  return new THREE.Color(0x35c95c);
+}
+
 export function createPhase1TerrainMaterial(mode: Phase1DebugMode): THREE.Material {
   if (mode === "final") {
     return new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
@@ -84,6 +93,7 @@ function colorsForMode(
     else if (mode === "flow") color.copy(flowColor(sample.flow));
     else if (mode === "biome") color.copy(BIOME_COLORS[sample.biome] ?? BIOME_COLORS[0]);
     else if (mode === "paint_weights") color.copy(paintWeightColor(sample, config));
+    else if (mode === "page_source_sections") color.copy(pageSourceSectionColor(sample));
     else {
       const biomeColor = BIOME_COLORS[sample.biome] ?? BIOME_COLORS[0];
       const slopeRock = THREE.MathUtils.smoothstep(sample.slope, config.material.slopeRockStart, config.material.slopeRockFull);

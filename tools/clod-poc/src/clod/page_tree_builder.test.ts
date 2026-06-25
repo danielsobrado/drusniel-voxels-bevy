@@ -33,7 +33,21 @@ describe("buildDerivedClodTree", () => {
     for (const nodes of tree.nodesByLevel.values()) {
       for (const node of nodes) {
         for (const value of node.mesh.positions) expect(Number.isFinite(value)).toBe(true);
+        for (let vertex = 0; vertex < node.mesh.materialWeights.length / 4; vertex += 1) {
+          const weights = node.mesh.materialWeights.slice(vertex * 4, vertex * 4 + 4);
+          expect([...weights].reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1);
+        }
       }
     }
+    const parentHasCoastIdentity = [...tree.nodesByLevel.entries()]
+      .filter(([level]) => level > 0)
+      .some(([, nodes]) => nodes.some((node) => {
+        for (let vertex = 0; vertex < node.mesh.materialWeights.length / 4; vertex += 1) {
+          const weights = node.mesh.materialWeights.slice(vertex * 4, vertex * 4 + 4);
+          if ([...weights].filter((weight) => weight > 0.001).length > 1) return true;
+        }
+        return false;
+      }));
+    expect(parentHasCoastIdentity).toBe(true);
   });
 });

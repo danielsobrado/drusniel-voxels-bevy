@@ -16,3 +16,7 @@ export * from "./farWaterSurface.js";
 export * from "./moistureField.js";
 export * from "./waterScreenResources.js";
 export * from "./causticsConfig.js";
+export * from "./surfMask.js";
+export * from "./surfBand.js";
+export * from "./deepOceanMesh.js";
+export * from "./deepOcean.js";

@@ -150,8 +150,18 @@ function buildFixtureMesh(
   const vc = positions.length / 3;
   const weights = new Float32Array(vc * 4);
   for (let wi = 0; wi < vc; wi++) {
-    const slot = Math.min(Math.max(0, Math.round(paintSlots[wi])), 3);
-    weights[wi * 4 + slot] = 1;
+    const x = positions[wi * 3];
+    const z = positions[wi * 3 + 2];
+    const fixtureWeights = fixture.materialWeights?.(x, z);
+    if (fixtureWeights) {
+      const sum = fixtureWeights.reduce((total, weight) => total + Math.max(0, weight), 0);
+      for (let slot = 0; slot < 4; slot += 1) {
+        weights[wi * 4 + slot] = sum > 0 ? Math.max(0, fixtureWeights[slot]) / sum : 0;
+      }
+    } else {
+      const slot = Math.min(Math.max(0, Math.round(paintSlots[wi])), 3);
+      weights[wi * 4 + slot] = 1;
+    }
   }
 
   return {
@@ -249,6 +259,21 @@ export function buildTerrainForStressScene(
     throw new Error(`Unknown stress scene: ${params.sceneName}`);
   }
 
+  return buildTerrainForFixture(fixture, params, scene);
+}
+
+export type StressTerrainDebugMode =
+  | "final"
+  | "lod"
+  | "coastType"
+  | "materialWeights"
+  | "pageSourceSections";
+
+export function buildTerrainForFixture(
+  fixture: FixtureDef,
+  params: StressSceneParams,
+  scene: THREE.Scene,
+): TerrainBuildResult {
   const material = new THREE.MeshStandardMaterial({
     vertexColors: false,
     color: 0x88aa77,
@@ -277,6 +302,23 @@ export function buildTerrainForStressScene(
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(norm), 3));
     geo.setIndex(new THREE.BufferAttribute(new Uint32Array(node.mesh.indices), 1));
+    const coastColors = new Float32Array((pos.length / 3) * 3);
+    const materialColors = new Float32Array((pos.length / 3) * 3);
+    const sourceColors = new Float32Array((pos.length / 3) * 3);
+    for (let vertex = 0; vertex < pos.length / 3; vertex += 1) {
+      const x = pos[vertex * 3];
+      const z = pos[vertex * 3 + 2];
+      const coastColor = fixture.coastTypeColor?.(x, z) ?? [0.2, 0.85, 0.3];
+      coastColors.set(coastColor, vertex * 3);
+      const grass = node.mesh.materialWeights[vertex * 4] ?? 0;
+      const sand = node.mesh.materialWeights[vertex * 4 + 1] ?? 0;
+      const rock = node.mesh.materialWeights[vertex * 4 + 2] ?? 0;
+      materialColors.set([grass * 0.2 + sand * 0.9 + rock * 0.45, grass * 0.75 + sand * 0.65 + rock * 0.3, grass * 0.18 + sand * 0.25 + rock * 0.22], vertex * 3);
+      sourceColors.set([0.2, 0.85, 0.3], vertex * 3);
+    }
+    geo.setAttribute("coastTypeColor", new THREE.BufferAttribute(coastColors, 3));
+    geo.setAttribute("materialWeightColor", new THREE.BufferAttribute(materialColors, 3));
+    geo.setAttribute("pageSourceSectionColor", new THREE.BufferAttribute(sourceColors, 3));
 
     const mesh = new THREE.Mesh(geo, material.clone());
     mesh.name = `clod-${node.id}`;
@@ -326,5 +368,45 @@ export function buildTerrainForStressScene(
     }
   }
 
-  return { rootNodeIds, nodes: runtimeNodes, nodeDefs, scene, fixtureDef: fixture };
+  const result = { rootNodeIds, nodes: runtimeNodes, nodeDefs, scene, fixtureDef: fixture };
+  scene.userData["borderCoastStress"] = {
+    fixture: fixture.name,
+    debugOverlays: [
+      "pageBoundaries",
+      "lodLevelColors",
+      "lockedBorderVertices",
+      "coastTypeColor",
+      "materialWeightDebug",
+      "pageSourceSectionDebug",
+      "simplificationErrorLabels",
+    ],
+    pageSourceKinds: ["mainTerrain"],
+    waterTrianglesInSimplifiedPages: 0,
+  };
+  return result;
+}
+
+export function setStressTerrainDebugMode(
+  result: { nodes: Map<ClodNodeId, ClodPageNodeRuntime> },
+  mode: StressTerrainDebugMode,
+): void {
+  const lodColors = [0x4488ff, 0x44ff88, 0xff8844, 0xff4488];
+  for (const [id, runtimeNode] of result.nodes) {
+    const mesh = runtimeNode.mesh;
+    if (!mesh) continue;
+    const geometry = mesh.geometry;
+    if (mode === "coastType") geometry.setAttribute("color", geometry.getAttribute("coastTypeColor"));
+    else if (mode === "materialWeights") geometry.setAttribute("color", geometry.getAttribute("materialWeightColor"));
+    else if (mode === "pageSourceSections") geometry.setAttribute("color", geometry.getAttribute("pageSourceSectionColor"));
+    else geometry.deleteAttribute("color");
+    const material = mesh.material as THREE.MeshStandardMaterial;
+    material.vertexColors = mode === "coastType" || mode === "materialWeights" || mode === "pageSourceSections";
+    if (mode === "lod") {
+      const level = Number(/^L(\d+):/.exec(id)?.[1] ?? 0);
+      material.color.setHex(lodColors[level % lodColors.length]);
+    } else {
+      material.color.setHex(0x88aa77);
+    }
+    material.needsUpdate = true;
+  }
 }

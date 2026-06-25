@@ -1,0 +1,109 @@
+world:
+  bounds:
+    min_x: -2048
+    max_x: 2048
+    min_z: -2048
+    max_z: 2048
+  water_level: 0
+
+coast:
+  enabled: true
+  seed_offset: 73191
+
+  band:
+    width_m: 384
+    inner_fade_m: 128
+    outer_fade_m: 96
+    segment_length_m: 220
+    coastline_noise_scale: 0.004
+    coastline_noise_strength_m: 80
+    corner_rounding_m: 192
+
+  type_weights:
+    sandy_beach: 0.38
+    rocky_beach: 0.20
+    cliff: 0.27
+    cove: 0.10
+    reef: 0.05
+
+  beach:
+    min_width_m: 48
+    max_width_m: 160
+    slope: 0.035
+    dune_height_m: 3.5
+    dune_noise_strength_m: 1.2
+    wet_sand_width_m: 12
+    tide_pool_probability: 0.08
+
+  cliff:
+    min_height_m: 18
+    max_height_m: 80
+    face_steepness: 0.82
+    erosion_noise_strength_m: 9
+    ledge_probability: 0.18
+    cave_mouth_probability: 0.03
+
+  rocky:
+    rock_scatter_density: 0.18
+    boulder_min_scale: 0.8
+    boulder_max_scale: 4.5
+    sea_stack_probability: 0.04
+
+materials:
+  dry_sand: sand
+  wet_sand: wet_sand
+  shallow_seabed: sand
+  dune_grass: grass
+  cliff_rock: rock
+  beach_rock: rock
+
+surf:
+  enabled: true
+  beach_foam_width_m: 32
+  cliff_foam_width_m: 18
+  reef_foam_width_m: 48
+  foam_noise_scale: 0.08
+  foam_speed: 0.35
+  shore_wave_height: 0.45
+  shore_choppiness: 0.8
+
+deep_ocean:
+  enabled: true
+  start_outside_border_m: 64
+  visual_extent_m: 4096
+  near_grid_size_m: 512
+  far_grid_size_m: 2048
+  near_subdivisions: 128
+  far_subdivisions: 64
+
+  wave:
+    wind_speed: 14
+    wind_direction_deg: 45
+    height_scale: 1.3
+    choppiness: 1.6
+    coarse_patch_m: 250
+    fine_patch_m: 37
+    foam_threshold: 0.5
+    foam_power: 1.36
+    foam_intensity: 1.25
+
+  shading:
+    deep_color: "#042c4e"
+    shallow_color: "#0a5c5a"
+    foam_color: "#ffffff"
+    fresnel_power: 4.5
+    fresnel_strength: 0.75
+    reflection_strength: 0.46
+    reflection_distortion: 0.04
+    roughness: 0.08
+    fog_color: "#47616d"
+    fog_near_m: 100
+    fog_far_m: 1800
+    fog_density: 0.5
+
+debug:
+  show_world_bounds: false
+  show_coast_band: false
+  show_coast_type: false
+  show_page_input_sections: false
+  freeze_lod_selection: false
