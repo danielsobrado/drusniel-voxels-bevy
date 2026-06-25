@@ -28,11 +28,7 @@ export interface FarShellControllerDeps {
   getLighting: () => EnvironmentLighting;
   getSettings: () => FarShellUiSettings;
   onTriangleCount?: (counter: "far_shell_tris" | "canopy_tris", count: number) => void;
-
-  /** Optional height provider for far summary streaming. When set, the shell samples from
-   *  this instead of TerrainSummaryField. */
   heightProvider?: FarHeightProvider;
-  /** Grid center for camera-relative positioning. When not set, uses worldSize/2. */
   centerX?: number;
   centerZ?: number;
 }
@@ -43,8 +39,8 @@ export interface FarShellController {
   isBuilt(): boolean;
   readonly canopyShell: FarShellInstance | null;
   dispose(): void;
-  updateCenter(x: number, z: number): void;
-  /** Set or change the height provider after construction. Rebuilds the shell. */
+  /** Move the shell mesh to a new world center without rebuilding. */
+  moveTo(x: number, z: number): void;
   setHeightProvider(provider: FarHeightProvider | undefined): void;
 }
 
@@ -54,11 +50,14 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
   let currentCenterX = deps.centerX ?? deps.worldSizeCells / 2;
   let currentCenterZ = deps.centerZ ?? deps.worldSizeCells / 2;
   let currentHeightProvider = deps.heightProvider;
+  let buildCenterX = currentCenterX;
+  let buildCenterZ = currentCenterZ;
 
   const buildFarShellInstance = (
     radiusFactor: number,
     heightBias: number,
     heightDrop: number,
+    useRelativeBuild: boolean,
   ): FarShellInstance => {
     if (current) {
       deps.scene.remove(current.mesh);
@@ -78,7 +77,14 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
       heightProvider: currentHeightProvider,
       centerX: currentCenterX,
       centerZ: currentCenterZ,
+      buildRelative: useRelativeBuild,
     });
+    buildCenterX = result.buildCenterX;
+    buildCenterZ = result.buildCenterZ;
+    // For relative build, translate to the actual world center
+    if (useRelativeBuild) {
+      result.mesh.position.set(currentCenterX, 0, currentCenterZ);
+    }
     current = result;
     deps.scene.add(result.mesh);
     deps.onTriangleCount?.("far_shell_tris", result.triangleCount);
@@ -87,19 +93,23 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
 
   const rebuild = () => {
     const settings = deps.getSettings();
-    buildFarShellInstance(settings.radiusFactor, settings.heightBias, settings.heightDrop);
+    const useRelative = currentHeightProvider !== undefined;
+    buildFarShellInstance(settings.radiusFactor, settings.heightBias, settings.heightDrop, useRelative);
     if (!settings.enabled && !deps.isLongView) {
       if (current) deps.scene.remove(current.mesh);
     }
   };
 
-  const updateCenter = (x: number, z: number) => {
+  const moveTo = (x: number, z: number) => {
+    if (!current) return;
+    // For relative builds, just translate the mesh.
+    // For non-relative, delta-move (only valid for small offsets).
+    current.mesh.position.set(x - buildCenterX, 0, z - buildCenterZ);
     currentCenterX = x;
     currentCenterZ = z;
-    rebuild();
   };
 
-  current = buildFarShellInstance(1.5, 0.6, 2);
+  current = buildFarShellInstance(1.5, 0.6, 2, false);
   if (!deps.isLongView && !deps.queryFarShell) {
     deps.scene.remove(current.mesh);
   }
@@ -139,7 +149,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
     get canopyShell() {
       return canopyShell;
     },
-    updateCenter,
+    moveTo,
     dispose() {
       if (current) {
         deps.scene.remove(current.mesh);

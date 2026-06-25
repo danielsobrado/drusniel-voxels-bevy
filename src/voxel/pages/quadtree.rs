@@ -24,11 +24,38 @@ pub struct ClodPageNode {
     pub polish: DiagonalPolishStats,
 }
 
+/// LOD0 page coord minimum used to infer build shape. Public node keys stay in world space.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PageBuildOrigin {
+    pub min_page_x: i32,
+    pub min_page_z: i32,
+}
+
 pub struct BuildResult {
     pub nodes_by_level: Vec<Vec<ClodPageNode>>,
+    pub origin: PageBuildOrigin,
     pub world_pages_x: i32,
     pub world_pages_z: i32,
     pub polish: DiagonalPolishStats,
+}
+
+/// Inclusive LOD0 page coord span → axis page counts for `resolve_build_shape`.
+fn infer_lod0_page_shape(lod0: &[((i32, i32), PageSource)]) -> (PageBuildOrigin, i32, i32) {
+    if lod0.is_empty() {
+        return (PageBuildOrigin::default(), 0, 0);
+    }
+    let min_page_x = lod0.iter().map(|((px, _), _)| *px).min().unwrap();
+    let max_page_x = lod0.iter().map(|((px, _), _)| *px).max().unwrap();
+    let min_page_z = lod0.iter().map(|((_, pz), _)| *pz).min().unwrap();
+    let max_page_z = lod0.iter().map(|((_, pz), _)| *pz).max().unwrap();
+    (
+        PageBuildOrigin {
+            min_page_x,
+            min_page_z,
+        },
+        max_page_x - min_page_x + 1,
+        max_page_z - min_page_z + 1,
+    )
 }
 
 /// Inclusive world-cell bounds touched by an edit (sphere bbox + influence margin).
@@ -147,6 +174,16 @@ fn build_parent_node(
     cfg: &ClodPagesConfig,
     weld_epsilon: f32,
 ) -> Result<ClodPageNode, ClodBuildError> {
+    if child_ids.len() != 4 {
+        return Err(ClodBuildError::PageIncomplete {
+            message: format!(
+                "parent L{level}:({},{}) expected 4 children, got {}",
+                coord.0,
+                coord.1,
+                child_ids.len()
+            ),
+        });
+    }
     let children: Vec<&ClodPageNode> = child_ids.iter().map(|&i| &previous_level[i]).collect();
     build_parent_node_from_children(level, coord, &children, cfg, weld_epsilon)
 }
@@ -158,8 +195,17 @@ fn build_parent_level(
     cfg: &ClodPagesConfig,
     weld_epsilon: f32,
 ) -> Result<Vec<ClodPageNode>, ClodBuildError> {
-    if groups.len() <= 1 {
-        return groups
+    let complete_groups: Vec<_> = groups
+        .into_iter()
+        .filter(|(_, child_ids)| child_ids.len() == 4)
+        .collect();
+
+    if complete_groups.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if complete_groups.len() <= 1 {
+        return complete_groups
             .into_iter()
             .map(|(coord, child_ids)| {
                 build_parent_node(level, coord, &child_ids, previous_level, cfg, weld_epsilon)
@@ -170,11 +216,11 @@ fn build_parent_level(
     let worker_count = thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(1)
-        .min(groups.len());
-    let chunk_size = groups.len().div_ceil(worker_count);
+        .min(complete_groups.len());
+    let chunk_size = complete_groups.len().div_ceil(worker_count);
     thread::scope(|scope| {
         let mut handles = Vec::new();
-        for chunk in groups.chunks(chunk_size) {
+        for chunk in complete_groups.chunks(chunk_size) {
             handles.push(scope.spawn(move || {
                 chunk
                     .iter()
@@ -207,9 +253,7 @@ pub fn build_quadtree(
 ) -> Result<BuildResult, ClodBuildError> {
     let eps = cfg.simplify.weld_epsilon_cells;
 
-    // infer world_pages from the LOD0 coords
-    let world_pages_x = lod0.iter().map(|((px, _), _)| *px).max().unwrap_or(0) + 1;
-    let world_pages_z = lod0.iter().map(|((_, pz), _)| *pz).max().unwrap_or(0) + 1;
+    let (origin, world_pages_x, world_pages_z) = infer_lod0_page_shape(&lod0);
     let max_levels = resolve_build_shape(world_pages_x, world_pages_z, cfg)?;
 
     let mut nodes_by_level: Vec<Vec<ClodPageNode>> = Vec::new();
@@ -259,6 +303,7 @@ pub fn build_quadtree(
 
     Ok(BuildResult {
         nodes_by_level,
+        origin,
         world_pages_x,
         world_pages_z,
         polish,

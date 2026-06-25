@@ -6,7 +6,7 @@ import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import { updateStreamCenter, type StreamCenter } from "./stream-center.js";
 import { computeRequiredFarSummaryTiles } from "./clipmap-rings.js";
 import { FarSummaryDebugOverlay } from "./debug-overlay.js";
-import { createFarSummaryStats, accumulateStats } from "./stats.js";
+import { createFarSummaryStats } from "./stats.js";
 import type { FarSummaryStats } from "./types.js";
 import type { FarHeightProvider } from "./clipmap-sampler.js";
 import type { FarShellController } from "../systems/far_shell_controller.js";
@@ -73,30 +73,39 @@ export function initFarSummaryIntegration(
 
     const requests = computeRequiredFarSummaryTiles(currentCenter, config);
 
-    if (forceSlowBuilds) {
-      config.stream.maxTileBuildsPerFrame = 1;
-    }
-
     const nowMs = performance.now();
 
     cache.requestTiles(requests, frameIndex, nowMs);
 
     if (buildDelayMs > 0 && frameIndex % Math.ceil(buildDelayMs / 16) !== 0) {
     } else {
-      cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs);
+      const budget = forceSlowBuilds ? 1 : undefined;
+      cache.buildSomeTiles(options.terrainSampler, frameIndex, nowMs, budget);
     }
 
     cache.markStale(null);
     cache.evictColdTiles(frameIndex, nowMs);
 
     const currentStats = cache.getStats();
-    accumulateStats(stats, currentStats);
-    sampler.resetFrameStats();
+    // Carry over cumulative counters, replace per-frame ones.
+    stats.requestedTiles = currentStats.requestedTiles;
+    stats.buildingTiles = currentStats.buildingTiles;
+    stats.readyTiles = currentStats.readyTiles;
+    stats.staleTiles = currentStats.staleTiles;
+    stats.evictedTiles = currentStats.evictedTiles;
+    stats.cacheHits = currentStats.cacheHits;
+    stats.cacheMisses = currentStats.cacheMisses;
+    stats.proceduralFallbacks = currentStats.proceduralFallbacks;
+    stats.lowerRingFallbacks = currentStats.lowerRingFallbacks;
+    stats.tilesBuiltThisFrame = currentStats.tilesBuiltThisFrame;
+    stats.tilesCommittedThisFrame = currentStats.tilesCommittedThisFrame;
+    stats.buildTimeMs = currentStats.buildTimeMs;
+    stats.maxBuildTimeMs = currentStats.maxBuildTimeMs;
 
     debugOverlay.update(frameIndex, stats);
 
     if (options.farShellController) {
-      options.farShellController.updateCenter(
+      options.farShellController.moveTo(
         currentCenter.predictedX,
         currentCenter.predictedZ,
       );

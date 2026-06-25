@@ -133,4 +133,118 @@ describe("far summary cache", () => {
     expect(stats.tilesBuiltThisFrame).toBeLessThanOrEqual(2);
     expect(stats.tilesCommittedThisFrame).toBeLessThanOrEqual(2);
   });
+
+  describe("cache hit/miss stats", () => {
+    it("hit increments only cacheHits", () => {
+      const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+      config.stream.maxTileBuildsPerFrame = 500;
+      config.stream.maxTileCommitsPerFrame = 500;
+      const cache = new FarSummaryCache(config);
+
+      const center: StreamCenter = {
+        worldX: 0, worldZ: 0,
+        predictedX: 0, predictedZ: 0,
+        velocityX: 0, velocityZ: 0,
+      };
+      const requests = computeRequiredFarSummaryTiles(center, config);
+      cache.requestTiles(requests, 0, 0);
+      cache.buildSomeTiles(flatSampler, 0, 0);
+
+      cache.sample(2500, 2500, 0);
+      const stats = cache.getStats();
+      expect(stats.cacheHits).toBeGreaterThan(0);
+      expect(stats.cacheMisses).toBe(0);
+    });
+
+    it("missing tile increments only cacheMisses", () => {
+      const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+      const cache = new FarSummaryCache(config);
+      // No tiles built — sampling always misses
+      cache.sample(99999, 99999, 0);
+      const stats = cache.getStats();
+      expect(stats.cacheMisses).toBeGreaterThan(0);
+      expect(stats.cacheHits).toBe(0);
+    });
+
+    it("repeated calls produce correct totals", () => {
+      const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+      config.stream.maxTileBuildsPerFrame = 500;
+      config.stream.maxTileCommitsPerFrame = 500;
+      const cache = new FarSummaryCache(config);
+
+      const center: StreamCenter = {
+        worldX: 0, worldZ: 0,
+        predictedX: 0, predictedZ: 0,
+        velocityX: 0, velocityZ: 0,
+      };
+      const requests = computeRequiredFarSummaryTiles(center, config);
+      cache.requestTiles(requests, 0, 0);
+      cache.buildSomeTiles(flatSampler, 0, 0);
+
+      // 3 hits + 2 misses
+      cache.sample(2500, 2500, 0);
+      cache.sample(2600, 2500, 0);
+      cache.sample(2500, 2600, 0);
+      cache.sample(99999, 99999, 0);
+      cache.sample(-99999, -99999, 0);
+
+      const stats = cache.getStats();
+      expect(stats.cacheHits).toBeGreaterThanOrEqual(3);
+      expect(stats.cacheMisses).toBeGreaterThanOrEqual(2);
+      expect(stats.cacheHits + stats.cacheMisses).toBe(5);
+    });
+  });
+
+  describe("stale tile lifecycle", () => {
+    it("stale tile remains sampleable while rebuild is pending", () => {
+      const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+      config.stream.maxTileBuildsPerFrame = 500;
+      config.stream.maxTileCommitsPerFrame = 500;
+      config.stream.keepStaleUntilReplacement = true;
+      const cache = new FarSummaryCache(config);
+
+      const center: StreamCenter = {
+        worldX: 0, worldZ: 0,
+        predictedX: 0, predictedZ: 0,
+        velocityX: 0, velocityZ: 0,
+      };
+      const requests = computeRequiredFarSummaryTiles(center, config);
+      cache.requestTiles(requests, 0, 0);
+      cache.buildSomeTiles(flatSampler, 0, 0);
+      let stats = cache.getStats();
+      expect(stats.readyTiles).toBeGreaterThan(0);
+
+      // Advance frameIndex (without cooling the tile) so markStale catches it
+      cache.evictColdTiles(2, 0);
+      cache.markStale(null);
+      stats = cache.getStats();
+      expect(stats.staleTiles).toBeGreaterThan(0);
+
+      // Stale tile should still be sampleable
+      const sample = cache.sample(2500, 2500, 0);
+      expect(sample).not.toBeNull();
+    });
+
+    it("commit budget prevents replacing old tile immediately", () => {
+      const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
+      config.stream.maxTileBuildsPerFrame = 1;
+      config.stream.maxTileCommitsPerFrame = 0; // No commits allowed
+      const cache = new FarSummaryCache(config);
+
+      const center: StreamCenter = {
+        worldX: 0, worldZ: 0,
+        predictedX: 0, predictedZ: 0,
+        velocityX: 0, velocityZ: 0,
+      };
+      const requests = computeRequiredFarSummaryTiles(center, config);
+      cache.requestTiles(requests, 0, 0);
+      cache.buildSomeTiles(flatSampler, 0, 0);
+
+      // With 0 commit budget, nothing should be committed
+      const stats = cache.getStats();
+      expect(stats.tilesCommittedThisFrame).toBe(0);
+      // There should be no ready tiles
+      expect(stats.readyTiles).toBe(0);
+    });
+  });
 });

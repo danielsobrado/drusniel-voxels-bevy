@@ -15,6 +15,7 @@ pub mod diagonal_polish;
 pub mod export;
 pub mod lock;
 pub mod material_weights;
+pub mod material_tier;
 mod ownership;
 pub mod plugin;
 pub mod quadtree;
@@ -24,6 +25,7 @@ mod selection;
 pub mod simplify;
 pub mod source_mesh;
 pub mod stats;
+pub mod summary;
 pub mod triangle_quality;
 pub mod types;
 pub mod validate;
@@ -37,6 +39,7 @@ pub use export::{ClodExportError, TerrainMainSurfaceExport, extract_main_surface
 pub(crate) use ownership::ClodPageMeshGate;
 pub use plugin::ClodPagesPlugin;
 pub use render::{ClodPageMeshBounds, ClodPageMeshTag};
+pub use summary::TerrainSummaryField;
 pub use types::{ClodBuildError, PageFootprint, PageMesh};
 
 #[cfg(test)]

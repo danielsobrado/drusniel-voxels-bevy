@@ -37,6 +37,9 @@ pub struct CachedPropMesh {
     pub bounds_from_mesh: bool,
 }
 
+/// Duration in seconds after which pending GLTF extraction is treated as stuck.
+const PROP_EXTRACTION_TIMEOUT_SECONDS: f64 = 60.0;
+
 /// Resource storing cached meshes for each prop type.
 #[derive(Resource)]
 pub struct PropMeshCache {
@@ -52,6 +55,8 @@ pub struct PropMeshCache {
     pub enabled: bool,
     /// Default material for props without materials
     pub default_material: Option<Handle<StandardMaterial>>,
+    /// Real time (seconds) when the first extraction pass started.
+    extraction_start_time_seconds: Option<f64>,
 }
 
 impl Default for PropMeshCache {
@@ -64,6 +69,7 @@ impl Default for PropMeshCache {
             // Instancing enabled - spawner waits for extraction to complete
             enabled: true,
             default_material: None,
+            extraction_start_time_seconds: None,
         }
     }
 }
@@ -108,9 +114,33 @@ pub fn extract_prop_meshes(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut props_materials: ResMut<Assets<PropsMaterial>>,
     asset_server: Res<AssetServer>,
+    time: Res<Time>,
 ) {
     if !cache.enabled || cache.extraction_complete || !prop_assets.loaded {
         return;
+    }
+
+    // Start the extraction timer on first pass.
+    if cache.extraction_start_time_seconds.is_none() {
+        cache.extraction_start_time_seconds = Some(time.elapsed_secs_f64());
+    }
+
+    // Timeout: if extraction has been running too long, mark remaining
+    // pending GLTFs as failed so the system does not hang forever.
+    let elapsed = cache
+        .extraction_start_time_seconds
+        .map(|start| time.elapsed_secs_f64() - start)
+        .unwrap_or(0.0);
+    if elapsed > PROP_EXTRACTION_TIMEOUT_SECONDS && !cache.pending_gltfs.is_empty() {
+        let stuck: Vec<String> = cache.pending_gltfs.keys().cloned().collect();
+        for prop_id in &stuck {
+            warn!(
+                "Prop extraction timed out for '{}' ({:.0}s); marking as failed",
+                prop_id, elapsed,
+            );
+            cache.failed_ids.insert(prop_id.clone());
+        }
+        cache.pending_gltfs.clear();
     }
 
     // Create default material if needed

@@ -1,5 +1,6 @@
 // LV-2: Far terrain vista shell (~1.8–4 km).
 //
+// === finiteWorldSkirt mode (default) ===
 // A horizon skirt that SURROUNDS the built world.  The interior square [0, worldSize] is owned
 // by the live CLOD pages; the skirt owns everything outside it, out to `farRadius` from the
 // world center.  Heights inside the world come from the LV-1b terrain summary; beyond the world
@@ -10,8 +11,12 @@
 // renders black here), and fades to the sky/haze colour near the rim.  No collider, no edit, no
 // heavy shadows.
 //
-// When a FarHeightProvider is given, the shell samples height/normal from it instead of the
-// TerrainSummaryField — enabling the far summary clipmap streaming for infinite worlds.
+// === cameraRelativeShell (future) ===
+// For true infinite streaming, the excluded inner area should be centred on the stream centre /
+// camera instead of assuming a fixed [inset, worldSize - inset] square.  The inner exclusion
+// zone should match the live CLOD page ring (not the full world square).  When buildRelative is
+// set, the mesh is built at (0,0) and translated by the controller, but the interior exclusion
+// still uses the finite-world square — a camera-relative exclusion mode is TODO.
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
@@ -28,12 +33,6 @@ export interface FarHeightProvider {
   sampleNormal(x: number, z: number): THREE.Vector3;
 }
 
-/**
- * Lighting inputs for the far shell — structurally an EnvironmentLighting (environment.ts).
- * The scene has NO THREE.Light objects: the terrain is lit entirely inside the TSL node graph
- * (terrain_node_material.ts), so the shell must reproduce the same hemispheric + sun model in
- * its own colorNode.
- */
 export interface FarShellLighting {
   sunDirection: THREE.Vector3;
   sunColor: THREE.Color;
@@ -42,40 +41,31 @@ export interface FarShellLighting {
 }
 
 export interface FarTerrainShellOptions {
-  /** Skirt half-extent in world units from world center. Default: worldSize * 1.5 (auto when <= 0) */
   farRadius: number;
-  /**
-   * World-square inset in world units.  Quads lying fully inside [inset, worldSize-inset]² are
-   * skipped (owned by the pages); the skirt overlaps the world edge by this much for a seamless
-   * join.  Default: worldSize * 0.04 (auto when < 0).
-   */
   inset: number;
-  /** Grid resolution (vertices per axis). Default: 128 */
   gridRes: number;
-  /** Height offset to drop the skirt below page terrain (prevent z-fighting in the overlap). Default: 2 */
   heightDrop: number;
-  /**
-   * Height bias for blended sampling: 0 = valley floor (heightMin), 1 = peak (heightMax).
-   * Default 0.6 places the skirt at a representative mid-surface height.
-   */
   heightBias: number;
-  /** When set, the shell samples height/normal from this provider instead of TerrainSummaryField. */
   heightProvider?: FarHeightProvider;
-  /** Grid center X (default: worldSize / 2). Use to center on camera/stream center. */
   centerX?: number;
-  /** Grid center Z (default: worldSize / 2). Use to center on camera/stream center. */
   centerZ?: number;
+  /** Build geometry relative to (0,0) so the mesh can be moved via mesh.position.
+   *  When set, centerX/centerZ are only used for the material haze fade. */
+  buildRelative?: boolean;
 }
 
 export interface FarTerrainShell {
   mesh: THREE.Mesh;
   triangleCount: number;
+  /** World-space center this shell was built for (used by the controller for delta-move). */
+  buildCenterX: number;
+  buildCenterZ: number;
   dispose: () => void;
 }
 
 const DEFAULT_OPTIONS: FarTerrainShellOptions = {
-  farRadius: 0, // auto: worldSize * 1.5
-  inset: -1, // auto: worldSize * 0.04
+  farRadius: 0,
+  inset: -1,
   gridRes: 128,
   heightDrop: 2,
   heightBias: 0.6,
@@ -84,9 +74,15 @@ const DEFAULT_OPTIONS: FarTerrainShellOptions = {
 /**
  * Build the far terrain shell geometry and material.
  *
- * The grid spans [center - farRadius, center + farRadius] (center = worldSize/2 by default,
- * or centerX/centerZ when provided). Quads fully inside the page-covered world square are
- * excluded, leaving a skirt around the world that extends out to the horizon.
+ * In finiteWorldSkirt mode (default): the grid spans [center - farRadius, center + farRadius].
+ * Quads fully inside the page-covered world square [inset, worldSize - inset] are excluded,
+ * leaving a skirt around the world that extends out to the horizon.
+ *
+ * When `heightProvider` is set (far summary streaming), the interior exclusion is skipped
+ * so the shell covers the full grid — the clipmap fills in heights everywhere.
+ *
+ * When `buildRelative` is set, geometry is built at origin (0,0) and the caller positions
+ * the mesh.  This enables the controller to translate the shell without rebuilding.
  */
 export function buildFarTerrainShell(
   summary: TerrainSummaryField,
@@ -94,7 +90,7 @@ export function buildFarTerrainShell(
   options: Partial<FarTerrainShellOptions> = {},
 ): FarTerrainShell {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const { gridRes, heightDrop, heightBias, heightProvider } = opts;
+  const { gridRes, heightDrop, heightBias, heightProvider, buildRelative } = opts;
 
   const worldSize = summary.worldSize;
   const centerX = opts.centerX ?? worldSize / 2;
@@ -102,10 +98,15 @@ export function buildFarTerrainShell(
   const farRadius = opts.farRadius > 0 ? opts.farRadius : worldSize * 1.5;
   const inset = opts.inset >= 0 ? opts.inset : worldSize * 0.04;
   const extent = 2 * farRadius;
-  const originX = centerX - farRadius;
-  const originZ = centerZ - farRadius;
   const cellSize = extent / gridRes;
   const baseLevel = summaryBaseLevel(summary);
+
+  // Build geometry relative to (0,0) when buildRelative is set.
+  // The mesh will be positioned at the stream center by the caller.
+  const buildCenterX = buildRelative ? 0 : centerX;
+  const buildCenterZ = buildRelative ? 0 : centerZ;
+  const originX = buildCenterX - farRadius;
+  const originZ = buildCenterZ - farRadius;
 
   const vertexCount = (gridRes + 1) * (gridRes + 1);
   const positions = new Float32Array(vertexCount * 3);
@@ -113,7 +114,6 @@ export function buildFarTerrainShell(
   const uvs = new Float32Array(vertexCount * 2);
   const indices: number[] = [];
 
-  // Pass 1: bake the skirt height for every vertex.
   const heightGrid = new Float32Array(vertexCount);
   for (let gz = 0; gz <= gridRes; gz++) {
     for (let gx = 0; gx <= gridRes; gx++) {
@@ -126,7 +126,6 @@ export function buildFarTerrainShell(
     }
   }
 
-  // Pass 2: positions, UVs, and central-difference normals over the baked height grid.
   for (let gz = 0; gz <= gridRes; gz++) {
     for (let gx = 0; gx <= gridRes; gx++) {
       const vi = gz * (gridRes + 1) + gx;
@@ -154,8 +153,6 @@ export function buildFarTerrainShell(
     }
   }
 
-  // Build indices — skip quads lying fully inside the page-covered world square [inset,
-  // worldSize-inset]².
   const innerMin = inset;
   const innerMax = worldSize - inset;
   for (let gz = 0; gz < gridRes; gz++) {
@@ -164,7 +161,7 @@ export function buildFarTerrainShell(
       const x1 = x0 + cellSize;
       const z0 = originZ + gz * cellSize;
       const z1 = z0 + cellSize;
-      const fullyInside = x0 >= innerMin && x1 <= innerMax && z0 >= innerMin && z1 <= innerMax;
+      const fullyInside = heightProvider ? false : (x0 >= innerMin && x1 <= innerMax && z0 >= innerMin && z1 <= innerMax);
       if (fullyInside) continue;
       const a = gz * (gridRes + 1) + gx;
       const b = a + 1;
@@ -181,8 +178,6 @@ export function buildFarTerrainShell(
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
 
-  // Unlit TSL material: reproduce terrain_node_material's hemispheric sky/ground + sun^1.35,
-  // then fade to the sky/haze colour near the rim so the outer edge dissolves into the horizon.
   const v3 = (c: THREE.Color) => vec3(c.r, c.g, c.b);
   const n = normalize(normalGeometry);
   const uLight = uniform(lighting.sunDirection.clone());
@@ -202,15 +197,16 @@ export function buildFarTerrainShell(
   const material = new MeshBasicNodeMaterial();
   material.colorNode = mix(base.mul(light), uHaze, hazeT);
 
-  // Disable shadow casting (LV-3 handles far shadows via proxy)
   const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = false;
   mesh.receiveShadow = true;
-  mesh.frustumCulled = false; // always visible (the shell is the horizon)
+  mesh.frustumCulled = false;
 
   return {
     mesh,
     triangleCount: indices.length / 3,
+    buildCenterX,
+    buildCenterZ,
     dispose: () => {
       geometry.dispose();
       material.dispose();

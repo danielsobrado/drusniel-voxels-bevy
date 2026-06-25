@@ -19,6 +19,8 @@ pub struct DebugNodeInfo {
 /// Serializable hierarchy for debug export.
 #[derive(serde::Serialize)]
 pub struct DebugHierarchy {
+    pub min_page_x: i32,
+    pub min_page_z: i32,
     pub world_pages_x: i32,
     pub world_pages_z: i32,
     pub nodes: Vec<DebugNodeInfo>,
@@ -83,6 +85,8 @@ pub fn build_debug_hierarchy(result: &BuildResult) -> DebugHierarchy {
     }
 
     DebugHierarchy {
+        min_page_x: result.origin.min_page_x,
+        min_page_z: result.origin.min_page_z,
         world_pages_x: result.world_pages_x,
         world_pages_z: result.world_pages_z,
         nodes: node_set,

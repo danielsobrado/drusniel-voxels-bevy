@@ -19,6 +19,9 @@ use super::runtime::{
 use super::selection::{
     ClodPageSelectionIndex, ClodPageSelectionState, clod_page_selection_system,
 };
+use super::summary::{
+    TerrainSummaryField, TerrainSummaryRebuildState, terrain_summary_rebuild_system,
+};
 
 pub struct ClodPagesPlugin;
 
@@ -32,6 +35,8 @@ impl Plugin for ClodPagesPlugin {
             .init_resource::<ClodPageSelectionIndex>()
             .init_resource::<ClodPageSelectionState>()
             .init_resource::<ClodPageMeshGate>()
+            .init_resource::<TerrainSummaryField>()
+            .init_resource::<TerrainSummaryRebuildState>()
             .add_systems(Startup, clod_pages_startup_log_system)
             // Reads VoxelWorld immutably; the scheduler serializes it after the dirty mesher.
             .add_systems(
@@ -64,6 +69,10 @@ impl Plugin for ClodPagesPlugin {
             .add_systems(
                 Update,
                 clod_page_selection_system.after(clod_page_mesh_commit_system),
+            )
+            .add_systems(
+                Update,
+                terrain_summary_rebuild_system.after(clod_page_mesh_commit_system),
             )
             .add_systems(
                 Update,

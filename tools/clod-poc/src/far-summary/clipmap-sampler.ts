@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import type { FarSummaryConfig } from "./config.js";
-import type { FarSummaryCache } from "./summary-cache.js";
+import type { FarSummaryCache, FallbackStatsWriter } from "./summary-cache.js";
 import type { FarSummarySample } from "./types.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
+import { computeNormalFiniteDifference } from "./summary-tile-builder.js";
 
 export interface FarHeightProvider {
   sampleHeight(x: number, z: number): number;
@@ -14,32 +15,18 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
   private readonly cache: FarSummaryCache;
   private readonly config: FarSummaryConfig;
   private readonly terrainSampler: FarTerrainSampler;
-  private readonly _stats = {
-    cacheHits: 0,
-    cacheMisses: 0,
-    proceduralFallbacks: 0,
-    lowerRingFallbacks: 0,
-  };
+  private readonly _fallbacks: FallbackStatsWriter;
 
   constructor(
     cache: FarSummaryCache,
     config: FarSummaryConfig,
     terrainSampler: FarTerrainSampler,
+    fallbackStats?: FallbackStatsWriter,
   ) {
     this.cache = cache;
     this.config = config;
     this.terrainSampler = terrainSampler;
-  }
-
-  get stats() {
-    return this._stats;
-  }
-
-  resetFrameStats(): void {
-    this._stats.cacheHits = 0;
-    this._stats.cacheMisses = 0;
-    this._stats.proceduralFallbacks = 0;
-    this._stats.lowerRingFallbacks = 0;
+    this._fallbacks = fallbackStats ?? cache;
   }
 
   sampleHeight(x: number, z: number, preferredRing?: number): number {
@@ -70,47 +57,52 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
   sampleFull(x: number, z: number, preferredRing?: number): FarSummarySample {
     const ring = preferredRing ?? 0;
 
-    const tileSample = this.cache.sample(x, z, ring);
+    const tileSample = this.cache.sampleExactRing(x, z, ring);
     if (tileSample) {
-      this._stats.cacheHits++;
       return tileSample;
     }
 
-    if (this.config.sampling.fallbackToLowerRing && ring > 0) {
-      for (let ri = ring - 1; ri >= 0; ri--) {
-        const fallbackSample = this.cache.sample(x, z, ri);
+    // Fall back to coarser rings (higher index = larger cells = wider coverage).
+    // Finer rings (lower index) have smaller cells and won't cover a position that ring
+    // `ring` already missed, so we iterate upward through ring indices.
+    if (this.config.sampling.fallbackToLowerRing) {
+      for (let ri = ring + 1; ri < this.config.rings.length; ri++) {
+        const fallbackSample = this.cache.sampleExactRing(x, z, ri);
         if (fallbackSample) {
-          this._stats.lowerRingFallbacks++;
+          this._fallbacks.countLowerRingFallback();
           return fallbackSample;
         }
       }
     }
 
     if (this.config.sampling.fallbackToProcedural) {
-      this._stats.proceduralFallbacks++;
+      this._fallbacks.countProceduralFallback();
       return this.sampleProceduralFallback(x, z);
     }
 
-    this._stats.cacheMisses++;
     return this.sampleConservativeDefault();
   }
 
   private sampleProceduralFallback(x: number, z: number): FarSummarySample {
     const height = this.terrainSampler.sampleHeight(x, z);
-    const ny = 1;
+    const step = this.config.sampling.normalSampleStepCells * 16;
+    const [nx, ny, nz] = computeNormalFiniteDifference(
+      (px, pz) => this.terrainSampler.sampleHeight(px, pz),
+      x, z, step,
+    );
 
     return {
       heightMin: height,
       heightMax: height,
       heightAvg: height,
-      normalX: 0,
+      normalX: nx,
       normalY: ny,
-      normalZ: 0,
+      normalZ: nz,
       dominantMaterial: this.terrainSampler.sampleMaterial?.(x, z) ?? 0,
       materialVariance: 0,
       canopyCoverage: this.terrainSampler.sampleCanopyCoverage?.(x, z) ?? 0,
       waterCoverage: this.terrainSampler.sampleWaterCoverage?.(x, z) ?? 0,
-      slope: 0,
+      slope: Math.acos(Math.max(0, Math.min(1, ny))),
       roughness: 0,
     };
   }

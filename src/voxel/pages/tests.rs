@@ -246,3 +246,39 @@ fn rebuild_dirty_pages_handles_full_rebuild() {
         assert_eq!(n.error_world, 0.0);
     }
 }
+
+#[test]
+fn build_quadtree_uses_min_max_page_span_not_max_plus_one() {
+    let cfg = ClodPagesConfig::load();
+    let lod0 = build_lod0_world(2, 2, &cfg).expect("2x2 source build");
+    let shifted: Vec<_> = lod0
+        .into_iter()
+        .map(|((px, pz), src)| ((px - 2, pz - 2), src))
+        .collect();
+
+    let result = build_quadtree(shifted, &cfg).expect("negative-origin 2x2 build");
+    assert_eq!(result.origin.min_page_x, -2);
+    assert_eq!(result.origin.min_page_z, -2);
+    assert_eq!(result.world_pages_x, 2);
+    assert_eq!(result.world_pages_z, 2);
+    assert_eq!(result.nodes_by_level[0].len(), 4);
+}
+
+#[test]
+fn build_quadtree_skips_parent_when_child_group_is_incomplete() {
+    let cfg = ClodPagesConfig::load();
+    let lod0 = build_lod0_world(2, 2, &cfg).expect("2x2 source build");
+    // Drop one quadrant so parent (0,0) would only have 3 children.
+    let partial: Vec<_> = lod0
+        .into_iter()
+        .filter(|&((px, pz), _)| !(px == 1 && pz == 1))
+        .collect();
+
+    let result = build_quadtree(partial, &cfg).expect("partial 2x2 build should succeed");
+    assert_eq!(result.nodes_by_level[0].len(), 3, "three LOD0 pages remain");
+    let parent_count = result.nodes_by_level.get(1).map_or(0, |level| level.len());
+    assert_eq!(
+        parent_count, 0,
+        "incomplete child groups must not produce parent pages"
+    );
+}

@@ -92,6 +92,38 @@ pub struct PocGateCfg {
     pub lod0_pages_z: usize,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClodMaterialCfg {
+    pub full_triplanar_max_m: f32,
+    pub single_projection_far_max_m: f32,
+}
+
+impl Default for ClodMaterialCfg {
+    fn default() -> Self {
+        Self {
+            full_triplanar_max_m: 768.0,
+            single_projection_far_max_m: 2048.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TerrainSummaryCfg {
+    pub grid: usize,
+    pub cell_size_m: f32,
+    pub rebuild_debounce_frames: u32,
+}
+
+impl Default for TerrainSummaryCfg {
+    fn default() -> Self {
+        Self {
+            grid: 64,
+            cell_size_m: 64.0,
+            rebuild_debounce_frames: 3,
+        }
+    }
+}
+
 #[derive(Deserialize, Clone)]
 pub struct ClodPagesConfig {
     pub page: PageCfg,
@@ -100,6 +132,10 @@ pub struct ClodPagesConfig {
     pub polish: PolishCfg,
     pub selection: SelectionCfg,
     pub near_field: NearFieldCfg,
+    #[serde(default)]
+    pub material: ClodMaterialCfg,
+    #[serde(default)]
+    pub terrain_summary: TerrainSummaryCfg,
     #[serde(default)]
     pub validation: Option<ValidationCfg>,
     #[serde(default)]

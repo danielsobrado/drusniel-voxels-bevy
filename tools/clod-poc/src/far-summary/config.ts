@@ -46,7 +46,7 @@ export const DEFAULT_FAR_SUMMARY_CONFIG: FarSummaryConfig = {
 
   stream: {
     preloadSeconds: 4.0,
-    maxTileBuildsPerFrame: 4,
+    maxTileBuildsPerFrame: 1,
     maxTileCommitsPerFrame: 8,
     evictionGraceSeconds: 12.0,
     keepStaleUntilReplacement: true,

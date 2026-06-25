@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
+use super::material_tier::clod_page_material_quality_for_distance;
 use super::ownership::ClodPageMeshGate;
 use super::render::{ClodPageMeshBounds, ClodPageMeshTag};
 use super::runtime::ClodPagesRuntime;
@@ -413,7 +414,7 @@ fn set_page_fade(
         if let Some(base_material) = base_material.as_ref() {
             if page_material_needs_base_refresh(material, Some(base_material)) {
                 *material = base_material.clone();
-                material.quality = TerrainMaterialQuality::FullTriplanar;
+                material.quality = base_material.quality;
             }
         }
         material.uniforms.clod_fade = fade;
@@ -562,7 +563,22 @@ pub(crate) fn clod_page_selection_system(
             state.fades.remove(&key);
         }
 
-        set_page_fade(&mut materials, &material.0, &base_material_handle, next);
+        let quality_base_handle = index
+            .node(key)
+            .map(|node| {
+                let distance = params.cam_pos.distance(node.center);
+                let quality =
+                    clod_page_material_quality_for_distance(distance, &runtime.cfg.material);
+                triplanar_material.handle_for_quality(quality)
+            })
+            .unwrap_or(base_material_handle.clone());
+
+        set_page_fade(
+            &mut materials,
+            &material.0,
+            &quality_base_handle,
+            next,
+        );
         let desired_visibility = if next > 0.0 {
             Visibility::Visible
         } else {

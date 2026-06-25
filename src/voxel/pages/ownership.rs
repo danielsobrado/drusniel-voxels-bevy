@@ -130,15 +130,6 @@ fn live_chunk_hidden_by_clod(
             .unwrap_or(true)
 }
 
-pub(crate) fn chunk_page_coord(chunk_pos: IVec3, chunks_per_page: i32, level: usize) -> (i32, i32) {
-    let level_scale = 1i32 << level.min(30);
-    let chunks_per_node = chunks_per_page * level_scale;
-    (
-        chunk_pos.x.div_euclid(chunks_per_node),
-        chunk_pos.z.div_euclid(chunks_per_node),
-    )
-}
-
 /// Keys of pages that are currently committed, visible, and from a Ready tree — i.e.
 /// the pages actually drawing this frame, which a live chunk may hand ownership to.
 fn ready_visible_page_keys(
@@ -156,17 +147,29 @@ fn ready_visible_page_keys(
         .collect()
 }
 
-fn chunk_covered_by_visible_page(
+/// True when `outer` fully contains `inner` in world X/Z.
+pub(crate) fn footprint_covers_chunk(outer: PageFootprint, inner: PageFootprint) -> bool {
+    outer.min_x <= inner.min_x
+        && outer.min_z <= inner.min_z
+        && outer.max_x >= inner.max_x
+        && outer.max_z >= inner.max_z
+}
+
+fn node_footprint(tree: &ClodPageTree, key: ClodPageNodeKey) -> Option<PageFootprint> {
+    tree.nodes_by_level
+        .get(key.level)
+        .and_then(|nodes| nodes.iter().find(|node| node.coord == key.coord))
+        .map(|node| node.footprint)
+}
+
+fn chunk_covered_by_page(
     chunk_pos: IVec3,
-    chunks_per_page: i32,
-    levels: usize,
-    ready_visible_pages: &HashSet<ClodPageNodeKey>,
+    page_keys: &HashSet<ClodPageNodeKey>,
+    tree: &ClodPageTree,
 ) -> bool {
-    (0..levels).any(|level| {
-        ready_visible_pages.contains(&ClodPageNodeKey::new(
-            level,
-            chunk_page_coord(chunk_pos, chunks_per_page, level),
-        ))
+    let chunk = chunk_footprint(chunk_pos);
+    page_keys.iter().any(|key| {
+        node_footprint(tree, *key).is_some_and(|page| footprint_covers_chunk(page, chunk))
     })
 }
 
@@ -293,8 +296,6 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
     let player_transform = player_query.single().ok();
     let bubble = clod_near_field_bubble(&runtime, camera_transform, player_transform);
     let page_keys = built_page_keys(&tree);
-    let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
-    let level_count = tree.nodes_by_level.len();
 
     let mut owned_columns = HashSet::new();
     for (pos, _) in world.chunk_entries() {
@@ -303,7 +304,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
             continue;
         }
         if !near_field_intersects_footprint(chunk_footprint(*pos), bubble)
-            && chunk_covered_by_visible_page(*pos, chunks_per_page, level_count, &page_keys)
+            && chunk_covered_by_page(*pos, &page_keys, &tree)
         {
             owned_columns.insert(column);
         }
@@ -352,15 +353,9 @@ pub(crate) fn clod_page_chunk_ownership_system(
         clod_near_field_bubble(&runtime, camera_transform, player_query.single().ok())
     });
     let ready_pages = ready_visible_page_keys(&tree, &page_query);
-    let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
-    let level_count = tree.nodes_by_level.len();
     for (entity, chunk_mesh, mut visibility, marker) in &mut chunk_query {
-        let page_covers = chunk_covered_by_visible_page(
-            chunk_mesh.chunk_position,
-            chunks_per_page,
-            level_count,
-            &ready_pages,
-        );
+        let page_covers =
+            chunk_covered_by_page(chunk_mesh.chunk_position, &ready_pages, &tree);
         if live_chunk_hidden_by_clod(
             chunk_footprint(chunk_mesh.chunk_position),
             bubble,
@@ -428,6 +423,15 @@ mod tests {
         assert_eq!(chunk.min_z, 48.0);
         assert_eq!(chunk.max_x, -16.0);
         assert_eq!(chunk.max_z, 64.0);
+    }
+
+    #[test]
+    fn footprint_coverage_requires_full_chunk_containment() {
+        let partial_parent = footprint(0.0, 0.0, 32.0, 32.0);
+        let chunk = footprint(32.0, 32.0, 48.0, 48.0);
+        assert!(!footprint_covers_chunk(partial_parent, chunk));
+        let full_parent = footprint(0.0, 0.0, 64.0, 64.0);
+        assert!(footprint_covers_chunk(full_parent, chunk));
     }
 
     #[test]

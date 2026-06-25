@@ -37,6 +37,15 @@ selection:
 near_field:
   radius_chunks: 6            # live editable Surface Nets bubble, no pages inside
 
+material:
+  full_triplanar_max_m: 768.0
+  single_projection_far_max_m: 2048.0
+
+terrain_summary:
+  grid: 64
+  cell_size_m: 64.0
+  rebuild_debounce_frames: 3
+
 validation:
   position_epsilon: 0.000001
   normal_dot_min: 0.9999

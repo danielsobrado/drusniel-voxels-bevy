@@ -67,16 +67,19 @@ export function computeRequiredFarSummaryTiles(
           continue;
         }
 
-        const directionPriority = computeDirectionPriority(
+        // Lower cost = more important = earlier in the build queue.
+        // aheadCost: 0 = ahead of movement, ~500 = sideways, ~1000 = behind.
+        const aheadCost = computeAheadCost(
           tileCenterX, tileCenterZ,
           center.worldX, center.worldZ,
           center.velocityX, center.velocityZ,
         );
+        const distanceCost = Math.round(distPredicted);
 
         const priority = (
-          ri * 1000000 +
-          directionPriority * 1000 +
-          Math.max(0, 1000 - Math.round(distPredicted))
+          ri * 1_000_000 +
+          aheadCost * 1_000 +
+          distanceCost
         );
 
         requests.push({
@@ -94,7 +97,12 @@ export function computeRequiredFarSummaryTiles(
   return requests;
 }
 
-function computeDirectionPriority(
+/**
+ * Cost for tile priority: 0 when moving directly toward the tile,
+ * ~500 for sideways, ~1000 for directly behind. Lower = more urgent.
+ * When stationary, returns 500 (neutral).
+ */
+function computeAheadCost(
   tx: number, tz: number,
   cx: number, cz: number,
   vx: number, vz: number,
@@ -108,7 +116,7 @@ function computeDirectionPriority(
   if (dist < 1) return 500;
 
   const dot = (dx * vx + dz * vz) / (dist * speed);
-  return Math.round((dot + 1) * 250);
+  return Math.round((1 - dot) * 500);
 }
 
 export function findCachedTileForSample(

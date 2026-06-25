@@ -2,12 +2,17 @@ import type { FarSummaryConfig } from "./config.js";
 import type { FarSummaryStats, FarSummaryTile, FarSummaryTileKey, FarSummarySample } from "./types.js";
 import type { FarSummaryRingRequest } from "./clipmap-rings.js";
 import { findCachedTileForSample } from "./clipmap-rings.js";
-import { tileKeyToString } from "./tile-key.js";
+import { tileKeyToString, worldToTileCoord } from "./tile-key.js";
 import { createFarSummaryStats, resetFrameStats } from "./stats.js";
 import type { FarTerrainSampler } from "./summary-tile-builder.js";
 import { buildFarSummaryTile } from "./summary-tile-builder.js";
 
-export class FarSummaryCache {
+export interface FallbackStatsWriter {
+  countProceduralFallback(): void;
+  countLowerRingFallback(): void;
+}
+
+export class FarSummaryCache implements FallbackStatsWriter {
   private readonly config: FarSummaryConfig;
   private readonly tiles = new Map<string, FarSummaryTile>();
   private readonly pendingBuildKeys = new Map<string, FarSummaryRingRequest>();
@@ -49,8 +54,10 @@ export class FarSummaryCache {
         existing.lastTouchedFrame = frameIndex;
         existing.lastTouchedTimeMs = nowMs;
 
-        if (existing.state === 'cooling') {
-          existing.state = 'stale';
+        if (existing.state === 'stale' || existing.state === 'cooling') {
+          existing.state = 'requested';
+          this.pendingBuildKeys.set(keyStr, req);
+          this.stats.requestedTiles++;
         } else if (existing.state === 'evicted') {
           existing.state = 'requested';
           this.pendingBuildKeys.set(keyStr, req);
@@ -64,9 +71,14 @@ export class FarSummaryCache {
     terrainSampler: FarTerrainSampler,
     frameIndex: number,
     nowMs: number,
+    overrideMaxBuilds?: number,
   ): void {
     this.frameIndex = frameIndex;
-    const maxBuilds = this.config.stream.maxTileBuildsPerFrame;
+    const maxBuilds = overrideMaxBuilds ?? this.config.stream.maxTileBuildsPerFrame;
+    const commitBudget = this.config.stream.maxTileCommitsPerFrame;
+
+    // TODO(FAR_SUMMARY_ASYNC): Move tile building to a worker/incremental job queue.
+    // Currently synchronous on the frame path — OK for Phase 4 prototype.
 
     let built = 0;
     const buildsToProcess: { keyStr: string; ringIndex: number; tileKey: FarSummaryTileKey }[] = [];
@@ -83,16 +95,14 @@ export class FarSummaryCache {
       if (!existing) continue;
 
       existing.state = 'building';
-
-      const ringConfig = this.config.rings[build.ringIndex];
-      if (!ringConfig) {
-        console.warn(`[far-summary] missing ring config for ring ${build.ringIndex}`);
-        existing.state = 'evicted';
-        continue;
-      }
-
       const t0 = performance.now();
       try {
+        const ringConfig = this.config.rings[build.ringIndex];
+        if (!ringConfig) {
+          console.warn(`[far-summary] missing ring config for ring ${build.ringIndex}`);
+          existing.state = 'evicted';
+          continue;
+        }
         const builtTile = buildFarSummaryTile({
           key: build.tileKey,
           ringConfig,
@@ -101,18 +111,12 @@ export class FarSummaryCache {
           nowMs,
         });
 
-        const commitBudget = this.config.stream.maxTileCommitsPerFrame;
-        if (this.stats.tilesCommittedThisFrame < commitBudget) {
-          const old = this.tiles.get(build.keyStr);
-          if (old) {
-            if (old.state === 'stale' && this.config.stream.keepStaleUntilReplacement) {
-              old.state = 'stale';
-              old.revision++;
-            }
-          }
-          this.tiles.set(build.keyStr, builtTile);
-          this.stats.tilesCommittedThisFrame++;
+        if (this.stats.tilesCommittedThisFrame >= commitBudget) {
+          continue;
         }
+
+        this.tiles.set(build.keyStr, builtTile);
+        this.stats.tilesCommittedThisFrame++;
       } catch (err) {
         console.error(`[far-summary] build failed for ${build.keyStr}:`, err);
         existing.state = 'missing';
@@ -132,18 +136,50 @@ export class FarSummaryCache {
     return this.tiles.get(ks) ?? null;
   }
 
+  /** Look up the exact tile for (x, z) in the given ring using direct key lookup — O(1). */
+  sampleExactRing(x: number, z: number, ringIndex: number): FarSummarySample | null {
+    const ringConfig = this.config.rings[ringIndex];
+    if (!ringConfig) return null;
+    const tx = worldToTileCoord(x, ringConfig.cellM, ringConfig.tileCells);
+    const tz = worldToTileCoord(z, ringConfig.cellM, ringConfig.tileCells);
+    const key: FarSummaryTileKey = { ring: ringIndex, x: tx, z: tz, cellSizeM: ringConfig.cellM };
+    const ks = tileKeyToString(key);
+    const tile = this.tiles.get(ks);
+    if (!tile || tile.state === 'evicted') {
+      return null;
+    }
+    const sample = sampleFromTile(tile, x, z);
+    if (sample) {
+      this.stats.cacheHits++;
+    }
+    return sample;
+  }
+
+  /** Fallback scan across all cached tiles (slow — for debug/safety only). */
+  sampleAnyRing(x: number, z: number, preferredRing: number): FarSummarySample | null {
+    const tile = findCachedTileForSample(this.tiles, x, z, preferredRing);
+    if (!tile) return null;
+    const sample = sampleFromTile(tile, x, z);
+    return sample;
+  }
+
   sample(
     x: number,
     z: number,
     preferredRing: number,
   ): FarSummarySample | null {
+    const sample = this.sampleExactRing(x, z, preferredRing);
+    if (sample) return sample;
     this.stats.cacheMisses++;
-    const tile = findCachedTileForSample(this.tiles, x, z, preferredRing);
-    if (!tile) return null;
+    return null;
+  }
 
-    this.stats.cacheHits++;
-    const sample = sampleFromTile(tile, x, z);
-    return sample;
+  countProceduralFallback(): void {
+    this.stats.proceduralFallbacks++;
+  }
+
+  countLowerRingFallback(): void {
+    this.stats.lowerRingFallbacks++;
   }
 
   markStale(_boundsOrPredicate: unknown): void {
