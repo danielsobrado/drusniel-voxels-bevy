@@ -27,6 +27,31 @@ export interface StoneClassConfig {
   shadows: boolean;
 }
 
+export interface StoneTerrainClassWeights {
+  /** Multiplies candidate acceptance on this terrain band. */
+  density: number;
+  /** Multiplies class-selection weight after the candidate is accepted. */
+  large: number;
+  medium: number;
+  small: number;
+}
+
+export interface StoneTerrainWeights {
+  /** Height below this is blended toward `low`; above this fades into `mid`. */
+  lowHeightM: number;
+  /** Height above this is blended toward `high`; below this fades into `mid`. */
+  highHeightM: number;
+  /** Blend width around low/high height boundaries. */
+  heightBlendM: number;
+  grass: StoneTerrainClassWeights;
+  rock: StoneTerrainClassWeights;
+  sand: StoneTerrainClassWeights;
+  snow: StoneTerrainClassWeights;
+  low: StoneTerrainClassWeights;
+  mid: StoneTerrainClassWeights;
+  high: StoneTerrainClassWeights;
+}
+
 export interface StoneSettings {
   enabled: boolean;
   seedSalt: number;
@@ -71,6 +96,8 @@ export interface StoneSettings {
   sinkSlopeMultiplier: number;
   /** max lean (rad) toward the terrain normal */
   normalLean: number;
+  /** YAML-driven density and class bias from height + surface material. */
+  terrain: StoneTerrainWeights;
   debug: StoneDebugSettings;
   classes: Record<StoneClass, StoneClassConfig>;
 }
@@ -87,6 +114,26 @@ export interface StoneDebugSettings {
   rockBasePatchHeatmap: boolean;
   candidateGrid: boolean;
 }
+
+const defaultTerrainWeights = (
+  density: number,
+  large: number,
+  medium: number,
+  small: number,
+): StoneTerrainClassWeights => ({ density, large, medium, small });
+
+export const DEFAULT_STONE_TERRAIN_WEIGHTS: StoneTerrainWeights = {
+  lowHeightM: 26,
+  highHeightM: 78,
+  heightBlendM: 12,
+  grass: defaultTerrainWeights(0.58, 0.45, 0.85, 1.45),
+  rock: defaultTerrainWeights(1.25, 1.35, 1.1, 0.82),
+  sand: defaultTerrainWeights(0.9, 0.8, 1.1, 1.1),
+  snow: defaultTerrainWeights(0.72, 1.75, 1.05, 0.38),
+  low: defaultTerrainWeights(0.82, 0.75, 1.0, 1.18),
+  mid: defaultTerrainWeights(1.0, 1.0, 1.0, 1.0),
+  high: defaultTerrainWeights(1.15, 1.35, 1.0, 0.68),
+};
 
 export const DEFAULT_STONE_SETTINGS: StoneSettings = {
   enabled: true,
@@ -118,6 +165,16 @@ export const DEFAULT_STONE_SETTINGS: StoneSettings = {
   patchClumpCellMult: 3.0,
   sinkSlopeMultiplier: 0.9,
   normalLean: 0.4,
+  terrain: {
+    ...DEFAULT_STONE_TERRAIN_WEIGHTS,
+    grass: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.grass },
+    rock: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.rock },
+    sand: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.sand },
+    snow: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.snow },
+    low: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.low },
+    mid: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.mid },
+    high: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.high },
+  },
   debug: {
     classColors: false,
     largeOnly: false,
@@ -182,6 +239,26 @@ interface StoneYamlClassConfig {
   shadows?: boolean;
 }
 
+interface StoneYamlTerrainClassWeights {
+  density?: number;
+  large?: number;
+  medium?: number;
+  small?: number;
+}
+
+interface StoneYamlTerrainWeights {
+  low_height_m?: number;
+  high_height_m?: number;
+  height_blend_m?: number;
+  grass?: StoneYamlTerrainClassWeights;
+  rock?: StoneYamlTerrainClassWeights;
+  sand?: StoneYamlTerrainClassWeights;
+  snow?: StoneYamlTerrainClassWeights;
+  low?: StoneYamlTerrainClassWeights;
+  mid?: StoneYamlTerrainClassWeights;
+  high?: StoneYamlTerrainClassWeights;
+}
+
 interface StoneYamlConfig {
   enabled?: boolean;
   seed_salt?: number;
@@ -213,6 +290,7 @@ interface StoneYamlConfig {
   patch_clump_cell_mult?: number;
   sink_slope_multiplier?: number;
   normal_lean?: number;
+  terrain?: StoneYamlTerrainWeights;
   debug?: Partial<Record<keyof StoneDebugSettings, boolean>> & {
     class_colors?: boolean;
     large_only?: boolean;
@@ -241,6 +319,33 @@ function classFromYaml(base: StoneClassConfig, raw: StoneYamlClassConfig | undef
     variants: raw.variants ?? base.variants,
     presets: raw.presets ? [...raw.presets] : [...base.presets],
     shadows: raw.shadows ?? base.shadows,
+  };
+}
+
+function terrainClassFromYaml(
+  base: StoneTerrainClassWeights,
+  raw: StoneYamlTerrainClassWeights | undefined,
+): StoneTerrainClassWeights {
+  return {
+    density: raw?.density ?? base.density,
+    large: raw?.large ?? base.large,
+    medium: raw?.medium ?? base.medium,
+    small: raw?.small ?? base.small,
+  };
+}
+
+function terrainFromYaml(base: StoneTerrainWeights, raw: StoneYamlTerrainWeights | undefined): StoneTerrainWeights {
+  return {
+    lowHeightM: raw?.low_height_m ?? base.lowHeightM,
+    highHeightM: raw?.high_height_m ?? base.highHeightM,
+    heightBlendM: raw?.height_blend_m ?? base.heightBlendM,
+    grass: terrainClassFromYaml(base.grass, raw?.grass),
+    rock: terrainClassFromYaml(base.rock, raw?.rock),
+    sand: terrainClassFromYaml(base.sand, raw?.sand),
+    snow: terrainClassFromYaml(base.snow, raw?.snow),
+    low: terrainClassFromYaml(base.low, raw?.low),
+    mid: terrainClassFromYaml(base.mid, raw?.mid),
+    high: terrainClassFromYaml(base.high, raw?.high),
   };
 }
 
@@ -290,6 +395,7 @@ export function parseStoneConfig(text: string): StoneSettings {
     patchClumpCellMult: raw.patch_clump_cell_mult ?? base.patchClumpCellMult,
     sinkSlopeMultiplier: raw.sink_slope_multiplier ?? base.sinkSlopeMultiplier,
     normalLean: raw.normal_lean ?? base.normalLean,
+    terrain: terrainFromYaml(base.terrain, raw.terrain),
     debug,
     classes: {
       large: classFromYaml(base.classes.large, raw.large),
