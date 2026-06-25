@@ -8,7 +8,7 @@ use super::diagonal_polish::{DiagonalPolishStats, polish_diagonals};
 use super::lock::build_outer_border_locks;
 use super::simplify::simplify_page;
 use super::source_mesh::{PageSource, concat};
-use super::types::{ClodBuildError, PageFootprint, PageMesh};
+use super::types::{BorderTolerances, ClodBuildError, PageFootprint, PageMesh};
 use super::validate::{assert_no_internal_borders, strip_degenerate_triangles};
 use super::weld::weld_vertices;
 use std::collections::HashMap;
@@ -72,10 +72,10 @@ pub fn resolve_build_shape(
         .min((world_pages_x.min(world_pages_z) as f32).log2().floor() as usize + 1);
     let required_multiple = 1 << (max_levels - 1);
     if world_pages_x % required_multiple != 0 || world_pages_z % required_multiple != 0 {
-        return Err(ClodBuildError::PageIncomplete(format!(
+        return Err(ClodBuildError::PageIncomplete { message: format!(
             "world pages {}x{} not a multiple of {} for {} levels",
             world_pages_x, world_pages_z, required_multiple, max_levels
-        )));
+        ) });
     }
     Ok(max_levels)
 }
@@ -102,7 +102,12 @@ fn build_parent_node_from_children(
     weld_epsilon: f32,
 ) -> Result<ClodPageNode, ClodBuildError> {
     let merged = concat(&children.iter().map(|c| c.mesh.clone()).collect::<Vec<_>>());
-    let (welded, _) = weld_vertices(&merged, weld_epsilon)?;
+    let tol = BorderTolerances {
+        position: weld_epsilon,
+        normal_dot: 0.9999,
+        material: 1e-4,
+    };
+    let (welded, _) = weld_vertices(&merged, weld_epsilon, tol)?;
     let footprint = children
         .iter()
         .skip(1)
@@ -114,7 +119,7 @@ fn build_parent_node_from_children(
         let sim = simplify_page(&welded, &locks, cfg);
         (sim.mesh, sim.error_world, sim.low_benefit)
     };
-    strip_degenerate_triangles(&mut mesh);
+    strip_degenerate_triangles(&mut mesh, cfg.simplify.weld_epsilon_cells)?;
     let polish_locks = build_outer_border_locks(&mesh);
     let polish = polish_diagonals(&mut mesh, &polish_locks, &cfg.polish.diagonal_flip);
     assert_no_internal_borders(&mesh, &footprint)?;
@@ -212,7 +217,7 @@ pub fn build_quadtree(
     let mut level0: Vec<ClodPageNode> = Vec::new();
     for (coord, src) in lod0 {
         let mut mesh = src.mesh;
-        strip_degenerate_triangles(&mut mesh);
+        strip_degenerate_triangles(&mut mesh, cfg.simplify.target_error)?;
         assert_no_internal_borders(&mesh, &src.footprint)?;
         level0.push(ClodPageNode {
             level: 0,
@@ -290,12 +295,12 @@ pub fn resimplify_parent(
         })
         .collect();
     if children.len() != 4 {
-        return Err(ClodBuildError::PageIncomplete(format!(
+        return Err(ClodBuildError::PageIncomplete { message: format!(
             "resimplify L{level}:({},{}) expected 4 children, got {}",
             coord.0,
             coord.1,
             children.len()
-        )));
+        ) });
     }
     let rebuilt =
         build_parent_node_from_children(level, coord, &children, cfg, weld_epsilon)?;
@@ -315,7 +320,7 @@ pub fn rebuild_dirty_lod0_pages(
     for &(coord, ref src) in new_sources {
         if let Some(&node_idx) = index[0].get(&coord) {
             let mut mesh = src.mesh.clone();
-            strip_degenerate_triangles(&mut mesh);
+            let _ = strip_degenerate_triangles(&mut mesh, 1e-8);
             nodes_by_level[0][node_idx].mesh = mesh;
             nodes_by_level[0][node_idx].footprint = src.footprint;
             coords.push(coord);

@@ -61,8 +61,18 @@ export interface ClodPagesConfig {
     neighbor_level_delta_max: number;
     transition_mode: "instant" | "dither";
     crossfade_frames: number;
+    freeze_selection: boolean;
   };
-  near_field: { radius_chunks: number };
+  near_field: { enabled: boolean; radius_chunks: number; show_mask: boolean };
+  debug: {
+    show_wireframe: boolean;
+    show_page_boundaries: boolean;
+    show_locked_border_vertices: boolean;
+    show_error_labels: boolean;
+    show_stats_panel: boolean;
+    lod_colors: Record<string, string>;
+  };
+  stress: { active_scene: string };
   meshopt_package_version: string;
   poc: PocConfig;
   validation: ValidationConfig;
@@ -129,6 +139,8 @@ export function parseConfig(text: string): ClodPagesConfig {
   const polish = asRecord(doc["polish"], "polish");
   const selection = asRecord(doc["selection"], "selection");
   const near_field = asRecord(doc["near_field"], "near_field");
+  const debug = asRecord(doc["debug"], "debug");
+  const stress = asRecord(doc["stress"], "stress");
   const poc = asRecord(doc["poc"], "poc");
   const validation = asRecord(doc["validation"], "validation");
 
@@ -163,9 +175,28 @@ export function parseConfig(text: string): ClodPagesConfig {
       neighbor_level_delta_max: positiveIntAt(selection, "neighbor_level_delta_max", "selection"),
       transition_mode: transitionMode as "instant" | "dither",
       crossfade_frames: intAt(selection, "crossfade_frames", "selection", 0),
+      freeze_selection: boolAt(selection, "freeze_selection", "selection"),
     },
     near_field: {
+      enabled: boolAt(near_field, "enabled", "near_field"),
       radius_chunks: intAt(near_field, "radius_chunks", "near_field", 0),
+      show_mask: boolAt(near_field, "show_mask", "near_field"),
+    },
+    debug: {
+      show_wireframe: boolAt(debug, "show_wireframe", "debug"),
+      show_page_boundaries: boolAt(debug, "show_page_boundaries", "debug"),
+      show_locked_border_vertices: boolAt(debug, "show_locked_border_vertices", "debug"),
+      show_error_labels: boolAt(debug, "show_error_labels", "debug"),
+      show_stats_panel: boolAt(debug, "show_stats_panel", "debug"),
+      lod_colors: {
+        lod0: stringAt(asRecord(debug["lod_colors"], "debug.lod_colors"), "lod0", "debug.lod_colors"),
+        lod1: stringAt(asRecord(debug["lod_colors"], "debug.lod_colors"), "lod1", "debug.lod_colors"),
+        lod2: stringAt(asRecord(debug["lod_colors"], "debug.lod_colors"), "lod2", "debug.lod_colors"),
+        lod3: stringAt(asRecord(debug["lod_colors"], "debug.lod_colors"), "lod3", "debug.lod_colors"),
+      },
+    },
+    stress: {
+      active_scene: stringAt(stress, "active_scene", "stress"),
     },
     meshopt_package_version: stringAt(doc, "meshopt_package_version", "root"),
     poc: {

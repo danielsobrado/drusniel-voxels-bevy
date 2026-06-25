@@ -1,6 +1,10 @@
-//! Spatial-hash vertex weld. Ported from clod-rs (§11.3).
+//! Spatial-hash vertex weld. Ported from tools/clod-poc/src/weld.ts.
+//!
+//! Welds vertices within `epsilon` by quantized position. A position match with a normal,
+//! paint-slot, or material-weight conflict is DirtyInput -> hard fail. On valid match,
+//! normals and material weights are averaged incrementally.
 
-use super::types::{ClodBuildError, DEFAULT_TOLERANCES, PageMesh};
+use super::types::{BorderTolerances, ClodBuildError, PageMesh};
 use std::collections::HashMap;
 
 pub struct WeldReport {
@@ -26,47 +30,91 @@ fn normalize(v: [f32; 3]) -> [f32; 3] {
     [v[0] * inv, v[1] * inv, v[2] * inv]
 }
 
-/// Welds vertices within `epsilon` by quantized position. Normal conflicts remain dirty input;
-/// material weights from independently meshed chunk borders are reconciled onto the canonical
-/// vertex with an incremental average.
+/// Weld vertices within `epsilon` by quantized position hash. Takes explicit tolerances.
+/// Paint slots are checked for conflict; material weights are averaged on valid merge.
 pub fn weld_vertices(
     mesh: &PageMesh,
     epsilon: f32,
+    tolerances: BorderTolerances,
 ) -> Result<(PageMesh, WeldReport), ClodBuildError> {
     let n = mesh.vertex_count();
     let inv = 1.0 / epsilon;
-    let tol = &DEFAULT_TOLERANCES;
+    let stride = mesh.material_weight_stride();
 
     let mut canonical: HashMap<(i64, i64, i64), u32> = HashMap::new();
     let mut canonical_counts: Vec<u32> = Vec::new();
     let mut remap = vec![0u32; n];
     let mut out = PageMesh::default();
+    let weights = mesh.material_weights();
 
     for i in 0..n {
         let p = mesh.positions[i];
         let key = quant_key(p, inv);
         if let Some(&found) = canonical.get(&key) {
             let f = found as usize;
-            let a = mesh.normals[i];
-            let b = out.normals[f];
-            let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-            if dot < tol.normal_dot {
-                return Err(ClodBuildError::DirtyInput(format!(
-                    "weld conflict at ({:.3},{:.3},{:.3}): normal dot {:.5} (need >= {})",
-                    p[0], p[1], p[2], dot, tol.normal_dot
-                )));
+
+            // Normal conflict check
+            let dot = mesh.normals[i][0] * out.normals[f][0]
+                + mesh.normals[i][1] * out.normals[f][1]
+                + mesh.normals[i][2] * out.normals[f][2];
+            if dot < tolerances.normal_dot {
+                return Err(ClodBuildError::DirtyInput {
+                    message: format!(
+                        "weld conflict at ({:.3},{:.3},{:.3}): normal dot {:.5} (need >= {})",
+                        p[0], p[1], p[2], dot, tolerances.normal_dot
+                    ),
+                });
             }
+
+            // Paint-slot conflict check
+            let paint_delta = (mesh.paint_slots.get(i).copied().unwrap_or(0.0)
+                - out.paint_slots.get(f).copied().unwrap_or(0.0))
+            .abs();
+            if paint_delta > tolerances.material {
+                return Err(ClodBuildError::DirtyInput {
+                    message: format!(
+                        "weld conflict at ({:.3},{:.3},{:.3}): paint delta {:.2e} (need <= {})",
+                        p[0], p[1], p[2], paint_delta, tolerances.material
+                    ),
+                });
+            }
+
+            // Material-weight conflict check (for each channel)
+            let mut max_weight_delta = 0.0;
+            for j in 0..stride {
+                let wd = (weights[i * stride + j]
+                    - out.material_weights()[f * stride + j])
+                .abs();
+                if wd > max_weight_delta {
+                    max_weight_delta = wd;
+                }
+            }
+            if max_weight_delta > tolerances.material {
+                return Err(ClodBuildError::DirtyInput {
+                    message: format!(
+                        "weld conflict at ({:.3},{:.3},{:.3}): max weight delta {:.2e} (need <= {})",
+                        p[0], p[1], p[2], max_weight_delta, tolerances.material
+                    ),
+                });
+            }
+
+            // Average normals
             let count = canonical_counts[f] as f32;
             let next_count = count + 1.0;
             out.normals[f] = normalize([
-                (out.normals[f][0] * count + a[0]) / next_count,
-                (out.normals[f][1] * count + a[1]) / next_count,
-                (out.normals[f][2] * count + a[2]) / next_count,
+                (out.normals[f][0] * count + mesh.normals[i][0]) / next_count,
+                (out.normals[f][1] * count + mesh.normals[i][1]) / next_count,
+                (out.normals[f][2] * count + mesh.normals[i][2]) / next_count,
             ]);
-            for c in 0..4 {
-                out.materials[f][c] =
-                    (out.materials[f][c] * count + mesh.materials[i][c]) / next_count;
+
+            // Average material weights
+            for j in 0..stride {
+                out.material_weights_mut()[f * stride + j] = (out.material_weights()[f * stride + j]
+                    * count
+                    + weights[i * stride + j])
+                    / next_count;
             }
+
             canonical_counts[f] += 1;
             remap[i] = found;
         } else {
@@ -75,7 +123,13 @@ pub fn weld_vertices(
             remap[i] = ni;
             out.positions.push(p);
             out.normals.push(mesh.normals[i]);
-            out.materials.push(mesh.materials[i]);
+            // Copy material weights as [f32; 4] via materials
+            if i < mesh.materials.len() {
+                out.materials.push(mesh.materials[i]);
+            } else {
+                out.materials.push([0.0; 4]);
+            }
+            out.paint_slots.push(mesh.paint_slots.get(i).copied().unwrap_or(0.0));
             canonical_counts.push(1);
         }
     }
@@ -85,6 +139,8 @@ pub fn weld_vertices(
         .iter()
         .map(|&idx| remap[idx as usize])
         .collect();
+    out.material_weight_stride = stride;
+
     let report = WeldReport {
         input_vertices: n,
         output_vertices: out.positions.len(),

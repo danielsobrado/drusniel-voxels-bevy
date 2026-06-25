@@ -172,10 +172,10 @@ fn page_inputs_from_cache(
         let mut exports = Vec::with_capacity(chunk_positions.len());
         for &pos in chunk_positions {
             let export = cache.exports.get(&pos).cloned().ok_or_else(|| {
-                ClodBuildError::PageIncomplete(format!(
+                ClodBuildError::PageIncomplete { message: format!(
                     "page {:?} complete-page snapshot is missing chunk export {:?}",
                     coord, pos
-                ))
+                ) }
             })?;
             content_revision = mix_export_signature(content_revision, pos, export.revision);
             exports.push(export);
@@ -250,9 +250,7 @@ pub(crate) fn clod_pages_build_queue_system(
             fail_build(
                 &mut tree,
                 page_coords,
-                ClodBuildError::DirtyInput(
-                    "forced by CLOD_PAGES_FORCE_FAIL for fallback verification".to_string(),
-                ),
+                ClodBuildError::DirtyInput { message: "forced by CLOD_PAGES_FORCE_FAIL for fallback verification".to_string() },
             );
         }
         queue.clear();

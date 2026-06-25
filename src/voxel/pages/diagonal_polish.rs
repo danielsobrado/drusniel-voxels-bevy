@@ -450,6 +450,7 @@ mod tests {
     }
 
     fn quad_mesh(materials: Vec<[f32; 4]>) -> PageMesh {
+        let n = materials.len();
         PageMesh {
             positions: vec![
                 [0.0, 0.0, 0.0],
@@ -459,6 +460,8 @@ mod tests {
             ],
             normals: vec![[0.0, 1.0, 0.0]; 4],
             materials,
+            paint_slots: vec![0.0; n],
+            material_weight_stride: 4,
             indices: vec![0, 1, 2, 0, 2, 3],
         }
     }

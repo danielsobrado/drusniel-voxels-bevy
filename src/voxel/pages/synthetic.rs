@@ -257,6 +257,8 @@ fn mesh_chunk(cx: i32, cz: i32, cfg: &ClodPagesConfig, world: WorldBounds) -> Pa
         positions: buf.pos,
         normals: buf.nrm,
         materials: buf.mat,
+        paint_slots: vec![0.0; buf.mat.len()],
+        material_weight_stride: 4,
         indices,
     }
 }

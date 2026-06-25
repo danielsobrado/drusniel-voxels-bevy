@@ -30,10 +30,28 @@ selection:
   hysteresis_merge_factor: 1.5    # merge at 1.5px, split at 1.0px
   neighbor_level_delta_max: 1     # 2:1 restricted quadtree constraint
   transition_mode: instant        # terrain pages swap atomically; dither is too noisy when textured
-  crossfade_frames: 0
+  crossfade_frames: 12
+  freeze_selection: false
 
 near_field:
+  enabled: true
   radius_chunks: 6            # live editable Surface Nets bubble, no pages inside
+  show_mask: true
+
+debug:
+  show_wireframe: true
+  show_page_boundaries: true
+  show_locked_border_vertices: false
+  show_error_labels: true
+  show_stats_panel: true
+  lod_colors:
+    lod0: "#3b82f6"
+    lod1: "#22c55e"
+    lod2: "#f59e0b"
+    lod3: "#ef4444"
+
+stress:
+  active_scene: "ridge_border"
 
 meshopt_package_version: "0.22.0"
 

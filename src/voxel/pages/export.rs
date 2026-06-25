@@ -19,6 +19,8 @@ pub struct TerrainMainSurfaceExport {
     pub local_positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub material_weights: Vec<[f32; 4]>,
+    /// Per-vertex paint override (0 = natural terrain).
+    pub paint_slots: Vec<f32>,
     pub indices: Vec<u32>,
     pub chunk_pos: IVec3,
     pub lod: LodLevel,
@@ -107,12 +109,15 @@ pub fn extract_main_surface_for_clod(
     let mut local_positions = Vec::new();
     let mut normals = Vec::new();
     let mut material_weights = Vec::new();
+    let mut paint_slots = Vec::new();
     for i in 0..n {
         if barycentric_section(solid.barycentric_uvs[i]) == TERRAIN_MESH_SECTION_MAIN {
             remap[i] = local_positions.len() as u32;
             local_positions.push(solid.positions[i]);
             normals.push(solid.normals[i]);
             material_weights.push(solid.colors[i]);
+            // TODO: extract real paint slot from MeshData when available
+            paint_slots.push(0.0);
         }
     }
 
@@ -136,6 +141,7 @@ pub fn extract_main_surface_for_clod(
         local_positions,
         normals,
         material_weights,
+        paint_slots,
         indices,
         chunk_pos,
         lod,

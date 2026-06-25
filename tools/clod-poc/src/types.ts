@@ -55,7 +55,7 @@ export interface BorderTolerances {
 }
 
 export const DEFAULT_TOLERANCES: BorderTolerances = {
-  position: 1e-3,
+  position: 1e-6,
   normalDot: 0.9999,
   material: 1e-4,
 };

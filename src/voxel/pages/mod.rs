@@ -8,18 +8,13 @@
 //! Lower LODs are NEVER re-extracted from voxels — always decimated from merged child
 //! meshes. Page borders are locked (by OPEN topological boundary, a sandbox finding — not
 //! by footprint plane: Surface Nets vertices sit inside cells, so borders are non-planar).
-//! LOD0 export capture is throttled on the main thread; page assembly, simplification, and
-//! quadtree construction run on the async compute pool. The near-field bubble stays live LOD0.
-//!
-//! Phase 5 Steps 1-5 are present: structural main-surface export, the ported builder, async
-//! build/commit, runtime selection, and binary near-field ownership. Rollout remains
-//! default-off for A/B benching; set `CLOD_PAGES=1` to enable the complete page path.
 
 pub mod build_queue;
 pub mod config;
 pub mod diagonal_polish;
 pub mod export;
 pub mod lock;
+pub mod material_weights;
 mod ownership;
 pub mod plugin;
 pub mod quadtree;
@@ -28,10 +23,14 @@ pub mod runtime;
 mod selection;
 pub mod simplify;
 pub mod source_mesh;
+pub mod stats;
 pub mod triangle_quality;
 pub mod types;
 pub mod validate;
 pub mod weld;
+
+#[cfg(test)]
+pub mod debug_export;
 
 pub use build_queue::{ClodPageBuildStatus, ClodPageTree};
 pub use export::{ClodExportError, TerrainMainSurfaceExport, extract_main_surface_for_clod};

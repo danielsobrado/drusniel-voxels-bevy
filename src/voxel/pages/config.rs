@@ -77,6 +77,21 @@ pub struct SelectionCfg {
     pub crossfade_frames: u32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValidationCfg {
+    pub position_epsilon: f32,
+    pub normal_dot_min: f32,
+    pub material_weight_epsilon: f32,
+    pub zero_area_epsilon: f32,
+    pub material_weight_sum_epsilon: f32,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct PocGateCfg {
+    pub lod0_pages_x: usize,
+    pub lod0_pages_z: usize,
+}
+
 #[derive(Deserialize, Clone)]
 pub struct ClodPagesConfig {
     pub page: PageCfg,
@@ -85,10 +100,24 @@ pub struct ClodPagesConfig {
     pub polish: PolishCfg,
     pub selection: SelectionCfg,
     pub near_field: NearFieldCfg,
+    #[serde(default)]
+    pub validation: Option<ValidationCfg>,
+    #[serde(default)]
+    pub poc_gate: Option<PocGateCfg>,
 }
 
 impl ClodPagesConfig {
     pub fn load() -> Self {
         serde_yaml::from_str(CONFIG_YAML).expect("parse config/clod_pages.yaml")
+    }
+
+    pub fn validation(&self) -> ValidationCfg {
+        self.validation.clone().unwrap_or(ValidationCfg {
+            position_epsilon: 1e-6,
+            normal_dot_min: 0.9999,
+            material_weight_epsilon: 1e-4,
+            zero_area_epsilon: 1e-8,
+            material_weight_sum_epsilon: 1e-4,
+        })
     }
 }

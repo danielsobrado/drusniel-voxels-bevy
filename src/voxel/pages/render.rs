@@ -298,6 +298,8 @@ mod tests {
             positions: vec![[1.0, -2.0, 3.0], [4.0, 6.0, 7.0], [8.0, 1.0, 9.0]],
             normals: vec![[0.0, 1.0, 0.0]; 3],
             materials: vec![[1.0, 0.0, 0.0, 0.0]; 3],
+            paint_slots: vec![0.0; 3],
+            material_weight_stride: 4,
             indices: vec![0, 1, 2],
         };
 

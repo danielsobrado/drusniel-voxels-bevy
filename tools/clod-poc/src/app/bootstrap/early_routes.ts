@@ -40,5 +40,11 @@ export async function runEarlyRoutes(searchParams: URLSearchParams): Promise<boo
     return true;
   }
 
+  if (earlyScene === "phase2") {
+    const { runPhase2Scene } = await import("../../phase2/phase2_scene.js");
+    await runPhase2Scene();
+    return true;
+  }
+
   return false;
 }

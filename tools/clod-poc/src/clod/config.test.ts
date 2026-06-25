@@ -56,8 +56,24 @@ selection:
   neighbor_level_delta_max: 1
   transition_mode: instant
   crossfade_frames: 0
+  freeze_selection: false
 near_field:
+  enabled: true
   radius_chunks: 6
+  show_mask: true
+debug:
+  show_wireframe: true
+  show_page_boundaries: true
+  show_locked_border_vertices: false
+  show_error_labels: true
+  show_stats_panel: true
+  lod_colors:
+    lod0: "#3b82f6"
+    lod1: "#22c55e"
+    lod2: "#f59e0b"
+    lod3: "#ef4444"
+stress:
+  active_scene: "ridge_border"
 meshopt_package_version: "0.22.0"
 poc:
   lod0_pages_x: 8
@@ -103,8 +119,24 @@ selection:
   neighbor_level_delta_max: 1
   transition_mode: instant
   crossfade_frames: 0
+  freeze_selection: false
 near_field:
+  enabled: true
   radius_chunks: 0
+  show_mask: true
+debug:
+  show_wireframe: true
+  show_page_boundaries: true
+  show_locked_border_vertices: false
+  show_error_labels: true
+  show_stats_panel: true
+  lod_colors:
+    lod0: "#3b82f6"
+    lod1: "#22c55e"
+    lod2: "#f59e0b"
+    lod3: "#ef4444"
+stress:
+  active_scene: "ridge_border"
 meshopt_package_version: "0.22.0"`;
     expect(() => parseConfig(bad)).toThrow();
   });
@@ -138,8 +170,24 @@ selection:
   neighbor_level_delta_max: 1
   transition_mode: fade
   crossfade_frames: 0
+  freeze_selection: false
 near_field:
+  enabled: true
   radius_chunks: 0
+  show_mask: true
+debug:
+  show_wireframe: true
+  show_page_boundaries: true
+  show_locked_border_vertices: false
+  show_error_labels: true
+  show_stats_panel: true
+  lod_colors:
+    lod0: "#3b82f6"
+    lod1: "#22c55e"
+    lod2: "#f59e0b"
+    lod3: "#ef4444"
+stress:
+  active_scene: "ridge_border"
 meshopt_package_version: "0.22.0"
 poc:
   lod0_pages_x: 8

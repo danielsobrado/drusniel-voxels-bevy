@@ -21,6 +21,7 @@ use std::collections::HashMap;
 /// keep the locked open border. Proves meshopt works in-engine with the byte attribute stride.
 fn grid(n: usize) -> PageMesh {
     let mut m = PageMesh::default();
+    m.material_weight_stride = 4;
     for z in 0..n {
         for x in 0..n {
             let (fx, fz) = (x as f32, z as f32);
@@ -28,6 +29,7 @@ fn grid(n: usize) -> PageMesh {
                 .push([fx, (fx * 0.4).sin() * 1.5 + (fz * 0.3).cos() * 1.2, fz]);
             m.normals.push([0.0, 1.0, 0.0]);
             m.materials.push([1.0, 0.0, 0.0, 0.0]);
+            m.paint_slots.push(0.0);
         }
     }
     for z in 0..n - 1 {
@@ -60,6 +62,7 @@ fn meshopt_reduces_in_engine_with_byte_stride() {
 fn weld_merges_coincident_and_rejects_conflicts() {
     // two coincident verts, identical attrs -> merge
     let mut m = PageMesh::default();
+    m.material_weight_stride = 4;
     m.positions = vec![
         [0.0, 0.0, 0.0],
         [1.0, 0.0, 0.0],
@@ -68,8 +71,10 @@ fn weld_merges_coincident_and_rejects_conflicts() {
     ];
     m.normals = vec![[0.0, 1.0, 0.0]; 4];
     m.materials = vec![[1.0, 0.0, 0.0, 0.0]; 4];
+    m.paint_slots = vec![0.0; 4];
     m.indices = vec![0, 1, 2, 3, 1, 2];
-    let (welded, report) = weld_vertices(&m, 0.001).expect("clean weld");
+    let tol = super::types::BorderTolerances { position: 0.001, normal_dot: 0.9999, material: 1e-4 };
+    let (welded, report) = weld_vertices(&m, 0.001, tol).expect("clean weld");
     assert_eq!(report.merged_vertices, 1, "the duplicate vertex merges");
     assert_eq!(welded.vertex_count(), 3);
 
@@ -77,7 +82,7 @@ fn weld_merges_coincident_and_rejects_conflicts() {
     let mut bad = m.clone();
     bad.normals[3] = [1.0, 0.0, 0.0];
     assert!(
-        weld_vertices(&bad, 0.001).is_err(),
+        weld_vertices(&bad, 0.001, tol).is_err(),
         "attribute conflict must hard-fail"
     );
 }
@@ -151,11 +156,10 @@ fn adjacent_pages_share_matching_borders() {
             let a = &nodes[ai];
             if let Some(&ri) = idx.get(&(nx + 1, nz)) {
                 let r = &nodes[ri];
-                assert_border_match(
-                    &border_chain(&a.mesh, Axis::X, a.footprint.max_x, &a.footprint),
-                    &border_chain(&r.mesh, Axis::X, r.footprint.min_x, &r.footprint),
-                )
-                .expect("x border match");
+                let tol = super::types::DEFAULT_TOLERANCES;
+                let a_chain = border_chain(&a.mesh, Axis::X, a.footprint.max_x, &a.footprint).expect("border chain a");
+                let b_chain = border_chain(&r.mesh, Axis::X, r.footprint.min_x, &r.footprint).expect("border chain b");
+                assert_border_match(&a_chain, &b_chain, tol).expect("x border match");
                 checks += 1;
             }
         }

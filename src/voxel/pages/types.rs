@@ -1,4 +1,4 @@
-//! Builder data contracts. Ported from tools/clod-rs/src/types.rs (the validated sandbox).
+//! Builder data contracts. Ported from tools/clod-poc/src/types.ts.
 
 use super::export::ClodExportError;
 use std::fmt;
@@ -8,7 +8,12 @@ use std::fmt;
 pub struct PageMesh {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
+    /// Per-vertex 4-channel material blend weights (grass/rock/sand/snow).
     pub materials: Vec<[f32; 4]>,
+    /// Per-vertex paint override (0 = natural terrain, slot+1 = painted material).
+    pub paint_slots: Vec<f32>,
+    /// Number of weight channels per vertex (always 4 when present).
+    pub material_weight_stride: usize,
     pub indices: Vec<u32>,
 }
 
@@ -19,9 +24,48 @@ impl PageMesh {
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
     }
+    /// Flat view of material weights (4 channels per vertex).
+    pub fn material_weights(&self) -> &[f32] {
+        bytemuck::cast_slice(&self.materials)
+    }
+    /// Mutable flat view of material weights.
+    pub fn material_weights_mut(&mut self) -> &mut [f32] {
+        bytemuck::cast_slice_mut(&mut self.materials)
+    }
+    /// Number of material weight channels per vertex. Always 4 for this builder.
+    pub fn material_weight_stride(&self) -> usize {
+        if self.material_weight_stride > 0 {
+            self.material_weight_stride
+        } else if !self.materials.is_empty() {
+            4
+        } else {
+            0
+        }
+    }
+    /// Ensure paint_slots length matches vertex count, filling with 0 for natural terrain.
+    pub fn ensure_paint_slots(&mut self) {
+        let vc = self.vertex_count();
+        if self.paint_slots.len() != vc {
+            self.paint_slots.resize(vc, 0.0);
+        }
+    }
 }
 
-/// Horizontal page footprint in WORLD units (terrain is chunked in X/Z only).
+/// Uniquely identifies a page in the quadtree hierarchy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PageId {
+    pub level: u8,
+    pub x: i32,
+    pub z: i32,
+}
+
+impl fmt::Display for PageId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "L{}:({},{})", self.level, self.x, self.z)
+    }
+}
+
+/// Horizontal page footprint in world units (terrain is chunked in X/Z only).
 #[derive(Clone, Copy, Debug)]
 pub struct PageFootprint {
     pub min_x: f32,
@@ -30,6 +74,17 @@ pub struct PageFootprint {
     pub max_z: f32,
 }
 
+/// Bounding sphere for culling / selection.
+#[derive(Debug, Clone, Copy)]
+pub struct BoundingSphere {
+    pub center: [f32; 3],
+    pub radius: f32,
+    pub min_y: f32,
+    pub max_y: f32,
+}
+
+/// Tolerances for weld conflict and border validation.
+#[derive(Debug, Clone, Copy)]
 pub struct BorderTolerances {
     pub position: f32,
     pub normal_dot: f32,
@@ -42,39 +97,31 @@ pub const DEFAULT_TOLERANCES: BorderTolerances = BorderTolerances {
     material: 1e-4,
 };
 
-/// Hard-fail builder error — never simplify dirty input (plan §3, §11.7).
-#[derive(Debug)]
+/// Hard-fail builder error.
+#[derive(Debug, thiserror::Error)]
 pub enum ClodBuildError {
-    Export(ClodExportError),
-    DirtyInput(String),
-    InternalBorderNotWelded(String),
-    BorderPositionMismatch(String),
-    BorderNormalMismatch(String),
-    BorderMaterialMismatch(String),
-    PageIncomplete(String),
-    MeshoptFailed(String),
-}
-
-impl fmt::Display for ClodBuildError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use ClodBuildError::*;
-        match self {
-            Export(e) => write!(f, "{e}"),
-            DirtyInput(m) => write!(f, "DirtyInput: {m}"),
-            InternalBorderNotWelded(m) => write!(f, "InternalBorderNotWelded: {m}"),
-            BorderPositionMismatch(m) => write!(f, "BorderPositionMismatch: {m}"),
-            BorderNormalMismatch(m) => write!(f, "BorderNormalMismatch: {m}"),
-            BorderMaterialMismatch(m) => write!(f, "BorderMaterialMismatch: {m}"),
-            PageIncomplete(m) => write!(f, "PageIncomplete: {m}"),
-            MeshoptFailed(m) => write!(f, "MeshoptFailed: {m}"),
-        }
-    }
-}
-
-impl std::error::Error for ClodBuildError {}
-
-impl From<ClodExportError> for ClodBuildError {
-    fn from(e: ClodExportError) -> Self {
-        ClodBuildError::Export(e)
-    }
+    #[error("{0}")]
+    Export(#[from] ClodExportError),
+    #[error("ConfigInvalid: {message}")]
+    ConfigInvalid { message: String },
+    #[error("DirtyInput: {message}")]
+    DirtyInput { message: String },
+    #[error("InternalBorderNotWelded: {message}")]
+    InternalBorderNotWelded { message: String },
+    #[error("BorderPositionMismatch: {message}")]
+    BorderPositionMismatch { message: String },
+    #[error("BorderNormalMismatch: {message}")]
+    BorderNormalMismatch { message: String },
+    #[error("BorderMaterialMismatch: {message}")]
+    BorderMaterialMismatch { message: String },
+    #[error("PageIncomplete: {message}")]
+    PageIncomplete { message: String },
+    #[error("SimplifierUnavailable: {message}")]
+    SimplifierUnavailable { message: String },
+    #[error("MeshoptFailed: {message}")]
+    MeshoptFailed { message: String },
+    #[error("DegenerateGeometry: {message}")]
+    DegenerateGeometry { message: String },
+    #[error("MissingMaterialWeights: {message}")]
+    MissingMaterialWeights { message: String },
 }
