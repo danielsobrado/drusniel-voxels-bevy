@@ -73,6 +73,8 @@ export interface UiStartupInput {
     phase0VelocityX: number;
     phase0VelocityZ: number;
     phase0Streaming: Phase0Config["phase0"]["streaming"];
+    infiniteFarShell?: import("../../long-view/infiniteFarShell.js").InfiniteFarShell;
+    farShellMetrics?: import("../../long-view/farShellMetrics.js").FarShellMetrics;
   };
   /** Optional far summary frame update callback. */
   onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;

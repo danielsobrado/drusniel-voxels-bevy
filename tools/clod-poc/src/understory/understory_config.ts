@@ -335,7 +335,7 @@ export function parseUnderstoryConfig(
 }
 
 function readUnderstoryTerrainWeights(
-  raw: UnderstoryYamlConfig["understory"] extends infer T ? T extends { terrain?: infer R } ? R : never : never,
+  raw: Partial<Record<"grass" | "rock" | "sand" | "snow", UnderstoryYamlTerrainClass>> | undefined,
   fallback: UnderstoryTerrainWeights,
 ): UnderstoryTerrainWeights {
   return {

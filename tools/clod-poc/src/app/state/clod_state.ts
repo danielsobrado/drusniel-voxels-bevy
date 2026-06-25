@@ -31,6 +31,15 @@ export interface ClodSliceState {
   farShellRadiusFactor: number;
   farShellHeightBias: number;
   farShellHeightDrop: number;
+
+  longViewInfiniteShellEnabled: boolean;
+  longViewInfiniteShellWireframe: boolean;
+  longViewShowShellRings: boolean;
+  longViewShowMissingSummaryFallback: boolean;
+  longViewShowFarSummaryTiles: boolean;
+  longViewFreezeStreamCenter: boolean;
+  longViewForceMissingTiles: boolean;
+  longViewRebuildBudget: number;
 }
 
 const CLOD_ARCHIVE_KEYS = [
@@ -76,6 +85,15 @@ export function createClodSliceState(input: {
     farShellRadiusFactor: FAR_SHELL_DEFAULTS.radiusFactor,
     farShellHeightBias: FAR_SHELL_DEFAULTS.heightBias,
     farShellHeightDrop: FAR_SHELL_DEFAULTS.heightDrop,
+
+    longViewInfiniteShellEnabled: true,
+    longViewInfiniteShellWireframe: false,
+    longViewShowShellRings: false,
+    longViewShowMissingSummaryFallback: false,
+    longViewShowFarSummaryTiles: false,
+    longViewFreezeStreamCenter: false,
+    longViewForceMissingTiles: false,
+    longViewRebuildBudget: 4,
   };
 }
 

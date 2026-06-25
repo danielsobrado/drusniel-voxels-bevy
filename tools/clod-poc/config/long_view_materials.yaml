@@ -1,0 +1,70 @@
+# Long-view material parity config for the CLOD PoC far terrain shell.
+# Controls material quality, terrain bands, macro variation, far normals,
+# lighting, haze, seam blending, and debug modes.
+# See src/config/longViewMaterialsConfig.ts for the typed loader.
+
+long_view_materials:
+  enabled: true
+
+  material_quality:
+    default: horizon_proxy
+    allowed:
+      - full_debug
+      - cheap_triplanar_debug
+      - single_projection_far
+      - horizon_proxy
+      - atlas_only_debug
+
+  terrain_bands:
+    waterline_m: 0.0
+    sand_max_height_m: 4.0
+    grass_max_slope: 0.62
+    dirt_max_slope: 0.82
+    rock_min_slope: 0.72
+    snow_min_height_m: 96.0
+    snow_min_slope: 0.15
+
+  macro_variation:
+    enabled: true
+    world_scale_1: 180.0
+    world_scale_2: 720.0
+    strength: 0.18
+    slope_strength: 0.12
+    height_strength: 0.10
+
+  far_normals:
+    mode: analytic_summary
+    strength: 0.65
+    finite_difference_m: 8.0
+    flatten_with_distance: true
+    flatten_start_m: 2200.0
+    flatten_end_m: 4096.0
+
+  lighting:
+    hemisphere_strength: 0.45
+    sun_strength: 0.85
+    wrap_lighting: 0.20
+    roughness: 0.92
+    ambient_floor: 0.16
+
+  haze:
+    enabled: true
+    start_m: 1800.0
+    end_m: 4096.0
+    color: [0.62, 0.70, 0.76]
+    strength: 0.72
+    height_falloff: 0.035
+
+  seam_blend:
+    page_to_shell_blend_m: 160.0
+    shell_inner_drop_m: 2.0
+    normal_blend_m: 128.0
+    material_blend_m: 192.0
+
+  debug:
+    show_material_bands: false
+    show_slope: false
+    show_macro_noise: false
+    show_far_normals: false
+    show_haze_factor: false
+    freeze_material_lod: false

@@ -157,6 +157,9 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
   }
   if (params.searchParams.get("understory") === "1") state.understoryEnabled = true;
   if (params.searchParams.get("understory") === "0") state.understoryEnabled = false;
+  if (params.searchParams.get("scene") === "long-view-shadow-proxy-low-sun") {
+    state.sunElevationDeg = 8;
+  }
 }
 
 export function createClodAppState(params: CreateClodAppStateParams): ClodAppState {

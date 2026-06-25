@@ -49,12 +49,18 @@ setBorderCoastRuntime(borderCoast, worldCells);
 setTerrainSurfaceOverride(null);
 const world = { cellsX: worldCells, cellsZ: worldCells };
 
-const z = 198;
-for (const x of [30, 31, 31.5, 32, 32.5, 33]) {
-  console.log(`surfaceHeight(${x}, ${z}) = ${surfaceHeight(x, z).toFixed(4)}`);
+const zBand = 198;
+for (const x of [78, 79, 80, 81]) {
+  console.log(`band edge surfaceHeight(${x}, ${zBand}) = ${surfaceHeight(x, zBand).toFixed(4)}`);
 }
-console.log("type@31", sampleCoastType(31, z, borderCoast.coast));
-console.log("type@32", sampleCoastType(32, z, borderCoast.coast));
+
+for (const x of [30, 31, 31.5, 32, 32.5, 33]) {
+  console.log(`surfaceHeight(${x}, ${zBand}) = ${surfaceHeight(x, zBand).toFixed(4)}`);
+}
+const jump = Math.abs(surfaceHeight(32, zBand) - surfaceHeight(31, zBand));
+console.log("jump@31-32", jump.toFixed(4), jump < 2 ? "OK" : "BAD");
+console.log("type@31", sampleCoastType(31, zBand, borderCoast.coast));
+console.log("type@32", sampleCoastType(32, zBand, borderCoast.coast));
 
 const px = 0;
 const pz = 3;
@@ -66,7 +72,7 @@ const near = (mesh: typeof c1, label: string) => {
   for (let i = 0; i < mesh.positions.length; i += 3) {
     const x = mesh.positions[i];
     const zz = mesh.positions[i + 2];
-    if (Math.abs(x - seamX) < 0.6 && Math.abs(zz - z) < 2) {
+    if (Math.abs(x - seamX) < 0.6 && Math.abs(zz - zBand) < 2) {
       out.push([x, mesh.positions[i + 1], zz]);
     }
   }

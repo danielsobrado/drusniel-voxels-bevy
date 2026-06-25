@@ -139,11 +139,19 @@ export interface FrameLoopDiagnosticsDeps {
     page: { chunk_size: number; chunks_per_page: number };
   };
   getFarShellRadiusFactor: () => number;
+  getShadowProxyInert: () => number;
+  getShadowProxyEnabled: () => number;
+  getFarShellMetrics?: () => import("../../long-view/farShellMetrics.js").FarShellMetrics | undefined;
+  infiniteFarShellActive?: () => boolean;
 }
 
 export interface FrameLoopFarSummaryDeps {
   /** Called each frame after terrain phase but before vegetation phase. */
   onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
+}
+
+export interface FrameLoopShadowProxyDeps {
+  rebuildIfNeeded: () => void;
 }
 
 export interface ClodFrameLoopDeps {
@@ -155,4 +163,5 @@ export interface ClodFrameLoopDeps {
   stats: FrameLoopStatsDeps;
   diagnostics: FrameLoopDiagnosticsDeps;
   farSummary?: FrameLoopFarSummaryDeps;
+  shadowProxy?: FrameLoopShadowProxyDeps;
 }

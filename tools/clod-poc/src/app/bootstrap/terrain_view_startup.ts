@@ -1,8 +1,17 @@
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { createHeightTexture } from "../../clod/terrain_summary.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
-import { buildFarTerrainShadowProxy } from "../../gpu/far_terrain_shadow_proxy.js";
+import longViewYaml from "../../../config/long_view.yaml?raw";
+import {
+  applyShadowProxyDebugQueryOverrides,
+  applyShadowProxySceneOverrides,
+  createShadowProxyController,
+  createShadowProxyDebugState,
+  isStreamingLongViewScene,
+  parseLongViewSunShadowsConfig,
+  type ShadowProxyController,
+  type ShadowProxyDebugState,
+} from "../../shadows/index.js";
 import { GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import { compareChunkSurfaces } from "../../gpu/gpu_mesh_parity.js";
 import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
@@ -105,7 +114,10 @@ export interface TerrainViewStartupResult {
   applyColorByLodToMaterials: (on: boolean) => void;
   applyColorAdjustmentsToTerrain: () => void;
   farShellController: ReturnType<typeof createFarShellController>;
-  shadowProxyResult: ReturnType<typeof buildFarTerrainShadowProxy>;
+  shadowProxyController: ShadowProxyController | null;
+  shadowProxyDebugState: ShadowProxyDebugState | null;
+  getShadowProxyConfig: () => import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig;
+  setShadowProxyConfig: (config: import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig) => void;
   boundaryGroup: THREE.Group;
   seamGroup: THREE.Group;
   crossLodBorderGroup: THREE.Group;
@@ -263,6 +275,18 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     });
   }
 
+  const queryScene = searchParams.get("scene");
+  const streamingLongView = isStreamingLongViewScene(queryScene);
+  const longViewSunConfig = parseLongViewSunShadowsConfig(longViewYaml);
+  const shadowProxyConfig = applyShadowProxySceneOverrides(
+    applyShadowProxyDebugQueryOverrides(longViewSunConfig.shadowProxy, searchParams),
+    queryScene,
+  );
+  const shadowProxyDebugState = isLongView
+    ? createShadowProxyDebugState(shadowProxyConfig, longViewSunConfig.enabled)
+    : null;
+  let liveShadowProxyConfig = { ...shadowProxyConfig };
+
   const farShellController = createFarShellController({
     scene,
     terrainSummary,
@@ -277,6 +301,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
       heightBias: state.farShellHeightBias,
       heightDrop: state.farShellHeightDrop,
     }),
+    receiveSunShadows: () => Boolean(isLongView && shadowProxyDebugState?.sunShadowsEnabled),
     onTriangleCount: (counter, count) => {
       if (longViewHooks?.stats) longViewHooks.stats.counters[counter] = count;
     },
@@ -288,15 +313,35 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     farShellController.setEnabled(false);
   }
 
-  const shadowHeightTexture = createHeightTexture(terrainSummary);
-  const shadowProxyResult = buildFarTerrainShadowProxy(shadowHeightTexture, worldSizeCells, {
-    grid: 512,
-  });
-  if (isLongView) {
-    scene.add(shadowProxyResult.mesh);
-  }
-  if (longViewHooks?.stats) {
-    longViewHooks.stats.counters["shadow_proxy_tris"] = shadowProxyResult.triangleCount;
+  const shadowProxyController = isLongView
+    ? createShadowProxyController(
+      { enabled: longViewSunConfig.enabled, shadowProxy: liveShadowProxyConfig },
+      {
+        scene,
+        renderer: input.renderer,
+        getTerrainSummary: () => window.__drusnielTerrainSummary ?? terrainSummary,
+        worldSize: worldSizeCells,
+        isLongView,
+        streamingCentered: streamingLongView,
+        rebaseSnapMeters: 64,
+        getSunShadowsEnabled: () => shadowProxyDebugState?.sunShadowsEnabled ?? false,
+        getConfig: () => liveShadowProxyConfig,
+        getLighting: currentLighting,
+        getCoverageCenter: () => ({ x: camera.position.x, z: camera.position.z }),
+        onCounters: (counters) => {
+          if (!longViewHooks?.stats) return;
+          for (const [key, value] of Object.entries(counters)) {
+            longViewHooks.stats.counters[key] = value;
+          }
+        },
+      },
+    )
+    : null;
+
+  if (shadowProxyDebugState && shadowProxyController) {
+    shadowProxyDebugState.shadowProxyStatsLine = shadowProxyController.runtime.stats.built
+      ? `tris ${shadowProxyController.runtime.stats.triangleCount}`
+      : "shadow proxy: not built";
   }
 
   const boundaryGroup = new THREE.Group();
@@ -440,7 +485,12 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     applyColorByLodToMaterials,
     applyColorAdjustmentsToTerrain,
     farShellController,
-    shadowProxyResult,
+    shadowProxyController,
+    shadowProxyDebugState,
+    getShadowProxyConfig: () => liveShadowProxyConfig,
+    setShadowProxyConfig: (config: import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig) => {
+      liveShadowProxyConfig = { ...config };
+    },
     boundaryGroup,
     seamGroup,
     crossLodBorderGroup,

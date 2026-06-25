@@ -134,10 +134,16 @@ export function applyBorderCoastShape(
 
   const edgeDistance = worldEdgeDistance(x, z, worldCells);
   const bandEnd = config.coast.oceanStartCells + config.coast.shoreBackshoreCells;
-  if (edgeDistance < 0 || edgeDistance >= bandEnd) return inlandHeight;
+  const fadeCells = Math.min(config.coast.shoreBackshoreCells, 16);
+  if (edgeDistance < 0 || edgeDistance >= bandEnd + fadeCells) return inlandHeight;
 
   const cliffW = sampleCoastCliffWeight(x, z, config.coast);
   const beach = beachCoastHeight(edgeDistance, inlandHeight, config.coast, config.ocean);
   const cliff = cliffCoastHeight(edgeDistance, inlandHeight, config.coast, config.ocean);
-  return lerp(beach, cliff, cliffW);
+  const shaped = lerp(beach, cliff, cliffW);
+
+  if (edgeDistance >= bandEnd) {
+    return lerp(inlandHeight, shaped, smooth(1 - (edgeDistance - bandEnd) / fadeCells));
+  }
+  return shaped;
 }

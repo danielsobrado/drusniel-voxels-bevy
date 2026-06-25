@@ -1,5 +1,5 @@
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../src/config.ts";
-import { setBorderCoastRuntime, setTerrainSurfaceOverride, surfaceHeight } from "../src/terrain/terrain.ts";
+import { setBorderCoastRuntime, setTerrainSurfaceOverride } from "../src/terrain/terrain.ts";
 import { buildWorld } from "../src/clod/quadtree.ts";
 import { initSimplifier } from "../src/clod/simplify.ts";
 import { parseBorderCoastOceanConfig } from "../src/terrain/border_coast_config.ts";
@@ -35,28 +35,16 @@ const cfg: ClodPagesConfig = {
   validation: { position_epsilon: 0.000001, normal_dot_min: 0.9999, material_weight_epsilon: 0.0001, zero_area_epsilon: 0.00000001 },
 };
 
-const borderCoastYaml = readFileSync(new URL("../config/border_coast_ocean.yaml", import.meta.url), "utf8");
-const borderCoast = parseBorderCoastOceanConfig(borderCoastYaml);
-const WORLD = 16;
-const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
-setBorderCoastRuntime(borderCoast, worldCells);
-setTerrainSurfaceOverride(null);
-
-const x = 192;
-const z = 268;
-for (const dx of [-1, 0, 1]) {
-  const xx = x + dx;
-  console.log(`surfaceHeight(${xx}, ${z}) = ${surfaceHeight(xx, z).toFixed(4)}`);
-}
-for (const dz of [-1, 0, 1]) {
-  const zz = z + dz;
-  console.log(`surfaceHeight(${x}, ${zz}) = ${surfaceHeight(x, zz).toFixed(4)}`);
-}
+const borderCoast = parseBorderCoastOceanConfig(
+  readFileSync(new URL("../config/border_coast_ocean.yaml", import.meta.url), "utf8"),
+);
 
 await initSimplifier();
+setBorderCoastRuntime(borderCoast, 16 * 4 * 16);
+setTerrainSurfaceOverride(null);
 try {
-  buildWorld(WORLD, WORLD, cfg);
-  console.log("OK");
+  buildWorld(16, 16, cfg);
+  console.log("WORLD 16 OK");
 } catch (e) {
-  console.error((e as Error).message);
+  console.error("WORLD 16 FAIL", (e as Error).message);
 }

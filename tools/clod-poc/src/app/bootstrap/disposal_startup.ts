@@ -20,8 +20,9 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
       skyEnvironment,
       postProcess,
       farShellController,
-      shadowProxyResult,
+      shadowProxyController,
     },
+    longView,
   } = input;
 
   bindUiAudioShell();
@@ -40,6 +41,7 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
     getClodErrorCompute()?.destroy();
     clodWorker.dispose();
     farShellController.dispose();
-    shadowProxyResult.dispose();
+    shadowProxyController?.dispose();
+    longView.infiniteFarShell?.dispose();
   }, { once: true });
 }

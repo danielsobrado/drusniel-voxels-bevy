@@ -67,6 +67,7 @@ export interface RuntimeSystemsStartupInput {
   vegetationDirtyQueue: VegetationDirtyQueue;
   statControllers: VegetationStatControllerRefs;
   getHooks: () => ClodHooks | null;
+  shadowProxyController?: import("../../../shadows/shadowProxyController.js").ShadowProxyController | null;
 }
 
 export interface RuntimeSystemsStartupResult extends VegetationStartupResult, WaterWeatherStartupResult,
@@ -199,6 +200,7 @@ export async function runRuntimeSystemsStartup(
     waterController.updateSunDirection(lighting.sunDirection);
     waterWeather.deepOceanMaterial?.updateSunDirection(lighting.sunDirection);
     waterWeather.deepOceanMaterial?.updateHorizonColor(lighting.skyLight);
+    input.shadowProxyController?.syncSunLight();
   };
 
   const drainVegetationDirtyQueue = (): void => {

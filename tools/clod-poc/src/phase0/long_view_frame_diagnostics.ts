@@ -10,6 +10,8 @@ import type { StoneStats } from "../stones/stone_instances.js";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
 import type { WaterField } from "../water/waterField.js";
 import { publishBorderOceanAcceptanceCounters } from "../debug/border_ocean_scene.js";
+import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
+import { publishFarShellMetricsToCounters } from "../long-view/farShellMetrics.js";
 import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
 
 const PHASE0_P95_WINDOW = 120;
@@ -28,7 +30,11 @@ export interface LongViewFrameDiagnosticsDeps {
   getFarShellRadiusFactor: () => number;
   farShellBuilt: () => boolean;
   farShellCanopyEnabled: () => boolean;
+  getFarShellMetrics?: () => FarShellMetrics | undefined;
+  infiniteFarShellActive?: () => boolean;
   isLongView: boolean;
+  getShadowProxyInert: () => number;
+  getShadowProxyEnabled: () => number;
   phase0TargetVisibleM: number;
   phase0Config: Phase0Config;
   queryScene: string | null;
@@ -86,22 +92,43 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       s.counters["gpu_stone_drawn_far"] = stoneStats.drawnFar;
     }
 
+    const shellMetrics = deps.getFarShellMetrics?.();
+    const infiniteShellActive = deps.infiniteFarShellActive?.() ?? false;
+    const legacyShellBuilt = deps.farShellBuilt();
+    const farShellEnabled = infiniteShellActive
+      ? Boolean(shellMetrics?.farShellEnabled)
+      : legacyShellBuilt;
+    const farShellRadiusM = infiniteShellActive && shellMetrics
+      ? shellMetrics.farShellOuterM
+      : deps.worldCells * deps.getFarShellRadiusFactor();
+    const farShellGridRes = infiniteShellActive && shellMetrics
+      ? shellMetrics.farShellGridRes
+      : 128;
+
     const effectiveVisible = computeEffectiveVisibleMeters({
       worldCells: deps.worldCells,
-      farShellEnabled: deps.farShellBuilt(),
-      farShellRadiusM: deps.worldCells * deps.getFarShellRadiusFactor(),
+      farShellEnabled,
+      farShellRadiusM,
     });
-    s.counters["effective_far_radius_m"] = deps.worldCells * deps.getFarShellRadiusFactor();
+    s.counters["effective_far_radius_m"] = farShellRadiusM;
     s.counters["effective_visible_m"] = effectiveVisible;
     s.counters["visible_target_met"] = computeVisibleTargetMet({
       effectiveVisibleM: effectiveVisible,
       targetVisibleM: deps.phase0TargetVisibleM,
     }) ? 1 : 0;
-    s.counters["far_shell_enabled"] = deps.farShellBuilt() ? 1 : 0;
-    s.counters["far_shell_radius_m"] = deps.worldCells * deps.getFarShellRadiusFactor();
-    s.counters["far_shell_grid_res"] = 128;
-    s.counters["shadow_proxy_enabled"] = deps.isLongView ? 1 : 0;
-    s.counters["shadow_proxy_inert"] = 1;
+    s.counters["far_shell_enabled"] = farShellEnabled ? 1 : 0;
+    s.counters["far_shell_radius_m"] = farShellRadiusM;
+    s.counters["far_shell_grid_res"] = farShellGridRes;
+    s.counters["far_shell_tris"] = infiniteShellActive && shellMetrics
+      ? shellMetrics.farShellTriangles
+      : (s.counters["far_shell_tris"] ?? 0);
+    if (shellMetrics) {
+      publishFarShellMetricsToCounters(s.counters, shellMetrics);
+    }
+    if (s.counters["shadow_proxy_enabled"] === undefined) {
+      s.counters["shadow_proxy_enabled"] = deps.isLongView ? 1 : 0;
+    }
+    s.counters["shadow_proxy_inert"] = deps.getShadowProxyInert();
     s.counters["canopy_enabled"] = deps.farShellCanopyEnabled() ? 1 : 0;
     for (let lvl = 0; lvl <= deps.maxTerrainLevel; lvl++) {
       s.counters[`rendered_page_count_lod${lvl}`] = selectionStats.nodesByLod[lvl] ?? 0;

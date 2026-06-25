@@ -34,8 +34,17 @@ export interface SceneQueryFlags {
   queryBorderOceanScene: boolean;
 }
 
+const SHADOW_PROXY_LONG_VIEW_SCENES = new Set([
+  "long-view-shadow-proxy-basic",
+  "long-view-shadow-proxy-off",
+  "long-view-shadow-proxy-debug-visible",
+  "long-view-shadow-proxy-forest",
+  "long-view-shadow-proxy-low-sun",
+]);
+
 export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryFlags {
   const queryScene = searchParams.get("scene");
+  const isShadowProxyScene = queryScene !== null && SHADOW_PROXY_LONG_VIEW_SCENES.has(queryScene);
   return {
     queryScene,
     queryGrassPerfScene: queryScene === "grass-perf",
@@ -48,7 +57,13 @@ export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryF
       || queryScene === "infinite-stream-straight"
       || queryScene === "infinite-stream-fast-turn"
       || queryScene === "infinite-stream-far-summary"
-      || queryScene === "infinite-stream-slow-builds",
+      || queryScene === "infinite-stream-slow-builds"
+      || queryScene === "infinite-far-shell-straight"
+      || queryScene === "infinite-far-shell-fast-turn"
+      || queryScene === "infinite-far-shell-mountain-approach"
+      || queryScene === "long-view-8km"
+      || queryScene === "long-view-16km"
+      || isShadowProxyScene,
     queryBorderOceanScene: queryScene === "border-ocean",
   };
 }
@@ -71,6 +86,16 @@ const sceneNameToConfigKey: Record<string, string> = {
   "infinite-stream-fast-turn": "infinite_stream_fast_turn",
   "infinite-stream-far-summary": "infinite_stream_far_summary",
   "infinite-stream-slow-builds": "infinite_stream_slow_builds",
+  "infinite-far-shell-straight": "infinite_far_shell_straight",
+  "infinite-far-shell-fast-turn": "infinite_far_shell_fast_turn",
+  "infinite-far-shell-mountain-approach": "infinite_far_shell_mountain_approach",
+  "long-view-8km": "long_view_8km",
+  "long-view-16km": "long_view_16km",
+  "long-view-shadow-proxy-basic": "long_view_4km",
+  "long-view-shadow-proxy-off": "long_view_4km",
+  "long-view-shadow-proxy-debug-visible": "long_view_4km",
+  "long-view-shadow-proxy-forest": "long_view_forest_4km",
+  "long-view-shadow-proxy-low-sun": "long_view_4km",
 };
 
 export function parsePhase0SceneContext(
@@ -116,6 +141,12 @@ export interface ClodRuntimeQueryFlags {
   queryGrassRingGrid: number | null;
   queryGrassRingCell: number | null;
   textureMipmapsEnabled: boolean;
+  queryTerrainMaterial: string | null;
+  queryDebugMaterialBands: boolean;
+  queryDebugSlope: boolean;
+  queryDebugFarNormals: boolean;
+  queryDebugHaze: boolean;
+  queryFreezeMaterialLod: boolean;
 }
 
 export function parseClodRuntimeQueryFlags(searchParams: URLSearchParams): ClodRuntimeQueryFlags {
@@ -128,6 +159,12 @@ export function parseClodRuntimeQueryFlags(searchParams: URLSearchParams): ClodR
     queryMaterialTiers: searchParams.get("materialTiers") === "1",
     queryWebGpuParity: searchParams.get("webgpuParity") === "1",
     queryTerrainMaterialSource: terrainMaterialSourceParam(searchParams.get("terrainMaterial")),
+    queryTerrainMaterial: searchParams.get("terrainMaterial"),
+    queryDebugMaterialBands: searchParams.get("debugMaterialBands") === "1",
+    queryDebugSlope: searchParams.get("debugSlope") === "1",
+    queryDebugFarNormals: searchParams.get("debugFarNormals") === "1",
+    queryDebugHaze: searchParams.get("debugHaze") === "1",
+    queryFreezeMaterialLod: searchParams.get("freezeMaterialLod") === "1",
     queryGrassRingGrid: positiveNumberParam(searchParams.get("grassRingGrid")),
     queryGrassRingCell: positiveNumberParam(searchParams.get("grassRingCell")),
     textureMipmapsEnabled: searchParams.get("textureMipmaps") !== "0",

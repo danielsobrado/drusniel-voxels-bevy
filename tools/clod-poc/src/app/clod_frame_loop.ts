@@ -21,7 +21,7 @@ export type {
 import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
-  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary } = deps;
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy } = deps;
   let elapsedSeconds = 0;
   const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
@@ -60,7 +60,11 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     getFarShellRadiusFactor: diagnostics.getFarShellRadiusFactor,
     farShellBuilt: diagnostics.farShellBuilt,
     farShellCanopyEnabled: diagnostics.farShellCanopyEnabled,
+    getFarShellMetrics: diagnostics.getFarShellMetrics,
+    infiniteFarShellActive: diagnostics.infiniteFarShellActive,
     isLongView: diagnostics.isLongView,
+    getShadowProxyInert: diagnostics.getShadowProxyInert,
+    getShadowProxyEnabled: diagnostics.getShadowProxyEnabled,
     phase0TargetVisibleM: diagnostics.phase0TargetVisibleM,
     phase0Config: diagnostics.phase0Config,
     queryScene: diagnostics.queryScene,
@@ -128,6 +132,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       views: terrain.views,
       worldCells: terrain.worldCells,
     });
+
+    shadowProxy?.rebuildIfNeeded();
 
     runVegetationFramePhase({
       elapsedSeconds,

@@ -14,8 +14,14 @@ import { buildLod0PageSource, rebuildPageChunks } from "./source_mesh.js";
 import { concat } from "./source_mesh.js";
 import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks, countLocks } from "../lock.js";
-import { simplifyPage } from "./simplify.js";
-import { validateFinalPageMesh, validatePageMesh, validateWeldedIntermediate } from "./validate.js";
+import { simplifyPage, type SimplifyOutput } from "./simplify.js";
+import {
+  assertNoInternalBorders,
+  stripDegenerateTriangles,
+  validateFinalPageMesh,
+  validatePageMesh,
+  validateWeldedIntermediate,
+} from "./validate.js";
 import {
   emptyDiagonalPolishStats,
   polishDiagonals,
@@ -52,6 +58,34 @@ export interface BuildProgress {
 function footprintFor(level: number, nx: number, nz: number, cfg: ClodPagesConfig): PageFootprint {
   const span = (1 << level) * cfg.page.chunks_per_page * cfg.page.chunk_size; // cells per node side
   return { minX: nx * span, minZ: nz * span, maxX: (nx + 1) * span, maxZ: (nz + 1) * span };
+}
+
+/** Simplify a welded parent page; fall back to the welded mesh if decimation opens an internal seam. */
+function clonePageMesh(mesh: PageMesh): PageMesh {
+  return {
+    positions: mesh.positions.slice(),
+    normals: mesh.normals.slice(),
+    paintSlots: mesh.paintSlots.slice(),
+    materialWeights: mesh.materialWeights.slice(),
+    materialWeightStride: mesh.materialWeightStride,
+    indices: mesh.indices.slice(),
+  };
+}
+
+function simplifyParentPage(
+  welded: PageMesh,
+  locks: Uint8Array,
+  footprint: PageFootprint,
+  cfg: ClodPagesConfig,
+): SimplifyOutput {
+  const sim = simplifyPage(clonePageMesh(welded), locks, cfg);
+  try {
+    stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
+    assertNoInternalBorders(sim.mesh, footprint);
+    return sim;
+  } catch {
+    return { mesh: welded, resultError: 0, errorWorld: 0, lowBenefit: true };
+  }
 }
 
 function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: number; minY: number; maxY: number } {
@@ -192,10 +226,14 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
             validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
             const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
-        const sim = simplifyPage(welded, locks, cfg);
-        validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
-        const polishLocks = buildOuterBorderLocks(sim.mesh);
-        const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
+        const sim = simplifyParentPage(welded, locks, footprint, cfg);
+        const simplified = sim.mesh !== welded;
+        if (simplified) {
+          validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
+        }
+        const polish = simplified
+          ? polishDiagonals(sim.mesh, buildOuterBorderLocks(sim.mesh), pageMeshPolishConfig(cfg))
+          : emptyDiagonalPolishStats();
         validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -329,10 +367,14 @@ export async function buildWorldAsync(
         validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
-        const sim = simplifyPage(welded, locks, cfg);
-        validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
-        const polishLocks = buildOuterBorderLocks(sim.mesh);
-        const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
+        const sim = simplifyParentPage(welded, locks, footprint, cfg);
+        const simplified = sim.mesh !== welded;
+        if (simplified) {
+          validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
+        }
+        const polish = simplified
+          ? polishDiagonals(sim.mesh, buildOuterBorderLocks(sim.mesh), pageMeshPolishConfig(cfg))
+          : emptyDiagonalPolishStats();
         validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -500,10 +542,12 @@ export function resimplifyParent(
   });
   validateWeldedIntermediate(welded, `${node.id} welded`, cfg.validation.zero_area_epsilon);
   const locks = buildOuterBorderLocks(welded);
-  const sim = simplifyPage(welded, locks, cfg);
-  validateWeldedIntermediate(sim.mesh, `${node.id} resimplify`, cfg.validation.zero_area_epsilon);
-  const polishLocks = buildOuterBorderLocks(sim.mesh);
-  polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
+  const sim = simplifyParentPage(welded, locks, node.footprint, cfg);
+  const simplified = sim.mesh !== welded;
+  if (simplified) {
+    validateWeldedIntermediate(sim.mesh, `${node.id} resimplify`, cfg.validation.zero_area_epsilon);
+    polishDiagonals(sim.mesh, buildOuterBorderLocks(sim.mesh), pageMeshPolishConfig(cfg));
+  }
   validateFinalPageMesh(sim.mesh, node.footprint, cfg.validation.zero_area_epsilon, `${node.id} final`);
   node.mesh = sim.mesh;
   node.bounds = boundsOf(sim.mesh);

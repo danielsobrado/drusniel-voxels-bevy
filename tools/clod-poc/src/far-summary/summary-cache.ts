@@ -260,6 +260,10 @@ export class FarSummaryCache implements FallbackStatsWriter {
     this.stats.staleTiles = stale;
     return { ...this.stats, evictedTiles: evicted };
   }
+
+  getTileCount(): number {
+    return this.tiles.size;
+  }
 }
 
 function sampleFromTile(tile: FarSummaryTile, x: number, z: number): FarSummarySample | null {

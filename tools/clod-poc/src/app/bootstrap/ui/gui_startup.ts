@@ -1,4 +1,5 @@
 import { createClodPocGui } from "../../../ui/gui/gui_root.js";
+import { shadowProxyDebugStateToConfig } from "../../../shadows/shadowProxyDebug.js";
 import type GUI from "lil-gui";
 import { type NodeView, recomputedNormalsFor } from "../bootstrap_types.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
@@ -44,6 +45,10 @@ export function runGuiStartup(
     applyColorByLodToMaterials,
     postProcess,
     currentPostProcessSettings,
+    shadowProxyDebugState,
+    getShadowProxyConfig,
+    setShadowProxyConfig,
+    shadowProxyController,
   } = input.terrainView;
   const {
     grassController,
@@ -64,6 +69,8 @@ export function runGuiStartup(
   } = input.runtime;
   const { applyColorAdjustmentsToTerrain } = input.terrainView;
   const { updateInfo, applyClodPerfMode } = infoPanel;
+
+  const farSummaryIntegration = (window as unknown as Record<string, unknown>).__drusnielFarSummary;
 
   const guiResult = createClodPocGui(state, {
     clod: {
@@ -122,6 +129,23 @@ export function runGuiStartup(
       setWaterWireframe: (enabled) => { state.waterWireframe = enabled; },
       setWaterDepthWrite: (on) => { state.waterDepthWrite = on; },
     },
+    longView: input.longView.infiniteFarShell || input.longView.farShellMetrics ? {
+      state,
+      farSummaryIntegration: farSummaryIntegration as import("../../../far-summary/integration.js").FarSummaryIntegration | undefined,
+      infiniteFarShell: input.longView.infiniteFarShell,
+    } : undefined,
+    shadowProxy: shadowProxyController && shadowProxyDebugState ? {
+      shadowProxyController,
+      farShellController,
+      infiniteFarShell: input.longView.infiniteFarShell,
+      getDebugState: () => shadowProxyDebugState,
+      setDebugState: (next) => {
+        Object.assign(shadowProxyDebugState, next);
+        setShadowProxyConfig(shadowProxyDebugStateToConfig(shadowProxyDebugState, getShadowProxyConfig()));
+      },
+      getBaseConfig: getShadowProxyConfig,
+      updateInfo,
+    } : undefined,
   });
 
   colorByLodController.current = guiResult.colorByLodController;

@@ -23,6 +23,7 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import { clamp, dot, float, max, mix, normalGeometry, normalize, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import { sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
+import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer } from "../farTerrain/farTerrainMaterial.js";
 
 /**
  * Height provider interface — alternative to TerrainSummaryField for the far shell.
@@ -52,6 +53,12 @@ export interface FarTerrainShellOptions {
   /** Build geometry relative to (0,0) so the mesh can be moved via mesh.position.
    *  When set, centerX/centerZ are only used for the material haze fade. */
   buildRelative?: boolean;
+    /** Use a Lambert receiver so Three.js directional shadows are visible in long-view PoC. */
+  receiveSunShadows?: boolean;
+  /** Use the parity material path with terrain band classification. */
+  useParityMaterial?: boolean;
+  /** Material config data for the parity material. */
+  parityConfig?: import("../farTerrain/farTerrainUniforms.js").FarTerrainUniformData;
 }
 
 export interface FarTerrainShell {
@@ -90,7 +97,7 @@ export function buildFarTerrainShell(
   options: Partial<FarTerrainShellOptions> = {},
 ): FarTerrainShell {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const { gridRes, heightDrop, heightBias, heightProvider, buildRelative } = opts;
+  const { gridRes, heightDrop, heightBias, heightProvider, buildRelative, receiveSunShadows, useParityMaterial, parityConfig } = opts;
 
   const worldSize = summary.worldSize;
   const centerX = opts.centerX ?? worldSize / 2;
@@ -199,8 +206,34 @@ export function buildFarTerrainShell(
   const ctrZ = float(centerZ);
   const distXZ = vec2(positionWorld.x.sub(ctrX), positionWorld.z.sub(ctrZ)).length();
   const hazeT = smoothstep(float(farRadius * 0.55), float(farRadius * 0.98), distXZ);
-  const material = new MeshBasicNodeMaterial();
-  material.colorNode = mix(base.mul(light), uHaze, hazeT);
+  if (useParityMaterial && parityConfig) {
+    const vc = computeFarTerrainVertexColors(
+      heightProvider
+        ? (x: number, z: number) => heightProvider.sampleHeight(x, z)
+        : (x: number, z: number) => sampleSkirtHeight(summary, x, z, farRadius, baseLevel, heightBias),
+      positions,
+      normals,
+      vertexCount,
+      parityConfig,
+      worldSize,
+    );
+    const colorAttr = createVertexColorBuffer(vc, parityConfig);
+    geometry.setAttribute("color", new THREE.BufferAttribute(colorAttr, 3));
+  }
+
+  let material: THREE.Material;
+  if (useParityMaterial && parityConfig) {
+    material = createFarTerrainMaterial(lighting, parityConfig, centerX, centerZ, farRadius);
+  } else if (receiveSunShadows) {
+    material = new THREE.MeshLambertMaterial({
+      color: 0x5a6b42,
+      side: THREE.DoubleSide,
+    });
+  } else {
+    const nodeMaterial = new MeshBasicNodeMaterial();
+    nodeMaterial.colorNode = mix(base.mul(light), uHaze, hazeT);
+    material = nodeMaterial;
+  }
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = false;
