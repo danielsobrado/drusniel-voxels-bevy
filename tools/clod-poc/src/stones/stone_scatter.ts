@@ -12,6 +12,7 @@ import {
   STONE_CLASSES,
   type StoneClass,
   type StoneSettings,
+  type StoneTerrainClassWeights,
 } from "./stone_config.js";
 
 const TWO_PI = Math.PI * 2;
@@ -49,6 +50,7 @@ export interface StoneInstance {
 export interface StoneSiteSample {
   height: number;
   normalY: number;
+  grass: number;
   rockExposure: number;
   snow: number;
   sand: number;
@@ -69,12 +71,16 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
+function mix(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
 /** Sample the terrain-derived placement fields at a world position. */
 export function sampleStoneSite(x: number, z: number, settings: StoneSettings): StoneSiteSample {
   const height = surfaceHeight(x, z);
   const normal = surfaceNormal(x, z);
   const normalY = normal[1];
-  const [, rock, sand, snow] = terrainWeights(height, normalY);
+  const [grass, rock, sand, snow] = terrainWeights(height, normalY);
 
   const standingWater = height < WATER_LEVEL + settings.waterMarginM + settings.standingWaterCutoffM;
   const repose = clamp01(
@@ -103,7 +109,32 @@ export function sampleStoneSite(x: number, z: number, settings: StoneSettings): 
   const riseFar = (hFar - hNear) / Math.max(1e-3, far - near);
   const cliffAbove = smoothstep(settings.cliffRiseStart, settings.cliffRiseEnd, Math.max(riseNear, riseFar));
 
-  return { height, normalY, rockExposure: rock, snow, sand, scree, streambed, cliffAbove, repose, standingWater };
+  return { height, normalY, grass, rockExposure: rock, snow, sand, scree, streambed, cliffAbove, repose, standingWater };
+}
+
+export function stoneTerrainBias(site: StoneSiteSample, settings: StoneSettings): StoneTerrainClassWeights {
+  const material = blendTerrainWeights([
+    [settings.terrain.grass, site.grass],
+    [settings.terrain.rock, site.rockExposure],
+    [settings.terrain.sand, site.sand],
+    [settings.terrain.snow, site.snow],
+  ]);
+  const t = settings.terrain;
+  const blend = Math.max(0.001, t.heightBlendM);
+  const lowWeight = 1 - smoothstep(t.lowHeightM - blend, t.lowHeightM + blend, site.height);
+  const highWeight = smoothstep(t.highHeightM - blend, t.highHeightM + blend, site.height);
+  const midWeight = Math.max(0, 1 - lowWeight - highWeight);
+  const height = blendTerrainWeights([
+    [t.low, lowWeight],
+    [t.mid, midWeight],
+    [t.high, highWeight],
+  ]);
+  return {
+    density: material.density * height.density,
+    large: material.large * height.large,
+    medium: material.medium * height.medium,
+    small: material.small * height.small,
+  };
 }
 
 /** Combined acceptance weight (≥0; >1 means certain). */
@@ -119,17 +150,18 @@ export function stoneWeight(site: StoneSiteSample, settings: StoneSettings, x: n
     site.streambed * settings.streamWeight +
     site.cliffAbove * settings.cliffAboveWeight +
     settings.baseSoilWeight;
-  return settings.density * base * patchClump * site.repose * (1 - site.snow * settings.snowFade);
+  return settings.density * base * patchClump * site.repose * stoneTerrainBias(site, settings).density * (1 - site.snow * settings.snowFade);
 }
 
 export function stoneClassWeights(site: StoneSiteSample, settings: StoneSettings): Record<StoneClass, number> {
   // Large stones gain weight where scree, streambeds, and cliff-fans collect bigger blocks.
   const largeBias =
     1 + site.scree + site.cliffAbove + site.streambed * settings.streamLargeBias * 6;
+  const terrain = stoneTerrainBias(site, settings);
   return {
-    large: CLASS_BASE_WEIGHTS.large * largeBias,
-    medium: CLASS_BASE_WEIGHTS.medium,
-    small: CLASS_BASE_WEIGHTS.small,
+    large: CLASS_BASE_WEIGHTS.large * largeBias * terrain.large,
+    medium: CLASS_BASE_WEIGHTS.medium * terrain.medium,
+    small: CLASS_BASE_WEIGHTS.small * terrain.small,
   };
 }
 
@@ -240,4 +272,30 @@ export function classShares(instances: readonly StoneInstance[]): Record<StoneCl
   for (const instance of instances) counts[instance.classId]++;
   const total = instances.length || 1;
   return { large: counts.large / total, medium: counts.medium / total, small: counts.small / total };
+}
+
+function blendTerrainWeights(
+  weighted: readonly (readonly [StoneTerrainClassWeights, number])[],
+): StoneTerrainClassWeights {
+  let sum = 0;
+  let density = 0;
+  let large = 0;
+  let medium = 0;
+  let small = 0;
+  for (const [entry, rawWeight] of weighted) {
+    const weight = Math.max(0, rawWeight);
+    sum += weight;
+    density += entry.density * weight;
+    large += entry.large * weight;
+    medium += entry.medium * weight;
+    small += entry.small * weight;
+  }
+  if (sum <= 0) return { density: 1, large: 1, medium: 1, small: 1 };
+  const inv = 1 / sum;
+  return {
+    density: mix(1, density * inv, 1),
+    large: mix(1, large * inv, 1),
+    medium: mix(1, medium * inv, 1),
+    small: mix(1, small * inv, 1),
+  };
 }
