@@ -1,7 +1,12 @@
 import * as THREE from "three";
 import { terrainWeights, surfaceHeight, surfaceNormal } from "../terrain/terrain.js";
 import type { PageFootprint } from "../types.js";
-import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
+import {
+  UNDERSTORY_CLASSES,
+  type UnderstoryClass,
+  type UnderstorySettings,
+  type UnderstoryTerrainClassWeights,
+} from "./understory_config.js";
 import {
   sampleUnderstoryEcology,
   understoryClassWeight,
@@ -119,7 +124,8 @@ export function generateUnderstoryInstances(
       }
 
       const weights = sampler.materialWeights(height, normalY);
-      const groundWeight = weights[0] + weights[1] * 0.25;
+      const terrainBias = understoryTerrainBias(weights, settings);
+      const groundWeight = (weights[0] + weights[1] * 0.25) * terrainBias.density;
       if (groundWeight < settings.placement.minGroundWeight) {
         stats.rejectedMaterial++;
         continue;
@@ -140,7 +146,14 @@ export function generateUnderstoryInstances(
         continue;
       }
 
-      const cls = selectUnderstoryClass(ecology, height, normalY, settings, understoryHash2(gridX, gridZ, settings.seed + 409));
+      const cls = selectUnderstoryClass(
+        ecology,
+        height,
+        normalY,
+        settings,
+        understoryHash2(gridX, gridZ, settings.seed + 409),
+        terrainBias,
+      );
       if (!cls) {
         stats.rejectedEcology++;
         continue;
@@ -193,10 +206,11 @@ export function selectUnderstoryClass(
   normalY: number,
   settings: UnderstorySettings,
   roll: number,
+  terrainBias: UnderstoryTerrainClassWeights = defaultClassBias(),
 ): UnderstoryClass | null {
   const weights = UNDERSTORY_CLASSES.map((classId) => ({
     classId,
-    weight: understoryClassWeight(classId, ecology, height, normalY, settings),
+    weight: understoryClassWeight(classId, ecology, height, normalY, settings) * terrainBias[classId],
   }));
   const total = weights.reduce((sum, entry) => sum + entry.weight, 0);
   if (total <= 0) return null;
@@ -206,6 +220,18 @@ export function selectUnderstoryClass(
     if (cursor <= 0) return entry.classId;
   }
   return weights[weights.length - 1]?.classId ?? null;
+}
+
+export function understoryTerrainBias(
+  weights: readonly [number, number, number, number],
+  settings: UnderstorySettings,
+): UnderstoryTerrainClassWeights {
+  return blendTerrainBias([
+    [settings.terrain.grass, weights[0]],
+    [settings.terrain.rock, weights[1]],
+    [settings.terrain.sand, weights[2]],
+    [settings.terrain.snow, weights[3]],
+  ]);
 }
 
 function classSpacingRadius(cls: UnderstoryClass, spacing: number): number {
@@ -221,4 +247,43 @@ function incrementClassStats(stats: UnderstoryGenerationStats, cls: UnderstoryCl
   else if (cls === "flower") stats.acceptedFlower++;
   else if (cls === "dead_log") stats.acceptedDeadLog++;
   else stats.acceptedStump++;
+}
+
+function defaultClassBias(): UnderstoryTerrainClassWeights {
+  return { density: 1, shrub: 1, fern: 1, sapling: 1, flower: 1, dead_log: 1, stump: 1 };
+}
+
+function blendTerrainBias(
+  entries: readonly (readonly [UnderstoryTerrainClassWeights, number])[],
+): UnderstoryTerrainClassWeights {
+  const out = defaultClassBias();
+  let sum = 0;
+  out.density = 0;
+  out.shrub = 0;
+  out.fern = 0;
+  out.sapling = 0;
+  out.flower = 0;
+  out.dead_log = 0;
+  out.stump = 0;
+  for (const [entry, rawWeight] of entries) {
+    const weight = Math.max(0, rawWeight);
+    sum += weight;
+    out.density += entry.density * weight;
+    out.shrub += entry.shrub * weight;
+    out.fern += entry.fern * weight;
+    out.sapling += entry.sapling * weight;
+    out.flower += entry.flower * weight;
+    out.dead_log += entry.dead_log * weight;
+    out.stump += entry.stump * weight;
+  }
+  if (sum <= 0) return defaultClassBias();
+  const inv = 1 / sum;
+  out.density *= inv;
+  out.shrub *= inv;
+  out.fern *= inv;
+  out.sapling *= inv;
+  out.flower *= inv;
+  out.dead_log *= inv;
+  out.stump *= inv;
+  return out;
 }
