@@ -2,9 +2,11 @@ import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
 import {
+  DEFAULT_EDGE_OCEAN_SETTINGS,
   WaterClipmap,
   WaterField,
   WATER_DEBUG_MODES,
+  type EdgeOceanSettings,
   type WaterConfig,
   type WaterDebugState,
 } from "../../water/index.js";
@@ -56,6 +58,10 @@ export interface WaterController {
   setDebugMode(mode: keyof typeof WATER_DEBUG_MODES): void;
   setClipmapTint(enabled: boolean): void;
   setWireframe(enabled: boolean): void;
+  setOceanEnabled(enabled: boolean): void;
+  setOceanStartDistance(distance: number): void;
+  setOceanFullDepthDistance(distance: number): void;
+  setOceanMaxDepth(depth: number): void;
   updateVisual(visual: ReturnType<WaterController["makeVisual"]>): void;
   updateSunDirection(direction: THREE.Vector3): void;
   update(deltaSeconds: number, cameraPosition: THREE.Vector3): void;
@@ -64,9 +70,28 @@ export interface WaterController {
   dispose(): void;
 }
 
+function readPositiveParam(searchParams: URLSearchParams, key: string, fallback: number): number {
+  const raw = searchParams.get(key);
+  if (raw === null) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readOceanSettings(searchParams: URLSearchParams): EdgeOceanSettings {
+  return {
+    ...DEFAULT_EDGE_OCEAN_SETTINGS,
+    enabled: searchParams.get("ocean") === "1" || searchParams.get("edgeOcean") === "1",
+    startDistance: readPositiveParam(searchParams, "oceanStart", DEFAULT_EDGE_OCEAN_SETTINGS.startDistance),
+    fullDepthDistance: readPositiveParam(searchParams, "oceanFull", DEFAULT_EDGE_OCEAN_SETTINGS.fullDepthDistance),
+    maxDepth: readPositiveParam(searchParams, "oceanDepth", DEFAULT_EDGE_OCEAN_SETTINGS.maxDepth),
+  };
+}
+
 export async function createWaterController(deps: WaterControllerDeps): Promise<WaterController> {
   const pageSignaturesBefore = pageMeshSignatures(deps.nodes);
-  const field = new WaterField(deps.waterConfig, { surfaceHeight: deps.surfaceHeight }, deps.hydrologySystem);
+  const field = new WaterField(deps.waterConfig, { surfaceHeight: deps.surfaceHeight }, deps.hydrologySystem, deps.worldCells);
+  const oceanSettings = readOceanSettings(deps.searchParams);
+  field.setEdgeOcean(oceanSettings);
   const waterMaterialFactory = deps.isWebGpu
     ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
     : createWaterShaderMaterial;
@@ -92,12 +117,26 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     clipmapTint: ui.waterClipmapTint,
     wireframe: ui.waterWireframe,
     depthWrite: ui.waterDepthWrite,
+    oceanEnabled: oceanSettings.enabled,
+    oceanStartDistance: oceanSettings.startDistance,
+    oceanFullDepthDistance: oceanSettings.fullDepthDistance,
+    oceanMaxDepth: oceanSettings.maxDepth,
   };
 
   const makeVisual = () => ({
     ...deps.waterConfig.visual,
     depthWrite: deps.getUiState().waterDepthWrite,
   });
+
+  const applyOceanDebugState = () => {
+    field.setEdgeOcean({
+      enabled: debugState.oceanEnabled,
+      startDistance: debugState.oceanStartDistance,
+      fullDepthDistance: debugState.oceanFullDepthDistance,
+      maxDepth: debugState.oceanMaxDepth,
+    });
+    clipmap.update(0, deps.camera.position as THREE.Vector3);
+  };
 
   const controller: WaterController = {
     field,
@@ -115,6 +154,22 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     },
     setWireframe(enabled) {
       clipmap.setWireframe(enabled);
+    },
+    setOceanEnabled(enabled) {
+      debugState.oceanEnabled = enabled;
+      applyOceanDebugState();
+    },
+    setOceanStartDistance(distance) {
+      debugState.oceanStartDistance = Math.max(1, distance);
+      applyOceanDebugState();
+    },
+    setOceanFullDepthDistance(distance) {
+      debugState.oceanFullDepthDistance = Math.max(0, distance);
+      applyOceanDebugState();
+    },
+    setOceanMaxDepth(depth) {
+      debugState.oceanMaxDepth = Math.max(0.01, depth);
+      applyOceanDebugState();
     },
     updateVisual(visual) {
       clipmap.updateVisual(visual);
@@ -153,6 +208,14 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         debugState.mode = modeName;
         clipmap.setDebugMode(id as typeof WATER_DEBUG_MODES[keyof typeof WATER_DEBUG_MODES]);
         return { mode: modeName, id };
+      };
+      const setEdgeOcean = (settings: Partial<EdgeOceanSettings>) => {
+        debugState.oceanEnabled = settings.enabled ?? debugState.oceanEnabled;
+        debugState.oceanStartDistance = settings.startDistance ?? debugState.oceanStartDistance;
+        debugState.oceanFullDepthDistance = settings.fullDepthDistance ?? debugState.oceanFullDepthDistance;
+        debugState.oceanMaxDepth = settings.maxDepth ?? debugState.oceanMaxDepth;
+        applyOceanDebugState();
+        return field.getEdgeOcean();
       };
       const setCameraPose = (pose: { x: number; z: number; yaw?: number; y?: number; distance?: number; pitch?: number }) => {
         const x = Number(pose.x);
@@ -194,6 +257,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
           debugMode: uiState.waterDebugMode,
           clipmapTint: uiState.waterClipmapTint,
           wireframe: uiState.waterWireframe,
+          ocean: field.getEdgeOcean(),
           debugModes: { ...WATER_DEBUG_MODES },
           clipmap: {
             levelCount: clipmap.levelCount,
@@ -217,6 +281,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       Object.assign(window, {
         waterProbe: sampleForDebug,
         setWaterDebugMode,
+        setEdgeOcean,
         setCameraPose,
         waterDebugInfo,
       });
@@ -240,6 +305,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       console.log("[DEV LOG] Water System Initialized:", {
         worldCells,
         worldBounds: { minX: 0, minZ: 0, maxX: worldCells, maxZ: worldCells },
+        ocean: field.getEdgeOcean(),
         resolvedLakes: deps.waterConfig.fakeBodies.lakes.map((l) => ({ center: l.center, radius: l.radius, levelOffset: l.levelOffset })),
         resolvedRivers: deps.waterConfig.fakeBodies.rivers.map((r) => r.points),
         lakeCenterSample: lakeCenterSample ? {
