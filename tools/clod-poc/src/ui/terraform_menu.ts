@@ -1,8 +1,8 @@
 import { emitAudio } from "../audio/index.js";
-import type { BrushOp, BrushShape } from "../terrain.js";
+import type { BrushOp, BrushShape } from "../terrain/terrain.js";
 import { PAINT_SWATCH_COLORS } from "../app/clod_constants.js";
-import { materialCarouselBounds, materialCarouselPageForSelection } from "../material_carousel.js";
-import { terrainTextureSlotLabel } from "../terrain_textures.js";
+import { materialCarouselBounds, materialCarouselPageForSelection } from "../material/material_carousel.js";
+import { terrainTextureSlotLabel } from "../terrain/terrain_textures.js";
 import type { ClodIconKind } from "./icons/index.js";
 import { setButtonIcon } from "./dom_icons.js";
 import type { TerrainMaterialController } from "../terrain/material/terrain_material_controller.js";

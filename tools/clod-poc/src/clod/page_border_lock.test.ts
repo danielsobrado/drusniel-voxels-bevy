@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PageFootprint, PageMesh } from "../types.js";
-import { assertNoInternalBorders } from "../validate.js";
+import { assertNoInternalBorders } from "./validate.js";
 import { collectOuterBorderVertexKeys, validatePageBorderChains } from "./page_border_lock.js";
 
 function gridMesh(): { mesh: PageMesh; footprint: PageFootprint } {

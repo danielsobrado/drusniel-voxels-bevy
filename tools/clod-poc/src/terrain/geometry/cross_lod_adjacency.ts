@@ -1,4 +1,4 @@
-import { borderChain } from "../../validate.js";
+import { borderChain } from "../../clod/validate.js";
 import { ClodPageNode } from "../../types.js";
 
 export interface SharedEdge {

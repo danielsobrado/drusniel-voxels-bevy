@@ -12,11 +12,11 @@ import {
   paintWeightsAt,
   replaceDigEdits,
   surfaceHeight,
-} from "./terrain.js";
-import { buildNodeIndex, buildWorld, rebuildDirtyLod0Pages, rebuildDirtyPages } from "./quadtree.js";
-import { buildLod0PageSource } from "./source_mesh.js";
-import { initSimplifier } from "./simplify.js";
-import { assertBorderMatch, borderChain } from "./validate.js";
+} from "./terrain/terrain.js";
+import { buildNodeIndex, buildWorld, rebuildDirtyLod0Pages, rebuildDirtyPages } from "./clod/quadtree.js";
+import { buildLod0PageSource } from "./clod/source_mesh.js";
+import { initSimplifier } from "./clod/simplify.js";
+import { assertBorderMatch, borderChain } from "./clod/validate.js";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "./config.js";
 
 // Small world: 2x2 pages of 2x2 chunks of 16 cells -> 64x64 cells, LOD0 + one LOD1 root.

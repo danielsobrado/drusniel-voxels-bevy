@@ -1,6 +1,6 @@
 import { WATER_DEBUG_MODES } from "../../water/index.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
-import type { ProjectWaterArchiveState } from "../../project_archive.js";
+import type { ProjectWaterArchiveState } from "../../project/project_archive.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
 export interface WaterSliceState {

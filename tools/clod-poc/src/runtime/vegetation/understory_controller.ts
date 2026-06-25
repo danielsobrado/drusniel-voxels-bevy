@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
-import type { EnvironmentLighting } from "../../environment.js";
+import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
 import { UnderstorySystem, type UnderstoryStats } from "../../understory/understory_system.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { surfaceHeight } from "../src/terrain.js";
+import { surfaceHeight } from "../src/terrain/terrain.js";
 import { HydrologySystem, parseWaterConfig, resolveWaterConfig } from "../src/water/index.js";
 
 const root = resolve(import.meta.dirname, "..");

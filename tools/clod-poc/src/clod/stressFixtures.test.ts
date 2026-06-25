@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
-import { initSimplifier } from "../simplify.js";
+import { initSimplifier } from "./simplify.js";
 import type { PageMesh, ClodPageNode } from "../types.js";
-import { assertBorderMatch, borderChain } from "../validate.js";
+import { assertBorderMatch, borderChain } from "./validate.js";
 import { buildTestHierarchy, validateHierarchyInvariants } from "./buildTestHierarchy.js";
 import { formatBuildStats } from "./stats.js";
 import { buildDebugSummary } from "./debugExport.js";

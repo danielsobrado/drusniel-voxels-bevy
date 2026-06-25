@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { terrainWeights, surfaceHeight, surfaceNormal } from "../terrain.js";
+import { terrainWeights, surfaceHeight, surfaceNormal } from "../terrain/terrain.js";
 import type { PageFootprint } from "../types.js";
 import { treeHash2, treeRandomSigned } from "./tree_hash.js";
 import { selectTreeSpecies } from "./tree_species.js";

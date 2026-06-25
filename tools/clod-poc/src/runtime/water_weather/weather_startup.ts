@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { surfaceHeight, surfaceNormal } from "../../terrain.js";
+import { surfaceHeight, surfaceNormal } from "../../terrain/terrain.js";
 import { createWeatherController } from "./weather_controller.js";
 import type { WaterStartupResult } from "./water_startup.js";
 

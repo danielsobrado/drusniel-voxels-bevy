@@ -1,6 +1,6 @@
 import { getAudioState } from "../../audio/index.js";
 import type { ClodPagesConfig } from "../../config.js";
-import type { ProjectArchiveContents } from "../../project_archive.js";
+import type { ProjectArchiveContents } from "../../project/project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import type { WeatherMode } from "../clod_constants.js";
 import type { TerrainMaterialSource } from "../../terrain/material/terrain_material_constants.js";

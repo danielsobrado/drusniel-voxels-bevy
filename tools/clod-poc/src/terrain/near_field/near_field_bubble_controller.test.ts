@@ -3,8 +3,8 @@ import * as THREE from "three";
 import { createNearFieldBubbleController } from "./near_field_bubble_controller.js";
 import type { ClodPageNode } from "../../types.js";
 
-vi.mock("../../terrain.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../terrain.js")>();
+vi.mock("../../terrain/terrain.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../terrain/terrain.js")>();
   return {
     ...actual,
     meshChunk: () => {

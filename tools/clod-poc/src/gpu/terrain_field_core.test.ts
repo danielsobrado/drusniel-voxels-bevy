@@ -10,7 +10,7 @@ import {
   replaceDigEdits,
   clearDigEdits,
   DigEdit,
-} from "../terrain.js";
+} from "../terrain/terrain.js";
 import {
   surfaceHeightCore,
   densityCore,

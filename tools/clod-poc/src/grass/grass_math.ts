@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { terrainWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "../terrain.js";
+import { terrainWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "../terrain/terrain.js";
 import {
   DEFAULT_GRASS_SETTINGS,
   GRASS_WATER_CLEARANCE,

@@ -3,8 +3,8 @@ import * as THREE from "three";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { surfaceHeight } from "../terrain.js";
-import { buildLod0PageSource } from "../source_mesh.js";
+import { surfaceHeight } from "../terrain/terrain.js";
+import { buildLod0PageSource } from "../clod/source_mesh.js";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
 import {
   DEFAULT_WATER_CONFIG,

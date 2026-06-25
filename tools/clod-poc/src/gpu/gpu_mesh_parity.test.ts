@@ -2,7 +2,7 @@
 // verified CPU mesher with synthetic f32-style perturbation standing in for the GPU's f32 drift.
 
 import { describe, it, expect } from "vitest";
-import { meshChunk } from "../terrain.js";
+import { meshChunk } from "../terrain/terrain.js";
 import type { ClodPagesConfig } from "../config.js";
 import { meshChunkGpuShaped } from "./surface_nets_core.js";
 import { compareChunkSurfaces } from "./gpu_mesh_parity.js";

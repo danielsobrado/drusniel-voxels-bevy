@@ -27,7 +27,7 @@ import {
   vec2,
   vec3,
 } from "three/tsl";
-import type { EnvironmentLighting } from "../environment.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
 import type { UnderstoryMaterialHandle } from "./understory_material.js";
 

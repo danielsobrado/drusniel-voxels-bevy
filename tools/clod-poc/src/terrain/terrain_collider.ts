@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MeshBVH } from "three-mesh-bvh";
-import type { PageMesh } from "./types.js";
+import type { PageMesh } from "../types.js";
 
 export interface TerrainColliderFootprint {
   minX: number;

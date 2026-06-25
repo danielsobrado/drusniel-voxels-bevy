@@ -14,9 +14,9 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { WebGPURenderer } from "three/webgpu";
 import { parseConfig } from "../config.js";
-import { buildWorld, rebuildDirtyPages } from "../quadtree.js";
-import { initSimplifier } from "../simplify.js";
-import { selectCut, type SelectionParams, type SelectionState } from "../selection.js";
+import { buildWorld, rebuildDirtyPages } from "../clod/quadtree.js";
+import { initSimplifier } from "../clod/simplify.js";
+import { selectCut, type SelectionParams, type SelectionState } from "../clod/selection.js";
 import { DEFAULT_GRASS_SETTINGS, generateGrassInstances } from "../grass.js";
 import { DEFAULT_STONE_SETTINGS } from "../stones/stone_config.js";
 import { StoneSystem, type StoneLighting } from "../stones/stone_instances.js";
@@ -27,8 +27,8 @@ import {
   PAINT_BLEND_CHANNELS,
   paintWeightsAt,
   type DigEdit,
-} from "../terrain.js";
-import { TerrainColliderSet } from "../terrain_collider.js";
+} from "../terrain/terrain.js";
+import { TerrainColliderSet } from "../terrain/terrain_collider.js";
 import { parseProceduralTextureConfig } from "../textures/materialRecipes.js";
 import { createProceduralTerrainTextures } from "../textures/terrainTextureArrays.js";
 import type { ClodPageNode, PageMesh } from "../types.js";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { surfaceHeight, WATER_LEVEL } from "../terrain.js";
+import { surfaceHeight, WATER_LEVEL } from "../terrain/terrain.js";
 import type { PageFootprint } from "../types.js";
 import { DEFAULT_STONE_SETTINGS, type StoneSettings } from "./stone_config.js";
 import { classShares, generateRankedStoneInstances, generateStoneInstances } from "./stone_scatter.js";

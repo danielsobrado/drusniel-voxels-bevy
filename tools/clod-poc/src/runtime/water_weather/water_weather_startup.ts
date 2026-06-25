@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
-import type { EnvironmentLighting } from "../../environment.js";
+import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { HydrologySystem } from "../../water/index.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";

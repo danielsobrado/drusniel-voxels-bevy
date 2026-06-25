@@ -1,10 +1,10 @@
 // LOD0 page source — built by WELDING same-resolution chunk meshes, never re-extracted.
 
-import { PageMesh, PageFootprint, ClodBuildError } from "./types.js";
-import { ClodPagesConfig } from "./config.js";
-import { meshChunk, WorldBounds } from "./terrain.js";
+import { PageMesh, PageFootprint, ClodBuildError } from "../types.js";
+import { ClodPagesConfig } from "../config.js";
+import { meshChunk, WorldBounds } from "../terrain/terrain.js";
 import { weldVertices, WeldReport } from "./weld.js";
-import { assertMaterialWeights } from "./materialWeights.js";
+import { assertMaterialWeights } from "../material/material_weights.js";
 
 export interface PageSource {
   mesh: PageMesh;

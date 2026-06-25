@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "./config.js";
+import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
 import { initSimplifier, simplifyPage } from "./simplify.js";
-import type { PageMesh } from "./types.js";
+import type { PageMesh } from "../types.js";
 
 const cfg: ClodPagesConfig = {
   page: { chunks_per_page: 4, chunk_size: 16, halo_chunks: 1, quadtree_levels: 4 },

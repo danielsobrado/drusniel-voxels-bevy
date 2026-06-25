@@ -5,8 +5,8 @@
 // count-and-continue: a rejected conflict survives as an unwelded internal border and
 // fails later with a worse message). Spatial hash, NOT a kd-tree (jglrxavpok perf trap).
 
-import { PageMesh, ClodBuildError, vertexCount, type BorderTolerances } from "./types.js";
-import { assertMaterialWeights } from "./materialWeights.js";
+import { PageMesh, ClodBuildError, vertexCount, type BorderTolerances } from "../types.js";
+import { assertMaterialWeights } from "../material/material_weights.js";
 
 export interface WeldReport {
   inputVertices: number;

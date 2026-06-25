@@ -17,9 +17,9 @@ import type {
   DispatchOptions,
 } from "../../gpu/clod_error_px_compute.js";
 import type { WebGpuReadbackMode } from "../../core/webgpu_readback_mode.js";
-import { selectCut, type SelectionParams, type SelectionState } from "../../selection.js";
+import { selectCut, type SelectionParams, type SelectionState } from "../../clod/selection.js";
 import { LockedBorderOverlay } from "../../ui/locked_border_overlay.js";
-import { borderChain } from "../../validate.js";
+import { borderChain } from "../../clod/validate.js";
 import { ClodPageNode } from "../../types.js";
 import {
   appendCrossLodBorderSegments,

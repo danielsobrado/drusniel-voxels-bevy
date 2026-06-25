@@ -25,7 +25,7 @@ import {
   type EnvironmentColors,
   type EnvironmentLighting,
   type EnvironmentSettings,
-} from "../environment.js";
+} from "../environment/environment.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;

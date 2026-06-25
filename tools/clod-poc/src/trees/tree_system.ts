@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
-import { getDigEditsSnapshot } from "../terrain.js";
+import { getDigEditsSnapshot } from "../terrain/terrain.js";
 import type { ClodPageNode, PageFootprint } from "../types.js";
 import { depthPrepassTwin } from "../rendering/veg_prepass.js";
 import {
@@ -61,7 +61,7 @@ import {
   type TreeHydrologyWater,
   type TreeRingInstanceBuffers,
 } from "./tree_node_material.js";
-import type { EnvironmentLighting } from "../environment.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 
 const TREE_BOUNDS_REFRESH_DISTANCE_M = 1.0;

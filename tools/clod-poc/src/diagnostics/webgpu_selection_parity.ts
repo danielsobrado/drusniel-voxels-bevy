@@ -1,6 +1,6 @@
 import type { ClodErrorMap, ClodErrorPxCompute, DispatchOptions } from "../gpu/clod_error_px_compute.js";
 import type { WebGpuReadbackMode } from "../core/webgpu_readback_mode.js";
-import { errorPx, type SelectionParams } from "../selection.js";
+import { errorPx, type SelectionParams } from "../clod/selection.js";
 import type { ClodPageNode } from "../types.js";
 
 export interface WebGpuParityTracker {

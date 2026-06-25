@@ -8,7 +8,7 @@ import { runAppStateStartup } from "./app_state_startup.js";
 import { createBootstrapUiRefs } from "./bootstrap_refs.js";
 import { createTerrainEditContext } from "./terrain_edit_context.js";
 import type { BootstrapQueryContext } from "./query_context.js";
-import type { ProjectArchiveContents } from "../../project_archive.js";
+import type { ProjectArchiveContents } from "../../project/project_archive.js";
 import type { ClodPagesConfig } from "../../config.js";
 import type { RendererStartupResult } from "./renderer_startup.js";
 import type { WorldBuildResult } from "./world_build_startup.js";

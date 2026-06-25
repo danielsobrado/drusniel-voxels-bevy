@@ -30,7 +30,7 @@ import {
   vec2,
   vec3,
 } from "three/tsl";
-import type { EnvironmentLighting } from "../environment.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   createBladeGeometry,
   createGrassClumpGeometry,

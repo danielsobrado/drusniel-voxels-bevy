@@ -2,7 +2,7 @@ import type {
   ProjectSessionState,
   ProjectWaterArchiveState,
   ProjectWeatherArchiveState,
-} from "../project_archive.js";
+} from "../project/project_archive.js";
 import type { WaterSliceState } from "../app/state/water_state.js";
 import type { WeatherSliceState } from "../app/state/weather_state.js";
 

@@ -3,7 +3,7 @@
 // are an overlay and never feed `source_mesh.ts` / `weld.ts`. Terrain-aware weighting mirrors
 // the LAAS rules adapted to the fields the PoC terrain exposes (height, normal, material bands).
 
-import { terrainWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "../terrain.js";
+import { terrainWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "../terrain/terrain.js";
 import type { PageFootprint } from "../types.js";
 import { ROCK_PRESETS, type RockPreset } from "./rock_builder.js";
 import { hash2, hashU32 } from "./stone_hash.js";

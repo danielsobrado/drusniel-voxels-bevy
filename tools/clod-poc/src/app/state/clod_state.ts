@@ -1,5 +1,5 @@
 import type { ClodPagesConfig } from "../../config.js";
-import type { ProjectSessionState } from "../../project_archive.js";
+import type { ProjectSessionState } from "../../project/project_archive.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
 export interface ClodSliceState {

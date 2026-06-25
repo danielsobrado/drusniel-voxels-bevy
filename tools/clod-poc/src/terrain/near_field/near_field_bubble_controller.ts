@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { ClodPagesConfig } from "../../config.js";
-import { meshChunk, getDigEditsSnapshot } from "../../terrain.js";
+import { meshChunk, getDigEditsSnapshot } from "../../terrain/terrain.js";
 import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
 import type { ChunkMesh, GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import { toGeometry } from "../geometry/page_geometry.js";

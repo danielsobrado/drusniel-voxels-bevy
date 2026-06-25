@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { buildTerrainFragmentShader } from "../terrain_shader.js";
+import { buildTerrainFragmentShader } from "../terrain/terrain_shader.js";
 import { MATERIAL_DEBUG_VIEW_IDS, materialDebugViewIndex } from "../debug/materialDebugViews.js";
 import { samplePageTerrainMaterial } from "../materials/pageTerrainMaterial.js";
 import { sampleDrusnielTerrainMaterial } from "../materials/terrainMaterialCommon.js";

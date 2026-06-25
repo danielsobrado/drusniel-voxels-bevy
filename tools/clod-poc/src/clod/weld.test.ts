@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PageMesh } from "./types.js";
+import type { PageMesh } from "../types.js";
 import { weldVertices } from "./weld.js";
 
 describe("weldVertices", () => {

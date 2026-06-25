@@ -1,0 +1,50 @@
+name: CLOD Phase 3 Gate
+
+on:
+  push:
+    paths:
+      - 'tools/clod-poc/**'
+      - '.github/workflows/clod-phase3-gate.yml'
+  pull_request:
+    paths:
+      - 'tools/clod-poc/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  phase3-gate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/clod-poc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: tools/clod-poc/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Acceptance gate (no screenshots)
+        run: npm run acceptance:clod:fast
+
+      - name: Upload acceptance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-runs
+          path: tools/clod-poc/acceptance-runs/

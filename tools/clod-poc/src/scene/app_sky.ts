@@ -1,4 +1,4 @@
-import type { EnvironmentLighting, EnvironmentSettings } from "../environment.js";
+import type { EnvironmentLighting, EnvironmentSettings } from "../environment/environment.js";
 
 export interface AppSky {
   lighting(): EnvironmentLighting;

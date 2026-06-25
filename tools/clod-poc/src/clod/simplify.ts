@@ -4,9 +4,9 @@
 // simplify_sloppy is NEVER used because it can break topology.
 
 import { MeshoptSimplifier } from "meshoptimizer";
-import { PageMesh, ClodBuildError, vertexCount } from "./types.js";
-import { ClodPagesConfig } from "./config.js";
-import { assertMaterialWeights } from "./materialWeights.js";
+import { PageMesh, ClodBuildError, vertexCount } from "../types.js";
+import { ClodPagesConfig } from "../config.js";
+import { assertMaterialWeights } from "../material/material_weights.js";
 
 let ready = false;
 export async function initSimplifier(): Promise<void> {

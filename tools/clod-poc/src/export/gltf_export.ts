@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
-import type { ClodPageNode, PageMesh } from "./types.js";
+import type { ClodPageNode, PageMesh } from "../types.js";
 
 const EXPORT_LOD_COLORS = [0x9ca3ad, 0x3a6ea5, 0x49a078, 0xd98032];
 

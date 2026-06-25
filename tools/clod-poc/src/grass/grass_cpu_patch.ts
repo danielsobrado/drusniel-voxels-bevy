@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { PageFootprint } from "../types.js";
-import { surfaceHeight } from "../terrain.js";
+import { surfaceHeight } from "../terrain/terrain.js";
 import {
   TWO_PI,
   type GrassSettings,

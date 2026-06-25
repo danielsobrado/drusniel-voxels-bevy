@@ -1,4 +1,4 @@
-import type { ProjectSessionState } from "../../project_archive.js";
+import type { ProjectSessionState } from "../../project/project_archive.js";
 import type { GrassSettings } from "../../grass/grass_config.js";
 import type { StoneSettings } from "../../stones/stone_config.js";
 import type { TreeSettings } from "../../trees/tree_config.js";

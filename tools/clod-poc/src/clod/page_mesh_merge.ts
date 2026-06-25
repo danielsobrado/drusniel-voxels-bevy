@@ -1,6 +1,6 @@
-import { concat } from "../source_mesh.js";
+import { concat } from "./source_mesh.js";
 import type { ClodPageNode, PageMesh } from "../types.js";
-import { assertMaterialWeights } from "../materialWeights.js";
+import { assertMaterialWeights } from "../material/material_weights.js";
 
 export function mergeChildPageMeshes(children: readonly ClodPageNode[], epsilon: number): PageMesh {
   const ordered = [...children].sort((a, b) =>

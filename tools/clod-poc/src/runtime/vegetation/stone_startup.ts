@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import type { StoneStats } from "../../stones/stone_instances.js";
-import type { EnvironmentLighting } from "../../environment.js";
+import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { HydrologySystem } from "../../water/index.js";
 import { createStoneController } from "./stone_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";

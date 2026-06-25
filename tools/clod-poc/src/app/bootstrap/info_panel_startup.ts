@@ -1,4 +1,4 @@
-import { digEditCount } from "../../terrain.js";
+import { digEditCount } from "../../terrain/terrain.js";
 import { formatTreeInfoLine } from "../../trees/index.js";
 import { formatUnderstoryInfoLine } from "../../understory/index.js";
 import { formatForestLightingInfoLine } from "../../forest_lighting/index.js";

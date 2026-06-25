@@ -2,7 +2,7 @@ import { emitAudio } from "../../audio/index.js";
 import {
   consumeStagedProjectImport,
   type ProjectArchiveContents,
-} from "../../project_archive.js";
+} from "../../project/project_archive.js";
 
 export interface ProjectImportDom {
   buildProgress: HTMLElement;

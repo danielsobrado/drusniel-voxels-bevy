@@ -16,7 +16,7 @@ import {
 import { createUnderstoryMaterialHandle, type UnderstoryMaterialHandle } from "./understory_material.js";
 import { createUnderstoryNodeMaterialHandle } from "./understory_node_material.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
-import type { EnvironmentLighting } from "../environment.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   UnderstoryGpuRingCompute,
   understoryGpuRingComputeUnsupportedReason,
@@ -28,7 +28,7 @@ import {
   type UnderstoryHydrologyData,
 } from "../gpu/understory_ring_compute.js";
 import { understoryRingGroupCapacity, understoryRingCell } from "./understory_ring_math.js";
-import { getDigEditsSnapshot, getDigEditRevision } from "../terrain.js";
+import { getDigEditsSnapshot, getDigEditRevision } from "../terrain/terrain.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import { generateUnderstoryRingValidationCounts } from "./understory_ring_validation.js";
 

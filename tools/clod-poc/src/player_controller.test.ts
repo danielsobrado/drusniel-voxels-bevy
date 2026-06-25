@@ -8,7 +8,7 @@ import {
   jumpVelocityForHeight,
   normalizeMovementInput,
 } from "./player_controller.js";
-import { TerrainColliderSet, type TerrainColliderPage } from "./terrain_collider.js";
+import { TerrainColliderSet, type TerrainColliderPage } from "./terrain/terrain_collider.js";
 
 function page(id: string, geometry: THREE.BufferGeometry, minX = -10, minZ = -10, maxX = 10, maxZ = 10): TerrainColliderPage {
   return { id, geometry, footprint: { minX, minZ, maxX, maxZ } };

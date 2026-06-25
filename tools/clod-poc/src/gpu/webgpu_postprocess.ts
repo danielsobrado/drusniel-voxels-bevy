@@ -19,7 +19,7 @@ import {
 import {
   DEFAULT_POST_PROCESS_SETTINGS,
   type PostProcessSettings,
-} from "../postprocess.js";
+} from "../environment/postprocess.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;

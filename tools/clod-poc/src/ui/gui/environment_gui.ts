@@ -3,12 +3,12 @@ import type { ClodAppState } from "../../app/clod_app_state.js";
 import { setAudioEnabled, setMasterVolume } from "../../audio/index.js";
 import {
   DEFAULT_ENVIRONMENT_SETTINGS,
-} from "../../environment.js";
+} from "../../environment/environment.js";
 import {
   DEFAULT_POST_PROCESS_SETTINGS,
   type PostProcessSettings,
-} from "../../postprocess.js";
-import { DEFAULT_TERRAIN_COLOR_ADJUSTMENTS } from "../../material.js";
+} from "../../environment/postprocess.js";
+import { DEFAULT_TERRAIN_COLOR_ADJUSTMENTS } from "../../material/material.js";
 import type { GuiController } from "./gui_controller.js";
 
 export interface EnvironmentGuiDeps {

@@ -1,10 +1,10 @@
-import type { WeatherMode } from "./app/clod_constants.js";
-import type { ClodPagesConfig } from "./config.js";
-import { isGrassShaderMode, type GrassShaderMode } from "./grass.js";
-import type { BrushOp, BrushShape, DigEdit } from "./terrain.js";
-import { MAX_TERRAIN_TEXTURES } from "./terrain_textures.js";
-import { DEFAULT_RAIN_WEATHER_SETTINGS } from "./weather/rain.js";
-import { DEFAULT_WATER_VISUAL, WATER_DEBUG_MODES, type WaterDebugMode } from "./water/waterConfig.js";
+import type { WeatherMode } from "../app/clod_constants.js";
+import type { ClodPagesConfig } from "../config.js";
+import { isGrassShaderMode, type GrassShaderMode } from "../grass.js";
+import type { BrushOp, BrushShape, DigEdit } from "../terrain/terrain.js";
+import { MAX_TERRAIN_TEXTURES } from "../terrain/terrain_textures.js";
+import { DEFAULT_RAIN_WEATHER_SETTINGS } from "../weather/rain.js";
+import { DEFAULT_WATER_VISUAL, WATER_DEBUG_MODES, type WaterDebugMode } from "../water/waterConfig.js";
 
 export const PROJECT_SCHEMA_VERSION_V1 = 1 as const;
 export const PROJECT_SCHEMA_VERSION = 2 as const;

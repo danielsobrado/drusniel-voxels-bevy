@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { emitAudio } from "../../audio/index.js";
-import { materialCarouselBounds, TEXTURE_MODAL_PAGE_SIZE } from "../../material_carousel.js";
+import { materialCarouselBounds, TEXTURE_MODAL_PAGE_SIZE } from "../../material/material_carousel.js";
 import {
   INITIAL_TERRAIN_TEXTURE_COUNT,
   MAX_TERRAIN_TEXTURES,
   terrainTextureSlotLabel,
-} from "../../terrain_textures.js";
+} from "../../terrain/terrain_textures.js";
 import { iconDataUrl } from "../../ui/icons/index.js";
 import { setButtonIcon } from "../../ui/dom_icons.js";
 import { TERRAIN_BAND_ICONS } from "../../app/clod_constants.js";

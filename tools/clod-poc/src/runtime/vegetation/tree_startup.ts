@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import { formatTreeTotalDisplay, type TreeStats } from "../../trees/index.js";
-import type { EnvironmentLighting } from "../../environment.js";
+import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { HydrologySystem } from "../../water/index.js";
 import { createTreeController } from "./tree_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";

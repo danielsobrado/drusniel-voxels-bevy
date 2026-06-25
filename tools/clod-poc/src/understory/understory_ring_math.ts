@@ -7,7 +7,7 @@
 // byte layout. Mirrors trees/tree_ring_math.ts but understory has a single LOD,
 // so a "group" is just an understory class.
 
-import { terrainWeights } from "../terrain.js";
+import { terrainWeights } from "../terrain/terrain.js";
 import { clamp01 } from "../trees/tree_noise.js";
 import {
   DEFAULT_UNDERSTORY_SETTINGS,

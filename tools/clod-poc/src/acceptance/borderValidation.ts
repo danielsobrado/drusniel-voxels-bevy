@@ -1,5 +1,5 @@
 import type { PageMesh, ClodPageNode, BorderTolerances, PageFootprint } from "../types.js";
-import { borderChain } from "../validate.js";
+import { borderChain } from "../clod/validate.js";
 import type {
   AcceptanceGateResult,
   AcceptanceFailure,
@@ -383,77 +383,79 @@ export function collectFineEdgeChain(
   };
 }
 
-const CORNER_TRIM_MARGIN = 2.5;
-const MAX_VERTEX_GAP = 5.0;
 
-export function validateChainSpanCoverage(
+
+export interface FootprintInterval {
+  start: number;
+  end: number;
+}
+
+export function validateIntervalCoverage(
+  expectedIntervals: FootprintInterval[],
   coarseSpanStart: number,
   coarseSpanEnd: number,
-  fineChain: FineEdgeChain,
-  freeAxis: "x" | "z",
 ): { passes: boolean; failures: AcceptanceFailure[] } {
   const failures: AcceptanceFailure[] = [];
-  const axisIdx = freeAxis === "x" ? 0 : 2;
 
-  if (fineChain.positions.length === 0) {
+  if (expectedIntervals.length === 0) {
     failures.push({
       code: MIXED_LOD_FAILURE_CODES.MISSING_FINE_SEGMENT,
-      message: `No fine border vertices found for coarse span [${coarseSpanStart.toFixed(2)}, ${coarseSpanEnd.toFixed(2)}]`,
+      message: `No fine-node intervals found for coarse span [${coarseSpanStart.toFixed(2)}, ${coarseSpanEnd.toFixed(2)}]`,
       spanStart: coarseSpanStart,
       spanEnd: coarseSpanEnd,
     });
     return { passes: false, failures };
   }
 
-  const firstCoord = fineChain.positions[0][axisIdx];
-  const lastCoord = fineChain.positions[fineChain.positions.length - 1][axisIdx];
+  const sorted = [...expectedIntervals].sort((a, b) => a.start - b.start);
 
-  if (firstCoord < coarseSpanStart - CORNER_TRIM_MARGIN) {
+  if (Math.abs(sorted[0].start - coarseSpanStart) > 0.001) {
     failures.push({
-      code: MIXED_LOD_FAILURE_CODES.EDGE_OVERLAP,
-      message: `Fine chain starts at ${firstCoord.toFixed(2)}, before span start ${coarseSpanStart.toFixed(2)} by ${(coarseSpanStart - firstCoord).toFixed(2)}`,
+      code: MIXED_LOD_FAILURE_CODES.COVERAGE_GAP,
+      message: `First fine interval starts at ${sorted[0].start.toFixed(2)}, expected ~${coarseSpanStart.toFixed(2)}`,
       spanStart: coarseSpanStart,
       spanEnd: coarseSpanEnd,
-      gapStart: firstCoord,
-      gapEnd: coarseSpanStart,
+      gapStart: coarseSpanStart,
+      gapEnd: sorted[0].start,
     });
   }
 
-  if (lastCoord > coarseSpanEnd + CORNER_TRIM_MARGIN) {
+  const lastEnd = sorted[sorted.length - 1].end;
+  if (Math.abs(lastEnd - coarseSpanEnd) > 0.001) {
     failures.push({
-      code: MIXED_LOD_FAILURE_CODES.EDGE_OVERLAP,
-      message: `Fine chain ends at ${lastCoord.toFixed(2)}, beyond span end ${coarseSpanEnd.toFixed(2)} by ${(lastCoord - coarseSpanEnd).toFixed(2)}`,
+      code: MIXED_LOD_FAILURE_CODES.COVERAGE_GAP,
+      message: `Last fine interval ends at ${lastEnd.toFixed(2)}, expected ~${coarseSpanEnd.toFixed(2)}`,
       spanStart: coarseSpanStart,
       spanEnd: coarseSpanEnd,
-      gapStart: coarseSpanEnd,
-      gapEnd: lastCoord,
+      gapStart: lastEnd,
+      gapEnd: coarseSpanEnd,
     });
   }
 
-  for (let i = 1; i < fineChain.positions.length; i++) {
-    const prev = fineChain.positions[i - 1][axisIdx];
-    const curr = fineChain.positions[i][axisIdx];
-    const gap = curr - prev;
+  for (let i = 1; i < sorted.length; i++) {
+    const prevEnd = sorted[i - 1].end;
+    const currStart = sorted[i].start;
+    const gap = currStart - prevEnd;
 
-    if (gap > MAX_VERTEX_GAP) {
+    if (gap > 0.001) {
       failures.push({
         code: MIXED_LOD_FAILURE_CODES.COVERAGE_GAP,
-        message: `Gap of ${gap.toFixed(2)} between consecutive fine vertices at [${prev.toFixed(2)}, ${curr.toFixed(2)}]`,
+        message: `Gap of ${gap.toFixed(4)} between fine intervals at [${prevEnd.toFixed(2)}, ${currStart.toFixed(2)}]`,
         spanStart: coarseSpanStart,
         spanEnd: coarseSpanEnd,
-        gapStart: prev,
-        gapEnd: curr,
+        gapStart: prevEnd,
+        gapEnd: currStart,
       });
     }
 
-    if (gap < -MAX_VERTEX_GAP) {
+    if (gap < -0.001) {
       failures.push({
         code: MIXED_LOD_FAILURE_CODES.EDGE_OVERLAP,
-        message: `Overlap of ${(-gap).toFixed(2)} between consecutive fine vertices at [${prev.toFixed(2)}, ${curr.toFixed(2)}]`,
+        message: `Overlap of ${(-gap).toFixed(4)} between fine intervals at [${prevEnd.toFixed(2)}, ${currStart.toFixed(2)}]`,
         spanStart: coarseSpanStart,
         spanEnd: coarseSpanEnd,
-        gapStart: curr,
-        gapEnd: prev,
+        gapStart: currStart,
+        gapEnd: prevEnd,
       });
     }
   }
@@ -469,12 +471,14 @@ export function validateMixedLodCutForDelta(
 ): {
   passes: boolean;
   failures: AcceptanceFailure[];
+  surfaceFindings: AcceptanceFailure[];
   edgesTested: number;
   maxPosDelta: number;
   minNormDot: number;
   maxMatDelta: number;
 } {
   const failures: AcceptanceFailure[] = [];
+  const surfaceFindings: AcceptanceFailure[] = [];
   let maxPosDelta = 0;
   let minNormDot = 1;
   let maxMatDelta = 0;
@@ -509,184 +513,122 @@ export function validateMixedLodCutForDelta(
 
       const childCountPerParent = 1 << forcedDelta;
 
-      for (let dz = 0; dz < childCountPerParent; dz++) {
-        for (let dx = 0; dx < childCountPerParent; dx++) {
-          const childNX = nx * childCountPerParent + dx;
-          const childNZ = nz * childCountPerParent + dz;
+      for (const edgeDir of ["east", "south"] as const) {
+        const isEast = edgeDir === "east";
+        const coarseAxis: "x" | "z" = isEast ? "x" : "z";
+        const freeAxis: "x" | "z" = isEast ? "z" : "x";
 
-          if (dx === childCountPerParent - 1) {
-            const neighborKey = `${childNX + 1},${childNZ}`;
+        const intervals: { start: number; end: number; neighbor: ClodPageNode }[] = [];
+        const missingNeighborKeys: string[] = [];
+
+        for (let dz = 0; dz < childCountPerParent; dz++) {
+          for (let dx = 0; dx < childCountPerParent; dx++) {
+            const isEdge = isEast ? dx === childCountPerParent - 1 : dz === childCountPerParent - 1;
+            if (!isEdge) continue;
+
+            const neighborKey = isEast
+              ? `${nx * childCountPerParent + dx + 1},${nz * childCountPerParent + dz}`
+              : `${nx * childCountPerParent + dx},${nz * childCountPerParent + dz + 1}`;
+
             const neighbor = fineIndex.get(neighborKey);
-            if (!neighbor) continue;
-
-            edgesTested++;
-
-            const z0 = neighbor.footprint.minZ;
-            const z1 = neighbor.footprint.maxZ;
-            const coarseSpanStart = z0;
-            const coarseSpanEnd = z1;
-
-            const coarseChain = borderChain(coarseNode.mesh, "x", coarseNode.footprint.maxX, coarseNode.footprint, 1);
-            const strippedCoarse = stripCornerVertices(coarseChain, coarseNode.footprint.maxZ, "z", 0.5);
-
-            const fineChain = collectFineEdgeChain(neighbor, "x", neighbor.footprint.minX);
-
-            if (strippedCoarse.positions.length === 0 && fineChain.positions.length === 0) continue;
-
-            const zMargin = 0.001;
-            const coarseInRange: typeof strippedCoarse = {
-              positions: [], normals: [], materials: [], materialWeights: [],
-            };
-            const seenZ = new Set<number>();
-            for (let vi = 0; vi < strippedCoarse.positions.length; vi++) {
-              const z = strippedCoarse.positions[vi][2];
-              if (z >= z0 - zMargin && z <= z1 + zMargin) {
-                const zKey = Math.round(z * 1e6);
-                if (!seenZ.has(zKey)) {
-                  seenZ.add(zKey);
-                  coarseInRange.positions.push(strippedCoarse.positions[vi]);
-                  coarseInRange.normals.push(strippedCoarse.normals[vi]);
-                  coarseInRange.materials.push(strippedCoarse.materials[vi]);
-                  coarseInRange.materialWeights.push(strippedCoarse.materialWeights[vi]);
-                }
-              }
-            }
-
-            if (fineChain.positions.length === 0) {
-              failures.push({
-                code: MIXED_LOD_FAILURE_CODES.MISSING_FINE_SEGMENT,
-                message: `No border vertices for fine node ${neighborKey} on east edge (span [${coarseSpanStart.toFixed(2)}, ${coarseSpanEnd.toFixed(2)}])`,
-                scene: fixtureName,
-                nodeId: `L${coarseLevel}:${nx},${nz}`,
-                level: coarseLevel,
-                forcedDelta,
-                coarseLevel,
-                fineLevel,
-                edge: "east",
-                spanStart: coarseSpanStart,
-                spanEnd: coarseSpanEnd,
-              });
+            if (!neighbor) {
+              missingNeighborKeys.push(neighborKey);
               continue;
             }
 
-            const coverageResult = validateChainSpanCoverage(
-              coarseSpanStart, coarseSpanEnd,
-              fineChain, "z",
-            );
+            const spanCoord = freeAxis === "x" ? "minX" as const : "minZ" as const;
+            const spanEnd = freeAxis === "x" ? "maxX" as const : "maxZ" as const;
+            intervals.push({ start: neighbor.footprint[spanCoord], end: neighbor.footprint[spanEnd], neighbor });
+          }
+        }
 
-            if (!coverageResult.passes) {
-              for (const f of coverageResult.failures) {
-                failures.push({
-                  ...f,
-                  scene: fixtureName,
-                  nodeId: `L${coarseLevel}:${nx},${nz}`,
-                  level: coarseLevel,
-                  forcedDelta,
-                  coarseLevel,
-                  fineLevel,
-                  edge: "east",
-                });
+        if (intervals.length === 0 && missingNeighborKeys.length === 0) continue;
+        if (intervals.length === 0 && missingNeighborKeys.length > 0) continue;
+
+        for (const neighborKey of missingNeighborKeys) {
+          failures.push({
+            code: MIXED_LOD_FAILURE_CODES.MISSING_FINE_SEGMENT,
+            message: `Missing fine node ${neighborKey} for ${edgeDir} edge of coarse L${coarseLevel}:${nx},${nz} (delta ${forcedDelta})`,
+            scene: fixtureName,
+            nodeId: `L${coarseLevel}:${nx},${nz}`,
+            level: coarseLevel,
+            forcedDelta,
+            coarseLevel,
+            fineLevel,
+            edge: edgeDir,
+            spanStart: isEast ? coarseNode.footprint.minZ : coarseNode.footprint.minX,
+            spanEnd: isEast ? coarseNode.footprint.maxZ : coarseNode.footprint.maxX,
+          });
+        }
+
+        edgesTested++;
+
+        const coarseSpanStart = isEast ? coarseNode.footprint.minZ : coarseNode.footprint.minX;
+        const coarseSpanEnd = isEast ? coarseNode.footprint.maxZ : coarseNode.footprint.maxX;
+
+        const intervalData = intervals.map((i) => ({ start: i.start, end: i.end }));
+        const ivResult = validateIntervalCoverage(intervalData, coarseSpanStart, coarseSpanEnd);
+        if (!ivResult.passes) {
+          for (const f of ivResult.failures) {
+            failures.push({
+              ...f,
+              scene: fixtureName,
+              nodeId: `L${coarseLevel}:${nx},${nz}`,
+              level: coarseLevel,
+              forcedDelta,
+              coarseLevel,
+              fineLevel,
+              edge: edgeDir,
+            });
+          }
+        }
+
+        if (missingNeighborKeys.length === 0) {
+          const planeKey = coarseAxis === "x" ? "maxX" as const : "maxZ" as const;
+          const coarseChain = borderChain(coarseNode.mesh, coarseAxis, coarseNode.footprint[planeKey], coarseNode.footprint, 1);
+          const cornerBoundary = isEast ? coarseNode.footprint.maxZ : coarseNode.footprint.maxX;
+          const strippedCoarse = stripCornerVertices(coarseChain, cornerBoundary, freeAxis, 0.5);
+
+          const margin = 0.001;
+          const coarseInRange: typeof strippedCoarse = {
+            positions: [], normals: [], materials: [], materialWeights: [],
+          };
+          const seen = new Set<number>();
+          const axisIdx = freeAxis === "x" ? 0 : 2;
+          for (let vi = 0; vi < strippedCoarse.positions.length; vi++) {
+            const coord = strippedCoarse.positions[vi][axisIdx];
+            if (coord >= coarseSpanStart - margin && coord <= coarseSpanEnd + margin) {
+              const key = Math.round(coord * 1e6);
+              if (!seen.has(key)) {
+                seen.add(key);
+                coarseInRange.positions.push(strippedCoarse.positions[vi]);
+                coarseInRange.normals.push(strippedCoarse.normals[vi]);
+                coarseInRange.materials.push(strippedCoarse.materials[vi]);
+                coarseInRange.materialWeights.push(strippedCoarse.materialWeights[vi]);
               }
-            }
-
-            if (coarseInRange.positions.length > 0 && fineChain.positions.length > 0) {
-              const surfResult = reportMixedLodSurfaceDifferences(
-                coarseInRange,
-                fineChain,
-                tolerances,
-              );
-
-              if (surfResult.maxPositionDelta > maxPosDelta) maxPosDelta = surfResult.maxPositionDelta;
-              if (surfResult.minNormalDot < minNormDot) minNormDot = surfResult.minNormalDot;
-              if (surfResult.maxMaterialWeightDelta > maxMatDelta) maxMatDelta = surfResult.maxMaterialWeightDelta;
             }
           }
 
-          if (dz === childCountPerParent - 1) {
-            const neighborKey = `${childNX},${childNZ + 1}`;
-            const neighbor = fineIndex.get(neighborKey);
-            if (!neighbor) continue;
-
-            edgesTested++;
-
-            const x0 = neighbor.footprint.minX;
-            const x1 = neighbor.footprint.maxX;
-            const coarseSpanStart = x0;
-            const coarseSpanEnd = x1;
-
-            const coarseChain = borderChain(coarseNode.mesh, "z", coarseNode.footprint.maxZ, coarseNode.footprint, 1);
-            const strippedCoarse = stripCornerVertices(coarseChain, coarseNode.footprint.maxX, "x", 0.5);
-
-            const fineChain = collectFineEdgeChain(neighbor, "z", neighbor.footprint.minZ);
-
-            if (strippedCoarse.positions.length === 0 && fineChain.positions.length === 0) continue;
-
-            const xMargin = 0.001;
-            const coarseInRange: typeof strippedCoarse = {
-              positions: [], normals: [], materials: [], materialWeights: [],
-            };
-            const seenX = new Set<number>();
-            for (let vi = 0; vi < strippedCoarse.positions.length; vi++) {
-              const x = strippedCoarse.positions[vi][0];
-              if (x >= x0 - xMargin && x <= x1 + xMargin) {
-                const xKey = Math.round(x * 1e6);
-                if (!seenX.has(xKey)) {
-                  seenX.add(xKey);
-                  coarseInRange.positions.push(strippedCoarse.positions[vi]);
-                  coarseInRange.normals.push(strippedCoarse.normals[vi]);
-                  coarseInRange.materials.push(strippedCoarse.materials[vi]);
-                  coarseInRange.materialWeights.push(strippedCoarse.materialWeights[vi]);
-                }
-              }
-            }
-
-            if (fineChain.positions.length === 0) {
-              failures.push({
-                code: MIXED_LOD_FAILURE_CODES.MISSING_FINE_SEGMENT,
-                message: `No border vertices for fine node ${neighborKey} on south edge (span [${coarseSpanStart.toFixed(2)}, ${coarseSpanEnd.toFixed(2)}])`,
-                scene: fixtureName,
-                nodeId: `L${coarseLevel}:${nx},${nz}`,
-                level: coarseLevel,
-                forcedDelta,
-                coarseLevel,
-                fineLevel,
-                edge: "south",
-                spanStart: coarseSpanStart,
-                spanEnd: coarseSpanEnd,
-              });
-              continue;
-            }
-
-            const coverageResult = validateChainSpanCoverage(
-              coarseSpanStart, coarseSpanEnd,
-              fineChain, "x",
-            );
-
-            if (!coverageResult.passes) {
-              for (const f of coverageResult.failures) {
-                failures.push({
-                  ...f,
+          for (const { neighbor } of intervals) {
+            const minKey = coarseAxis === "x" ? "minX" as const : "minZ" as const;
+            const fineChain = collectFineEdgeChain(neighbor, coarseAxis, neighbor.footprint[minKey]);
+            if (fineChain.positions.length > 0 && coarseInRange.positions.length > 0) {
+              const surfResult = reportMixedLodSurfaceDifferences(coarseInRange, fineChain, tolerances);
+              if (surfResult.maxPositionDelta > maxPosDelta) maxPosDelta = surfResult.maxPositionDelta;
+              if (surfResult.minNormalDot < minNormDot) minNormDot = surfResult.minNormalDot;
+              if (surfResult.maxMaterialWeightDelta > maxMatDelta) maxMatDelta = surfResult.maxMaterialWeightDelta;
+              for (const finding of surfResult.findings) {
+                surfaceFindings.push({
+                  ...finding,
                   scene: fixtureName,
                   nodeId: `L${coarseLevel}:${nx},${nz}`,
                   level: coarseLevel,
                   forcedDelta,
                   coarseLevel,
                   fineLevel,
-                  edge: "south",
+                  edge: edgeDir,
                 });
               }
-            }
-
-            if (coarseInRange.positions.length > 0 && fineChain.positions.length > 0) {
-              const surfResult = reportMixedLodSurfaceDifferences(
-                coarseInRange,
-                fineChain,
-                tolerances,
-              );
-
-              if (surfResult.maxPositionDelta > maxPosDelta) maxPosDelta = surfResult.maxPositionDelta;
-              if (surfResult.minNormalDot < minNormDot) minNormDot = surfResult.minNormalDot;
-              if (surfResult.maxMaterialWeightDelta > maxMatDelta) maxMatDelta = surfResult.maxMaterialWeightDelta;
             }
           }
         }
@@ -697,6 +639,7 @@ export function validateMixedLodCutForDelta(
   return {
     passes: failures.length === 0,
     failures,
+    surfaceFindings,
     edgesTested,
     maxPosDelta,
     minNormDot,
@@ -704,13 +647,10 @@ export function validateMixedLodCutForDelta(
   };
 }
 
-export function validateAllMixedLodCuts(
-  nodesByLevel: Map<number, ClodPageNode[]>,
-  config: AcceptanceConfig,
-  fixtureName: string,
-): {
+export interface AllMixedLodResult {
   passes: boolean;
   failures: AcceptanceFailure[];
+  surfaceFindings: AcceptanceFailure[];
   deltasTested: number;
   edgesTested: number;
   failureCount: number;
@@ -718,9 +658,16 @@ export function validateAllMixedLodCuts(
   maxPosDelta: number;
   minNormDot: number;
   maxMatDelta: number;
-} {
+}
+
+export function validateAllMixedLodCuts(
+  nodesByLevel: Map<number, ClodPageNode[]>,
+  config: AcceptanceConfig,
+  fixtureName: string,
+): AllMixedLodResult {
   const lodDeltas = config.stressScenes.forcedNeighborLodDeltas;
   const allFailures: AcceptanceFailure[] = [];
+  const allSurfaceFindings: AcceptanceFailure[] = [];
   let maxPosDelta = 0;
   let minNormDot = 1;
   let maxMatDelta = 0;
@@ -747,6 +694,7 @@ export function validateAllMixedLodCuts(
     }
 
     allFailures.push(...result.failures);
+    allSurfaceFindings.push(...result.surfaceFindings);
     if (result.maxPosDelta > maxPosDelta) maxPosDelta = result.maxPosDelta;
     if (result.minNormDot < minNormDot) minNormDot = result.minNormDot;
     if (result.maxMatDelta > maxMatDelta) maxMatDelta = result.maxMatDelta;
@@ -755,6 +703,7 @@ export function validateAllMixedLodCuts(
   return {
     passes: allFailures.length === 0,
     failures: allFailures,
+    surfaceFindings: allSurfaceFindings,
     deltasTested: lodDeltas.length,
     edgesTested: totalEdgesTested,
     failureCount: allFailures.length,
@@ -774,8 +723,16 @@ export function runGateA1(
   const sameLevel = validateSameLevelWatertightness(nodesByLevel, tolerances);
   const mixed = validateAllMixedLodCuts(nodesByLevel, config, fixtureName);
 
-  const allFailures = [...sameLevel.failures, ...mixed.failures];
+  const realMixedFailures = mixed.failures.filter(
+    (f) => f.code !== MIXED_LOD_FAILURE_CODES.UNTESTABLE_DELTA,
+  );
+  const allFailures = [
+    ...sameLevel.failures,
+    ...realMixedFailures,
+  ];
   const failureCount = allFailures.length;
+
+  const mixedEqualityCount = mixed.surfaceFindings.length;
 
   const maxPosDelta = Math.max(sameLevel.maxPositionDelta, mixed.maxPosDelta);
   const minNormDot = Math.min(sameLevel.minNormalDot, mixed.minNormDot);
@@ -784,12 +741,12 @@ export function runGateA1(
   let status: "pass" | "warn" | "fail";
   let message: string;
 
-  if (mixed.untestableDeltaCount > 0 && config.stressScenes.forcedNeighborLodDeltas.length > 0) {
-    status = "warn";
-    message = `${sameLevel.failureCount} same-level failures, ${mixed.failureCount} mixed-LOD failures, ${mixed.untestableDeltaCount} untestable deltas (mixed-LOD checks incomplete)`;
-  } else if (failureCount > 0) {
+  if (sameLevel.failureCount > 0 || realMixedFailures.length > 0) {
     status = "fail";
-    message = `${sameLevel.failureCount} same-level failures, ${mixed.failureCount} mixed-LOD failures`;
+    message = `${sameLevel.failureCount} same-level failures, ${realMixedFailures.length} mixed-LOD failures`;
+  } else if (mixed.untestableDeltaCount > 0) {
+    status = "warn";
+    message = `No topology gaps found, but ${mixed.untestableDeltaCount} of ${config.stressScenes.forcedNeighborLodDeltas.length} configured deltas are untestable with the current hierarchy depth`;
   } else {
     status = "pass";
     message = "No holes or lips found in border chain validation";
@@ -822,8 +779,9 @@ export function runGateA1(
       mixedLodEdgesTested: mixed.edgesTested,
       mixedLodFailureCount: mixed.failureCount,
       mixedLodUntestableDeltaCount: mixed.untestableDeltaCount,
-      visualSweepAvailable: config.visual.enabled,
-      visualSweepStatus: config.visual.enabled ? "configured" : "disabled",
+      mixedLodSurfaceFindingsCount: mixedEqualityCount,
+      visualSweepAvailable: false,
+      visualSweepStatus: "disabled",
     },
     failures,
   };

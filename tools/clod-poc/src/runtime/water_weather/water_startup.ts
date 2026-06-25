@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { HydrologySystem } from "../../water/index.js";
-import { surfaceHeight } from "../../terrain.js";
+import { surfaceHeight } from "../../terrain/terrain.js";
 import { createWaterController } from "./water_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { waterUiState } from "../../app/clod_app_state.js";
@@ -15,7 +15,7 @@ export interface WaterStartupInput {
   worldCells: number;
   hydrologySystem: HydrologySystem | null;
   searchParams: URLSearchParams;
-  currentLighting: () => import("../../environment.js").EnvironmentLighting;
+  currentLighting: () => import("../../environment/environment.js").EnvironmentLighting;
   lod0Nodes: ClodPageNode[];
   isWebGpu: boolean;
 }

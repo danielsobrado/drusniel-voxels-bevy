@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import type { BrushOp, BrushShape } from "../terrain.js";
-import type { TerrainSurfaceHit } from "../terrain_collider.js";
+import type { BrushOp, BrushShape } from "../terrain/terrain.js";
+import type { TerrainSurfaceHit } from "../terrain/terrain_collider.js";
 import type { PlayerInteractionMode } from "../player_controller.js";
 
 export interface BrushPreviewController {

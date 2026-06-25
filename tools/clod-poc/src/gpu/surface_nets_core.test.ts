@@ -4,7 +4,7 @@
 // WGSL compute pass (a transliteration of surface_nets_core) has a verified logic spec.
 
 import { describe, it, expect, afterEach } from "vitest";
-import { meshChunk, replaceDigEdits, clearDigEdits, DigEdit } from "../terrain.js";
+import { meshChunk, replaceDigEdits, clearDigEdits, DigEdit } from "../terrain/terrain.js";
 import type { ClodPagesConfig } from "../config.js";
 import type { PageMesh } from "../types.js";
 import { meshChunkGpuShaped, ChunkMeshArrays } from "./surface_nets_core.js";

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
-import { getDigEditsSnapshot, getDigEditRevision } from "../terrain.js";
+import { getDigEditsSnapshot, getDigEditRevision } from "../terrain/terrain.js";
 import type { ClodPageNode, PageFootprint } from "../types.js";
 import {
   GrassGpuRingCompute,

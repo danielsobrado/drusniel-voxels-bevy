@@ -7,7 +7,7 @@ import { parseTreeConfig } from "../../../trees/index.js";
 import { parseUnderstoryConfig } from "../../../understory/index.js";
 import type { WaterConfig } from "../../../water/waterConfig.js";
 import type { HydrologySystem } from "../../../water/index.js";
-import type { EnvironmentLighting } from "../../../environment.js";
+import type { EnvironmentLighting } from "../../../environment/environment.js";
 import { drainVegetationDirty, type VegetationDirtyQueue } from "../../../systems/vegetation_dirty.js";
 import type { ClodHooks } from "../../../core/hooks.js";
 import type { ClodRuntimeBindings } from "../../clod_runtime_bindings.js";

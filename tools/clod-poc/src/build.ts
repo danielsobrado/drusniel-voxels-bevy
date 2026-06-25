@@ -5,9 +5,9 @@
 // Run: npm run build-pages [worldPages]   (default 4x4 LOD0 pages)
 
 import { loadConfig } from "./config_node.js";
-import { initSimplifier } from "./simplify.js";
-import { buildWorld } from "./quadtree.js";
-import { borderChain, assertBorderMatch } from "./validate.js";
+import { initSimplifier } from "./clod/simplify.js";
+import { buildWorld } from "./clod/quadtree.js";
+import { borderChain, assertBorderMatch } from "./clod/validate.js";
 import { ClodPageNode } from "./types.js";
 import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "./diagonalPolish.js";
 

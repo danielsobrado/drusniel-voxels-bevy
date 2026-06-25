@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { initSimplifier } from "../simplify.js";
+import { initSimplifier } from "../clod/simplify.js";
 import { buildTestHierarchy } from "../clod/buildTestHierarchy.js";
 import { fixtureByName, type FixtureDef } from "../clod/stressFixtures.js";
 import { type ClodPagesConfig, parseConfig } from "../config.js";
@@ -20,6 +20,7 @@ import { runGateA4, computeTriangleReduction } from "./triangleReductionGate.js"
 import { runGateA6, computeLowBenefitRates } from "./lowBenefitGate.js";
 import { runGateA5, runFullHierarchyBuild, type BuildTimingMetrics } from "./buildCostGate.js";
 import { runGateA3 } from "./densityScarGate.js";
+import { runGateA1VisualSweep } from "./visualSweepGate.js";
 import { defineScreenshots, writeVisualSweepUnavailable } from "./screenshots.js";
 
 const _runnerDir = dirname(fileURLToPath(import.meta.url));
@@ -215,11 +216,42 @@ export async function runAcceptance(
 
     logger.info(`  Levels: ${nodesByLevel.size}, total nodes: ${[...nodesByLevel.values()].reduce((s, n) => s + n.length, 0)}`);
 
-    const a1Result = runGateA1(nodesByLevel, config, name);
-    const a2Result = runGateA2(nodesByLevel, config, name);
+    let a1Result = runGateA1(nodesByLevel, config, name);
     const a3Result = runGateA3(nodesByLevel, config, name);
     const a4Result = runGateA4(nodesByLevel, config, name);
     const a6Result = runGateA6(nodesByLevel, config, name);
+
+    const a1VisualResult = runGateA1VisualSweep(nodesByLevel, config, name);
+    if (a1VisualResult) {
+      const mergedStatus = worstStatus(a1Result.status, a1VisualResult.status);
+      const mergedMeasurements = { ...a1Result.measurements, ...a1VisualResult.measurements };
+      mergedMeasurements.visualSweepAvailable = false;
+      mergedMeasurements.visualSweepStatus = "not_available";
+      a1Result = {
+        ...a1Result,
+        status: mergedStatus,
+        message: a1Result.status !== "fail" ? a1VisualResult.message : a1Result.message,
+        measurements: mergedMeasurements,
+        failures: [...a1Result.failures, ...a1VisualResult.failures],
+      };
+    }
+
+    let a2Result = runGateA2(nodesByLevel, config, name);
+    const surfaceFindingsCount = typeof a1Result.measurements.mixedLodSurfaceFindingsCount === "number"
+      ? a1Result.measurements.mixedLodSurfaceFindingsCount
+      : 0;
+    if (surfaceFindingsCount > 0) {
+      a2Result = {
+        ...a2Result,
+        measurements: {
+          ...a2Result.measurements,
+          mixedLodSurfaceFindingsCount: surfaceFindingsCount,
+          mixedLodMaxPositionDelta: typeof a1Result.measurements.maxPositionDelta === "number" ? a1Result.measurements.maxPositionDelta : 0,
+          mixedLodMinNormalDot: typeof a1Result.measurements.minNormalDot === "number" ? a1Result.measurements.minNormalDot : 1,
+          mixedLodMaxMaterialWeightDelta: typeof a1Result.measurements.maxMaterialWeightDelta === "number" ? a1Result.measurements.maxMaterialWeightDelta : 0,
+        },
+      };
+    }
 
     logger.info(`  A1 Watertight: ${a1Result.status}, A2 Border: ${a2Result.status}, A3 Scars: ${a3Result.status}`);
     logger.info(`  A4 Reduction: ${a4Result.status}, A6 Low-benefit: ${a6Result.status}`);

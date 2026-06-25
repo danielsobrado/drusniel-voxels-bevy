@@ -34,7 +34,7 @@ import {
   grassGpuRingGrid,
   grassGpuRingSlotCount,
 } from "./gpu/grass_ring_compute.js";
-import { addDigEdit, clearDigEdits, surfaceHeight } from "./terrain.js";
+import { addDigEdit, clearDigEdits, surfaceHeight } from "./terrain/terrain.js";
 import { buildGrassInstancedGeometry } from "./gpu/grass_node_material.js";
 import type { PageFootprint } from "./types.js";
 

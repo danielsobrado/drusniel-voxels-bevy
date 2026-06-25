@@ -1,9 +1,9 @@
-import type { ProjectSessionState } from "../../project_archive.js";
-import { DEFAULT_ENVIRONMENT_SETTINGS } from "../../environment.js";
+import type { ProjectSessionState } from "../../project/project_archive.js";
+import { DEFAULT_ENVIRONMENT_SETTINGS } from "../../environment/environment.js";
 import {
   DEFAULT_POST_PROCESS_SETTINGS,
   type PostProcessSettings,
-} from "../../postprocess.js";
+} from "../../environment/postprocess.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
 export interface EnvironmentSliceState {

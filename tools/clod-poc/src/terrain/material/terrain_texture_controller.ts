@@ -1,9 +1,9 @@
 import * as THREE from "three";
-import type { ProjectTextureSlot } from "../../project_archive.js";
+import type { ProjectTextureSlot } from "../../project/project_archive.js";
 import {
   emptyTextureSlotState,
   INITIAL_TERRAIN_TEXTURE_COUNT,
-} from "../../terrain_textures.js";
+} from "../../terrain/terrain_textures.js";
 import {
   configureNormalTexture,
   loadTerrainTextureUrl,

@@ -3,7 +3,7 @@ import {
   DEFAULT_ENVIRONMENT_COLORS,
   type EnvironmentLighting,
   type EnvironmentSettings,
-} from "../environment.js";
+} from "../environment/environment.js";
 import { createSkyNodeMaterial, type SkyNodeHandle } from "../gpu/sky_node_material.js";
 import type { AppSky } from "./app_sky.js";
 

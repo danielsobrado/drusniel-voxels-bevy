@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { CapsuleCollisionConfig, TerrainColliderSet } from "./terrain_collider.js";
+import type { CapsuleCollisionConfig, TerrainColliderSet } from "./terrain/terrain_collider.js";
 import type { PropColliderSet } from "./props/prop_collider.js";
 import { emitAudio } from "./audio/index.js";
 

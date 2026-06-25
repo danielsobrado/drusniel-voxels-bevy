@@ -6,21 +6,21 @@ import { buildFarTerrainShadowProxy } from "../../gpu/far_terrain_shadow_proxy.j
 import { GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import { compareChunkSurfaces } from "../../gpu/gpu_mesh_parity.js";
 import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
-import { getDigEditsSnapshot, meshChunk } from "../../terrain.js";
+import { getDigEditsSnapshot, meshChunk } from "../../terrain/terrain.js";
 import type { ClodPagesConfig } from "../../config.js";
 import type { ClodPageNode } from "../../types.js";
 import type { ClodHooks } from "../../core/hooks.js";
-import type { TerrainColorAdjustments } from "../../material.js";
+import type { TerrainColorAdjustments } from "../../material/material.js";
 import {
   DEFAULT_ENVIRONMENT_COLORS,
   SkyEnvironment,
   type EnvironmentLighting,
   type EnvironmentSettings,
-} from "../../environment.js";
+} from "../../environment/environment.js";
 import {
   PostProcessPipeline,
   type PostProcessSettings,
-} from "../../postprocess.js";
+} from "../../environment/postprocess.js";
 import { WebGpuPostProcessPipeline } from "../../gpu/webgpu_postprocess.js";
 import type { AppPostProcess } from "../app_post_process.js";
 import type { AppSky } from "../../scene/app_sky.js";
@@ -38,9 +38,9 @@ import { NodeLabelOverlay } from "../../ui/node_labels.js";
 import { createBrushPreviewController } from "../../player/brush_preview_controller.js";
 import type { WebGpuReadbackMode } from "../../core/webgpu_readback_mode.js";
 import type { ClodErrorPxCompute } from "../../gpu/clod_error_px_compute.js";
-import type { TerrainColliderSet } from "../../terrain_collider.js";
+import type { TerrainColliderSet } from "../../terrain/terrain_collider.js";
 import type { PlayerController, PlayerInteractionState } from "../../player_controller.js";
-import type { ProjectArchiveContents } from "../../project_archive.js";
+import type { ProjectArchiveContents } from "../../project/project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import type { ClodAppState } from "../clod_app_state.js";
 import type { ClodRuntimeBindings } from "../clod_runtime_bindings.js";

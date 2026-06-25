@@ -1,4 +1,4 @@
-import type { ClodProjectManifest } from "../../project_archive.js";
+import type { ClodProjectManifest } from "../../project/project_archive.js";
 import type { AppStateSlices } from "./types.js";
 import { applyBrushArchiveState } from "./brush_state.js";
 import { applyClodArchiveState } from "./clod_state.js";

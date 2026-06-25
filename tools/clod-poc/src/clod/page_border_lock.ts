@@ -1,5 +1,5 @@
 import type { PageFootprint, PageMesh } from "../types.js";
-import { borderChain, openBoundaryVertexFlags } from "../validate.js";
+import { borderChain, openBoundaryVertexFlags } from "./validate.js";
 
 export function collectOuterBorderVertexKeys(mesh: PageMesh, footprint: PageFootprint, epsilon: number): Set<number> {
   const flags = openBoundaryVertexFlags(mesh);

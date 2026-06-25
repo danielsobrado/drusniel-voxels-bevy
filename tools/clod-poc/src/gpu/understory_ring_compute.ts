@@ -22,7 +22,7 @@ import {
   understoryRingSlotCount,
   type UnderstoryRingCounts,
 } from "../understory/understory_ring_math.js";
-import type { EnvironmentLighting } from "../environment.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
 
 const CLASS_PARAMS_BYTES = UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32 * Float32Array.BYTES_PER_ELEMENT;
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;

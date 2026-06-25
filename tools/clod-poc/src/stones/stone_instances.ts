@@ -6,7 +6,7 @@ import {
   StorageBufferAttribute,
   StorageInstancedBufferAttribute,
 } from "three/webgpu";
-import { getDigEditsSnapshot } from "../terrain.js";
+import { getDigEditsSnapshot } from "../terrain/terrain.js";
 import type { ClodPageNode } from "../types.js";
 import {
   STONE_GPU_CLASS_COUNT,

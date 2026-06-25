@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { webGpuDispatchKey } from "./webgpu_selection_parity.js";
-import type { SelectionParams } from "../selection.js";
+import type { SelectionParams } from "../clod/selection.js";
 
 describe("webGpuDispatchKey", () => {
   it("is stable for quantized camera and selection params", () => {

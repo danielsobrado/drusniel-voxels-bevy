@@ -18,7 +18,7 @@ import type {
   TerrainMaterialHandle,
   TerrainTextureApplyOptions,
 } from "./terrain_material.js";
-import type { TerrainTextureSlotUniform } from "../material.js";
+import type { TerrainTextureSlotUniform } from "../material/material.js";
 
 type MaterialChangedCallback = (material: THREE.Material) => void;
 

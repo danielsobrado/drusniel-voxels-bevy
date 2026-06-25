@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { initSimplifier } from "../simplify.js";
+import { initSimplifier } from "./simplify.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "../types.js";
-import { assertNoInternalBorders } from "../validate.js";
+import { assertNoInternalBorders } from "./validate.js";
 import { boundsOf } from "./heightfield_leaf_source.js";
 import { deriveParentPage, type ClodDerivationConfig } from "./parent_page_derivation.js";
 

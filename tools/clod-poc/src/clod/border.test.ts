@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PageFootprint, PageMesh } from "../types.js";
-import { assertBorderMatch, borderChain } from "../validate.js";
+import { assertBorderMatch, borderChain } from "./validate.js";
 
 function adjacentPageMeshes(): { a: PageMesh; b: PageMesh; footprintA: PageFootprint; footprintB: PageFootprint } {
   const footA: PageFootprint = { minX: 0, minZ: 0, maxX: 4, maxZ: 4 };
@@ -67,7 +67,7 @@ describe("border chain", () => {
   });
 });
 
-function chain(p: [number, number, number][], n: [number, number, number][], m: number[]): import("../validate.js").BorderChain {
+function chain(p: [number, number, number][], n: [number, number, number][], m: number[]): import("./validate.js").BorderChain {
   return { positions: p, normals: n, materials: m, materialWeights: m.map(() => []) };
 }
 

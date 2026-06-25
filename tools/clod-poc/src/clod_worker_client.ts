@@ -1,5 +1,5 @@
-import type { BuildProgress, BuildResult, DirtyCellBounds } from "./quadtree.js";
-import type { DigEdit } from "./terrain.js";
+import type { BuildProgress, BuildResult, DirtyCellBounds } from "./clod/quadtree.js";
+import type { DigEdit } from "./terrain/terrain.js";
 import type { ClodPageNode } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
 import {

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
-import type { EnvironmentLighting } from "../environment.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   createForestLightingUniforms,
   injectForestLightingFragmentShader,

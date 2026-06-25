@@ -1,4 +1,4 @@
-import { initSimplifier } from "./simplify.js";
+import { initSimplifier } from "./clod/simplify.js";
 import {
   buildNodeIndex,
   buildWorldAsync,
@@ -6,8 +6,8 @@ import {
   resimplifyParent,
   type BuildResult,
   type NodeIndex,
-} from "./quadtree.js";
-import { addDigEdit, replaceDigEdits, setTerrainSurfaceOverride } from "./terrain.js";
+} from "./clod/quadtree.js";
+import { addDigEdit, replaceDigEdits, setTerrainSurfaceOverride } from "./terrain/terrain.js";
 import {
   collectBuildResultTransferables,
   collectNodeTransferables,

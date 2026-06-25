@@ -1,5 +1,5 @@
-import type { ProjectSessionState } from "../../project_archive.js";
-import type { BrushOp, BrushShape } from "../../terrain.js";
+import type { ProjectSessionState } from "../../project/project_archive.js";
+import type { BrushOp, BrushShape } from "../../terrain/terrain.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
 export interface BrushSliceState {

@@ -7,7 +7,7 @@ import {
   getDigEditsSnapshot,
   replaceDigEdits,
   setTerrainSurfaceOverride,
-} from "../../terrain.js";
+} from "../../terrain/terrain.js";
 import { buildTerrainSummary } from "../../clod/terrain_summary.js";
 import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
 import { bakeMacroTint } from "../../gpu/terrain_node_material.js";
@@ -30,7 +30,7 @@ import {
   type WaterConfig,
 } from "../../water/index.js";
 import type { ClodPageNode } from "../../types.js";
-import type { ProjectArchiveContents } from "../../project_archive.js";
+import type { ProjectArchiveContents } from "../../project/project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
 import configText from "../../../config/clod_pages.yaml?raw";

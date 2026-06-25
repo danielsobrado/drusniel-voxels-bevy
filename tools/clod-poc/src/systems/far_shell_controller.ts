@@ -3,7 +3,7 @@ import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import { createExtendedCanopyTexture, createExtendedHeightTexture } from "../clod/terrain_summary.js";
 import { buildFarCanopyShell } from "../gpu/far_canopy_shell.js";
 import { buildFarTerrainShell } from "../gpu/far_terrain_shell.js";
-import type { EnvironmentLighting } from "../environment.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
 
 export interface FarShellInstance {
   mesh: THREE.Mesh;

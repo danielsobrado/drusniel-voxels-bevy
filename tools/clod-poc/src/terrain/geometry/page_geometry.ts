@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { PAINT_BLEND_CHANNELS, paintWeightsAt } from "../../terrain.js";
+import { PAINT_BLEND_CHANNELS, paintWeightsAt } from "../../terrain/terrain.js";
 import type { PageMesh } from "../../types.js";
 import type { ChunkMesh } from "../../gpu/gpu_chunk_mesher.js";
 

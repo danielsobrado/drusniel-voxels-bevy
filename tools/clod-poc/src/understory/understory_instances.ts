@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { terrainWeights, surfaceHeight, surfaceNormal } from "../terrain.js";
+import { terrainWeights, surfaceHeight, surfaceNormal } from "../terrain/terrain.js";
 import type { PageFootprint } from "../types.js";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
 import {

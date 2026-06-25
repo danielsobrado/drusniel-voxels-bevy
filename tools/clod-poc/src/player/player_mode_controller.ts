@@ -6,7 +6,7 @@ import {
   PlayerController,
   PlayerInteractionState,
 } from "../player_controller.js";
-import type { TerrainColliderSet } from "../terrain_collider.js";
+import type { TerrainColliderSet } from "../terrain/terrain_collider.js";
 
 export interface PlayerModeControllerDeps {
   renderer: { domElement: HTMLElement };

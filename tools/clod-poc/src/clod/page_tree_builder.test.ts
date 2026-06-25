@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import phase1ConfigText from "../../config/phase1_terrain.yaml?raw";
-import { initSimplifier } from "../simplify.js";
+import { initSimplifier } from "./simplify.js";
 import { buildHeightfieldLeafNodes } from "./heightfield_leaf_source.js";
 import { buildDerivedClodTree } from "./page_tree_builder.js";
 import { parsePhase1Config } from "../phase1/phase1_config.js";

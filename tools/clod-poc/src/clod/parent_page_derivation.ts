@@ -1,8 +1,8 @@
 import type { ClodPagesConfig } from "../config.js";
 import { countLocks } from "../lock.js";
-import { simplifyPage } from "../simplify.js";
+import { simplifyPage } from "./simplify.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "../types.js";
-import { assertNoInternalBorders, stripDegenerateTriangles } from "../validate.js";
+import { assertNoInternalBorders, stripDegenerateTriangles } from "./validate.js";
 import { buildOuterBorderLocks } from "../lock.js";
 import { boundsOf } from "./heightfield_leaf_source.js";
 import { validatePageBorderChains } from "./page_border_lock.js";

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MeshBVH } from "three-mesh-bvh";
-import type { CapsuleCollisionConfig, CapsuleCollisionResult } from "../terrain_collider.js";
+import type { CapsuleCollisionConfig, CapsuleCollisionResult } from "../terrain/terrain_collider.js";
 import type { CollisionMode, PropAssetMetadata } from "./prop_types.js";
 import type { LoadedPropAsset } from "./prop_asset_loader.js";
 

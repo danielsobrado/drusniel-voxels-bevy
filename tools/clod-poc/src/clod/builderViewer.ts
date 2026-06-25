@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import GUI from "lil-gui";
 import { type ClodPagesConfig, parseConfig } from "../config.js";
-import { initSimplifier } from "../simplify.js";
+import { initSimplifier } from "./simplify.js";
 import { buildTestHierarchy, type TestBuildResult } from "./buildTestHierarchy.js";
 import { ALL_FIXTURES, type FixtureDef, fixtureByName } from "./stressFixtures.js";
 import { formatBuildStats } from "./stats.js";

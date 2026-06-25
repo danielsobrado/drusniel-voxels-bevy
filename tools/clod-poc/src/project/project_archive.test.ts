@@ -1,6 +1,6 @@
 import { unzipSync, zipSync, strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "./config.js";
+import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js";
 import {
   createProjectArchive,
   DEFAULT_PROJECT_WATER_ARCHIVE_STATE,

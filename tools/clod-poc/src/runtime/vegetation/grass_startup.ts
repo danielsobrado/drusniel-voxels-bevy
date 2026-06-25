@@ -6,7 +6,7 @@ import {
   type GrassSettings,
   type GrassStats,
 } from "../../grass.js";
-import type { EnvironmentLighting } from "../../environment.js";
+import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { HydrologySystem } from "../../water/index.js";
 import {
   buildGrassInstancedGeometry,

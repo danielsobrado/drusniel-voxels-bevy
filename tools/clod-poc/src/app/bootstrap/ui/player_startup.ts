@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { surfaceHeight } from "../../../terrain.js";
+import { surfaceHeight } from "../../../terrain/terrain.js";
 import { createPlayerModeController } from "../../../player/player_mode_controller.js";
 import { createPlayerInputController } from "../../../player/player_input_controller.js";
 import type { InfoPanelController } from "../info_panel_startup.js";

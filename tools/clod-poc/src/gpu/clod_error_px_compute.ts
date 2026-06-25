@@ -1,4 +1,4 @@
-import type { SelectionParams } from "../selection.js";
+import type { SelectionParams } from "../clod/selection.js";
 import type { WebGpuReadbackMode } from "../core/webgpu_readback_mode.js";
 import type { ClodPageNode } from "../types.js";
 import {

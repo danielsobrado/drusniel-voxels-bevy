@@ -1,4 +1,4 @@
-import type { EnvironmentLighting } from "../../environment.js";
+import type { EnvironmentLighting } from "../../environment/environment.js";
 import {
   applyForestLightingMaterialStateIfChanged,
   ForestLightingSystem,

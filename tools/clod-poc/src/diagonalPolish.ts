@@ -10,7 +10,7 @@ import {
   triangleMinAngleDegrees,
   triangleNormal,
   type Vec3,
-} from "./triangleQuality.js";
+} from "./clod/triangle_quality.js";
 
 export type DiagonalId = "ac" | "bd";
 export type DiagonalChoice = "keep" | "flip" | "reject";

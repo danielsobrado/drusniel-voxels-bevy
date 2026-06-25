@@ -10,7 +10,7 @@
 // Keep the math here byte-identical to terrain.ts. The two are intentionally duplicated: the
 // CPU mesher keeps its path, this is the GPU-shaped parallel reference guarded by the test.
 
-import { BrushShape, BrushOp, DigEdit } from "../terrain.js";
+import { BrushShape, BrushOp, DigEdit } from "../terrain/terrain.js";
 
 // ---- baked constants (mirror terrain.ts) ----------------------------------
 const WATER_LEVEL = 18;

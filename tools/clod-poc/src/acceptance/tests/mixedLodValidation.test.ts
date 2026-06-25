@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectFineEdgeChain, validateChainSpanCoverage, validateMixedLodCutForDelta } from "../borderValidation.js";
+import { collectFineEdgeChain, validateIntervalCoverage, validateMixedLodCutForDelta } from "../borderValidation.js";
 import { buildTolerances } from "../borderValidation.js";
 import type { AcceptanceFailure } from "../acceptanceTypes.js";
 
@@ -19,64 +19,46 @@ const TEST_THRESHOLDS = {
 
 const tolerances = buildTolerances(TEST_THRESHOLDS);
 
-describe("validateChainSpanCoverage", () => {
-  it("fine chain fully covers coarse span -> pass", () => {
-    const chain = {
-      positions: [[0, 0, 0] as [number, number, number], [0, 0, 2] as [number, number, number], [0, 0, 4] as [number, number, number]],
-      normals: [[0, 1, 0] as [number, number, number], [0, 1, 0] as [number, number, number], [0, 1, 0] as [number, number, number]],
-      materials: [0, 0, 0],
-      materialWeights: [[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]],
-    };
-    const result = validateChainSpanCoverage(0, 4, chain, "z");
+describe("validateIntervalCoverage", () => {
+  it("fine intervals fully cover coarse span -> pass", () => {
+    const intervals = [{ start: 0, end: 2 }, { start: 2, end: 4 }];
+    const result = validateIntervalCoverage(intervals, 0, 4);
     expect(result.passes).toBe(true);
     expect(result.failures).toHaveLength(0);
   });
 
-  it("chain with empty positions -> fail with MIXED_LOD_MISSING_FINE_SEGMENT", () => {
-    const chain = {
-      positions: [],
-      normals: [],
-      materials: [],
-      materialWeights: [],
-    };
-    const result = validateChainSpanCoverage(0, 4, chain, "z");
+  it("empty intervals -> fail with MIXED_LOD_MISSING_FINE_SEGMENT", () => {
+    const result = validateIntervalCoverage([], 0, 4);
     expect(result.passes).toBe(false);
     expect(result.failures.some((f: AcceptanceFailure) => f.code === "MIXED_LOD_MISSING_FINE_SEGMENT")).toBe(true);
   });
 
-  it("large consecutive gap -> fail with MIXED_LOD_COVERAGE_GAP", () => {
-    const chain = {
-      positions: [[0, 0, 0] as [number, number, number], [0, 0, 0.5] as [number, number, number], [0, 0, 10] as [number, number, number] as [number, number, number]],
-      normals: [[0, 1, 0] as [number, number, number], [0, 1, 0] as [number, number, number], [0, 1, 0] as [number, number, number]],
-      materials: [0, 0, 0],
-      materialWeights: [[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]],
-    };
-    const result = validateChainSpanCoverage(0, 10, chain, "z");
+  it("gap between intervals -> fail with MIXED_LOD_COVERAGE_GAP", () => {
+    const intervals = [{ start: 0, end: 1.5 }, { start: 2.5, end: 4 }];
+    const result = validateIntervalCoverage(intervals, 0, 4);
     expect(result.passes).toBe(false);
     expect(result.failures.some((f: AcceptanceFailure) => f.code === "MIXED_LOD_COVERAGE_GAP")).toBe(true);
   });
 
-  it("chain starting before span -> fail with MIXED_LOD_EDGE_OVERLAP", () => {
-    const chain = {
-      positions: [[0, 0, -3] as [number, number, number], [0, 0, 2] as [number, number, number]],
-      normals: [[0, 1, 0] as [number, number, number], [0, 1, 0] as [number, number, number]],
-      materials: [0, 0],
-      materialWeights: [[1, 0, 0, 0], [1, 0, 0, 0]],
-    };
-    const result = validateChainSpanCoverage(0, 4, chain, "z");
+  it("overlapping intervals -> fail with MIXED_LOD_EDGE_OVERLAP", () => {
+    const intervals = [{ start: 0, end: 3 }, { start: 2, end: 4 }];
+    const result = validateIntervalCoverage(intervals, 0, 4);
     expect(result.passes).toBe(false);
     expect(result.failures.some((f: AcceptanceFailure) => f.code === "MIXED_LOD_EDGE_OVERLAP")).toBe(true);
   });
 
-  it("continuous chain within margin of span boundaries -> pass", () => {
-    const chain = {
-      positions: [[0, 0, 2] as [number, number, number], [0, 0, 4] as [number, number, number], [0, 0, 6] as [number, number, number], [0, 0, 8] as [number, number, number]],
-      normals: [[0, 1, 0] as [number, number, number], [0, 1, 0] as [number, number, number], [0, 1, 0] as [number, number, number], [0, 1, 0] as [number, number, number]],
-      materials: [0, 0, 0, 0],
-      materialWeights: [[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]],
-    };
-    const result = validateChainSpanCoverage(0, 10, chain, "z");
-    expect(result.passes).toBe(true);
+  it("interval starts after span start -> fail with MIXED_LOD_COVERAGE_GAP", () => {
+    const intervals = [{ start: 1, end: 4 }];
+    const result = validateIntervalCoverage(intervals, 0, 4);
+    expect(result.passes).toBe(false);
+    expect(result.failures.some((f: AcceptanceFailure) => f.code === "MIXED_LOD_COVERAGE_GAP")).toBe(true);
+  });
+
+  it("interval ends before span end -> fail with MIXED_LOD_COVERAGE_GAP", () => {
+    const intervals = [{ start: 0, end: 3 }];
+    const result = validateIntervalCoverage(intervals, 0, 4);
+    expect(result.passes).toBe(false);
+    expect(result.failures.some((f: AcceptanceFailure) => f.code === "MIXED_LOD_COVERAGE_GAP")).toBe(true);
   });
 });
 

@@ -6,7 +6,7 @@
 // internal welding is exactly the page's outer border.
 
 import { PageMesh } from "./types.js";
-import { openBoundaryVertexFlags } from "./validate.js";
+import { openBoundaryVertexFlags } from "./clod/validate.js";
 
 export function buildOuterBorderLocks(mesh: PageMesh): Uint8Array {
   return openBoundaryVertexFlags(mesh);

@@ -6,7 +6,7 @@ import type { StoneStats } from "../../stones/stone_instances.js";
 import type { TreeStats } from "../../trees/index.js";
 import type { UnderstoryStats } from "../../understory/index.js";
 import type { ForestLightingStats } from "../../forest_lighting/index.js";
-import type { PostProcessSettings } from "../../postprocess.js";
+import type { PostProcessSettings } from "../../environment/postprocess.js";
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import type { NearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";
 import type { TerrainRaycastService } from "../../player/terrain_raycast_service.js";

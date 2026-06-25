@@ -1,5 +1,5 @@
 import type * as THREE from "three";
-import type { PostProcessSettings } from "../postprocess.js";
+import type { PostProcessSettings } from "../environment/postprocess.js";
 
 export interface AppPostProcess {
   render(scene: THREE.Scene, camera: THREE.Camera): void;

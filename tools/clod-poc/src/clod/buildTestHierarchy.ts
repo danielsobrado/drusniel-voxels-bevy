@@ -1,9 +1,9 @@
 import type { ClodPagesConfig } from "../config.js";
-import { concat } from "../source_mesh.js";
-import { weldVertices } from "../weld.js";
+import { concat } from "./source_mesh.js";
+import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks } from "../lock.js";
-import { simplifyPage } from "../simplify.js";
-import { assertNoInternalBorders, stripDegenerateTriangles, validateFinite, validateWeldedIntermediate, validateFinalPageMesh } from "../validate.js";
+import { simplifyPage } from "./simplify.js";
+import { assertNoInternalBorders, stripDegenerateTriangles, validateFinite, validateWeldedIntermediate, validateFinalPageMesh } from "./validate.js";
 import { type LevelStats, type BuildStats } from "./stats.js";
 import { ClodBuildError, type ClodPageNode, type PageFootprint, type PageMesh } from "../types.js";
 

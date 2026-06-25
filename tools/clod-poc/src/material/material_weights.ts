@@ -1,4 +1,4 @@
-import { PageMesh, vertexCount, ClodBuildError } from "./types.js";
+import { PageMesh, vertexCount, ClodBuildError } from "../types.js";
 
 const DEFAULT_WEIGHT_STRIDE = 4;
 

@@ -8,14 +8,14 @@
 // exact same uniform write / helper call the app did inline, so behaviour is unchanged.
 
 import * as THREE from "three";
-import type { EnvironmentLighting } from "../environment.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   applyTerrainColorAdjustments,
   applyTerrainTextureUniforms,
   createTerrainMaterial,
   type TerrainColorAdjustments,
   type TerrainTextureSlotUniform,
-} from "../material.js";
+} from "../material/material.js";
 
 export type TerrainTextureApplyOptions = Parameters<typeof applyTerrainTextureUniforms>[2];
 

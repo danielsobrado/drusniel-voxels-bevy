@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildAllLodsExportScene, disposeAllLodsExportScene, exportAllLodsToGlb } from "./gltf_export.js";
-import type { ClodPageNode, PageMesh } from "./types.js";
+import type { ClodPageNode, PageMesh } from "../types.js";
 
 const mesh: PageMesh = {
   positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),

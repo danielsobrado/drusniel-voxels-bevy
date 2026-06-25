@@ -16,7 +16,7 @@ import type { GrassBladeInstance } from "./grass_cpu_patch.js";
 import { edgeFadeForCandidate } from "./grass_cpu_patch.js";
 import type { GrassGenerationStats } from "./grass_stats.js";
 import { acceptsGrassCandidate, grassRingBands, grassThin, hash2, randomSigned, sampleGrassTerrainSite } from "./grass_math.js";
-import { getDigEditRevision } from "../terrain.js";
+import { getDigEditRevision } from "../terrain/terrain.js";
 
 interface GrassRingTierInstances {
   near: GrassBladeInstance[];

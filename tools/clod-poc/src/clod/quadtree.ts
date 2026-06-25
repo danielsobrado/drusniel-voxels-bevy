@@ -8,19 +8,19 @@
 // decimation of its merged children. Locked outer borders are bit-identical across
 // siblings (inherited verbatim from LOD0), so internal borders weld exactly.
 
-import { ClodPageNode, PageFootprint, PageMesh, ClodBuildError } from "./types.js";
-import { ClodPagesConfig } from "./config.js";
+import { ClodPageNode, PageFootprint, PageMesh, ClodBuildError } from "../types.js";
+import { ClodPagesConfig } from "../config.js";
 import { buildLod0PageSource, rebuildPageChunks } from "./source_mesh.js";
 import { concat } from "./source_mesh.js";
 import { weldVertices } from "./weld.js";
-import { buildOuterBorderLocks, countLocks } from "./lock.js";
+import { buildOuterBorderLocks, countLocks } from "../lock.js";
 import { simplifyPage } from "./simplify.js";
 import { validateFinalPageMesh, validatePageMesh, validateWeldedIntermediate } from "./validate.js";
 import {
   emptyDiagonalPolishStats,
   polishDiagonals,
   type DiagonalPolishStats,
-} from "./diagonalPolish.js";
+} from "../diagonalPolish.js";
 
 export interface NodeBuildStat {
   id: string;

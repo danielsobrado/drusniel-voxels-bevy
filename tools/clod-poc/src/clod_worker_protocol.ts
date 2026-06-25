@@ -5,8 +5,8 @@ import type {
   DirtyCellBounds,
   Lod0RebuildResult,
   NodeBuildStat,
-} from "./quadtree.js";
-import type { DigEdit } from "./terrain.js";
+} from "./clod/quadtree.js";
+import type { DigEdit } from "./terrain/terrain.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 
 export interface SerializedHydrologyTerrain {

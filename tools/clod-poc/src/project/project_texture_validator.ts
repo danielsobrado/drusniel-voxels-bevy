@@ -1,5 +1,5 @@
 import { BUILTIN_TERRAIN_TEXTURES } from "../terrain/material/terrain_builtin_textures.js";
-import type { ProjectArchiveContents } from "../project_archive.js";
+import type { ProjectArchiveContents } from "../project/project_archive.js";
 
 export async function validateProjectArchiveTextures(contents: ProjectArchiveContents): Promise<void> {
   for (const slot of contents.manifest.textures) {

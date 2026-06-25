@@ -35,7 +35,7 @@ import {
   vec2,
   vec3,
 } from "three/tsl";
-import type { EnvironmentLighting } from "../environment.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { bakeBarkTextures, type BarkTextures } from "../textures/barkSynth.js";

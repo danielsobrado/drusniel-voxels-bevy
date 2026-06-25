@@ -1,4 +1,4 @@
-import type { BrushOp, BrushShape } from "../../terrain.js";
+import type { BrushOp, BrushShape } from "../../terrain/terrain.js";
 import type { TreeTotalDisplay } from "../../trees/tree_info.js";
 
 export interface ClodFrameLoopUiState {

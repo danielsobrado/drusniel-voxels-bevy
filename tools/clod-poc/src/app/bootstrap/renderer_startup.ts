@@ -7,16 +7,16 @@ import {
 } from "../../rendering/renderer_backend.js";
 import { getRendererGpuDevice } from "../../rendering/webgpu_device_bridge.js";
 import { failLoud } from "../../core/diagnostics.js";
-import { TerrainColliderSet, type TerrainColliderPage } from "../../terrain_collider.js";
+import { TerrainColliderSet, type TerrainColliderPage } from "../../terrain/terrain_collider.js";
 import {
   PlayerController,
   PlayerInteractionState,
 } from "../../player_controller.js";
 import { createTerrainRaycastService } from "../../player/terrain_raycast_service.js";
-import { surfaceHeight } from "../../terrain.js";
+import { surfaceHeight } from "../../terrain/terrain.js";
 import type { ClodPagesConfig } from "../../config.js";
 import type { ClodPageNode } from "../../types.js";
-import type { ProjectArchiveContents } from "../../project_archive.js";
+import type { ProjectArchiveContents } from "../../project/project_archive.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { Phase0SceneConfig } from "../../phase0/phase0_config.js";
 

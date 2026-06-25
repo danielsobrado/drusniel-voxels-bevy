@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { ClodHooks } from "../../core/hooks.js";
 import type { GrassStats } from "../../grass.js";
-import type { PostProcessSettings } from "../../postprocess.js";
+import type { PostProcessSettings } from "../../environment/postprocess.js";
 import type { NodeLabelOverlay } from "../../ui/node_labels.js";
 import type { AppPostProcess } from "../app_post_process.js";
 import type { NearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { TerrainColliderSet } from "./terrain_collider.js";
-import type { PageMesh } from "./types.js";
+import type { PageMesh } from "../types.js";
 
 function planeMesh(x0: number, z0: number, x1: number, z1: number): PageMesh {
   return {

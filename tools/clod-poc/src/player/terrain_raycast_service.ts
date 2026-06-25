@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { TerrainColliderSet, TerrainSurfaceHit } from "../terrain_collider.js";
+import type { TerrainColliderSet, TerrainSurfaceHit } from "../terrain/terrain_collider.js";
 
 export interface TerrainRaycastServiceDeps {
   terrainColliders: TerrainColliderSet;

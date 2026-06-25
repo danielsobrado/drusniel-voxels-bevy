@@ -1,4 +1,4 @@
-import { terrainWeights, WATER_LEVEL } from "../terrain.js";
+import { terrainWeights, WATER_LEVEL } from "../terrain/terrain.js";
 import { DEFAULT_TREE_SETTINGS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { clamp, clamp01, smoothstep } from "./tree_noise.js";
 

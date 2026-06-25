@@ -8,7 +8,7 @@ import {
   type BrushOp,
   type BrushShape,
   type DigEdit,
-} from "../../terrain.js";
+} from "../../terrain/terrain.js";
 import type { ClodPageNode } from "../../types.js";
 import type { ClodSelectionController } from "../selection/clod_selection_controller.js";
 import type { TerrainRaycastService } from "../../player/terrain_raycast_service.js";

@@ -8,9 +8,9 @@ import {
   PROJECT_SCHEMA_VERSION,
   stageProjectImport,
   type ClodProjectManifest,
-} from "../project_archive.js";
+} from "../project/project_archive.js";
 import type { TerrainTextureController } from "../terrain/material/terrain_texture_controller.js";
-import { getDigEditsSnapshot } from "../terrain.js";
+import { getDigEditsSnapshot } from "../terrain/terrain.js";
 import {
   mapProjectSessionState,
   mapProjectWaterArchiveState,
@@ -100,7 +100,7 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         await deps.flushAncestors();
         setProjectBusy(true, "exporting all LOD meshes", 0.25);
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const { exportAllLodsToGlb } = await import("../gltf_export.js");
+        const { exportAllLodsToGlb } = await import("../export/gltf_export.js");
         const terrainGlb = await exportAllLodsToGlb(deps.getNodesByLevel());
         setProjectBusy(true, "packing project archive", 0.8);
         const textures = deps.textureController.projectTextureMetadata();

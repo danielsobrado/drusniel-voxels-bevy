@@ -10,7 +10,7 @@ import {
 import { composeStoneScatterShader } from "../gpu/wgsl_modules.js";
 import terrainCommonSource from "../gpu/shaders/terrain_field_common.wgsl?raw";
 import shaderSource from "../gpu/shaders/stone_scatter.compute.wgsl?raw";
-import { buildWorld } from "../quadtree.js";
+import { buildWorld } from "../clod/quadtree.js";
 import type { ClodPageNode } from "../types.js";
 import { DEFAULT_STONE_SETTINGS, type StoneSettings } from "./stone_config.js";
 import { StoneSystem } from "./stone_instances.js";

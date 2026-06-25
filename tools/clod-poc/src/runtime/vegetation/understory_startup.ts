@@ -3,7 +3,7 @@ import type { ClodPageNode } from "../../types.js";
 import {
   type UnderstoryStats,
 } from "../../understory/index.js";
-import type { EnvironmentLighting } from "../../environment.js";
+import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { HydrologySystem } from "../../water/index.js";
 import { createUnderstoryController } from "./understory_controller.js";
 import { packHydrologyData } from "../../systems/hydrology_packing.js";

@@ -1,7 +1,7 @@
 // Builder validation - errors, never warnings.
 // Runs in every build (the builder is off the frame path; correctness > speed here).
 
-import { PageMesh, PageFootprint, ClodBuildError, DEFAULT_TOLERANCES, vertexCount, type BorderTolerances } from "./types.js";
+import { PageMesh, PageFootprint, ClodBuildError, DEFAULT_TOLERANCES, vertexCount, type BorderTolerances } from "../types.js";
 
 /** Undirected edge key for boundary-edge detection. String to avoid int overflow. */
 function edgeKey(a: number, b: number): string {

@@ -1,7 +1,7 @@
 import * as THREE from "three";
-import { getDigEditsSnapshot } from "../../terrain.js";
-import type { TerrainColorAdjustments } from "../../material.js";
-import type { EnvironmentLighting } from "../../environment.js";
+import { getDigEditsSnapshot } from "../../terrain/terrain.js";
+import type { TerrainColorAdjustments } from "../../material/material.js";
+import type { EnvironmentLighting } from "../../environment/environment.js";
 import {
   createWebGlTerrainMaterial,
   type TerrainMaterialHandle,
