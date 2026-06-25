@@ -186,17 +186,12 @@ export class ClodWorkerClient {
         break;
       }
       case "lod0Rebuilt": {
-        const pending = this.digRequests.get(message.requestId);
-        if (!pending) break;
-        this.digRequests.delete(message.requestId);
-        const changed = message.changed.map((node) => {
-          const target = this.nodesById.get(node.id);
-          if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
-          return applySerializedNode(target, node, this.nodesById);
-        });
-        if (message.pendingParents > 0) this.parentsPending = true;
-        pending.resolve({
-          changed,
+        const result: WorkerLod0Rebuild = {
+          changed: message.changed.map((node) => {
+            const target = this.nodesById.get(node.id);
+            if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
+            return applySerializedNode(target, node, this.nodesById);
+          }),
           dirtyCoords: message.dirtyCoords,
           lod0Pages: message.lod0Pages,
           lod0Ms: message.lod0Ms,
@@ -205,7 +200,15 @@ export class ClodWorkerClient {
           chunksRemeshed: message.chunksRemeshed,
           chunksTotal: message.chunksTotal,
           pendingParents: message.pendingParents,
-        });
+        };
+        if (message.pendingParents > 0) this.parentsPending = true;
+        for (const rid of message.requestIds) {
+          const pending = this.digRequests.get(rid);
+          if (pending) {
+            this.digRequests.delete(rid);
+            pending.resolve(result);
+          }
+        }
         break;
       }
       case "parentRebuilt":
@@ -242,6 +245,13 @@ export class ClodWorkerClient {
     };
   }
 
+  private rejectParentsWaiters(error: Error): void {
+    this.parentsPending = false;
+    for (const resolve of this.parentsWaiters) resolve();
+    this.parentsWaiters = [];
+    this.onError?.(error);
+  }
+
   private handleError(requestId: number | null, error: Error): void {
     if (requestId !== null) {
       const pending =
@@ -255,6 +265,11 @@ export class ClodWorkerClient {
         pending.reject(error);
         return;
       }
+      // If no matching pending request, the error may be from a parent rebuild
+      // (the dig promise was already resolved). Release parent waiters so
+      // pumpDigQueue does not hang forever.
+      this.rejectParentsWaiters(error);
+      return;
     }
     this.onError?.(error);
   }

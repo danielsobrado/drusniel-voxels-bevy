@@ -237,7 +237,9 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
     );
   }
 
-  const payload = {
+  post({
+    type: "lod0Rebuilt",
+    requestIds,
     changed,
     dirtyCoords: lod0.dirtyCoords.map(([x, z]) => [x, z] as [number, number]),
     lod0Pages: lod0.lod0Pages,
@@ -247,15 +249,7 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
     chunksRemeshed: lod0.chunksRemeshed,
     chunksTotal: lod0.chunksTotal,
     pendingParents: pendingParentCount(),
-  };
-
-  for (let i = 0; i < requestIds.length; i++) {
-    post({
-      type: "lod0Rebuilt",
-      requestId: requestIds[i]!,
-      ...payload,
-    }, i === 0 ? transferables : undefined);
-  }
+  }, transferables);
   scheduleParentDrain();
 }
 

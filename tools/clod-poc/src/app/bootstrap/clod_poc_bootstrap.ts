@@ -15,6 +15,7 @@ import { runUiStartup } from "./ui/ui_startup.js";
 import { surfaceHeightCore } from "../../gpu/terrain_field_core.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
+import { DEFAULT_FAR_SUMMARY_CONFIG } from "../../far-summary/config.js";
 import type * as THREE from "three";
 
 
@@ -125,6 +126,8 @@ export async function bootstrapClodPoc() {
     queryScene === "infinite-stream-slow-builds";
 
   if (isInfiniteStreamScene) {
+    const summaryFallbackParam = searchParams.get("summaryFallback");
+    const disableProcedural = summaryFallbackParam === "0";
     farSummaryIntegration = initFarSummaryIntegration({
       terrainSampler: {
         sampleHeight: (x: number, z: number) => surfaceHeightCore(x, z),
@@ -142,6 +145,10 @@ export async function bootstrapClodPoc() {
           showSummaryNormals: false,
           showRingColors: true,
         },
+        sampling: disableProcedural ? {
+          ...DEFAULT_FAR_SUMMARY_CONFIG.sampling,
+          disableProceduralFallback: true,
+        } : undefined,
       },
     });
 

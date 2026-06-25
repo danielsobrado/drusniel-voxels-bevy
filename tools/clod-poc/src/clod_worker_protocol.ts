@@ -56,7 +56,7 @@ export type ClodWorkerRequest =
     };
 
 export interface SerializedLod0RebuildResult {
-  requestId: number;
+  requestIds: number[];
   changed: SerializedClodNode[];
   dirtyCoords: [number, number][];
   lod0Pages: number;
@@ -115,7 +115,7 @@ export function serializeNodes(nodes: readonly ClodPageNode[]): SerializedClodNo
 
 export function serializeLod0Rebuild(result: Lod0RebuildResult, pendingParents: number, serializeMs: number, serializedBytes: number): SerializedLod0RebuildResult {
   return {
-    requestId: 0,
+    requestIds: [0],
     changed: serializeNodes(result.changed),
     dirtyCoords: result.dirtyCoords.map(([x, z]) => [x, z]),
     lod0Pages: result.lod0Pages,

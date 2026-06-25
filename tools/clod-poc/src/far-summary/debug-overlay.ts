@@ -29,6 +29,7 @@ export class FarSummaryDebugOverlay {
   private gridMeshes: THREE.Object3D[] = [];
   private tileMeshes: THREE.Object3D[] = [];
   private lastMeshRevision = -1;
+  private meshRebuildFrameSkips = 0;
 
   constructor(
     config: FarSummaryConfig,
@@ -65,9 +66,11 @@ export class FarSummaryDebugOverlay {
     stats: FarSummaryStats,
   ): void {
     const currentRev = this.cache.commitRevisionAt();
-    if (currentRev !== this.lastMeshRevision) {
+    this.meshRebuildFrameSkips++;
+    if (currentRev !== this.lastMeshRevision && this.meshRebuildFrameSkips >= 5) {
       this.rebuildMeshes();
       this.lastMeshRevision = currentRev;
+      this.meshRebuildFrameSkips = 0;
     }
     this.updateStatsText(stats);
   }

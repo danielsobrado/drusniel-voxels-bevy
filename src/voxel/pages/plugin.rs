@@ -68,6 +68,13 @@ impl Plugin for ClodPagesPlugin {
                     .chain()
                     .after(clod_page_selection_system),
             )
+            // Second scheduling of the gate refresh: establishes an ordering edge
+            // `refresh_clod_page_mesh_gate_system → update_chunk_lod_system` across
+            // plugin boundaries.  The first instance (chained after selection, above)
+            // only orders it within this plugin.  Without this second entry, the gate
+            // could run *after* LOD on some frames when the schedulers of the two
+            // plugins interleave.  Both runs are idempotent on the same frame state,
+            // so the second is a safe ordering anchor.
             .add_systems(
                 Update,
                 refresh_clod_page_mesh_gate_system

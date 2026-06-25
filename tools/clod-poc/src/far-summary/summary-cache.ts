@@ -30,6 +30,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
     nowMs: number,
   ): void {
     this.frameIndex = frameIndex;
+    resetFrameStats(this.stats);
 
     for (const req of requests) {
       const keyStr = tileKeyToString(req.key);
@@ -54,11 +55,12 @@ export class FarSummaryCache implements FallbackStatsWriter {
         existing.lastTouchedFrame = frameIndex;
         existing.lastTouchedTimeMs = nowMs;
 
-        if (existing.state === 'stale' || existing.state === 'cooling') {
-          existing.state = 'requested';
-          this.pendingBuildKeys.set(keyStr, req);
-          this.stats.requestedTiles++;
-        } else if (existing.state === 'evicted') {
+        if (
+          existing.state === 'missing' ||
+          existing.state === 'stale' ||
+          existing.state === 'cooling' ||
+          existing.state === 'evicted'
+        ) {
           existing.state = 'requested';
           this.pendingBuildKeys.set(keyStr, req);
           this.stats.requestedTiles++;
@@ -74,7 +76,6 @@ export class FarSummaryCache implements FallbackStatsWriter {
     overrideMaxBuilds?: number,
   ): void {
     this.frameIndex = frameIndex;
-    resetFrameStats(this.stats);
     const maxBuilds = overrideMaxBuilds ?? this.config.stream.maxTileBuildsPerFrame;
     const commitBudget = this.config.stream.maxTileCommitsPerFrame;
 
@@ -116,7 +117,8 @@ export class FarSummaryCache implements FallbackStatsWriter {
 
         this.stats.tilesBuiltThisFrame++;
         if (this.stats.tilesCommittedThisFrame >= commitBudget) {
-          existing.state = preBuildState === 'requested' ? 'stale' : preBuildState;
+          const hasSamples = existing.samples.length > 0;
+          existing.state = hasSamples ? 'stale' : 'requested';
           this.pendingBuildKeys.set(build.keyStr, build.req);
         } else {
           this.pendingBuildKeys.delete(build.keyStr);
