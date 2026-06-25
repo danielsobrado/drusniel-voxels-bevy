@@ -73,6 +73,16 @@ pub enum OceanClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoastSurfaceClass {
+    DeepSeaFloor,
+    ShelfSeaFloor,
+    WetCoast,
+    BeachSand,
+    CoastalCliff,
+    Inland,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BiomeHint {
     Ocean,
     Beach,
@@ -89,6 +99,7 @@ pub struct WorldShapeSample {
     pub coast_distance_m: f32,
     pub base_elevation: f32,
     pub ocean_class: OceanClass,
+    pub coast_surface: CoastSurfaceClass,
     pub biome_hint: BiomeHint,
 }
 
@@ -113,6 +124,7 @@ impl WorldShapeSampler {
         let island = self.island_value(x, z);
         let ocean_class = classify_ocean(land_mask, coast_distance_m, &self.config.coast);
         let base_elevation = self.base_elevation(x, z, land_mask, coast_distance_m, ocean_class);
+        let coast_surface = self.classify_coast_surface(x, z, ocean_class, coast_distance_m);
         let biome_hint = classify_biome(base_elevation, ocean_class, self.config.sea_level);
 
         WorldShapeSample {
@@ -122,6 +134,7 @@ impl WorldShapeSampler {
             coast_distance_m,
             base_elevation,
             ocean_class,
+            coast_surface,
             biome_hint,
         }
     }
@@ -192,6 +205,43 @@ impl WorldShapeSampler {
         let gradient = ((dx * dx + dz * dz).sqrt() / (COAST_GRADIENT_STEP_M * 2.0)).max(MIN_GRADIENT);
 
         land_mask / gradient
+    }
+
+    fn classify_coast_surface(
+        &self,
+        x: f32,
+        z: f32,
+        ocean_class: OceanClass,
+        coast_distance_m: f32,
+    ) -> CoastSurfaceClass {
+        match ocean_class {
+            OceanClass::DeepSea => CoastSurfaceClass::DeepSeaFloor,
+            OceanClass::ShelfSea => CoastSurfaceClass::ShelfSeaFloor,
+            OceanClass::Coast => CoastSurfaceClass::WetCoast,
+            OceanClass::Beach => {
+                let cliff_noise = fbm(
+                    x,
+                    z,
+                    &NoiseLayer {
+                        scale: self.config.coast.cliff_noise_scale,
+                        amplitude: 1.0,
+                        octaves: 2,
+                        persistence: 0.5,
+                        lacunarity: 2.0,
+                    },
+                    self.config.seed.wrapping_add(307),
+                );
+                let coast_t = (coast_distance_m / self.config.coast.beach_width_m).clamp(0.0, 1.0);
+                let cliff_score = cliff_noise * self.config.coast.cliff_chance + coast_t;
+
+                if cliff_score >= self.config.coast.cliff_slope_threshold {
+                    CoastSurfaceClass::CoastalCliff
+                } else {
+                    CoastSurfaceClass::BeachSand
+                }
+            }
+            OceanClass::Land => CoastSurfaceClass::Inland,
+        }
     }
 
     fn base_elevation(
@@ -366,6 +416,7 @@ mod tests {
 
         assert_eq!(a.land_mask, b.land_mask);
         assert_eq!(a.ocean_class, b.ocean_class);
+        assert_eq!(a.coast_surface, b.coast_surface);
         assert_eq!(a.biome_hint, b.biome_hint);
     }
 
@@ -378,5 +429,17 @@ mod tests {
         assert_eq!(classify_ocean(-0.01, -12.0, &coast), OceanClass::Coast);
         assert_eq!(classify_ocean(-0.2, -100.0, &coast), OceanClass::ShelfSea);
         assert_eq!(classify_ocean(-0.6, -400.0, &coast), OceanClass::DeepSea);
+    }
+
+    #[test]
+    fn beach_can_be_sand_or_cliff() {
+        let mut config = WorldShapeConfig::default();
+        config.coast.cliff_slope_threshold = 2.0;
+        let sandy = WorldShapeSampler::new(config.clone()).sample(0.0, 0.0);
+
+        config.coast.cliff_slope_threshold = -2.0;
+        let cliff = WorldShapeSampler::new(config).sample(0.0, 0.0);
+
+        assert_ne!(sandy.coast_surface, cliff.coast_surface);
     }
 }
