@@ -32,23 +32,32 @@ export interface WaterFieldResult {
   flow: WaterFlow;
 }
 
-export interface EdgeOceanSettings {
+/** Shallow shore surf inside the playable border — not deep ocean. */
+export interface ShoreSurfBandSettings {
   enabled: boolean;
+  /** Cells from the nearest world edge where surf begins. */
   startDistance: number;
-  fullDepthDistance: number;
-  minDepth: number;
-  maxDepth: number;
+  /** Cells from the edge where surf reaches full strength. */
+  fullSurfDistance: number;
+  /** Sea level for the surf sheet. */
   level: number;
+  /** Max submerged depth used for surf mask fade (shallow wetness only). */
+  maxShallowDepth: number;
 }
 
-export const DEFAULT_EDGE_OCEAN_SETTINGS: EdgeOceanSettings = {
+/** @deprecated Use ShoreSurfBandSettings */
+export type EdgeOceanSettings = ShoreSurfBandSettings;
+
+export const DEFAULT_SHORE_SURF_BAND_SETTINGS: ShoreSurfBandSettings = {
   enabled: false,
-  startDistance: 96,
-  fullDepthDistance: 32,
-  minDepth: 2,
-  maxDepth: 18,
+  startDistance: 48,
+  fullSurfDistance: 16,
   level: 18,
+  maxShallowDepth: 2.5,
 };
+
+/** @deprecated Use DEFAULT_SHORE_SURF_BAND_SETTINGS */
+export const DEFAULT_EDGE_OCEAN_SETTINGS = DEFAULT_SHORE_SURF_BAND_SETTINGS;
 
 const FLOW_EPSILON = 1e-6;
 
@@ -163,7 +172,7 @@ function smooth01(value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function cloneOceanSettings(settings: EdgeOceanSettings): EdgeOceanSettings {
+function cloneShoreSurfSettings(settings: ShoreSurfBandSettings): ShoreSurfBandSettings {
   return { ...settings };
 }
 
@@ -176,7 +185,7 @@ export class WaterField {
   private readonly source: WaterConfig["source"];
   private readonly farLevelMinCellSize: number;
   private readonly worldCells: number;
-  private ocean = cloneOceanSettings(DEFAULT_EDGE_OCEAN_SETTINGS);
+  private shoreSurf = cloneShoreSurfSettings(DEFAULT_SHORE_SURF_BAND_SETTINGS);
 
   constructor(config: WaterConfig, sampler: TerrainHeightSampler, hydrology: HydrologySystem | null = null, worldCells = 0) {
     this.sampler = sampler;
@@ -191,26 +200,36 @@ export class WaterField {
       .map((river) => buildRiverRuntime(river, sampler));
   }
 
-  setEdgeOcean(settings: Partial<EdgeOceanSettings>): void {
-    this.ocean = {
-      ...this.ocean,
+  setShoreSurfBand(settings: Partial<ShoreSurfBandSettings>): void {
+    this.shoreSurf = {
+      ...this.shoreSurf,
       ...settings,
-      startDistance: Math.max(1, settings.startDistance ?? this.ocean.startDistance),
-      fullDepthDistance: Math.max(0, settings.fullDepthDistance ?? this.ocean.fullDepthDistance),
-      minDepth: Math.max(0.01, settings.minDepth ?? this.ocean.minDepth),
-      maxDepth: Math.max(0.01, settings.maxDepth ?? this.ocean.maxDepth),
-      level: Number.isFinite(settings.level) ? Number(settings.level) : this.ocean.level,
+      startDistance: Math.max(1, settings.startDistance ?? this.shoreSurf.startDistance),
+      fullSurfDistance: Math.max(0, settings.fullSurfDistance ?? this.shoreSurf.fullSurfDistance),
+      maxShallowDepth: Math.max(0.01, settings.maxShallowDepth ?? this.shoreSurf.maxShallowDepth),
+      level: Number.isFinite(settings.level) ? Number(settings.level) : this.shoreSurf.level,
     };
-    if (this.ocean.fullDepthDistance > this.ocean.startDistance) {
-      this.ocean.fullDepthDistance = this.ocean.startDistance;
-    }
-    if (this.ocean.maxDepth < this.ocean.minDepth) {
-      this.ocean.maxDepth = this.ocean.minDepth;
+    if (this.shoreSurf.fullSurfDistance > this.shoreSurf.startDistance) {
+      this.shoreSurf.fullSurfDistance = this.shoreSurf.startDistance;
     }
   }
 
-  getEdgeOcean(): EdgeOceanSettings {
-    return cloneOceanSettings(this.ocean);
+  getShoreSurfBand(): ShoreSurfBandSettings {
+    return cloneShoreSurfSettings(this.shoreSurf);
+  }
+
+  /** @deprecated Use setShoreSurfBand */
+  setEdgeOcean(settings: Partial<ShoreSurfBandSettings & { fullDepthDistance?: number; minDepth?: number; maxDepth?: number }>): void {
+    this.setShoreSurfBand({
+      ...settings,
+      fullSurfDistance: settings.fullSurfDistance ?? settings.fullDepthDistance,
+      maxShallowDepth: settings.maxShallowDepth ?? settings.minDepth ?? settings.maxDepth,
+    });
+  }
+
+  /** @deprecated Use getShoreSurfBand */
+  getEdgeOcean(): ShoreSurfBandSettings {
+    return this.getShoreSurfBand();
   }
 
   /** Terrain surface height at (x,z), exposed for the clipmap vertex fill. */
@@ -245,8 +264,8 @@ export class WaterField {
   }
 
   sampleForCellSize(x: number, z: number, cellSize: number): WaterFieldResult {
-    const ocean = this.sampleEdgeOcean(x, z);
-    if (ocean) return ocean;
+    const shoreSurf = this.sampleShoreSurfBand(x, z);
+    if (shoreSurf) return shoreSurf;
 
     if (this.source === "hydrology" && this.hydrology) {
       const s = this.hydrology.sample(x, z);
@@ -396,26 +415,29 @@ export class WaterField {
     };
   }
 
-  private sampleEdgeOcean(x: number, z: number): WaterFieldResult | null {
-    if (!this.ocean.enabled || this.worldCells <= 0) return null;
+  private sampleShoreSurfBand(x: number, z: number): WaterFieldResult | null {
+    if (!this.shoreSurf.enabled || this.worldCells <= 0) return null;
     const edgeDistance = Math.min(x, z, this.worldCells - x, this.worldCells - z);
-    if (edgeDistance >= this.ocean.startDistance) return null;
+    if (edgeDistance >= this.shoreSurf.startDistance) return null;
 
-    const width = Math.max(1, this.ocean.startDistance - this.ocean.fullDepthDistance);
-    const raw = (this.ocean.startDistance - edgeDistance) / width;
-    const strength = edgeDistance <= this.ocean.fullDepthDistance ? 1 : smooth01(raw);
+    const width = Math.max(1, this.shoreSurf.startDistance - this.shoreSurf.fullSurfDistance);
+    const raw = (this.shoreSurf.startDistance - edgeDistance) / width;
+    const strength = edgeDistance <= this.shoreSurf.fullSurfDistance ? 1 : smooth01(raw);
     if (strength <= 0) return null;
 
     const terrainY = this.terrainYAt(x, z);
-    const oceanDepth = this.ocean.minDepth + (this.ocean.maxDepth - this.ocean.minDepth) * strength;
-    const seaLevel = this.ocean.level;
-    const waterY = Math.max(seaLevel, terrainY + Math.max(0.12, oceanDepth * 0.08));
+    const waterY = this.shoreSurf.level;
     const depth = waterY - terrainY;
+    if (depth <= 0) return null;
+
+    const shallowNorm = Math.min(1, depth / Math.max(0.01, this.shoreSurf.maxShallowDepth));
+    const bodyMask = Math.min(1, strength * shallowNorm);
+
     return {
       waterY,
       terrainY,
       depth,
-      bodyMask: Math.min(1, strength),
+      bodyMask,
       flow: { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
     };
   }

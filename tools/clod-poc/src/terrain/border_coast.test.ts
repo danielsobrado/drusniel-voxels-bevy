@@ -34,12 +34,11 @@ describe("border coast shaping", () => {
     expect(coastMask(0, worldCells * 0.5, cfg.coast, worldCells)).toBeGreaterThan(0.9);
   });
 
-  it("lowers beach shoreline heights toward the waterline", () => {
+  it("places beach waterline at sea level offset on the world edge", () => {
     const inland = 80;
-    const beachX = 4;
-    const shaped = applyBorderCoastShape(beachX, worldCells * 0.5, inland, cfg, worldCells);
-    expect(shaped).toBeLessThan(inland);
-    expect(shaped).toBeGreaterThan(cfg.ocean.surfaceY);
+    const shaped = applyBorderCoastShape(0, 0, inland, cfg, worldCells);
+    const waterline = cfg.ocean.surfaceY + cfg.coast.beach.waterlineOffset;
+    expect(shaped).toBeCloseTo(waterline, 5);
   });
 
   it("samples deterministic coast types", () => {

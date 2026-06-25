@@ -12,7 +12,7 @@ border_coast_ocean:
     cliff_headland_threshold: 0.58
     cliff_modulo: 7
     beach:
-      waterline_offset: 1.0
+      waterline_offset: -0.25
       backshore_height_above_water: 5.0
       beach_shelf_cells: 8      # chunk_size / 2
     cliff:

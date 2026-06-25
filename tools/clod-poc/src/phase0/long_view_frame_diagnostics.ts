@@ -43,6 +43,7 @@ export interface LongViewFrameDiagnosticsDeps {
     waterField: WaterField;
     deepOcean: DeepOceanRenderConfig;
     deepOceanMeshPresent: boolean;
+    oceanSampler: import("../water/ocean_service.js").OceanSampler | null;
   };
 }
 
@@ -125,6 +126,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         deepOcean: deps.borderOceanScene.deepOcean,
         waterField: deps.borderOceanScene.waterField,
         deepOceanMeshPresent: deps.borderOceanScene.deepOceanMeshPresent,
+        oceanSampler: deps.borderOceanScene.oceanSampler,
       });
     }
 

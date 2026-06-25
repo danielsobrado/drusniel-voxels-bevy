@@ -52,7 +52,7 @@ export const DEFAULT_BORDER_COAST_OCEAN_CONFIG: BorderCoastOceanConfig = {
     cliffHeadlandThreshold: 0.58,
     cliffModulo: 7,
     beach: {
-      waterlineOffset: 1.0,
+      waterlineOffset: -0.25,
       backshoreHeightAboveWater: 5.0,
       beachShelfCells: 8,
     },

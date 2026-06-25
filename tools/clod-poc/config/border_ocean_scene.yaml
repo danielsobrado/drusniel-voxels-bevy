@@ -12,4 +12,4 @@ border_ocean_scene:
     fov: 55
   acceptance:
     min_deep_ocean_vertices: 1000
-    max_interior_water_wet_ratio: 0.35
+    max_interior_water_wet_ratio: 0.15

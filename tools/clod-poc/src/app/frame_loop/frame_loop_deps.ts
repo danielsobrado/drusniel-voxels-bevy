@@ -91,7 +91,7 @@ export interface FrameLoopVegetationDeps {
   understorySystem: UnderstoryController["system"];
   forestLightingSystem: ForestLightingController["system"];
   stoneSystem: StoneController["system"];
-  currentLighting: () => { sunDirection: THREE.Vector3 };
+  currentLighting: () => { sunDirection: THREE.Vector3; skyLight: THREE.Color };
 }
 
 export interface FrameLoopWaterWeatherDeps {
@@ -100,6 +100,7 @@ export interface FrameLoopWaterWeatherDeps {
   waterField: import("../../water/waterField.js").WaterField;
   deepOceanConfig: import("../../terrain/border_coast_config.js").DeepOceanRenderConfig;
   deepOceanMeshPresent: boolean;
+  oceanSampler: import("../../water/ocean_service.js").OceanSampler | null;
   weatherController: WeatherController;
   updateWeatherStats: () => void;
   weatherStatsController: GuiDisplayController | null;

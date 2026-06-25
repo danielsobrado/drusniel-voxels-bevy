@@ -33,7 +33,7 @@ export interface VegetationFramePhaseInput {
   weatherController: WeatherController;
   updateWeatherStats: () => void;
   weatherStatsController: GuiDisplayController | null;
-  currentLighting: () => { sunDirection: THREE.Vector3 };
+  currentLighting: () => { sunDirection: THREE.Vector3; skyLight: THREE.Color };
   selectionFrameId: number;
   worldCells: number;
 }
@@ -54,6 +54,9 @@ export function runVegetationFramePhase(input: VegetationFramePhaseInput): void 
   if (input.deepOceanMaterial) {
     input.deepOceanMaterial.setTime(input.elapsedSeconds);
     input.deepOceanMaterial.updateCamera(input.camera.position);
+    const lighting = input.currentLighting();
+    input.deepOceanMaterial.updateSunDirection(lighting.sunDirection);
+    input.deepOceanMaterial.updateHorizonColor(lighting.skyLight);
   }
   input.weatherController.update(input.playerDelta, input.elapsedSeconds, input.camera.position, input.grassCenter);
   if (input.state.weatherMode !== "off" && input.selectionFrameId % 30 === 0) {

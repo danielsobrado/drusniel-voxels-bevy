@@ -1,6 +1,6 @@
 // Water debug UI helper. Adds a small lil-gui folder for the fake water clipmap:
 // enable toggle, debug render mode, clipmap tint/wireframe, depth-write override,
-// and the CLOD edge-ocean preview controls.
+// and the CLOD shore-surf preview controls.
 //
 // The existing CLOD "freeze selection" toggle (state.freeze in main.ts) already
 // freezes page selection while water keeps following the camera, because
@@ -8,7 +8,7 @@
 // freeze framework is added here, per the water spec.
 import type GUI from "lil-gui";
 import { type WaterDebugMode, type WaterVisualConfig } from "./waterConfig.js";
-import { DEFAULT_EDGE_OCEAN_SETTINGS } from "./waterField.js";
+import { DEFAULT_SHORE_SURF_BAND_SETTINGS } from "./waterField.js";
 
 export interface WaterDebugState {
   enabled: boolean;
@@ -59,10 +59,10 @@ export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugSta
     clipmapTint: false,
     wireframe: false,
     depthWrite: visual.depthWrite,
-    oceanEnabled: DEFAULT_EDGE_OCEAN_SETTINGS.enabled,
-    oceanStartDistance: DEFAULT_EDGE_OCEAN_SETTINGS.startDistance,
-    oceanFullDepthDistance: DEFAULT_EDGE_OCEAN_SETTINGS.fullDepthDistance,
-    oceanMaxDepth: DEFAULT_EDGE_OCEAN_SETTINGS.maxDepth,
+    oceanEnabled: DEFAULT_SHORE_SURF_BAND_SETTINGS.enabled,
+    oceanStartDistance: DEFAULT_SHORE_SURF_BAND_SETTINGS.startDistance,
+    oceanFullDepthDistance: DEFAULT_SHORE_SURF_BAND_SETTINGS.fullSurfDistance,
+    oceanMaxDepth: DEFAULT_SHORE_SURF_BAND_SETTINGS.maxShallowDepth,
   };
 }
 
@@ -90,24 +90,24 @@ export function addWaterDebugFolder(
     bindings.onRebuildVisual();
   });
 
-  const ocean = folder.addFolder("edge ocean");
-  ocean.add(state, "oceanEnabled").name("enabled").onChange((enabled: boolean) => {
+  const shoreSurf = folder.addFolder("shore surf");
+  shoreSurf.add(state, "oceanEnabled").name("enabled").onChange((enabled: boolean) => {
     bindings.onOceanEnabled(enabled);
   });
-  ocean.add(state, "oceanStartDistance", 8, 192, 1).name("start distance").onChange((distance: number) => {
+  shoreSurf.add(state, "oceanStartDistance", 8, 192, 1).name("start distance").onChange((distance: number) => {
     bindings.onOceanStartDistance(distance);
   });
-  ocean.add(state, "oceanFullDepthDistance", 0, 128, 1).name("full depth at").onChange((distance: number) => {
+  shoreSurf.add(state, "oceanFullDepthDistance", 0, 128, 1).name("full surf at").onChange((distance: number) => {
     bindings.onOceanFullDepthDistance(distance);
   });
-  ocean.add(state, "oceanMaxDepth", 1, 40, 1).name("max depth").onChange((depth: number) => {
+  shoreSurf.add(state, "oceanMaxDepth", 0.1, 8, 0.1).name("max shallow depth").onChange((depth: number) => {
     bindings.onOceanMaxDepth(depth);
   });
 
   return {
     refreshDisplay: () => {
       folder.controllers.forEach((controller) => controller.updateDisplay());
-      ocean.controllers.forEach((controller) => controller.updateDisplay());
+      shoreSurf.controllers.forEach((controller) => controller.updateDisplay());
     },
   };
 }

@@ -74,6 +74,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           waterField: waterWeather.waterField,
           deepOcean: waterWeather.deepOceanConfig,
           deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
+          oceanSampler: waterWeather.oceanSampler,
         }
       : undefined,
   });

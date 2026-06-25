@@ -1,5 +1,9 @@
 import { load } from "js-yaml";
 import type { WaterField } from "../water/waterField.js";
+import { WaterField as WaterFieldImpl } from "../water/waterField.js";
+import { parseWaterConfig } from "../water/waterConfig.js";
+import waterYaml from "../../config/water.yaml?raw";
+import type { OceanSampler } from "../water/ocean_service.js";
 import { deepOceanSurfaceVertexCount } from "../water/deep_ocean_surface.js";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
 import { getBorderCoastRuntime } from "../terrain/terrain.js";
@@ -42,7 +46,7 @@ export const DEFAULT_BORDER_OCEAN_SCENE_CONFIG: BorderOceanSceneConfig = {
   },
   acceptance: {
     minDeepOceanVertices: 1000,
-    maxInteriorWaterWetRatio: 0.35,
+    maxInteriorWaterWetRatio: 0.15,
   },
 };
 
@@ -151,7 +155,7 @@ export function parseBorderOceanCamString(
 }
 
 export function sampleInteriorWaterWetRatio(field: WaterField, worldCells: number): number {
-  const margin = worldCells * 0.3;
+  const margin = worldCells * 0.35;
   const min = margin;
   const max = worldCells - margin;
   const step = Math.max(8, worldCells / 32);
@@ -172,6 +176,30 @@ export interface BorderOceanAcceptanceInput {
   deepOcean: DeepOceanRenderConfig;
   waterField: WaterField | null;
   deepOceanMeshPresent: boolean;
+  oceanSampler: OceanSampler | null;
+}
+
+export function probePlayableOceanOutside(sampler: OceanSampler, worldCells: number): number {
+  const x = worldCells + 64;
+  const z = worldCells * 0.5;
+  if (!sampler.isInPlayableOcean(x, z)) return 0;
+  const height = sampler.sampleOceanHeight(x, z, 0);
+  return Number.isFinite(height) && height > 0 ? 1 : 0;
+}
+
+export function probeCliffDryAboveSea(seaLevel: number, worldCells: number): number {
+  const field = new WaterFieldImpl(parseWaterConfig(waterYaml), {
+    surfaceHeight: () => seaLevel + 24,
+  }, null, worldCells);
+  field.setShoreSurfBand({
+    enabled: true,
+    startDistance: 48,
+    fullSurfDistance: 16,
+    level: seaLevel,
+    maxShallowDepth: 2.5,
+  });
+  const sample = field.sample(4, worldCells * 0.5);
+  return sample.depth > 0 ? 0 : 1;
 }
 
 export function publishBorderOceanAcceptanceCounters(
@@ -190,6 +218,17 @@ export function publishBorderOceanAcceptanceCounters(
   counters["border_ocean.interior_water_wet_ratio"] = input.waterField
     ? sampleInteriorWaterWetRatio(input.waterField, input.worldCells)
     : -1;
+  counters["border_ocean.playable_ocean_outside_ok"] = input.oceanSampler
+    ? probePlayableOceanOutside(input.oceanSampler, input.worldCells)
+    : 0;
+  if (input.waterField && runtime?.config) {
+    counters["border_ocean.cliff_dry_above_sea"] = probeCliffDryAboveSea(
+      runtime.config.ocean.surfaceY,
+      input.worldCells,
+    );
+  } else {
+    counters["border_ocean.cliff_dry_above_sea"] = -1;
+  }
 }
 
 export function validateBorderOceanStats(
@@ -218,4 +257,6 @@ export function validateBorderOceanStats(
     "border_ocean.interior_water_wet_ratio",
     (v) => v >= 0 && v <= sceneConfig.acceptance.maxInteriorWaterWetRatio,
   );
+  assertCounter("border_ocean.playable_ocean_outside_ok", (v) => v === 1);
+  assertCounter("border_ocean.cliff_dry_above_sea", (v) => v === 1);
 }
