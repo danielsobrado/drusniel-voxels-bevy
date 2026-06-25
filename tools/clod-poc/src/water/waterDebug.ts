@@ -1,5 +1,6 @@
 // Water debug UI helper. Adds a small lil-gui folder for the fake water clipmap:
-// enable toggle, debug render mode, clipmap tint/wireframe, and depth-write override.
+// enable toggle, debug render mode, clipmap tint/wireframe, depth-write override,
+// and the CLOD edge-ocean preview controls.
 //
 // The existing CLOD "freeze selection" toggle (state.freeze in main.ts) already
 // freezes page selection while water keeps following the camera, because
@@ -14,6 +15,10 @@ export interface WaterDebugState {
   clipmapTint: boolean;
   wireframe: boolean;
   depthWrite: boolean;
+  oceanEnabled: boolean;
+  oceanStartDistance: number;
+  oceanFullDepthDistance: number;
+  oceanMaxDepth: number;
 }
 
 export interface WaterDebugBindings {
@@ -22,6 +27,10 @@ export interface WaterDebugBindings {
   onClipmapTint: (enabled: boolean) => void;
   onWireframe: (enabled: boolean) => void;
   onDepthWrite: (depthWrite: boolean) => void;
+  onOceanEnabled: (enabled: boolean) => void;
+  onOceanStartDistance: (distance: number) => void;
+  onOceanFullDepthDistance: (distance: number) => void;
+  onOceanMaxDepth: (depth: number) => void;
   onRebuildVisual: () => void;
 }
 
@@ -49,6 +58,10 @@ export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugSta
     clipmapTint: false,
     wireframe: false,
     depthWrite: visual.depthWrite,
+    oceanEnabled: false,
+    oceanStartDistance: 96,
+    oceanFullDepthDistance: 32,
+    oceanMaxDepth: 18,
   };
 }
 
@@ -75,9 +88,25 @@ export function addWaterDebugFolder(
     bindings.onDepthWrite(on);
     bindings.onRebuildVisual();
   });
+
+  const ocean = folder.addFolder("edge ocean");
+  ocean.add(state, "oceanEnabled").name("enabled").onChange((enabled: boolean) => {
+    bindings.onOceanEnabled(enabled);
+  });
+  ocean.add(state, "oceanStartDistance", 8, 192, 1).name("start distance").onChange((distance: number) => {
+    bindings.onOceanStartDistance(distance);
+  });
+  ocean.add(state, "oceanFullDepthDistance", 0, 128, 1).name("full depth at").onChange((distance: number) => {
+    bindings.onOceanFullDepthDistance(distance);
+  });
+  ocean.add(state, "oceanMaxDepth", 1, 40, 1).name("max depth").onChange((depth: number) => {
+    bindings.onOceanMaxDepth(depth);
+  });
+
   return {
     refreshDisplay: () => {
       folder.controllers.forEach((controller) => controller.updateDisplay());
+      ocean.controllers.forEach((controller) => controller.updateDisplay());
     },
   };
 }
