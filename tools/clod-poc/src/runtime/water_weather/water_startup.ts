@@ -31,6 +31,7 @@ export interface WaterStartupResult {
   makeWaterVisual: () => ReturnType<Awaited<ReturnType<typeof createWaterController>>["makeVisual"]>;
   deepOceanSurface: DeepOceanSurface | null;
   deepOceanMaterial: DeepOceanMaterialHandle | null;
+  deepOceanConfig: BorderCoastOceanConfig["deepOcean"];
 }
 
 export async function runWaterStartup(input: WaterStartupInput): Promise<WaterStartupResult> {
@@ -55,8 +56,9 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
     borderCoastOceanConfig,
   });
 
+  const deepOceanEnabled = borderCoastOceanConfig.deepOcean.enabled;
   const lighting = currentLighting();
-  const deepOceanMaterial = borderCoastOceanConfig.deepOcean.enabled
+  const deepOceanMaterial = deepOceanEnabled
     ? await createDeepOceanMaterial(isWebGpu, {
         visual: waterConfig.visual,
         surfaceY: borderCoastOceanConfig.deepOcean.surfaceY,
@@ -65,11 +67,9 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
         horizonColor: lighting.skyLight,
       })
     : null;
-  const deepOceanSurface = createDeepOceanSurface(
-    worldCells,
-    borderCoastOceanConfig.deepOcean,
-    deepOceanMaterial?.material ?? new THREE.MeshBasicMaterial({ color: 0x224466, transparent: true }),
-  );
+  const deepOceanSurface = deepOceanMaterial
+    ? createDeepOceanSurface(worldCells, borderCoastOceanConfig.deepOcean, deepOceanMaterial.material)
+    : null;
   if (deepOceanSurface) scene.add(deepOceanSurface.mesh);
 
   return {
@@ -79,5 +79,6 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
     makeWaterVisual: () => waterController.makeVisual(),
     deepOceanSurface,
     deepOceanMaterial,
+    deepOceanConfig: borderCoastOceanConfig.deepOcean,
   };
 }

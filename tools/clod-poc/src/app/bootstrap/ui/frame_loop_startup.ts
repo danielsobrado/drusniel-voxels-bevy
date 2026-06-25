@@ -82,6 +82,9 @@ export function runFrameLoopStartup(
     stoneController,
     waterController,
     deepOceanMaterial,
+    deepOceanSurface,
+    waterField,
+    deepOceanConfig,
     weatherController,
     updateWeatherStats,
     grassSystem,
@@ -99,6 +102,7 @@ export function runFrameLoopStartup(
     forestLightingStats,
     customProps,
   } = input.runtime;
+  const deepOceanMeshPresent = deepOceanSurface !== null;
   const { updateInfo } = infoPanel;
   const { playerTerraformEditActive } = terrainEdit;
   const statsPresenter = statsPresenterFromSession(ctx);
@@ -176,6 +180,9 @@ export function runFrameLoopStartup(
     waterWeather: {
       waterController,
       deepOceanMaterial,
+      waterField,
+      deepOceanConfig,
+      deepOceanMeshPresent,
       weatherController,
       updateWeatherStats,
       weatherStatsController: session.weatherStatsController,

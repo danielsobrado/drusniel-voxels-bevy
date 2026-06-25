@@ -31,6 +31,7 @@ export interface SceneQueryFlags {
   queryTreeGpuRing: boolean;
   queryForestFloorScene: boolean;
   queryLongViewScene: boolean;
+  queryBorderOceanScene: boolean;
 }
 
 export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryFlags {
@@ -48,6 +49,7 @@ export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryF
       || queryScene === "infinite-stream-fast-turn"
       || queryScene === "infinite-stream-far-summary"
       || queryScene === "infinite-stream-slow-builds",
+    queryBorderOceanScene: queryScene === "border-ocean",
   };
 }
 

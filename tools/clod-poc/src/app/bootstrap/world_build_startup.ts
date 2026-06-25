@@ -44,6 +44,7 @@ import proceduralConfigText from "../../../config/procedural_textures.yaml?raw";
 import grassConfigText from "../../../config/grass.yaml?raw";
 import waterConfigText from "../../../config/water.yaml?raw";
 import borderCoastOceanConfigText from "../../../config/border_coast_ocean.yaml?raw";
+import borderOceanSceneConfigText from "../../../config/border_ocean_scene.yaml?raw";
 import forestLightingConfigText from "../../../config/forest_lighting.yaml?raw";
 import customPropsConfigText from "../../../config/custom_props.yaml?raw";
 import customPropPlacementsText from "../../../config/custom_prop_placements.yaml?raw";
@@ -54,6 +55,7 @@ import { parseCustomPropsConfig } from "../../props/prop_config.js";
 import { parsePropPlacements } from "../../props/prop_placements.js";
 import type { CustomPropsSettings } from "../../props/prop_types.js";
 import type { PropPlacementScene } from "../../props/prop_types.js";
+import { parseBorderOceanSceneConfig } from "../../debug/border_ocean_scene.js";
 import { splitWorldBuildNodes } from "./world_build_nodes.js";
 
 export interface WorldBuildStartupInput {
@@ -64,6 +66,7 @@ export interface WorldBuildStartupInput {
   queryTreePerfScene: boolean;
   queryForestFloorScene: boolean;
   queryLongViewScene: boolean;
+  queryBorderOceanScene: boolean;
   buildProgress: HTMLElement;
   buildProgressPhase: HTMLElement;
   buildProgressPercent: HTMLElement;
@@ -108,6 +111,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     queryTreePerfScene,
     queryForestFloorScene,
     queryLongViewScene,
+    queryBorderOceanScene,
     buildProgress,
     buildProgressPhase,
     buildProgressPercent,
@@ -131,6 +135,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   };
   let waterConfig = parseWaterConfig(waterConfigText);
   const borderCoastOceanConfig = parseBorderCoastOceanConfig(borderCoastOceanConfigText);
+  const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
   const proceduralTerrain = proceduralTextureConfig.enabled
     ? createProceduralTerrainTextures(proceduralTextureConfig)
@@ -145,8 +150,10 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const WORLD = stagedImport?.manifest.worldSize ?? (
     clodRuntime.runtime.worldOptions.includes(requested)
       ? requested
-      : queryGrassPerfScene || queryTreePerfScene || queryForestFloorScene || queryLongViewScene
-        ? 16
+      : queryGrassPerfScene || queryTreePerfScene || queryForestFloorScene || queryLongViewScene || queryBorderOceanScene
+        ? queryBorderOceanScene
+          ? borderOceanSceneConfig.defaultWorldPages
+          : 16
         : 4
   );
   const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;

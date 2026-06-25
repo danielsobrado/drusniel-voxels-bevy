@@ -107,6 +107,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
       }
 
       existing.state = 'building';
+      this.stateRevision++;
       const t0 = performance.now();
       try {
         const ringConfig = this.config.rings[build.ringIndex];
@@ -129,6 +130,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
         } else {
           this.pendingBuildKeys.delete(build.keyStr);
           this.tiles.set(build.keyStr, builtTile);
+          this.stateRevision++;
           this.stats.tilesCommittedThisFrame++;
           this.commitRevision++;
         }
@@ -222,7 +224,11 @@ export class FarSummaryCache implements FallbackStatsWriter {
     }
     let evicted = 0;
     for (const [ekey, tile] of this.tiles) {
-      if (tile.state === 'evicted') { this.tiles.delete(ekey); evicted++; }
+      if (tile.state === 'evicted') {
+        this.tiles.delete(ekey);
+        this.stateRevision++;
+        evicted++;
+      }
     }
     this.stats.evictedTiles = evicted;
   }

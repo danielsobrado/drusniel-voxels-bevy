@@ -7,6 +7,9 @@ import type { ClodSelectionStats } from "../terrain/selection/clod_selection_con
 import type { GrassStats } from "../grass.js";
 import type { TreeStats } from "../trees/index.js";
 import type { StoneStats } from "../stones/stone_instances.js";
+import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
+import type { WaterField } from "../water/waterField.js";
+import { publishBorderOceanAcceptanceCounters } from "../debug/border_ocean_scene.js";
 import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
 
 const PHASE0_P95_WINDOW = 120;
@@ -36,6 +39,11 @@ export interface LongViewFrameDiagnosticsDeps {
   phase0VelocityX: number;
   phase0VelocityZ: number;
   phase0Streaming: Phase0Config["phase0"]["streaming"];
+  borderOceanScene?: {
+    waterField: WaterField;
+    deepOcean: DeepOceanRenderConfig;
+    deepOceanMeshPresent: boolean;
+  };
 }
 
 export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDeps): () => void {
@@ -110,6 +118,15 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       s.counters["frame_ms_p99"] = sorted[Math.floor(sorted.length * 0.99)] ?? -1;
     }
     s.counters["horizon_hole_ratio"] = -1;
+
+    if (deps.queryScene === "border-ocean" && deps.borderOceanScene) {
+      publishBorderOceanAcceptanceCounters(s.counters, {
+        worldCells: deps.worldCells,
+        deepOcean: deps.borderOceanScene.deepOcean,
+        waterField: deps.borderOceanScene.waterField,
+        deepOceanMeshPresent: deps.borderOceanScene.deepOceanMeshPresent,
+      });
+    }
 
     const streamingReport = simulateStreamingCoverage({
       worldCells: deps.worldCells,

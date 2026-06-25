@@ -52,10 +52,11 @@ export function normalizeMaterialWeights(mesh: PageMesh, label: string, epsilon 
     }
 
     if (sum <= epsilon) {
-      throw new ClodBuildError("DegenerateGeometry", `${label}: vertex ${i} material weights sum to ${sum.toFixed(4)}, expected > 0`);
+      const fallback = 1 / ws;
+      for (let j = 0; j < ws; j++) mesh.materialWeights[base + j] = fallback;
+    } else {
+      for (let j = 0; j < ws; j++) mesh.materialWeights[base + j] /= sum;
     }
-
-    for (let j = 0; j < ws; j++) mesh.materialWeights[base + j] /= sum;
   }
 }
 

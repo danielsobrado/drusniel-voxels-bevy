@@ -69,6 +69,13 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     phase0VelocityX: diagnostics.phase0VelocityX,
     phase0VelocityZ: diagnostics.phase0VelocityZ,
     phase0Streaming: diagnostics.phase0Streaming,
+    borderOceanScene: diagnostics.queryScene === "border-ocean"
+      ? {
+          waterField: waterWeather.waterField,
+          deepOcean: waterWeather.deepOceanConfig,
+          deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
+        }
+      : undefined,
   });
 
   render.renderer.setAnimationLoop(() => {

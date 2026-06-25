@@ -45,6 +45,7 @@ export async function bootstrapClodPoc() {
     queryTreePerfScene: queries.queryTreePerfScene,
     queryForestFloorScene: queries.queryForestFloorScene,
     queryLongViewScene: queries.queryLongViewScene,
+    queryBorderOceanScene: queries.queryBorderOceanScene,
     buildProgress: dom.buildProgress,
     buildProgressPhase: dom.buildProgressPhase,
     buildProgressPercent: dom.buildProgressPercent,
@@ -62,6 +63,7 @@ export async function bootstrapClodPoc() {
     queryGrassPerfScene: queries.queryGrassPerfScene,
     queryTreePerfScene: queries.queryTreePerfScene,
     queryLongViewScene: queries.queryLongViewScene,
+    queryBorderOceanScene: queries.queryBorderOceanScene,
     activePhase0Scene: queries.activePhase0Scene,
   });
   if (!renderer) return;

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { borderOceanCameraForWorld, validateBorderOceanStats } from "../src/debug/border_ocean_scene.js";
 
 const SHOT_DIR = "shots/phase-0";
 const SANITY_SHOT = `${SHOT_DIR}/sanity.png`;
@@ -16,6 +17,10 @@ const LONG_VIEW_SHOT = `${LONG_VIEW_DIR}/long-view-4km.png`;
 const LONG_VIEW_STATS = `${LONG_VIEW_DIR}/long-view-4km-stats.json`;
 const LONG_VIEW_SUMMARY = `${LONG_VIEW_DIR}/long-view-4km-summary.json`;
 const LONG_VIEW_CAM = "1800,360,3200,2.6500,-0.4300,55";
+const BORDER_OCEAN_DIR = "shots/border-ocean";
+const BORDER_OCEAN_SHOT = `${BORDER_OCEAN_DIR}/border-ocean.png`;
+const BORDER_OCEAN_STATS = `${BORDER_OCEAN_DIR}/border-ocean-stats.json`;
+const BORDER_OCEAN_CAM = borderOceanCameraForWorld(16 * 4 * 16);
 
 function run(label: string, args: string[]): void {
   console.log(`[battery] ${label}`);
@@ -70,6 +75,11 @@ function validatePhase1Stats(): void {
   assertCounter(stats, "phase1.nodesRendered", (value) => value > 0);
   assertCounter(stats, "phase1.trianglesRendered", (value) => value > 0);
   assertCounter(stats, "phase1.buildMs100", (value) => Number.isFinite(value));
+}
+
+function validateBorderOceanShotStats(): void {
+  const stats = JSON.parse(readFileSync(BORDER_OCEAN_STATS, "utf8")) as Record<string, unknown>;
+  validateBorderOceanStats(stats);
 }
 
 function validateLongViewStats(): void {
@@ -159,6 +169,22 @@ function main(): void {
     "--stats", LONG_VIEW_STATS,
   ]);
   validateLongViewStats();
+
+  mkdirSync(BORDER_OCEAN_DIR, { recursive: true });
+  run("shoot border-ocean", [
+    "run", "shoot", "--",
+    "--scene", "border-ocean",
+    "--seed", "1",
+    "--world", "16",
+    "--freeze", "1",
+    "--hud", "1",
+    "--framealign", "0",
+    "--weather", "off",
+    "--cam", `${BORDER_OCEAN_CAM.eye[0].toFixed(0)},${BORDER_OCEAN_CAM.eye[1].toFixed(0)},${BORDER_OCEAN_CAM.eye[2].toFixed(0)},${BORDER_OCEAN_CAM.look[0].toFixed(0)},${BORDER_OCEAN_CAM.look[1].toFixed(0)},${BORDER_OCEAN_CAM.look[2].toFixed(0)},${BORDER_OCEAN_CAM.fov}`,
+    "--out", BORDER_OCEAN_SHOT,
+    "--stats", BORDER_OCEAN_STATS,
+  ]);
+  validateBorderOceanShotStats();
   console.log("[battery] ok");
 }
 

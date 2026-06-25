@@ -19,6 +19,11 @@ import type { ClodPageNode } from "../../types.js";
 import type { ProjectArchiveContents } from "../../project/project_archive.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { Phase0SceneConfig } from "../../phase0/phase0_config.js";
+import borderOceanSceneConfigText from "../../../config/border_ocean_scene.yaml?raw";
+import {
+  parseBorderOceanCamString,
+  parseBorderOceanSceneConfig,
+} from "../../debug/border_ocean_scene.js";
 
 export type AppRenderer = Awaited<ReturnType<typeof createWebGpuAppRenderer>> | ReturnType<typeof createWebGlAppRenderer>;
 
@@ -32,6 +37,7 @@ export interface RendererStartupInput {
   queryGrassPerfScene: boolean;
   queryTreePerfScene: boolean;
   queryLongViewScene: boolean;
+  queryBorderOceanScene: boolean;
   activePhase0Scene: Phase0SceneConfig | undefined;
 }
 
@@ -62,8 +68,11 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     queryGrassPerfScene,
     queryTreePerfScene,
     queryLongViewScene,
+    queryBorderOceanScene,
     activePhase0Scene,
   } = input;
+
+  const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
 
   const rendererBackend = parseRendererBackend(searchParams);
   let app: AppRenderer;
@@ -136,6 +145,14 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   } else if (queryTreePerfScene) {
     controls.target.set(mid, 24, mid);
     camera.position.set(mid - worldCells * 0.28, 58, mid + worldCells * 0.38);
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (queryBorderOceanScene) {
+    const cam = parseBorderOceanCamString(searchParams.get("cam"), worldCells, borderOceanSceneConfig);
+    camera.position.set(cam.eye[0], cam.eye[1], cam.eye[2]);
+    controls.target.set(cam.look[0], cam.look[1], cam.look[2]);
+    camera.fov = cam.fov;
+    camera.updateProjectionMatrix();
     camera.lookAt(controls.target);
     controls.update();
   } else if (queryLongViewScene) {
