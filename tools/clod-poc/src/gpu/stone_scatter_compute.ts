@@ -1,12 +1,12 @@
 import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
-import type { StoneSettings } from "../stones/stone_config.js";
+import type { StoneSettings, StoneTerrainClassWeights } from "../stones/stone_config.js";
 import { composeStoneScatterShader } from "./wgsl_modules.js";
 
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
 const COUNTER_COUNT = 4;
-const PARAM_BYTES = 16 * 12;
+const PARAM_BYTES = 16 * 20;
 const COUNTER_BYTES = COUNTER_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_CLASS = 5;
 const INDIRECT_BYTES = CLASS_COUNT * INDIRECT_ARGS_PER_CLASS * Uint32Array.BYTES_PER_ELEMENT;
@@ -226,6 +226,16 @@ export class StoneGpuScatterCompute {
     this.paramF32[45] = clampFinite(params.centerZ, 0, params.worldCells);
     this.paramF32[46] = ringRadius;
     this.paramF32[47] = Math.max(0, settings.ringEdgeFadeM);
+    this.writeTerrainConfig(48, settings.terrain.grass);
+    this.writeTerrainConfig(52, settings.terrain.rock);
+    this.writeTerrainConfig(56, settings.terrain.sand);
+    this.writeTerrainConfig(60, settings.terrain.snow);
+    this.writeTerrainConfig(64, settings.terrain.low);
+    this.writeTerrainConfig(68, settings.terrain.mid);
+    this.writeTerrainConfig(72, settings.terrain.high);
+    this.paramF32[76] = settings.terrain.lowHeightM;
+    this.paramF32[77] = settings.terrain.highHeightM;
+    this.paramF32[78] = Math.max(0.001, settings.terrain.heightBlendM);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
 
     const encoder = this.device.createCommandEncoder({ label: "stone scatter compute encoder" });
@@ -259,6 +269,13 @@ export class StoneGpuScatterCompute {
     this.paramF32[offset + 1] = cls.radiusMax;
     this.paramF32[offset + 2] = cls.sink;
     this.paramF32[offset + 3] = cls.maxDistance;
+  }
+
+  private writeTerrainConfig(offset: number, terrain: StoneTerrainClassWeights): void {
+    this.paramF32[offset] = terrain.density;
+    this.paramF32[offset + 1] = terrain.large;
+    this.paramF32[offset + 2] = terrain.medium;
+    this.paramF32[offset + 3] = terrain.small;
   }
 
   private dispatchPipeline(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline, workgroups: number): void {
