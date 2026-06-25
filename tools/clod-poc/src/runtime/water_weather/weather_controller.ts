@@ -167,7 +167,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
     applySettings,
     refreshStats,
     update(deltaSeconds, elapsedSeconds, cameraPosition, effectCenter) {
-      meadowWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
+      meadowWeather.update(deltaSeconds, elapsedSeconds, effectCenter);
       rainWeather.update(deltaSeconds, elapsedSeconds, cameraPosition, effectCenter);
       snowWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
       sandstormWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
