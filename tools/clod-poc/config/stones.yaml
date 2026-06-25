@@ -1,8 +1,9 @@
-# Stone ground-detail props. Stones are an overlay over terrain pages; they never enter
-# source_mesh.ts, CLOD page meshes, colliders, or terrain edits.
 enabled: true
 seed_salt: 931777
 cell_size_m: 2.1
+ring_radius_m: 220.0
+ring_refresh_distance_m: 8.0
+ring_edge_fade_m: 24.0
 max_instances: 120000
 density: 1.0
 
@@ -27,6 +28,46 @@ patch_clump_min: 0.35
 patch_clump_cell_mult: 3.0
 sink_slope_multiplier: 0.9
 normal_lean: 0.4
+
+terrain:
+  low_height_m: 26.0
+  high_height_m: 78.0
+  height_blend_m: 12.0
+  grass:
+    density: 0.58
+    large: 0.45
+    medium: 0.85
+    small: 1.45
+  rock:
+    density: 1.25
+    large: 1.35
+    medium: 1.10
+    small: 0.82
+  sand:
+    density: 0.90
+    large: 0.80
+    medium: 1.10
+    small: 1.10
+  snow:
+    density: 0.72
+    large: 1.75
+    medium: 1.05
+    small: 0.38
+  low:
+    density: 0.82
+    large: 0.75
+    medium: 1.00
+    small: 1.18
+  mid:
+    density: 1.00
+    large: 1.00
+    medium: 1.00
+    small: 1.00
+  high:
+    density: 1.15
+    large: 1.35
+    medium: 1.00
+    small: 0.68
 
 debug:
   class_colors: false
