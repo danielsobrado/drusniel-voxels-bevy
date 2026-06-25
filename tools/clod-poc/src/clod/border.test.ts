@@ -67,34 +67,38 @@ describe("border chain", () => {
   });
 });
 
+function chain(p: [number, number, number][], n: [number, number, number][], m: number[]): import("../validate.js").BorderChain {
+  return { positions: p, normals: n, materials: m, materialWeights: m.map(() => []) };
+}
+
 describe("assertBorderMatch", () => {
   it("position mismatch fails", () => {
-    const chainA = { positions: [[0, 0, 0], [1, 0, 0]] as [number, number, number][], normals: [[0, 1, 0], [0, 1, 0]] as [number, number, number][], materials: [0, 0] };
-    const chainB = { positions: [[0, 0, 0], [1.1, 0, 0]] as [number, number, number][], normals: [[0, 1, 0], [0, 1, 0]] as [number, number, number][], materials: [0, 0] };
+    const chainA = chain([[0, 0, 0], [1, 0, 0]], [[0, 1, 0], [0, 1, 0]], [0, 0]);
+    const chainB = chain([[0, 0, 0], [1.1, 0, 0]], [[0, 1, 0], [0, 1, 0]], [0, 0]);
     expect(() => assertBorderMatch(chainA, chainB)).toThrow(/BorderPositionMismatch/);
   });
 
   it("normal mismatch fails", () => {
-    const chainA = { positions: [[0, 0, 0], [1, 0, 0]] as [number, number, number][], normals: [[0, 1, 0], [0, 1, 0]] as [number, number, number][], materials: [0, 0] };
-    const chainB = { positions: [[0, 0, 0], [1, 0, 0]] as [number, number, number][], normals: [[0, -1, 0], [0, 1, 0]] as [number, number, number][], materials: [0, 0] };
+    const chainA = chain([[0, 0, 0], [1, 0, 0]], [[0, 1, 0], [0, 1, 0]], [0, 0]);
+    const chainB = chain([[0, 0, 0], [1, 0, 0]], [[0, -1, 0], [0, 1, 0]], [0, 0]);
     expect(() => assertBorderMatch(chainA, chainB)).toThrow(/BorderNormalMismatch/);
   });
 
   it("material mismatch fails", () => {
-    const chainA = { positions: [[0, 0, 0], [1, 0, 0]] as [number, number, number][], normals: [[0, 1, 0], [0, 1, 0]] as [number, number, number][], materials: [0, 0] };
-    const chainB = { positions: [[0, 0, 0], [1, 0, 0]] as [number, number, number][], normals: [[0, 1, 0], [0, 1, 0]] as [number, number, number][], materials: [0, 0.5] };
+    const chainA = chain([[0, 0, 0], [1, 0, 0]], [[0, 1, 0], [0, 1, 0]], [0, 0]);
+    const chainB = chain([[0, 0, 0], [1, 0, 0]], [[0, 1, 0], [0, 1, 0]], [0, 0.5]);
     expect(() => assertBorderMatch(chainA, chainB)).toThrow(/BorderMaterialMismatch/);
   });
 
   it("chain length mismatch fails", () => {
-    const chainA = { positions: [[0, 0, 0]] as [number, number, number][], normals: [[0, 1, 0]] as [number, number, number][], materials: [0] };
-    const chainB = { positions: [[0, 0, 0], [1, 0, 0]] as [number, number, number][], normals: [[0, 1, 0], [0, 1, 0]] as [number, number, number][], materials: [0, 0] };
+    const chainA = chain([[0, 0, 0]], [[0, 1, 0]], [0]);
+    const chainB = chain([[0, 0, 0], [1, 0, 0]], [[0, 1, 0], [0, 1, 0]], [0, 0]);
     expect(() => assertBorderMatch(chainA, chainB)).toThrow(/vertex counts differ/);
   });
 
   it("matching chains pass", () => {
-    const chainA = { positions: [[0, 0, 0], [1, 0, 0]] as [number, number, number][], normals: [[0, 1, 0], [0, 1, 0]] as [number, number, number][], materials: [0, 0] };
-    const chainB = { positions: [[0, 0, 0], [1, 0, 0]] as [number, number, number][], normals: [[0, 1, 0], [0, 1, 0]] as [number, number, number][], materials: [0, 0] };
+    const chainA = chain([[0, 0, 0], [1, 0, 0]], [[0, 1, 0], [0, 1, 0]], [0, 0]);
+    const chainB = chain([[0, 0, 0], [1, 0, 0]], [[0, 1, 0], [0, 1, 0]], [0, 0]);
     expect(() => assertBorderMatch(chainA, chainB)).not.toThrow();
   });
 });

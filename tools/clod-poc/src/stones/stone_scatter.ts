@@ -3,7 +3,7 @@
 // are an overlay and never feed `source_mesh.ts` / `weld.ts`. Terrain-aware weighting mirrors
 // the LAAS rules adapted to the fields the PoC terrain exposes (height, normal, material bands).
 
-import { materialWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "../terrain.js";
+import { terrainWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "../terrain.js";
 import type { PageFootprint } from "../types.js";
 import { ROCK_PRESETS, type RockPreset } from "./rock_builder.js";
 import { hash2, hashU32 } from "./stone_hash.js";
@@ -74,7 +74,7 @@ export function sampleStoneSite(x: number, z: number, settings: StoneSettings): 
   const height = surfaceHeight(x, z);
   const normal = surfaceNormal(x, z);
   const normalY = normal[1];
-  const [, rock, sand, snow] = materialWeights(height, normalY);
+  const [, rock, sand, snow] = terrainWeights(height, normalY);
 
   const standingWater = height < WATER_LEVEL + settings.waterMarginM + settings.standingWaterCutoffM;
   const repose = clamp01(

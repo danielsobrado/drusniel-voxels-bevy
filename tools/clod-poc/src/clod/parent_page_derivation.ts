@@ -41,7 +41,7 @@ export function deriveParentPage(
   assertNoInternalBorders(sourceMesh, footprint);
 
   const locks = buildOuterBorderLocks(sourceMesh);
-  const simplified = simplifyPage(sourceMesh, locks, simplifyConfig(config), { preserveMaterials: true });
+  const simplified = simplifyPage(sourceMesh, locks, simplifyConfig(config));
   stripDegenerateTriangles(simplified.mesh);
   recomputeNormals(simplified.mesh);
   assertNoInternalBorders(simplified.mesh, footprint);

@@ -73,14 +73,17 @@ export function weldVertices(mesh: PageMesh, epsilon: number, tolerances?: Borde
         mesh.normals[i * 3] * nrm[found * 3] +
         mesh.normals[i * 3 + 1] * nrm[found * 3 + 1] +
         mesh.normals[i * 3 + 2] * nrm[found * 3 + 2];
-      const matDelta = Math.abs(mesh.paintSlots[i] - mat[found]);
-      if (dot < tol.normalDot || matDelta > tol.material) {
-        throw new ClodBuildError(
-          "DirtyInput",
-          `weld conflict at (${px.toFixed(3)},${py.toFixed(3)},${pz.toFixed(3)}): ` +
-            `normal dot ${dot.toFixed(5)} (need >= ${tol.normalDot}), ` +
-            `material delta ${matDelta.toExponential(2)} (need <= ${tol.material})`,
-        );
+      const paintDelta = Math.abs(mesh.paintSlots[i] - mat[found]);
+      let maxWeightDelta = 0;
+      for (let j = 0; j < ws; j++) {
+        maxWeightDelta = Math.max(maxWeightDelta, Math.abs(mesh.materialWeights[i * ws + j] - wgt[found * ws + j]));
+      }
+      if (dot < tol.normalDot || paintDelta > tol.material || maxWeightDelta > tol.material) {
+        const parts: string[] = [`weld conflict at (${px.toFixed(3)},${py.toFixed(3)},${pz.toFixed(3)})`];
+        if (dot < tol.normalDot) parts.push(`normal dot ${dot.toFixed(5)} (need >= ${tol.normalDot})`);
+        if (paintDelta > tol.material) parts.push(`paint delta ${paintDelta.toExponential(2)} (need <= ${tol.material})`);
+        if (maxWeightDelta > tol.material) parts.push(`max weight delta ${maxWeightDelta.toExponential(2)} (need <= ${tol.material})`);
+        throw new ClodBuildError("DirtyInput", parts.join("; "));
       }
       // average material weights on merge
       const mc = mergeCount[found];

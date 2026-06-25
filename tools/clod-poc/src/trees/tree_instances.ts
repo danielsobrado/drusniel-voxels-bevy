@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { materialWeights, surfaceHeight, surfaceNormal } from "../terrain.js";
+import { terrainWeights, surfaceHeight, surfaceNormal } from "../terrain.js";
 import type { PageFootprint } from "../types.js";
 import { treeHash2, treeRandomSigned } from "./tree_hash.js";
 import { selectTreeSpecies } from "./tree_species.js";
@@ -36,7 +36,7 @@ export interface TreeGenerationStats {
 export const defaultTreeTerrainSampler: TreeTerrainSampler = {
   surfaceHeight,
   surfaceNormal,
-  materialWeights,
+  materialWeights: terrainWeights,
 };
 
 export function emptyTreeGenerationStats(): TreeGenerationStats {

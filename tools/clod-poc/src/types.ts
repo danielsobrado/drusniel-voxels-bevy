@@ -62,8 +62,12 @@ export const DEFAULT_TOLERANCES: BorderTolerances = {
 
 /** Hard-fail builder error - never simplify dirty input. */
 export class ClodBuildError extends Error {
-  constructor(public kind: string, message: string) {
-    super(`${kind}: ${message}`);
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly details?: Record<string, unknown>,
+  ) {
+    super(`${code}: ${message}`);
     this.name = "ClodBuildError";
   }
 }

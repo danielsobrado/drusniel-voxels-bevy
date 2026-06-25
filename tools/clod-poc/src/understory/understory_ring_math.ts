@@ -7,7 +7,7 @@
 // byte layout. Mirrors trees/tree_ring_math.ts but understory has a single LOD,
 // so a "group" is just an understory class.
 
-import { materialWeights } from "../terrain.js";
+import { terrainWeights } from "../terrain.js";
 import { clamp01 } from "../trees/tree_noise.js";
 import {
   DEFAULT_UNDERSTORY_SETTINGS,
@@ -186,7 +186,7 @@ export function understoryRingTerrainGate(
   if (!Number.isFinite(height) || !Number.isFinite(normalY)) return -1;
   if (normalY < params.slopeMinY) return -1;
   if (height < params.minHeightM || height > params.maxHeightM) return -1;
-  const [grassWeight, dirtWeight] = materialWeights(height, normalY);
+  const [grassWeight, dirtWeight] = terrainWeights(height, normalY);
   const groundWeight = grassWeight + dirtWeight * 0.25;
   if (groundWeight < params.minGroundWeight) return -1;
   return clamp01(groundWeight);

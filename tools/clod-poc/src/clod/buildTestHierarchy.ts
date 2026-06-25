@@ -5,7 +5,7 @@ import { buildOuterBorderLocks } from "../lock.js";
 import { simplifyPage } from "../simplify.js";
 import { stripDegenerateTriangles, validateFinite, validateNoDegenerateTriangles, assertNoInternalBorders } from "../validate.js";
 import { type LevelStats, type BuildStats } from "./stats.js";
-import type { ClodPageNode, PageFootprint, PageMesh } from "../types.js";
+import { ClodBuildError, type ClodPageNode, type PageFootprint, type PageMesh } from "../types.js";
 
 export interface TestBuildResult {
   nodesByLevel: Map<number, ClodPageNode[]>;
@@ -108,7 +108,9 @@ export function buildTestHierarchy(
             if (c) children.push(c);
           }
         }
-        if (children.length === 0) continue;
+        if (children.length !== 4) {
+          throw new ClodBuildError("PageIncomplete", `parent L${level}:${nx},${nz} expected 4 children, got ${children.length}`);
+        }
 
         const merged = concat(children.map((c) => c.mesh));
         const { mesh: welded } = weldVertices(merged, eps, {

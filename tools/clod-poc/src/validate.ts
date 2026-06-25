@@ -157,6 +157,7 @@ export interface BorderChain {
   positions: [number, number, number][];
   normals: [number, number, number][];
   materials: number[];
+  materialWeights: number[][];
 }
 
 /**
@@ -175,7 +176,8 @@ export function borderChain(
 ): BorderChain {
   const n = vertexCount(mesh);
   const open = openBoundaryVertexFlags(mesh);
-  const out: { p: [number, number, number]; nr: [number, number, number]; m: number }[] = [];
+  const ws = mesh.materialWeightStride;
+  const out: { p: [number, number, number]; nr: [number, number, number]; m: number; w: number[] }[] = [];
   for (let i = 0; i < n; i++) {
     if (!open[i]) continue;
     const x = mesh.positions[i * 3], z = mesh.positions[i * 3 + 2];
@@ -187,16 +189,19 @@ export function borderChain(
     } else {
       if (Math.abs(x - footprint.minX) <= perimeterBand || Math.abs(x - footprint.maxX) <= perimeterBand) continue;
     }
+    const w: number[] = [];
+    for (let j = 0; j < ws; j++) w.push(mesh.materialWeights[i * ws + j]);
     out.push({
       p: [mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]],
       nr: [mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]],
       m: mesh.paintSlots[i],
+      w,
     });
   }
   // sort along the free axes then Y
   const free = axis === "x" ? 2 : 0;
   out.sort((a, b) => a.p[free] - b.p[free] || a.p[1] - b.p[1]);
-  return { positions: out.map((o) => o.p), normals: out.map((o) => o.nr), materials: out.map((o) => o.m) };
+  return { positions: out.map((o) => o.p), normals: out.map((o) => o.nr), materials: out.map((o) => o.m), materialWeights: out.map((o) => o.w) };
 }
 
 /**
@@ -227,7 +232,16 @@ export function assertBorderMatch(a: BorderChain, b: BorderChain, tolerances?: B
     }
     const md = Math.abs(a.materials[i] - b.materials[i]);
     if (md > tol.material) {
-      throw new ClodBuildError("BorderMaterialMismatch", `material delta ${md.toExponential(2)} at border vertex ${i}`);
+      throw new ClodBuildError("BorderMaterialMismatch", `paint delta ${md.toExponential(2)} at border vertex ${i}`);
+    }
+    if (a.materialWeights[i] && a.materialWeights[i].length > 0) {
+      const ws = a.materialWeights[i].length;
+      for (let j = 0; j < ws; j++) {
+        const wd = Math.abs(a.materialWeights[i][j] - b.materialWeights[i][j]);
+        if (wd > tol.material) {
+          throw new ClodBuildError("BorderMaterialMismatch", `material weight channel ${j} delta ${wd.toExponential(2)} at border vertex ${i}`);
+        }
+      }
     }
   }
 }

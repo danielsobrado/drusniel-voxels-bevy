@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { materialWeights, surfaceHeight, surfaceNormal } from "../terrain.js";
+import { terrainWeights, surfaceHeight, surfaceNormal } from "../terrain.js";
 import type { PageFootprint } from "../types.js";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
 import {
@@ -46,7 +46,7 @@ export interface UnderstoryGenerationStats {
 export const defaultUnderstoryTerrainSampler: UnderstoryTerrainSampler = {
   surfaceHeight,
   surfaceNormal,
-  materialWeights,
+  materialWeights: terrainWeights,
   // Note: when hydrology is active, surfaceHeight() returns the carved bed via terrainSurfaceOverride.
   // The GPU compute shader (understory_ring.compute.wgsl) uses surfaceHeightField() which is the
   // base procedural terrain without hydrology carving. This creates a CPU/GPU height mismatch in

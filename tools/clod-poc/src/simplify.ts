@@ -6,7 +6,6 @@
 import { MeshoptSimplifier } from "meshoptimizer";
 import { PageMesh, ClodBuildError, vertexCount } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
-import { paintMaterialAt } from "./terrain.js";
 import { ensureMaterialWeights } from "./materialWeights.js";
 
 let ready = false;
@@ -30,10 +29,6 @@ export interface SimplifyOutput {
   lowBenefit: boolean;
 }
 
-export interface SimplifyOptions {
-  preserveMaterials?: boolean;
-}
-
 /**
  * Decimate `mesh` toward target_ratio_per_level, carrying normals + material weights and
  * honouring per-vertex locks. Returns the simplified mesh plus world-space error.
@@ -42,7 +37,6 @@ export function simplifyPage(
   mesh: PageMesh,
   locks: Uint8Array,
   cfg: ClodPagesConfig,
-  options: SimplifyOptions = {},
 ): SimplifyOutput {
   if (!ready) throw new ClodBuildError("SimplifierApiUnavailable", "call initSimplifier() first");
 
@@ -88,9 +82,10 @@ export function simplifyPage(
 
   // meshopt keeps the original vertex buffer; unused vertices are simply unreferenced.
   // Compact to referenced vertices so downstream weld/lock/stats stay tight.
-  // NOTE: compaction copies original positions verbatim — no snapping.
-  // Locked border vertices must survive simplification unchanged.
-  const compacted = compact(mesh, newIndices, options);
+  // NOTE: compaction copies original positions, normals, paint slots, and material weights
+  // verbatim — no snapping, no recalculation. Locked border vertices must survive
+  // simplification unchanged.
+  const compacted = compact(mesh, newIndices);
 
   const errorWorld = resultError * simplifyScale(mesh);
   const lowBenefit = newIndices.length > cfg.simplify.abandon_ratio * inputIndices;
@@ -98,8 +93,8 @@ export function simplifyPage(
   return { mesh: compacted, resultError, errorWorld, lowBenefit };
 }
 
-/** Drop unreferenced vertices and remap indices. Copies original positions and weights verbatim. */
-function compact(mesh: PageMesh, indices: Uint32Array, options: SimplifyOptions): PageMesh {
+/** Drop unreferenced vertices and remap indices. Copies original attributes verbatim. */
+function compact(mesh: PageMesh, indices: Uint32Array): PageMesh {
   const ws = mesh.materialWeightStride;
   const remap = new Map<number, number>();
   const pos: number[] = [], nrm: number[] = [], mat: number[] = [], wgt: number[] = [];
@@ -116,15 +111,8 @@ function compact(mesh: PageMesh, indices: Uint32Array, options: SimplifyOptions)
         mesh.positions[old * 3 + 2],
       );
       nrm.push(mesh.normals[old * 3], mesh.normals[old * 3 + 1], mesh.normals[old * 3 + 2]);
-      if (options.preserveMaterials) {
-        mat.push(mesh.paintSlots[old]);
-        for (let j = 0; j < ws; j++) wgt.push(mesh.materialWeights[old * ws + j]);
-      } else {
-        const paintSlot = paintMaterialAt(mesh.positions[old * 3], mesh.positions[old * 3 + 1], mesh.positions[old * 3 + 2]);
-        mat.push(paintSlot);
-        const clamped = Math.min(Math.max(0, paintSlot), ws - 1);
-        for (let j = 0; j < ws; j++) wgt.push(j === clamped ? 1.0 : 0.0);
-      }
+      mat.push(mesh.paintSlots[old]);
+      for (let j = 0; j < ws; j++) wgt.push(mesh.materialWeights[old * ws + j]);
     }
     out[i] = ni;
   }

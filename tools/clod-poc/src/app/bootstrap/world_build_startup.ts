@@ -9,7 +9,7 @@ import {
   setTerrainSurfaceOverride,
 } from "../../terrain.js";
 import { buildTerrainSummary } from "../../clod/terrain_summary.js";
-import { publishTerrainSummary } from "./diagnostics_startup.js";
+import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
 import { bakeMacroTint } from "../../gpu/terrain_node_material.js";
 import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "../../diagonalPolish.js";
 import { parseProceduralTextureConfig } from "../../textures/materialRecipes.js";
@@ -201,7 +201,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const maxTerrainLevel = Math.max(...result.nodesByLevel.keys());
   const worldSizeCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
   const terrainSummary = buildTerrainSummary(allNodes, worldSizeCells, 8);
-  publishTerrainSummary(terrainSummary);
+  publishTerrainSummaryForDiagnostics(terrainSummary);
 
   return {
     cfg,

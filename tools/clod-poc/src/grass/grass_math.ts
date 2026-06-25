@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { materialWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "../terrain.js";
+import { terrainWeights, surfaceHeight, surfaceNormal, WATER_LEVEL } from "../terrain.js";
 import {
   DEFAULT_GRASS_SETTINGS,
   GRASS_WATER_CLEARANCE,
@@ -102,7 +102,7 @@ export function grassMaskForHeightNormal(
   distanceFromCamera = Number.POSITIVE_INFINITY,
 ): number {
   if (height < settings.minHeight || height > settings.maxHeight) return 0;
-  const [grassWeight, rockWeight, , snowWeight] = materialWeights(height, normalY);
+  const [grassWeight, rockWeight, , snowWeight] = terrainWeights(height, normalY);
   if (height < WATER_LEVEL + GRASS_WATER_CLEARANCE || rockWeight >= 0.82 || snowWeight >= 0.55) return 0;
   const aboveWaterMask = THREE.MathUtils.smoothstep(height, WATER_LEVEL + GRASS_WATER_CLEARANCE, WATER_LEVEL + 3.5);
   const slopeMask = THREE.MathUtils.smoothstep(
@@ -140,7 +140,7 @@ export function sampleGrassTerrainSite(
   const height = surfaceHeight(x, z);
   const normal = surfaceNormal(x, z);
   const normalY = normal[1];
-  const weights = materialWeights(height, normalY);
+  const weights = terrainWeights(height, normalY);
   const [grassWeight, rockWeight, sandWeight, snowWeight] = weights;
   const waterDepth = Math.max(0, WATER_LEVEL + GRASS_WATER_CLEARANCE - height);
   const aboveWaterMask = THREE.MathUtils.smoothstep(height, WATER_LEVEL + GRASS_WATER_CLEARANCE, WATER_LEVEL + 3.5);

@@ -9,6 +9,8 @@ import {
 } from "./quadtree.js";
 import { addDigEdit, replaceDigEdits, setTerrainSurfaceOverride } from "./terrain.js";
 import {
+  collectBuildResultTransferables,
+  collectNodeTransferables,
   serializeBuildResult,
   serializeNodes,
   type ClodWorkerRequest,
@@ -59,13 +61,14 @@ function post(message: ClodWorkerResponse, transfer?: Transferable[]): void {
 }
 
 function errorResponse(requestId: number | null, error: unknown): ClodWorkerResponse {
-  const err = error as Error & { kind?: string };
+  const err = error as Error & { code?: string; details?: Record<string, unknown> };
   return {
     type: "error",
     requestId,
     message: err?.message ?? String(error),
     name: err?.name,
-    kind: err?.kind,
+    code: err?.code,
+    details: err?.details,
   };
 }
 
@@ -118,12 +121,7 @@ function drainParents(budgetMs: number): void {
     const serialized = serializeNodes(changed);
     const transferables: Transferable[] = [];
     for (const node of serialized) {
-      transferables.push(
-        node.mesh.positions.buffer,
-        node.mesh.normals.buffer,
-        node.mesh.paintSlots.buffer,
-        node.mesh.indices.buffer,
-      );
+      collectNodeTransferables(node, transferables);
     }
     post({
       type: "parentRebuilt",
@@ -176,7 +174,8 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   );
   index = buildNodeIndex(result);
   topLevel = Math.max(...result.nodesByLevel.keys());
-  post({ type: "buildComplete", requestId: request.requestId, result: serializeBuildResult(result) });
+  const serialized = serializeBuildResult(result);
+  post({ type: "buildComplete", requestId: request.requestId, result: serialized }, collectBuildResultTransferables(serialized));
 }
 
 function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
@@ -202,11 +201,13 @@ function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
     serializedBytes += node.mesh.positions.byteLength
       + node.mesh.normals.byteLength
       + node.mesh.paintSlots.byteLength
+      + node.mesh.materialWeights.byteLength
       + node.mesh.indices.byteLength;
     transferables.push(
       node.mesh.positions.buffer,
       node.mesh.normals.buffer,
       node.mesh.paintSlots.buffer,
+      node.mesh.materialWeights.buffer,
       node.mesh.indices.buffer,
     );
   }

@@ -100,8 +100,7 @@ function yieldToBrowser(): Promise<void> {
   });
 }
 
-export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPagesConfig): BuildResult {
-  const eps = cfg.simplify.weld_epsilon_cells;
+function resolveBuildShape(worldPagesX: number, worldPagesZ: number, cfg: ClodPagesConfig): { maxLevels: number } {
   const maxLevels = Math.min(
     cfg.page.quadtree_levels,
     Math.floor(Math.log2(Math.min(worldPagesX, worldPagesZ))) + 1,
@@ -113,6 +112,12 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
       `world pages ${worldPagesX}x${worldPagesZ} not a multiple of ${requiredMultiple} for ${maxLevels} levels`,
     );
   }
+  return { maxLevels };
+}
+
+export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPagesConfig): BuildResult {
+  const eps = cfg.simplify.weld_epsilon_cells;
+  const { maxLevels } = resolveBuildShape(worldPagesX, worldPagesZ, cfg);
   const world = {
     cellsX: worldPagesX * cfg.page.chunks_per_page * cfg.page.chunk_size,
     cellsZ: worldPagesZ * cfg.page.chunks_per_page * cfg.page.chunk_size,
@@ -239,6 +244,7 @@ export async function buildWorldAsync(
   onProgress: (progress: BuildProgress) => void,
 ): Promise<BuildResult> {
   const eps = cfg.simplify.weld_epsilon_cells;
+  const { maxLevels } = resolveBuildShape(worldPagesX, worldPagesZ, cfg);
   const world = {
     cellsX: worldPagesX * cfg.page.chunks_per_page * cfg.page.chunk_size,
     cellsZ: worldPagesZ * cfg.page.chunks_per_page * cfg.page.chunk_size,
@@ -246,7 +252,7 @@ export async function buildWorldAsync(
   const nodesByLevel = new Map<number, ClodPageNode[]>();
   const stats: NodeBuildStat[] = [];
   const index: Map<string, ClodPageNode>[] = [];
-  const total = estimatedNodeCount(worldPagesX, worldPagesZ, cfg.page.quadtree_levels);
+  const total = estimatedNodeCount(worldPagesX, worldPagesZ, maxLevels);
   let done = 0;
   let lastYield = performance.now();
 
@@ -296,7 +302,7 @@ export async function buildWorldAsync(
   index[0] = lod0Index;
 
   let prevCountX = worldPagesX, prevCountZ = worldPagesZ;
-  for (let level = 1; level < cfg.page.quadtree_levels; level++) {
+  for (let level = 1; level < maxLevels; level++) {
     const countX = Math.ceil(prevCountX / 2);
     const countZ = Math.ceil(prevCountZ / 2);
     const levelNodes: ClodPageNode[] = [];

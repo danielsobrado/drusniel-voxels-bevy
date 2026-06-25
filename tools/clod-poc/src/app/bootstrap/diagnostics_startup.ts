@@ -5,7 +5,7 @@ import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
 import type { ClodPageNode } from "../../types.js";
 import type { AppRenderer } from "./renderer_startup.js";
 
-export function publishTerrainSummary(summary: TerrainSummaryField): void {
+export function publishTerrainSummaryForDiagnostics(summary: TerrainSummaryField): void {
   window.__drusnielTerrainSummary = summary;
 }
 

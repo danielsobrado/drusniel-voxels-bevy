@@ -398,7 +398,7 @@ export function surfaceNormal(x: number, z: number): [number, number, number] {
 }
 
 /** 4 material weights from slope/height — deterministic, so they match across borders. */
-export function materialWeights(y: number, ny: number): [number, number, number, number] {
+export function terrainWeights(y: number, ny: number): [number, number, number, number] {
   void ny;
   const sand = Math.max(0, 1 - Math.abs(y - WATER_LEVEL) / 6);
   const snow = Math.max(0, (y - 88) / 22);
@@ -646,16 +646,21 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
   }
 
   const nv = buf.mat.length;
-  const materialWeights = new Float32Array(nv * 4);
+  const vertWeights = new Float32Array(nv * 4);
   for (let i = 0; i < nv; i++) {
-    const slot = Math.min(Math.max(0, buf.mat[i]), 3);
-    materialWeights[i * 4 + slot] = 1.0;
+    const py = buf.pos[i * 3 + 1];
+    const ny = buf.nrm[i * 3 + 1];
+    const [g, r, s, sn] = terrainWeights(py, ny);
+    vertWeights[i * 4 + 0] = g;
+    vertWeights[i * 4 + 1] = r;
+    vertWeights[i * 4 + 2] = s;
+    vertWeights[i * 4 + 3] = sn;
   }
   return {
     positions: new Float32Array(buf.pos),
     normals: new Float32Array(buf.nrm),
     paintSlots: new Float32Array(buf.mat),
-    materialWeights,
+    materialWeights: vertWeights,
     materialWeightStride: 4,
     indices: new Uint32Array(indices),
   };

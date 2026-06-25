@@ -7,6 +7,7 @@ import type { ClodSelectionStats } from "../terrain_runtime/clod_selection_contr
 import type { GrassStats } from "../grass.js";
 import type { TreeStats } from "../trees/index.js";
 import type { StoneStats } from "../stones/stone_instances.js";
+import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
 
 const PHASE0_P95_WINDOW = 120;
 
@@ -14,7 +15,7 @@ export interface LongViewFrameDiagnosticsDeps {
   getHooks: () => ClodHooks | null;
   getAverageFps: () => number;
   getFrameStartMs: () => number;
-  renderer: THREE.WebGLRenderer;
+  renderer: FrameRenderer;
   getSelectionStats: () => ClodSelectionStats;
   maxTerrainLevel: number;
   getGrassStats: () => GrassStats | null;
@@ -49,9 +50,9 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     s.fps = deps.getAverageFps();
     s.frameMs = performance.now() - deps.getFrameStartMs();
     s.frame++;
-    const info = deps.renderer.info as unknown as { render: { drawCalls?: number; triangles?: number } };
-    s.drawCalls = info.render.drawCalls ?? 0;
-    s.triangles = info.render.triangles ?? 0;
+    const info = deps.renderer.info;
+    s.drawCalls = info?.render.drawCalls ?? 0;
+    s.triangles = info?.render.triangles ?? 0;
     for (let lvl = 0; lvl <= deps.maxTerrainLevel; lvl++) {
       s.counters[`built_page_count_lod${lvl}`] = selectionStats.nodesByLod[lvl] ?? 0;
     }

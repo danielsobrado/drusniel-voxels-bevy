@@ -83,7 +83,7 @@ export type ClodWorkerResponse =
   | ({ type: "parentRebuilt" } & SerializedParentBatch)
   | { type: "parentsComplete"; requestId: number | null; parentNodes: number; parentMs: number }
   | { type: "flushed"; requestId: number }
-  | { type: "error"; requestId: number | null; message: string; name?: string; kind?: string };
+  | { type: "error"; requestId: number | null; message: string; name?: string; code?: string; details?: Record<string, unknown> };
 
 function cloneMesh(mesh: PageMesh): PageMesh {
   return {
@@ -126,6 +126,24 @@ export function serializeLod0Rebuild(result: Lod0RebuildResult, pendingParents: 
     chunksTotal: result.chunksTotal,
     pendingParents,
   };
+}
+
+export function collectNodeTransferables(node: SerializedClodNode, out: Transferable[]): void {
+  out.push(
+    node.mesh.positions.buffer,
+    node.mesh.normals.buffer,
+    node.mesh.paintSlots.buffer,
+    node.mesh.materialWeights.buffer,
+    node.mesh.indices.buffer,
+  );
+}
+
+export function collectBuildResultTransferables(result: SerializedBuildResult): Transferable[] {
+  const out: Transferable[] = [];
+  for (const [, nodes] of result.nodesByLevel) {
+    for (const node of nodes) collectNodeTransferables(node, out);
+  }
+  return out;
 }
 
 export function serializeBuildResult(result: BuildResult): SerializedBuildResult {

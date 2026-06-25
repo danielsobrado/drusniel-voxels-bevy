@@ -1,131 +1,29 @@
-import * as THREE from "three";
-import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { ClodHooks } from "../core/hooks.js";
-import type { GrassStats, GrassSettings } from "../grass.js";
-import type { StoneStats } from "../stones/stone_instances.js";
-import type { TreeStats } from "../trees/index.js";
-import type { UnderstoryStats } from "../understory/index.js";
-import type { ForestLightingStats } from "../forest_lighting/index.js";
-import type { PostProcessSettings } from "../postprocess.js";
-import type { ClodSelectionController } from "../terrain_runtime/clod_selection_controller.js";
-import type { NearFieldBubbleController } from "../terrain_runtime/near_field_bubble_controller.js";
-import type { TerrainRaycastService } from "../player/terrain_raycast_service.js";
-import type { PlayerInputController } from "../player/player_input_controller.js";
-import type { BrushPreviewController } from "../player/brush_preview_controller.js";
-import type { GrassController } from "../systems/grass_controller.js";
-import type { TreeController } from "../systems/tree_controller.js";
-import type { UnderstoryController } from "../systems/understory_controller.js";
-import type { ForestLightingController } from "../systems/forest_lighting_controller.js";
-import type { StoneController } from "../systems/stone_controller.js";
-import type { WaterController } from "../systems/water_controller.js";
-import type { WeatherController } from "../systems/weather_controller.js";
-import type { NodeLabelOverlay } from "../ui/node_labels.js";
-import type { AppPostProcess } from "./app_post_process.js";
-import type { AppSky } from "../scene/app_sky.js";
 import { createLongViewFrameDiagnostics } from "../phase0/long_view_frame_diagnostics.js";
-import type { Phase0Config } from "../phase0/phase0_config.js";
-import type { PlayerController, PlayerInteractionState } from "../player_controller.js";
 import { runTerrainFramePhase } from "./frame_loop/terrain_frame_phase.js";
 import { runVegetationFramePhase } from "./frame_loop/vegetation_frame_phase.js";
 import { runStatsSyncPhase } from "./frame_loop/stats_sync_phase.js";
 import { runRenderPhase } from "./frame_loop/render_phase.js";
 import { submitMsChanged } from "./frame_loop/frame_timing.js";
-import type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
-import type { StatsPresenter, GuiDisplayController } from "./frame_loop/stats_presenter.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
 export type { StatsPresenter } from "./frame_loop/stats_presenter.js";
+export type { FrameRenderer } from "./frame_loop/frame_renderer.js";
+export type {
+  ClodFrameLoopDeps,
+  FrameLoopRenderDeps,
+  FrameLoopPlayerDeps,
+  FrameLoopTerrainDeps,
+  FrameLoopVegetationDeps,
+  FrameLoopWaterWeatherDeps,
+  FrameLoopStatsDeps,
+  FrameLoopDiagnosticsDeps,
+} from "./frame_loop/frame_loop_deps.js";
 
-interface TerrainFadeView {
-  fade: number;
-  target: number;
-  mesh: THREE.Mesh;
-  mat: { setFade: (fade: number, fadeIn: boolean, dither: boolean) => void };
-}
-
-interface NodeViewLookup {
-  node: { id: string };
-}
-
-export interface ClodFrameLoopDeps {
-  renderer: THREE.WebGLRenderer;
-  scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  controls: OrbitControls;
-  player: PlayerController;
-  interaction: PlayerInteractionState;
-  state: ClodFrameLoopUiState;
-  selectionController: ClodSelectionController;
-  playerInputController: PlayerInputController;
-  skyEnvironment: AppSky | null;
-  drainVegetationDirtyQueue: () => void;
-  treeController: TreeController;
-  updateSelection: () => void;
-  playerTerraformEditActive: () => boolean;
-  brushPreview: BrushPreviewController;
-  terrainRaycast: TerrainRaycastService;
-  pageTransitionMode: string;
-  crossfadeStep: number;
-  nearFieldBubbleController: NearFieldBubbleController;
-  views: Map<string, NodeViewLookup & TerrainFadeView>;
-  worldCells: number;
-  grassController: GrassController;
-  understoryController: UnderstoryController;
-  forestLightingController: ForestLightingController;
-  applyForestLightingToPropMaterials: () => void;
-  stoneController: StoneController;
-  waterController: WaterController;
-  weatherController: WeatherController;
-  updateWeatherStats: () => void;
-  weatherStatsController: GuiDisplayController | null;
-  grassSystem: GrassController["system"];
-  treeSystem: TreeController["system"];
-  understorySystem: UnderstoryController["system"];
-  forestLightingSystem: ForestLightingController["system"];
-  stoneSystem: StoneController["system"];
-  currentLighting: () => { sunDirection: THREE.Vector3 };
-  getGrassStats: () => GrassStats | null;
-  setGrassStats: (stats: GrassStats | null) => void;
-  getTreeStats: () => TreeStats | null;
-  setTreeStats: (stats: TreeStats | null) => void;
-  getStoneStats: () => StoneStats | null;
-  setStoneStats: (stats: StoneStats | null) => void;
-  getUnderstoryStats: () => UnderstoryStats | null;
-  setUnderstoryStats: (stats: UnderstoryStats | null) => void;
-  getForestLightingStats: () => ForestLightingStats | null;
-  setForestLightingStats: (stats: ForestLightingStats | null) => void;
-  formatTreeGpuSummary: (stats: TreeStats) => string;
-  formatUnderstoryGpuSummary: (stats: UnderstoryStats) => string;
-  statsPresenter: StatsPresenter;
-  nodeLabelOverlay: NodeLabelOverlay;
-  postProcess: AppPostProcess | null;
-  currentPostProcessSettings: () => PostProcessSettings;
-  makeGrassSettings: () => GrassSettings;
-  updateInfo: () => void;
-  averageFpsRef: { value: number };
-  getHooks: () => ClodHooks | null;
-  longViewSettleWaiters: { frames: number; resolve: () => void }[];
-  maxTerrainLevel: number;
-  farShellBuilt: () => boolean;
-  farShellCanopyEnabled: () => boolean;
-  isLongView: boolean;
-  phase0TargetVisibleM: number;
-  phase0Config: Phase0Config;
-  queryScene: string | null;
-  phase0VelocityX: number;
-  phase0VelocityZ: number;
-  phase0Streaming: Phase0Config["phase0"]["streaming"];
-  longViewDiagnosticsCfg: {
-    page: { chunk_size: number; chunks_per_page: number };
-  };
-  getFarShellRadiusFactor: () => number;
-  profileFrameMs: number;
-  grassProfileEnabled: boolean;
-  grassPrepassEnabled: boolean;
-}
+import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics } = deps;
   let elapsedSeconds = 0;
-  const averageFpsRef = deps.averageFpsRef;
+  const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
   let lastFrameAt = performance.now();
   let lastFpsRefreshAt = lastFrameAt;
@@ -143,78 +41,78 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
     if (now - lastFpsRefreshAt >= 250) {
       lastFpsRefreshAt = now;
-      deps.updateInfo();
+      stats.updateInfo();
     }
   };
 
   let frameStart = 0;
   const updateLongViewDiagnostics = createLongViewFrameDiagnostics({
-    getHooks: deps.getHooks,
+    getHooks: render.getHooks,
     getAverageFps: () => averageFpsRef.value,
     getFrameStartMs: () => frameStart,
-    renderer: deps.renderer,
-    getSelectionStats: () => deps.selectionController.stats(),
-    maxTerrainLevel: deps.maxTerrainLevel,
-    getGrassStats: deps.getGrassStats,
-    getTreeStats: deps.getTreeStats,
-    getStoneStats: deps.getStoneStats,
-    worldCells: deps.worldCells,
-    getFarShellRadiusFactor: deps.getFarShellRadiusFactor,
-    farShellBuilt: deps.farShellBuilt,
-    farShellCanopyEnabled: deps.farShellCanopyEnabled,
-    isLongView: deps.isLongView,
-    phase0TargetVisibleM: deps.phase0TargetVisibleM,
-    phase0Config: deps.phase0Config,
-    queryScene: deps.queryScene,
-    cfg: deps.longViewDiagnosticsCfg,
-    camera: deps.camera,
-    phase0VelocityX: deps.phase0VelocityX,
-    phase0VelocityZ: deps.phase0VelocityZ,
-    phase0Streaming: deps.phase0Streaming,
+    renderer: render.renderer,
+    getSelectionStats: () => terrain.selectionController.stats(),
+    maxTerrainLevel: diagnostics.maxTerrainLevel,
+    getGrassStats: stats.getGrassStats,
+    getTreeStats: stats.getTreeStats,
+    getStoneStats: stats.getStoneStats,
+    worldCells: terrain.worldCells,
+    getFarShellRadiusFactor: diagnostics.getFarShellRadiusFactor,
+    farShellBuilt: diagnostics.farShellBuilt,
+    farShellCanopyEnabled: diagnostics.farShellCanopyEnabled,
+    isLongView: diagnostics.isLongView,
+    phase0TargetVisibleM: diagnostics.phase0TargetVisibleM,
+    phase0Config: diagnostics.phase0Config,
+    queryScene: diagnostics.queryScene,
+    cfg: diagnostics.longViewDiagnosticsCfg,
+    camera: render.camera,
+    phase0VelocityX: diagnostics.phase0VelocityX,
+    phase0VelocityZ: diagnostics.phase0VelocityZ,
+    phase0Streaming: diagnostics.phase0Streaming,
   });
 
-  deps.renderer.setAnimationLoop(() => {
+  render.renderer.setAnimationLoop(() => {
     frameStart = performance.now();
-    deps.selectionController.advanceFrame();
-    const selectionStats = deps.selectionController.stats();
-    deps.playerInputController.playerTimer.update();
-    const playerDelta = Math.min(deps.playerInputController.playerTimer.getDelta(), 0.1);
+    terrain.selectionController.advanceFrame();
+    const selectionStats = terrain.selectionController.stats();
+    player.playerInputController.playerTimer.update();
+    const playerDelta = Math.min(player.playerInputController.playerTimer.getDelta(), 0.1);
     elapsedSeconds += playerDelta;
     updateAverageFps();
-    deps.playerInputController.updateFrame(playerDelta);
-    deps.skyEnvironment?.updateCamera(deps.camera);
-    deps.drainVegetationDirtyQueue();
-    deps.treeController.updateFallingTrees(playerDelta);
-    if (!deps.state.freeze) deps.updateSelection();
+    player.playerInputController.updateFrame(playerDelta);
+    render.skyEnvironment?.updateCamera(render.camera);
+    vegetation.drainVegetationDirtyQueue();
+    vegetation.treeController.updateFallingTrees(playerDelta);
+    if (!player.state.freeze) terrain.updateSelection();
 
     updateLongViewDiagnostics();
 
-    deps.playerInputController.updateHoldToDig();
+    player.playerInputController.updateHoldToDig();
 
-    deps.brushPreview.update({
-      digEnabled: deps.state.digEnabled,
-      interactionMode: deps.interaction.mode,
-      terraformEditActive: deps.playerTerraformEditActive(),
-      brushShape: deps.state.brushShape,
-      brushOp: deps.state.brushOp,
-      digRadius: deps.state.digRadius,
-      brushHeight: deps.state.brushHeight,
-      raycastEditableTerrain: deps.terrainRaycast.raycastEditableTerrain,
-      getPlayingAimRay: () => deps.playerInputController.getPlayingAimRay(),
-      getOrbitHoverRay: () => deps.playerInputController.getOrbitHoverRay(),
+    player.brushPreview.update({
+      digEnabled: player.state.digEnabled,
+      interactionMode: player.interaction.mode,
+      terraformEditActive: player.playerTerraformEditActive(),
+      brushShape: player.state.brushShape,
+      brushOp: player.state.brushOp,
+      digRadius: player.state.digRadius,
+      brushHeight: player.state.brushHeight,
+      raycastEditableTerrain: player.terrainRaycast.raycastEditableTerrain,
+      getPlayingAimRay: () => player.playerInputController.getPlayingAimRay(),
+      getOrbitHoverRay: () => player.playerInputController.getOrbitHoverRay(),
     });
 
     const terrainPhase = runTerrainFramePhase({
-      state: deps.state,
-      pageTransitionMode: deps.pageTransitionMode,
-      crossfadeStep: deps.crossfadeStep,
-      interaction: deps.interaction,
-      player: deps.player,
-      controls: deps.controls,
-      selectionController: deps.selectionController,
-      nearFieldBubbleController: deps.nearFieldBubbleController,
-      views: deps.views,
-      worldCells: deps.worldCells,
+      state: player.state,
+      pageTransitionMode: terrain.pageTransitionMode,
+      crossfadeStep: terrain.crossfadeStep,
+      interaction: player.interaction,
+      player: player.player,
+      controls: player.controls,
+      selectionController: terrain.selectionController,
+      nearFieldBubbleController: terrain.nearFieldBubbleController,
+      views: terrain.views,
+      worldCells: terrain.worldCells,
     });
 
     runVegetationFramePhase({
@@ -222,68 +120,68 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       playerDelta,
       ringCenter: terrainPhase.ringCenter,
       grassCenter: terrainPhase.grassCenter,
-      camera: deps.camera,
-      state: deps.state,
-      grassController: deps.grassController,
-      treeController: deps.treeController,
-      understoryController: deps.understoryController,
-      forestLightingController: deps.forestLightingController,
-      applyForestLightingToPropMaterials: deps.applyForestLightingToPropMaterials,
-      stoneController: deps.stoneController,
-      waterController: deps.waterController,
-      weatherController: deps.weatherController,
-      updateWeatherStats: deps.updateWeatherStats,
-      weatherStatsController: deps.weatherStatsController,
-      currentLighting: deps.currentLighting,
+      camera: render.camera,
+      state: player.state,
+      grassController: vegetation.grassController,
+      treeController: vegetation.treeController,
+      understoryController: vegetation.understoryController,
+      forestLightingController: vegetation.forestLightingController,
+      applyForestLightingToPropMaterials: vegetation.applyForestLightingToPropMaterials,
+      stoneController: vegetation.stoneController,
+      waterController: waterWeather.waterController,
+      weatherController: waterWeather.weatherController,
+      updateWeatherStats: waterWeather.updateWeatherStats,
+      weatherStatsController: waterWeather.weatherStatsController,
+      currentLighting: vegetation.currentLighting,
       selectionFrameId: selectionStats.frameId,
-      worldCells: deps.worldCells,
+      worldCells: terrain.worldCells,
     });
 
     const { currentGrassStats } = runStatsSyncPhase({
-      state: deps.state,
-      grassSystem: deps.grassSystem,
-      treeSystem: deps.treeSystem,
-      stoneSystem: deps.stoneSystem,
-      understorySystem: deps.understorySystem,
-      forestLightingSystem: deps.forestLightingSystem,
-      getGrassStats: deps.getGrassStats,
-      setGrassStats: deps.setGrassStats,
-      getTreeStats: deps.getTreeStats,
-      setTreeStats: deps.setTreeStats,
-      getStoneStats: deps.getStoneStats,
-      setStoneStats: deps.setStoneStats,
-      getUnderstoryStats: deps.getUnderstoryStats,
-      setUnderstoryStats: deps.setUnderstoryStats,
-      getForestLightingStats: deps.getForestLightingStats,
-      setForestLightingStats: deps.setForestLightingStats,
-      formatTreeGpuSummary: deps.formatTreeGpuSummary,
-      formatUnderstoryGpuSummary: deps.formatUnderstoryGpuSummary,
-      statsPresenter: deps.statsPresenter,
+      state: player.state,
+      grassSystem: vegetation.grassSystem,
+      treeSystem: vegetation.treeSystem,
+      stoneSystem: vegetation.stoneSystem,
+      understorySystem: vegetation.understorySystem,
+      forestLightingSystem: vegetation.forestLightingSystem,
+      getGrassStats: stats.getGrassStats,
+      setGrassStats: stats.setGrassStats,
+      getTreeStats: stats.getTreeStats,
+      setTreeStats: stats.setTreeStats,
+      getStoneStats: stats.getStoneStats,
+      setStoneStats: stats.setStoneStats,
+      getUnderstoryStats: stats.getUnderstoryStats,
+      setUnderstoryStats: stats.setUnderstoryStats,
+      getForestLightingStats: stats.getForestLightingStats,
+      setForestLightingStats: stats.setForestLightingStats,
+      formatTreeGpuSummary: stats.formatTreeGpuSummary,
+      formatUnderstoryGpuSummary: stats.formatUnderstoryGpuSummary,
+      statsPresenter: stats.statsPresenter,
     });
 
     runRenderPhase({
-      renderer: deps.renderer,
-      scene: deps.scene,
-      camera: deps.camera,
-      postProcess: deps.postProcess,
-      currentPostProcessSettings: deps.currentPostProcessSettings,
-      nodeLabelOverlay: deps.nodeLabelOverlay,
-      selectionController: deps.selectionController,
-      getHooks: deps.getHooks,
-      longViewSettleWaiters: deps.longViewSettleWaiters,
+      renderer: render.renderer,
+      scene: render.scene,
+      camera: render.camera,
+      postProcess: render.postProcess,
+      currentPostProcessSettings: render.currentPostProcessSettings,
+      nodeLabelOverlay: render.nodeLabelOverlay,
+      selectionController: terrain.selectionController,
+      getHooks: render.getHooks,
+      longViewSettleWaiters: render.longViewSettleWaiters,
       frameStart,
-      profileEnabled: deps.state.profileEnabled,
-      profileFrameMs: deps.profileFrameMs,
-      grassProfileEnabled: deps.grassProfileEnabled,
+      profileEnabled: player.state.profileEnabled,
+      profileFrameMs: render.profileFrameMs,
+      grassProfileEnabled: render.grassProfileEnabled,
       grassProfileFrame,
       currentGrassStats,
       tPropsStart: terrainPhase.tPropsStart,
       tBubbleStart: terrainPhase.tBubbleStart,
       chunkGroupsBuiltThisFrame: terrainPhase.chunkGroupsBuiltThisFrame,
-      nearFieldBubbleController: deps.nearFieldBubbleController,
-      interaction: deps.interaction,
-      makeGrassSettings: deps.makeGrassSettings,
-      grassPrepassEnabled: deps.grassPrepassEnabled,
+      nearFieldBubbleController: terrain.nearFieldBubbleController,
+      interaction: player.interaction,
+      makeGrassSettings: render.makeGrassSettings,
+      grassPrepassEnabled: render.grassPrepassEnabled,
     });
   });
 }

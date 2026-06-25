@@ -1,4 +1,4 @@
-import { materialWeights, WATER_LEVEL } from "../terrain.js";
+import { terrainWeights, WATER_LEVEL } from "../terrain.js";
 import { DEFAULT_TREE_SETTINGS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { clamp, clamp01, smoothstep } from "./tree_noise.js";
 
@@ -121,7 +121,7 @@ export function treeAcceptMask(
   if (height < params.minHeightM || height > params.maxHeightM) return 0;
   if (height < WATER_LEVEL + params.waterClearanceM || normalY < params.slopeMinY) return 0;
 
-  const [grassWeight, rockWeight, , snowWeight] = materialWeights(height, normalY);
+  const [grassWeight, rockWeight, , snowWeight] = terrainWeights(height, normalY);
   if (rockWeight >= params.rockReject || snowWeight >= params.snowReject) return 0;
 
   const groundWeight = clamp01(grassWeight + rockWeight * 0.25);
