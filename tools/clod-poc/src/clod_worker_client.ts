@@ -68,6 +68,8 @@ export class ClodWorkerClient {
   private digPending: DigBatchSlot | null = null;
   private digPumpActive = false;
   private parentsPending = false;
+  private parentsHealthy = true;
+  private lastParentError: Error | null = null;
   private parentsWaiters: Array<() => void> = [];
 
   constructor() {
@@ -120,6 +122,14 @@ export class ClodWorkerClient {
       this.flushRequests.set(requestId, { resolve, reject });
       this.worker.postMessage(request);
     });
+  }
+
+  isParentsHealthy(): boolean {
+    return this.parentsHealthy;
+  }
+
+  getLastParentError(): Error | null {
+    return this.lastParentError;
   }
 
   dispose(): void {
@@ -215,6 +225,8 @@ export class ClodWorkerClient {
         this.onParentRebuilt?.(this.rehydrateParentBatch(message));
         break;
       case "parentsComplete":
+        this.parentsHealthy = true;
+        this.lastParentError = null;
         this.resolveParentsWaiters();
         this.onParentsComplete?.(message.requestId, message.parentNodes, message.parentMs);
         break;
@@ -245,8 +257,10 @@ export class ClodWorkerClient {
     };
   }
 
-  private rejectParentsWaiters(error: Error): void {
+  private releaseParentsWaitersAfterFailure(error: Error): void {
     this.parentsPending = false;
+    this.parentsHealthy = false;
+    this.lastParentError = error;
     for (const resolve of this.parentsWaiters) resolve();
     this.parentsWaiters = [];
     this.onError?.(error);
@@ -268,7 +282,7 @@ export class ClodWorkerClient {
       // If no matching pending request, the error may be from a parent rebuild
       // (the dig promise was already resolved). Release parent waiters so
       // pumpDigQueue does not hang forever.
-      this.rejectParentsWaiters(error);
+      this.releaseParentsWaitersAfterFailure(error);
       return;
     }
     this.onError?.(error);

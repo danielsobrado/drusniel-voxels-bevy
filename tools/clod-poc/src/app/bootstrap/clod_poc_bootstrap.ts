@@ -156,6 +156,13 @@ export async function bootstrapClodPoc() {
       farSummaryIntegration.getHeightProvider(),
     );
 
+    const lastRing = DEFAULT_FAR_SUMMARY_CONFIG.rings.at(-1);
+    const farShellRadiusM = Math.max(
+      DEFAULT_FAR_SUMMARY_CONFIG.targetVisibleM,
+      lastRing?.endM ?? DEFAULT_FAR_SUMMARY_CONFIG.targetVisibleM,
+    );
+    terrainView.farShellController.setFarRadiusOverride(farShellRadiusM);
+
     if (queryScene === "infinite-stream-slow-builds") {
       farSummaryIntegration.setForceSlowBuilds(true);
       farSummaryIntegration.setBuildDelayMs(100);

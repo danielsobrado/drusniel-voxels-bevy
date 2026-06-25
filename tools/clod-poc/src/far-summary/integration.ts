@@ -98,6 +98,7 @@ export function initFarSummaryIntegration(
     stats.cacheMisses = currentStats.cacheMisses;
     stats.proceduralFallbacks = currentStats.proceduralFallbacks;
     stats.lowerRingFallbacks = currentStats.lowerRingFallbacks;
+    stats.conservativeFallbacks = currentStats.conservativeFallbacks;
     stats.tilesBuiltThisFrame = currentStats.tilesBuiltThisFrame;
     stats.tilesCommittedThisFrame = currentStats.tilesCommittedThisFrame;
     stats.buildTimeMs = currentStats.buildTimeMs;

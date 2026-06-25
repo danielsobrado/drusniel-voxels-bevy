@@ -11,6 +11,7 @@ export function createFarSummaryStats(): FarSummaryStats {
     cacheMisses: 0,
     proceduralFallbacks: 0,
     lowerRingFallbacks: 0,
+    conservativeFallbacks: 0,
     tilesBuiltThisFrame: 0,
     tilesCommittedThisFrame: 0,
     buildTimeMs: 0,

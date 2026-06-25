@@ -52,6 +52,7 @@ export interface FarSummaryStats {
   cacheMisses: number;
   proceduralFallbacks: number;
   lowerRingFallbacks: number;
+  conservativeFallbacks: number;
   tilesBuiltThisFrame: number;
   tilesCommittedThisFrame: number;
   buildTimeMs: number;

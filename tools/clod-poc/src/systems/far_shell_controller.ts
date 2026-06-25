@@ -32,6 +32,9 @@ export interface FarShellControllerDeps {
   heightProvider?: FarHeightProvider;
   centerX?: number;
   centerZ?: number;
+  /** Override the shell far radius in world units. When set, the shell radius is
+   *  this value instead of worldSizeCells * radiusFactor. */
+  farShellRadiusM?: number;
 }
 
 export interface FarShellController {
@@ -40,9 +43,11 @@ export interface FarShellController {
   isBuilt(): boolean;
   readonly canopyShell: FarShellInstance | null;
   dispose(): void;
-  /** Move the shell mesh to a new world center without rebuilding. */
   moveTo(x: number, z: number): void;
+  /** Set or change the height provider after construction. Rebuilds the shell. */
   setHeightProvider(provider: FarHeightProvider | undefined): void;
+  /** Override the shell far radius (world units). Pass 0 to clear the override. */
+  setFarRadiusOverride(m: number): void;
 }
 
 export function createFarShellController(deps: FarShellControllerDeps): FarShellController {
@@ -51,6 +56,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
   let currentCenterX = deps.centerX ?? deps.worldSizeCells / 2;
   let currentCenterZ = deps.centerZ ?? deps.worldSizeCells / 2;
   let currentHeightProvider = deps.heightProvider;
+  let currentFarRadiusOverride = 0;
   let buildCenterX = currentCenterX;
   let buildCenterZ = currentCenterZ;
 
@@ -65,13 +71,14 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
       current.dispose();
     }
     const lighting = deps.getLighting();
+    const farRadius = currentFarRadiusOverride ?? deps.farShellRadiusM ?? deps.worldSizeCells * radiusFactor;
     const result = buildFarTerrainShell(deps.terrainSummary, {
       sunDirection: lighting.sunDirection,
       sunColor: lighting.sunColor,
       skyLight: lighting.skyLight,
       groundLight: lighting.groundLight,
     }, {
-      farRadius: deps.worldSizeCells * radiusFactor,
+      farRadius,
       gridRes: 128,
       heightDrop,
       heightBias,
@@ -144,6 +151,10 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
     setHeightProvider(provider: FarHeightProvider | undefined) {
       currentHeightProvider = provider;
       rebuild();
+    },
+    setFarRadiusOverride(m: number) {
+      currentFarRadiusOverride = m;
+      if (m > 0) rebuild();
     },
     setEnabled(on) {
       if (!current) return;

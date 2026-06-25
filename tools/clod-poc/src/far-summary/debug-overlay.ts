@@ -28,7 +28,7 @@ export class FarSummaryDebugOverlay {
   private readonly statsElement: HTMLPreElement | null = null;
   private gridMeshes: THREE.Object3D[] = [];
   private tileMeshes: THREE.Object3D[] = [];
-  private lastMeshRevision = -1;
+  private lastStateRevision = -1;
   private meshRebuildFrameSkips = 0;
 
   constructor(
@@ -65,11 +65,11 @@ export class FarSummaryDebugOverlay {
     _frameIndex: number,
     stats: FarSummaryStats,
   ): void {
-    const currentRev = this.cache.commitRevisionAt();
+    const currentRev = this.cache.stateRevisionAt();
     this.meshRebuildFrameSkips++;
-    if (currentRev !== this.lastMeshRevision && this.meshRebuildFrameSkips >= 5) {
+    if (currentRev !== this.lastStateRevision && this.meshRebuildFrameSkips >= 5) {
       this.rebuildMeshes();
-      this.lastMeshRevision = currentRev;
+      this.lastStateRevision = currentRev;
       this.meshRebuildFrameSkips = 0;
     }
     this.updateStatsText(stats);
@@ -170,6 +170,7 @@ export class FarSummaryDebugOverlay {
       `  hit: ${this.cacheHitsPercent(stats)}%`,
       `  prc: ${stats.proceduralFallbacks}`,
       `  lwr: ${stats.lowerRingFallbacks}`,
+      `  cns: ${stats.conservativeFallbacks}`,
       `  blt: ${stats.tilesBuiltThisFrame}`,
       `  ms:  ${stats.buildTimeMs.toFixed(1)}`,
       `  max: ${stats.maxBuildTimeMs.toFixed(1)}`,
