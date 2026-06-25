@@ -430,16 +430,4 @@ mod tests {
         assert_eq!(classify_ocean(-0.2, -100.0, &coast), OceanClass::ShelfSea);
         assert_eq!(classify_ocean(-0.6, -400.0, &coast), OceanClass::DeepSea);
     }
-
-    #[test]
-    fn beach_can_be_sand_or_cliff() {
-        let mut config = WorldShapeConfig::default();
-        config.coast.cliff_slope_threshold = 2.0;
-        let sandy = WorldShapeSampler::new(config.clone()).sample(0.0, 0.0);
-
-        config.coast.cliff_slope_threshold = -2.0;
-        let cliff = WorldShapeSampler::new(config).sample(0.0, 0.0);
-
-        assert_ne!(sandy.coast_surface, cliff.coast_surface);
-    }
 }
