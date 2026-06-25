@@ -32,6 +32,12 @@ export interface StoneSettings {
   seedSalt: number;
   /** scatter grid spacing (m) */
   cellSizeM: number;
+  /** camera-centred toroidal scatter radius (m) */
+  ringRadiusM: number;
+  /** centre movement before the GPU scatter ring refreshes (m) */
+  ringRefreshDistanceM: number;
+  /** soft acceptance fade near the ring edge (m) */
+  ringEdgeFadeM: number;
   /** hard cap on rendered instances */
   maxInstances: number;
   /** global density multiplier (0 disables, 1 = nominal) */
@@ -86,6 +92,9 @@ export const DEFAULT_STONE_SETTINGS: StoneSettings = {
   enabled: true,
   seedSalt: 931777,
   cellSizeM: 2.1,
+  ringRadiusM: 220,
+  ringRefreshDistanceM: 8,
+  ringEdgeFadeM: 24,
   maxInstances: 120000,
   density: 1.0,
   slopeReposeStart: 0.78,
@@ -177,6 +186,9 @@ interface StoneYamlConfig {
   enabled?: boolean;
   seed_salt?: number;
   cell_size_m?: number;
+  ring_radius_m?: number;
+  ring_refresh_distance_m?: number;
+  ring_edge_fade_m?: number;
   max_instances?: number;
   density?: number;
   slope_repose_start?: number;
@@ -194,6 +206,7 @@ interface StoneYamlConfig {
   rock_exposure_weight?: number;
   scree_weight?: number;
   cliff_above_weight?: number;
+  rock_base_patch_weight?: number;
   stream_weight?: number;
   base_soil_weight?: number;
   patch_clump_min?: number;
@@ -251,6 +264,9 @@ export function parseStoneConfig(text: string): StoneSettings {
     enabled: raw.enabled ?? base.enabled,
     seedSalt: raw.seed_salt ?? base.seedSalt,
     cellSizeM: raw.cell_size_m ?? base.cellSizeM,
+    ringRadiusM: raw.ring_radius_m ?? base.ringRadiusM,
+    ringRefreshDistanceM: raw.ring_refresh_distance_m ?? base.ringRefreshDistanceM,
+    ringEdgeFadeM: raw.ring_edge_fade_m ?? base.ringEdgeFadeM,
     maxInstances: raw.max_instances ?? base.maxInstances,
     density: raw.density ?? base.density,
     slopeReposeStart: raw.slope_repose_start ?? base.slopeReposeStart,
@@ -269,7 +285,7 @@ export function parseStoneConfig(text: string): StoneSettings {
     screeWeight: raw.scree_weight ?? base.screeWeight,
     cliffAboveWeight: raw.cliff_above_weight ?? base.cliffAboveWeight,
     streamWeight: raw.stream_weight ?? base.streamWeight,
-    baseSoilWeight: raw.base_soil_weight ?? base.baseSoilWeight,
+    baseSoilWeight: raw.base_soil_weight ?? raw.rock_base_patch_weight ?? base.baseSoilWeight,
     patchClumpMin: raw.patch_clump_min ?? base.patchClumpMin,
     patchClumpCellMult: raw.patch_clump_cell_mult ?? base.patchClumpCellMult,
     sinkSlopeMultiplier: raw.sink_slope_multiplier ?? base.sinkSlopeMultiplier,
