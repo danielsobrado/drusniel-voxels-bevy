@@ -8,6 +8,11 @@
 //!
 //! NOTE: terrain is chunked in Y too, so a page footprint spans several Y chunks; this
 //! caches per-chunk exports (all Y), and Step 3b groups them into P×P×Y page sources.
+//!
+//! TODO(CLOD_PHASE3_GATE): This runtime path is default-off and experimental.
+//! Do not expand Phase 5 behavior until tools/clod-poc Phase 3 acceptance
+//! passes with mixed-LOD A1, strict A2, real A5 measured timings, and honest
+//! visual-sweep reporting.
 
 use bevy::prelude::*;
 use std::collections::{BTreeMap, HashMap};

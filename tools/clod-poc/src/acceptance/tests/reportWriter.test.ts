@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { mkdirSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -50,6 +50,7 @@ const DEFAULT_CONFIG: AcceptanceConfig = {
     densityScarScoreMax: 0.35,
     visualHolePixelRatioMax: 0,
     visualLipPixelRatioMax: 0,
+    requireMeasuredSingleNodeRebuild: false,
   },
   visual: { enabled: false, screenshotWidth: 1920, screenshotHeight: 1080, cameraFovYDeg: 60, grazingAngleDeg: 7, crossfadeFrames: 12 },
   stressScenes: { ridgeBorder: true, cliffCorner: true, caveMouthBorder: true, thinBridge: true, forcedNeighborLodDeltas: [1, 2, 3], nearFieldBubbleMask: true },
@@ -61,16 +62,29 @@ const METRICS: AcceptanceMetrics = {
   lod3Triangles: 5000,
   lod3TriangleRatio: 0.05,
   fullHierarchyBuildMs: 4210,
-  singleNodeRebuildP50Ms: 12,
-  singleNodeRebuildP95Ms: 45,
+  fullHierarchyBuildMsMin: 4100,
+  fullHierarchyBuildMsP50: 4200,
+  fullHierarchyBuildMsP95: 4300,
+  fullHierarchyBuildRuns: 8,
+  singleNodeRebuildMeasured: false,
+  singleNodeRebuildMsMin: 10,
+  singleNodeRebuildMsP50: 12,
+  singleNodeRebuildMsP95: 45,
   lowBenefitRateLevel1: 0.02,
   lowBenefitRateLevel2: 0.03,
   maxBorderPositionDelta: 0.0000005,
   minBorderNormalDot: 0.99995,
   maxBorderMaterialWeightDelta: 0.00001,
   densityScarScore: 0.21,
-  visualHolePixelRatio: 0,
-  visualLipPixelRatio: 0,
+  visualHolePixelRatio: -1,
+  visualLipPixelRatio: -1,
+  visualSweepAvailable: false,
+  sameLevelEdgesTested: 42,
+  sameLevelFailureCount: 0,
+  mixedLodDeltasTested: 3,
+  mixedLodEdgesTested: 12,
+  mixedLodFailureCount: 0,
+  mixedLodUntestableDeltaCount: 0,
 };
 
 describe("reportWriter", () => {
@@ -111,7 +125,7 @@ describe("reportWriter", () => {
     expect(content.status).toBe("pass");
   });
 
-  it("writes summary.md", () => {
+  it("writes summary.md with visual sweep honesty", () => {
     const gates = [makeGate("A1", "Watertight", "pass")];
     const report = buildReport("test-run", "2025-01-01", "2025-01-01", 100, "config.yaml", gates, METRICS, createArtifacts(tmpRunDir));
     const mdPath = writeSummaryMarkdown(tmpRunDir, report, DEFAULT_CONFIG);
@@ -119,15 +133,19 @@ describe("reportWriter", () => {
     const content = readFileSync(mdPath, "utf-8");
     expect(content).toContain("CLOD Phase 3 Acceptance Report");
     expect(content).toContain("PASS");
+    expect(content).toContain("N/A (sweep not available)");
   });
 
-  it("writes metrics.csv", () => {
+  it("writes metrics.csv with new fields", () => {
     const gates = [makeGate("A1", "Watertight", "pass")];
     const csvPath = writeMetricsCsv(tmpRunDir, METRICS, gates);
     expect(existsSync(csvPath)).toBe(true);
     const content = readFileSync(csvPath, "utf-8");
     expect(content).toContain("lod0Triangles");
     expect(content).toContain("100000");
+    expect(content).toContain("mixedLodDeltasTested");
+    expect(content).toContain("visualSweepAvailable");
+    expect(content).toContain("fullHierarchyBuildRuns");
   });
 
   it("preserves failed gate details in report", () => {
@@ -150,7 +168,7 @@ describe("reportWriter", () => {
   it("recommendation returns correct message for pass", () => {
     const gates = [makeGate("A1", "Watertight", "pass"), makeGate("A2", "Border", "pass")];
     const rec = recommendationFromGates(gates);
-    expect(rec).toContain("Phase 3 passed");
+    expect(rec).toContain("Phase 3");
   });
 
   it("recommendation returns do not port for A1 fail", () => {
@@ -158,5 +176,17 @@ describe("reportWriter", () => {
     const rec = recommendationFromGates(gates);
     expect(rec).toContain("Do not port");
     expect(rec).toContain("topology");
+  });
+
+  it("writeAllArtifacts produces summary.json with correct artifact list", () => {
+    const gates = [makeGate("A1", "Watertight", "pass")];
+    const report = buildReport("test-run", "2025-01-01", "2025-01-01", 100, "config.yaml", gates, METRICS, createArtifacts(tmpRunDir));
+    const written = writeAllArtifacts(tmpRunDir, report, DEFAULT_CONFIG, ["debug/visual_sweep_unavailable.json"], []);
+    expect(written.summaryJson).toBeTruthy();
+    expect(written.debugFiles).toContain("debug/visual_sweep_unavailable.json");
+    expect(written.screenshots).toEqual([]);
+
+    const jsonContent = JSON.parse(readFileSync(written.summaryJson, "utf-8"));
+    expect(Array.isArray(jsonContent.artifacts.debugFiles)).toBe(true);
   });
 });

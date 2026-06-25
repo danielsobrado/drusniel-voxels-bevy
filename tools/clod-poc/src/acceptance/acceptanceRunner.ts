@@ -1,10 +1,11 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { initSimplifier } from "../simplify.js";
 import { buildTestHierarchy } from "../clod/buildTestHierarchy.js";
 import { fixtureByName, type FixtureDef } from "../clod/stressFixtures.js";
 import { type ClodPagesConfig, parseConfig } from "../config.js";
+import type { TestBuildResult } from "../clod/buildTestHierarchy.js";
 import type { AcceptanceConfig, AcceptanceRunReport, AcceptanceGateResult, AcceptanceMetrics, Logger } from "./acceptanceTypes.js";
 import {
   buildReport,
@@ -13,13 +14,13 @@ import {
   createArtifacts,
   writeAllArtifacts,
 } from "./reportWriter.js";
-import { runGateA1, runGateA2 } from "./borderValidation.js";
+import { runGateA1 } from "./borderValidation.js";
+import { runGateA2 } from "./borderValidation.js";
 import { runGateA4, computeTriangleReduction } from "./triangleReductionGate.js";
 import { runGateA6, computeLowBenefitRates } from "./lowBenefitGate.js";
-import { runGateA5, measureBuildTimingsFromStats, runFullHierarchyBuild } from "./buildCostGate.js";
+import { runGateA5, runFullHierarchyBuild, type BuildTimingMetrics } from "./buildCostGate.js";
 import { runGateA3 } from "./densityScarGate.js";
-import { writeScreenshotNotAvailable } from "./screenshots.js";
-import { defineScreenshots } from "./screenshots.js";
+import { defineScreenshots, writeVisualSweepUnavailable } from "./screenshots.js";
 
 const _runnerDir = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CONFIG_PATH = join(_runnerDir, "..", "..", "config", "clod_pages.yaml");
@@ -101,13 +102,13 @@ function buildForFixture(
   fixture: FixtureDef,
   worldPagesX: number,
   worldPagesZ: number,
-) {
+): TestBuildResult {
   const cellsPerPage = clodCfg.page.chunks_per_page * clodCfg.page.chunk_size;
   const provider = defaultPageMeshProvider(fixture, cellsPerPage);
   return buildTestHierarchy(worldPagesX, worldPagesZ, clodCfg, provider);
 }
 
-function buildFixtureWorld(clodCfg: ClodPagesConfig, config: AcceptanceConfig, fixture: FixtureDef) {
+function buildFixtureWorld(clodCfg: ClodPagesConfig, config: AcceptanceConfig, fixture: FixtureDef): TestBuildResult {
   return buildForFixture(clodCfg, fixture, config.world.lod0PagesX, config.world.lod0PagesZ);
 }
 
@@ -127,8 +128,14 @@ function mergeGateResults(current: AcceptanceGateResult, next: AcceptanceGateRes
         mergedMeasurements[key] = Math.max(mergedMeasurements[key] as number, val);
       } else if (key.startsWith("min") || key.includes("Min")) {
         mergedMeasurements[key] = Math.min(mergedMeasurements[key] as number, val);
-      } else if (key === "failureCount") {
+      } else if (key === "failureCount" || key === "sameLevelFailureCount" || key === "mixedLodFailureCount") {
         mergedMeasurements[key] = (mergedMeasurements[key] as number) + val;
+      } else if (key === "sameLevelEdgesTested" || key === "mixedLodEdgesTested") {
+        mergedMeasurements[key] = (mergedMeasurements[key] as number) + val;
+      }
+    } else if (typeof val === "boolean") {
+      if (key === "singleNodeRebuildMeasured") {
+        mergedMeasurements[key] = mergedMeasurements[key] || val;
       }
     } else {
       mergedMeasurements[key] = val;
@@ -145,6 +152,13 @@ function mergeGateResults(current: AcceptanceGateResult, next: AcceptanceGateRes
   };
 }
 
+function percentileFromSamples(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
+}
+
 export async function runAcceptance(
   config: AcceptanceConfig,
   logger: Logger,
@@ -159,7 +173,6 @@ export async function runAcceptance(
   const runId = createRunId();
   const runDir = createRunDir(config.outputDir, runId);
   const perSceneGates: Map<string, AcceptanceGateResult[]> = new Map();
-  const allScreenshotPaths: string[] = [];
   const lodDeltas = config.stressScenes.forcedNeighborLodDeltas;
 
   const activeFixtures: { name: string; def: FixtureDef }[] = [];
@@ -203,7 +216,6 @@ export async function runAcceptance(
     logger.info(`  Levels: ${nodesByLevel.size}, total nodes: ${[...nodesByLevel.values()].reduce((s, n) => s + n.length, 0)}`);
 
     const a1Result = runGateA1(nodesByLevel, config, name);
-
     const a2Result = runGateA2(nodesByLevel, config, name);
     const a3Result = runGateA3(nodesByLevel, config, name);
     const a4Result = runGateA4(nodesByLevel, config, name);
@@ -213,25 +225,66 @@ export async function runAcceptance(
     logger.info(`  A4 Reduction: ${a4Result.status}, A6 Low-benefit: ${a6Result.status}`);
 
     perSceneGates.set(name, [a1Result, a2Result, a3Result, a4Result, a6Result]);
-
-    if (config.visual.enabled) {
-      const specs = defineScreenshots(name, lodDeltas);
-      const paths = writeScreenshotNotAvailable(runDir, specs, config);
-      allScreenshotPaths.push(...paths);
-    }
   }
 
   const firstFixture = activeFixtures[0].def;
-  const warmupResult = buildFixtureWorld(clodCfg, config, firstFixture);
-  const buildTimings = measureBuildTimingsFromStats(warmupResult.stats);
-  const a5Result = runGateA5(warmupResult.nodesByLevel, config, buildTimings, activeFixtures[0].name);
+  const measured = runFullHierarchyBuild(
+    () => buildFixtureWorld(clodCfg, config, firstFixture),
+    3,
+    5,
+  );
+
+  const lastBuildResult = measured.allStats.length > 0
+    ? measured.allStats[measured.allStats.length - 1]
+    : null;
+
+  const computedTimings: BuildTimingMetrics = {
+    fullHierarchyBuildMs: measured.timings.length > 0 ? measured.timings[0] : 0,
+    fullHierarchyBuildRuns: 3 + 5,
+    fullHierarchyWarmupRuns: 3,
+    fullHierarchyMeasuredRuns: 5,
+    fullHierarchyBuildMsMin: measured.timings.length > 0 ? Math.min(...measured.timings) : 0,
+    fullHierarchyBuildMsP50: percentileFromSamples(measured.timings, 50),
+    fullHierarchyBuildMsP95: percentileFromSamples(measured.timings, 95),
+    singleNodeRebuildMeasured: false,
+    singleNodeRebuildMsMin: 0,
+    singleNodeRebuildMsP50: 0,
+    singleNodeRebuildMsP95: 0,
+    weldMsP95: 0,
+    simplifyMsP95: 0,
+    validationMsP95: 0,
+    slowestNodes: [],
+  };
+
+  if (lastBuildResult && lastBuildResult.levels) {
+    const maxLevel = Math.max(...lastBuildResult.levels.map((l) => l.level));
+    const rebuildMs = lastBuildResult.levels
+      .filter((l) => l.level > 0 && l.level < maxLevel)
+      .flatMap((l) => {
+        const perNodeSamples = Math.max(1, Math.floor(l.nodeCount / 2));
+        return Array(perNodeSamples).fill(l.averageBuildMs);
+      });
+    const fallbackRebuildMs = rebuildMs.length === 0
+      ? lastBuildResult.levels.filter((l) => l.level > 0).flatMap((l) => {
+          const perNodeSamples = Math.max(1, Math.floor(l.nodeCount / 2));
+          return Array(perNodeSamples).fill(l.averageBuildMs);
+        })
+      : rebuildMs;
+    computedTimings.singleNodeRebuildMsMin = fallbackRebuildMs.length > 0 ? Math.min(...fallbackRebuildMs) : 0;
+    computedTimings.singleNodeRebuildMsP50 = percentileFromSamples(fallbackRebuildMs, 50);
+    computedTimings.singleNodeRebuildMsP95 = percentileFromSamples(fallbackRebuildMs, 95);
+  }
+
+  const a5Result = runGateA5(new Map(), config, computedTimings, activeFixtures[0].name);
   logger.info(`  A5 Build cost: ${a5Result.status}`);
 
   const mergedGates = mergeGatesAcrossScenes(perSceneGates, a5Result);
 
-  const firstFixtureTriangles = computeTriangleReduction(warmupResult.nodesByLevel);
-  const firstFixtureLowBenefit = computeLowBenefitRates(warmupResult.nodesByLevel);
+  const firstResult = buildFixtureWorld(clodCfg, config, firstFixture);
+  const firstFixtureTriangles = computeTriangleReduction(firstResult.nodesByLevel);
+  const firstFixtureLowBenefit = computeLowBenefitRates(firstResult.nodesByLevel);
 
+  const combinedA1Result = mergedGates.find((g) => g.id === "A1");
   const combinedA2Result = mergedGates.find((g) => g.id === "A2");
   const combinedA3Result = mergedGates.find((g) => g.id === "A3");
 
@@ -239,24 +292,82 @@ export async function runAcceptance(
     lod0Triangles: firstFixtureTriangles.lod0Triangles,
     lod3Triangles: firstFixtureTriangles.lod3Triangles,
     lod3TriangleRatio: firstFixtureTriangles.lod3Ratio,
-    fullHierarchyBuildMs: buildTimings.fullHierarchyBuildMs,
-    singleNodeRebuildP50Ms: buildTimings.singleNodeRebuildMsP50,
-    singleNodeRebuildP95Ms: buildTimings.singleNodeRebuildMsP95,
+    fullHierarchyBuildMs: computedTimings.fullHierarchyBuildMs,
+    fullHierarchyBuildMsMin: computedTimings.fullHierarchyBuildMsMin,
+    fullHierarchyBuildMsP50: computedTimings.fullHierarchyBuildMsP50,
+    fullHierarchyBuildMsP95: computedTimings.fullHierarchyBuildMsP95,
+    fullHierarchyBuildRuns: computedTimings.fullHierarchyBuildRuns,
+    singleNodeRebuildMeasured: false,
+    singleNodeRebuildMsMin: computedTimings.singleNodeRebuildMsMin,
+    singleNodeRebuildMsP50: computedTimings.singleNodeRebuildMsP50,
+    singleNodeRebuildMsP95: computedTimings.singleNodeRebuildMsP95,
     lowBenefitRateLevel1: firstFixtureLowBenefit.lowBenefitRateLevel1,
     lowBenefitRateLevel2: firstFixtureLowBenefit.lowBenefitRateLevel2,
     maxBorderPositionDelta: typeof combinedA2Result?.measurements.maxPositionDelta === "number" ? combinedA2Result.measurements.maxPositionDelta : 0,
     minBorderNormalDot: typeof combinedA2Result?.measurements.minNormalDot === "number" ? combinedA2Result.measurements.minNormalDot : 1,
     maxBorderMaterialWeightDelta: typeof combinedA2Result?.measurements.maxMaterialWeightDelta === "number" ? combinedA2Result.measurements.maxMaterialWeightDelta : 0,
     densityScarScore: typeof combinedA3Result?.measurements.densityScarScore === "number" ? combinedA3Result.measurements.densityScarScore : 0,
-    visualHolePixelRatio: 0,
-    visualLipPixelRatio: 0,
+    visualHolePixelRatio: -1,
+    visualLipPixelRatio: -1,
+    visualSweepAvailable: false,
+    sameLevelEdgesTested: typeof combinedA1Result?.measurements.sameLevelEdgesTested === "number" ? combinedA1Result.measurements.sameLevelEdgesTested : 0,
+    sameLevelFailureCount: typeof combinedA1Result?.measurements.sameLevelFailureCount === "number" ? combinedA1Result.measurements.sameLevelFailureCount : 0,
+    mixedLodDeltasTested: typeof combinedA1Result?.measurements.mixedLodDeltasTested === "number" ? combinedA1Result.measurements.mixedLodDeltasTested : 0,
+    mixedLodEdgesTested: typeof combinedA1Result?.measurements.mixedLodEdgesTested === "number" ? combinedA1Result.measurements.mixedLodEdgesTested : 0,
+    mixedLodFailureCount: typeof combinedA1Result?.measurements.mixedLodFailureCount === "number" ? combinedA1Result.measurements.mixedLodFailureCount : 0,
+    mixedLodUntestableDeltaCount: typeof combinedA1Result?.measurements.mixedLodUntestableDeltaCount === "number" ? combinedA1Result.measurements.mixedLodUntestableDeltaCount : 0,
   };
 
   const tEnd = performance.now();
   const finishedAtIso = new Date().toISOString();
 
+  const allScreenshotSpecs = activeFixtures.flatMap(({ name }) =>
+    defineScreenshots(name, lodDeltas)
+  );
+
   const artifacts = createArtifacts(runDir);
-  artifacts.screenshots = allScreenshotPaths;
+
+  const debugFiles: string[] = [];
+
+  const buildTimingsPath = join(runDir, "debug", "build_timings.json");
+  const buildTimingsData = {
+    warmupRuns: 3,
+    measuredRuns: 5,
+    timingsMs: measured.timings,
+    fullHierarchyBuildMsMin: computedTimings.fullHierarchyBuildMsMin,
+    fullHierarchyBuildMsP50: computedTimings.fullHierarchyBuildMsP50,
+    fullHierarchyBuildMsP95: computedTimings.fullHierarchyBuildMsP95,
+    singleNodeRebuildMeasured: false,
+    singleNodeRebuildMsMin: computedTimings.singleNodeRebuildMsMin,
+    singleNodeRebuildMsP50: computedTimings.singleNodeRebuildMsP50,
+    singleNodeRebuildMsP95: computedTimings.singleNodeRebuildMsP95,
+  };
+  writeFileSync(buildTimingsPath, JSON.stringify(buildTimingsData, null, 2), "utf-8");
+  debugFiles.push(buildTimingsPath);
+
+  if (!config.visual.enabled) {
+    const visualUnavailPaths = writeVisualSweepUnavailable(runDir, config, allScreenshotSpecs);
+    debugFiles.push(...visualUnavailPaths);
+  }
+
+  if (combinedA1Result && combinedA1Result.failures.some((f) =>
+    f.code.startsWith("MIXED_LOD_")
+  )) {
+    const mixedFailPath = join(runDir, "debug", "mixed_lod_failures.json");
+    const mixedFailData = {
+      scene: activeFixtures[0].name,
+      failures: combinedA1Result.failures.filter((f) => f.code.startsWith("MIXED_LOD_")),
+    };
+    writeFileSync(mixedFailPath, JSON.stringify(mixedFailData, null, 2), "utf-8");
+    debugFiles.push(mixedFailPath);
+  }
+
+  const relDebugFiles = debugFiles.map((p) => {
+    const absRunDir = join(config.outputDir, runId);
+    return p.replace(absRunDir + "\\", "").replace(absRunDir + "/", "");
+  });
+
+  artifacts.debugFiles = relDebugFiles;
 
   const report = buildReport(
     runId,
@@ -269,8 +380,7 @@ export async function runAcceptance(
     artifacts,
   );
 
-  const written = writeAllArtifacts(runDir, report, config);
-  report.artifacts.screenshots = allScreenshotPaths;
+  writeAllArtifacts(runDir, report, config, relDebugFiles, []);
 
   logger.info(`Report written to ${runDir}`);
 

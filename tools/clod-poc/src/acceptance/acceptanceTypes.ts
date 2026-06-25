@@ -31,6 +31,13 @@ export interface AcceptanceFailure {
   pageId?: string;
   level?: number;
   edge?: "north" | "south" | "east" | "west";
+  forcedDelta?: number;
+  coarseLevel?: number;
+  fineLevel?: number;
+  spanStart?: number;
+  spanEnd?: number;
+  gapStart?: number;
+  gapEnd?: number;
   value?: number;
   threshold?: number;
 }
@@ -40,8 +47,14 @@ export interface AcceptanceMetrics {
   lod3Triangles: number;
   lod3TriangleRatio: number;
   fullHierarchyBuildMs: number;
-  singleNodeRebuildP50Ms: number;
-  singleNodeRebuildP95Ms: number;
+  fullHierarchyBuildMsMin: number;
+  fullHierarchyBuildMsP50: number;
+  fullHierarchyBuildMsP95: number;
+  fullHierarchyBuildRuns: number;
+  singleNodeRebuildMeasured: boolean;
+  singleNodeRebuildMsMin: number;
+  singleNodeRebuildMsP50: number;
+  singleNodeRebuildMsP95: number;
   lowBenefitRateLevel1: number;
   lowBenefitRateLevel2: number;
   maxBorderPositionDelta: number;
@@ -50,6 +63,13 @@ export interface AcceptanceMetrics {
   densityScarScore: number;
   visualHolePixelRatio: number;
   visualLipPixelRatio: number;
+  visualSweepAvailable: boolean;
+  sameLevelEdgesTested: number;
+  sameLevelFailureCount: number;
+  mixedLodDeltasTested: number;
+  mixedLodEdgesTested: number;
+  mixedLodFailureCount: number;
+  mixedLodUntestableDeltaCount: number;
 }
 
 export interface AcceptanceArtifacts {
@@ -71,6 +91,7 @@ export interface AcceptanceThresholds {
   densityScarScoreMax: number;
   visualHolePixelRatioMax: number;
   visualLipPixelRatioMax: number;
+  requireMeasuredSingleNodeRebuild: boolean;
 }
 
 export interface AcceptanceConfig {
@@ -142,3 +163,14 @@ export function normalizeError(error: unknown): { message: string; details: Reco
     exitCode: 3,
   };
 }
+
+export const MIXED_LOD_FAILURE_CODES = {
+  COVERAGE_GAP: "MIXED_LOD_COVERAGE_GAP",
+  EDGE_OVERLAP: "MIXED_LOD_EDGE_OVERLAP",
+  MISSING_FINE_SEGMENT: "MIXED_LOD_MISSING_FINE_SEGMENT",
+  ENDPOINT_MISMATCH: "MIXED_LOD_ENDPOINT_MISMATCH",
+  POSITION_MISMATCH: "MIXED_LOD_POSITION_MISMATCH",
+  NORMAL_MISMATCH: "MIXED_LOD_NORMAL_MISMATCH",
+  MATERIAL_MISMATCH: "MIXED_LOD_MATERIAL_MISMATCH",
+  UNTESTABLE_DELTA: "MIXED_LOD_UNTESTABLE_DELTA",
+} as const;

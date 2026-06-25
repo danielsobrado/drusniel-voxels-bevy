@@ -4,9 +4,9 @@ export { loadAcceptanceConfig, parseAcceptanceConfig, DEFAULT_ACCEPTANCE_CONFIG_
 export { createLogger } from "./logger.js";
 export type { AcceptanceConfig, AcceptanceRunReport, AcceptanceGateResult, AcceptanceMetrics, AcceptanceFailure, AcceptanceStatus, AcceptanceArtifacts, Logger } from "./acceptanceTypes.js";
 export { AcceptanceError, normalizeError } from "./acceptanceTypes.js";
-export { runGateA1, runGateA2, validateWatertightCut, validateBorderEquality, compareBorderChains, buildTolerances } from "./borderValidation.js";
+export { runGateA1, runGateA2, validateSameLevelWatertightness, validateSameLevelStrictEquality, compareBorderChains, buildTolerances } from "./borderValidation.js";
 export { runGateA4, computeTriangleReduction } from "./triangleReductionGate.js";
 export { runGateA6, computeLowBenefitRates } from "./lowBenefitGate.js";
-export { runGateA5, measureBuildTimingsFromStats } from "./buildCostGate.js";
+export { runGateA5, measureBuildTimingsFromStats, runFullHierarchyBuild } from "./buildCostGate.js";
 export { runGateA3, computeDensityScar } from "./densityScarGate.js";
 export { writeSummaryJson, writeSummaryMarkdown, writeMetricsCsv, buildReport, createRunId } from "./reportWriter.js";

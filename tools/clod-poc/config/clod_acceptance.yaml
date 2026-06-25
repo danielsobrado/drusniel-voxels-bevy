@@ -22,6 +22,7 @@ acceptance:
     density_scar_score_max: 0.35
     visual_hole_pixel_ratio_max: 0.0
     visual_lip_pixel_ratio_max: 0.0
+    require_measured_single_node_rebuild: false
 
   visual:
     enabled: false

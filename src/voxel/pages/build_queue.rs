@@ -1,5 +1,10 @@
 //! Phase 5 Step 3b part 1: assemble complete LOD0 page sources on the main thread and
 //! build their quadtree on the async compute pool.
+//!
+//! TODO(CLOD_PHASE3_GATE): This runtime path is default-off and experimental.
+//! Do not expand Phase 5 behavior until tools/clod-poc Phase 3 acceptance
+//! passes with mixed-LOD A1, strict A2, real A5 measured timings, and honest
+//! visual-sweep reporting.
 
 use std::collections::VecDeque;
 #[cfg(test)]

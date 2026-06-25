@@ -39,6 +39,7 @@ export function runGateA1VisualSweep(
       visualHolePixelRatioMax: config.thresholds.visualHolePixelRatioMax,
       visualLipPixelRatioMax: config.thresholds.visualLipPixelRatioMax,
       visualSweepAvailable: false,
+      visualSweepStatus: "not_available",
     },
     failures: [],
   };

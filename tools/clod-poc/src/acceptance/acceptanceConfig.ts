@@ -93,6 +93,7 @@ export function parseAcceptanceConfig(text: string): AcceptanceConfig {
       densityScarScoreMax: numberAt(thresholds, "density_scar_score_max", "acceptance.thresholds", 0),
       visualHolePixelRatioMax: numberAt(thresholds, "visual_hole_pixel_ratio_max", "acceptance.thresholds", 0),
       visualLipPixelRatioMax: numberAt(thresholds, "visual_lip_pixel_ratio_max", "acceptance.thresholds", 0),
+      requireMeasuredSingleNodeRebuild: boolAt(thresholds, "require_measured_single_node_rebuild", "acceptance.thresholds"),
     },
     visual: {
       enabled: boolAt(visual, "enabled", "acceptance.visual"),

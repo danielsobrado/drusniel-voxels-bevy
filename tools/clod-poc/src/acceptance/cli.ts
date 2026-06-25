@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { loadAcceptanceConfig, DEFAULT_ACCEPTANCE_CONFIG_PATH } from "./acceptanceConfig.js";
 import { runAcceptance } from "./acceptanceRunner.js";
 import { createLogger } from "./logger.js";
-import { normalizeError } from "./acceptanceTypes.js";
+
 
 export interface CliOptions {
   configPath: string;

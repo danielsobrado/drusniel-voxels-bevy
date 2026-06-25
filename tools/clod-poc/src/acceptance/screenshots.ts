@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AcceptanceConfig } from "./acceptanceTypes.js";
 
@@ -32,45 +32,19 @@ export function defineScreenshots(
   return specs;
 }
 
-export function writeScreenshotPlaceholder(
-  dir: string,
-  filename: string,
-  width: number,
-  height: number,
-): void {
-  const path = join(dir, "screenshots", filename);
-  const header = Buffer.alloc(54);
-  const pixelDataSize = width * height * 3;
-  const fileSize = 54 + pixelDataSize;
-  header.write("BM", 0);
-  header.writeUInt32LE(fileSize, 2);
-  header.writeUInt32LE(54, 10);
-  header.writeUInt32LE(40, 14);
-  header.writeInt32LE(width, 18);
-  header.writeInt32LE(height, 22);
-  header.writeUInt16LE(1, 26);
-  header.writeUInt16LE(24, 28);
-  header.writeUInt32LE(pixelDataSize, 34);
-
-  const pixels = Buffer.alloc(pixelDataSize, 0x33);
-
-  writeFileSync(path, Buffer.concat([header, pixels]));
-}
-
-export function writeScreenshotNotAvailable(
+export function writeVisualSweepUnavailable(
   runDir: string,
-  specs: ScreenshotSpec[],
   config: AcceptanceConfig,
+  specs: ScreenshotSpec[],
 ): string[] {
-  const paths: string[] = [];
-  for (const spec of specs) {
-    writeScreenshotPlaceholder(
-      runDir,
-      spec.filename,
-      config.visual.screenshotWidth,
-      config.visual.screenshotHeight,
-    );
-    paths.push(join("screenshots", spec.filename));
-  }
-  return paths;
+  const debugDir = join(runDir, "debug");
+  const path = join(debugDir, "visual_sweep_unavailable.json");
+  const data = {
+    visualSweepAvailable: false,
+    reason: "headless renderer not implemented",
+    configuredVisualEnabled: config.visual.enabled,
+    requestedScreenshots: specs.map((s) => s.filename),
+  };
+  writeFileSync(path, JSON.stringify(data, null, 2), "utf-8");
+  return [path];
 }

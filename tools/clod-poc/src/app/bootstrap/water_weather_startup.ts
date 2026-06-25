@@ -9,6 +9,9 @@ import { createWeatherController } from "../../systems/weather_controller.js";
 import type { ClodAppState } from "../clod_app_state.js";
 import { waterUiState } from "../clod_app_state.js";
 
+// State refactor: replace ClodAppState + waterUiState() with WaterSliceState /
+// WeatherSliceState once callers pass slice refs instead of the merged view.
+
 export interface WaterWeatherStartupInput {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;

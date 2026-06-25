@@ -4,9 +4,13 @@ import type { AcceptanceGateResult, AcceptanceConfig, AcceptanceFailure } from "
 
 export interface BuildTimingMetrics {
   fullHierarchyBuildMs: number;
+  fullHierarchyBuildRuns: number;
+  fullHierarchyWarmupRuns: number;
+  fullHierarchyMeasuredRuns: number;
   fullHierarchyBuildMsMin: number;
   fullHierarchyBuildMsP50: number;
   fullHierarchyBuildMsP95: number;
+  singleNodeRebuildMeasured: boolean;
   singleNodeRebuildMsMin: number;
   singleNodeRebuildMsP50: number;
   singleNodeRebuildMsP95: number;
@@ -78,9 +82,13 @@ export function measureBuildTimingsFromStats(stats: BuildStats): BuildTimingMetr
 
   return {
     fullHierarchyBuildMs: totalBuildMs,
+    fullHierarchyBuildRuns: 1,
+    fullHierarchyWarmupRuns: 0,
+    fullHierarchyMeasuredRuns: 1,
     fullHierarchyBuildMsMin: allMs.length > 0 ? Math.min(...allMs) : 0,
     fullHierarchyBuildMsP50: percentile(allMs, 50),
     fullHierarchyBuildMsP95: percentile(allMs, 95),
+    singleNodeRebuildMeasured: false,
     singleNodeRebuildMsMin: fallbackRebuildMs.length > 0 ? Math.min(...fallbackRebuildMs) : 0,
     singleNodeRebuildMsP50: percentile(fallbackRebuildMs, 50),
     singleNodeRebuildMsP95: percentile(fallbackRebuildMs, 95),
@@ -99,6 +107,7 @@ export function runGateA5(
 ): AcceptanceGateResult {
   const thresholds = config.thresholds;
   const failures: AcceptanceFailure[] = [];
+  const requireMeasured = thresholds.requireMeasuredSingleNodeRebuild;
 
   const fullOk = buildMetrics.fullHierarchyBuildMsP50 <= thresholds.fullHierarchyBuildMsMax;
   if (!fullOk) {
@@ -110,20 +119,54 @@ export function runGateA5(
     });
   }
 
-  const singleOk = buildMetrics.singleNodeRebuildMsP95 <= thresholds.singleNodeRebuildMsMax;
-  if (!singleOk) {
-    failures.push({
-      code: "SINGLE_NODE_REBUILD_TOO_SLOW",
-      message: `Single node rebuild p95 ${buildMetrics.singleNodeRebuildMsP95.toFixed(1)}ms exceeds max ${thresholds.singleNodeRebuildMsMax}ms`,
-      value: buildMetrics.singleNodeRebuildMsP95,
-      threshold: thresholds.singleNodeRebuildMsMax,
-    });
+  if (!buildMetrics.singleNodeRebuildMeasured) {
+    if (!failures.some((f) => f.code === "SINGLE_NODE_REBUILD_ESTIMATED")) {
+      failures.push({
+        code: "SINGLE_NODE_REBUILD_ESTIMATED",
+        message: `Single node rebuild times are estimated from per-level averages (p95 ${buildMetrics.singleNodeRebuildMsP95.toFixed(1)}ms). Not directly measured — add isolated node rebuild sampling for accurate metrics.`,
+        value: buildMetrics.singleNodeRebuildMsP95,
+        threshold: thresholds.singleNodeRebuildMsMax,
+      });
+    }
+
+    if (requireMeasured) {
+      failures.push({
+        code: "SINGLE_NODE_REBUILD_NOT_MEASURED",
+        message: "Single node rebuild times are estimated, not measured. Set require_measured_single_node_rebuild to false or implement direct sampling.",
+        value: 0,
+        threshold: 1,
+      });
+    }
+  } else {
+    const singleOk = buildMetrics.singleNodeRebuildMsP95 <= thresholds.singleNodeRebuildMsMax;
+    if (!singleOk) {
+      failures.push({
+        code: "SINGLE_NODE_REBUILD_TOO_SLOW",
+        message: `Single node rebuild p95 ${buildMetrics.singleNodeRebuildMsP95.toFixed(1)}ms exceeds max ${thresholds.singleNodeRebuildMsMax}ms`,
+        value: buildMetrics.singleNodeRebuildMsP95,
+        threshold: thresholds.singleNodeRebuildMsMax,
+      });
+    }
   }
 
-  const status = fullOk && singleOk ? "pass" : "fail";
+  let status: "pass" | "warn" | "fail";
+  if (failures.some((f) => f.code === "FULL_HIERARCHY_BUILD_TOO_SLOW")) {
+    status = "fail";
+  } else if (failures.some((f) => f.code === "SINGLE_NODE_REBUILD_NOT_MEASURED")) {
+    status = "fail";
+  } else if (failures.some((f) => f.code === "SINGLE_NODE_REBUILD_ESTIMATED")) {
+    status = "warn";
+  } else if (failures.some((f) => f.code === "SINGLE_NODE_REBUILD_TOO_SLOW")) {
+    status = "fail";
+  } else {
+    status = "pass";
+  }
+
   const message = status === "pass"
     ? `Full build p50 ${buildMetrics.fullHierarchyBuildMsP50.toFixed(0)}ms, single rebuild p95 ${buildMetrics.singleNodeRebuildMsP95.toFixed(1)}ms`
-    : `Build cost exceeds thresholds`;
+    : status === "warn"
+      ? `Build cost acceptable but single-node data is estimated (${buildMetrics.singleNodeRebuildMsP95.toFixed(1)}ms p95)`
+      : `Build cost exceeds thresholds`;
 
   return {
     id: "A5",
@@ -132,14 +175,19 @@ export function runGateA5(
     message,
     measurements: {
       fullHierarchyBuildMs: buildMetrics.fullHierarchyBuildMs,
+      fullHierarchyBuildRuns: buildMetrics.fullHierarchyBuildRuns,
+      fullHierarchyWarmupRuns: buildMetrics.fullHierarchyWarmupRuns,
+      fullHierarchyMeasuredRuns: buildMetrics.fullHierarchyMeasuredRuns,
       fullHierarchyBuildMsMin: buildMetrics.fullHierarchyBuildMsMin,
       fullHierarchyBuildMsP50: buildMetrics.fullHierarchyBuildMsP50,
       fullHierarchyBuildMsP95: buildMetrics.fullHierarchyBuildMsP95,
+      singleNodeRebuildMeasured: buildMetrics.singleNodeRebuildMeasured,
       singleNodeRebuildMsMin: buildMetrics.singleNodeRebuildMsMin,
       singleNodeRebuildMsP50: buildMetrics.singleNodeRebuildMsP50,
       singleNodeRebuildMsP95: buildMetrics.singleNodeRebuildMsP95,
       fullHierarchyBuildMsMax: thresholds.fullHierarchyBuildMsMax,
       singleNodeRebuildMsMax: thresholds.singleNodeRebuildMsMax,
+      requireMeasuredSingleNodeRebuild: requireMeasured,
     },
     failures,
   };
