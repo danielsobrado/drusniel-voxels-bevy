@@ -34,6 +34,10 @@ export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
     onDepthWrite: (on) => {
       deps.setWaterDepthWrite(on);
     },
+    onOceanEnabled: (enabled) => deps.waterController.setOceanEnabled(enabled),
+    onOceanStartDistance: (distance) => deps.waterController.setOceanStartDistance(distance),
+    onOceanFullDepthDistance: (distance) => deps.waterController.setOceanFullDepthDistance(distance),
+    onOceanMaxDepth: (depth) => deps.waterController.setOceanMaxDepth(depth),
     onRebuildVisual: () => {
       deps.waterController.updateVisual(deps.makeWaterVisual());
     },
