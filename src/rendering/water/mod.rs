@@ -5,6 +5,7 @@ use bevy_water::water::material::{WATER_FRAGMENT_SHADER_HANDLE, WATER_VERTEX_SHA
 use serde::{Deserialize, Serialize};
 
 use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishConfig;
+use crate::terrain::generation::OceanClass;
 use crate::voxel::meshing::WaterBodyKind;
 
 /// Water configuration. Per-body wave/colour/reflection tuning lives in
@@ -100,6 +101,17 @@ impl WaterConfig {
             WaterBodyKind::ShallowFlood => &self.body_presets.shallow_flood,
             WaterBodyKind::Unknown => &self.body_presets.ocean,
         }
+    }
+
+    pub fn world_shape_preset(&self, ocean_class: OceanClass) -> &WaterBodyPresetConfig {
+        self.body_preset(water_body_kind_for_ocean_class(ocean_class))
+    }
+}
+
+pub fn water_body_kind_for_ocean_class(ocean_class: OceanClass) -> WaterBodyKind {
+    match ocean_class {
+        OceanClass::DeepSea | OceanClass::ShelfSea | OceanClass::Coast => WaterBodyKind::Ocean,
+        OceanClass::Beach | OceanClass::Land => WaterBodyKind::Unknown,
     }
 }
 
@@ -218,275 +230,35 @@ fn default_shallow_flood_preset() -> WaterBodyPresetConfig {
     }
 }
 
-#[derive(Deserialize, Clone)]
-pub struct ReflectionConfig {
-    pub enabled: bool,
-    pub resolution_scale: f32,
-    pub disable_shadows: bool,
-    pub max_render_distance: f32,
-    pub distortion_strength: f32,
-    pub update_every_n_frames: u32,
-}
-
-impl Default for ReflectionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            resolution_scale: 0.35,
-            disable_shadows: true,
-            max_render_distance: 150.0,
-            distortion_strength: 0.02,
-            update_every_n_frames: 2,
-        }
-    }
-}
-
-#[derive(Deserialize, Clone)]
-pub struct RefractionConfig {
-    pub enabled: bool,
-    pub strength: f32,
-    pub ior: f32,
-    pub chromatic_aberration: bool,
-}
-
-impl Default for RefractionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            strength: 0.03,
-            ior: 1.33,
-            chromatic_aberration: false,
-        }
-    }
-}
-
-#[derive(Deserialize, Clone)]
-pub struct DisplacementConfig {
-    pub enabled: bool,
-    pub resolution: u32,
-    pub world_size: f32,
-    pub wave_speed: f32,
-    pub damping: f32,
-    pub player_impulse_radius: f32,
-    pub player_impulse_strength: f32,
-}
-
-#[derive(Deserialize, Clone)]
-#[serde(default)]
-pub struct WaterWeatherConfig {
-    pub rain_reflection_boost: f32,
-    pub rain_distortion_boost: f32,
-    pub snow_reflection_soften: f32,
-}
-
-impl Default for WaterWeatherConfig {
-    fn default() -> Self {
-        Self {
-            rain_reflection_boost: 0.12,
-            rain_distortion_boost: 0.35,
-            snow_reflection_soften: 0.18,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn unknown_water_uses_ocean_preset_as_transient_fallback() {
-        let config = WaterConfig::default();
-
+    fn ocean_classes_map_to_ocean_water() {
         assert_eq!(
-            config.body_preset(WaterBodyKind::Unknown).deep_color,
-            config.body_preset(WaterBodyKind::Ocean).deep_color
+            water_body_kind_for_ocean_class(OceanClass::DeepSea),
+            WaterBodyKind::Ocean
         );
         assert_eq!(
-            config.body_preset(WaterBodyKind::Unknown).wave_amplitude,
-            config.body_preset(WaterBodyKind::Ocean).wave_amplitude
+            water_body_kind_for_ocean_class(OceanClass::ShelfSea),
+            WaterBodyKind::Ocean
+        );
+        assert_eq!(
+            water_body_kind_for_ocean_class(OceanClass::Coast),
+            WaterBodyKind::Ocean
+        );
+    }
+
+    #[test]
+    fn dry_classes_do_not_spawn_ocean_water() {
+        assert_eq!(
+            water_body_kind_for_ocean_class(OceanClass::Beach),
+            WaterBodyKind::Unknown
+        );
+        assert_eq!(
+            water_body_kind_for_ocean_class(OceanClass::Land),
+            WaterBodyKind::Unknown
         );
     }
 }
-
-impl Default for DisplacementConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            resolution: 1024,
-            world_size: 128.0,
-            wave_speed: 0.98,
-            damping: 0.995,
-            player_impulse_radius: 1.5,
-            player_impulse_strength: -0.3,
-        }
-    }
-}
-
-pub fn load_water_config() -> Result<WaterConfig, Box<dyn std::error::Error>> {
-    let config_str = std::fs::read_to_string("assets/config/water.yaml")?;
-    let config: WaterConfig = serde_yaml::from_str(&config_str)?;
-    Ok(config)
-}
-
-/// Component marking entities that should receive caustic lighting
-#[derive(Component)]
-pub struct ReceivesCaustics {
-    pub water_surface_y: f32,
-}
-
-/// Component for water volumes
-#[derive(Component)]
-pub struct WaterVolume {
-    pub bounds_min: Vec3,
-    pub bounds_max: Vec3,
-}
-
-// WGSL modules registered via `load_internal_asset!` so other shaders can `#import` them.
-pub const WATER_CAUSTICS_HANDLE: Handle<Shader> =
-    uuid_handle!("c3d4e5f6-a7b8-9012-cdef-012345678901");
-pub const WEATHER_COMMON_HANDLE: Handle<Shader> =
-    uuid_handle!("a42e6f9b-5c81-4a0d-a6f7-6e45e9ef0001");
-pub const NOBLE_GERSTNER_HANDLE: Handle<Shader> =
-    uuid_handle!("e8a0c196-9db0-4db7-a623-3c8f57c20e01");
-pub const NOBLE_FOAM_HANDLE: Handle<Shader> = uuid_handle!("d301db2d-50ef-4f6f-a22e-704278a756d1");
-pub const NOBLE_DETAIL_NORMALS_HANDLE: Handle<Shader> =
-    uuid_handle!("b6e30d80-517f-4e8e-bd35-e4e54f653fa1");
-pub const NOBLE_PARALLAX_HANDLE: Handle<Shader> =
-    uuid_handle!("ad3c6724-8f1d-4643-9504-790f9506700b");
-
-pub struct EnhancedWaterPlugin;
-
-impl Plugin for EnhancedWaterPlugin {
-    fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            WATER_CAUSTICS_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/water_caustics.wgsl"
-            ),
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            WEATHER_COMMON_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/weather_common.wgsl"
-            ),
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            NOBLE_GERSTNER_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/noble_gerstner.wgsl"
-            ),
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            NOBLE_FOAM_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/noble_foam.wgsl"
-            ),
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            NOBLE_DETAIL_NORMALS_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/noble_detail_normals.wgsl"
-            ),
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            NOBLE_PARALLAX_HANDLE,
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/noble_parallax.wgsl"
-            ),
-            Shader::from_wgsl
-        );
-
-        let config = load_water_config().unwrap_or_else(|e| {
-            warn!("Failed to load water config: {}, using defaults", e);
-            WaterConfig::default()
-        });
-
-        let witchcraft_params = config.witchcraft_finish.params();
-        let shader_toggles = config.shader_toggles.with_env_overrides();
-        app.insert_resource(config)
-            .insert_resource(witchcraft_params)
-            .insert_resource(shader_toggles)
-            .add_systems(Startup, sync_water_shader_defs)
-            .add_systems(Update, sync_water_shader_defs);
-    }
-}
-
-fn sync_water_shader_defs(
-    toggles: Res<WaterShaderToggles>,
-    asset_server: Res<AssetServer>,
-    mut shaders: ResMut<Assets<Shader>>,
-    mut last_applied: Local<Option<WaterShaderToggles>>,
-) {
-    let shader_toggles = *toggles;
-    let should_apply = last_applied.is_none_or(|last| last != shader_toggles);
-    let vertex_asset: Handle<Shader> = asset_server.load("shaders/water_vertex.wgsl");
-    let fragment_asset: Handle<Shader> = asset_server.load("shaders/water_fragment.wgsl");
-    let mut all_loaded = true;
-
-    for handle in [
-        &WATER_VERTEX_SHADER_HANDLE,
-        &WATER_FRAGMENT_SHADER_HANDLE,
-        &vertex_asset,
-        &fragment_asset,
-    ] {
-        if let Some(shader) = shaders.get_mut(handle) {
-            if should_apply {
-                set_noble_shader_defs(shader, shader_toggles);
-            }
-        } else {
-            all_loaded = false;
-        }
-    }
-
-    if all_loaded {
-        *last_applied = Some(shader_toggles);
-    }
-}
-
-fn set_noble_shader_defs(shader: &mut Shader, toggles: WaterShaderToggles) {
-    const NOBLE_DEFS: [&str; 4] = [
-        "USE_NOBLE_GERSTNER",
-        "USE_NOBLE_FOAM",
-        "USE_NOBLE_DETAIL_NORMALS",
-        "USE_NOBLE_PARALLAX",
-    ];
-    shader.shader_defs.retain(|def| match def {
-        ShaderDefVal::Bool(name, _) => !NOBLE_DEFS.contains(&name.as_str()),
-        ShaderDefVal::Int(name, _) => !NOBLE_DEFS.contains(&name.as_str()),
-        ShaderDefVal::UInt(name, _) => !NOBLE_DEFS.contains(&name.as_str()),
-    });
-
-    if toggles.gerstner {
-        shader.shader_defs.push("USE_NOBLE_GERSTNER".into());
-    }
-    if toggles.voronoi_foam {
-        shader.shader_defs.push("USE_NOBLE_FOAM".into());
-    }
-    if toggles.detail_normals {
-        shader.shader_defs.push("USE_NOBLE_DETAIL_NORMALS".into());
-    }
-    if toggles.water_parallax {
-        shader.shader_defs.push("USE_NOBLE_PARALLAX".into());
-    }
-}
-pub mod displacement;
-pub mod finish;
-pub mod reflection;
-pub mod reflection_compositor;
