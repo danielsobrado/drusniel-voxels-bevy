@@ -6,10 +6,11 @@ import { composeStoneScatterShader } from "./wgsl_modules.js";
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
 const COUNTER_COUNT = 4;
-const PARAM_BYTES = 16 * 11;
+const PARAM_BYTES = 16 * 12;
 const COUNTER_BYTES = COUNTER_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_CLASS = 5;
 const INDIRECT_BYTES = CLASS_COUNT * INDIRECT_ARGS_PER_CLASS * Uint32Array.BYTES_PER_ELEMENT;
+export const STONE_GPU_RING_MAX_SAFE_GRID = 512;
 // Storage buffers in the bind group: counters, indirect_args, instance_a, instance_b, digEdits.
 // (bindings 0 and 6 are uniforms and don't count against this limit.)
 export const STONE_GPU_SCATTER_STORAGE_BINDINGS = 5;
@@ -24,6 +25,8 @@ export interface StoneGpuScatterBuffers {
 
 export interface StoneGpuScatterParams {
   worldCells: number;
+  centerX: number;
+  centerZ: number;
   settings: StoneSettings;
   indexCounts: [number, number, number];
 }
@@ -178,12 +181,17 @@ export class StoneGpuScatterCompute {
   async run(params: StoneGpuScatterParams): Promise<StoneGpuScatterCounts> {
     const settings = params.settings;
     const maxInstances = Math.max(0, Math.floor(settings.maxInstances));
-    const grid = Math.max(1, Math.ceil(params.worldCells / Math.max(0.1, settings.cellSizeM)));
+    const cellSize = Math.max(0.1, settings.cellSizeM);
+    const ringRadius = Math.max(cellSize, settings.ringRadiusM);
+    const grid = Math.min(
+      STONE_GPU_RING_MAX_SAFE_GRID,
+      Math.max(1, Math.ceil((ringRadius * 2) / cellSize)),
+    );
 
     this.paramF32.fill(0);
     this.paramU32.fill(0);
     this.paramF32[0] = params.worldCells;
-    this.paramF32[1] = Math.max(0.1, settings.cellSizeM);
+    this.paramF32[1] = cellSize;
     this.paramF32[2] = Math.max(0, settings.density);
     this.paramF32[4] = settings.slopeReposeStart;
     this.paramF32[5] = settings.slopeRepose;
@@ -214,6 +222,10 @@ export class StoneGpuScatterCompute {
     this.paramU32[39] = Math.max(0, Math.floor(params.indexCounts[0] ?? 0));
     this.paramU32[40] = Math.max(0, Math.floor(params.indexCounts[1] ?? 0));
     this.paramU32[41] = Math.max(0, Math.floor(params.indexCounts[2] ?? 0));
+    this.paramF32[44] = clampFinite(params.centerX, 0, params.worldCells);
+    this.paramF32[45] = clampFinite(params.centerZ, 0, params.worldCells);
+    this.paramF32[46] = ringRadius;
+    this.paramF32[47] = Math.max(0, settings.ringEdgeFadeM);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
 
     const encoder = this.device.createCommandEncoder({ label: "stone scatter compute encoder" });
@@ -256,6 +268,11 @@ export class StoneGpuScatterCompute {
     pass.dispatchWorkgroups(Math.max(1, workgroups));
     pass.end();
   }
+}
+
+function clampFinite(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
 }
 
 export const STONE_GPU_CLASS_COUNT = CLASS_COUNT;
