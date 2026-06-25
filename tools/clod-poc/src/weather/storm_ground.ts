@@ -48,14 +48,17 @@ const STRIKE_COUNT = 32;
 const STRIKE_AREA = 48;
 const REPOSITION_DISTANCE = 8;
 const SURFACE_OFFSET = 0.09;
+const IMPACT_SURFACE_OFFSET = 0.045;
 const WATER_DEPTH_EPSILON = 0.035;
 const WATER_MASK_EPSILON = 0.05;
 const DEFAULT_SEED = 0x57a4d0c7;
 
 export class StormLightningSystem {
   private readonly group = new THREE.Group();
-  private readonly material: RainWeatherShaderHandle;
-  private readonly mesh: THREE.Mesh;
+  private readonly strikeMaterial: RainWeatherShaderHandle;
+  private readonly impactMaterial: RainWeatherShaderHandle;
+  private readonly strikeMesh: THREE.Mesh;
+  private readonly impactMesh: THREE.Mesh;
   private readonly buffers: StrikeBuffers;
   private readonly samplers: RainWeatherSamplers;
   private readonly worldCells: number;
@@ -70,15 +73,21 @@ export class StormLightningSystem {
     this.group.name = "weather-storm";
     this.group.visible = this.settings.enabled;
 
-    this.material = options.isWebGpu ? createStormNodeMaterial() : createStormShaderMaterial();
+    this.strikeMaterial = options.isWebGpu ? createStormNodeMaterial() : createStormShaderMaterial();
+    this.impactMaterial = options.isWebGpu ? createImpactNodeMaterial() : createImpactShaderMaterial();
     const strikes = createStrikeGeometry(STRIKE_COUNT);
     this.buffers = strikes.buffers;
-    this.mesh = new THREE.Mesh(strikes.geometry, this.material.material);
-    this.mesh.name = "weather-storm-ground-lightning";
-    this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = 96;
+    this.strikeMesh = new THREE.Mesh(strikes.geometry, this.strikeMaterial.material);
+    this.strikeMesh.name = "weather-storm-ground-lightning";
+    this.strikeMesh.frustumCulled = false;
+    this.strikeMesh.renderOrder = 96;
 
-    this.group.add(this.mesh);
+    this.impactMesh = new THREE.Mesh(createImpactGeometry(this.buffers), this.impactMaterial.material);
+    this.impactMesh.name = "weather-storm-surface-impact";
+    this.impactMesh.frustumCulled = false;
+    this.impactMesh.renderOrder = 95;
+
+    this.group.add(this.impactMesh, this.strikeMesh);
     options.scene.add(this.group);
     this.applySettings(this.settings);
   }
@@ -89,14 +98,17 @@ export class StormLightningSystem {
       intensity: THREE.MathUtils.clamp(settings.intensity, 0, 1.6),
     };
     this.group.visible = this.settings.enabled && this.settings.intensity > 0.001;
-    this.material.setIntensity(this.settings.intensity);
+    for (const material of [this.strikeMaterial, this.impactMaterial]) {
+      material.setIntensity(this.settings.intensity);
+    }
   }
 
   update(deltaSeconds: number, elapsedSeconds: number, focus: THREE.Vector3): void {
     void deltaSeconds;
     if (!this.group.visible) return;
 
-    this.material.setTime(elapsedSeconds);
+    this.strikeMaterial.setTime(elapsedSeconds);
+    this.impactMaterial.setTime(elapsedSeconds);
     if (
       !Number.isFinite(this.placementCenter.x) ||
       this.placementCenter.distanceToSquared(focus) > REPOSITION_DISTANCE * REPOSITION_DISTANCE
@@ -112,8 +124,10 @@ export class StormLightningSystem {
 
   dispose(): void {
     this.group.removeFromParent();
-    this.mesh.geometry.dispose();
-    this.material.dispose();
+    this.strikeMesh.geometry.dispose();
+    this.impactMesh.geometry.dispose();
+    this.strikeMaterial.dispose();
+    this.impactMaterial.dispose();
   }
 
   private repositionStrikes(focus: THREE.Vector3): void {
@@ -176,9 +190,11 @@ export class StormLightningSystem {
   }
 
   private markAttributesDirty(): void {
-    for (const key of ["aLightningCenter", "aLightningNormal", "aLightningParams"]) {
-      const attr = this.mesh.geometry.getAttribute(key);
-      if (attr) attr.needsUpdate = true;
+    for (const geometry of [this.strikeMesh.geometry, this.impactMesh.geometry]) {
+      for (const key of ["aLightningCenter", "aLightningNormal", "aLightningParams"]) {
+        const attr = geometry.getAttribute(key);
+        if (attr) attr.needsUpdate = true;
+      }
     }
   }
 }
@@ -219,10 +235,34 @@ function createStrikeGeometry(count: number): { geometry: THREE.InstancedBufferG
     params: new Float32Array(count * 4),
   };
   for (let i = 0; i < count; i++) buffers.normal[i * 3 + 1] = 1;
+  setStrikeAttributes(geometry, buffers);
+  return { geometry, buffers };
+}
+
+function createImpactGeometry(buffers: StrikeBuffers): THREE.InstancedBufferGeometry {
+  const geometry = new THREE.InstancedBufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
+    -1, -1, 0,
+    1, -1, 0,
+    -1, 1, 0,
+    1, 1, 0,
+  ]), 3));
+  geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
+    0, 0,
+    1, 0,
+    0, 1,
+    1, 1,
+  ]), 2));
+  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([0, 1, 2, 2, 1, 3]), 1));
+  geometry.instanceCount = buffers.params.length / 4;
+  setStrikeAttributes(geometry, buffers);
+  return geometry;
+}
+
+function setStrikeAttributes(geometry: THREE.InstancedBufferGeometry, buffers: StrikeBuffers): void {
   geometry.setAttribute("aLightningCenter", new THREE.InstancedBufferAttribute(buffers.center, 3));
   geometry.setAttribute("aLightningNormal", new THREE.InstancedBufferAttribute(buffers.normal, 3));
   geometry.setAttribute("aLightningParams", new THREE.InstancedBufferAttribute(buffers.params, 4));
-  return { geometry, buffers };
 }
 
 const STORM_VERTEX = /* glsl */ `
@@ -324,26 +364,104 @@ void main() {
 }
 `;
 
+const IMPACT_VERTEX = /* glsl */ `
+attribute vec3 aLightningCenter;
+attribute vec3 aLightningNormal;
+attribute vec4 aLightningParams;
+varying vec2 vLocal;
+varying float vSeed;
+varying float vActive;
+
+void main() {
+  vec3 n = normalize(aLightningNormal);
+  vec3 ref = abs(n.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+  vec3 tangent = normalize(cross(ref, n));
+  vec3 bitangent = normalize(cross(n, tangent));
+  float radius = aLightningParams.y * 5.2 + 0.45;
+  vec3 worldPosition = aLightningCenter
+    + (tangent * position.x + bitangent * position.y) * radius
+    + n * ${IMPACT_SURFACE_OFFSET.toFixed(3)};
+
+  vLocal = position.xy;
+  vSeed = aLightningParams.z;
+  vActive = aLightningParams.w;
+  gl_Position = projectionMatrix * viewMatrix * vec4(worldPosition, 1.0);
+}
+`;
+
+const IMPACT_FRAGMENT = /* glsl */ `
+uniform float uTime;
+uniform float uIntensity;
+uniform float uRate;
+uniform float uEmissionPower;
+uniform vec3 uEffectColor;
+uniform vec3 uMainColor;
+varying vec2 vLocal;
+varying float vSeed;
+varying float vActive;
+
+float hash12(vec2 p) {
+  return fract(cos(mod(dot(p, vec2(13.9898, 8.141)), 3.14)) * 43758.5453);
+}
+
+void main() {
+  float r = length(vLocal);
+  if (r > 1.05) discard;
+
+  float stormStrength = clamp(uIntensity / 1.6, 0.0, 1.0);
+  float eventTime = uTime * uRate * mix(1.05, 1.65, stormStrength) + vSeed * 7.0;
+  float localTime = fract(eventTime);
+  float cycle = floor(eventTime);
+  float gate = smoothstep(mix(0.66, 0.28, stormStrength), 0.98, hash12(vec2(cycle, vSeed)));
+  float flashA = 1.0 - smoothstep(0.0, 0.18, localTime);
+  float flashB = (1.0 - smoothstep(0.0, 0.08, abs(localTime - 0.24))) * 0.48;
+  float flash = max(flashA, flashB) * gate * vActive;
+  if (flash < 0.002) discard;
+
+  float ringRadius = mix(0.22, 0.72, smoothstep(0.0, 0.24, localTime));
+  float center = 1.0 - smoothstep(0.0, 0.2, r);
+  float ring = 1.0 - smoothstep(0.025, 0.085, abs(r - ringRadius));
+  float bloom = 1.0 - smoothstep(0.18, 1.0, r);
+  float axis = min(abs(vLocal.x), abs(vLocal.y));
+  float diag = min(abs(vLocal.x + vLocal.y), abs(vLocal.x - vLocal.y)) * 0.72;
+  float spokes = (1.0 - smoothstep(0.018, 0.11, min(axis, diag))) * smoothstep(0.1, 0.55, r) * (1.0 - smoothstep(0.62, 1.0, r));
+
+  float alpha = min((center * 0.92 + ring * 0.74 + bloom * 0.45 + spokes * 0.32) * flash * clamp(uIntensity, 0.0, 1.6), 1.0);
+  if (alpha < 0.003) discard;
+
+  vec3 color = uEffectColor * uMainColor * (center * 2.1 + ring * 1.35 + bloom * 0.92 + spokes * 0.75) * uEmissionPower;
+  gl_FragColor = vec4(color, alpha);
+}
+`;
+
 function createStormShaderMaterial(): RainWeatherShaderHandle {
+  return createCommonShaderMaterial("weather-storm-ground-shader", STORM_VERTEX, STORM_FRAGMENT, 3.2);
+}
+
+function createImpactShaderMaterial(): RainWeatherShaderHandle {
+  return createCommonShaderMaterial("weather-storm-impact-shader", IMPACT_VERTEX, IMPACT_FRAGMENT, 2.7);
+}
+
+function createCommonShaderMaterial(name: string, vertexShader: string, fragmentShader: string, emissionPower: number): RainWeatherShaderHandle {
   const uniforms = {
     uTime: { value: 0 },
     uIntensity: { value: 1 },
     uRate: { value: 0.78 },
-    uEmissionPower: { value: 3.2 },
+    uEmissionPower: { value: emissionPower },
     uEffectColor: { value: new THREE.Color(0.55, 0.62, 1.0) },
     uMainColor: { value: new THREE.Color(1.0, 1.0, 1.0) },
   };
   const material = new THREE.ShaderMaterial({
     uniforms,
-    vertexShader: STORM_VERTEX,
-    fragmentShader: STORM_FRAGMENT,
+    vertexShader,
+    fragmentShader,
     transparent: true,
     depthWrite: false,
     depthTest: true,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
   });
-  material.name = "weather-storm-ground-shader";
+  material.name = name;
   return {
     material,
     setTime: (time) => { uniforms.uTime.value = time; },
@@ -356,6 +474,18 @@ function createStormShaderMaterial(): RainWeatherShaderHandle {
 
 function hash12Node(p: TslNode): TslNode {
   return fract(sin(dot(p, vec2(13.9898, 8.141))).mul(43758.5453));
+}
+
+function flashNode(uTime: TslNode, uRate: TslNode, uIntensity: TslNode, params: TslNode): TslNode {
+  const stormStrength: TslNode = clamp(uIntensity.div(1.6), 0.0, 1.0);
+  const eventTime: TslNode = uTime.mul(uRate).mul(mix(1.05, 1.65, stormStrength)).add(params.z.mul(7.0));
+  const localTime: TslNode = fract(eventTime);
+  const cycle: TslNode = floor(eventTime);
+  const gate: TslNode = smoothstep(mix(0.66, 0.28, stormStrength), 0.98, hash12Node(vec2(cycle, params.z)));
+  return max(
+    float(1).sub(smoothstep(0.0, 0.18, localTime)),
+    float(1).sub(smoothstep(0.0, 0.08, abs(localTime.sub(0.24)))).mul(0.48),
+  ).mul(gate).mul(params.w);
 }
 
 function createStormNodeMaterial(): RainWeatherShaderHandle {
@@ -380,15 +510,7 @@ function createStormNodeMaterial(): RainWeatherShaderHandle {
 
   const fragment = Fn(() => {
     const p: TslNode = uv();
-    const stormStrength: TslNode = clamp(uIntensity.div(1.6), 0.0, 1.0);
-    const eventTime: TslNode = uTime.mul(uRate).mul(mix(1.05, 1.65, stormStrength)).add(aParams.z.mul(7.0));
-    const localTime: TslNode = fract(eventTime);
-    const cycle: TslNode = floor(eventTime);
-    const gate: TslNode = smoothstep(mix(0.66, 0.28, stormStrength), 0.98, hash12Node(vec2(cycle, aParams.z)));
-    const flash: TslNode = max(
-      float(1).sub(smoothstep(0.0, 0.18, localTime)),
-      float(1).sub(smoothstep(0.0, 0.08, abs(localTime.sub(0.24)))).mul(0.48),
-    ).mul(gate).mul(aParams.w);
+    const flash: TslNode = flashNode(uTime, uRate, uIntensity, aParams);
     flash.lessThan(0.002).discard();
 
     const x: TslNode = p.x.mul(2.0).sub(1.0);
@@ -411,6 +533,73 @@ function createStormNodeMaterial(): RainWeatherShaderHandle {
 
   const material = new MeshBasicNodeMaterial();
   material.name = "weather-storm-ground-node";
+  material.positionNode = worldPosition;
+  material.fragmentNode = fragment();
+  material.transparent = true;
+  material.depthWrite = false;
+  material.depthTest = true;
+  material.side = THREE.DoubleSide;
+  material.blending = THREE.AdditiveBlending;
+
+  return {
+    material,
+    setTime: (time) => { uTime.value = time; },
+    setIntensity: (intensity) => { uIntensity.value = intensity; },
+    setCenter: () => undefined,
+    setWind: () => undefined,
+    dispose: () => { material.dispose(); },
+  };
+}
+
+function createImpactNodeMaterial(): RainWeatherShaderHandle {
+  const uTime = uniform(0) as TslNode;
+  const uIntensity = uniform(1) as TslNode;
+  const uRate = uniform(0.78) as TslNode;
+  const uEmissionPower = uniform(2.7) as TslNode;
+  const uEffectColor = uniform(new THREE.Color(0.55, 0.62, 1.0)) as TslNode;
+  const uMainColor = uniform(new THREE.Color(1.0, 1.0, 1.0)) as TslNode;
+
+  const aCenter: TslNode = attribute("aLightningCenter", "vec3");
+  const aNormal: TslNode = attribute("aLightningNormal", "vec3");
+  const aParams: TslNode = attribute("aLightningParams", "vec4");
+  const pos: TslNode = positionGeometry;
+  const n: TslNode = normalize(aNormal);
+  const ref: TslNode = abs(n.y).lessThan(0.95).select(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0));
+  const tangent: TslNode = normalize(cross(ref, n));
+  const bitangent: TslNode = normalize(cross(n, tangent));
+  const radius: TslNode = aParams.y.mul(5.2).add(0.45);
+  const local: TslNode = vec2(pos.x, pos.y);
+  const worldPosition: TslNode = aCenter
+    .add(tangent.mul(pos.x).add(bitangent.mul(pos.y)).mul(radius))
+    .add(n.mul(IMPACT_SURFACE_OFFSET));
+
+  const fragment = Fn(() => {
+    const flash: TslNode = flashNode(uTime, uRate, uIntensity, aParams);
+    flash.lessThan(0.002).discard();
+
+    const r2: TslNode = dot(local, local);
+    r2.greaterThan(1.1025).discard();
+    const eventTime: TslNode = uTime.mul(uRate).add(aParams.z.mul(7.0));
+    const localTime: TslNode = fract(eventTime);
+    const ringRadius2: TslNode = mix(0.048, 0.52, smoothstep(0.0, 0.24, localTime));
+    const center: TslNode = float(1).sub(smoothstep(0.0, 0.04, r2));
+    const ring: TslNode = float(1).sub(smoothstep(0.002, 0.08, abs(r2.sub(ringRadius2))));
+    const bloom: TslNode = float(1).sub(smoothstep(0.03, 1.0, r2));
+    const axis: TslNode = min(abs(local.x), abs(local.y));
+    const diag: TslNode = min(abs(local.x.add(local.y)), abs(local.x.sub(local.y))).mul(0.72);
+    const spokes: TslNode = float(1).sub(smoothstep(0.018, 0.11, min(axis, diag)))
+      .mul(smoothstep(0.01, 0.3, r2))
+      .mul(float(1).sub(smoothstep(0.38, 1.0, r2)));
+    const alpha: TslNode = min(center.mul(0.92).add(ring.mul(0.74)).add(bloom.mul(0.45)).add(spokes.mul(0.32))
+      .mul(flash).mul(clamp(uIntensity, 0.0, 1.6)), 1.0);
+    alpha.lessThan(0.003).discard();
+
+    const brightness: TslNode = center.mul(2.1).add(ring.mul(1.35)).add(bloom.mul(0.92)).add(spokes.mul(0.75));
+    return vec4(uEffectColor.mul(uMainColor).mul(brightness).mul(uEmissionPower), alpha);
+  });
+
+  const material = new MeshBasicNodeMaterial();
+  material.name = "weather-storm-impact-node";
   material.positionNode = worldPosition;
   material.fragmentNode = fragment();
   material.transparent = true;
