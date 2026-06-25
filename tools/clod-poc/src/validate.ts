@@ -125,7 +125,9 @@ export function validateNoDegenerateTriangles(mesh: PageMesh, epsilon: number): 
   }
 }
 
-/** Validate mesh for NaN/Infinity, index bounds, and count consistency. */
+const MATERIAL_WEIGHT_EPSILON = 1e-4;
+
+/** Validate mesh for NaN/Infinity, index bounds, count consistency, and material-weight range/sum. */
 export function validateFinite(mesh: PageMesh, label: string): void {
   if (mesh.indices.length % 3 !== 0) throw new ClodBuildError("DegenerateGeometry", `${label} non-triangle index count`);
   if (mesh.indices.length === 0) throw new ClodBuildError("DegenerateGeometry", `${label} empty mesh after strip`);
@@ -142,14 +144,45 @@ export function validateFinite(mesh: PageMesh, label: string): void {
   for (const v of mesh.normals) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite normal`);
   for (const v of mesh.paintSlots) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite paintSlot`);
   for (const v of mesh.materialWeights) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite materialWeight`);
+  // per-vertex material-weight range [0,1] and sum ≈ 1
+  const ws = mesh.materialWeightStride;
+  for (let i = 0; i < vc; i++) {
+    let sum = 0;
+    for (let j = 0; j < ws; j++) {
+      const w = mesh.materialWeights[i * ws + j];
+      if (w < 0 || w > 1) {
+        throw new ClodBuildError("DegenerateGeometry", `${label} vertex ${i} material weight ${j}=${w.toFixed(4)} outside [0,1]`);
+      }
+      sum += w;
+    }
+    if (Math.abs(sum - 1) > MATERIAL_WEIGHT_EPSILON) {
+      throw new ClodBuildError("DegenerateGeometry", `${label} vertex ${i} material weights sum to ${sum.toFixed(4)}, expected ~1`);
+    }
+  }
 }
 
-/** Full validation suite for a built page mesh. */
-export function validatePageMesh(mesh: PageMesh, footprint: PageFootprint, zeroAreaEpsilon: number, label: string): void {
+/**
+ * Validate a freshly-welded intermediate mesh (after weld, before simplification).
+ * Strips degenerates, then validates count/finite/range and no-zero-area triangles.
+ */
+export function validateWeldedIntermediate(mesh: PageMesh, label: string, zeroAreaEpsilon: number): void {
   stripDegenerateTriangles(mesh, zeroAreaEpsilon);
   validateFinite(mesh, label);
   validateNoDegenerateTriangles(mesh, zeroAreaEpsilon);
+}
+
+/**
+ * Full validation suite for a built/final page mesh (after weld→simplify→polish).
+ * Runs every check including internal-border assertion.
+ */
+export function validateFinalPageMesh(mesh: PageMesh, footprint: PageFootprint, zeroAreaEpsilon: number, label: string): void {
+  validateWeldedIntermediate(mesh, label, zeroAreaEpsilon);
   assertNoInternalBorders(mesh, footprint);
+}
+
+/** @deprecated Use {@link validateFinalPageMesh} or {@link validateWeldedIntermediate}. */
+export function validatePageMesh(mesh: PageMesh, footprint: PageFootprint, zeroAreaEpsilon: number, label: string): void {
+  validateFinalPageMesh(mesh, footprint, zeroAreaEpsilon, label);
 }
 
 export interface BorderChain {
@@ -235,8 +268,12 @@ export function assertBorderMatch(a: BorderChain, b: BorderChain, tolerances?: B
       throw new ClodBuildError("BorderMaterialMismatch", `paint delta ${md.toExponential(2)} at border vertex ${i}`);
     }
     if (a.materialWeights[i] && a.materialWeights[i].length > 0) {
-      const ws = a.materialWeights[i].length;
-      for (let j = 0; j < ws; j++) {
+      const ws_a = a.materialWeights[i].length;
+      const ws_b = b.materialWeights[i] ? b.materialWeights[i].length : 0;
+      if (ws_a !== ws_b) {
+        throw new ClodBuildError("BorderMaterialMismatch", `material weight stride mismatch at vertex ${i}: ${ws_a} vs ${ws_b}`);
+      }
+      for (let j = 0; j < ws_a; j++) {
         const wd = Math.abs(a.materialWeights[i][j] - b.materialWeights[i][j]);
         if (wd > tol.material) {
           throw new ClodBuildError("BorderMaterialMismatch", `material weight channel ${j} delta ${wd.toExponential(2)} at border vertex ${i}`);

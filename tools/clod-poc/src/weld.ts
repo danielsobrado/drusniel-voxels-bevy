@@ -6,7 +6,7 @@
 // fails later with a worse message). Spatial hash, NOT a kd-tree (jglrxavpok perf trap).
 
 import { PageMesh, ClodBuildError, vertexCount, type BorderTolerances } from "./types.js";
-import { ensureMaterialWeights } from "./materialWeights.js";
+import { assertMaterialWeights } from "./materialWeights.js";
 
 export interface WeldReport {
   inputVertices: number;
@@ -44,7 +44,7 @@ export function weldVertices(mesh: PageMesh, epsilon: number, tolerances?: Borde
   const inv = 1 / epsilon;
   const tol = tolerances ?? { position: epsilon, normalDot: 0.9999, material: 1e-4 };
 
-  ensureMaterialWeights(mesh);
+  assertMaterialWeights(mesh, "weldVertices input");
   const ws = mesh.materialWeightStride;
 
   const canonical: WeldKeyMap = new Map(); // quantized xyz -> canonical NEW index

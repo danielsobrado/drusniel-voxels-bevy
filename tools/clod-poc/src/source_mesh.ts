@@ -4,7 +4,7 @@ import { PageMesh, PageFootprint, ClodBuildError } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
 import { meshChunk, WorldBounds } from "./terrain.js";
 import { weldVertices, WeldReport } from "./weld.js";
-import { ensureMaterialWeights } from "./materialWeights.js";
+import { assertMaterialWeights } from "./materialWeights.js";
 
 export interface PageSource {
   mesh: PageMesh;
@@ -31,7 +31,7 @@ export function concat(meshes: PageMesh[]): PageMesh {
   const indices = new Uint32Array(ni);
   let vOff = 0, iOff = 0;
   for (const m of meshes) {
-    ensureMaterialWeights(m);
+    assertMaterialWeights(m, "concat input");
     positions.set(m.positions, vOff * 3);
     normals.set(m.normals, vOff * 3);
     materials.set(m.paintSlots, vOff);

@@ -1,6 +1,6 @@
 import { concat } from "../source_mesh.js";
 import type { ClodPageNode, PageMesh } from "../types.js";
-import { ensureMaterialWeights } from "../materialWeights.js";
+import { assertMaterialWeights } from "../materialWeights.js";
 
 export function mergeChildPageMeshes(children: readonly ClodPageNode[], epsilon: number): PageMesh {
   const ordered = [...children].sort((a, b) =>
@@ -15,7 +15,7 @@ export function mergeChildPageMeshes(children: readonly ClodPageNode[], epsilon:
 
 function weldMergedChildVertices(mesh: PageMesh, epsilon: number): PageMesh {
   const inv = 1 / epsilon;
-  ensureMaterialWeights(mesh);
+  assertMaterialWeights(mesh, "weldMergedChildVertices input");
   const ws = mesh.materialWeightStride;
   const remap = new Uint32Array(mesh.positions.length / 3);
   const canonical = new Map<string, number>();

@@ -1,4 +1,4 @@
-//! Quadtree build orchestration (§3.2 / §11.6). Ported from clod-rs.
+//! Quadtree build orchestration (§3.2 / §11.6). Ported from clod-poc/quadtree.ts.
 //! LOD0 nodes come from welded chunk exports (`source_mesh`); LODk = merge 2x2 children →
 //! weld old internal page borders → lock new outer border → simplify → accumulate error.
 //! Lower LODs are NEVER re-extracted from voxels (I2).
@@ -26,8 +26,29 @@ pub struct ClodPageNode {
 
 pub struct BuildResult {
     pub nodes_by_level: Vec<Vec<ClodPageNode>>,
+    pub world_pages_x: i32,
+    pub world_pages_z: i32,
     pub polish: DiagonalPolishStats,
 }
+
+/// Inclusive world-cell bounds touched by an edit (sphere bbox + influence margin).
+#[derive(Clone, Debug)]
+pub struct DirtyCellBounds {
+    pub min_x: f32,
+    pub max_x: f32,
+    pub min_z: f32,
+    pub max_z: f32,
+}
+
+pub struct EditRebuildResult {
+    /// Total LOD0 pages rebuilt.
+    pub lod0_page_coords: Vec<(i32, i32)>,
+    /// Total parent nodes rebuilt via resimplify.
+    pub parent_node_coords: Vec<(i32, i32)>,
+}
+
+/// Per-level node lookup: level → HashMap<coord, index_into_nodes_by_level[level]>.
+pub type NodeIndex = Vec<HashMap<(i32, i32), usize>>;
 
 fn union(a: PageFootprint, b: PageFootprint) -> PageFootprint {
     PageFootprint {
@@ -38,15 +59,48 @@ fn union(a: PageFootprint, b: PageFootprint) -> PageFootprint {
     }
 }
 
-fn build_parent_node(
+/// Validate world page dimensions and compute the effective number of quadtree levels.
+/// Mirrors `resolveBuildShape` in clod-poc/src/quadtree.ts.
+pub fn resolve_build_shape(
+    world_pages_x: i32,
+    world_pages_z: i32,
+    cfg: &ClodPagesConfig,
+) -> Result<usize, ClodBuildError> {
+    let max_levels = cfg
+        .page
+        .quadtree_levels
+        .min((world_pages_x.min(world_pages_z) as f32).log2().floor() as usize + 1);
+    let required_multiple = 1 << (max_levels - 1);
+    if world_pages_x % required_multiple != 0 || world_pages_z % required_multiple != 0 {
+        return Err(ClodBuildError::PageIncomplete(format!(
+            "world pages {}x{} not a multiple of {} for {} levels",
+            world_pages_x, world_pages_z, required_multiple, max_levels
+        )));
+    }
+    Ok(max_levels)
+}
+
+/// Build a per-level HashMap from node coord to index in `nodes_by_level[level]`.
+pub fn build_node_index(nodes_by_level: &[Vec<ClodPageNode>]) -> NodeIndex {
+    let mut index = Vec::with_capacity(nodes_by_level.len());
+    for (_level, nodes) in nodes_by_level.iter().enumerate() {
+        let mut m = HashMap::new();
+        for (i, n) in nodes.iter().enumerate() {
+            m.insert(n.coord, i);
+        }
+        index.push(m);
+    }
+    index
+}
+
+/// Build a parent node by merging and simplifying its 2×2 children (identified by coord).
+fn build_parent_node_from_children(
     level: usize,
     coord: (i32, i32),
-    child_ids: &[usize],
-    previous_level: &[ClodPageNode],
+    children: &[&ClodPageNode],
     cfg: &ClodPagesConfig,
     weld_epsilon: f32,
 ) -> Result<ClodPageNode, ClodBuildError> {
-    let children: Vec<&ClodPageNode> = child_ids.iter().map(|&i| &previous_level[i]).collect();
     let merged = concat(&children.iter().map(|c| c.mesh.clone()).collect::<Vec<_>>());
     let (welded, _) = weld_vertices(&merged, weld_epsilon)?;
     let footprint = children
@@ -77,6 +131,18 @@ fn build_parent_node(
         low_benefit,
         polish,
     })
+}
+
+fn build_parent_node(
+    level: usize,
+    coord: (i32, i32),
+    child_ids: &[usize],
+    previous_level: &[ClodPageNode],
+    cfg: &ClodPagesConfig,
+    weld_epsilon: f32,
+) -> Result<ClodPageNode, ClodBuildError> {
+    let children: Vec<&ClodPageNode> = child_ids.iter().map(|&i| &previous_level[i]).collect();
+    build_parent_node_from_children(level, coord, &children, cfg, weld_epsilon)
 }
 
 fn build_parent_level(
@@ -134,17 +200,20 @@ pub fn build_quadtree(
     cfg: &ClodPagesConfig,
 ) -> Result<BuildResult, ClodBuildError> {
     let eps = cfg.simplify.weld_epsilon_cells;
+
+    // infer world_pages from the LOD0 coords
+    let world_pages_x = lod0.iter().map(|((px, _), _)| *px).max().unwrap_or(0) + 1;
+    let world_pages_z = lod0.iter().map(|((_, pz), _)| *pz).max().unwrap_or(0) + 1;
+    let max_levels = resolve_build_shape(world_pages_x, world_pages_z, cfg)?;
+
     let mut nodes_by_level: Vec<Vec<ClodPageNode>> = Vec::new();
-    let mut index: Vec<HashMap<(i32, i32), usize>> = Vec::new();
 
     // ---- LOD0 ----
     let mut level0: Vec<ClodPageNode> = Vec::new();
-    let mut idx0: HashMap<(i32, i32), usize> = HashMap::new();
     for (coord, src) in lod0 {
         let mut mesh = src.mesh;
         strip_degenerate_triangles(&mut mesh);
         assert_no_internal_borders(&mesh, &src.footprint)?;
-        idx0.insert(coord, level0.len());
         level0.push(ClodPageNode {
             level: 0,
             coord,
@@ -156,10 +225,9 @@ pub fn build_quadtree(
         });
     }
     nodes_by_level.push(level0);
-    index.push(idx0);
 
     // ---- LOD1+ ----
-    for level in 1..cfg.page.quadtree_levels {
+    for level in 1..max_levels {
         // group previous-level nodes by parent coord
         let mut groups: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
         for (i, n) in nodes_by_level[level - 1].iter().enumerate() {
@@ -167,17 +235,12 @@ pub fn build_quadtree(
             groups.entry(pc).or_default().push(i);
         }
 
-        let mut level_index: HashMap<(i32, i32), usize> = HashMap::new();
         let group_items = groups.into_iter().collect::<Vec<_>>();
         let level_nodes =
             build_parent_level(level, group_items, &nodes_by_level[level - 1], cfg, eps)?;
-        for (i, node) in level_nodes.iter().enumerate() {
-            level_index.insert(node.coord, i);
-        }
 
         let done = level_nodes.len() <= 1;
         nodes_by_level.push(level_nodes);
-        index.push(level_index);
         if done {
             break;
         }
@@ -190,6 +253,103 @@ pub fn build_quadtree(
 
     Ok(BuildResult {
         nodes_by_level,
+        world_pages_x,
+        world_pages_z,
         polish,
+    })
+}
+
+/// Re-derive a single parent from its 2×2 children (identified by coord at level-1).
+/// Mutates the node in `nodes_by_level[level]` in place. Mirrors `resimplifyParent`
+/// in clod-poc/src/quadtree.ts.
+pub fn resimplify_parent(
+    nodes_by_level: &mut [Vec<ClodPageNode>],
+    index: &NodeIndex,
+    level: usize,
+    coord: (i32, i32),
+    cfg: &ClodPagesConfig,
+    weld_epsilon: f32,
+) -> Result<(), ClodBuildError> {
+    let Some(&node_idx) = index.get(level).and_then(|m| m.get(&coord)) else {
+        return Ok(());
+    };
+    let previous = &nodes_by_level[level - 1];
+    let child_coords = [
+        (coord.0 * 2, coord.1 * 2),
+        (coord.0 * 2 + 1, coord.1 * 2),
+        (coord.0 * 2, coord.1 * 2 + 1),
+        (coord.0 * 2 + 1, coord.1 * 2 + 1),
+    ];
+    let children: Vec<&ClodPageNode> = child_coords
+        .iter()
+        .filter_map(|&c| {
+            index
+                .get(level - 1)
+                .and_then(|m| m.get(&c))
+                .map(|&i| &previous[i])
+        })
+        .collect();
+    if children.len() != 4 {
+        return Err(ClodBuildError::PageIncomplete(format!(
+            "resimplify L{level}:({},{}) expected 4 children, got {}",
+            coord.0,
+            coord.1,
+            children.len()
+        )));
+    }
+    let rebuilt =
+        build_parent_node_from_children(level, coord, &children, cfg, weld_epsilon)?;
+    nodes_by_level[level][node_idx] = rebuilt;
+    Ok(())
+}
+
+/// First stage of edit rebuild: regenerate LOD0 nodes for pages whose footprint intersects
+/// `dirty`. Nodes are looked up from the coordinate index. Mirrors `rebuildDirtyLod0Pages`
+/// in clod-poc/src/quadtree.ts.
+pub fn rebuild_dirty_lod0_pages(
+    nodes_by_level: &mut [Vec<ClodPageNode>],
+    index: &NodeIndex,
+    new_sources: &[((i32, i32), PageSource)],
+) -> Vec<(i32, i32)> {
+    let mut coords = Vec::new();
+    for &(coord, ref src) in new_sources {
+        if let Some(&node_idx) = index[0].get(&coord) {
+            let mut mesh = src.mesh.clone();
+            strip_degenerate_triangles(&mut mesh);
+            nodes_by_level[0][node_idx].mesh = mesh;
+            nodes_by_level[0][node_idx].footprint = src.footprint;
+            coords.push(coord);
+        }
+    }
+    coords
+}
+
+/// End-to-end edit rebuild: replace dirty LOD0 pages, then resimplify every ancestor chain.
+/// Mirrors `rebuildDirtyPages` in clod-poc/src/quadtree.ts.
+pub fn rebuild_dirty_pages(
+    nodes_by_level: &mut Vec<Vec<ClodPageNode>>,
+    new_sources: &[((i32, i32), PageSource)],
+    cfg: &ClodPagesConfig,
+    weld_epsilon: f32,
+) -> Result<EditRebuildResult, ClodBuildError> {
+    let index = build_node_index(nodes_by_level);
+    let lod0_coords = rebuild_dirty_lod0_pages(nodes_by_level, &index, new_sources);
+    let mut parent_coords: Vec<(i32, i32)> = Vec::new();
+    let mut dirty_coords = lod0_coords.clone();
+    for level in 1..nodes_by_level.len() {
+        let mut parents = std::collections::HashSet::new();
+        for &(nx, nz) in &dirty_coords {
+            parents.insert((nx.div_euclid(2), nz.div_euclid(2)));
+        }
+        dirty_coords.clear();
+        for &pc in &parents {
+            resimplify_parent(nodes_by_level, &index, level, pc, cfg, weld_epsilon)?;
+            parent_coords.push(pc);
+            dirty_coords.push(pc);
+        }
+    }
+    Ok(EditRebuildResult {
+        lod0_page_coords: lod0_coords,
+        parent_node_coords: parent_coords,
     })
 }

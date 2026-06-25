@@ -26,7 +26,7 @@ export interface RendererStartupInput {
   searchParams: URLSearchParams;
   cfg: ClodPagesConfig;
   worldCells: number;
-  allNodes: ClodPageNode[];
+  lod0Nodes: ClodPageNode[];
   waterConfig: WaterConfig;
   stagedImport: ProjectArchiveContents | null;
   queryGrassPerfScene: boolean;
@@ -56,7 +56,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     searchParams,
     cfg,
     worldCells,
-    allNodes,
+    lod0Nodes,
     waterConfig,
     stagedImport,
     queryGrassPerfScene,
@@ -167,8 +167,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     }
   }
 
-  const colliderPages: TerrainColliderPage[] = allNodes
-    .filter((node) => node.level === 0)
+  const colliderPages: TerrainColliderPage[] = lod0Nodes
     .map((node) => ({
       id: node.id,
       mesh: node.mesh,

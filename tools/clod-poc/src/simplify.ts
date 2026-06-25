@@ -6,7 +6,7 @@
 import { MeshoptSimplifier } from "meshoptimizer";
 import { PageMesh, ClodBuildError, vertexCount } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
-import { ensureMaterialWeights } from "./materialWeights.js";
+import { assertMaterialWeights } from "./materialWeights.js";
 
 let ready = false;
 export async function initSimplifier(): Promise<void> {
@@ -41,7 +41,7 @@ export function simplifyPage(
   if (!ready) throw new ClodBuildError("SimplifierApiUnavailable", "call initSimplifier() first");
 
   const vc = vertexCount(mesh);
-  ensureMaterialWeights(mesh);
+  assertMaterialWeights(mesh, "simplifyPage input");
   const ws = mesh.materialWeightStride;
   const inputIndices = mesh.indices.length;
   const targetRaw = Math.floor(inputIndices * cfg.simplify.target_ratio_per_level);

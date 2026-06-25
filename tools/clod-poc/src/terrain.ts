@@ -397,7 +397,7 @@ export function surfaceNormal(x: number, z: number): [number, number, number] {
   return gradient(x, surfaceHeight(x, z), z);
 }
 
-/** 4 material weights from slope/height — deterministic, so they match across borders. */
+/** 4 material weights from height — deterministic, so they match across borders. ny is reserved for future slope-aware blending. */
 export function terrainWeights(y: number, ny: number): [number, number, number, number] {
   void ny;
   const sand = Math.max(0, 1 - Math.abs(y - WATER_LEVEL) / 6);

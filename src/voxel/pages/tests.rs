@@ -6,8 +6,11 @@
 
 use super::config::ClodPagesConfig;
 use super::lock::build_outer_border_locks;
-use super::quadtree::build_quadtree;
+use super::quadtree::{
+    build_node_index, build_quadtree, rebuild_dirty_pages, resolve_build_shape,
+};
 use super::simplify::simplify_page;
+use super::source_mesh::PageSource;
 use super::synthetic::build_lod0_world;
 use super::types::PageMesh;
 use super::validate::{Axis, assert_border_match, border_chain};
@@ -158,4 +161,84 @@ fn adjacent_pages_share_matching_borders() {
         }
     }
     assert!(checks > 0, "expected adjacent page pairs to check");
+}
+
+#[test]
+fn resolve_build_shape_validates_world_size() {
+    let cfg = ClodPagesConfig::load();
+
+    // 2x2 world → min(4, floor(log2(2)) + 1) = min(4, 2) = 2 levels
+    let levels = resolve_build_shape(2, 2, &cfg).expect("2x2 should be valid");
+    assert_eq!(levels, 2, "2x2 world → 2 levels");
+
+    // 4x4 world → min(4, floor(log2(4)) + 1) = min(4, 3) = 3 levels
+    let levels = resolve_build_shape(4, 4, &cfg).expect("4x4 should be valid");
+    assert_eq!(levels, 3, "4x4 world → 3 levels");
+
+    // 8x8 world → min(4, floor(log2(8)) + 1) = min(4, 4) = 4 levels
+    let levels = resolve_build_shape(8, 8, &cfg).expect("8x8 should be valid");
+    assert_eq!(levels, 4, "8x8 world → 4 levels");
+
+    // non-power-of-two world → error
+    assert!(resolve_build_shape(3, 3, &cfg).is_err(), "3x3 should be rejected");
+    assert!(resolve_build_shape(6, 8, &cfg).is_err(), "6x8 should be rejected");
+    assert!(resolve_build_shape(8, 6, &cfg).is_err(), "8x6 should be rejected");
+}
+
+#[test]
+fn build_node_index_provides_coord_lookup() {
+    let cfg = ClodPagesConfig::load();
+    let lod0 = build_lod0_world(2, 2, &cfg).expect("2x2 source build");
+    let result = build_quadtree(lod0, &cfg).expect("2x2 build");
+    let index = build_node_index(&result.nodes_by_level);
+
+    assert_eq!(index.len(), result.nodes_by_level.len());
+    assert_eq!(index[0].len(), 4, "2x2 → 4 LOD0 nodes");
+    assert!(index[0].contains_key(&(0, 0)));
+    assert!(index[0].contains_key(&(1, 0)));
+    assert!(index[0].contains_key(&(0, 1)));
+    assert!(index[0].contains_key(&(1, 1)));
+    if result.nodes_by_level.len() > 1 {
+        // root at (0,0), level 1
+        assert!(index[1].contains_key(&(0, 0)));
+    }
+}
+
+#[test]
+fn rebuild_dirty_pages_handles_full_rebuild() {
+    let cfg = ClodPagesConfig::load();
+    let lod0 = build_lod0_world(4, 4, &cfg).expect("4x4 source build");
+    let mut result = build_quadtree(lod0, &cfg).expect("4x4 build");
+
+    // rebuild using the same sources — should be a no-op structurally
+    let mut original_sources = Vec::new();
+    for node in &result.nodes_by_level[0] {
+        let src = PageSource {
+            mesh: node.mesh.clone(),
+            footprint: node.footprint,
+            weld: super::weld::WeldReport {
+                input_vertices: node.mesh.vertex_count(),
+                output_vertices: node.mesh.vertex_count(),
+                merged_vertices: 0,
+            },
+        };
+        original_sources.push((node.coord, src));
+    }
+
+    let edit_result = rebuild_dirty_pages(
+        &mut result.nodes_by_level,
+        &original_sources,
+        &cfg,
+        cfg.simplify.weld_epsilon_cells,
+    )
+    .expect("full rebuild should succeed");
+    assert_eq!(
+        edit_result.lod0_page_coords.len(),
+        16,
+        "4x4 → 16 LOD0 pages"
+    );
+    // Verify LOD0 error is still 0
+    for n in &result.nodes_by_level[0] {
+        assert_eq!(n.error_world, 0.0);
+    }
 }

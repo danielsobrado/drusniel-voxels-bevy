@@ -75,7 +75,7 @@ export interface RuntimeSystemsStartupInput {
   controls: OrbitControls;
   state: ClodAppState;
   bindings: ClodRuntimeBindings;
-  allNodes: ClodPageNode[];
+  lod0Nodes: ClodPageNode[];
   worldCells: number;
   grassConfig: ReturnType<typeof parseGrassConfig>;
   stoneConfig: ReturnType<typeof parseStoneConfig>;
@@ -140,7 +140,7 @@ export async function runRuntimeSystemsStartup(
     controls,
     state,
     bindings,
-    allNodes,
+    lod0Nodes,
     worldCells,
     grassConfig,
     stoneConfig,
@@ -178,7 +178,6 @@ export async function runRuntimeSystemsStartup(
   });
 
   const grassStats = { current: null as GrassStats | null };
-  const lod0PageNodes = allNodes.filter((node) => node.level === 0);
   const gpuBackend = isWebGpu ? (app.renderer as import("three/webgpu").WebGPURenderer).backend as unknown as {
     createStorageAttribute(attribute: THREE.BufferAttribute): void;
     createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
@@ -198,7 +197,7 @@ export async function runRuntimeSystemsStartup(
 
   const grassController = createGrassController({
     scene,
-    nodes: lod0PageNodes,
+    nodes: lod0Nodes,
     worldCells,
     grassConfig,
     queryGrassRingGrid,
@@ -250,7 +249,7 @@ export async function runRuntimeSystemsStartup(
   const stoneStats = { current: null as StoneStats | null };
   const stoneController = createStoneController({
     scene,
-    nodes: lod0PageNodes,
+    nodes: lod0Nodes,
     worldCells,
     stoneConfig,
     hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
@@ -276,7 +275,7 @@ export async function runRuntimeSystemsStartup(
   const treeStats = { current: null as TreeStats | null };
   const treeController = createTreeController({
     scene,
-    nodes: lod0PageNodes,
+    nodes: lod0Nodes,
     worldCells,
     treeConfig,
     webgpu: isWebGpu,
@@ -304,7 +303,7 @@ export async function runRuntimeSystemsStartup(
   const understoryStats = { current: null as UnderstoryStats | null };
   const understoryController = createUnderstoryController({
     scene,
-    nodes: lod0PageNodes,
+    nodes: lod0Nodes,
     worldCells,
     understoryConfig,
     webgpu: isWebGpu,
@@ -348,7 +347,7 @@ export async function runRuntimeSystemsStartup(
 
   const waterController = await createWaterController({
     scene,
-    nodes: lod0PageNodes,
+    nodes: lod0Nodes,
     waterConfig,
     worldCells,
     isWebGpu,

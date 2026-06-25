@@ -3,7 +3,7 @@ import { concat } from "../source_mesh.js";
 import { weldVertices } from "../weld.js";
 import { buildOuterBorderLocks } from "../lock.js";
 import { simplifyPage } from "../simplify.js";
-import { stripDegenerateTriangles, validateFinite, validateNoDegenerateTriangles, assertNoInternalBorders } from "../validate.js";
+import { assertNoInternalBorders, stripDegenerateTriangles, validateFinite, validateWeldedIntermediate, validateFinalPageMesh } from "../validate.js";
 import { type LevelStats, type BuildStats } from "./stats.js";
 import { ClodBuildError, type ClodPageNode, type PageFootprint, type PageMesh } from "../types.js";
 
@@ -118,16 +118,11 @@ export function buildTestHierarchy(
           normalDot: cfg.validation.normal_dot_min,
           material: cfg.validation.material_weight_epsilon,
         });
-        stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
-        validateFinite(welded, `L${level}:${nx},${nz} welded`);
-        validateNoDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+        validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
-        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-        validateFinite(sim.mesh, `L${level}:${nx},${nz} after simplify`);
-        validateNoDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-        assertNoInternalBorders(sim.mesh, footprint);
+        validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
         if (errorWorld < Math.max(...children.map((c) => c.errorWorld))) {

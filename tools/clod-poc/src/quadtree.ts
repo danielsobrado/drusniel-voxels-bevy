@@ -15,7 +15,7 @@ import { concat } from "./source_mesh.js";
 import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks, countLocks } from "./lock.js";
 import { simplifyPage } from "./simplify.js";
-import { assertNoInternalBorders, stripDegenerateTriangles, validateFinite, validateNoDegenerateTriangles, validatePageMesh } from "./validate.js";
+import { validateFinalPageMesh, validatePageMesh, validateWeldedIntermediate } from "./validate.js";
 import {
   emptyDiagonalPolishStats,
   polishDiagonals,
@@ -189,19 +189,14 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
               normalDot: cfg.validation.normal_dot_min,
               material: cfg.validation.material_weight_epsilon,
             });
-            stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
-            validateFinite(welded, `L${level}:${nx},${nz} welded`);
-            validateNoDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+            validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
             const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
-        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-        validateNoDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-        validateFinite(sim.mesh, `L${level}:${nx},${nz} after simplify`);
+        validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
         const polishLocks = buildOuterBorderLocks(sim.mesh);
         const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
-        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-        assertNoInternalBorders(sim.mesh, footprint);
+        validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
         const b = boundsOf(sim.mesh);
@@ -331,19 +326,14 @@ export async function buildWorldAsync(
           normalDot: cfg.validation.normal_dot_min,
           material: cfg.validation.material_weight_epsilon,
         });
-        stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
-        validateFinite(welded, `L${level}:${nx},${nz} welded`);
-        validateNoDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+        validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
-        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-        validateNoDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-        validateFinite(sim.mesh, `L${level}:${nx},${nz} after simplify`);
+        validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
         const polishLocks = buildOuterBorderLocks(sim.mesh);
         const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
-        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-        assertNoInternalBorders(sim.mesh, footprint);
+        validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
         const b = boundsOf(sim.mesh);
@@ -508,18 +498,13 @@ export function resimplifyParent(
     normalDot: cfg.validation.normal_dot_min,
     material: cfg.validation.material_weight_epsilon,
   });
-  stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
-  validateFinite(welded, `${node.id} welded`);
-  validateNoDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+  validateWeldedIntermediate(welded, `${node.id} welded`, cfg.validation.zero_area_epsilon);
   const locks = buildOuterBorderLocks(welded);
   const sim = simplifyPage(welded, locks, cfg);
-  stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-  validateFinite(sim.mesh, `${node.id} resimplify`);
-  validateNoDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
+  validateWeldedIntermediate(sim.mesh, `${node.id} resimplify`, cfg.validation.zero_area_epsilon);
   const polishLocks = buildOuterBorderLocks(sim.mesh);
   polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
-  stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
-  assertNoInternalBorders(sim.mesh, node.footprint);
+  validateFinalPageMesh(sim.mesh, node.footprint, cfg.validation.zero_area_epsilon, `${node.id} final`);
   node.mesh = sim.mesh;
   node.bounds = boundsOf(sim.mesh);
   node.errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));

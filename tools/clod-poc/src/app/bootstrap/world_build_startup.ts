@@ -72,6 +72,7 @@ export interface WorldBuildResult {
   WORLD: number;
   worldCells: number;
   worldSizeCells: number;
+  lod0Nodes: ClodPageNode[];
   allNodes: ClodPageNode[];
   maxTerrainLevel: number;
   terrainSummary: ReturnType<typeof buildTerrainSummary>;
@@ -197,10 +198,11 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   buildProgress.hidden = true;
   buildStatus.value = "ready";
   const polishLine = formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish)));
-  const allNodes: ClodPageNode[] = result.nodesByLevel.get(0) ?? [];
+  const lod0Nodes: ClodPageNode[] = result.nodesByLevel.get(0) ?? [];
+  const allNodes: ClodPageNode[] = [...result.nodesByLevel.values()].flat();
   const maxTerrainLevel = Math.max(...result.nodesByLevel.keys());
   const worldSizeCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
-  const terrainSummary = buildTerrainSummary(allNodes, worldSizeCells, 8);
+  const terrainSummary = buildTerrainSummary(lod0Nodes, worldSizeCells, 8);
   publishTerrainSummaryForDiagnostics(terrainSummary);
 
   return {
@@ -218,6 +220,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     WORLD,
     worldCells,
     worldSizeCells,
+    lod0Nodes,
     allNodes,
     maxTerrainLevel,
     terrainSummary,
