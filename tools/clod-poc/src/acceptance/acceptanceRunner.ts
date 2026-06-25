@@ -258,21 +258,24 @@ export async function runAcceptance(
 
   if (lastBuildResult && lastBuildResult.levels) {
     const maxLevel = Math.max(...lastBuildResult.levels.map((l) => l.level));
-    const rebuildMs = lastBuildResult.levels
-      .filter((l) => l.level > 0 && l.level < maxLevel)
-      .flatMap((l) => {
-        const perNodeSamples = Math.max(1, Math.floor(l.nodeCount / 2));
-        return Array(perNodeSamples).fill(l.averageBuildMs);
-      });
-    const fallbackRebuildMs = rebuildMs.length === 0
-      ? lastBuildResult.levels.filter((l) => l.level > 0).flatMap((l) => {
-          const perNodeSamples = Math.max(1, Math.floor(l.nodeCount / 2));
-          return Array(perNodeSamples).fill(l.averageBuildMs);
-        })
-      : rebuildMs;
-    computedTimings.singleNodeRebuildMsMin = fallbackRebuildMs.length > 0 ? Math.min(...fallbackRebuildMs) : 0;
-    computedTimings.singleNodeRebuildMsP50 = percentileFromSamples(fallbackRebuildMs, 50);
-    computedTimings.singleNodeRebuildMsP95 = percentileFromSamples(fallbackRebuildMs, 95);
+    const perNodeSamples: number[] = [];
+    for (const l of lastBuildResult.levels) {
+      if (l.level === 0 || l.level >= maxLevel) continue;
+      if (l.perNodeBuildMs && l.perNodeBuildMs.length > 0) {
+        perNodeSamples.push(...l.perNodeBuildMs);
+      } else {
+        const synthetic = Array(Math.max(1, Math.floor(l.nodeCount / 2))).fill(l.averageBuildMs) as number[];
+        perNodeSamples.push(...synthetic);
+      }
+    }
+    if (perNodeSamples.length > 0) {
+      computedTimings.singleNodeRebuildMeasured = lastBuildResult.levels.some(
+        (l) => l.perNodeBuildMs && l.perNodeBuildMs.length > 0,
+      );
+      computedTimings.singleNodeRebuildMsMin = Math.min(...perNodeSamples);
+      computedTimings.singleNodeRebuildMsP50 = percentileFromSamples(perNodeSamples, 50);
+      computedTimings.singleNodeRebuildMsP95 = percentileFromSamples(perNodeSamples, 95);
+    }
   }
 
   const a5Result = runGateA5(new Map(), config, computedTimings, activeFixtures[0].name);
@@ -297,7 +300,7 @@ export async function runAcceptance(
     fullHierarchyBuildMsP50: computedTimings.fullHierarchyBuildMsP50,
     fullHierarchyBuildMsP95: computedTimings.fullHierarchyBuildMsP95,
     fullHierarchyBuildRuns: computedTimings.fullHierarchyBuildRuns,
-    singleNodeRebuildMeasured: false,
+    singleNodeRebuildMeasured: computedTimings.singleNodeRebuildMeasured,
     singleNodeRebuildMsMin: computedTimings.singleNodeRebuildMsMin,
     singleNodeRebuildMsP50: computedTimings.singleNodeRebuildMsP50,
     singleNodeRebuildMsP95: computedTimings.singleNodeRebuildMsP95,
@@ -337,7 +340,7 @@ export async function runAcceptance(
     fullHierarchyBuildMsMin: computedTimings.fullHierarchyBuildMsMin,
     fullHierarchyBuildMsP50: computedTimings.fullHierarchyBuildMsP50,
     fullHierarchyBuildMsP95: computedTimings.fullHierarchyBuildMsP95,
-    singleNodeRebuildMeasured: false,
+    singleNodeRebuildMeasured: computedTimings.singleNodeRebuildMeasured,
     singleNodeRebuildMsMin: computedTimings.singleNodeRebuildMsMin,
     singleNodeRebuildMsP50: computedTimings.singleNodeRebuildMsP50,
     singleNodeRebuildMsP95: computedTimings.singleNodeRebuildMsP95,

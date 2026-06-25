@@ -1,0 +1,26 @@
+# Fixed prop instance placements for PoC bench scenes. Procedural scatter is out of scope
+# until the asset loader and spatial grid are stable.
+schema_version: 1
+scene_id: poc_smoke_500
+
+instances:
+  - asset_id: crate_a
+    position: [12.0, 0.0, 18.0]
+    rotation_y: 0.35
+    scale: 1.0
+    seed: 101
+    variation_id: 0
+
+  - asset_id: rock_large_01
+    position: [-24.0, 0.0, 40.0]
+    rotation_y: 1.1
+    scale: 1.2
+    seed: 202
+    variation_id: 1
+
+  - asset_id: stone_ruin_wall
+    position: [64.0, 0.0, -32.0]
+    rotation_y: -0.4
+    scale: 1.0
+    seed: 303
+    variation_id: 0

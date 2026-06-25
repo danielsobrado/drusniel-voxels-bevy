@@ -3,7 +3,7 @@ import type { ClodHooks } from "../core/hooks.js";
 import { computeEffectiveVisibleMeters, computeVisibleTargetMet } from "../phase0/phase0_metrics.js";
 import type { Phase0Config } from "../phase0/phase0_config.js";
 import { simulateStreamingCoverage } from "../phase0/streaming_coverage_sim.js";
-import type { ClodSelectionStats } from "../terrain_runtime/clod_selection_controller.js";
+import type { ClodSelectionStats } from "../terrain/selection/clod_selection_controller.js";
 import type { GrassStats } from "../grass.js";
 import type { TreeStats } from "../trees/index.js";
 import type { StoneStats } from "../stones/stone_instances.js";

@@ -1,6 +1,6 @@
 import type { ClodPagesConfig } from "../../config.js";
 import type { ProjectArchiveContents } from "../../project_archive.js";
-import { type TerrainTextureLoadOptions } from "../../terrain_runtime/texture_loader.js";
+import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_loader.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import { createClodAppState, type ClodAppState } from "../clod_app_state.js";
 import { parseWeatherQueryContext, type BootstrapQueryContext } from "./query_context.js";

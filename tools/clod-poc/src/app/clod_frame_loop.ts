@@ -77,6 +77,10 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     const selectionStats = terrain.selectionController.stats();
     player.playerInputController.playerTimer.update();
     const playerDelta = Math.min(player.playerInputController.playerTimer.getDelta(), 0.1);
+    if (vegetation.propController) {
+      const p = player.player.position;
+      vegetation.propController.syncColliders([p.x, p.y, p.z]);
+    }
     elapsedSeconds += playerDelta;
     updateAverageFps();
     player.playerInputController.updateFrame(playerDelta);
@@ -128,6 +132,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       forestLightingController: vegetation.forestLightingController,
       applyForestLightingToPropMaterials: vegetation.applyForestLightingToPropMaterials,
       stoneController: vegetation.stoneController,
+      propController: vegetation.propController,
       waterController: waterWeather.waterController,
       weatherController: waterWeather.weatherController,
       updateWeatherStats: waterWeather.updateWeatherStats,

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import type { TerrainMaterialHandle } from "../../rendering/terrain_material.js";
-import { computeGeometryNormals } from "../../terrain_runtime/page_geometry.js";
+import { computeGeometryNormals } from "../../terrain/geometry/page_geometry.js";
 
 export interface NodeView {
   node: ClodPageNode;

@@ -1,6 +1,6 @@
 import type GUI from "lil-gui";
 import { addWaterDebugFolder, WATER_DEBUG_MODES, type WaterDebugState } from "../../water/index.js";
-import type { WaterController } from "../../systems/water_controller.js";
+import type { WaterController } from "../../runtime/water_weather/water_controller.js";
 
 export interface WaterGuiDeps {
   waterController: WaterController;

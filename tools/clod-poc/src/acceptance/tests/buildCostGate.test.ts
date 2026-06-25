@@ -115,6 +115,31 @@ describe("runGateA5", () => {
     expect(result.measurements.singleNodeRebuildMeasured).toBe(false);
   });
 
+  it("passes when singleNodeRebuild is measured and within threshold", () => {
+    const config = makeConfig();
+    const metrics = {
+      fullHierarchyBuildMs: 1000,
+      fullHierarchyBuildRuns: 8,
+      fullHierarchyWarmupRuns: 3,
+      fullHierarchyMeasuredRuns: 5,
+      fullHierarchyBuildMsMin: 900,
+      fullHierarchyBuildMsP50: 1000,
+      fullHierarchyBuildMsP95: 1100,
+      singleNodeRebuildMeasured: true,
+      singleNodeRebuildMsMin: 10,
+      singleNodeRebuildMsP50: 30,
+      singleNodeRebuildMsP95: 55,
+      weldMsP95: 0,
+      simplifyMsP95: 0,
+      validationMsP95: 0,
+      slowestNodes: [],
+    };
+
+    const result = runGateA5(new Map(), config, metrics, "test");
+    expect(result.status).toBe("pass");
+    expect(result.measurements.singleNodeRebuildMeasured).toBe(true);
+  });
+
   it("fails when full build exceeds threshold", () => {
     const config = makeConfig();
     const metrics = {

@@ -3,7 +3,7 @@ import {
   TEXTURE_BLEND_MODES,
   type ProceduralDebugMode,
   type TerrainMaterialSource,
-} from "../../terrain_runtime/terrain_material_constants.js";
+} from "../../terrain/material/terrain_material_constants.js";
 import type { TextureBlendMode } from "../../project_archive.js";
 import { DEFAULT_TERRAIN_COLOR_ADJUSTMENTS } from "../../material.js";
 import { assignArchiveFields } from "./archive_fields.js";

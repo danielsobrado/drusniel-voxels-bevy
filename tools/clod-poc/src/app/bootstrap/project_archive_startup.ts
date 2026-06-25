@@ -1,7 +1,7 @@
 import { createProjectArchiveController } from "../../project/project_archive_controller.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
 import type { InfoPanelController } from "./info_panel_startup.js";
-import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
+import type { TerrainEditStartupResult } from "./ui/terrain_edit_startup.js";
 import type { UiStartupContext } from "./ui_startup_context.js";
 
 export function runProjectArchiveStartup(

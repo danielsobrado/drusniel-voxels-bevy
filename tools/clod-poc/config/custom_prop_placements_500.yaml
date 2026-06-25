@@ -1,0 +1,4503 @@
+schema_version: 1
+scene_id: poc_bench_500
+instances:
+  - asset_id: crate_a
+    position:
+      - 294
+      - 0
+      - 124.8
+    rotation_y: 0.62
+    scale: 1
+    seed: 9500
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 681.5
+      - 0
+      - 618.1
+    rotation_y: 0.98
+    scale: 1.1
+    seed: 9501
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 330.5
+      - 0
+      - 1065.9
+    rotation_y: 2.34
+    scale: 1
+    seed: 9502
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 338.8
+      - 0
+      - -803.4
+    rotation_y: 1
+    scale: 1
+    seed: 9503
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -855.3
+      - 0
+      - -83.5
+    rotation_y: 1.67
+    scale: 1.1
+    seed: 9504
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -298.6
+      - 0
+      - 225.5
+    rotation_y: 2.61
+    scale: 1
+    seed: 9505
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -168.5
+      - 0
+      - -27.1
+    rotation_y: 4.56
+    scale: 1
+    seed: 9506
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -922
+      - 0
+      - 882.7
+    rotation_y: 5.27
+    scale: 1.1
+    seed: 9507
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -268.4
+      - 0
+      - 419.4
+    rotation_y: 4.28
+    scale: 1
+    seed: 9508
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 126.8
+      - 0
+      - -478.3
+    rotation_y: 2.7
+    scale: 1
+    seed: 9509
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -219.5
+      - 0
+      - 469.3
+    rotation_y: 2.64
+    scale: 1.1
+    seed: 9510
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -84.5
+      - 0
+      - -865.6
+    rotation_y: 6.16
+    scale: 1
+    seed: 9511
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 208.9
+      - 0
+      - -1049.9
+    rotation_y: 0.07
+    scale: 1
+    seed: 9512
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 546
+      - 0
+      - -631.1
+    rotation_y: 0.47
+    scale: 1.1
+    seed: 9513
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -50.5
+      - 0
+      - 533.9
+    rotation_y: 1.27
+    scale: 1
+    seed: 9514
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 242.7
+      - 0
+      - -652.7
+    rotation_y: 1.18
+    scale: 1
+    seed: 9515
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 487.8
+      - 0
+      - -480.5
+    rotation_y: 3.72
+    scale: 1.1
+    seed: 9516
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 118.2
+      - 0
+      - 789.1
+    rotation_y: 1.35
+    scale: 1
+    seed: 9517
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 717.4
+      - 0
+      - 243.1
+    rotation_y: 0.78
+    scale: 1
+    seed: 9518
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -753.6
+      - 0
+      - -897.2
+    rotation_y: 5.27
+    scale: 1.1
+    seed: 9519
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 1049.9
+      - 0
+      - 50.8
+    rotation_y: 1.13
+    scale: 1
+    seed: 9520
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 723.1
+      - 0
+      - -1009.8
+    rotation_y: 5.53
+    scale: 1
+    seed: 9521
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 224.7
+      - 0
+      - -482.3
+    rotation_y: 6.02
+    scale: 1.1
+    seed: 9522
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -414.6
+      - 0
+      - 905.1
+    rotation_y: 3.18
+    scale: 1
+    seed: 9523
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 632.5
+      - 0
+      - 479
+    rotation_y: 1.71
+    scale: 1
+    seed: 9524
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 371.9
+      - 0
+      - 256.9
+    rotation_y: 3.2
+    scale: 1.1
+    seed: 9525
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -185.1
+      - 0
+      - 844.6
+    rotation_y: 6.04
+    scale: 1
+    seed: 9526
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -299.9
+      - 0
+      - 580.7
+    rotation_y: 2.11
+    scale: 1
+    seed: 9527
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 484.4
+      - 0
+      - -321.2
+    rotation_y: 6.08
+    scale: 1.1
+    seed: 9528
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -324.7
+      - 0
+      - 337
+    rotation_y: 2.78
+    scale: 1
+    seed: 9529
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -1028.6
+      - 0
+      - -609
+    rotation_y: 3.24
+    scale: 1
+    seed: 9530
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -818.9
+      - 0
+      - 1101.8
+    rotation_y: 4.9
+    scale: 1.1
+    seed: 9531
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -898.3
+      - 0
+      - -604.8
+    rotation_y: 5.5
+    scale: 1
+    seed: 9532
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 1084.5
+      - 0
+      - 892.3
+    rotation_y: 3.92
+    scale: 1
+    seed: 9533
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -833.3
+      - 0
+      - 48.6
+    rotation_y: 0.64
+    scale: 1.1
+    seed: 9534
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 303.4
+      - 0
+      - 534.9
+    rotation_y: 5.42
+    scale: 1
+    seed: 9535
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -517.5
+      - 0
+      - 205
+    rotation_y: 5.86
+    scale: 1
+    seed: 9536
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 267.3
+      - 0
+      - -97.7
+    rotation_y: 2.16
+    scale: 1.1
+    seed: 9537
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -495.4
+      - 0
+      - 889.8
+    rotation_y: 2.79
+    scale: 1
+    seed: 9538
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 271
+      - 0
+      - 716
+    rotation_y: 5.08
+    scale: 1
+    seed: 9539
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -1008.9
+      - 0
+      - 1035.3
+    rotation_y: 2.52
+    scale: 1.1
+    seed: 9540
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -493.9
+      - 0
+      - -1058.6
+    rotation_y: 4.2
+    scale: 1
+    seed: 9541
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 610.5
+      - 0
+      - 748.8
+    rotation_y: 2.9
+    scale: 1
+    seed: 9542
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -195.2
+      - 0
+      - 630.3
+    rotation_y: 0.68
+    scale: 1.1
+    seed: 9543
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -115.4
+      - 0
+      - 480.7
+    rotation_y: 5.02
+    scale: 1
+    seed: 9544
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -157.3
+      - 0
+      - -953
+    rotation_y: 1.12
+    scale: 1
+    seed: 9545
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -712.8
+      - 0
+      - -516.7
+    rotation_y: 4.72
+    scale: 1.1
+    seed: 9546
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 82
+      - 0
+      - -79.7
+    rotation_y: 4.8
+    scale: 1
+    seed: 9547
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -477.2
+      - 0
+      - -156.1
+    rotation_y: 1.59
+    scale: 1
+    seed: 9548
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 464.6
+      - 0
+      - 1025.5
+    rotation_y: 0.64
+    scale: 1.1
+    seed: 9549
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -67.6
+      - 0
+      - -484.8
+    rotation_y: 6.18
+    scale: 1
+    seed: 9550
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 837.4
+      - 0
+      - -439
+    rotation_y: 5.71
+    scale: 1
+    seed: 9551
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 526.4
+      - 0
+      - 796.3
+    rotation_y: 3.9
+    scale: 1.1
+    seed: 9552
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 1046.8
+      - 0
+      - -169.5
+    rotation_y: 2.83
+    scale: 1
+    seed: 9553
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -703.6
+      - 0
+      - 384.1
+    rotation_y: 1.95
+    scale: 1
+    seed: 9554
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -24.5
+      - 0
+      - -827.3
+    rotation_y: 0.82
+    scale: 1.1
+    seed: 9555
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 790.5
+      - 0
+      - -1019.5
+    rotation_y: 4.69
+    scale: 1
+    seed: 9556
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 852
+      - 0
+      - 797
+    rotation_y: 4.72
+    scale: 1
+    seed: 9557
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 731
+      - 0
+      - -1035.7
+    rotation_y: 5.82
+    scale: 1.1
+    seed: 9558
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 14.6
+      - 0
+      - 372.5
+    rotation_y: 5.65
+    scale: 1
+    seed: 9559
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 683.5
+      - 0
+      - 1047
+    rotation_y: 2.28
+    scale: 1
+    seed: 9560
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 1078.1
+      - 0
+      - 1042.9
+    rotation_y: 2.69
+    scale: 1.1
+    seed: 9561
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -533.2
+      - 0
+      - -474.5
+    rotation_y: 5.64
+    scale: 1
+    seed: 9562
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -715.2
+      - 0
+      - 203.7
+    rotation_y: 5.24
+    scale: 1
+    seed: 9563
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 954.3
+      - 0
+      - -1067.3
+    rotation_y: 2.64
+    scale: 1.1
+    seed: 9564
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -621.4
+      - 0
+      - -540.3
+    rotation_y: 5.4
+    scale: 1
+    seed: 9565
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 266.3
+      - 0
+      - 691.1
+    rotation_y: 4.82
+    scale: 1
+    seed: 9566
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 691.1
+      - 0
+      - 935
+    rotation_y: 2.72
+    scale: 1.1
+    seed: 9567
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 629.7
+      - 0
+      - -1089
+    rotation_y: 2.88
+    scale: 1
+    seed: 9568
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -756.7
+      - 0
+      - 220.4
+    rotation_y: 3.58
+    scale: 1
+    seed: 9569
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 432.1
+      - 0
+      - -200.2
+    rotation_y: 0.87
+    scale: 1.1
+    seed: 9570
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 977.1
+      - 0
+      - -441.1
+    rotation_y: 5.03
+    scale: 1
+    seed: 9571
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -134.8
+      - 0
+      - -617.3
+    rotation_y: 1.3
+    scale: 1
+    seed: 9572
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 392.4
+      - 0
+      - -761.6
+    rotation_y: 1.57
+    scale: 1.1
+    seed: 9573
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -168.1
+      - 0
+      - -137.4
+    rotation_y: 0.22
+    scale: 1
+    seed: 9574
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -643.4
+      - 0
+      - -505.7
+    rotation_y: 5.53
+    scale: 1
+    seed: 9575
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 251.9
+      - 0
+      - 45.7
+    rotation_y: 5.42
+    scale: 1.1
+    seed: 9576
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -862.8
+      - 0
+      - -421.2
+    rotation_y: 4.63
+    scale: 1
+    seed: 9577
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 331
+      - 0
+      - 2.2
+    rotation_y: 5.04
+    scale: 1
+    seed: 9578
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -106.6
+      - 0
+      - 334.2
+    rotation_y: 5.22
+    scale: 1.1
+    seed: 9579
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 500.7
+      - 0
+      - -346.1
+    rotation_y: 6.07
+    scale: 1
+    seed: 9580
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 619.9
+      - 0
+      - -246.1
+    rotation_y: 2.78
+    scale: 1
+    seed: 9581
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -280.2
+      - 0
+      - -990.4
+    rotation_y: 2.92
+    scale: 1.1
+    seed: 9582
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 70.7
+      - 0
+      - 886.4
+    rotation_y: 1.93
+    scale: 1
+    seed: 9583
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -644.3
+      - 0
+      - -799
+    rotation_y: 4.27
+    scale: 1
+    seed: 9584
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 897.9
+      - 0
+      - -3.5
+    rotation_y: 5.27
+    scale: 1.1
+    seed: 9585
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -5.3
+      - 0
+      - -79.1
+    rotation_y: 2.68
+    scale: 1
+    seed: 9586
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -704.8
+      - 0
+      - -582.8
+    rotation_y: 1.93
+    scale: 1
+    seed: 9587
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 171.3
+      - 0
+      - 354.9
+    rotation_y: 0.3
+    scale: 1.1
+    seed: 9588
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 743.2
+      - 0
+      - -310.4
+    rotation_y: 3.25
+    scale: 1
+    seed: 9589
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 160.7
+      - 0
+      - 368.5
+    rotation_y: 2.15
+    scale: 1
+    seed: 9590
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -576.3
+      - 0
+      - -99.7
+    rotation_y: 2.76
+    scale: 1.1
+    seed: 9591
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -250.3
+      - 0
+      - -215.6
+    rotation_y: 1.88
+    scale: 1
+    seed: 9592
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 14.4
+      - 0
+      - 878
+    rotation_y: 5.79
+    scale: 1
+    seed: 9593
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 629.5
+      - 0
+      - 184.8
+    rotation_y: 0.07
+    scale: 1.1
+    seed: 9594
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -933.2
+      - 0
+      - 151.8
+    rotation_y: 5.29
+    scale: 1
+    seed: 9595
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 708.7
+      - 0
+      - -835.6
+    rotation_y: 2.18
+    scale: 1
+    seed: 9596
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -679.8
+      - 0
+      - 804.9
+    rotation_y: 4.01
+    scale: 1.1
+    seed: 9597
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 35
+      - 0
+      - 100.9
+    rotation_y: 5.52
+    scale: 1
+    seed: 9598
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 1047.1
+      - 0
+      - 501.4
+    rotation_y: 3.75
+    scale: 1
+    seed: 9599
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -39.8
+      - 0
+      - 1062.2
+    rotation_y: 1.11
+    scale: 1.1
+    seed: 9600
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 1076.8
+      - 0
+      - 614.3
+    rotation_y: 1.65
+    scale: 1
+    seed: 9601
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 182.5
+      - 0
+      - -922.1
+    rotation_y: 4.95
+    scale: 1
+    seed: 9602
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 260.8
+      - 0
+      - 920.6
+    rotation_y: 1.44
+    scale: 1.1
+    seed: 9603
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -1053.5
+      - 0
+      - 1016.9
+    rotation_y: 5.65
+    scale: 1
+    seed: 9604
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -487.7
+      - 0
+      - 591.4
+    rotation_y: 3.39
+    scale: 1
+    seed: 9605
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -9.6
+      - 0
+      - 687.7
+    rotation_y: 2.43
+    scale: 1.1
+    seed: 9606
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 661.9
+      - 0
+      - -233.3
+    rotation_y: 2.63
+    scale: 1
+    seed: 9607
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 567.7
+      - 0
+      - 950.2
+    rotation_y: 0.67
+    scale: 1
+    seed: 9608
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 223.2
+      - 0
+      - 425
+    rotation_y: 4.79
+    scale: 1.1
+    seed: 9609
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 251.7
+      - 0
+      - -960.9
+    rotation_y: 0.36
+    scale: 1
+    seed: 9610
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 628.2
+      - 0
+      - -165.7
+    rotation_y: 4.59
+    scale: 1
+    seed: 9611
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -219.7
+      - 0
+      - -681.4
+    rotation_y: 0.56
+    scale: 1.1
+    seed: 9612
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 336.6
+      - 0
+      - 1036.7
+    rotation_y: 0.82
+    scale: 1
+    seed: 9613
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -205.5
+      - 0
+      - -846.1
+    rotation_y: 1.37
+    scale: 1
+    seed: 9614
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -668.7
+      - 0
+      - 723.7
+    rotation_y: 5.55
+    scale: 1.1
+    seed: 9615
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 850.6
+      - 0
+      - 1103
+    rotation_y: 3.12
+    scale: 1
+    seed: 9616
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 780.5
+      - 0
+      - 942.1
+    rotation_y: 3.72
+    scale: 1
+    seed: 9617
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -1039.5
+      - 0
+      - 332.5
+    rotation_y: 5.03
+    scale: 1.1
+    seed: 9618
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -814.2
+      - 0
+      - 227.6
+    rotation_y: 2.1
+    scale: 1
+    seed: 9619
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -892.7
+      - 0
+      - 663.3
+    rotation_y: 5.72
+    scale: 1
+    seed: 9620
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -385
+      - 0
+      - -280.2
+    rotation_y: 5.48
+    scale: 1.1
+    seed: 9621
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -22.1
+      - 0
+      - -428.9
+    rotation_y: 2.42
+    scale: 1
+    seed: 9622
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 608.6
+      - 0
+      - -623.5
+    rotation_y: 2.68
+    scale: 1
+    seed: 9623
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 615.2
+      - 0
+      - 649.2
+    rotation_y: 1.28
+    scale: 1.1
+    seed: 9624
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 509.9
+      - 0
+      - -920.2
+    rotation_y: 3.59
+    scale: 1
+    seed: 9625
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -748.4
+      - 0
+      - -1077.2
+    rotation_y: 2.47
+    scale: 1
+    seed: 9626
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -778
+      - 0
+      - -149.2
+    rotation_y: 4.92
+    scale: 1.1
+    seed: 9627
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 515.3
+      - 0
+      - -404.2
+    rotation_y: 4.14
+    scale: 1
+    seed: 9628
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 238.2
+      - 0
+      - -953.4
+    rotation_y: 0.61
+    scale: 1
+    seed: 9629
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -1058.7
+      - 0
+      - -47.1
+    rotation_y: 5.4
+    scale: 1.1
+    seed: 9630
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -151.2
+      - 0
+      - 102.2
+    rotation_y: 2.46
+    scale: 1
+    seed: 9631
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -914.5
+      - 0
+      - -919.1
+    rotation_y: 1.32
+    scale: 1
+    seed: 9632
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 219.7
+      - 0
+      - 768.7
+    rotation_y: 3.77
+    scale: 1.1
+    seed: 9633
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -761.8
+      - 0
+      - 650.8
+    rotation_y: 0.02
+    scale: 1
+    seed: 9634
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 358.1
+      - 0
+      - -932
+    rotation_y: 1.37
+    scale: 1
+    seed: 9635
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -113.1
+      - 0
+      - 253.3
+    rotation_y: 0.43
+    scale: 1.1
+    seed: 9636
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 626.2
+      - 0
+      - 1038.9
+    rotation_y: 1.01
+    scale: 1
+    seed: 9637
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 232.9
+      - 0
+      - -541.2
+    rotation_y: 4.68
+    scale: 1
+    seed: 9638
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -415.2
+      - 0
+      - -786.7
+    rotation_y: 5
+    scale: 1.1
+    seed: 9639
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 1102.6
+      - 0
+      - -950
+    rotation_y: 2.11
+    scale: 1
+    seed: 9640
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 452.8
+      - 0
+      - 62.6
+    rotation_y: 1.24
+    scale: 1
+    seed: 9641
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 247.1
+      - 0
+      - -657.7
+    rotation_y: 3.4
+    scale: 1.1
+    seed: 9642
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 961.8
+      - 0
+      - -359.6
+    rotation_y: 5.69
+    scale: 1
+    seed: 9643
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 735.6
+      - 0
+      - -245.6
+    rotation_y: 3.92
+    scale: 1
+    seed: 9644
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 475.9
+      - 0
+      - 767.6
+    rotation_y: 2
+    scale: 1.1
+    seed: 9645
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 835.2
+      - 0
+      - -110
+    rotation_y: 4.82
+    scale: 1
+    seed: 9646
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -508
+      - 0
+      - 1066
+    rotation_y: 5.09
+    scale: 1
+    seed: 9647
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -429.4
+      - 0
+      - 547.3
+    rotation_y: 2.78
+    scale: 1.1
+    seed: 9648
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -772.4
+      - 0
+      - 994.8
+    rotation_y: 2.46
+    scale: 1
+    seed: 9649
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 501.3
+      - 0
+      - 199.6
+    rotation_y: 5.72
+    scale: 1
+    seed: 9650
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -845.6
+      - 0
+      - -1079.8
+    rotation_y: 3.45
+    scale: 1.1
+    seed: 9651
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 1098.2
+      - 0
+      - 651.5
+    rotation_y: 1.68
+    scale: 1
+    seed: 9652
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -371.6
+      - 0
+      - 108.6
+    rotation_y: 2.77
+    scale: 1
+    seed: 9653
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 694.1
+      - 0
+      - -99.3
+    rotation_y: 0.33
+    scale: 1.1
+    seed: 9654
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -122.3
+      - 0
+      - -37
+    rotation_y: 3.34
+    scale: 1
+    seed: 9655
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -794.8
+      - 0
+      - -983
+    rotation_y: 0.41
+    scale: 1
+    seed: 9656
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -501.3
+      - 0
+      - 505.2
+    rotation_y: 4.58
+    scale: 1.1
+    seed: 9657
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 1053.5
+      - 0
+      - -460.8
+    rotation_y: 0.88
+    scale: 1
+    seed: 9658
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -622
+      - 0
+      - 438.3
+    rotation_y: 0.51
+    scale: 1
+    seed: 9659
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -753.8
+      - 0
+      - -922
+    rotation_y: 3.47
+    scale: 1.1
+    seed: 9660
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 989.3
+      - 0
+      - -254.9
+    rotation_y: 3.97
+    scale: 1
+    seed: 9661
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -308.8
+      - 0
+      - -586.3
+    rotation_y: 0.76
+    scale: 1
+    seed: 9662
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 574.1
+      - 0
+      - 425.8
+    rotation_y: 4.84
+    scale: 1.1
+    seed: 9663
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -854.4
+      - 0
+      - -628
+    rotation_y: 0.54
+    scale: 1
+    seed: 9664
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -319.5
+      - 0
+      - -364.7
+    rotation_y: 2.13
+    scale: 1
+    seed: 9665
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -307.5
+      - 0
+      - 169.6
+    rotation_y: 5.67
+    scale: 1.1
+    seed: 9666
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 772.3
+      - 0
+      - -389.4
+    rotation_y: 5.93
+    scale: 1
+    seed: 9667
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -712.6
+      - 0
+      - -1097.1
+    rotation_y: 1.46
+    scale: 1
+    seed: 9668
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 1057.8
+      - 0
+      - 919.1
+    rotation_y: 1.31
+    scale: 1.1
+    seed: 9669
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -38.9
+      - 0
+      - -220.3
+    rotation_y: 5.74
+    scale: 1
+    seed: 9670
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 285.2
+      - 0
+      - -675.5
+    rotation_y: 1.77
+    scale: 1
+    seed: 9671
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -706.1
+      - 0
+      - 631.5
+    rotation_y: 6.17
+    scale: 1.1
+    seed: 9672
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -64.6
+      - 0
+      - 33.2
+    rotation_y: 1.86
+    scale: 1
+    seed: 9673
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 136.8
+      - 0
+      - -947.8
+    rotation_y: 3.45
+    scale: 1
+    seed: 9674
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -1103.1
+      - 0
+      - 981.3
+    rotation_y: 4.72
+    scale: 1.1
+    seed: 9675
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 155.8
+      - 0
+      - -145.7
+    rotation_y: 1.31
+    scale: 1
+    seed: 9676
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -705.4
+      - 0
+      - -590.7
+    rotation_y: 5.89
+    scale: 1
+    seed: 9677
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 296.9
+      - 0
+      - -690
+    rotation_y: 1
+    scale: 1.1
+    seed: 9678
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -1057.9
+      - 0
+      - 982.2
+    rotation_y: 5.42
+    scale: 1
+    seed: 9679
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 376.3
+      - 0
+      - -343.4
+    rotation_y: 4.89
+    scale: 1
+    seed: 9680
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 210.8
+      - 0
+      - -504.1
+    rotation_y: 6.18
+    scale: 1.1
+    seed: 9681
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 362.3
+      - 0
+      - 883.9
+    rotation_y: 3.02
+    scale: 1
+    seed: 9682
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 937.1
+      - 0
+      - 6.5
+    rotation_y: 5.7
+    scale: 1
+    seed: 9683
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 181.4
+      - 0
+      - -727.3
+    rotation_y: 4.92
+    scale: 1.1
+    seed: 9684
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 268.3
+      - 0
+      - -974.1
+    rotation_y: 3.28
+    scale: 1
+    seed: 9685
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -24.3
+      - 0
+      - 645.7
+    rotation_y: 0.08
+    scale: 1
+    seed: 9686
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 678.9
+      - 0
+      - -156.7
+    rotation_y: 2.44
+    scale: 1.1
+    seed: 9687
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 552.6
+      - 0
+      - 316
+    rotation_y: 2.86
+    scale: 1
+    seed: 9688
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 776.1
+      - 0
+      - -1067
+    rotation_y: 0.09
+    scale: 1
+    seed: 9689
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 466.1
+      - 0
+      - -545.7
+    rotation_y: 3.72
+    scale: 1.1
+    seed: 9690
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 654.5
+      - 0
+      - -468.7
+    rotation_y: 0.94
+    scale: 1
+    seed: 9691
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -523.6
+      - 0
+      - 354.4
+    rotation_y: 4.1
+    scale: 1
+    seed: 9692
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 516.9
+      - 0
+      - -126.2
+    rotation_y: 2.59
+    scale: 1.1
+    seed: 9693
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 963.6
+      - 0
+      - -149.4
+    rotation_y: 3.25
+    scale: 1
+    seed: 9694
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -981.3
+      - 0
+      - -1062.2
+    rotation_y: 0.81
+    scale: 1
+    seed: 9695
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 634.6
+      - 0
+      - -560.9
+    rotation_y: 4.05
+    scale: 1.1
+    seed: 9696
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 244.6
+      - 0
+      - 453.9
+    rotation_y: 0.75
+    scale: 1
+    seed: 9697
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -796.4
+      - 0
+      - -803.5
+    rotation_y: 2.92
+    scale: 1
+    seed: 9698
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 142
+      - 0
+      - 1003.7
+    rotation_y: 3.3
+    scale: 1.1
+    seed: 9699
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 916.6
+      - 0
+      - -838.2
+    rotation_y: 0.34
+    scale: 1
+    seed: 9700
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -992.4
+      - 0
+      - 590.1
+    rotation_y: 1.57
+    scale: 1
+    seed: 9701
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 980.2
+      - 0
+      - -253.8
+    rotation_y: 5.46
+    scale: 1.1
+    seed: 9702
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 840.7
+      - 0
+      - 1072.1
+    rotation_y: 0.5
+    scale: 1
+    seed: 9703
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -247.3
+      - 0
+      - 765.2
+    rotation_y: 0.1
+    scale: 1
+    seed: 9704
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -6.2
+      - 0
+      - 558.8
+    rotation_y: 4.43
+    scale: 1.1
+    seed: 9705
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -460.4
+      - 0
+      - 1030.5
+    rotation_y: 0.56
+    scale: 1
+    seed: 9706
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 48.9
+      - 0
+      - 194.9
+    rotation_y: 5.34
+    scale: 1
+    seed: 9707
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -158.6
+      - 0
+      - -443.2
+    rotation_y: 4.33
+    scale: 1.1
+    seed: 9708
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -780.3
+      - 0
+      - 255.8
+    rotation_y: 1.52
+    scale: 1
+    seed: 9709
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -608.7
+      - 0
+      - -270.1
+    rotation_y: 0.42
+    scale: 1
+    seed: 9710
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 220.2
+      - 0
+      - -941.6
+    rotation_y: 0.62
+    scale: 1.1
+    seed: 9711
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -458.9
+      - 0
+      - 13.6
+    rotation_y: 3.63
+    scale: 1
+    seed: 9712
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -404.5
+      - 0
+      - -477.9
+    rotation_y: 2.29
+    scale: 1
+    seed: 9713
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -66.2
+      - 0
+      - 577.8
+    rotation_y: 2.13
+    scale: 1.1
+    seed: 9714
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -35.5
+      - 0
+      - -226.5
+    rotation_y: 0.83
+    scale: 1
+    seed: 9715
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -255.9
+      - 0
+      - -505.4
+    rotation_y: 2
+    scale: 1
+    seed: 9716
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -1093.6
+      - 0
+      - 980
+    rotation_y: 3.8
+    scale: 1.1
+    seed: 9717
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -437.6
+      - 0
+      - -583.2
+    rotation_y: 2.95
+    scale: 1
+    seed: 9718
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -849.1
+      - 0
+      - 490.9
+    rotation_y: 2.07
+    scale: 1
+    seed: 9719
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 131.9
+      - 0
+      - -74.8
+    rotation_y: 3.19
+    scale: 1.1
+    seed: 9720
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 383.7
+      - 0
+      - 48.4
+    rotation_y: 0.88
+    scale: 1
+    seed: 9721
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 160
+      - 0
+      - -849.2
+    rotation_y: 5.11
+    scale: 1
+    seed: 9722
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 790.5
+      - 0
+      - 1027.1
+    rotation_y: 1.4
+    scale: 1.1
+    seed: 9723
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -812
+      - 0
+      - -219
+    rotation_y: 5.21
+    scale: 1
+    seed: 9724
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -906.4
+      - 0
+      - -77.5
+    rotation_y: 2.39
+    scale: 1
+    seed: 9725
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 769.8
+      - 0
+      - 47.4
+    rotation_y: 4.07
+    scale: 1.1
+    seed: 9726
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 53
+      - 0
+      - -12.9
+    rotation_y: 2.31
+    scale: 1
+    seed: 9727
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -858.1
+      - 0
+      - -786.2
+    rotation_y: 2.01
+    scale: 1
+    seed: 9728
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -992.5
+      - 0
+      - 245.2
+    rotation_y: 1.09
+    scale: 1.1
+    seed: 9729
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -245.2
+      - 0
+      - -867.2
+    rotation_y: 2.97
+    scale: 1
+    seed: 9730
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -4.8
+      - 0
+      - 560
+    rotation_y: 5.19
+    scale: 1
+    seed: 9731
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -588.8
+      - 0
+      - 973.9
+    rotation_y: 0.9
+    scale: 1.1
+    seed: 9732
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 754.3
+      - 0
+      - 313.2
+    rotation_y: 3.43
+    scale: 1
+    seed: 9733
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -674.3
+      - 0
+      - -130.3
+    rotation_y: 5.9
+    scale: 1
+    seed: 9734
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -28.3
+      - 0
+      - -1026.3
+    rotation_y: 4.41
+    scale: 1.1
+    seed: 9735
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -256.3
+      - 0
+      - 132.2
+    rotation_y: 0.54
+    scale: 1
+    seed: 9736
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 1031.8
+      - 0
+      - -727.3
+    rotation_y: 3.25
+    scale: 1
+    seed: 9737
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -567.4
+      - 0
+      - -1061.3
+    rotation_y: 3.74
+    scale: 1.1
+    seed: 9738
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -1005.7
+      - 0
+      - -1089.8
+    rotation_y: 3.46
+    scale: 1
+    seed: 9739
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -504.4
+      - 0
+      - 557.6
+    rotation_y: 6.1
+    scale: 1
+    seed: 9740
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -509.6
+      - 0
+      - 286.7
+    rotation_y: 1.39
+    scale: 1.1
+    seed: 9741
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -476.9
+      - 0
+      - -451.9
+    rotation_y: 5.9
+    scale: 1
+    seed: 9742
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -1060
+      - 0
+      - 98.7
+    rotation_y: 1.86
+    scale: 1
+    seed: 9743
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 558.3
+      - 0
+      - -806.3
+    rotation_y: 4.86
+    scale: 1.1
+    seed: 9744
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 466.3
+      - 0
+      - 82.3
+    rotation_y: 4.97
+    scale: 1
+    seed: 9745
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -41
+      - 0
+      - -60.8
+    rotation_y: 4.36
+    scale: 1
+    seed: 9746
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 143.1
+      - 0
+      - 681.7
+    rotation_y: 4.78
+    scale: 1.1
+    seed: 9747
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 20.1
+      - 0
+      - 290.7
+    rotation_y: 0.52
+    scale: 1
+    seed: 9748
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -847.1
+      - 0
+      - -880.8
+    rotation_y: 4.62
+    scale: 1
+    seed: 9749
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -853.7
+      - 0
+      - -176.3
+    rotation_y: 5.56
+    scale: 1.1
+    seed: 9750
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -959.9
+      - 0
+      - -199.9
+    rotation_y: 0.64
+    scale: 1
+    seed: 9751
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -352.2
+      - 0
+      - -198.9
+    rotation_y: 1.75
+    scale: 1
+    seed: 9752
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -1034
+      - 0
+      - -876.3
+    rotation_y: 2.57
+    scale: 1.1
+    seed: 9753
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 1101.6
+      - 0
+      - 575
+    rotation_y: 4.16
+    scale: 1
+    seed: 9754
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -268.7
+      - 0
+      - -925.1
+    rotation_y: 5.28
+    scale: 1
+    seed: 9755
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -457.4
+      - 0
+      - 1010.2
+    rotation_y: 4.39
+    scale: 1.1
+    seed: 9756
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 905.5
+      - 0
+      - -1055.8
+    rotation_y: 1.13
+    scale: 1
+    seed: 9757
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -426.4
+      - 0
+      - -959.8
+    rotation_y: 5.63
+    scale: 1
+    seed: 9758
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -1054
+      - 0
+      - -773.7
+    rotation_y: 6.12
+    scale: 1.1
+    seed: 9759
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 230.9
+      - 0
+      - 1059.4
+    rotation_y: 5.62
+    scale: 1
+    seed: 9760
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 1045.5
+      - 0
+      - 136.5
+    rotation_y: 1.4
+    scale: 1
+    seed: 9761
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 637.5
+      - 0
+      - 845.3
+    rotation_y: 5.6
+    scale: 1.1
+    seed: 9762
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -512.4
+      - 0
+      - 921.4
+    rotation_y: 6.17
+    scale: 1
+    seed: 9763
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -812.7
+      - 0
+      - -658.5
+    rotation_y: 5.26
+    scale: 1
+    seed: 9764
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -995.6
+      - 0
+      - -298.7
+    rotation_y: 1.07
+    scale: 1.1
+    seed: 9765
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 543.7
+      - 0
+      - 771
+    rotation_y: 4.83
+    scale: 1
+    seed: 9766
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 451.1
+      - 0
+      - 251.2
+    rotation_y: 4.71
+    scale: 1
+    seed: 9767
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -940.8
+      - 0
+      - -707.2
+    rotation_y: 1.49
+    scale: 1.1
+    seed: 9768
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 109
+      - 0
+      - 575.9
+    rotation_y: 5.63
+    scale: 1
+    seed: 9769
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 369.4
+      - 0
+      - 130.8
+    rotation_y: 4.93
+    scale: 1
+    seed: 9770
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -97.4
+      - 0
+      - -759.5
+    rotation_y: 5.38
+    scale: 1.1
+    seed: 9771
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 673.6
+      - 0
+      - -1046.3
+    rotation_y: 5.7
+    scale: 1
+    seed: 9772
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 153.6
+      - 0
+      - 524.5
+    rotation_y: 0.83
+    scale: 1
+    seed: 9773
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 1077.4
+      - 0
+      - 807.1
+    rotation_y: 6.1
+    scale: 1.1
+    seed: 9774
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 538.7
+      - 0
+      - 482.2
+    rotation_y: 0.57
+    scale: 1
+    seed: 9775
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 561.4
+      - 0
+      - 1009.1
+    rotation_y: 3.66
+    scale: 1
+    seed: 9776
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -548.8
+      - 0
+      - -866.6
+    rotation_y: 2.39
+    scale: 1.1
+    seed: 9777
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 805.9
+      - 0
+      - 181.8
+    rotation_y: 1.11
+    scale: 1
+    seed: 9778
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 211.9
+      - 0
+      - 705
+    rotation_y: 4.48
+    scale: 1
+    seed: 9779
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 242.3
+      - 0
+      - 927.8
+    rotation_y: 3.07
+    scale: 1.1
+    seed: 9780
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -187.3
+      - 0
+      - 390
+    rotation_y: 5.7
+    scale: 1
+    seed: 9781
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -1066.5
+      - 0
+      - -545.7
+    rotation_y: 4.26
+    scale: 1
+    seed: 9782
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 108.9
+      - 0
+      - -716.2
+    rotation_y: 2.82
+    scale: 1.1
+    seed: 9783
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 821.4
+      - 0
+      - 844.5
+    rotation_y: 3.97
+    scale: 1
+    seed: 9784
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -528
+      - 0
+      - -427.2
+    rotation_y: 4.55
+    scale: 1
+    seed: 9785
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -826.9
+      - 0
+      - -905.9
+    rotation_y: 6.13
+    scale: 1.1
+    seed: 9786
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -657.5
+      - 0
+      - -532
+    rotation_y: 4.72
+    scale: 1
+    seed: 9787
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 402.3
+      - 0
+      - 663.9
+    rotation_y: 3.22
+    scale: 1
+    seed: 9788
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -202
+      - 0
+      - -368.8
+    rotation_y: 3.29
+    scale: 1.1
+    seed: 9789
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -30
+      - 0
+      - -226
+    rotation_y: 1
+    scale: 1
+    seed: 9790
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -921.8
+      - 0
+      - -585
+    rotation_y: 3.68
+    scale: 1
+    seed: 9791
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -405.4
+      - 0
+      - 782.7
+    rotation_y: 4.92
+    scale: 1.1
+    seed: 9792
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 883.7
+      - 0
+      - -218.2
+    rotation_y: 1.32
+    scale: 1
+    seed: 9793
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -792.5
+      - 0
+      - 47
+    rotation_y: 1.85
+    scale: 1
+    seed: 9794
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -483.6
+      - 0
+      - 940
+    rotation_y: 0.2
+    scale: 1.1
+    seed: 9795
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -250.9
+      - 0
+      - -657.2
+    rotation_y: 5.26
+    scale: 1
+    seed: 9796
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -359
+      - 0
+      - -403.2
+    rotation_y: 6.07
+    scale: 1
+    seed: 9797
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -266.4
+      - 0
+      - -1086.3
+    rotation_y: 6.12
+    scale: 1.1
+    seed: 9798
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -735.5
+      - 0
+      - -1046.4
+    rotation_y: 5.96
+    scale: 1
+    seed: 9799
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -264.6
+      - 0
+      - 299.6
+    rotation_y: 5.63
+    scale: 1
+    seed: 9800
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -578.7
+      - 0
+      - 790.6
+    rotation_y: 5.2
+    scale: 1.1
+    seed: 9801
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -514.9
+      - 0
+      - -570.4
+    rotation_y: 2.81
+    scale: 1
+    seed: 9802
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 1003.2
+      - 0
+      - -521.4
+    rotation_y: 0.97
+    scale: 1
+    seed: 9803
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -952.4
+      - 0
+      - -161.8
+    rotation_y: 1.25
+    scale: 1.1
+    seed: 9804
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 381.4
+      - 0
+      - -53.6
+    rotation_y: 2.54
+    scale: 1
+    seed: 9805
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 1080.5
+      - 0
+      - 955.8
+    rotation_y: 1.47
+    scale: 1
+    seed: 9806
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -937.3
+      - 0
+      - -266.4
+    rotation_y: 0.16
+    scale: 1.1
+    seed: 9807
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 308.7
+      - 0
+      - -969.8
+    rotation_y: 3.13
+    scale: 1
+    seed: 9808
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -609.8
+      - 0
+      - 171
+    rotation_y: 0.14
+    scale: 1
+    seed: 9809
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 768
+      - 0
+      - -505.2
+    rotation_y: 1.14
+    scale: 1.1
+    seed: 9810
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 532.7
+      - 0
+      - 1021.8
+    rotation_y: 1.3
+    scale: 1
+    seed: 9811
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 402.2
+      - 0
+      - -1059.4
+    rotation_y: 3.66
+    scale: 1
+    seed: 9812
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 1042.3
+      - 0
+      - -522.5
+    rotation_y: 4.97
+    scale: 1.1
+    seed: 9813
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -728.6
+      - 0
+      - -133.1
+    rotation_y: 4.24
+    scale: 1
+    seed: 9814
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 159.3
+      - 0
+      - -231
+    rotation_y: 1.85
+    scale: 1
+    seed: 9815
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 319.7
+      - 0
+      - 161.5
+    rotation_y: 1.6
+    scale: 1.1
+    seed: 9816
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 527.5
+      - 0
+      - -254.1
+    rotation_y: 6.08
+    scale: 1
+    seed: 9817
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -932.8
+      - 0
+      - 159.2
+    rotation_y: 3.25
+    scale: 1
+    seed: 9818
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 507.6
+      - 0
+      - 792.3
+    rotation_y: 0.08
+    scale: 1.1
+    seed: 9819
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 287.7
+      - 0
+      - -786
+    rotation_y: 5.03
+    scale: 1
+    seed: 9820
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -52.2
+      - 0
+      - 737.2
+    rotation_y: 1.33
+    scale: 1
+    seed: 9821
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 130
+      - 0
+      - -1.2
+    rotation_y: 3.44
+    scale: 1.1
+    seed: 9822
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 301.6
+      - 0
+      - 570.8
+    rotation_y: 1.55
+    scale: 1
+    seed: 9823
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -1005.8
+      - 0
+      - 237.4
+    rotation_y: 1.04
+    scale: 1
+    seed: 9824
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 108.7
+      - 0
+      - 94.6
+    rotation_y: 3.19
+    scale: 1.1
+    seed: 9825
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -100.8
+      - 0
+      - -716.8
+    rotation_y: 0.94
+    scale: 1
+    seed: 9826
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -142.7
+      - 0
+      - -677.2
+    rotation_y: 5.03
+    scale: 1
+    seed: 9827
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -939.5
+      - 0
+      - -75
+    rotation_y: 0.71
+    scale: 1.1
+    seed: 9828
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 918.8
+      - 0
+      - -475.4
+    rotation_y: 1.52
+    scale: 1
+    seed: 9829
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 166.7
+      - 0
+      - -20.2
+    rotation_y: 3.44
+    scale: 1
+    seed: 9830
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 909.9
+      - 0
+      - 385.6
+    rotation_y: 5.44
+    scale: 1.1
+    seed: 9831
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -834.7
+      - 0
+      - 21.6
+    rotation_y: 0.28
+    scale: 1
+    seed: 9832
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -257
+      - 0
+      - 495.5
+    rotation_y: 0.72
+    scale: 1
+    seed: 9833
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 788.5
+      - 0
+      - 210.7
+    rotation_y: 1.71
+    scale: 1.1
+    seed: 9834
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -353.5
+      - 0
+      - 229.5
+    rotation_y: 1.07
+    scale: 1
+    seed: 9835
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -683.1
+      - 0
+      - -25.8
+    rotation_y: 3.28
+    scale: 1
+    seed: 9836
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -761.8
+      - 0
+      - -310.3
+    rotation_y: 3.37
+    scale: 1.1
+    seed: 9837
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -213.2
+      - 0
+      - -1012.5
+    rotation_y: 2.42
+    scale: 1
+    seed: 9838
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 287.4
+      - 0
+      - 708.4
+    rotation_y: 0.99
+    scale: 1
+    seed: 9839
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -492.9
+      - 0
+      - 317.5
+    rotation_y: 2.77
+    scale: 1.1
+    seed: 9840
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 302.2
+      - 0
+      - 1090
+    rotation_y: 0.88
+    scale: 1
+    seed: 9841
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 231.3
+      - 0
+      - 987.5
+    rotation_y: 0.8
+    scale: 1
+    seed: 9842
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 589.1
+      - 0
+      - 929.7
+    rotation_y: 3.08
+    scale: 1.1
+    seed: 9843
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -949.4
+      - 0
+      - 84.5
+    rotation_y: 1.59
+    scale: 1
+    seed: 9844
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 336.9
+      - 0
+      - -881.3
+    rotation_y: 0.87
+    scale: 1
+    seed: 9845
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 564.5
+      - 0
+      - -297.1
+    rotation_y: 2.23
+    scale: 1.1
+    seed: 9846
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -256.2
+      - 0
+      - 376.7
+    rotation_y: 1.49
+    scale: 1
+    seed: 9847
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -268
+      - 0
+      - -82.5
+    rotation_y: 2.19
+    scale: 1
+    seed: 9848
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -493.4
+      - 0
+      - -587
+    rotation_y: 5.14
+    scale: 1.1
+    seed: 9849
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -410.5
+      - 0
+      - 329.1
+    rotation_y: 1.86
+    scale: 1
+    seed: 9850
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -483.2
+      - 0
+      - -1093.8
+    rotation_y: 2.63
+    scale: 1
+    seed: 9851
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 728.2
+      - 0
+      - -416.7
+    rotation_y: 0.72
+    scale: 1.1
+    seed: 9852
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 433
+      - 0
+      - 17.8
+    rotation_y: 2.37
+    scale: 1
+    seed: 9853
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 169.7
+      - 0
+      - -808.5
+    rotation_y: 0.13
+    scale: 1
+    seed: 9854
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -235.4
+      - 0
+      - -481
+    rotation_y: 2.04
+    scale: 1.1
+    seed: 9855
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 368.9
+      - 0
+      - 426
+    rotation_y: 3.95
+    scale: 1
+    seed: 9856
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 1010.4
+      - 0
+      - 447.3
+    rotation_y: 5.86
+    scale: 1
+    seed: 9857
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 930.7
+      - 0
+      - 606.8
+    rotation_y: 2.67
+    scale: 1.1
+    seed: 9858
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 894.6
+      - 0
+      - -67.4
+    rotation_y: 3.4
+    scale: 1
+    seed: 9859
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -958.5
+      - 0
+      - 463
+    rotation_y: 0.85
+    scale: 1
+    seed: 9860
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 119.5
+      - 0
+      - -1003.5
+    rotation_y: 3.75
+    scale: 1.1
+    seed: 9861
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -311.7
+      - 0
+      - 680.3
+    rotation_y: 5.6
+    scale: 1
+    seed: 9862
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -269.7
+      - 0
+      - -604.8
+    rotation_y: 0.58
+    scale: 1
+    seed: 9863
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 683.5
+      - 0
+      - -520.2
+    rotation_y: 5.19
+    scale: 1.1
+    seed: 9864
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -151.1
+      - 0
+      - -184.4
+    rotation_y: 2.05
+    scale: 1
+    seed: 9865
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 461.6
+      - 0
+      - 665.2
+    rotation_y: 5.18
+    scale: 1
+    seed: 9866
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 1097
+      - 0
+      - -284
+    rotation_y: 2.89
+    scale: 1.1
+    seed: 9867
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 1073.5
+      - 0
+      - -26.4
+    rotation_y: 2.52
+    scale: 1
+    seed: 9868
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -275.5
+      - 0
+      - -516.2
+    rotation_y: 4.46
+    scale: 1
+    seed: 9869
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -783.6
+      - 0
+      - 344.3
+    rotation_y: 1.09
+    scale: 1.1
+    seed: 9870
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 747.8
+      - 0
+      - 247.7
+    rotation_y: 5.34
+    scale: 1
+    seed: 9871
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -361.3
+      - 0
+      - -289.1
+    rotation_y: 3.25
+    scale: 1
+    seed: 9872
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -91.6
+      - 0
+      - 875.6
+    rotation_y: 2.17
+    scale: 1.1
+    seed: 9873
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -855.9
+      - 0
+      - -428.8
+    rotation_y: 0.21
+    scale: 1
+    seed: 9874
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -374.2
+      - 0
+      - 63.6
+    rotation_y: 4.26
+    scale: 1
+    seed: 9875
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 638.2
+      - 0
+      - 210.7
+    rotation_y: 0.92
+    scale: 1.1
+    seed: 9876
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 493.5
+      - 0
+      - -288.1
+    rotation_y: 0.28
+    scale: 1
+    seed: 9877
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 853.8
+      - 0
+      - -290.5
+    rotation_y: 2.64
+    scale: 1
+    seed: 9878
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -713.9
+      - 0
+      - 425.6
+    rotation_y: 2.88
+    scale: 1.1
+    seed: 9879
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -788.2
+      - 0
+      - 564.5
+    rotation_y: 5.6
+    scale: 1
+    seed: 9880
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 1.9
+      - 0
+      - -1016.8
+    rotation_y: 4.28
+    scale: 1
+    seed: 9881
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 902.6
+      - 0
+      - -71.8
+    rotation_y: 3.95
+    scale: 1.1
+    seed: 9882
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 1026
+      - 0
+      - -296.4
+    rotation_y: 4.69
+    scale: 1
+    seed: 9883
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -67.1
+      - 0
+      - 446.1
+    rotation_y: 5.27
+    scale: 1
+    seed: 9884
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 4.8
+      - 0
+      - 639.1
+    rotation_y: 1.3
+    scale: 1.1
+    seed: 9885
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 411.8
+      - 0
+      - -762.1
+    rotation_y: 0.63
+    scale: 1
+    seed: 9886
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -537.3
+      - 0
+      - -310.6
+    rotation_y: 3.72
+    scale: 1
+    seed: 9887
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -782.6
+      - 0
+      - -299
+    rotation_y: 1.15
+    scale: 1.1
+    seed: 9888
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 703
+      - 0
+      - 56.1
+    rotation_y: 2.3
+    scale: 1
+    seed: 9889
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -531
+      - 0
+      - -65
+    rotation_y: 4.22
+    scale: 1
+    seed: 9890
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -100
+      - 0
+      - -501.4
+    rotation_y: 3.61
+    scale: 1.1
+    seed: 9891
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -698.9
+      - 0
+      - 331.7
+    rotation_y: 2.4
+    scale: 1
+    seed: 9892
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 100.2
+      - 0
+      - -79.5
+    rotation_y: 2.52
+    scale: 1
+    seed: 9893
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -537.2
+      - 0
+      - -351.8
+    rotation_y: 4.6
+    scale: 1.1
+    seed: 9894
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 321.1
+      - 0
+      - 787.3
+    rotation_y: 1.26
+    scale: 1
+    seed: 9895
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 901.2
+      - 0
+      - 134.4
+    rotation_y: 1.67
+    scale: 1
+    seed: 9896
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 831.8
+      - 0
+      - -997.2
+    rotation_y: 4.42
+    scale: 1.1
+    seed: 9897
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 1072.2
+      - 0
+      - 691.9
+    rotation_y: 5.09
+    scale: 1
+    seed: 9898
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 70.8
+      - 0
+      - 347.2
+    rotation_y: 0.57
+    scale: 1
+    seed: 9899
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -433.6
+      - 0
+      - 1066.9
+    rotation_y: 1.27
+    scale: 1.1
+    seed: 9900
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 503.9
+      - 0
+      - -559.7
+    rotation_y: 6.23
+    scale: 1
+    seed: 9901
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -826.1
+      - 0
+      - -401.3
+    rotation_y: 3.38
+    scale: 1
+    seed: 9902
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 625
+      - 0
+      - 8.9
+    rotation_y: 5.66
+    scale: 1.1
+    seed: 9903
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -487.4
+      - 0
+      - 356.2
+    rotation_y: 3.51
+    scale: 1
+    seed: 9904
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 699.8
+      - 0
+      - 30.1
+    rotation_y: 2.67
+    scale: 1
+    seed: 9905
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -499.8
+      - 0
+      - 50.9
+    rotation_y: 3.81
+    scale: 1.1
+    seed: 9906
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 334.4
+      - 0
+      - -770.1
+    rotation_y: 3.55
+    scale: 1
+    seed: 9907
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -355.9
+      - 0
+      - -898.5
+    rotation_y: 3.57
+    scale: 1
+    seed: 9908
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 635.2
+      - 0
+      - 560.2
+    rotation_y: 3.58
+    scale: 1.1
+    seed: 9909
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -31.9
+      - 0
+      - -602.8
+    rotation_y: 5.41
+    scale: 1
+    seed: 9910
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 270
+      - 0
+      - -47
+    rotation_y: 5
+    scale: 1
+    seed: 9911
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 930.8
+      - 0
+      - 757.1
+    rotation_y: 1.5
+    scale: 1.1
+    seed: 9912
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 350.4
+      - 0
+      - -70.3
+    rotation_y: 4.9
+    scale: 1
+    seed: 9913
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -549.6
+      - 0
+      - 357
+    rotation_y: 2.76
+    scale: 1
+    seed: 9914
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 475.5
+      - 0
+      - -1042.9
+    rotation_y: 4.81
+    scale: 1.1
+    seed: 9915
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -789.3
+      - 0
+      - -388.8
+    rotation_y: 3.36
+    scale: 1
+    seed: 9916
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 274.5
+      - 0
+      - 75.9
+    rotation_y: 3.27
+    scale: 1
+    seed: 9917
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -820.5
+      - 0
+      - -824.2
+    rotation_y: 3.7
+    scale: 1.1
+    seed: 9918
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -41.5
+      - 0
+      - 715.3
+    rotation_y: 4.6
+    scale: 1
+    seed: 9919
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -889.2
+      - 0
+      - -612.7
+    rotation_y: 4.79
+    scale: 1
+    seed: 9920
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -453.3
+      - 0
+      - -407.4
+    rotation_y: 4.11
+    scale: 1.1
+    seed: 9921
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 45.9
+      - 0
+      - -292
+    rotation_y: 5.53
+    scale: 1
+    seed: 9922
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 463.8
+      - 0
+      - -413.2
+    rotation_y: 2.71
+    scale: 1
+    seed: 9923
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 984
+      - 0
+      - 661.9
+    rotation_y: 0.22
+    scale: 1.1
+    seed: 9924
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 395.6
+      - 0
+      - -123.3
+    rotation_y: 2.91
+    scale: 1
+    seed: 9925
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -233.4
+      - 0
+      - 990.3
+    rotation_y: 5.65
+    scale: 1
+    seed: 9926
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 35.5
+      - 0
+      - 1.2
+    rotation_y: 5.06
+    scale: 1.1
+    seed: 9927
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - -372.3
+      - 0
+      - -1001.4
+    rotation_y: 6
+    scale: 1
+    seed: 9928
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 599.7
+      - 0
+      - -777.1
+    rotation_y: 4.61
+    scale: 1
+    seed: 9929
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -68
+      - 0
+      - -1087.2
+    rotation_y: 1.69
+    scale: 1.1
+    seed: 9930
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -642.1
+      - 0
+      - 353.7
+    rotation_y: 0.28
+    scale: 1
+    seed: 9931
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 287.9
+      - 0
+      - 144.3
+    rotation_y: 1.43
+    scale: 1
+    seed: 9932
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 505.9
+      - 0
+      - -8.2
+    rotation_y: 2.3
+    scale: 1.1
+    seed: 9933
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -281.1
+      - 0
+      - 141.6
+    rotation_y: 5.36
+    scale: 1
+    seed: 9934
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -760.8
+      - 0
+      - -245.6
+    rotation_y: 1.35
+    scale: 1
+    seed: 9935
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -649.5
+      - 0
+      - 698.3
+    rotation_y: 6.09
+    scale: 1.1
+    seed: 9936
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - -345.9
+      - 0
+      - 809.6
+    rotation_y: 1.36
+    scale: 1
+    seed: 9937
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 259.1
+      - 0
+      - -407.8
+    rotation_y: 0.75
+    scale: 1
+    seed: 9938
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 507.5
+      - 0
+      - -378.4
+    rotation_y: 2.59
+    scale: 1.1
+    seed: 9939
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 981.4
+      - 0
+      - -1001.5
+    rotation_y: 4.79
+    scale: 1
+    seed: 9940
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 311.9
+      - 0
+      - 105.1
+    rotation_y: 3.22
+    scale: 1
+    seed: 9941
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - -444.2
+      - 0
+      - -322.6
+    rotation_y: 3.83
+    scale: 1.1
+    seed: 9942
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -712.7
+      - 0
+      - -274.8
+    rotation_y: 1.42
+    scale: 1
+    seed: 9943
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -1080.7
+      - 0
+      - -537.6
+    rotation_y: 5.2
+    scale: 1
+    seed: 9944
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 177.3
+      - 0
+      - -70.3
+    rotation_y: 4.03
+    scale: 1.1
+    seed: 9945
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -585
+      - 0
+      - -572.1
+    rotation_y: 4.62
+    scale: 1
+    seed: 9946
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 57.5
+      - 0
+      - 175.5
+    rotation_y: 0.04
+    scale: 1
+    seed: 9947
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -435.6
+      - 0
+      - 762.3
+    rotation_y: 5.4
+    scale: 1.1
+    seed: 9948
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 121.6
+      - 0
+      - 866.5
+    rotation_y: 0.21
+    scale: 1
+    seed: 9949
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -769.3
+      - 0
+      - -895.2
+    rotation_y: 5.54
+    scale: 1
+    seed: 9950
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -738.8
+      - 0
+      - 441.1
+    rotation_y: 1.17
+    scale: 1.1
+    seed: 9951
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 255.2
+      - 0
+      - 553.6
+    rotation_y: 1.03
+    scale: 1
+    seed: 9952
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 572.7
+      - 0
+      - -306.1
+    rotation_y: 4.1
+    scale: 1
+    seed: 9953
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 577.6
+      - 0
+      - -405.5
+    rotation_y: 0.26
+    scale: 1.1
+    seed: 9954
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 352.8
+      - 0
+      - 101.5
+    rotation_y: 3.54
+    scale: 1
+    seed: 9955
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -146.3
+      - 0
+      - 561.2
+    rotation_y: 1.06
+    scale: 1
+    seed: 9956
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - 549.6
+      - 0
+      - -64
+    rotation_y: 4.28
+    scale: 1.1
+    seed: 9957
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 430.5
+      - 0
+      - 905.2
+    rotation_y: 1.96
+    scale: 1
+    seed: 9958
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 15.1
+      - 0
+      - -269.6
+    rotation_y: 0.14
+    scale: 1
+    seed: 9959
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -259
+      - 0
+      - -427.5
+    rotation_y: 3.81
+    scale: 1.1
+    seed: 9960
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 11.1
+      - 0
+      - -952.2
+    rotation_y: 3.81
+    scale: 1
+    seed: 9961
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 821.7
+      - 0
+      - 1014.1
+    rotation_y: 1.97
+    scale: 1
+    seed: 9962
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 543.5
+      - 0
+      - 936.9
+    rotation_y: 5.85
+    scale: 1.1
+    seed: 9963
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 666.4
+      - 0
+      - -932.7
+    rotation_y: 3.73
+    scale: 1
+    seed: 9964
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 694.8
+      - 0
+      - 130.6
+    rotation_y: 0.73
+    scale: 1
+    seed: 9965
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 934.9
+      - 0
+      - 726.9
+    rotation_y: 2.96
+    scale: 1.1
+    seed: 9966
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 1022.8
+      - 0
+      - -787
+    rotation_y: 3.08
+    scale: 1
+    seed: 9967
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 832.4
+      - 0
+      - 17.7
+    rotation_y: 4.36
+    scale: 1
+    seed: 9968
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -905.7
+      - 0
+      - -333.8
+    rotation_y: 3.76
+    scale: 1.1
+    seed: 9969
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -237.5
+      - 0
+      - -544.1
+    rotation_y: 4.82
+    scale: 1
+    seed: 9970
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -49.8
+      - 0
+      - -236.9
+    rotation_y: 2.02
+    scale: 1
+    seed: 9971
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 379.5
+      - 0
+      - 856.3
+    rotation_y: 3.41
+    scale: 1.1
+    seed: 9972
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 270.4
+      - 0
+      - -757.8
+    rotation_y: 3.59
+    scale: 1
+    seed: 9973
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - -791.8
+      - 0
+      - 397.7
+    rotation_y: 2.43
+    scale: 1
+    seed: 9974
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 1056.7
+      - 0
+      - -516
+    rotation_y: 3.39
+    scale: 1.1
+    seed: 9975
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 323.8
+      - 0
+      - -127.5
+    rotation_y: 2.59
+    scale: 1
+    seed: 9976
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - -967.7
+      - 0
+      - 486.6
+    rotation_y: 5.67
+    scale: 1
+    seed: 9977
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 729.4
+      - 0
+      - 480.8
+    rotation_y: 3.49
+    scale: 1.1
+    seed: 9978
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - 542.7
+      - 0
+      - -37.6
+    rotation_y: 2.41
+    scale: 1
+    seed: 9979
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - -102.1
+      - 0
+      - 512.9
+    rotation_y: 4.37
+    scale: 1
+    seed: 9980
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -518.5
+      - 0
+      - 71
+    rotation_y: 5.36
+    scale: 1.1
+    seed: 9981
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - 45
+      - 0
+      - 736
+    rotation_y: 4.7
+    scale: 1
+    seed: 9982
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - -940.9
+      - 0
+      - -927
+    rotation_y: 2.78
+    scale: 1
+    seed: 9983
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - 831.8
+      - 0
+      - -889.7
+    rotation_y: 4.07
+    scale: 1.1
+    seed: 9984
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 35
+      - 0
+      - 631.5
+    rotation_y: 1.34
+    scale: 1
+    seed: 9985
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 722.5
+      - 0
+      - 370.6
+    rotation_y: 3.66
+    scale: 1
+    seed: 9986
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - -663
+      - 0
+      - -900.9
+    rotation_y: 0.97
+    scale: 1.1
+    seed: 9987
+    variation_id: 3
+  - asset_id: stone_ruin_wall
+    position:
+      - 981.9
+      - 0
+      - -446.4
+    rotation_y: 1.78
+    scale: 1
+    seed: 9988
+    variation_id: 0
+  - asset_id: crate_a
+    position:
+      - 66.1
+      - 0
+      - -899.4
+    rotation_y: 1.93
+    scale: 1
+    seed: 9989
+    variation_id: 1
+  - asset_id: rock_large_01
+    position:
+      - 514.2
+      - 0
+      - 351.8
+    rotation_y: 4.17
+    scale: 1.1
+    seed: 9990
+    variation_id: 2
+  - asset_id: stone_ruin_wall
+    position:
+      - -30.2
+      - 0
+      - 570.4
+    rotation_y: 4.85
+    scale: 1
+    seed: 9991
+    variation_id: 3
+  - asset_id: crate_a
+    position:
+      - 645.6
+      - 0
+      - -155.9
+    rotation_y: 2.87
+    scale: 1
+    seed: 9992
+    variation_id: 0
+  - asset_id: rock_large_01
+    position:
+      - -540.1
+      - 0
+      - 171.9
+    rotation_y: 5.28
+    scale: 1.1
+    seed: 9993
+    variation_id: 1
+  - asset_id: stone_ruin_wall
+    position:
+      - -225.8
+      - 0
+      - -971.7
+    rotation_y: 5.35
+    scale: 1
+    seed: 9994
+    variation_id: 2
+  - asset_id: crate_a
+    position:
+      - 713.4
+      - 0
+      - 247.7
+    rotation_y: 4.84
+    scale: 1
+    seed: 9995
+    variation_id: 3
+  - asset_id: rock_large_01
+    position:
+      - -762.3
+      - 0
+      - 514.3
+    rotation_y: 0.68
+    scale: 1.1
+    seed: 9996
+    variation_id: 0
+  - asset_id: stone_ruin_wall
+    position:
+      - 449.8
+      - 0
+      - 454.1
+    rotation_y: 4.16
+    scale: 1
+    seed: 9997
+    variation_id: 1
+  - asset_id: crate_a
+    position:
+      - 229.1
+      - 0
+      - -740.8
+    rotation_y: 0.1
+    scale: 1
+    seed: 9998
+    variation_id: 2
+  - asset_id: rock_large_01
+    position:
+      - 599.2
+      - 0
+      - -843.3
+    rotation_y: 3.72
+    scale: 1.1
+    seed: 9999
+    variation_id: 3

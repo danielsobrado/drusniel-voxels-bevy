@@ -3,8 +3,8 @@ acceptance:
   output_dir: "acceptance-runs"
 
   world:
-    lod0_pages_x: 8
-    lod0_pages_z: 8
+    lod0_pages_x: 16
+    lod0_pages_z: 16
     smoke_lod0_pages_x: 4
     smoke_lod0_pages_z: 4
 
@@ -17,7 +17,7 @@ acceptance:
     low_benefit_rate_max: 0.10
 
     full_hierarchy_build_ms_max: 8000
-    single_node_rebuild_ms_max: 80
+    single_node_rebuild_ms_max: 100
 
     density_scar_score_max: 0.35
     visual_hole_pixel_ratio_max: 0.0

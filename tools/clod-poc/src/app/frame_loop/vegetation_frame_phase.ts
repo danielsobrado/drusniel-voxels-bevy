@@ -1,11 +1,12 @@
 import type * as THREE from "three";
-import type { GrassController } from "../../systems/grass_controller.js";
-import type { TreeController } from "../../systems/tree_controller.js";
-import type { UnderstoryController } from "../../systems/understory_controller.js";
-import type { ForestLightingController } from "../../systems/forest_lighting_controller.js";
-import type { StoneController } from "../../systems/stone_controller.js";
-import type { WaterController } from "../../systems/water_controller.js";
-import type { WeatherController } from "../../systems/weather_controller.js";
+import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
+import type { TreeController } from "../../runtime/vegetation/tree_controller.js";
+import type { UnderstoryController } from "../../runtime/vegetation/understory_controller.js";
+import type { ForestLightingController } from "../../runtime/forest_lighting/forest_lighting_controller.js";
+import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
+import type { PropController } from "../../systems/prop_controller.js";
+import type { WaterController } from "../../runtime/water_weather/water_controller.js";
+import type { WeatherController } from "../../runtime/water_weather/weather_controller.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 
 interface GuiDisplayController {
@@ -25,6 +26,7 @@ export interface VegetationFramePhaseInput {
   forestLightingController: ForestLightingController;
   applyForestLightingToPropMaterials: () => void;
   stoneController: StoneController;
+  propController: PropController | null;
   waterController: WaterController;
   weatherController: WeatherController;
   updateWeatherStats: () => void;
@@ -45,6 +47,7 @@ export function runVegetationFramePhase(input: VegetationFramePhaseInput): void 
   });
   input.applyForestLightingToPropMaterials();
   input.stoneController.update(input.ringCenter);
+  input.propController?.update(input.camera as THREE.PerspectiveCamera);
   input.waterController.update(Math.min(input.playerDelta, 0.1), input.camera.position);
   input.weatherController.update(input.playerDelta, input.elapsedSeconds, input.camera.position, input.grassCenter);
   if (input.state.weatherMode !== "off" && input.selectionFrameId % 30 === 0) {

@@ -9,7 +9,7 @@ import {
 import {
   terrainMaterialSourceParam,
   type TerrainMaterialSource,
-} from "../../terrain_runtime/terrain_material_constants.js";
+} from "../../terrain/material/terrain_material_constants.js";
 import {
   DEFAULT_RAIN_WEATHER_SETTINGS,
   DEFAULT_SANDSTORM_WEATHER_SETTINGS,

@@ -1,7 +1,7 @@
 import type GUI from "lil-gui";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { WEATHER_MODE_OPTIONS } from "../../app/clod_constants.js";
-import type { WeatherController } from "../../systems/weather_controller.js";
+import type { WeatherController } from "../../runtime/water_weather/weather_controller.js";
 import type { GuiController } from "./gui_controller.js";
 
 export interface WeatherGuiDeps {

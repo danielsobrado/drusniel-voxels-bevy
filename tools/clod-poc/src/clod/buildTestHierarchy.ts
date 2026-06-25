@@ -168,6 +168,7 @@ export function buildTestHierarchy(
       maxErrorWorld: maxErr,
       averageBuildMs: avgMs,
       maxBuildMs: maxMs,
+      perNodeBuildMs: levelBuildMs,
     });
 
     if (countX === 1 && countZ === 1) break;

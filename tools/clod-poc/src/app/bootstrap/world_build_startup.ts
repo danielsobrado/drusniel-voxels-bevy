@@ -41,6 +41,16 @@ import proceduralConfigText from "../../../config/procedural_textures.yaml?raw";
 import grassConfigText from "../../../config/grass.yaml?raw";
 import waterConfigText from "../../../config/water.yaml?raw";
 import forestLightingConfigText from "../../../config/forest_lighting.yaml?raw";
+import customPropsConfigText from "../../../config/custom_props.yaml?raw";
+import customPropPlacementsText from "../../../config/custom_prop_placements.yaml?raw";
+import customPropPlacements500Text from "../../../config/custom_prop_placements_500.yaml?raw";
+import customPropPlacements5000Text from "../../../config/custom_prop_placements_5000.yaml?raw";
+import customPropPlacements20000Text from "../../../config/custom_prop_placements_20000.yaml?raw";
+import { parseCustomPropsConfig } from "../../props/prop_config.js";
+import { parsePropPlacements } from "../../props/prop_placements.js";
+import type { CustomPropsSettings } from "../../props/prop_types.js";
+import type { PropPlacementScene } from "../../props/prop_types.js";
+import { splitWorldBuildNodes } from "./world_build_nodes.js";
 
 export interface WorldBuildStartupInput {
   stagedImport: ProjectArchiveContents | null;
@@ -65,6 +75,8 @@ export interface WorldBuildResult {
   forestLightingConfig: ReturnType<typeof parseForestLightingConfig>;
   grassConfig: ReturnType<typeof parseGrassConfig>;
   waterConfig: WaterConfig;
+  customPropsConfig: CustomPropsSettings;
+  propPlacementScenes: Record<string, PropPlacementScene>;
   proceduralTerrain: ReturnType<typeof createProceduralTerrainTextures> | null;
   proceduralTextureConfig: ReturnType<typeof parseProceduralTextureConfig>;
   bakedMacroTint: THREE.DataTexture | null;
@@ -105,6 +117,13 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const forestLightingConfig = parseForestLightingConfig(forestLightingConfigText);
   createForestLightingIntegrationWarner()(forestLightingConfig);
   const grassConfig = parseGrassConfig(grassConfigText);
+  const customPropsConfig = parseCustomPropsConfig(customPropsConfigText);
+  const propPlacementScenes: Record<string, PropPlacementScene> = {
+    smoke: parsePropPlacements(customPropPlacementsText),
+    "500": parsePropPlacements(customPropPlacements500Text),
+    "5000": parsePropPlacements(customPropPlacements5000Text),
+    "20000": parsePropPlacements(customPropPlacements20000Text),
+  };
   let waterConfig = parseWaterConfig(waterConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
   const proceduralTerrain = proceduralTextureConfig.enabled
@@ -199,8 +218,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   buildProgress.hidden = true;
   buildStatus.value = "ready";
   const polishLine = formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish)));
-  const lod0Nodes: ClodPageNode[] = result.nodesByLevel.get(0) ?? [];
-  const allNodes: ClodPageNode[] = [...result.nodesByLevel.values()].flat();
+  const { lod0Nodes, allNodes } = splitWorldBuildNodes(result.nodesByLevel);
   const maxTerrainLevel = Math.max(...result.nodesByLevel.keys());
   const worldSizeCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
   const terrainSummary = buildTerrainSummary(lod0Nodes, worldSizeCells, 8);
@@ -214,6 +232,8 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     forestLightingConfig,
     grassConfig,
     waterConfig,
+    customPropsConfig,
+    propPlacementScenes,
     proceduralTerrain,
     proceduralTextureConfig,
     bakedMacroTint,

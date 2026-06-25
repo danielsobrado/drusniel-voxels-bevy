@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { PlayerController, PlayerInteractionState } from "../../player_controller.js";
-import type { NearFieldBubbleController, NearFieldBubbleView } from "../../terrain_runtime/near_field_bubble_controller.js";
-import type { ClodSelectionController } from "../../terrain_runtime/clod_selection_controller.js";
+import type { NearFieldBubbleController, NearFieldBubbleView } from "../../terrain/near_field/near_field_bubble_controller.js";
+import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 
 interface TerrainFadeView {

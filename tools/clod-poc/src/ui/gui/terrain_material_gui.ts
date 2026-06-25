@@ -4,8 +4,8 @@ import {
   PROCEDURAL_DEBUG_MODES,
   TEXTURE_BLEND_MODES,
   TERRAIN_MATERIAL_SOURCES,
-} from "../../terrain_runtime/terrain_material_constants.js";
-import type { TerrainTextureModal } from "../../terrain_runtime/terrain_texture_modal.js";
+} from "../../terrain/material/terrain_material_constants.js";
+import type { TerrainTextureModal } from "../../terrain/material/terrain_texture_modal.js";
 import type { GuiController } from "./gui_controller.js";
 
 export interface TerrainMaterialGuiDeps {

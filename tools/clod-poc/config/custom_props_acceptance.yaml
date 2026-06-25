@@ -1,0 +1,18 @@
+scenes:
+  "500":
+    min_instances_total: 500
+    max_update_ms: 16
+    max_draw_calls: 64
+    max_frame_ms: 33
+  "5000":
+    min_instances_total: 5000
+    min_instances_visible: 1
+    max_update_ms: 24
+    max_draw_calls: 200
+    max_frame_ms: 50
+  "20000":
+    min_instances_total: 20000
+    min_cells_culled: 1
+    max_update_ms: 33
+    max_draw_calls: 256
+    max_frame_ms: 66

@@ -9,14 +9,14 @@ import type { TerrainRaycastService } from "../../player/terrain_raycast_service
 import type { TerrainColliderSet } from "../../terrain_collider.js";
 import type { PlayerController, PlayerInteractionState } from "../../player_controller.js";
 import type { ProjectArchiveContents } from "../../project_archive.js";
-import type { TerrainTextureLoadOptions } from "../../terrain_runtime/texture_loader.js";
+import type { TerrainTextureLoadOptions } from "../../terrain/material/texture_loader.js";
 import type { VegetationDirtyQueue } from "../../systems/vegetation_dirty.js";
 import type { ClodAppState } from "../clod_app_state.js";
 import type { ClodRuntimeBindings } from "../clod_runtime_bindings.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import type { AppRenderer } from "./renderer_startup.js";
 import type { DomShell } from "./dom_shell.js";
-import type { RuntimeSystemsStartupResult, VegetationStatControllerRefs } from "./runtime_systems_startup.js";
+import type { RuntimeSystemsStartupResult, VegetationStatControllerRefs } from "./runtime/runtime_systems_startup.js";
 import type { TerrainViewStartupResult } from "./terrain_view_startup.js";
 import type { parseTreeConfig } from "../../trees/tree_config.js";
 import type { parseUnderstoryConfig } from "../../understory/understory_config.js";

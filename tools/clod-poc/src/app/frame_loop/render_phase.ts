@@ -4,8 +4,8 @@ import type { GrassStats } from "../../grass.js";
 import type { PostProcessSettings } from "../../postprocess.js";
 import type { NodeLabelOverlay } from "../../ui/node_labels.js";
 import type { AppPostProcess } from "../app_post_process.js";
-import type { NearFieldBubbleController } from "../../terrain_runtime/near_field_bubble_controller.js";
-import type { ClodSelectionController } from "../../terrain_runtime/clod_selection_controller.js";
+import type { NearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";
+import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import type { PlayerInteractionState } from "../../player_controller.js";
 import type { FrameRenderer } from "./frame_renderer.js";
 

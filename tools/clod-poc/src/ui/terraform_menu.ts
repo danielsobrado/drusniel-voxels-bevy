@@ -5,7 +5,7 @@ import { materialCarouselBounds, materialCarouselPageForSelection } from "../mat
 import { terrainTextureSlotLabel } from "../terrain_textures.js";
 import type { ClodIconKind } from "./icons/index.js";
 import { setButtonIcon } from "./dom_icons.js";
-import type { TerrainMaterialController } from "../terrain_runtime/terrain_material_controller.js";
+import type { TerrainMaterialController } from "../terrain/material/terrain_material_controller.js";
 
 export interface TerraformMenuDeps {
   root: HTMLElement;

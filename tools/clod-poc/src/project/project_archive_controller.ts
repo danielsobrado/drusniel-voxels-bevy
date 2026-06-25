@@ -9,7 +9,7 @@ import {
   stageProjectImport,
   type ClodProjectManifest,
 } from "../project_archive.js";
-import type { TerrainTextureController } from "../terrain_runtime/terrain_texture_controller.js";
+import type { TerrainTextureController } from "../terrain/material/terrain_texture_controller.js";
 import { getDigEditsSnapshot } from "../terrain.js";
 import {
   mapProjectSessionState,

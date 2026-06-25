@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { CapsuleCollisionConfig, TerrainColliderSet } from "./terrain_collider.js";
+import type { PropColliderSet } from "./props/prop_collider.js";
 import { emitAudio } from "./audio/index.js";
 
 export type PlayerInteractionMode = "orbit" | "choosingSpawn" | "playing";
@@ -122,6 +123,12 @@ export class PlayerController {
     readonly config: Readonly<PlayerConfig> = DEFAULT_PLAYER_CONFIG,
   ) {}
 
+  private propColliders: PropColliderSet | null = null;
+
+  attachPropColliders(set: PropColliderSet | null): void {
+    this.propColliders = set;
+  }
+
   spawn(point: THREE.Vector3): void {
     this.position.copy(point).addScaledVector(THREE.Object3D.DEFAULT_UP, 0.02);
     clampPlayerToWorld(this.position, this.bounds, this.config.worldEdgeMargin);
@@ -190,10 +197,20 @@ export class PlayerController {
     if (this.position.z !== previousZ + this.velocity.z * step) this.velocity.z = 0;
 
     const collision = this.colliders.resolveCapsule(this.position, this.velocity, this.config);
-    this.position.copy(collision.position);
-    this.velocity.copy(collision.velocity);
-    this.grounded = collision.grounded;
-    this.lastPagesTested = collision.pagesTested;
+    let resolved = collision;
+    if (this.propColliders && this.propColliders.activeCount() > 0) {
+      const propHit = this.propColliders.resolveCapsule(collision.position, collision.velocity, this.config);
+      resolved = {
+        position: propHit.position,
+        velocity: propHit.velocity,
+        grounded: collision.grounded || propHit.grounded,
+        pagesTested: collision.pagesTested + propHit.pagesTested,
+      };
+    }
+    this.position.copy(resolved.position);
+    this.velocity.copy(resolved.velocity);
+    this.grounded = resolved.grounded;
+    this.lastPagesTested = resolved.pagesTested;
     if (this.grounded) this.lastSafePosition.copy(this.position);
 
     if (this.position.y < this.lastSafePosition.y - this.config.recoveryDepth) {

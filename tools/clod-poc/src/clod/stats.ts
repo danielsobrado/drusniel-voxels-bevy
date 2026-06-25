@@ -9,6 +9,7 @@ export interface LevelStats {
   maxErrorWorld: number;
   averageBuildMs: number;
   maxBuildMs: number;
+  perNodeBuildMs?: number[];
 }
 
 export interface BuildStats {

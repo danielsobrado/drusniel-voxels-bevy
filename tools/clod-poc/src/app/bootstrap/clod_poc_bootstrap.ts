@@ -10,8 +10,8 @@ import { runWorldBuildStartup } from "./world_build_startup.js";
 import { runRendererStartup } from "./renderer_startup.js";
 import { runPostRendererStartup } from "./post_renderer_startup.js";
 import { runTerrainViewStartup } from "./terrain_view_startup.js";
-import { runRuntimeSystemsStartup } from "./runtime_systems_startup.js";
-import { runUiStartup } from "./ui_startup.js";
+import { runRuntimeSystemsStartup } from "./runtime/runtime_systems_startup.js";
+import { runUiStartup } from "./ui/ui_startup.js";
 
 
 export async function bootstrapClodPoc() {
@@ -129,6 +129,8 @@ export async function bootstrapClodPoc() {
     understoryConfig: world.understoryConfig,
     forestLightingConfig: world.forestLightingConfig,
     waterConfig: world.waterConfig,
+    customPropsConfig: world.customPropsConfig,
+    propPlacementScenes: world.propPlacementScenes,
     queryGrassRingGrid: queries.queryGrassRingGrid,
     queryGrassRingCell: queries.queryGrassRingCell,
     isWebGpu: renderer.isWebGpu,
@@ -140,6 +142,7 @@ export async function bootstrapClodPoc() {
     currentLighting: terrainView.currentLighting,
     vegetationDirtyQueue: postRenderer.terrainEdit.vegetationDirtyQueue,
     statControllers: postRenderer.uiRefs.statControllers,
+    getHooks: () => postRenderer.longViewHooks,
   });
 
   await runUiStartup({

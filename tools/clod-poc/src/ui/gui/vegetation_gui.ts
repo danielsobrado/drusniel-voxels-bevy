@@ -1,11 +1,11 @@
 import type GUI from "lil-gui";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { GRASS_SHADER_MODES } from "../../grass.js";
-import type { GrassController } from "../../systems/grass_controller.js";
-import type { StoneController } from "../../systems/stone_controller.js";
-import type { TreeController } from "../../systems/tree_controller.js";
-import type { UnderstoryController } from "../../systems/understory_controller.js";
-import type { ForestLightingController } from "../../systems/forest_lighting_controller.js";
+import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
+import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
+import type { TreeController } from "../../runtime/vegetation/tree_controller.js";
+import type { UnderstoryController } from "../../runtime/vegetation/understory_controller.js";
+import type { ForestLightingController } from "../../runtime/forest_lighting/forest_lighting_controller.js";
 import type { FarShellController } from "../../systems/far_shell_controller.js";
 import type { TreeSettings } from "../../trees/index.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";

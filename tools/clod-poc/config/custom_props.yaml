@@ -1,0 +1,123 @@
+# Custom props loaded from external GLB/GLTF meshes. These are a separate spatial layer
+# over CLOD terrain pages — they never enter source_mesh.ts or CLOD page meshes.
+enabled: false
+
+prop_spatial:
+  cell_size_m: 64
+  max_instances_per_cell_warning: 512
+  far_cell_update_interval_frames: 8
+
+culling:
+  cell_frustum_culling: true
+  cell_distance_culling: true
+  per_instance_frustum_culling_for_large_props: true
+  per_instance_culling_min_radius: 1.5
+  far_update_interval_frames: 8
+  hysteresis_m: 8
+
+category_budgets:
+  small_decor:
+    max_triangles: 800
+    max_materials: 2
+    max_draw_parts: 4
+    max_texture_px: 1024
+  medium_static:
+    max_triangles: 8000
+    max_materials: 4
+    max_draw_parts: 8
+    max_texture_px: 2048
+  large_static:
+    max_triangles: 32000
+    max_materials: 6
+    max_draw_parts: 12
+    max_texture_px: 4096
+  vegetation:
+    max_triangles: 12000
+    max_materials: 4
+    max_draw_parts: 8
+    max_texture_px: 2048
+  interactive:
+    max_triangles: 16000
+    max_materials: 6
+    max_draw_parts: 10
+    max_texture_px: 2048
+
+debug:
+  show_cells: false
+  show_bounds: false
+  lod_color_overlay: false
+  billboard_overlay: false
+
+shadows:
+  max_shadow_props: 512
+
+props:
+  - id: stone_ruin_wall
+    source: models/custom_props/ruins/stone_ruin_wall.glb
+    category: large_static
+    placement:
+      align_to_terrain: true
+      terrain_conform: false
+      snap_to_grid: false
+    lod:
+      mode: generated
+      distances: [0, 40, 90, 180, 280]
+      triangle_ratios: [1.0, 0.5, 0.25, 0.08]
+      billboard_from: 180
+      hysteresis: 12
+    culling:
+      max_distance: 280
+      shadow_distance: 64
+      reflection_distance: 120
+      min_screen_px: 6
+    collision:
+      mode: box
+      distance: 48
+    lighting_proxy:
+      mode: coarse_bounds
+      affect_gi: true
+      affect_fog: true
+
+  - id: crate_a
+    source: models/custom_props/crates/crate_a.glb
+    category: medium_static
+    placement:
+      align_to_terrain: true
+      terrain_conform: false
+      snap_to_grid: false
+    lod:
+      mode: generated
+      distances: [0, 30, 70, 140]
+      triangle_ratios: [1.0, 0.5, 0.2]
+      hysteresis: 10
+    culling:
+      max_distance: 140
+      shadow_distance: 48
+      reflection_distance: 80
+      min_screen_px: 4
+    collision:
+      mode: box
+      distance: 48
+
+  - id: rock_large_01
+    source: models/custom_props/rocks/rock_large_01.glb
+    category: large_static
+    placement:
+      align_to_terrain: true
+      terrain_conform: false
+      snap_to_grid: false
+      slope_limit_degrees: 35
+    lod:
+      mode: generated
+      distances: [0, 50, 120, 220, 320]
+      triangle_ratios: [1.0, 0.5, 0.25, 0.1]
+      billboard_from: 220
+      hysteresis: 12
+    culling:
+      max_distance: 320
+      shadow_distance: 72
+      reflection_distance: 140
+      min_screen_px: 6
+    collision:
+      mode: trimesh_near_only
+      distance: 48

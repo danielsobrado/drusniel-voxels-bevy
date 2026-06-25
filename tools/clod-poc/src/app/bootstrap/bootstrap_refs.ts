@@ -1,6 +1,6 @@
 import type { ProjectArchiveContents } from "../../project_archive.js";
 import { createClodRuntimeBindings } from "../clod_runtime_bindings.js";
-import type { VegetationStatControllerRefs } from "./runtime_systems_startup.js";
+import type { VegetationStatControllerRefs } from "./runtime/runtime_systems_startup.js";
 
 export type GuiDisplayController = { updateDisplay: () => unknown };
 
