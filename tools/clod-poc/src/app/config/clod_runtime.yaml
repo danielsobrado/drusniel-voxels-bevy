@@ -12,6 +12,8 @@ terrain_textures:
 
 near_field:
   chunk_group_build_budget: 1
+  max_cached_chunk_groups: 64
+  evict_distance_multiplier: 2.5
 
 digging:
   hold_interval_ms: 400

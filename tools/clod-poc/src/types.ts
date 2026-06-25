@@ -40,6 +40,8 @@ export interface ClodPageNode {
    * re-extracting all PxP chunks. The welded page mesh stays identical to a full rebuild.
    */
   chunkMeshes?: PageMesh[];
+  /** Source chunk revisions this node was built from (LOD0 only). */
+  sourceRevisions?: Array<{ chunkX: number; chunkZ: number; revision: number }>;
 }
 
 export interface BorderTolerances {
@@ -60,4 +62,39 @@ export class ClodBuildError extends Error {
     super(`${kind}: ${message}`);
     this.name = "ClodBuildError";
   }
+}
+
+/** Unique identifier for a page in the quadtree hierarchy. */
+export interface PageId {
+  level: number;
+  x: number;
+  z: number;
+}
+
+/** Bounding sphere. */
+export interface BoundingSphere {
+  center: Vec3;
+  radius: number;
+}
+
+export interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * Terrain chunk main-surface export.
+ * LOD0 only: built from same-resolution chunk terrain meshes, never from page-level voxel re-extraction.
+ */
+export interface TerrainChunkMainSurface {
+  chunkX: number;
+  chunkZ: number;
+  lod: 0;
+  origin: Vec3;
+  revision: number;
+  positions: Float32Array;
+  normals: Float32Array;
+  materials: Float32Array;
+  indices: Uint32Array;
 }

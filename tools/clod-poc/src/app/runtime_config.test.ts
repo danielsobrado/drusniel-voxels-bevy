@@ -15,6 +15,8 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.webgpuSelection.errorTolerancePx).toBe(0.02);
     expect(config.terrainTextures.textureArraySize).toBe(512);
     expect(config.nearField.chunkGroupBuildBudget).toBe(1);
+    expect(config.nearField.maxCachedChunkGroups).toBe(64);
+    expect(config.nearField.evictDistanceMultiplier).toBe(2.5);
     expect(config.digging.holdIntervalMs).toBe(400);
     expect(config.profiling.slowFrameMs).toBe(24);
   });

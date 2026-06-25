@@ -55,6 +55,8 @@ function makeConfig(): ClodPagesConfig {
     },
     near_field: { radius_chunks: 1 },
     meshopt_package_version: "0.22.0",
+    poc: { lod0_pages_x: 8, lod0_pages_z: 8, smoke_lod0_pages_x: 4, smoke_lod0_pages_z: 4, emit_debug_json: false, emit_debug_obj: false },
+    validation: { position_epsilon: 0.000001, normal_dot_min: 0.9999, material_weight_epsilon: 0.0001, zero_area_epsilon: 0.00000001 },
   };
 }
 

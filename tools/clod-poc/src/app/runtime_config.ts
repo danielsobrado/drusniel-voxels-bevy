@@ -16,6 +16,8 @@ export interface ClodRuntimeConfig {
   };
   nearField: {
     chunkGroupBuildBudget: number;
+    maxCachedChunkGroups: number;
+    evictDistanceMultiplier: number;
   };
   digging: {
     holdIntervalMs: number;
@@ -40,6 +42,8 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
   },
   nearField: {
     chunkGroupBuildBudget: 1,
+    maxCachedChunkGroups: 64,
+    evictDistanceMultiplier: 2.5,
   },
   digging: {
     holdIntervalMs: 400,
@@ -108,6 +112,14 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
         chunkGroupBuildBudget: positiveInt(
           nearField.chunk_group_build_budget,
           defaults.nearField.chunkGroupBuildBudget,
+        ),
+        maxCachedChunkGroups: positiveInt(
+          nearField.max_cached_chunk_groups,
+          defaults.nearField.maxCachedChunkGroups,
+        ),
+        evictDistanceMultiplier: positiveNumber(
+          nearField.evict_distance_multiplier,
+          defaults.nearField.evictDistanceMultiplier,
         ),
       },
       digging: {

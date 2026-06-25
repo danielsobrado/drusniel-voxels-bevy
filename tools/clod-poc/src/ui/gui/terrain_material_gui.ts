@@ -12,7 +12,7 @@ export interface TerrainMaterialGuiDeps {
   applyTerrainTextures: () => void;
   updateSelection: () => void;
   updateInfo: () => void;
-  chunkGroups: Iterable<{ mats: Iterable<{ setBaseColor: (color: number) => void }> }>;
+  applyBubbleTint: (enabled: boolean) => void;
 }
 
 export interface TerrainMaterialGuiResult {
@@ -50,9 +50,7 @@ export function createTerrainMaterialGui(
   bubbleFolder.add(state, "bubble").name("enable (raw chunks)").onChange(deps.updateSelection);
   bubbleFolder.add(state, "bubbleRadius", 16, 160, 1).name("radius (cells)").onChange(deps.updateSelection);
   bubbleFolder.add(state, "tintBubble").name("tint bubble red").onChange((on: boolean) => {
-    for (const { mats } of deps.chunkGroups) {
-      for (const m of mats) m.setBaseColor(on ? 0xc94b4b : 0xffffff);
-    }
+    deps.applyBubbleTint(on);
   });
 
   const digFolder = gui.addFolder("digging");
