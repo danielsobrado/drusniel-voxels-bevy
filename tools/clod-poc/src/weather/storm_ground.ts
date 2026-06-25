@@ -44,7 +44,7 @@ export interface StormLightningOptions {
   seed?: number;
 }
 
-const STRIKE_COUNT = 28;
+const STRIKE_COUNT = 32;
 const STRIKE_AREA = 48;
 const REPOSITION_DISTANCE = 8;
 const SURFACE_OFFSET = 0.09;
@@ -147,8 +147,8 @@ export class StormLightningSystem {
       this.buffers.normal[c] = point.normal.x;
       this.buffers.normal[c + 1] = point.normal.y;
       this.buffers.normal[c + 2] = point.normal.z;
-      this.buffers.params[p] = rng.range(9.0, 24.0);
-      this.buffers.params[p + 1] = rng.range(0.06, 0.18);
+      this.buffers.params[p] = rng.range(12.0, 30.0);
+      this.buffers.params[p + 1] = rng.range(0.34, 0.82);
       this.buffers.params[p + 2] = rng.float();
       this.buffers.params[p + 3] = 1;
     }
@@ -190,14 +190,27 @@ function createStrikeGeometry(count: number): { geometry: THREE.InstancedBufferG
     1, 0, 0,
     -1, 1, 0,
     1, 1, 0,
+    -1, 0, 1,
+    1, 0, 1,
+    -1, 1, 1,
+    1, 1, 1,
   ]), 3));
   geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
     0, 0,
     1, 0,
     0, 1,
     1, 1,
+    0, 0,
+    1, 0,
+    0, 1,
+    1, 1,
   ]), 2));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([0, 1, 2, 2, 1, 3]), 1));
+  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([
+    0, 1, 2,
+    2, 1, 3,
+    4, 5, 6,
+    6, 5, 7,
+  ]), 1));
   geometry.instanceCount = count;
 
   const buffers: StrikeBuffers = {
@@ -224,10 +237,12 @@ void main() {
   vec3 n = normalize(aLightningNormal);
   vec3 ref = abs(n.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
   vec3 tangent = normalize(cross(ref, n));
-  float lean = sin(aLightningParams.z * 17.0) * 0.18;
-  vec3 up = normalize(mix(vec3(0.0, 1.0, 0.0), n, 0.35) + tangent * lean);
+  vec3 bitangent = normalize(cross(n, tangent));
+  vec3 widthAxis = position.z < 0.5 ? tangent : bitangent;
+  float lean = sin(aLightningParams.z * 17.0) * 0.22;
+  vec3 up = normalize(mix(vec3(0.0, 1.0, 0.0), n, 0.24) + widthAxis * lean);
   vec3 worldPosition = aLightningCenter
-    + tangent * position.x * aLightningParams.y
+    + widthAxis * position.x * aLightningParams.y
     + up * position.y * aLightningParams.x;
 
   vUv = uv;
@@ -249,7 +264,34 @@ varying float vSeed;
 varying float vActive;
 
 float hash12(vec2 p) {
-  return fract(sin(dot(p, vec2(13.9898, 8.141))) * 43758.5453);
+  return fract(cos(mod(dot(p, vec2(13.9898, 8.141)), 3.14)) * 43758.5453);
+}
+
+vec2 hash22(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return 2.0 * fract(sin(p) * 43758.5453123);
+}
+
+float noise(vec2 p) {
+  vec2 iuv = floor(p);
+  vec2 fuv = fract(p);
+  vec2 blur = smoothstep(0.0, 1.0, fuv);
+  float a = dot(hash22(iuv + vec2(0.0, 0.0)), fuv - vec2(0.0, 0.0));
+  float b = dot(hash22(iuv + vec2(1.0, 0.0)), fuv - vec2(1.0, 0.0));
+  float c = dot(hash22(iuv + vec2(0.0, 1.0)), fuv - vec2(0.0, 1.0));
+  float d = dot(hash22(iuv + vec2(1.0, 1.0)), fuv - vec2(1.0, 1.0));
+  return mix(mix(a, b, blur.x), mix(c, d, blur.x), blur.y) + 0.5;
+}
+
+float fbm(vec2 p) {
+  float value = 0.0;
+  float amplitude = 0.5;
+  for (int i = 0; i < 8; i++) {
+    value += amplitude * noise(p);
+    p *= 2.0;
+    amplitude *= 0.5;
+  }
+  return value;
 }
 
 void main() {
@@ -257,27 +299,27 @@ void main() {
   float eventTime = uTime * uRate * mix(1.05, 1.65, stormStrength) + vSeed * 7.0;
   float localTime = fract(eventTime);
   float cycle = floor(eventTime);
-  float gate = smoothstep(mix(0.68, 0.32, stormStrength), 0.98, hash12(vec2(cycle, vSeed)));
-  float flashA = 1.0 - smoothstep(0.0, 0.16, localTime);
-  float flashB = (1.0 - smoothstep(0.0, 0.075, abs(localTime - 0.22))) * 0.42;
+  float gate = smoothstep(mix(0.66, 0.28, stormStrength), 0.98, hash12(vec2(cycle, vSeed)));
+  float flashA = 1.0 - smoothstep(0.0, 0.18, localTime);
+  float flashB = (1.0 - smoothstep(0.0, 0.08, abs(localTime - 0.24))) * 0.48;
   float flash = max(flashA, flashB) * gate * vActive;
   if (flash < 0.002) discard;
 
-  float x = vUv.x * 2.0 - 1.0;
-  float y = vUv.y;
-  float centerLine = (sin(y * 13.0 + vSeed * 41.0) * 0.16 + sin(y * 31.0 + vSeed * 17.0) * 0.07) * mix(0.35, 1.0, y);
-  float dist = abs(x - centerLine);
-  float core = 1.0 - smoothstep(0.0, 0.045, dist);
-  float glow = 1.0 - smoothstep(0.04, 0.42, dist);
-  float branchSeed = sin(y * 23.0 + vSeed * 97.0) * 0.5 + 0.5;
-  float branchMask = smoothstep(0.80, 0.98, branchSeed) * smoothstep(0.2, 0.82, y);
-  float branch = (1.0 - smoothstep(0.02, 0.11, abs(x - centerLine - (branchSeed - 0.5) * 0.58))) * branchMask * 0.5;
-  float ground = (1.0 - smoothstep(0.0, 0.14, y)) * (1.0 - smoothstep(0.0, 0.72, abs(x))) * 0.5;
+  vec2 modifiedUv = 2.0 * vUv - 1.0;
+  modifiedUv.y *= 4.0;
+  modifiedUv.x *= 1.15;
+  modifiedUv.x -= 0.5;
+  modifiedUv += fbm(modifiedUv + vec2(uTime * 3.0 + vSeed * 17.0));
 
-  float alpha = min((core + glow * 0.32 + branch + ground) * flash * clamp(uIntensity, 0.0, 1.6), 1.0);
+  float dist = abs(modifiedUv.x);
+  float godotCore = 0.055 / max(dist, 0.012);
+  float body = smoothstep(0.72, 2.8, godotCore);
+  float glow = smoothstep(0.12, 1.25, godotCore);
+  float groundBloom = (1.0 - smoothstep(0.0, 0.17, vUv.y)) * (1.0 - smoothstep(0.0, 0.9, abs(vUv.x * 2.0 - 1.0))) * 0.55;
+  float alpha = min((body + glow * 0.42 + groundBloom) * flash * clamp(uIntensity, 0.0, 1.6), 1.0);
   if (alpha < 0.003) discard;
 
-  vec3 color = uEffectColor * uMainColor * (core * 2.2 + glow * 0.9 + branch * 1.4 + ground) * uEmissionPower;
+  vec3 color = uEffectColor * uMainColor * (body * 2.5 + glow * 0.95 + groundBloom) * uEmissionPower;
   gl_FragColor = vec4(color, alpha);
 }
 `;
@@ -287,7 +329,7 @@ function createStormShaderMaterial(): RainWeatherShaderHandle {
     uTime: { value: 0 },
     uIntensity: { value: 1 },
     uRate: { value: 0.78 },
-    uEmissionPower: { value: 3.0 },
+    uEmissionPower: { value: 3.2 },
     uEffectColor: { value: new THREE.Color(0.55, 0.62, 1.0) },
     uMainColor: { value: new THREE.Color(1.0, 1.0, 1.0) },
   };
@@ -320,7 +362,7 @@ function createStormNodeMaterial(): RainWeatherShaderHandle {
   const uTime = uniform(0) as TslNode;
   const uIntensity = uniform(1) as TslNode;
   const uRate = uniform(0.78) as TslNode;
-  const uEmissionPower = uniform(3.0) as TslNode;
+  const uEmissionPower = uniform(3.2) as TslNode;
   const uEffectColor = uniform(new THREE.Color(0.55, 0.62, 1.0)) as TslNode;
   const uMainColor = uniform(new THREE.Color(1.0, 1.0, 1.0)) as TslNode;
 
@@ -331,8 +373,10 @@ function createStormNodeMaterial(): RainWeatherShaderHandle {
   const n: TslNode = normalize(aNormal);
   const ref: TslNode = abs(n.y).lessThan(0.95).select(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0));
   const tangent: TslNode = normalize(cross(ref, n));
-  const up: TslNode = normalize(mix(vec3(0.0, 1.0, 0.0), n, 0.35).add(tangent.mul(sin(aParams.z.mul(17.0)).mul(0.18))));
-  const worldPosition: TslNode = aCenter.add(tangent.mul(pos.x).mul(aParams.y)).add(up.mul(pos.y).mul(aParams.x));
+  const bitangent: TslNode = normalize(cross(n, tangent));
+  const widthAxis: TslNode = pos.z.lessThan(0.5).select(tangent, bitangent);
+  const up: TslNode = normalize(mix(vec3(0.0, 1.0, 0.0), n, 0.24).add(widthAxis.mul(sin(aParams.z.mul(17.0)).mul(0.22))));
+  const worldPosition: TslNode = aCenter.add(widthAxis.mul(pos.x).mul(aParams.y)).add(up.mul(pos.y).mul(aParams.x));
 
   const fragment = Fn(() => {
     const p: TslNode = uv();
@@ -340,33 +384,28 @@ function createStormNodeMaterial(): RainWeatherShaderHandle {
     const eventTime: TslNode = uTime.mul(uRate).mul(mix(1.05, 1.65, stormStrength)).add(aParams.z.mul(7.0));
     const localTime: TslNode = fract(eventTime);
     const cycle: TslNode = floor(eventTime);
-    const gate: TslNode = smoothstep(mix(0.68, 0.32, stormStrength), 0.98, hash12Node(vec2(cycle, aParams.z)));
+    const gate: TslNode = smoothstep(mix(0.66, 0.28, stormStrength), 0.98, hash12Node(vec2(cycle, aParams.z)));
     const flash: TslNode = max(
-      float(1).sub(smoothstep(0.0, 0.16, localTime)),
-      float(1).sub(smoothstep(0.0, 0.075, abs(localTime.sub(0.22)))).mul(0.42),
+      float(1).sub(smoothstep(0.0, 0.18, localTime)),
+      float(1).sub(smoothstep(0.0, 0.08, abs(localTime.sub(0.24)))).mul(0.48),
     ).mul(gate).mul(aParams.w);
     flash.lessThan(0.002).discard();
 
     const x: TslNode = p.x.mul(2.0).sub(1.0);
     const y: TslNode = p.y;
-    const centerLine: TslNode = sin(y.mul(13.0).add(aParams.z.mul(41.0))).mul(0.16)
-      .add(sin(y.mul(31.0).add(aParams.z.mul(17.0))).mul(0.07))
+    const centerLine: TslNode = sin(y.mul(13.0).add(aParams.z.mul(41.0)).add(uTime.mul(3.0))).mul(0.2)
+      .add(sin(y.mul(31.0).add(aParams.z.mul(17.0)).add(uTime.mul(1.7))).mul(0.11))
       .mul(mix(0.35, 1.0, y));
     const dist: TslNode = abs(x.sub(centerLine));
-    const core: TslNode = float(1).sub(smoothstep(0.0, 0.045, dist));
-    const glow: TslNode = float(1).sub(smoothstep(0.04, 0.42, dist));
-    const branchSeed: TslNode = sin(y.mul(23.0).add(aParams.z.mul(97.0))).mul(0.5).add(0.5);
-    const branchMask: TslNode = smoothstep(0.80, 0.98, branchSeed).mul(smoothstep(0.2, 0.82, y));
-    const branch: TslNode = float(1).sub(smoothstep(0.02, 0.11, abs(x.sub(centerLine).sub(branchSeed.sub(0.5).mul(0.58)))))
-      .mul(branchMask)
-      .mul(0.5);
-    const ground: TslNode = float(1).sub(smoothstep(0.0, 0.14, y))
-      .mul(float(1).sub(smoothstep(0.0, 0.72, abs(x))))
-      .mul(0.5);
-    const alpha: TslNode = min(core.add(glow.mul(0.32)).add(branch).add(ground).mul(flash).mul(clamp(uIntensity, 0.0, 1.6)), 1.0);
+    const body: TslNode = float(1).sub(smoothstep(0.0, 0.12, dist));
+    const glow: TslNode = float(1).sub(smoothstep(0.08, 0.64, dist));
+    const ground: TslNode = float(1).sub(smoothstep(0.0, 0.17, y))
+      .mul(float(1).sub(smoothstep(0.0, 0.9, abs(x))))
+      .mul(0.55);
+    const alpha: TslNode = min(body.add(glow.mul(0.42)).add(ground).mul(flash).mul(clamp(uIntensity, 0.0, 1.6)), 1.0);
     alpha.lessThan(0.003).discard();
 
-    const brightness: TslNode = core.mul(2.2).add(glow.mul(0.9)).add(branch.mul(1.4)).add(ground);
+    const brightness: TslNode = body.mul(2.5).add(glow.mul(0.95)).add(ground);
     return vec4(uEffectColor.mul(uMainColor).mul(brightness).mul(uEmissionPower), alpha);
   });
 
