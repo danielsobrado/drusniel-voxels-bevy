@@ -34,6 +34,24 @@ export function percentile(values: number[], p: number): number {
   return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
 }
 
+export function runFullHierarchyBuild(
+  buildFn: () => { stats: BuildStats },
+  warmRuns: number,
+  measuredRuns: number,
+): { timings: number[]; allStats: BuildStats[] } {
+  for (let i = 0; i < warmRuns; i++) buildFn();
+
+  const timings: number[] = [];
+  const allStats: BuildStats[] = [];
+  for (let i = 0; i < measuredRuns; i++) {
+    const t0 = performance.now();
+    const result = buildFn();
+    timings.push(performance.now() - t0);
+    allStats.push(result.stats);
+  }
+  return { timings, allStats };
+}
+
 export function measureBuildTimingsFromStats(stats: BuildStats): BuildTimingMetrics {
   const allMs = stats.levels.flatMap((l) => {
     if (l.level === 0) return [];

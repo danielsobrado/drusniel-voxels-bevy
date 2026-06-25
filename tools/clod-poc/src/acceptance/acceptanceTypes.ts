@@ -105,8 +105,8 @@ export interface AcceptanceConfig {
 
 export class AcceptanceError extends Error {
   constructor(
-    message: string,
     public readonly code: string,
+    message: string,
     public readonly details: Record<string, unknown> = {},
   ) {
     super(message);

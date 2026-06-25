@@ -17,7 +17,7 @@ acceptance:
     low_benefit_rate_max: 0.10
 
     full_hierarchy_build_ms_max: 8000
-    single_node_rebuild_ms_max: 200
+    single_node_rebuild_ms_max: 80
 
     density_scar_score_max: 0.35
     visual_hole_pixel_ratio_max: 0.0

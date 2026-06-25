@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { initSimplifier } from "../simplify.js";
 import { buildTestHierarchy } from "../clod/buildTestHierarchy.js";
 import { fixtureByName, type FixtureDef } from "../clod/stressFixtures.js";
-import { type ClodPagesConfig, DEFAULT_DIAGONAL_FLIP_CONFIG } from "../config.js";
+import { type ClodPagesConfig, parseConfig } from "../config.js";
 import type { AcceptanceConfig, AcceptanceRunReport, AcceptanceGateResult, AcceptanceMetrics, Logger } from "./acceptanceTypes.js";
 import {
   buildReport,
@@ -13,42 +16,37 @@ import {
 import { runGateA1, runGateA2 } from "./borderValidation.js";
 import { runGateA4, computeTriangleReduction } from "./triangleReductionGate.js";
 import { runGateA6, computeLowBenefitRates } from "./lowBenefitGate.js";
-import { runGateA5, measureBuildTimingsFromStats } from "./buildCostGate.js";
+import { runGateA5, measureBuildTimingsFromStats, runFullHierarchyBuild } from "./buildCostGate.js";
 import { runGateA3 } from "./densityScarGate.js";
 import { writeScreenshotNotAvailable } from "./screenshots.js";
 import { defineScreenshots } from "./screenshots.js";
 
-const ACCEPTANCE_CFG: ClodPagesConfig = {
-  page: { chunks_per_page: 4, chunk_size: 16, halo_chunks: 1, quadtree_levels: 4 },
-  simplify: {
-    target_ratio_per_level: 0.5,
-    abandon_ratio: 0.85,
-    target_error: 0.01,
-    weld_epsilon_cells: 0.001,
-    attribute_weights: { normal: 0.5, material: 1.0 },
-  },
-  polish: { diagonal_flip: DEFAULT_DIAGONAL_FLIP_CONFIG },
-  selection: {
-    error_threshold_px: 1,
-    hysteresis_merge_factor: 1.5,
-    neighbor_level_delta_max: 1,
-    transition_mode: "instant",
-    crossfade_frames: 0,
-    freeze_selection: false,
-  },
-  near_field: { enabled: true, radius_chunks: 6, show_mask: true },
-  debug: {
-    show_wireframe: true, show_page_boundaries: true, show_locked_border_vertices: false,
-    show_error_labels: true, show_stats_panel: true,
-    lod_colors: { lod0: "#3b82f6", lod1: "#22c55e", lod2: "#f59e0b", lod3: "#ef4444" },
-  },
-  stress: { active_scene: "ridge_border" },
-  meshopt_package_version: "0.22.0",
-  poc: { lod0_pages_x: 8, lod0_pages_z: 8, smoke_lod0_pages_x: 4, smoke_lod0_pages_z: 4, emit_debug_json: true, emit_debug_obj: false },
-  validation: { position_epsilon: 0.000001, normal_dot_min: 0.9999, material_weight_epsilon: 0.0001, zero_area_epsilon: 0.00000001 },
-};
+const _runnerDir = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_CONFIG_PATH = join(_runnerDir, "..", "..", "config", "clod_pages.yaml");
+
+function normalFromHeightFn(heightFn: (x: number, z: number) => number, eps = 0.01) {
+  return (x: number, z: number): [number, number, number] => {
+    const h = heightFn(x, z);
+    const hx = heightFn(x + eps, z);
+    const hz = heightFn(x, z + eps);
+    const dx = (hx - h) / eps;
+    const dz = (hz - h) / eps;
+    const len = Math.hypot(-dx, 1, -dz);
+    return len > 0 ? [-dx / len, 1 / len, -dz / len] : [0, 1, 0];
+  };
+}
+
+function loadClodPagesConfig(path?: string): ClodPagesConfig {
+  const configPath = path ?? DEFAULT_CONFIG_PATH;
+  const text = readFileSync(configPath, "utf-8");
+  return parseConfig(text);
+}
 
 function defaultPageMeshProvider(fixture: FixtureDef, cellsPerSide: number) {
+  const heightFn = fixture.height;
+  const materialFn = fixture.material;
+  const normalFn = normalFromHeightFn(heightFn, 0.01);
+
   return (px: number, pz: number) => {
     const baseX = px * cellsPerSide;
     const baseZ = pz * cellsPerSide;
@@ -61,10 +59,11 @@ function defaultPageMeshProvider(fixture: FixtureDef, cellsPerSide: number) {
       for (let i = 0; i <= cellsPerSide; i++) {
         const wx = baseX + i;
         const wz = baseZ + j;
-        const h = fixture.height(wx, wz);
-        const m = fixture.material(wx, wz);
+        const h = heightFn(wx, wz);
+        const n = normalFn(wx, wz);
+        const m = materialFn(wx, wz);
         positions.push(wx, h, wz);
-        normals.push(0, 1, 0);
+        normals.push(n[0], n[1], n[2]);
         materials.push(m);
       }
     }
@@ -97,14 +96,19 @@ function defaultPageMeshProvider(fixture: FixtureDef, cellsPerSide: number) {
   };
 }
 
-function buildForFixture(fixture: FixtureDef, worldPagesX: number, worldPagesZ: number) {
-  const cellsPerPage = ACCEPTANCE_CFG.page.chunks_per_page * ACCEPTANCE_CFG.page.chunk_size;
+function buildForFixture(
+  clodCfg: ClodPagesConfig,
+  fixture: FixtureDef,
+  worldPagesX: number,
+  worldPagesZ: number,
+) {
+  const cellsPerPage = clodCfg.page.chunks_per_page * clodCfg.page.chunk_size;
   const provider = defaultPageMeshProvider(fixture, cellsPerPage);
-  return buildTestHierarchy(worldPagesX, worldPagesZ, ACCEPTANCE_CFG, provider);
+  return buildTestHierarchy(worldPagesX, worldPagesZ, clodCfg, provider);
 }
 
-function buildFixtureWorld(config: AcceptanceConfig, fixture: FixtureDef) {
-  return buildForFixture(fixture, config.world.lod0PagesX, config.world.lod0PagesZ);
+function buildFixtureWorld(clodCfg: ClodPagesConfig, config: AcceptanceConfig, fixture: FixtureDef) {
+  return buildForFixture(clodCfg, fixture, config.world.lod0PagesX, config.world.lod0PagesZ);
 }
 
 function worstStatus(a: "pass" | "warn" | "fail", b: "pass" | "warn" | "fail"): "pass" | "warn" | "fail" {
@@ -148,18 +152,21 @@ export async function runAcceptance(
 ): Promise<{ report: AcceptanceRunReport; runDir: string }> {
   await initSimplifier();
 
+  const clodCfg = loadClodPagesConfig();
+
   const startedAtIso = new Date().toISOString();
   const tStart = performance.now();
   const runId = createRunId();
   const runDir = createRunDir(config.outputDir, runId);
   const perSceneGates: Map<string, AcceptanceGateResult[]> = new Map();
+  const allScreenshotPaths: string[] = [];
+  const lodDeltas = config.stressScenes.forcedNeighborLodDeltas;
 
   const activeFixtures: { name: string; def: FixtureDef }[] = [];
 
   if (singleScene) {
     const f = fixtureByName(singleScene) ?? fixtureByName(singleScene.replace("_border", ""));
-    const name = singleScene;
-    if (f) activeFixtures.push({ name, def: f });
+    if (f) activeFixtures.push({ name: singleScene, def: f });
   } else {
     if (config.stressScenes.ridgeBorder) {
       const f = fixtureByName("ridge_border");
@@ -185,19 +192,18 @@ export async function runAcceptance(
     logger.warn("No active fixtures configured, falling back to ridge_border");
   }
 
-  const lodDeltas = config.stressScenes.forcedNeighborLodDeltas;
-
   logger.info(`Running ${activeFixtures.length} scenes`);
   logger.info(`LOD deltas: ${lodDeltas.join(", ")}`);
 
   for (const { name, def } of activeFixtures) {
     logger.info(`Building fixture: ${name}`);
-    const result = buildFixtureWorld(config, def);
+    const result = buildFixtureWorld(clodCfg, config, def);
     const nodesByLevel = result.nodesByLevel;
 
     logger.info(`  Levels: ${nodesByLevel.size}, total nodes: ${[...nodesByLevel.values()].reduce((s, n) => s + n.length, 0)}`);
 
     const a1Result = runGateA1(nodesByLevel, config, name);
+
     const a2Result = runGateA2(nodesByLevel, config, name);
     const a3Result = runGateA3(nodesByLevel, config, name);
     const a4Result = runGateA4(nodesByLevel, config, name);
@@ -209,20 +215,22 @@ export async function runAcceptance(
     perSceneGates.set(name, [a1Result, a2Result, a3Result, a4Result, a6Result]);
 
     if (config.visual.enabled) {
-      const screenshots = defineScreenshots(name, lodDeltas);
-      writeScreenshotNotAvailable(runDir, screenshots, config);
+      const specs = defineScreenshots(name, lodDeltas);
+      const paths = writeScreenshotNotAvailable(runDir, specs, config);
+      allScreenshotPaths.push(...paths);
     }
   }
 
-  const firstResult = buildFixtureWorld(config, activeFixtures[0].def);
-  const buildMetrics = measureBuildTimingsFromStats(firstResult.stats);
-  const a5Result = runGateA5(firstResult.nodesByLevel, config, buildMetrics, activeFixtures[0].name);
+  const firstFixture = activeFixtures[0].def;
+  const warmupResult = buildFixtureWorld(clodCfg, config, firstFixture);
+  const buildTimings = measureBuildTimingsFromStats(warmupResult.stats);
+  const a5Result = runGateA5(warmupResult.nodesByLevel, config, buildTimings, activeFixtures[0].name);
   logger.info(`  A5 Build cost: ${a5Result.status}`);
 
   const mergedGates = mergeGatesAcrossScenes(perSceneGates, a5Result);
 
-  const firstFixtureTriangles = computeTriangleReduction(firstResult.nodesByLevel);
-  const firstFixtureLowBenefit = computeLowBenefitRates(firstResult.nodesByLevel);
+  const firstFixtureTriangles = computeTriangleReduction(warmupResult.nodesByLevel);
+  const firstFixtureLowBenefit = computeLowBenefitRates(warmupResult.nodesByLevel);
 
   const combinedA2Result = mergedGates.find((g) => g.id === "A2");
   const combinedA3Result = mergedGates.find((g) => g.id === "A3");
@@ -231,9 +239,9 @@ export async function runAcceptance(
     lod0Triangles: firstFixtureTriangles.lod0Triangles,
     lod3Triangles: firstFixtureTriangles.lod3Triangles,
     lod3TriangleRatio: firstFixtureTriangles.lod3Ratio,
-    fullHierarchyBuildMs: buildMetrics.fullHierarchyBuildMs,
-    singleNodeRebuildP50Ms: buildMetrics.singleNodeRebuildMsP50,
-    singleNodeRebuildP95Ms: buildMetrics.singleNodeRebuildMsP95,
+    fullHierarchyBuildMs: buildTimings.fullHierarchyBuildMs,
+    singleNodeRebuildP50Ms: buildTimings.singleNodeRebuildMsP50,
+    singleNodeRebuildP95Ms: buildTimings.singleNodeRebuildMsP95,
     lowBenefitRateLevel1: firstFixtureLowBenefit.lowBenefitRateLevel1,
     lowBenefitRateLevel2: firstFixtureLowBenefit.lowBenefitRateLevel2,
     maxBorderPositionDelta: typeof combinedA2Result?.measurements.maxPositionDelta === "number" ? combinedA2Result.measurements.maxPositionDelta : 0,
@@ -248,6 +256,8 @@ export async function runAcceptance(
   const finishedAtIso = new Date().toISOString();
 
   const artifacts = createArtifacts(runDir);
+  artifacts.screenshots = allScreenshotPaths;
+
   const report = buildReport(
     runId,
     startedAtIso,
@@ -260,7 +270,7 @@ export async function runAcceptance(
   );
 
   const written = writeAllArtifacts(runDir, report, config);
-  report.artifacts = written;
+  report.artifacts.screenshots = allScreenshotPaths;
 
   logger.info(`Report written to ${runDir}`);
 
@@ -292,6 +302,3 @@ function mergeGatesAcrossScenes(
 
   return Array.from(merged.values());
 }
-
-
-

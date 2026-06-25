@@ -11,14 +11,14 @@ export function computeVisualSweep(
   _nodesByLevel: Map<number, ClodPageNode[]>,
 ): VisualSweepMetrics {
   return {
-    visualHolePixelRatio: 0,
-    visualLipPixelRatio: 0,
+    visualHolePixelRatio: -1,
+    visualLipPixelRatio: -1,
     scenesChecked: 0,
   };
 }
 
 export function runGateA1VisualSweep(
-  nodesByLevel: Map<number, ClodPageNode[]>,
+  _nodesByLevel: Map<number, ClodPageNode[]>,
   config: AcceptanceConfig,
   _fixtureName: string,
 ): AcceptanceGateResult | null {
@@ -26,25 +26,19 @@ export function runGateA1VisualSweep(
     return null;
   }
 
-  const metrics = computeVisualSweep(nodesByLevel);
-  const holePass = metrics.visualHolePixelRatio <= config.thresholds.visualHolePixelRatioMax;
-  const lipPass = metrics.visualLipPixelRatio <= config.thresholds.visualLipPixelRatioMax;
-
-  const status = holePass && lipPass ? "pass" : "fail";
-  const message = status === "pass"
-    ? "No holes or lips detected in visual sweep"
-    : `Visual issues detected: holes ${metrics.visualHolePixelRatio}, lips ${metrics.visualLipPixelRatio}`;
+  const message = "Visual sweep not available in headless mode. Requires Playwright/browser for rendered screenshots.";
 
   return {
     id: "A1",
     name: "Watertight (visual sweep)",
-    status,
+    status: "warn",
     message,
     measurements: {
-      visualHolePixelRatio: metrics.visualHolePixelRatio,
-      visualLipPixelRatio: metrics.visualLipPixelRatio,
+      visualHolePixelRatio: -1,
+      visualLipPixelRatio: -1,
       visualHolePixelRatioMax: config.thresholds.visualHolePixelRatioMax,
       visualLipPixelRatioMax: config.thresholds.visualLipPixelRatioMax,
+      visualSweepAvailable: false,
     },
     failures: [],
   };
