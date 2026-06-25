@@ -6,7 +6,7 @@
 import { MeshoptSimplifier } from "meshoptimizer";
 import { PageMesh, ClodBuildError, vertexCount } from "../types.js";
 import { ClodPagesConfig } from "../config.js";
-import { assertMaterialWeights } from "../material/material_weights.js";
+import { assertMaterialWeights, normalizeMaterialWeights } from "../material/material_weights.js";
 
 let ready = false;
 export async function initSimplifier(): Promise<void> {
@@ -79,13 +79,8 @@ export function simplifyPage(
   }
 
   const [newIndices, resultError] = result;
-
-  // meshopt keeps the original vertex buffer; unused vertices are simply unreferenced.
-  // Compact to referenced vertices so downstream weld/lock/stats stay tight.
-  // NOTE: compaction copies original positions, normals, paint slots, and material weights
-  // verbatim — no snapping, no recalculation. Locked border vertices must survive
-  // simplification unchanged.
   const compacted = compact(mesh, newIndices);
+  normalizeMaterialWeights(compacted, "simplifyPage output");
 
   const errorWorld = resultError * simplifyScale(mesh);
   const lowBenefit = newIndices.length > cfg.simplify.abandon_ratio * inputIndices;
