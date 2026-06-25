@@ -205,7 +205,7 @@ export class StoneSystem {
         this.stats.small = counts.small;
         this.stats.total = counts.large + counts.medium + counts.small;
         this.stats.groups = this.draws.length;
-        this.refreshVisibleStats();
+        this.applyClassVisibility();
         this.onStats?.(this.getStats());
       })
       .catch((error) => {
