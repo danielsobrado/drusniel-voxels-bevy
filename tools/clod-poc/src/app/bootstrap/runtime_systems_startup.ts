@@ -25,14 +25,11 @@ import {
   buildGrassInstancedGeometry,
   createGrassNodeMaterial,
 } from "../../gpu/grass_node_material.js";
-import { surfaceHeight, surfaceNormal } from "../../terrain.js";
 import { createGrassController } from "../../systems/grass_controller.js";
 import { createStoneController } from "../../systems/stone_controller.js";
 import { createTreeController } from "../../systems/tree_controller.js";
 import { createUnderstoryController } from "../../systems/understory_controller.js";
 import { createForestLightingController } from "../../systems/forest_lighting_controller.js";
-import { createWaterController } from "../../systems/water_controller.js";
-import { createWeatherController } from "../../systems/weather_controller.js";
 import { packHydrologyData } from "../../systems/hydrology_packing.js";
 import { drainVegetationDirty, type VegetationDirtyQueue } from "../../systems/vegetation_dirty.js";
 import type { ClodAppState } from "../clod_app_state.js";
@@ -42,12 +39,12 @@ import {
   treeUiState,
   understoryUiState,
   forestLightingUiState,
-  waterUiState,
 } from "../clod_app_state.js";
 import type { ClodRuntimeBindings } from "../clod_runtime_bindings.js";
 import type { AppRenderer } from "./renderer_startup.js";
 import type { createTerrainMaterialController } from "../../terrain_runtime/terrain_material_controller.js";
 import type { AppSky } from "../../scene/app_sky.js";
+import { runWaterWeatherStartup, type WaterWeatherStartupResult } from "./water_weather_startup.js";
 
 export interface GuiDisplayController {
   updateDisplay: () => unknown;
@@ -96,7 +93,7 @@ export interface RuntimeSystemsStartupInput {
   statControllers: VegetationStatControllerRefs;
 }
 
-export interface RuntimeSystemsStartupResult {
+export interface RuntimeSystemsStartupResult extends WaterWeatherStartupResult {
   grassController: ReturnType<typeof createGrassController>;
   grassSystem: ReturnType<typeof createGrassController>["system"];
   makeGrassSettings: () => GrassSettings;
@@ -116,13 +113,6 @@ export interface RuntimeSystemsStartupResult {
   forestLightingSystem: ReturnType<typeof createForestLightingController>["system"];
   forestLightingStats: { current: ForestLightingStats | null };
   applyForestLightingToPropMaterials: () => void;
-  waterController: Awaited<ReturnType<typeof createWaterController>>;
-  waterField: Awaited<ReturnType<typeof createWaterController>>["field"];
-  waterDebugState: Awaited<ReturnType<typeof createWaterController>>["debugState"];
-  makeWaterVisual: () => ReturnType<Awaited<ReturnType<typeof createWaterController>>["makeVisual"]>;
-  weatherController: ReturnType<typeof createWeatherController>;
-  applyWeatherSettings: () => void;
-  updateWeatherStats: () => void;
   updateLighting: () => void;
   formatTreeGpuSummary: (stats: TreeStats) => string;
   formatUnderstoryGpuSummary: (stats: UnderstoryStats) => string;
@@ -345,42 +335,26 @@ export async function runRuntimeSystemsStartup(
   const applyForestLightingToPropMaterials = () => forestLightingController.applyToPropMaterials();
   forestLightingStats.current = forestLightingSystem.getStats();
 
-  const waterController = await createWaterController({
+  const {
+    waterController,
+    waterField,
+    waterDebugState,
+    makeWaterVisual,
+    weatherController,
+    applyWeatherSettings,
+    updateWeatherStats,
+  } = await runWaterWeatherStartup({
     scene,
-    nodes: lod0Nodes,
+    camera,
+    state,
     waterConfig,
     worldCells,
-    isWebGpu,
-    surfaceHeight,
     hydrologySystem,
-    camera,
-    getSunDirection: () => currentLighting().sunDirection,
-    getUiState: () => waterUiState(state),
     searchParams,
-    devMode: import.meta.env.DEV,
-  });
-  const waterField = waterController.field;
-  const waterDebugState = waterController.debugState;
-  const makeWaterVisual = () => waterController.makeVisual();
-
-  const weatherController = createWeatherController({
-    scene,
-    camera,
+    currentLighting,
+    lod0Nodes,
     isWebGpu,
-    worldCells,
-    surfaceHeight,
-    surfaceNormal,
-    waterSample: (x, z) => waterField.sample(x, z),
-    getSettings: () => ({
-      weatherMode: state.weatherMode,
-      weatherIntensity: state.weatherIntensity,
-      weatherWindX: state.weatherWindX,
-      weatherWindZ: state.weatherWindZ,
-    }),
-    setStatsText: (text) => { state.weatherStats = text; },
   });
-  const applyWeatherSettings = () => weatherController.applySettings();
-  const updateWeatherStats = () => weatherController.refreshStats();
 
   const updateLighting = () => {
     skyEnvironment?.updateSettings({

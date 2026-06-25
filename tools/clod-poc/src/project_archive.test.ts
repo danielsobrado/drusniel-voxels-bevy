@@ -161,6 +161,18 @@ describe("CLOD project archive", () => {
     expect(validateProjectManifest(legacy).state.grassShaderMode).toBe("classic");
   });
 
+  it("rejects v2 archives missing water or weather state", () => {
+    const missingWater = { ...manifestV2() };
+    delete (missingWater as Partial<typeof missingWater>).water;
+
+    expect(() => validateProjectManifest(missingWater)).toThrow(/water/i);
+
+    const missingWeather = { ...manifestV2() };
+    delete (missingWeather as Partial<typeof missingWeather>).weather;
+
+    expect(() => validateProjectManifest(missingWeather)).toThrow(/weather/i);
+  });
+
   it("rejects unsafe water and weather values in v2 archives", () => {
     expect(() => validateProjectManifest({
       ...manifestV2(),

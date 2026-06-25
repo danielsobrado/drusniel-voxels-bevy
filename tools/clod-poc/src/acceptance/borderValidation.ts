@@ -1,5 +1,5 @@
 import type { PageMesh, ClodPageNode, BorderTolerances, PageFootprint } from "../types.js";
-import { borderChain, assertBorderMatch } from "../validate.js";
+import { borderChain } from "../validate.js";
 import type {
   AcceptanceGateResult,
   AcceptanceFailure,

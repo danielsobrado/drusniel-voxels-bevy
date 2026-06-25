@@ -364,14 +364,26 @@ function assertWeatherArchiveState(value: unknown): asserts value is ProjectWeat
   }
 }
 
-function normalizeWaterArchiveState(value: unknown): ProjectWaterArchiveState {
+function normalizeV1WaterArchiveState(value: unknown): ProjectWaterArchiveState {
   if (value === undefined) return { ...DEFAULT_PROJECT_WATER_ARCHIVE_STATE };
   assertWaterArchiveState(value);
   return value;
 }
 
-function normalizeWeatherArchiveState(value: unknown): ProjectWeatherArchiveState {
+function normalizeV1WeatherArchiveState(value: unknown): ProjectWeatherArchiveState {
   if (value === undefined) return { ...DEFAULT_PROJECT_WEATHER_ARCHIVE_STATE };
+  assertWeatherArchiveState(value);
+  return value;
+}
+
+function requireV2WaterArchiveState(value: unknown): ProjectWaterArchiveState {
+  if (value === undefined) throw new Error("project.json is missing water state");
+  assertWaterArchiveState(value);
+  return value;
+}
+
+function requireV2WeatherArchiveState(value: unknown): ProjectWeatherArchiveState {
+  if (value === undefined) throw new Error("project.json is missing weather state");
   assertWeatherArchiveState(value);
   return value;
 }
@@ -401,8 +413,13 @@ export function validateProjectManifest(value: unknown): ClodProjectManifest {
   if (!isRecord(value.camera) || !isVec3(value.camera.position) || !isVec3(value.camera.target)) {
     throw new Error("project.json has invalid orbit camera data");
   }
-  const water = normalizeWaterArchiveState(value.water);
-  const weather = normalizeWeatherArchiveState(value.weather);
+  const isV1 = value.schemaVersion === PROJECT_SCHEMA_VERSION_V1;
+  const water = isV1
+    ? normalizeV1WaterArchiveState(value.water)
+    : requireV2WaterArchiveState(value.water);
+  const weather = isV1
+    ? normalizeV1WeatherArchiveState(value.weather)
+    : requireV2WeatherArchiveState(value.weather);
   return {
   ...(value as unknown as ClodProjectManifestV1),
     schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -417,12 +434,12 @@ export async function createProjectArchive(
   customTextures: ReadonlyMap<string, Uint8Array>,
 ): Promise<Uint8Array> {
   const { strToU8, zipSync } = await import("fflate");
-  validateProjectManifest(manifest);
+  const normalizedManifest = validateProjectManifest(manifest);
   const files: import("fflate").Zippable = {
-    [PROJECT_FILE]: [strToU8(JSON.stringify(manifest, null, 2)), { level: 6 }],
+    [PROJECT_FILE]: [strToU8(JSON.stringify(normalizedManifest, null, 2)), { level: 6 }],
     [TERRAIN_FILE]: [terrainGlb, { level: 0 }],
   };
-  for (const slot of manifest.textures) {
+  for (const slot of normalizedManifest.textures) {
     if (slot.source === "custom" && slot.customPath) {
       const bytes = customTextures.get(slot.customPath);
       if (!bytes) throw new Error(`Missing custom texture bytes for ${slot.customPath}`);

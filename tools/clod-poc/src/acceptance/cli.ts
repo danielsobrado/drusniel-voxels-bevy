@@ -96,7 +96,7 @@ export async function runAcceptanceCli(): Promise<void> {
   logger.info("CLOD Phase 3 Acceptance Gate");
   logger.info(`Config: ${configPath}`);
 
-  const { report, runDir } = await runAcceptance(config, logger);
+  const { report, runDir } = await runAcceptance(config, logger, options.scene);
 
   printSummary(report, runDir, options.jsonOnly);
 

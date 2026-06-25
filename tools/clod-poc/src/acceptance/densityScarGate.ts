@@ -16,6 +16,9 @@ export function computeDensityScar(
   let totalLockedRatio = 0;
   let maxLockedRatio = 0;
   let totalNodesWithLocks = 0;
+  let weightedScore = 0;
+  let farLodWireDensity = 0;
+  let farNodeCount = 0;
 
   for (const [level, nodes] of nodesByLevel) {
     if (level === 0) continue;
@@ -24,40 +27,23 @@ export function computeDensityScar(
       const lockedCount = countLocks(locks);
       const totalVertices = node.mesh.positions.length / 3;
       const ratio = totalVertices > 0 ? lockedCount / totalVertices : 0;
+
       totalLockedRatio += ratio;
       totalNodesWithLocks++;
       if (ratio > maxLockedRatio) maxLockedRatio = ratio;
+
+      const areaWeight = 1.0 / (1 << level);
+      weightedScore += ratio * areaWeight;
+
+      if (level >= 2) {
+        farLodWireDensity += node.mesh.indices.length / 3;
+        farNodeCount++;
+      }
     }
   }
 
   const avgLockedRatio = totalNodesWithLocks > 0 ? totalLockedRatio / totalNodesWithLocks : 0;
-
-  let weightedScore = 0;
-  let totalNodes = 0;
-  for (const [level, nodes] of nodesByLevel) {
-    if (level === 0) continue;
-    for (const node of nodes) {
-      const locks = buildOuterBorderLocks(node.mesh);
-      const lockedCount = countLocks(locks);
-      const totalVertices = node.mesh.positions.length / 3;
-      const ratio = totalVertices > 0 ? lockedCount / totalVertices : 0;
-      const areaWeight = 1.0 / (1 << level);
-      weightedScore += ratio * areaWeight;
-      totalNodes++;
-    }
-  }
-
-  const densityScarScore = totalNodes > 0 ? weightedScore / totalNodes : 0;
-
-  let farLodWireDensity = 0;
-  let farNodeCount = 0;
-  for (const [level, nodes] of nodesByLevel) {
-    if (level < 2) continue;
-    for (const node of nodes) {
-      farLodWireDensity += node.mesh.indices.length / 3;
-      farNodeCount++;
-    }
-  }
+  const densityScarScore = totalNodesWithLocks > 0 ? weightedScore / totalNodesWithLocks : 0;
   farLodWireDensity = farNodeCount > 0 ? farLodWireDensity / farNodeCount : 0;
 
   return {

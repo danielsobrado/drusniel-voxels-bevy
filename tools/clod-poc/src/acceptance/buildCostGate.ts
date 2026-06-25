@@ -1,10 +1,6 @@
+import type { BuildStats } from "../clod/stats.js";
 import type { ClodPageNode } from "../types.js";
-import { type LevelStats, type BuildStats } from "../clod/stats.js";
-import { buildTestHierarchy, type TestBuildResult } from "../clod/buildTestHierarchy.js";
 import type { AcceptanceGateResult, AcceptanceConfig, AcceptanceFailure } from "./acceptanceTypes.js";
-import type { AcceptanceThresholds } from "./acceptanceTypes.js";
-import type { ClodPagesConfig } from "../config.js";
-import type { FixtureDef } from "../clod/stressFixtures.js";
 
 export interface BuildTimingMetrics {
   fullHierarchyBuildMs: number;
@@ -36,27 +32,6 @@ export function percentile(values: number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b);
   const index = Math.ceil((p / 100) * sorted.length) - 1;
   return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
-}
-
-export function measureFullHierarchyBuild(
-  buildFn: () => TestBuildResult,
-  warmRuns: number,
-  measuredRuns: number,
-): { timings: number[]; result: TestBuildResult } {
-  for (let i = 0; i < warmRuns; i++) {
-    buildFn();
-  }
-
-  const timings: number[] = [];
-  let result: TestBuildResult | undefined;
-
-  for (let i = 0; i < measuredRuns; i++) {
-    const t0 = performance.now();
-    result = buildFn();
-    timings.push(performance.now() - t0);
-  }
-
-  return { timings, result: result! };
 }
 
 export function measureBuildTimingsFromStats(stats: BuildStats): BuildTimingMetrics {
@@ -99,7 +74,7 @@ export function measureBuildTimingsFromStats(stats: BuildStats): BuildTimingMetr
 }
 
 export function runGateA5(
-  nodesByLevel: Map<number, ClodPageNode[]>,
+  _nodesByLevel: Map<number, ClodPageNode[]>,
   config: AcceptanceConfig,
   buildMetrics: BuildTimingMetrics,
   _fixtureName: string,

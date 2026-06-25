@@ -8,7 +8,7 @@ import type {
   AcceptanceArtifacts,
   AcceptanceConfig,
 } from "./acceptanceTypes.js";
-import type { Logger } from "./acceptanceTypes.js";
+
 
 export function createRunId(): string {
   const now = new Date();
