@@ -151,7 +151,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
       rainWeather.update(deltaSeconds, elapsedSeconds, cameraPosition, effectCenter);
       snowWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
       sandstormWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
-      stormWeather.update(deltaSeconds, elapsedSeconds, effectCenter);
+      stormWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
     },
     bindStatsController(controller) {
       statsController = controller;
