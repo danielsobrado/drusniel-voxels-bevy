@@ -7,7 +7,9 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
-use super::material_tier::clod_page_material_quality_for_distance;
+use super::material_tier::{
+    clod_page_material_distance_m, clod_page_material_quality_for_distance,
+};
 use super::ownership::ClodPageMeshGate;
 use super::render::{ClodPageMeshBounds, ClodPageMeshTag};
 use super::runtime::ClodPagesRuntime;
@@ -40,6 +42,7 @@ impl From<&ClodPageMeshTag> for ClodPageNodeKey {
 pub(crate) struct ClodSelectionNode {
     pub key: ClodPageNodeKey,
     pub footprint: PageFootprint,
+    pub mesh_bounds: ClodPageMeshBounds,
     pub center: Vec3,
     pub radius: f32,
     pub error_world: f32,
@@ -82,6 +85,7 @@ impl ClodPageSelectionIndex {
                     ClodSelectionNode {
                         key,
                         footprint: node.footprint,
+                        mesh_bounds: bounds,
                         center: bounding_sphere_center(node.footprint, bounds),
                         radius: bounding_sphere_radius(node.footprint, bounds),
                         error_world: node.error_world,
@@ -107,6 +111,10 @@ impl ClodPageSelectionIndex {
 
     pub(crate) fn node(&self, key: ClodPageNodeKey) -> Option<&ClodSelectionNode> {
         self.nodes.get(&key)
+    }
+
+    pub(crate) fn nodes(&self) -> impl Iterator<Item = &ClodSelectionNode> {
+        self.nodes.values()
     }
 }
 
@@ -193,21 +201,7 @@ fn error_px(node: &ClodSelectionNode, params: &SelectionParams) -> f32 {
 }
 
 pub(crate) fn rect_distance2_to_point(footprint: PageFootprint, point: Vec2) -> f32 {
-    let dx = if point.x < footprint.min_x {
-        footprint.min_x - point.x
-    } else if point.x > footprint.max_x {
-        point.x - footprint.max_x
-    } else {
-        0.0
-    };
-    let dz = if point.y < footprint.min_z {
-        footprint.min_z - point.y
-    } else if point.y > footprint.max_z {
-        point.y - footprint.max_z
-    } else {
-        0.0
-    };
-    dx * dx + dz * dz
+    footprint.distance_xz_squared(point.x, point.y)
 }
 
 pub(crate) fn near_field_intersects_footprint(
@@ -403,9 +397,11 @@ fn set_page_fade(
     let fade = fade.clamp(0.0, 1.0);
     let dither = fade > 0.0 && fade < 0.999;
     let base_material = materials.get(base_handle).cloned();
+    let target_quality = base_material.as_ref().map(|material| material.quality);
     if materials.get(handle).is_some_and(|material| {
         (material.uniforms.clod_fade - fade).abs() <= 0.0001
             && material.clod_page_dither == dither
+            && target_quality.is_some_and(|quality| material.quality == quality)
             && !page_material_needs_base_refresh(material, base_material.as_ref())
     }) {
         return;
@@ -414,8 +410,8 @@ fn set_page_fade(
         if let Some(base_material) = base_material.as_ref() {
             if page_material_needs_base_refresh(material, Some(base_material)) {
                 *material = base_material.clone();
-                material.quality = base_material.quality;
             }
+            material.quality = base_material.quality;
         }
         material.uniforms.clod_fade = fade;
         material.clod_page_dither = dither;
@@ -521,7 +517,6 @@ pub(crate) fn clod_page_selection_system(
     state.split = new_split;
 
     let rendered: HashSet<ClodPageNodeKey> = rendered.into_iter().collect();
-    let chunks_per_page = runtime.cfg.page.chunks_per_page as i32;
     let crossfade_frames = runtime.cfg.selection.crossfade_frames;
     let fade_step = if crossfade_frames == 0 {
         1.0
@@ -530,9 +525,9 @@ pub(crate) fn clod_page_selection_system(
     };
     for (tag, mut visibility, material) in pages.iter_mut() {
         let key = ClodPageNodeKey::from(tag);
-        let pending_live_restore = gate
-            .as_deref()
-            .is_some_and(|gate| gate.node_has_pending_restore(key, chunks_per_page));
+        let pending_live_restore = gate.as_deref().is_some_and(|gate| {
+            gate.node_has_pending_restore(key, &tree)
+        });
         let outside_near_field = index.node(key).is_some_and(|node| {
             !near_field_intersects_footprint(node.footprint, params.near_field)
         });
@@ -566,7 +561,7 @@ pub(crate) fn clod_page_selection_system(
         let quality_base_handle = index
             .node(key)
             .map(|node| {
-                let distance = params.cam_pos.distance(node.center);
+                let distance = clod_page_material_distance_m(params.cam_pos, node.footprint);
                 let quality =
                     clod_page_material_quality_for_distance(distance, &runtime.cfg.material);
                 triplanar_material.handle_for_quality(quality)
@@ -612,6 +607,7 @@ mod tests {
         ClodSelectionNode {
             key,
             footprint,
+            mesh_bounds: ClodPageMeshBounds::default(),
             center: bounding_sphere_center(footprint, ClodPageMeshBounds::default()),
             radius: bounding_sphere_radius(footprint, ClodPageMeshBounds::default()),
             error_world,

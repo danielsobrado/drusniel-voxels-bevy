@@ -39,6 +39,7 @@ near_field:
 
 material:
   full_triplanar_max_m: 768.0
+  cheap_triplanar_max_m: 1280.0
   single_projection_far_max_m: 2048.0
 
 terrain_summary:

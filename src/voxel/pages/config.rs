@@ -95,6 +95,7 @@ pub struct PocGateCfg {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClodMaterialCfg {
     pub full_triplanar_max_m: f32,
+    pub cheap_triplanar_max_m: f32,
     pub single_projection_far_max_m: f32,
 }
 
@@ -102,6 +103,7 @@ impl Default for ClodMaterialCfg {
     fn default() -> Self {
         Self {
             full_triplanar_max_m: 768.0,
+            cheap_triplanar_max_m: 1280.0,
             single_projection_far_max_m: 2048.0,
         }
     }

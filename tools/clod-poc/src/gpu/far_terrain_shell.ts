@@ -117,11 +117,16 @@ export function buildFarTerrainShell(
   const heightGrid = new Float32Array(vertexCount);
   for (let gz = 0; gz <= gridRes; gz++) {
     for (let gx = 0; gx <= gridRes; gx++) {
-      const wx = originX + gx * cellSize;
-      const wz = originZ + gz * cellSize;
+      const localX = originX + gx * cellSize;
+      const localZ = originZ + gz * cellSize;
+      // When buildRelative, geometry is built around origin but heights must
+      // be sampled in world space so they match the terrain where the mesh
+      // will be placed (the mesh is offset to centerX/centerZ after build).
+      const sampleX = buildRelative ? localX + centerX : localX;
+      const sampleZ = buildRelative ? localZ + centerZ : localZ;
       const h = heightProvider
-        ? heightProvider.sampleHeight(wx, wz)
-        : sampleSkirtHeight(summary, wx, wz, farRadius, baseLevel, heightBias);
+        ? heightProvider.sampleHeight(sampleX, sampleZ)
+        : sampleSkirtHeight(summary, sampleX, sampleZ, farRadius, baseLevel, heightBias);
       heightGrid[gz * (gridRes + 1) + gx] = h - heightDrop;
     }
   }

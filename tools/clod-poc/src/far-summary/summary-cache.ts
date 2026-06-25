@@ -18,6 +18,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
   private readonly pendingBuildKeys = new Map<string, FarSummaryRingRequest>();
   private readonly stats = createFarSummaryStats();
   private frameIndex = 0;
+  private commitRevision = 0;
 
   constructor(config: FarSummaryConfig) {
     this.config = config;
@@ -29,7 +30,6 @@ export class FarSummaryCache implements FallbackStatsWriter {
     nowMs: number,
   ): void {
     this.frameIndex = frameIndex;
-    resetFrameStats(this.stats);
 
     for (const req of requests) {
       const keyStr = tileKeyToString(req.key);
@@ -74,26 +74,33 @@ export class FarSummaryCache implements FallbackStatsWriter {
     overrideMaxBuilds?: number,
   ): void {
     this.frameIndex = frameIndex;
+    resetFrameStats(this.stats);
     const maxBuilds = overrideMaxBuilds ?? this.config.stream.maxTileBuildsPerFrame;
     const commitBudget = this.config.stream.maxTileCommitsPerFrame;
 
-    // TODO(FAR_SUMMARY_ASYNC): Move tile building to a worker/incremental job queue.
-    // Currently synchronous on the frame path — OK for Phase 4 prototype.
+    const sortedPending = [...this.pendingBuildKeys.entries()]
+      .sort((a, b) =>
+        a[1].priority - b[1].priority ||
+        a[1].ring - b[1].ring ||
+        a[1].key.z - b[1].key.z ||
+        a[1].key.x - b[1].key.x
+      )
+      .slice(0, maxBuilds);
 
-    let built = 0;
-    const buildsToProcess: { keyStr: string; ringIndex: number; tileKey: FarSummaryTileKey }[] = [];
-
-    for (const [keyStr, req] of this.pendingBuildKeys) {
-      if (built >= maxBuilds) break;
-      buildsToProcess.push({ keyStr, ringIndex: req.ring, tileKey: req.key });
-      built++;
-    }
+    const buildsToProcess = sortedPending.map(([keyStr, req]) => ({
+      keyStr, ringIndex: req.ring, tileKey: req.key, priority: req.priority, req,
+    }));
 
     for (const build of buildsToProcess) {
-      this.pendingBuildKeys.delete(build.keyStr);
       const existing = this.tiles.get(build.keyStr);
       if (!existing) continue;
+      if (existing.state === 'building') {
+        existing.state = 'stale';
+        this.pendingBuildKeys.set(build.keyStr, build.req);
+        continue;
+      }
 
+      const preBuildState = existing.state;
       existing.state = 'building';
       const t0 = performance.now();
       try {
@@ -104,30 +111,28 @@ export class FarSummaryCache implements FallbackStatsWriter {
           continue;
         }
         const builtTile = buildFarSummaryTile({
-          key: build.tileKey,
-          ringConfig,
-          terrainSampler,
-          frameIndex,
-          nowMs,
+          key: build.tileKey, ringConfig, terrainSampler, frameIndex, nowMs,
         });
 
+        this.stats.tilesBuiltThisFrame++;
         if (this.stats.tilesCommittedThisFrame >= commitBudget) {
-          continue;
+          existing.state = preBuildState === 'requested' ? 'stale' : preBuildState;
+          this.pendingBuildKeys.set(build.keyStr, build.req);
+        } else {
+          this.pendingBuildKeys.delete(build.keyStr);
+          this.tiles.set(build.keyStr, builtTile);
+          this.stats.tilesCommittedThisFrame++;
+          this.commitRevision++;
         }
-
-        this.tiles.set(build.keyStr, builtTile);
-        this.stats.tilesCommittedThisFrame++;
+        const elapsed = performance.now() - t0;
+        this.stats.buildTimeMs += elapsed;
+        if (elapsed > this.stats.maxBuildTimeMs) {
+          this.stats.maxBuildTimeMs = elapsed;
+        }
       } catch (err) {
         console.error(`[far-summary] build failed for ${build.keyStr}:`, err);
         existing.state = 'missing';
       }
-
-      const elapsed = performance.now() - t0;
-      this.stats.buildTimeMs += elapsed;
-      if (elapsed > this.stats.maxBuildTimeMs) {
-        this.stats.maxBuildTimeMs = elapsed;
-      }
-      this.stats.tilesBuiltThisFrame++;
     }
   }
 
@@ -136,21 +141,26 @@ export class FarSummaryCache implements FallbackStatsWriter {
     return this.tiles.get(ks) ?? null;
   }
 
-  /** Look up the exact tile for (x, z) in the given ring using direct key lookup — O(1). */
   sampleExactRing(x: number, z: number, ringIndex: number): FarSummarySample | null {
     const ringConfig = this.config.rings[ringIndex];
-    if (!ringConfig) return null;
+    if (!ringConfig) {
+      this.stats.cacheMisses++;
+      return null;
+    }
     const tx = worldToTileCoord(x, ringConfig.cellM, ringConfig.tileCells);
     const tz = worldToTileCoord(z, ringConfig.cellM, ringConfig.tileCells);
     const key: FarSummaryTileKey = { ring: ringIndex, x: tx, z: tz, cellSizeM: ringConfig.cellM };
     const ks = tileKeyToString(key);
     const tile = this.tiles.get(ks);
     if (!tile || tile.state === 'evicted') {
+      this.stats.cacheMisses++;
       return null;
     }
     const sample = sampleFromTile(tile, x, z);
     if (sample) {
       this.stats.cacheHits++;
+    } else {
+      this.stats.cacheMisses++;
     }
     return sample;
   }
@@ -159,28 +169,15 @@ export class FarSummaryCache implements FallbackStatsWriter {
   sampleAnyRing(x: number, z: number, preferredRing: number): FarSummarySample | null {
     const tile = findCachedTileForSample(this.tiles, x, z, preferredRing);
     if (!tile) return null;
-    const sample = sampleFromTile(tile, x, z);
-    return sample;
+    return sampleFromTile(tile, x, z);
   }
 
-  sample(
-    x: number,
-    z: number,
-    preferredRing: number,
-  ): FarSummarySample | null {
-    const sample = this.sampleExactRing(x, z, preferredRing);
-    if (sample) return sample;
-    this.stats.cacheMisses++;
-    return null;
+  sample(x: number, z: number, preferredRing: number): FarSummarySample | null {
+    return this.sampleExactRing(x, z, preferredRing);
   }
 
-  countProceduralFallback(): void {
-    this.stats.proceduralFallbacks++;
-  }
-
-  countLowerRingFallback(): void {
-    this.stats.lowerRingFallbacks++;
-  }
+  countProceduralFallback(): void { this.stats.proceduralFallbacks++; }
+  countLowerRingFallback(): void { this.stats.lowerRingFallbacks++; }
 
   markStale(_boundsOrPredicate: unknown): void {
     const now = this.frameIndex;
@@ -194,43 +191,36 @@ export class FarSummaryCache implements FallbackStatsWriter {
   evictColdTiles(frameIndex: number, nowMs: number): void {
     this.frameIndex = frameIndex;
     const graceMs = this.config.stream.evictionGraceSeconds * 1000;
-
     for (const [_ks, tile] of this.tiles) {
       if (tile.state === 'ready' && tile.lastTouchedFrame < frameIndex - 2) {
         tile.state = 'cooling';
       }
-
       if (tile.state === 'cooling' && (nowMs - tile.lastTouchedTimeMs) > graceMs) {
         tile.state = 'evicted';
       }
-
       if (tile.state === 'cooling' && tile.lastTouchedFrame >= frameIndex - 1) {
         tile.state = 'stale';
       }
-
       if (tile.state === 'stale' && tile.lastTouchedFrame < frameIndex - 5) {
         tile.state = 'cooling';
       }
     }
-
     let evicted = 0;
     for (const [ekey, tile] of this.tiles) {
-      if (tile.state === 'evicted') {
-        this.tiles.delete(ekey);
-        evicted++;
-      }
+      if (tile.state === 'evicted') { this.tiles.delete(ekey); evicted++; }
     }
     this.stats.evictedTiles = evicted;
   }
 
-  getStats(): FarSummaryStats {
-    let requested = 0;
-    let building = 0;
-    let ready = 0;
-    let stale = 0;
-    let cooling = 0;
-    let evicted = 0;
+  commitRevisionAt(): number { return this.commitRevision; }
+  hasNewCommitsSince(revision: number): boolean { return this.commitRevision > revision; }
 
+  forEachTile(fn: (tile: FarSummaryTile) => void): void {
+    for (const tile of this.tiles.values()) fn(tile);
+  }
+
+  getStats(): FarSummaryStats {
+    let requested = 0, building = 0, ready = 0, stale = 0, cooling = 0, evicted = 0;
     for (const [, tile] of this.tiles) {
       switch (tile.state) {
         case 'requested': requested++; break;
@@ -241,12 +231,10 @@ export class FarSummaryCache implements FallbackStatsWriter {
         case 'evicted': evicted++; break;
       }
     }
-
     this.stats.requestedTiles = requested;
     this.stats.buildingTiles = building;
     this.stats.readyTiles = ready;
     this.stats.staleTiles = stale;
-
     return { ...this.stats, evictedTiles: evicted };
   }
 }
@@ -254,15 +242,10 @@ export class FarSummaryCache implements FallbackStatsWriter {
 function sampleFromTile(tile: FarSummaryTile, x: number, z: number): FarSummarySample | null {
   const { cellSizeM, tileCells, originX, originZ, samples } = tile;
   if (samples.length === 0) return null;
-
   const localX = (x - originX) / cellSizeM;
   const localZ = (z - originZ) / cellSizeM;
-
   const sx = Math.floor(localX);
   const sz = Math.floor(localZ);
-
   if (sx < 0 || sx >= tileCells || sz < 0 || sz >= tileCells) return null;
-
-  const idx = sz * tileCells + sx;
-  return samples[idx] ?? null;
+  return samples[sz * tileCells + sx] ?? null;
 }

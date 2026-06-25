@@ -74,6 +74,46 @@ pub struct PageFootprint {
     pub max_z: f32,
 }
 
+impl PageFootprint {
+    pub fn contains_point(self, world_x: f32, world_z: f32) -> bool {
+        world_x >= self.min_x
+            && world_x < self.max_x
+            && world_z >= self.min_z
+            && world_z < self.max_z
+    }
+
+    pub fn contains_footprint(self, inner: PageFootprint) -> bool {
+        self.min_x <= inner.min_x
+            && self.min_z <= inner.min_z
+            && self.max_x >= inner.max_x
+            && self.max_z >= inner.max_z
+    }
+
+    /// Squared horizontal distance from a world XZ point to the footprint rectangle.
+    pub fn distance_xz_squared(self, world_x: f32, world_z: f32) -> f32 {
+        let dx = if world_x < self.min_x {
+            self.min_x - world_x
+        } else if world_x > self.max_x {
+            world_x - self.max_x
+        } else {
+            0.0
+        };
+        let dz = if world_z < self.min_z {
+            self.min_z - world_z
+        } else if world_z > self.max_z {
+            world_z - self.max_z
+        } else {
+            0.0
+        };
+        dx * dx + dz * dz
+    }
+
+    /// Horizontal distance from a world XZ point to the footprint rectangle.
+    pub fn distance_xz(self, world_x: f32, world_z: f32) -> f32 {
+        self.distance_xz_squared(world_x, world_z).sqrt()
+    }
+}
+
 /// Bounding sphere for culling / selection.
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingSphere {

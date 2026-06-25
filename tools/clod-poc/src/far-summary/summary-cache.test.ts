@@ -225,10 +225,10 @@ describe("far summary cache", () => {
       expect(sample).not.toBeNull();
     });
 
-    it("commit budget prevents replacing old tile immediately", () => {
+    it("commit budget exhaustion preserves stale state and retries next frame", () => {
       const config = { ...DEFAULT_FAR_SUMMARY_CONFIG };
-      config.stream.maxTileBuildsPerFrame = 1;
-      config.stream.maxTileCommitsPerFrame = 0; // No commits allowed
+      config.stream.maxTileBuildsPerFrame = 500;
+      config.stream.maxTileCommitsPerFrame = 0; // Block all commits
       const cache = new FarSummaryCache(config);
 
       const center: StreamCenter = {
@@ -240,11 +240,33 @@ describe("far summary cache", () => {
       cache.requestTiles(requests, 0, 0);
       cache.buildSomeTiles(flatSampler, 0, 0);
 
-      // With 0 commit budget, nothing should be committed
-      const stats = cache.getStats();
+      // Frame 0: budget exhausted — no tiles committed
+      let stats = cache.getStats();
       expect(stats.tilesCommittedThisFrame).toBe(0);
-      // There should be no ready tiles
+      // Tiles should be stale (pre-build state was 'requested', restored to 'stale')
+      expect(stats.staleTiles).toBeGreaterThan(0);
+      expect(stats.requestedTiles).toBe(0);
       expect(stats.readyTiles).toBe(0);
+
+      // Frame 1: still no commit budget — same tiles should be stale again (retried)
+      cache.requestTiles(requests, 1, 16);
+      cache.buildSomeTiles(flatSampler, 1, 16);
+      stats = cache.getStats();
+      expect(stats.tilesBuiltThisFrame).toBeGreaterThan(0);
+      expect(stats.tilesCommittedThisFrame).toBe(0);
+      expect(stats.staleTiles).toBeGreaterThan(0);
+
+      // Frame 2: now allow commits
+      config.stream.maxTileCommitsPerFrame = 500;
+      cache.requestTiles(requests, 2, 32);
+      cache.buildSomeTiles(flatSampler, 2, 32);
+      stats = cache.getStats();
+      expect(stats.tilesCommittedThisFrame).toBeGreaterThan(0);
+      expect(stats.readyTiles).toBeGreaterThan(0);
+
+      // After commit, samples should work
+      const sample = cache.sample(2500, 2500, 0);
+      expect(sample).not.toBeNull();
     });
   });
 });

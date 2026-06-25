@@ -37,6 +37,21 @@ interface PendingRequest<T> {
   reject: (reason: unknown) => void;
 }
 
+interface DigBatchSlot {
+  edits: DigEdit[];
+  dirty: DirtyCellBounds;
+  resolvers: Array<PendingRequest<WorkerLod0Rebuild>>;
+}
+
+function mergeDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds {
+  return {
+    minX: Math.min(a.minX, b.minX),
+    maxX: Math.max(a.maxX, b.maxX),
+    minZ: Math.min(a.minZ, b.minZ),
+    maxZ: Math.max(a.maxZ, b.maxZ),
+  };
+}
+
 export class ClodWorkerClient {
   onParentRebuilt: ((batch: WorkerParentBatch) => void) | null = null;
   onParentsComplete: ((requestId: number | null, parentNodes: number, parentMs: number) => void) | null = null;
@@ -50,6 +65,10 @@ export class ClodWorkerClient {
   private digRequests = new Map<number, PendingRequest<WorkerLod0Rebuild>>();
   private flushRequests = new Map<number, PendingRequest<void>>();
   private progressHandlers = new Map<number, (progress: BuildProgress) => void>();
+  private digPending: DigBatchSlot | null = null;
+  private digPumpActive = false;
+  private parentsPending = false;
+  private parentsWaiters: Array<() => void> = [];
 
   constructor() {
     this.worker.onmessage = (event: MessageEvent<ClodWorkerResponse>) => this.handleMessage(event.data);
@@ -78,11 +97,19 @@ export class ClodWorkerClient {
   }
 
   rebuildAfterDig(edit: DigEdit, dirty: DirtyCellBounds): Promise<WorkerLod0Rebuild> {
-    const requestId = this.nextRequestId++;
-    const request: ClodWorkerRequest = { type: "dig", requestId, edit, dirty };
     return new Promise((resolve, reject) => {
-      this.digRequests.set(requestId, { resolve, reject });
-      this.worker.postMessage(request);
+      if (!this.digPending) {
+        this.digPending = {
+          edits: [edit],
+          dirty: { ...dirty },
+          resolvers: [{ resolve, reject }],
+        };
+      } else {
+        this.digPending.edits.push(edit);
+        this.digPending.dirty = mergeDirty(this.digPending.dirty, dirty);
+        this.digPending.resolvers.push({ resolve, reject });
+      }
+      void this.pumpDigQueue();
     });
   }
 
@@ -98,6 +125,49 @@ export class ClodWorkerClient {
   dispose(): void {
     this.worker.terminate();
     this.rejectAll(new Error("CLOD worker disposed"));
+  }
+
+  private async pumpDigQueue(): Promise<void> {
+    if (this.digPumpActive) return;
+    this.digPumpActive = true;
+    try {
+      while (this.digPending) {
+        const batch = this.digPending;
+        this.digPending = null;
+        try {
+          const result = await this.sendDigBatch(batch);
+          for (const pending of batch.resolvers) pending.resolve(result);
+          await this.waitForParents();
+        } catch (error) {
+          for (const pending of batch.resolvers) pending.reject(error);
+        }
+      }
+    } finally {
+      this.digPumpActive = false;
+      if (this.digPending) void this.pumpDigQueue();
+    }
+  }
+
+  private sendDigBatch(batch: DigBatchSlot): Promise<WorkerLod0Rebuild> {
+    const requestId = this.nextRequestId++;
+    const request: ClodWorkerRequest = { type: "dig", requestId, edits: batch.edits, dirty: batch.dirty };
+    return new Promise((resolve, reject) => {
+      this.digRequests.set(requestId, { resolve, reject });
+      this.worker.postMessage(request);
+    });
+  }
+
+  private waitForParents(): Promise<void> {
+    if (!this.parentsPending) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.parentsWaiters.push(resolve);
+    });
+  }
+
+  private resolveParentsWaiters(): void {
+    this.parentsPending = false;
+    for (const resolve of this.parentsWaiters) resolve();
+    this.parentsWaiters = [];
   }
 
   private handleMessage(message: ClodWorkerResponse): void {
@@ -124,6 +194,7 @@ export class ClodWorkerClient {
           if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
           return applySerializedNode(target, node, this.nodesById);
         });
+        if (message.pendingParents > 0) this.parentsPending = true;
         pending.resolve({
           changed,
           dirtyCoords: message.dirtyCoords,
@@ -141,6 +212,7 @@ export class ClodWorkerClient {
         this.onParentRebuilt?.(this.rehydrateParentBatch(message));
         break;
       case "parentsComplete":
+        this.resolveParentsWaiters();
         this.onParentsComplete?.(message.requestId, message.parentNodes, message.parentMs);
         break;
       case "flushed": {
@@ -191,9 +263,14 @@ export class ClodWorkerClient {
     for (const pending of this.buildRequests.values()) pending.reject(error);
     for (const pending of this.digRequests.values()) pending.reject(error);
     for (const pending of this.flushRequests.values()) pending.reject(error);
+    if (this.digPending) {
+      for (const pending of this.digPending.resolvers) pending.reject(error);
+      this.digPending = null;
+    }
     this.buildRequests.clear();
     this.digRequests.clear();
     this.flushRequests.clear();
     this.progressHandlers.clear();
+    this.resolveParentsWaiters();
   }
 }

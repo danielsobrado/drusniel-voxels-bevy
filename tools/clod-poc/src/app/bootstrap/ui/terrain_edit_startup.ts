@@ -21,7 +21,6 @@ export function runTerrainEditStartup(
     state,
     bindings,
     markEditedAncestorsStale,
-    vegetationDirtyQueue,
     staleEditedAncestorIds,
   } = input;
   const {
@@ -89,7 +88,6 @@ export function runTerrainEditStartup(
     grassSystem,
     treeSystem,
     understorySystem,
-    vegetationDirtyQueue,
     fallingTrees,
     refreshGrassStats: () => bindings.refreshGrassStats(),
     refreshTreeStats: () => bindings.refreshTreeStats(),

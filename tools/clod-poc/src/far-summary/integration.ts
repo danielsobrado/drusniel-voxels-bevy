@@ -59,6 +59,8 @@ export function initFarSummaryIntegration(
   };
   let forceSlowBuilds = false;
   let buildDelayMs = 0;
+  let lastKnownCommitRev = 0;
+  let framesSinceShellRebuild = 99;
 
   const update = (_frameIndexArg: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
     frameIndex++;
@@ -87,7 +89,6 @@ export function initFarSummaryIntegration(
     cache.evictColdTiles(frameIndex, nowMs);
 
     const currentStats = cache.getStats();
-    // Carry over cumulative counters, replace per-frame ones.
     stats.requestedTiles = currentStats.requestedTiles;
     stats.buildingTiles = currentStats.buildingTiles;
     stats.readyTiles = currentStats.readyTiles;
@@ -105,10 +106,20 @@ export function initFarSummaryIntegration(
     debugOverlay.update(frameIndex, stats);
 
     if (options.farShellController) {
+      // Move shell to camera position (not predicted, which would drift ahead).
       options.farShellController.moveTo(
-        currentCenter.predictedX,
-        currentCenter.predictedZ,
+        currentCenter.worldX,
+        currentCenter.worldZ,
       );
+
+      // Rebuild shell when summary data changes, throttled to skip ~10 frames
+      // so a burst of tile commits doesn't trigger back-to-back rebuilds.
+      framesSinceShellRebuild++;
+      if (cache.hasNewCommitsSince(lastKnownCommitRev) && framesSinceShellRebuild >= 10) {
+        lastKnownCommitRev = cache.commitRevisionAt();
+        framesSinceShellRebuild = 0;
+        options.farShellController.setHeightProvider(sampler);
+      }
     }
   };
 

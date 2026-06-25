@@ -40,6 +40,7 @@ pub(crate) struct ClodPageMeshGate {
     tree_revision: Option<u64>,
     world_chunk_count: usize,
     bubble_key: Option<NearFieldChunkKey>,
+    visible_page_count: usize,
     owned_columns: HashSet<IVec2>,
     pending_restore_columns: HashSet<IVec2>,
 }
@@ -53,6 +54,7 @@ impl Default for ClodPageMeshGate {
             tree_revision: None,
             world_chunk_count: 0,
             bubble_key: None,
+            visible_page_count: 0,
             owned_columns: HashSet::new(),
             pending_restore_columns: HashSet::new(),
         }
@@ -76,19 +78,19 @@ impl ClodPageMeshGate {
     pub(crate) fn node_has_pending_restore(
         &self,
         key: ClodPageNodeKey,
-        chunks_per_page: i32,
+        tree: &ClodPageTree,
     ) -> bool {
         if !self.should_hold_pages_visible() {
             return false;
         }
-        let level_scale = 1i32 << key.level.min(30);
-        let chunks_per_node = chunks_per_page * level_scale;
-        let min_x = key.coord.0 * chunks_per_node;
-        let min_z = key.coord.1 * chunks_per_node;
-        let max_x = min_x + chunks_per_node;
-        let max_z = min_z + chunks_per_node;
+        let Some(footprint) = node_footprint(tree, key) else {
+            return false;
+        };
         self.pending_restore_columns.iter().any(|column| {
-            column.x >= min_x && column.x < max_x && column.y >= min_z && column.y < max_z
+            footprint_covers_chunk(
+                footprint,
+                chunk_footprint(IVec3::new(column.x, 0, column.y)),
+            )
         })
     }
 }
@@ -130,39 +132,19 @@ fn live_chunk_hidden_by_clod(
             .unwrap_or(true)
 }
 
-/// Keys of pages that are currently committed, visible, and from a Ready tree — i.e.
-/// the pages actually drawing this frame, which a live chunk may hand ownership to.
-fn ready_visible_page_keys(
-    tree: &ClodPageTree,
-    page_query: &Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
-) -> HashSet<ClodPageNodeKey> {
-    if !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready)) {
-        return HashSet::new();
-    }
-    page_query
-        .iter()
-        .filter_map(|(tag, visibility)| {
-            (*visibility == Visibility::Visible).then(|| ClodPageNodeKey::from(tag))
-        })
-        .collect()
-}
-
 /// True when `outer` fully contains `inner` in world X/Z.
 pub(crate) fn footprint_covers_chunk(outer: PageFootprint, inner: PageFootprint) -> bool {
-    outer.min_x <= inner.min_x
-        && outer.min_z <= inner.min_z
-        && outer.max_x >= inner.max_x
-        && outer.max_z >= inner.max_z
+    outer.contains_footprint(inner)
 }
 
-fn node_footprint(tree: &ClodPageTree, key: ClodPageNodeKey) -> Option<PageFootprint> {
+pub(crate) fn node_footprint(tree: &ClodPageTree, key: ClodPageNodeKey) -> Option<PageFootprint> {
     tree.nodes_by_level
         .get(key.level)
         .and_then(|nodes| nodes.iter().find(|node| node.coord == key.coord))
         .map(|node| node.footprint)
 }
 
-fn chunk_covered_by_page(
+pub(crate) fn chunk_covered_by_page(
     chunk_pos: IVec3,
     page_keys: &HashSet<ClodPageNodeKey>,
     tree: &ClodPageTree,
@@ -173,14 +155,18 @@ fn chunk_covered_by_page(
     })
 }
 
-fn built_page_keys(tree: &ClodPageTree) -> HashSet<ClodPageNodeKey> {
-    tree.nodes_by_level
+/// Keys of pages that are currently committed, visible, and from a Ready tree.
+pub(crate) fn ready_visible_page_keys(
+    tree: &ClodPageTree,
+    page_query: &Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
+) -> HashSet<ClodPageNodeKey> {
+    if !matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready)) {
+        return HashSet::new();
+    }
+    page_query
         .iter()
-        .enumerate()
-        .flat_map(|(level, nodes)| {
-            nodes
-                .iter()
-                .map(move |node| ClodPageNodeKey::new(level, node.coord))
+        .filter_map(|(tag, visibility)| {
+            (*visibility == Visibility::Visible).then(|| ClodPageNodeKey::from(tag))
         })
         .collect()
 }
@@ -254,6 +240,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
     mut world: ResMut<VoxelWorld>,
     camera_query: Query<&Transform, With<PlayerCamera>>,
     player_query: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,
+    page_query: Query<(&ClodPageMeshTag, &Visibility), Without<ChunkMesh>>,
     mut gate: ResMut<ClodPageMeshGate>,
 ) {
     refresh_pending_restore_columns(&mut gate, &world);
@@ -264,6 +251,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
     gate.pages_failed = matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Failed(_)));
     gate.pages_pending = matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Building));
 
+    let visible_pages = ready_visible_page_keys(&tree, &page_query);
     let bubble_key = camera_query.single().ok().map(|camera_transform| {
         let player_transform = player_query.single().ok();
         NearFieldChunkKey {
@@ -275,6 +263,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
     let needs_refresh = gate.tree_revision != Some(tree.revision)
         || gate.world_chunk_count != world_chunk_count
         || gate.bubble_key != bubble_key
+        || gate.visible_page_count != visible_pages.len()
         || !pages_ready;
     if !needs_refresh {
         return;
@@ -283,6 +272,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
     gate.tree_revision = Some(tree.revision);
     gate.world_chunk_count = world_chunk_count;
     gate.bubble_key = bubble_key;
+    gate.visible_page_count = visible_pages.len();
 
     if !pages_ready {
         gate.owned_columns.clear();
@@ -295,7 +285,6 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
     };
     let player_transform = player_query.single().ok();
     let bubble = clod_near_field_bubble(&runtime, camera_transform, player_transform);
-    let page_keys = built_page_keys(&tree);
 
     let mut owned_columns = HashSet::new();
     for (pos, _) in world.chunk_entries() {
@@ -304,7 +293,7 @@ pub(crate) fn refresh_clod_page_mesh_gate_system(
             continue;
         }
         if !near_field_intersects_footprint(chunk_footprint(*pos), bubble)
-            && chunk_covered_by_page(*pos, &page_keys, &tree)
+            && chunk_covered_by_page(*pos, &visible_pages, &tree)
         {
             owned_columns.insert(column);
         }
@@ -388,6 +377,9 @@ pub(crate) fn clod_page_chunk_ownership_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::build_queue::{ClodPageBuildStatus, ClodPageTree};
+    use super::super::diagonal_polish::DiagonalPolishStats;
+    use std::collections::HashSet;
 
     fn footprint(min_x: f32, min_z: f32, max_x: f32, max_z: f32) -> PageFootprint {
         PageFootprint {
@@ -452,6 +444,27 @@ mod tests {
         assert!(live_chunk_hidden_by_clod(chunk, None, true));
         // No camera and no covering page: keep live terrain visible.
         assert!(!live_chunk_hidden_by_clod(chunk, None, false));
+    }
+
+    #[test]
+    fn chunk_not_covered_by_partial_page_footprint() {
+        let mut tree = ClodPageTree::default();
+        tree.status = Some(ClodPageBuildStatus::Ready);
+        tree.nodes_by_level = vec![vec![super::super::quadtree::ClodPageNode {
+            level: 0,
+            coord: (0, 0),
+            footprint: footprint(0.0, 0.0, 32.0, 32.0),
+            mesh: Default::default(),
+            error_world: 0.0,
+            low_benefit: false,
+            polish: DiagonalPolishStats::default(),
+        }]];
+        let mut keys = HashSet::new();
+        keys.insert(ClodPageNodeKey::new(0, (0, 0)));
+        let chunk_pos = IVec3::new(2, 0, 2);
+        assert!(!chunk_covered_by_page(chunk_pos, &keys, &tree));
+        tree.nodes_by_level[0][0].footprint = footprint(0.0, 0.0, 64.0, 64.0);
+        assert!(chunk_covered_by_page(chunk_pos, &keys, &tree));
     }
 
     #[test]

@@ -7,7 +7,8 @@
 use super::config::ClodPagesConfig;
 use super::lock::build_outer_border_locks;
 use super::quadtree::{
-    build_node_index, build_quadtree, rebuild_dirty_pages, resolve_build_shape,
+    build_node_index, build_quadtree, infer_lod0_page_shape, rebuild_dirty_pages,
+    resolve_build_shape,
 };
 use super::simplify::simplify_page;
 use super::source_mesh::PageSource;
@@ -248,7 +249,13 @@ fn rebuild_dirty_pages_handles_full_rebuild() {
 }
 
 #[test]
-fn build_quadtree_uses_min_max_page_span_not_max_plus_one() {
+fn build_quadtree_rejects_empty_lod0_input() {
+    let cfg = ClodPagesConfig::load();
+    assert!(build_quadtree(Vec::new(), &cfg).is_err());
+}
+
+#[test]
+fn infer_lod0_page_shape_uses_min_max_span_for_negative_coords() {
     let cfg = ClodPagesConfig::load();
     let lod0 = build_lod0_world(2, 2, &cfg).expect("2x2 source build");
     let shifted: Vec<_> = lod0
@@ -256,12 +263,12 @@ fn build_quadtree_uses_min_max_page_span_not_max_plus_one() {
         .map(|((px, pz), src)| ((px - 2, pz - 2), src))
         .collect();
 
-    let result = build_quadtree(shifted, &cfg).expect("negative-origin 2x2 build");
-    assert_eq!(result.origin.min_page_x, -2);
-    assert_eq!(result.origin.min_page_z, -2);
-    assert_eq!(result.world_pages_x, 2);
-    assert_eq!(result.world_pages_z, 2);
-    assert_eq!(result.nodes_by_level[0].len(), 4);
+    let (origin, world_pages_x, world_pages_z) = infer_lod0_page_shape(&shifted);
+    assert_eq!(origin.min_page_x, -2);
+    assert_eq!(origin.min_page_z, -2);
+    assert_eq!(world_pages_x, 2);
+    assert_eq!(world_pages_z, 2);
+    assert!(resolve_build_shape(world_pages_x, world_pages_z, &cfg).is_ok());
 }
 
 #[test]
@@ -280,5 +287,10 @@ fn build_quadtree_skips_parent_when_child_group_is_incomplete() {
     assert_eq!(
         parent_count, 0,
         "incomplete child groups must not produce parent pages"
+    );
+    assert_eq!(
+        result.nodes_by_level.len(),
+        1,
+        "partial build should not append an empty parent level"
     );
 }

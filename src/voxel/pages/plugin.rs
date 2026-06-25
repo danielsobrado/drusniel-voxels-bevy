@@ -53,17 +53,6 @@ impl Plugin for ClodPagesPlugin {
             )
             .add_systems(
                 Update,
-                refresh_clod_page_mesh_gate_system
-                    .before(crate::voxel::runtime::update_chunk_lod_system),
-            )
-            .add_systems(
-                Update,
-                refresh_clod_page_mesh_gate_system
-                    .after(clod_pages_build_task_poll_system)
-                    .before(clod_page_selection_system),
-            )
-            .add_systems(
-                Update,
                 clod_page_mesh_commit_system.after(clod_pages_build_task_poll_system),
             )
             .add_systems(
@@ -72,12 +61,22 @@ impl Plugin for ClodPagesPlugin {
             )
             .add_systems(
                 Update,
-                terrain_summary_rebuild_system.after(clod_page_mesh_commit_system),
+                (
+                    refresh_clod_page_mesh_gate_system,
+                    terrain_summary_rebuild_system,
+                )
+                    .chain()
+                    .after(clod_page_selection_system),
+            )
+            .add_systems(
+                Update,
+                refresh_clod_page_mesh_gate_system
+                    .before(crate::voxel::runtime::update_chunk_lod_system),
             )
             .add_systems(
                 Update,
                 clod_page_chunk_ownership_system
-                    .after(clod_page_selection_system)
+                    .after(refresh_clod_page_mesh_gate_system)
                     .after(VoxelTerrainSet::MeshDirty),
             );
     }

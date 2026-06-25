@@ -38,10 +38,9 @@ export interface TerrainEditServiceDeps {
   markEditedAncestorsStale: (lod0Nodes: readonly ClodPageNode[]) => void;
   selectionController: Pick<ClodSelectionController, "patchNodes" | "invalidate" | "update">;
   applyTerrainTextures: () => void;
-  grassSystem: { removePatchesForNodes(ids: string[]): void; markPatchesDirty(): void } | null;
-  treeSystem: { removePatchesForNodes(ids: string[]): Array<unknown>; markPatchesDirty(): void } | null;
-  understorySystem: { removePatchesForNodes(ids: string[]): void; markPatchesDirty(): void } | null;
-  vegetationDirtyQueue: { grass: boolean; trees: boolean; understory: boolean };
+  grassSystem: { rebuildNodePatches(ids: string[]): void } | null;
+  treeSystem: { removePatchesForNodes(ids: string[]): Array<unknown>; rebuildNodePatches(ids: string[]): void } | null;
+  understorySystem: { rebuildNodePatches(ids: string[]): void } | null;
   fallingTrees: unknown[];
   refreshGrassStats: () => void;
   refreshTreeStats: () => void;
@@ -64,6 +63,46 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   let digDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let digRebuildsInFlight = 0;
   let lastDigAt = -Infinity;
+  const pendingGrassNodeIds = new Set<string>();
+  const pendingTreeNodeIds = new Set<string>();
+  const pendingUnderstoryNodeIds = new Set<string>();
+  let vegetationFlushQueued = false;
+
+  const flushVegetationRebuilds = () => {
+    vegetationFlushQueued = false;
+    const veg = deps.getVegetationState();
+
+    if (veg.grassEnabled && pendingGrassNodeIds.size > 0) {
+      deps.grassSystem?.rebuildNodePatches([...pendingGrassNodeIds]);
+      pendingGrassNodeIds.clear();
+      deps.refreshGrassStats();
+    }
+    if (veg.treesEnabled && pendingTreeNodeIds.size > 0) {
+      const changedIds = [...pendingTreeNodeIds];
+      pendingTreeNodeIds.clear();
+      const fallen = deps.treeSystem?.removePatchesForNodes(changedIds) ?? [];
+      deps.fallingTrees.push(...fallen);
+      deps.treeSystem?.rebuildNodePatches(changedIds);
+      deps.refreshTreeStats();
+    }
+    if (veg.understoryEnabled && pendingUnderstoryNodeIds.size > 0) {
+      deps.understorySystem?.rebuildNodePatches([...pendingUnderstoryNodeIds]);
+      pendingUnderstoryNodeIds.clear();
+      deps.refreshUnderstoryStats();
+    }
+  };
+
+  const queueVegetationRebuild = (changed: readonly ClodPageNode[]) => {
+    const veg = deps.getVegetationState();
+    for (const node of changed) {
+      if (veg.grassEnabled) pendingGrassNodeIds.add(node.id);
+      if (veg.treesEnabled) pendingTreeNodeIds.add(node.id);
+      if (veg.understoryEnabled) pendingUnderstoryNodeIds.add(node.id);
+    }
+    if (vegetationFlushQueued) return;
+    vegetationFlushQueued = true;
+    queueMicrotask(flushVegetationRebuilds);
+  };
 
   const flushAncestors = async () => {
     await deps.clodWorker.flushParents();
@@ -96,26 +135,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       }
       if (lod0.pendingParents > 0) deps.markEditedAncestorsStale(lod0.changed);
       deps.selectionController.patchNodes(lod0.changed);
-      const veg = deps.getVegetationState();
-      if (veg.grassEnabled && lod0.changed.length > 0) {
-        const changedIds = lod0.changed.map((node) => node.id);
-        deps.grassSystem?.removePatchesForNodes(changedIds);
-        deps.vegetationDirtyQueue.grass = true;
-        deps.refreshGrassStats();
-      }
-      if (veg.treesEnabled && lod0.changed.length > 0) {
-        const changedIds = lod0.changed.map((node) => node.id);
-        const fallen = deps.treeSystem?.removePatchesForNodes(changedIds) ?? [];
-        deps.fallingTrees.push(...fallen);
-        deps.vegetationDirtyQueue.trees = true;
-        deps.refreshTreeStats();
-      }
-      if (veg.understoryEnabled && lod0.changed.length > 0) {
-        const changedIds = lod0.changed.map((node) => node.id);
-        deps.understorySystem?.removePatchesForNodes(changedIds);
-        deps.vegetationDirtyQueue.understory = true;
-        deps.refreshUnderstoryStats();
-      }
+      if (lod0.changed.length > 0) queueVegetationRebuild(lod0.changed);
       deps.setPendingParentNodes(0);
       deps.setPendingParentMs(0);
       deps.setPendingParentCount(lod0.pendingParents);
@@ -136,7 +156,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       if (error instanceof Error && error.name === "ClodBuildError") {
         emitAudio("clod.validation.error");
       }
-      throw error;
+      console.error("Dig rebuild failed:", error);
     } finally {
       digRebuildsInFlight--;
     }

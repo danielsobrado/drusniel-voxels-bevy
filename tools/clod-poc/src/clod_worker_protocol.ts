@@ -47,7 +47,7 @@ export type ClodWorkerRequest =
   | {
       type: "dig";
       requestId: number;
-      edit: DigEdit;
+      edits: DigEdit[];
       dirty: DirtyCellBounds;
     }
   | {

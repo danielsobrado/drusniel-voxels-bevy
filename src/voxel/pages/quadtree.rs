@@ -40,7 +40,7 @@ pub struct BuildResult {
 }
 
 /// Inclusive LOD0 page coord span → axis page counts for `resolve_build_shape`.
-fn infer_lod0_page_shape(lod0: &[((i32, i32), PageSource)]) -> (PageBuildOrigin, i32, i32) {
+pub(crate) fn infer_lod0_page_shape(lod0: &[((i32, i32), PageSource)]) -> (PageBuildOrigin, i32, i32) {
     if lod0.is_empty() {
         return (PageBuildOrigin::default(), 0, 0);
     }
@@ -251,6 +251,12 @@ pub fn build_quadtree(
     lod0: Vec<((i32, i32), PageSource)>,
     cfg: &ClodPagesConfig,
 ) -> Result<BuildResult, ClodBuildError> {
+    if lod0.is_empty() {
+        return Err(ClodBuildError::PageIncomplete {
+            message: "no LOD0 page sources".to_string(),
+        });
+    }
+
     let eps = cfg.simplify.weld_epsilon_cells;
 
     let (origin, world_pages_x, world_pages_z) = infer_lod0_page_shape(&lod0);
@@ -288,6 +294,9 @@ pub fn build_quadtree(
         let group_items = groups.into_iter().collect::<Vec<_>>();
         let level_nodes =
             build_parent_level(level, group_items, &nodes_by_level[level - 1], cfg, eps)?;
+        if level_nodes.is_empty() {
+            break;
+        }
 
         let done = level_nodes.len() <= 1;
         nodes_by_level.push(level_nodes);
@@ -341,12 +350,7 @@ pub fn resimplify_parent(
         })
         .collect();
     if children.len() != 4 {
-        return Err(ClodBuildError::PageIncomplete { message: format!(
-            "resimplify L{level}:({},{}) expected 4 children, got {}",
-            coord.0,
-            coord.1,
-            children.len()
-        ) });
+        return Ok(());
     }
     let rebuilt =
         build_parent_node_from_children(level, coord, &children, cfg, weld_epsilon)?;

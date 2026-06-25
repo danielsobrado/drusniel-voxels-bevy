@@ -5,6 +5,7 @@ import {
   rebuildDirtyLod0Pages,
   resimplifyParent,
   type BuildResult,
+  type DirtyCellBounds,
   type NodeIndex,
 } from "./clod/quadtree.js";
 import { addDigEdit, replaceDigEdits, setTerrainSurfaceOverride } from "./terrain/terrain.js";
@@ -33,6 +34,22 @@ let parentNodes = 0;
 let parentMs = 0;
 let drainScheduled = false;
 const pendingByLevel = new Map<number, Set<string>>();
+
+interface CoalescedDig {
+  dirty: DirtyCellBounds;
+  requestIds: number[];
+}
+
+let coalescedDig: CoalescedDig | null = null;
+
+function mergeDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds {
+  return {
+    minX: Math.min(a.minX, b.minX),
+    maxX: Math.max(a.maxX, b.maxX),
+    minZ: Math.min(a.minZ, b.minZ),
+    maxZ: Math.max(a.maxZ, b.maxZ),
+  };
+}
 
 function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | undefined): void {
   if (!terrain) {
@@ -140,6 +157,8 @@ function drainParents(budgetMs: number): void {
       parentNodes,
       parentMs,
     });
+    activeParentRequestId = null;
+    flushCoalescedDig();
   }
 }
 
@@ -162,6 +181,7 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   replaceDigEdits(request.edits);
   installHydrologyTerrain(request.hydrologyTerrain);
   pendingByLevel.clear();
+  coalescedDig = null;
   activeParentRequestId = null;
   parentNodes = 0;
   parentMs = 0;
@@ -178,16 +198,21 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   post({ type: "buildComplete", requestId: request.requestId, result: serialized }, collectBuildResultTransferables(serialized));
 }
 
-function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
-  if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
-  if (pendingParentCount() > 0) {
-    post(errorResponse(request.requestId, new Error("parent rebuild already pending; coalesce edits before next dig")));
+function queueCoalescedDig(requestId: number, dirty: DirtyCellBounds): void {
+  if (!coalescedDig) {
+    coalescedDig = { dirty: { ...dirty }, requestIds: [requestId] };
     return;
   }
-  addDigEdit(request.edit);
+  coalescedDig.dirty = mergeDirty(coalescedDig.dirty, dirty);
+  coalescedDig.requestIds.push(requestId);
+}
 
-  const lod0 = rebuildDirtyLod0Pages(result, request.dirty, cfg, index);
-  activeParentRequestId = request.requestId;
+function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
+  if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
+  if (requestIds.length === 0) return;
+
+  const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, index);
+  activeParentRequestId = requestIds[0]!;
   parentNodes = 0;
   parentMs = 0;
   for (const [nx, nz] of lod0.dirtyCoords) enqueueParent(1, nx >> 1, nz >> 1);
@@ -212,11 +237,9 @@ function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
     );
   }
 
-  post({
-    type: "lod0Rebuilt",
-    requestId: request.requestId,
+  const payload = {
     changed,
-    dirtyCoords: lod0.dirtyCoords.map(([x, z]) => [x, z]),
+    dirtyCoords: lod0.dirtyCoords.map(([x, z]) => [x, z] as [number, number]),
     lod0Pages: lod0.lod0Pages,
     lod0Ms: lod0.lod0Ms,
     serializeMs,
@@ -224,12 +247,40 @@ function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
     chunksRemeshed: lod0.chunksRemeshed,
     chunksTotal: lod0.chunksTotal,
     pendingParents: pendingParentCount(),
-  }, transferables);
+  };
+
+  for (let i = 0; i < requestIds.length; i++) {
+    post({
+      type: "lod0Rebuilt",
+      requestId: requestIds[i]!,
+      ...payload,
+    }, i === 0 ? transferables : undefined);
+  }
   scheduleParentDrain();
+}
+
+function flushCoalescedDig(): void {
+  if (!coalescedDig || pendingParentCount() > 0) return;
+  const batch = coalescedDig;
+  coalescedDig = null;
+  postLod0Rebuild(batch.requestIds, batch.dirty);
+}
+
+function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
+  if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
+  for (const edit of request.edits) addDigEdit(edit);
+
+  if (pendingParentCount() > 0) {
+    queueCoalescedDig(request.requestId, request.dirty);
+    return;
+  }
+
+  postLod0Rebuild([request.requestId], request.dirty);
 }
 
 function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): void {
   drainParents(Number.POSITIVE_INFINITY);
+  flushCoalescedDig();
   post({ type: "flushed", requestId: request.requestId });
 }
 

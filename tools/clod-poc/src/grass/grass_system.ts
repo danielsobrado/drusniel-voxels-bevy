@@ -366,7 +366,12 @@ export class GrassSystem {
 
   /** Regenerate grass for edited LOD0 pages so blades track the current surface. */
   rebuildNodePatches(nodeIds: Iterable<string>): void {
-    this.removePatchesForNodes(nodeIds);
+    if (this.canUseGpuRingDraw()) {
+      this.removePatchesForNodes(nodeIds);
+      if (this.gpuRingDraw) return;
+    } else {
+      this.removePatchesForNodes(nodeIds);
+    }
     this.refreshForCenter(this.lastCenter);
   }
 
