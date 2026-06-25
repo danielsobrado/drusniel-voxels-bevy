@@ -8,7 +8,7 @@ import {
   type SnowWeatherSettings,
   type StormWeatherSettings,
 } from "../../weather/rain.js";
-import { StormLightningSystem } from "../../weather/storm.js";
+import { StormLightningSystem } from "../../weather/storm_ground.js";
 
 export interface WeatherUiSettings {
   weatherMode: "off" | "rain" | "snow" | "sandstorm" | "storm";
