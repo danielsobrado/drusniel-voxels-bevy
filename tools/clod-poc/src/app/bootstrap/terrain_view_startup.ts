@@ -282,6 +282,12 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     },
   });
 
+  if (state.farShellEnabled) {
+    farShellController.rebuild();
+  } else {
+    farShellController.setEnabled(false);
+  }
+
   const shadowHeightTexture = createHeightTexture(terrainSummary);
   const shadowProxyResult = buildFarTerrainShadowProxy(shadowHeightTexture, worldSizeCells, {
     grid: 512,

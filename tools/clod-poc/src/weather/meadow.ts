@@ -69,7 +69,7 @@ const MEADOW_MID_COUNT = 850;
 const MEADOW_FAR_COUNT = 550;
 
 export const DEFAULT_MEADOW_WEATHER_SETTINGS: MeadowWeatherSettings = {
-  enabled: false,
+  enabled: true,
   intensity: 0.75,
   windX: -0.42,
   windZ: 0.18,
@@ -90,7 +90,7 @@ export class MeadowWeatherSystem {
     this.meadowMaterial = options.isWebGpu ? createMeadowNodeMaterial() : createMeadowShaderMaterial();
     this.meadowMesh = new THREE.Mesh(geometry, this.meadowMaterial.material);
     this.meadowMesh.name = "weather-meadow-pollen";
-    this.meadowMesh.frustumCulled = true;
+    this.meadowMesh.frustumCulled = false;
     this.meadowMesh.renderOrder = 43;
 
     this.group.add(this.meadowMesh);

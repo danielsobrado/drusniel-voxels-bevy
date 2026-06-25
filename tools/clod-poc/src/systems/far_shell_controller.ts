@@ -3,6 +3,7 @@ import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import { createExtendedCanopyTexture, createExtendedHeightTexture } from "../clod/terrain_summary.js";
 import { buildFarCanopyShell } from "../gpu/far_canopy_shell.js";
 import { buildFarTerrainShell, type FarHeightProvider } from "../gpu/far_terrain_shell.js";
+import { FAR_SHELL_DEFAULTS } from "../app/clod_constants.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 
 export interface FarShellInstance {
@@ -109,12 +110,18 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
     currentCenterZ = z;
   };
 
-  current = buildFarShellInstance(1.5, 0.6, 2, false);
-  if (!deps.isLongView && !deps.queryFarShell) {
+  const initialSettings = deps.getSettings();
+  current = buildFarShellInstance(
+    initialSettings.radiusFactor,
+    initialSettings.heightBias,
+    initialSettings.heightDrop,
+    currentHeightProvider !== undefined,
+  );
+  if (!initialSettings.enabled && !deps.isLongView && !deps.queryFarShell) {
     deps.scene.remove(current.mesh);
   }
 
-  const canopyFarRadius = deps.worldSizeCells * 1.5;
+  const canopyFarRadius = deps.worldSizeCells * FAR_SHELL_DEFAULTS.radiusFactor;
   if (deps.isLongView || deps.queryCanopy) {
     const canopyHeightTexture = createExtendedHeightTexture(deps.terrainSummary, canopyFarRadius);
     const canopyCoverageTexture = createExtendedCanopyTexture(deps.terrainSummary, canopyFarRadius, 42);

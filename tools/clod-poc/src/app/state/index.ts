@@ -207,6 +207,9 @@ export function createClodAppState(params: CreateClodAppStateParams): ClodAppSta
   const state = mergeSlices(slices);
   Object.defineProperty(state, "slices", { value: slices, enumerable: false });
   applyScenePresets(state, params);
+  if (params.isWebGpu && !params.queryPerfMode) {
+    state.grassShaderMode = "webgpu-ring-v1";
+  }
   return state;
 }
 

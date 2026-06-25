@@ -83,7 +83,7 @@ export interface StoneDebugSettings {
 }
 
 export const DEFAULT_STONE_SETTINGS: StoneSettings = {
-  enabled: false,
+  enabled: true,
   seedSalt: 931777,
   cellSizeM: 2.1,
   maxInstances: 120000,

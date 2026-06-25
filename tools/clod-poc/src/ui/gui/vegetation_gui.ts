@@ -1,5 +1,6 @@
 import type GUI from "lil-gui";
 import type { ClodAppState } from "../../app/clod_app_state.js";
+import { FAR_SHELL_DEFAULTS } from "../../app/clod_constants.js";
 import { GRASS_SHADER_MODES } from "../../grass.js";
 import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
 import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
@@ -144,7 +145,13 @@ export function createVegetationGui(
     }
     deps.updateInfo();
   });
-  farShellFolder.add(state, "farShellRadiusFactor", 1.0, 2.5, 0.05)
+  farShellFolder.add(
+    state,
+    "farShellRadiusFactor",
+    FAR_SHELL_DEFAULTS.radiusFactorMin,
+    FAR_SHELL_DEFAULTS.radiusFactorMax,
+    0.05,
+  )
     .name("far radius (×world)")
     .onFinishChange(() => deps.farShellController.rebuild());
   farShellFolder.add(state, "farShellHeightBias", 0, 1, 0.01)

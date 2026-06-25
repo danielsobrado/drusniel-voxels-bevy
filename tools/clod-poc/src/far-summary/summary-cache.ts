@@ -101,7 +101,6 @@ export class FarSummaryCache implements FallbackStatsWriter {
         continue;
       }
 
-      const preBuildState = existing.state;
       existing.state = 'building';
       const t0 = performance.now();
       try {
