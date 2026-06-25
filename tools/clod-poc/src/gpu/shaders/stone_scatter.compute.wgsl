@@ -18,6 +18,7 @@ struct Params {
   class_small: vec4<f32>,
   counts_a: vec4<u32>,
   counts_b: vec4<u32>,
+  ring: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -43,6 +44,18 @@ fn pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let b5 = b4 ^ (b4 >> 16u);
   let inv = 1.0 / 16777216.0;
   return vec2<f32>(f32(a5 & 0xffffffu) * inv, f32(b5 & 0xffffffu) * inv);
+}
+
+fn stone_world_cell(slot: u32) -> vec2<f32> {
+  let grid = max(params.counts_a.y, 1u);
+  let cell_size = max(params.world.y, 0.001);
+  let sx = f32(slot % grid);
+  let sz = f32(slot / grid);
+  let center_cell = params.ring.xy / cell_size;
+  return vec2<f32>(
+    round((center_cell.x - sx) / f32(grid)) * f32(grid) + sx,
+    round((center_cell.y - sz) / f32(grid)) * f32(grid) + sz,
+  );
 }
 
 fn material_weights(height: f32) -> vec4<f32> {
@@ -97,6 +110,15 @@ fn pick_class(site_scree: f32, streambed: f32, cliff_above: f32, roll: f32) -> u
   return CLASS_SMALL;
 }
 
+fn ring_edge_fade(dist: f32) -> f32 {
+  let radius = max(params.ring.z, 0.001);
+  let fade_m = clamp(params.ring.w, 0.0, radius);
+  if (fade_m <= 0.0001) {
+    return select(1.0, 0.0, dist > radius);
+  }
+  return 1.0 - smoothstep(radius - fade_m, radius, dist);
+}
+
 fn process_cell(slot: u32) {
   let grid = params.counts_a.y;
   let max_instances = params.counts_a.x;
@@ -104,11 +126,16 @@ fn process_cell(slot: u32) {
     return;
   }
 
-  let cell = vec2<f32>(f32(slot % grid), f32(slot / grid));
+  let wc = stone_world_cell(slot);
   let seed = params.counts_a.z;
-  let jitter = pcg2d(cell, seed + 101u);
-  let wpos = (cell + jitter) * params.world.y;
+  let jitter = pcg2d(wc, seed + 101u);
+  let wpos = (wc + jitter) * params.world.y;
   if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= params.world.x || wpos.y >= params.world.x) {
+    return;
+  }
+
+  let dist = distance(wpos, params.ring.xy);
+  if (dist > params.ring.z) {
     return;
   }
 
@@ -145,8 +172,9 @@ fn process_cell(slot: u32) {
     + cliff_above * params.weights_a.z
     + streambed * params.weights_a.w
     + params.weights_b.x;
-  let accept = params.world.z * base * clump * repose * (1.0 - snow * params.stream_snow_lean.z);
-  if (pcg2d(cell, seed + 307u).x >= accept) {
+  let ring_edge = ring_edge_fade(dist);
+  let accept = params.world.z * base * clump * repose * ring_edge * (1.0 - snow * params.stream_snow_lean.z);
+  if (pcg2d(wc, seed + 307u).x >= accept) {
     return;
   }
 
@@ -155,19 +183,19 @@ fn process_cell(slot: u32) {
     return;
   }
 
-  let cls = pick_class(scree, streambed, cliff_above, pcg2d(cell, seed + 523u).x);
+  let cls = pick_class(scree, streambed, cliff_above, pcg2d(wc, seed + 523u).x);
   let class_slot = atomicAdd(&counters[cls + 1u], 1u);
   if (class_slot >= max_instances) {
     return;
   }
 
   let cfg = class_radius(cls);
-  let radius_hash = pcg2d(cell, seed + 859u).x;
+  let radius_hash = pcg2d(wc, seed + 859u).x;
   let target_radius = cfg.x + (cfg.y - cfg.x) * radius_hash;
   let scale = target_radius / class_base_radius(cls);
   let slope_amt = 1.0 - normal.y;
   let y = h - cfg.z * target_radius * (1.0 + slope_amt * params.weights_b.w);
-  let yaw = pcg2d(cell, seed + 536u).x * TAU;
+  let yaw = pcg2d(wc, seed + 536u).x * TAU;
   let lean = vec2<f32>(normal.z, -normal.x) * params.stream_snow_lean.w * slope_amt;
   let out_index = cls * max_instances + class_slot;
   instance_a[out_index] = vec4<f32>(wpos.x, y, wpos.y, scale);
