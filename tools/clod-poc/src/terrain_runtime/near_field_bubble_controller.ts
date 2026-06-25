@@ -151,6 +151,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       const edits = resolveDigEdits(getDigEditsSnapshot());
       let pending = P * P;
       const failedCoords: Array<[number, number]> = [];
+      let unrecoveredFailures = 0;
       const settle = () => {
         if (--pending !== 0) return;
         if (failedCoords.length > 0) {
@@ -158,14 +159,14 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
             `[bubble] GPU chunk meshing failed for page ${node.id}: ${failedCoords.length}/${P * P} chunks`,
           );
           const recovered = cpuFallbackChunks(node, group, mats, unsubs, failedCoords);
-          const expectedMeshes = P * P;
-          entry.failed = group.children.length < expectedMeshes;
-          if (recovered > 0 && entry.failed) {
+          unrecoveredFailures = failedCoords.length - recovered;
+          if (recovered > 0 && unrecoveredFailures > 0) {
             console.warn(
-              `[bubble] partial CPU fallback for page ${node.id}: ${group.children.length}/${expectedMeshes} chunks`,
+              `[bubble] partial CPU fallback for page ${node.id}: ${recovered}/${failedCoords.length} chunks recovered`,
             );
           }
         }
+        entry.failed = unrecoveredFailures > 0;
         entry.ready = true;
       };
       for (let dz = 0; dz < P; dz++) {
@@ -245,9 +246,12 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
               chunkGroupsBuiltThisFrame++;
             }
             grp.lastTouchFrame = input.frameId;
-            if (grp.ready && !grp.failed) {
+            if (grp.ready && !grp.failed && grp.group.children.length > 0) {
               v.mesh.visible = false;
               grp.group.visible = true;
+            } else if (grp.ready && !grp.failed) {
+              v.mesh.visible = true;
+              grp.group.visible = false;
             } else {
               v.mesh.visible = true;
               grp.group.visible = false;

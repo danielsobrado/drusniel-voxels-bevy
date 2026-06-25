@@ -1,4 +1,5 @@
 import type GUI from "lil-gui";
+import type { ClodAppState } from "../../app/clod_app_state.js";
 import {
   PROCEDURAL_DEBUG_MODES,
   TEXTURE_BLEND_MODES,
@@ -21,7 +22,7 @@ export interface TerrainMaterialGuiResult {
 
 export function createTerrainMaterialGui(
   gui: GUI,
-  state: Record<string, unknown>,
+  state: ClodAppState,
   deps: TerrainMaterialGuiDeps,
 ): TerrainMaterialGuiResult {
   const textureActions = deps.textureModal.actions;

@@ -1,4 +1,5 @@
 import type GUI from "lil-gui";
+import type { ClodAppState } from "../../app/clod_app_state.js";
 import { GRASS_SHADER_MODES } from "../../grass.js";
 import type { GrassController } from "../../systems/grass_controller.js";
 import type { StoneController } from "../../systems/stone_controller.js";
@@ -59,7 +60,7 @@ export interface VegetationGuiResult {
 
 export function createVegetationGui(
   gui: GUI,
-  state: Record<string, unknown>,
+  state: ClodAppState,
   deps: VegetationGuiDeps,
 ): VegetationGuiResult {
   let grassBladeCountController: GuiController | null = null;

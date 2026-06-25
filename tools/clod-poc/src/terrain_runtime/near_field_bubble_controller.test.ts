@@ -94,4 +94,66 @@ describe("createNearFieldBubbleController", () => {
     expect(view.mesh.visible).toBe(true);
     expect(controller.size()).toBe(1);
   });
+
+  it("does not mark page failed when GPU returns empty but successful chunks", async () => {
+    const scene = new THREE.Scene();
+    const sharedMaterial = {
+      material: new THREE.MeshStandardMaterial(),
+      setBaseColor: vi.fn(),
+      onMaterialChanged: () => () => {},
+    };
+    const materialController = {
+      sharedMaterial,
+      materials: new Map(),
+      makeTerrainMaterial: () => sharedMaterial,
+      configureChunkMaterial: vi.fn(),
+    } as unknown as import("./terrain_material_controller.js").TerrainMaterialController;
+
+    const emptyMesher = {
+      meshChunk: vi.fn(() => Promise.resolve({
+        positions: new Float32Array(),
+        normals: new Float32Array(),
+        materials: new Float32Array(),
+        indices: new Uint32Array(),
+      })),
+    };
+
+    const controller = createNearFieldBubbleController({
+      scene,
+      materialController,
+      cfg: TEST_CFG,
+      worldBounds: { cellsX: 64, cellsZ: 64 },
+      getTintBubble: () => false,
+      getGpuMesher: () => emptyMesher as unknown as import("../gpu/gpu_chunk_mesher.js").GpuChunkMesher,
+      chunkGroupBuildBudget: 4,
+      maxCachedChunkGroups: 64,
+      evictDistanceMultiplier: 2.5,
+    });
+
+    const node = makeNode();
+    const view = makeView(node);
+    controller.update({
+      enabled: true,
+      bubbleRadius: 1000,
+      bubbleCenter: new THREE.Vector3(24, 0, 24),
+      bubbleViews: [view],
+      getView: (id) => (id === node.id ? view : undefined),
+      frameId: 1,
+    });
+    await vi.waitFor(() => {
+      expect(emptyMesher.meshChunk).toHaveBeenCalled();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    controller.update({
+      enabled: true,
+      bubbleRadius: 1000,
+      bubbleCenter: new THREE.Vector3(24, 0, 24),
+      bubbleViews: [view],
+      getView: (id) => (id === node.id ? view : undefined),
+      frameId: 2,
+    });
+
+    expect(view.mesh.visible).toBe(true);
+  });
 });

@@ -1,4 +1,5 @@
 import type GUI from "lil-gui";
+import type { ClodAppState } from "../../app/clod_app_state.js";
 import { setAudioEnabled, setMasterVolume } from "../../audio/index.js";
 import {
   DEFAULT_ENVIRONMENT_SETTINGS,
@@ -19,7 +20,7 @@ export interface EnvironmentGuiDeps {
 
 export function createEnvironmentGui(
   gui: GUI,
-  state: Record<string, unknown>,
+  state: ClodAppState,
   deps: EnvironmentGuiDeps,
 ): void {
   const audioFolder = gui.addFolder("Audio");

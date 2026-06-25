@@ -85,7 +85,9 @@ export function simplifyPage(
 
   // meshopt keeps the original vertex buffer; unused vertices are simply unreferenced.
   // Compact to referenced vertices so downstream weld/lock/stats stay tight.
-  const compacted = compact(mesh, newIndices, cfg.simplify.weld_epsilon_cells, options);
+  // NOTE: compaction copies original positions verbatim — no snapping.
+  // Locked border vertices must survive simplification unchanged.
+  const compacted = compact(mesh, newIndices, options);
 
   const errorWorld = resultError * simplifyScale(mesh);
   const lowBenefit = newIndices.length > cfg.simplify.abandon_ratio * inputIndices;
@@ -93,12 +95,8 @@ export function simplifyPage(
   return { mesh: compacted, resultError, errorWorld, lowBenefit };
 }
 
-/** Drop unreferenced vertices and remap indices. */
-function snap(value: number, epsilon: number): number {
-  return Math.round(value / epsilon) * epsilon;
-}
-
-function compact(mesh: PageMesh, indices: Uint32Array, snapEpsilon: number, options: SimplifyOptions): PageMesh {
+/** Drop unreferenced vertices and remap indices. Copies original positions verbatim. */
+function compact(mesh: PageMesh, indices: Uint32Array, options: SimplifyOptions): PageMesh {
   const remap = new Map<number, number>();
   const pos: number[] = [], nrm: number[] = [], mat: number[] = [];
   const out = new Uint32Array(indices.length);
@@ -108,12 +106,13 @@ function compact(mesh: PageMesh, indices: Uint32Array, snapEpsilon: number, opti
     if (ni === undefined) {
       ni = pos.length / 3;
       remap.set(old, ni);
-      const px = snap(mesh.positions[old * 3], snapEpsilon);
-      const py = snap(mesh.positions[old * 3 + 1], snapEpsilon);
-      const pz = snap(mesh.positions[old * 3 + 2], snapEpsilon);
-      pos.push(px, py, pz);
+      pos.push(
+        mesh.positions[old * 3],
+        mesh.positions[old * 3 + 1],
+        mesh.positions[old * 3 + 2],
+      );
       nrm.push(mesh.normals[old * 3], mesh.normals[old * 3 + 1], mesh.normals[old * 3 + 2]);
-      mat.push(options.preserveMaterials ? mesh.materials[old] : paintMaterialAt(px, py, pz));
+      mat.push(options.preserveMaterials ? mesh.materials[old] : paintMaterialAt(mesh.positions[old * 3], mesh.positions[old * 3 + 1], mesh.positions[old * 3 + 2]));
     }
     out[i] = ni;
   }

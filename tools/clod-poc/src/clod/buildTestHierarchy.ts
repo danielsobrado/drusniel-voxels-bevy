@@ -116,7 +116,7 @@ export function buildTestHierarchy(
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
-        stripDegenerateTriangles(sim.mesh);
+        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));

@@ -1,8 +1,13 @@
 import { bootstrapClodPoc } from "./app/bootstrap/index.js";
 
-bootstrapClodPoc().catch((e) => {
+bootstrapClodPoc().catch((error) => {
   const buildProgress = document.getElementById("build-progress");
   if (buildProgress) buildProgress.hidden = true;
-  document.getElementById("info")!.textContent = "build failed: " + (e?.message ?? e);
-  throw e;
+
+  const info = document.getElementById("info");
+  if (info) {
+    info.textContent = `build failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+
+  console.error(error);
 });

@@ -177,3 +177,17 @@ export function parseWeatherQueryContext(searchParams: URLSearchParams): Weather
     queryWeatherWindZ: weatherWindZParam === null ? Number.NaN : Number(weatherWindZParam),
   };
 }
+
+export type BootstrapQueryContext = SceneQueryFlags & Phase0SceneContext & ClodRuntimeQueryFlags;
+
+export function parseBootstrapQueryContext(
+  searchParams: URLSearchParams,
+  phase0ConfigText: string,
+): BootstrapQueryContext {
+  const scene = parseSceneQueryFlags(searchParams);
+  return {
+    ...scene,
+    ...parsePhase0SceneContext(scene.queryScene, phase0ConfigText),
+    ...parseClodRuntimeQueryFlags(searchParams),
+  };
+}

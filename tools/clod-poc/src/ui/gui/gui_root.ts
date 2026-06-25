@@ -1,3 +1,4 @@
+import type { ClodAppState } from "../../app/clod_app_state.js";
 import GUI from "lil-gui";
 import { createClodGui, type ClodGuiDeps } from "./clod_gui.js";
 import { createEnvironmentGui, type EnvironmentGuiDeps } from "./environment_gui.js";
@@ -34,7 +35,7 @@ export interface ClodPocGuiResult {
 }
 
 export function createClodPocGui(
-  state: Record<string, unknown>,
+  state: ClodAppState,
   deps: ClodPocGuiDeps,
 ): Omit<ClodPocGuiResult, "digRadiusController"> {
   const gui = new GUI();
@@ -59,7 +60,7 @@ export function createClodPocGui(
 
 export function createClodPocTerrainMaterialGui(
   gui: GUI,
-  state: Record<string, unknown>,
+  state: ClodAppState,
   deps: ClodPocTerrainMaterialGuiDeps,
 ): Pick<ClodPocGuiResult, "digRadiusController"> {
   return createTerrainMaterialGui(gui, state, deps.terrainMaterial);

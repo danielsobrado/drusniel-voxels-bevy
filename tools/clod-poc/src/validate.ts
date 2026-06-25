@@ -1,17 +1,17 @@
 // Builder validation - errors, never warnings.
 // Runs in every build (the builder is off the frame path; correctness > speed here).
 
-import { PageMesh, PageFootprint, ClodBuildError, DEFAULT_TOLERANCES, vertexCount } from "./types.js";
+import { PageMesh, PageFootprint, ClodBuildError, DEFAULT_TOLERANCES, vertexCount, type BorderTolerances } from "./types.js";
 
-/** Undirected edge key for boundary-edge detection. */
-function edgeKey(a: number, b: number): number {
+/** Undirected edge key for boundary-edge detection. String to avoid int overflow. */
+function edgeKey(a: number, b: number): string {
   const lo = Math.min(a, b), hi = Math.max(a, b);
-  return lo * 0x1000000 + hi;
+  return `${lo}:${hi}`;
 }
 
 /** Topological border edges = edges used by exactly one triangle. */
-export function borderEdges(mesh: PageMesh): Set<number> {
-  const count = new Map<number, number>();
+export function borderEdges(mesh: PageMesh): Set<string> {
+  const count = new Map<string, number>();
   const idx = mesh.indices;
   for (let t = 0; t < idx.length; t += 3) {
     const a = idx[t], b = idx[t + 1], c = idx[t + 2];
@@ -20,7 +20,7 @@ export function borderEdges(mesh: PageMesh): Set<number> {
       count.set(k, (count.get(k) ?? 0) + 1);
     }
   }
-  const border = new Set<number>();
+  const border = new Set<string>();
   for (const [k, n] of count) if (n === 1) border.add(k);
   return border;
 }
@@ -33,8 +33,9 @@ export function borderEdges(mesh: PageMesh): Set<number> {
 export function openBoundaryVertexFlags(mesh: PageMesh): Uint8Array {
   const flags = new Uint8Array(vertexCount(mesh));
   for (const k of borderEdges(mesh)) {
-    flags[Math.floor(k / 0x1000000)] = 1;
-    flags[k % 0x1000000] = 1;
+    const [a, b] = k.split(":").map(Number);
+    flags[a] = 1;
+    flags[b] = 1;
   }
   return flags;
 }
@@ -73,14 +74,36 @@ export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint
   }
 }
 
-/** Strip exactly-degenerate (zero-area / repeated-index) triangles. */
-export function stripDegenerateTriangles(mesh: PageMesh): number {
+/** Squared area of a triangle. */
+function triangleAreaSq(mesh: PageMesh, a: number, b: number, c: number): number {
+  const ax = mesh.positions[a * 3], ay = mesh.positions[a * 3 + 1], az = mesh.positions[a * 3 + 2];
+  const bx = mesh.positions[b * 3], by = mesh.positions[b * 3 + 1], bz = mesh.positions[b * 3 + 2];
+  const cx = mesh.positions[c * 3], cy = mesh.positions[c * 3 + 1], cz = mesh.positions[c * 3 + 2];
+  const abx = bx - ax, aby = by - ay, abz = bz - az;
+  const acx = cx - ax, acy = cy - ay, acz = cz - az;
+  const nx = aby * acz - abz * acy;
+  const ny = abz * acx - abx * acz;
+  const nz = abx * acy - aby * acx;
+  return (nx * nx + ny * ny + nz * nz) * 0.25;
+}
+
+/**
+ * Strip degenerate triangles: repeated-index AND zero-area.
+ * When zeroAreaEpsilon is provided, also strips triangles whose area is <= zeroAreaEpsilon.
+ */
+export function stripDegenerateTriangles(mesh: PageMesh, zeroAreaEpsilon?: number): number {
   const idx = mesh.indices;
   const kept: number[] = [];
   let removed = 0;
+  const epsSq = zeroAreaEpsilon !== undefined ? zeroAreaEpsilon * zeroAreaEpsilon : -1;
+
   for (let t = 0; t < idx.length; t += 3) {
     const a = idx[t], b = idx[t + 1], c = idx[t + 2];
     if (a === b || b === c || a === c) {
+      removed++;
+      continue;
+    }
+    if (epsSq >= 0 && triangleAreaSq(mesh, a, b, c) <= epsSq) {
       removed++;
       continue;
     }
@@ -88,6 +111,33 @@ export function stripDegenerateTriangles(mesh: PageMesh): number {
   }
   mesh.indices = new Uint32Array(kept);
   return removed;
+}
+
+/** Validate no degenerate (zero-area) triangles remain. */
+export function validateNoDegenerateTriangles(mesh: PageMesh, epsilon: number): void {
+  const idx = mesh.indices;
+  const epsSq = epsilon * epsilon;
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+    if (triangleAreaSq(mesh, a, b, c) <= epsSq) {
+      throw new ClodBuildError("DegenerateGeometry", `zero-area triangle at indices ${a},${b},${c}`);
+    }
+  }
+}
+
+/** Validate mesh for NaN/Infinity, index bounds, and count consistency. */
+export function validateFinite(mesh: PageMesh, label: string): void {
+  if (mesh.indices.length % 3 !== 0) throw new ClodBuildError("DegenerateGeometry", `${label} non-triangle index count`);
+  if (mesh.indices.length === 0) throw new ClodBuildError("DegenerateGeometry", `${label} empty mesh after strip`);
+  const vc = vertexCount(mesh);
+  if (vc !== mesh.normals.length / 3) throw new ClodBuildError("DegenerateGeometry", `${label} position/normal count mismatch`);
+  if (vc !== mesh.materials.length) throw new ClodBuildError("DegenerateGeometry", `${label} position/material count mismatch`);
+  for (let i = 0; i < mesh.indices.length; i++) {
+    if (mesh.indices[i] >= vc) throw new ClodBuildError("DegenerateGeometry", `${label} out-of-bounds index ${mesh.indices[i]} >= ${vc}`);
+  }
+  for (const v of mesh.positions) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite position`);
+  for (const v of mesh.normals) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite normal`);
+  for (const v of mesh.materials) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite material`);
 }
 
 export interface BorderChain {
@@ -139,10 +189,10 @@ export function borderChain(
 
 /**
  * Assert two adjacent same-level pages share a matching border chain (gate A2).
- * position <= default weld epsilon, normal dot >= 0.9999, material delta <= 1e-4.
+ * Tolerances come from cfg.validation or fall back to DEFAULT_TOLERANCES.
  */
-export function assertBorderMatch(a: BorderChain, b: BorderChain): void {
-  const tol = DEFAULT_TOLERANCES;
+export function assertBorderMatch(a: BorderChain, b: BorderChain, tolerances?: BorderTolerances): void {
+  const tol = tolerances ?? DEFAULT_TOLERANCES;
   if (a.positions.length !== b.positions.length) {
     throw new ClodBuildError(
       "BorderPositionMismatch",

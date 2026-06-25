@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type GUI from "lil-gui";
+import type { ClodAppState } from "../../app/clod_app_state.js";
 import { emitAudio } from "../../audio/index.js";
 import type { GuiController } from "./gui_controller.js";
 
@@ -43,7 +44,7 @@ export interface ClodGuiResult {
 
 export function createClodGui(
   gui: GUI,
-  state: Record<string, unknown>,
+  state: ClodAppState,
   deps: ClodGuiDeps,
 ): ClodGuiResult {
   gui

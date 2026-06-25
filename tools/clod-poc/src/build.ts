@@ -17,7 +17,12 @@ function fmt(n: number, w = 8): string {
 
 async function main() {
   const cfg = loadConfig();
-  const world = Number(process.argv[2] ?? 4);
+  const rawArg = process.argv[2];
+  const world = rawArg === "smoke"
+    ? cfg.poc.smoke_lod0_pages_x
+    : rawArg
+      ? Number(rawArg)
+      : cfg.poc.lod0_pages_x;
 
   await initSimplifier();
   const t0 = performance.now();
@@ -74,6 +79,7 @@ async function main() {
         assertBorderMatch(
           borderChain(a.mesh, "x", a.footprint.maxX, a.footprint),
           borderChain(right.mesh, "x", right.footprint.minX, right.footprint),
+          { position: cfg.validation.position_epsilon, normalDot: cfg.validation.normal_dot_min, material: cfg.validation.material_weight_epsilon },
         );
         checks++;
       }
@@ -82,12 +88,14 @@ async function main() {
         assertBorderMatch(
           borderChain(a.mesh, "z", a.footprint.maxZ, a.footprint),
           borderChain(down.mesh, "z", down.footprint.minZ, down.footprint),
+          { position: cfg.validation.position_epsilon, normalDot: cfg.validation.normal_dot_min, material: cfg.validation.material_weight_epsilon },
         );
         checks++;
       }
     }
   }
-  console.log(`\nA2 border-match: ${checks} adjacent same-level page pairs matched (pos<=1e-3, dot>=0.9999, mat<=1e-4). PASS`);
+  const v = cfg.validation;
+  console.log(`\nA2 border-match: ${checks} adjacent same-level page pairs matched (pos<=${v.position_epsilon}, dot>=${v.normal_dot_min}, mat<=${v.material_weight_epsilon}). PASS`);
 
   // ---- Acceptance gate verdict ----
   const maxNodeMs = Math.max(...result.stats.map((s) => s.buildMs));

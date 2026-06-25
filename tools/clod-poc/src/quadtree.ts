@@ -170,7 +170,7 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
-        stripDegenerateTriangles(sim.mesh);
+        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
         const polishLocks = buildOuterBorderLocks(sim.mesh);
         const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
         assertNoInternalBorders(sim.mesh, footprint);
@@ -298,7 +298,7 @@ export async function buildWorldAsync(
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
-        stripDegenerateTriangles(sim.mesh);
+        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
         const polishLocks = buildOuterBorderLocks(sim.mesh);
         const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
         assertNoInternalBorders(sim.mesh, footprint);
