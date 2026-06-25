@@ -32,6 +32,24 @@ export interface WaterFieldResult {
   flow: WaterFlow;
 }
 
+export interface EdgeOceanSettings {
+  enabled: boolean;
+  startDistance: number;
+  fullDepthDistance: number;
+  minDepth: number;
+  maxDepth: number;
+  level: number;
+}
+
+export const DEFAULT_EDGE_OCEAN_SETTINGS: EdgeOceanSettings = {
+  enabled: false,
+  startDistance: 96,
+  fullDepthDistance: 32,
+  minDepth: 2,
+  maxDepth: 18,
+  level: 18,
+};
+
 const FLOW_EPSILON = 1e-6;
 
 interface LakeRuntime {
@@ -140,6 +158,15 @@ function smoothMask(edge0: number, edge1: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
+function smooth01(value: number): number {
+  const t = Math.min(1, Math.max(0, value));
+  return t * t * (3 - 2 * t);
+}
+
+function cloneOceanSettings(settings: EdgeOceanSettings): EdgeOceanSettings {
+  return { ...settings };
+}
+
 export class WaterField {
   private readonly sampler: TerrainHeightSampler;
   private readonly drySentinelDepth: number;
@@ -148,17 +175,42 @@ export class WaterField {
   private readonly hydrology: HydrologySystem | null;
   private readonly source: WaterConfig["source"];
   private readonly farLevelMinCellSize: number;
+  private readonly worldCells: number;
+  private ocean = cloneOceanSettings(DEFAULT_EDGE_OCEAN_SETTINGS);
 
-  constructor(config: WaterConfig, sampler: TerrainHeightSampler, hydrology: HydrologySystem | null = null) {
+  constructor(config: WaterConfig, sampler: TerrainHeightSampler, hydrology: HydrologySystem | null = null, worldCells = 0) {
     this.sampler = sampler;
     this.drySentinelDepth = config.drySentinelDepth;
     this.hydrology = hydrology;
     this.source = config.source;
     this.farLevelMinCellSize = config.hydrology.waterSurface.farLevelMinCellSize;
+    this.worldCells = Math.max(0, worldCells);
     this.lakes = config.fakeBodies.lakes.map((lake) => buildLakeRuntime(lake, sampler));
     this.rivers = config.fakeBodies.rivers
       .filter((river) => river.points.length >= 2)
       .map((river) => buildRiverRuntime(river, sampler));
+  }
+
+  setEdgeOcean(settings: Partial<EdgeOceanSettings>): void {
+    this.ocean = {
+      ...this.ocean,
+      ...settings,
+      startDistance: Math.max(1, settings.startDistance ?? this.ocean.startDistance),
+      fullDepthDistance: Math.max(0, settings.fullDepthDistance ?? this.ocean.fullDepthDistance),
+      minDepth: Math.max(0.01, settings.minDepth ?? this.ocean.minDepth),
+      maxDepth: Math.max(0.01, settings.maxDepth ?? this.ocean.maxDepth),
+      level: Number.isFinite(settings.level) ? Number(settings.level) : this.ocean.level,
+    };
+    if (this.ocean.fullDepthDistance > this.ocean.startDistance) {
+      this.ocean.fullDepthDistance = this.ocean.startDistance;
+    }
+    if (this.ocean.maxDepth < this.ocean.minDepth) {
+      this.ocean.maxDepth = this.ocean.minDepth;
+    }
+  }
+
+  getEdgeOcean(): EdgeOceanSettings {
+    return cloneOceanSettings(this.ocean);
   }
 
   /** Terrain surface height at (x,z), exposed for the clipmap vertex fill. */
@@ -182,7 +234,7 @@ export class WaterField {
     return this.sample(x, z).flow;
   }
 
-  /** Body mask in [0,1]: lake/river occupancy, blended at edges. 0 in dry areas. */
+  /** Body mask in [0,1]: lake/river/ocean occupancy, blended at edges. 0 in dry areas. */
   bodyMaskAt(x: number, z: number): number {
     return this.sample(x, z).bodyMask;
   }
@@ -193,6 +245,9 @@ export class WaterField {
   }
 
   sampleForCellSize(x: number, z: number, cellSize: number): WaterFieldResult {
+    const ocean = this.sampleEdgeOcean(x, z);
+    if (ocean) return ocean;
+
     if (this.source === "hydrology" && this.hydrology) {
       const s = this.hydrology.sample(x, z);
       const useFar = cellSize >= this.farLevelMinCellSize;
@@ -226,14 +281,10 @@ export class WaterField {
       const dx = (x - lake.center[0]) * lake.invRadius[0];
       const dz = (z - lake.center[1]) * lake.invRadius[1];
       const r2 = dx * dx + dz * dz;
-
-      // Soft edge over the outer 6% of the ellipse so shore foam has a gradient.
       const edgeStart = 0.94 * 0.94;
       const weight = 1 - smoothMask(edgeStart, 1.0, r2);
       if (weight > 0) {
         maxLakeMask = Math.max(maxLakeMask, weight);
-        // Inside the lake the water level is flat; if terrain is above the lake,
-        // depth goes negative and the shader discards.
         const level = lake.waterLevel;
         if (weight > bestLakeWeight) {
           bestLakeWeight = weight;
@@ -276,11 +327,9 @@ export class WaterField {
         accLen += river.segLengths[i];
       }
 
-      // Calculations for Mask
       const m = 1 - smoothMask(river.halfWidth * 0.9, river.halfWidth, bestDist);
       maxRiverMask = Math.max(maxRiverMask, m);
 
-      // Calculations for Level
       const inside = bestDist <= river.halfWidth;
       const proximity = 1 - smoothMask(river.halfWidth * 0.9, river.halfWidth, bestDist);
       if (inside || proximity > 0) {
@@ -295,7 +344,6 @@ export class WaterField {
         }
       }
 
-      // Calculations for Flow
       const flowProximity = 1 - smoothMask(river.halfWidth * 0.5, river.halfWidth, bestDist);
       if (flowProximity > 0) {
         const ax = river.points[bestSegIdx][0];
@@ -326,11 +374,7 @@ export class WaterField {
 
     let waterY = terrainY - this.drySentinelDepth;
     if (bestLakeWeight > 0 || bestRiverWeight > 0) {
-      if (bestLakeWeight > bestRiverWeight) {
-        waterY = bestLakeLevel;
-      } else {
-        waterY = bestRiverLevel;
-      }
+      waterY = bestLakeWeight > bestRiverWeight ? bestLakeLevel : bestRiverLevel;
     }
 
     const flow = bestFlowWeight > 0
@@ -349,6 +393,30 @@ export class WaterField {
       depth: waterY - terrainY,
       bodyMask,
       flow,
+    };
+  }
+
+  private sampleEdgeOcean(x: number, z: number): WaterFieldResult | null {
+    if (!this.ocean.enabled || this.worldCells <= 0) return null;
+    const edgeDistance = Math.min(x, z, this.worldCells - x, this.worldCells - z);
+    if (edgeDistance >= this.ocean.startDistance) return null;
+
+    const width = Math.max(1, this.ocean.startDistance - this.ocean.fullDepthDistance);
+    const raw = (this.ocean.startDistance - edgeDistance) / width;
+    const strength = edgeDistance <= this.ocean.fullDepthDistance ? 1 : smooth01(raw);
+    if (strength <= 0) return null;
+
+    const terrainY = this.terrainYAt(x, z);
+    const oceanDepth = this.ocean.minDepth + (this.ocean.maxDepth - this.ocean.minDepth) * strength;
+    const seaLevel = this.ocean.level;
+    const waterY = Math.max(seaLevel, terrainY + Math.max(0.12, oceanDepth * 0.08));
+    const depth = waterY - terrainY;
+    return {
+      waterY,
+      terrainY,
+      depth,
+      bodyMask: Math.min(1, strength),
+      flow: { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
     };
   }
 }
