@@ -64,8 +64,8 @@ describe("grass placement", () => {
     expect(DEFAULT_GRASS_SHADER_MODE).toBe("webgpu-ring-v1");
     expect(DEFAULT_GRASS_SETTINGS.shaderMode).toBe("webgpu-ring-v1");
     expect(DEFAULT_GRASS_SETTINGS.maxHeight).toBe(28);
-    expect(DEFAULT_GRASS_SETTINGS.ring.grid).toBe(256);
-    expect(DEFAULT_GRASS_SETTINGS.ring.cell).toBe(1.7);
+    expect(DEFAULT_GRASS_SETTINGS.ring.grid).toBe(700);
+    expect(DEFAULT_GRASS_SETTINGS.ring.cell).toBe(0.7);
     expect(DEFAULT_GRASS_SETTINGS.patchFallback.maxNewPatchesPerRefresh).toBe(2);
     expect(GRASS_SHADER_MODES).toContain("terrain-patch-v2");
     expect(GRASS_SHADER_MODES).toContain("webgpu-ring-v1");
@@ -323,8 +323,8 @@ grass:
   });
 
   it("uses a fixed GPU slot grid instead of a CPU candidate buffer", () => {
-    expect(GRASS_GPU_RING_GRID).toBe(256);
-    expect(GRASS_GPU_RING_CELL).toBe(1.7);
+    expect(GRASS_GPU_RING_GRID).toBe(700);
+    expect(GRASS_GPU_RING_CELL).toBe(0.7);
     expect(GRASS_GPU_RING_SLOT_COUNT).toBe(GRASS_GPU_RING_GRID * GRASS_GPU_RING_GRID);
     expect(GRASS_GPU_RING_GRID * GRASS_GPU_RING_CELL * 0.5).toBeGreaterThanOrEqual(217);
   });
@@ -396,7 +396,9 @@ grass:
         mesh: {
           positions: new Float32Array(),
           normals: new Float32Array(),
-          materials: new Float32Array(),
+          paintSlots: new Float32Array(),
+          materialWeights: new Float32Array(),
+          materialWeightStride: 4,
           indices: new Uint32Array(),
         },
         footprint,
@@ -590,7 +592,9 @@ grass:
         mesh: {
           positions: new Float32Array(),
           normals: new Float32Array(),
-          materials: new Float32Array(),
+          paintSlots: new Float32Array(),
+          materialWeights: new Float32Array(),
+          materialWeightStride: 4,
           indices: new Uint32Array(),
         },
         footprint,
@@ -633,7 +637,9 @@ grass:
         mesh: {
           positions: new Float32Array(),
           normals: new Float32Array(),
-          materials: new Float32Array(),
+          paintSlots: new Float32Array(),
+          materialWeights: new Float32Array(),
+          materialWeightStride: 4,
           indices: new Uint32Array(),
         },
         footprint,
@@ -689,7 +695,9 @@ grass:
         mesh: {
           positions: new Float32Array(),
           normals: new Float32Array(),
-          materials: new Float32Array(),
+          paintSlots: new Float32Array(),
+          materialWeights: new Float32Array(),
+          materialWeightStride: 4,
           indices: new Uint32Array(),
         },
         footprint,
@@ -741,7 +749,9 @@ grass:
         mesh: {
           positions: new Float32Array(),
           normals: new Float32Array(),
-          materials: new Float32Array(),
+          paintSlots: new Float32Array(),
+          materialWeights: new Float32Array(),
+          materialWeightStride: 4,
           indices: new Uint32Array(),
         },
         footprint,

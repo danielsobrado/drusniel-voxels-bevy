@@ -41,10 +41,18 @@ function heightfieldPageMesh(fixture: FixtureDef, pageX: number, pageZ: number, 
     }
   }
 
+  const nv = materials.length;
+  const materialWeights = new Float32Array(nv * 4);
+  for (let i = 0; i < nv; i++) {
+    const slot = Math.min(Math.max(0, materials[i]), 3);
+    materialWeights[i * 4 + slot] = 1.0;
+  }
   return {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
-    materials: new Float32Array(materials),
+    paintSlots: new Float32Array(materials),
+    materialWeights,
+    materialWeightStride: 4,
     indices: new Uint32Array(indices),
   };
 }

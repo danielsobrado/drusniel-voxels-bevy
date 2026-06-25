@@ -6,10 +6,7 @@ import type { UnderstoryStats } from "../../understory/index.js";
 import type { ForestLightingStats } from "../../forest_lighting/index.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import { submitMsChanged } from "./frame_timing.js";
-
-interface GuiDisplayController {
-  updateDisplay: () => unknown;
-}
+import type { StatsPresenter } from "./stats_presenter.js";
 
 export interface StatsSyncPhaseInput {
   state: ClodFrameLoopUiState;
@@ -30,23 +27,7 @@ export interface StatsSyncPhaseInput {
   setForestLightingStats: (stats: ForestLightingStats | null) => void;
   formatTreeGpuSummary: (stats: TreeStats) => string;
   formatUnderstoryGpuSummary: (stats: UnderstoryStats) => string;
-  grassBladeCountController: GuiDisplayController | null;
-  grassVisiblePatchesController: GuiDisplayController | null;
-  grassTierSummaryController: GuiDisplayController | null;
-  grassEdgeSuppressedController: GuiDisplayController | null;
-  grassCandidateCountController: GuiDisplayController | null;
-  treeTotalController: GuiDisplayController | null;
-  treeVisiblePatchesController: GuiDisplayController | null;
-  treeLodSummaryController: GuiDisplayController | null;
-  treeGpuSummaryController: GuiDisplayController | null;
-  stoneTotalController: GuiDisplayController | null;
-  stoneClassSummaryController: GuiDisplayController | null;
-  stoneVisibleController: GuiDisplayController | null;
-  understoryTotalController: GuiDisplayController | null;
-  understoryVisiblePatchesController: GuiDisplayController | null;
-  understoryClassSummaryController: GuiDisplayController | null;
-  understoryGpuSummaryController: GuiDisplayController | null;
-  forestLightingStatsController: GuiDisplayController | null;
+  statsPresenter: StatsPresenter;
 }
 
 export interface StatsSyncPhaseResult {
@@ -54,6 +35,7 @@ export interface StatsSyncPhaseResult {
 }
 
 export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseResult {
+  const presenter = input.statsPresenter;
   const nextTreeStats = input.treeSystem?.getStats();
   const treeStats = input.getTreeStats();
   if (
@@ -77,10 +59,10 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     input.state.treeVisiblePatches = `${nextTreeStats.visiblePatches}/${nextTreeStats.patches}`;
     input.state.treeLodSummary = `${nextTreeStats.nearTrees}/${nextTreeStats.midTrees}/${nextTreeStats.farTrees}/${nextTreeStats.impostorTrees}`;
     input.state.treeGpuSummary = input.formatTreeGpuSummary(nextTreeStats);
-    input.treeTotalController?.updateDisplay();
-    input.treeVisiblePatchesController?.updateDisplay();
-    input.treeLodSummaryController?.updateDisplay();
-    input.treeGpuSummaryController?.updateDisplay();
+    presenter.treeTotalController?.updateDisplay();
+    presenter.treeVisiblePatchesController?.updateDisplay();
+    presenter.treeLodSummaryController?.updateDisplay();
+    presenter.treeGpuSummaryController?.updateDisplay();
   }
 
   const nextStoneStats = input.stoneSystem?.getStats();
@@ -90,9 +72,9 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     input.state.stoneTotal = nextStoneStats.total;
     input.state.stoneClassSummary = `${nextStoneStats.large}/${nextStoneStats.medium}/${nextStoneStats.small}`;
     input.state.stoneVisible = nextStoneStats.visible;
-    input.stoneTotalController?.updateDisplay();
-    input.stoneClassSummaryController?.updateDisplay();
-    input.stoneVisibleController?.updateDisplay();
+    presenter.stoneTotalController?.updateDisplay();
+    presenter.stoneClassSummaryController?.updateDisplay();
+    presenter.stoneVisibleController?.updateDisplay();
   }
 
   const nextUnderstoryStats = input.understorySystem?.getStats();
@@ -116,10 +98,10 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     input.state.understoryClassSummary =
       `${nextUnderstoryStats.shrub}/${nextUnderstoryStats.fern}/${nextUnderstoryStats.sapling}/${nextUnderstoryStats.flower}/${nextUnderstoryStats.deadLog}/${nextUnderstoryStats.stump}`;
     input.state.understoryGpuSummary = input.formatUnderstoryGpuSummary(nextUnderstoryStats);
-    input.understoryTotalController?.updateDisplay();
-    input.understoryVisiblePatchesController?.updateDisplay();
-    input.understoryClassSummaryController?.updateDisplay();
-    input.understoryGpuSummaryController?.updateDisplay();
+    presenter.understoryTotalController?.updateDisplay();
+    presenter.understoryVisiblePatchesController?.updateDisplay();
+    presenter.understoryClassSummaryController?.updateDisplay();
+    presenter.understoryGpuSummaryController?.updateDisplay();
   }
 
   const nextForestLightingStats = input.forestLightingSystem.getStats();
@@ -136,7 +118,7 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
       ? `canopy=${nextForestLightingStats.maxCanopy.toFixed(2)} ao=${nextForestLightingStats.maxAo.toFixed(2)} ` +
         `shadow=${nextForestLightingStats.maxShadow.toFixed(2)} fog=${nextForestLightingStats.maxFog.toFixed(2)}`
       : "disabled";
-    input.forestLightingStatsController?.updateDisplay();
+    presenter.forestLightingStatsController?.updateDisplay();
   }
 
   const nextGrassStats = input.grassSystem?.getStats();
@@ -165,11 +147,11 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     input.state.grassTierSummary = `${nextGrassStats.nearPatches}/${nextGrassStats.midPatches}/${nextGrassStats.coveragePatches}/${nextGrassStats.superPatches}`;
     input.state.grassEdgeSuppressed = nextGrassStats.edgeSuppressedCandidates;
     input.state.grassCandidateCount = nextGrassStats.generatedCandidates;
-    input.grassBladeCountController?.updateDisplay();
-    input.grassVisiblePatchesController?.updateDisplay();
-    input.grassTierSummaryController?.updateDisplay();
-    input.grassEdgeSuppressedController?.updateDisplay();
-    input.grassCandidateCountController?.updateDisplay();
+    presenter.grassBladeCountController?.updateDisplay();
+    presenter.grassVisiblePatchesController?.updateDisplay();
+    presenter.grassTierSummaryController?.updateDisplay();
+    presenter.grassEdgeSuppressedController?.updateDisplay();
+    presenter.grassCandidateCountController?.updateDisplay();
   }
 
   return { currentGrassStats: nextGrassStats ?? grassStats };

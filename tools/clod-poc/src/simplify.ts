@@ -7,6 +7,7 @@ import { MeshoptSimplifier } from "meshoptimizer";
 import { PageMesh, ClodBuildError, vertexCount } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
 import { paintMaterialAt } from "./terrain.js";
+import { ensureMaterialWeights } from "./materialWeights.js";
 
 let ready = false;
 export async function initSimplifier(): Promise<void> {
@@ -46,22 +47,24 @@ export function simplifyPage(
   if (!ready) throw new ClodBuildError("SimplifierApiUnavailable", "call initSimplifier() first");
 
   const vc = vertexCount(mesh);
+  ensureMaterialWeights(mesh);
+  const ws = mesh.materialWeightStride;
   const inputIndices = mesh.indices.length;
   const targetRaw = Math.floor(inputIndices * cfg.simplify.target_ratio_per_level);
   const targetIndices = Math.min(inputIndices, Math.max(3, Math.floor(targetRaw / 3) * 3));
 
-  // Interleave attributes: [n0 n1 n2 paintSlot] per vertex, stride 4.
-  const ATTR_STRIDE = 4;
+  // Interleave attributes: [n0 n1 n2 w0..wN] per vertex, stride = 3 + ws.
+  const ATTR_STRIDE = 3 + ws;
   const attrs = new Float32Array(vc * ATTR_STRIDE);
   for (let i = 0; i < vc; i++) {
     attrs[i * ATTR_STRIDE + 0] = mesh.normals[i * 3 + 0];
     attrs[i * ATTR_STRIDE + 1] = mesh.normals[i * 3 + 1];
     attrs[i * ATTR_STRIDE + 2] = mesh.normals[i * 3 + 2];
-    attrs[i * ATTR_STRIDE + 3] = mesh.materials[i];
+    for (let j = 0; j < ws; j++) attrs[i * ATTR_STRIDE + 3 + j] = mesh.materialWeights[i * ws + j];
   }
   const wn = cfg.simplify.attribute_weights.normal;
   const wm = cfg.simplify.attribute_weights.material;
-  const attrWeights = [wn, wn, wn, wm];
+  const attrWeights = [wn, wn, wn, ...Array(ws).fill(wm)];
 
   let result: [Uint32Array, number];
   try {
@@ -95,10 +98,11 @@ export function simplifyPage(
   return { mesh: compacted, resultError, errorWorld, lowBenefit };
 }
 
-/** Drop unreferenced vertices and remap indices. Copies original positions verbatim. */
+/** Drop unreferenced vertices and remap indices. Copies original positions and weights verbatim. */
 function compact(mesh: PageMesh, indices: Uint32Array, options: SimplifyOptions): PageMesh {
+  const ws = mesh.materialWeightStride;
   const remap = new Map<number, number>();
-  const pos: number[] = [], nrm: number[] = [], mat: number[] = [];
+  const pos: number[] = [], nrm: number[] = [], mat: number[] = [], wgt: number[] = [];
   const out = new Uint32Array(indices.length);
   for (let i = 0; i < indices.length; i++) {
     const old = indices[i];
@@ -112,14 +116,24 @@ function compact(mesh: PageMesh, indices: Uint32Array, options: SimplifyOptions)
         mesh.positions[old * 3 + 2],
       );
       nrm.push(mesh.normals[old * 3], mesh.normals[old * 3 + 1], mesh.normals[old * 3 + 2]);
-      mat.push(options.preserveMaterials ? mesh.materials[old] : paintMaterialAt(mesh.positions[old * 3], mesh.positions[old * 3 + 1], mesh.positions[old * 3 + 2]));
+      if (options.preserveMaterials) {
+        mat.push(mesh.paintSlots[old]);
+        for (let j = 0; j < ws; j++) wgt.push(mesh.materialWeights[old * ws + j]);
+      } else {
+        const paintSlot = paintMaterialAt(mesh.positions[old * 3], mesh.positions[old * 3 + 1], mesh.positions[old * 3 + 2]);
+        mat.push(paintSlot);
+        const clamped = Math.min(Math.max(0, paintSlot), ws - 1);
+        for (let j = 0; j < ws; j++) wgt.push(j === clamped ? 1.0 : 0.0);
+      }
     }
     out[i] = ni;
   }
   return {
     positions: new Float32Array(pos),
     normals: new Float32Array(nrm),
-    materials: new Float32Array(mat),
+    paintSlots: new Float32Array(mat),
+    materialWeights: new Float32Array(wgt),
+    materialWeightStride: ws,
     indices: out,
   };
 }

@@ -4,6 +4,7 @@ import { PageMesh, PageFootprint, ClodBuildError } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
 import { meshChunk, WorldBounds } from "./terrain.js";
 import { weldVertices, WeldReport } from "./weld.js";
+import { ensureMaterialWeights } from "./materialWeights.js";
 
 export interface PageSource {
   mesh: PageMesh;
@@ -16,24 +17,36 @@ export interface PageSource {
 /** Concatenate several PageMeshes into one buffer (no welding yet). */
 export function concat(meshes: PageMesh[]): PageMesh {
   let nv = 0, ni = 0;
+  let ws = 0;
   for (const m of meshes) {
     nv += m.positions.length / 3;
     ni += m.indices.length;
+    if (m.materialWeightStride > ws) ws = m.materialWeightStride;
   }
+  if (ws === 0) ws = 4;
   const positions = new Float32Array(nv * 3);
   const normals = new Float32Array(nv * 3);
   const materials = new Float32Array(nv);
+  const materialWeights = new Float32Array(nv * ws);
   const indices = new Uint32Array(ni);
   let vOff = 0, iOff = 0;
   for (const m of meshes) {
+    ensureMaterialWeights(m);
     positions.set(m.positions, vOff * 3);
     normals.set(m.normals, vOff * 3);
-    materials.set(m.materials, vOff);
+    materials.set(m.paintSlots, vOff);
+    for (let j = 0; j < m.positions.length / 3; j++) {
+      for (let k = 0; k < ws; k++) {
+        materialWeights[(vOff + j) * ws + k] = j < m.positions.length / 3 && k < m.materialWeightStride
+          ? m.materialWeights[j * m.materialWeightStride + k]
+          : k === 0 ? 1.0 : 0.0;
+      }
+    }
     for (let i = 0; i < m.indices.length; i++) indices[iOff + i] = m.indices[i] + vOff;
     vOff += m.positions.length / 3;
     iOff += m.indices.length;
   }
-  return { positions, normals, materials, indices };
+  return { positions, normals, paintSlots: materials, materialWeights, materialWeightStride: ws, indices };
 }
 
 /**
@@ -60,7 +73,11 @@ export function buildLod0PageSource(
     throw new ClodBuildError("PageIncomplete", `expected ${P * P} chunks, got ${chunks.length}`);
   }
 
-  const { mesh, report } = weldVertices(concat(chunks), cfg.simplify.weld_epsilon_cells);
+  const { mesh, report } = weldVertices(concat(chunks), cfg.simplify.weld_epsilon_cells, {
+    position: cfg.validation.position_epsilon,
+    normalDot: cfg.validation.normal_dot_min,
+    material: cfg.validation.material_weight_epsilon,
+  });
 
   const footprint: PageFootprint = {
     minX: pageX * P * S,
@@ -130,6 +147,10 @@ export function rebuildPageChunks(
     const dx = li % P, dz = (li / P) | 0;
     chunkMeshes[li] = meshChunk(pageX * P + dx, pageZ * P + dz, cfg, world);
   }
-  const { mesh } = weldVertices(concat(chunkMeshes), cfg.simplify.weld_epsilon_cells);
+  const { mesh } = weldVertices(concat(chunkMeshes), cfg.simplify.weld_epsilon_cells, {
+    position: cfg.validation.position_epsilon,
+    normalDot: cfg.validation.normal_dot_min,
+    material: cfg.validation.material_weight_epsilon,
+  });
   return { mesh, remeshed: indices.length };
 }

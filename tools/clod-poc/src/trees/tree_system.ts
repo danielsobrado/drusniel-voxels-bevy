@@ -454,7 +454,9 @@ export class TreeSystem {
 
   rebuildNodePatches(nodeIds: Iterable<string>): void {
     this.removePatchesForNodes(nodeIds);
-    this.refreshForCenter(this.lastCenter);
+    if (!this.usesGpuRingDraw()) {
+      this.refreshForCenter(this.lastCenter);
+    }
   }
 
   dispose(): void {

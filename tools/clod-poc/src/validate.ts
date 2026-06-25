@@ -131,13 +131,25 @@ export function validateFinite(mesh: PageMesh, label: string): void {
   if (mesh.indices.length === 0) throw new ClodBuildError("DegenerateGeometry", `${label} empty mesh after strip`);
   const vc = vertexCount(mesh);
   if (vc !== mesh.normals.length / 3) throw new ClodBuildError("DegenerateGeometry", `${label} position/normal count mismatch`);
-  if (vc !== mesh.materials.length) throw new ClodBuildError("DegenerateGeometry", `${label} position/material count mismatch`);
+  if (vc !== mesh.paintSlots.length) throw new ClodBuildError("DegenerateGeometry", `${label} position/paintSlots count mismatch`);
+  if (mesh.materialWeightStride <= 0 || mesh.materialWeights.length !== vc * mesh.materialWeightStride) {
+    throw new ClodBuildError("DegenerateGeometry", `${label} materialWeights length mismatch`);
+  }
   for (let i = 0; i < mesh.indices.length; i++) {
     if (mesh.indices[i] >= vc) throw new ClodBuildError("DegenerateGeometry", `${label} out-of-bounds index ${mesh.indices[i]} >= ${vc}`);
   }
   for (const v of mesh.positions) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite position`);
   for (const v of mesh.normals) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite normal`);
-  for (const v of mesh.materials) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite material`);
+  for (const v of mesh.paintSlots) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite paintSlot`);
+  for (const v of mesh.materialWeights) if (!Number.isFinite(v)) throw new ClodBuildError("DegenerateGeometry", `${label} non-finite materialWeight`);
+}
+
+/** Full validation suite for a built page mesh. */
+export function validatePageMesh(mesh: PageMesh, footprint: PageFootprint, zeroAreaEpsilon: number, label: string): void {
+  stripDegenerateTriangles(mesh, zeroAreaEpsilon);
+  validateFinite(mesh, label);
+  validateNoDegenerateTriangles(mesh, zeroAreaEpsilon);
+  assertNoInternalBorders(mesh, footprint);
 }
 
 export interface BorderChain {
@@ -178,7 +190,7 @@ export function borderChain(
     out.push({
       p: [mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]],
       nr: [mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]],
-      m: mesh.materials[i],
+      m: mesh.paintSlots[i],
     });
   }
   // sort along the free axes then Y

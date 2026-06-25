@@ -30,7 +30,9 @@ function gridMesh(): { mesh: PageMesh; footprint: PageFootprint } {
     mesh: {
       positions: new Float32Array(positions),
       normals: new Float32Array(normals),
-      materials: new Float32Array(materials),
+      paintSlots: new Float32Array(materials),
+      materialWeights: new Float32Array(materials.length * 4),
+      materialWeightStride: 4,
       indices: new Uint32Array(indices),
     },
   };
@@ -62,7 +64,9 @@ describe("page border locks", () => {
         0, 1, 0,
         0, 1, 0,
       ]),
-      materials: new Float32Array([1, 1, 1, 1]),
+      paintSlots: new Float32Array([1, 1, 1, 1]),
+      materialWeights: new Float32Array(16),
+      materialWeightStride: 4,
       indices: new Uint32Array([0, 2, 1, 1, 2, 3]),
     };
 

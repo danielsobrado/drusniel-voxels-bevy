@@ -276,6 +276,7 @@ const editIndex = new Map<CellKey, DigEdit[]>();
 let digEditRevision = 0;
 const editIds = new WeakMap<DigEdit, number>();
 let editIdCounter = 0;
+const activePaintSlots = new Set<number>();
 
 export function addDigEdit(edit: DigEdit): void {
   const id = ++editIdCounter;
@@ -291,6 +292,7 @@ export function addDigEdit(edit: DigEdit): void {
     editIds.set(copy, id);
     bucket.push(copy);
   }
+  if (edit.op === "add") activePaintSlots.add(Math.max(0, edit.material ?? 0));
   digEditRevision++;
 }
 
@@ -303,7 +305,7 @@ export function getDigEditsSnapshot(): DigEdit[] {
       const id = editIds.get(edit) ?? 0;
       if (!seen.has(id)) {
         seen.add(id);
-        all.push(edit);
+        all.push({ ...edit });
       }
     }
   }
@@ -318,6 +320,7 @@ export function replaceDigEdits(edits: readonly DigEdit[]): void {
 
 export function clearDigEdits(): void {
   editIndex.clear();
+  activePaintSlots.clear();
   digEditRevision++;
 }
 
@@ -460,19 +463,14 @@ export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
   const slots = new Array<number>(PAINT_BLEND_CHANNELS).fill(-1);
   const weights = new Array<number>(PAINT_BLEND_CHANNELS).fill(0);
 
+  const globalSlots = [...activePaintSlots].sort((a, b) => a - b);
+  for (let c = 0; c < Math.min(globalSlots.length, PAINT_BLEND_CHANNELS); c++) {
+    slots[c] = globalSlots[c];
+  }
+
   const bucket = editIndex.size > 0 ? editIndex.get(cellKey(x, y, z)) : undefined;
   if (!bucket) return { slots, weights };
 
-  const channelSlots: number[] = [];
-  for (let i = bucket.length - 1; i >= 0 && channelSlots.length < PAINT_BLEND_CHANNELS; i--) {
-    const e = bucket[i];
-    if (e.op !== "add") continue;
-    const slot = Math.max(0, (e.material ?? 0) | 0);
-    if (!channelSlots.includes(slot)) channelSlots.push(slot);
-  }
-  channelSlots.sort((a, b) => a - b);
-
-  for (let c = 0; c < channelSlots.length; c++) slots[c] = channelSlots[c];
   const cover = new Map<number, number>();
   for (let i = bucket.length - 1; i >= 0; i--) {
     const e = bucket[i];
@@ -487,8 +485,8 @@ export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
     const slot = Math.max(0, (e.material ?? 0) | 0);
     cover.set(slot, Math.max(cover.get(slot) ?? 0, w));
   }
-  for (let c = 0; c < channelSlots.length; c++) {
-    weights[c] = cover.get(channelSlots[c]) ?? 0;
+  for (let c = 0; c < PAINT_BLEND_CHANNELS; c++) {
+    if (slots[c] >= 0) weights[c] = cover.get(slots[c]) ?? 0;
   }
   return { slots, weights };
 }
@@ -647,10 +645,18 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
     }
   }
 
+  const nv = buf.mat.length;
+  const materialWeights = new Float32Array(nv * 4);
+  for (let i = 0; i < nv; i++) {
+    const slot = Math.min(Math.max(0, buf.mat[i]), 3);
+    materialWeights[i * 4 + slot] = 1.0;
+  }
   return {
     positions: new Float32Array(buf.pos),
     normals: new Float32Array(buf.nrm),
-    materials: new Float32Array(buf.mat),
+    paintSlots: new Float32Array(buf.mat),
+    materialWeights,
+    materialWeightStride: 4,
     indices: new Uint32Array(indices),
   };
 }

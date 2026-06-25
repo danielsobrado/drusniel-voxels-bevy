@@ -25,7 +25,9 @@ function makeNode(id = "L0:1,1"): ClodPageNode {
     mesh: {
       positions: new Float32Array([0, 0, 0]),
       normals: new Float32Array([0, 1, 0]),
-      materials: new Float32Array([0]),
+      paintSlots: new Float32Array([0]),
+      materialWeights: new Float32Array([1, 0, 0, 0]),
+      materialWeightStride: 4,
       indices: new Uint32Array([0, 0, 0]),
     },
   } as ClodPageNode;

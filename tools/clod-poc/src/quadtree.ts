@@ -8,14 +8,14 @@
 // decimation of its merged children. Locked outer borders are bit-identical across
 // siblings (inherited verbatim from LOD0), so internal borders weld exactly.
 
-import { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
+import { ClodPageNode, PageFootprint, PageMesh, ClodBuildError } from "./types.js";
 import { ClodPagesConfig } from "./config.js";
 import { buildLod0PageSource, rebuildPageChunks } from "./source_mesh.js";
 import { concat } from "./source_mesh.js";
 import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks, countLocks } from "./lock.js";
 import { simplifyPage } from "./simplify.js";
-import { assertNoInternalBorders, stripDegenerateTriangles } from "./validate.js";
+import { assertNoInternalBorders, stripDegenerateTriangles, validateFinite, validateNoDegenerateTriangles, validatePageMesh } from "./validate.js";
 import {
   emptyDiagonalPolishStats,
   polishDiagonals,
@@ -102,6 +102,17 @@ function yieldToBrowser(): Promise<void> {
 
 export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPagesConfig): BuildResult {
   const eps = cfg.simplify.weld_epsilon_cells;
+  const maxLevels = Math.min(
+    cfg.page.quadtree_levels,
+    Math.floor(Math.log2(Math.min(worldPagesX, worldPagesZ))) + 1,
+  );
+  const requiredMultiple = 1 << (maxLevels - 1);
+  if (worldPagesX % requiredMultiple !== 0 || worldPagesZ % requiredMultiple !== 0) {
+    throw new ClodBuildError(
+      "PageIncomplete",
+      `world pages ${worldPagesX}x${worldPagesZ} not a multiple of ${requiredMultiple} for ${maxLevels} levels`,
+    );
+  }
   const world = {
     cellsX: worldPagesX * cfg.page.chunks_per_page * cfg.page.chunk_size,
     cellsZ: worldPagesZ * cfg.page.chunks_per_page * cfg.page.chunk_size,
@@ -118,8 +129,7 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
     for (let px = 0; px < worldPagesX; px++) {
       const t0 = performance.now();
       const src = buildLod0PageSource(px, pz, cfg, world);
-      stripDegenerateTriangles(src.mesh);
-      assertNoInternalBorders(src.mesh, src.footprint);
+      validatePageMesh(src.mesh, src.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz}`);
       const b = boundsOf(src.mesh);
       const node: ClodPageNode = {
         id: `L0:${px},${pz}`,
@@ -146,33 +156,46 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
 
   // ---- LOD1+ ----
   let prevCountX = worldPagesX, prevCountZ = worldPagesZ;
-  for (let level = 1; level < cfg.page.quadtree_levels; level++) {
+  for (let level = 1; level < maxLevels; level++) {
     const countX = Math.ceil(prevCountX / 2);
     const countZ = Math.ceil(prevCountZ / 2);
     const levelNodes: ClodPageNode[] = [];
     const levelIndex = new Map<string, ClodPageNode>();
-
     for (let nz = 0; nz < countZ; nz++) {
       for (let nx = 0; nx < countX; nx++) {
         const t0 = performance.now();
         const children: ClodPageNode[] = [];
-        for (let dz = 0; dz < 2; dz++) {
-          for (let dx = 0; dx < 2; dx++) {
-            const c = index[level - 1].get(`${nx * 2 + dx},${nz * 2 + dz}`);
-            if (c) children.push(c);
-          }
-        }
-        if (children.length === 0) continue;
+            for (let dz = 0; dz < 2; dz++) {
+              for (let dx = 0; dx < 2; dx++) {
+                const c = index[level - 1].get(`${nx * 2 + dx},${nz * 2 + dz}`);
+                if (c) children.push(c);
+              }
+            }
+            if (children.length !== 4) {
+              throw new ClodBuildError(
+                "PageIncomplete",
+                `parent L${level}:${nx},${nz} expected 4 children, got ${children.length}`,
+              );
+            }
 
-        const merged = concat(children.map((c) => c.mesh));
-        const { mesh: welded } = weldVertices(merged, eps);
-        stripDegenerateTriangles(welded);
-        const footprint = footprintFor(level, nx, nz, cfg);
+            const merged = concat(children.map((c) => c.mesh));
+            const { mesh: welded } = weldVertices(merged, eps, {
+              position: cfg.validation.position_epsilon,
+              normalDot: cfg.validation.normal_dot_min,
+              material: cfg.validation.material_weight_epsilon,
+            });
+            stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+            validateFinite(welded, `L${level}:${nx},${nz} welded`);
+            validateNoDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+            const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
         stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
+        validateNoDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
+        validateFinite(sim.mesh, `L${level}:${nx},${nz} after simplify`);
         const polishLocks = buildOuterBorderLocks(sim.mesh);
         const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
+        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -246,8 +269,7 @@ export async function buildWorldAsync(
     for (let px = 0; px < worldPagesX; px++) {
       const t0 = performance.now();
       const src = buildLod0PageSource(px, pz, cfg, world);
-      stripDegenerateTriangles(src.mesh);
-      assertNoInternalBorders(src.mesh, src.footprint);
+      validatePageMesh(src.mesh, src.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz}`);
       const b = boundsOf(src.mesh);
       const node: ClodPageNode = {
         id: `L0:${px},${pz}`,
@@ -290,17 +312,31 @@ export async function buildWorldAsync(
             if (c) children.push(c);
           }
         }
-        if (children.length === 0) continue;
+        if (children.length !== 4) {
+          throw new ClodBuildError(
+            "PageIncomplete",
+            `parent L${level}:${nx},${nz} expected 4 children, got ${children.length}`,
+          );
+        }
 
         const merged = concat(children.map((c) => c.mesh));
-        const { mesh: welded } = weldVertices(merged, eps);
-        stripDegenerateTriangles(welded);
+        const { mesh: welded } = weldVertices(merged, eps, {
+          position: cfg.validation.position_epsilon,
+          normalDot: cfg.validation.normal_dot_min,
+          material: cfg.validation.material_weight_epsilon,
+        });
+        stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+        validateFinite(welded, `L${level}:${nx},${nz} welded`);
+        validateNoDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
         stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
+        validateNoDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
+        validateFinite(sim.mesh, `L${level}:${nx},${nz} after simplify`);
         const polishLocks = buildOuterBorderLocks(sim.mesh);
         const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
+        stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -431,8 +467,7 @@ export function rebuildDirtyLod0Pages(
         chunksRemeshed += src.chunks.length;
         chunksTotal += src.chunks.length;
       }
-      stripDegenerateTriangles(mesh);
-      assertNoInternalBorders(mesh, node.footprint);
+      validatePageMesh(mesh, node.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz} edit-rebuild`);
       node.mesh = mesh;
       node.bounds = boundsOf(mesh);
       changed.push(node);
@@ -462,13 +497,22 @@ export function resimplifyParent(
   if (!node) return null;
   const children = node.children.filter((c): c is ClodPageNode => c !== null);
   const merged = concat(children.map((c) => c.mesh));
-  const { mesh: welded } = weldVertices(merged, cfg.simplify.weld_epsilon_cells);
-  stripDegenerateTriangles(welded);
+  const { mesh: welded } = weldVertices(merged, cfg.simplify.weld_epsilon_cells, {
+    position: cfg.validation.position_epsilon,
+    normalDot: cfg.validation.normal_dot_min,
+    material: cfg.validation.material_weight_epsilon,
+  });
+  stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+  validateFinite(welded, `${node.id} welded`);
+  validateNoDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
   const locks = buildOuterBorderLocks(welded);
   const sim = simplifyPage(welded, locks, cfg);
-  stripDegenerateTriangles(sim.mesh);
+  stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
+  validateFinite(sim.mesh, `${node.id} resimplify`);
+  validateNoDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
   const polishLocks = buildOuterBorderLocks(sim.mesh);
   polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
+  stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
   assertNoInternalBorders(sim.mesh, node.footprint);
   node.mesh = sim.mesh;
   node.bounds = boundsOf(sim.mesh);

@@ -79,7 +79,13 @@ function buildLeafMesh(footprint: PageFootprint, segments: number, sampler: Heig
       indices[ii++] = d;
     }
   }
-  return { positions, normals, materials, indices };
+  const nv = positions.length / 3;
+  const materialWeights = new Float32Array(nv * 4);
+  for (let i = 0; i < nv; i++) {
+    const slot = Math.min(Math.max(0, materials[i]), 3);
+    materialWeights[i * 4 + slot] = 1.0;
+  }
+  return { positions, normals, paintSlots: materials, materialWeights, materialWeightStride: 4, indices };
 }
 
 export function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: number; minY: number; maxY: number } {
@@ -106,7 +112,7 @@ export function validateLeafMesh(mesh: PageMesh, footprint: PageFootprint, id: s
   if (mesh.indices.length === 0 || mesh.positions.length === 0) throw new Error(`${id} empty mesh`);
   for (const value of mesh.positions) if (!Number.isFinite(value)) throw new Error(`${id} has non-finite position`);
   for (const value of mesh.normals) if (!Number.isFinite(value)) throw new Error(`${id} has non-finite normal`);
-  for (const value of mesh.materials) {
+  for (const value of mesh.paintSlots) {
     if (!Number.isFinite(value) || value < 0 || value > 3) throw new Error(`${id} invalid material ${value}`);
   }
 }

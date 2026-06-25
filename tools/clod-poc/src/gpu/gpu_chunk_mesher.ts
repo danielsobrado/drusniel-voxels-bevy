@@ -29,6 +29,8 @@ export interface ChunkMesh {
   positions: Float32Array;
   normals: Float32Array;
   materials: Float32Array;
+  materialWeights?: Float32Array;
+  materialWeightStride?: number;
   indices: Uint32Array;
 }
 

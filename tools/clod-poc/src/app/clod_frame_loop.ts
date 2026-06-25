@@ -31,7 +31,9 @@ import { runStatsSyncPhase } from "./frame_loop/stats_sync_phase.js";
 import { runRenderPhase } from "./frame_loop/render_phase.js";
 import { submitMsChanged } from "./frame_loop/frame_timing.js";
 import type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
+import type { StatsPresenter, GuiDisplayController } from "./frame_loop/stats_presenter.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
+export type { StatsPresenter } from "./frame_loop/stats_presenter.js";
 
 interface TerrainFadeView {
   fade: number;
@@ -42,10 +44,6 @@ interface TerrainFadeView {
 
 interface NodeViewLookup {
   node: { id: string };
-}
-
-interface GuiDisplayController {
-  updateDisplay: () => unknown;
 }
 
 export interface ClodFrameLoopDeps {
@@ -97,23 +95,7 @@ export interface ClodFrameLoopDeps {
   setForestLightingStats: (stats: ForestLightingStats | null) => void;
   formatTreeGpuSummary: (stats: TreeStats) => string;
   formatUnderstoryGpuSummary: (stats: UnderstoryStats) => string;
-  grassBladeCountController: GuiDisplayController | null;
-  grassVisiblePatchesController: GuiDisplayController | null;
-  grassTierSummaryController: GuiDisplayController | null;
-  grassEdgeSuppressedController: GuiDisplayController | null;
-  grassCandidateCountController: GuiDisplayController | null;
-  treeTotalController: GuiDisplayController | null;
-  treeVisiblePatchesController: GuiDisplayController | null;
-  treeLodSummaryController: GuiDisplayController | null;
-  treeGpuSummaryController: GuiDisplayController | null;
-  stoneTotalController: GuiDisplayController | null;
-  stoneClassSummaryController: GuiDisplayController | null;
-  stoneVisibleController: GuiDisplayController | null;
-  understoryTotalController: GuiDisplayController | null;
-  understoryVisiblePatchesController: GuiDisplayController | null;
-  understoryClassSummaryController: GuiDisplayController | null;
-  understoryGpuSummaryController: GuiDisplayController | null;
-  forestLightingStatsController: GuiDisplayController | null;
+  statsPresenter: StatsPresenter;
   nodeLabelOverlay: NodeLabelOverlay;
   postProcess: AppPostProcess | null;
   currentPostProcessSettings: () => PostProcessSettings;
@@ -276,23 +258,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       setForestLightingStats: deps.setForestLightingStats,
       formatTreeGpuSummary: deps.formatTreeGpuSummary,
       formatUnderstoryGpuSummary: deps.formatUnderstoryGpuSummary,
-      grassBladeCountController: deps.grassBladeCountController,
-      grassVisiblePatchesController: deps.grassVisiblePatchesController,
-      grassTierSummaryController: deps.grassTierSummaryController,
-      grassEdgeSuppressedController: deps.grassEdgeSuppressedController,
-      grassCandidateCountController: deps.grassCandidateCountController,
-      treeTotalController: deps.treeTotalController,
-      treeVisiblePatchesController: deps.treeVisiblePatchesController,
-      treeLodSummaryController: deps.treeLodSummaryController,
-      treeGpuSummaryController: deps.treeGpuSummaryController,
-      stoneTotalController: deps.stoneTotalController,
-      stoneClassSummaryController: deps.stoneClassSummaryController,
-      stoneVisibleController: deps.stoneVisibleController,
-      understoryTotalController: deps.understoryTotalController,
-      understoryVisiblePatchesController: deps.understoryVisiblePatchesController,
-      understoryClassSummaryController: deps.understoryClassSummaryController,
-      understoryGpuSummaryController: deps.understoryGpuSummaryController,
-      forestLightingStatsController: deps.forestLightingStatsController,
+      statsPresenter: deps.statsPresenter,
     });
 
     runRenderPhase({

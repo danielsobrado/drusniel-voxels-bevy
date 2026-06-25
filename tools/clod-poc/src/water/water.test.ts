@@ -346,7 +346,7 @@ describe("WaterClipmap", () => {
     const before = {
       positions: page.mesh.positions.length,
       normals: page.mesh.normals.length,
-      materials: page.mesh.materials.length,
+      materials: page.mesh.paintSlots.length,
       indices: page.mesh.indices.length,
       firstPos: page.mesh.positions[0],
       lastPos: page.mesh.positions[page.mesh.positions.length - 1],
@@ -372,7 +372,7 @@ describe("WaterClipmap", () => {
 
     expect(page.mesh.positions.length).toBe(before.positions);
     expect(page.mesh.normals.length).toBe(before.normals);
-    expect(page.mesh.materials.length).toBe(before.materials);
+    expect(page.mesh.paintSlots.length).toBe(before.materials);
     expect(page.mesh.indices.length).toBe(before.indices);
     expect(page.mesh.positions[0]).toBe(before.firstPos);
     expect(page.mesh.positions[page.mesh.positions.length - 1]).toBe(before.lastPos);

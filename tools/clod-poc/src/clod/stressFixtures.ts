@@ -276,10 +276,17 @@ export function buildFixtureChunks(options: BuildFixtureChunksOptions): FixtureC
             chunkIndices.push(localIndices[ii] + localOffset);
           }
 
+          const localWeights = new Float32Array(vc * 4);
+          for (let wi = 0; wi < vc; wi++) {
+            const slot = Math.min(Math.max(0, localMaterials[wi]), 3);
+            localWeights[wi * 4 + slot] = 1.0;
+          }
           const chunkMesh: PageMesh = {
             positions: new Float32Array(localPositions),
             normals: new Float32Array(localNormals),
-            materials: new Float32Array(localMaterials),
+            paintSlots: new Float32Array(localMaterials),
+            materialWeights: localWeights,
+            materialWeightStride: 4,
             indices: new Uint32Array(localIndices),
           };
           const chunkExport: TerrainChunkMainSurface = {

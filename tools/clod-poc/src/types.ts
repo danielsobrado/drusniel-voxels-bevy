@@ -4,7 +4,11 @@
 export interface PageMesh {
   positions: Float32Array; // xyz * vertexCount
   normals: Float32Array; // xyz * vertexCount
-  materials: Float32Array; // paint slot per vertex: 0 = natural, slot index + 1 when painted
+  paintSlots: Float32Array; // paint slot per vertex: 0 = natural, slot index + 1 when painted
+  /** Per-vertex material blend weights (materialWeightStride per vertex), for simplification seam preservation. */
+  materialWeights: Float32Array;
+  /** Number of material blend weights per vertex (e.g. 4 for 4-channel blend). */
+  materialWeightStride: number;
   indices: Uint32Array;
 }
 

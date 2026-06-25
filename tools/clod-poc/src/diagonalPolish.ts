@@ -327,7 +327,7 @@ function vertex(mesh: PageMesh, i: number): QuadVertex {
   return {
     position: [mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]],
     normal: [mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]],
-    material: [mesh.materials[i]],
+    material: [mesh.paintSlots[i]],
   };
 }
 

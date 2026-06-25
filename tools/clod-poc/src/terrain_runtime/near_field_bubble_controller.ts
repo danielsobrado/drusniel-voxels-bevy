@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { ClodPagesConfig } from "../config.js";
 import { meshChunk, getDigEditsSnapshot } from "../terrain.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
-import type { GpuChunkMesher } from "../gpu/gpu_chunk_mesher.js";
+import type { ChunkMesh, GpuChunkMesher } from "../gpu/gpu_chunk_mesher.js";
 import { toGeometry } from "./page_geometry.js";
 import type { ClodPageNode, PageMesh } from "../types.js";
 import type { TerrainMaterialController } from "./terrain_material_controller.js";
@@ -81,7 +81,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     group: THREE.Group,
     mats: TerrainMaterialHandle[],
     unsubs: Array<() => void>,
-    cm: PageMesh,
+    cm: PageMesh | ChunkMesh,
   ) => {
     const mat = buildChunkMaterial();
     const mesh = new THREE.Mesh(toGeometry(cm), mat.material);

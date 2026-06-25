@@ -37,7 +37,9 @@ function meshFromQuad(materials = [0, 0, 0, 0]): PageMesh {
       0, 1, 0,
       0, 1, 0,
     ]),
-    materials: new Float32Array(materials),
+    paintSlots: new Float32Array(materials),
+    materialWeights: new Float32Array(materials.length * 4),
+    materialWeightStride: 4,
     indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
   };
 }

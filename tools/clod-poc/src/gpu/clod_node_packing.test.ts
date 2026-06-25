@@ -9,7 +9,9 @@ import type { ClodPageNode, PageMesh } from "../types.js";
 const mesh: PageMesh = {
   positions: new Float32Array([0, 0, 0]),
   normals: new Float32Array([0, 1, 0]),
-  materials: new Float32Array([0]),
+  paintSlots: new Float32Array([0]),
+  materialWeights: new Float32Array(4),
+  materialWeightStride: 4,
   indices: new Uint32Array([0]),
 };
 

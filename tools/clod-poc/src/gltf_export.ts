@@ -9,7 +9,7 @@ function exportGeometry(mesh: PageMesh): THREE.BufferGeometry {
   geometry.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
   geometry.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
   // GLTFExporter maps unknown attributes to an underscore-prefixed custom semantic.
-  geometry.setAttribute("paintSlot", new THREE.BufferAttribute(mesh.materials, 1));
+  geometry.setAttribute("paintSlot", new THREE.BufferAttribute(mesh.paintSlots, 1));
   geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
   return geometry;
 }

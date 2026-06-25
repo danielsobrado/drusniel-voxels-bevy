@@ -89,7 +89,9 @@ function cloneMesh(mesh: PageMesh): PageMesh {
   return {
     positions: mesh.positions.slice(),
     normals: mesh.normals.slice(),
-    materials: mesh.materials.slice(),
+    paintSlots: mesh.paintSlots.slice(),
+    materialWeights: mesh.materialWeights.slice(),
+    materialWeightStride: mesh.materialWeightStride,
     indices: mesh.indices.slice(),
   };
 }

@@ -12,7 +12,9 @@ function mesh(material = 0): PageMesh {
   return {
     positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
     normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
-    materials: new Float32Array([material, material, material]),
+    paintSlots: new Float32Array([material, material, material]),
+    materialWeights: new Float32Array(12),
+    materialWeightStride: 4,
     indices: new Uint32Array([0, 1, 2]),
   };
 }
@@ -54,6 +56,6 @@ describe("CLOD worker protocol", () => {
     applySerializedNode(child, update, nodesById);
 
     expect(root.children[0]).toBe(child);
-    expect(child.mesh.materials[0]).toBe(3);
+    expect(child.mesh.paintSlots[0]).toBe(3);
   });
 });

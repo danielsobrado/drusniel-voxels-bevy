@@ -1,15 +1,18 @@
 import * as THREE from "three";
 import { PAINT_BLEND_CHANNELS, paintWeightsAt } from "../terrain.js";
-import { PageMesh } from "../types.js";
+import type { PageMesh } from "../types.js";
+import type { ChunkMesh } from "../gpu/gpu_chunk_mesher.js";
+
+type MeshLike = PageMesh | ChunkMesh;
 
 export interface PaintAttributeCache {
   slots: Float32Array;
   weights: Float32Array;
 }
 
-const paintAttributeCache = new WeakMap<PageMesh, PaintAttributeCache>();
+const paintAttributeCache = new WeakMap<MeshLike, PaintAttributeCache>();
 
-export function paintAttributesFor(mesh: PageMesh): PaintAttributeCache {
+export function paintAttributesFor(mesh: MeshLike): PaintAttributeCache {
   const cached = paintAttributeCache.get(mesh);
   if (cached) return cached;
   const vertexCount = mesh.positions.length / 3;
@@ -27,7 +30,7 @@ export function paintAttributesFor(mesh: PageMesh): PaintAttributeCache {
   return built;
 }
 
-export function toGeometry(mesh: PageMesh): THREE.BufferGeometry {
+export function toGeometry(mesh: MeshLike): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
   g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));

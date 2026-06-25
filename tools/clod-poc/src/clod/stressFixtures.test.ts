@@ -73,10 +73,13 @@ function heightfieldPageMesh(fixture: FixtureDef, pageX: number, pageZ: number, 
     }
   }
 
+  const nv = positions.length / 3;
   return {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
-    materials: new Float32Array(materials),
+    paintSlots: new Float32Array(materials),
+    materialWeights: new Float32Array(nv * 4),
+    materialWeightStride: 4,
     indices: new Uint32Array(indices),
   };
 }

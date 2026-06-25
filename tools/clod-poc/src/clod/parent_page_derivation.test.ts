@@ -35,11 +35,11 @@ describe("deriveParentPage", () => {
     expect(derived.internalBorderChecks).toBe(2);
     expect(derived.sourceTriangles).toBeGreaterThan(0);
     expect(derived.outputTriangles).toBeGreaterThan(0);
-    expect([...parent.mesh.materials].some((value) => value >= 11 && value <= 14)).toBe(true);
+    expect([...parent.mesh.paintSlots].some((value) => value >= 11 && value <= 14)).toBe(true);
     expect([...parent.mesh.positions].some((value) => value >= 101 && value <= 104)).toBe(true);
     for (const value of parent.mesh.positions) expect(Number.isFinite(value)).toBe(true);
     for (const value of parent.mesh.normals) expect(Number.isFinite(value)).toBe(true);
-    for (const value of parent.mesh.materials) expect(Number.isFinite(value)).toBe(true);
+    for (const value of parent.mesh.paintSlots) expect(Number.isFinite(value)).toBe(true);
     expect(() => assertNoInternalBorders(parent.mesh, parent.footprint)).not.toThrow();
   });
 });
@@ -90,10 +90,13 @@ function childMesh(footprint: PageFootprint, sentinelMaterial: number, sentinelH
       indices.push(a, c, b, b, c, d);
     }
   }
+  const nv = positions.length / 3;
   return {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
-    materials: new Float32Array(materials),
+    paintSlots: new Float32Array(materials),
+    materialWeights: new Float32Array(nv * 4),
+    materialWeightStride: 4,
     indices: new Uint32Array(indices),
   };
 }

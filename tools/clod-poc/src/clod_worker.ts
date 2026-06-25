@@ -121,7 +121,7 @@ function drainParents(budgetMs: number): void {
       transferables.push(
         node.mesh.positions.buffer,
         node.mesh.normals.buffer,
-        node.mesh.materials.buffer,
+        node.mesh.paintSlots.buffer,
         node.mesh.indices.buffer,
       );
     }
@@ -181,6 +181,10 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
 
 function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
+  if (pendingParentCount() > 0) {
+    post(errorResponse(request.requestId, new Error("parent rebuild already pending; coalesce edits before next dig")));
+    return;
+  }
   addDigEdit(request.edit);
 
   const lod0 = rebuildDirtyLod0Pages(result, request.dirty, cfg, index);
@@ -197,12 +201,12 @@ function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   for (const node of changed) {
     serializedBytes += node.mesh.positions.byteLength
       + node.mesh.normals.byteLength
-      + node.mesh.materials.byteLength
+      + node.mesh.paintSlots.byteLength
       + node.mesh.indices.byteLength;
     transferables.push(
       node.mesh.positions.buffer,
       node.mesh.normals.buffer,
-      node.mesh.materials.buffer,
+      node.mesh.paintSlots.buffer,
       node.mesh.indices.buffer,
     );
   }

@@ -15,7 +15,7 @@ export function pageMeshSignatures(nodes: readonly ClodPageNode[]): PageMeshSign
       vertices: node.mesh.positions.length,
       indices: node.mesh.indices.length,
       normals: node.mesh.normals.length,
-      materials: node.mesh.materials.length,
+      materials: node.mesh.paintSlots.length,
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }

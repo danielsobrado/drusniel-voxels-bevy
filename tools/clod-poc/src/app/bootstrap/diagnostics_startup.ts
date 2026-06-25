@@ -1,8 +1,13 @@
 import { initHooks, type ClodHooks, type EngineStats } from "../../core/hooks.js";
+import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { ClodErrorPxCompute } from "../../gpu/clod_error_px_compute.js";
 import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
 import type { ClodPageNode } from "../../types.js";
 import type { AppRenderer } from "./renderer_startup.js";
+
+export function publishTerrainSummary(summary: TerrainSummaryField): void {
+  window.__drusnielTerrainSummary = summary;
+}
 
 export interface LongViewDiagnosticsContext {
   longViewHooks: ClodHooks | null;

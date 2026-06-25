@@ -3,7 +3,7 @@ import { concat } from "../source_mesh.js";
 import { weldVertices } from "../weld.js";
 import { buildOuterBorderLocks } from "../lock.js";
 import { simplifyPage } from "../simplify.js";
-import { assertNoInternalBorders, stripDegenerateTriangles } from "../validate.js";
+import { stripDegenerateTriangles, validateFinite, validateNoDegenerateTriangles, assertNoInternalBorders } from "../validate.js";
 import { type LevelStats, type BuildStats } from "./stats.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "../types.js";
 
@@ -111,12 +111,20 @@ export function buildTestHierarchy(
         if (children.length === 0) continue;
 
         const merged = concat(children.map((c) => c.mesh));
-        const { mesh: welded } = weldVertices(merged, eps);
-        stripDegenerateTriangles(welded);
+        const { mesh: welded } = weldVertices(merged, eps, {
+          position: cfg.validation.position_epsilon,
+          normalDot: cfg.validation.normal_dot_min,
+          material: cfg.validation.material_weight_epsilon,
+        });
+        stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
+        validateFinite(welded, `L${level}:${nx},${nz} welded`);
+        validateNoDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyPage(welded, locks, cfg);
         stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
+        validateFinite(sim.mesh, `L${level}:${nx},${nz} after simplify`);
+        validateNoDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
         assertNoInternalBorders(sim.mesh, footprint);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -190,7 +198,7 @@ export function validateHierarchyInvariants(result: TestBuildResult, _cfg: ClodP
       if (node.mesh.positions.length / 3 !== node.mesh.normals.length / 3) {
         throw new Error(`${node.id} position/normal count mismatch`);
       }
-      if (node.mesh.positions.length / 3 !== node.mesh.materials.length) {
+      if (node.mesh.positions.length / 3 !== node.mesh.paintSlots.length) {
         throw new Error(`${node.id} position/material count mismatch`);
       }
       for (const v of node.mesh.positions) {
@@ -199,7 +207,7 @@ export function validateHierarchyInvariants(result: TestBuildResult, _cfg: ClodP
       for (const v of node.mesh.normals) {
         if (!Number.isFinite(v)) throw new Error(`${node.id} has non-finite normal`);
       }
-      for (const v of node.mesh.materials) {
+      for (const v of node.mesh.paintSlots) {
         if (!Number.isFinite(v)) throw new Error(`${node.id} has non-finite material`);
       }
       for (let i = 0; i < node.mesh.indices.length; i++) {
@@ -211,6 +219,7 @@ export function validateHierarchyInvariants(result: TestBuildResult, _cfg: ClodP
       if (level > 0) {
         assertNoInternalBorders(node.mesh, node.footprint);
       }
+      validateFinite(node.mesh, node.id);
       if (level > 0 && node.children.length > 0) {
         const childMaxErr = Math.max(...node.children.filter((c): c is ClodPageNode => c !== null).map((c) => c.errorWorld));
         if (node.errorWorld < childMaxErr) {

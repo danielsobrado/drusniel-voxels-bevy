@@ -7,6 +7,8 @@
   "scripts": {
     "spike": "tsx src/spike.ts",
     "build-pages": "tsx src/build.ts",
+    "build-pages:smoke": "tsx src/build.ts smoke",
+    "build-pages:gate": "tsx src/build.ts 8",
     "qa": "tsx src/qa.ts",
     "dev": "vite --port 5173 --strictPort",
     "build": "vite build",

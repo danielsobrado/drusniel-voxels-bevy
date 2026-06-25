@@ -1,5 +1,6 @@
 import { concat } from "../source_mesh.js";
 import type { ClodPageNode, PageMesh } from "../types.js";
+import { ensureMaterialWeights } from "../materialWeights.js";
 
 export function mergeChildPageMeshes(children: readonly ClodPageNode[], epsilon: number): PageMesh {
   const ordered = [...children].sort((a, b) =>
@@ -14,18 +15,21 @@ export function mergeChildPageMeshes(children: readonly ClodPageNode[], epsilon:
 
 function weldMergedChildVertices(mesh: PageMesh, epsilon: number): PageMesh {
   const inv = 1 / epsilon;
+  ensureMaterialWeights(mesh);
+  const ws = mesh.materialWeightStride;
   const remap = new Uint32Array(mesh.positions.length / 3);
   const canonical = new Map<string, number>();
   const positions: number[] = [];
   const normals: number[] = [];
   const materials: number[] = [];
+  const weights: number[] = [];
   const counts: number[] = [];
 
   for (let i = 0; i < remap.length; i++) {
     const x = mesh.positions[i * 3];
     const y = mesh.positions[i * 3 + 1];
     const z = mesh.positions[i * 3 + 2];
-    const material = mesh.materials[i];
+    const material = mesh.paintSlots[i];
     const key = `${Math.round(x * inv)},${Math.round(y * inv)},${Math.round(z * inv)},${Math.round(material * 1000)}`;
     let next = canonical.get(key);
     if (next === undefined) {
@@ -34,6 +38,7 @@ function weldMergedChildVertices(mesh: PageMesh, epsilon: number): PageMesh {
       positions.push(x, y, z);
       normals.push(mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]);
       materials.push(material);
+      for (let j = 0; j < ws; j++) weights.push(mesh.materialWeights[i * ws + j]);
       counts.push(1);
     } else {
       normals[next * 3] += mesh.normals[i * 3];
@@ -62,7 +67,9 @@ function weldMergedChildVertices(mesh: PageMesh, epsilon: number): PageMesh {
   return {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
-    materials: new Float32Array(materials),
+    paintSlots: new Float32Array(materials),
+    materialWeights: new Float32Array(weights),
+    materialWeightStride: ws,
     indices,
   };
 }
@@ -71,5 +78,5 @@ export function validateFiniteMesh(mesh: PageMesh, label: string): void {
   if (mesh.indices.length === 0) throw new Error(`${label} has no indices`);
   for (const value of mesh.positions) if (!Number.isFinite(value)) throw new Error(`${label} has non-finite position`);
   for (const value of mesh.normals) if (!Number.isFinite(value)) throw new Error(`${label} has non-finite normal`);
-  for (const value of mesh.materials) if (!Number.isFinite(value)) throw new Error(`${label} has non-finite material`);
+  for (const value of mesh.paintSlots) if (!Number.isFinite(value)) throw new Error(`${label} has non-finite paintSlot`);
 }

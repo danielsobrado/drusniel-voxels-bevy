@@ -45,7 +45,9 @@ function fiveTriangleFan(): PageMesh {
       0, 1, 0,
       0, 1, 0,
     ]),
-    materials: new Float32Array([0, 0, 0, 0, 0, 0]),
+    paintSlots: new Float32Array([0, 0, 0, 0, 0, 0]),
+    materialWeights: new Float32Array(24),
+    materialWeightStride: 4,
     indices: new Uint32Array([
       0, 1, 2,
       0, 2, 3,
