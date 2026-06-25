@@ -29,7 +29,7 @@ selection:
   error_threshold_px: 1.0
   hysteresis_merge_factor: 1.5    # merge at 1.5px, split at 1.0px
   neighbor_level_delta_max: 1     # 2:1 restricted quadtree constraint
-  transition_mode: instant        # terrain pages swap atomically; dither is too noisy when textured
+  transition_mode: dither         # screen-door dither crossfade for LOD transitions
   crossfade_frames: 12
   freeze_selection: false
 

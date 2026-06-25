@@ -78,23 +78,23 @@ export function advanceClodRuntime(
   state.stats.freezeEnabled = state.freezeSelection;
   state.stats.enforce21Enabled = state.enforce21;
 
+  if (state.activeTransition && isTransitionComplete(state.activeTransition, frame)) {
+    logger.info(`transition completed: ${state.activeTransition.id}`);
+    state.activeTransition = null;
+  }
+
   let transition: ClodTransition | null = null;
-  if (state.crossfadeEnabled && runtimeConfig.selection.crossfadeFrames > 0) {
+  if (state.crossfadeEnabled && runtimeConfig.crossfadeFrames > 0) {
     transition = createTransition({
       previousCut: state.previousCut,
       nextCut,
       frame,
-      durationFrames: runtimeConfig.selection.crossfadeFrames,
+      durationFrames: runtimeConfig.crossfadeFrames,
     });
     if (transition) {
       state.activeTransition = transition;
       logger.info(`cut changed at frame ${frame}: transition ${transition.id}`);
     }
-  }
-
-  if (state.activeTransition && isTransitionComplete(state.activeTransition, frame)) {
-    logger.info(`transition completed: ${state.activeTransition.id}`);
-    state.activeTransition = null;
   }
 
   const fadeStates = computeFadeStates({
@@ -107,7 +107,7 @@ export function advanceClodRuntime(
     state.nodeMeshMap.meshes,
     state.nodeMeshMap.ditherMaterials,
     fadeStates,
-    state.crossfadeEnabled && runtimeConfig.selection.crossfadeFrames > 0,
+    state.crossfadeEnabled && runtimeConfig.crossfadeFrames > 0,
   );
 
   updateRuntimeStats(

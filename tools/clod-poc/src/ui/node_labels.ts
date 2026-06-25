@@ -48,7 +48,13 @@ export class NodeLabelOverlay {
       this.scratch.fromArray(node.bounds.center);
       this.cameraSpace.copy(this.scratch).applyMatrix4(camera.matrixWorldInverse);
       const dist = Math.max(0.001, this.scratch.distanceTo(cameraPosition) - node.bounds.radius);
-      const errorPx = (node.errorWorld * viewportHeight) / (2 * dist * Math.tan(fovY / 2));
+      const baseErrorPx = (node.errorWorld * viewportHeight) / (2 * dist * Math.tan(fovY / 2));
+      const pageSpan = node.footprint.maxX - node.footprint.minX;
+      const heightRange = node.bounds.maxY - node.bounds.minY;
+      const reliefBoost = pageSpan > 0
+        ? Math.min(1.8, Math.max(1, 1 + (heightRange / pageSpan) * 0.8))
+        : 1;
+      const errorPx = baseErrorPx * reliefBoost;
       this.scratch.project(camera);
       const visible =
         this.cameraSpace.z < 0 &&

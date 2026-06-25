@@ -1,8 +1,7 @@
 //! Optional debug export of CLOD page hierarchy as JSON.
 //! Only compiled in test/bench builds. Include behind `#[cfg(test)]`.
 
-use super::quadtree::{BuildResult, ClodPageNode};
-use super::types::PageFootprint;
+use super::quadtree::BuildResult;
 
 /// Serializable node info for debug export.
 #[derive(serde::Serialize)]

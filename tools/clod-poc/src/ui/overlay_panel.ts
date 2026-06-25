@@ -5,6 +5,7 @@ export interface ClodOverlaySnapshot {
   renderedTriangles: number;
   nodesByLod: Record<number, number>;
   forcedSplits: number;
+  blockedSplits: number;
   bubbleForcedSplits: number;
   cutFrozen: boolean;
   errorThreshold: number;
@@ -54,6 +55,7 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
     createMeterRow({ label: "Triangles", value: "0", fraction: 0, severity: "neutral" }),
     createMeterRow({ label: "LOD cut", value: "none", severity: "neutral" }),
     createMeterRow({ label: "2:1 splits", value: "0", fraction: 0, severity: "ok" }),
+    createMeterRow({ label: "Blocked", value: "0", fraction: 0, severity: "ok" }),
     createMeterRow({ label: "Bubble splits", value: "0", fraction: 0, severity: "ok" }),
     createMeterRow({ label: "Error threshold", value: "0.00 px", fraction: 0, severity: "neutral" }),
   ];
@@ -75,7 +77,13 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
         fraction: Math.min(1, snapshot.forcedSplits / 64),
         severity: snapshot.forcedSplits > 64 ? "warn" : "ok",
       });
-      meters[3].update({
+      meters[4].update({
+        label: "Bubble splits",
+        value: formatCount(snapshot.bubbleForcedSplits),
+        fraction: Math.min(1, snapshot.bubbleForcedSplits / 64),
+        severity: snapshot.bubbleForcedSplits > 64 ? "warn" : "ok",
+      });
+      meters[5].update({
         label: "Bubble splits",
         value: formatCount(snapshot.bubbleForcedSplits),
         fraction: Math.min(1, snapshot.bubbleForcedSplits / 64),

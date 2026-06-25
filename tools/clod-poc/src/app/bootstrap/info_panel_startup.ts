@@ -60,6 +60,7 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
       renderedTriangles: selection.triCount,
       nodesByLod: selection.nodesByLod,
       forcedSplits: selection.forcedSplits,
+      blockedSplits: 0,
       bubbleForcedSplits: selection.nearFieldForcedSplits,
       cutFrozen: state.freeze,
       errorThreshold: state.thresholdPx,

@@ -20,7 +20,7 @@ export interface ClodPageNodeRuntime {
   errorWorld: number;
   minY: number;
   maxY: number;
-  mesh?: THREE.Mesh | null;
+  mesh: THREE.Mesh | null;
   lockedBorderVertexPositions?: Float32Array;
   neighbors?: Partial<Record<ClodNeighborDirection, ClodNodeId>>;
   lowBenefit: boolean;
@@ -46,7 +46,6 @@ export interface ClodSelectionConfig {
   errorThresholdPx: number;
   hysteresisMergeFactor: number;
   neighborLevelDeltaMax: number;
-  crossfadeFrames: number;
 }
 
 export interface ClodDebugConfig {
@@ -60,6 +59,7 @@ export interface ClodDebugConfig {
 
 export interface ClodRuntimeConfig {
   selection: ClodSelectionConfig;
+  crossfadeFrames: number;
   debug: ClodDebugConfig;
   nearField: {
     enabled: boolean;

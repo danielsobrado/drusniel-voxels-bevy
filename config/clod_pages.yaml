@@ -37,5 +37,16 @@ selection:
 near_field:
   radius_chunks: 6            # live editable Surface Nets bubble, no pages inside
 
+validation:
+  position_epsilon: 0.000001
+  normal_dot_min: 0.9999
+  material_weight_epsilon: 0.0001
+  zero_area_epsilon: 0.00000001
+  material_weight_sum_epsilon: 0.0001
+
+poc_gate:
+  lod0_pages_x: 8
+  lod0_pages_z: 8
+
 # Phase 0 §2 record: pinned npm package version validated by the PoC spike.
 meshopt_package_version: "0.22.0"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { computeErrorPx, computeNodeDistanceToCamera, computeNodeErrorPx } from "../runtime/clodError.js";
+import { computeErrorPx, computeNodeDistanceToCamera, computeNodeErrorPx, computeReliefBoost } from "../runtime/clodError.js";
 import type { ClodPageNodeRuntime } from "../runtime/clodRuntimeTypes.js";
 
 function makeNode(center: [number, number, number], radius: number, errorWorld: number): ClodPageNodeRuntime {
@@ -14,6 +14,26 @@ function makeNode(center: [number, number, number], radius: number, errorWorld: 
     errorWorld,
     minY: center[1] - radius,
     maxY: center[1] + radius,
+    mesh: null,
+    lowBenefit: false,
+    ready: true,
+  };
+}
+
+function makeCustomNode(footprint: { minX: number; minZ: number; maxX: number; maxZ: number }, minY: number, maxY: number): ClodPageNodeRuntime {
+  const cx = (footprint.minX + footprint.maxX) / 2;
+  const cz = (footprint.minZ + footprint.maxZ) / 2;
+  return {
+    id: "relief-test",
+    level: 0,
+    parentId: null,
+    childIds: [],
+    footprint,
+    boundingSphere: { center: [cx, 0, cz], radius: 1 },
+    errorWorld: 1,
+    minY,
+    maxY,
+    mesh: null,
     lowBenefit: false,
     ready: true,
   };
@@ -85,5 +105,22 @@ describe("clodError", () => {
     const result = computeNodeErrorPx(node, camera, viewportH, fovY);
     expect(result).toBeGreaterThan(0);
     expect(Number.isFinite(result)).toBe(true);
+  });
+
+  it("relief boost is 1 for flat node", () => {
+    const flat = makeCustomNode({ minX: 0, minZ: 0, maxX: 100, maxZ: 100 }, 0, 0);
+    expect(computeReliefBoost(flat)).toBe(1);
+  });
+
+  it("relief boost is >1 for tall node", () => {
+    const tall = makeCustomNode({ minX: 0, minZ: 0, maxX: 100, maxZ: 100 }, 0, 80);
+    const boost = computeReliefBoost(tall);
+    expect(boost).toBeGreaterThan(1);
+    expect(boost).toBeLessThanOrEqual(1.8);
+  });
+
+  it("relief boost is clamped to 1.8", () => {
+    const extreme = makeCustomNode({ minX: 0, minZ: 0, maxX: 100, maxZ: 100 }, 0, 300);
+    expect(computeReliefBoost(extreme)).toBeCloseTo(1.8, 5);
   });
 });

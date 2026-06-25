@@ -102,10 +102,11 @@ fn build_parent_node_from_children(
     weld_epsilon: f32,
 ) -> Result<ClodPageNode, ClodBuildError> {
     let merged = concat(&children.iter().map(|c| c.mesh.clone()).collect::<Vec<_>>());
+    let val = cfg.validation();
     let tol = BorderTolerances {
         position: weld_epsilon,
-        normal_dot: 0.9999,
-        material: 1e-4,
+        normal_dot: val.normal_dot_min,
+        material: val.material_weight_epsilon,
     };
     let (welded, _) = weld_vertices(&merged, weld_epsilon, tol)?;
     let footprint = children
@@ -119,7 +120,7 @@ fn build_parent_node_from_children(
         let sim = simplify_page(&welded, &locks, cfg);
         (sim.mesh, sim.error_world, sim.low_benefit)
     };
-    strip_degenerate_triangles(&mut mesh, cfg.simplify.weld_epsilon_cells)?;
+        strip_degenerate_triangles(&mut mesh, cfg.validation().zero_area_epsilon)?;
     let polish_locks = build_outer_border_locks(&mesh);
     let polish = polish_diagonals(&mut mesh, &polish_locks, &cfg.polish.diagonal_flip);
     assert_no_internal_borders(&mesh, &footprint)?;
@@ -217,7 +218,7 @@ pub fn build_quadtree(
     let mut level0: Vec<ClodPageNode> = Vec::new();
     for (coord, src) in lod0 {
         let mut mesh = src.mesh;
-        strip_degenerate_triangles(&mut mesh, cfg.simplify.target_error)?;
+        strip_degenerate_triangles(&mut mesh, cfg.validation().zero_area_epsilon)?;
         assert_no_internal_borders(&mesh, &src.footprint)?;
         level0.push(ClodPageNode {
             level: 0,

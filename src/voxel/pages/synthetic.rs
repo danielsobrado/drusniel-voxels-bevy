@@ -253,11 +253,12 @@ fn mesh_chunk(cx: i32, cz: i32, cfg: &ClodPagesConfig, world: WorldBounds) -> Pa
             }
         }
     }
+    let n = buf.mat.len();
     PageMesh {
         positions: buf.pos,
         normals: buf.nrm,
         materials: buf.mat,
-        paint_slots: vec![0.0; buf.mat.len()],
+        paint_slots: vec![0.0; n],
         material_weight_stride: 4,
         indices,
     }
@@ -281,7 +282,12 @@ fn build_lod0_page_source(
     }
 
     let merged = concat(&chunks);
-    let (mesh, weld) = weld_vertices(&merged, cfg.simplify.weld_epsilon_cells)?;
+    let tol = super::types::BorderTolerances {
+        position: cfg.simplify.weld_epsilon_cells,
+        normal_dot: 0.9999,
+        material: 1e-4,
+    };
+    let (mesh, weld) = weld_vertices(&merged, cfg.simplify.weld_epsilon_cells, tol)?;
     let footprint = PageFootprint {
         min_x: (page_x * p * s) as f32,
         min_z: (page_z * p * s) as f32,

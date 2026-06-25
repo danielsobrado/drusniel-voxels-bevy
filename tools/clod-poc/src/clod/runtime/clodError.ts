@@ -27,6 +27,15 @@ export function computeErrorPx(params: {
   return (errorWorld * viewportHeightPx) / denom;
 }
 
+export function computeReliefBoost(node: ClodPageNodeRuntime): number {
+  const spanX = node.footprint.maxX - node.footprint.minX;
+  const spanZ = node.footprint.maxZ - node.footprint.minZ;
+  const pageSpan = Math.max(spanX, spanZ);
+  const heightRange = node.maxY - node.minY;
+  if (pageSpan <= 0) return 1;
+  return Math.min(1.8, Math.max(1, 1 + (heightRange / pageSpan) * 0.8));
+}
+
 export function computeNodeErrorPx(
   node: ClodPageNodeRuntime,
   camera: THREE.PerspectiveCamera,
@@ -34,10 +43,12 @@ export function computeNodeErrorPx(
   fovYRadians: number,
 ): number {
   const distance = computeNodeDistanceToCamera(node, camera);
-  return computeErrorPx({
+  const base = computeErrorPx({
     errorWorld: node.errorWorld,
     distanceToCamera: distance,
     viewportHeightPx,
     fovYRadians,
   });
+  const reliefBoost = computeReliefBoost(node);
+  return base * reliefBoost;
 }

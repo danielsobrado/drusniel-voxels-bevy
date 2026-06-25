@@ -8,6 +8,7 @@ import { createClodDebugGui } from "../clod/debug/clodDebugGui.js";
 import { ClodWireframeOverlay } from "../clod/debug/clodWireframeOverlay.js";
 import { ClodPageBoundaryOverlay } from "../clod/debug/clodPageBoundaryOverlay.js";
 import { ClodLockedBorderOverlay } from "../clod/debug/clodLockedBorderOverlay.js";
+import { ClodErrorLabelOverlay } from "../clod/debug/clodErrorLabelOverlay.js";
 import { ClodStatsPanel } from "../clod/debug/clodStatsPanel.js";
 import { buildStressScene, type StressSceneResult } from "../clod/stress/clodStressRunner.js";
 import { STRESS_SCENE_NAMES, type StressSceneName, type StressSceneParams, DEFAULT_STRESS_PARAMS } from "../clod/stress/stressSceneConfig.js";
@@ -50,8 +51,8 @@ export async function runPhase2Scene(): Promise<void> {
       errorThresholdPx: parsedConfig.selection.error_threshold_px,
       hysteresisMergeFactor: parsedConfig.selection.hysteresis_merge_factor,
       neighborLevelDeltaMax: parsedConfig.selection.neighbor_level_delta_max,
-      crossfadeFrames: parsedConfig.selection.crossfade_frames,
     },
+    crossfadeFrames: parsedConfig.selection.crossfade_frames,
     debug: {
       showWireframe: parsedConfig.debug.show_wireframe,
       showPageBoundaries: parsedConfig.debug.show_page_boundaries,
@@ -124,11 +125,13 @@ export async function runPhase2Scene(): Promise<void> {
   const wireframeOverlay = new ClodWireframeOverlay(scene, cfg.debug.lodColors);
   const boundaryOverlay = new ClodPageBoundaryOverlay(scene);
   const lockedBorderOverlay = new ClodLockedBorderOverlay(scene);
+  const errorLabelOverlay = new ClodErrorLabelOverlay(document.body);
   const statsPanel = new ClodStatsPanel(document.body);
 
   wireframeOverlay.setVisible(cfg.debug.showWireframe);
   boundaryOverlay.setVisible(cfg.debug.showPageBoundaries);
   lockedBorderOverlay.setVisible(cfg.debug.showLockedBorderVertices);
+  errorLabelOverlay.setVisible(cfg.debug.showErrorLabels);
   statsPanel.setVisible(cfg.debug.showStatsPanel);
 
   const gui = new GUI({ title: "CLOD Phase 2" });
@@ -145,7 +148,7 @@ export async function runPhase2Scene(): Promise<void> {
       setWireframeVisible: (v) => wireframeOverlay.setVisible(v),
       setPageBoundariesVisible: (v) => boundaryOverlay.setVisible(v),
       setLockedBorderVisible: (v) => lockedBorderOverlay.setVisible(v),
-      setErrorLabelsVisible: (_v) => { /* error labels created separately */ },
+      setErrorLabelsVisible: (v) => errorLabelOverlay.setVisible(v),
       setStatsPanelVisible: (v) => statsPanel.setVisible(v),
       setNearFieldMaskVisible: (_v) => { /* near-field mask */ },
     },
@@ -159,7 +162,13 @@ export async function runPhase2Scene(): Promise<void> {
 
     for (const [, node] of currentBuild.nodes) {
       if (node.mesh) {
-        node.mesh.visible = false;
+        scene.remove(node.mesh);
+        node.mesh.geometry.dispose();
+        if (Array.isArray(node.mesh.material)) {
+          node.mesh.material.forEach((m) => m.dispose());
+        } else {
+          node.mesh.material.dispose();
+        }
       }
     }
     wireframeOverlay.clear();
@@ -211,9 +220,11 @@ export async function runPhase2Scene(): Promise<void> {
       });
     }
 
-    wireframeOverlay.update(runtimeState.previousCut ?? { frame: 0, nodes: new Map() }, currentBuild.nodes);
-    boundaryOverlay.update(runtimeState.previousCut ?? { frame: 0, nodes: new Map() }, currentBuild.nodes);
-    lockedBorderOverlay.update(runtimeState.previousCut ?? { frame: 0, nodes: new Map() }, currentBuild.nodes);
+    const cut = runtimeState.previousCut ?? { frame: 0, nodes: new Map() };
+    wireframeOverlay.update(cut, currentBuild.nodes);
+    boundaryOverlay.update(cut, currentBuild.nodes);
+    lockedBorderOverlay.update(cut, currentBuild.nodes);
+    errorLabelOverlay.update(cut, currentBuild.nodes, camera, renderer.domElement.height);
     statsPanel.update(runtimeState.stats);
 
     renderer.render(scene, camera);

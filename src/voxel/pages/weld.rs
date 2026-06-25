@@ -108,11 +108,10 @@ pub fn weld_vertices(
             ]);
 
             // Average material weights
+            let out_w = out.material_weights_mut();
             for j in 0..stride {
-                out.material_weights_mut()[f * stride + j] = (out.material_weights()[f * stride + j]
-                    * count
-                    + weights[i * stride + j])
-                    / next_count;
+                let idx = f * stride + j;
+                out_w[idx] = (out_w[idx] * count + weights[i * stride + j]) / next_count;
             }
 
             canonical_counts[f] += 1;

@@ -46,7 +46,7 @@ export function createClodDebugGui(
     errorThresholdPx: config.selection.errorThresholdPx,
     hysteresisMergeFactor: config.selection.hysteresisMergeFactor,
     neighborMaxLevelDelta: config.selection.neighborLevelDeltaMax,
-    crossfadeFrames: config.selection.crossfadeFrames,
+    crossfadeFrames: config.crossfadeFrames,
 
     showWireframe: config.debug.showWireframe,
     showPageBoundaries: config.debug.showPageBoundaries,
@@ -79,7 +79,7 @@ export function createClodDebugGui(
     runtimeState.runtimeConfig.selection.neighborLevelDeltaMax = v;
   });
   runtimeFolder.add(guiState, "crossfadeFrames", 0, 60, 1).name("Crossfade frames").onChange((v: number) => {
-    runtimeState.runtimeConfig.selection.crossfadeFrames = v;
+    runtimeState.runtimeConfig.crossfadeFrames = v;
   });
   runtimeFolder.open();
 

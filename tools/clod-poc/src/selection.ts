@@ -9,6 +9,8 @@ export interface SelectionParams {
   thresholdPx: number;
   hysteresisMergeFactor: number;
   enforce21: boolean;
+  neighborLevelDeltaMax?: number; // default 1
+  freezeSelection?: boolean;
   nearField?: {
     enabled: boolean;
     centerX: number;
@@ -24,6 +26,7 @@ export interface SelectionParams {
 
 export interface SelectionState {
   split: Set<string>; // node ids currently split (recursed) — carries hysteresis frame to frame
+  renderedIds?: string[]; // ids rendered in the last cut — used by freeze
 }
 
 /** error_world -> error_px. distance = camera to bounding-sphere surface. */
@@ -46,10 +49,24 @@ export function errorPx(node: ClodPageNode, p: SelectionParams): number {
 const kids = (n: ClodPageNode): ClodPageNode[] => n.children.filter((c): c is ClodPageNode => !!c);
 const missingForcedChildrenWarnings = new Set<string>();
 
+function flattenNodeAndDescendants(node: ClodPageNode): ClodPageNode[] {
+  const result: ClodPageNode[] = [];
+  const stack = [node];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    result.push(n);
+    for (const c of n.children) {
+      if (c) stack.push(c);
+    }
+  }
+  return result;
+}
+
 export interface SelectionResult {
   rendered: ClodPageNode[];
   state: SelectionState;
   forcedSplits: number; // how many nodes the 2:1 pass split
+  blockedSplits: number; // how many 2:1 splits were blocked by missing children
   nearFieldForcedSplits: number; // how many nodes the near-field bubble forced to LOD0
 }
 
@@ -97,6 +114,20 @@ export function selectCut(
   const rendered: ClodPageNode[] = [];
   let nearFieldForcedSplits = 0;
 
+  if (params.freezeSelection && prev.renderedIds && prev.renderedIds.length > 0) {
+    const renderedIds = new Set(prev.renderedIds);
+    const frozenRendered = roots
+      .flatMap((r) => flattenNodeAndDescendants(r))
+      .filter((n) => renderedIds.has(n.id));
+    return {
+      rendered: frozenRendered,
+      state: { split: new Set(prev.split), renderedIds: prev.renderedIds },
+      forcedSplits: 0,
+      blockedSplits: 0,
+      nearFieldForcedSplits: 0,
+    };
+  }
+
   const visit = (node: ClodPageNode) => {
     const children = kids(node);
     if (children.length === 0) {
@@ -136,11 +167,19 @@ export function selectCut(
   for (const r of roots) visit(r);
 
   let forcedSplits = 0;
+  let blockedSplits = 0;
+  const maxLevelDelta = params.neighborLevelDeltaMax ?? 1;
   const finalRendered = params.enforce21
-    ? enforce21(rendered, newSplit, () => forcedSplits++)
+    ? enforce21(rendered, newSplit, () => forcedSplits++, maxLevelDelta, () => blockedSplits++)
     : rendered;
 
-  return { rendered: finalRendered, state: { split: newSplit }, forcedSplits, nearFieldForcedSplits };
+  return {
+    rendered: finalRendered,
+    state: { split: newSplit, renderedIds: finalRendered.map((n) => n.id) },
+    forcedSplits,
+    blockedSplits,
+    nearFieldForcedSplits,
+  };
 }
 
 interface EdgeEntry {
@@ -159,7 +198,12 @@ function addEdge(index: Map<number, EdgeEntry[]>, plane: number, entry: EdgeEntr
   entries.push(entry);
 }
 
-function find21Violation(nodes: readonly ClodPageNode[]): ClodPageNode | null {
+type ViolationResult =
+  | { type: "splittable"; node: ClodPageNode }
+  | { type: "blocked"; node: ClodPageNode; neighbor: ClodPageNode }
+  | null;
+
+function find21Violation(nodes: readonly ClodPageNode[], maxLevelDelta: number): ViolationResult {
   const xEdges = new Map<number, EdgeEntry[]>();
   const zEdges = new Map<number, EdgeEntry[]>();
   for (const node of nodes) {
@@ -170,15 +214,21 @@ function find21Violation(nodes: readonly ClodPageNode[]): ClodPageNode | null {
     addEdge(zEdges, f.maxZ, { node, side: 1, start: f.minX, end: f.maxX });
   }
 
-  const scan = (entries: EdgeEntry[]): ClodPageNode | null => {
+  const scan = (entries: EdgeEntry[]): ViolationResult => {
     entries.sort((a, b) => a.start - b.start || a.end - b.end);
     for (let i = 0; i < entries.length; i++) {
       const a = entries[i];
       for (let j = i + 1; j < entries.length && entries[j].start < a.end; j++) {
         const b = entries[j];
-        if (a.side === b.side || b.end <= a.start || Math.abs(a.node.level - b.node.level) <= 1) continue;
-        const coarser = a.node.level > b.node.level ? a.node : b.node;
-        if (kids(coarser).length > 0) return coarser;
+        if (a.side === b.side || b.end <= a.start) continue;
+        const delta = Math.abs(a.node.level - b.node.level);
+        if (delta <= maxLevelDelta) continue;
+        const coarser = a.node.level > b.node.level ? a : b;
+        const finer = a.node.level > b.node.level ? b : a;
+        if (kids(coarser.node).length > 0) {
+          return { type: "splittable", node: coarser.node };
+        }
+        return { type: "blocked", node: coarser.node, neighbor: finer.node };
       }
     }
     return null;
@@ -204,11 +254,21 @@ function enforce21(
   rendered: ClodPageNode[],
   split: Set<string>,
   onSplit: () => void,
+  maxLevelDelta: number,
+  onBlocked: () => void,
 ): ClodPageNode[] {
   let work = [...rendered];
+  const blockedNodes = new Set<string>();
   for (let guard = 0; guard < 64; guard++) {
-    const coarser = find21Violation(work);
-    if (!coarser) break;
+    const filtered = work.filter((n) => !blockedNodes.has(n.id));
+    const violation = find21Violation(filtered, maxLevelDelta);
+    if (!violation) break;
+    if (violation.type === "blocked") {
+      blockedNodes.add(violation.node.id);
+      onBlocked();
+      continue;
+    }
+    const coarser = violation.node;
     const children = kids(coarser);
     split.add(coarser.id);
     onSplit();

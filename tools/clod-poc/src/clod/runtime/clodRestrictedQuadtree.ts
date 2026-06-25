@@ -21,9 +21,10 @@ export function enforceRestrictedQuadtree(params: {
   let forcedSplits = 0;
   let blockedSplits = 0;
   let work = new Map(params.cut.nodes);
+  const blockedNodes = new Set<ClodNodeId>();
 
   for (let iteration = 0; iteration < 64; iteration++) {
-    const selected = [...work.values()];
+    const selected = [...work.values()].filter((s) => !blockedNodes.has(s.nodeId));
     const coarser = findLevelDeltaViolation(selected, params.nodes, params.maxLevelDelta);
     if (!coarser) break;
 
@@ -47,6 +48,7 @@ export function enforceRestrictedQuadtree(params: {
       }
       forcedSplits++;
     } else {
+      blockedNodes.add(coarser);
       blockedSplits++;
       logger.warn(
         `restricted split blocked for ${coarser}: not all children ready`,

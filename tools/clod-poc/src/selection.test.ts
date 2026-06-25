@@ -148,6 +148,71 @@ describe("selectCut 2:1 enforcement", () => {
   });
 });
 
+describe("selectCut freeze selection", () => {
+  it("freeze keeps the same nodes rendered when camera moves", () => {
+    const children = [
+      node("L0:0,0", 0, { minX: 0, minZ: 0, maxX: 1, maxZ: 1 }),
+      node("L0:1,0", 0, { minX: 1, minZ: 0, maxX: 2, maxZ: 1 }),
+      node("L0:0,1", 0, { minX: 0, minZ: 1, maxX: 1, maxZ: 2 }),
+      node("L0:1,1", 0, { minX: 1, minZ: 1, maxX: 2, maxZ: 2 }),
+    ];
+    const root = node("L1:0,0", 1, { minX: 0, minZ: 0, maxX: 2, maxZ: 2 }, children, 10);
+
+    const warmup = selectCut([root], {
+      thresholdPx: 1000, hysteresisMergeFactor: 1.5, enforce21: false,
+      viewportH: 720, fovY: Math.PI / 3, camPos: [10, 10, 10],
+    }, { split: new Set() });
+
+    const frozen = selectCut([root], {
+      thresholdPx: 1000, hysteresisMergeFactor: 1.5, enforce21: false, freezeSelection: true,
+      viewportH: 720, fovY: Math.PI / 3, camPos: [0.1, 0.1, 0.1],
+    }, warmup.state);
+
+    expect(frozen.rendered.length).toBe(1);
+    expect(frozen.rendered[0].id).toBe("L1:0,0");
+  });
+});
+
+describe("selectCut neighborLevelDeltaMax", () => {
+  it("uses configured neighborLevelDeltaMax instead of hard-coded 1", () => {
+    const children = [
+      node("L1:0,0", 1, { minX: 0, minZ: 0, maxX: 2, maxZ: 2 }),
+      node("L1:1,0", 1, { minX: 2, minZ: 0, maxX: 4, maxZ: 2 }),
+      node("L1:0,1", 1, { minX: 0, minZ: 2, maxX: 2, maxZ: 4 }),
+      node("L1:1,1", 1, { minX: 2, minZ: 2, maxX: 4, maxZ: 4 }),
+    ];
+    const coarse = node("L2:0,0", 2, { minX: 0, minZ: 0, maxX: 4, maxZ: 4 }, children);
+    const fine = node("L0:4,0", 0, { minX: 4, minZ: 0, maxX: 5, maxZ: 1 });
+
+    const strict = selectCut([coarse, fine], {
+      thresholdPx: 1000, hysteresisMergeFactor: 1.5, enforce21: true, neighborLevelDeltaMax: 1,
+      viewportH: 720, fovY: Math.PI / 3, camPos: [10, 10, 10],
+    }, { split: new Set() });
+    expect(strict.forcedSplits).toBe(1);
+
+    const relaxed = selectCut([coarse, fine], {
+      thresholdPx: 1000, hysteresisMergeFactor: 1.5, enforce21: true, neighborLevelDeltaMax: 2,
+      viewportH: 720, fovY: Math.PI / 3, camPos: [10, 10, 10],
+    }, { split: new Set() });
+    expect(relaxed.forcedSplits).toBe(0);
+  });
+});
+
+describe("selectCut blocked splits", () => {
+  it("reports blockedSplits when coarse node has no children to split into", () => {
+    const coarse = node("L2:0,0", 2, { minX: 0, minZ: 0, maxX: 4, maxZ: 4 }, [], 0.001);
+    const fine = node("L0:4,0", 0, { minX: 4, minZ: 0, maxX: 5, maxZ: 1 });
+
+    const result = selectCut([coarse, fine], {
+      thresholdPx: 1000, hysteresisMergeFactor: 1.5, enforce21: true,
+      viewportH: 720, fovY: Math.PI / 3, camPos: [10, 10, 10],
+    }, { split: new Set() });
+
+    expect(result.blockedSplits).toBeGreaterThan(0);
+    expect(result.rendered.map((r) => r.id)).toContain("L2:0,0");
+  });
+});
+
 describe("LV-1 relief split bias", () => {
   const params: SelectionParams = {
     thresholdPx: 1,

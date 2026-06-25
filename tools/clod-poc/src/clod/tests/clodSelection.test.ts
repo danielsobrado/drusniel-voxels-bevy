@@ -24,6 +24,7 @@ function makeNode(
     errorWorld,
     minY: -1,
     maxY: 1,
+    mesh: null,
     lowBenefit: false,
     ready,
   };
@@ -40,7 +41,6 @@ const defaultConfig: ClodSelectionConfig = {
   errorThresholdPx: 5,
   hysteresisMergeFactor: 1.5,
   neighborLevelDeltaMax: 1,
-  crossfadeFrames: 12,
 };
 
 describe("clodSelection", () => {

@@ -6,7 +6,7 @@ import type {
   ClodSelectedNode,
   ClodSelectionConfig,
 } from "./clodRuntimeTypes.js";
-import { computeNodeErrorPx } from "./clodError.js";
+import { computeNodeDistanceToCamera, computeErrorPx, computeNodeErrorPx } from "./clodError.js";
 import { shouldSplitNode, shouldKeepSplit } from "./clodHysteresis.js";
 import { enforceRestrictedQuadtree } from "./clodRestrictedQuadtree.js";
 import { logger } from "./clodLogger.js";
@@ -67,27 +67,27 @@ export function selectClodCut(input: SelectionInput): {
       return;
     }
 
-    const distance = computeNodeErrorPx(node, camera, viewportHeightPx, fovY);
+    const dist = computeNodeDistanceToCamera(node, camera);
+    const errorPx = computeErrorPx({
+      errorWorld: node.errorWorld,
+      distanceToCamera: dist,
+      viewportHeightPx,
+      fovYRadians: fovY,
+    });
     const wasSplit = previousNodeIds?.has(nodeId) ?? false;
-    const errorPx = distance;
-
-    const hysteresisParams = {
-      wasSplit,
-      errorPx,
-      thresholdPx: config.errorThresholdPx,
-      hysteresisMergeFactor: config.hysteresisMergeFactor,
-    };
 
     const childrenReady = node.childIds.length > 0 && node.childIds.every((cid) => {
       const child = nodes.get(cid);
       return child && child.ready;
     });
 
-    if (childrenReady && shouldKeepSplit(hysteresisParams) || (childrenReady && shouldSplitNode({ errorPx, thresholdPx: config.errorThresholdPx }))) {
-      for (const childId of node.childIds) {
-        visit(childId);
-      }
-    } else if (childrenReady && shouldSplitNode({ errorPx, thresholdPx: config.errorThresholdPx })) {
+    const shouldRecurse = childrenReady && (
+      wasSplit
+        ? shouldKeepSplit({ wasSplit: true, errorPx, thresholdPx: config.errorThresholdPx, hysteresisMergeFactor: config.hysteresisMergeFactor })
+        : shouldSplitNode({ errorPx, thresholdPx: config.errorThresholdPx })
+    );
+
+    if (shouldRecurse) {
       for (const childId of node.childIds) {
         visit(childId);
       }
@@ -105,7 +105,7 @@ export function selectClodCut(input: SelectionInput): {
         nodeId,
         level: node.level,
         errorPx,
-        distanceToCamera: computeNodeErrorPx(node, camera, viewportHeightPx, fovY),
+        distanceToCamera: dist,
         reason,
       });
     }

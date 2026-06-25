@@ -144,6 +144,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     renderedTriangles: 0,
     nodesByLod: {},
     forcedSplits: 0,
+    blockedSplits: 0,
     bubbleForcedSplits: 0,
     cutFrozen: false,
     errorThreshold: cfg.selection.error_threshold_px,

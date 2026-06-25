@@ -19,6 +19,7 @@ function makeNode(
     errorWorld: 1,
     minY: -1,
     maxY: 1,
+    mesh: null,
     lowBenefit: false,
     ready,
   };
@@ -75,19 +76,24 @@ describe("clodRestrictedQuadtree", () => {
 
   it("blocks split when children missing and increments blocked count", () => {
     const nodes = new Map<ClodNodeId, ClodPageNodeRuntime>();
-    nodes.set("L1:1,0", makeNode("L1:1,0", 1, { minX: 8, minZ: 0, maxX: 16, maxZ: 8 }, ["L0:4,0"], false));
+    nodes.set("L2:1,0", makeNode("L2:1,0", 2, { minX: 8, minZ: 0, maxX: 24, maxZ: 8 }, ["L0:4,0", "L0:5,0", "L0:4,1", "L0:5,1"], true));
+    nodes.set("L0:4,0", makeNode("L0:4,0", 0, { minX: 8, minZ: 0, maxX: 12, maxZ: 4 }, [], true));
+    nodes.set("L0:5,0", makeNode("L0:5,0", 0, { minX: 12, minZ: 0, maxX: 16, maxZ: 4 }, [], true));
+    nodes.set("L0:4,1", makeNode("L0:4,1", 0, { minX: 8, minZ: 4, maxX: 12, maxZ: 8 }, [], true));
     nodes.set("L0:0,0", makeNode("L0:0,0", 0, { minX: 0, minZ: 0, maxX: 8, maxZ: 8 }));
 
     const cut: ClodCut = {
       frame: 0,
       nodes: new Map([
-        ["L1:1,0", cutNode("L1:1,0", 1)],
+        ["L2:1,0", cutNode("L2:1,0", 2)],
         ["L0:0,0", cutNode("L0:0,0", 0)],
       ]),
     };
 
     const result = enforceRestrictedQuadtree({ cut, nodes, maxLevelDelta: 1 });
     expect(result.forcedSplits).toBe(0);
+    expect(result.blockedSplits).toBe(1);
+    expect(result.cut.nodes.has("L2:1,0")).toBe(true);
   });
 
   it("pass terminates for valid cut", () => {

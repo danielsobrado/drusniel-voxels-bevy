@@ -409,6 +409,7 @@ mod tests {
             local_positions: Vec::new(),
             normals: Vec::new(),
             material_weights: Vec::new(),
+            paint_slots: Vec::new(),
             indices: Vec::new(),
             chunk_pos: pos,
             lod: LodLevel::Lod0,

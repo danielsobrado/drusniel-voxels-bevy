@@ -72,10 +72,11 @@ pub fn build_lod0_page_source(
         }
     }
     let merged = concat_exports(exports);
+    let val = cfg.validation();
     let tolerances = BorderTolerances {
         position: cfg.simplify.weld_epsilon_cells,
-        normal_dot: 0.9999,
-        material: 1e-4,
+        normal_dot: val.normal_dot_min,
+        material: val.material_weight_epsilon,
     };
     let (mesh, weld) =
         weld_vertices(&merged, cfg.simplify.weld_epsilon_cells, tolerances)?;
