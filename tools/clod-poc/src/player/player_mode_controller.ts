@@ -2,7 +2,6 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { emitAudio } from "../audio/index.js";
 import {
-  DEFAULT_PLAYER_CONFIG,
   PlayerController,
   PlayerInteractionState,
 } from "../player_controller.js";
@@ -36,6 +35,8 @@ export interface PlayerModeController {
   applyQuerySpawn(): void;
 }
 
+const ORBIT_RETURN_OFFSET = new THREE.Vector3(8, 7, 8);
+
 export function createPlayerModeController(deps: PlayerModeControllerDeps): PlayerModeController {
   const playerRaycaster = new THREE.Raycaster();
   const playerPointer = new THREE.Vector2();
@@ -64,14 +65,20 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     }
   };
 
+  const setOrbitCameraAroundPlayer = () => {
+    const playerX = deps.player.position.x;
+    const playerZ = deps.player.position.z;
+    orbitReturnTarget.set(playerX, deps.surfaceHeight(playerX, playerZ), playerZ);
+    deps.controls.target.copy(orbitReturnTarget);
+    deps.camera.position.copy(orbitReturnTarget).add(ORBIT_RETURN_OFFSET);
+    deps.camera.lookAt(orbitReturnTarget);
+  };
+
   const exitPlayerMode = () => {
     emitAudio("camera.mode.orbit");
     deps.onBeforeExitMode();
     if (deps.interaction.mode === "playing") {
-      orbitReturnTarget.copy(deps.player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, DEFAULT_PLAYER_CONFIG.eyeHeight * 0.65);
-      deps.controls.target.copy(orbitReturnTarget);
-      deps.camera.position.copy(orbitReturnTarget).add(new THREE.Vector3(8, 6, 8));
-      deps.camera.lookAt(orbitReturnTarget);
+      setOrbitCameraAroundPlayer();
     }
     deps.interaction.exitToOrbit();
     deps.resetPlayerInput();
@@ -150,7 +157,7 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
     deps.interaction.startPlaying();
     deps.controls.enabled = false;
 
-    deps.camera.position.copy(deps.player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, DEFAULT_PLAYER_CONFIG.eyeHeight);
+    deps.camera.position.copy(deps.player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, deps.player.config.eyeHeight);
     deps.camera.rotation.set(0, yawVal, 0, "YXZ");
   };
 
