@@ -80,6 +80,9 @@ describe("parseWaterConfig", () => {
     expect(parsed.fakeBodies.rivers[0].pointsNorm).toBeDefined();
     expect(parsed.fakeBodies.rivers[0].pointsNorm!.length).toBe(5);
     expect(parsed.hydrology.waterSurface.farReduceFactor).toBe(8);
+    expect(parsed.hydrology.waterSurface.farLakeDominance).toBe(0.4);
+    expect(parsed.hydrology.waterSurface.farRiverDominance).toBe(0.3);
+    expect(parsed.hydrology.waterSurface.farWetThreshold).toBe(0.1);
     expect(parsed.hydrology.waterSurface.farLevelMinCellSize).toBe(12);
     expect(parsed.hydrology.waterSurface.drySentinelDepth).toBe(2);
     expect(parsed.hydrology.moisture.enabled).toBe(true);
@@ -280,7 +283,7 @@ describe("VisualHydrologyField", () => {
     grid.flowDirZ[river] = 0.8;
     grid.flowStrength[river] = 0.5;
     grid.riverDepth[river] = 2.5;
-    buildFarWaterSurface(grid, 2);
+    buildFarWaterSurface(grid, { ...cloneWaterConfig().hydrology.waterSurface, farReduceFactor: 2 });
 
     const field = buildVisualHydrologyField(grid, { farReduceFactor: 2, moistureBlurRadius: 1 });
 
@@ -629,6 +632,25 @@ describe("CPU hydrology modules", () => {
     expect(grid.wetMask[4] + grid.wetMask[5]).toBeLessThan(2);
   });
 
+  it("wet-to-wet cliff cut is scan-order independent", () => {
+    const makeGrid = () => {
+      const grid = createHydrologyGrid(3, 2, { surfaceHeight: () => 10 });
+      grid.carvedBed.fill(10);
+      grid.waterYRaw.fill(-1e4);
+      grid.waterYRaw[1] = 10;
+      grid.waterYRaw[4] = 20;
+      grid.waterYRaw[7] = 10;
+      return grid;
+    };
+    const a = makeGrid();
+    const b = makeGrid();
+    const cfg = { ...surfaceCfg, wetSmoothIterations: 0, wetToWetCliffSlopeMax: 0.1 };
+    buildWaterSurface(a, cfg, 2);
+    buildWaterSurface(b, cfg, 2);
+    expect(Array.from(a.wetMask)).toEqual(Array.from(b.wetMask));
+    expect(a.wetMask[4]).toBe(0);
+  });
+
   it("buildWaterSurface produces finite waterY values", () => {
     const grid = createHydrologyGrid(4, 4, { surfaceHeight: (x, z) => x + z });
     grid.carvedBed.set(grid.originalBed);
@@ -646,7 +668,7 @@ describe("CPU hydrology modules", () => {
       1, 0, -1, -2,
       -3, -4, -5, -6,
     ]);
-    buildFarWaterSurface(grid, 2);
+    buildFarWaterSurface(grid, { ...cloneWaterConfig().hydrology.waterSurface, farReduceFactor: 2 });
     expect(grid.farRes).toBe(2);
     expect(Array.from(grid.waterYFar)).toEqual([4, 2, -4, -6]);
   });

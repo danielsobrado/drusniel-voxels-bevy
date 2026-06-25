@@ -5,6 +5,7 @@ import { parseGrassConfig } from "../../../grass.js";
 import { parseStoneConfig } from "../../../stones/stone_config.js";
 import { parseTreeConfig } from "../../../trees/index.js";
 import { parseUnderstoryConfig } from "../../../understory/index.js";
+import type { BorderCoastOceanConfig } from "../../../terrain/border_coast_config.js";
 import type { WaterConfig } from "../../../water/waterConfig.js";
 import type { HydrologySystem } from "../../../water/index.js";
 import type { EnvironmentLighting } from "../../../environment/environment.js";
@@ -51,6 +52,7 @@ export interface RuntimeSystemsStartupInput {
   understoryConfig: ReturnType<typeof parseUnderstoryConfig>;
   forestLightingConfig: ReturnType<typeof import("../../../forest_lighting/index.js").parseForestLightingConfig>;
   waterConfig: WaterConfig;
+  borderCoastOceanConfig: BorderCoastOceanConfig;
   customPropsConfig: CustomPropsSettings;
   propPlacementScenes: Record<string, PropPlacementScene>;
   queryGrassRingGrid: number | null;
@@ -92,6 +94,7 @@ export async function runRuntimeSystemsStartup(
     understoryConfig,
     forestLightingConfig,
     waterConfig,
+    borderCoastOceanConfig,
     customPropsConfig,
     propPlacementScenes,
     queryGrassRingGrid,
@@ -152,6 +155,7 @@ export async function runRuntimeSystemsStartup(
     camera,
     state,
     waterConfig,
+    borderCoastOceanConfig,
     worldCells,
     hydrologySystem,
     searchParams,

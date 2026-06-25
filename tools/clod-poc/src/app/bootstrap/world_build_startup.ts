@@ -7,6 +7,9 @@ import {
   getDigEditsSnapshot,
   replaceDigEdits,
   setTerrainSurfaceOverride,
+  setBorderCoastRuntime,
+  parseBorderCoastOceanConfig,
+  type BorderCoastOceanConfig,
 } from "../../terrain/terrain.js";
 import { buildTerrainSummary } from "../../clod/terrain_summary.js";
 import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
@@ -40,6 +43,7 @@ import understoryConfigText from "../../../config/understory.yaml?raw";
 import proceduralConfigText from "../../../config/procedural_textures.yaml?raw";
 import grassConfigText from "../../../config/grass.yaml?raw";
 import waterConfigText from "../../../config/water.yaml?raw";
+import borderCoastOceanConfigText from "../../../config/border_coast_ocean.yaml?raw";
 import forestLightingConfigText from "../../../config/forest_lighting.yaml?raw";
 import customPropsConfigText from "../../../config/custom_props.yaml?raw";
 import customPropPlacementsText from "../../../config/custom_prop_placements.yaml?raw";
@@ -75,6 +79,7 @@ export interface WorldBuildResult {
   forestLightingConfig: ReturnType<typeof parseForestLightingConfig>;
   grassConfig: ReturnType<typeof parseGrassConfig>;
   waterConfig: WaterConfig;
+  borderCoastOceanConfig: BorderCoastOceanConfig;
   customPropsConfig: CustomPropsSettings;
   propPlacementScenes: Record<string, PropPlacementScene>;
   proceduralTerrain: ReturnType<typeof createProceduralTerrainTextures> | null;
@@ -125,6 +130,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     "20000": parsePropPlacements(customPropPlacements20000Text),
   };
   let waterConfig = parseWaterConfig(waterConfigText);
+  const borderCoastOceanConfig = parseBorderCoastOceanConfig(borderCoastOceanConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
   const proceduralTerrain = proceduralTextureConfig.enabled
     ? createProceduralTerrainTextures(proceduralTextureConfig)
@@ -156,6 +162,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     );
   }
   waterConfig = resolveWaterConfig(waterConfig, worldCells);
+  setBorderCoastRuntime(borderCoastOceanConfig, worldCells);
 
   const buildStatus = { value: "preparing" };
   const updateBuildOverlay = () => updateClodOverlay({
@@ -232,6 +239,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     forestLightingConfig,
     grassConfig,
     waterConfig,
+    borderCoastOceanConfig,
     customPropsConfig,
     propPlacementScenes,
     proceduralTerrain,

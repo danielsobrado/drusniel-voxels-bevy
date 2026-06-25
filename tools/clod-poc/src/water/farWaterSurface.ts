@@ -2,6 +2,7 @@ import {
   gridIndex,
   type HydrologyGrid,
 } from "./hydrologyGrid.js";
+import type { HydrologyWaterSurfaceConfig } from "./hydrologyConfig.js";
 
 /**
  * Build the reduced-resolution far water surface used by coarse clipmap levels.
@@ -15,14 +16,14 @@ import {
  *   - River-dominated: use conservative min wet waterY (rivers vanish at distance)
  *   - Mostly dry: use min local bed - drySentinelDepth
  */
-export function buildFarWaterSurface(grid: HydrologyGrid, farReduceFactor: number): void {
-  const reduce = Math.max(1, Math.floor(farReduceFactor));
+export function buildFarWaterSurface(grid: HydrologyGrid, config: HydrologyWaterSurfaceConfig): void {
+  const reduce = Math.max(1, Math.floor(config.farReduceFactor));
   const farRes = Math.max(1, Math.floor(grid.res / reduce));
   const out = grid.waterYFar.length === farRes * farRes ? grid.waterYFar : new Float32Array(farRes * farRes);
 
-  const LAKE_DOMINANCE = 0.4;   // >40% lake cells → use lake-representative level
-  const RIVER_DOMINANCE = 0.3;  // >30% river cells → use conservative min
-  const WET_THRESHOLD = 0.1;    // >10% wet cells → not "mostly dry"
+  const LAKE_DOMINANCE = config.farLakeDominance;
+  const RIVER_DOMINANCE = config.farRiverDominance;
+  const WET_THRESHOLD = config.farWetThreshold;
 
   for (let fz = 0; fz < farRes; fz++) {
     const z0 = Math.floor((fz * grid.res) / farRes);

@@ -43,6 +43,9 @@ water:
       dry_sentinel_depth: 2.0
       wet_smooth_iterations: 2
       wet_to_wet_cliff_slope_max: 0.35
+      far_lake_dominance: 0.4
+      far_river_dominance: 0.3
+      far_wet_threshold: 0.1
     moisture:
       enabled: true
       blur_radius: 4

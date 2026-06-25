@@ -48,6 +48,10 @@ export function buildWaterSurface(grid: HydrologyGrid, config: HydrologyWaterSur
   }
 
   tmp.set(waterY);
+  const nextWetMask = new Float32Array(wetMask);
+  const nextLakeMask = new Float32Array(grid.lakeMask);
+  const nextRiverMask = new Float32Array(grid.riverMask);
+  const nextBodyKind = new Int8Array(grid.bodyKind);
   const maxJump = config.wetToWetCliffSlopeMax * grid.texel;
   for (let z = 0; z < res; z++) {
     for (let x = 0; x < res; x++) {
@@ -63,12 +67,16 @@ export function buildWaterSurface(grid: HydrologyGrid, config: HydrologyWaterSur
       }
       if (cliff) {
         tmp[i] = carvedBed[i] - drySentinelDepth;
-        wetMask[i] = 0;
-        grid.lakeMask[i] = 0;
-        grid.riverMask[i] = 0;
-        grid.bodyKind[i] = HYDROLOGY_BODY_DRY;
+        nextWetMask[i] = 0;
+        nextLakeMask[i] = 0;
+        nextRiverMask[i] = 0;
+        nextBodyKind[i] = HYDROLOGY_BODY_DRY;
       }
     }
   }
   waterY.set(tmp);
+  wetMask.set(nextWetMask);
+  grid.lakeMask.set(nextLakeMask);
+  grid.riverMask.set(nextRiverMask);
+  grid.bodyKind.set(nextBodyKind);
 }

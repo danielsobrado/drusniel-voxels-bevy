@@ -170,6 +170,7 @@ export async function bootstrapClodPoc() {
     understoryConfig: world.understoryConfig,
     forestLightingConfig: world.forestLightingConfig,
     waterConfig: world.waterConfig,
+    borderCoastOceanConfig: world.borderCoastOceanConfig,
     customPropsConfig: world.customPropsConfig,
     propPlacementScenes: world.propPlacementScenes,
     queryGrassRingGrid: queries.queryGrassRingGrid,

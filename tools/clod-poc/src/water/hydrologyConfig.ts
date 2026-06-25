@@ -36,6 +36,9 @@ export interface HydrologyWaterSurfaceConfig {
   farReduceFactor: number;
   farLevelMinCellSize: number;
   drySentinelDepth: number;
+  farLakeDominance: number;
+  farRiverDominance: number;
+  farWetThreshold: number;
 }
 
 export interface HydrologyMoistureConfig {
@@ -112,6 +115,9 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     farReduceFactor: 8,
     farLevelMinCellSize: 12.0,
     drySentinelDepth: 2.0,
+    farLakeDominance: 0.4,
+    farRiverDominance: 0.3,
+    farWetThreshold: 0.1,
   },
   moisture: {
     enabled: true,

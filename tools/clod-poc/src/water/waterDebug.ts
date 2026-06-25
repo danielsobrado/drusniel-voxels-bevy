@@ -7,6 +7,7 @@
 // freeze framework is added here, per the water spec.
 import type GUI from "lil-gui";
 import { type WaterDebugMode, type WaterVisualConfig } from "./waterConfig.js";
+import { DEFAULT_EDGE_OCEAN_SETTINGS } from "./waterField.js";
 
 export interface WaterDebugState {
   enabled: boolean;
@@ -14,6 +15,10 @@ export interface WaterDebugState {
   clipmapTint: boolean;
   wireframe: boolean;
   depthWrite: boolean;
+  oceanEnabled: boolean;
+  oceanStartDistance: number;
+  oceanFullDepthDistance: number;
+  oceanMaxDepth: number;
 }
 
 export interface WaterDebugBindings {
@@ -49,6 +54,10 @@ export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugSta
     clipmapTint: false,
     wireframe: false,
     depthWrite: visual.depthWrite,
+    oceanEnabled: DEFAULT_EDGE_OCEAN_SETTINGS.enabled,
+    oceanStartDistance: DEFAULT_EDGE_OCEAN_SETTINGS.startDistance,
+    oceanFullDepthDistance: DEFAULT_EDGE_OCEAN_SETTINGS.fullDepthDistance,
+    oceanMaxDepth: DEFAULT_EDGE_OCEAN_SETTINGS.maxDepth,
   };
 }
 

@@ -1,3 +1,7 @@
+import { applyBorderCoastShape } from "./border_coast.js";
+import type { BorderCoastOceanConfig } from "./border_coast_config.js";
+import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "./border_coast_config.js";
+
 export const WATER_LEVEL = 18;
 const MIN_NORMAL_TERRAIN_SURFACE_Y = WATER_LEVEL - 4;
 const BASE_TERRAIN_ELEVATION = MIN_NORMAL_TERRAIN_SURFACE_Y;
@@ -135,8 +139,27 @@ export type TerrainSurfaceOverride = (x: number, z: number) => number;
 
 let terrainSurfaceOverride: TerrainSurfaceOverride | null = null;
 
+interface BorderCoastRuntime {
+  config: BorderCoastOceanConfig;
+  worldCells: number;
+}
+
+let borderCoastRuntime: BorderCoastRuntime | null = null;
+
 export function setTerrainSurfaceOverride(override: TerrainSurfaceOverride | null): void {
   terrainSurfaceOverride = override;
+}
+
+export function setBorderCoastRuntime(config: BorderCoastOceanConfig | null, worldCells = 0): void {
+  if (!config || !config.enabled || worldCells <= 0) {
+    borderCoastRuntime = null;
+    return;
+  }
+  borderCoastRuntime = { config, worldCells };
+}
+
+export function getBorderCoastRuntime(): BorderCoastRuntime | null {
+  return borderCoastRuntime;
 }
 
 export function baseSurfaceHeight(x: number, z: number): number {
@@ -174,5 +197,13 @@ export function baseSurfaceHeight(x: number, z: number): number {
 }
 
 export function surfaceHeight(x: number, z: number): number {
-  return terrainSurfaceOverride ? terrainSurfaceOverride(x, z) : baseSurfaceHeight(x, z);
+  const inland = terrainSurfaceOverride ? terrainSurfaceOverride(x, z) : baseSurfaceHeight(x, z);
+  if (!borderCoastRuntime) return inland;
+  return applyBorderCoastShape(
+    x,
+    z,
+    inland,
+    borderCoastRuntime.config ?? DEFAULT_BORDER_COAST_OCEAN_CONFIG,
+    borderCoastRuntime.worldCells,
+  );
 }

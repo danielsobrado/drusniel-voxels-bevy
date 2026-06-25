@@ -391,6 +391,9 @@ interface WaterYamlConfig {
         far_reduce_factor?: unknown;
         far_level_min_cell_size?: unknown;
         dry_sentinel_depth?: unknown;
+        far_lake_dominance?: unknown;
+        far_river_dominance?: unknown;
+        far_wet_threshold?: unknown;
       };
       moisture?: {
         enabled?: unknown;
@@ -682,6 +685,9 @@ export function parseWaterConfig(
         hfb.waterSurface.drySentinelDepth,
         0.1,
       ),
+      farLakeDominance: Math.min(1, Math.max(0, readNumber(hydRaw.water_surface?.far_lake_dominance, hfb.waterSurface.farLakeDominance))),
+      farRiverDominance: Math.min(1, Math.max(0, readNumber(hydRaw.water_surface?.far_river_dominance, hfb.waterSurface.farRiverDominance))),
+      farWetThreshold: Math.min(1, Math.max(0, readNumber(hydRaw.water_surface?.far_wet_threshold, hfb.waterSurface.farWetThreshold))),
     },
     moisture: {
       enabled: readBoolean(hydRaw.moisture?.enabled, hfb.moisture.enabled),

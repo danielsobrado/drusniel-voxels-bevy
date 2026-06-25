@@ -126,7 +126,7 @@ export class HydrologySystem {
       if (grid.riverMask[i] > 0.5) grid.waterYRaw[i] = grid.carvedBed[i] + grid.riverDepth[i];
     }
     buildWaterSurface(grid, config.waterSurface, config.waterSurface.drySentinelDepth);
-    buildFarWaterSurface(grid, config.waterSurface.farReduceFactor);
+    buildFarWaterSurface(grid, config.waterSurface);
     buildMoistureField(grid, config.moisture);
     const stats = collectStats(grid, config.accumulation.particles, nowMs() - t0);
     logHydrologySummary(stats);

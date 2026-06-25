@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
+import type { BorderCoastOceanConfig } from "../../terrain/border_coast_config.js";
 import {
   DEFAULT_EDGE_OCEAN_SETTINGS,
   WaterClipmap,
@@ -47,6 +48,7 @@ export interface WaterControllerDeps {
   getUiState: () => WaterControllerUiState;
   searchParams: URLSearchParams;
   devMode: boolean;
+  borderCoastOceanConfig?: BorderCoastOceanConfig;
 }
 
 export interface WaterController {
@@ -77,20 +79,35 @@ function readPositiveParam(searchParams: URLSearchParams, key: string, fallback:
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function readOceanSettings(searchParams: URLSearchParams): EdgeOceanSettings {
+function readOceanSettings(
+  searchParams: URLSearchParams,
+  borderCoast?: BorderCoastOceanConfig,
+): EdgeOceanSettings {
+  const fromBorder = borderCoast?.enabled
+    ? {
+        enabled: true,
+        startDistance: borderCoast.coast.oceanStartCells,
+        fullDepthDistance: borderCoast.coast.oceanFullDepthCells,
+        minDepth: borderCoast.ocean.minDepth,
+        maxDepth: borderCoast.ocean.maxDepth,
+        level: borderCoast.ocean.surfaceY,
+      }
+    : {};
+  const urlEnabled = searchParams.get("ocean") === "1" || searchParams.get("edgeOcean") === "1";
   return {
     ...DEFAULT_EDGE_OCEAN_SETTINGS,
-    enabled: searchParams.get("ocean") === "1" || searchParams.get("edgeOcean") === "1",
-    startDistance: readPositiveParam(searchParams, "oceanStart", DEFAULT_EDGE_OCEAN_SETTINGS.startDistance),
-    fullDepthDistance: readPositiveParam(searchParams, "oceanFull", DEFAULT_EDGE_OCEAN_SETTINGS.fullDepthDistance),
-    maxDepth: readPositiveParam(searchParams, "oceanDepth", DEFAULT_EDGE_OCEAN_SETTINGS.maxDepth),
+    ...fromBorder,
+    enabled: urlEnabled || Boolean(fromBorder.enabled),
+    startDistance: readPositiveParam(searchParams, "oceanStart", fromBorder.startDistance ?? DEFAULT_EDGE_OCEAN_SETTINGS.startDistance),
+    fullDepthDistance: readPositiveParam(searchParams, "oceanFull", fromBorder.fullDepthDistance ?? DEFAULT_EDGE_OCEAN_SETTINGS.fullDepthDistance),
+    maxDepth: readPositiveParam(searchParams, "oceanDepth", fromBorder.maxDepth ?? DEFAULT_EDGE_OCEAN_SETTINGS.maxDepth),
   };
 }
 
 export async function createWaterController(deps: WaterControllerDeps): Promise<WaterController> {
   const pageSignaturesBefore = pageMeshSignatures(deps.nodes);
   const field = new WaterField(deps.waterConfig, { surfaceHeight: deps.surfaceHeight }, deps.hydrologySystem, deps.worldCells);
-  const oceanSettings = readOceanSettings(deps.searchParams);
+  const oceanSettings = readOceanSettings(deps.searchParams, deps.borderCoastOceanConfig);
   field.setEdgeOcean(oceanSettings);
   const waterMaterialFactory = deps.isWebGpu
     ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
