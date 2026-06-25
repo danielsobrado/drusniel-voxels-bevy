@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
-  abs,
   attribute,
   clamp,
   dot,
@@ -158,54 +157,9 @@ function createMeadowGeometry(seed: number): THREE.InstancedBufferGeometry {
   const offset = new Float32Array(MEADOW_PARTICLE_COUNT * 4);
   const shape = new Float32Array(MEADOW_PARTICLE_COUNT * 4);
   const rng = new Rng(hashCombine(seed, hashString("meadow-pollen")));
-  writeMeadowBand({
-    rng,
-    offset,
-    shape,
-    start: 0,
-    count: MEADOW_NEAR_COUNT,
-    area: 28,
-    yMin: -1.25,
-    yMax: 4.4,
-    speedMin: 0.07,
-    speedMax: 0.28,
-    sizeMin: 0.018,
-    sizeMax: 0.07,
-    opacityMin: 0.065,
-    opacityMax: 0.22,
-  });
-  writeMeadowBand({
-    rng,
-    offset,
-    shape,
-    start: MEADOW_NEAR_COUNT,
-    count: MEADOW_MID_COUNT,
-    area: 48,
-    yMin: -0.9,
-    yMax: 6.6,
-    speedMin: 0.045,
-    speedMax: 0.2,
-    sizeMin: 0.012,
-    sizeMax: 0.052,
-    opacityMin: 0.038,
-    opacityMax: 0.16,
-  });
-  writeMeadowBand({
-    rng,
-    offset,
-    shape,
-    start: MEADOW_NEAR_COUNT + MEADOW_MID_COUNT,
-    count: MEADOW_FAR_COUNT,
-    area: 72,
-    yMin: -0.45,
-    yMax: 8.6,
-    speedMin: 0.025,
-    speedMax: 0.14,
-    sizeMin: 0.008,
-    sizeMax: 0.034,
-    opacityMin: 0.022,
-    opacityMax: 0.095,
-  });
+  writeMeadowBand({ rng, offset, shape, start: 0, count: MEADOW_NEAR_COUNT, area: 28, yMin: -1.25, yMax: 4.4, speedMin: 0.07, speedMax: 0.28, sizeMin: 0.018, sizeMax: 0.07, opacityMin: 0.065, opacityMax: 0.22 });
+  writeMeadowBand({ rng, offset, shape, start: MEADOW_NEAR_COUNT, count: MEADOW_MID_COUNT, area: 48, yMin: -0.9, yMax: 6.6, speedMin: 0.045, speedMax: 0.2, sizeMin: 0.012, sizeMax: 0.052, opacityMin: 0.038, opacityMax: 0.16 });
+  writeMeadowBand({ rng, offset, shape, start: MEADOW_NEAR_COUNT + MEADOW_MID_COUNT, count: MEADOW_FAR_COUNT, area: 72, yMin: -0.45, yMax: 8.6, speedMin: 0.025, speedMax: 0.14, sizeMin: 0.008, sizeMax: 0.034, opacityMin: 0.022, opacityMax: 0.095 });
   geometry.setAttribute("aMeadowOffset", new THREE.InstancedBufferAttribute(offset, 4));
   geometry.setAttribute("aMeadowShape", new THREE.InstancedBufferAttribute(shape, 4));
   return geometry;
@@ -276,23 +230,19 @@ void main() {
   vec3 side = vec3(-windDir.z, 0.0, windDir.x);
   float travel = fract(aMeadowOffset.y + uTime * aMeadowShape.z * max(uIntensity, 0.05) / max(aMeadowOffset.w, 0.001));
   float along = (0.5 - travel) * aMeadowOffset.w;
-
   vec2 noiseUv = vec2(along * 0.045 + aMeadowShape.w * 0.002, uTime * 0.13 + aMeadowOffset.x * 0.03);
   float curlX = fbm(noiseUv) - 0.5;
   float curlZ = fbm(noiseUv.yx + vec2(19.1, -7.3)) - 0.5;
   float lift = fbm(noiseUv * 1.7 + vec2(23.0, 11.0)) - 0.5;
   float hover = sin(uTime * (0.22 + aMeadowShape.w * 0.0003) + aMeadowShape.w) * 0.24;
-
   vec3 center = uCenter
     + windDir * (along * 0.82 + curlZ * 1.5)
     + side * (aMeadowOffset.x + curlX * 2.2)
     + vec3(0.0, aMeadowOffset.z + lift * 0.85 + hover, 0.0);
-
   vec3 worldPosition = center
     + side * position.x * aMeadowShape.x
     + vec3(0.0, position.y * aMeadowShape.x, 0.0)
     + windDir * position.z * aMeadowShape.x * 0.8;
-
   float wave = smoothstep(0.15, 0.95, fbm(noiseUv * 1.3 + 5.0));
   vUv = uv;
   vSeed = aMeadowShape.w;
