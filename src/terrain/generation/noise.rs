@@ -1,4 +1,10 @@
-use super::config::{MountainConfig, NoiseLayer};
+use super::config::{MountainConfig, NoiseLayer, TerrainConfig};
+use super::world_shape::{OceanClass, WorldShapeConfig, WorldShapeSampler};
+
+const UNDERWATER_DETAIL_FACTOR: f32 = 0.08;
+const BEACH_DETAIL_FACTOR: f32 = 0.18;
+const COAST_DETAIL_FACTOR: f32 = 0.12;
+const MOUNTAIN_MASK_OFFSET: f32 = 0.3;
 
 /// Standard fBm noise
 pub fn fbm(x: f32, z: f32, layer: &NoiseLayer, seed: u32) -> f32 {
@@ -28,8 +34,6 @@ pub fn ridged_fbm(x: f32, z: f32, config: &MountainConfig, seed: u32) -> f32 {
 
     for i in 0..config.octaves {
         let sample = simplex_2d(x * frequency, z * frequency, seed.wrapping_add(i + 100));
-
-        // Ridge transformation: 1.0 - |noise|, then power for sharpness
         let ridge = 1.0 - sample.abs();
         let ridge = ridge.powf(config.ridge_power);
 
@@ -43,17 +47,27 @@ pub fn ridged_fbm(x: f32, z: f32, config: &MountainConfig, seed: u32) -> f32 {
     (value / max_value) * config.amplitude
 }
 
-/// Combined terrain height at world position
-pub fn sample_terrain_height(
+/// Combined terrain height at world position.
+pub fn sample_terrain_height(x: f32, z: f32, config: &TerrainConfig, seed: u32) -> f32 {
+    let sampler = WorldShapeSampler::new(WorldShapeConfig {
+        seed,
+        sea_level: config.height.sea_level,
+        ..WorldShapeConfig::default()
+    });
+
+    sample_terrain_height_with_world_shape(x, z, config, &sampler, seed)
+}
+
+pub fn sample_terrain_height_with_world_shape(
     x: f32,
     z: f32,
-    config: &super::config::TerrainConfig,
+    config: &TerrainConfig,
+    world_shape: &WorldShapeSampler,
     seed: u32,
 ) -> f32 {
-    // Large scale continent shape
-    let continent = fbm(x, z, &config.continent, seed);
+    let shape = world_shape.sample(x, z);
+    let land_factor = land_detail_factor(shape.ocean_class);
 
-    // Mountain mask - determines where mountains appear
     let mountain_mask = (fbm(
         x,
         z,
@@ -65,23 +79,30 @@ pub fn sample_terrain_height(
             lacunarity: 2.0,
         },
         seed.wrapping_add(500),
-    ) + 0.3)
-        .clamp(0.0, 1.0);
+    ) + MOUNTAIN_MASK_OFFSET)
+        .clamp(0.0, 1.0)
+        * land_factor;
 
-    // Ridged mountains, masked by continent
     let mountains = ridged_fbm(x, z, &config.mountains, seed) * mountain_mask;
+    let hills = fbm(x, z, &config.hills, seed.wrapping_add(200)) * land_factor;
+    let detail = fbm(x, z, &config.detail, seed.wrapping_add(300)) * land_factor;
+    let height = shape.base_elevation + mountains + hills + detail;
 
-    // Hills everywhere
-    let hills = fbm(x, z, &config.hills, seed.wrapping_add(200));
+    match shape.ocean_class {
+        OceanClass::DeepSea | OceanClass::ShelfSea | OceanClass::Coast => {
+            height.min(config.height.sea_level - 0.25)
+        }
+        OceanClass::Beach | OceanClass::Land => height.clamp(config.height.min, config.height.max),
+    }
+}
 
-    // Fine detail
-    let detail = fbm(x, z, &config.detail, seed.wrapping_add(300));
-
-    // Combine layers
-    let height = continent + mountains + hills + detail;
-
-    // Clamp to world bounds
-    height.clamp(config.height.min, config.height.max)
+fn land_detail_factor(ocean_class: OceanClass) -> f32 {
+    match ocean_class {
+        OceanClass::Land => 1.0,
+        OceanClass::Beach => BEACH_DETAIL_FACTOR,
+        OceanClass::Coast => COAST_DETAIL_FACTOR,
+        OceanClass::ShelfSea | OceanClass::DeepSea => UNDERWATER_DETAIL_FACTOR,
+    }
 }
 
 fn simplex_2d(x: f32, y: f32, seed: u32) -> f32 {
@@ -229,5 +250,18 @@ mod tests {
             max - min > 1.0,
             "terrain height samples should vary after noise is applied: {heights:?}"
         );
+    }
+
+    #[test]
+    fn underwater_samples_stay_below_sea_level() {
+        let config = TerrainConfig::default();
+        let mut shape_config = WorldShapeConfig::default();
+        shape_config.seed = 5;
+        shape_config.continents.threshold = 2.0;
+        let sampler = WorldShapeSampler::new(shape_config);
+
+        let height = sample_terrain_height_with_world_shape(0.0, 0.0, &config, &sampler, 5);
+
+        assert!(height <= config.height.sea_level - 0.25);
     }
 }
