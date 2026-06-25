@@ -9,13 +9,15 @@ export interface VertexPaint {
   weights: number[];
 }
 
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
 export function terrainWeights(y: number, ny: number): [number, number, number, number] {
   void ny;
   const WATER_LEVEL = 18;
-  const sand = Math.max(0, 1 - Math.abs(y - WATER_LEVEL) / 6);
-  const snow = Math.max(0, (y - 88) / 22);
-  const rock = Math.max(0, Math.min(1, (y - 48) / 34)) * (1 - snow);
-  const grass = Math.max(0, 1 - sand - snow - rock);
+  const sand = clamp01(1 - Math.abs(y - WATER_LEVEL) / 6);
+  const snow = clamp01((y - 88) / 22);
+  const rock = clamp01((y - 48) / 34) * (1 - snow);
+  const grass = clamp01(1 - sand - snow - rock);
   const sum = sand + snow + rock + grass || 1;
   return [grass / sum, rock / sum, sand / sum, snow / sum];
 }
