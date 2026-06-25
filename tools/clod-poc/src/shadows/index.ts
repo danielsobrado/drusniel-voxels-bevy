@@ -14,6 +14,7 @@ export {
   cloneShadowProxyConfig,
   DEFAULT_SHADOW_PROXY_CONFIG,
   parseLongViewSunShadowsConfig,
+  resolveShadowProxyRebuildSnapMeters,
 } from "./shadowProxyConfig.js";
 export { DEFAULT_LONG_VIEW_SUN_SHADOWS_CONFIG } from "../config/longViewDefaults.js";
 export { buildShadowProxyGeometry } from "./shadowProxyGeometry.js";

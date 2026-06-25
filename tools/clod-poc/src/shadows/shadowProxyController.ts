@@ -20,7 +20,8 @@ export interface ShadowProxyControllerDeps {
   worldSize: number;
   isLongView: boolean;
   streamingCentered: boolean;
-  rebaseSnapMeters: number;
+  /** Snap distance for geometry rebuilds in streaming mode (not per-frame follow). */
+  rebuildSnapMeters: number;
   getSunShadowsEnabled: () => boolean;
   getConfig: () => ShadowProxyConfig;
   getLighting: () => EnvironmentLighting;
@@ -121,6 +122,15 @@ export function createShadowProxyController(
     if (runtime.mesh && proxyEnabled) deps.scene.add(runtime.mesh);
   };
 
+  const updateStreamingFollow = (cameraWorldX: number, cameraWorldZ: number) => {
+    if (!runtime.mesh || !deps.streamingCentered) return;
+    runtime.mesh.position.set(
+      builtCenterX - cameraWorldX,
+      0,
+      builtCenterZ - cameraWorldZ,
+    );
+  };
+
   const rebuildProxy = (force = false) => {
     if (!deps.isLongView || !proxyEnabled) {
       removeProxyMesh();
@@ -130,21 +140,20 @@ export function createShadowProxyController(
       publishCounters();
       return;
     }
-    const terrainSummary = deps.getTerrainSummary();
-    const center = resolveCoverageCenter(deps);
-    const coverage: ShadowProxyCoverage = computeShadowProxyCoverage(
-      deps.worldSize,
-      config,
-      center.x,
-      center.z,
-    );
-    const sameSummary = builtSummaryRef === terrainSummary;
-    const sameCenter = builtCenterX === center.x && builtCenterZ === center.z;
-    if (config.debugFreezeProxy && frozenGeometry && !force && sameSummary && sameCenter) {
-      updateShadowProxyDebugMaterial(runtime, config);
+    const liveConfig = deps.getConfig();
+    if (liveConfig.debugFreezeProxy && frozenGeometry && !force) {
+      config = { ...config, ...liveConfig };
+      updateShadowProxyDebugMaterial(runtime, liveConfig);
       publishCounters();
       return;
     }
+    config = { ...config, ...liveConfig };
+    const terrainSummary = deps.getTerrainSummary();
+    const center = resolveCoverageCenter(deps);
+    const coverage: ShadowProxyCoverage = {
+      ...computeShadowProxyCoverage(deps.worldSize, config, center.x, center.z),
+      buildRelative: deps.streamingCentered,
+    };
     removeProxyMesh();
     runtime.dispose();
     runtime = buildShadowProxyMesh(terrainSummary, config, coverage);
@@ -152,6 +161,12 @@ export function createShadowProxyController(
     builtCenterX = center.x;
     builtCenterZ = center.z;
     frozenGeometry = runtime.stats.built;
+    if (runtime.mesh && deps.streamingCentered) {
+      const live = deps.getCoverageCenter();
+      runtime.mesh.position.set(builtCenterX - live.x, 0, builtCenterZ - live.z);
+    } else if (runtime.mesh) {
+      runtime.mesh.position.set(0, 0, 0);
+    }
     attachProxyMesh();
     publishCounters();
   };
@@ -167,7 +182,6 @@ export function createShadowProxyController(
       configureLongViewSunShadows(sunLight, deps.getConfig(), { castShadow: enabled });
       syncLongViewSunLight(sunLight, deps.getLighting(), 2.4, sunTarget);
     }
-    deps.onSunShadowsChanged?.(enabled);
     onSunShadowsChanged?.(enabled);
     publishCounters();
   };
@@ -198,10 +212,10 @@ export function createShadowProxyController(
       const next = { ...deps.getConfig() };
       const geometryChanged = geometryConfigChanged(config, next);
       config = next;
-      if (builtSummaryRef !== deps.getTerrainSummary() || geometryChanged) {
-        rebuildProxy(true);
-      } else if (config.debugFreezeProxy && frozenGeometry && !geometryChanged) {
+      if (config.debugFreezeProxy && frozenGeometry && !geometryChanged) {
         updateShadowProxyDebugMaterial(runtime, config);
+      } else if (builtSummaryRef !== deps.getTerrainSummary() || geometryChanged) {
+        rebuildProxy(true);
       } else {
         rebuildProxy(true);
       }
@@ -213,16 +227,20 @@ export function createShadowProxyController(
     },
     updateFrame(cameraWorldX: number, cameraWorldZ: number) {
       if (!deps.isLongView || !deps.streamingCentered) return;
-      const snapped = snapCenter(cameraWorldX, cameraWorldZ, deps.rebaseSnapMeters);
-      if (snapped.x === builtCenterX && snapped.z === builtCenterZ) return;
+      const snapped = snapCenter(cameraWorldX, cameraWorldZ, deps.rebuildSnapMeters);
       sunTarget = new THREE.Vector3(snapped.x, 0, snapped.z);
       if (sunLight) {
         sunLight.target.position.copy(sunTarget);
         sunLight.target.updateMatrixWorld();
       }
-      rebuildProxy(true);
+      const frozen = deps.getConfig().debugFreezeProxy && frozenGeometry;
+      if ((snapped.x !== builtCenterX || snapped.z !== builtCenterZ) && !frozen) {
+        rebuildProxy(true);
+      }
+      updateStreamingFollow(cameraWorldX, cameraWorldZ);
     },
     rebuildIfNeeded(force = false) {
+      if (deps.getConfig().debugFreezeProxy && frozenGeometry && !force) return;
       const summary = deps.getTerrainSummary();
       const center = resolveCoverageCenter(deps);
       if (
@@ -260,7 +278,7 @@ export function createShadowProxyController(
 function resolveCoverageCenter(deps: ShadowProxyControllerDeps): { x: number; z: number } {
   if (deps.streamingCentered) {
     const live = deps.getCoverageCenter();
-    return snapCenter(live.x, live.z, deps.rebaseSnapMeters);
+    return snapCenter(live.x, live.z, deps.rebuildSnapMeters);
   }
   return { x: deps.worldSize / 2, z: deps.worldSize / 2 };
 }

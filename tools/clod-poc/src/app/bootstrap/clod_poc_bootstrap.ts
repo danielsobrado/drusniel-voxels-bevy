@@ -17,6 +17,8 @@ import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
 import { InfiniteFarShell, createFarShellMetrics, DEFAULT_LONG_VIEW_CONFIG, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
 import type { FarShellMetrics } from "../../long-view/index.js";
+import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
+import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import * as THREE from "three";
 
 
@@ -169,13 +171,17 @@ export async function bootstrapClodPoc() {
       },
       scene: renderer.scene,
       camera: renderer.camera,
-      farShellController: terrainView.farShellController,
+      farShellController: undefined,
       farShellMetrics,
       config: longViewConfigToFarSummaryConfig(lvConfig),
     });
 
     const heightProvider = farSummaryIntegration.getHeightProvider();
     const lighting = terrainView.currentLighting();
+
+    const materialConfig = loadLongViewMaterialsConfig(undefined, parseQueryOverrides(searchParams));
+    const parityConfig = materialConfig.enabled ? configToUniformData(materialConfig) : undefined;
+    const useParity = materialConfig.enabled && parityConfig !== undefined;
 
     infiniteFarShell = new InfiniteFarShell({
       innerMeters: lvConfig.farShell.startMeters,
@@ -194,6 +200,8 @@ export async function bootstrapClodPoc() {
         skyLight: lighting.skyLight,
         groundLight: lighting.groundLight,
       },
+      useParityMaterial: useParity,
+      parityConfig,
       debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
       metrics: farShellMetrics,
     });

@@ -51,6 +51,8 @@ export interface ShadowProxyCoverage {
   centerX: number;
   centerZ: number;
   extentM: number;
+  /** Build geometry in local space around the origin; heights sampled at centerX/centerZ + local. */
+  buildRelative?: boolean;
 }
 
 /** Heightfield source for the far terrain shadow proxy. */

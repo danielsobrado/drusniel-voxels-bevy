@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import longViewYaml from "../../config/long_view.yaml?raw";
 import {
   applyShadowProxyDebugQueryOverrides,
   applyShadowProxySceneOverrides,
   DEFAULT_SHADOW_PROXY_CONFIG,
   parseLongViewSunShadowsConfig,
+  resolveShadowProxyRebuildSnapMeters,
 } from "./shadowProxyConfig.js";
 import { DEFAULT_LONG_VIEW_SUN_SHADOWS_CONFIG } from "../config/longViewDefaults.js";
 
@@ -44,5 +45,18 @@ describe("shadow proxy config", () => {
 
   it("falls back to defaults for empty yaml", () => {
     expect(parseLongViewSunShadowsConfig("")).toEqual(DEFAULT_LONG_VIEW_SUN_SHADOWS_CONFIG);
+  });
+
+  it("falls back to defaults for malformed yaml", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const parsed = parseLongViewSunShadowsConfig("long_view:\n  shadow_proxy: [");
+    expect(parsed).toEqual(DEFAULT_LONG_VIEW_SUN_SHADOWS_CONFIG);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("uses coarse rebuild snap for large proxy extent", () => {
+    expect(resolveShadowProxyRebuildSnapMeters(DEFAULT_SHADOW_PROXY_CONFIG)).toBe(1024);
+    expect(resolveShadowProxyRebuildSnapMeters({ ...DEFAULT_SHADOW_PROXY_CONFIG, endM: 800 })).toBe(512);
   });
 });

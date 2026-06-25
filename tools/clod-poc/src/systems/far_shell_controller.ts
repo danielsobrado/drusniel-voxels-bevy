@@ -30,6 +30,7 @@ export interface FarShellControllerDeps {
   getSettings: () => FarShellUiSettings;
   onTriangleCount?: (counter: "far_shell_tris" | "canopy_tris", count: number) => void;
   receiveSunShadows?: () => boolean;
+  useDebugLambertReceiver?: () => boolean;
   useParityMaterial?: () => boolean;
   getParityConfig?: () => import("../farTerrain/farTerrainUniforms.js").FarTerrainUniformData | undefined;
   heightProvider?: FarHeightProvider;
@@ -97,6 +98,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
       centerZ: currentCenterZ,
       buildRelative: useRelativeBuild,
       receiveSunShadows: deps.receiveSunShadows?.() ?? false,
+      useDebugLambertReceiver: deps.useDebugLambertReceiver?.() ?? false,
       useParityMaterial: deps.useParityMaterial?.() ?? false,
       parityConfig: deps.getParityConfig?.(),
     });

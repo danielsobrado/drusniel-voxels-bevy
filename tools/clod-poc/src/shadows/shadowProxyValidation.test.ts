@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { buildTerrainSummary, sampleHeight, sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
 import { DEFAULT_SHADOW_PROXY_CONFIG } from "../config/longViewDefaults.js";
 import {
   clampProxyHeight,
   ringFadeWeight,
+  sampleProxyHeight,
   validateShadowProxyConfig,
   validateTerrainSummarySource,
 } from "./shadowProxyValidation.js";
-import { buildTerrainSummary } from "../clod/terrain_summary.js";
 
 describe("shadow proxy validation", () => {
   it("flags invalid config", () => {
@@ -27,5 +28,27 @@ describe("shadow proxy validation", () => {
     expect(clampProxyHeight(Number.NaN, DEFAULT_SHADOW_PROXY_CONFIG)).toBe(DEFAULT_SHADOW_PROXY_CONFIG.minHeightM);
     expect(ringFadeWeight(0, DEFAULT_SHADOW_PROXY_CONFIG)).toBeGreaterThanOrEqual(0);
     expect(ringFadeWeight(DEFAULT_SHADOW_PROXY_CONFIG.startM, DEFAULT_SHADOW_PROXY_CONFIG)).toBe(1);
+  });
+
+  it("samples analytic far terrain outside the summary footprint (not edge-clamped)", () => {
+    const summary = buildTerrainSummary([], 512, 8);
+    summary.heightMax.fill(420);
+    const config = { ...DEFAULT_SHADOW_PROXY_CONFIG, startM: 0, endM: 4096, edgeFadeM: 0 };
+    const baseLevel = config.minHeightM;
+    const farBase = summaryBaseLevel(summary);
+    const dist = 3000;
+    const x = -1000;
+
+    const edgeClamped = sampleHeight(summary, x, 256);
+    const skirt = sampleSkirtHeight(summary, x, 256, config.endM, farBase, 1.0);
+    const proxy = sampleProxyHeight(summary, x, 256, baseLevel, config, dist);
+
+    expect(edgeClamped).toBeCloseTo(420, 0);
+    expect(skirt).not.toBeCloseTo(edgeClamped, 1);
+    expect(proxy).not.toBeCloseTo(edgeClamped, 1);
+    expect(proxy).toBeCloseTo(
+      baseLevel + (clampProxyHeight(skirt + config.heightBiasM, config) - baseLevel) * ringFadeWeight(dist, config),
+      4,
+    );
   });
 });

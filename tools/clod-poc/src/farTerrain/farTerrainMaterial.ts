@@ -1,11 +1,10 @@
 import * as THREE from "three";
-import { clamp, dot, float, max, mix, normalize, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+import { clamp, dot, float, max, mix, normalGeometry, normalize, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+import { vertexColor } from "three/tsl";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMaterial/terrainMaterialBands.js";
-
-type TslNode = any;
 
 export interface FarTerrainVertexColors {
   baseColor: Float32Array;
@@ -13,10 +12,6 @@ export interface FarTerrainVertexColors {
   macro: Float32Array;
   slope: Float32Array;
   materialWeights: Float32Array;
-}
-
-function v3c(c: THREE.Color): TslNode {
-  return vec3(c.r, c.g, c.b);
 }
 
 export function createFarTerrainMaterial(
@@ -27,22 +22,16 @@ export function createFarTerrainMaterial(
   _farRadius: number,
 ): MeshBasicNodeMaterial {
   const uSunDir = uniform(lighting.sunDirection.clone());
-  const uSunColor = uniform(v3c(lighting.sunColor));
-  const uSkyColor = uniform(v3c(lighting.skyLight));
-  const uGroundColor = uniform(v3c(lighting.groundLight));
+  const uSunColor = uniform(vec3(lighting.sunColor.r, lighting.sunColor.g, lighting.sunColor.b));
+  const uSkyColor = uniform(vec3(lighting.skyLight.r, lighting.skyLight.g, lighting.skyLight.b));
+  const uGroundColor = uniform(vec3(lighting.groundLight.r, lighting.groundLight.g, lighting.groundLight.b));
   const uHazeColor = uniform(new THREE.Vector3(config.hazeColor[0], config.hazeColor[1], config.hazeColor[2]));
 
   const uHazeStart = uniform(config.hazeStartM);
   const uHazeEnd = uniform(config.hazeEndM);
   const uHazeStrength = uniform(config.hazeStrength);
-  const uHazeHeightFalloff = uniform(config.hazeHeightFalloff);
-  const uShowMaterialBands = uniform(config.debugShowMaterialBands);
-  const uShowSlope = uniform(config.debugShowSlope);
-  const uShowMacroNoise = uniform(config.debugShowMacroNoise);
-  const uShowFarNormals = uniform(config.debugShowFarNormals);
-  const uShowHazeFactor = uniform(config.debugShowHazeFactor);
 
-  const nrm = normalize(positionWorld);
+  const nrm = normalize(normalGeometry);
   const sun = max(dot(nrm, uSunDir), float(0));
   const sky = clamp(nrm.y.mul(0.5).add(0.5), float(0), float(1));
   const hemi = mix(uGroundColor, uSkyColor, sky);
@@ -51,34 +40,16 @@ export function createFarTerrainMaterial(
   const dp = vec2(positionWorld.x.sub(centerX), positionWorld.z.sub(centerZ));
   const distXZ = dp.length();
   const hazeT = smoothstep(uHazeStart, uHazeEnd, distXZ);
-  const hazeHeightFade = float(1).sub(hazeT.mul(0.5));
-  const hazeFactor = hazeT.mul(hazeHeightFade).mul(uHazeStrength);
+  const hazeFactor = hazeT.mul(uHazeStrength);
 
-  const colorNode = vec3(0.5, 0.5, 0.5);
-  const lit = colorNode.mul(light);
+  const vColor = vertexColor();
+  const colorNode = vColor as unknown as { mul: (x: unknown) => unknown };
+  const lit = (colorNode.mul(light) as unknown as ReturnType<typeof vec3>);
   const final = mix(lit, uHazeColor, hazeFactor);
 
   const material = new MeshBasicNodeMaterial();
   material.colorNode = final;
   material.side = THREE.DoubleSide;
-  material.vertexColors = true;
-
-  (material as unknown as Record<string, unknown>).__far_terrain_uniforms = {
-    uSunDir,
-    uSunColor,
-    uSkyColor,
-    uGroundColor,
-    uHazeColor,
-    uHazeStart,
-    uHazeEnd,
-    uHazeStrength,
-    uHazeHeightFalloff,
-    uShowMaterialBands,
-    uShowSlope,
-    uShowMacroNoise,
-    uShowFarNormals,
-    uShowHazeFactor,
-  };
 
   return material;
 }
@@ -90,6 +61,8 @@ export function computeFarTerrainVertexColors(
   vertexCount: number,
   config: FarTerrainUniformData,
   _worldSize: number,
+  worldOffsetX?: number,
+  worldOffsetZ?: number,
 ): FarTerrainVertexColors {
   const baseColor = new Float32Array(vertexCount * 3);
   const debugBand = new Float32Array(vertexCount * 3);
@@ -116,8 +89,8 @@ export function computeFarTerrainVertexColors(
   };
 
   for (let vi = 0; vi < vertexCount; vi++) {
-    const x = positions[vi * 3];
-    const z = positions[vi * 3 + 2];
+    const x = positions[vi * 3] + (worldOffsetX ?? 0);
+    const z = positions[vi * 3 + 2] + (worldOffsetZ ?? 0);
     const y = positions[vi * 3 + 1];
     const nx = normals[vi * 3];
     const ny = normals[vi * 3 + 1];

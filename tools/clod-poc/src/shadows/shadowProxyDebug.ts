@@ -7,6 +7,7 @@ export interface ShadowProxyDebugState {
   debugWireframe: boolean;
   debugFreezeProxy: boolean;
   debugShowBounds: boolean;
+  debugLambertFarShellReceiver: boolean;
   showSunShadowCamera: boolean;
   heightBiasM: number;
   lightShadowBias: number;
@@ -26,6 +27,7 @@ export function createShadowProxyDebugState(
     debugWireframe: config.debugWireframe,
     debugFreezeProxy: config.debugFreezeProxy,
     debugShowBounds: config.debugShowBounds,
+    debugLambertFarShellReceiver: false,
     showSunShadowCamera: false,
     heightBiasM: config.heightBiasM,
     lightShadowBias: config.lightShadowBias,

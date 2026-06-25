@@ -53,8 +53,10 @@ export interface FarTerrainShellOptions {
   /** Build geometry relative to (0,0) so the mesh can be moved via mesh.position.
    *  When set, centerX/centerZ are only used for the material haze fade. */
   buildRelative?: boolean;
-    /** Use a Lambert receiver so Three.js directional shadows are visible in long-view PoC. */
+  /** Use a Lambert receiver so Three.js directional shadows are visible in long-view PoC. */
   receiveSunShadows?: boolean;
+  /** Debug-only: swap to Lambert for visible shadow reception (regresses TSL far-shell look). */
+  useDebugLambertReceiver?: boolean;
   /** Use the parity material path with terrain band classification. */
   useParityMaterial?: boolean;
   /** Material config data for the parity material. */
@@ -97,7 +99,7 @@ export function buildFarTerrainShell(
   options: Partial<FarTerrainShellOptions> = {},
 ): FarTerrainShell {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const { gridRes, heightDrop, heightBias, heightProvider, buildRelative, receiveSunShadows, useParityMaterial, parityConfig } = opts;
+  const { gridRes, heightDrop, heightBias, heightProvider, buildRelative, receiveSunShadows, useDebugLambertReceiver, useParityMaterial, parityConfig } = opts;
 
   const worldSize = summary.worldSize;
   const centerX = opts.centerX ?? worldSize / 2;
@@ -224,7 +226,7 @@ export function buildFarTerrainShell(
   let material: THREE.Material;
   if (useParityMaterial && parityConfig) {
     material = createFarTerrainMaterial(lighting, parityConfig, centerX, centerZ, farRadius);
-  } else if (receiveSunShadows) {
+  } else if (receiveSunShadows && useDebugLambertReceiver) {
     material = new THREE.MeshLambertMaterial({
       color: 0x5a6b42,
       side: THREE.DoubleSide,
@@ -237,7 +239,7 @@ export function buildFarTerrainShell(
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = false;
-  mesh.receiveShadow = true;
+  mesh.receiveShadow = receiveSunShadows ?? false;
   mesh.frustumCulled = false;
 
   return {

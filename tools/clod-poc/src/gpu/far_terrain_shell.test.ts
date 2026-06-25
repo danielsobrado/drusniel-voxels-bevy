@@ -52,4 +52,23 @@ describe("far terrain shell — horizon skirt around the world", () => {
     }
     expect(beyond).toBeGreaterThan(0);
   });
+
+  it("keeps TSL far-shell material when sun shadows are enabled unless debug Lambert is requested", () => {
+    const withShadows = buildFarTerrainShell(summary, lighting, {
+      gridRes: 32,
+      receiveSunShadows: true,
+      useDebugLambertReceiver: false,
+    });
+    expect(withShadows.mesh.material.type).not.toBe("MeshLambertMaterial");
+    expect(withShadows.mesh.receiveShadow).toBe(true);
+
+    const debugLambert = buildFarTerrainShell(summary, lighting, {
+      gridRes: 32,
+      receiveSunShadows: true,
+      useDebugLambertReceiver: true,
+    });
+    expect(debugLambert.mesh.material.type).toBe("MeshLambertMaterial");
+    debugLambert.dispose();
+    withShadows.dispose();
+  });
 });

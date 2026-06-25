@@ -121,6 +121,10 @@ export function initFarSummaryIntegration(
       metrics.farSummaryTilesStale = stats.staleTiles;
       metrics.farSummaryTilesBuiltThisFrame = stats.tilesBuiltThisFrame;
       metrics.farSummaryCacheSize = cache.getTileCount();
+      metrics.farSummaryFallbackSamples =
+        stats.proceduralFallbacks +
+        stats.lowerRingFallbacks +
+        stats.conservativeFallbacks;
     }
 
     if (options.farShellController) {

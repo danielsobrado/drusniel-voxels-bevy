@@ -1,5 +1,5 @@
 import type { ShadowProxyConfig, ShadowProxyCoverage, ShadowProxySource } from "./shadowProxyTypes.js";
-import { sampleHeight } from "../clod/terrain_summary.js";
+import { sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
 
 export interface ShadowProxyValidationResult {
   ok: boolean;
@@ -84,7 +84,15 @@ export function sampleProxyHeight(
   config: ShadowProxyConfig,
   dist: number,
 ): number {
-  const raw = sampleHeight(terrainSummary, x, z);
+  const farBase = summaryBaseLevel(terrainSummary);
+  const raw = sampleSkirtHeight(
+    terrainSummary,
+    x,
+    z,
+    config.endM,
+    farBase,
+    1.0,
+  );
   const biased = clampProxyHeight(raw + config.heightBiasM, config);
   const fade = ringFadeWeight(dist, config);
   return baseLevel + (biased - baseLevel) * fade;

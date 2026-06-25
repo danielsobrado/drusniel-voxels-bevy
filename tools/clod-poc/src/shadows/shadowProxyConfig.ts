@@ -64,17 +64,26 @@ function parseShadowProxyConfig(
   };
 }
 
+export function resolveShadowProxyRebuildSnapMeters(config: ShadowProxyConfig): number {
+  return Math.max(512, config.endM * 0.25);
+}
+
 export function parseLongViewSunShadowsConfig(
   yamlText: string,
   fallback: LongViewSunShadowsConfig = DEFAULT_LONG_VIEW_SUN_SHADOWS_CONFIG,
 ): LongViewSunShadowsConfig {
   if (!yamlText.trim()) return cloneLongViewSunShadowsConfig(fallback);
-  const parsed = load(yamlText) as LongViewYamlConfig;
-  const root = parsed.long_view;
-  return {
-    enabled: readBoolean(root?.sun_shadows?.enabled, fallback.enabled),
-    shadowProxy: parseShadowProxyConfig(root?.shadow_proxy, fallback.shadowProxy),
-  };
+  try {
+    const parsed = load(yamlText) as LongViewYamlConfig | null;
+    const root = parsed?.long_view;
+    return {
+      enabled: readBoolean(root?.sun_shadows?.enabled, fallback.enabled),
+      shadowProxy: parseShadowProxyConfig(root?.shadow_proxy, fallback.shadowProxy),
+    };
+  } catch (error) {
+    console.warn("[shadow-proxy] invalid long_view.yaml; using defaults", error);
+    return cloneLongViewSunShadowsConfig(fallback);
+  }
 }
 
 export function applyShadowProxySceneOverrides(

@@ -57,7 +57,7 @@ describe("infinite far shell — camera-relative annular geometry", () => {
     shell2.dispose();
   });
 
-  it("shell is camera-relative — move camera 10000m, render coords stay local", () => {
+  it("shell is centered at snapped world position after camera movement", () => {
     const shell = new InfiniteFarShell(makeDefaultOptions());
     shell.update(10000, 0, 0);
 
@@ -71,8 +71,8 @@ describe("infinite far shell — camera-relative annular geometry", () => {
     expect(hasLargeCoord).toBe(false);
 
     const meshPos = shell.mesh.position;
-    expect(meshPos.x).toBeLessThan(100);
-    expect(meshPos.z).toBeLessThan(100);
+    expect(meshPos.x).toBe(10000);
+    expect(meshPos.z).toBe(0);
     shell.dispose();
   });
 
@@ -88,6 +88,14 @@ describe("infinite far shell — camera-relative annular geometry", () => {
     }
 
     expect(metrics.farShellRebuilds).toBe(rebuildsAfterFirst);
+    shell.dispose();
+  });
+
+  it("keeps shell centered around camera after large movement", () => {
+    const shell = new InfiniteFarShell(makeDefaultOptions());
+    shell.update(10000, 0, 0);
+    const centerWorld = shell.mesh.position.x;
+    expect(centerWorld).toBe(10000);
     shell.dispose();
   });
 

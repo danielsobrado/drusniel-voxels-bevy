@@ -4,6 +4,9 @@ import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
 import { createInfiniteFarShellMaterial, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
 import type { FarShellMetrics } from "./farShellMetrics.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
+import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer } from "../farTerrain/farTerrainMaterial.js";
+import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
+import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
 
 export interface InfiniteFarShellOptions {
   innerMeters: number;
@@ -22,6 +25,8 @@ export interface InfiniteFarShellOptions {
     skyLight: THREE.Color;
     groundLight: THREE.Color;
   };
+  useParityMaterial?: boolean;
+  parityConfig?: import("../farTerrain/farTerrainUniforms.js").FarTerrainUniformData;
   debugShowMissingFallback?: boolean;
   debugShowWireframe?: boolean;
   metrics?: FarShellMetrics;
@@ -47,6 +52,9 @@ export class InfiniteFarShell {
   private rebuildCount = 0;
   private lastRebuildMs = 0;
   private materialOptions: InfiniteFarShellMaterialOptions;
+  private readonly useParityMaterial: boolean;
+  private readonly parityConfig: FarTerrainUniformData | undefined;
+  private parityColorBuffer: Float32Array | null = null;
 
   private positions: Float32Array;
   private normals: Float32Array;
@@ -77,6 +85,9 @@ export class InfiniteFarShell {
       farSummaryFallbackSamples: 0,
     };
 
+    this.useParityMaterial = options.useParityMaterial ?? false;
+    this.parityConfig = options.parityConfig;
+
     this.samplerOptions = {
       macroBlendStartMeters: options.macroBlendStartMeters,
       macroBlendEndMeters: options.macroBlendEndMeters,
@@ -92,9 +103,16 @@ export class InfiniteFarShell {
       debugShowMissingFallback: options.debugShowMissingFallback ?? false,
     };
 
-    const material = createInfiniteFarShellMaterial(this.materialOptions);
-    if (options.debugShowWireframe) {
-      material.wireframe = true;
+    const useParity = this.useParityMaterial && this.parityConfig;
+    const material = useParity
+      ? createFarTerrainMaterial(
+          options.lighting,
+          this.parityConfig!,
+          0, 0, options.outerMeters,
+        )
+      : createInfiniteFarShellMaterial(this.materialOptions);
+    if (options.debugShowWireframe && 'wireframe' in material) {
+      (material as unknown as { wireframe: boolean }).wireframe = true;
     }
 
     const vertexCount = this.computeVertexCount();
@@ -220,11 +238,7 @@ export class InfiniteFarShell {
       this.rebuildHeights();
     }
 
-    this.mesh.position.set(
-      this.snappedX - cameraWorldX,
-      0,
-      this.snappedZ - cameraWorldZ,
-    );
+    this.mesh.position.set(this.snappedX, 0, this.snappedZ);
   }
 
   private rebuildHeights(): void {
@@ -268,6 +282,21 @@ export class InfiniteFarShell {
       }
     }
 
+    if (this.useParityMaterial && this.parityConfig) {
+      const vertexColors = computeFarTerrainVertexColors(
+        (x: number, z: number) => surfaceHeightCore(x, z),
+        this.positions,
+        this.normals,
+        vertexCount,
+        this.parityConfig,
+        this.options.outerMeters * 2,
+        this.snappedX,
+        this.snappedZ,
+      );
+      this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig);
+      this.attachVertexColors();
+    }
+
     this.rebuildCount++;
     this.lastRebuildMs = performance.now() - t0;
 
@@ -294,6 +323,19 @@ export class InfiniteFarShell {
 
     geometry.computeBoundingSphere();
     geometry.computeBoundingBox();
+  }
+
+  private attachVertexColors(): void {
+    if (!this.parityColorBuffer) return;
+    const geometry = this.mesh.geometry as THREE.BufferGeometry;
+    const existing = geometry.getAttribute("color");
+    if (existing) {
+      const buf = existing as THREE.BufferAttribute;
+      buf.array.set(this.parityColorBuffer);
+      buf.needsUpdate = true;
+    } else {
+      geometry.setAttribute("color", new THREE.BufferAttribute(this.parityColorBuffer.slice(), 3));
+    }
   }
 
   dispose(): void {

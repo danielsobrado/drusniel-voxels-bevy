@@ -9,6 +9,7 @@ import {
   createShadowProxyDebugState,
   isStreamingLongViewScene,
   parseLongViewSunShadowsConfig,
+  resolveShadowProxyRebuildSnapMeters,
   type ShadowProxyController,
   type ShadowProxyDebugState,
 } from "../../shadows/index.js";
@@ -42,6 +43,9 @@ import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_l
 import { createTerrainTextureController } from "../../terrain/material/terrain_texture_controller.js";
 import { createTerrainMaterialController } from "../../terrain/material/terrain_material_controller.js";
 import { createFarShellController } from "../../systems/far_shell_controller.js";
+import materialsYaml from "../../../config/long_view_materials.yaml?raw";
+import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
+import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import { LockedBorderOverlay } from "../../ui/locked_border_overlay.js";
 import { NodeLabelOverlay } from "../../ui/node_labels.js";
 import { createBrushPreviewController } from "../../player/brush_preview_controller.js";
@@ -285,7 +289,13 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   const shadowProxyDebugState = isLongView
     ? createShadowProxyDebugState(shadowProxyConfig, longViewSunConfig.enabled)
     : null;
+  if (shadowProxyDebugState && searchParams.get("shadowProxyDebugLambert") === "1") {
+    shadowProxyDebugState.debugLambertFarShellReceiver = true;
+  }
   let liveShadowProxyConfig = { ...shadowProxyConfig };
+
+  const materialConfig = loadLongViewMaterialsConfig(materialsYaml, parseQueryOverrides(searchParams));
+  const parityUniformData = materialConfig.enabled ? configToUniformData(materialConfig) : undefined;
 
   const farShellController = createFarShellController({
     scene,
@@ -302,6 +312,9 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
       heightDrop: state.farShellHeightDrop,
     }),
     receiveSunShadows: () => Boolean(isLongView && shadowProxyDebugState?.sunShadowsEnabled),
+    useDebugLambertReceiver: () => Boolean(shadowProxyDebugState?.debugLambertFarShellReceiver),
+    useParityMaterial: () => materialConfig.enabled,
+    getParityConfig: () => parityUniformData,
     onTriangleCount: (counter, count) => {
       if (longViewHooks?.stats) longViewHooks.stats.counters[counter] = count;
     },
@@ -323,7 +336,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
         worldSize: worldSizeCells,
         isLongView,
         streamingCentered: streamingLongView,
-        rebaseSnapMeters: 64,
+        rebuildSnapMeters: resolveShadowProxyRebuildSnapMeters(liveShadowProxyConfig),
         getSunShadowsEnabled: () => shadowProxyDebugState?.sunShadowsEnabled ?? false,
         getConfig: () => liveShadowProxyConfig,
         getLighting: currentLighting,
