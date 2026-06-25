@@ -77,6 +77,12 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
         fraction: Math.min(1, snapshot.forcedSplits / 64),
         severity: snapshot.forcedSplits > 64 ? "warn" : "ok",
       });
+      meters[3].update({
+        label: "Blocked",
+        value: formatCount(snapshot.blockedSplits),
+        fraction: Math.min(1, snapshot.blockedSplits / 64),
+        severity: snapshot.blockedSplits > 64 ? "warn" : "ok",
+      });
       meters[4].update({
         label: "Bubble splits",
         value: formatCount(snapshot.bubbleForcedSplits),
@@ -84,12 +90,6 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
         severity: snapshot.bubbleForcedSplits > 64 ? "warn" : "ok",
       });
       meters[5].update({
-        label: "Bubble splits",
-        value: formatCount(snapshot.bubbleForcedSplits),
-        fraction: Math.min(1, snapshot.bubbleForcedSplits / 64),
-        severity: snapshot.bubbleForcedSplits > 64 ? "warn" : "ok",
-      });
-      meters[4].update({
         label: "Error threshold",
         value: `${snapshot.errorThreshold.toFixed(2)} px`,
         fraction: Math.min(1, snapshot.errorThreshold / 6),

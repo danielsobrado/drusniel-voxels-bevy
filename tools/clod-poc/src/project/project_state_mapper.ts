@@ -1,8 +1,15 @@
-import type { ProjectSessionState } from "../project_archive.js";
+import type {
+  ProjectSessionState,
+  ProjectWaterArchiveState,
+  ProjectWeatherArchiveState,
+} from "../project_archive.js";
+import type { WaterSliceState } from "../app/state/water_state.js";
+import type { WeatherSliceState } from "../app/state/weather_state.js";
 
 export type ProjectStateSource = Omit<ProjectSessionState, "forceMaxLevel"> & {
   forceMaxLevel: string;
-};
+} & Pick<WaterSliceState, keyof ProjectWaterArchiveState>
+  & Pick<WeatherSliceState, keyof ProjectWeatherArchiveState>;
 
 export function mapProjectSessionState(state: ProjectStateSource): ProjectSessionState {
   return {
@@ -87,5 +94,26 @@ export function mapProjectSessionState(state: ProjectStateSource): ProjectSessio
     treeGustStrength: state.treeGustStrength,
     treeTrunkSwayStrength: state.treeTrunkSwayStrength,
     treeLeafFlutterStrength: state.treeLeafFlutterStrength,
+  };
+}
+
+export function mapProjectWaterArchiveState(state: Pick<WaterSliceState, keyof ProjectWaterArchiveState>): ProjectWaterArchiveState {
+  return {
+    waterEnabled: state.waterEnabled,
+    waterDebugMode: state.waterDebugMode,
+    waterClipmapTint: state.waterClipmapTint,
+    waterWireframe: state.waterWireframe,
+    waterDepthWrite: state.waterDepthWrite,
+  };
+}
+
+export function mapProjectWeatherArchiveState(
+  state: Pick<WeatherSliceState, keyof ProjectWeatherArchiveState>,
+): ProjectWeatherArchiveState {
+  return {
+    weatherMode: state.weatherMode,
+    weatherIntensity: state.weatherIntensity,
+    weatherWindX: state.weatherWindX,
+    weatherWindZ: state.weatherWindZ,
   };
 }

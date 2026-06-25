@@ -73,7 +73,9 @@ export function advanceClodRuntime(
 
   const { cut: nextCut, forcedSplits, blockedSplits } = selectClodCut(selectionInput);
 
+  state.stats.forcedRestrictedSplitsFrame = forcedSplits;
   state.stats.forcedRestrictedSplits += forcedSplits;
+  state.stats.blockedRestrictedSplitsFrame = blockedSplits;
   state.stats.blockedRestrictedSplits += blockedSplits;
   state.stats.freezeEnabled = state.freezeSelection;
   state.stats.enforce21Enabled = state.enforce21;

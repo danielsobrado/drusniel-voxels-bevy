@@ -22,6 +22,7 @@ export function enforceRestrictedQuadtree(params: {
   let blockedSplits = 0;
   let work = new Map(params.cut.nodes);
   const blockedNodes = new Set<ClodNodeId>();
+  const newSplit = new Set(params.cut.split ?? []);
 
   for (let iteration = 0; iteration < 64; iteration++) {
     const selected = [...work.values()].filter((s) => !blockedNodes.has(s.nodeId));
@@ -37,13 +38,14 @@ export function enforceRestrictedQuadtree(params: {
 
     if (readyChildren.length === coarseNode.childIds.length && coarseNode.childIds.length > 0) {
       work.delete(coarser);
+      newSplit.add(coarser);
       for (const child of readyChildren) {
         work.set(child.id, {
           nodeId: child.id,
           level: child.level,
           errorPx: 0,
           distanceToCamera: 0,
-          reason: "restricted-split-blocked",
+          reason: "restricted-forced-split",
         });
       }
       forcedSplits++;
@@ -59,6 +61,7 @@ export function enforceRestrictedQuadtree(params: {
   const resultCut: ClodCut = {
     frame: params.cut.frame,
     nodes: work,
+    split: newSplit,
   };
 
   return { cut: resultCut, forcedSplits, blockedSplits };

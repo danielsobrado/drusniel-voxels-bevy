@@ -82,3 +82,4 @@ docs/reference/
 tools/clod-poc/shots/
 tools/clod-poc/shots/phase-1/*.png
 tools/clod-poc/shots/phase-1/*
+tools/clod-poc/acceptance-runs/*

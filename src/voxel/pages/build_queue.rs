@@ -214,7 +214,7 @@ pub(crate) fn clod_pages_build_queue_system(
     mut queue: ResMut<ClodPageBuildQueue>,
     mut tree: ResMut<ClodPageTree>,
 ) {
-    if !gen_state.is_complete {
+    if !runtime.enabled || !gen_state.is_complete {
         if !tree.nodes_by_level.is_empty()
             || !tree.build_page_coords.is_empty()
             || tree.status.is_some()

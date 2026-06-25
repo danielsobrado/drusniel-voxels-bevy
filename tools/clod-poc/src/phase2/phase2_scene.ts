@@ -3,6 +3,7 @@ import GUI from "lil-gui";
 import { FlyCamera } from "../core/fly_camera.js";
 import { initHooks } from "../core/hooks.js";
 import { createClodRuntime, advanceClodRuntime } from "../clod/runtime/clodRuntime.js";
+import { createClodDitherMaterial } from "../clod/runtime/clodDitherMaterial.js";
 import type { ClodRuntimeConfig } from "../clod/runtime/clodRuntimeTypes.js";
 import { createClodDebugGui } from "../clod/debug/clodDebugGui.js";
 import { ClodWireframeOverlay } from "../clod/debug/clodWireframeOverlay.js";
@@ -118,6 +119,10 @@ export async function runPhase2Scene(): Promise<void> {
         ? node.mesh.geometry.index.count / 3
         : 0;
       runtimeState.nodeMeshMap.meshes.set(node.id, node.mesh);
+      runtimeState.nodeMeshMap.ditherMaterials.set(
+        node.id,
+        createClodDitherMaterial(node.mesh.material as THREE.Material),
+      );
       runtimeState.nodeTriangleCounts.set(node.id, triCount);
     }
   }
@@ -185,6 +190,10 @@ export async function runPhase2Scene(): Promise<void> {
             ? node.mesh.geometry.index.count / 3
             : 0;
           runtimeState.nodeMeshMap.meshes.set(node.id, node.mesh);
+          runtimeState.nodeMeshMap.ditherMaterials.set(
+            node.id,
+            createClodDitherMaterial(node.mesh.material as THREE.Material),
+          );
           runtimeState.nodeTriangleCounts.set(node.id, triCount);
         }
       }
@@ -209,7 +218,7 @@ export async function runPhase2Scene(): Promise<void> {
     const dt = Math.max(0.0001, Math.min((now - prevTimestamp) / 1000, 0.1));
     prevTimestamp = now;
 
-    if (!guiState.freezeCut) flyCam.update(dt);
+    flyCam.update(dt); // camera always moves; freezeCut only freezes the CLOD cut
 
     if (guiState.enableRuntime) {
       advanceClodRuntime(runtimeState, {

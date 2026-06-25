@@ -46,14 +46,15 @@ export function selectClodCut(input: SelectionInput): {
       });
     }
     return {
-      cut: { frame: previousCut.frame + 1, nodes: frozenNodes },
+      cut: { frame: previousCut.frame + 1, nodes: frozenNodes, split: previousCut.split },
       forcedSplits: 0,
       blockedSplits: 0,
     };
   }
 
   const newCutNodes = new Map<ClodNodeId, ClodSelectedNode>();
-  const previousNodeIds = previousCut?.nodes ?? null;
+  const splitNodeIds = new Set<ClodNodeId>();
+  const previousSplitIds = previousCut?.split ?? null;
 
   function visit(nodeId: ClodNodeId): void {
     const node = nodes.get(nodeId);
@@ -74,7 +75,7 @@ export function selectClodCut(input: SelectionInput): {
       viewportHeightPx,
       fovYRadians: fovY,
     });
-    const wasSplit = previousNodeIds?.has(nodeId) ?? false;
+    const wasSplit = previousSplitIds?.has(nodeId) ?? false;
 
     const childrenReady = node.childIds.length > 0 && node.childIds.every((cid) => {
       const child = nodes.get(cid);
@@ -88,6 +89,7 @@ export function selectClodCut(input: SelectionInput): {
     );
 
     if (shouldRecurse) {
+      splitNodeIds.add(nodeId);
       for (const childId of node.childIds) {
         visit(childId);
       }
@@ -115,7 +117,7 @@ export function selectClodCut(input: SelectionInput): {
     visit(rootId);
   }
 
-  let cut: ClodCut = { frame: (previousCut?.frame ?? 0) + 1, nodes: newCutNodes };
+  let cut: ClodCut = { frame: (previousCut?.frame ?? 0) + 1, nodes: newCutNodes, split: splitNodeIds };
   let forcedSplits = 0;
   let blockedSplits = 0;
 

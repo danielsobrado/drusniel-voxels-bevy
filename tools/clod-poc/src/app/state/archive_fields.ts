@@ -1,9 +1,7 @@
-import type { ProjectSessionState } from "../../project_archive.js";
-
-export function assignArchiveFields<T extends object>(
+export function assignArchiveFields<T extends object, S extends object>(
   target: T,
-  archive: ProjectSessionState,
-  keys: readonly (keyof ProjectSessionState)[],
+  archive: S,
+  keys: readonly (keyof T & keyof S)[],
 ): void {
   const record = target as Record<string, unknown>;
   for (const key of keys) {

@@ -8,8 +8,10 @@ export function createRuntimeStats(): ClodRuntimeStats {
     nodesPerLevel: new Map(),
     trianglesRendered: 0,
     errorThresholdPx: 1,
-    forcedRestrictedSplits: 0,
-    blockedRestrictedSplits: 0,
+      forcedRestrictedSplits: 0,
+      forcedRestrictedSplitsFrame: 0,
+      blockedRestrictedSplits: 0,
+      blockedRestrictedSplitsFrame: 0,
     activeTransitions: 0,
     crossfadeProgress: 0,
     freezeEnabled: false,
@@ -62,8 +64,8 @@ export function formatStatsText(stats: ClodRuntimeStats): string[] {
   lines.push(`LOD cut: ${lodParts.join("  ")}`);
   lines.push(`Triangles: ${stats.trianglesRendered.toLocaleString()}`);
   lines.push(`Err thresh: ${stats.errorThresholdPx.toFixed(2)}px`);
-  lines.push(`2:1 forced: ${stats.forcedRestrictedSplits}`);
-  lines.push(`2:1 blocked: ${stats.blockedRestrictedSplits}`);
+  lines.push(`2:1 forced: ${stats.forcedRestrictedSplitsFrame} (total ${stats.forcedRestrictedSplits})`);
+  lines.push(`2:1 blocked: ${stats.blockedRestrictedSplitsFrame} (total ${stats.blockedRestrictedSplits})`);
   lines.push(`Transitions: ${stats.activeTransitions} (${(stats.crossfadeProgress * 100).toFixed(0)}%)`);
   if (stats.freezeEnabled) lines.push("FREEZE ON");
   if (!stats.enforce21Enabled) lines.push("2:1 OFF");

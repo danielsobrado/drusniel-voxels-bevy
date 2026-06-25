@@ -201,7 +201,7 @@ export function createClodAppState(params: CreateClodAppStateParams): ClodAppSta
   };
 
   if (params.stagedImport) {
-    applyValidatedArchiveState(slices, params.stagedImport.manifest.state);
+    applyValidatedArchiveState(slices, params.stagedImport.manifest);
   }
 
   const state = mergeSlices(slices);

@@ -1,6 +1,7 @@
 //! Phase 5 Step 3a — LOD0 live-mesh export cache maintenance.
 //!
 //! Default-OFF (`ClodPagesRuntime.enabled`, D4) for explicit A/B rollout.
+//! Enable with `CLOD_PAGES=1` env var.
 //! Reuses the exact live LOD0 mesher output, so the near/far bubble edge matches the live
 //! chunks by construction (I3.1). This module maintains the export cache consumed by the
 //! async page assembly, decimation, and entity commit pipeline.
@@ -18,9 +19,18 @@ use crate::voxel::chunk::MeshDirtyReason;
 use crate::voxel::runtime::ChunkGenerationState;
 use crate::voxel::world::VoxelWorld;
 
+fn clod_pages_enabled() -> bool {
+    matches!(
+        std::env::var("CLOD_PAGES").ok().as_deref().map(str::trim),
+        Some("1") | Some("true") | Some("on") | Some("yes")
+    )
+}
+
 #[derive(Resource)]
 pub struct ClodPagesRuntime {
     pub cfg: ClodPagesConfig,
+    /// Master toggle — default OFF. Set `CLOD_PAGES=1` to enable.
+    pub enabled: bool,
     /// LOD0 pages assembled per frame by the build queue.
     pub source_budget_per_frame: usize,
     /// Chebyshev radius (chunks) out to which page sources are pre-meshed.
@@ -32,6 +42,7 @@ impl Default for ClodPagesRuntime {
         let cfg = ClodPagesConfig::load();
         let p = cfg.page.chunks_per_page as i32;
         let levels = cfg.page.quadtree_levels as i32;
+        let enabled = clod_pages_enabled();
         // reach one top-level page footprint beyond the near-field bubble
         let source_radius_chunks = cfg.near_field.radius_chunks + p * (1 << (levels - 1).max(0));
         let source_budget_per_frame = std::env::var("CLOD_PAGES_BUDGET")
@@ -40,6 +51,7 @@ impl Default for ClodPagesRuntime {
             .unwrap_or(4);
         Self {
             cfg,
+            enabled,
             source_budget_per_frame,
             source_radius_chunks,
         }
@@ -160,8 +172,12 @@ fn page_coord(chunk_pos: IVec3, chunks_per_page: i32) -> (i32, i32) {
 
 /// Logs the initial page state once for bench output.
 pub fn clod_pages_startup_log_system(runtime: Res<ClodPagesRuntime>) {
+    if !runtime.enabled {
+        info!("CLOD PAGES: disabled (set CLOD_PAGES=1 to enable).");
+        return;
+    }
     info!(
-        "CLOD PAGES: always on; radius {} chunks, page-source budget {}/frame.",
+        "CLOD PAGES: enabled; radius {} chunks, page-source budget {}/frame.",
         runtime.source_radius_chunks, runtime.source_budget_per_frame
     );
 }
@@ -174,7 +190,7 @@ pub fn clod_pages_source_meshing_system(
     runtime: Res<ClodPagesRuntime>,
     mut cache: ResMut<PageExportCache>,
 ) {
-    if !gen_state.is_complete {
+    if !runtime.enabled || !gen_state.is_complete {
         cache.clear_all();
         return;
     }

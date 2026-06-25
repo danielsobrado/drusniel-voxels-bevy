@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "./config.js";
 import {
   createProjectArchive,
+  DEFAULT_PROJECT_WATER_ARCHIVE_STATE,
+  DEFAULT_PROJECT_WEATHER_ARCHIVE_STATE,
   parseProjectArchive,
   PROJECT_SCHEMA_VERSION,
+  PROJECT_SCHEMA_VERSION_V1,
   validateProjectManifest,
+  type ClodProjectManifest,
   type ClodProjectManifestV1,
   type ProjectSessionState,
 } from "./project_archive.js";
@@ -64,9 +68,24 @@ const state: ProjectSessionState = {
   grassMaxBlades: 35000, grassSeed: 1337,
 };
 
-function manifest(): ClodProjectManifestV1 {
+const water = {
+  waterEnabled: false,
+  waterDebugMode: "foam" as const,
+  waterClipmapTint: true,
+  waterWireframe: true,
+  waterDepthWrite: true,
+};
+
+const weather = {
+  weatherMode: "rain" as const,
+  weatherIntensity: 1.1,
+  weatherWindX: -0.5,
+  weatherWindZ: 0.75,
+};
+
+function manifestV1(): ClodProjectManifestV1 {
   return {
-    schemaVersion: PROJECT_SCHEMA_VERSION,
+    schemaVersion: PROJECT_SCHEMA_VERSION_V1,
     kind: "drusniel-clod-project",
     exportedAt: "2026-06-13T10:00:00.000Z",
     worldSize: 4,
@@ -86,6 +105,15 @@ function manifest(): ClodProjectManifestV1 {
   };
 }
 
+function manifestV2(): ClodProjectManifest {
+  return {
+    ...manifestV1(),
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    water,
+    weather,
+  };
+}
+
 function minimalGlb(): Uint8Array {
   const bytes = new Uint8Array(12);
   const view = new DataView(bytes.buffer);
@@ -97,7 +125,7 @@ function minimalGlb(): Uint8Array {
 
 describe("CLOD project archive", () => {
   it("round-trips complete session state and exact custom texture bytes", async () => {
-    const source = manifest();
+    const source = manifestV2();
     const texture = new Uint8Array([137, 80, 78, 71, 1, 2, 3, 4]);
     const normal = new Uint8Array([137, 80, 78, 71, 9, 8, 7, 6]);
     const terrainGlb = minimalGlb();
@@ -114,23 +142,46 @@ describe("CLOD project archive", () => {
     expect(Object.keys(unzipSync(archive))).not.toContain("textures/slot-1.jpg");
   });
 
+  it("loads v1 archives with default water and weather state", () => {
+    const normalized = validateProjectManifest(manifestV1());
+    expect(normalized.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(normalized.water).toEqual(DEFAULT_PROJECT_WATER_ARCHIVE_STATE);
+    expect(normalized.weather).toEqual(DEFAULT_PROJECT_WEATHER_ARCHIVE_STATE);
+    expect(normalized.state).toEqual(state);
+  });
+
   it("rejects unsupported schema versions", () => {
-    const invalid = { ...manifest(), schemaVersion: 2 };
+    const invalid = { ...manifestV2(), schemaVersion: 3 };
     expect(() => validateProjectManifest(invalid)).toThrow(/schema version/i);
   });
 
   it("defaults legacy grass shader mode to classic", () => {
-    const legacy = manifest() as unknown as { state: Partial<ProjectSessionState> };
+    const legacy = manifestV1() as unknown as { state: Partial<ProjectSessionState> };
     delete legacy.state.grassShaderMode;
     expect(validateProjectManifest(legacy).state.grassShaderMode).toBe("classic");
   });
 
+  it("rejects unsafe water and weather values in v2 archives", () => {
+    expect(() => validateProjectManifest({
+      ...manifestV2(),
+      water: { ...water, waterDebugMode: "not-a-mode" },
+    })).toThrow(/waterDebugMode/i);
+    expect(() => validateProjectManifest({
+      ...manifestV2(),
+      weather: { ...weather, weatherIntensity: 2 },
+    })).toThrow(/weatherIntensity/i);
+    expect(() => validateProjectManifest({
+      ...manifestV2(),
+      weather: { ...weather, weatherMode: "hail" },
+    })).toThrow(/weatherMode/i);
+  });
+
   it("rejects malformed or incomplete archives", async () => {
     await expect(parseProjectArchive(new Uint8Array([1, 2, 3]))).rejects.toThrow(/ZIP archive/i);
-    const missingGlb = zipSync({ "project.json": strToU8(JSON.stringify(manifest())) });
+    const missingGlb = zipSync({ "project.json": strToU8(JSON.stringify(manifestV2())) });
     await expect(parseProjectArchive(missingGlb)).rejects.toThrow(/terrain\.glb/i);
     const missingTexture = zipSync({
-      "project.json": strToU8(JSON.stringify(manifest())),
+      "project.json": strToU8(JSON.stringify(manifestV2())),
       "terrain.glb": minimalGlb(),
     });
     await expect(parseProjectArchive(missingTexture)).rejects.toThrow(/slot-0\.png/i);

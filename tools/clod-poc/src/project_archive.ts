@@ -1,9 +1,14 @@
+import type { WeatherMode } from "./app/clod_constants.js";
 import type { ClodPagesConfig } from "./config.js";
 import { isGrassShaderMode, type GrassShaderMode } from "./grass.js";
 import type { BrushOp, BrushShape, DigEdit } from "./terrain.js";
 import { MAX_TERRAIN_TEXTURES } from "./terrain_textures.js";
+import { DEFAULT_RAIN_WEATHER_SETTINGS } from "./weather/rain.js";
+import { DEFAULT_WATER_VISUAL, WATER_DEBUG_MODES, type WaterDebugMode } from "./water/waterConfig.js";
 
-export const PROJECT_SCHEMA_VERSION = 1 as const;
+export const PROJECT_SCHEMA_VERSION_V1 = 1 as const;
+export const PROJECT_SCHEMA_VERSION = 2 as const;
+export const SUPPORTED_PROJECT_SCHEMA_VERSIONS = [PROJECT_SCHEMA_VERSION_V1, PROJECT_SCHEMA_VERSION] as const;
 const PROJECT_FILE = "project.json";
 const TERRAIN_FILE = "terrain.glb";
 const IMPORT_DB = "drusniel-clod-imports";
@@ -109,8 +114,38 @@ export interface ProjectTextureSlot {
   normalMimeType?: string;
 }
 
+export interface ProjectWaterArchiveState {
+  waterEnabled: boolean;
+  waterDebugMode: WaterDebugMode;
+  waterClipmapTint: boolean;
+  waterWireframe: boolean;
+  waterDepthWrite: boolean;
+}
+
+export interface ProjectWeatherArchiveState {
+  weatherMode: WeatherMode;
+  weatherIntensity: number;
+  weatherWindX: number;
+  weatherWindZ: number;
+}
+
+export const DEFAULT_PROJECT_WATER_ARCHIVE_STATE: ProjectWaterArchiveState = {
+  waterEnabled: true,
+  waterDebugMode: "final",
+  waterClipmapTint: false,
+  waterWireframe: false,
+  waterDepthWrite: DEFAULT_WATER_VISUAL.depthWrite,
+};
+
+export const DEFAULT_PROJECT_WEATHER_ARCHIVE_STATE: ProjectWeatherArchiveState = {
+  weatherMode: "off",
+  weatherIntensity: DEFAULT_RAIN_WEATHER_SETTINGS.intensity,
+  weatherWindX: DEFAULT_RAIN_WEATHER_SETTINGS.windX,
+  weatherWindZ: DEFAULT_RAIN_WEATHER_SETTINGS.windZ,
+};
+
 export interface ClodProjectManifestV1 {
-  schemaVersion: typeof PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof PROJECT_SCHEMA_VERSION_V1;
   kind: "drusniel-clod-project";
   exportedAt: string;
   worldSize: number;
@@ -124,14 +159,22 @@ export interface ClodProjectManifestV1 {
   };
 }
 
+export interface ClodProjectManifestV2 extends Omit<ClodProjectManifestV1, "schemaVersion"> {
+  schemaVersion: typeof PROJECT_SCHEMA_VERSION;
+  water: ProjectWaterArchiveState;
+  weather: ProjectWeatherArchiveState;
+}
+
+export type ClodProjectManifest = ClodProjectManifestV2;
+
 export interface ProjectArchiveContents {
-  manifest: ClodProjectManifestV1;
+  manifest: ClodProjectManifest;
   terrainGlb: Uint8Array;
   customTextures: Map<string, Uint8Array>;
 }
 
 interface StagedProjectImport {
-  manifest: ClodProjectManifestV1;
+  manifest: ClodProjectManifest;
   terrainGlb: Uint8Array;
   customTextures: [string, Uint8Array][];
 }
@@ -295,8 +338,50 @@ function assertTextureSlot(value: unknown, index: number): asserts value is Proj
   }
 }
 
-export function validateProjectManifest(value: unknown): ClodProjectManifestV1 {
-  if (!isRecord(value) || value.schemaVersion !== PROJECT_SCHEMA_VERSION || value.kind !== "drusniel-clod-project") {
+function assertWaterArchiveState(value: unknown): asserts value is ProjectWaterArchiveState {
+  if (!isRecord(value)) throw new Error("project.json is missing water state");
+  if (typeof value.waterEnabled !== "boolean") throw new Error("project.json water.waterEnabled must be a boolean");
+  if (!Object.prototype.hasOwnProperty.call(WATER_DEBUG_MODES, String(value.waterDebugMode))) {
+    throw new Error("project.json water.waterDebugMode is invalid");
+  }
+  if (typeof value.waterClipmapTint !== "boolean") throw new Error("project.json water.waterClipmapTint must be a boolean");
+  if (typeof value.waterWireframe !== "boolean") throw new Error("project.json water.waterWireframe must be a boolean");
+  if (typeof value.waterDepthWrite !== "boolean") throw new Error("project.json water.waterDepthWrite must be a boolean");
+}
+
+function assertWeatherArchiveState(value: unknown): asserts value is ProjectWeatherArchiveState {
+  if (!isRecord(value)) throw new Error("project.json is missing weather state");
+  if (!["off", "rain", "snow", "sandstorm"].includes(String(value.weatherMode))) {
+    throw new Error("project.json weather.weatherMode is invalid");
+  }
+  if (!isFiniteNumber(value.weatherIntensity) || value.weatherIntensity < 0 || value.weatherIntensity > 1.6) {
+    throw new Error("project.json weather.weatherIntensity must be between 0 and 1.6");
+  }
+  for (const key of ["weatherWindX", "weatherWindZ"] as const) {
+    if (!isFiniteNumber(value[key]) || Math.abs(value[key]) > 1_000) {
+      throw new Error(`project.json weather.${key} must be a safe finite number`);
+    }
+  }
+}
+
+function normalizeWaterArchiveState(value: unknown): ProjectWaterArchiveState {
+  if (value === undefined) return { ...DEFAULT_PROJECT_WATER_ARCHIVE_STATE };
+  assertWaterArchiveState(value);
+  return value;
+}
+
+function normalizeWeatherArchiveState(value: unknown): ProjectWeatherArchiveState {
+  if (value === undefined) return { ...DEFAULT_PROJECT_WEATHER_ARCHIVE_STATE };
+  assertWeatherArchiveState(value);
+  return value;
+}
+
+function isSupportedSchemaVersion(value: unknown): value is typeof SUPPORTED_PROJECT_SCHEMA_VERSIONS[number] {
+  return value === PROJECT_SCHEMA_VERSION_V1 || value === PROJECT_SCHEMA_VERSION;
+}
+
+export function validateProjectManifest(value: unknown): ClodProjectManifest {
+  if (!isRecord(value) || !isSupportedSchemaVersion(value.schemaVersion) || value.kind !== "drusniel-clod-project") {
     throw new Error("Unsupported CLOD project format or schema version");
   }
   if (!isFiniteNumber(value.worldSize) || ![2, 4, 8, 16, 32].includes(value.worldSize)) {
@@ -316,11 +401,18 @@ export function validateProjectManifest(value: unknown): ClodProjectManifestV1 {
   if (!isRecord(value.camera) || !isVec3(value.camera.position) || !isVec3(value.camera.target)) {
     throw new Error("project.json has invalid orbit camera data");
   }
-  return value as unknown as ClodProjectManifestV1;
+  const water = normalizeWaterArchiveState(value.water);
+  const weather = normalizeWeatherArchiveState(value.weather);
+  return {
+  ...(value as unknown as ClodProjectManifestV1),
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    water,
+    weather,
+  };
 }
 
 export async function createProjectArchive(
-  manifest: ClodProjectManifestV1,
+  manifest: ClodProjectManifest,
   terrainGlb: Uint8Array,
   customTextures: ReadonlyMap<string, Uint8Array>,
 ): Promise<Uint8Array> {

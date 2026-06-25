@@ -27,7 +27,7 @@ export interface ClodPageNodeRuntime {
   ready: boolean;
 }
 
-export type ClodAcceptReason = "accepted" | "fallback" | "frozen" | "restricted-split-blocked";
+export type ClodAcceptReason = "accepted" | "fallback" | "frozen" | "restricted-split-blocked" | "restricted-forced-split";
 
 export interface ClodSelectedNode {
   nodeId: ClodNodeId;
@@ -40,6 +40,8 @@ export interface ClodSelectedNode {
 export interface ClodCut {
   frame: number;
   nodes: Map<ClodNodeId, ClodSelectedNode>;
+  /** Nodes that were rejected (split) because their children were rendered instead. */
+  split?: Set<ClodNodeId>;
 }
 
 export interface ClodSelectionConfig {
@@ -75,7 +77,9 @@ export interface ClodRuntimeStats {
   trianglesRendered: number;
   errorThresholdPx: number;
   forcedRestrictedSplits: number;
+  forcedRestrictedSplitsFrame: number;
   blockedRestrictedSplits: number;
+  blockedRestrictedSplitsFrame: number;
   activeTransitions: number;
   crossfadeProgress: number;
   freezeEnabled: boolean;

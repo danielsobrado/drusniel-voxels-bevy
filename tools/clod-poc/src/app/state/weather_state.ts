@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import type { WeatherMode } from "../clod_constants.js";
+import type { ProjectWeatherArchiveState } from "../../project_archive.js";
+import { assignArchiveFields } from "./archive_fields.js";
 
 export interface WeatherSliceState {
   weatherMode: WeatherMode;
@@ -8,6 +10,10 @@ export interface WeatherSliceState {
   weatherWindZ: number;
   weatherStats: string;
 }
+
+const WEATHER_ARCHIVE_KEYS = [
+  "weatherMode", "weatherIntensity", "weatherWindX", "weatherWindZ",
+] as const satisfies readonly (keyof ProjectWeatherArchiveState)[];
 
 export function createWeatherSliceState(input: {
   queryWeatherMode: WeatherMode;
@@ -25,4 +31,11 @@ export function createWeatherSliceState(input: {
     weatherWindZ: Number.isFinite(input.queryWeatherWindZ) ? input.queryWeatherWindZ : input.weatherDefaults.windZ,
     weatherStats: "off",
   };
+}
+
+export function applyWeatherArchiveState(
+  target: WeatherSliceState,
+  archive: ProjectWeatherArchiveState,
+): void {
+  assignArchiveFields(target, archive, WEATHER_ARCHIVE_KEYS);
 }

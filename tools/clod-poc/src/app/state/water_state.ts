@@ -1,5 +1,7 @@
 import { WATER_DEBUG_MODES } from "../../water/index.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
+import type { ProjectWaterArchiveState } from "../../project_archive.js";
+import { assignArchiveFields } from "./archive_fields.js";
 
 export interface WaterSliceState {
   waterEnabled: boolean;
@@ -9,6 +11,10 @@ export interface WaterSliceState {
   waterDepthWrite: boolean;
 }
 
+const WATER_ARCHIVE_KEYS = [
+  "waterEnabled", "waterDebugMode", "waterClipmapTint", "waterWireframe", "waterDepthWrite",
+] as const satisfies readonly (keyof ProjectWaterArchiveState)[];
+
 export function createWaterSliceState(waterConfig: WaterConfig): WaterSliceState {
   return {
     waterEnabled: waterConfig.enabled,
@@ -17,4 +23,11 @@ export function createWaterSliceState(waterConfig: WaterConfig): WaterSliceState
     waterWireframe: waterConfig.debug.wireframe,
     waterDepthWrite: waterConfig.visual.depthWrite,
   };
+}
+
+export function applyWaterArchiveState(
+  target: WaterSliceState,
+  archive: ProjectWaterArchiveState,
+): void {
+  assignArchiveFields(target, archive, WATER_ARCHIVE_KEYS);
 }

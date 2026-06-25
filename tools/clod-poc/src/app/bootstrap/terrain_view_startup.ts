@@ -377,6 +377,8 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     getSettings: () => ({
       thresholdPx: state.thresholdPx,
       enforce21: state.enforce21,
+      freezeSelection: (state as any).freezeSelection ?? false,
+      neighborLevelDeltaMax: (state as any).neighborLevelDeltaMax ?? 1,
       bubble: state.bubble,
       bubbleRadius: state.bubbleRadius,
       forceMaxLevel: state.forceMaxLevel as number | "auto",

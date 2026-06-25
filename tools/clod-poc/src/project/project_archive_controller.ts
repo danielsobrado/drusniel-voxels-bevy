@@ -7,11 +7,16 @@ import {
   parseProjectArchive,
   PROJECT_SCHEMA_VERSION,
   stageProjectImport,
-  type ClodProjectManifestV1,
+  type ClodProjectManifest,
 } from "../project_archive.js";
 import type { TerrainTextureController } from "../terrain_runtime/terrain_texture_controller.js";
 import { getDigEditsSnapshot } from "../terrain.js";
-import { mapProjectSessionState, type ProjectStateSource } from "./project_state_mapper.js";
+import {
+  mapProjectSessionState,
+  mapProjectWaterArchiveState,
+  mapProjectWeatherArchiveState,
+  type ProjectStateSource,
+} from "./project_state_mapper.js";
 import { validateProjectArchiveTextures } from "./project_texture_validator.js";
 
 export interface ProjectArchiveControllerDeps {
@@ -24,7 +29,7 @@ export interface ProjectArchiveControllerDeps {
   buildProgressBar: HTMLProgressElement;
   getState: () => ProjectStateSource;
   getWorldSize: () => number;
-  getConfig: () => ClodProjectManifestV1["config"];
+  getConfig: () => ClodProjectManifest["config"];
   getNodesByLevel: () => Map<number, ClodPageNode[]>;
   textureController: TerrainTextureController;
   camera: THREE.PerspectiveCamera;
@@ -113,13 +118,15 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
           }
         }
         const worldSize = deps.getWorldSize();
-        const manifest: ClodProjectManifestV1 = {
+        const manifest: ClodProjectManifest = {
           schemaVersion: PROJECT_SCHEMA_VERSION,
           kind: "drusniel-clod-project",
           exportedAt: new Date().toISOString(),
           worldSize,
           config: structuredClone(deps.getConfig()),
           state: mapProjectSessionState(deps.getState()),
+          water: mapProjectWaterArchiveState(deps.getState()),
+          weather: mapProjectWeatherArchiveState(deps.getState()),
           terrainEdits: getDigEditsSnapshot(),
           textures,
           camera: {

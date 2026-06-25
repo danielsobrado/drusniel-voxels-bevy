@@ -1,0 +1,43 @@
+# CLOD Phase 3 Acceptance Gate Configuration
+acceptance:
+  output_dir: "acceptance-runs"
+
+  world:
+    lod0_pages_x: 8
+    lod0_pages_z: 8
+    smoke_lod0_pages_x: 4
+    smoke_lod0_pages_z: 4
+
+  thresholds:
+    border_position_epsilon: 0.000001
+    border_normal_dot_min: 0.9999
+    border_material_weight_delta_max: 0.0001
+
+    lod3_triangle_ratio_max: 0.15
+    low_benefit_rate_max: 0.10
+
+    full_hierarchy_build_ms_max: 8000
+    single_node_rebuild_ms_max: 200
+
+    density_scar_score_max: 0.35
+    visual_hole_pixel_ratio_max: 0.0
+    visual_lip_pixel_ratio_max: 0.0
+
+  visual:
+    enabled: false
+    screenshot_width: 1920
+    screenshot_height: 1080
+    camera_fov_y_deg: 60
+    grazing_angle_deg: 7
+    crossfade_frames: 12
+
+  stress_scenes:
+    ridge_border: true
+    cliff_corner: true
+    cave_mouth_border: true
+    thin_bridge: true
+    forced_neighbor_lod_deltas: [1, 2, 3]
+    near_field_bubble_mask: true
+
+  logging:
+    level: "info"

@@ -32,6 +32,8 @@ import {
 export interface ClodSelectionSettings {
   thresholdPx: number;
   enforce21: boolean;
+  freezeSelection: boolean;
+  neighborLevelDeltaMax: number;
   bubble: boolean;
   bubbleRadius: number;
   forceMaxLevel: number | "auto";
@@ -241,6 +243,8 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       thresholdPx: settings.thresholdPx,
       hysteresisMergeFactor: config.hysteresisMergeFactor,
       enforce21: settings.enforce21,
+      freezeSelection: settings.freezeSelection,
+      neighborLevelDeltaMax: settings.neighborLevelDeltaMax,
       nearField: {
         enabled: settings.bubble,
         centerX: selectionCenter.x,
