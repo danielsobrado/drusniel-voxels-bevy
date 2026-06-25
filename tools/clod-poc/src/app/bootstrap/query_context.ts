@@ -10,6 +10,7 @@ import {
   terrainMaterialSourceParam,
   type TerrainMaterialSource,
 } from "../../terrain/material/terrain_material_constants.js";
+import { DEFAULT_MEADOW_WEATHER_SETTINGS } from "../../weather/meadow.js";
 import {
   DEFAULT_RAIN_WEATHER_SETTINGS,
   DEFAULT_SANDSTORM_WEATHER_SETTINGS,
@@ -141,49 +142,61 @@ export interface WeatherQueryContext {
 
 export function parseWeatherQueryContext(searchParams: URLSearchParams): WeatherQueryContext {
   const weatherParam = searchParams.get("weather");
-  const queryWeatherMode: WeatherMode = searchParams.get("sandstorm") === "1"
-    || searchParams.get("sand") === "1"
-    || weatherParam === "sandstorm"
-    || weatherParam === "sand"
-    ? "sandstorm"
-    : searchParams.get("snow") === "1" || weatherParam === "snow"
-      ? "snow"
-      : searchParams.get("storm") === "1" || weatherParam === "storm"
-        ? "storm"
-        : searchParams.get("rain") === "1" || weatherParam === "rain"
-          ? "rain"
-          : "off";
-  const weatherDefaults = queryWeatherMode === "sandstorm"
-    ? DEFAULT_SANDSTORM_WEATHER_SETTINGS
-    : queryWeatherMode === "snow"
-      ? DEFAULT_SNOW_WEATHER_SETTINGS
-      : queryWeatherMode === "storm"
-        ? DEFAULT_STORM_WEATHER_SETTINGS
-        : DEFAULT_RAIN_WEATHER_SETTINGS;
+  const queryWeatherMode: WeatherMode = weatherParam === "off"
+    ? "off"
+    : searchParams.get("sandstorm") === "1"
+      || searchParams.get("sand") === "1"
+      || weatherParam === "sandstorm"
+      || weatherParam === "sand"
+      ? "sandstorm"
+      : searchParams.get("snow") === "1" || weatherParam === "snow"
+        ? "snow"
+        : searchParams.get("storm") === "1" || weatherParam === "storm"
+          ? "storm"
+          : searchParams.get("rain") === "1" || weatherParam === "rain"
+            ? "rain"
+            : searchParams.get("meadow") === "1" || searchParams.get("pollen") === "1" || weatherParam === "meadow" || weatherParam === "pollen"
+              ? "meadow"
+              : "meadow";
+  const weatherDefaults = queryWeatherMode === "meadow"
+    ? DEFAULT_MEADOW_WEATHER_SETTINGS
+    : queryWeatherMode === "sandstorm"
+      ? DEFAULT_SANDSTORM_WEATHER_SETTINGS
+      : queryWeatherMode === "snow"
+        ? DEFAULT_SNOW_WEATHER_SETTINGS
+        : queryWeatherMode === "storm"
+          ? DEFAULT_STORM_WEATHER_SETTINGS
+          : DEFAULT_RAIN_WEATHER_SETTINGS;
   const weatherIntensityParam = searchParams.get("weatherIntensity")
-    ?? (queryWeatherMode === "sandstorm"
-      ? searchParams.get("sandstormIntensity") ?? searchParams.get("sandIntensity")
-      : queryWeatherMode === "snow"
-        ? searchParams.get("snowIntensity")
-        : queryWeatherMode === "storm"
-          ? searchParams.get("stormIntensity")
-          : searchParams.get("rainIntensity"));
+    ?? (queryWeatherMode === "meadow"
+      ? searchParams.get("meadowIntensity") ?? searchParams.get("pollenIntensity")
+      : queryWeatherMode === "sandstorm"
+        ? searchParams.get("sandstormIntensity") ?? searchParams.get("sandIntensity")
+        : queryWeatherMode === "snow"
+          ? searchParams.get("snowIntensity")
+          : queryWeatherMode === "storm"
+            ? searchParams.get("stormIntensity")
+            : searchParams.get("rainIntensity"));
   const weatherWindXParam = searchParams.get("weatherWindX")
-    ?? (queryWeatherMode === "sandstorm"
-      ? searchParams.get("sandstormWindX") ?? searchParams.get("sandWindX")
-      : queryWeatherMode === "snow"
-        ? searchParams.get("snowWindX")
-        : queryWeatherMode === "storm"
-          ? null
-          : searchParams.get("rainWindX"));
+    ?? (queryWeatherMode === "meadow"
+      ? searchParams.get("meadowWindX") ?? searchParams.get("pollenWindX")
+      : queryWeatherMode === "sandstorm"
+        ? searchParams.get("sandstormWindX") ?? searchParams.get("sandWindX")
+        : queryWeatherMode === "snow"
+          ? searchParams.get("snowWindX")
+          : queryWeatherMode === "storm"
+            ? null
+            : searchParams.get("rainWindX"));
   const weatherWindZParam = searchParams.get("weatherWindZ")
-    ?? (queryWeatherMode === "sandstorm"
-      ? searchParams.get("sandstormWindZ") ?? searchParams.get("sandWindZ")
-      : queryWeatherMode === "snow"
-        ? searchParams.get("snowWindZ")
-        : queryWeatherMode === "storm"
-          ? null
-          : searchParams.get("rainWindZ"));
+    ?? (queryWeatherMode === "meadow"
+      ? searchParams.get("meadowWindZ") ?? searchParams.get("pollenWindZ")
+      : queryWeatherMode === "sandstorm"
+        ? searchParams.get("sandstormWindZ") ?? searchParams.get("sandWindZ")
+        : queryWeatherMode === "snow"
+          ? searchParams.get("snowWindZ")
+          : queryWeatherMode === "storm"
+            ? null
+            : searchParams.get("rainWindZ"));
   return {
     queryWeatherMode,
     weatherDefaults,
