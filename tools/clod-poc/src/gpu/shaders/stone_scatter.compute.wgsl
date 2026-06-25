@@ -19,6 +19,14 @@ struct Params {
   counts_a: vec4<u32>,
   counts_b: vec4<u32>,
   ring: vec4<f32>,
+  terrain_grass: vec4<f32>,
+  terrain_rock: vec4<f32>,
+  terrain_sand: vec4<f32>,
+  terrain_snow: vec4<f32>,
+  terrain_low: vec4<f32>,
+  terrain_mid: vec4<f32>,
+  terrain_high: vec4<f32>,
+  terrain_height: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -95,11 +103,32 @@ fn class_base_radius(cls: u32) -> f32 {
   return 0.16;
 }
 
-fn pick_class(site_scree: f32, streambed: f32, cliff_above: f32, roll: f32) -> u32 {
+fn blend_terrain_class_weights(weights: vec4<f32>, grass: vec4<f32>, rock: vec4<f32>, sand: vec4<f32>, snow: vec4<f32>) -> vec4<f32> {
+  let sum = max(0.00001, weights.x + weights.y + weights.z + weights.w);
+  return (grass * weights.x + rock * weights.y + sand * weights.z + snow * weights.w) / sum;
+}
+
+fn height_terrain_weights(height: f32) -> vec4<f32> {
+  let blend = max(0.001, params.terrain_height.z);
+  let low_weight = 1.0 - smoothstep(params.terrain_height.x - blend, params.terrain_height.x + blend, height);
+  let high_weight = smoothstep(params.terrain_height.y - blend, params.terrain_height.y + blend, height);
+  let mid_weight = max(0.0, 1.0 - low_weight - high_weight);
+  let sum = max(0.00001, low_weight + mid_weight + high_weight);
+  return (params.terrain_low * low_weight + params.terrain_mid * mid_weight + params.terrain_high * high_weight) / sum;
+}
+
+// Bias layout: x=density, y=large, z=medium, w=small.
+fn terrain_bias(height: f32, weights: vec4<f32>) -> vec4<f32> {
+  let material = blend_terrain_class_weights(weights, params.terrain_grass, params.terrain_rock, params.terrain_sand, params.terrain_snow);
+  let height_bias = height_terrain_weights(height);
+  return material * height_bias;
+}
+
+fn pick_class(site_scree: f32, streambed: f32, cliff_above: f32, terrain: vec4<f32>, roll: f32) -> u32 {
   let large_bias = 1.0 + site_scree + cliff_above + streambed * params.slope_water.w * 6.0;
-  let w_large = 0.1 * large_bias;
-  let w_medium = 0.32;
-  let w_small = 0.58;
+  let w_large = 0.1 * large_bias * terrain.y;
+  let w_medium = 0.32 * terrain.z;
+  let w_small = 0.58 * terrain.w;
   let class_pick = roll * (w_large + w_medium + w_small);
   if (class_pick < w_large) {
     return CLASS_LARGE;
@@ -145,6 +174,7 @@ fn process_cell(slot: u32) {
   let rock = weights.y;
   let sand = weights.z;
   let snow = weights.w;
+  let terrain = terrain_bias(h, weights);
 
   if (h < WATER_LEVEL + params.slope_water.z) {
     return;
@@ -173,7 +203,7 @@ fn process_cell(slot: u32) {
     + streambed * params.weights_a.w
     + params.weights_b.x;
   let ring_edge = ring_edge_fade(dist);
-  let accept = params.world.z * base * clump * repose * ring_edge * (1.0 - snow * params.stream_snow_lean.z);
+  let accept = params.world.z * base * clump * repose * terrain.x * ring_edge * (1.0 - snow * params.stream_snow_lean.z);
   if (pcg2d(wc, seed + 307u).x >= accept) {
     return;
   }
@@ -183,7 +213,7 @@ fn process_cell(slot: u32) {
     return;
   }
 
-  let cls = pick_class(scree, streambed, cliff_above, pcg2d(wc, seed + 523u).x);
+  let cls = pick_class(scree, streambed, cliff_above, terrain, pcg2d(wc, seed + 523u).x);
   let class_slot = atomicAdd(&counters[cls + 1u], 1u);
   if (class_slot >= max_instances) {
     return;
