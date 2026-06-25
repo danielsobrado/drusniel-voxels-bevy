@@ -3,12 +3,12 @@ import {
   RainWeatherSystem,
   SandstormWeatherSystem,
   SnowWeatherSystem,
-  StormLightningSystem,
   type RainWeatherSettings,
   type SandstormWeatherSettings,
   type SnowWeatherSettings,
   type StormWeatherSettings,
 } from "../../weather/rain.js";
+import { StormLightningSystem } from "../../weather/storm.js";
 
 export interface WeatherUiSettings {
   weatherMode: "off" | "rain" | "snow" | "sandstorm" | "storm";
@@ -67,8 +67,14 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
   });
   const stormWeather = new StormLightningSystem({
     scene: deps.scene,
-    camera: deps.camera,
     isWebGpu: deps.isWebGpu,
+    worldCells: deps.worldCells,
+    seed: 0x57a4d0c7,
+    samplers: {
+      surfaceHeight: deps.surfaceHeight,
+      surfaceNormal: deps.surfaceNormal,
+      waterSample: deps.waterSample,
+    },
   });
 
   let statsController: { updateDisplay: () => unknown } | null = null;
@@ -121,7 +127,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
       deps.setStatsText(`sandstorm ${stats.particles} puffs${stats.haze ? " + haze" : ""}`);
     } else if (settings.weatherMode === "storm") {
       const stats = stormWeather.getStats();
-      deps.setStatsText(`storm lightning ${stats.active ? "on" : "off"}`);
+      deps.setStatsText(`storm ground lightning ${stats.active ? "on" : "off"}`);
     } else {
       deps.setStatsText("off");
     }
@@ -145,7 +151,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
       rainWeather.update(deltaSeconds, elapsedSeconds, cameraPosition, effectCenter);
       snowWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
       sandstormWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
-      stormWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
+      stormWeather.update(deltaSeconds, elapsedSeconds, effectCenter);
     },
     bindStatsController(controller) {
       statsController = controller;
