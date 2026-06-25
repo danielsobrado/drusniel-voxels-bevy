@@ -241,14 +241,22 @@ export async function runAcceptance(
       ? a1Result.measurements.mixedLodSurfaceFindingsCount
       : 0;
     if (surfaceFindingsCount > 0) {
+      const a1maxPos = typeof a1Result.measurements.maxPositionDelta === "number" ? a1Result.measurements.maxPositionDelta : 0;
+      const a1minDot = typeof a1Result.measurements.minNormalDot === "number" ? a1Result.measurements.minNormalDot : 1;
+      const a1maxMat = typeof a1Result.measurements.maxMaterialWeightDelta === "number" ? a1Result.measurements.maxMaterialWeightDelta : 0;
+      const a2Status: "pass" | "warn" | "fail" = a2Result.status === "fail" ? "fail" : "warn";
       a2Result = {
         ...a2Result,
+        status: a2Status,
+        message: a2Result.status === "fail"
+          ? a2Result.message
+          : `${surfaceFindingsCount} mixed-LOD surface findings detected. Position delta ${a1maxPos.toExponential(2)}, normal dot ${a1minDot.toFixed(6)}`,
         measurements: {
           ...a2Result.measurements,
           mixedLodSurfaceFindingsCount: surfaceFindingsCount,
-          mixedLodMaxPositionDelta: typeof a1Result.measurements.maxPositionDelta === "number" ? a1Result.measurements.maxPositionDelta : 0,
-          mixedLodMinNormalDot: typeof a1Result.measurements.minNormalDot === "number" ? a1Result.measurements.minNormalDot : 1,
-          mixedLodMaxMaterialWeightDelta: typeof a1Result.measurements.maxMaterialWeightDelta === "number" ? a1Result.measurements.maxMaterialWeightDelta : 0,
+          mixedLodMaxPositionDelta: a1maxPos,
+          mixedLodMinNormalDot: a1minDot,
+          mixedLodMaxMaterialWeightDelta: a1maxMat,
         },
       };
     }

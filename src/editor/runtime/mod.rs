@@ -6942,6 +6942,7 @@ mod tests {
         world.insert_resource(PropAssets {
             scenes,
             loaded: true,
+            failed_ids: HashSet::new(),
         });
 
         let prop = json!({

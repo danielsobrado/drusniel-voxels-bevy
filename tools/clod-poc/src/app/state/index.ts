@@ -57,7 +57,7 @@ export interface CreateClodAppStateParams {
   queryWeatherIntensity: number;
   queryWeatherWindX: number;
   queryWeatherWindZ: number;
-  weatherDefaults: { intensity: number; windX: number; windZ: number };
+  weatherDefaults: { intensity: number; windX?: number; windZ?: number };
   grassConfig: GrassSettings;
   stoneConfig: StoneSettings;
   treeConfig: TreeSettings;

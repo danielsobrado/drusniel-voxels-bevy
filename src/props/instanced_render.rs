@@ -192,6 +192,8 @@ pub struct InstancedPropGroup {
     source_bounds: Vec<PropInstanceBounds>,
     prop_classes: Vec<PropRenderClass>,
     lod_states: Vec<PropInstanceLod>,
+    /// Distance/chunk cull hides slots even when LOD would keep them visible.
+    distance_hidden: Vec<bool>,
     pub instances: Vec<PropInstance>,
     instance_bounds: Vec<PropInstanceBounds>,
     pub shadow_instances: Vec<PropInstance>,
@@ -237,6 +239,7 @@ impl InstancedPropGroup {
             source_bounds: self.source_bounds.clone(),
             prop_classes: Vec::new(),
             lod_states: Vec::new(),
+            distance_hidden: Vec::new(),
             instances: self.instances.clone(),
             instance_bounds: self.instance_bounds.clone(),
             shadow_instances: self.shadow_instances.clone(),
@@ -866,6 +869,7 @@ fn get_or_create_group(
                         source_bounds: Vec::new(),
                         prop_classes: Vec::new(),
                         lod_states: Vec::new(),
+                        distance_hidden: Vec::new(),
                         instances: Vec::new(),
                         instance_bounds: Vec::new(),
                         shadow_instances: Vec::new(),
@@ -917,6 +921,9 @@ fn apply_pending_instances(
         group
             .lod_states
             .extend(std::iter::repeat(PropInstanceLod::Full).take(update.instances.len()));
+        group
+            .distance_hidden
+            .extend(std::iter::repeat(false).take(update.instances.len()));
         group
             .shadow_culled
             .extend(update.shadow_culled.iter().copied());
@@ -1102,6 +1109,36 @@ fn draw_aabb(gizmos: &mut Gizmos, min: Vec3, max: Vec3, color: Color) {
     gizmos.primitive_3d(&cuboid, Isometry3d::from_translation(center), color);
 }
 
+fn instance_render_hidden(group: &InstancedPropGroup, index: usize, lod: PropInstanceLod) -> bool {
+    group.distance_hidden.get(index).copied().unwrap_or(false) || lod == PropInstanceLod::Hidden
+}
+
+/// Apply distance/chunk cull state to instanced prop group slots.
+pub fn sync_prop_distance_hidden_slots(
+    groups: &mut Query<&mut InstancedPropGroup>,
+    updates: &[(Entity, usize, bool)],
+) {
+    let mut dirty_groups = HashSet::new();
+    for (group_entity, slot, hidden) in updates {
+        let Ok(mut group) = groups.get_mut(*group_entity) else {
+            continue;
+        };
+        if let Some(flag) = group.distance_hidden.get_mut(*slot) {
+            if *flag != *hidden {
+                *flag = *hidden;
+                dirty_groups.insert(*group_entity);
+            }
+        }
+    }
+
+    for group_entity in dirty_groups {
+        let Ok(mut group) = groups.get_mut(group_entity) else {
+            continue;
+        };
+        rebuild_visible_and_shadow_instances(&mut group);
+    }
+}
+
 fn rebuild_visible_and_shadow_instances(group: &mut InstancedPropGroup) -> (bool, bool) {
     rebuild_visible_and_shadow_instances_with_options(group, false)
 }
@@ -1114,14 +1151,15 @@ fn rebuild_visible_and_shadow_instances_with_options(
     let mut visible_bounds = Vec::with_capacity(group.source_bounds.len());
     let mut shadow_instances = Vec::with_capacity(group.source_instances.len());
 
-    for (((instance, bounds), lod), shadow_culled) in group
+    for (index, (((instance, bounds), lod), shadow_culled)) in group
         .source_instances
         .iter()
         .zip(group.source_bounds.iter())
         .zip(group.lod_states.iter())
         .zip(group.shadow_culled.iter())
+        .enumerate()
     {
-        if *lod == PropInstanceLod::Hidden {
+        if instance_render_hidden(group, index, *lod) {
             continue;
         }
         visible_instances.push(*instance);
@@ -1161,14 +1199,15 @@ fn rebuild_visible_and_shadow_instances_with_cascades(
     let num_cascades = cascade_frusta.len();
     let mut cascade_lists: Vec<Vec<PropInstance>> = vec![Vec::new(); num_cascades];
 
-    for (((instance, bounds), lod), shadow_culled) in group
+    for (index, (((instance, bounds), lod), shadow_culled)) in group
         .source_instances
         .iter()
         .zip(group.source_bounds.iter())
         .zip(group.lod_states.iter())
         .zip(group.shadow_culled.iter())
+        .enumerate()
     {
-        if *lod == PropInstanceLod::Hidden {
+        if instance_render_hidden(group, index, *lod) {
             continue;
         }
         visible_instances.push(*instance);

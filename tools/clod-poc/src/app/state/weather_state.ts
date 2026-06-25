@@ -20,15 +20,15 @@ export function createWeatherSliceState(input: {
   queryWeatherIntensity: number;
   queryWeatherWindX: number;
   queryWeatherWindZ: number;
-  weatherDefaults: { intensity: number; windX: number; windZ: number };
+  weatherDefaults: { intensity: number; windX?: number; windZ?: number };
 }): WeatherSliceState {
   return {
     weatherMode: input.queryWeatherMode,
     weatherIntensity: Number.isFinite(input.queryWeatherIntensity)
       ? THREE.MathUtils.clamp(input.queryWeatherIntensity, 0, 1.6)
       : input.weatherDefaults.intensity,
-    weatherWindX: Number.isFinite(input.queryWeatherWindX) ? input.queryWeatherWindX : input.weatherDefaults.windX,
-    weatherWindZ: Number.isFinite(input.queryWeatherWindZ) ? input.queryWeatherWindZ : input.weatherDefaults.windZ,
+    weatherWindX: Number.isFinite(input.queryWeatherWindX) ? input.queryWeatherWindX : (input.weatherDefaults.windX ?? 0),
+    weatherWindZ: Number.isFinite(input.queryWeatherWindZ) ? input.queryWeatherWindZ : (input.weatherDefaults.windZ ?? 0),
     weatherStats: "off",
   };
 }

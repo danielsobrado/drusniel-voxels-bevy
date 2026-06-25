@@ -422,6 +422,101 @@ export function createSandstormHazeShaderMaterial(): RainWeatherShaderHandle {
   };
 }
 
+const STORM_VERTEX = /* glsl */ `
+varying vec2 vUv;
+
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+const STORM_FRAGMENT = /* glsl */ `
+uniform float uTime;
+uniform float uIntensity;
+uniform vec3 uEffectColor;
+uniform vec3 uMainColor;
+
+varying vec2 vUv;
+
+float hash12(vec2 uv) {
+  return fract(cos(mod(dot(uv, vec2(13.9898, 8.141)), 3.14)) * 43758.5453);
+}
+
+vec2 hash22(vec2 uv) {
+  uv = vec2(dot(uv, vec2(127.1, 311.7)), dot(uv, vec2(269.5, 183.3)));
+  return 2.0 * fract(sin(uv) * 43758.5453123);
+}
+
+float noise(vec2 uv) {
+  vec2 iuv = floor(uv);
+  vec2 fuv = fract(uv);
+  vec2 blur = smoothstep(0.0, 1.0, fuv);
+  float a = dot(hash22(iuv + vec2(0.0, 0.0)), fuv - vec2(0.0, 0.0));
+  float b = dot(hash22(iuv + vec2(1.0, 0.0)), fuv - vec2(1.0, 0.0));
+  float c = dot(hash22(iuv + vec2(0.0, 1.0)), fuv - vec2(0.0, 1.0));
+  float d = dot(hash22(iuv + vec2(1.0, 1.0)), fuv - vec2(1.0, 1.0));
+  float mixX1 = mix(a, b, blur.x);
+  float mixX2 = mix(c, d, blur.x);
+  return mix(mixX1, mixX2, blur.y) + 0.5;
+}
+
+float fbm(vec2 uv) {
+  float value = 0.0;
+  float amplitude = 0.5;
+  for (int i = 0; i < 5; i++) {
+    value += amplitude * noise(uv);
+    uv *= 2.0;
+    amplitude *= 0.5;
+  }
+  return value;
+}
+
+void main() {
+  vec2 modifiedUV = 2.0 * vUv - 1.0;
+  modifiedUV.y *= 4.0;
+
+  modifiedUV.x -= 0.5;
+  modifiedUV += fbm(modifiedUV + uTime * 3.0);
+  modifiedUV.x += 0.0;
+
+  float dist = abs(modifiedUV.x);
+  float flicker = mix(0.0, 0.05, hash12(vec2(uTime)));
+  vec3 finalColor = uEffectColor * flicker / max(dist, 0.001);
+
+  float alpha = min(finalColor.r, 1.0);
+  vec3 albedo = finalColor * uMainColor;
+  gl_FragColor = vec4(albedo, alpha * clamp(uIntensity, 0.0, 1.6));
+}
+`;
+
+export function createStormShaderMaterial(): RainWeatherShaderHandle {
+  const uniforms = {
+    uTime: { value: 0 },
+    uIntensity: { value: 1 },
+    uEffectColor: { value: new THREE.Color(0.3, 0.3, 1.0) },
+    uMainColor: { value: new THREE.Color(1.0, 1.0, 1.0) },
+  };
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: STORM_VERTEX,
+    fragmentShader: STORM_FRAGMENT,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    side: THREE.DoubleSide,
+  });
+  material.name = "weather-storm-shader";
+  return {
+    material,
+    setTime: (time) => { uniforms.uTime.value = time; },
+    setIntensity: (intensity) => { uniforms.uIntensity.value = intensity; },
+    setCenter: () => undefined,
+    setWind: () => undefined,
+    dispose: () => { material.dispose(); },
+  };
+}
+
 export function createSplashShaderMaterial(kind: "hard" | "water"): RainWeatherShaderHandle {
   const uniforms = {
     uCenter: { value: new THREE.Vector3() },

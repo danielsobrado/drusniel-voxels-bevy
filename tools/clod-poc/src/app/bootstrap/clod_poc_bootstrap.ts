@@ -12,6 +12,10 @@ import { runPostRendererStartup } from "./post_renderer_startup.js";
 import { runTerrainViewStartup } from "./terrain_view_startup.js";
 import { runRuntimeSystemsStartup } from "./runtime/runtime_systems_startup.js";
 import { runUiStartup } from "./ui/ui_startup.js";
+import { surfaceHeightCore } from "../../gpu/terrain_field_core.js";
+import { initFarSummaryIntegration } from "../../far-summary/integration.js";
+import type { FarSummaryIntegration } from "../../far-summary/integration.js";
+import type * as THREE from "three";
 
 
 export async function bootstrapClodPoc() {
@@ -114,6 +118,43 @@ export async function bootstrapClodPoc() {
     colorByLodController: postRenderer.uiRefs.colorByLodController,
   });
 
+  let farSummaryIntegration: FarSummaryIntegration | undefined;
+  const queryScene = queries.queryScene;
+  const isInfiniteStreamScene =
+    queryScene === "infinite-stream-far-summary" ||
+    queryScene === "infinite-stream-slow-builds";
+
+  if (isInfiniteStreamScene) {
+    farSummaryIntegration = initFarSummaryIntegration({
+      terrainSampler: {
+        sampleHeight: (x: number, z: number) => surfaceHeightCore(x, z),
+        sampleMaterial: () => 0,
+        sampleCanopyCoverage: () => 0,
+        sampleWaterCoverage: () => 0,
+      },
+      scene: renderer.scene,
+      camera: renderer.camera,
+      farShellController: terrainView.farShellController,
+      config: {
+        debug: {
+          showClipmapGrid: true,
+          showTileStates: true,
+          showSummaryNormals: false,
+          showRingColors: true,
+        },
+      },
+    });
+
+    terrainView.farShellController.setHeightProvider(
+      farSummaryIntegration.getHeightProvider(),
+    );
+
+    if (queryScene === "infinite-stream-slow-builds") {
+      farSummaryIntegration.setForceSlowBuilds(true);
+      farSummaryIntegration.setBuildDelayMs(100);
+    }
+  }
+
   const runtime = await runRuntimeSystemsStartup({
     app: renderer.app,
     scene: renderer.scene,
@@ -195,6 +236,11 @@ export async function bootstrapClodPoc() {
       phase0VelocityZ: queries.phase0VelocityZ,
       phase0Streaming: queries.phase0Streaming,
     },
+    onFarSummaryUpdate: farSummaryIntegration
+      ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+          farSummaryIntegration!.update(frameIndex, deltaSeconds, camera);
+        }
+      : undefined,
     getClodErrorCompute: postRenderer.getClodErrorCompute,
     ensureClodErrorCompute: postRenderer.ensureClodErrorCompute,
     textureLoadOptions: postRenderer.textureLoadOptions,

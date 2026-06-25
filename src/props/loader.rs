@@ -1,4 +1,4 @@
-use super::{PropAssets, PropConfig};
+use super::{is_spawnable_prop, PropAssets, PropConfig};
 use crate::config::loader::load_config;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -45,6 +45,13 @@ pub fn load_prop_config(
         .chain(config.props.flowers.iter());
 
     for def in all_defs {
+        if !is_spawnable_prop(def) {
+            info!(
+                "Skipping non-spawnable prop asset load: {} (density={}, max_count={:?})",
+                def.id, def.density, def.max_count
+            );
+            continue;
+        }
         if scenes.contains_key(&def.id) {
             warn!("Duplicate prop id: {}", def.id);
             continue;
@@ -69,6 +76,7 @@ pub fn track_asset_loading(asset_server: Res<AssetServer>, mut prop_assets: ResM
 
     let mut loaded_count = 0;
     let mut failed_count = 0;
+    let mut newly_failed = Vec::new();
     let total = prop_assets.scenes.len();
 
     for (id, handle) in prop_assets.scenes.iter() {
@@ -76,10 +84,14 @@ pub fn track_asset_loading(asset_server: Res<AssetServer>, mut prop_assets: ResM
             Some(bevy::asset::LoadState::Loaded) => loaded_count += 1,
             Some(bevy::asset::LoadState::Failed(_)) => {
                 error!("Failed to load prop: {}", id);
+                newly_failed.push(id.clone());
                 failed_count += 1;
             }
             _ => {}
         }
+    }
+    for id in newly_failed {
+        prop_assets.failed_ids.insert(id);
     }
 
     if loaded_count + failed_count >= total {

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import { createExtendedCanopyTexture, createExtendedHeightTexture } from "../clod/terrain_summary.js";
 import { buildFarCanopyShell } from "../gpu/far_canopy_shell.js";
-import { buildFarTerrainShell } from "../gpu/far_terrain_shell.js";
+import { buildFarTerrainShell, type FarHeightProvider } from "../gpu/far_terrain_shell.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 
 export interface FarShellInstance {
@@ -28,6 +28,13 @@ export interface FarShellControllerDeps {
   getLighting: () => EnvironmentLighting;
   getSettings: () => FarShellUiSettings;
   onTriangleCount?: (counter: "far_shell_tris" | "canopy_tris", count: number) => void;
+
+  /** Optional height provider for far summary streaming. When set, the shell samples from
+   *  this instead of TerrainSummaryField. */
+  heightProvider?: FarHeightProvider;
+  /** Grid center for camera-relative positioning. When not set, uses worldSize/2. */
+  centerX?: number;
+  centerZ?: number;
 }
 
 export interface FarShellController {
@@ -36,11 +43,17 @@ export interface FarShellController {
   isBuilt(): boolean;
   readonly canopyShell: FarShellInstance | null;
   dispose(): void;
+  updateCenter(x: number, z: number): void;
+  /** Set or change the height provider after construction. Rebuilds the shell. */
+  setHeightProvider(provider: FarHeightProvider | undefined): void;
 }
 
 export function createFarShellController(deps: FarShellControllerDeps): FarShellController {
   let current: FarShellInstance | null = null;
   let canopyShell: FarShellInstance | null = null;
+  let currentCenterX = deps.centerX ?? deps.worldSizeCells / 2;
+  let currentCenterZ = deps.centerZ ?? deps.worldSizeCells / 2;
+  let currentHeightProvider = deps.heightProvider;
 
   const buildFarShellInstance = (
     radiusFactor: number,
@@ -62,6 +75,9 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
       gridRes: 128,
       heightDrop,
       heightBias,
+      heightProvider: currentHeightProvider,
+      centerX: currentCenterX,
+      centerZ: currentCenterZ,
     });
     current = result;
     deps.scene.add(result.mesh);
@@ -75,6 +91,12 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
     if (!settings.enabled && !deps.isLongView) {
       if (current) deps.scene.remove(current.mesh);
     }
+  };
+
+  const updateCenter = (x: number, z: number) => {
+    currentCenterX = x;
+    currentCenterZ = z;
+    rebuild();
   };
 
   current = buildFarShellInstance(1.5, 0.6, 2);
@@ -102,6 +124,10 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
 
   return {
     rebuild,
+    setHeightProvider(provider: FarHeightProvider | undefined) {
+      currentHeightProvider = provider;
+      rebuild();
+    },
     setEnabled(on) {
       if (!current) return;
       if (on) deps.scene.add(current.mesh);
@@ -113,6 +139,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
     get canopyShell() {
       return canopyShell;
     },
+    updateCenter,
     dispose() {
       if (current) {
         deps.scene.remove(current.mesh);

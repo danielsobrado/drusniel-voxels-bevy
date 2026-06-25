@@ -3,13 +3,15 @@ import {
   RainWeatherSystem,
   SandstormWeatherSystem,
   SnowWeatherSystem,
+  StormLightningSystem,
   type RainWeatherSettings,
   type SandstormWeatherSettings,
   type SnowWeatherSettings,
+  type StormWeatherSettings,
 } from "../../weather/rain.js";
 
 export interface WeatherUiSettings {
-  weatherMode: "off" | "rain" | "snow" | "sandstorm";
+  weatherMode: "off" | "rain" | "snow" | "sandstorm" | "storm";
   weatherIntensity: number;
   weatherWindX: number;
   weatherWindZ: number;
@@ -63,6 +65,11 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
     isWebGpu: deps.isWebGpu,
     seed: 0x5a4d570d,
   });
+  const stormWeather = new StormLightningSystem({
+    scene: deps.scene,
+    camera: deps.camera,
+    isWebGpu: deps.isWebGpu,
+  });
 
   let statsController: { updateDisplay: () => unknown } | null = null;
 
@@ -93,6 +100,13 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
       windZ: settings.weatherWindZ,
     };
   };
+  const currentStormWeatherSettings = (): StormWeatherSettings => {
+    const settings = deps.getSettings();
+    return {
+      enabled: settings.weatherMode === "storm",
+      intensity: settings.weatherIntensity,
+    };
+  };
 
   const refreshStats = () => {
     const settings = deps.getSettings();
@@ -105,6 +119,9 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
     } else if (settings.weatherMode === "sandstorm") {
       const stats = sandstormWeather.getStats();
       deps.setStatsText(`sandstorm ${stats.particles} puffs${stats.haze ? " + haze" : ""}`);
+    } else if (settings.weatherMode === "storm") {
+      const stats = stormWeather.getStats();
+      deps.setStatsText(`storm lightning ${stats.active ? "on" : "off"}`);
     } else {
       deps.setStatsText("off");
     }
@@ -114,6 +131,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
     rainWeather.applySettings(currentRainWeatherSettings());
     snowWeather.applySettings(currentSnowWeatherSettings());
     sandstormWeather.applySettings(currentSandstormWeatherSettings());
+    stormWeather.applySettings(currentStormWeatherSettings());
     refreshStats();
     statsController?.updateDisplay();
   };
@@ -127,6 +145,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
       rainWeather.update(deltaSeconds, elapsedSeconds, cameraPosition, effectCenter);
       snowWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
       sandstormWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
+      stormWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
     },
     bindStatsController(controller) {
       statsController = controller;
@@ -135,6 +154,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
       rainWeather.dispose();
       snowWeather.dispose();
       sandstormWeather.dispose();
+      stormWeather.dispose();
     },
   };
 }

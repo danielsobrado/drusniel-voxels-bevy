@@ -486,7 +486,7 @@ export function validateMixedLodCutForDelta(
 
   const maxLevel = Math.max(...nodesByLevel.keys());
 
-  for (let fineLevel = 1; fineLevel <= maxLevel; fineLevel++) {
+  for (let fineLevel = 0; fineLevel <= maxLevel; fineLevel++) {
     const coarseLevel = fineLevel + forcedDelta;
     if (coarseLevel > maxLevel) continue;
 

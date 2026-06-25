@@ -664,6 +664,9 @@ fn spawn_props_from_data(
     props
         .iter()
         .filter_map(|prop| {
+            if mesh_cache.is_prop_failed(&prop.id) {
+                return None;
+            }
             let transform = prop.to_transform();
             if protected_areas
                 .map(|registry| registry.prop_position_blocked(transform.translation))
@@ -1112,6 +1115,10 @@ pub fn spawn_debug_custom_props_near_player(
                     .entity(entity)
                     .insert(GrassPropWind::new(&transform, hash));
             }
+            continue;
+        }
+
+        if mesh_cache.is_prop_failed(id) {
             continue;
         }
 

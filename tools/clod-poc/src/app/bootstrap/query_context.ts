@@ -14,6 +14,7 @@ import {
   DEFAULT_RAIN_WEATHER_SETTINGS,
   DEFAULT_SANDSTORM_WEATHER_SETTINGS,
   DEFAULT_SNOW_WEATHER_SETTINGS,
+  DEFAULT_STORM_WEATHER_SETTINGS,
 } from "../../weather/rain.js";
 
 const positiveNumberParam = (value: string | null): number | null => {
@@ -43,7 +44,9 @@ export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryF
       || queryScene === "long-view-forest-4km"
       || queryScene === "long-view-edit-stress"
       || queryScene === "infinite-stream-straight"
-      || queryScene === "infinite-stream-fast-turn",
+      || queryScene === "infinite-stream-fast-turn"
+      || queryScene === "infinite-stream-far-summary"
+      || queryScene === "infinite-stream-slow-builds",
   };
 }
 
@@ -63,6 +66,8 @@ const sceneNameToConfigKey: Record<string, string> = {
   "long-view-edit-stress": "long_view_edit_stress",
   "infinite-stream-straight": "infinite_stream_straight",
   "infinite-stream-fast-turn": "infinite_stream_fast_turn",
+  "infinite-stream-far-summary": "infinite_stream_far_summary",
+  "infinite-stream-slow-builds": "infinite_stream_slow_builds",
 };
 
 export function parsePhase0SceneContext(
@@ -128,7 +133,7 @@ export function parseClodRuntimeQueryFlags(searchParams: URLSearchParams): ClodR
 
 export interface WeatherQueryContext {
   queryWeatherMode: WeatherMode;
-  weatherDefaults: typeof DEFAULT_RAIN_WEATHER_SETTINGS;
+  weatherDefaults: { enabled: boolean; intensity: number; windX?: number; windZ?: number };
   queryWeatherIntensity: number;
   queryWeatherWindX: number;
   queryWeatherWindZ: number;
@@ -143,32 +148,42 @@ export function parseWeatherQueryContext(searchParams: URLSearchParams): Weather
     ? "sandstorm"
     : searchParams.get("snow") === "1" || weatherParam === "snow"
       ? "snow"
-      : searchParams.get("rain") === "1" || weatherParam === "rain"
-        ? "rain"
-        : "off";
+      : searchParams.get("storm") === "1" || weatherParam === "storm"
+        ? "storm"
+        : searchParams.get("rain") === "1" || weatherParam === "rain"
+          ? "rain"
+          : "off";
   const weatherDefaults = queryWeatherMode === "sandstorm"
     ? DEFAULT_SANDSTORM_WEATHER_SETTINGS
     : queryWeatherMode === "snow"
       ? DEFAULT_SNOW_WEATHER_SETTINGS
-      : DEFAULT_RAIN_WEATHER_SETTINGS;
+      : queryWeatherMode === "storm"
+        ? DEFAULT_STORM_WEATHER_SETTINGS
+        : DEFAULT_RAIN_WEATHER_SETTINGS;
   const weatherIntensityParam = searchParams.get("weatherIntensity")
     ?? (queryWeatherMode === "sandstorm"
       ? searchParams.get("sandstormIntensity") ?? searchParams.get("sandIntensity")
       : queryWeatherMode === "snow"
         ? searchParams.get("snowIntensity")
-        : searchParams.get("rainIntensity"));
+        : queryWeatherMode === "storm"
+          ? searchParams.get("stormIntensity")
+          : searchParams.get("rainIntensity"));
   const weatherWindXParam = searchParams.get("weatherWindX")
     ?? (queryWeatherMode === "sandstorm"
       ? searchParams.get("sandstormWindX") ?? searchParams.get("sandWindX")
       : queryWeatherMode === "snow"
         ? searchParams.get("snowWindX")
-        : searchParams.get("rainWindX"));
+        : queryWeatherMode === "storm"
+          ? null
+          : searchParams.get("rainWindX"));
   const weatherWindZParam = searchParams.get("weatherWindZ")
     ?? (queryWeatherMode === "sandstorm"
       ? searchParams.get("sandstormWindZ") ?? searchParams.get("sandWindZ")
       : queryWeatherMode === "snow"
         ? searchParams.get("snowWindZ")
-        : searchParams.get("rainWindZ"));
+        : queryWeatherMode === "storm"
+          ? null
+          : searchParams.get("rainWindZ"));
   return {
     queryWeatherMode,
     weatherDefaults,

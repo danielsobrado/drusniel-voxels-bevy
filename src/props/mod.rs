@@ -254,6 +254,13 @@ impl Default for PropChunkCullState {
 pub struct PropAssets {
     pub scenes: HashMap<String, Handle<Scene>>,
     pub loaded: bool,
+    /// Scene handles that failed to load from the asset server.
+    pub failed_ids: HashSet<String>,
+}
+
+/// Procedural props with zero density or zero max_count should not load assets or spawn.
+pub fn is_spawnable_prop(def: &PropDefinition) -> bool {
+    def.density > 0.0 && def.max_count.unwrap_or(1) > 0
 }
 
 /// Cached landmark building positions for minimap markers.
@@ -934,6 +941,9 @@ fn spawn_props_from_placement_data(
     props
         .iter()
         .filter_map(|prop| {
+            if mesh_cache.is_prop_failed(&prop.id) {
+                return None;
+            }
             let transform = prop.to_transform();
             if protected_areas
                 .map(|registry| registry.prop_position_blocked(transform.translation))
@@ -1090,7 +1100,8 @@ fn handle_clear_prop_cache(
 const PROP_CHUNK_SIZE_CULL: f32 = 64.0;
 
 /// Update prop visibility based on camera distance and, while enclosed,
-/// terrain occlusion. Sole owner of prop and instanced-group `Visibility`.
+/// terrain occlusion. Distance culling writes both prop markers and instanced
+/// group slot visibility via `distance_hidden`.
 fn update_prop_chunk_visibility(
     time: Res<Time>,
     config: Res<PropViewDistanceConfig>,
@@ -1112,6 +1123,7 @@ fn update_prop_chunk_visibility(
         )>,
         Query<(Entity, &mut Visibility), With<instanced_render::InstancedPropGroup>>,
     )>,
+    mut instanced_groups: Query<&mut instanced_render::InstancedPropGroup>,
     frame: Res<FrameCount>,
     mut timing: ResMut<AreaTimingRecorder>,
     mut was_occlusion_active: Local<bool>,
@@ -1182,6 +1194,8 @@ fn update_prop_chunk_visibility(
     let mut total_props = 0usize;
     let mut visible_groups = HashSet::new();
 
+    let mut slot_distance_updates: Vec<(Entity, usize, bool)> = Vec::new();
+
     for (prop, transform, owner, mut visibility, persisted, refs) in
         visibility_queries.p0().iter_mut()
     {
@@ -1220,6 +1234,13 @@ fn update_prop_chunk_visibility(
             culled_count += 1;
         }
 
+        if let Some(refs) = refs {
+            let distance_hidden = !should_be_visible;
+            for visual in &refs.refs {
+                slot_distance_updates.push((visual.group, visual.slot as usize, distance_hidden));
+            }
+        }
+
         if occlusion_active {
             total_props += 1;
             if terrain_visible {
@@ -1231,6 +1252,8 @@ fn update_prop_chunk_visibility(
             }
         }
     }
+
+    instanced_render::sync_prop_distance_hidden_slots(&mut instanced_groups, &slot_distance_updates);
 
     // Instanced group meshes follow occlusion only: a group renders while any
     // prop referencing it sits in a BFS-visible chunk.

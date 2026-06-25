@@ -24,6 +24,7 @@ use crate::constants::{
 };
 use crate::performance::{AreaTimingRecorder, area_timer};
 
+use super::instanced_render::PropVisualRefs;
 use super::{PropConfig, PropType};
 
 const GENERATED_BILLBOARD_DIR: &str = "assets/textures/billboards/generated";
@@ -512,7 +513,10 @@ pub fn update_billboard_lod(
     material_handle: Option<Res<BillboardMaterialHandle>>,
     camera_query: Query<&GlobalTransform, With<PlayerCamera>>,
     mut commands: Commands,
-    mut lod_query: Query<(Entity, &GlobalTransform, &mut BillboardLod)>,
+    mut lod_query: Query<
+        (Entity, &GlobalTransform, &mut BillboardLod),
+        Without<PropVisualRefs>,
+    >,
     mut billboard_query: Query<&mut MeshMaterial3d<BillboardMaterial>, With<BillboardQuad>>,
     mut stats: ResMut<BillboardStats>,
     frame: Res<FrameCount>,

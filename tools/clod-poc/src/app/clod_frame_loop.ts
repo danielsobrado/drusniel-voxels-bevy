@@ -21,7 +21,7 @@ export type {
 import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
-  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics } = deps;
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary } = deps;
   let elapsedSeconds = 0;
   const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
@@ -90,6 +90,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     if (!player.state.freeze) terrain.updateSelection();
 
     updateLongViewDiagnostics();
+
+    farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera);
 
     player.playerInputController.updateHoldToDig();
 

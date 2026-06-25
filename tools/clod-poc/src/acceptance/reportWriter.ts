@@ -140,15 +140,19 @@ export function recommendationFromGates(gates: AcceptanceGateResult[]): string {
   if (allPass) {
     const visualWarn = gates.some((g) => g.id === "A1" && g.measurements.visualSweepAvailable === false);
     if (visualWarn) {
-      return "Phase 3 passes structural checks but visual sweep was not available. Confirm rendering before final sign-off.";
+      return "Phase 3 passes structural checks but visual sweep was not available. Run with visual.enabled=true and Playwright/browser rendering before final sign-off.";
     }
     return "Phase 3 passed. Rust offline builder port is allowed.";
   }
   const allNoFail = gates.every((g) => g.status !== "fail");
   if (allNoFail) {
+    const a2MixedFindings = gates.some((g) => g.id === "A2" && typeof g.measurements.mixedLodSurfaceFindingsCount === "number" && g.measurements.mixedLodSurfaceFindingsCount > 0);
+    if (a2MixedFindings) {
+      return "Structural gates pass but mixed-LOD surface findings exist. Review surface deltas before porting.";
+    }
     return "All gates pass or warn. Review warnings before porting.";
   }
-  return "Review warnings and address before porting.";
+  return "Review warnings and address failures before porting.";
 }
 
 export function writeSummaryMarkdown(runDir: string, report: AcceptanceRunReport, _config: AcceptanceConfig): string {

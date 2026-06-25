@@ -74,6 +74,8 @@ export interface UiStartupInput {
     phase0VelocityZ: number;
     phase0Streaming: Phase0Config["phase0"]["streaming"];
   };
+  /** Optional far summary frame update callback. */
+  onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
   getClodErrorCompute: () => import("../../gpu/clod_error_px_compute.js").ClodErrorPxCompute | null;
   ensureClodErrorCompute: () => Promise<void>;
   textureLoadOptions: TerrainTextureLoadOptions;

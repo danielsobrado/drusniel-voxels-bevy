@@ -6,19 +6,23 @@ import {
   clamp,
   cos,
   cross,
+  dot,
   float,
+  floor,
   Fn,
   fract,
   length,
   max,
   min,
   mix,
+  mod,
   normalize,
   positionGeometry,
   sin,
   smoothstep,
   uniform,
   uv,
+  vec2,
   vec3,
   vec4,
 } from "three/tsl";
@@ -237,6 +241,85 @@ export function createSandstormHazeNodeMaterial(): RainWeatherShaderHandle {
 
   const material = new MeshBasicNodeMaterial();
   material.name = "weather-sandstorm-haze-node";
+  material.fragmentNode = fragment();
+  material.transparent = true;
+  material.depthWrite = false;
+  material.depthTest = false;
+  material.side = THREE.DoubleSide;
+
+  return {
+    material,
+    setTime: (time) => { uTime.value = time; },
+    setIntensity: (intensity) => { uIntensity.value = intensity; },
+    setCenter: () => undefined,
+    setWind: () => undefined,
+    dispose: () => { material.dispose(); },
+  };
+}
+
+function hash12(uv: TslNode): TslNode {
+  return fract(cos(mod(dot(uv, vec2(13.9898, 8.141)), 3.14)).mul(43758.5453));
+}
+
+function hash22(uv: TslNode): TslNode {
+  const u = vec2(dot(uv, vec2(127.1, 311.7)), dot(uv, vec2(269.5, 183.3)));
+  return float(2.0).mul(fract(sin(u).mul(43758.5453123)));
+}
+
+function noise(uv: TslNode): TslNode {
+  const iuv: TslNode = floor(uv);
+  const fuv: TslNode = fract(uv);
+  const blurX: TslNode = smoothstep(0.0, 1.0, fuv.x);
+  const blurY: TslNode = smoothstep(0.0, 1.0, fuv.y);
+  const a: TslNode = dot(hash22(iuv.add(vec2(0.0, 0.0))), fuv.sub(vec2(0.0, 0.0)));
+  const b: TslNode = dot(hash22(iuv.add(vec2(1.0, 0.0))), fuv.sub(vec2(1.0, 0.0)));
+  const c: TslNode = dot(hash22(iuv.add(vec2(0.0, 1.0))), fuv.sub(vec2(0.0, 1.0)));
+  const d: TslNode = dot(hash22(iuv.add(vec2(1.0, 1.0))), fuv.sub(vec2(1.0, 1.0)));
+  const mixX1: TslNode = mix(a, b, blurX);
+  const mixX2: TslNode = mix(c, d, blurX);
+  return mix(mixX1, mixX2, blurY).add(0.5);
+}
+
+function fbm(uv: TslNode): TslNode {
+  const amp0: TslNode = float(0.5);
+  const v0: TslNode = amp0.mul(noise(uv));
+  const u1: TslNode = uv.mul(2.0);
+  const amp1: TslNode = amp0.mul(0.5);
+  const v1: TslNode = v0.add(amp1.mul(noise(u1)));
+  const u2: TslNode = u1.mul(2.0);
+  const amp2: TslNode = amp1.mul(0.5);
+  const v2: TslNode = v1.add(amp2.mul(noise(u2)));
+  const u3: TslNode = u2.mul(2.0);
+  const amp3: TslNode = amp2.mul(0.5);
+  const v3: TslNode = v2.add(amp3.mul(noise(u3)));
+  const u4: TslNode = u3.mul(2.0);
+  const amp4: TslNode = amp3.mul(0.5);
+  const v4: TslNode = v3.add(amp4.mul(noise(u4)));
+  return v4;
+}
+
+export function createStormNodeMaterial(): RainWeatherShaderHandle {
+  const uTime = uniform(0) as TslNode;
+  const uIntensity = uniform(1) as TslNode;
+  const uEffectColor = uniform(new THREE.Color(0.3, 0.3, 1.0)) as TslNode;
+  const uMainColor = uniform(new THREE.Color(1.0, 1.0, 1.0)) as TslNode;
+
+  const fragment = Fn(() => {
+    const p: TslNode = uv();
+    const modifiedUV: TslNode = vec2(p.x.mul(2.0).sub(1.0), p.y.mul(2.0).sub(1.0).mul(4.0));
+    const fbmUV: TslNode = vec2(modifiedUV.x.sub(0.5), modifiedUV.y).add(uTime.mul(3.0));
+    const displaced: TslNode = modifiedUV.x.sub(0.5).add(fbm(fbmUV));
+    const dist: TslNode = abs(displaced);
+    const flicker: TslNode = mix(0.0, 0.05, hash12(vec2(uTime)));
+    const finalColor: TslNode = uEffectColor.mul(flicker).div(max(dist, 0.001));
+    const alpha: TslNode = min(finalColor.r, 1.0).mul(clamp(uIntensity, 0.0, 1.6));
+    alpha.lessThan(0.003).discard();
+    const albedo: TslNode = finalColor.mul(uMainColor);
+    return vec4(albedo, alpha);
+  });
+
+  const material = new MeshBasicNodeMaterial();
+  material.name = "weather-storm-node";
   material.fragmentNode = fragment();
   material.transparent = true;
   material.depthWrite = false;

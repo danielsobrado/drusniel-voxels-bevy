@@ -9,12 +9,24 @@
 // objects — terrain_node_material.ts lights in the node graph, so a stock MeshStandardMaterial
 // renders black here), and fades to the sky/haze colour near the rim.  No collider, no edit, no
 // heavy shadows.
+//
+// When a FarHeightProvider is given, the shell samples height/normal from it instead of the
+// TerrainSummaryField — enabling the far summary clipmap streaming for infinite worlds.
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { clamp, dot, float, max, mix, normalGeometry, normalize, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import { sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
+
+/**
+ * Height provider interface — alternative to TerrainSummaryField for the far shell.
+ * Enables the far summary clipmap to drive the shell without finite-world assumptions.
+ */
+export interface FarHeightProvider {
+  sampleHeight(x: number, z: number): number;
+  sampleNormal(x: number, z: number): THREE.Vector3;
+}
 
 /**
  * Lighting inputs for the far shell — structurally an EnvironmentLighting (environment.ts).
@@ -47,6 +59,12 @@ export interface FarTerrainShellOptions {
    * Default 0.6 places the skirt at a representative mid-surface height.
    */
   heightBias: number;
+  /** When set, the shell samples height/normal from this provider instead of TerrainSummaryField. */
+  heightProvider?: FarHeightProvider;
+  /** Grid center X (default: worldSize / 2). Use to center on camera/stream center. */
+  centerX?: number;
+  /** Grid center Z (default: worldSize / 2). Use to center on camera/stream center. */
+  centerZ?: number;
 }
 
 export interface FarTerrainShell {
@@ -66,9 +84,9 @@ const DEFAULT_OPTIONS: FarTerrainShellOptions = {
 /**
  * Build the far terrain shell geometry and material.
  *
- * The grid spans [center - farRadius, center + farRadius] (center = worldSize/2). Quads fully
- * inside the page-covered world square are excluded, leaving a skirt around the world that
- * extends out to the horizon.
+ * The grid spans [center - farRadius, center + farRadius] (center = worldSize/2 by default,
+ * or centerX/centerZ when provided). Quads fully inside the page-covered world square are
+ * excluded, leaving a skirt around the world that extends out to the horizon.
  */
 export function buildFarTerrainShell(
   summary: TerrainSummaryField,
@@ -76,14 +94,16 @@ export function buildFarTerrainShell(
   options: Partial<FarTerrainShellOptions> = {},
 ): FarTerrainShell {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const { gridRes, heightDrop, heightBias } = opts;
+  const { gridRes, heightDrop, heightBias, heightProvider } = opts;
 
   const worldSize = summary.worldSize;
-  const center = worldSize / 2;
+  const centerX = opts.centerX ?? worldSize / 2;
+  const centerZ = opts.centerZ ?? worldSize / 2;
   const farRadius = opts.farRadius > 0 ? opts.farRadius : worldSize * 1.5;
   const inset = opts.inset >= 0 ? opts.inset : worldSize * 0.04;
   const extent = 2 * farRadius;
-  const origin = center - farRadius; // grid min in both X and Z
+  const originX = centerX - farRadius;
+  const originZ = centerZ - farRadius;
   const cellSize = extent / gridRes;
   const baseLevel = summaryBaseLevel(summary);
 
@@ -93,15 +113,16 @@ export function buildFarTerrainShell(
   const uvs = new Float32Array(vertexCount * 2);
   const indices: number[] = [];
 
-  // Pass 1: bake the skirt height for every vertex (analytic beyond the world, baked inside).
+  // Pass 1: bake the skirt height for every vertex.
   const heightGrid = new Float32Array(vertexCount);
   for (let gz = 0; gz <= gridRes; gz++) {
     for (let gx = 0; gx <= gridRes; gx++) {
-      const wx = origin + gx * cellSize;
-      const wz = origin + gz * cellSize;
-      // Constant drop so the overlap band sits just below the page terrain (no z-fight).
-      heightGrid[gz * (gridRes + 1) + gx] =
-        sampleSkirtHeight(summary, wx, wz, farRadius, baseLevel, heightBias) - heightDrop;
+      const wx = originX + gx * cellSize;
+      const wz = originZ + gz * cellSize;
+      const h = heightProvider
+        ? heightProvider.sampleHeight(wx, wz)
+        : sampleSkirtHeight(summary, wx, wz, farRadius, baseLevel, heightBias);
+      heightGrid[gz * (gridRes + 1) + gx] = h - heightDrop;
     }
   }
 
@@ -109,9 +130,9 @@ export function buildFarTerrainShell(
   for (let gz = 0; gz <= gridRes; gz++) {
     for (let gx = 0; gx <= gridRes; gx++) {
       const vi = gz * (gridRes + 1) + gx;
-      positions[vi * 3] = origin + gx * cellSize;
+      positions[vi * 3] = originX + gx * cellSize;
       positions[vi * 3 + 1] = heightGrid[vi];
-      positions[vi * 3 + 2] = origin + gz * cellSize;
+      positions[vi * 3 + 2] = originZ + gz * cellSize;
 
       const xl = Math.max(0, gx - 1);
       const xr = Math.min(gridRes, gx + 1);
@@ -134,15 +155,14 @@ export function buildFarTerrainShell(
   }
 
   // Build indices — skip quads lying fully inside the page-covered world square [inset,
-  // worldSize-inset]².  A circular hole over a square world would leave the corners/edges
-  // sheeted over the near terrain; the square test excludes exactly the interior the pages own.
+  // worldSize-inset]².
   const innerMin = inset;
   const innerMax = worldSize - inset;
   for (let gz = 0; gz < gridRes; gz++) {
     for (let gx = 0; gx < gridRes; gx++) {
-      const x0 = origin + gx * cellSize;
+      const x0 = originX + gx * cellSize;
       const x1 = x0 + cellSize;
-      const z0 = origin + gz * cellSize;
+      const z0 = originZ + gz * cellSize;
       const z1 = z0 + cellSize;
       const fullyInside = x0 >= innerMin && x1 <= innerMax && z0 >= innerMin && z1 <= innerMax;
       if (fullyInside) continue;
@@ -175,8 +195,9 @@ export function buildFarTerrainShell(
   const sky = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi = mix(uGround, uSky, sky);
   const light = hemi.add(uSun.mul(pow(sun, 1.35)));
-  const centerN = float(center);
-  const distXZ = vec2(positionWorld.x.sub(centerN), positionWorld.z.sub(centerN)).length();
+  const ctrX = float(centerX);
+  const ctrZ = float(centerZ);
+  const distXZ = vec2(positionWorld.x.sub(ctrX), positionWorld.z.sub(ctrZ)).length();
   const hazeT = smoothstep(float(farRadius * 0.55), float(farRadius * 0.98), distXZ);
   const material = new MeshBasicNodeMaterial();
   material.colorNode = mix(base.mul(light), uHaze, hazeT);

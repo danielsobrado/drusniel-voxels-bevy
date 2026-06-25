@@ -63,6 +63,28 @@ phase0:
         look_distance_m: 4096
       simulated_streaming_only: true
 
+    infinite_stream_far_summary:
+      world: 16
+      camera:
+        mode: scripted
+        start_x_ratio: 0.20
+        start_z_ratio: 0.50
+        direction_degrees: 90
+        speed_mps: 18
+        duration_seconds: 60
+        look_distance_m: 4096
+
+    infinite_stream_slow_builds:
+      world: 16
+      camera:
+        mode: scripted
+        start_x_ratio: 0.20
+        start_z_ratio: 0.50
+        direction_degrees: 90
+        speed_mps: 10
+        duration_seconds: 30
+        look_distance_m: 4096
+
 metrics:
   required_counters:
     - world_cells

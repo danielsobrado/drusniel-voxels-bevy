@@ -209,5 +209,8 @@ export function runFrameLoopStartup(
       longViewDiagnosticsCfg: cfg,
       getFarShellRadiusFactor: () => state.farShellRadiusFactor,
     },
+    farSummary: input.onFarSummaryUpdate ? {
+      onFarSummaryUpdate: input.onFarSummaryUpdate,
+    } : undefined,
   });
 }

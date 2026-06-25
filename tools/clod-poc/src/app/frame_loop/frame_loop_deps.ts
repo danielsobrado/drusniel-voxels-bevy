@@ -136,6 +136,11 @@ export interface FrameLoopDiagnosticsDeps {
   getFarShellRadiusFactor: () => number;
 }
 
+export interface FrameLoopFarSummaryDeps {
+  /** Called each frame after terrain phase but before vegetation phase. */
+  onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
+}
+
 export interface ClodFrameLoopDeps {
   render: FrameLoopRenderDeps;
   player: FrameLoopPlayerDeps;
@@ -144,4 +149,5 @@ export interface ClodFrameLoopDeps {
   waterWeather: FrameLoopWaterWeatherDeps;
   stats: FrameLoopStatsDeps;
   diagnostics: FrameLoopDiagnosticsDeps;
+  farSummary?: FrameLoopFarSummaryDeps;
 }
