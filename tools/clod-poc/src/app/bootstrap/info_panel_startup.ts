@@ -21,6 +21,7 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
     state,
     isWebGpu,
     terrainColliders,
+    clodWorker,
     selectionQueryFlags: { queryGrassPerfScene, queryTreePerfScene, queryForestFloorScene },
     player,
     interaction,
@@ -72,6 +73,9 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
 
   const updateInfo = () => {
     const selection = selectionController.stats();
+    session.parentsHealthy = clodWorker.isParentsHealthy();
+    const lastErr = clodWorker.getLastParentError();
+    session.lastParentError = lastErr ? lastErr.message : "";
     const playerLine = interaction.mode === "playing"
       ? `player: grounded=${player.grounded}  physics p95=${player.physicsP95Ms().toFixed(2)} ms  collider pages=${player.lastPagesTested}`
       : `view: ${interaction.mode}`;
@@ -85,7 +89,8 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
       `${state.forceMaxLevel === "auto" ? "" : `forced<=${state.forceMaxLevel}   `}${state.freeze ? "[FROZEN]" : ""}\n` +
       `renderer: ${isWebGpu ? "WebGPU" : "WebGL"}   selection: ${selection.selectionSource} ${selection.selectionMs.toFixed(2)}ms   gpu-compute: ${selectionController.formatWebGpuStats(state.webgpuSelection)}\n` +
       `${polishLine}\n` +
-      `worker: parents pending=${session.pendingParentCount} rebuilt=${session.pendingParentNodes} ${session.pendingParentMs.toFixed(0)}ms   ` +
+      `worker: parents pending=${session.pendingParentCount} rebuilt=${session.pendingParentNodes} ${session.pendingParentMs.toFixed(0)}ms` +
+      `${session.parentsHealthy ? "" : `  PARENT FAIL: ${session.lastParentError}`}   ` +
       `colliders loaded=${terrainColliders.loadedPageCount()}${state.clodPerfMode ? "   CLOD PERF" : ""}\n` +
       `grass: ${state.grassEnabled ? "enabled" : "disabled"} ${state.grassShaderMode} ` +
       `${state.grassBladeCount.toLocaleString()} blades` +

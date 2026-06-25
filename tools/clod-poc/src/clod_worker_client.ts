@@ -1,5 +1,6 @@
 import type { BuildProgress, BuildResult, DirtyCellBounds } from "./clod/quadtree.js";
 import type { DigEdit } from "./terrain/terrain.js";
+import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
 import {
@@ -88,9 +89,19 @@ export class ClodWorkerClient {
     edits: DigEdit[],
     onProgress: (progress: BuildProgress) => void,
     hydrologyTerrain: SerializedHydrologyTerrain | null = null,
+    borderCoastOceanConfig: BorderCoastOceanConfig | null = null,
   ): Promise<BuildResult> {
     const requestId = this.nextRequestId++;
-    const request: ClodWorkerRequest = { type: "build", requestId, worldPagesX, worldPagesZ, cfg, edits, hydrologyTerrain };
+    const request: ClodWorkerRequest = {
+      type: "build",
+      requestId,
+      worldPagesX,
+      worldPagesZ,
+      cfg,
+      edits,
+      hydrologyTerrain,
+      borderCoastOceanConfig,
+    };
     this.progressHandlers.set(requestId, onProgress);
     return new Promise((resolve, reject) => {
       this.buildRequests.set(requestId, { resolve, reject });

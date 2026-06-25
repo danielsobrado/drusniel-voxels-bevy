@@ -7,6 +7,7 @@ import type {
   NodeBuildStat,
 } from "./clod/quadtree.js";
 import type { DigEdit } from "./terrain/terrain.js";
+import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 
 export interface SerializedHydrologyTerrain {
@@ -43,6 +44,7 @@ export type ClodWorkerRequest =
       cfg: ClodPagesConfig;
       edits: DigEdit[];
       hydrologyTerrain?: SerializedHydrologyTerrain | null;
+      borderCoastOceanConfig?: BorderCoastOceanConfig | null;
     }
   | {
       type: "dig";

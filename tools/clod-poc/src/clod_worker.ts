@@ -8,7 +8,7 @@ import {
   type DirtyCellBounds,
   type NodeIndex,
 } from "./clod/quadtree.js";
-import { addDigEdit, replaceDigEdits, setTerrainSurfaceOverride } from "./terrain/terrain.js";
+import { addDigEdit, replaceDigEdits, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
 import {
   collectBuildResultTransferables,
   collectNodeTransferables,
@@ -176,10 +176,20 @@ function scheduleParentDrain(): void {
   }, 0);
 }
 
+function installBorderCoastRuntime(
+  config: Extract<ClodWorkerRequest, { type: "build" }>["borderCoastOceanConfig"],
+  worldPagesX: number,
+  pagesCfg: ClodPagesConfig,
+): void {
+  const worldCells = worldPagesX * pagesCfg.page.chunks_per_page * pagesCfg.page.chunk_size;
+  setBorderCoastRuntime(config ?? null, worldCells);
+}
+
 async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }>): Promise<void> {
   cfg = request.cfg;
   replaceDigEdits(request.edits);
   installHydrologyTerrain(request.hydrologyTerrain);
+  installBorderCoastRuntime(request.borderCoastOceanConfig, request.worldPagesX, request.cfg);
   pendingByLevel.clear();
   coalescedDig = null;
   activeParentRequestId = null;

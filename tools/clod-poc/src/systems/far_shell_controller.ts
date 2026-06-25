@@ -56,9 +56,16 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
   let currentCenterX = deps.centerX ?? deps.worldSizeCells / 2;
   let currentCenterZ = deps.centerZ ?? deps.worldSizeCells / 2;
   let currentHeightProvider = deps.heightProvider;
-  let currentFarRadiusOverride = 0;
+  let currentFarRadiusOverride: number | undefined = deps.farShellRadiusM;
   let buildCenterX = currentCenterX;
   let buildCenterZ = currentCenterZ;
+
+  const resolveFarRadius = (radiusFactor: number): number =>
+    currentFarRadiusOverride && currentFarRadiusOverride > 0
+      ? currentFarRadiusOverride
+      : deps.farShellRadiusM && deps.farShellRadiusM > 0
+        ? deps.farShellRadiusM
+        : deps.worldSizeCells * radiusFactor;
 
   const buildFarShellInstance = (
     radiusFactor: number,
@@ -71,7 +78,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
       current.dispose();
     }
     const lighting = deps.getLighting();
-    const farRadius = currentFarRadiusOverride ?? deps.farShellRadiusM ?? deps.worldSizeCells * radiusFactor;
+    const farRadius = resolveFarRadius(radiusFactor);
     const result = buildFarTerrainShell(deps.terrainSummary, {
       sunDirection: lighting.sunDirection,
       sunColor: lighting.sunColor,
@@ -153,8 +160,8 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
       rebuild();
     },
     setFarRadiusOverride(m: number) {
-      currentFarRadiusOverride = m;
-      if (m > 0) rebuild();
+      currentFarRadiusOverride = m > 0 ? m : undefined;
+      rebuild();
     },
     setEnabled(on) {
       if (!current) return;

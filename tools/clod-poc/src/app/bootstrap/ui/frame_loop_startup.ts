@@ -81,6 +81,7 @@ export function runFrameLoopStartup(
     applyForestLightingToPropMaterials,
     stoneController,
     waterController,
+    deepOceanMaterial,
     weatherController,
     updateWeatherStats,
     grassSystem,
@@ -174,6 +175,7 @@ export function runFrameLoopStartup(
     },
     waterWeather: {
       waterController,
+      deepOceanMaterial,
       weatherController,
       updateWeatherStats,
       weatherStatsController: session.weatherStatsController,

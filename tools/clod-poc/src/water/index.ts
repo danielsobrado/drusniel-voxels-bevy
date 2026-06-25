@@ -14,6 +14,7 @@ export * from "./fakeBodyCarve.js";
 export * from "./visualHydrologyField.js";
 export * from "./farWaterSurface.js";
 export * from "./deep_ocean_surface.js";
+export * from "./deep_ocean_material.js";
 export * from "./moistureField.js";
 export * from "./waterScreenResources.js";
 export * from "./causticsConfig.js";

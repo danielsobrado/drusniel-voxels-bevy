@@ -197,6 +197,8 @@ export async function runRuntimeSystemsStartup(
     treeController.updateLighting(lighting);
     understoryController.updateLighting(lighting);
     waterController.updateSunDirection(lighting.sunDirection);
+    waterWeather.deepOceanMaterial?.updateSunDirection(lighting.sunDirection);
+    waterWeather.deepOceanMaterial?.updateHorizonColor(lighting.skyLight);
   };
 
   const drainVegetationDirtyQueue = (): void => {

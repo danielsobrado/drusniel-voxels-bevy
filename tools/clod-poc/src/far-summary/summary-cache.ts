@@ -51,6 +51,7 @@ export class FarSummaryCache implements FallbackStatsWriter {
           originZ: 0,
           samples: [],
         });
+        this.stateRevision++;
         this.pendingBuildKeys.set(keyStr, req);
         this.stats.requestedTiles++;
       } else {

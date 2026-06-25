@@ -87,6 +87,8 @@ export interface UiSessionState {
   averageFpsRef: { value: number };
   lastDigSummary: string;
   lastArchiveSummary: string;
+  parentsHealthy: boolean;
+  lastParentError: string;
   pendingParentNodes: number;
   pendingParentMs: number;
   pendingParentCount: number;
@@ -114,6 +116,8 @@ export function createUiStartupContext(input: UiStartupInput): UiStartupContext 
       averageFpsRef: { value: 0 },
       lastDigSummary: "",
       lastArchiveSummary: "",
+      parentsHealthy: true,
+      lastParentError: "",
       pendingParentNodes: 0,
       pendingParentMs: 0,
       pendingParentCount: 0,

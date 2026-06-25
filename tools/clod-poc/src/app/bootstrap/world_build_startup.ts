@@ -220,7 +220,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     info.textContent = `building ${WORLD}x${WORLD} world… ${Math.floor(fraction * 100)}%\n${phase}  L${level}  ${done}/${total}`;
     buildStatus.value = `${phase} L${level} ${done}/${total}`;
     updateBuildOverlay();
-  }, hydrologyTerrain);
+  }, hydrologyTerrain, borderCoastOceanConfig);
 
   buildProgress.hidden = true;
   buildStatus.value = "ready";

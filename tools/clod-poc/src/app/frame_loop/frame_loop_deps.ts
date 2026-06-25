@@ -96,6 +96,7 @@ export interface FrameLoopVegetationDeps {
 
 export interface FrameLoopWaterWeatherDeps {
   waterController: WaterController;
+  deepOceanMaterial: import("../../water/deep_ocean_material.js").DeepOceanMaterialHandle | null;
   weatherController: WeatherController;
   updateWeatherStats: () => void;
   weatherStatsController: GuiDisplayController | null;

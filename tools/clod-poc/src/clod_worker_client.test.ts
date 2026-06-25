@@ -20,7 +20,7 @@ describe("ClodWorkerClient parent error lifecycle", () => {
     vi.resetAllMocks();
     onError = vi.fn();
     client = new ClodWorkerClient();
-    client.onError = onError;
+    client.onError = onError as (error: Error) => void;
   });
 
   it("starts healthy", () => {
@@ -29,7 +29,6 @@ describe("ClodWorkerClient parent error lifecycle", () => {
   });
 
   it("sets unhealthy state when error arrives without matching pending request", () => {
-    const error = new Error("parent drain failed");
     const mockWorker = (client as unknown as { worker: MockWorker }).worker;
     mockWorker.onmessage!({ data: { type: "error", requestId: 999, message: "parent drain failed" } } as MessageEvent);
 
