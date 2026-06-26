@@ -65,7 +65,7 @@ export function applyGrassMaterialBiasFromYaml(settings: GrassSettings, text: st
 }
 
 export function getGrassMaterialBias(settings: GrassSettings): GrassMaterialBiasSettings {
-  return cloneGrassMaterialBias((settings as GrassSettingsWithMaterialBias).materialBias ?? DEFAULT_GRASS_MATERIAL_BIAS);
+  return (settings as GrassSettingsWithMaterialBias).materialBias ?? DEFAULT_GRASS_MATERIAL_BIAS;
 }
 
 export function grassTerrainDensity(
