@@ -152,6 +152,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       stoneController: vegetation.stoneController,
       propController: vegetation.propController,
       waterController: waterWeather.waterController,
+      deepOceanSurface: waterWeather.deepOceanSurface,
       deepOceanMaterial: waterWeather.deepOceanMaterial,
       weatherController: waterWeather.weatherController,
       updateWeatherStats: waterWeather.updateWeatherStats,
