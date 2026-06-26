@@ -58,6 +58,7 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
   const uRippleStrengthB = uniform(u.uRippleStrengthB.value) as TslNode;
   const uRippleLoopDistance = uniform(u.uRippleLoopDistance.value) as TslNode;
   const uLakeBreeze = uniform(u.uLakeBreeze.value) as TslNode;
+  const uFoamNoiseScale = uniform(u.uFoamNoiseScale.value) as TslNode;
   const uFresnelBase = uniform(u.uFresnelBase.value) as TslNode;
   const uFresnelNormalFlatten = uniform(u.uFresnelNormalFlatten.value) as TslNode;
   const uTurbidity = uniform(u.uTurbidity.value) as TslNode;
@@ -68,6 +69,7 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
   const worldPos: TslNode = positionWorld;
 
   const fragment = Fn(() => {
+    const waveHeight: TslNode = worldPos.y.sub(float(params.surfaceY));
     const breezeDir: TslNode = normalize(uLakeBreeze.add(vec2(0.00001, 0.0)));
     const breezeSpeed: TslNode = max(abs(uLakeBreeze.x), abs(uLakeBreeze.y));
     const advectSpeed: TslNode = breezeSpeed.mul(uRippleSpeed);
@@ -117,21 +119,28 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const deepBlue: TslNode = mix(vec3(0.0, 0.025, 0.10), uDeep, float(0.55));
     const shallowTeal: TslNode = mix(uShallow, vec3(0.0, 0.45, 0.62), float(0.35));
     const viewDepthTint: TslNode = smoothstep(float(0.0), float(0.55), float(1.0).sub(ndotv));
-    const waterColor: TslNode = mix(deepBlue, shallowTeal, viewDepthTint.mul(0.28).add(uTurbidity.mul(0.18)));
+    const heightTint: TslNode = smoothstep(float(-3.0), float(5.5), waveHeight);
+    const viewColor: TslNode = mix(deepBlue, shallowTeal, viewDepthTint.mul(0.28).add(uTurbidity.mul(0.18)));
+    const waterColor: TslNode = mix(viewColor, mix(vec3(0.01, 0.04, 0.14), shallowTeal, heightTint), float(0.32));
 
-    const chopA: TslNode = sin(worldPos.x.mul(0.09).add(worldPos.z.mul(0.07)).add(uTime.mul(0.55))).mul(0.5).add(0.5);
-    const chopB: TslNode = cos(worldPos.x.mul(0.06).sub(worldPos.z.mul(0.11)).sub(uTime.mul(0.41))).mul(0.5).add(0.5);
-    const foamBlend: TslNode = mix(chopA, chopB, blend);
-    const foam: TslNode = smoothstep(float(0.58), float(0.93), foamBlend).mul(0.18);
+    const foamUv: TslNode = worldPos.xz.mul(max(uFoamNoiseScale, float(0.01))).add(advectA.mul(0.35));
+    const n1: TslNode = fract(sin(dot(foamUv, vec2(12.9898, 78.233))).mul(43758.5453));
+    const n2: TslNode = fract(sin(dot(foamUv.mul(2.3).add(vec2(17.3, -9.1)), vec2(12.9898, 78.233))).mul(43758.5453));
+    const n3: TslNode = fract(sin(dot(foamUv.mul(5.7).add(vec2(-3.8, 23.5)), vec2(12.9898, 78.233))).mul(43758.5453));
+    const turbulent: TslNode = n1.mul(0.5).add(n2.mul(0.3)).add(n3.mul(0.2));
+    const ridged: TslNode = float(1.0).sub(abs(turbulent.mul(2.0).sub(1.0)));
+    const crestFoam: TslNode = smoothstep(float(1.2), float(4.0), waveHeight).mul(smoothstep(float(0.36), float(0.82), ridged));
+    const foam: TslNode = smoothstep(float(0.68), float(0.96), ridged).mul(0.10).add(crestFoam.mul(0.32));
 
     const backlit: TslNode = pow(max(dot(viewDir, sunDir.negate()), float(0.0)), float(4.0)).mul(0.35);
-    const crestScatter: TslNode = smoothstep(float(0.45), float(0.95), foamBlend).mul(0.35);
+    const crestScatter: TslNode = smoothstep(float(0.0), float(5.5), waveHeight).mul(0.38)
+      .add(smoothstep(float(0.45), float(0.95), ridged).mul(0.20));
     const sss: TslNode = mix(vec3(0.01, 0.04, 0.14), shallowTeal, float(0.55)).mul(backlit.add(crestScatter));
     const specDot: TslNode = max(dot(reflect(sunDir.negate(), normal), viewDir), float(0.0));
     const sunSpec: TslNode = vec3(1.0, 0.92, 0.76).mul(pow(specDot, float(384.0)).mul(1.35).add(pow(specDot, float(96.0)).mul(0.32)));
 
     const litWater: TslNode = mix(waterColor.add(sss).add(sunSpec), skyReflection, clamp(fres.mul(0.75), 0.0, 0.85));
-    const finalColor: TslNode = mix(litWater, uFoam, foam);
+    const finalColor: TslNode = mix(litWater, uFoam, clamp(foam, 0.0, 1.0));
 
     const dist: TslNode = length(uCameraPos.xz.sub(worldPos.xz));
     const horizonLift: TslNode = smoothstep(0.02, 0.35, float(1.0).sub(abs(viewDir.y)));
@@ -182,6 +191,7 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
       uRippleStrengthB.value = uniforms.uRippleStrengthB.value;
       uRippleLoopDistance.value = uniforms.uRippleLoopDistance.value;
       uLakeBreeze.value.copy(uniforms.uLakeBreeze.value);
+      uFoamNoiseScale.value = uniforms.uFoamNoiseScale.value;
       uFresnelBase.value = uniforms.uFresnelBase.value;
       uFresnelNormalFlatten.value = uniforms.uFresnelNormalFlatten.value;
       uTurbidity.value = uniforms.uTurbidity.value;
