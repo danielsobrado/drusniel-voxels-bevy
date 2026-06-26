@@ -17,6 +17,7 @@ import {
   DEFAULT_SNOW_WEATHER_SETTINGS,
   DEFAULT_STORM_WEATHER_SETTINGS,
 } from "../../weather/rain.js";
+import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 
 const positiveNumberParam = (value: string | null): number | null => {
   if (value === null) return null;
@@ -54,6 +55,7 @@ export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryF
     queryLongViewScene: queryScene === "long-view-4km"
       || queryScene === "long-view-forest-4km"
       || queryScene === "long-view-edit-stress"
+      || queryScene === RIVER_PARITY_TEST_SCENE
       || queryScene === "infinite-stream-straight"
       || queryScene === "infinite-stream-fast-turn"
       || queryScene === "infinite-stream-far-summary"
@@ -82,6 +84,7 @@ const sceneNameToConfigKey: Record<string, string> = {
   "long-view-4km": "long_view_4km",
   "long-view-forest-4km": "long_view_forest_4km",
   "long-view-edit-stress": "long_view_edit_stress",
+  [RIVER_PARITY_TEST_SCENE]: "long_view_forest_4km",
   "infinite-stream-straight": "infinite_stream_straight",
   "infinite-stream-fast-turn": "infinite_stream_fast_turn",
   "infinite-stream-far-summary": "infinite_stream_far_summary",
@@ -221,40 +224,18 @@ export function parseWeatherQueryContext(searchParams: URLSearchParams): Weather
       ? searchParams.get("meadowWindX") ?? searchParams.get("pollenWindX")
       : queryWeatherMode === "sandstorm"
         ? searchParams.get("sandstormWindX") ?? searchParams.get("sandWindX")
-        : queryWeatherMode === "snow"
-          ? searchParams.get("snowWindX")
-          : queryWeatherMode === "storm"
-            ? null
-            : searchParams.get("rainWindX"));
+        : searchParams.get("rainWindX"));
   const weatherWindZParam = searchParams.get("weatherWindZ")
     ?? (queryWeatherMode === "meadow"
       ? searchParams.get("meadowWindZ") ?? searchParams.get("pollenWindZ")
       : queryWeatherMode === "sandstorm"
         ? searchParams.get("sandstormWindZ") ?? searchParams.get("sandWindZ")
-        : queryWeatherMode === "snow"
-          ? searchParams.get("snowWindZ")
-          : queryWeatherMode === "storm"
-            ? null
-            : searchParams.get("rainWindZ"));
+        : searchParams.get("rainWindZ"));
   return {
     queryWeatherMode,
     weatherDefaults,
-    queryWeatherIntensity: weatherIntensityParam === null ? Number.NaN : Number(weatherIntensityParam),
-    queryWeatherWindX: weatherWindXParam === null ? Number.NaN : Number(weatherWindXParam),
-    queryWeatherWindZ: weatherWindZParam === null ? Number.NaN : Number(weatherWindZParam),
-  };
-}
-
-export type BootstrapQueryContext = SceneQueryFlags & Phase0SceneContext & ClodRuntimeQueryFlags;
-
-export function parseBootstrapQueryContext(
-  searchParams: URLSearchParams,
-  phase0ConfigText: string,
-): BootstrapQueryContext {
-  const scene = parseSceneQueryFlags(searchParams);
-  return {
-    ...scene,
-    ...parsePhase0SceneContext(scene.queryScene, phase0ConfigText),
-    ...parseClodRuntimeQueryFlags(searchParams),
+    queryWeatherIntensity: positiveNumberParam(weatherIntensityParam) ?? weatherDefaults.intensity,
+    queryWeatherWindX: Number(weatherWindXParam ?? weatherDefaults.windX ?? 0),
+    queryWeatherWindZ: Number(weatherWindZParam ?? weatherDefaults.windZ ?? 0),
   };
 }
