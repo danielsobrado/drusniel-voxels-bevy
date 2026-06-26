@@ -30,7 +30,9 @@ export async function lightweightArrayDigest(arr: ArrayLike<number>): Promise<st
 }
 
 async function hashFloat32Array(arr: Float32Array): Promise<string> {
-  return sha256Hex(new Uint8Array(arr).buffer);
+  const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+  const copy = bytes.slice();
+  return sha256Hex(copy.buffer);
 }
 
 function roundCoord(v: number): number {

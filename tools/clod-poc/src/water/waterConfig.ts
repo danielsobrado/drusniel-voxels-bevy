@@ -312,7 +312,7 @@ function readRiverBody(value: unknown, fallback: RiverBodyConfig): RiverBodyConf
   const record = (value ?? {}) as Record<string, unknown>;
   const pointsExplicit = Array.isArray(record.points);
   const points = pointsExplicit
-    ? record.points.map((point, index) => readNumberTuple(point, fallback.points[index] ?? [0, 0]))
+    ? (record.points as unknown[]).map((point: unknown, index: number) => readNumberTuple(point, fallback.points[index] ?? [0, 0]))
     : fallback.points.map((point) => [...point] as [number, number]);
   const rawPointsNorm = record.points_norm ?? record.pointsNorm;
   const pointsNormExplicit = Array.isArray(rawPointsNorm);

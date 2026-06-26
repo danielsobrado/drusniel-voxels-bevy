@@ -1,5 +1,6 @@
 import type { ShadowProxyConfig, ShadowProxyCoverage, ShadowProxySource } from "./shadowProxyTypes.js";
 import { sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
+import { getNaadfIntegrationFromWindow } from "../naadf/canopyBridge.js";
 
 export interface ShadowProxyValidationResult {
   ok: boolean;
@@ -83,6 +84,17 @@ export function sampleProxyHeight(
   config: ShadowProxyConfig,
   dist: number,
 ): number {
+  const naadf = getNaadfIntegrationFromWindow();
+  if (naadf) {
+    const sample = naadf.queryHeight(x, z, "shadow");
+    if (!sample.unknown && Number.isFinite(sample.height)) {
+      const biased = clampProxyHeight(sample.height + config.heightBiasM, config);
+      const fade = ringFadeWeight(dist, config);
+      const farBase = summaryBaseLevel(terrainSummary);
+      return farBase + (biased - farBase) * fade;
+    }
+  }
+
   const farBase = summaryBaseLevel(terrainSummary);
   const raw = sampleSkirtHeight(
     terrainSummary,

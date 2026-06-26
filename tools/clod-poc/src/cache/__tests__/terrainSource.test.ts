@@ -69,6 +69,15 @@ describe("terrain source hash", () => {
     const b = await hashHydrologyTerrain({ ...base, carvedBed: bedB });
     expect(a).not.toBe(b);
   });
+
+  it("distinguishes carved beds that truncate to the same uint8 when element-cast", async () => {
+    const bedA = new Float32Array([12.1, 45.6]);
+    const bedB = new Float32Array([12.9, 45.2]);
+    const base = { res: 2, worldCells: 8 };
+    const a = await hashHydrologyTerrain({ ...base, carvedBed: bedA });
+    const b = await hashHydrologyTerrain({ ...base, carvedBed: bedB });
+    expect(a).not.toBe(b);
+  });
 });
 
 describe("staged import hash", () => {

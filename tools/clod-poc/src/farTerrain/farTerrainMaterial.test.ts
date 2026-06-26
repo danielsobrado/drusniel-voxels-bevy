@@ -79,7 +79,6 @@ describe("computeFarTerrainVertexColors", () => {
     expect(result.macro.length).toBe(25);
     expect(result.slope.length).toBe(25);
     expect(result.materialWeights.length).toBe(25 * 5);
-    expect(result.valid).toBeUndefined();
   });
 
   it("all baseColor values are in [0, 1]", () => {

@@ -44,11 +44,9 @@ function toIdbRecord(record: ClodCacheStoredRecord): IdbStoredRecord {
 }
 
 function fromIdbRecord(raw: IdbStoredRecord): ClodCacheStoredRecord {
-  const payload = raw.payload.buffer.slice(
-    raw.payload.byteOffset,
-    raw.payload.byteOffset + raw.payload.byteLength,
-  );
-  return { header: raw.header, payload };
+  const bytes = new Uint8Array(raw.payload.byteLength);
+  bytes.set(raw.payload);
+  return { header: raw.header, payload: bytes.buffer };
 }
 
 function isRetryableIdbError(error: unknown): boolean {

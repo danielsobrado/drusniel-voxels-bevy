@@ -146,10 +146,14 @@ export function runGuiStartup(
       getBaseConfig: getShadowProxyConfig,
       updateInfo,
     } : undefined,
+    naadf: input.naadfIntegration ? {
+      getIntegration: () => input.naadfIntegration,
+    } : undefined,
   });
 
   colorByLodController.current = guiResult.colorByLodController;
   session.weatherStatsController = guiResult.weatherStatsController;
+  session.naadfStatsController = guiResult.naadfStatsController;
   bindings.refreshGrassStats = guiResult.refreshGrassStats;
   bindings.refreshTreeStats = guiResult.refreshTreeStats;
   bindings.refreshUnderstoryStats = guiResult.refreshUnderstoryStats;

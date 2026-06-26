@@ -38,8 +38,6 @@ export function runStoneStartup(input: StoneStartupInput): StoneStartupResult {
     currentLighting, statControllers,
   } = input;
 
-  const hydrologyData = hydrologySystem ? packHydrologyData(hydrologySystem) : null;
-
   const currentGrassLighting = (): import("../../grass.js").GrassLighting => {
     const lighting = currentLighting();
     return {

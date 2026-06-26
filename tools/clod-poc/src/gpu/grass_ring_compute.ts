@@ -553,9 +553,11 @@ export class GrassGpuRingCompute {
         format: "rgba32float",
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
       });
+      const bytes = new Uint8Array(hydroData.data.byteLength);
+      bytes.set(new Uint8Array(hydroData.data.buffer, hydroData.data.byteOffset, hydroData.data.byteLength));
       this.device.queue.writeTexture(
         { texture },
-        hydroData.data.buffer as ArrayBuffer,
+        bytes,
         { bytesPerRow: hydroData.res * 16 },
         { width: hydroData.res, height: hydroData.res },
       );

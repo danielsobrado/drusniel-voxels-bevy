@@ -5,6 +5,7 @@ import type { TreeDistribution } from "./deterministic_tree_distribution.js";
 import { worldCellIndex, worldCellOrigin } from "./deterministic_tree_distribution.js";
 import type { CanopyTerrainSampler } from "./canopy_terrain_sampler.js";
 import { clamp01 } from "./canopy_hash.js";
+import { getNaadfIntegrationFromWindow } from "../naadf/canopyBridge.js";
 
 export interface BuildCanopySummaryTileParams {
   key: CanopyWorldKey;
@@ -49,6 +50,7 @@ export function buildCanopySummaryTile(params: BuildCanopySummaryTileParams): Ca
   const { key, originX, originZ, cellSizeM, resolution, treeDistribution, revision = 1 } = params;
   const cells: CanopySummaryCell[] = new Array(resolution * resolution);
 
+  const naadf = getNaadfIntegrationFromWindow();
   for (let gz = 0; gz < resolution; gz++) {
     for (let gx = 0; gx < resolution; gx++) {
       const localX = originX + gx * cellSizeM;
@@ -61,6 +63,15 @@ export function buildCanopySummaryTile(params: BuildCanopySummaryTileParams): Ca
         cellSizeM,
         params.terrainSampler,
       );
+      if (naadf) {
+        const idx = gz * resolution + gx;
+        const sampleX = localX + cellSizeM * 0.5;
+        const sampleZ = localZ + cellSizeM * 0.5;
+        const summary = naadf.queryHeight(sampleX, sampleZ, "canopy");
+        if (Number.isFinite(summary.canopyCoverage)) {
+          cells[idx]!.coverage = clamp01(Math.max(cells[idx]!.coverage, summary.canopyCoverage));
+        }
+      }
     }
   }
 

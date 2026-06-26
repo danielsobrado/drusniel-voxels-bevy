@@ -371,7 +371,11 @@ export class TreeGpuRingCompute {
   private createHydrologyTexture(hydroData: TreeHydrologyData | null): GPUTexture {
     if (hydroData && hydroData.data.length > 0) {
       const texture = this.device.createTexture({ label: "tree ring hydro texture", size: { width: hydroData.res, height: hydroData.res }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-      this.device.queue.writeTexture({ texture }, hydroData.data.buffer as ArrayBuffer, { bytesPerRow: hydroData.res * 16 }, { width: hydroData.res, height: hydroData.res });
+      const bytes = new Uint8Array(hydroData.data.byteLength);
+      bytes.set(new Uint8Array(hydroData.data.buffer, hydroData.data.byteOffset, hydroData.data.byteLength));
+      this.device.queue.writeTexture(
+        { texture },
+        bytes, { bytesPerRow: hydroData.res * 16 }, { width: hydroData.res, height: hydroData.res });
       return texture;
     }
     return this.device.createTexture({ label: "tree ring fallback hydro texture", size: { width: 1, height: 1 }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING });

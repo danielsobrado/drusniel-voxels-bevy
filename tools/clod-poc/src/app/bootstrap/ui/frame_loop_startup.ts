@@ -5,6 +5,7 @@ import type { UnderstoryStats } from "../../../understory/index.js";
 import type { ForestLightingStats } from "../../../forest_lighting/index.js";
 import { bindClodFrameLoop } from "../../clod_frame_loop.js";
 import { resolveSlowFrameMsThreshold } from "../../runtime_config.js";
+import { shadowProxyStatsToCounters } from "../../../shadows/shadowProxyStats.js";
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
@@ -72,6 +73,25 @@ export function runFrameLoopStartup(
     views,
     farShellController,
   } = input.terrainView;
+  const {
+    shadowProxyController,
+    shadowProxyDebugState,
+    getShadowProxyConfig,
+  } = input.terrainView;
+
+  const readShadowProxyCounters = () => {
+    if (!shadowProxyController || !shadowProxyDebugState) {
+      return { shadow_proxy_enabled: 0, shadow_proxy_inert: 1 };
+    }
+    const proxyConfig = getShadowProxyConfig();
+    return shadowProxyStatsToCounters({
+      proxyEnabled: shadowProxyDebugState.shadowProxyEnabled,
+      sunShadowsEnabled: shadowProxyDebugState.sunShadowsEnabled,
+      stats: shadowProxyController.runtime.stats,
+      lightShadowMapSize: shadowProxyDebugState.lightShadowMapSize,
+      lightShadowCameraExtentM: proxyConfig.lightShadowCameraExtentM,
+    });
+  };
   const {
     drainVegetationDirtyQueue,
     treeController,
@@ -228,8 +248,16 @@ export function runFrameLoopStartup(
         },
       },
       getFarShellRadiusFactor: () => state.farShellRadiusFactor,
-      getShadowProxyInert: () => state.shadowProxyInert,
-      getShadowProxyEnabled: () => state.shadowProxyEnabled,
+      getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert,
+      getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled,
     },
+    farSummary: input.onFarSummaryUpdate
+      ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
+          input.onFarSummaryUpdate!(frameIndex, deltaSeconds, camera);
+          session.naadfStatsController?.updateDisplay();
+        } }
+      : session.naadfStatsController
+        ? { onFarSummaryUpdate: () => { session.naadfStatsController?.updateDisplay(); } }
+        : undefined,
   });
 }

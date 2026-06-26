@@ -239,6 +239,7 @@ impl Default for WaterBodyPresetsConfig {
 }
 
 #[derive(Deserialize, Clone)]
+#[serde(default)]
 pub struct ReflectionConfig {
     pub enabled: bool,
     pub resolution_scale: f32,
@@ -262,6 +263,7 @@ impl Default for ReflectionConfig {
 }
 
 #[derive(Deserialize, Clone)]
+#[serde(default)]
 pub struct RefractionConfig {
     pub enabled: bool,
     pub strength: f32,
@@ -281,6 +283,7 @@ impl Default for RefractionConfig {
 }
 
 #[derive(Deserialize, Clone)]
+#[serde(default)]
 pub struct DisplacementConfig {
     pub enabled: bool,
     pub resolution: u32,

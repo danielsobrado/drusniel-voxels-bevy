@@ -10,6 +10,7 @@ import {
   terrainMaterialSourceParam,
   type TerrainMaterialSource,
 } from "../../terrain/material/terrain_material_constants.js";
+import { NAADF_SCENES } from "../../naadf/integration.js";
 import { DEFAULT_MEADOW_WEATHER_SETTINGS } from "../../weather/meadow.js";
 import {
   DEFAULT_RAIN_WEATHER_SETTINGS,
@@ -33,6 +34,7 @@ export interface SceneQueryFlags {
   queryForestFloorScene: boolean;
   queryLongViewScene: boolean;
   queryBorderOceanScene: boolean;
+  queryNaadfScene: boolean;
 }
 
 const SHADOW_PROXY_LONG_VIEW_SCENES = new Set([
@@ -45,6 +47,7 @@ const SHADOW_PROXY_LONG_VIEW_SCENES = new Set([
 
 export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryFlags {
   const queryScene = searchParams.get("scene");
+  const isNaadfScene = queryScene !== null && NAADF_SCENES.has(queryScene);
   const isShadowProxyScene = queryScene !== null && SHADOW_PROXY_LONG_VIEW_SCENES.has(queryScene);
   return {
     queryScene,
@@ -65,8 +68,10 @@ export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryF
       || queryScene === "infinite-far-shell-mountain-approach"
       || queryScene === "long-view-8km"
       || queryScene === "long-view-16km"
+      || isNaadfScene
       || isShadowProxyScene,
     queryBorderOceanScene: queryScene === "border-ocean",
+    queryNaadfScene: isNaadfScene || searchParams.get("naadf") === "1",
   };
 }
 
@@ -99,6 +104,15 @@ const sceneNameToConfigKey: Record<string, string> = {
   "long-view-shadow-proxy-debug-visible": "long_view_4km",
   "long-view-shadow-proxy-forest": "long_view_forest_4km",
   "long-view-shadow-proxy-low-sun": "long_view_4km",
+  "infinite-naadf-flat": "infinite_stream_straight",
+  "infinite-naadf-hills": "infinite_stream_straight",
+  "infinite-naadf-mountains": "infinite_far_shell_mountain_approach",
+  "infinite-naadf-fast-flight": "infinite_stream_straight",
+  "infinite-naadf-fast-turn": "infinite_stream_fast_turn",
+  "infinite-naadf-forest": "long_view_forest_4km",
+  "infinite-naadf-sun-visibility": "long_view_4km",
+  "infinite-naadf-stress-missing": "infinite_stream_slow_builds",
+  "infinite-naadf-far": "infinite_far_shell_straight",
 };
 
 export function parsePhase0SceneContext(
@@ -224,18 +238,40 @@ export function parseWeatherQueryContext(searchParams: URLSearchParams): Weather
       ? searchParams.get("meadowWindX") ?? searchParams.get("pollenWindX")
       : queryWeatherMode === "sandstorm"
         ? searchParams.get("sandstormWindX") ?? searchParams.get("sandWindX")
-        : searchParams.get("rainWindX"));
+        : queryWeatherMode === "snow"
+          ? searchParams.get("snowWindX")
+          : queryWeatherMode === "storm"
+            ? null
+            : searchParams.get("rainWindX"));
   const weatherWindZParam = searchParams.get("weatherWindZ")
     ?? (queryWeatherMode === "meadow"
       ? searchParams.get("meadowWindZ") ?? searchParams.get("pollenWindZ")
       : queryWeatherMode === "sandstorm"
         ? searchParams.get("sandstormWindZ") ?? searchParams.get("sandWindZ")
-        : searchParams.get("rainWindZ"));
+        : queryWeatherMode === "snow"
+          ? searchParams.get("snowWindZ")
+          : queryWeatherMode === "storm"
+            ? null
+            : searchParams.get("rainWindZ"));
   return {
     queryWeatherMode,
     weatherDefaults,
-    queryWeatherIntensity: positiveNumberParam(weatherIntensityParam) ?? weatherDefaults.intensity,
-    queryWeatherWindX: Number(weatherWindXParam ?? weatherDefaults.windX ?? 0),
-    queryWeatherWindZ: Number(weatherWindZParam ?? weatherDefaults.windZ ?? 0),
+    queryWeatherIntensity: weatherIntensityParam === null ? Number.NaN : Number(weatherIntensityParam),
+    queryWeatherWindX: weatherWindXParam === null ? Number.NaN : Number(weatherWindXParam),
+    queryWeatherWindZ: weatherWindZParam === null ? Number.NaN : Number(weatherWindZParam),
+  };
+}
+
+export type BootstrapQueryContext = SceneQueryFlags & Phase0SceneContext & ClodRuntimeQueryFlags;
+
+export function parseBootstrapQueryContext(
+  searchParams: URLSearchParams,
+  phase0ConfigText: string,
+): BootstrapQueryContext {
+  const scene = parseSceneQueryFlags(searchParams);
+  return {
+    ...scene,
+    ...parsePhase0SceneContext(scene.queryScene, phase0ConfigText),
+    ...parseClodRuntimeQueryFlags(searchParams),
   };
 }

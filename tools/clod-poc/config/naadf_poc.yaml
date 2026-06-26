@@ -1,0 +1,95 @@
+naadf_poc:
+  enabled: true
+
+  world:
+    seed: 12345
+    chunk_size_cells: 16
+    voxel_size_m: 1.0
+    coordinate_mode: camera_relative_i64_keys
+
+  streaming:
+    preload_seconds: 4.0
+    max_jobs_per_frame: 8
+    max_commits_per_frame: 16
+    eviction_grace_seconds: 12.0
+    keep_stale_until_replacement: true
+
+  near_page_table:
+    enabled: true
+    radius_chunks_xz: 32
+    height_layers: 1
+
+  hash_fallback:
+    enabled: true
+    capacity: 8192
+
+  chunk_bricks:
+    brick_size: 16
+    store_mode: height_and_material
+    build_mips: true
+    max_dirty_bricks_per_frame: 128
+
+  mip_summary:
+    levels: [8, 4, 2, 1]
+    conservative_empty_skip: true
+    mixed_nodes_refine: true
+    store:
+      - occupied_any
+      - occupied_all
+      - min_height
+      - max_height
+      - avg_height
+      - avg_normal
+      - dominant_material
+      - material_variance
+      - normal_variance
+      - aadf_pos_x
+      - aadf_neg_x
+      - aadf_pos_z
+      - aadf_neg_z
+      - aadf_pos_y
+      - aadf_neg_y
+      - canopy_coverage
+      - water_coverage
+
+  far_clipmap:
+    enabled: true
+    tile_cells: 32
+    rings:
+      - { name: "summary_2_4km", start_m: 1536, end_m: 4096, cell_m: 32 }
+      - { name: "summary_4_8km", start_m: 4096, end_m: 8192, cell_m: 64 }
+      - { name: "summary_8_16km", start_m: 8192, end_m: 16384, cell_m: 128 }
+
+  query:
+    max_steps_primary: 128
+    max_steps_sun: 64
+    epsilon_m: 0.01
+    primary_lod_bias: -0.5
+    sun_lod_bias: 0.75
+    far_summary_lod_bias: 1.0
+    unknown_counts_as_blocked_for_sun: true
+
+  far_shell:
+    mode: camera_relative_summary
+    start_m: 4096
+    end_m: 16384
+    grid_res: 192
+    use_naadf_summary: true
+
+  debug:
+    enabled: true
+    show_near_page_table: false
+    show_hash_fallback_tiles: false
+    show_far_clipmap_rings: true
+    show_ray_steps: false
+    show_missing_samples: true
+    show_summary_mips: false
+    show_aadf_skips: false
+    show_sun_visibility: false
+    split_screen_primary_debug: false
+
+  acceptance:
+    max_visible_holes: 0
+    max_missing_samples_per_frame: 0
+    max_p95_primary_steps: 64
+    max_p95_sun_steps: 24

@@ -8,6 +8,7 @@ import { createShadowProxyGui } from "./shadow_proxy_gui.js";
 import { createWaterGui, type WaterGuiDeps } from "./water_gui.js";
 import { createTerrainMaterialGui, type TerrainMaterialGuiDeps } from "./terrain_material_gui.js";
 import { createLongViewGui, type LongViewGuiDeps } from "./long_view_gui.js";
+import { createNaadfGui } from "./naadf_gui.js";
 import type { GuiController } from "./gui_controller.js";
 
 export interface ClodPocGuiDeps {
@@ -17,6 +18,7 @@ export interface ClodPocGuiDeps {
   vegetation: VegetationGuiDeps;
   water: WaterGuiDeps;
   longView?: LongViewGuiDeps;
+  naadf?: import("./naadf_gui.js").NaadfGuiDeps;
   shadowProxy?: import("./shadow_proxy_gui.js").ShadowProxyGuiDeps;
 }
 
@@ -35,6 +37,7 @@ export interface ClodPocGuiResult {
   refreshUnderstoryStats: () => void;
   forestLightingStatsController: GuiController | null;
   shadowProxyStatsController: GuiController | null;
+  naadfStatsController: GuiController | null;
   statControllers: VegetationGuiStatControllers;
   digRadiusController: GuiController;
 }
@@ -55,6 +58,9 @@ export function createClodPocGui(
   if (deps.longView) {
     createLongViewGui(gui, deps.longView);
   }
+  const naadfStatsController = deps.naadf
+    ? createNaadfGui(gui, deps.naadf)
+    : null;
   return {
     gui,
     colorByLodController,
@@ -66,6 +72,7 @@ export function createClodPocGui(
     refreshUnderstoryStats: vegetation.refreshUnderstoryStats,
     forestLightingStatsController: vegetation.forestLightingStatsController,
     shadowProxyStatsController,
+    naadfStatsController,
     statControllers: vegetation.statControllers,
   };
 }

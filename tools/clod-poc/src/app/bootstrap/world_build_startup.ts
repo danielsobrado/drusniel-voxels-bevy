@@ -304,16 +304,9 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     cacheCtx,
   );
   const terrainSummary = summaryResult.summary;
-  cacheCtx = summaryResult.cacheCtx;
-  publishTerrainSummaryForDiagnostics(terrainSummary, worldSizeCells);
+  publishTerrainSummaryForDiagnostics(terrainSummary);
   if (cacheCtx) {
-    createCacheDebugOverlay({
-      cacheCtx,
-      terrainSource,
-      buildStats: result.stats,
-      summaryCache: summaryResult,
-      searchParams,
-    });
+    createCacheDebugOverlay();
   }
 
   return {

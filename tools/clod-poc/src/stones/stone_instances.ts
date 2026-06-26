@@ -11,9 +11,8 @@ import type { ClodPageNode } from "../types.js";
 import {
   STONE_GPU_CLASS_COUNT,
   StoneGpuScatterCompute,
-  stoneGpuClassRegion,
   stoneGpuScatterUnsupportedReason,
-  type   StoneGpuScatterBuffers,
+  type StoneGpuScatterBuffers,
 } from "../gpu/stone_scatter_compute.js";
 import type { GrassHydrologyData } from "../gpu/grass_ring_compute.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
@@ -345,7 +344,7 @@ export class StoneSystem {
       draw.mesh.material.dispose();
     }
     this.draws = [];
-    this.materialHandle?.dispose();
+    this.materialHandle?.material.dispose();
     this.materialHandle = null;
     this.stats = emptyStats();
     this.onStats?.(this.getStats());

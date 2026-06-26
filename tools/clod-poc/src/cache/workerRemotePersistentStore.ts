@@ -12,7 +12,9 @@ const pending = new Map<number, {
 function normalizePayload(payload: ArrayBuffer | ArrayBufferView): ArrayBuffer {
   if (payload instanceof ArrayBuffer) return payload;
   const view = payload as ArrayBufferView;
-  return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+  const bytes = new Uint8Array(view.byteLength);
+  bytes.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+  return bytes.buffer;
 }
 
 function normalizeRecord(record: ClodCacheStoredRecord): ClodCacheStoredRecord {
@@ -22,12 +24,20 @@ function normalizeRecord(record: ClodCacheStoredRecord): ClodCacheStoredRecord {
   };
 }
 
-function rpc<T>(body: Omit<CacheRpcRequest, "type" | "requestId">): Promise<T> {
+type CacheRpcBody =
+  | { op: "probe" }
+  | { op: "get"; key: string }
+  | { op: "put"; key: string; record: ClodCacheStoredRecord }
+  | { op: "delete"; key: string }
+  | { op: "clear" }
+  | { op: "keys" };
+
+function rpc<T>(body: CacheRpcBody): Promise<T> {
   const requestId = nextRequestId++;
   const request = { type: "cacheRpc", requestId, ...body } as CacheRpcRequest;
   return new Promise((resolve, reject) => {
     pending.set(requestId, { resolve: resolve as (value: unknown) => void, reject });
-    (self as DedicatedWorkerGlobalScope).postMessage(request);
+    (self as unknown as Worker).postMessage(request);
   });
 }
 

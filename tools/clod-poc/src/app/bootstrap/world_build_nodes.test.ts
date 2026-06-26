@@ -53,8 +53,8 @@ describe("lod0Nodes / allNodes bootstrap wiring", () => {
   it("world_build_startup builds terrain summary from lod0Nodes only", () => {
     const source = readSource("world_build_startup.ts");
     expect(source).toContain("splitWorldBuildNodes(result.nodesByLevel)");
-    expect(source).toMatch(/buildTerrainSummary\(\s*lod0Nodes\s*,/);
-    expect(source).not.toMatch(/buildTerrainSummary\(\s*allNodes\s*,/);
+    expect(source).toMatch(/loadTerrainSummaryWithCacheSimple\(\s*lod0Nodes\s*,/);
+    expect(source).not.toMatch(/loadTerrainSummaryWithCacheSimple\(\s*allNodes\s*,/);
   });
 
   it("clod_poc_bootstrap routes allNodes to terrain view and lod0Nodes to runtime vegetation", () => {

@@ -78,6 +78,7 @@ export interface UiStartupInput {
   };
   /** Optional far summary frame update callback. */
   onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
+  naadfIntegration?: import("../../naadf/integration.js").NaadfIntegration;
   getClodErrorCompute: () => import("../../gpu/clod_error_px_compute.js").ClodErrorPxCompute | null;
   ensureClodErrorCompute: () => Promise<void>;
   textureLoadOptions: TerrainTextureLoadOptions;
@@ -96,6 +97,7 @@ export interface UiSessionState {
   pendingParentCount: number;
   terraformEditCheckbox: HTMLInputElement | null;
   weatherStatsController: GuiDisplayController | null;
+  naadfStatsController: GuiDisplayController | null;
   grassBladeCountController: GuiDisplayController | null;
   grassVisiblePatchesController: GuiDisplayController | null;
   grassTierSummaryController: GuiDisplayController | null;
@@ -125,6 +127,7 @@ export function createUiStartupContext(input: UiStartupInput): UiStartupContext 
       pendingParentCount: 0,
       terraformEditCheckbox: null,
       weatherStatsController: null,
+      naadfStatsController: null,
       grassBladeCountController: null,
       grassVisiblePatchesController: null,
       grassTierSummaryController: null,

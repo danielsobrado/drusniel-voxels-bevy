@@ -59,7 +59,10 @@ describe("far terrain shell — horizon skirt around the world", () => {
       receiveSunShadows: true,
       useDebugLambertReceiver: false,
     });
-    expect(withShadows.mesh.material.type).not.toBe("MeshLambertMaterial");
+    const withShadowsMaterial = Array.isArray(withShadows.mesh.material)
+      ? withShadows.mesh.material[0]!
+      : withShadows.mesh.material;
+    expect(withShadowsMaterial.type).not.toBe("MeshLambertMaterial");
     expect(withShadows.mesh.receiveShadow).toBe(true);
 
     const debugLambert = buildFarTerrainShell(summary, lighting, {
@@ -67,7 +70,10 @@ describe("far terrain shell — horizon skirt around the world", () => {
       receiveSunShadows: true,
       useDebugLambertReceiver: true,
     });
-    expect(debugLambert.mesh.material.type).toBe("MeshLambertMaterial");
+    const debugLambertMaterial = Array.isArray(debugLambert.mesh.material)
+      ? debugLambert.mesh.material[0]!
+      : debugLambert.mesh.material;
+    expect(debugLambertMaterial.type).toBe("MeshLambertMaterial");
     debugLambert.dispose();
     withShadows.dispose();
   });

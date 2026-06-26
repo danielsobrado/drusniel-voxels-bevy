@@ -1,4 +1,5 @@
 ﻿import phase0ConfigText from "../../../config/infinite_streaming_phase0.yaml?raw";
+import naadfConfigText from "../../../config/naadf_poc.yaml?raw";
 import { installGlobalErrorHooks } from "../../core/diagnostics.js";
 import { parseClodRuntimeConfig } from "../runtime_config.js";
 import { runContentRegistryStartup } from "./content_registry_startup.js";
@@ -15,6 +16,7 @@ import { runUiStartup } from "./ui/ui_startup.js";
 import { surfaceHeightCore } from "../../gpu/terrain_field_core.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
+import { initNaadfIntegration, isNaadfScene, type NaadfIntegration } from "../../naadf/integration.js";
 import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig, sampleMacroTerrainMaterial } from "../../long-view/index.js";
 import type { FarShellMetrics } from "../../long-view/index.js";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
@@ -127,8 +129,25 @@ export async function bootstrapClodPoc() {
   });
 
   let farSummaryIntegration: FarSummaryIntegration | undefined;
+  let naadfIntegration: NaadfIntegration | undefined;
 
   const queryScene = queries.queryScene;
+  const isNaadfCapable = queries.queryNaadfScene;
+
+  if (isNaadfCapable) {
+    naadfIntegration = initNaadfIntegration({
+      yamlText: naadfConfigText,
+      sceneName: queryScene,
+      threeScene: renderer.scene,
+      forceEnable: queries.queryNaadfScene,
+    }) ?? undefined;
+  }
+
+  const useNaadfFarSummary = Boolean(
+    naadfIntegration?.config.farShell.useNaadfSummary
+    && (queryScene?.startsWith("infinite-naadf-") ?? false),
+  );
+
   const isLongViewCapableScene =
     queryScene === "infinite-stream-far-summary" ||
     queryScene === "infinite-stream-slow-builds" ||
@@ -142,7 +161,8 @@ export async function bootstrapClodPoc() {
     queryScene === RIVER_PARITY_TEST_SCENE ||
     queryScene === "infinite-far-shell-straight" ||
     queryScene === "infinite-far-shell-fast-turn" ||
-    queryScene === "infinite-far-shell-mountain-approach";
+    queryScene === "infinite-far-shell-mountain-approach" ||
+    isNaadfScene(queryScene);
 
   let infiniteFarShell: InfiniteFarShell | undefined;
   let farShellMetrics: FarShellMetrics | undefined;
@@ -159,27 +179,42 @@ export async function bootstrapClodPoc() {
       lvConfig.farShell.farFadeMeters = 4096;
     }
 
+    if (naadfIntegration && (queryScene?.startsWith("infinite-naadf-") ?? false)) {
+      lvConfig.farShell.startMeters = naadfIntegration.config.farShell.startM;
+      lvConfig.farShell.endMeters = naadfIntegration.config.farShell.endM;
+      if (naadfIntegration.config.farShell.gridRes > 0) {
+        lvConfig.farShell.radialSegments = naadfIntegration.config.farShell.gridRes;
+      }
+    }
+
     farShellMetrics = createFarShellMetrics();
     farShellMetrics.farShellEnabled = true;
     farShellMetrics.farShellInnerM = lvConfig.farShell.startMeters;
     farShellMetrics.farShellOuterM = lvConfig.farShell.endMeters;
     farShellMetrics.farShellGridRes = lvConfig.farShell.radialSegments;
 
-    farSummaryIntegration = initFarSummaryIntegration({
-      terrainSampler: {
-        sampleHeight: (x: number, z: number) => surfaceHeightCore(x, z),
-        sampleMaterial: (x, z) => sampleMacroTerrainMaterial(x, z),
-        sampleCanopyCoverage: () => 0,
-        sampleWaterCoverage: () => 0,
-      },
-      scene: renderer.scene,
-      camera: renderer.camera,
-      farShellController: undefined,
-      farShellMetrics,
-      config: longViewConfigToFarSummaryConfig(lvConfig),
-    });
+    if (!useNaadfFarSummary) {
+      farSummaryIntegration = initFarSummaryIntegration({
+        terrainSampler: {
+          sampleHeight: (x: number, z: number) => surfaceHeightCore(x, z),
+          sampleMaterial: (x, z) => sampleMacroTerrainMaterial(x, z),
+          sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
+          sampleWaterCoverage: () => 0,
+        },
+        scene: renderer.scene,
+        camera: renderer.camera,
+        farShellController: undefined,
+        farShellMetrics,
+        config: longViewConfigToFarSummaryConfig(lvConfig),
+      });
+    }
 
-    const heightProvider = farSummaryIntegration.getHeightProvider();
+    const heightProvider = useNaadfFarSummary && naadfIntegration
+      ? naadfIntegration.getHeightProvider()
+      : farSummaryIntegration?.getHeightProvider();
+    if (!heightProvider) {
+      throw new Error("long-view scene requires NAADF or far-summary height provider");
+    }
     const lighting = terrainView.currentLighting();
 
     const materialConfig = loadLongViewMaterialsConfig(undefined, parseQueryOverrides(searchParams));
@@ -221,7 +256,7 @@ export async function bootstrapClodPoc() {
       infiniteFarShell.setReceiveSunShadows(true);
     }
 
-    if (queryScene === "infinite-stream-slow-builds") {
+    if (queryScene === "infinite-stream-slow-builds" && farSummaryIntegration) {
       farSummaryIntegration.setForceSlowBuilds(true);
       farSummaryIntegration.setBuildDelayMs(100);
     }
@@ -312,10 +347,27 @@ export async function bootstrapClodPoc() {
       infiniteFarShell,
       farShellMetrics,
     },
-    onFarSummaryUpdate: farSummaryIntegration
-      ? (updatedSummary) => {
-          terrainView.farShellController.setTerrainSummary(updatedSummary.summary, updatedSummary.worldSizeCells);
+    onFarSummaryUpdate: farSummaryIntegration || naadfIntegration
+      ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+          if (farSummaryIntegration) {
+            farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
+          }
+          naadfIntegration?.update(frameIndex, deltaSeconds, camera);
+          if (infiniteFarShell) {
+            infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
+          }
+          terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
         }
-      : undefined,
+      : terrainView.shadowProxyController
+          ? (_frameIndex: number, _deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+              terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
+            }
+          : undefined,
+    naadfIntegration,
+    getClodErrorCompute: postRenderer.getClodErrorCompute,
+    ensureClodErrorCompute: postRenderer.ensureClodErrorCompute,
+    textureLoadOptions: postRenderer.textureLoadOptions,
+    treeConfig: world.treeConfig,
+    understoryConfig: world.understoryConfig,
   });
 }
