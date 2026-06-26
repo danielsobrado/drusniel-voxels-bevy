@@ -62,7 +62,7 @@ describe("shore surf band", () => {
 });
 
 describe("deep ocean sampler", () => {
-  it("reports the outside skirt and playable border band as ocean", () => {
+  it("reports the outside skirt and playable border band as ocean without CPU wave simulation", () => {
     const sampler = createDeepOceanSampler(256, {
       enabled: true,
       extendCells: 64,
@@ -72,7 +72,8 @@ describe("deep ocean sampler", () => {
     expect(sampler.isInPlayableOcean(300, 128)).toBe(true);
     expect(sampler.isInPlayableOcean(8, 128)).toBe(true);
     expect(sampler.isInPlayableOcean(128, 128)).toBe(false);
-    expect(sampler.sampleOceanHeight(300, 128, 1)).not.toBe(18);
-    expect(sampler.sampleOceanCurrent(300, 128, 1).length).toBe(3);
+    expect(sampler.sampleOceanHeight(300, 128, 1)).toBe(18);
+    expect(sampler.sampleOceanNormal(300, 128, 1)).toEqual([0, 1, 0]);
+    expect(sampler.sampleOceanCurrent(300, 128, 1)).toEqual([0, 0, 0]);
   });
 });
