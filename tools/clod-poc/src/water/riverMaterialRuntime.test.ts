@@ -12,6 +12,11 @@ describe("river material runtime settings", () => {
     expect(settings.geometryBankLift).toBeGreaterThan(0);
     expect(settings.geometryRiffleStrength).toBeGreaterThan(0);
     expect(settings.geometryMaxOffset).toBeGreaterThanOrEqual(settings.geometryThalwegDip);
+    expect(settings.cascadeDropStart).toBeGreaterThanOrEqual(0);
+    expect(settings.cascadeDropEnd).toBeGreaterThan(settings.cascadeDropStart);
+    expect(settings.cascadeStepStrength).toBeGreaterThan(0);
+    expect(settings.cascadeRoughnessStrength).toBeGreaterThan(0);
+    expect(settings.cascadeWhitewaterBoost).toBeGreaterThan(0);
     expect(settings.flowNormalStrength).toBeGreaterThan(0);
     expect(settings.crossCurrentStrength).toBeGreaterThan(0);
     expect(settings.rapidNormalBoost).toBeGreaterThan(0);
@@ -29,6 +34,11 @@ describe("river material runtime settings", () => {
       geometryRiffleStrength: 10,
       geometrySideRiffleStrength: 10,
       geometryMaxOffset: 10,
+      cascadeDropStart: 10,
+      cascadeDropEnd: 0.01,
+      cascadeStepStrength: 10,
+      cascadeRoughnessStrength: 10,
+      cascadeWhitewaterBoost: 10,
       flowNormalStrength: 10,
       crossCurrentStrength: -2,
       rapidNormalBoost: 10,
@@ -44,6 +54,11 @@ describe("river material runtime settings", () => {
     expect(settings.geometryRiffleStrength).toBe(0.30);
     expect(settings.geometrySideRiffleStrength).toBe(0.20);
     expect(settings.geometryMaxOffset).toBe(0.60);
+    expect(settings.cascadeDropStart).toBe(8);
+    expect(settings.cascadeDropEnd).toBe(8.05);
+    expect(settings.cascadeStepStrength).toBe(0.60);
+    expect(settings.cascadeRoughnessStrength).toBe(0.40);
+    expect(settings.cascadeWhitewaterBoost).toBe(5);
     expect(settings.flowNormalStrength).toBe(4);
     expect(settings.crossCurrentStrength).toBe(0);
     expect(settings.rapidNormalBoost).toBe(4);
