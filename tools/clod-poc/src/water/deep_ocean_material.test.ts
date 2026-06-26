@@ -24,6 +24,13 @@ describe("deep ocean material", () => {
     }
   });
 
+  it("keeps deep ocean displacement in render materials", () => {
+    expect(DEEP_SHADER_SOURCE).toContain("uniform vec4 uWaveA");
+    expect(DEEP_SHADER_SOURCE).toContain("DEEP_OCEAN_WAVE_COUNT");
+    expect(DEEP_NODE_SOURCE).toContain("material.positionNode = displacedPosition");
+    expect(DEEP_NODE_SOURCE).toContain("DEEP_OCEAN_GPU_WAVES");
+  });
+
   it("keeps reference-style sky reflection on the visible clipmap shader", () => {
     expect(CLIPMAP_SHADER_SOURCE).toContain("skyReflection");
     expect(CLIPMAP_SHADER_SOURCE).toContain("envReflection");
