@@ -100,6 +100,23 @@ export class VoxelEditStore {
     const x0 = Math.floor(x);
     const y0 = Math.floor(y);
     const z0 = Math.floor(z);
+    // Only trilinear-blend in cells touched by stored overrides. Once any edit exists,
+    // blending procedural density from integer lattice corners everywhere else would
+    // change the field (and mesh normals) in untouched regions and break page seams
+    // when only dirty pages are re-meshed after a dig.
+    if (
+      !this.voxelAt(x0, y0, z0)
+      && !this.voxelAt(x0 + 1, y0, z0)
+      && !this.voxelAt(x0, y0 + 1, z0)
+      && !this.voxelAt(x0 + 1, y0 + 1, z0)
+      && !this.voxelAt(x0, y0, z0 + 1)
+      && !this.voxelAt(x0 + 1, y0, z0 + 1)
+      && !this.voxelAt(x0, y0 + 1, z0 + 1)
+      && !this.voxelAt(x0 + 1, y0 + 1, z0 + 1)
+    ) {
+      return baseDensity(x, y, z);
+    }
+
     const tx = x - x0;
     const ty = y - y0;
     const tz = z - z0;

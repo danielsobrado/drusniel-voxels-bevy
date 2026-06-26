@@ -86,10 +86,18 @@ export function weldVertices(mesh: PageMesh, epsilon: number, tolerances?: Borde
         throw new ClodBuildError("DirtyInput", parts.join("; "));
       }
       const mc = mergeCount[found];
+      const next = mc + 1;
+      let nx = (nrm[found * 3] * mc + mesh.normals[i * 3]) / next;
+      let ny = (nrm[found * 3 + 1] * mc + mesh.normals[i * 3 + 1]) / next;
+      let nz = (nrm[found * 3 + 2] * mc + mesh.normals[i * 3 + 2]) / next;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nrm[found * 3] = nx / len;
+      nrm[found * 3 + 1] = ny / len;
+      nrm[found * 3 + 2] = nz / len;
       for (let j = 0; j < ws; j++) {
-        wgt[found * ws + j] = (wgt[found * ws + j] * mc + mesh.materialWeights[i * ws + j]) / (mc + 1);
+        wgt[found * ws + j] = (wgt[found * ws + j] * mc + mesh.materialWeights[i * ws + j]) / next;
       }
-      mergeCount[found] = mc + 1;
+      mergeCount[found] = next;
       remap[i] = found;
     }
   }

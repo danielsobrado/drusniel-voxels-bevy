@@ -53,7 +53,7 @@ import {
   createCanopyShellSystem,
   type CanopyShellSystem,
 } from "../../canopy/canopy_system.js";
-import { canopyDebugStateToConfig, createCanopyDebugState } from "../../canopy/canopy_debug.js";
+import { applyConfigToCanopyDebugState, createCanopyDebugState } from "../../canopy/canopy_debug.js";
 import type { CanopyShellConfig } from "../../canopy/canopy_types_internal.js";
 import type { CanopyDebugState } from "../../canopy/canopy_debug.js";
 import materialsYaml from "../../../config/long_view_materials.yaml?raw";
@@ -66,7 +66,7 @@ import type { WebGpuReadbackMode } from "../../core/webgpu_readback_mode.js";
 import type { ClodErrorPxCompute } from "../../gpu/clod_error_px_compute.js";
 import type { TerrainColliderSet } from "../../terrain/terrain_collider.js";
 import type { PlayerController, PlayerInteractionState } from "../../player_controller.js";
-import type { ProjectArchiveContents } from "../../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import type { ClodAppState } from "../clod_app_state.js";
 import type { ClodRuntimeBindings } from "../clod_runtime_bindings.js";
@@ -103,7 +103,7 @@ export interface TerrainViewStartupInput {
   textureMipmapsEnabled: boolean;
   maxAnisotropy: number;
   textureLoadOptions: TerrainTextureLoadOptions;
-  stagedImport: ProjectArchiveContents | null;
+  stagedImport: VoxelProjectArchiveContents | null;
   searchParams: URLSearchParams;
   rendererWebGpuDevice: GPUDevice | null;
   interaction: PlayerInteractionState;
@@ -549,7 +549,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     setCanopyConfig: (config: CanopyShellConfig) => {
       liveCanopyConfig = { ...config };
       if (canopyDebugState) {
-        Object.assign(canopyDebugState, canopyDebugStateToConfig(canopyDebugState, config));
+        applyConfigToCanopyDebugState(canopyDebugState, config);
       }
     },
     shadowProxyController,

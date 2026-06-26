@@ -548,6 +548,34 @@ export interface Lod0RebuildResult {
  * chain and it's the surface the player is looking at, so the viewer applies this
  * synchronously and defers {@link resimplifyParent} to later frames.
  */
+/** When any LOD0 page in a 2x2 parent quad is dirty, rebuild all four siblings so the
+ *  parent merge reads a consistent voxel field across internal seams. */
+export function expandLod0SiblingPages(
+  coords: readonly [number, number][],
+  worldPagesX: number,
+  worldPagesZ: number,
+): [number, number][] {
+  const keys = new Set<string>();
+  for (const [nx, nz] of coords) {
+    const parentX = nx >> 1;
+    const parentZ = nz >> 1;
+    const baseX = parentX * 2;
+    const baseZ = parentZ * 2;
+    for (let dz = 0; dz < 2; dz++) {
+      for (let dx = 0; dx < 2; dx++) {
+        const px = baseX + dx;
+        const pz = baseZ + dz;
+        if (px < 0 || pz < 0 || px >= worldPagesX || pz >= worldPagesZ) continue;
+        keys.add(`${px},${pz}`);
+      }
+    }
+  }
+  return [...keys].map((k) => {
+    const [px, pz] = k.split(",").map(Number);
+    return [px, pz] as [number, number];
+  });
+}
+
 export function rebuildDirtyLod0Pages(
   result: BuildResult,
   dirty: DirtyCellBounds,
@@ -565,13 +593,20 @@ export function rebuildDirtyLod0Pages(
   const minPz = Math.max(0, Math.floor(dirty.minZ / span));
   const maxPz = Math.min(result.worldPagesZ - 1, Math.floor(dirty.maxZ / span));
 
+  const touched: [number, number][] = [];
+  for (let pz = minPz; pz <= maxPz; pz++) {
+    for (let px = minPx; px <= maxPx; px++) {
+      touched.push([px, pz]);
+    }
+  }
+  const pages = expandLod0SiblingPages(touched, result.worldPagesX, result.worldPagesZ);
+
   const changed: ClodPageNode[] = [];
   const dirtyCoords: [number, number][] = [];
   let chunksRemeshed = 0;
   let chunksTotal = 0;
   const t0 = performance.now();
-  for (let pz = minPz; pz <= maxPz; pz++) {
-    for (let px = minPx; px <= maxPx; px++) {
+  for (const [px, pz] of pages) {
       const node = index[0]?.get(`${px},${pz}`);
       if (!node) continue;
       let mesh: PageMesh;
@@ -594,7 +629,6 @@ export function rebuildDirtyLod0Pages(
       node.bounds = boundsOf(mesh);
       changed.push(node);
       dirtyCoords.push([px, pz]);
-    }
   }
   return {
     changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - t0,

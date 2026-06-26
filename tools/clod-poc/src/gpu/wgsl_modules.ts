@@ -23,7 +23,7 @@ function composeShader(label: string, parts: readonly string[]): string {
 
 function validateSingleFieldBindings(label: string, source: string): void {
   for (const name of FIELD_GLOBALS) {
-    const declarations = source.match(new RegExp(`\bvar<[^>]+>\s+${name}\s*:`, "g")) ?? [];
+    const declarations = source.match(new RegExp(`\\bvar<[^>]+>\\s+${name}\\s*:`, "g")) ?? [];
     if (declarations.length !== 1) {
       throw new Error(`${label} must declare exactly one ${name} binding; found ${declarations.length}`);
     }

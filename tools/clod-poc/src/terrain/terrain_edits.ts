@@ -66,8 +66,16 @@ function densityAfterEdit(edit: DigEdit, x: number, y: number, z: number, curren
   const h = editHeight(edit);
   const sdf = brushSdf(edit.shape, x - edit.x, y - edit.y, z - edit.z, edit.r, h);
   const full = edit.op === "add" ? Math.max(currentDensity, -sdf) : Math.min(currentDensity, sdf);
-  const feather = Math.max(1e-3, (edit.falloff ?? 0) * edit.r);
-  const weight = Math.min(1, Math.max(0, -sdf / feather)) * (edit.strength ?? 1);
+  const strength = edit.strength ?? 1;
+  const falloff = edit.falloff ?? 0;
+  let weight: number;
+  if (falloff > 0) {
+    const feather = Math.max(1e-3, falloff * edit.r);
+    weight = Math.min(1, Math.max(0, -sdf / feather)) * strength;
+  } else {
+    // Hard brush: include the sdf=0 boundary so voxel corners match the analytic shape.
+    weight = sdf <= 0 ? strength : 0;
+  }
   return currentDensity + (full - currentDensity) * weight;
 }
 

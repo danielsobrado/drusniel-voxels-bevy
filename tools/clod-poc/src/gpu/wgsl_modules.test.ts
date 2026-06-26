@@ -5,6 +5,7 @@ import {
   composeStoneScatterShader,
   composeTerrainFieldShader,
   composeTreeRingShader,
+  composeUnderstoryRingShader,
 } from "./wgsl_modules.js";
 
 function bindingDeclarationCount(source: string, name: "digEdits" | "fieldParams"): number {
@@ -63,6 +64,18 @@ describe("WGSL module composition", () => {
     expect(source).toContain("fn tree_world_cell_from_slot");
     expect(source).toContain("fn tree_accept_mask");
     expect(source).toContain("fn tree_lod_ring");
+    expect(bindingDeclarationCount(source, "digEdits")).toBe(1);
+    expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
+  });
+
+  it("composes understory ring with explicit understory field bindings and shared terrain functions", () => {
+    const source = composeUnderstoryRingShader();
+
+    expect(source).toContain("@group(0) @binding(7)");
+    expect(source).toContain("@group(0) @binding(8)");
+    expect(source).toContain("fn surfaceHeightField");
+    expect(source).toContain("fn densityGradient");
+    expect(source).toContain("fn understory_cull");
     expect(bindingDeclarationCount(source, "digEdits")).toBe(1);
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
   });

@@ -191,7 +191,12 @@ export function rebuildPageChunks(
 ): { mesh: PageMesh; remeshed: number } {
   const P = cfg.page.chunks_per_page;
   const indices = dirtyPageChunkIndices(pageX, pageZ, cfg, dirty);
-  for (const li of indices) {
+  // Once a page is touched, re-extract every chunk. Partial remesh leaves neighbors
+  // built under an older voxel revision and the page weld / parent merge hard-fails.
+  const toRemesh = indices.length > 0
+    ? Array.from({ length: P * P }, (_, li) => li)
+    : indices;
+  for (const li of toRemesh) {
     const dx = li % P, dz = (li / P) | 0;
     chunkMeshes[li] = meshChunk(pageX * P + dx, pageZ * P + dz, cfg, world);
   }
@@ -207,5 +212,5 @@ export function rebuildPageChunks(
     normalDot: cfg.validation.normal_dot_min,
     material: cfg.validation.material_weight_epsilon,
   });
-  return { mesh, remeshed: indices.length };
+  return { mesh, remeshed: toRemesh.length };
 }
