@@ -146,6 +146,24 @@ fn tree_shoreline_density_mask(height: f32, normal_y: f32, cfg: TreeAcceptParams
   return clamp(dry_bank * riparian_boost, 0.0, 1.18);
 }
 
+fn tree_local_competition_mask(wc: vec2<f32>, wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
+  let current = tree_hash(wc, 7103u) + tree_parent_clump_mask(wpos, cfg) * 0.08;
+  var stronger_neighbors = 0.0;
+
+  for (var dz = -1; dz <= 1; dz = dz + 1) {
+    for (var dx = -1; dx <= 1; dx = dx + 1) {
+      if (dx != 0 || dz != 0) {
+        let ncell = wc + vec2<f32>(f32(dx), f32(dz));
+        let nscore = tree_hash(ncell, 7103u) + tree_hash(ncell, 7201u) * 0.08;
+        stronger_neighbors = stronger_neighbors + select(0.0, 1.0, nscore > current + 0.18);
+      }
+    }
+  }
+
+  let pressure = clamp(stronger_neighbors / 8.0, 0.0, 1.0);
+  return mix(1.05, 0.72, pressure);
+}
+
 fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
   if (height < cfg.min_height_m || height > cfg.max_height_m) {
     return 0.0;
@@ -170,7 +188,8 @@ fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAccept
   let clump_mask = tree_parent_clump_mask(wpos, cfg);
   let forest_cover = tree_forest_cover_mask(wpos, cfg);
   let shoreline_mask = tree_shoreline_density_mask(height, normal_y, cfg);
-  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask * forest_cover * shoreline_mask, 0.0, 1.0);
+  let competition_mask = tree_local_competition_mask(floor(wpos / max(params.settings_a.x, 0.001)), wpos, cfg);
+  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask * forest_cover * shoreline_mask * competition_mask, 0.0, 1.0);
 }
 
 fn tree_accept_params_from_uniforms() -> TreeAcceptParams {
