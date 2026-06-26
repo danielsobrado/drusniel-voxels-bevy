@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
-import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
+import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   createForestLightingUniforms,
@@ -202,23 +202,15 @@ function attachTreeShader(
 
 function applyFoliageMaterialSettings(
   material: THREE.MeshStandardMaterial,
-  settings: TreeSettings,
+  _settings: TreeSettings,
   replaceAtlas: (atlas: TreeFoliageAtlas | null) => void,
 ): void {
   material.side = THREE.DoubleSide;
   material.transparent = false;
   material.depthWrite = true;
-  if (!settings.foliage.enabled) {
-    material.alphaTest = 0;
-    material.map = null;
-    replaceAtlas(null);
-    material.needsUpdate = true;
-    return;
-  }
-  const atlas = createTreeFoliageAtlas(settings);
-  material.alphaTest = settings.foliage.alphaTest;
-  material.map = atlas.texture;
-  replaceAtlas(atlas);
+  material.alphaTest = 0;
+  material.map = null;
+  replaceAtlas(null);
   material.needsUpdate = true;
 }
 
