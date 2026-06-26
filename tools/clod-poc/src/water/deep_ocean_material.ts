@@ -34,6 +34,7 @@ const DEEP_OCEAN_VERT = /* glsl */ `
 const DEEP_OCEAN_FRAG = /* glsl */ `
   precision highp float;
   uniform float uTime;
+  uniform float uSurfaceY;
   uniform vec3 uShallowColor;
   uniform vec3 uDeepColor;
   uniform vec3 uFoamColor;
@@ -75,6 +76,13 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     );
   }
 
+  float fbm3(vec2 p) {
+    float n1 = noise2(p);
+    float n2 = noise2(p * 2.3 + vec2(17.3, -9.1));
+    float n3 = noise2(p * 5.7 + vec2(-3.8, 23.5));
+    return n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
+  }
+
   vec2 rippleGrad(vec2 uv, float phase) {
     float tau = 6.28318530718;
     return vec2(
@@ -107,6 +115,7 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
 
   void main() {
     vec3 worldPos = vWorldPos;
+    float waveHeight = worldPos.y - uSurfaceY;
     vec2 breezeDir = normalize(uLakeBreeze + vec2(0.00001, 0.0));
     float advectSpeed = length(uLakeBreeze) * uRippleSpeed;
     float phaseA = fract(uTime * uRippleCycle);
@@ -129,28 +138,31 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     vec3 deepBlue = mix(deepInk, uDeepColor, 0.55);
     vec3 shallowTeal = mix(uShallowColor, vec3(0.0, 0.45, 0.62), 0.35);
     float viewDepthTint = smoothstep(0.0, 0.55, 1.0 - ndotv);
+    float heightTint = smoothstep(-3.0, 5.5, waveHeight);
     vec3 waterColor = mix(deepBlue, shallowTeal, viewDepthTint * 0.28 + uTurbidity * 0.18);
+    waterColor = mix(waterColor, mix(vec3(0.01, 0.04, 0.14), shallowTeal, heightTint), 0.32);
 
     vec3 reflectDir = normalize(reflect(-viewDir, normal));
     vec3 envReflection = skyReflection(reflectDir, sunDir);
     float roughFade = 0.88;
     vec3 finalReflection = envReflection * roughFade;
 
-    float foamA1 = noise2(worldPos.xz * uFoamNoiseScale + advectA * 0.7);
-    float foamB1 = noise2((worldPos.xz + vec2(3.71, 1.13)) * uFoamNoiseScale + advectB * 0.7);
-    float varNorm = sqrt(blend * blend + (1.0 - blend) * (1.0 - blend));
-    float foamBlend = (mix(foamA1, foamB1, blend) - 0.5) / max(varNorm, 0.01) + 0.5;
-    float foam = smoothstep(0.58, 0.93, foamBlend) * 0.18;
+    vec2 foamUv = worldPos.xz * max(0.01, uFoamNoiseScale);
+    float warp = fbm3(foamUv * 0.35 + vec2(uTime * 0.035, -uTime * 0.025));
+    float turbulent = fbm3(foamUv + vec2(warp * 1.8, -warp * 1.4) + advectA * 0.35);
+    float ridged = 1.0 - abs(turbulent * 2.0 - 1.0);
+    float crestFoam = smoothstep(1.2, 4.0, waveHeight) * smoothstep(0.36, 0.82, ridged);
+    float foam = smoothstep(0.68, 0.96, ridged) * 0.10 + crestFoam * 0.32;
 
     float backlit = pow(max(dot(viewDir, -sunDir), 0.0), 4.0) * 0.35;
-    float crestScatter = smoothstep(0.45, 0.95, foamBlend) * 0.35;
+    float crestScatter = smoothstep(0.0, 5.5, waveHeight) * 0.38 + smoothstep(0.45, 0.95, ridged) * 0.20;
     vec3 sss = mix(vec3(0.01, 0.04, 0.14), shallowTeal, 0.55) * (backlit + crestScatter);
 
     float specDot = max(dot(reflect(-sunDir, normal), viewDir), 0.0);
     vec3 sunSpec = vec3(1.0, 0.92, 0.76) * (pow(specDot, 384.0) * 1.35 + pow(specDot, 96.0) * 0.32);
 
     vec3 litWater = mix(waterColor + sss + sunSpec, finalReflection, clamp(fres * 0.75, 0.0, 0.85));
-    vec3 finalColor = mix(litWater, uFoamColor, foam);
+    vec3 finalColor = mix(litWater, uFoamColor, clamp(foam, 0.0, 1.0));
 
     float dist = length(uCameraPos.xz - worldPos.xz);
     float horizonLift = smoothstep(0.02, 0.35, 1.0 - abs(viewDir.y));
@@ -164,6 +176,7 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
 `;
 
 interface DeepOceanUniforms extends WaterUniforms {
+  uSurfaceY: { value: number };
   uHorizonColor: { value: THREE.Color };
   uFogDistance: { value: number };
 }
@@ -178,6 +191,7 @@ function makeDeepOceanUniforms(params: DeepOceanMaterialParams): DeepOceanUnifor
   });
   return {
     ...base,
+    uSurfaceY: { value: params.surfaceY },
     uHorizonColor: { value: (params.horizonColor ?? new THREE.Color(0.62, 0.74, 0.88)).clone() },
     uFogDistance: { value: Math.max(256, params.visual.rippleLoopDistance * 4) },
   };
