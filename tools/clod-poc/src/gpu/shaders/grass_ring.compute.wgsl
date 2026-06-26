@@ -7,6 +7,10 @@ const INDIRECT_STRIDE_U32: u32 = 5u;
 const TAU: f32 = 6.28318530718;
 const GRASS_WATER_CLEARANCE: f32 = 0.18;
 const GRASS_HYDRO_WATER_CLEARANCE: f32 = 0.35;
+const GRASS_LOW_BANK_START_M: f32 = 0.8;
+const GRASS_LOW_BANK_END_M: f32 = 4.2;
+const GRASS_MOIST_BANK_START_M: f32 = 3.2;
+const GRASS_MOIST_BANK_END_M: f32 = 11.0;
 
 struct Params {
   center_radius: vec4<f32>,
@@ -25,6 +29,14 @@ struct HydrologySample {
   wet_mask: f32,
   carved_bed: f32,
   enabled: f32,
+};
+
+struct GrassRiverBand {
+  channel_clear: f32,
+  low_bank: f32,
+  moist_bank: f32,
+  density: f32,
+  height: f32,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -156,21 +168,39 @@ fn fallback_river_distance_m(wx: f32, wz: f32) -> f32 {
   return d * world_size;
 }
 
-fn river_grass_density_mask(wx: f32, wz: f32) -> f32 {
+fn fallback_river_grass_band(wx: f32, wz: f32) -> GrassRiverBand {
   let dist = fallback_river_distance_m(wx, wz);
-  let wet_channel = 1.0 - smoothstep(7.0, 12.0, dist);
-  let moist_bank = smoothstep(9.0, 16.0, dist) * (1.0 - smoothstep(16.0, 28.0, dist));
-  return clamp((1.0 - wet_channel) * mix(0.92, 1.08, moist_bank), 0.0, 1.08);
+  let channel_clear = 1.0 - smoothstep(7.0, 12.0, dist);
+  let low_bank = smoothstep(8.0, 13.0, dist) * (1.0 - smoothstep(13.0, 20.0, dist));
+  let moist_bank = smoothstep(16.0, 24.0, dist) * (1.0 - smoothstep(24.0, 42.0, dist));
+  let density = clamp((1.0 - channel_clear) * mix(0.68, 1.12, moist_bank) * mix(1.0, 0.62, low_bank), 0.0, 1.12);
+  let height = clamp(mix(1.0, 0.56, low_bank) * mix(1.0, 1.08, moist_bank), 0.48, 1.10);
+  return GrassRiverBand(channel_clear, low_bank, moist_bank, density, height);
 }
 
-fn hydro_bank_density_mask(sample: HydrologySample, ground_height: f32) -> f32 {
+fn hydro_river_grass_band(sample: HydrologySample, ground_height: f32) -> GrassRiverBand {
   if (sample.enabled < 0.5 || sample.wet_mask <= 0.001) {
-    return 1.0;
+    return GrassRiverBand(0.0, 0.0, 0.0, 1.0, 1.0);
   }
   let above_water = ground_height - sample.water_y;
-  let outer_bank = smoothstep(GRASS_HYDRO_WATER_CLEARANCE, 2.4, above_water);
-  let moist_boost = smoothstep(1.1, 3.5, above_water) * (1.0 - smoothstep(3.5, 7.0, above_water));
-  return clamp(outer_bank * mix(0.92, 1.10, moist_boost), 0.0, 1.10);
+  let channel_clear = 1.0 - smoothstep(GRASS_HYDRO_WATER_CLEARANCE, GRASS_LOW_BANK_START_M, above_water);
+  let low_bank = smoothstep(GRASS_LOW_BANK_START_M, 1.8, above_water) * (1.0 - smoothstep(2.9, GRASS_LOW_BANK_END_M, above_water));
+  let moist_bank = smoothstep(GRASS_MOIST_BANK_START_M, 5.6, above_water) * (1.0 - smoothstep(7.8, GRASS_MOIST_BANK_END_M, above_water));
+  let density = clamp((1.0 - channel_clear) * mix(0.62, 1.16, moist_bank) * mix(1.0, 0.58, low_bank), 0.0, 1.16);
+  let height = clamp(mix(1.0, 0.52, low_bank) * mix(1.0, 1.08, moist_bank), 0.46, 1.10);
+  return GrassRiverBand(channel_clear, low_bank, moist_bank, density, height);
+}
+
+fn river_grass_ecology_band(wx: f32, wz: f32, hydro: HydrologySample, height: f32) -> GrassRiverBand {
+  let fallback = fallback_river_grass_band(wx, wz);
+  let hydro_band = hydro_river_grass_band(hydro, height);
+  return GrassRiverBand(
+    max(fallback.channel_clear, hydro_band.channel_clear),
+    max(fallback.low_bank, hydro_band.low_bank),
+    max(fallback.moist_bank, hydro_band.moist_bank),
+    min(fallback.density, hydro_band.density) * max(1.0, max(fallback.moist_bank, hydro_band.moist_bank) * 1.08),
+    min(fallback.height, hydro_band.height) * max(1.0, max(fallback.moist_bank, hydro_band.moist_bank) * 1.04),
+  );
 }
 
 fn grass_mask(height: f32, normal_y: f32, distance: f32, wx: f32, wz: f32, hydro: HydrologySample) -> f32 {
@@ -191,12 +221,12 @@ fn grass_mask(height: f32, normal_y: f32, distance: f32, wx: f32, wz: f32, hydro
   let snow_reject = smoothstep(0.08, 0.55, snow_weight);
   let viable = above_water * slope_mask * (1.0 - rock_reject) * (1.0 - snow_reject);
   let bank = wet_bank(height, normal_y);
-  let river_mask = river_grass_density_mask(wx, wz) * hydro_bank_density_mask(hydro, height);
+  let river_band = river_grass_ecology_band(wx, wz, hydro, height);
   let scruff_meters = params.settings_b.z;
   let scruff_min = params.density_b.y;
   let scruff = (1.0 - smoothstep(scruff_meters * 0.45, scruff_meters, distance))
     * viable * scruff_min;
-  return clamp(max(grass_weight * viable * (1.0 - bank * 0.58), scruff) * river_mask, 0.0, 1.0);
+  return clamp(max(grass_weight * viable * (1.0 - bank * 0.58), scruff) * river_band.density, 0.0, 1.0);
 }
 
 fn grass_thin(distance: f32) -> f32 {
@@ -235,7 +265,7 @@ fn in_frustum(center: vec3<f32>, slack: f32) -> bool {
   return true;
 }
 
-fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal: vec3<f32>, dist: f32, edge: f32, ring_edge: f32, thin: f32) {
+fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal: vec3<f32>, dist: f32, edge: f32, ring_edge: f32, thin: f32, river_height: f32) {
   let max_per_tier = params.counts_b.x;
   let slot = atomicAdd(&counters[tier], 1u);
   if (slot >= max_per_tier) {
@@ -258,7 +288,7 @@ fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, norm
   let weights = material_weights_with_paint(height, normal.y, wpos.x, wpos.y);
   let bank = wet_bank(height, normal.y);
   let height_jit = pcg2d(wc, seed + 1501u).x * 2.0 - 1.0;
-  let height_scale = max(0.1, 1.0 + height_jit * params.settings_a.z);
+  let height_scale = max(0.1, 1.0 + height_jit * params.settings_a.z) * river_height;
   let yaw = pcg2d(wc, seed + 1709u).x * TAU;
   let phase = pcg2d(wc, seed + 1801u).x * TAU;
   let color_hash = pcg2d(wc, seed + 1901u).x;
@@ -314,21 +344,22 @@ fn process_slot(slot: u32) {
     return;
   }
 
+  let river_height = river_grass_ecology_band(wpos.x, wpos.y, hydro, height).height;
   let near_d = params.bands.x;
   let mid_d = params.bands.y;
   let far_d = params.bands.z;
   let band = params.bands.w;
   if (dist < near_d + band) {
-    append_candidate(TIER_NEAR, wc, wpos, height, normal, dist, edge, ring_edge, thin);
+    append_candidate(TIER_NEAR, wc, wpos, height, normal, dist, edge, ring_edge, thin, river_height);
   }
   if (dist >= near_d - band && dist < mid_d + band) {
-    append_candidate(TIER_MID, wc, wpos, height, normal, dist, edge, ring_edge, thin);
+    append_candidate(TIER_MID, wc, wpos, height, normal, dist, edge, ring_edge, thin, river_height);
   }
   if (dist >= mid_d - band && dist < far_d + band) {
-    append_candidate(TIER_FAR, wc, wpos, height, normal, dist, edge, ring_edge, thin);
+    append_candidate(TIER_FAR, wc, wpos, height, normal, dist, edge, ring_edge, thin, river_height);
   }
   if (dist >= far_d - band) {
-    append_candidate(TIER_SUPER, wc, wpos, height, normal, dist, edge, ring_edge, thin);
+    append_candidate(TIER_SUPER, wc, wpos, height, normal, dist, edge, ring_edge, thin, river_height);
   }
 }
 
