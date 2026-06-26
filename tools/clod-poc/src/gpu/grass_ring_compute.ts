@@ -84,6 +84,8 @@ export interface GrassGpuRingDensityParams {
   maxWidthCompensation: number;
   scruffMinDensity: number;
   gustStrength: number;
+  materialDensity?: [number, number, number, number];
+  heightDensity?: [number, number, number, number, number, number];
 }
 
 export interface GrassGpuRingIndexCounts {
@@ -160,6 +162,7 @@ export function grassGpuRingDensityParams(
 ): GrassGpuRingDensityParams {
   const nearDistance = settings.distance * settings.lod.nearFraction;
   const midDistance = settings.distance * settings.lod.midFraction;
+  const maybeFullSettings = settings as GrassSettings;
   return {
     nearDistance,
     midDistance,
@@ -170,6 +173,8 @@ export function grassGpuRingDensityParams(
     maxWidthCompensation: settings.blade.maxWidthCompensation,
     scruffMinDensity: settings.ring.scruffMinDensity,
     gustStrength: settings.wind.gustStrength,
+    materialDensity: grassMaterialDensityVector(maybeFullSettings),
+    heightDensity: grassHeightDensityVector(maybeFullSettings),
   };
 }
 
@@ -223,8 +228,8 @@ export function packGrassGpuRingParams(
   f32[30] = params.density.scruffMinDensity;
   f32[31] = params.jitter;
 
-  const material = params.materialDensity ?? DEFAULT_MATERIAL_DENSITY;
-  const height = params.heightDensity ?? DEFAULT_HEIGHT_DENSITY;
+  const material = params.materialDensity ?? params.density.materialDensity ?? DEFAULT_MATERIAL_DENSITY;
+  const height = params.heightDensity ?? params.density.heightDensity ?? DEFAULT_HEIGHT_DENSITY;
   for (let i = 0; i < 4; i++) f32[32 + i] = material[i] ?? 1;
   f32[36] = height[0] ?? DEFAULT_HEIGHT_DENSITY[0];
   f32[37] = height[1] ?? DEFAULT_HEIGHT_DENSITY[1];
