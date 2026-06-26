@@ -255,6 +255,11 @@ function addRiverMaterialTuningFolder(parent: GUI): { refresh: () => void } {
   folder.add(settings, "geometryRiffleStrength", 0, 0.30, 0.005).name("riffle strength");
   folder.add(settings, "geometrySideRiffleStrength", 0, 0.20, 0.005).name("side riffle");
   folder.add(settings, "geometryMaxOffset", 0, 0.60, 0.01).name("max geom offset");
+  folder.add(settings, "cascadeDropStart", 0, 8, 0.05).name("cascade drop start");
+  folder.add(settings, "cascadeDropEnd", 0.05, 16, 0.05).name("cascade drop end");
+  folder.add(settings, "cascadeStepStrength", 0, 0.60, 0.005).name("cascade step");
+  folder.add(settings, "cascadeRoughnessStrength", 0, 0.40, 0.005).name("cascade roughness");
+  folder.add(settings, "cascadeWhitewaterBoost", 0, 5, 0.05).name("whitewater boost");
   folder.add(settings, "flowNormalStrength", 0, 4, 0.05).name("flow normal");
   folder.add(settings, "crossCurrentStrength", 0, 4, 0.05).name("cross current");
   folder.add(settings, "rapidNormalBoost", 0, 4, 0.05).name("rapid normal");
