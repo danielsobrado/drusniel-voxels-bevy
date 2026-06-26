@@ -254,8 +254,9 @@ export class GrassGpuRingCompute {
   private readonly outputBuffers: GrassGpuRingOutputBuffers | null;
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
-  private readonly bindGroup: GPUBindGroup;
+  private bindGroup: GPUBindGroup;
   private readonly hydroTexture: GPUTexture;
+  private readonly hydroSampler: GPUSampler;
   private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private counts: GrassGpuRingCounts = { near: 0, mid: 0, far: 0, super: 0 };
@@ -269,7 +270,7 @@ export class GrassGpuRingCompute {
 
   private constructor(
     private readonly device: GPUDevice,
-    layout: GPUBindGroupLayout,
+    private readonly layout: GPUBindGroupLayout,
     pipelines: Record<PipelineName, GPUComputePipeline>,
     edits: readonly ResolvedDigEdit[],
     outputBuffers: GrassGpuRingOutputBuffers | null,
@@ -298,20 +299,8 @@ export class GrassGpuRingCompute {
       size: 4 * Uint32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    this.digEdits = device.createBuffer({
-      label: "grass ring dig edits",
-      size: Math.max(1, edits.length) * DIG_EDIT_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(this.digEdits, 0, packDigEdits(edits));
-    const packedFieldParams = packFieldParams(edits.length);
-    device.queue.writeBuffer(
-      this.fieldParams,
-      0,
-      packedFieldParams.buffer as ArrayBuffer,
-      packedFieldParams.byteOffset,
-      packedFieldParams.byteLength,
-    );
+    this.digEdits = this.createDigEditsBuffer(edits);
+    this.writeFieldParams(edits.length);
     this.counterReadbacks = Array.from({ length: READBACK_SLOTS }, (_, index) => ({
       buffer: device.createBuffer({
         label: `grass ring counter readback ${index}`,
@@ -323,25 +312,12 @@ export class GrassGpuRingCompute {
       cpu: new Uint32Array(TIER_COUNT),
     }));
     this.hydroTexture = this.createHydrologyTexture(hydroData);
-    const hydroSampler = device.createSampler({
+    this.hydroSampler = device.createSampler({
       label: "grass ring hydro sampler",
       magFilter: "nearest",
       minFilter: "nearest",
     });
-    this.bindGroup = device.createBindGroup({
-      label: "grass ring bind group",
-      layout,
-      entries: [
-        { binding: 0, resource: { buffer: this.paramBuffer } },
-        { binding: 1, resource: { buffer: this.counterBuffer } },
-        { binding: 2, resource: { buffer: this.indirectArgs } },
-        ...this.outputBindGroupEntries(),
-        { binding: 7, resource: { buffer: this.digEdits } },
-        { binding: 8, resource: { buffer: this.fieldParams } },
-        { binding: 9, resource: this.hydroTexture.createView() },
-        { binding: 10, resource: hydroSampler },
-      ],
-    });
+    this.bindGroup = this.createBindGroup();
   }
 
   static async create(
@@ -393,6 +369,15 @@ export class GrassGpuRingCompute {
       grass_cull: cull,
       build_indirect_args: buildIndirectArgs,
     }, edits, outputBuffers, { ...ring }, hydroData);
+  }
+
+  updateDigEdits(edits: readonly ResolvedDigEdit[]): void {
+    const previous = this.digEdits;
+    this.digEdits = this.createDigEditsBuffer(edits);
+    this.writeFieldParams(edits.length);
+    this.bindGroup = this.createBindGroup();
+    previous.destroy();
+    this.failedReason = null;
   }
 
   dispatch(params: GrassGpuRingDispatchParams, indexCounts: GrassGpuRingIndexCounts): boolean {
@@ -508,6 +493,44 @@ export class GrassGpuRingCompute {
       if (slot.busy) slot.destroyAfterMap = true;
       else slot.buffer.destroy();
     }
+  }
+
+  private createBindGroup(): GPUBindGroup {
+    return this.device.createBindGroup({
+      label: "grass ring bind group",
+      layout: this.layout,
+      entries: [
+        { binding: 0, resource: { buffer: this.paramBuffer } },
+        { binding: 1, resource: { buffer: this.counterBuffer } },
+        { binding: 2, resource: { buffer: this.indirectArgs } },
+        ...this.outputBindGroupEntries(),
+        { binding: 7, resource: { buffer: this.digEdits } },
+        { binding: 8, resource: { buffer: this.fieldParams } },
+        { binding: 9, resource: this.hydroTexture.createView() },
+        { binding: 10, resource: this.hydroSampler },
+      ],
+    });
+  }
+
+  private createDigEditsBuffer(edits: readonly ResolvedDigEdit[]): GPUBuffer {
+    const buffer = this.device.createBuffer({
+      label: "grass ring dig edits",
+      size: Math.max(1, edits.length) * DIG_EDIT_BYTES,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    this.device.queue.writeBuffer(buffer, 0, packDigEdits(edits));
+    return buffer;
+  }
+
+  private writeFieldParams(editCount: number): void {
+    const packedFieldParams = packFieldParams(editCount);
+    this.device.queue.writeBuffer(
+      this.fieldParams,
+      0,
+      packedFieldParams.buffer as ArrayBuffer,
+      packedFieldParams.byteOffset,
+      packedFieldParams.byteLength,
+    );
   }
 
   private dispatchPipeline(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline, workgroups: number): void {
