@@ -11,7 +11,7 @@ import {
   type TreeEcologySample,
 } from "./tree_ecology.js";
 
-const TREE_CONTACT_OFFSET_M = 0;
+const TREE_CONTACT_OFFSET_M = -0.12;
 
 export interface TreeTerrainSampler {
   surfaceHeight(x: number, z: number): number;
