@@ -3,7 +3,7 @@ import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_confi
 import type { WaterConfig } from "../water/waterConfig.js";
 import type { ClodPagesConfig } from "../config.js";
 import type { SerializedHydrologyTerrain } from "../clod_worker_protocol.js";
-import type { DigEdit } from "../terrain/terrain.js";
+import type { VoxelEditSnapshot } from "../terrain/terrain.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
@@ -35,23 +35,15 @@ async function hashFloat32Array(arr: Float32Array): Promise<string> {
   return sha256Hex(copy.buffer);
 }
 
-function roundCoord(v: number): number {
-  return Math.round(v * 1000) / 1000;
-}
-
-export function canonicalizeDigEdits(edits: readonly DigEdit[]) {
-  return edits
-    .map((e) => ({
-      x: roundCoord(e.x),
-      y: roundCoord(e.y),
-      z: roundCoord(e.z),
-      r: roundCoord(e.r),
-      shape: e.shape ?? "sphere",
-      op: e.op ?? "remove",
-      material: e.material ?? 0,
-      height: e.height ?? null,
-      strength: e.strength ?? null,
-      falloff: e.falloff ?? null,
+function canonicalizeVoxelEdits(snapshot: VoxelEditSnapshot) {
+  return snapshot.deltas
+    .map((delta) => ({
+      x: delta.x,
+      y: delta.y,
+      z: delta.z,
+      density: Math.round(delta.density * 1_000_000) / 1_000_000,
+      materialSlot: delta.materialSlot ?? null,
+      revision: delta.revision,
     }))
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
@@ -150,15 +142,16 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
 
 export async function buildStagedImportHash(manifest: {
   worldSize: number;
-  terrainEdits: DigEdit[];
+  voxelTerrainEdits: VoxelEditSnapshot;
   config: ClodPagesConfig;
 } | null): Promise<string | null> {
   if (!manifest) return null;
-  const editsCanonical = canonicalizeDigEdits(manifest.terrainEdits);
+  const editsCanonical = canonicalizeVoxelEdits(manifest.voxelTerrainEdits);
   const editsDigest = await sha256Hex(textEncoder.encode(JSON.stringify(editsCanonical)).buffer);
   return hashJson({
     worldSize: manifest.worldSize,
-    editCount: manifest.terrainEdits.length,
+    editCount: manifest.voxelTerrainEdits.deltas.length,
+    editsRevision: manifest.voxelTerrainEdits.revision,
     editsDigest,
     page: manifest.config.page,
     meshopt: manifest.config.meshopt_package_version,
