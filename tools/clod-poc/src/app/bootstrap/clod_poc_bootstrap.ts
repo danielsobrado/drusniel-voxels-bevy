@@ -21,6 +21,7 @@ import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, l
 import type { FarShellMetrics } from "../../long-view/index.js";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
+import { applyOwnershipToFarShellRange, resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
 import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 import * as THREE from "three";
 
@@ -132,6 +133,12 @@ export async function bootstrapClodPoc() {
 
   const queryScene = queries.queryScene;
   const isNaadfCapable = queries.queryNaadfScene;
+  const streamingOwnership = resolveStreamingOwnership({
+    streaming: queries.phase0Streaming,
+    targetVisibleM: queries.phase0TargetVisibleM,
+    targetFutureVisibleM: queries.phase0Config.phase0.target_future_visible_m,
+    streamingScene: queryScene?.startsWith("infinite-") ?? false,
+  });
 
   if (isNaadfCapable) {
     naadfIntegration = initNaadfIntegration({
@@ -185,6 +192,8 @@ export async function bootstrapClodPoc() {
         lvConfig.farShell.radialSegments = naadfIntegration.config.farShell.gridRes;
       }
     }
+
+    applyOwnershipToFarShellRange(lvConfig.farShell, streamingOwnership);
 
     farShellMetrics = createFarShellMetrics();
     farShellMetrics.farShellEnabled = true;
