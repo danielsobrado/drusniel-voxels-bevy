@@ -59,7 +59,8 @@ export function applyBrushSdfToDensity(
   const full = brush.op === "add"
     ? Math.max(currentDensity, -sdf)
     : Math.min(currentDensity, sdf);
-  const feather = Math.max(1e-3, brush.falloff * brush.radius);
-  const weight = Math.min(1, Math.max(0, -sdf / feather)) * brush.strength;
+  const weight = brush.falloff > 0
+    ? Math.min(1, Math.max(0, -sdf / Math.max(1e-3, brush.falloff * brush.radius))) * brush.strength
+    : sdf <= 0 ? brush.strength : 0;
   return currentDensity + (full - currentDensity) * weight;
 }
