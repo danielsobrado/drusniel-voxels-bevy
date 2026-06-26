@@ -179,59 +179,128 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     bakedMacroTint = bakeMacroTint(
       proceduralTerrain.noise.noiseA,
       proceduralTerrain.noise.noiseB,
-      proceduralTerrain.noise.resolution,
       bakeRes,
+      worldCells,
     );
   }
+  waterConfig = resolveWaterConfig(waterConfig, worldCells);
+  setBorderCoastRuntime(borderCoastOceanConfig, worldCells);
 
-  const clodCacheContext: ClodCacheContext = initClodCacheContext({
-    cache: clodRuntime.cache,
-    searchParams,
-    sourceHash: buildProceduralTextureHash(proceduralTextureConfig) + "|" + buildStagedImportHash(stagedImport),
-    cfg,
+  const buildStatus = { value: "preparing" };
+  const updateBuildOverlay = () => updateClodOverlay({
     worldSize: WORLD,
+    renderedTriangles: 0,
+    nodesByLod: {},
+    forcedSplits: 0,
+    blockedSplits: 0,
+    bubbleForcedSplits: 0,
+    cutFrozen: false,
+    errorThreshold: cfg.selection.error_threshold_px,
+    buildStatus: buildStatus.value,
   });
-  const buildStatus = { value: "building world" };
-  const cacheDisabled = isCacheSessionDisabled();
-  const cacheLabel = cacheDisabled
-    ? "disabled"
-    : clodCacheContext.enabled
-      ? `${clodRuntime.cache.mode}`
-      : "off";
-  info.textContent = `building world (${WORLD}x${WORLD} pages, cache ${cacheLabel})`;
+  updateBuildOverlay();
 
-  // Remaining startup logic is unchanged.
-  const cacheResult = await loadTerrainSummaryWithCacheSimple({
-    context: clodCacheContext,
-    buildProgress,
-    buildProgressPhase,
-    buildProgressPercent,
-    buildProgressBar,
-    buildStatus,
-    build: async () => {
-      buildProgressPhase.textContent = "building terrain pages";
-      return clodWorker.buildWorld(cfg, WORLD, stagedImport?.terrainSnapshot ?? null);
-    },
-  });
-  const result = cacheResult.result;
-  if (cacheResult.fromCache) clearWorkerCacheSnapshot();
-  const { lod0Nodes, allNodes, maxTerrainLevel } = splitWorldBuildNodes(result.nodes);
-  const terrainSummary = result.terrainSummary;
-  publishTerrainSummaryForDiagnostics(terrainSummary);
-  const hydrologySystem = resolveWaterConfig(waterConfig).enabled
-    ? new HydrologySystem({ worldCells, terrainSummary })
+  const cacheParam = searchParams.get("cache");
+  const cacheDisabled = cacheParam === "0" || cacheParam === "false";
+  if (cacheDisabled) setCacheSessionDisabled(true);
+  clearWorkerCacheSnapshot();
+
+  if (stagedImport) replaceDigEdits(stagedImport.manifest.terrainEdits);
+
+  const preHydrologyTerrain = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
+  const hydrologySystem = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
+    ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain)
     : null;
-  if (hydrologySystem) setTerrainSurfaceOverride(makeFakeBodyCarvedSampler(hydrologySystem));
-  else setTerrainSurfaceOverride(null);
-  setBorderCoastRuntime(borderCoastOceanConfig);
-  replaceDigEdits(stagedImport?.terrainSnapshot?.digEdits ?? getDigEditsSnapshot());
-  const polishStats = aggregateDiagonalPolishStats(result.nodes);
-  const polishLine = formatDiagonalPolishStats(polishStats);
-  createCacheDebugOverlay(clodCacheContext, cacheResult, () => {
-    setCacheSessionDisabled(true);
-    location.reload();
+  if (hydrologySystem) {
+    setTerrainSurfaceOverride((x, z) => hydrologySystem.terrainHeight(x, z));
+    console.log("[water] hydrology built", hydrologySystem.stats);
+  } else if (waterConfig.enabled && waterConfig.fakeBodies.carveTerrain) {
+    setTerrainSurfaceOverride((x, z) => preHydrologyTerrain.surfaceHeight(x, z));
+  } else {
+    setTerrainSurfaceOverride(null);
+  }
+  const hydrologyTerrain = hydrologySystem
+    ? {
+        res: hydrologySystem.grid.res,
+        worldCells: hydrologySystem.grid.worldCells,
+        carvedBed: hydrologySystem.grid.carvedBed,
+      }
+    : null;
+
+  const scene = searchParams.get("scene") ?? "default";
+  const proceduralTextureHash = await buildProceduralTextureHash(
+    proceduralTextureConfig.enabled,
+    proceduralTextureConfig.enabled
+      ? `${proceduralTextureConfig.seed}:${proceduralTextureConfig.noise.resolution}`
+      : null,
+  );
+  const stagedImportHash = await buildStagedImportHash(stagedImport?.manifest ?? null);
+  const terrainSource: TerrainSourceInputs = {
+    scene,
+    worldSeed: "0",
+    worldPages: WORLD,
+    generatorVersion: cfg.meshopt_package_version,
+    digRevision: getDigEditRevision(),
+    hydrologyTerrain,
+    borderCoastOceanConfig,
+    waterConfig: {
+      enabled: waterConfig.enabled,
+      source: waterConfig.source,
+      fakeBodies: { carveTerrain: waterConfig.fakeBodies.carveTerrain },
+      hydrology: { enabled: waterConfig.hydrology.enabled },
+    },
+    proceduralTextureEnabled: proceduralTextureConfig.enabled,
+    proceduralTextureHash,
+    stagedImportHash,
+    longViewScene: queryLongViewScene,
+  };
+
+  let cacheCtx: ClodCacheContext | null = await initClodCacheContext({
+    cfg,
+    worldPages: WORLD,
+    terrainSource,
+    forceDisabled: cacheDisabled,
+    role: "main",
   });
-  updateClodOverlay({ polishLine, cache: cacheResult.fromCache ? "hit" : "miss" });
+
+  const buildNote =
+    WORLD >= 16 ? " (worker build; large world may take a while)" :
+    WORLD >= 8 ? " (worker build)" :
+    "";
+  info.textContent = `building ${WORLD}x${WORLD} world…${buildNote}`;
+  buildProgress.hidden = false;
+  buildProgressPhase.textContent = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
+  buildProgressPercent.textContent = "0%";
+  buildProgressBar.value = 0;
+  buildStatus.value = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
+  updateBuildOverlay();
+  await new Promise((r) => setTimeout(r, 16));
+
+  const result = await clodWorker.buildWorld(WORLD, WORLD, cfg, getDigEditsSnapshot(), ({ done, total, level, phase }) => {
+    const fraction = total > 0 ? Math.min(1, done / total) : 0;
+    buildProgressBar.value = fraction;
+    buildProgressPercent.textContent = `${Math.floor(fraction * 100)}%`;
+    buildProgressPhase.textContent = `${phase}  L${level}  ${done}/${total}`;
+    info.textContent = `building ${WORLD}x${WORLD} world… ${Math.floor(fraction * 100)}%\n${phase}  L${level}  ${done}/${total}`;
+    buildStatus.value = `${phase} L${level} ${done}/${total}`;
+    updateBuildOverlay();
+  }, hydrologyTerrain, borderCoastOceanConfig, cacheDisabled || isCacheSessionDisabled(), terrainSource);
+
+  buildProgress.hidden = true;
+  buildStatus.value = "ready";
+  const polishLine = formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish)));
+  const { lod0Nodes, allNodes } = splitWorldBuildNodes(result.nodesByLevel);
+  const maxTerrainLevel = Math.max(...result.nodesByLevel.keys());
+  const worldSizeCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const summaryResult = await loadTerrainSummaryWithCacheSimple(
+    lod0Nodes,
+    worldSizeCells,
+    8,
+    cacheCtx,
+  );
+  const terrainSummary = summaryResult.summary;
+  publishTerrainSummaryForDiagnostics(terrainSummary);
+  createCacheDebugOverlay({ clearWorkerCache: () => clodWorker.clearCache() })?.update();
 
   return {
     cfg,
@@ -250,7 +319,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     clodWorker,
     WORLD,
     worldCells,
-    worldSizeCells: worldCells,
+    worldSizeCells,
     lod0Nodes,
     allNodes,
     maxTerrainLevel,
