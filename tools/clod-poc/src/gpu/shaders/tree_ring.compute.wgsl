@@ -28,6 +28,7 @@ struct TreeAcceptParams {
   water_clearance_m: f32,
   rock_reject: f32,
   snow_reject: f32,
+  material_density: vec4<f32>,
 };
 
 struct TreeLodParams {
@@ -56,6 +57,10 @@ struct TreeRingParams {
   index_counts_b: vec4<u32>,
   index_counts_c: vec4<u32>,
   settings_u: vec4<u32>,
+  material_density: vec4<f32>,
+  species_material_oak: vec4<f32>,
+  species_material_pine: vec4<f32>,
+  species_material_dead: vec4<f32>,
   planes: array<vec4<f32>, 6>,
 };
 
@@ -228,7 +233,8 @@ fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAccept
     return 0.0;
   }
   let weights = tree_material_weights(height, normal_y);
-  let ground_weight = clamp(weights.x + weights.y * 0.25, 0.0, 1.0);
+  let material_density = max(0.0, dot(weights, cfg.material_density));
+  let ground_weight = clamp((weights.x + weights.y * 0.25) * material_density, 0.0, 1.0);
   if (weights.y >= cfg.rock_reject || weights.w >= cfg.snow_reject) {
     return 0.0;
   }
@@ -267,6 +273,7 @@ fn tree_accept_params_from_uniforms() -> TreeAcceptParams {
     params.settings_d.w,
     params.settings_e.x,
     params.settings_e.y,
+    params.material_density,
   );
 }
 
@@ -301,37 +308,16 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
   var active = vec4<u32>(0u);
   var fade = vec4<f32>(0.0);
   if (band_m <= 0.0) {
-    if (dist <= near_m) {
-      active.x = 1u;
-      fade.x = 1.0;
-    } else if (dist <= mid_m) {
-      active.y = 1u;
-      fade.y = 1.0;
-    } else if (dist <= far_m) {
-      active.z = 1u;
-      fade.z = 1.0;
-    } else if (dist <= radius_m) {
-      active.w = 1u;
-      fade.w = 1.0;
-    }
+    if (dist <= near_m) { active.x = 1u; fade.x = 1.0; }
+    else if (dist <= mid_m) { active.y = 1u; fade.y = 1.0; }
+    else if (dist <= far_m) { active.z = 1u; fade.z = 1.0; }
+    else if (dist <= radius_m) { active.w = 1u; fade.w = 1.0; }
     return TreeLodRing(active, fade);
   }
-  if (dist < near_m + band_m) {
-    active.x = 1u;
-    fade.x = 1.0;
-  }
-  if (dist >= near_m - band_m && dist < mid_m + band_m) {
-    active.y = 1u;
-    fade.y = 1.0;
-  }
-  if (dist >= mid_m - band_m && dist < far_m + band_m) {
-    active.z = 1u;
-    fade.z = 1.0;
-  }
-  if (dist >= far_m - band_m && dist <= radius_m + band_m) {
-    active.w = 1u;
-    fade.w = 1.0;
-  }
+  if (dist < near_m + band_m) { active.x = 1u; fade.x = 1.0; }
+  if (dist >= near_m - band_m && dist < mid_m + band_m) { active.y = 1u; fade.y = 1.0; }
+  if (dist >= mid_m - band_m && dist < far_m + band_m) { active.z = 1u; fade.z = 1.0; }
+  if (dist >= far_m - band_m && dist <= radius_m + band_m) { active.w = 1u; fade.w = 1.0; }
   if (dist >= near_m - band_m && dist <= near_m + band_m) {
     let t = clamp((dist - (near_m - band_m)) / (band_m * 2.0), 0.0, 1.0);
     fade.x = min(fade.x, 1.0 - t);
@@ -356,12 +342,8 @@ fn group_index(species: u32, lod: u32) -> u32 {
 }
 
 fn index_count_for_group(group: u32) -> u32 {
-  if (group < 4u) {
-    return params.index_counts_a[group];
-  }
-  if (group < 8u) {
-    return params.index_counts_b[group - 4u];
-  }
+  if (group < 4u) { return params.index_counts_a[group]; }
+  if (group < 8u) { return params.index_counts_b[group - 4u]; }
   return params.index_counts_c[group - 8u];
 }
 
@@ -376,9 +358,7 @@ fn in_frustum(center: vec3<f32>, slack: f32) -> bool {
 }
 
 fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {
-  if (distance_m <= params.lod.y) {
-    return false;
-  }
+  if (distance_m <= params.lod.y) { return false; }
   let start_xz = params.center_radius.xy;
   let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;
   let crown_height = end_height + 5.5;
@@ -392,6 +372,12 @@ fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> 
     }
   }
   return false;
+}
+
+fn species_material_bias(species: u32, materials: vec4<f32>) -> f32 {
+  if (species == 0u) { return max(0.0, dot(materials, params.species_material_oak)); }
+  if (species == 1u) { return max(0.0, dot(materials, params.species_material_pine)); }
+  return max(0.0, dot(materials, params.species_material_dead));
 }
 
 fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) -> u32 {
@@ -408,31 +394,28 @@ fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) ->
   let clump = clamp(tree_parent_clump_mask(wpos, cfg), 0.0, 1.25);
   let old_age = smoothstep(0.58, 0.96, tree_hash(wc, 2309u));
   let oak = base.x
+    * species_material_bias(0u, materials)
     * mix(1.45, 0.52, height_band)
     * mix(0.78, 1.28, moisture)
     * mix(0.82, 1.18, slope_health)
     * (1.0 - materials.y * 0.35)
     * mix(1.06, 0.82, old_age);
   let pine = base.y
+    * species_material_bias(1u, materials)
     * mix(0.52, 1.62, height_band)
     * mix(0.84, 1.16, 1.0 - moisture)
     * mix(0.78, 1.25, slope_health)
     * (1.0 + materials.y * 0.22)
     * mix(1.02, 0.9, old_age);
   let dead = base.z
+    * species_material_bias(2u, materials)
     * (0.38 + clump * 0.28 + ridge_stress * 0.42 + materials.y * 0.32 + old_age * 0.72);
   let weights = max(vec3<f32>(oak, pine, dead), vec3<f32>(0.0));
   let total = weights.x + weights.y + weights.z;
-  if (total <= 0.0) {
-    return 0xffffffffu;
-  }
+  if (total <= 0.0) { return 0xffffffffu; }
   let roll = tree_hash(wc, 409u) * total;
-  if (roll < weights.x) {
-    return 0u;
-  }
-  if (roll < weights.x + weights.y) {
-    return 1u;
-  }
+  if (roll < weights.x) { return 0u; }
+  if (roll < weights.x + weights.y) { return 1u; }
   return 2u;
 }
 
@@ -440,61 +423,41 @@ fn append_tree(species: u32, lod: u32, wc: vec2<f32>, height: f32, scale: f32) {
   let max_per_group = params.settings_u.x;
   let group = group_index(species, lod);
   let slot = atomicAdd(&counters[group], 1u);
-  if (slot >= max_per_group) {
-    return;
-  }
+  if (slot >= max_per_group) { return; }
   let out_index = group * max_per_group + slot;
   out_cell[out_index] = vec4<f32>(wc.x, wc.y, height, scale);
 }
 
 fn append_lod_if_active(species: u32, lod: u32, active: u32, wc: vec2<f32>, height: f32, scale: f32) {
-  if (active != 0u) {
-    append_tree(species, lod, wc, height, scale);
-  }
+  if (active != 0u) { append_tree(species, lod, wc, height, scale); }
 }
 
 fn process_tree_slot(slot: u32) {
   let grid = params.settings_u.y;
   let max_per_group = params.settings_u.x;
-  if (slot >= grid * grid || max_per_group == 0u) {
-    return;
-  }
+  if (slot >= grid * grid || max_per_group == 0u) { return; }
   let cell_size = params.settings_a.x;
   let wc = tree_world_cell_from_slot(slot, grid, cell_size, params.center_radius.xy);
   let jitter = tree_hash2(wc, 1103u);
   let wpos = (wc + jitter) * cell_size;
   let world_max = params.center_radius.w;
-  if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max) {
-    return;
-  }
+  if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max) { return; }
   let dist = distance(wpos, params.center_radius.xy);
-  if (dist > params.center_radius.z + params.lod.w) {
-    return;
-  }
+  if (dist > params.center_radius.z + params.lod.w) { return; }
 
   let cfg = tree_accept_params_from_uniforms();
   let raw_height = surfaceHeightField(wpos.x, wpos.y);
   let hydro = tree_hydrology_at(wpos.x, wpos.y);
   let height = tree_hydrology_ground_height(raw_height, hydro);
-  if (tree_hydrology_reject_tree(hydro, height, cfg)) {
-    return;
-  }
+  if (tree_hydrology_reject_tree(hydro, height, cfg)) { return; }
   let normal = normalize(densityGradient(wpos.x, height, wpos.y));
   let accept = tree_accept_mask(height, normal.y, wpos, cfg)
     * tree_hydrology_bank_density_mask(hydro, height, normal.y, cfg);
-  if (tree_hash(wc, 809u) >= accept) {
-    return;
-  }
-  if (!in_frustum(vec3<f32>(wpos.x, height + 4.0, wpos.y), 8.0)) {
-    return;
-  }
-  if (terrain_ridge_filter(wpos, height, dist)) {
-    return;
-  }
+  if (tree_hash(wc, 809u) >= accept) { return; }
+  if (!in_frustum(vec3<f32>(wpos.x, height + 4.0, wpos.y), 8.0)) { return; }
+  if (terrain_ridge_filter(wpos, height, dist)) { return; }
   let species = select_species(wc, wpos, height, normal.y);
-  if (species >= TREE_SPECIES_COUNT) {
-    return;
-  }
+  if (species >= TREE_SPECIES_COUNT) { return; }
   let scale = tree_instance_scale(wc, wpos, normal.y, species);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
   append_lod_if_active(species, TREE_LOD_NEAR, ring.active.x, wc, height, scale);
@@ -506,12 +469,8 @@ fn process_tree_slot(slot: u32) {
 @compute @workgroup_size(TREE_WORKGROUP_SIZE)
 fn clear_counters(@builtin(global_invocation_id) id: vec3<u32>) {
   let i = id.x;
-  if (i < TREE_GROUP_COUNT) {
-    atomicStore(&counters[i], 0u);
-  }
-  if (i < TREE_GROUP_COUNT * TREE_INDIRECT_STRIDE_U32) {
-    indirect_args[i] = 0u;
-  }
+  if (i < TREE_GROUP_COUNT) { atomicStore(&counters[i], 0u); }
+  if (i < TREE_GROUP_COUNT * TREE_INDIRECT_STRIDE_U32) { indirect_args[i] = 0u; }
 }
 
 @compute @workgroup_size(TREE_WORKGROUP_SIZE)
@@ -531,8 +490,6 @@ fn write_draw_args(group: u32, index_count: u32, instance_count: u32) {
 @compute @workgroup_size(TREE_WORKGROUP_SIZE)
 fn build_indirect_args(@builtin(global_invocation_id) id: vec3<u32>) {
   let group = id.x;
-  if (group >= TREE_GROUP_COUNT) {
-    return;
-  }
+  if (group >= TREE_GROUP_COUNT) { return; }
   write_draw_args(group, index_count_for_group(group), atomicLoad(&counters[group]));
 }
