@@ -87,11 +87,14 @@ export function carveRiversAndClassifyWater(
 }
 
 function ensureVisibleFallbackRivers(grid: HydrologyGrid, config: HydrologyRiversConfig): void {
+  if (!config.guaranteeFallbackRivers) return;
   const minimumRiverCells = Math.max(grid.res * 2.25, grid.res * grid.res * 0.006);
   if (countRiverCells(grid) >= minimumRiverCells) return;
 
-  for (const path of FALLBACK_RIVER_PATHS) {
-    carveFallbackRiverPath(grid, config, path);
+  for (let index = 0; index < FALLBACK_RIVER_PATHS.length; index++) {
+    if (index === 0 && !config.fallbackMainRiver) continue;
+    if (index > 0 && !config.fallbackTributaries) continue;
+    carveFallbackRiverPath(grid, config, FALLBACK_RIVER_PATHS[index]);
   }
 }
 
