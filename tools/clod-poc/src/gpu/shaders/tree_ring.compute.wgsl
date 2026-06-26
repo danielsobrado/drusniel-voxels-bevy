@@ -298,14 +298,39 @@ fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> 
   return false;
 }
 
-fn select_species(wc: vec2<f32>, height: f32, normal_y: f32) -> u32 {
-  _ = height;
-  _ = normal_y;
-  let weights = max(params.species_weights.xyz, vec3<f32>(0.0));
+fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) -> u32 {
+  let base = max(params.species_weights.xyz, vec3<f32>(0.0));
+  if (base.x + base.y + base.z <= 0.0) {
+    return 0xffffffffu;
+  }
+
+  let cfg = tree_accept_params_from_uniforms();
+  let materials = tree_material_weights(height, normal_y);
+  let height_band = smoothstep(cfg.lowland_height_m, cfg.highland_height_m, height);
+  let moisture = 1.0 - clamp((height - WATER_LEVEL) / 42.0, 0.0, 1.0);
+  let slope_health = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
+  let ridge_stress = 1.0 - slope_health;
+  let clump = clamp(tree_parent_clump_mask(wpos, cfg), 0.0, 1.25);
+
+  let oak = base.x
+    * mix(1.45, 0.52, height_band)
+    * mix(0.78, 1.28, moisture)
+    * mix(0.82, 1.18, slope_health)
+    * (1.0 - materials.y * 0.35);
+  let pine = base.y
+    * mix(0.52, 1.62, height_band)
+    * mix(0.84, 1.16, 1.0 - moisture)
+    * mix(0.78, 1.25, slope_health)
+    * (1.0 + materials.y * 0.22);
+  let dead = base.z
+    * (0.62 + clump * 0.34 + ridge_stress * 0.42 + materials.y * 0.32);
+
+  let weights = max(vec3<f32>(oak, pine, dead), vec3<f32>(0.0));
   let total = weights.x + weights.y + weights.z;
   if (total <= 0.0) {
     return 0xffffffffu;
   }
+
   let roll = tree_hash(wc, 409u) * total;
   if (roll < weights.x) {
     return 0u;
@@ -367,7 +392,7 @@ fn process_tree_slot(slot: u32) {
     return;
   }
 
-  let species = select_species(wc, height, normal.y);
+  let species = select_species(wc, wpos, height, normal.y);
   if (species >= TREE_SPECIES_COUNT) {
     return;
   }
