@@ -1,4 +1,4 @@
-import type { ProjectSessionState } from "../../project/project_archive.js";
+import type { ProjectSessionState } from "../../project/voxel_project_archive.js";
 import type { BrushOp, BrushShape } from "../../terrain/terrain.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
