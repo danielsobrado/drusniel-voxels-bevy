@@ -6,7 +6,9 @@ import { vegRng } from "../veg/veg_rng.js";
 import { VEG_BARK_COLOR, VEG_TREE_SPECIES } from "../veg/veg_species.js";
 import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 
-export type TreeGeometryMap = Record<TreeSpeciesId, Record<number, Record<TreeLod, THREE.BufferGeometry>>>;
+export type TreeVariantGeometryMap = Record<number, Record<TreeLod, THREE.BufferGeometry>>;
+export type TreeSpeciesGeometryMap = Record<TreeLod, THREE.BufferGeometry> & { variants: TreeVariantGeometryMap };
+export type TreeGeometryMap = Record<TreeSpeciesId, TreeSpeciesGeometryMap>;
 
 const BARK = new THREE.Color(0x5b3a22);
 const DEAD_BARK = new THREE.Color(0x7a6653);
@@ -18,21 +20,25 @@ const PINE_LEAF_HIGH = new THREE.Color(0x367142);
 export function createTreeGeometryMap(settings: TreeSettings): TreeGeometryMap {
   const out = {} as TreeGeometryMap;
   for (const species of TREE_SPECIES) {
-    out[species] = {} as Record<number, Record<TreeLod, THREE.BufferGeometry>>;
+    const variants = {} as TreeVariantGeometryMap;
     for (let variant = 0; variant < TREE_STRUCTURAL_VARIANTS; variant++) {
-      out[species][variant] = {} as Record<TreeLod, THREE.BufferGeometry>;
+      variants[variant] = {} as Record<TreeLod, THREE.BufferGeometry>;
       for (const lod of TREE_LODS) {
-        out[species][variant][lod] = createTreeGeometry(species, variant, lod, settings);
+        variants[variant][lod] = createTreeGeometry(species, variant, lod, settings);
       }
     }
+    const speciesMap = variants[0] as TreeSpeciesGeometryMap;
+    speciesMap.variants = variants;
+    out[species] = speciesMap;
   }
   return out;
 }
 
 export function disposeTreeGeometryMap(map: TreeGeometryMap): void {
   for (const species of TREE_SPECIES) {
-    for (let variant = 0; variant < TREE_STRUCTURAL_VARIANTS; variant++) {
-      for (const lod of TREE_LODS) map[species][variant]?.[lod]?.dispose();
+    const variants = map[species].variants ?? { 0: map[species] };
+    for (const variant of Object.values(variants)) {
+      for (const lod of TREE_LODS) variant[lod].dispose();
     }
   }
 }
@@ -137,7 +143,8 @@ function createTreeGeometry(
     return geometry;
   }
 
-  // All LODs for this variant derive from the same skeleton seed; only detail budgets vary.
+  // All LODs for the same species+variant derive from the same skeleton seed;
+  // only bark/foliage budgets vary by LOD.
   const sp = VEG_TREE_SPECIES[species];
   const rng = vegRng(settings.seed, `tree/${species}/${variant}`);
   const built = buildTree(sp, rng, { lod: GRAMMAR_LOD[lod], barkColor: VEG_BARK_COLOR[species] });
@@ -152,9 +159,14 @@ function createTreeGeometry(
   return geometry;
 }
 
-export function treeGeometryVariant(map: TreeGeometryMap, species: TreeSpeciesId, variant: number, lod: TreeLod): THREE.BufferGeometry {
+export function treeGeometryVariant(
+  map: TreeGeometryMap,
+  species: TreeSpeciesId,
+  variant: number,
+  lod: TreeLod,
+): THREE.BufferGeometry {
   const safeVariant = Math.max(0, Math.min(TREE_STRUCTURAL_VARIANTS - 1, Math.floor(variant)));
-  return map[species][safeVariant]?.[lod] ?? map[species][0][lod];
+  return map[species].variants?.[safeVariant]?.[lod] ?? map[species][lod];
 }
 
 function appendImpostorTree(

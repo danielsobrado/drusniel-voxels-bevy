@@ -5,11 +5,18 @@ function field(value: number | string | undefined): string {
   return String(value);
 }
 
+/** Encode node id for file-path-safe cache keys (Windows-safe). */
+export function encodeNodeIdForKey(nodeId: string): string {
+  return nodeId.replace(/[:/,]/g, "-");
+}
+
 export function buildClodCacheKey(parts: ClodCacheKeyParts): string {
   const pageX = field(parts.pageX);
   const pageZ = field(parts.pageZ);
   const lod = parts.lod === undefined ? "_" : `lod${parts.lod}`;
-  const nodeId = field(parts.nodeId);
+  const nodeSuffix = parts.nodeId === undefined
+    ? `${pageX}_${pageZ}_${lod}`
+    : `${pageX}_${pageZ}_${lod}_node_${encodeNodeIdForKey(parts.nodeId)}`;
 
   return [
     parts.namespace,
@@ -21,7 +28,7 @@ export function buildClodCacheKey(parts: ClodCacheKeyParts): string {
     parts.sourceRevision,
     parts.configHash,
     parts.sourceHash,
-    `${pageX}_${pageZ}_${lod}_${nodeId}`,
+    nodeSuffix,
   ].join("/");
 }
 

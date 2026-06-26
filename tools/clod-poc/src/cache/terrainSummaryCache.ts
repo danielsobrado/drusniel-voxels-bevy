@@ -58,7 +58,7 @@ export async function loadTerrainSummaryWithCache(
   }
 
   const keyParts = buildBaseKeyParts(cacheCtx, "terrain-summary", {
-    sourceHash: cacheCtx.sourceRevision,
+    sourceHash: cacheCtx.terrainSourceHash,
   });
   const cached = await cacheCtx.service.get(keyParts, decodeTerrainSummaryArtifact);
 
@@ -112,7 +112,7 @@ export async function loadTerrainSummaryWithCacheSimple(
   }
 
   const keyParts = buildBaseKeyParts(cacheCtx, "terrain-summary", {
-    sourceHash: cacheCtx.sourceRevision,
+    sourceHash: cacheCtx.terrainSourceHash,
   });
   const cached = await cacheCtx.service.get(keyParts, decodeTerrainSummaryArtifact);
   if (cached.status === "hit" && cached.artifact) {

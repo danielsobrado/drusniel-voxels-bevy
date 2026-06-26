@@ -1,5 +1,6 @@
 import type { ClodPagesConfig } from "../config.js";
 import { sha256Hex } from "./checksum.js";
+import { lightweightArrayDigest } from "./terrainSource.js";
 
 export interface CacheRelevantFarSettings {
   farReduceFactor: number;
@@ -50,23 +51,7 @@ export interface SourceHashInput {
   materialWeights?: Float32Array;
 }
 
-export async function computeSourceRevisionPoC(input: {
-  worldSeed: string;
-  scene: string;
-  worldPages: number;
-  generatorVersion: string;
-  digRevision: number;
-}): Promise<string> {
-  // TODO: replace PoC sourceRevision with production edit revision.
-  return hashJson({
-    worldSeed: input.worldSeed,
-    scene: input.scene,
-    worldPages: input.worldPages,
-    generatorVersion: input.generatorVersion,
-    digRevision: input.digRevision,
-  });
-}
-
+/** Per-page mesh digest for future LOD0 exact-source invalidation. */
 export async function computePageSourceHash(input: SourceHashInput): Promise<string> {
   const content: Record<string, unknown> = {
     worldSeed: input.worldSeed,
@@ -93,19 +78,4 @@ export async function computePageSourceHash(input: SourceHashInput): Promise<str
   }
 
   return hashJson(content);
-}
-
-async function lightweightArrayDigest(arr: ArrayLike<number>): Promise<string> {
-  const len = arr.length;
-  if (len === 0) return "empty";
-  const sampleCount = Math.min(64, len);
-  const step = Math.max(1, Math.floor(len / sampleCount));
-  const samples: number[] = [];
-  let sum = 0;
-  for (let i = 0; i < len; i += step) {
-    const v = arr[i]!;
-    samples.push(v);
-    sum += v;
-  }
-  return hashJson({ len, sum, samples });
 }

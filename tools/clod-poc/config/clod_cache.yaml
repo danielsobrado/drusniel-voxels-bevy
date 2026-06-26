@@ -26,7 +26,7 @@ cache:
     include_builder_version: true
     include_world_seed: true
     include_source_revision: true
-  include_source_hash: true
+    include_source_hash: true
 
   streaming:
     read_budget_per_frame: 8

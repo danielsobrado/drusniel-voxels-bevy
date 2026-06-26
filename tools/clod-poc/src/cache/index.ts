@@ -17,8 +17,20 @@ export {
   type ClodCacheConfig,
 } from "./cacheConfig.js";
 
-export { buildClodCacheKey, parsePageCoordsFromNodeId } from "./cacheKey.js";
-export { computeCacheConfigHash, computeSourceRevisionPoC, computePageSourceHash } from "./cacheHash.js";
+export { buildClodCacheKey, encodeNodeIdForKey, parsePageCoordsFromNodeId } from "./cacheKey.js";
+export { computeCacheConfigHash } from "./cacheHash.js";
+export {
+  computeTerrainSourceHash,
+  buildStagedImportHash,
+  buildProceduralTextureHash,
+  type TerrainSourceInputs,
+} from "./terrainSource.js";
+export {
+  setWorkerCacheSnapshot,
+  getWorkerCacheBuildStats,
+  getWorkerCacheServiceMetrics,
+} from "./cacheMetricsBridge.js";
+export { type WorkerCacheBuildStats } from "./cacheMetrics.js";
 export { sha256Hex } from "./checksum.js";
 export { compressPayload, decompressPayload } from "./compression.js";
 export {

@@ -18,9 +18,21 @@ export interface ClodCacheMetrics {
   lastMissReason: CacheMissReason | null;
   lastError: string | null;
   nodesLoadedFromCache: number;
-  buildMsSaved: number;
+  coldBuildMsAvoided: number;
+  cacheDecodeMs: number;
+  netSavedMs: number;
   coldBuildMs: number;
-  warmReadMs: number;
+}
+
+export interface WorkerCacheBuildStats {
+  nodesFromCache: number;
+  nodesBuilt: number;
+  cacheHits: number;
+  cacheMisses: number;
+  coldBuildMsAvoided: number;
+  cacheDecodeMs: number;
+  netSavedMs: number;
+  coldBuildMs: number;
 }
 
 export function createEmptyCacheMetrics(enabled: boolean): ClodCacheMetrics {
@@ -42,9 +54,10 @@ export function createEmptyCacheMetrics(enabled: boolean): ClodCacheMetrics {
     lastMissReason: null,
     lastError: null,
     nodesLoadedFromCache: 0,
-    buildMsSaved: 0,
+    coldBuildMsAvoided: 0,
+    cacheDecodeMs: 0,
+    netSavedMs: 0,
     coldBuildMs: 0,
-    warmReadMs: 0,
   };
 }
 

@@ -24,7 +24,7 @@ describe("cache key", () => {
     const b = buildClodCacheKey({ ...base });
     expect(a).toBe(b);
     expect(a).toBe(
-      "drusniel-clod-poc/1/clod-poc-cache-v1/clod-page-node/0/0.22.0/abc123/cfg111/src222/2_3_lod1_L1:2,3",
+      "drusniel-clod-poc/1/clod-poc-cache-v1/clod-page-node/0/0.22.0/abc123/cfg111/src222/2_3_lod1_node_L1-2-3",
     );
   });
 
@@ -55,6 +55,6 @@ describe("cache key", () => {
       nodeId: undefined,
       artifactKind: "terrain-summary",
     });
-    expect(key.split("/").at(-1)).toBe("_______");
+    expect(key.split("/").at(-1)).toBe("_____");
   });
 });

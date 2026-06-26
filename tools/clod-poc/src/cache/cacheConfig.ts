@@ -144,8 +144,8 @@ export function parseClodCacheConfig(text: string): ClodCacheConfig {
         : boolAt(invalidation, "include_source_hash", "cache.invalidation"),
     },
     streaming: {
-      read_budget_per_frame: intAt(streaming, "read_budget_per_frame", "cache.streaming", 0),
-      write_budget_per_frame: intAt(streaming, "write_budget_per_frame", "cache.streaming", 0),
+      read_budget_per_frame: intAt(streaming, "read_budget_per_frame", "cache.streaming", 1),
+      write_budget_per_frame: intAt(streaming, "write_budget_per_frame", "cache.streaming", 1),
       max_decode_ms_per_frame: numberAt(streaming, "max_decode_ms_per_frame", "cache.streaming", 0),
       max_encode_ms_per_frame: numberAt(streaming, "max_encode_ms_per_frame", "cache.streaming", 0),
       keep_stale_until_replacement: boolAt(streaming, "keep_stale_until_replacement", "cache.streaming"),

@@ -202,7 +202,7 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   const cacheCtx = await initClodCacheContext({
     cfg: request.cfg,
     worldPages: request.worldPagesX,
-    digRevision: request.digRevision ?? 0,
+    terrainSource: request.terrainSource,
     forceDisabled: request.cacheDisabled ?? false,
   });
   const cacheStats: CachedBuildStats = {
@@ -210,7 +210,9 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
     nodesBuilt: 0,
     cacheHits: 0,
     cacheMisses: 0,
-    buildMsSaved: 0,
+    coldBuildMsAvoided: 0,
+    cacheDecodeMs: 0,
+    netSavedMs: 0,
     coldBuildMs: 0,
   };
   const cacheHooks = cacheCtx?.effective ? createBuildCacheHooks(cacheCtx, cacheStats) : undefined;
@@ -226,7 +228,14 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   index = buildNodeIndex(result);
   topLevel = Math.max(...result.nodesByLevel.keys());
   const serialized = serializeBuildResult(result);
-  post({ type: "buildComplete", requestId: request.requestId, result: serialized }, collectBuildResultTransferables(serialized));
+  const cacheServiceMetrics = cacheCtx?.service.getMetrics();
+  post({
+    type: "buildComplete",
+    requestId: request.requestId,
+    result: serialized,
+    cacheBuildStats: cacheCtx?.effective ? cacheStats : undefined,
+    cacheServiceMetrics: cacheCtx?.effective ? cacheServiceMetrics : undefined,
+  }, collectBuildResultTransferables(serialized));
 }
 
 function queueCoalescedDig(requestId: number, dirty: DirtyCellBounds): void {

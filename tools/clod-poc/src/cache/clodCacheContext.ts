@@ -3,7 +3,11 @@ import type { ClodCacheConfig } from "./cacheConfig.js";
 import { parseClodCacheConfig, isCacheEffective } from "./cacheConfig.js";
 import type { ClodCacheService } from "./cacheService.js";
 import { createClodCacheService } from "./cacheService.js";
-import { computeCacheConfigHash, computePageSourceHash, computeSourceRevisionPoC } from "./cacheHash.js";
+import { computeCacheConfigHash } from "./cacheHash.js";
+import {
+  computeTerrainSourceHash,
+  type TerrainSourceInputs,
+} from "./terrainSource.js";
 import type { ClodCacheKeyParts } from "./cacheTypes.js";
 import cacheConfigText from "../../config/clod_cache.yaml?raw";
 
@@ -13,7 +17,7 @@ export interface ClodCacheContext {
   configHash: string;
   worldSeed: string;
   generatorVersion: string;
-  sourceRevision: string;
+  terrainSourceHash: string;
   worldPagesX: number;
   worldPagesZ: number;
   farReduceFactor: number;
@@ -25,9 +29,7 @@ let activeContext: ClodCacheContext | null = null;
 export async function initClodCacheContext(input: {
   cfg: ClodPagesConfig;
   worldPages: number;
-  worldSeed?: string;
-  scene?: string;
-  digRevision?: number;
+  terrainSource: TerrainSourceInputs;
   farReduceFactor?: number;
   cacheConfigText?: string;
   forceDisabled?: boolean;
@@ -37,26 +39,22 @@ export async function initClodCacheContext(input: {
     cacheConfig.enabled = false;
   }
 
-  const worldSeed = input.worldSeed ?? "0";
+  const worldSeed = input.terrainSource.worldSeed;
   const generatorVersion = input.cfg.meshopt_package_version;
-  const sourceRevision = await computeSourceRevisionPoC({
-    worldSeed,
-    scene: input.scene ?? "default",
-    worldPages: input.worldPages,
-    generatorVersion,
-    digRevision: input.digRevision ?? 0,
-  });
+  const terrainSourceHash = await computeTerrainSourceHash(input.terrainSource);
   const farReduceFactor = input.farReduceFactor ?? 8;
   const configHash = await computeCacheConfigHash(input.cfg, { farReduceFactor });
 
   const service = createClodCacheService(cacheConfig);
+  await service.initialize();
+
   const ctx: ClodCacheContext = {
     config: cacheConfig,
     service,
     configHash,
     worldSeed,
     generatorVersion,
-    sourceRevision,
+    terrainSourceHash,
     worldPagesX: input.worldPages,
     worldPagesZ: input.worldPages,
     farReduceFactor,
@@ -82,27 +80,13 @@ export function buildBaseKeyParts(
     artifactKind,
     worldSeed: ctx.worldSeed,
     generatorVersion: ctx.generatorVersion,
-    sourceRevision: ctx.sourceRevision,
+    sourceRevision: ctx.terrainSourceHash,
     configHash: ctx.configHash,
-    sourceHash: overrides.sourceHash ?? ctx.sourceRevision,
+    sourceHash: overrides.sourceHash ?? ctx.terrainSourceHash,
     ...overrides,
   };
 }
 
-export async function buildPageNodeSourceHash(
-  ctx: ClodCacheContext,
-  pageX: number,
-  pageZ: number,
-  lod: number,
-): Promise<string> {
-  return computePageSourceHash({
-    worldSeed: ctx.worldSeed,
-    generatorVersion: ctx.generatorVersion,
-    worldPagesX: ctx.worldPagesX,
-    worldPagesZ: ctx.worldPagesZ,
-    sourceRevision: ctx.sourceRevision,
-    pageX,
-    pageZ,
-    lod,
-  });
+export function pageNodeSourceHash(ctx: ClodCacheContext): string {
+  return ctx.terrainSourceHash;
 }

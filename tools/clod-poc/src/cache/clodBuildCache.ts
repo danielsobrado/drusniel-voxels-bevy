@@ -4,26 +4,19 @@ import type { ClodPagesConfig } from "../config.js";
 import type { ClodPageNode } from "../types.js";
 import {
   buildBaseKeyParts,
-  buildPageNodeSourceHash,
+  pageNodeSourceHash,
   type ClodCacheContext,
 } from "./clodCacheContext.js";
 import {
   decodeClodPageNodeArtifact,
   encodeClodPageNodeArtifact,
-  decodeClodPageTreeArtifact,
   encodeClodPageTreeArtifact,
   type ClodPageNodeArtifact,
 } from "./artifactSerializer.js";
+import type { WorkerCacheBuildStats } from "./cacheMetrics.js";
 import { cacheLogger } from "./cacheLogger.js";
 
-export interface CachedBuildStats {
-  nodesFromCache: number;
-  nodesBuilt: number;
-  cacheHits: number;
-  cacheMisses: number;
-  buildMsSaved: number;
-  coldBuildMs: number;
-}
+export type CachedBuildStats = WorkerCacheBuildStats;
 
 function artifactToNode(artifact: ClodPageNodeArtifact, children: ClodPageNode[] = []): ClodPageNode {
   return {
@@ -69,22 +62,26 @@ function nodeToArtifact(node: ClodPageNode): ClodPageNodeArtifact {
 }
 
 export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildStats): BuildCacheHooks {
+  const sourceHash = () => pageNodeSourceHash(ctx);
+
   return {
     async tryLoadNode(nodeId, level, px, pz) {
       if (!ctx.effective) return null;
-      const sourceHash = await buildPageNodeSourceHash(ctx, px, pz, level);
       const keyParts = buildBaseKeyParts(ctx, "clod-page-node", {
         pageX: px,
         pageZ: pz,
         lod: level,
         nodeId,
-        sourceHash,
+        sourceHash: sourceHash(),
       });
       const result = await ctx.service.get(keyParts, decodeClodPageNodeArtifact);
       if (result.status === "hit" && result.artifact) {
+        const cachedBuildMs = typeof result.metadata?.buildMs === "number" ? result.metadata.buildMs : 0;
         stats.nodesFromCache++;
         stats.cacheHits++;
-        stats.buildMsSaved += result.decodeMs;
+        stats.cacheDecodeMs += result.decodeMs;
+        stats.coldBuildMsAvoided += cachedBuildMs;
+        stats.netSavedMs += Math.max(0, cachedBuildMs - result.decodeMs);
         return artifactToNode(result.artifact);
       }
       stats.cacheMisses++;
@@ -96,13 +93,12 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
       stats.nodesBuilt++;
       stats.coldBuildMs += buildMs;
       const { pageX, pageZ, lod } = parseNodeId(node.id);
-      const sourceHash = await buildPageNodeSourceHash(ctx, pageX, pageZ, lod);
       const keyParts = buildBaseKeyParts(ctx, "clod-page-node", {
         pageX,
         pageZ,
         lod,
         nodeId: node.id,
-        sourceHash,
+        sourceHash: sourceHash(),
       });
       void ctx.service.put(
         keyParts,
@@ -125,7 +121,7 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
         }
       }
       const keyParts = buildBaseKeyParts(ctx, "clod-page-tree", {
-        sourceHash: ctx.sourceRevision,
+        sourceHash: sourceHash(),
       });
       void ctx.service.put(
         keyParts,
@@ -139,7 +135,9 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
         { nodeCount: nodes.length },
       );
       cacheLogger.info(
-        `build complete: ${stats.nodesFromCache} from cache, ${stats.nodesBuilt} built, saved ~${stats.buildMsSaved.toFixed(1)} ms decode`,
+        `build complete: ${stats.nodesFromCache} from cache, ${stats.nodesBuilt} built, ` +
+        `avoided ${stats.coldBuildMsAvoided.toFixed(1)} ms build, decode ${stats.cacheDecodeMs.toFixed(1)} ms, ` +
+        `net saved ${stats.netSavedMs.toFixed(1)} ms`,
       );
     },
   };
@@ -163,19 +161,13 @@ export async function buildWorldAsyncWithCache(
     nodesBuilt: 0,
     cacheHits: 0,
     cacheMisses: 0,
-    buildMsSaved: 0,
+    coldBuildMsAvoided: 0,
+    cacheDecodeMs: 0,
+    netSavedMs: 0,
     coldBuildMs: 0,
   };
   const hooks = cacheCtx ? createBuildCacheHooks(cacheCtx, cacheStats) : undefined;
   const result = await buildWorldAsync(worldPagesX, worldPagesZ, cfg, onProgress, hooks);
-  if (cacheCtx) {
-    await cacheCtx.service.flush();
-    const metrics = cacheCtx.service.getMetrics();
-    metrics.nodesLoadedFromCache = cacheStats.nodesFromCache;
-    metrics.buildMsSaved = cacheStats.buildMsSaved;
-    metrics.coldBuildMs = cacheStats.coldBuildMs;
-  }
+  if (cacheCtx) await cacheCtx.service.flush();
   return { result, cacheStats };
 }
-
-export { decodeClodPageTreeArtifact };

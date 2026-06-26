@@ -1,8 +1,8 @@
 import type { ClodCachePersistentConfig } from "./cacheConfig.js";
-import type { ClodCacheStoredRecord } from "./cacheTypes.js";
+import type { ClodCacheManifestEntry, ClodCacheStoredRecord } from "./cacheTypes.js";
 import { CacheUnavailableError } from "./cacheErrors.js";
 
-const MANIFEST_KEY = "__manifest__";
+export const MANIFEST_KEY = "__manifest__";
 
 export interface PersistentCacheStore {
   get(key: string): Promise<ClodCacheStoredRecord | null>;
@@ -10,10 +10,13 @@ export interface PersistentCacheStore {
   delete(key: string): Promise<void>;
   clear(): Promise<void>;
   keys(): Promise<string[]>;
+  getManifestEntries(): Promise<ClodCacheManifestEntry[] | null>;
+  putManifestEntries(entries: ClodCacheManifestEntry[]): Promise<void>;
 }
 
 export class InMemoryPersistentStore implements PersistentCacheStore {
   private readonly records = new Map<string, ClodCacheStoredRecord>();
+  private manifest: ClodCacheManifestEntry[] | null = null;
 
   async get(key: string): Promise<ClodCacheStoredRecord | null> {
     return this.records.get(key) ?? null;
@@ -29,10 +32,19 @@ export class InMemoryPersistentStore implements PersistentCacheStore {
 
   async clear(): Promise<void> {
     this.records.clear();
+    this.manifest = null;
   }
 
   async keys(): Promise<string[]> {
     return [...this.records.keys()];
+  }
+
+  async getManifestEntries(): Promise<ClodCacheManifestEntry[] | null> {
+    return this.manifest ? this.manifest.map((e) => ({ ...e })) : null;
+  }
+
+  async putManifestEntries(entries: ClodCacheManifestEntry[]): Promise<void> {
+    this.manifest = entries.map((e) => ({ ...e }));
   }
 }
 
@@ -105,6 +117,24 @@ export class IndexedDbStore implements PersistentCacheStore {
       };
       request.onerror = () => reject(request.error ?? new CacheUnavailableError("IndexedDB keys failed"));
     });
+  }
+
+  async getManifestEntries(): Promise<ClodCacheManifestEntry[] | null> {
+    const db = await this.openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.config.object_store_name, "readonly");
+      const store = tx.objectStore(this.config.object_store_name);
+      const request = store.get(MANIFEST_KEY);
+      request.onsuccess = () => {
+        const value = request.result as ClodCacheManifestEntry[] | undefined;
+        resolve(value ?? null);
+      };
+      request.onerror = () => reject(request.error ?? new CacheUnavailableError("IndexedDB manifest read failed"));
+    });
+  }
+
+  async putManifestEntries(entries: ClodCacheManifestEntry[]): Promise<void> {
+    await this.withStore("readwrite", (store) => store.put(entries, MANIFEST_KEY));
   }
 }
 

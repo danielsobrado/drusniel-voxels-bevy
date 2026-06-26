@@ -72,6 +72,7 @@ export interface ClodCacheGetResult<TArtifact> {
   key: string;
   bytesRead: number;
   decodeMs: number;
+  metadata?: Record<string, string | number | boolean>;
 }
 
 export interface ClodCachePutResult {

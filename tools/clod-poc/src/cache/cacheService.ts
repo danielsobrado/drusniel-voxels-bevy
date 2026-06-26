@@ -39,6 +39,7 @@ export interface ClodCacheService {
   clearMemory(): void;
   clearPersistent(): Promise<void>;
   flush(): Promise<void>;
+  initialize(): Promise<void>;
   getMetrics(): ClodCacheMetrics;
   getConfig(): ClodCacheConfig;
 }
@@ -54,6 +55,8 @@ export class ClodCacheServiceImpl implements ClodCacheService {
   private readonly manifest: ClodCacheManifest;
   private readonly scheduler: CacheScheduler;
   private readonly metrics: CacheMetricsTracker;
+  private manifestLoaded = false;
+  private manifestSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config: ClodCacheConfig, persistentOverride?: PersistentCacheStore | null) {
     this.config = config;
@@ -76,6 +79,60 @@ export class ClodCacheServiceImpl implements ClodCacheService {
     this.metrics.setPending(this.scheduler.pendingReads, this.scheduler.pendingWrites);
     this.metrics.setEntryCounts(this.memory?.size ?? 0, this.manifest.size);
     return { ...this.metrics.metrics };
+  }
+
+  async initialize(): Promise<void> {
+    if (this.manifestLoaded || !this.persistent) return;
+    try {
+      const stored = await this.persistent.getManifestEntries();
+      if (stored && stored.length > 0) {
+        for (const entry of stored) this.manifest.upsert(entry);
+      } else {
+        await this.rebuildManifestFromPersistent();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      cacheLogger.warn(`manifest load failed, rebuilding: ${message}`);
+      await this.rebuildManifestFromPersistent();
+    }
+    this.manifestLoaded = true;
+  }
+
+  private async rebuildManifestFromPersistent(): Promise<void> {
+    if (!this.persistent) return;
+    const keys = await this.persistent.keys();
+    for (const key of keys) {
+      const record = await this.persistent.get(key);
+      if (!record) continue;
+      this.manifest.upsert({
+        key,
+        artifactKind: record.header.artifactKind,
+        createdAtUnixMs: record.header.createdAtUnixMs,
+        lastAccessedUnixMs: record.header.createdAtUnixMs,
+        hitCount: 0,
+        storedBytes: record.header.storedBytes,
+      });
+    }
+    void this.persistManifest();
+  }
+
+  private scheduleManifestPersist(): void {
+    if (!this.persistent) return;
+    if (this.manifestSaveTimer) clearTimeout(this.manifestSaveTimer);
+    this.manifestSaveTimer = setTimeout(() => {
+      this.manifestSaveTimer = null;
+      void this.persistManifest();
+    }, 250);
+  }
+
+  private async persistManifest(): Promise<void> {
+    if (!this.persistent) return;
+    try {
+      await this.persistent.putManifestEntries(this.manifest.listEntries());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      cacheLogger.warn(`manifest persist failed: ${message}`);
+    }
   }
 
   async get<TArtifact>(
@@ -126,6 +183,7 @@ export class ClodCacheServiceImpl implements ClodCacheService {
           key,
           bytesRead: record.header.storedBytes,
           decodeMs,
+          metadata: record.header.metadata,
         };
       } catch (error) {
         const reason: CacheMissReason =
@@ -201,8 +259,10 @@ export class ClodCacheServiceImpl implements ClodCacheService {
           );
           for (const evictKey of evictedKeys) {
             await this.persistent.delete(evictKey);
+            this.manifest.delete(evictKey);
             this.onEvicted([evictKey]);
           }
+          this.scheduleManifestPersist();
         }
         const encodeMs = performance.now() - t0;
         this.metrics.recordWrite(record.header.storedBytes, encodeMs);
@@ -235,7 +295,10 @@ export class ClodCacheServiceImpl implements ClodCacheService {
 
   async clearPersistent(): Promise<void> {
     this.manifest.clear();
-    if (this.persistent) await this.persistent.clear();
+    if (this.persistent) {
+      await this.persistent.clear();
+      await this.persistent.putManifestEntries([]);
+    }
   }
 
   async flush(): Promise<void> {
@@ -290,16 +353,17 @@ export class ClodCacheServiceImpl implements ClodCacheService {
     const existing = this.manifest.getEntry(key);
     if (existing) {
       this.manifest.touchHit(key, now);
-      return;
+    } else {
+      this.manifest.upsert({
+        key,
+        artifactKind,
+        createdAtUnixMs: now,
+        lastAccessedUnixMs: now,
+        hitCount: 1,
+        storedBytes,
+      });
     }
-    this.manifest.upsert({
-      key,
-      artifactKind,
-      createdAtUnixMs: now,
-      lastAccessedUnixMs: now,
-      hitCount: 1,
-      storedBytes,
-    });
+    this.scheduleManifestPersist();
   }
 }
 

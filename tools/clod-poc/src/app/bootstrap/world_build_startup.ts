@@ -21,6 +21,12 @@ import {
   setCacheSessionDisabled,
   type ClodCacheContext,
 } from "../../cache/index.js";
+import {
+  buildProceduralTextureHash,
+  buildStagedImportHash,
+  type TerrainSourceInputs,
+} from "../../cache/terrainSource.js";
+import { clearWorkerCacheSnapshot } from "../../cache/cacheMetricsBridge.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { bakeMacroTint } from "../../gpu/terrain_node_material.js";
 import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "../../diagonalPolish.js";
@@ -197,15 +203,9 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const cacheParam = searchParams.get("cache");
   const cacheDisabled = cacheParam === "0" || cacheParam === "false";
   if (cacheDisabled) setCacheSessionDisabled(true);
+  clearWorkerCacheSnapshot();
 
   if (stagedImport) replaceDigEdits(stagedImport.manifest.terrainEdits);
-
-  let cacheCtx: ClodCacheContext | null = await initClodCacheContext({
-    cfg,
-    worldPages: WORLD,
-    digRevision: getDigEditRevision(),
-    forceDisabled: cacheDisabled,
-  });
 
   const preHydrologyTerrain = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
   const hydrologySystem = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
@@ -226,6 +226,41 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
         carvedBed: hydrologySystem.grid.carvedBed,
       }
     : null;
+
+  const scene = searchParams.get("scene") ?? "default";
+  const proceduralTextureHash = await buildProceduralTextureHash(
+    proceduralTextureConfig.enabled,
+    proceduralTextureConfig.enabled
+      ? `${proceduralTextureConfig.seed}:${proceduralTextureConfig.noise.resolution}`
+      : null,
+  );
+  const stagedImportHash = await buildStagedImportHash(stagedImport?.manifest ?? null);
+  const terrainSource: TerrainSourceInputs = {
+    scene,
+    worldSeed: "0",
+    worldPages: WORLD,
+    generatorVersion: cfg.meshopt_package_version,
+    digRevision: getDigEditRevision(),
+    hydrologyTerrain,
+    borderCoastOceanConfig,
+    waterConfig: {
+      enabled: waterConfig.enabled,
+      source: waterConfig.source,
+      fakeBodies: { carveTerrain: waterConfig.fakeBodies.carveTerrain },
+      hydrology: { enabled: waterConfig.hydrology.enabled },
+    },
+    proceduralTextureEnabled: proceduralTextureConfig.enabled,
+    proceduralTextureHash,
+    stagedImportHash,
+    longViewScene: queryLongViewScene,
+  };
+
+  let cacheCtx: ClodCacheContext | null = await initClodCacheContext({
+    cfg,
+    worldPages: WORLD,
+    terrainSource,
+    forceDisabled: cacheDisabled,
+  });
 
   const buildNote =
     WORLD >= 16 ? " (worker build; large world may take a while)" :
@@ -248,7 +283,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     info.textContent = `building ${WORLD}x${WORLD} world… ${Math.floor(fraction * 100)}%\n${phase}  L${level}  ${done}/${total}`;
     buildStatus.value = `${phase} L${level} ${done}/${total}`;
     updateBuildOverlay();
-  }, hydrologyTerrain, borderCoastOceanConfig, cacheDisabled || isCacheSessionDisabled(), getDigEditRevision());
+  }, hydrologyTerrain, borderCoastOceanConfig, cacheDisabled || isCacheSessionDisabled(), terrainSource);
 
   buildProgress.hidden = true;
   buildStatus.value = "ready";
@@ -264,7 +299,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   );
   const terrainSummary = summaryResult.summary;
   publishTerrainSummaryForDiagnostics(terrainSummary);
-  createCacheDebugOverlay();
+  createCacheDebugOverlay()?.update();
 
   return {
     cfg,

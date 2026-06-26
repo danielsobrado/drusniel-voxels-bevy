@@ -1,11 +1,14 @@
 import {
   averageDecodeMs,
   averageEncodeMs,
-  hitRate,
+  type ClodCacheMetrics,
 } from "./cacheMetrics.js";
 import { getClodCacheContext } from "./clodCacheContext.js";
 import { setCacheSessionDisabled } from "./cacheConfig.js";
-import type { ClodCacheMetrics } from "./cacheMetrics.js";
+import {
+  getWorkerCacheBuildStats,
+  getWorkerCacheServiceMetrics,
+} from "./cacheMetricsBridge.js";
 
 export interface CacheDebugOverlay {
   element: HTMLElement;
@@ -33,7 +36,7 @@ export function createCacheDebugOverlay(): CacheDebugOverlay | null {
     position: fixed; right: 12px; top: 120px; z-index: 9000;
     background: rgba(10,14,20,0.88); color: #c8e6ff; font: 11px/1.35 monospace;
     padding: 8px 10px; border: 1px solid rgba(120,180,255,0.35); border-radius: 6px;
-    max-width: 280px; pointer-events: auto;
+    max-width: 320px; pointer-events: auto;
   `;
   const actions = root.querySelector<HTMLElement>(".clod-cache-overlay-actions")!;
   actions.style.display = "flex";
@@ -50,8 +53,7 @@ export function createCacheDebugOverlay(): CacheDebugOverlay | null {
       pre.textContent = "cache: not initialized";
       return;
     }
-    const m: ClodCacheMetrics = active.service.getMetrics();
-    pre.textContent = formatMetrics(active.config.enabled, m);
+    pre.textContent = formatCombinedMetrics(active.config.enabled, active.service.getMetrics());
   };
 
   root.querySelector<HTMLButtonElement>("[data-cache-clear-memory]")!.onclick = () => {
@@ -76,7 +78,11 @@ export function createCacheDebugOverlay(): CacheDebugOverlay | null {
   root.querySelector<HTMLButtonElement>("[data-cache-dump-metrics]")!.onclick = () => {
     const active = getClodCacheContext();
     if (!active) return;
-    console.log("[clod-cache-metrics]", active.service.getMetrics());
+    console.log("[clod-cache-metrics]", {
+      main: active.service.getMetrics(),
+      workerBuild: getWorkerCacheBuildStats(),
+      workerService: getWorkerCacheServiceMetrics(),
+    });
   };
 
   document.body.appendChild(root);
@@ -91,21 +97,34 @@ export function createCacheDebugOverlay(): CacheDebugOverlay | null {
   };
 }
 
-function formatMetrics(enabled: boolean, m: ClodCacheMetrics): string {
-  const hr = (hitRate(m) * 100).toFixed(1);
+function formatCombinedMetrics(enabled: boolean, main: ClodCacheMetrics): string {
+  const worker = getWorkerCacheServiceMetrics();
+  const workerBuild = getWorkerCacheBuildStats();
+  const combinedHits = main.hits + (worker?.hits ?? 0);
+  const combinedMisses = main.misses + (worker?.misses ?? 0);
+  const combinedHitRate = combinedHits + combinedMisses > 0
+    ? ((combinedHits / (combinedHits + combinedMisses)) * 100).toFixed(1)
+    : "0.0";
+
   return [
-    `enabled: ${enabled && m.enabled}`,
-    `memory: ${m.memoryEntries}`,
-    `persistent: ${m.persistentEntries}`,
-    `pending r/w: ${m.pendingReads}/${m.pendingWrites}`,
-    `hits/miss: ${m.hits}/${m.misses} (${hr}%)`,
-    `evictions: ${m.evictions}`,
-    `bytes r/w: ${m.bytesRead}/${m.bytesWritten}`,
-    `nodes cached: ${m.nodesLoadedFromCache}`,
-    `build saved ms: ${m.buildMsSaved.toFixed(1)}`,
-    `decode avg: ${averageDecodeMs(m).toFixed(2)} ms`,
-    `encode avg: ${averageEncodeMs(m).toFixed(2)} ms`,
-    `last miss: ${m.lastMissReason ?? "-"}`,
-    `last error: ${m.lastError ?? "-"}`,
+    `enabled: ${enabled}`,
+    "--- main (terrain summary) ---",
+    `mem/persist: ${main.memoryEntries}/${main.persistentEntries}`,
+    `hits/miss: ${main.hits}/${main.misses}`,
+    `bytes r/w: ${main.bytesRead}/${main.bytesWritten}`,
+    "--- worker (page nodes) ---",
+    `nodes cached: ${workerBuild?.nodesFromCache ?? 0}`,
+    `hits/miss: ${workerBuild?.cacheHits ?? 0}/${workerBuild?.cacheMisses ?? 0}`,
+    `build avoided: ${(workerBuild?.coldBuildMsAvoided ?? 0).toFixed(1)} ms`,
+    `decode: ${(workerBuild?.cacheDecodeMs ?? 0).toFixed(1)} ms`,
+    `net saved: ${(workerBuild?.netSavedMs ?? 0).toFixed(1)} ms`,
+    `svc hits/miss: ${worker?.hits ?? 0}/${worker?.misses ?? 0}`,
+    "--- combined ---",
+    `hit rate: ${combinedHitRate}%`,
+    `pending r/w: ${(main.pendingReads + (worker?.pendingReads ?? 0))}/${(main.pendingWrites + (worker?.pendingWrites ?? 0))}`,
+    `decode avg: ${averageDecodeMs(main).toFixed(2)} ms`,
+    `encode avg: ${averageEncodeMs(main).toFixed(2)} ms`,
+    `last miss: ${main.lastMissReason ?? worker?.lastMissReason ?? "-"}`,
+    `last error: ${main.lastError ?? worker?.lastError ?? "-"}`,
   ].join("\n");
 }

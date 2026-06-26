@@ -3,6 +3,8 @@ import type { DigEdit } from "./terrain/terrain.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
+import type { TerrainSourceInputs } from "./cache/terrainSource.js";
+import { setWorkerCacheSnapshot } from "./cache/cacheMetricsBridge.js";
 import {
   applySerializedNode,
   indexNodes,
@@ -91,7 +93,7 @@ export class ClodWorkerClient {
     hydrologyTerrain: SerializedHydrologyTerrain | null = null,
     borderCoastOceanConfig: BorderCoastOceanConfig | null = null,
     cacheDisabled = false,
-    digRevision = 0,
+    terrainSource: TerrainSourceInputs,
   ): Promise<BuildResult> {
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = {
@@ -104,7 +106,7 @@ export class ClodWorkerClient {
       hydrologyTerrain,
       borderCoastOceanConfig,
       cacheDisabled,
-      digRevision,
+      terrainSource,
     };
     this.progressHandlers.set(requestId, onProgress);
     return new Promise((resolve, reject) => {
@@ -207,6 +209,7 @@ export class ClodWorkerClient {
         this.progressHandlers.delete(message.requestId);
         this.result = rehydrateBuildResult(message.result);
         this.nodesById = indexNodes(this.result);
+        setWorkerCacheSnapshot(message.cacheBuildStats ?? null, message.cacheServiceMetrics ?? null);
         pending.resolve(this.result);
         break;
       }

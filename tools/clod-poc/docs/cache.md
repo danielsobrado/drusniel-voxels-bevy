@@ -42,7 +42,8 @@ Keys are deterministic strings:
 
 - Undefined page fields become `_`
 - Hashes are lowercase hex SHA-256
-- Safe as IndexedDB keys and future file path components
+- Node ids are encoded as file-path-safe segments (`L1:2,3` → `L1-2-3`)
+- Safe as IndexedDB keys and future file path components (Windows-safe)
 
 ### Config hash includes
 
@@ -52,7 +53,21 @@ Keys are deterministic strings:
 
 ### Source hash / revision
 
-PoC `sourceRevision` is derived from world seed, scene, world size, generator version, and dig revision. **TODO:** replace with real edit revision when edit invalidation exists.
+`terrainSourceHash` is computed from all terrain-affecting inputs:
+
+- Scene (`?scene=`)
+- World seed, world page count, generator version
+- Dig edit revision
+- Hydrology carved bed digest (when hydrology terrain is active)
+- Border coast / ocean config hash
+- Water enabled/source/carve/hydrology flags
+- Procedural terrain enabled + seed/resolution fingerprint
+- Staged import manifest hash (when importing a project)
+- Long-view scene flag
+
+This hash is used as both `sourceRevision` and `sourceHash` in cache keys. Changing any terrain-affecting input invalidates cached page nodes and terrain summaries.
+
+**TODO:** replace PoC dig revision with production edit revision when edit invalidation exists.
 
 ## Invalidation
 
@@ -69,13 +84,13 @@ Cache misses (not errors) when:
 1. **Memory cache** — LRU by item count and bytes; cleared on reload
 2. **Persistent store** — IndexedDB default (`indexedDbStore.ts` only)
 3. **Scheduler** — Read/write budgets per frame; avoids IndexedDB on hot path bursts
-4. **Manifest** — Tracks `storedBytes`, `lastAccessedUnixMs` for persistent eviction
+4. **Manifest** — Tracks `storedBytes`, `lastAccessedUnixMs` for persistent eviction; persisted to IndexedDB under `__manifest__` and rebuilt from store headers on startup if missing
 
 ## Integration
 
 - **Worker build** (`clod_worker.ts`): per-node cache lookup before build; write after validation
 - **Terrain summary** (`world_build_startup.ts`): cache load before `buildTerrainSummary`; stale summary kept visible when configured
-- **Debug overlay**: top-right stats panel when `debug.expose_overlay_stats: true`
+- **Debug overlay**: top-right stats panel when `debug.expose_overlay_stats: true` — shows **main** (terrain summary) and **worker** (page nodes) metrics separately plus combined hit rate
 
 ## How to clear cache
 
@@ -91,14 +106,19 @@ Or delete the IndexedDB database `drusniel-clod-poc-cache` in browser devtools.
 1. Start dev server: `npm --prefix tools/clod-poc run dev -- --host 127.0.0.1`
 2. Open `http://127.0.0.1:5180/?world=8` (first run = cold cache)
 3. Reload the same URL (second run = warm cache)
-4. Check debug overlay and console `[cache]` logs for hit rate, bytes read, decode ms
-5. Compare build progress: warm run should skip most page mesh builds
+4. Check debug overlay: worker section should show `nodes cached > 0` and `net saved > 0` on warm run
+5. Compare console `[cache]` logs for hit rate, bytes read, decode ms, and `build avoided` ms
 
-Document your machine numbers in console via **Dump metrics** or:
+Example warm-run metrics to record (your machine):
 
-```js
-window.__drusnielClod?.stats // if wired
-```
+| Metric | Cold (1st load) | Warm (reload) |
+|--------|-----------------|---------------|
+| Worker nodes cached | 0 | ~all LOD nodes |
+| Worker net saved ms | 0 | > 0 |
+| Worker decode ms | 0 | > 0 |
+| Combined hit rate | ~0% | > 50% typical |
+
+Document your numbers in console via **Dump metrics** after each run.
 
 ## Known limitations
 
