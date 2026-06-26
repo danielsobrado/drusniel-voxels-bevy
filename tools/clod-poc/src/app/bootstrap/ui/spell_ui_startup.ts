@@ -1,10 +1,12 @@
 import type { UiStartupContext } from "../ui_startup_context.js";
 import { createSpellMenu } from "../../../spells/spell_menu.js";
+import { defaultSpellConfig } from "../../../spells/spell_config.js";
 import "../../../spells/spell_menu.css";
 
 export function runSpellUiStartup(_ctx: UiStartupContext): void {
-  const menu = createSpellMenu();
-  const menuEl = document.getElementById("spell-menu");
+  const config = defaultSpellConfig;
+  const menu = createSpellMenu({ config });
+  const menuEl = document.getElementById(config.menu.rootId);
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.code !== "KeyV") return;
