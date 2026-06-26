@@ -115,6 +115,17 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     await deps.clodWorker.flushParents();
   };
 
+  const applyLod0Result = (changed: readonly ClodPageNode[], pendingParents: number): void => {
+    for (const node of changed) deps.applyNodeMesh(node);
+    if (pendingParents > 0) deps.markEditedAncestorsStale(changed);
+    deps.selectionController.patchNodes(changed);
+    if (changed.length > 0) queueVegetationRebuild(changed);
+    deps.setPendingParentCount(pendingParents);
+    deps.selectionController.invalidate();
+    deps.selectionController.update();
+    deps.updateInfo();
+  };
+
   const performEditRebuild = async (
     edit: DigEdit,
     hit: TerrainRebuildHit,
@@ -133,31 +144,18 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
         maxZ: hit.point.z + margin,
       });
 
-      let colliderMs = 0;
-      let geometrySwapMs = 0;
-      for (const node of lod0.changed) {
-        const r = deps.applyNodeMesh(node);
-        colliderMs += r.colliderMs;
-        geometrySwapMs += r.geometrySwapMs;
-      }
-      if (lod0.pendingParents > 0) deps.markEditedAncestorsStale(lod0.changed);
-      deps.selectionController.patchNodes(lod0.changed);
-      if (lod0.changed.length > 0) queueVegetationRebuild(lod0.changed);
+      applyLod0Result(lod0.changed, lod0.pendingParents);
       deps.setPendingParentNodes(0);
       deps.setPendingParentMs(0);
-      deps.setPendingParentCount(lod0.pendingParents);
 
       const totalMs = performance.now() - t0;
       const summary =
         `${totalMs.toFixed(0)}ms worker LOD0 (build ${lod0.lod0Ms.toFixed(0)}ms · ${lod0.lod0Pages}p · ` +
-        `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · swap ${geometrySwapMs.toFixed(0)}ms · collider ${colliderMs.toFixed(0)}ms)`;
+        `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · serialize ${lod0.serializeMs.toFixed(0)}ms)`;
       deps.setLastDigSummary(summary);
       console.log(
         `[${label} ${edit.op ?? "edit"} ${edit.shape ?? "sphere"} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${summary} — ${lod0.pendingParents} ancestors queued in worker`,
       );
-      deps.selectionController.invalidate();
-      deps.selectionController.update();
-      deps.updateInfo();
     } catch (error) {
       emitAudio("clod.rebuild.error");
       if (error instanceof Error && error.name === "ClodBuildError") {
@@ -226,7 +224,10 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     if (request.trimHeightM > 0) addDigEdit(trimEdit);
     if (!hadPaintedTerrain) deps.applyTerrainTextures();
     emitAudio("terrain.raise");
-    await performEditRebuild(fillEdit, hit, radius, "construction terrain conform");
+    await performEditRebuild(fillEdit, hit, radius, "construction terrain fill");
+    if (request.trimHeightM > 0) {
+      await performEditRebuild(trimEdit, hit, radius, "construction terrain trim");
+    }
   };
 
   const scheduleDig = (ray: THREE.Ray): void => {
