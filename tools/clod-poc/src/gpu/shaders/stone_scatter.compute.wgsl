@@ -5,6 +5,7 @@ const CLASS_SMALL: u32 = 2u;
 const COUNTER_TOTAL: u32 = 0u;
 const TAU: f32 = 6.28318530718;
 const INDIRECT_STRIDE_U32: u32 = 5u;
+const STONE_HYDRO_WATER_CLEARANCE: f32 = 0.22;
 
 struct Params {
   world: vec4<f32>,
@@ -29,11 +30,20 @@ struct Params {
   terrain_height: vec4<f32>,
 };
 
+struct StoneHydrologySample {
+  water_y: f32,
+  wet_mask: f32,
+  carved_bed: f32,
+  enabled: f32,
+};
+
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read_write> counters: array<atomic<u32>>;
 @group(0) @binding(2) var<storage, read_write> indirect_args: array<u32>;
 @group(0) @binding(3) var<storage, read_write> instance_a: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read_write> instance_b: array<vec4<f32>>;
+@group(0) @binding(7) var hydro_texture: texture_2d<f32>;
+@group(0) @binding(8) var hydro_sampler: sampler;
 
 fn pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let M = 1664525u;
@@ -66,6 +76,41 @@ fn stone_world_cell(slot: u32) -> vec2<f32> {
   );
 }
 
+fn hydrology_at(wx: f32, wz: f32) -> StoneHydrologySample {
+  let dims = textureDimensions(hydro_texture);
+  if (dims.x <= 1u || dims.y <= 1u) {
+    return StoneHydrologySample(0.0, 0.0, 0.0, 0.0);
+  }
+  let world_size = max(1.0, params.world.x);
+  let uv = clamp(vec2<f32>(wx, wz) / world_size, vec2<f32>(0.0), vec2<f32>(1.0));
+  let h = textureSampleLevel(hydro_texture, hydro_sampler, uv, 0.0);
+  return StoneHydrologySample(h.x, h.y, h.z, 1.0);
+}
+
+fn hydrology_ground_height(raw_height: f32, hydro: StoneHydrologySample) -> f32 {
+  if (hydro.enabled < 0.5) {
+    return raw_height;
+  }
+  return hydro.carved_bed;
+}
+
+fn hydrology_reject_stone(hydro: StoneHydrologySample, ground_height: f32) -> bool {
+  if (hydro.enabled < 0.5 || hydro.wet_mask <= 0.05) {
+    return false;
+  }
+  return ground_height <= hydro.water_y + STONE_HYDRO_WATER_CLEARANCE;
+}
+
+fn hydrology_streambed_mask(hydro: StoneHydrologySample, ground_height: f32) -> f32 {
+  if (hydro.enabled < 0.5 || hydro.wet_mask <= 0.001) {
+    return 0.0;
+  }
+  let above_water = ground_height - hydro.water_y;
+  let dry_edge = smoothstep(STONE_HYDRO_WATER_CLEARANCE, 1.5, above_water);
+  let outer_fade = 1.0 - smoothstep(7.0, 18.0, above_water);
+  return clamp(dry_edge * outer_fade, 0.0, 1.0);
+}
+
 fn material_weights(height: f32) -> vec4<f32> {
   let sand = max(0.0, 1.0 - abs(height - WATER_LEVEL) / 6.0);
   let snow = max(0.0, (height - 88.0) / 22.0);
@@ -93,9 +138,6 @@ fn class_radius(cls: u32) -> vec4<f32> {
   return params.class_small;
 }
 
-// Base mesh radius of the rock_builder presets used per class (talus for large, cobble
-// otherwise). scale = target_radius / base_radius, so these must track buildRock preset sizes
-// in src/stones/rock_builder.ts (DRAW_PRESET/DRAW_DETAIL in stone_instances.ts).
 fn class_base_radius(cls: u32) -> f32 {
   if (cls == CLASS_LARGE) {
     return 0.95;
@@ -117,7 +159,6 @@ fn height_terrain_weights(height: f32) -> vec4<f32> {
   return (params.terrain_low * low_weight + params.terrain_mid * mid_weight + params.terrain_high * high_weight) / sum;
 }
 
-// Bias layout: x=density, y=large, z=medium, w=small.
 fn terrain_bias(height: f32, weights: vec4<f32>) -> vec4<f32> {
   let material = blend_terrain_class_weights(weights, params.terrain_grass, params.terrain_rock, params.terrain_sand, params.terrain_snow);
   let height_bias = height_terrain_weights(height);
@@ -168,13 +209,19 @@ fn process_cell(slot: u32) {
     return;
   }
 
-  let h = surfaceHeightField(wpos.x, wpos.y);
+  let raw_h = surfaceHeightField(wpos.x, wpos.y);
+  let hydro = hydrology_at(wpos.x, wpos.y);
+  let h = hydrology_ground_height(raw_h, hydro);
+  if (hydrology_reject_stone(hydro, h)) {
+    return;
+  }
   let normal = normalize(densityGradient(wpos.x, h, wpos.y));
   let weights = material_weights(h);
   let rock = weights.y;
   let sand = weights.z;
   let snow = weights.w;
   let terrain = terrain_bias(h, weights);
+  let hydro_streambed = hydrology_streambed_mask(hydro, h);
 
   if (h < WATER_LEVEL + params.slope_water.z) {
     return;
@@ -185,7 +232,7 @@ fn process_cell(slot: u32) {
     return;
   }
   let scree = clamp((params.slope_water.x - normal.y) / denom, 0.0, 1.0) * repose;
-  let streambed = stone_smooth_range(params.stream_snow_lean.x, params.stream_snow_lean.y, sand);
+  let streambed = max(stone_smooth_range(params.stream_snow_lean.x, params.stream_snow_lean.y, sand), hydro_streambed);
 
   let n_xz_len = max(0.0001, length(normal.xz));
   let uphill = -normal.xz / n_xz_len;
@@ -224,7 +271,8 @@ fn process_cell(slot: u32) {
   let target_radius = cfg.x + (cfg.y - cfg.x) * radius_hash;
   let scale = target_radius / class_base_radius(cls);
   let slope_amt = 1.0 - normal.y;
-  let y = h - cfg.z * target_radius * (1.0 + slope_amt * params.weights_b.w);
+  let bank_sink = mix(1.0, 1.45, hydro_streambed);
+  let y = h - cfg.z * target_radius * (1.0 + slope_amt * params.weights_b.w) * bank_sink;
   let yaw = pcg2d(wc, seed + 536u).x * TAU;
   let lean = vec2<f32>(normal.z, -normal.x) * params.stream_snow_lean.w * slope_amt;
   let out_index = cls * max_instances + class_slot;
