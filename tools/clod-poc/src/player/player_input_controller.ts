@@ -24,6 +24,7 @@ export interface PlayerInputControllerDeps {
   exitPlayerMode: () => void;
   adjustDigRadius: (delta: number) => void;
   cycleBrushShape: () => void;
+  triggerSwordAttack?: () => boolean;
 }
 
 export interface PlayerInputController {
@@ -83,6 +84,8 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
       digHeld = true;
       deps.camera.getWorldDirection(digDirection);
       deps.scheduleDig(new THREE.Ray(deps.camera.position.clone(), digDirection.clone()));
+    } else if (deps.interaction.mode === "playing" && event.button === 0 && document.pointerLockElement === deps.renderer.domElement) {
+      deps.triggerSwordAttack?.();
     } else if (deps.interaction.mode === "orbit" && event.button === 0 && deps.getDigEnabled()) {
       digPointerDown = { x: event.clientX, y: event.clientY };
     }

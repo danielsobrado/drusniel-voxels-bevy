@@ -267,5 +267,8 @@ export function runFrameLoopStartup(
     construction: constructionController
       ? { update: () => constructionController.update() }
       : undefined,
+    combat: session.combatController
+      ? { update: (timeMs) => session.combatController!.update(timeMs) }
+      : undefined,
   });
 }

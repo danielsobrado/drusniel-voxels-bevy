@@ -23,6 +23,7 @@ import type { parseUnderstoryConfig } from "../../understory/understory_config.j
 import type { GuiDisplayController } from "./bootstrap_refs.js";
 import type { createPlayerInputController } from "../../player/player_input_controller.js";
 import type { createPlayerModeController } from "../../player/player_mode_controller.js";
+import type { SwordAttackController } from "../../combat/index.js";
 
 export interface UiStartupInput {
   dom: DomShell;
@@ -105,6 +106,7 @@ export interface UiSessionState {
   digRadiusController: GuiDisplayController | null;
   playerInputController: ReturnType<typeof createPlayerInputController> | null;
   playerModeController: ReturnType<typeof createPlayerModeController> | null;
+  combatController: SwordAttackController | null;
 }
 
 export interface UiStartupContext {
@@ -135,6 +137,7 @@ export function createUiStartupContext(input: UiStartupInput): UiStartupContext 
       digRadiusController: null,
       playerInputController: null,
       playerModeController: null,
+      combatController: null,
     },
   };
 }

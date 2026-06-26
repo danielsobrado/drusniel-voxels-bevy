@@ -163,6 +163,10 @@ export interface FrameLoopConstructionDeps {
   update: () => void;
 }
 
+export interface FrameLoopCombatDeps {
+  update: (timeMs: number) => void;
+}
+
 export interface ClodFrameLoopDeps {
   render: FrameLoopRenderDeps;
   player: FrameLoopPlayerDeps;
@@ -175,4 +179,5 @@ export interface ClodFrameLoopDeps {
   shadowProxy?: FrameLoopShadowProxyDeps;
   canopy?: FrameLoopCanopyDeps;
   construction?: FrameLoopConstructionDeps;
+  combat?: FrameLoopCombatDeps;
 }
