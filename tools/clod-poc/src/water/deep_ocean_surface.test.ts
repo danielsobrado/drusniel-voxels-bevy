@@ -62,7 +62,7 @@ describe("deep ocean surface", () => {
     surface.dispose();
   });
 
-  it("animates vertex heights without moving xz coordinates", () => {
+  it("animates Gerstner-style height and horizontal chop", () => {
     const worldCells = 128;
     const config = {
       ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
@@ -72,11 +72,11 @@ describe("deep ocean surface", () => {
     const surface = createDeepOceanSurface(worldCells, config, new THREE.MeshBasicMaterial(), 24)!;
     const positions = surface.mesh.geometry.getAttribute("position");
     const x0 = positions.getX(0);
-    const z0 = positions.getZ(0);
     const y0 = positions.getY(0);
+    const z0 = positions.getZ(0);
     surface.update(2.0);
-    expect(positions.getX(0)).toBe(x0);
-    expect(positions.getZ(0)).toBe(z0);
+    const movedXZ = Math.hypot(positions.getX(0) - x0, positions.getZ(0) - z0);
+    expect(movedXZ).toBeGreaterThan(0);
     expect(positions.getY(0)).not.toBe(y0);
     surface.dispose();
   });
