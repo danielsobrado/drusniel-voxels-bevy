@@ -1,8 +1,8 @@
 import { emitAudio } from "../../audio/index.js";
 import {
-  consumeStagedProjectImport,
-  type ProjectArchiveContents,
-} from "../../project/project_archive.js";
+  consumeStagedVoxelProjectImport,
+  type VoxelProjectArchiveContents,
+} from "../../project/voxel_project_archive.js";
 
 export interface ProjectImportDom {
   buildProgress: HTMLElement;
@@ -15,7 +15,7 @@ export interface ProjectImportDom {
 export async function loadStagedProjectImport(
   searchParams: URLSearchParams,
   dom: ProjectImportDom,
-): Promise<ProjectArchiveContents | null> {
+): Promise<VoxelProjectArchiveContents | null> {
   const importToken = searchParams.get("import");
   if (!importToken) return null;
 
@@ -24,7 +24,7 @@ export async function loadStagedProjectImport(
   dom.buildProgressPercent.textContent = "0%";
   dom.buildProgressBar.value = 0;
   try {
-    const stagedImport = await consumeStagedProjectImport(importToken);
+    const stagedImport = await consumeStagedVoxelProjectImport(importToken);
     if (!stagedImport) throw new Error("The staged project was not found or was already used");
     emitAudio("project.import.success");
     return stagedImport;
