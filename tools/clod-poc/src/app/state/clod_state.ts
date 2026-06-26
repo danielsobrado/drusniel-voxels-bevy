@@ -1,5 +1,5 @@
 import type { ClodPagesConfig } from "../../config.js";
-import type { ProjectSessionState } from "../../project/project_archive.js";
+import type { ProjectSessionState } from "../../project/voxel_project_archive.js";
 import { FAR_SHELL_DEFAULTS } from "../clod_constants.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
