@@ -1,8 +1,6 @@
 trees:
   enabled: true
   seed: 7331
-  # Reference-inspired rings: hero ≈26 m, full mesh/card ring ≈150 m,
-  # far tree ring ≈460 m, then impostors to the outer tree distance.
   distance_m: 620
   refresh_distance_m: 16
   max_new_patches_per_frame: 2
@@ -22,8 +20,6 @@ trees:
     debug_validate_against_cpu: false
 
   placement:
-    # Closer to Fable5's 3.4 m candidate grid, but kept slightly wider for the
-    # current CPU/page path until the GPU scatter path is promoted.
     spacing_m: 5.5
     jitter: 0.72
     slope_min_y: 0.64
@@ -43,9 +39,6 @@ trees:
     dither_enabled: true
     shadows_max_lod: near
     budgets:
-      # Current mesh-only foliage is still cheaper than the full Fable5 hybrid
-      # card+mesh hero path, but these higher guardrails stop accidental regressions
-      # when the denser presets produce more anchors.
       near_max_vertices: 60000
       mid_max_vertices: 22000
       far_max_vertices: 9000
@@ -94,6 +87,27 @@ trees:
       slope_fade_start_y: 0.62
       slope_fade_end_y: 0.9
       material_weight_power: 1.35
+    material_bias:
+      grass:
+        density: 1.08
+        oak: 1.22
+        pine: 0.86
+        dead: 0.52
+      rock:
+        density: 0.46
+        oak: 0.35
+        pine: 0.96
+        dead: 1.55
+      sand:
+        density: 0.55
+        oak: 0.72
+        pine: 0.45
+        dead: 0.68
+      snow:
+        density: 0.08
+        oak: 0.04
+        pine: 0.30
+        dead: 1.45
     clustering:
       cluster_scale_m: 26
       cluster_strength: 0.82
