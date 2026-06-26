@@ -1,3 +1,6 @@
+import { isVisualPageDistance } from "./page_filter.js";
+import { pageRangeForRadius } from "./page_range.js";
+
 export function pageKey(level: number, x: number, z: number): string {
   return String(level) + ":" + String(x) + "," + String(z);
 }
