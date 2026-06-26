@@ -276,6 +276,28 @@ fn in_frustum(center: vec3<f32>, slack: f32) -> bool {
   return true;
 }
 
+fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {
+  if (distance_m <= params.lod.y) {
+    return false;
+  }
+
+  let start_xz = params.center_radius.xy;
+  let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;
+  let crown_height = end_height + 5.5;
+
+  for (var i = 1u; i <= 6u; i = i + 1u) {
+    let t = f32(i) / 7.0;
+    let sample_xz = mix(start_xz, end_xz, t);
+    let sample_line_height = mix(start_height, crown_height, t);
+    let sample_ground_height = surfaceHeightField(sample_xz.x, sample_xz.y);
+    if (sample_ground_height > sample_line_height + 1.75) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 fn select_species(wc: vec2<f32>, height: f32, normal_y: f32) -> u32 {
   _ = height;
   _ = normal_y;
@@ -339,6 +361,9 @@ fn process_tree_slot(slot: u32) {
     return;
   }
   if (!in_frustum(vec3<f32>(wpos.x, height + 4.0, wpos.y), 8.0)) {
+    return;
+  }
+  if (terrain_ridge_filter(wpos, height, dist)) {
     return;
   }
 
