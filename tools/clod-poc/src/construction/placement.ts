@@ -18,13 +18,17 @@ export interface PlacementValidationInput {
   config: ConstructionPlacementConfig;
 }
 
-interface Bounds2d {
+interface Bounds3d {
   minX: number;
   maxX: number;
   minY: number;
   maxY: number;
   minZ: number;
   maxZ: number;
+}
+
+function isFiniteVec3(value: readonly [number, number, number]): boolean {
+  return Number.isFinite(value[0]) && Number.isFinite(value[1]) && Number.isFinite(value[2]);
 }
 
 function rotatedDimensions(piece: ConstructionPieceDef, rotationQuarterTurns: number): readonly [number, number, number] {
@@ -38,7 +42,7 @@ function boundsFor(
   position: readonly [number, number, number],
   rotationQuarterTurns: number,
   paddingM: number,
-): Bounds2d {
+): Bounds3d {
   const [sx, sy, sz] = rotatedDimensions(piece, rotationQuarterTurns);
   const hx = Math.max(0, sx * 0.5 - paddingM);
   const hy = Math.max(0, sy * 0.5 - paddingM);
@@ -53,7 +57,7 @@ function boundsFor(
   };
 }
 
-function overlaps(a: Bounds2d, b: Bounds2d): boolean {
+function overlaps(a: Bounds3d, b: Bounds3d): boolean {
   return a.minX <= b.maxX && a.maxX >= b.minX
     && a.minY <= b.maxY && a.maxY >= b.minY
     && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
@@ -72,8 +76,8 @@ export function createFreePlacementPosition(
 
 export function validateConstructionPlacement(input: PlacementValidationInput): { valid: boolean; reason: string | null } {
   const { piece, position, rotationQuarterTurns, snapped, terrainHit, placedPieces, piecesById, worldCells, config } = input;
-  if (position[0] < 0 || position[0] > worldCells || position[2] < 0 || position[2] > worldCells) {
-    return { valid: false, reason: "outside world" };
+  if (!isFiniteVec3(position) || !Number.isFinite(worldCells) || worldCells <= 0) {
+    return { valid: false, reason: "invalid position" };
   }
   if (!snapped && !piece.canGround) {
     return { valid: false, reason: "snap required" };
@@ -81,6 +85,12 @@ export function validateConstructionPlacement(input: PlacementValidationInput): 
   if (piece.canGround && !snapped && !terrainHit) {
     return { valid: false, reason: "no terrain" };
   }
+
+  const worldBounds = boundsFor(piece, position, rotationQuarterTurns, 0);
+  if (worldBounds.minX < 0 || worldBounds.maxX > worldCells || worldBounds.minZ < 0 || worldBounds.maxZ > worldCells) {
+    return { valid: false, reason: "outside world" };
+  }
+
   const bounds = boundsFor(piece, position, rotationQuarterTurns, config.overlapPaddingM);
   for (const placed of placedPieces) {
     const otherPiece = piecesById.get(placed.typeId);

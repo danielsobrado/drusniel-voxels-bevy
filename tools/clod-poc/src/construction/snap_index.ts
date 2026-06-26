@@ -1,13 +1,21 @@
 import type { ConstructionPieceDef, ConstructionSnapConfig, ConstructionSnapResult, IndexedConstructionSnapPoint, SnapGroup } from "./types.js";
 
+const HORIZONTAL_EPSILON = 0.000001;
+
 function dot(a: readonly [number, number, number], b: readonly [number, number, number]): number {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
 function normalize(value: readonly [number, number, number]): [number, number, number] {
   const len = Math.hypot(value[0], value[1], value[2]);
-  if (len <= 0.000001) return [0, 1, 0];
+  if (len <= HORIZONTAL_EPSILON) return [0, 1, 0];
   return [value[0] / len, value[1] / len, value[2] / len];
+}
+
+function normalizeHorizontal(value: readonly [number, number, number]): [number, number, number] | null {
+  const len = Math.hypot(value[0], value[2]);
+  if (len <= HORIZONTAL_EPSILON) return null;
+  return [value[0] / len, 0, value[2] / len];
 }
 
 function rotateYQuarter(value: readonly [number, number, number], quarterTurns: number): [number, number, number] {
@@ -46,14 +54,42 @@ function isWallFloorPair(sourceGroup: SnapGroup, targetGroup: SnapGroup): boolea
     || (sourceGroup === "floor-edge" && targetGroup === "wall-bottom");
 }
 
-function connectionAlignment(
+function localHorizontalSnapNormal(piece: ConstructionPieceDef): [number, number, number] {
+  return piece.dimensionsM[0] <= piece.dimensionsM[2] ? [1, 0, 0] : [0, 0, 1];
+}
+
+function wallFloorAlignment(
+  piece: ConstructionPieceDef,
   sourceGroup: SnapGroup,
   targetGroup: SnapGroup,
+  rotationQuarterTurns: number,
+  sourceDir: readonly [number, number, number],
+  targetDir: readonly [number, number, number],
+): number | null {
+  if (!isWallFloorPair(sourceGroup, targetGroup)) return null;
+
+  if (sourceGroup === "wall-bottom" && targetGroup === "floor-edge") {
+    const sourceNormal = normalizeHorizontal(rotateYQuarter(localHorizontalSnapNormal(piece), rotationQuarterTurns));
+    const targetNormal = normalizeHorizontal(targetDir);
+    return sourceNormal && targetNormal ? Math.abs(dot(sourceNormal, targetNormal)) : 0;
+  }
+
+  const sourceNormal = normalizeHorizontal(sourceDir);
+  const targetNormal = normalizeHorizontal(targetDir);
+  return sourceNormal && targetNormal ? Math.abs(dot(sourceNormal, targetNormal)) : 1;
+}
+
+function connectionAlignment(
+  piece: ConstructionPieceDef,
+  sourceGroup: SnapGroup,
+  targetGroup: SnapGroup,
+  rotationQuarterTurns: number,
   sourceDir: readonly [number, number, number],
   targetDir: readonly [number, number, number],
 ): number {
-  const opposed = -dot(sourceDir, targetDir);
-  return isWallFloorPair(sourceGroup, targetGroup) ? Math.max(opposed, 1.0) : opposed;
+  const floorAlignment = wallFloorAlignment(piece, sourceGroup, targetGroup, rotationQuarterTurns, sourceDir, targetDir);
+  if (floorAlignment !== null) return floorAlignment;
+  return -dot(sourceDir, targetDir);
 }
 
 export class ConstructionSnapIndex {
@@ -125,25 +161,10 @@ export class ConstructionSnapIndex {
     let best: ConstructionSnapResult | null = null;
     let bestScore = Number.NEGATIVE_INFINITY;
     for (const target of this.queryRadius(cursorWorldPos, config.radiusM)) {
-      piece.snapPoints.forEach((source, sourceSnapIndex) => {
-        if (!accepts(source.accepts, source.group, target)) return;
-        const sourceDir = normalize(rotateYQuarter(source.direction, rotationQuarterTurns));
-        const alignment = connectionAlignment(source.group, target.group, sourceDir, target.worldDirection);
-        if (alignment < config.minAlignment) return;
-        const sourceOffset = rotateYQuarter(source.localPos, rotationQuarterTurns);
-        const worldPosition = sub(target.worldPos, sourceOffset);
-        const distanceScore = 1 - Math.min(1, distance(cursorWorldPos, worldPosition) / config.radiusM);
-        const score = config.alignmentWeight * alignment + config.distanceWeight * distanceScore;
-        if (score <= bestScore) return;
-        bestScore = score;
-        best = {
-          target,
-          sourceSnapIndex,
-          worldPosition,
-          rotationQuarterTurns,
-          score,
-        };
-      });
+      const candidate = this.findBestSnapAgainstTarget(cursorWorldPos, target, piece, rotationQuarterTurns, config);
+      if (!candidate || candidate.score <= bestScore) continue;
+      bestScore = candidate.score;
+      best = candidate;
     }
     return best;
   }
@@ -166,26 +187,10 @@ export class ConstructionSnapIndex {
       const closest = add(rayOrigin, [direction[0] * t, direction[1] * t, direction[2] * t]);
       const rayDistance = distance(closest, target.worldPos);
       if (rayDistance > config.radiusM) continue;
-      piece.snapPoints.forEach((source, sourceSnapIndex) => {
-        if (!accepts(source.accepts, source.group, target)) return;
-        const sourceDir = normalize(rotateYQuarter(source.direction, rotationQuarterTurns));
-        const alignment = connectionAlignment(source.group, target.group, sourceDir, target.worldDirection);
-        if (alignment < config.minAlignment) return;
-        const sourceOffset = rotateYQuarter(source.localPos, rotationQuarterTurns);
-        const worldPosition = sub(target.worldPos, sourceOffset);
-        const cursorDistance = length(sub(closest, worldPosition));
-        const distanceScore = 1 - Math.min(1, Math.max(rayDistance, cursorDistance) / config.radiusM);
-        const score = config.alignmentWeight * alignment + config.distanceWeight * distanceScore;
-        if (score <= bestScore) return;
-        bestScore = score;
-        best = {
-          target,
-          sourceSnapIndex,
-          worldPosition,
-          rotationQuarterTurns,
-          score,
-        };
-      });
+      const candidate = this.findBestSnapAgainstTarget(closest, target, piece, rotationQuarterTurns, config, rayDistance);
+      if (!candidate || candidate.score <= bestScore) continue;
+      bestScore = candidate.score;
+      best = candidate;
     }
     return best;
   }
@@ -194,6 +199,39 @@ export class ConstructionSnapIndex {
     let total = 0;
     for (const points of this.cells.values()) total += points.length;
     return total;
+  }
+
+  private findBestSnapAgainstTarget(
+    cursorWorldPos: readonly [number, number, number],
+    target: IndexedConstructionSnapPoint,
+    piece: ConstructionPieceDef,
+    rotationQuarterTurns: number,
+    config: ConstructionSnapConfig,
+    rayDistanceM = 0,
+  ): ConstructionSnapResult | null {
+    let best: ConstructionSnapResult | null = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    piece.snapPoints.forEach((source, sourceSnapIndex) => {
+      if (!accepts(source.accepts, source.group, target)) return;
+      const sourceDir = normalize(rotateYQuarter(source.direction, rotationQuarterTurns));
+      const alignment = connectionAlignment(piece, source.group, target.group, rotationQuarterTurns, sourceDir, target.worldDirection);
+      if (alignment < config.minAlignment) return;
+      const sourceOffset = rotateYQuarter(source.localPos, rotationQuarterTurns);
+      const worldPosition = sub(target.worldPos, sourceOffset);
+      const cursorDistance = length(sub(cursorWorldPos, worldPosition));
+      const distanceScore = 1 - Math.min(1, Math.max(rayDistanceM, cursorDistance) / config.radiusM);
+      const score = config.alignmentWeight * alignment + config.distanceWeight * distanceScore;
+      if (score <= bestScore) return;
+      bestScore = score;
+      best = {
+        target,
+        sourceSnapIndex,
+        worldPosition,
+        rotationQuarterTurns,
+        score,
+      };
+    });
+    return best;
   }
 
   private safeCellSize(): number {
