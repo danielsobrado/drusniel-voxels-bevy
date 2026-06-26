@@ -2,11 +2,16 @@ import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { emitAudio } from "../audio/index.js";
 import type { ClodPageNode } from "../types.js";
-import { PROJECT_SCHEMA_VERSION, stageProjectImport, type ClodProjectManifest } from "../project/project_archive.js";
+import { stageProjectImport } from "../project/project_archive.js";
 import { EMPTY_PROJECT_PROPS } from "../project/project_props.js";
-import { createVoxelProjectArchive, parseVoxelProjectArchive, type VoxelProjectManifest } from "../project/voxel_project_archive.js";
+import {
+  createVoxelProjectArchive,
+  parseVoxelProjectArchive,
+  VOXEL_PROJECT_SCHEMA_VERSION,
+  type VoxelProjectManifest,
+} from "../project/voxel_project_archive.js";
 import type { TerrainTextureController } from "../terrain/material/terrain_texture_controller.js";
-import { getDigEditsSnapshot, getVoxelEditSnapshot } from "../terrain/terrain.js";
+import { getVoxelEditSnapshot } from "../terrain/terrain.js";
 import { mapProjectSessionState, mapProjectWaterArchiveState, mapProjectWeatherArchiveState, type ProjectStateSource } from "./project_state_mapper.js";
 import { validateProjectArchiveTextures } from "./project_texture_validator.js";
 
@@ -20,7 +25,7 @@ export interface ProjectArchiveControllerDeps {
   buildProgressBar: HTMLProgressElement;
   getState: () => ProjectStateSource;
   getWorldSize: () => number;
-  getConfig: () => ClodProjectManifest["config"];
+  getConfig: () => VoxelProjectManifest["config"];
   getNodesByLevel: () => Map<number, ClodPageNode[]>;
   textureController: TerrainTextureController;
   camera: THREE.PerspectiveCamera;
@@ -118,7 +123,7 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         setProjectBusy(true, "packing voxel project archive", 0.8);
         const worldSize = deps.getWorldSize();
         const manifest: VoxelProjectManifest = {
-          schemaVersion: PROJECT_SCHEMA_VERSION,
+          schemaVersion: VOXEL_PROJECT_SCHEMA_VERSION,
           kind: "drusniel-clod-project",
           exportedAt: new Date().toISOString(),
           worldSize,
@@ -126,7 +131,6 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
           state: mapProjectSessionState(deps.getState()),
           water: mapProjectWaterArchiveState(deps.getState()),
           weather: mapProjectWeatherArchiveState(deps.getState()),
-          terrainEdits: getDigEditsSnapshot(),
           voxelTerrainEdits: getVoxelEditSnapshot(),
           props: EMPTY_PROJECT_PROPS,
           textures: deps.textureController.projectTextureMetadata(),
@@ -141,7 +145,7 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         const elapsed = performance.now() - startedAt;
         const summary = `export: ${(archive.byteLength / 1048576).toFixed(1)} MiB voxel archive in ${(elapsed / 1000).toFixed(2)}s`;
         deps.setLastArchiveSummary(summary);
-        console.info(`[project export] ${summary}; terrain GLB omitted`);
+        console.info(`[project export] ${summary}; mesh caches omitted`);
         deps.updateInfo();
         emitAudio("project.export.success");
       } catch (error) {
