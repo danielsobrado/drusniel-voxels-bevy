@@ -14,6 +14,8 @@ import type { ClodPageNode } from "../../types.js";
 import type { ClodSelectionController } from "../selection/clod_selection_controller.js";
 import type { TerrainRaycastService } from "../../player/terrain_raycast_service.js";
 
+const VEGETATION_REBUILD_DEBOUNCE_MS = 160;
+
 export interface TerrainBrushParams {
   digRadius: number;
   brushShape: BrushShape;
@@ -68,15 +70,15 @@ interface TerrainRebuildHit {
 export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainEditService {
   let digDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let conformDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let vegetationFlushTimer: ReturnType<typeof setTimeout> | null = null;
   let digRebuildsInFlight = 0;
   let lastDigAt = -Infinity;
   const pendingGrassNodeIds = new Set<string>();
   const pendingTreeNodeIds = new Set<string>();
   const pendingUnderstoryNodeIds = new Set<string>();
-  let vegetationFlushQueued = false;
 
   const flushVegetationRebuilds = () => {
-    vegetationFlushQueued = false;
+    vegetationFlushTimer = null;
     const veg = deps.getVegetationState();
 
     if (veg.grassEnabled && pendingGrassNodeIds.size > 0) {
@@ -106,9 +108,8 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       if (veg.treesEnabled) pendingTreeNodeIds.add(node.id);
       if (veg.understoryEnabled) pendingUnderstoryNodeIds.add(node.id);
     }
-    if (vegetationFlushQueued) return;
-    vegetationFlushQueued = true;
-    queueMicrotask(flushVegetationRebuilds);
+    if (vegetationFlushTimer !== null) clearTimeout(vegetationFlushTimer);
+    vegetationFlushTimer = setTimeout(flushVegetationRebuilds, VEGETATION_REBUILD_DEBOUNCE_MS);
   };
 
   const flushAncestors = async () => {
