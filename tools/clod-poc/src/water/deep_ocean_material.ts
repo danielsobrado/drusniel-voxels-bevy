@@ -1,6 +1,7 @@
 // Render-only deep ocean material — outside the playable world square.
 // No clipmap discard, no terrain/body-mask attributes, no inner-rect holes.
 import * as THREE from "three";
+import { DEEP_OCEAN_GPU_WAVES } from "./deep_ocean_waves.js";
 import type { WaterVisualConfig } from "./waterConfig.js";
 import { applyWaterVisual, makeWaterUniforms, type WaterUniforms } from "./waterMaterial.js";
 
@@ -22,12 +23,50 @@ export interface DeepOceanMaterialHandle {
   dispose(): void;
 }
 
+const GPU_WAVE_COUNT = DEEP_OCEAN_GPU_WAVES.length;
+
 const DEEP_OCEAN_VERT = /* glsl */ `
+  #define DEEP_OCEAN_WAVE_COUNT ${GPU_WAVE_COUNT}
+  uniform float uTime;
+  uniform vec4 uWaveA[DEEP_OCEAN_WAVE_COUNT]; // dirX, dirZ, k, omega
+  uniform vec4 uWaveB[DEEP_OCEAN_WAVE_COUNT]; // amp, phase, choppiness, unused
   varying vec3 vWorldPos;
+  varying vec2 vWaveSlope;
+  varying float vWaveCompression;
 
   void main() {
-    vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec3 p = position;
+    float offsetX = 0.0;
+    float offsetY = 0.0;
+    float offsetZ = 0.0;
+    float slopeX = 0.0;
+    float slopeZ = 0.0;
+    float jxx = 0.0;
+    float jzz = 0.0;
+    float jxz = 0.0;
+
+    for (int i = 0; i < DEEP_OCEAN_WAVE_COUNT; i++) {
+      vec4 a = uWaveA[i];
+      vec4 b = uWaveB[i];
+      float theta = a.z * (a.x * position.x + a.y * position.z) - a.w * uTime + b.y;
+      float c = cos(theta);
+      float s = sin(theta);
+      offsetX -= b.x * a.x * s * b.z;
+      offsetZ -= b.x * a.y * s * b.z;
+      offsetY += b.x * c;
+      slopeX -= b.x * a.z * a.x * s;
+      slopeZ -= b.x * a.z * a.y * s;
+      jxx -= b.x * a.z * a.x * a.x * c * b.z;
+      jzz -= b.x * a.z * a.y * a.y * c * b.z;
+      jxz -= b.x * a.z * a.x * a.y * c * b.z;
+    }
+
+    p += vec3(offsetX, offsetY, offsetZ);
+    float jacobian = (1.0 + jxx) * (1.0 + jzz) - jxz * jxz;
+    vWaveCompression = clamp((0.58 - jacobian) / 0.58, 0.0, 1.0);
+    vWaveSlope = vec2(slopeX, slopeZ);
+    vWorldPos = (modelMatrix * vec4(p, 1.0)).xyz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
   }
 `;
 
@@ -58,6 +97,8 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
   uniform vec3 uSunDir;
   uniform float uFogDistance;
   varying vec3 vWorldPos;
+  varying vec2 vWaveSlope;
+  varying float vWaveCompression;
 
   float hash21(vec2 p) {
     p = fract(p * vec2(123.34, 456.21));
@@ -126,24 +167,27 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
   }
 
   float combinedFoamNoise(vec2 uv, float t) {
-    float domainWarp = noiseDomainWarp(uv, t);
-    float ridged = noiseRidged(uv, t);
-    float cellular = noiseCellular(uv, t);
-    float billow = noiseBillow(uv, t);
-    float swiss = noiseSwiss(uv, t);
-    float turbulent = noiseTurbulent(uv, t);
-    return clamp(domainWarp * 0.24 + ridged * 0.24 + cellular * 0.08 + billow * 0.10 + swiss * 0.14 + turbulent * 0.20, 0.0, 1.0);
+    return clamp(
+      noiseDomainWarp(uv, t) * 0.24 +
+      noiseRidged(uv, t) * 0.24 +
+      noiseCellular(uv, t) * 0.08 +
+      noiseBillow(uv, t) * 0.10 +
+      noiseSwiss(uv, t) * 0.14 +
+      noiseTurbulent(uv, t) * 0.20,
+      0.0,
+      1.0
+    );
   }
 
   float bumpHeight(vec2 uv, float t) {
-    float perlin = fbm3(uv * 0.8 + vec2(t * 0.12, t * 0.06));
-    float ridged = noiseRidged(uv * 0.55, t);
-    float domainWarp = noiseDomainWarp(uv * 0.42, t);
-    float billow = noiseBillow(uv * 0.75, t);
     float crossA = noise2(vec2(uv.x * 0.9 + uv.y * 0.27, uv.y * 0.9 - uv.x * 0.27) + vec2(t * 0.09, 0.0));
     float crossB = noise2(vec2(uv.x * 0.9 - uv.y * 0.45, uv.y * 0.9 + uv.x * 0.45) - vec2(t * 0.07, 0.0));
-    float crosshatch = (crossA + crossB) * 0.5;
-    return perlin * 0.28 + ridged * 0.18 + domainWarp * 0.18 + billow * 0.12 + crosshatch * 0.10 + fbm3(uv * 2.7 - vec2(t * 0.18, t * 0.05)) * 0.14;
+    return fbm3(uv * 0.8 + vec2(t * 0.12, t * 0.06)) * 0.28 +
+      noiseRidged(uv * 0.55, t) * 0.18 +
+      noiseDomainWarp(uv * 0.42, t) * 0.18 +
+      noiseBillow(uv * 0.75, t) * 0.12 +
+      (crossA + crossB) * 0.05 +
+      fbm3(uv * 2.7 - vec2(t * 0.18, t * 0.05)) * 0.14;
   }
 
   vec2 bumpNormalDetail(vec2 uv, float t) {
@@ -166,21 +210,12 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     float reflY = reflectDir.y;
     float reflYClamped = max(reflY, 0.0);
     float sunDot = max(dot(reflectDir, sunDir), 0.0);
-
-    vec3 skyZenith = vec3(0.12, 0.32, 0.72);
-    vec3 skyHorizon = vec3(0.55, 0.70, 0.90);
-    vec3 skyDawn = vec3(0.85, 0.55, 0.35);
-    vec3 horizon = mix(skyDawn, skyHorizon, smoothstep(0.0, 0.25, sunDir.y));
-    vec3 sky = mix(horizon, skyZenith, smoothstep(0.0, 0.6, reflYClamped));
-
+    vec3 horizon = mix(vec3(0.85, 0.55, 0.35), vec3(0.55, 0.70, 0.90), smoothstep(0.0, 0.25, sunDir.y));
+    vec3 sky = mix(horizon, vec3(0.12, 0.32, 0.72), smoothstep(0.0, 0.6, reflYClamped));
     vec3 belowHorizon = mix(vec3(0.035, 0.07, 0.16), vec3(0.07, 0.14, 0.28), smoothstep(-0.5, 0.0, reflY));
     vec3 reflectedSky = mix(belowHorizon, sky, smoothstep(-0.25, 0.12, reflY));
-
-    vec3 sunWarm = vec3(1.0, 0.72, 0.42);
-    vec3 sunWhite = vec3(1.0, 0.95, 0.85);
-    vec3 mie = sunWarm * pow(sunDot, 8.0) * 0.25 + sunWhite * pow(sunDot, 64.0) * 1.2;
+    vec3 mie = vec3(1.0, 0.72, 0.42) * pow(sunDot, 8.0) * 0.25 + vec3(1.0, 0.95, 0.85) * pow(sunDot, 64.0) * 1.2;
     vec3 sunDisc = vec3(1.0, 0.92, 0.75) * (pow(sunDot, 512.0) * 4.5 + pow(sunDot, 128.0) * 1.4);
-
     return max(reflectedSky + mie + sunDisc, vec3(0.035, 0.07, 0.14));
   }
 
@@ -197,7 +232,7 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     vec2 gradA = rippleGrad(worldPos.xz * uRippleScaleA + advectA, phaseA);
     vec2 gradB = rippleGrad(worldPos.xz * uRippleScaleB + advectB + vec2(17.31, -9.47), phaseB);
     vec2 noiseGrad = bumpNormalDetail(worldPos.xz * max(0.02, uFoamNoiseScale * 2.5), uTime) * 0.18;
-    vec2 grad = mix(gradA, gradB, blend) * uRippleAmp + noiseGrad;
+    vec2 grad = mix(gradA, gradB, blend) * uRippleAmp + noiseGrad + vWaveSlope;
     vec3 normal = normalize(vec3(-grad.x, 1.0, -grad.y));
 
     vec3 viewDir = normalize(uCameraPos - worldPos);
@@ -206,8 +241,7 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     float ndotv = max(dot(viewDir, fresnelNormal), 0.0);
     float fres = uFresnelBase + (1.0 - uFresnelBase) * pow(1.0 - ndotv, uFresnelPower);
 
-    vec3 deepInk = vec3(0.0, 0.025, 0.10);
-    vec3 deepBlue = mix(deepInk, uDeepColor, 0.55);
+    vec3 deepBlue = mix(vec3(0.0, 0.025, 0.10), uDeepColor, 0.55);
     vec3 shallowTeal = mix(uShallowColor, vec3(0.0, 0.45, 0.62), 0.35);
     float viewDepthTint = smoothstep(0.0, 0.55, 1.0 - ndotv);
     float heightTint = smoothstep(-3.0, 5.5, waveHeight);
@@ -215,13 +249,13 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     waterColor = mix(waterColor, mix(vec3(0.01, 0.04, 0.14), shallowTeal, heightTint), 0.32);
 
     vec3 reflectDir = normalize(reflect(-viewDir, normal));
-    vec3 envReflection = skyReflection(reflectDir, sunDir);
-    vec3 finalReflection = envReflection * 0.88;
+    vec3 finalReflection = skyReflection(reflectDir, sunDir) * 0.88;
 
     vec2 foamUv = worldPos.xz * max(0.01, uFoamNoiseScale) + advectA * 0.35;
     float foamNoise = combinedFoamNoise(foamUv, uTime);
     float crestFoam = smoothstep(1.2, 4.0, waveHeight) * smoothstep(0.36, 0.82, foamNoise);
-    float foam = smoothstep(0.70, 0.96, foamNoise) * 0.10 + crestFoam * 0.34;
+    float compressionFoam = smoothstep(0.04, 0.55, vWaveCompression) * smoothstep(0.42, 0.86, foamNoise);
+    float foam = smoothstep(0.70, 0.96, foamNoise) * 0.10 + crestFoam * 0.34 + compressionFoam * 0.38;
 
     float backlit = pow(max(dot(viewDir, -sunDir), 0.0), 4.0) * 0.35;
     float crestScatter = smoothstep(0.0, 5.5, waveHeight) * 0.38 + smoothstep(0.45, 0.95, foamNoise) * 0.20;
@@ -248,6 +282,16 @@ interface DeepOceanUniforms extends WaterUniforms {
   uSurfaceY: { value: number };
   uHorizonColor: { value: THREE.Color };
   uFogDistance: { value: number };
+  uWaveA: { value: THREE.Vector4[] };
+  uWaveB: { value: THREE.Vector4[] };
+}
+
+function waveUniformA(): THREE.Vector4[] {
+  return DEEP_OCEAN_GPU_WAVES.map((wave) => new THREE.Vector4(wave.dirX, wave.dirZ, wave.k, wave.omega));
+}
+
+function waveUniformB(): THREE.Vector4[] {
+  return DEEP_OCEAN_GPU_WAVES.map((wave) => new THREE.Vector4(wave.amp, wave.phase, wave.choppiness, 0));
 }
 
 function makeDeepOceanUniforms(params: DeepOceanMaterialParams): DeepOceanUniforms {
@@ -263,6 +307,8 @@ function makeDeepOceanUniforms(params: DeepOceanMaterialParams): DeepOceanUnifor
     uSurfaceY: { value: params.surfaceY },
     uHorizonColor: { value: (params.horizonColor ?? new THREE.Color(0.62, 0.74, 0.88)).clone() },
     uFogDistance: { value: Math.max(256, params.visual.rippleLoopDistance * 4) },
+    uWaveA: { value: waveUniformA() },
+    uWaveB: { value: waveUniformB() },
   };
 }
 
