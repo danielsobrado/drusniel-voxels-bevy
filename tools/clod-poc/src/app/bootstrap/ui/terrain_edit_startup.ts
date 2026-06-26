@@ -1,4 +1,5 @@
 import type * as THREE from "three";
+import type { ConstructionTerrainConformRequest } from "../../../construction/types.js";
 import { createTerrainEditService } from "../../../terrain/editing/terrain_edit_service.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
@@ -7,6 +8,7 @@ export interface TerrainEditStartupResult {
   terrainEditService: ReturnType<typeof createTerrainEditService>;
   flushAncestors: () => Promise<void>;
   scheduleDig: (ray: THREE.Ray) => void;
+  scheduleConstructionTerrainConform: (request: ConstructionTerrainConformRequest) => void;
   playerTerraformEditActive: () => boolean;
 }
 
@@ -104,6 +106,7 @@ export function runTerrainEditStartup(
     terrainEditService,
     flushAncestors: () => terrainEditService.flushAncestors(),
     scheduleDig: (ray) => terrainEditService.scheduleDig(ray),
+    scheduleConstructionTerrainConform: (request) => terrainEditService.scheduleConstructionTerrainConform(request),
     playerTerraformEditActive,
   };
 }
