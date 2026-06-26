@@ -31,11 +31,12 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   slots.className = "spell-menu-slots";
 
   const fireButton = document.createElement("button");
+  const onFireButtonClick = (): void => castFire();
   fireButton.type = "button";
   fireButton.textContent = `🔥 ${config.fire.label}`;
   fireButton.title = `${config.fire.label} spell`;
   fireButton.setAttribute("aria-pressed", "false");
-  fireButton.addEventListener("click", () => castFire());
+  fireButton.addEventListener("click", onFireButtonClick);
 
   root.addEventListener("pointerdown", stopUiPropagation);
   root.addEventListener("click", stopUiPropagation);
@@ -59,7 +60,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
       activeReset = 0;
       root.removeEventListener("pointerdown", stopUiPropagation);
       root.removeEventListener("click", stopUiPropagation);
-      fireButton.removeEventListener("click", castFire);
+      fireButton.removeEventListener("click", onFireButtonClick);
       fireRenderer.dispose();
       flameSfx.dispose();
       if (shouldRemoveRoot) root.remove();
