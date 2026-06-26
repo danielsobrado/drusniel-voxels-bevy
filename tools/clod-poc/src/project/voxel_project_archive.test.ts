@@ -152,6 +152,10 @@ function manifest(): VoxelProjectManifest {
       rotation: [0, 0, 0, 1],
       scale: [1, 1, 1],
       anchor: "terrain",
+      seed: 42,
+      variationId: 3,
+      flags: 7,
+      revision: 9,
     }],
     textures: [
       { index: 0, source: "custom", name: "soil.png", selectedId: "custom", scale: 0.02, heightMin: 0, heightMax: 40, customPath: "textures/slot-0.png", mimeType: "image/png" },

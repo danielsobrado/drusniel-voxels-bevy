@@ -183,6 +183,14 @@ function isVec3(value: unknown): value is [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every(isFiniteNumber);
 }
 
+function isVec4(value: unknown): value is [number, number, number, number] {
+  return Array.isArray(value) && value.length === 4 && value.every(isFiniteNumber);
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return isFiniteNumber(value) ? value : undefined;
+}
+
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -249,14 +257,28 @@ function validateVoxelEditSnapshot(value: unknown): VoxelEditSnapshot {
 
 function validateProps(value: unknown): ProjectPropInstance[] {
   if (!Array.isArray(value)) throw new Error("project.json props must be an array");
-  return value.filter(isRecord).map((prop) => ({
-    id: String(prop.id),
-    prefabId: String(prop.prefabId),
-    position: prop.position as [number, number, number],
-    rotation: prop.rotation as [number, number, number, number],
-    scale: prop.scale as [number, number, number],
-    anchor: prop.anchor === "terrain" || prop.anchor === "voxel" ? prop.anchor : "world",
-  }));
+  return value.map((raw, index) => {
+    if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.prefabId !== "string" || !isVec3(raw.position) || !isVec4(raw.rotation) || !isVec3(raw.scale)) {
+      throw new Error(`project.json props[${index}] is invalid`);
+    }
+    const prop: ProjectPropInstance = {
+      id: raw.id,
+      prefabId: raw.prefabId,
+      position: [...raw.position],
+      rotation: [...raw.rotation],
+      scale: [...raw.scale],
+      anchor: raw.anchor === "terrain" || raw.anchor === "voxel" ? raw.anchor : "world",
+    };
+    const seed = optionalFiniteNumber(raw.seed);
+    const variationId = optionalFiniteNumber(raw.variationId);
+    const flags = optionalFiniteNumber(raw.flags);
+    const revision = optionalFiniteNumber(raw.revision);
+    if (seed !== undefined) prop.seed = seed;
+    if (variationId !== undefined) prop.variationId = variationId;
+    if (flags !== undefined) prop.flags = flags;
+    if (revision !== undefined) prop.revision = revision;
+    return prop;
+  });
 }
 
 function assertWaterArchiveState(value: unknown): asserts value is ProjectWaterArchiveState {
