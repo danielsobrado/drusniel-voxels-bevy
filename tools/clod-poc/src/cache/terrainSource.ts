@@ -1,7 +1,9 @@
 import type { BorderCoastOceanConfig } from "../terrain/border_coast_config.js";
+import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_config.js";
 import type { WaterConfig } from "../water/waterConfig.js";
 import type { ClodPagesConfig } from "../config.js";
 import type { SerializedHydrologyTerrain } from "../clod_worker_protocol.js";
+import type { DigEdit } from "../terrain/terrain.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
@@ -11,6 +13,7 @@ async function hashJson(value: unknown): Promise<string> {
   return sha256Hex(textEncoder.encode(json).buffer);
 }
 
+/** Sampled digest for large mesh payloads in artifact headers — not used for terrain invalidation. */
 export async function lightweightArrayDigest(arr: ArrayLike<number>): Promise<string> {
   const len = arr.length;
   if (len === 0) return "empty";
@@ -24,6 +27,31 @@ export async function lightweightArrayDigest(arr: ArrayLike<number>): Promise<st
     sum += v;
   }
   return hashJson({ len, sum, samples });
+}
+
+async function hashFloat32Array(arr: Float32Array): Promise<string> {
+  return sha256Hex(new Uint8Array(arr).buffer);
+}
+
+function roundCoord(v: number): number {
+  return Math.round(v * 1000) / 1000;
+}
+
+export function canonicalizeDigEdits(edits: readonly DigEdit[]) {
+  return edits
+    .map((e) => ({
+      x: roundCoord(e.x),
+      y: roundCoord(e.y),
+      z: roundCoord(e.z),
+      r: roundCoord(e.r),
+      shape: e.shape ?? "sphere",
+      op: e.op ?? "remove",
+      material: e.material ?? 0,
+      height: e.height ?? null,
+      strength: e.strength ?? null,
+      falloff: e.falloff ?? null,
+    }))
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 
 export interface TerrainSourceInputs {
@@ -44,15 +72,43 @@ export interface TerrainSourceInputs {
   longViewScene: boolean;
 }
 
+/** Normalize terrain source fields after worker postMessage (defensive against partial payloads). */
+export function normalizeTerrainSourceInputs(
+  input: TerrainSourceInputs | undefined | null,
+): TerrainSourceInputs {
+  if (!input) {
+    throw new Error("terrainSource is required for CLOD cache invalidation");
+  }
+  return {
+    scene: input.scene ?? "default",
+    worldSeed: input.worldSeed ?? "0",
+    worldPages: input.worldPages ?? 0,
+    generatorVersion: input.generatorVersion ?? "unknown",
+    digRevision: input.digRevision ?? 0,
+    hydrologyTerrain: input.hydrologyTerrain ?? null,
+    borderCoastOceanConfig: input.borderCoastOceanConfig ?? DEFAULT_BORDER_COAST_OCEAN_CONFIG,
+    waterConfig: {
+      enabled: input.waterConfig?.enabled ?? false,
+      source: input.waterConfig?.source ?? "fake_bodies",
+      fakeBodies: { carveTerrain: input.waterConfig?.fakeBodies?.carveTerrain ?? false },
+      hydrology: { enabled: input.waterConfig?.hydrology?.enabled ?? false },
+    },
+    proceduralTextureEnabled: input.proceduralTextureEnabled ?? false,
+    proceduralTextureHash: input.proceduralTextureHash ?? null,
+    stagedImportHash: input.stagedImportHash ?? null,
+    longViewScene: input.longViewScene ?? false,
+  };
+}
+
 export async function hashHydrologyTerrain(
   terrain: SerializedHydrologyTerrain | null,
 ): Promise<string | null> {
   if (!terrain) return null;
-  const bedDigest = await lightweightArrayDigest(terrain.carvedBed);
+  const carvedBedHash = await hashFloat32Array(terrain.carvedBed);
   return hashJson({
     res: terrain.res,
     worldCells: terrain.worldCells,
-    bedDigest,
+    carvedBedHash,
   });
 }
 
@@ -66,38 +122,42 @@ export async function hashBorderCoastConfig(config: BorderCoastOceanConfig): Pro
 }
 
 export async function computeTerrainSourceHash(input: TerrainSourceInputs): Promise<string> {
-  const hydrologyHash = await hashHydrologyTerrain(input.hydrologyTerrain);
-  const borderCoastHash = await hashBorderCoastConfig(input.borderCoastOceanConfig);
+  const source = normalizeTerrainSourceInputs(input);
+  const hydrologyHash = await hashHydrologyTerrain(source.hydrologyTerrain);
+  const borderCoastHash = await hashBorderCoastConfig(source.borderCoastOceanConfig);
   return hashJson({
-    scene: input.scene,
-    worldSeed: input.worldSeed,
-    worldPages: input.worldPages,
-    generatorVersion: input.generatorVersion,
-    digRevision: input.digRevision,
+    scene: source.scene,
+    worldSeed: source.worldSeed,
+    worldPages: source.worldPages,
+    generatorVersion: source.generatorVersion,
+    digRevision: source.digRevision,
     hydrologyHash,
     borderCoastHash,
     water: {
-      enabled: input.waterConfig.enabled,
-      source: input.waterConfig.source,
-      carveTerrain: input.waterConfig.fakeBodies.carveTerrain,
-      hydrologyEnabled: input.waterConfig.hydrology.enabled,
+      enabled: source.waterConfig.enabled,
+      source: source.waterConfig.source,
+      carveTerrain: source.waterConfig.fakeBodies.carveTerrain,
+      hydrologyEnabled: source.waterConfig.hydrology.enabled,
     },
-    proceduralTextureEnabled: input.proceduralTextureEnabled,
-    proceduralTextureHash: input.proceduralTextureHash,
-    stagedImportHash: input.stagedImportHash,
-    longViewScene: input.longViewScene,
+    proceduralTextureEnabled: source.proceduralTextureEnabled,
+    proceduralTextureHash: source.proceduralTextureHash,
+    stagedImportHash: source.stagedImportHash,
+    longViewScene: source.longViewScene,
   });
 }
 
 export async function buildStagedImportHash(manifest: {
   worldSize: number;
-  terrainEdits: unknown[];
+  terrainEdits: DigEdit[];
   config: ClodPagesConfig;
 } | null): Promise<string | null> {
   if (!manifest) return null;
+  const editsCanonical = canonicalizeDigEdits(manifest.terrainEdits);
+  const editsDigest = await sha256Hex(textEncoder.encode(JSON.stringify(editsCanonical)).buffer);
   return hashJson({
     worldSize: manifest.worldSize,
     editCount: manifest.terrainEdits.length,
+    editsDigest,
     page: manifest.config.page,
     meshopt: manifest.config.meshopt_package_version,
   });

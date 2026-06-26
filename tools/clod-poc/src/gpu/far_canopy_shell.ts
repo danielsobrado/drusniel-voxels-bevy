@@ -258,8 +258,9 @@ export function buildFarCanopyShellFromTextureSet(
   mat.colorNode = Fn(() => {
     const fadeEdge = float(FADE_IN - FADE_BAND);
     const fadeEnd = float(FADE_IN + FADE_BAND);
-  Discard(
-      smoothstep(fadeEdge, fadeEnd, distV).mul(ditherStrength).lessThanEqual(
+    const coverageVisible = smoothstep(float(0.02), float(0.12), cov);
+    Discard(
+      coverageVisible.mul(smoothstep(fadeEdge, fadeEnd, distV)).mul(ditherStrength).lessThanEqual(
         interleavedGradientNoise(screenCoordinate.xy),
       ),
     );

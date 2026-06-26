@@ -61,6 +61,10 @@ export type ClodWorkerRequest =
   | {
       type: "flush";
       requestId: number;
+    }
+  | {
+      type: "clearCache";
+      requestId: number;
     };
 
 export interface SerializedLod0RebuildResult {
@@ -97,6 +101,7 @@ export type ClodWorkerResponse =
   | ({ type: "parentRebuilt" } & SerializedParentBatch)
   | { type: "parentsComplete"; requestId: number | null; parentNodes: number; parentMs: number }
   | { type: "flushed"; requestId: number }
+  | { type: "cacheCleared"; requestId: number }
   | { type: "error"; requestId: number | null; message: string; name?: string; code?: string; details?: Record<string, unknown> };
 
 function cloneMesh(mesh: PageMesh): PageMesh {

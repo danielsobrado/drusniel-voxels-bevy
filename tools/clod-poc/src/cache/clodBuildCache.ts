@@ -1,4 +1,4 @@
-import type { BuildProgress, BuildResult } from "../clod/quadtree.js";
+import type { BuildProgress, BuildResult, NodeBuildStat } from "../clod/quadtree.js";
 import { buildWorldAsync, type BuildCacheHooks } from "../clod/quadtree.js";
 import type { ClodPagesConfig } from "../config.js";
 import type { ClodPageNode } from "../types.js";
@@ -13,6 +13,7 @@ import {
   encodeClodPageTreeArtifact,
   type ClodPageNodeArtifact,
 } from "./artifactSerializer.js";
+import { decodeBuildStatFromMetadata, encodeBuildStatMetadata } from "./cacheBuildStatMetadata.js";
 import type { WorkerCacheBuildStats } from "./cacheMetrics.js";
 import { cacheLogger } from "./cacheLogger.js";
 
@@ -63,8 +64,13 @@ function nodeToArtifact(node: ClodPageNode): ClodPageNodeArtifact {
 
 export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildStats): BuildCacheHooks {
   const sourceHash = () => pageNodeSourceHash(ctx);
+  const cachedBuildStats = new Map<string, NodeBuildStat>();
 
   return {
+    getCachedBuildStat(nodeId) {
+      return cachedBuildStats.get(nodeId);
+    },
+
     async tryLoadNode(nodeId, level, px, pz) {
       if (!ctx.effective) return null;
       const keyParts = buildBaseKeyParts(ctx, "clod-page-node", {
@@ -77,6 +83,8 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
       const result = await ctx.service.get(keyParts, decodeClodPageNodeArtifact);
       if (result.status === "hit" && result.artifact) {
         const cachedBuildMs = typeof result.metadata?.buildMs === "number" ? result.metadata.buildMs : 0;
+        const restoredStat = decodeBuildStatFromMetadata(nodeId, level, result.metadata);
+        if (restoredStat) cachedBuildStats.set(nodeId, restoredStat);
         stats.nodesFromCache++;
         stats.cacheHits++;
         stats.cacheDecodeMs += result.decodeMs;
@@ -88,10 +96,10 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
       return null;
     },
 
-    async storeNode(node, buildMs) {
+    async storeNode(node, stat) {
       if (!ctx.effective) return;
       stats.nodesBuilt++;
-      stats.coldBuildMs += buildMs;
+      stats.coldBuildMs += stat.buildMs;
       const { pageX, pageZ, lod } = parseNodeId(node.id);
       const keyParts = buildBaseKeyParts(ctx, "clod-page-node", {
         pageX,
@@ -104,7 +112,10 @@ export function createBuildCacheHooks(ctx: ClodCacheContext, stats: CachedBuildS
         keyParts,
         nodeToArtifact(node),
         encodeClodPageNodeArtifact,
-        { buildMs, triangleCount: node.mesh.indices.length / 3 },
+        {
+          ...encodeBuildStatMetadata(stat),
+          triangleCount: node.mesh.indices.length / 3,
+        },
       );
     },
 

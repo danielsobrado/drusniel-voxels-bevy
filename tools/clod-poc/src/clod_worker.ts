@@ -8,7 +8,9 @@ import {
   type DirtyCellBounds,
   type NodeIndex,
 } from "./clod/quadtree.js";
-import { initClodCacheContext } from "./cache/clodCacheContext.js";
+import { initClodCacheContext, clearWorkerPersistentCache, type ClodCacheContext } from "./cache/clodCacheContext.js";
+import { isCacheRpcResponse } from "./cache/cacheWorkerRpc.js";
+import { dispatchCacheRpcResponse } from "./cache/workerRemotePersistentStore.js";
 import { createBuildCacheHooks, type CachedBuildStats } from "./cache/clodBuildCache.js";
 import { addDigEdit, replaceDigEdits, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
 import {
@@ -28,6 +30,7 @@ const ctx = self as unknown as {
 };
 
 let cfg: ClodPagesConfig | null = null;
+let workerCacheCtx: ClodCacheContext | null = null;
 let result: BuildResult | null = null;
 let index: NodeIndex | null = null;
 let topLevel = 0;
@@ -204,7 +207,9 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
     worldPages: request.worldPagesX,
     terrainSource: request.terrainSource,
     forceDisabled: request.cacheDisabled ?? false,
+    role: "worker",
   });
+  workerCacheCtx = cacheCtx;
   const cacheStats: CachedBuildStats = {
     nodesFromCache: 0,
     nodesBuilt: 0,
@@ -318,13 +323,29 @@ function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): vo
   post({ type: "flushed", requestId: request.requestId });
 }
 
+async function handleClearCache(request: Extract<ClodWorkerRequest, { type: "clearCache" }>): Promise<void> {
+  if (workerCacheCtx) {
+    await workerCacheCtx.service.clear();
+    workerCacheCtx = null;
+  } else {
+    await clearWorkerPersistentCache();
+  }
+  post({ type: "cacheCleared", requestId: request.requestId });
+}
+
 ctx.onmessage = (event: MessageEvent<ClodWorkerRequest>) => {
+  if (isCacheRpcResponse(event.data)) {
+    dispatchCacheRpcResponse(event.data);
+    return;
+  }
   const request = event.data;
   try {
     if (request.type === "build") {
       void handleBuild(request).catch((error) => post(errorResponse(request.requestId, error)));
     } else if (request.type === "dig") {
       handleDig(request);
+    } else if (request.type === "clearCache") {
+      void handleClearCache(request).catch((error) => post(errorResponse(request.requestId, error)));
     } else {
       handleFlush(request);
     }

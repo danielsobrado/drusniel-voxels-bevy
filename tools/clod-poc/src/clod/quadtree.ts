@@ -38,6 +38,8 @@ export interface NodeBuildStat {
   lowBenefit: boolean;
   polish: DiagonalPolishStats;
   buildMs: number;
+  /** True when stats were restored from a warm-cache artifact instead of a fresh build. */
+  fromCache?: boolean;
 }
 
 export interface BuildResult {
@@ -58,7 +60,8 @@ export interface BuildProgress {
 /** Optional disk/memory cache hooks — never block rendering on cache miss. */
 export interface BuildCacheHooks {
   tryLoadNode(nodeId: string, level: number, px: number, pz: number): Promise<ClodPageNode | null>;
-  storeNode(node: ClodPageNode, buildMs: number): Promise<void>;
+  getCachedBuildStat?(nodeId: string): NodeBuildStat | undefined;
+  storeNode(node: ClodPageNode, stat: NodeBuildStat): Promise<void>;
   onBuildComplete?(result: BuildResult): Promise<void>;
 }
 
@@ -319,12 +322,11 @@ export async function buildWorldAsync(
       let node: ClodPageNode | null = cacheHooks
         ? await cacheHooks.tryLoadNode(nodeId, 0, px, pz)
         : null;
-      if (node) {
-        node.chunkMeshes = undefined;
-      } else {
+      if (!node) {
         const src = buildLod0PageSource(px, pz, cfg, world);
         validatePageMesh(src.mesh, src.footprint, cfg.validation.zero_area_epsilon, nodeId);
         const b = boundsOf(src.mesh);
+        const buildMs = performance.now() - t0;
         node = {
           id: nodeId,
           level: 0,
@@ -336,16 +338,25 @@ export async function buildWorldAsync(
           lowBenefit: false,
           chunkMeshes: src.chunks,
         };
-        const buildMs = performance.now() - t0;
-        if (cacheHooks) await cacheHooks.storeNode(node, buildMs);
+        const stat: NodeBuildStat = {
+          id: nodeId, level: 0, inputTris: tris(src.mesh), outputTris: tris(src.mesh),
+          lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
+          buildMs,
+        };
+        if (cacheHooks) await cacheHooks.storeNode(node, stat);
+        lod0.push(node);
+        lod0Index.set(`${px},${pz}`, node);
+        stats.push(stat);
+      } else {
+        lod0.push(node);
+        lod0Index.set(`${px},${pz}`, node);
+        const cachedStat = cacheHooks?.getCachedBuildStat?.(nodeId);
+        stats.push(cachedStat ?? {
+          id: node.id, level: 0, inputTris: tris(node.mesh), outputTris: tris(node.mesh),
+          lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
+          buildMs: performance.now() - t0, fromCache: true,
+        });
       }
-      lod0.push(node);
-      lod0Index.set(`${px},${pz}`, node);
-      stats.push({
-        id: node.id, level: 0, inputTris: tris(node.mesh), outputTris: tris(node.mesh),
-        lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
-        buildMs: performance.now() - t0,
-      });
       await tick(0, "LOD0 pages");
     }
   }
@@ -385,11 +396,12 @@ export async function buildWorldAsync(
           node.children = children;
           levelNodes.push(node);
           levelIndex.set(`${nx},${nz}`, node);
-          stats.push({
+          const cachedStat = cacheHooks?.getCachedBuildStat?.(nodeId);
+          stats.push(cachedStat ?? {
             id: node.id, level, inputTris: tris(node.mesh), outputTris: tris(node.mesh),
             lockedVerts: 0, errorWorld: node.errorWorld, lowBenefit: node.lowBenefit,
             polish: emptyDiagonalPolishStats(),
-            buildMs: performance.now() - t0,
+            buildMs: performance.now() - t0, fromCache: true,
           });
           await tick(level, `LOD${level} parents`);
           continue;
@@ -427,15 +439,16 @@ export async function buildWorldAsync(
           lowBenefit: sim.lowBenefit,
         };
         const buildMs = performance.now() - t0;
-        if (cacheHooks) await cacheHooks.storeNode(node, buildMs);
-        levelNodes.push(node);
-        levelIndex.set(`${nx},${nz}`, node);
-        stats.push({
+        const stat: NodeBuildStat = {
           id: node.id, level, inputTris: tris(welded), outputTris: tris(sim.mesh),
           lockedVerts: countLocks(locks), errorWorld, lowBenefit: sim.lowBenefit,
           polish,
           buildMs,
-        });
+        };
+        if (cacheHooks) await cacheHooks.storeNode(node, stat);
+        levelNodes.push(node);
+        levelIndex.set(`${nx},${nz}`, node);
+        stats.push(stat);
         await tick(level, `LOD${level} parents`);
       }
     }
@@ -539,7 +552,7 @@ export function rebuildDirtyLod0Pages(
         chunksRemeshed += r.remeshed;
         chunksTotal += node.chunkMeshes.length;
       } else {
-        // no cached chunks (shouldn't happen post-build): full extract, then populate cache
+        // Warm-cache LOD0 pages omit chunkMeshes; first edit does one full page extract, then partial chunk remeshing.
         const src = buildLod0PageSource(px, pz, cfg, world);
         node.chunkMeshes = src.chunks;
         mesh = src.mesh;

@@ -16,7 +16,11 @@ export interface CacheDebugOverlay {
   destroy(): void;
 }
 
-export function createCacheDebugOverlay(): CacheDebugOverlay | null {
+export interface CacheDebugOverlayDeps {
+  clearWorkerCache?: () => Promise<void>;
+}
+
+export function createCacheDebugOverlay(deps: CacheDebugOverlayDeps = {}): CacheDebugOverlay | null {
   const ctx = getClodCacheContext();
   if (!ctx?.config.debug.expose_overlay_stats) return null;
 
@@ -66,7 +70,12 @@ export function createCacheDebugOverlay(): CacheDebugOverlay | null {
   root.querySelector<HTMLButtonElement>("[data-cache-clear-persistent]")!.onclick = async () => {
     const active = getClodCacheContext();
     if (!active) return;
-    await active.service.clearPersistent();
+    active.service.clearMemory();
+    if (deps.clearWorkerCache) {
+      await deps.clearWorkerCache();
+    } else {
+      await active.service.clearPersistent();
+    }
     update();
   };
 

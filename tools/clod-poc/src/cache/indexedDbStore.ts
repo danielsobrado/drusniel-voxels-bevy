@@ -1,8 +1,23 @@
 import type { ClodCachePersistentConfig } from "./cacheConfig.js";
 import type { ClodCacheManifestEntry, ClodCacheStoredRecord } from "./cacheTypes.js";
 import { CacheUnavailableError } from "./cacheErrors.js";
+import { cacheLogger } from "./cacheLogger.js";
+import { WorkerRemotePersistentStore } from "./workerRemotePersistentStore.js";
 
-export const MANIFEST_KEY = "__manifest__";
+const DB_VERSION = 2;
+const ARTIFACTS_STORE = "artifacts";
+const RECREATE_DELAY_MS = 100;
+
+/** IndexedDB-safe record: Uint8Array clones reliably in workers. */
+interface IdbStoredRecord {
+  header: ClodCacheStoredRecord["header"];
+  payload: Uint8Array;
+}
+
+const LEGACY_DATABASE_NAMES = [
+  "drusniel-clod-poc-cache",
+  "drusniel-clod-poc-cache-worker",
+];
 
 export interface PersistentCacheStore {
   get(key: string): Promise<ClodCacheStoredRecord | null>;
@@ -12,6 +27,60 @@ export interface PersistentCacheStore {
   keys(): Promise<string[]>;
   getManifestEntries(): Promise<ClodCacheManifestEntry[] | null>;
   putManifestEntries(entries: ClodCacheManifestEntry[]): Promise<void>;
+  probe(): Promise<boolean>;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toIdbRecord(record: ClodCacheStoredRecord): IdbStoredRecord {
+  return {
+    header: record.header,
+    payload: new Uint8Array(record.payload),
+  };
+}
+
+function fromIdbRecord(raw: IdbStoredRecord): ClodCacheStoredRecord {
+  const payload = raw.payload.buffer.slice(
+    raw.payload.byteOffset,
+    raw.payload.byteOffset + raw.payload.byteLength,
+  );
+  return { header: raw.header, payload };
+}
+
+function isRetryableIdbError(error: unknown): boolean {
+  if (!(error instanceof DOMException)) return false;
+  return error.name === "UnknownError"
+    || error.name === "InvalidStateError"
+    || error.name === "VersionError"
+    || error.name === "NotReadableError"
+    || error.name === "AbortError";
+}
+
+export function deleteDatabase(name: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      resolve();
+      return;
+    }
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new CacheUnavailableError(`deleteDatabase failed: ${name}`));
+    request.onblocked = () => {
+      cacheLogger.warn(`IndexedDB delete blocked for ${name}; waiting for open connections to close`);
+    };
+  });
+}
+
+export async function purgeLegacyCacheDatabases(): Promise<void> {
+  for (const name of LEGACY_DATABASE_NAMES) {
+    try {
+      await deleteDatabase(name);
+    } catch {
+      // Best-effort cleanup of pre-v2 corrupted stores.
+    }
+  }
 }
 
 export class InMemoryPersistentStore implements PersistentCacheStore {
@@ -46,104 +115,224 @@ export class InMemoryPersistentStore implements PersistentCacheStore {
   async putManifestEntries(entries: ClodCacheManifestEntry[]): Promise<void> {
     this.manifest = entries.map((e) => ({ ...e }));
   }
+
+  async probe(): Promise<boolean> {
+    return true;
+  }
 }
 
 export class IndexedDbStore implements PersistentCacheStore {
   private readonly config: ClodCachePersistentConfig;
+  private db: IDBDatabase | null = null;
   private dbPromise: Promise<IDBDatabase> | null = null;
+  private recoveryAttempted = false;
+
+  get dbName(): string {
+    return this.config.database_name;
+  }
 
   constructor(config: ClodCachePersistentConfig) {
     this.config = config;
   }
 
-  private openDb(): Promise<IDBDatabase> {
-    if (this.dbPromise) return this.dbPromise;
+  async probe(): Promise<boolean> {
+    try {
+      await this.withRecovery(() => this.probeInternal());
+      return true;
+    } catch (error) {
+      const name = error instanceof DOMException ? error.name : error instanceof Error ? error.name : "";
+      const message = error instanceof Error ? error.message : String(error);
+      cacheLogger.warn(`IndexedDB probe failed [${name}] ${message} (db: ${this.dbName})`);
+      return false;
+    }
+  }
+
+  private closeConnection(): void {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {
+        // Ignore close errors on corrupted connections.
+      }
+      this.db = null;
+    }
+    this.dbPromise = null;
+  }
+
+  private async recreateDatabase(): Promise<void> {
+    this.closeConnection();
+    await deleteDatabase(this.config.database_name);
+    await purgeLegacyCacheDatabases();
+    await delay(RECREATE_DELAY_MS);
+  }
+
+  private async withRecovery<T>(op: () => Promise<T>): Promise<T> {
+    try {
+      return await op();
+    } catch (error) {
+      if (!isRetryableIdbError(error) || this.recoveryAttempted) throw error;
+      this.recoveryAttempted = true;
+      cacheLogger.warn(`IndexedDB error [${(error as DOMException).name}], recreating db ${this.dbName}`);
+      await this.recreateDatabase();
+      return await op();
+    }
+  }
+
+  private openDbOnce(): Promise<IDBDatabase> {
     if (typeof indexedDB === "undefined") {
       return Promise.reject(new CacheUnavailableError("IndexedDB unavailable"));
     }
-    this.dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.config.database_name, 1);
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.config.database_name, DB_VERSION);
       request.onupgradeneeded = () => {
         const db = request.result;
-        if (!db.objectStoreNames.contains(this.config.object_store_name)) {
-          db.createObjectStore(this.config.object_store_name);
+        for (const name of Array.from(db.objectStoreNames)) {
+          if (name !== ARTIFACTS_STORE) db.deleteObjectStore(name);
+        }
+        if (!db.objectStoreNames.contains(ARTIFACTS_STORE)) {
+          db.createObjectStore(ARTIFACTS_STORE);
         }
       };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error ?? new CacheUnavailableError("IndexedDB open failed"));
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => {
+          db.close();
+          if (this.db === db) this.closeConnection();
+        };
+        this.db = db;
+        resolve(db);
+      };
+      request.onerror = () => {
+        const err = request.error;
+        reject(err ?? new CacheUnavailableError(`${this.config.database_name} open failed`));
+      };
     });
-    return this.dbPromise;
   }
 
-  private async withStore<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  private async openDb(): Promise<IDBDatabase> {
+    if (this.db) return this.db;
+    if (this.dbPromise) return this.dbPromise;
+    this.dbPromise = this.openDbOnce();
+    try {
+      this.db = await this.dbPromise;
+      return this.db;
+    } catch (error) {
+      this.dbPromise = null;
+      throw error;
+    }
+  }
+
+  private async withArtifacts<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
     const db = await this.openDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(this.config.object_store_name, mode);
-      const store = tx.objectStore(this.config.object_store_name);
+      const tx = db.transaction(ARTIFACTS_STORE, mode);
+      const store = tx.objectStore(ARTIFACTS_STORE);
       const request = fn(store);
       request.onsuccess = () => resolve(request.result as T);
-      request.onerror = () => reject(request.error ?? new CacheUnavailableError("IndexedDB request failed"));
+      request.onerror = () => reject(request.error ?? new CacheUnavailableError("artifact store request failed"));
+      tx.onerror = () => reject(tx.error ?? request.error ?? new CacheUnavailableError("artifact transaction failed"));
+    });
+  }
+
+  private async probeInternal(): Promise<void> {
+    await this.withArtifacts("readonly", (store) => store.count());
+  }
+
+  private async keysInternal(): Promise<string[]> {
+    const db = await this.openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(ARTIFACTS_STORE, "readonly");
+      const request = tx.objectStore(ARTIFACTS_STORE).getAllKeys();
+      request.onsuccess = () => resolve((request.result as IDBValidKey[]).map(String));
+      request.onerror = () => reject(request.error ?? new CacheUnavailableError("keys failed"));
+      tx.onerror = () => reject(tx.error ?? new CacheUnavailableError("keys transaction failed"));
     });
   }
 
   async get(key: string): Promise<ClodCacheStoredRecord | null> {
-    const result = await this.withStore("readonly", (store) => store.get(key));
-    return (result as ClodCacheStoredRecord | undefined) ?? null;
+    return this.withRecovery(async () => {
+      const result = await this.withArtifacts("readonly", (store) => store.get(key));
+      const raw = result as IdbStoredRecord | undefined;
+      return raw ? fromIdbRecord(raw) : null;
+    });
   }
 
   async put(key: string, record: ClodCacheStoredRecord): Promise<void> {
-    await this.withStore("readwrite", (store) => store.put(record, key));
+    await this.withRecovery(async () => {
+      await this.withArtifacts("readwrite", (store) => store.put(toIdbRecord(record), key));
+    });
   }
 
   async delete(key: string): Promise<void> {
-    await this.withStore("readwrite", (store) => store.delete(key));
+    await this.withRecovery(async () => {
+      await this.withArtifacts("readwrite", (store) => store.delete(key));
+    });
   }
 
   async clear(): Promise<void> {
-    await this.withStore("readwrite", (store) => store.clear());
+    await this.withRecovery(async () => {
+      await this.withArtifacts("readwrite", (store) => store.clear());
+    });
   }
 
   async keys(): Promise<string[]> {
-    const db = await this.openDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(this.config.object_store_name, "readonly");
-      const store = tx.objectStore(this.config.object_store_name);
-      const request = store.getAllKeys();
-      request.onsuccess = () => {
-        const keys = (request.result as IDBValidKey[])
-          .map(String)
-          .filter((k) => k !== MANIFEST_KEY);
-        resolve(keys);
-      };
-      request.onerror = () => reject(request.error ?? new CacheUnavailableError("IndexedDB keys failed"));
-    });
+    return this.withRecovery(() => this.keysInternal());
   }
 
+  /** Manifest is memory-only for IndexedDB; cross-session eviction uses artifact headers on demand. */
   async getManifestEntries(): Promise<ClodCacheManifestEntry[] | null> {
-    const db = await this.openDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(this.config.object_store_name, "readonly");
-      const store = tx.objectStore(this.config.object_store_name);
-      const request = store.get(MANIFEST_KEY);
-      request.onsuccess = () => {
-        const value = request.result as ClodCacheManifestEntry[] | undefined;
-        resolve(value ?? null);
-      };
-      request.onerror = () => reject(request.error ?? new CacheUnavailableError("IndexedDB manifest read failed"));
-    });
+    return null;
   }
 
-  async putManifestEntries(entries: ClodCacheManifestEntry[]): Promise<void> {
-    await this.withStore("readwrite", (store) => store.put(entries, MANIFEST_KEY));
+  async putManifestEntries(_entries: ClodCacheManifestEntry[]): Promise<void> {
+    // no-op: manifest not persisted to IndexedDB (avoids second-store failures in workers)
   }
 }
 
-export function createPersistentStore(config: ClodCachePersistentConfig): PersistentCacheStore | null {
-  if (!config.enabled) return null;
-  if (config.backend === "indexeddb") {
-    if (typeof indexedDB === "undefined") return null;
-    return new IndexedDbStore(config);
+export type CachePersistenceRole = "worker" | "main";
+
+export function resolveBrokerPersistentConfig(
+  config: ClodCachePersistentConfig | undefined,
+): ClodCachePersistentConfig {
+  if (!config) {
+    throw new CacheUnavailableError("cache persistent config missing");
   }
-  // TODO: add Vite file-cache backend after IndexedDB behavior is validated.
+  return {
+    ...config,
+    enabled: config.enabled,
+    database_name: `${config.database_name}-pages`,
+  };
+}
+
+export function resolvePersistentConfig(
+  config: ClodCachePersistentConfig,
+  role: CachePersistenceRole,
+): ClodCachePersistentConfig {
+  if (role === "main") {
+    return { ...config, enabled: false };
+  }
+  // Worker never opens IndexedDB locally; persistence is brokered on the main thread.
+  return { ...config, enabled: false };
+}
+
+export async function prepareWorkerPersistentStore(): Promise<void> {
+  // Legacy DB cleanup runs on the main-thread broker before first open.
+}
+
+export function createPersistentStore(
+  config: ClodCachePersistentConfig,
+  role: CachePersistenceRole = "worker",
+): PersistentCacheStore | null {
+  const resolved = resolvePersistentConfig(config, role);
+  if (role === "worker" && config.enabled && config.backend === "indexeddb") {
+    if (typeof document === "undefined") {
+      return new WorkerRemotePersistentStore();
+    }
+  }
+  if (!resolved.enabled) return null;
+  if (resolved.backend === "indexeddb") {
+    if (typeof indexedDB === "undefined") return null;
+    return new IndexedDbStore(resolved);
+  }
   return null;
 }

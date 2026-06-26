@@ -58,11 +58,11 @@ Keys are deterministic strings:
 - Scene (`?scene=`)
 - World seed, world page count, generator version
 - Dig edit revision
-- Hydrology carved bed digest (when hydrology terrain is active)
+- Hydrology carved bed **full SHA-256** (when hydrology terrain is active)
 - Border coast / ocean config hash
 - Water enabled/source/carve/hydrology flags
 - Procedural terrain enabled + seed/resolution fingerprint
-- Staged import manifest hash (when importing a project)
+- Staged import manifest hash including canonical terrain edit content digest (when importing a project)
 - Long-view scene flag
 
 This hash is used as both `sourceRevision` and `sourceHash` in cache keys. Changing any terrain-affecting input invalidates cached page nodes and terrain summaries.
@@ -84,7 +84,7 @@ Cache misses (not errors) when:
 1. **Memory cache** — LRU by item count and bytes; cleared on reload
 2. **Persistent store** — IndexedDB default (`indexedDbStore.ts` only)
 3. **Scheduler** — Read/write budgets per frame; avoids IndexedDB on hot path bursts
-4. **Manifest** — Tracks `storedBytes`, `lastAccessedUnixMs` for persistent eviction; persisted to IndexedDB under `__manifest__` and rebuilt from store headers on startup if missing
+4. **Manifest** — In-memory LRU eviction tracker per cache service instance. **Not** persisted to IndexedDB. Worker startup hydrates manifest entries by scanning artifact keys (up to 256) via main-thread broker RPC. Main terrain-summary cache is memory-only; page artifacts use IndexedDB on the **main thread** broker (worker never opens IndexedDB directly).
 
 ## Integration
 
@@ -96,10 +96,10 @@ Cache misses (not errors) when:
 
 Debug overlay buttons:
 
-- **Clear memory** — runtime LRU cache
-- **Clear persistent** — IndexedDB + manifest (current implementation clears both layers)
+- **Clear memory** — main-thread runtime LRU cache only
+- **Clear persistent** — clears main memory cache and worker IndexedDB artifacts (`drusniel-clod-poc-cache-pages`) via worker message
 
-Or delete the IndexedDB database `drusniel-clod-poc-cache` in browser devtools.
+Or delete the IndexedDB database `drusniel-clod-poc-cache-pages` in browser devtools.
 
 ## Cold / warm validation
 
@@ -122,10 +122,12 @@ Document your numbers in console via **Dump metrics** after each run.
 
 ## Known limitations
 
-- IndexedDB is browser persistence, not true filesystem I/O
-- Worker and main thread each open the same DB (by design for PoC)
+- **Main-thread broker** (`drusniel-clod-poc-cache-pages`): sole IndexedDB owner; CLOD worker uses RPC for get/put/clear (avoids worker IndexedDB `UnknownError` on some Windows/Chrome builds)
+- **Main terrain summary**: memory cache only
+- Eviction manifest is **memory-only**; IndexedDB manifest persistence was removed after worker `UnknownError` issues
 - Frame budget enforcement in the scheduler is approximate (see TODO in `cacheScheduler.ts`)
-- Parent LOD nodes cached from children hashes use page coordinates only (no child mesh digest yet)
+- Warm-cache page nodes restore original `NodeBuildStat` from artifact metadata (`fromCache: true`)
+- Warm-cache LOD0 pages omit `chunkMeshes`; first edit after load does one full page extract, then partial chunk remeshing
 - No Vite/Node file backend yet
 
 ## Production port notes (Bevy/Rust)

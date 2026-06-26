@@ -23,8 +23,14 @@ export {
   computeTerrainSourceHash,
   buildStagedImportHash,
   buildProceduralTextureHash,
+  canonicalizeDigEdits,
+  normalizeTerrainSourceInputs,
+  hashHydrologyTerrain,
+  hashBorderCoastConfig,
   type TerrainSourceInputs,
 } from "./terrainSource.js";
+export { encodeBuildStatMetadata, decodeBuildStatFromMetadata } from "./cacheBuildStatMetadata.js";
+export { clearWorkerPersistentCache } from "./clodCacheContext.js";
 export {
   setWorkerCacheSnapshot,
   getWorkerCacheBuildStats,
@@ -59,8 +65,9 @@ export {
   CacheChecksumError,
   CacheConfigError,
 } from "./cacheErrors.js";
-export { InMemoryPersistentStore } from "./indexedDbStore.js";
+export { InMemoryPersistentStore, type CachePersistenceRole, resolvePersistentConfig, resolveBrokerPersistentConfig, prepareWorkerPersistentStore, purgeLegacyCacheDatabases } from "./indexedDbStore.js";
+export { attachMainThreadCacheBroker, clearMainThreadCacheBroker } from "./mainThreadCacheBroker.js";
 export { initClodCacheContext, getClodCacheContext, type ClodCacheContext } from "./clodCacheContext.js";
 export { loadTerrainSummaryWithCache, loadTerrainSummaryWithCacheSimple } from "./terrainSummaryCache.js";
 export { buildWorldAsyncWithCache, type CachedBuildStats } from "./clodBuildCache.js";
-export { createCacheDebugOverlay, type CacheDebugOverlay } from "./cacheDebugOverlay.js";
+export { createCacheDebugOverlay, type CacheDebugOverlay, type CacheDebugOverlayDeps } from "./cacheDebugOverlay.js";

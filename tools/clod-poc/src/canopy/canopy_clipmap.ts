@@ -115,7 +115,7 @@ export function createCanopyClipmap(): CanopyClipmap {
           tileRing.clear();
           staleSince.clear();
           rebuildQueue.length = 0;
-          metrics.evictedTiles += evicted;
+          metrics.evictedTiles = evicted;
         }
         metrics.requestedTiles = 0;
         metrics.builtThisFrame = 0;
@@ -183,6 +183,7 @@ export function createCanopyClipmap(): CanopyClipmap {
         built++;
       }
       metrics.builtThisFrame = built;
+      metrics.queuedTiles = rebuildQueue.length;
       metrics.builtTiles = tiles.size;
       metrics.visibleTiles = tiles.size;
       metrics.buildMs = performance.now() - t0;

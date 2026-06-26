@@ -6,10 +6,13 @@ import { createClodCacheService } from "./cacheService.js";
 import { computeCacheConfigHash } from "./cacheHash.js";
 import {
   computeTerrainSourceHash,
+  normalizeTerrainSourceInputs,
   type TerrainSourceInputs,
 } from "./terrainSource.js";
 import type { ClodCacheKeyParts } from "./cacheTypes.js";
 import cacheConfigText from "../../config/clod_cache.yaml?raw";
+import type { CachePersistenceRole } from "./indexedDbStore.js";
+import { clearMainThreadCacheBroker } from "./mainThreadCacheBroker.js";
 
 export interface ClodCacheContext {
   config: ClodCacheConfig;
@@ -33,19 +36,22 @@ export async function initClodCacheContext(input: {
   farReduceFactor?: number;
   cacheConfigText?: string;
   forceDisabled?: boolean;
+  role?: CachePersistenceRole;
 }): Promise<ClodCacheContext | null> {
   const cacheConfig = parseClodCacheConfig(input.cacheConfigText ?? cacheConfigText);
   if (input.forceDisabled) {
     cacheConfig.enabled = false;
   }
 
-  const worldSeed = input.terrainSource.worldSeed;
+  const terrainSource = normalizeTerrainSourceInputs(input.terrainSource);
+  const worldSeed = terrainSource.worldSeed;
   const generatorVersion = input.cfg.meshopt_package_version;
-  const terrainSourceHash = await computeTerrainSourceHash(input.terrainSource);
+  const terrainSourceHash = await computeTerrainSourceHash(terrainSource);
   const farReduceFactor = input.farReduceFactor ?? 8;
   const configHash = await computeCacheConfigHash(input.cfg, { farReduceFactor });
 
-  const service = createClodCacheService(cacheConfig);
+  const role = input.role ?? (typeof document !== "undefined" ? "main" : "worker");
+  const service = createClodCacheService(cacheConfig, undefined, role);
   await service.initialize();
 
   const ctx: ClodCacheContext = {
@@ -89,4 +95,11 @@ export function buildBaseKeyParts(
 
 export function pageNodeSourceHash(ctx: ClodCacheContext): string {
   return ctx.terrainSourceHash;
+}
+
+/** Clears worker-owned cache artifacts via the main-thread IndexedDB broker. */
+export async function clearWorkerPersistentCache(): Promise<void> {
+  const cacheConfig = parseClodCacheConfig(cacheConfigText);
+  if (!cacheConfig.persistent.enabled) return;
+  await clearMainThreadCacheBroker();
 }

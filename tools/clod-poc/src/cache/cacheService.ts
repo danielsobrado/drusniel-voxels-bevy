@@ -19,7 +19,7 @@ import {
   CacheUnavailableError,
 } from "./cacheErrors.js";
 import { cacheLogger } from "./cacheLogger.js";
-import { createPersistentStore, type PersistentCacheStore } from "./indexedDbStore.js";
+import { createPersistentStore, type PersistentCacheStore, type CachePersistenceRole } from "./indexedDbStore.js";
 
 export interface ClodCacheService {
   get<TArtifact>(
@@ -51,24 +51,38 @@ function miss<T>(key: string, reason: CacheMissReason, decodeMs = 0): ClodCacheG
 export class ClodCacheServiceImpl implements ClodCacheService {
   private readonly config: ClodCacheConfig;
   private readonly memory: MemoryCache | null;
-  private readonly persistent: PersistentCacheStore | null;
+  private persistent: PersistentCacheStore | null;
   private readonly manifest: ClodCacheManifest;
   private readonly scheduler: CacheScheduler;
   private readonly metrics: CacheMetricsTracker;
   private manifestLoaded = false;
-  private manifestSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistentErrorCount = 0;
+  private readonly PERSISTENT_ERROR_THRESHOLD = 3;
 
-  constructor(config: ClodCacheConfig, persistentOverride?: PersistentCacheStore | null) {
+  constructor(
+    config: ClodCacheConfig,
+    persistentOverride?: PersistentCacheStore | null,
+    role: CachePersistenceRole = "worker",
+  ) {
     this.config = config;
     this.memory = config.memory.enabled
       ? new MemoryCache(config.memory.max_items, config.memory.max_bytes)
       : null;
     this.persistent = persistentOverride !== undefined
       ? persistentOverride
-      : createPersistentStore(config.persistent);
+      : createPersistentStore(config.persistent, role);
     this.manifest = new ClodCacheManifest();
     this.scheduler = new CacheScheduler(config.streaming);
     this.metrics = new CacheMetricsTracker(cacheEffective(config));
+  }
+
+  private notePersistentError(): void {
+    this.persistentErrorCount++;
+    if (this.persistentErrorCount >= this.PERSISTENT_ERROR_THRESHOLD && this.persistent) {
+      cacheLogger.error(`persistent store failed ${this.persistentErrorCount} times, disabling persistence for this session`);
+      this.persistent = null;
+      this.metrics.recordError("persistence-disabled");
+    }
   }
 
   getConfig(): ClodCacheConfig {
@@ -83,25 +97,30 @@ export class ClodCacheServiceImpl implements ClodCacheService {
 
   async initialize(): Promise<void> {
     if (this.manifestLoaded || !this.persistent) return;
-    try {
-      const stored = await this.persistent.getManifestEntries();
-      if (stored && stored.length > 0) {
-        for (const entry of stored) this.manifest.upsert(entry);
-      } else {
-        await this.rebuildManifestFromPersistent();
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      cacheLogger.warn(`manifest load failed, rebuilding: ${message}`);
-      await this.rebuildManifestFromPersistent();
-    }
     this.manifestLoaded = true;
+
+    const probeOk = await this.persistent.probe();
+    if (!probeOk) {
+      cacheLogger.warn("IndexedDB probe failed, using memory-only cache for this session");
+      this.persistent = null;
+      return;
+    }
+
+    try {
+      await this.hydrateManifestFromArtifacts();
+    } catch (error) {
+      const name = error instanceof DOMException ? error.name : error instanceof Error ? error.name : "";
+      const message = error instanceof Error ? error.message : String(error);
+      cacheLogger.debug(`manifest hydrate skipped [${name}] ${message}`);
+    }
   }
 
-  private async rebuildManifestFromPersistent(): Promise<void> {
+  private async hydrateManifestFromArtifacts(): Promise<void> {
     if (!this.persistent) return;
     const keys = await this.persistent.keys();
-    for (const key of keys) {
+    const maxScan = Math.min(keys.length, 256);
+    for (let i = 0; i < maxScan; i++) {
+      const key = keys[i]!;
       const record = await this.persistent.get(key);
       if (!record) continue;
       this.manifest.upsert({
@@ -113,26 +132,13 @@ export class ClodCacheServiceImpl implements ClodCacheService {
         storedBytes: record.header.storedBytes,
       });
     }
-    void this.persistManifest();
+    if (keys.length > maxScan) {
+      cacheLogger.debug(`manifest hydrate scanned ${maxScan}/${keys.length} artifact keys`);
+    }
   }
 
   private scheduleManifestPersist(): void {
-    if (!this.persistent) return;
-    if (this.manifestSaveTimer) clearTimeout(this.manifestSaveTimer);
-    this.manifestSaveTimer = setTimeout(() => {
-      this.manifestSaveTimer = null;
-      void this.persistManifest();
-    }, 250);
-  }
-
-  private async persistManifest(): Promise<void> {
-    if (!this.persistent) return;
-    try {
-      await this.persistent.putManifestEntries(this.manifest.listEntries());
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      cacheLogger.warn(`manifest persist failed: ${message}`);
-    }
+    // Manifest eviction state is memory-only for IndexedDB backends.
   }
 
   async get<TArtifact>(
@@ -192,10 +198,12 @@ export class ClodCacheServiceImpl implements ClodCacheService {
             : error instanceof CacheUnavailableError
               ? "backend-error"
               : "decode-error";
+        const name = error instanceof Error ? error.name : "";
         const message = error instanceof Error ? error.message : String(error);
-        cacheLogger.warn(`get failed for ${key}: ${message}`);
+        cacheLogger.warn(`get failed for ${key} [${name}] ${message}`);
         this.metrics.recordMiss(reason);
-        this.metrics.recordError(message);
+        this.metrics.recordError(`[${name}] ${message}`);
+        if (reason === "backend-error") this.notePersistentError();
         if (this.config.strict) throw error;
         return miss<TArtifact>(key, reason, performance.now() - t0);
       }
@@ -268,9 +276,11 @@ export class ClodCacheServiceImpl implements ClodCacheService {
         this.metrics.recordWrite(record.header.storedBytes, encodeMs);
         return { key, bytesWritten: record.header.storedBytes, encodeMs, compression: compressed.mode };
       } catch (error) {
+        const name = error instanceof Error ? error.name : "";
         const message = error instanceof Error ? error.message : String(error);
-        cacheLogger.error(`put failed for ${key}: ${message}`);
-        this.metrics.recordError(message);
+        cacheLogger.error(`put failed for ${key} [${name}] ${message}`);
+        this.metrics.recordError(`[${name}] ${message}`);
+        this.notePersistentError();
         if (this.config.strict) throw error;
         return { key, bytesWritten: 0, encodeMs: performance.now() - t0, compression: "none" };
       }
@@ -370,6 +380,7 @@ export class ClodCacheServiceImpl implements ClodCacheService {
 export function createClodCacheService(
   config: ClodCacheConfig,
   persistentOverride?: PersistentCacheStore | null,
+  role: CachePersistenceRole = "worker",
 ): ClodCacheService {
-  return new ClodCacheServiceImpl(config, persistentOverride);
+  return new ClodCacheServiceImpl(config, persistentOverride, role);
 }

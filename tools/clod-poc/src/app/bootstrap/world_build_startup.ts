@@ -260,6 +260,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     worldPages: WORLD,
     terrainSource,
     forceDisabled: cacheDisabled,
+    role: "main",
   });
 
   const buildNote =
@@ -299,7 +300,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   );
   const terrainSummary = summaryResult.summary;
   publishTerrainSummaryForDiagnostics(terrainSummary);
-  createCacheDebugOverlay()?.update();
+  createCacheDebugOverlay({ clearWorkerCache: () => clodWorker.clearCache() })?.update();
 
   return {
     cfg,

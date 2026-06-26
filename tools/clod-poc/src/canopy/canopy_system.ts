@@ -74,7 +74,11 @@ export function createCanopyShellSystem(
   if (!active) return null;
 
   const clipmap = createCanopyClipmap();
-  const treeDistribution = createTreeDistribution(config.treeDistribution, config.seed);
+  let treeDistribution = createTreeDistribution(config.treeDistribution, config.seed);
+  let treeDistributionKey = JSON.stringify({
+    seed: config.seed,
+    treeDistribution: config.treeDistribution,
+  });
   let terrainSampler: CanopyTerrainSampler = createBlendedTerrainSampler(
     deps.terrainSummary,
     config.distances.shellEndM,
@@ -154,6 +158,15 @@ export function createCanopyShellSystem(
     if (config.distances.shellEndM !== terrainSamplerRadius) {
       terrainSamplerRadius = config.distances.shellEndM;
       terrainSampler = createBlendedTerrainSampler(deps.terrainSummary, terrainSamplerRadius);
+    }
+    const nextTreeKey = JSON.stringify({
+      seed: config.seed,
+      treeDistribution: config.treeDistribution,
+    });
+    if (nextTreeKey !== treeDistributionKey) {
+      treeDistributionKey = nextTreeKey;
+      treeDistribution = createTreeDistribution(config.treeDistribution, config.seed);
+      clipmap.disposeFarTiles();
     }
     clipmap.setFreezeCenter(config.debug.freezeClipCenter || debugState.freezeClipCenter);
     const clipUpdate = clipmap.update(cameraX, cameraZ, config, terrainSampler, treeDistribution);
