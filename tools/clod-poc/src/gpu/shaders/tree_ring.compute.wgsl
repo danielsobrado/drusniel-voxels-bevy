@@ -8,6 +8,9 @@ const TREE_SPECIES_COUNT: u32 = 3u;
 const TREE_GROUP_COUNT: u32 = TREE_SPECIES_COUNT * TREE_LOD_COUNT;
 const TREE_INDIRECT_STRIDE_U32: u32 = 5u;
 const TREE_HYDRO_WATER_CLEARANCE: f32 = 1.5;
+const TREE_RIPARIAN_INNER_END_M: f32 = 8.0;
+const TREE_RIPARIAN_OUTER_START_M: f32 = 9.0;
+const TREE_RIPARIAN_OUTER_END_M: f32 = 32.0;
 
 struct TreeAcceptParams {
   seed: u32,
@@ -136,28 +139,35 @@ fn tree_hydrology_at(wx: f32, wz: f32) -> TreeHydrologySample {
 }
 
 fn tree_hydrology_ground_height(raw_height: f32, sample: TreeHydrologySample) -> f32 {
-  if (sample.enabled < 0.5) {
-    return raw_height;
-  }
+  if (sample.enabled < 0.5) { return raw_height; }
   return sample.carved_bed;
 }
 
 fn tree_hydrology_reject_tree(sample: TreeHydrologySample, ground_height: f32, cfg: TreeAcceptParams) -> bool {
-  if (sample.enabled < 0.5 || sample.wet_mask <= 0.05) {
-    return false;
-  }
+  if (sample.enabled < 0.5 || sample.wet_mask <= 0.05) { return false; }
   return ground_height <= sample.water_y + max(TREE_HYDRO_WATER_CLEARANCE, cfg.water_clearance_m);
 }
 
 fn tree_hydrology_bank_density_mask(sample: TreeHydrologySample, ground_height: f32, normal_y: f32, cfg: TreeAcceptParams) -> f32 {
-  if (sample.enabled < 0.5 || sample.wet_mask <= 0.001) {
-    return 1.0;
-  }
+  if (sample.enabled < 0.5 || sample.wet_mask <= 0.001) { return 1.0; }
   let above_water = ground_height - sample.water_y;
-  let clear_of_channel = smoothstep(max(TREE_HYDRO_WATER_CLEARANCE, cfg.water_clearance_m), 5.0, above_water);
-  let riparian_band = smoothstep(2.5, 7.0, above_water) * (1.0 - smoothstep(10.0, 22.0, above_water));
+  let clear_distance = max(TREE_HYDRO_WATER_CLEARANCE, cfg.water_clearance_m);
+  let clear_of_channel = smoothstep(clear_distance, clear_distance + 2.5, above_water);
+  let sparse_inner_bank = smoothstep(clear_distance + 1.0, clear_distance + 3.5, above_water)
+    * (1.0 - smoothstep(TREE_RIPARIAN_INNER_END_M, TREE_RIPARIAN_INNER_END_M + 5.0, above_water));
+  let riparian_outer_bank = smoothstep(TREE_RIPARIAN_OUTER_START_M, TREE_RIPARIAN_OUTER_START_M + 5.0, above_water)
+    * (1.0 - smoothstep(TREE_RIPARIAN_OUTER_END_M, TREE_RIPARIAN_OUTER_END_M + 12.0, above_water));
   let slope_health = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
-  return clamp(clear_of_channel * mix(0.86, 1.16, riparian_band * slope_health), 0.0, 1.16);
+  let sparse_density = mix(1.0, 0.58, sparse_inner_bank);
+  let riparian_density = mix(1.0, 1.20, riparian_outer_bank * slope_health);
+  return clamp(clear_of_channel * sparse_density * riparian_density, 0.0, 1.20);
+}
+
+fn tree_hydrology_scale_mask(sample: TreeHydrologySample, ground_height: f32) -> f32 {
+  if (sample.enabled < 0.5 || sample.wet_mask <= 0.001) { return 1.0; }
+  let above_water = ground_height - sample.water_y;
+  let low_inner = smoothstep(2.2, 5.0, above_water) * (1.0 - smoothstep(7.5, 14.0, above_water));
+  return clamp(mix(1.0, 0.84, low_inner), 0.82, 1.0);
 }
 
 fn tree_material_weights(height: f32, normal_y: f32) -> vec4<f32> {
@@ -226,18 +236,12 @@ fn tree_terrain_roughness_mask(height: f32, wpos: vec2<f32>) -> f32 {
 }
 
 fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
-  if (height < cfg.min_height_m || height > cfg.max_height_m) {
-    return 0.0;
-  }
-  if (height < WATER_LEVEL + cfg.water_clearance_m || normal_y < cfg.slope_min_y) {
-    return 0.0;
-  }
+  if (height < cfg.min_height_m || height > cfg.max_height_m) { return 0.0; }
+  if (height < WATER_LEVEL + cfg.water_clearance_m || normal_y < cfg.slope_min_y) { return 0.0; }
   let weights = tree_material_weights(height, normal_y);
   let material_density = max(0.0, dot(weights, cfg.material_density));
   let ground_weight = clamp((weights.x + weights.y * 0.25) * material_density, 0.0, 1.0);
-  if (weights.y >= cfg.rock_reject || weights.w >= cfg.snow_reject) {
-    return 0.0;
-  }
+  if (weights.y >= cfg.rock_reject || weights.w >= cfg.snow_reject) { return 0.0; }
   let material_mask = pow(
     smoothstep(cfg.min_ground_weight, min(1.0, cfg.min_ground_weight + 0.28), ground_weight),
     max(0.001, cfg.material_weight_power),
@@ -288,13 +292,9 @@ fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32, species: u
   let edge_scale = mix(0.78, 1.0, forest_cover) * mix(0.9, 1.05, edge_noise * forest_edge_stress);
   let base_scale = (0.58 + age * 0.48 + clump * 0.18 + slope_health * 0.08) * edge_scale;
   var species_scale = 1.0;
-  if (species == 0u) {
-    species_scale = mix(0.92, 1.18, age);
-  } else if (species == 1u) {
-    species_scale = mix(1.08, 1.34, age);
-  } else {
-    species_scale = mix(0.72, 0.96, age);
-  }
+  if (species == 0u) { species_scale = mix(0.92, 1.18, age); }
+  else if (species == 1u) { species_scale = mix(1.08, 1.34, age); }
+  else { species_scale = mix(0.72, 0.96, age); }
   return clamp(base_scale * species_scale, 0.42, 1.62);
 }
 
@@ -337,9 +337,7 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
   return TreeLodRing(active, fade);
 }
 
-fn group_index(species: u32, lod: u32) -> u32 {
-  return species * TREE_LOD_COUNT + lod;
-}
+fn group_index(species: u32, lod: u32) -> u32 { return species * TREE_LOD_COUNT + lod; }
 
 fn index_count_for_group(group: u32) -> u32 {
   if (group < 4u) { return params.index_counts_a[group]; }
@@ -350,9 +348,7 @@ fn index_count_for_group(group: u32) -> u32 {
 fn in_frustum(center: vec3<f32>, slack: f32) -> bool {
   for (var p = 0u; p < 6u; p = p + 1u) {
     let plane = params.planes[p];
-    if (dot(plane.xyz, center) + plane.w < -slack) {
-      return false;
-    }
+    if (dot(plane.xyz, center) + plane.w < -slack) { return false; }
   }
   return true;
 }
@@ -367,9 +363,7 @@ fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> 
     let sample_xz = mix(start_xz, end_xz, t);
     let sample_line_height = mix(start_height, crown_height, t);
     let sample_ground_height = surfaceHeightField(sample_xz.x, sample_xz.y);
-    if (sample_ground_height > sample_line_height + 1.75) {
-      return true;
-    }
+    if (sample_ground_height > sample_line_height + 1.75) { return true; }
   }
   return false;
 }
@@ -382,9 +376,7 @@ fn species_material_bias(species: u32, materials: vec4<f32>) -> f32 {
 
 fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) -> u32 {
   let base = max(params.species_weights.xyz, vec3<f32>(0.0));
-  if (base.x + base.y + base.z <= 0.0) {
-    return 0xffffffffu;
-  }
+  if (base.x + base.y + base.z <= 0.0) { return 0xffffffffu; }
   let cfg = tree_accept_params_from_uniforms();
   let materials = tree_material_weights(height, normal_y);
   let height_band = smoothstep(cfg.lowland_height_m, cfg.highland_height_m, height);
@@ -458,7 +450,7 @@ fn process_tree_slot(slot: u32) {
   if (terrain_ridge_filter(wpos, height, dist)) { return; }
   let species = select_species(wc, wpos, height, normal.y);
   if (species >= TREE_SPECIES_COUNT) { return; }
-  let scale = tree_instance_scale(wc, wpos, normal.y, species);
+  let scale = tree_instance_scale(wc, wpos, normal.y, species) * tree_hydrology_scale_mask(hydro, height);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
   append_lod_if_active(species, TREE_LOD_NEAR, ring.active.x, wc, height, scale);
   append_lod_if_active(species, TREE_LOD_MID, ring.active.y, wc, height, scale);
