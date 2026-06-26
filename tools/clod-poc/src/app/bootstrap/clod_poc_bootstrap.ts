@@ -19,6 +19,7 @@ import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, l
 import type { FarShellMetrics } from "../../long-view/index.js";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
+import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 import * as THREE from "three";
 
 
@@ -138,6 +139,7 @@ export async function bootstrapClodPoc() {
     queryScene === "long-view-16km" ||
     queryScene === "long-view-forest-4km" ||
     queryScene === "long-view-edit-stress" ||
+    queryScene === RIVER_PARITY_TEST_SCENE ||
     queryScene === "infinite-far-shell-straight" ||
     queryScene === "infinite-far-shell-fast-turn" ||
     queryScene === "infinite-far-shell-mountain-approach";
@@ -311,22 +313,9 @@ export async function bootstrapClodPoc() {
       farShellMetrics,
     },
     onFarSummaryUpdate: farSummaryIntegration
-      ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
-          farSummaryIntegration!.update(frameIndex, deltaSeconds, camera);
-          if (infiniteFarShell) {
-            infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
-          }
-          terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
+      ? (updatedSummary) => {
+          terrainView.farShellController.setTerrainSummary(updatedSummary.summary, updatedSummary.worldSizeCells);
         }
-      : terrainView.shadowProxyController
-        ? (_frameIndex: number, _deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
-            terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
-          }
-        : undefined,
-    getClodErrorCompute: postRenderer.getClodErrorCompute,
-    ensureClodErrorCompute: postRenderer.ensureClodErrorCompute,
-    textureLoadOptions: postRenderer.textureLoadOptions,
-    treeConfig: world.treeConfig,
-    understoryConfig: world.understoryConfig,
+      : undefined,
   });
 }
