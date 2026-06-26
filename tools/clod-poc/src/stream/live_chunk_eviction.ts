@@ -1,5 +1,6 @@
 import type { StreamingOwnershipRadii } from "../streaming/streaming_ownership.js";
-import { parseLiveChunkKey, type LiveVoxelChunkPlanConfig, type StreamCenter } from "./live_voxel_chunk_streamer.js";
+import { parseLiveChunkKey, type StreamCenter } from "./live_chunk_keys.js";
+import type { LiveVoxelChunkPlanConfig } from "./live_voxel_chunk_streamer.js";
 
 export function evictableLiveChunks(
   loadedKeys: Iterable<string>,
