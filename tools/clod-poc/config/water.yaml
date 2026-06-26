@@ -37,6 +37,11 @@ water:
       slope_gate_start: 0.50
       slope_gate_end: 0.24
       min_visible_depth: 0.05
+      guarantee_fallback_rivers: true
+      fallback_main_river: true
+      fallback_tributaries: true
+      flow_speed_multiplier: 1.0
+      lake_surface_drop_m: 2.0
     water_surface:
       far_reduce_factor: 8
       far_level_min_cell_size: 12.0
