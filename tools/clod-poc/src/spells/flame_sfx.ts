@@ -11,6 +11,7 @@ type StereoSample = readonly [number, number];
 export class FlameSfx {
   private ctx: AudioContext | null = null;
   private output: GainNode | null = null;
+  private activeSources = new Set<AudioBufferSourceNode>();
 
   play(config: FireSpellAudioConfig, durationMs: number): void {
     const state = getAudioState();
@@ -29,6 +30,23 @@ export class FlameSfx {
     } catch (error) {
       console.warn("[spells] Flame SFX failed.", error);
     }
+  }
+
+  dispose(): void {
+    for (const source of this.activeSources) {
+      try {
+        source.stop();
+      } catch {
+        // Already stopped.
+      }
+    }
+    this.activeSources.clear();
+    this.output?.disconnect();
+    if (this.ctx && this.ctx.state !== "closed") {
+      void this.ctx.close();
+    }
+    this.ctx = null;
+    this.output = null;
   }
 
   private ensureContext(): void {
@@ -82,6 +100,13 @@ export class FlameSfx {
     gain.gain.linearRampToValueAtTime(0.001, now + durationSeconds);
 
     source.connect(highpass).connect(lowpass).connect(gain).connect(this.output);
+    source.addEventListener("ended", () => {
+      this.activeSources.delete(source);
+      highpass.disconnect();
+      lowpass.disconnect();
+      gain.disconnect();
+    }, { once: true });
+    this.activeSources.add(source);
     source.start(now);
     source.stop(now + durationSeconds + 0.05);
   }
