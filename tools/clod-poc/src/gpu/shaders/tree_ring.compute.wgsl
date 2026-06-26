@@ -7,6 +7,7 @@ const TREE_LOD_COUNT: u32 = 4u;
 const TREE_SPECIES_COUNT: u32 = 3u;
 const TREE_GROUP_COUNT: u32 = TREE_SPECIES_COUNT * TREE_LOD_COUNT;
 const TREE_INDIRECT_STRIDE_U32: u32 = 5u;
+const TREE_HYDRO_WATER_CLEARANCE: f32 = 1.5;
 
 struct TreeAcceptParams {
   seed: u32,
@@ -58,10 +59,19 @@ struct TreeRingParams {
   planes: array<vec4<f32>, 6>,
 };
 
+struct TreeHydrologySample {
+  water_y: f32,
+  wet_mask: f32,
+  carved_bed: f32,
+  enabled: f32,
+};
+
 @group(0) @binding(0) var<uniform> params: TreeRingParams;
 @group(0) @binding(1) var<storage, read_write> counters: array<atomic<u32>>;
 @group(0) @binding(2) var<storage, read_write> indirect_args: array<u32>;
 @group(0) @binding(3) var<storage, read_write> out_cell: array<vec4<f32>>;
+@group(0) @binding(9) var hydro_texture: texture_2d<f32>;
+@group(0) @binding(10) var hydro_sampler: sampler;
 
 fn tree_pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let M = 1664525u;
@@ -109,6 +119,42 @@ fn tree_world_cell_from_slot(slot: u32, grid: u32, cell_size: f32, camera_xz: ve
   return tree_world_cell(slot % safe_grid, slot / safe_grid, safe_grid, cell_size, camera_xz);
 }
 
+fn tree_hydrology_at(wx: f32, wz: f32) -> TreeHydrologySample {
+  let dims = textureDimensions(hydro_texture);
+  if (dims.x <= 1u || dims.y <= 1u) {
+    return TreeHydrologySample(0.0, 0.0, 0.0, 0.0);
+  }
+  let world_size = max(1.0, params.center_radius.w);
+  let uv = clamp(vec2<f32>(wx, wz) / world_size, vec2<f32>(0.0), vec2<f32>(1.0));
+  let h = textureSampleLevel(hydro_texture, hydro_sampler, uv, 0.0);
+  return TreeHydrologySample(h.x, h.y, h.z, 1.0);
+}
+
+fn tree_hydrology_ground_height(raw_height: f32, sample: TreeHydrologySample) -> f32 {
+  if (sample.enabled < 0.5) {
+    return raw_height;
+  }
+  return sample.carved_bed;
+}
+
+fn tree_hydrology_reject_tree(sample: TreeHydrologySample, ground_height: f32, cfg: TreeAcceptParams) -> bool {
+  if (sample.enabled < 0.5 || sample.wet_mask <= 0.05) {
+    return false;
+  }
+  return ground_height <= sample.water_y + max(TREE_HYDRO_WATER_CLEARANCE, cfg.water_clearance_m);
+}
+
+fn tree_hydrology_bank_density_mask(sample: TreeHydrologySample, ground_height: f32, normal_y: f32, cfg: TreeAcceptParams) -> f32 {
+  if (sample.enabled < 0.5 || sample.wet_mask <= 0.001) {
+    return 1.0;
+  }
+  let above_water = ground_height - sample.water_y;
+  let clear_of_channel = smoothstep(max(TREE_HYDRO_WATER_CLEARANCE, cfg.water_clearance_m), 5.0, above_water);
+  let riparian_band = smoothstep(2.5, 7.0, above_water) * (1.0 - smoothstep(10.0, 22.0, above_water));
+  let slope_health = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
+  return clamp(clear_of_channel * mix(0.86, 1.16, riparian_band * slope_health), 0.0, 1.16);
+}
+
 fn tree_material_weights(height: f32, normal_y: f32) -> vec4<f32> {
   _ = normal_y;
   let sand = max(0.0, 1.0 - abs(height - WATER_LEVEL) / 6.0);
@@ -149,7 +195,6 @@ fn tree_shoreline_density_mask(height: f32, normal_y: f32, cfg: TreeAcceptParams
 fn tree_local_competition_mask(wc: vec2<f32>, wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
   let current = tree_hash(wc, 7103u) + tree_parent_clump_mask(wpos, cfg) * 0.08;
   var stronger_neighbors = 0.0;
-
   for (var dz = -1; dz <= 1; dz = dz + 1) {
     for (var dx = -1; dx <= 1; dx = dx + 1) {
       if (dx != 0 || dz != 0) {
@@ -159,7 +204,6 @@ fn tree_local_competition_mask(wc: vec2<f32>, wpos: vec2<f32>, cfg: TreeAcceptPa
       }
     }
   }
-
   let pressure = clamp(stronger_neighbors / 8.0, 0.0, 1.0);
   return mix(1.05, 0.72, pressure);
 }
@@ -183,13 +227,11 @@ fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAccept
   if (height < WATER_LEVEL + cfg.water_clearance_m || normal_y < cfg.slope_min_y) {
     return 0.0;
   }
-
   let weights = tree_material_weights(height, normal_y);
   let ground_weight = clamp(weights.x + weights.y * 0.25, 0.0, 1.0);
   if (weights.y >= cfg.rock_reject || weights.w >= cfg.snow_reject) {
     return 0.0;
   }
-
   let material_mask = pow(
     smoothstep(cfg.min_ground_weight, min(1.0, cfg.min_ground_weight + 0.28), ground_weight),
     max(0.001, cfg.material_weight_power),
@@ -228,10 +270,6 @@ fn tree_accept_params_from_uniforms() -> TreeAcceptParams {
   );
 }
 
-fn tree_accept_mask_from_params(height: f32, normal_y: f32, wpos: vec2<f32>) -> f32 {
-  return tree_accept_mask(height, normal_y, wpos, tree_accept_params_from_uniforms());
-}
-
 fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32, species: u32) -> f32 {
   let cfg = tree_accept_params_from_uniforms();
   let age = smoothstep(0.16, 1.0, tree_hash(wc, 601u));
@@ -242,7 +280,6 @@ fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32, species: u
   let edge_noise = tree_hash(wc, 3407u);
   let edge_scale = mix(0.78, 1.0, forest_cover) * mix(0.9, 1.05, edge_noise * forest_edge_stress);
   let base_scale = (0.58 + age * 0.48 + clump * 0.18 + slope_health * 0.08) * edge_scale;
-
   var species_scale = 1.0;
   if (species == 0u) {
     species_scale = mix(0.92, 1.18, age);
@@ -251,7 +288,6 @@ fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32, species: u
   } else {
     species_scale = mix(0.72, 0.96, age);
   }
-
   return clamp(base_scale * species_scale, 0.42, 1.62);
 }
 
@@ -264,7 +300,6 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
   let band_m = max(0.0, params.band_m);
   var active = vec4<u32>(0u);
   var fade = vec4<f32>(0.0);
-
   if (band_m <= 0.0) {
     if (dist <= near_m) {
       active.x = 1u;
@@ -281,7 +316,6 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
     }
     return TreeLodRing(active, fade);
   }
-
   if (dist < near_m + band_m) {
     active.x = 1u;
     fade.x = 1.0;
@@ -298,7 +332,6 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
     active.w = 1u;
     fade.w = 1.0;
   }
-
   if (dist >= near_m - band_m && dist <= near_m + band_m) {
     let t = clamp((dist - (near_m - band_m)) / (band_m * 2.0), 0.0, 1.0);
     fade.x = min(fade.x, 1.0 - t);
@@ -314,7 +347,6 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
     fade.z = min(fade.z, 1.0 - t);
     fade.w = min(fade.w, t);
   }
-
   fade = fade * vec4<f32>(active);
   return TreeLodRing(active, fade);
 }
@@ -347,11 +379,9 @@ fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> 
   if (distance_m <= params.lod.y) {
     return false;
   }
-
   let start_xz = params.center_radius.xy;
   let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;
   let crown_height = end_height + 5.5;
-
   for (var i = 1u; i <= 6u; i = i + 1u) {
     let t = f32(i) / 7.0;
     let sample_xz = mix(start_xz, end_xz, t);
@@ -361,7 +391,6 @@ fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> 
       return true;
     }
   }
-
   return false;
 }
 
@@ -370,7 +399,6 @@ fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) ->
   if (base.x + base.y + base.z <= 0.0) {
     return 0xffffffffu;
   }
-
   let cfg = tree_accept_params_from_uniforms();
   let materials = tree_material_weights(height, normal_y);
   let height_band = smoothstep(cfg.lowland_height_m, cfg.highland_height_m, height);
@@ -379,7 +407,6 @@ fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) ->
   let ridge_stress = 1.0 - slope_health;
   let clump = clamp(tree_parent_clump_mask(wpos, cfg), 0.0, 1.25);
   let old_age = smoothstep(0.58, 0.96, tree_hash(wc, 2309u));
-
   let oak = base.x
     * mix(1.45, 0.52, height_band)
     * mix(0.78, 1.28, moisture)
@@ -394,13 +421,11 @@ fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) ->
     * mix(1.02, 0.9, old_age);
   let dead = base.z
     * (0.38 + clump * 0.28 + ridge_stress * 0.42 + materials.y * 0.32 + old_age * 0.72);
-
   let weights = max(vec3<f32>(oak, pine, dead), vec3<f32>(0.0));
   let total = weights.x + weights.y + weights.z;
   if (total <= 0.0) {
     return 0xffffffffu;
   }
-
   let roll = tree_hash(wc, 409u) * total;
   if (roll < weights.x) {
     return 0u;
@@ -418,7 +443,6 @@ fn append_tree(species: u32, lod: u32, wc: vec2<f32>, height: f32, scale: f32) {
   if (slot >= max_per_group) {
     return;
   }
-
   let out_index = group * max_per_group + slot;
   out_cell[out_index] = vec4<f32>(wc.x, wc.y, height, scale);
 }
@@ -443,15 +467,21 @@ fn process_tree_slot(slot: u32) {
   if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max) {
     return;
   }
-
   let dist = distance(wpos, params.center_radius.xy);
   if (dist > params.center_radius.z + params.lod.w) {
     return;
   }
 
-  let height = surfaceHeightField(wpos.x, wpos.y);
+  let cfg = tree_accept_params_from_uniforms();
+  let raw_height = surfaceHeightField(wpos.x, wpos.y);
+  let hydro = tree_hydrology_at(wpos.x, wpos.y);
+  let height = tree_hydrology_ground_height(raw_height, hydro);
+  if (tree_hydrology_reject_tree(hydro, height, cfg)) {
+    return;
+  }
   let normal = normalize(densityGradient(wpos.x, height, wpos.y));
-  let accept = tree_accept_mask_from_params(height, normal.y, wpos);
+  let accept = tree_accept_mask(height, normal.y, wpos, cfg)
+    * tree_hydrology_bank_density_mask(hydro, height, normal.y, cfg);
   if (tree_hash(wc, 809u) >= accept) {
     return;
   }
@@ -461,12 +491,10 @@ fn process_tree_slot(slot: u32) {
   if (terrain_ridge_filter(wpos, height, dist)) {
     return;
   }
-
   let species = select_species(wc, wpos, height, normal.y);
   if (species >= TREE_SPECIES_COUNT) {
     return;
   }
-
   let scale = tree_instance_scale(wc, wpos, normal.y, species);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
   append_lod_if_active(species, TREE_LOD_NEAR, ring.active.x, wc, height, scale);
