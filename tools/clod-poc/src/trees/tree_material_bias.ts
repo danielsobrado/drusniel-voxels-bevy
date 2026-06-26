@@ -45,7 +45,7 @@ export function applyTreeMaterialBiasFromYaml(settings: TreeSettings, text: stri
 }
 
 export function getTreeMaterialBias(settings: TreeSettings): TreeMaterialBiasSettings {
-  return cloneTreeMaterialBias((settings as TreeSettingsWithMaterialBias).ecology.materialBias ?? DEFAULT_TREE_MATERIAL_BIAS);
+  return (settings as TreeSettingsWithMaterialBias).ecology.materialBias ?? DEFAULT_TREE_MATERIAL_BIAS;
 }
 
 export function treeMaterialDensity(settings: TreeSettings, weights: readonly [number, number, number, number]): number {
