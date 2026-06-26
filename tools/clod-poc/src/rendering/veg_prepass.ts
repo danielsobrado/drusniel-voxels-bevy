@@ -1,6 +1,8 @@
 import { EqualDepth, Mesh, type Material, type Side } from "three";
 import { NodeMaterial, type WebGPURenderer } from "three/webgpu";
 
+const WGSL_ATTRIBUTE_PREFIX = String.fromCharCode(64);
+
 export function installPositionInvariance(renderer: WebGPURenderer): void {
   const backend = renderer.backend as unknown as {
     createNodeBuilder(object: object, renderer: unknown): object;
@@ -14,9 +16,10 @@ export function installPositionInvariance(renderer: WebGPURenderer): void {
   proto.__clodInvariant = true;
   const original = proto._getWGSLVertexCode;
   proto._getWGSLVertexCode = function (this: unknown, data: unknown): string {
+    const clipPosition = `${WGSL_ATTRIBUTE_PREFIX}builtin( position ) builtinClipSpace`;
     return original.call(this, data).replace(
-      "@builtin( position ) builtinClipSpace",
-      "@invariant @builtin( position ) builtinClipSpace",
+      clipPosition,
+      `${WGSL_ATTRIBUTE_PREFIX}invariant ${clipPosition}`,
     );
   };
 }
@@ -42,6 +45,11 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes): Mesh {
   material.depthWrite = true;
   material.depthTest = true;
 
+  const colorMaterial = (mesh.material as Material).clone();
+  colorMaterial.depthFunc = EqualDepth;
+  colorMaterial.depthWrite = false;
+  mesh.material = colorMaterial;
+
   const twin = new Mesh(mesh.geometry, material);
   twin.name = `${mesh.name}-depth-prepass`;
   twin.frustumCulled = false;
@@ -49,8 +57,5 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes): Mesh {
   twin.receiveShadow = false;
   twin.renderOrder = -100;
 
-  const colorMaterial = mesh.material as Material;
-  colorMaterial.depthFunc = EqualDepth;
-  colorMaterial.depthWrite = false;
   return twin;
 }
