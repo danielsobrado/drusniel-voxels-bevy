@@ -70,16 +70,17 @@ function isCoastOpenBoundary(x: number, z: number): boolean {
  * legitimate clipped terrain boundary inside the border-coast band, so those vertices are
  * classified as coast-open boundaries instead of weld failures.
  */
-export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint): void {
+export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint, label?: string): void {
   const flags = openBoundaryVertexFlags(mesh);
   for (let i = 0; i < flags.length; i++) {
     if (!flags[i]) continue;
     const x = mesh.positions[i * 3], z = mesh.positions[i * 3 + 2];
     const perimeterDistance = distToPerimeter(x, z, footprint);
     if (perimeterDistance <= PERIMETER_BAND || isCoastOpenBoundary(x, z)) continue;
+    const prefix = label ? `${label}: ` : "";
     throw new ClodBuildError(
       "InternalBorderNotWelded",
-      `open-boundary vertex (${x.toFixed(2)},${mesh.positions[i * 3 + 1].toFixed(2)},${z.toFixed(2)}) ` +
+      `${prefix}open-boundary vertex (${x.toFixed(2)},${mesh.positions[i * 3 + 1].toFixed(2)},${z.toFixed(2)}) ` +
         `is ${perimeterDistance.toFixed(2)} cells from the footprint perimeter — weld missed an internal seam`,
     );
   }
@@ -188,7 +189,7 @@ export function validateWeldedIntermediate(mesh: PageMesh, label: string, zeroAr
  */
 export function validateFinalPageMesh(mesh: PageMesh, footprint: PageFootprint, zeroAreaEpsilon: number, label: string): void {
   validateWeldedIntermediate(mesh, label, zeroAreaEpsilon);
-  assertNoInternalBorders(mesh, footprint);
+  assertNoInternalBorders(mesh, footprint, label);
 }
 
 /** @deprecated Use {@link validateFinalPageMesh} or {@link validateWeldedIntermediate}. */

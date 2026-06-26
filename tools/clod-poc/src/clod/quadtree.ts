@@ -94,7 +94,30 @@ function simplifyParentPage(
     assertNoInternalBorders(sim.mesh, footprint);
     return sim;
   } catch {
-    return { mesh: welded, resultError: 0, errorWorld: 0, lowBenefit: true };
+    try {
+      assertNoInternalBorders(welded, footprint);
+      return { mesh: welded, resultError: 0, errorWorld: 0, lowBenefit: true };
+    } catch {
+      // Hydrology merge can leave seams on the welded parent while simplification still
+      // produces the cleaner mesh — prefer simplified over welded when both fail the check.
+      return { mesh: sim.mesh, resultError: sim.resultError, errorWorld: sim.errorWorld, lowBenefit: true };
+    }
+  }
+}
+
+/** Diagonal polish is optional quality; skip when a flip would open an internal seam. */
+function tryPolishParentPage(
+  mesh: PageMesh,
+  footprint: PageFootprint,
+  cfg: ClodPagesConfig,
+): { mesh: PageMesh; stats: ReturnType<typeof emptyDiagonalPolishStats> } {
+  const candidate = clonePageMesh(mesh);
+  const stats = polishDiagonals(candidate, buildOuterBorderLocks(candidate), pageMeshPolishConfig(cfg));
+  try {
+    assertNoInternalBorders(candidate, footprint);
+    return { mesh: candidate, stats };
+  } catch {
+    return { mesh, stats: emptyDiagonalPolishStats() };
   }
 }
 
@@ -238,12 +261,13 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyParentPage(welded, locks, footprint, cfg);
         const simplified = sim.mesh !== welded;
+        let polish = emptyDiagonalPolishStats();
         if (simplified) {
           validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
+          const polished = tryPolishParentPage(sim.mesh, footprint, cfg);
+          sim.mesh = polished.mesh;
+          polish = polished.stats;
         }
-        const polish = simplified
-          ? polishDiagonals(sim.mesh, buildOuterBorderLocks(sim.mesh), pageMeshPolishConfig(cfg))
-          : emptyDiagonalPolishStats();
         validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -418,12 +442,13 @@ export async function buildWorldAsync(
         const locks = buildOuterBorderLocks(welded);
         const sim = simplifyParentPage(welded, locks, footprint, cfg);
         const simplified = sim.mesh !== welded;
+        let polish = emptyDiagonalPolishStats();
         if (simplified) {
           validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
+          const polished = tryPolishParentPage(sim.mesh, footprint, cfg);
+          sim.mesh = polished.mesh;
+          polish = polished.stats;
         }
-        const polish = simplified
-          ? polishDiagonals(sim.mesh, buildOuterBorderLocks(sim.mesh), pageMeshPolishConfig(cfg))
-          : emptyDiagonalPolishStats();
         validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -600,7 +625,8 @@ export function resimplifyParent(
   const simplified = sim.mesh !== welded;
   if (simplified) {
     validateWeldedIntermediate(sim.mesh, `${node.id} resimplify`, cfg.validation.zero_area_epsilon);
-    polishDiagonals(sim.mesh, buildOuterBorderLocks(sim.mesh), pageMeshPolishConfig(cfg));
+    const polished = tryPolishParentPage(sim.mesh, node.footprint, cfg);
+    sim.mesh = polished.mesh;
   }
   validateFinalPageMesh(sim.mesh, node.footprint, cfg.validation.zero_area_epsilon, `${node.id} final`);
   node.mesh = sim.mesh;
