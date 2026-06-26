@@ -260,6 +260,11 @@ function addRiverMaterialTuningFolder(parent: GUI): { refresh: () => void } {
   folder.add(settings, "cascadeStepStrength", 0, 0.60, 0.005).name("cascade step");
   folder.add(settings, "cascadeRoughnessStrength", 0, 0.40, 0.005).name("cascade roughness");
   folder.add(settings, "cascadeWhitewaterBoost", 0, 5, 0.05).name("whitewater boost");
+  folder.add(settings, "wetBankStrength", 0, 2, 0.05).name("wet bank decals");
+  folder.add(settings, "wetBankDistanceM", 0.5, 24, 0.5).name("wet bank distance");
+  folder.add(settings, "wetRockDarkening", 0, 1, 0.02).name("wet rock darken");
+  folder.add(settings, "foamResidueStrength", 0, 2, 0.05).name("foam residue");
+  folder.add(settings, "foamResidueDropStart", 0, 8, 0.05).name("residue drop start");
   folder.add(settings, "flowNormalStrength", 0, 4, 0.05).name("flow normal");
   folder.add(settings, "crossCurrentStrength", 0, 4, 0.05).name("cross current");
   folder.add(settings, "rapidNormalBoost", 0, 4, 0.05).name("rapid normal");
