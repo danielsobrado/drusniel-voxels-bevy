@@ -180,6 +180,7 @@ export function runFrameLoopStartup(
     },
     waterWeather: {
       waterController,
+      deepOceanSurface,
       deepOceanMaterial,
       waterField,
       deepOceanConfig,
@@ -220,32 +221,15 @@ export function runFrameLoopStartup(
       phase0VelocityX: longView.phase0VelocityX,
       phase0VelocityZ: longView.phase0VelocityZ,
       phase0Streaming: longView.phase0Streaming,
-      longViewDiagnosticsCfg: cfg,
+      longViewDiagnosticsCfg: {
+        page: {
+          chunk_size: cfg.page.chunk_size,
+          chunks_per_page: cfg.page.chunks_per_page,
+        },
+      },
       getFarShellRadiusFactor: () => state.farShellRadiusFactor,
-      getShadowProxyInert: () => {
-        const proxyOn = input.terrainView.shadowProxyDebugState?.shadowProxyEnabled ?? false;
-        const sunOn = input.terrainView.shadowProxyDebugState?.sunShadowsEnabled ?? false;
-        const built = input.terrainView.shadowProxyController?.runtime.stats.built ?? false;
-        return proxyOn && sunOn && built ? 0 : 1;
-      },
-      getShadowProxyEnabled: () => {
-        const counters = input.longView.hooks?.stats?.counters;
-        if (counters && counters["shadow_proxy_enabled"] !== undefined) {
-          return counters["shadow_proxy_enabled"];
-        }
-        const built = input.terrainView.shadowProxyController?.runtime.stats.built ?? false;
-        const proxyOn = input.terrainView.shadowProxyDebugState?.shadowProxyEnabled ?? false;
-        return built && proxyOn ? 1 : 0;
-      },
+      getShadowProxyInert: () => state.shadowProxyInert,
+      getShadowProxyEnabled: () => state.shadowProxyEnabled,
     },
-    farSummary: input.onFarSummaryUpdate ? {
-      onFarSummaryUpdate: input.onFarSummaryUpdate,
-    } : undefined,
-    shadowProxy: input.terrainView.shadowProxyController ? {
-      rebuildIfNeeded: () => input.terrainView.shadowProxyController?.rebuildIfNeeded(),
-    } : undefined,
-    canopy: input.terrainView.canopyShellSystem ? {
-      update: (x, z) => input.terrainView.canopyShellSystem?.update(x, z),
-    } : undefined,
   });
 }
