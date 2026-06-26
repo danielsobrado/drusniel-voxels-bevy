@@ -1,0 +1,10 @@
+id: quaternius_rpg_items
+name: Free RPG Items Pack
+source: Quaternius
+source_url: https://quaternius.com/packs/free-rpg-items.html
+license: CC0-1.0
+attribution_required: false
+runtime_format: glb
+source_formats:
+  - fbx
+notes: "Free sample of RPG items (weapons, armor, potions, books, keys, etc.). Runtime models converted to GLB. Original FBX sources kept under assets_source."
