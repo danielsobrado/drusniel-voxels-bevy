@@ -1,10 +1,9 @@
-import type { ProjectSessionState } from "../../project/project_archive.js";
+import type { ProjectSessionState, TextureBlendMode } from "../../project/voxel_project_archive.js";
 import {
   TEXTURE_BLEND_MODES,
   type ProceduralDebugMode,
   type TerrainMaterialSource,
 } from "../../terrain/material/terrain_material_constants.js";
-import type { TextureBlendMode } from "../../project/project_archive.js";
 import { DEFAULT_TERRAIN_COLOR_ADJUSTMENTS } from "../../material/material.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
