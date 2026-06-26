@@ -1,6 +1,6 @@
 // Water debug UI helper. Adds lil-gui folders for water debug, shore surf,
-// and river tuning. River generation controls rebuild through URL params because
-// hydrology is built before the renderer starts.
+// river tuning, and live river stats. River generation controls rebuild through
+// URL params because hydrology is built before the renderer starts.
 import type GUI from "lil-gui";
 import { type WaterDebugMode, type WaterVisualConfig, WATER_DEBUG_MODES } from "./waterConfig.js";
 import { DEFAULT_SHORE_SURF_BAND_SETTINGS } from "./waterField.js";
@@ -27,6 +27,23 @@ export interface WaterDebugState {
   riverFoamStrength: number;
 }
 
+export interface WaterRiverDebugStats {
+  source: string;
+  hydrologyEnabled: boolean;
+  riverCells: number;
+  lakeCells: number;
+  wetCells: number;
+  maxFlowSpeed: number;
+  fallbackRivers: boolean;
+  fallbackMainRiver: boolean;
+  fallbackTributaries: boolean;
+  widenRadius: number;
+  carveDepthM: number;
+  visibleDepthM: number;
+  flowSpeedMultiplier: number;
+  fakeRiverCount: number;
+}
+
 export interface WaterDebugBindings {
   onEnabled: (enabled: boolean) => void;
   onMode: (mode: WaterDebugMode) => void;
@@ -38,6 +55,7 @@ export interface WaterDebugBindings {
   onOceanFullDepthDistance: (distance: number) => void;
   onOceanMaxDepth: (depth: number) => void;
   onRebuildVisual: () => void;
+  getRiverStats?: () => WaterRiverDebugStats;
 }
 
 export interface WaterDebugController {
@@ -106,6 +124,53 @@ function reloadWithRiverState(state: WaterDebugState): void {
   window.location.assign(url.toString());
 }
 
+function makeEmptyRiverStats(): WaterRiverDebugStats {
+  return {
+    source: "unknown",
+    hydrologyEnabled: false,
+    riverCells: 0,
+    lakeCells: 0,
+    wetCells: 0,
+    maxFlowSpeed: 0,
+    fallbackRivers: false,
+    fallbackMainRiver: false,
+    fallbackTributaries: false,
+    widenRadius: 0,
+    carveDepthM: 0,
+    visibleDepthM: 0,
+    flowSpeedMultiplier: 1,
+    fakeRiverCount: 0,
+  };
+}
+
+function addRiverStatsFolder(parent: GUI, bindings: WaterDebugBindings): { refresh: () => void } {
+  const folder = parent.addFolder("river stats");
+  const stats = makeEmptyRiverStats();
+  const refresh = () => Object.assign(stats, bindings.getRiverStats?.() ?? makeEmptyRiverStats());
+  refresh();
+  folder.add(stats, "source").name("source").disable();
+  folder.add(stats, "hydrologyEnabled").name("hydrology").disable();
+  folder.add(stats, "riverCells").name("river cells").disable();
+  folder.add(stats, "lakeCells").name("lake cells").disable();
+  folder.add(stats, "wetCells").name("wet cells").disable();
+  folder.add(stats, "maxFlowSpeed").name("max flow").disable();
+  folder.add(stats, "fallbackRivers").name("fallback used").disable();
+  folder.add(stats, "fallbackMainRiver").name("trunk enabled").disable();
+  folder.add(stats, "fallbackTributaries").name("tributaries").disable();
+  folder.add(stats, "widenRadius").name("width / widen").disable();
+  folder.add(stats, "carveDepthM").name("carve depth").disable();
+  folder.add(stats, "visibleDepthM").name("visible depth").disable();
+  folder.add(stats, "flowSpeedMultiplier").name("flow speed x").disable();
+  folder.add(stats, "fakeRiverCount").name("fake rivers").disable();
+  folder.add({ refresh }, "refresh").name("refresh stats");
+  return {
+    refresh: () => {
+      refresh();
+      folder.controllers.forEach((controller) => controller.updateDisplay());
+    },
+  };
+}
+
 export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugState {
   const riverDefaults = DEFAULT_HYDROLOGY_CONFIG.rivers;
   return {
@@ -166,6 +231,8 @@ export function addWaterDebugFolder(
   rivers.add(state, "riverFoamStrength", 0, 2, 0.01).name("rapids foam");
   rivers.add({ apply: () => reloadWithRiverState(state) }, "apply").name("apply + rebuild");
 
+  const riverStats = addRiverStatsFolder(folder, bindings);
+
   const shoreSurf = folder.addFolder("shore surf");
   shoreSurf.add(state, "oceanEnabled").name("enabled").onChange((enabled: boolean) => {
     bindings.onOceanEnabled(enabled);
@@ -184,6 +251,7 @@ export function addWaterDebugFolder(
     refreshDisplay: () => {
       folder.controllers.forEach((controller) => controller.updateDisplay());
       rivers.controllers.forEach((controller) => controller.updateDisplay());
+      riverStats.refresh();
       shoreSurf.controllers.forEach((controller) => controller.updateDisplay());
     },
   };
