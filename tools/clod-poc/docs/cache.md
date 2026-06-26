@@ -1,6 +1,8 @@
 # CLOD PoC Disk/Cache Streaming (Phase 9)
 
-PoC-scoped persistent cache for generated CLOD page artifacts, terrain summary data, and far-view helper schemas. This validates cache keys, serialization, invalidation, compression, and lazy streaming in TypeScript/Three.js before any Bevy/Rust port.
+PoC-scoped persistent cache for generated CLOD page artifacts and far-view helper schemas. Terrain summary uses the same keys and serialization but is **memory-only** for now (persistent terrain-summary is deferred; see Known limitations). This validates cache keys, serialization, invalidation, compression, and lazy streaming in TypeScript/Three.js before any Bevy/Rust port.
+
+**Phase 9 status:** persistent reload coverage is complete for `clod-page-node` artifacts only. Do not treat terrain-summary or other artifact kinds as Phase-9-complete for persistence until wired to IndexedDB.
 
 **This is not production-ready.** It is a design validation step.
 
@@ -122,8 +124,9 @@ Document your numbers in console via **Dump metrics** after each run.
 
 ## Known limitations
 
+- **Phase 9 persistent artifact coverage (deferred):** page-node cache survives reload; terrain-summary cache does not. Keys/serialization are ready, but main-thread terrain summary stays in the runtime LRU only — acceptable for PoC, not full Phase 9 persistence.
 - **Main-thread broker** (`drusniel-clod-poc-cache-pages-v2`): sole IndexedDB owner; CLOD worker uses RPC for get/put/clear
-- **Main terrain summary**: memory cache only
+- **Main terrain summary**: memory cache only (persistent terrain-summary deferred)
 - Eviction manifest is **memory-only**; IndexedDB manifest persistence was removed after worker `UnknownError` issues
 - Frame budget enforcement in the scheduler is approximate (see TODO in `cacheScheduler.ts`)
 - Warm-cache page nodes restore original `NodeBuildStat` from artifact metadata (`fromCache: true`)

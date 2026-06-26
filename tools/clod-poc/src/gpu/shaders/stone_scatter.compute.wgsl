@@ -42,8 +42,6 @@ struct StoneHydrologySample {
 @group(0) @binding(2) var<storage, read_write> indirect_args: array<u32>;
 @group(0) @binding(3) var<storage, read_write> instance_a: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read_write> instance_b: array<vec4<f32>>;
-@group(0) @binding(7) var hydro_texture: texture_2d<f32>;
-@group(0) @binding(8) var hydro_sampler: sampler;
 
 fn pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let M = 1664525u;

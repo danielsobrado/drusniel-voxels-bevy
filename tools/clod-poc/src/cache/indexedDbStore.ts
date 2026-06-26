@@ -5,7 +5,6 @@ import { cacheLogger } from "./cacheLogger.js";
 import { WorkerRemotePersistentStore } from "./workerRemotePersistentStore.js";
 
 const DB_VERSION = 2;
-const ARTIFACTS_STORE = "artifacts";
 const RECREATE_DELAY_MS = 150;
 const MAX_IDB_RECOVERY_ATTEMPTS = 3;
 
@@ -131,6 +130,10 @@ export class IndexedDbStore implements PersistentCacheStore {
     return this.config.database_name;
   }
 
+  private get objectStoreName(): string {
+    return this.config.object_store_name;
+  }
+
   constructor(config: ClodCachePersistentConfig) {
     this.config = config;
   }
@@ -190,11 +193,12 @@ export class IndexedDbStore implements PersistentCacheStore {
       const request = indexedDB.open(this.config.database_name, DB_VERSION);
       request.onupgradeneeded = () => {
         const db = request.result;
+        const storeName = this.objectStoreName;
         for (const name of Array.from(db.objectStoreNames)) {
-          if (name !== ARTIFACTS_STORE) db.deleteObjectStore(name);
+          if (name !== storeName) db.deleteObjectStore(name);
         }
-        if (!db.objectStoreNames.contains(ARTIFACTS_STORE)) {
-          db.createObjectStore(ARTIFACTS_STORE);
+        if (!db.objectStoreNames.contains(storeName)) {
+          db.createObjectStore(storeName);
         }
       };
       request.onsuccess = () => {
@@ -229,8 +233,8 @@ export class IndexedDbStore implements PersistentCacheStore {
   private async withArtifacts<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
     const db = await this.openDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(ARTIFACTS_STORE, mode);
-      const store = tx.objectStore(ARTIFACTS_STORE);
+      const tx = db.transaction(this.objectStoreName, mode);
+      const store = tx.objectStore(this.objectStoreName);
       const request = fn(store);
       request.onsuccess = () => resolve(request.result as T);
       request.onerror = () => reject(request.error ?? new CacheUnavailableError("artifact store request failed"));
@@ -245,8 +249,8 @@ export class IndexedDbStore implements PersistentCacheStore {
   private async keysInternal(): Promise<string[]> {
     const db = await this.openDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(ARTIFACTS_STORE, "readonly");
-      const request = tx.objectStore(ARTIFACTS_STORE).getAllKeys();
+      const tx = db.transaction(this.objectStoreName, "readonly");
+      const request = tx.objectStore(this.objectStoreName).getAllKeys();
       request.onsuccess = () => resolve((request.result as IDBValidKey[]).map(String));
       request.onerror = () => reject(request.error ?? new CacheUnavailableError("keys failed"));
       tx.onerror = () => reject(tx.error ?? new CacheUnavailableError("keys transaction failed"));

@@ -237,7 +237,6 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     applyTerrainTextures,
     setRiverTerrainWetnessMask(mask) {
       riverTerrainWetnessMask = mask;
-      applyTerrainTextures();
     },
     applyColorByLodToMaterials,
     syncColorByLod,

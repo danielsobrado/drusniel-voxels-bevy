@@ -36,6 +36,7 @@ import { createProceduralTerrainTextures } from "../../textures/terrainTextureAr
 import { parseGrassConfig, applyGrassMaterialBiasFromYaml } from "../../grass.js";
 import { parseStoneConfig } from "../../stones/stone_config.js";
 import { parseTreeConfig, applyTreeMaterialBiasFromYaml } from "../../trees/index.js";
+import { parseUnderstoryConfig } from "../../understory/index.js";
 import {
   createForestLightingIntegrationWarner,
   parseForestLightingConfig,

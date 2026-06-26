@@ -17,7 +17,7 @@ type CacheWorker = {
 
 let brokerStore: IndexedDbStore | null = null;
 let brokerInit: Promise<IndexedDbStore | null> | null = null;
-let brokerAttached = false;
+const attachedWorkers = new WeakSet<CacheWorker>();
 
 async function ensureBrokerStore(): Promise<IndexedDbStore | null> {
   if (brokerStore) return brokerStore;
@@ -84,8 +84,8 @@ async function handleCacheRpc(worker: CacheWorker, request: CacheRpcRequest): Pr
 
 /** Routes worker cache RPC to main-thread IndexedDB (workers skip local IDB). */
 export function attachMainThreadCacheBroker(worker: CacheWorker): void {
-  if (brokerAttached) return;
-  brokerAttached = true;
+  if (attachedWorkers.has(worker)) return;
+  attachedWorkers.add(worker);
   worker.addEventListener("message", (event: MessageEvent) => {
     if (!isCacheRpcRequest(event.data)) return;
     void handleCacheRpc(worker, event.data);

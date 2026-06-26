@@ -87,6 +87,7 @@ export async function runTextureUiStartup(
   session.terraformEditCheckbox = terraformMenuUi.editCheckbox;
   bindings.refreshTerraformSwatches = terraformMenuUi.refreshSwatches;
   bindings.syncTerraformMenu = terraformMenuUi.syncMenu;
+  applyTerrainTextures();
 
   if (stagedImport) {
     textureModal.rebuildTextureSlotCards();
