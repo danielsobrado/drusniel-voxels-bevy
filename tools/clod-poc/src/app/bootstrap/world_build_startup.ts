@@ -50,7 +50,7 @@ import {
   type WaterConfig,
 } from "../../water/index.js";
 import type { ClodPageNode } from "../../types.js";
-import type { ProjectArchiveContents } from "../../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
 import configText from "../../../config/clod_pages.yaml?raw";
@@ -76,7 +76,7 @@ import { parseBorderOceanSceneConfig } from "../../debug/border_ocean_scene.js";
 import { splitWorldBuildNodes } from "./world_build_nodes.js";
 
 export interface WorldBuildStartupInput {
-  stagedImport: ProjectArchiveContents | null;
+  stagedImport: VoxelProjectArchiveContents | null;
   clodRuntime: ClodRuntimeConfig;
   searchParams: URLSearchParams;
   queryGrassPerfScene: boolean;
@@ -119,13 +119,9 @@ export interface WorldBuildResult {
   buildStatus: { value: string };
 }
 
-function importedVoxelSnapshot(stagedImport: ProjectArchiveContents | null): VoxelEditSnapshot {
+function importedVoxelSnapshot(stagedImport: VoxelProjectArchiveContents | null): VoxelEditSnapshot {
   if (!stagedImport) return { revision: 0, deltas: [] };
-  const snapshot = (stagedImport.manifest as { voxelTerrainEdits?: unknown }).voxelTerrainEdits;
-  if (!snapshot || typeof snapshot !== "object") throw new Error("Imported project is missing voxelTerrainEdits");
-  const candidate = snapshot as VoxelEditSnapshot;
-  if (!Array.isArray(candidate.deltas) || !Number.isFinite(candidate.revision)) throw new Error("Imported project has invalid voxelTerrainEdits");
-  return candidate;
+  return stagedImport.manifest.voxelTerrainEdits;
 }
 
 export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promise<WorldBuildResult> {
