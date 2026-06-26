@@ -38,4 +38,46 @@ describe("deep ocean surface", () => {
     expect(box.max.z).toBeGreaterThanOrEqual(worldCells + extend);
     surface.dispose();
   });
+
+  it("can extend into the playable border ocean band", () => {
+    const worldCells = 256;
+    const innerBand = 48;
+    const config = {
+      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
+      extendCells: 64,
+      segments: 8,
+    };
+    const surface = createDeepOceanSurface(worldCells, config, new THREE.MeshBasicMaterial(), innerBand)!;
+    const positions = surface.mesh.geometry.getAttribute("position");
+    let minInsideX = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i);
+      const z = positions.getZ(i);
+      if (x >= 0 && x <= worldCells && z >= 0 && z <= worldCells) {
+        minInsideX = Math.min(minInsideX, x);
+      }
+    }
+    expect(minInsideX).toBeLessThanOrEqual(innerBand);
+    expect(positions.count).toBe(deepOceanSurfaceVertexCount(worldCells, config, innerBand));
+    surface.dispose();
+  });
+
+  it("animates vertex heights without moving xz coordinates", () => {
+    const worldCells = 128;
+    const config = {
+      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
+      extendCells: 32,
+      segments: 4,
+    };
+    const surface = createDeepOceanSurface(worldCells, config, new THREE.MeshBasicMaterial(), 24)!;
+    const positions = surface.mesh.geometry.getAttribute("position");
+    const x0 = positions.getX(0);
+    const z0 = positions.getZ(0);
+    const y0 = positions.getY(0);
+    surface.update(2.0);
+    expect(positions.getX(0)).toBe(x0);
+    expect(positions.getZ(0)).toBe(z0);
+    expect(positions.getY(0)).not.toBe(y0);
+    surface.dispose();
+  });
 });
