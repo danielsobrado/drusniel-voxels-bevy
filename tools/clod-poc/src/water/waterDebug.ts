@@ -1,7 +1,7 @@
 // Water debug UI helper. Adds lil-gui folders for water debug, shore surf,
 // river tuning, live river stats, and river ecology inspection. River generation
-// and ecology controls rebuild through URL params because hydrology/GPU scatter
-// are built before the renderer starts.
+// and ecology/material controls rebuild through URL params because hydrology/GPU
+// scatter/water materials are built before the renderer starts.
 import type GUI from "lil-gui";
 import { type WaterDebugMode, type WaterVisualConfig, WATER_DEBUG_MODES } from "./waterConfig.js";
 import { DEFAULT_SHORE_SURF_BAND_SETTINGS } from "./waterField.js";
@@ -12,6 +12,11 @@ import {
   riverEcologyReadout,
   type RiverEcologySettings,
 } from "./riverEcologyRuntime.js";
+import {
+  readRiverMaterialSettings,
+  reloadWithRiverMaterialSettings,
+  type RiverMaterialSettings,
+} from "./riverMaterialRuntime.js";
 
 export interface WaterDebugState {
   enabled: boolean;
@@ -242,6 +247,28 @@ function addRiverEcologyTuningFolder(parent: GUI): { refresh: () => void } {
   };
 }
 
+function addRiverMaterialTuningFolder(parent: GUI): { refresh: () => void } {
+  const folder = parent.addFolder("river material tuning");
+  const settings: RiverMaterialSettings = readRiverMaterialSettings();
+  folder.add(settings, "geometryThalwegDip", 0, 0.35, 0.005).name("thalweg dip");
+  folder.add(settings, "geometryBankLift", 0, 0.25, 0.005).name("bank lift");
+  folder.add(settings, "geometryRiffleStrength", 0, 0.30, 0.005).name("riffle strength");
+  folder.add(settings, "geometrySideRiffleStrength", 0, 0.20, 0.005).name("side riffle");
+  folder.add(settings, "geometryMaxOffset", 0, 0.60, 0.01).name("max geom offset");
+  folder.add(settings, "flowNormalStrength", 0, 4, 0.05).name("flow normal");
+  folder.add(settings, "crossCurrentStrength", 0, 4, 0.05).name("cross current");
+  folder.add(settings, "rapidNormalBoost", 0, 4, 0.05).name("rapid normal");
+  folder.add(settings, "bankFoamStrength", 0, 3, 0.05).name("bank foam");
+  folder.add(settings, "rapidFoamStrength", 0, 3, 0.05).name("rapid foam");
+  folder.add(settings, "foamStreakStrength", 0, 3, 0.05).name("foam streaks");
+  folder.add(settings, "shallowBankTintStrength", 0, 3, 0.05).name("shallow tint");
+  folder.add(settings, "centerChannelDarkening", 0, 3, 0.05).name("center darken");
+  folder.add({ apply: () => reloadWithRiverMaterialSettings(settings) }, "apply").name("apply + rebuild");
+  return {
+    refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()),
+  };
+}
+
 export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugState {
   const riverDefaults = DEFAULT_HYDROLOGY_CONFIG.rivers;
   return {
@@ -305,6 +332,7 @@ export function addWaterDebugFolder(
   const riverStats = addRiverStatsFolder(folder, bindings);
   const riverEcologyDebug = addRiverEcologyDebugFolder(folder, state, bindings);
   const riverEcologyTuning = addRiverEcologyTuningFolder(folder);
+  const riverMaterialTuning = addRiverMaterialTuningFolder(folder);
 
   const shoreSurf = folder.addFolder("shore surf");
   shoreSurf.add(state, "oceanEnabled").name("enabled").onChange((enabled: boolean) => {
@@ -327,6 +355,7 @@ export function addWaterDebugFolder(
       riverStats.refresh();
       riverEcologyDebug.refresh();
       riverEcologyTuning.refresh();
+      riverMaterialTuning.refresh();
       shoreSurf.controllers.forEach((controller) => controller.updateDisplay());
     },
   };
