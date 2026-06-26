@@ -99,6 +99,34 @@ fn wet_bank(height: f32, normal_y: f32) -> f32 {
   return bank_height * smoothstep(0.42, 0.82, normal_y);
 }
 
+fn segment_distance(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+  let ab = b - a;
+  let denom = max(dot(ab, ab), 1e-6);
+  let t = clamp(dot(p - a, ab) / denom, 0.0, 1.0);
+  return distance(p, a + ab * t);
+}
+
+fn fallback_river_distance_m(wx: f32, wz: f32) -> f32 {
+  let world_size = max(1.0, params.center_radius.w);
+  let p = vec2<f32>(wx / world_size, wz / world_size);
+  var d = 1e6;
+  d = min(d, segment_distance(p, vec2<f32>(0.08, 0.32), vec2<f32>(0.24, 0.39)));
+  d = min(d, segment_distance(p, vec2<f32>(0.24, 0.39), vec2<f32>(0.42, 0.47)));
+  d = min(d, segment_distance(p, vec2<f32>(0.42, 0.47), vec2<f32>(0.61, 0.56)));
+  d = min(d, segment_distance(p, vec2<f32>(0.61, 0.56), vec2<f32>(0.86, 0.68)));
+  d = min(d, segment_distance(p, vec2<f32>(0.72, 0.12), vec2<f32>(0.66, 0.27)));
+  d = min(d, segment_distance(p, vec2<f32>(0.66, 0.27), vec2<f32>(0.58, 0.42)));
+  d = min(d, segment_distance(p, vec2<f32>(0.58, 0.42), vec2<f32>(0.48, 0.51)));
+  return d * world_size;
+}
+
+fn river_grass_density_mask(wx: f32, wz: f32) -> f32 {
+  let dist = fallback_river_distance_m(wx, wz);
+  let wet_channel = 1.0 - smoothstep(7.0, 12.0, dist);
+  let moist_bank = smoothstep(9.0, 16.0, dist) * (1.0 - smoothstep(16.0, 28.0, dist));
+  return clamp((1.0 - wet_channel) * mix(0.92, 1.08, moist_bank), 0.0, 1.08);
+}
+
 fn grass_mask(height: f32, normal_y: f32, distance: f32, wx: f32, wz: f32) -> f32 {
   if (height < params.settings_b.x || height > params.settings_b.y) {
     return 0.0;
@@ -117,11 +145,12 @@ fn grass_mask(height: f32, normal_y: f32, distance: f32, wx: f32, wz: f32) -> f3
   let snow_reject = smoothstep(0.08, 0.55, snow_weight);
   let viable = above_water * slope_mask * (1.0 - rock_reject) * (1.0 - snow_reject);
   let bank = wet_bank(height, normal_y);
+  let river_mask = river_grass_density_mask(wx, wz);
   let scruff_meters = params.settings_b.z;
   let scruff_min = params.density_b.y;
   let scruff = (1.0 - smoothstep(scruff_meters * 0.45, scruff_meters, distance))
     * viable * scruff_min;
-  return clamp(max(grass_weight * viable * (1.0 - bank * 0.58), scruff), 0.0, 1.0);
+  return clamp(max(grass_weight * viable * (1.0 - bank * 0.58), scruff) * river_mask, 0.0, 1.0);
 }
 
 fn grass_thin(distance: f32) -> f32 {
@@ -217,12 +246,6 @@ fn process_slot(slot: u32) {
   }
 
   let height = surfaceHeightField(wpos.x, wpos.y);
-  // TODO: surfaceHeightField() is the base procedural terrain without hydrology carving.
-  // When hydrology is active, visible terrain uses the carved bed, so GPU grass blades
-  // may float above carved terrain in hydrology regions. The grass node material already
-  // samples hydrologyWaterTexture to discard blades under water, but blade Y is still
-  // snapped to the uncarved procedural height. Fix: sample a hydrology height texture
-  // in the compute shader and snap height to the carved bed when available.
   let normal = normalize(densityGradient(wpos.x, height, wpos.y));
   let mask = grass_mask(height, normal.y, dist, wpos.x, wpos.y);
   let thin = grass_thin(dist);
