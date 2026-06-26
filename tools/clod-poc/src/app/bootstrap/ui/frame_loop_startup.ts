@@ -137,6 +137,10 @@ export function runFrameLoopStartup(
     player.attachPropColliders(customProps.propController.colliderSet);
   }
 
+  constructionController?.setTerrainConformHandler((request) => {
+    terrainEdit.scheduleConstructionTerrainConform(request);
+  });
+
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
