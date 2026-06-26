@@ -34,8 +34,16 @@ const wall: ConstructionPieceDef = {
   ],
 };
 
+const sideWall: ConstructionPieceDef = {
+  ...wall,
+  snapPoints: [
+    ...wall.snapPoints,
+    { id: "left", localPos: [-1, 0, 0], direction: [-1, 0, 0], group: "wall-side", accepts: ["wall-side"] },
+  ],
+};
+
 describe("ConstructionSnapIndex", () => {
-  it("finds a compatible snapped wall placement", () => {
+  it("finds a compatible snapped wall placement and auto-aligns rotation", () => {
     const index = new ConstructionSnapIndex(1);
     index.addPiece(floor, "floor-1", [10, 5, 10], 0);
 
@@ -44,6 +52,26 @@ describe("ConstructionSnapIndex", () => {
     expect(snap).not.toBeNull();
     expect(snap?.target.entityId).toBe("floor-1");
     expect(snap?.worldPosition).toEqual([11, 6.1, 10]);
+    expect(snap?.rotationQuarterTurns).toBe(1);
+  });
+
+  it("targets elevated snap points from the aim ray", () => {
+    const index = new ConstructionSnapIndex(1);
+    index.insert({
+      entityId: "wall-1",
+      pieceTypeId: "wall",
+      snapIndex: 0,
+      worldPos: [2, 2, 0],
+      worldDirection: [1, 0, 0],
+      group: "wall-side",
+      accepts: ["wall-side"],
+    });
+
+    const snap = index.findBestSnapOnRay([2, 2, -5], [0, 0, 1], 10, sideWall, 0, config);
+
+    expect(snap).not.toBeNull();
+    expect(snap?.target.entityId).toBe("wall-1");
+    expect(snap?.worldPosition).toEqual([3, 2, 0]);
   });
 
   it("rejects incompatible snap groups", () => {
