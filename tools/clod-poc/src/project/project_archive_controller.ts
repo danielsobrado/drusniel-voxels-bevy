@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { emitAudio } from "../audio/index.js";
 import type { ClodPageNode } from "../types.js";
-import { EMPTY_PROJECT_PROPS } from "../project/project_props.js";
+import type { ProjectPropInstance } from "../project/project_props.js";
 import {
   createVoxelProjectArchive,
   parseVoxelProjectArchive,
@@ -27,6 +27,7 @@ export interface ProjectArchiveControllerDeps {
   getWorldSize: () => number;
   getConfig: () => VoxelProjectManifest["config"];
   getNodesByLevel: () => Map<number, ClodPageNode[]>;
+  getProps: () => ProjectPropInstance[];
   textureController: TerrainTextureController;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
@@ -132,7 +133,7 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
           water: mapProjectWaterArchiveState(deps.getState()),
           weather: mapProjectWeatherArchiveState(deps.getState()),
           voxelTerrainEdits: getVoxelEditSnapshot(),
-          props: EMPTY_PROJECT_PROPS,
+          props: deps.getProps(),
           textures: deps.textureController.projectTextureMetadata(),
           camera: {
             position: deps.camera.position.toArray() as [number, number, number],
@@ -145,7 +146,7 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         const elapsed = performance.now() - startedAt;
         const summary = `export: ${(archive.byteLength / 1048576).toFixed(1)} MiB voxel archive in ${(elapsed / 1000).toFixed(2)}s`;
         deps.setLastArchiveSummary(summary);
-        console.info(`[project export] ${summary}; mesh caches omitted`);
+        console.info(`[project export] ${summary}; mesh caches omitted; props=${manifest.props.length}`);
         deps.updateInfo();
         emitAudio("project.export.success");
       } catch (error) {
