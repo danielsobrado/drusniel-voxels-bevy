@@ -938,40 +938,40 @@ pub fn spawn_floating_particles(
     let camera_pos = camera_transform.translation;
 
     // Small particle mesh for pollen/dust specks
-    let particle_mesh = meshes.add(Sphere::new(0.06).mesh().build());
+    let particle_mesh = meshes.add(Sphere::new(0.025).mesh().build());
 
     let particle_materials = vec![
         materials.add(StandardMaterial {
-            base_color: Color::srgba(0.95, 0.86, 0.55, 0.85),
-            emissive: LinearRgba::new(0.5, 0.45, 0.18, 1.0),
+            base_color: Color::srgba(0.85, 0.75, 0.45, 0.35),
+            emissive: LinearRgba::new(0.08, 0.06, 0.02, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         materials.add(StandardMaterial {
-            base_color: Color::srgba(0.78, 0.9, 0.52, 0.75),
-            emissive: LinearRgba::new(0.25, 0.4, 0.18, 1.0),
+            base_color: Color::srgba(0.55, 0.7, 0.4, 0.3),
+            emissive: LinearRgba::new(0.04, 0.06, 0.03, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         materials.add(StandardMaterial {
-            base_color: Color::srgba(0.62, 0.82, 0.45, 0.65),
-            emissive: LinearRgba::new(0.2, 0.32, 0.16, 1.0),
+            base_color: Color::srgba(0.6, 0.45, 0.25, 0.25),
+            emissive: LinearRgba::new(0.05, 0.03, 0.01, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         materials.add(StandardMaterial {
-            base_color: Color::srgba(0.88, 0.83, 0.7, 0.6),
-            emissive: LinearRgba::new(0.18, 0.18, 0.18, 1.0),
+            base_color: Color::srgba(0.7, 0.75, 0.5, 0.25),
+            emissive: LinearRgba::new(0.05, 0.05, 0.02, 1.0),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
     ];
 
-    let particle_count = 200;
+    let particle_count = 150;
 
     for i in 0..particle_count {
         let hash1 = simple_hash(i * 17, i * 31);
@@ -992,9 +992,9 @@ pub fn spawn_floating_particles(
 
         // Mix sharp and slightly "blurred" sizes
         let scale = if hash3 > 0.7 {
-            1.2 + hash2 * 0.8
+            0.5 + hash2 * 0.5
         } else {
-            0.6 + hash2 * 0.6
+            0.3 + hash2 * 0.4
         };
 
         commands.spawn((

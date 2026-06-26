@@ -111,7 +111,12 @@ describe("canopy clipmap", () => {
     };
 
     clipmap.update(0, 0, config, terrain, trees);
-    const update = clipmap.update(5000, 5000, noBuildConfig, terrain, trees);
+    while (clipmap.getVisibleTiles().length === 0) {
+      clipmap.update(0, 0, config, terrain, trees);
+    }
+    const beforeQueue = clipmap.getVisibleTiles().length;
+
+    const update = clipmap.update(1024, 0, noBuildConfig, terrain, trees);
 
     expect(update.metrics.builtThisFrame).toBe(0);
     expect(update.metrics.queuedTiles).toBeGreaterThan(0);
