@@ -17,6 +17,11 @@ describe("river material runtime settings", () => {
     expect(settings.cascadeStepStrength).toBeGreaterThan(0);
     expect(settings.cascadeRoughnessStrength).toBeGreaterThan(0);
     expect(settings.cascadeWhitewaterBoost).toBeGreaterThan(0);
+    expect(settings.wetBankStrength).toBeGreaterThan(0);
+    expect(settings.wetBankDistanceM).toBeGreaterThan(0);
+    expect(settings.wetRockDarkening).toBeGreaterThan(0);
+    expect(settings.foamResidueStrength).toBeGreaterThan(0);
+    expect(settings.foamResidueDropStart).toBeGreaterThanOrEqual(0);
     expect(settings.flowNormalStrength).toBeGreaterThan(0);
     expect(settings.crossCurrentStrength).toBeGreaterThan(0);
     expect(settings.rapidNormalBoost).toBeGreaterThan(0);
@@ -39,6 +44,11 @@ describe("river material runtime settings", () => {
       cascadeStepStrength: 10,
       cascadeRoughnessStrength: 10,
       cascadeWhitewaterBoost: 10,
+      wetBankStrength: 10,
+      wetBankDistanceM: -1,
+      wetRockDarkening: 10,
+      foamResidueStrength: 10,
+      foamResidueDropStart: 10,
       flowNormalStrength: 10,
       crossCurrentStrength: -2,
       rapidNormalBoost: 10,
@@ -59,6 +69,11 @@ describe("river material runtime settings", () => {
     expect(settings.cascadeStepStrength).toBe(0.60);
     expect(settings.cascadeRoughnessStrength).toBe(0.40);
     expect(settings.cascadeWhitewaterBoost).toBe(5);
+    expect(settings.wetBankStrength).toBe(2);
+    expect(settings.wetBankDistanceM).toBe(0.5);
+    expect(settings.wetRockDarkening).toBe(1);
+    expect(settings.foamResidueStrength).toBe(2);
+    expect(settings.foamResidueDropStart).toBe(8);
     expect(settings.flowNormalStrength).toBe(4);
     expect(settings.crossCurrentStrength).toBe(0);
     expect(settings.rapidNormalBoost).toBe(4);
