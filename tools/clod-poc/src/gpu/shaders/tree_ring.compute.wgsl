@@ -164,6 +164,18 @@ fn tree_local_competition_mask(wc: vec2<f32>, wpos: vec2<f32>, cfg: TreeAcceptPa
   return mix(1.05, 0.72, pressure);
 }
 
+fn tree_terrain_roughness_mask(height: f32, wpos: vec2<f32>) -> f32 {
+  let sample_radius = max(params.settings_a.x * 1.5, 4.0);
+  let hx0 = surfaceHeightField(wpos.x - sample_radius, wpos.y);
+  let hx1 = surfaceHeightField(wpos.x + sample_radius, wpos.y);
+  let hz0 = surfaceHeightField(wpos.x, wpos.y - sample_radius);
+  let hz1 = surfaceHeightField(wpos.x, wpos.y + sample_radius);
+  let roughness = (abs(hx0 - height) + abs(hx1 - height) + abs(hz0 - height) + abs(hz1 - height)) * 0.25;
+  let rough_mask = 1.0 - smoothstep(2.6, 8.5, roughness) * 0.48;
+  let terrace_bonus = smoothstep(0.0, 2.4, 2.4 - roughness) * 0.06;
+  return clamp(rough_mask + terrace_bonus, 0.52, 1.06);
+}
+
 fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
   if (height < cfg.min_height_m || height > cfg.max_height_m) {
     return 0.0;
@@ -189,7 +201,8 @@ fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAccept
   let forest_cover = tree_forest_cover_mask(wpos, cfg);
   let shoreline_mask = tree_shoreline_density_mask(height, normal_y, cfg);
   let competition_mask = tree_local_competition_mask(floor(wpos / max(params.settings_a.x, 0.001)), wpos, cfg);
-  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask * forest_cover * shoreline_mask * competition_mask, 0.0, 1.0);
+  let roughness_mask = tree_terrain_roughness_mask(height, wpos);
+  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask * forest_cover * shoreline_mask * competition_mask * roughness_mask, 0.0, 1.0);
 }
 
 fn tree_accept_params_from_uniforms() -> TreeAcceptParams {
