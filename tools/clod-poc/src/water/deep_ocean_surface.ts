@@ -1,13 +1,12 @@
 import * as THREE from "three";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
+import { deepOceanWaveVerticalBounds, sampleDeepOceanWave } from "./deep_ocean_waves.js";
 
 export interface DeepOceanSurface {
   mesh: THREE.Mesh;
   update(timeSeconds: number): void;
   dispose(): void;
 }
-
-const WAVE_Y_BOUNDS = 4.0;
 
 function addRectGrid(
   positions: number[],
@@ -51,21 +50,17 @@ function addRectGrid(
   vertexOffset.value = base + (rows + 1) * (cols + 1);
 }
 
-function oceanWaveHeight(x: number, z: number, timeSeconds: number): number {
-  const t = timeSeconds;
-  const swellA = Math.sin(x * 0.018 + z * 0.007 + t * 0.46) * 1.45;
-  const swellB = Math.sin(x * -0.011 + z * 0.022 + t * 0.31) * 0.95;
-  const cross = Math.cos(x * 0.041 - z * 0.035 + t * 0.78) * 0.32;
-  return swellA + swellB + cross;
-}
-
 function updateWavePositions(geometry: THREE.BufferGeometry, basePositions: Float32Array, timeSeconds: number): void {
   const attr = geometry.getAttribute("position") as THREE.BufferAttribute;
   const positions = attr.array as Float32Array;
   for (let i = 0; i < positions.length; i += 3) {
     const x = basePositions[i];
+    const y = basePositions[i + 1];
     const z = basePositions[i + 2];
-    positions[i + 1] = basePositions[i + 1] + oceanWaveHeight(x, z, timeSeconds);
+    const wave = sampleDeepOceanWave(x, z, timeSeconds);
+    positions[i] = x + wave.dx;
+    positions[i + 1] = y + wave.dy;
+    positions[i + 2] = z + wave.dz;
   }
   attr.needsUpdate = true;
   geometry.computeVertexNormals();
@@ -110,9 +105,10 @@ export function createDeepOceanSurface(
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
+  const waveBounds = deepOceanWaveVerticalBounds();
   geometry.boundingBox = new THREE.Box3(
-    new THREE.Vector3(outerMin, y - WAVE_Y_BOUNDS, outerMin),
-    new THREE.Vector3(outerMax, y + WAVE_Y_BOUNDS, outerMax),
+    new THREE.Vector3(outerMin - waveBounds, y - waveBounds, outerMin - waveBounds),
+    new THREE.Vector3(outerMax + waveBounds, y + waveBounds, outerMax + waveBounds),
   );
   const basePositions = new Float32Array(positions);
 
