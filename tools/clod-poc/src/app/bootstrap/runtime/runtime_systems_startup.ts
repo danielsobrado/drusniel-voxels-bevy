@@ -34,6 +34,7 @@ import {
 } from "../custom_props_startup.js";
 import { resolvePropPlacementScene } from "../../../props/prop_placements.js";
 import type { CustomPropsSettings, PropPlacementScene } from "../../../props/prop_types.js";
+import { createConstructionController, type ConstructionController } from "../../../construction/index.js";
 
 export type { VegetationStatControllerRefs } from "../../../runtime/vegetation/vegetation_types.js";
 
@@ -75,6 +76,7 @@ export interface RuntimeSystemsStartupResult extends VegetationStartupResult, Wa
   updateLighting: () => void;
   drainVegetationDirtyQueue: () => void;
   customProps: CustomPropsStartupResult | null;
+  constructionController: ConstructionController | null;
 }
 
 export async function runRuntimeSystemsStartup(
@@ -255,6 +257,20 @@ export async function runRuntimeSystemsStartup(
     }
   }
 
+  let constructionController: ConstructionController | null = null;
+  if (searchParams.get("construction") !== "0") {
+    try {
+      constructionController = createConstructionController({
+        scene,
+        camera,
+        rendererDomElement: app.renderer.domElement,
+        worldCells,
+      });
+    } catch (error) {
+      console.error("[construction] failed to initialize", error);
+    }
+  }
+
   return {
     ...vegetation,
     ...waterWeather,
@@ -262,5 +278,6 @@ export async function runRuntimeSystemsStartup(
     updateLighting,
     drainVegetationDirtyQueue,
     customProps,
+    constructionController,
   };
 }
