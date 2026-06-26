@@ -2,11 +2,12 @@ import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffer
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeTreeRingShader } from "./wgsl_modules.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "../trees/tree_config.js";
+import { treeMaterialDensityVector, treeSpeciesMaterialVector } from "../trees/tree_material_bias.js";
 import { treeRingAcceptParams, treeRingLodParams } from "../trees/tree_ring_math.js";
 
 export const TREE_GPU_RING_LOD_COUNT = TREE_LODS.length;
 export const TREE_GPU_RING_GROUP_COUNT = TREE_SPECIES.length * TREE_GPU_RING_LOD_COUNT;
-const PARAM_BYTES = 16 * 18;
+const PARAM_BYTES = 16 * 22;
 const COUNTER_BYTES = TREE_GPU_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
@@ -125,6 +126,10 @@ export function treeGpuRingKey(settings: TreeSettings, worldCells: number): stri
     lod.near, lod.mid, lod.far, lod.radius, lod.band,
     accept.minHeightM, accept.maxHeightM, accept.slopeMinY, accept.minGroundWeight,
     accept.parentCellM, accept.clumpStrength, accept.clumpThreshold,
+    ...accept.materialDensity,
+    ...treeSpeciesMaterialVector(settings, "oak"),
+    ...treeSpeciesMaterialVector(settings, "pine"),
+    ...treeSpeciesMaterialVector(settings, "dead"),
     speciesWeight(settings, "oak"), speciesWeight(settings, "pine"), speciesWeight(settings, "dead"),
     treeGpuRingWorkgroupSize(settings),
   ].join("|");
@@ -180,8 +185,18 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   u32[44] = Math.max(0, Math.floor(params.maxInstancesPerGroup)) >>> 0;
   u32[45] = treeGpuRingGrid(settings) >>> 0;
   u32[46] = settings.seed >>> 0;
+  const density = treeMaterialDensityVector(settings);
+  const oak = treeSpeciesMaterialVector(settings, "oak");
+  const pine = treeSpeciesMaterialVector(settings, "pine");
+  const dead = treeSpeciesMaterialVector(settings, "dead");
+  for (let i = 0; i < 4; i++) {
+    f32[48 + i] = density[i] ?? 1;
+    f32[52 + i] = oak[i] ?? 1;
+    f32[56 + i] = pine[i] ?? 1;
+    f32[60 + i] = dead[i] ?? 1;
+  }
   if (params.frustumPlanes) {
-    for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) f32[48 + i] = params.frustumPlanes[i] ?? 0;
+    for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) f32[64 + i] = params.frustumPlanes[i] ?? 0;
   }
   return scratch;
 }
