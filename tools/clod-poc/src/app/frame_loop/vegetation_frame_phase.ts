@@ -5,6 +5,7 @@ import type { UnderstoryController } from "../../runtime/vegetation/understory_c
 import type { ForestLightingController } from "../../runtime/forest_lighting/forest_lighting_controller.js";
 import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
 import type { PropController } from "../../systems/prop_controller.js";
+import type { DeepOceanSurface } from "../../water/deep_ocean_surface.js";
 import type { DeepOceanMaterialHandle } from "../../water/deep_ocean_material.js";
 import type { WaterController } from "../../runtime/water_weather/water_controller.js";
 import type { WeatherController } from "../../runtime/water_weather/weather_controller.js";
@@ -29,6 +30,7 @@ export interface VegetationFramePhaseInput {
   stoneController: StoneController;
   propController: PropController | null;
   waterController: WaterController;
+  deepOceanSurface: DeepOceanSurface | null;
   deepOceanMaterial: DeepOceanMaterialHandle | null;
   weatherController: WeatherController;
   updateWeatherStats: () => void;
@@ -51,6 +53,7 @@ export function runVegetationFramePhase(input: VegetationFramePhaseInput): void 
   input.stoneController.update(input.ringCenter);
   input.propController?.update(input.camera as THREE.PerspectiveCamera);
   input.waterController.update(Math.min(input.playerDelta, 0.1), input.camera.position);
+  input.deepOceanSurface?.update(input.elapsedSeconds);
   if (input.deepOceanMaterial) {
     input.deepOceanMaterial.setTime(input.elapsedSeconds);
     input.deepOceanMaterial.updateCamera(input.camera.position);
