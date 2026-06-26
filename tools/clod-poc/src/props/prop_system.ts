@@ -102,6 +102,24 @@ export class PropSystem {
     return this.stats;
   }
 
+  getPlacementSceneSnapshot(): PropPlacementScene {
+    const instances = (this.grid?.instances ?? this.deps.placementScene.instances).map((instance) => ({
+      assetId: instance.assetId,
+      position: [...instance.position] as [number, number, number],
+      rotationY: instance.rotationY,
+      scale: instance.scale,
+      seed: instance.seed,
+      variationId: instance.variationId,
+      flags: instance.flags,
+      revision: instance.revision,
+    }));
+    return {
+      schemaVersion: this.deps.placementScene.schemaVersion,
+      sceneId: this.deps.placementScene.sceneId,
+      instances,
+    };
+  }
+
   buildColliderInstances(playerPos: [number, number, number]): PropColliderInstanceInput[] {
     if (!this.grid) return [];
     const out: PropColliderInstanceInput[] = [];
