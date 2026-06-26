@@ -1,14 +1,10 @@
-// Water debug UI helper. Adds a small lil-gui folder for the fake water clipmap:
-// enable toggle, debug render mode, clipmap tint/wireframe, depth-write override,
-// and the CLOD shore-surf preview controls.
-//
-// The existing CLOD "freeze selection" toggle (state.freeze in main.ts) already
-// freezes page selection while water keeps following the camera, because
-// WaterClipmap.update runs every frame independent of the freeze flag. No new
-// freeze framework is added here, per the water spec.
+// Water debug UI helper. Adds lil-gui folders for water debug, shore surf,
+// and river tuning. River generation controls rebuild through URL params because
+// hydrology is built before the renderer starts.
 import type GUI from "lil-gui";
 import { type WaterDebugMode, type WaterVisualConfig, WATER_DEBUG_MODES } from "./waterConfig.js";
 import { DEFAULT_SHORE_SURF_BAND_SETTINGS } from "./waterField.js";
+import { DEFAULT_HYDROLOGY_CONFIG } from "./hydrologyConfig.js";
 
 export interface WaterDebugState {
   enabled: boolean;
@@ -20,6 +16,15 @@ export interface WaterDebugState {
   oceanStartDistance: number;
   oceanFullDepthDistance: number;
   oceanMaxDepth: number;
+  riverSource: "hydrology" | "fake_bodies";
+  riversFallback: boolean;
+  riverMain: boolean;
+  riverTributaries: boolean;
+  riverWidth: number;
+  riverVisibleDepth: number;
+  riverCarveDepth: number;
+  riverFlowSpeed: number;
+  riverFoamStrength: number;
 }
 
 export interface WaterDebugBindings {
@@ -64,7 +69,45 @@ const WATER_MODE_OPTIONS = Object.fromEntries(
   ]),
 ) as Record<string, WaterDebugMode>;
 
+function currentSearchParams(): URLSearchParams {
+  return typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+}
+
+function queryBool(key: string, fallback: boolean): boolean {
+  const raw = currentSearchParams().get(key);
+  if (raw === null) return fallback;
+  return raw === "1" || raw === "true";
+}
+
+function queryNumber(key: string, fallback: number): number {
+  const raw = currentSearchParams().get(key);
+  if (raw === null) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function querySource(fallback: "hydrology" | "fake_bodies"): "hydrology" | "fake_bodies" {
+  const raw = currentSearchParams().get("waterSource");
+  return raw === "fake_bodies" ? "fake_bodies" : raw === "hydrology" ? "hydrology" : fallback;
+}
+
+function reloadWithRiverState(state: WaterDebugState): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("waterSource", state.riverSource);
+  url.searchParams.set("riversFallback", state.riversFallback ? "1" : "0");
+  url.searchParams.set("riverMain", state.riverMain ? "1" : "0");
+  url.searchParams.set("riverTributaries", state.riverTributaries ? "1" : "0");
+  url.searchParams.set("riverWidth", state.riverWidth.toFixed(2));
+  url.searchParams.set("riverVisibleDepth", state.riverVisibleDepth.toFixed(2));
+  url.searchParams.set("riverCarveDepth", state.riverCarveDepth.toFixed(2));
+  url.searchParams.set("riverFlowSpeed", state.riverFlowSpeed.toFixed(2));
+  url.searchParams.set("riverFoamStrength", state.riverFoamStrength.toFixed(2));
+  window.location.assign(url.toString());
+}
+
 export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugState {
+  const riverDefaults = DEFAULT_HYDROLOGY_CONFIG.rivers;
   return {
     enabled: true,
     mode: "final",
@@ -75,6 +118,15 @@ export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugSta
     oceanStartDistance: DEFAULT_SHORE_SURF_BAND_SETTINGS.startDistance,
     oceanFullDepthDistance: DEFAULT_SHORE_SURF_BAND_SETTINGS.fullSurfDistance,
     oceanMaxDepth: DEFAULT_SHORE_SURF_BAND_SETTINGS.maxShallowDepth,
+    riverSource: querySource("hydrology"),
+    riversFallback: queryBool("riversFallback", riverDefaults.guaranteeFallbackRivers),
+    riverMain: queryBool("riverMain", riverDefaults.fallbackMainRiver),
+    riverTributaries: queryBool("riverTributaries", riverDefaults.fallbackTributaries),
+    riverWidth: queryNumber("riverWidth", riverDefaults.widenRadius),
+    riverVisibleDepth: queryNumber("riverVisibleDepth", riverDefaults.visibleDepthM),
+    riverCarveDepth: queryNumber("riverCarveDepth", riverDefaults.carveDepthM),
+    riverFlowSpeed: queryNumber("riverFlowSpeed", riverDefaults.flowSpeedMultiplier),
+    riverFoamStrength: queryNumber("riverFoamStrength", visual.foam.riverStrength),
   };
 }
 
@@ -102,6 +154,18 @@ export function addWaterDebugFolder(
     bindings.onRebuildVisual();
   });
 
+  const rivers = folder.addFolder("rivers");
+  rivers.add(state, "riverSource", { hydrology: "hydrology", "fake bodies": "fake_bodies" }).name("source");
+  rivers.add(state, "riversFallback").name("guarantee rivers");
+  rivers.add(state, "riverMain").name("fallback trunk");
+  rivers.add(state, "riverTributaries").name("fallback tributaries");
+  rivers.add(state, "riverWidth", 0.5, 8, 0.1).name("width / widen");
+  rivers.add(state, "riverVisibleDepth", 0.1, 8, 0.1).name("visible depth");
+  rivers.add(state, "riverCarveDepth", 0.5, 18, 0.25).name("carve depth");
+  rivers.add(state, "riverFlowSpeed", 0.1, 4, 0.05).name("flow speed");
+  rivers.add(state, "riverFoamStrength", 0, 2, 0.01).name("rapids foam");
+  rivers.add({ apply: () => reloadWithRiverState(state) }, "apply").name("apply + rebuild");
+
   const shoreSurf = folder.addFolder("shore surf");
   shoreSurf.add(state, "oceanEnabled").name("enabled").onChange((enabled: boolean) => {
     bindings.onOceanEnabled(enabled);
@@ -119,6 +183,7 @@ export function addWaterDebugFolder(
   return {
     refreshDisplay: () => {
       folder.controllers.forEach((controller) => controller.updateDisplay());
+      rivers.controllers.forEach((controller) => controller.updateDisplay());
       shoreSurf.controllers.forEach((controller) => controller.updateDisplay());
     },
   };
