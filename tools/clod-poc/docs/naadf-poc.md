@@ -7,8 +7,10 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 - Streamed chunk brick + mip summary data model around the camera
 - Conservative AADF-style directional skip metadata
 - Dense near page table + hash fallback for resident chunks
+- Explicit dense / HDDA / compare traversal modes for primary debug rays and sun visibility
+- NanoVDB-style span stepping at chunk/block/voxel scale in the heightfield PoC
 - Far clipmap summary rings for long-distance queries
-- Query API with explicit counters (near table, hash, far clipmap, missing)
+- Query API with explicit counters (near table, hash, far clipmap, missing, HDDA)
 - Camera-relative infinite far shell sampling via `queryTerrainHeight`
 - Canopy coverage flowing through summary chain
 - Sun visibility / terrain occlusion debug rays
@@ -32,6 +34,7 @@ deterministic terrain source (surfaceHeight / macroTerrain)
   -> hash fallback (open-addressing for out-of-table residents)
   -> far clipmap summary tiles (ringed clipmap)
   -> query API (height / primary ray / sun visibility)
+  -> dense or HDDA traversal mode
   -> far shell / canopy shell / shadow debug / ray debug overlays
 ```
 
@@ -48,15 +51,19 @@ Loaded from [`config/naadf_poc.yaml`](../config/naadf_poc.yaml). Key sections:
 | `chunk_bricks` / `mip_summary` | Brick build + mip levels + stored fields |
 | `far_clipmap` | Distance rings and cell sizes |
 | `query` | Ray step limits, LOD bias, sun unknown policy |
+| `traversal` | `dense`, `hdda`, or `compare`; HDDA step budgets and compare epsilon |
 | `far_shell` | Camera-relative shell distances |
 | `debug` | Overlay toggles |
 | `acceptance` | Gate thresholds |
+
+Default traversal remains `dense`. Use `compare` before trusting HDDA changes; compare mode returns the HDDA result plus dense-vs-HDDA mismatch metadata and increments `naadf_hdda_dense_mismatches`.
 
 Enable with `?naadf=1` or any `infinite-naadf-*` scene.
 
 ## Known limitations
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
+- HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
 - TypeScript synchronous builds under frame budgets (no worker offload)
 - Macro terrain fallback still used when summaries are missing (counted, not silent)
 - Sun visibility is debug-only stepping, not a path tracer
