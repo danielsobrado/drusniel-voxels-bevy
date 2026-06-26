@@ -7,6 +7,7 @@ import {
   type GrassSettings,
   type GrassTerrainSite,
 } from "./grass_config.js";
+import { grassTerrainDensity } from "./grass_material_bias.js";
 
 export function hash2(x: number, z: number, seed: number): number {
   let value = seed | 0;
@@ -102,8 +103,9 @@ export function grassMaskForHeightNormal(
   distanceFromCamera = Number.POSITIVE_INFINITY,
 ): number {
   if (height < settings.minHeight || height > settings.maxHeight) return 0;
-  const [grassWeight, rockWeight, , snowWeight] = terrainWeights(height, normalY);
+  const [grassWeight, rockWeight, sandWeight, snowWeight] = terrainWeights(height, normalY);
   if (height < WATER_LEVEL + GRASS_WATER_CLEARANCE || rockWeight >= 0.82 || snowWeight >= 0.55) return 0;
+  const terrainDensity = grassTerrainDensity(settings as GrassSettings, [grassWeight, rockWeight, sandWeight, snowWeight], height);
   const aboveWaterMask = THREE.MathUtils.smoothstep(height, WATER_LEVEL + GRASS_WATER_CLEARANCE, WATER_LEVEL + 3.5);
   const slopeMask = THREE.MathUtils.smoothstep(
     normalY,
@@ -125,7 +127,7 @@ export function grassMaskForHeightNormal(
     * viableMask
     * settings.ring.scruffMinDensity;
   return THREE.MathUtils.clamp(
-    Math.max(grassWeight * viableMask * wetBankThinning, scruff),
+    Math.max(grassWeight * viableMask * wetBankThinning, scruff) * terrainDensity,
     0,
     1,
   );
@@ -142,6 +144,7 @@ export function sampleGrassTerrainSite(
   const normalY = normal[1];
   const weights = terrainWeights(height, normalY);
   const [grassWeight, rockWeight, sandWeight, snowWeight] = weights;
+  const terrainDensity = grassTerrainDensity(settings as GrassSettings, weights, height);
   const waterDepth = Math.max(0, WATER_LEVEL + GRASS_WATER_CLEARANCE - height);
   const aboveWaterMask = THREE.MathUtils.smoothstep(height, WATER_LEVEL + GRASS_WATER_CLEARANCE, WATER_LEVEL + 3.5);
   const slopeMask = THREE.MathUtils.smoothstep(
@@ -164,7 +167,7 @@ export function sampleGrassTerrainSite(
     * viableMask
     * settings.ring.scruffMinDensity;
   const grassMask = THREE.MathUtils.clamp(
-    Math.max(grassWeight * viableMask * wetBankThinning, scruff),
+    Math.max(grassWeight * viableMask * wetBankThinning, scruff) * terrainDensity,
     0,
     1,
   );
