@@ -122,6 +122,7 @@ export function runFrameLoopStartup(
     understoryStats,
     forestLightingStats,
     customProps,
+    constructionController,
   } = input.runtime;
   const deepOceanMeshPresent = deepOceanSurface !== null;
   const { updateInfo } = infoPanel;
@@ -259,5 +260,8 @@ export function runFrameLoopStartup(
       : session.naadfStatsController
         ? { onFarSummaryUpdate: () => { session.naadfStatsController?.updateDisplay(); } }
         : undefined,
+    construction: constructionController
+      ? { update: () => constructionController.update() }
+      : undefined,
   });
 }
