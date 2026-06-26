@@ -19,6 +19,7 @@ import type { ClodPageNode } from "../../types.js";
 import type { ProjectArchiveContents } from "../../project/project_archive.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { Phase0SceneConfig } from "../../phase0/phase0_config.js";
+import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 import borderOceanSceneConfigText from "../../../config/border_ocean_scene.yaml?raw";
 import {
   parseBorderOceanCamString,
@@ -152,6 +153,13 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     camera.position.set(cam.eye[0], cam.eye[1], cam.eye[2]);
     controls.target.set(cam.look[0], cam.look[1], cam.look[2]);
     camera.fov = cam.fov;
+    camera.updateProjectionMatrix();
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (searchParams.get("scene") === RIVER_PARITY_TEST_SCENE) {
+    controls.target.set(worldCells * 0.50, 38, worldCells * 0.50);
+    camera.position.set(worldCells * 0.30, 155, worldCells * 0.86);
+    camera.fov = 48;
     camera.updateProjectionMatrix();
     camera.lookAt(controls.target);
     controls.update();
