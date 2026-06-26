@@ -13,6 +13,14 @@ construction:
     storage_key: drusniel.clod-poc.construction.v1
   ghost:
     opacity: 0.42
+  terrain_conform:
+    enabled: true
+    foundation_categories: [floor]
+    pad_margin_m: 0.35
+    fill_depth_m: 2.5
+    trim_height_m: 1.2
+    falloff_m: 0.12
+    material_slot: 1
   pieces:
     - id: wood-floor-2x2
       label: Wood Floor
