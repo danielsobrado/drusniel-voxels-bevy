@@ -159,6 +159,10 @@ export interface FrameLoopCanopyDeps {
   update: (cameraX: number, cameraZ: number) => void;
 }
 
+export interface FrameLoopConstructionDeps {
+  update: () => void;
+}
+
 export interface ClodFrameLoopDeps {
   render: FrameLoopRenderDeps;
   player: FrameLoopPlayerDeps;
@@ -170,4 +174,5 @@ export interface ClodFrameLoopDeps {
   farSummary?: FrameLoopFarSummaryDeps;
   shadowProxy?: FrameLoopShadowProxyDeps;
   canopy?: FrameLoopCanopyDeps;
+  construction?: FrameLoopConstructionDeps;
 }
