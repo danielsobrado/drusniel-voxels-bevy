@@ -51,6 +51,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private readonly snapIndex: ConstructionSnapIndex;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointerNdc = new THREE.Vector2(0, 0);
+  private readonly centerNdc = new THREE.Vector2(0, 0);
   private readonly ghostMaterial: THREE.MeshBasicMaterial;
   private readonly ghostMesh: THREE.Mesh;
   private readonly placedPieces: PlacedConstructionPiece[] = [];
@@ -131,10 +132,11 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   stats(): ConstructionControllerStats {
+    const selected = this.config.pieces[this.selectedIndex] ?? null;
     return {
       active: this.active,
       snapEnabled: this.snapEnabled,
-      selectedPieceId: this.selectedPiece()?.id ?? null,
+      selectedPieceId: selected?.id ?? null,
       placedPieces: this.placedPieces.length,
       indexedSnapPoints: this.snapIndex.size(),
       currentValid: this.currentCandidate?.valid ?? false,
@@ -210,12 +212,13 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   private selectedPiece(): ConstructionPieceDef {
-    return this.config.pieces[Math.min(this.selectedIndex, this.config.pieces.length - 1)]!;
+    const clampedIndex = Math.min(this.selectedIndex, this.config.pieces.length - 1);
+    return this.config.pieces[clampedIndex]!;
   }
 
   private readAimRay(): THREE.Ray | null {
     if (document.pointerLockElement === this.deps.rendererDomElement) {
-      this.raycaster.setFromCamera({ x: 0, y: 0 }, this.deps.camera);
+      this.raycaster.setFromCamera(this.centerNdc, this.deps.camera);
       return this.raycaster.ray.clone();
     }
     if (!this.pointerInside) return null;
