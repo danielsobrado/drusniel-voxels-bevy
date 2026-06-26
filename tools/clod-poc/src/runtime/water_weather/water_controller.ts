@@ -118,11 +118,25 @@ function readShoreSurfSettings(
   };
 }
 
+function deepOceanClipmapExclusionDistance(
+  searchParams: URLSearchParams,
+  borderCoast?: BorderCoastOceanConfig,
+): number {
+  if (searchParams.get("clipmapBorderWater") === "1") return 0;
+  if (!borderCoast?.enabled || !borderCoast.deepOcean.enabled) return 0;
+  return Math.max(0, borderCoast.coast.oceanStartCells);
+}
+
 export async function createWaterController(deps: WaterControllerDeps): Promise<WaterController> {
   const pageSignaturesBefore = pageMeshSignatures(deps.nodes);
   const field = new WaterField(deps.waterConfig, { surfaceHeight: deps.surfaceHeight }, deps.hydrologySystem, deps.worldCells);
   const shoreSurfSettings = readShoreSurfSettings(deps.searchParams, deps.borderCoastOceanConfig);
+  const clipmapExclusionDistance = deepOceanClipmapExclusionDistance(deps.searchParams, deps.borderCoastOceanConfig);
   field.setShoreSurfBand(shoreSurfSettings);
+  field.setClipmapExclusionBand({
+    enabled: clipmapExclusionDistance > 0,
+    distance: clipmapExclusionDistance,
+  });
   const waterMaterialFactory = deps.isWebGpu
     ? (await import("../../water/waterNodeMaterial.js")).createWaterNodeMaterialImpl
     : createWaterShaderMaterial;
@@ -289,6 +303,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
           clipmapTint: uiState.waterClipmapTint,
           wireframe: uiState.waterWireframe,
           shoreSurf: field.getShoreSurfBand(),
+          clipmapExclusionBand: field.getClipmapExclusionBand(),
           debugModes: { ...WATER_DEBUG_MODES },
           clipmap: {
             levelCount: clipmap.levelCount,
@@ -338,6 +353,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         worldCells,
         worldBounds: { minX: 0, minZ: 0, maxX: worldCells, maxZ: worldCells },
         shoreSurf: field.getShoreSurfBand(),
+        clipmapExclusionBand: field.getClipmapExclusionBand(),
         resolvedLakes: deps.waterConfig.fakeBodies.lakes.map((l) => ({ center: l.center, radius: l.radius, levelOffset: l.levelOffset })),
         resolvedRivers: deps.waterConfig.fakeBodies.rivers.map((r) => r.points),
         lakeCenterSample: lakeCenterSample ? {
