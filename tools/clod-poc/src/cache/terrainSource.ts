@@ -3,7 +3,7 @@ import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_confi
 import type { WaterConfig } from "../water/waterConfig.js";
 import type { ClodPagesConfig } from "../config.js";
 import type { SerializedHydrologyTerrain } from "../clod_worker_protocol.js";
-import type { VoxelEditSnapshot } from "../terrain/terrain.js";
+import type { DigEdit, VoxelEditSnapshot } from "../terrain/terrain.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
@@ -33,6 +33,28 @@ async function hashFloat32Array(arr: Float32Array): Promise<string> {
   const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
   const copy = bytes.slice();
   return sha256Hex(copy.buffer);
+}
+
+function roundCoord(v: number): number {
+  return Math.round(v * 1000) / 1000;
+}
+
+/** Stable dig-edit ordering for cache/debug callers that still key on brush metadata. */
+export function canonicalizeDigEdits(edits: readonly DigEdit[]) {
+  return edits
+    .map((e) => ({
+      x: roundCoord(e.x),
+      y: roundCoord(e.y),
+      z: roundCoord(e.z),
+      r: roundCoord(e.r),
+      shape: e.shape ?? "sphere",
+      op: e.op ?? "remove",
+      material: e.material ?? 0,
+      height: e.height ?? null,
+      strength: e.strength ?? null,
+      falloff: e.falloff ?? null,
+    }))
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 
 function canonicalizeVoxelEdits(snapshot: VoxelEditSnapshot) {

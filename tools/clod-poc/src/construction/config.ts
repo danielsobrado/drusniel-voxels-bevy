@@ -24,7 +24,7 @@ const DEFAULT_CONFIG: ConstructionConfig = {
     opacity: 0.42,
   },
   terrainConform: {
-    enabled: true,
+    enabled: false,
     foundationCategories: ["floor"],
     padMarginM: 0.35,
     fillDepthM: 2.5,

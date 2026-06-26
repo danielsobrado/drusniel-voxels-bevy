@@ -4,6 +4,7 @@ import {
   ALLOWED_PAGE_SOURCE_SECTIONS,
   assertPageSourceTerrainOnly,
   buildLod0PageSource,
+  expandChunkNeighborRing,
   validatePageSourcePurity,
   type PageSourceSection,
 } from "./source_mesh.js";
@@ -65,5 +66,9 @@ describe("page source purity", () => {
   it("buildLod0PageSource stays terrain-only", () => {
     const page = buildLod0PageSource(0, 0, makeConfig(), { cellsX: 8, cellsZ: 8 });
     expect(page.mesh.indices.length).toBeGreaterThan(0);
+  });
+
+  it("expandChunkNeighborRing includes the 3x3 neighborhood", () => {
+    expect(expandChunkNeighborRing([5], 4).sort((a, b) => a - b)).toEqual([0, 1, 2, 4, 5, 6, 8, 9, 10]);
   });
 });

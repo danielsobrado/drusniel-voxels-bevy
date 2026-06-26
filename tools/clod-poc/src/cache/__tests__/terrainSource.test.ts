@@ -86,12 +86,18 @@ describe("staged import hash", () => {
   it("changes when edits differ but edit count matches", async () => {
     const manifest = {
       worldSize: 8,
-      terrainEdits: [{ x: 1, y: 0, z: 1, r: 2 }],
+      voxelTerrainEdits: {
+        revision: 1,
+        deltas: [{ x: 1, y: 0, z: 1, density: -1, revision: 1 }],
+      },
       config: cfg,
     };
     const other = {
       ...manifest,
-      terrainEdits: [{ x: 9, y: 0, z: 9, r: 2 }],
+      voxelTerrainEdits: {
+        revision: 1,
+        deltas: [{ x: 9, y: 0, z: 9, density: -1, revision: 1 }],
+      },
     };
     const a = await buildStagedImportHash(manifest);
     const b = await buildStagedImportHash(other);

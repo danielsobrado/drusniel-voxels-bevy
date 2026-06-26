@@ -180,7 +180,24 @@ export function dirtyPageChunkIndices(
       }
     }
   }
-  return out;
+  return expandChunkNeighborRing(out, P);
+}
+
+/** Re-mesh the 3x3 neighborhood around every dirty chunk so shared border/corner vertices
+ *  are extracted from the same density field. Partial remesh of only the dirty chunk leaves
+ *  stale neighbor normals that weld within epsilon but fail the normal-dot gate. */
+export function expandChunkNeighborRing(indices: readonly number[], chunksPerPage: number): number[] {
+  const P = chunksPerPage;
+  const out = new Set(indices);
+  for (const li of indices) {
+    const dx = li % P, dz = (li / P) | 0;
+    for (let ndz = dz - 1; ndz <= dz + 1; ndz++) {
+      for (let ndx = dx - 1; ndx <= dx + 1; ndx++) {
+        if (ndx >= 0 && ndx < P && ndz >= 0 && ndz < P) out.add(ndz * P + ndx);
+      }
+    }
+  }
+  return [...out];
 }
 
 /**

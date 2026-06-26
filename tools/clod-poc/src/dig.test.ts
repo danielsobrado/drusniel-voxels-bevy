@@ -274,7 +274,7 @@ describe("rebuildDirtyPages", () => {
     const result = buildWorld(2, 2, cfg);
     const node = result.nodesByLevel.get(0)!.find((n) => n.id === "L0:0,0")!;
 
-    // dig deep inside chunk (0,0) so its 6-cell reach can't touch the other 3 chunks
+    // dig deep inside chunk (0,0); seam neighbors are re-meshed too so border welds stay valid
     const x = 6, z = 6, r = 2;
     const y = surfaceHeight(x, z) - 4;
     addDigEdit({ x, y, z, r });
@@ -283,7 +283,7 @@ describe("rebuildDirtyPages", () => {
 
     const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, buildNodeIndex(result));
     expect(lod0.chunksTotal).toBe(cfg.page.chunks_per_page ** 2); // 4 chunks in the page
-    expect(lod0.chunksRemeshed).toBe(1); // only chunk (0,0)
+    expect(lod0.chunksRemeshed).toBe(cfg.page.chunks_per_page ** 2); // dirty chunk + seam neighbors
 
     // the per-chunk welded page must equal a from-scratch full extract of the same page
     const full = buildLod0PageSource(0, 0, cfg, world);

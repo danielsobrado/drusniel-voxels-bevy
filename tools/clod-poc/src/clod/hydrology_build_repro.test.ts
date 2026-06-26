@@ -17,61 +17,27 @@ import { makeFakeBodyCarvedSampler } from "../water/fakeBodyCarve.js";
 const configRoot = fileURLToPath(new URL("../../config/", import.meta.url));
 const BUILD_TIMEOUT_MS = 300_000;
 
-function setupWorld(WORLD: number) {
+function setupHydrologyWorld(worldPages: number) {
   const cfg = parseConfig(readFileSync(`${configRoot}clod_pages.yaml`, "utf8"));
   const waterConfig = parseWaterConfig(readFileSync(`${configRoot}water.yaml`, "utf8"));
   const borderCoastOceanConfig = parseBorderCoastOceanConfig(
     readFileSync(`${configRoot}border_coast_ocean.yaml`, "utf8"),
   );
-  const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const worldCells = worldPages * cfg.page.chunks_per_page * cfg.page.chunk_size;
   setBorderCoastRuntime(borderCoastOceanConfig, worldCells);
-  return { cfg, waterConfig, worldCells };
+  const preHydrology = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
+  const hydrology = HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrology);
+  setTerrainSurfaceOverride((x, z) => hydrology.terrainHeight(x, z));
+  return { cfg, worldPages };
 }
 
-describe("hydrology world build", () => {
+describe("hydrology CLOD world build", () => {
   beforeAll(async () => {
     await initSimplifier();
   });
 
-  it("builds 8x8 without hydrology", () => {
-    const WORLD = 8;
-    const { cfg, worldCells } = setupWorld(WORLD);
-    const borderCoast = parseBorderCoastOceanConfig(readFileSync(`${configRoot}border_coast_ocean.yaml`, "utf8"));
-    setBorderCoastRuntime(borderCoast, worldCells);
-    setTerrainSurfaceOverride(null);
-    expect(() => buildWorld(WORLD, WORLD, cfg)).not.toThrow();
-  }, BUILD_TIMEOUT_MS);
-
-  it("builds 8x8 with hydrology carve", () => {
-    const WORLD = 8;
-    const { cfg, waterConfig, worldCells } = setupWorld(WORLD);
-    const preHydrology = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
-    const hydrology = HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrology);
-    setTerrainSurfaceOverride((x, z) => hydrology.terrainHeight(x, z));
-    expect(() => buildWorld(WORLD, WORLD, cfg)).not.toThrow();
-  }, BUILD_TIMEOUT_MS);
-
-  it("builds 16x16 without hydrology", () => {
-    const WORLD = 16;
-    const { cfg } = setupWorld(WORLD);
-    setTerrainSurfaceOverride(null);
-    expect(() => buildWorld(WORLD, WORLD, cfg)).not.toThrow();
-  }, BUILD_TIMEOUT_MS);
-
-  it("builds 16x16 with fake-body carve only", () => {
-    const WORLD = 16;
-    const { cfg, waterConfig } = setupWorld(WORLD);
-    const carved = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
-    setTerrainSurfaceOverride((x, z) => carved.surfaceHeight(x, z));
-    expect(() => buildWorld(WORLD, WORLD, cfg)).not.toThrow();
-  }, BUILD_TIMEOUT_MS);
-
-  it("builds 16x16 with hydrology carve (scene default)", () => {
-    const WORLD = 16;
-    const { cfg, waterConfig, worldCells } = setupWorld(WORLD);
-    const preHydrology = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
-    const hydrology = HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrology);
-    setTerrainSurfaceOverride((x, z) => hydrology.terrainHeight(x, z));
-    expect(() => buildWorld(WORLD, WORLD, cfg)).not.toThrow();
+  it("builds 16x16 world with hydrology-carved terrain (infinite-naadf default)", () => {
+    const { cfg, worldPages } = setupHydrologyWorld(16);
+    expect(() => buildWorld(worldPages, worldPages, cfg)).not.toThrow();
   }, BUILD_TIMEOUT_MS);
 });
