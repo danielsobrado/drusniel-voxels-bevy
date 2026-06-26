@@ -35,6 +35,8 @@ import {
 import { resolvePropPlacementScene } from "../../../props/prop_placements.js";
 import type { CustomPropsSettings, PropPlacementScene } from "../../../props/prop_types.js";
 import { createConstructionController, type ConstructionController } from "../../../construction/index.js";
+import type { VoxelProjectArchiveContents } from "../../../project/voxel_project_archive.js";
+import { projectPropsToPropPlacementScene } from "../../../project/project_props.js";
 
 export type { VegetationStatControllerRefs } from "../../../runtime/vegetation/vegetation_types.js";
 
@@ -56,6 +58,7 @@ export interface RuntimeSystemsStartupInput {
   borderCoastOceanConfig: BorderCoastOceanConfig;
   customPropsConfig: CustomPropsSettings;
   propPlacementScenes: Record<string, PropPlacementScene>;
+  stagedImport: VoxelProjectArchiveContents | null;
   queryGrassRingGrid: number | null;
   queryGrassRingCell: number | null;
   isWebGpu: boolean;
@@ -100,6 +103,7 @@ export async function runRuntimeSystemsStartup(
     borderCoastOceanConfig,
     customPropsConfig,
     propPlacementScenes,
+    stagedImport,
     queryGrassRingGrid,
     queryGrassRingCell,
     isWebGpu,
@@ -234,15 +238,17 @@ export async function runRuntimeSystemsStartup(
     });
   };
 
-  const customPropsEnabled = resolveCustomPropsEnabled(searchParams, customPropsConfig);
+  const importedProps = stagedImport?.manifest.props ?? [];
+  const hasImportedProps = importedProps.length > 0;
+  const customPropsEnabled = searchParams.get("customProps") === "0"
+    ? false
+    : hasImportedProps || resolveCustomPropsEnabled(searchParams, customPropsConfig);
   let customProps: CustomPropsStartupResult | null = null;
   if (customPropsEnabled) {
     try {
-      const placementScene = resolvePropPlacementScene(
-        searchParams,
-        propPlacementScenes,
-        propPlacementScenes.smoke!,
-      );
+      const placementScene = hasImportedProps
+        ? projectPropsToPropPlacementScene(importedProps, "archive")
+        : resolvePropPlacementScene(searchParams, propPlacementScenes, propPlacementScenes.smoke!);
       customProps = await runCustomPropsStartup({
         scene,
         camera,
