@@ -13,6 +13,8 @@ import { publishBorderOceanAcceptanceCounters } from "../debug/border_ocean_scen
 import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
 import { publishFarShellMetricsToCounters } from "../long-view/farShellMetrics.js";
 import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
+import { resolveStreamingOwnership } from "../streaming/streaming_ownership.js";
+import { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
 
 const PHASE0_P95_WINDOW = 120;
 
@@ -55,6 +57,23 @@ export interface LongViewFrameDiagnosticsDeps {
 
 export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDeps): () => void {
   const phase0FrameMsBuffer: number[] = [];
+  const ownership = resolveStreamingOwnership({
+    streaming: deps.phase0Streaming,
+    targetVisibleM: deps.phase0TargetVisibleM,
+    targetFutureVisibleM: deps.phase0Config.phase0.target_future_visible_m,
+    streamingScene: deps.queryScene?.startsWith("infinite-") ?? false,
+  });
+  const ownershipRuntime = new TerrainOwnershipRuntime(ownership, {
+    live: {
+      chunkSizeM: deps.cfg.page.chunk_size,
+      hysteresisM: deps.cfg.page.chunk_size * 2,
+    },
+    visualPages: {
+      pageSizeM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
+      maxLevel: deps.maxTerrainLevel,
+      hysteresisM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
+    },
+  });
 
   return () => {
     const hooks = deps.getHooks();
@@ -173,6 +192,14 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     s.counters["streamer_simulated_required_pages"] = streamingReport.requiredPageCount;
     s.counters["streamer_simulated_missing_chunks"] = streamingReport.missingChunkCount;
     s.counters["streamer_simulated_missing_pages"] = streamingReport.missingPageCount;
+
+    const ownershipSnapshot = ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
+    s.counters["streamer_live_required_chunks"] = ownershipSnapshot.live.required.length;
+    s.counters["streamer_live_loaded_chunks"] = ownershipSnapshot.live.loaded.length;
+    s.counters["streamer_visual_required_pages"] = ownershipSnapshot.visualPages.required.length;
+    s.counters["streamer_visual_loaded_pages"] = ownershipSnapshot.visualPages.loaded.length;
+    s.counters["streamer_far_shell_inner_m"] = ownershipSnapshot.farShell.innerRadiusM;
+    s.counters["streamer_far_shell_outer_m"] = ownershipSnapshot.farShell.outerRadiusM;
 
     const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in s.counters));
     window.__drusnielPhase0Report = {
