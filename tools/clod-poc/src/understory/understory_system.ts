@@ -45,8 +45,9 @@ export interface UnderstorySystemOptions {
   gpuDevice?: GPUDevice | null;
   gpuBackend?: UnderstoryWebGpuBackendAccess | null;
   supportsGpu?: boolean;
-  /** Hydrology water-surface data (R=waterY, G=wetMask, B=carvedBed). When set, GPU understory uses carved-bed height in flat areas and rejects water bodies. */
+  /** Hydrology water-surface data (R=waterY, G=wetMask, B=carvedBed). When set, GPU understory uses carved-bed height and rejects water bodies. */
   hydrologyData?: UnderstoryHydrologyData | null;
+  hydrologyWaterTexture?: THREE.Texture | null;
 }
 
 export function understoryUsesGpuRingDraw(settings: UnderstorySettings): boolean {
@@ -142,6 +143,7 @@ export class UnderstorySystem {
   private lastGpuValidationSignature = "";
   private readonly frustumPlaneScratch = new Float32Array(24);
   private readonly hydrologyData: UnderstoryHydrologyData | null;
+  private readonly hydrologyWaterTexture: THREE.Texture | null;
 
   constructor(options: UnderstorySystemOptions) {
     this.scene = options.scene;
@@ -155,6 +157,7 @@ export class UnderstorySystem {
     this.gpuBackend = options.gpuBackend ?? null;
     this.supportsGpu = options.supportsGpu ?? !!this.gpuDevice;
     this.hydrologyData = options.hydrologyData ?? null;
+    this.hydrologyWaterTexture = options.hydrologyWaterTexture ?? null;
     this.gpuRingUnsupportedReason = this.gpuDevice
       ? understoryGpuRingComputeUnsupportedReason(this.gpuDevice)
       : null;
@@ -349,7 +352,9 @@ export class UnderstorySystem {
 
     this.clearGpuRingDraw();
     this.gpuRingKey = key;
-    this.gpuRingDraw = createGpuRingDrawResources(this.settings, this.worldCells, this.gpuBackend);
+    this.gpuRingDraw = createGpuRingDrawResources(
+      this.settings, this.worldCells, this.gpuBackend, undefined, this.hydrologyData, this.hydrologyWaterTexture,
+    );
     for (const mesh of this.gpuRingDraw.meshes) {
       mesh.visible = false;
       this.root.add(mesh);

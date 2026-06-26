@@ -38,7 +38,6 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
   root.innerHTML = `
     <section class="clod-overlay-panel" aria-live="polite">
       <header>
-        <span class="clod-overlay-kicker">CLOD Runtime</span>
         <strong class="clod-overlay-world">world --</strong>
       </header>
       <div class="clod-overlay-meters"></div>

@@ -1,10 +1,10 @@
 trees:
   enabled: true
   seed: 7331
-  distance_m: 220
+  distance_m: 620
   refresh_distance_m: 16
-  max_new_patches_per_frame: 1
-  max_instances: 2500
+  max_new_patches_per_frame: 2
+  max_instances: 9000
 
   gpu:
     enabled: false
@@ -20,18 +20,18 @@ trees:
     debug_validate_against_cpu: false
 
   placement:
-    spacing_m: 14
-    jitter: 0.42
-    slope_min_y: 0.78
-    min_height_m: 12
-    max_height_m: 48
-    min_ground_weight: 0.2
-    min_spacing_m: 8
+    spacing_m: 5.5
+    jitter: 0.72
+    slope_min_y: 0.64
+    min_height_m: 10
+    max_height_m: 58
+    min_ground_weight: 0.14
+    min_spacing_m: 3.4
 
   lod:
-    near_fraction: 0.28
-    mid_fraction: 0.52
-    far_fraction: 0.78
+    near_fraction: 0.042
+    mid_fraction: 0.242
+    far_fraction: 0.742
     impostor_fraction: 1.0
     hysteresis_m: 8
     crossfade_enabled: true
@@ -39,11 +39,9 @@ trees:
     dither_enabled: true
     shadows_max_lod: near
     budgets:
-      # Raised for procedural grammar trees (real leaf/needle meshes vs alpha
-      # cards). See docs/plans/vegetation-grammar-port-plan.md §3.3.
-      near_max_vertices: 30000
-      mid_max_vertices: 13000
-      far_max_vertices: 6500
+      near_max_vertices: 60000
+      mid_max_vertices: 22000
+      far_max_vertices: 9000
       impostor_max_vertices: 240
 
   impostors:
@@ -75,9 +73,9 @@ trees:
   ecology:
     enabled: true
     density:
-      base_density: 1.0
+      base_density: 1.2
       forest_noise_scale_m: 96
-      forest_noise_strength: 0.85
+      forest_noise_strength: 0.9
       clearing_noise_scale_m: 180
       clearing_threshold: 0.68
       clearing_softness: 0.18
@@ -86,13 +84,34 @@ trees:
       lowland_height_m: 16
       highland_height_m: 42
       height_fade_m: 8
-      slope_fade_start_y: 0.72
-      slope_fade_end_y: 0.92
-      material_weight_power: 1.4
+      slope_fade_start_y: 0.62
+      slope_fade_end_y: 0.9
+      material_weight_power: 1.35
+    material_bias:
+      grass:
+        density: 1.08
+        oak: 1.22
+        pine: 0.86
+        dead: 0.52
+      rock:
+        density: 0.46
+        oak: 0.35
+        pine: 0.96
+        dead: 1.55
+      sand:
+        density: 0.55
+        oak: 0.72
+        pine: 0.45
+        dead: 0.68
+      snow:
+        density: 0.08
+        oak: 0.04
+        pine: 0.30
+        dead: 1.45
     clustering:
-      cluster_scale_m: 42
-      cluster_strength: 0.75
-      cluster_threshold: 0.42
+      cluster_scale_m: 26
+      cluster_strength: 0.82
+      cluster_threshold: 0.36
       min_spacing_jitter: 0.35
     age:
       young_probability: 0.24
@@ -127,9 +146,9 @@ trees:
     texture_atlas_rows: 2
     debug_show_alpha_cards: false
     oak:
-      card_count_near: 64
-      card_count_mid: 28
-      card_count_far: 4
+      card_count_near: 96
+      card_count_mid: 44
+      card_count_far: 8
       card_width_m: 1.35
       card_height_m: 0.92
       card_size_variation: 0.35
@@ -140,9 +159,9 @@ trees:
       lobe_count: 7
       cutout_roundness: 0.72
     pine:
-      card_count_near: 56
-      card_count_mid: 24
-      card_count_far: 4
+      card_count_near: 88
+      card_count_mid: 38
+      card_count_far: 8
       card_width_m: 1.05
       card_height_m: 1.35
       card_size_variation: 0.28
@@ -156,18 +175,18 @@ trees:
   species:
     oak:
       enabled: true
-      weight: 0.55
-      min_height_m: 12
-      max_height_m: 34
-      trunk_height_m: 4.5
-      trunk_radius_m: 0.35
-      crown_radius_m: 2.8
+      weight: 0.52
+      min_height_m: 10
+      max_height_m: 42
+      trunk_height_m: 8.0
+      trunk_radius_m: 0.36
+      crown_radius_m: 4.2
       morphology:
         trunk_bend: 0.18
         trunk_taper: 0.62
-        branch_levels: 2
-        primary_branch_count: 7
-        secondary_branch_count: 2
+        branch_levels: 3
+        primary_branch_count: 8
+        secondary_branch_count: 3
         branch_spread: 0.85
         branch_up_sweep: 0.42
         branch_length: 2.4
@@ -177,12 +196,12 @@ trees:
         leaf_card_count: 44
     pine:
       enabled: true
-      weight: 0.35
-      min_height_m: 18
-      max_height_m: 48
-      trunk_height_m: 6.5
-      trunk_radius_m: 0.28
-      crown_radius_m: 2.4
+      weight: 0.36
+      min_height_m: 14
+      max_height_m: 58
+      trunk_height_m: 9.5
+      trunk_radius_m: 0.30
+      crown_radius_m: 3.1
       morphology:
         trunk_bend: 0.08
         trunk_taper: 0.42
@@ -198,18 +217,18 @@ trees:
         leaf_card_count: 36
     dead:
       enabled: true
-      weight: 0.10
-      min_height_m: 18
-      max_height_m: 46
-      trunk_height_m: 5.2
-      trunk_radius_m: 0.25
+      weight: 0.12
+      min_height_m: 14
+      max_height_m: 58
+      trunk_height_m: 8.0
+      trunk_radius_m: 0.27
       crown_radius_m: 0.0
       morphology:
         trunk_bend: 0.26
         trunk_taper: 0.58
-        branch_levels: 1
+        branch_levels: 2
         primary_branch_count: 5
-        secondary_branch_count: 0
+        secondary_branch_count: 1
         branch_spread: 0.9
         branch_up_sweep: 0.18
         branch_length: 1.9

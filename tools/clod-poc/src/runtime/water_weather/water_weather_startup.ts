@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import type { EnvironmentLighting } from "../../environment/environment.js";
+import type { BorderCoastOceanConfig } from "../../terrain/border_coast_config.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { HydrologySystem } from "../../water/index.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
@@ -12,6 +13,7 @@ export interface WaterWeatherStartupInput {
   camera: THREE.PerspectiveCamera;
   state: ClodAppState;
   waterConfig: WaterConfig;
+  borderCoastOceanConfig: BorderCoastOceanConfig;
   worldCells: number;
   hydrologySystem: HydrologySystem | null;
   searchParams: URLSearchParams;

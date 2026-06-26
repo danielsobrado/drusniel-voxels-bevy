@@ -1,11 +1,63 @@
 // LOD0 page source — built by WELDING same-resolution chunk meshes, never re-extracted.
 
-import { PageMesh, PageFootprint, ClodBuildError } from "../types.js";
+import { PageMesh, PageFootprint, ClodBuildError, triangleCount } from "../types.js";
 import { ClodPagesConfig } from "../config.js";
 import { meshChunk, WorldBounds } from "../terrain/terrain.js";
 import { weldVertices, WeldReport } from "./weld.js";
 import { filterPageSourceSections } from "./pageSource.js";
-import type { PageSourceSection } from "./pageSourceSections.js";
+import type { PageSourceSection as PageSourceMeshSection } from "./pageSourceSections.js";
+
+/** Sections that may appear in render meshes but must never enter the CLOD page source path. */
+export type PageSourceSection =
+  | "terrain_main"
+  | "water"
+  | "surf"
+  | "deep_ocean"
+  | "debug"
+  | "props";
+
+export const ALLOWED_PAGE_SOURCE_SECTIONS: ReadonlySet<PageSourceSection> = new Set(["terrain_main"]);
+
+export const PAGE_SOURCE_SECTION: PageSourceSection = "terrain_main";
+
+export interface PageSourcePurityReport {
+  terrainTriangles: number;
+  excludedTriangles: number;
+  forbiddenSections: PageSourceSection[];
+}
+
+export function validatePageSourcePurity(
+  meshes: readonly PageMesh[],
+  sections: readonly PageSourceSection[],
+): PageSourcePurityReport {
+  let terrainTriangles = 0;
+  let excludedTriangles = 0;
+  const forbidden = new Set<PageSourceSection>();
+  for (let i = 0; i < meshes.length; i++) {
+    const section = sections[i] ?? PAGE_SOURCE_SECTION;
+    const tris = triangleCount(meshes[i]);
+    if (ALLOWED_PAGE_SOURCE_SECTIONS.has(section)) {
+      terrainTriangles += tris;
+    } else {
+      excludedTriangles += tris;
+      forbidden.add(section);
+    }
+  }
+  return {
+    terrainTriangles,
+    excludedTriangles,
+    forbiddenSections: [...forbidden],
+  };
+}
+
+export function assertPageSourceTerrainOnly(report: PageSourcePurityReport): void {
+  if (report.excludedTriangles > 0 || report.forbiddenSections.length > 0) {
+    throw new ClodBuildError(
+      "ForbiddenPageSourceSection",
+      `page source contains ${report.excludedTriangles} triangles from forbidden sections: ${report.forbiddenSections.join(", ")}`,
+    );
+  }
+}
 
 export interface PageSource {
   mesh: PageMesh;
@@ -30,16 +82,21 @@ export function buildLod0PageSource(
   const S = cfg.page.chunk_size;
 
   const chunks: PageMesh[] = [];
+  const chunkSections: PageSourceSection[] = [];
   for (let dz = 0; dz < P; dz++) {
     for (let dx = 0; dx < P; dx++) {
       chunks.push(meshChunk(pageX * P + dx, pageZ * P + dz, cfg, world));
+      chunkSections.push(PAGE_SOURCE_SECTION);
     }
   }
   if (chunks.length !== P * P) {
     throw new ClodBuildError("PageIncomplete", `expected ${P * P} chunks, got ${chunks.length}`);
   }
 
-  const sections: PageSourceSection[] = chunks.map((mesh, index) => ({
+  const purity = validatePageSourcePurity(chunks, chunkSections);
+  assertPageSourceTerrainOnly(purity);
+
+  const sections: PageSourceMeshSection[] = chunks.map((mesh, index) => ({
     kind: "mainTerrain",
     terrainClass: "inland",
     positionSource: "extracted",
@@ -97,7 +154,24 @@ export function dirtyPageChunkIndices(
       }
     }
   }
-  return out;
+  return expandChunkNeighborRing(out, P);
+}
+
+/** Re-mesh the 3x3 neighborhood around every dirty chunk so shared border/corner vertices
+ *  are extracted from the same density field. Partial remesh of only the dirty chunk leaves
+ *  stale neighbor normals that weld within epsilon but fail the normal-dot gate. */
+export function expandChunkNeighborRing(indices: readonly number[], chunksPerPage: number): number[] {
+  const P = chunksPerPage;
+  const out = new Set(indices);
+  for (const li of indices) {
+    const dx = li % P, dz = (li / P) | 0;
+    for (let ndz = dz - 1; ndz <= dz + 1; ndz++) {
+      for (let ndx = dx - 1; ndx <= dx + 1; ndx++) {
+        if (ndx >= 0 && ndx < P && ndz >= 0 && ndz < P) out.add(ndz * P + ndx);
+      }
+    }
+  }
+  return [...out];
 }
 
 /**

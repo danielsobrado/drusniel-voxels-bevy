@@ -1,5 +1,6 @@
 import type { ClodPagesConfig } from "../../config.js";
-import type { ProjectSessionState } from "../../project/project_archive.js";
+import type { ProjectSessionState } from "../../project/voxel_project_archive.js";
+import { FAR_SHELL_DEFAULTS } from "../clod_constants.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
 export interface ClodSliceState {
@@ -30,6 +31,15 @@ export interface ClodSliceState {
   farShellRadiusFactor: number;
   farShellHeightBias: number;
   farShellHeightDrop: number;
+
+  longViewInfiniteShellEnabled: boolean;
+  longViewInfiniteShellWireframe: boolean;
+  longViewShowShellRings: boolean;
+  longViewShowMissingSummaryFallback: boolean;
+  longViewShowFarSummaryTiles: boolean;
+  longViewFreezeStreamCenter: boolean;
+  longViewForceMissingTiles: boolean;
+  longViewRebuildBudget: number;
 }
 
 const CLOD_ARCHIVE_KEYS = [
@@ -71,10 +81,19 @@ export function createClodSliceState(input: {
     bubbleRadius: input.cfg.near_field.radius_chunks * input.cfg.page.chunk_size,
     tintBubble: true,
     profileEnabled: input.profileEnabled,
-    farShellEnabled: input.queryFarShell || input.isLongView,
-    farShellRadiusFactor: 1.5,
-    farShellHeightBias: 0.6,
-    farShellHeightDrop: 2,
+    farShellEnabled: FAR_SHELL_DEFAULTS.enabled,
+    farShellRadiusFactor: FAR_SHELL_DEFAULTS.radiusFactor,
+    farShellHeightBias: FAR_SHELL_DEFAULTS.heightBias,
+    farShellHeightDrop: FAR_SHELL_DEFAULTS.heightDrop,
+
+    longViewInfiniteShellEnabled: true,
+    longViewInfiniteShellWireframe: false,
+    longViewShowShellRings: false,
+    longViewShowMissingSummaryFallback: false,
+    longViewShowFarSummaryTiles: false,
+    longViewFreezeStreamCenter: false,
+    longViewForceMissingTiles: false,
+    longViewRebuildBudget: 4,
   };
 }
 

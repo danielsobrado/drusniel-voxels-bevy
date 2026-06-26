@@ -240,21 +240,21 @@ describe("far summary cache", () => {
       cache.requestTiles(requests, 0, 0);
       cache.buildSomeTiles(flatSampler, 0, 0);
 
-      // Frame 0: budget exhausted — no tiles committed
+      // Frame 0: budget exhausted — no tiles committed.
+      // Brand-new tiles (no samples) stay 'requested', not 'stale'.
       let stats = cache.getStats();
       expect(stats.tilesCommittedThisFrame).toBe(0);
-      // Tiles should be stale (pre-build state was 'requested', restored to 'stale')
-      expect(stats.staleTiles).toBeGreaterThan(0);
-      expect(stats.requestedTiles).toBe(0);
+      expect(stats.staleTiles).toBe(0);
+      expect(stats.requestedTiles).toBeGreaterThan(0);
       expect(stats.readyTiles).toBe(0);
 
-      // Frame 1: still no commit budget — same tiles should be stale again (retried)
+      // Frame 1: still no commit budget — tiles built again, still 'requested'.
       cache.requestTiles(requests, 1, 16);
       cache.buildSomeTiles(flatSampler, 1, 16);
       stats = cache.getStats();
       expect(stats.tilesBuiltThisFrame).toBeGreaterThan(0);
       expect(stats.tilesCommittedThisFrame).toBe(0);
-      expect(stats.staleTiles).toBeGreaterThan(0);
+      expect(stats.requestedTiles).toBeGreaterThan(0);
 
       // Frame 2: now allow commits
       config.stream.maxTileCommitsPerFrame = 500;

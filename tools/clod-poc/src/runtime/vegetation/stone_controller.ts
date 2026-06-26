@@ -4,6 +4,7 @@ import { STONE_CLASSES, type StoneClass } from "../../stones/stone_config.js";
 import type { StoneSettings } from "../../stones/stone_config.js";
 import { StoneSystem, type StoneLighting, type StoneStats } from "../../stones/stone_instances.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
+import type { GrassHydrologyData } from "../../gpu/grass_ring_compute.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
 
 export interface StoneControllerUiState {
@@ -24,6 +25,7 @@ export interface StoneControllerDeps {
   getUiState: () => StoneControllerUiState;
   getLighting: () => StoneLighting;
   hydrologyWaterTexture: THREE.Texture | null;
+  hydrologyGpuData: GrassHydrologyData | null;
   gpuDevice: GPUDevice | null;
   gpuBackend: GrassWebGpuBackendAccess | null;
   onScatterStats: () => void;
@@ -69,6 +71,7 @@ export function createStoneController(deps: StoneControllerDeps): StoneControlle
     settings: makeSettings(),
     lighting: deps.getLighting(),
     hydrologyWaterTexture: deps.hydrologyWaterTexture,
+    hydrologyGpuData: deps.hydrologyGpuData,
     gpuDevice: deps.gpuDevice,
     gpuBackend: deps.gpuBackend,
     onStats: () => deps.onScatterStats(),

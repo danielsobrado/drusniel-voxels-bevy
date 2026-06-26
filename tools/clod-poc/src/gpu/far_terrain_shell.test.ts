@@ -52,4 +52,69 @@ describe("far terrain shell — horizon skirt around the world", () => {
     }
     expect(beyond).toBeGreaterThan(0);
   });
+
+  it("keeps TSL far-shell material when sun shadows are enabled unless debug Lambert is requested", () => {
+    const withShadows = buildFarTerrainShell(summary, lighting, {
+      gridRes: 32,
+      receiveSunShadows: true,
+      useDebugLambertReceiver: false,
+    });
+    const withShadowsMaterial = Array.isArray(withShadows.mesh.material)
+      ? withShadows.mesh.material[0]!
+      : withShadows.mesh.material;
+    expect(withShadowsMaterial.type).not.toBe("MeshLambertMaterial");
+    expect(withShadows.mesh.receiveShadow).toBe(true);
+
+    const debugLambert = buildFarTerrainShell(summary, lighting, {
+      gridRes: 32,
+      receiveSunShadows: true,
+      useDebugLambertReceiver: true,
+    });
+    const debugLambertMaterial = Array.isArray(debugLambert.mesh.material)
+      ? debugLambert.mesh.material[0]!
+      : debugLambert.mesh.material;
+    expect(debugLambertMaterial.type).toBe("MeshLambertMaterial");
+    debugLambert.dispose();
+    withShadows.dispose();
+  });
+
+  it("uses a camera-relative radial exclusion when a streaming height provider is active", () => {
+    const innerRadius = 60;
+    const farRadius = 150;
+    const radialShell = buildFarTerrainShell(summary, lighting, {
+      gridRes: 32,
+      farRadius,
+      centerX: 25,
+      centerZ: -40,
+      buildRelative: true,
+      innerExclusionRadius: innerRadius,
+      heightProvider: {
+        sampleHeight: () => 0,
+        sampleNormal: () => new THREE.Vector3(0, 1, 0),
+      },
+    });
+
+    const radialIndex = radialShell.mesh.geometry.getIndex()!;
+    const radialPosition = radialShell.mesh.geometry.getAttribute("position");
+    const fullGridTriangles = 32 * 32 * 2;
+
+    expect(radialShell.triangleCount).toBeGreaterThan(0);
+    expect(radialShell.triangleCount).toBeLessThan(fullGridTriangles);
+
+    const insideInner = (vi: number): boolean => {
+      const x = radialPosition.getX(vi);
+      const z = radialPosition.getZ(vi);
+      return Math.hypot(x, z) < innerRadius;
+    };
+
+    for (let t = 0; t < radialIndex.count; t += 3) {
+      const a = radialIndex.getX(t);
+      const b = radialIndex.getX(t + 1);
+      const c = radialIndex.getX(t + 2);
+      const allInside = insideInner(a) && insideInner(b) && insideInner(c);
+      expect(allInside).toBe(false);
+    }
+
+    radialShell.dispose();
+  });
 });

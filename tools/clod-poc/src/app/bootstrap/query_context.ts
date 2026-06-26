@@ -10,6 +10,7 @@ import {
   terrainMaterialSourceParam,
   type TerrainMaterialSource,
 } from "../../terrain/material/terrain_material_constants.js";
+import { NAADF_SCENES } from "../../naadf/integration.js";
 import { DEFAULT_MEADOW_WEATHER_SETTINGS } from "../../weather/meadow.js";
 import {
   DEFAULT_RAIN_WEATHER_SETTINGS,
@@ -17,6 +18,7 @@ import {
   DEFAULT_SNOW_WEATHER_SETTINGS,
   DEFAULT_STORM_WEATHER_SETTINGS,
 } from "../../weather/rain.js";
+import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 
 const positiveNumberParam = (value: string | null): number | null => {
   if (value === null) return null;
@@ -31,10 +33,22 @@ export interface SceneQueryFlags {
   queryTreeGpuRing: boolean;
   queryForestFloorScene: boolean;
   queryLongViewScene: boolean;
+  queryBorderOceanScene: boolean;
+  queryNaadfScene: boolean;
 }
+
+const SHADOW_PROXY_LONG_VIEW_SCENES = new Set([
+  "long-view-shadow-proxy-basic",
+  "long-view-shadow-proxy-off",
+  "long-view-shadow-proxy-debug-visible",
+  "long-view-shadow-proxy-forest",
+  "long-view-shadow-proxy-low-sun",
+]);
 
 export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryFlags {
   const queryScene = searchParams.get("scene");
+  const isNaadfScene = queryScene !== null && NAADF_SCENES.has(queryScene);
+  const isShadowProxyScene = queryScene !== null && SHADOW_PROXY_LONG_VIEW_SCENES.has(queryScene);
   return {
     queryScene,
     queryGrassPerfScene: queryScene === "grass-perf",
@@ -44,10 +58,20 @@ export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryF
     queryLongViewScene: queryScene === "long-view-4km"
       || queryScene === "long-view-forest-4km"
       || queryScene === "long-view-edit-stress"
+      || queryScene === RIVER_PARITY_TEST_SCENE
       || queryScene === "infinite-stream-straight"
       || queryScene === "infinite-stream-fast-turn"
       || queryScene === "infinite-stream-far-summary"
-      || queryScene === "infinite-stream-slow-builds",
+      || queryScene === "infinite-stream-slow-builds"
+      || queryScene === "infinite-far-shell-straight"
+      || queryScene === "infinite-far-shell-fast-turn"
+      || queryScene === "infinite-far-shell-mountain-approach"
+      || queryScene === "long-view-8km"
+      || queryScene === "long-view-16km"
+      || isNaadfScene
+      || isShadowProxyScene,
+    queryBorderOceanScene: queryScene === "border-ocean",
+    queryNaadfScene: isNaadfScene || searchParams.get("naadf") === "1",
   };
 }
 
@@ -65,10 +89,30 @@ const sceneNameToConfigKey: Record<string, string> = {
   "long-view-4km": "long_view_4km",
   "long-view-forest-4km": "long_view_forest_4km",
   "long-view-edit-stress": "long_view_edit_stress",
+  [RIVER_PARITY_TEST_SCENE]: "long_view_forest_4km",
   "infinite-stream-straight": "infinite_stream_straight",
   "infinite-stream-fast-turn": "infinite_stream_fast_turn",
   "infinite-stream-far-summary": "infinite_stream_far_summary",
   "infinite-stream-slow-builds": "infinite_stream_slow_builds",
+  "infinite-far-shell-straight": "infinite_far_shell_straight",
+  "infinite-far-shell-fast-turn": "infinite_far_shell_fast_turn",
+  "infinite-far-shell-mountain-approach": "infinite_far_shell_mountain_approach",
+  "long-view-8km": "long_view_8km",
+  "long-view-16km": "long_view_16km",
+  "long-view-shadow-proxy-basic": "long_view_4km",
+  "long-view-shadow-proxy-off": "long_view_4km",
+  "long-view-shadow-proxy-debug-visible": "long_view_4km",
+  "long-view-shadow-proxy-forest": "long_view_forest_4km",
+  "long-view-shadow-proxy-low-sun": "long_view_4km",
+  "infinite-naadf-flat": "infinite_stream_straight",
+  "infinite-naadf-hills": "infinite_stream_straight",
+  "infinite-naadf-mountains": "infinite_far_shell_mountain_approach",
+  "infinite-naadf-fast-flight": "infinite_stream_straight",
+  "infinite-naadf-fast-turn": "infinite_stream_fast_turn",
+  "infinite-naadf-forest": "long_view_forest_4km",
+  "infinite-naadf-sun-visibility": "long_view_4km",
+  "infinite-naadf-stress-missing": "infinite_stream_slow_builds",
+  "infinite-naadf-far": "infinite_far_shell_straight",
 };
 
 export function parsePhase0SceneContext(
@@ -114,6 +158,12 @@ export interface ClodRuntimeQueryFlags {
   queryGrassRingGrid: number | null;
   queryGrassRingCell: number | null;
   textureMipmapsEnabled: boolean;
+  queryTerrainMaterial: string | null;
+  queryDebugMaterialBands: boolean;
+  queryDebugSlope: boolean;
+  queryDebugFarNormals: boolean;
+  queryDebugHaze: boolean;
+  queryFreezeMaterialLod: boolean;
 }
 
 export function parseClodRuntimeQueryFlags(searchParams: URLSearchParams): ClodRuntimeQueryFlags {
@@ -126,6 +176,12 @@ export function parseClodRuntimeQueryFlags(searchParams: URLSearchParams): ClodR
     queryMaterialTiers: searchParams.get("materialTiers") === "1",
     queryWebGpuParity: searchParams.get("webgpuParity") === "1",
     queryTerrainMaterialSource: terrainMaterialSourceParam(searchParams.get("terrainMaterial")),
+    queryTerrainMaterial: searchParams.get("terrainMaterial"),
+    queryDebugMaterialBands: searchParams.get("debugMaterialBands") === "1",
+    queryDebugSlope: searchParams.get("debugSlope") === "1",
+    queryDebugFarNormals: searchParams.get("debugFarNormals") === "1",
+    queryDebugHaze: searchParams.get("debugHaze") === "1",
+    queryFreezeMaterialLod: searchParams.get("freezeMaterialLod") === "1",
     queryGrassRingGrid: positiveNumberParam(searchParams.get("grassRingGrid")),
     queryGrassRingCell: positiveNumberParam(searchParams.get("grassRingCell")),
     textureMipmapsEnabled: searchParams.get("textureMipmaps") !== "0",

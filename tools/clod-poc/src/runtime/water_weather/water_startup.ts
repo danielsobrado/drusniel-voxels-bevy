@@ -1,5 +1,9 @@
-import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
+import * as THREE from "three";
+import type { BorderCoastOceanConfig } from "../../terrain/border_coast_config.js";
+import { createDeepOceanSurface, type DeepOceanSurface } from "../../water/deep_ocean_surface.js";
+import { createDeepOceanMaterial, type DeepOceanMaterialHandle } from "../../water/deep_ocean_material.js";
+import { createDeepOceanSampler, type OceanSampler } from "../../water/ocean_service.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { HydrologySystem } from "../../water/index.js";
 import { surfaceHeight } from "../../terrain/terrain.js";
@@ -12,6 +16,7 @@ export interface WaterStartupInput {
   camera: THREE.PerspectiveCamera;
   state: ClodAppState;
   waterConfig: WaterConfig;
+  borderCoastOceanConfig: BorderCoastOceanConfig;
   worldCells: number;
   hydrologySystem: HydrologySystem | null;
   searchParams: URLSearchParams;
@@ -25,13 +30,18 @@ export interface WaterStartupResult {
   waterField: Awaited<ReturnType<typeof createWaterController>>["field"];
   waterDebugState: Awaited<ReturnType<typeof createWaterController>>["debugState"];
   makeWaterVisual: () => ReturnType<Awaited<ReturnType<typeof createWaterController>>["makeVisual"]>;
+  deepOceanSurface: DeepOceanSurface | null;
+  deepOceanMaterial: DeepOceanMaterialHandle | null;
+  deepOceanConfig: BorderCoastOceanConfig["deepOcean"];
+  oceanSampler: OceanSampler | null;
 }
 
 export async function runWaterStartup(input: WaterStartupInput): Promise<WaterStartupResult> {
   const {
-    scene, camera, state, waterConfig, worldCells,
+    scene, camera, state, waterConfig, borderCoastOceanConfig, worldCells,
     hydrologySystem, searchParams, currentLighting, lod0Nodes, isWebGpu,
   } = input;
+  const deepOceanBorderCells = borderCoastOceanConfig.coast.oceanStartCells;
 
   const waterController = await createWaterController({
     scene,
@@ -46,12 +56,40 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
     getUiState: () => waterUiState(state),
     searchParams,
     devMode: import.meta.env.DEV,
+    borderCoastOceanConfig,
   });
+
+  const oceanSampler = borderCoastOceanConfig.deepOcean.enabled
+    ? createDeepOceanSampler(worldCells, borderCoastOceanConfig.deepOcean, deepOceanBorderCells)
+    : null;
+  const lighting = currentLighting();
+  const deepOceanMaterial = oceanSampler
+    ? await createDeepOceanMaterial(isWebGpu, {
+        visual: waterConfig.visual,
+        surfaceY: borderCoastOceanConfig.deepOcean.surfaceY,
+        sunDirection: lighting.sunDirection.clone(),
+        cameraPosition: camera.position.clone(),
+        horizonColor: lighting.skyLight,
+      })
+    : null;
+  const deepOceanSurface = deepOceanMaterial
+    ? createDeepOceanSurface(
+        worldCells,
+        borderCoastOceanConfig.deepOcean,
+        deepOceanMaterial.material,
+        deepOceanBorderCells,
+      )
+    : null;
+  if (deepOceanSurface) scene.add(deepOceanSurface.mesh);
 
   return {
     waterController,
     waterField: waterController.field,
     waterDebugState: waterController.debugState,
     makeWaterVisual: () => waterController.makeVisual(),
+    deepOceanSurface,
+    deepOceanMaterial,
+    deepOceanConfig: borderCoastOceanConfig.deepOcean,
+    oceanSampler,
   };
 }

@@ -1,4 +1,4 @@
-import type { ClodProjectManifest } from "../../project/project_archive.js";
+import type { VoxelProjectManifest } from "../../project/voxel_project_archive.js";
 import type { AppStateSlices } from "./types.js";
 import { applyBrushArchiveState } from "./brush_state.js";
 import { applyClodArchiveState } from "./clod_state.js";
@@ -8,7 +8,7 @@ import { applyVegetationArchiveState } from "./vegetation_state.js";
 import { applyWaterArchiveState } from "./water_state.js";
 import { applyWeatherArchiveState } from "./weather_state.js";
 
-export function applyValidatedArchiveState(slices: AppStateSlices, manifest: ClodProjectManifest): void {
+export function applyValidatedArchiveState(slices: AppStateSlices, manifest: VoxelProjectManifest): void {
   applyClodArchiveState(slices.clod, manifest.state);
   applyTerrainMaterialArchiveState(slices.terrainMaterial, manifest.state);
   applyBrushArchiveState(slices.brush, manifest.state);

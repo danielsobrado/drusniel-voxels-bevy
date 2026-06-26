@@ -70,6 +70,7 @@ export interface TerrainMaterialController {
   texturesActive(): boolean;
   terrainTextureUniformOptions(): TerrainTextureApplyOptions;
   applyTerrainTextures(): void;
+  setRiverTerrainWetnessMask(mask: THREE.Texture | null): void;
   applyColorByLodToMaterials(on: boolean): void;
   syncColorByLod(): void;
   configureChunkMaterial(mat: TerrainMaterialHandle): void;
@@ -80,6 +81,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   const terrainMaterials = new Set<TerrainMaterialHandle>();
   let sharedTerrainMaterial: TerrainMaterialHandle | null = null;
   let lastTexturesActive: boolean | null = null;
+  let riverTerrainWetnessMask: THREE.Texture | null = null;
 
   const makeTerrainMaterial = (color: number): TerrainMaterialHandle => {
     if (deps.poolTerrainMaterial) {
@@ -167,6 +169,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
         lodBias: 0,
       },
       bakedMacroTint: deps.bakedMacroTint ?? undefined,
+      riverWetnessMask: riverTerrainWetnessMask ?? undefined,
       worldSize: deps.worldCells,
     } as TerrainTextureApplyOptions;
   };
@@ -232,6 +235,9 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     texturesActive,
     terrainTextureUniformOptions,
     applyTerrainTextures,
+    setRiverTerrainWetnessMask(mask) {
+      riverTerrainWetnessMask = mask;
+    },
     applyColorByLodToMaterials,
     syncColorByLod,
     configureChunkMaterial,

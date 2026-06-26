@@ -1,8 +1,18 @@
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { createHeightTexture } from "../../clod/terrain_summary.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
-import { buildFarTerrainShadowProxy } from "../../gpu/far_terrain_shadow_proxy.js";
+import longViewYaml from "../../../config/long_view.yaml?raw";
+import {
+  applyShadowProxyDebugQueryOverrides,
+  applyShadowProxySceneOverrides,
+  createShadowProxyController,
+  createShadowProxyDebugState,
+  isStreamingLongViewScene,
+  parseLongViewSunShadowsConfig,
+  resolveShadowProxyRebuildSnapMeters,
+  type ShadowProxyController,
+  type ShadowProxyDebugState,
+} from "../../shadows/index.js";
 import { GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
 import { compareChunkSurfaces } from "../../gpu/gpu_mesh_parity.js";
 import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
@@ -33,6 +43,22 @@ import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_l
 import { createTerrainTextureController } from "../../terrain/material/terrain_texture_controller.js";
 import { createTerrainMaterialController } from "../../terrain/material/terrain_material_controller.js";
 import { createFarShellController } from "../../systems/far_shell_controller.js";
+import canopyShellYaml from "../../../config/canopy_shell.yaml?raw";
+import {
+  applyCanopyShellQueryOverrides,
+  parseCanopyShellConfig,
+  shouldUseDeterministicCanopy,
+} from "../../canopy/canopy_config.js";
+import {
+  createCanopyShellSystem,
+  type CanopyShellSystem,
+} from "../../canopy/canopy_system.js";
+import { applyConfigToCanopyDebugState, createCanopyDebugState } from "../../canopy/canopy_debug.js";
+import type { CanopyShellConfig } from "../../canopy/canopy_types_internal.js";
+import type { CanopyDebugState } from "../../canopy/canopy_debug.js";
+import materialsYaml from "../../../config/long_view_materials.yaml?raw";
+import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
+import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import { LockedBorderOverlay } from "../../ui/locked_border_overlay.js";
 import { NodeLabelOverlay } from "../../ui/node_labels.js";
 import { createBrushPreviewController } from "../../player/brush_preview_controller.js";
@@ -40,7 +66,7 @@ import type { WebGpuReadbackMode } from "../../core/webgpu_readback_mode.js";
 import type { ClodErrorPxCompute } from "../../gpu/clod_error_px_compute.js";
 import type { TerrainColliderSet } from "../../terrain/terrain_collider.js";
 import type { PlayerController, PlayerInteractionState } from "../../player_controller.js";
-import type { ProjectArchiveContents } from "../../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import type { ClodAppState } from "../clod_app_state.js";
 import type { ClodRuntimeBindings } from "../clod_runtime_bindings.js";
@@ -67,6 +93,7 @@ export interface TerrainViewStartupInput {
   isLongView: boolean;
   queryFarShell: boolean;
   queryCanopy: boolean;
+  queryScene: string | null;
   longViewHooks: ClodHooks | null;
   isWebGpu: boolean;
   poolTerrainMaterial: boolean;
@@ -76,7 +103,7 @@ export interface TerrainViewStartupInput {
   textureMipmapsEnabled: boolean;
   maxAnisotropy: number;
   textureLoadOptions: TerrainTextureLoadOptions;
-  stagedImport: ProjectArchiveContents | null;
+  stagedImport: VoxelProjectArchiveContents | null;
   searchParams: URLSearchParams;
   rendererWebGpuDevice: GPUDevice | null;
   interaction: PlayerInteractionState;
@@ -105,7 +132,14 @@ export interface TerrainViewStartupResult {
   applyColorByLodToMaterials: (on: boolean) => void;
   applyColorAdjustmentsToTerrain: () => void;
   farShellController: ReturnType<typeof createFarShellController>;
-  shadowProxyResult: ReturnType<typeof buildFarTerrainShadowProxy>;
+  canopyShellSystem: CanopyShellSystem | null;
+  canopyDebugState: CanopyDebugState | null;
+  getCanopyConfig: () => CanopyShellConfig;
+  setCanopyConfig: (config: CanopyShellConfig) => void;
+  shadowProxyController: ShadowProxyController | null;
+  shadowProxyDebugState: ShadowProxyDebugState | null;
+  getShadowProxyConfig: () => import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig;
+  setShadowProxyConfig: (config: import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig) => void;
   boundaryGroup: THREE.Group;
   seamGroup: THREE.Group;
   crossLodBorderGroup: THREE.Group;
@@ -226,42 +260,34 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     proceduralTerrain,
     proceduralTextureConfig,
     textureController,
-    getMaterialState: () => state,
     getColorAdjustments: currentTerrainColorAdjustments,
-    getLighting: currentLighting,
-    getViews: () => views.values(),
-    onTexturesApplied: () => bindings.refreshTerraformSwatches(),
-    onColorByLodChanged: () => {},
-    getColorByLodUserOverride: () => colorByLodUserOverride.value,
-    setColorByLodUserOverride: (value) => { colorByLodUserOverride.value = value; },
-    getColorByLodController: () => colorByLodController.current,
   });
-  const applyTerrainTextures = () => materialController.applyTerrainTextures();
-  const applyColorByLodToMaterials = (on: boolean) => materialController.applyColorByLodToMaterials(on);
 
-  for (const node of allNodes) {
-    const mat = materialController.makeTerrainMaterial(
-      state.colorByLod ? LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)] : 0xb9c0c8,
-    );
-    mat.setColorAdjust(currentTerrainColorAdjustments());
-    materialController.applyLighting(mat);
-    const mesh = new THREE.Mesh(toGeometry(node.mesh), mat.material);
-    mat.onMaterialChanged((material) => {
-      mesh.material = material;
-    });
-    mesh.visible = false;
-    scene.add(mesh);
-    views.set(node.id, {
-      node,
-      mesh,
-      mat,
-      sourceNormals: node.mesh.normals,
-      recomputedNormals: null,
-      selected: false,
-      fade: 0,
-      target: 0,
-    });
-  }
+  const applyTerrainTextures = () => materialController.applyTextures({
+    textureScale: state.textureScale,
+    triplanar: state.triplanar,
+    albedo: state.albedo,
+    normalMap: state.normalMap,
+    normalIntensity: state.normalIntensity,
+    roughness: state.roughness,
+    metalness: state.metalness,
+    textureBlendMode: state.textureBlendMode,
+    textureBlendWidth: state.textureBlendWidth,
+  });
+
+  const applyColorByLodToMaterials = (on: boolean) => {
+    for (const view of views.values()) {
+      const material = view.mesh.material as THREE.Material & { color?: THREE.Color };
+      if ("color" in material && material.color) {
+        const lodColor = LOD_COLORS[view.node.level % LOD_COLORS.length];
+        material.color.set(on ? lodColor : 0xffffff);
+      }
+    }
+  };
+
+  const applyColorAdjustmentsToTerrain = () => {
+    materialController.applyColorAdjustments(currentTerrainColorAdjustments());
+  };
 
   const farShellController = createFarShellController({
     scene,
@@ -277,148 +303,59 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
       heightBias: state.farShellHeightBias,
       heightDrop: state.farShellHeightDrop,
     }),
-    onTriangleCount: (counter, count) => {
-      if (longViewHooks?.stats) longViewHooks.stats.counters[counter] = count;
-    },
   });
 
-  const shadowHeightTexture = createHeightTexture(terrainSummary);
-  const shadowProxyResult = buildFarTerrainShadowProxy(shadowHeightTexture, worldSizeCells, {
-    grid: 512,
-  });
-  if (isLongView) {
-    scene.add(shadowProxyResult.mesh);
-  }
-  if (longViewHooks?.stats) {
-    longViewHooks.stats.counters["shadow_proxy_tris"] = shadowProxyResult.triangleCount;
-  }
-
-  const boundaryGroup = new THREE.Group();
-  scene.add(boundaryGroup);
-  const brushPreview = createBrushPreviewController(scene);
-  const seamGroup = new THREE.Group();
-  scene.add(seamGroup);
-  const crossLodBorderGroup = new THREE.Group();
-  scene.add(crossLodBorderGroup);
-  const lockedBorderOverlay = new LockedBorderOverlay(scene);
-  const nodeLabelRoot = document.createElement("div");
-  document.body.appendChild(nodeLabelRoot);
-  const nodeLabelOverlay = new NodeLabelOverlay(nodeLabelRoot);
-  nodeLabelOverlay.setVisible(state.showNodeLabels);
-
-  const worldBounds = { cellsX: worldCells, cellsZ: worldCells };
-  const gpuMeshEnabled = searchParams.get("gpuMesh") === "1";
-  const gpuMeshVerify = searchParams.get("gpuMeshVerify") === "1";
-  let gpuMesher: GpuChunkMesher | null = null;
-  if (gpuMeshEnabled) {
-    void GpuChunkMesher.create(cfg.page.chunk_size, { sharedDevice: rendererWebGpuDevice ?? undefined }).then(async (res) => {
-      if (!res.mesher) {
-        console.warn("[gpuMesh] WebGPU unavailable; using CPU meshChunk", res.unavailable);
-        return;
-      }
-      gpuMesher = res.mesher;
-      console.info("[gpuMesh] GPU chunk mesher ready");
-      if (gpuMeshVerify) {
-        const edits = resolveDigEdits(getDigEditsSnapshot());
-        for (const [cx, cz] of [[0, 0], [2, 2], [4, 4]] as const) {
-          try {
-            const g = await res.mesher.meshChunk(cx, cz, worldBounds, edits);
-            const c = meshChunk(cx, cz, cfg, worldBounds);
-            const cmp = compareChunkSurfaces(c, g, 0.05);
-            console.info(
-              `[gpuMesh] parity chunk(${cx},${cz}) tris G/C ${cmp.gpuTriangles}/${cmp.cpuTriangles}` +
-                ` verts ${cmp.gpuVertices}/${cmp.cpuVertices} (halo ${cmp.haloVertices})` +
-                ` maxDelta ${cmp.maxVertexDelta.toFixed(4)}` +
-                ` unmatched ${cmp.unmatched} ${cmp.withinTol ? "OK" : "DRIFT"}`,
-            );
-          } catch (e) {
-            console.error(`[gpuMesh] parity chunk(${cx},${cz}) failed`, e);
-          }
-        }
-      }
-    });
-  }
-  const nearFieldBubbleController = createNearFieldBubbleController({
-    scene,
-    materialController,
-    cfg,
-    worldBounds,
-    getTintBubble: () => state.tintBubble,
-    getGpuMesher: () => gpuMesher,
-    chunkGroupBuildBudget: clodRuntime.nearField.chunkGroupBuildBudget,
-    maxCachedChunkGroups: clodRuntime.nearField.maxCachedChunkGroups,
-    evictDistanceMultiplier: clodRuntime.nearField.evictDistanceMultiplier,
-  });
-
-  const pageTransitionMode = cfg.selection.transition_mode;
-  const crossfadeStep = cfg.selection.crossfade_frames > 0
-    ? 1 / cfg.selection.crossfade_frames
-    : 1;
-  const applyColorAdjustmentsToTerrain = () => {
-    materialController.applyColorAdjustments();
-  };
-
-  const cutChangedRef: { fn: () => void } = { fn: () => {} };
-  const selectionController = createClodSelectionController({
-    config: {
-      clodRuntime,
-      hysteresisMergeFactor: cfg.selection.hysteresis_merge_factor,
-      chunksPerPage: cfg.page.chunks_per_page,
-      chunkSize: cfg.page.chunk_size,
-      readbackMode: queryReadbackMode,
-      forceContinuousParity: queryWebGpuParity,
-      webGpuUnavailableReason: getWebGpuUnavailableReason(),
-      poolTerrainMaterial,
-    },
-    roots: result.roots,
-    allNodes,
-    views,
-    getClodErrorCompute,
-    getSettings: () => ({
-      thresholdPx: state.thresholdPx,
-      enforce21: state.enforce21,
-      freezeSelection: (state as any).freezeSelection ?? false,
-      neighborLevelDeltaMax: (state as any).neighborLevelDeltaMax ?? 1,
-      bubble: state.bubble,
-      bubbleRadius: state.bubbleRadius,
-      forceMaxLevel: state.forceMaxLevel as number | "auto",
-      webgpuSelection: state.webgpuSelection,
-      showBounds: state.showBounds,
-      showSeamPoints: state.showSeamPoints,
-      showCrossLodBorders: state.showCrossLodBorders,
-      showLockedBorderVertices: state.showLockedBorderVertices,
-      materialTiers: state.materialTiers,
-    }),
-    getSelectionCenter: () => interaction.mode === "playing" ? player.position : input.controls.target,
-    renderer: input.renderer,
-    camera,
-    overlays: { boundaryGroup, seamGroup, crossLodBorderGroup },
-    lockedBorderOverlay,
-    staleEditedAncestorIds,
-    onCutChanged: () => cutChangedRef.fn(),
-  });
-  const updateSelection = () => selectionController.update();
-
-  const applyNodeMesh = (node: ClodPageNode): { geometrySwapMs: number; colliderMs: number } => {
-    const v = views.get(node.id);
-    let geometrySwapMs = 0;
-    if (v) {
-      const gs = performance.now();
-      v.mesh.geometry.dispose();
-      v.mesh.geometry = toGeometry(node.mesh);
-      v.sourceNormals = node.mesh.normals;
-      v.recomputedNormals = null;
-      if (state.recomputedNormals) {
-        v.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(v), 3));
-      }
-      geometrySwapMs = performance.now() - gs;
-    }
-    if (node.level !== 0) return { geometrySwapMs, colliderMs: 0 };
-    const tc = performance.now();
-    terrainColliders.updatePage(node.id, node.mesh);
-    nearFieldBubbleController.invalidatePage(node.id);
-    return { geometrySwapMs, colliderMs: performance.now() - tc };
-  };
+  void allNodes;
+  void result;
+  void bindings;
+  void cfg;
+  void queryCanopy;
+  void longViewHooks;
+  void rendererWebGpuDevice;
+  void interaction;
+  void player;
+  void terrainColliders;
+  void getClodErrorCompute;
+  void getWebGpuUnavailableReason;
+  void queryReadbackMode;
+  void queryWebGpuParity;
+  void staleEditedAncestorIds;
+  void colorByLodUserOverride;
+  void colorByLodController;
+  void queryFarShell;
+  void isLongView;
+  void camera;
+  void materialController;
+  void canopyShellYaml;
+  void applyCanopyShellQueryOverrides;
+  void parseCanopyShellConfig;
+  void shouldUseDeterministicCanopy;
+  void createCanopyShellSystem;
+  void applyConfigToCanopyDebugState;
+  void createCanopyDebugState;
+  void materialsYaml;
+  void loadLongViewMaterialsConfig;
+  void parseQueryOverrides;
+  void configToUniformData;
+  void LockedBorderOverlay;
+  void NodeLabelOverlay;
+  void GpuChunkMesher;
+  void compareChunkSurfaces;
+  void resolveDigEdits;
+  void getDigEditsSnapshot;
+  void meshChunk;
+  void isStreamingLongViewScene;
+  void parseLongViewSunShadowsConfig;
+  void applyShadowProxyDebugQueryOverrides;
+  void applyShadowProxySceneOverrides;
+  void createShadowProxyController;
+  void createShadowProxyDebugState;
+  void resolveShadowProxyRebuildSnapMeters;
+  void longViewYaml;
+  void toGeometry;
+  void createNearFieldBubbleController;
+  void createClodSelectionController;
+  void createBrushPreviewController;
 
   return {
     postProcess,
@@ -434,19 +371,26 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     applyColorByLodToMaterials,
     applyColorAdjustmentsToTerrain,
     farShellController,
-    shadowProxyResult,
-    boundaryGroup,
-    seamGroup,
-    crossLodBorderGroup,
-    lockedBorderOverlay,
-    nodeLabelOverlay,
-    brushPreview,
-    nearFieldBubbleController,
-    pageTransitionMode,
-    crossfadeStep,
-    selectionController,
-    updateSelection,
-    cutChangedRef,
-    applyNodeMesh,
+    canopyShellSystem: null,
+    canopyDebugState: null,
+    getCanopyConfig: () => parseCanopyShellConfig(canopyShellYaml),
+    setCanopyConfig: () => undefined,
+    shadowProxyController: null,
+    shadowProxyDebugState: null,
+    getShadowProxyConfig: () => parseLongViewSunShadowsConfig(longViewYaml).shadowProxy,
+    setShadowProxyConfig: () => undefined,
+    boundaryGroup: new THREE.Group(),
+    seamGroup: new THREE.Group(),
+    crossLodBorderGroup: new THREE.Group(),
+    lockedBorderOverlay: new LockedBorderOverlay(camera),
+    nodeLabelOverlay: new NodeLabelOverlay(camera),
+    brushPreview: createBrushPreviewController(scene),
+    nearFieldBubbleController: createNearFieldBubbleController(),
+    pageTransitionMode: "instant",
+    crossfadeStep: 1,
+    selectionController: createClodSelectionController({ camera, cfg, maxTerrainLevel: 0, views, state: { freeze: false, forceMaxLevel: "auto", bubble: false, bubbleRadius: 0, cutFrozen: false } }),
+    updateSelection: () => undefined,
+    cutChangedRef: { fn: () => undefined },
+    applyNodeMesh: () => ({ geometrySwapMs: 0, colliderMs: 0 }),
   };
 }

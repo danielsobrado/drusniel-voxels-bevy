@@ -75,6 +75,11 @@ export class FarSummaryClipmapSampler implements FarHeightProvider {
       }
     }
 
+    if (this.config.sampling.disableProceduralFallback) {
+      this._fallbacks.countConservativeFallback();
+      return this.sampleConservativeDefault();
+    }
+
     if (this.config.sampling.fallbackToProcedural) {
       this._fallbacks.countProceduralFallback();
       return this.sampleProceduralFallback(x, z);

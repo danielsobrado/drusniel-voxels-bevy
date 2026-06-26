@@ -12,12 +12,14 @@ import {
   buildGrassInstancedGeometry,
   createGrassNodeMaterial,
 } from "../../gpu/grass_node_material.js";
+import { GrassGpuRingCompute } from "../../gpu/grass_ring_compute.js";
 import { createGrassController } from "./grass_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { grassUiState } from "../../app/clod_app_state.js";
 import type { AppRenderer } from "../../app/bootstrap/renderer_startup.js";
 import type { VegetationGpuBackend } from "./vegetation_gpu_backend.js";
 import type { VegetationStatControllerRefs } from "./vegetation_types.js";
+import { packHydrologyData } from "../../systems/hydrology_packing.js";
 
 export interface GrassStartupInput {
   app: AppRenderer;
@@ -50,6 +52,8 @@ export function runGrassStartup(input: GrassStartupInput): GrassStartupResult {
     queryGrassRingGrid, queryGrassRingCell, isWebGpu, rendererWebGpuDevice,
     gpuBackend, hydrologySystem, currentLighting,
   } = input;
+
+  const grassHydrologyData = hydrologySystem ? packHydrologyData(hydrologySystem) : null;
 
   const currentGrassLighting = (): GrassLighting => {
     const lighting = currentLighting();
@@ -99,9 +103,12 @@ export function runGrassStartup(input: GrassStartupInput): GrassStartupResult {
               ringInstanceBuffers,
               hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
               worldSize: worldCells,
+              hydrologyRes: grassHydrologyData?.res ?? 1,
               waterClearance: 0.5,
             }),
           buildGeometry: buildGrassInstancedGeometry,
+          createGpuRingCompute: (device, edits, outputBuffers, ring) =>
+            GrassGpuRingCompute.create(device, edits, outputBuffers, ring, grassHydrologyData),
         }
       : {}),
     syncStatsToState: (stats) => {

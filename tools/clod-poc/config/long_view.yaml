@@ -1,0 +1,38 @@
+long_view:
+  shadow_proxy:
+    enabled: true
+
+    # Sandbox defaults. Later infinite streaming can replace these with clipmap-backed values.
+    grid_res: 512
+    start_m: 192
+    end_m: 4096
+
+    # Geometry shaping.
+    height_bias_m: 0.75
+    min_height_m: -256
+    max_height_m: 512
+    edge_fade_m: 256
+
+    # Shadow rendering.
+    cast_shadow: true
+    receive_shadow: false
+    main_pass_color_write: false
+    main_pass_depth_write: false
+    shadow_side: double
+
+    # Directional light shadow tuning for the PoC scene.
+    light_shadow_map_size: 2048
+    light_shadow_camera_extent_m: 4096
+    light_shadow_camera_near_m: 1
+    light_shadow_camera_far_m: 8192
+    light_shadow_bias: -0.00015
+    light_shadow_normal_bias: 0.5
+
+    # Debug.
+    debug_visible_proxy: false
+    debug_wireframe: false
+    debug_freeze_proxy: false
+    debug_show_bounds: false
+
+  sun_shadows:
+    enabled: true

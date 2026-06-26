@@ -11,18 +11,18 @@
 // renders black here), and fades to the sky/haze colour near the rim.  No collider, no edit, no
 // heavy shadows.
 //
-// === cameraRelativeShell (future) ===
-// For true infinite streaming, the excluded inner area should be centred on the stream centre /
-// camera instead of assuming a fixed [inset, worldSize - inset] square.  The inner exclusion
-// zone should match the live CLOD page ring (not the full world square).  When buildRelative is
-// set, the mesh is built at (0,0) and translated by the controller, but the interior exclusion
-// still uses the finite-world square — a camera-relative exclusion mode is TODO.
+// === cameraRelativeShell mode ===
+// When `innerExclusionRadius` is set, the shell becomes a stream-centered annulus.  The inner
+// circle is owned by live chunks/CLOD pages; the shell owns only the visual horizon band between
+// `innerExclusionRadius` and `farRadius`.  This keeps the player inside the playable terrain
+// bubble and prevents the visual shell from covering the main area while the stream center moves.
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { clamp, dot, float, max, mix, normalGeometry, normalize, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import { sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
+import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer } from "../farTerrain/farTerrainMaterial.js";
 
 /**
  * Height provider interface — alternative to TerrainSummaryField for the far shell.
@@ -49,9 +49,19 @@ export interface FarTerrainShellOptions {
   heightProvider?: FarHeightProvider;
   centerX?: number;
   centerZ?: number;
+  /** Radius around center owned by playable/CLOD terrain; shell geometry is excluded inside it. */
+  innerExclusionRadius?: number;
   /** Build geometry relative to (0,0) so the mesh can be moved via mesh.position.
    *  When set, centerX/centerZ are only used for the material haze fade. */
   buildRelative?: boolean;
+  /** Use a Lambert receiver so Three.js directional shadows are visible in long-view PoC. */
+  receiveSunShadows?: boolean;
+  /** Debug-only: swap to Lambert for visible shadow reception (regresses TSL far-shell look). */
+  useDebugLambertReceiver?: boolean;
+  /** Use the parity material path with terrain band classification. */
+  useParityMaterial?: boolean;
+  /** Material config data for the parity material. */
+  parityConfig?: import("../farTerrain/farTerrainUniforms.js").FarTerrainUniformData;
 }
 
 export interface FarTerrainShell {
@@ -69,6 +79,7 @@ const DEFAULT_OPTIONS: FarTerrainShellOptions = {
   gridRes: 128,
   heightDrop: 2,
   heightBias: 0.6,
+  innerExclusionRadius: 0,
 };
 
 /**
@@ -78,8 +89,12 @@ const DEFAULT_OPTIONS: FarTerrainShellOptions = {
  * Quads fully inside the page-covered world square [inset, worldSize - inset] are excluded,
  * leaving a skirt around the world that extends out to the horizon.
  *
- * When `heightProvider` is set (far summary streaming), the interior exclusion is skipped
- * so the shell covers the full grid — the clipmap fills in heights everywhere.
+ * When `innerExclusionRadius` is set, the square finite-world exclusion is replaced by a
+ * camera/stream-relative circular exclusion.  The shell only emits quads that intersect the
+ * annulus between `innerExclusionRadius` and `farRadius`.
+ *
+ * When `heightProvider` is set, the shell samples heights from the provider instead of from
+ * TerrainSummaryField.
  *
  * When `buildRelative` is set, geometry is built at origin (0,0) and the caller positions
  * the mesh.  This enables the controller to translate the shell without rebuilding.
@@ -90,13 +105,15 @@ export function buildFarTerrainShell(
   options: Partial<FarTerrainShellOptions> = {},
 ): FarTerrainShell {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const { gridRes, heightDrop, heightBias, heightProvider, buildRelative } = opts;
+  const { gridRes, heightDrop, heightBias, heightProvider, buildRelative, receiveSunShadows, useDebugLambertReceiver, useParityMaterial, parityConfig } = opts;
 
   const worldSize = summary.worldSize;
   const centerX = opts.centerX ?? worldSize / 2;
   const centerZ = opts.centerZ ?? worldSize / 2;
   const farRadius = opts.farRadius > 0 ? opts.farRadius : worldSize * 1.5;
   const inset = opts.inset >= 0 ? opts.inset : worldSize * 0.04;
+  const innerExclusionRadius = Math.max(0, Math.min(opts.innerExclusionRadius ?? 0, farRadius));
+  const useRadialExclusion = innerExclusionRadius > 0;
   const extent = 2 * farRadius;
   const cellSize = extent / gridRes;
   const baseLevel = summaryBaseLevel(summary);
@@ -158,6 +175,21 @@ export function buildFarTerrainShell(
     }
   }
 
+  const quadRadiusBounds = (x0: number, z0: number, x1: number, z1: number): { min: number; max: number } => {
+    const wx0 = buildRelative ? x0 + centerX : x0;
+    const wz0 = buildRelative ? z0 + centerZ : z0;
+    const wx1 = buildRelative ? x1 + centerX : x1;
+    const wz1 = buildRelative ? z1 + centerZ : z1;
+    const d00 = Math.hypot(wx0 - centerX, wz0 - centerZ);
+    const d10 = Math.hypot(wx1 - centerX, wz0 - centerZ);
+    const d01 = Math.hypot(wx0 - centerX, wz1 - centerZ);
+    const d11 = Math.hypot(wx1 - centerX, wz1 - centerZ);
+    return {
+      min: Math.min(d00, d10, d01, d11),
+      max: Math.max(d00, d10, d01, d11),
+    };
+  };
+
   const innerMin = inset;
   const innerMax = worldSize - inset;
   for (let gz = 0; gz < gridRes; gz++) {
@@ -166,8 +198,13 @@ export function buildFarTerrainShell(
       const x1 = x0 + cellSize;
       const z0 = originZ + gz * cellSize;
       const z1 = z0 + cellSize;
-      const fullyInside = heightProvider ? false : (x0 >= innerMin && x1 <= innerMax && z0 >= innerMin && z1 <= innerMax);
-      if (fullyInside) continue;
+      if (useRadialExclusion) {
+        const bounds = quadRadiusBounds(x0, z0, x1, z1);
+        if (bounds.max <= innerExclusionRadius || bounds.min >= farRadius) continue;
+      } else {
+        const fullyInside = heightProvider ? false : (x0 >= innerMin && x1 <= innerMax && z0 >= innerMin && z1 <= innerMax);
+        if (fullyInside) continue;
+      }
       const a = gz * (gridRes + 1) + gx;
       const b = a + 1;
       const c = a + (gridRes + 1);
@@ -199,12 +236,36 @@ export function buildFarTerrainShell(
   const ctrZ = float(centerZ);
   const distXZ = vec2(positionWorld.x.sub(ctrX), positionWorld.z.sub(ctrZ)).length();
   const hazeT = smoothstep(float(farRadius * 0.55), float(farRadius * 0.98), distXZ);
-  const material = new MeshBasicNodeMaterial();
-  material.colorNode = mix(base.mul(light), uHaze, hazeT);
+  if (useParityMaterial && parityConfig) {
+    const vc = computeFarTerrainVertexColors(
+      positions,
+      normals,
+      vertexCount,
+      parityConfig,
+      centerX,
+      centerZ,
+    );
+    const colorAttr = createVertexColorBuffer(vc, parityConfig, undefined, centerX, centerZ, positions);
+    geometry.setAttribute("color", new THREE.BufferAttribute(colorAttr, 3));
+  }
+
+  let material: THREE.Material;
+  if (useParityMaterial && parityConfig) {
+    material = createFarTerrainMaterial(lighting, parityConfig, centerX, centerZ, farRadius);
+  } else if (receiveSunShadows && useDebugLambertReceiver) {
+    material = new THREE.MeshLambertMaterial({
+      color: 0x5a6b42,
+      side: THREE.DoubleSide,
+    });
+  } else {
+    const nodeMaterial = new MeshBasicNodeMaterial();
+    nodeMaterial.colorNode = mix(base.mul(light), uHaze, hazeT);
+    material = nodeMaterial;
+  }
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = false;
-  mesh.receiveShadow = true;
+  mesh.receiveShadow = receiveSunShadows ?? false;
   mesh.frustumCulled = false;
 
   return {

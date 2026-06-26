@@ -1,0 +1,15 @@
+# Deterministic acceptance scene: inland -> coast/cliff -> world edge -> deep ocean.
+border_ocean_scene:
+  default_world_pages: 16
+  default_seed: 1
+  camera:
+    eye_x_ratio: 0.50
+    eye_y_ratio: 0.14
+    eye_z_ratio: 0.20
+    look_x_ratio: 0.50
+    look_y: 18
+    look_z_ratio: 1.08
+    fov: 55
+  acceptance:
+    min_deep_ocean_vertices: 1000
+    max_interior_water_wet_ratio: 0.15

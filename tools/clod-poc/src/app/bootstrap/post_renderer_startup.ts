@@ -8,7 +8,7 @@ import { runAppStateStartup } from "./app_state_startup.js";
 import { createBootstrapUiRefs } from "./bootstrap_refs.js";
 import { createTerrainEditContext } from "./terrain_edit_context.js";
 import type { BootstrapQueryContext } from "./query_context.js";
-import type { ProjectArchiveContents } from "../../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { ClodPagesConfig } from "../../config.js";
 import type { RendererStartupResult } from "./renderer_startup.js";
 import type { WorldBuildResult } from "./world_build_startup.js";
@@ -18,7 +18,7 @@ export interface PostRendererStartupInput {
   searchParams: URLSearchParams;
   clodRuntime: ClodRuntimeConfig;
   cfg: ClodPagesConfig;
-  stagedImport: ProjectArchiveContents | null;
+  stagedImport: VoxelProjectArchiveContents | null;
   queries: BootstrapQueryContext;
   world: Pick<
     WorldBuildResult,
@@ -38,7 +38,7 @@ export interface PostRendererStartupInput {
 export async function runPostRendererStartup(input: PostRendererStartupInput) {
   const { info, searchParams, clodRuntime, cfg, stagedImport, queries, world, renderer } = input;
   const isLongView = queries.queryLongViewScene;
-  const enableAutomationHooks = isLongView || searchParams.get("customProps") === "1";
+  const enableAutomationHooks = isLongView || queries.queryBorderOceanScene || searchParams.get("customProps") === "1";
   const terrainEdit = createTerrainEditContext(world.maxTerrainLevel);
   const { longViewHooks, longViewSettleWaiters } = initLongViewDiagnostics({
     isLongView: enableAutomationHooks,

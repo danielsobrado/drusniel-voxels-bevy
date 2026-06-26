@@ -68,6 +68,56 @@
   box-shadow: none;
   color: #d8cfb7;
   font-family: var(--clod-ui-font);
+  padding: 0 9px 7px;
+}
+
+.debug-panel-chrome {
+  display: grid;
+  gap: 0;
+}
+
+.debug-panel-chrome-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 7px 0;
+  font: 10px/1.2 var(--clod-ui-font);
+  color: #9fb0c0;
+  user-select: none;
+}
+
+.debug-panel-chrome--floating .debug-panel-chrome-header {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(120, 180, 255, 0.2);
+  cursor: grab;
+  touch-action: none;
+  color: #c8e6ff;
+}
+
+.debug-panel-chrome-title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.debug-panel-chrome-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+#clod-overlay .debug-panel-chrome-header {
+  color: var(--clod-muted);
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(233, 201, 106, 0.18);
+}
+
+#info-panel .debug-panel-chrome-header {
+  padding-bottom: 2px;
+}
+
+.debug-panel-chrome-body[hidden] {
+  display: none;
 }
 
 .clod-overlay-panel {

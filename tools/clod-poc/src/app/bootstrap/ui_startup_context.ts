@@ -8,7 +8,7 @@ import type { Phase0Config } from "../../phase0/phase0_config.js";
 import type { TerrainRaycastService } from "../../player/terrain_raycast_service.js";
 import type { TerrainColliderSet } from "../../terrain/terrain_collider.js";
 import type { PlayerController, PlayerInteractionState } from "../../player_controller.js";
-import type { ProjectArchiveContents } from "../../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { TerrainTextureLoadOptions } from "../../terrain/material/texture_loader.js";
 import type { VegetationDirtyQueue } from "../../systems/vegetation_dirty.js";
 import type { ClodAppState } from "../clod_app_state.js";
@@ -32,7 +32,7 @@ export interface UiStartupInput {
   WORLD: number;
   polishLine: string;
   buildStatusRef: { value: string };
-  stagedImport: ProjectArchiveContents | null;
+  stagedImport: VoxelProjectArchiveContents | null;
   state: ClodAppState;
   bindings: ClodRuntimeBindings;
   colorByLodUserOverride: { value: boolean };
@@ -73,9 +73,11 @@ export interface UiStartupInput {
     phase0VelocityX: number;
     phase0VelocityZ: number;
     phase0Streaming: Phase0Config["phase0"]["streaming"];
+    infiniteFarShell?: import("../../long-view/infiniteFarShell.js").InfiniteFarShell;
+    farShellMetrics?: import("../../long-view/farShellMetrics.js").FarShellMetrics;
   };
-  /** Optional far summary frame update callback. */
   onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
+  naadfIntegration?: import("../../naadf/integration.js").NaadfIntegration;
   getClodErrorCompute: () => import("../../gpu/clod_error_px_compute.js").ClodErrorPxCompute | null;
   ensureClodErrorCompute: () => Promise<void>;
   textureLoadOptions: TerrainTextureLoadOptions;
@@ -87,11 +89,14 @@ export interface UiSessionState {
   averageFpsRef: { value: number };
   lastDigSummary: string;
   lastArchiveSummary: string;
+  parentsHealthy: boolean;
+  lastParentError: string;
   pendingParentNodes: number;
   pendingParentMs: number;
   pendingParentCount: number;
   terraformEditCheckbox: HTMLInputElement | null;
   weatherStatsController: GuiDisplayController | null;
+  naadfStatsController: GuiDisplayController | null;
   grassBladeCountController: GuiDisplayController | null;
   grassVisiblePatchesController: GuiDisplayController | null;
   grassTierSummaryController: GuiDisplayController | null;
@@ -114,11 +119,14 @@ export function createUiStartupContext(input: UiStartupInput): UiStartupContext 
       averageFpsRef: { value: 0 },
       lastDigSummary: "",
       lastArchiveSummary: "",
+      parentsHealthy: true,
+      lastParentError: "",
       pendingParentNodes: 0,
       pendingParentMs: 0,
       pendingParentCount: 0,
       terraformEditCheckbox: null,
       weatherStatsController: null,
+      naadfStatsController: null,
       grassBladeCountController: null,
       grassVisiblePatchesController: null,
       grassTierSummaryController: null,

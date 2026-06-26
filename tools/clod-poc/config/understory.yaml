@@ -27,6 +27,40 @@ understory:
     density_noise_strength: 0.55
     deadfall_old_forest_bias: 0.75
 
+  terrain:
+    grass:
+      density: 1.20
+      shrub: 1.00
+      fern: 1.18
+      sapling: 0.92
+      flower: 1.30
+      dead_log: 0.60
+      stump: 0.65
+    rock:
+      density: 0.48
+      shrub: 0.62
+      fern: 0.24
+      sapling: 0.55
+      flower: 0.08
+      dead_log: 1.35
+      stump: 1.28
+    sand:
+      density: 0.62
+      shrub: 0.44
+      fern: 0.22
+      sapling: 0.24
+      flower: 0.75
+      dead_log: 0.48
+      stump: 0.44
+    snow:
+      density: 0.18
+      shrub: 0.30
+      fern: 0.10
+      sapling: 0.12
+      flower: 0.02
+      dead_log: 1.60
+      stump: 1.35
+
   classes:
     shrub:
       enabled: true

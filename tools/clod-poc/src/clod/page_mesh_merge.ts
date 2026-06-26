@@ -1,6 +1,6 @@
 import { concatPageSourceMeshes } from "./pageSource.js";
 import type { ClodPageNode, PageMesh } from "../types.js";
-import { assertMaterialWeights } from "../material/material_weights.js";
+import { assertMaterialWeights, normalizeMaterialWeights } from "../material/material_weights.js";
 
 export function mergeChildPageMeshes(children: readonly ClodPageNode[], epsilon: number): PageMesh {
   const ordered = [...children].sort((a, b) =>
@@ -47,7 +47,11 @@ function weldMergedChildVertices(mesh: PageMesh, epsilon: number): PageMesh {
       normals[next * 3] += mesh.normals[i * 3];
       normals[next * 3 + 1] += mesh.normals[i * 3 + 1];
       normals[next * 3 + 2] += mesh.normals[i * 3 + 2];
-      counts[next]++;
+      const count = counts[next];
+      for (let j = 0; j < ws; j++) {
+        weights[next * ws + j] = (weights[next * ws + j] * count + mesh.materialWeights[i * ws + j]) / (count + 1);
+      }
+      counts[next] = count + 1;
     }
     remap[i] = next;
   }
@@ -67,7 +71,7 @@ function weldMergedChildVertices(mesh: PageMesh, epsilon: number): PageMesh {
 
   const indices = new Uint32Array(mesh.indices.length);
   for (let i = 0; i < mesh.indices.length; i++) indices[i] = remap[mesh.indices[i]];
-  return {
+  const welded: PageMesh = {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
     paintSlots: new Float32Array(materials),
@@ -75,6 +79,8 @@ function weldMergedChildVertices(mesh: PageMesh, epsilon: number): PageMesh {
     materialWeightStride: ws,
     indices,
   };
+  normalizeMaterialWeights(welded, "weldMergedChildVertices output");
+  return welded;
 }
 
 export function validateFiniteMesh(mesh: PageMesh, label: string): void {

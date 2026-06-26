@@ -2,24 +2,30 @@ import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffer
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
 import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings, type GrassSettings } from "../grass/grass_config.js";
+import { grassHeightDensityVector, grassMaterialDensityVector } from "../grass/grass_material_bias.js";
 
 const WORKGROUP_SIZE = 64;
-const PARAM_BYTES = 16 * 14;
+const PARAM_BYTES = 16 * 17;
 const COUNTER_BYTES = 4 * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_TIER = 5;
 const TIER_COUNT = 4;
 const INDIRECT_BYTES = TIER_COUNT * INDIRECT_ARGS_PER_TIER * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
+const DEFAULT_MATERIAL_DENSITY: [number, number, number, number] = [1, 1, 1, 1];
+const DEFAULT_HEIGHT_DENSITY: [number, number, number, number, number, number] = [14, 34, 8, 1, 1, 1];
 export const GRASS_GPU_RING_MAX_SAFE_GRID = 384;
 
-// Toroidal slot grid: GRID² candidate cells, CELL m apart → ±(GRID·CELL/2) m ring. Density polish:
-// a denser grid (smaller CELL) gives a lusher near field; survivors widen by 1/√thin to conserve
-// coverage. ~245 m ring at ~2 slots/m². Cull is one dispatch over GRID² (cheap on GPU).
 export const GRASS_GPU_RING_GRID = DEFAULT_GRASS_SETTINGS.ring.grid;
 export const GRASS_GPU_RING_CELL = DEFAULT_GRASS_SETTINGS.ring.cell;
 export const GRASS_GPU_RING_SLOT_COUNT = GRASS_GPU_RING_GRID * GRASS_GPU_RING_GRID;
 export const GRASS_GPU_RING_STORAGE_BINDINGS = 7;
+
+export interface GrassHydrologyData {
+  res: number;
+  worldCells: number;
+  data: Float32Array;
+}
 
 export function grassGpuRingGrid(ring: Pick<GrassRingSettings, "grid"> = DEFAULT_GRASS_SETTINGS.ring): number {
   const grid = Number.isFinite(ring.grid) ? ring.grid : DEFAULT_GRASS_SETTINGS.ring.grid;
@@ -63,6 +69,8 @@ export interface GrassGpuRingDispatchParams {
   maxInstancesPerTier: number;
   seed: number;
   jitter: number;
+  materialDensity?: [number, number, number, number];
+  heightDensity?: [number, number, number, number, number, number];
   frustumPlanes?: ArrayLike<number>;
 }
 
@@ -76,6 +84,8 @@ export interface GrassGpuRingDensityParams {
   maxWidthCompensation: number;
   scruffMinDensity: number;
   gustStrength: number;
+  materialDensity?: [number, number, number, number];
+  heightDensity?: [number, number, number, number, number, number];
 }
 
 export interface GrassGpuRingIndexCounts {
@@ -152,6 +162,7 @@ export function grassGpuRingDensityParams(
 ): GrassGpuRingDensityParams {
   const nearDistance = settings.distance * settings.lod.nearFraction;
   const midDistance = settings.distance * settings.lod.midFraction;
+  const maybeFullSettings = settings as GrassSettings;
   return {
     nearDistance,
     midDistance,
@@ -162,7 +173,17 @@ export function grassGpuRingDensityParams(
     maxWidthCompensation: settings.blade.maxWidthCompensation,
     scruffMinDensity: settings.ring.scruffMinDensity,
     gustStrength: settings.wind.gustStrength,
+    materialDensity: grassMaterialDensityVector(maybeFullSettings),
+    heightDensity: grassHeightDensityVector(maybeFullSettings),
   };
+}
+
+export function grassGpuRingMaterialDensity(settings: GrassSettings): [number, number, number, number] {
+  return grassMaterialDensityVector(settings);
+}
+
+export function grassGpuRingHeightDensity(settings: GrassSettings): [number, number, number, number, number, number] {
+  return grassHeightDensityVector(settings);
 }
 
 export function packGrassGpuRingParams(
@@ -206,9 +227,20 @@ export function packGrassGpuRingParams(
   f32[29] = params.density.farInstanceFraction;
   f32[30] = params.density.scruffMinDensity;
   f32[31] = params.jitter;
+
+  const material = params.materialDensity ?? params.density.materialDensity ?? DEFAULT_MATERIAL_DENSITY;
+  const height = params.heightDensity ?? params.density.heightDensity ?? DEFAULT_HEIGHT_DENSITY;
+  for (let i = 0; i < 4; i++) f32[32 + i] = material[i] ?? 1;
+  f32[36] = height[0] ?? DEFAULT_HEIGHT_DENSITY[0];
+  f32[37] = height[1] ?? DEFAULT_HEIGHT_DENSITY[1];
+  f32[38] = height[2] ?? DEFAULT_HEIGHT_DENSITY[2];
+  f32[39] = height[3] ?? DEFAULT_HEIGHT_DENSITY[3];
+  f32[40] = height[4] ?? DEFAULT_HEIGHT_DENSITY[4];
+  f32[41] = height[5] ?? DEFAULT_HEIGHT_DENSITY[5];
+
   if (params.frustumPlanes) {
     for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) {
-      f32[32 + i] = params.frustumPlanes[i] ?? 0;
+      f32[44 + i] = params.frustumPlanes[i] ?? 0;
     }
   }
   return scratch;
@@ -223,6 +255,7 @@ export class GrassGpuRingCompute {
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
   private readonly bindGroup: GPUBindGroup;
+  private readonly hydroTexture: GPUTexture;
   private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private counts: GrassGpuRingCounts = { near: 0, mid: 0, far: 0, super: 0 };
@@ -241,6 +274,7 @@ export class GrassGpuRingCompute {
     edits: readonly ResolvedDigEdit[],
     outputBuffers: GrassGpuRingOutputBuffers | null,
     private readonly ring: GrassRingSettings,
+    hydroData: GrassHydrologyData | null,
   ) {
     this.pipelines = pipelines;
     this.outputBuffers = outputBuffers;
@@ -288,6 +322,12 @@ export class GrassGpuRingCompute {
       destroyAfterMap: false,
       cpu: new Uint32Array(TIER_COUNT),
     }));
+    this.hydroTexture = this.createHydrologyTexture(hydroData);
+    const hydroSampler = device.createSampler({
+      label: "grass ring hydro sampler",
+      magFilter: "nearest",
+      minFilter: "nearest",
+    });
     this.bindGroup = device.createBindGroup({
       label: "grass ring bind group",
       layout,
@@ -298,6 +338,8 @@ export class GrassGpuRingCompute {
         ...this.outputBindGroupEntries(),
         { binding: 7, resource: { buffer: this.digEdits } },
         { binding: 8, resource: { buffer: this.fieldParams } },
+        { binding: 9, resource: this.hydroTexture.createView() },
+        { binding: 10, resource: hydroSampler },
       ],
     });
   }
@@ -307,6 +349,7 @@ export class GrassGpuRingCompute {
     edits: readonly ResolvedDigEdit[],
     outputBuffers: GrassGpuRingOutputBuffers | null = null,
     ring: GrassRingSettings = DEFAULT_GRASS_SETTINGS.ring,
+    hydroData: GrassHydrologyData | null = null,
   ): Promise<GrassGpuRingCompute> {
     const module = device.createShaderModule({
       label: "grass ring compute shader",
@@ -329,6 +372,8 @@ export class GrassGpuRingCompute {
         storage(6),
         storage(7, "read-only-storage"),
         { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+        { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -338,11 +383,7 @@ export class GrassGpuRingCompute {
         layout: pipelineLayout,
         compute: { module, entryPoint },
       });
-    const [
-      clearCounters,
-      cull,
-      buildIndirectArgs,
-    ] = await Promise.all([
+    const [clearCounters, cull, buildIndirectArgs] = await Promise.all([
       makePipeline("clear_counters"),
       makePipeline("grass_cull"),
       makePipeline("build_indirect_args"),
@@ -351,7 +392,7 @@ export class GrassGpuRingCompute {
       clear_counters: clearCounters,
       grass_cull: cull,
       build_indirect_args: buildIndirectArgs,
-    }, edits, outputBuffers, { ...ring });
+    }, edits, outputBuffers, { ...ring }, hydroData);
   }
 
   dispatch(params: GrassGpuRingDispatchParams, indexCounts: GrassGpuRingIndexCounts): boolean {
@@ -461,6 +502,7 @@ export class GrassGpuRingCompute {
     this.counterBuffer.destroy();
     this.digEdits.destroy();
     this.fieldParams.destroy();
+    this.hydroTexture.destroy();
     if (!this.outputBuffers) this.indirectArgs.destroy();
     for (const slot of this.counterReadbacks) {
       if (slot.busy) slot.destroyAfterMap = true;
@@ -501,5 +543,31 @@ export class GrassGpuRingCompute {
       super: shared,
       indirectArgs: this.indirectArgs,
     };
+  }
+
+  private createHydrologyTexture(hydroData: GrassHydrologyData | null): GPUTexture {
+    if (hydroData && hydroData.data.length > 0) {
+      const texture = this.device.createTexture({
+        label: "grass ring hydro texture",
+        size: { width: hydroData.res, height: hydroData.res },
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      const bytes = new Uint8Array(hydroData.data.byteLength);
+      bytes.set(new Uint8Array(hydroData.data.buffer, hydroData.data.byteOffset, hydroData.data.byteLength));
+      this.device.queue.writeTexture(
+        { texture },
+        bytes,
+        { bytesPerRow: hydroData.res * 16 },
+        { width: hydroData.res, height: hydroData.res },
+      );
+      return texture;
+    }
+    return this.device.createTexture({
+      label: "grass ring fallback hydro texture",
+      size: { width: 1, height: 1 },
+      format: "rgba32float",
+      usage: GPUTextureUsage.TEXTURE_BINDING,
+    });
   }
 }

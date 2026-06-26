@@ -24,13 +24,13 @@ import {
   sin,
   smoothstep,
   storage,
-  texture,
   uniform,
   uv,
   vec2,
   vec3,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import { sampleCarvedBedBilinearTsl, sampleHydrologyBilinearTsl } from "./placement_height.js";
 import {
   createBladeGeometry,
   createGrassClumpGeometry,
@@ -76,6 +76,8 @@ export interface GrassNodeParams {
   hydrologyWaterTexture?: THREE.Texture | null;
   /** World size (worldCells) used to map instance XZ → hydrology texture UV. */
   worldSize?: number;
+  /** Hydrology grid resolution for bilinear carved-bed sampling. */
+  hydrologyRes?: number;
   /** Metres of blade base allowed below the water surface before discard. */
   waterClearance?: number;
   /** Explicit tier base offset into the shared storage buffer (tier * maxPerTier). When set, the material reads instanceIndex + tierBaseOffset instead of relying on indirect firstInstance. */
@@ -154,11 +156,14 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   let groundY: TslNode = aOffset.y;
   let hydroWaterY: TslNode | null = null;
   if (params.hydrologyWaterTexture) {
-    const uHydroWorldSize = uniform(params.worldSize ?? 1);
-    const hydroUv: TslNode = vec2(aOffset.x, aOffset.z).div(uHydroWorldSize);
-    const hydro: TslNode = texture(params.hydrologyWaterTexture, hydroUv);
+    const hydroSample = {
+      texture: params.hydrologyWaterTexture,
+      worldSize: params.worldSize ?? 1,
+      res: params.hydrologyRes ?? 1,
+    };
+    const hydro: TslNode = sampleHydrologyBilinearTsl(aOffset.x, aOffset.z, hydroSample);
     hydroWaterY = hydro.x;
-    groundY = hydro.z;
+    groundY = sampleCarvedBedBilinearTsl(aOffset.x, aOffset.z, hydroSample);
   }
   const aTerrainNormal: TslNode = aTerrainNormal4.xyz;
   const aHeight: TslNode = aPacked0.x;

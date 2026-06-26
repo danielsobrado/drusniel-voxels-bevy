@@ -48,6 +48,23 @@ export interface UnderstoryClassSettings {
   windWeight: number;
 }
 
+export interface UnderstoryTerrainClassWeights {
+  density: number;
+  shrub: number;
+  fern: number;
+  sapling: number;
+  flower: number;
+  dead_log: number;
+  stump: number;
+}
+
+export interface UnderstoryTerrainWeights {
+  grass: UnderstoryTerrainClassWeights;
+  rock: UnderstoryTerrainClassWeights;
+  sand: UnderstoryTerrainClassWeights;
+  snow: UnderstoryTerrainClassWeights;
+}
+
 export interface UnderstoryRenderSettings {
   debugColorByClass: boolean;
   alphaTest: number;
@@ -80,6 +97,7 @@ export interface UnderstorySettings {
   maxInstances: number;
   placement: UnderstoryPlacementSettings;
   ecology: UnderstoryEcologySettings;
+  terrain: UnderstoryTerrainWeights;
   classes: Record<UnderstoryClass, UnderstoryClassSettings>;
   render: UnderstoryRenderSettings;
   gpu: UnderstoryGpuSettings;
@@ -96,6 +114,16 @@ interface UnderstoryYamlClass {
   moisture_preference?: number;
   forest_edge_bias?: number;
   wind_weight?: number;
+}
+
+interface UnderstoryYamlTerrainClass {
+  density?: number;
+  shrub?: number;
+  fern?: number;
+  sapling?: number;
+  flower?: number;
+  dead_log?: number;
+  stump?: number;
 }
 
 interface UnderstoryYamlConfig {
@@ -127,6 +155,7 @@ interface UnderstoryYamlConfig {
       density_noise_strength?: number;
       deadfall_old_forest_bias?: number;
     };
+    terrain?: Partial<Record<"grass" | "rock" | "sand" | "snow", UnderstoryYamlTerrainClass>>;
     classes?: Partial<Record<UnderstoryClass, UnderstoryYamlClass>>;
     render?: {
       debug_color_by_class?: boolean;
@@ -148,6 +177,23 @@ interface UnderstoryYamlGpu {
   debug_show_gpu_counts?: boolean;
   debug_validate_against_cpu?: boolean;
 }
+
+const terrainDefaults = (
+  density: number,
+  shrub: number,
+  fern: number,
+  sapling: number,
+  flower: number,
+  deadLog: number,
+  stump: number,
+): UnderstoryTerrainClassWeights => ({ density, shrub, fern, sapling, flower, dead_log: deadLog, stump });
+
+export const DEFAULT_UNDERSTORY_TERRAIN_WEIGHTS: UnderstoryTerrainWeights = {
+  grass: terrainDefaults(1.15, 1.0, 1.15, 0.9, 1.25, 0.65, 0.7),
+  rock: terrainDefaults(0.55, 0.75, 0.35, 0.7, 0.18, 1.25, 1.2),
+  sand: terrainDefaults(0.7, 0.55, 0.35, 0.35, 0.8, 0.55, 0.5),
+  snow: terrainDefaults(0.28, 0.42, 0.18, 0.22, 0.05, 1.45, 1.25),
+};
 
 export const DEFAULT_UNDERSTORY_GPU_SETTINGS: UnderstoryGpuSettings = {
   enabled: true,
@@ -188,6 +234,7 @@ export const DEFAULT_UNDERSTORY_SETTINGS: UnderstorySettings = {
     densityNoiseStrength: 0.55,
     deadfallOldForestBias: 0.75,
   },
+  terrain: cloneUnderstoryTerrainWeights(DEFAULT_UNDERSTORY_TERRAIN_WEIGHTS),
   classes: {
     shrub: classDefaults(0.30, 1.0, 0.7, 1.6, "any", 0.55, 0.45, 0.65, 0.35),
     fern: classDefaults(0.24, 1.0, 0.55, 1.25, "low", 0.85, 0.80, 0.25, 0.55),
@@ -210,6 +257,7 @@ export function cloneUnderstorySettings(settings: UnderstorySettings = DEFAULT_U
     ...settings,
     placement: { ...settings.placement },
     ecology: { ...settings.ecology },
+    terrain: cloneUnderstoryTerrainWeights(settings.terrain),
     classes: {
       shrub: { ...settings.classes.shrub },
       fern: { ...settings.classes.fern },
@@ -267,6 +315,7 @@ export function parseUnderstoryConfig(
       densityNoiseStrength: readNumberInRange(raw.ecology?.density_noise_strength, fallback.ecology.densityNoiseStrength, 0, 1),
       deadfallOldForestBias: readNumberInRange(raw.ecology?.deadfall_old_forest_bias, fallback.ecology.deadfallOldForestBias, 0, 2),
     },
+    terrain: readUnderstoryTerrainWeights(raw.terrain, fallback.terrain),
     classes: {
       shrub: readClass(fallback.classes.shrub, raw.classes?.shrub),
       fern: readClass(fallback.classes.fern, raw.classes?.fern),
@@ -282,6 +331,42 @@ export function parseUnderstoryConfig(
       maxShadowClass: readUnderstoryClass(raw.render?.max_shadow_class, fallback.render.maxShadowClass),
     },
     gpu: readUnderstoryGpuSettings(raw.gpu, fallback.gpu),
+  };
+}
+
+function readUnderstoryTerrainWeights(
+  raw: Partial<Record<"grass" | "rock" | "sand" | "snow", UnderstoryYamlTerrainClass>> | undefined,
+  fallback: UnderstoryTerrainWeights,
+): UnderstoryTerrainWeights {
+  return {
+    grass: readTerrainClass(fallback.grass, raw?.grass),
+    rock: readTerrainClass(fallback.rock, raw?.rock),
+    sand: readTerrainClass(fallback.sand, raw?.sand),
+    snow: readTerrainClass(fallback.snow, raw?.snow),
+  };
+}
+
+function readTerrainClass(
+  fallback: UnderstoryTerrainClassWeights,
+  raw: UnderstoryYamlTerrainClass | undefined,
+): UnderstoryTerrainClassWeights {
+  return {
+    density: readNumberAtLeast(raw?.density, fallback.density, 0),
+    shrub: readNumberAtLeast(raw?.shrub, fallback.shrub, 0),
+    fern: readNumberAtLeast(raw?.fern, fallback.fern, 0),
+    sapling: readNumberAtLeast(raw?.sapling, fallback.sapling, 0),
+    flower: readNumberAtLeast(raw?.flower, fallback.flower, 0),
+    dead_log: readNumberAtLeast(raw?.dead_log, fallback.dead_log, 0),
+    stump: readNumberAtLeast(raw?.stump, fallback.stump, 0),
+  };
+}
+
+function cloneUnderstoryTerrainWeights(weights: UnderstoryTerrainWeights): UnderstoryTerrainWeights {
+  return {
+    grass: { ...weights.grass },
+    rock: { ...weights.rock },
+    sand: { ...weights.sand },
+    snow: { ...weights.snow },
   };
 }
 

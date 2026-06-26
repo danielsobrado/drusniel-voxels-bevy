@@ -1,4 +1,4 @@
-import type { ProjectSessionState } from "../../project/project_archive.js";
+import type { ProjectSessionState } from "../../project/voxel_project_archive.js";
 import { DEFAULT_ENVIRONMENT_SETTINGS } from "../../environment/environment.js";
 import {
   DEFAULT_POST_PROCESS_SETTINGS,

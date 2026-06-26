@@ -11,6 +11,7 @@ import {
   cos,
   dot,
   floor,
+  float,
   fract,
   frontFacing,
   instanceIndex,
@@ -24,18 +25,21 @@ import {
   sin,
   smoothstep,
   storage,
-  texture,
   uniform,
   vec2,
   vec3,
 } from "three/tsl";
 import type { StoneLighting } from "../stones/stone_instances.js";
+import { sampleCarvedBedBilinearTsl, sampleHydrologyBilinearTsl } from "./placement_height.js";
+import { readRiverMaterialSettings } from "../water/riverMaterialRuntime.js";
 
 export interface StoneHydrologyWater {
   /** RGBA32F hydrology field; G = wet mask, B = carved-bed Y. */
   texture: THREE.Texture | null;
   /** World size (worldCells) mapping instance XZ → hydrology UV. */
   worldSize: number;
+  /** Hydrology grid resolution for bilinear carved-bed sampling. */
+  res: number;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -63,14 +67,17 @@ export function createStoneNodeMaterial(
   instanceBuffers?: StoneStorageInstanceBuffers,
   hydrology?: StoneHydrologyWater,
 ): StoneNodeMaterialHandle {
+  const riverMaterial = readRiverMaterialSettings();
   const uLight = uniform(lighting.light.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
+  const uWetRockDarkening = uniform(riverMaterial.wetRockDarkening);
 
   let worldPos: TslNode = positionWorld;
   let normalNode: TslNode = normalize(normalWorld);
   let aboveWater: TslNode | null = null;
+  let wetRock: TslNode | null = null;
   if (instanceBuffers) {
     const instAStore: TslNode = storage(instanceBuffers.instanceA, "vec4", instanceBuffers.capacity).toReadOnly();
     const instBStore: TslNode = storage(instanceBuffers.instanceB, "vec4", instanceBuffers.capacity).toReadOnly();
@@ -84,11 +91,20 @@ export function createStoneNodeMaterial(
     // Snap the stone's ground to the carved-bed height (hydrology B channel) so it
     // sits on the carved terrain instead of floating on the un-carved base height.
     let groundY: TslNode = instA.y;
+    const sinkDepth: TslNode = instB.w;
     if (hydrology?.texture) {
-      const uHydroWorldSize: TslNode = uniform(hydrology.worldSize);
-      const hydro: TslNode = texture(hydrology.texture, vec2(instA.x, instA.z).div(uHydroWorldSize));
-      groundY = hydro.z; // carved-bed height (B channel)
-      aboveWater = hydro.y.lessThan(0.5); // G = wet mask; drop stones in water bodies
+      const hydroSample = {
+        texture: hydrology.texture,
+        worldSize: hydrology.worldSize,
+        res: hydrology.res,
+      };
+      const hydro: TslNode = sampleHydrologyBilinearTsl(instA.x, instA.z, hydroSample);
+      const heightAboveWater: TslNode = instA.y.sub(hydro.x);
+      groundY = sampleCarvedBedBilinearTsl(instA.x, instA.z, hydroSample).sub(sinkDepth);
+      aboveWater = hydro.y.lessThan(0.5).or(heightAboveWater.greaterThan(0.03));
+      wetRock = hydro.y
+        .mul(float(1).sub(smoothstep(0.10, 2.15, heightAboveWater)))
+        .mul(uWetRockDarkening);
     }
     worldPos = vec3(
       rx.add(instB.y.mul(local.y)).add(instA.x),
@@ -120,6 +136,11 @@ export function createStoneNodeMaterial(
   const moss = clamp(vdata.z, 0.0, 1.0).mul(up);
   rock = mix(rock, vec3(0.22, 0.3, 0.14), moss.mul(0.25));
   rock = mix(rock, vec3(0.18, 0.15, 0.12), up.oneMinus().mul(0.18));
+  if (wetRock) {
+    const fleck = smoothstep(0.78, 0.98, hash2(floor(worldPos.xz.mul(3.5).add(worldPos.y.mul(0.4))))).mul(wetRock).mul(0.42);
+    rock = mix(rock, rock.mul(vec3(0.42, 0.50, 0.48)), wetRock);
+    rock = mix(rock, vec3(0.72, 0.78, 0.74), fleck);
+  }
 
   const ao = clamp(vdata.w, 0.0, 1.0);
   const sun = max(dot(n, uLight), 0.0);

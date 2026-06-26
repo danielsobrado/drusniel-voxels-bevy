@@ -5,12 +5,13 @@
 use bevy::math::{Vec2, Vec3};
 
 use crate::constants::WATER_LEVEL;
+use crate::terrain::generation::{can_place, PlacementKind, WorldShapeSampler};
 use crate::voxel::terrain::{NoiseGenerator, TerrainGenerator};
 
 use super::config::{StoneClassId, StoneConfig};
 use super::hash::StoneRng;
 use super::rock_mesh::RockPreset;
-use super::site_sample::{StoneSiteSample, sample_site};
+use super::site_sample::{sample_site, StoneSiteSample};
 use super::{deterministic_hash, hash_to_seed};
 
 const TAU: f32 = std::f32::consts::TAU;
@@ -65,8 +66,6 @@ fn stone_weight(site: &StoneSiteSample, cfg: &StoneConfig, gx: i32, gz: i32) -> 
 }
 
 fn select_class(site: &StoneSiteSample, cfg: &StoneConfig, roll: f32) -> StoneClassId {
-    // Large stones gather in scree fans / below cliffs / in streambeds, but stay a minority:
-    // the bias is capped so the small class keeps dominating the ground-cover layer.
     let large_bias = (1.0
         + site.scree * 0.5
         + site.cliff_above * 0.6
@@ -128,8 +127,64 @@ pub fn generate_stones_in_area<N: NoiseGenerator>(
         .collect()
 }
 
+pub fn generate_stones_in_area_with_world_shape<N: NoiseGenerator>(
+    terrain: &TerrainGenerator<N>,
+    world_shape: &WorldShapeSampler,
+    min_x: i32,
+    min_z: i32,
+    max_x: i32,
+    max_z: i32,
+    cfg: &StoneConfig,
+) -> Vec<StoneInstance> {
+    generate_ranked_stones_in_area_with_world_shape(
+        terrain,
+        world_shape,
+        min_x,
+        min_z,
+        max_x,
+        max_z,
+        cfg,
+    )
+    .into_iter()
+    .take(cfg.max_instances)
+    .map(|(_, instance)| instance)
+    .collect()
+}
+
 pub fn generate_ranked_stones_in_area<N: NoiseGenerator>(
     terrain: &TerrainGenerator<N>,
+    min_x: i32,
+    min_z: i32,
+    max_x: i32,
+    max_z: i32,
+    cfg: &StoneConfig,
+) -> Vec<(f32, StoneInstance)> {
+    generate_ranked_stones_in_area_inner(terrain, None, min_x, min_z, max_x, max_z, cfg)
+}
+
+pub fn generate_ranked_stones_in_area_with_world_shape<N: NoiseGenerator>(
+    terrain: &TerrainGenerator<N>,
+    world_shape: &WorldShapeSampler,
+    min_x: i32,
+    min_z: i32,
+    max_x: i32,
+    max_z: i32,
+    cfg: &StoneConfig,
+) -> Vec<(f32, StoneInstance)> {
+    generate_ranked_stones_in_area_inner(
+        terrain,
+        Some(world_shape),
+        min_x,
+        min_z,
+        max_x,
+        max_z,
+        cfg,
+    )
+}
+
+fn generate_ranked_stones_in_area_inner<N: NoiseGenerator>(
+    terrain: &TerrainGenerator<N>,
+    world_shape: Option<&WorldShapeSampler>,
     min_x: i32,
     min_z: i32,
     max_x: i32,
@@ -156,6 +211,13 @@ pub fn generate_ranked_stones_in_area<N: NoiseGenerator>(
             let wx = fx.round() as i32;
             let wz = fz.round() as i32;
 
+            if let Some(world_shape) = world_shape {
+                let sample = world_shape.sample(fx, fz);
+                if !can_place(&sample, PlacementKind::Stone) {
+                    continue;
+                }
+            }
+
             let site = sample_site(terrain, wx, wz, cfg);
             if site.height < water_floor {
                 continue;
@@ -168,8 +230,6 @@ pub fn generate_ranked_stones_in_area<N: NoiseGenerator>(
                 continue;
             }
 
-            // Per-cell strong PRNG for the categorical / continuous draws (the single-round
-            // spatial hashes band on the structured grid; sfc32 does not).
             let seed = seeded_seed(cfg, grid_x, grid_z, "stone");
             let mut rng = StoneRng::new(seed as u32);
             let class = select_class(&site, cfg, rng.next_f32());
@@ -227,6 +287,7 @@ pub fn class_shares(instances: &[StoneInstance]) -> [f32; 3] {
 mod tests {
     use super::*;
     use crate::terrain::generation::config::TerrainConfig;
+    use crate::terrain::generation::WorldShapeConfig;
     use crate::voxel::terrain::ValueNoise;
 
     fn terrain() -> TerrainGenerator<ValueNoise> {
@@ -329,5 +390,24 @@ mod tests {
             ..enabled_config()
         };
         assert!(generate_stones_in_area(&t, -256, -256, 256, 256, &cfg).is_empty());
+    }
+
+    #[test]
+    fn world_shape_can_filter_ocean_stones() {
+        let t = terrain();
+        let mut shape_config = WorldShapeConfig::default();
+        shape_config.continents.threshold = 2.0;
+        let world_shape = WorldShapeSampler::new(shape_config);
+        let stones = generate_stones_in_area_with_world_shape(
+            &t,
+            &world_shape,
+            -128,
+            -128,
+            128,
+            128,
+            &enabled_config(),
+        );
+
+        assert!(stones.is_empty());
     }
 }

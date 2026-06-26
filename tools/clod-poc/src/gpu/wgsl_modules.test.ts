@@ -43,9 +43,13 @@ describe("WGSL module composition", () => {
 
     expect(source).toContain("@group(0) @binding(5)");
     expect(source).toContain("@group(0) @binding(6)");
+    expect(source).toContain("@group(0) @binding(7) var hydro_texture");
+    expect(source).toContain("@group(0) @binding(8) var hydro_sampler");
     expect(source).toContain("fn scatter_stones");
     expect(bindingDeclarationCount(source, "digEdits")).toBe(1);
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
+    expect(source.match(/^@group\(0\) @binding\(7\) var hydro_texture:/gm)).toHaveLength(1);
+    expect(source.match(/^@group\(0\) @binding\(8\) var hydro_sampler:/gm)).toHaveLength(1);
   });
 
   it("composes tree ring helpers with explicit tree field bindings and shared terrain functions", () => {

@@ -6,7 +6,7 @@
 // fails later with a worse message). Spatial hash, NOT a kd-tree (jglrxavpok perf trap).
 
 import { PageMesh, ClodBuildError, vertexCount, type BorderTolerances } from "../types.js";
-import { assertMaterialWeights } from "../material/material_weights.js";
+import { assertMaterialWeights, normalizeMaterialWeights } from "../material/material_weights.js";
 
 export interface WeldReport {
   inputVertices: number;
@@ -85,7 +85,6 @@ export function weldVertices(mesh: PageMesh, epsilon: number, tolerances?: Borde
         if (maxWeightDelta > tol.material) parts.push(`max weight delta ${maxWeightDelta.toExponential(2)} (need <= ${tol.material})`);
         throw new ClodBuildError("DirtyInput", parts.join("; "));
       }
-      // average material weights on merge
       const mc = mergeCount[found];
       for (let j = 0; j < ws; j++) {
         wgt[found * ws + j] = (wgt[found * ws + j] * mc + mesh.materialWeights[i * ws + j]) / (mc + 1);
@@ -98,15 +97,18 @@ export function weldVertices(mesh: PageMesh, epsilon: number, tolerances?: Borde
   const indices = new Uint32Array(mesh.indices.length);
   for (let i = 0; i < mesh.indices.length; i++) indices[i] = remap[mesh.indices[i]];
 
+  const welded: PageMesh = {
+    positions: new Float32Array(pos),
+    normals: new Float32Array(nrm),
+    paintSlots: new Float32Array(mat),
+    materialWeights: new Float32Array(wgt),
+    materialWeightStride: ws,
+    indices,
+  };
+  normalizeMaterialWeights(welded, "weldVertices output");
+
   return {
-    mesh: {
-      positions: new Float32Array(pos),
-      normals: new Float32Array(nrm),
-      paintSlots: new Float32Array(mat),
-      materialWeights: new Float32Array(wgt),
-      materialWeightStride: ws,
-      indices,
-    },
+    mesh: welded,
     report: { inputVertices: n, outputVertices: pos.length / 3, mergedVertices: n - pos.length / 3 },
   };
 }

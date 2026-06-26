@@ -1,0 +1,34 @@
+world_shape:
+  seed: 1337
+  sea_level: 0.0
+
+  continents:
+    scale: 0.00055
+    octaves: 5
+    lacunarity: 2.0
+    gain: 0.5
+    threshold: 0.08
+    warp_scale: 0.0009
+    warp_strength_m: 180.0
+
+  islands:
+    scale: 0.0018
+    octaves: 4
+    lacunarity: 2.1
+    gain: 0.52
+    threshold: 0.22
+    contribution: 0.35
+
+  coast:
+    beach_width_m: 45.0
+    shelf_width_m: 220.0
+    cliff_chance: 0.35
+    cliff_noise_scale: 0.004
+    cliff_slope_threshold: 0.42
+
+  ocean:
+    shelf_depth: -8.0
+    deep_sea_depth: -80.0
+    trench_depth: -160.0
+    trench_scale: 0.0008
+    trench_strength: 0.45

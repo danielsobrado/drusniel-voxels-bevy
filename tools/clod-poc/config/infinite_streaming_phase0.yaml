@@ -85,6 +85,62 @@ phase0:
         duration_seconds: 30
         look_distance_m: 4096
 
+    infinite_far_shell_straight:
+      world: 16
+      camera:
+        mode: scripted
+        start_x_ratio: 0.20
+        start_z_ratio: 0.50
+        direction_degrees: 90
+        speed_mps: 18
+        duration_seconds: 30
+        look_distance_m: 8192
+      simulated_streaming_only: true
+
+    infinite_far_shell_fast_turn:
+      world: 16
+      camera:
+        mode: scripted
+        start_x_ratio: 0.50
+        start_z_ratio: 0.50
+        speed_mps: 12
+        duration_seconds: 30
+        turn_degrees_per_second: 90
+        look_distance_m: 8192
+      simulated_streaming_only: true
+
+    infinite_far_shell_mountain_approach:
+      world: 16
+      camera:
+        mode: scripted
+        start_x_ratio: 0.50
+        start_z_ratio: 0.50
+        speed_mps: 15
+        duration_seconds: 25
+        direction_degrees: 45
+        look_distance_m: 8192
+      simulated_streaming_only: true
+
+    long_view_8km:
+      world: 16
+      camera:
+        mode: fixed
+        x_ratio: 0.50
+        z_ratio: 0.50
+        y_offset_m: 400
+        look_distance_m: 8192
+      require_visible_m: 8192
+
+    long_view_16km:
+      world: 16
+      camera:
+        mode: fixed
+        x_ratio: 0.50
+        z_ratio: 0.50
+        y_offset_m: 600
+        look_distance_m: 16384
+      require_visible_m: 16384
+
 metrics:
   required_counters:
     - world_cells
@@ -121,6 +177,18 @@ metrics:
     - streamer_simulated_missing_pages
     - horizon_hole_ratio
     - stale_fallback_count
+    - far_shell_inner_m
+    - far_shell_outer_m
+    - far_shell_vertices
+    - far_shell_rebuilds
+    - far_shell_last_rebuild_ms
+    - far_summary_tiles_required
+    - far_summary_tiles_ready
+    - far_summary_tiles_missing
+    - far_summary_tiles_stale
+    - far_summary_tiles_built_this_frame
+    - far_summary_cache_size
+    - far_summary_fallback_samples
 
 acceptance:
   allow_current_4km_failure: true

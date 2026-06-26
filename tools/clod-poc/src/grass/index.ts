@@ -1,4 +1,5 @@
 export * from "./grass_config.js";
+export * from "./grass_material_bias.js";
 export * from "./grass_math.js";
 export * from "./grass_cpu_patch.js";
 export * from "./grass_gpu_ring.js";

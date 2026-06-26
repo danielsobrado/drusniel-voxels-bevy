@@ -34,11 +34,11 @@ use bevy::shader::Shader;
 use crate::camera::controller::PlayerCamera;
 use crate::rendering::render_timing::RenderTimingSink;
 use crate::rendering::water::WaterConfig;
-use crate::rendering::water_reflection::{
+use super::reflection::{
     WaterReflectionBodyParams, WaterReflectionConfig, WaterReflectionDebugViewMode,
     WaterReflectionMaskTexture, WaterReflectionStatus, WaterReflectionTexture,
 };
-use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishParams;
+use super::finish::WitchcraftWaterFinishParams;
 use crate::weather::{WeatherRuntime, WeatherShaderUniforms};
 
 const COMPOSITOR_SHADER_HANDLE: Handle<Shader> =
@@ -128,7 +128,7 @@ fn extract_reflection_texture(world: &mut World) {
                 ]
             })
             .unwrap_or_else(|| {
-                let defaults = crate::rendering::water::WaterWeatherConfig::default();
+                let defaults = super::WaterWeatherConfig::default();
                 [
                     defaults.rain_distortion_boost,
                     defaults.rain_reflection_boost,
@@ -150,7 +150,7 @@ fn extract_reflection_texture(world: &mut World) {
                 ]
             })
             .unwrap_or_else(|| {
-                let defaults = crate::rendering::water::RefractionConfig::default();
+                let defaults = super::RefractionConfig::default();
                 [
                     if defaults.enabled { 1.0 } else { 0.0 },
                     defaults.strength,

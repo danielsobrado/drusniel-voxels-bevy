@@ -7,6 +7,9 @@ export const PROCEDURAL_DEBUG_MODES = {
   roughness: 5,
   "page LOD": 6,
   "seam stress": 7,
+  "river wetness": 8,
+  "river foam residue": 9,
+  "river droplets": 10,
 } as const;
 
 export type ProceduralDebugMode = keyof typeof PROCEDURAL_DEBUG_MODES;

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
-import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
+import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   createForestLightingUniforms,
@@ -54,7 +54,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     transparent: false,
     depthWrite: true,
   });
-  applyFoliageMaterialSettings(regularMaterial, (atlas) => {
+  applyFoliageMaterialSettings(regularMaterial, settings, (atlas) => {
     foliageAtlas?.dispose();
     foliageAtlas = atlas;
   });
@@ -79,7 +79,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     },
     updateSettings(nextSettings: TreeSettings) {
       updateTreeWindUniforms(uniforms, nextSettings);
-      applyFoliageMaterialSettings(regularMaterial, (atlas) => {
+      applyFoliageMaterialSettings(regularMaterial, nextSettings, (atlas) => {
         foliageAtlas?.dispose();
         foliageAtlas = atlas;
       });
@@ -126,6 +126,11 @@ vec2 treeInstanceWorldXZ = treeWorldXZ;
 vec2 treeInstanceWorldXZ = vec2(0.0);
 #endif
 float treePhase = treeWindHash(treeInstanceWorldXZ);
+float treeShapePhase = treeWindHash(treeInstanceWorldXZ + vec2(23.17, 91.71));
+float treeHeightMask = smoothstep(0.0, 14.0, position.y);
+float treeShape = (treeShapePhase - 0.5) * treeHeightMask;
+transformed.xz += normalize(transformed.xz + vec2(0.001)) * treeShape * 0.34;
+transformed.y *= 1.0 + treeShape * 0.055;
 float treeTime = uTreeTime * uTreeWindSpeed;
 float treeWave = sin(treeTime + treePhase * 6.2831853 + dot(treeInstanceWorldXZ, uTreeWindDirection) * 0.035);
 float treeGust = sin(treeTime * 0.37 + treePhase * 12.9898) * uTreeGustStrength;
@@ -197,16 +202,23 @@ function attachTreeShader(
 
 function applyFoliageMaterialSettings(
   material: THREE.MeshStandardMaterial,
+  settings: TreeSettings,
   replaceAtlas: (atlas: TreeFoliageAtlas | null) => void,
 ): void {
   material.side = THREE.DoubleSide;
   material.transparent = false;
   material.depthWrite = true;
-  // Foliage is real leaf/needle geometry lit by vertex colour now — the alpha-card
-  // atlas + cutout is retired, so no map and no alpha test (opaque meshes).
-  material.alphaTest = 0;
-  material.map = null;
-  replaceAtlas(null);
+  if (!settings.foliage.enabled) {
+    material.alphaTest = 0;
+    material.map = null;
+    replaceAtlas(null);
+    material.needsUpdate = true;
+    return;
+  }
+  const atlas = createTreeFoliageAtlas(settings);
+  material.alphaTest = settings.foliage.alphaTest;
+  material.map = atlas.texture;
+  replaceAtlas(atlas);
   material.needsUpdate = true;
 }
 

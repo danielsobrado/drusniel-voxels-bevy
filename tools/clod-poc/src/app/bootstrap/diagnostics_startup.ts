@@ -104,6 +104,18 @@ export function seedLongViewStats(
   lvStats.counters["streamer_simulated_missing_chunks"] = 0;
   lvStats.counters["streamer_simulated_missing_pages"] = 0;
   lvStats.counters["stale_fallback_count"] = 0;
+  lvStats.counters["far_shell_inner_m"] = 0;
+  lvStats.counters["far_shell_outer_m"] = 0;
+  lvStats.counters["far_shell_vertices"] = 0;
+  lvStats.counters["far_shell_rebuilds"] = 0;
+  lvStats.counters["far_shell_last_rebuild_ms"] = 0;
+  lvStats.counters["far_summary_tiles_required"] = 0;
+  lvStats.counters["far_summary_tiles_ready"] = 0;
+  lvStats.counters["far_summary_tiles_missing"] = 0;
+  lvStats.counters["far_summary_tiles_stale"] = 0;
+  lvStats.counters["far_summary_tiles_built_this_frame"] = 0;
+  lvStats.counters["far_summary_cache_size"] = 0;
+  lvStats.counters["far_summary_fallback_samples"] = 0;
 }
 
 export function createClodErrorComputeAccess(input: {

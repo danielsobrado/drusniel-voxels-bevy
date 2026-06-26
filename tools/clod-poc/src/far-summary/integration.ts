@@ -10,12 +10,15 @@ import { createFarSummaryStats } from "./stats.js";
 import type { FarSummaryStats } from "./types.js";
 import type { FarHeightProvider } from "./clipmap-sampler.js";
 import type { FarShellController } from "../systems/far_shell_controller.js";
+import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
+import { resetFrameShellMetrics } from "../long-view/farShellMetrics.js";
 
 export interface FarSummaryIntegrationOptions {
   terrainSampler: FarTerrainSampler;
   scene?: THREE.Scene;
   camera?: THREE.PerspectiveCamera;
   farShellController?: FarShellController;
+  farShellMetrics?: FarShellMetrics;
   config?: Partial<FarSummaryConfig>;
 }
 
@@ -98,12 +101,31 @@ export function initFarSummaryIntegration(
     stats.cacheMisses = currentStats.cacheMisses;
     stats.proceduralFallbacks = currentStats.proceduralFallbacks;
     stats.lowerRingFallbacks = currentStats.lowerRingFallbacks;
+    stats.conservativeFallbacks = currentStats.conservativeFallbacks;
     stats.tilesBuiltThisFrame = currentStats.tilesBuiltThisFrame;
     stats.tilesCommittedThisFrame = currentStats.tilesCommittedThisFrame;
     stats.buildTimeMs = currentStats.buildTimeMs;
     stats.maxBuildTimeMs = currentStats.maxBuildTimeMs;
 
     debugOverlay.update(frameIndex, stats);
+
+    if (options.farShellMetrics) {
+      const metrics = options.farShellMetrics;
+      resetFrameShellMetrics(metrics);
+      metrics.farSummaryTilesRequired = requests.length;
+      metrics.farSummaryTilesReady = stats.readyTiles;
+      metrics.farSummaryTilesMissing = Math.max(
+        0,
+        requests.length - stats.readyTiles - stats.buildingTiles,
+      );
+      metrics.farSummaryTilesStale = stats.staleTiles;
+      metrics.farSummaryTilesBuiltThisFrame = stats.tilesBuiltThisFrame;
+      metrics.farSummaryCacheSize = cache.getTileCount();
+      metrics.farSummaryFallbackSamples =
+        stats.proceduralFallbacks +
+        stats.lowerRingFallbacks +
+        stats.conservativeFallbacks;
+    }
 
     if (options.farShellController) {
       // Move shell to camera position (not predicted, which would drift ahead).

@@ -91,11 +91,17 @@ export interface FrameLoopVegetationDeps {
   understorySystem: UnderstoryController["system"];
   forestLightingSystem: ForestLightingController["system"];
   stoneSystem: StoneController["system"];
-  currentLighting: () => { sunDirection: THREE.Vector3 };
+  currentLighting: () => { sunDirection: THREE.Vector3; skyLight: THREE.Color };
 }
 
 export interface FrameLoopWaterWeatherDeps {
   waterController: WaterController;
+  deepOceanSurface: import("../../water/deep_ocean_surface.js").DeepOceanSurface | null;
+  deepOceanMaterial: import("../../water/deep_ocean_material.js").DeepOceanMaterialHandle | null;
+  waterField: import("../../water/waterField.js").WaterField;
+  deepOceanConfig: import("../../terrain/border_coast_config.js").DeepOceanRenderConfig;
+  deepOceanMeshPresent: boolean;
+  oceanSampler: import("../../water/ocean_service.js").OceanSampler | null;
   weatherController: WeatherController;
   updateWeatherStats: () => void;
   weatherStatsController: GuiDisplayController | null;
@@ -134,11 +140,27 @@ export interface FrameLoopDiagnosticsDeps {
     page: { chunk_size: number; chunks_per_page: number };
   };
   getFarShellRadiusFactor: () => number;
+  getShadowProxyInert: () => number;
+  getShadowProxyEnabled: () => number;
+  getFarShellMetrics?: () => import("../../long-view/farShellMetrics.js").FarShellMetrics | undefined;
+  infiniteFarShellActive?: () => boolean;
 }
 
 export interface FrameLoopFarSummaryDeps {
   /** Called each frame after terrain phase but before vegetation phase. */
   onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
+}
+
+export interface FrameLoopShadowProxyDeps {
+  rebuildIfNeeded: () => void;
+}
+
+export interface FrameLoopCanopyDeps {
+  update: (cameraX: number, cameraZ: number) => void;
+}
+
+export interface FrameLoopConstructionDeps {
+  update: () => void;
 }
 
 export interface ClodFrameLoopDeps {
@@ -150,4 +172,7 @@ export interface ClodFrameLoopDeps {
   stats: FrameLoopStatsDeps;
   diagnostics: FrameLoopDiagnosticsDeps;
   farSummary?: FrameLoopFarSummaryDeps;
+  shadowProxy?: FrameLoopShadowProxyDeps;
+  canopy?: FrameLoopCanopyDeps;
+  construction?: FrameLoopConstructionDeps;
 }

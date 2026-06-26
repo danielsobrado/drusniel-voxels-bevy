@@ -2,6 +2,8 @@
 // Runs in every build (the builder is off the frame path; correctness > speed here).
 
 import { PageMesh, PageFootprint, ClodBuildError, DEFAULT_TOLERANCES, vertexCount, type BorderTolerances } from "../types.js";
+import { coastMask } from "../terrain/border_coast.js";
+import { getBorderCoastRuntime } from "../terrain/terrain_surface.js";
 
 /** Undirected edge key for boundary-edge detection. String to avoid int overflow. */
 function edgeKey(a: number, b: number): string {
@@ -54,23 +56,33 @@ function distToPerimeter(x: number, z: number, fp: PageFootprint): number {
 // perimeter within ~1 cell rather than lying exactly on it. An unwelded internal seam
 // shows up as open edges far from the perimeter — that's what we catch.
 const PERIMETER_BAND = 1.0;
+const COAST_BOUNDARY_BAND = 0.01;
+
+function isCoastOpenBoundary(x: number, z: number): boolean {
+  const coast = getBorderCoastRuntime();
+  if (!coast) return false;
+  return coastMask(x, z, coast.config.coast, coast.worldCells) > COAST_BOUNDARY_BAND;
+}
 
 /**
  * Assert every open-boundary vertex hugs the page footprint perimeter (within one cell),
- * i.e. no INTERNAL topological border survived welding.
+ * i.e. no INTERNAL topological border survived welding. Coastline shaping can create a
+ * legitimate clipped terrain boundary inside the border-coast band, so those vertices are
+ * classified as coast-open boundaries instead of weld failures.
  */
-export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint): void {
+export function assertNoInternalBorders(mesh: PageMesh, footprint: PageFootprint, label?: string): void {
   const flags = openBoundaryVertexFlags(mesh);
   for (let i = 0; i < flags.length; i++) {
     if (!flags[i]) continue;
     const x = mesh.positions[i * 3], z = mesh.positions[i * 3 + 2];
-    if (distToPerimeter(x, z, footprint) > PERIMETER_BAND) {
-      throw new ClodBuildError(
-        "InternalBorderNotWelded",
-        `open-boundary vertex (${x.toFixed(2)},${mesh.positions[i * 3 + 1].toFixed(2)},${z.toFixed(2)}) ` +
-          `is ${distToPerimeter(x, z, footprint).toFixed(2)} cells from the footprint perimeter — weld missed an internal seam`,
-      );
-    }
+    const perimeterDistance = distToPerimeter(x, z, footprint);
+    if (perimeterDistance <= PERIMETER_BAND || isCoastOpenBoundary(x, z)) continue;
+    const prefix = label ? `${label}: ` : "";
+    throw new ClodBuildError(
+      "InternalBorderNotWelded",
+      `${prefix}open-boundary vertex (${x.toFixed(2)},${mesh.positions[i * 3 + 1].toFixed(2)},${z.toFixed(2)}) ` +
+        `is ${perimeterDistance.toFixed(2)} cells from the footprint perimeter — weld missed an internal seam`,
+    );
   }
 }
 
@@ -177,7 +189,7 @@ export function validateWeldedIntermediate(mesh: PageMesh, label: string, zeroAr
  */
 export function validateFinalPageMesh(mesh: PageMesh, footprint: PageFootprint, zeroAreaEpsilon: number, label: string): void {
   validateWeldedIntermediate(mesh, label, zeroAreaEpsilon);
-  assertNoInternalBorders(mesh, footprint);
+  assertNoInternalBorders(mesh, footprint, label);
 }
 
 /** @deprecated Use {@link validateFinalPageMesh} or {@link validateWeldedIntermediate}. */
@@ -256,28 +268,22 @@ export function assertBorderMatch(a: BorderChain, b: BorderChain, tolerances?: B
       a.positions[i][2] - b.positions[i][2],
     );
     if (dp > tol.position) {
-      throw new ClodBuildError("BorderPositionMismatch", `pos delta ${dp.toExponential(2)} at border vertex ${i}`);
+      throw new ClodBuildError("BorderPositionMismatch", `pos delta ${dp.toExponential(2)} > ${tol.position} at border index ${i}`);
     }
-    const dot =
-      a.normals[i][0] * b.normals[i][0] + a.normals[i][1] * b.normals[i][1] + a.normals[i][2] * b.normals[i][2];
-    if (dot < tol.normalDot) {
-      throw new ClodBuildError("BorderNormalMismatch", `normal dot ${dot.toFixed(5)} at border vertex ${i}`);
+    const ndot = a.normals[i][0] * b.normals[i][0] + a.normals[i][1] * b.normals[i][1] + a.normals[i][2] * b.normals[i][2];
+    if (ndot < tol.normalDot) {
+      throw new ClodBuildError("BorderNormalMismatch", `normal dot ${ndot.toFixed(5)} < ${tol.normalDot} at border index ${i}`);
     }
-    const md = Math.abs(a.materials[i] - b.materials[i]);
-    if (md > tol.material) {
-      throw new ClodBuildError("BorderMaterialMismatch", `paint delta ${md.toExponential(2)} at border vertex ${i}`);
+    if (Math.abs(a.materials[i] - b.materials[i]) > tol.material) {
+      throw new ClodBuildError("BorderMaterialMismatch", `material delta > ${tol.material} at border index ${i}`);
     }
-    if (a.materialWeights[i] && a.materialWeights[i].length > 0) {
-      const ws_a = a.materialWeights[i].length;
-      const ws_b = b.materialWeights[i] ? b.materialWeights[i].length : 0;
-      if (ws_a !== ws_b) {
-        throw new ClodBuildError("BorderMaterialMismatch", `material weight stride mismatch at vertex ${i}: ${ws_a} vs ${ws_b}`);
-      }
-      for (let j = 0; j < ws_a; j++) {
-        const wd = Math.abs(a.materialWeights[i][j] - b.materialWeights[i][j]);
-        if (wd > tol.material) {
-          throw new ClodBuildError("BorderMaterialMismatch", `material weight channel ${j} delta ${wd.toExponential(2)} at border vertex ${i}`);
-        }
+    const aw = a.materialWeights[i], bw = b.materialWeights[i];
+    if (aw.length !== bw.length) {
+      throw new ClodBuildError("BorderMaterialMismatch", `material weight stride differs at border index ${i}: ${aw.length} vs ${bw.length}`);
+    }
+    for (let j = 0; j < aw.length; j++) {
+      if (Math.abs(aw[j] - bw[j]) > tol.material) {
+        throw new ClodBuildError("BorderMaterialMismatch", `material weight delta > ${tol.material} at border index ${i}, channel ${j}`);
       }
     }
   }

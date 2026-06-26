@@ -374,7 +374,9 @@ export function createTreeRingNodeMaterialHandle(
     const jitter: TslNode = vec2(treeRingHash(worldCell, uSeed, 1103), treeRingHash(worldCell, uSeed, 1200));
     const aWorldXZ: TslNode = worldCell.add(jitter).mul(uCellSize);
     const aHeight: TslNode = aCell.z;
-    const aScale: TslNode = treeRingHash(worldCell, uSeed, 601).mul(0.42).add(0.82);
+    // GPU scatter writes scale into aCell.w so tree age/clump variation is shared
+    // by culling and rendering instead of being a material-only hash.
+    const aScale: TslNode = max(aCell.w, float(0.001));
     const aYaw: TslNode = treeRingHash(worldCell, uSeed, 701).mul(6.28318530718);
     const aTint: TslNode = treeRingHash(worldCell, uSeed, 1901);
 

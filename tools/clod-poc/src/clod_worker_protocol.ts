@@ -6,8 +6,12 @@ import type {
   Lod0RebuildResult,
   NodeBuildStat,
 } from "./clod/quadtree.js";
-import type { DigEdit } from "./terrain/terrain.js";
+import type { DigEdit, VoxelEditSnapshot } from "./terrain/terrain.js";
+import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
+import type { TerrainSourceInputs } from "./cache/terrainSource.js";
+import type { WorkerCacheBuildStats } from "./cache/cacheMetrics.js";
+import type { ClodCacheMetrics } from "./cache/cacheMetrics.js";
 
 export interface SerializedHydrologyTerrain {
   res: number;
@@ -41,8 +45,12 @@ export type ClodWorkerRequest =
       worldPagesX: number;
       worldPagesZ: number;
       cfg: ClodPagesConfig;
-      edits: DigEdit[];
+      voxelEdits: VoxelEditSnapshot;
       hydrologyTerrain?: SerializedHydrologyTerrain | null;
+      borderCoastOceanConfig?: BorderCoastOceanConfig | null;
+      cacheDisabled?: boolean;
+      digRevision?: number;
+      terrainSource: TerrainSourceInputs;
     }
   | {
       type: "dig";
@@ -53,10 +61,14 @@ export type ClodWorkerRequest =
   | {
       type: "flush";
       requestId: number;
+    }
+  | {
+      type: "clearCache";
+      requestId: number;
     };
 
 export interface SerializedLod0RebuildResult {
-  requestId: number;
+  requestIds: number[];
   changed: SerializedClodNode[];
   dirtyCoords: [number, number][];
   lod0Pages: number;
@@ -78,11 +90,18 @@ export interface SerializedParentBatch {
 
 export type ClodWorkerResponse =
   | ({ type: "progress"; requestId: number } & BuildProgress)
-  | { type: "buildComplete"; requestId: number; result: SerializedBuildResult }
+  | {
+      type: "buildComplete";
+      requestId: number;
+      result: SerializedBuildResult;
+      cacheBuildStats?: WorkerCacheBuildStats;
+      cacheServiceMetrics?: ClodCacheMetrics;
+    }
   | ({ type: "lod0Rebuilt" } & SerializedLod0RebuildResult)
   | ({ type: "parentRebuilt" } & SerializedParentBatch)
   | { type: "parentsComplete"; requestId: number | null; parentNodes: number; parentMs: number }
   | { type: "flushed"; requestId: number }
+  | { type: "cacheCleared"; requestId: number }
   | { type: "error"; requestId: number | null; message: string; name?: string; code?: string; details?: Record<string, unknown> };
 
 function cloneMesh(mesh: PageMesh): PageMesh {
@@ -115,7 +134,7 @@ export function serializeNodes(nodes: readonly ClodPageNode[]): SerializedClodNo
 
 export function serializeLod0Rebuild(result: Lod0RebuildResult, pendingParents: number, serializeMs: number, serializedBytes: number): SerializedLod0RebuildResult {
   return {
-    requestId: 0,
+    requestIds: [0],
     changed: serializeNodes(result.changed),
     dirtyCoords: result.dirtyCoords.map(([x, z]) => [x, z]),
     lod0Pages: result.lod0Pages,

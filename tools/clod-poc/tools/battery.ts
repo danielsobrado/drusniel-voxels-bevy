@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { borderOceanCameraForWorld, validateBorderOceanStats } from "../src/debug/border_ocean_scene.js";
 
 const SHOT_DIR = "shots/phase-0";
 const SANITY_SHOT = `${SHOT_DIR}/sanity.png`;
@@ -16,6 +17,14 @@ const LONG_VIEW_SHOT = `${LONG_VIEW_DIR}/long-view-4km.png`;
 const LONG_VIEW_STATS = `${LONG_VIEW_DIR}/long-view-4km-stats.json`;
 const LONG_VIEW_SUMMARY = `${LONG_VIEW_DIR}/long-view-4km-summary.json`;
 const LONG_VIEW_CAM = "1800,360,3200,2.6500,-0.4300,55";
+const LONG_VIEW_FOREST_DIR = "shots/long-view";
+const LONG_VIEW_FOREST_SHOT = `${LONG_VIEW_FOREST_DIR}/long-view-forest-4km.png`;
+const LONG_VIEW_FOREST_STATS = `${LONG_VIEW_FOREST_DIR}/long-view-forest-4km-stats.json`;
+const LONG_VIEW_FOREST_CAM = "1800,360,3200,2.6500,-0.4300,55";
+const BORDER_OCEAN_DIR = "shots/border-ocean";
+const BORDER_OCEAN_SHOT = `${BORDER_OCEAN_DIR}/border-ocean.png`;
+const BORDER_OCEAN_STATS = `${BORDER_OCEAN_DIR}/border-ocean-stats.json`;
+const BORDER_OCEAN_CAM = borderOceanCameraForWorld(16 * 4 * 16);
 
 function run(label: string, args: string[]): void {
   console.log(`[battery] ${label}`);
@@ -72,6 +81,11 @@ function validatePhase1Stats(): void {
   assertCounter(stats, "phase1.buildMs100", (value) => Number.isFinite(value));
 }
 
+function validateBorderOceanShotStats(): void {
+  const stats = JSON.parse(readFileSync(BORDER_OCEAN_STATS, "utf8")) as Record<string, unknown>;
+  validateBorderOceanStats(stats);
+}
+
 function validateLongViewStats(): void {
   const stats = JSON.parse(readFileSync(LONG_VIEW_STATS, "utf8")) as Record<string, unknown>;
   if (stats["ready"] !== true) throw new Error("long-view stats ready flag is not true");
@@ -90,6 +104,14 @@ function validateLongViewStats(): void {
   if (!hasAnyLod) throw new Error("long-view: no clod_page_count_lod* counter > 0");
   // Verify QA summary was also written.
   if (!existsSync(LONG_VIEW_SUMMARY)) throw new Error(`long-view QA summary not found at ${LONG_VIEW_SUMMARY}`);
+}
+
+function validateForestLongViewStats(): void {
+  const stats = JSON.parse(readFileSync(LONG_VIEW_FOREST_STATS, "utf8")) as Record<string, unknown>;
+  if (stats["ready"] !== true) throw new Error("forest long-view stats ready flag is not true");
+  assertCounter(stats, "canopy_enabled", (value) => value === 1);
+  assertCounter(stats, "canopy_shell_tris", (value) => value > 0);
+  assertCounter(stats, "canopy_visible_tiles", (value) => value > 0);
 }
 
 function runPhase1Shots(): void {
@@ -159,6 +181,38 @@ function main(): void {
     "--stats", LONG_VIEW_STATS,
   ]);
   validateLongViewStats();
+
+  run("shoot long-view-forest-4km", [
+    "run", "shoot", "--",
+    "--scene", "long-view-forest-4km",
+    "--seed", "12345",
+    "--world", "16",
+    "--cam", LONG_VIEW_FOREST_CAM,
+    "--freeze", "1",
+    "--hud", "1",
+    "--framealign", "0",
+    "--clodPerf", "1",
+    "--webgpuSelection", "1",
+    "--out", LONG_VIEW_FOREST_SHOT,
+    "--stats", LONG_VIEW_FOREST_STATS,
+  ]);
+  validateForestLongViewStats();
+
+  mkdirSync(BORDER_OCEAN_DIR, { recursive: true });
+  run("shoot border-ocean", [
+    "run", "shoot", "--",
+    "--scene", "border-ocean",
+    "--seed", "1",
+    "--world", "16",
+    "--freeze", "1",
+    "--hud", "1",
+    "--framealign", "0",
+    "--weather", "off",
+    "--cam", `${BORDER_OCEAN_CAM.eye[0].toFixed(0)},${BORDER_OCEAN_CAM.eye[1].toFixed(0)},${BORDER_OCEAN_CAM.eye[2].toFixed(0)},${BORDER_OCEAN_CAM.look[0].toFixed(0)},${BORDER_OCEAN_CAM.look[1].toFixed(0)},${BORDER_OCEAN_CAM.look[2].toFixed(0)},${BORDER_OCEAN_CAM.fov}`,
+    "--out", BORDER_OCEAN_SHOT,
+    "--stats", BORDER_OCEAN_STATS,
+  ]);
+  validateBorderOceanShotStats();
   console.log("[battery] ok");
 }
 

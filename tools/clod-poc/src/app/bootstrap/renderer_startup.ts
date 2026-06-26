@@ -16,9 +16,15 @@ import { createTerrainRaycastService } from "../../player/terrain_raycast_servic
 import { surfaceHeight } from "../../terrain/terrain.js";
 import type { ClodPagesConfig } from "../../config.js";
 import type { ClodPageNode } from "../../types.js";
-import type { ProjectArchiveContents } from "../../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { Phase0SceneConfig } from "../../phase0/phase0_config.js";
+import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
+import borderOceanSceneConfigText from "../../../config/border_ocean_scene.yaml?raw";
+import {
+  parseBorderOceanCamString,
+  parseBorderOceanSceneConfig,
+} from "../../debug/border_ocean_scene.js";
 
 export type AppRenderer = Awaited<ReturnType<typeof createWebGpuAppRenderer>> | ReturnType<typeof createWebGlAppRenderer>;
 
@@ -28,10 +34,11 @@ export interface RendererStartupInput {
   worldCells: number;
   lod0Nodes: ClodPageNode[];
   waterConfig: WaterConfig;
-  stagedImport: ProjectArchiveContents | null;
+  stagedImport: VoxelProjectArchiveContents | null;
   queryGrassPerfScene: boolean;
   queryTreePerfScene: boolean;
   queryLongViewScene: boolean;
+  queryBorderOceanScene: boolean;
   activePhase0Scene: Phase0SceneConfig | undefined;
 }
 
@@ -62,8 +69,11 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     queryGrassPerfScene,
     queryTreePerfScene,
     queryLongViewScene,
+    queryBorderOceanScene,
     activePhase0Scene,
   } = input;
+
+  const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
 
   const rendererBackend = parseRendererBackend(searchParams);
   let app: AppRenderer;
@@ -78,7 +88,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       "- If Chrome keeps reporting DXGI_ERROR_DEVICE_HUNG, restart the browser.",
       "- Use ?renderer=webgl to open the app without WebGPU.",
     ];
-    failLoud("Renderer initialization failed", details);
+    failLoud("Renderer startup failed", details);
     return null;
   }
 
@@ -136,6 +146,21 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   } else if (queryTreePerfScene) {
     controls.target.set(mid, 24, mid);
     camera.position.set(mid - worldCells * 0.28, 58, mid + worldCells * 0.38);
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (queryBorderOceanScene) {
+    const cam = parseBorderOceanCamString(searchParams.get("cam"), worldCells, borderOceanSceneConfig);
+    camera.position.set(cam.eye[0], cam.eye[1], cam.eye[2]);
+    controls.target.set(cam.look[0], cam.look[1], cam.look[2]);
+    camera.fov = cam.fov;
+    camera.updateProjectionMatrix();
+    camera.lookAt(controls.target);
+    controls.update();
+  } else if (searchParams.get("scene") === RIVER_PARITY_TEST_SCENE) {
+    controls.target.set(worldCells * 0.50, 38, worldCells * 0.50);
+    camera.position.set(worldCells * 0.30, 155, worldCells * 0.86);
+    camera.fov = 48;
+    camera.updateProjectionMatrix();
     camera.lookAt(controls.target);
     controls.update();
   } else if (queryLongViewScene) {

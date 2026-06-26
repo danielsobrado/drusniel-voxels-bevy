@@ -1,0 +1,42 @@
+cache:
+  enabled: true
+  namespace: "drusniel-clod-poc"
+  schema_version: 1
+  builder_version: "clod-poc-cache-v1"
+  strict: false
+
+  memory:
+    enabled: true
+    max_items: 512
+    max_bytes: 268435456
+
+  persistent:
+    enabled: true
+    backend: "indexeddb"
+    database_name: "drusniel-clod-poc-cache"
+    object_store_name: "artifacts"
+    max_items: 4096
+    max_bytes: 2147483648
+    compression: "gzip"
+    checksum: "sha256"
+
+  invalidation:
+    include_config_hash: true
+    include_generator_version: true
+    include_builder_version: true
+    include_world_seed: true
+    include_source_revision: true
+    include_source_hash: true
+
+  streaming:
+    read_budget_per_frame: 8
+    write_budget_per_frame: 4
+    max_decode_ms_per_frame: 4
+    max_encode_ms_per_frame: 4
+    keep_stale_until_replacement: true
+
+  debug:
+    log_cache_hits: true
+    log_cache_misses: true
+    log_cache_evictions: true
+    expose_overlay_stats: true

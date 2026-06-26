@@ -28,6 +28,7 @@ import {
   vec3,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import { sampleCarvedBedBilinearTsl } from "../gpu/placement_height.js";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
 import type { UnderstoryMaterialHandle } from "./understory_material.js";
 
@@ -136,6 +137,12 @@ export interface UnderstoryRingInstanceBuffers {
   capacity: number;
 }
 
+export interface UnderstoryRingHydrologyWater {
+  texture: THREE.Texture | null;
+  worldSize: number;
+  res: number;
+}
+
 export function createUnderstoryRingNodeMaterialHandle(
   settings: UnderstorySettings,
   buffers: UnderstoryRingInstanceBuffers,
@@ -143,6 +150,7 @@ export function createUnderstoryRingNodeMaterialHandle(
   classMinScale?: number,
   classMaxScale?: number,
   classBaseOffset = 0,
+  hydrology?: UnderstoryRingHydrologyWater,
 ): UnderstoryMaterialHandle {
   const uTime = uniform(0);
   const windDir = new THREE.Vector2(0.8, 0.6).normalize();
@@ -169,7 +177,14 @@ export function createUnderstoryRingNodeMaterialHandle(
     const worldCell: TslNode = aCell.xy;
     const jitter: TslNode = vec2(understoryRingHash(worldCell, uSeed, 1103), understoryRingHash(worldCell, uSeed, 1200));
     const aWorldXZ: TslNode = worldCell.add(jitter).mul(uCellSize);
-    const aHeight: TslNode = aCell.z;
+    let aHeight: TslNode = aCell.z;
+    if (hydrology?.texture) {
+      aHeight = sampleCarvedBedBilinearTsl(aWorldXZ.x, aWorldXZ.y, {
+        texture: hydrology.texture,
+        worldSize: hydrology.worldSize,
+        res: hydrology.res,
+      });
+    }
 
     const minS = classMinScale ?? 0.5;
     const maxS = classMaxScale ?? 1.25;

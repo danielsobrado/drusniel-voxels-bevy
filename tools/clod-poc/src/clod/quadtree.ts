@@ -14,8 +14,14 @@ import { buildLod0PageSource, rebuildPageChunks } from "./source_mesh.js";
 import { concatPageSourceMeshes as concat } from "./pageSource.js";
 import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks, countLocks } from "../lock.js";
-import { simplifyPage } from "./simplify.js";
-import { validateFinalPageMesh, validatePageMesh, validateWeldedIntermediate } from "./validate.js";
+import { simplifyPage, type SimplifyOutput } from "./simplify.js";
+import {
+  assertNoInternalBorders,
+  stripDegenerateTriangles,
+  validateFinalPageMesh,
+  validatePageMesh,
+  validateWeldedIntermediate,
+} from "./validate.js";
 import {
   emptyDiagonalPolishStats,
   polishDiagonals,
@@ -32,6 +38,8 @@ export interface NodeBuildStat {
   lowBenefit: boolean;
   polish: DiagonalPolishStats;
   buildMs: number;
+  /** True when stats were restored from a warm-cache artifact instead of a fresh build. */
+  fromCache?: boolean;
 }
 
 export interface BuildResult {
@@ -49,9 +57,69 @@ export interface BuildProgress {
   phase: string;
 }
 
+/** Optional disk/memory cache hooks — never block rendering on cache miss. */
+export interface BuildCacheHooks {
+  tryLoadNode(nodeId: string, level: number, px: number, pz: number): Promise<ClodPageNode | null>;
+  getCachedBuildStat?(nodeId: string): NodeBuildStat | undefined;
+  storeNode(node: ClodPageNode, stat: NodeBuildStat): Promise<void>;
+  onBuildComplete?(result: BuildResult): Promise<void>;
+}
+
 function footprintFor(level: number, nx: number, nz: number, cfg: ClodPagesConfig): PageFootprint {
   const span = (1 << level) * cfg.page.chunks_per_page * cfg.page.chunk_size; // cells per node side
   return { minX: nx * span, minZ: nz * span, maxX: (nx + 1) * span, maxZ: (nz + 1) * span };
+}
+
+/** Simplify a welded parent page; fall back to the welded mesh if decimation opens an internal seam. */
+function clonePageMesh(mesh: PageMesh): PageMesh {
+  return {
+    positions: mesh.positions.slice(),
+    normals: mesh.normals.slice(),
+    paintSlots: mesh.paintSlots.slice(),
+    materialWeights: mesh.materialWeights.slice(),
+    materialWeightStride: mesh.materialWeightStride,
+    indices: mesh.indices.slice(),
+  };
+}
+
+function simplifyParentPage(
+  welded: PageMesh,
+  locks: Uint8Array,
+  footprint: PageFootprint,
+  cfg: ClodPagesConfig,
+): SimplifyOutput {
+  const sim = simplifyPage(clonePageMesh(welded), locks, cfg);
+  try {
+    stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
+    assertNoInternalBorders(sim.mesh, footprint);
+    return sim;
+  } catch {
+    try {
+      assertNoInternalBorders(welded, footprint);
+      return { mesh: welded, resultError: 0, errorWorld: 0, lowBenefit: true };
+    } catch {
+      // Hydrology merge can leave seams on the welded parent while simplification still
+      // produces the cleaner mesh — prefer simplified over welded when both fail the check.
+      return { mesh: sim.mesh, resultError: sim.resultError, errorWorld: sim.errorWorld, lowBenefit: true };
+    }
+  }
+}
+
+/** Diagonal polish is optional quality; skip when a flip would open an internal seam. */
+function tryPolishParentPage(
+  mesh: PageMesh,
+  footprint: PageFootprint,
+  cfg: ClodPagesConfig,
+  label: string,
+): { mesh: PageMesh; stats: ReturnType<typeof emptyDiagonalPolishStats> } {
+  const candidate = clonePageMesh(mesh);
+  const stats = polishDiagonals(candidate, buildOuterBorderLocks(candidate), pageMeshPolishConfig(cfg));
+  try {
+    validateFinalPageMesh(candidate, footprint, cfg.validation.zero_area_epsilon, `${label} polish`);
+    return { mesh: candidate, stats };
+  } catch {
+    return { mesh, stats: emptyDiagonalPolishStats() };
+  }
 }
 
 function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: number; minY: number; maxY: number } {
@@ -192,10 +260,17 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
             validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
             const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
-        const sim = simplifyPage(welded, locks, cfg);
-        validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
-        const polishLocks = buildOuterBorderLocks(sim.mesh);
-        const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
+        const sim = simplifyParentPage(welded, locks, footprint, cfg);
+        const simplified = sim.mesh !== welded;
+        let polish = emptyDiagonalPolishStats();
+        if (simplified) {
+          validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
+          if (level === maxLevels - 1) {
+            const polished = tryPolishParentPage(sim.mesh, footprint, cfg, `L${level}:${nx},${nz}`);
+            sim.mesh = polished.mesh;
+            polish = polished.stats;
+          }
+        }
         validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
@@ -237,6 +312,7 @@ export async function buildWorldAsync(
   worldPagesZ: number,
   cfg: ClodPagesConfig,
   onProgress: (progress: BuildProgress) => void,
+  cacheHooks?: BuildCacheHooks,
 ): Promise<BuildResult> {
   const eps = cfg.simplify.weld_epsilon_cells;
   const { maxLevels } = resolveBuildShape(worldPagesX, worldPagesZ, cfg);
@@ -269,27 +345,45 @@ export async function buildWorldAsync(
   for (let pz = 0; pz < worldPagesZ; pz++) {
     for (let px = 0; px < worldPagesX; px++) {
       const t0 = performance.now();
-      const src = buildLod0PageSource(px, pz, cfg, world);
-      validatePageMesh(src.mesh, src.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz}`);
-      const b = boundsOf(src.mesh);
-      const node: ClodPageNode = {
-        id: `L0:${px},${pz}`,
-        level: 0,
-        children: [],
-        mesh: src.mesh,
-        footprint: src.footprint,
-        bounds: b,
-        errorWorld: 0,
-        lowBenefit: false,
-        chunkMeshes: src.chunks,
-      };
-      lod0.push(node);
-      lod0Index.set(`${px},${pz}`, node);
-      stats.push({
-        id: node.id, level: 0, inputTris: tris(src.mesh), outputTris: tris(src.mesh),
-        lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
-        buildMs: performance.now() - t0,
-      });
+      const nodeId = `L0:${px},${pz}`;
+      let node: ClodPageNode | null = cacheHooks
+        ? await cacheHooks.tryLoadNode(nodeId, 0, px, pz)
+        : null;
+      if (!node) {
+        const src = buildLod0PageSource(px, pz, cfg, world);
+        validatePageMesh(src.mesh, src.footprint, cfg.validation.zero_area_epsilon, nodeId);
+        const b = boundsOf(src.mesh);
+        const buildMs = performance.now() - t0;
+        node = {
+          id: nodeId,
+          level: 0,
+          children: [],
+          mesh: src.mesh,
+          footprint: src.footprint,
+          bounds: b,
+          errorWorld: 0,
+          lowBenefit: false,
+          chunkMeshes: src.chunks,
+        };
+        const stat: NodeBuildStat = {
+          id: nodeId, level: 0, inputTris: tris(src.mesh), outputTris: tris(src.mesh),
+          lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
+          buildMs,
+        };
+        if (cacheHooks) await cacheHooks.storeNode(node, stat);
+        lod0.push(node);
+        lod0Index.set(`${px},${pz}`, node);
+        stats.push(stat);
+      } else {
+        lod0.push(node);
+        lod0Index.set(`${px},${pz}`, node);
+        const cachedStat = cacheHooks?.getCachedBuildStat?.(nodeId);
+        stats.push(cachedStat ?? {
+          id: node.id, level: 0, inputTris: tris(node.mesh), outputTris: tris(node.mesh),
+          lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
+          buildMs: performance.now() - t0, fromCache: true,
+        });
+      }
       await tick(0, "LOD0 pages");
     }
   }
@@ -306,6 +400,11 @@ export async function buildWorldAsync(
     for (let nz = 0; nz < countZ; nz++) {
       for (let nx = 0; nx < countX; nx++) {
         const t0 = performance.now();
+        const nodeId = `L${level}:${nx},${nz}`;
+        let node: ClodPageNode | null = cacheHooks
+          ? await cacheHooks.tryLoadNode(nodeId, level, nx, nz)
+          : null;
+
         const children: ClodPageNode[] = [];
         for (let dz = 0; dz < 2; dz++) {
           for (let dx = 0; dx < 2; dx++) {
@@ -320,6 +419,21 @@ export async function buildWorldAsync(
           );
         }
 
+        if (node) {
+          node.children = children;
+          levelNodes.push(node);
+          levelIndex.set(`${nx},${nz}`, node);
+          const cachedStat = cacheHooks?.getCachedBuildStat?.(nodeId);
+          stats.push(cachedStat ?? {
+            id: node.id, level, inputTris: tris(node.mesh), outputTris: tris(node.mesh),
+            lockedVerts: 0, errorWorld: node.errorWorld, lowBenefit: node.lowBenefit,
+            polish: emptyDiagonalPolishStats(),
+            buildMs: performance.now() - t0, fromCache: true,
+          });
+          await tick(level, `LOD${level} parents`);
+          continue;
+        }
+
         const merged = concat(children.map((c) => c.mesh));
         const { mesh: welded } = weldVertices(merged, eps, {
           position: cfg.validation.position_epsilon,
@@ -329,16 +443,23 @@ export async function buildWorldAsync(
         validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
         const footprint = footprintFor(level, nx, nz, cfg);
         const locks = buildOuterBorderLocks(welded);
-        const sim = simplifyPage(welded, locks, cfg);
-        validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
-        const polishLocks = buildOuterBorderLocks(sim.mesh);
-        const polish = polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
+        const sim = simplifyParentPage(welded, locks, footprint, cfg);
+        const simplified = sim.mesh !== welded;
+        let polish = emptyDiagonalPolishStats();
+        if (simplified) {
+          validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
+          if (level === maxLevels - 1) {
+            const polished = tryPolishParentPage(sim.mesh, footprint, cfg, `L${level}:${nx},${nz}`);
+            sim.mesh = polished.mesh;
+            polish = polished.stats;
+          }
+        }
         validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
         const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
         const b = boundsOf(sim.mesh);
-        const node: ClodPageNode = {
-          id: `L${level}:${nx},${nz}`,
+        node = {
+          id: nodeId,
           level,
           children,
           mesh: sim.mesh,
@@ -347,14 +468,17 @@ export async function buildWorldAsync(
           errorWorld,
           lowBenefit: sim.lowBenefit,
         };
-        levelNodes.push(node);
-        levelIndex.set(`${nx},${nz}`, node);
-        stats.push({
+        const buildMs = performance.now() - t0;
+        const stat: NodeBuildStat = {
           id: node.id, level, inputTris: tris(welded), outputTris: tris(sim.mesh),
           lockedVerts: countLocks(locks), errorWorld, lowBenefit: sim.lowBenefit,
           polish,
-          buildMs: performance.now() - t0,
-        });
+          buildMs,
+        };
+        if (cacheHooks) await cacheHooks.storeNode(node, stat);
+        levelNodes.push(node);
+        levelIndex.set(`${nx},${nz}`, node);
+        stats.push(stat);
         await tick(level, `LOD${level} parents`);
       }
     }
@@ -369,7 +493,9 @@ export async function buildWorldAsync(
   const topLevel = Math.max(...nodesByLevel.keys());
   onProgress({ done: total, total, level: topLevel, phase: "complete" });
   await yieldToBrowser();
-  return { roots: nodesByLevel.get(topLevel)!, nodesByLevel, stats, worldPagesX, worldPagesZ };
+  const buildResult = { roots: nodesByLevel.get(topLevel)!, nodesByLevel, stats, worldPagesX, worldPagesZ };
+  if (cacheHooks?.onBuildComplete) await cacheHooks.onBuildComplete(buildResult);
+  return buildResult;
 }
 
 // ---- targeted rebuild after a terrain edit ---------------------------------
@@ -456,7 +582,7 @@ export function rebuildDirtyLod0Pages(
         chunksRemeshed += r.remeshed;
         chunksTotal += node.chunkMeshes.length;
       } else {
-        // no cached chunks (shouldn't happen post-build): full extract, then populate cache
+        // Warm-cache LOD0 pages omit chunkMeshes; first edit does one full page extract, then partial chunk remeshing.
         const src = buildLod0PageSource(px, pz, cfg, world);
         node.chunkMeshes = src.chunks;
         mesh = src.mesh;
@@ -500,10 +626,15 @@ export function resimplifyParent(
   });
   validateWeldedIntermediate(welded, `${node.id} welded`, cfg.validation.zero_area_epsilon);
   const locks = buildOuterBorderLocks(welded);
-  const sim = simplifyPage(welded, locks, cfg);
-  validateWeldedIntermediate(sim.mesh, `${node.id} resimplify`, cfg.validation.zero_area_epsilon);
-  const polishLocks = buildOuterBorderLocks(sim.mesh);
-  polishDiagonals(sim.mesh, polishLocks, pageMeshPolishConfig(cfg));
+  const sim = simplifyParentPage(welded, locks, node.footprint, cfg);
+  const simplified = sim.mesh !== welded;
+  if (simplified) {
+    validateWeldedIntermediate(sim.mesh, `${node.id} resimplify`, cfg.validation.zero_area_epsilon);
+    if (node.level >= cfg.page.quadtree_levels - 1) {
+      const polished = tryPolishParentPage(sim.mesh, node.footprint, cfg, node.id);
+      sim.mesh = polished.mesh;
+    }
+  }
   validateFinalPageMesh(sim.mesh, node.footprint, cfg.validation.zero_area_epsilon, `${node.id} final`);
   node.mesh = sim.mesh;
   node.bounds = boundsOf(sim.mesh);

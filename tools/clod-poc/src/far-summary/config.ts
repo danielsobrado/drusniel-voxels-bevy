@@ -22,6 +22,10 @@ export interface FarSummarySamplingConfig {
   fallbackToLowerRing: boolean;
   conservativeMissingHeightM: number;
   normalSampleStepCells: number;
+  /** When true, missing tiles produce a warning in the stats instead of
+   *  silently falling back to procedural terrain.  Use during validation
+   *  scenes to confirm the summary cache is the real source. */
+  disableProceduralFallback?: boolean;
 }
 
 export interface FarSummaryDebugConfig {

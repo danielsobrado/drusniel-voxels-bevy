@@ -5,6 +5,7 @@ import type { UnderstoryStats } from "../../../understory/index.js";
 import type { ForestLightingStats } from "../../../forest_lighting/index.js";
 import { bindClodFrameLoop } from "../../clod_frame_loop.js";
 import { resolveSlowFrameMsThreshold } from "../../runtime_config.js";
+import { shadowProxyStatsToCounters } from "../../../shadows/shadowProxyStats.js";
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
@@ -73,6 +74,25 @@ export function runFrameLoopStartup(
     farShellController,
   } = input.terrainView;
   const {
+    shadowProxyController,
+    shadowProxyDebugState,
+    getShadowProxyConfig,
+  } = input.terrainView;
+
+  const readShadowProxyCounters = () => {
+    if (!shadowProxyController || !shadowProxyDebugState) {
+      return { shadow_proxy_enabled: 0, shadow_proxy_inert: 1 };
+    }
+    const proxyConfig = getShadowProxyConfig();
+    return shadowProxyStatsToCounters({
+      proxyEnabled: shadowProxyDebugState.shadowProxyEnabled,
+      sunShadowsEnabled: shadowProxyDebugState.sunShadowsEnabled,
+      stats: shadowProxyController.runtime.stats,
+      lightShadowMapSize: shadowProxyDebugState.lightShadowMapSize,
+      lightShadowCameraExtentM: proxyConfig.lightShadowCameraExtentM,
+    });
+  };
+  const {
     drainVegetationDirtyQueue,
     treeController,
     grassController,
@@ -81,6 +101,11 @@ export function runFrameLoopStartup(
     applyForestLightingToPropMaterials,
     stoneController,
     waterController,
+    deepOceanMaterial,
+    deepOceanSurface,
+    waterField,
+    deepOceanConfig,
+    oceanSampler,
     weatherController,
     updateWeatherStats,
     grassSystem,
@@ -97,7 +122,9 @@ export function runFrameLoopStartup(
     understoryStats,
     forestLightingStats,
     customProps,
+    constructionController,
   } = input.runtime;
+  const deepOceanMeshPresent = deepOceanSurface !== null;
   const { updateInfo } = infoPanel;
   const { playerTerraformEditActive } = terrainEdit;
   const statsPresenter = statsPresenterFromSession(ctx);
@@ -109,6 +136,10 @@ export function runFrameLoopStartup(
   if (customProps?.propController) {
     player.attachPropColliders(customProps.propController.colliderSet);
   }
+
+  constructionController?.setTerrainConformHandler((request) => {
+    terrainEdit.scheduleConstructionTerrainConform(request);
+  });
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -174,6 +205,12 @@ export function runFrameLoopStartup(
     },
     waterWeather: {
       waterController,
+      deepOceanSurface,
+      deepOceanMaterial,
+      waterField,
+      deepOceanConfig,
+      deepOceanMeshPresent,
+      oceanSampler,
       weatherController,
       updateWeatherStats,
       weatherStatsController: session.weatherStatsController,
@@ -198,7 +235,10 @@ export function runFrameLoopStartup(
     diagnostics: {
       maxTerrainLevel,
       farShellBuilt: () => farShellController.isBuilt(),
-      farShellCanopyEnabled: () => farShellController.canopyShell !== null,
+      farShellCanopyEnabled: () =>
+        farShellController.canopyShell !== null || input.terrainView.canopyShellSystem !== null,
+      getFarShellMetrics: () => longView.farShellMetrics,
+      infiniteFarShellActive: () => longView.infiniteFarShell !== undefined,
       isLongView: longView.isLongView,
       phase0TargetVisibleM: longView.phase0TargetVisibleM,
       phase0Config: longView.phase0Config,
@@ -206,11 +246,26 @@ export function runFrameLoopStartup(
       phase0VelocityX: longView.phase0VelocityX,
       phase0VelocityZ: longView.phase0VelocityZ,
       phase0Streaming: longView.phase0Streaming,
-      longViewDiagnosticsCfg: cfg,
+      longViewDiagnosticsCfg: {
+        page: {
+          chunk_size: cfg.page.chunk_size,
+          chunks_per_page: cfg.page.chunks_per_page,
+        },
+      },
       getFarShellRadiusFactor: () => state.farShellRadiusFactor,
+      getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert,
+      getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled,
     },
-    farSummary: input.onFarSummaryUpdate ? {
-      onFarSummaryUpdate: input.onFarSummaryUpdate,
-    } : undefined,
+    farSummary: input.onFarSummaryUpdate
+      ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
+          input.onFarSummaryUpdate!(frameIndex, deltaSeconds, camera);
+          session.naadfStatsController?.updateDisplay();
+        } }
+      : session.naadfStatsController
+        ? { onFarSummaryUpdate: () => { session.naadfStatsController?.updateDisplay(); } }
+        : undefined,
+    construction: constructionController
+      ? { update: () => constructionController.update() }
+      : undefined,
   });
 }

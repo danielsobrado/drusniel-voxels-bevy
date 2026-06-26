@@ -1,5 +1,5 @@
 import type { ClodPagesConfig } from "../../config.js";
-import type { ProjectArchiveContents } from "../../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_loader.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import { createClodAppState, type ClodAppState } from "../clod_app_state.js";
@@ -10,7 +10,7 @@ export interface AppStateStartupInput {
   searchParams: URLSearchParams;
   clodRuntime: ClodRuntimeConfig;
   cfg: ClodPagesConfig;
-  stagedImport: ProjectArchiveContents | null;
+  stagedImport: VoxelProjectArchiveContents | null;
   isWebGpu: boolean;
   maxAnisotropy: number;
   queries: BootstrapQueryContext;

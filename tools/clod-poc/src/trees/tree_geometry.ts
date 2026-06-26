@@ -4,8 +4,11 @@ import { foliageAtlasCell } from "./tree_alpha_mask.js";
 import { buildTree, type VegLod } from "../veg/veg_tree_builder.js";
 import { vegRng } from "../veg/veg_rng.js";
 import { VEG_BARK_COLOR, VEG_TREE_SPECIES } from "../veg/veg_species.js";
+import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 
-export type TreeGeometryMap = Record<TreeSpeciesId, Record<TreeLod, THREE.BufferGeometry>>;
+export type TreeVariantGeometryMap = Record<number, Record<TreeLod, THREE.BufferGeometry>>;
+export type TreeSpeciesGeometryMap = Record<TreeLod, THREE.BufferGeometry> & { variants: TreeVariantGeometryMap };
+export type TreeGeometryMap = Record<TreeSpeciesId, TreeSpeciesGeometryMap>;
 
 const BARK = new THREE.Color(0x5b3a22);
 const DEAD_BARK = new THREE.Color(0x7a6653);
@@ -17,34 +20,42 @@ const PINE_LEAF_HIGH = new THREE.Color(0x367142);
 export function createTreeGeometryMap(settings: TreeSettings): TreeGeometryMap {
   const out = {} as TreeGeometryMap;
   for (const species of TREE_SPECIES) {
-    out[species] = {} as Record<TreeLod, THREE.BufferGeometry>;
-    for (const lod of TREE_LODS) {
-      out[species][lod] = createTreeGeometry(species, lod, settings);
+    const variants = {} as TreeVariantGeometryMap;
+    for (let variant = 0; variant < TREE_STRUCTURAL_VARIANTS; variant++) {
+      variants[variant] = {} as Record<TreeLod, THREE.BufferGeometry>;
+      for (const lod of TREE_LODS) {
+        variants[variant][lod] = createTreeGeometry(species, variant, lod, settings);
+      }
     }
+    const speciesMap = variants[0] as TreeSpeciesGeometryMap;
+    speciesMap.variants = variants;
+    out[species] = speciesMap;
   }
   return out;
 }
 
 export function disposeTreeGeometryMap(map: TreeGeometryMap): void {
   for (const species of TREE_SPECIES) {
-    for (const lod of TREE_LODS) map[species][lod].dispose();
+    const variants = map[species].variants ?? { 0: map[species] };
+    for (const variant of Object.values(variants)) {
+      for (const lod of TREE_LODS) variant[lod].dispose();
+    }
   }
 }
 
 /**
- * Stable signature of every setting that `createTreeGeometry` consumes: seed,
- * foliage card layout/atlas, LOD vertex budgets, and per-species trunk/crown
- * dimensions + morphology. Compare two keys to decide whether tree geometry must
- * be rebuilt, instead of a fragile `settings.species` object-reference compare.
+ * Stable signature of every setting that `createTreeGeometry` consumes. Compare
+ * two keys to decide whether tree geometry must be rebuilt, instead of a fragile
+ * `settings.species` object-reference compare.
  */
 export function treeGeometryKey(settings: TreeSettings): string {
   return JSON.stringify({
     seed: settings.seed,
-    foliage: settings.foliage,
+    variants: TREE_STRUCTURAL_VARIANTS,
     budgets: settings.lod.budgets,
     species: TREE_SPECIES.map((species) => {
       const config = settings.species[species];
-      return [config.trunkHeightM, config.trunkRadiusM, config.crownRadiusM, config.morphology];
+      return [config.trunkHeightM, config.trunkRadiusM, config.crownRadiusM];
     }),
   });
 }
@@ -115,7 +126,12 @@ function targetTreeHeight(species: TreeSpeciesId, config: TreeSettings["species"
   return config.trunkHeightM * 1.08; // dead snag (no crown)
 }
 
-function createTreeGeometry(species: TreeSpeciesId, lod: TreeLod, settings: TreeSettings): THREE.BufferGeometry {
+function createTreeGeometry(
+  species: TreeSpeciesId,
+  variant: number,
+  lod: TreeLod,
+  settings: TreeSettings,
+): THREE.BufferGeometry {
   const config = settings.species[species];
 
   if (lod === "impostor") {
@@ -127,9 +143,10 @@ function createTreeGeometry(species: TreeSpeciesId, lod: TreeLod, settings: Tree
     return geometry;
   }
 
-  // near / mid / far: procedural grammar (bark tubes + real leaf/needle meshes).
+  // All LODs for the same species+variant derive from the same skeleton seed;
+  // only bark/foliage budgets vary by LOD.
   const sp = VEG_TREE_SPECIES[species];
-  const rng = vegRng(settings.seed, `tree/${species}/${lod}`);
+  const rng = vegRng(settings.seed, `tree/${species}/${variant}`);
   const built = buildTree(sp, rng, { lod: GRAMMAR_LOD[lod], barkColor: VEG_BARK_COLOR[species] });
   const geometry = built.geometry;
   const target = targetTreeHeight(species, config);
@@ -140,6 +157,16 @@ function createTreeGeometry(species: TreeSpeciesId, lod: TreeLod, settings: Tree
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
+}
+
+export function treeGeometryVariant(
+  map: TreeGeometryMap,
+  species: TreeSpeciesId,
+  variant: number,
+  lod: TreeLod,
+): THREE.BufferGeometry {
+  const safeVariant = Math.max(0, Math.min(TREE_STRUCTURAL_VARIANTS - 1, Math.floor(variant)));
+  return map[species].variants?.[safeVariant]?.[lod] ?? map[species][lod];
 }
 
 function appendImpostorTree(
@@ -313,8 +340,6 @@ class GeometryBuilder {
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(this.normals, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(this.colors, 3));
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(this.uvs, 2));
-    // Wind (x) + flutter (y) packed into one vec2 buffer: keeps the tree node
-    // material at/under WebGPU's 8 vertex-buffer limit.
     const treeWind = new Float32Array(this.windWeights.length * 2);
     for (let i = 0; i < this.windWeights.length; i++) {
       treeWind[i * 2] = this.windWeights[i];

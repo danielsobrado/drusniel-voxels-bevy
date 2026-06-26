@@ -37,12 +37,20 @@ water:
       slope_gate_start: 0.50
       slope_gate_end: 0.24
       min_visible_depth: 0.05
+      guarantee_fallback_rivers: true
+      fallback_main_river: true
+      fallback_tributaries: true
+      flow_speed_multiplier: 1.15
+      lake_surface_drop_m: 2.0
     water_surface:
       far_reduce_factor: 8
       far_level_min_cell_size: 12.0
       dry_sentinel_depth: 2.0
       wet_smooth_iterations: 2
       wet_to_wet_cliff_slope_max: 0.35
+      far_lake_dominance: 0.4
+      far_river_dominance: 0.3
+      far_wet_threshold: 0.1
     moisture:
       enabled: true
       blur_radius: 4
@@ -78,36 +86,36 @@ water:
         downstream_drop: 3.0
 
   visual:
-    shallow_color: [0.16, 0.38, 0.36]
-    deep_color: [0.02, 0.08, 0.12]
-    foam_color: [0.82, 0.88, 0.84]
-    alpha: 0.82
-    ripple_cycle: 0.065
-    ripple_amp: 1.0
-    ripple_speed: 0.45
-    ripple_scale_a: 0.18
-    ripple_scale_b: 0.115
-    ripple_strength_a: 0.20
-    ripple_strength_b: 0.13
-    ripple_loop_distance: 18.0
-    lake_breeze: [0.18, 0.06]
+    shallow_color: [0.00, 0.32, 0.55]
+    deep_color: [0.00, 0.025, 0.12]
+    foam_color: [0.90, 0.95, 0.96]
+    alpha: 0.90
+    ripple_cycle: 0.07
+    ripple_amp: 1.38
+    ripple_speed: 0.58
+    ripple_scale_a: 0.16
+    ripple_scale_b: 0.105
+    ripple_strength_a: 0.26
+    ripple_strength_b: 0.18
+    ripple_loop_distance: 22.0
+    lake_breeze: [0.20, 0.07]
     shore_foam_start: 0.03
-    shore_foam_end: 0.16
+    shore_foam_end: 0.18
     foam:
-      noise_scale: 0.09
+      noise_scale: 0.075
       shore_strength: 0.58
-      river_strength: 0.42
-      speed_start: 0.25
-      speed_end: 1.0
-      drop_start: 0.5
-      drop_end: 2.0
+      river_strength: 0.72
+      speed_start: 0.18
+      speed_end: 0.82
+      drop_start: 0.22
+      drop_end: 1.45
     fresnel:
-      base: 0.08
-      power: 4.5
-      normal_flatten: 0.72
+      base: 0.045
+      power: 4.2
+      normal_flatten: 0.48
     color:
-      depth_scale: 4.0
-      turbidity: 0.18
+      depth_scale: 4.6
+      turbidity: 0.12
     refraction:
       enabled: true
       strength: 0.055
@@ -124,8 +132,8 @@ water:
       step_scale: 0.09
       edge_fade_start: 1.0
       edge_fade_end: 0.82
-      sky_fallback_strength: 0.65
-      terrain_fallback_strength: 0.18
+      sky_fallback_strength: 0.78
+      terrain_fallback_strength: 0.12
     depth_write: false
 
   debug:

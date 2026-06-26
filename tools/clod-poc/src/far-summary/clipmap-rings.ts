@@ -63,7 +63,7 @@ export function computeRequiredFarSummaryTiles(
         const distCamera = Math.hypot(tileCenterX - center.worldX, tileCenterZ - center.worldZ);
         const distPredicted = Math.hypot(tileCenterX - predictedX, tileCenterZ - predictedZ);
 
-        if (distCamera < ring.startM) {
+        if (distCamera < ring.startM || distCamera > ring.endM) {
           continue;
         }
 

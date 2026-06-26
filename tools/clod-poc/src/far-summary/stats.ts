@@ -11,6 +11,7 @@ export function createFarSummaryStats(): FarSummaryStats {
     cacheMisses: 0,
     proceduralFallbacks: 0,
     lowerRingFallbacks: 0,
+    conservativeFallbacks: 0,
     tilesBuiltThisFrame: 0,
     tilesCommittedThisFrame: 0,
     buildTimeMs: 0,
@@ -34,9 +35,10 @@ export function accumulateStats(dst: FarSummaryStats, src: FarSummaryStats): voi
   dst.cacheMisses = src.cacheMisses;
   dst.proceduralFallbacks = src.proceduralFallbacks;
   dst.lowerRingFallbacks = src.lowerRingFallbacks;
-  dst.tilesBuiltThisFrame += src.tilesBuiltThisFrame;
-  dst.tilesCommittedThisFrame += src.tilesCommittedThisFrame;
-  dst.buildTimeMs += src.buildTimeMs;
+  dst.conservativeFallbacks = src.conservativeFallbacks;
+  dst.tilesBuiltThisFrame = src.tilesBuiltThisFrame;
+  dst.tilesCommittedThisFrame = src.tilesCommittedThisFrame;
+  dst.buildTimeMs = src.buildTimeMs;
   if (src.maxBuildTimeMs > dst.maxBuildTimeMs) {
     dst.maxBuildTimeMs = src.maxBuildTimeMs;
   }

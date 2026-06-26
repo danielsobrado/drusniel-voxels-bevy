@@ -25,6 +25,14 @@ export interface HydrologyRiversConfig {
   slopeGateStart: number;
   slopeGateEnd: number;
   minVisibleDepth: number;
+  /** Ensures at least one visible trunk river if particle accumulation is too weak. */
+  guaranteeFallbackRivers: boolean;
+  /** Enables the main fallback trunk river corridor. */
+  fallbackMainRiver: boolean;
+  /** Enables secondary fallback tributary corridors. */
+  fallbackTributaries: boolean;
+  /** Multiplies river render-flow speed after hydrology direction/strength are known. */
+  flowSpeedMultiplier: number;
   /** Metres to lower lake surfaces below the fill spill level (and recede the
    *  shoreline to the new contour). Higher = lower, smaller lakes. */
   lakeSurfaceDropM: number;
@@ -36,6 +44,9 @@ export interface HydrologyWaterSurfaceConfig {
   farReduceFactor: number;
   farLevelMinCellSize: number;
   drySentinelDepth: number;
+  farLakeDominance: number;
+  farRiverDominance: number;
+  farWetThreshold: number;
 }
 
 export interface HydrologyMoistureConfig {
@@ -104,6 +115,10 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     slopeGateStart: 0.50,
     slopeGateEnd: 0.24,
     minVisibleDepth: 0.05,
+    guaranteeFallbackRivers: true,
+    fallbackMainRiver: true,
+    fallbackTributaries: true,
+    flowSpeedMultiplier: 1.0,
     lakeSurfaceDropM: 2.0,
   },
   waterSurface: {
@@ -112,6 +127,9 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
     farReduceFactor: 8,
     farLevelMinCellSize: 12.0,
     drySentinelDepth: 2.0,
+    farLakeDominance: 0.4,
+    farRiverDominance: 0.3,
+    farWetThreshold: 0.1,
   },
   moisture: {
     enabled: true,

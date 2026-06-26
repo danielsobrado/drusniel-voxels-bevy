@@ -1,3 +1,7 @@
+import { surfaceHeight } from "./terrain_surface.js";
+import { voxelEditStore } from "./voxel_edits/voxel_edit_store.js";
+import type { VoxelEditTransaction } from "./voxel_edits/voxel_edit_types.js";
+
 export type BrushShape = "sphere" | "cube" | "cylinder";
 export type BrushOp = "remove" | "add";
 
@@ -50,6 +54,54 @@ export const editIds = new WeakMap<DigEdit, number>();
 let editIdCounter = 0;
 export const activePaintSlots = new Set<number>();
 
+function proceduralDensity(x: number, y: number, z: number): number {
+  return surfaceHeight(x, z) - y;
+}
+
+function editedDensityAt(x: number, y: number, z: number): number {
+  return voxelEditStore.sampleDensity(x, y, z, proceduralDensity);
+}
+
+function densityAfterEdit(edit: DigEdit, x: number, y: number, z: number, currentDensity: number): number {
+  const h = editHeight(edit);
+  const sdf = brushSdf(edit.shape, x - edit.x, y - edit.y, z - edit.z, edit.r, h);
+  const full = edit.op === "add" ? Math.max(currentDensity, -sdf) : Math.min(currentDensity, sdf);
+  const feather = Math.max(1e-3, (edit.falloff ?? 0) * edit.r);
+  const weight = Math.min(1, Math.max(0, -sdf / feather)) * (edit.strength ?? 1);
+  return currentDensity + (full - currentDensity) * weight;
+}
+
+function voxelTransactionFromDigEdit(edit: DigEdit, id: number): VoxelEditTransaction {
+  const h = editHeight(edit);
+  const r = edit.r + DIG_INFLUENCE_MARGIN;
+  const minX = Math.floor(edit.x - r);
+  const maxX = Math.ceil(edit.x + r);
+  const minY = Math.max(BEDROCK_Y + 1, Math.floor(edit.y - h - DIG_INFLUENCE_MARGIN));
+  const maxY = Math.ceil(edit.y + h + DIG_INFLUENCE_MARGIN);
+  const minZ = Math.floor(edit.z - r);
+  const maxZ = Math.ceil(edit.z + r);
+  const deltas: VoxelEditTransaction["deltas"] extends readonly (infer T)[] ? T[] : never = [];
+
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      for (let z = minZ; z <= maxZ; z++) {
+        const before = editedDensityAt(x, y, z);
+        const after = densityAfterEdit(edit, x, y, z, before);
+        const materialSlot = edit.op === "add" && edit.material !== undefined ? Math.max(0, edit.material | 0) : undefined;
+        if (Math.abs(after - before) <= 1e-6 && materialSlot === undefined) continue;
+        deltas.push({ x, y, z, density: after, materialSlot });
+      }
+    }
+  }
+
+  return {
+    id,
+    source: "brush",
+    revisionBase: voxelEditStore.revision(),
+    deltas,
+  };
+}
+
 export function addDigEdit(edit: DigEdit): void {
   const id = ++editIdCounter;
   const h = editHeight(edit);
@@ -65,6 +117,7 @@ export function addDigEdit(edit: DigEdit): void {
     bucket.push(copy);
   }
   if (edit.op === "add") activePaintSlots.add(Math.max(0, edit.material ?? 0));
+  voxelEditStore.apply(voxelTransactionFromDigEdit(edit, id));
   digEditRevision++;
 }
 
@@ -85,12 +138,15 @@ export function getDigEditsSnapshot(): DigEdit[] {
 
 export function replaceDigEdits(edits: readonly DigEdit[]): void {
   editIndex.clear();
+  activePaintSlots.clear();
+  voxelEditStore.clear();
   for (const edit of edits) addDigEdit(edit);
 }
 
 export function clearDigEdits(): void {
   editIndex.clear();
   activePaintSlots.clear();
+  voxelEditStore.clear();
   digEditRevision++;
 }
 
@@ -101,7 +157,7 @@ export function digEditCount(): number {
 }
 
 export function getDigEditRevision(): number {
-  return digEditRevision;
+  return Math.max(digEditRevision, voxelEditStore.revision());
 }
 
 export function brushSdf(shape: BrushShape | undefined, dx: number, dy: number, dz: number, r: number, h: number): number {
@@ -129,23 +185,7 @@ export function densityFromEdits(
   x: number, y: number, z: number,
   baseDensity: number,
 ): number {
-  let d = baseDensity;
-  if (editIndex.size > 0 && y > BEDROCK_Y) {
-    const key = cellKey(x, y, z);
-    const bucket = editIndex.get(key);
-    if (bucket) {
-      for (const e of bucket) {
-        const h = editHeight(e);
-        const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-        const sdf = brushSdf(e.shape, dx, dy, dz, e.r, h);
-        const full = (e.op === "add") ? Math.max(d, -sdf) : Math.min(d, sdf);
-        const feather = Math.max(1e-3, (e.falloff ?? 0) * e.r);
-        const weight = Math.min(1, Math.max(0, -sdf / feather)) * (e.strength ?? 1);
-        d += (full - d) * weight;
-      }
-    }
-  }
-  return d;
+  return voxelEditStore.sampleDensity(x, y, z, () => baseDensity);
 }
 
 export function collectOverlappingEdits(
@@ -174,4 +214,15 @@ export function collectOverlappingEdits(
     }
   }
   return chunkEdits;
+}
+
+export function getVoxelEditSnapshot() {
+  return voxelEditStore.snapshot();
+}
+
+export function replaceVoxelEdits(snapshot: ReturnType<typeof getVoxelEditSnapshot>): void {
+  editIndex.clear();
+  activePaintSlots.clear();
+  voxelEditStore.load(snapshot);
+  digEditRevision = Math.max(digEditRevision + 1, snapshot.revision);
 }

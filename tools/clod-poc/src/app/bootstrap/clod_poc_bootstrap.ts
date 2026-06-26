@@ -1,4 +1,5 @@
-﻿import phase0ConfigText from "../../../config/infinite_streaming_phase0.yaml?raw";
+import phase0ConfigText from "../../../config/infinite_streaming_phase0.yaml?raw";
+import naadfConfigText from "../../../config/naadf_poc.yaml?raw";
 import { installGlobalErrorHooks } from "../../core/diagnostics.js";
 import { parseClodRuntimeConfig } from "../runtime_config.js";
 import { runContentRegistryStartup } from "./content_registry_startup.js";
@@ -15,8 +16,13 @@ import { runUiStartup } from "./ui/ui_startup.js";
 import { surfaceHeightCore } from "../../gpu/terrain_field_core.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
-import type * as THREE from "three";
-
+import { initNaadfIntegration, isNaadfScene, type NaadfIntegration } from "../../naadf/integration.js";
+import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig, sampleMacroTerrainMaterial } from "../../long-view/index.js";
+import type { FarShellMetrics } from "../../long-view/index.js";
+import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
+import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
+import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
+import * as THREE from "three";
 
 export async function bootstrapClodPoc() {
   const searchParams = new URLSearchParams(location.search);
@@ -44,6 +50,7 @@ export async function bootstrapClodPoc() {
     queryTreePerfScene: queries.queryTreePerfScene,
     queryForestFloorScene: queries.queryForestFloorScene,
     queryLongViewScene: queries.queryLongViewScene,
+    queryBorderOceanScene: queries.queryBorderOceanScene,
     buildProgress: dom.buildProgress,
     buildProgressPhase: dom.buildProgressPhase,
     buildProgressPercent: dom.buildProgressPercent,
@@ -61,6 +68,7 @@ export async function bootstrapClodPoc() {
     queryGrassPerfScene: queries.queryGrassPerfScene,
     queryTreePerfScene: queries.queryTreePerfScene,
     queryLongViewScene: queries.queryLongViewScene,
+    queryBorderOceanScene: queries.queryBorderOceanScene,
     activePhase0Scene: queries.activePhase0Scene,
   });
   if (!renderer) return;
@@ -94,6 +102,7 @@ export async function bootstrapClodPoc() {
     isLongView: postRenderer.isLongView,
     queryFarShell: queries.queryFarShell,
     queryCanopy: queries.queryCanopy,
+    queryScene: queries.queryScene,
     longViewHooks: postRenderer.longViewHooks,
     isWebGpu: renderer.isWebGpu,
     poolTerrainMaterial: renderer.poolTerrainMaterial,
@@ -119,37 +128,134 @@ export async function bootstrapClodPoc() {
   });
 
   let farSummaryIntegration: FarSummaryIntegration | undefined;
-  const queryScene = queries.queryScene;
-  const isInfiniteStreamScene =
-    queryScene === "infinite-stream-far-summary" ||
-    queryScene === "infinite-stream-slow-builds";
+  let naadfIntegration: NaadfIntegration | undefined;
 
-  if (isInfiniteStreamScene) {
-    farSummaryIntegration = initFarSummaryIntegration({
-      terrainSampler: {
-        sampleHeight: (x: number, z: number) => surfaceHeightCore(x, z),
-        sampleMaterial: () => 0,
-        sampleCanopyCoverage: () => 0,
-        sampleWaterCoverage: () => 0,
-      },
-      scene: renderer.scene,
-      camera: renderer.camera,
-      farShellController: terrainView.farShellController,
-      config: {
-        debug: {
-          showClipmapGrid: true,
-          showTileStates: true,
-          showSummaryNormals: false,
-          showRingColors: true,
+  const queryScene = queries.queryScene;
+  const isNaadfCapable = queries.queryNaadfScene;
+
+  if (isNaadfCapable) {
+    naadfIntegration = initNaadfIntegration({
+      yamlText: naadfConfigText,
+      sceneName: queryScene,
+      threeScene: renderer.scene,
+      forceEnable: queries.queryNaadfScene,
+    }) ?? undefined;
+  }
+
+  const useNaadfFarSummary = Boolean(
+    naadfIntegration?.config.farShell.useNaadfSummary
+    && (queryScene?.startsWith("infinite-naadf-") ?? false),
+  );
+
+  const isLongViewCapableScene =
+    queryScene === "infinite-stream-far-summary" ||
+    queryScene === "infinite-stream-slow-builds" ||
+    queryScene === "infinite-stream-straight" ||
+    queryScene === "infinite-stream-fast-turn" ||
+    queryScene === "long-view-4km" ||
+    queryScene === "long-view-8km" ||
+    queryScene === "long-view-16km" ||
+    queryScene === "long-view-forest-4km" ||
+    queryScene === "long-view-edit-stress" ||
+    queryScene === RIVER_PARITY_TEST_SCENE ||
+    queryScene === "infinite-far-shell-straight" ||
+    queryScene === "infinite-far-shell-fast-turn" ||
+    queryScene === "infinite-far-shell-mountain-approach" ||
+    isNaadfScene(queryScene);
+
+  let infiniteFarShell: InfiniteFarShell | undefined;
+  let farShellMetrics: FarShellMetrics | undefined;
+
+  if (isLongViewCapableScene) {
+    const lvConfig = createDefaultLongViewConfig();
+
+    if (queryScene === "long-view-8km" || queryScene === "infinite-far-shell-straight" || queryScene === "infinite-far-shell-fast-turn" || queryScene === "infinite-far-shell-mountain-approach") {
+      lvConfig.targetVisibleMeters = 8192;
+      lvConfig.farShell.endMeters = 16384;
+    } else if (queryScene === "long-view-16km") {
+      lvConfig.targetVisibleMeters = 16384;
+      lvConfig.farShell.endMeters = 32768;
+      lvConfig.farShell.farFadeMeters = 4096;
+    }
+
+    if (naadfIntegration && (queryScene?.startsWith("infinite-naadf-") ?? false)) {
+      lvConfig.farShell.startMeters = naadfIntegration.config.farShell.startM;
+      lvConfig.farShell.endMeters = naadfIntegration.config.farShell.endM;
+      if (naadfIntegration.config.farShell.gridRes > 0) {
+        lvConfig.farShell.radialSegments = naadfIntegration.config.farShell.gridRes;
+      }
+    }
+
+    farShellMetrics = createFarShellMetrics();
+    farShellMetrics.farShellEnabled = true;
+    farShellMetrics.farShellInnerM = lvConfig.farShell.startMeters;
+    farShellMetrics.farShellOuterM = lvConfig.farShell.endMeters;
+    farShellMetrics.farShellGridRes = lvConfig.farShell.radialSegments;
+
+    if (!useNaadfFarSummary) {
+      farSummaryIntegration = initFarSummaryIntegration({
+        terrainSampler: {
+          sampleHeight: (x: number, z: number) => surfaceHeightCore(x, z),
+          sampleMaterial: (x, z) => sampleMacroTerrainMaterial(x, z),
+          sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
+          sampleWaterCoverage: () => 0,
         },
+        scene: renderer.scene,
+        camera: renderer.camera,
+        farShellController: undefined,
+        farShellMetrics,
+        config: longViewConfigToFarSummaryConfig(lvConfig),
+      });
+    }
+
+    const heightProvider = useNaadfFarSummary && naadfIntegration
+      ? naadfIntegration.getHeightProvider()
+      : farSummaryIntegration?.getHeightProvider();
+    if (!heightProvider) {
+      throw new Error("long-view scene requires NAADF or far-summary height provider");
+    }
+    const lighting = terrainView.currentLighting();
+
+    const materialConfig = loadLongViewMaterialsConfig(undefined, parseQueryOverrides(searchParams));
+    const parityConfig = materialConfig.enabled ? configToUniformData(materialConfig) : undefined;
+    const useParity = materialConfig.enabled && parityConfig !== undefined;
+
+    infiniteFarShell = new InfiniteFarShell({
+      innerMeters: lvConfig.farShell.startMeters,
+      outerMeters: lvConfig.farShell.endMeters,
+      radialSegments: lvConfig.farShell.radialSegments,
+      angularSegments: lvConfig.farShell.angularSegments,
+      heightBiasMeters: lvConfig.farShell.heightBiasMeters,
+      nearBlendMeters: lvConfig.farShell.nearBlendMeters,
+      farFadeMeters: lvConfig.farShell.farFadeMeters,
+      macroBlendStartMeters: lvConfig.farShell.macroBlendStartMeters,
+      macroBlendEndMeters: lvConfig.farShell.macroBlendEndMeters,
+      rebaseSnapMeters: lvConfig.farShell.rebaseSnapMeters,
+      lighting: {
+        sunDirection: lighting.sunDirection,
+        sunColor: lighting.sunColor,
+        skyLight: lighting.skyLight,
+        groundLight: lighting.groundLight,
       },
+      useParityMaterial: useParity,
+      parityConfig,
+      debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
+      metrics: farShellMetrics,
     });
 
-    terrainView.farShellController.setHeightProvider(
-      farSummaryIntegration.getHeightProvider(),
-    );
+    infiniteFarShell.setHeightProvider(heightProvider);
+    renderer.scene.add(infiniteFarShell.mesh);
 
-    if (queryScene === "infinite-stream-slow-builds") {
+    terrainView.farShellController.setEnabled(false);
+
+    terrainView.shadowProxyController?.setOnSunShadowsChanged((enabled) => {
+      infiniteFarShell?.setReceiveSunShadows(enabled);
+    });
+    if (terrainView.shadowProxyDebugState?.sunShadowsEnabled) {
+      infiniteFarShell.setReceiveSunShadows(true);
+    }
+
+    if (queryScene === "infinite-stream-slow-builds" && farSummaryIntegration) {
       farSummaryIntegration.setForceSlowBuilds(true);
       farSummaryIntegration.setBuildDelayMs(100);
     }
@@ -170,8 +276,10 @@ export async function bootstrapClodPoc() {
     understoryConfig: world.understoryConfig,
     forestLightingConfig: world.forestLightingConfig,
     waterConfig: world.waterConfig,
+    borderCoastOceanConfig: world.borderCoastOceanConfig,
     customPropsConfig: world.customPropsConfig,
     propPlacementScenes: world.propPlacementScenes,
+    stagedImport,
     queryGrassRingGrid: queries.queryGrassRingGrid,
     queryGrassRingCell: queries.queryGrassRingCell,
     isWebGpu: renderer.isWebGpu,
@@ -184,6 +292,7 @@ export async function bootstrapClodPoc() {
     vegetationDirtyQueue: postRenderer.terrainEdit.vegetationDirtyQueue,
     statControllers: postRenderer.uiRefs.statControllers,
     getHooks: () => postRenderer.longViewHooks,
+    shadowProxyController: terrainView.shadowProxyController,
   });
 
   await runUiStartup({
@@ -235,12 +344,26 @@ export async function bootstrapClodPoc() {
       phase0VelocityX: queries.phase0VelocityX,
       phase0VelocityZ: queries.phase0VelocityZ,
       phase0Streaming: queries.phase0Streaming,
+      infiniteFarShell,
+      farShellMetrics,
     },
-    onFarSummaryUpdate: farSummaryIntegration
+    onFarSummaryUpdate: farSummaryIntegration || naadfIntegration
       ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
-          farSummaryIntegration!.update(frameIndex, deltaSeconds, camera);
+          if (farSummaryIntegration) {
+            farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
+          }
+          naadfIntegration?.update(frameIndex, deltaSeconds, camera);
+          if (infiniteFarShell) {
+            infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
+          }
+          terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
         }
-      : undefined,
+      : terrainView.shadowProxyController
+          ? (_frameIndex: number, _deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+              terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
+            }
+          : undefined,
+    naadfIntegration,
     getClodErrorCompute: postRenderer.getClodErrorCompute,
     ensureClodErrorCompute: postRenderer.ensureClodErrorCompute,
     textureLoadOptions: postRenderer.textureLoadOptions,

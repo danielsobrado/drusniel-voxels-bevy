@@ -51,11 +51,12 @@ describe("grass ring compute capabilities", () => {
     expect(shaderSource).toContain("params.density_a");
     expect(shaderSource).toContain("params.density_b");
     expect(shaderSource).toContain("params.settings_b.w");
+    expect(shaderSource).toContain("params.material_density");
     expect(shaderSource).not.toContain("0.02, 1.0");
     expect(shaderSource).not.toContain("4.8");
   });
 
-  it("packs YAML LOD and width inputs so GPU density mirrors the CPU helper", () => {
+  it("packs YAML LOD, width, and material inputs so GPU density mirrors the CPU helper", () => {
     const settings = {
       ...DEFAULT_GRASS_SETTINGS,
       distance: 180,
@@ -90,6 +91,8 @@ describe("grass ring compute capabilities", () => {
       maxInstancesPerTier: 1234,
       seed: settings.seed,
       jitter: 0.34,
+      materialDensity: [1.12, 0.18, 0.58, 0.02],
+      heightDensity: [14, 34, 8, 1.04, 1, 0.58],
       frustumPlanes: [1, 2, 3, 4],
     }, { near: 11, mid: 13, far: 17, super: 19 }, settings.ring);
     const f32 = new Float32Array(scratch);
@@ -101,7 +104,11 @@ describe("grass ring compute capabilities", () => {
     expect(f32[27]).toBeCloseTo(0.27);
     expect(f32[28]).toBeCloseTo(0.08);
     expect(f32[29]).toBeCloseTo(0);
-    expect(f32[32]).toBe(1);
+    expect(f32[32]).toBeCloseTo(1.12);
+    expect(f32[33]).toBeCloseTo(0.18);
+    expect(f32[36]).toBeCloseTo(14);
+    expect(f32[39]).toBeCloseTo(1.04);
+    expect(f32[44]).toBe(1);
     expect(u32[20]).toBe(1234);
 
     const densityFromPacked = (distance: number) => {
@@ -131,11 +138,6 @@ describe("grass ring compute capabilities", () => {
   });
 
   it("grass WGSL sets firstInstance per tier (instanceIndex includes firstInstance)", () => {
-    // Grass relies on WebGPU instanceIndex including the indirect firstInstance.
-    // The smoke test (grass_first_instance_smoke.ts) proves this works.
-    // Unlike understory, grass uses a single material for all tiers, so the tier
-    // separation comes from the indirect firstInstance baked into instanceIndex.
-    // Explicit tierBaseOffset is available in createGrassNodeMaterial for future use.
     expect(shaderSource).toContain("indirect_args[base + 4u] = tier * params.counts_b.x");
   });
 });

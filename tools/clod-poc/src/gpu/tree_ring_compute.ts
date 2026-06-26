@@ -2,11 +2,12 @@ import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffer
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeTreeRingShader } from "./wgsl_modules.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "../trees/tree_config.js";
+import { treeMaterialDensityVector, treeSpeciesMaterialVector } from "../trees/tree_material_bias.js";
 import { treeRingAcceptParams, treeRingLodParams } from "../trees/tree_ring_math.js";
 
 export const TREE_GPU_RING_LOD_COUNT = TREE_LODS.length;
 export const TREE_GPU_RING_GROUP_COUNT = TREE_SPECIES.length * TREE_GPU_RING_LOD_COUNT;
-const PARAM_BYTES = 16 * 18;
+const PARAM_BYTES = 16 * 22;
 const COUNTER_BYTES = TREE_GPU_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
@@ -20,6 +21,18 @@ export type TreeGpuRingIndexCounts = Record<TreeSpeciesId, Record<TreeLod, numbe
 export interface TreeGpuRingOutputBuffers {
   cell: GPUBuffer;
   indirectArgs: GPUBuffer;
+}
+
+export interface TreeHydrologyData {
+  res: number;
+  worldCells: number;
+  data: Float32Array;
+}
+
+let defaultTreeHydrologyData: TreeHydrologyData | null = null;
+
+export function setTreeGpuRingHydrologyData(data: TreeHydrologyData | null): void {
+  defaultTreeHydrologyData = data;
 }
 
 export interface TreeGpuRingStats {
@@ -63,11 +76,7 @@ export function treeGpuRingGroupIndex(species: TreeSpeciesId, lod: TreeLod): num
 
 export function treeGpuRingGroupRegion(group: number, maxInstancesPerGroup: number): { start: number; end: number; firstInstance: number } {
   const start = Math.max(0, Math.floor(group)) * Math.max(0, Math.floor(maxInstancesPerGroup));
-  return {
-    start,
-    end: start + Math.max(0, Math.floor(maxInstancesPerGroup)),
-    firstInstance: start,
-  };
+  return { start, end: start + Math.max(0, Math.floor(maxInstancesPerGroup)), firstInstance: start };
 }
 
 export function treeGpuRingGrid(settings: Pick<TreeSettings, "distanceM">): number {
@@ -106,36 +115,22 @@ export function resolveTreeGpuRingReadbackCounts(
     Math.max(0, Math.floor(rawGroupCounts[group] ?? 0)),
   );
   const groupCounts = rawCounts.map((count) => Math.min(count, cap));
-  return {
-    counts: aggregateLodCounts(groupCounts),
-    groupCounts,
-    overflowed: rawCounts.some((count) => count > cap),
-  };
+  return { counts: aggregateLodCounts(groupCounts), groupCounts, overflowed: rawCounts.some((count) => count > cap) };
 }
 
 export function treeGpuRingKey(settings: TreeSettings, worldCells: number): string {
   const lod = treeRingLodParams(settings);
   const accept = treeRingAcceptParams(settings);
   return [
-    worldCells,
-    settings.seed,
-    settings.distanceM,
-    settings.gpu.maxVisible,
-    lod.near,
-    lod.mid,
-    lod.far,
-    lod.radius,
-    lod.band,
-    accept.minHeightM,
-    accept.maxHeightM,
-    accept.slopeMinY,
-    accept.minGroundWeight,
-    accept.parentCellM,
-    accept.clumpStrength,
-    accept.clumpThreshold,
-    speciesWeight(settings, "oak"),
-    speciesWeight(settings, "pine"),
-    speciesWeight(settings, "dead"),
+    worldCells, settings.seed, settings.distanceM, settings.gpu.maxVisible,
+    lod.near, lod.mid, lod.far, lod.radius, lod.band,
+    accept.minHeightM, accept.maxHeightM, accept.slopeMinY, accept.minGroundWeight,
+    accept.parentCellM, accept.clumpStrength, accept.clumpThreshold,
+    ...accept.materialDensity,
+    ...treeSpeciesMaterialVector(settings, "oak"),
+    ...treeSpeciesMaterialVector(settings, "pine"),
+    ...treeSpeciesMaterialVector(settings, "dead"),
+    speciesWeight(settings, "oak"), speciesWeight(settings, "pine"), speciesWeight(settings, "dead"),
     treeGpuRingWorkgroupSize(settings),
   ].join("|");
 }
@@ -146,11 +141,7 @@ export function treeGpuRingComputeUnsupportedReason(device: GPUDevice): string |
   return `tree ring compute requires ${TREE_GPU_RING_STORAGE_BINDINGS} storage buffers per shader stage; device limit is ${maxStorageBuffers}`;
 }
 
-export function packTreeGpuRingParams(
-  settings: TreeSettings,
-  params: TreeGpuRingDispatchParams,
-  scratch: ArrayBuffer = new ArrayBuffer(PARAM_BYTES),
-): ArrayBuffer {
+export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRingDispatchParams, scratch: ArrayBuffer = new ArrayBuffer(PARAM_BYTES)): ArrayBuffer {
   const f32 = new Float32Array(scratch);
   const u32 = new Uint32Array(scratch);
   const lod = treeRingLodParams(settings);
@@ -194,10 +185,18 @@ export function packTreeGpuRingParams(
   u32[44] = Math.max(0, Math.floor(params.maxInstancesPerGroup)) >>> 0;
   u32[45] = treeGpuRingGrid(settings) >>> 0;
   u32[46] = settings.seed >>> 0;
+  const density = treeMaterialDensityVector(settings);
+  const oak = treeSpeciesMaterialVector(settings, "oak");
+  const pine = treeSpeciesMaterialVector(settings, "pine");
+  const dead = treeSpeciesMaterialVector(settings, "dead");
+  for (let i = 0; i < 4; i++) {
+    f32[48 + i] = density[i] ?? 1;
+    f32[52 + i] = oak[i] ?? 1;
+    f32[56 + i] = pine[i] ?? 1;
+    f32[60 + i] = dead[i] ?? 1;
+  }
   if (params.frustumPlanes) {
-    for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) {
-      f32[48 + i] = params.frustumPlanes[i] ?? 0;
-    }
+    for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) f32[64 + i] = params.frustumPlanes[i] ?? 0;
   }
   return scratch;
 }
@@ -209,6 +208,7 @@ export class TreeGpuRingCompute {
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
   private readonly bindGroup: GPUBindGroup;
+  private readonly hydroTexture: GPUTexture;
   private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private counts: TreeGpuRingCounts = emptyTreeGpuRingCounts();
@@ -229,47 +229,24 @@ export class TreeGpuRingCompute {
     edits: readonly ResolvedDigEdit[],
     outputBuffers: TreeGpuRingOutputBuffers,
     private readonly settings: TreeSettings,
+    hydroData: TreeHydrologyData | null,
   ) {
     this.pipelines = pipelines;
-    this.paramBuffer = device.createBuffer({
-      label: "tree ring params",
-      size: PARAM_BYTES,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.counterBuffer = device.createBuffer({
-      label: "tree ring counters",
-      size: COUNTER_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-    this.fieldParams = device.createBuffer({
-      label: "tree ring field params",
-      size: 4 * Uint32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.digEdits = device.createBuffer({
-      label: "tree ring dig edits",
-      size: Math.max(1, edits.length) * DIG_EDIT_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
+    this.paramBuffer = device.createBuffer({ label: "tree ring params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.counterBuffer = device.createBuffer({ label: "tree ring counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    this.fieldParams = device.createBuffer({ label: "tree ring field params", size: 4 * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.digEdits = device.createBuffer({ label: "tree ring dig edits", size: Math.max(1, edits.length) * DIG_EDIT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(this.digEdits, 0, packDigEdits(edits));
     const packedFieldParams = packFieldParams(edits.length);
-    device.queue.writeBuffer(
-      this.fieldParams,
-      0,
-      packedFieldParams.buffer as ArrayBuffer,
-      packedFieldParams.byteOffset,
-      packedFieldParams.byteLength,
-    );
+    device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
     this.counterReadbacks = Array.from({ length: READBACK_SLOTS }, (_, index) => ({
-      buffer: device.createBuffer({
-        label: `tree ring counter readback ${index}`,
-        size: COUNTER_BYTES,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      }),
+      buffer: device.createBuffer({ label: `tree ring counter readback ${index}`, size: COUNTER_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
       busy: false,
       destroyAfterMap: false,
       cpu: new Uint32Array(TREE_GPU_RING_GROUP_COUNT),
     }));
+    this.hydroTexture = this.createHydrologyTexture(hydroData);
+    const hydroSampler = device.createSampler({ label: "tree ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
     this.bindGroup = device.createBindGroup({
       label: "tree ring bind group",
       layout,
@@ -280,101 +257,55 @@ export class TreeGpuRingCompute {
         { binding: 3, resource: { buffer: outputBuffers.cell } },
         { binding: 7, resource: { buffer: this.digEdits } },
         { binding: 8, resource: { buffer: this.fieldParams } },
+        { binding: 9, resource: this.hydroTexture.createView() },
+        { binding: 10, resource: hydroSampler },
       ],
     });
   }
 
-  static async create(
-    device: GPUDevice,
-    edits: readonly ResolvedDigEdit[],
-    outputBuffers: TreeGpuRingOutputBuffers,
-    settings: TreeSettings,
-  ): Promise<TreeGpuRingCompute> {
-    const module = device.createShaderModule({
-      label: "tree ring compute shader",
-      code: composeTreeRingShader(treeGpuRingWorkgroupSize(settings)),
-    });
-    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({
-      binding,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: { type },
-    });
+  static async create(device: GPUDevice, edits: readonly ResolvedDigEdit[], outputBuffers: TreeGpuRingOutputBuffers, settings: TreeSettings, hydroData: TreeHydrologyData | null = null): Promise<TreeGpuRingCompute> {
+    const module = device.createShaderModule({ label: "tree ring compute shader", code: composeTreeRingShader(treeGpuRingWorkgroupSize(settings)) });
+    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const layout = device.createBindGroupLayout({
       label: "tree ring compute layout",
       entries: [
         { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        storage(1),
-        storage(2),
-        storage(3),
-        storage(7, "read-only-storage"),
+        storage(1), storage(2), storage(3), storage(7, "read-only-storage"),
         { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+        { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
-    const makePipeline = (entryPoint: PipelineName) =>
-      device.createComputePipelineAsync({
-        label: `tree ring ${entryPoint}`,
-        layout: pipelineLayout,
-        compute: { module, entryPoint },
-      });
-    const [clearCounters, cull, buildIndirectArgs] = await Promise.all([
-      makePipeline("clear_counters"),
-      makePipeline("tree_cull"),
-      makePipeline("build_indirect_args"),
-    ]);
-    return new TreeGpuRingCompute(device, layout, {
-      clear_counters: clearCounters,
-      tree_cull: cull,
-      build_indirect_args: buildIndirectArgs,
-    }, edits, outputBuffers, { ...settings });
+    const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `tree ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
+    const [clearCounters, cull, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("tree_cull"), makePipeline("build_indirect_args")]);
+    return new TreeGpuRingCompute(device, layout, { clear_counters: clearCounters, tree_cull: cull, build_indirect_args: buildIndirectArgs }, edits, outputBuffers, { ...settings }, hydroData ?? defaultTreeHydrologyData);
   }
 
   dispatch(params: TreeGpuRingDispatchParams): boolean {
     if (this.failedReason) return false;
-
     const frame = this.frame++;
     const requestReadback = treeGpuRingRequestsDebugReadback(this.settings, frame);
-    const readbackSlot = requestReadback
-      ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null
-      : null;
+    const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
     if (requestReadback && !readbackSlot) this.skippedDispatches++;
-
     packTreeGpuRingParams(this.settings, params, this.paramScratch);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
-
     const encoder = this.device.createCommandEncoder({ label: "tree ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, 1);
-    this.dispatchPipeline(
-      encoder,
-      this.pipelines.tree_cull,
-      treeGpuRingCullWorkgroups(this.settings),
-    );
+    this.dispatchPipeline(encoder, this.pipelines.tree_cull, treeGpuRingCullWorkgroups(this.settings));
     this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, 1);
-    if (readbackSlot) {
-      encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, COUNTER_BYTES);
-    }
-
+    if (readbackSlot) encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, COUNTER_BYTES);
     const submittedGeneration = this.generation;
     const submitStart = performance.now();
-    if (readbackSlot) {
-      readbackSlot.busy = true;
-      readbackSlot.destroyAfterMap = false;
-      this.runningReadbacks++;
-    }
+    if (readbackSlot) { readbackSlot.busy = true; readbackSlot.destroyAfterMap = false; this.runningReadbacks++; }
     this.device.queue.submit([encoder.finish()]);
     this.submitMs = performance.now() - submitStart;
-
     if (readbackSlot) {
       const slot = readbackSlot;
       const readbackStart = performance.now();
       void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
         if (submittedGeneration !== this.generation) {
-          slot.busy = false;
-          slot.destroyAfterMap = false;
-          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-          slot.buffer.unmap();
-          slot.buffer.destroy();
-          return;
+          slot.busy = false; slot.destroyAfterMap = false; this.runningReadbacks = Math.max(0, this.runningReadbacks - 1); slot.buffer.unmap(); slot.buffer.destroy(); return;
         }
         slot.cpu.set(new Uint32Array(slot.buffer.getMappedRange(0, COUNTER_BYTES)));
         slot.buffer.unmap();
@@ -385,25 +316,14 @@ export class TreeGpuRingCompute {
         this.groupCounts = resolved.groupCounts;
         this.counts = resolved.counts;
         this.overflowed = resolved.overflowed;
-        if (slot.destroyAfterMap) {
-          slot.destroyAfterMap = false;
-          slot.buffer.destroy();
-        }
+        if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); }
       }).catch((error) => {
         if (submittedGeneration !== this.generation) {
-          slot.busy = false;
-          slot.destroyAfterMap = false;
-          this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-          slot.buffer.destroy();
-          return;
+          slot.busy = false; slot.destroyAfterMap = false; this.runningReadbacks = Math.max(0, this.runningReadbacks - 1); slot.buffer.destroy(); return;
         }
         slot.busy = false;
         this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-        if (slot.destroyAfterMap) {
-          slot.destroyAfterMap = false;
-          slot.buffer.destroy();
-          return;
-        }
+        if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); return; }
         this.failedReason = error instanceof Error ? error.message : String(error);
       });
     }
@@ -413,11 +333,7 @@ export class TreeGpuRingCompute {
   stats(enabled: boolean): TreeGpuRingStats {
     const acceptedCandidates = this.counts.near + this.counts.mid + this.counts.far + this.counts.impostor;
     return {
-      status: !enabled
-        ? "disabled"
-        : this.failedReason
-          ? "failed"
-          : this.runningReadbacks > 0 ? "running" : "ready",
+      status: !enabled ? "disabled" : this.failedReason ? "failed" : this.runningReadbacks > 0 ? "running" : "ready",
       reason: this.failedReason ?? undefined,
       candidateCount: treeGpuRingSlotCount(this.settings),
       acceptedCandidates,
@@ -437,6 +353,7 @@ export class TreeGpuRingCompute {
     this.counterBuffer.destroy();
     this.digEdits.destroy();
     this.fieldParams.destroy();
+    this.hydroTexture.destroy();
     for (const slot of this.counterReadbacks) {
       if (slot.busy) slot.destroyAfterMap = true;
       else slot.buffer.destroy();
@@ -450,6 +367,19 @@ export class TreeGpuRingCompute {
     pass.dispatchWorkgroups(Math.max(1, workgroups));
     pass.end();
   }
+
+  private createHydrologyTexture(hydroData: TreeHydrologyData | null): GPUTexture {
+    if (hydroData && hydroData.data.length > 0) {
+      const texture = this.device.createTexture({ label: "tree ring hydro texture", size: { width: hydroData.res, height: hydroData.res }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+      const bytes = new Uint8Array(hydroData.data.byteLength);
+      bytes.set(new Uint8Array(hydroData.data.buffer, hydroData.data.byteOffset, hydroData.data.byteLength));
+      this.device.queue.writeTexture(
+        { texture },
+        bytes, { bytesPerRow: hydroData.res * 16 }, { width: hydroData.res, height: hydroData.res });
+      return texture;
+    }
+    return this.device.createTexture({ label: "tree ring fallback hydro texture", size: { width: 1, height: 1 }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING });
+  }
 }
 
 function speciesWeight(settings: TreeSettings, species: TreeSpeciesId): number {
@@ -460,9 +390,7 @@ function speciesWeight(settings: TreeSettings, species: TreeSpeciesId): number {
 function aggregateLodCounts(groupCounts: readonly number[]): TreeGpuRingCounts {
   const counts = emptyTreeGpuRingCounts();
   for (const species of TREE_SPECIES) {
-    for (const treeLod of TREE_LODS) {
-      counts[treeLod] += groupCounts[treeGpuRingGroupIndex(species, treeLod)] ?? 0;
-    }
+    for (const treeLod of TREE_LODS) counts[treeLod] += groupCounts[treeGpuRingGroupIndex(species, treeLod)] ?? 0;
   }
   return counts;
 }

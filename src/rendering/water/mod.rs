@@ -1,10 +1,16 @@
+pub mod displacement;
+pub mod finish;
+pub mod reflection;
+pub mod reflection_compositor;
+
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::prelude::*;
 use bevy::shader::{Shader, ShaderDefVal};
 use bevy_water::water::material::{WATER_FRAGMENT_SHADER_HANDLE, WATER_VERTEX_SHADER_HANDLE};
 use serde::{Deserialize, Serialize};
 
-use crate::rendering::witchcraft_water_finish::WitchcraftWaterFinishConfig;
+use self::finish::WitchcraftWaterFinishConfig;
+use crate::terrain::generation::OceanClass;
 use crate::voxel::meshing::WaterBodyKind;
 
 /// Water configuration. Per-body wave/colour/reflection tuning lives in
@@ -68,6 +74,7 @@ pub struct WaterBodyPresetsConfig {
 }
 
 #[derive(Deserialize, Clone)]
+#[serde(default)]
 pub struct WaterBodyPresetConfig {
     pub wave_amplitude: f32,
     pub wave_speed: f32,
@@ -90,6 +97,31 @@ pub struct WaterBodyPresetConfig {
     pub lake_ripple_overlay_strength: f32,
 }
 
+impl Default for WaterBodyPresetConfig {
+    fn default() -> Self {
+        Self {
+            wave_amplitude: 0.5,
+            wave_speed: 1.0,
+            wave_scale: 1.0,
+            wave_count: 2,
+            reflection_strength: 0.3,
+            fresnel_power: 5.0,
+            distortion_strength: 0.02,
+            shallow_color: [0.0, 0.3, 0.8, 0.95],
+            deep_color: [0.0, 0.05, 0.3, 1.0],
+            clarity: 0.5,
+            base_alpha: 0.95,
+            foam_enabled: true,
+            shore_foam: true,
+            wave_crest_foam: false,
+            murkiness: 0.2,
+            detail_normal_intensity: 0.8,
+            detail_scroll_speed: 0.03,
+            lake_ripple_overlay_strength: 1.0,
+        }
+    }
+}
+
 impl WaterConfig {
     pub fn body_preset(&self, kind: WaterBodyKind) -> &WaterBodyPresetConfig {
         match kind {
@@ -100,6 +132,17 @@ impl WaterConfig {
             WaterBodyKind::ShallowFlood => &self.body_presets.shallow_flood,
             WaterBodyKind::Unknown => &self.body_presets.ocean,
         }
+    }
+
+    pub fn world_shape_preset(&self, ocean_class: OceanClass) -> &WaterBodyPresetConfig {
+        self.body_preset(water_body_kind_for_ocean_class(ocean_class))
+    }
+}
+
+pub fn water_body_kind_for_ocean_class(ocean_class: OceanClass) -> WaterBodyKind {
+    match ocean_class {
+        OceanClass::DeepSea | OceanClass::ShelfSea | OceanClass::Coast => WaterBodyKind::Ocean,
+        OceanClass::Beach | OceanClass::Land => WaterBodyKind::Unknown,
     }
 }
 
@@ -195,30 +238,8 @@ impl Default for WaterBodyPresetsConfig {
     }
 }
 
-fn default_shallow_flood_preset() -> WaterBodyPresetConfig {
-    WaterBodyPresetConfig {
-        wave_amplitude: 0.015,
-        wave_speed: 0.18,
-        wave_scale: 4.0,
-        wave_count: 1,
-        reflection_strength: 0.08,
-        fresnel_power: 3.0,
-        distortion_strength: 0.001,
-        shallow_color: [0.035, 0.20, 0.34, 0.74],
-        deep_color: [0.005, 0.065, 0.17, 0.86],
-        clarity: 0.42,
-        base_alpha: 0.72,
-        foam_enabled: false,
-        shore_foam: false,
-        wave_crest_foam: false,
-        murkiness: 0.65,
-        detail_normal_intensity: 0.1,
-        detail_scroll_speed: 0.006,
-        lake_ripple_overlay_strength: 0.0,
-    }
-}
-
 #[derive(Deserialize, Clone)]
+#[serde(default)]
 pub struct ReflectionConfig {
     pub enabled: bool,
     pub resolution_scale: f32,
@@ -242,6 +263,7 @@ impl Default for ReflectionConfig {
 }
 
 #[derive(Deserialize, Clone)]
+#[serde(default)]
 pub struct RefractionConfig {
     pub enabled: bool,
     pub strength: f32,
@@ -261,6 +283,7 @@ impl Default for RefractionConfig {
 }
 
 #[derive(Deserialize, Clone)]
+#[serde(default)]
 pub struct DisplacementConfig {
     pub enabled: bool,
     pub resolution: u32,
@@ -269,6 +292,20 @@ pub struct DisplacementConfig {
     pub damping: f32,
     pub player_impulse_radius: f32,
     pub player_impulse_strength: f32,
+}
+
+impl Default for DisplacementConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            resolution: 256,
+            world_size: 128.0,
+            wave_speed: 1.0,
+            damping: 0.98,
+            player_impulse_radius: 3.0,
+            player_impulse_strength: 0.5,
+        }
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -289,52 +326,17 @@ impl Default for WaterWeatherConfig {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unknown_water_uses_ocean_preset_as_transient_fallback() {
-        let config = WaterConfig::default();
-
-        assert_eq!(
-            config.body_preset(WaterBodyKind::Unknown).deep_color,
-            config.body_preset(WaterBodyKind::Ocean).deep_color
-        );
-        assert_eq!(
-            config.body_preset(WaterBodyKind::Unknown).wave_amplitude,
-            config.body_preset(WaterBodyKind::Ocean).wave_amplitude
-        );
-    }
-}
-
-impl Default for DisplacementConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            resolution: 1024,
-            world_size: 128.0,
-            wave_speed: 0.98,
-            damping: 0.995,
-            player_impulse_radius: 1.5,
-            player_impulse_strength: -0.3,
-        }
-    }
-}
-
 pub fn load_water_config() -> Result<WaterConfig, Box<dyn std::error::Error>> {
     let config_str = std::fs::read_to_string("assets/config/water.yaml")?;
     let config: WaterConfig = serde_yaml::from_str(&config_str)?;
     Ok(config)
 }
 
-/// Component marking entities that should receive caustic lighting
 #[derive(Component)]
 pub struct ReceivesCaustics {
     pub water_surface_y: f32,
 }
 
-/// Component for water volumes
 #[derive(Component)]
 pub struct WaterVolume {
     pub bounds_min: Vec3,
@@ -486,7 +488,59 @@ fn set_noble_shader_defs(shader: &mut Shader, toggles: WaterShaderToggles) {
         shader.shader_defs.push("USE_NOBLE_PARALLAX".into());
     }
 }
-pub mod displacement;
-pub mod finish;
-pub mod reflection;
-pub mod reflection_compositor;
+
+fn default_shallow_flood_preset() -> WaterBodyPresetConfig {
+    WaterBodyPresetConfig {
+        wave_amplitude: 0.015,
+        wave_speed: 0.18,
+        wave_scale: 4.0,
+        wave_count: 1,
+        reflection_strength: 0.08,
+        fresnel_power: 3.0,
+        distortion_strength: 0.001,
+        shallow_color: [0.035, 0.20, 0.34, 0.74],
+        deep_color: [0.005, 0.065, 0.17, 0.86],
+        clarity: 0.42,
+        base_alpha: 0.72,
+        foam_enabled: false,
+        shore_foam: false,
+        wave_crest_foam: false,
+        murkiness: 0.65,
+        detail_normal_intensity: 0.1,
+        detail_scroll_speed: 0.006,
+        lake_ripple_overlay_strength: 0.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ocean_classes_map_to_ocean_water() {
+        assert_eq!(
+            water_body_kind_for_ocean_class(OceanClass::DeepSea),
+            WaterBodyKind::Ocean
+        );
+        assert_eq!(
+            water_body_kind_for_ocean_class(OceanClass::ShelfSea),
+            WaterBodyKind::Ocean
+        );
+        assert_eq!(
+            water_body_kind_for_ocean_class(OceanClass::Coast),
+            WaterBodyKind::Ocean
+        );
+    }
+
+    #[test]
+    fn dry_classes_do_not_spawn_ocean_water() {
+        assert_eq!(
+            water_body_kind_for_ocean_class(OceanClass::Beach),
+            WaterBodyKind::Unknown
+        );
+        assert_eq!(
+            water_body_kind_for_ocean_class(OceanClass::Land),
+            WaterBodyKind::Unknown
+        );
+    }
+}

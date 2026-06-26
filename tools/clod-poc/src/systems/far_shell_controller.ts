@@ -3,6 +3,7 @@ import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import { createExtendedCanopyTexture, createExtendedHeightTexture } from "../clod/terrain_summary.js";
 import { buildFarCanopyShell } from "../gpu/far_canopy_shell.js";
 import { buildFarTerrainShell, type FarHeightProvider } from "../gpu/far_terrain_shell.js";
+import { FAR_SHELL_DEFAULTS } from "../app/clod_constants.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 
 export interface FarShellInstance {
@@ -28,9 +29,20 @@ export interface FarShellControllerDeps {
   getLighting: () => EnvironmentLighting;
   getSettings: () => FarShellUiSettings;
   onTriangleCount?: (counter: "far_shell_tris" | "canopy_tris", count: number) => void;
+  receiveSunShadows?: () => boolean;
+  useDebugLambertReceiver?: () => boolean;
+  useParityMaterial?: () => boolean;
+  getParityConfig?: () => import("../farTerrain/farTerrainUniforms.js").FarTerrainUniformData | undefined;
   heightProvider?: FarHeightProvider;
   centerX?: number;
   centerZ?: number;
+  /** Radius around the stream center owned by playable/CLOD terrain. */
+  cameraRelativeInnerRadiusM?: number;
+  /** Override the shell far radius in world units. When set, the shell radius is
+   *  this value instead of worldSizeCells * radiusFactor. */
+  farShellRadiusM?: number;
+  /** When true, legacy procedural canopy is not built (Phase 8 deterministic system owns canopy). */
+  skipLegacyCanopy?: boolean;
 }
 
 export interface FarShellController {
@@ -39,9 +51,11 @@ export interface FarShellController {
   isBuilt(): boolean;
   readonly canopyShell: FarShellInstance | null;
   dispose(): void;
-  /** Move the shell mesh to a new world center without rebuilding. */
   moveTo(x: number, z: number): void;
+  /** Set or change the height provider after construction. Rebuilds the shell. */
   setHeightProvider(provider: FarHeightProvider | undefined): void;
+  /** Override the shell far radius (world units). Pass 0 to clear the override. */
+  setFarRadiusOverride(m: number): void;
 }
 
 export function createFarShellController(deps: FarShellControllerDeps): FarShellController {
@@ -50,8 +64,24 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
   let currentCenterX = deps.centerX ?? deps.worldSizeCells / 2;
   let currentCenterZ = deps.centerZ ?? deps.worldSizeCells / 2;
   let currentHeightProvider = deps.heightProvider;
+  let currentFarRadiusOverride: number | undefined = deps.farShellRadiusM;
   let buildCenterX = currentCenterX;
   let buildCenterZ = currentCenterZ;
+
+  const resolveFarRadius = (radiusFactor: number): number =>
+    currentFarRadiusOverride && currentFarRadiusOverride > 0
+      ? currentFarRadiusOverride
+      : deps.farShellRadiusM && deps.farShellRadiusM > 0
+        ? deps.farShellRadiusM
+        : deps.worldSizeCells * radiusFactor;
+
+  const resolveInnerExclusionRadius = (farRadius: number): number | undefined => {
+    if (!currentHeightProvider) return undefined;
+    const configured = deps.cameraRelativeInnerRadiusM;
+    const fallback = deps.worldSizeCells / 2;
+    const radius = configured && configured > 0 ? configured : fallback;
+    return Math.max(0, Math.min(radius, farRadius * 0.95));
+  };
 
   const buildFarShellInstance = (
     radiusFactor: number,
@@ -64,24 +94,30 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
       current.dispose();
     }
     const lighting = deps.getLighting();
+    const farRadius = resolveFarRadius(radiusFactor);
     const result = buildFarTerrainShell(deps.terrainSummary, {
       sunDirection: lighting.sunDirection,
       sunColor: lighting.sunColor,
       skyLight: lighting.skyLight,
       groundLight: lighting.groundLight,
     }, {
-      farRadius: deps.worldSizeCells * radiusFactor,
+      farRadius,
       gridRes: 128,
       heightDrop,
       heightBias,
       heightProvider: currentHeightProvider,
       centerX: currentCenterX,
       centerZ: currentCenterZ,
+      innerExclusionRadius: resolveInnerExclusionRadius(farRadius),
       buildRelative: useRelativeBuild,
+      receiveSunShadows: deps.receiveSunShadows?.() ?? false,
+      useDebugLambertReceiver: deps.useDebugLambertReceiver?.() ?? false,
+      useParityMaterial: deps.useParityMaterial?.() ?? false,
+      parityConfig: deps.getParityConfig?.(),
     });
     buildCenterX = result.buildCenterX;
     buildCenterZ = result.buildCenterZ;
-    // For relative build, translate to the actual world center
+    // For relative build, translate to the actual world center.
     if (useRelativeBuild) {
       result.mesh.position.set(currentCenterX, 0, currentCenterZ);
     }
@@ -109,13 +145,19 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
     currentCenterZ = z;
   };
 
-  current = buildFarShellInstance(1.5, 0.6, 2, false);
-  if (!deps.isLongView && !deps.queryFarShell) {
+  const initialSettings = deps.getSettings();
+  current = buildFarShellInstance(
+    initialSettings.radiusFactor,
+    initialSettings.heightBias,
+    initialSettings.heightDrop,
+    currentHeightProvider !== undefined,
+  );
+  if (!initialSettings.enabled && !deps.isLongView && !deps.queryFarShell) {
     deps.scene.remove(current.mesh);
   }
 
-  const canopyFarRadius = deps.worldSizeCells * 1.5;
-  if (deps.isLongView || deps.queryCanopy) {
+  const canopyFarRadius = deps.worldSizeCells * FAR_SHELL_DEFAULTS.radiusFactor;
+  if ((deps.isLongView || deps.queryCanopy) && !deps.skipLegacyCanopy) {
     const canopyHeightTexture = createExtendedHeightTexture(deps.terrainSummary, canopyFarRadius);
     const canopyCoverageTexture = createExtendedCanopyTexture(deps.terrainSummary, canopyFarRadius, 42);
     const lighting = deps.getLighting();
@@ -136,6 +178,10 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
     rebuild,
     setHeightProvider(provider: FarHeightProvider | undefined) {
       currentHeightProvider = provider;
+      rebuild();
+    },
+    setFarRadiusOverride(m: number) {
+      currentFarRadiusOverride = m > 0 ? m : undefined;
       rebuild();
     },
     setEnabled(on) {

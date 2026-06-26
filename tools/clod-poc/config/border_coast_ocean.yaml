@@ -107,3 +107,34 @@ debug:
   show_coast_type: false
   show_page_input_sections: false
   freeze_lod_selection: false
+
+# Border coast + render-only deep ocean for finite CLOD-POC worlds.
+# Coast shaping feeds terrain surfaceHeight (CLOD page source path).
+# Deep ocean is a separate render mesh — never welded into LOD0 pages.
+border_coast_ocean:
+  enabled: true
+  # Distances in world cells from the nearest playable edge (0 = on the border).
+  coast:
+    ocean_start_cells: 48       # deep-ocean render mesh begins inside this border band
+    ocean_full_depth_cells: 16  # chunk_size * 1 — full ocean carve depth
+    shore_backshore_cells: 32   # chunk_size * 2 — inland blend back to procedural
+    shoreline_cell_cells: 32    # chunk_size * 2 — coast-type sampling grid
+    cliff_headland_threshold: 0.58
+    cliff_modulo: 7
+    beach:
+      waterline_offset: -0.25
+      backshore_height_above_water: 5.0
+      beach_shelf_cells: 8      # chunk_size / 2
+    cliff:
+      min_height_above_water: 16.0
+      inland_boost: 4.0
+  ocean:
+    surface_y: 18
+    min_depth: 2.0
+    max_depth: 16.0
+  deep_ocean:
+    enabled: true
+    # Render-only ring beyond the playable square and through the border-ocean band.
+    extend_cells: 384
+    surface_y: 18
+    segments: 64

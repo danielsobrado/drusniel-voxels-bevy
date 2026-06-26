@@ -21,7 +21,7 @@ export type {
 import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
-  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary } = deps;
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, canopy, construction } = deps;
   let elapsedSeconds = 0;
   const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
@@ -60,7 +60,11 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     getFarShellRadiusFactor: diagnostics.getFarShellRadiusFactor,
     farShellBuilt: diagnostics.farShellBuilt,
     farShellCanopyEnabled: diagnostics.farShellCanopyEnabled,
+    getFarShellMetrics: diagnostics.getFarShellMetrics,
+    infiniteFarShellActive: diagnostics.infiniteFarShellActive,
     isLongView: diagnostics.isLongView,
+    getShadowProxyInert: diagnostics.getShadowProxyInert,
+    getShadowProxyEnabled: diagnostics.getShadowProxyEnabled,
     phase0TargetVisibleM: diagnostics.phase0TargetVisibleM,
     phase0Config: diagnostics.phase0Config,
     queryScene: diagnostics.queryScene,
@@ -69,6 +73,14 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     phase0VelocityX: diagnostics.phase0VelocityX,
     phase0VelocityZ: diagnostics.phase0VelocityZ,
     phase0Streaming: diagnostics.phase0Streaming,
+    borderOceanScene: diagnostics.queryScene === "border-ocean"
+      ? {
+          waterField: waterWeather.waterField,
+          deepOcean: waterWeather.deepOceanConfig,
+          deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
+          oceanSampler: waterWeather.oceanSampler,
+        }
+      : undefined,
   });
 
   render.renderer.setAnimationLoop(() => {
@@ -108,6 +120,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       getOrbitHoverRay: () => player.playerInputController.getOrbitHoverRay(),
     });
 
+    construction?.update();
+
     const terrainPhase = runTerrainFramePhase({
       state: player.state,
       pageTransitionMode: terrain.pageTransitionMode,
@@ -120,6 +134,10 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       views: terrain.views,
       worldCells: terrain.worldCells,
     });
+
+    shadowProxy?.rebuildIfNeeded();
+
+    canopy?.update(render.camera.position.x, render.camera.position.z);
 
     runVegetationFramePhase({
       elapsedSeconds,
@@ -136,6 +154,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       stoneController: vegetation.stoneController,
       propController: vegetation.propController,
       waterController: waterWeather.waterController,
+      deepOceanSurface: waterWeather.deepOceanSurface,
+      deepOceanMaterial: waterWeather.deepOceanMaterial,
       weatherController: waterWeather.weatherController,
       updateWeatherStats: waterWeather.updateWeatherStats,
       weatherStatsController: waterWeather.weatherStatsController,

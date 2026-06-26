@@ -8,7 +8,8 @@ use crate::terrain::hydrology::VisualHydrologyConfig;
 pub const TERRAIN_CONFIG_PATH: &str = "assets/config/terrain_generation.yaml";
 pub const TERRAIN_MATERIALS_PATH: &str = "assets/content/materials.yaml";
 pub const TERRAIN_BIOMES_PATH: &str = "assets/content/biomes.yaml";
-pub const TERRAIN_GENERATION_VERSION: u64 = 11;
+pub const WORLD_SHAPE_CONFIG_PATH: &str = "assets/config/world_shape.yaml";
+pub const TERRAIN_GENERATION_VERSION: u64 = 12;
 
 /// Wrapper for YAML file structure (has `terrain:` root key)
 #[derive(Debug, Deserialize, Serialize)]
@@ -277,6 +278,7 @@ pub fn terrain_config_fingerprint() -> u64 {
         Path::new(TERRAIN_CONFIG_PATH),
         Path::new(TERRAIN_MATERIALS_PATH),
         Path::new(TERRAIN_BIOMES_PATH),
+        Path::new(WORLD_SHAPE_CONFIG_PATH),
     )
 }
 
@@ -284,6 +286,7 @@ fn terrain_config_fingerprint_for_paths(
     terrain_path: &Path,
     materials_path: &Path,
     biomes_path: &Path,
+    world_shape_path: &Path,
 ) -> u64 {
     let mut hash = Fnv1a64::default();
     hash.write_u64(TERRAIN_GENERATION_VERSION);
@@ -291,6 +294,7 @@ fn terrain_config_fingerprint_for_paths(
         (terrain_path, b"default-terrain-config".as_slice()),
         (materials_path, b"default-material-content".as_slice()),
         (biomes_path, b"default-biome-content".as_slice()),
+        (world_shape_path, b"default-world-shape-config".as_slice()),
     ] {
         match std::fs::read(path) {
             Ok(bytes) => {
@@ -367,24 +371,46 @@ mod tests {
     }
 
     #[test]
-    fn terrain_fingerprint_includes_material_and_biome_content() {
+    fn terrain_fingerprint_includes_material_biome_and_world_shape_content() {
         let mut terrain = tempfile::NamedTempFile::new().unwrap();
         let mut materials = tempfile::NamedTempFile::new().unwrap();
         let mut biomes = tempfile::NamedTempFile::new().unwrap();
+        let mut world_shape = tempfile::NamedTempFile::new().unwrap();
         terrain.write_all(b"terrain-v1").unwrap();
         materials.write_all(b"materials-v1").unwrap();
         biomes.write_all(b"biomes-v1").unwrap();
+        world_shape.write_all(b"world-shape-v1").unwrap();
 
-        let baseline =
-            terrain_config_fingerprint_for_paths(terrain.path(), materials.path(), biomes.path());
+        let baseline = terrain_config_fingerprint_for_paths(
+            terrain.path(),
+            materials.path(),
+            biomes.path(),
+            world_shape.path(),
+        );
         std::fs::write(materials.path(), b"materials-v2").unwrap();
-        let materials_changed =
-            terrain_config_fingerprint_for_paths(terrain.path(), materials.path(), biomes.path());
+        let materials_changed = terrain_config_fingerprint_for_paths(
+            terrain.path(),
+            materials.path(),
+            biomes.path(),
+            world_shape.path(),
+        );
         std::fs::write(biomes.path(), b"biomes-v2").unwrap();
-        let biomes_changed =
-            terrain_config_fingerprint_for_paths(terrain.path(), materials.path(), biomes.path());
+        let biomes_changed = terrain_config_fingerprint_for_paths(
+            terrain.path(),
+            materials.path(),
+            biomes.path(),
+            world_shape.path(),
+        );
+        std::fs::write(world_shape.path(), b"world-shape-v2").unwrap();
+        let world_shape_changed = terrain_config_fingerprint_for_paths(
+            terrain.path(),
+            materials.path(),
+            biomes.path(),
+            world_shape.path(),
+        );
 
         assert_ne!(baseline, materials_changed);
         assert_ne!(materials_changed, biomes_changed);
+        assert_ne!(biomes_changed, world_shape_changed);
     }
 }

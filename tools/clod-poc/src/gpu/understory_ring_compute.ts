@@ -5,7 +5,7 @@ import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeUnderstoryRingShader } from "./wgsl_modules.js";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "../understory/understory_config.js";
 import { createUnderstoryGeometryMap, disposeUnderstoryGeometryMap, type UnderstoryGeometryMap } from "../understory/understory_geometry.js";
-import { createUnderstoryRingNodeMaterialHandle, type UnderstoryRingInstanceBuffers } from "../understory/understory_node_material.js";
+import { createUnderstoryRingNodeMaterialHandle, type UnderstoryRingHydrologyWater, type UnderstoryRingInstanceBuffers } from "../understory/understory_node_material.js";
 import type { UnderstoryMaterialHandle } from "../understory/understory_material.js";
 import {
   understoryRingClassBaseOffset,
@@ -407,6 +407,8 @@ export function createGpuRingDrawResources(
   worldCells: number,
   gpuBackend: UnderstoryWebGpuBackendAccess,
   lighting?: EnvironmentLighting,
+  hydrologyData?: UnderstoryHydrologyData | null,
+  hydrologyTexture?: THREE.Texture | null,
 ): UnderstoryGpuRingDrawResources {
   const maxPerGroup = understoryRingGroupCapacity(settings);
   const count = Math.max(1, maxPerGroup);
@@ -421,6 +423,9 @@ export function createGpuRingDrawResources(
   gpuBackend.createStorageAttribute(cell);
 
   const ringBuffers: UnderstoryRingInstanceBuffers = { cell, capacity: sharedInstanceCount };
+  const hydrology: UnderstoryRingHydrologyWater | undefined = hydrologyTexture && hydrologyData
+    ? { texture: hydrologyTexture, worldSize: worldCells, res: hydrologyData.res }
+    : undefined;
 
   const geometries = createUnderstoryGeometryMap(settings);
   const meshes: UnderstoryGpuRingMesh[] = [];
@@ -430,7 +435,9 @@ export function createGpuRingDrawResources(
     const clsSettings = settings.classes[cls];
     const group = understoryRingGroupIndex(cls);
     const classBaseOffset = understoryRingClassBaseOffset(group, count);
-    const handle = createUnderstoryRingNodeMaterialHandle(settings, ringBuffers, lighting, clsSettings.minScale, clsSettings.maxScale, classBaseOffset);
+    const handle = createUnderstoryRingNodeMaterialHandle(
+      settings, ringBuffers, lighting, clsSettings.minScale, clsSettings.maxScale, classBaseOffset, hydrology,
+    );
     materialHandles[cls] = handle;
     meshes.push(createGpuRingTierDraw(
       settings,

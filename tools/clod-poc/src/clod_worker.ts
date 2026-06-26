@@ -8,7 +8,11 @@ import {
   type DirtyCellBounds,
   type NodeIndex,
 } from "./clod/quadtree.js";
-import { addDigEdit, replaceDigEdits, setTerrainSurfaceOverride } from "./terrain/terrain.js";
+import { initClodCacheContext, clearWorkerPersistentCache, type ClodCacheContext } from "./cache/clodCacheContext.js";
+import { isCacheRpcResponse } from "./cache/cacheWorkerRpc.js";
+import { dispatchCacheRpcResponse } from "./cache/workerRemotePersistentStore.js";
+import { createBuildCacheHooks, type CachedBuildStats } from "./cache/clodBuildCache.js";
+import { addDigEdit, replaceVoxelEdits, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
 import {
   collectBuildResultTransferables,
   collectNodeTransferables,
@@ -26,6 +30,7 @@ const ctx = self as unknown as {
 };
 
 let cfg: ClodPagesConfig | null = null;
+let workerCacheCtx: ClodCacheContext | null = null;
 let result: BuildResult | null = null;
 let index: NodeIndex | null = null;
 let topLevel = 0;
@@ -137,9 +142,7 @@ function drainParents(budgetMs: number): void {
   if (changed.length > 0) {
     const serialized = serializeNodes(changed);
     const transferables: Transferable[] = [];
-    for (const node of serialized) {
-      collectNodeTransferables(node, transferables);
-    }
+    for (const node of serialized) collectNodeTransferables(node, transferables);
     post({
       type: "parentRebuilt",
       requestId: activeParentRequestId,
@@ -176,26 +179,66 @@ function scheduleParentDrain(): void {
   }, 0);
 }
 
+function installBorderCoastRuntime(
+  config: Extract<ClodWorkerRequest, { type: "build" }>["borderCoastOceanConfig"],
+  worldPagesX: number,
+  pagesCfg: ClodPagesConfig,
+): void {
+  const worldCells = worldPagesX * pagesCfg.page.chunks_per_page * pagesCfg.page.chunk_size;
+  setBorderCoastRuntime(config ?? null, worldCells);
+}
+
 async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }>): Promise<void> {
   cfg = request.cfg;
-  replaceDigEdits(request.edits);
+  replaceVoxelEdits(request.voxelEdits);
   installHydrologyTerrain(request.hydrologyTerrain);
+  installBorderCoastRuntime(request.borderCoastOceanConfig, request.worldPagesX, request.cfg);
   pendingByLevel.clear();
   coalescedDig = null;
   activeParentRequestId = null;
   parentNodes = 0;
   parentMs = 0;
   await initSimplifier();
+
+  const cacheCtx = await initClodCacheContext({
+    cfg: request.cfg,
+    worldPages: request.worldPagesX,
+    terrainSource: request.terrainSource,
+    forceDisabled: request.cacheDisabled ?? false,
+    role: "worker",
+  });
+  workerCacheCtx = cacheCtx;
+  const cacheStats: CachedBuildStats = {
+    nodesFromCache: 0,
+    nodesBuilt: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+    coldBuildMsAvoided: 0,
+    cacheDecodeMs: 0,
+    netSavedMs: 0,
+    coldBuildMs: 0,
+  };
+  const cacheHooks = cacheCtx?.effective ? createBuildCacheHooks(cacheCtx, cacheStats) : undefined;
+
   result = await buildWorldAsync(
     request.worldPagesX,
     request.worldPagesZ,
     cfg,
     (progress) => post({ type: "progress", requestId: request.requestId, ...progress }),
+    cacheHooks,
   );
+  if (cacheCtx) await cacheCtx.service.flush();
   index = buildNodeIndex(result);
   topLevel = Math.max(...result.nodesByLevel.keys());
   const serialized = serializeBuildResult(result);
-  post({ type: "buildComplete", requestId: request.requestId, result: serialized }, collectBuildResultTransferables(serialized));
+  const cacheServiceMetrics = cacheCtx?.service.getMetrics();
+  post({
+    type: "buildComplete",
+    requestId: request.requestId,
+    result: serialized,
+    cacheBuildStats: cacheCtx?.effective ? cacheStats : undefined,
+    cacheServiceMetrics: cacheCtx?.effective ? cacheServiceMetrics : undefined,
+  }, collectBuildResultTransferables(serialized));
 }
 
 function queueCoalescedDig(requestId: number, dirty: DirtyCellBounds): void {
@@ -237,7 +280,9 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
     );
   }
 
-  const payload = {
+  post({
+    type: "lod0Rebuilt",
+    requestIds,
     changed,
     dirtyCoords: lod0.dirtyCoords.map(([x, z]) => [x, z] as [number, number]),
     lod0Pages: lod0.lod0Pages,
@@ -247,15 +292,7 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
     chunksRemeshed: lod0.chunksRemeshed,
     chunksTotal: lod0.chunksTotal,
     pendingParents: pendingParentCount(),
-  };
-
-  for (let i = 0; i < requestIds.length; i++) {
-    post({
-      type: "lod0Rebuilt",
-      requestId: requestIds[i]!,
-      ...payload,
-    }, i === 0 ? transferables : undefined);
-  }
+  }, transferables);
   scheduleParentDrain();
 }
 
@@ -284,13 +321,29 @@ function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): vo
   post({ type: "flushed", requestId: request.requestId });
 }
 
+async function handleClearCache(request: Extract<ClodWorkerRequest, { type: "clearCache" }>): Promise<void> {
+  if (workerCacheCtx) {
+    await workerCacheCtx.service.clear();
+    workerCacheCtx = null;
+  } else {
+    await clearWorkerPersistentCache();
+  }
+  post({ type: "cacheCleared", requestId: request.requestId });
+}
+
 ctx.onmessage = (event: MessageEvent<ClodWorkerRequest>) => {
+  if (isCacheRpcResponse(event.data)) {
+    dispatchCacheRpcResponse(event.data);
+    return;
+  }
   const request = event.data;
   try {
     if (request.type === "build") {
       void handleBuild(request).catch((error) => post(errorResponse(request.requestId, error)));
     } else if (request.type === "dig") {
       handleDig(request);
+    } else if (request.type === "clearCache") {
+      void handleClearCache(request).catch((error) => post(errorResponse(request.requestId, error)));
     } else {
       handleFlush(request);
     }

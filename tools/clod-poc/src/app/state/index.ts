@@ -1,6 +1,6 @@
 import { getAudioState } from "../../audio/index.js";
 import type { ClodPagesConfig } from "../../config.js";
-import type { ProjectArchiveContents } from "../../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import type { WeatherMode } from "../clod_constants.js";
 import type { TerrainMaterialSource } from "../../terrain/material/terrain_material_constants.js";
@@ -39,7 +39,7 @@ export interface CreateClodAppStateParams {
   cfg: ClodPagesConfig;
   clodRuntime: ClodRuntimeConfig;
   searchParams: URLSearchParams;
-  stagedImport: ProjectArchiveContents | null;
+  stagedImport: VoxelProjectArchiveContents | null;
   isWebGpu: boolean;
   queryPerfMode: boolean;
   queryWebGpuSelection: boolean;
@@ -157,6 +157,9 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
   }
   if (params.searchParams.get("understory") === "1") state.understoryEnabled = true;
   if (params.searchParams.get("understory") === "0") state.understoryEnabled = false;
+  if (params.searchParams.get("scene") === "long-view-shadow-proxy-low-sun") {
+    state.sunElevationDeg = 8;
+  }
 }
 
 export function createClodAppState(params: CreateClodAppStateParams): ClodAppState {
@@ -207,6 +210,9 @@ export function createClodAppState(params: CreateClodAppStateParams): ClodAppSta
   const state = mergeSlices(slices);
   Object.defineProperty(state, "slices", { value: slices, enumerable: false });
   applyScenePresets(state, params);
+  if (params.isWebGpu && !params.queryPerfMode) {
+    state.grassShaderMode = "webgpu-ring-v1";
+  }
   return state;
 }
 

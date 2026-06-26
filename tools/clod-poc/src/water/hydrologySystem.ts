@@ -122,11 +122,12 @@ export class HydrologySystem {
     fillDepressions(grid, config.fill);
     computeFlowAccumulation(grid, config.accumulation, config.fill, config.rivers);
     carveRiversAndClassifyWater(grid, config.fill, config.rivers, config.talus);
+    applyRiverFlowSpeedMultiplier(grid, config.rivers.flowSpeedMultiplier);
     for (let i = 0; i < grid.waterYRaw.length; i++) {
-      if (grid.riverMask[i] > 0.5) grid.waterYRaw[i] = grid.carvedBed[i] + grid.riverDepth[i];
+      if (grid.riverMask[i] > 0.01) grid.waterYRaw[i] = grid.carvedBed[i] + grid.riverDepth[i];
     }
     buildWaterSurface(grid, config.waterSurface, config.waterSurface.drySentinelDepth);
-    buildFarWaterSurface(grid, config.waterSurface.farReduceFactor);
+    buildFarWaterSurface(grid, config.waterSurface);
     buildMoistureField(grid, config.moisture);
     const stats = collectStats(grid, config.accumulation.particles, nowMs() - t0);
     logHydrologySummary(stats);
@@ -140,6 +141,15 @@ export class HydrologySystem {
 
   terrainHeight(x: number, z: number): number {
     return sampleGridBilinear(this.grid, this.grid.carvedBed, x, z);
+  }
+}
+
+function applyRiverFlowSpeedMultiplier(grid: HydrologyGrid, multiplier: number): void {
+  const safeMultiplier = Number.isFinite(multiplier) ? Math.max(0, multiplier) : 1;
+  if (Math.abs(safeMultiplier - 1) < 1e-6) return;
+  for (let i = 0; i < grid.flowStrength.length; i++) {
+    if (grid.riverMask[i] <= 0.01) continue;
+    grid.flowStrength[i] *= safeMultiplier;
   }
 }
 

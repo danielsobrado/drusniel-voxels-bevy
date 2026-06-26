@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { FarSummaryConfig } from "./config.js";
 import type { FarSummaryCache } from "./summary-cache.js";
 import type { FarSummaryStats } from "./types.js";
+import { attachDebugPanelChrome } from "../ui/debug_panel_chrome.js";
 
 const TILE_STATE_COLORS: Record<string, number> = {
   requested: 0xffff00,
@@ -23,12 +24,14 @@ const RING_COLORS: number[] = [
 export class FarSummaryDebugOverlay {
   private readonly config: FarSummaryConfig;
   private readonly cache: FarSummaryCache;
+  private readonly statsHost: HTMLElement;
+  private readonly statsElement: HTMLPreElement;
 
   private readonly gridGroup: THREE.Group;
-  private readonly statsElement: HTMLPreElement | null = null;
   private gridMeshes: THREE.Object3D[] = [];
   private tileMeshes: THREE.Object3D[] = [];
-  private lastMeshRevision = -1;
+  private lastStateRevision = -1;
+  private meshRebuildFrameSkips = 0;
 
   constructor(
     config: FarSummaryConfig,
@@ -41,33 +44,42 @@ export class FarSummaryDebugOverlay {
     this.gridGroup.frustumCulled = false;
     scene?.add(this.gridGroup);
 
+    this.statsHost = document.createElement("div");
+    document.body.appendChild(this.statsHost);
+
     this.statsElement = document.createElement("pre");
     this.statsElement.style.cssText = `
-      position: fixed;
-      bottom: 8px;
-      right: 8px;
-      background: rgba(0,0,0,0.75);
       color: #9fef9f;
       font: 11px/1.4 monospace;
-      padding: 6px 10px;
-      border-radius: 4px;
-      pointer-events: none;
-      z-index: 101;
       margin: 0;
       max-width: 350px;
       white-space: pre-wrap;
     `;
-    document.body.appendChild(this.statsElement);
+    this.statsHost.appendChild(this.statsElement);
+
+    const chrome = attachDebugPanelChrome(this.statsHost, {
+      panelId: "far-summary",
+      title: "Far Summary",
+      floating: true,
+      defaultPosition: {
+        left: Math.max(12, window.innerWidth - 370),
+        top: Math.max(12, window.innerHeight - 220),
+      },
+      onClose: () => this.statsHost.remove(),
+    });
+    chrome.body.style.padding = "6px 10px";
   }
 
   update(
     _frameIndex: number,
     stats: FarSummaryStats,
   ): void {
-    const currentRev = this.cache.commitRevisionAt();
-    if (currentRev !== this.lastMeshRevision) {
+    const currentRev = this.cache.stateRevisionAt();
+    this.meshRebuildFrameSkips++;
+    if (currentRev !== this.lastStateRevision && this.meshRebuildFrameSkips >= 5) {
       this.rebuildMeshes();
-      this.lastMeshRevision = currentRev;
+      this.lastStateRevision = currentRev;
+      this.meshRebuildFrameSkips = 0;
     }
     this.updateStatsText(stats);
   }
@@ -156,7 +168,6 @@ export class FarSummaryDebugOverlay {
   }
 
   private updateStatsText(stats: FarSummaryStats): void {
-    if (!this.statsElement) return;
     const lines = [
       "Far Summary:",
       `  req: ${stats.requestedTiles}`,
@@ -167,6 +178,7 @@ export class FarSummaryDebugOverlay {
       `  hit: ${this.cacheHitsPercent(stats)}%`,
       `  prc: ${stats.proceduralFallbacks}`,
       `  lwr: ${stats.lowerRingFallbacks}`,
+      `  cns: ${stats.conservativeFallbacks}`,
       `  blt: ${stats.tilesBuiltThisFrame}`,
       `  ms:  ${stats.buildTimeMs.toFixed(1)}`,
       `  max: ${stats.maxBuildTimeMs.toFixed(1)}`,
@@ -183,6 +195,6 @@ export class FarSummaryDebugOverlay {
   dispose(): void {
     this.clearAllMeshes();
     this.gridGroup.removeFromParent?.();
-    this.statsElement?.remove();
+    this.statsHost.remove();
   }
 }

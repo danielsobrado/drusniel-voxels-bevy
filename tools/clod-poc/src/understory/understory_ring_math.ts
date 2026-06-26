@@ -1,12 +1,3 @@
-// Understory GPU-ring math (Phase 1 of docs/plans/understory-gpu-ring-port-plan.md).
-//
-// Pure, deterministic helpers shared by the WGSL cull shader
-// (understory_ring.compute.wgsl), the ring draw material, and the CPU parity
-// reference. This module is the single source of truth for the ring geometry
-// (toroidal cell grid), per-group layout, terrain accept gate, and the uniform
-// byte layout. Mirrors trees/tree_ring_math.ts but understory has a single LOD,
-// so a "group" is just an understory class.
-
 import { terrainWeights } from "../terrain/terrain.js";
 import { clamp01 } from "../trees/tree_noise.js";
 import {
@@ -14,14 +5,12 @@ import {
   UNDERSTORY_CLASSES,
   type UnderstoryClass,
   type UnderstorySettings,
+  type UnderstoryTerrainClassWeights,
 } from "./understory_config.js";
 
 export const UNDERSTORY_RING_GROUP_COUNT = UNDERSTORY_CLASSES.length;
-
-// std140 uniform: 16 vec4 lanes (10 globals + 6 frustum planes).
 export const UNDERSTORY_RING_PARAM_BYTES = 16 * 16;
-// Per-class selection params: 8 floats per class (see packUnderstoryRingClassParams).
-export const UNDERSTORY_RING_CLASS_STRIDE_F32 = 8;
+export const UNDERSTORY_RING_CLASS_STRIDE_F32 = 12;
 
 export interface UnderstoryRingDispatchParams {
   centerX: number;
@@ -39,6 +28,7 @@ export interface UnderstoryRingAcceptParams {
   maxHeightM: number;
   slopeMinY: number;
   minGroundWeight: number;
+  materialDensity: [number, number, number, number];
 }
 
 export type UnderstoryRingCounts = Record<UnderstoryClass, number>;
@@ -102,8 +92,6 @@ export function understoryRingClassBaseOffset(group: number, maxPerGroup: number
   return Math.max(0, Math.floor(group)) * Math.max(0, Math.floor(maxPerGroup));
 }
 
-// PCG-style 2D hash returning two floats in [0, 1). Matches the WGSL
-// `understory_pcg2d` exactly (integer math, 24-bit mantissa).
 export function understoryPcg2d(cellX: number, cellZ: number, salt: number): [number, number] {
   const m = 1664525;
   const c = 1013904223;
@@ -123,8 +111,6 @@ export function understoryPcg2d(cellX: number, cellZ: number, salt: number): [nu
   return [(a5 & 0xffffff) * inv, (b5 & 0xffffff) * inv];
 }
 
-// fract(sin()) hash used for acceptance/class/scale rolls. Matches the WGSL
-// `understory_hash`. Keyed by world cell + seed + salt.
 export function understoryRingHash(cellX: number, cellZ: number, seed: number, salt: number): number {
   const sx = cellX + (seed + salt);
   const sz = cellZ + (seed * 0.37 + salt * 1.17);
@@ -171,13 +157,15 @@ export function understoryRingAcceptParams(
     maxHeightM: settings.placement.maxHeightM,
     slopeMinY: settings.placement.slopeMinY,
     minGroundWeight: settings.placement.minGroundWeight,
+    materialDensity: [
+      settings.terrain.grass.density,
+      settings.terrain.rock.density,
+      settings.terrain.sand.density,
+      settings.terrain.snow.density,
+    ],
   };
 }
 
-// Terrain placement gate, mirroring generateUnderstoryInstances() slope/height/
-// material rejects. Returns the ground weight (>= 0) when accepted, or -1 when
-// the candidate is rejected by terrain. The ecology roll + class selection (the
-// noise-heavy part) is layered on top of this in the cull shader / parity ref.
 export function understoryRingTerrainGate(
   height: number,
   normalY: number,
@@ -186,14 +174,16 @@ export function understoryRingTerrainGate(
   if (!Number.isFinite(height) || !Number.isFinite(normalY)) return -1;
   if (normalY < params.slopeMinY) return -1;
   if (height < params.minHeightM || height > params.maxHeightM) return -1;
-  const [grassWeight, dirtWeight] = terrainWeights(height, normalY);
-  const groundWeight = grassWeight + dirtWeight * 0.25;
+  const [grassWeight, dirtWeight, sandWeight, snowWeight] = terrainWeights(height, normalY);
+  const materialDensity = grassWeight * params.materialDensity[0]
+    + dirtWeight * params.materialDensity[1]
+    + sandWeight * params.materialDensity[2]
+    + snowWeight * params.materialDensity[3];
+  const groundWeight = (grassWeight + dirtWeight * 0.25) * materialDensity;
   if (groundWeight < params.minGroundWeight) return -1;
   return clamp01(groundWeight);
 }
 
-// Acceptance probability shared by CPU/GPU once ecology is sampled. Kept here so
-// the parity reference and the WGSL agree on the formula.
 export function understoryRingAcceptance(ecology: {
   density: number;
   forestInfluence: number;
@@ -230,9 +220,6 @@ function heightPreferenceCode(cls: UnderstoryClass, settings: UnderstorySettings
   return pref === "low" ? -1 : pref === "high" ? 1 : 0;
 }
 
-// Per-class selection params consumed by the cull shader (one row per class).
-// Layout per class (8 floats): weight, density, shadePreference,
-// moisturePreference, forestEdgeBias, heightPreferenceCode, enabled, reserved.
 export function packUnderstoryRingClassParams(
   settings: UnderstorySettings,
   scratch: Float32Array = new Float32Array(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32),
@@ -249,12 +236,14 @@ export function packUnderstoryRingClassParams(
     scratch[base + 5] = heightPreferenceCode(cls, settings);
     scratch[base + 6] = config.enabled ? 1 : 0;
     scratch[base + 7] = 0;
+    scratch[base + 8] = terrainClassWeight(settings.terrain.grass, cls);
+    scratch[base + 9] = terrainClassWeight(settings.terrain.rock, cls);
+    scratch[base + 10] = terrainClassWeight(settings.terrain.sand, cls);
+    scratch[base + 11] = terrainClassWeight(settings.terrain.snow, cls);
   });
   return scratch;
 }
 
-// Global ring uniform (16 vec4 lanes). The cull shader reads this as
-// UnderstoryRingParams; Phase 2 WGSL must keep this layout in sync.
 export function packUnderstoryRingParams(
   settings: UnderstorySettings,
   params: UnderstoryRingDispatchParams,
@@ -265,59 +254,45 @@ export function packUnderstoryRingParams(
   const ecology = settings.ecology;
   f32.fill(0);
   u32.fill(0);
-  // lane 0 — center_radius
   f32[0] = params.centerX;
   f32[1] = params.centerZ;
   f32[2] = settings.distanceM;
   f32[3] = params.worldCells;
-  // lane 1 — accept_a
   f32[4] = understoryRingCell(settings);
   f32[5] = settings.placement.minHeightM;
   f32[6] = settings.placement.maxHeightM;
   f32[7] = settings.placement.slopeMinY;
-  // lane 2 — accept_b
   f32[8] = settings.placement.minGroundWeight;
   f32[9] = settings.placement.minTreeInfluence;
   f32[10] = ecology.enabled ? 1 : 0;
-  f32[11] = 0;
-  // lane 3 — ecology_a
+  f32[11] = settings.terrain.grass.density;
   f32[12] = ecology.forestInfluenceScaleM;
   f32[13] = ecology.forestEdgeWidthM;
   f32[14] = ecology.moistureNoiseScaleM;
   f32[15] = ecology.densityNoiseScaleM;
-  // lane 4 — ecology_b
   f32[16] = ecology.moistureStrength;
   f32[17] = ecology.shadeStrength;
   f32[18] = ecology.clearingPreference;
   f32[19] = ecology.densityNoiseStrength;
-  // lane 5 — ecology_c
   f32[20] = ecology.deadfallOldForestBias;
-  f32[21] = 0;
-  f32[22] = 0;
-  f32[23] = 0;
-  // lane 6 — settings_u (u32)
+  f32[21] = settings.terrain.rock.density;
+  f32[22] = settings.terrain.sand.density;
+  f32[23] = settings.terrain.snow.density;
   u32[24] = Math.max(0, Math.floor(params.maxInstancesPerGroup)) >>> 0;
   u32[25] = understoryRingGrid(settings) >>> 0;
   u32[26] = settings.seed >>> 0;
   u32[27] = UNDERSTORY_RING_GROUP_COUNT >>> 0;
-  // lane 7 — settings_extra (u32): counts 4 and 5 (dead_log, stump)
   const ic = params.indexCounts;
   u32[28] = Math.max(0, Math.floor(ic[4])) >>> 0;
   u32[29] = Math.max(0, Math.floor(ic[5])) >>> 0;
-  // lane 8 — class_index_counts (u32 × 4): counts 0..3 (shrub, fern, sapling, flower)
   u32[32] = Math.max(0, Math.floor(ic[0])) >>> 0;
   u32[33] = Math.max(0, Math.floor(ic[1])) >>> 0;
   u32[34] = Math.max(0, Math.floor(ic[2])) >>> 0;
   u32[35] = Math.max(0, Math.floor(ic[3])) >>> 0;
-  // lane 9 — hydro_params (f32): x=worldCells, y=hydroEnabled(0/1)
-  // worldCells also appears in lane 0.w (center_radius); the duplicate is
-  // intentional — lane 0.w is the bounds-check world_max, lane 9.x is the
-  // hydrology texture scale.
   f32[36] = params.worldCells;
   f32[37] = params.hydroEnabled ? 1.0 : 0.0;
   f32[38] = 0;
   f32[39] = 0;
-  // lanes 10-15 — frustum planes (6 × vec4)
   const fp = params.frustumPlanes;
   for (let p = 0; p < 6; p++) {
     const src = p * 4;
@@ -328,4 +303,8 @@ export function packUnderstoryRingParams(
     f32[dst + 3] = fp[src + 3] ?? 0;
   }
   return scratch;
+}
+
+function terrainClassWeight(weights: UnderstoryTerrainClassWeights, cls: UnderstoryClass): number {
+  return weights[cls];
 }
