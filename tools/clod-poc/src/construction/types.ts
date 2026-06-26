@@ -10,6 +10,7 @@ export const SNAP_GROUPS = [
 export type SnapGroup = typeof SNAP_GROUPS[number];
 export type ConstructionCategory = "floor" | "wall" | "fence" | "pillar" | "roof" | "generic";
 export type ConstructionMaterial = "wood" | "stone" | "metal" | "thatch";
+export type ConstructionSupportState = "grounded" | "connected" | "unsupported";
 
 export interface ConstructionSnapPoint {
   id: string;
@@ -72,6 +73,8 @@ export interface PlacedConstructionPiece {
   typeId: string;
   position: readonly [number, number, number];
   rotationQuarterTurns: number;
+  grounded?: boolean;
+  parentIds?: readonly string[];
 }
 
 export interface ConstructionTerrainConformRequest {
@@ -112,4 +115,6 @@ export interface ConstructionCandidate {
   valid: boolean;
   reason: string | null;
   snap: ConstructionSnapResult | null;
+  supportState?: ConstructionSupportState;
+  supportParentIds?: readonly string[];
 }
