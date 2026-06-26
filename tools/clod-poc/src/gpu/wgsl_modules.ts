@@ -13,6 +13,7 @@ import understoryRingEntry from "./shaders/understory_ring.compute.wgsl?raw";
 import { readRiverEcologySettings } from "../water/riverEcologyRuntime.js";
 
 const FIELD_GLOBALS = ["digEdits", "fieldParams"] as const;
+const GRASS_FRUSTUM_RADIUS_CONST = "const GRASS_FRUSTUM_HORIZONTAL_SLACK_M: f32 = 1.4;";
 
 function composeShader(label: string, parts: readonly string[]): string {
   const source = parts.join("\n");
@@ -22,7 +23,7 @@ function composeShader(label: string, parts: readonly string[]): string {
 
 function validateSingleFieldBindings(label: string, source: string): void {
   for (const name of FIELD_GLOBALS) {
-    const declarations = source.match(new RegExp(`\\bvar<[^>]+>\\s+${name}\\s*:`, "g")) ?? [];
+    const declarations = source.match(new RegExp(`\bvar<[^>]+>\s+${name}\s*:`, "g")) ?? [];
     if (declarations.length !== 1) {
       throw new Error(`${label} must declare exactly one ${name} binding; found ${declarations.length}`);
     }
@@ -36,8 +37,36 @@ function formatWgslFloat(value: number): string {
 
 function replaceConst(source: string, name: string, value: number): string {
   return source.replace(
-    new RegExp(`const ${name}: f32 = [-+]?[0-9]*\\.?[0-9]+;`),
+    new RegExp(`const ${name}: f32 = [-+]?[0-9]*\.?[0-9]+;`),
     `const ${name}: f32 = ${formatWgslFloat(value)};`,
+  );
+}
+
+function withConservativeGrassFrustum(source: string): string {
+  if (source.includes("in_frustum_sphere")) return source;
+  const withConst = source.replace(
+    "const GRASS_MOIST_BANK_END_M: f32 = 11.0;",
+    `const GRASS_MOIST_BANK_END_M: f32 = 11.0;\n${GRASS_FRUSTUM_RADIUS_CONST}`,
+  );
+  const withSphereFn = withConst.replace(
+    /fn in_frustum\(center: vec3<f32>, slack: f32\) -> bool \{[\s\S]*?\n\}/,
+    `fn in_frustum_sphere(center: vec3<f32>, radius: f32) -> bool {
+  let safe_radius = max(0.0, radius);
+  for (var p = 0u; p < 6u; p = p + 1u) {
+    let plane = params.planes[p];
+    if (dot(plane.xyz, center) + plane.w < -safe_radius) { return false; }
+  }
+  return true;
+}`,
+  );
+  return withSphereFn.replace(
+    /  if \(!in_frustum\(vec3<f32>\(wpos\.x, height \+ 0\.5, wpos\.y\), 1\.4\)\) \{ return; \}\n  let river_band = river_grass_ecology_band\(wpos\.x, wpos\.y, hydro, height\);/,
+    `  let river_band = river_grass_ecology_band(wpos.x, wpos.y, hydro, height);
+  let max_height_scale = max(0.1, 1.0 + abs(params.settings_a.z)) * river_band.height;
+  let max_blade_height = params.settings_a.y * max_height_scale * 2.25;
+  let blade_center = vec3<f32>(wpos.x, height + 0.02 + max_blade_height * 0.5, wpos.y);
+  let blade_radius = max_blade_height * 0.5 + GRASS_FRUSTUM_HORIZONTAL_SLACK_M;
+  if (!in_frustum_sphere(blade_center, blade_radius)) { return; }`,
   );
 }
 
@@ -67,7 +96,7 @@ export function composeTerrainFieldShader(): string {
 }
 
 export function composeGrassRingShader(): string {
-  return composeShader("grass ring shader", [grassBindings, terrainCommon, placementHeight, withRiverEcologyConstants(grassRingEntry)]);
+  return composeShader("grass ring shader", [grassBindings, terrainCommon, placementHeight, withRiverEcologyConstants(withConservativeGrassFrustum(grassRingEntry))]);
 }
 
 export function composeStoneScatterShader(): string {
