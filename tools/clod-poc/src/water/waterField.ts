@@ -191,6 +191,24 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+function cascadeMask(flowSpeed: number, drop: number): number {
+  const speedMask = smooth01(flowSpeed / 0.75);
+  const dropMask = smoothMask(
+    RIVER_MATERIAL_SETTINGS.cascadeDropStart,
+    RIVER_MATERIAL_SETTINGS.cascadeDropEnd,
+    drop,
+  );
+  return speedMask * dropMask;
+}
+
+function cascadeWhitewaterDrop(drop: number, flowSpeed: number): number {
+  const cascade = cascadeMask(flowSpeed, drop);
+  if (cascade <= 0) return drop;
+  const boost = 1 + cascade * RIVER_MATERIAL_SETTINGS.cascadeWhitewaterBoost;
+  const lipSignal = cascade * RIVER_MATERIAL_SETTINGS.cascadeDropEnd * 0.35;
+  return drop * boost + lipSignal;
+}
+
 function flowSurfaceOffset(
   x: number,
   z: number,
@@ -213,15 +231,22 @@ function flowSurfaceOffset(
   const bank = (1 - center) * river;
   const speed = smooth01(flowSpeed / 1.15);
   const rapid = Math.max(speed, smooth01(drop / 1.6));
+  const cascade = cascadeMask(flowSpeed, drop);
   const along = x * dirX + z * dirZ;
   const side = x * -dirZ + z * dirX;
   const channelWave = Math.sin(along * 0.36 + Math.sin(side * 0.075) * 0.8);
   const sideWave = Math.cos(side * 0.42 + along * 0.035);
+  const cascadeLip = smooth01(Math.sin(along * 0.72 + Math.sin(side * 0.11) * 0.9) * 0.5 + 0.5);
+  const cascadeSheet = -RIVER_MATERIAL_SETTINGS.cascadeStepStrength * cascade * center * cascadeLip;
+  const cascadeRough = (channelWave * 0.65 + sideWave * 0.35)
+    * RIVER_MATERIAL_SETTINGS.cascadeRoughnessStrength
+    * cascade
+    * center;
   const centerTrough = -RIVER_MATERIAL_SETTINGS.geometryThalwegDip * center * smooth01(depthHint / 2.8);
   const bankLift = RIVER_MATERIAL_SETTINGS.geometryBankLift * bank * (1 + rapid * 0.35);
   const riffle = channelWave * RIVER_MATERIAL_SETTINGS.geometryRiffleStrength * rapid
     + sideWave * RIVER_MATERIAL_SETTINGS.geometrySideRiffleStrength * rapid * center;
-  const raw = (centerTrough + bankLift + riffle) * river * detailFade;
+  const raw = (centerTrough + bankLift + riffle + cascadeSheet + cascadeRough) * river * detailFade;
   const maxDown = Math.max(0, depthHint - 0.035);
   return Math.max(-maxDown, Math.min(RIVER_MATERIAL_SETTINGS.geometryMaxOffset, raw));
 }
@@ -369,7 +394,7 @@ export class WaterField {
       if (flowDirLen > FLOW_EPSILON && flowSpeed > FLOW_EPSILON) {
         const dirX = s.flowX / flowDirLen;
         const dirZ = s.flowZ / flowDirLen;
-        const drop = this.hydrologyRiverLocalDrop(x, z, dirX, dirZ);
+        const drop = cascadeWhitewaterDrop(this.hydrologyRiverLocalDrop(x, z, dirX, dirZ), flowSpeed);
         const bodyMask = baseDepth > 0 ? s.bodyMask : 0;
         const waterY = shapeRiverSurfaceY(
           x,
@@ -505,7 +530,7 @@ export class WaterField {
             bestFlowX = dirX;
             bestFlowZ = dirZ;
             bestFlowProgress = Math.min(1, Math.max(0, bestAccLen / river.totalLength));
-            bestFlowDrop = segDrop;
+            bestFlowDrop = cascadeWhitewaterDrop(segDrop, bestFlowSpeed);
           }
         }
       }
