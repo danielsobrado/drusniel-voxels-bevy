@@ -5,11 +5,12 @@ import { MAX_TERRAIN_TEXTURES } from "../terrain/terrain_textures.js";
 import type { WeatherMode } from "../app/clod_constants.js";
 import { DEFAULT_RAIN_WEATHER_SETTINGS } from "../weather/rain.js";
 import { DEFAULT_WATER_VISUAL, WATER_DEBUG_MODES, type WaterDebugMode } from "../water/waterConfig.js";
-import type { ProjectArchiveContents } from "./project_archive.js";
 import type { ProjectPropInstance } from "./project_props.js";
 
 export const VOXEL_PROJECT_SCHEMA_VERSION = 3 as const;
 const PROJECT_FILE = "project.json";
+const IMPORT_DB = "drusniel-clod-imports";
+const IMPORT_STORE = "projects";
 
 export type TextureBlendMode = "hard bands" | "blend bands";
 export type PostProcessDebugMode = "output" | "copy" | "off";
@@ -160,6 +161,16 @@ export interface VoxelProjectManifest {
   };
 }
 
+export interface VoxelProjectArchiveContents {
+  manifest: VoxelProjectManifest;
+  customTextures: Map<string, Uint8Array>;
+}
+
+interface StagedVoxelProjectImport {
+  manifest: VoxelProjectManifest;
+  customTextures: [string, Uint8Array][];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -170,6 +181,29 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isVec3(value: unknown): value is [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every(isFiniteNumber);
+}
+
+function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+  });
+}
+
+function transactionDone(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction was aborted"));
+  });
+}
+
+async function openImportDb(): Promise<IDBDatabase> {
+  const request = indexedDB.open(IMPORT_DB, 1);
+  request.onupgradeneeded = () => {
+    if (!request.result.objectStoreNames.contains(IMPORT_STORE)) request.result.createObjectStore(IMPORT_STORE);
+  };
+  return requestResult(request);
 }
 
 function assertConfig(value: unknown): asserts value is ClodPagesConfig {
@@ -283,7 +317,7 @@ export async function createVoxelProjectArchive(
   return zipSync(files);
 }
 
-export async function parseVoxelProjectArchive(bytes: Uint8Array): Promise<ProjectArchiveContents> {
+export async function parseVoxelProjectArchive(bytes: Uint8Array): Promise<VoxelProjectArchiveContents> {
   const { strFromU8, unzipSync } = await import("fflate");
   const files = unzipSync(bytes);
   if (!files[PROJECT_FILE]) throw new Error("The archive is missing project.json");
@@ -310,5 +344,40 @@ export async function parseVoxelProjectArchive(bytes: Uint8Array): Promise<Proje
     }
   }
 
-  return { manifest: manifest as unknown as ProjectArchiveContents["manifest"], terrainGlb: new Uint8Array(), customTextures };
+  return { manifest, customTextures };
+}
+
+export async function stageVoxelProjectImport(contents: VoxelProjectArchiveContents): Promise<string> {
+  const token = crypto.randomUUID();
+  const staged: StagedVoxelProjectImport = {
+    manifest: contents.manifest,
+    customTextures: [...contents.customTextures],
+  };
+  const db = await openImportDb();
+  try {
+    const transaction = db.transaction(IMPORT_STORE, "readwrite");
+    transaction.objectStore(IMPORT_STORE).put(staged, token);
+    await transactionDone(transaction);
+  } finally {
+    db.close();
+  }
+  return token;
+}
+
+export async function consumeStagedVoxelProjectImport(token: string): Promise<VoxelProjectArchiveContents | null> {
+  const db = await openImportDb();
+  try {
+    const transaction = db.transaction(IMPORT_STORE, "readwrite");
+    const store = transaction.objectStore(IMPORT_STORE);
+    const staged = await requestResult(store.get(token)) as StagedVoxelProjectImport | undefined;
+    if (staged) store.delete(token);
+    await transactionDone(transaction);
+    if (!staged) return null;
+    return {
+      manifest: validateVoxelProjectManifest(staged.manifest),
+      customTextures: new Map(staged.customTextures),
+    };
+  } finally {
+    db.close();
+  }
 }
