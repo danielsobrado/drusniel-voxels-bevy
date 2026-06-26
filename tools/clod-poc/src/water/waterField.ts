@@ -45,6 +45,12 @@ export interface ShoreSurfBandSettings {
   maxShallowDepth: number;
 }
 
+export interface ClipmapExclusionBandSettings {
+  enabled: boolean;
+  /** Cells from the nearest world edge owned by a separate ocean renderer. */
+  distance: number;
+}
+
 /** @deprecated Use ShoreSurfBandSettings */
 export type EdgeOceanSettings = ShoreSurfBandSettings;
 
@@ -54,6 +60,11 @@ export const DEFAULT_SHORE_SURF_BAND_SETTINGS: ShoreSurfBandSettings = {
   fullSurfDistance: 16,
   level: 18,
   maxShallowDepth: 2.5,
+};
+
+export const DEFAULT_CLIPMAP_EXCLUSION_BAND_SETTINGS: ClipmapExclusionBandSettings = {
+  enabled: false,
+  distance: 0,
 };
 
 /** @deprecated Use DEFAULT_SHORE_SURF_BAND_SETTINGS */
@@ -176,6 +187,10 @@ function cloneShoreSurfSettings(settings: ShoreSurfBandSettings): ShoreSurfBandS
   return { ...settings };
 }
 
+function cloneClipmapExclusionBandSettings(settings: ClipmapExclusionBandSettings): ClipmapExclusionBandSettings {
+  return { ...settings };
+}
+
 export class WaterField {
   private readonly sampler: TerrainHeightSampler;
   private readonly drySentinelDepth: number;
@@ -186,6 +201,7 @@ export class WaterField {
   private readonly farLevelMinCellSize: number;
   private readonly worldCells: number;
   private shoreSurf = cloneShoreSurfSettings(DEFAULT_SHORE_SURF_BAND_SETTINGS);
+  private clipmapExclusionBand = cloneClipmapExclusionBandSettings(DEFAULT_CLIPMAP_EXCLUSION_BAND_SETTINGS);
 
   constructor(config: WaterConfig, sampler: TerrainHeightSampler, hydrology: HydrologySystem | null = null, worldCells = 0) {
     this.sampler = sampler;
@@ -216,6 +232,18 @@ export class WaterField {
 
   getShoreSurfBand(): ShoreSurfBandSettings {
     return cloneShoreSurfSettings(this.shoreSurf);
+  }
+
+  setClipmapExclusionBand(settings: Partial<ClipmapExclusionBandSettings>): void {
+    this.clipmapExclusionBand = {
+      ...this.clipmapExclusionBand,
+      ...settings,
+      distance: Math.max(0, settings.distance ?? this.clipmapExclusionBand.distance),
+    };
+  }
+
+  getClipmapExclusionBand(): ClipmapExclusionBandSettings {
+    return cloneClipmapExclusionBandSettings(this.clipmapExclusionBand);
   }
 
   /** @deprecated Use setShoreSurfBand */
@@ -266,6 +294,7 @@ export class WaterField {
   sampleForCellSize(x: number, z: number, cellSize: number): WaterFieldResult {
     const shoreSurf = this.sampleShoreSurfBand(x, z);
     if (shoreSurf) return shoreSurf;
+    if (this.isInClipmapExclusionBand(x, z)) return this.sampleDry(x, z);
 
     if (this.source === "hydrology" && this.hydrology) {
       const s = this.hydrology.sample(x, z);
@@ -413,6 +442,24 @@ export class WaterField {
       bodyMask,
       flow,
     };
+  }
+
+  private sampleDry(x: number, z: number): WaterFieldResult {
+    const terrainY = this.terrainYAt(x, z);
+    const waterY = terrainY - this.drySentinelDepth;
+    return {
+      waterY,
+      terrainY,
+      depth: waterY - terrainY,
+      bodyMask: 0,
+      flow: { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
+    };
+  }
+
+  private isInClipmapExclusionBand(x: number, z: number): boolean {
+    if (!this.clipmapExclusionBand.enabled || this.worldCells <= 0 || this.clipmapExclusionBand.distance <= 0) return false;
+    const edgeDistance = Math.min(x, z, this.worldCells - x, this.worldCells - z);
+    return edgeDistance < this.clipmapExclusionBand.distance;
   }
 
   private sampleShoreSurfBand(x: number, z: number): WaterFieldResult | null {
