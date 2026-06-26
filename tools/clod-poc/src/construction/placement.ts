@@ -1,3 +1,4 @@
+import { resolveConstructionPlacementSupport } from "./support_state.js";
 import type { ConstructionCandidate, ConstructionPieceDef, ConstructionPlacementConfig, ConstructionSnapResult, PlacedConstructionPiece } from "./types.js";
 
 export interface TerrainHitPoint {
@@ -63,6 +64,15 @@ function overlaps(a: Bounds3d, b: Bounds3d): boolean {
     && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
 }
 
+function resolveSupport(input: PlacementValidationInput) {
+  return resolveConstructionPlacementSupport({
+    snapped: input.snapped,
+    snap: input.snap,
+    terrainGrounded: input.piece.canGround && !input.snapped && input.terrainHit !== null,
+    placedPieces: input.placedPieces,
+  });
+}
+
 export function createFreePlacementPosition(
   piece: ConstructionPieceDef,
   terrainHit: TerrainHitPoint,
@@ -86,6 +96,11 @@ export function validateConstructionPlacement(input: PlacementValidationInput): 
     return { valid: false, reason: "no terrain" };
   }
 
+  const support = resolveSupport(input);
+  if (!support.supported) {
+    return { valid: false, reason: support.reason };
+  }
+
   const worldBounds = boundsFor(piece, position, rotationQuarterTurns, 0);
   if (worldBounds.minX < 0 || worldBounds.maxX > worldCells || worldBounds.minZ < 0 || worldBounds.maxZ > worldCells) {
     return { valid: false, reason: "outside world" };
@@ -105,6 +120,7 @@ export function validateConstructionPlacement(input: PlacementValidationInput): 
 
 export function createConstructionCandidate(input: PlacementValidationInput): ConstructionCandidate {
   const validation = validateConstructionPlacement(input);
+  const support = resolveSupport(input);
   return {
     piece: input.piece,
     position: input.position,
@@ -113,6 +129,8 @@ export function createConstructionCandidate(input: PlacementValidationInput): Co
     valid: validation.valid,
     reason: validation.reason,
     snap: input.snap,
+    supportState: support.grounded ? "grounded" : support.supported ? "connected" : "unsupported",
+    supportParentIds: support.parentIds,
   };
 }
 
