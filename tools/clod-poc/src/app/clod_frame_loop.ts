@@ -21,7 +21,7 @@ export type {
 import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
-  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, canopy } = deps;
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, canopy, construction } = deps;
   let elapsedSeconds = 0;
   const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
@@ -119,6 +119,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       getPlayingAimRay: () => player.playerInputController.getPlayingAimRay(),
       getOrbitHoverRay: () => player.playerInputController.getOrbitHoverRay(),
     });
+
+    construction?.update();
 
     const terrainPhase = runTerrainFramePhase({
       state: player.state,
