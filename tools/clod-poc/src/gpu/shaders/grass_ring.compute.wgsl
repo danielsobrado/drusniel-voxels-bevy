@@ -108,6 +108,21 @@ fn material_weights(height: f32, normal_y: f32) -> vec4<f32> {
   return vec4<f32>(grass, rock, sand, snow) / sum;
 }
 
+fn paintMaterialAt(wx: f32, wz: f32, height: f32) -> i32 {
+  let fade = 3.0;
+  let count = arrayLength(&digEdits);
+  for (var i = 0u; i < count; i = i + 1u) {
+    let e = digEdits[i];
+    if (e.opAdd == 0) { continue; }
+    let dx = wx - e.x;
+    let dy = height - e.y;
+    let dz = wz - e.z;
+    let d = sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < e.r + fade) { return e.material; }
+  }
+  return -1;
+}
+
 fn material_weights_with_paint(height: f32, normal_y: f32, wx: f32, wz: f32) -> vec4<f32> {
   let base = material_weights(height, normal_y);
   let slot = paintMaterialAt(wx, wz, height);
