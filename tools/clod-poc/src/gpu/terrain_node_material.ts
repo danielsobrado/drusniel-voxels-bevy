@@ -90,13 +90,15 @@ export interface TerrainNodeTextures {
     microFadeEnd: number;
     lodBias: number;
   } | null;
+  /** RGBA river wetness mask: R wet bank, G foam residue, B droplet/puddle patches. */
+  riverWetnessMask?: THREE.Texture | null;
   /**
    * LV-6: Pre-baked macro tint texture (RGB = tinted colour per world XZ).
    * Far tiers sample this instead of evaluating proceduralMacroTint per pixel.
    * Layout: res×res, RGB, covering [0, worldSize] with the same UV mapping as noiseA.
    */
   bakedMacroTint?: THREE.Texture | null;
-  /** World extent in cells — needed to map worldPos.xz to [0,1] UV for bakedMacroTint. */
+  /** World extent in cells — needed to map worldPos.xz to [0,1] UV for bakedMacroTint/wetness. */
   worldSize?: number;
 }
 
@@ -547,6 +549,22 @@ export function createTerrainNodeMaterial(
     baseColor = tex.mul(mix(vec3(1), uColor, 0.35));
   }
 
+  let riverWetness: TslNode = float(0);
+  let riverFoamResidue: TslNode = float(0);
+  let riverDroplets: TslNode = float(0);
+  if (textures?.riverWetnessMask) {
+    const ws = textures.worldSize ?? 1024;
+    const mask: TslNode = texture(textures.riverWetnessMask, worldPos.xz.div(ws));
+    const slopeFade: TslNode = smoothstep(0.34, 0.82, geomN.y);
+    riverWetness = clamp(mask.r.mul(slopeFade), 0.0, 1.0);
+    riverFoamResidue = clamp(mask.g.mul(slopeFade), 0.0, 1.0);
+    riverDroplets = clamp(mask.b.mul(slopeFade), 0.0, 1.0);
+    const wetTotal = clamp(riverWetness.add(riverDroplets.mul(0.9)), 0.0, 1.0);
+    baseColor = mix(baseColor, baseColor.mul(vec3(0.44, 0.50, 0.48)), wetTotal.mul(0.72));
+    baseColor = mix(baseColor, baseColor.mul(vec3(0.32, 0.38, 0.40)), riverDroplets.mul(0.74));
+    baseColor = mix(baseColor, vec3(0.72, 0.78, 0.74), riverFoamResidue.mul(0.36));
+  }
+
   baseColor = adjustColor(baseColor, uBrightness, uContrast, uSaturation, uWarmth);
 
   let n: TslNode = geomN;
@@ -584,7 +602,10 @@ export function createTerrainNodeMaterial(
   const light = hemi.add(uSun.mul(pow(sun, 1.35)));
   const viewDir = normalize(cameraPosition.sub(worldPos));
   const halfVec = normalize(uLight.add(viewDir));
-  const spec = pow(max(dot(n, halfVec), 0.0), uShininess).mul(uSpecGain).mul(sun);
+  const wetGloss = clamp(riverWetness.mul(0.45).add(riverDroplets.mul(1.0)), 0.0, 1.0);
+  const spec = pow(max(dot(n, halfVec), 0.0), uShininess)
+    .mul(uSpecGain.mul(float(1).add(wetGloss.mul(2.4))))
+    .mul(sun);
   const diffuse = baseColor.mul(light);
 
   // Unlit material: the lighting model is computed entirely in the node graph. The renderer
@@ -602,6 +623,12 @@ export function createTerrainNodeMaterial(
     colorNode = vec3(paint);
   } else if (debugMode === 3) {
     colorNode = vec3(max(paintSlots.x, 0.0), max(paintSlots.y, 0.0), max(paintSlots.z, 0.0)).div(8.0);
+  } else if (debugMode === 8) {
+    colorNode = vec3(riverWetness);
+  } else if (debugMode === 9) {
+    colorNode = vec3(riverFoamResidue);
+  } else if (debugMode === 10) {
+    colorNode = vec3(riverDroplets);
   }
   const ditherNoise = interleavedGradientNoise(screenCoordinate);
   const fade = clamp(uFade, 0.0, 1.0);
