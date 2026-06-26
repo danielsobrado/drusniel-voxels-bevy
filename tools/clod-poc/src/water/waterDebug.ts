@@ -7,7 +7,7 @@
 // WaterClipmap.update runs every frame independent of the freeze flag. No new
 // freeze framework is added here, per the water spec.
 import type GUI from "lil-gui";
-import { type WaterDebugMode, type WaterVisualConfig } from "./waterConfig.js";
+import { type WaterDebugMode, type WaterVisualConfig, WATER_DEBUG_MODES } from "./waterConfig.js";
 import { DEFAULT_SHORE_SURF_BAND_SETTINGS } from "./waterField.js";
 
 export interface WaterDebugState {
@@ -39,18 +39,30 @@ export interface WaterDebugController {
   refreshDisplay: () => void;
 }
 
-const WATER_MODE_OPTIONS: Record<string, WaterDebugMode> = {
-  "final (0)": "final",
-  "depth (1)": "depth",
-  "foam (2)": "foam",
-  "fresnel (3)": "fresnel",
-  "body mask (4)": "bodyMask",
-  "clipmap level (5)": "clipmapLevel",
-  "flow (6)": "flow",
-  "refraction (12)": "refraction",
-  "reflection (13)": "reflection",
-  "SSR hit (14)": "ssrHit",
+const WATER_DEBUG_LABELS: Record<WaterDebugMode, string> = {
+  final: "final",
+  depth: "depth",
+  foam: "foam",
+  fresnel: "fresnel",
+  bodyMask: "body mask",
+  clipmapLevel: "clipmap level",
+  flow: "flow",
+  hydrologyFill: "hydrology fill",
+  accumulation: "accumulation",
+  carvedBed: "carved bed",
+  waterY: "water Y",
+  classification: "classification",
+  refraction: "refraction",
+  reflection: "reflection",
+  ssrHit: "SSR hit",
 };
+
+const WATER_MODE_OPTIONS = Object.fromEntries(
+  Object.entries(WATER_DEBUG_MODES).map(([mode, id]) => [
+    `${WATER_DEBUG_LABELS[mode as WaterDebugMode]} (${id})`,
+    mode,
+  ]),
+) as Record<string, WaterDebugMode>;
 
 export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugState {
   return {
