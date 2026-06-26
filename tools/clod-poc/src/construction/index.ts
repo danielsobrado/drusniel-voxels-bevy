@@ -3,6 +3,8 @@ export type { ConstructionController, ConstructionControllerDeps, ConstructionCo
 export { defaultConstructionConfig, parseConstructionConfig } from "./config.js";
 export { ConstructionSnapIndex, constructionSnapMath } from "./snap_index.js";
 export { createConstructionCandidate, createFreePlacementPosition, validateConstructionPlacement } from "./placement.js";
+export { buildPlacedPieceMap, hasGroundSupport, isPlacedPieceSupported, resolveConstructionPlacementSupport } from "./support_state.js";
+export type { ConstructionSupportInput, ConstructionSupportResult } from "./support_state.js";
 export type {
   ConstructionCandidate,
   ConstructionConfig,
@@ -13,6 +15,7 @@ export type {
   ConstructionSnapConfig,
   ConstructionSnapPoint,
   ConstructionSnapResult,
+  ConstructionSupportState,
   ConstructionTerrainConformConfig,
   ConstructionTerrainConformRequest,
   IndexedConstructionSnapPoint,
