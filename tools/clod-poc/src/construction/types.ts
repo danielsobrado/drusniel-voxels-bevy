@@ -48,11 +48,22 @@ export interface ConstructionGhostConfig {
   opacity: number;
 }
 
+export interface ConstructionTerrainConformConfig {
+  enabled: boolean;
+  foundationCategories: readonly ConstructionCategory[];
+  padMarginM: number;
+  fillDepthM: number;
+  trimHeightM: number;
+  falloffM: number;
+  materialSlot: number;
+}
+
 export interface ConstructionConfig {
   enabled: boolean;
   snap: ConstructionSnapConfig;
   placement: ConstructionPlacementConfig;
   ghost: ConstructionGhostConfig;
+  terrainConform: ConstructionTerrainConformConfig;
   pieces: readonly ConstructionPieceDef[];
 }
 
@@ -61,6 +72,18 @@ export interface PlacedConstructionPiece {
   typeId: string;
   position: readonly [number, number, number];
   rotationQuarterTurns: number;
+}
+
+export interface ConstructionTerrainConformRequest {
+  pieceId: string;
+  position: readonly [number, number, number];
+  dimensionsM: readonly [number, number, number];
+  rotationQuarterTurns: number;
+  materialSlot: number;
+  padMarginM: number;
+  fillDepthM: number;
+  trimHeightM: number;
+  falloffM: number;
 }
 
 export interface IndexedConstructionSnapPoint {
