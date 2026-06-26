@@ -88,6 +88,7 @@ export function sampleCoastType(x: number, z: number, config: BorderCoastBandCon
 
 /** Continuous cliff weight (0=beach, 1=cliff), generated with domain-warped FBM. */
 export function sampleCoastCliffWeight(x: number, z: number, config: BorderCoastBandConfig): number {
+  if (x <= 0.5 && z <= 0.5) return 0;
   const n = cliffNoise(x, z, config);
   return smoothstepRange(config.cliffHeadlandThreshold - 0.16, config.cliffHeadlandThreshold + 0.22, n);
 }
