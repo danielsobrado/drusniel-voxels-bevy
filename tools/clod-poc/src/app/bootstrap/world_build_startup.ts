@@ -5,14 +5,23 @@ import { emitAudio } from "../../audio/index.js";
 import {
   baseSurfaceHeight,
   getDigEditsSnapshot,
+  getDigEditRevision,
   replaceDigEdits,
   setTerrainSurfaceOverride,
   setBorderCoastRuntime,
   parseBorderCoastOceanConfig,
   type BorderCoastOceanConfig,
 } from "../../terrain/terrain.js";
-import { buildTerrainSummary } from "../../clod/terrain_summary.js";
 import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
+import {
+  initClodCacheContext,
+  loadTerrainSummaryWithCacheSimple,
+  createCacheDebugOverlay,
+  isCacheSessionDisabled,
+  setCacheSessionDisabled,
+  type ClodCacheContext,
+} from "../../cache/index.js";
+import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { bakeMacroTint } from "../../gpu/terrain_node_material.js";
 import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "../../diagonalPolish.js";
 import { parseProceduralTextureConfig } from "../../textures/materialRecipes.js";
@@ -95,7 +104,7 @@ export interface WorldBuildResult {
   lod0Nodes: ClodPageNode[];
   allNodes: ClodPageNode[];
   maxTerrainLevel: number;
-  terrainSummary: ReturnType<typeof buildTerrainSummary>;
+  terrainSummary: TerrainSummaryField;
   result: Awaited<ReturnType<ClodWorkerClient["buildWorld"]>>;
   hydrologySystem: HydrologySystem | null;
   polishLine: string;
@@ -154,7 +163,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
         ? queryBorderOceanScene
           ? borderOceanSceneConfig.defaultWorldPages
           : 16
-        : 4
+        : 8
   );
   const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
 
@@ -185,7 +194,19 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   });
   updateBuildOverlay();
 
+  const cacheParam = searchParams.get("cache");
+  const cacheDisabled = cacheParam === "0" || cacheParam === "false";
+  if (cacheDisabled) setCacheSessionDisabled(true);
+
   if (stagedImport) replaceDigEdits(stagedImport.manifest.terrainEdits);
+
+  let cacheCtx: ClodCacheContext | null = await initClodCacheContext({
+    cfg,
+    worldPages: WORLD,
+    digRevision: getDigEditRevision(),
+    forceDisabled: cacheDisabled,
+  });
+
   const preHydrologyTerrain = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
   const hydrologySystem = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
     ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain)
@@ -227,7 +248,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     info.textContent = `building ${WORLD}x${WORLD} world… ${Math.floor(fraction * 100)}%\n${phase}  L${level}  ${done}/${total}`;
     buildStatus.value = `${phase} L${level} ${done}/${total}`;
     updateBuildOverlay();
-  }, hydrologyTerrain, borderCoastOceanConfig);
+  }, hydrologyTerrain, borderCoastOceanConfig, cacheDisabled || isCacheSessionDisabled(), getDigEditRevision());
 
   buildProgress.hidden = true;
   buildStatus.value = "ready";
@@ -235,8 +256,15 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const { lod0Nodes, allNodes } = splitWorldBuildNodes(result.nodesByLevel);
   const maxTerrainLevel = Math.max(...result.nodesByLevel.keys());
   const worldSizeCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
-  const terrainSummary = buildTerrainSummary(lod0Nodes, worldSizeCells, 8);
+  const summaryResult = await loadTerrainSummaryWithCacheSimple(
+    lod0Nodes,
+    worldSizeCells,
+    8,
+    cacheCtx,
+  );
+  const terrainSummary = summaryResult.summary;
   publishTerrainSummaryForDiagnostics(terrainSummary);
+  createCacheDebugOverlay();
 
   return {
     cfg,

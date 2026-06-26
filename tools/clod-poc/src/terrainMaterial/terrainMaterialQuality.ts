@@ -50,7 +50,7 @@ export function pageQualityForDistance(
 export function tierIndexForQuality(quality: MaterialQuality): number {
   switch (quality) {
     case "full_debug": return 0;
-    case "cheap_triplanar_debug": return 1;
+    case "slope_tint_debug": return 1;
     case "single_projection_far": return 2;
     case "horizon_proxy": return 3;
     case "atlas_only_debug": return 4;
@@ -59,7 +59,7 @@ export function tierIndexForQuality(quality: MaterialQuality): number {
 
 export const QUALITY_LABELS: Record<MaterialQuality, string> = {
   full_debug: "Full Debug (near)",
-  cheap_triplanar_debug: "Cheap Triplanar Debug",
+  slope_tint_debug: "Slope Tint Debug",
   single_projection_far: "Single Projection (mid/far)",
   horizon_proxy: "Horizon Proxy (far shell)",
   atlas_only_debug: "Atlas Debug",

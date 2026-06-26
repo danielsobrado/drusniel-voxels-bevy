@@ -45,6 +45,8 @@ export type ClodWorkerRequest =
       edits: DigEdit[];
       hydrologyTerrain?: SerializedHydrologyTerrain | null;
       borderCoastOceanConfig?: BorderCoastOceanConfig | null;
+      cacheDisabled?: boolean;
+      digRevision?: number;
     }
   | {
       type: "dig";

@@ -63,14 +63,14 @@ interface MeadowBandOptions {
 const MEADOW_CELL_SIZE = 12;
 const MEADOW_RING_RADIUS = 42;
 const MEADOW_BOUNDS_RADIUS = 56;
-const MEADOW_PARTICLE_COUNT = 3200;
-const MEADOW_NEAR_COUNT = 1450;
-const MEADOW_MID_COUNT = 1100;
-const MEADOW_FAR_COUNT = 650;
+const MEADOW_PARTICLE_COUNT = 1200;
+const MEADOW_NEAR_COUNT = 550;
+const MEADOW_MID_COUNT = 400;
+const MEADOW_FAR_COUNT = 250;
 
 export const DEFAULT_MEADOW_WEATHER_SETTINGS: MeadowWeatherSettings = {
   enabled: true,
-  intensity: 1.05,
+  intensity: 0.7,
   windX: -0.42,
   windZ: 0.18,
 };
@@ -176,9 +176,9 @@ function createMeadowGeometry(seed: number): THREE.InstancedBufferGeometry {
   const offset = new Float32Array(MEADOW_PARTICLE_COUNT * 4);
   const shape = new Float32Array(MEADOW_PARTICLE_COUNT * 4);
   const rng = new Rng(hashCombine(seed, hashString("meadow-pollen")));
-  writeMeadowBand({ rng, offset, shape, start: 0, count: MEADOW_NEAR_COUNT, radius: 24, yMin: -0.35, yMax: 4.8, speedMin: 0.09, speedMax: 0.34, sizeMin: 0.055, sizeMax: 0.16, opacityMin: 0.16, opacityMax: 0.48 });
-  writeMeadowBand({ rng, offset, shape, start: MEADOW_NEAR_COUNT, count: MEADOW_MID_COUNT, radius: 34, yMin: -0.15, yMax: 6.8, speedMin: 0.06, speedMax: 0.24, sizeMin: 0.038, sizeMax: 0.115, opacityMin: 0.09, opacityMax: 0.32 });
-  writeMeadowBand({ rng, offset, shape, start: MEADOW_NEAR_COUNT + MEADOW_MID_COUNT, count: MEADOW_FAR_COUNT, radius: MEADOW_RING_RADIUS, yMin: 0.0, yMax: 8.6, speedMin: 0.035, speedMax: 0.16, sizeMin: 0.026, sizeMax: 0.08, opacityMin: 0.05, opacityMax: 0.2 });
+  writeMeadowBand({ rng, offset, shape, start: 0, count: MEADOW_NEAR_COUNT, radius: 24, yMin: -0.35, yMax: 4.8, speedMin: 0.09, speedMax: 0.34, sizeMin: 0.035, sizeMax: 0.1, opacityMin: 0.1, opacityMax: 0.3 });
+  writeMeadowBand({ rng, offset, shape, start: MEADOW_NEAR_COUNT, count: MEADOW_MID_COUNT, radius: 34, yMin: -0.15, yMax: 6.8, speedMin: 0.06, speedMax: 0.24, sizeMin: 0.025, sizeMax: 0.075, opacityMin: 0.06, opacityMax: 0.2 });
+  writeMeadowBand({ rng, offset, shape, start: MEADOW_NEAR_COUNT + MEADOW_MID_COUNT, count: MEADOW_FAR_COUNT, radius: MEADOW_RING_RADIUS, yMin: 0.0, yMax: 8.6, speedMin: 0.035, speedMax: 0.16, sizeMin: 0.018, sizeMax: 0.05, opacityMin: 0.03, opacityMax: 0.12 });
   geometry.setAttribute("aMeadowOffset", new THREE.InstancedBufferAttribute(offset, 4));
   geometry.setAttribute("aMeadowShape", new THREE.InstancedBufferAttribute(shape, 4));
   return geometry;
@@ -294,9 +294,9 @@ void main() {
   float mote = 0.78 + 0.22 * sin(vSeed * 13.7 + p.x * 19.0 + p.y * 23.0);
   float alpha = (core * 0.72 + halo * 0.34) * mote * vAlpha * uOpacity * clamp(uIntensity, 0.0, 1.6);
   if (alpha < 0.006) discard;
-  vec3 warm = vec3(1.0, 0.9, 0.45);
-  vec3 green = vec3(0.66, 0.96, 0.62);
-  vec3 color = mix(uColor, mix(warm, green, 0.28), vGlow * 0.45);
+  vec3 warm = vec3(0.85, 0.75, 0.45);
+  vec3 green = vec3(0.5, 0.65, 0.38);
+  vec3 color = mix(uColor, mix(warm, green, 0.35), vGlow * 0.35);
   gl_FragColor = vec4(color, alpha);
 }
 `;
@@ -308,8 +308,8 @@ function createMeadowShaderMaterial(): RainWeatherShaderHandle {
     uIntensity: { value: 1 },
     uWindX: { value: DEFAULT_MEADOW_WEATHER_SETTINGS.windX },
     uWindZ: { value: DEFAULT_MEADOW_WEATHER_SETTINGS.windZ },
-    uColor: { value: new THREE.Color(0xf6e8a3) },
-    uOpacity: { value: 1.35 },
+    uColor: { value: new THREE.Color(0x9e8b5e) },
+    uOpacity: { value: 0.8 },
   };
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -370,8 +370,8 @@ function createMeadowNodeMaterial(): RainWeatherShaderHandle {
   const uIntensity = uniform(1) as TslNode;
   const uWindX = uniform(DEFAULT_MEADOW_WEATHER_SETTINGS.windX) as TslNode;
   const uWindZ = uniform(DEFAULT_MEADOW_WEATHER_SETTINGS.windZ) as TslNode;
-  const uColor = uniform(new THREE.Color(0xf6e8a3)) as TslNode;
-  const uOpacity = uniform(1.35) as TslNode;
+  const uColor = uniform(new THREE.Color(0x9e8b5e)) as TslNode;
+  const uOpacity = uniform(0.8) as TslNode;
 
   const aOffset: TslNode = attribute("aMeadowOffset", "vec4");
   const aShape: TslNode = attribute("aMeadowShape", "vec4");
@@ -410,9 +410,9 @@ function createMeadowNodeMaterial(): RainWeatherShaderHandle {
     const alpha: TslNode = core.mul(0.72).add(halo.mul(0.34))
       .mul(mote).mul(aShape.y).mul(ringFade).mul(mix(0.75, 1.45, wave)).mul(uOpacity).mul(clamp(uIntensity, 0.0, 1.6));
     alpha.lessThan(0.006).discard();
-    const warm: TslNode = vec3(1.0, 0.9, 0.45);
-    const green: TslNode = vec3(0.66, 0.96, 0.62);
-    return vec4(mix(uColor, mix(warm, green, 0.28), wave.mul(0.45)), alpha);
+    const warm: TslNode = vec3(0.85, 0.75, 0.45);
+    const green: TslNode = vec3(0.5, 0.65, 0.38);
+    return vec4(mix(uColor, mix(warm, green, 0.35), wave.mul(0.35)), alpha);
   });
 
   const material = new MeshBasicNodeMaterial();

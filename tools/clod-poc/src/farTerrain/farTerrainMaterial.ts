@@ -178,7 +178,7 @@ export function createVertexColorBuffer(
 ): Float32Array {
   const count = vertexColors.baseColor.length / 3;
   const isFullDebug = config.materialQuality === "full_debug" || config.materialQualityIndex <= 0;
-  const isCheapTriplanar = config.materialQuality === "cheap_triplanar_debug" || config.materialQualityIndex === 1;
+  const isSlopeTint = config.materialQuality === "slope_tint_debug" || config.materialQualityIndex === 1;
   const isSingleProj = config.materialQuality === "single_projection_far" || config.materialQualityIndex === 2;
   const isAtlasDebug = config.materialQuality === "atlas_only_debug" || config.materialQualityIndex >= 4;
   const cx = centerX ?? 0;
@@ -189,8 +189,8 @@ export function createVertexColorBuffer(
       colors[vi * 3] = vertexColors.debugBand[vi * 3];
       colors[vi * 3 + 1] = vertexColors.debugBand[vi * 3 + 1];
       colors[vi * 3 + 2] = vertexColors.debugBand[vi * 3 + 2];
-    } else if (config.debugShowSlope > 0 || isCheapTriplanar) {
-      const s = isCheapTriplanar ? vertexColors.slope[vi] : vertexColors.slope[vi];
+    } else if (config.debugShowSlope > 0 || isSlopeTint) {
+      const s = vertexColors.slope[vi];
       colors[vi * 3] = 0.3 + s * 0.3;
       colors[vi * 3 + 1] = 0.4 - s * 0.2;
       colors[vi * 3 + 2] = 0.2 + s * 0.1;
@@ -218,9 +218,10 @@ export function createVertexColorBuffer(
       const dist = Math.hypot(x - cx, z - cz);
       const raw = cpuSmoothstep(config.hazeStartM, config.hazeEndM, dist);
       const haze = raw * config.hazeStrength * config.hazeEnabled;
-      colors[vi * 3] = Math.min(1, Math.max(0, 0.85 + haze * 0.15));
-      colors[vi * 3 + 1] = Math.min(1, Math.max(0, 0.90 + haze * 0.10));
-      colors[vi * 3 + 2] = Math.min(1, Math.max(0, 0.95 + haze * 0.05));
+      // Blue heatmap: dark at zero haze, bright cyan-blue at full strength.
+      colors[vi * 3] = Math.min(1, Math.max(0, haze * 0.1));
+      colors[vi * 3 + 1] = Math.min(1, Math.max(0, haze * 0.55));
+      colors[vi * 3 + 2] = Math.min(1, Math.max(0, 0.05 + haze * 0.95));
     } else if (isSingleProj) {
       colors[vi * 3] = vertexColors.baseColor[vi * 3];
       colors[vi * 3 + 1] = vertexColors.baseColor[vi * 3 + 1];

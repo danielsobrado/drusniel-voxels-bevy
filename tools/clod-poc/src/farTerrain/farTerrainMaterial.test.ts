@@ -124,6 +124,8 @@ describe("computeFarTerrainVertexColors", () => {
 });
 
 describe("createVertexColorBuffer", () => {
+  // TODO: assert horizon_proxy, single_projection_far, atlas_only_debug, and debug
+  // modes produce meaningfully different buffers (not just length/range/no-crash).
   it("default mode (horizon_proxy) produces non-debug colors", () => {
     const pos = makePositions(9);
     const norm = makeNormals(9);
@@ -180,19 +182,32 @@ describe("createVertexColorBuffer", () => {
     expect(buf.length).toBe(9 * 3);
   });
 
-  it("debugShowHazeFactor produces plausible colors with positions", () => {
-    const pos = makePositions(9, 500);
-    const norm = makeNormals(9);
-    const cfg = makeUniformData({ debugShowHazeFactor: 1, hazeStartM: 1000, hazeEndM: 5000, hazeStrength: 0.72 });
-    const vc = computeFarTerrainVertexColors(pos, norm, 9, cfg);
+  it("debugShowHazeFactor spans dark-to-bright blue heatmap by distance", () => {
+    const pos = new Float32Array([
+      0, 50, 0,
+      0, 50, 2500,
+      0, 50, 5000,
+    ]);
+    const norm = makeNormals(3);
+    const cfg = makeUniformData({
+      debugShowHazeFactor: 1,
+      hazeStartM: 1000,
+      hazeEndM: 5000,
+      hazeStrength: 1,
+      hazeEnabled: 1,
+    });
+    const vc = computeFarTerrainVertexColors(pos, norm, 3, cfg);
     const buf = createVertexColorBuffer(vc, cfg, undefined, 0, 0, pos);
 
-    expect(buf.length).toBe(9 * 3);
-    for (let i = 0; i < buf.length; i++) {
-      expect(Number.isFinite(buf[i])).toBe(true);
-      expect(buf[i]).toBeGreaterThanOrEqual(0);
-      expect(buf[i]).toBeLessThanOrEqual(1);
-    }
+    const nearB = buf[2];
+    const midB = buf[5];
+    const farB = buf[8];
+    expect(nearB).toBeLessThan(0.2);
+    expect(farB).toBeGreaterThan(0.8);
+    expect(farB - nearB).toBeGreaterThan(0.6);
+    expect(midB).toBeGreaterThan(nearB);
+    expect(midB).toBeLessThan(farB);
+    expect(buf[4]).toBeGreaterThan(buf[3]);
   });
 
   it("all output values are in [0, 1] for all modes", () => {
@@ -201,6 +216,7 @@ describe("createVertexColorBuffer", () => {
 
     const modes = [
       { materialQuality: "atlas_only_debug", materialQualityIndex: 4 },
+      { materialQuality: "slope_tint_debug", materialQualityIndex: 1 },
       { debugShowSlope: 1 },
       { debugShowMacroNoise: 1 },
       { debugShowFarNormals: 1 },

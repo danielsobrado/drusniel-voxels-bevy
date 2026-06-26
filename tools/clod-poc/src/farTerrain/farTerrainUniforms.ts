@@ -45,7 +45,7 @@ export interface FarTerrainUniformData {
 
 const QUALITY_INDEX: Record<MaterialQuality, number> = {
   full_debug: 0,
-  cheap_triplanar_debug: 1,
+  slope_tint_debug: 1,
   single_projection_far: 2,
   horizon_proxy: 3,
   atlas_only_debug: 4,

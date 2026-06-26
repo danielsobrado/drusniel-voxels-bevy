@@ -10,7 +10,7 @@ long_view_materials:
     default: horizon_proxy
     allowed:
       - full_debug
-      - cheap_triplanar_debug
+      - slope_tint_debug
       - single_projection_far
       - horizon_proxy
       - atlas_only_debug

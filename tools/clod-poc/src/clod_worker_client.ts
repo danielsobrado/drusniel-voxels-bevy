@@ -90,6 +90,8 @@ export class ClodWorkerClient {
     onProgress: (progress: BuildProgress) => void,
     hydrologyTerrain: SerializedHydrologyTerrain | null = null,
     borderCoastOceanConfig: BorderCoastOceanConfig | null = null,
+    cacheDisabled = false,
+    digRevision = 0,
   ): Promise<BuildResult> {
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = {
@@ -101,6 +103,8 @@ export class ClodWorkerClient {
       edits,
       hydrologyTerrain,
       borderCoastOceanConfig,
+      cacheDisabled,
+      digRevision,
     };
     this.progressHandlers.set(requestId, onProgress);
     return new Promise((resolve, reject) => {

@@ -8,6 +8,8 @@ import {
   type DirtyCellBounds,
   type NodeIndex,
 } from "./clod/quadtree.js";
+import { initClodCacheContext } from "./cache/clodCacheContext.js";
+import { createBuildCacheHooks, type CachedBuildStats } from "./cache/clodBuildCache.js";
 import { addDigEdit, replaceDigEdits, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
 import {
   collectBuildResultTransferables,
@@ -196,12 +198,31 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   parentNodes = 0;
   parentMs = 0;
   await initSimplifier();
+
+  const cacheCtx = await initClodCacheContext({
+    cfg: request.cfg,
+    worldPages: request.worldPagesX,
+    digRevision: request.digRevision ?? 0,
+    forceDisabled: request.cacheDisabled ?? false,
+  });
+  const cacheStats: CachedBuildStats = {
+    nodesFromCache: 0,
+    nodesBuilt: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+    buildMsSaved: 0,
+    coldBuildMs: 0,
+  };
+  const cacheHooks = cacheCtx?.effective ? createBuildCacheHooks(cacheCtx, cacheStats) : undefined;
+
   result = await buildWorldAsync(
     request.worldPagesX,
     request.worldPagesZ,
     cfg,
     (progress) => post({ type: "progress", requestId: request.requestId, ...progress }),
+    cacheHooks,
   );
+  if (cacheCtx) await cacheCtx.service.flush();
   index = buildNodeIndex(result);
   topLevel = Math.max(...result.nodesByLevel.keys());
   const serialized = serializeBuildResult(result);

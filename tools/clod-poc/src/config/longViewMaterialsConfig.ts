@@ -3,14 +3,14 @@ import configYaml from "../../config/long_view_materials.yaml?raw";
 
 export type MaterialQuality =
   | "full_debug"
-  | "cheap_triplanar_debug"
+  | "slope_tint_debug"
   | "single_projection_far"
   | "horizon_proxy"
   | "atlas_only_debug";
 
 const ALLOWED_QUALITIES: readonly MaterialQuality[] = [
   "full_debug",
-  "cheap_triplanar_debug",
+  "slope_tint_debug",
   "single_projection_far",
   "horizon_proxy",
   "atlas_only_debug",

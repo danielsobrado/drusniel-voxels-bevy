@@ -20,7 +20,7 @@ export interface FarTerrainDebugGuiState {
 
 const QUALITY_OPTIONS: Record<string, MaterialQuality> = {
   "Full Debug": "full_debug",
-  "Cheap Triplanar": "cheap_triplanar_debug",
+  "Slope Tint": "slope_tint_debug",
   "Single Projection": "single_projection_far",
   "Horizon Proxy": "horizon_proxy",
   "Atlas Debug": "atlas_only_debug",
