@@ -160,6 +160,27 @@ const WATER_FRAG = /* glsl */ `
     );
   }
 
+  vec3 skyReflection(vec3 reflectDir, vec3 sunDir) {
+    float reflY = reflectDir.y;
+    float reflYClamped = max(reflY, 0.0);
+    float sunDot = max(dot(reflectDir, sunDir), 0.0);
+
+    vec3 skyZenith = vec3(0.12, 0.32, 0.72);
+    vec3 skyHorizon = vec3(0.55, 0.70, 0.90);
+    vec3 skyDawn = vec3(0.85, 0.55, 0.35);
+    vec3 horizon = mix(skyDawn, skyHorizon, smoothstep(0.0, 0.25, sunDir.y));
+    vec3 sky = mix(horizon, skyZenith, smoothstep(0.0, 0.6, reflYClamped));
+
+    vec3 belowHorizon = mix(vec3(0.035, 0.07, 0.16), vec3(0.07, 0.14, 0.28), smoothstep(-0.5, 0.0, reflY));
+    vec3 reflectedSky = mix(belowHorizon, sky, smoothstep(-0.25, 0.12, reflY));
+
+    vec3 mie = vec3(1.0, 0.72, 0.42) * pow(sunDot, 8.0) * 0.25
+      + vec3(1.0, 0.95, 0.85) * pow(sunDot, 64.0) * 1.2;
+    vec3 sunDisc = vec3(1.0, 0.92, 0.75) * (pow(sunDot, 512.0) * 4.5 + pow(sunDot, 128.0) * 1.4);
+
+    return max(reflectedSky + mie + sunDisc, vec3(0.035, 0.07, 0.14));
+  }
+
   void main() {
     vec3 worldPos = vWorldPos;
     if (worldPos.x < 0.0 || worldPos.x > uWorldBounds.x ||
@@ -209,14 +230,19 @@ const WATER_FRAG = /* glsl */ `
     vec3 normal = normalize(vec3(-grad.x, 1.0, -grad.y));
 
     vec3 viewDir = normalize(uCameraPos - worldPos);
-    vec3 fresnelNormal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), uFresnelNormalFlatten));
-    float fres = uFresnelBase + (1.0 - uFresnelBase) * pow(1.0 - max(dot(viewDir, fresnelNormal), 0.0), uFresnelPower);
-    vec3 waterColor = mix(uShallowColor, uDeepColor, depthNorm);
-    waterColor = mix(waterColor, uShallowColor, uTurbidity * (1.0 - depthNorm) * 0.45);
     vec3 sunDir = normalize(uSunDir);
-    vec3 reflDir = reflect(-sunDir, normal);
-    float spec = pow(max(dot(reflDir, viewDir), 0.0), 32.0);
-    waterColor += spec * 0.12 + fres * 0.08 + caustic * vec3(0.12, 0.18, 0.15);
+    vec3 fresnelNormal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), uFresnelNormalFlatten));
+    float ndotv = max(dot(viewDir, fresnelNormal), 0.0);
+    float fres = uFresnelBase + (1.0 - uFresnelBase) * pow(1.0 - ndotv, uFresnelPower);
+
+    vec3 deepBlue = mix(vec3(0.0, 0.025, 0.10), uDeepColor, 0.65);
+    vec3 shallowTeal = mix(uShallowColor, vec3(0.0, 0.45, 0.62), 0.35);
+    vec3 waterColor = mix(shallowTeal, deepBlue, depthNorm);
+    waterColor = mix(waterColor, shallowTeal, uTurbidity * (1.0 - depthNorm) * 0.50);
+    waterColor += caustic * vec3(0.10, 0.18, 0.16);
+
+    vec3 reflectDir = normalize(reflect(-viewDir, normal));
+    vec3 envReflection = skyReflection(reflectDir, sunDir) * 0.88;
 
     // Two-phase decorrelated foam (Fable5-style): two noise scales, each blended
     // across both phases, with variance renormalization to avoid flat midpoints.
@@ -236,7 +262,15 @@ const WATER_FRAG = /* glsl */ `
     float riverDrop = smoothstep(uFoamDropStart, uFoamDropEnd, vFlow.w);
     float riverFoam = riverFast * riverDrop * uFoamRiverStrength * wetFade * (0.25 + 0.75 * breakup);
     float foam = clamp(shore + riverFoam, 0.0, 1.0);
-    vec3 finalColor = mix(waterColor, uFoamColor, foam);
+
+    float backlit = pow(max(dot(viewDir, -sunDir), 0.0), 4.0) * 0.30;
+    float crestScatter = smoothstep(0.45, 0.95, foamBlend) * 0.24;
+    vec3 sss = mix(vec3(0.01, 0.04, 0.14), shallowTeal, 0.55) * (backlit + crestScatter) * (1.0 - depthNorm * 0.45);
+    float specDot = max(dot(reflect(-sunDir, normal), viewDir), 0.0);
+    vec3 sunSpec = vec3(1.0, 0.92, 0.76) * (pow(specDot, 384.0) * 1.15 + pow(specDot, 96.0) * 0.28);
+    vec3 litWater = mix(waterColor + sss + sunSpec, envReflection, clamp(fres * 0.72, 0.0, 0.82));
+
+    vec3 finalColor = mix(litWater, uFoamColor, foam);
     finalColor = mix(finalColor, waterLevelColor(vLevel), uClipmapTint * 0.18);
     float alpha = clamp(uAlpha + fres * 0.18, 0.0, 1.0);
 
@@ -247,9 +281,9 @@ const WATER_FRAG = /* glsl */ `
     else if (uDebugMode == 4) outCol = vec3(vBodyMask);
     else if (uDebugMode == 5) outCol = waterLevelColor(vLevel);
     else if (uDebugMode == 6) outCol = vec3(riverDir * 0.5 + 0.5, clamp(vFlow.z / max(uFoamSpeedEnd, 0.001), 0.0, 1.0));
-    else if (uDebugMode == 12) outCol = vec3(0.5, 0.5, 0.7);
-    else if (uDebugMode == 13) outCol = vec3(0.7, 0.5, 0.5);
-    else if (uDebugMode == 14) outCol = vec3(0.0);
+    else if (uDebugMode == 12) outCol = waterColor;
+    else if (uDebugMode == 13) outCol = envReflection;
+    else if (uDebugMode == 14) outCol = vec3(specDot);
     else outCol = finalColor;
     float outAlpha = uDebugMode == 0 ? alpha : 1.0;
 
