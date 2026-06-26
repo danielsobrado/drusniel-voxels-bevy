@@ -11,6 +11,8 @@ import {
   type TreeEcologySample,
 } from "./tree_ecology.js";
 
+const TREE_CONTACT_OFFSET_M = 0;
+
 export interface TreeTerrainSampler {
   surfaceHeight(x: number, z: number): number;
   surfaceNormal(x: number, z: number): [number, number, number];
@@ -145,7 +147,7 @@ export function generateTreeInstances(
         priority: treeHash2(gridX, gridZ, settings.seed + 503),
         suppressionRadius,
         instance: {
-          position: [x, height, z],
+          position: [x, height + TREE_CONTACT_OFFSET_M, z],
           species,
           scale: baseScale * (ecology?.scaleMultiplier ?? 1),
           rotationY: treeHash2(gridX, gridZ, settings.seed + 701) * Math.PI * 2,
