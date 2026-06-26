@@ -10,6 +10,7 @@
 // terrain height sampler (an adapter) so water can track the terrain surface.
 import type { LakeBodyConfig, RiverBodyConfig, WaterConfig } from "./waterConfig.js";
 import type { HydrologySystem } from "./hydrologySystem.js";
+import { readRiverMaterialSettings } from "./riverMaterialRuntime.js";
 
 /** Adapter for the terrain surface height used to anchor fake water levels. */
 export interface TerrainHeightSampler {
@@ -73,7 +74,7 @@ export const DEFAULT_EDGE_OCEAN_SETTINGS = DEFAULT_SHORE_SURF_BAND_SETTINGS;
 const FLOW_EPSILON = 1e-6;
 const RIVER_GEOMETRY_CELL_FADE_START = 6;
 const RIVER_GEOMETRY_CELL_FADE_END = 24;
-const RIVER_GEOMETRY_MAX_OFFSET = 0.18;
+const RIVER_MATERIAL_SETTINGS = readRiverMaterialSettings();
 
 interface LakeRuntime {
   center: [number, number];
@@ -216,12 +217,13 @@ function flowSurfaceOffset(
   const side = x * -dirZ + z * dirX;
   const channelWave = Math.sin(along * 0.36 + Math.sin(side * 0.075) * 0.8);
   const sideWave = Math.cos(side * 0.42 + along * 0.035);
-  const centerTrough = -0.055 * center * smooth01(depthHint / 2.8);
-  const bankLift = 0.034 * bank * (1 + rapid * 0.35);
-  const riffle = channelWave * 0.045 * rapid + sideWave * 0.022 * rapid * center;
+  const centerTrough = -RIVER_MATERIAL_SETTINGS.geometryThalwegDip * center * smooth01(depthHint / 2.8);
+  const bankLift = RIVER_MATERIAL_SETTINGS.geometryBankLift * bank * (1 + rapid * 0.35);
+  const riffle = channelWave * RIVER_MATERIAL_SETTINGS.geometryRiffleStrength * rapid
+    + sideWave * RIVER_MATERIAL_SETTINGS.geometrySideRiffleStrength * rapid * center;
   const raw = (centerTrough + bankLift + riffle) * river * detailFade;
   const maxDown = Math.max(0, depthHint - 0.035);
-  return Math.max(-maxDown, Math.min(RIVER_GEOMETRY_MAX_OFFSET, raw));
+  return Math.max(-maxDown, Math.min(RIVER_MATERIAL_SETTINGS.geometryMaxOffset, raw));
 }
 
 function shapeRiverSurfaceY(
