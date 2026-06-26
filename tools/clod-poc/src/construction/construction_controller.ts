@@ -97,11 +97,16 @@ class ConstructionControllerImpl implements ConstructionController {
     this.installInput();
     this.loadSavedPieces();
     this.syncUi();
-    console.info("[construction] CLOD construction ready. B toggle, X snap, R rotate, 1-9 select, right-click place.");
+
+    if (this.config.enabled && this.config.pieces.length > 0) {
+      console.info("[construction] CLOD construction ready. B toggle, X snap, R rotate, 1-9 select, right-click place.");
+    } else {
+      console.info("[construction] CLOD construction disabled or has no configured pieces.");
+    }
   }
 
   update(): void {
-    if (!this.active || this.config.pieces.length === 0) {
+    if (!this.config.enabled || !this.active || this.config.pieces.length === 0) {
       this.currentCandidate = null;
       this.ghostMesh.visible = false;
       this.syncUi();
@@ -110,22 +115,38 @@ class ConstructionControllerImpl implements ConstructionController {
 
     const piece = this.selectedPiece();
     const ray = this.readAimRay();
-    const terrainHit = ray ? this.raycastTerrain(ray) : null;
-    if (!terrainHit) {
+    if (!ray) {
       this.currentCandidate = null;
       this.ghostMesh.visible = false;
       this.syncUi();
       return;
     }
 
+    const terrainHit = this.raycastTerrain(ray);
     const snap = this.snapEnabled
-      ? this.snapIndex.findBestSnap(terrainHit.point, piece, this.rotationQuarterTurns, this.config.snap)
+      ? this.snapIndex.findBestSnapOnRay(
+        this.vectorToTuple(ray.origin),
+        this.vectorToTuple(ray.direction),
+        terrainHit?.distanceM ?? this.config.placement.maxRayDistanceM,
+        piece,
+        this.rotationQuarterTurns,
+        this.config.snap,
+      )
       : null;
-    const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit);
+
+    if (!terrainHit && !snap) {
+      this.currentCandidate = null;
+      this.ghostMesh.visible = false;
+      this.syncUi();
+      return;
+    }
+
+    const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit!);
+    const rotationQuarterTurns = snap?.rotationQuarterTurns ?? this.rotationQuarterTurns;
     const candidate = createConstructionCandidate({
       piece,
       position,
-      rotationQuarterTurns: this.rotationQuarterTurns,
+      rotationQuarterTurns,
       snapped: snap !== null,
       snap,
       terrainHit,
@@ -142,8 +163,7 @@ class ConstructionControllerImpl implements ConstructionController {
 
   dispose(): void {
     for (const dispose of this.disposers) dispose();
-    this.ghostMesh.geometry.dispose();
-    this.ghostMaterial.dispose();
+    this.disposeRootMeshes();
     this.menu.remove();
     this.deps.scene.remove(this.root);
   }
@@ -151,7 +171,7 @@ class ConstructionControllerImpl implements ConstructionController {
   stats(): ConstructionControllerStats {
     const selected = this.config.pieces[this.selectedIndex] ?? null;
     return {
-      active: this.active,
+      active: this.config.enabled && this.active,
       snapEnabled: this.snapEnabled,
       selectedPieceId: selected?.id ?? null,
       placedPieces: this.placedPieces.length,
@@ -235,13 +255,13 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   private setActive(active: boolean): void {
-    this.active = active;
+    this.active = this.config.enabled && this.config.pieces.length > 0 && active;
     console.info(`[construction] building mode ${this.active ? "on" : "off"}`);
     this.syncUi();
   }
 
   private selectedPiece(): ConstructionPieceDef {
-    const clampedIndex = Math.min(this.selectedIndex, this.config.pieces.length - 1);
+    const clampedIndex = Math.max(0, Math.min(this.selectedIndex, this.config.pieces.length - 1));
     return this.config.pieces[clampedIndex]!;
   }
 
@@ -349,9 +369,11 @@ class ConstructionControllerImpl implements ConstructionController {
       const parsed = JSON.parse(raw) as unknown;
       if (!Array.isArray(parsed)) return;
       for (const entry of parsed) {
-        if (!this.isPlacedPiece(entry)) continue;
-        this.nextEntityId = Math.max(this.nextEntityId, Number(entry.id.replace("piece-", "")) + 1 || this.nextEntityId);
-        this.addPlacedPiece(entry, false);
+        const placed = this.parsePlacedPiece(entry);
+        if (!placed) continue;
+        const idNumber = Number(placed.id.replace("piece-", ""));
+        if (Number.isInteger(idNumber)) this.nextEntityId = Math.max(this.nextEntityId, idNumber + 1);
+        this.addPlacedPiece(placed, false);
       }
     } catch (error) {
       console.warn("[construction] failed to load saved pieces", error);
@@ -366,15 +388,22 @@ class ConstructionControllerImpl implements ConstructionController {
     }
   }
 
-  private isPlacedPiece(value: unknown): value is PlacedConstructionPiece {
-    if (!value || typeof value !== "object") return false;
+  private parsePlacedPiece(value: unknown): PlacedConstructionPiece | null {
+    if (!value || typeof value !== "object") return null;
     const record = value as Record<string, unknown>;
-    return typeof record.id === "string"
-      && typeof record.typeId === "string"
-      && Array.isArray(record.position)
-      && record.position.length === 3
-      && record.position.every((n) => Number.isFinite(Number(n)))
-      && Number.isInteger(Number(record.rotationQuarterTurns));
+    const id = typeof record.id === "string" ? record.id : null;
+    const typeId = typeof record.typeId === "string" ? record.typeId : null;
+    if (!id || !typeId || !this.piecesById.has(typeId)) return null;
+    if (!Array.isArray(record.position) || record.position.length !== 3) return null;
+    const position = record.position.map(Number);
+    const rotationQuarterTurns = Number(record.rotationQuarterTurns);
+    if (!position.every(Number.isFinite) || !Number.isInteger(rotationQuarterTurns)) return null;
+    return {
+      id,
+      typeId,
+      position: [position[0], position[1], position[2]],
+      rotationQuarterTurns: ((rotationQuarterTurns % 4) + 4) % 4,
+    };
   }
 
   private createBuildMenu(): HTMLElement {
@@ -403,13 +432,14 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   private syncUi(): void {
-    this.menu.style.display = this.active ? "grid" : "none";
-    if (!this.active) return;
+    this.menu.style.display = this.config.enabled && this.active ? "grid" : "none";
+    if (!this.config.enabled || !this.active) return;
     const selected = this.config.pieces[this.selectedIndex] ?? null;
     const candidate = this.currentCandidate;
     const status = candidate
       ? candidate.valid ? candidate.snapped ? "snapped" : "valid" : candidate.reason ?? "invalid"
       : "aim at terrain";
+    const displayedRotation = candidate?.rotationQuarterTurns ?? this.rotationQuarterTurns;
     const pieceButtons = this.config.pieces.map((piece, index) => {
       const selectedAttr = index === this.selectedIndex ? "true" : "false";
       return `<button type="button" data-piece-index="${index}" aria-pressed="${selectedAttr}">${index + 1}. ${piece.label}</button>`;
@@ -423,7 +453,7 @@ class ConstructionControllerImpl implements ConstructionController {
       <div style="display:flex;flex-wrap:wrap;gap:8px;color:#cdd8e3;">
         <span>Selected: ${selected?.label ?? "none"}</span>
         <span>Snap: ${this.snapEnabled ? "on" : "off"}</span>
-        <span>Rot: ${this.rotationQuarterTurns * 90}°</span>
+        <span>Rot: ${displayedRotation * 90}°</span>
         <span>State: ${status}</span>
       </div>
     `;
@@ -439,10 +469,28 @@ class ConstructionControllerImpl implements ConstructionController {
       });
       button.addEventListener("click", () => {
         const index = Number(button.dataset.pieceIndex);
-        if (!Number.isInteger(index)) return;
+        if (!Number.isInteger(index) || index < 0 || index >= this.config.pieces.length) return;
         this.selectedIndex = index;
         this.syncUi();
       });
     }
+  }
+
+  private vectorToTuple(value: THREE.Vector3): [number, number, number] {
+    return [value.x, value.y, value.z];
+  }
+
+  private disposeRootMeshes(): void {
+    const disposedMaterials = new Set<THREE.Material>();
+    this.root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) {
+        if (disposedMaterials.has(material)) continue;
+        material.dispose();
+        disposedMaterials.add(material);
+      }
+    });
   }
 }
