@@ -68,6 +68,8 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
 
   const worldPos: TslNode = positionWorld;
 
+  const hashNoise = (uv: TslNode): TslNode => fract(sin(dot(uv, vec2(12.9898, 78.233))).mul(43758.5453));
+
   const fragment = Fn(() => {
     const waveHeight: TslNode = worldPos.y.sub(float(params.surfaceY));
     const breezeDir: TslNode = normalize(uLakeBreeze.add(vec2(0.00001, 0.0)));
@@ -89,7 +91,12 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
       .add(cos(uvB.x.add(uvB.y).mul(0.73).sub(phaseB.mul(tau * 0.7))).mul(uRippleStrengthB));
     const gBz: TslNode = sin(uvB.y.sub(phaseB.mul(tau))).negate().mul(uRippleStrengthA)
       .add(cos(uvB.x.sub(uvB.y).mul(0.61).add(phaseB.mul(tau * 0.9))).mul(uRippleStrengthB));
-    const grad: TslNode = mix(vec3(gAx, 0, gAz), vec3(gBx, 0, gBz), blend).mul(uRippleAmp);
+
+    const bumpUv: TslNode = worldPos.xz.mul(max(uFoamNoiseScale.mul(2.5), float(0.02))).add(advectA.mul(0.15));
+    const bumpBase: TslNode = hashNoise(bumpUv);
+    const bumpX: TslNode = hashNoise(bumpUv.add(vec2(0.02, 0))).sub(bumpBase).mul(7.5);
+    const bumpZ: TslNode = hashNoise(bumpUv.add(vec2(0, 0.02))).sub(bumpBase).mul(7.5);
+    const grad: TslNode = mix(vec3(gAx, 0, gAz), vec3(gBx, 0, gBz), blend).mul(uRippleAmp).add(vec3(bumpX.mul(0.18), 0, bumpZ.mul(0.18)));
     const normal: TslNode = normalize(vec3(grad.x.negate(), float(1.0), grad.z.negate()));
 
     const viewDir: TslNode = normalize(uCameraPos.sub(worldPos));
@@ -124,17 +131,34 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const waterColor: TslNode = mix(viewColor, mix(vec3(0.01, 0.04, 0.14), shallowTeal, heightTint), float(0.32));
 
     const foamUv: TslNode = worldPos.xz.mul(max(uFoamNoiseScale, float(0.01))).add(advectA.mul(0.35));
-    const n1: TslNode = fract(sin(dot(foamUv, vec2(12.9898, 78.233))).mul(43758.5453));
-    const n2: TslNode = fract(sin(dot(foamUv.mul(2.3).add(vec2(17.3, -9.1)), vec2(12.9898, 78.233))).mul(43758.5453));
-    const n3: TslNode = fract(sin(dot(foamUv.mul(5.7).add(vec2(-3.8, 23.5)), vec2(12.9898, 78.233))).mul(43758.5453));
-    const turbulent: TslNode = n1.mul(0.5).add(n2.mul(0.3)).add(n3.mul(0.2));
-    const ridged: TslNode = float(1.0).sub(abs(turbulent.mul(2.0).sub(1.0)));
-    const crestFoam: TslNode = smoothstep(float(1.2), float(4.0), waveHeight).mul(smoothstep(float(0.36), float(0.82), ridged));
-    const foam: TslNode = smoothstep(float(0.68), float(0.96), ridged).mul(0.10).add(crestFoam.mul(0.32));
+    const n1: TslNode = hashNoise(foamUv.add(vec2(uTime.mul(0.03), uTime.mul(-0.02))));
+    const n2: TslNode = hashNoise(foamUv.mul(2.3).add(vec2(17.3, -9.1)).add(vec2(uTime.mul(-0.04), uTime.mul(0.05))));
+    const n3: TslNode = hashNoise(foamUv.mul(5.7).add(vec2(-3.8, 23.5)).add(vec2(uTime.mul(0.05), uTime.mul(0.02))));
+    const baseFbm: TslNode = n1.mul(0.5).add(n2.mul(0.3)).add(n3.mul(0.2));
+
+    const noiseDomainWarp: TslNode = mix(baseFbm, float(1.0).sub(abs(baseFbm.mul(2.0).sub(1.0))), float(0.4));
+    const r1: TslNode = float(1.0).sub(abs(n1.mul(2.0).sub(1.0)));
+    const r2: TslNode = float(1.0).sub(abs(n2.mul(2.0).sub(1.0)));
+    const r3: TslNode = float(1.0).sub(abs(n3.mul(2.0).sub(1.0)));
+    const noiseRidged: TslNode = r1.mul(0.5).add(r2.mul(r1).mul(0.3)).add(r3.mul(r2).mul(0.2));
+    const c1: TslNode = hashNoise(foamUv.mul(0.8).add(vec2(uTime.mul(0.02), uTime.mul(-0.015))));
+    const c2: TslNode = hashNoise(foamUv.mul(0.8).add(vec2(0.33, 0.77)).add(vec2(uTime.mul(0.02), uTime.mul(-0.015))));
+    const noiseCellular: TslNode = clamp(float(1.0).sub(abs(c1.sub(c2))).mul(1.5), 0.0, 1.0);
+    const noiseBillow: TslNode = abs(n1.mul(2.0).sub(1.0)).mul(0.5).add(abs(n2.mul(2.0).sub(1.0)).mul(0.3)).add(abs(n3.mul(2.0).sub(1.0)).mul(0.2));
+    const noiseSwiss: TslNode = r1.mul(0.6).add(r2.mul(r1).mul(r1).mul(0.4));
+    const noiseTurbulent: TslNode = float(1.0).sub(noiseBillow);
+    const foamNoise: TslNode = clamp(
+      noiseDomainWarp.mul(0.24).add(noiseRidged.mul(0.24)).add(noiseCellular.mul(0.08)).add(noiseBillow.mul(0.10)).add(noiseSwiss.mul(0.14)).add(noiseTurbulent.mul(0.20)),
+      0.0,
+      1.0,
+    );
+
+    const crestFoam: TslNode = smoothstep(float(1.2), float(4.0), waveHeight).mul(smoothstep(float(0.36), float(0.82), foamNoise));
+    const foam: TslNode = smoothstep(float(0.70), float(0.96), foamNoise).mul(0.10).add(crestFoam.mul(0.34));
 
     const backlit: TslNode = pow(max(dot(viewDir, sunDir.negate()), float(0.0)), float(4.0)).mul(0.35);
     const crestScatter: TslNode = smoothstep(float(0.0), float(5.5), waveHeight).mul(0.38)
-      .add(smoothstep(float(0.45), float(0.95), ridged).mul(0.20));
+      .add(smoothstep(float(0.45), float(0.95), foamNoise).mul(0.20));
     const sss: TslNode = mix(vec3(0.01, 0.04, 0.14), shallowTeal, float(0.55)).mul(backlit.add(crestScatter));
     const specDot: TslNode = max(dot(reflect(sunDir.negate(), normal), viewDir), float(0.0));
     const sunSpec: TslNode = vec3(1.0, 0.92, 0.76).mul(pow(specDot, float(384.0)).mul(1.35).add(pow(specDot, float(96.0)).mul(0.32)));
