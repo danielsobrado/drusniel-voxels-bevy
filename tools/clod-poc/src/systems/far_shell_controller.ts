@@ -36,12 +36,9 @@ export interface FarShellControllerDeps {
   heightProvider?: FarHeightProvider;
   centerX?: number;
   centerZ?: number;
-  /** Radius around the stream center owned by playable/CLOD terrain. */
   cameraRelativeInnerRadiusM?: number;
-  /** Override the shell far radius in world units. When set, the shell radius is
-   *  this value instead of worldSizeCells * radiusFactor. */
+  requireCameraRelativeInnerRadius?: boolean;
   farShellRadiusM?: number;
-  /** When true, legacy procedural canopy is not built (Phase 8 deterministic system owns canopy). */
   skipLegacyCanopy?: boolean;
 }
 
@@ -52,9 +49,7 @@ export interface FarShellController {
   readonly canopyShell: FarShellInstance | null;
   dispose(): void;
   moveTo(x: number, z: number): void;
-  /** Set or change the height provider after construction. Rebuilds the shell. */
   setHeightProvider(provider: FarHeightProvider | undefined): void;
-  /** Override the shell far radius (world units). Pass 0 to clear the override. */
   setFarRadiusOverride(m: number): void;
 }
 
@@ -78,6 +73,9 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
   const resolveInnerExclusionRadius = (farRadius: number): number | undefined => {
     if (!currentHeightProvider) return undefined;
     const configured = deps.cameraRelativeInnerRadiusM;
+    if (deps.requireCameraRelativeInnerRadius && (!configured || configured <= 0)) {
+      throw new Error("Missing camera-relative far shell inner radius");
+    }
     const fallback = deps.worldSizeCells / 2;
     const radius = configured && configured > 0 ? configured : fallback;
     return Math.max(0, Math.min(radius, farRadius * 0.95));
@@ -117,7 +115,6 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
     });
     buildCenterX = result.buildCenterX;
     buildCenterZ = result.buildCenterZ;
-    // For relative build, translate to the actual world center.
     if (useRelativeBuild) {
       result.mesh.position.set(currentCenterX, 0, currentCenterZ);
     }
@@ -138,8 +135,6 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
 
   const moveTo = (x: number, z: number) => {
     if (!current) return;
-    // For relative builds, just translate the mesh.
-    // For non-relative, delta-move (only valid for small offsets).
     current.mesh.position.set(x - buildCenterX, 0, z - buildCenterZ);
     currentCenterX = x;
     currentCenterZ = z;
