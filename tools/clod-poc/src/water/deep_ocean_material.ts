@@ -83,6 +83,77 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     return n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
   }
 
+  float noiseDomainWarp(vec2 uv, float t) {
+    float warp = fbm3(uv * 0.35 + vec2(t * 0.035, -t * 0.025));
+    float base = fbm3(uv + vec2(warp * 1.8, -warp * 1.4));
+    float ridged = 1.0 - abs(base * 2.0 - 1.0);
+    return mix(base, ridged, 0.4);
+  }
+
+  float noiseRidged(vec2 uv, float t) {
+    float r1 = 1.0 - abs(noise2(uv + vec2(t * 0.03, -t * 0.02)) * 2.0 - 1.0);
+    float r2 = 1.0 - abs(noise2(uv * 2.3 + vec2(-t * 0.04, t * 0.05)) * 2.0 - 1.0);
+    float r3 = 1.0 - abs(noise2(uv * 5.7 + vec2(t * 0.05, t * 0.02)) * 2.0 - 1.0);
+    return r1 * 0.5 + r2 * r1 * 0.3 + r3 * r2 * 0.2;
+  }
+
+  float noiseCellular(vec2 uv, float t) {
+    vec2 p = uv * 0.8 + vec2(t * 0.02, -t * 0.015);
+    float c1 = noise2(p);
+    float c2 = noise2(p + vec2(0.33, 0.77));
+    return clamp((1.0 - abs(c1 - c2)) * 1.5, 0.0, 1.0);
+  }
+
+  float noiseBillow(vec2 uv, float t) {
+    float b1 = abs(noise2(uv + vec2(t * 0.03, -t * 0.02)) * 2.0 - 1.0);
+    float b2 = abs(noise2(uv * 2.3 + vec2(-t * 0.04, t * 0.05)) * 2.0 - 1.0);
+    float b3 = abs(noise2(uv * 5.7 + vec2(t * 0.05, t * 0.02)) * 2.0 - 1.0);
+    return b1 * 0.5 + b2 * 0.3 + b3 * 0.2;
+  }
+
+  float noiseSwiss(vec2 uv, float t) {
+    float sw1 = 1.0 - abs(noise2(uv + vec2(t * 0.02, -t * 0.01)) * 2.0 - 1.0);
+    vec2 swUv = uv + vec2(sw1 * 0.3, sw1 * -0.25);
+    float sw2 = 1.0 - abs(noise2(swUv * 2.5 + vec2(-t * 0.03, t * 0.02)) * 2.0 - 1.0);
+    return sw1 * 0.6 + sw2 * sw1 * sw1 * 0.4;
+  }
+
+  float noiseTurbulent(vec2 uv, float t) {
+    float t1 = abs(noise2(uv + vec2(t * 0.04, t * 0.02)) * 2.0 - 1.0);
+    float t2 = abs(noise2(uv * 2.3 + vec2(-t * 0.06, t * 0.035)) * 2.0 - 1.0);
+    float t3 = abs(noise2(uv * 5.7 + vec2(t * 0.05, t * 0.015)) * 2.0 - 1.0);
+    return 1.0 - (t1 * 0.45 + t2 * 0.35 + t3 * 0.2);
+  }
+
+  float combinedFoamNoise(vec2 uv, float t) {
+    float domainWarp = noiseDomainWarp(uv, t);
+    float ridged = noiseRidged(uv, t);
+    float cellular = noiseCellular(uv, t);
+    float billow = noiseBillow(uv, t);
+    float swiss = noiseSwiss(uv, t);
+    float turbulent = noiseTurbulent(uv, t);
+    return clamp(domainWarp * 0.24 + ridged * 0.24 + cellular * 0.08 + billow * 0.10 + swiss * 0.14 + turbulent * 0.20, 0.0, 1.0);
+  }
+
+  float bumpHeight(vec2 uv, float t) {
+    float perlin = fbm3(uv * 0.8 + vec2(t * 0.12, t * 0.06));
+    float ridged = noiseRidged(uv * 0.55, t);
+    float domainWarp = noiseDomainWarp(uv * 0.42, t);
+    float billow = noiseBillow(uv * 0.75, t);
+    float crossA = noise2(vec2(uv.x * 0.9 + uv.y * 0.27, uv.y * 0.9 - uv.x * 0.27) + vec2(t * 0.09, 0.0));
+    float crossB = noise2(vec2(uv.x * 0.9 - uv.y * 0.45, uv.y * 0.9 + uv.x * 0.45) - vec2(t * 0.07, 0.0));
+    float crosshatch = (crossA + crossB) * 0.5;
+    return perlin * 0.28 + ridged * 0.18 + domainWarp * 0.18 + billow * 0.12 + crosshatch * 0.10 + fbm3(uv * 2.7 - vec2(t * 0.18, t * 0.05)) * 0.14;
+  }
+
+  vec2 bumpNormalDetail(vec2 uv, float t) {
+    float eps = 0.02;
+    float h = bumpHeight(uv, t);
+    float hx = bumpHeight(uv + vec2(eps, 0.0), t);
+    float hz = bumpHeight(uv + vec2(0.0, eps), t);
+    return vec2((hx - h) / eps, (hz - h) / eps);
+  }
+
   vec2 rippleGrad(vec2 uv, float phase) {
     float tau = 6.28318530718;
     return vec2(
@@ -125,7 +196,8 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     vec2 advectB = breezeDir * (phaseB * uRippleLoopDistance * advectSpeed);
     vec2 gradA = rippleGrad(worldPos.xz * uRippleScaleA + advectA, phaseA);
     vec2 gradB = rippleGrad(worldPos.xz * uRippleScaleB + advectB + vec2(17.31, -9.47), phaseB);
-    vec2 grad = mix(gradA, gradB, blend) * uRippleAmp;
+    vec2 noiseGrad = bumpNormalDetail(worldPos.xz * max(0.02, uFoamNoiseScale * 2.5), uTime) * 0.18;
+    vec2 grad = mix(gradA, gradB, blend) * uRippleAmp + noiseGrad;
     vec3 normal = normalize(vec3(-grad.x, 1.0, -grad.y));
 
     vec3 viewDir = normalize(uCameraPos - worldPos);
@@ -144,18 +216,15 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
 
     vec3 reflectDir = normalize(reflect(-viewDir, normal));
     vec3 envReflection = skyReflection(reflectDir, sunDir);
-    float roughFade = 0.88;
-    vec3 finalReflection = envReflection * roughFade;
+    vec3 finalReflection = envReflection * 0.88;
 
-    vec2 foamUv = worldPos.xz * max(0.01, uFoamNoiseScale);
-    float warp = fbm3(foamUv * 0.35 + vec2(uTime * 0.035, -uTime * 0.025));
-    float turbulent = fbm3(foamUv + vec2(warp * 1.8, -warp * 1.4) + advectA * 0.35);
-    float ridged = 1.0 - abs(turbulent * 2.0 - 1.0);
-    float crestFoam = smoothstep(1.2, 4.0, waveHeight) * smoothstep(0.36, 0.82, ridged);
-    float foam = smoothstep(0.68, 0.96, ridged) * 0.10 + crestFoam * 0.32;
+    vec2 foamUv = worldPos.xz * max(0.01, uFoamNoiseScale) + advectA * 0.35;
+    float foamNoise = combinedFoamNoise(foamUv, uTime);
+    float crestFoam = smoothstep(1.2, 4.0, waveHeight) * smoothstep(0.36, 0.82, foamNoise);
+    float foam = smoothstep(0.70, 0.96, foamNoise) * 0.10 + crestFoam * 0.34;
 
     float backlit = pow(max(dot(viewDir, -sunDir), 0.0), 4.0) * 0.35;
-    float crestScatter = smoothstep(0.0, 5.5, waveHeight) * 0.38 + smoothstep(0.45, 0.95, ridged) * 0.20;
+    float crestScatter = smoothstep(0.0, 5.5, waveHeight) * 0.38 + smoothstep(0.45, 0.95, foamNoise) * 0.20;
     vec3 sss = mix(vec3(0.01, 0.04, 0.14), shallowTeal, 0.55) * (backlit + crestScatter);
 
     float specDot = max(dot(reflect(-sunDir, normal), viewDir), 0.0);
