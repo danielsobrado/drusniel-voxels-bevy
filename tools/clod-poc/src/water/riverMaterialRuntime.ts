@@ -4,6 +4,11 @@ export interface RiverMaterialSettings {
   geometryRiffleStrength: number;
   geometrySideRiffleStrength: number;
   geometryMaxOffset: number;
+  cascadeDropStart: number;
+  cascadeDropEnd: number;
+  cascadeStepStrength: number;
+  cascadeRoughnessStrength: number;
+  cascadeWhitewaterBoost: number;
   flowNormalStrength: number;
   crossCurrentStrength: number;
   rapidNormalBoost: number;
@@ -20,6 +25,11 @@ export const DEFAULT_RIVER_MATERIAL_SETTINGS: RiverMaterialSettings = {
   geometryRiffleStrength: 0.045,
   geometrySideRiffleStrength: 0.022,
   geometryMaxOffset: 0.18,
+  cascadeDropStart: 0.45,
+  cascadeDropEnd: 2.2,
+  cascadeStepStrength: 0.16,
+  cascadeRoughnessStrength: 0.08,
+  cascadeWhitewaterBoost: 1.65,
   flowNormalStrength: 1.4,
   crossCurrentStrength: 0.9,
   rapidNormalBoost: 1.35,
@@ -36,6 +46,11 @@ const PARAM_KEYS: Record<keyof RiverMaterialSettings, string> = {
   geometryRiffleStrength: "riverGeomRiffle",
   geometrySideRiffleStrength: "riverGeomSideRiffle",
   geometryMaxOffset: "riverGeomMaxOffset",
+  cascadeDropStart: "riverCascadeDropStart",
+  cascadeDropEnd: "riverCascadeDropEnd",
+  cascadeStepStrength: "riverCascadeStep",
+  cascadeRoughnessStrength: "riverCascadeRoughness",
+  cascadeWhitewaterBoost: "riverCascadeWhitewater",
   flowNormalStrength: "riverFlowNormal",
   crossCurrentStrength: "riverCrossCurrent",
   rapidNormalBoost: "riverRapidNormal",
@@ -64,12 +79,22 @@ function clampFinite(value: number, min: number, max: number, fallback: number):
 
 export function sanitizeRiverMaterialSettings(settings: RiverMaterialSettings): RiverMaterialSettings {
   const d = DEFAULT_RIVER_MATERIAL_SETTINGS;
+  const cascadeDropStart = clampFinite(settings.cascadeDropStart, 0, 8, d.cascadeDropStart);
+  const cascadeDropEnd = Math.max(
+    cascadeDropStart + 0.05,
+    clampFinite(settings.cascadeDropEnd, 0.05, 16, d.cascadeDropEnd),
+  );
   return {
     geometryThalwegDip: clampFinite(settings.geometryThalwegDip, 0, 0.35, d.geometryThalwegDip),
     geometryBankLift: clampFinite(settings.geometryBankLift, 0, 0.25, d.geometryBankLift),
     geometryRiffleStrength: clampFinite(settings.geometryRiffleStrength, 0, 0.30, d.geometryRiffleStrength),
     geometrySideRiffleStrength: clampFinite(settings.geometrySideRiffleStrength, 0, 0.20, d.geometrySideRiffleStrength),
     geometryMaxOffset: clampFinite(settings.geometryMaxOffset, 0, 0.60, d.geometryMaxOffset),
+    cascadeDropStart,
+    cascadeDropEnd,
+    cascadeStepStrength: clampFinite(settings.cascadeStepStrength, 0, 0.60, d.cascadeStepStrength),
+    cascadeRoughnessStrength: clampFinite(settings.cascadeRoughnessStrength, 0, 0.40, d.cascadeRoughnessStrength),
+    cascadeWhitewaterBoost: clampFinite(settings.cascadeWhitewaterBoost, 0, 5, d.cascadeWhitewaterBoost),
     flowNormalStrength: clampFinite(settings.flowNormalStrength, 0, 4, d.flowNormalStrength),
     crossCurrentStrength: clampFinite(settings.crossCurrentStrength, 0, 4, d.crossCurrentStrength),
     rapidNormalBoost: clampFinite(settings.rapidNormalBoost, 0, 4, d.rapidNormalBoost),
@@ -90,6 +115,11 @@ export function readRiverMaterialSettings(): RiverMaterialSettings {
     geometryRiffleStrength: readNumber(params, PARAM_KEYS.geometryRiffleStrength, d.geometryRiffleStrength),
     geometrySideRiffleStrength: readNumber(params, PARAM_KEYS.geometrySideRiffleStrength, d.geometrySideRiffleStrength),
     geometryMaxOffset: readNumber(params, PARAM_KEYS.geometryMaxOffset, d.geometryMaxOffset),
+    cascadeDropStart: readNumber(params, PARAM_KEYS.cascadeDropStart, d.cascadeDropStart),
+    cascadeDropEnd: readNumber(params, PARAM_KEYS.cascadeDropEnd, d.cascadeDropEnd),
+    cascadeStepStrength: readNumber(params, PARAM_KEYS.cascadeStepStrength, d.cascadeStepStrength),
+    cascadeRoughnessStrength: readNumber(params, PARAM_KEYS.cascadeRoughnessStrength, d.cascadeRoughnessStrength),
+    cascadeWhitewaterBoost: readNumber(params, PARAM_KEYS.cascadeWhitewaterBoost, d.cascadeWhitewaterBoost),
     flowNormalStrength: readNumber(params, PARAM_KEYS.flowNormalStrength, d.flowNormalStrength),
     crossCurrentStrength: readNumber(params, PARAM_KEYS.crossCurrentStrength, d.crossCurrentStrength),
     rapidNormalBoost: readNumber(params, PARAM_KEYS.rapidNormalBoost, d.rapidNormalBoost),
