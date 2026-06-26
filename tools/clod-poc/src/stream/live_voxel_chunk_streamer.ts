@@ -1,4 +1,5 @@
 import type { StreamingOwnershipRadii } from "../streaming/streaming_ownership.js";
+import { evictableLiveChunks } from "./live_chunk_eviction.js";
 
 export interface StreamCenter {
   x: number;
@@ -12,6 +13,17 @@ export interface LiveChunkCoord {
 
 export interface LiveVoxelChunkPlanConfig {
   chunkSizeM: number;
+}
+
+export interface LiveVoxelChunkStreamerConfig extends LiveVoxelChunkPlanConfig {
+  hysteresisM: number;
+}
+
+export interface LiveVoxelChunkStreamerSnapshot {
+  center: StreamCenter;
+  required: readonly string[];
+  loaded: readonly string[];
+  evictable: readonly string[];
 }
 
 export function liveChunkKey(coord: LiveChunkCoord): string {
@@ -46,4 +58,39 @@ export function requiredLiveChunks(
     }
   }
   return [...required].sort();
+}
+
+export class LiveVoxelChunkStreamer {
+  private center: StreamCenter = { x: 0, z: 0 };
+  private readonly loaded = new Set<string>();
+
+  constructor(
+    private readonly ownership: StreamingOwnershipRadii,
+    private readonly config: LiveVoxelChunkStreamerConfig,
+  ) {}
+
+  update(center: StreamCenter): LiveVoxelChunkStreamerSnapshot {
+    this.center = { ...center };
+    const required = requiredLiveChunks(center, this.ownership, this.config);
+    for (const key of required) this.loaded.add(key);
+    const evictable = evictableLiveChunks(this.loaded, center, this.ownership, this.config, this.config.hysteresisM);
+    for (const key of evictable) this.loaded.delete(key);
+    return {
+      center: this.center,
+      required,
+      loaded: [...this.loaded].sort(),
+      evictable,
+    };
+  }
+
+  snapshot(): LiveVoxelChunkStreamerSnapshot {
+    const required = requiredLiveChunks(this.center, this.ownership, this.config);
+    const evictable = evictableLiveChunks(this.loaded, this.center, this.ownership, this.config, this.config.hysteresisM);
+    return {
+      center: { ...this.center },
+      required,
+      loaded: [...this.loaded].sort(),
+      evictable,
+    };
+  }
 }
