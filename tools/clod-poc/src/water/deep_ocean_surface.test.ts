@@ -5,6 +5,7 @@ import {
   createDeepOceanSurface,
   deepOceanSurfaceVertexCount,
 } from "./deep_ocean_surface.js";
+import { deepOceanWaveVerticalBounds } from "./deep_ocean_waves.js";
 
 describe("deep ocean surface", () => {
   it("subdivides strips using config.segments instead of four giant quads", () => {
@@ -32,10 +33,10 @@ describe("deep ocean surface", () => {
     };
     const surface = createDeepOceanSurface(worldCells, config, new THREE.MeshBasicMaterial())!;
     const box = surface.mesh.geometry.boundingBox!;
-    expect(box.min.x).toBeLessThanOrEqual(-extend);
-    expect(box.max.x).toBeGreaterThanOrEqual(worldCells + extend);
-    expect(box.min.z).toBeLessThanOrEqual(-extend);
-    expect(box.max.z).toBeGreaterThanOrEqual(worldCells + extend);
+    expect(box.min.x).toBeLessThanOrEqual(-extend - deepOceanWaveVerticalBounds());
+    expect(box.max.x).toBeGreaterThanOrEqual(worldCells + extend + deepOceanWaveVerticalBounds());
+    expect(box.min.z).toBeLessThanOrEqual(-extend - deepOceanWaveVerticalBounds());
+    expect(box.max.z).toBeGreaterThanOrEqual(worldCells + extend + deepOceanWaveVerticalBounds());
     surface.dispose();
   });
 
@@ -62,7 +63,7 @@ describe("deep ocean surface", () => {
     surface.dispose();
   });
 
-  it("animates Gerstner-style height and horizontal chop", () => {
+  it("keeps CPU geometry immutable because waves run in the GPU material", () => {
     const worldCells = 128;
     const config = {
       ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
@@ -75,9 +76,9 @@ describe("deep ocean surface", () => {
     const y0 = positions.getY(0);
     const z0 = positions.getZ(0);
     surface.update(2.0);
-    const movedXZ = Math.hypot(positions.getX(0) - x0, positions.getZ(0) - z0);
-    expect(movedXZ).toBeGreaterThan(0);
-    expect(positions.getY(0)).not.toBe(y0);
+    expect(positions.getX(0)).toBe(x0);
+    expect(positions.getY(0)).toBe(y0);
+    expect(positions.getZ(0)).toBe(z0);
     surface.dispose();
   });
 });
