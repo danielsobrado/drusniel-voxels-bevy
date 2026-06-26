@@ -175,6 +175,12 @@ metrics:
     - streamer_simulated_required_pages
     - streamer_simulated_missing_chunks
     - streamer_simulated_missing_pages
+    - streamer_live_required_chunks
+    - streamer_live_loaded_chunks
+    - streamer_visual_required_pages
+    - streamer_visual_loaded_pages
+    - streamer_far_shell_inner_m
+    - streamer_far_shell_outer_m
     - horizon_hole_ratio
     - stale_fallback_count
     - far_shell_inner_m
@@ -188,7 +194,6 @@ metrics:
     - far_summary_tiles_stale
     - far_summary_tiles_built_this_frame
     - far_summary_cache_size
-    - far_summary_fallback_samples
 
 acceptance:
   allow_current_4km_failure: true
