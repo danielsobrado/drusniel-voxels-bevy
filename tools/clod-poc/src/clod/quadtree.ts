@@ -548,13 +548,15 @@ export interface Lod0RebuildResult {
  * chain and it's the surface the player is looking at, so the viewer applies this
  * synchronously and defers {@link resimplifyParent} to later frames.
  */
-/** When any LOD0 page in a 2x2 parent quad is dirty, rebuild all four siblings so the
- *  parent merge reads a consistent voxel field across internal seams. */
-export function expandLod0SiblingPages(
+/** When any page at `level` in a 2x2 parent quad is dirty, include all four siblings. */
+export function expandQuadSiblingPages(
   coords: readonly [number, number][],
+  level: number,
   worldPagesX: number,
   worldPagesZ: number,
 ): [number, number][] {
+  const maxX = (worldPagesX >> level) - 1;
+  const maxZ = (worldPagesZ >> level) - 1;
   const keys = new Set<string>();
   for (const [nx, nz] of coords) {
     const parentX = nx >> 1;
@@ -565,7 +567,7 @@ export function expandLod0SiblingPages(
       for (let dx = 0; dx < 2; dx++) {
         const px = baseX + dx;
         const pz = baseZ + dz;
-        if (px < 0 || pz < 0 || px >= worldPagesX || pz >= worldPagesZ) continue;
+        if (px < 0 || pz < 0 || px > maxX || pz > maxZ) continue;
         keys.add(`${px},${pz}`);
       }
     }
@@ -574,6 +576,15 @@ export function expandLod0SiblingPages(
     const [px, pz] = k.split(",").map(Number);
     return [px, pz] as [number, number];
   });
+}
+
+/** @deprecated Use {@link expandQuadSiblingPages} at level 0. */
+export function expandLod0SiblingPages(
+  coords: readonly [number, number][],
+  worldPagesX: number,
+  worldPagesZ: number,
+): [number, number][] {
+  return expandQuadSiblingPages(coords, 0, worldPagesX, worldPagesZ);
 }
 
 export function rebuildDirtyLod0Pages(
@@ -599,7 +610,7 @@ export function rebuildDirtyLod0Pages(
       touched.push([px, pz]);
     }
   }
-  const pages = expandLod0SiblingPages(touched, result.worldPagesX, result.worldPagesZ);
+  const pages = expandQuadSiblingPages(touched, 0, result.worldPagesX, result.worldPagesZ);
 
   const changed: ClodPageNode[] = [];
   const dirtyCoords: [number, number][] = [];
@@ -611,13 +622,11 @@ export function rebuildDirtyLod0Pages(
       if (!node) continue;
       let mesh: PageMesh;
       if (node.chunkMeshes) {
-        // re-mesh only the chunks the edit perturbs, then re-weld the page (== full rebuild)
         const r = rebuildPageChunks(node.chunkMeshes, px, pz, cfg, world, dirty);
         mesh = r.mesh;
         chunksRemeshed += r.remeshed;
         chunksTotal += node.chunkMeshes.length;
       } else {
-        // Warm-cache LOD0 pages omit chunkMeshes; first edit does one full page extract, then partial chunk remeshing.
         const src = buildLod0PageSource(px, pz, cfg, world);
         node.chunkMeshes = src.chunks;
         mesh = src.mesh;
@@ -634,6 +643,27 @@ export function rebuildDirtyLod0Pages(
     changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - t0,
     chunksRemeshed, chunksTotal,
   };
+}
+
+/** Re-extract one LOD0 page from the current voxel field (used before parent merges). */
+function refreshLod0PageFromField(
+  index: NodeIndex,
+  key: string,
+  cfg: ClodPagesConfig,
+  result: BuildResult,
+): void {
+  const node = index[0]?.get(key);
+  if (!node) return;
+  const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const [px, pz] = key.split(",").map(Number);
+  const world = {
+    cellsX: result.worldPagesX * span,
+    cellsZ: result.worldPagesZ * span,
+  };
+  const src = buildLod0PageSource(px, pz, cfg, world);
+  node.chunkMeshes = src.chunks;
+  node.mesh = src.mesh;
+  node.bounds = boundsOf(src.mesh);
 }
 
 /**
@@ -677,6 +707,64 @@ export function resimplifyParent(
   return node;
 }
 
+export interface AncestorRebuildResult {
+  changed: ClodPageNode[];
+  parentNodes: number;
+  parentMs: number;
+}
+
+/** Re-simplify every ancestor touched by a LOD0 dirty set, expanding 2x2 siblings at each level. */
+export function rebuildAncestorLevels(
+  result: BuildResult,
+  lod0DirtyCoords: readonly [number, number][],
+  index: NodeIndex,
+  cfg: ClodPagesConfig,
+): AncestorRebuildResult {
+  const changed: ClodPageNode[] = [];
+  const t0 = performance.now();
+  let parentNodes = 0;
+  const topLevel = Math.max(...result.nodesByLevel.keys());
+  const seed = new Set<string>();
+  for (const [nx, nz] of lod0DirtyCoords) seed.add(`${nx >> 1},${nz >> 1}`);
+  let levelCoords = [...seed].map((k) => k.split(",").map(Number) as [number, number]);
+
+  for (let level = 1; level <= topLevel && levelCoords.length > 0; level++) {
+    levelCoords = expandQuadSiblingPages(levelCoords, level, result.worldPagesX, result.worldPagesZ);
+    if (level === 1) {
+      const l0Keys = new Set<string>();
+      for (const [nx, nz] of levelCoords) {
+        const baseX = nx * 2;
+        const baseZ = nz * 2;
+        for (let dz = 0; dz < 2; dz++) {
+          for (let dx = 0; dx < 2; dx++) {
+            l0Keys.add(`${baseX + dx},${baseZ + dz}`);
+          }
+        }
+      }
+      for (const key of l0Keys) {
+        refreshLod0PageFromField(index, key, cfg, result);
+      }
+    }
+    const parentKeys = new Set<string>();
+    const nextCoords: [number, number][] = [];
+    for (const [nx, nz] of levelCoords) {
+      const key = `${nx},${nz}`;
+      const node = resimplifyParent(index, level, key, cfg);
+      if (!node) continue;
+      changed.push(node);
+      parentNodes++;
+      const pk = `${nx >> 1},${nz >> 1}`;
+      if (!parentKeys.has(pk)) {
+        parentKeys.add(pk);
+        nextCoords.push([nx >> 1, nz >> 1]);
+      }
+    }
+    levelCoords = nextCoords;
+  }
+
+  return { changed, parentNodes, parentMs: performance.now() - t0 };
+}
+
 /**
  * Rebuild the LOD0 pages whose cells intersect `dirty`, then every ancestor up the
  * quadtree, with the same hard-fail validation as the full build. Nodes are mutated in
@@ -691,25 +779,12 @@ export function rebuildDirtyPages(
 ): EditRebuildResult {
   const index = buildNodeIndex(result);
   const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, index);
-  const changed = [...lod0.changed];
-
-  const t1 = performance.now();
-  let parentNodes = 0;
-  const topLevel = Math.max(...result.nodesByLevel.keys());
-  let dirtyCoords = lod0.dirtyCoords;
-  for (let level = 1; level <= topLevel && dirtyCoords.length > 0; level++) {
-    const parents = new Map<string, [number, number]>();
-    for (const [nx, nz] of dirtyCoords) parents.set(`${nx >> 1},${nz >> 1}`, [nx >> 1, nz >> 1]);
-    dirtyCoords = [];
-    for (const [key, coord] of parents) {
-      const node = resimplifyParent(index, level, key, cfg);
-      if (!node) continue;
-      changed.push(node);
-      parentNodes++;
-      dirtyCoords.push(coord);
-    }
-  }
-  const parentMs = performance.now() - t1;
-
-  return { changed, lod0Pages: lod0.lod0Pages, parentNodes, lod0Ms: lod0.lod0Ms, parentMs };
+  const ancestors = rebuildAncestorLevels(result, lod0.dirtyCoords, index, cfg);
+  return {
+    changed: [...lod0.changed, ...ancestors.changed],
+    lod0Pages: lod0.lod0Pages,
+    parentNodes: ancestors.parentNodes,
+    lod0Ms: lod0.lod0Ms,
+    parentMs: ancestors.parentMs,
+  };
 }

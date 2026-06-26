@@ -215,7 +215,7 @@ describe("rebuildDirtyPages", () => {
       cfg,
     );
 
-    expect(rebuild.lod0Pages).toBe(2); // pages (0,0) and (1,0)
+    expect(rebuild.lod0Pages).toBe(4); // full 2x2 quad under the touched LOD1 parent
     expect(rebuild.parentNodes).toBe(1); // the single LOD1 root
     expect(a.mesh.indices.length).not.toBe(trisBefore);
 
@@ -242,7 +242,7 @@ describe("rebuildDirtyPages", () => {
       cfg,
     );
 
-    expect(rebuild.lod0Pages).toBe(2);
+    expect(rebuild.lod0Pages).toBe(4);
     assertBorderMatch(
       borderChain(a.mesh, "x", 32, a.footprint),
       borderChain(b.mesh, "x", 32, b.footprint),
@@ -269,7 +269,7 @@ describe("rebuildDirtyPages", () => {
     expect(node.mesh.indices.length).toBeGreaterThan(trisBefore);
   });
 
-  it("per-chunk rebuild re-meshes only the touched chunks, identical to a full page rebuild", () => {
+  it("per-chunk rebuild re-meshes the full touched page quad, identical to a full page rebuild", () => {
     const world = { cellsX: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size, cellsZ: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size };
     const result = buildWorld(2, 2, cfg);
     const node = result.nodesByLevel.get(0)!.find((n) => n.id === "L0:0,0")!;
@@ -282,8 +282,8 @@ describe("rebuildDirtyPages", () => {
     const dirty = { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin };
 
     const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, buildNodeIndex(result));
-    expect(lod0.chunksTotal).toBe(cfg.page.chunks_per_page ** 2); // 4 chunks in the page
-    expect(lod0.chunksRemeshed).toBe(cfg.page.chunks_per_page ** 2); // dirty chunk + seam neighbors
+    expect(lod0.chunksTotal).toBe(cfg.page.chunks_per_page ** 2 * 4); // 2x2 pages in the touched quad
+    expect(lod0.chunksRemeshed).toBe(cfg.page.chunks_per_page ** 2 * 4);
 
     // the per-chunk welded page must equal a from-scratch full extract of the same page
     const full = buildLod0PageSource(0, 0, cfg, world);

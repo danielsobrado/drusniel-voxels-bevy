@@ -44,7 +44,8 @@ function replaceConst(source: string, name: string, value: number): string {
 
 function withConservativeGrassFrustum(source: string): string {
   if (source.includes("in_frustum_sphere")) return source;
-  const withConst = source.replace(
+  const normalized = source.replace(/\r\n/g, "\n");
+  const withConst = normalized.replace(
     "const GRASS_MOIST_BANK_END_M: f32 = 11.0;",
     `const GRASS_MOIST_BANK_END_M: f32 = 11.0;\n${GRASS_FRUSTUM_RADIUS_CONST}`,
   );
@@ -60,7 +61,7 @@ function withConservativeGrassFrustum(source: string): string {
 }`,
   );
   return withSphereFn.replace(
-    /  if \(!in_frustum\(vec3<f32>\(wpos\.x, height \+ 0\.5, wpos\.y\), 1\.4\)\) \{ return; \}\n  let river_band = river_grass_ecology_band\(wpos\.x, wpos\.y, hydro, height\);/,
+    /  if \(!in_frustum\(vec3<f32>\(wpos\.x, height \+ 0\.5, wpos\.y\), 1\.4\)\) \{ return; \}\r?\n  let river_band = river_grass_ecology_band\(wpos\.x, wpos\.y, hydro, height\);/,
     `  let river_band = river_grass_ecology_band(wpos.x, wpos.y, hydro, height);
   let max_height_scale = max(0.1, 1.0 + abs(params.settings_a.z)) * river_band.height;
   let max_blade_height = params.settings_a.y * max_height_scale * 2.25;

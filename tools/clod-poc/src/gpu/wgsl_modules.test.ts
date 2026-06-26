@@ -26,6 +26,14 @@ describe("WGSL module composition", () => {
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
   });
 
+  it("rewrites grass frustum culling to the conservative sphere test", () => {
+    const source = composeGrassRingShader();
+
+    expect(source).toContain("fn in_frustum_sphere");
+    expect(source).toContain("in_frustum_sphere(blade_center, blade_radius)");
+    expect(source).not.toMatch(/\bin_frustum\(/);
+  });
+
   it("composes terrain mesh with explicit terrain field bindings and no grass entry points", () => {
     const source = composeTerrainFieldShader();
 

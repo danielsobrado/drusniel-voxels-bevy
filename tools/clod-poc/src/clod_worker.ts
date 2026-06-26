@@ -2,6 +2,7 @@ import { initSimplifier } from "./clod/simplify.js";
 import {
   buildNodeIndex,
   buildWorldAsync,
+  rebuildAncestorLevels,
   rebuildDirtyLod0Pages,
   resimplifyParent,
   type BuildResult,
@@ -255,17 +256,18 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
   if (requestIds.length === 0) return;
 
   const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, index);
-  activeParentRequestId = requestIds[0]!;
-  parentNodes = 0;
-  parentMs = 0;
-  for (const [nx, nz] of lod0.dirtyCoords) enqueueParent(1, nx >> 1, nz >> 1);
+  const ancestors = rebuildAncestorLevels(result, lod0.dirtyCoords, index, cfg);
+  activeParentRequestId = null;
+  parentNodes = ancestors.parentNodes;
+  parentMs = ancestors.parentMs;
 
   const tSer = performance.now();
-  const changed = serializeNodes(lod0.changed);
+  const lod0Serialized = serializeNodes(lod0.changed);
+  const ancestorSerialized = serializeNodes(ancestors.changed);
   const serializeMs = performance.now() - tSer;
   let serializedBytes = 0;
   const transferables: Transferable[] = [];
-  for (const node of changed) {
+  for (const node of [...lod0Serialized, ...ancestorSerialized]) {
     serializedBytes += node.mesh.positions.byteLength
       + node.mesh.normals.byteLength
       + node.mesh.paintSlots.byteLength
@@ -283,7 +285,7 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
   post({
     type: "lod0Rebuilt",
     requestIds,
-    changed,
+    changed: lod0Serialized,
     dirtyCoords: lod0.dirtyCoords.map(([x, z]) => [x, z] as [number, number]),
     lod0Pages: lod0.lod0Pages,
     lod0Ms: lod0.lod0Ms,
@@ -291,9 +293,27 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
     serializedBytes,
     chunksRemeshed: lod0.chunksRemeshed,
     chunksTotal: lod0.chunksTotal,
-    pendingParents: pendingParentCount(),
+    pendingParents: 0,
   }, transferables);
-  scheduleParentDrain();
+
+  if (ancestorSerialized.length > 0) {
+    const parentTransferables: Transferable[] = [];
+    for (const node of ancestorSerialized) collectNodeTransferables(node, parentTransferables);
+    post({
+      type: "parentRebuilt",
+      requestId: requestIds[0]!,
+      changed: ancestorSerialized,
+      parentNodes,
+      parentMs,
+      pendingParents: 0,
+    }, parentTransferables);
+    post({
+      type: "parentsComplete",
+      requestId: requestIds[0]!,
+      parentNodes,
+      parentMs,
+    });
+  }
 }
 
 function flushCoalescedDig(): void {
