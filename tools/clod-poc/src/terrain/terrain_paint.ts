@@ -1,4 +1,5 @@
 import { editIndex, cellKey, brushSdf, editHeight, activePaintSlots } from "./terrain_edits.js";
+import { voxelEditStore } from "./voxel_edits/voxel_edit_store.js";
 
 export const MATERIAL_PAINT_BAND = 0.75;
 export const PAINT_BLEND_CHANNELS = 4;
@@ -23,6 +24,9 @@ export function terrainWeights(y: number, ny: number): [number, number, number, 
 }
 
 export function paintMaterialAt(x: number, y: number, z: number): number {
+  const voxelSlot = voxelEditStore.materialAt(x, y, z);
+  if (voxelSlot !== undefined) return voxelSlot + 1;
+
   if (editIndex.size > 0) {
     const key = cellKey(x, y, z);
     const bucket = editIndex.get(key);
@@ -49,6 +53,14 @@ export function paintWeightsAt(x: number, y: number, z: number): VertexPaint {
   const globalSlots = [...activePaintSlots].sort((a, b) => a - b);
   for (let c = 0; c < Math.min(globalSlots.length, PAINT_BLEND_CHANNELS); c++) {
     slots[c] = globalSlots[c];
+  }
+
+  const voxelSlot = voxelEditStore.materialAt(x, y, z);
+  if (voxelSlot !== undefined) {
+    if (!slots.includes(voxelSlot)) slots[0] = voxelSlot;
+    const slotIndex = Math.max(0, slots.indexOf(voxelSlot));
+    weights[slotIndex] = 1;
+    return { slots, weights };
   }
 
   const bucket = editIndex.size > 0 ? editIndex.get(cellKey(x, y, z)) : undefined;
