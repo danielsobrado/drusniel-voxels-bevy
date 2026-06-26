@@ -332,19 +332,22 @@ fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) ->
   let slope_health = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
   let ridge_stress = 1.0 - slope_health;
   let clump = clamp(tree_parent_clump_mask(wpos, cfg), 0.0, 1.25);
+  let old_age = smoothstep(0.58, 0.96, tree_hash(wc, 2309u));
 
   let oak = base.x
     * mix(1.45, 0.52, height_band)
     * mix(0.78, 1.28, moisture)
     * mix(0.82, 1.18, slope_health)
-    * (1.0 - materials.y * 0.35);
+    * (1.0 - materials.y * 0.35)
+    * mix(1.06, 0.82, old_age);
   let pine = base.y
     * mix(0.52, 1.62, height_band)
     * mix(0.84, 1.16, 1.0 - moisture)
     * mix(0.78, 1.25, slope_health)
-    * (1.0 + materials.y * 0.22);
+    * (1.0 + materials.y * 0.22)
+    * mix(1.02, 0.9, old_age);
   let dead = base.z
-    * (0.62 + clump * 0.34 + ridge_stress * 0.42 + materials.y * 0.32);
+    * (0.38 + clump * 0.28 + ridge_stress * 0.42 + materials.y * 0.32 + old_age * 0.72);
 
   let weights = max(vec3<f32>(oak, pine, dead), vec3<f32>(0.0));
   let total = weights.x + weights.y + weights.z;
