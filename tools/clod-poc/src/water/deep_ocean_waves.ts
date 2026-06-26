@@ -26,6 +26,17 @@ export interface DeepOceanGpuWave {
   choppiness: number;
 }
 
+export interface DeepOceanWaveSample {
+  height: number;
+  offsetX: number;
+  offsetZ: number;
+  slopeX: number;
+  slopeZ: number;
+  compression: number;
+  velocityX: number;
+  velocityZ: number;
+}
+
 export const DEEP_OCEAN_SPECTRUM = {
   gravity: 9.81,
   gridK: 16,
@@ -147,6 +158,56 @@ function buildGpuWaves(): readonly DeepOceanGpuWave[] {
 
 /** Cached once at module load, then uploaded/read by GPU shaders. */
 export const DEEP_OCEAN_GPU_WAVES: readonly DeepOceanGpuWave[] = buildGpuWaves();
+
+export function sampleDeepOceanWave(x: number, z: number, timeSeconds: number): DeepOceanWaveSample {
+  let offsetX = 0;
+  let offsetZ = 0;
+  let height = 0;
+  let slopeX = 0;
+  let slopeZ = 0;
+  let jxx = 0;
+  let jzz = 0;
+  let jxz = 0;
+  let velocityX = 0;
+  let velocityZ = 0;
+
+  for (const wave of DEEP_OCEAN_GPU_WAVES) {
+    const theta = wave.k * (wave.dirX * x + wave.dirZ * z) - wave.omega * timeSeconds + wave.phase;
+    const c = Math.cos(theta);
+    const s = Math.sin(theta);
+    offsetX -= wave.amp * wave.dirX * s * wave.choppiness;
+    offsetZ -= wave.amp * wave.dirZ * s * wave.choppiness;
+    height += wave.amp * c;
+    slopeX -= wave.amp * wave.k * wave.dirX * s;
+    slopeZ -= wave.amp * wave.k * wave.dirZ * s;
+    jxx -= wave.amp * wave.k * wave.dirX * wave.dirX * c * wave.choppiness;
+    jzz -= wave.amp * wave.k * wave.dirZ * wave.dirZ * c * wave.choppiness;
+    jxz -= wave.amp * wave.k * wave.dirX * wave.dirZ * c * wave.choppiness;
+    velocityX += wave.amp * wave.dirX * wave.omega * c * wave.choppiness;
+    velocityZ += wave.amp * wave.dirZ * wave.omega * c * wave.choppiness;
+  }
+
+  const jacobian = (1 + jxx) * (1 + jzz) - jxz * jxz;
+  return {
+    height,
+    offsetX,
+    offsetZ,
+    slopeX,
+    slopeZ,
+    compression: Math.min(1, Math.max(0, (0.58 - jacobian) / 0.58)),
+    velocityX,
+    velocityZ,
+  };
+}
+
+export function sampleDeepOceanNormal(x: number, z: number, timeSeconds: number): readonly [number, number, number] {
+  const wave = sampleDeepOceanWave(x, z, timeSeconds);
+  const nx = -wave.slopeX;
+  const ny = 1;
+  const nz = -wave.slopeZ;
+  const len = Math.hypot(nx, ny, nz) || 1;
+  return [nx / len, ny / len, nz / len] as const;
+}
 
 export function deepOceanWaveVerticalBounds(): number {
   return DEEP_OCEAN_GPU_WAVES.reduce((sum, wave) => sum + Math.abs(wave.amp), 0) + 1;
