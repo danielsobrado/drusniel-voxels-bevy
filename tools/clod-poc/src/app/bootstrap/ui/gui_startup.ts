@@ -1,4 +1,5 @@
 import { createClodPocGui } from "../../../ui/gui/gui_root.js";
+import { createSceneGui } from "../../../ui/gui/scene_gui.js";
 import { shadowProxyDebugStateToConfig } from "../../../shadows/shadowProxyDebug.js";
 import type GUI from "lil-gui";
 import { type NodeView, recomputedNormalsFor } from "../bootstrap_types.js";
@@ -150,6 +151,7 @@ export function runGuiStartup(
       getIntegration: () => input.naadfIntegration,
     } : undefined,
   });
+  createSceneGui(guiResult.gui);
 
   colorByLodController.current = guiResult.colorByLodController;
   session.weatherStatsController = guiResult.weatherStatsController;
