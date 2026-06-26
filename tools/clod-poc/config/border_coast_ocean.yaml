@@ -5,7 +5,7 @@ border_coast_ocean:
   enabled: true
   # Distances in world cells from the nearest playable edge (0 = on the border).
   coast:
-    ocean_start_cells: 48       # chunk_size * 3 — shore band begins
+    ocean_start_cells: 48       # deep-ocean render mesh begins inside this border band
     ocean_full_depth_cells: 16  # chunk_size * 1 — full ocean carve depth
     shore_backshore_cells: 32   # chunk_size * 2 — inland blend back to procedural
     shoreline_cell_cells: 32    # chunk_size * 2 — coast-type sampling grid
@@ -24,7 +24,7 @@ border_coast_ocean:
     max_depth: 16.0
   deep_ocean:
     enabled: true
-    # Render-only skirt beyond the playable square; hides the open mesh edge.
+    # Render-only ring beyond the playable square and through the border-ocean band.
     extend_cells: 384
     surface_y: 18
     segments: 64
