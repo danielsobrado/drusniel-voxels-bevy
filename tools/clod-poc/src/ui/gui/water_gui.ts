@@ -1,5 +1,10 @@
 import type GUI from "lil-gui";
-import { addWaterDebugFolder, WATER_DEBUG_MODES, type WaterDebugState } from "../../water/index.js";
+import {
+  addWaterDebugFolder,
+  WATER_DEBUG_MODES,
+  type WaterDebugState,
+  type WaterRiverDebugStats,
+} from "../../water/index.js";
 import type { WaterController } from "../../runtime/water_weather/water_controller.js";
 
 export interface WaterGuiDeps {
@@ -15,8 +20,36 @@ export interface WaterGuiDeps {
 
 type WaterVisual = ReturnType<WaterController["makeVisual"]>;
 
+type RiverStatsController = WaterController & {
+  getRiverStats?: () => WaterRiverDebugStats;
+};
+
 interface ColorBinding {
   value: string;
+}
+
+function emptyRiverStats(): WaterRiverDebugStats {
+  return {
+    source: "unknown",
+    hydrologyEnabled: false,
+    riverCells: 0,
+    lakeCells: 0,
+    wetCells: 0,
+    maxFlowSpeed: 0,
+    fallbackRivers: false,
+    fallbackMainRiver: false,
+    fallbackTributaries: false,
+    widenRadius: 0,
+    carveDepthM: 0,
+    visibleDepthM: 0,
+    flowSpeedMultiplier: 1,
+    fakeRiverCount: 0,
+  };
+}
+
+function riverStats(controller: WaterController): WaterRiverDebugStats {
+  const withStats = controller as RiverStatsController;
+  return typeof withStats.getRiverStats === "function" ? withStats.getRiverStats() : emptyRiverStats();
 }
 
 function toHexColor(rgb: [number, number, number]): string {
@@ -129,7 +162,7 @@ export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
     onOceanFullDepthDistance: (distance) => deps.waterController.setOceanFullDepthDistance(distance),
     onOceanMaxDepth: (depth) => deps.waterController.setOceanMaxDepth(depth),
     onRebuildVisual: rebuildVisual,
-    getRiverStats: () => deps.waterController.getRiverStats(),
+    getRiverStats: () => riverStats(deps.waterController),
   });
 
   addDeepWaterLookFolder(gui, visual, rebuildVisual);
