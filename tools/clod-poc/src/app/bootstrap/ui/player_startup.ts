@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { surfaceHeight } from "../../../terrain/terrain.js";
 import { createPlayerModeController } from "../../../player/player_mode_controller.js";
 import { createPlayerInputController } from "../../../player/player_input_controller.js";
+import { createFirstPersonWeapon, createSwordAttackController } from "../../../combat/index.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
@@ -31,6 +32,10 @@ export function runPlayerStartup(
     throw new Error("Player startup requires digRadiusController from texture UI startup");
   }
 
+  const weapon = createFirstPersonWeapon({ camera });
+  const combatController = createSwordAttackController({ camera, weapon });
+  const config = combatController.getConfig();
+
   const playerInputController = createPlayerInputController({
     renderer,
     camera,
@@ -58,6 +63,7 @@ export function runPlayerStartup(
       bindings.syncTerraformMenu();
       updateInfo();
     },
+    triggerSwordAttack: () => combatController.trigger(),
   });
 
   const playerModeController = createPlayerModeController({
@@ -84,6 +90,11 @@ export function runPlayerStartup(
   playerModeController.applyQuerySpawn();
   playerModeController.updatePlayerModeUi();
 
+  const offset = new THREE.Vector3(...config.camera_offset);
+  weapon.load(config.model_path, offset).catch(() => { /* weapon model load failed, silent */ });
+  weapon.setVisible(true);
+
   session.playerInputController = playerInputController;
   session.playerModeController = playerModeController;
+  session.combatController = combatController;
 }

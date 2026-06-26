@@ -21,7 +21,7 @@ export type {
 import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
-  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, canopy, construction } = deps;
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, canopy, construction, combat } = deps;
   let elapsedSeconds = 0;
   const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
@@ -121,6 +121,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     });
 
     construction?.update();
+    combat?.update(performance.now());
 
     const terrainPhase = runTerrainFramePhase({
       state: player.state,
