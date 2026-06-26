@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { shouldRebuildCanopyShell } from "./canopy_system.js";
+import { shellGridForTriangleBudget, shouldRebuildCanopyShell } from "./canopy_system.js";
 import type { CanopyTextureSet } from "./canopy_types.js";
 
 function mockTextureSet(revision: number, syntheticFallback = false): CanopyTextureSet {
@@ -18,6 +18,14 @@ function mockTextureSet(revision: number, syntheticFallback = false): CanopyText
     revision,
   };
 }
+
+describe("shellGridForTriangleBudget", () => {
+  it("caps grid from the configured triangle budget", () => {
+    expect(shellGridForTriangleBudget(250000)).toBe(192);
+    expect(shellGridForTriangleBudget(8000)).toBe(63);
+    expect(shellGridForTriangleBudget(512)).toBe(16);
+  });
+});
 
 describe("shouldRebuildCanopyShell", () => {
   it("rebuilds when revision changes", () => {

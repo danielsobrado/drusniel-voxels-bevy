@@ -56,6 +56,12 @@ export function shouldRebuildCanopyShell(
   return prev.revision !== next.revision;
 }
 
+/** Conservative shell grid cap from triangle budget (assumes all quads are emitted). */
+export function shellGridForTriangleBudget(maxShellTris: number, preferredGrid = 192): number {
+  const maxGrid = Math.floor(Math.sqrt(maxShellTris / 2));
+  return Math.max(16, Math.min(preferredGrid, maxGrid));
+}
+
 export function createCanopyShellSystem(
   yamlText: string,
   searchParams: URLSearchParams,
@@ -104,7 +110,7 @@ export function createCanopyShellSystem(
       skyLight: lighting.skyLight,
       groundLight: lighting.groundLight,
     }, {
-      grid: 192,
+      grid: shellGridForTriangleBudget(config.budgets.maxShellTris),
       buildRelative: true,
       skipInteriorHole: true,
       showCoverageHeatmap: debugState.showCoverageHeatmap,

@@ -15,7 +15,7 @@ import { runUiStartup } from "./ui/ui_startup.js";
 import { surfaceHeightCore } from "../../gpu/terrain_field_core.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
-import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
+import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig, sampleMacroTerrainMaterial } from "../../long-view/index.js";
 import type { FarShellMetrics } from "../../long-view/index.js";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
@@ -166,7 +166,7 @@ export async function bootstrapClodPoc() {
     farSummaryIntegration = initFarSummaryIntegration({
       terrainSampler: {
         sampleHeight: (x: number, z: number) => surfaceHeightCore(x, z),
-        sampleMaterial: () => 0,
+        sampleMaterial: (x, z) => sampleMacroTerrainMaterial(x, z),
         sampleCanopyCoverage: () => 0,
         sampleWaterCoverage: () => 0,
       },

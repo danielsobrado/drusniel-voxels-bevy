@@ -89,12 +89,10 @@ export function createFarTerrainMaterial(
 }
 
 export function computeFarTerrainVertexColors(
-  _sampleHeight: (x: number, z: number) => number,
   positions: Float32Array,
   normals: Float32Array,
   vertexCount: number,
   config: FarTerrainUniformData,
-  _worldSize: number,
   worldOffsetX?: number,
   worldOffsetZ?: number,
 ): FarTerrainVertexColors {
@@ -163,20 +161,29 @@ export function computeFarTerrainVertexColors(
   return { baseColor, debugBand, macro, slope, materialWeights, normals };
 }
 
+function cpuSmoothstep(edge0: number, edge1: number, v: number): number {
+  const range = edge1 - edge0;
+  const denom = Math.abs(range) < 1e-8 ? 1e-8 : range;
+  const t = Math.min(1, Math.max(0, (v - edge0) / denom));
+  return t * t * (3 - 2 * t);
+}
+
 export function createVertexColorBuffer(
   vertexColors: FarTerrainVertexColors,
   config: FarTerrainUniformData,
+  normals?: Float32Array,
+  centerX?: number,
+  centerZ?: number,
+  vertexPositions?: Float32Array,
 ): Float32Array {
   const count = vertexColors.baseColor.length / 3;
+  const isFullDebug = config.materialQuality === "full_debug" || config.materialQualityIndex <= 0;
+  const isCheapTriplanar = config.materialQuality === "cheap_triplanar_debug" || config.materialQualityIndex === 1;
+  const isSingleProj = config.materialQuality === "single_projection_far" || config.materialQualityIndex === 2;
+  const isAtlasDebug = config.materialQuality === "atlas_only_debug" || config.materialQualityIndex >= 4;
+  const cx = centerX ?? 0;
+  const cz = centerZ ?? 0;
   const colors = new Float32Array(count * 3);
-
-  const quality = config.materialQuality;
-  const isFullDebug = quality === "full_debug";
-  const isCheapTriplanar = quality === "cheap_triplanar_debug";
-  const isSingleProj = quality === "single_projection_far";
-  const isAtlasDebug = quality === "atlas_only_debug";
-  const normals = vertexColors.normals;
-
   for (let vi = 0; vi < count; vi++) {
     if (config.debugShowMaterialBands > 0 || isFullDebug || isAtlasDebug) {
       colors[vi * 3] = vertexColors.debugBand[vi * 3];
@@ -205,12 +212,15 @@ export function createVertexColorBuffer(
         colors[vi * 3 + 1] = 0.5;
         colors[vi * 3 + 2] = 0.75;
       }
-    } else if (config.debugShowHazeFactor > 0) {
-      const s = vertexColors.slope[vi];
-      const haze = s * 0.6 + vertexColors.macro[vi] * 0.2;
-      colors[vi * 3] = haze;
-      colors[vi * 3 + 1] = haze * 0.85;
-      colors[vi * 3 + 2] = haze * 0.95;
+    } else if (config.debugShowHazeFactor > 0 && vertexPositions) {
+      const x = vertexPositions[vi * 3];
+      const z = vertexPositions[vi * 3 + 2];
+      const dist = Math.hypot(x - cx, z - cz);
+      const raw = cpuSmoothstep(config.hazeStartM, config.hazeEndM, dist);
+      const haze = raw * config.hazeStrength * config.hazeEnabled;
+      colors[vi * 3] = Math.min(1, Math.max(0, 0.85 + haze * 0.15));
+      colors[vi * 3 + 1] = Math.min(1, Math.max(0, 0.90 + haze * 0.10));
+      colors[vi * 3 + 2] = Math.min(1, Math.max(0, 0.95 + haze * 0.05));
     } else if (isSingleProj) {
       colors[vi * 3] = vertexColors.baseColor[vi * 3];
       colors[vi * 3 + 1] = vertexColors.baseColor[vi * 3 + 1];

@@ -210,16 +210,14 @@ export function buildFarTerrainShell(
   const hazeT = smoothstep(float(farRadius * 0.55), float(farRadius * 0.98), distXZ);
   if (useParityMaterial && parityConfig) {
     const vc = computeFarTerrainVertexColors(
-      heightProvider
-        ? (x: number, z: number) => heightProvider.sampleHeight(x, z)
-        : (x: number, z: number) => sampleSkirtHeight(summary, x, z, farRadius, baseLevel, heightBias),
       positions,
       normals,
       vertexCount,
       parityConfig,
-      worldSize,
+      centerX,
+      centerZ,
     );
-    const colorAttr = createVertexColorBuffer(vc, parityConfig);
+    const colorAttr = createVertexColorBuffer(vc, parityConfig, undefined, centerX, centerZ, positions);
     geometry.setAttribute("color", new THREE.BufferAttribute(colorAttr, 3));
   }
 

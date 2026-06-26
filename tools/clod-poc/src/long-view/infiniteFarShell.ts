@@ -6,7 +6,6 @@ import type { FarShellMetrics } from "./farShellMetrics.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer, updateFarTerrainMaterialCenter } from "../farTerrain/farTerrainMaterial.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
-import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
 
 export interface InfiniteFarShellOptions {
   innerMeters: number;
@@ -292,16 +291,14 @@ export class InfiniteFarShell {
 
     if (this.useParityMaterial && this.parityConfig) {
       const vertexColors = computeFarTerrainVertexColors(
-        (x: number, z: number) => surfaceHeightCore(x, z),
         this.positions,
         this.normals,
         vertexCount,
         this.parityConfig,
-        this.options.outerMeters * 2,
         this.snappedX,
         this.snappedZ,
       );
-      this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig);
+      this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, undefined, this.snappedX, this.snappedZ, this.positions);
       this.attachVertexColors();
     }
 

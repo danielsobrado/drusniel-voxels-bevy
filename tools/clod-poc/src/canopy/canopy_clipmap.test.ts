@@ -60,6 +60,21 @@ describe("canopy clipmap", () => {
     );
   });
 
+  it("skips tile builds when clipmap is disabled", () => {
+    const clipmap = createCanopyClipmap();
+    clipmap.update(0, 0, config, terrain, trees);
+    expect(clipmap.getVisibleTiles().length).toBeGreaterThan(0);
+
+    const disabled = {
+      ...config,
+      clipmap: { ...config.clipmap, enabled: false },
+    };
+    const update = clipmap.update(0, 0, disabled, terrain, trees);
+    expect(clipmap.getVisibleTiles()).toHaveLength(0);
+    expect(update.metrics.builtThisFrame).toBe(0);
+    expect(update.texturesDirty).toBe(true);
+  });
+
   it("texture revision changes after clipmap warms at a new camera position", () => {
     const clipmap = createCanopyClipmap();
     clipmap.update(0, 0, config, terrain, trees);

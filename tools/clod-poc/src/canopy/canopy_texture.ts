@@ -3,6 +3,7 @@ import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import { createExtendedCanopyTexture, createExtendedHeightTexture } from "../clod/terrain_summary.js";
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import type { CanopySummaryTile, CanopyTextureSet } from "./canopy_types.js";
+import { stableTileKey } from "./canopy_types.js";
 import { clamp01 } from "./canopy_hash.js";
 
 function makeDataTexture(data: Float32Array, res: number): THREE.DataTexture {
@@ -25,16 +26,30 @@ function makeRgbTexture(data: Float32Array, res: number): THREE.DataTexture {
   return tex;
 }
 
-function findCellAtWorld(tiles: CanopySummaryTile[], worldX: number, worldZ: number) {
-  for (const tile of tiles) {
-    const maxX = tile.originX + tile.resolution * tile.cellSizeM;
-    const maxZ = tile.originZ + tile.resolution * tile.cellSizeM;
-    if (worldX < tile.originX || worldZ < tile.originZ || worldX >= maxX || worldZ >= maxZ) continue;
-    const gx = Math.min(tile.resolution - 1, Math.floor((worldX - tile.originX) / tile.cellSizeM));
-    const gz = Math.min(tile.resolution - 1, Math.floor((worldZ - tile.originZ) / tile.cellSizeM));
-    return tile.cells[gz * tile.resolution + gx];
+function buildTileMap(visibleTiles: CanopySummaryTile[]): Map<string, CanopySummaryTile> {
+  const tileMap = new Map<string, CanopySummaryTile>();
+  for (const tile of visibleTiles) {
+    tileMap.set(stableTileKey(tile.key.tileX, tile.key.tileZ), tile);
   }
-  return null;
+  return tileMap;
+}
+
+function findCellAtWorldFast(
+  tileMap: Map<string, CanopySummaryTile>,
+  worldX: number,
+  worldZ: number,
+  tileSizeM: number,
+) {
+  const tileX = Math.floor(worldX / tileSizeM);
+  const tileZ = Math.floor(worldZ / tileSizeM);
+  const tile = tileMap.get(stableTileKey(tileX, tileZ));
+  if (!tile) return null;
+
+  const gx = Math.min(tile.resolution - 1, Math.floor((worldX - tile.originX) / tile.cellSizeM));
+  const gz = Math.min(tile.resolution - 1, Math.floor((worldZ - tile.originZ) / tile.cellSizeM));
+  if (gx < 0 || gz < 0 || gx >= tile.resolution || gz >= tile.resolution) return null;
+
+  return tile.cells[gz * tile.resolution + gx];
 }
 
 export interface BuildCanopyTextureSetParams {
@@ -83,12 +98,14 @@ export function buildCanopyTextureSet(params: BuildCanopyTextureSetParams): Cano
   const coverageData = new Float32Array(resolution * resolution);
   const speciesData = new Float32Array(resolution * resolution * 3);
   const roughnessData = new Float32Array(resolution * resolution);
+  const tileSizeM = config.clipmap.tileSizeM;
+  const tileMap = buildTileMap(visibleTiles);
 
   for (let j = 0; j < resolution; j++) {
     for (let i = 0; i < resolution; i++) {
       const wx = originX + ((i + 0.5) / resolution) * extentM;
       const wz = originZ + ((j + 0.5) / resolution) * extentM;
-      const cell = findCellAtWorld(visibleTiles, wx, wz);
+      const cell = findCellAtWorldFast(tileMap, wx, wz, tileSizeM);
       const idx = j * resolution + i;
       if (!cell) {
         heightData[idx] = 0;
