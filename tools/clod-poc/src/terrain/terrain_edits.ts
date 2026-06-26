@@ -1,3 +1,5 @@
+import { sampleBrushSdf, type SdfBrush } from "./sdf/sdf_brush.js";
+import { rasterizeSdfBrushToVoxelTransaction } from "./sdf/sdf_rasterizer.js";
 import { surfaceHeight } from "./terrain_surface.js";
 import { voxelEditStore } from "./voxel_edits/voxel_edit_store.js";
 import type { VoxelEditTransaction } from "./voxel_edits/voxel_edit_types.js";
@@ -62,52 +64,38 @@ function editedDensityAt(x: number, y: number, z: number): number {
   return voxelEditStore.sampleDensity(x, y, z, proceduralDensity);
 }
 
-function densityAfterEdit(edit: DigEdit, x: number, y: number, z: number, currentDensity: number): number {
-  const h = editHeight(edit);
-  const sdf = brushSdf(edit.shape, x - edit.x, y - edit.y, z - edit.z, edit.r, h);
-  const full = edit.op === "add" ? Math.max(currentDensity, -sdf) : Math.min(currentDensity, sdf);
-  const strength = edit.strength ?? 1;
-  const falloff = edit.falloff ?? 0;
-  let weight: number;
-  if (falloff > 0) {
-    const feather = Math.max(1e-3, falloff * edit.r);
-    weight = Math.min(1, Math.max(0, -sdf / feather)) * strength;
-  } else {
-    // Hard brush: include the sdf=0 boundary so voxel corners match the analytic shape.
-    weight = sdf <= 0 ? strength : 0;
-  }
-  return currentDensity + (full - currentDensity) * weight;
+function sdfBrushFromDigEdit(edit: DigEdit): SdfBrush {
+  return {
+    x: edit.x,
+    y: edit.y,
+    z: edit.z,
+    radius: edit.r,
+    height: editHeight(edit),
+    shape: edit.shape ?? "sphere",
+    op: edit.op ?? "remove",
+    strength: edit.strength ?? 1,
+    falloff: edit.falloff ?? 0,
+    materialSlot: edit.material,
+  };
 }
 
 function voxelTransactionFromDigEdit(edit: DigEdit, id: number): VoxelEditTransaction {
   const h = editHeight(edit);
   const r = edit.r + DIG_INFLUENCE_MARGIN;
-  const minX = Math.floor(edit.x - r);
-  const maxX = Math.ceil(edit.x + r);
-  const minY = Math.max(BEDROCK_Y + 1, Math.floor(edit.y - h - DIG_INFLUENCE_MARGIN));
-  const maxY = Math.ceil(edit.y + h + DIG_INFLUENCE_MARGIN);
-  const minZ = Math.floor(edit.z - r);
-  const maxZ = Math.ceil(edit.z + r);
-  const deltas: VoxelEditTransaction["deltas"] extends readonly (infer T)[] ? T[] : never = [];
-
-  for (let x = minX; x <= maxX; x++) {
-    for (let y = minY; y <= maxY; y++) {
-      for (let z = minZ; z <= maxZ; z++) {
-        const before = editedDensityAt(x, y, z);
-        const after = densityAfterEdit(edit, x, y, z, before);
-        const materialSlot = edit.op === "add" && edit.material !== undefined ? Math.max(0, edit.material | 0) : undefined;
-        if (Math.abs(after - before) <= 1e-6 && materialSlot === undefined) continue;
-        deltas.push({ x, y, z, density: after, materialSlot });
-      }
-    }
-  }
-
-  return {
+  return rasterizeSdfBrushToVoxelTransaction({
     id,
-    source: "brush",
     revisionBase: voxelEditStore.revision(),
-    deltas,
-  };
+    brush: sdfBrushFromDigEdit(edit),
+    bounds: {
+      minX: Math.floor(edit.x - r),
+      maxX: Math.ceil(edit.x + r),
+      minY: Math.max(BEDROCK_Y + 1, Math.floor(edit.y - h - DIG_INFLUENCE_MARGIN)),
+      maxY: Math.ceil(edit.y + h + DIG_INFLUENCE_MARGIN),
+      minZ: Math.floor(edit.z - r),
+      maxZ: Math.ceil(edit.z + r),
+    },
+    sampleDensity: editedDensityAt,
+  });
 }
 
 export function addDigEdit(edit: DigEdit): void {
@@ -169,20 +157,7 @@ export function getDigEditRevision(): number {
 }
 
 export function brushSdf(shape: BrushShape | undefined, dx: number, dy: number, dz: number, r: number, h: number): number {
-  switch (shape) {
-    case "cube": {
-      const qx = Math.abs(dx) - r, qy = Math.abs(dy) - h, qz = Math.abs(dz) - r;
-      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0));
-      return outside + Math.min(Math.max(qx, qy, qz), 0);
-    }
-    case "cylinder": {
-      const dRadial = Math.hypot(dx, dz) - r, dAxial = Math.abs(dy) - h;
-      const outside = Math.hypot(Math.max(dRadial, 0), Math.max(dAxial, 0));
-      return outside + Math.min(Math.max(dRadial, dAxial), 0);
-    }
-    default:
-      return Math.hypot(dx, (dy * r) / h, dz) - r;
-  }
+  return sampleBrushSdf(shape ?? "sphere", dx, dy, dz, r, h);
 }
 
 export function editHeight(e: DigEdit): number {
