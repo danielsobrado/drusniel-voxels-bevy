@@ -41,6 +41,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
     scene, camera, state, waterConfig, borderCoastOceanConfig, worldCells,
     hydrologySystem, searchParams, currentLighting, lod0Nodes, isWebGpu,
   } = input;
+  const deepOceanBorderCells = borderCoastOceanConfig.coast.oceanStartCells;
 
   const waterController = await createWaterController({
     scene,
@@ -59,7 +60,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
   });
 
   const oceanSampler = borderCoastOceanConfig.deepOcean.enabled
-    ? createDeepOceanSampler(worldCells, borderCoastOceanConfig.deepOcean)
+    ? createDeepOceanSampler(worldCells, borderCoastOceanConfig.deepOcean, deepOceanBorderCells)
     : null;
   const lighting = currentLighting();
   const deepOceanMaterial = oceanSampler
@@ -76,7 +77,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
         worldCells,
         borderCoastOceanConfig.deepOcean,
         deepOceanMaterial.material,
-        borderCoastOceanConfig.coast.oceanStartCells,
+        deepOceanBorderCells,
       )
     : null;
   if (deepOceanSurface) scene.add(deepOceanSurface.mesh);
