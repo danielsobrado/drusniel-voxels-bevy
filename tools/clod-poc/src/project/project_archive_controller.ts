@@ -2,11 +2,11 @@ import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { emitAudio } from "../audio/index.js";
 import type { ClodPageNode } from "../types.js";
-import { stageProjectImport } from "../project/project_archive.js";
 import { EMPTY_PROJECT_PROPS } from "../project/project_props.js";
 import {
   createVoxelProjectArchive,
   parseVoxelProjectArchive,
+  stageVoxelProjectImport,
   VOXEL_PROJECT_SCHEMA_VERSION,
   type VoxelProjectManifest,
 } from "../project/voxel_project_archive.js";
@@ -104,7 +104,7 @@ export function createProjectArchiveController(deps: ProjectArchiveControllerDep
         const contents = await parseVoxelProjectArchive(new Uint8Array(await file.arrayBuffer()));
         await validateProjectArchiveTextures(contents);
         setProjectBusy(true, "staging project for rebuild", 0.65);
-        const token = await stageProjectImport(contents);
+        const token = await stageVoxelProjectImport(contents);
         emitAudio("project.import.success");
         const next = new URLSearchParams(location.search);
         next.set("world", String(contents.manifest.worldSize));
