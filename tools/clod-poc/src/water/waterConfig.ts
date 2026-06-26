@@ -367,6 +367,11 @@ function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = DEFAULT
       slopeGateStart: readNumber(rivers.slope_gate_start ?? rivers.slopeGateStart, fallback.rivers.slopeGateStart),
       slopeGateEnd: readNumber(rivers.slope_gate_end ?? rivers.slopeGateEnd, fallback.rivers.slopeGateEnd),
       minVisibleDepth: readNumber(rivers.min_visible_depth ?? rivers.minVisibleDepth, fallback.rivers.minVisibleDepth),
+      guaranteeFallbackRivers: readBoolean(rivers.guarantee_fallback_rivers ?? rivers.guaranteeFallbackRivers, fallback.rivers.guaranteeFallbackRivers),
+      fallbackMainRiver: readBoolean(rivers.fallback_main_river ?? rivers.fallbackMainRiver, fallback.rivers.fallbackMainRiver),
+      fallbackTributaries: readBoolean(rivers.fallback_tributaries ?? rivers.fallbackTributaries, fallback.rivers.fallbackTributaries),
+      flowSpeedMultiplier: readNumber(rivers.flow_speed_multiplier ?? rivers.flowSpeedMultiplier, fallback.rivers.flowSpeedMultiplier),
+      lakeSurfaceDropM: readNumber(rivers.lake_surface_drop_m ?? rivers.lakeSurfaceDropM, fallback.rivers.lakeSurfaceDropM),
     },
     waterSurface: {
       farReduceFactor: readNumber(waterSurface.far_reduce_factor ?? waterSurface.farReduceFactor, fallback.waterSurface.farReduceFactor),
@@ -530,16 +535,54 @@ function riverHasValidPoints(river: RiverBodyConfig): boolean {
   return (river.pointsNorm?.length ?? 0) >= 2;
 }
 
+function runtimeSearchParams(): URLSearchParams | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search);
+}
+
+function queryBool(params: URLSearchParams, key: string, fallback: boolean): boolean {
+  const raw = params.get(key);
+  if (raw === null) return fallback;
+  return raw === "1" || raw === "true";
+}
+
+function queryNumber(params: URLSearchParams, key: string, fallback: number): number {
+  const raw = params.get(key);
+  if (raw === null) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function applyRuntimeRiverOverrides(config: WaterConfig): WaterConfig {
+  const params = runtimeSearchParams();
+  if (!params) return config;
+  const next = cloneWaterConfig(config);
+  const source = params.get("waterSource");
+  if (source === "hydrology" || source === "fake_bodies") next.source = source;
+  next.hydrology.rivers.guaranteeFallbackRivers = queryBool(params, "riversFallback", next.hydrology.rivers.guaranteeFallbackRivers);
+  next.hydrology.rivers.fallbackMainRiver = queryBool(params, "riverMain", next.hydrology.rivers.fallbackMainRiver);
+  next.hydrology.rivers.fallbackTributaries = queryBool(params, "riverTributaries", next.hydrology.rivers.fallbackTributaries);
+  next.hydrology.rivers.widenRadius = queryNumber(params, "riverWidth", next.hydrology.rivers.widenRadius);
+  next.hydrology.rivers.visibleDepthM = queryNumber(params, "riverVisibleDepth", next.hydrology.rivers.visibleDepthM);
+  next.hydrology.rivers.carveDepthM = queryNumber(params, "riverCarveDepth", next.hydrology.rivers.carveDepthM);
+  next.hydrology.rivers.flowSpeedMultiplier = queryNumber(params, "riverFlowSpeed", next.hydrology.rivers.flowSpeedMultiplier);
+  next.visual.foam.riverStrength = queryNumber(params, "riverFoamStrength", next.visual.foam.riverStrength);
+  for (const river of next.fakeBodies.rivers) {
+    river.width = Math.max(0.1, river.width * Math.max(0.1, next.hydrology.rivers.widenRadius / DEFAULT_HYDROLOGY_CONFIG.rivers.widenRadius));
+  }
+  return next;
+}
+
 export function parseWaterConfig(
   text: string | null | undefined,
   warn: ((message: string) => void) | null = console.warn,
 ): WaterConfig {
-  const fallback = cloneWaterConfig();
+  const fallback = applyRuntimeRiverOverrides(cloneWaterConfig());
   if (!text || text.trim() === "") return fallback;
 
   let config: WaterConfig;
   try {
-    config = parseWaterConfigYaml(text);
+    config = applyRuntimeRiverOverrides(parseWaterConfigYaml(text));
   } catch (error) {
     warnWater(
       `failed to parse config/water.yaml; using defaults: ${error instanceof Error ? error.message : String(error)}`,
