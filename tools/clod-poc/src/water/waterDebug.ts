@@ -1,10 +1,17 @@
 // Water debug UI helper. Adds lil-gui folders for water debug, shore surf,
 // river tuning, live river stats, and river ecology inspection. River generation
-// controls rebuild through URL params because hydrology is built before the renderer starts.
+// and ecology controls rebuild through URL params because hydrology/GPU scatter
+// are built before the renderer starts.
 import type GUI from "lil-gui";
 import { type WaterDebugMode, type WaterVisualConfig, WATER_DEBUG_MODES } from "./waterConfig.js";
 import { DEFAULT_SHORE_SURF_BAND_SETTINGS } from "./waterField.js";
 import { DEFAULT_HYDROLOGY_CONFIG } from "./hydrologyConfig.js";
+import {
+  readRiverEcologySettings,
+  reloadWithRiverEcologySettings,
+  riverEcologyReadout,
+  type RiverEcologySettings,
+} from "./riverEcologyRuntime.js";
 
 export interface WaterDebugState {
   enabled: boolean;
@@ -197,17 +204,39 @@ function addRiverEcologyDebugFolder(
   folder.add(actions, "showFoam").name("show foam");
   folder.add(actions, "showFinal").name("back to final");
 
-  const readout = {
-    grass: "clear 0.35m; low 0.8-4.2m; moist 3.2-11m",
-    understory: "clear 0.45m; fern 1.2-8m; shrub 5.5-18m",
-    trees: "clear 1.5m; sparse inner 2.5-13m; outer 9-32m",
-    stones: "wet reject; dry streambed edge; deeper sink",
-  };
+  const readout = riverEcologyReadout();
   folder.add(readout, "grass").name("grass bands").disable();
   folder.add(readout, "understory").name("understory bands").disable();
   folder.add(readout, "trees").name("tree bands").disable();
   folder.add(readout, "stones").name("stone bands").disable();
 
+  return {
+    refresh: () => {
+      Object.assign(readout, riverEcologyReadout());
+      folder.controllers.forEach((controller) => controller.updateDisplay());
+    },
+  };
+}
+
+function addRiverEcologyTuningFolder(parent: GUI): { refresh: () => void } {
+  const folder = parent.addFolder("river ecology tuning");
+  const settings: RiverEcologySettings = readRiverEcologySettings();
+  folder.add(settings, "grassClearanceM", 0.05, 2.5, 0.05).name("grass clear m");
+  folder.add(settings, "grassLowStartM", 0.1, 6.0, 0.1).name("grass low start");
+  folder.add(settings, "grassLowEndM", 0.5, 12.0, 0.1).name("grass low end");
+  folder.add(settings, "grassMoistStartM", 0.5, 16.0, 0.1).name("grass moist start");
+  folder.add(settings, "grassMoistEndM", 2.0, 32.0, 0.5).name("grass moist end");
+  folder.add(settings, "understoryClearM", 0.05, 3.0, 0.05).name("understory clear");
+  folder.add(settings, "understoryFernStartM", 0.2, 8.0, 0.1).name("fern start");
+  folder.add(settings, "understoryFernEndM", 2.0, 18.0, 0.5).name("fern end");
+  folder.add(settings, "understoryShrubStartM", 2.0, 18.0, 0.5).name("shrub start");
+  folder.add(settings, "understoryShrubEndM", 6.0, 36.0, 0.5).name("shrub end");
+  folder.add(settings, "treeClearanceM", 0.5, 8.0, 0.1).name("tree clear");
+  folder.add(settings, "treeInnerEndM", 2.0, 24.0, 0.5).name("tree inner end");
+  folder.add(settings, "treeOuterStartM", 4.0, 40.0, 0.5).name("tree outer start");
+  folder.add(settings, "treeOuterEndM", 12.0, 80.0, 1.0).name("tree outer end");
+  folder.add(settings, "stoneClearanceM", 0.02, 2.0, 0.02).name("stone clear");
+  folder.add({ apply: () => reloadWithRiverEcologySettings(settings) }, "apply").name("apply + rebuild");
   return {
     refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()),
   };
@@ -275,6 +304,7 @@ export function addWaterDebugFolder(
 
   const riverStats = addRiverStatsFolder(folder, bindings);
   const riverEcologyDebug = addRiverEcologyDebugFolder(folder, state, bindings);
+  const riverEcologyTuning = addRiverEcologyTuningFolder(folder);
 
   const shoreSurf = folder.addFolder("shore surf");
   shoreSurf.add(state, "oceanEnabled").name("enabled").onChange((enabled: boolean) => {
@@ -296,6 +326,7 @@ export function addWaterDebugFolder(
       rivers.controllers.forEach((controller) => controller.updateDisplay());
       riverStats.refresh();
       riverEcologyDebug.refresh();
+      riverEcologyTuning.refresh();
       shoreSurf.controllers.forEach((controller) => controller.updateDisplay());
     },
   };
