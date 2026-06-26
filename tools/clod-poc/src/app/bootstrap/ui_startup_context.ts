@@ -97,4 +97,44 @@ export interface UiSessionState {
   terraformEditCheckbox: HTMLInputElement | null;
   weatherStatsController: GuiDisplayController | null;
   naadfStatsController: GuiDisplayController | null;
+  grassBladeCountController: GuiDisplayController | null;
+  grassVisiblePatchesController: GuiDisplayController | null;
+  grassTierSummaryController: GuiDisplayController | null;
+  grassEdgeSuppressedController: GuiDisplayController | null;
+  grassCandidateCountController: GuiDisplayController | null;
+  digRadiusController: GuiDisplayController | null;
+  playerInputController: ReturnType<typeof createPlayerInputController> | null;
+  playerModeController: ReturnType<typeof createPlayerModeController> | null;
+}
+
+export interface UiStartupContext {
+  input: UiStartupInput;
+  session: UiSessionState;
+}
+
+export function createUiStartupContext(input: UiStartupInput): UiStartupContext {
+  return {
+    input,
+    session: {
+      averageFpsRef: { value: 0 },
+      lastDigSummary: "",
+      lastArchiveSummary: "",
+      parentsHealthy: true,
+      lastParentError: "",
+      pendingParentNodes: 0,
+      pendingParentMs: 0,
+      pendingParentCount: 0,
+      terraformEditCheckbox: null,
+      weatherStatsController: null,
+      naadfStatsController: null,
+      grassBladeCountController: null,
+      grassVisiblePatchesController: null,
+      grassTierSummaryController: null,
+      grassEdgeSuppressedController: null,
+      grassCandidateCountController: null,
+      digRadiusController: null,
+      playerInputController: null,
+      playerModeController: null,
+    },
+  };
 }

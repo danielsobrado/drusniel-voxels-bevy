@@ -110,11 +110,12 @@ function tryPolishParentPage(
   mesh: PageMesh,
   footprint: PageFootprint,
   cfg: ClodPagesConfig,
+  label: string,
 ): { mesh: PageMesh; stats: ReturnType<typeof emptyDiagonalPolishStats> } {
   const candidate = clonePageMesh(mesh);
   const stats = polishDiagonals(candidate, buildOuterBorderLocks(candidate), pageMeshPolishConfig(cfg));
   try {
-    assertNoInternalBorders(candidate, footprint);
+    validateFinalPageMesh(candidate, footprint, cfg.validation.zero_area_epsilon, `${label} polish`);
     return { mesh: candidate, stats };
   } catch {
     return { mesh, stats: emptyDiagonalPolishStats() };
@@ -264,9 +265,11 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
         let polish = emptyDiagonalPolishStats();
         if (simplified) {
           validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
-          const polished = tryPolishParentPage(sim.mesh, footprint, cfg);
-          sim.mesh = polished.mesh;
-          polish = polished.stats;
+          if (level === maxLevels - 1) {
+            const polished = tryPolishParentPage(sim.mesh, footprint, cfg, `L${level}:${nx},${nz}`);
+            sim.mesh = polished.mesh;
+            polish = polished.stats;
+          }
         }
         validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
@@ -445,9 +448,11 @@ export async function buildWorldAsync(
         let polish = emptyDiagonalPolishStats();
         if (simplified) {
           validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
-          const polished = tryPolishParentPage(sim.mesh, footprint, cfg);
-          sim.mesh = polished.mesh;
-          polish = polished.stats;
+          if (level === maxLevels - 1) {
+            const polished = tryPolishParentPage(sim.mesh, footprint, cfg, `L${level}:${nx},${nz}`);
+            sim.mesh = polished.mesh;
+            polish = polished.stats;
+          }
         }
         validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
 
@@ -625,8 +630,10 @@ export function resimplifyParent(
   const simplified = sim.mesh !== welded;
   if (simplified) {
     validateWeldedIntermediate(sim.mesh, `${node.id} resimplify`, cfg.validation.zero_area_epsilon);
-    const polished = tryPolishParentPage(sim.mesh, node.footprint, cfg);
-    sim.mesh = polished.mesh;
+    if (node.level >= cfg.page.quadtree_levels - 1) {
+      const polished = tryPolishParentPage(sim.mesh, node.footprint, cfg, node.id);
+      sim.mesh = polished.mesh;
+    }
   }
   validateFinalPageMesh(sim.mesh, node.footprint, cfg.validation.zero_area_epsilon, `${node.id} final`);
   node.mesh = sim.mesh;
