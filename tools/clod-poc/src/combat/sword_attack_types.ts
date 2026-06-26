@@ -1,4 +1,4 @@
-export const enum AttackPhase {
+export enum AttackPhase {
   Idle = 0,
   Windup = 1,
   Active = 2,
@@ -32,5 +32,6 @@ export const DEFAULT_COMBAT_CONFIG: CombatConfig = {
 export interface AttackState {
   phase: AttackPhase;
   phaseStartMs: number;
+  cooldownUntilMs: number;
   hitDelivered: boolean;
 }
