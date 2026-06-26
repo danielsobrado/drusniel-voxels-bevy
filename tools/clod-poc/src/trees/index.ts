@@ -3,6 +3,7 @@ export * from "./tree_hash.js";
 export * from "./tree_noise.js";
 export * from "./tree_species.js";
 export * from "./tree_ecology.js";
+export * from "./tree_material_bias.js";
 export * from "./tree_alpha_mask.js";
 export * from "./tree_geometry.js";
 export * from "./tree_impostor_baker.js";
