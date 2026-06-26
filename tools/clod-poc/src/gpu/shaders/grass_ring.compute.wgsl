@@ -6,6 +6,7 @@ const TIER_SUPER: u32 = 3u;
 const INDIRECT_STRIDE_U32: u32 = 5u;
 const TAU: f32 = 6.28318530718;
 const GRASS_WATER_CLEARANCE: f32 = 0.18;
+const GRASS_HYDRO_WATER_CLEARANCE: f32 = 0.35;
 
 struct Params {
   center_radius: vec4<f32>,
@@ -19,6 +20,13 @@ struct Params {
   planes: array<vec4<f32>, 6>,
 };
 
+struct HydrologySample {
+  water_y: f32,
+  wet_mask: f32,
+  carved_bed: f32,
+  enabled: f32,
+};
+
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read_write> counters: array<atomic<u32>>;
 @group(0) @binding(2) var<storage, read_write> indirect_args: array<u32>;
@@ -26,6 +34,8 @@ struct Params {
 @group(0) @binding(4) var<storage, read_write> out_packed0: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read_write> out_packed1: array<vec4<f32>>;
 @group(0) @binding(6) var<storage, read_write> out_normal: array<vec4<f32>>;
+@group(0) @binding(9) var hydro_texture: texture_2d<f32>;
+@group(0) @binding(10) var hydro_sampler: sampler;
 
 fn pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let M = 1664525u;
@@ -56,6 +66,34 @@ fn world_cell(slot: u32) -> vec2<f32> {
     round((cam_cell.x - sx) / f32(grid)) * f32(grid) + sx,
     round((cam_cell.y - sy) / f32(grid)) * f32(grid) + sy,
   );
+}
+
+fn hydrology_at(wx: f32, wz: f32) -> HydrologySample {
+  let dims = textureDimensions(hydro_texture);
+  if (dims.x <= 1u || dims.y <= 1u) {
+    return HydrologySample(0.0, 0.0, 0.0, 0.0);
+  }
+  let world_size = max(1.0, params.center_radius.w);
+  let uv = clamp(vec2<f32>(wx, wz) / world_size, vec2<f32>(0.0), vec2<f32>(1.0));
+  let h = textureSampleLevel(hydro_texture, hydro_sampler, uv, 0.0);
+  return HydrologySample(h.x, h.y, h.z, 1.0);
+}
+
+fn hydrology_ground_height(raw_height: f32, sample: HydrologySample) -> f32 {
+  if (sample.enabled < 0.5) {
+    return raw_height;
+  }
+  return sample.carved_bed;
+}
+
+fn hydrology_reject_grass(sample: HydrologySample, ground_height: f32) -> bool {
+  if (sample.enabled < 0.5) {
+    return false;
+  }
+  if (sample.wet_mask <= 0.05) {
+    return false;
+  }
+  return ground_height <= sample.water_y + GRASS_HYDRO_WATER_CLEARANCE;
 }
 
 fn material_weights(height: f32, normal_y: f32) -> vec4<f32> {
@@ -127,7 +165,17 @@ fn river_grass_density_mask(wx: f32, wz: f32) -> f32 {
   return clamp((1.0 - wet_channel) * mix(0.92, 1.08, moist_bank), 0.0, 1.08);
 }
 
-fn grass_mask(height: f32, normal_y: f32, distance: f32, wx: f32, wz: f32) -> f32 {
+fn hydro_bank_density_mask(sample: HydrologySample, ground_height: f32) -> f32 {
+  if (sample.enabled < 0.5 || sample.wet_mask <= 0.001) {
+    return 1.0;
+  }
+  let above_water = ground_height - sample.water_y;
+  let outer_bank = smoothstep(GRASS_HYDRO_WATER_CLEARANCE, 2.4, above_water);
+  let moist_boost = smoothstep(1.1, 3.5, above_water) * (1.0 - smoothstep(3.5, 7.0, above_water));
+  return clamp(outer_bank * mix(0.92, 1.10, moist_boost), 0.0, 1.10);
+}
+
+fn grass_mask(height: f32, normal_y: f32, distance: f32, wx: f32, wz: f32, hydro: HydrologySample) -> f32 {
   if (height < params.settings_b.x || height > params.settings_b.y) {
     return 0.0;
   }
@@ -145,7 +193,7 @@ fn grass_mask(height: f32, normal_y: f32, distance: f32, wx: f32, wz: f32) -> f3
   let snow_reject = smoothstep(0.08, 0.55, snow_weight);
   let viable = above_water * slope_mask * (1.0 - rock_reject) * (1.0 - snow_reject);
   let bank = wet_bank(height, normal_y);
-  let river_mask = river_grass_density_mask(wx, wz);
+  let river_mask = river_grass_density_mask(wx, wz) * hydro_bank_density_mask(hydro, height);
   let scruff_meters = params.settings_b.z;
   let scruff_min = params.density_b.y;
   let scruff = (1.0 - smoothstep(scruff_meters * 0.45, scruff_meters, distance))
@@ -245,9 +293,14 @@ fn process_slot(slot: u32) {
     return;
   }
 
-  let height = surfaceHeightField(wpos.x, wpos.y);
+  let raw_height = surfaceHeightField(wpos.x, wpos.y);
+  let hydro = hydrology_at(wpos.x, wpos.y);
+  let height = hydrology_ground_height(raw_height, hydro);
+  if (hydrology_reject_grass(hydro, height)) {
+    return;
+  }
   let normal = normalize(densityGradient(wpos.x, height, wpos.y));
-  let mask = grass_mask(height, normal.y, dist, wpos.x, wpos.y);
+  let mask = grass_mask(height, normal.y, dist, wpos.x, wpos.y, hydro);
   let thin = grass_thin(dist);
   let ring_edge = 1.0 - smoothstep(params.center_radius.z * 0.9, params.center_radius.z, dist);
   let accept = mask * ring_edge * thin;
