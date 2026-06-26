@@ -22,6 +22,12 @@ export interface TreeGpuRingOutputBuffers {
   indirectArgs: GPUBuffer;
 }
 
+export interface TreeHydrologyData {
+  res: number;
+  worldCells: number;
+  data: Float32Array;
+}
+
 export interface TreeGpuRingStats {
   status: "initializing" | "idle" | "running" | "ready" | "failed" | "disabled";
   reason?: string;
@@ -209,6 +215,7 @@ export class TreeGpuRingCompute {
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
   private readonly bindGroup: GPUBindGroup;
+  private readonly hydroTexture: GPUTexture;
   private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private counts: TreeGpuRingCounts = emptyTreeGpuRingCounts();
@@ -229,6 +236,7 @@ export class TreeGpuRingCompute {
     edits: readonly ResolvedDigEdit[],
     outputBuffers: TreeGpuRingOutputBuffers,
     private readonly settings: TreeSettings,
+    hydroData: TreeHydrologyData | null,
   ) {
     this.pipelines = pipelines;
     this.paramBuffer = device.createBuffer({
@@ -270,6 +278,12 @@ export class TreeGpuRingCompute {
       destroyAfterMap: false,
       cpu: new Uint32Array(TREE_GPU_RING_GROUP_COUNT),
     }));
+    this.hydroTexture = this.createHydrologyTexture(hydroData);
+    const hydroSampler = device.createSampler({
+      label: "tree ring hydro sampler",
+      magFilter: "nearest",
+      minFilter: "nearest",
+    });
     this.bindGroup = device.createBindGroup({
       label: "tree ring bind group",
       layout,
@@ -280,6 +294,8 @@ export class TreeGpuRingCompute {
         { binding: 3, resource: { buffer: outputBuffers.cell } },
         { binding: 7, resource: { buffer: this.digEdits } },
         { binding: 8, resource: { buffer: this.fieldParams } },
+        { binding: 9, resource: this.hydroTexture.createView() },
+        { binding: 10, resource: hydroSampler },
       ],
     });
   }
@@ -289,6 +305,7 @@ export class TreeGpuRingCompute {
     edits: readonly ResolvedDigEdit[],
     outputBuffers: TreeGpuRingOutputBuffers,
     settings: TreeSettings,
+    hydroData: TreeHydrologyData | null = null,
   ): Promise<TreeGpuRingCompute> {
     const module = device.createShaderModule({
       label: "tree ring compute shader",
@@ -308,6 +325,8 @@ export class TreeGpuRingCompute {
         storage(3),
         storage(7, "read-only-storage"),
         { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+        { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -326,7 +345,7 @@ export class TreeGpuRingCompute {
       clear_counters: clearCounters,
       tree_cull: cull,
       build_indirect_args: buildIndirectArgs,
-    }, edits, outputBuffers, { ...settings });
+    }, edits, outputBuffers, { ...settings }, hydroData);
   }
 
   dispatch(params: TreeGpuRingDispatchParams): boolean {
@@ -437,6 +456,7 @@ export class TreeGpuRingCompute {
     this.counterBuffer.destroy();
     this.digEdits.destroy();
     this.fieldParams.destroy();
+    this.hydroTexture.destroy();
     for (const slot of this.counterReadbacks) {
       if (slot.busy) slot.destroyAfterMap = true;
       else slot.buffer.destroy();
@@ -449,6 +469,30 @@ export class TreeGpuRingCompute {
     pass.setBindGroup(0, this.bindGroup);
     pass.dispatchWorkgroups(Math.max(1, workgroups));
     pass.end();
+  }
+
+  private createHydrologyTexture(hydroData: TreeHydrologyData | null): GPUTexture {
+    if (hydroData && hydroData.data.length > 0) {
+      const texture = this.device.createTexture({
+        label: "tree ring hydro texture",
+        size: { width: hydroData.res, height: hydroData.res },
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      this.device.queue.writeTexture(
+        { texture },
+        hydroData.data.buffer as ArrayBuffer,
+        { bytesPerRow: hydroData.res * 16 },
+        { width: hydroData.res, height: hydroData.res },
+      );
+      return texture;
+    }
+    return this.device.createTexture({
+      label: "tree ring fallback hydro texture",
+      size: { width: 1, height: 1 },
+      format: "rgba32float",
+      usage: GPUTextureUsage.TEXTURE_BINDING,
+    });
   }
 }
 
