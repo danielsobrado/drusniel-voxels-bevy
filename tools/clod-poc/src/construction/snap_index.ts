@@ -31,6 +31,10 @@ function distance(a: readonly [number, number, number], b: readonly [number, num
   return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
 
+function length(value: readonly [number, number, number]): number {
+  return Math.hypot(value[0], value[1], value[2]);
+}
+
 function accepts(sourceAccepts: readonly SnapGroup[], sourceGroup: SnapGroup, target: IndexedConstructionSnapPoint): boolean {
   const sourceAllowsTarget = sourceAccepts.length === 0 || sourceAccepts.includes(target.group);
   const targetAllowsSource = target.accepts.length === 0 || target.accepts.includes(sourceGroup);
@@ -144,6 +148,48 @@ export class ConstructionSnapIndex {
     return best;
   }
 
+  findBestSnapNearRay(
+    rayOrigin: readonly [number, number, number],
+    rayDirection: readonly [number, number, number],
+    maxDistanceM: number,
+    piece: ConstructionPieceDef,
+    rotationQuarterTurns: number,
+    config: ConstructionSnapConfig,
+  ): ConstructionSnapResult | null {
+    const direction = normalize(rayDirection);
+    let best: ConstructionSnapResult | null = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (const target of this.points()) {
+      const toTarget = sub(target.worldPos, rayOrigin);
+      const t = dot(toTarget, direction);
+      if (t < 0 || t > maxDistanceM) continue;
+      const closest = add(rayOrigin, [direction[0] * t, direction[1] * t, direction[2] * t]);
+      const rayDistance = distance(closest, target.worldPos);
+      if (rayDistance > config.radiusM) continue;
+      piece.snapPoints.forEach((source, sourceSnapIndex) => {
+        if (!accepts(source.accepts, source.group, target)) return;
+        const sourceDir = normalize(rotateYQuarter(source.direction, rotationQuarterTurns));
+        const alignment = connectionAlignment(source.group, target.group, sourceDir, target.worldDirection);
+        if (alignment < config.minAlignment) return;
+        const sourceOffset = rotateYQuarter(source.localPos, rotationQuarterTurns);
+        const worldPosition = sub(target.worldPos, sourceOffset);
+        const cursorDistance = length(sub(closest, worldPosition));
+        const distanceScore = 1 - Math.min(1, Math.max(rayDistance, cursorDistance) / config.radiusM);
+        const score = config.alignmentWeight * alignment + config.distanceWeight * distanceScore;
+        if (score <= bestScore) return;
+        bestScore = score;
+        best = {
+          target,
+          sourceSnapIndex,
+          worldPosition,
+          rotationQuarterTurns,
+          score,
+        };
+      });
+    }
+    return best;
+  }
+
   size(): number {
     let total = 0;
     for (const points of this.cells.values()) total += points.length;
@@ -162,6 +208,12 @@ export class ConstructionSnapIndex {
   private cellKey(pos: readonly [number, number, number]): string {
     const cell = this.toCell(pos);
     return `${cell[0]},${cell[1]},${cell[2]}`;
+  }
+
+  private *points(): Iterable<IndexedConstructionSnapPoint> {
+    for (const cellPoints of this.cells.values()) {
+      for (const point of cellPoints) yield point;
+    }
   }
 }
 

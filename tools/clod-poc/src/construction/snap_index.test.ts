@@ -31,6 +31,8 @@ const wall: ConstructionPieceDef = {
   material: "wood",
   snapPoints: [
     { id: "bottom", localPos: [0, -1, 0], direction: [0, -1, 0], group: "wall-bottom", accepts: ["floor-edge"] },
+    { id: "left", localPos: [-1, 0, 0], direction: [-1, 0, 0], group: "wall-side", accepts: ["wall-side"] },
+    { id: "right", localPos: [1, 0, 0], direction: [1, 0, 0], group: "wall-side", accepts: ["wall-side"] },
   ],
 };
 
@@ -59,5 +61,39 @@ describe("ConstructionSnapIndex", () => {
     });
 
     expect(index.findBestSnap([0, 0, 0], wall, 0, config)).toBeNull();
+  });
+
+  it("finds elevated snap points near the aim ray", () => {
+    const index = new ConstructionSnapIndex(1);
+    index.addPiece(wall, "wall-1", [11, 6.1, 10], 0);
+
+    const snap = index.findBestSnapNearRay(
+      [10, 6.1, 8],
+      [0, 0, 1],
+      10,
+      wall,
+      0,
+      config,
+    );
+
+    expect(snap).not.toBeNull();
+    expect(snap?.target.entityId).toBe("wall-1");
+    expect(snap?.worldPosition).toEqual([9, 6.1, 10]);
+  });
+
+  it("does not snap to elevated points outside the aim ray radius", () => {
+    const index = new ConstructionSnapIndex(1);
+    index.addPiece(wall, "wall-1", [11, 6.1, 10], 0);
+
+    const snap = index.findBestSnapNearRay(
+      [10, 4.5, 8],
+      [0, 0, 1],
+      10,
+      wall,
+      0,
+      config,
+    );
+
+    expect(snap).toBeNull();
   });
 });

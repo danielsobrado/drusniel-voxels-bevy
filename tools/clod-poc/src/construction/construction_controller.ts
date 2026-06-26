@@ -24,6 +24,15 @@ const MATERIAL_COLORS: Record<ConstructionMaterial, number> = {
   thatch: 0xb59b52,
 };
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export interface ConstructionControllerDeps {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -64,6 +73,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private readonly ghostMaterial: THREE.MeshBasicMaterial;
   private readonly ghostMesh: THREE.Mesh;
   private readonly placedPieces: PlacedConstructionPiece[] = [];
+  private readonly placedMeshes: THREE.Mesh[] = [];
   private readonly disposers: Array<() => void> = [];
   private readonly menu: HTMLElement;
   private active = false;
@@ -119,7 +129,14 @@ class ConstructionControllerImpl implements ConstructionController {
     }
 
     const snap = this.snapEnabled
-      ? this.snapIndex.findBestSnap(terrainHit.point, piece, this.rotationQuarterTurns, this.config.snap)
+      ? this.snapIndex.findBestSnapNearRay(
+        [ray.origin.x, ray.origin.y, ray.origin.z],
+        [ray.direction.x, ray.direction.y, ray.direction.z],
+        terrainHit.distanceM + this.config.snap.radiusM,
+        piece,
+        this.rotationQuarterTurns,
+        this.config.snap,
+      )
       : null;
     const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit);
     const candidate = createConstructionCandidate({
@@ -142,6 +159,16 @@ class ConstructionControllerImpl implements ConstructionController {
 
   dispose(): void {
     for (const dispose of this.disposers) dispose();
+    for (const mesh of this.placedMeshes) {
+      mesh.geometry.dispose();
+      const material = mesh.material;
+      if (Array.isArray(material)) {
+        for (const entry of material) entry.dispose();
+      } else {
+        material.dispose();
+      }
+    }
+    this.placedMeshes.length = 0;
     this.ghostMesh.geometry.dispose();
     this.ghostMaterial.dispose();
     this.menu.remove();
@@ -320,6 +347,7 @@ class ConstructionControllerImpl implements ConstructionController {
     mesh.position.set(placed.position[0], placed.position[1], placed.position[2]);
     mesh.rotation.set(0, placed.rotationQuarterTurns * Math.PI * 0.5, 0);
     this.root.add(mesh);
+    this.placedMeshes.push(mesh);
     this.placedPieces.push(placed);
     this.snapIndex.addPiece(piece, placed.id, placed.position, placed.rotationQuarterTurns);
     if (logPlacement) console.info(`[construction] placed ${piece.label} at ${placed.position.map((v) => v.toFixed(2)).join(", ")}`);
@@ -412,7 +440,7 @@ class ConstructionControllerImpl implements ConstructionController {
       : "aim at terrain";
     const pieceButtons = this.config.pieces.map((piece, index) => {
       const selectedAttr = index === this.selectedIndex ? "true" : "false";
-      return `<button type="button" data-piece-index="${index}" aria-pressed="${selectedAttr}">${index + 1}. ${piece.label}</button>`;
+      return `<button type="button" data-piece-index="${index}" aria-pressed="${selectedAttr}">${index + 1}. ${escapeHtml(piece.label)}</button>`;
     }).join("");
     this.menu.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
@@ -421,10 +449,10 @@ class ConstructionControllerImpl implements ConstructionController {
       </div>
       <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-bottom:6px;">${pieceButtons}</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;color:#cdd8e3;">
-        <span>Selected: ${selected?.label ?? "none"}</span>
+        <span>Selected: ${escapeHtml(selected?.label ?? "none")}</span>
         <span>Snap: ${this.snapEnabled ? "on" : "off"}</span>
         <span>Rot: ${this.rotationQuarterTurns * 90}°</span>
-        <span>State: ${status}</span>
+        <span>State: ${escapeHtml(status)}</span>
       </div>
     `;
     for (const button of this.menu.querySelectorAll<HTMLButtonElement>("button[data-piece-index]")) {
