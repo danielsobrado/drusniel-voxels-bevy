@@ -209,7 +209,8 @@ export function runFrameLoopStartup(
     diagnostics: {
       maxTerrainLevel,
       farShellBuilt: () => farShellController.isBuilt(),
-      farShellCanopyEnabled: () => farShellController.canopyShell !== null,
+      farShellCanopyEnabled: () =>
+        farShellController.canopyShell !== null || input.terrainView.canopyShellSystem !== null,
       getFarShellMetrics: () => longView.farShellMetrics,
       infiniteFarShellActive: () => longView.infiniteFarShell !== undefined,
       isLongView: longView.isLongView,
@@ -242,6 +243,9 @@ export function runFrameLoopStartup(
     } : undefined,
     shadowProxy: input.terrainView.shadowProxyController ? {
       rebuildIfNeeded: () => input.terrainView.shadowProxyController?.rebuildIfNeeded(),
+    } : undefined,
+    canopy: input.terrainView.canopyShellSystem ? {
+      update: (x, z) => input.terrainView.canopyShellSystem?.update(x, z),
     } : undefined,
   });
 }

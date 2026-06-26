@@ -1,0 +1,64 @@
+import type { CanopyShellConfig } from "./canopy_types_internal.js";
+
+export const DEFAULT_CANOPY_SHELL_CONFIG: CanopyShellConfig = {
+  enabled: true,
+  seed: 12345,
+  source: {
+    mode: "deterministic_tree_summary",
+    allowSyntheticDebugFallback: true,
+    debugFallbackWarning: true,
+  },
+  distances: {
+    realTreeEndM: 220,
+    impostorEndM: 650,
+    shellStartM: 620,
+    shellFullM: 760,
+    shellEndM: 8192,
+    fadeBandM: 140,
+  },
+  clipmap: {
+    enabled: true,
+    tileSizeM: 512,
+    cellSizeM: 8,
+    rings: [
+      { startM: 512, endM: 2048, cellSizeM: 8 },
+      { startM: 2048, endM: 4096, cellSizeM: 16 },
+      { startM: 4096, endM: 8192, cellSizeM: 32 },
+    ],
+  },
+  treeDistribution: {
+    densityScale: 1.0,
+    forestThreshold: 0.42,
+    slopeRejectStart: 0.55,
+    slopeRejectEnd: 0.85,
+    waterReject: true,
+    minCanopyHeightM: 3.0,
+    maxCanopyHeightM: 18.0,
+    crownRadiusMinM: 1.8,
+    crownRadiusMaxM: 5.5,
+  },
+  material: {
+    baseTint: [0.19, 0.31, 0.14],
+    pineTint: [0.13, 0.24, 0.12],
+    broadleafTint: [0.24, 0.36, 0.15],
+    deadwoodTint: [0.29, 0.24, 0.16],
+    coverageAlphaPower: 0.85,
+    crownBumpStrengthM: 1.8,
+    horizonHazeStrength: 0.65,
+    normalStrength: 1.0,
+    ditherStrength: 1.0,
+  },
+  debug: {
+    showTileBounds: false,
+    showCoverageHeatmap: false,
+    showShellWireframe: false,
+    showFadeZone: false,
+    freezeClipCenter: false,
+    forceSyntheticSource: false,
+  },
+  budgets: {
+    maxTilesBuiltPerFrame: 4,
+    maxTextureUploadsPerFrame: 2,
+    maxShellTris: 250000,
+  },
+};

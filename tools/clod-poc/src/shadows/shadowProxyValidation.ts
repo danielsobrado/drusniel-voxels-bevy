@@ -80,7 +80,6 @@ export function sampleProxyHeight(
   terrainSummary: ShadowProxySource,
   x: number,
   z: number,
-  baseLevel: number,
   config: ShadowProxyConfig,
   dist: number,
 ): number {
@@ -95,5 +94,5 @@ export function sampleProxyHeight(
   );
   const biased = clampProxyHeight(raw + config.heightBiasM, config);
   const fade = ringFadeWeight(dist, config);
-  return baseLevel + (biased - baseLevel) * fade;
+  return farBase + (biased - farBase) * fade;
 }

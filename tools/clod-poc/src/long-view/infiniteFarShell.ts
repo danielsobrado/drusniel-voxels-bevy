@@ -4,7 +4,7 @@ import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
 import { createInfiniteFarShellMaterial, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
 import type { FarShellMetrics } from "./farShellMetrics.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
-import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer } from "../farTerrain/farTerrainMaterial.js";
+import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer, updateFarTerrainMaterialCenter } from "../farTerrain/farTerrainMaterial.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
 import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
 
@@ -239,6 +239,14 @@ export class InfiniteFarShell {
     }
 
     this.mesh.position.set(this.snappedX, 0, this.snappedZ);
+
+    if (this.useParityMaterial && this.parityConfig) {
+      updateFarTerrainMaterialCenter(
+        this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial,
+        this.snappedX,
+        this.snappedZ,
+      );
+    }
   }
 
   private rebuildHeights(): void {

@@ -43,6 +43,19 @@ import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_l
 import { createTerrainTextureController } from "../../terrain/material/terrain_texture_controller.js";
 import { createTerrainMaterialController } from "../../terrain/material/terrain_material_controller.js";
 import { createFarShellController } from "../../systems/far_shell_controller.js";
+import canopyShellYaml from "../../../config/canopy_shell.yaml?raw";
+import {
+  applyCanopyShellQueryOverrides,
+  parseCanopyShellConfig,
+  shouldUseDeterministicCanopy,
+} from "../../canopy/canopy_config.js";
+import {
+  createCanopyShellSystem,
+  type CanopyShellSystem,
+} from "../../canopy/canopy_system.js";
+import { canopyDebugStateToConfig, createCanopyDebugState } from "../../canopy/canopy_debug.js";
+import type { CanopyShellConfig } from "../../canopy/canopy_types_internal.js";
+import type { CanopyDebugState } from "../../canopy/canopy_debug.js";
 import materialsYaml from "../../../config/long_view_materials.yaml?raw";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
@@ -80,6 +93,7 @@ export interface TerrainViewStartupInput {
   isLongView: boolean;
   queryFarShell: boolean;
   queryCanopy: boolean;
+  queryScene: string | null;
   longViewHooks: ClodHooks | null;
   isWebGpu: boolean;
   poolTerrainMaterial: boolean;
@@ -118,6 +132,10 @@ export interface TerrainViewStartupResult {
   applyColorByLodToMaterials: (on: boolean) => void;
   applyColorAdjustmentsToTerrain: () => void;
   farShellController: ReturnType<typeof createFarShellController>;
+  canopyShellSystem: CanopyShellSystem | null;
+  canopyDebugState: CanopyDebugState | null;
+  getCanopyConfig: () => CanopyShellConfig;
+  setCanopyConfig: (config: CanopyShellConfig) => void;
   shadowProxyController: ShadowProxyController | null;
   shadowProxyDebugState: ShadowProxyDebugState | null;
   getShadowProxyConfig: () => import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig;
@@ -294,6 +312,12 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   }
   let liveShadowProxyConfig = { ...shadowProxyConfig };
 
+  let liveCanopyConfig = applyCanopyShellQueryOverrides(parseCanopyShellConfig(canopyShellYaml), searchParams);
+  const useDeterministicCanopy = shouldUseDeterministicCanopy(queryScene, liveCanopyConfig, input.queryCanopy);
+  let canopyDebugState: CanopyDebugState | null = useDeterministicCanopy
+    ? createCanopyDebugState(liveCanopyConfig)
+    : null;
+
   const materialConfig = loadLongViewMaterialsConfig(materialsYaml, parseQueryOverrides(searchParams));
   const parityUniformData = materialConfig.enabled ? configToUniformData(materialConfig) : undefined;
 
@@ -315,6 +339,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     useDebugLambertReceiver: () => Boolean(shadowProxyDebugState?.debugLambertFarShellReceiver),
     useParityMaterial: () => materialConfig.enabled,
     getParityConfig: () => parityUniformData,
+    skipLegacyCanopy: useDeterministicCanopy,
     onTriangleCount: (counter, count) => {
       if (longViewHooks?.stats) longViewHooks.stats.counters[counter] = count;
     },
@@ -324,6 +349,26 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     farShellController.rebuild();
   } else {
     farShellController.setEnabled(false);
+  }
+
+  const canopyShellSystem = useDeterministicCanopy
+    ? createCanopyShellSystem(canopyShellYaml, searchParams, queryScene, input.queryCanopy, {
+      scene,
+      terrainSummary,
+      worldSizeCells,
+      getLighting: currentLighting,
+      getConfig: () => liveCanopyConfig,
+      getDebugState: () => canopyDebugState!,
+      onCounters: (counters) => {
+        if (!longViewHooks?.stats) return;
+        for (const [key, value] of Object.entries(counters)) {
+          longViewHooks.stats.counters[key] = value;
+        }
+      },
+    })
+    : null;
+  if (canopyShellSystem) {
+    canopyDebugState = canopyShellSystem.debugState;
   }
 
   const shadowProxyController = isLongView
@@ -498,6 +543,15 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     applyColorByLodToMaterials,
     applyColorAdjustmentsToTerrain,
     farShellController,
+    canopyShellSystem,
+    canopyDebugState,
+    getCanopyConfig: () => liveCanopyConfig,
+    setCanopyConfig: (config: CanopyShellConfig) => {
+      liveCanopyConfig = { ...config };
+      if (canopyDebugState) {
+        Object.assign(canopyDebugState, canopyDebugStateToConfig(canopyDebugState, config));
+      }
+    },
     shadowProxyController,
     shadowProxyDebugState,
     getShadowProxyConfig: () => liveShadowProxyConfig,

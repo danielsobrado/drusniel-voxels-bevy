@@ -65,7 +65,6 @@ export function buildShadowProxyGeometry(
   const ringWeight = new Float32Array(n * n);
   let minHeight = Number.POSITIVE_INFINITY;
   let maxHeight = Number.NEGATIVE_INFINITY;
-  const baseLevel = config.minHeightM;
 
   for (let gz = 0; gz < n; gz++) {
     for (let gx = 0; gx < n; gx++) {
@@ -74,7 +73,7 @@ export function buildShadowProxyGeometry(
       const sampleX = buildRelative ? localX + centerX : localX;
       const sampleZ = buildRelative ? localZ + centerZ : localZ;
       const dist = Math.hypot(sampleX - centerX, sampleZ - centerZ);
-      const y = sampleProxyHeight(terrainSummary, sampleX, sampleZ, baseLevel, config, dist);
+      const y = sampleProxyHeight(terrainSummary, sampleX, sampleZ, config, dist);
       const idx = gz * n + gx;
       positions[idx * 3] = localX;
       positions[idx * 3 + 1] = y;

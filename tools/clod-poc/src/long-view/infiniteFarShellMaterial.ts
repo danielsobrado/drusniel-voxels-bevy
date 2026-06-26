@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { clamp, dot, float, max, mix, normalize, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+import { clamp, dot, float, max, mix, normalGeometry, normalize, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 
 type TslNode = any;
@@ -23,7 +23,7 @@ export function createInfiniteFarShellMaterial(
 ): MeshBasicNodeMaterial {
   const { lighting, innerMeters, outerMeters, nearBlendMeters, farFadeMeters, debugShowMissingFallback } = options;
 
-  const n = normalize(positionWorld);
+  const n = normalize(normalGeometry);
   const uLight = uniform(lighting.sunDirection.clone());
   const uSun = uniform(v3c(lighting.sunColor));
   const uSky = uniform(v3c(lighting.skyLight));
@@ -41,9 +41,9 @@ export function createInfiniteFarShellMaterial(
 
   const distXZ = vec2(positionWorld.x, positionWorld.z).length();
 
-  const nearAlpha = smoothstep(uInner, uInner.add(uNearBlend), distXZ);
-  const farAlpha = float(1).sub(smoothstep(uOuter.sub(uFarFade), uOuter, distXZ));
-  const alpha = nearAlpha.mul(farAlpha);
+  const nearFade = smoothstep(uInner, uInner.add(uNearBlend), distXZ);
+  const farFade = float(1).sub(smoothstep(uOuter.sub(uFarFade), uOuter, distXZ));
+  const shellFade = nearFade.mul(farFade);
 
   const hazeT = smoothstep(uOuter.mul(0.55), uOuter.mul(0.98), distXZ);
 
@@ -53,10 +53,12 @@ export function createInfiniteFarShellMaterial(
 
   if (debugShowMissingFallback) {
     const debugColor = vec3(1, 0.3, 0.3);
-    material.colorNode = mix(vec3(0.3, 0.34, 0.22).mul(light), debugColor, alpha.mul(0.5));
+    const debugBase = vec3(0.3, 0.34, 0.22);
+    material.colorNode = mix(mix(debugBase.mul(light), uHaze, hazeT), debugColor, shellFade.mul(0.5));
   } else {
     const base = vec3(0.30, 0.34, 0.22);
-    material.colorNode = mix(base.mul(light), uHaze, hazeT);
+    const faded = mix(uHaze, base.mul(light), shellFade);
+    material.colorNode = mix(faded, uHaze, hazeT);
   }
 
   return material;

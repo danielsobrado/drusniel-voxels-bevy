@@ -154,6 +154,10 @@ export interface FrameLoopShadowProxyDeps {
   rebuildIfNeeded: () => void;
 }
 
+export interface FrameLoopCanopyDeps {
+  update: (cameraX: number, cameraZ: number) => void;
+}
+
 export interface ClodFrameLoopDeps {
   render: FrameLoopRenderDeps;
   player: FrameLoopPlayerDeps;
@@ -164,4 +168,5 @@ export interface ClodFrameLoopDeps {
   diagnostics: FrameLoopDiagnosticsDeps;
   farSummary?: FrameLoopFarSummaryDeps;
   shadowProxy?: FrameLoopShadowProxyDeps;
+  canopy?: FrameLoopCanopyDeps;
 }

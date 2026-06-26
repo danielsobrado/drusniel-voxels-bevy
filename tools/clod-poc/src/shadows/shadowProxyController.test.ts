@@ -82,4 +82,22 @@ describe("shadow proxy controller", () => {
     expect(buildSpy.mock.calls.length).toBeGreaterThan(buildsAfterInit);
     controller.dispose();
   });
+
+  it("positions relative-built proxy at the snapped build center", () => {
+    let cameraX = 0;
+    const controller = createShadowProxyController(
+      DEFAULT_LONG_VIEW_SUN_SHADOWS_CONFIG,
+      makeDeps({
+        rebuildSnapMeters: 1024,
+        getCoverageCenter: () => ({ x: cameraX, z: 0 }),
+      }),
+    );
+    expect(controller.runtime.mesh?.position.x).toBe(0);
+
+    cameraX = 1100;
+    controller.updateFrame(cameraX, 0);
+    expect(controller.runtime.mesh?.position.x).toBe(1024);
+    expect(controller.runtime.mesh?.position.x).not.toBe(1024 - cameraX);
+    controller.dispose();
+  });
 });

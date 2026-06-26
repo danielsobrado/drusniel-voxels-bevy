@@ -39,6 +39,8 @@ export interface FarShellControllerDeps {
   /** Override the shell far radius in world units. When set, the shell radius is
    *  this value instead of worldSizeCells * radiusFactor. */
   farShellRadiusM?: number;
+  /** When true, legacy procedural canopy is not built (Phase 8 deterministic system owns canopy). */
+  skipLegacyCanopy?: boolean;
 }
 
 export interface FarShellController {
@@ -144,7 +146,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
   }
 
   const canopyFarRadius = deps.worldSizeCells * FAR_SHELL_DEFAULTS.radiusFactor;
-  if (deps.isLongView || deps.queryCanopy) {
+  if ((deps.isLongView || deps.queryCanopy) && !deps.skipLegacyCanopy) {
     const canopyHeightTexture = createExtendedHeightTexture(deps.terrainSummary, canopyFarRadius);
     const canopyCoverageTexture = createExtendedCanopyTexture(deps.terrainSummary, canopyFarRadius, 42);
     const lighting = deps.getLighting();

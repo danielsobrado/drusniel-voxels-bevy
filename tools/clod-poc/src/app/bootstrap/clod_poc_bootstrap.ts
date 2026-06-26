@@ -100,6 +100,7 @@ export async function bootstrapClodPoc() {
     isLongView: postRenderer.isLongView,
     queryFarShell: queries.queryFarShell,
     queryCanopy: queries.queryCanopy,
+    queryScene: queries.queryScene,
     longViewHooks: postRenderer.longViewHooks,
     isWebGpu: renderer.isWebGpu,
     poolTerrainMaterial: renderer.poolTerrainMaterial,

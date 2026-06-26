@@ -1,0 +1,10 @@
+export * from "./canopy_types.js";
+export * from "./canopy_config.js";
+export { DEFAULT_CANOPY_SHELL_CONFIG } from "./canopy_defaults.js";
+export { createTreeDistribution, worldCellIndex, worldCellOrigin } from "./deterministic_tree_distribution.js";
+export { createBlendedTerrainSampler, createAnalyticTerrainSampler, createSummaryTerrainSampler } from "./canopy_terrain_sampler.js";
+export { buildCanopySummaryTile, tileResolutionForCellSize } from "./canopy_summary_builder.js";
+export { createCanopyClipmap, updateCanopyClipmap } from "./canopy_clipmap.js";
+export { buildCanopyTextureSet, disposeCanopyTextureSet } from "./canopy_texture.js";
+export { createCanopyShellSystem, type CanopyShellSystem } from "./canopy_system.js";
+export { createCanopyDebugState, canopyDebugStateToConfig, formatCanopyStatsLine } from "./canopy_debug.js";

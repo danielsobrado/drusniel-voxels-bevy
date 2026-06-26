@@ -1,0 +1,60 @@
+canopy_shell:
+  enabled: true
+  seed: 12345
+
+  source:
+    mode: deterministic_tree_summary
+    allow_synthetic_debug_fallback: true
+    debug_fallback_warning: true
+
+  distances:
+    real_tree_end_m: 220
+    impostor_end_m: 650
+    shell_start_m: 620
+    shell_full_m: 760
+    shell_end_m: 8192
+    fade_band_m: 140
+
+  clipmap:
+    enabled: true
+    tile_size_m: 512
+    cell_size_m: 8
+    rings:
+      - { start_m: 512, end_m: 2048, cell_size_m: 8 }
+      - { start_m: 2048, end_m: 4096, cell_size_m: 16 }
+      - { start_m: 4096, end_m: 8192, cell_size_m: 32 }
+
+  tree_distribution:
+    density_scale: 1.0
+    forest_threshold: 0.42
+    slope_reject_start: 0.55
+    slope_reject_end: 0.85
+    water_reject: true
+    min_canopy_height_m: 3.0
+    max_canopy_height_m: 18.0
+    crown_radius_min_m: 1.8
+    crown_radius_max_m: 5.5
+
+  material:
+    base_tint: [0.19, 0.31, 0.14]
+    pine_tint: [0.13, 0.24, 0.12]
+    broadleaf_tint: [0.24, 0.36, 0.15]
+    deadwood_tint: [0.29, 0.24, 0.16]
+    coverage_alpha_power: 0.85
+    crown_bump_strength_m: 1.8
+    horizon_haze_strength: 0.65
+    normal_strength: 1.0
+    dither_strength: 1.0
+
+  debug:
+    show_tile_bounds: false
+    show_coverage_heatmap: false
+    show_shell_wireframe: false
+    show_fade_zone: false
+    freeze_clip_center: false
+    force_synthetic_source: false
+
+  budgets:
+    max_tiles_built_per_frame: 4
+    max_texture_uploads_per_frame: 2
+    max_shell_tris: 250000

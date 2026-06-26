@@ -122,13 +122,9 @@ export function createShadowProxyController(
     if (runtime.mesh && proxyEnabled) deps.scene.add(runtime.mesh);
   };
 
-  const updateStreamingFollow = (cameraWorldX: number, cameraWorldZ: number) => {
+  const updateStreamingFollow = () => {
     if (!runtime.mesh || !deps.streamingCentered) return;
-    runtime.mesh.position.set(
-      builtCenterX - cameraWorldX,
-      0,
-      builtCenterZ - cameraWorldZ,
-    );
+    runtime.mesh.position.set(builtCenterX, 0, builtCenterZ);
   };
 
   const rebuildProxy = (force = false) => {
@@ -162,8 +158,7 @@ export function createShadowProxyController(
     builtCenterZ = center.z;
     frozenGeometry = runtime.stats.built;
     if (runtime.mesh && deps.streamingCentered) {
-      const live = deps.getCoverageCenter();
-      runtime.mesh.position.set(builtCenterX - live.x, 0, builtCenterZ - live.z);
+      runtime.mesh.position.set(builtCenterX, 0, builtCenterZ);
     } else if (runtime.mesh) {
       runtime.mesh.position.set(0, 0, 0);
     }
@@ -237,7 +232,7 @@ export function createShadowProxyController(
       if ((snapped.x !== builtCenterX || snapped.z !== builtCenterZ) && !frozen) {
         rebuildProxy(true);
       }
-      updateStreamingFollow(cameraWorldX, cameraWorldZ);
+      updateStreamingFollow();
     },
     rebuildIfNeeded(force = false) {
       if (deps.getConfig().debugFreezeProxy && frozenGeometry && !force) return;

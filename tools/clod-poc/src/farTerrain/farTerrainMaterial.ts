@@ -3,6 +3,7 @@ import { clamp, dot, float, max, mix, normalGeometry, normalize, positionWorld, 
 import { vertexColor } from "three/tsl";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
+
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMaterial/terrainMaterialBands.js";
 
@@ -12,6 +13,23 @@ export interface FarTerrainVertexColors {
   macro: Float32Array;
   slope: Float32Array;
   materialWeights: Float32Array;
+}
+
+export interface FarTerrainUniformRefs {
+  uCenterX: ReturnType<typeof uniform>;
+  uCenterZ: ReturnType<typeof uniform>;
+  uHazeStart: ReturnType<typeof uniform>;
+  uHazeEnd: ReturnType<typeof uniform>;
+  uHazeStrength: ReturnType<typeof uniform>;
+  uHazeEnabled: ReturnType<typeof uniform>;
+  uHazeColor: ReturnType<typeof uniform>;
+  uHemiStrength: ReturnType<typeof uniform>;
+  uSunStrength: ReturnType<typeof uniform>;
+  uAmbientFloor: ReturnType<typeof uniform>;
+  uSunDir: ReturnType<typeof uniform>;
+  uSunColor: ReturnType<typeof uniform>;
+  uSkyColor: ReturnType<typeof uniform>;
+  uGroundColor: ReturnType<typeof uniform>;
 }
 
 export function createFarTerrainMaterial(
@@ -25,22 +43,29 @@ export function createFarTerrainMaterial(
   const uSunColor = uniform(vec3(lighting.sunColor.r, lighting.sunColor.g, lighting.sunColor.b));
   const uSkyColor = uniform(vec3(lighting.skyLight.r, lighting.skyLight.g, lighting.skyLight.b));
   const uGroundColor = uniform(vec3(lighting.groundLight.r, lighting.groundLight.g, lighting.groundLight.b));
-  const uHazeColor = uniform(new THREE.Vector3(config.hazeColor[0], config.hazeColor[1], config.hazeColor[2]));
 
+  const uCenterX = uniform(centerX);
+  const uCenterZ = uniform(centerZ);
   const uHazeStart = uniform(config.hazeStartM);
   const uHazeEnd = uniform(config.hazeEndM);
   const uHazeStrength = uniform(config.hazeStrength);
+  const uHazeEnabled = uniform(config.hazeEnabled);
+  const uHazeColor = uniform(new THREE.Vector3(config.hazeColor[0], config.hazeColor[1], config.hazeColor[2]));
+  const uHemiStrength = uniform(config.hemiStrength);
+  const uSunStrength = uniform(config.sunStrength);
+  const uAmbientFloor = uniform(config.ambientFloor);
 
   const nrm = normalize(normalGeometry);
   const sun = max(dot(nrm, uSunDir), float(0));
   const sky = clamp(nrm.y.mul(0.5).add(0.5), float(0), float(1));
-  const hemi = mix(uGroundColor, uSkyColor, sky);
-  const light = hemi.add(uSunColor.mul(pow(sun, float(1.35))));
+  const hemi = mix(uGroundColor, uSkyColor, sky).mul(uHemiStrength);
+  const ambientFloor = vec3(uAmbientFloor, uAmbientFloor, uAmbientFloor);
+  const light = ambientFloor.add(hemi).add(uSunColor.mul(pow(sun, float(1.35))).mul(uSunStrength));
 
-  const dp = vec2(positionWorld.x.sub(centerX), positionWorld.z.sub(centerZ));
+  const dp = vec2(positionWorld.x.sub(uCenterX), positionWorld.z.sub(uCenterZ));
   const distXZ = dp.length();
   const hazeT = smoothstep(uHazeStart, uHazeEnd, distXZ);
-  const hazeFactor = hazeT.mul(uHazeStrength);
+  const hazeFactor = hazeT.mul(uHazeStrength).mul(uHazeEnabled);
 
   const vColor = vertexColor();
   const colorNode = vColor as unknown as { mul: (x: unknown) => unknown };
@@ -50,6 +75,14 @@ export function createFarTerrainMaterial(
   const material = new MeshBasicNodeMaterial();
   material.colorNode = final;
   material.side = THREE.DoubleSide;
+
+  const refs: FarTerrainUniformRefs = {
+    uCenterX, uCenterZ,
+    uHazeStart, uHazeEnd, uHazeStrength, uHazeEnabled, uHazeColor,
+    uHemiStrength, uSunStrength, uAmbientFloor,
+    uSunDir, uSunColor, uSkyColor, uGroundColor,
+  };
+  material.userData.farTerrainUniforms = refs;
 
   return material;
 }
@@ -135,8 +168,12 @@ export function createVertexColorBuffer(
 ): Float32Array {
   const count = vertexColors.baseColor.length / 3;
   const colors = new Float32Array(count * 3);
+
+  const quality = config.materialQuality;
+  const isAtlasDebug = quality === "atlas_only_debug";
+
   for (let vi = 0; vi < count; vi++) {
-    if (config.debugShowMaterialBands > 0) {
+    if (config.debugShowMaterialBands > 0 || isAtlasDebug) {
       colors[vi * 3] = vertexColors.debugBand[vi * 3];
       colors[vi * 3 + 1] = vertexColors.debugBand[vi * 3 + 1];
       colors[vi * 3 + 2] = vertexColors.debugBand[vi * 3 + 2];
@@ -162,6 +199,7 @@ export function createVertexColorBuffer(
       colors[vi * 3 + 2] = vertexColors.baseColor[vi * 3 + 2];
     }
   }
+
   return colors;
 }
 
@@ -169,39 +207,28 @@ export function updateFarTerrainMaterial(
   material: MeshBasicNodeMaterial,
   config: Partial<FarTerrainUniformData>,
 ): void {
-  const uniforms = (material as unknown as Record<string, unknown>).__far_terrain_uniforms as Record<string, { value: unknown }> | undefined;
-  if (!uniforms) return;
+  const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs | undefined;
+  if (!refs) return;
 
-  const floatMap: Record<string, keyof FarTerrainUniformData> = {
-    uHazeStart: "hazeStartM",
-    uHazeEnd: "hazeEndM",
-    uHazeStrength: "hazeStrength",
-    uHazeHeightFalloff: "hazeHeightFalloff",
-  };
-
-  for (const [uni, key] of Object.entries(floatMap)) {
-    const val = config[key as keyof FarTerrainUniformData];
-    if (val !== undefined && typeof val === "number" && uniforms[uni]) {
-      uniforms[uni].value = val;
-    }
+  if (config.hazeStartM !== undefined) refs.uHazeStart.value = config.hazeStartM;
+  if (config.hazeEndM !== undefined) refs.uHazeEnd.value = config.hazeEndM;
+  if (config.hazeStrength !== undefined) refs.uHazeStrength.value = config.hazeStrength;
+  if (config.hazeEnabled !== undefined) refs.uHazeEnabled.value = config.hazeEnabled;
+  if (config.hazeColor) {
+    refs.uHazeColor.value = new THREE.Vector3(config.hazeColor[0], config.hazeColor[1], config.hazeColor[2]);
   }
+  if (config.hemiStrength !== undefined) refs.uHemiStrength.value = config.hemiStrength;
+  if (config.sunStrength !== undefined) refs.uSunStrength.value = config.sunStrength;
+  if (config.ambientFloor !== undefined) refs.uAmbientFloor.value = config.ambientFloor;
+}
 
-  const flagMap: Record<string, keyof FarTerrainUniformData> = {
-    uShowMaterialBands: "debugShowMaterialBands",
-    uShowSlope: "debugShowSlope",
-    uShowMacroNoise: "debugShowMacroNoise",
-    uShowFarNormals: "debugShowFarNormals",
-    uShowHazeFactor: "debugShowHazeFactor",
-  };
-
-  for (const [uni, key] of Object.entries(flagMap)) {
-    const val = config[key as keyof FarTerrainUniformData];
-    if (val !== undefined && typeof val === "number" && uniforms[uni]) {
-      uniforms[uni].value = val;
-    }
-  }
-
-  if (config.hazeColor && uniforms.uHazeColor) {
-    uniforms.uHazeColor.value = new THREE.Vector3(config.hazeColor[0], config.hazeColor[1], config.hazeColor[2]);
-  }
+export function updateFarTerrainMaterialCenter(
+  material: MeshBasicNodeMaterial,
+  centerX: number,
+  centerZ: number,
+): void {
+  const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs | undefined;
+  if (!refs) return;
+  refs.uCenterX.value = centerX;
+  refs.uCenterZ.value = centerZ;
 }

@@ -34,20 +34,19 @@ describe("shadow proxy validation", () => {
     const summary = buildTerrainSummary([], 512, 8);
     summary.heightMax.fill(420);
     const config = { ...DEFAULT_SHADOW_PROXY_CONFIG, startM: 0, endM: 4096, edgeFadeM: 0 };
-    const baseLevel = config.minHeightM;
     const farBase = summaryBaseLevel(summary);
     const dist = 3000;
     const x = -1000;
 
     const edgeClamped = sampleHeight(summary, x, 256);
     const skirt = sampleSkirtHeight(summary, x, 256, config.endM, farBase, 1.0);
-    const proxy = sampleProxyHeight(summary, x, 256, baseLevel, config, dist);
+    const proxy = sampleProxyHeight(summary, x, 256, config, dist);
 
     expect(edgeClamped).toBeCloseTo(420, 0);
     expect(skirt).not.toBeCloseTo(edgeClamped, 1);
     expect(proxy).not.toBeCloseTo(edgeClamped, 1);
     expect(proxy).toBeCloseTo(
-      baseLevel + (clampProxyHeight(skirt + config.heightBiasM, config) - baseLevel) * ringFadeWeight(dist, config),
+      farBase + (clampProxyHeight(skirt + config.heightBiasM, config) - farBase) * ringFadeWeight(dist, config),
       4,
     );
   });

@@ -38,6 +38,8 @@ import {
   vec3,
 } from "three/tsl";
 import type { FarShellLighting } from "./far_terrain_shell.js";
+import type { CanopyShellConfig } from "../canopy/canopy_types_internal.js";
+import type { CanopyTextureSet } from "../canopy/canopy_types.js";
 
 // TSL Node has no exported type surface — the graph is built dynamically.
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -92,40 +94,102 @@ export function buildFarCanopyShell(
   options: Partial<FarCanopyShellOptions> = {},
 ): FarCanopyShell {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const GRID = opts.grid;
-  const FADE_IN = opts.fadeIn;
-  const FADE_BAND = opts.fadeBand;
-  const center = worldSize / 2;
   const farRadius = opts.farRadius > 0 ? opts.farRadius : worldSize * 1.5;
-  const inset = opts.inset >= 0 ? opts.inset : worldSize * 0.04;
-  const extent = 2 * farRadius;
-  const origin = center - farRadius; // grid/texture min in both X and Z
-  const n = GRID + 1;
+  const center = worldSize / 2;
+  const set: CanopyTextureSet = {
+    heightTexture,
+    coverageTexture: canopyTexture,
+    speciesTexture: canopyTexture,
+    roughnessTexture: canopyTexture,
+    originX: center - farRadius,
+    originZ: center - farRadius,
+    extentM: farRadius * 2,
+    resolution: canopyTexture.image.width,
+    syntheticFallback: true,
+    revision: 0,
+  };
+  const config = {
+    distances: {
+      shellStartM: opts.fadeIn,
+      shellFullM: opts.fadeIn + opts.fadeBand,
+      shellEndM: farRadius,
+      fadeBandM: opts.fadeBand,
+      realTreeEndM: 220,
+      impostorEndM: 650,
+    },
+    material: {
+      crownBumpStrengthM: 4.5,
+      horizonHazeStrength: 1,
+      normalStrength: 1,
+      ditherStrength: 1,
+      baseTint: [0.045, 0.105, 0.05] as [number, number, number],
+      pineTint: [0.085, 0.155, 0.055] as [number, number, number],
+      broadleafTint: [0.1, 0.13, 0.045] as [number, number, number],
+      deadwoodTint: [0.1, 0.13, 0.045] as [number, number, number],
+      coverageAlphaPower: 1,
+    },
+  } as CanopyShellConfig;
+  return buildFarCanopyShellFromTextureSet(set, config, lighting, {
+    ...opts,
+    worldSize,
+    buildRelative: false,
+    skipInteriorHole: false,
+  });
+}
 
-  // --- Geometry: flat grid at y=0 over [origin, origin + extent] (height set in the TSL node) ---
+export interface FarCanopyShellFromSourceOptions extends Partial<FarCanopyShellOptions> {
+  worldSize?: number;
+  buildRelative?: boolean;
+  skipInteriorHole?: boolean;
+  showCoverageHeatmap?: boolean;
+  wireframe?: boolean;
+}
+
+/**
+ * Build canopy shell from deterministic summary textures (Phase 8 path).
+ */
+export function buildFarCanopyShellFromTextureSet(
+  textureSet: CanopyTextureSet,
+  config: CanopyShellConfig,
+  lighting: FarShellLighting,
+  options: FarCanopyShellFromSourceOptions = {},
+): FarCanopyShell {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const GRID = opts.grid;
+  const { heightTexture, coverageTexture, speciesTexture, roughnessTexture } = textureSet;
+  const origin = textureSet.originX;
+  const extent = textureSet.extentM;
+  const farRadius = extent * 0.5;
+  const FADE_IN = config.distances.shellStartM;
+  const FADE_BAND = config.distances.fadeBandM;
+  const worldSize = options.worldSize ?? extent;
+  const buildRelative = options.buildRelative ?? false;
+  const center = buildRelative ? 0 : worldSize / 2;
+  const inset = opts.inset >= 0 ? opts.inset : worldSize * 0.04;
+  const n = GRID + 1;
+  const geoOrigin = buildRelative ? -farRadius : origin;
+
   const pos = new Float32Array(n * n * 3);
   for (let z = 0; z < n; z++) {
     for (let x = 0; x < n; x++) {
       const i = (z * n + x) * 3;
-      pos[i] = origin + (x / GRID) * extent;
+      pos[i] = geoOrigin + (x / GRID) * extent;
       pos[i + 1] = 0;
-      pos[i + 2] = origin + (z / GRID) * extent;
+      pos[i + 2] = geoOrigin + (z / GRID) * extent;
     }
   }
-  // Skip quads lying fully inside the page-covered world square [inset, worldSize-inset]² — the
-  // near field is owned by the live trees/terrain.  The square test (vs a circular hole) excludes
-  // exactly the interior, so the skirt covers the corners/edges of the world too.
   const cell = extent / GRID;
   const innerMin = inset;
   const innerMax = worldSize - inset;
   const idx: number[] = [];
   for (let z = 0; z < GRID; z++) {
     for (let x = 0; x < GRID; x++) {
-      const x0 = origin + x * cell;
+      const x0 = geoOrigin + x * cell;
       const x1 = x0 + cell;
-      const z0 = origin + z * cell;
+      const z0 = geoOrigin + z * cell;
       const z1 = z0 + cell;
-      if (x0 >= innerMin && x1 <= innerMax && z0 >= innerMin && z1 <= innerMax) continue;
+      if (!options.skipInteriorHole
+        && x0 >= innerMin && x1 <= innerMax && z0 >= innerMin && z1 <= innerMax) continue;
       const a = z * n + x;
       idx.push(a, a + n, a + 1, a + 1, a + n, a + n + 1);
     }
@@ -135,30 +199,24 @@ export function buildFarCanopyShell(
   geo.setIndex(idx);
 
   const mat = new MeshBasicNodeMaterial();
+  if (options.wireframe) mat.wireframe = true;
 
-  // TSL helpers: sample the extended textures (UV = (worldXZ - origin) / extent)
   const originN = float(origin);
   const extentN = float(extent);
-  const sampleHeightTsl = (p: TslNode): TslNode =>
-    texture(heightTexture, vec2(p.x.sub(originN).div(extentN), p.y.sub(originN).div(extentN))).r;
-  const sampleCanopyTsl = (p: TslNode): TslNode =>
-    texture(canopyTexture, vec2(p.x.sub(originN).div(extentN), p.y.sub(originN).div(extentN))).r;
+  const uvOf = (p: TslNode): TslNode =>
+    vec2(p.x.sub(originN).div(extentN), p.y.sub(originN).div(extentN));
+  const sampleHeightTsl = (p: TslNode): TslNode => texture(heightTexture, uvOf(p)).r;
+  const sampleCanopyTsl = (p: TslNode): TslNode => texture(coverageTexture, uvOf(p)).r;
+  const sampleSpeciesTsl = (p: TslNode): TslNode => texture(speciesTexture, uvOf(p));
+  const sampleRoughTsl = (p: TslNode): TslNode => texture(roughnessTexture, uvOf(p)).r;
 
-  // Simple cell hash for crown-scale bumps (fract(sin) pattern)
-  const cellHash2 = (p: TslNode, seed: number): TslNode => {
-    const s = float(seed);
-    const n1 = p.x.mul(127.1).add(p.y.mul(311.7)).add(s);
-    const n2 = p.x.mul(269.5).add(p.y.mul(183.3)).add(s);
-    return vec2(n1.sin().mul(43758.5453).fract(), n2.sin().mul(43758.5453).fract());
-  };
-
-  /** canopy-top height field: terrain + coverage lift + crown bumps */
+  const bumpStrength = float(config.material.crownBumpStrengthM);
   const shellY = (p: TslNode): TslNode => {
     const cov = sampleCanopyTsl(p);
-    const lift = smoothstep(float(0.18), float(0.5), cov).mul(cov.mul(7).add(11));
-    const bump = cellHash2(p.div(7).floor(), 911).x.sub(0.5).mul(4.5);
     const h = sampleHeightTsl(p);
-    // forestless cells dive under the terrain and z-fail
+    const rough = sampleRoughTsl(p);
+    const lift = smoothstep(float(0.18), float(0.5), cov).mul(cov.mul(7).add(11));
+    const bump = rough.sub(0.5).mul(bumpStrength);
     return mix(
       h.sub(8),
       h.add(lift).add(bump.mul(smoothstep(float(0.2), float(0.45), cov))),
@@ -166,47 +224,42 @@ export function buildFarCanopyShell(
     );
   };
 
-  // Canopy normal (finite differences), carried to the fragment stage for lighting.
   const e = float(cell);
-  const pBase = vec2(positionLocal.x, positionLocal.z);
+  const worldXZ = vec2(positionWorld.x, positionWorld.z);
   const canopyNormalV = varying(
     vec3(
-      shellY(pBase).sub(shellY(pBase.add(vec2(e, float(0))))),
+      shellY(worldXZ).sub(shellY(worldXZ.add(vec2(e, float(0))))),
       e,
-      shellY(pBase).sub(shellY(pBase.add(vec2(float(0), e)))),
+      shellY(worldXZ).sub(shellY(worldXZ.add(vec2(float(0), e)))),
     ).normalize(),
   );
 
-  mat.positionNode = Fn(() => vec3(positionLocal.x, shellY(pBase), positionLocal.z))();
+  mat.positionNode = Fn(() => vec3(positionLocal.x, shellY(worldXZ), positionLocal.z))();
 
-  // Foliage palette by coverage + macro noise
-  const cov = sampleCanopyTsl(vec2(positionWorld.x, positionWorld.z));
-  const macro = positionWorld.x
-    .mul(0.013)
-    .add(3.1)
-    .sin()
-    .add(positionWorld.z.mul(0.013).sin())
-    .mul(0.5)
-    .add(0.5);
-  let albedo: TslNode = mix(vec3(0.045, 0.105, 0.05), vec3(0.085, 0.155, 0.055), macro);
-  albedo = mix(albedo, vec3(0.1, 0.13, 0.045), cov.mul(0.4));
+  const worldP = vec2(positionWorld.x, positionWorld.z);
+  const cov = sampleCanopyTsl(worldP);
+  let albedo: TslNode = sampleSpeciesTsl(worldP);
+  if (options.showCoverageHeatmap) {
+    albedo = vec3(cov, cov.mul(0.2), float(0));
+  }
 
-  // Hemispheric sky/ground + sun^1.35 — reproduces terrain_node_material lighting (no scene lights).
   const v3 = (c: THREE.Color) => vec3(c.r, c.g, c.b);
   const uLight = uniform(lighting.sunDirection.clone());
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
   const uHaze = uniform(v3(lighting.skyLight));
-  const centerN = float(center);
+  const centerN = float(buildRelative ? origin + farRadius : center);
 
   const distV = varying(
-    vec3(positionLocal.x, float(0), positionLocal.z).sub(cameraPosition).length(),
+    vec3(positionWorld.x, float(0), positionWorld.z).sub(cameraPosition).length(),
   );
+  const ditherStrength = float(config.material.ditherStrength);
   mat.colorNode = Fn(() => {
-    // dither IN beyond the impostor mid-band
-    Discard(
-      smoothstep(float(FADE_IN - FADE_BAND), float(FADE_IN + FADE_BAND), distV).lessThanEqual(
+    const fadeEdge = float(FADE_IN - FADE_BAND);
+    const fadeEnd = float(FADE_IN + FADE_BAND);
+  Discard(
+      smoothstep(fadeEdge, fadeEnd, distV).mul(ditherStrength).lessThanEqual(
         interleavedGradientNoise(screenCoordinate.xy),
       ),
     );
@@ -215,9 +268,9 @@ export function buildFarCanopyShell(
     const sky = clamp(nLit.y.mul(0.5).add(0.5), float(0), float(1));
     const hemi = mix(uGround, uSky, sky);
     const light = hemi.add(uSun.mul(pow(sun, float(1.35))));
-    // fade to sky/haze near the rim so the outer canopy dissolves into the horizon
     const distXZ = vec2(positionWorld.x.sub(centerN), positionWorld.z.sub(centerN)).length();
-    const hazeT = smoothstep(float(farRadius * 0.6), float(farRadius * 0.97), distXZ);
+    const hazeT = smoothstep(float(farRadius * 0.6), float(farRadius * 0.97), distXZ)
+      .mul(float(config.material.horizonHazeStrength));
     return mix(albedo.mul(light), uHaze, hazeT);
   })();
 
@@ -225,6 +278,7 @@ export function buildFarCanopyShell(
   mesh.frustumCulled = false;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
+  mesh.userData.canopyTextureSetRevision = textureSet.revision;
 
   return {
     mesh,
@@ -235,3 +289,11 @@ export function buildFarCanopyShell(
     },
   };
 }
+
+export function updateFarCanopyShellTextures(shell: FarCanopyShell, textureSet: CanopyTextureSet): void {
+  const mesh = shell.mesh as THREE.Mesh & { userData: { canopyTextureSetRevision?: number } };
+  if (mesh.userData.canopyTextureSetRevision === textureSet.revision) return;
+  mesh.userData.canopyTextureSetRevision = textureSet.revision;
+  // Textures are rebuilt with new GPU objects in the PoC path; shell rebuild handles swaps.
+}
+

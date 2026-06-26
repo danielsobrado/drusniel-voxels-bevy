@@ -36,45 +36,54 @@ export interface LongViewConfig {
   };
 }
 
-export const DEFAULT_LONG_VIEW_CONFIG: LongViewConfig = {
-  targetVisibleMeters: 4096,
+function rawDefaultConfig(): LongViewConfig {
+  return {
+    targetVisibleMeters: 4096,
+    farSummary: {
+      enabled: true,
+      startMeters: 1536,
+      endMeters: 8192,
+      tileSizeMeters: 256,
+      maxTilesBuiltPerFrame: 4,
+      staleTileGraceSeconds: 10,
+      rings: [
+        { name: "near_far", startM: 1536, endM: 4096, cellM: 32, tileCells: 32 },
+        { name: "mid_far", startM: 4096, endM: 8192, cellM: 64, tileCells: 32 },
+        { name: "horizon", startM: 8192, endM: 16384, cellM: 128, tileCells: 32 },
+      ],
+    },
+    farShell: {
+      enabled: true,
+      startMeters: 4096, endMeters: 16384,
+      gridResolution: 192, radialSegments: 96, angularSegments: 192,
+      heightBiasMeters: 0.6, nearBlendMeters: 512, farFadeMeters: 2048,
+      macroBlendStartMeters: 8192, macroBlendEndMeters: 16384,
+      rebaseSnapMeters: 64,
+    },
+    debug: {
+      showFarSummaryTiles: false, showFarShellWireframe: false,
+      showShellRings: false, showMissingSummaryFallback: false,
+    },
+  };
+}
 
-  farSummary: {
-    enabled: true,
-    startMeters: 1536,
-    endMeters: 8192,
-    tileSizeMeters: 256,
-    maxTilesBuiltPerFrame: 4,
-    staleTileGraceSeconds: 10,
-    rings: [
-      { name: "near_far", startM: 1536, endM: 4096, cellM: 32, tileCells: 32 },
-      { name: "mid_far", startM: 4096, endM: 8192, cellM: 64, tileCells: 32 },
-      { name: "horizon", startM: 8192, endM: 16384, cellM: 128, tileCells: 32 },
-    ],
-  },
+function deepCloneLongViewConfig(src: LongViewConfig): LongViewConfig {
+  return {
+    targetVisibleMeters: src.targetVisibleMeters,
+    farSummary: {
+      ...src.farSummary,
+      rings: src.farSummary.rings.map(r => ({ ...r })),
+    },
+    farShell: { ...src.farShell },
+    debug: { ...src.debug },
+  };
+}
 
-  farShell: {
-    enabled: true,
-    startMeters: 4096,
-    endMeters: 16384,
-    gridResolution: 192,
-    radialSegments: 96,
-    angularSegments: 192,
-    heightBiasMeters: 0.6,
-    nearBlendMeters: 512,
-    farFadeMeters: 2048,
-    macroBlendStartMeters: 8192,
-    macroBlendEndMeters: 16384,
-    rebaseSnapMeters: 64,
-  },
+export function createDefaultLongViewConfig(): LongViewConfig {
+  return deepCloneLongViewConfig(rawDefaultConfig());
+}
 
-  debug: {
-    showFarSummaryTiles: false,
-    showFarShellWireframe: false,
-    showShellRings: false,
-    showMissingSummaryFallback: false,
-  },
-};
+export const DEFAULT_LONG_VIEW_CONFIG: LongViewConfig = rawDefaultConfig();
 
 export function longViewConfigToFarSummaryConfig(lvConfig: LongViewConfig): FarSummaryConfig {
   const fs = lvConfig.farSummary;
