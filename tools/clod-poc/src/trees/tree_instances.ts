@@ -13,7 +13,7 @@ import {
 
 export const TREE_STRUCTURAL_VARIANTS = 4;
 
-const TREE_CONTACT_OFFSET_M = -0.12;
+const TREE_CONTACT_OFFSET_PER_SCALE_M = -0.12;
 const TREE_VARIANT_HASH_SALT = 1103;
 
 export interface TreeTerrainSampler {
@@ -147,14 +147,15 @@ export function generateTreeInstances(
 
       stats.acceptedCandidates++;
       const baseScale = 0.82 + treeHash2(gridX, gridZ, settings.seed + 601) * 0.42;
+      const scale = baseScale * (ecology?.scaleMultiplier ?? 1);
       ranked.push({
         priority: treeHash2(gridX, gridZ, settings.seed + 503),
         suppressionRadius,
         instance: {
-          position: [x, height + TREE_CONTACT_OFFSET_M, z],
+          position: [x, height + scale * TREE_CONTACT_OFFSET_PER_SCALE_M, z],
           species,
           variant: treeVariant(gridX, gridZ, settings.seed),
-          scale: baseScale * (ecology?.scaleMultiplier ?? 1),
+          scale,
           rotationY: treeHash2(gridX, gridZ, settings.seed + 701) * Math.PI * 2,
           normalY,
         },
