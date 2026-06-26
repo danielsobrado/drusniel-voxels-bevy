@@ -209,12 +209,9 @@ fn process_cell(slot: u32) {
     return;
   }
 
-  let raw_h = surfaceHeightField(wpos.x, wpos.y);
+  let world_size = params.world.x;
   let hydro = hydrology_at(wpos.x, wpos.y);
-  let h = hydrology_ground_height(raw_h, hydro);
-  if (hydrology_reject_stone(hydro, h)) {
-    return;
-  }
+  let h = placement_ground_height(wpos.x, wpos.y, world_size);
   let normal = normalize(densityGradient(wpos.x, h, wpos.y));
   let weights = material_weights(h);
   let rock = weights.y;
@@ -236,8 +233,8 @@ fn process_cell(slot: u32) {
 
   let n_xz_len = max(0.0001, length(normal.xz));
   let uphill = -normal.xz / n_xz_len;
-  let h_near = surfaceHeightField(wpos.x + uphill.x * params.cliff.x, wpos.y + uphill.y * params.cliff.x);
-  let h_far = surfaceHeightField(wpos.x + uphill.x * params.cliff.y, wpos.y + uphill.y * params.cliff.y);
+  let h_near = placement_ground_height(wpos.x + uphill.x * params.cliff.x, wpos.y + uphill.y * params.cliff.x, world_size);
+  let h_far = placement_ground_height(wpos.x + uphill.x * params.cliff.y, wpos.y + uphill.y * params.cliff.y, world_size);
   let rise_near = (h_near - h) / max(0.001, params.cliff.x);
   let rise_far = (h_far - h_near) / max(0.001, params.cliff.y - params.cliff.x);
   let cliff_above = stone_smooth_range(params.cliff.z, params.cliff.w, max(rise_near, rise_far));
@@ -271,13 +268,13 @@ fn process_cell(slot: u32) {
   let target_radius = cfg.x + (cfg.y - cfg.x) * radius_hash;
   let scale = target_radius / class_base_radius(cls);
   let slope_amt = 1.0 - normal.y;
-  let bank_sink = mix(1.0, 1.45, hydro_streambed);
-  let y = h - cfg.z * target_radius * (1.0 + slope_amt * params.weights_b.w) * bank_sink;
+  let sink_depth = cfg.z * target_radius * (1.0 + slope_amt * params.weights_b.w);
+  let y = h - sink_depth;
   let yaw = pcg2d(wc, seed + 536u).x * TAU;
   let lean = vec2<f32>(normal.z, -normal.x) * params.stream_snow_lean.w * slope_amt;
   let out_index = cls * max_instances + class_slot;
   instance_a[out_index] = vec4<f32>(wpos.x, y, wpos.y, scale);
-  instance_b[out_index] = vec4<f32>(yaw, lean.x, lean.y, f32(cls));
+  instance_b[out_index] = vec4<f32>(yaw, lean.x, lean.y, sink_depth);
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)

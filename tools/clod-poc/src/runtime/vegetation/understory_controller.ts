@@ -25,6 +25,7 @@ export interface UnderstoryControllerDeps {
   gpuDevice: GPUDevice | null;
   gpuBackend: GrassWebGpuBackendAccess | null;
   hydrologyData: UnderstoryHydrologyData | null;
+  hydrologyWaterTexture: THREE.Texture | null;
   syncStatsToState: (stats: UnderstoryStats) => void;
 }
 
@@ -77,6 +78,7 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
     gpuBackend: deps.gpuBackend,
     supportsGpu: deps.webgpu,
     hydrologyData: deps.hydrologyData,
+    hydrologyWaterTexture: deps.hydrologyWaterTexture,
   });
   assertPageMeshSignaturesUnchanged(signaturesBefore, pageMeshSignatures(deps.nodes));
 

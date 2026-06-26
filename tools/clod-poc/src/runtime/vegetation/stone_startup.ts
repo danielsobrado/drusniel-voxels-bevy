@@ -7,8 +7,8 @@ import { createStoneController } from "./stone_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { stoneUiState } from "../../app/clod_app_state.js";
 import type { VegetationGpuBackend } from "./vegetation_gpu_backend.js";
-import type { VegetationStatControllerRefs } from "./vegetation_types.js";
 import { packHydrologyData } from "../../systems/hydrology_packing.js";
+import type { VegetationStatControllerRefs } from "./vegetation_types.js";
 
 export interface StoneStartupInput {
   scene: THREE.Scene;
@@ -53,13 +53,15 @@ export function runStoneStartup(input: StoneStartupInput): StoneStartupResult {
   const stoneStats = { current: null as StoneStats | null };
   const onStoneScatterComplete = { current: null as (() => void) | null };
 
+  const stoneHydrologyData = hydrologySystem ? packHydrologyData(hydrologySystem) : null;
+
   const stoneController = createStoneController({
     scene,
     nodes: lod0Nodes,
     worldCells,
     stoneConfig,
     hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
-    hydrologyData,
+    hydrologyGpuData: stoneHydrologyData,
     gpuDevice: rendererWebGpuDevice,
     gpuBackend,
     getUiState: () => stoneUiState(state),

@@ -3,6 +3,7 @@ import grassBindings from "./shaders/terrain_field_bindings_grass.wgsl?raw";
 import stoneBindings from "./shaders/terrain_field_bindings_stone.wgsl?raw";
 import treeBindings from "./shaders/terrain_field_bindings_tree.wgsl?raw";
 import terrainCommon from "./shaders/terrain_field_common.wgsl?raw";
+import placementHeight from "./shaders/placement_height.wgsl?raw";
 import terrainEntry from "./shaders/terrain_field_entry.wgsl?raw";
 import grassRingEntry from "./shaders/grass_ring.compute.wgsl?raw";
 import stoneScatterEntry from "./shaders/stone_scatter.compute.wgsl?raw";
@@ -32,11 +33,11 @@ export function composeTerrainFieldShader(): string {
 }
 
 export function composeGrassRingShader(): string {
-  return composeShader("grass ring shader", [grassBindings, terrainCommon, grassRingEntry]);
+  return composeShader("grass ring shader", [grassBindings, terrainCommon, placementHeight, grassRingEntry]);
 }
 
 export function composeStoneScatterShader(): string {
-  return composeShader("stone scatter shader", [stoneBindings, terrainCommon, stoneScatterEntry]);
+  return composeShader("stone scatter shader", [stoneBindings, terrainCommon, placementHeight, stoneScatterEntry]);
 }
 
 export function composeTreeRingShader(workgroupSize = 64): string {
@@ -58,5 +59,5 @@ export function composeUnderstoryRingShader(workgroupSize = 64): string {
     /const UNDERSTORY_WORKGROUP_SIZE: u32 = \d+u;/,
     `const UNDERSTORY_WORKGROUP_SIZE: u32 = ${size}u;`,
   );
-  return composeShader("understory ring shader", [understoryBindings, terrainCommon, entry]);
+  return composeShader("understory ring shader", [understoryBindings, terrainCommon, placementHeight, entry]);
 }

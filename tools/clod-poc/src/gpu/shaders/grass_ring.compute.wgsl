@@ -69,13 +69,11 @@ fn world_cell(slot: u32) -> vec2<f32> {
 }
 
 fn hydrology_at(wx: f32, wz: f32) -> HydrologySample {
-  let dims = textureDimensions(hydro_texture);
-  if (dims.x <= 1u || dims.y <= 1u) {
+  if (!placement_hydro_enabled()) {
     return HydrologySample(0.0, 0.0, 0.0, 0.0);
   }
   let world_size = max(1.0, params.center_radius.w);
-  let uv = clamp(vec2<f32>(wx, wz) / world_size, vec2<f32>(0.0), vec2<f32>(1.0));
-  let h = textureSampleLevel(hydro_texture, hydro_sampler, uv, 0.0);
+  let h = placement_sample_hydro_bilinear(wx, wz, world_size);
   return HydrologySample(h.x, h.y, h.z, 1.0);
 }
 
@@ -216,10 +214,11 @@ fn grass_thin(distance: f32) -> f32 {
 
 fn edge_fade(wpos: vec2<f32>, height: f32, normal_y: f32) -> f32 {
   let sample_distance = max(0.75, params.settings_a.x * 1.25);
-  let h0 = surfaceHeightField(wpos.x + sample_distance, wpos.y);
-  let h1 = surfaceHeightField(wpos.x - sample_distance, wpos.y);
-  let h2 = surfaceHeightField(wpos.x, wpos.y + sample_distance);
-  let h3 = surfaceHeightField(wpos.x, wpos.y - sample_distance);
+  let world_size = max(1.0, params.center_radius.w);
+  let h0 = placement_ground_height(wpos.x + sample_distance, wpos.y, world_size);
+  let h1 = placement_ground_height(wpos.x - sample_distance, wpos.y, world_size);
+  let h2 = placement_ground_height(wpos.x, wpos.y + sample_distance, world_size);
+  let h3 = placement_ground_height(wpos.x, wpos.y - sample_distance, world_size);
   let max_delta = max(max(abs(h0 - height), abs(h1 - height)), max(abs(h2 - height), abs(h3 - height)));
   let height_fade = 1.0 - smoothstep(1.5, 4.5, max_delta);
   let slope_fade = smoothstep(0.55, 0.9, normal_y);
@@ -293,9 +292,9 @@ fn process_slot(slot: u32) {
     return;
   }
 
-  let raw_height = surfaceHeightField(wpos.x, wpos.y);
+  let world_size = max(1.0, params.center_radius.w);
   let hydro = hydrology_at(wpos.x, wpos.y);
-  let height = hydrology_ground_height(raw_height, hydro);
+  let height = placement_ground_height(wpos.x, wpos.y, world_size);
   if (hydrology_reject_grass(hydro, height)) {
     return;
   }

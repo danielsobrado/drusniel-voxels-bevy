@@ -50,6 +50,7 @@ export function runUnderstoryStartup(input: UnderstoryStartupInput): UnderstoryS
     understoryConfig,
     webgpu: isWebGpu,
     hydrologyData: hydrologySystem ? packHydrologyData(hydrologySystem) : null,
+    hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
     gpuDevice: rendererWebGpuDevice,
     gpuBackend,
     getUiState: () => understoryUiState(state),

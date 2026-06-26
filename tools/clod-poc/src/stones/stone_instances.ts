@@ -13,9 +13,9 @@ import {
   StoneGpuScatterCompute,
   stoneGpuClassRegion,
   stoneGpuScatterUnsupportedReason,
-  type StoneGpuScatterBuffers,
-  type StoneHydrologyData,
+  type   StoneGpuScatterBuffers,
 } from "../gpu/stone_scatter_compute.js";
+import type { GrassHydrologyData } from "../gpu/grass_ring_compute.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import {
   createStoneNodeMaterial,
@@ -50,7 +50,8 @@ export interface StoneSystemOptions {
   /** Hydrology water field (RGBA32F; G = wet mask, B = carved-bed Y) so GPU stones
    *  snap to the carved terrain instead of floating, and drop in water bodies. */
   hydrologyWaterTexture?: THREE.Texture | null;
-  hydrologyData?: StoneHydrologyData | null;
+  /** Baked hydrology grid for GPU scatter carved-bed sampling. */
+  hydrologyGpuData?: GrassHydrologyData | null;
   /** Called when async scatter finishes and `getStats()` counts become valid. */
   onStats?: (stats: StoneStats) => void;
 }
@@ -101,7 +102,7 @@ export class StoneSystem {
   private draws: StoneDraw[] = [];
   private materialHandle: StoneNodeMaterialHandle | null = null;
   private readonly hydrologyWater: StoneHydrologyWater | undefined;
-  private readonly hydrologyData: StoneHydrologyData | null;
+  private readonly hydrologyGpuData: GrassHydrologyData | null;
   private scatterCompute: StoneGpuScatterCompute | null = null;
   private scatterRunning = false;
   private generation = 0;
@@ -115,9 +116,13 @@ export class StoneSystem {
     this.worldCells = options.worldCells;
     this.defaultScatterCenter = new THREE.Vector3(this.worldCells * 0.5, 0, this.worldCells * 0.5);
     this.hydrologyWater = options.hydrologyWaterTexture
-      ? { texture: options.hydrologyWaterTexture, worldSize: options.worldCells }
+      ? {
+        texture: options.hydrologyWaterTexture,
+        worldSize: options.worldCells,
+        res: options.hydrologyGpuData?.res ?? 1,
+      }
       : undefined;
-    this.hydrologyData = options.hydrologyData ?? null;
+    this.hydrologyGpuData = options.hydrologyGpuData ?? null;
     this.settings = { ...options.settings };
     this.currentLighting = cloneLighting(options.lighting);
     this.gpuDevice = options.gpuDevice ?? null;
@@ -191,7 +196,7 @@ export class StoneSystem {
       indirectArgs: this.gpuBufferForAttribute(indirect),
     };
     const edits = resolveDigEdits(getDigEditsSnapshot());
-    void StoneGpuScatterCompute.create(this.gpuDevice, edits, buffers, this.hydrologyData)
+    void StoneGpuScatterCompute.create(this.gpuDevice, edits, buffers, this.hydrologyGpuData)
       .then((compute) => {
         if (generation !== this.generation) {
           compute.destroy();

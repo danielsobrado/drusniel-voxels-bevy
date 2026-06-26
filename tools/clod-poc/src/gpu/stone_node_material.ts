@@ -24,18 +24,20 @@ import {
   sin,
   smoothstep,
   storage,
-  texture,
   uniform,
   vec2,
   vec3,
 } from "three/tsl";
 import type { StoneLighting } from "../stones/stone_instances.js";
+import { sampleCarvedBedBilinearTsl, sampleHydrologyBilinearTsl } from "./placement_height.js";
 
 export interface StoneHydrologyWater {
   /** RGBA32F hydrology field; G = wet mask, B = carved-bed Y. */
   texture: THREE.Texture | null;
   /** World size (worldCells) mapping instance XZ → hydrology UV. */
   worldSize: number;
+  /** Hydrology grid resolution for bilinear carved-bed sampling. */
+  res: number;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -84,11 +86,16 @@ export function createStoneNodeMaterial(
     // Snap the stone's ground to the carved-bed height (hydrology B channel) so it
     // sits on the carved terrain instead of floating on the un-carved base height.
     let groundY: TslNode = instA.y;
+    const sinkDepth: TslNode = instB.w;
     if (hydrology?.texture) {
-      const uHydroWorldSize: TslNode = uniform(hydrology.worldSize);
-      const hydro: TslNode = texture(hydrology.texture, vec2(instA.x, instA.z).div(uHydroWorldSize));
-      groundY = hydro.z; // carved-bed height (B channel)
-      aboveWater = hydro.y.lessThan(0.5); // G = wet mask; drop stones in water bodies
+      const hydroSample = {
+        texture: hydrology.texture,
+        worldSize: hydrology.worldSize,
+        res: hydrology.res,
+      };
+      const hydro: TslNode = sampleHydrologyBilinearTsl(instA.x, instA.z, hydroSample);
+      groundY = sampleCarvedBedBilinearTsl(instA.x, instA.z, hydroSample).sub(sinkDepth);
+      aboveWater = hydro.y.lessThan(0.5);
     }
     worldPos = vec3(
       rx.add(instB.y.mul(local.y)).add(instA.x),

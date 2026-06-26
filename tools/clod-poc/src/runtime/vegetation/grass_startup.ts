@@ -103,6 +103,7 @@ export function runGrassStartup(input: GrassStartupInput): GrassStartupResult {
               ringInstanceBuffers,
               hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
               worldSize: worldCells,
+              hydrologyRes: grassHydrologyData?.res ?? 1,
               waterClearance: 0.5,
             }),
           buildGeometry: buildGrassInstancedGeometry,

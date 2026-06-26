@@ -103,12 +103,11 @@ fn understory_hash(cell: vec2<f32>, salt: u32) -> f32 {
 }
 
 fn sampleHydrology(wx: f32, wz: f32, world_size: f32) -> vec4<f32> {
-  let safe_size = max(world_size, 1.0);
-  let uv = vec2<f32>(wx / safe_size, wz / safe_size);
-  return textureSampleLevel(hydro_texture, hydro_sampler, uv, 0.0);
+  return placement_sample_hydro_bilinear(wx, wz, world_size);
 }
 
 fn hydrologyHeight(wx: f32, wz: f32, base_height: f32, normal_y: f32) -> vec2<f32> {
+  _ = normal_y;
   let world_size = params.hydro_params.x;
   let hydro_enabled = params.hydro_params.y;
   if (hydro_enabled < 0.5 || world_size <= 0.0) {
@@ -117,9 +116,8 @@ fn hydrologyHeight(wx: f32, wz: f32, base_height: f32, normal_y: f32) -> vec2<f3
   let hydro = sampleHydrology(wx, wz, world_size);
   let carved_bed = hydro.z;
   let wet_mask = hydro.y;
-  let flat_enough = normal_y > 0.7;
   let height_diff = abs(carved_bed - base_height);
-  let height = select(base_height, carved_bed, flat_enough && height_diff > 0.01);
+  let height = select(base_height, carved_bed, height_diff > 0.01);
   return vec2<f32>(height, wet_mask);
 }
 

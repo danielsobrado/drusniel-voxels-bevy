@@ -2,6 +2,7 @@ import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffer
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import type { StoneSettings, StoneTerrainClassWeights } from "../stones/stone_config.js";
 import { composeStoneScatterShader } from "./wgsl_modules.js";
+import type { GrassHydrologyData } from "./grass_ring_compute.js";
 
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
@@ -76,8 +77,8 @@ export class StoneGpuScatterCompute {
   private readonly counterReadback: GPUBuffer;
   private readonly fieldParams: GPUBuffer;
   private readonly digEdits: GPUBuffer;
-  private readonly bindGroup: GPUBindGroup;
   private readonly hydroTexture: GPUTexture;
+  private readonly bindGroup: GPUBindGroup;
   private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
   private readonly paramF32 = new Float32Array(this.paramScratch);
   private readonly paramU32 = new Uint32Array(this.paramScratch);
@@ -89,7 +90,7 @@ export class StoneGpuScatterCompute {
     pipelines: Record<PipelineName, GPUComputePipeline>,
     edits: readonly ResolvedDigEdit[],
     private readonly buffers: StoneGpuScatterBuffers,
-    hydroData: StoneHydrologyData | null,
+    hydroData: GrassHydrologyData | null,
   ) {
     this.pipelines = pipelines;
     this.paramBuffer = device.createBuffer({
@@ -153,7 +154,7 @@ export class StoneGpuScatterCompute {
     device: GPUDevice,
     edits: readonly ResolvedDigEdit[],
     buffers: StoneGpuScatterBuffers,
-    hydroData: StoneHydrologyData | null = null,
+    hydroData: GrassHydrologyData | null = null,
   ): Promise<StoneGpuScatterCompute> {
     const module = device.createShaderModule({
       label: "stone scatter compute shader",
@@ -172,7 +173,7 @@ export class StoneGpuScatterCompute {
         storage(2),
         storage(3),
         storage(4),
-        storage(5, "read-only-storage"),
+        { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
         { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         { binding: 7, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
         { binding: 8, visibility: GPUShaderStage.COMPUTE, sampler: {} },
@@ -306,29 +307,7 @@ export class StoneGpuScatterCompute {
     pass.end();
   }
 
-  private createHydrologyTexture(hydroData: StoneHydrologyData | null): GPUTexture {
-    if (hydroData && hydroData.data.length > 0) {
-      const texture = this.device.createTexture({
-        label: "stone scatter hydro texture",
-        size: { width: hydroData.res, height: hydroData.res },
-        format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-      });
-      this.device.queue.writeTexture(
-        { texture },
-        hydroData.data.buffer as ArrayBuffer,
-        { bytesPerRow: hydroData.res * 16 },
-        { width: hydroData.res, height: hydroData.res },
-      );
-      return texture;
-    }
-    return this.device.createTexture({
-      label: "stone scatter fallback hydro texture",
-      size: { width: 1, height: 1 },
-      format: "rgba32float",
-      usage: GPUTextureUsage.TEXTURE_BINDING,
-    });
-  }
+
 }
 
 function clampFinite(value: number, min: number, max: number): number {
