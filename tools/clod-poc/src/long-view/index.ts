@@ -1,4 +1,4 @@
-export { DEFAULT_LONG_VIEW_CONFIG, longViewConfigToFarSummaryConfig } from "./longViewConfig.js";
+export { DEFAULT_LONG_VIEW_CONFIG, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "./longViewConfig.js";
 export type { LongViewConfig } from "./longViewConfig.js";
 
 export { sampleMacroTerrainHeight, sampleMacroTerrainNormal, sampleMacroTerrainMaterial } from "./macroTerrain.js";

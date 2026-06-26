@@ -20,6 +20,8 @@ export const DEFAULT_CANOPY_SHELL_CONFIG: CanopyShellConfig = {
     enabled: true,
     tileSizeM: 512,
     cellSizeM: 8,
+    evictionGraceSeconds: 4,
+    evictionGraceTiles: 2,
     rings: [
       { startM: 512, endM: 2048, cellSizeM: 8 },
       { startM: 2048, endM: 4096, cellSizeM: 16 },

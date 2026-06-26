@@ -23,6 +23,8 @@ export interface CanopyClipmapConfig {
   enabled: boolean;
   tileSizeM: number;
   cellSizeM: number;
+  evictionGraceSeconds: number;
+  evictionGraceTiles: number;
   rings: CanopyClipmapRingConfig[];
 }
 

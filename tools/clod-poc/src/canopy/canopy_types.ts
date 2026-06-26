@@ -93,8 +93,13 @@ export function canopyMetricsToCounters(metrics: CanopyMetrics, enabled: boolean
   };
 }
 
+export function stableTileKey(tileX: number, tileZ: number): string {
+  return `${tileX}:${tileZ}`;
+}
+
+/** @deprecated Use stableTileKey — ring is metadata, not tile identity. */
 export function tileKeyString(key: CanopyWorldKey): string {
-  return `${key.ring}:${key.tileX}:${key.tileZ}`;
+  return stableTileKey(key.tileX, key.tileZ);
 }
 
 export function emptyCanopySummaryCell(): CanopySummaryCell {

@@ -13,6 +13,7 @@ export interface FarTerrainVertexColors {
   macro: Float32Array;
   slope: Float32Array;
   materialWeights: Float32Array;
+  normals?: Float32Array;
 }
 
 export interface FarTerrainUniformRefs {
@@ -159,7 +160,7 @@ export function computeFarTerrainVertexColors(
     materialWeights[vi * 5 + 4] = matResult.weights.snow;
   }
 
-  return { baseColor, debugBand, macro, slope, materialWeights };
+  return { baseColor, debugBand, macro, slope, materialWeights, normals };
 }
 
 export function createVertexColorBuffer(
@@ -170,33 +171,61 @@ export function createVertexColorBuffer(
   const colors = new Float32Array(count * 3);
 
   const quality = config.materialQuality;
+  const isFullDebug = quality === "full_debug";
+  const isCheapTriplanar = quality === "cheap_triplanar_debug";
+  const isSingleProj = quality === "single_projection_far";
   const isAtlasDebug = quality === "atlas_only_debug";
+  const normals = vertexColors.normals;
 
   for (let vi = 0; vi < count; vi++) {
-    if (config.debugShowMaterialBands > 0 || isAtlasDebug) {
+    if (config.debugShowMaterialBands > 0 || isFullDebug || isAtlasDebug) {
       colors[vi * 3] = vertexColors.debugBand[vi * 3];
       colors[vi * 3 + 1] = vertexColors.debugBand[vi * 3 + 1];
       colors[vi * 3 + 2] = vertexColors.debugBand[vi * 3 + 2];
-    } else if (config.debugShowSlope > 0) {
-      colors[vi * 3] = vertexColors.slope[vi];
-      colors[vi * 3 + 1] = 0;
-      colors[vi * 3 + 2] = 0;
+    } else if (config.debugShowSlope > 0 || isCheapTriplanar) {
+      const s = isCheapTriplanar ? vertexColors.slope[vi] : vertexColors.slope[vi];
+      colors[vi * 3] = 0.3 + s * 0.3;
+      colors[vi * 3 + 1] = 0.4 - s * 0.2;
+      colors[vi * 3 + 2] = 0.2 + s * 0.1;
     } else if (config.debugShowMacroNoise > 0) {
-      colors[vi * 3] = vertexColors.macro[vi];
+      const m = vertexColors.macro[vi];
+      colors[vi * 3] = m;
       colors[vi * 3 + 1] = 0;
       colors[vi * 3 + 2] = 0;
     } else if (config.debugShowFarNormals > 0) {
-      colors[vi * 3] = 0.5;
-      colors[vi * 3 + 1] = 0.5;
-      colors[vi * 3 + 2] = 0.5;
+      if (normals) {
+        const nx = normals[vi * 3];
+        const ny = normals[vi * 3 + 1];
+        const nz = normals[vi * 3 + 2];
+        colors[vi * 3] = 0.5 + 0.5 * nx;
+        colors[vi * 3 + 1] = 0.5 + 0.5 * ny;
+        colors[vi * 3 + 2] = 0.5 + 0.5 * nz;
+      } else {
+        colors[vi * 3] = 0.5;
+        colors[vi * 3 + 1] = 0.5;
+        colors[vi * 3 + 2] = 0.75;
+      }
     } else if (config.debugShowHazeFactor > 0) {
-      colors[vi * 3] = 0;
-      colors[vi * 3 + 1] = 0;
-      colors[vi * 3 + 2] = 0;
-    } else {
+      const s = vertexColors.slope[vi];
+      const haze = s * 0.6 + vertexColors.macro[vi] * 0.2;
+      colors[vi * 3] = haze;
+      colors[vi * 3 + 1] = haze * 0.85;
+      colors[vi * 3 + 2] = haze * 0.95;
+    } else if (isSingleProj) {
       colors[vi * 3] = vertexColors.baseColor[vi * 3];
       colors[vi * 3 + 1] = vertexColors.baseColor[vi * 3 + 1];
       colors[vi * 3 + 2] = vertexColors.baseColor[vi * 3 + 2];
+    } else {
+      let r = vertexColors.baseColor[vi * 3];
+      let g = vertexColors.baseColor[vi * 3 + 1];
+      let b = vertexColors.baseColor[vi * 3 + 2];
+      const m = vertexColors.macro[vi];
+      r *= 1 + (m - 0.5) * 0.18;
+      g *= 1 + (m - 0.5) * 0.18;
+      b *= 1 + (m - 0.5) * 0.18;
+      colors[vi * 3] = Math.min(1, Math.max(0, r));
+      colors[vi * 3 + 1] = Math.min(1, Math.max(0, g));
+      colors[vi * 3 + 2] = Math.min(1, Math.max(0, b));
     }
   }
 

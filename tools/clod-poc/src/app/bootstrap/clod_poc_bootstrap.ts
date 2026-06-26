@@ -15,7 +15,7 @@ import { runUiStartup } from "./ui/ui_startup.js";
 import { surfaceHeightCore } from "../../gpu/terrain_field_core.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
-import { InfiniteFarShell, createFarShellMetrics, DEFAULT_LONG_VIEW_CONFIG, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
+import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
 import type { FarShellMetrics } from "../../long-view/index.js";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
@@ -146,7 +146,7 @@ export async function bootstrapClodPoc() {
   let farShellMetrics: FarShellMetrics | undefined;
 
   if (isLongViewCapableScene) {
-    const lvConfig = { ...DEFAULT_LONG_VIEW_CONFIG };
+    const lvConfig = createDefaultLongViewConfig();
 
     if (queryScene === "long-view-8km" || queryScene === "infinite-far-shell-straight" || queryScene === "infinite-far-shell-fast-turn" || queryScene === "infinite-far-shell-mountain-approach") {
       lvConfig.targetVisibleMeters = 8192;

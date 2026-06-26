@@ -206,13 +206,12 @@ export function createShadowProxyController(
     applyDebugConfig() {
       const next = { ...deps.getConfig() };
       const geometryChanged = geometryConfigChanged(config, next);
+      const summaryChanged = builtSummaryRef !== deps.getTerrainSummary();
       config = next;
-      if (config.debugFreezeProxy && frozenGeometry && !geometryChanged) {
-        updateShadowProxyDebugMaterial(runtime, config);
-      } else if (builtSummaryRef !== deps.getTerrainSummary() || geometryChanged) {
+      if (summaryChanged || geometryChanged) {
         rebuildProxy(true);
       } else {
-        rebuildProxy(true);
+        updateShadowProxyDebugMaterial(runtime, config);
       }
       if (sunLight) {
         configureLongViewSunShadows(sunLight, config, { castShadow: sunShadowsEnabled() });

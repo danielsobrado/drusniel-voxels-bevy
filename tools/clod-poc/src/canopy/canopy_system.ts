@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
-import { FAR_SHELL_DEFAULTS } from "../app/clod_constants.js";
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import {
   applyCanopyShellQueryOverrides,
@@ -11,7 +10,7 @@ import {
 import type { CanopyTextureSet } from "./canopy_types.js";
 import { canopyMetricsToCounters, createEmptyCanopyMetrics } from "./canopy_types.js";
 import { createCanopyClipmap } from "./canopy_clipmap.js";
-import { createBlendedTerrainSampler } from "./canopy_terrain_sampler.js";
+import { createBlendedTerrainSampler, type CanopyTerrainSampler } from "./canopy_terrain_sampler.js";
 import { createTreeDistribution } from "./deterministic_tree_distribution.js";
 import {
   createCanopyDebugOverlays,
@@ -26,7 +25,6 @@ import {
 } from "./canopy_texture.js";
 import {
   buildFarCanopyShellFromTextureSet,
-  updateFarCanopyShellTextures,
   type FarCanopyShell,
 } from "../gpu/far_canopy_shell.js";
 
@@ -49,6 +47,15 @@ export interface CanopyShellSystem {
   dispose(): void;
 }
 
+export function shouldRebuildCanopyShell(
+  prev: CanopyTextureSet | null,
+  next: CanopyTextureSet,
+): boolean {
+  if (!prev) return true;
+  if (prev.syntheticFallback !== next.syntheticFallback) return true;
+  return prev.revision !== next.revision;
+}
+
 export function createCanopyShellSystem(
   yamlText: string,
   searchParams: URLSearchParams,
@@ -62,8 +69,11 @@ export function createCanopyShellSystem(
 
   const clipmap = createCanopyClipmap();
   const treeDistribution = createTreeDistribution(config.treeDistribution, config.seed);
-  const farRadius = deps.worldSizeCells * FAR_SHELL_DEFAULTS.radiusFactor;
-  const terrainSampler = createBlendedTerrainSampler(deps.terrainSummary, farRadius);
+  let terrainSampler: CanopyTerrainSampler = createBlendedTerrainSampler(
+    deps.terrainSummary,
+    config.distances.shellEndM,
+  );
+  let terrainSamplerRadius = config.distances.shellEndM;
   const debugState = createCanopyDebugState(config);
   const overlays = createCanopyDebugOverlays(deps.scene);
 
@@ -106,8 +116,9 @@ export function createCanopyShellSystem(
   };
 
   const ensureTextures = (forceSynthetic: boolean) => {
+    const farRadius = config.distances.shellEndM;
     const useSynthetic = forceSynthetic
-      || (config.debug.forceSyntheticSource)
+      || config.debug.forceSyntheticSource
       || (clipmap.getVisibleTiles().length === 0 && config.source.allowSyntheticDebugFallback);
 
     const t0 = performance.now();
@@ -125,14 +136,7 @@ export function createCanopyShellSystem(
     metrics.uploadMs = performance.now() - t0;
     metrics.textureUploads++;
 
-    if (!textureSet || next.syntheticFallback !== textureSet.syntheticFallback) {
-      disposeCanopyTextureSet(textureSet);
-      textureSet = next;
-      rebuildShell(next);
-    } else if (shell) {
-      updateFarCanopyShellTextures(shell, next);
-      textureSet = next;
-    } else {
+    if (shouldRebuildCanopyShell(textureSet, next)) {
       disposeCanopyTextureSet(textureSet);
       textureSet = next;
       rebuildShell(next);
@@ -141,6 +145,10 @@ export function createCanopyShellSystem(
 
   const update = (cameraX: number, cameraZ: number) => {
     config = deps.getConfig();
+    if (config.distances.shellEndM !== terrainSamplerRadius) {
+      terrainSamplerRadius = config.distances.shellEndM;
+      terrainSampler = createBlendedTerrainSampler(deps.terrainSummary, terrainSamplerRadius);
+    }
     clipmap.setFreezeCenter(config.debug.freezeClipCenter || debugState.freezeClipCenter);
     const clipUpdate = clipmap.update(cameraX, cameraZ, config, terrainSampler, treeDistribution);
     centerX = clipUpdate.centerX;

@@ -53,7 +53,7 @@ import {
   createCanopyShellSystem,
   type CanopyShellSystem,
 } from "../../canopy/canopy_system.js";
-import { canopyDebugStateToConfig, createCanopyDebugState } from "../../canopy/canopy_debug.js";
+import { applyConfigToCanopyDebugState, createCanopyDebugState } from "../../canopy/canopy_debug.js";
 import type { CanopyShellConfig } from "../../canopy/canopy_types_internal.js";
 import type { CanopyDebugState } from "../../canopy/canopy_debug.js";
 import materialsYaml from "../../../config/long_view_materials.yaml?raw";
@@ -549,7 +549,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     setCanopyConfig: (config: CanopyShellConfig) => {
       liveCanopyConfig = { ...config };
       if (canopyDebugState) {
-        Object.assign(canopyDebugState, canopyDebugStateToConfig(canopyDebugState, config));
+        applyConfigToCanopyDebugState(canopyDebugState, config);
       }
     },
     shadowProxyController,

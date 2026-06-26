@@ -92,7 +92,7 @@ describe("parseWaterConfig", () => {
 
     const cfg = resolveWaterConfig(parsed, 128);
     expect(cfg.fakeBodies.rivers[0].points).toHaveLength(5);
-    expect(cfg.visual.alpha).toBeCloseTo(0.82);
+    expect(cfg.visual.alpha).toBeCloseTo(0.90);
     expect(cfg.visual.foam.noiseScale).toBeGreaterThan(0);
     expect(cfg.visual.fresnel.normalFlatten).toBeGreaterThan(0);
     expect(cfg.visual.color.depthScale).toBeGreaterThan(0);

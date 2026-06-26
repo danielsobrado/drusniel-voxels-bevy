@@ -310,13 +310,15 @@ function readLakeBody(value: unknown, fallback: LakeBodyConfig): LakeBodyConfig 
 
 function readRiverBody(value: unknown, fallback: RiverBodyConfig): RiverBodyConfig {
   const record = (value ?? {}) as Record<string, unknown>;
-  const points = Array.isArray(record.points)
+  const pointsExplicit = Array.isArray(record.points);
+  const points = pointsExplicit
     ? record.points.map((point, index) => readNumberTuple(point, fallback.points[index] ?? [0, 0]))
     : fallback.points.map((point) => [...point] as [number, number]);
   const rawPointsNorm = record.points_norm ?? record.pointsNorm;
-  const pointsNorm = Array.isArray(rawPointsNorm)
+  const pointsNormExplicit = Array.isArray(rawPointsNorm);
+  const pointsNorm = pointsNormExplicit
     ? rawPointsNorm.map((point, index) => readNumberTuple(point, fallback.pointsNorm?.[index] ?? [0, 0]))
-    : fallback.pointsNorm?.map((point) => [...point] as [number, number]);
+    : pointsExplicit ? undefined : fallback.pointsNorm?.map((point) => [...point] as [number, number]);
   return {
     points,
     pointsNorm,
@@ -513,4 +515,78 @@ export function parseWaterConfigYaml(source: string): WaterConfig {
       wireframe: readBoolean((waterRecord.debug as Record<string, unknown> | undefined)?.wireframe, DEFAULT_WATER_CONFIG.debug.wireframe),
     },
   };
+}
+
+function isWaterDebugModeId(value: unknown): value is WaterDebugModeId {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 14;
+}
+
+function warnWater(message: string, warn?: ((message: string) => void) | null): void {
+  warn?.(`[water-config] ${message}`);
+}
+
+function riverHasValidPoints(river: RiverBodyConfig): boolean {
+  if (river.points.length >= 2) return true;
+  return (river.pointsNorm?.length ?? 0) >= 2;
+}
+
+export function parseWaterConfig(
+  text: string | null | undefined,
+  warn: ((message: string) => void) | null = console.warn,
+): WaterConfig {
+  const fallback = cloneWaterConfig();
+  if (!text || text.trim() === "") return fallback;
+
+  let config: WaterConfig;
+  try {
+    config = parseWaterConfigYaml(text);
+  } catch (error) {
+    warnWater(
+      `failed to parse config/water.yaml; using defaults: ${error instanceof Error ? error.message : String(error)}`,
+      warn ?? undefined,
+    );
+    return fallback;
+  }
+
+  const debugMode = isWaterDebugModeId(config.debug.mode)
+    ? config.debug.mode
+    : DEFAULT_WATER_CONFIG.debug.mode;
+
+  const rivers: RiverBodyConfig[] = [];
+  for (const [idx, river] of config.fakeBodies.rivers.entries()) {
+    if (!riverHasValidPoints(river)) {
+      warnWater(
+        `skipping river entry ${idx}: expected at least 2 valid points or points_norm entries`,
+        warn ?? undefined,
+      );
+      continue;
+    }
+    rivers.push(river);
+  }
+
+  if (debugMode === config.debug.mode && rivers.length === config.fakeBodies.rivers.length) {
+    return config;
+  }
+
+  return {
+    ...config,
+    debug: { ...config.debug, mode: debugMode },
+    fakeBodies: { ...config.fakeBodies, rivers },
+  };
+}
+
+/** Resolves normalized fake bodies to absolute coordinate space. */
+export function resolveWaterConfig(config: WaterConfig, worldCells: number): WaterConfig {
+  const resolved = cloneWaterConfig(config);
+  for (const lake of resolved.fakeBodies.lakes) {
+    if (lake.centerNorm) {
+      lake.center = [lake.centerNorm[0] * worldCells, lake.centerNorm[1] * worldCells];
+    }
+  }
+  for (const river of resolved.fakeBodies.rivers) {
+    if (river.pointsNorm) {
+      river.points = river.pointsNorm.map((point) => [point[0] * worldCells, point[1] * worldCells]);
+    }
+  }
+  return resolved;
 }

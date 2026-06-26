@@ -85,6 +85,8 @@ function parseConfig(raw: Record<string, unknown> | undefined, fallback: Config)
       enabled: readBoolean(clipmap.enabled, fallback.clipmap.enabled),
       tileSizeM: readNumber(clipmap.tile_size_m, fallback.clipmap.tileSizeM),
       cellSizeM: readNumber(clipmap.cell_size_m, fallback.clipmap.cellSizeM),
+      evictionGraceSeconds: readNumber(clipmap.eviction_grace_seconds, fallback.clipmap.evictionGraceSeconds),
+      evictionGraceTiles: Math.floor(readNumber(clipmap.eviction_grace_tiles, fallback.clipmap.evictionGraceTiles)),
       rings: parseRings(clipmap.rings, fallback.clipmap.rings),
     },
     treeDistribution: {

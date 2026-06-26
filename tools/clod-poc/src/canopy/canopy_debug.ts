@@ -44,6 +44,18 @@ export function canopyDebugStateToConfig(
   };
 }
 
+export function applyConfigToCanopyDebugState(
+  state: CanopyDebugState,
+  config: CanopyShellConfig,
+): void {
+  state.showTileBounds = config.debug.showTileBounds;
+  state.showCoverageHeatmap = config.debug.showCoverageHeatmap;
+  state.showShellWireframe = config.debug.showShellWireframe;
+  state.showFadeZone = config.debug.showFadeZone;
+  state.freezeClipCenter = config.debug.freezeClipCenter;
+  state.forceSyntheticSource = config.debug.forceSyntheticSource;
+}
+
 export function formatCanopyStatsLine(
   metrics: CanopyMetrics,
   syntheticFallback: boolean,

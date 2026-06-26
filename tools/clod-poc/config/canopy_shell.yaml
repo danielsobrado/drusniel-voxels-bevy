@@ -19,6 +19,8 @@ canopy_shell:
     enabled: true
     tile_size_m: 512
     cell_size_m: 8
+    eviction_grace_seconds: 4.0
+    eviction_grace_tiles: 2
     rings:
       - { start_m: 512, end_m: 2048, cell_size_m: 8 }
       - { start_m: 2048, end_m: 4096, cell_size_m: 16 }

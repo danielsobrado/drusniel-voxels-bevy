@@ -1,6 +1,6 @@
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import type { CanopyMetrics, CanopySummaryTile, CanopyWorldKey } from "./canopy_types.js";
-import { createEmptyCanopyMetrics, tileKeyString } from "./canopy_types.js";
+import { createEmptyCanopyMetrics, stableTileKey } from "./canopy_types.js";
 import { buildCanopySummaryTile, tileResolutionForCellSize } from "./canopy_summary_builder.js";
 import type { CanopyTerrainSampler } from "./canopy_terrain_sampler.js";
 import type { TreeDistribution } from "./deterministic_tree_distribution.js";
@@ -27,21 +27,21 @@ export interface CanopyClipmap {
   dispose(): void;
 }
 
-function ringForDistance(dist: number, config: CanopyShellConfig): number {
+export function ringForDistance(dist: number, config: CanopyShellConfig): number | null {
   for (let i = 0; i < config.clipmap.rings.length; i++) {
     const ring = config.clipmap.rings[i];
     if (dist >= ring.startM && dist < ring.endM) return i;
   }
-  return config.clipmap.rings.length - 1;
+  return null;
 }
 
-function wantedTileKeys(
+function wantedTileMap(
   cameraX: number,
   cameraZ: number,
   config: CanopyShellConfig,
-): CanopyWorldKey[] {
+): Map<string, CanopyWorldKey> {
   const { tileSizeM } = config.clipmap;
-  const keys: CanopyWorldKey[] = [];
+  const wanted = new Map<string, CanopyWorldKey>();
   const maxEnd = config.distances.shellEndM + tileSizeM;
   const tileRadius = Math.ceil(maxEnd / tileSizeM);
   const centerTileX = Math.floor(cameraX / tileSizeM);
@@ -54,15 +54,18 @@ function wantedTileKeys(
       const dist = Math.hypot(tileCenterX - cameraX, tileCenterZ - cameraZ);
       if (dist > maxEnd) continue;
       const ring = ringForDistance(dist, config);
-      keys.push({ tileX: tx, tileZ: tz, ring });
+      if (ring === null) continue;
+      wanted.set(stableTileKey(tx, tz), { tileX: tx, tileZ: tz, ring });
     }
   }
-  return keys;
+  return wanted;
 }
 
 export function createCanopyClipmap(): CanopyClipmap {
   const tiles = new Map<string, CanopySummaryTile>();
-  const queue: CanopyWorldKey[] = [];
+  const tileRing = new Map<string, number>();
+  const staleSince = new Map<string, number>();
+  const rebuildQueue: CanopyWorldKey[] = [];
   let metrics = createEmptyCanopyMetrics();
   let freezeCenter = false;
   let frozenX = 0;
@@ -105,32 +108,55 @@ export function createCanopyClipmap(): CanopyClipmap {
       lastCenterX = centerX;
       lastCenterZ = centerZ;
 
-      const wanted = wantedTileKeys(centerX, centerZ, config);
-      metrics.requestedTiles = wanted.length;
+      const wanted = wantedTileMap(centerX, centerZ, config);
+      metrics.requestedTiles = wanted.size;
       metrics.builtThisFrame = 0;
       metrics.evictedTiles = 0;
 
-      const wantedSet = new Set(wanted.map(tileKeyString));
-      for (const key of [...tiles.keys()]) {
-        if (!wantedSet.has(key)) {
-          tiles.delete(key);
+      rebuildQueue.length = 0;
+      for (const [stableKey, key] of wanted) {
+        const existingRing = tileRing.get(stableKey);
+        if (!tiles.has(stableKey) || existingRing !== key.ring) {
+          rebuildQueue.push(key);
+        }
+        staleSince.delete(stableKey);
+      }
+
+      for (const stableKey of tiles.keys()) {
+        if (!wanted.has(stableKey) && !staleSince.has(stableKey)) {
+          staleSince.set(stableKey, performance.now());
+        }
+      }
+
+      const graceMs = config.clipmap.evictionGraceSeconds * 1000;
+      const tileSizeM = config.clipmap.tileSizeM;
+      const evictionDist = config.distances.shellEndM + config.clipmap.evictionGraceTiles * tileSizeM;
+      for (const [stableKey, staleAt] of [...staleSince.entries()]) {
+        const tile = tiles.get(stableKey);
+        if (!tile) {
+          staleSince.delete(stableKey);
+          continue;
+        }
+        const cx = tile.originX + tileSizeM * 0.5;
+        const cz = tile.originZ + tileSizeM * 0.5;
+        const dist = Math.hypot(cx - centerX, cz - centerZ);
+        if (performance.now() - staleAt >= graceMs || dist > evictionDist) {
+          tiles.delete(stableKey);
+          tileRing.delete(stableKey);
+          staleSince.delete(stableKey);
           metrics.evictedTiles++;
         }
       }
 
-      queue.length = 0;
-      for (const key of wanted) {
-        const k = tileKeyString(key);
-        if (!tiles.has(k)) queue.push(key);
-      }
-      metrics.queuedTiles = queue.length;
-
+      metrics.queuedTiles = rebuildQueue.length;
       const budget = config.budgets.maxTilesBuiltPerFrame;
       let built = 0;
-      while (built < budget && queue.length > 0) {
-        const key = queue.shift()!;
+      while (built < budget && rebuildQueue.length > 0) {
+        const key = rebuildQueue.shift()!;
+        const stableKey = stableTileKey(key.tileX, key.tileZ);
         const tile = buildTile(key, config, terrainSampler, treeDistribution);
-        tiles.set(tileKeyString(key), tile);
+        tiles.set(stableKey, tile);
+        tileRing.set(stableKey, key.ring);
         built++;
       }
       metrics.builtThisFrame = built;
@@ -154,7 +180,7 @@ export function createCanopyClipmap(): CanopyClipmap {
 
       return {
         metrics: { ...metrics },
-        texturesDirty: built > 0 || metrics.evictedTiles > 0,
+        texturesDirty: built > 0 || metrics.evictedTiles > 0 || rebuildQueue.length > 0,
         centerX,
         centerZ,
       };
@@ -175,12 +201,16 @@ export function createCanopyClipmap(): CanopyClipmap {
     disposeFarTiles() {
       const n = tiles.size;
       tiles.clear();
-      queue.length = 0;
+      tileRing.clear();
+      staleSince.clear();
+      rebuildQueue.length = 0;
       metrics.evictedTiles += n;
     },
     dispose() {
       tiles.clear();
-      queue.length = 0;
+      tileRing.clear();
+      staleSince.clear();
+      rebuildQueue.length = 0;
     },
   };
 }
