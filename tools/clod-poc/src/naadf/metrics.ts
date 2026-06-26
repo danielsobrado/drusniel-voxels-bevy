@@ -55,6 +55,13 @@ export type NaadfPocMetricsSnapshot = Readonly<{
   sunStepsP50: number;
   sunStepsP95: number;
   aadfSkips: number;
+  hddaRays: number;
+  hddaSpanSteps: number;
+  hddaChunkSkips: number;
+  hddaBlockSkips: number;
+  hddaVoxelSteps: number;
+  hddaDenseMismatches: number;
+  hddaFallbackToDense: number;
   visibleHoles: number;
   farShellSamples: number;
   farShellMissingSamples: number;
@@ -78,6 +85,13 @@ export class NaadfMetricsCollector {
   missingSamples = 0;
   unknownSunSamples = 0;
   aadfSkips = 0;
+  hddaRays = 0;
+  hddaSpanSteps = 0;
+  hddaChunkSkips = 0;
+  hddaBlockSkips = 0;
+  hddaVoxelSteps = 0;
+  hddaDenseMismatches = 0;
+  hddaFallbackToDense = 0;
   visibleHoles = 0;
   farShellSamples = 0;
   farShellMissingSamples = 0;
@@ -95,6 +109,13 @@ export class NaadfMetricsCollector {
     this.missingSamples = 0;
     this.unknownSunSamples = 0;
     this.aadfSkips = 0;
+    this.hddaRays = 0;
+    this.hddaSpanSteps = 0;
+    this.hddaChunkSkips = 0;
+    this.hddaBlockSkips = 0;
+    this.hddaVoxelSteps = 0;
+    this.hddaDenseMismatches = 0;
+    this.hddaFallbackToDense = 0;
     this.farShellSamples = 0;
     this.farShellMissingSamples = 0;
     this.canopySamples = 0;
@@ -120,6 +141,13 @@ export class NaadfMetricsCollector {
       sunStepsP50: this.sunSteps.percentile(0.5),
       sunStepsP95: this.sunSteps.percentile(0.95),
       aadfSkips: this.aadfSkips,
+      hddaRays: this.hddaRays,
+      hddaSpanSteps: this.hddaSpanSteps,
+      hddaChunkSkips: this.hddaChunkSkips,
+      hddaBlockSkips: this.hddaBlockSkips,
+      hddaVoxelSteps: this.hddaVoxelSteps,
+      hddaDenseMismatches: this.hddaDenseMismatches,
+      hddaFallbackToDense: this.hddaFallbackToDense,
       visibleHoles: this.visibleHoles,
       farShellSamples: this.farShellSamples,
       farShellMissingSamples: this.farShellMissingSamples,
@@ -146,6 +174,13 @@ export class NaadfMetricsCollector {
       naadf_primary_steps_p95: s.primaryStepsP95,
       naadf_sun_steps_p95: s.sunStepsP95,
       naadf_aadf_skips: s.aadfSkips,
+      naadf_hdda_rays: s.hddaRays,
+      naadf_hdda_span_steps: s.hddaSpanSteps,
+      naadf_hdda_chunk_skips: s.hddaChunkSkips,
+      naadf_hdda_block_skips: s.hddaBlockSkips,
+      naadf_hdda_voxel_steps: s.hddaVoxelSteps,
+      naadf_hdda_dense_mismatches: s.hddaDenseMismatches,
+      naadf_hdda_fallback_to_dense: s.hddaFallbackToDense,
       naadf_visible_holes: s.visibleHoles,
       naadf_far_shell_samples: s.farShellSamples,
       naadf_far_shell_missing: s.farShellMissingSamples,
