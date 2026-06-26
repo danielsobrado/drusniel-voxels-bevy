@@ -1,4 +1,4 @@
-﻿import phase0ConfigText from "../../../config/infinite_streaming_phase0.yaml?raw";
+import phase0ConfigText from "../../../config/infinite_streaming_phase0.yaml?raw";
 import naadfConfigText from "../../../config/naadf_poc.yaml?raw";
 import { installGlobalErrorHooks } from "../../core/diagnostics.js";
 import { parseClodRuntimeConfig } from "../runtime_config.js";
@@ -23,7 +23,6 @@ import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/l
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 import * as THREE from "three";
-
 
 export async function bootstrapClodPoc() {
   const searchParams = new URLSearchParams(location.search);
@@ -332,3 +331,43 @@ export async function bootstrapClodPoc() {
     staleEditedAncestorIds: postRenderer.terrainEdit.staleEditedAncestorIds,
     selectionQueryFlags: {
       queryGrassPerfScene: queries.queryGrassPerfScene,
+      queryTreePerfScene: queries.queryTreePerfScene,
+      queryForestFloorScene: queries.queryForestFloorScene,
+    },
+    longView: {
+      hooks: postRenderer.longViewHooks,
+      settleWaiters: postRenderer.longViewSettleWaiters,
+      isLongView: postRenderer.isLongView,
+      phase0TargetVisibleM: queries.phase0TargetVisibleM,
+      phase0Config: queries.phase0Config,
+      queryScene: queries.queryScene,
+      phase0VelocityX: queries.phase0VelocityX,
+      phase0VelocityZ: queries.phase0VelocityZ,
+      phase0Streaming: queries.phase0Streaming,
+      infiniteFarShell,
+      farShellMetrics,
+    },
+    onFarSummaryUpdate: farSummaryIntegration || naadfIntegration
+      ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+          if (farSummaryIntegration) {
+            farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
+          }
+          naadfIntegration?.update(frameIndex, deltaSeconds, camera);
+          if (infiniteFarShell) {
+            infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
+          }
+          terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
+        }
+      : terrainView.shadowProxyController
+          ? (_frameIndex: number, _deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+              terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
+            }
+          : undefined,
+    naadfIntegration,
+    getClodErrorCompute: postRenderer.getClodErrorCompute,
+    ensureClodErrorCompute: postRenderer.ensureClodErrorCompute,
+    textureLoadOptions: postRenderer.textureLoadOptions,
+    treeConfig: world.treeConfig,
+    understoryConfig: world.understoryConfig,
+  });
+}
