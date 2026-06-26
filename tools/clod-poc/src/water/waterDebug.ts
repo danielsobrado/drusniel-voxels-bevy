@@ -1,6 +1,6 @@
 // Water debug UI helper. Adds lil-gui folders for water debug, shore surf,
-// river tuning, and live river stats. River generation controls rebuild through
-// URL params because hydrology is built before the renderer starts.
+// river tuning, live river stats, and river ecology inspection. River generation
+// controls rebuild through URL params because hydrology is built before the renderer starts.
 import type GUI from "lil-gui";
 import { type WaterDebugMode, type WaterVisualConfig, WATER_DEBUG_MODES } from "./waterConfig.js";
 import { DEFAULT_SHORE_SURF_BAND_SETTINGS } from "./waterField.js";
@@ -143,6 +143,11 @@ function makeEmptyRiverStats(): WaterRiverDebugStats {
   };
 }
 
+function setWaterDebugMode(state: WaterDebugState, bindings: WaterDebugBindings, mode: WaterDebugMode): void {
+  state.mode = mode;
+  bindings.onMode(mode);
+}
+
 function addRiverStatsFolder(parent: GUI, bindings: WaterDebugBindings): { refresh: () => void } {
   const folder = parent.addFolder("river stats");
   const stats = makeEmptyRiverStats();
@@ -168,6 +173,43 @@ function addRiverStatsFolder(parent: GUI, bindings: WaterDebugBindings): { refre
       refresh();
       folder.controllers.forEach((controller) => controller.updateDisplay());
     },
+  };
+}
+
+function addRiverEcologyDebugFolder(
+  parent: GUI,
+  state: WaterDebugState,
+  bindings: WaterDebugBindings,
+): { refresh: () => void } {
+  const folder = parent.addFolder("river ecology debug");
+  const actions = {
+    showClassification: () => setWaterDebugMode(state, bindings, "classification"),
+    showCarvedBed: () => setWaterDebugMode(state, bindings, "carvedBed"),
+    showWaterY: () => setWaterDebugMode(state, bindings, "waterY"),
+    showFlow: () => setWaterDebugMode(state, bindings, "flow"),
+    showFoam: () => setWaterDebugMode(state, bindings, "foam"),
+    showFinal: () => setWaterDebugMode(state, bindings, "final"),
+  };
+  folder.add(actions, "showClassification").name("show classification");
+  folder.add(actions, "showCarvedBed").name("show carved bed");
+  folder.add(actions, "showWaterY").name("show water Y");
+  folder.add(actions, "showFlow").name("show flow");
+  folder.add(actions, "showFoam").name("show foam");
+  folder.add(actions, "showFinal").name("back to final");
+
+  const readout = {
+    grass: "clear 0.35m; low 0.8-4.2m; moist 3.2-11m",
+    understory: "clear 0.45m; fern 1.2-8m; shrub 5.5-18m",
+    trees: "clear 1.5m; sparse inner 2.5-13m; outer 9-32m",
+    stones: "wet reject; dry streambed edge; deeper sink",
+  };
+  folder.add(readout, "grass").name("grass bands").disable();
+  folder.add(readout, "understory").name("understory bands").disable();
+  folder.add(readout, "trees").name("tree bands").disable();
+  folder.add(readout, "stones").name("stone bands").disable();
+
+  return {
+    refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()),
   };
 }
 
@@ -232,6 +274,7 @@ export function addWaterDebugFolder(
   rivers.add({ apply: () => reloadWithRiverState(state) }, "apply").name("apply + rebuild");
 
   const riverStats = addRiverStatsFolder(folder, bindings);
+  const riverEcologyDebug = addRiverEcologyDebugFolder(folder, state, bindings);
 
   const shoreSurf = folder.addFolder("shore surf");
   shoreSurf.add(state, "oceanEnabled").name("enabled").onChange((enabled: boolean) => {
@@ -252,6 +295,7 @@ export function addWaterDebugFolder(
       folder.controllers.forEach((controller) => controller.updateDisplay());
       rivers.controllers.forEach((controller) => controller.updateDisplay());
       riverStats.refresh();
+      riverEcologyDebug.refresh();
       shoreSurf.controllers.forEach((controller) => controller.updateDisplay());
     },
   };
