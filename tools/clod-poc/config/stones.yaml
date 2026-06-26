@@ -34,40 +34,40 @@ terrain:
   high_height_m: 78.0
   height_blend_m: 12.0
   grass:
-    density: 0.58
-    large: 0.45
-    medium: 0.85
-    small: 1.45
+    density: 0.52
+    large: 0.38
+    medium: 0.82
+    small: 1.55
   rock:
-    density: 1.25
-    large: 1.35
-    medium: 1.10
-    small: 0.82
+    density: 1.35
+    large: 1.48
+    medium: 1.12
+    small: 0.72
   sand:
-    density: 0.90
-    large: 0.80
-    medium: 1.10
-    small: 1.10
-  snow:
     density: 0.72
-    large: 1.75
-    medium: 1.05
-    small: 0.38
+    large: 0.58
+    medium: 0.95
+    small: 1.15
+  snow:
+    density: 0.58
+    large: 2.05
+    medium: 0.95
+    small: 0.24
   low:
-    density: 0.82
-    large: 0.75
-    medium: 1.00
-    small: 1.18
+    density: 0.78
+    large: 0.68
+    medium: 0.98
+    small: 1.22
   mid:
     density: 1.00
     large: 1.00
     medium: 1.00
     small: 1.00
   high:
-    density: 1.15
-    large: 1.35
-    medium: 1.00
-    small: 0.68
+    density: 1.18
+    large: 1.50
+    medium: 0.90
+    small: 0.55
 
 debug:
   class_colors: false
