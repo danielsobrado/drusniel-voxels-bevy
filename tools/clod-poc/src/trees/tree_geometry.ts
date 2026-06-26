@@ -13,6 +13,7 @@ const OAK_LEAF_LOW = new THREE.Color(0x2c6f36);
 const OAK_LEAF_HIGH = new THREE.Color(0x4f9a42);
 const PINE_LEAF_LOW = new THREE.Color(0x1d4e32);
 const PINE_LEAF_HIGH = new THREE.Color(0x367142);
+const DEFAULT_TREE_VARIANT = 0;
 
 export function createTreeGeometryMap(settings: TreeSettings): TreeGeometryMap {
   const out = {} as TreeGeometryMap;
@@ -32,19 +33,17 @@ export function disposeTreeGeometryMap(map: TreeGeometryMap): void {
 }
 
 /**
- * Stable signature of every setting that `createTreeGeometry` consumes: seed,
- * foliage card layout/atlas, LOD vertex budgets, and per-species trunk/crown
- * dimensions + morphology. Compare two keys to decide whether tree geometry must
- * be rebuilt, instead of a fragile `settings.species` object-reference compare.
+ * Stable signature of every setting that `createTreeGeometry` consumes. Compare
+ * two keys to decide whether tree geometry must be rebuilt, instead of a fragile
+ * `settings.species` object-reference compare.
  */
 export function treeGeometryKey(settings: TreeSettings): string {
   return JSON.stringify({
     seed: settings.seed,
-    foliage: settings.foliage,
     budgets: settings.lod.budgets,
     species: TREE_SPECIES.map((species) => {
       const config = settings.species[species];
-      return [config.trunkHeightM, config.trunkRadiusM, config.crownRadiusM, config.morphology];
+      return [config.trunkHeightM, config.trunkRadiusM, config.crownRadiusM];
     }),
   });
 }
@@ -127,9 +126,9 @@ function createTreeGeometry(species: TreeSpeciesId, lod: TreeLod, settings: Tree
     return geometry;
   }
 
-  // near / mid / far: procedural grammar (bark tubes + real leaf/needle meshes).
+  // All LODs derive from the same skeleton seed; only bark/foliage budgets vary.
   const sp = VEG_TREE_SPECIES[species];
-  const rng = vegRng(settings.seed, `tree/${species}/${lod}`);
+  const rng = vegRng(settings.seed, `tree/${species}/${DEFAULT_TREE_VARIANT}`);
   const built = buildTree(sp, rng, { lod: GRAMMAR_LOD[lod], barkColor: VEG_BARK_COLOR[species] });
   const geometry = built.geometry;
   const target = targetTreeHeight(species, config);
@@ -313,8 +312,6 @@ class GeometryBuilder {
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(this.normals, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(this.colors, 3));
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(this.uvs, 2));
-    // Wind (x) + flutter (y) packed into one vec2 buffer: keeps the tree node
-    // material at/under WebGPU's 8 vertex-buffer limit.
     const treeWind = new Float32Array(this.windWeights.length * 2);
     for (let i = 0; i < this.windWeights.length; i++) {
       treeWind[i * 2] = this.windWeights[i];
