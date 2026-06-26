@@ -22,6 +22,7 @@ export interface TreeStartupInput {
   gpuBackend: VegetationGpuBackend | null;
   currentLighting: () => EnvironmentLighting;
   statControllers: VegetationStatControllerRefs;
+  renderer: unknown;
 }
 
 export interface TreeStartupResult {
@@ -36,7 +37,7 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
   const {
     scene, state, lod0Nodes, worldCells, treeConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
-    currentLighting, statControllers,
+    currentLighting, statControllers, renderer,
   } = input;
 
   const treeStats = { current: null as TreeStats | null };
@@ -67,6 +68,16 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
   const treeSystem = treeController.system;
   const fallingTrees = treeController.fallingTrees;
   treeStats.current = treeSystem.getStats();
+
+  if (treeConfig.impostors.enabled && treeConfig.impostors.bakeOnStart) {
+    void treeController.bakeImpostors(renderer).then((result) => {
+      if (!result.supported) console.info(`[trees] impostor baking fallback: ${result.reason ?? "unsupported"}`);
+      treeController.refreshStats();
+    }).catch((error) => {
+      console.warn("[trees] impostor baking failed", error);
+      treeController.refreshStats();
+    });
+  }
 
   return {
     treeController, treeSystem, fallingTrees, treeStats, formatTreeGpuSummary,
