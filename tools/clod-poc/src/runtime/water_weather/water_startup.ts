@@ -72,7 +72,12 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
       })
     : null;
   const deepOceanSurface = deepOceanMaterial
-    ? createDeepOceanSurface(worldCells, borderCoastOceanConfig.deepOcean, deepOceanMaterial.material)
+    ? createDeepOceanSurface(
+        worldCells,
+        borderCoastOceanConfig.deepOcean,
+        deepOceanMaterial.material,
+        borderCoastOceanConfig.coast.oceanStartCells,
+      )
     : null;
   if (deepOceanSurface) scene.add(deepOceanSurface.mesh);
 
