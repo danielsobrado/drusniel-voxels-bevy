@@ -63,6 +63,20 @@ describe("deep ocean surface", () => {
     surface.dispose();
   });
 
+  it("keeps diagnostics counts equal to generated geometry when the core collapses", () => {
+    const worldCells = 128;
+    const innerBand = worldCells * 0.5;
+    const config = {
+      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
+      extendCells: 32,
+      segments: 4,
+    };
+    const surface = createDeepOceanSurface(worldCells, config, new THREE.MeshBasicMaterial(), innerBand)!;
+    const positions = surface.mesh.geometry.getAttribute("position");
+    expect(positions.count).toBe(deepOceanSurfaceVertexCount(worldCells, config, innerBand));
+    surface.dispose();
+  });
+
   it("keeps CPU geometry immutable because waves run in the GPU material", () => {
     const worldCells = 128;
     const config = {
