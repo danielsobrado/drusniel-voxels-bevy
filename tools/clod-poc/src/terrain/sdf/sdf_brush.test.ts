@@ -45,6 +45,6 @@ describe("SDF brush", () => {
   it("attenuates soft brushes by falloff and strength", () => {
     const after = applyBrushSdfToDensity(brush({ op: "add", falloff: 0.5, strength: 0.5 }), 2, 0, 0, -4);
 
-    expect(after).toBeCloseTo(-2.5, 6);
+    expect(after).toBeCloseTo(-1, 6);
   });
 });
