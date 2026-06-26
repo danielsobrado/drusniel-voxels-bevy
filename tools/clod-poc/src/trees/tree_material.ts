@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
-import type { TreeFoliageAtlas } from "./tree_alpha_mask.js";
+import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   createForestLightingUniforms,
@@ -54,7 +54,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     transparent: false,
     depthWrite: true,
   });
-  applyFoliageMaterialSettings(regularMaterial, (atlas) => {
+  applyFoliageMaterialSettings(regularMaterial, settings, (atlas) => {
     foliageAtlas?.dispose();
     foliageAtlas = atlas;
   });
@@ -79,7 +79,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     },
     updateSettings(nextSettings: TreeSettings) {
       updateTreeWindUniforms(uniforms, nextSettings);
-      applyFoliageMaterialSettings(regularMaterial, (atlas) => {
+      applyFoliageMaterialSettings(regularMaterial, nextSettings, (atlas) => {
         foliageAtlas?.dispose();
         foliageAtlas = atlas;
       });
@@ -202,16 +202,23 @@ function attachTreeShader(
 
 function applyFoliageMaterialSettings(
   material: THREE.MeshStandardMaterial,
+  settings: TreeSettings,
   replaceAtlas: (atlas: TreeFoliageAtlas | null) => void,
 ): void {
   material.side = THREE.DoubleSide;
   material.transparent = false;
   material.depthWrite = true;
-  // Foliage is real leaf/needle geometry lit by vertex colour now — the alpha-card
-  // atlas + cutout is retired, so no map and no alpha test (opaque meshes).
-  material.alphaTest = 0;
-  material.map = null;
-  replaceAtlas(null);
+  if (!settings.foliage.enabled) {
+    material.alphaTest = 0;
+    material.map = null;
+    replaceAtlas(null);
+    material.needsUpdate = true;
+    return;
+  }
+  const atlas = createTreeFoliageAtlas(settings);
+  material.alphaTest = settings.foliage.alphaTest;
+  material.map = atlas.texture;
+  replaceAtlas(atlas);
   material.needsUpdate = true;
 }
 
