@@ -88,6 +88,7 @@ export function carveRiversAndClassifyWater(
 
 function ensureVisibleFallbackRivers(grid: HydrologyGrid, config: HydrologyRiversConfig): void {
   if (!config.guaranteeFallbackRivers) return;
+  if (grid.res < 16) return;
   const minimumRiverCells = Math.max(grid.res * 2.25, grid.res * grid.res * 0.006);
   if (countRiverCells(grid) >= minimumRiverCells) return;
 

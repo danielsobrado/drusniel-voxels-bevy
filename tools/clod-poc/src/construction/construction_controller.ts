@@ -120,7 +120,13 @@ class ConstructionControllerImpl implements ConstructionController {
 
     const piece = this.selectedPiece();
     const ray = this.readAimRay();
-    const terrainHit = ray ? this.raycastTerrain(ray) : null;
+    if (!ray) {
+      this.currentCandidate = null;
+      this.ghostMesh.visible = false;
+      this.syncUi();
+      return;
+    }
+    const terrainHit = this.raycastTerrain(ray);
     if (!terrainHit) {
       this.currentCandidate = null;
       this.ghostMesh.visible = false;
@@ -455,7 +461,7 @@ class ConstructionControllerImpl implements ConstructionController {
         <span>State: ${escapeHtml(status)}</span>
       </div>
     `;
-    for (const button of this.menu.querySelectorAll<HTMLButtonElement>("button[data-piece-index]")) {
+    for (const button of Array.from(this.menu.querySelectorAll<HTMLButtonElement>("button[data-piece-index]"))) {
       Object.assign(button.style, {
         padding: "6px 7px",
         border: "1px solid #46515e",

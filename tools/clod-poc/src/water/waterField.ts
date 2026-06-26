@@ -135,6 +135,14 @@ function buildRiverRuntime(river: RiverBodyConfig, sampler: TerrainHeightSampler
     levelPrefix.push(totalLength);
   }
   const levels = points.map((p) => sampler.surfaceHeight(p[0], p[1]) + river.levelOffset);
+  if (river.downstreamDrop > 0 && levels.length > 1) {
+    const startLevel = levels[0];
+    const endLevel = Math.min(levels[levels.length - 1], startLevel - river.downstreamDrop);
+    for (let i = 1; i < levels.length; i++) {
+      const progress = levelPrefix[i] / Math.max(1e-3, totalLength);
+      levels[i] = Math.min(levels[i], startLevel + (endLevel - startLevel) * progress);
+    }
+  }
   for (let i = 1; i < levels.length; i++) levels[i] = Math.min(levels[i], levels[i - 1] - 0.02);
   if (river.downstreamDrop > 0 && levels.length > 1) {
     levels[levels.length - 1] = Math.min(levels[levels.length - 1], levels[0] - river.downstreamDrop);
@@ -530,7 +538,7 @@ export class WaterField {
             bestFlowX = dirX;
             bestFlowZ = dirZ;
             bestFlowProgress = Math.min(1, Math.max(0, bestAccLen / river.totalLength));
-            bestFlowDrop = cascadeWhitewaterDrop(segDrop, bestFlowSpeed);
+            bestFlowDrop = Math.max(segDrop, river.downstreamDrop);
           }
         }
       }
