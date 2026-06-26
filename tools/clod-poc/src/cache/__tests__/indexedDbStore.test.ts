@@ -3,8 +3,8 @@ import {
   createPersistentStore,
   resolveBrokerPersistentConfig,
   resolvePersistentConfig,
-  WorkerRemotePersistentStore,
 } from "../indexedDbStore.js";
+import { WorkerRemotePersistentStore } from "../workerRemotePersistentStore.js";
 
 describe("persistent config roles", () => {
   const base = {
@@ -31,7 +31,7 @@ describe("persistent config roles", () => {
   it("uses broker database name on main thread", () => {
     const resolved = resolveBrokerPersistentConfig(base);
     expect(resolved.enabled).toBe(true);
-    expect(resolved.database_name).toBe("drusniel-clod-poc-cache-pages");
+    expect(resolved.database_name).toBe("drusniel-clod-poc-cache-pages-v2");
   });
 
   it("createPersistentStore worker role does not throw on persistent config shape", () => {

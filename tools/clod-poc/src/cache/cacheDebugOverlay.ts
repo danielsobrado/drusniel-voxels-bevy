@@ -9,6 +9,7 @@ import {
   getWorkerCacheBuildStats,
   getWorkerCacheServiceMetrics,
 } from "./cacheMetricsBridge.js";
+import { attachDebugPanelChrome } from "../ui/debug_panel_chrome.js";
 
 export interface CacheDebugOverlay {
   element: HTMLElement;
@@ -24,10 +25,11 @@ export function createCacheDebugOverlay(deps: CacheDebugOverlayDeps = {}): Cache
   const ctx = getClodCacheContext();
   if (!ctx?.config.debug.expose_overlay_stats) return null;
 
-  const root = document.createElement("section");
-  root.className = "clod-cache-overlay";
-  root.innerHTML = `
-    <header><strong>CLOD Cache</strong></header>
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+
+  const content = document.createElement("div");
+  content.innerHTML = `
     <pre data-cache-stats></pre>
     <div class="clod-cache-overlay-actions">
       <button type="button" data-cache-clear-memory>Clear memory</button>
@@ -36,23 +38,37 @@ export function createCacheDebugOverlay(deps: CacheDebugOverlayDeps = {}): Cache
       <button type="button" data-cache-dump-metrics>Dump metrics</button>
     </div>
   `;
-  root.style.cssText = `
-    position: fixed; right: 12px; top: 120px; z-index: 9000;
-    background: rgba(10,14,20,0.88); color: #c8e6ff; font: 11px/1.35 monospace;
-    padding: 8px 10px; border: 1px solid rgba(120,180,255,0.35); border-radius: 6px;
-    max-width: 320px; pointer-events: auto;
-  `;
-  const actions = root.querySelector<HTMLElement>(".clod-cache-overlay-actions")!;
+  host.appendChild(content);
+
+  const chrome = attachDebugPanelChrome(host, {
+    panelId: "clod-cache",
+    title: "CLOD Cache",
+    floating: true,
+    defaultPosition: { left: 12, top: 120 },
+    onClose: () => host.remove(),
+  });
+
+  chrome.body.style.padding = "8px 10px";
+
+  const actions = chrome.body.querySelector<HTMLElement>(".clod-cache-overlay-actions")!;
   actions.style.display = "flex";
   actions.style.flexWrap = "wrap";
   actions.style.gap = "4px";
+  actions.style.marginTop = "6px";
   for (const btn of Array.from(actions.querySelectorAll("button"))) {
     (btn as HTMLButtonElement).style.fontSize = "10px";
   }
 
+  requestAnimationFrame(() => {
+    const rect = chrome.root.getBoundingClientRect();
+    if (rect.height > 0 && rect.top < 80) {
+      chrome.setPosition(12, Math.max(12, window.innerHeight - rect.height - 200));
+    }
+  });
+
   const update = () => {
     const active = getClodCacheContext();
-    const pre = root.querySelector<HTMLElement>("[data-cache-stats]")!;
+    const pre = chrome.body.querySelector<HTMLElement>("[data-cache-stats]")!;
     if (!active) {
       pre.textContent = "cache: not initialized";
       return;
@@ -60,14 +76,14 @@ export function createCacheDebugOverlay(deps: CacheDebugOverlayDeps = {}): Cache
     pre.textContent = formatCombinedMetrics(active.config.enabled, active.service.getMetrics());
   };
 
-  root.querySelector<HTMLButtonElement>("[data-cache-clear-memory]")!.onclick = () => {
+  chrome.body.querySelector<HTMLButtonElement>("[data-cache-clear-memory]")!.onclick = () => {
     const active = getClodCacheContext();
     if (!active) return;
     active.service.clearMemory();
     update();
   };
 
-  root.querySelector<HTMLButtonElement>("[data-cache-clear-persistent]")!.onclick = async () => {
+  chrome.body.querySelector<HTMLButtonElement>("[data-cache-clear-persistent]")!.onclick = async () => {
     const active = getClodCacheContext();
     if (!active) return;
     active.service.clearMemory();
@@ -79,12 +95,12 @@ export function createCacheDebugOverlay(deps: CacheDebugOverlayDeps = {}): Cache
     update();
   };
 
-  root.querySelector<HTMLButtonElement>("[data-cache-disable-session]")!.onclick = () => {
+  chrome.body.querySelector<HTMLButtonElement>("[data-cache-disable-session]")!.onclick = () => {
     setCacheSessionDisabled(true);
     update();
   };
 
-  root.querySelector<HTMLButtonElement>("[data-cache-dump-metrics]")!.onclick = () => {
+  chrome.body.querySelector<HTMLButtonElement>("[data-cache-dump-metrics]")!.onclick = () => {
     const active = getClodCacheContext();
     if (!active) return;
     console.log("[clod-cache-metrics]", {
@@ -94,14 +110,13 @@ export function createCacheDebugOverlay(deps: CacheDebugOverlayDeps = {}): Cache
     });
   };
 
-  document.body.appendChild(root);
   update();
 
   return {
-    element: root,
+    element: chrome.root,
     update,
     destroy() {
-      root.remove();
+      host.remove();
     },
   };
 }

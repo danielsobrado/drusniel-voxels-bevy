@@ -6,7 +6,8 @@ import { WorkerRemotePersistentStore } from "./workerRemotePersistentStore.js";
 
 const DB_VERSION = 2;
 const ARTIFACTS_STORE = "artifacts";
-const RECREATE_DELAY_MS = 100;
+const RECREATE_DELAY_MS = 150;
+const MAX_IDB_RECOVERY_ATTEMPTS = 3;
 
 /** IndexedDB-safe record: Uint8Array clones reliably in workers. */
 interface IdbStoredRecord {
@@ -17,6 +18,7 @@ interface IdbStoredRecord {
 const LEGACY_DATABASE_NAMES = [
   "drusniel-clod-poc-cache",
   "drusniel-clod-poc-cache-worker",
+  "drusniel-clod-poc-cache-pages",
 ];
 
 export interface PersistentCacheStore {
@@ -125,7 +127,7 @@ export class IndexedDbStore implements PersistentCacheStore {
   private readonly config: ClodCachePersistentConfig;
   private db: IDBDatabase | null = null;
   private dbPromise: Promise<IDBDatabase> | null = null;
-  private recoveryAttempted = false;
+  private recoveryAttempts = 0;
 
   get dbName(): string {
     return this.config.database_name;
@@ -167,14 +169,18 @@ export class IndexedDbStore implements PersistentCacheStore {
   }
 
   private async withRecovery<T>(op: () => Promise<T>): Promise<T> {
-    try {
-      return await op();
-    } catch (error) {
-      if (!isRetryableIdbError(error) || this.recoveryAttempted) throw error;
-      this.recoveryAttempted = true;
-      cacheLogger.warn(`IndexedDB error [${(error as DOMException).name}], recreating db ${this.dbName}`);
-      await this.recreateDatabase();
-      return await op();
+    for (;;) {
+      try {
+        return await op();
+      } catch (error) {
+        if (!isRetryableIdbError(error) || this.recoveryAttempts >= MAX_IDB_RECOVERY_ATTEMPTS) throw error;
+        this.recoveryAttempts++;
+        cacheLogger.warn(
+          `IndexedDB error [${(error as DOMException).name}], recreating db ${this.dbName} ` +
+          `(attempt ${this.recoveryAttempts}/${MAX_IDB_RECOVERY_ATTEMPTS})`,
+        );
+        await this.recreateDatabase();
+      }
     }
   }
 
@@ -300,7 +306,7 @@ export function resolveBrokerPersistentConfig(
   return {
     ...config,
     enabled: config.enabled,
-    database_name: `${config.database_name}-pages`,
+    database_name: `${config.database_name}-pages-v2`,
   };
 }
 

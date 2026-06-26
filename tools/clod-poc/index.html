@@ -21,20 +21,8 @@
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
         backdrop-filter: blur(5px);
       }
+      #clod-overlay[hidden] { display: none; }
       #info-panel[hidden] { display: none; }
-      .info-panel-header {
-        display: flex; align-items: center; justify-content: space-between; gap: 8px;
-        padding: 4px 7px 0;
-        font: 10px/1.2 system-ui, -apple-system, Segoe UI, sans-serif;
-        color: #9fb0c0;
-      }
-      #info-close {
-        width: 20px; height: 20px; padding: 0; flex: none;
-        border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 3px;
-        color: #dce5ee; background: rgba(255, 255, 255, 0.06); cursor: pointer;
-        font: 14px/1 sans-serif;
-      }
-      #info-close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
       #info {
         position: static; color: #eef3f8;
         padding: 4px 9px 7px; border: none; background: transparent; box-shadow: none;
@@ -42,15 +30,18 @@
         pointer-events: none; box-sizing: border-box;
         text-shadow: 0 1px 1px #000;
       }
-      #info-reopen {
+      #info-reopen,
+      #clod-runtime-reopen {
         pointer-events: auto; align-self: flex-start;
         padding: 3px 8px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 999px;
         color: #cdd8e3; background: rgba(8, 9, 12, 0.42); cursor: pointer;
         font: 10px/1.2 system-ui, -apple-system, Segoe UI, sans-serif;
         backdrop-filter: blur(4px);
       }
-      #info-reopen[hidden] { display: none; }
-      #info-reopen:hover { color: #fff; background: rgba(8, 9, 12, 0.62); }
+      #info-reopen[hidden],
+      #clod-runtime-reopen[hidden] { display: none; }
+      #info-reopen:hover,
+      #clod-runtime-reopen:hover { color: #fff; background: rgba(8, 9, 12, 0.62); }
       @media (max-width: 760px) {
         #clod-left-stack { width: calc(100vw - 22px); }
       }
@@ -319,12 +310,9 @@
     <div id="clod-left-stack">
       <div id="clod-overlay" aria-label="CLOD runtime overlay"></div>
       <aside id="info-panel" aria-label="Runtime debug stats">
-        <header class="info-panel-header">
-          <span>Debug stats</span>
-          <button id="info-close" type="button" title="Hide stats" aria-label="Hide stats">×</button>
-        </header>
         <div id="info">building…</div>
       </aside>
+      <button id="clod-runtime-reopen" type="button" hidden>Show runtime</button>
       <button id="info-reopen" type="button" hidden>Show stats</button>
     </div>
     <nav id="project-toolbar" aria-label="Project and community links">

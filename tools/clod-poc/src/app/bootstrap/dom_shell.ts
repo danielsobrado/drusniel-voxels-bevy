@@ -1,4 +1,5 @@
 import { createClodOverlay } from "../../ui/overlay_panel.js";
+import { attachDebugPanelChrome } from "../../ui/debug_panel_chrome.js";
 import { setButtonIcon, setIconOnlyButton } from "../../ui/dom_icons.js";
 
 export interface DomShell {
@@ -19,15 +20,32 @@ export interface DomShell {
 export function initDomShell(): DomShell {
   const info = document.getElementById("info")!;
   const infoPanel = document.getElementById("info-panel")!;
-  const infoClose = document.getElementById("info-close") as HTMLButtonElement;
   const infoReopen = document.getElementById("info-reopen") as HTMLButtonElement;
+  const runtimeReopen = document.getElementById("clod-runtime-reopen") as HTMLButtonElement;
   const setInfoPanelVisible = (visible: boolean) => {
     infoPanel.hidden = !visible;
     infoReopen.hidden = visible;
   };
-  infoClose.addEventListener("click", () => setInfoPanelVisible(false));
+  const setRuntimePanelVisible = (visible: boolean) => {
+    const runtimeRoot = document.getElementById("clod-overlay")!;
+    runtimeRoot.hidden = !visible;
+    runtimeReopen.hidden = visible;
+  };
   infoReopen.addEventListener("click", () => setInfoPanelVisible(true));
-  createClodOverlay(document.getElementById("clod-overlay")!);
+  runtimeReopen.addEventListener("click", () => setRuntimePanelVisible(true));
+
+  const clodOverlayRoot = document.getElementById("clod-overlay")!;
+  createClodOverlay(clodOverlayRoot);
+  attachDebugPanelChrome(clodOverlayRoot, {
+    panelId: "clod-runtime",
+    title: "CLOD Runtime",
+    onClose: () => setRuntimePanelVisible(false),
+  });
+  attachDebugPanelChrome(infoPanel, {
+    panelId: "debug-stats",
+    title: "Debug stats",
+    onClose: () => setInfoPanelVisible(false),
+  });
 
   const importButton = document.getElementById("project-import") as HTMLButtonElement;
   const exportButton = document.getElementById("project-export") as HTMLButtonElement;

@@ -99,7 +99,7 @@ Debug overlay buttons:
 - **Clear memory** — main-thread runtime LRU cache only
 - **Clear persistent** — clears main memory cache and worker IndexedDB artifacts (`drusniel-clod-poc-cache-pages`) via worker message
 
-Or delete the IndexedDB database `drusniel-clod-poc-cache-pages` in browser devtools.
+Or delete the IndexedDB database `drusniel-clod-poc-cache-pages-v2` in browser devtools.
 
 ## Cold / warm validation
 
@@ -122,7 +122,7 @@ Document your numbers in console via **Dump metrics** after each run.
 
 ## Known limitations
 
-- **Main-thread broker** (`drusniel-clod-poc-cache-pages`): sole IndexedDB owner; CLOD worker uses RPC for get/put/clear (avoids worker IndexedDB `UnknownError` on some Windows/Chrome builds)
+- **Main-thread broker** (`drusniel-clod-poc-cache-pages-v2`): sole IndexedDB owner; CLOD worker uses RPC for get/put/clear
 - **Main terrain summary**: memory cache only
 - Eviction manifest is **memory-only**; IndexedDB manifest persistence was removed after worker `UnknownError` issues
 - Frame budget enforcement in the scheduler is approximate (see TODO in `cacheScheduler.ts`)

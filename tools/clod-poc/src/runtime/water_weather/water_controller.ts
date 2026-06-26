@@ -11,6 +11,7 @@ import {
   type WaterConfig,
   type WaterDebugState,
 } from "../../water/index.js";
+import { defaultWaterDebugState } from "../../water/waterDebug.js";
 import type { HydrologySystem } from "../../water/hydrologySystem.js";
 import { createWaterShaderMaterial } from "../../water/waterMaterial.js";
 
@@ -157,6 +158,10 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
 
   let devLogged = false;
   const debugState: WaterDebugState = {
+    ...defaultWaterDebugState({
+      ...deps.waterConfig.visual,
+      depthWrite: ui.waterDepthWrite,
+    }),
     enabled: ui.waterEnabled,
     mode: ui.waterDebugMode,
     clipmapTint: ui.waterClipmapTint,
@@ -166,6 +171,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     oceanStartDistance: shoreSurfSettings.startDistance,
     oceanFullDepthDistance: shoreSurfSettings.fullSurfDistance,
     oceanMaxDepth: shoreSurfSettings.maxShallowDepth,
+    riverSource: deps.waterConfig.source,
   };
 
   const makeVisual = () => ({

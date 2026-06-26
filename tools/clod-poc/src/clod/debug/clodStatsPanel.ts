@@ -1,34 +1,40 @@
 import type { ClodRuntimeStats } from "../runtime/clodRuntimeTypes.js";
 import { formatStatsText } from "../runtime/clodRuntimeStats.js";
+import { attachDebugPanelChrome } from "../../ui/debug_panel_chrome.js";
 
 export class ClodStatsPanel {
-  private readonly container: HTMLElement;
+  private readonly chromeRoot: HTMLElement;
+  private readonly pre: HTMLPreElement;
   private visible = true;
-  private pre: HTMLPreElement;
 
   constructor(container: HTMLElement) {
-    this.container = container;
+    const host = document.createElement("div");
+    container.appendChild(host);
+
     this.pre = document.createElement("pre");
     this.pre.className = "clod-stats-panel";
     this.pre.style.cssText = `
-      position: fixed;
-      bottom: 8px;
-      left: 8px;
-      background: rgba(0,0,0,0.75);
       color: #9fef9f;
       font: 11px/1.4 monospace;
-      padding: 6px 10px;
-      border-radius: 4px;
-      pointer-events: none;
-      z-index: 100;
       margin: 0;
+      white-space: pre-wrap;
     `;
-    this.container.appendChild(this.pre);
+    host.appendChild(this.pre);
+
+    const chrome = attachDebugPanelChrome(host, {
+      panelId: "clod-stats",
+      title: "CLOD Stats",
+      floating: true,
+      defaultPosition: { left: 8, top: Math.max(12, window.innerHeight - 220) },
+      onClose: () => host.remove(),
+    });
+    chrome.body.style.padding = "6px 10px";
+    this.chromeRoot = chrome.root;
   }
 
   setVisible(visible: boolean): void {
     this.visible = visible;
-    this.pre.hidden = !visible;
+    this.chromeRoot.hidden = !visible;
   }
 
   update(stats: ClodRuntimeStats): void {
@@ -37,6 +43,6 @@ export class ClodStatsPanel {
   }
 
   dispose(): void {
-    this.pre.remove();
+    this.chromeRoot.parentElement?.remove();
   }
 }
