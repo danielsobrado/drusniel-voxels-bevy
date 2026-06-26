@@ -51,6 +51,13 @@ export function runPlayerStartup(
       bindings.syncTerraformMenu();
       updateInfo();
     },
+    cycleBrushShape: () => {
+      const shapes = ["sphere", "cube", "cylinder"] as const;
+      const current = shapes.indexOf(state.brushShape);
+      state.brushShape = shapes[(current + 1) % shapes.length];
+      bindings.syncTerraformMenu();
+      updateInfo();
+    },
   });
 
   const playerModeController = createPlayerModeController({

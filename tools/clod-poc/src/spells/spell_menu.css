@@ -24,6 +24,10 @@ body[data-player-mode="choosingSpawn"] #spell-menu {
   display: none;
 }
 
+.spell-menu-hidden {
+  display: none !important;
+}
+
 .spell-menu-title {
   color: var(--clod-gold, #e9c96a);
   font-family: var(--clod-title-font, Georgia, serif);

@@ -23,6 +23,7 @@ export interface PlayerInputControllerDeps {
   onPlayerModeUiChange: () => void;
   exitPlayerMode: () => void;
   adjustDigRadius: (delta: number) => void;
+  cycleBrushShape: () => void;
 }
 
 export interface PlayerInputController {
@@ -159,6 +160,10 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
     if (event.code === "KeyD") playerInput.right = 1;
     if (event.code === "ShiftLeft" || event.code === "ShiftRight") playerInput.sprint = true;
     if (event.code === "Space") playerInput.jump = true;
+    if (event.code === "KeyG") {
+      deps.cycleBrushShape();
+      return;
+    }
   });
   window.addEventListener("keyup", (event) => {
     if (event.code === "Tab" && deps.interaction.mode === "playing" && tabUiHold) {
