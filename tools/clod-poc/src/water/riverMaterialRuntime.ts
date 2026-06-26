@@ -9,6 +9,11 @@ export interface RiverMaterialSettings {
   cascadeStepStrength: number;
   cascadeRoughnessStrength: number;
   cascadeWhitewaterBoost: number;
+  wetBankStrength: number;
+  wetBankDistanceM: number;
+  wetRockDarkening: number;
+  foamResidueStrength: number;
+  foamResidueDropStart: number;
   flowNormalStrength: number;
   crossCurrentStrength: number;
   rapidNormalBoost: number;
@@ -30,6 +35,11 @@ export const DEFAULT_RIVER_MATERIAL_SETTINGS: RiverMaterialSettings = {
   cascadeStepStrength: 0.16,
   cascadeRoughnessStrength: 0.08,
   cascadeWhitewaterBoost: 1.65,
+  wetBankStrength: 0.72,
+  wetBankDistanceM: 5.5,
+  wetRockDarkening: 0.42,
+  foamResidueStrength: 0.58,
+  foamResidueDropStart: 0.55,
   flowNormalStrength: 1.4,
   crossCurrentStrength: 0.9,
   rapidNormalBoost: 1.35,
@@ -51,6 +61,11 @@ const PARAM_KEYS: Record<keyof RiverMaterialSettings, string> = {
   cascadeStepStrength: "riverCascadeStep",
   cascadeRoughnessStrength: "riverCascadeRoughness",
   cascadeWhitewaterBoost: "riverCascadeWhitewater",
+  wetBankStrength: "riverWetBank",
+  wetBankDistanceM: "riverWetBankDistance",
+  wetRockDarkening: "riverWetRockDarkening",
+  foamResidueStrength: "riverFoamResidue",
+  foamResidueDropStart: "riverFoamResidueDrop",
   flowNormalStrength: "riverFlowNormal",
   crossCurrentStrength: "riverCrossCurrent",
   rapidNormalBoost: "riverRapidNormal",
@@ -95,6 +110,11 @@ export function sanitizeRiverMaterialSettings(settings: RiverMaterialSettings): 
     cascadeStepStrength: clampFinite(settings.cascadeStepStrength, 0, 0.60, d.cascadeStepStrength),
     cascadeRoughnessStrength: clampFinite(settings.cascadeRoughnessStrength, 0, 0.40, d.cascadeRoughnessStrength),
     cascadeWhitewaterBoost: clampFinite(settings.cascadeWhitewaterBoost, 0, 5, d.cascadeWhitewaterBoost),
+    wetBankStrength: clampFinite(settings.wetBankStrength, 0, 2, d.wetBankStrength),
+    wetBankDistanceM: clampFinite(settings.wetBankDistanceM, 0.5, 24, d.wetBankDistanceM),
+    wetRockDarkening: clampFinite(settings.wetRockDarkening, 0, 1, d.wetRockDarkening),
+    foamResidueStrength: clampFinite(settings.foamResidueStrength, 0, 2, d.foamResidueStrength),
+    foamResidueDropStart: clampFinite(settings.foamResidueDropStart, 0, 8, d.foamResidueDropStart),
     flowNormalStrength: clampFinite(settings.flowNormalStrength, 0, 4, d.flowNormalStrength),
     crossCurrentStrength: clampFinite(settings.crossCurrentStrength, 0, 4, d.crossCurrentStrength),
     rapidNormalBoost: clampFinite(settings.rapidNormalBoost, 0, 4, d.rapidNormalBoost),
@@ -120,6 +140,11 @@ export function readRiverMaterialSettings(): RiverMaterialSettings {
     cascadeStepStrength: readNumber(params, PARAM_KEYS.cascadeStepStrength, d.cascadeStepStrength),
     cascadeRoughnessStrength: readNumber(params, PARAM_KEYS.cascadeRoughnessStrength, d.cascadeRoughnessStrength),
     cascadeWhitewaterBoost: readNumber(params, PARAM_KEYS.cascadeWhitewaterBoost, d.cascadeWhitewaterBoost),
+    wetBankStrength: readNumber(params, PARAM_KEYS.wetBankStrength, d.wetBankStrength),
+    wetBankDistanceM: readNumber(params, PARAM_KEYS.wetBankDistanceM, d.wetBankDistanceM),
+    wetRockDarkening: readNumber(params, PARAM_KEYS.wetRockDarkening, d.wetRockDarkening),
+    foamResidueStrength: readNumber(params, PARAM_KEYS.foamResidueStrength, d.foamResidueStrength),
+    foamResidueDropStart: readNumber(params, PARAM_KEYS.foamResidueDropStart, d.foamResidueDropStart),
     flowNormalStrength: readNumber(params, PARAM_KEYS.flowNormalStrength, d.flowNormalStrength),
     crossCurrentStrength: readNumber(params, PARAM_KEYS.crossCurrentStrength, d.crossCurrentStrength),
     rapidNormalBoost: readNumber(params, PARAM_KEYS.rapidNormalBoost, d.rapidNormalBoost),
