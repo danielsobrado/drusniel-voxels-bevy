@@ -7,10 +7,12 @@ import {
   getDigEditsSnapshot,
   getDigEditRevision,
   replaceDigEdits,
+  replaceVoxelEdits,
   setTerrainSurfaceOverride,
   setBorderCoastRuntime,
   parseBorderCoastOceanConfig,
   type BorderCoastOceanConfig,
+  type VoxelEditSnapshot,
 } from "../../terrain/terrain.js";
 import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
 import {
@@ -35,7 +37,6 @@ import { createProceduralTerrainTextures } from "../../textures/terrainTextureAr
 import { parseGrassConfig, applyGrassMaterialBiasFromYaml } from "../../grass.js";
 import { parseStoneConfig } from "../../stones/stone_config.js";
 import { parseTreeConfig, applyTreeMaterialBiasFromYaml } from "../../trees/index.js";
-import { parseUnderstoryConfig } from "../../understory/index.js";
 import {
   createForestLightingIntegrationWarner,
   parseForestLightingConfig,
@@ -117,6 +118,13 @@ export interface WorldBuildResult {
   hydrologySystem: HydrologySystem | null;
   polishLine: string;
   buildStatus: { value: string };
+}
+
+function importedVoxelSnapshot(stagedImport: ProjectArchiveContents | null): VoxelEditSnapshot | null {
+  const snapshot = (stagedImport?.manifest as { voxelTerrainEdits?: unknown } | undefined)?.voxelTerrainEdits;
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const candidate = snapshot as VoxelEditSnapshot;
+  return Array.isArray(candidate.deltas) && Number.isFinite(candidate.revision) ? candidate : null;
 }
 
 export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promise<WorldBuildResult> {
@@ -210,7 +218,9 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   if (cacheDisabled) setCacheSessionDisabled(true);
   clearWorkerCacheSnapshot();
 
-  if (stagedImport) replaceDigEdits(stagedImport.manifest.terrainEdits);
+  const voxelSnapshot = importedVoxelSnapshot(stagedImport);
+  if (voxelSnapshot) replaceVoxelEdits(voxelSnapshot);
+  else if (stagedImport) replaceDigEdits(stagedImport.manifest.terrainEdits);
 
   const preHydrologyTerrain = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
   const hydrologySystem = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
@@ -260,7 +270,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     longViewScene: queryLongViewScene,
   };
 
-  let cacheCtx: ClodCacheContext | null = await initClodCacheContext({
+  const cacheCtx: ClodCacheContext | null = await initClodCacheContext({
     cfg,
     worldPages: WORLD,
     terrainSource,
@@ -305,9 +315,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   );
   const terrainSummary = summaryResult.summary;
   publishTerrainSummaryForDiagnostics(terrainSummary);
-  if (cacheCtx) {
-    createCacheDebugOverlay();
-  }
+  if (cacheCtx) createCacheDebugOverlay();
 
   return {
     cfg,
