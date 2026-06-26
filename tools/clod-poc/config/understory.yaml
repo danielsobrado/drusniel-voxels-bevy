@@ -29,37 +29,37 @@ understory:
 
   terrain:
     grass:
-      density: 1.15
+      density: 1.20
       shrub: 1.00
-      fern: 1.15
-      sapling: 0.90
-      flower: 1.25
-      dead_log: 0.65
-      stump: 0.70
+      fern: 1.18
+      sapling: 0.92
+      flower: 1.30
+      dead_log: 0.60
+      stump: 0.65
     rock:
-      density: 0.55
-      shrub: 0.75
-      fern: 0.35
-      sapling: 0.70
-      flower: 0.18
-      dead_log: 1.25
-      stump: 1.20
+      density: 0.48
+      shrub: 0.62
+      fern: 0.24
+      sapling: 0.55
+      flower: 0.08
+      dead_log: 1.35
+      stump: 1.28
     sand:
-      density: 0.70
-      shrub: 0.55
-      fern: 0.35
-      sapling: 0.35
-      flower: 0.80
-      dead_log: 0.55
-      stump: 0.50
+      density: 0.62
+      shrub: 0.44
+      fern: 0.22
+      sapling: 0.24
+      flower: 0.75
+      dead_log: 0.48
+      stump: 0.44
     snow:
-      density: 0.28
-      shrub: 0.42
-      fern: 0.18
-      sapling: 0.22
-      flower: 0.05
-      dead_log: 1.45
-      stump: 1.25
+      density: 0.18
+      shrub: 0.30
+      fern: 0.10
+      sapling: 0.12
+      flower: 0.02
+      dead_log: 1.60
+      stump: 1.35
 
   classes:
     shrub:
