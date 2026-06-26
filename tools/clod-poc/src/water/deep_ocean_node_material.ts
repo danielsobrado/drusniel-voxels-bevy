@@ -13,7 +13,6 @@ import {
   mix,
   normalize,
   positionGeometry,
-  positionWorld,
   pow,
   reflect,
   sin,
@@ -72,22 +71,36 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
   let waveX: TslNode = float(0);
   let waveY: TslNode = float(0);
   let waveZ: TslNode = float(0);
+  let slopeX: TslNode = float(0);
+  let slopeZ: TslNode = float(0);
+  let jxx: TslNode = float(0);
+  let jzz: TslNode = float(0);
+  let jxz: TslNode = float(0);
   for (const wave of DEEP_OCEAN_GPU_WAVES) {
     const dirX = float(wave.dirX);
     const dirZ = float(wave.dirZ);
+    const k = float(wave.k);
     const amp = float(wave.amp);
-    const theta: TslNode = float(wave.k)
+    const choppiness = float(wave.choppiness);
+    const theta: TslNode = k
       .mul(dirX.mul(pos.x).add(dirZ.mul(pos.z)))
       .sub(float(wave.omega).mul(uTime))
       .add(float(wave.phase));
     const s: TslNode = sin(theta);
     const c: TslNode = cos(theta);
-    waveX = waveX.sub(amp.mul(dirX).mul(s).mul(wave.choppiness));
-    waveZ = waveZ.sub(amp.mul(dirZ).mul(s).mul(wave.choppiness));
+    waveX = waveX.sub(amp.mul(dirX).mul(s).mul(choppiness));
+    waveZ = waveZ.sub(amp.mul(dirZ).mul(s).mul(choppiness));
     waveY = waveY.add(amp.mul(c));
+    slopeX = slopeX.sub(amp.mul(k).mul(dirX).mul(s));
+    slopeZ = slopeZ.sub(amp.mul(k).mul(dirZ).mul(s));
+    jxx = jxx.sub(amp.mul(k).mul(dirX).mul(dirX).mul(c).mul(choppiness));
+    jzz = jzz.sub(amp.mul(k).mul(dirZ).mul(dirZ).mul(c).mul(choppiness));
+    jxz = jxz.sub(amp.mul(k).mul(dirX).mul(dirZ).mul(c).mul(choppiness));
   }
   const displacedPosition: TslNode = vec3(pos.x.add(waveX), pos.y.add(waveY), pos.z.add(waveZ));
-  const worldPos: TslNode = positionWorld;
+  const worldPos: TslNode = displacedPosition;
+  const jacobian: TslNode = float(1).add(jxx).mul(float(1).add(jzz)).sub(jxz.mul(jxz));
+  const waveCompression: TslNode = clamp(float(0.58).sub(jacobian).mul(1 / 0.58), 0.0, 1.0);
 
   const hashNoise = (uv: TslNode): TslNode => fract(sin(dot(uv, vec2(12.9898, 78.233))).mul(43758.5453));
 
@@ -117,7 +130,10 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const bumpBase: TslNode = hashNoise(bumpUv);
     const bumpX: TslNode = hashNoise(bumpUv.add(vec2(0.02, 0))).sub(bumpBase).mul(7.5);
     const bumpZ: TslNode = hashNoise(bumpUv.add(vec2(0, 0.02))).sub(bumpBase).mul(7.5);
-    const grad: TslNode = mix(vec3(gAx, 0, gAz), vec3(gBx, 0, gBz), blend).mul(uRippleAmp).add(vec3(bumpX.mul(0.18), 0, bumpZ.mul(0.18)));
+    const rippleGrad: TslNode = mix(vec3(gAx, 0, gAz), vec3(gBx, 0, gBz), blend).mul(uRippleAmp);
+    const detailGrad: TslNode = vec3(bumpX.mul(0.18), 0, bumpZ.mul(0.18));
+    const waveGrad: TslNode = vec3(slopeX, 0, slopeZ);
+    const grad: TslNode = rippleGrad.add(detailGrad).add(waveGrad);
     const normal: TslNode = normalize(vec3(grad.x.negate(), float(1.0), grad.z.negate()));
 
     const viewDir: TslNode = normalize(uCameraPos.sub(worldPos));
@@ -173,7 +189,8 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     );
 
     const crestFoam: TslNode = smoothstep(float(1.2), float(4.0), waveHeight).mul(smoothstep(float(0.36), float(0.82), foamNoise));
-    const foam: TslNode = smoothstep(float(0.70), float(0.96), foamNoise).mul(0.10).add(crestFoam.mul(0.34));
+    const compressionFoam: TslNode = smoothstep(float(0.04), float(0.55), waveCompression).mul(smoothstep(float(0.42), float(0.86), foamNoise));
+    const foam: TslNode = smoothstep(float(0.70), float(0.96), foamNoise).mul(0.10).add(crestFoam.mul(0.34)).add(compressionFoam.mul(0.38));
     const backlit: TslNode = pow(max(dot(viewDir, sunDir.negate()), float(0.0)), float(4.0)).mul(0.35);
     const crestScatter: TslNode = smoothstep(float(0.0), float(5.5), waveHeight).mul(0.38)
       .add(smoothstep(float(0.45), float(0.95), foamNoise).mul(0.20));
@@ -199,7 +216,8 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
   });
   material.name = "deep-ocean-node";
   material.positionNode = displacedPosition;
-  material.colorNode = fragment;
+  material.colorNode = fragment.xyz;
+  material.opacityNode = fragment.w;
 
   const uniforms: WaterUniforms & {
     uHorizonColor: { value: THREE.Color };

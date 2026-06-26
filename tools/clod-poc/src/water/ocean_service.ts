@@ -1,4 +1,5 @@
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
+import { sampleDeepOceanNormal, sampleDeepOceanWave } from "./deep_ocean_waves.js";
 
 /** Future boat gameplay seam: deep sea around the playable CLOD square. */
 export interface OceanSampler {
@@ -25,14 +26,18 @@ export function createDeepOceanSampler(
     worldCells,
     surfaceY,
     extendCells: extend,
-    sampleOceanHeight(_x, _z, _time) {
-      return surfaceY;
+    sampleOceanHeight(x, z, time) {
+      if (!this.isInPlayableOcean(x, z)) return Number.NaN;
+      return surfaceY + sampleDeepOceanWave(x, z, time).height;
     },
-    sampleOceanNormal(_x, _z, _time) {
-      return [0, 1, 0] as const;
+    sampleOceanNormal(x, z, time) {
+      if (!this.isInPlayableOcean(x, z)) return [0, 1, 0] as const;
+      return sampleDeepOceanNormal(x, z, time);
     },
-    sampleOceanCurrent(_x, _z, _time): readonly [number, number, number] {
-      return [0, 0, 0] as const;
+    sampleOceanCurrent(x, z, time): readonly [number, number, number] {
+      if (!this.isInPlayableOcean(x, z)) return [0, 0, 0] as const;
+      const wave = sampleDeepOceanWave(x, z, time);
+      return [wave.velocityX, 0, wave.velocityZ] as const;
     },
     isInPlayableOcean(x, z) {
       if (!config.enabled || worldCells <= 0) return false;
