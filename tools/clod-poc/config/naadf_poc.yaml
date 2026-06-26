@@ -69,6 +69,14 @@ naadf_poc:
     far_summary_lod_bias: 1.0
     unknown_counts_as_blocked_for_sun: true
 
+  traversal:
+    mode: dense
+    hdda_use_directional_bounds: false
+    hdda_max_chunk_steps: 512
+    hdda_max_block_steps: 2048
+    hdda_max_voxel_steps: 4096
+    compare_distance_epsilon_m: 0.001
+
   far_shell:
     mode: camera_relative_summary
     start_m: 4096
