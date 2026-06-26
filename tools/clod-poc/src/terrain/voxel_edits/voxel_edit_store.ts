@@ -1,4 +1,5 @@
 import type {
+  BaseDensitySampler,
   VoxelChunkKey,
   VoxelDelta,
   VoxelEditResult,
@@ -6,6 +7,10 @@ import type {
   VoxelEditTransaction,
 } from "./voxel_edit_types.js";
 import { voxelChunkKeyFor, voxelChunkKeyString, voxelKey } from "./voxel_keys.js";
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
 
 export class VoxelEditStore {
   private readonly voxels = new Map<string, VoxelDelta>();
@@ -87,6 +92,32 @@ export class VoxelEditStore {
 
   voxelAt(x: number, y: number, z: number): VoxelDelta | undefined {
     return this.voxels.get(voxelKey(Math.floor(x), Math.floor(y), Math.floor(z)));
+  }
+
+  sampleDensity(x: number, y: number, z: number, baseDensity: BaseDensitySampler): number {
+    if (this.voxels.size === 0) return baseDensity(x, y, z);
+
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    const z0 = Math.floor(z);
+    const tx = x - x0;
+    const ty = y - y0;
+    const tz = z - z0;
+    const at = (ix: number, iy: number, iz: number): number => this.voxelAt(ix, iy, iz)?.density ?? baseDensity(ix, iy, iz);
+
+    const c000 = at(x0, y0, z0);
+    const c100 = at(x0 + 1, y0, z0);
+    const c010 = at(x0, y0 + 1, z0);
+    const c110 = at(x0 + 1, y0 + 1, z0);
+    const c001 = at(x0, y0, z0 + 1);
+    const c101 = at(x0 + 1, y0, z0 + 1);
+    const c011 = at(x0, y0 + 1, z0 + 1);
+    const c111 = at(x0 + 1, y0 + 1, z0 + 1);
+    const c00 = lerp(c000, c100, tx);
+    const c10 = lerp(c010, c110, tx);
+    const c01 = lerp(c001, c101, tx);
+    const c11 = lerp(c011, c111, tx);
+    return lerp(lerp(c00, c10, ty), lerp(c01, c11, ty), tz);
   }
 
   materialAt(x: number, y: number, z: number): number | undefined {
