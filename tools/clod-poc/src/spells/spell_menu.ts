@@ -15,6 +15,7 @@ export interface SpellMenuDeps {
 export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   const config = deps.config ?? defaultSpellConfig;
   const root = deps.root ?? ensureMenuRoot(config.menu.rootId);
+  const shouldRemoveRoot = deps.root === undefined;
   const fireRenderer = new FireFlameRenderer(config.fire.vfx);
   const flameSfx = new FlameSfx();
   let activeReset = 0;
@@ -55,10 +56,14 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
     castFire,
     dispose: () => {
       window.clearTimeout(activeReset);
+      activeReset = 0;
       root.removeEventListener("pointerdown", stopUiPropagation);
       root.removeEventListener("click", stopUiPropagation);
+      fireButton.removeEventListener("click", castFire);
       fireRenderer.dispose();
-      root.remove();
+      flameSfx.dispose();
+      if (shouldRemoveRoot) root.remove();
+      else root.replaceChildren();
     },
   };
 }
