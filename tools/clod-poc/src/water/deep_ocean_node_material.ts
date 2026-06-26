@@ -91,30 +91,54 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const normal: TslNode = normalize(vec3(grad.x.negate(), float(1.0), grad.z.negate()));
 
     const viewDir: TslNode = normalize(uCameraPos.sub(worldPos));
+    const sunDir: TslNode = normalize(uSunDir);
     const fresnelNormal: TslNode = normalize(mix(normal, vec3(0, 1, 0), uFresnelNormalFlatten));
+    const ndotv: TslNode = max(dot(viewDir, fresnelNormal), float(0.0));
     const fres: TslNode = uFresnelBase.add(
-      float(1.0).sub(uFresnelBase).mul(pow(float(1.0).sub(max(dot(viewDir, fresnelNormal), float(0.0))), uFresnelPower)),
+      float(1.0).sub(uFresnelBase).mul(pow(float(1.0).sub(ndotv), uFresnelPower)),
     );
 
-    const waterColor: TslNode = mix(uShallow, uDeep, float(1.0));
-    const tinted: TslNode = mix(waterColor, uShallow, uTurbidity.mul(0.2));
-    const sunDir: TslNode = normalize(uSunDir);
-    const reflDir: TslNode = reflect(sunDir.negate(), normal);
-    const spec: TslNode = pow(max(dot(reflDir, viewDir), float(0.0)), float(48.0));
-    const lit: TslNode = tinted.add(spec.mul(0.18)).add(fres.mul(0.12));
+    const reflectDir: TslNode = normalize(reflect(viewDir.negate(), normal));
+    const reflY: TslNode = reflectDir.y;
+    const reflYClamped: TslNode = max(reflY, float(0.0));
+    const sunDot: TslNode = max(dot(reflectDir, sunDir), float(0.0));
+    const horizonColor: TslNode = mix(vec3(0.85, 0.55, 0.35), vec3(0.55, 0.70, 0.90), smoothstep(float(0.0), float(0.25), sunDir.y));
+    const skyGrad: TslNode = mix(horizonColor, vec3(0.12, 0.32, 0.72), smoothstep(float(0.0), float(0.6), reflYClamped));
+    const belowHorizon: TslNode = mix(vec3(0.035, 0.07, 0.16), vec3(0.07, 0.14, 0.28), smoothstep(float(-0.5), float(0.0), reflY));
+    const reflectedSky: TslNode = mix(belowHorizon, skyGrad, smoothstep(float(-0.25), float(0.12), reflY));
+    const mie: TslNode = vec3(1.0, 0.72, 0.42).mul(pow(sunDot, float(8.0)).mul(0.25))
+      .add(vec3(1.0, 0.95, 0.85).mul(pow(sunDot, float(64.0)).mul(1.2)));
+    const sunDisc: TslNode = vec3(1.0, 0.92, 0.75).mul(
+      pow(sunDot, float(512.0)).mul(4.5).add(pow(sunDot, float(128.0)).mul(1.4)),
+    );
+    const reflectionFloor: TslNode = vec3(0.035, 0.07, 0.14);
+    const skyReflection: TslNode = max(reflectedSky.add(mie).add(sunDisc), reflectionFloor).mul(0.88);
+
+    const deepBlue: TslNode = mix(vec3(0.0, 0.025, 0.10), uDeep, float(0.55));
+    const shallowTeal: TslNode = mix(uShallow, vec3(0.0, 0.45, 0.62), float(0.35));
+    const viewDepthTint: TslNode = smoothstep(float(0.0), float(0.55), float(1.0).sub(ndotv));
+    const waterColor: TslNode = mix(deepBlue, shallowTeal, viewDepthTint.mul(0.28).add(uTurbidity.mul(0.18)));
 
     const chopA: TslNode = sin(worldPos.x.mul(0.09).add(worldPos.z.mul(0.07)).add(uTime.mul(0.55))).mul(0.5).add(0.5);
     const chopB: TslNode = cos(worldPos.x.mul(0.06).sub(worldPos.z.mul(0.11)).sub(uTime.mul(0.41))).mul(0.5).add(0.5);
     const foamBlend: TslNode = mix(chopA, chopB, blend);
-    const chop: TslNode = smoothstep(0.42, 0.88, foamBlend);
-    const finalColor: TslNode = mix(lit, uFoam, chop.mul(0.35));
+    const foam: TslNode = smoothstep(float(0.58), float(0.93), foamBlend).mul(0.18);
+
+    const backlit: TslNode = pow(max(dot(viewDir, sunDir.negate()), float(0.0)), float(4.0)).mul(0.35);
+    const crestScatter: TslNode = smoothstep(float(0.45), float(0.95), foamBlend).mul(0.35);
+    const sss: TslNode = mix(vec3(0.01, 0.04, 0.14), shallowTeal, float(0.55)).mul(backlit.add(crestScatter));
+    const specDot: TslNode = max(dot(reflect(sunDir.negate(), normal), viewDir), float(0.0));
+    const sunSpec: TslNode = vec3(1.0, 0.92, 0.76).mul(pow(specDot, float(384.0)).mul(1.35).add(pow(specDot, float(96.0)).mul(0.32)));
+
+    const litWater: TslNode = mix(waterColor.add(sss).add(sunSpec), skyReflection, clamp(fres.mul(0.75), 0.0, 0.85));
+    const finalColor: TslNode = mix(litWater, uFoam, foam);
 
     const dist: TslNode = length(uCameraPos.xz.sub(worldPos.xz));
     const horizonLift: TslNode = smoothstep(0.02, 0.35, float(1.0).sub(abs(viewDir.y)));
     const distFog: TslNode = smoothstep(uFogDistance.mul(0.35), uFogDistance, dist);
-    const fog: TslNode = clamp(max(horizonLift.mul(0.55), distFog.mul(0.65)), 0.0, 1.0);
+    const fog: TslNode = clamp(max(horizonLift.mul(0.42), distFog.mul(0.58)), 0.0, 1.0);
     const fogged: TslNode = mix(finalColor, uHorizon, fog);
-    const alpha: TslNode = clamp(uAlpha.add(fres.mul(0.14)), 0.0, 1.0);
+    const alpha: TslNode = clamp(uAlpha.add(fres.mul(0.18)), 0.0, 1.0);
     return vec4(fogged, alpha);
   })();
 
