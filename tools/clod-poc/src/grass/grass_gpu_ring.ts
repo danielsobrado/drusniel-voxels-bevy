@@ -80,7 +80,7 @@ export function ringCellSize(settings: GrassSettings, radius: number): number {
   return Math.max(0.5, settings.bladeSpacing, (radius * 2) / RING_MAX_AXIS_CELLS);
 }
 
-export function grassGpuRingKey(settings: GrassSettings, worldCells: number, digRevision = getDigEditRevision()): string {
+export function grassGpuRingStableKey(settings: GrassSettings, worldCells: number): string {
   return [
     worldCells,
     settings.maxBlades,
@@ -93,8 +93,11 @@ export function grassGpuRingKey(settings: GrassSettings, worldCells: number, dig
     settings.ring.farDistanceFraction,
     settings.ring.bandMeters,
     settings.ring.scruffMeters,
-    digRevision,
   ].join("|");
+}
+
+export function grassGpuRingKey(settings: GrassSettings, worldCells: number, digRevision = getDigEditRevision()): string {
+  return `${grassGpuRingStableKey(settings, worldCells)}|${digRevision}`;
 }
 
 export function grassGpuRingTierCapacity(settings: GrassSettings): number {
@@ -178,38 +181,35 @@ export function generateGrassRingInstances(
         1 + randomSigned(cellX, cellZ, settings.seed + 1501) * settings.bladeHeightVariation,
       );
       const widthScale = THREE.MathUtils.clamp(1 / Math.sqrt(Math.max(thin, 0.001)), 1, settings.blade.maxWidthCompensation);
+      const windPhase = randomSigned(cellX, cellZ, settings.seed + 1601) * TWO_PI;
       const tier: GrassTier = distance <= nearDistance
         ? "near"
-        : distance <= midDistance ? "mid" : distance <= farDistance ? "far" : "super";
-      const tierHeight = tier === "near" ? 1 : tier === "mid" ? 1.35 : tier === "far" ? 1.75 : 2.25;
+        : distance <= midDistance
+          ? "mid"
+          : distance <= farDistance ? "far" : "super";
       ranked.push({
-        priority: hash2(cellX, cellZ, settings.seed + 1601),
+        priority: distance + hash2(cellX, cellZ, settings.seed + 1701) * 0.01,
         tier,
         instance: {
-          offset: [x, site.height + 0.02, z],
-          height: settings.bladeHeight * heightScale * tierHeight,
-          rotationY: hash2(cellX, cellZ, settings.seed + 1709) * TWO_PI,
-          phase: hash2(cellX, cellZ, settings.seed + 1801) * TWO_PI,
-          colorMix: Math.min(1, Math.pow(hash2(cellX, cellZ, settings.seed + 1901), 2) + site.wetBank * 0.16 + site.sandWeight * 0.12),
+          x,
+          z,
+          y: site.height,
+          height: settings.bladeHeight * heightScale,
+          widthScale,
+          yaw: hash2(cellX, cellZ, settings.seed + 1801) * TWO_PI,
+          windPhase,
           edgeFade,
-          normalY: site.normalY,
-          terrainNormal: site.terrainNormal,
-          widthScale: tier === "super" ? Math.min(settings.blade.maxWidthCompensation, widthScale * 1.35) : widthScale,
+          normal: site.terrainNormal,
         },
       });
     }
   }
 
   ranked.sort((a, b) => a.priority - b.priority);
-  const limit = Math.max(0, Math.floor(maxBlades));
-  const tiers: GrassRingTierInstances = { near: [], mid: [], far: [], super: [] };
-  for (let i = 0; i < ranked.length && i < limit; i++) {
-    const item = ranked[i];
-    tiers[item.tier].push(item.instance);
-  }
-
+  const result: GrassRingTierInstances = { near: [], mid: [], far: [], super: [] };
+  for (const entry of ranked.slice(0, maxBlades)) result[entry.tier].push(entry.instance);
   return {
-    ...tiers,
+    ...result,
     stats,
     cellSize,
     radius,
