@@ -1,4 +1,5 @@
 import type { TreeEcologySettings, TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import { treeSpeciesMaterialBias } from "./tree_material_bias.js";
 import { clamp, clamp01, fractalNoise2D, hash2, remap, smoothstep, valueNoise2D } from "./tree_noise.js";
 
 const PARENT_CLUMP_PROBABILITY = 0.62;
@@ -108,13 +109,14 @@ export function speciesEcologyWeight(
   height: number,
   normalY: number,
   settings: TreeSettings,
+  materialWeights: readonly [number, number, number, number] = [1, 0, 0, 0],
 ): number {
   const speciesSettings = settings.species[species];
   if (!speciesSettings.enabled || speciesSettings.weight <= 0) return 0;
   if (height < speciesSettings.minHeightM || height > speciesSettings.maxHeightM) return 0;
 
   const ecology = settings.ecology;
-  if (!ecology.enabled) return speciesSettings.weight;
+  if (!ecology.enabled) return speciesSettings.weight * treeSpeciesMaterialBias(settings, species, materialWeights);
   const zone = ecology.speciesZones[species];
   const heightT = smoothstep(ecology.terrain.lowlandHeightM, ecology.terrain.highlandHeightM, height);
   const heightWeight = zone.heightPreference === "low"
@@ -129,7 +131,8 @@ export function speciesEcologyWeight(
   const oldForestWeight = species === "dead" && sample.age === "old"
     ? 1 + zone.oldForestBias * sample.forestDensity * 1.4
     : 1;
-  return Math.max(0, speciesSettings.weight * heightWeight * moistureWeight * slopeWeight * clusterWeight * oldForestWeight);
+  const materialBias = treeSpeciesMaterialBias(settings, species, materialWeights);
+  return Math.max(0, speciesSettings.weight * materialBias * heightWeight * moistureWeight * slopeWeight * clusterWeight * oldForestWeight);
 }
 
 export function treeEcologyDebugSample(
