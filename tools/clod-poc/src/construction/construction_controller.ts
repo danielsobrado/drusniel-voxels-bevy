@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { surfaceHeight } from "../terrain/terrain.js";
 import { defaultConstructionConfig } from "./config.js";
-import { createConstructionCandidate, createFreePlacementPosition, type TerrainHitPoint } from "./placement.js";
+import { createConstructionCandidate, createFreePlacementPosition, validateConstructionPlacement, type TerrainHitPoint } from "./placement.js";
 import { ConstructionSnapIndex } from "./snap_index.js";
 import type {
   ConstructionCandidate,
@@ -399,6 +399,22 @@ class ConstructionControllerImpl implements ConstructionController {
     if (!piece) return;
     const normalized = this.normalizePlacedPiece(placed);
     if (!normalized) return;
+    const validation = validateConstructionPlacement({
+      piece,
+      position: normalized.position,
+      rotationQuarterTurns: normalized.rotationQuarterTurns,
+      snapped: true,
+      snap: null,
+      terrainHit: null,
+      placedPieces: this.placedPieces,
+      piecesById: this.piecesById,
+      worldCells: this.deps.worldCells,
+      config: this.config.placement,
+    });
+    if (!validation.valid) {
+      console.warn(`[construction] skipped invalid saved piece ${normalized.id}: ${validation.reason ?? "invalid"}`);
+      return;
+    }
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(piece.dimensionsM[0], piece.dimensionsM[1], piece.dimensionsM[2]),
       new THREE.MeshStandardMaterial({ color: MATERIAL_COLORS[piece.material], roughness: 0.78 }),
