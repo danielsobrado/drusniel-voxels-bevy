@@ -37,15 +37,23 @@ const wall: ConstructionPieceDef = {
 };
 
 describe("ConstructionSnapIndex", () => {
-  it("finds a compatible snapped wall placement", () => {
+  it("finds a compatible snapped wall placement when the wall face matches the floor edge", () => {
     const index = new ConstructionSnapIndex(1);
     index.addPiece(floor, "floor-1", [10, 5, 10], 0);
 
-    const snap = index.findBestSnap([11, 5, 10], wall, 0, config);
+    const snap = index.findBestSnap([11, 5, 10], wall, 1, config);
 
     expect(snap).not.toBeNull();
     expect(snap?.target.entityId).toBe("floor-1");
+    expect(snap?.rotationQuarterTurns).toBe(1);
     expect(snap?.worldPosition).toEqual([11, 6.1, 10]);
+  });
+
+  it("rejects wall-bottom to floor-edge snaps when the wall face is parallel to the floor edge", () => {
+    const index = new ConstructionSnapIndex(1);
+    index.addPiece(floor, "floor-1", [10, 5, 10], 0);
+
+    expect(index.findBestSnap([11, 5, 10], wall, 0, config)).toBeNull();
   });
 
   it("rejects incompatible snap groups", () => {
