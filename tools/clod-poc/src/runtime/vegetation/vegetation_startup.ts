@@ -39,7 +39,7 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
   const tree = runTreeStartup({
     scene, state, lod0Nodes, worldCells, treeConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
-    currentLighting, statControllers,
+    currentLighting, statControllers, renderer: app.renderer,
   });
 
   const understory = runUnderstoryStartup({
