@@ -34,7 +34,7 @@ import {
 } from "../custom_props_startup.js";
 import { resolvePropPlacementScene } from "../../../props/prop_placements.js";
 import type { CustomPropsSettings, PropPlacementScene } from "../../../props/prop_types.js";
-import { createConstructionController, type ConstructionController } from "../../../construction/index.js";
+import { createConstructionController, defaultConstructionConfig, type ConstructionController } from "../../../construction/index.js";
 import type { VoxelProjectArchiveContents } from "../../../project/voxel_project_archive.js";
 import { projectPropsToPropPlacementScene } from "../../../project/project_props.js";
 
@@ -264,7 +264,13 @@ export async function runRuntimeSystemsStartup(
   }
 
   let constructionController: ConstructionController | null = null;
-  if (searchParams.get("construction") !== "0") {
+  const constructionParam = searchParams.get("construction");
+  const constructionEnabled = constructionParam === "1"
+    ? true
+    : constructionParam === "0"
+      ? false
+      : defaultConstructionConfig.enabled;
+  if (constructionEnabled) {
     try {
       constructionController = createConstructionController({
         scene,
