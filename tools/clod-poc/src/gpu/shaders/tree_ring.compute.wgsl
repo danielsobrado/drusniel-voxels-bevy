@@ -180,12 +180,23 @@ fn tree_accept_mask_from_params(height: f32, normal_y: f32, wpos: vec2<f32>) -> 
   return tree_accept_mask(height, normal_y, wpos, tree_accept_params_from_uniforms());
 }
 
-fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32) -> f32 {
+fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32, species: u32) -> f32 {
   let cfg = tree_accept_params_from_uniforms();
   let age = smoothstep(0.16, 1.0, tree_hash(wc, 601u));
   let clump = clamp(tree_parent_clump_mask(wpos, cfg), 0.0, 1.25);
   let slope_health = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
-  return clamp(0.58 + age * 0.48 + clump * 0.18 + slope_health * 0.08, 0.58, 1.42);
+  let base_scale = 0.58 + age * 0.48 + clump * 0.18 + slope_health * 0.08;
+
+  var species_scale = 1.0;
+  if (species == 0u) {
+    species_scale = mix(0.92, 1.18, age);
+  } else if (species == 1u) {
+    species_scale = mix(1.08, 1.34, age);
+  } else {
+    species_scale = mix(0.72, 0.96, age);
+  }
+
+  return clamp(base_scale * species_scale, 0.48, 1.62);
 }
 
 fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
@@ -397,7 +408,7 @@ fn process_tree_slot(slot: u32) {
     return;
   }
 
-  let scale = tree_instance_scale(wc, wpos, normal.y);
+  let scale = tree_instance_scale(wc, wpos, normal.y, species);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
   append_lod_if_active(species, TREE_LOD_NEAR, ring.active.x, wc, height, scale);
   append_lod_if_active(species, TREE_LOD_MID, ring.active.y, wc, height, scale);
