@@ -11,7 +11,10 @@ import {
   type TreeEcologySample,
 } from "./tree_ecology.js";
 
+export const TREE_STRUCTURAL_VARIANTS = 4;
+
 const TREE_CONTACT_OFFSET_M = -0.12;
+const TREE_VARIANT_HASH_SALT = 1103;
 
 export interface TreeTerrainSampler {
   surfaceHeight(x: number, z: number): number;
@@ -22,6 +25,7 @@ export interface TreeTerrainSampler {
 export interface TreeInstance {
   position: [number, number, number];
   species: TreeSpeciesId;
+  variant: number;
   scale: number;
   rotationY: number;
   normalY: number;
@@ -149,6 +153,7 @@ export function generateTreeInstances(
         instance: {
           position: [x, height + TREE_CONTACT_OFFSET_M, z],
           species,
+          variant: treeVariant(gridX, gridZ, settings.seed),
           scale: baseScale * (ecology?.scaleMultiplier ?? 1),
           rotationY: treeHash2(gridX, gridZ, settings.seed + 701) * Math.PI * 2,
           normalY,
@@ -159,6 +164,13 @@ export function generateTreeInstances(
 
   ranked.sort((a, b) => a.priority - b.priority);
   return ranked.slice(0, limit).map(({ instance }) => instance);
+}
+
+function treeVariant(gridX: number, gridZ: number, seed: number): number {
+  return Math.min(
+    TREE_STRUCTURAL_VARIANTS - 1,
+    Math.floor(treeHash2(gridX, gridZ, seed + TREE_VARIANT_HASH_SALT) * TREE_STRUCTURAL_VARIANTS),
+  );
 }
 
 function selectEcologySpecies(
