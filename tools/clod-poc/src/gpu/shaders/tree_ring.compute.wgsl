@@ -153,8 +153,8 @@ fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAccept
   return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask, 0.0, 1.0);
 }
 
-fn tree_accept_mask_from_params(height: f32, normal_y: f32, wpos: vec2<f32>) -> f32 {
-  return tree_accept_mask(height, normal_y, wpos, TreeAcceptParams(
+fn tree_accept_params_from_uniforms() -> TreeAcceptParams {
+  return TreeAcceptParams(
     params.settings_u.z,
     params.settings_a.y,
     params.settings_a.z,
@@ -173,7 +173,19 @@ fn tree_accept_mask_from_params(height: f32, normal_y: f32, wpos: vec2<f32>) -> 
     params.settings_d.w,
     params.settings_e.x,
     params.settings_e.y,
-  ));
+  );
+}
+
+fn tree_accept_mask_from_params(height: f32, normal_y: f32, wpos: vec2<f32>) -> f32 {
+  return tree_accept_mask(height, normal_y, wpos, tree_accept_params_from_uniforms());
+}
+
+fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32) -> f32 {
+  let cfg = tree_accept_params_from_uniforms();
+  let age = smoothstep(0.16, 1.0, tree_hash(wc, 601u));
+  let clump = clamp(tree_parent_clump_mask(wpos, cfg), 0.0, 1.25);
+  let slope_health = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
+  return clamp(0.58 + age * 0.48 + clump * 0.18 + slope_health * 0.08, 0.58, 1.42);
 }
 
 fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
@@ -282,7 +294,7 @@ fn select_species(wc: vec2<f32>, height: f32, normal_y: f32) -> u32 {
   return 2u;
 }
 
-fn append_tree(species: u32, lod: u32, wc: vec2<f32>, height: f32, normal_y: f32) {
+fn append_tree(species: u32, lod: u32, wc: vec2<f32>, height: f32, scale: f32) {
   let max_per_group = params.settings_u.x;
   let group = group_index(species, lod);
   let slot = atomicAdd(&counters[group], 1u);
@@ -291,12 +303,12 @@ fn append_tree(species: u32, lod: u32, wc: vec2<f32>, height: f32, normal_y: f32
   }
 
   let out_index = group * max_per_group + slot;
-  out_cell[out_index] = vec4<f32>(wc.x, wc.y, height, normal_y);
+  out_cell[out_index] = vec4<f32>(wc.x, wc.y, height, scale);
 }
 
-fn append_lod_if_active(species: u32, lod: u32, active: u32, wc: vec2<f32>, height: f32, normal_y: f32) {
+fn append_lod_if_active(species: u32, lod: u32, active: u32, wc: vec2<f32>, height: f32, scale: f32) {
   if (active != 0u) {
-    append_tree(species, lod, wc, height, normal_y);
+    append_tree(species, lod, wc, height, scale);
   }
 }
 
@@ -335,11 +347,12 @@ fn process_tree_slot(slot: u32) {
     return;
   }
 
+  let scale = tree_instance_scale(wc, wpos, normal.y);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
-  append_lod_if_active(species, TREE_LOD_NEAR, ring.active.x, wc, height, normal.y);
-  append_lod_if_active(species, TREE_LOD_MID, ring.active.y, wc, height, normal.y);
-  append_lod_if_active(species, TREE_LOD_FAR, ring.active.z, wc, height, normal.y);
-  append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.active.w, wc, height, normal.y);
+  append_lod_if_active(species, TREE_LOD_NEAR, ring.active.x, wc, height, scale);
+  append_lod_if_active(species, TREE_LOD_MID, ring.active.y, wc, height, scale);
+  append_lod_if_active(species, TREE_LOD_FAR, ring.active.z, wc, height, scale);
+  append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.active.w, wc, height, scale);
 }
 
 @compute @workgroup_size(TREE_WORKGROUP_SIZE)

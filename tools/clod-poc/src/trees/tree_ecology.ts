@@ -1,5 +1,12 @@
-import type { TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import type { TreeEcologySettings, TreeSettings, TreeSpeciesId } from "./tree_config.js";
 import { clamp, clamp01, fractalNoise2D, hash2, remap, smoothstep, valueNoise2D } from "./tree_noise.js";
+
+const PARENT_CLUMP_PROBABILITY = 0.62;
+const PARENT_CLUMP_HASH_SALT = 0x51f3;
+const PARENT_CLUMP_EXIST_SALT = 0x9e37;
+const PARENT_CLUMP_RADIUS_MIN = 0.5;
+const PARENT_CLUMP_RADIUS_RANGE = 0.55;
+const PARENT_CLUMP_CORE_FRACTION = 0.22;
 
 export interface TreeEcologySample {
   forestDensity: number;
@@ -35,7 +42,9 @@ export function sampleTreeEcology(
   const edgeNoise = valueNoise2D(x + density.edgeSoftnessM, z - density.edgeSoftnessM, density.clearingNoiseScaleM * 0.55, seed + 12037);
   const clearingMask = clamp01(1 - clearingOpen * remap(edgeNoise, 0, 1, 0.72, 1));
   const clusterNoise = fractalNoise2D(x, z, clustering.clusterScaleM, seed + 13001, 2);
-  const clusterMask = smoothstep(clustering.clusterThreshold, 1, clusterNoise);
+  const noiseCluster = smoothstep(clustering.clusterThreshold, 1, clusterNoise);
+  const parentCluster = parentClumpField(x, z, clustering, seed + PARENT_CLUMP_HASH_SALT);
+  const clusterMask = Math.max(noiseCluster, parentCluster);
   const lowerHeight = smoothstep(terrain.lowlandHeightM - terrain.heightFadeM, terrain.lowlandHeightM, height);
   const upperHeight = 1 - smoothstep(terrain.highlandHeightM, terrain.highlandHeightM + terrain.heightFadeM, height);
   const slope = smoothstep(terrain.slopeFadeStartY, terrain.slopeFadeEndY, normalY);
@@ -60,6 +69,30 @@ export function sampleTreeEcology(
     age,
     scaleMultiplier,
   };
+}
+
+function parentClumpField(x: number, z: number, clustering: TreeEcologySettings["clustering"], seed: number): number {
+  const cellSize = Math.max(4, clustering.clusterScaleM);
+  const baseX = Math.floor(x / cellSize);
+  const baseZ = Math.floor(z / cellSize);
+  let weight = 0;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const cellX = baseX + dx;
+      const cellZ = baseZ + dz;
+      const exists = hash2(cellX, cellZ, seed + PARENT_CLUMP_EXIST_SALT) < PARENT_CLUMP_PROBABILITY;
+      if (!exists) continue;
+      const jitterX = hash2(cellX, cellZ, seed + 17);
+      const jitterZ = hash2(cellX, cellZ, seed + 29);
+      const centerX = (cellX + 0.15 + jitterX * 0.7) * cellSize;
+      const centerZ = (cellZ + 0.15 + jitterZ * 0.7) * cellSize;
+      const radius = cellSize * (PARENT_CLUMP_RADIUS_MIN + jitterX * PARENT_CLUMP_RADIUS_RANGE);
+      const distance = Math.hypot(x - centerX, z - centerZ);
+      const kernel = 1 - smoothstep(radius * PARENT_CLUMP_CORE_FRACTION, radius, distance);
+      weight = Math.max(weight, kernel);
+    }
+  }
+  return clamp01(weight);
 }
 
 export function ecologyAcceptanceProbability(sample: TreeEcologySample, settings: TreeSettings): number {
