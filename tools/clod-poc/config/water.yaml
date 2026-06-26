@@ -40,7 +40,7 @@ water:
       guarantee_fallback_rivers: true
       fallback_main_river: true
       fallback_tributaries: true
-      flow_speed_multiplier: 1.0
+      flow_speed_multiplier: 1.15
       lake_surface_drop_m: 2.0
     water_surface:
       far_reduce_factor: 8
@@ -91,31 +91,31 @@ water:
     foam_color: [0.90, 0.95, 0.96]
     alpha: 0.90
     ripple_cycle: 0.07
-    ripple_amp: 1.25
-    ripple_speed: 0.52
+    ripple_amp: 1.38
+    ripple_speed: 0.58
     ripple_scale_a: 0.16
     ripple_scale_b: 0.105
-    ripple_strength_a: 0.24
-    ripple_strength_b: 0.16
+    ripple_strength_a: 0.26
+    ripple_strength_b: 0.18
     ripple_loop_distance: 22.0
     lake_breeze: [0.20, 0.07]
     shore_foam_start: 0.03
-    shore_foam_end: 0.16
+    shore_foam_end: 0.18
     foam:
       noise_scale: 0.075
-      shore_strength: 0.52
-      river_strength: 0.38
-      speed_start: 0.25
-      speed_end: 1.0
-      drop_start: 0.5
-      drop_end: 2.0
+      shore_strength: 0.58
+      river_strength: 0.72
+      speed_start: 0.18
+      speed_end: 0.82
+      drop_start: 0.22
+      drop_end: 1.45
     fresnel:
       base: 0.045
       power: 4.2
-      normal_flatten: 0.55
+      normal_flatten: 0.48
     color:
-      depth_scale: 5.0
-      turbidity: 0.10
+      depth_scale: 4.6
+      turbidity: 0.12
     refraction:
       enabled: true
       strength: 0.055
