@@ -15,6 +15,26 @@ grass:
     max_height_m: 28
     min_grass_weight: 0.05
 
+  terrain:
+    grass:
+      density: 1.12
+    rock:
+      density: 0.18
+    sand:
+      density: 0.58
+    snow:
+      density: 0.02
+    height:
+      low_height_m: 14.0
+      high_height_m: 34.0
+      height_blend_m: 8.0
+      low:
+        density: 1.04
+      mid:
+        density: 1.00
+      high:
+        density: 0.58
+
   lod:
     near_fraction: 0.42
     mid_fraction: 0.78
