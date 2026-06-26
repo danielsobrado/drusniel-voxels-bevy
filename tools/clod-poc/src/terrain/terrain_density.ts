@@ -1,8 +1,12 @@
 import { surfaceHeight } from "./terrain_surface.js";
-import { densityFromEdits } from "./terrain_edits.js";
+import { voxelEditStore } from "./voxel_edits/voxel_edit_store.js";
+
+function baseDensity(x: number, y: number, z: number): number {
+  return surfaceHeight(x, z) - y;
+}
 
 export function density(x: number, y: number, z: number): number {
-  return densityFromEdits(x, y, z, surfaceHeight(x, z) - y);
+  return voxelEditStore.sampleDensity(x, y, z, baseDensity);
 }
 
 function gradient(x: number, y: number, z: number): [number, number, number] {
