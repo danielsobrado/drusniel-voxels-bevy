@@ -12,6 +12,8 @@ import {
   max,
   mix,
   normalize,
+  positionGeometry,
+  positionWorld,
   pow,
   reflect,
   sin,
@@ -20,8 +22,8 @@ import {
   vec2,
   vec3,
   vec4,
-  positionWorld,
 } from "three/tsl";
+import { DEEP_OCEAN_GPU_WAVES } from "./deep_ocean_waves.js";
 import {
   applyWaterVisual,
   makeWaterUniforms,
@@ -66,6 +68,25 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
   const uSunDir = uniform(u.uSunDir.value) as TslNode;
   const uFogDistance = uniform(Math.max(256, params.visual.rippleLoopDistance * 4)) as TslNode;
 
+  const pos: TslNode = positionGeometry;
+  let waveX: TslNode = float(0);
+  let waveY: TslNode = float(0);
+  let waveZ: TslNode = float(0);
+  for (const wave of DEEP_OCEAN_GPU_WAVES) {
+    const dirX = float(wave.dirX);
+    const dirZ = float(wave.dirZ);
+    const amp = float(wave.amp);
+    const theta: TslNode = float(wave.k)
+      .mul(dirX.mul(pos.x).add(dirZ.mul(pos.z)))
+      .sub(float(wave.omega).mul(uTime))
+      .add(float(wave.phase));
+    const s: TslNode = sin(theta);
+    const c: TslNode = cos(theta);
+    waveX = waveX.sub(amp.mul(dirX).mul(s).mul(wave.choppiness));
+    waveZ = waveZ.sub(amp.mul(dirZ).mul(s).mul(wave.choppiness));
+    waveY = waveY.add(amp.mul(c));
+  }
+  const displacedPosition: TslNode = vec3(pos.x.add(waveX), pos.y.add(waveY), pos.z.add(waveZ));
   const worldPos: TslNode = positionWorld;
 
   const hashNoise = (uv: TslNode): TslNode => fract(sin(dot(uv, vec2(12.9898, 78.233))).mul(43758.5453));
@@ -120,8 +141,7 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const sunDisc: TslNode = vec3(1.0, 0.92, 0.75).mul(
       pow(sunDot, float(512.0)).mul(4.5).add(pow(sunDot, float(128.0)).mul(1.4)),
     );
-    const reflectionFloor: TslNode = vec3(0.035, 0.07, 0.14);
-    const skyReflection: TslNode = max(reflectedSky.add(mie).add(sunDisc), reflectionFloor).mul(0.88);
+    const skyReflection: TslNode = max(reflectedSky.add(mie).add(sunDisc), vec3(0.035, 0.07, 0.14)).mul(0.88);
 
     const deepBlue: TslNode = mix(vec3(0.0, 0.025, 0.10), uDeep, float(0.55));
     const shallowTeal: TslNode = mix(uShallow, vec3(0.0, 0.45, 0.62), float(0.35));
@@ -135,7 +155,6 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const n2: TslNode = hashNoise(foamUv.mul(2.3).add(vec2(17.3, -9.1)).add(vec2(uTime.mul(-0.04), uTime.mul(0.05))));
     const n3: TslNode = hashNoise(foamUv.mul(5.7).add(vec2(-3.8, 23.5)).add(vec2(uTime.mul(0.05), uTime.mul(0.02))));
     const baseFbm: TslNode = n1.mul(0.5).add(n2.mul(0.3)).add(n3.mul(0.2));
-
     const noiseDomainWarp: TslNode = mix(baseFbm, float(1.0).sub(abs(baseFbm.mul(2.0).sub(1.0))), float(0.4));
     const r1: TslNode = float(1.0).sub(abs(n1.mul(2.0).sub(1.0)));
     const r2: TslNode = float(1.0).sub(abs(n2.mul(2.0).sub(1.0)));
@@ -155,17 +174,14 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
 
     const crestFoam: TslNode = smoothstep(float(1.2), float(4.0), waveHeight).mul(smoothstep(float(0.36), float(0.82), foamNoise));
     const foam: TslNode = smoothstep(float(0.70), float(0.96), foamNoise).mul(0.10).add(crestFoam.mul(0.34));
-
     const backlit: TslNode = pow(max(dot(viewDir, sunDir.negate()), float(0.0)), float(4.0)).mul(0.35);
     const crestScatter: TslNode = smoothstep(float(0.0), float(5.5), waveHeight).mul(0.38)
       .add(smoothstep(float(0.45), float(0.95), foamNoise).mul(0.20));
     const sss: TslNode = mix(vec3(0.01, 0.04, 0.14), shallowTeal, float(0.55)).mul(backlit.add(crestScatter));
     const specDot: TslNode = max(dot(reflect(sunDir.negate(), normal), viewDir), float(0.0));
     const sunSpec: TslNode = vec3(1.0, 0.92, 0.76).mul(pow(specDot, float(384.0)).mul(1.35).add(pow(specDot, float(96.0)).mul(0.32)));
-
     const litWater: TslNode = mix(waterColor.add(sss).add(sunSpec), skyReflection, clamp(fres.mul(0.75), 0.0, 0.85));
     const finalColor: TslNode = mix(litWater, uFoam, clamp(foam, 0.0, 1.0));
-
     const dist: TslNode = length(uCameraPos.xz.sub(worldPos.xz));
     const horizonLift: TslNode = smoothstep(0.02, 0.35, float(1.0).sub(abs(viewDir.y)));
     const distFog: TslNode = smoothstep(uFogDistance.mul(0.35), uFogDistance, dist);
@@ -182,6 +198,7 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     side: THREE.DoubleSide,
   });
   material.name = "deep-ocean-node";
+  material.positionNode = displacedPosition;
   material.colorNode = fragment;
 
   const uniforms: WaterUniforms & {
