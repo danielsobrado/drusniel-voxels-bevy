@@ -12,7 +12,7 @@ import { initClodCacheContext, clearWorkerPersistentCache, type ClodCacheContext
 import { isCacheRpcResponse } from "./cache/cacheWorkerRpc.js";
 import { dispatchCacheRpcResponse } from "./cache/workerRemotePersistentStore.js";
 import { createBuildCacheHooks, type CachedBuildStats } from "./cache/clodBuildCache.js";
-import { addDigEdit, replaceDigEdits, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
+import { addDigEdit, replaceVoxelEdits, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
 import {
   collectBuildResultTransferables,
   collectNodeTransferables,
@@ -142,9 +142,7 @@ function drainParents(budgetMs: number): void {
   if (changed.length > 0) {
     const serialized = serializeNodes(changed);
     const transferables: Transferable[] = [];
-    for (const node of serialized) {
-      collectNodeTransferables(node, transferables);
-    }
+    for (const node of serialized) collectNodeTransferables(node, transferables);
     post({
       type: "parentRebuilt",
       requestId: activeParentRequestId,
@@ -192,7 +190,7 @@ function installBorderCoastRuntime(
 
 async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }>): Promise<void> {
   cfg = request.cfg;
-  replaceDigEdits(request.edits);
+  replaceVoxelEdits(request.voxelEdits);
   installHydrologyTerrain(request.hydrologyTerrain);
   installBorderCoastRuntime(request.borderCoastOceanConfig, request.worldPagesX, request.cfg);
   pendingByLevel.clear();
