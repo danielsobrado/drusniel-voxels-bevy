@@ -15,6 +15,7 @@ export function runPlayerStartup(
   const { input, session } = ctx;
   const {
     renderer,
+    scene,
     camera,
     controls,
     player,
@@ -32,8 +33,12 @@ export function runPlayerStartup(
     throw new Error("Player startup requires digRadiusController from texture UI startup");
   }
 
-  const weapon = createFirstPersonWeapon({ camera });
-  const combatController = createSwordAttackController({ camera, weapon });
+  const weapon = createFirstPersonWeapon({ scene, camera });
+  const combatController = createSwordAttackController({
+    camera,
+    weapon,
+    isEnabled: () => interaction.mode === "playing",
+  });
   const config = combatController.getConfig();
 
   const playerInputController = createPlayerInputController({
@@ -91,8 +96,9 @@ export function runPlayerStartup(
   playerModeController.updatePlayerModeUi();
 
   const offset = new THREE.Vector3(...config.camera_offset);
-  weapon.load(config.model_path, offset).catch(() => { /* weapon model load failed, silent */ });
-  weapon.setVisible(true);
+  weapon.load(config.model_path, offset).catch((error: unknown) => {
+    console.warn("[combat] failed to load first-person weapon model", error);
+  });
 
   session.playerInputController = playerInputController;
   session.playerModeController = playerModeController;
