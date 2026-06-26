@@ -129,6 +129,7 @@ export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
     onOceanFullDepthDistance: (distance) => deps.waterController.setOceanFullDepthDistance(distance),
     onOceanMaxDepth: (depth) => deps.waterController.setOceanMaxDepth(depth),
     onRebuildVisual: rebuildVisual,
+    getRiverStats: () => deps.waterController.getRiverStats(),
   });
 
   addDeepWaterLookFolder(gui, visual, rebuildVisual);
