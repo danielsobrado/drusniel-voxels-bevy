@@ -2,6 +2,11 @@ const UNDERSTORY_WORKGROUP_SIZE: u32 = 64u;
 const UNDERSTORY_GROUP_COUNT: u32 = 6u;
 const UNDERSTORY_INDIRECT_STRIDE_U32: u32 = 5u;
 const UNDERSTORY_CLASS_STRIDE_F32: u32 = 12u;
+const UNDERSTORY_RIVER_CLEAR_M: f32 = 0.45;
+const UNDERSTORY_FERN_START_M: f32 = 1.2;
+const UNDERSTORY_FERN_END_M: f32 = 8.0;
+const UNDERSTORY_SHRUB_START_M: f32 = 5.5;
+const UNDERSTORY_SHRUB_END_M: f32 = 18.0;
 
 struct UnderstoryRingParams {
   center_radius: vec4<f32>,
@@ -106,19 +111,33 @@ fn sampleHydrology(wx: f32, wz: f32, world_size: f32) -> vec4<f32> {
   return placement_sample_hydro_bilinear(wx, wz, world_size);
 }
 
-fn hydrologyHeight(wx: f32, wz: f32, base_height: f32, normal_y: f32) -> vec2<f32> {
+fn hydrologyHeight(wx: f32, wz: f32, base_height: f32, normal_y: f32) -> vec4<f32> {
   _ = normal_y;
   let world_size = params.hydro_params.x;
   let hydro_enabled = params.hydro_params.y;
   if (hydro_enabled < 0.5 || world_size <= 0.0) {
-    return vec2<f32>(base_height, 0.0);
+    return vec4<f32>(base_height, 0.0, 0.0, 0.0);
   }
   let hydro = sampleHydrology(wx, wz, world_size);
   let carved_bed = hydro.z;
   let wet_mask = hydro.y;
   let height_diff = abs(carved_bed - base_height);
   let height = select(base_height, carved_bed, height_diff > 0.01);
-  return vec2<f32>(height, wet_mask);
+  return vec4<f32>(height, wet_mask, hydro.x, 1.0);
+}
+
+fn river_understory_band(hydro: vec4<f32>) -> vec4<f32> {
+  let enabled = hydro.w;
+  let wet_mask = hydro.y;
+  if (enabled < 0.5 || wet_mask <= 0.001) {
+    return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+  }
+  let above_water = hydro.x - hydro.z;
+  let clear = 1.0 - understory_smoothstep(UNDERSTORY_RIVER_CLEAR_M, UNDERSTORY_FERN_START_M, above_water);
+  let fern_band = understory_smoothstep(UNDERSTORY_FERN_START_M, 2.8, above_water) * (1.0 - understory_smoothstep(5.8, UNDERSTORY_FERN_END_M, above_water));
+  let shrub_band = understory_smoothstep(UNDERSTORY_SHRUB_START_M, 9.0, above_water) * (1.0 - understory_smoothstep(13.0, UNDERSTORY_SHRUB_END_M, above_water));
+  let density = clamp((1.0 - clear) * mix(0.82, 1.22, fern_band) * mix(1.0, 1.10, shrub_band), 0.0, 1.28);
+  return vec4<f32>(clear, fern_band, shrub_band, density);
 }
 
 fn understory_world_cell(slot_x: u32, slot_z: u32, grid: u32, cell_size: f32, camera_xz: vec2<f32>) -> vec2<f32> {
@@ -224,6 +243,21 @@ fn sample_understory_ecology(x: f32, z: f32, height: f32, normal_y: f32, ground_
   result.density = density;
   result.deadfall = deadfall;
   return result;
+}
+
+fn apply_river_understory_ecology(ecology: EcologySample, river: vec4<f32>) -> EcologySample {
+  var next = ecology;
+  let clear = river.x;
+  let fern_band = river.y;
+  let shrub_band = river.z;
+  let density = river.w;
+  next.moisture = clamp(next.moisture + fern_band * 0.28 + shrub_band * 0.10, 0.0, 1.0);
+  next.shade = clamp(next.shade + fern_band * 0.10 + shrub_band * 0.06, 0.0, 1.0);
+  next.forest_edge = clamp(max(next.forest_edge, shrub_band * 0.72), 0.0, 1.0);
+  next.clearing = clamp(next.clearing * (1.0 - fern_band * 0.20), 0.0, 1.0);
+  next.density = clamp(next.density * density * (1.0 - clear), 0.0, 1.0);
+  next.deadfall = clamp(next.deadfall + shrub_band * 0.12, 0.0, 1.0);
+  return next;
 }
 
 fn understory_acceptance(ecology: EcologySample) -> f32 {
@@ -341,12 +375,13 @@ fn process_understory_slot(slot: u32) {
   let ground = understory_terrain_gate(height, normal.y, material);
   if (ground < 0.0) { return; }
 
-  let ecology = sample_understory_ecology(wpos.x, wpos.y, height, normal.y, ground);
+  let river_band = river_understory_band(hydro);
+  let ecology = apply_river_understory_ecology(sample_understory_ecology(wpos.x, wpos.y, height, normal.y, ground), river_band);
   let acceptance = understory_acceptance(ecology);
   if (understory_hash(wc, 809u) >= acceptance) { return; }
 
   let min_tree_influence = params.accept_b.y;
-  if (ecology.forest_influence < min_tree_influence) { return; }
+  if (ecology.forest_influence + river_band.z * 0.32 < min_tree_influence) { return; }
 
   var total_weight: f32 = 0.0;
   var weights: array<f32, 6>;
