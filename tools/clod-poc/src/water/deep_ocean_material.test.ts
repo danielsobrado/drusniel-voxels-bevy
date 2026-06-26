@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const SHADER_SOURCE = readFileSync(new URL("./deep_ocean_material.ts", import.meta.url), "utf8");
-const NODE_SOURCE = readFileSync(new URL("./deep_ocean_node_material.ts", import.meta.url), "utf8");
+const DEEP_SHADER_SOURCE = readFileSync(new URL("./deep_ocean_material.ts", import.meta.url), "utf8");
+const DEEP_NODE_SOURCE = readFileSync(new URL("./deep_ocean_node_material.ts", import.meta.url), "utf8");
+const CLIPMAP_SHADER_SOURCE = readFileSync(new URL("./waterMaterial.ts", import.meta.url), "utf8");
 
 describe("deep ocean material", () => {
-  it("keeps reference-style sky reflection and sun glints in both render paths", () => {
-    for (const source of [SHADER_SOURCE, NODE_SOURCE]) {
+  it("keeps reference-style sky reflection and sun glints in deep-ocean render paths", () => {
+    for (const source of [DEEP_SHADER_SOURCE, DEEP_NODE_SOURCE]) {
       expect(source).toContain("skyReflection");
       expect(source).toContain("512");
       expect(source).toContain("0.92");
@@ -15,11 +16,17 @@ describe("deep ocean material", () => {
   });
 
   it("keeps deep blue water with teal shallow scattering", () => {
-    for (const source of [SHADER_SOURCE, NODE_SOURCE]) {
+    for (const source of [DEEP_SHADER_SOURCE, DEEP_NODE_SOURCE, CLIPMAP_SHADER_SOURCE]) {
       expect(source).toContain("0.025");
       expect(source).toContain("0.10");
       expect(source).toContain("0.45");
       expect(source).toContain("0.62");
     }
+  });
+
+  it("keeps reference-style sky reflection on the visible clipmap shader", () => {
+    expect(CLIPMAP_SHADER_SOURCE).toContain("skyReflection");
+    expect(CLIPMAP_SHADER_SOURCE).toContain("envReflection");
+    expect(CLIPMAP_SHADER_SOURCE).toContain("384.0");
   });
 });
