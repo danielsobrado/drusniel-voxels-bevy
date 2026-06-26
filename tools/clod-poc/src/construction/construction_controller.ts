@@ -8,6 +8,7 @@ import type {
   ConstructionConfig,
   ConstructionMaterial,
   ConstructionPieceDef,
+  ConstructionSnapResult,
   ConstructionTerrainConformRequest,
   PlacedConstructionPiece,
 } from "./types.js";
@@ -16,6 +17,9 @@ const GHOST_VALID_COLOR = 0x35d46b;
 const GHOST_SNAPPED_COLOR = 0x4ea1ff;
 const GHOST_INVALID_COLOR = 0xff4f4f;
 const MENU_ID = "construction-build-menu";
+const ROTATION_QUARTER_COUNT = 4;
+const RAYCAST_REFINE_STEPS = 12;
+const ENTITY_ID_PREFIX = "piece-";
 
 const MATERIAL_COLORS: Record<ConstructionMaterial, number> = {
   wood: 0x9a673a,
@@ -31,6 +35,17 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function normalizeRotationQuarterTurns(value: number): number {
+  const turns = Math.trunc(value);
+  return ((turns % ROTATION_QUARTER_COUNT) + ROTATION_QUARTER_COUNT) % ROTATION_QUARTER_COUNT;
+}
+
+function asFiniteVec3(value: unknown): [number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 3) return null;
+  const parsed = value.map(Number);
+  return parsed.every(Number.isFinite) ? [parsed[0], parsed[1], parsed[2]] : null;
 }
 
 export interface ConstructionControllerDeps {
@@ -83,6 +98,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private pointerInside = false;
   private currentCandidate: ConstructionCandidate | null = null;
   private nextEntityId = 1;
+  private lastUiStateKey = "";
   private terrainConformHandler: ((request: ConstructionTerrainConformRequest) => void) | null = null;
 
   constructor(private readonly deps: ConstructionControllerDeps) {
@@ -106,7 +122,7 @@ class ConstructionControllerImpl implements ConstructionController {
     this.menu = this.createBuildMenu();
     this.installInput();
     this.loadSavedPieces();
-    this.syncUi();
+    this.syncUi(true);
     console.info("[construction] CLOD construction ready. B toggle, X snap, R rotate, 1-9 select, right-click place.");
   }
 
@@ -135,20 +151,14 @@ class ConstructionControllerImpl implements ConstructionController {
     }
 
     const snap = this.snapEnabled
-      ? this.snapIndex.findBestSnapNearRay(
-        [ray.origin.x, ray.origin.y, ray.origin.z],
-        [ray.direction.x, ray.direction.y, ray.direction.z],
-        terrainHit.distanceM + this.config.snap.radiusM,
-        piece,
-        this.rotationQuarterTurns,
-        this.config.snap,
-      )
+      ? this.findBestSnapForPreview(ray, terrainHit, piece)
       : null;
+    const rotationQuarterTurns = snap?.rotationQuarterTurns ?? this.rotationQuarterTurns;
     const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit);
     const candidate = createConstructionCandidate({
       piece,
       position,
-      rotationQuarterTurns: this.rotationQuarterTurns,
+      rotationQuarterTurns,
       snapped: snap !== null,
       snap,
       terrainHit,
@@ -201,6 +211,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private installInput(): void {
     const onPointerMove = (event: PointerEvent) => {
       const rect = this.deps.rendererDomElement.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
       this.pointerNdc.set(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
         -((event.clientY - rect.top) / rect.height) * 2 + 1,
@@ -222,26 +233,30 @@ class ConstructionControllerImpl implements ConstructionController {
     const onKeyDown = (event: KeyboardEvent) => {
       if (this.isTextInputEvent(event)) return;
       if (event.code === "KeyB") {
+        event.preventDefault();
         this.setActive(!this.active);
         return;
       }
       if (!this.active) return;
       if (event.code === "KeyX") {
+        event.preventDefault();
         this.snapEnabled = !this.snapEnabled;
         console.info(`[construction] snap ${this.snapEnabled ? "on" : "off"}`);
-        this.syncUi();
+        this.syncUi(true);
         return;
       }
       if (event.code === "KeyR") {
-        this.rotationQuarterTurns = (this.rotationQuarterTurns + 1) % 4;
-        this.syncUi();
+        event.preventDefault();
+        this.rotationQuarterTurns = normalizeRotationQuarterTurns(this.rotationQuarterTurns + 1);
+        this.syncUi(true);
         return;
       }
       if (event.code.startsWith("Digit")) {
         const index = Number(event.code.slice(5)) - 1;
         if (Number.isInteger(index) && index >= 0 && index < this.config.pieces.length) {
+          event.preventDefault();
           this.selectedIndex = index;
-          this.syncUi();
+          this.syncUi(true);
         }
       }
     };
@@ -269,12 +284,16 @@ class ConstructionControllerImpl implements ConstructionController {
 
   private setActive(active: boolean): void {
     this.active = active;
+    if (!active) {
+      this.currentCandidate = null;
+      this.ghostMesh.visible = false;
+    }
     console.info(`[construction] building mode ${this.active ? "on" : "off"}`);
-    this.syncUi();
+    this.syncUi(true);
   }
 
   private selectedPiece(): ConstructionPieceDef {
-    const clampedIndex = Math.min(this.selectedIndex, this.config.pieces.length - 1);
+    const clampedIndex = Math.max(0, Math.min(this.selectedIndex, this.config.pieces.length - 1));
     return this.config.pieces[clampedIndex]!;
   }
 
@@ -292,20 +311,29 @@ class ConstructionControllerImpl implements ConstructionController {
     const maxDistance = this.config.placement.maxRayDistanceM;
     const step = this.config.placement.terrainStepM;
     const scratch = new THREE.Vector3();
-    let previousT = 0;
-    ray.at(previousT, scratch);
-    let previousSigned = scratch.y - surfaceHeight(scratch.x, scratch.z);
+    let previousT: number | null = null;
+    let previousSigned = 0;
 
-    for (let t = step; t <= maxDistance; t += step) {
+    for (let t = 0; t <= maxDistance; t += step) {
       ray.at(t, scratch);
       const inWorld = scratch.x >= 0 && scratch.x <= this.deps.worldCells && scratch.z >= 0 && scratch.z <= this.deps.worldCells;
-      const signed = inWorld ? scratch.y - surfaceHeight(scratch.x, scratch.z) : Number.POSITIVE_INFINITY;
-      if (inWorld && previousSigned >= 0 && signed <= 0) {
+      if (!inWorld) {
+        previousT = null;
+        continue;
+      }
+
+      const signed = scratch.y - surfaceHeight(scratch.x, scratch.z);
+      if (previousT !== null && previousSigned >= 0 && signed <= 0) {
         let lo = previousT;
         let hi = t;
-        for (let i = 0; i < 12; i += 1) {
+        for (let i = 0; i < RAYCAST_REFINE_STEPS; i += 1) {
           const mid = (lo + hi) * 0.5;
           ray.at(mid, scratch);
+          const midInWorld = scratch.x >= 0 && scratch.x <= this.deps.worldCells && scratch.z >= 0 && scratch.z <= this.deps.worldCells;
+          if (!midInWorld) {
+            lo = mid;
+            continue;
+          }
           const midSigned = scratch.y - surfaceHeight(scratch.x, scratch.z);
           if (midSigned > 0) lo = mid;
           else hi = mid;
@@ -317,6 +345,28 @@ class ConstructionControllerImpl implements ConstructionController {
       previousSigned = signed;
     }
     return null;
+  }
+
+  private findBestSnapForPreview(
+    ray: THREE.Ray,
+    terrainHit: TerrainHitPoint,
+    piece: ConstructionPieceDef,
+  ): ConstructionSnapResult | null {
+    let best: ConstructionSnapResult | null = null;
+    for (let offset = 0; offset < ROTATION_QUARTER_COUNT; offset += 1) {
+      const rotation = normalizeRotationQuarterTurns(this.rotationQuarterTurns + offset);
+      const snap = this.snapIndex.findBestSnapNearRay(
+        [ray.origin.x, ray.origin.y, ray.origin.z],
+        [ray.direction.x, ray.direction.y, ray.direction.z],
+        terrainHit.distanceM + this.config.snap.radiusM,
+        piece,
+        rotation,
+        this.config.snap,
+      );
+      if (!snap || (best && snap.score <= best.score)) continue;
+      best = snap;
+    }
+    return best;
   }
 
   private updateGhost(candidate: ConstructionCandidate): void {
@@ -331,32 +381,36 @@ class ConstructionControllerImpl implements ConstructionController {
     const candidate = this.currentCandidate;
     if (!candidate?.valid) return;
     const placed: PlacedConstructionPiece = {
-      id: `piece-${this.nextEntityId++}`,
+      id: `${ENTITY_ID_PREFIX}${this.nextEntityId++}`,
       typeId: candidate.piece.id,
-      position: candidate.position,
+      position: [candidate.position[0], candidate.position[1], candidate.position[2]],
       rotationQuarterTurns: candidate.rotationQuarterTurns,
     };
     this.addPlacedPiece(placed, true);
     this.requestTerrainConform(candidate);
+    this.currentCandidate = null;
+    this.ghostMesh.visible = false;
     this.savePlacedPieces();
-    this.syncUi();
+    this.syncUi(true);
   }
 
   private addPlacedPiece(placed: PlacedConstructionPiece, logPlacement: boolean): void {
     const piece = this.piecesById.get(placed.typeId);
     if (!piece) return;
+    const normalized = this.normalizePlacedPiece(placed);
+    if (!normalized) return;
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(piece.dimensionsM[0], piece.dimensionsM[1], piece.dimensionsM[2]),
       new THREE.MeshStandardMaterial({ color: MATERIAL_COLORS[piece.material], roughness: 0.78 }),
     );
-    mesh.name = `construction-${placed.typeId}`;
-    mesh.position.set(placed.position[0], placed.position[1], placed.position[2]);
-    mesh.rotation.set(0, placed.rotationQuarterTurns * Math.PI * 0.5, 0);
+    mesh.name = `construction-${normalized.typeId}`;
+    mesh.position.set(normalized.position[0], normalized.position[1], normalized.position[2]);
+    mesh.rotation.set(0, normalized.rotationQuarterTurns * Math.PI * 0.5, 0);
     this.root.add(mesh);
     this.placedMeshes.push(mesh);
-    this.placedPieces.push(placed);
-    this.snapIndex.addPiece(piece, placed.id, placed.position, placed.rotationQuarterTurns);
-    if (logPlacement) console.info(`[construction] placed ${piece.label} at ${placed.position.map((v) => v.toFixed(2)).join(", ")}`);
+    this.placedPieces.push(normalized);
+    this.snapIndex.addPiece(piece, normalized.id, normalized.position, normalized.rotationQuarterTurns);
+    if (logPlacement) console.info(`[construction] placed ${piece.label} at ${normalized.position.map((v) => v.toFixed(2)).join(", ")}`);
   }
 
   private requestTerrainConform(candidate: ConstructionCandidate): void {
@@ -383,9 +437,11 @@ class ConstructionControllerImpl implements ConstructionController {
       const parsed = JSON.parse(raw) as unknown;
       if (!Array.isArray(parsed)) return;
       for (const entry of parsed) {
-        if (!this.isPlacedPiece(entry)) continue;
-        this.nextEntityId = Math.max(this.nextEntityId, Number(entry.id.replace("piece-", "")) + 1 || this.nextEntityId);
-        this.addPlacedPiece(entry, false);
+        const placed = this.normalizePlacedPiece(entry);
+        if (!placed || !this.piecesById.has(placed.typeId)) continue;
+        const suffix = Number(placed.id.startsWith(ENTITY_ID_PREFIX) ? placed.id.slice(ENTITY_ID_PREFIX.length) : NaN);
+        if (Number.isInteger(suffix) && suffix >= this.nextEntityId) this.nextEntityId = suffix + 1;
+        this.addPlacedPiece(placed, false);
       }
     } catch (error) {
       console.warn("[construction] failed to load saved pieces", error);
@@ -400,15 +456,20 @@ class ConstructionControllerImpl implements ConstructionController {
     }
   }
 
-  private isPlacedPiece(value: unknown): value is PlacedConstructionPiece {
-    if (!value || typeof value !== "object") return false;
+  private normalizePlacedPiece(value: unknown): PlacedConstructionPiece | null {
+    if (!value || typeof value !== "object") return null;
     const record = value as Record<string, unknown>;
-    return typeof record.id === "string"
-      && typeof record.typeId === "string"
-      && Array.isArray(record.position)
-      && record.position.length === 3
-      && record.position.every((n) => Number.isFinite(Number(n)))
-      && Number.isInteger(Number(record.rotationQuarterTurns));
+    const position = asFiniteVec3(record.position);
+    const rotation = Number(record.rotationQuarterTurns);
+    if (typeof record.id !== "string" || typeof record.typeId !== "string" || !position || !Number.isFinite(rotation)) {
+      return null;
+    }
+    return {
+      id: record.id,
+      typeId: record.typeId,
+      position,
+      rotationQuarterTurns: normalizeRotationQuarterTurns(rotation),
+    };
   }
 
   private createBuildMenu(): HTMLElement {
@@ -432,21 +493,46 @@ class ConstructionControllerImpl implements ConstructionController {
       backdropFilter: "blur(3px)",
       userSelect: "none",
     });
+    const onClick = (event: MouseEvent) => {
+      const target = event.target instanceof HTMLElement
+        ? event.target.closest<HTMLButtonElement>("button[data-piece-index]")
+        : null;
+      if (!target) return;
+      const index = Number(target.dataset.pieceIndex);
+      if (!Number.isInteger(index) || index < 0 || index >= this.config.pieces.length) return;
+      this.selectedIndex = index;
+      this.syncUi(true);
+    };
+    menu.addEventListener("click", onClick);
+    this.disposers.push(() => menu.removeEventListener("click", onClick));
     document.body.appendChild(menu);
     return menu;
   }
 
-  private syncUi(): void {
+  private syncUi(force = false): void {
     this.menu.style.display = this.active ? "grid" : "none";
-    if (!this.active) return;
     const selected = this.config.pieces[this.selectedIndex] ?? null;
     const candidate = this.currentCandidate;
     const status = candidate
       ? candidate.valid ? candidate.snapped ? "snapped" : "valid" : candidate.reason ?? "invalid"
       : "aim at terrain";
+    const previewRotation = candidate?.rotationQuarterTurns ?? this.rotationQuarterTurns;
+    const stateKey = [
+      this.active ? "1" : "0",
+      this.selectedIndex,
+      this.snapEnabled ? "1" : "0",
+      previewRotation,
+      status,
+      candidate?.valid ? "1" : "0",
+      candidate?.snapped ? "1" : "0",
+    ].join("|");
+    if (!force && stateKey === this.lastUiStateKey) return;
+    this.lastUiStateKey = stateKey;
+    if (!this.active) return;
+
     const pieceButtons = this.config.pieces.map((piece, index) => {
       const selectedAttr = index === this.selectedIndex ? "true" : "false";
-      return `<button type="button" data-piece-index="${index}" aria-pressed="${selectedAttr}">${index + 1}. ${escapeHtml(piece.label)}</button>`;
+      return `<button type="button" data-piece-index="${index}" aria-pressed="${selectedAttr}" style="padding:6px 7px;border:1px solid #46515e;border-radius:3px;color:#dce5ee;background:${selectedAttr === "true" ? "#245781" : "#20262d"};cursor:pointer;font:inherit;">${index + 1}. ${escapeHtml(piece.label)}</button>`;
     }).join("");
     this.menu.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
@@ -457,26 +543,9 @@ class ConstructionControllerImpl implements ConstructionController {
       <div style="display:flex;flex-wrap:wrap;gap:8px;color:#cdd8e3;">
         <span>Selected: ${escapeHtml(selected?.label ?? "none")}</span>
         <span>Snap: ${this.snapEnabled ? "on" : "off"}</span>
-        <span>Rot: ${this.rotationQuarterTurns * 90}°</span>
+        <span>Rot: ${previewRotation * 90}°${candidate?.snapped ? " auto" : ""}</span>
         <span>State: ${escapeHtml(status)}</span>
       </div>
     `;
-    for (const button of Array.from(this.menu.querySelectorAll<HTMLButtonElement>("button[data-piece-index]"))) {
-      Object.assign(button.style, {
-        padding: "6px 7px",
-        border: "1px solid #46515e",
-        borderRadius: "3px",
-        color: "#dce5ee",
-        background: button.getAttribute("aria-pressed") === "true" ? "#245781" : "#20262d",
-        cursor: "pointer",
-        font: "inherit",
-      });
-      button.addEventListener("click", () => {
-        const index = Number(button.dataset.pieceIndex);
-        if (!Number.isInteger(index)) return;
-        this.selectedIndex = index;
-        this.syncUi();
-      });
-    }
   }
 }
