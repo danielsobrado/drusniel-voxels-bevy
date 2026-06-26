@@ -137,6 +137,15 @@ fn tree_forest_cover_mask(wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
   return clamp(1.0 - clearing * 0.78, 0.18, 1.0);
 }
 
+fn tree_shoreline_density_mask(height: f32, normal_y: f32, cfg: TreeAcceptParams) -> f32 {
+  let water_margin = height - WATER_LEVEL;
+  let dry_bank = smoothstep(cfg.water_clearance_m, cfg.water_clearance_m + 7.0, water_margin);
+  let lowland_moisture = 1.0 - clamp(water_margin / 36.0, 0.0, 1.0);
+  let bank_health = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
+  let riparian_boost = mix(0.92, 1.18, lowland_moisture * bank_health);
+  return clamp(dry_bank * riparian_boost, 0.0, 1.18);
+}
+
 fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
   if (height < cfg.min_height_m || height > cfg.max_height_m) {
     return 0.0;
@@ -160,7 +169,8 @@ fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAccept
   let slope_mask = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
   let clump_mask = tree_parent_clump_mask(wpos, cfg);
   let forest_cover = tree_forest_cover_mask(wpos, cfg);
-  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask * forest_cover, 0.0, 1.0);
+  let shoreline_mask = tree_shoreline_density_mask(height, normal_y, cfg);
+  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask * forest_cover * shoreline_mask, 0.0, 1.0);
 }
 
 fn tree_accept_params_from_uniforms() -> TreeAcceptParams {
