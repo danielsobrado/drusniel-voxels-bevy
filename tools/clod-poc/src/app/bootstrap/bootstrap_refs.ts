@@ -1,4 +1,4 @@
-import type { ProjectArchiveContents } from "../../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import { createClodRuntimeBindings } from "../clod_runtime_bindings.js";
 import type { VegetationStatControllerRefs } from "./runtime/runtime_systems_startup.js";
 
@@ -11,7 +11,7 @@ export interface BootstrapUiRefs {
   statControllers: VegetationStatControllerRefs;
 }
 
-export function createBootstrapUiRefs(stagedImport: ProjectArchiveContents | null): BootstrapUiRefs {
+export function createBootstrapUiRefs(stagedImport: VoxelProjectArchiveContents | null): BootstrapUiRefs {
   return {
     bindings: createClodRuntimeBindings(),
     colorByLodUserOverride: { value: stagedImport !== null },
