@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
-import { deepOceanWaveVerticalBounds, sampleDeepOceanWave } from "./deep_ocean_waves.js";
+import { deepOceanWaveVerticalBounds } from "./deep_ocean_waves.js";
 
 export interface DeepOceanSurface {
   mesh: THREE.Mesh;
@@ -50,26 +50,9 @@ function addRectGrid(
   vertexOffset.value = base + (rows + 1) * (cols + 1);
 }
 
-function updateWavePositions(geometry: THREE.BufferGeometry, basePositions: Float32Array, timeSeconds: number): void {
-  const attr = geometry.getAttribute("position") as THREE.BufferAttribute;
-  const positions = attr.array as Float32Array;
-  for (let i = 0; i < positions.length; i += 3) {
-    const x = basePositions[i];
-    const y = basePositions[i + 1];
-    const z = basePositions[i + 2];
-    const wave = sampleDeepOceanWave(x, z, timeSeconds);
-    positions[i] = x + wave.dx;
-    positions[i + 1] = y + wave.dy;
-    positions[i + 2] = z + wave.dz;
-  }
-  attr.needsUpdate = true;
-  geometry.computeVertexNormals();
-}
-
 /**
- * Render-only deep ocean ring. It covers the outside skirt and the playable
- * border ocean band, while leaving the central CLOD terrain/hydrology area open.
- * Never fed into CLOD page source or hydrology carve.
+ * Render-only deep ocean ring. Vertices stay static on CPU; wave displacement,
+ * chop, compression, and foam are evaluated in the GPU material.
  */
 export function createDeepOceanSurface(
   worldCells: number,
@@ -110,7 +93,6 @@ export function createDeepOceanSurface(
     new THREE.Vector3(outerMin - waveBounds, y - waveBounds, outerMin - waveBounds),
     new THREE.Vector3(outerMax + waveBounds, y + waveBounds, outerMax + waveBounds),
   );
-  const basePositions = new Float32Array(positions);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = "deep-ocean-surface";
@@ -119,8 +101,8 @@ export function createDeepOceanSurface(
 
   return {
     mesh,
-    update(timeSeconds: number) {
-      updateWavePositions(geometry, basePositions, timeSeconds);
+    update(_timeSeconds: number) {
+      // Time is pushed to the GPU material; CPU geometry is intentionally immutable.
     },
     dispose() {
       geometry.dispose();
