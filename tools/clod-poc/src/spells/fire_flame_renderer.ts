@@ -149,8 +149,10 @@ export class FireFlameRenderer {
     if (this.gl && this.state) return true;
     if (!this.canvas) return false;
 
-    const gl = this.canvas.getContext("webgl", WEBGL_CONTEXT_OPTIONS)
-      ?? this.canvas.getContext("experimental-webgl", WEBGL_CONTEXT_OPTIONS) as WebGLRenderingContext | null;
+    const gl = (
+      this.canvas.getContext("webgl", WEBGL_CONTEXT_OPTIONS)
+      ?? this.canvas.getContext("experimental-webgl", WEBGL_CONTEXT_OPTIONS)
+    ) as WebGLRenderingContext | null;
     if (!gl) return false;
 
     const state = this.createProgramState(gl);
