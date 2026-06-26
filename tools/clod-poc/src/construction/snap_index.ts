@@ -37,6 +37,21 @@ function accepts(sourceAccepts: readonly SnapGroup[], sourceGroup: SnapGroup, ta
   return sourceAllowsTarget && targetAllowsSource;
 }
 
+function isWallFloorPair(sourceGroup: SnapGroup, targetGroup: SnapGroup): boolean {
+  return (sourceGroup === "wall-bottom" && targetGroup === "floor-edge")
+    || (sourceGroup === "floor-edge" && targetGroup === "wall-bottom");
+}
+
+function connectionAlignment(
+  sourceGroup: SnapGroup,
+  targetGroup: SnapGroup,
+  sourceDir: readonly [number, number, number],
+  targetDir: readonly [number, number, number],
+): number {
+  const opposed = -dot(sourceDir, targetDir);
+  return isWallFloorPair(sourceGroup, targetGroup) ? Math.max(opposed, 1.0) : opposed;
+}
+
 export class ConstructionSnapIndex {
   private readonly cells = new Map<string, IndexedConstructionSnapPoint[]>();
 
@@ -109,7 +124,7 @@ export class ConstructionSnapIndex {
       piece.snapPoints.forEach((source, sourceSnapIndex) => {
         if (!accepts(source.accepts, source.group, target)) return;
         const sourceDir = normalize(rotateYQuarter(source.direction, rotationQuarterTurns));
-        const alignment = -dot(sourceDir, target.worldDirection);
+        const alignment = connectionAlignment(source.group, target.group, sourceDir, target.worldDirection);
         if (alignment < config.minAlignment) return;
         const sourceOffset = rotateYQuarter(source.localPos, rotationQuarterTurns);
         const worldPosition = sub(target.worldPos, sourceOffset);
