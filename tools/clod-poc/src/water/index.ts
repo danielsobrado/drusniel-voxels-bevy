@@ -20,4 +20,5 @@ export * from "./moistureField.js";
 export * from "./waterScreenResources.js";
 export * from "./causticsConfig.js";
 export * from "./riverEcologyRuntime.js";
+export * from "./riverMaterialRuntime.js";
 export * from "./riverParityScene.js";
