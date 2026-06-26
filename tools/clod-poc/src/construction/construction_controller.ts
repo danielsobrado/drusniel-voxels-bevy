@@ -48,6 +48,12 @@ function asFiniteVec3(value: unknown): [number, number, number] | null {
   return parsed.every(Number.isFinite) ? [parsed[0], parsed[1], parsed[2]] : null;
 }
 
+function readStringArray(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const parsed = value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+  return parsed.length > 0 ? parsed : [];
+}
+
 export interface ConstructionControllerDeps {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -150,9 +156,7 @@ class ConstructionControllerImpl implements ConstructionController {
       return;
     }
 
-    const snap = this.snapEnabled
-      ? this.findBestSnapForPreview(ray, terrainHit, piece)
-      : null;
+    const snap = this.snapEnabled ? this.findBestSnapForPreview(ray, terrainHit, piece) : null;
     const rotationQuarterTurns = snap?.rotationQuarterTurns ?? this.rotationQuarterTurns;
     const position = snap?.worldPosition ?? createFreePlacementPosition(piece, terrainHit);
     const candidate = createConstructionCandidate({
@@ -178,11 +182,8 @@ class ConstructionControllerImpl implements ConstructionController {
     for (const mesh of this.placedMeshes) {
       mesh.geometry.dispose();
       const material = mesh.material;
-      if (Array.isArray(material)) {
-        for (const entry of material) entry.dispose();
-      } else {
-        material.dispose();
-      }
+      if (Array.isArray(material)) for (const entry of material) entry.dispose();
+      else material.dispose();
     }
     this.placedMeshes.length = 0;
     this.ghostMesh.geometry.dispose();
@@ -347,11 +348,7 @@ class ConstructionControllerImpl implements ConstructionController {
     return null;
   }
 
-  private findBestSnapForPreview(
-    ray: THREE.Ray,
-    terrainHit: TerrainHitPoint,
-    piece: ConstructionPieceDef,
-  ): ConstructionSnapResult | null {
+  private findBestSnapForPreview(ray: THREE.Ray, terrainHit: TerrainHitPoint, piece: ConstructionPieceDef): ConstructionSnapResult | null {
     let best: ConstructionSnapResult | null = null;
     for (let offset = 0; offset < ROTATION_QUARTER_COUNT; offset += 1) {
       const rotation = normalizeRotationQuarterTurns(this.rotationQuarterTurns + offset);
@@ -385,6 +382,8 @@ class ConstructionControllerImpl implements ConstructionController {
       typeId: candidate.piece.id,
       position: [candidate.position[0], candidate.position[1], candidate.position[2]],
       rotationQuarterTurns: candidate.rotationQuarterTurns,
+      grounded: candidate.supportState === "grounded",
+      parentIds: candidate.supportParentIds ?? [],
     };
     this.addPlacedPiece(placed, true);
     this.requestTerrainConform(candidate);
@@ -461,15 +460,18 @@ class ConstructionControllerImpl implements ConstructionController {
     const record = value as Record<string, unknown>;
     const position = asFiniteVec3(record.position);
     const rotation = Number(record.rotationQuarterTurns);
-    if (typeof record.id !== "string" || typeof record.typeId !== "string" || !position || !Number.isFinite(rotation)) {
-      return null;
-    }
-    return {
+    if (typeof record.id !== "string" || typeof record.typeId !== "string" || !position || !Number.isFinite(rotation)) return null;
+
+    const normalized: PlacedConstructionPiece = {
       id: record.id,
       typeId: record.typeId,
       position,
       rotationQuarterTurns: normalizeRotationQuarterTurns(rotation),
     };
+    if (typeof record.grounded === "boolean") normalized.grounded = record.grounded;
+    const parentIds = readStringArray(record.parentIds);
+    if (parentIds !== undefined) normalized.parentIds = parentIds;
+    return normalized;
   }
 
   private createBuildMenu(): HTMLElement {
@@ -516,6 +518,7 @@ class ConstructionControllerImpl implements ConstructionController {
     const status = candidate
       ? candidate.valid ? candidate.snapped ? "snapped" : "valid" : candidate.reason ?? "invalid"
       : "aim at terrain";
+    const support = candidate?.supportState ?? "-";
     const previewRotation = candidate?.rotationQuarterTurns ?? this.rotationQuarterTurns;
     const stateKey = [
       this.active ? "1" : "0",
@@ -523,6 +526,7 @@ class ConstructionControllerImpl implements ConstructionController {
       this.snapEnabled ? "1" : "0",
       previewRotation,
       status,
+      support,
       candidate?.valid ? "1" : "0",
       candidate?.snapped ? "1" : "0",
     ].join("|");
@@ -545,6 +549,7 @@ class ConstructionControllerImpl implements ConstructionController {
         <span>Snap: ${this.snapEnabled ? "on" : "off"}</span>
         <span>Rot: ${previewRotation * 90}°${candidate?.snapped ? " auto" : ""}</span>
         <span>State: ${escapeHtml(status)}</span>
+        <span>Support: ${escapeHtml(support)}</span>
       </div>
     `;
   }
