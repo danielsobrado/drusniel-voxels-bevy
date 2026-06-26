@@ -18,6 +18,11 @@ export interface StreamingOwnershipRadii {
   streamingScene: boolean;
 }
 
+export interface FarShellRangeLike {
+  startMeters: number;
+  endMeters: number;
+}
+
 function finitePositive(value: number, name: string): number {
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(`Streaming ownership: ${name} must be a positive finite number`);
@@ -56,4 +61,14 @@ export function farShellInnerRadiusForOwnership(ownership: StreamingOwnershipRad
 
 export function farShellOuterRadiusForOwnership(ownership: StreamingOwnershipRadii): number | undefined {
   return ownership.streamingScene ? ownership.farShellOuterM : undefined;
+}
+
+export function applyOwnershipToFarShellRange(
+  farShell: FarShellRangeLike,
+  ownership: StreamingOwnershipRadii,
+): FarShellRangeLike {
+  if (!ownership.streamingScene) return farShell;
+  farShell.startMeters = ownership.farShellInnerM;
+  farShell.endMeters = Math.max(farShell.endMeters, ownership.farShellOuterM);
+  return farShell;
 }
