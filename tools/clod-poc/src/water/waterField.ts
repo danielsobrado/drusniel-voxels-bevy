@@ -301,21 +301,33 @@ export class WaterField {
       const useFar = cellSize >= this.farLevelMinCellSize;
       const waterY = useFar ? s.waterYFar : s.waterY;
       const depth = waterY - s.terrainY;
-      const flowLen = Math.hypot(s.flowX, s.flowZ);
+      const riverMask = Math.max(0, Math.min(1, s.riverMask));
+      const flowDirLen = Math.hypot(s.flowX, s.flowZ);
+      const flowSpeed = Math.max(0, s.flowStrength) * riverMask;
+      if (flowDirLen > FLOW_EPSILON && flowSpeed > FLOW_EPSILON) {
+        const dirX = s.flowX / flowDirLen;
+        const dirZ = s.flowZ / flowDirLen;
+        return {
+          waterY,
+          terrainY: s.terrainY,
+          depth,
+          bodyMask: depth > 0 ? s.bodyMask : 0,
+          flow: {
+            x: dirX,
+            z: dirZ,
+            speed: flowSpeed,
+            progress: 0,
+            drop: this.hydrologyRiverLocalDrop(x, z, dirX, dirZ),
+          },
+        };
+      }
+
       return {
         waterY,
         terrainY: s.terrainY,
         depth,
         bodyMask: depth > 0 ? s.bodyMask : 0,
-        flow: flowLen > FLOW_EPSILON
-          ? {
-              x: s.flowX / flowLen,
-              z: s.flowZ / flowLen,
-              speed: flowLen,
-              progress: 0,
-              drop: s.riverDepth,
-            }
-          : { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
+        flow: { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
       };
     }
 
@@ -407,12 +419,14 @@ export class WaterField {
           if (flowProximity > bestFlowWeight) {
             bestFlowWeight = flowProximity;
             const centerFade = 1 - smoothMask(0, river.halfWidth, bestDist);
+            const segDrop = Math.max(0, (river.levels[bestSegIdx] ?? 0) - (river.levels[bestSegIdx + 1] ?? 0));
+            const localSlopeSpeed = (segDrop / Math.max(1, river.segLengths[bestSegIdx] ?? 1)) * 90;
             const dropSpeed = (river.downstreamDrop / Math.max(1, river.totalLength)) * 60;
-            bestFlowSpeed = dropSpeed * centerFade;
+            bestFlowSpeed = Math.max(dropSpeed, localSlopeSpeed) * centerFade;
             bestFlowX = dirX;
             bestFlowZ = dirZ;
             bestFlowProgress = Math.min(1, Math.max(0, bestAccLen / river.totalLength));
-            bestFlowDrop = Math.max(0, river.downstreamDrop);
+            bestFlowDrop = segDrop;
           }
         }
       }
@@ -442,6 +456,16 @@ export class WaterField {
       bodyMask,
       flow,
     };
+  }
+
+  private hydrologyRiverLocalDrop(x: number, z: number, dirX: number, dirZ: number): number {
+    if (!this.hydrology) return 0;
+    const grid = this.hydrology.grid;
+    const sampleStep = Math.max(1, grid.worldCells / Math.max(1, grid.res - 1)) * 2;
+    const up = this.hydrology.sample(x - dirX * sampleStep, z - dirZ * sampleStep);
+    const down = this.hydrology.sample(x + dirX * sampleStep, z + dirZ * sampleStep);
+    if (up.riverMask <= 0.05 && down.riverMask <= 0.05) return 0;
+    return Math.max(0, up.waterY - down.waterY);
   }
 
   private sampleDry(x: number, z: number): WaterFieldResult {
