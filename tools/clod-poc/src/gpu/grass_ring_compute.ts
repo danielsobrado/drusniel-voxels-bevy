@@ -2,20 +2,20 @@ import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffer
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
 import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings, type GrassSettings } from "../grass/grass_config.js";
+import { grassHeightDensityVector, grassMaterialDensityVector } from "../grass/grass_material_bias.js";
 
 const WORKGROUP_SIZE = 64;
-const PARAM_BYTES = 16 * 14;
+const PARAM_BYTES = 16 * 17;
 const COUNTER_BYTES = 4 * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_TIER = 5;
 const TIER_COUNT = 4;
 const INDIRECT_BYTES = TIER_COUNT * INDIRECT_ARGS_PER_TIER * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
+const DEFAULT_MATERIAL_DENSITY: [number, number, number, number] = [1, 1, 1, 1];
+const DEFAULT_HEIGHT_DENSITY: [number, number, number, number, number, number] = [14, 34, 8, 1, 1, 1];
 export const GRASS_GPU_RING_MAX_SAFE_GRID = 384;
 
-// Toroidal slot grid: GRID² candidate cells, CELL m apart → ±(GRID·CELL/2) m ring. Density polish:
-// a denser grid (smaller CELL) gives a lusher near field; survivors widen by 1/√thin to conserve
-// coverage. ~245 m ring at ~2 slots/m². Cull is one dispatch over GRID² (cheap on GPU).
 export const GRASS_GPU_RING_GRID = DEFAULT_GRASS_SETTINGS.ring.grid;
 export const GRASS_GPU_RING_CELL = DEFAULT_GRASS_SETTINGS.ring.cell;
 export const GRASS_GPU_RING_SLOT_COUNT = GRASS_GPU_RING_GRID * GRASS_GPU_RING_GRID;
@@ -69,6 +69,8 @@ export interface GrassGpuRingDispatchParams {
   maxInstancesPerTier: number;
   seed: number;
   jitter: number;
+  materialDensity?: [number, number, number, number];
+  heightDensity?: [number, number, number, number, number, number];
   frustumPlanes?: ArrayLike<number>;
 }
 
@@ -171,6 +173,14 @@ export function grassGpuRingDensityParams(
   };
 }
 
+export function grassGpuRingMaterialDensity(settings: GrassSettings): [number, number, number, number] {
+  return grassMaterialDensityVector(settings);
+}
+
+export function grassGpuRingHeightDensity(settings: GrassSettings): [number, number, number, number, number, number] {
+  return grassHeightDensityVector(settings);
+}
+
 export function packGrassGpuRingParams(
   params: GrassGpuRingDispatchParams,
   indexCounts: GrassGpuRingIndexCounts,
@@ -212,9 +222,20 @@ export function packGrassGpuRingParams(
   f32[29] = params.density.farInstanceFraction;
   f32[30] = params.density.scruffMinDensity;
   f32[31] = params.jitter;
+
+  const material = params.materialDensity ?? DEFAULT_MATERIAL_DENSITY;
+  const height = params.heightDensity ?? DEFAULT_HEIGHT_DENSITY;
+  for (let i = 0; i < 4; i++) f32[32 + i] = material[i] ?? 1;
+  f32[36] = height[0] ?? DEFAULT_HEIGHT_DENSITY[0];
+  f32[37] = height[1] ?? DEFAULT_HEIGHT_DENSITY[1];
+  f32[38] = height[2] ?? DEFAULT_HEIGHT_DENSITY[2];
+  f32[39] = height[3] ?? DEFAULT_HEIGHT_DENSITY[3];
+  f32[40] = height[4] ?? DEFAULT_HEIGHT_DENSITY[4];
+  f32[41] = height[5] ?? DEFAULT_HEIGHT_DENSITY[5];
+
   if (params.frustumPlanes) {
     for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) {
-      f32[32 + i] = params.frustumPlanes[i] ?? 0;
+      f32[44 + i] = params.frustumPlanes[i] ?? 0;
     }
   }
   return scratch;
