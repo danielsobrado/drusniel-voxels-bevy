@@ -205,7 +205,11 @@ fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32, species: u
   let age = smoothstep(0.16, 1.0, tree_hash(wc, 601u));
   let clump = clamp(tree_parent_clump_mask(wpos, cfg), 0.0, 1.25);
   let slope_health = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
-  let base_scale = 0.58 + age * 0.48 + clump * 0.18 + slope_health * 0.08;
+  let forest_cover = tree_forest_cover_mask(wpos, cfg);
+  let forest_edge_stress = 1.0 - forest_cover;
+  let edge_noise = tree_hash(wc, 3407u);
+  let edge_scale = mix(0.78, 1.0, forest_cover) * mix(0.9, 1.05, edge_noise * forest_edge_stress);
+  let base_scale = (0.58 + age * 0.48 + clump * 0.18 + slope_health * 0.08) * edge_scale;
 
   var species_scale = 1.0;
   if (species == 0u) {
@@ -216,7 +220,7 @@ fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32, species: u
     species_scale = mix(0.72, 0.96, age);
   }
 
-  return clamp(base_scale * species_scale, 0.48, 1.62);
+  return clamp(base_scale * species_scale, 0.42, 1.62);
 }
 
 fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
