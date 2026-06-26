@@ -14,6 +14,7 @@ import {
   stoneGpuClassRegion,
   stoneGpuScatterUnsupportedReason,
   type StoneGpuScatterBuffers,
+  type StoneHydrologyData,
 } from "../gpu/stone_scatter_compute.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import {
@@ -49,6 +50,7 @@ export interface StoneSystemOptions {
   /** Hydrology water field (RGBA32F; G = wet mask, B = carved-bed Y) so GPU stones
    *  snap to the carved terrain instead of floating, and drop in water bodies. */
   hydrologyWaterTexture?: THREE.Texture | null;
+  hydrologyData?: StoneHydrologyData | null;
   /** Called when async scatter finishes and `getStats()` counts become valid. */
   onStats?: (stats: StoneStats) => void;
 }
@@ -99,6 +101,7 @@ export class StoneSystem {
   private draws: StoneDraw[] = [];
   private materialHandle: StoneNodeMaterialHandle | null = null;
   private readonly hydrologyWater: StoneHydrologyWater | undefined;
+  private readonly hydrologyData: StoneHydrologyData | null;
   private scatterCompute: StoneGpuScatterCompute | null = null;
   private scatterRunning = false;
   private generation = 0;
@@ -114,6 +117,7 @@ export class StoneSystem {
     this.hydrologyWater = options.hydrologyWaterTexture
       ? { texture: options.hydrologyWaterTexture, worldSize: options.worldCells }
       : undefined;
+    this.hydrologyData = options.hydrologyData ?? null;
     this.settings = { ...options.settings };
     this.currentLighting = cloneLighting(options.lighting);
     this.gpuDevice = options.gpuDevice ?? null;
@@ -187,7 +191,7 @@ export class StoneSystem {
       indirectArgs: this.gpuBufferForAttribute(indirect),
     };
     const edits = resolveDigEdits(getDigEditsSnapshot());
-    void StoneGpuScatterCompute.create(this.gpuDevice, edits, buffers)
+    void StoneGpuScatterCompute.create(this.gpuDevice, edits, buffers, this.hydrologyData)
       .then((compute) => {
         if (generation !== this.generation) {
           compute.destroy();
@@ -333,21 +337,18 @@ export class StoneSystem {
     for (const draw of this.draws) {
       this.root.remove(draw.mesh);
       draw.mesh.geometry.dispose();
+      draw.mesh.material.dispose();
     }
     this.draws = [];
-    this.materialHandle?.material.dispose();
+    this.materialHandle?.dispose();
     this.materialHandle = null;
     this.stats = emptyStats();
+    this.onStats?.(this.getStats());
   }
 }
 
-function cloneLighting(lighting: StoneLighting): StoneLighting {
-  return {
-    light: lighting.light.clone(),
-    sunColor: lighting.sunColor.clone(),
-    skyLight: lighting.skyLight.clone(),
-    groundLight: lighting.groundLight.clone(),
-  };
+function emptyStats(): StoneStats {
+  return { total: 0, large: 0, medium: 0, small: 0, visible: 0, drawnNear: 0, drawnFar: 0, groups: 0 };
 }
 
 function distance2d(a: THREE.Vector3, b: THREE.Vector3): number {
@@ -359,8 +360,11 @@ function clampFinite(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function emptyStats(): StoneStats {
-  return { total: 0, large: 0, medium: 0, small: 0, visible: 0, drawnNear: 0, drawnFar: 0, groups: 0 };
+function cloneLighting(lighting: StoneLighting): StoneLighting {
+  return {
+    light: lighting.light.clone(),
+    sunColor: lighting.sunColor.clone(),
+    skyLight: lighting.skyLight.clone(),
+    groundLight: lighting.groundLight.clone(),
+  };
 }
-
-export { stoneGpuClassRegion };
