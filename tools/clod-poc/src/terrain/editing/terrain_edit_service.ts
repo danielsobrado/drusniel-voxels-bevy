@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { emitAudio } from "../../audio/index.js";
 import type { ClodWorkerClient } from "../../clod_worker_client.js";
+import type { ConstructionTerrainConformRequest } from "../../construction/types.js";
 import {
   addDigEdit,
   DIG_INFLUENCE_MARGIN,
@@ -55,12 +56,18 @@ export interface TerrainEditServiceDeps {
 
 export interface TerrainEditService {
   scheduleDig(ray: THREE.Ray): void;
+  scheduleConstructionTerrainConform(request: ConstructionTerrainConformRequest): void;
   flushAncestors(): Promise<void>;
   readonly lastDigAt: number;
 }
 
+interface TerrainRebuildHit {
+  point: THREE.Vector3;
+}
+
 export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainEditService {
   let digDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let conformDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let digRebuildsInFlight = 0;
   let lastDigAt = -Infinity;
   const pendingGrassNodeIds = new Set<string>();
@@ -108,11 +115,11 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     await deps.clodWorker.flushParents();
   };
 
-  const performDigRebuild = async (
+  const performEditRebuild = async (
     edit: DigEdit,
-    hit: NonNullable<ReturnType<TerrainRaycastService["raycastEditableTerrain"]>>,
+    hit: TerrainRebuildHit,
     radius: number,
-    brushParams: TerrainBrushParams,
+    label: string,
   ) => {
     const t0 = performance.now();
     lastDigAt = t0;
@@ -146,7 +153,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
         `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · swap ${geometrySwapMs.toFixed(0)}ms · collider ${colliderMs.toFixed(0)}ms)`;
       deps.setLastDigSummary(summary);
       console.log(
-        `[${brushParams.brushOp} ${brushParams.brushShape} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${summary} — ${lod0.pendingParents} ancestors queued in worker`,
+        `[${label} ${edit.op ?? "edit"} ${edit.shape ?? "sphere"} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${summary} — ${lod0.pendingParents} ancestors queued in worker`,
       );
       deps.selectionController.invalidate();
       deps.selectionController.update();
@@ -156,7 +163,7 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       if (error instanceof Error && error.name === "ClodBuildError") {
         emitAudio("clod.validation.error");
       }
-      console.error("Dig rebuild failed:", error);
+      console.error(`${label} rebuild failed:`, error);
     } finally {
       digRebuildsInFlight--;
     }
@@ -183,7 +190,43 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
 
     emitAudio(brushParams.brushOp === "add" ? "terrain.raise" : "terrain.dig.tick");
 
-    await performDigRebuild(edit, hit, radius, brushParams);
+    await performEditRebuild(edit, hit, radius, `${brushParams.brushOp} ${brushParams.brushShape}`);
+  };
+
+  const performConstructionTerrainConform = async (request: ConstructionTerrainConformRequest) => {
+    const radius = Math.max(request.dimensionsM[0], request.dimensionsM[2]) * 0.5 + request.padMarginM;
+    const topY = request.position[1] - request.dimensionsM[1] * 0.5;
+    const hit = { point: new THREE.Vector3(request.position[0], topY, request.position[2]) };
+    const fillEdit: DigEdit = {
+      x: request.position[0],
+      y: topY - request.fillDepthM * 0.5,
+      z: request.position[2],
+      r: radius,
+      shape: "cube",
+      op: "add",
+      material: request.materialSlot,
+      height: request.fillDepthM * 0.5,
+      strength: 1,
+      falloff: request.falloffM,
+    };
+    const trimEdit: DigEdit = {
+      x: request.position[0],
+      y: topY + request.trimHeightM * 0.5,
+      z: request.position[2],
+      r: radius,
+      shape: "cube",
+      op: "remove",
+      height: request.trimHeightM * 0.5,
+      strength: 1,
+      falloff: request.falloffM,
+    };
+
+    const hadPaintedTerrain = getDigEditsSnapshot().some((existing) => existing.op === "add");
+    addDigEdit(fillEdit);
+    if (request.trimHeightM > 0) addDigEdit(trimEdit);
+    if (!hadPaintedTerrain) deps.applyTerrainTextures();
+    emitAudio("terrain.raise");
+    await performEditRebuild(fillEdit, hit, radius, "construction terrain conform");
   };
 
   const scheduleDig = (ray: THREE.Ray): void => {
@@ -195,8 +238,17 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     }, 40);
   };
 
+  const scheduleConstructionTerrainConform = (request: ConstructionTerrainConformRequest): void => {
+    if (conformDebounceTimer !== null) clearTimeout(conformDebounceTimer);
+    conformDebounceTimer = setTimeout(() => {
+      conformDebounceTimer = null;
+      void performConstructionTerrainConform(request);
+    }, 20);
+  };
+
   return {
     scheduleDig,
+    scheduleConstructionTerrainConform,
     flushAncestors,
     get lastDigAt() {
       return lastDigAt;
