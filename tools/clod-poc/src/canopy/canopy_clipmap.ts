@@ -203,7 +203,7 @@ export function createCanopyClipmap(): CanopyClipmap {
 
       return {
         metrics: { ...metrics },
-        texturesDirty: built > 0 || metrics.evictedTiles > 0 || rebuildQueue.length > 0,
+        texturesDirty: built > 0 || metrics.evictedTiles > 0,
         centerX,
         centerZ,
       };

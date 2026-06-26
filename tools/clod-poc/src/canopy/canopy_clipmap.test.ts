@@ -102,4 +102,19 @@ describe("canopy clipmap", () => {
     expect(setB.revision).toBeGreaterThan(setA.revision);
     expect(setB.heightTexture).not.toBe(setA.heightTexture);
   });
+
+  it("does not mark textures dirty when queue remains but no tile was built", () => {
+    const clipmap = createCanopyClipmap();
+    const noBuildConfig = {
+      ...config,
+      budgets: { ...config.budgets, maxTilesBuiltPerFrame: 0 },
+    };
+
+    clipmap.update(0, 0, config, terrain, trees);
+    const update = clipmap.update(5000, 5000, noBuildConfig, terrain, trees);
+
+    expect(update.metrics.builtThisFrame).toBe(0);
+    expect(update.metrics.queuedTiles).toBeGreaterThan(0);
+    expect(update.texturesDirty).toBe(false);
+  });
 });
