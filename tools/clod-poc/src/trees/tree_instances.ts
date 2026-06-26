@@ -4,6 +4,7 @@ import type { PageFootprint } from "../types.js";
 import { treeHash2, treeRandomSigned } from "./tree_hash.js";
 import { selectTreeSpecies } from "./tree_species.js";
 import type { TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import { treeMaterialDensity } from "./tree_material_bias.js";
 import {
   ecologyAcceptanceProbability,
   sampleTreeEcology,
@@ -104,7 +105,8 @@ export function generateTreeInstances(
       }
 
       const weights = sampler.materialWeights(height, normalY);
-      const groundWeight = weights[0] + weights[1] * 0.25;
+      const materialDensity = treeMaterialDensity(settings, weights);
+      const groundWeight = (weights[0] + weights[1] * 0.25) * materialDensity;
       const threshold = treeHash2(gridX, gridZ, settings.seed + 307);
       if (groundWeight < settings.placement.minGroundWeight || (!settings.ecology.enabled && threshold > groundWeight)) {
         stats.rejectedMaterial++;
@@ -120,7 +122,7 @@ export function generateTreeInstances(
       }
 
       const species = ecology
-        ? selectEcologySpecies(settings, ecology, height, normalY, treeHash2(gridX, gridZ, settings.seed + 409))
+        ? selectEcologySpecies(settings, ecology, height, normalY, weights, treeHash2(gridX, gridZ, settings.seed + 409))
         : selectTreeSpecies(settings, treeHash2(gridX, gridZ, settings.seed + 409));
       if (!species) {
         stats.rejectedMaterial++;
@@ -179,12 +181,13 @@ function selectEcologySpecies(
   ecology: TreeEcologySample,
   height: number,
   normalY: number,
+  materialWeights: readonly [number, number, number, number],
   roll: number,
 ): TreeSpeciesId | null {
   const weights: { species: TreeSpeciesId; weight: number }[] = [
-    { species: "oak", weight: speciesEcologyWeight("oak", ecology, height, normalY, settings) },
-    { species: "pine", weight: speciesEcologyWeight("pine", ecology, height, normalY, settings) },
-    { species: "dead", weight: speciesEcologyWeight("dead", ecology, height, normalY, settings) },
+    { species: "oak", weight: speciesEcologyWeight("oak", ecology, height, normalY, settings, materialWeights) },
+    { species: "pine", weight: speciesEcologyWeight("pine", ecology, height, normalY, settings, materialWeights) },
+    { species: "dead", weight: speciesEcologyWeight("dead", ecology, height, normalY, settings, materialWeights) },
   ];
   const total = weights.reduce((sum, entry) => sum + entry.weight, 0);
   if (total <= 0) return null;
