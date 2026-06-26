@@ -1,7 +1,7 @@
 import { BUILTIN_TERRAIN_TEXTURES } from "../terrain/material/terrain_builtin_textures.js";
-import type { ProjectArchiveContents } from "../project/project_archive.js";
+import type { VoxelProjectArchiveContents } from "../project/voxel_project_archive.js";
 
-export async function validateProjectArchiveTextures(contents: ProjectArchiveContents): Promise<void> {
+export async function validateProjectArchiveTextures(contents: VoxelProjectArchiveContents): Promise<void> {
   for (const slot of contents.manifest.textures) {
     if (slot.source === "builtin" && !BUILTIN_TERRAIN_TEXTURES.some((texture) => texture.id === slot.selectedId)) {
       throw new Error(`project.json references unknown built-in texture ${slot.selectedId}`);
