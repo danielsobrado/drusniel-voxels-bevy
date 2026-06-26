@@ -21,6 +21,12 @@ export const GRASS_GPU_RING_CELL = DEFAULT_GRASS_SETTINGS.ring.cell;
 export const GRASS_GPU_RING_SLOT_COUNT = GRASS_GPU_RING_GRID * GRASS_GPU_RING_GRID;
 export const GRASS_GPU_RING_STORAGE_BINDINGS = 7;
 
+export interface GrassHydrologyData {
+  res: number;
+  worldCells: number;
+  data: Float32Array;
+}
+
 export function grassGpuRingGrid(ring: Pick<GrassRingSettings, "grid"> = DEFAULT_GRASS_SETTINGS.ring): number {
   const grid = Number.isFinite(ring.grid) ? ring.grid : DEFAULT_GRASS_SETTINGS.ring.grid;
   return Math.min(GRASS_GPU_RING_MAX_SAFE_GRID, Math.max(1, Math.floor(grid)));
@@ -223,6 +229,7 @@ export class GrassGpuRingCompute {
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
   private readonly bindGroup: GPUBindGroup;
+  private readonly hydroTexture: GPUTexture;
   private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private counts: GrassGpuRingCounts = { near: 0, mid: 0, far: 0, super: 0 };
@@ -241,6 +248,7 @@ export class GrassGpuRingCompute {
     edits: readonly ResolvedDigEdit[],
     outputBuffers: GrassGpuRingOutputBuffers | null,
     private readonly ring: GrassRingSettings,
+    hydroData: GrassHydrologyData | null,
   ) {
     this.pipelines = pipelines;
     this.outputBuffers = outputBuffers;
@@ -288,6 +296,12 @@ export class GrassGpuRingCompute {
       destroyAfterMap: false,
       cpu: new Uint32Array(TIER_COUNT),
     }));
+    this.hydroTexture = this.createHydrologyTexture(hydroData);
+    const hydroSampler = device.createSampler({
+      label: "grass ring hydro sampler",
+      magFilter: "nearest",
+      minFilter: "nearest",
+    });
     this.bindGroup = device.createBindGroup({
       label: "grass ring bind group",
       layout,
@@ -298,6 +312,8 @@ export class GrassGpuRingCompute {
         ...this.outputBindGroupEntries(),
         { binding: 7, resource: { buffer: this.digEdits } },
         { binding: 8, resource: { buffer: this.fieldParams } },
+        { binding: 9, resource: this.hydroTexture.createView() },
+        { binding: 10, resource: hydroSampler },
       ],
     });
   }
@@ -307,6 +323,7 @@ export class GrassGpuRingCompute {
     edits: readonly ResolvedDigEdit[],
     outputBuffers: GrassGpuRingOutputBuffers | null = null,
     ring: GrassRingSettings = DEFAULT_GRASS_SETTINGS.ring,
+    hydroData: GrassHydrologyData | null = null,
   ): Promise<GrassGpuRingCompute> {
     const module = device.createShaderModule({
       label: "grass ring compute shader",
@@ -329,6 +346,8 @@ export class GrassGpuRingCompute {
         storage(6),
         storage(7, "read-only-storage"),
         { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+        { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -338,11 +357,7 @@ export class GrassGpuRingCompute {
         layout: pipelineLayout,
         compute: { module, entryPoint },
       });
-    const [
-      clearCounters,
-      cull,
-      buildIndirectArgs,
-    ] = await Promise.all([
+    const [clearCounters, cull, buildIndirectArgs] = await Promise.all([
       makePipeline("clear_counters"),
       makePipeline("grass_cull"),
       makePipeline("build_indirect_args"),
@@ -351,7 +366,7 @@ export class GrassGpuRingCompute {
       clear_counters: clearCounters,
       grass_cull: cull,
       build_indirect_args: buildIndirectArgs,
-    }, edits, outputBuffers, { ...ring });
+    }, edits, outputBuffers, { ...ring }, hydroData);
   }
 
   dispatch(params: GrassGpuRingDispatchParams, indexCounts: GrassGpuRingIndexCounts): boolean {
@@ -461,6 +476,7 @@ export class GrassGpuRingCompute {
     this.counterBuffer.destroy();
     this.digEdits.destroy();
     this.fieldParams.destroy();
+    this.hydroTexture.destroy();
     if (!this.outputBuffers) this.indirectArgs.destroy();
     for (const slot of this.counterReadbacks) {
       if (slot.busy) slot.destroyAfterMap = true;
@@ -501,5 +517,29 @@ export class GrassGpuRingCompute {
       super: shared,
       indirectArgs: this.indirectArgs,
     };
+  }
+
+  private createHydrologyTexture(hydroData: GrassHydrologyData | null): GPUTexture {
+    if (hydroData && hydroData.data.length > 0) {
+      const texture = this.device.createTexture({
+        label: "grass ring hydro texture",
+        size: { width: hydroData.res, height: hydroData.res },
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      this.device.queue.writeTexture(
+        { texture },
+        hydroData.data.buffer as ArrayBuffer,
+        { bytesPerRow: hydroData.res * 16 },
+        { width: hydroData.res, height: hydroData.res },
+      );
+      return texture;
+    }
+    return this.device.createTexture({
+      label: "grass ring fallback hydro texture",
+      size: { width: 1, height: 1 },
+      format: "rgba32float",
+      usage: GPUTextureUsage.TEXTURE_BINDING,
+    });
   }
 }
