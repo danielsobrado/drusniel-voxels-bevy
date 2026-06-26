@@ -45,6 +45,8 @@ import {
   resolveWaterConfig,
   HydrologySystem,
   makeFakeBodyCarvedSampler,
+  applyRiverParityTestWaterConfig,
+  isRiverParityTestScene,
   type WaterConfig,
 } from "../../water/index.js";
 import type { ClodPageNode } from "../../types.js";
@@ -183,6 +185,9 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       worldCells,
     );
   }
+  if (isRiverParityTestScene(searchParams.get("scene"))) {
+    waterConfig = applyRiverParityTestWaterConfig(waterConfig);
+  }
   waterConfig = resolveWaterConfig(waterConfig, worldCells);
   setBorderCoastRuntime(borderCoastOceanConfig, worldCells);
 
@@ -299,8 +304,17 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     cacheCtx,
   );
   const terrainSummary = summaryResult.summary;
-  publishTerrainSummaryForDiagnostics(terrainSummary);
-  createCacheDebugOverlay({ clearWorkerCache: () => clodWorker.clearCache() })?.update();
+  cacheCtx = summaryResult.cacheCtx;
+  publishTerrainSummaryForDiagnostics(terrainSummary, worldSizeCells);
+  if (cacheCtx) {
+    createCacheDebugOverlay({
+      cacheCtx,
+      terrainSource,
+      buildStats: result.stats,
+      summaryCache: summaryResult,
+      searchParams,
+    });
+  }
 
   return {
     cfg,
