@@ -13,6 +13,8 @@ export type {
   ConstructionSnapConfig,
   ConstructionSnapPoint,
   ConstructionSnapResult,
+  ConstructionTerrainConformConfig,
+  ConstructionTerrainConformRequest,
   IndexedConstructionSnapPoint,
   PlacedConstructionPiece,
   SnapGroup,
