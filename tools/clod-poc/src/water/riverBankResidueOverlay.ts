@@ -11,6 +11,7 @@ interface ResidueSample {
   drop: number;
   radius: number;
   angle: number;
+  slopeFade: number;
 }
 
 const SAMPLE_GRID = 25;
@@ -19,6 +20,8 @@ const MAX_WET_DECALS = 360;
 const MAX_FOAM_DECALS = 180;
 const UPDATE_INTERVAL_S = 0.28;
 const MIN_CAMERA_MOVE_M = 2.5;
+const NORMAL_SAMPLE_STEP_M = 1.2;
+const DECAL_SURFACE_OFFSET_M = 0.055;
 
 function hash2(x: number, z: number, seed: number): number {
   const v = Math.sin(x * 41.3 + z * 289.1 + seed * 17.17) * 43758.5453;
@@ -28,6 +31,18 @@ function hash2(x: number, z: number, seed: number): number {
 function smooth01(value: number): number {
   const t = Math.min(1, Math.max(0, value));
   return t * t * (3 - 2 * t);
+}
+
+function groundNormalY(field: WaterField, x: number, z: number): number {
+  const hL = field.sample(x - NORMAL_SAMPLE_STEP_M, z).terrainY;
+  const hR = field.sample(x + NORMAL_SAMPLE_STEP_M, z).terrainY;
+  const hD = field.sample(x, z - NORMAL_SAMPLE_STEP_M).terrainY;
+  const hU = field.sample(x, z + NORMAL_SAMPLE_STEP_M).terrainY;
+  return new THREE.Vector3(hL - hR, NORMAL_SAMPLE_STEP_M * 2, hD - hU).normalize().y;
+}
+
+function slopeFadeForGround(field: WaterField, x: number, z: number): number {
+  return smooth01((groundNormalY(field, x, z) - 0.35) / 0.45);
 }
 
 function makeDecalMesh(name: string, opacity: number): THREE.Mesh {
@@ -48,13 +63,13 @@ function makeDecalMesh(name: string, opacity: number): THREE.Mesh {
   return mesh;
 }
 
-function replaceDecals(mesh: THREE.Mesh, samples: ResidueSample[], kind: "wet" | "foam"): void {
+function replaceDecals(field: WaterField, mesh: THREE.Mesh, samples: ResidueSample[], kind: "wet" | "foam"): void {
   const vertexCount = Math.max(1, samples.length * 6);
   const positions = new Float32Array(vertexCount * 3);
   const colors = new Float32Array(vertexCount * 3);
   for (let i = 0; i < samples.length; i++) {
     const s = samples[i];
-    const strength = kind === "wet" ? Math.max(s.wet, s.drop) : s.foam;
+    const strength = (kind === "wet" ? Math.max(s.wet, s.drop) : s.foam) * s.slopeFade;
     const rx = s.radius * (kind === "wet" ? 1.45 : 1.10);
     const rz = s.radius * (kind === "wet" ? 0.82 : 0.48);
     const ca = Math.cos(s.angle);
@@ -69,7 +84,7 @@ function replaceDecals(mesh: THREE.Mesh, samples: ResidueSample[], kind: "wet" |
       const pz = s.z + lx * sa + lz * ca;
       const vi = i * 18 + c * 3;
       positions[vi + 0] = px;
-      positions[vi + 1] = s.y;
+      positions[vi + 1] = field.sample(px, pz).terrainY + DECAL_SURFACE_OFFSET_M;
       positions[vi + 2] = pz;
       if (kind === "wet") {
         const dropTint = s.drop * 0.05;
@@ -127,8 +142,8 @@ export class RiverBankResidueOverlay {
 
   private rebuild(centerX: number, centerZ: number): void {
     if (this.settings.wetBankStrength <= 0 && this.settings.foamResidueStrength <= 0) {
-      replaceDecals(this.wetDecals, [], "wet");
-      replaceDecals(this.foamDecals, [], "foam");
+      replaceDecals(this.field, this.wetDecals, [], "wet");
+      replaceDecals(this.field, this.foamDecals, [], "foam");
       return;
     }
 
@@ -153,6 +168,8 @@ export class RiverBankResidueOverlay {
         const z = (cellZ + 0.5 + jz * 0.45) * SAMPLE_SPACING_M;
         const here = this.field.sample(x, z);
         if (here.depth > 0.04) continue;
+        const slopeFade = slopeFadeForGround(this.field, x, z);
+        if (slopeFade <= 0.02) continue;
 
         let bestWet = 0;
         let bestFoam = 0;
@@ -176,21 +193,21 @@ export class RiverBankResidueOverlay {
 
         const patchNoise = hash2(cellX, cellZ, 37);
         const puddleNoise = hash2(Math.floor(cellX / 2), Math.floor(cellZ / 2), 53);
-        const wetStrength = bestWet * this.settings.wetBankStrength;
-        const foamStrength = bestFoam * this.settings.foamResidueStrength;
+        const wetStrength = bestWet * this.settings.wetBankStrength * slopeFade;
+        const foamStrength = bestFoam * this.settings.foamResidueStrength * slopeFade;
         const dropPatch = smooth01((patchNoise * 0.62 + puddleNoise * 0.38 - 0.48) / 0.46) * wetStrength;
         const angle = Math.atan2(bestDirZ, bestDirX) + (hash2(cellX, cellZ, 61) - 0.5) * 0.75;
         const radius = 0.55 + hash2(cellX, cellZ, 71) * 1.65;
         if (wet.length < MAX_WET_DECALS && wetStrength > 0.08 && patchNoise < Math.min(0.95, wetStrength + dropPatch * 0.35)) {
-          wet.push({ x, y: here.terrainY + 0.045, z, wet: Math.min(1, wetStrength), foam: 0, drop: Math.min(1, dropPatch), radius, angle });
+          wet.push({ x, y: here.terrainY + 0.045, z, wet: Math.min(1, wetStrength), foam: 0, drop: Math.min(1, dropPatch), radius, angle, slopeFade });
         }
         if (foam.length < MAX_FOAM_DECALS && foamStrength > 0.10 && hash2(cellX, cellZ, 41) < Math.min(0.82, foamStrength)) {
-          foam.push({ x, y: here.terrainY + 0.065, z, wet: 0, foam: Math.min(1, foamStrength), drop: 0, radius: radius * 0.78, angle });
+          foam.push({ x, y: here.terrainY + 0.065, z, wet: 0, foam: Math.min(1, foamStrength), drop: 0, radius: radius * 0.78, angle, slopeFade });
         }
       }
     }
 
-    replaceDecals(this.wetDecals, wet, "wet");
-    replaceDecals(this.foamDecals, foam, "foam");
+    replaceDecals(this.field, this.wetDecals, wet, "wet");
+    replaceDecals(this.field, this.foamDecals, foam, "foam");
   }
 }
