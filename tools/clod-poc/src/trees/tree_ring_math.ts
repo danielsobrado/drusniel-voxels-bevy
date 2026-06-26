@@ -1,5 +1,6 @@
 import { terrainWeights, WATER_LEVEL } from "../terrain/terrain.js";
 import { DEFAULT_TREE_SETTINGS, type TreeLod, type TreeSettings } from "./tree_config.js";
+import { treeMaterialDensityVector } from "./tree_material_bias.js";
 import { clamp, clamp01, smoothstep } from "./tree_noise.js";
 
 export interface TreeRingAcceptParams {
@@ -21,6 +22,7 @@ export interface TreeRingAcceptParams {
   waterClearanceM: number;
   rockReject: number;
   snowReject: number;
+  materialDensity: [number, number, number, number];
 }
 
 export interface TreeRingLodParams {
@@ -107,6 +109,7 @@ export function treeRingAcceptParams(settings: TreeSettings = DEFAULT_TREE_SETTI
     waterClearanceM: 0.35,
     rockReject: 0.9,
     snowReject: 0.55,
+    materialDensity: treeMaterialDensityVector(settings),
   };
 }
 
@@ -121,10 +124,14 @@ export function treeAcceptMask(
   if (height < params.minHeightM || height > params.maxHeightM) return 0;
   if (height < WATER_LEVEL + params.waterClearanceM || normalY < params.slopeMinY) return 0;
 
-  const [grassWeight, rockWeight, , snowWeight] = terrainWeights(height, normalY);
+  const [grassWeight, rockWeight, sandWeight, snowWeight] = terrainWeights(height, normalY);
   if (rockWeight >= params.rockReject || snowWeight >= params.snowReject) return 0;
+  const materialDensity = grassWeight * params.materialDensity[0]
+    + rockWeight * params.materialDensity[1]
+    + sandWeight * params.materialDensity[2]
+    + snowWeight * params.materialDensity[3];
 
-  const groundWeight = clamp01(grassWeight + rockWeight * 0.25);
+  const groundWeight = clamp01((grassWeight + rockWeight * 0.25) * materialDensity);
   const materialMask = Math.pow(
     smoothstep(params.minGroundWeight, Math.min(1, params.minGroundWeight + 0.28), groundWeight),
     Math.max(0.001, params.materialWeightPower),
