@@ -1,4 +1,5 @@
 import { createProjectArchiveController } from "../../project/project_archive_controller.js";
+import { propPlacementSceneToProjectProps } from "../../project/project_props.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
 import type { InfoPanelController } from "./info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./ui/terrain_edit_startup.js";
@@ -44,6 +45,10 @@ export function runProjectArchiveStartup(
     getWorldSize: () => WORLD,
     getConfig: () => cfg,
     getNodesByLevel: () => result.nodesByLevel,
+    getProps: () => {
+      const scene = input.runtime.customProps?.propController.getPlacementSceneSnapshot();
+      return scene ? propPlacementSceneToProjectProps(scene) : [];
+    },
     textureController,
     camera,
     controls,
