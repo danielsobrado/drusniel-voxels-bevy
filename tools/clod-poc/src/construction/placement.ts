@@ -18,7 +18,7 @@ export interface PlacementValidationInput {
   config: ConstructionPlacementConfig;
 }
 
-interface Bounds2d {
+interface Bounds3d {
   minX: number;
   maxX: number;
   minY: number;
@@ -38,7 +38,7 @@ function boundsFor(
   position: readonly [number, number, number],
   rotationQuarterTurns: number,
   paddingM: number,
-): Bounds2d {
+): Bounds3d {
   const [sx, sy, sz] = rotatedDimensions(piece, rotationQuarterTurns);
   const hx = Math.max(0, sx * 0.5 - paddingM);
   const hy = Math.max(0, sy * 0.5 - paddingM);
@@ -53,10 +53,14 @@ function boundsFor(
   };
 }
 
-function overlaps(a: Bounds2d, b: Bounds2d): boolean {
+function overlaps(a: Bounds3d, b: Bounds3d): boolean {
   return a.minX <= b.maxX && a.maxX >= b.minX
     && a.minY <= b.maxY && a.maxY >= b.minY
     && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
+}
+
+function isFinitePosition(position: readonly [number, number, number]): boolean {
+  return position.every(Number.isFinite);
 }
 
 export function createFreePlacementPosition(
@@ -72,8 +76,8 @@ export function createFreePlacementPosition(
 
 export function validateConstructionPlacement(input: PlacementValidationInput): { valid: boolean; reason: string | null } {
   const { piece, position, rotationQuarterTurns, snapped, terrainHit, placedPieces, piecesById, worldCells, config } = input;
-  if (position[0] < 0 || position[0] > worldCells || position[2] < 0 || position[2] > worldCells) {
-    return { valid: false, reason: "outside world" };
+  if (!isFinitePosition(position)) {
+    return { valid: false, reason: "invalid position" };
   }
   if (!snapped && !piece.canGround) {
     return { valid: false, reason: "snap required" };
@@ -81,7 +85,12 @@ export function validateConstructionPlacement(input: PlacementValidationInput): 
   if (piece.canGround && !snapped && !terrainHit) {
     return { valid: false, reason: "no terrain" };
   }
+
   const bounds = boundsFor(piece, position, rotationQuarterTurns, config.overlapPaddingM);
+  if (bounds.minX < 0 || bounds.maxX > worldCells || bounds.minZ < 0 || bounds.maxZ > worldCells) {
+    return { valid: false, reason: "outside world" };
+  }
+
   for (const placed of placedPieces) {
     const otherPiece = piecesById.get(placed.typeId);
     if (!otherPiece) continue;
@@ -108,4 +117,5 @@ export function createConstructionCandidate(input: PlacementValidationInput): Co
 
 export const constructionPlacementMath = {
   rotatedDimensions,
+  boundsFor,
 };
