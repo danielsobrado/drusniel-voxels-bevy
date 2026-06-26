@@ -139,8 +139,8 @@ trees:
         old_forest_bias: 0.85
 
   foliage:
-    enabled: true
-    alpha_test: 0.45
+    enabled: false
+    alpha_test: 0
     mask_resolution_px: 64
     texture_atlas_columns: 4
     texture_atlas_rows: 2
