@@ -1,3 +1,5 @@
+import type { NaadfTraversalMode } from "./config.js";
+
 export const SOURCE_NEAR_TABLE = "near_table" as const;
 export const SOURCE_HASH_FALLBACK = "hash_fallback" as const;
 export const SOURCE_FAR_CLIPMAP = "far_clipmap" as const;
@@ -138,6 +140,35 @@ export type TerrainQueryResult = Readonly<{
   missingSample: boolean;
 }>;
 
+export type HddaTraversalStats = {
+  spanSteps: number;
+  chunkSkips: number;
+  blockSkips: number;
+  voxelSteps: number;
+};
+
+export type HddaMismatchReason =
+  | "none"
+  | "hit_miss_mismatch"
+  | "voxel_mismatch"
+  | "material_mismatch"
+  | "distance_mismatch"
+  | "normal_mismatch"
+  | "exceeded_max_steps"
+  | "missing_chunk"
+  | "invalid_block_skip";
+
+export type HddaCompareResult = Readonly<{
+  mismatchReason: HddaMismatchReason;
+  denseSteps: number;
+  hddaSteps: number;
+  denseHit: boolean;
+  hddaHit: boolean;
+  denseMaterial: number;
+  hddaMaterial: number;
+  distanceDeltaM: number;
+}>;
+
 export type RayTraceResult = Readonly<{
   hit: boolean;
   unknown: boolean;
@@ -151,6 +182,9 @@ export type RayTraceResult = Readonly<{
   hashFallbackHits: number;
   farClipmapHits: number;
   missingSamples: number;
+  traversalMode?: NaadfTraversalMode;
+  hdda?: HddaTraversalStats;
+  compare?: HddaCompareResult;
 }>;
 
 export type SunVisibilityResult = Readonly<{
@@ -163,6 +197,9 @@ export type SunVisibilityResult = Readonly<{
   hashFallbackHits: number;
   farClipmapHits: number;
   missingSamples: number;
+  traversalMode?: NaadfTraversalMode;
+  hdda?: HddaTraversalStats;
+  compare?: HddaCompareResult;
 }>;
 
 export type SummaryStreamingUpdate = Readonly<{
