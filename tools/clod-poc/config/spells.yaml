@@ -1,0 +1,17 @@
+spells:
+  menu:
+    root_id: spell-menu
+    title: Spells
+  fire:
+    id: fire
+    label: Fire
+    cast_duration_ms: 3200
+    audio:
+      volume: 0.34
+    vfx:
+      layer_id: spell-vfx-layer
+      canvas_id: fire-spell-vfx
+      width_px: 560
+      height_px: 320
+      max_dpr: 1.5
+      flame_scale: 1.0
