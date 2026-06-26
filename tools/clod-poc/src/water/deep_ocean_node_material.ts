@@ -216,7 +216,8 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
   });
   material.name = "deep-ocean-node";
   material.positionNode = displacedPosition;
-  material.colorNode = fragment;
+  material.colorNode = fragment.xyz;
+  material.opacityNode = fragment.w;
 
   const uniforms: WaterUniforms & {
     uHorizonColor: { value: THREE.Color };
