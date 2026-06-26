@@ -36,6 +36,8 @@ export interface FarShellControllerDeps {
   heightProvider?: FarHeightProvider;
   centerX?: number;
   centerZ?: number;
+  /** Radius around the stream center owned by playable/CLOD terrain. */
+  cameraRelativeInnerRadiusM?: number;
   /** Override the shell far radius in world units. When set, the shell radius is
    *  this value instead of worldSizeCells * radiusFactor. */
   farShellRadiusM?: number;
@@ -73,6 +75,14 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
         ? deps.farShellRadiusM
         : deps.worldSizeCells * radiusFactor;
 
+  const resolveInnerExclusionRadius = (farRadius: number): number | undefined => {
+    if (!currentHeightProvider) return undefined;
+    const configured = deps.cameraRelativeInnerRadiusM;
+    const fallback = deps.worldSizeCells / 2;
+    const radius = configured && configured > 0 ? configured : fallback;
+    return Math.max(0, Math.min(radius, farRadius * 0.95));
+  };
+
   const buildFarShellInstance = (
     radiusFactor: number,
     heightBias: number,
@@ -98,6 +108,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
       heightProvider: currentHeightProvider,
       centerX: currentCenterX,
       centerZ: currentCenterZ,
+      innerExclusionRadius: resolveInnerExclusionRadius(farRadius),
       buildRelative: useRelativeBuild,
       receiveSunShadows: deps.receiveSunShadows?.() ?? false,
       useDebugLambertReceiver: deps.useDebugLambertReceiver?.() ?? false,
@@ -106,7 +117,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
     });
     buildCenterX = result.buildCenterX;
     buildCenterZ = result.buildCenterZ;
-    // For relative build, translate to the actual world center
+    // For relative build, translate to the actual world center.
     if (useRelativeBuild) {
       result.mesh.position.set(currentCenterX, 0, currentCenterZ);
     }
