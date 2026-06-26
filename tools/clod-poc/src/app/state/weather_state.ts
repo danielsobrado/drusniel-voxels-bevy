@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { WeatherMode } from "../clod_constants.js";
-import type { ProjectWeatherArchiveState } from "../../project/project_archive.js";
+import type { ProjectWeatherArchiveState } from "../../project/voxel_project_archive.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
 export interface WeatherSliceState {
