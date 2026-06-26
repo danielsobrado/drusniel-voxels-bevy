@@ -9,6 +9,8 @@ import { treeUiState } from "../../app/clod_app_state.js";
 import type { VegetationGpuBackend } from "./vegetation_gpu_backend.js";
 import type { VegetationStatControllerRefs } from "./vegetation_types.js";
 import { formatTreeGpuSummary } from "./vegetation_stats_presenter.js";
+import { packHydrologyData } from "../../systems/hydrology_packing.js";
+import { setTreeGpuRingHydrologyData } from "../../gpu/tree_ring_compute.js";
 
 export interface TreeStartupInput {
   scene: THREE.Scene;
@@ -39,6 +41,8 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     currentLighting, statControllers, renderer,
   } = input;
+
+  setTreeGpuRingHydrologyData(hydrologySystem ? packHydrologyData(hydrologySystem) : null);
 
   const treeStats = { current: null as TreeStats | null };
 
