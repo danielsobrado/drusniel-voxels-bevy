@@ -128,6 +128,15 @@ fn tree_parent_clump_mask(wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
   return clamp(1.0 - cfg.clump_strength + clustered_density * cfg.clump_strength, 0.0, 1.25);
 }
 
+fn tree_forest_cover_mask(wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
+  let broad_cell = floor(wpos / 176.0);
+  let mid_cell = floor(wpos / 64.0);
+  let broad = tree_pcg2d(broad_cell, cfg.seed + 17011u).x;
+  let mid = tree_pcg2d(mid_cell, cfg.seed + 19031u).y;
+  let clearing = smoothstep(0.62, 0.92, broad) * smoothstep(0.44, 0.86, mid);
+  return clamp(1.0 - clearing * 0.78, 0.18, 1.0);
+}
+
 fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
   if (height < cfg.min_height_m || height > cfg.max_height_m) {
     return 0.0;
@@ -150,7 +159,8 @@ fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAccept
   let upper_height = 1.0 - smoothstep(cfg.highland_height_m, cfg.highland_height_m + cfg.height_fade_m, height);
   let slope_mask = smoothstep(cfg.slope_fade_start_y, cfg.slope_fade_end_y, normal_y);
   let clump_mask = tree_parent_clump_mask(wpos, cfg);
-  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask, 0.0, 1.0);
+  let forest_cover = tree_forest_cover_mask(wpos, cfg);
+  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask * forest_cover, 0.0, 1.0);
 }
 
 fn tree_accept_params_from_uniforms() -> TreeAcceptParams {
