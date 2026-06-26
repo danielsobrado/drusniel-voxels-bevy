@@ -195,13 +195,6 @@ export function createVegetationGui(
   const refreshTreeStats = () => {
     deps.treeController.refreshStats();
   };
-  if (deps.impostorsEnabled && deps.bakeImpostorsOnStart) {
-    void deps.treeController.bakeImpostors(deps.renderer).then((result) => {
-      if (!result.supported) console.info(`[trees] impostor baking fallback: ${result.reason ?? "unsupported"}`);
-      refreshTreeStats();
-      deps.updateInfo();
-    });
-  }
   const updateTreeWindSettings = () => deps.treeSystem.updateSettings({
     wind: {
       ...deps.treeConfig.wind,
