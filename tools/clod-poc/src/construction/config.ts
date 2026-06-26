@@ -2,6 +2,9 @@ import { load } from "js-yaml";
 import constructionYamlText from "../../config/construction.yaml?raw";
 import { SNAP_GROUPS, type ConstructionCategory, type ConstructionConfig, type ConstructionMaterial, type ConstructionPieceDef, type ConstructionSnapPoint, type SnapGroup } from "./types.js";
 
+const CONSTRUCTION_CATEGORIES: readonly ConstructionCategory[] = ["floor", "wall", "fence", "pillar", "roof", "generic"];
+const CONSTRUCTION_MATERIALS: readonly ConstructionMaterial[] = ["wood", "stone", "metal", "thatch"];
+
 const DEFAULT_CONFIG: ConstructionConfig = {
   enabled: true,
   snap: {
@@ -19,6 +22,15 @@ const DEFAULT_CONFIG: ConstructionConfig = {
   },
   ghost: {
     opacity: 0.42,
+  },
+  terrainConform: {
+    enabled: true,
+    foundationCategories: ["floor"],
+    padMarginM: 0.35,
+    fillDepthM: 2.5,
+    trimHeightM: 1.2,
+    falloffM: 0.12,
+    materialSlot: 1,
   },
   pieces: [],
 };
@@ -71,15 +83,21 @@ function readSnapGroups(value: unknown): SnapGroup[] {
 
 function asCategory(value: string): ConstructionCategory {
   const normalized = value.trim().toLowerCase();
-  if (["floor", "wall", "fence", "pillar", "roof", "generic"].includes(normalized)) {
+  if (CONSTRUCTION_CATEGORIES.includes(normalized as ConstructionCategory)) {
     return normalized as ConstructionCategory;
   }
   return "generic";
 }
 
+function readCategories(value: unknown, fallback: readonly ConstructionCategory[]): ConstructionCategory[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const parsed = value.map((entry) => asCategory(String(entry)));
+  return parsed.length > 0 ? parsed : [...fallback];
+}
+
 function asMaterial(value: string): ConstructionMaterial {
   const normalized = value.trim().toLowerCase();
-  if (["wood", "stone", "metal", "thatch"].includes(normalized)) {
+  if (CONSTRUCTION_MATERIALS.includes(normalized as ConstructionMaterial)) {
     return normalized as ConstructionMaterial;
   }
   return "wood";
@@ -125,6 +143,7 @@ export function parseConstructionConfig(text: string = constructionYamlText): Co
     const snap = asRecord(root?.snap);
     const placement = asRecord(root?.placement);
     const ghost = asRecord(root?.ghost);
+    const terrainConform = asRecord(root?.terrain_conform);
     const pieces = Array.isArray(root?.pieces)
       ? root.pieces.map(parsePiece).filter((piece): piece is ConstructionPieceDef => piece !== null)
       : [];
@@ -146,6 +165,15 @@ export function parseConstructionConfig(text: string = constructionYamlText): Co
       },
       ghost: {
         opacity: readNumber(ghost, "opacity", DEFAULT_CONFIG.ghost.opacity, 0.05, 0.95),
+      },
+      terrainConform: {
+        enabled: readBool(terrainConform, "enabled", DEFAULT_CONFIG.terrainConform.enabled),
+        foundationCategories: readCategories(terrainConform?.foundation_categories, DEFAULT_CONFIG.terrainConform.foundationCategories),
+        padMarginM: readNumber(terrainConform, "pad_margin_m", DEFAULT_CONFIG.terrainConform.padMarginM, 0, 8),
+        fillDepthM: readNumber(terrainConform, "fill_depth_m", DEFAULT_CONFIG.terrainConform.fillDepthM, 0.1, 16),
+        trimHeightM: readNumber(terrainConform, "trim_height_m", DEFAULT_CONFIG.terrainConform.trimHeightM, 0, 16),
+        falloffM: readNumber(terrainConform, "falloff_m", DEFAULT_CONFIG.terrainConform.falloffM, 0, 1),
+        materialSlot: Math.floor(readNumber(terrainConform, "material_slot", DEFAULT_CONFIG.terrainConform.materialSlot, 0, 255)),
       },
       pieces,
     };
