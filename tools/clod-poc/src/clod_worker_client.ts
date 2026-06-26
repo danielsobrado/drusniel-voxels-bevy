@@ -1,5 +1,5 @@
 import type { BuildProgress, BuildResult, DirtyCellBounds } from "./clod/quadtree.js";
-import type { DigEdit } from "./terrain/terrain.js";
+import type { DigEdit, VoxelEditSnapshot } from "./terrain/terrain.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
@@ -95,7 +95,7 @@ export class ClodWorkerClient {
     worldPagesX: number,
     worldPagesZ: number,
     cfg: ClodPagesConfig,
-    edits: DigEdit[],
+    voxelEdits: VoxelEditSnapshot,
     onProgress: (progress: BuildProgress) => void,
     hydrologyTerrain: SerializedHydrologyTerrain | null = null,
     borderCoastOceanConfig: BorderCoastOceanConfig | null = null,
@@ -109,7 +109,7 @@ export class ClodWorkerClient {
       worldPagesX,
       worldPagesZ,
       cfg,
-      edits,
+      voxelEdits,
       hydrologyTerrain,
       borderCoastOceanConfig,
       cacheDisabled,
@@ -324,15 +324,9 @@ export class ClodWorkerClient {
         this.flushRequests.delete(requestId);
         this.clearCacheRequests.delete(requestId);
         pending.reject(error);
-        return;
       }
-      // If no matching pending request, the error may be from a parent rebuild
-      // (the dig promise was already resolved). Release parent waiters so
-      // pumpDigQueue does not hang forever.
-      this.releaseParentsWaitersAfterFailure(error);
-      return;
     }
-    this.onError?.(error);
+    this.releaseParentsWaitersAfterFailure(error);
   }
 
   private rejectAll(error: Error): void {
@@ -340,15 +334,9 @@ export class ClodWorkerClient {
     for (const pending of this.digRequests.values()) pending.reject(error);
     for (const pending of this.flushRequests.values()) pending.reject(error);
     for (const pending of this.clearCacheRequests.values()) pending.reject(error);
-    if (this.digPending) {
-      for (const pending of this.digPending.resolvers) pending.reject(error);
-      this.digPending = null;
-    }
     this.buildRequests.clear();
     this.digRequests.clear();
     this.flushRequests.clear();
     this.clearCacheRequests.clear();
-    this.progressHandlers.clear();
-    this.resolveParentsWaiters();
   }
 }
