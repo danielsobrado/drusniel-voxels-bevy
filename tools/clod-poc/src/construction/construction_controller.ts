@@ -55,6 +55,10 @@ function readStringArray(value: unknown): readonly string[] | undefined {
   return parsed.length > 0 ? parsed : [];
 }
 
+function hasExplicitSupportMetadata(placed: PlacedConstructionPiece): boolean {
+  return placed.grounded !== undefined || placed.parentIds !== undefined;
+}
+
 export interface ConstructionControllerDeps {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -442,11 +446,29 @@ class ConstructionControllerImpl implements ConstructionController {
 
       let rewriteStorage = false;
       const pending: PlacedConstructionPiece[] = [];
+      const seenIds = new Set<string>();
       for (const entry of parsed) {
         const placed = this.normalizePlacedPiece(entry);
-        if (!placed || !this.piecesById.has(placed.typeId)) {
+        const piece = placed ? this.piecesById.get(placed.typeId) : null;
+        if (!placed || !piece) {
           rewriteStorage = true;
           continue;
+        }
+        if (seenIds.has(placed.id)) {
+          console.warn(`[construction] skipped duplicate saved piece ${placed.id}`);
+          rewriteStorage = true;
+          continue;
+        }
+        seenIds.add(placed.id);
+        if (!hasExplicitSupportMetadata(placed)) {
+          if (!piece.canGround) {
+            console.warn(`[construction] skipped legacy saved piece ${placed.id}: invalid support`);
+            rewriteStorage = true;
+            continue;
+          }
+          placed.grounded = true;
+          placed.parentIds = [];
+          rewriteStorage = true;
         }
         const suffix = Number(placed.id.startsWith(ENTITY_ID_PREFIX) ? placed.id.slice(ENTITY_ID_PREFIX.length) : NaN);
         if (Number.isInteger(suffix) && suffix >= this.nextEntityId) this.nextEntityId = suffix + 1;
@@ -471,7 +493,6 @@ class ConstructionControllerImpl implements ConstructionController {
             piecesById: this.piecesById,
             worldCells: this.deps.worldCells,
             config: this.config.placement,
-            allowLegacySupportMetadata: true,
           });
           if (validation.valid) {
             pending.splice(index, 1);
