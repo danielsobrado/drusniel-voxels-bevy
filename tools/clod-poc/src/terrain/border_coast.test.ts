@@ -14,15 +14,39 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 describe("parseBorderCoastOceanConfig", () => {
-  it("loads the repo yaml", () => {
+  it("loads the unified repo yaml", () => {
     const yaml = readFileSync(
       fileURLToPath(new URL("../../config/border_coast_ocean.yaml", import.meta.url)),
       "utf8",
     );
     const cfg = parseBorderCoastOceanConfig(yaml);
     expect(cfg.enabled).toBe(true);
-    expect(cfg.coast.oceanStartCells).toBe(48);
-    expect(cfg.deepOcean.extendCells).toBe(384);
+    expect(cfg.ocean.surfaceY).toBe(18);
+    expect(cfg.coast.oceanStartCells).toBe(256);
+    expect(cfg.coast.oceanFullDepthCells).toBe(96);
+    expect(cfg.coast.shoreBackshoreCells).toBe(128);
+    expect(cfg.deepOcean.extendCells).toBe(4096);
+    expect(cfg.deepOcean.segments).toBe(64);
+  });
+
+  it("keeps legacy nested yaml compatibility", () => {
+    const cfg = parseBorderCoastOceanConfig(`
+border_coast_ocean:
+  enabled: true
+  coast:
+    ocean_start_cells: 64
+    ocean_full_depth_cells: 12
+  ocean:
+    surface_y: 21
+  deep_ocean:
+    extend_cells: 512
+    segments: 32
+`);
+    expect(cfg.coast.oceanStartCells).toBe(64);
+    expect(cfg.coast.oceanFullDepthCells).toBe(12);
+    expect(cfg.ocean.surfaceY).toBe(21);
+    expect(cfg.deepOcean.extendCells).toBe(512);
+    expect(cfg.deepOcean.segments).toBe(32);
   });
 });
 
