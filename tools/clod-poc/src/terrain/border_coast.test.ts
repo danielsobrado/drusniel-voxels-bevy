@@ -15,27 +15,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 function beachOnlyConfig(): BorderCoastOceanConfig {
-  return {
-    ...DEFAULT_BORDER_COAST_OCEAN_CONFIG,
-    coast: {
-      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.coast,
-      beach: { ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.coast.beach },
-      cliff: { ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.coast.cliff },
-      cliffHeadlandThreshold: 2,
-    },
-    ocean: { ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.ocean },
-    deepOcean: {
-      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
-      wave: { ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.wave },
-      shading: {
-        ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading,
-        deepColor: [...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading.deepColor],
-        shallowColor: [...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading.shallowColor],
-        foamColor: [...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading.foamColor],
-        fogColor: [...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading.fogColor],
-      },
-    },
-  };
+  const cfg = structuredClone(DEFAULT_BORDER_COAST_OCEAN_CONFIG) as BorderCoastOceanConfig;
+  cfg.coast.cliffHeadlandThreshold = 2;
+  return cfg;
 }
 
 describe("parseBorderCoastOceanConfig", () => {
