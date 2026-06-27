@@ -223,7 +223,17 @@ function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig 
   if (bounds === "1" || bounds === "true") config.traversal.hddaUseDirectionalBounds = true;
   if (bounds === "0" || bounds === "false") config.traversal.hddaUseDirectionalBounds = false;
 
+  const shellGrid = positiveIntParam(params.get("naadfShellGrid"));
+  if (shellGrid !== null) config.farShell.gridRes = shellGrid;
+
   return config;
+}
+
+function positiveIntParam(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
 }
 
 function currentSearchParams(): URLSearchParams | null {
