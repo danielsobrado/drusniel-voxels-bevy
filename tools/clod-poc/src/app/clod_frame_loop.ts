@@ -105,12 +105,20 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
     farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera);
 
-    player.playerInputController.updateHoldToDig();
+    construction?.update();
+    const constructionActive = construction?.isActive() ?? false;
+    const terraformEditActive = !constructionActive && player.playerTerraformEditActive();
+    if (constructionActive) {
+      player.playerInputController.clearDigHold();
+      player.brushPreview.hide();
+    } else {
+      player.playerInputController.updateHoldToDig();
+    }
 
     player.brushPreview.update({
-      digEnabled: player.state.digEnabled,
+      digEnabled: player.state.digEnabled && !constructionActive,
       interactionMode: player.interaction.mode,
-      terraformEditActive: player.playerTerraformEditActive(),
+      terraformEditActive,
       brushShape: player.state.brushShape,
       brushOp: player.state.brushOp,
       digRadius: player.state.digRadius,
@@ -120,7 +128,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       getOrbitHoverRay: () => player.playerInputController.getOrbitHoverRay(),
     });
 
-    construction?.update();
     combat?.update(performance.now());
 
     const terrainPhase = runTerrainFramePhase({

@@ -64,7 +64,10 @@ export function runTerrainEditStartup(
     updateInfo();
   };
 
-  const playerTerraformEditActive = () => session.terraformEditCheckbox?.checked ?? session.terraformEditActive;
+  const playerTerraformEditActive = () => {
+    if (session.constructionBuildActive) return false;
+    return session.terraformEditCheckbox?.checked ?? session.terraformEditActive;
+  };
 
   const terrainEditService = createTerrainEditService({
     clodWorker,

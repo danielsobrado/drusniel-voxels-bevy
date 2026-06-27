@@ -161,6 +161,7 @@ export interface FrameLoopCanopyDeps {
 
 export interface FrameLoopConstructionDeps {
   update: () => void;
+  isActive: () => boolean;
 }
 
 export interface FrameLoopCombatDeps {
