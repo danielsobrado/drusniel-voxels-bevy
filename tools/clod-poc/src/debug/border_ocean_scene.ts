@@ -181,7 +181,7 @@ export interface BorderOceanAcceptanceInput {
 }
 
 export function probePlayableOceanOutside(sampler: OceanSampler, worldCells: number): number {
-  const x = worldCells + 64;
+  const x = worldCells + sampler.startOutsideBorderM + 1;
   const z = worldCells * 0.5;
   if (!sampler.isInPlayableOcean(x, z)) return 0;
   const height = sampler.sampleOceanHeight(x, z, 0);
@@ -215,6 +215,7 @@ export function publishBorderOceanAcceptanceCounters(
   counters["border_ocean.deep_ocean_vertices"] = input.deepOcean.enabled
     ? deepOceanSurfaceVertexCount(input.worldCells, input.deepOcean)
     : 0;
+  counters["border_ocean.deep_ocean_start_outside_m"] = input.deepOcean.startOutsideBorderM;
   counters["border_ocean.deep_ocean_extend_m"] = input.deepOcean.extendCells;
   counters["border_ocean.deep_ocean_surface_y"] = input.deepOcean.surfaceY;
   counters["border_ocean.wave_count"] = input.oceanSampler
@@ -263,6 +264,7 @@ export function validateBorderOceanStats(
   assertCounter("border_ocean.deep_ocean_enabled", (v) => v === 1);
   assertCounter("border_ocean.deep_ocean_mesh_present", (v) => v === 1);
   assertCounter("border_ocean.deep_ocean_vertices", (v) => v >= sceneConfig.acceptance.minDeepOceanVertices);
+  assertCounter("border_ocean.deep_ocean_start_outside_m", (v) => v >= 0);
   assertCounter("border_ocean.deep_ocean_extend_m", (v) => v > 0);
   assertCounter("border_ocean.deep_ocean_surface_y", (v) => v > 0);
   assertCounter("border_ocean.wave_count", (v) => v > 0);
