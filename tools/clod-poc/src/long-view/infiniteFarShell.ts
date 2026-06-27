@@ -66,7 +66,7 @@ export class InfiniteFarShell {
 
   constructor(options: InfiniteFarShellOptions) {
     this.options = options;
-    this.heightSamplingMode = options.heightSamplingMode ?? "cpu";
+    this.heightSamplingMode = options.heightSamplingMode ?? (options.useParityMaterial ? "gpu" : "cpu");
     this.metrics = options.metrics ?? {
       farShellEnabled: true,
       farShellInnerM: options.innerMeters,
