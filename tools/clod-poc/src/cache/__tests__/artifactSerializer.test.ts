@@ -57,6 +57,24 @@ describe("artifact serializer", () => {
     }
   });
 
+  it("rejects clod-page-node with mismatched normal length", () => {
+    const original = sampleArtifact();
+    const bytes = encodeClodPageNodeArtifact({
+      ...original,
+      normals: new Float32Array([0, 1, 0]),
+    });
+    expect(() => decodeClodPageNodeArtifact(bytes)).toThrow();
+  });
+
+  it("rejects clod-page-node with invalid index count", () => {
+    const original = sampleArtifact();
+    const bytes = encodeClodPageNodeArtifact({
+      ...original,
+      indices: new Uint32Array([0, 1]),
+    });
+    expect(() => decodeClodPageNodeArtifact(bytes)).toThrow();
+  });
+
   it("round-trips terrain-summary", () => {
     const original = sampleSummary();
     const bytes = encodeTerrainSummaryArtifact(original);
