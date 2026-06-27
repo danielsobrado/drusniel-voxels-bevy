@@ -1,0 +1,80 @@
+# CLOD parity tracker between tools/clod-poc and the Bevy runtime.
+#
+# status values:
+#   ported     - implemented or represented in the Rust/Bevy tree
+#   qa         - covered by diagnostics/guards, not necessarily gameplay-visible
+#   planned    - next implementation target
+#   intentional_skip - known PoC feature that should not be ported as-is
+#
+# The tracker is intentionally file/path based so CI can detect accidental
+# removals while reviewers can still read the rationale in one place.
+
+[[item]]
+id = "selection-runtime-controls"
+category = "runtime"
+priority = "high"
+status = "ported"
+title = "CLOD selection runtime controls"
+poc_refs = ["tools/clod-poc/src/clod/selection.ts", "tools/clod-poc/src/clod/runtime/clodCutFreeze.ts"]
+bevy_paths = ["src/voxel/pages/selection.rs", "src/voxel/pages/debug_overlay.rs", "src/voxel/pages/runtime_stats_export.rs"]
+notes = "Relief-biased error, forced/frozen selection and runtime counters are represented by the PR 1-3 stack."
+
+[[item]]
+id = "qa-guards"
+category = "qa"
+priority = "high"
+status = "ported"
+title = "CLOD guard/report pipeline"
+poc_refs = ["tools/clod-poc/src/clod/qa", "tools/clod-poc/src/clod/tests", "tools/clod-poc/src/clod/stress"]
+bevy_paths = ["src/bin/clod_stats_guard.rs", "src/bin/clod_rebuild_guard.rs", "src/bin/clod_qa_report.rs", "scripts/run-clod-complete-qa.sh"]
+notes = "Standalone Rust guard tools and a complete QA runner mirror the PoC QA/report workflow."
+
+[[item]]
+id = "crossfade-dither"
+category = "visual"
+priority = "high"
+status = "ported"
+title = "Crossfade and dither transition contract"
+poc_refs = ["tools/clod-poc/src/clod/runtime/clodCrossfade.ts", "tools/clod-poc/src/clod/runtime/clodDitherMaterial.ts"]
+bevy_paths = ["src/voxel/pages/crossfade.rs", "src/voxel/pages/crossfade_runtime.rs", "src/voxel/pages/dither_material.rs", "src/voxel/pages/fade_material.rs", "assets/shaders/terrain/clod_dither.wgsl"]
+notes = "Fade state, material contract and shader helper are tracked separately from terrain selection."
+
+[[item]]
+id = "border-topology-weld-simplify"
+category = "geometry"
+priority = "high"
+status = "qa"
+title = "Geometry parity diagnostics"
+poc_refs = ["tools/clod-poc/src/clod/weld", "tools/clod-poc/src/clod/validate", "tools/clod-poc/src/clod/simplify"]
+bevy_paths = ["src/voxel/pages/border_lock_stats.rs", "src/voxel/pages/topology_stats.rs", "src/voxel/pages/simplify_stats.rs", "src/voxel/pages/weld_stats.rs"]
+notes = "Diagnostics and guards cover locks, topology, simplification and weld health."
+
+[[item]]
+id = "scripted-edit-execution"
+category = "editing"
+priority = "high"
+status = "planned"
+title = "Execute scripted CLOD edit operations during benches"
+poc_refs = ["tools/clod-poc/src/clod/edit", "tools/clod-poc/src/clod/stress"]
+bevy_paths = ["bench/scenes/terrain/clod-edit-stress.toml", "src/voxel/pages/edit_dirtiness.rs", "src/bin/clod_edit_plan_guard.rs", "src/bin/clod_edit_plan_export.rs"]
+notes = "Schema, dirtiness planner and plan-vs-rebuild guard exist; actual bench-time brush execution remains the next implementation target."
+
+[[item]]
+id = "collider-refresh-after-edit"
+category = "editing"
+priority = "high"
+status = "planned"
+title = "Verify collider refresh after CLOD edits"
+poc_refs = ["tools/clod-poc/src/clod/edit", "tools/clod-poc/src/clod/stress"]
+bevy_paths = ["src/voxel/pages/rebuild_observer.rs", "src/bin/clod_edit_rebuild_guard.rs"]
+notes = "Rebuild publication is observable, but the edit stress bench must emit collider refresh timing before this can be guarded strictly."
+
+[[item]]
+id = "water-clipmap"
+category = "water"
+priority = "low"
+status = "intentional_skip"
+title = "Fake PoC water clipmap"
+poc_refs = ["tools/clod-poc/src/water"]
+bevy_paths = ["src/rendering/water_reflection.rs", "src/rendering/water_displacement.rs", "assets/config/water.yaml"]
+notes = "The Bevy water stack is more advanced and should not be replaced by the PoC fake water clipmap."
