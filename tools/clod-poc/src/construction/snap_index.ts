@@ -51,8 +51,13 @@ function accepts(sourceAccepts: readonly SnapGroup[], sourceGroup: SnapGroup, ta
 }
 
 function isWallFloorPair(sourceGroup: SnapGroup, targetGroup: SnapGroup): boolean {
-  return (sourceGroup === "wall-bottom" && targetGroup === "floor-edge")
-    || (sourceGroup === "floor-edge" && targetGroup === "wall-bottom");
+  return ((sourceGroup === "wall-bottom" || sourceGroup === "wall-top") && targetGroup === "floor-edge")
+    || (sourceGroup === "floor-edge" && (targetGroup === "wall-bottom" || targetGroup === "wall-top"));
+}
+
+function isWallStackPair(sourceGroup: SnapGroup, targetGroup: SnapGroup): boolean {
+  return (sourceGroup === "wall-bottom" && targetGroup === "wall-top")
+    || (sourceGroup === "wall-top" && targetGroup === "wall-bottom");
 }
 
 function localHorizontalSnapNormal(piece: ConstructionPieceDef): [number, number, number] {
@@ -88,6 +93,7 @@ function connectionAlignment(
   sourceDir: readonly [number, number, number],
   targetDir: readonly [number, number, number],
 ): number {
+  if (isWallStackPair(sourceGroup, targetGroup)) return -dot(sourceDir, targetDir);
   const floorAlignment = wallFloorAlignment(piece, sourceGroup, targetGroup, rotationQuarterTurns, sourceDir, targetDir);
   if (floorAlignment !== null) return floorAlignment;
   return -dot(sourceDir, targetDir);
@@ -95,11 +101,25 @@ function connectionAlignment(
 
 function compatibilityRank(sourceGroup: SnapGroup, targetGroup: SnapGroup): number {
   if (isWallFloorPair(sourceGroup, targetGroup)) return 4;
+  if (isWallStackPair(sourceGroup, targetGroup)) return 4;
   if ((sourceGroup === "roof-edge" && targetGroup === "wall-top") || (sourceGroup === "wall-top" && targetGroup === "roof-edge")) return 4;
   if (sourceGroup === "wall-side" && targetGroup === "wall-side") return 3;
   if (sourceGroup === "floor-edge" && targetGroup === "floor-edge") return 2;
   if (sourceGroup === "generic" && targetGroup === "generic") return 1;
   return 1;
+}
+
+function snapWorldPosition(
+  target: IndexedConstructionSnapPoint,
+  piece: ConstructionPieceDef,
+  sourceGroup: SnapGroup,
+  sourceOffset: readonly [number, number, number],
+): [number, number, number] {
+  const worldPosition = sub(target.worldPos, sourceOffset);
+  if (sourceGroup === "floor-edge" && target.group === "wall-top") {
+    worldPosition[1] += piece.dimensionsM[1];
+  }
+  return worldPosition;
 }
 
 function scoreSnap(alignment: number, distanceScore: number, rank: number, config: ConstructionSnapConfig): number {
@@ -233,7 +253,7 @@ export class ConstructionSnapIndex {
       const alignment = connectionAlignment(piece, source.group, target.group, rotationQuarterTurns, sourceDir, target.worldDirection);
       if (alignment < config.minAlignment) return;
       const sourceOffset = rotateYQuarter(source.localPos, rotationQuarterTurns);
-      const worldPosition = sub(target.worldPos, sourceOffset);
+      const worldPosition = snapWorldPosition(target, piece, source.group, sourceOffset);
       const cursorDistance = length(sub(cursorWorldPos, worldPosition));
       const distanceScore = 1 - Math.min(1, Math.max(rayDistanceM, cursorDistance) / config.radiusM);
       const rank = compatibilityRank(source.group, target.group);
