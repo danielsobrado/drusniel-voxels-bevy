@@ -3,8 +3,8 @@ import {
   createConstructionCandidate,
   createFreePlacementPosition,
   validateConstructionPlacement,
-  validatePersistedConstructionPlacement,
 } from "./placement.js";
+import { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
 import type { ConstructionPieceDef, ConstructionPlacementConfig, ConstructionSnapResult, PlacedConstructionPiece } from "./types.js";
 
 const placementConfig: ConstructionPlacementConfig = {
@@ -79,15 +79,20 @@ function validateLive(
   });
 }
 
-function validateSaved(placed: PlacedConstructionPiece, placedPieces: readonly PlacedConstructionPiece[] = []) {
+function validateSaved(
+  placed: PlacedConstructionPiece,
+  placedPieces: readonly PlacedConstructionPiece[] = [],
+  allowLegacySupportMetadata = false,
+) {
   const piece = piecesById.get(placed.typeId)!;
-  return validatePersistedConstructionPlacement({
+  return validateStrictPersistedConstructionPlacement({
     piece,
     placed,
     placedPieces,
     piecesById,
     worldCells: 16,
     config: placementConfig,
+    allowLegacySupportMetadata,
   });
 }
 
@@ -199,13 +204,37 @@ describe("construction placement", () => {
     expect(result).toEqual({ valid: false, reason: "unsupported" });
   });
 
-  it("keeps old saved pieces without support metadata loadable", () => {
+  it("rejects saved non-ground pieces forged as grounded", () => {
+    const result = validateSaved({
+      id: "wall-1",
+      typeId: "wall",
+      position: [12, 2, 8],
+      rotationQuarterTurns: 1,
+      grounded: true,
+      parentIds: [],
+    });
+
+    expect(result).toEqual({ valid: false, reason: "invalid support" });
+  });
+
+  it("rejects old saved pieces without support metadata by default", () => {
     const result = validateSaved({
       id: "legacy-wall",
       typeId: "wall",
       position: [12, 2, 8],
       rotationQuarterTurns: 1,
     });
+
+    expect(result).toEqual({ valid: false, reason: "missing support" });
+  });
+
+  it("keeps old saved pieces loadable only during explicit legacy migration", () => {
+    const result = validateSaved({
+      id: "legacy-wall",
+      typeId: "wall",
+      position: [12, 2, 8],
+      rotationQuarterTurns: 1,
+    }, [], true);
 
     expect(result.valid).toBe(true);
   });
