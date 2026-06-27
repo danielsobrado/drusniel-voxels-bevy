@@ -27,11 +27,17 @@ export function sampleBlendedHeightNormalMaterial(
   heightProvider: FarHeightProvider | undefined,
   options: FarSummarySamplerOptions,
 ): HeightNormalMaterial {
+  const macroBlend = smoothstep(
+    options.macroBlendStartMeters,
+    options.macroBlendEndMeters,
+    distanceFromCenter,
+  );
+
   const macroHeight = sampleMacroTerrainHeight(x, z);
   const macroNormal = sampleMacroTerrainNormal(x, z);
   const macroMaterial = sampleMacroTerrainMaterial(x, z);
 
-  if (!heightProvider) {
+  if (!heightProvider || macroBlend >= 1) {
     return { height: macroHeight, normal: macroNormal, material: macroMaterial };
   }
 
@@ -62,17 +68,8 @@ export function sampleBlendedHeightNormalMaterial(
     options.metrics.farSummaryFallbackSamples++;
   }
 
-  const macroBlend = smoothstep(
-    options.macroBlendStartMeters,
-    options.macroBlendEndMeters,
-    distanceFromCenter,
-  );
-
   if (macroBlend <= 0) {
     return { height: summaryHeight, normal: summaryNormal, material: summaryMaterial };
-  }
-  if (macroBlend >= 1) {
-    return { height: macroHeight, normal: macroNormal, material: macroMaterial };
   }
 
   const height = summaryHeight * (1 - macroBlend) + macroHeight * macroBlend;
