@@ -71,6 +71,42 @@ function withConservativeGrassFrustum(source: string): string {
   );
 }
 
+function withTreeFinalPlacementHeight(source: string): string {
+  return source
+    .replace(
+      "let hx0 = surfaceHeightField(wpos.x - sample_radius, wpos.y);",
+      "let hx0 = placement_ground_height(wpos.x - sample_radius, wpos.y, params.center_radius.w);",
+    )
+    .replace(
+      "let hx1 = surfaceHeightField(wpos.x + sample_radius, wpos.y);",
+      "let hx1 = placement_ground_height(wpos.x + sample_radius, wpos.y, params.center_radius.w);",
+    )
+    .replace(
+      "let hz0 = surfaceHeightField(wpos.x, wpos.y - sample_radius);",
+      "let hz0 = placement_ground_height(wpos.x, wpos.y - sample_radius, params.center_radius.w);",
+    )
+    .replace(
+      "let hz1 = surfaceHeightField(wpos.x, wpos.y + sample_radius);",
+      "let hz1 = placement_ground_height(wpos.x, wpos.y + sample_radius, params.center_radius.w);",
+    )
+    .replace(
+      "let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;",
+      "let start_height = placement_ground_height(start_xz.x, start_xz.y, params.center_radius.w) + 18.0;",
+    )
+    .replace(
+      "let sample_ground_height = surfaceHeightField(sample_xz.x, sample_xz.y);",
+      "let sample_ground_height = placement_ground_height(sample_xz.x, sample_xz.y, params.center_radius.w);",
+    )
+    .replace(
+      "let raw_height = surfaceHeightField(wpos.x, wpos.y);",
+      "let raw_height = placement_ground_height(wpos.x, wpos.y, params.center_radius.w);",
+    )
+    .replace(
+      "let height = tree_hydrology_ground_height(raw_height, hydro);",
+      "let height = raw_height;",
+    );
+}
+
 function withRiverEcologyConstants(source: string): string {
   const ecology = readRiverEcologySettings();
   return [
@@ -108,11 +144,11 @@ export function composeTreeRingShader(workgroupSize = 64): string {
   const size = workgroupSize === 32 || workgroupSize === 64 || workgroupSize === 128 || workgroupSize === 256
     ? workgroupSize
     : 64;
-  const treeEntry = withRiverEcologyConstants(treeRingEntry).replace(
+  const treeEntry = withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)).replace(
     /const TREE_WORKGROUP_SIZE: u32 = \d+u;/,
     `const TREE_WORKGROUP_SIZE: u32 = ${size}u;`,
   );
-  return composeShader("tree ring shader", [treeBindings, terrainCommon, treeEntry]);
+  return composeShader("tree ring shader", [treeBindings, terrainCommon, placementHeight, treeEntry]);
 }
 
 export function composeUnderstoryRingShader(workgroupSize = 64): string {
