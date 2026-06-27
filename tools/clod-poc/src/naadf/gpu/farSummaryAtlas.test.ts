@@ -45,6 +45,8 @@ describe("FarSummaryGpuAtlas", () => {
     expect(atlas.view.texture.minFilter).toBe(THREE.NearestFilter);
     expect(atlas.view.materialTexture.magFilter).toBe(THREE.NearestFilter);
     expect(atlas.view.materialTexture.minFilter).toBe(THREE.NearestFilter);
+    expect(atlas.view.normalTexture.magFilter).toBe(THREE.NearestFilter);
+    expect(atlas.view.normalTexture.minFilter).toBe(THREE.NearestFilter);
     const data = atlas.view.texture.image.data as Float32Array;
     const firstPackedPixel = ((2 * atlas.view.widthCells) + 2) * 4;
     expect(data[firstPackedPixel]).toBe(20);
@@ -66,6 +68,21 @@ describe("FarSummaryGpuAtlas", () => {
     expect(materialData[firstPackedPixel + 1]).toBeCloseTo(0.48);
     expect(materialData[firstPackedPixel + 2]).toBeCloseTo(0.24);
     expect(materialData[firstPackedPixel + 3]).toBe(1);
+  });
+
+  it("packs derived normals into a paired float texture", () => {
+    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
+    const farTiles = new Map<string, any>();
+    farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
+
+    atlas.updateFromState(testState(farTiles));
+
+    const normalData = atlas.view.normalTexture.image.data as Float32Array;
+    const firstPackedPixel = ((2 * atlas.view.widthCells) + 2) * 4;
+    expect(normalData[firstPackedPixel]).toBeLessThan(0.5);
+    expect(normalData[firstPackedPixel + 1]).toBeGreaterThan(0.5);
+    expect(normalData[firstPackedPixel + 2]).toBeLessThan(0.5);
+    expect(normalData[firstPackedPixel + 3]).toBe(1);
   });
 
   it("packs each far-summary ring into a separate atlas band", () => {
