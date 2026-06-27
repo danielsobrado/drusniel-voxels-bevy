@@ -3239,7 +3239,7 @@ fn queue_instanced_prop_shadows(
         Query<&RenderCascadesVisibleEntities, With<ExtractedDirectionalLight>>,
         Query<&RenderCubemapVisibleEntities, With<ExtractedPointLight>>,
         Query<&RenderVisibleMeshEntities, With<ExtractedPointLight>>,
-        Res<CascadeShadowBuffers>,
+        Option<Res<CascadeShadowBuffers>>,
     )>,
     view_key_cache: Res<ViewKeyCache>,
     timing: Option<Res<RenderTimingSink>>,
@@ -3352,8 +3352,8 @@ fn queue_instanced_prop_shadows(
                 if is_directional {
                     if cascade_index.is_some_and(|ci| {
                         light_visible_entities.p3()
-                            .buffers
-                            .contains_key(&(render_entity, ci))
+                            .as_ref()
+                            .is_some_and(|csb| csb.buffers.contains_key(&(render_entity, ci)))
                     }) {
                         cascade_buffer_hits += 1;
                     } else {
