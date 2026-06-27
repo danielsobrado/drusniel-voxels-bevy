@@ -48,3 +48,51 @@ jobs:
         with:
           name: acceptance-runs
           path: tools/clod-poc/acceptance-runs/
+
+  border-ocean-visual:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/clod-poc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: tools/clod-poc/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Build app
+        run: npm run build
+
+      - name: Start preview server
+        run: |
+          npm run preview -- --host 127.0.0.1 > /tmp/clod-poc-preview.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/clod-poc-preview.log
+          exit 1
+
+      - name: Border ocean visual gate
+        env:
+          CLOD_POC_BASE_URL: http://127.0.0.1:4173/
+        run: npm run border-ocean:visual
+
+      - name: Upload border ocean artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: border-ocean-visual
+          path: tools/clod-poc/shots/border-ocean/visual/
