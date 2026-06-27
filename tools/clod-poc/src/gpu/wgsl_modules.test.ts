@@ -19,6 +19,7 @@ describe("WGSL module composition", () => {
     expect(source).toContain("@group(0) @binding(7)");
     expect(source).toContain("@group(0) @binding(8)");
     expect(source).toContain("fn surfaceHeightField");
+    expect(source).toContain("fn placement_border_coast_height");
     expect(source).toContain("fn densityGradient");
     expect(source).toContain("fn grass_cull");
     expect(source).not.toContain("replace(");
@@ -54,6 +55,7 @@ describe("WGSL module composition", () => {
     expect(source).toContain("@group(0) @binding(6)");
     expect(source).toContain("@group(0) @binding(7) var hydro_texture");
     expect(source).toContain("@group(0) @binding(8) var hydro_sampler");
+    expect(source).toContain("fn placement_border_coast_height");
     expect(source).toContain("fn scatter_stones");
     expect(bindingDeclarationCount(source, "digEdits")).toBe(1);
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
@@ -61,17 +63,20 @@ describe("WGSL module composition", () => {
     expect(source.match(/^@group\(0\) @binding\(8\) var hydro_sampler:/gm)).toHaveLength(1);
   });
 
-  it("composes tree ring helpers with explicit tree field bindings and shared terrain functions", () => {
+  it("composes tree ring helpers with final terrain placement height", () => {
     const source = composeTreeRingShader();
 
     expect(source).toContain("@group(0) @binding(7)");
     expect(source).toContain("@group(0) @binding(8)");
     expect(source).toContain("fn surfaceHeightField");
+    expect(source).toContain("fn placement_border_coast_height");
     expect(source).toContain("fn densityGradient");
     expect(source).toContain("fn tree_pcg2d");
     expect(source).toContain("fn tree_world_cell_from_slot");
     expect(source).toContain("fn tree_accept_mask");
     expect(source).toContain("fn tree_lod_ring");
+    expect(source).toContain("let raw_height = placement_ground_height(wpos.x, wpos.y, params.center_radius.w);");
+    expect(source).toContain("let height = raw_height;");
     expect(bindingDeclarationCount(source, "digEdits")).toBe(1);
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
   });
@@ -82,6 +87,7 @@ describe("WGSL module composition", () => {
     expect(source).toContain("@group(0) @binding(7)");
     expect(source).toContain("@group(0) @binding(8)");
     expect(source).toContain("fn surfaceHeightField");
+    expect(source).toContain("fn placement_border_coast_height");
     expect(source).toContain("fn densityGradient");
     expect(source).toContain("fn understory_cull");
     expect(bindingDeclarationCount(source, "digEdits")).toBe(1);
