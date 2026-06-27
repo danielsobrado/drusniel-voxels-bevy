@@ -191,13 +191,6 @@ export class ClodWorkerClient {
     });
   }
 
-  private waitForParents(): Promise<void> {
-    if (!this.parentsPending) return Promise.resolve();
-    return new Promise((resolve) => {
-      this.parentsWaiters.push(resolve);
-    });
-  }
-
   private resolveParentsWaiters(): void {
     this.parentsPending = false;
     for (const resolve of this.parentsWaiters) resolve();
