@@ -1,6 +1,10 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { borderOceanCameraForWorld, validateBorderOceanStats } from "../src/debug/border_ocean_scene.js";
+import {
+  borderOceanCameraForWorld,
+  parseBorderOceanSceneConfig,
+  validateBorderOceanStats,
+} from "../src/debug/border_ocean_scene.js";
 
 const SHOT_DIR = "shots/phase-0";
 const SANITY_SHOT = `${SHOT_DIR}/sanity.png`;
@@ -24,7 +28,10 @@ const LONG_VIEW_FOREST_CAM = "1800,360,3200,2.6500,-0.4300,55";
 const BORDER_OCEAN_DIR = "shots/border-ocean";
 const BORDER_OCEAN_SHOT = `${BORDER_OCEAN_DIR}/border-ocean.png`;
 const BORDER_OCEAN_STATS = `${BORDER_OCEAN_DIR}/border-ocean-stats.json`;
-const BORDER_OCEAN_CAM = borderOceanCameraForWorld(16 * 4 * 16);
+const BORDER_OCEAN_SCENE_CONFIG = parseBorderOceanSceneConfig(
+  readFileSync("config/border_ocean_scene.yaml", "utf8"),
+);
+const BORDER_OCEAN_CAM = borderOceanCameraForWorld(16 * 4 * 16, BORDER_OCEAN_SCENE_CONFIG);
 
 function run(label: string, args: string[]): void {
   console.log(`[battery] ${label}`);
@@ -83,7 +90,7 @@ function validatePhase1Stats(): void {
 
 function validateBorderOceanShotStats(): void {
   const stats = JSON.parse(readFileSync(BORDER_OCEAN_STATS, "utf8")) as Record<string, unknown>;
-  validateBorderOceanStats(stats);
+  validateBorderOceanStats(stats, BORDER_OCEAN_SCENE_CONFIG);
 }
 
 function validateLongViewStats(): void {
