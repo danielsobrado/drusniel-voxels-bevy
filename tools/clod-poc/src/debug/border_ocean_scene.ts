@@ -5,6 +5,7 @@ import { parseWaterConfig } from "../water/waterConfig.js";
 import waterYaml from "../../config/water.yaml?raw";
 import type { OceanSampler } from "../water/ocean_service.js";
 import { deepOceanSurfaceVertexCount } from "../water/deep_ocean_surface.js";
+import { deepOceanSpectrumWaveCount } from "../water/deep_ocean_waves.js";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
 import { getBorderCoastRuntime } from "../terrain/terrain.js";
 
@@ -214,6 +215,16 @@ export function publishBorderOceanAcceptanceCounters(
   counters["border_ocean.deep_ocean_vertices"] = input.deepOcean.enabled
     ? deepOceanSurfaceVertexCount(input.worldCells, input.deepOcean)
     : 0;
+  counters["border_ocean.deep_ocean_extend_m"] = input.deepOcean.extendCells;
+  counters["border_ocean.deep_ocean_surface_y"] = input.deepOcean.surfaceY;
+  counters["border_ocean.wave_count"] = input.oceanSampler
+    ? deepOceanSpectrumWaveCount(input.oceanSampler.waves)
+    : 0;
+  counters["border_ocean.wave_wind_speed"] = input.deepOcean.wave.windSpeed;
+  counters["border_ocean.wave_height_scale"] = input.deepOcean.wave.heightScale;
+  counters["border_ocean.wave_choppiness"] = input.deepOcean.wave.choppiness;
+  counters["border_ocean.shading_fog_far_m"] = input.deepOcean.shading.fogFarM;
+  counters["border_ocean.shading_reflection_strength"] = input.deepOcean.shading.reflectionStrength;
   counters["border_ocean.page_source_purity"] = 1;
   counters["border_ocean.interior_water_wet_ratio"] = input.waterField
     ? sampleInteriorWaterWetRatio(input.waterField, input.worldCells)
@@ -252,6 +263,14 @@ export function validateBorderOceanStats(
   assertCounter("border_ocean.deep_ocean_enabled", (v) => v === 1);
   assertCounter("border_ocean.deep_ocean_mesh_present", (v) => v === 1);
   assertCounter("border_ocean.deep_ocean_vertices", (v) => v >= sceneConfig.acceptance.minDeepOceanVertices);
+  assertCounter("border_ocean.deep_ocean_extend_m", (v) => v > 0);
+  assertCounter("border_ocean.deep_ocean_surface_y", (v) => v > 0);
+  assertCounter("border_ocean.wave_count", (v) => v > 0);
+  assertCounter("border_ocean.wave_wind_speed", (v) => v > 0);
+  assertCounter("border_ocean.wave_height_scale", (v) => v > 0);
+  assertCounter("border_ocean.wave_choppiness", (v) => v > 0);
+  assertCounter("border_ocean.shading_fog_far_m", (v) => v > 0);
+  assertCounter("border_ocean.shading_reflection_strength", (v) => v >= 0);
   assertCounter("border_ocean.page_source_purity", (v) => v === 1);
   assertCounter(
     "border_ocean.interior_water_wet_ratio",
