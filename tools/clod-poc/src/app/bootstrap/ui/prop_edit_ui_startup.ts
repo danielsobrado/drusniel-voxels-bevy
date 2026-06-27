@@ -6,6 +6,7 @@ import type { UiStartupContext } from "../ui_startup_context.js";
 
 const rayDirection = new THREE.Vector3();
 const editRay = new THREE.Ray();
+const PROP_SNAP_RADIUS_M = 1.1;
 
 interface PropEditorState {
   enabled: boolean;
@@ -17,6 +18,7 @@ interface PropEditorState {
   yawDeg: number;
   scale: number;
   anchor: NonNullable<ProjectPropInstance["anchor"]>;
+  snapToProps: boolean;
   count: number;
   revision: number;
   status: string;
@@ -79,6 +81,32 @@ function hitCrosshair(ctx: UiStartupContext): THREE.Vector3 | null {
   return terrainRaycast.raycastEditableTerrain(editRay)?.point ?? null;
 }
 
+function setStatePosition(state: PropEditorState, position: readonly [number, number, number]): void {
+  state.x = Number(position[0].toFixed(3));
+  state.y = Number(position[1].toFixed(3));
+  state.z = Number(position[2].toFixed(3));
+}
+
+function snapToExistingProps(
+  ctx: UiStartupContext,
+  state: PropEditorState,
+  position: readonly [number, number, number],
+): string | null {
+  if (!state.snapToProps) return null;
+  const propController = ctx.input.runtime.customProps?.propController;
+  const snap = propController?.resolveSnapPlacement({
+    assetId: state.prefabId,
+    position: [position[0], position[1], position[2]],
+    rotationY: THREE.MathUtils.degToRad(state.yawDeg),
+    scale: state.scale,
+    radiusM: PROP_SNAP_RADIUS_M,
+  });
+  if (!snap) return null;
+  setStatePosition(state, snap.position);
+  state.anchor = "world";
+  return `prop snapped ${snap.sourceSnapId} → ${snap.targetSnapId}`;
+}
+
 export function runPropEditUiStartup(ctx: UiStartupContext, gui: GUI): void {
   const propController = ctx.input.runtime.customProps?.propController;
   const folder = gui.addFolder("Props");
@@ -94,6 +122,7 @@ export function runPropEditUiStartup(ctx: UiStartupContext, gui: GUI): void {
     yawDeg: existing ? quaternionToYawDeg(existing.rotation) : 0,
     scale: existing ? uniformScale(existing.scale) : 1,
     anchor: existing?.anchor ?? "terrain",
+    snapToProps: true,
     count: projectPropEditStore.snapshot().length,
     revision: projectPropEditStore.revision(),
     status: propController ? "ready" : "disabled: start with ?propEditor=1 or ?customProps=1",
@@ -113,18 +142,26 @@ export function runPropEditUiStartup(ctx: UiStartupContext, gui: GUI): void {
         refresh();
         return;
       }
-      state.x = Number(hit.x.toFixed(3));
-      state.y = Number(hit.y.toFixed(3));
-      state.z = Number(hit.z.toFixed(3));
-      setStatus(state, "transform snapped to crosshair");
+      const candidate: [number, number, number] = [hit.x, hit.y, hit.z];
+      const snapMessage = snapToExistingProps(ctx, state, candidate);
+      if (!snapMessage) {
+        setStatePosition(state, candidate);
+        state.anchor = "terrain";
+      }
+      setStatus(state, snapMessage ?? "transform snapped to terrain crosshair");
       refresh();
     },
     addAtCrosshair: () => {
       const hit = hitCrosshair(ctx);
       if (hit) {
-        state.x = Number(hit.x.toFixed(3));
-        state.y = Number(hit.y.toFixed(3));
-        state.z = Number(hit.z.toFixed(3));
+        const candidate: [number, number, number] = [hit.x, hit.y, hit.z];
+        const snapMessage = snapToExistingProps(ctx, state, candidate);
+        if (!snapMessage) {
+          setStatePosition(state, candidate);
+          state.anchor = "terrain";
+        } else {
+          setStatus(state, snapMessage);
+        }
       }
       actions.addFromFields();
     },
@@ -199,6 +236,7 @@ export function runPropEditUiStartup(ctx: UiStartupContext, gui: GUI): void {
   controllers.push(folder.add(state, "yawDeg", -180, 180, 1).name("yaw").listen());
   controllers.push(folder.add(state, "scale", 0.05, 20, 0.05).name("scale").listen());
   controllers.push(folder.add(state, "anchor", ["terrain", "world", "voxel"]).name("anchor").listen());
+  controllers.push(folder.add(state, "snapToProps").name("snap to props").listen());
   controllers.push(folder.add(state, "count").name("count").listen().disable());
   controllers.push(folder.add(state, "revision").name("revision").listen().disable());
   controllers.push(folder.add(state, "status").name("status").listen().disable());
