@@ -534,13 +534,26 @@ export class PropSystem {
       this.activeCellKeys.delete(key);
       return;
     }
-    for (const slot of record.slots) this.queueMatrixUpload(slot.bucketKey, slot.slot, _zeroMatrix, "release");
+    for (const slot of record.slots) {
+      if (!this.cancelPendingActivation(slot)) this.queueMatrixUpload(slot.bucketKey, slot.slot, _zeroMatrix, "release");
+    }
     this.cellRecords.delete(key);
     this.activeCellKeys.delete(key);
     this.activeInstances -= record.instancesVisible;
     this.activeBillboards -= record.billboardInstances;
     this.activeShadowCasters -= record.shadowCasters;
     addLodTotals(this.trianglesByLod, record.trianglesByLod, -1);
+  }
+
+  private cancelPendingActivation(slot: BucketSlot): boolean {
+    for (const job of this.matrixUploadQueue) {
+      if (job.bucketKey !== slot.bucketKey || job.slot !== slot.slot || !job.activateSlot) continue;
+      job.matrix.copy(_zeroMatrix);
+      job.activateSlot = false;
+      job.releaseSlot = true;
+      return true;
+    }
+    return false;
   }
 
   private allocateBucketSlot(key: string): number | null {
@@ -572,7 +585,7 @@ export class PropSystem {
       if (job.activateSlot) bucket.occupiedSlots.add(job.slot);
       if (job.releaseSlot) {
         bucket.occupiedSlots.delete(job.slot);
-        bucket.freeSlots.push(job.slot);
+        if (!bucket.freeSlots.includes(job.slot)) bucket.freeSlots.push(job.slot);
       }
       this.refreshBucketVisibility(bucket);
       processed++;
