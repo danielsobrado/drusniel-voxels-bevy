@@ -113,6 +113,12 @@ export function validatePlayerWorldBoundsFit(
   if (!Number.isFinite(config.worldEdgeMargin) || config.worldEdgeMargin <= 0) {
     throw new Error("Player world edge margin must be a finite number greater than 0");
   }
+  if (!Number.isFinite(config.worldEdgePushbackBand) || config.worldEdgePushbackBand < 0) {
+    throw new Error("Player world edge pushback band must be a finite number greater than or equal to 0");
+  }
+  if (!Number.isFinite(config.worldEdgePushbackAcceleration) || config.worldEdgePushbackAcceleration < 0) {
+    throw new Error("Player world edge pushback acceleration must be a finite number greater than or equal to 0");
+  }
   if (bounds.minX >= bounds.maxX || bounds.minZ >= bounds.maxZ) {
     throw new Error("Player world bounds must have positive width and depth");
   }
