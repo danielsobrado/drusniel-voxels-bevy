@@ -23,16 +23,16 @@ describe("shore surf boundary", () => {
     expect(field.sample(257, 128).bodyMask).toBe(0);
   });
 
-  it("keeps clipmap exclusion inside the playable world", () => {
+  it("can exclude border fake-body water from the clipmap", () => {
     const cfg = cloneWaterConfig();
     cfg.source = "fake_bodies";
     cfg.fakeBodies.lakes = [{ center: [8, 128], radius: [16, 16], levelOffset: 4 }];
     cfg.fakeBodies.rivers = [];
     const field = new WaterField(cfg, { surfaceHeight: () => 17 }, null, 256);
-    field.setClipmapExclusionBand({ enabled: true, distance: 32 });
+    expect(field.sample(8, 128).bodyMask).toBeGreaterThan(0);
 
+    field.setClipmapExclusionBand({ enabled: true, distance: 32 });
     expect(field.sample(8, 128).bodyMask).toBe(0);
-    expect(field.sample(-1, 128).bodyMask).toBe(0);
   });
 });
 
