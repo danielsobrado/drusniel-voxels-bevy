@@ -75,7 +75,7 @@ describe("construction support state", () => {
     expect(support.reason).toBe("unsupported");
   });
 
-  it("keeps legacy saved pieces supported until they are resaved with metadata", () => {
+  it("treats runtime pieces without support metadata as unsupported", () => {
     const legacyWall: PlacedConstructionPiece = {
       id: "wall-legacy",
       typeId: "wall",
@@ -90,6 +90,6 @@ describe("construction support state", () => {
       placedPieces: [legacyWall],
     });
 
-    expect(support.supported).toBe(true);
+    expect(support.supported).toBe(false);
   });
 });
