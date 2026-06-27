@@ -2,7 +2,6 @@ import { initSimplifier } from "./clod/simplify.js";
 import {
   buildNodeIndex,
   buildWorldAsync,
-  rebuildAncestorLevels,
   rebuildDirtyLod0Pages,
   resimplifyParent,
   type BuildResult,
@@ -24,6 +23,7 @@ import {
   type SerializedHydrologyTerrain,
 } from "./clod_worker_protocol.js";
 import type { ClodPagesConfig } from "./config.js";
+import type { ClodPageNode } from "./types.js";
 
 const ctx = self as unknown as {
   postMessage: (message: ClodWorkerResponse, transfer?: Transferable[]) => void;
@@ -42,8 +42,17 @@ let drainScheduled = false;
 const pendingByLevel = new Map<number, Set<string>>();
 
 interface CoalescedDig {
-  dirty: DirtyCellBounds;
+  dirtyRegions: DirtyCellBounds[];
   requestIds: number[];
+}
+
+interface CombinedLod0Rebuild {
+  changed: ClodPageNode[];
+  dirtyCoords: [number, number][];
+  lod0Pages: number;
+  lod0Ms: number;
+  chunksRemeshed: number;
+  chunksTotal: number;
 }
 
 let coalescedDig: CoalescedDig | null = null;
@@ -120,6 +129,10 @@ function enqueueParent(level: number, nx: number, nz: number): void {
   set.add(`${nx},${nz}`);
 }
 
+function enqueueParentsForLod0(coords: readonly [number, number][]): void {
+  for (const [nx, nz] of coords) enqueueParent(1, nx >> 1, nz >> 1);
+}
+
 function nextPendingParent(): { level: number; key: string } | null {
   for (let level = 1; level <= topLevel; level++) {
     const set = pendingByLevel.get(level);
@@ -171,6 +184,8 @@ function drainParents(budgetMs: number): void {
       parentMs,
     });
     activeParentRequestId = null;
+    parentNodes = 0;
+    parentMs = 0;
     flushCoalescedDig();
   }
 }
@@ -251,28 +266,73 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   }, collectBuildResultTransferables(serialized));
 }
 
-function queueCoalescedDig(requestId: number, dirty: DirtyCellBounds): void {
+function pageParentDirtyGroups(regions: readonly DirtyCellBounds[]): DirtyCellBounds[] {
+  if (!result || !cfg) throw new Error("CLOD worker received a dig before build completion");
+  const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const groups = new Map<string, DirtyCellBounds>();
+  for (const dirty of regions) {
+    const minPx = Math.max(0, Math.floor(dirty.minX / span));
+    const maxPx = Math.min(result.worldPagesX - 1, Math.floor(dirty.maxX / span));
+    const minPz = Math.max(0, Math.floor(dirty.minZ / span));
+    const maxPz = Math.min(result.worldPagesZ - 1, Math.floor(dirty.maxZ / span));
+    for (let pz = minPz; pz <= maxPz; pz++) {
+      for (let px = minPx; px <= maxPx; px++) {
+        const key = `${px >> 1},${pz >> 1}`;
+        const previous = groups.get(key);
+        groups.set(key, previous ? mergeDirty(previous, dirty) : { ...dirty });
+      }
+    }
+  }
+  return [...groups.values()];
+}
+
+function rebuildDirtyRegionGroups(regions: readonly DirtyCellBounds[]): CombinedLod0Rebuild {
+  if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
+  const changedById = new Map<string, ClodPageNode>();
+  const dirtyCoordKeys = new Set<string>();
+  let lod0Pages = 0;
+  let lod0Ms = 0;
+  let chunksRemeshed = 0;
+  let chunksTotal = 0;
+  for (const dirty of pageParentDirtyGroups(regions)) {
+    const partial = rebuildDirtyLod0Pages(result, dirty, cfg, index);
+    lod0Ms += partial.lod0Ms;
+    chunksRemeshed += partial.chunksRemeshed;
+    chunksTotal += partial.chunksTotal;
+    for (const node of partial.changed) changedById.set(node.id, node);
+    for (const [x, z] of partial.dirtyCoords) dirtyCoordKeys.add(`${x},${z}`);
+  }
+  const dirtyCoords = [...dirtyCoordKeys].map((key) => key.split(",").map(Number) as [number, number]);
+  lod0Pages = changedById.size;
+  return {
+    changed: [...changedById.values()],
+    dirtyCoords,
+    lod0Pages,
+    lod0Ms,
+    chunksRemeshed,
+    chunksTotal,
+  };
+}
+
+function queueCoalescedDig(requestId: number, dirtyRegions: readonly DirtyCellBounds[]): void {
   if (!coalescedDig) {
-    coalescedDig = { dirty: { ...dirty }, requestIds: [requestId] };
+    coalescedDig = { dirtyRegions: dirtyRegions.map((dirty) => ({ ...dirty })), requestIds: [requestId] };
     return;
   }
-  coalescedDig.dirty = mergeDirty(coalescedDig.dirty, dirty);
+  coalescedDig.dirtyRegions.push(...dirtyRegions.map((dirty) => ({ ...dirty })));
   coalescedDig.requestIds.push(requestId);
 }
 
-function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
+function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellBounds[]): void {
   if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
-  if (requestIds.length === 0) return;
+  if (requestIds.length === 0 || dirtyRegions.length === 0) return;
 
-  const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, index);
-  const ancestors = rebuildAncestorLevels(result, lod0.dirtyCoords, index, cfg);
-  activeParentRequestId = null;
-  parentNodes = ancestors.parentNodes;
-  parentMs = ancestors.parentMs;
+  const lod0 = rebuildDirtyRegionGroups(dirtyRegions);
+  enqueueParentsForLod0(lod0.dirtyCoords);
+  if (pendingParentCount() > 0 && activeParentRequestId === null) activeParentRequestId = requestIds[0]!;
 
   const tSer = performance.now();
   const lod0Serialized = serializeNodes(lod0.changed);
-  const ancestorSerialized = serializeNodes(ancestors.changed);
   const serializeMs = performance.now() - tSer;
   let serializedBytes = 0;
   const transferables: Transferable[] = [];
@@ -283,13 +343,6 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
       + node.mesh.materialWeights.byteLength
       + node.mesh.indices.byteLength;
     collectNodeTransferables(node, transferables);
-  }
-  for (const node of ancestorSerialized) {
-    serializedBytes += node.mesh.positions.byteLength
-      + node.mesh.normals.byteLength
-      + node.mesh.paintSlots.byteLength
-      + node.mesh.materialWeights.byteLength
-      + node.mesh.indices.byteLength;
   }
 
   post({
@@ -303,46 +356,29 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
     serializedBytes,
     chunksRemeshed: lod0.chunksRemeshed,
     chunksTotal: lod0.chunksTotal,
-    pendingParents: 0,
+    pendingParents: pendingParentCount(),
   }, transferables);
 
-  if (ancestorSerialized.length > 0) {
-    const parentTransferables: Transferable[] = [];
-    for (const node of ancestorSerialized) collectNodeTransferables(node, parentTransferables);
-    post({
-      type: "parentRebuilt",
-      requestId: requestIds[0]!,
-      changed: ancestorSerialized,
-      parentNodes,
-      parentMs,
-      pendingParents: 0,
-    }, parentTransferables);
-    post({
-      type: "parentsComplete",
-      requestId: requestIds[0]!,
-      parentNodes,
-      parentMs,
-    });
-  }
+  if (pendingParentCount() > 0) scheduleParentDrain();
 }
 
 function flushCoalescedDig(): void {
   if (!coalescedDig || pendingParentCount() > 0) return;
   const batch = coalescedDig;
   coalescedDig = null;
-  postLod0Rebuild(batch.requestIds, batch.dirty);
+  postLod0Rebuild(batch.requestIds, batch.dirtyRegions);
 }
 
 function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
   for (const edit of request.edits) addDigEdit(edit);
 
-  if (pendingParentCount() > 0) {
-    queueCoalescedDig(request.requestId, request.dirty);
+  if (drainScheduled && pendingParentCount() > 0) {
+    queueCoalescedDig(request.requestId, request.dirtyRegions);
     return;
   }
 
-  postLod0Rebuild([request.requestId], request.dirty);
+  postLod0Rebuild([request.requestId], request.dirtyRegions);
 }
 
 function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): void {
@@ -378,6 +414,6 @@ ctx.onmessage = (event: MessageEvent<ClodWorkerRequest>) => {
       handleFlush(request);
     }
   } catch (error) {
-    post(errorResponse(request.requestId, error));
+    post(errorResponse("requestId" in request ? request.requestId : null, error));
   }
 };
