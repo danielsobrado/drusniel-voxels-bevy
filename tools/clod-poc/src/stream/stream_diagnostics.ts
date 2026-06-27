@@ -11,7 +11,7 @@ export interface StreamDiagnosticInput {
   queryScene: string | null;
 }
 
-export interface StreamDiagnosticSnapshot extends TerrainOwnershipRuntimeSnapshot {
+export interface StreamDiagnosticSnapshot extends Omit<TerrainOwnershipRuntimeSnapshot, "ownership"> {
   ownership: StreamingOwnershipRadii;
 }
 
@@ -42,8 +42,8 @@ export function createStreamDiagnosticTracker(input: StreamDiagnosticInput): Str
   });
 
   const withOwnership = (snapshot: TerrainOwnershipRuntimeSnapshot): StreamDiagnosticSnapshot => ({
-    ownership,
     ...snapshot,
+    ownership,
   });
 
   return {
