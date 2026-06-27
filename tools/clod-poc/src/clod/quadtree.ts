@@ -101,6 +101,12 @@ interface ParentBuildOutput {
   polish: DiagonalPolishStats;
 }
 
+interface Lod0NodeBackup {
+  mesh: PageMesh;
+  bounds: ClodPageNode["bounds"];
+  chunkMeshes?: PageMesh[];
+}
+
 const tris = (mesh: PageMesh): number => mesh.indices.length / 3;
 
 function footprintFor(level: number, nx: number, nz: number, cfg: ClodPagesConfig): PageFootprint {
@@ -117,6 +123,32 @@ function clonePageMesh(mesh: PageMesh): PageMesh {
     materialWeightStride: mesh.materialWeightStride,
     indices: mesh.indices.slice(),
   };
+}
+
+function cloneBounds(bounds: ClodPageNode["bounds"]): ClodPageNode["bounds"] {
+  return {
+    center: [...bounds.center],
+    radius: bounds.radius,
+    minY: bounds.minY,
+    maxY: bounds.maxY,
+  };
+}
+
+function backupLod0Node(node: ClodPageNode): Lod0NodeBackup {
+  return {
+    mesh: node.mesh,
+    bounds: cloneBounds(node.bounds),
+    chunkMeshes: node.chunkMeshes ? [...node.chunkMeshes] : undefined,
+  };
+}
+
+function restoreLod0Backups(backups: ReadonlyMap<ClodPageNode, Lod0NodeBackup>): void {
+  for (const [node, backup] of backups) {
+    node.mesh = backup.mesh;
+    node.bounds = cloneBounds(backup.bounds);
+    if (backup.chunkMeshes) node.chunkMeshes = backup.chunkMeshes;
+    else delete node.chunkMeshes;
+  }
 }
 
 function simplifyParentPage(welded: PageMesh, locks: Uint8Array, footprint: PageFootprint, cfg: ClodPagesConfig): SimplifyOutput {
@@ -590,34 +622,43 @@ export function rebuildDirtyLod0Pages(
   const pages = expandQuadSiblingPages(touched, 0, result.worldPagesX, result.worldPagesZ);
   const changed: ClodPageNode[] = [];
   const dirtyCoords: [number, number][] = [];
+  const backups = new Map<ClodPageNode, Lod0NodeBackup>();
   let chunksRemeshed = 0;
   let chunksTotal = 0;
   const startedAt = performance.now();
-  for (const [px, pz] of pages) {
-    const node = index[0]?.get(`${px},${pz}`);
-    if (!node) continue;
-    const dirtyChunkCount = dirtyPageChunkIndices(px, pz, cfg, dirty).length;
-    chunksTotal += node.chunkMeshes?.length ?? pageChunks;
-    if (dirtyChunkCount === 0) continue;
 
-    let mesh: PageMesh;
-    if (node.chunkMeshes) {
-      const rebuilt = rebuildPageChunks(node.chunkMeshes, px, pz, cfg, world, dirty);
-      if (rebuilt.remeshed === 0) continue;
-      mesh = rebuilt.mesh;
-      chunksRemeshed += rebuilt.remeshed;
-    } else {
-      const src = buildLod0PageSource(px, pz, cfg, world);
-      node.chunkMeshes = src.chunks;
-      mesh = src.mesh;
-      chunksRemeshed += src.chunks.length;
+  try {
+    for (const [px, pz] of pages) {
+      const node = index[0]?.get(`${px},${pz}`);
+      if (!node) continue;
+      const dirtyChunkCount = dirtyPageChunkIndices(px, pz, cfg, dirty).length;
+      chunksTotal += node.chunkMeshes?.length ?? pageChunks;
+      if (dirtyChunkCount === 0) continue;
+      if (!backups.has(node)) backups.set(node, backupLod0Node(node));
+
+      let mesh: PageMesh;
+      if (node.chunkMeshes) {
+        const rebuilt = rebuildPageChunks(node.chunkMeshes, px, pz, cfg, world, dirty);
+        if (rebuilt.remeshed === 0) continue;
+        mesh = rebuilt.mesh;
+        chunksRemeshed += rebuilt.remeshed;
+      } else {
+        const src = buildLod0PageSource(px, pz, cfg, world);
+        node.chunkMeshes = src.chunks;
+        mesh = src.mesh;
+        chunksRemeshed += src.chunks.length;
+      }
+      validatePageMesh(mesh, node.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz} edit-rebuild`);
+      node.mesh = mesh;
+      node.bounds = boundsOf(mesh);
+      changed.push(node);
+      dirtyCoords.push([px, pz]);
     }
-    validatePageMesh(mesh, node.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz} edit-rebuild`);
-    node.mesh = mesh;
-    node.bounds = boundsOf(mesh);
-    changed.push(node);
-    dirtyCoords.push([px, pz]);
+  } catch (error) {
+    restoreLod0Backups(backups);
+    throw error;
   }
+
   return { changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - startedAt, chunksRemeshed, chunksTotal };
 }
 
