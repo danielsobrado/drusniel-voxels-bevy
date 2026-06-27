@@ -5,6 +5,7 @@ import { parseCustomPropsConfig } from "../../props/prop_config.js";
 import { parsePropPlacements, resolvePropPlacementScene } from "../../props/prop_placements.js";
 import type { PropStats } from "../../props/prop_stats.js";
 import { createPropController, type PropController } from "../../systems/prop_controller.js";
+import type { PropEditStore } from "../../project/prop_edit_store.js";
 
 export interface CustomPropsStartupInput {
   scene: THREE.Scene;
@@ -14,12 +15,14 @@ export interface CustomPropsStartupInput {
   enabled: boolean;
   searchParams?: URLSearchParams;
   getHooks: () => ClodHooks | null;
+  propEditStore?: PropEditStore;
   onStats?: (stats: PropStats) => void;
 }
 
 export interface CustomPropsStartupResult {
   propController: PropController;
   propStats: { current: PropStats | null };
+  stopPropStoreSync: () => void;
 }
 
 export async function runCustomPropsStartup(
@@ -54,7 +57,11 @@ export async function runCustomPropsStartup(
   });
 
   await propController.init();
-  return { propController, propStats };
+  const stopPropStoreSync = input.propEditStore?.subscribe(() => {
+    if (!input.propEditStore) return;
+    propController.replacePlacementScene(input.propEditStore.toPlacementScene("active"));
+  }) ?? (() => undefined);
+  return { propController, propStats, stopPropStoreSync };
 }
 
 export function resolveCustomPropsEnabled(
