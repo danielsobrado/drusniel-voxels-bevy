@@ -28,6 +28,7 @@ export interface InfiniteFarShellOptions {
   };
   useParityMaterial?: boolean;
   parityConfig?: import("../farTerrain/farTerrainUniforms.js").FarTerrainUniformData;
+  /** CPU uses the far-summary/NAADF height provider. GPU is experimental and must be explicitly requested. */
   heightSamplingMode?: FarShellHeightSamplingMode;
   debugShowMissingFallback?: boolean;
   debugShowWireframe?: boolean;
@@ -42,7 +43,7 @@ export interface SnappedCenter {
 }
 
 function resolveHeightSamplingMode(options: InfiniteFarShellOptions): FarShellHeightSamplingMode {
-  const requested = options.heightSamplingMode ?? (options.useParityMaterial ? "gpu" : "cpu");
+  const requested = options.heightSamplingMode ?? "cpu";
   return requested === "gpu" && options.useParityMaterial && options.parityConfig ? "gpu" : "cpu";
 }
 
@@ -310,87 +311,3 @@ export class InfiniteFarShell {
         this.uvs[vi * 2 + 1] = ai / angularSegments;
       }
     }
-
-    if (this.useParityMaterial && this.parityConfig) {
-      const vertexColors = computeFarTerrainVertexColors(
-        this.positions,
-        this.normals,
-        vertexCount,
-        this.parityConfig,
-        this.snappedX,
-        this.snappedZ,
-      );
-      this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, undefined, this.snappedX, this.snappedZ, this.positions);
-      this.attachVertexColors();
-    }
-
-    this.rebuildCount++;
-    this.lastRebuildMs = performance.now() - t0;
-
-    this.metrics.farShellRebuilds = this.rebuildCount;
-    this.metrics.farShellLastRebuildMs = this.lastRebuildMs;
-
-    this.flushAttributes();
-  }
-
-  private flushAttributes(): void {
-    const geometry = this.mesh.geometry as THREE.BufferGeometry;
-    const posAttr = geometry.getAttribute("position") as THREE.BufferAttribute;
-    const normAttr = geometry.getAttribute("normal") as THREE.BufferAttribute;
-    const uvAttr = geometry.getAttribute("uv") as THREE.BufferAttribute;
-
-    posAttr.array.set(this.positions);
-    posAttr.needsUpdate = true;
-
-    normAttr.array.set(this.normals);
-    normAttr.needsUpdate = true;
-
-    uvAttr.array.set(this.uvs);
-    uvAttr.needsUpdate = true;
-
-    geometry.computeBoundingSphere();
-    geometry.computeBoundingBox();
-  }
-
-  private attachGpuDefaultVertexColors(vertexCount: number): void {
-    const colors = new Float32Array(vertexCount * 3);
-    for (let i = 0; i < vertexCount; i++) {
-      colors[i * 3] = 0.32;
-      colors[i * 3 + 1] = 0.44;
-      colors[i * 3 + 2] = 0.28;
-    }
-    this.parityColorBuffer = colors;
-    this.attachVertexColors();
-  }
-
-  private attachVertexColors(): void {
-    if (!this.parityColorBuffer) return;
-    const geometry = this.mesh.geometry as THREE.BufferGeometry;
-    const existing = geometry.getAttribute("color");
-    if (existing) {
-      const buf = existing as THREE.BufferAttribute;
-      buf.array.set(this.parityColorBuffer);
-      buf.needsUpdate = true;
-    } else {
-      geometry.setAttribute("color", new THREE.BufferAttribute(this.parityColorBuffer.slice(), 3));
-    }
-  }
-
-  dispose(): void {
-    const geometry = this.mesh.geometry;
-    geometry.dispose();
-    const mat = this.mesh.material;
-    if (Array.isArray(mat)) {
-      for (const m of mat) m.dispose();
-    } else {
-      mat.dispose();
-    }
-    this.mesh.removeFromParent();
-  }
-}
-
-export function createInfiniteFarShell(
-  options: InfiniteFarShellOptions,
-): InfiniteFarShell {
-  return new InfiniteFarShell(options);
-}
