@@ -12,9 +12,7 @@ export function runSpellUiStartup(_ctx: UiStartupContext): void {
     if (event.code !== "KeyV") return;
     const target = event.target;
     if (target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
-    if (menuEl) {
-      menuEl.classList.toggle("visible");
-    }
+    menuEl?.classList.toggle("spell-menu-hidden");
   };
 
   window.addEventListener("keydown", onKeyDown);
