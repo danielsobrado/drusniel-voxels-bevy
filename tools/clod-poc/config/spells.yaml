@@ -17,3 +17,18 @@ spells:
       flame_scale: 1.0
       origin: [0.0, -0.50]
       target: [0.0, 0.08]
+  water:
+    id: water
+    label: Water
+    cast_duration_ms: 2200
+    audio:
+      volume: 0.34
+    vfx:
+      layer_id: spell-vfx-layer
+      canvas_id: water-spell-vfx
+      fallback_width_px: 1280
+      fallback_height_px: 720
+      max_dpr: 1.25
+      flame_scale: 1.0
+      origin: [0.0, -0.50]
+      target: [0.0, 0.08]
