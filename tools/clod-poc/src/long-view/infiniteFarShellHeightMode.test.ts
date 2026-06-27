@@ -82,21 +82,12 @@ describe("InfiniteFarShell height sampling mode", () => {
     shell.dispose();
   });
 
-  it("falls back to CPU provider heights when GPU mode is requested without an atlas", () => {
-    const shell = makeShell({
+  it("fails loudly when GPU mode is requested without an atlas", () => {
+    expect(() => makeShell({
       useParityMaterial: true,
       parityConfig,
       heightSamplingMode: "gpu",
-    });
-
-    shell.setHeightProvider({
-      sampleHeight: () => 77,
-      sampleNormal: () => new THREE.Vector3(0, 1, 0),
-    });
-
-    const positions = shell.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
-    expect(positions.getY(0)).toBe(77);
-    shell.dispose();
+    })).toThrow(/GPU mode requires parity material, parity config, and a GPU far-summary atlas/);
   });
 
   it("attaches initial vertex colors for parity material before provider rebuild", () => {
