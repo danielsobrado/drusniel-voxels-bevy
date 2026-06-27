@@ -76,13 +76,10 @@ export interface EditRebuildResult {
 }
 
 export interface Lod0RebuildResult {
-  /** LOD0 nodes whose mesh/chunk cache changed, mutated in place. */
   changed: ClodPageNode[];
-  /** Page coords of changed LOD0 nodes — the seed for the ancestor chain. */
   dirtyCoords: [number, number][];
   lod0Pages: number;
   lod0Ms: number;
-  /** Chunks actually re-meshed vs. chunks considered in the sibling page group. */
   chunksRemeshed: number;
   chunksTotal: number;
 }
@@ -222,6 +219,12 @@ function resolveBuildShape(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
   return { maxLevels };
 }
 
+function requireFourChildren(level: number, nx: number, nz: number, children: readonly ClodPageNode[]): void {
+  if (children.length !== 4) {
+    throw new ClodBuildError("PageIncomplete", `parent L${level}:${nx},${nz} expected 4 children, got ${children.length}`);
+  }
+}
+
 function childNodes(index: Map<string, ClodPageNode>[], level: number, nx: number, nz: number): ClodPageNode[] {
   const children: ClodPageNode[] = [];
   for (let dz = 0; dz < 2; dz++) {
@@ -230,9 +233,7 @@ function childNodes(index: Map<string, ClodPageNode>[], level: number, nx: numbe
       if (child) children.push(child);
     }
   }
-  if (children.length !== 4) {
-    throw new ClodBuildError("PageIncomplete", `parent L${level}:${nx},${nz} expected 4 children, got ${children.length}`);
-  }
+  requireFourChildren(level, nx, nz, children);
   return children;
 }
 
@@ -244,6 +245,7 @@ function buildParentOutput(
   cfg: ClodPagesConfig,
   polishTopLevel: boolean,
 ): ParentBuildOutput {
+  requireFourChildren(level, nx, nz, children);
   const merged = concat(children.map((child) => child.mesh));
   const { mesh: welded } = weldVertices(merged, cfg.simplify.weld_epsilon_cells, {
     position: cfg.validation.position_epsilon,
@@ -619,12 +621,19 @@ export function rebuildDirtyLod0Pages(
   return { changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - startedAt, chunksRemeshed, chunksTotal };
 }
 
-export function resimplifyParent(index: NodeIndex, level: number, key: string, cfg: ClodPagesConfig): ClodPageNode | null {
+export function resimplifyParent(
+  index: NodeIndex,
+  level: number,
+  key: string,
+  cfg: ClodPagesConfig,
+  polishTopLevel = level >= cfg.page.quadtree_levels - 1,
+): ClodPageNode | null {
   const node = index[level]?.get(key);
   if (!node) return null;
   const children = node.children.filter((child): child is ClodPageNode => child !== null);
   const [nx, nz] = key.split(",").map(Number);
-  const built = buildParentOutput(level, nx, nz, children, cfg, node.level >= cfg.page.quadtree_levels - 1);
+  requireFourChildren(level, nx, nz, children);
+  const built = buildParentOutput(level, nx, nz, children, cfg, polishTopLevel);
   node.mesh = built.mesh;
   node.bounds = boundsOf(built.mesh);
   node.errorWorld = built.errorWorld;
@@ -651,7 +660,7 @@ export function rebuildAncestorLevels(
     const nextKeys = new Set<string>();
     const nextCoords: [number, number][] = [];
     for (const [nx, nz] of levelCoords) {
-      const node = resimplifyParent(index, level, `${nx},${nz}`, cfg);
+      const node = resimplifyParent(index, level, `${nx},${nz}`, cfg, level === topLevel);
       if (!node) continue;
       changed.push(node);
       parentNodes++;
