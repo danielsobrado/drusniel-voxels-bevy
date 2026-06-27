@@ -7,7 +7,7 @@ import type { DigEdit, VoxelEditSnapshot } from "../terrain/terrain.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
-const TERRAIN_SOURCE_CACHE_VERSION = "coast-band-v2";
+const TERRAIN_SOURCE_CACHE_VERSION = "coast-band-v3";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
