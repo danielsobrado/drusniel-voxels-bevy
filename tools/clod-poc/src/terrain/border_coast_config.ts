@@ -63,6 +63,7 @@ export interface DeepOceanShadingConfig {
 
 export interface DeepOceanRenderConfig {
   enabled: boolean;
+  startOutsideBorderM: number;
   extendCells: number;
   surfaceY: number;
   segments: number;
@@ -134,6 +135,7 @@ export const DEFAULT_BORDER_COAST_OCEAN_CONFIG: BorderCoastOceanConfig = {
   },
   deepOcean: {
     enabled: true,
+    startOutsideBorderM: 64,
     extendCells: 384,
     surfaceY: 18,
     segments: 64,
@@ -262,6 +264,7 @@ function parseDeepOceanConfig(root: YamlRecord | undefined, waterLevel: number, 
   const shading = parseDeepOceanShadingConfig(readRecord(root?.shading), fallback.shading);
   return {
     enabled: readBoolean(root?.enabled, fallback.enabled),
+    startOutsideBorderM: readNumberAtLeast(root?.start_outside_border_m ?? root?.startOutsideBorderM, fallback.startOutsideBorderM, 0),
     extendCells: readIntegerAtLeast(root?.extend_cells ?? root?.visual_extent_m ?? root?.extendCells, fallback.extendCells, 1),
     surfaceY: readNumber(root?.surface_y ?? root?.surfaceY, waterLevel),
     segments: readIntegerAtLeast(root?.segments ?? root?.far_subdivisions ?? root?.farSubdivisions, fallback.segments, 4),
