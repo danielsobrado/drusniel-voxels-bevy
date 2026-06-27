@@ -56,7 +56,7 @@ Loaded from [`config/naadf_poc.yaml`](../config/naadf_poc.yaml). Key sections:
 | `debug` | Overlay toggles |
 | `acceptance` | Gate thresholds |
 
-Default traversal remains `dense`. Use `compare` before trusting HDDA changes; compare mode returns the HDDA result plus dense-vs-HDDA mismatch metadata and increments `naadf_hdda_dense_mismatches`.
+Default traversal remains `dense`. Use `compare` before trusting HDDA changes. Compare mode runs the dense oracle with isolated metrics, runs HDDA against live metrics, and returns the dense result as a safe fallback if there is a mismatch. It increments both `naadf_hdda_dense_mismatches` and `naadf_hdda_fallback_to_dense` on fallback.
 
 Enable with `?naadf=1` or any `infinite-naadf-*` scene.
 
