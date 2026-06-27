@@ -18,6 +18,7 @@ import {
 } from "./clod_worker_protocol.js";
 
 const MAX_DIG_EDITS_PER_WORKER_BATCH = 8;
+const WORKER_STOPPED_ERROR = "CLOD worker stopped";
 
 export interface WorkerLod0Rebuild {
   changed: ClodPageNode[];
@@ -71,6 +72,7 @@ export class ClodWorkerClient {
   private parentsHealthy = true;
   private lastParentError: Error | null = null;
   private parentsWaiters: Array<() => void> = [];
+  private stopped = false;
 
   constructor() {
     attachMainThreadCacheBroker(this.worker);
@@ -80,6 +82,7 @@ export class ClodWorkerClient {
     };
     this.worker.onerror = (event) => {
       const error = new Error(event.message || "CLOD worker failed");
+      this.stopped = true;
       this.rejectAll(error);
       this.onError?.(error);
     };
@@ -96,6 +99,7 @@ export class ClodWorkerClient {
     cacheDisabled = false,
     terrainSource: TerrainSourceInputs,
   ): Promise<BuildResult> {
+    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = {
       type: "build",
@@ -118,6 +122,10 @@ export class ClodWorkerClient {
 
   rebuildAfterDig(edit: DigEdit, dirty: DirtyCellBounds): Promise<WorkerLod0Rebuild> {
     return new Promise((resolve, reject) => {
+      if (this.stopped) {
+        reject(new Error(WORKER_STOPPED_ERROR));
+        return;
+      }
       if (!this.digPending) {
         this.digPending = {
           edits: [edit],
@@ -134,6 +142,7 @@ export class ClodWorkerClient {
   }
 
   flushParents(): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = { type: "flush", requestId };
     return new Promise((resolve, reject) => {
@@ -143,6 +152,7 @@ export class ClodWorkerClient {
   }
 
   clearCache(): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = { type: "clearCache", requestId };
     return new Promise((resolve, reject) => {
@@ -160,15 +170,16 @@ export class ClodWorkerClient {
   }
 
   dispose(): void {
+    this.stopped = true;
     this.worker.terminate();
     this.rejectAll(new Error("CLOD worker disposed"));
   }
 
   private async pumpDigQueue(): Promise<void> {
-    if (this.digPumpActive) return;
+    if (this.digPumpActive || this.stopped) return;
     this.digPumpActive = true;
     try {
-      while (this.digPending) {
+      while (this.digPending && !this.stopped) {
         const batch = this.digPending;
         this.digPending = null;
         for (const part of this.splitDigBatch(batch)) {
@@ -178,11 +189,15 @@ export class ClodWorkerClient {
           } catch (error) {
             for (const pending of part.resolvers) pending.reject(error);
           }
+          if (this.stopped) break;
         }
       }
     } finally {
       this.digPumpActive = false;
-      if (this.digPending) void this.pumpDigQueue();
+      if (this.digPending) {
+        if (this.stopped) this.rejectPendingDig(new Error(WORKER_STOPPED_ERROR));
+        else void this.pumpDigQueue();
+      }
     }
   }
 
@@ -201,6 +216,7 @@ export class ClodWorkerClient {
   }
 
   private sendDigBatch(batch: DigBatchSlot): Promise<WorkerLod0Rebuild> {
+    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = { type: "dig", requestId, edits: batch.edits, dirtyRegions: batch.dirtyRegions };
     return new Promise((resolve, reject) => {
@@ -333,7 +349,15 @@ export class ClodWorkerClient {
     this.releaseParentsWaitersAfterFailure(error);
   }
 
+  private rejectPendingDig(error: Error): void {
+    const pending = this.digPending;
+    this.digPending = null;
+    if (!pending) return;
+    for (const resolver of pending.resolvers) resolver.reject(error);
+  }
+
   private rejectAll(error: Error): void {
+    this.rejectPendingDig(error);
     for (const pending of this.buildRequests.values()) pending.reject(error);
     for (const pending of this.digRequests.values()) pending.reject(error);
     for (const pending of this.flushRequests.values()) pending.reject(error);
