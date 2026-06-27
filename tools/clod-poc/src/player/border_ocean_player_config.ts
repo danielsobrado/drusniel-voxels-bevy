@@ -34,12 +34,29 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+export function validateBorderOceanGameplayConfig(config: BorderOceanGameplayConfig): void {
+  if (config.worldEdgeMarginM <= 0) {
+    throw new Error("Border ocean gameplay config: worldEdgeMarginM must be > 0");
+  }
+  if (!config.softPushbackEnabled) return;
+  if (config.pushbackStartInsideWorldM <= 0) {
+    throw new Error(
+      "Border ocean gameplay config: pushbackStartInsideWorldM must be > 0 when soft pushback is enabled",
+    );
+  }
+  if (config.pushbackStrength <= 0) {
+    throw new Error(
+      "Border ocean gameplay config: pushbackStrength must be > 0 when soft pushback is enabled",
+    );
+  }
+}
+
 export function parseBorderOceanGameplayConfig(text: string): BorderOceanGameplayConfig {
   const root = record(load(text));
   const gameplay = record(root?.gameplay);
   if (!gameplay) return { ...DEFAULT_GAMEPLAY_CONFIG };
 
-  return {
+  const config = {
     softPushbackEnabled: readBoolean(
       gameplay.soft_pushback_enabled ?? gameplay.softPushbackEnabled,
       DEFAULT_GAMEPLAY_CONFIG.softPushbackEnabled,
@@ -57,12 +74,15 @@ export function parseBorderOceanGameplayConfig(text: string): BorderOceanGamepla
       DEFAULT_GAMEPLAY_CONFIG.pushbackStrength,
     ),
   };
+  validateBorderOceanGameplayConfig(config);
+  return config;
 }
 
 export function resolvePlayerConfigForBorderOcean(
   base: Readonly<PlayerConfig>,
   gameplay: BorderOceanGameplayConfig,
 ): PlayerConfig {
+  validateBorderOceanGameplayConfig(gameplay);
   return {
     ...base,
     worldEdgeMargin: gameplay.worldEdgeMarginM,
