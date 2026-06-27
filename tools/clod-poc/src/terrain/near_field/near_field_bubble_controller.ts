@@ -7,6 +7,7 @@ import { toGeometry } from "../geometry/page_geometry.js";
 import type { ClodPageNode, PageMesh } from "../../types.js";
 import type { TerrainMaterialController } from "../material/terrain_material_controller.js";
 import type { TerrainMaterialHandle } from "../../rendering/terrain_material.js";
+import type { WorldBounds } from "../../terrain/terrain_surface.js";
 
 export interface ChunkGroupEntry {
   group: THREE.Group;
@@ -45,12 +46,13 @@ export interface NearFieldBubbleControllerDeps {
   scene: THREE.Scene;
   materialController: TerrainMaterialController;
   cfg: ClodPagesConfig;
-  worldBounds: { cellsX: number; cellsZ: number };
+  worldBounds: WorldBounds;
   getTintBubble: () => boolean;
   getGpuMesher: () => GpuChunkMesher | null;
   chunkGroupBuildBudget: number;
   maxCachedChunkGroups: number;
   evictDistanceMultiplier: number;
+  streamingLiveTerrain?: boolean;
 }
 
 export interface NearFieldBubbleController {
@@ -62,8 +64,68 @@ export interface NearFieldBubbleController {
   dispose(): void;
 }
 
+interface PageCoord {
+  px: number;
+  pz: number;
+  centerX: number;
+  centerZ: number;
+}
+
+function pageGroupKey(px: number, pz: number): string {
+  return `L0:${px},${pz}`;
+}
+
+function parsePageGroupKey(key: string): { px: number; pz: number } {
+  const [, coordText] = key.split(":");
+  const [pxText, pzText] = (coordText ?? "").split(",");
+  const px = Number(pxText);
+  const pz = Number(pzText);
+  if (!Number.isInteger(px) || !Number.isInteger(pz)) throw new Error(`Invalid page key ${key}`);
+  return { px, pz };
+}
+
+function pageIntersectsFiniteWorld(px: number, pz: number, pageSize: number, world: WorldBounds): boolean {
+  if (world.finite === false) return true;
+  const minX = px * pageSize;
+  const maxX = minX + pageSize;
+  const minZ = pz * pageSize;
+  const maxZ = minZ + pageSize;
+  return maxX > 0 && minX < world.cellsX && maxZ > 0 && minZ < world.cellsZ;
+}
+
+export function requiredStreamingPageCoords(
+  center: THREE.Vector3,
+  bubbleRadius: number,
+  pageSize: number,
+): PageCoord[] {
+  const minPx = Math.floor((center.x - bubbleRadius) / pageSize);
+  const maxPx = Math.floor((center.x + bubbleRadius) / pageSize);
+  const minPz = Math.floor((center.z - bubbleRadius) / pageSize);
+  const maxPz = Math.floor((center.z + bubbleRadius) / pageSize);
+  const halfDiag = pageSize * Math.SQRT2 * 0.5;
+  const coords: PageCoord[] = [];
+
+  for (let px = minPx; px <= maxPx; px++) {
+    for (let pz = minPz; pz <= maxPz; pz++) {
+      const centerX = (px + 0.5) * pageSize;
+      const centerZ = (pz + 0.5) * pageSize;
+      if (Math.hypot(center.x - centerX, center.z - centerZ) <= bubbleRadius + halfDiag) {
+        coords.push({ px, pz, centerX, centerZ });
+      }
+    }
+  }
+
+  return coords.sort((a, b) => {
+    const da = Math.hypot(center.x - a.centerX, center.z - a.centerZ);
+    const db = Math.hypot(center.x - b.centerX, center.z - b.centerZ);
+    return da - db || a.px - b.px || a.pz - b.pz;
+  });
+}
+
 export function createNearFieldBubbleController(deps: NearFieldBubbleControllerDeps): NearFieldBubbleController {
   const P = deps.cfg.page.chunks_per_page;
+  const S = deps.cfg.page.chunk_size;
+  const pageSize = P * S;
   const chunkGroups = new Map<string, ChunkGroupEntry>();
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
@@ -75,6 +137,12 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     const mat = deps.materialController.makeTerrainMaterial(deps.getTintBubble() ? 0xc94b4b : 0xffffff);
     deps.materialController.configureChunkMaterial(mat);
     return mat;
+  };
+
+  const buildWorldBoundsForPage = (px: number, pz: number): WorldBounds => {
+    if (!deps.streamingLiveTerrain) return deps.worldBounds;
+    if (pageIntersectsFiniteWorld(px, pz, pageSize, deps.worldBounds)) return deps.worldBounds;
+    return { ...deps.worldBounds, finite: false };
   };
 
   const addChunkMesh = (
@@ -105,33 +173,34 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   };
 
   const cpuFallbackChunks = (
-    node: ClodPageNode,
+    pageKey: string,
+    px: number,
+    pz: number,
+    worldBounds: WorldBounds,
     group: THREE.Group,
     mats: TerrainMaterialHandle[],
     unsubs: Array<() => void>,
     failedCoords: Array<[number, number]>,
   ): number => {
-    const [px, pz] = node.id.slice(3).split(",").map(Number);
     let recovered = 0;
     for (const [dx, dz] of failedCoords) {
       try {
-        addChunkMesh(group, mats, unsubs, meshChunk(px * P + dx, pz * P + dz, deps.cfg, deps.worldBounds));
+        addChunkMesh(group, mats, unsubs, meshChunk(px * P + dx, pz * P + dz, deps.cfg, worldBounds));
         recovered++;
       } catch (error) {
-        console.error(`[bubble] CPU fallback failed for page ${node.id} chunk (${dx},${dz})`, error);
+        console.error(`[bubble] CPU fallback failed for page ${pageKey} chunk (${dx},${dz})`, error);
       }
     }
     return recovered;
   };
 
-  const ensureChunkGroup = (node: ClodPageNode): ChunkGroupEntry => {
-    const existing = chunkGroups.get(node.id);
+  const ensureChunkGroupForPage = (key: string, px: number, pz: number, centerX: number, centerZ: number): ChunkGroupEntry => {
+    const existing = chunkGroups.get(key);
     if (existing) return existing;
-    const [px, pz] = node.id.slice(3).split(",").map(Number);
-    const [centerX, centerZ] = pageCenter(node);
     const group = new THREE.Group();
     const mats: TerrainMaterialHandle[] = [];
     const unsubs: Array<() => void> = [];
+    const worldBounds = buildWorldBoundsForPage(px, pz);
     const gpuMesher = deps.getGpuMesher();
 
     if (gpuMesher) {
@@ -147,7 +216,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       };
       group.visible = false;
       deps.scene.add(group);
-      chunkGroups.set(node.id, entry);
+      chunkGroups.set(key, entry);
       const edits = resolveDigEdits(getDigEditsSnapshot());
       let pending = P * P;
       const failedCoords: Array<[number, number]> = [];
@@ -156,13 +225,13 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         if (--pending !== 0) return;
         if (failedCoords.length > 0) {
           console.error(
-            `[bubble] GPU chunk meshing failed for page ${node.id}: ${failedCoords.length}/${P * P} chunks`,
+            `[bubble] GPU chunk meshing failed for page ${key}: ${failedCoords.length}/${P * P} chunks`,
           );
-          const recovered = cpuFallbackChunks(node, group, mats, unsubs, failedCoords);
+          const recovered = cpuFallbackChunks(key, px, pz, worldBounds, group, mats, unsubs, failedCoords);
           unrecoveredFailures = failedCoords.length - recovered;
           if (recovered > 0 && unrecoveredFailures > 0) {
             console.warn(
-              `[bubble] partial CPU fallback for page ${node.id}: ${recovered}/${failedCoords.length} chunks recovered`,
+              `[bubble] partial CPU fallback for page ${key}: ${recovered}/${failedCoords.length} chunks recovered`,
             );
           }
         }
@@ -171,14 +240,14 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       };
       for (let dz = 0; dz < P; dz++) {
         for (let dx = 0; dx < P; dx++) {
-          gpuMesher.meshChunk(px * P + dx, pz * P + dz, deps.worldBounds, edits)
+          gpuMesher.meshChunk(px * P + dx, pz * P + dz, worldBounds, edits)
             .then((cm) => {
-              if (chunkGroups.get(node.id) !== entry) return;
+              if (chunkGroups.get(key) !== entry) return;
               if (cm.indices.length > 0) addChunkMesh(group, mats, unsubs, cm);
               settle();
             })
             .catch(() => {
-              if (chunkGroups.get(node.id) !== entry) return;
+              if (chunkGroups.get(key) !== entry) return;
               failedCoords.push([dx, dz]);
               settle();
             });
@@ -189,7 +258,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
 
     for (let dz = 0; dz < P; dz++) {
       for (let dx = 0; dx < P; dx++) {
-        addChunkMesh(group, mats, unsubs, meshChunk(px * P + dx, pz * P + dz, deps.cfg, deps.worldBounds));
+        addChunkMesh(group, mats, unsubs, meshChunk(px * P + dx, pz * P + dz, deps.cfg, worldBounds));
       }
     }
     deps.scene.add(group);
@@ -203,8 +272,14 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       centerZ,
       lastTouchFrame: 0,
     };
-    chunkGroups.set(node.id, entry);
+    chunkGroups.set(key, entry);
     return entry;
+  };
+
+  const ensureChunkGroup = (node: ClodPageNode): ChunkGroupEntry => {
+    const { px, pz } = parsePageGroupKey(node.id);
+    const [centerX, centerZ] = pageCenter(node);
+    return ensureChunkGroupForPage(node.id, px, pz, centerX, centerZ);
   };
 
   const evictCache = (bubbleCenter: THREE.Vector3, bubbleRadius: number) => {
@@ -220,6 +295,16 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
       const [nodeId, entry] = lru.shift()!;
       disposeEntry(nodeId, entry);
     }
+  };
+
+  const showReadyGroup = (entry: ChunkGroupEntry, fallbackMesh?: THREE.Mesh): boolean => {
+    if (entry.ready && !entry.failed && entry.group.children.length > 0) {
+      if (fallbackMesh) fallbackMesh.visible = false;
+      entry.group.visible = true;
+      return true;
+    }
+    entry.group.visible = false;
+    return false;
   };
 
   return {
@@ -246,15 +331,8 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
               chunkGroupsBuiltThisFrame++;
             }
             grp.lastTouchFrame = input.frameId;
-            if (grp.ready && !grp.failed && grp.group.children.length > 0) {
-              v.mesh.visible = false;
-              grp.group.visible = true;
-            } else if (grp.ready && !grp.failed) {
-              v.mesh.visible = true;
-              grp.group.visible = false;
-            } else {
-              v.mesh.visible = true;
-              grp.group.visible = false;
+            if (!showReadyGroup(grp, v.mesh)) {
+              v.mesh.visible = v.fade > 0.001;
             }
           } else {
             const grp = chunkGroups.get(v.node.id);
@@ -262,6 +340,21 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
             v.mesh.visible = v.fade > 0.001;
           }
         }
+
+        if (deps.streamingLiveTerrain) {
+          for (const coord of requiredStreamingPageCoords(input.bubbleCenter, input.bubbleRadius, pageSize)) {
+            const key = pageGroupKey(coord.px, coord.pz);
+            let grp = chunkGroups.get(key);
+            if (!grp) {
+              if (chunkGroupsBuiltThisFrame >= deps.chunkGroupBuildBudget) continue;
+              grp = ensureChunkGroupForPage(key, coord.px, coord.pz, coord.centerX, coord.centerZ);
+              chunkGroupsBuiltThisFrame++;
+            }
+            grp.lastTouchFrame = input.frameId;
+            showReadyGroup(grp);
+          }
+        }
+
         evictCache(input.bubbleCenter, input.bubbleRadius);
       } else if (chunkGroups.size > 0) {
         for (const [nodeId, { group }] of chunkGroups) {
