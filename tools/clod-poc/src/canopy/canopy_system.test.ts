@@ -5,6 +5,7 @@ import {
   shellCenterForTextureSet,
   shellGridForTriangleBudget,
   shouldAttemptTextureUpload,
+  shouldKeepCanopyShellActive,
   shouldRebuildCanopyShell,
   shouldUseSyntheticCanopyFallback,
   treeDistributionConfigKey,
@@ -91,6 +92,33 @@ describe("shouldUseSyntheticCanopyFallback", () => {
 
     config.debug.forceSyntheticSource = true;
     expect(shouldUseSyntheticCanopyFallback(config, false, 0)).toBe(true);
+  });
+});
+
+describe("shouldKeepCanopyShellActive", () => {
+  it("keeps the shell active while the clipmap is enabled", () => {
+    const config = cloneConfig();
+    config.clipmap.enabled = true;
+
+    expect(shouldKeepCanopyShellActive(config, false)).toBe(true);
+  });
+
+  it("disables the shell when clipmap is disabled and synthetic mode is not forced", () => {
+    const config = cloneConfig();
+    config.clipmap.enabled = false;
+    config.debug.forceSyntheticSource = false;
+
+    expect(shouldKeepCanopyShellActive(config, false)).toBe(false);
+  });
+
+  it("keeps the shell active for explicit synthetic debug modes", () => {
+    const config = cloneConfig();
+    config.clipmap.enabled = false;
+
+    expect(shouldKeepCanopyShellActive(config, true)).toBe(true);
+
+    config.debug.forceSyntheticSource = true;
+    expect(shouldKeepCanopyShellActive(config, false)).toBe(true);
   });
 });
 
