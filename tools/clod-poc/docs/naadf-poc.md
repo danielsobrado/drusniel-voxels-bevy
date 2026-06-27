@@ -15,6 +15,7 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 - Paired GPU far-summary material-color atlas for runtime far-shell color
 - GPU height-atlas neighbor normals for runtime far-shell lighting
 - Paired GPU derived-normal atlas retained for debug/future filtered normals
+- Configurable 3x3 / 5x5 / 7x7 GPU atlas window via YAML, URL, and side menu
 - GPU procedural displacement as fallback where summary atlas data is missing
 - CPU query/HDDA path as oracle/debug only
 - Canopy coverage flowing through summary chain
@@ -38,7 +39,7 @@ CPU far summary tile stream
   -> paired RGBA32F GPU material-color atlas
   -> paired RGBA32F GPU derived-normal atlas for debug/future use
   -> one vertical atlas band per far-summary ring
-  -> 5x5 moving tile window per ring by default
+  -> configurable 3x3 / 5x5 / 7x7 moving tile window per ring
   -> nearest-filtered texel-center sampling in GPU material positionNode/colorNode
   -> distance-selected atlas height/color where alpha is valid
   -> runtime lighting normals from neighboring height-atlas texels inside the selected ring band
@@ -74,13 +75,15 @@ Loaded from [`config/naadf_poc.yaml`](../config/naadf_poc.yaml). Key sections:
 | `far_clipmap` | Distance rings and cell sizes |
 | `query` | Ray step limits, LOD bias, sun unknown policy |
 | `traversal` | `dense`, `hdda`, or `compare`; HDDA step budgets and compare epsilon |
-| `far_shell` | Camera-relative shell distances, grid size, `height_sampling_mode` |
+| `far_shell` | Camera-relative shell distances, grid size, `height_sampling_mode`, `gpu_atlas_window_tiles` |
 | `debug` | Overlay toggles |
 | `acceptance` | Gate thresholds |
 
 Default traversal remains `dense`. Use `compare` before trusting HDDA changes. Compare mode runs the dense oracle with isolated metrics, runs HDDA against live metrics, and returns the dense result as a safe fallback if there is a mismatch. It increments both `naadf_hdda_dense_mismatches` and `naadf_hdda_fallback_to_dense` on fallback.
 
 Runtime far-shell height sampling defaults to `gpu`. CPU height sampling is only for debug/oracle checks and can be forced with `naadfHeightMode=cpu`. GPU mode fails loudly if the required WebGPU far terrain material or GPU atlas is unavailable; it must not silently downgrade to CPU runtime sampling.
+
+`far_shell.gpu_atlas_window_tiles` supports `3`, `5`, or `7`. The **NAADF PoC** side menu exposes the same setting as **GPU atlas window** and reloads the scene with the matching URL override because changing this value reallocates GPU atlas textures.
 
 Enable with `?naadf=1` or any `infinite-naadf-*` scene.
 
@@ -90,6 +93,7 @@ Runtime overrides:
 ?scene=infinite-naadf-sun-visibility&naadfTraversal=compare
 ?scene=infinite-naadf-sun-visibility&naadfTraversal=hdda&naadfHddaBounds=1
 ?scene=infinite-naadf-sun-visibility&naadfHeightMode=gpu&naadfShellGrid=96
+?scene=infinite-naadf-sun-visibility&naadfAtlasWindow=7
 ?scene=infinite-naadf-sun-visibility&naadfHeightMode=cpu
 ```
 
@@ -98,9 +102,9 @@ Runtime overrides:
 ## Known limitations
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
-- Runtime far shell derives lighting normals from neighboring height-atlas texels, but ring-window borders still clamp at the current 5x5 atlas edge
+- Runtime far shell derives lighting normals from neighboring height-atlas texels, but ring-window borders still clamp at the configured atlas edge
 - Canopy/water coverage are still packed in CPU summaries only; the runtime shader does not consume them yet
-- The atlas is still a small moving 5x5 tile window per ring, not a production bindless/SSBO page table
+- The atlas is still a small moving tile window per ring, not a production bindless/SSBO page table
 - HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
 - CPU macro terrain fallback still exists for debug/oracle paths, but should not be on the runtime far-shell hot path in GPU mode
 - Sun visibility is debug-only stepping, not a path tracer
@@ -141,6 +145,7 @@ http://127.0.0.1:5173/?scene=infinite-naadf-flat&farShell=1
 http://127.0.0.1:5173/?scene=infinite-naadf-fast-flight&farShell=1
 http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&farShell=1
 http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfHeightMode=gpu&naadfShellGrid=96
+http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfAtlasWindow=7
 http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfTraversal=compare&naadfHddaBounds=1&naadfHeightMode=cpu
 ```
 
