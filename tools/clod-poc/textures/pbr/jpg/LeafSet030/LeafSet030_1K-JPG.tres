@@ -1,0 +1,19 @@
+[gd_resource type="StandardMaterial3D" load_steps=6 format=3 uid="acg_59t0seu7"]
+
+[ext_resource type="Texture2D" uid="uid://acg_fjm4syzt" id="Color" path="./LeafSet030_1K-JPG_Color.jpg"]
+[ext_resource type="Texture2D" uid="uid://acg_ejd62h7w" id="Displacement" path="./LeafSet030_1K-JPG_Displacement.jpg"]
+[ext_resource type="Texture2D" uid="uid://acg_rxz6410l" id="Roughness" path="./LeafSet030_1K-JPG_Roughness.jpg"]
+[ext_resource type="Texture2D" uid="uid://acg_cmp4rds9" id="NormalGL" path="./LeafSet030_1K-JPG_NormalGL.jpg"]
+[ext_resource type="Texture2D" uid="uid://acg_r5xthpc3" id="Scattering" path="./LeafSet030_1K-JPG_Scattering.jpg"]
+[resource]
+albedo_texture = ExtResource("Color")
+roughness_texture = ExtResource("Roughness")
+roughness_texture_channel = 4
+normal_texture = ExtResource("NormalGL")
+normal_enabled = true
+heightmap_texture = ExtResource("Displacement")
+heightmap_scale = 1.0
+heightmap_enabled = true
+subsurf_scatter_enabled = true
+subsurf_scatter_strength = 0.25
+subsurf_scatter_texture = ExtResource("Scattering")
