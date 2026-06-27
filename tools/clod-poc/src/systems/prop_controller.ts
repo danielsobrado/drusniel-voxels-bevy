@@ -1,13 +1,21 @@
 import type * as THREE from "three";
-import type { CustomPropsSettings, PropPlacementScene } from "../props/prop_types.js";
+import type { CustomPropsSettings, PropAssetDef, PropAssetMetadata, PropPlacementScene } from "../props/prop_types.js";
 import { PropColliderSet } from "../props/prop_collider.js";
 import { PropSystem } from "../props/prop_system.js";
 import type { PropStats } from "../props/prop_stats.js";
 import type { ClodHooks } from "../core/hooks.js";
+import { resolvePropSnapPlacement, type PropSnapPlacementInput, type PropSnapPlacementResult } from "../props/prop_snap.js";
+import type { PropSpatialGrid } from "../props/prop_spatial_grid.js";
 
 const COLLIDER_SYNC_MIN_INTERVAL_MS = 75;
 const COLLIDER_SYNC_MIN_DISTANCE_M = 0.35;
 const COLLIDER_SYNC_MIN_DISTANCE_SQ = COLLIDER_SYNC_MIN_DISTANCE_M * COLLIDER_SYNC_MIN_DISTANCE_M;
+
+interface PropSystemSnapAccess {
+  grid: PropSpatialGrid | null;
+  assetById: Map<string, PropAssetDef>;
+  metadataByAssetId: Map<string, PropAssetMetadata>;
+}
 
 export interface PropControllerDeps {
   scene: THREE.Scene;
@@ -27,6 +35,7 @@ export interface PropController {
   refreshStats(): void;
   getPlacementSceneSnapshot(): PropPlacementScene;
   replacePlacementScene(scene: PropPlacementScene): void;
+  resolveSnapPlacement(input: PropSnapPlacementInput): PropSnapPlacementResult | null;
   availablePrefabIds(): string[];
   dispose(): void;
 }
@@ -56,6 +65,12 @@ export function createPropController(deps: PropControllerDeps): PropController {
     const dy = playerPos[1] - lastColliderSyncPos[1];
     const dz = playerPos[2] - lastColliderSyncPos[2];
     return dx * dx + dy * dy + dz * dz >= COLLIDER_SYNC_MIN_DISTANCE_SQ;
+  };
+
+  const resolveSnap = (input: PropSnapPlacementInput): PropSnapPlacementResult | null => {
+    const snapAccess = system as unknown as PropSystemSnapAccess;
+    if (!snapAccess.grid) return null;
+    return resolvePropSnapPlacement(input, snapAccess.grid.instances, snapAccess.assetById, snapAccess.metadataByAssetId);
   };
 
   return {
@@ -100,6 +115,9 @@ export function createPropController(deps: PropControllerDeps): PropController {
       system.setCollidersActive(0);
       forceColliderSync = true;
       refreshStats();
+    },
+    resolveSnapPlacement(input) {
+      return resolveSnap(input);
     },
     availablePrefabIds() {
       return system.availablePrefabIds();
