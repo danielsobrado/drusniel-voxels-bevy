@@ -2,10 +2,9 @@
 // MeshStandardMaterial + onBeforeCompile path in tree_material.ts. The classic path
 // relies on GLSL `onBeforeCompile` (#include <begin_vertex>, <map_fragment>) which
 // WebGPURenderer silently drops, leaving the trees as solid black silhouettes. This
-// reauthors the same look as a node graph: vertex-colour albedo tinted by the white
-// foliage alpha atlas, foliage alpha cutout (trunk/branch geometry kept opaque via
-// treeFoliageMask), wind sway/flutter, and the same hemispheric + sun lighting as the
-// grass/stone node materials. Geometry/LOD/scatter stays in TreeSystem.
+// reauthors the same look as a node graph: vertex-colour albedo, wind sway/flutter,
+// and the same hemispheric + sun lighting as the grass/stone node materials.
+// Geometry/LOD/scatter stays in TreeSystem.
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
@@ -31,7 +30,6 @@ import {
   storage,
   texture,
   uniform,
-  uv,
   vec2,
   vec3,
 } from "three/tsl";
@@ -40,7 +38,6 @@ import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { bakeBarkTextures, type BarkTextures } from "../textures/barkSynth.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
-import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -168,7 +165,6 @@ export function createTreeNodeMaterialHandle(
     uLeafFlutter: uniform(0),
   };
   applyWindUniforms(wind, settings);
-  const uUseFoliageAlpha = uniform(settings.foliage.enabled ? 1 : 0);
   const uLight = uniform(lighting.sunDirection.clone().normalize());
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
@@ -183,15 +179,13 @@ export function createTreeNodeMaterialHandle(
   const uForestFogStrength = uniform(1);
   const uForestFogColor = uniform(new THREE.Vector3(0.72, 0.78, 0.81));
 
-  let foliageAtlas: TreeFoliageAtlas = createTreeFoliageAtlas(settings);
-  const mapNodes: TslNode[] = [];
   const forestMapNodes: TslNode[] = [];
   const materials: MeshBasicNodeMaterial[] = [];
 
   // Shared per-vertex / per-instance attribute nodes (rebuilt per material to avoid
   // sharing a node instance across compiled materials).
   const barkTexture = sharedBarkTexture(settings.seed);
-  const buildMaterial = (albedoFactory: (vertexColor: TslNode, mapRgb: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
+  const buildMaterial = (albedoFactory: (vertexColor: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
     const aWind: TslNode = attribute("treeWind", "vec2");
@@ -199,12 +193,10 @@ export function createTreeNodeMaterialHandle(
     const aFlutterWeight: TslNode = aWind.y;
     const aWorldXZ: TslNode = attribute("treeWorldXZ", "vec2");
 
-    const mapNode: TslNode = texture(foliageAtlas.texture, uv());
-    mapNodes.push(mapNode);
     const forestUv: TslNode = clamp(aWorldXZ.div(uForestWorldSize), vec2(0), vec2(1));
     const forestPacked: TslNode = texture(neutralForestTexture, forestUv);
     forestMapNodes.push(forestPacked);
-    const foliageAlbedo: TslNode = albedoFactory(aColor, mapNode.xyz);
+    const foliageAlbedo: TslNode = albedoFactory(aColor);
     // Trunk/branch verts (treeFoliageMask 0) get triplanar bark; foliage verts
     // (mask 1) are real leaf/needle meshes lit by their vertex colour. The old
     // alpha-card atlas cutout is retired — foliage is opaque geometry now.
@@ -264,7 +256,7 @@ export function createTreeNodeMaterialHandle(
     const lodMask: TslNode = ign.lessThan(aLodFade);
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     (material as unknown as { maskNode: TslNode }).maskNode = aboveWater ? lodMask.and(aboveWater) : lodMask;
-    material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
+    material.alphaTest = 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
     material.depthWrite = true;
@@ -288,13 +280,10 @@ export function createTreeNodeMaterialHandle(
     },
     updateSettings(next: TreeSettings) {
       applyWindUniforms(wind, next);
-      uUseFoliageAlpha.value = next.foliage.enabled ? 1 : 0;
-      const previous = foliageAtlas;
-      foliageAtlas = createTreeFoliageAtlas(next);
-      for (const mapNode of mapNodes) mapNode.value = foliageAtlas.texture;
-      previous.dispose();
       for (const material of materials) {
-        material.alphaTest = next.foliage.enabled ? next.foliage.alphaTest : 0;
+        material.alphaTest = 0;
+        material.transparent = false;
+        material.depthWrite = true;
         material.needsUpdate = true;
       }
     },
@@ -318,7 +307,6 @@ export function createTreeNodeMaterialHandle(
       for (const mapNode of forestMapNodes) mapNode.value = state.textureHandle.texture;
     },
     dispose() {
-      foliageAtlas.dispose();
       neutralForestTexture.dispose();
       for (const material of materials) material.dispose();
     },
@@ -342,7 +330,6 @@ export function createTreeRingNodeMaterialHandle(
     uLeafFlutter: uniform(0),
   };
   applyWindUniforms(wind, settings);
-  const uUseFoliageAlpha = uniform(settings.foliage.enabled ? 1 : 0);
   const uFadeCenter = uniform(new THREE.Vector2());
   const uNearDistance = uniform(settings.distanceM * settings.lod.nearFraction);
   const uMidDistance = uniform(settings.distanceM * settings.lod.midFraction);
@@ -355,14 +342,12 @@ export function createTreeRingNodeMaterialHandle(
   const uSun = uniform(v3(lighting.sunColor));
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
-  let foliageAtlas: TreeFoliageAtlas = createTreeFoliageAtlas(settings);
   const barkTexture = sharedBarkTexture(settings.seed);
-  const mapNodes: TslNode[] = [];
   const materials: MeshBasicNodeMaterial[] = [];
   let debugColorByLod = settings.render.debugColorByLod;
   const prepassNodes = new Map<MeshBasicNodeMaterial, PrepassNodes>();
 
-  const buildMaterial = (albedoFactory: (vertexColor: TslNode, mapRgb: TslNode, tint: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
+  const buildMaterial = (albedoFactory: (vertexColor: TslNode, tint: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
     const aWind: TslNode = attribute("treeWind", "vec2");
@@ -380,13 +365,11 @@ export function createTreeRingNodeMaterialHandle(
     const aYaw: TslNode = treeRingHash(worldCell, uSeed, 701).mul(6.28318530718);
     const aTint: TslNode = treeRingHash(worldCell, uSeed, 1901);
 
-    const mapNode: TslNode = texture(foliageAtlas.texture, uv());
-    mapNodes.push(mapNode);
-    const foliageAlbedo: TslNode = albedoFactory(aColor, mapNode.xyz, aTint);
+    const foliageAlbedo: TslNode = albedoFactory(aColor, aTint);
     const albedo: TslNode = withBark
       ? mix(barkTrunkAlbedo(aColor, barkTexture), foliageAlbedo, aFoliageMask)
       : foliageAlbedo;
-    const opacity: TslNode = mix(float(1), mapNode.w, aFoliageMask.mul(uUseFoliageAlpha));
+    const opacity: TslNode = float(1);
 
     const phase: TslNode = fract(sin(dot(aWorldXZ, vec2(127.1, 311.7))).mul(43758.5453123));
     const t: TslNode = wind.uTime.mul(wind.uWindSpeed);
@@ -435,7 +418,7 @@ export function createTreeRingNodeMaterialHandle(
     );
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     (material as unknown as { maskNode: TslNode }).maskNode = aboveWater ? lodMask.and(aboveWater) : lodMask;
-    material.alphaTest = settings.foliage.enabled ? settings.foliage.alphaTest : 0;
+    material.alphaTest = 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
     material.depthWrite = true;
@@ -448,8 +431,8 @@ export function createTreeRingNodeMaterialHandle(
     return material;
   };
 
-  const regularMaterial = buildMaterial((vertexColor, mapRgb, tint) =>
-    vertexColor.mul(mapRgb).mul(mix(vec3(0.88, 0.93, 0.82), vec3(1.08, 1.02, 0.9), tint)),
+  const regularMaterial = buildMaterial((vertexColor, tint) =>
+    vertexColor.mul(mix(vec3(0.88, 0.93, 0.82), vec3(1.08, 1.02, 0.9), tint)),
     true,
   );
   const debugMaterials = {} as Record<TreeLod, THREE.Material>;
@@ -474,18 +457,15 @@ export function createTreeRingNodeMaterialHandle(
     updateSettings(next: TreeSettings) {
       debugColorByLod = next.render.debugColorByLod;
       applyWindUniforms(wind, next);
-      uUseFoliageAlpha.value = next.foliage.enabled ? 1 : 0;
       uNearDistance.value = next.distanceM * next.lod.nearFraction;
       uMidDistance.value = next.distanceM * next.lod.midFraction;
       uFarDistance.value = next.distanceM * next.lod.farFraction;
       uBandDistance.value = next.lod.crossfadeEnabled ? next.lod.crossfadeBandM : 0;
       uSeed.value = next.seed;
-      const previous = foliageAtlas;
-      foliageAtlas = createTreeFoliageAtlas(next);
-      for (const mapNode of mapNodes) mapNode.value = foliageAtlas.texture;
-      previous.dispose();
       for (const material of materials) {
-        material.alphaTest = next.foliage.enabled ? next.foliage.alphaTest : 0;
+        material.alphaTest = 0;
+        material.transparent = false;
+        material.depthWrite = true;
         material.needsUpdate = true;
       }
     },
@@ -500,7 +480,6 @@ export function createTreeRingNodeMaterialHandle(
       // on the existing CPU/WebGPU material until the all-LOD quality stage.
     },
     dispose() {
-      foliageAtlas.dispose();
       for (const material of materials) material.dispose();
     },
   };
