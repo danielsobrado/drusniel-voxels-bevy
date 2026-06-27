@@ -107,6 +107,13 @@ interface Lod0NodeBackup {
   chunkMeshes?: PageMesh[];
 }
 
+interface ParentNodeBackup {
+  mesh: PageMesh;
+  bounds: ClodPageNode["bounds"];
+  errorWorld: number;
+  lowBenefit: boolean;
+}
+
 const tris = (mesh: PageMesh): number => mesh.indices.length / 3;
 
 function footprintFor(level: number, nx: number, nz: number, cfg: ClodPagesConfig): PageFootprint {
@@ -142,12 +149,36 @@ function backupLod0Node(node: ClodPageNode): Lod0NodeBackup {
   };
 }
 
+function backupAllLod0Nodes(result: BuildResult): Map<ClodPageNode, Lod0NodeBackup> {
+  const backups = new Map<ClodPageNode, Lod0NodeBackup>();
+  for (const node of result.nodesByLevel.get(0) ?? []) backups.set(node, backupLod0Node(node));
+  return backups;
+}
+
 function restoreLod0Backups(backups: ReadonlyMap<ClodPageNode, Lod0NodeBackup>): void {
   for (const [node, backup] of backups) {
     node.mesh = backup.mesh;
     node.bounds = cloneBounds(backup.bounds);
     if (backup.chunkMeshes) node.chunkMeshes = backup.chunkMeshes;
     else delete node.chunkMeshes;
+  }
+}
+
+function backupParentNode(node: ClodPageNode): ParentNodeBackup {
+  return {
+    mesh: node.mesh,
+    bounds: cloneBounds(node.bounds),
+    errorWorld: node.errorWorld,
+    lowBenefit: node.lowBenefit,
+  };
+}
+
+function restoreParentBackups(backups: ReadonlyMap<ClodPageNode, ParentNodeBackup>): void {
+  for (const [node, backup] of backups) {
+    node.mesh = backup.mesh;
+    node.bounds = cloneBounds(backup.bounds);
+    node.errorWorld = backup.errorWorld;
+    node.lowBenefit = backup.lowBenefit;
   }
 }
 
@@ -689,6 +720,7 @@ export function rebuildAncestorLevels(
   cfg: ClodPagesConfig,
 ): AncestorRebuildResult {
   const changed: ClodPageNode[] = [];
+  const backups = new Map<ClodPageNode, ParentNodeBackup>();
   const startedAt = performance.now();
   let parentNodes = 0;
   const topLevel = Math.max(...result.nodesByLevel.keys());
@@ -696,36 +728,51 @@ export function rebuildAncestorLevels(
   for (const [nx, nz] of lod0DirtyCoords) seed.add(`${nx >> 1},${nz >> 1}`);
   let levelCoords = [...seed].map((key) => key.split(",").map(Number) as [number, number]);
 
-  for (let level = 1; level <= topLevel && levelCoords.length > 0; level++) {
-    levelCoords = expandQuadSiblingPages(levelCoords, level, result.worldPagesX, result.worldPagesZ);
-    const nextKeys = new Set<string>();
-    const nextCoords: [number, number][] = [];
-    for (const [nx, nz] of levelCoords) {
-      const node = resimplifyParent(index, level, `${nx},${nz}`, cfg, level === topLevel);
-      if (!node) continue;
-      changed.push(node);
-      parentNodes++;
-      const parentKey = `${nx >> 1},${nz >> 1}`;
-      if (!nextKeys.has(parentKey)) {
-        nextKeys.add(parentKey);
-        nextCoords.push([nx >> 1, nz >> 1]);
+  try {
+    for (let level = 1; level <= topLevel && levelCoords.length > 0; level++) {
+      levelCoords = expandQuadSiblingPages(levelCoords, level, result.worldPagesX, result.worldPagesZ);
+      const nextKeys = new Set<string>();
+      const nextCoords: [number, number][] = [];
+      for (const [nx, nz] of levelCoords) {
+        const key = `${nx},${nz}`;
+        const target = index[level]?.get(key);
+        if (!target) continue;
+        if (!backups.has(target)) backups.set(target, backupParentNode(target));
+        const node = resimplifyParent(index, level, key, cfg, level === topLevel);
+        if (!node) continue;
+        changed.push(node);
+        parentNodes++;
+        const parentKey = `${nx >> 1},${nz >> 1}`;
+        if (!nextKeys.has(parentKey)) {
+          nextKeys.add(parentKey);
+          nextCoords.push([nx >> 1, nz >> 1]);
+        }
       }
+      levelCoords = nextCoords;
     }
-    levelCoords = nextCoords;
+  } catch (error) {
+    restoreParentBackups(backups);
+    throw error;
   }
 
   return { changed, parentNodes, parentMs: performance.now() - startedAt };
 }
 
 export function rebuildDirtyPages(result: BuildResult, dirty: DirtyCellBounds, cfg: ClodPagesConfig): EditRebuildResult {
+  const lod0Backups = backupAllLod0Nodes(result);
   const index = buildNodeIndex(result);
-  const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, index);
-  const ancestors = rebuildAncestorLevels(result, lod0.dirtyCoords, index, cfg);
-  return {
-    changed: [...lod0.changed, ...ancestors.changed],
-    lod0Pages: lod0.lod0Pages,
-    parentNodes: ancestors.parentNodes,
-    lod0Ms: lod0.lod0Ms,
-    parentMs: ancestors.parentMs,
-  };
+  try {
+    const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, index);
+    const ancestors = rebuildAncestorLevels(result, lod0.dirtyCoords, index, cfg);
+    return {
+      changed: [...lod0.changed, ...ancestors.changed],
+      lod0Pages: lod0.lod0Pages,
+      parentNodes: ancestors.parentNodes,
+      lod0Ms: lod0.lod0Ms,
+      parentMs: ancestors.parentMs,
+    };
+  } catch (error) {
+    restoreLod0Backups(lod0Backups);
+    throw error;
+  }
 }
