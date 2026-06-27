@@ -243,21 +243,24 @@ export class ClodWorkerClient {
       case "buildComplete": {
         const pending = this.buildRequests.get(message.requestId);
         if (!pending) break;
+        const nextResult = rehydrateBuildResult(message.result);
+        const nextNodesById = indexNodes(nextResult);
+        setWorkerCacheSnapshot(message.cacheBuildStats ?? null, message.cacheServiceMetrics ?? null);
+        this.result = nextResult;
+        this.nodesById = nextNodesById;
         this.buildRequests.delete(message.requestId);
         this.progressHandlers.delete(message.requestId);
-        this.result = rehydrateBuildResult(message.result);
-        this.nodesById = indexNodes(this.result);
-        setWorkerCacheSnapshot(message.cacheBuildStats ?? null, message.cacheServiceMetrics ?? null);
         pending.resolve(this.result);
         break;
       }
       case "lod0Rebuilt": {
+        const targets = message.changed.map((node) => {
+          const target = this.nodesById.get(node.id);
+          if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
+          return { node, target };
+        });
         const result: WorkerLod0Rebuild = {
-          changed: message.changed.map((node) => {
-            const target = this.nodesById.get(node.id);
-            if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
-            return applySerializedNode(target, node, this.nodesById);
-          }),
+          changed: targets.map(({ node, target }) => applySerializedNode(target, node, this.nodesById)),
           dirtyCoords: message.dirtyCoords,
           lod0Pages: message.lod0Pages,
           lod0Ms: message.lod0Ms,
@@ -309,13 +312,14 @@ export class ClodWorkerClient {
   }
 
   private rehydrateParentBatch(message: SerializedParentBatch): WorkerParentBatch {
+    const targets = message.changed.map((node) => {
+      const target = this.nodesById.get(node.id);
+      if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
+      return { node, target };
+    });
     return {
       requestId: message.requestId,
-      changed: message.changed.map((node) => {
-        const target = this.nodesById.get(node.id);
-        if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
-        return applySerializedNode(target, node, this.nodesById);
-      }),
+      changed: targets.map(({ node, target }) => applySerializedNode(target, node, this.nodesById)),
       parentNodes: message.parentNodes,
       parentMs: message.parentMs,
       pendingParents: message.pendingParents,
