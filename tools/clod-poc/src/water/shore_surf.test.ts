@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_config.js";
 import { cloneWaterConfig } from "./waterConfig.js";
 import { WaterField } from "./waterField.js";
 import { createDeepOceanSampler } from "./ocean_service.js";
@@ -51,7 +52,7 @@ describe("shore surf boundary", () => {
 describe("deep ocean sampler boundary", () => {
   it("treats only positions outside the playable world as future boat ocean", () => {
     const sampler = createDeepOceanSampler(256, {
-      enabled: true,
+      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
       extendCells: 64,
       surfaceY: 18,
       segments: 8,
