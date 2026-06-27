@@ -82,7 +82,10 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   const forceMissing = options.sceneName === "infinite-naadf-stress-missing";
   const state = createNaadfWorldState(config, source, metrics, forceMissing);
   const gpuAtlas = config.farShell.heightSamplingMode === "gpu"
-    ? new FarSummaryGpuAtlas({ tileCells: config.farClipmap.tileCells })
+    ? new FarSummaryGpuAtlas({
+        tileCells: config.farClipmap.tileCells,
+        ringCount: config.farClipmap.rings.length,
+      })
     : undefined;
   const debugOverlay = options.threeScene
     ? new NaadfDebugOverlay(options.threeScene, config)
