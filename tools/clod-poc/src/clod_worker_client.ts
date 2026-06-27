@@ -83,6 +83,7 @@ export class ClodWorkerClient {
     this.worker.onerror = (event) => {
       const error = new Error(event.message || "CLOD worker failed");
       this.stopped = true;
+      this.markParentsFailed(error);
       this.rejectAll(error);
       this.onError?.(error);
     };
@@ -321,12 +322,15 @@ export class ClodWorkerClient {
     };
   }
 
-  private releaseParentsWaitersAfterFailure(error: Error): void {
+  private markParentsFailed(error: Error): void {
     this.parentsPending = false;
     this.parentsHealthy = false;
     this.lastParentError = error;
-    for (const resolve of this.parentsWaiters) resolve();
-    this.parentsWaiters = [];
+    this.resolveParentsWaiters();
+  }
+
+  private releaseParentsWaitersAfterFailure(error: Error): void {
+    this.markParentsFailed(error);
     this.onError?.(error);
   }
 
