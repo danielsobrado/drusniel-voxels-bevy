@@ -3,7 +3,6 @@ import type {
   BuildProgress,
   BuildResult,
   DirtyCellBounds,
-  Lod0RebuildResult,
   NodeBuildStat,
 } from "./clod/quadtree.js";
 import type { DigEdit, VoxelEditSnapshot } from "./terrain/terrain.js";
@@ -144,22 +143,6 @@ export function serializeNode(node: ClodPageNode): SerializedClodNode {
 
 export function serializeNodes(nodes: readonly ClodPageNode[]): SerializedClodNode[] {
   return nodes.map(serializeNode);
-}
-
-export function serializeLod0Rebuild(result: Lod0RebuildResult, pendingParents: number, serializeMs: number, serializedBytes: number): SerializedLod0RebuildResult {
-  return {
-    requestIds: [0],
-    editCount: 1,
-    changed: serializeNodes(result.changed),
-    dirtyCoords: result.dirtyCoords.map(([x, z]) => [x, z]),
-    lod0Pages: result.lod0Pages,
-    lod0Ms: result.lod0Ms,
-    serializeMs,
-    serializedBytes,
-    chunksRemeshed: result.chunksRemeshed,
-    chunksTotal: result.chunksTotal,
-    pendingParents,
-  };
 }
 
 export function collectNodeTransferables(node: SerializedClodNode, out: Transferable[]): void {
