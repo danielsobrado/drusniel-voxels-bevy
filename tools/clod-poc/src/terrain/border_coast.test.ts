@@ -71,6 +71,24 @@ describe("border coast shaping", () => {
     expect(shaped).toBeCloseTo(waterline, 5);
   });
 
+  it("preserves high terrain on the dry side of beach coast shaping", () => {
+    const highMountain = 96;
+    const x = cfg.coast.oceanStartCells + cfg.coast.beach.beachShelfCells + 12;
+    const z = worldCells * 0.5;
+    const shaped = applyBorderCoastShape(x, z, highMountain, cfg, worldCells);
+
+    expect(shaped).toBeGreaterThan(highMountain - 1);
+  });
+
+  it("still smooths low beach terrain on the dry side", () => {
+    const lowBackshore = cfg.ocean.surfaceY + cfg.coast.beach.backshoreHeightAboveWater + 1;
+    const x = cfg.coast.oceanStartCells + cfg.coast.beach.beachShelfCells + 4;
+    const z = worldCells * 0.5;
+    const shaped = applyBorderCoastShape(x, z, lowBackshore, cfg, worldCells);
+
+    expect(shaped).toBeLessThan(lowBackshore);
+  });
+
   it("keeps the repo coast band from swallowing the default playable world", () => {
     const yaml = readFileSync(
       fileURLToPath(new URL("../../config/border_coast_ocean.yaml", import.meta.url)),
