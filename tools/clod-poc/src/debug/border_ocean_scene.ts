@@ -10,6 +10,8 @@ import { deepOceanSpectrumWaveCount } from "../water/deep_ocean_waves.js";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
 import { getBorderCoastRuntime } from "../terrain/terrain.js";
 
+const SCENE_CONFIG_NAME = "border-ocean scene config";
+
 export const DEFAULT_BORDER_OCEAN_REQUIRED_COUNTERS = Object.freeze([
   "border_ocean.scene",
   "border_ocean.coast_runtime_active",
@@ -79,23 +81,44 @@ export const DEFAULT_BORDER_OCEAN_SCENE_CONFIG: BorderOceanSceneConfig = {
   },
 };
 
-function readNumber(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+type YamlRecord = Record<string, unknown>;
+
+function optionalRecord(value: unknown, field: string): YamlRecord | undefined {
+  if (value === undefined) return undefined;
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) return value as YamlRecord;
+  throw new Error(`${SCENE_CONFIG_NAME}: ${field} must be an object`);
 }
 
-function readIntegerAtLeast(value: unknown, fallback: number, min: number): number {
-  const n = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : fallback;
-  return Math.max(min, n);
+function requiredRootRecord(value: unknown): YamlRecord {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) return value as YamlRecord;
+  throw new Error(`${SCENE_CONFIG_NAME}: root must be an object`);
+}
+
+function optionalNumber(value: unknown, fallback: number, field: string): number {
+  if (value === undefined) return fallback;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  throw new Error(`${SCENE_CONFIG_NAME}: ${field} must be a finite number`);
+}
+
+function optionalIntegerAtLeast(value: unknown, fallback: number, min: number, field: string): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new Error(`${SCENE_CONFIG_NAME}: ${field} must be an integer`);
+  }
+  if (value < min) {
+    throw new Error(`${SCENE_CONFIG_NAME}: ${field} must be >= ${min}`);
+  }
+  return value;
 }
 
 function readRequiredCounters(value: unknown, fallback: readonly string[]): readonly string[] {
   if (value === undefined) return fallback;
   if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("border-ocean scene config: acceptance.required_counters must be a non-empty string array");
+    throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters must be a non-empty string array`);
   }
   const invalidIndex = value.findIndex((item) => typeof item !== "string" || item.length === 0);
   if (invalidIndex >= 0) {
-    throw new Error(`border-ocean scene config: acceptance.required_counters[${invalidIndex}] must be a non-empty string`);
+    throw new Error(`${SCENE_CONFIG_NAME}: acceptance.required_counters[${invalidIndex}] must be a non-empty string`);
   }
   return value as string[];
 }
@@ -104,52 +127,47 @@ export function parseBorderOceanSceneConfig(text: string): BorderOceanSceneConfi
   const defaults = DEFAULT_BORDER_OCEAN_SCENE_CONFIG;
   if (!text.trim()) return { ...defaults };
 
-  const raw = load(text) as {
-    border_ocean_scene?: {
-      default_world_pages?: unknown;
-      default_seed?: unknown;
-      camera?: {
-        eye_x_ratio?: unknown;
-        eye_y_ratio?: unknown;
-        eye_z_ratio?: unknown;
-        look_x_ratio?: unknown;
-        look_y?: unknown;
-        look_z_ratio?: unknown;
-        fov?: unknown;
-      };
-      acceptance?: {
-        min_deep_ocean_vertices?: unknown;
-        max_interior_water_wet_ratio?: unknown;
-        required_counters?: unknown;
-      };
-    };
-  };
-  const root = raw.border_ocean_scene ?? {};
+  const rawRoot = requiredRootRecord(load(text));
+  const root = optionalRecord(rawRoot.border_ocean_scene, "border_ocean_scene") ?? {};
+  const camera = optionalRecord(root.camera, "border_ocean_scene.camera") ?? {};
+  const acceptance = optionalRecord(root.acceptance, "border_ocean_scene.acceptance") ?? {};
 
   return {
-    defaultWorldPages: readIntegerAtLeast(root.default_world_pages, defaults.defaultWorldPages, 4),
-    defaultSeed: readIntegerAtLeast(root.default_seed, defaults.defaultSeed, 1),
+    defaultWorldPages: optionalIntegerAtLeast(
+      root.default_world_pages,
+      defaults.defaultWorldPages,
+      4,
+      "border_ocean_scene.default_world_pages",
+    ),
+    defaultSeed: optionalIntegerAtLeast(
+      root.default_seed,
+      defaults.defaultSeed,
+      1,
+      "border_ocean_scene.default_seed",
+    ),
     camera: {
-      eyeXRatio: readNumber(root.camera?.eye_x_ratio, defaults.camera.eyeXRatio),
-      eyeYRatio: readNumber(root.camera?.eye_y_ratio, defaults.camera.eyeYRatio),
-      eyeZRatio: readNumber(root.camera?.eye_z_ratio, defaults.camera.eyeZRatio),
-      lookXRatio: readNumber(root.camera?.look_x_ratio, defaults.camera.lookXRatio),
-      lookY: readNumber(root.camera?.look_y, defaults.camera.lookY),
-      lookZRatio: readNumber(root.camera?.look_z_ratio, defaults.camera.lookZRatio),
-      fov: readNumber(root.camera?.fov, defaults.camera.fov),
+      eyeXRatio: optionalNumber(camera.eye_x_ratio, defaults.camera.eyeXRatio, "border_ocean_scene.camera.eye_x_ratio"),
+      eyeYRatio: optionalNumber(camera.eye_y_ratio, defaults.camera.eyeYRatio, "border_ocean_scene.camera.eye_y_ratio"),
+      eyeZRatio: optionalNumber(camera.eye_z_ratio, defaults.camera.eyeZRatio, "border_ocean_scene.camera.eye_z_ratio"),
+      lookXRatio: optionalNumber(camera.look_x_ratio, defaults.camera.lookXRatio, "border_ocean_scene.camera.look_x_ratio"),
+      lookY: optionalNumber(camera.look_y, defaults.camera.lookY, "border_ocean_scene.camera.look_y"),
+      lookZRatio: optionalNumber(camera.look_z_ratio, defaults.camera.lookZRatio, "border_ocean_scene.camera.look_z_ratio"),
+      fov: optionalNumber(camera.fov, defaults.camera.fov, "border_ocean_scene.camera.fov"),
     },
     acceptance: {
-      minDeepOceanVertices: readIntegerAtLeast(
-        root.acceptance?.min_deep_ocean_vertices,
+      minDeepOceanVertices: optionalIntegerAtLeast(
+        acceptance.min_deep_ocean_vertices,
         defaults.acceptance.minDeepOceanVertices,
         1,
+        "border_ocean_scene.acceptance.min_deep_ocean_vertices",
       ),
-      maxInteriorWaterWetRatio: readNumber(
-        root.acceptance?.max_interior_water_wet_ratio,
+      maxInteriorWaterWetRatio: optionalNumber(
+        acceptance.max_interior_water_wet_ratio,
         defaults.acceptance.maxInteriorWaterWetRatio,
+        "border_ocean_scene.acceptance.max_interior_water_wet_ratio",
       ),
       requiredCounters: readRequiredCounters(
-        root.acceptance?.required_counters,
+        acceptance.required_counters,
         defaults.acceptance.requiredCounters,
       ),
     },
