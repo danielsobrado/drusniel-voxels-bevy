@@ -24,7 +24,7 @@ spells:
     audio:
       volume: 0.34
     vfx:
-      layer_id: spell-vfx-layer
+      layer_id: water-spell-vfx-layer
       canvas_id: water-spell-vfx
       fallback_width_px: 1280
       fallback_height_px: 720
