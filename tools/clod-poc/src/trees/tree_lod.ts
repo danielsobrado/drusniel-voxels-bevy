@@ -31,7 +31,7 @@ export function selectTreeLod(
   const distances = treeLodDistances(settings);
   const baseLod = lodForDistance(distance, distances);
 
-  if (settings.lod.crossfadeEnabled) {
+  if (settings.lod.crossfadeEnabled && settings.lod.ditherEnabled) {
     return selectTreeLodWithCrossfade(distance, baseLod, settings);
   }
 
