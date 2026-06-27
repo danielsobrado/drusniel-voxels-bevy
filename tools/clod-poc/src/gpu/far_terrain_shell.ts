@@ -91,6 +91,16 @@ export function buildFarTerrainShell(
   const buildCenterZ = buildRelative ? 0 : centerZ;
   const originX = buildCenterX - farRadius;
   const originZ = buildCenterZ - farRadius;
+  const fallbackHeight = (x: number, z: number): number => sampleSkirtHeight(summary, x, z, farRadius, baseLevel, heightBias);
+  const sampleHeight = (x: number, z: number): number => {
+    if (!heightProvider) return fallbackHeight(x, z);
+    try {
+      const h = heightProvider.sampleHeight(x, z);
+      return Number.isFinite(h) ? h : fallbackHeight(x, z);
+    } catch {
+      return fallbackHeight(x, z);
+    }
+  };
 
   const vertexCount = (gridRes + 1) * (gridRes + 1);
   const positions = new Float32Array(vertexCount * 3);
@@ -105,9 +115,7 @@ export function buildFarTerrainShell(
       const localZ = originZ + gz * cellSize;
       const sampleX = buildRelative ? localX + centerX : localX;
       const sampleZ = buildRelative ? localZ + centerZ : localZ;
-      const h = heightProvider
-        ? heightProvider.sampleHeight(sampleX, sampleZ)
-        : sampleSkirtHeight(summary, sampleX, sampleZ, farRadius, baseLevel, heightBias);
+      const h = sampleHeight(sampleX, sampleZ);
       heightGrid[gz * (gridRes + 1) + gx] = h - heightDrop;
     }
   }
@@ -198,8 +206,12 @@ export function buildFarTerrainShell(
   const hazeT = smoothstep(float(farRadius * 0.55), float(farRadius * 0.98), distXZ);
 
   if (useParityMaterial && parityConfig) {
-    const vc = computeFarTerrainVertexColors(positions, normals, vertexCount, parityConfig, centerX, centerZ);
-    const colorAttr = createVertexColorBuffer(vc, parityConfig, undefined, centerX, centerZ, positions);
+    const colorWorldOffsetX = buildRelative ? centerX : 0;
+    const colorWorldOffsetZ = buildRelative ? centerZ : 0;
+    const debugCenterX = buildRelative ? 0 : centerX;
+    const debugCenterZ = buildRelative ? 0 : centerZ;
+    const vc = computeFarTerrainVertexColors(positions, normals, vertexCount, parityConfig, colorWorldOffsetX, colorWorldOffsetZ);
+    const colorAttr = createVertexColorBuffer(vc, parityConfig, undefined, debugCenterX, debugCenterZ, positions);
     geometry.setAttribute("color", new THREE.BufferAttribute(colorAttr, 3));
   }
 
