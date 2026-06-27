@@ -155,17 +155,7 @@ vTreeFoliageMask = treeFoliageMask;`,
 }
 
 export function injectTreeFoliageFragmentShader(fragmentShader: string): string {
-  return fragmentShader.replace(
-    "#include <common>",
-    `#include <common>
-varying float vTreeFoliageMask;`,
-  ).replace(
-    "#include <map_fragment>",
-    `#include <map_fragment>
-#ifdef USE_MAP
-diffuseColor.a = mix(1.0, diffuseColor.a, clamp(vTreeFoliageMask, 0.0, 1.0));
-#endif`,
-  );
+  return fragmentShader;
 }
 
 /**
