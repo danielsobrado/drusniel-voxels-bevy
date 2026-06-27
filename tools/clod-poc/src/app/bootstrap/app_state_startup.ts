@@ -3,6 +3,7 @@ import type { VoxelProjectArchiveContents } from "../../project/voxel_project_ar
 import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_loader.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import { createClodAppState, type ClodAppState } from "../clod_app_state.js";
+import { applyEnvironmentQueryOverrides } from "../state/environment_query_overrides.js";
 import { parseWeatherQueryContext, type BootstrapQueryContext } from "./query_context.js";
 import type { WorldBuildResult } from "./world_build_startup.js";
 
@@ -90,5 +91,6 @@ export function runAppStateStartup(input: AppStateStartupInput): AppStateStartup
     waterConfig: configs.waterConfig,
     digHoldIntervalMs: clodRuntime.digging.holdIntervalMs,
   });
+  applyEnvironmentQueryOverrides(state, searchParams);
   return { state, textureLoadOptions };
 }
