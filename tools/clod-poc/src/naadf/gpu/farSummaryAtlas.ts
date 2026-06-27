@@ -25,6 +25,7 @@ export interface FarSummaryGpuAtlasView {
   readonly texture: THREE.DataTexture;
   readonly materialTexture: THREE.DataTexture;
   readonly normalTexture: THREE.DataTexture;
+  readonly coverageTexture: THREE.DataTexture;
   readonly rings: FarSummaryGpuAtlasRingView[];
   originX: number;
   originZ: number;
@@ -53,6 +54,7 @@ export class FarSummaryGpuAtlas {
   private readonly heightData: Float32Array;
   private readonly materialData: Float32Array;
   private readonly normalData: Float32Array;
+  private readonly coverageData: Float32Array;
   private lastSignature = "";
 
   constructor(options: FarSummaryGpuAtlasOptions) {
@@ -67,15 +69,18 @@ export class FarSummaryGpuAtlas {
     this.heightData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
     this.materialData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
     this.normalData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
+    this.coverageData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
 
     const texture = createFloatAtlasTexture(this.heightData, width, height, "naadf-far-summary-height-atlas");
     const materialTexture = createFloatAtlasTexture(this.materialData, width, height, "naadf-far-summary-material-atlas");
     const normalTexture = createFloatAtlasTexture(this.normalData, width, height, "naadf-far-summary-normal-atlas");
+    const coverageTexture = createFloatAtlasTexture(this.coverageData, width, height, "naadf-far-summary-coverage-atlas");
 
     this.view = {
       texture,
       materialTexture,
       normalTexture,
+      coverageTexture,
       rings: Array.from({ length: this.ringCount }, (_, ringIndex) => this.emptyRingView(ringIndex)),
       originX: 0,
       originZ: 0,
@@ -128,6 +133,7 @@ export class FarSummaryGpuAtlas {
     this.heightData.fill(0);
     this.materialData.fill(0);
     this.normalData.fill(0);
+    this.coverageData.fill(0);
     let validRings = 0;
     for (let ringIndex = 0; ringIndex < this.ringCount; ringIndex++) {
       const ring = state.config.farClipmap.rings[ringIndex];
@@ -165,6 +171,7 @@ export class FarSummaryGpuAtlas {
     this.view.texture.needsUpdate = true;
     this.view.materialTexture.needsUpdate = true;
     this.view.normalTexture.needsUpdate = true;
+    this.view.coverageTexture.needsUpdate = true;
     this.lastSignature = signature;
   }
 
@@ -172,6 +179,7 @@ export class FarSummaryGpuAtlas {
     this.view.texture.dispose();
     this.view.materialTexture.dispose();
     this.view.normalTexture.dispose();
+    this.view.coverageTexture.dispose();
   }
 
   private invalidate(): void {
@@ -181,12 +189,14 @@ export class FarSummaryGpuAtlas {
     this.heightData.fill(0);
     this.materialData.fill(0);
     this.normalData.fill(0);
+    this.coverageData.fill(0);
     for (let ringIndex = 0; ringIndex < this.ringCount; ringIndex++) {
       this.view.rings[ringIndex] = this.emptyRingView(ringIndex);
     }
     this.view.texture.needsUpdate = true;
     this.view.materialTexture.needsUpdate = true;
     this.view.normalTexture.needsUpdate = true;
+    this.view.coverageTexture.needsUpdate = true;
     this.lastSignature = "";
   }
 
@@ -217,6 +227,11 @@ export class FarSummaryGpuAtlas {
         this.normalData[dst + 1] = encodeNormalChannel(normal.y);
         this.normalData[dst + 2] = encodeNormalChannel(normal.z);
         this.normalData[dst + 3] = 1;
+
+        this.coverageData[dst] = clamp01(tile.canopyCoverage[src] ?? 0);
+        this.coverageData[dst + 1] = clamp01(tile.waterCoverage[src] ?? 0);
+        this.coverageData[dst + 2] = 0;
+        this.coverageData[dst + 3] = 1;
       }
     }
   }
@@ -273,6 +288,10 @@ function heightAt(tile: FarSummaryTile, x: number, z: number): number {
 
 function encodeNormalChannel(value: number): number {
   return Math.min(1, Math.max(0, value * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_BIAS));
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 function selectTiles(
