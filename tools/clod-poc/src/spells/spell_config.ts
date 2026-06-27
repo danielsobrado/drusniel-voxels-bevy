@@ -51,8 +51,8 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
       fallbackHeightPx: 720,
       maxDpr: 1.25,
       flameScale: 1.0,
-      origin: [0.33, -0.47],
-      target: [0.0, 0.055],
+      origin: [0.0, -0.50],
+      target: [0.0, 0.08],
     },
   },
 };
