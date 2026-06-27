@@ -39,6 +39,14 @@ export function runAcceptanceChecks(
     detail: `${metrics.sunStepsP95.toFixed(1)} <= ${config.acceptance.maxP95SunSteps}`,
   });
 
+  checks.push({
+    name: "hdda_dense_mismatches",
+    passed: config.traversal.mode !== "compare" || !warmedUp || metrics.hddaDenseMismatches === 0,
+    detail: config.traversal.mode === "compare"
+      ? `${metrics.hddaDenseMismatches} == 0`
+      : "disabled outside compare mode",
+  });
+
   return checks;
 }
 
