@@ -41,7 +41,7 @@ border_coast_ocean:
   deep_ocean:
     extend_cells: 512
     segments: 32
- `);
+`);
     expect(cfg.coast.oceanStartCells).toBe(64);
     expect(cfg.coast.oceanFullDepthCells).toBe(12);
     expect(cfg.ocean.surfaceY).toBe(21);
@@ -78,11 +78,12 @@ describe("border coast shaping", () => {
     );
     const repoCfg = parseBorderCoastOceanConfig(yaml);
     const defaultWorldCells = 512;
+    const center = defaultWorldCells * 0.5;
     const inland = 86;
 
-    expect(coastMask(defaultWorldCells * 0.5, defaultWorldCells * 0.5, repoCfg.coast, defaultWorldCells)).toBe(0);
-    expect(applyBorderCoastShape(defaultWorldCells * 0.5, defaultWorldCells * 0.5, inland, repoCfg, defaultWorldCells)).toBe(inland);
-    expect(coastMask(0, defaultWorldCells * 0.5, repoCfg.coast, defaultWorldCells)).toBeGreaterThan(0.9);
+    expect(coastMask(center, center, repoCfg.coast, defaultWorldCells)).toBe(0);
+    expect(applyBorderCoastShape(center, center, inland, repoCfg, defaultWorldCells)).toBe(inland);
+    expect(coastMask(0, center, repoCfg.coast, defaultWorldCells)).toBeGreaterThan(0.9);
   });
 
   it("samples deterministic coast types", () => {
