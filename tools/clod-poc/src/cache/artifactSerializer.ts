@@ -89,16 +89,25 @@ function parseContainer(bytes: ArrayBuffer): Map<number, ArrayBuffer> {
     if (magic[i] !== MAGIC_BYTES[i]) throw new CacheCorruptError("invalid cache payload magic");
   }
   const sectionCount = readU32(view, 4);
+  const headerSize = 8 + sectionCount * 12;
+  if (headerSize > bytes.byteLength) throw new CacheCorruptError("section table exceeds payload bounds");
   const sections = new Map<number, ArrayBuffer>();
+  const ranges: Array<{ start: number; end: number; type: number }> = [];
   for (let i = 0; i < sectionCount; i++) {
     const base = 8 + i * 12;
-    if (base + 12 > bytes.byteLength) throw new CacheCorruptError("truncated section header");
     const type = readU32(view, base);
     const length = readU32(view, base + 4);
     const offset = readU32(view, base + 8);
+    if (sections.has(type)) throw new CacheCorruptError(`duplicate section ${type}`);
+    if (offset < headerSize) throw new CacheCorruptError(`section ${type} overlaps header`);
     if (offset + length > bytes.byteLength) {
       throw new CacheCorruptError(`section ${type} exceeds payload bounds`);
     }
+    for (const range of ranges) {
+      const overlaps = offset < range.end && offset + length > range.start;
+      if (overlaps) throw new CacheCorruptError(`section ${type} overlaps section ${range.type}`);
+    }
+    ranges.push({ start: offset, end: offset + length, type });
     sections.set(type, bytes.slice(offset, offset + length));
   }
   return sections;
