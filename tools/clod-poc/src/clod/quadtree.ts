@@ -10,7 +10,7 @@
 
 import { ClodPageNode, PageFootprint, PageMesh, ClodBuildError } from "../types.js";
 import { ClodPagesConfig } from "../config.js";
-import { buildLod0PageSource, rebuildPageChunks } from "./source_mesh.js";
+import { buildLod0PageSource, dirtyPageChunkIndices, rebuildPageChunks } from "./source_mesh.js";
 import { concatPageSourceMeshes as concat } from "./pageSource.js";
 import { weldVertices } from "./weld.js";
 import { buildOuterBorderLocks, countLocks } from "../lock.js";
@@ -531,13 +531,13 @@ export function buildNodeIndex(result: BuildResult): NodeIndex {
 }
 
 export interface Lod0RebuildResult {
-  /** LOD0 nodes re-extracted from the field, mutated in place. */
+  /** LOD0 nodes whose mesh/chunk cache changed, mutated in place. */
   changed: ClodPageNode[];
-  /** Page coords of the rebuilt LOD0 nodes — the seed for the ancestor chain. */
+  /** Page coords of changed LOD0 nodes — the seed for the ancestor chain. */
   dirtyCoords: [number, number][];
   lod0Pages: number;
   lod0Ms: number;
-  /** Chunks actually re-meshed vs. the chunks in the dirty pages (the per-chunk saving). */
+  /** Chunks actually re-meshed vs. the chunks considered in the sibling page group. */
   chunksRemeshed: number;
   chunksTotal: number;
 }
@@ -593,6 +593,7 @@ export function rebuildDirtyLod0Pages(
   cfg: ClodPagesConfig,
   index: NodeIndex,
 ): Lod0RebuildResult {
+  const pageChunks = cfg.page.chunks_per_page ** 2;
   const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
   const world = {
     cellsX: result.worldPagesX * span,
@@ -618,26 +619,29 @@ export function rebuildDirtyLod0Pages(
   let chunksTotal = 0;
   const t0 = performance.now();
   for (const [px, pz] of pages) {
-      const node = index[0]?.get(`${px},${pz}`);
-      if (!node) continue;
-      let mesh: PageMesh;
-      if (node.chunkMeshes) {
-        const r = rebuildPageChunks(node.chunkMeshes, px, pz, cfg, world, dirty);
-        mesh = r.mesh;
-        chunksRemeshed += r.remeshed;
-        chunksTotal += node.chunkMeshes.length;
-      } else {
-        const src = buildLod0PageSource(px, pz, cfg, world);
-        node.chunkMeshes = src.chunks;
-        mesh = src.mesh;
-        chunksRemeshed += src.chunks.length;
-        chunksTotal += src.chunks.length;
-      }
-      validatePageMesh(mesh, node.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz} edit-rebuild`);
-      node.mesh = mesh;
-      node.bounds = boundsOf(mesh);
-      changed.push(node);
-      dirtyCoords.push([px, pz]);
+    const node = index[0]?.get(`${px},${pz}`);
+    if (!node) continue;
+    const dirtyChunkCount = dirtyPageChunkIndices(px, pz, cfg, dirty).length;
+    chunksTotal += node.chunkMeshes?.length ?? pageChunks;
+    if (dirtyChunkCount === 0) continue;
+
+    let mesh: PageMesh;
+    if (node.chunkMeshes) {
+      const r = rebuildPageChunks(node.chunkMeshes, px, pz, cfg, world, dirty);
+      if (r.remeshed === 0) continue;
+      mesh = r.mesh;
+      chunksRemeshed += r.remeshed;
+    } else {
+      const src = buildLod0PageSource(px, pz, cfg, world);
+      node.chunkMeshes = src.chunks;
+      mesh = src.mesh;
+      chunksRemeshed += src.chunks.length;
+    }
+    validatePageMesh(mesh, node.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz} edit-rebuild`);
+    node.mesh = mesh;
+    node.bounds = boundsOf(mesh);
+    changed.push(node);
+    dirtyCoords.push([px, pz]);
   }
   return {
     changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - t0,
