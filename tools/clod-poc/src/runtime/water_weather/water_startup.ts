@@ -71,6 +71,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
     ? await createDeepOceanMaterial(isWebGpu, {
         visual: resolveDeepOceanVisual(waterConfig.visual, deepOceanConfig),
         surfaceY: deepOceanConfig.surfaceY,
+        fogDistanceM: deepOceanConfig.shading.fogFarM,
         sunDirection: lighting.sunDirection.clone(),
         cameraPosition: camera.position.clone(),
         horizonColor: lighting.skyLight,
