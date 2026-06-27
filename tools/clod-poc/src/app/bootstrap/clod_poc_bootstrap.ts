@@ -224,14 +224,17 @@ export async function bootstrapClodPoc() {
     const heightProvider = useNaadfFarSummary && naadfIntegration
       ? naadfIntegration.getHeightProvider()
       : farSummaryIntegration?.getHeightProvider();
-    if (!heightProvider && naadfHeightSamplingMode !== "gpu") {
-      throw new Error("long-view scene requires NAADF or far-summary height provider");
-    }
     const lighting = terrainView.currentLighting();
 
     const materialConfig = loadLongViewMaterialsConfig(undefined, parseQueryOverrides(searchParams));
     const parityConfig = materialConfig.enabled ? configToUniformData(materialConfig) : undefined;
     const useParity = materialConfig.enabled && parityConfig !== undefined;
+    const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu" && useParity
+      ? "gpu"
+      : naadfHeightSamplingMode;
+    if (!heightProvider && effectiveHeightSamplingMode !== "gpu") {
+      throw new Error("long-view scene requires NAADF or far-summary height provider");
+    }
 
     infiniteFarShell = new InfiniteFarShell({
       innerMeters: lvConfig.farShell.startMeters,
@@ -252,7 +255,7 @@ export async function bootstrapClodPoc() {
       },
       useParityMaterial: useParity,
       parityConfig,
-      heightSamplingMode: naadfHeightSamplingMode,
+      heightSamplingMode: effectiveHeightSamplingMode,
       debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
       metrics: farShellMetrics,
     });
