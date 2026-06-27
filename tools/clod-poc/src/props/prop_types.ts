@@ -58,6 +58,11 @@ export interface PropAssetDef {
   lightingProxy?: PropLightingProxy;
 }
 
+export interface PropExternalCatalogRef {
+  url: string;
+  enabled: boolean;
+}
+
 export interface PropCategoryBudget {
   maxTriangles: number;
   maxMaterials: number;
@@ -102,6 +107,7 @@ export interface PropShadowSettings {
 export interface CustomPropsSettings {
   enabled: boolean;
   props: PropAssetDef[];
+  externalCatalogs: PropExternalCatalogRef[];
   spatial: PropSpatialSettings;
   culling: PropCullingSettings;
   shadows: PropShadowSettings;
