@@ -1,5 +1,6 @@
+import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { computeFarTerrainVertexColors, createVertexColorBuffer } from "./farTerrainMaterial.js";
+import { computeFarTerrainVertexColors, createFarTerrainMaterial, createVertexColorBuffer } from "./farTerrainMaterial.js";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
 
 function makeUniformData(overrides: Partial<FarTerrainUniformData> = {}): FarTerrainUniformData {
@@ -67,6 +68,20 @@ function makeNormals(count: number): Float32Array {
   }
   return n;
 }
+
+describe("createFarTerrainMaterial", () => {
+  it("enables vertex colors for far shell parity shading", () => {
+    const material = createFarTerrainMaterial({
+      sunDirection: new THREE.Vector3(0, 1, 0),
+      sunColor: new THREE.Color(1, 1, 1),
+      skyLight: new THREE.Color(1, 1, 1),
+      groundLight: new THREE.Color(0.2, 0.2, 0.2),
+    }, makeUniformData(), 0, 0, 1024);
+
+    expect(material.vertexColors).toBe(true);
+    material.dispose();
+  });
+});
 
 describe("computeFarTerrainVertexColors", () => {
   it("returns valid output for a simple grid", () => {
