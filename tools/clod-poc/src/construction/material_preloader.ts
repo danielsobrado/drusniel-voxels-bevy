@@ -18,6 +18,7 @@ interface PreloadResult {
 let preloadWorker: Worker | null | undefined;
 let workerErrorCount = 0;
 const requestedUrls = new Set<string>();
+const fallbackImages = new Set<HTMLImageElement>();
 
 function materialPbrUrls(material: ConstructionMaterial): string[] {
   const asset = CONSTRUCTION_MATERIAL_ASSETS[material];
@@ -38,6 +39,9 @@ function browserPreload(urls: readonly string[]): void {
     const image = new Image();
     image.decoding = "async";
     image.loading = "eager";
+    image.onload = () => fallbackImages.delete(image);
+    image.onerror = () => fallbackImages.delete(image);
+    fallbackImages.add(image);
     image.src = url;
   }
 }
