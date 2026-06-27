@@ -83,7 +83,7 @@ export class ClodWorkerClient {
   constructor() {
     attachMainThreadCacheBroker(this.worker);
     this.worker.onmessage = (event: MessageEvent) => {
-      if (isCacheRpcMessage(event.data)) return;
+      if (this.stopped || isCacheRpcMessage(event.data)) return;
       try {
         this.handleMessage(event.data as ClodWorkerResponse);
       } catch (error) {
@@ -171,6 +171,7 @@ export class ClodWorkerClient {
   }
 
   dispose(): void {
+    if (this.stopped) return;
     this.stopped = true;
     this.worker.terminate();
     this.rejectAll(new Error("CLOD worker disposed"));
@@ -344,6 +345,7 @@ export class ClodWorkerClient {
   }
 
   private failClosed(error: unknown): void {
+    if (this.stopped) return;
     const err = error instanceof Error ? error : new Error(String(error));
     this.stopped = true;
     this.worker.terminate();
