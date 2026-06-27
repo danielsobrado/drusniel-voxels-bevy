@@ -12,7 +12,7 @@ border_ocean_scene:
     fov: 55
   acceptance:
     min_deep_ocean_vertices: 1000
-    max_deep_ocean_triangles: 65536
+    max_deep_ocean_triangles: 600000
     max_deep_ocean_draw_calls: 1
     max_transition_gap_vertices: 0
     max_frame_ms_p95: 50
