@@ -299,7 +299,7 @@ export function parseNaadfPocConfig(yamlText: string): NaadfPocConfig {
       endM: requireNumber(shellRaw["end_m"], "far_shell.end_m", 0),
       gridRes: requireNumber(shellRaw["grid_res"], "far_shell.grid_res", 1),
       useNaadfSummary: requireBool(shellRaw["use_naadf_summary"], "far_shell.use_naadf_summary"),
-      heightSamplingMode: requireFarShellHeightMode(shellRaw["height_sampling_mode"] ?? "gpu", "far_shell.height_sampling_mode"),
+      heightSamplingMode: requireFarShellHeightMode(shellRaw["height_sampling_mode"] ?? "cpu", "far_shell.height_sampling_mode"),
     },
     debug: {
       enabled: requireBool(debugRaw["enabled"], "debug.enabled"),
