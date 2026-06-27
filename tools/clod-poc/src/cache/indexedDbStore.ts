@@ -7,6 +7,8 @@ import { WorkerRemotePersistentStore } from "./workerRemotePersistentStore.js";
 const DB_VERSION = 2;
 const RECREATE_DELAY_MS = 150;
 const MAX_IDB_RECOVERY_ATTEMPTS = 3;
+const PAGE_CACHE_DB_SUFFIX = "pages-v2";
+const SUMMARY_CACHE_DB_SUFFIX = "summary-v2";
 
 /** IndexedDB-safe record: Uint8Array clones reliably in workers. */
 interface IdbStoredRecord {
@@ -308,7 +310,7 @@ export function resolveBrokerPersistentConfig(
   return {
     ...config,
     enabled: config.enabled,
-    database_name: `${config.database_name}-pages-v2`,
+    database_name: `${config.database_name}-${PAGE_CACHE_DB_SUFFIX}`,
   };
 }
 
@@ -317,7 +319,11 @@ export function resolvePersistentConfig(
   role: CachePersistenceRole,
 ): ClodCachePersistentConfig {
   if (role === "main") {
-    return { ...config, enabled: false };
+    return {
+      ...config,
+      enabled: config.enabled,
+      database_name: `${config.database_name}-${SUMMARY_CACHE_DB_SUFFIX}`,
+    };
   }
   // Worker never opens IndexedDB locally; persistence is brokered on the main thread.
   return { ...config, enabled: false };
