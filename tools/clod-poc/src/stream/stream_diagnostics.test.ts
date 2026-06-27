@@ -71,4 +71,21 @@ describe("stream diagnostics", () => {
     expect(snapshot.visualPages.required.length).toBeGreaterThan(0);
     expect(tracker.format(snapshot)).toContain("far-shell>=2048m");
   });
+
+  it("returns the latest snapshot without updating the center", () => {
+    const tracker = createStreamDiagnosticTracker({
+      cfg,
+      maxTerrainLevel: 3,
+      phase0Config,
+      phase0TargetVisibleM: 4096,
+      queryScene: "infinite-stream-straight",
+    });
+
+    const updated = tracker.update({ x: 128, z: 256 });
+    const snapshot = tracker.snapshot();
+
+    expect(snapshot.center).toEqual({ x: 128, z: 256 });
+    expect(snapshot.live.required).toEqual(updated.live.required);
+    expect(snapshot.visualPages.required).toEqual(updated.visualPages.required);
+  });
 });
