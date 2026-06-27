@@ -44,7 +44,7 @@ category_budgets:
   interactive:
     max_triangles: 16000
     max_materials: 6
-    max_drawParts: 10
+    max_draw_parts: 10
     max_texture_px: 2048
 
 debug:
