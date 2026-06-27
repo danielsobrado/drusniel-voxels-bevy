@@ -145,18 +145,6 @@ export function buildFarTerrainShell(
     }
   }
 
-  const quadRadiusBounds = (x0: number, z0: number, x1: number, z1: number): { min: number; max: number } => {
-    const wx0 = buildRelative ? x0 + centerX : x0;
-    const wz0 = buildRelative ? z0 + centerZ : z0;
-    const wx1 = buildRelative ? x1 + centerX : x1;
-    const wz1 = buildRelative ? z1 + centerZ : z1;
-    const d00 = Math.hypot(wx0 - centerX, wz0 - centerZ);
-    const d10 = Math.hypot(wx1 - centerX, wz0 - centerZ);
-    const d01 = Math.hypot(wx0 - centerX, wz1 - centerZ);
-    const d11 = Math.hypot(wx1 - centerX, wz1 - centerZ);
-    return { min: Math.min(d00, d10, d01, d11), max: Math.max(d00, d10, d01, d11) };
-  };
-
   const innerMin = inset;
   const innerMax = worldSize - inset;
   const dist = (x: number, z: number) => {
