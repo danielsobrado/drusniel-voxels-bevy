@@ -4,6 +4,9 @@ import { SNAP_GROUPS, type ConstructionCategory, type ConstructionConfig, type C
 
 const CONSTRUCTION_CATEGORIES: readonly ConstructionCategory[] = ["floor", "wall", "fence", "pillar", "roof", "generic"];
 const CONSTRUCTION_MATERIALS: readonly ConstructionMaterial[] = ["wood", "stone", "metal", "thatch"];
+const MIN_DIMENSION_M = 0.01;
+const ZERO_LENGTH_EPSILON = 0.000001;
+const DEFAULT_SNAP_DIRECTION: readonly [number, number, number] = [0, 1, 0];
 
 const DEFAULT_CONFIG: ConstructionConfig = {
   enabled: true,
@@ -70,6 +73,18 @@ function readVec3(record: Record<string, unknown> | undefined, key: string, fall
   return parsed.every(Number.isFinite) ? [parsed[0], parsed[1], parsed[2]] : [...fallback];
 }
 
+function readPositiveVec3(record: Record<string, unknown> | undefined, key: string, fallback: readonly [number, number, number]): [number, number, number] {
+  const value = readVec3(record, key, fallback);
+  return value.every((entry) => entry >= MIN_DIMENSION_M) ? value : [...fallback];
+}
+
+function readDirectionVec3(record: Record<string, unknown> | undefined, key: string, fallback: readonly [number, number, number]): [number, number, number] {
+  const value = readVec3(record, key, fallback);
+  const length = Math.hypot(value[0], value[1], value[2]);
+  if (length <= ZERO_LENGTH_EPSILON) return [...fallback];
+  return [value[0] / length, value[1] / length, value[2] / length];
+}
+
 function asSnapGroup(value: unknown, fallback: SnapGroup): SnapGroup {
   if (typeof value !== "string") return fallback;
   const normalized = value.trim().toLowerCase().replaceAll("_", "-");
@@ -111,7 +126,7 @@ function parseSnapPoint(value: unknown): ConstructionSnapPoint | null {
   return {
     id,
     localPos: readVec3(record, "local_pos", [0, 0, 0]),
-    direction: readVec3(record, "direction", [0, 1, 0]),
+    direction: readDirectionVec3(record, "direction", DEFAULT_SNAP_DIRECTION),
     group,
     accepts: readSnapGroups(record.accepts),
   };
@@ -129,7 +144,7 @@ function parsePiece(value: unknown): ConstructionPieceDef | null {
     id,
     label: readString(record, "label", id),
     category: asCategory(readString(record, "category", "generic")),
-    dimensionsM: readVec3(record, "dimensions_m", [1, 1, 1]),
+    dimensionsM: readPositiveVec3(record, "dimensions_m", [1, 1, 1]),
     canGround: readBool(record, "can_ground", false),
     material: asMaterial(readString(record, "material", "wood")),
     snapPoints,
