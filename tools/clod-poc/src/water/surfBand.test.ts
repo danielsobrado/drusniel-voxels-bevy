@@ -29,6 +29,21 @@ describe("SurfBand", () => {
     band.dispose();
   });
 
+  it("uses a border ring instead of a full-world sheet", () => {
+    const cellSizeM = 128;
+    const band = new SurfBand({ config, seed: 9, cellSizeM, verticalOffsetM: 0.08 });
+    const maxWidth = Math.max(
+      config.surf.beach_foam_width_m,
+      config.surf.cliff_foam_width_m,
+      config.surf.reef_foam_width_m,
+    );
+    const fullWidth = config.world.bounds.max_x - config.world.bounds.min_x + maxWidth * 2;
+    const fullDepth = config.world.bounds.max_z - config.world.bounds.min_z + maxWidth * 2;
+    const fullSheetTriangles = Math.ceil(fullWidth / cellSizeM) * Math.ceil(fullDepth / cellSizeM) * 2;
+    expect(band.stats().triangles).toBeLessThan(fullSheetTriangles * 0.35);
+    band.dispose();
+  });
+
   it("is rejected by strict CLOD page-source filtering", () => {
     const band = new SurfBand({
       config,
