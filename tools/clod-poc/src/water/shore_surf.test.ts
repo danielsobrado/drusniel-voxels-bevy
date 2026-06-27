@@ -34,6 +34,18 @@ describe("shore surf boundary", () => {
     field.setClipmapExclusionBand({ enabled: true, distance: 32 });
     expect(field.sample(8, 128).bodyMask).toBe(0);
   });
+
+  it("keeps fake-body water dry outside the playable world", () => {
+    const cfg = cloneWaterConfig();
+    cfg.source = "fake_bodies";
+    cfg.fakeBodies.lakes = [{ center: [-8, 128], radius: [32, 32], levelOffset: 4 }];
+    cfg.fakeBodies.rivers = [];
+    const field = new WaterField(cfg, { surfaceHeight: () => 17 }, null, 256);
+
+    const outside = field.sample(-8, 128);
+    expect(outside.bodyMask).toBe(0);
+    expect(outside.depth).toBeLessThanOrEqual(0);
+  });
 });
 
 describe("deep ocean sampler boundary", () => {
