@@ -1,22 +1,40 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { shellGridForTriangleBudget, shouldRebuildCanopyShell } from "./canopy_system.js";
+import {
+  canopyTextureConfigKey,
+  shellCenterForTextureSet,
+  shellGridForTriangleBudget,
+  shouldRebuildCanopyShell,
+  treeDistributionConfigKey,
+} from "./canopy_system.js";
 import type { CanopyTextureSet } from "./canopy_types.js";
+import { DEFAULT_CANOPY_SHELL_CONFIG } from "./canopy_defaults.js";
+import type { CanopyShellConfig } from "./canopy_types_internal.js";
 
-function mockTextureSet(revision: number, syntheticFallback = false): CanopyTextureSet {
+function mockTextureSet(
+  revision: number,
+  syntheticFallback = false,
+  originX = 0,
+  originZ = 0,
+  extentM = 1024,
+): CanopyTextureSet {
   const data = new Float32Array(4);
   return {
     heightTexture: new THREE.DataTexture(data, 2, 2, THREE.RedFormat, THREE.FloatType),
     coverageTexture: new THREE.DataTexture(data, 2, 2, THREE.RedFormat, THREE.FloatType),
     speciesTexture: new THREE.DataTexture(data, 2, 2, THREE.RGBFormat, THREE.FloatType),
     roughnessTexture: new THREE.DataTexture(data, 2, 2, THREE.RedFormat, THREE.FloatType),
-    originX: 0,
-    originZ: 0,
-    extentM: 1024,
+    originX,
+    originZ,
+    extentM,
     resolution: 2,
     syntheticFallback,
     revision,
   };
+}
+
+function cloneConfig(): CanopyShellConfig {
+  return structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
 }
 
 describe("shellGridForTriangleBudget", () => {
@@ -24,6 +42,49 @@ describe("shellGridForTriangleBudget", () => {
     expect(shellGridForTriangleBudget(250000)).toBe(192);
     expect(shellGridForTriangleBudget(8000)).toBe(63);
     expect(shellGridForTriangleBudget(512)).toBe(16);
+  });
+});
+
+describe("canopy config invalidation keys", () => {
+  it("changes the tree-distribution key when seed changes", () => {
+    const a = cloneConfig();
+    const b = cloneConfig();
+    b.seed += 1;
+
+    expect(treeDistributionConfigKey(a)).not.toBe(treeDistributionConfigKey(b));
+  });
+
+  it("changes the tree-distribution key when tree rules change", () => {
+    const a = cloneConfig();
+    const b = cloneConfig();
+    b.treeDistribution.forestThreshold += 0.1;
+
+    expect(treeDistributionConfigKey(a)).not.toBe(treeDistributionConfigKey(b));
+  });
+
+  it("changes the texture key when shell distance changes", () => {
+    const a = cloneConfig();
+    const b = cloneConfig();
+    b.distances.shellEndM *= 2;
+
+    expect(canopyTextureConfigKey(a)).not.toBe(canopyTextureConfigKey(b));
+  });
+
+  it("changes the texture key when material/debug texture inputs change", () => {
+    const a = cloneConfig();
+    const b = cloneConfig();
+    b.material.coverageAlphaPower = 0.5;
+    b.debug.showCoverageHeatmap = true;
+
+    expect(canopyTextureConfigKey(a)).not.toBe(canopyTextureConfigKey(b));
+  });
+});
+
+describe("shellCenterForTextureSet", () => {
+  it("keeps shell placement coupled to texture origin", () => {
+    const set = mockTextureSet(1, false, 100, 200, 800);
+
+    expect(shellCenterForTextureSet(set)).toEqual({ x: 500, z: 600 });
   });
 });
 
