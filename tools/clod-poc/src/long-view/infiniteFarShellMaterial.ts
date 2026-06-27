@@ -5,6 +5,10 @@ import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 
 type TslNode = any;
 
+interface FarShellMaterialUniformRefs {
+  uDebugFallback: ReturnType<typeof uniform>;
+}
+
 export interface InfiniteFarShellMaterialOptions {
   lighting: FarShellLighting;
   innerMeters: number;
@@ -33,6 +37,7 @@ export function createInfiniteFarShellMaterial(
   const uOuter = float(outerMeters);
   const uNearBlend = float(nearBlendMeters);
   const uFarFade = float(farFadeMeters);
+  const uDebugFallback = uniform(debugShowMissingFallback ? 1 : 0);
 
   const sun = max(dot(n, uLight), float(0));
   const sky = clamp(n.y.mul(0.5).add(0.5), float(0), float(1));
@@ -43,22 +48,21 @@ export function createInfiniteFarShellMaterial(
   const nearFade = smoothstep(uInner, uInner.add(uNearBlend), distXZ);
   const farFade = float(1).sub(smoothstep(uOuter.sub(uFarFade), uOuter, distXZ));
   const shellFade = nearFade.mul(farFade);
-
   const hazeT = smoothstep(uOuter.mul(0.55), uOuter.mul(0.98), distXZ);
+
+  const base = vec3(0.30, 0.34, 0.22);
+  const normalFaded = mix(uHaze, base.mul(light), shellFade);
+  const normalColor = mix(normalFaded, uHaze, hazeT);
+  const debugColor = vec3(1, 0.3, 0.3);
+  const debugBase = vec3(0.3, 0.34, 0.22);
+  const debugLit = mix(debugBase.mul(light), uHaze, hazeT);
+  const debugOutput = mix(debugLit, debugColor, shellFade.mul(0.5));
 
   const material = new MeshBasicNodeMaterial();
   material.vertexColors = true;
   material.side = THREE.DoubleSide;
-
-  if (debugShowMissingFallback) {
-    const debugColor = vec3(1, 0.3, 0.3);
-    const debugBase = vec3(0.3, 0.34, 0.22);
-    material.colorNode = mix(mix(debugBase.mul(light), uHaze, hazeT), debugColor, shellFade.mul(0.5));
-  } else {
-    const base = vec3(0.30, 0.34, 0.22);
-    const faded = mix(uHaze, base.mul(light), shellFade);
-    material.colorNode = mix(faded, uHaze, hazeT);
-  }
+  material.colorNode = mix(normalColor, debugOutput, uDebugFallback);
+  material.userData.farShellMaterialUniforms = { uDebugFallback } satisfies FarShellMaterialUniformRefs;
 
   return material;
 }
@@ -67,7 +71,9 @@ export function updateFarShellMaterialMaterial(
   material: MeshBasicNodeMaterial,
   options: Partial<InfiniteFarShellMaterialOptions>,
 ): void {
+  const refs = material.userData.farShellMaterialUniforms as FarShellMaterialUniformRefs | undefined;
+  if (!refs) return;
   if (options.debugShowMissingFallback !== undefined) {
-    material.needsUpdate = true;
+    refs.uDebugFallback.value = options.debugShowMissingFallback ? 1 : 0;
   }
 }
