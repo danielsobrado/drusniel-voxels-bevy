@@ -45,12 +45,22 @@ interface SnapPoint {
   source?: string;
 }
 
+interface GltfNode {
+  mesh?: number;
+  children?: number[];
+  matrix?: number[];
+  translation?: number[];
+  rotation?: number[];
+  scale?: number[];
+  name?: string;
+}
+
 interface GltfDocument {
   buffers?: Array<{ uri?: string; byteLength: number }>;
   bufferViews?: Array<{ buffer: number; byteOffset?: number; byteLength: number; byteStride?: number }>;
   accessors?: Array<{ bufferView?: number; byteOffset?: number; componentType: number; count: number; type: AccessorType; normalized?: boolean }>;
   meshes?: Array<{ primitives?: Array<{ attributes?: Record<string, number>; indices?: number; mode?: number; material?: number }> }>;
-  nodes?: Array<{ mesh?: number; children?: number[]; matrix?: number[]; translation?: number[]; rotation?: number[]; scale?: number[]; name?: string }>;
+  nodes?: GltfNode[];
   scenes?: Array<{ nodes?: number[] }>;
   scene?: number;
   materials?: Array<{ name?: string }>;
@@ -140,10 +150,6 @@ function cross(a: Vec3, b: Vec3): Vec3 {
   return vec(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
 }
 
-function dot(a: Vec3, b: Vec3): number {
-  return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
 function length(a: Vec3): number {
   return Math.hypot(a.x, a.y, a.z);
 }
@@ -222,9 +228,7 @@ function transformPoint(m: number[], p: Vec3): Vec3 {
 }
 
 function readCatalog(path: string): CatalogFile {
-  if (!existsSync(path)) {
-    return { schemaVersion: 1, packId: "quaternius-construction", generatedAt: "generated", props: [] };
-  }
+  if (!existsSync(path)) return { schemaVersion: 1, packId: "quaternius-construction", generatedAt: "generated", props: [] };
   const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<CatalogFile>;
   return {
     schemaVersion: 1,
@@ -388,7 +392,7 @@ function readAccessor(model: LoadedGltf, accessorIndex: number): number[][] {
   return rows;
 }
 
-function nodeMatrix(node: GltfDocument["nodes"] extends Array<infer N> ? N : never): number[] {
+function nodeMatrix(node: GltfNode): number[] {
   if (Array.isArray(node.matrix) && node.matrix.length === 16) return [...node.matrix];
   return mat4FromTrs(node.translation, node.rotation, node.scale);
 }
@@ -423,9 +427,7 @@ function collectSamples(model: LoadedGltf): { samples: TriangleSample[]; bounds:
         bounds.max.y = Math.max(bounds.max.y, position.y);
         bounds.max.z = Math.max(bounds.max.z, position.z);
       }
-      const indices = primitive.indices !== undefined
-        ? readAccessor(model, primitive.indices).map((row) => row[0])
-        : positions.map((_, index) => index);
+      const indices = primitive.indices !== undefined ? readAccessor(model, primitive.indices).map((row) => row[0]) : positions.map((_, index) => index);
       const materialName = primitive.material !== undefined ? document.materials?.[primitive.material]?.name ?? "" : "";
       const sampleLabel = `${label}/${materialName}`.toLowerCase();
       for (let i = 0; i + 2 < indices.length; i += 3) {
@@ -436,12 +438,7 @@ function collectSamples(model: LoadedGltf): { samples: TriangleSample[]; bounds:
         const normalRaw = cross(sub(b, a), sub(c, a));
         const area = length(normalRaw) * 0.5;
         if (area <= 0.000001) continue;
-        samples.push({
-          centroid: mul(add(add(a, b), c), 1 / 3),
-          normal: normalize(normalRaw),
-          area,
-          label: sampleLabel,
-        });
+        samples.push({ centroid: mul(add(add(a, b), c), 1 / 3), normal: normalize(normalRaw), area, label: sampleLabel });
       }
     }
   }
@@ -473,24 +470,14 @@ function planeBucket(sample: TriangleSample): { id: string; group: SnapGroup; di
     const direction = cardinalDirection(n);
     return { id: `side-${directionKey(direction)}`, group: "prop-side", direction, source: "mesh-plane" };
   }
-  if (n.y >= ROOF_Y_MIN && n.y <= ROOF_Y_MAX && sample.label.includes("roof")) {
-    return { id: `roof-${directionKey(n)}`, group: "prop-roof", direction: normalize(n), source: "mesh-name-hint" };
-  }
+  if (n.y >= ROOF_Y_MIN && n.y <= ROOF_Y_MAX && sample.label.includes("roof")) return { id: `roof-${directionKey(n)}`, group: "prop-roof", direction: normalize(n), source: "mesh-name-hint" };
   return null;
 }
 
 function addPlane(accumulators: Map<string, PlaneAccumulator>, bucket: ReturnType<typeof planeBucket>, sample: TriangleSample): void {
   if (!bucket) return;
   const key = bucket.id;
-  const existing = accumulators.get(key) ?? {
-    id: key,
-    group: bucket.group,
-    direction: bucket.direction,
-    weightedCentroid: vec(),
-    area: 0,
-    sampleCount: 0,
-    source: bucket.source,
-  };
+  const existing = accumulators.get(key) ?? { id: key, group: bucket.group, direction: bucket.direction, weightedCentroid: vec(), area: 0, sampleCount: 0, source: bucket.source };
   existing.weightedCentroid = add(existing.weightedCentroid, mul(sample.centroid, sample.area));
   existing.area += sample.area;
   existing.sampleCount += 1;
@@ -537,9 +524,8 @@ function boundsFallback(bounds: Bounds): SnapPoint[] {
 function completeWithBounds(snaps: SnapPoint[], bounds: Bounds): SnapPoint[] {
   const byId = new Map(snaps.map((snap) => [snap.id, snap]));
   for (const fallback of boundsFallback(bounds)) {
-    if (!byId.has(fallback.id) && !snaps.some((snap) => snap.group === fallback.group && snap.direction.join(",") === fallback.direction.join(","))) {
-      byId.set(fallback.id, fallback);
-    }
+    const duplicate = snaps.some((snap) => snap.group === fallback.group && snap.direction.join(",") === fallback.direction.join(","));
+    if (!byId.has(fallback.id) && !duplicate) byId.set(fallback.id, fallback);
   }
   return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
@@ -552,9 +538,7 @@ function generateSnapPoints(modelPath: string): SnapPoint[] {
   const minArea = Math.max(MIN_PLANE_AREA_ABS, totalArea * MIN_PLANE_AREA_RATIO);
   const planes = new Map<string, PlaneAccumulator>();
   for (const sample of samples) addPlane(planes, planeBucket(sample), sample);
-  const planeSnaps = [...planes.values()]
-    .filter((acc) => acc.area >= minArea)
-    .map((acc) => snapFromAccumulator(acc, totalArea));
+  const planeSnaps = [...planes.values()].filter((acc) => acc.area >= minArea).map((acc) => snapFromAccumulator(acc, totalArea));
   return completeWithBounds(planeSnaps, bounds);
 }
 
