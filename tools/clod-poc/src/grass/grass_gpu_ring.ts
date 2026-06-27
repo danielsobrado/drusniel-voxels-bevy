@@ -50,13 +50,7 @@ export interface GrassGpuTierDrawResources {
 
 export type GrassGpuSharedDrawAttributes = Omit<GrassGpuTierDrawResources, "mesh">;
 
-/**
- * GPU-ring per-instance storage buffers handed to the node material. They hold 4*maxInstancesPerTier
- * vec4 and must be read as storage (storage().element), never via attribute() - that exceeds the
- * 64KB uniform-binding limit on the indirect-draw path. See grass_node_material.ts.
- */
 export type GrassRingInstanceBuffers = GrassGpuSharedDrawAttributes & {
-  /** vec4 element count of each buffer = sharedInstanceCount = 4 * maxInstancesPerTier */
   capacity: number;
 };
 
@@ -131,19 +125,12 @@ export function generateGrassRingInstances(
   const centerCellX = Math.floor(center.x / cellSize);
   const centerCellZ = Math.floor(center.z / cellSize);
   const cellRadius = Math.ceil(radius / cellSize);
-  const nearDistance = bands.near;
-  const midDistance = bands.mid;
-  const farDistance = bands.far;
   const stats: GrassGenerationStats = {
     generatedCandidates: 0,
     acceptedCandidates: 0,
     edgeSuppressedCandidates: 0,
   };
-  const ranked: {
-    priority: number;
-    tier: GrassTier;
-    instance: GrassBladeInstance;
-  }[] = [];
+  const ranked: { priority: number; tier: GrassTier; instance: GrassBladeInstance }[] = [];
 
   for (let dz = -cellRadius; dz <= cellRadius; dz++) {
     for (let dx = -cellRadius; dx <= cellRadius; dx++) {
@@ -184,33 +171,30 @@ export function generateGrassRingInstances(
         1 + randomSigned(cellX, cellZ, settings.seed + 1501) * settings.bladeHeightVariation,
       );
       const widthScale = THREE.MathUtils.clamp(1 / Math.sqrt(Math.max(thin, 0.001)), 1, settings.blade.maxWidthCompensation);
-      const windPhase = randomSigned(cellX, cellZ, settings.seed + 1601) * TWO_PI;
-      const tier: GrassTier = distance <= nearDistance
-        ? "near"
-        : distance <= midDistance
-          ? "mid"
-          : distance <= farDistance ? "far" : "super";
+      const tier = grassTierForDistance(distance, bands);
+      const tierHeight = tier === "near" ? 1 : tier === "mid" ? 1.35 : tier === "far" ? 1.75 : 2.25;
       ranked.push({
-        priority: distance + hash2(cellX, cellZ, settings.seed + 1701) * 0.01,
+        priority: hash2(cellX, cellZ, settings.seed + 1601),
         tier,
         instance: {
-          offset: [x, site.height, z],
-          height: settings.bladeHeight * heightScale,
-          rotationY: hash2(cellX, cellZ, settings.seed + 1801) * TWO_PI,
-          phase: windPhase,
-          colorMix: Math.min(1, Math.pow(hash2(cellX, cellZ, settings.seed + 701), 2) + site.wetBank * 0.16 + site.sandWeight * 0.12),
+          offset: [x, site.height + 0.02, z],
+          height: settings.bladeHeight * heightScale * tierHeight,
+          rotationY: hash2(cellX, cellZ, settings.seed + 1709) * TWO_PI,
+          phase: hash2(cellX, cellZ, settings.seed + 1801) * TWO_PI,
+          colorMix: Math.min(1, Math.pow(hash2(cellX, cellZ, settings.seed + 1901), 2) + site.wetBank * 0.16 + site.sandWeight * 0.12),
           edgeFade,
           normalY: site.normalY,
           terrainNormal: site.terrainNormal,
-          widthScale,
+          widthScale: tier === "super" ? Math.min(settings.blade.maxWidthCompensation, widthScale * 1.35) : widthScale,
         },
       });
     }
   }
 
   ranked.sort((a, b) => a.priority - b.priority);
+  const limit = Math.max(0, Math.floor(maxBlades));
   const result: GrassRingTierInstances = { near: [], mid: [], far: [], super: [] };
-  for (const entry of ranked.slice(0, maxBlades)) result[entry.tier].push(entry.instance);
+  for (const entry of ranked.slice(0, limit)) result[entry.tier].push(entry.instance);
   return {
     ...result,
     stats,
@@ -219,4 +203,11 @@ export function generateGrassRingInstances(
     centerCellX,
     centerCellZ,
   };
+}
+
+function grassTierForDistance(distance: number, bands: ReturnType<typeof grassRingBands>): GrassTier {
+  if (distance <= bands.near) return "near";
+  if (distance <= bands.mid) return "mid";
+  if (distance <= bands.far) return "far";
+  return "super";
 }
