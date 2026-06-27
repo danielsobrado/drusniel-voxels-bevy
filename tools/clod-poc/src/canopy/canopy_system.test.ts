@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   canopyTextureConfigKey,
@@ -13,6 +13,17 @@ import type { CanopyTextureSet } from "./canopy_types.js";
 import { DEFAULT_CANOPY_SHELL_CONFIG } from "./canopy_defaults.js";
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 
+const textureSets: CanopyTextureSet[] = [];
+
+afterEach(() => {
+  for (const set of textureSets.splice(0)) {
+    set.heightTexture.dispose();
+    set.coverageTexture.dispose();
+    set.speciesTexture.dispose();
+    set.roughnessTexture.dispose();
+  }
+});
+
 function mockTextureSet(
   revision: number,
   syntheticFallback = false,
@@ -21,7 +32,7 @@ function mockTextureSet(
   extentM = 1024,
 ): CanopyTextureSet {
   const data = new Float32Array(4);
-  return {
+  const set = {
     heightTexture: new THREE.DataTexture(data, 2, 2, THREE.RedFormat, THREE.FloatType),
     coverageTexture: new THREE.DataTexture(data, 2, 2, THREE.RedFormat, THREE.FloatType),
     speciesTexture: new THREE.DataTexture(data, 2, 2, THREE.RGBFormat, THREE.FloatType),
@@ -33,6 +44,8 @@ function mockTextureSet(
     syntheticFallback,
     revision,
   };
+  textureSets.push(set);
+  return set;
 }
 
 function cloneConfig(): CanopyShellConfig {
