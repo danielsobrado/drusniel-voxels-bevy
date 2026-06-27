@@ -1,6 +1,5 @@
 import * as THREE from "three";
-import { clamp, cos, dot, float, max, mix, normalGeometry, normalize, positionGeometry, positionWorld, pow, sin, smoothstep, uniform, vec2, vec3 } from "three/tsl";
-import { vertexColor } from "three/tsl";
+import { clamp, cos, dot, float, max, mix, normalGeometry, normalize, positionGeometry, positionWorld, pow, sin, smoothstep, uniform, vec2, vec3, vertexColor } from "three/tsl";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
 
