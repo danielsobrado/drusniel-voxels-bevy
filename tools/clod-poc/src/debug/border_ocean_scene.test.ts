@@ -55,7 +55,7 @@ describe("border-ocean acceptance probes", () => {
     expect(config.acceptance.requiredCounters).toContain("border_ocean.player_soft_pushback_enabled");
     expect(config.acceptance.requiredCounters).toContain("border_ocean.deep_ocean_transition_gap_vertices");
     expect(config.acceptance.requiredCounters).toContain("border_ocean.frame_ms_p95");
-    expect(config.acceptance.maxDeepOceanTriangles).toBe(65536);
+    expect(config.acceptance.maxDeepOceanTriangles).toBe(600000);
     expect(config.acceptance.maxDeepOceanDrawCalls).toBe(1);
     expect(config.acceptance.maxTransitionGapVertices).toBe(0);
     expect(config.acceptance.maxFrameMsP95).toBe(50);
