@@ -39,6 +39,7 @@ export function createPropController(deps: PropControllerDeps): PropController {
     getHooks: deps.getHooks,
   });
   const colliderSet = new PropColliderSet();
+  let collidersEnabled = deps.settings.enabled;
   let forceColliderSync = true;
   let lastColliderSyncAt = Number.NEGATIVE_INFINITY;
   let lastColliderSyncPos: [number, number, number] | null = null;
@@ -70,6 +71,7 @@ export function createPropController(deps: PropControllerDeps): PropController {
       refreshStats();
     },
     syncColliders(playerPos) {
+      if (!collidersEnabled) return;
       if (!shouldSyncColliders(playerPos)) return;
       const instances = system.buildColliderInstances(playerPos);
       colliderSet.sync(instances);
@@ -79,6 +81,7 @@ export function createPropController(deps: PropControllerDeps): PropController {
       forceColliderSync = false;
     },
     setEnabled(enabled) {
+      collidersEnabled = enabled;
       system.setEnabled(enabled);
       if (!enabled) {
         colliderSet.sync([]);
