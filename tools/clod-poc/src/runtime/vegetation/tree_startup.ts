@@ -56,6 +56,8 @@ function sanitizeRuntimeTreeConfig(config: TreeSettings): TreeSettings {
     },
     impostors: {
       ...config.impostors,
+      enabled: false,
+      bakeOnStart: false,
       fallbackToPlaceholder: false,
     },
   };
