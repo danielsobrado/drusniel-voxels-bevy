@@ -19,6 +19,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   const fireRenderer = new FireFlameRenderer(config.fire.vfx);
   const flameSfx = new FlameSfx();
   let activeReset = 0;
+  let dragOffset: { x: number; y: number } | null = null;
 
   root.replaceChildren();
   root.setAttribute("aria-label", "Spell menu");
@@ -43,6 +44,36 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   slots.appendChild(fireButton);
   root.append(title, slots);
 
+  title.addEventListener("pointerdown", onDragStart);
+
+  function onDragStart(event: PointerEvent): void {
+    if (!(event.target instanceof HTMLElement) || !title.contains(event.target)) return;
+    event.preventDefault();
+    const rect = root.getBoundingClientRect();
+    dragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    root.style.left = `${rect.left}px`;
+    root.style.top = `${rect.top}px`;
+    root.style.transform = "none";
+    root.style.bottom = "auto";
+    root.style.right = "auto";
+    root.classList.add("dragging");
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerup", onDragEnd);
+  }
+
+  function onDragMove(event: PointerEvent): void {
+    if (!dragOffset) return;
+    root.style.left = `${event.clientX - dragOffset.x}px`;
+    root.style.top = `${event.clientY - dragOffset.y}px`;
+  }
+
+  function onDragEnd(): void {
+    dragOffset = null;
+    root.classList.remove("dragging");
+    window.removeEventListener("pointermove", onDragMove);
+    window.removeEventListener("pointerup", onDragEnd);
+  }
+
   function castFire(): void {
     window.clearTimeout(activeReset);
     fireButton.setAttribute("aria-pressed", "true");
@@ -58,6 +89,8 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
     dispose: () => {
       window.clearTimeout(activeReset);
       activeReset = 0;
+      if (dragOffset) onDragEnd();
+      title.removeEventListener("pointerdown", onDragStart);
       root.removeEventListener("pointerdown", stopUiPropagation);
       root.removeEventListener("click", stopUiPropagation);
       fireButton.removeEventListener("click", onFireButtonClick);

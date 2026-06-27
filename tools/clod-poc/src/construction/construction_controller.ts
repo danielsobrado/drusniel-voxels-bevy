@@ -107,6 +107,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private nextEntityId = 1;
   private lastUiStateKey = "";
   private terrainConformHandler: ((request: ConstructionTerrainConformRequest) => void) | null = null;
+  private dragOffset: { x: number; y: number } | null = null;
 
   constructor(private readonly deps: ConstructionControllerDeps) {
     this.config = deps.config ?? defaultConstructionConfig;
@@ -179,6 +180,7 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   dispose(): void {
+    this.dragOffset = null;
     for (const dispose of this.disposers) dispose();
     for (const mesh of this.placedMeshes) {
       mesh.geometry.dispose();
@@ -526,9 +528,10 @@ class ConstructionControllerImpl implements ConstructionController {
     menu.id = MENU_ID;
     menu.setAttribute("aria-label", "Build menu");
     Object.assign(menu.style, {
-      position: "absolute",
-      right: "8px",
-      bottom: "8px",
+      position: "fixed",
+      left: "50%",
+      bottom: "80px",
+      transform: "translateX(-50%)",
       zIndex: "13",
       display: "none",
       width: "min(360px, calc(100vw - 16px))",
@@ -541,6 +544,7 @@ class ConstructionControllerImpl implements ConstructionController {
       font: "11px/1.3 system-ui, -apple-system, Segoe UI, sans-serif",
       backdropFilter: "blur(3px)",
       userSelect: "none",
+      touchAction: "none",
     });
     const onClick = (event: MouseEvent) => {
       const target = event.target instanceof HTMLElement
@@ -552,8 +556,40 @@ class ConstructionControllerImpl implements ConstructionController {
       this.selectedIndex = index;
       this.syncUi(true);
     };
+    const onPointerDown = (event: PointerEvent) => {
+      const handle = event.target instanceof HTMLElement
+        ? event.target.closest<HTMLElement>("[data-drag-handle]")
+        : null;
+      if (!handle) return;
+      event.preventDefault();
+      const rect = menu.getBoundingClientRect();
+      this.dragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      menu.style.left = `${rect.left}px`;
+      menu.style.top = `${rect.top}px`;
+      menu.style.transform = "none";
+      menu.style.bottom = "auto";
+      menu.style.right = "auto";
+      menu.style.cursor = "grabbing";
+      const onMove = (e: PointerEvent) => {
+        if (!this.dragOffset) return;
+        menu.style.left = `${e.clientX - this.dragOffset.x}px`;
+        menu.style.top = `${e.clientY - this.dragOffset.y}px`;
+      };
+      const onUp = () => {
+        this.dragOffset = null;
+        menu.style.cursor = "";
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    };
     menu.addEventListener("click", onClick);
-    this.disposers.push(() => menu.removeEventListener("click", onClick));
+    menu.addEventListener("pointerdown", onPointerDown);
+    this.disposers.push(
+      () => menu.removeEventListener("click", onClick),
+      () => menu.removeEventListener("pointerdown", onPointerDown),
+    );
     document.body.appendChild(menu);
     return menu;
   }
@@ -586,7 +622,7 @@ class ConstructionControllerImpl implements ConstructionController {
       return `<button type="button" data-piece-index="${index}" aria-pressed="${selectedAttr}" style="padding:6px 7px;border:1px solid #46515e;border-radius:3px;color:#dce5ee;background:${selectedAttr === "true" ? "#245781" : "#20262d"};cursor:pointer;font:inherit;">${index + 1}. ${escapeHtml(piece.label)}</button>`;
     }).join("");
     this.menu.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+      <div data-drag-handle style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;cursor:grab;">
         <strong>Build</strong>
         <span style="color:#9fb0c0;">B close · R rotate · X snap</span>
       </div>

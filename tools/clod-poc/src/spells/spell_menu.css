@@ -1,12 +1,13 @@
 #spell-menu {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
+  position: fixed;
+  left: 50%;
+  bottom: 80px;
   z-index: 13;
   display: none;
   align-items: center;
   gap: 7px;
   padding: 7px 9px;
+  transform: translateX(-50%);
   color: #e8ddbd;
   background: var(--clod-panel-bg);
   border: 2px solid var(--clod-border);
@@ -18,6 +19,7 @@
     inset 0 0 22px rgba(0, 0, 0, 0.24);
   font: 12px/1.25 var(--clod-ui-font, Arial, Helvetica, sans-serif);
   user-select: none;
+  touch-action: none;
 }
 
 #spell-menu.visible {
@@ -26,6 +28,10 @@
 
 body[data-player-mode="choosingSpawn"] #spell-menu.visible {
   display: flex !important;
+}
+
+#spell-menu.dragging {
+  transition: none;
 }
 
 .spell-menu-hidden {
@@ -37,6 +43,14 @@ body[data-player-mode="choosingSpawn"] #spell-menu.visible {
   font-family: var(--clod-title-font, Georgia, serif);
   letter-spacing: 0.035em;
   text-shadow: 1px 1px 2px #000;
+  cursor: grab;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 3px;
+}
+
+.spell-menu-title:active {
+  cursor: grabbing;
 }
 
 .spell-menu-slots {
@@ -121,8 +135,7 @@ body[data-player-mode="choosingSpawn"] #spell-menu.visible {
 
 @media (max-width: 760px) {
   #spell-menu {
-    right: 8px;
-    bottom: 8px;
+    bottom: 76px;
     max-width: calc(100vw - 16px);
   }
 
