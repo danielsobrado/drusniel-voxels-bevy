@@ -66,8 +66,9 @@ terrain:
 `, null);
 
     expect(cfg.cellSizeM).toBe(0.1);
-    expect(cfg.slopeRepose).toBe(1);
+    expect(cfg.slopeRepose).toBeCloseTo(0.999);
     expect(cfg.slopeReposeStart).toBeGreaterThan(cfg.slopeRepose);
+    expect(cfg.slopeReposeStart).toBeLessThanOrEqual(1);
     expect(cfg.classes.large.radiusMin).toBeGreaterThan(0);
     expect(cfg.classes.large.radiusMax).toBeGreaterThanOrEqual(cfg.classes.large.radiusMin);
     expect(cfg.classes.large.variants).toBe(1);
