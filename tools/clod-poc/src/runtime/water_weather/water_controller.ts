@@ -81,6 +81,13 @@ function readPositiveParam(searchParams: URLSearchParams, key: string, fallback:
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function readNonNegativeParam(searchParams: URLSearchParams, key: string, fallback: number): number {
+  const raw = searchParams.get(key);
+  if (raw === null) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function readShoreSurfSettings(
   searchParams: URLSearchParams,
   borderCoast?: BorderCoastOceanConfig,
@@ -106,7 +113,7 @@ function readShoreSurfSettings(
       "shoreSurfStart",
       fromBorder.startDistance ?? DEFAULT_SHORE_SURF_BAND_SETTINGS.startDistance,
     ),
-    fullSurfDistance: readPositiveParam(
+    fullSurfDistance: readNonNegativeParam(
       searchParams,
       "shoreSurfFull",
       fromBorder.fullSurfDistance ?? DEFAULT_SHORE_SURF_BAND_SETTINGS.fullSurfDistance,
