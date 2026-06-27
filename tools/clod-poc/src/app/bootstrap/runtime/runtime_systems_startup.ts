@@ -36,7 +36,8 @@ import { resolvePropPlacementScene } from "../../../props/prop_placements.js";
 import type { CustomPropsSettings, PropPlacementScene } from "../../../props/prop_types.js";
 import { createConstructionController, defaultConstructionConfig, type ConstructionController } from "../../../construction/index.js";
 import type { VoxelProjectArchiveContents } from "../../../project/voxel_project_archive.js";
-import { projectPropsToPropPlacementScene } from "../../../project/project_props.js";
+import { propPlacementSceneToProjectProps } from "../../../project/project_props.js";
+import { projectPropEditStore } from "../../../project/prop_edit_store.js";
 
 export type { VegetationStatControllerRefs } from "../../../runtime/vegetation/vegetation_types.js";
 
@@ -246,14 +247,17 @@ export async function runRuntimeSystemsStartup(
   let customProps: CustomPropsStartupResult | null = null;
   if (customPropsEnabled) {
     try {
-      const placementScene = hasImportedProps
-        ? projectPropsToPropPlacementScene(importedProps, "archive")
-        : resolvePropPlacementScene(searchParams, propPlacementScenes, propPlacementScenes.smoke!);
+      if (hasImportedProps) {
+        projectPropEditStore.restore(importedProps);
+      } else {
+        const scenePreset = resolvePropPlacementScene(searchParams, propPlacementScenes, propPlacementScenes.smoke!);
+        projectPropEditStore.restore(propPlacementSceneToProjectProps(scenePreset));
+      }
       customProps = await runCustomPropsStartup({
         scene,
         camera,
         customPropsConfig,
-        placementScene,
+        placementScene: projectPropEditStore.toPlacementScene(hasImportedProps ? "archive" : "active"),
         enabled: true,
         searchParams,
         getHooks,
@@ -261,6 +265,8 @@ export async function runRuntimeSystemsStartup(
     } catch (error) {
       console.error("[custom-props] failed to initialize", error);
     }
+  } else {
+    projectPropEditStore.clear();
   }
 
   let constructionController: ConstructionController | null = null;
