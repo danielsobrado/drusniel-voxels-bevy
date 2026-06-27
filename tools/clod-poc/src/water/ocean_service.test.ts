@@ -21,11 +21,13 @@ describe("createDeepOceanSampler", () => {
     expect(Math.hypot(current[0], current[2])).toBeGreaterThan(0);
   });
 
-  it("does not report gameplay water from the dry playable core", () => {
+  it("does not report gameplay water from the playable world or coast band", () => {
     const worldCells = 256;
     const sampler = createDeepOceanSampler(worldCells, DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean, 48);
 
     expect(sampler.isInPlayableOcean(worldCells * 0.5, worldCells * 0.5)).toBe(false);
+    expect(sampler.isInPlayableOcean(8, worldCells * 0.5)).toBe(false);
+    expect(sampler.isInPlayableOcean(worldCells - 8, worldCells * 0.5)).toBe(false);
     expect(Number.isNaN(sampler.sampleOceanHeight(worldCells * 0.5, worldCells * 0.5, 0))).toBe(true);
     expect(sampler.sampleOceanNormal(worldCells * 0.5, worldCells * 0.5, 0)).toEqual([0, 1, 0]);
     expect(sampler.sampleOceanCurrent(worldCells * 0.5, worldCells * 0.5, 0)).toEqual([0, 0, 0]);
