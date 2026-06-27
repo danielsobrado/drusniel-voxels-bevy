@@ -12,6 +12,7 @@ import {
   type GrassSettings,
   type GrassTier,
 } from "./grass_config.js";
+import { grassHeightDensityVector, grassMaterialDensityVector } from "./grass_material_bias.js";
 import type { GrassBladeInstance } from "./grass_cpu_patch.js";
 import { edgeFadeForCandidate } from "./grass_cpu_patch.js";
 import type { GrassGenerationStats } from "./grass_stats.js";
@@ -93,6 +94,8 @@ export function grassGpuRingStableKey(settings: GrassSettings, worldCells: numbe
     settings.ring.farDistanceFraction,
     settings.ring.bandMeters,
     settings.ring.scruffMeters,
+    ...grassMaterialDensityVector(settings),
+    ...grassHeightDensityVector(settings),
   ].join("|");
 }
 
