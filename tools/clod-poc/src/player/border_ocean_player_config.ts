@@ -18,35 +18,52 @@ const DEFAULT_GAMEPLAY_CONFIG: BorderOceanGameplayConfig = {
   pushbackStrength: DEFAULT_PLAYER_CONFIG.worldEdgePushbackAcceleration,
 };
 
+const CONFIG_NAME = "Border ocean gameplay config";
+
 type YamlRecord = Record<string, unknown>;
 
 function record(value: unknown): YamlRecord | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as YamlRecord : null;
 }
 
-function readNumber(value: unknown, fallback: number, min = 0): number {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.max(min, value)
-    : fallback;
+function readPresentBoolean(recordValue: YamlRecord, snakeKey: string, camelKey: string): boolean {
+  const value = recordValue[snakeKey] ?? recordValue[camelKey];
+  if (typeof value !== "boolean") {
+    throw new Error(`${CONFIG_NAME}: ${snakeKey} must be boolean`);
+  }
+  return value;
 }
 
-function readBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
+function readPresentNumber(recordValue: YamlRecord, snakeKey: string, camelKey: string): number {
+  const value = recordValue[snakeKey] ?? recordValue[camelKey];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${CONFIG_NAME}: ${snakeKey} must be a finite number`);
+  }
+  if (value < 0) {
+    throw new Error(`${CONFIG_NAME}: ${snakeKey} must be >= 0`);
+  }
+  return value;
 }
 
 export function validateBorderOceanGameplayConfig(config: BorderOceanGameplayConfig): void {
-  if (config.worldEdgeMarginM <= 0) {
-    throw new Error("Border ocean gameplay config: worldEdgeMarginM must be > 0");
+  if (!Number.isFinite(config.worldEdgeMarginM) || config.worldEdgeMarginM <= 0) {
+    throw new Error(`${CONFIG_NAME}: worldEdgeMarginM must be a finite number > 0`);
+  }
+  if (!Number.isFinite(config.pushbackStartInsideWorldM) || config.pushbackStartInsideWorldM < 0) {
+    throw new Error(`${CONFIG_NAME}: pushbackStartInsideWorldM must be a finite number >= 0`);
+  }
+  if (!Number.isFinite(config.pushbackStrength) || config.pushbackStrength < 0) {
+    throw new Error(`${CONFIG_NAME}: pushbackStrength must be a finite number >= 0`);
   }
   if (!config.softPushbackEnabled) return;
   if (config.pushbackStartInsideWorldM <= 0) {
     throw new Error(
-      "Border ocean gameplay config: pushbackStartInsideWorldM must be > 0 when soft pushback is enabled",
+      `${CONFIG_NAME}: pushbackStartInsideWorldM must be > 0 when soft pushback is enabled`,
     );
   }
   if (config.pushbackStrength <= 0) {
     throw new Error(
-      "Border ocean gameplay config: pushbackStrength must be > 0 when soft pushback is enabled",
+      `${CONFIG_NAME}: pushbackStrength must be > 0 when soft pushback is enabled`,
     );
   }
 }
@@ -57,22 +74,14 @@ export function parseBorderOceanGameplayConfig(text: string): BorderOceanGamepla
   if (!gameplay) return { ...DEFAULT_GAMEPLAY_CONFIG };
 
   const config = {
-    softPushbackEnabled: readBoolean(
-      gameplay.soft_pushback_enabled ?? gameplay.softPushbackEnabled,
-      DEFAULT_GAMEPLAY_CONFIG.softPushbackEnabled,
+    softPushbackEnabled: readPresentBoolean(gameplay, "soft_pushback_enabled", "softPushbackEnabled"),
+    worldEdgeMarginM: readPresentNumber(gameplay, "world_edge_margin_m", "worldEdgeMarginM"),
+    pushbackStartInsideWorldM: readPresentNumber(
+      gameplay,
+      "pushback_start_inside_world_m",
+      "pushbackStartInsideWorldM",
     ),
-    worldEdgeMarginM: readNumber(
-      gameplay.world_edge_margin_m ?? gameplay.worldEdgeMarginM,
-      DEFAULT_GAMEPLAY_CONFIG.worldEdgeMarginM,
-    ),
-    pushbackStartInsideWorldM: readNumber(
-      gameplay.pushback_start_inside_world_m ?? gameplay.pushbackStartInsideWorldM,
-      DEFAULT_GAMEPLAY_CONFIG.pushbackStartInsideWorldM,
-    ),
-    pushbackStrength: readNumber(
-      gameplay.pushback_strength ?? gameplay.pushbackStrength,
-      DEFAULT_GAMEPLAY_CONFIG.pushbackStrength,
-    ),
+    pushbackStrength: readPresentNumber(gameplay, "pushback_strength", "pushbackStrength"),
   };
   validateBorderOceanGameplayConfig(config);
   return config;
