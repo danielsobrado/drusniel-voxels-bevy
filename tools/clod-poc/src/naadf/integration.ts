@@ -13,6 +13,7 @@ import { queryTerrainHeight, tracePrimaryDebugRay, traceSunVisibility } from "./
 import { NaadfDebugOverlay } from "./debugOverlay.js";
 import { runAcceptanceChecks, allAcceptancePassed } from "./validation.js";
 import { setNaadfIntegration } from "./canopyBridge.js";
+import { FarSummaryGpuAtlas, type FarSummaryGpuAtlasView } from "./gpu/farSummaryAtlas.js";
 
 const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
 const HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
@@ -59,6 +60,7 @@ export interface NaadfIntegration {
   update(frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera): void;
   getHeightProvider(): FarHeightProvider;
   getCanopySampler(): { sampleCanopyCoverage(x: number, z: number): number };
+  getFarSummaryGpuAtlasView(): FarSummaryGpuAtlasView | undefined;
   queryHeight(x: number, z: number, purpose?: "render" | "shadow" | "canopy"): ReturnType<typeof queryTerrainHeight>;
   traceSun(x: number, y: number, z: number, sunDir: THREE.Vector3, maxDist: number): ReturnType<typeof traceSunVisibility>;
   getMetricsSnapshot(): ReturnType<NaadfMetricsCollector["snapshot"]>;
@@ -79,6 +81,9 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   const metrics = new NaadfMetricsCollector();
   const forceMissing = options.sceneName === "infinite-naadf-stress-missing";
   const state = createNaadfWorldState(config, source, metrics, forceMissing);
+  const gpuAtlas = config.farShell.heightSamplingMode === "gpu"
+    ? new FarSummaryGpuAtlas({ tileCells: config.farClipmap.tileCells })
+    : undefined;
   const debugOverlay = options.threeScene
     ? new NaadfDebugOverlay(options.threeScene, config)
     : null;
@@ -118,6 +123,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
         velocityZ: scriptedVz,
         deltaSeconds,
       });
+      gpuAtlas?.updateFromState(state);
       debugOverlay?.update(state);
 
       const clod = (window as unknown as { __drusnielClod?: { stats?: { counters?: Record<string, number> } } }).__drusnielClod;
@@ -165,6 +171,10 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
       };
     },
 
+    getFarSummaryGpuAtlasView() {
+      return gpuAtlas?.view;
+    },
+
     queryHeight(x, z, purpose = "render") {
       return queryTerrainHeight({ state, worldX: x, worldZ: z, purpose });
     },
@@ -193,6 +203,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
 
     dispose() {
       debugOverlay?.dispose();
+      gpuAtlas?.dispose();
       state.residents.length = 0;
       state.residentIndexByKey.clear();
       state.farTiles.clear();
