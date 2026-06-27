@@ -12,16 +12,25 @@ border_ocean_scene:
     fov: 55
   acceptance:
     min_deep_ocean_vertices: 1000
+    max_deep_ocean_triangles: 65536
+    max_deep_ocean_draw_calls: 1
+    max_transition_gap_vertices: 0
+    max_frame_ms_p95: 50
     max_interior_water_wet_ratio: 0.15
+    max_webgl_webgpu_mean_delta: 18
+    max_webgl_webgpu_p95_delta: 80
     required_counters:
       - border_ocean.scene
       - border_ocean.coast_runtime_active
       - border_ocean.deep_ocean_enabled
       - border_ocean.deep_ocean_mesh_present
       - border_ocean.deep_ocean_vertices
+      - border_ocean.deep_ocean_triangles
+      - border_ocean.deep_ocean_draw_calls
       - border_ocean.deep_ocean_start_outside_m
       - border_ocean.deep_ocean_extend_m
       - border_ocean.deep_ocean_surface_y
+      - border_ocean.deep_ocean_transition_gap_vertices
       - border_ocean.wave_count
       - border_ocean.wave_wind_speed
       - border_ocean.wave_height_scale
@@ -32,6 +41,7 @@ border_ocean_scene:
       - border_ocean.player_pushback_band_m
       - border_ocean.player_pushback_accel
       - border_ocean.player_soft_pushback_enabled
+      - border_ocean.frame_ms_p95
       - border_ocean.page_source_purity
       - border_ocean.interior_water_wet_ratio
       - border_ocean.playable_ocean_outside_ok
