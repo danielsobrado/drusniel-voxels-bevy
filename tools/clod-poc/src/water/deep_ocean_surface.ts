@@ -62,15 +62,14 @@ function rectGridVertexCount(
   return (Math.max(1, segX) + 1) * (Math.max(1, segZ) + 1);
 }
 
-function deepOceanGridLayout(worldCells: number, config: DeepOceanRenderConfig, innerBandCells: number) {
+function deepOceanGridLayout(worldCells: number, config: DeepOceanRenderConfig, _innerBandCells: number) {
   const extend = Math.max(1, config.extendCells);
   const segments = Math.max(4, config.segments);
   const outerMin = -extend;
   const outerMax = worldCells + extend;
-  const innerBand = Math.min(Math.max(0, innerBandCells), worldCells * 0.5);
-  const innerMin = innerBand;
-  const innerMax = worldCells - innerBand;
-  const ringWidth = Math.max(extend, innerBand, 1);
+  const innerMin = 0;
+  const innerMax = worldCells;
+  const ringWidth = Math.max(extend, 1);
   const radialSegments = Math.max(4, Math.round(segments * ringWidth / Math.max(ringWidth, worldCells * 0.25)));
   const tangentialSegments = segments;
   return {
