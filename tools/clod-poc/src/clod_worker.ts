@@ -495,7 +495,9 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
 
   const lod0 = rebuildDirtyRegionGroups(dirtyRegions);
   enqueueParentsForLod0(lod0.dirtyCoords);
-  if (pendingParentCount() > 0 && activeParentRequestId === null) activeParentRequestId = requestIds[0]!;
+  const pendingParents = pendingParentCount();
+  if (pendingParents > 0 && activeParentRequestId === null) activeParentRequestId = requestIds[0]!;
+  if (pendingParents > 0) scheduleParentDrain();
 
   const tSer = performance.now();
   const lod0Serialized = serializeNodes(lod0.changed);
@@ -523,10 +525,8 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
     serializedBytes,
     chunksRemeshed: lod0.chunksRemeshed,
     chunksTotal: lod0.chunksTotal,
-    pendingParents: pendingParentCount(),
+    pendingParents,
   }, transferables);
-
-  if (pendingParentCount() > 0) scheduleParentDrain();
 }
 
 function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
