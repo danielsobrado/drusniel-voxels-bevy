@@ -48,7 +48,6 @@ export function createFarWaterMaterial(
   const distXZ = vec2(local.x, local.z).length();
   let waterHeight = float(0.0);
   let waterCoverage = float(0.0);
-  let waterBandWeight = float(0.0);
 
   for (const ringRefs of uSummaryRings) {
     const atlasUCells = worldX.sub(ringRefs.uOriginX).div(ringRefs.uCellM);
@@ -66,17 +65,14 @@ export function createFarWaterMaterial(
       .mul(step(atlasVCells, ringRefs.uHeightCells.sub(float(SUMMARY_EDGE_EPS))));
     const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM.sub(float(SUMMARY_EDGE_EPS))));
     const atlasWeight = heightSample.a.mul(coverageSample.a).mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
-    const coverageWeight = coverageSample.g.mul(atlasWeight);
     waterHeight = mix(waterHeight, heightSample.r, atlasWeight);
     waterCoverage = mix(waterCoverage, coverageSample.g, atlasWeight);
-    waterBandWeight = mix(waterBandWeight, coverageWeight, atlasWeight);
   }
 
   const ripple = sin(worldX.mul(float(WATER_RIPPLE_SCALE_1)).add(worldZ.mul(float(WATER_RIPPLE_SCALE_2))))
     .mul(float(WATER_RIPPLE_HEIGHT_M));
   const alpha = smoothstep(float(WATER_MASK_THRESHOLD), float(0.35), waterCoverage)
-    .mul(float(WATER_ALPHA))
-    .mul(waterBandWeight);
+    .mul(float(WATER_ALPHA));
   const deepWater = vec3(0.035, 0.11, 0.19);
   const shallowWater = vec3(0.08, 0.22, 0.30);
   const color = mix(shallowWater, deepWater, clamp(waterCoverage, float(0.0), float(1.0)));
@@ -85,7 +81,7 @@ export function createFarWaterMaterial(
   material.name = "naadf-far-water-overlay";
   material.colorNode = color;
   material.opacityNode = alpha;
-  material.maskNode = alpha.greaterThan(float(0.01));
+  material.maskNode = alpha.greaterThan(0.01);
   material.positionNode = vec3(local.x, waterHeight.add(float(WATER_SURFACE_OFFSET_M)).add(ripple.mul(waterCoverage)), local.z);
   material.transparent = true;
   material.depthTest = true;
