@@ -63,6 +63,11 @@ export interface TerrainTextureController {
     previewUrl: string,
     selectedId: string,
   ): void;
+  setBuiltinSlotNormal(
+    index: number,
+    texture: THREE.Texture,
+    previewUrl: string,
+  ): void;
   clearTextureSlot(index: number): void;
   setSlotNormal(
     index: number,
@@ -188,7 +193,9 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
   ) => {
     const old = slots[index];
     old.texture?.dispose();
+    old.normalTexture?.dispose();
     if (old.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.previewUrl);
+    if (old.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(old.normalPreviewUrl);
     slots[index] = {
       ...old,
       texture,
@@ -198,7 +205,23 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
       customBytes: null,
       customMimeType: null,
       customExtension: null,
+      normalTexture: null,
+      normalPreviewUrl: null,
+      normalBytes: null,
+      normalMimeType: null,
+      normalExtension: null,
     };
+  };
+
+  const setBuiltinSlotNormal = (index: number, texture: THREE.Texture, previewUrl: string) => {
+    const slot = slots[index];
+    slot.normalTexture?.dispose();
+    if (slot.normalPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(slot.normalPreviewUrl);
+    slot.normalTexture = texture;
+    slot.normalPreviewUrl = previewUrl;
+    slot.normalBytes = null;
+    slot.normalMimeType = null;
+    slot.normalExtension = null;
   };
 
   const setSlotNormal = (index: number, texture: THREE.Texture, previewUrl: string, bytes: Uint8Array, mimeType: string, extension: string) => {
@@ -257,6 +280,14 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
   const getNormalArray = () => normalArrayTex;
   const hasAnyLoadedTexture = () => slots.some((slot) => slot.texture !== null);
 
+  const loadBuiltinNormal = async (index: number, normalUrl: string | undefined) => {
+    if (!normalUrl) return;
+    const normalTexture = await loadTerrainTextureUrl(normalUrl, textureLoadOptions);
+    if (!normalTexture) return;
+    configureNormalTexture(normalTexture, textureLoadOptions);
+    setBuiltinSlotNormal(index, normalTexture, normalUrl);
+  };
+
   const loadBuiltinTextureSlots = async (
     slotManifests: readonly { index: number; selectedId: string; name: string }[],
     progress: TerrainTextureLoadProgress,
@@ -269,13 +300,18 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
       if (!builtin) continue;
       progress.setPhase(`${phaseLabel} texture ${i + 1}/${builtinSlots.length}`, (i + 1) / Math.max(1, builtinSlots.length));
       const texture = await loadTerrainTextureUrl(builtin.url, textureLoadOptions);
-      if (texture) setBuiltinTextureSlot(slot.index, texture, slot.name, builtin.url, slot.selectedId);
+      if (!texture) continue;
+      setBuiltinTextureSlot(slot.index, texture, slot.name, builtin.url, slot.selectedId);
+      await loadBuiltinNormal(slot.index, builtin.normalUrl);
     }
   };
 
   const restoreStagedImport = async (progress: TerrainTextureLoadProgress) => {
     const manifest = deps.stagedImport?.manifest;
     if (!manifest) return;
+    const builtin = manifest.textures.filter((slot) => slot.source === "builtin");
+    await loadBuiltinTextureSlots(builtin, progress, "loading built-in");
+
     const custom = manifest.textures.filter((slot) => slot.source === "custom" && slot.customPath);
     for (let i = 0; i < custom.length; i++) {
       const slot = custom[i];
@@ -326,6 +362,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     slots,
     setTextureSlot,
     setBuiltinTextureSlot,
+    setBuiltinSlotNormal,
     clearTextureSlot,
     setSlotNormal,
     clearSlotNormal,
