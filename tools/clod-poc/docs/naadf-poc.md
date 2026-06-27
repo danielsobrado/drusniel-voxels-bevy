@@ -13,9 +13,11 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 - Query API with explicit counters (near table, hash, far clipmap, missing, HDDA)
 - Multi-ring GPU far-summary height atlas for runtime far-shell displacement
 - Paired GPU far-summary material-color atlas for runtime far-shell color
+- Paired GPU far-summary coverage atlas for canopy/water far-shell tinting
 - GPU height-atlas neighbor normals for runtime far-shell lighting
 - Paired GPU derived-normal atlas retained for debug/future filtered normals
 - Configurable 3x3 / 5x5 / 7x7 GPU atlas window via YAML, URL, and side menu
+- Side-menu GPU atlas stats for window, pixels, upload revision, texture count, and memory estimate
 - GPU procedural displacement as fallback where summary atlas data is missing
 - CPU query/HDDA path as oracle/debug only
 - Canopy coverage flowing through summary chain
@@ -38,10 +40,13 @@ CPU far summary tile stream
   -> packed RGBA32F GPU height atlas
   -> paired RGBA32F GPU material-color atlas
   -> paired RGBA32F GPU derived-normal atlas for debug/future use
+  -> paired RGBA32F GPU coverage atlas (R=canopy, G=water, B=reserved, A=valid)
   -> one vertical atlas band per far-summary ring
   -> configurable 3x3 / 5x5 / 7x7 moving tile window per ring
   -> nearest-filtered texel-center sampling in GPU material positionNode/colorNode
-  -> distance-selected atlas height/color where alpha is valid
+  -> distance-selected atlas height/color/coverage where alpha is valid
+  -> canopy coverage darkens/greens distant forest areas
+  -> water coverage blue-tints and smooths distant wet/water areas
   -> runtime lighting normals from neighboring height-atlas texels inside the selected ring band
   -> procedural GPU displacement fallback where atlas is missing
   -> GPU material lighting / haze
@@ -85,6 +90,8 @@ Runtime far-shell height sampling defaults to `gpu`. CPU height sampling is only
 
 `far_shell.gpu_atlas_window_tiles` supports `3`, `5`, or `7`. The **NAADF PoC** side menu exposes the same setting as **GPU atlas window** and reloads the scene with the matching URL override because changing this value reallocates GPU atlas textures.
 
+The **stats** folder shows GPU atlas cost: atlas window tiles, cells per ring, total pixels, texture count, upload revision, and estimated MiB. The estimate assumes four RGBA32F textures: height, material color, derived normal, and coverage.
+
 Enable with `?naadf=1` or any `infinite-naadf-*` scene.
 
 Runtime overrides:
@@ -103,7 +110,7 @@ Runtime overrides:
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
 - Runtime far shell derives lighting normals from neighboring height-atlas texels, but ring-window borders still clamp at the configured atlas edge
-- Canopy/water coverage are still packed in CPU summaries only; the runtime shader does not consume them yet
+- Canopy/water coverage is summary-tint only; no far-shell animated water surface yet
 - The atlas is still a small moving tile window per ring, not a production bindless/SSBO page table
 - HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
 - CPU macro terrain fallback still exists for debug/oracle paths, but should not be on the runtime far-shell hot path in GPU mode
