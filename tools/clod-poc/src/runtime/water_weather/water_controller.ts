@@ -94,14 +94,13 @@ function readShoreSurfSettings(
         maxShallowDepth: Math.min(2.5, borderCoast.ocean.minDepth),
       }
     : {};
-  const deepOceanOwnsBorder = Boolean(borderCoast?.enabled && borderCoast.deepOcean.enabled);
   const urlEnabled = searchParams.get("shoreSurf") === "1" || searchParams.get("edgeOcean") === "1";
   const urlDisabled = searchParams.get("shoreSurf") === "0" || searchParams.get("edgeOcean") === "0";
-  const legacySurfEnabled = Boolean(fromBorder.enabled) && !deepOceanOwnsBorder;
+  const surfEnabled = Boolean(fromBorder.enabled);
   return {
     ...DEFAULT_SHORE_SURF_BAND_SETTINGS,
     ...fromBorder,
-    enabled: !urlDisabled && (urlEnabled || legacySurfEnabled),
+    enabled: !urlDisabled && (urlEnabled || surfEnabled),
     startDistance: readPositiveParam(
       searchParams,
       "oceanStart",
