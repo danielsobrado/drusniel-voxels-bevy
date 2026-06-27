@@ -95,6 +95,7 @@ export interface UiSessionState {
   pendingParentNodes: number;
   pendingParentMs: number;
   pendingParentCount: number;
+  terraformEditActive: boolean;
   terraformEditCheckbox: HTMLInputElement | null;
   weatherStatsController: GuiDisplayController | null;
   naadfStatsController: GuiDisplayController | null;
@@ -126,6 +127,7 @@ export function createUiStartupContext(input: UiStartupInput): UiStartupContext 
       pendingParentNodes: 0,
       pendingParentMs: 0,
       pendingParentCount: 0,
+      terraformEditActive: true,
       terraformEditCheckbox: null,
       weatherStatsController: null,
       naadfStatsController: null,
