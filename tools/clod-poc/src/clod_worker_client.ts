@@ -13,6 +13,7 @@ import {
   rehydrateBuildResult,
   type ClodWorkerRequest,
   type ClodWorkerResponse,
+  type SerializedClodNode,
   type SerializedHydrologyTerrain,
   type SerializedParentBatch,
 } from "./clod_worker_protocol.js";
@@ -50,6 +51,11 @@ interface DigBatchSlot {
   edits: DigEdit[];
   dirtyRegions: DirtyCellBounds[];
   resolvers: Array<PendingRequest<WorkerLod0Rebuild>>;
+}
+
+interface NodeTarget {
+  node: SerializedClodNode;
+  target: ClodPageNode;
 }
 
 export class ClodWorkerClient {
@@ -235,6 +241,22 @@ export class ClodWorkerClient {
     this.parentsWaiters = [];
   }
 
+  private collectNodeTargets(nodes: readonly SerializedClodNode[]): NodeTarget[] {
+    const targets = nodes.map((node) => {
+      const target = this.nodesById.get(node.id);
+      if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
+      return { node, target };
+    });
+    for (const { node } of targets) {
+      for (const childId of node.childIds) {
+        if (childId !== null && !this.nodesById.has(childId)) {
+          throw new Error(`CLOD worker returned node ${node.id} with unknown child ${childId}`);
+        }
+      }
+    }
+    return targets;
+  }
+
   private handleMessage(message: ClodWorkerResponse): void {
     if (!message || typeof message !== "object" || typeof message.type !== "string") {
       return;
@@ -257,11 +279,7 @@ export class ClodWorkerClient {
         break;
       }
       case "lod0Rebuilt": {
-        const targets = message.changed.map((node) => {
-          const target = this.nodesById.get(node.id);
-          if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
-          return { node, target };
-        });
+        const targets = this.collectNodeTargets(message.changed);
         const result: WorkerLod0Rebuild = {
           changed: targets.map(({ node, target }) => applySerializedNode(target, node, this.nodesById)),
           dirtyCoords: message.dirtyCoords,
@@ -315,11 +333,7 @@ export class ClodWorkerClient {
   }
 
   private rehydrateParentBatch(message: SerializedParentBatch): WorkerParentBatch {
-    const targets = message.changed.map((node) => {
-      const target = this.nodesById.get(node.id);
-      if (!target) throw new Error(`CLOD worker returned unknown node ${node.id}`);
-      return { node, target };
-    });
+    const targets = this.collectNodeTargets(message.changed);
     return {
       requestId: message.requestId,
       changed: targets.map(({ node, target }) => applySerializedNode(target, node, this.nodesById)),
