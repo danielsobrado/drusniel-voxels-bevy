@@ -13,6 +13,7 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
       stoneSystem,
       waterController,
       weatherController,
+      customProps,
     },
     terrainView: {
       nearFieldBubbleController,
@@ -36,6 +37,8 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
     stoneSystem.dispose();
     waterController.dispose();
     weatherController.dispose();
+    customProps?.stopPropStoreSync();
+    customProps?.propController.dispose();
     skyEnvironment?.dispose();
     postProcess?.dispose();
     getClodErrorCompute()?.destroy();
