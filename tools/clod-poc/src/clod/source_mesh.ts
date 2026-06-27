@@ -164,10 +164,10 @@ export function expandChunkNeighborRing(indices: readonly number[], chunksPerPag
 }
 
 /**
- * Re-mesh only the chunks of a cached page that `dirty` can perturb, mutating `chunkMeshes`
- * in place, then re-weld the whole page. If the partial result violates page validation,
- * fall back to a full-page remesh. This preserves correctness while allowing the common
- * small-brush path to update far fewer chunks than a full page rebuild.
+ * Re-mesh only the chunks of a cached page that `dirty` can perturb, then re-weld the whole
+ * page. The cached chunks are mutated only after a candidate page validates successfully;
+ * failed validation leaves the previous cache intact so future edits cannot inherit a
+ * half-applied chunk set.
  */
 export function rebuildPageChunks(
   chunkMeshes: PageMesh[],
@@ -187,16 +187,24 @@ export function rebuildPageChunks(
     return { mesh, remeshed: 0 };
   }
 
-  for (const li of toRemesh) remeshChunk(chunkMeshes, li, pageX, pageZ, cfg, world);
+  const partialChunks = chunkMeshes.slice();
+  for (const li of toRemesh) remeshChunk(partialChunks, li, pageX, pageZ, cfg, world);
 
   try {
-    const { mesh } = weldChunkMeshes(chunkMeshes, cfg);
+    const { mesh } = weldChunkMeshes(partialChunks, cfg);
     validatePageMesh(mesh, footprint, cfg.validation.zero_area_epsilon, `L0:${pageX},${pageZ} partial edit-rebuild`);
+    commitChunks(chunkMeshes, partialChunks, toRemesh);
     return { mesh, remeshed: toRemesh.length };
   } catch {
-    for (let li = 0; li < P * P; li++) remeshChunk(chunkMeshes, li, pageX, pageZ, cfg, world);
-    const { mesh } = weldChunkMeshes(chunkMeshes, cfg);
+    const fullChunks = chunkMeshes.slice();
+    const allChunks: number[] = [];
+    for (let li = 0; li < P * P; li++) {
+      remeshChunk(fullChunks, li, pageX, pageZ, cfg, world);
+      allChunks.push(li);
+    }
+    const { mesh } = weldChunkMeshes(fullChunks, cfg);
     validatePageMesh(mesh, footprint, cfg.validation.zero_area_epsilon, `L0:${pageX},${pageZ} full edit-rebuild fallback`);
+    commitChunks(chunkMeshes, fullChunks, allChunks);
     return { mesh, remeshed: P * P };
   }
 }
@@ -213,6 +221,10 @@ function remeshChunk(
   const dx = localIndex % P;
   const dz = (localIndex / P) | 0;
   chunkMeshes[localIndex] = meshChunk(pageX * P + dx, pageZ * P + dz, cfg, world);
+}
+
+function commitChunks(target: PageMesh[], source: readonly PageMesh[], indices: readonly number[]): void {
+  for (const index of indices) target[index] = source[index];
 }
 
 function pageFootprint(pageX: number, pageZ: number, cfg: ClodPagesConfig): PageFootprint {
