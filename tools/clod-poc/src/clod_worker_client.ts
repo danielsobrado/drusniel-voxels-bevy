@@ -115,9 +115,9 @@ export class ClodWorkerClient {
       terrainSource,
     };
     this.progressHandlers.set(requestId, onProgress);
-    return new Promise((resolve, reject) => {
-      this.buildRequests.set(requestId, { resolve, reject });
-      this.worker.postMessage(request);
+    return this.postTrackedRequest(this.buildRequests, request).catch((error) => {
+      this.progressHandlers.delete(requestId);
+      throw error;
     });
   }
 
@@ -146,20 +146,14 @@ export class ClodWorkerClient {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = { type: "flush", requestId };
-    return new Promise((resolve, reject) => {
-      this.flushRequests.set(requestId, { resolve, reject });
-      this.worker.postMessage(request);
-    });
+    return this.postTrackedRequest(this.flushRequests, request);
   }
 
   clearCache(): Promise<void> {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = { type: "clearCache", requestId };
-    return new Promise((resolve, reject) => {
-      this.clearCacheRequests.set(requestId, { resolve, reject });
-      this.worker.postMessage(request);
-    });
+    return this.postTrackedRequest(this.clearCacheRequests, request);
   }
 
   isParentsHealthy(): boolean {
@@ -174,6 +168,18 @@ export class ClodWorkerClient {
     this.stopped = true;
     this.worker.terminate();
     this.rejectAll(new Error("CLOD worker disposed"));
+  }
+
+  private postTrackedRequest<T>(requests: Map<number, PendingRequest<T>>, request: ClodWorkerRequest): Promise<T> {
+    return new Promise((resolve, reject) => {
+      requests.set(request.requestId, { resolve, reject });
+      try {
+        this.worker.postMessage(request);
+      } catch (error) {
+        requests.delete(request.requestId);
+        reject(error);
+      }
+    });
   }
 
   private async pumpDigQueue(): Promise<void> {
@@ -220,10 +226,7 @@ export class ClodWorkerClient {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = { type: "dig", requestId, edits: batch.edits, dirtyRegions: batch.dirtyRegions };
-    return new Promise((resolve, reject) => {
-      this.digRequests.set(requestId, { resolve, reject });
-      this.worker.postMessage(request);
-    });
+    return this.postTrackedRequest(this.digRequests, request);
   }
 
   private resolveParentsWaiters(): void {
