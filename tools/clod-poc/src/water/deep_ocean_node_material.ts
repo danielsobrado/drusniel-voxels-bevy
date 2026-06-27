@@ -112,19 +112,11 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const n1: TslNode = hashNoise(foamUv);
     const n2: TslNode = hashNoise(foamUv.mul(2.3).add(vec2(17.3, -9.1)));
     const n3: TslNode = hashNoise(foamUv.mul(5.7).add(vec2(-3.8, 23.5)));
-    const turbulent: TslNode = float(1.0).sub(
-      abs(n1.mul(2.0).sub(1.0)).mul(0.45)
-        .add(abs(n2.mul(2.0).sub(1.0)).mul(0.35))
-        .add(abs(n3.mul(2.0).sub(1.0)).mul(0.2)),
-    );
+    const turbulent: TslNode = float(1.0).sub(abs(n1.mul(2.0).sub(1.0)).mul(0.45).add(abs(n2.mul(2.0).sub(1.0)).mul(0.35)).add(abs(n3.mul(2.0).sub(1.0)).mul(0.2)));
     const foamNoise: TslNode = clamp(turbulent.mul(0.35).add(n1.mul(0.09)).add(n2.mul(0.054)).add(n3.mul(0.036)), 0.0, 1.0);
     const foamEdge: TslNode = uFoamThreshold.add(foamNoise);
     const jacobianApprox: TslNode = float(0.58).sub(waveCompression.mul(0.58));
-    const foamMask: TslNode = clamp(
-      pow(float(1.0).sub(smoothstep(foamEdge.sub(0.6), foamEdge, jacobianApprox)), uFoamPower).mul(uFoamIntensity),
-      0.0,
-      1.0,
-    );
+    const foamMask: TslNode = clamp(pow(float(1.0).sub(smoothstep(foamEdge.sub(0.6), foamEdge, jacobianApprox)), uFoamPower).mul(uFoamIntensity), 0.0, 1.0);
 
     const deepColor: TslNode = vec3(0.0, 0.03, 0.12);
     const shallowColor: TslNode = vec3(0.0, 0.08, 0.18);
@@ -137,7 +129,8 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const hColor3: TslNode = mix(hColor2, colorNode([0.369, 0.769, 0.690]), smoothstep(float(0.66), float(1.0), hNorm));
     const albedo: TslNode = mix(depthTint, hColor3, float(0.6));
 
-    const reflectDir: TslNode = normalize(reflect(viewDir.negate(), normal));
+    const reflectionWarp: TslNode = vec3(slopeX.mul(uReflectionDistortion), float(0), slopeZ.mul(uReflectionDistortion));
+    const reflectDir: TslNode = normalize(reflect(viewDir.negate(), normal).add(reflectionWarp));
     const reflY: TslNode = reflectDir.y;
     const reflYClamped: TslNode = max(reflY, float(0.0));
     const sunDot: TslNode = max(dot(reflectDir, sunDir), float(0.0));
@@ -145,8 +138,7 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     const skyGrad: TslNode = mix(horizonColor, vec3(0.15, 0.35, 0.75), smoothstep(float(0.0), float(0.6), reflYClamped));
     const belowHorizon: TslNode = mix(vec3(0.04, 0.08, 0.18), vec3(0.08, 0.15, 0.28), smoothstep(float(-0.5), float(0.0), reflY));
     const reflectedSky: TslNode = mix(belowHorizon, skyGrad, smoothstep(float(-0.25), float(0.12), reflY));
-    const mie: TslNode = vec3(1.0, 0.85, 0.55).mul(pow(sunDot, float(8.0)).mul(0.25))
-      .add(vec3(1.0, 0.95, 0.85).mul(pow(sunDot, float(64.0)).mul(1.2)));
+    const mie: TslNode = vec3(1.0, 0.85, 0.55).mul(pow(sunDot, float(8.0)).mul(0.25)).add(vec3(1.0, 0.95, 0.85).mul(pow(sunDot, float(64.0)).mul(1.2)));
     const sunDisc: TslNode = vec3(1.0, 0.92, 0.75).mul(pow(sunDot, float(512.0)).mul(5.0).add(pow(sunDot, float(128.0)).mul(1.5)));
     const ambient: TslNode = mix(vec3(0.03, 0.06, 0.12), vec3(0.06, 0.10, 0.18), smoothstep(float(-0.3), float(0.2), reflY));
     const skyReflection: TslNode = max(reflectedSky.add(mie).add(sunDisc), ambient).mul(float(1.0).sub(uRoughness.mul(0.5)));
@@ -168,12 +160,7 @@ export function createDeepOceanNodeMaterialImpl(params: DeepOceanMaterialParams)
     return vec4(fogged, clamp(uAlpha, 0.0, 1.0));
   })();
 
-  const material = new MeshBasicNodeMaterial({
-    transparent: true,
-    depthTest: true,
-    depthWrite: params.visual.depthWrite,
-    side: THREE.DoubleSide,
-  });
+  const material = new MeshBasicNodeMaterial({ transparent: true, depthTest: true, depthWrite: params.visual.depthWrite, side: THREE.DoubleSide });
   material.name = "deep-ocean-node";
   material.positionNode = displacedPosition;
   material.colorNode = fragment.xyz;
