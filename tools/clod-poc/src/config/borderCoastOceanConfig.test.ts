@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import yamlText from "../../config/border_coast_ocean.yaml?raw";
 import { parseBorderCoastOceanConfig } from "./borderCoastOceanConfig.js";
 import { parseBorderCoastOceanConfig as parseRuntimeBorderCoastOceanConfig } from "../terrain/border_coast_config.js";
+import { parseBorderOceanGameplayConfig } from "../player/border_ocean_player_config.js";
 
 function hexToRgb(hex: string): [number, number, number] {
   const raw = Number.parseInt(hex.slice(1), 16);
@@ -42,6 +43,12 @@ describe("border coast/ocean config", () => {
       swell_height_scale: 0.34,
     });
     expect(config.deep_ocean.shading.deep_color).toBe("#042c4e");
+    expect(config.gameplay).toEqual({
+      soft_pushback_enabled: true,
+      world_edge_margin_m: 16,
+      pushback_start_inside_world_m: 48,
+      pushback_strength: 36,
+    });
   });
 
   it("keeps strict config validation aligned with the runtime border ocean parser", () => {
@@ -71,6 +78,16 @@ describe("border coast/ocean config", () => {
     expect(runtime.deepOcean.shading.deepColor).toEqual(hexToRgb(strict.deep_ocean.shading.deep_color));
     expect(runtime.deepOcean.shading.shallowColor).toEqual(hexToRgb(strict.deep_ocean.shading.shallow_color));
     expect(runtime.deepOcean.shading.foamColor).toEqual(hexToRgb(strict.deep_ocean.shading.foam_color));
+  });
+
+  it("keeps strict gameplay config aligned with player config resolver", () => {
+    const strict = parseBorderCoastOceanConfig(yamlText);
+    const gameplay = parseBorderOceanGameplayConfig(yamlText);
+
+    expect(gameplay.softPushbackEnabled).toBe(strict.gameplay.soft_pushback_enabled);
+    expect(gameplay.worldEdgeMarginM).toBe(strict.gameplay.world_edge_margin_m);
+    expect(gameplay.pushbackStartInsideWorldM).toBe(strict.gameplay.pushback_start_inside_world_m);
+    expect(gameplay.pushbackStrength).toBe(strict.gameplay.pushback_strength);
   });
 
   it("normalizes coast type weights", () => {
@@ -125,6 +142,22 @@ describe("border coast/ocean config", () => {
         yamlText.replace("near_subdivisions: 128", "near_subdivisions: many"),
       ),
     ).toThrow("deep_ocean.near_subdivisions must be a finite number");
+  });
+
+  it("fails clearly for malformed gameplay fields", () => {
+    expect(() =>
+      parseBorderCoastOceanConfig(
+        yamlText.replace("soft_pushback_enabled: true", "soft_pushback_enabled: yes"),
+      ),
+    ).toThrow("gameplay.soft_pushback_enabled must be boolean");
+  });
+
+  it("fails clearly for missing gameplay fields", () => {
+    expect(() =>
+      parseBorderCoastOceanConfig(
+        yamlText.replace(/\n  world_edge_margin_m: 16/, ""),
+      ),
+    ).toThrow("missing required field 'gameplay.world_edge_margin_m'");
   });
 
   it("fails clearly for missing wave constants", () => {
