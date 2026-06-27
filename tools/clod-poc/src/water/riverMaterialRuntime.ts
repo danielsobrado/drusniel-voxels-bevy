@@ -14,6 +14,9 @@ export interface RiverMaterialSettings {
   wetRockDarkening: number;
   foamResidueStrength: number;
   foamResidueDropStart: number;
+  foamResidueDropEnd: number;
+  bankNormalStrength: number;
+  rapidScale: number;
   flowNormalStrength: number;
   crossCurrentStrength: number;
   rapidNormalBoost: number;
@@ -40,6 +43,9 @@ export const DEFAULT_RIVER_MATERIAL_SETTINGS: RiverMaterialSettings = {
   wetRockDarkening: 0.42,
   foamResidueStrength: 0.58,
   foamResidueDropStart: 0.55,
+  foamResidueDropEnd: 4.0,
+  bankNormalStrength: 1.0,
+  rapidScale: 0.5,
   flowNormalStrength: 1.4,
   crossCurrentStrength: 0.9,
   rapidNormalBoost: 1.35,
@@ -66,6 +72,9 @@ const PARAM_KEYS: Record<keyof RiverMaterialSettings, string> = {
   wetRockDarkening: "riverWetRockDarkening",
   foamResidueStrength: "riverFoamResidue",
   foamResidueDropStart: "riverFoamResidueDrop",
+  foamResidueDropEnd: "riverFoamResidueDropEnd",
+  bankNormalStrength: "riverBankNormal",
+  rapidScale: "riverRapidScale",
   flowNormalStrength: "riverFlowNormal",
   crossCurrentStrength: "riverCrossCurrent",
   rapidNormalBoost: "riverRapidNormal",
@@ -115,6 +124,9 @@ export function sanitizeRiverMaterialSettings(settings: RiverMaterialSettings): 
     wetRockDarkening: clampFinite(settings.wetRockDarkening, 0, 1, d.wetRockDarkening),
     foamResidueStrength: clampFinite(settings.foamResidueStrength, 0, 2, d.foamResidueStrength),
     foamResidueDropStart: clampFinite(settings.foamResidueDropStart, 0, 8, d.foamResidueDropStart),
+    foamResidueDropEnd: clampFinite(settings.foamResidueDropEnd, 0.05, 24, d.foamResidueDropEnd),
+    bankNormalStrength: clampFinite(settings.bankNormalStrength, 0, 3, d.bankNormalStrength),
+    rapidScale: clampFinite(settings.rapidScale, 0.02, 1.0, d.rapidScale),
     flowNormalStrength: clampFinite(settings.flowNormalStrength, 0, 4, d.flowNormalStrength),
     crossCurrentStrength: clampFinite(settings.crossCurrentStrength, 0, 4, d.crossCurrentStrength),
     rapidNormalBoost: clampFinite(settings.rapidNormalBoost, 0, 4, d.rapidNormalBoost),
@@ -145,6 +157,9 @@ export function readRiverMaterialSettings(): RiverMaterialSettings {
     wetRockDarkening: readNumber(params, PARAM_KEYS.wetRockDarkening, d.wetRockDarkening),
     foamResidueStrength: readNumber(params, PARAM_KEYS.foamResidueStrength, d.foamResidueStrength),
     foamResidueDropStart: readNumber(params, PARAM_KEYS.foamResidueDropStart, d.foamResidueDropStart),
+    foamResidueDropEnd: readNumber(params, PARAM_KEYS.foamResidueDropEnd, d.foamResidueDropEnd),
+    bankNormalStrength: readNumber(params, PARAM_KEYS.bankNormalStrength, d.bankNormalStrength),
+    rapidScale: readNumber(params, PARAM_KEYS.rapidScale, d.rapidScale),
     flowNormalStrength: readNumber(params, PARAM_KEYS.flowNormalStrength, d.flowNormalStrength),
     crossCurrentStrength: readNumber(params, PARAM_KEYS.crossCurrentStrength, d.crossCurrentStrength),
     rapidNormalBoost: readNumber(params, PARAM_KEYS.rapidNormalBoost, d.rapidNormalBoost),
