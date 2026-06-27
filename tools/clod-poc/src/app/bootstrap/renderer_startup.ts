@@ -6,6 +6,7 @@ import {
   parseRendererBackend,
 } from "../../rendering/renderer_backend.js";
 import { getRendererGpuDevice } from "../../rendering/webgpu_device_bridge.js";
+import { installRealtimeSunShadows } from "../../rendering/realtime_sun_shadows.js";
 import { failLoud } from "../../core/diagnostics.js";
 import { TerrainColliderSet, type TerrainColliderPage } from "../../terrain/terrain_collider.js";
 import {
@@ -210,6 +211,15 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       controls.update();
     }
   }
+
+  installRealtimeSunShadows({
+    scene,
+    camera,
+    renderer,
+    worldCells,
+    searchParams,
+    enabled: !queryLongViewScene,
+  });
 
   const colliderPages: TerrainColliderPage[] = lod0Nodes
     .map((node) => ({
