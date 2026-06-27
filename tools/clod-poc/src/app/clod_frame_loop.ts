@@ -153,7 +153,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
     canopy?.update(render.camera.position.x, render.camera.position.z);
 
-    runVegetationFramePhase({
+    const vegetationTiming = runVegetationFramePhase({
       elapsedSeconds,
       playerDelta,
       ringCenter: terrainPhase.ringCenter,
@@ -229,6 +229,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       currentGrassStats,
       tPropsStart: terrainPhase.tPropsStart,
       tBubbleStart: terrainPhase.tBubbleStart,
+      vegetationTiming,
       chunkGroupsBuiltThisFrame: terrainPhase.chunkGroupsBuiltThisFrame,
       nearFieldBubbleController: terrain.nearFieldBubbleController,
       interaction: player.interaction,
