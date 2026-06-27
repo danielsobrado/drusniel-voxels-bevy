@@ -81,6 +81,7 @@ export function createConstructionMaterial(material: ConstructionMaterial): THRE
   }
 
   const woodTexture = createWoodTexture();
+  // TODO: Replace this temporary procedural wood with the final construction material asset pipeline.
   return new THREE.MeshStandardMaterial({
     color: 0xffffff,
     map: woodTexture ?? undefined,
