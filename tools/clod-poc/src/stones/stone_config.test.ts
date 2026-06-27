@@ -26,4 +26,39 @@ large:
     expect(cfg.classes.large.radiusMin).toBe(0.7);
     expect(cfg.classes.large.presets).toEqual(["slab", "angular"]);
   });
+
+  it("maps terrain density and class bias from YAML", () => {
+    const cfg = parseStoneConfig(`
+terrain:
+  low_height_m: 20
+  high_height_m: 80
+  height_blend_m: 10
+  snow:
+    density: 0.5
+    large: 2.0
+    medium: 0.8
+    small: 0.2
+`, null);
+
+    expect(cfg.terrain.lowHeightM).toBe(20);
+    expect(cfg.terrain.highHeightM).toBe(80);
+    expect(cfg.terrain.heightBlendM).toBe(10);
+    expect(cfg.terrain.snow).toEqual({ density: 0.5, large: 2.0, medium: 0.8, small: 0.2 });
+  });
+
+  it("clamps negative terrain weights and falls back on malformed YAML", () => {
+    const cfg = parseStoneConfig(`
+terrain:
+  grass:
+    density: -1
+    large: -2
+`, null);
+    expect(cfg.terrain.grass.density).toBe(0);
+    expect(cfg.terrain.grass.large).toBe(0);
+
+    const warnings: string[] = [];
+    const fallback = parseStoneConfig("terrain:\n  snow: [", (message) => warnings.push(message));
+    expect(warnings).toHaveLength(1);
+    expect(fallback.terrain.snow.large).toBe(1.75);
+  });
 });
