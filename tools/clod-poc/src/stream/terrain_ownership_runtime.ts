@@ -11,6 +11,10 @@ export interface TerrainOwnershipRuntimeSnapshot {
   center: StreamCenter;
   live: LiveVoxelChunkStreamerSnapshot;
   visualPages: VisualPageStreamerSnapshot;
+  ownership: {
+    liveRadiusM: number;
+    clodRadiusM: number;
+  };
   farShell: {
     innerRadiusM: number;
     outerRadiusM: number;
@@ -34,6 +38,10 @@ export class TerrainOwnershipRuntime {
       center: { ...center },
       live: this.live.update(center),
       visualPages: this.visualPages.update(center.x, center.z),
+      ownership: {
+        liveRadiusM: this.ownership.liveRadiusM,
+        clodRadiusM: this.ownership.clodRadiusM,
+      },
       farShell: {
         innerRadiusM: this.ownership.farShellInnerM,
         outerRadiusM: this.ownership.farShellOuterM,
