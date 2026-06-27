@@ -1,3 +1,8 @@
+import {
+  DEFAULT_BORDER_COAST_OCEAN_CONFIG,
+  type DeepOceanWaveConfig,
+} from "../terrain/border_coast_config.js";
+
 interface GerstnerSwell {
   dx: number;
   dz: number;
@@ -37,21 +42,9 @@ export interface DeepOceanWaveSample {
   velocityZ: number;
 }
 
-export const DEEP_OCEAN_SPECTRUM = {
-  gravity: 9.81,
-  gridK: 16,
-  patchCoarse: 250,
-  patchFine: 37,
-  activeGpuWaves: 48,
-  windSpeed: 14.0,
-  windDirectionRad: Math.PI * 0.25,
-  heightScale: 1.3,
-  choppiness: 0.72,
-  swellHeightScale: 0.34,
-} as const;
-
 const TWO_PI = Math.PI * 2;
 const SPECTRUM_SEED = 12345;
+const DEFAULT_WAVE_CONFIG = DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.wave;
 
 const SWELLS: readonly GerstnerSwell[] = [
   { dx: 0.90, dz: 0.44, wavelength: 120, steepness: 0.18, speedScale: 0.88 },
@@ -68,13 +61,32 @@ function hash01(value: number, seed = SPECTRUM_SEED): number {
   return ((n ^ (n >> 16)) >>> 0) / 4294967295;
 }
 
-function buildCascade(cascade: 0 | 1, patchSize: number): SpectrumWave[] {
+function normalizeWaveConfig(config: DeepOceanWaveConfig = DEFAULT_WAVE_CONFIG): DeepOceanWaveConfig {
+  return {
+    gravity: Math.max(0.01, config.gravity),
+    gridK: Math.max(2, Math.floor(config.gridK)),
+    activeGpuWaves: Math.max(1, Math.floor(config.activeGpuWaves)),
+    windSpeed: Math.max(0.01, config.windSpeed),
+    windDirectionDeg: config.windDirectionDeg,
+    heightScale: Math.max(0, config.heightScale),
+    choppiness: Math.max(0, config.choppiness),
+    coarsePatchM: Math.max(1, config.coarsePatchM),
+    finePatchM: Math.max(1, config.finePatchM),
+    foamThreshold: Math.max(0, config.foamThreshold),
+    foamPower: Math.max(0, config.foamPower),
+    foamIntensity: Math.max(0, config.foamIntensity),
+    swellHeightScale: Math.max(0, config.swellHeightScale),
+  };
+}
+
+function buildCascade(config: DeepOceanWaveConfig, cascade: 0 | 1, patchSize: number): SpectrumWave[] {
   const waves: SpectrumWave[] = [];
-  const gridK = DEEP_OCEAN_SPECTRUM.gridK;
+  const gridK = config.gridK;
   const dk = TWO_PI / patchSize;
-  const windSpeed = Math.max(0.5, DEEP_OCEAN_SPECTRUM.windSpeed);
-  const fetchLength = (windSpeed * windSpeed) / DEEP_OCEAN_SPECTRUM.gravity;
-  const omegaPeak = (DEEP_OCEAN_SPECTRUM.gravity * 0.87) / windSpeed;
+  const windSpeed = Math.max(0.5, config.windSpeed);
+  const windDirectionRad = (config.windDirectionDeg * Math.PI) / 180;
+  const fetchLength = (windSpeed * windSpeed) / config.gravity;
+  const omegaPeak = (config.gravity * 0.87) / windSpeed;
 
   for (let iz = 0; iz < gridK; iz++) {
     for (let ix = 0; ix < gridK; ix++) {
@@ -85,7 +97,7 @@ function buildCascade(cascade: 0 | 1, patchSize: number): SpectrumWave[] {
       const kx = nx * dk;
       const kz = nz * dk;
       const k = Math.max(0.0001, Math.hypot(kx, kz));
-      const omega = Math.sqrt(DEEP_OCEAN_SPECTRUM.gravity * k);
+      const omega = Math.sqrt(config.gravity * k);
       const dx = kx / k;
       const dz = kz / k;
       const kFetch = k * fetchLength;
@@ -95,10 +107,10 @@ function buildCascade(cascade: 0 | 1, patchSize: number): SpectrumWave[] {
       const ratio = (omega - omegaPeak) / Math.max(1e-6, sigma * omegaPeak);
       const jonswap = Math.pow(3.3, Math.exp(-0.5 * ratio * ratio));
       const waveAngle = Math.atan2(kz, kx);
-      const directional = Math.pow(Math.max(Math.cos(waveAngle - DEEP_OCEAN_SPECTRUM.windDirectionRad), 0), 2);
+      const directional = Math.pow(Math.max(Math.cos(waveAngle - windDirectionRad), 0), 2);
       const suppress = Math.exp(k * k * -0.0001);
       const spectrum = phillips * jonswap * directional * suppress;
-      const amp = Math.sqrt(Math.max(0, spectrum)) * dk * DEEP_OCEAN_SPECTRUM.heightScale;
+      const amp = Math.sqrt(Math.max(0, spectrum)) * dk * config.heightScale;
       if (amp <= 1e-6) continue;
 
       const waveIndex = cascade * gridK * gridK + iz * gridK + ix;
@@ -117,32 +129,37 @@ function buildCascade(cascade: 0 | 1, patchSize: number): SpectrumWave[] {
   return waves;
 }
 
-function resolveSwellWaves(): DeepOceanGpuWave[] {
+function resolveSwellWaves(config: DeepOceanWaveConfig): DeepOceanGpuWave[] {
   return SWELLS.map((swell) => {
     const length = Math.hypot(swell.dx, swell.dz) || 1;
     const dirX = swell.dx / length;
     const dirZ = swell.dz / length;
     const k = TWO_PI / Math.max(1, swell.wavelength);
-    const omega = Math.sqrt(DEEP_OCEAN_SPECTRUM.gravity * k) * swell.speedScale;
+    const omega = Math.sqrt(config.gravity * k) * swell.speedScale;
     return {
       dirX,
       dirZ,
       k,
       omega,
-      amp: (swell.steepness / k) * DEEP_OCEAN_SPECTRUM.swellHeightScale,
+      amp: (swell.steepness / k) * config.swellHeightScale,
       phase: 0,
-      choppiness: DEEP_OCEAN_SPECTRUM.choppiness,
+      choppiness: config.choppiness,
     };
   });
 }
 
-function buildGpuWaves(): readonly DeepOceanGpuWave[] {
+function zeroWave(): DeepOceanGpuWave {
+  return { dirX: 1, dirZ: 0, k: 1, omega: 0, amp: 0, phase: 0, choppiness: 0 };
+}
+
+function buildGpuWaves(configInput: DeepOceanWaveConfig = DEFAULT_WAVE_CONFIG): DeepOceanGpuWave[] {
+  const config = normalizeWaveConfig(configInput);
   const spectrum = [
-    ...buildCascade(0, DEEP_OCEAN_SPECTRUM.patchCoarse),
-    ...buildCascade(1, DEEP_OCEAN_SPECTRUM.patchFine),
+    ...buildCascade(config, 0, config.coarsePatchM),
+    ...buildCascade(config, 1, config.finePatchM),
   ]
     .sort((a, b) => b.amp - a.amp)
-    .slice(0, DEEP_OCEAN_SPECTRUM.activeGpuWaves)
+    .slice(0, config.activeGpuWaves)
     .map((wave): DeepOceanGpuWave => ({
       dirX: wave.dx,
       dirZ: wave.dz,
@@ -150,16 +167,44 @@ function buildGpuWaves(): readonly DeepOceanGpuWave[] {
       omega: wave.omega,
       amp: wave.amp,
       phase: wave.phase,
-      choppiness: DEEP_OCEAN_SPECTRUM.choppiness,
+      choppiness: config.choppiness,
     }));
 
-  return Object.freeze([...spectrum, ...resolveSwellWaves()]);
+  return [...spectrum, ...resolveSwellWaves(config)];
 }
 
-/** Cached once at module load, then uploaded/read by GPU shaders. */
-export const DEEP_OCEAN_GPU_WAVES: readonly DeepOceanGpuWave[] = buildGpuWaves();
+const DEFAULT_GPU_WAVES = Object.freeze(buildGpuWaves(DEFAULT_WAVE_CONFIG));
+const DEFAULT_GPU_WAVE_COUNT = DEFAULT_GPU_WAVES.length;
 
-export function sampleDeepOceanWave(x: number, z: number, timeSeconds: number): DeepOceanWaveSample {
+function fitDefaultWaveCount(waves: DeepOceanGpuWave[]): readonly DeepOceanGpuWave[] {
+  if (waves.length > DEFAULT_GPU_WAVE_COUNT) return Object.freeze(waves.slice(0, DEFAULT_GPU_WAVE_COUNT));
+  if (waves.length < DEFAULT_GPU_WAVE_COUNT) {
+    return Object.freeze([
+      ...waves,
+      ...Array.from({ length: DEFAULT_GPU_WAVE_COUNT - waves.length }, zeroWave),
+    ]);
+  }
+  return Object.freeze(waves);
+}
+
+/** Live binding used by the WebGL and WebGPU ocean materials. */
+export let DEEP_OCEAN_GPU_WAVES: readonly DeepOceanGpuWave[] = DEFAULT_GPU_WAVES;
+
+export function deepOceanGpuWaves(config?: DeepOceanWaveConfig): readonly DeepOceanGpuWave[] {
+  return fitDefaultWaveCount(buildGpuWaves(config ?? DEFAULT_WAVE_CONFIG));
+}
+
+export function configureDeepOceanWaves(config?: DeepOceanWaveConfig): readonly DeepOceanGpuWave[] {
+  DEEP_OCEAN_GPU_WAVES = deepOceanGpuWaves(config);
+  return DEEP_OCEAN_GPU_WAVES;
+}
+
+export function sampleDeepOceanWave(
+  x: number,
+  z: number,
+  timeSeconds: number,
+  waves: readonly DeepOceanGpuWave[] = DEEP_OCEAN_GPU_WAVES,
+): DeepOceanWaveSample {
   let offsetX = 0;
   let offsetZ = 0;
   let height = 0;
@@ -171,7 +216,7 @@ export function sampleDeepOceanWave(x: number, z: number, timeSeconds: number): 
   let velocityX = 0;
   let velocityZ = 0;
 
-  for (const wave of DEEP_OCEAN_GPU_WAVES) {
+  for (const wave of waves) {
     const theta = wave.k * (wave.dirX * x + wave.dirZ * z) - wave.omega * timeSeconds + wave.phase;
     const c = Math.cos(theta);
     const s = Math.sin(theta);
@@ -200,8 +245,13 @@ export function sampleDeepOceanWave(x: number, z: number, timeSeconds: number): 
   };
 }
 
-export function sampleDeepOceanNormal(x: number, z: number, timeSeconds: number): readonly [number, number, number] {
-  const wave = sampleDeepOceanWave(x, z, timeSeconds);
+export function sampleDeepOceanNormal(
+  x: number,
+  z: number,
+  timeSeconds: number,
+  waves: readonly DeepOceanGpuWave[] = DEEP_OCEAN_GPU_WAVES,
+): readonly [number, number, number] {
+  const wave = sampleDeepOceanWave(x, z, timeSeconds, waves);
   const nx = -wave.slopeX;
   const ny = 1;
   const nz = -wave.slopeZ;
@@ -209,10 +259,10 @@ export function sampleDeepOceanNormal(x: number, z: number, timeSeconds: number)
   return [nx / len, ny / len, nz / len] as const;
 }
 
-export function deepOceanWaveVerticalBounds(): number {
-  return DEEP_OCEAN_GPU_WAVES.reduce((sum, wave) => sum + Math.abs(wave.amp), 0) + 1;
+export function deepOceanWaveVerticalBounds(waves: readonly DeepOceanGpuWave[] = DEEP_OCEAN_GPU_WAVES): number {
+  return waves.reduce((sum, wave) => sum + Math.abs(wave.amp), 0) + 1;
 }
 
-export function deepOceanSpectrumWaveCount(): number {
-  return DEEP_OCEAN_GPU_WAVES.length;
+export function deepOceanSpectrumWaveCount(waves: readonly DeepOceanGpuWave[] = DEEP_OCEAN_GPU_WAVES): number {
+  return waves.length;
 }
