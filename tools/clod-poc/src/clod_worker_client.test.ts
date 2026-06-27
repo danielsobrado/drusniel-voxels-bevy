@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { ClodWorkerClient } from "./clod_worker_client.js";
 import type { ClodPageNode, PageMesh } from "./types.js";
 
@@ -24,6 +24,10 @@ describe("ClodWorkerClient parent error lifecycle", () => {
     onError = vi.fn();
     client = new ClodWorkerClient();
     client.onError = onError as (error: Error) => void;
+  });
+
+  afterEach(() => {
+    client.dispose();
   });
 
   it("starts healthy", () => {
