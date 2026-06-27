@@ -38,6 +38,7 @@ CPU far summary tile stream
   -> paired RGBA32F GPU material-color atlas
   -> paired RGBA32F GPU derived-normal atlas for debug/future use
   -> one vertical atlas band per far-summary ring
+  -> 5x5 moving tile window per ring by default
   -> nearest-filtered texel-center sampling in GPU material positionNode/colorNode
   -> distance-selected atlas height/color where alpha is valid
   -> runtime lighting normals from neighboring height-atlas texels inside the selected ring band
@@ -97,9 +98,9 @@ Runtime overrides:
 ## Known limitations
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
-- Runtime far shell derives lighting normals from neighboring height-atlas texels, but ring-window borders still clamp at the current 3x3 atlas edge
+- Runtime far shell derives lighting normals from neighboring height-atlas texels, but ring-window borders still clamp at the current 5x5 atlas edge
 - Canopy/water coverage are still packed in CPU summaries only; the runtime shader does not consume them yet
-- The atlas is still a small moving 3x3 tile window per ring, not a production bindless/SSBO page table
+- The atlas is still a small moving 5x5 tile window per ring, not a production bindless/SSBO page table
 - HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
 - CPU macro terrain fallback still exists for debug/oracle paths, but should not be on the runtime far-shell hot path in GPU mode
 - Sun visibility is debug-only stepping, not a path tracer
