@@ -3,7 +3,7 @@ import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "../config.js
 import type { Phase0Config } from "../phase0/phase0_config.js";
 import { createStreamDiagnosticTracker } from "./stream_diagnostics.js";
 
-const cfg: ClodPagesConfig = {
+const cfg = {
   page: { chunks_per_page: 4, chunk_size: 16, halo_chunks: 1, quadtree_levels: 4 },
   simplify: {
     target_ratio_per_level: 0.5,
@@ -34,9 +34,9 @@ const cfg: ClodPagesConfig = {
   meshopt_package_version: "0.22.0",
   poc: { lod0_pages_x: 8, lod0_pages_z: 8, smoke_lod0_pages_x: 4, smoke_lod0_pages_z: 4, emit_debug_json: true, emit_debug_obj: false },
   validation: { position_epsilon: 0.000001, normal_dot_min: 0.9999, material_weight_epsilon: 0.0001, zero_area_epsilon: 0.00000001 },
-};
+} satisfies ClodPagesConfig;
 
-const phase0Config: Phase0Config = {
+const phase0Config = {
   phase0: {
     target_visible_m: 4096,
     target_future_visible_m: 8192,
@@ -51,10 +51,10 @@ const phase0Config: Phase0Config = {
     max_streamer_simulated_missing_chunks: 0,
     max_streamer_simulated_missing_pages: 0,
   },
-};
+} satisfies Phase0Config;
 
 describe("stream diagnostics", () => {
-  it("produces live and visual CLOD snapshots from ownership radii", () => {
+  it("publishes live and visual page snapshots", () => {
     const tracker = createStreamDiagnosticTracker({
       cfg,
       maxTerrainLevel: 3,
@@ -68,7 +68,7 @@ describe("stream diagnostics", () => {
     expect(snapshot.ownership.liveRadiusM).toBe(200);
     expect(snapshot.ownership.clodRadiusM).toBe(2048);
     expect(snapshot.live.required.length).toBeGreaterThan(0);
-    expect(snapshot.clod.required.length).toBeGreaterThan(0);
+    expect(snapshot.visualPages.required.length).toBeGreaterThan(0);
     expect(tracker.format(snapshot)).toContain("far-shell>=2048m");
   });
 });
