@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { surfaceHeight } from "../terrain/terrain.js";
 import { defaultConstructionConfig } from "./config.js";
 import { asConstructionMaterial, CONSTRUCTION_MATERIAL_OPTIONS, constructionMaterialLabel, createConstructionMaterial } from "./materials.js";
+import { preloadConstructionMaterialPreviews, preloadConstructionMaterialWindow } from "./material_preloader.js";
 import { createConstructionCandidate, createFreePlacementPosition, type TerrainHitPoint } from "./placement.js";
 import { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
 import { ConstructionSnapIndex } from "./snap_index.js";
@@ -341,6 +342,7 @@ class ConstructionControllerImpl implements ConstructionController {
       this.lastPlacementMessage = "";
     } else {
       this.lastPlacementMessage = "Left-click to place. Right-click deletes aimed construction.";
+      this.preloadSelectedMaterialWindow();
     }
     console.info(`[construction] building mode ${this.active ? "on" : "off"}`);
     this.syncUi(true);
@@ -360,9 +362,15 @@ class ConstructionControllerImpl implements ConstructionController {
     return index >= 0 ? index : 0;
   }
 
+  private preloadSelectedMaterialWindow(): void {
+    preloadConstructionMaterialPreviews();
+    preloadConstructionMaterialWindow(this.selectedMaterialIndex);
+  }
+
   private moveMaterialSelection(direction: number): void {
     const count = CONSTRUCTION_MATERIAL_OPTIONS.length;
     this.selectedMaterialIndex = ((this.selectedMaterialIndex + direction) % count + count) % count;
+    this.preloadSelectedMaterialWindow();
     this.syncUi(true);
   }
 
@@ -740,6 +748,7 @@ class ConstructionControllerImpl implements ConstructionController {
         const index = Number(materialButton.dataset.materialIndex);
         if (Number.isInteger(index) && index >= 0 && index < CONSTRUCTION_MATERIAL_OPTIONS.length) {
           this.selectedMaterialIndex = index;
+          this.preloadSelectedMaterialWindow();
           this.syncUi(true);
         }
         return;
