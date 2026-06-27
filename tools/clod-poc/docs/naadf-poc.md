@@ -60,6 +60,15 @@ Default traversal remains `dense`. Use `compare` before trusting HDDA changes; c
 
 Enable with `?naadf=1` or any `infinite-naadf-*` scene.
 
+Runtime traversal overrides:
+
+```text
+?scene=infinite-naadf-sun-visibility&naadfTraversal=compare
+?scene=infinite-naadf-sun-visibility&naadfTraversal=hdda&naadfHddaBounds=1
+```
+
+`naadfHddaBounds=1` enables AADF directional-bound skips. Leave it off while checking pure span stepping.
+
 ## Known limitations
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
@@ -103,6 +112,7 @@ Examples:
 http://127.0.0.1:5173/?scene=infinite-naadf-flat&farShell=1
 http://127.0.0.1:5173/?scene=infinite-naadf-fast-flight&farShell=1
 http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&farShell=1
+http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfTraversal=compare&naadfHddaBounds=1
 ```
 
 Use the **NAADF PoC** GUI folder for overlays and per-frame counters.
