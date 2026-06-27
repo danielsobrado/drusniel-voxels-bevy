@@ -1,8 +1,7 @@
 import type { ClodPagesConfig } from "../config.js";
 import type { Phase0Config } from "../phase0/phase0_config.js";
 import { resolveStreamingOwnership, type StreamingOwnershipRadii } from "../streaming/streaming_ownership.js";
-import { LiveVoxelChunkStreamer, type LiveVoxelChunkStreamerSnapshot } from "./live_voxel_chunk_streamer.js";
-import { VisualClodPageStreamer, type VisualPageStreamerSnapshot } from "./page_plan.js";
+import { TerrainOwnershipRuntime, type TerrainOwnershipRuntimeSnapshot } from "./terrain_ownership_runtime.js";
 
 export interface StreamDiagnosticInput {
   cfg: ClodPagesConfig;
@@ -12,10 +11,8 @@ export interface StreamDiagnosticInput {
   queryScene: string | null;
 }
 
-export interface StreamDiagnosticSnapshot {
+export interface StreamDiagnosticSnapshot extends TerrainOwnershipRuntimeSnapshot {
   ownership: StreamingOwnershipRadii;
-  live: LiveVoxelChunkStreamerSnapshot;
-  clod: VisualPageStreamerSnapshot;
 }
 
 export interface StreamDiagnosticTracker {
@@ -31,28 +28,29 @@ export function createStreamDiagnosticTracker(input: StreamDiagnosticInput): Str
     targetFutureVisibleM: input.phase0Config.phase0.target_future_visible_m,
     streamingScene: input.queryScene?.startsWith("infinite-") ?? false,
   });
-  const live = new LiveVoxelChunkStreamer(ownership, {
-    chunkSizeM: input.cfg.page.chunk_size,
-    hysteresisM: input.cfg.page.chunk_size * 2,
-  });
-  const clod = new VisualClodPageStreamer(ownership.liveRadiusM, ownership.clodRadiusM, {
-    pageSizeM,
-    maxLevel: input.maxTerrainLevel,
-    hysteresisM: pageSizeM,
+  const runtime = new TerrainOwnershipRuntime(ownership, {
+    live: {
+      chunkSizeM: input.cfg.page.chunk_size,
+      hysteresisM: input.cfg.page.chunk_size * 2,
+    },
+    visualPages: {
+      pageSizeM,
+      maxLevel: input.maxTerrainLevel,
+      hysteresisM: pageSizeM,
+    },
   });
 
   return {
     update(center) {
       return {
         ownership,
-        live: live.update(center),
-        clod: clod.update(center.x, center.z),
+        ...runtime.update(center),
       };
     },
     format(snapshot) {
       return `stream ownership: live<=${snapshot.ownership.liveRadiusM}m chunks req/load/evict=${snapshot.live.required.length}/${snapshot.live.loaded.length}/${snapshot.live.evictable.length}  ` +
-        `clod<=${snapshot.ownership.clodRadiusM}m pages req/load/evict=${snapshot.clod.required.length}/${snapshot.clod.loaded.length}/${snapshot.clod.evictable.length}  ` +
-        `far-shell>=${snapshot.ownership.farShellInnerM}m`;
+        `clod<=${snapshot.ownership.clodRadiusM}m pages req/load/evict=${snapshot.visualPages.required.length}/${snapshot.visualPages.loaded.length}/${snapshot.visualPages.evictable.length}  ` +
+        `far-shell>=${snapshot.farShell.innerRadiusM}m`;
     },
   };
 }
