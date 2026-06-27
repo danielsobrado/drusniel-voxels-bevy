@@ -14,7 +14,9 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 - Multi-ring GPU far-summary height atlas for runtime far-shell displacement
 - Paired GPU far-summary material-color atlas for runtime far-shell color
 - Paired GPU far-summary coverage atlas for canopy/water far-shell tinting
-- Paired GPU derived-normal atlas for runtime far-shell lighting
+- Separate transparent far-water overlay mesh driven by water coverage
+- GPU height-atlas neighbor normals for runtime far-shell terrain lighting
+- Paired GPU derived-normal atlas retained for debug/future filtered normals
 - Configurable 3x3 / 5x5 / 7x7 GPU atlas window via YAML, URL, and side menu
 - Side-menu GPU atlas stats for window, pixels, upload revision, texture count, and memory estimate
 - GPU procedural displacement as fallback where summary atlas data is missing
@@ -42,11 +44,11 @@ CPU far summary tile stream
   -> paired RGBA32F GPU coverage atlas (R=canopy, G=water, B=reserved, A=valid)
   -> one vertical atlas band per far-summary ring
   -> configurable 3x3 / 5x5 / 7x7 moving tile window per ring
-  -> nearest-filtered texel-center sampling in GPU material positionNode/colorNode
-  -> distance-selected atlas height/color/normal/coverage where alpha is valid
-  -> canopy coverage darkens/greens distant forest areas
-  -> water coverage blue-tints and smooths distant wet/water areas
-  -> runtime lighting normals from the derived-normal atlas
+  -> terrain shell: nearest-filtered texel-center height/color/coverage sampling
+  -> terrain shell: canopy coverage darkens/greens distant forest areas
+  -> terrain shell: water coverage lightly blue-tints and smooths distant wet areas
+  -> terrain shell: runtime lighting normals from neighboring height-atlas texels
+  -> water overlay: transparent render-only child mesh above summary height where water coverage is present
   -> procedural GPU displacement fallback where atlas is missing
   -> GPU material lighting / haze
 ```
@@ -85,7 +87,7 @@ Loaded from [`config/naadf_poc.yaml`](../config/naadf_poc.yaml). Key sections:
 
 Default traversal remains `dense`. Use `compare` before trusting HDDA changes. Compare mode runs the dense oracle with isolated metrics, runs HDDA against live metrics, and returns the dense result as a safe fallback if there is a mismatch. It increments both `naadf_hdda_dense_mismatches` and `naadf_hdda_fallback_to_dense` on fallback.
 
-Runtime far-shell height sampling defaults to `cpu` unless `far_shell.height_sampling_mode: gpu` is set in YAML or `naadfHeightMode=gpu` is passed in the URL. GPU mode only becomes effective when the WebGPU far terrain parity material and GPU atlas are both available; otherwise startup falls back to CPU/provider sampling and still requires a provider.
+Runtime far-shell height sampling defaults to `gpu`. CPU height sampling is only for debug/oracle checks and can be forced with `naadfHeightMode=cpu`. GPU mode fails loudly if the required WebGPU far terrain material or GPU atlas is unavailable; it must not silently downgrade to CPU runtime sampling.
 
 `far_shell.gpu_atlas_window_tiles` supports `3`, `5`, or `7`. The **NAADF PoC** side menu exposes the same setting as **GPU atlas window** and reloads the scene with the matching URL override because changing this value reallocates GPU atlas textures.
 
@@ -109,7 +111,7 @@ Runtime overrides:
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
 - Ring-window borders still clamp at the configured atlas edge
-- Canopy/water coverage is summary-tint only; no far-shell animated water surface yet
+- Far-water overlay is coverage-driven and render-only; it is not gameplay collision or full hydrology
 - The atlas is still a small moving tile window per ring, not a production bindless/SSBO page table
 - HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
 - CPU macro terrain fallback still exists for debug/oracle paths, but should not be on the runtime far-shell hot path in GPU mode
