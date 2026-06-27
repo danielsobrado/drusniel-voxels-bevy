@@ -8,6 +8,7 @@ import type { NearFieldBubbleController } from "../../terrain/near_field/near_fi
 import type { ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import type { PlayerInteractionState } from "../../player_controller.js";
 import type { FrameRenderer } from "./frame_renderer.js";
+import type { VegetationFrameTiming } from "./vegetation_frame_phase.js";
 
 export interface RenderPhaseInput {
   renderer: FrameRenderer;
@@ -27,6 +28,7 @@ export interface RenderPhaseInput {
   currentGrassStats: GrassStats | null;
   tPropsStart: number;
   tBubbleStart: number;
+  vegetationTiming: VegetationFrameTiming;
   chunkGroupsBuiltThisFrame: number;
   nearFieldBubbleController: NearFieldBubbleController;
   interaction: PlayerInteractionState;
@@ -65,6 +67,18 @@ function logGrassProfile(
       ` slots=${settings.ring.grid * settings.ring.grid}` +
       ` grass+props=${grassAndPropsMs.toFixed(2)}ms`,
   );
+}
+
+function formatVegetationTiming(timing: VegetationFrameTiming): string {
+  return `grass ${timing.grassMs.toFixed(1)}` +
+    ` trees ${timing.treesMs.toFixed(1)}` +
+    ` under ${timing.understoryMs.toFixed(1)}` +
+    ` forest ${timing.forestLightingMs.toFixed(1)}` +
+    ` stones ${timing.stonesMs.toFixed(1)}` +
+    ` custom ${timing.customPropsMs.toFixed(1)}` +
+    ` water ${timing.waterMs.toFixed(1)}` +
+    ` ocean ${timing.deepOceanMs.toFixed(1)}` +
+    ` weather ${timing.weatherMs.toFixed(1)}`;
 }
 
 export function runRenderPhase(input: RenderPhaseInput): void {
@@ -119,7 +133,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
           ` | selection ${selectionStats.selectionMs.toFixed(1)}` +
           ` (cut ${selectionStats.subphases.cut.toFixed(1)} book ${selectionStats.subphases.book.toFixed(1)} info ${selectionStats.subphases.info.toFixed(1)} overlays ${selectionStats.subphases.overlays.toFixed(1)})` +
           ` bubble/chunks ${bubbleMs.toFixed(1)} (built ${input.chunkGroupsBuiltThisFrame})` +
-          ` props ${propsMs.toFixed(1)}` +
+          ` props ${propsMs.toFixed(1)} (${formatVegetationTiming(input.vegetationTiming)})` +
           ` render ${renderMs.toFixed(1)}` +
           ` other ${otherMs.toFixed(1)}` +
           ` | cut=${selectionStats.renderedCount} chunkGroups=${input.nearFieldBubbleController.size()} mode=${input.interaction.mode}`,
