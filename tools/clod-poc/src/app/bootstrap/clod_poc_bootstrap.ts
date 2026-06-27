@@ -229,7 +229,10 @@ export async function bootstrapClodPoc() {
     const materialConfig = loadLongViewMaterialsConfig(undefined, parseQueryOverrides(searchParams));
     const parityConfig = materialConfig.enabled ? configToUniformData(materialConfig) : undefined;
     const useParity = materialConfig.enabled && parityConfig !== undefined;
-    const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu" && useParity
+    const farSummaryGpuAtlas = naadfHeightSamplingMode === "gpu"
+      ? naadfIntegration?.getFarSummaryGpuAtlasView()
+      : undefined;
+    const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu" && useParity && farSummaryGpuAtlas
       ? "gpu"
       : naadfHeightSamplingMode;
     if (!heightProvider && effectiveHeightSamplingMode !== "gpu") {
@@ -256,6 +259,7 @@ export async function bootstrapClodPoc() {
       useParityMaterial: useParity,
       parityConfig,
       heightSamplingMode: effectiveHeightSamplingMode,
+      farSummaryGpuAtlas: effectiveHeightSamplingMode === "gpu" ? farSummaryGpuAtlas : undefined,
       debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
       metrics: farShellMetrics,
     });
