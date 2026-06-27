@@ -237,7 +237,7 @@ export function tracePrimaryDebugRayHdda(params: TraceBaseParams): RayTraceResul
   const { dirX, dirY, dirZ } = normalized;
   const cellSize = state.config.world.voxelSizeM;
   const eps = Math.max(state.config.query.epsilonM, 1e-6);
-  const maxSteps = Math.min(state.config.query.maxStepsPrimary, state.config.traversal.hddaMaxVoxelSteps);
+  const maxSteps = state.config.traversal.hddaMaxVoxelSteps;
   let stepper = HddaSpanStepper.init({
     originX: params.originX,
     originY: params.originY,
@@ -256,6 +256,7 @@ export function tracePrimaryDebugRayHdda(params: TraceBaseParams): RayTraceResul
   let hashFallbackHits = 0;
   let farClipmapHits = 0;
   let missingSamples = 0;
+  let budgetExceeded = false;
   const stats = createTraversalStats();
 
   state.metrics.hddaRays++;
@@ -294,7 +295,10 @@ export function tracePrimaryDebugRayHdda(params: TraceBaseParams): RayTraceResul
       };
     }
 
-    const plan = chooseSpanPlan(state, x, y, z, dirX, dirY, dirZ, "primary");
+    let plan = chooseSpanPlan(state, x, y, z, dirX, dirY, dirZ, "primary");
+    if (plan.node && y <= plan.node.maxHeight + eps) {
+      plan = voxelPlan();
+    }
     if (stepper.spanDim !== plan.spanDim) {
       stepper = stepper.reinitAtT({
         originX: params.originX,
@@ -319,6 +323,10 @@ export function tracePrimaryDebugRayHdda(params: TraceBaseParams): RayTraceResul
     }
     if (aadfSkipOccurred(skip, cellSize)) aadfSkips++;
     updateTraversalStats(stats, plan, skip, cellSize);
+    if (isBudgetExceeded(state.config, stats)) {
+      budgetExceeded = true;
+      break;
+    }
     stepper = advanceStepper(stepper, params, dirX, dirY, dirZ, skip, boundaryDistance, eps, cellSize);
   }
 
@@ -330,7 +338,7 @@ export function tracePrimaryDebugRayHdda(params: TraceBaseParams): RayTraceResul
   const missZ = params.originZ + dirZ * Math.min(stepper.t, maxDistanceM);
   return {
     hit: false,
-    unknown: missingSamples > 0,
+    unknown: missingSamples > 0 || budgetExceeded || steps >= maxSteps,
     hitX: missX,
     hitY: missY,
     hitZ: missZ,
@@ -354,7 +362,7 @@ export function traceSunVisibilityHdda(params: SunTraceBaseParams): SunVisibilit
   const { dirX, dirY, dirZ } = normalized;
   const cellSize = state.config.world.voxelSizeM;
   const eps = Math.max(state.config.query.epsilonM, 1e-6);
-  const maxSteps = Math.min(state.config.query.maxStepsSun, state.config.traversal.hddaMaxVoxelSteps);
+  const maxSteps = state.config.traversal.hddaMaxVoxelSteps;
   let stepper = HddaSpanStepper.init({
     originX: params.worldX,
     originY: params.worldY,
@@ -373,6 +381,7 @@ export function traceSunVisibilityHdda(params: SunTraceBaseParams): SunVisibilit
   let hashFallbackHits = 0;
   let farClipmapHits = 0;
   let missingSamples = 0;
+  let budgetExceeded = false;
   const stats = createTraversalStats();
 
   state.metrics.hddaRays++;
@@ -436,6 +445,10 @@ export function traceSunVisibilityHdda(params: SunTraceBaseParams): SunVisibilit
     const skip = estimatePlanSkip({ state, plan, boundaryDistance, dirX, dirY, dirZ, eps, cellSize });
     if (aadfSkipOccurred(skip, cellSize)) aadfSkips++;
     updateTraversalStats(stats, plan, skip, cellSize);
+    if (isBudgetExceeded(state.config, stats)) {
+      budgetExceeded = true;
+      break;
+    }
     stepper = advanceStepper(
       stepper,
       {
@@ -457,7 +470,7 @@ export function traceSunVisibilityHdda(params: SunTraceBaseParams): SunVisibilit
   recordHddaMetrics(state, stats);
   state.metrics.sunSteps.add(steps);
   state.metrics.aadfSkips += aadfSkips;
-  return { visible: true, unknown: missingSamples > 0, blocked: false, steps, aadfSkips, nearTableHits, hashFallbackHits, farClipmapHits, missingSamples, traversalMode: "hdda", hdda: stats };
+  return { visible: true, unknown: missingSamples > 0 || budgetExceeded || steps >= maxSteps, blocked: false, steps, aadfSkips, nearTableHits, hashFallbackHits, farClipmapHits, missingSamples, traversalMode: "hdda", hdda: stats };
 }
 
 export function compareRayResults(
@@ -553,6 +566,10 @@ function chooseSpanPlan(
     }
   }
 
+  return voxelPlan();
+}
+
+function voxelPlan(): SpanPlan {
   return { spanDim: HIERARCHY_VOXEL_SPAN, node: null, source: "fallback" };
 }
 
@@ -587,9 +604,6 @@ function estimatePlanSkip(params: {
       config: params.state.config,
     });
   }
-  if (params.plan.source === "far") {
-    return Math.max(params.eps, Math.min(params.boundaryDistance, spanDistance));
-  }
   return Math.max(params.eps, Math.min(params.boundaryDistance, spanDistance));
 }
 
@@ -601,6 +615,12 @@ function updateTraversalStats(stats: HddaTraversalStats, plan: SpanPlan, skip: n
   } else {
     stats.voxelSteps++;
   }
+}
+
+function isBudgetExceeded(config: NaadfPocConfig, stats: HddaTraversalStats): boolean {
+  return stats.chunkSkips > config.traversal.hddaMaxChunkSteps
+    || stats.blockSkips > config.traversal.hddaMaxBlockSteps
+    || stats.voxelSteps > config.traversal.hddaMaxVoxelSteps;
 }
 
 function advanceStepper(
@@ -682,6 +702,7 @@ function rayMismatchReason(
   epsilonM: number,
 ): HddaMismatchReason {
   if (dense.hit !== hdda.hit) return "hit_miss_mismatch";
+  if (dense.unknown !== hdda.unknown) return "missing_chunk";
   if (!dense.hit && !hdda.hit) return "none";
   if (dense.material !== hdda.material) return "material_mismatch";
   if (distanceDeltaM > epsilonM) return "distance_mismatch";
