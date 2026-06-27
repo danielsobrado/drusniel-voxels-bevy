@@ -130,6 +130,24 @@ describe("cache service", () => {
     expect(result.reason).toBe("checksum-mismatch");
   });
 
+  it("source revision mismatch becomes miss", async () => {
+    const config = parseClodCacheConfig(yaml);
+    config.memory.enabled = false;
+    const store = new InMemoryPersistentStore();
+    const service = createClodCacheService(config, store);
+    await service.put(keyParts, artifact, encodeClodPageNodeArtifact, {});
+    await service.flush();
+    const key = buildClodCacheKey(keyParts);
+    const stored = (await store.get(key))!;
+    await store.put(key, {
+      ...stored,
+      header: { ...stored.header, sourceRevision: "stale-revision" },
+    });
+    const result = await service.get(keyParts, decodeClodPageNodeArtifact);
+    expect(result.status).toBe("miss");
+    expect(result.reason).toBe("source-revision-mismatch");
+  });
+
   it("decode error becomes miss", async () => {
     const config = parseClodCacheConfig(yaml);
     const service = createClodCacheService(config, new InMemoryPersistentStore());
