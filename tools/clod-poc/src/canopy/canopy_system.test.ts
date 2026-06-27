@@ -6,6 +6,7 @@ import {
   shellGridForTriangleBudget,
   shouldAttemptTextureUpload,
   shouldRebuildCanopyShell,
+  shouldUseSyntheticCanopyFallback,
   treeDistributionConfigKey,
 } from "./canopy_system.js";
 import type { CanopyTextureSet } from "./canopy_types.js";
@@ -52,6 +53,31 @@ describe("shouldAttemptTextureUpload", () => {
     expect(shouldAttemptTextureUpload(1, 0)).toBe(true);
     expect(shouldAttemptTextureUpload(1, 1)).toBe(false);
     expect(shouldAttemptTextureUpload(2, 1)).toBe(true);
+  });
+});
+
+describe("shouldUseSyntheticCanopyFallback", () => {
+  it("uses automatic fallback only while clipmap is enabled and empty", () => {
+    const config = cloneConfig();
+    config.source.allowSyntheticDebugFallback = true;
+    config.debug.forceSyntheticSource = false;
+    config.clipmap.enabled = true;
+
+    expect(shouldUseSyntheticCanopyFallback(config, false, 0)).toBe(true);
+    expect(shouldUseSyntheticCanopyFallback(config, false, 1)).toBe(false);
+
+    config.clipmap.enabled = false;
+    expect(shouldUseSyntheticCanopyFallback(config, false, 0)).toBe(false);
+  });
+
+  it("allows explicit synthetic fallback even when clipmap is disabled", () => {
+    const config = cloneConfig();
+    config.clipmap.enabled = false;
+
+    expect(shouldUseSyntheticCanopyFallback(config, true, 0)).toBe(true);
+
+    config.debug.forceSyntheticSource = true;
+    expect(shouldUseSyntheticCanopyFallback(config, false, 0)).toBe(true);
   });
 });
 
