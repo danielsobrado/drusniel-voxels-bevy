@@ -22,3 +22,20 @@ export function assertFarShellOutsidePlayable(
     throw new Error("CLOD ownership must start outside live ownership");
   }
 }
+
+export function assertGameplayOwnershipDistance(
+  distanceM: number,
+  ownership: StreamingOwnershipRadii,
+): void {
+  const layer = classifyOwnershipDistance(distanceM, ownership);
+  if (layer === "far-shell") {
+    throw new Error(`Gameplay ownership cannot target far shell at ${distanceM.toFixed(2)}m`);
+  }
+}
+
+export function ownsGameplayAtDistance(
+  distanceM: number,
+  ownership: StreamingOwnershipRadii,
+): boolean {
+  return classifyOwnershipDistance(distanceM, ownership) !== "far-shell";
+}
