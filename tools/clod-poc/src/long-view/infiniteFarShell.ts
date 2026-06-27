@@ -4,8 +4,15 @@ import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
 import { createInfiniteFarShellMaterial, updateFarShellMaterialMaterial, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
 import type { FarShellMetrics } from "./farShellMetrics.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
-import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer, updateFarTerrainMaterialCenter } from "../farTerrain/farTerrainMaterial.js";
+import {
+  createFarTerrainMaterial,
+  computeFarTerrainVertexColors,
+  createVertexColorBuffer,
+  updateFarTerrainMaterialCenter,
+  updateFarTerrainMaterialSummaryAtlas,
+} from "../farTerrain/farTerrainMaterial.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
+import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 
 export type FarShellHeightSamplingMode = "cpu" | "gpu";
 
@@ -27,8 +34,9 @@ export interface InfiniteFarShellOptions {
     groundLight: THREE.Color;
   };
   useParityMaterial?: boolean;
-  parityConfig?: import("../farTerrain/farTerrainUniforms.js").FarTerrainUniformData;
+  parityConfig?: FarTerrainUniformData;
   heightSamplingMode?: FarShellHeightSamplingMode;
+  farSummaryGpuAtlas?: FarSummaryGpuAtlasView;
   debugShowMissingFallback?: boolean;
   debugShowWireframe?: boolean;
   metrics?: FarShellMetrics;
@@ -52,6 +60,7 @@ export class InfiniteFarShell {
   private readonly samplerOptions: FarSummarySamplerOptions;
   private readonly metrics: FarShellMetrics;
   private readonly heightSamplingMode: FarShellHeightSamplingMode;
+  private readonly farSummaryGpuAtlas: FarSummaryGpuAtlasView | undefined;
   private heightProvider: FarHeightProvider | undefined;
   private receiveSunShadows = false;
   private snappedX = 0;
@@ -70,6 +79,7 @@ export class InfiniteFarShell {
   constructor(options: InfiniteFarShellOptions) {
     this.options = options;
     this.heightSamplingMode = resolveHeightSamplingMode(options);
+    this.farSummaryGpuAtlas = options.farSummaryGpuAtlas;
     this.metrics = options.metrics ?? {
       farShellEnabled: true,
       farShellInnerM: options.innerMeters,
@@ -111,6 +121,7 @@ export class InfiniteFarShell {
       ? createFarTerrainMaterial(options.lighting, this.parityConfig!, 0, 0, options.outerMeters, {
           gpuDisplacement: this.heightSamplingMode === "gpu",
           heightBiasMeters: options.heightBiasMeters,
+          summaryAtlas: this.heightSamplingMode === "gpu" ? this.farSummaryGpuAtlas : undefined,
         })
       : createInfiniteFarShellMaterial(this.materialOptions);
     if (options.debugShowWireframe && "wireframe" in material) {
@@ -209,7 +220,11 @@ export class InfiniteFarShell {
     if (snappedChanged && this.heightSamplingMode === "cpu") this.rebuildHeights();
     this.mesh.position.set(this.snappedX, 0, this.snappedZ);
     if (this.useParityMaterial && this.parityConfig) {
-      updateFarTerrainMaterialCenter(this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial, this.snappedX, this.snappedZ);
+      const material = this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial;
+      updateFarTerrainMaterialCenter(material, this.snappedX, this.snappedZ);
+      if (this.heightSamplingMode === "gpu" && this.farSummaryGpuAtlas) {
+        updateFarTerrainMaterialSummaryAtlas(material, this.farSummaryGpuAtlas);
+      }
     }
   }
 
