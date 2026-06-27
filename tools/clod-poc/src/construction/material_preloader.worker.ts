@@ -9,11 +9,17 @@ interface PreloadResult {
   failed: string[];
 }
 
+interface WorkerScope {
+  postMessage(message: PreloadResult): void;
+  onmessage: ((event: MessageEvent<PreloadRequest>) => void) | null;
+}
+
+const workerScope = globalThis as unknown as WorkerScope;
 const loadedUrls = new Set<string>();
 const inflightUrls = new Map<string, Promise<void>>();
 
 function postResult(result: PreloadResult): void {
-  globalThis.postMessage(result);
+  workerScope.postMessage(result);
 }
 
 async function decodeBlob(blob: Blob): Promise<void> {
@@ -47,7 +53,7 @@ async function preloadUrl(url: string): Promise<void> {
   return task;
 }
 
-globalThis.onmessage = (event: MessageEvent<PreloadRequest>) => {
+workerScope.onmessage = (event: MessageEvent<PreloadRequest>) => {
   if (event.data.type !== "preload") return;
   const urls = [...new Set(event.data.urls.filter((url) => typeof url === "string" && url.length > 0))];
   Promise.allSettled(urls.map(preloadUrl))
