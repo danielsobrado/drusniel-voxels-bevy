@@ -56,7 +56,7 @@ export interface SnappedCenter {
 
 function resolveHeightSamplingMode(options: InfiniteFarShellOptions): FarShellHeightSamplingMode {
   const requested = options.heightSamplingMode ?? "cpu";
-  return requested === "gpu" && options.useParityMaterial && options.parityConfig ? "gpu" : "cpu";
+  return requested === "gpu" && options.useParityMaterial && options.parityConfig && options.farSummaryGpuAtlas ? "gpu" : "cpu";
 }
 
 export class InfiniteFarShell {
