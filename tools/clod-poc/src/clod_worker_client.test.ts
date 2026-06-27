@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { ClodWorkerClient } from "./clod_worker_client.js";
 import type { ClodPageNode, PageMesh } from "./types.js";
 
@@ -11,8 +11,14 @@ class MockWorker {
   removeEventListener = vi.fn();
 }
 
+const originalWorker = globalThis.Worker;
+
 beforeAll(() => {
   (globalThis as unknown as Record<string, unknown>).Worker = MockWorker as unknown as typeof Worker;
+});
+
+afterAll(() => {
+  (globalThis as unknown as Record<string, unknown>).Worker = originalWorker;
 });
 
 describe("ClodWorkerClient parent error lifecycle", () => {
