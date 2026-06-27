@@ -1,4 +1,5 @@
 import { load } from "js-yaml";
+import type { PlayerConfig } from "../player_controller.js";
 import type { WaterField } from "../water/waterField.js";
 import { WaterField as WaterFieldImpl } from "../water/waterField.js";
 import { parseWaterConfig } from "../water/waterConfig.js";
@@ -178,6 +179,7 @@ export interface BorderOceanAcceptanceInput {
   waterField: WaterField | null;
   deepOceanMeshPresent: boolean;
   oceanSampler: OceanSampler | null;
+  playerConfig?: Readonly<PlayerConfig>;
 }
 
 export function probePlayableOceanOutside(sampler: OceanSampler, worldCells: number): number {
@@ -226,6 +228,12 @@ export function publishBorderOceanAcceptanceCounters(
   counters["border_ocean.wave_choppiness"] = input.deepOcean.wave.choppiness;
   counters["border_ocean.shading_fog_far_m"] = input.deepOcean.shading.fogFarM;
   counters["border_ocean.shading_reflection_strength"] = input.deepOcean.shading.reflectionStrength;
+  counters["border_ocean.player_margin_m"] = input.playerConfig?.worldEdgeMargin ?? -1;
+  counters["border_ocean.player_pushback_band_m"] = input.playerConfig?.worldEdgePushbackBand ?? -1;
+  counters["border_ocean.player_pushback_accel"] = input.playerConfig?.worldEdgePushbackAcceleration ?? -1;
+  counters["border_ocean.player_soft_pushback_enabled"] = input.playerConfig
+    ? (input.playerConfig.worldEdgePushbackBand > 0 && input.playerConfig.worldEdgePushbackAcceleration > 0 ? 1 : 0)
+    : -1;
   counters["border_ocean.page_source_purity"] = 1;
   counters["border_ocean.interior_water_wet_ratio"] = input.waterField
     ? sampleInteriorWaterWetRatio(input.waterField, input.worldCells)
@@ -273,6 +281,10 @@ export function validateBorderOceanStats(
   assertCounter("border_ocean.wave_choppiness", (v) => v > 0);
   assertCounter("border_ocean.shading_fog_far_m", (v) => v > 0);
   assertCounter("border_ocean.shading_reflection_strength", (v) => v >= 0);
+  assertCounter("border_ocean.player_margin_m", (v) => v > 0);
+  assertCounter("border_ocean.player_pushback_band_m", (v) => v >= 0);
+  assertCounter("border_ocean.player_pushback_accel", (v) => v >= 0);
+  assertCounter("border_ocean.player_soft_pushback_enabled", (v) => v === 0 || v === 1);
   assertCounter("border_ocean.page_source_purity", (v) => v === 1);
   assertCounter(
     "border_ocean.interior_water_wet_ratio",
