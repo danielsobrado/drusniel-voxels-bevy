@@ -9,9 +9,34 @@ import {
 import {
   DEFAULT_BORDER_COAST_OCEAN_CONFIG,
   parseBorderCoastOceanConfig,
+  type BorderCoastOceanConfig,
 } from "./border_coast_config.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+
+function beachOnlyConfig(): BorderCoastOceanConfig {
+  return {
+    ...DEFAULT_BORDER_COAST_OCEAN_CONFIG,
+    coast: {
+      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.coast,
+      beach: { ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.coast.beach },
+      cliff: { ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.coast.cliff },
+      cliffHeadlandThreshold: 2,
+    },
+    ocean: { ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.ocean },
+    deepOcean: {
+      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
+      wave: { ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.wave },
+      shading: {
+        ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading,
+        deepColor: [...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading.deepColor],
+        shallowColor: [...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading.shallowColor],
+        foamColor: [...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading.foamColor],
+        fogColor: [...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading.fogColor],
+      },
+    },
+  };
+}
 
 describe("parseBorderCoastOceanConfig", () => {
   it("loads the unified repo yaml", () => {
@@ -72,19 +97,21 @@ describe("border coast shaping", () => {
   });
 
   it("preserves high terrain on the dry side of beach coast shaping", () => {
+    const beachCfg = beachOnlyConfig();
     const highMountain = 96;
-    const x = cfg.coast.oceanStartCells + cfg.coast.beach.beachShelfCells + 12;
+    const x = beachCfg.coast.oceanStartCells + beachCfg.coast.beach.beachShelfCells + 12;
     const z = worldCells * 0.5;
-    const shaped = applyBorderCoastShape(x, z, highMountain, cfg, worldCells);
+    const shaped = applyBorderCoastShape(x, z, highMountain, beachCfg, worldCells);
 
     expect(shaped).toBeGreaterThan(highMountain - 1);
   });
 
   it("still smooths low beach terrain on the dry side", () => {
-    const lowBackshore = cfg.ocean.surfaceY + cfg.coast.beach.backshoreHeightAboveWater + 1;
-    const x = cfg.coast.oceanStartCells + cfg.coast.beach.beachShelfCells + 4;
+    const beachCfg = beachOnlyConfig();
+    const lowBackshore = beachCfg.ocean.surfaceY + beachCfg.coast.beach.backshoreHeightAboveWater + 1;
+    const x = beachCfg.coast.oceanStartCells + beachCfg.coast.beach.beachShelfCells + 4;
     const z = worldCells * 0.5;
-    const shaped = applyBorderCoastShape(x, z, lowBackshore, cfg, worldCells);
+    const shaped = applyBorderCoastShape(x, z, lowBackshore, beachCfg, worldCells);
 
     expect(shaped).toBeLessThan(lowBackshore);
   });
