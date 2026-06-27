@@ -4,6 +4,7 @@ import { DEFAULT_PLAYER_CONFIG } from "../player_controller.js";
 import {
   parseBorderOceanGameplayConfig,
   resolvePlayerConfigForBorderOcean,
+  validateBorderOceanGameplayConfig,
 } from "./border_ocean_player_config.js";
 
 describe("border ocean player config", () => {
@@ -41,14 +42,47 @@ describe("border ocean player config", () => {
       {
         softPushbackEnabled: false,
         worldEdgeMarginM: 16,
-        pushbackStartInsideWorldM: 80,
-        pushbackStrength: 42,
+        pushbackStartInsideWorldM: 0,
+        pushbackStrength: 0,
       },
     );
 
     expect(playerConfig.worldEdgeMargin).toBe(16);
     expect(playerConfig.worldEdgePushbackBand).toBe(0);
     expect(playerConfig.worldEdgePushbackAcceleration).toBe(0);
+  });
+
+  it("fails when hard clamp margin is disabled", () => {
+    expect(() =>
+      validateBorderOceanGameplayConfig({
+        softPushbackEnabled: false,
+        worldEdgeMarginM: 0,
+        pushbackStartInsideWorldM: 0,
+        pushbackStrength: 0,
+      }),
+    ).toThrow("worldEdgeMarginM must be > 0");
+  });
+
+  it("fails when enabled soft pushback has no band", () => {
+    expect(() =>
+      validateBorderOceanGameplayConfig({
+        softPushbackEnabled: true,
+        worldEdgeMarginM: 16,
+        pushbackStartInsideWorldM: 0,
+        pushbackStrength: 36,
+      }),
+    ).toThrow("pushbackStartInsideWorldM must be > 0");
+  });
+
+  it("fails when enabled soft pushback has no acceleration", () => {
+    expect(() =>
+      validateBorderOceanGameplayConfig({
+        softPushbackEnabled: true,
+        worldEdgeMarginM: 16,
+        pushbackStartInsideWorldM: 48,
+        pushbackStrength: 0,
+      }),
+    ).toThrow("pushbackStrength must be > 0");
   });
 
   it("falls back to player defaults when gameplay config is absent", () => {
