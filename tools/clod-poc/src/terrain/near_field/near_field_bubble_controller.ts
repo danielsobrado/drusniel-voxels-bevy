@@ -126,6 +126,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const P = deps.cfg.page.chunks_per_page;
   const S = deps.cfg.page.chunk_size;
   const pageSize = P * S;
+  const liveStreamingEnabled = deps.streamingLiveTerrain ?? true;
   const chunkGroups = new Map<string, ChunkGroupEntry>();
 
   const pageCenter = (node: ClodPageNode): [number, number] => [
@@ -140,7 +141,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   };
 
   const buildWorldBoundsForPage = (px: number, pz: number): WorldBounds => {
-    if (!deps.streamingLiveTerrain) return deps.worldBounds;
+    if (!liveStreamingEnabled) return deps.worldBounds;
     if (pageIntersectsFiniteWorld(px, pz, pageSize, deps.worldBounds)) return deps.worldBounds;
     return { ...deps.worldBounds, finite: false };
   };
@@ -341,7 +342,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           }
         }
 
-        if (deps.streamingLiveTerrain) {
+        if (liveStreamingEnabled) {
           for (const coord of requiredStreamingPageCoords(input.bubbleCenter, input.bubbleRadius, pageSize)) {
             const key = pageGroupKey(coord.px, coord.pz);
             let grp = chunkGroups.get(key);
