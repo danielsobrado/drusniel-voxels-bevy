@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { clamp, dot, float, max, mix, normalGeometry, normalize, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+import { clamp, cos, dot, float, max, mix, normalGeometry, normalize, positionGeometry, positionWorld, pow, sin, smoothstep, uniform, vec2, vec3 } from "three/tsl";
 import { vertexColor } from "three/tsl";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
@@ -33,12 +33,18 @@ export interface FarTerrainUniformRefs {
   uGroundColor: ReturnType<typeof uniform>;
 }
 
+export interface FarTerrainMaterialOptions {
+  gpuDisplacement?: boolean;
+  heightBiasMeters?: number;
+}
+
 export function createFarTerrainMaterial(
   lighting: FarShellLighting,
   config: FarTerrainUniformData,
   centerX: number,
   centerZ: number,
   _farRadius: number,
+  options: FarTerrainMaterialOptions = {},
 ): MeshBasicNodeMaterial {
   const uSunDir = uniform(lighting.sunDirection.clone());
   const uSunColor = uniform(vec3(lighting.sunColor.r, lighting.sunColor.g, lighting.sunColor.b));
@@ -76,6 +82,22 @@ export function createFarTerrainMaterial(
   const material = new MeshBasicNodeMaterial();
   material.colorNode = final;
   material.side = THREE.DoubleSide;
+
+  if (options.gpuDisplacement) {
+    const local = positionGeometry;
+    const worldX = local.x.add(uCenterX);
+    const worldZ = local.z.add(uCenterZ);
+    const continent = sin(worldX.mul(0.0017).add(worldZ.mul(0.0011))).mul(18.0);
+    const hills = sin(worldX.mul(0.009).add(worldZ.mul(0.006))).mul(7.0)
+      .add(cos(worldX.mul(0.013).sub(worldZ.mul(0.011))).mul(5.0));
+    const detail = sin(worldX.mul(0.041).add(worldZ.mul(0.033))).mul(1.4);
+    const terrainHeight = float(46.0)
+      .add(continent)
+      .add(hills)
+      .add(detail)
+      .add(float(options.heightBiasMeters ?? 0));
+    material.positionNode = vec3(local.x, terrainHeight, local.z);
+  }
 
   const refs: FarTerrainUniformRefs = {
     uCenterX, uCenterZ,
@@ -218,7 +240,6 @@ export function createVertexColorBuffer(
       const dist = Math.hypot(x - cx, z - cz);
       const raw = cpuSmoothstep(config.hazeStartM, config.hazeEndM, dist);
       const haze = raw * config.hazeStrength * config.hazeEnabled;
-      // Blue heatmap: dark at zero haze, bright cyan-blue at full strength.
       colors[vi * 3] = Math.min(1, Math.max(0, haze * 0.1));
       colors[vi * 3 + 1] = Math.min(1, Math.max(0, haze * 0.55));
       colors[vi * 3 + 2] = Math.min(1, Math.max(0, 0.05 + haze * 0.95));
