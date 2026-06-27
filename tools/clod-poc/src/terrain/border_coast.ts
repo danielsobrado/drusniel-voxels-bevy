@@ -10,21 +10,24 @@ export interface CoastProfile {
 
 const COAST_NOISE_SEED = 99173;
 const SHORELINE_MEANDER_CELLS = 10;
-const MAX_COAST_BAND_WORLD_FRACTION = 0.25;
-const MIN_DYNAMIC_COAST_BAND_CELLS = 32;
+const MAX_COAST_BLEND_CELLS = 16;
+const MIN_INLAND_CORE_WORLD_FRACTION = 0.18;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-function dynamicCoastBand(config: BorderCoastBandConfig, worldCells: number): BorderCoastBandConfig {
+function maxCoastBandCellsForWorld(worldCells: number): number {
+  const halfWorldCells = Math.max(1, Math.floor(worldCells * 0.5));
+  const inlandCoreCells = Math.max(8, Math.floor(halfWorldCells * MIN_INLAND_CORE_WORLD_FRACTION));
+  return Math.max(1, halfWorldCells - inlandCoreCells - MAX_COAST_BLEND_CELLS);
+}
+
+function resolveCoastBandForWorld(config: BorderCoastBandConfig, worldCells: number): BorderCoastBandConfig {
   const configuredBandCells = config.oceanStartCells + config.shoreBackshoreCells;
   if (worldCells <= 0 || configuredBandCells <= 0) return config;
 
-  const maxBandCells = Math.max(
-    MIN_DYNAMIC_COAST_BAND_CELLS,
-    Math.floor(worldCells * MAX_COAST_BAND_WORLD_FRACTION),
-  );
+  const maxBandCells = maxCoastBandCellsForWorld(worldCells);
   if (configuredBandCells <= maxBandCells) return config;
 
   const scale = maxBandCells / configuredBandCells;
@@ -82,12 +85,12 @@ function shorelineMeander(x: number, z: number, edgeDistance: number, config: Bo
 
 function effectiveCoastDistance(x: number, z: number, config: BorderCoastBandConfig, worldCells: number): number {
   const base = worldEdgeDistance(x, z, worldCells);
-  return Math.max(0, base + shorelineMeander(x, z, base, dynamicCoastBand(config, worldCells)));
+  return Math.max(0, base + shorelineMeander(x, z, base, config));
 }
 
 /** 0 outside the coast band, rising toward 1 at the world edge. */
 export function coastMask(x: number, z: number, config: BorderCoastBandConfig, worldCells: number): number {
-  const coast = dynamicCoastBand(config, worldCells);
+  const coast = resolveCoastBandForWorld(config, worldCells);
   const edgeDistance = effectiveCoastDistance(x, z, coast, worldCells);
   const bandEnd = coast.oceanStartCells + coast.shoreBackshoreCells;
   if (edgeDistance < 0 || edgeDistance >= bandEnd) return 0;
@@ -136,7 +139,7 @@ export function shorelineProfile(
   config: BorderCoastBandConfig,
   worldCells: number,
 ): CoastProfile | null {
-  const coast = dynamicCoastBand(config, worldCells);
+  const coast = resolveCoastBandForWorld(config, worldCells);
   const edgeDistance = effectiveCoastDistance(x, z, coast, worldCells);
   const bandEnd = coast.oceanStartCells + coast.shoreBackshoreCells;
   if (edgeDistance < 0 || edgeDistance >= bandEnd) return null;
@@ -190,10 +193,10 @@ export function applyBorderCoastShape(
 ): number {
   if (!config.enabled || worldCells <= 0) return inlandHeight;
 
-  const coast = dynamicCoastBand(config.coast, worldCells);
+  const coast = resolveCoastBandForWorld(config.coast, worldCells);
   const edgeDistance = effectiveCoastDistance(x, z, coast, worldCells);
   const bandEnd = coast.oceanStartCells + coast.shoreBackshoreCells;
-  const fadeCells = Math.min(coast.shoreBackshoreCells, 16);
+  const fadeCells = Math.min(coast.shoreBackshoreCells, MAX_COAST_BLEND_CELLS);
   if (edgeDistance < 0 || edgeDistance >= bandEnd + fadeCells) return inlandHeight;
 
   const cliffW = sampleCoastCliffWeight(x, z, coast);
