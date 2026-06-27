@@ -51,6 +51,7 @@ export function cullPropSpatialGrid(
   settings: CustomPropsSettings,
   metadataByAssetId: ReadonlyMap<string, PropAssetMetadata>,
   frameId: number,
+  candidateCells: readonly PropGridCell[] = grid.allCells(),
 ): PropCullResult {
   const visibleCellKeys = new Set<string>();
   const visibleInstanceIndices: number[] = [];
@@ -65,7 +66,7 @@ export function cullPropSpatialGrid(
     settings.spatial.cellSizeM,
   );
 
-  for (const cell of grid.allCells()) {
+  for (const cell of candidateCells) {
     const key = cellKey(cell.cellCoord);
     const dist = cellDistance(cameraPos, cell);
 
