@@ -80,6 +80,7 @@ export function createFarTerrainMaterial(
   const final = mix(lit, uHazeColor, hazeFactor);
 
   const material = new MeshBasicNodeMaterial();
+  material.vertexColors = true;
   material.colorNode = final;
   material.side = THREE.DoubleSide;
 
