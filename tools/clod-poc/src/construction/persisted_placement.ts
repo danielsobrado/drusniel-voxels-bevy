@@ -95,7 +95,8 @@ function validatePersistedSupport(
   allowLegacySupportMetadata: boolean,
 ): { valid: boolean; reason: string | null } {
   if (hasLegacySupportMetadata(placed)) {
-    return allowLegacySupportMetadata ? { valid: true, reason: null } : { valid: false, reason: "missing support" };
+    if (!allowLegacySupportMetadata) return { valid: false, reason: "missing support" };
+    return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
   }
   if (placed.grounded === true) {
     return piece.canGround ? { valid: true, reason: null } : { valid: false, reason: "invalid support" };
