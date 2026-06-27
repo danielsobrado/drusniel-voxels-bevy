@@ -46,28 +46,31 @@ const parityConfig: FarTerrainUniformData = {
   freezeMaterialLod: 0,
 };
 
+function makeShell(overrides: Partial<ConstructorParameters<typeof InfiniteFarShell>[0]> = {}): InfiniteFarShell {
+  return new InfiniteFarShell({
+    innerMeters: 16,
+    outerMeters: 32,
+    radialSegments: 2,
+    angularSegments: 4,
+    heightBiasMeters: 0,
+    nearBlendMeters: 1,
+    farFadeMeters: 8,
+    macroBlendStartMeters: 16,
+    macroBlendEndMeters: 32,
+    rebaseSnapMeters: 16,
+    lighting: {
+      sunDirection: new THREE.Vector3(0, 1, 0),
+      sunColor: new THREE.Color(1, 1, 1),
+      skyLight: new THREE.Color(1, 1, 1),
+      groundLight: new THREE.Color(0.2, 0.2, 0.2),
+    },
+    ...overrides,
+  });
+}
+
 describe("InfiniteFarShell height sampling mode", () => {
   it("keeps CPU provider heights as the default with parity material", () => {
-    const shell = new InfiniteFarShell({
-      innerMeters: 16,
-      outerMeters: 32,
-      radialSegments: 2,
-      angularSegments: 4,
-      heightBiasMeters: 0,
-      nearBlendMeters: 1,
-      farFadeMeters: 8,
-      macroBlendStartMeters: 16,
-      macroBlendEndMeters: 32,
-      rebaseSnapMeters: 16,
-      lighting: {
-        sunDirection: new THREE.Vector3(0, 1, 0),
-        sunColor: new THREE.Color(1, 1, 1),
-        skyLight: new THREE.Color(1, 1, 1),
-        groundLight: new THREE.Color(0.2, 0.2, 0.2),
-      },
-      useParityMaterial: true,
-      parityConfig,
-    });
+    const shell = makeShell({ useParityMaterial: true, parityConfig });
 
     shell.setHeightProvider({
       sampleHeight: () => 123,
@@ -76,6 +79,17 @@ describe("InfiniteFarShell height sampling mode", () => {
 
     const positions = shell.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
     expect(positions.getY(0)).toBe(123);
+    shell.dispose();
+  });
+
+  it("updates missing-summary debug fallback through a material uniform", () => {
+    const shell = makeShell();
+    const material = shell.mesh.material as import("three/webgpu").MeshBasicNodeMaterial;
+
+    shell.setDebugShowMissingFallback(true);
+
+    const refs = material.userData.farShellMaterialUniforms as { uDebugFallback: { value: number } };
+    expect(refs.uDebugFallback.value).toBe(1);
     shell.dispose();
   });
 });
