@@ -41,6 +41,11 @@ export interface SnappedCenter {
   snappedZ: number;
 }
 
+function resolveHeightSamplingMode(options: InfiniteFarShellOptions): FarShellHeightSamplingMode {
+  const requested = options.heightSamplingMode ?? (options.useParityMaterial ? "gpu" : "cpu");
+  return requested === "gpu" && options.useParityMaterial && options.parityConfig ? "gpu" : "cpu";
+}
+
 export class InfiniteFarShell {
   readonly mesh: THREE.Mesh;
   private readonly options: InfiniteFarShellOptions;
@@ -66,7 +71,7 @@ export class InfiniteFarShell {
 
   constructor(options: InfiniteFarShellOptions) {
     this.options = options;
-    this.heightSamplingMode = options.heightSamplingMode ?? (options.useParityMaterial ? "gpu" : "cpu");
+    this.heightSamplingMode = resolveHeightSamplingMode(options);
     this.metrics = options.metrics ?? {
       farShellEnabled: true,
       farShellInnerM: options.innerMeters,
