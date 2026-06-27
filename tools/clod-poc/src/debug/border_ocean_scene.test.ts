@@ -11,6 +11,7 @@ describe("border-ocean acceptance probes", () => {
   it("validates playable ocean outside the square", () => {
     const sampler = createDeepOceanSampler(1024, {
       ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
+      startOutsideBorderM: 64,
       extendCells: 384,
       surfaceY: 18,
       segments: 64,
@@ -28,6 +29,7 @@ describe("border-ocean acceptance probes", () => {
         "border_ocean.deep_ocean_enabled": 1,
         "border_ocean.deep_ocean_mesh_present": 1,
         "border_ocean.deep_ocean_vertices": 5000,
+        "border_ocean.deep_ocean_start_outside_m": 64,
         "border_ocean.deep_ocean_extend_m": 4096,
         "border_ocean.deep_ocean_surface_y": 18,
         "border_ocean.wave_count": 54,
