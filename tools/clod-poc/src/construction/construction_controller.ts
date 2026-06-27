@@ -1,13 +1,13 @@
 import * as THREE from "three";
 import { surfaceHeight } from "../terrain/terrain.js";
 import { defaultConstructionConfig } from "./config.js";
+import { createConstructionMaterial } from "./materials.js";
 import { createConstructionCandidate, createFreePlacementPosition, type TerrainHitPoint } from "./placement.js";
 import { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
 import { ConstructionSnapIndex } from "./snap_index.js";
 import type {
   ConstructionCandidate,
   ConstructionConfig,
-  ConstructionMaterial,
   ConstructionPieceDef,
   ConstructionSnapResult,
   ConstructionTerrainConformRequest,
@@ -22,13 +22,6 @@ const ROTATION_QUARTER_COUNT = 4;
 const RAYCAST_REFINE_STEPS = 12;
 const ENTITY_ID_PREFIX = "piece-";
 const BUILD_POINTER_OPTIONS = { capture: true } as const;
-
-const MATERIAL_COLORS: Record<ConstructionMaterial, number> = {
-  wood: 0x9a673a,
-  stone: 0x7f858c,
-  metal: 0x777f8a,
-  thatch: 0xb59b52,
-};
 
 function escapeHtml(value: string): string {
   return value
@@ -521,7 +514,7 @@ class ConstructionControllerImpl implements ConstructionController {
     if (!normalized) return false;
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(piece.dimensionsM[0], piece.dimensionsM[1], piece.dimensionsM[2]),
-      new THREE.MeshStandardMaterial({ color: MATERIAL_COLORS[piece.material], roughness: 0.78 }),
+      createConstructionMaterial(piece.material),
     );
     mesh.name = `construction-${normalized.typeId}`;
     mesh.position.set(normalized.position[0], normalized.position[1], normalized.position[2]);
