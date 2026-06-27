@@ -4,6 +4,7 @@ import {
   canopyTextureConfigKey,
   shellCenterForTextureSet,
   shellGridForTriangleBudget,
+  shouldAttemptTextureUpload,
   shouldRebuildCanopyShell,
   treeDistributionConfigKey,
 } from "./canopy_system.js";
@@ -42,6 +43,15 @@ describe("shellGridForTriangleBudget", () => {
     expect(shellGridForTriangleBudget(250000)).toBe(192);
     expect(shellGridForTriangleBudget(8000)).toBe(63);
     expect(shellGridForTriangleBudget(512)).toBe(16);
+  });
+});
+
+describe("shouldAttemptTextureUpload", () => {
+  it("returns true only while upload capacity remains", () => {
+    expect(shouldAttemptTextureUpload(0, 0)).toBe(false);
+    expect(shouldAttemptTextureUpload(1, 0)).toBe(true);
+    expect(shouldAttemptTextureUpload(1, 1)).toBe(false);
+    expect(shouldAttemptTextureUpload(2, 1)).toBe(true);
   });
 });
 
