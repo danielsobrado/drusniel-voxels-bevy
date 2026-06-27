@@ -16,6 +16,8 @@ precision mediump float;
 #endif
 
 uniform vec2 uResolution;
+uniform vec2 uOrigin;
+uniform vec2 uTarget;
 uniform float uTime;
 uniform float uProgress;
 uniform float uScale;
@@ -56,8 +58,8 @@ void main() {
   float aspect = uResolution.x / max(uResolution.y, 1.0);
   vec2 p = vec2((vUv.x - 0.5) * aspect, vUv.y - 0.5);
 
-  vec2 origin = vec2(0.33 * aspect, -0.47);
-  vec2 target = vec2(0.0, 0.055);
+  vec2 origin = vec2(uOrigin.x * aspect, uOrigin.y);
+  vec2 target = vec2(uTarget.x * aspect, uTarget.y);
   vec2 dir = normalize(target - origin);
   vec2 perp = vec2(-dir.y, dir.x);
   vec2 rel = p - origin;
