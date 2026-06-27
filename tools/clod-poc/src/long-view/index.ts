@@ -10,7 +10,7 @@ export { createFarShellMetrics, resetFrameShellMetrics, exposeMetricsOnWindow, g
 export type { FarShellMetrics } from "./farShellMetrics.js";
 
 export { InfiniteFarShell, createInfiniteFarShell } from "./infiniteFarShell.js";
-export type { InfiniteFarShellOptions, SnappedCenter } from "./infiniteFarShell.js";
+export type { FarShellHeightSamplingMode, InfiniteFarShellOptions, SnappedCenter } from "./infiniteFarShell.js";
 
 export { createInfiniteFarShellMaterial, updateFarShellMaterialMaterial } from "./infiniteFarShellMaterial.js";
 export type { InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";

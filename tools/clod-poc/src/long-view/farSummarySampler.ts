@@ -4,8 +4,17 @@ import { sampleMacroTerrainHeight, sampleMacroTerrainNormal, sampleMacroTerrainM
 import type { FarShellMetrics } from "./farShellMetrics.js";
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  const span = edge1 - edge0;
+  if (Math.abs(span) < 1e-8) return x < edge1 ? 0 : 1;
+  const t = Math.max(0, Math.min(1, (x - edge0) / span));
   return t * t * (3 - 2 * t);
+}
+
+function isFiniteNormal(normal: THREE.Vector3): boolean {
+  return Number.isFinite(normal.x)
+    && Number.isFinite(normal.y)
+    && Number.isFinite(normal.z)
+    && normal.lengthSq() > 1e-8;
 }
 
 export interface FarSummarySamplerOptions {
@@ -63,7 +72,7 @@ export function sampleBlendedHeightNormalMaterial(
     summaryNormal = heightProvider.sampleNormal(x, z);
     summaryMaterial = heightProvider.sampleMaterial?.(x, z) ?? 0;
 
-    if (!Number.isFinite(summaryHeight)) {
+    if (!Number.isFinite(summaryHeight) || !isFiniteNormal(summaryNormal)) {
       usedFallback = true;
       const m = getMacro();
       summaryHeight = m.height;

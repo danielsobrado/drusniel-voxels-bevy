@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
+import { createFarShellMetrics } from "./farShellMetrics.js";
 import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 
@@ -58,5 +59,31 @@ describe("far summary sampler", () => {
     expect(calls.height).toBe(1);
     expect(calls.normal).toBe(1);
     expect(calls.material).toBe(1);
+  });
+
+  it("handles zero-width macro blend ranges", () => {
+    const sample = sampleBlendedHeightNormalMaterial(0, 0, 10, undefined, {
+      macroBlendStartMeters: 10,
+      macroBlendEndMeters: 10,
+    });
+
+    expect(Number.isFinite(sample.height)).toBe(true);
+    expect(Number.isFinite(sample.normal.x)).toBe(true);
+  });
+
+  it("falls back when provider returns invalid normals", () => {
+    const metrics = createFarShellMetrics();
+    const sample = sampleBlendedHeightNormalMaterial(0, 0, 0, {
+      sampleHeight: () => 10,
+      sampleNormal: () => new THREE.Vector3(Number.NaN, 0, 0),
+    }, {
+      macroBlendStartMeters: 1000,
+      macroBlendEndMeters: 2000,
+      metrics,
+    });
+
+    expect(Number.isFinite(sample.height)).toBe(true);
+    expect(Number.isFinite(sample.normal.x)).toBe(true);
+    expect(metrics.farSummaryFallbackSamples).toBe(1);
   });
 });

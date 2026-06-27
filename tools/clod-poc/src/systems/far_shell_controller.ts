@@ -5,6 +5,7 @@ import { buildFarCanopyShell } from "../gpu/far_canopy_shell.js";
 import { buildFarTerrainShell, type FarHeightProvider } from "../gpu/far_terrain_shell.js";
 import { FAR_SHELL_DEFAULTS } from "../app/clod_constants.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import { updateFarTerrainMaterialCenter } from "../farTerrain/farTerrainMaterial.js";
 
 export interface FarShellInstance {
   mesh: THREE.Mesh;
@@ -63,6 +64,14 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
   let buildCenterX = currentCenterX;
   let buildCenterZ = currentCenterZ;
 
+  const parityMaterialEnabled = (): boolean => Boolean(deps.useParityMaterial?.() && deps.getParityConfig?.());
+
+  const syncParityMaterialCenter = (mesh: THREE.Mesh, x: number, z: number): void => {
+    if (!parityMaterialEnabled()) return;
+    if (Array.isArray(mesh.material)) return;
+    updateFarTerrainMaterialCenter(mesh.material as import("three/webgpu").MeshBasicNodeMaterial, x, z);
+  };
+
   const resolveFarRadius = (radiusFactor: number): number =>
     currentFarRadiusOverride && currentFarRadiusOverride > 0
       ? currentFarRadiusOverride
@@ -110,13 +119,14 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
       buildRelative: useRelativeBuild,
       receiveSunShadows: deps.receiveSunShadows?.() ?? false,
       useDebugLambertReceiver: deps.useDebugLambertReceiver?.() ?? false,
-      useParityMaterial: deps.useParityMaterial?.() ?? false,
+      useParityMaterial: parityMaterialEnabled(),
       parityConfig: deps.getParityConfig?.(),
     });
     buildCenterX = result.buildCenterX;
     buildCenterZ = result.buildCenterZ;
     if (useRelativeBuild) {
       result.mesh.position.set(currentCenterX, 0, currentCenterZ);
+      syncParityMaterialCenter(result.mesh, currentCenterX, currentCenterZ);
     }
     current = result;
     deps.scene.add(result.mesh);
@@ -136,6 +146,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
   const moveTo = (x: number, z: number) => {
     if (!current) return;
     current.mesh.position.set(x - buildCenterX, 0, z - buildCenterZ);
+    syncParityMaterialCenter(current.mesh, x, z);
     currentCenterX = x;
     currentCenterZ = z;
   };

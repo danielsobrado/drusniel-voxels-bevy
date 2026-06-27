@@ -38,9 +38,9 @@ grass:
   lod:
     near_fraction: 0.42
     mid_fraction: 0.78
-    far_density_ratio: 0.18
+    far_density_ratio: 0.14
     mid_instance_fraction: 0.35
-    far_instance_fraction: 0.12
+    far_instance_fraction: 0.10
     dither_band_m: 12
 
   blade:
@@ -51,9 +51,9 @@ grass:
     mid_blades_per_instance: 3
     near_segments: 4
     mid_segments: 2
-    far_tuft_width_m: 0.28
+    far_tuft_width_m: 0.14
     near_crossed_quads: true
-    max_width_compensation: 2.6
+    max_width_compensation: 1.35
 
   wind:
     direction: [0.8, 0.6]
