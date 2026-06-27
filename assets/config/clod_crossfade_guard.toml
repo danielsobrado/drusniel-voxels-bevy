@@ -1,0 +1,45 @@
+# Bench-only guard for the CLOD crossfade CSV emitted when
+# VOXEL_CLOD_CROSSFADE_STATS_CSV=1 is enabled.
+#
+# Typical use:
+#   CLOD_PAGES=1 \
+#   VOXEL_CLOD_CROSSFADE_BRIDGE=1 \
+#   VOXEL_CLOD_CROSSFADE_MATERIAL=1 \
+#   VOXEL_CLOD_CROSSFADE_STATS_CSV=1 \
+#   VOXEL_CLOD_CROSSFADE_STATS_CSV_PATH=bench-runs/<run>/clod-crossfade-runtime.csv \
+#   cargo run --release -- --bench bench/scenes/visual/visual-regression-live-lod.toml
+#   cargo run --bin clod_crossfade_guard -- bench-runs/<run>/clod-crossfade-runtime.csv
+
+[crossfade]
+min_samples = 1
+
+# Dedicated crossfade benches should run with the material path enabled.
+require_material_enabled = true
+max_material_disabled_frames = 0
+
+# Generic benches can set this to 0. Dedicated live-LOD/crossfade benches can
+# raise it to ensure at least one transition actually happened.
+min_transitions_observed = 0
+
+# If a transition happens, alpha should move through the interval rather than
+# staying pinned at a single value.
+require_alpha_motion_when_transitioning = true
+
+# Alpha values should remain normalized.
+min_allowed_alpha = 0.0
+max_allowed_alpha = 1.0
+
+# At the end of a deterministic bench, old fade-out pages should have been
+# removed from visibility/render state.
+max_final_fade_out_pages = 0
+max_final_fade_out_entities = 0
+
+# Runtime says pages are fading, but ECS has no fade components. A few samples
+# can be tolerated around startup in generic benches; keep zero for strict runs.
+max_rows_with_fading_runtime_and_no_entities = 0
+
+# The exported role counters should sum back to faded_entities.
+max_role_sum_mismatch_rows = 0
+
+# Visible faded entities should never exceed all faded entities.
+max_visible_faded_entity_overflow_rows = 0
