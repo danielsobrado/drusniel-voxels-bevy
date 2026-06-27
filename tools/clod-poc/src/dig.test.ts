@@ -208,7 +208,7 @@ describe("rebuildDirtyPages", () => {
       cfg,
     );
 
-    expect(rebuild.lod0Pages).toBe(4);
+    expect(rebuild.lod0Pages).toBe(2);
     expect(rebuild.parentNodes).toBe(1);
     expect(a.mesh.indices.length).not.toBe(trisBefore);
     assertBorderMatch(
@@ -231,7 +231,7 @@ describe("rebuildDirtyPages", () => {
       cfg,
     );
 
-    expect(rebuild.lod0Pages).toBe(4);
+    expect(rebuild.lod0Pages).toBe(2);
     assertBorderMatch(
       borderChain(a.mesh, "x", 32, a.footprint),
       borderChain(b.mesh, "x", 32, b.footprint),
@@ -257,7 +257,7 @@ describe("rebuildDirtyPages", () => {
     expect(node.mesh.indices.length).toBeGreaterThan(trisBefore);
   });
 
-  it("per-chunk rebuild avoids remeshing clean sibling pages", () => {
+  it("per-chunk rebuild avoids reporting clean sibling pages", () => {
     const world = { cellsX: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size, cellsZ: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size };
     const result = buildWorld(2, 2, cfg);
     const node = result.nodesByLevel.get(0)!.find((n) => n.id === "L0:0,0")!;
@@ -269,6 +269,7 @@ describe("rebuildDirtyPages", () => {
     const dirty = { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin };
 
     const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, buildNodeIndex(result));
+    expect(lod0.lod0Pages).toBe(1);
     expect(lod0.chunksTotal).toBe(cfg.page.chunks_per_page ** 2 * 4);
     expect(lod0.chunksRemeshed).toBe(cfg.page.chunks_per_page ** 2);
     expect(lod0.chunksRemeshed).toBeLessThan(lod0.chunksTotal);
@@ -291,6 +292,7 @@ describe("rebuildDirtyPages", () => {
     const dirty = { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin };
 
     const lod0 = rebuildDirtyLod0Pages(result, dirty, uiCfg, buildNodeIndex(result));
+    expect(lod0.lod0Pages).toBe(1);
     expect(lod0.chunksTotal).toBe(uiCfg.page.chunks_per_page ** 2 * 4);
     expect(lod0.chunksRemeshed).toBe(4);
     expect(lod0.chunksRemeshed).toBeLessThan(uiCfg.page.chunks_per_page ** 2);
