@@ -45,8 +45,8 @@ trees:
       impostor_max_vertices: 240
 
   impostors:
-    enabled: true
-    bake_on_start: true
+    enabled: false
+    bake_on_start: false
     fallback_to_placeholder: false
     source_lod: mid
     resolution_px: 128
