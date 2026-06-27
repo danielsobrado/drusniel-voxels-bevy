@@ -7,14 +7,13 @@ import type { DigEdit, VoxelEditSnapshot } from "../terrain/terrain.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
-const TERRAIN_SOURCE_CACHE_VERSION = "coast-band-v3";
+const TERRAIN_SOURCE_VERSION = "rectangular-world-v1";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
   return sha256Hex(textEncoder.encode(json).buffer);
 }
 
-/** Sampled digest for large mesh payloads in artifact headers — not used for terrain invalidation. */
 export async function lightweightArrayDigest(arr: ArrayLike<number>): Promise<string> {
   const len = arr.length;
   if (len === 0) return "empty";
@@ -40,7 +39,6 @@ function roundCoord(v: number): number {
   return Math.round(v * 1000) / 1000;
 }
 
-/** Stable dig-edit ordering for cache/debug callers that still key on brush metadata. */
 export function canonicalizeDigEdits(edits: readonly DigEdit[]) {
   return edits
     .map((e) => ({
@@ -75,6 +73,8 @@ export interface TerrainSourceInputs {
   scene: string;
   worldSeed: string;
   worldPages: number;
+  worldPagesX?: number;
+  worldPagesZ?: number;
   generatorVersion: string;
   digRevision: number;
   hydrologyTerrain: SerializedHydrologyTerrain | null;
@@ -89,17 +89,18 @@ export interface TerrainSourceInputs {
   longViewScene: boolean;
 }
 
-/** Normalize terrain source fields after worker postMessage (defensive against partial payloads). */
 export function normalizeTerrainSourceInputs(
   input: TerrainSourceInputs | undefined | null,
 ): TerrainSourceInputs {
   if (!input) {
-    throw new Error("terrainSource is required for CLOD cache invalidation");
+    throw new Error("terrainSource is required");
   }
   return {
     scene: input.scene ?? "default",
     worldSeed: input.worldSeed ?? "0",
     worldPages: input.worldPages ?? 0,
+    worldPagesX: input.worldPagesX ?? input.worldPages ?? 0,
+    worldPagesZ: input.worldPagesZ ?? input.worldPagesX ?? input.worldPages ?? 0,
     generatorVersion: input.generatorVersion ?? "unknown",
     digRevision: input.digRevision ?? 0,
     hydrologyTerrain: input.hydrologyTerrain ?? null,
@@ -143,10 +144,12 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
   const hydrologyHash = await hashHydrologyTerrain(source.hydrologyTerrain);
   const borderCoastHash = await hashBorderCoastConfig(source.borderCoastOceanConfig);
   return hashJson({
-    terrainSourceCacheVersion: TERRAIN_SOURCE_CACHE_VERSION,
+    terrainSourceVersion: TERRAIN_SOURCE_VERSION,
     scene: source.scene,
     worldSeed: source.worldSeed,
     worldPages: source.worldPages,
+    worldPagesX: source.worldPagesX,
+    worldPagesZ: source.worldPagesZ,
     generatorVersion: source.generatorVersion,
     digRevision: source.digRevision,
     hydrologyHash,
