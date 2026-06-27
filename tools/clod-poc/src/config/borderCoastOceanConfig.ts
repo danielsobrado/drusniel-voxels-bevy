@@ -88,6 +88,9 @@ export interface SurfConfig {
 }
 
 export interface DeepOceanWaveConfig {
+  gravity: number;
+  grid_k: number;
+  active_gpu_waves: number;
   wind_speed: number;
   wind_direction_deg: number;
   height_scale: number;
@@ -97,6 +100,7 @@ export interface DeepOceanWaveConfig {
   foam_threshold: number;
   foam_power: number;
   foam_intensity: number;
+  swell_height_scale: number;
 }
 
 export interface DeepOceanShadingConfig {
@@ -378,6 +382,9 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
       near_subdivisions: integerAt(deepOcean, "near_subdivisions", "deep_ocean", 1),
       far_subdivisions: integerAt(deepOcean, "far_subdivisions", "deep_ocean", 1),
       wave: {
+        gravity: numberAt(wave, "gravity", "deep_ocean.wave", Number.MIN_VALUE),
+        grid_k: integerAt(wave, "grid_k", "deep_ocean.wave", 2),
+        active_gpu_waves: integerAt(wave, "active_gpu_waves", "deep_ocean.wave", 1),
         wind_speed: numberAt(wave, "wind_speed", "deep_ocean.wave", 0),
         wind_direction_deg: numberAt(wave, "wind_direction_deg", "deep_ocean.wave"),
         height_scale: numberAt(wave, "height_scale", "deep_ocean.wave", 0),
@@ -387,6 +394,7 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
         foam_threshold: numberAt(wave, "foam_threshold", "deep_ocean.wave", 0, 1),
         foam_power: numberAt(wave, "foam_power", "deep_ocean.wave", 0),
         foam_intensity: numberAt(wave, "foam_intensity", "deep_ocean.wave", 0),
+        swell_height_scale: numberAt(wave, "swell_height_scale", "deep_ocean.wave", 0),
       },
       shading: {
         deep_color: colorAt(shading, "deep_color", "deep_ocean.shading"),
