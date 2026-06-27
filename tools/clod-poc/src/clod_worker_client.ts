@@ -17,6 +17,8 @@ import {
   type SerializedParentBatch,
 } from "./clod_worker_protocol.js";
 
+const MAX_DIG_EDITS_PER_WORKER_BATCH = 8;
+
 export interface WorkerLod0Rebuild {
   changed: ClodPageNode[];
   dirtyCoords: [number, number][];
@@ -169,17 +171,33 @@ export class ClodWorkerClient {
       while (this.digPending) {
         const batch = this.digPending;
         this.digPending = null;
-        try {
-          const result = await this.sendDigBatch(batch);
-          for (const pending of batch.resolvers) pending.resolve(result);
-        } catch (error) {
-          for (const pending of batch.resolvers) pending.reject(error);
+        for (const part of this.splitDigBatch(batch)) {
+          try {
+            const result = await this.sendDigBatch(part);
+            for (const pending of part.resolvers) pending.resolve(result);
+          } catch (error) {
+            for (const pending of part.resolvers) pending.reject(error);
+          }
         }
       }
     } finally {
       this.digPumpActive = false;
       if (this.digPending) void this.pumpDigQueue();
     }
+  }
+
+  private splitDigBatch(batch: DigBatchSlot): DigBatchSlot[] {
+    if (batch.edits.length <= MAX_DIG_EDITS_PER_WORKER_BATCH) return [batch];
+    const out: DigBatchSlot[] = [];
+    for (let start = 0; start < batch.edits.length; start += MAX_DIG_EDITS_PER_WORKER_BATCH) {
+      const end = Math.min(batch.edits.length, start + MAX_DIG_EDITS_PER_WORKER_BATCH);
+      out.push({
+        edits: batch.edits.slice(start, end),
+        dirtyRegions: batch.dirtyRegions.slice(start, end),
+        resolvers: batch.resolvers.slice(start, end),
+      });
+    }
+    return out;
   }
 
   private sendDigBatch(batch: DigBatchSlot): Promise<WorkerLod0Rebuild> {
