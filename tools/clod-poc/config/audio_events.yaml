@@ -214,6 +214,14 @@ events:
     pitch: 1050
     duration_ms: 60
 
+  spell.fire.cast:
+    enabled: true
+    volume: 0.38
+    cooldown_ms: 180
+    synth: fire_flame
+    pitch: 16000
+    duration_ms: 2600
+
   clod.rebuild.start:
     enabled: true
     volume: 0.12
@@ -298,4 +306,3 @@ events:
     synth: jump
     pitch: 180
     duration_ms: 120
-
