@@ -109,6 +109,7 @@ Both render paths should respect the same resolved visual configuration.
 - WebGPU node material receives the shared resolved visual config.
 - Wave constants are generated from YAML before material creation.
 - Fog distance must come from deep-ocean shading config, not generic lake ripple defaults.
+- The node material must stay transparent through the configured transition gap and only fade in after that gap.
 
 The node material currently derives fog distance from `visual.rippleLoopDistance * 4`. The shared deep-ocean visual resolver maps `fogFarM / 4` into `rippleLoopDistance` to preserve parity without duplicating node material logic.
 
@@ -133,9 +134,12 @@ border_ocean.coast_runtime_active
 border_ocean.deep_ocean_enabled
 border_ocean.deep_ocean_mesh_present
 border_ocean.deep_ocean_vertices
+border_ocean.deep_ocean_triangles
+border_ocean.deep_ocean_draw_calls
 border_ocean.deep_ocean_start_outside_m
 border_ocean.deep_ocean_extend_m
 border_ocean.deep_ocean_surface_y
+border_ocean.deep_ocean_transition_gap_vertices
 border_ocean.wave_count
 border_ocean.wave_wind_speed
 border_ocean.wave_height_scale
@@ -146,11 +150,34 @@ border_ocean.player_margin_m
 border_ocean.player_pushback_band_m
 border_ocean.player_pushback_accel
 border_ocean.player_soft_pushback_enabled
+border_ocean.frame_ms_p95
 border_ocean.page_source_purity
 border_ocean.interior_water_wet_ratio
 border_ocean.playable_ocean_outside_ok
 border_ocean.cliff_dry_above_sea
 ```
+
+## Visual regression
+
+Run the default WebGL visual gate:
+
+```bash
+npm run border-ocean:visual
+```
+
+Run the optional WebGPU parity check when the machine supports WebGPU in Chromium:
+
+```bash
+BORDER_OCEAN_VISUAL_WEBGPU=1 npm run border-ocean:visual
+```
+
+Make WebGPU parity mandatory on a GPU-capable machine:
+
+```bash
+BORDER_OCEAN_VISUAL_WEBGPU=1 BORDER_OCEAN_REQUIRE_WEBGPU=1 npm run border-ocean:visual
+```
+
+The visual runner captures noon, sunset, storm/fog, and cheap-mode WebGL scenes, validates the stats payload, and optionally compares WebGL against WebGPU with thresholds from `config/border_ocean_scene.yaml`.
 
 ## QA checklist
 
@@ -162,13 +189,13 @@ Before changing the border ocean, verify:
 - Enabled soft pushback has a positive band and acceleration.
 - The deep-ocean sampler is false inside the playable square.
 - The deep-ocean sampler is false inside the transition gap.
-- The deep-ocean mesh has no vertices inside the transition gap.
+- The deep-ocean mesh has zero vertices inside the transition gap.
 - Config changes affect generated waves.
 - Strict and runtime config parsers stay aligned.
 - WebGL and WebGPU use the same resolved visual values.
 - The border-ocean acceptance scene still passes.
+- The visual regression command still passes.
 
 ## Future work
 
 TODO: add boat-specific gameplay ownership before allowing travel into the deep ocean ring.
-TODO: add visual regression snapshots for several time-of-day and weather presets.
