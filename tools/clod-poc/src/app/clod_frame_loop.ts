@@ -184,6 +184,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
         deepOcean: waterWeather.deepOceanConfig,
         deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
         oceanSampler: waterWeather.oceanSampler,
+        playerConfig: player.player.config,
       });
     }
 
