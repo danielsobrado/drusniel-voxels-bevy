@@ -125,6 +125,34 @@ describe("ClodWorkerClient parent error lifecycle", () => {
     resolveDig(mockWorker, requestId(thirdCall), 1);
     await expect(queued[8]).resolves.toMatchObject({ requestCount: 1 });
   });
+
+  it("rejects sent and unsent dig work when disposed", async () => {
+    const mockWorker = (client as unknown as { worker: MockWorker }).worker;
+    const first = client.rebuildAfterDig(
+      { x: 0, y: 0, z: 0, r: 1 },
+      { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
+    );
+    expect(digCalls(mockWorker)).toHaveLength(1);
+
+    const queued = client.rebuildAfterDig(
+      { x: 2, y: 0, z: 0, r: 1 },
+      { minX: 2, maxX: 3, minZ: 0, maxZ: 1 },
+    );
+
+    client.dispose();
+
+    await expect(first).rejects.toThrow("disposed");
+    await expect(queued).rejects.toThrow("disposed");
+    expect(mockWorker.terminate).toHaveBeenCalled();
+  });
+
+  it("rejects new dig work after disposal", async () => {
+    client.dispose();
+    await expect(client.rebuildAfterDig(
+      { x: 0, y: 0, z: 0, r: 1 },
+      { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
+    )).rejects.toThrow("stopped");
+  });
 });
 
 function digCalls(worker: MockWorker): Array<Record<string, unknown>> {
