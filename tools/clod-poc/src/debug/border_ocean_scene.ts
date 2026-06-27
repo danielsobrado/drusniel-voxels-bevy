@@ -10,6 +10,31 @@ import { deepOceanSpectrumWaveCount } from "../water/deep_ocean_waves.js";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
 import { getBorderCoastRuntime } from "../terrain/terrain.js";
 
+export const DEFAULT_BORDER_OCEAN_REQUIRED_COUNTERS = Object.freeze([
+  "border_ocean.scene",
+  "border_ocean.coast_runtime_active",
+  "border_ocean.deep_ocean_enabled",
+  "border_ocean.deep_ocean_mesh_present",
+  "border_ocean.deep_ocean_vertices",
+  "border_ocean.deep_ocean_start_outside_m",
+  "border_ocean.deep_ocean_extend_m",
+  "border_ocean.deep_ocean_surface_y",
+  "border_ocean.wave_count",
+  "border_ocean.wave_wind_speed",
+  "border_ocean.wave_height_scale",
+  "border_ocean.wave_choppiness",
+  "border_ocean.shading_fog_far_m",
+  "border_ocean.shading_reflection_strength",
+  "border_ocean.player_margin_m",
+  "border_ocean.player_pushback_band_m",
+  "border_ocean.player_pushback_accel",
+  "border_ocean.player_soft_pushback_enabled",
+  "border_ocean.page_source_purity",
+  "border_ocean.interior_water_wet_ratio",
+  "border_ocean.playable_ocean_outside_ok",
+  "border_ocean.cliff_dry_above_sea",
+] as const);
+
 export interface BorderOceanCamera {
   eye: [number, number, number];
   look: [number, number, number];
@@ -31,6 +56,7 @@ export interface BorderOceanSceneConfig {
   acceptance: {
     minDeepOceanVertices: number;
     maxInteriorWaterWetRatio: number;
+    requiredCounters: readonly string[];
   };
 }
 
@@ -49,6 +75,7 @@ export const DEFAULT_BORDER_OCEAN_SCENE_CONFIG: BorderOceanSceneConfig = {
   acceptance: {
     minDeepOceanVertices: 1000,
     maxInteriorWaterWetRatio: 0.15,
+    requiredCounters: DEFAULT_BORDER_OCEAN_REQUIRED_COUNTERS,
   },
 };
 
@@ -59,6 +86,12 @@ function readNumber(value: unknown, fallback: number): number {
 function readIntegerAtLeast(value: unknown, fallback: number, min: number): number {
   const n = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : fallback;
   return Math.max(min, n);
+}
+
+function readStringArray(value: unknown, fallback: readonly string[]): readonly string[] {
+  if (!Array.isArray(value)) return fallback;
+  const parsed = value.filter((item): item is string => typeof item === "string" && item.length > 0);
+  return parsed.length > 0 ? parsed : fallback;
 }
 
 export function parseBorderOceanSceneConfig(text: string): BorderOceanSceneConfig {
@@ -81,6 +114,7 @@ export function parseBorderOceanSceneConfig(text: string): BorderOceanSceneConfi
       acceptance?: {
         min_deep_ocean_vertices?: unknown;
         max_interior_water_wet_ratio?: unknown;
+        required_counters?: unknown;
       };
     };
   };
@@ -107,6 +141,10 @@ export function parseBorderOceanSceneConfig(text: string): BorderOceanSceneConfi
       maxInteriorWaterWetRatio: readNumber(
         root.acceptance?.max_interior_water_wet_ratio,
         defaults.acceptance.maxInteriorWaterWetRatio,
+      ),
+      requiredCounters: readStringArray(
+        root.acceptance?.required_counters,
+        defaults.acceptance.requiredCounters,
       ),
     },
   };
@@ -259,6 +297,12 @@ export function validateBorderOceanStats(
   if (stats["error"] !== null) throw new Error(`border-ocean stats error: ${String(stats["error"])}`);
   const counters = stats["counters"] as Record<string, unknown> | undefined;
   if (!counters) throw new Error("border-ocean stats missing counters");
+
+  for (const key of sceneConfig.acceptance.requiredCounters) {
+    if (typeof counters[key] !== "number") {
+      throw new Error(`border-ocean required counter missing: ${key}`);
+    }
+  }
 
   const assertCounter = (key: string, predicate: (value: number) => boolean) => {
     const value = counters[key];
