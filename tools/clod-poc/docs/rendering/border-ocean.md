@@ -142,6 +142,10 @@ border_ocean.wave_height_scale
 border_ocean.wave_choppiness
 border_ocean.shading_fog_far_m
 border_ocean.shading_reflection_strength
+border_ocean.player_margin_m
+border_ocean.player_pushback_band_m
+border_ocean.player_pushback_accel
+border_ocean.player_soft_pushback_enabled
 border_ocean.page_source_purity
 border_ocean.interior_water_wet_ratio
 border_ocean.playable_ocean_outside_ok
