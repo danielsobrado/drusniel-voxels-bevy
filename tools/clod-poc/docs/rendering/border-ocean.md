@@ -117,11 +117,11 @@ The node material currently derives fog distance from `visual.rippleLoopDistance
 Border-ocean gameplay settings only configure the player boundary behavior. They do not make the deep-ocean ring playable terrain.
 
 - `soft_pushback_enabled` may guide the player away from the edge.
-- `world_edge_margin_m` keeps the hard clamp inside the simulation.
-- `pushback_start_inside_world_m` controls where the soft inward force begins.
-- `pushback_strength` controls the inward acceleration.
+- `world_edge_margin_m` keeps the hard clamp inside the simulation and must stay greater than zero.
+- `pushback_start_inside_world_m` controls the soft pushback band and must be greater than zero when soft pushback is enabled.
+- `pushback_strength` controls the inward acceleration and must be greater than zero when soft pushback is enabled.
 
-If soft pushback is disabled, the hard clamp remains active.
+If soft pushback is disabled, the hard clamp remains active and the pushback band/acceleration resolve to zero.
 
 ## Acceptance counters
 
@@ -159,6 +159,7 @@ Before changing the border ocean, verify:
 - The player cannot leave the playable simulation.
 - Soft pushback values come from `border_coast_ocean.yaml`.
 - Disabling soft pushback still keeps the hard clamp active.
+- Enabled soft pushback has a positive band and acceleration.
 - The deep-ocean sampler is false inside the playable square.
 - The deep-ocean sampler is false inside the transition gap.
 - The deep-ocean mesh has no vertices inside the transition gap.
