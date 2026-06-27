@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { WebGPURenderer } from "three/webgpu";
 import { buildRequiredLimits, describeDiagnostics, probeWebGPU } from "../core/diagnostics.js";
+import { installMaterialKeyMemo } from "./three_patches.js";
 import { installPositionInvariance } from "./veg_prepass.js";
 
 export type RendererBackend = "webgl" | "webgpu";
@@ -33,6 +34,7 @@ export type AppRenderer = WebGlAppRenderer | WebGpuAppRenderer;
 
 export function createWebGlAppRenderer(): WebGlAppRenderer {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.shadowMap.enabled = true;
   return { isWebGpu: false, renderer, maxAnisotropy: renderer.capabilities.getMaxAnisotropy() };
 }
 
@@ -62,6 +64,8 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
     ].join("\n"));
   }
   installPositionInvariance(renderer);
+  installMaterialKeyMemo(renderer);
+  renderer.shadowMap.enabled = true;
   // fail-loud: surface WebGPU validation errors instead of silent black frames.
   const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
   if (device) {
