@@ -176,6 +176,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       currentLighting: vegetation.currentLighting,
       selectionFrameId: selectionStats.frameId,
       worldCells: terrain.worldCells,
+      collectTiming: player.state.profileEnabled,
     });
 
     if (borderOceanDebugPanel && selectionStats.frameId % 10 === 0) {
