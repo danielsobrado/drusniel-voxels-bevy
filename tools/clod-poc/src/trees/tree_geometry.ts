@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
-import { foliageAtlasCell } from "./tree_alpha_mask.js";
 import { buildTree, type VegLod } from "../veg/veg_tree_builder.js";
 import { vegRng } from "../veg/veg_rng.js";
 import { VEG_BARK_COLOR, VEG_TREE_SPECIES } from "../veg/veg_species.js";
@@ -9,13 +8,6 @@ import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 export type TreeVariantGeometryMap = Record<number, Record<TreeLod, THREE.BufferGeometry>>;
 export type TreeSpeciesGeometryMap = Record<TreeLod, THREE.BufferGeometry> & { variants: TreeVariantGeometryMap };
 export type TreeGeometryMap = Record<TreeSpeciesId, TreeSpeciesGeometryMap>;
-
-const BARK = new THREE.Color(0x5b3a22);
-const DEAD_BARK = new THREE.Color(0x7a6653);
-const OAK_LEAF_LOW = new THREE.Color(0x2c6f36);
-const OAK_LEAF_HIGH = new THREE.Color(0x4f9a42);
-const PINE_LEAF_LOW = new THREE.Color(0x1d4e32);
-const PINE_LEAF_HIGH = new THREE.Color(0x367142);
 
 export function createTreeGeometryMap(settings: TreeSettings): TreeGeometryMap {
   const out = {} as TreeGeometryMap;
@@ -132,17 +124,14 @@ function createTreeGeometry(
   lod: TreeLod,
   settings: TreeSettings,
 ): THREE.BufferGeometry {
-  const config = settings.species[species];
-
   if (lod === "impostor") {
-    const builder = new GeometryBuilder();
-    appendImpostorTree(builder, species, config, settings);
-    const geometry = builder.build();
-    geometry.computeBoundingSphere();
-    geometry.computeBoundingBox();
-    return geometry;
+    // The old placeholder impostor was alpha-card geometry. Until a baked atlas is
+    // ready, render the far procedural mesh instead so regular trees never become
+    // cutout cards or opaque card rectangles.
+    return createTreeGeometry(species, variant, "far", settings);
   }
 
+  const config = settings.species[species];
   // All LODs for the same species+variant derive from the same skeleton seed;
   // only bark/foliage budgets vary by LOD.
   const sp = VEG_TREE_SPECIES[species];
@@ -167,85 +156,6 @@ export function treeGeometryVariant(
 ): THREE.BufferGeometry {
   const safeVariant = Math.max(0, Math.min(TREE_STRUCTURAL_VARIANTS - 1, Math.floor(variant)));
   return map[species].variants?.[safeVariant]?.[lod] ?? map[species][lod];
-}
-
-function appendImpostorTree(
-  builder: GeometryBuilder,
-  species: TreeSpeciesId,
-  config: TreeSettings["species"][TreeSpeciesId],
-  settings: TreeSettings,
-): void {
-  const bark = species === "dead" ? DEAD_BARK : BARK;
-  const trunkWidth = Math.max(0.18, config.trunkRadiusM * (species === "dead" ? 2.4 : 1.7));
-  for (const rotation of [0, Math.PI * 0.5]) {
-    builder.addFlatCard(
-      new THREE.Vector3(0, config.trunkHeightM * 0.5, 0),
-      trunkWidth,
-      config.trunkHeightM,
-      rotation,
-      0,
-      bark,
-      species === "dead" ? 0.22 : 0.38,
-      0,
-      centeredFrame(),
-      0,
-    );
-  }
-
-  if (species === "dead") {
-    appendDeadImpostorBranches(builder, config);
-    return;
-  }
-
-  const leafColor = species === "pine"
-    ? PINE_LEAF_LOW.clone().lerp(PINE_LEAF_HIGH, 0.35)
-    : OAK_LEAF_LOW.clone().lerp(OAK_LEAF_HIGH, 0.45);
-  const crownWidth = species === "pine" ? config.crownRadiusM * 1.75 : config.crownRadiusM * 2.75;
-  const crownHeight = species === "pine"
-    ? config.crownRadiusM * 2.85 * config.morphology.crownFlattening
-    : config.crownRadiusM * 1.55 / Math.max(0.55, config.morphology.crownFlattening);
-  const centerY = species === "pine" ? config.trunkHeightM + crownHeight * 0.42 : config.trunkHeightM + crownHeight * 0.54;
-  const rotations = species === "pine" ? [0, Math.PI * 0.5] : [0, Math.PI / 3, Math.PI * 2 / 3];
-  for (let i = 0; i < rotations.length; i++) {
-    builder.addFlatCard(
-      new THREE.Vector3(0, centerY, 0),
-      crownWidth,
-      crownHeight,
-      rotations[i],
-      species === "pine" ? -0.06 : 0.03,
-      leafColor,
-      0.72,
-      species === "pine" ? 0.12 : 0.18,
-      atlasFrame(foliageAtlasCell(species, i, settings), settings),
-      1,
-    );
-  }
-}
-
-function appendDeadImpostorBranches(
-  builder: GeometryBuilder,
-  config: TreeSettings["species"][TreeSpeciesId],
-): void {
-  const branches: readonly [THREE.Vector3, THREE.Vector3, number][] = [
-    [
-      new THREE.Vector3(0, config.trunkHeightM * 0.62, 0),
-      new THREE.Vector3(config.morphology.branchLength * 0.7, config.trunkHeightM * 0.82, 0.18),
-      0.09,
-    ],
-    [
-      new THREE.Vector3(0, config.trunkHeightM * 0.72, 0),
-      new THREE.Vector3(-config.morphology.branchLength * 0.58, config.trunkHeightM * 0.88, -0.16),
-      0.075,
-    ],
-    [
-      new THREE.Vector3(0, config.trunkHeightM * 0.82, 0),
-      new THREE.Vector3(config.morphology.branchLength * 0.36, config.trunkHeightM * 1.04, -0.1),
-      0.06,
-    ],
-  ];
-  for (const [start, end, width] of branches) {
-    builder.addBranchCard(start, end, width, DEAD_BARK, 0.24, 0.02);
-  }
 }
 
 class GeometryBuilder {
@@ -313,27 +223,6 @@ class GeometryBuilder {
     this.addQuad(a, b, c, d);
   }
 
-  addBranchCard(
-    start: THREE.Vector3,
-    end: THREE.Vector3,
-    width: number,
-    color: THREE.Color,
-    windWeight: number,
-    flutterWeight: number,
-  ): void {
-    const axis = end.clone().sub(start);
-    if (axis.lengthSq() <= 1e-8) return;
-    const right = new THREE.Vector3(axis.z, 0, -axis.x);
-    if (right.lengthSq() <= 1e-8) right.set(1, 0, 0);
-    right.normalize().multiplyScalar(width * 0.5);
-    const normal = new THREE.Vector3().crossVectors(right, axis).normalize();
-    const a = this.addVertex(start.clone().sub(right), normal, color, windWeight, flutterWeight);
-    const b = this.addVertex(start.clone().add(right), normal, color, windWeight, flutterWeight);
-    const c = this.addVertex(end.clone().add(right), normal, color, windWeight, flutterWeight);
-    const d = this.addVertex(end.clone().sub(right), normal, color, windWeight, flutterWeight);
-    this.addQuad(a, b, c, d);
-  }
-
   build(): THREE.BufferGeometry {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(this.positions, 3));
@@ -357,32 +246,6 @@ interface AtlasFrame {
   u1: number;
   v0: number;
   v1: number;
-}
-
-function atlasFrame(cell: number, settings: TreeSettings): AtlasFrame {
-  const columns = settings.foliage.textureAtlasColumns;
-  const rows = settings.foliage.textureAtlasRows;
-  const cellCount = columns * rows;
-  const safeCell = Math.max(0, Math.min(cellCount - 1, cell));
-  const x = safeCell % columns;
-  const y = Math.floor(safeCell / columns);
-  const insetU = 0.5 / (columns * settings.foliage.maskResolutionPx);
-  const insetV = 0.5 / (rows * settings.foliage.maskResolutionPx);
-  return {
-    u0: x / columns + insetU,
-    u1: (x + 1) / columns - insetU,
-    v0: y / rows + insetV,
-    v1: (y + 1) / rows - insetV,
-  };
-}
-
-function centeredFrame(): AtlasFrame {
-  return {
-    u0: 0.5,
-    u1: 0.5,
-    v0: 0.5,
-    v1: 0.5,
-  };
 }
 
 function unitFrame(): AtlasFrame {
