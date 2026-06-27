@@ -23,7 +23,7 @@ construction:
     material_slot: 1
   pieces:
     - id: wood-floor-2x2
-      label: Wood Floor
+      label: Floor
       category: floor
       dimensions_m: [2.0, 0.2, 2.0]
       can_ground: true
@@ -51,7 +51,7 @@ construction:
           accepts: [floor-edge, wall-bottom, wall-top]
 
     - id: wood-wall-2x2
-      label: Wood Wall
+      label: Wall
       category: wall
       dimensions_m: [2.0, 2.0, 0.2]
       can_ground: false
@@ -79,7 +79,7 @@ construction:
           accepts: [wall-side]
 
     - id: wood-fence-2x1
-      label: Wood Fence
+      label: Fence
       category: fence
       dimensions_m: [2.0, 1.0, 0.1]
       can_ground: true
@@ -102,7 +102,7 @@ construction:
           accepts: [generic]
 
     - id: wood-pillar-2m
-      label: Wood Pillar
+      label: Pillar
       category: pillar
       dimensions_m: [0.4, 2.0, 0.4]
       can_ground: true
