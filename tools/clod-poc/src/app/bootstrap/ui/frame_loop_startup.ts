@@ -265,7 +265,13 @@ export function runFrameLoopStartup(
         ? { onFarSummaryUpdate: () => { session.naadfStatsController?.updateDisplay(); } }
         : undefined,
     construction: constructionController
-      ? { update: () => constructionController.update() }
+      ? {
+          update: () => {
+            constructionController.update();
+            session.constructionBuildActive = constructionController.stats().active;
+          },
+          isActive: () => constructionController.stats().active,
+        }
       : undefined,
     combat: session.combatController
       ? { update: (timeMs) => session.combatController!.update(timeMs) }
