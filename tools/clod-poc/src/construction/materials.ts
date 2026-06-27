@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import woodAoUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_AmbientOcclusion.jpg?url";
 import woodAlbedoUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_Color.jpg?url";
-import woodDisplacementUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_Displacement.jpg?url";
 import woodNormalUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_NormalGL.jpg?url";
 import woodRoughnessUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_Roughness.jpg?url";
 import type { ConstructionMaterial } from "./types.js";
@@ -11,8 +10,6 @@ const WOOD_TEXTURE_REPEAT_V = 1.0;
 const WOOD_TEXTURE_ANISOTROPY = 8;
 const WOOD_NORMAL_SCALE = 0.75;
 const WOOD_AO_INTENSITY = 0.85;
-const WOOD_DISPLACEMENT_SCALE = 0.015;
-const WOOD_DISPLACEMENT_BIAS = -0.0075;
 
 const DEFAULT_MATERIAL_COLORS: Record<ConstructionMaterial, number> = {
   wood: 0x9a673a,
@@ -26,7 +23,6 @@ interface WoodPbrTextureSet {
   normal: THREE.Texture;
   roughness: THREE.Texture;
   ao: THREE.Texture;
-  displacement: THREE.Texture;
 }
 
 let cachedWoodPbrTextures: WoodPbrTextureSet | null = null;
@@ -61,7 +57,6 @@ function woodPbrTextures(): WoodPbrTextureSet {
     normal: loadWoodTexture(woodNormalUrl, "Wood060-normal", THREE.NoColorSpace),
     roughness: loadWoodTexture(woodRoughnessUrl, "Wood060-roughness", THREE.NoColorSpace),
     ao: loadWoodTexture(woodAoUrl, "Wood060-ao", THREE.NoColorSpace),
-    displacement: loadWoodTexture(woodDisplacementUrl, "Wood060-displacement", THREE.NoColorSpace),
   };
   return cachedWoodPbrTextures;
 }
@@ -89,9 +84,6 @@ export function createConstructionMaterial(material: ConstructionMaterial): THRE
     metalness: 0.0,
     aoMap: textures.ao,
     aoMapIntensity: WOOD_AO_INTENSITY,
-    displacementMap: textures.displacement,
-    displacementScale: WOOD_DISPLACEMENT_SCALE,
-    displacementBias: WOOD_DISPLACEMENT_BIAS,
   });
   return woodMaterial;
 }
