@@ -9,6 +9,8 @@ import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMate
 
 const MAX_GPU_SUMMARY_RINGS = 8;
 const SUMMARY_EDGE_EPS = 0.0001;
+const SUMMARY_HEIGHT_RANGE_SHADE_M = 36.0;
+const SUMMARY_HEIGHT_RANGE_SHADE_STRENGTH = 0.28;
 
 export interface FarTerrainVertexColors {
   baseColor: Float32Array;
@@ -94,20 +96,15 @@ export function createFarTerrainMaterial(
   const hazeT = smoothstep(uHazeStart, uHazeEnd, distXZ);
   const hazeFactor = hazeT.mul(uHazeStrength).mul(uHazeEnabled);
 
-  const vColor = vertexColor();
-  const colorNode = vColor as unknown as { mul: (x: unknown) => unknown };
-  const lit = (colorNode.mul(light) as unknown as ReturnType<typeof vec3>);
-  const final = mix(lit, uHazeColor, hazeFactor);
-
-  const material = new MeshBasicNodeMaterial();
-  material.vertexColors = true;
-  material.colorNode = final;
-  material.side = THREE.DoubleSide;
-
+  let surfaceColor = vertexColor() as unknown as ReturnType<typeof vec3>;
   let uSummaryWidthCells: ReturnType<typeof uniform> | undefined;
   let uSummaryHeightCells: ReturnType<typeof uniform> | undefined;
   let uSummaryValid: ReturnType<typeof uniform> | undefined;
   let uSummaryRings: FarTerrainSummaryRingUniformRefs[] | undefined;
+
+  const material = new MeshBasicNodeMaterial();
+  material.vertexColors = true;
+  material.side = THREE.DoubleSide;
 
   if (options.gpuDisplacement) {
     const local = positionGeometry;
@@ -136,20 +133,29 @@ export function createFarTerrainMaterial(
         const atlasU = atlasUCell.add(float(0.5)).div(ringRefs.uWidthCells);
         const atlasV = ringRefs.uRowOffsetCells.add(atlasVCell).add(float(0.5)).div(uSummaryHeightCells);
         const atlasUv = vec2(atlasU, atlasV);
-        const atlasSample = texture(summaryAtlas.texture, atlasUv);
+        const heightSample = texture(summaryAtlas.texture, atlasUv);
+        const materialSample = texture(summaryAtlas.materialTexture, atlasUv);
         const inside = step(float(0.0), atlasUCells)
           .mul(step(atlasUCells, ringRefs.uWidthCells.sub(float(SUMMARY_EDGE_EPS))))
           .mul(step(float(0.0), atlasVCells))
           .mul(step(atlasVCells, ringRefs.uHeightCells.sub(float(SUMMARY_EDGE_EPS))));
         const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM.sub(float(SUMMARY_EDGE_EPS))));
-        const atlasWeight = atlasSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
-        terrainHeight = mix(terrainHeight, atlasSample.r, atlasWeight);
+        const atlasWeight = heightSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
+        const heightRange = clamp(heightSample.b.sub(heightSample.g).div(float(SUMMARY_HEIGHT_RANGE_SHADE_M)), float(0.0), float(1.0));
+        const rangeShade = float(1.0).sub(heightRange.mul(float(SUMMARY_HEIGHT_RANGE_SHADE_STRENGTH)).mul(atlasWeight));
+        const atlasSurfaceColor = materialSample.rgb.mul(rangeShade);
+        terrainHeight = mix(terrainHeight, heightSample.r, atlasWeight);
+        surfaceColor = mix(surfaceColor, atlasSurfaceColor, atlasWeight) as unknown as ReturnType<typeof vec3>;
       }
     }
 
     terrainHeight = terrainHeight.add(float(options.heightBiasMeters ?? 0));
     material.positionNode = vec3(local.x, terrainHeight, local.z);
   }
+
+  const colorNode = surfaceColor as unknown as { mul: (x: unknown) => unknown };
+  const lit = (colorNode.mul(light) as unknown as ReturnType<typeof vec3>);
+  material.colorNode = mix(lit, uHazeColor, hazeFactor);
 
   const refs: FarTerrainUniformRefs = {
     uCenterX, uCenterZ,
