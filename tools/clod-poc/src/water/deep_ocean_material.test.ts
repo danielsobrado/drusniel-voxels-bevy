@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const DEEP_SHADER_SOURCE = readFileSync(new URL("./deep_ocean_material.ts", import.meta.url), "utf8");
 const DEEP_NODE_SOURCE = readFileSync(new URL("./deep_ocean_node_material.ts", import.meta.url), "utf8");
+const DEEP_VISUAL_SOURCE = readFileSync(new URL("./deep_ocean_visual.ts", import.meta.url), "utf8");
 const CLIPMAP_SHADER_SOURCE = readFileSync(new URL("./waterMaterial.ts", import.meta.url), "utf8");
 
 describe("deep ocean material", () => {
@@ -29,6 +30,13 @@ describe("deep ocean material", () => {
     expect(DEEP_SHADER_SOURCE).toContain("DEEP_OCEAN_WAVE_COUNT");
     expect(DEEP_NODE_SOURCE).toContain("material.positionNode = displacedPosition");
     expect(DEEP_NODE_SOURCE).toContain("DEEP_OCEAN_GPU_WAVES");
+  });
+
+  it("keeps deep ocean fog driven by border ocean shading config", () => {
+    expect(DEEP_SHADER_SOURCE).toContain("fogDistanceM");
+    expect(DEEP_SHADER_SOURCE).toContain("params.fogDistanceM");
+    expect(DEEP_NODE_SOURCE).toContain("visual.rippleLoopDistance * 4");
+    expect(DEEP_VISUAL_SOURCE).toContain("shading.fogFarM / NODE_FOG_DISTANCE_SCALE");
   });
 
   it("keeps reference-style sky reflection on the visible clipmap shader", () => {
