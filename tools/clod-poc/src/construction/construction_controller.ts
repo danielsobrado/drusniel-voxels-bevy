@@ -225,13 +225,7 @@ class ConstructionControllerImpl implements ConstructionController {
 
   private installInput(): void {
     const onPointerMove = (event: PointerEvent) => {
-      const rect = this.deps.rendererDomElement.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      this.pointerNdc.set(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      this.pointerInside = true;
+      this.updatePointerFromEvent(event);
     };
     const onPointerLeave = () => {
       this.pointerInside = false;
@@ -240,6 +234,11 @@ class ConstructionControllerImpl implements ConstructionController {
       if (!this.active) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (!this.updatePointerFromEvent(event)) {
+        this.lastPlacementMessage = "Build input ignored because the canvas pointer was unavailable.";
+        this.syncUi(true);
+        return;
+      }
       if (event.button === 0) {
         this.placeCurrentCandidate();
         return;
@@ -294,6 +293,17 @@ class ConstructionControllerImpl implements ConstructionController {
       () => this.deps.rendererDomElement.removeEventListener("contextmenu", onContextMenu, BUILD_POINTER_OPTIONS),
       () => window.removeEventListener("keydown", onKeyDown),
     );
+  }
+
+  private updatePointerFromEvent(event: PointerEvent): boolean {
+    const rect = this.deps.rendererDomElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    this.pointerNdc.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.pointerInside = true;
+    return true;
   }
 
   private isTextInputEvent(event: KeyboardEvent): boolean {
@@ -444,6 +454,8 @@ class ConstructionControllerImpl implements ConstructionController {
       this.syncUi(true);
       return;
     }
+    this.deps.camera.updateMatrixWorld(true);
+    this.root.updateMatrixWorld(true);
     this.raycaster.ray.copy(ray);
     const hit = this.raycaster.intersectObjects(this.placedMeshes, false)[0];
     if (!hit) {
@@ -515,6 +527,7 @@ class ConstructionControllerImpl implements ConstructionController {
     mesh.position.set(normalized.position[0], normalized.position[1], normalized.position[2]);
     mesh.rotation.set(0, normalized.rotationQuarterTurns * Math.PI * 0.5, 0);
     this.root.add(mesh);
+    mesh.updateMatrixWorld(true);
     this.placedMeshes.push(mesh);
     this.placedPieces.push(normalized);
     this.snapIndex.addPiece(piece, normalized.id, normalized.position, normalized.rotationQuarterTurns);
