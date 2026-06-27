@@ -99,6 +99,22 @@ export function jumpVelocityForHeight(height: number, gravity: number): number {
   return Math.sqrt(2 * gravity * height);
 }
 
+export function validatePlayerWorldBoundsFit(
+  bounds: HorizontalWorldBounds,
+  config: Readonly<PlayerConfig>,
+): void {
+  if (bounds.minX >= bounds.maxX || bounds.minZ >= bounds.maxZ) {
+    throw new Error("Player world bounds must have positive width and depth");
+  }
+  const safeWidth = bounds.maxX - bounds.minX - config.worldEdgeMargin * 2;
+  const safeDepth = bounds.maxZ - bounds.minZ - config.worldEdgeMargin * 2;
+  if (safeWidth <= 0 || safeDepth <= 0) {
+    throw new Error(
+      `Player world bounds too small for margin ${config.worldEdgeMargin}: safeWidth=${safeWidth}, safeDepth=${safeDepth}`,
+    );
+  }
+}
+
 export function clampPlayerToWorld(
   position: THREE.Vector3,
   bounds: HorizontalWorldBounds,
@@ -165,7 +181,9 @@ export class PlayerController {
     private readonly colliders: TerrainColliderSet,
     private readonly bounds: HorizontalWorldBounds,
     readonly config: Readonly<PlayerConfig> = DEFAULT_PLAYER_CONFIG,
-  ) {}
+  ) {
+    validatePlayerWorldBoundsFit(bounds, config);
+  }
 
   private propColliders: PropColliderSet | null = null;
 
