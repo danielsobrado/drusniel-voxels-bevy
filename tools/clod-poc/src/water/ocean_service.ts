@@ -1,11 +1,17 @@
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
-import { sampleDeepOceanNormal, sampleDeepOceanWave } from "./deep_ocean_waves.js";
+import {
+  deepOceanGpuWaves,
+  sampleDeepOceanNormal,
+  sampleDeepOceanWave,
+  type DeepOceanGpuWave,
+} from "./deep_ocean_waves.js";
 
 /** Future boat gameplay seam: deep sea outside the playable CLOD square. */
 export interface OceanSampler {
   readonly worldCells: number;
   readonly surfaceY: number;
   readonly extendCells: number;
+  readonly waves: readonly DeepOceanGpuWave[];
   sampleOceanHeight(x: number, z: number, time: number): number;
   sampleOceanNormal(x: number, z: number, time: number): readonly [number, number, number];
   sampleOceanCurrent(x: number, z: number, time: number): readonly [number, number, number];
@@ -19,22 +25,24 @@ export function createDeepOceanSampler(
 ): OceanSampler {
   const extend = Math.max(1, config.extendCells);
   const surfaceY = config.surfaceY;
+  const waves = deepOceanGpuWaves(config.wave);
 
   return {
     worldCells,
     surfaceY,
     extendCells: extend,
+    waves,
     sampleOceanHeight(x, z, time) {
       if (!this.isInPlayableOcean(x, z)) return Number.NaN;
-      return surfaceY + sampleDeepOceanWave(x, z, time).height;
+      return surfaceY + sampleDeepOceanWave(x, z, time, waves).height;
     },
     sampleOceanNormal(x, z, time) {
       if (!this.isInPlayableOcean(x, z)) return [0, 1, 0] as const;
-      return sampleDeepOceanNormal(x, z, time);
+      return sampleDeepOceanNormal(x, z, time, waves);
     },
     sampleOceanCurrent(x, z, time): readonly [number, number, number] {
       if (!this.isInPlayableOcean(x, z)) return [0, 0, 0] as const;
-      const wave = sampleDeepOceanWave(x, z, time);
+      const wave = sampleDeepOceanWave(x, z, time, waves);
       return [wave.velocityX, 0, wave.velocityZ] as const;
     },
     isInPlayableOcean(x, z) {
