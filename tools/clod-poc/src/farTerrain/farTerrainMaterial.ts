@@ -83,18 +83,12 @@ export function createFarTerrainMaterial(
   const uSunStrength = uniform(config.sunStrength);
   const uAmbientFloor = uniform(config.ambientFloor);
 
-  const nrm = normalize(normalGeometry);
-  const sun = max(dot(nrm, uSunDir), float(0));
-  const sky = clamp(nrm.y.mul(0.5).add(0.5), float(0), float(1));
-  const hemi = mix(uGroundColor, uSkyColor, sky).mul(uHemiStrength);
-  const ambientFloor = vec3(uAmbientFloor, uAmbientFloor, uAmbientFloor);
-  const light = ambientFloor.add(hemi).add(uSunColor.mul(pow(sun, float(1.35))).mul(uSunStrength));
-
   const dp = vec2(positionWorld.x.sub(uCenterX), positionWorld.z.sub(uCenterZ));
   const distXZ = dp.length();
   const hazeT = smoothstep(uHazeStart, uHazeEnd, distXZ);
   const hazeFactor = hazeT.mul(uHazeStrength).mul(uHazeEnabled);
 
+  let surfaceNormal = normalize(normalGeometry) as unknown as ReturnType<typeof vec3>;
   let surfaceColor = vertexColor() as unknown as ReturnType<typeof vec3>;
   let uSummaryWidthCells: ReturnType<typeof uniform> | undefined;
   let uSummaryHeightCells: ReturnType<typeof uniform> | undefined;
@@ -132,6 +126,7 @@ export function createFarTerrainMaterial(
         const atlasUv = vec2(atlasU, atlasV);
         const heightSample = texture(summaryAtlas.texture, atlasUv);
         const materialSample = texture(summaryAtlas.materialTexture, atlasUv);
+        const normalSample = texture(summaryAtlas.normalTexture, atlasUv);
         const inside = step(float(0.0), atlasUCells)
           .mul(step(atlasUCells, ringRefs.uWidthCells.sub(float(SUMMARY_EDGE_EPS))))
           .mul(step(float(0.0), atlasVCells))
@@ -141,8 +136,10 @@ export function createFarTerrainMaterial(
         const heightRange = clamp(heightSample.b.sub(heightSample.g).div(float(SUMMARY_HEIGHT_RANGE_SHADE_M)), float(0.0), float(1.0));
         const rangeShade = float(1.0).sub(heightRange.mul(float(SUMMARY_HEIGHT_RANGE_SHADE_STRENGTH)).mul(atlasWeight));
         const atlasSurfaceColor = materialSample.rgb.mul(rangeShade);
+        const atlasNormal = normalize(normalSample.rgb.mul(float(2.0)).sub(vec3(1.0, 1.0, 1.0)));
         terrainHeight = mix(terrainHeight, heightSample.r, atlasWeight);
         surfaceColor = mix(surfaceColor, atlasSurfaceColor, atlasWeight) as unknown as ReturnType<typeof vec3>;
+        surfaceNormal = normalize(mix(surfaceNormal, atlasNormal, atlasWeight)) as unknown as ReturnType<typeof vec3>;
       }
     }
 
@@ -150,6 +147,11 @@ export function createFarTerrainMaterial(
     material.positionNode = vec3(local.x, terrainHeight, local.z);
   }
 
+  const sun = max(dot(surfaceNormal, uSunDir), float(0));
+  const sky = clamp(surfaceNormal.y.mul(0.5).add(0.5), float(0), float(1));
+  const hemi = mix(uGroundColor, uSkyColor, sky).mul(uHemiStrength);
+  const ambientFloor = vec3(uAmbientFloor, uAmbientFloor, uAmbientFloor);
+  const light = ambientFloor.add(hemi).add(uSunColor.mul(pow(sun, float(1.35))).mul(uSunStrength));
   const colorNode = surfaceColor as unknown as { mul: (x: unknown) => unknown };
   const lit = (colorNode.mul(light) as unknown as ReturnType<typeof vec3>);
   material.colorNode = mix(lit, uHazeColor, hazeFactor);
