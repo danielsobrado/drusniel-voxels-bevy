@@ -2,6 +2,7 @@ import { initSimplifier } from "./clod/simplify.js";
 import {
   buildNodeIndex,
   buildWorldAsync,
+  expandQuadSiblingPages,
   rebuildDirtyLod0Pages,
   resimplifyParent,
   type BuildResult,
@@ -122,8 +123,24 @@ function enqueueParent(level: number, nx: number, nz: number): void {
   set.add(`${nx},${nz}`);
 }
 
+function uniqueParentCoords(childCoords: readonly [number, number][]): [number, number][] {
+  const keys = new Set<string>();
+  for (const [nx, nz] of childCoords) keys.add(`${nx >> 1},${nz >> 1}`);
+  return [...keys].map((key) => key.split(",").map(Number) as [number, number]);
+}
+
+function enqueueParentSiblingGroup(parentLevel: number, parentCoords: readonly [number, number][]): void {
+  if (!result || parentLevel > topLevel || parentCoords.length === 0) return;
+  const expanded = expandQuadSiblingPages(parentCoords, parentLevel, result.worldPagesX, result.worldPagesZ);
+  for (const [nx, nz] of expanded) enqueueParent(parentLevel, nx, nz);
+}
+
+function enqueueParentsForChildren(childLevel: number, childCoords: readonly [number, number][]): void {
+  enqueueParentSiblingGroup(childLevel + 1, uniqueParentCoords(childCoords));
+}
+
 function enqueueParentsForLod0(coords: readonly [number, number][]): void {
-  for (const [nx, nz] of coords) enqueueParent(1, nx >> 1, nz >> 1);
+  enqueueParentsForChildren(0, coords);
 }
 
 function nextPendingParent(): { level: number; key: string } | null {
@@ -140,7 +157,7 @@ function nextPendingParent(): { level: number; key: string } | null {
 function drainParents(budgetMs: number): void {
   if (!cfg || !index) return;
   const startedAt = performance.now();
-  const changed = [];
+  const changed: ClodPageNode[] = [];
 
   while (pendingParentCount() > 0 && performance.now() - startedAt < budgetMs) {
     const next = nextPendingParent();
@@ -151,8 +168,8 @@ function drainParents(budgetMs: number): void {
     if (!node) continue;
     parentNodes++;
     changed.push(node);
-    const [nx, nz] = next.key.split(",").map(Number);
-    enqueueParent(next.level + 1, nx >> 1, nz >> 1);
+    const [nx, nz] = next.key.split(",").map(Number) as [number, number];
+    enqueueParentsForChildren(next.level, [[nx, nz]]);
   }
 
   if (changed.length > 0) {
