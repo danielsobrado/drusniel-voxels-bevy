@@ -25,6 +25,7 @@ describe("border coast/ocean config", () => {
       cove: 0.1,
       reef: 0.05,
     });
+    expect(config.deep_ocean.start_outside_border_m).toBe(64);
     expect(config.deep_ocean.wave).toMatchObject({
       gravity: 9.81,
       grid_k: 16,
@@ -48,6 +49,7 @@ describe("border coast/ocean config", () => {
     const runtime = parseRuntimeBorderCoastOceanConfig(yamlText);
 
     expect(runtime.deepOcean.enabled).toBe(strict.deep_ocean.enabled);
+    expect(runtime.deepOcean.startOutsideBorderM).toBe(strict.deep_ocean.start_outside_border_m);
     expect(runtime.deepOcean.surfaceY).toBe(strict.world.water_level);
     expect(runtime.deepOcean.extendCells).toBe(strict.deep_ocean.visual_extent_m);
     expect(runtime.deepOcean.segments).toBe(strict.deep_ocean.far_subdivisions);
