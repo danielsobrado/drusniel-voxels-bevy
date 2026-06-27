@@ -7,6 +7,7 @@ export interface AudioEventOptions {
   volume?: number;
   pitch?: number;
   variant?: number;
+  durationMs?: number;
   force?: boolean;
 }
 
@@ -109,7 +110,8 @@ export class AudioBus {
       eventId.startsWith("camera.") ||
       eventId.startsWith("texture.") ||
       eventId.startsWith("material.") ||
-      eventId.startsWith("terrain.")
+      eventId.startsWith("terrain.") ||
+      eventId.startsWith("spell.")
     ) {
       categoryScale = this.config.global.world_volume;
     } else if (eventId.startsWith("clod.")) {
@@ -117,7 +119,7 @@ export class AudioBus {
     }
 
     // Combined volume: event volume * options volume (if provided) * category scale
-    let eventVol = options?.volume !== undefined ? options.volume : eventCfg.volume;
+    const eventVol = options?.volume !== undefined ? options.volume : eventCfg.volume;
     const finalVolume = Math.min(1, Math.max(0, eventVol * categoryScale));
 
     this.synthManager.playSynth(
@@ -125,7 +127,8 @@ export class AudioBus {
       eventCfg,
       finalVolume,
       options?.pitch,
-      options?.variant
+      options?.variant,
+      options?.durationMs,
     );
   }
 
