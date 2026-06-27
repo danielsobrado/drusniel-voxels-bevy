@@ -6,6 +6,8 @@ import { materialColorForDebugId } from "../../terrainMaterial/terrainMaterialBa
 const DEFAULT_ATLAS_TILES_X = 3;
 const DEFAULT_ATLAS_TILES_Z = 3;
 const FLOAT_RGBA_COMPONENTS = 4;
+const NORMAL_ENCODE_BIAS = 0.5;
+const NORMAL_ENCODE_SCALE = 0.5;
 
 export interface FarSummaryGpuAtlasRingView {
   originX: number;
@@ -22,6 +24,7 @@ export interface FarSummaryGpuAtlasRingView {
 export interface FarSummaryGpuAtlasView {
   readonly texture: THREE.DataTexture;
   readonly materialTexture: THREE.DataTexture;
+  readonly normalTexture: THREE.DataTexture;
   readonly rings: FarSummaryGpuAtlasRingView[];
   originX: number;
   originZ: number;
@@ -49,6 +52,7 @@ export class FarSummaryGpuAtlas {
   private readonly ringHeightCells: number;
   private readonly heightData: Float32Array;
   private readonly materialData: Float32Array;
+  private readonly normalData: Float32Array;
   private lastSignature = "";
 
   constructor(options: FarSummaryGpuAtlasOptions) {
@@ -62,13 +66,16 @@ export class FarSummaryGpuAtlas {
     const height = this.ringHeightCells * this.ringCount;
     this.heightData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
     this.materialData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
+    this.normalData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
 
     const texture = createFloatAtlasTexture(this.heightData, width, height, "naadf-far-summary-height-atlas");
     const materialTexture = createFloatAtlasTexture(this.materialData, width, height, "naadf-far-summary-material-atlas");
+    const normalTexture = createFloatAtlasTexture(this.normalData, width, height, "naadf-far-summary-normal-atlas");
 
     this.view = {
       texture,
       materialTexture,
+      normalTexture,
       rings: Array.from({ length: this.ringCount }, (_, ringIndex) => this.emptyRingView(ringIndex)),
       originX: 0,
       originZ: 0,
@@ -120,6 +127,7 @@ export class FarSummaryGpuAtlas {
 
     this.heightData.fill(0);
     this.materialData.fill(0);
+    this.normalData.fill(0);
     let validRings = 0;
     for (let ringIndex = 0; ringIndex < this.ringCount; ringIndex++) {
       const ring = state.config.farClipmap.rings[ringIndex];
@@ -156,12 +164,14 @@ export class FarSummaryGpuAtlas {
     this.view.revision++;
     this.view.texture.needsUpdate = true;
     this.view.materialTexture.needsUpdate = true;
+    this.view.normalTexture.needsUpdate = true;
     this.lastSignature = signature;
   }
 
   dispose(): void {
     this.view.texture.dispose();
     this.view.materialTexture.dispose();
+    this.view.normalTexture.dispose();
   }
 
   private invalidate(): void {
@@ -170,11 +180,13 @@ export class FarSummaryGpuAtlas {
     this.view.revision++;
     this.heightData.fill(0);
     this.materialData.fill(0);
+    this.normalData.fill(0);
     for (let ringIndex = 0; ringIndex < this.ringCount; ringIndex++) {
       this.view.rings[ringIndex] = this.emptyRingView(ringIndex);
     }
     this.view.texture.needsUpdate = true;
     this.view.materialTexture.needsUpdate = true;
+    this.view.normalTexture.needsUpdate = true;
     this.lastSignature = "";
   }
 
@@ -199,6 +211,12 @@ export class FarSummaryGpuAtlas {
         this.materialData[dst + 1] = color[1];
         this.materialData[dst + 2] = color[2];
         this.materialData[dst + 3] = 1;
+
+        const normal = deriveSummaryNormal(tile, x, z);
+        this.normalData[dst] = encodeNormalChannel(normal.x);
+        this.normalData[dst + 1] = encodeNormalChannel(normal.y);
+        this.normalData[dst + 2] = encodeNormalChannel(normal.z);
+        this.normalData[dst + 3] = 1;
       }
     }
   }
@@ -233,6 +251,28 @@ function createFloatAtlasTexture(
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
   return texture;
+}
+
+function deriveSummaryNormal(tile: FarSummaryTile, x: number, z: number): THREE.Vector3 {
+  const x0 = Math.max(0, x - 1);
+  const x1 = Math.min(tile.resolution - 1, x + 1);
+  const z0 = Math.max(0, z - 1);
+  const z1 = Math.min(tile.resolution - 1, z + 1);
+  const dx = Math.max(1, x1 - x0) * tile.cellM;
+  const dz = Math.max(1, z1 - z0) * tile.cellM;
+  const dhdx = (heightAt(tile, x1, z) - heightAt(tile, x0, z)) / dx;
+  const dhdz = (heightAt(tile, x, z1) - heightAt(tile, x, z0)) / dz;
+  return new THREE.Vector3(-dhdx, 1, -dhdz).normalize();
+}
+
+function heightAt(tile: FarSummaryTile, x: number, z: number): number {
+  const cx = Math.min(tile.resolution - 1, Math.max(0, x));
+  const cz = Math.min(tile.resolution - 1, Math.max(0, z));
+  return tile.avgHeight[cz * tile.resolution + cx] ?? 0;
+}
+
+function encodeNormalChannel(value: number): number {
+  return Math.min(1, Math.max(0, value * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_BIAS));
 }
 
 function selectTiles(
