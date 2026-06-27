@@ -231,7 +231,7 @@ export class ClodWorkerClient {
           chunksRemeshed: message.chunksRemeshed,
           chunksTotal: message.chunksTotal,
           pendingParents: message.pendingParents,
-          requestCount: message.requestIds.length,
+          requestCount: message.editCount,
         };
         if (message.pendingParents > 0) this.parentsPending = true;
         for (const rid of message.requestIds) {
