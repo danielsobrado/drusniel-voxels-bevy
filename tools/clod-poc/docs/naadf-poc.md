@@ -11,7 +11,7 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 - NanoVDB-style span stepping at chunk/block/voxel scale in the heightfield PoC
 - Far clipmap summary rings for long-distance queries
 - Query API with explicit counters (near table, hash, far clipmap, missing, HDDA)
-- GPU far-summary height atlas for runtime far-shell displacement
+- Multi-ring GPU far-summary height atlas for runtime far-shell displacement
 - GPU procedural displacement as fallback where summary atlas data is missing
 - CPU query/HDDA path as oracle/debug only
 - Canopy coverage flowing through summary chain
@@ -32,8 +32,9 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 ```text
 CPU far summary tile stream
   -> packed RGBA32F GPU height atlas
+  -> one vertical atlas band per far-summary ring
   -> GPU material positionNode
-  -> atlas height displacement where alpha is valid
+  -> distance-selected atlas height displacement where alpha is valid
   -> procedural GPU displacement fallback where atlas is missing
   -> GPU material lighting / haze
 ```
@@ -90,7 +91,8 @@ Runtime overrides:
 ## Known limitations
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
-- Runtime far shell currently samples the first far-summary ring atlas plus procedural fallback; full multi-ring texture/SSBO selection is next
+- Runtime far shell samples a multi-ring GPU height atlas, but normals/materials are still not summary-atlas driven
+- The atlas is still a small moving 3x3 tile window per ring, not a production bindless/SSBO page table
 - HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
 - CPU macro terrain fallback still exists for debug/oracle paths, but should not be on the runtime far-shell hot path in GPU mode
 - Sun visibility is debug-only stepping, not a path tracer
