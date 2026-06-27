@@ -1,5 +1,5 @@
+import { emitAudio } from "../audio/index.js";
 import { FireFlameRenderer } from "./fire_flame_renderer.js";
-import { FlameSfx } from "./flame_sfx.js";
 import { defaultSpellConfig, type SpellConfig } from "./spell_config.js";
 
 export interface SpellMenu {
@@ -17,7 +17,6 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   const root = deps.root ?? ensureMenuRoot(config.menu.rootId);
   const shouldRemoveRoot = deps.root === undefined;
   const fireRenderer = new FireFlameRenderer(config.fire.vfx);
-  const flameSfx = new FlameSfx();
   let activeReset = 0;
   let dragOffset: { x: number; y: number } | null = null;
 
@@ -34,8 +33,8 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   const fireButton = document.createElement("button");
   const onFireButtonClick = (): void => castFire();
   fireButton.type = "button";
-  fireButton.textContent = `🔥 ${config.fire.label}`;
-  fireButton.title = `${config.fire.label} spell`;
+  fireButton.textContent = `1 🔥 ${config.fire.label}`;
+  fireButton.title = `${config.fire.label} spell (1)`;
   fireButton.setAttribute("aria-pressed", "false");
   fireButton.addEventListener("click", onFireButtonClick);
 
@@ -78,7 +77,11 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
     window.clearTimeout(activeReset);
     fireButton.setAttribute("aria-pressed", "true");
     fireRenderer.play(config.fire.castDurationMs);
-    flameSfx.play(config.fire.audio, config.fire.castDurationMs);
+    emitAudio("spell.fire.cast", {
+      volume: config.fire.audio.volume,
+      durationMs: config.fire.castDurationMs,
+      force: true,
+    });
     activeReset = window.setTimeout(() => {
       fireButton.setAttribute("aria-pressed", "false");
     }, config.fire.castDurationMs);
@@ -95,7 +98,6 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
       root.removeEventListener("click", stopUiPropagation);
       fireButton.removeEventListener("click", onFireButtonClick);
       fireRenderer.dispose();
-      flameSfx.dispose();
       if (shouldRemoveRoot) root.remove();
       else root.replaceChildren();
     },
