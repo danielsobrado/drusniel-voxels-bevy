@@ -116,6 +116,19 @@ function cloneMesh(mesh: PageMesh): PageMesh {
   };
 }
 
+function resolveChildIds(
+  ownerId: string,
+  childIds: readonly (string | null)[],
+  nodesById: ReadonlyMap<string, ClodPageNode>,
+): (ClodPageNode | null)[] {
+  return childIds.map((id) => {
+    if (id === null) return null;
+    const child = nodesById.get(id);
+    if (!child) throw new Error(`CLOD serialized node ${ownerId} references missing child ${id}`);
+    return child;
+  });
+}
+
 export function serializeNode(node: ClodPageNode): SerializedClodNode {
   return {
     id: node.id,
@@ -190,8 +203,9 @@ export function applySerializedNode(
   serialized: SerializedClodNode,
   nodesById: Map<string, ClodPageNode>,
 ): ClodPageNode {
+  const children = resolveChildIds(serialized.id, serialized.childIds, nodesById);
   target.level = serialized.level;
-  target.children = serialized.childIds.map((id) => (id === null ? null : nodesById.get(id) ?? null));
+  target.children = children;
   target.mesh = serialized.mesh;
   target.footprint = serialized.footprint;
   target.bounds = serialized.bounds;
@@ -202,10 +216,12 @@ export function applySerializedNode(
 
 export function rehydrateBuildResult(serialized: SerializedBuildResult): BuildResult {
   const nodesById = new Map<string, ClodPageNode>();
+  const serializedById = new Map<string, SerializedClodNode>();
   const nodesByLevel = new Map<number, ClodPageNode[]>();
 
   for (const [level, serializedNodes] of serialized.nodesByLevel) {
     const nodes: ClodPageNode[] = serializedNodes.map((node) => {
+      if (nodesById.has(node.id)) throw new Error(`CLOD build result contains duplicate node ${node.id}`);
       const rehydrated: ClodPageNode = {
         id: node.id,
         level: node.level,
@@ -217,6 +233,7 @@ export function rehydrateBuildResult(serialized: SerializedBuildResult): BuildRe
         lowBenefit: node.lowBenefit,
       };
       nodesById.set(rehydrated.id, rehydrated);
+      serializedById.set(node.id, node);
       return rehydrated;
     });
     nodesByLevel.set(level, nodes);
@@ -224,13 +241,20 @@ export function rehydrateBuildResult(serialized: SerializedBuildResult): BuildRe
 
   for (const [, nodes] of nodesByLevel) {
     for (const node of nodes) {
-      const serializedNode = serialized.nodesByLevel.flatMap(([, levelNodes]) => levelNodes).find((n) => n.id === node.id);
-      node.children = serializedNode?.childIds.map((id) => (id === null ? null : nodesById.get(id) ?? null)) ?? [];
+      const serializedNode = serializedById.get(node.id);
+      if (!serializedNode) throw new Error(`CLOD build result missing serialized node ${node.id}`);
+      node.children = resolveChildIds(serializedNode.id, serializedNode.childIds, nodesById);
     }
   }
 
+  const roots = serialized.roots.map((id) => {
+    const root = nodesById.get(id);
+    if (!root) throw new Error(`CLOD build result references missing root ${id}`);
+    return root;
+  });
+
   return {
-    roots: serialized.roots.map((id) => nodesById.get(id)).filter((node): node is ClodPageNode => !!node),
+    roots,
     nodesByLevel,
     stats: serialized.stats.map((stat) => ({ ...stat, polish: { ...stat.polish } })),
     worldPagesX: serialized.worldPagesX,
