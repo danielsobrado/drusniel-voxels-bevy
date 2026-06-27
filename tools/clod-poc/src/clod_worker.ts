@@ -291,6 +291,7 @@ function drainParents(budgetMs: number): void {
   const changed: ClodPageNode[] = [];
   const parentQueueSnapshot = snapshotParentQueue();
   const parentSnapshots = new Map<ClodPageNode, ParentNodeSnapshot>();
+  let committed = false;
 
   try {
     while (pendingParentCount() > 0 && performance.now() - startedAt < budgetMs) {
@@ -307,24 +308,27 @@ function drainParents(budgetMs: number): void {
       const [nx, nz] = next.key.split(",").map(Number) as [number, number];
       enqueueParentsForChildren(next.level, [[nx, nz]]);
     }
-  } catch (error) {
-    restoreParentNodes(parentSnapshots);
-    restoreParentQueue(parentQueueSnapshot);
-    throw error;
-  }
 
-  if (changed.length > 0) {
-    const serialized = serializeNodes(changed);
-    const transferables: Transferable[] = [];
-    for (const node of serialized) collectNodeTransferables(node, transferables);
-    post({
-      type: "parentRebuilt",
-      requestId: activeParentRequestId,
-      changed: serialized,
-      parentNodes,
-      parentMs,
-      pendingParents: pendingParentCount(),
-    }, transferables);
+    if (changed.length > 0) {
+      const serialized = serializeNodes(changed);
+      const transferables: Transferable[] = [];
+      for (const node of serialized) collectNodeTransferables(node, transferables);
+      post({
+        type: "parentRebuilt",
+        requestId: activeParentRequestId,
+        changed: serialized,
+        parentNodes,
+        parentMs,
+        pendingParents: pendingParentCount(),
+      }, transferables);
+    }
+    committed = true;
+  } catch (error) {
+    if (!committed) {
+      restoreParentNodes(parentSnapshots);
+      restoreParentQueue(parentQueueSnapshot);
+    }
+    throw error;
   }
 
   if (pendingParentCount() === 0 && activeParentRequestId !== null) {
