@@ -322,6 +322,7 @@ export class WaterField {
   }
 
   sampleForCellSize(x: number, z: number, cellSize: number): WaterFieldResult {
+    if (this.worldCells > 0 && !this.isInsidePlayableWorld(x, z)) return this.sampleDry(x, z);
     const shoreSurf = this.sampleShoreSurfBand(x, z);
     if (shoreSurf) return shoreSurf;
     if (this.isInClipmapExclusionBand(x, z)) return this.sampleDry(x, z);
