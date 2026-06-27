@@ -82,6 +82,15 @@ describe("InfiniteFarShell height sampling mode", () => {
     shell.dispose();
   });
 
+  it("attaches initial vertex colors for parity material before provider rebuild", () => {
+    const shell = makeShell({ useParityMaterial: true, parityConfig });
+    const color = shell.mesh.geometry.getAttribute("color") as THREE.BufferAttribute | undefined;
+
+    expect(color).toBeDefined();
+    expect(color!.count).toBe(shell.mesh.geometry.getAttribute("position").count);
+    shell.dispose();
+  });
+
   it("updates missing-summary debug fallback through a material uniform", () => {
     const shell = makeShell();
     const material = shell.mesh.material as import("three/webgpu").MeshBasicNodeMaterial;
