@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { ClodHooks } from "../core/hooks.js";
-import type { CustomPropsSettings, PropAssetDef, PropPlacementScene } from "./prop_types.js";
+import type { CustomPropsSettings, PropAssetDef, PropAssetMetadata, PropPlacementScene } from "./prop_types.js";
 import { PropAssetRegistry, type LoadedPropAsset } from "./prop_asset_loader.js";
 import { assignPropCellCoords } from "./prop_placements.js";
 import { cullPropSpatialGrid } from "./prop_culling.js";
@@ -21,7 +21,11 @@ const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 const _box = new THREE.Box3();
+const _debugBoxSize = new THREE.Vector3();
+const _yAxis = new THREE.Vector3(0, 1, 0);
 const _billboardQuat = new THREE.Quaternion();
+
+const PROP_MATRIX_UPLOAD_LIMIT_FALLBACK = 0;
 
 type BucketKind = "opaque" | "shadow" | "billboard";
 
@@ -30,9 +34,9 @@ interface InstanceLodState {
 }
 
 interface MeshDraw {
+  instanceIndex: number;
   assetId: string;
   lod: number;
-  matrix: THREE.Matrix4;
   distance: number;
   triCount: number;
   shadowEligible: boolean;
@@ -72,6 +76,24 @@ function disposeBucket(bucket: RenderBucket): void {
   bucket.mesh.removeFromParent();
 }
 
+function insertShadowCandidate(candidates: MeshDraw[], draw: MeshDraw, limit: number): void {
+  if (limit <= 0) return;
+  if (candidates.length < limit) {
+    candidates.push(draw);
+    return;
+  }
+  let farthestIndex = 0;
+  let farthestDistance = candidates[0]?.distance ?? -Infinity;
+  for (let i = 1; i < candidates.length; i++) {
+    const distance = candidates[i]!.distance;
+    if (distance > farthestDistance) {
+      farthestDistance = distance;
+      farthestIndex = i;
+    }
+  }
+  if (draw.distance < farthestDistance) candidates[farthestIndex] = draw;
+}
+
 export interface PropSystemDeps {
   scene: THREE.Scene;
   settings: CustomPropsSettings;
@@ -86,12 +108,17 @@ export class PropSystem {
   private grid: PropSpatialGrid | null = null;
   private readonly assetById = new Map<string, PropAssetDef>();
   private readonly loadedAssets = new Map<string, LoadedPropAsset>();
+  private readonly metadataByAssetId = new Map<string, PropAssetMetadata>();
   private readonly buckets = new Map<string, RenderBucket>();
   private readonly lodState = new Map<number, InstanceLodState>();
+  private readonly meshDraws: MeshDraw[] = [];
+  private readonly shadowCandidates: MeshDraw[] = [];
+  private readonly shadowInstanceIndices = new Set<number>();
   private frameId = 0;
   private ready = false;
   private stats: PropStats = { ...EMPTY_PROP_STATS };
   private collidersActive = 0;
+  private colliderQueryRadius = 0;
 
   constructor(private readonly deps: PropSystemDeps) {
     this.root.name = "custom-props";
@@ -132,24 +159,27 @@ export class PropSystem {
   }
 
   buildColliderInstances(playerPos: [number, number, number]): PropColliderInstanceInput[] {
-    if (!this.grid) return [];
+    if (!this.grid || this.colliderQueryRadius <= 0) return [];
     const out: PropColliderInstanceInput[] = [];
-    for (let idx = 0; idx < this.grid.instances.length; idx++) {
-      const inst = this.grid.instances[idx]!;
-      const def = this.assetById.get(inst.assetId);
-      const loaded = this.loadedAssets.get(inst.assetId);
-      if (!def || !loaded) continue;
-      const radius = loaded.metadata.boundingSphereRadius * inst.scale;
-      const distance = propDistanceToCamera(playerPos, inst.position, radius);
-      if (!propNeedsCollider(def, distance)) continue;
-      out.push({
-        key: String(idx),
-        mode: def.collision.mode,
-        position: inst.position,
-        rotationY: inst.rotationY,
-        scale: inst.scale,
-        asset: loaded,
-      });
+    const cells = this.grid.nearbyCells(playerPos, this.colliderQueryRadius);
+    for (const cell of cells) {
+      for (const idx of cell.instanceIndices) {
+        const inst = this.grid.instances[idx]!;
+        const def = this.assetById.get(inst.assetId);
+        const loaded = this.loadedAssets.get(inst.assetId);
+        if (!def || !loaded) continue;
+        const radius = loaded.metadata.boundingSphereRadius * inst.scale;
+        const distance = propDistanceToCamera(playerPos, inst.position, radius);
+        if (!propNeedsCollider(def, distance)) continue;
+        out.push({
+          key: String(idx),
+          mode: def.collision.mode,
+          position: inst.position,
+          rotationY: inst.rotationY,
+          scale: inst.scale,
+          asset: loaded,
+        });
+      }
     }
     return out;
   }
@@ -160,7 +190,10 @@ export class PropSystem {
 
   async init(): Promise<void> {
     const { loaded } = await this.registry.loadManifest();
-    for (const asset of loaded) this.loadedAssets.set(asset.def.id, asset);
+    for (const asset of loaded) {
+      this.loadedAssets.set(asset.def.id, asset);
+      this.metadataByAssetId.set(asset.def.id, asset.metadata);
+    }
     this.replacePlacementScene(this.deps.placementScene);
     this.ready = true;
   }
@@ -169,6 +202,7 @@ export class PropSystem {
     this.deps.placementScene = placementScene;
     const instances = assignPropCellCoords(placementScene.instances, this.deps.settings.spatial.cellSizeM);
     this.grid = PropSpatialGrid.fromInstances(instances, this.deps.settings.spatial.cellSizeM);
+    this.colliderQueryRadius = this.computeColliderQueryRadius();
     this.lodState.clear();
     this.clearBuckets();
     this.ensureBuckets();
@@ -190,22 +224,22 @@ export class PropSystem {
     this.frameId++;
     this.root.visible = true;
 
-    const metadataByAssetId = new Map(
-      [...this.loadedAssets.entries()].map(([id, asset]) => [id, asset.metadata]),
-    );
-    const cull = cullPropSpatialGrid(this.grid, camera, this.deps.settings, metadataByAssetId, this.frameId);
+    const cull = cullPropSpatialGrid(this.grid, camera, this.deps.settings, this.metadataByAssetId, this.frameId);
 
     const viewportH = Math.max(1, window.innerHeight);
     const fovY = THREE.MathUtils.degToRad(camera.fov);
     const camPos: [number, number, number] = [camera.position.x, camera.position.y, camera.position.z];
-
-    const opaqueMatrices = new Map<string, THREE.Matrix4[]>();
-    const shadowMatrices = new Map<string, THREE.Matrix4[]>();
-    const billboardMatrices = new Map<string, THREE.Matrix4[]>();
     const trianglesByLod = [0, 0, 0, 0, 0];
-    let billboardInstances = 0;
+    const debugEnabled = this.deps.settings.debug.showCells
+      || this.deps.settings.debug.showBounds
+      || this.deps.settings.debug.lodColorOverlay;
     const debugBounds: { min: THREE.Vector3; max: THREE.Vector3; lod: number }[] = [];
-    const meshDraws: MeshDraw[] = [];
+    const bucketCounts = new Map<string, number>();
+    this.meshDraws.length = 0;
+    this.shadowCandidates.length = 0;
+    this.shadowInstanceIndices.clear();
+
+    let billboardInstances = 0;
 
     for (const idx of cull.visibleInstanceIndices) {
       const inst = this.grid.instances[idx]!;
@@ -228,88 +262,63 @@ export class PropSystem {
       if (lod < 0) continue;
 
       _position.set(inst.position[0], inst.position[1], inst.position[2]);
-      _quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), inst.rotationY);
+      _quaternion.setFromAxisAngle(_yAxis, inst.rotationY);
       _scale.setScalar(inst.scale);
 
       if (lod >= def.lod.distances.length) {
-        billboardInstances++;
         if (!loaded.lodChain?.billboardGeometry) continue;
         _billboardQuat.copy(_quaternion);
         _matrix.compose(_position, _billboardQuat, _scale);
         const key = bucketKey(inst.assetId, def.lod.distances.length, "billboard");
-        const list = billboardMatrices.get(key) ?? [];
-        list.push(_matrix.clone());
-        billboardMatrices.set(key, list);
-        trianglesByLod[4] = (trianglesByLod[4] ?? 0) + 2;
+        if (this.writeBucketMatrix(key, bucketCounts)) {
+          billboardInstances++;
+          trianglesByLod[4] = (trianglesByLod[4] ?? 0) + 2;
+        }
         continue;
       }
 
-      _matrix.compose(_position, _quaternion, _scale);
       const triCount = lodTriangleCount(loaded, lod);
       trianglesByLod[lod] = (trianglesByLod[lod] ?? 0) + triCount;
-      meshDraws.push({
+      const draw: MeshDraw = {
+        instanceIndex: idx,
         assetId: inst.assetId,
         lod,
-        matrix: _matrix.clone(),
         distance,
         triCount,
         shadowEligible: propCastsShadow(def, distance),
-      });
+      };
+      this.meshDraws.push(draw);
+      if (draw.shadowEligible) insertShadowCandidate(this.shadowCandidates, draw, this.deps.settings.shadows.maxShadowProps);
 
-      if (this.deps.settings.debug.showBounds || this.deps.settings.debug.lodColorOverlay) {
-        _box.setFromCenterAndSize(_position, new THREE.Vector3(radius * 2, radius * 2, radius * 2));
+      if (debugEnabled && (this.deps.settings.debug.showBounds || this.deps.settings.debug.lodColorOverlay)) {
+        _debugBoxSize.set(radius * 2, radius * 2, radius * 2);
+        _box.setFromCenterAndSize(_position, _debugBoxSize);
         debugBounds.push({ min: _box.min.clone(), max: _box.max.clone(), lod });
       }
     }
 
-    meshDraws.sort((a, b) => a.distance - b.distance);
-    let shadowRemaining = this.deps.settings.shadows.maxShadowProps;
-    let shadowCasters = 0;
+    for (const draw of this.shadowCandidates) this.shadowInstanceIndices.add(draw.instanceIndex);
+
     let visibleMeshes = 0;
-    for (const draw of meshDraws) {
-      visibleMeshes++;
-      const useShadow = draw.shadowEligible && shadowRemaining > 0;
-      if (useShadow) {
-        shadowRemaining--;
-        shadowCasters++;
-        const key = bucketKey(draw.assetId, draw.lod, "shadow");
-        const list = shadowMatrices.get(key) ?? [];
-        list.push(draw.matrix);
-        shadowMatrices.set(key, list);
-      } else {
-        const key = bucketKey(draw.assetId, draw.lod, "opaque");
-        const list = opaqueMatrices.get(key) ?? [];
-        list.push(draw.matrix);
-        opaqueMatrices.set(key, list);
+    let shadowCasters = 0;
+    for (const draw of this.meshDraws) {
+      const inst = this.grid.instances[draw.instanceIndex]!;
+      _position.set(inst.position[0], inst.position[1], inst.position[2]);
+      _quaternion.setFromAxisAngle(_yAxis, inst.rotationY);
+      _scale.setScalar(inst.scale);
+      _matrix.compose(_position, _quaternion, _scale);
+      const useShadow = this.shadowInstanceIndices.has(draw.instanceIndex);
+      const kind: BucketKind = useShadow ? "shadow" : "opaque";
+      const key = bucketKey(draw.assetId, draw.lod, kind);
+      if (this.writeBucketMatrix(key, bucketCounts)) {
+        visibleMeshes++;
+        if (useShadow) shadowCasters++;
       }
     }
 
-    const bucketMatrices = new Map<string, THREE.Matrix4[]>();
-    for (const [key, matrices] of opaqueMatrices) bucketMatrices.set(key, matrices);
-    for (const [key, matrices] of shadowMatrices) bucketMatrices.set(key, matrices);
-    for (const [key, matrices] of billboardMatrices) bucketMatrices.set(key, matrices);
+    const drawCallsTotal = this.applyBucketCounts(bucketCounts);
+    this.updateDebug(debugEnabled, cull.visibleCellKeys, debugBounds);
 
-    for (const [key, bucket] of this.buckets) {
-      const matrices = bucketMatrices.get(key) ?? [];
-      bucket.mesh.count = matrices.length;
-      bucket.mesh.visible = matrices.length > 0;
-      for (let i = 0; i < matrices.length; i++) {
-        bucket.mesh.setMatrixAt(i, matrices[i]!);
-      }
-      bucket.mesh.instanceMatrix.needsUpdate = matrices.length > 0;
-    }
-
-    const visibleCellSet = cull.visibleCellKeys;
-    const visibleCells = this.grid.allCells().filter((c) => visibleCellSet.has(`${c.cellCoord[0]},${c.cellCoord[1]}`));
-    const culledCells = this.grid.allCells().filter((c) => !visibleCellSet.has(`${c.cellCoord[0]},${c.cellCoord[1]}`));
-    this.debug.update({
-      settings: this.deps.settings.debug,
-      visibleCells,
-      culledCells,
-      instanceBounds: debugBounds,
-    });
-
-    const drawCallsTotal = [...this.buckets.values()].filter((b) => b.mesh.visible).length;
     this.stats = {
       totalInstances: this.grid.instances.length,
       cellsTotal: this.grid.cells.size,
@@ -391,5 +400,63 @@ export class PropSystem {
     mesh.visible = false;
     this.root.add(mesh);
     this.buckets.set(key, { assetId, lod, kind, mesh, maxCount });
+  }
+
+  private writeBucketMatrix(key: string, counts: Map<string, number>): boolean {
+    const bucket = this.buckets.get(key);
+    if (!bucket) return false;
+    const count = counts.get(key) ?? PROP_MATRIX_UPLOAD_LIMIT_FALLBACK;
+    if (count >= bucket.maxCount) return false;
+    bucket.mesh.setMatrixAt(count, _matrix);
+    counts.set(key, count + 1);
+    return true;
+  }
+
+  private applyBucketCounts(counts: ReadonlyMap<string, number>): number {
+    let visibleBuckets = 0;
+    for (const [key, bucket] of this.buckets) {
+      const count = counts.get(key) ?? 0;
+      bucket.mesh.count = count;
+      bucket.mesh.visible = count > 0;
+      bucket.mesh.instanceMatrix.needsUpdate = count > 0;
+      if (count > 0) visibleBuckets++;
+    }
+    return visibleBuckets;
+  }
+
+  private computeColliderQueryRadius(): number {
+    if (!this.grid) return 0;
+    let radius = 0;
+    for (const inst of this.grid.instances) {
+      const def = this.assetById.get(inst.assetId);
+      const loaded = this.loadedAssets.get(inst.assetId);
+      if (!def || !loaded || def.collision.mode === "none") continue;
+      radius = Math.max(radius, def.collision.distance + loaded.metadata.boundingSphereRadius * inst.scale);
+    }
+    return radius;
+  }
+
+  private updateDebug(
+    debugEnabled: boolean,
+    visibleCellSet: ReadonlySet<string>,
+    debugBounds: { min: THREE.Vector3; max: THREE.Vector3; lod: number }[],
+  ): void {
+    if (!debugEnabled || !this.grid) {
+      this.debug.update({ settings: this.deps.settings.debug, visibleCells: [], culledCells: [], instanceBounds: [] });
+      return;
+    }
+    const visibleCells = [];
+    const culledCells = [];
+    for (const cell of this.grid.allCells()) {
+      const key = `${cell.cellCoord[0]},${cell.cellCoord[1]}`;
+      if (visibleCellSet.has(key)) visibleCells.push(cell);
+      else culledCells.push(cell);
+    }
+    this.debug.update({
+      settings: this.deps.settings.debug,
+      visibleCells,
+      culledCells,
+      instanceBounds: debugBounds,
+    });
   }
 }
