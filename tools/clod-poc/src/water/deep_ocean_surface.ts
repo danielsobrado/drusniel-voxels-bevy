@@ -62,7 +62,7 @@ function rectGridVertexCount(
   return (Math.max(1, segX) + 1) * (Math.max(1, segZ) + 1);
 }
 
-function deepOceanGridLayout(worldCells: number, config: DeepOceanRenderConfig, _innerBandCells: number) {
+function deepOceanGridLayout(worldCells: number, config: DeepOceanRenderConfig) {
   const extend = Math.max(1, config.extendCells);
   const segments = Math.max(4, config.segments);
   const outerMin = -extend;
@@ -72,32 +72,18 @@ function deepOceanGridLayout(worldCells: number, config: DeepOceanRenderConfig, 
   const ringWidth = Math.max(extend, 1);
   const radialSegments = Math.max(4, Math.round(segments * ringWidth / Math.max(ringWidth, worldCells * 0.25)));
   const tangentialSegments = segments;
-  return {
-    outerMin,
-    outerMax,
-    innerMin,
-    innerMax,
-    radialSegments,
-    tangentialSegments,
-  };
+  return { outerMin, outerMax, innerMin, innerMax, radialSegments, tangentialSegments };
 }
 
-/**
- * Render-only deep ocean ring. Vertices stay static on CPU; wave displacement,
- * chop, compression, and foam are evaluated in the GPU material.
- */
 export function createDeepOceanSurface(
   worldCells: number,
   config: DeepOceanRenderConfig,
   material: THREE.Material,
-  innerBandCells = 0,
 ): DeepOceanSurface | null {
   if (!config.enabled || worldCells <= 0) return null;
 
   const y = config.surfaceY;
-  const layout = deepOceanGridLayout(worldCells, config, innerBandCells);
-  const { outerMin, outerMax, innerMin, innerMax, radialSegments, tangentialSegments } = layout;
-
+  const { outerMin, outerMax, innerMin, innerMax, radialSegments, tangentialSegments } = deepOceanGridLayout(worldCells, config);
   const positions: number[] = [];
   const indices: number[] = [];
   const vertexOffset = { value: 0 };
@@ -125,21 +111,17 @@ export function createDeepOceanSurface(
 
   return {
     mesh,
-    update(_timeSeconds: number) {
-      // Time is pushed to the GPU material; CPU geometry is intentionally immutable.
-    },
+    update(_timeSeconds: number) {},
     dispose() {
       geometry.dispose();
-      mesh.parent?.remove(mesh);
+      mesh.removeFromParent();
     },
   };
 }
 
-/** Vertex count for tests and diagnostics. */
-export function deepOceanSurfaceVertexCount(worldCells: number, config: DeepOceanRenderConfig, innerBandCells = 0): number {
+export function deepOceanSurfaceVertexCount(worldCells: number, config: DeepOceanRenderConfig): number {
   if (!config.enabled || worldCells <= 0) return 0;
-  const layout = deepOceanGridLayout(worldCells, config, innerBandCells);
-  const { outerMin, outerMax, innerMin, innerMax, radialSegments, tangentialSegments } = layout;
+  const { outerMin, outerMax, innerMin, innerMax, radialSegments, tangentialSegments } = deepOceanGridLayout(worldCells, config);
   return rectGridVertexCount(outerMin, outerMax, innerMax, outerMax, tangentialSegments, radialSegments)
     + rectGridVertexCount(outerMin, outerMax, outerMin, innerMin, tangentialSegments, radialSegments)
     + rectGridVertexCount(outerMin, innerMin, innerMin, innerMax, radialSegments, tangentialSegments)
