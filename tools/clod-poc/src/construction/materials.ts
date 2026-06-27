@@ -1,13 +1,19 @@
 import * as THREE from "three";
+import woodAoUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_AmbientOcclusion.jpg?url";
+import woodAlbedoUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_Color.jpg?url";
+import woodDisplacementUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_Displacement.jpg?url";
+import woodNormalUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_NormalGL.jpg?url";
+import woodRoughnessUrl from "../../textures/pbr/jpg/Wood060/Wood060_1K-JPG_Roughness.jpg?url";
 import type { ConstructionMaterial } from "./types.js";
 
-const WOOD_TEXTURE_SIZE_PX = 256;
-const WOOD_GRAIN_ROWS = 32;
-const WOOD_GRAIN_SCALE = 0.12;
-const WOOD_GRAIN_RING_SCALE = 0.035;
-const WOOD_BASE_RGB = [139, 88, 42] as const;
-const WOOD_DARK_RGB = [82, 45, 24] as const;
-const WOOD_LIGHT_RGB = [186, 126, 63] as const;
+const WOOD_TEXTURE_REPEAT_U = 1.5;
+const WOOD_TEXTURE_REPEAT_V = 1.0;
+const WOOD_TEXTURE_ANISOTROPY = 8;
+const WOOD_NORMAL_SCALE = 0.75;
+const WOOD_AO_INTENSITY = 0.85;
+const WOOD_DISPLACEMENT_SCALE = 0.015;
+const WOOD_DISPLACEMENT_BIAS = -0.0075;
+
 const DEFAULT_MATERIAL_COLORS: Record<ConstructionMaterial, number> = {
   wood: 0x9a673a,
   stone: 0x7f858c,
@@ -15,77 +21,77 @@ const DEFAULT_MATERIAL_COLORS: Record<ConstructionMaterial, number> = {
   thatch: 0xb59b52,
 };
 
-let cachedWoodTexture: THREE.CanvasTexture | null = null;
-
-function mixChannel(a: number, b: number, t: number): number {
-  return Math.round(a * (1 - t) + b * t);
+interface WoodPbrTextureSet {
+  albedo: THREE.Texture;
+  normal: THREE.Texture;
+  roughness: THREE.Texture;
+  ao: THREE.Texture;
+  displacement: THREE.Texture;
 }
 
-function drawWoodGrain(ctx: CanvasRenderingContext2D): void {
-  const width = WOOD_TEXTURE_SIZE_PX;
-  const height = WOOD_TEXTURE_SIZE_PX;
-  const image = ctx.createImageData(width, height);
-  const data = image.data;
+let cachedWoodPbrTextures: WoodPbrTextureSet | null = null;
 
-  for (let y = 0; y < height; y += 1) {
-    const rowWave = Math.sin(y * WOOD_GRAIN_RING_SCALE) * 0.5 + Math.sin(y * WOOD_GRAIN_SCALE) * 0.28;
-    for (let x = 0; x < width; x += 1) {
-      const grain = Math.sin((x * 0.075) + rowWave * 5.5) * 0.5 + 0.5;
-      const knot = Math.sin(Math.hypot(x - 176, y - 118) * 0.13) * Math.max(0, 1 - Math.hypot(x - 176, y - 118) / 84);
-      const streak = ((x + Math.floor(rowWave * 18)) % WOOD_GRAIN_ROWS) / WOOD_GRAIN_ROWS;
-      const lightMix = Math.max(0, grain * 0.38 + streak * 0.22 + knot * 0.18);
-      const darkMix = Math.max(0, (1 - grain) * 0.24 - knot * 0.12);
-      const index = (y * width + x) * 4;
-      const baseR = mixChannel(WOOD_BASE_RGB[0], WOOD_LIGHT_RGB[0], lightMix);
-      const baseG = mixChannel(WOOD_BASE_RGB[1], WOOD_LIGHT_RGB[1], lightMix);
-      const baseB = mixChannel(WOOD_BASE_RGB[2], WOOD_LIGHT_RGB[2], lightMix);
-      data[index] = mixChannel(baseR, WOOD_DARK_RGB[0], darkMix);
-      data[index + 1] = mixChannel(baseG, WOOD_DARK_RGB[1], darkMix);
-      data[index + 2] = mixChannel(baseB, WOOD_DARK_RGB[2], darkMix);
-      data[index + 3] = 255;
-    }
-  }
-
-  ctx.putImageData(image, 0, 0);
-}
-
-function createWoodTexture(): THREE.CanvasTexture | null {
-  if (cachedWoodTexture) return cachedWoodTexture;
-  if (typeof document === "undefined") return null;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = WOOD_TEXTURE_SIZE_PX;
-  canvas.height = WOOD_TEXTURE_SIZE_PX;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-
-  drawWoodGrain(ctx);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.name = "construction-procedural-wood";
+function configureWoodTexture(texture: THREE.Texture, colorSpace: THREE.ColorSpace): void {
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(1.5, 1.0);
-  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.repeat.set(WOOD_TEXTURE_REPEAT_U, WOOD_TEXTURE_REPEAT_V);
+  texture.colorSpace = colorSpace;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = WOOD_TEXTURE_ANISOTROPY;
   texture.needsUpdate = true;
-  cachedWoodTexture = texture;
+}
+
+function loadWoodTexture(url: string, name: string, colorSpace: THREE.ColorSpace): THREE.Texture {
+  const texture = new THREE.TextureLoader().load(
+    url,
+    (loadedTexture) => configureWoodTexture(loadedTexture, colorSpace),
+    undefined,
+    (error) => console.warn(`[construction] failed to load wood PBR texture ${name}`, error),
+  );
+  texture.name = name;
   return texture;
+}
+
+function woodPbrTextures(): WoodPbrTextureSet {
+  if (cachedWoodPbrTextures) return cachedWoodPbrTextures;
+  cachedWoodPbrTextures = {
+    albedo: loadWoodTexture(woodAlbedoUrl, "Wood060-albedo", THREE.SRGBColorSpace),
+    normal: loadWoodTexture(woodNormalUrl, "Wood060-normal", THREE.NoColorSpace),
+    roughness: loadWoodTexture(woodRoughnessUrl, "Wood060-roughness", THREE.NoColorSpace),
+    ao: loadWoodTexture(woodAoUrl, "Wood060-ao", THREE.NoColorSpace),
+    displacement: loadWoodTexture(woodDisplacementUrl, "Wood060-displacement", THREE.NoColorSpace),
+  };
+  return cachedWoodPbrTextures;
 }
 
 export function createConstructionMaterial(material: ConstructionMaterial): THREE.MeshStandardMaterial {
   if (material !== "wood") {
-    return new THREE.MeshStandardMaterial({
+    const fallbackMaterial = new THREE.MeshStandardMaterial({
       color: DEFAULT_MATERIAL_COLORS[material],
       roughness: material === "metal" ? 0.46 : 0.78,
       metalness: material === "metal" ? 0.62 : 0.0,
     });
+    fallbackMaterial.name = `construction-${material}`;
+    return fallbackMaterial;
   }
 
-  const woodTexture = createWoodTexture();
-  // TODO: Replace this temporary procedural wood with the final construction material asset pipeline.
-  return new THREE.MeshStandardMaterial({
-    color: woodTexture ? 0xffffff : DEFAULT_MATERIAL_COLORS.wood,
-    map: woodTexture ?? undefined,
-    roughness: 0.86,
+  const textures = woodPbrTextures();
+  const woodMaterial = new THREE.MeshStandardMaterial({
+    name: "construction-wood-Wood060-pbr",
+    color: 0xffffff,
+    map: textures.albedo,
+    normalMap: textures.normal,
+    normalScale: new THREE.Vector2(WOOD_NORMAL_SCALE, WOOD_NORMAL_SCALE),
+    roughness: 1.0,
+    roughnessMap: textures.roughness,
     metalness: 0.0,
+    aoMap: textures.ao,
+    aoMapIntensity: WOOD_AO_INTENSITY,
+    displacementMap: textures.displacement,
+    displacementScale: WOOD_DISPLACEMENT_SCALE,
+    displacementBias: WOOD_DISPLACEMENT_BIAS,
   });
+  return woodMaterial;
 }
