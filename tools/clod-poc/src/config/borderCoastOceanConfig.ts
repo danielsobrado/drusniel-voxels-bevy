@@ -254,6 +254,23 @@ function normalizeTypeWeights(raw: Record<string, unknown>): CoastTypeWeightsCon
   };
 }
 
+function validateGameplayRelationships(config: BorderOceanGameplayConfig): void {
+  if (config.world_edge_margin_m <= 0) {
+    throw new Error(`${CONFIG_NAME}: gameplay.world_edge_margin_m must be greater than 0`);
+  }
+  if (!config.soft_pushback_enabled) return;
+  if (config.pushback_start_inside_world_m <= 0) {
+    throw new Error(
+      `${CONFIG_NAME}: gameplay.pushback_start_inside_world_m must be greater than 0 when soft pushback is enabled`,
+    );
+  }
+  if (config.pushback_strength <= 0) {
+    throw new Error(
+      `${CONFIG_NAME}: gameplay.pushback_strength must be greater than 0 when soft pushback is enabled`,
+    );
+  }
+}
+
 export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfig {
   let parsed: unknown;
   try {
@@ -321,6 +338,14 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
   if (fogNear >= fogFar) {
     throw new Error(`${CONFIG_NAME}: deep_ocean.shading.fog_near_m must be less than fog_far_m`);
   }
+
+  const gameplayConfig: BorderOceanGameplayConfig = {
+    soft_pushback_enabled: booleanAt(gameplay, "soft_pushback_enabled", "gameplay"),
+    world_edge_margin_m: numberAt(gameplay, "world_edge_margin_m", "gameplay", 0),
+    pushback_start_inside_world_m: numberAt(gameplay, "pushback_start_inside_world_m", "gameplay", 0),
+    pushback_strength: numberAt(gameplay, "pushback_strength", "gameplay", 0),
+  };
+  validateGameplayRelationships(gameplayConfig);
 
   return {
     world: {
@@ -420,12 +445,7 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
         fog_density: numberAt(shading, "fog_density", "deep_ocean.shading", 0),
       },
     },
-    gameplay: {
-      soft_pushback_enabled: booleanAt(gameplay, "soft_pushback_enabled", "gameplay"),
-      world_edge_margin_m: numberAt(gameplay, "world_edge_margin_m", "gameplay", 0),
-      pushback_start_inside_world_m: numberAt(gameplay, "pushback_start_inside_world_m", "gameplay", 0),
-      pushback_strength: numberAt(gameplay, "pushback_strength", "gameplay", 0),
-    },
+    gameplay: gameplayConfig,
     debug: {
       show_world_bounds: booleanAt(debug, "show_world_bounds", "debug"),
       show_coast_band: booleanAt(debug, "show_coast_band", "debug"),
