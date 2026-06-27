@@ -85,23 +85,73 @@ describe("ClodWorkerClient parent error lifecycle", () => {
     expect(digCall).toBeDefined();
 
     const requestId = (digCall![0] as Record<string, unknown>).requestId as number;
-    mockWorker.onmessage!({
-      data: {
-        type: "lod0Rebuilt",
-        requestIds: [requestId],
-        editCount: 1,
-        changed: [],
-        dirtyCoords: [],
-        lod0Pages: 0,
-        lod0Ms: 0,
-        serializeMs: 0,
-        serializedBytes: 0,
-        chunksRemeshed: 0,
-        chunksTotal: 0,
-        pendingParents: 0,
-      },
-    } as MessageEvent);
+    resolveDig(mockWorker, requestId, 1);
 
     await expect(digPromise).resolves.toMatchObject({ requestCount: 1 });
   });
+
+  it("splits queued dig bursts into capped worker batches", async () => {
+    const mockWorker = (client as unknown as { worker: MockWorker }).worker;
+    const first = client.rebuildAfterDig(
+      { x: 0, y: 0, z: 0, r: 1 },
+      { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
+    );
+    const firstCall = digCalls(mockWorker)[0];
+    expect(firstCall).toBeDefined();
+
+    const queued = Array.from({ length: 9 }, (_, i) => client.rebuildAfterDig(
+      { x: i + 1, y: 0, z: 0, r: 1 },
+      { minX: i + 1, maxX: i + 2, minZ: 0, maxZ: 1 },
+    ));
+
+    resolveDig(mockWorker, requestId(firstCall), 1);
+    await first;
+    await Promise.resolve();
+
+    const secondCall = digCalls(mockWorker)[1];
+    expect(secondCall).toBeDefined();
+    expect((secondCall as { edits: unknown[] }).edits).toHaveLength(8);
+    expect((secondCall as { dirtyRegions: unknown[] }).dirtyRegions).toHaveLength(8);
+
+    resolveDig(mockWorker, requestId(secondCall), 8);
+    await Promise.all(queued.slice(0, 8));
+    await Promise.resolve();
+
+    const thirdCall = digCalls(mockWorker)[2];
+    expect(thirdCall).toBeDefined();
+    expect((thirdCall as { edits: unknown[] }).edits).toHaveLength(1);
+    expect((thirdCall as { dirtyRegions: unknown[] }).dirtyRegions).toHaveLength(1);
+
+    resolveDig(mockWorker, requestId(thirdCall), 1);
+    await expect(queued[8]).resolves.toMatchObject({ requestCount: 1 });
+  });
 });
+
+function digCalls(worker: MockWorker): Array<Record<string, unknown>> {
+  return worker.postMessage.mock.calls
+    .map(([msg]: unknown[]) => msg as Record<string, unknown>)
+    .filter((msg) => msg.type === "dig");
+}
+
+function requestId(message: Record<string, unknown>): number {
+  return message.requestId as number;
+}
+
+function resolveDig(worker: MockWorker, requestId: number, editCount: number): void {
+  worker.onmessage!({
+    data: {
+      type: "lod0Rebuilt",
+      requestIds: [requestId],
+      editCount,
+      changed: [],
+      dirtyCoords: [],
+      lod0Pages: 0,
+      lod0Ms: 0,
+      serializeMs: 0,
+      serializedBytes: 0,
+      chunksRemeshed: 0,
+      chunksTotal: 0,
+      pendingParents: 0,
+    },
+  } as MessageEvent);
+}
