@@ -81,7 +81,7 @@ naadf_poc:
     mode: camera_relative_summary
     start_m: 4096
     end_m: 16384
-    grid_res: 192
+    grid_res: 96
     use_naadf_summary: true
 
   debug:
