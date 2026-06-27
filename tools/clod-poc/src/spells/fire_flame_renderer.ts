@@ -124,8 +124,13 @@ export class FireFlameRenderer {
       document.body.appendChild(layer);
     }
     layer.classList.add("spell-vfx-layer");
-    layer.style.width = `min(${this.config.widthPx}px, calc(100vw - 28px))`;
-    layer.style.height = `${this.config.heightPx}px`;
+    layer.style.left = "0";
+    layer.style.top = "0";
+    layer.style.right = "0";
+    layer.style.bottom = "0";
+    layer.style.width = "100vw";
+    layer.style.height = "100vh";
+    layer.style.transform = "none";
 
     let canvas = document.getElementById(this.config.canvasId) as HTMLCanvasElement | null;
     if (!canvas) {
