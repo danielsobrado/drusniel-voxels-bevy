@@ -22,6 +22,8 @@ export interface PropController {
   setEnabled(enabled: boolean): void;
   refreshStats(): void;
   getPlacementSceneSnapshot(): PropPlacementScene;
+  replacePlacementScene(scene: PropPlacementScene): void;
+  availablePrefabIds(): string[];
   dispose(): void;
 }
 
@@ -61,6 +63,13 @@ export function createPropController(deps: PropControllerDeps): PropController {
     refreshStats,
     getPlacementSceneSnapshot() {
       return system.getPlacementSceneSnapshot();
+    },
+    replacePlacementScene(scene) {
+      system.replacePlacementScene(scene);
+      refreshStats();
+    },
+    availablePrefabIds() {
+      return system.availablePrefabIds();
     },
     dispose() {
       colliderSet.dispose();
