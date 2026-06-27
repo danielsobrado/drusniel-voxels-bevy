@@ -57,11 +57,12 @@ export interface LongViewFrameDiagnosticsDeps {
 
 export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDeps): () => void {
   const phase0FrameMsBuffer: number[] = [];
+  const streamingScene = deps.queryScene?.startsWith("infinite-") ?? false;
   const ownership = resolveStreamingOwnership({
     streaming: deps.phase0Streaming,
     targetVisibleM: deps.phase0TargetVisibleM,
     targetFutureVisibleM: deps.phase0Config.phase0.target_future_visible_m,
-    streamingScene: deps.queryScene?.startsWith("infinite-") ?? false,
+    streamingScene,
   });
   const ownershipRuntime = new TerrainOwnershipRuntime(ownership, {
     live: {
@@ -187,6 +188,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       preloadSeconds: deps.phase0Streaming.preload_seconds,
       liveRadiusM: deps.phase0Streaming.live_radius_m,
       clodRadiusM: deps.phase0Streaming.clod_radius_m,
+      infiniteStreaming: streamingScene,
     });
     s.counters["streamer_simulated_required_chunks"] = streamingReport.requiredChunkCount;
     s.counters["streamer_simulated_required_pages"] = streamingReport.requiredPageCount;
