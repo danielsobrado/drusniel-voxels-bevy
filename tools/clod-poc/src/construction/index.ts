@@ -6,8 +6,9 @@ export {
   createConstructionCandidate,
   createFreePlacementPosition,
   validateConstructionPlacement,
-  validatePersistedConstructionPlacement,
 } from "./placement.js";
+export { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
+export type { PersistedConstructionPlacementValidationInput } from "./persisted_placement.js";
 export { buildPlacedPieceMap, hasGroundSupport, isPlacedPieceSupported, resolveConstructionPlacementSupport } from "./support_state.js";
 export type { ConstructionSupportInput, ConstructionSupportResult } from "./support_state.js";
 export type {
