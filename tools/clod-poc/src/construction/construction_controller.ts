@@ -60,6 +60,16 @@ function hasExplicitSupportMetadata(placed: PlacedConstructionPiece): boolean {
   return placed.grounded !== undefined || placed.parentIds !== undefined;
 }
 
+function disposeMesh(mesh: THREE.Mesh): void {
+  mesh.geometry.dispose();
+  const material = mesh.material;
+  if (Array.isArray(material)) {
+    for (const entry of material) entry.dispose();
+  } else {
+    material.dispose();
+  }
+}
+
 export interface ConstructionControllerDeps {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -137,7 +147,7 @@ class ConstructionControllerImpl implements ConstructionController {
     this.installInput();
     this.loadSavedPieces();
     this.syncUi(true);
-    console.info("[construction] CLOD construction ready. B toggle, left-click place, X snap, R rotate, 1-9 select.");
+    console.info("[construction] CLOD construction ready. B toggle, left-click place, right-click delete, X snap, R rotate, 1-9 select.");
   }
 
   update(): void {
@@ -188,12 +198,7 @@ class ConstructionControllerImpl implements ConstructionController {
   dispose(): void {
     this.dragOffset = null;
     for (const dispose of this.disposers) dispose();
-    for (const mesh of this.placedMeshes) {
-      mesh.geometry.dispose();
-      const material = mesh.material;
-      if (Array.isArray(material)) for (const entry of material) entry.dispose();
-      else material.dispose();
-    }
+    for (const mesh of this.placedMeshes) disposeMesh(mesh);
     this.placedMeshes.length = 0;
     this.ghostMesh.geometry.dispose();
     this.ghostMaterial.dispose();
@@ -235,8 +240,11 @@ class ConstructionControllerImpl implements ConstructionController {
       if (!this.active) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (event.button !== 0 && event.button !== 2) return;
-      this.placeCurrentCandidate();
+      if (event.button === 0) {
+        this.placeCurrentCandidate();
+        return;
+      }
+      if (event.button === 2) this.deleteAimedPiece();
     };
     const onContextMenu = (event: MouseEvent) => {
       if (!this.active) return;
@@ -305,7 +313,7 @@ class ConstructionControllerImpl implements ConstructionController {
       this.ghostMesh.visible = false;
       this.lastPlacementMessage = "";
     } else {
-      this.lastPlacementMessage = "Left-click to place. Red ghost means blocked; see State below.";
+      this.lastPlacementMessage = "Left-click to place. Right-click deletes aimed construction.";
     }
     console.info(`[construction] building mode ${this.active ? "on" : "off"}`);
     this.syncUi(true);
@@ -427,6 +435,71 @@ class ConstructionControllerImpl implements ConstructionController {
     this.ghostMesh.visible = false;
     this.savePlacedPieces();
     this.syncUi(true);
+  }
+
+  private deleteAimedPiece(): void {
+    const ray = this.readAimRay();
+    if (!ray) {
+      this.lastPlacementMessage = "No delete target. Aim at an existing construction piece.";
+      this.syncUi(true);
+      return;
+    }
+    this.raycaster.ray.copy(ray);
+    const hit = this.raycaster.intersectObjects(this.placedMeshes, false)[0];
+    if (!hit) {
+      this.lastPlacementMessage = "No construction piece under cursor.";
+      this.syncUi(true);
+      return;
+    }
+    const index = this.placedMeshes.indexOf(hit.object as THREE.Mesh);
+    if (index < 0) {
+      this.lastPlacementMessage = "Delete target was not tracked.";
+      console.warn(`[construction] ${this.lastPlacementMessage}`);
+      this.syncUi(true);
+      return;
+    }
+    const removedIds = this.collectDependentPieceIds(this.placedPieces[index]!.id);
+    const removedCount = this.removePlacedPiecesById(removedIds);
+    this.currentCandidate = null;
+    this.ghostMesh.visible = false;
+    this.savePlacedPieces();
+    this.lastPlacementMessage = removedCount === 1 ? "Deleted 1 piece." : `Deleted ${removedCount} connected pieces.`;
+    console.info(`[construction] ${this.lastPlacementMessage}`);
+    this.syncUi(true);
+  }
+
+  private collectDependentPieceIds(rootId: string): Set<string> {
+    const result = new Set<string>([rootId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const placed of this.placedPieces) {
+        if (result.has(placed.id)) continue;
+        if ((placed.parentIds ?? []).some((parentId) => result.has(parentId))) {
+          result.add(placed.id);
+          changed = true;
+        }
+      }
+    }
+    return result;
+  }
+
+  private removePlacedPiecesById(ids: ReadonlySet<string>): number {
+    let removed = 0;
+    for (let index = this.placedPieces.length - 1; index >= 0; index -= 1) {
+      const placed = this.placedPieces[index]!;
+      if (!ids.has(placed.id)) continue;
+      const mesh = this.placedMeshes[index];
+      if (mesh) {
+        this.root.remove(mesh);
+        disposeMesh(mesh);
+      }
+      this.snapIndex.removeEntity(placed.id);
+      this.placedPieces.splice(index, 1);
+      this.placedMeshes.splice(index, 1);
+      removed += 1;
+    }
+    return removed;
   }
 
   private addPlacedPiece(placed: PlacedConstructionPiece, logPlacement: boolean): boolean {
@@ -676,7 +749,7 @@ class ConstructionControllerImpl implements ConstructionController {
     this.menu.innerHTML = `
       <div data-drag-handle style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;cursor:grab;">
         <strong>Build</strong>
-        <span style="color:#9fb0c0;">B close · left-click place · R rotate · X snap</span>
+        <span style="color:#9fb0c0;">B close · left-click place · right-click delete · R rotate · X snap</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-bottom:6px;">${pieceButtons}</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;color:#cdd8e3;">
@@ -686,7 +759,7 @@ class ConstructionControllerImpl implements ConstructionController {
         <span style="color:${statusColor};">State: ${escapeHtml(status)}</span>
         <span>Support: ${escapeHtml(support)}</span>
       </div>
-      <div style="margin-top:5px;color:#9fb0c0;">${escapeHtml(this.lastPlacementMessage || "Green/blue places. Red is blocked; State shows why.")}</div>
+      <div style="margin-top:5px;color:#9fb0c0;">${escapeHtml(this.lastPlacementMessage || "Left-click places. Right-click deletes aimed construction.")}</div>
     `;
   }
 }
