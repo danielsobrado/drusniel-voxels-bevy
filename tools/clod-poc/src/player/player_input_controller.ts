@@ -78,12 +78,15 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
   };
 
   deps.renderer.domElement.addEventListener("pointerdown", (event) => {
-    if (deps.interaction.mode === "playing" && event.button === 0 && document.pointerLockElement !== deps.renderer.domElement) {
-      void deps.renderer.domElement.requestPointerLock();
-    } else if (deps.interaction.mode === "playing" && event.button === 0 && deps.getDigEnabled() && deps.getTerraformEditActive()) {
+    if (deps.interaction.mode === "playing" && event.button === 0 && deps.getDigEnabled() && deps.getTerraformEditActive()) {
       digHeld = true;
       deps.camera.getWorldDirection(digDirection);
       deps.scheduleDig(new THREE.Ray(deps.camera.position.clone(), digDirection.clone()));
+      if (document.pointerLockElement !== deps.renderer.domElement) {
+        void deps.renderer.domElement.requestPointerLock();
+      }
+    } else if (deps.interaction.mode === "playing" && event.button === 0 && document.pointerLockElement !== deps.renderer.domElement) {
+      void deps.renderer.domElement.requestPointerLock();
     } else if (deps.interaction.mode === "playing" && event.button === 0 && document.pointerLockElement === deps.renderer.domElement) {
       deps.triggerSwordAttack?.();
     } else if (deps.interaction.mode === "orbit" && event.button === 0 && deps.getDigEnabled()) {

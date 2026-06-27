@@ -77,6 +77,7 @@ export async function runTextureUiStartup(
     bindTerraformEditCheckbox: (el) => session.playerModeController!.bindTerraformEditCheckbox(el),
     bindEditToggleInput: (el) => session.playerModeController!.bindEditToggleInput(el),
     onEditToggleChanged: (enabled) => {
+      session.terraformEditActive = enabled;
       if (!enabled) {
         session.playerInputController!.clearDigHold();
         brushPreview.hide();
@@ -85,6 +86,7 @@ export async function runTextureUiStartup(
     },
   });
   session.terraformEditCheckbox = terraformMenuUi.editCheckbox;
+  session.terraformEditActive = terraformMenuUi.editCheckbox.checked;
   bindings.refreshTerraformSwatches = terraformMenuUi.refreshSwatches;
   bindings.syncTerraformMenu = terraformMenuUi.syncMenu;
   applyTerrainTextures();
