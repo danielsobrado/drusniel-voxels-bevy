@@ -1,7 +1,19 @@
 import * as THREE from "three";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { FarSummaryGpuAtlas } from "./farSummaryAtlas.js";
 import { createTestNaadfConfig } from "../__tests__/testConfig.js";
+
+const atlases: FarSummaryGpuAtlas[] = [];
+
+function createAtlas(options: ConstructorParameters<typeof FarSummaryGpuAtlas>[0]): FarSummaryGpuAtlas {
+  const atlas = new FarSummaryGpuAtlas(options);
+  atlases.push(atlas);
+  return atlas;
+}
+
+afterEach(() => {
+  for (const atlas of atlases.splice(0)) atlas.dispose();
+});
 
 function readyTile(ring: number, x: number, z: number, height: number): any {
   return {
@@ -33,7 +45,7 @@ function testState(farTiles: Map<string, any>, revision = 42): any {
 
 describe("FarSummaryGpuAtlas", () => {
   it("uses a wider 5x5 moving tile window by default", () => {
-    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, ringCount: 2 });
+    const atlas = createAtlas({ tileCells: 2, ringCount: 2 });
 
     expect(atlas.view.widthCells).toBe(10);
     expect(atlas.view.heightCells).toBe(20);
@@ -43,7 +55,7 @@ describe("FarSummaryGpuAtlas", () => {
   });
 
   it("packs ready far-summary heights into a float texture", () => {
-    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
+    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
 
@@ -68,7 +80,7 @@ describe("FarSummaryGpuAtlas", () => {
   });
 
   it("packs summary material color into a paired float texture", () => {
-    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
+    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
 
@@ -83,7 +95,7 @@ describe("FarSummaryGpuAtlas", () => {
   });
 
   it("packs derived normals into a paired float texture", () => {
-    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
+    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
 
@@ -98,7 +110,7 @@ describe("FarSummaryGpuAtlas", () => {
   });
 
   it("packs canopy and water coverage into a paired float texture", () => {
-    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
+    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
 
@@ -113,7 +125,7 @@ describe("FarSummaryGpuAtlas", () => {
   });
 
   it("packs each far-summary ring into a separate atlas band", () => {
-    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, ringCount: 2, tilesX: 3, tilesZ: 3 });
+    const atlas = createAtlas({ tileCells: 2, ringCount: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
     farTiles.set("1:1,1", readyTile(1, 1, 1, 80));
@@ -132,7 +144,7 @@ describe("FarSummaryGpuAtlas", () => {
   });
 
   it("does not repack when only unrelated world revision changes", () => {
-    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, ringCount: 2, tilesX: 3, tilesZ: 3 });
+    const atlas = createAtlas({ tileCells: 2, ringCount: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
 
