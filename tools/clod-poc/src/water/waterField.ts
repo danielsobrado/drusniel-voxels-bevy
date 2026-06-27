@@ -480,14 +480,19 @@ export class WaterField {
     return { waterY, terrainY, depth: waterY - terrainY, bodyMask: 0, flow: { ...STILL_FLOW } };
   }
 
+  private isInsidePlayableWorld(x: number, z: number): boolean {
+    return this.worldCells > 0 && x >= 0 && x <= this.worldCells && z >= 0 && z <= this.worldCells;
+  }
+
   private isInClipmapExclusionBand(x: number, z: number): boolean {
-    if (!this.clipmapExclusionBand.enabled || this.worldCells <= 0 || this.clipmapExclusionBand.distance <= 0) return false;
+    if (!this.clipmapExclusionBand.enabled || this.clipmapExclusionBand.distance <= 0) return false;
+    if (!this.isInsidePlayableWorld(x, z)) return false;
     const edgeDistance = Math.min(x, z, this.worldCells - x, this.worldCells - z);
     return edgeDistance < this.clipmapExclusionBand.distance;
   }
 
   private sampleShoreSurfBand(x: number, z: number): WaterFieldResult | null {
-    if (!this.shoreSurf.enabled || this.worldCells <= 0) return null;
+    if (!this.shoreSurf.enabled || !this.isInsidePlayableWorld(x, z)) return null;
     const edgeDistance = Math.min(x, z, this.worldCells - x, this.worldCells - z);
     if (edgeDistance >= this.shoreSurf.startDistance) return null;
 
