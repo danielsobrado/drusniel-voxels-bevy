@@ -11,7 +11,8 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 - NanoVDB-style span stepping at chunk/block/voxel scale in the heightfield PoC
 - Far clipmap summary rings for long-distance queries
 - Query API with explicit counters (near table, hash, far clipmap, missing, HDDA)
-- Camera-relative infinite far shell sampling via `queryTerrainHeight`
+- GPU procedural displacement for the runtime far shell
+- CPU query/HDDA path as oracle/debug only
 - Canopy coverage flowing through summary chain
 - Sun visibility / terrain occlusion debug rays
 - Acceptance scenes and metrics for port/no-port decisions
@@ -19,12 +20,22 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 ## What it intentionally does not validate
 
 - Full 16³ voxel brick occupancy (heightfield PoC approximation only)
-- Production GPU path tracing or NAADF as visible terrain renderer
+- True GPU NAADF summary-tile texture/SSBO traversal yet
+- Production GPU path tracing
 - CLOD page mesh replacement or gameplay collision
 - Sparse voxel octrees / DAGs
 - Bevy/Rust integration
 
-## Data flow
+## Runtime data flow
+
+```text
+far shell annular mesh
+  -> GPU material positionNode
+  -> procedural height displacement in vertex shader
+  -> GPU material lighting / haze
+```
+
+CPU NAADF data still exists for oracle/debug:
 
 ```text
 deterministic terrain source (surfaceHeight / macroTerrain)
@@ -35,7 +46,7 @@ deterministic terrain source (surfaceHeight / macroTerrain)
   -> far clipmap summary tiles (ringed clipmap)
   -> query API (height / primary ray / sun visibility)
   -> dense or HDDA traversal mode
-  -> far shell / canopy shell / shadow debug / ray debug overlays
+  -> debug overlays / acceptance counters
 ```
 
 ## Config
@@ -52,19 +63,23 @@ Loaded from [`config/naadf_poc.yaml`](../config/naadf_poc.yaml). Key sections:
 | `far_clipmap` | Distance rings and cell sizes |
 | `query` | Ray step limits, LOD bias, sun unknown policy |
 | `traversal` | `dense`, `hdda`, or `compare`; HDDA step budgets and compare epsilon |
-| `far_shell` | Camera-relative shell distances |
+| `far_shell` | Camera-relative shell distances, grid size, `height_sampling_mode` |
 | `debug` | Overlay toggles |
 | `acceptance` | Gate thresholds |
 
 Default traversal remains `dense`. Use `compare` before trusting HDDA changes. Compare mode runs the dense oracle with isolated metrics, runs HDDA against live metrics, and returns the dense result as a safe fallback if there is a mismatch. It increments both `naadf_hdda_dense_mismatches` and `naadf_hdda_fallback_to_dense` on fallback.
 
+Runtime far-shell height sampling defaults to `gpu`. CPU height sampling is only for debug/oracle checks and can be forced with `naadfHeightMode=cpu`.
+
 Enable with `?naadf=1` or any `infinite-naadf-*` scene.
 
-Runtime traversal overrides:
+Runtime overrides:
 
 ```text
 ?scene=infinite-naadf-sun-visibility&naadfTraversal=compare
 ?scene=infinite-naadf-sun-visibility&naadfTraversal=hdda&naadfHddaBounds=1
+?scene=infinite-naadf-sun-visibility&naadfHeightMode=gpu&naadfShellGrid=96
+?scene=infinite-naadf-sun-visibility&naadfHeightMode=cpu
 ```
 
 `naadfHddaBounds=1` enables AADF directional-bound skips. Leave it off while checking pure span stepping.
@@ -72,9 +87,9 @@ Runtime traversal overrides:
 ## Known limitations
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
+- Runtime far shell currently uses GPU procedural displacement, not uploaded NAADF summary-tile texture/SSBO sampling
 - HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
-- TypeScript synchronous builds under frame budgets (no worker offload)
-- Macro terrain fallback still used when summaries are missing (counted, not silent)
+- CPU macro terrain fallback still exists for debug/oracle paths, but should not be on the runtime far-shell hot path in GPU mode
 - Sun visibility is debug-only stepping, not a path tracer
 - `infinite-naadf-stress-missing` forces zero build budget to test missing paths
 
@@ -112,7 +127,8 @@ Examples:
 http://127.0.0.1:5173/?scene=infinite-naadf-flat&farShell=1
 http://127.0.0.1:5173/?scene=infinite-naadf-fast-flight&farShell=1
 http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&farShell=1
-http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfTraversal=compare&naadfHddaBounds=1
+http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfHeightMode=gpu&naadfShellGrid=96
+http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfTraversal=compare&naadfHddaBounds=1&naadfHeightMode=cpu
 ```
 
 Use the **NAADF PoC** GUI folder for overlays and per-frame counters.
