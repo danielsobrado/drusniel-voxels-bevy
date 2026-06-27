@@ -101,13 +101,13 @@ fn placement_beach_highland_preserve(edge_distance: f32, inland_height: f32, oce
   let start_height = backshore_height + PLACEMENT_BEACH_HIGHLAND_START_ABOVE_BACKSHORE;
   let full_height = max(
     start_height + PLACEMENT_BEACH_HIGHLAND_FULL_EXTRA_CELLS,
-    WATER_LEVEL + PLACEMENT_CLIFF_MIN_HEIGHT_ABOVE_WATER + PLACEMENT_CLIFF_INLAND_BOOST,
+    WATER_LEVEL + PLACEMENT_CLIFF_MIN_HEIGHT_ABOVE_WATER + PLACEMENT_CLIFF_INLAND_BOOST
   );
   let highland = smoothstepRange(start_height, full_height, inland_height);
   let dry_side = smoothstepRange(
     ocean_start * PLACEMENT_BEACH_HIGHLAND_PRESERVE_SHORE_FRACTION,
     ocean_start + max(1.0, beach_shelf),
-    edge_distance,
+    edge_distance
   );
   return highland * dry_side;
 }
