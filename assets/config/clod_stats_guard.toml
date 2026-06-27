@@ -1,0 +1,22 @@
+# Bench-only guard for the CLOD runtime stats CSV emitted when
+# VOXEL_CLOD_STATS_CSV=1 is enabled.
+#
+# Run after a deterministic bench:
+#   VOXEL_CLOD_STATS_CSV=1 \
+#   VOXEL_CLOD_STATS_CSV_PATH=bench-runs/<run>/clod-selection-runtime.csv \
+#   cargo run --release -- --bench bench/scenes/visual-regression-live-lod.toml
+#   cargo run --bin clod_stats_guard -- bench-runs/<run>/clod-selection-runtime.csv
+
+[clod]
+min_samples = 1
+max_blocked_splits = 0
+max_rows_with_indexed_nodes_and_no_rendered_pages = 0
+max_frozen_frames = 0
+
+# Keep this at 0 for generic benches. Raise it for dedicated near-field routes
+# once the route is known to enter pages that should expose LOD0.
+min_max_lod0_visible_pages = 0
+
+# Crossfade can temporarily leave extra visible pages around the active cut.
+# Higher than this usually means old page visibility is leaking.
+max_visible_to_rendered_ratio = 8.0
