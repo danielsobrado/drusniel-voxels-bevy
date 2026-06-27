@@ -219,6 +219,13 @@ export function encodeTerrainSummaryArtifact(artifact: TerrainSummaryArtifact): 
   ]);
 }
 
+function checkedChannelLength(value: unknown, label: string): number {
+  if (!Number.isInteger(value) || (value as number) < 0) {
+    throw new CacheDecodeError(`invalid summary channel length for ${label}`);
+  }
+  return value as number;
+}
+
 export function decodeTerrainSummaryArtifact(bytes: ArrayBuffer): TerrainSummaryArtifact {
   const sections = parseContainer(bytes);
   const meta = readJsonSection<{
@@ -229,24 +236,38 @@ export function decodeTerrainSummaryArtifact(bytes: ArrayBuffer): TerrainSummary
   }>(sections, CACHE_SECTION.NODE_METADATA_JSON, "summary metadata");
   const f32Buf = sections.get(CACHE_SECTION.SUMMARY_F32);
   if (!f32Buf) throw new CacheDecodeError("missing summary f32 section");
+  if (f32Buf.byteLength % 4 !== 0) throw new CacheDecodeError("invalid summary f32 section length");
   const all = new Float32Array(f32Buf);
+  const cl = meta.channelLengths;
+  const lengths = {
+    heightMin: checkedChannelLength(cl.heightMin, "heightMin"),
+    heightMax: checkedChannelLength(cl.heightMax, "heightMax"),
+    normalX: checkedChannelLength(cl.normalX, "normalX"),
+    normalY: checkedChannelLength(cl.normalY, "normalY"),
+    normalZ: checkedChannelLength(cl.normalZ, "normalZ"),
+    coverage: checkedChannelLength(cl.coverage, "coverage"),
+  };
+  const expected = lengths.heightMin + lengths.heightMax + lengths.normalX + lengths.normalY + lengths.normalZ + lengths.coverage;
+  if (expected !== all.length) {
+    throw new CacheDecodeError(`summary channel length mismatch: expected ${expected}, got ${all.length}`);
+  }
+
   let offset = 0;
   const take = (len: number) => {
     const slice = all.slice(offset, offset + len);
     offset += len;
     return slice;
   };
-  const cl = meta.channelLengths;
   return {
     res: meta.res,
     worldSize: meta.worldSize,
     farReduceFactor: meta.farReduceFactor,
-    heightMin: take(cl.heightMin!),
-    heightMax: take(cl.heightMax!),
-    normalX: take(cl.normalX!),
-    normalY: take(cl.normalY!),
-    normalZ: take(cl.normalZ!),
-    coverage: take(cl.coverage!),
+    heightMin: take(lengths.heightMin),
+    heightMax: take(lengths.heightMax),
+    normalX: take(lengths.normalX),
+    normalY: take(lengths.normalY),
+    normalZ: take(lengths.normalZ),
+    coverage: take(lengths.coverage),
   };
 }
 
