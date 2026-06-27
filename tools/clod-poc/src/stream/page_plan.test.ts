@@ -29,4 +29,14 @@ describe("visual page planning", () => {
     expect(second.evictable.length).toBeGreaterThan(0);
     expect(second.loaded).toEqual(second.required);
   });
+
+  it("returns a stable snapshot without moving the stream center", () => {
+    const streamer = new VisualClodPageStreamer(64, 192, { pageSizeM: 64, maxLevel: 1, hysteresisM: 64 });
+    const first = streamer.update(0, 0);
+    const snapshot = streamer.snapshot();
+
+    expect(snapshot.center).toEqual({ x: 0, z: 0 });
+    expect(snapshot.required).toEqual(first.required);
+    expect(snapshot.loaded).toEqual(first.loaded);
+  });
 });
