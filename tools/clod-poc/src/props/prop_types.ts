@@ -13,6 +13,25 @@ export type LightingProxyMode = "none" | "coarse_bounds";
 
 export type PropLodAvailability = "none" | "provided" | "generated";
 
+export type PropSnapGroup =
+  | "prop-bottom"
+  | "prop-top"
+  | "prop-side"
+  | "prop-door"
+  | "prop-window"
+  | "prop-roof"
+  | "prop-foundation";
+
+export type PropPivotMode = "original" | "bottom_center" | "bounds_center" | "front_bottom_center";
+
+export interface PropSnapPoint {
+  id: string;
+  localPos: [number, number, number];
+  direction: [number, number, number];
+  group: PropSnapGroup;
+  accepts: PropSnapGroup[];
+}
+
 export interface PropPlacementRules {
   alignToTerrain: boolean;
   terrainConform: boolean;
@@ -56,6 +75,8 @@ export interface PropAssetDef {
   culling: PropCullingPolicy;
   collision: PropCollisionPolicy;
   lightingProxy?: PropLightingProxy;
+  pivot?: PropPivotMode;
+  snapPoints?: PropSnapPoint[];
 }
 
 export interface PropExternalCatalogRef {
