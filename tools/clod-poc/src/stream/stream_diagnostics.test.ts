@@ -67,6 +67,8 @@ describe("stream diagnostics", () => {
 
     expect(snapshot.ownership.liveRadiusM).toBe(200);
     expect(snapshot.ownership.clodRadiusM).toBe(2048);
+    expect(snapshot.ownership.farShellInnerM).toBe(2048);
+    expect(snapshot.ownership.farShellOuterM).toBe(8192);
     expect(snapshot.live.required.length).toBeGreaterThan(0);
     expect(snapshot.visualPages.required.length).toBeGreaterThan(0);
     expect(tracker.format(snapshot)).toContain("far-shell>=2048m");
@@ -87,5 +89,6 @@ describe("stream diagnostics", () => {
     expect(snapshot.center).toEqual({ x: 128, z: 256 });
     expect(snapshot.live.required).toEqual(updated.live.required);
     expect(snapshot.visualPages.required).toEqual(updated.visualPages.required);
+    expect(snapshot.ownership.farShellInnerM).toBe(2048);
   });
 });
