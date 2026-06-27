@@ -1,6 +1,7 @@
 import type { ConstructionPieceDef, ConstructionSnapConfig, ConstructionSnapResult, IndexedConstructionSnapPoint, SnapGroup } from "./types.js";
 
 const HORIZONTAL_EPSILON = 0.000001;
+const SNAP_COMPATIBILITY_SCORE_WEIGHT = 10;
 
 function dot(a: readonly [number, number, number], b: readonly [number, number, number]): number {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -90,6 +91,21 @@ function connectionAlignment(
   const floorAlignment = wallFloorAlignment(piece, sourceGroup, targetGroup, rotationQuarterTurns, sourceDir, targetDir);
   if (floorAlignment !== null) return floorAlignment;
   return -dot(sourceDir, targetDir);
+}
+
+function compatibilityRank(sourceGroup: SnapGroup, targetGroup: SnapGroup): number {
+  if (isWallFloorPair(sourceGroup, targetGroup)) return 4;
+  if ((sourceGroup === "roof-edge" && targetGroup === "wall-top") || (sourceGroup === "wall-top" && targetGroup === "roof-edge")) return 4;
+  if (sourceGroup === "wall-side" && targetGroup === "wall-side") return 3;
+  if (sourceGroup === "floor-edge" && targetGroup === "floor-edge") return 2;
+  if (sourceGroup === "generic" && targetGroup === "generic") return 1;
+  return 1;
+}
+
+function scoreSnap(alignment: number, distanceScore: number, rank: number, config: ConstructionSnapConfig): number {
+  return rank * SNAP_COMPATIBILITY_SCORE_WEIGHT
+    + config.alignmentWeight * alignment
+    + config.distanceWeight * distanceScore;
 }
 
 export class ConstructionSnapIndex {
@@ -220,7 +236,8 @@ export class ConstructionSnapIndex {
       const worldPosition = sub(target.worldPos, sourceOffset);
       const cursorDistance = length(sub(cursorWorldPos, worldPosition));
       const distanceScore = 1 - Math.min(1, Math.max(rayDistanceM, cursorDistance) / config.radiusM);
-      const score = config.alignmentWeight * alignment + config.distanceWeight * distanceScore;
+      const rank = compatibilityRank(source.group, target.group);
+      const score = scoreSnap(alignment, distanceScore, rank, config);
       if (score <= bestScore) return;
       bestScore = score;
       best = {
@@ -258,4 +275,5 @@ export class ConstructionSnapIndex {
 export const constructionSnapMath = {
   rotateYQuarter,
   normalize,
+  compatibilityRank,
 };
