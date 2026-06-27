@@ -12,6 +12,7 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 - Far clipmap summary rings for long-distance queries
 - Query API with explicit counters (near table, hash, far clipmap, missing, HDDA)
 - Multi-ring GPU far-summary height atlas for runtime far-shell displacement
+- Paired GPU far-summary material-color atlas for runtime far-shell color
 - GPU procedural displacement as fallback where summary atlas data is missing
 - CPU query/HDDA path as oracle/debug only
 - Canopy coverage flowing through summary chain
@@ -32,9 +33,11 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 ```text
 CPU far summary tile stream
   -> packed RGBA32F GPU height atlas
+  -> paired RGBA32F GPU material-color atlas
   -> one vertical atlas band per far-summary ring
-  -> nearest-filtered texel-center sampling in GPU material positionNode
-  -> distance-selected atlas height displacement where alpha is valid
+  -> nearest-filtered texel-center sampling in GPU material positionNode/colorNode
+  -> distance-selected atlas height/color where alpha is valid
+  -> height-range darkening from maxHeight - minHeight as a cheap slope proxy
   -> procedural GPU displacement fallback where atlas is missing
   -> GPU material lighting / haze
 ```
@@ -91,7 +94,8 @@ Runtime overrides:
 ## Known limitations
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
-- Runtime far shell samples a multi-ring GPU height atlas, but normals/materials are still not summary-atlas driven
+- Runtime far shell samples GPU height and material-color atlases, but true normals are still not summary-atlas driven
+- Canopy/water coverage are still packed in CPU summaries only; the runtime shader does not consume them yet
 - The atlas is still a small moving 3x3 tile window per ring, not a production bindless/SSBO page table
 - HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
 - CPU macro terrain fallback still exists for debug/oracle paths, but should not be on the runtime far-shell hot path in GPU mode
