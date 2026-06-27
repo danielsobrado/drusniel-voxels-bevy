@@ -86,11 +86,9 @@ export function createCacheDebugOverlay(deps: CacheDebugOverlayDeps = {}): Cache
   chrome.body.querySelector<HTMLButtonElement>("[data-cache-clear-persistent]")!.onclick = async () => {
     const active = getClodCacheContext();
     if (!active) return;
-    active.service.clearMemory();
+    await active.service.clear();
     if (deps.clearWorkerCache) {
       await deps.clearWorkerCache();
-    } else {
-      await active.service.clearPersistent();
     }
     update();
   };
