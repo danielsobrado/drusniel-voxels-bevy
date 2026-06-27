@@ -9,14 +9,12 @@ spells:
     audio:
       volume: 0.38
     vfx:
-      layer_id: spell-vfx-layer
-      canvas_id: fire-spell-vfx
-      fallback_width_px: 1280
-      fallback_height_px: 720
-      max_dpr: 1.25
       flame_scale: 1.0
-      origin: [0.0, -0.50]
-      target: [0.0, 0.08]
+      world_width: 1.6
+      world_height: 5.0
+      hand_forward_m: 0.5
+      hand_right_m: 0.35
+      hand_up_m: -0.35
   water:
     id: water
     label: Water
@@ -24,11 +22,9 @@ spells:
     audio:
       volume: 0.34
     vfx:
-      layer_id: water-spell-vfx-layer
-      canvas_id: water-spell-vfx
-      fallback_width_px: 1280
-      fallback_height_px: 720
-      max_dpr: 1.25
       flame_scale: 1.0
-      origin: [0.0, -0.50]
-      target: [0.0, 0.08]
+      world_width: 1.2
+      world_height: 4.5
+      hand_forward_m: 0.5
+      hand_right_m: 0.35
+      hand_up_m: -0.35

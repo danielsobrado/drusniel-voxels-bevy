@@ -1,7 +1,6 @@
 import { emitAudio } from "../audio/index.js";
-import { FireFlameRenderer } from "./fire_flame_renderer.js";
-import { WaterSpellRenderer } from "./water_spell_renderer.js";
 import { defaultSpellConfig, type SpellConfig } from "./spell_config.js";
+import type { SpellVfxController } from "./spell_vfx_controller.js";
 
 export interface SpellMenu {
   castFire: () => void;
@@ -12,14 +11,15 @@ export interface SpellMenu {
 export interface SpellMenuDeps {
   config?: SpellConfig;
   root?: HTMLElement;
+  /** In-scene VFX controller that plays the 3D fire/water billboards. */
+  controller?: SpellVfxController;
 }
 
 export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   const config = deps.config ?? defaultSpellConfig;
   const root = deps.root ?? ensureMenuRoot(config.menu.rootId);
   const shouldRemoveRoot = deps.root === undefined;
-  const fireRenderer = new FireFlameRenderer(config.fire.vfx);
-  const waterRenderer = new WaterSpellRenderer(config.water.vfx);
+  const controller = deps.controller;
   let fireActiveReset = 0;
   let waterActiveReset = 0;
   let dragOffset: { x: number; y: number } | null = null;
@@ -75,7 +75,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   function castFire(): void {
     window.clearTimeout(fireActiveReset);
     fireButton.setAttribute("aria-pressed", "true");
-    fireRenderer.play(config.fire.castDurationMs);
+    controller?.playFire(config.fire.castDurationMs);
     emitAudio("spell.fire.cast", {
       volume: config.fire.audio.volume,
       durationMs: config.fire.castDurationMs,
@@ -88,7 +88,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   function castWater(): void {
     window.clearTimeout(waterActiveReset);
     waterButton.setAttribute("aria-pressed", "true");
-    waterRenderer.play(config.water.castDurationMs);
+    controller?.playWater(config.water.castDurationMs);
     emitAudio("spell.water.cast", {
       volume: config.water.audio.volume,
       durationMs: config.water.castDurationMs,
@@ -112,8 +112,6 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
       root.removeEventListener("click", stopUiPropagation);
       fireButton.remove();
       waterButton.remove();
-      fireRenderer.dispose();
-      waterRenderer.dispose();
       if (shouldRemoveRoot) root.remove();
       else root.replaceChildren();
     },

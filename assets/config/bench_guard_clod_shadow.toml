@@ -1,0 +1,25 @@
+# Optional bench_guard thresholds for the Fable-style CLOD shadow path.
+#
+# Copy this section into assets/config/bench_guard.toml once the bench_guard
+# binary is wired to call src/rendering/clod_shadow_bench_guard.rs.
+
+[clod_shadow]
+enabled = true
+
+# Proxy mode is the parity target. It should use real proxy caster pages and
+# save a meaningful amount of terrain shadow triangles versus visual-only mode.
+proxy_min_saved_percent = 45.0
+proxy_min_proxy_pages = 1
+proxy_max_missing_visual_entities = 0
+proxy_max_missing_proxy_meshes = 0
+
+# Visual-only is the quality/control baseline. It should not accidentally spawn
+# proxy caster pages or report large proxy savings.
+visual_max_saved_percent = 5.0
+visual_max_proxy_pages = 0
+
+# No-cast is a diagnostic floor for shadow-pass cost.
+nocast_max_caster_pages = 0
+
+# Disabled mode should not leave an active CLOD shadow snapshot loaded.
+disabled_max_loaded_pages = 0

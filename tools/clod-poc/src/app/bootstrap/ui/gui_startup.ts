@@ -1,6 +1,8 @@
+import * as THREE from "three";
 import { createClodPocGui } from "../../../ui/gui/gui_root.js";
 import { createSceneGui } from "../../../ui/gui/scene_gui.js";
 import { shadowProxyDebugStateToConfig } from "../../../shadows/shadowProxyDebug.js";
+import { createClodShadowOverlayController } from "../../../clod_shadow_overlay_controller.js";
 import type GUI from "lil-gui";
 import { type NodeView, recomputedNormalsFor } from "../bootstrap_types.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
@@ -72,6 +74,29 @@ export function runGuiStartup(
   const { updateInfo, applyClodPerfMode } = infoPanel;
 
   const farSummaryIntegration = (window as unknown as Record<string, unknown>).__drusnielFarSummary;
+
+  const clodShadowOverlayController = createClodShadowOverlayController({
+    roots: () => input.result.roots,
+    camera: input.camera,
+    renderer: input.renderer,
+    scene: input.scene,
+    state,
+    getSelectionCenter: () => {
+      const center = input.terrainView.selectionController.currentTerrainViews();
+      if (center.size === 0) return input.controls.target;
+      let cx = 0, cz = 0, count = 0;
+      for (const v of center) {
+        cx += v.node.footprint.minX + (v.node.footprint.maxX - v.node.footprint.minX) / 2;
+        cz += v.node.footprint.minZ + (v.node.footprint.maxZ - v.node.footprint.minZ) / 2;
+        count++;
+      }
+      return count > 0
+        ? new THREE.Vector3(cx / count, 0, cz / count)
+        : input.controls.target;
+    },
+    nearFieldRadius: () => state.bubble ? state.bubbleRadius : 0,
+  });
+  session.clodShadowOverlayController = clodShadowOverlayController;
 
   const guiResult = createClodPocGui(state, {
     clod: {
@@ -150,8 +175,16 @@ export function runGuiStartup(
     naadf: input.naadfIntegration ? {
       getIntegration: () => input.naadfIntegration,
     } : undefined,
+    clodShadow: {
+      updateOverlay: () => clodShadowOverlayController.update(),
+      updateInfo,
+    },
   });
   createSceneGui(guiResult.gui);
+  session.clodShadowStatsController = guiResult.clodShadowStatsController;
+  clodShadowOverlayController.update();
+  guiResult.clodShadowStatsController?.updateDisplay();
+  infoPanel.updateInfo();
 
   colorByLodController.current = guiResult.colorByLodController;
   session.weatherStatsController = guiResult.weatherStatsController;

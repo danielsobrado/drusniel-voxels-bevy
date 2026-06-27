@@ -57,6 +57,9 @@ describe("river material runtime settings", () => {
       foamStreakStrength: Number.NaN,
       shallowBankTintStrength: 10,
       centerChannelDarkening: -5,
+      foamResidueDropEnd: -1,
+      bankNormalStrength: 10,
+      rapidScale: 10,
     });
 
     expect(settings.geometryThalwegDip).toBe(0);

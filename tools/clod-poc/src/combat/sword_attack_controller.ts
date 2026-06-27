@@ -100,8 +100,6 @@ export function createSwordAttackController(deps: SwordAttackControllerDeps): Sw
         if (elapsed >= duration) resetToIdle(timeMs);
         break;
       }
-      case AttackPhase.Idle:
-        break;
     }
   }
 

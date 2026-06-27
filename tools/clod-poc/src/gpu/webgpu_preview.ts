@@ -572,7 +572,7 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
       `cut: ${renderedCount} nodes, ${triangles.toFixed(0)} tris, levels ${levelSummary}\n` +
       `camera: ${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}\n` +
       (useGrass ? `grass: ${grassBlades} near${useGrassV2 ? `, ${grassMidBlades} mid` : ""}\n` : "") +
-      (useStones ? `stones: ${stones?.stats?.totalStones ?? 0}\n` : "") +
+      (useStones ? `stones: ${stones?.getStats()?.total ?? 0}\n` : "") +
       (useDig ? `dig: ${digOp} r=${digRadius} ${lastDigSummary}\n` : "") +
       `controls: orbit; ?dig=1 click terrain to edit`;
     renderer.render(scene, camera);

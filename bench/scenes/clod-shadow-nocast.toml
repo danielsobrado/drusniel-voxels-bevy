@@ -1,0 +1,25 @@
+# CLOD shadow A/B preset: no terrain shadow casters.
+#
+# Run with:
+#   cargo run --release -- --bench bench/scenes/clod-shadow-nocast.toml
+#
+# This is a diagnostic floor for shadow-pass cost.  It keeps the CLOD shadow
+# runtime active so F3/bench metrics still report the mode, but forces all CLOD
+# terrain pages to NotShadowCaster.
+
+name = "clod-shadow-nocast"
+description = "Visual regression run forcing all CLOD terrain pages to no-cast."
+freeze_terrain_lod_after_ready = true
+
+[render_toggles]
+quality_preset = "high"
+disable_clod_shadows = false
+force_visual_mesh_shadows = false
+force_no_cast_shadows = true
+disable_clod_shadow_proxies = true
+disable_clod_shadow_snapshot_loading = false
+disable_clod_shadow_light_layers = true
+disable_clod_shadow_f3 = false
+disable_clod_shadow_bench_metrics = false
+clod_shadow_snapshot_path = "assets/generated/clod/shadow_runtime.json"
+clod_shadow_auto_reload = false

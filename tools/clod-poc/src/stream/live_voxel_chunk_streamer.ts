@@ -1,15 +1,7 @@
 import type { StreamingOwnershipRadii } from "../streaming/streaming_ownership.js";
 import { evictableLiveChunks } from "./live_chunk_eviction.js";
-
-export interface StreamCenter {
-  x: number;
-  z: number;
-}
-
-export interface LiveChunkCoord {
-  x: number;
-  z: number;
-}
+import type { StreamCenter } from "./live_chunk_keys.js";
+import { liveChunkKey } from "./live_chunk_keys.js";
 
 export interface LiveVoxelChunkPlanConfig {
   chunkSizeM: number;
@@ -24,16 +16,6 @@ export interface LiveVoxelChunkStreamerSnapshot {
   required: readonly string[];
   loaded: readonly string[];
   evictable: readonly string[];
-}
-
-export function liveChunkKey(coord: LiveChunkCoord): string {
-  return `${coord.x},${coord.z}`;
-}
-
-export function parseLiveChunkKey(key: string): LiveChunkCoord {
-  const [x, z] = key.split(",").map(Number);
-  if (!Number.isInteger(x) || !Number.isInteger(z)) throw new Error(`Invalid live chunk key ${key}`);
-  return { x, z };
 }
 
 export function requiredLiveChunks(

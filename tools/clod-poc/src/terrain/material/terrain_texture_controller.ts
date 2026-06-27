@@ -248,8 +248,8 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
     if (signature === textureArraySignature) return;
     albedoArrayTex?.dispose();
     normalArrayTex?.dispose();
-    albedoArrayTex = buildDataArray(slots.map((slot) => slot.texture?.image ?? null), THREE.SRGBColorSpace);
-    normalArrayTex = buildDataArray(slots.map((slot) => slot.normalTexture?.image ?? null), THREE.NoColorSpace);
+    albedoArrayTex = buildDataArray(slots.map((slot) => slot.texture?.image ?? null) as readonly (TexImageSource | null)[], THREE.SRGBColorSpace);
+    normalArrayTex = buildDataArray(slots.map((slot) => slot.normalTexture?.image ?? null) as readonly (TexImageSource | null)[], THREE.NoColorSpace);
     textureArraySignature = signature;
   };
 
@@ -269,7 +269,7 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
       if (!builtin) continue;
       progress.setPhase(`${phaseLabel} texture ${i + 1}/${builtinSlots.length}`, (i + 1) / Math.max(1, builtinSlots.length));
       const texture = await loadTerrainTextureUrl(builtin.url, textureLoadOptions);
-      setBuiltinTextureSlot(slot.index, texture, slot.name, builtin.url, slot.selectedId);
+      if (texture) setBuiltinTextureSlot(slot.index, texture, slot.name, builtin.url, slot.selectedId);
     }
   };
 
@@ -284,15 +284,17 @@ export function createTerrainTextureController(deps: TerrainTextureControllerDep
       const blob = new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: slot.mimeType ?? "application/octet-stream" });
       const previewUrl = URL.createObjectURL(blob);
       const texture = await loadTerrainTextureUrl(previewUrl, textureLoadOptions);
-      setTextureSlot(slot.index, texture, slot.name, previewUrl, bytes, slot.mimeType ?? "application/octet-stream", slot.customPath?.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin");
+      if (texture) setTextureSlot(slot.index, texture, slot.name, previewUrl, bytes, slot.mimeType ?? "application/octet-stream", slot.customPath?.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin");
       if (slot.normalPath) {
         const normalBytes = deps.stagedImport?.customTextures.get(slot.normalPath);
         if (!normalBytes) throw new Error(`Imported project is missing ${slot.normalPath}`);
         const normalBlob = new Blob([new Uint8Array(normalBytes).buffer as ArrayBuffer], { type: slot.normalMimeType ?? "application/octet-stream" });
         const normalPreviewUrl = URL.createObjectURL(normalBlob);
         const normalTexture = await loadTerrainTextureUrl(normalPreviewUrl, textureLoadOptions);
-        configureNormalTexture(normalTexture, textureLoadOptions);
-        setSlotNormal(slot.index, normalTexture, normalPreviewUrl, normalBytes, slot.normalMimeType ?? "application/octet-stream", slot.normalPath.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin");
+        if (normalTexture) {
+          configureNormalTexture(normalTexture, textureLoadOptions);
+          setSlotNormal(slot.index, normalTexture, normalPreviewUrl, normalBytes, slot.normalMimeType ?? "application/octet-stream", slot.normalPath.match(/(\.[a-z0-9]+)$/i)?.[1] ?? ".bin");
+        }
       }
       progress.setPhase(`loading custom texture ${i + 1}/${custom.length}`, (i + 1) / Math.max(1, custom.length));
     }

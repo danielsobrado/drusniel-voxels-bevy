@@ -229,7 +229,8 @@ function assertSessionState(value: unknown): asserts value is ProjectSessionStat
   for (const key of numericKeys) {
     if (!isFiniteNumber(value[key]) || Math.abs(value[key]) > 1_000_000) throw new Error(`project.json state.${key} must be finite`);
   }
-  if (value.brushMaterial < 0 || value.brushMaterial >= MAX_TERRAIN_TEXTURES) throw new Error("project.json has unsafe brush material");
+  const brushMaterial = value.brushMaterial as number;
+  if (brushMaterial < 0 || brushMaterial >= MAX_TERRAIN_TEXTURES) throw new Error("project.json has unsafe brush material");
 }
 
 function assertTextureSlot(value: unknown, index: number): asserts value is ProjectTextureSlot {

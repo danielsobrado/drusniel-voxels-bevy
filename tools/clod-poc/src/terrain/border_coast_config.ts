@@ -357,6 +357,7 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
 
   const raw = readRecord(load(text));
   if (!raw) return cloneDefaults();
-  if (raw.world || raw.materials || raw.surf) return parseUnifiedConfig(raw);
-  return parseLegacyConfig(raw);
+  const inner = readRecord(raw.border_coast_ocean) ?? raw;
+  if (inner.world || inner.materials || inner.surf) return parseUnifiedConfig(inner);
+  return parseLegacyConfig(inner);
 }

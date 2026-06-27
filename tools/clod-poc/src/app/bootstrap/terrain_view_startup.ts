@@ -223,10 +223,6 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     vignette: state.postProcessVignette,
     debugMode: state.postProcessDebugMode,
   });
-  const postProcess: AppPostProcess = app.isWebGpu
-    ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings())
-    : new PostProcessPipeline(app.renderer, currentPostProcessSettings());
-  postProcess.setSize(window.innerWidth, window.innerHeight);
   const skyEnvironment: AppSky = app.isWebGpu
     ? new WebGpuSkyEnvironment({
         scene,
@@ -296,6 +292,11 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
       target: 0,
     });
   }
+
+  const postProcess: AppPostProcess = app.isWebGpu
+    ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings())
+    : new PostProcessPipeline(app.renderer, currentPostProcessSettings());
+  postProcess.setSize(window.innerWidth, window.innerHeight);
 
   const queryScene = searchParams.get("scene");
   const streamingLongView = isStreamingLongViewScene(queryScene);

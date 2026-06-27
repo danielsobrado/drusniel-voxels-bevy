@@ -1,17 +1,19 @@
 import { load } from "js-yaml";
 import spellsYamlText from "../../config/spells.yaml?raw";
 
-export type SpellVec2 = readonly [number, number];
-
 export interface FireSpellVfxConfig {
-  layerId: string;
-  canvasId: string;
-  fallbackWidthPx: number;
-  fallbackHeightPx: number;
-  maxDpr: number;
+  /** Overall size multiplier applied to the billboard quad. */
   flameScale: number;
-  origin: SpellVec2;
-  target: SpellVec2;
+  /** Jet width in world metres. */
+  worldWidth: number;
+  /** Jet length (forward reach) in world metres. */
+  worldHeight: number;
+  /** Metres in front of the eye to place the flame base (hand). */
+  handForwardM: number;
+  /** Metres to the side of the eye for the flame base (hand). */
+  handRightM: number;
+  /** Metres above/below the eye for the flame base (negative = down). */
+  handUpM: number;
 }
 
 export type WaterSpellVfxConfig = FireSpellVfxConfig;
@@ -56,14 +58,12 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
       volume: 0.38,
     },
     vfx: {
-      layerId: "spell-vfx-layer",
-      canvasId: "fire-spell-vfx",
-      fallbackWidthPx: 1280,
-      fallbackHeightPx: 720,
-      maxDpr: 1.25,
       flameScale: 1.0,
-      origin: [0.0, -0.50],
-      target: [0.0, 0.08],
+      worldWidth: 1.6,
+      worldHeight: 5.0,
+      handForwardM: 0.5,
+      handRightM: 0.35,
+      handUpM: -0.35,
     },
   },
   water: {
@@ -74,14 +74,12 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
       volume: 0.34,
     },
     vfx: {
-      layerId: "water-spell-vfx-layer",
-      canvasId: "water-spell-vfx",
-      fallbackWidthPx: 1280,
-      fallbackHeightPx: 720,
-      maxDpr: 1.25,
       flameScale: 1.0,
-      origin: [0.0, -0.50],
-      target: [0.0, 0.08],
+      worldWidth: 1.2,
+      worldHeight: 4.5,
+      handForwardM: 0.5,
+      handRightM: 0.35,
+      handUpM: -0.35,
     },
   },
 };
@@ -109,26 +107,14 @@ function readNumber(
   return Math.min(max, Math.max(min, value));
 }
 
-function readVec2(record: Record<string, unknown> | undefined, key: string, fallback: SpellVec2): SpellVec2 {
-  const value = record?.[key];
-  if (!Array.isArray(value) || value.length < 2) return fallback;
-
-  const x = Number(value[0]);
-  const y = Number(value[1]);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return fallback;
-  return [Math.min(2, Math.max(-2, x)), Math.min(2, Math.max(-2, y))];
-}
-
 function readVfxConfig(record: Record<string, unknown> | undefined, fallback: FireSpellVfxConfig): FireSpellVfxConfig {
   return {
-    layerId: readString(record, "layer_id", fallback.layerId),
-    canvasId: readString(record, "canvas_id", fallback.canvasId),
-    fallbackWidthPx: readNumber(record, "fallback_width_px", fallback.fallbackWidthPx, 160, 2560),
-    fallbackHeightPx: readNumber(record, "fallback_height_px", fallback.fallbackHeightPx, 120, 1440),
-    maxDpr: readNumber(record, "max_dpr", fallback.maxDpr, 1, 3),
     flameScale: readNumber(record, "flame_scale", fallback.flameScale, 0.25, 3),
-    origin: readVec2(record, "origin", fallback.origin),
-    target: readVec2(record, "target", fallback.target),
+    worldWidth: readNumber(record, "world_width", fallback.worldWidth, 0.2, 20),
+    worldHeight: readNumber(record, "world_height", fallback.worldHeight, 0.2, 30),
+    handForwardM: readNumber(record, "hand_forward_m", fallback.handForwardM, -5, 10),
+    handRightM: readNumber(record, "hand_right_m", fallback.handRightM, -5, 5),
+    handUpM: readNumber(record, "hand_up_m", fallback.handUpM, -5, 5),
   };
 }
 

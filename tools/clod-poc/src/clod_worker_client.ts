@@ -74,7 +74,6 @@ export class ClodWorkerClient {
   private progressHandlers = new Map<number, (progress: BuildProgress) => void>();
   private digPending: DigBatchSlot | null = null;
   private digPumpActive = false;
-  private parentsPending = false;
   private parentsHealthy = true;
   private lastParentError: Error | null = null;
   private parentsWaiters: Array<() => void> = [];
@@ -237,7 +236,6 @@ export class ClodWorkerClient {
   }
 
   private resolveParentsWaiters(): void {
-    this.parentsPending = false;
     for (const resolve of this.parentsWaiters) resolve();
     this.parentsWaiters = [];
   }
@@ -293,7 +291,6 @@ export class ClodWorkerClient {
           pendingParents: message.pendingParents,
           requestCount: message.editCount,
         };
-        if (message.pendingParents > 0) this.parentsPending = true;
         for (const rid of message.requestIds) {
           const pending = this.digRequests.get(rid);
           if (pending) {
@@ -303,9 +300,11 @@ export class ClodWorkerClient {
         }
         break;
       }
-      case "parentRebuilt":
-        this.onParentRebuilt?.(this.rehydrateParentBatch(message));
+      case "parentRebuilt": {
+        const batch = this.rehydrateParentBatch(message);
+        this.onParentRebuilt?.(batch);
         break;
+      }
       case "parentsComplete":
         this.parentsHealthy = true;
         this.lastParentError = null;
@@ -355,7 +354,6 @@ export class ClodWorkerClient {
   }
 
   private markParentsFailed(error: Error): void {
-    this.parentsPending = false;
     this.parentsHealthy = false;
     this.lastParentError = error;
     this.resolveParentsWaiters();

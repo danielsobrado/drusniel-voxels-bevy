@@ -1,0 +1,25 @@
+# CLOD shadow A/B preset: visual mesh casters only.
+#
+# Run with:
+#   cargo run --release -- --bench bench/scenes/clod-shadow-visual.toml
+#
+# This is the quality/control baseline.  It loads the same CLOD shadow snapshot
+# as proxy mode, but forces every terrain page to cast from the normal visual
+# mesh.  Compare this against clod-shadow-proxy.toml to measure the proxy win.
+
+name = "clod-shadow-visual"
+description = "Visual regression run forcing CLOD shadows to visual mesh casters."
+freeze_terrain_lod_after_ready = true
+
+[render_toggles]
+quality_preset = "high"
+disable_clod_shadows = false
+force_visual_mesh_shadows = true
+force_no_cast_shadows = false
+disable_clod_shadow_proxies = true
+disable_clod_shadow_snapshot_loading = false
+disable_clod_shadow_light_layers = true
+disable_clod_shadow_f3 = false
+disable_clod_shadow_bench_metrics = false
+clod_shadow_snapshot_path = "assets/generated/clod/shadow_runtime.json"
+clod_shadow_auto_reload = false

@@ -92,7 +92,10 @@ describe("assembleChunkMesh end-to-end", () => {
   it("reproduces the canonical surface from max-sized readback arrays", () => {
     const S = 4;
     const world = { cellsX: 16, cellsZ: 16 };
-    const cfg = { page: { chunk_size: S } } as unknown as ClodPagesConfig;
+    const cfg = {
+      page: { chunk_size: S },
+      simplify: { weld_epsilon_cells: 0.3 },
+    } as unknown as ClodPagesConfig;
     // The GPU writes compact verts/indices into oversized buffers; emulate that with the verified
     // mesher and over-allocated backing arrays, then assemble by the reported counts.
     const gpu = meshChunkGpuShaped(1, 1, S, world, []);

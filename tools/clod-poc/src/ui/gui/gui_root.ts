@@ -5,6 +5,7 @@ import { createEnvironmentGui, type EnvironmentGuiDeps } from "./environment_gui
 import { createWeatherGui, type WeatherGuiDeps } from "./weather_gui.js";
 import { createVegetationGui, type VegetationGuiDeps, type VegetationGuiStatControllers } from "./vegetation_gui.js";
 import { createShadowProxyGui } from "./shadow_proxy_gui.js";
+import { createClodShadowGui, type ClodShadowGuiDeps } from "./clod_shadow_gui.js";
 import { createWaterGui, type WaterGuiDeps } from "./water_gui.js";
 import { createTerrainMaterialGui, type TerrainMaterialGuiDeps } from "./terrain_material_gui.js";
 import { createLongViewGui, type LongViewGuiDeps } from "./long_view_gui.js";
@@ -20,6 +21,7 @@ export interface ClodPocGuiDeps {
   longView?: LongViewGuiDeps;
   naadf?: import("./naadf_gui.js").NaadfGuiDeps;
   shadowProxy?: import("./shadow_proxy_gui.js").ShadowProxyGuiDeps;
+  clodShadow?: ClodShadowGuiDeps;
 }
 
 export interface ClodPocTerrainMaterialGuiDeps {
@@ -37,6 +39,7 @@ export interface ClodPocGuiResult {
   refreshUnderstoryStats: () => void;
   forestLightingStatsController: GuiController | null;
   shadowProxyStatsController: GuiController | null;
+  clodShadowStatsController: GuiController | null;
   naadfStatsController: GuiController | null;
   statControllers: VegetationGuiStatControllers;
   digRadiusController: GuiController;
@@ -48,6 +51,9 @@ export function createClodPocGui(
 ): Omit<ClodPocGuiResult, "digRadiusController"> {
   const gui = new GUI();
   const { colorByLodController } = createClodGui(gui, state, deps.clod);
+  const clodShadowStatsController = deps.clodShadow
+    ? createClodShadowGui(gui, state, deps.clodShadow).statsController
+    : null;
   createEnvironmentGui(gui, state, deps.environment);
   const { weatherStatsController } = createWeatherGui(gui, state, deps.weather);
   const vegetation = createVegetationGui(gui, state, deps.vegetation);
@@ -72,6 +78,7 @@ export function createClodPocGui(
     refreshUnderstoryStats: vegetation.refreshUnderstoryStats,
     forestLightingStatsController: vegetation.forestLightingStatsController,
     shadowProxyStatsController,
+    clodShadowStatsController,
     naadfStatsController,
     statControllers: vegetation.statControllers,
   };

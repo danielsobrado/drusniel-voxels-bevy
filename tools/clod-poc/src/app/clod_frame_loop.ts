@@ -22,7 +22,7 @@ export type {
 import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
-  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, canopy, construction, combat } = deps;
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, clodShadow, canopy, construction, combat, spells } = deps;
   let elapsedSeconds = 0;
   const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
@@ -135,6 +135,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     });
 
     combat?.update(performance.now());
+    spells?.update(performance.now());
 
     const terrainPhase = runTerrainFramePhase({
       state: player.state,
@@ -150,6 +151,10 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     });
 
     shadowProxy?.rebuildIfNeeded();
+    clodShadow?.update();
+    if (clodShadow?.isActive()) {
+      clodShadow.statsController?.updateDisplay();
+    }
 
     canopy?.update(render.camera.position.x, render.camera.position.z);
 

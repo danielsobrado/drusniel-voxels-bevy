@@ -9,7 +9,10 @@ import { compareChunkSurfaces } from "./gpu_mesh_parity.js";
 
 const S = 4;
 const world = { cellsX: 16, cellsZ: 16 };
-const cfg = { page: { chunk_size: S } } as unknown as ClodPagesConfig;
+const cfg = {
+  page: { chunk_size: S },
+  simplify: { weld_epsilon_cells: 0.3 },
+} as unknown as ClodPagesConfig;
 
 function perturb(positions: Float32Array, amount: number): Float32Array {
   const out = new Float32Array(positions.length);

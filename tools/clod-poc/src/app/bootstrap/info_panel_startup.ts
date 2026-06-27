@@ -117,6 +117,7 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
       `${formatTreeInfoLine(state.treesEnabled, state.treeTotal, treeStats.current)}\n` +
       `${formatUnderstoryInfoLine(state.understoryEnabled, state.understoryTotal, understoryStats.current)}\n` +
       `${formatForestLightingInfoLine(state.forestLightingEnabled, forestLightingStats.current)}\n` +
+      (state.clodShadowStatsLine ? `clod shadows: ${state.clodShadowStatsLine}\n` : "") +
       `brush: ${state.digEnabled ? "on" : "off"}  ${state.brushOp === "add" ? "raise" : "dig"} ${state.brushShape} r=${state.digRadius}  edits=${digEditCount()}\n` +
       `${session.lastDigSummary ? `last: ${session.lastDigSummary}\n` : ""}` +
       `${session.lastArchiveSummary ? `${session.lastArchiveSummary}\n` : ""}` +

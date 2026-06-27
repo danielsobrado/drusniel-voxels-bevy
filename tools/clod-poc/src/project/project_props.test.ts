@@ -3,6 +3,7 @@ import {
   projectPropsToPropPlacementScene,
   propPlacementSceneToProjectProps,
 } from "./project_props.js";
+import { surfaceHeight } from "../terrain/terrain.js";
 import type { PropPlacementScene } from "../props/prop_types.js";
 
 const scene: PropPlacementScene = {
@@ -47,7 +48,7 @@ describe("project prop placement adapters", () => {
     expect(restored.instances).toHaveLength(1);
     expect(restored.instances[0]).toMatchObject({
       assetId: "props/stone-large",
-      position: [10, 20, 30],
+      position: [10, surfaceHeight(10, 30), 30],
       scale: 1.5,
       seed: 42,
       variationId: 3,

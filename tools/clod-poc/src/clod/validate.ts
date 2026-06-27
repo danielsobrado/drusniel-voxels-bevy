@@ -61,7 +61,7 @@ const COAST_BOUNDARY_BAND = 0.01;
 function isCoastOpenBoundary(x: number, z: number): boolean {
   const coast = getBorderCoastRuntime();
   if (!coast) return false;
-  return coastMask(x, z, coast.config.coast, coast.worldCells) > COAST_BOUNDARY_BAND;
+  return coastMask(x, z, coast.config.coast, coast.worldCellsX) > COAST_BOUNDARY_BAND;
 }
 
 /**

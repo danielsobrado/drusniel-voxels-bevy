@@ -1,0 +1,97 @@
+name: CLOD Shadow Bench Guard
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_benches:
+        description: "Run the four CLOD shadow bench scenes before guarding results"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      cargo_profile:
+        description: "Cargo profile for bench scenes"
+        required: true
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+      summary_glob:
+        description: "Existing summary.json glob when run_benches=false"
+        required: false
+        default: "bench-runs/*/summary.json"
+      print_metrics:
+        description: "Print extracted CLOD shadow metrics"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  clod-shadow-guard:
+    name: CLOD shadow guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build bench guard
+        run: cargo build --bin bench_guard
+
+      - name: Run unit tests for CLOD shadow guard path
+        run: |
+          cargo test clod_shadow_config
+          cargo test clod_shadow_bench_guard
+          cargo test --bin bench_guard
+
+      - name: Run CLOD shadow bench matrix
+        if: ${{ inputs.run_benches == 'true' }}
+        run: |
+          extra=""
+          if [[ "${{ inputs.print_metrics }}" == "true" ]]; then
+            extra="--print-metrics"
+          fi
+          scripts/run_clod_shadow_bench_matrix.sh \
+            --profile "${{ inputs.cargo_profile }}" \
+            $extra
+
+      - name: Guard existing CLOD shadow summaries
+        if: ${{ inputs.run_benches != 'true' }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          summaries=( ${{ inputs.summary_glob }} )
+          if [[ "${#summaries[@]}" -eq 0 ]]; then
+            echo "No summary files matched: ${{ inputs.summary_glob }}" >&2
+            exit 1
+          fi
+
+          extra=""
+          if [[ "${{ inputs.print_metrics }}" == "true" ]]; then
+            extra="--print-metrics"
+          fi
+
+          scripts/run_clod_shadow_bench_matrix.sh \
+            --guard-only "${summaries[@]}" \
+            $extra
+
+      - name: Upload bench runs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clod-shadow-bench-runs
+          path: bench-runs/**
+          if-no-files-found: ignore

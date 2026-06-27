@@ -1,0 +1,25 @@
+# CLOD shadow A/B preset: Fable-style proxy path.
+#
+# Run with:
+#   cargo run --release -- --bench bench/scenes/clod-shadow-proxy.toml
+#
+# This is the parity target.  It keeps the exported shadow manifest behavior:
+# near terrain pages cast from the visual mesh, mid/far terrain pages cast from
+# generated proxy meshes, and no-cast pages are removed from the shadow pass.
+
+name = "clod-shadow-proxy"
+description = "Visual regression run with CLOD shadow proxies enabled."
+freeze_terrain_lod_after_ready = true
+
+[render_toggles]
+quality_preset = "high"
+disable_clod_shadows = false
+force_visual_mesh_shadows = false
+force_no_cast_shadows = false
+disable_clod_shadow_proxies = false
+disable_clod_shadow_snapshot_loading = false
+disable_clod_shadow_light_layers = false
+disable_clod_shadow_f3 = false
+disable_clod_shadow_bench_metrics = false
+clod_shadow_snapshot_path = "assets/generated/clod/shadow_runtime.json"
+clod_shadow_auto_reload = false

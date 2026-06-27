@@ -2,6 +2,7 @@ import type { ProjectSessionState } from "../../project/voxel_project_archive.js
 import { DEFAULT_ENVIRONMENT_SETTINGS } from "../../environment/environment.js";
 import {
   DEFAULT_POST_PROCESS_SETTINGS,
+  type GodRaysMode,
   type PostProcessSettings,
 } from "../../environment/postprocess.js";
 import { assignArchiveFields } from "./archive_fields.js";
@@ -24,6 +25,11 @@ export interface EnvironmentSliceState {
   postProcessSaturation: number;
   postProcessVignette: number;
   postProcessDebugMode: PostProcessSettings["debugMode"];
+  godRaysMode: GodRaysMode;
+  godRaysDensity: number;
+  godRaysDecay: number;
+  godRaysWeight: number;
+  godRaysExposure: number;
   audioEnabled: boolean;
   audioVolume: number;
 }
@@ -58,6 +64,11 @@ export function createEnvironmentSliceState(input: {
     postProcessSaturation: DEFAULT_POST_PROCESS_SETTINGS.saturation,
     postProcessVignette: DEFAULT_POST_PROCESS_SETTINGS.vignette,
     postProcessDebugMode: DEFAULT_POST_PROCESS_SETTINGS.debugMode,
+    godRaysMode: DEFAULT_POST_PROCESS_SETTINGS.godRaysMode,
+    godRaysDensity: DEFAULT_POST_PROCESS_SETTINGS.godRaysDensity,
+    godRaysDecay: DEFAULT_POST_PROCESS_SETTINGS.godRaysDecay,
+    godRaysWeight: DEFAULT_POST_PROCESS_SETTINGS.godRaysWeight,
+    godRaysExposure: DEFAULT_POST_PROCESS_SETTINGS.godRaysExposure,
     audioEnabled: input.audioEnabled,
     audioVolume: input.audioVolume,
   };

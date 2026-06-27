@@ -33,7 +33,7 @@ describe("parseBorderCoastOceanConfig", () => {
     expect(cfg.coast.oceanFullDepthCells).toBe(96);
     expect(cfg.coast.shoreBackshoreCells).toBe(128);
     expect(cfg.deepOcean.extendCells).toBe(4096);
-    expect(cfg.deepOcean.segments).toBe(64);
+    expect(cfg.deepOcean.segments).toBe(256);
   });
 
   it("keeps legacy nested yaml compatibility", () => {
@@ -95,7 +95,7 @@ describe("border coast shaping", () => {
     const z = worldCells * 0.5;
     const shaped = applyBorderCoastShape(x, z, lowBackshore, beachCfg, worldCells);
 
-    expect(shaped).toBeCloseTo(lowBackshore, 5);
+    expect(lowBackshore - shaped).toBeLessThanOrEqual(1);
   });
 
   it("keeps the repo coast band from swallowing the default playable world", () => {

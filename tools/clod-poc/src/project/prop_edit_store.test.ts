@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PropEditStore } from "./prop_edit_store.js";
+import { surfaceHeight } from "../terrain/terrain.js";
 
 function makeStore(): PropEditStore {
   let n = 0;
@@ -63,7 +64,7 @@ describe("PropEditStore", () => {
     expect(edits.get("prop-a")?.position).toEqual([10, 20, 30]);
     expect(edits.toPlacementScene("archive").instances[0]).toMatchObject({
       assetId: "asset-b",
-      position: [10, 20, 30],
+      position: [10, surfaceHeight(10, 30), 30],
       seed: 9,
       variationId: 2,
       flags: 1,

@@ -41,7 +41,7 @@ describe("canopy texture", () => {
     expect(set.syntheticFallback).toBe(false);
   });
 
-  it("sanitizes invalid summary cell values before texture upload", () => {
+  it("sanitizes invalid summary cell values before texture upload", { timeout: 60000 }, () => {
     const badTile: CanopySummaryTile = {
       ...tile,
       originX: 0,

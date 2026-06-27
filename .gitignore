@@ -92,3 +92,4 @@ tools/clod-poc/acceptance-runs/*
 tools/clod-poc/public/tmp/*
 tools/clod-poc/textures/pbr/*.zip
 
+tools/clod-poc/pr/*

@@ -40,6 +40,11 @@ export interface ClodSliceState {
   longViewFreezeStreamCenter: boolean;
   longViewForceMissingTiles: boolean;
   longViewRebuildBudget: number;
+
+  clodShadowOverlayMode: "off" | "casters" | "all";
+  clodShadowProxyView: "off" | "proxy-meshes";
+  clodShadowProxyWireframe: boolean;
+  clodShadowStatsLine: string;
 }
 
 const CLOD_ARCHIVE_KEYS = [
@@ -94,6 +99,11 @@ export function createClodSliceState(input: {
     longViewFreezeStreamCenter: false,
     longViewForceMissingTiles: false,
     longViewRebuildBudget: 4,
+
+    clodShadowOverlayMode: "off",
+    clodShadowProxyView: "off",
+    clodShadowProxyWireframe: true,
+    clodShadowStatsLine: "",
   };
 }
 

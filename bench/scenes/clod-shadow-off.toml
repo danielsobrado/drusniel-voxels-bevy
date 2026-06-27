@@ -1,0 +1,25 @@
+# CLOD shadow A/B preset: runtime path disabled.
+#
+# Run with:
+#   cargo run --release -- --bench bench/scenes/clod-shadow-off.toml
+#
+# This is the integration baseline.  It disables the whole CLOD shadow runtime
+# path so existing/non-CLOD terrain shadow behavior can be compared against the
+# new proxy, visual-only, and no-cast modes.
+
+name = "clod-shadow-off"
+description = "Visual regression run with the CLOD shadow runtime disabled."
+freeze_terrain_lod_after_ready = true
+
+[render_toggles]
+quality_preset = "high"
+disable_clod_shadows = true
+force_visual_mesh_shadows = false
+force_no_cast_shadows = false
+disable_clod_shadow_proxies = true
+disable_clod_shadow_snapshot_loading = true
+disable_clod_shadow_light_layers = true
+disable_clod_shadow_f3 = true
+disable_clod_shadow_bench_metrics = false
+clod_shadow_snapshot_path = "assets/generated/clod/shadow_runtime.json"
+clod_shadow_auto_reload = false

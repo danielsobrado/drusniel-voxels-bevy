@@ -159,12 +159,22 @@ export interface FrameLoopCanopyDeps {
   update: (cameraX: number, cameraZ: number) => void;
 }
 
+export interface FrameLoopClodShadowDeps {
+  update: () => void;
+  statsController?: { updateDisplay: () => unknown } | null;
+  isActive: () => boolean;
+}
+
 export interface FrameLoopConstructionDeps {
   update: () => void;
   isActive: () => boolean;
 }
 
 export interface FrameLoopCombatDeps {
+  update: (timeMs: number) => void;
+}
+
+export interface FrameLoopSpellsDeps {
   update: (timeMs: number) => void;
 }
 
@@ -178,7 +188,9 @@ export interface ClodFrameLoopDeps {
   diagnostics: FrameLoopDiagnosticsDeps;
   farSummary?: FrameLoopFarSummaryDeps;
   shadowProxy?: FrameLoopShadowProxyDeps;
+  clodShadow?: FrameLoopClodShadowDeps;
   canopy?: FrameLoopCanopyDeps;
   construction?: FrameLoopConstructionDeps;
   combat?: FrameLoopCombatDeps;
+  spells?: FrameLoopSpellsDeps;
 }

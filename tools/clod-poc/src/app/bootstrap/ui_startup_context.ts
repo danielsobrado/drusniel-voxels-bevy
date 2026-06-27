@@ -24,6 +24,8 @@ import type { GuiDisplayController } from "./bootstrap_refs.js";
 import type { createPlayerInputController } from "../../player/player_input_controller.js";
 import type { createPlayerModeController } from "../../player/player_mode_controller.js";
 import type { SwordAttackController } from "../../combat/index.js";
+import type { SpellVfxController } from "../../spells/spell_vfx_controller.js";
+import type { ClodShadowOverlayController } from "../../clod_shadow_overlay_controller.js";
 
 export interface UiStartupInput {
   dom: DomShell;
@@ -53,7 +55,7 @@ export interface UiStartupInput {
   isWebGpu: boolean;
   worldCells: number;
   clodWorker: ClodWorkerClient;
-  result: { nodesByLevel: Map<number, ClodPageNode[]> };
+  result: { roots: ClodPageNode[]; nodesByLevel: Map<number, ClodPageNode[]> };
   allNodes: ClodPageNode[];
   maxTerrainLevel: number;
   markEditedAncestorsStale: (lod0Nodes: readonly ClodPageNode[]) => void;
@@ -109,6 +111,9 @@ export interface UiSessionState {
   playerInputController: ReturnType<typeof createPlayerInputController> | null;
   playerModeController: ReturnType<typeof createPlayerModeController> | null;
   combatController: SwordAttackController | null;
+  spellVfxController: SpellVfxController | null;
+  clodShadowOverlayController: ClodShadowOverlayController | null;
+  clodShadowStatsController: GuiDisplayController | null;
 }
 
 export interface UiStartupContext {
@@ -142,6 +147,9 @@ export function createUiStartupContext(input: UiStartupInput): UiStartupContext 
       playerInputController: null,
       playerModeController: null,
       combatController: null,
+      spellVfxController: null,
+      clodShadowOverlayController: null,
+      clodShadowStatsController: null,
     },
   };
 }

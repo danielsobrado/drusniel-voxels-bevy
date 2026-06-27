@@ -1,16 +1,17 @@
-// WebGPU post-processing for the isolated preview path. This mirrors src/postprocess.ts:
-// scene pass -> exposure/contrast/saturation/vignette -> renderer tone mapping/output color.
+// WebGPU post-processing: scene render target -> exposure/contrast/saturation/vignette -> tone map/output.
 
 import * as THREE from "three";
-import { RenderPipeline, type WebGPURenderer } from "three/webgpu";
+import { ColorManagement } from "three";
+import { NodeMaterial, QuadMesh, type WebGPURenderer } from "three/webgpu";
 import {
   clamp,
   dot,
   length,
   max,
   mix,
-  pass,
+  renderOutput,
   smoothstep,
+  texture,
   uniform,
   uv,
   vec3,
@@ -24,10 +25,23 @@ import {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
+/** True when the post-process output graph must be recompiled. */
+export function postProcessOutputGraphDirty(
+  current: PostProcessSettings,
+  settings: Partial<PostProcessSettings>,
+): boolean {
+  return (
+    (settings.enabled !== undefined && settings.enabled !== current.enabled) ||
+    (settings.debugMode !== undefined && settings.debugMode !== current.debugMode)
+  );
+}
+
 export class WebGpuPostProcessPipeline {
   private readonly renderer: WebGPURenderer;
-  private readonly pipeline: RenderPipeline;
-  private readonly scenePass: ReturnType<typeof pass>;
+  private readonly target: THREE.RenderTarget;
+  private readonly quad: QuadMesh;
+  private readonly material: NodeMaterial;
+  private readonly drawingBufferSize = new THREE.Vector2();
   private readonly uOpacity = uniform(DEFAULT_POST_PROCESS_SETTINGS.opacity);
   private readonly uExposure = uniform(DEFAULT_POST_PROCESS_SETTINGS.exposure);
   private readonly uContrast = uniform(DEFAULT_POST_PROCESS_SETTINGS.contrast);
@@ -37,38 +51,54 @@ export class WebGpuPostProcessPipeline {
 
   constructor(
     renderer: WebGPURenderer,
-    scene: THREE.Scene,
-    camera: THREE.Camera,
+    _scene: THREE.Scene,
+    _camera: THREE.Camera,
     settings: Partial<PostProcessSettings> = {},
   ) {
     this.renderer = renderer;
     this.settings = { ...DEFAULT_POST_PROCESS_SETTINGS, ...settings };
-    this.scenePass = pass(scene, camera, {
+    // Single-sample RT: MSAA offscreen targets are not sampleable in the composite pass on WebGPU.
+    this.target = new THREE.RenderTarget(1, 1, {
       depthBuffer: true,
       stencilBuffer: false,
-      samples: 4,
+      samples: 0,
+      type: renderer.getOutputBufferType(),
+      colorSpace: ColorManagement.workingColorSpace,
     });
-    this.pipeline = new RenderPipeline(renderer);
-    // updateSettings() rebuilds the output graph (mode keys are defined here), so no
-    // separate rebuildOutput() call is needed.
+    this.target.texture.name = "clod-poc-webgpu-postprocess-color";
+
+    this.material = new NodeMaterial();
+    this.material.name = "clod-poc-webgpu-postprocess";
+    this.quad = new QuadMesh(this.material);
+    this.quad.name = "clod-poc-webgpu-postprocess-quad";
+
     this.updateSettings(this.settings);
+    this.rebuildComposite();
   }
 
-  /** Resize the offscreen scene-pass target to match the renderer's drawing buffer. */
-  setSize(): void {
-    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    this.scenePass.setSize(size.x, size.y);
+  setSize(width?: number, height?: number): void {
+    if (width === undefined || height === undefined) {
+      const css = new THREE.Vector2();
+      this.renderer.getSize(css);
+      width = css.x;
+      height = css.y;
+    }
+    this.renderer.getDrawingBufferSize(this.drawingBufferSize);
+    const pixelRatio = this.renderer.getPixelRatio();
+    const targetWidth = this.drawingBufferSize.x || Math.floor(width * pixelRatio);
+    const targetHeight = this.drawingBufferSize.y || Math.floor(height * pixelRatio);
+    this.target.setSize(Math.max(1, targetWidth), Math.max(1, targetHeight));
   }
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
-    const modeChanged = settings.enabled !== undefined || settings.debugMode !== undefined;
+    const modeChanged = postProcessOutputGraphDirty(this.settings, settings);
     this.settings = { ...this.settings, ...settings };
     this.uOpacity.value = this.settings.opacity;
     this.uExposure.value = this.settings.exposure;
     this.uContrast.value = this.settings.contrast;
     this.uSaturation.value = this.settings.saturation;
     this.uVignette.value = this.settings.vignette;
-    if (modeChanged) this.rebuildOutput();
+    if (modeChanged) this.rebuildComposite();
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera): void {
@@ -76,23 +106,49 @@ export class WebGpuPostProcessPipeline {
       this.renderer.render(scene, camera);
       return;
     }
-    this.pipeline.render();
+
+    const renderer = this.renderer;
+    const toneMapping = renderer.toneMapping;
+    const outputColorSpace = renderer.outputColorSpace;
+    const currentRenderTarget = renderer.getRenderTarget();
+    const currentXr = renderer.xr.enabled;
+
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.outputColorSpace = ColorManagement.workingColorSpace;
+    renderer.xr.enabled = false;
+    renderer.setRenderTarget(this.target);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(currentRenderTarget);
+    renderer.xr.enabled = currentXr;
+
+    // Keep the renderer linear during the composite; renderOutput() in the quad applies tone mapping.
+    this.quad.render(renderer);
+
+    renderer.toneMapping = toneMapping;
+    renderer.outputColorSpace = outputColorSpace;
   }
 
   dispose(): void {
-    this.scenePass.dispose();
+    this.target.dispose();
+    this.material.dispose();
   }
 
-  private rebuildOutput(): void {
-    const sampled: TslNode = this.scenePass.getTextureNode("output");
+  private rebuildComposite(): void {
+    const sampled: TslNode = texture(this.target.texture, uv());
+    let output: TslNode;
     if (!this.settings.enabled || this.settings.debugMode === "off") {
-      this.pipeline.outputNode = sampled;
+      output = sampled;
     } else if (this.settings.debugMode === "copy") {
-      this.pipeline.outputNode = vec4(sampled.rgb, sampled.a.mul(this.uOpacity));
+      output = vec4(sampled.rgb, sampled.a.mul(this.uOpacity));
     } else {
-      this.pipeline.outputNode = this.outputNode(sampled);
+      output = this.outputNode(sampled);
     }
-    this.pipeline.needsUpdate = true;
+    this.material.fragmentNode = renderOutput(
+      output,
+      this.renderer.toneMapping,
+      this.renderer.outputColorSpace,
+    );
+    this.material.needsUpdate = true;
   }
 
   private outputNode(sampled: TslNode): TslNode {

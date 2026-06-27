@@ -1,5 +1,6 @@
 import type { StreamingOwnershipRadii } from "../streaming/streaming_ownership.js";
-import { LiveVoxelChunkStreamer, type LiveVoxelChunkStreamerConfig, type LiveVoxelChunkStreamerSnapshot, type StreamCenter } from "./live_voxel_chunk_streamer.js";
+import { LiveVoxelChunkStreamer, type LiveVoxelChunkStreamerConfig, type LiveVoxelChunkStreamerSnapshot } from "./live_voxel_chunk_streamer.js";
+import type { StreamCenter } from "./live_chunk_keys.js";
 import { VisualClodPageStreamer, type VisualPageStreamerConfig, type VisualPageStreamerSnapshot } from "./page_plan.js";
 
 export interface TerrainOwnershipRuntimeConfig {

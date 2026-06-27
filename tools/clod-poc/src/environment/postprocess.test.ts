@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_POST_PROCESS_SETTINGS,
+  GOD_RAYS_SCREEN_SAMPLES,
   POSTPROCESS_SHADER_TEST_HOOKS,
 } from "./postprocess.js";
 
@@ -14,7 +15,22 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       saturation: 1,
       vignette: 0,
       debugMode: "output",
+      godRaysMode: "off",
+      godRaysDensity: 0.96,
+      godRaysDecay: 0.92,
+      godRaysWeight: 0.35,
+      godRaysExposure: 0.6,
     });
+  });
+
+  it("defaults god rays off so existing scenes are unchanged", () => {
+    expect(DEFAULT_POST_PROCESS_SETTINGS.godRaysMode).toBe("off");
+  });
+});
+
+describe("GOD_RAYS_SCREEN_SAMPLES", () => {
+  it("spends a larger raymarch budget on the heavy screen-space mode", () => {
+    expect(GOD_RAYS_SCREEN_SAMPLES.heavy).toBeGreaterThan(GOD_RAYS_SCREEN_SAMPLES.cheap);
   });
 });
 

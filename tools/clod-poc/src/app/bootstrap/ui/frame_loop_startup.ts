@@ -276,5 +276,15 @@ export function runFrameLoopStartup(
     combat: session.combatController
       ? { update: (timeMs) => session.combatController!.update(timeMs) }
       : undefined,
+    spells: session.spellVfxController
+      ? { update: (timeMs) => session.spellVfxController!.update(timeMs) }
+      : undefined,
+    clodShadow: session.clodShadowOverlayController
+      ? {
+          update: () => session.clodShadowOverlayController!.update(),
+          statsController: session.clodShadowStatsController,
+          isActive: () => state.clodShadowOverlayMode !== "off" || state.clodShadowProxyView !== "off",
+        }
+      : undefined,
   });
 }

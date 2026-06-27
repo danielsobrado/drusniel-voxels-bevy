@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { getNaadfIntegrationFromWindow, setNaadfIntegration } from "../canopyBridge.js";
 import type { NaadfIntegration } from "../integration.js";
@@ -11,7 +12,7 @@ function stubIntegration(): NaadfIntegration {
     update: () => {},
     getHeightProvider: () => ({
       sampleHeight: () => 0,
-      sampleNormal: () => ({ x: 0, y: 1, z: 0 }),
+      sampleNormal: () => new THREE.Vector3(0, 1, 0),
       sampleMaterial: () => 0,
     }),
     getCanopySampler: () => ({ sampleCanopyCoverage: () => 0 }),
@@ -30,7 +31,18 @@ function stubIntegration(): NaadfIntegration {
       farClipmapHit: false,
       missingSample: false,
     }),
-    traceSun: () => ({ visible: true, steps: 0, blockedByAadf: false }),
+    traceSun: () => ({
+      visible: true,
+      unknown: false,
+      blocked: false,
+      steps: 0,
+      aadfSkips: 0,
+      nearTableHits: 0,
+      hashFallbackHits: 0,
+      farClipmapHits: 0,
+      missingSamples: 0,
+    }),
+    getFarSummaryGpuAtlasView: () => undefined,
     getMetricsSnapshot: () => ({} as ReturnType<NaadfIntegration["getMetricsSnapshot"]>),
     getAcceptanceStatus: () => ({ checks: [], passed: true }),
     dispose: () => {},

@@ -160,6 +160,14 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
   if (params.searchParams.get("scene") === "long-view-shadow-proxy-low-sun") {
     state.sunElevationDeg = 8;
   }
+  const clodShadowOverlayQuery = params.searchParams.get("clodShadowOverlay");
+  if (clodShadowOverlayQuery === "off" || clodShadowOverlayQuery === "casters" || clodShadowOverlayQuery === "all") {
+    state.clodShadowOverlayMode = clodShadowOverlayQuery;
+  }
+  const clodShadowProxyQuery = params.searchParams.get("clodShadowProxy");
+  if (clodShadowProxyQuery === "off" || clodShadowProxyQuery === "proxy-meshes") {
+    state.clodShadowProxyView = clodShadowProxyQuery;
+  }
 }
 
 export function createClodAppState(params: CreateClodAppStateParams): ClodAppState {

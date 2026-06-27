@@ -273,7 +273,7 @@ grass:
   });
 
   it("computes terrain-aware grass masks and near-field scruff", () => {
-    setTerrainSurfaceOverride((x, z) => {
+    setTerrainSurfaceOverride((x, _z) => {
       if (x < 32) return 10;
       return 24;
     });
@@ -334,7 +334,7 @@ grass:
   });
 
   it("generates a super-far ring tier when the distance budget reaches meadow range", () => {
-    setTerrainSurfaceOverride((x, z) => 24);
+    setTerrainSurfaceOverride((_x, _z) => 24);
     try {
       const ring = generateGrassRingInstances(
         { x: 256, z: 256 },

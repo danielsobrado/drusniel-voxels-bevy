@@ -1,5 +1,15 @@
 import * as THREE from "three";
 
+/**
+ * God-rays / light-shaft mode.
+ * - `off`: no light shafts.
+ * - `cheap`: screen-space radial-blur shafts at a low raymarch budget. Cheapest, default-friendly.
+ * - `heavy`: same screen-space technique with a higher raymarch budget for smoother shafts.
+ * - `volumetric`: physically-based volumetric shafts that raymarch a real shadow map. Requires the
+ *   volumetric controller to stand up a shadow-casting directional light, so it is the most costly.
+ */
+export type GodRaysMode = "off" | "cheap" | "heavy" | "volumetric";
+
 export interface PostProcessSettings {
   enabled: boolean;
   opacity: number;
@@ -8,6 +18,16 @@ export interface PostProcessSettings {
   saturation: number;
   vignette: number;
   debugMode: "output" | "copy" | "off";
+  /** Light-shaft technique to apply after grading (WebGPU pipeline only). */
+  godRaysMode: GodRaysMode;
+  /** Step size of the screen-space raymarch toward the sun. Higher = longer shafts. */
+  godRaysDensity: number;
+  /** Per-sample falloff for the screen-space march. Must stay below 1. */
+  godRaysDecay: number;
+  /** Per-sample contribution weight for the screen-space march. */
+  godRaysWeight: number;
+  /** Output gain applied to the accumulated shafts. */
+  godRaysExposure: number;
 }
 
 export const DEFAULT_POST_PROCESS_SETTINGS: PostProcessSettings = {
@@ -18,6 +38,17 @@ export const DEFAULT_POST_PROCESS_SETTINGS: PostProcessSettings = {
   saturation: 1.0,
   vignette: 0.0,
   debugMode: "output",
+  godRaysMode: "off",
+  godRaysDensity: 0.96,
+  godRaysDecay: 0.92,
+  godRaysWeight: 0.35,
+  godRaysExposure: 0.6,
+};
+
+/** Screen-space raymarch sample count per god-rays mode. Drives shader cost. */
+export const GOD_RAYS_SCREEN_SAMPLES: Record<"cheap" | "heavy", number> = {
+  cheap: 24,
+  heavy: 60,
 };
 
 const FULLSCREEN_VERT = /* glsl */ `

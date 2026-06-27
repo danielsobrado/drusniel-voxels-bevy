@@ -96,4 +96,27 @@ export function createEnvironmentGui(
     },
   };
   postFolder.add(postActions, "reset").name("reset");
+
+  const godRaysFolder = gui.addFolder("god rays");
+  const godRaysControllers: GuiController[] = [
+    godRaysFolder
+      .add(state, "godRaysMode", ["off", "cheap", "heavy", "volumetric"])
+      .name("mode (WebGPU)"),
+    godRaysFolder.add(state, "godRaysDensity", 0.5, 1.5, 0.01).name("density"),
+    godRaysFolder.add(state, "godRaysDecay", 0.8, 0.99, 0.005).name("decay"),
+    godRaysFolder.add(state, "godRaysWeight", 0.0, 1.0, 0.01).name("weight"),
+    godRaysFolder.add(state, "godRaysExposure", 0.0, 2.0, 0.01).name("exposure"),
+  ];
+  const godRaysActions = {
+    reset: () => {
+      state.godRaysMode = DEFAULT_POST_PROCESS_SETTINGS.godRaysMode;
+      state.godRaysDensity = DEFAULT_POST_PROCESS_SETTINGS.godRaysDensity;
+      state.godRaysDecay = DEFAULT_POST_PROCESS_SETTINGS.godRaysDecay;
+      state.godRaysWeight = DEFAULT_POST_PROCESS_SETTINGS.godRaysWeight;
+      state.godRaysExposure = DEFAULT_POST_PROCESS_SETTINGS.godRaysExposure;
+      deps.postProcess?.updateSettings(deps.currentPostProcessSettings());
+      for (const controller of godRaysControllers) controller.updateDisplay();
+    },
+  };
+  godRaysFolder.add(godRaysActions, "reset").name("reset");
 }
