@@ -332,15 +332,18 @@ function drainParents(budgetMs: number): void {
   }
 
   if (pendingParentCount() === 0 && activeParentRequestId !== null) {
-    post({
-      type: "parentsComplete",
-      requestId: activeParentRequestId,
-      parentNodes,
-      parentMs,
-    });
+    const completedRequestId = activeParentRequestId;
+    const completedParentNodes = parentNodes;
+    const completedParentMs = parentMs;
     activeParentRequestId = null;
     parentNodes = 0;
     parentMs = 0;
+    post({
+      type: "parentsComplete",
+      requestId: completedRequestId,
+      parentNodes: completedParentNodes,
+      parentMs: completedParentMs,
+    });
   }
 }
 
