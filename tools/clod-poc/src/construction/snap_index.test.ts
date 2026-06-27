@@ -22,6 +22,13 @@ const floor: ConstructionPieceDef = {
   ],
 };
 
+const upperFloor: ConstructionPieceDef = {
+  ...floor,
+  snapPoints: [
+    { id: "north", localPos: [0, 0.1, -1], direction: [0, 0, -1], group: "floor-edge", accepts: ["floor-edge", "wall-bottom", "wall-top"] },
+  ],
+};
+
 const wall: ConstructionPieceDef = {
   id: "wall",
   label: "Wall",
@@ -31,6 +38,16 @@ const wall: ConstructionPieceDef = {
   material: "wood",
   snapPoints: [
     { id: "bottom", localPos: [0, -1, 0], direction: [0, -1, 0], group: "wall-bottom", accepts: ["floor-edge"] },
+    { id: "left", localPos: [-1, 0, 0], direction: [-1, 0, 0], group: "wall-side", accepts: ["wall-side"] },
+    { id: "right", localPos: [1, 0, 0], direction: [1, 0, 0], group: "wall-side", accepts: ["wall-side"] },
+  ],
+};
+
+const stackableWall: ConstructionPieceDef = {
+  ...wall,
+  snapPoints: [
+    { id: "bottom", localPos: [0, -1, 0], direction: [0, -1, 0], group: "wall-bottom", accepts: ["floor-edge", "wall-top"] },
+    { id: "top", localPos: [0, 1, 0], direction: [0, 1, 0], group: "wall-top", accepts: ["floor-edge", "wall-bottom", "wall-top", "roof-edge"] },
     { id: "left", localPos: [-1, 0, 0], direction: [-1, 0, 0], group: "wall-side", accepts: ["wall-side"] },
     { id: "right", localPos: [1, 0, 0], direction: [1, 0, 0], group: "wall-side", accepts: ["wall-side"] },
   ],
@@ -131,5 +148,27 @@ describe("ConstructionSnapIndex", () => {
     );
 
     expect(snap).toBeNull();
+  });
+
+  it("places upper floors on top of wall-top snaps", () => {
+    const index = new ConstructionSnapIndex(1);
+    index.addPiece(stackableWall, "wall-1", [10, 1.1, 10], 0);
+
+    const snap = index.findBestSnap([10, 2.1, 9], upperFloor, 0, config);
+
+    expect(snap).not.toBeNull();
+    expect(snap?.target.group).toBe("wall-top");
+    expect(snap?.worldPosition[1]).toBeCloseTo(2.2, 6);
+  });
+
+  it("stacks walls on wall-top snaps for multi-level construction", () => {
+    const index = new ConstructionSnapIndex(1);
+    index.addPiece(stackableWall, "wall-1", [10, 1.1, 10], 0);
+
+    const snap = index.findBestSnap([10, 2.1, 10], stackableWall, 0, config);
+
+    expect(snap).not.toBeNull();
+    expect(snap?.target.group).toBe("wall-top");
+    expect(snap?.worldPosition[1]).toBeCloseTo(3.1, 6);
   });
 });
