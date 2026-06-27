@@ -60,7 +60,7 @@ describe("border ocean player config", () => {
         pushbackStartInsideWorldM: 0,
         pushbackStrength: 0,
       }),
-    ).toThrow("worldEdgeMarginM must be > 0");
+    ).toThrow("worldEdgeMarginM must be a finite number > 0");
   });
 
   it("fails when enabled soft pushback has no band", () => {
@@ -83,6 +83,22 @@ describe("border ocean player config", () => {
         pushbackStrength: 0,
       }),
     ).toThrow("pushbackStrength must be > 0");
+  });
+
+  it("fails when gameplay parser sees malformed present fields", () => {
+    expect(() =>
+      parseBorderOceanGameplayConfig(
+        yamlText.replace("world_edge_margin_m: 16", "world_edge_margin_m: nope"),
+      ),
+    ).toThrow("world_edge_margin_m must be a finite number");
+  });
+
+  it("fails when gameplay parser sees missing present fields", () => {
+    expect(() =>
+      parseBorderOceanGameplayConfig(
+        yamlText.replace(/\n  pushback_strength: 36/, ""),
+      ),
+    ).toThrow("pushback_strength must be a finite number");
   });
 
   it("falls back to player defaults when gameplay config is absent", () => {
