@@ -1,9 +1,10 @@
 import * as THREE from "three";
-import { clamp, cos, dot, float, max, mix, normalGeometry, normalize, positionGeometry, positionWorld, pow, sin, smoothstep, uniform, vec2, vec3, vertexColor } from "three/tsl";
+import { clamp, cos, dot, float, max, mix, normalGeometry, normalize, positionGeometry, positionWorld, pow, sin, smoothstep, step, texture, uniform, vec2, vec3, vertexColor } from "three/tsl";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
 
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
+import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMaterial/terrainMaterialBands.js";
 
 export interface FarTerrainVertexColors {
@@ -30,11 +31,18 @@ export interface FarTerrainUniformRefs {
   uSunColor: ReturnType<typeof uniform>;
   uSkyColor: ReturnType<typeof uniform>;
   uGroundColor: ReturnType<typeof uniform>;
+  uSummaryOriginX?: ReturnType<typeof uniform>;
+  uSummaryOriginZ?: ReturnType<typeof uniform>;
+  uSummaryCellM?: ReturnType<typeof uniform>;
+  uSummaryWidthCells?: ReturnType<typeof uniform>;
+  uSummaryHeightCells?: ReturnType<typeof uniform>;
+  uSummaryValid?: ReturnType<typeof uniform>;
 }
 
 export interface FarTerrainMaterialOptions {
   gpuDisplacement?: boolean;
   heightBiasMeters?: number;
+  summaryAtlas?: FarSummaryGpuAtlasView;
 }
 
 export function createFarTerrainMaterial(
@@ -83,6 +91,13 @@ export function createFarTerrainMaterial(
   material.colorNode = final;
   material.side = THREE.DoubleSide;
 
+  let uSummaryOriginX: ReturnType<typeof uniform> | undefined;
+  let uSummaryOriginZ: ReturnType<typeof uniform> | undefined;
+  let uSummaryCellM: ReturnType<typeof uniform> | undefined;
+  let uSummaryWidthCells: ReturnType<typeof uniform> | undefined;
+  let uSummaryHeightCells: ReturnType<typeof uniform> | undefined;
+  let uSummaryValid: ReturnType<typeof uniform> | undefined;
+
   if (options.gpuDisplacement) {
     const local = positionGeometry;
     const worldX = local.x.add(uCenterX);
@@ -91,11 +106,29 @@ export function createFarTerrainMaterial(
     const hills = sin(worldX.mul(0.009).add(worldZ.mul(0.006))).mul(7.0)
       .add(cos(worldX.mul(0.013).sub(worldZ.mul(0.011))).mul(5.0));
     const detail = sin(worldX.mul(0.041).add(worldZ.mul(0.033))).mul(1.4);
-    const terrainHeight = float(46.0)
-      .add(continent)
-      .add(hills)
-      .add(detail)
-      .add(float(options.heightBiasMeters ?? 0));
+    let terrainHeight = float(46.0).add(continent).add(hills).add(detail);
+
+    if (options.summaryAtlas) {
+      uSummaryOriginX = uniform(options.summaryAtlas.originX);
+      uSummaryOriginZ = uniform(options.summaryAtlas.originZ);
+      uSummaryCellM = uniform(options.summaryAtlas.cellM);
+      uSummaryWidthCells = uniform(options.summaryAtlas.widthCells);
+      uSummaryHeightCells = uniform(options.summaryAtlas.heightCells);
+      uSummaryValid = uniform(options.summaryAtlas.valid);
+
+      const atlasU = worldX.sub(uSummaryOriginX).div(uSummaryCellM.mul(uSummaryWidthCells));
+      const atlasV = worldZ.sub(uSummaryOriginZ).div(uSummaryCellM.mul(uSummaryHeightCells));
+      const atlasUv = vec2(clamp(atlasU, float(0.0), float(1.0)), clamp(atlasV, float(0.0), float(1.0)));
+      const atlasSample = texture(options.summaryAtlas.texture, atlasUv);
+      const inside = step(float(0.0), atlasU)
+        .mul(step(atlasU, float(1.0)))
+        .mul(step(float(0.0), atlasV))
+        .mul(step(atlasV, float(1.0)));
+      const atlasWeight = atlasSample.a.mul(inside).mul(uSummaryValid);
+      terrainHeight = mix(terrainHeight, atlasSample.r, atlasWeight);
+    }
+
+    terrainHeight = terrainHeight.add(float(options.heightBiasMeters ?? 0));
     material.positionNode = vec3(local.x, terrainHeight, local.z);
   }
 
@@ -104,6 +137,7 @@ export function createFarTerrainMaterial(
     uHazeStart, uHazeEnd, uHazeStrength, uHazeEnabled, uHazeColor,
     uHemiStrength, uSunStrength, uAmbientFloor,
     uSunDir, uSunColor, uSkyColor, uGroundColor,
+    uSummaryOriginX, uSummaryOriginZ, uSummaryCellM, uSummaryWidthCells, uSummaryHeightCells, uSummaryValid,
   };
   material.userData.farTerrainUniforms = refs;
 
@@ -264,6 +298,10 @@ export function createVertexColorBuffer(
   return colors;
 }
 
+export function createFarSummaryAtlasPreviewTexture(view: FarSummaryGpuAtlasView): THREE.DataTexture {
+  return view.texture;
+}
+
 export function updateFarTerrainMaterial(
   material: MeshBasicNodeMaterial,
   config: Partial<FarTerrainUniformData>,
@@ -292,4 +330,18 @@ export function updateFarTerrainMaterialCenter(
   if (!refs) return;
   refs.uCenterX.value = centerX;
   refs.uCenterZ.value = centerZ;
+}
+
+export function updateFarTerrainMaterialSummaryAtlas(
+  material: MeshBasicNodeMaterial,
+  view: FarSummaryGpuAtlasView,
+): void {
+  const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs | undefined;
+  if (!refs) return;
+  if (refs.uSummaryOriginX) refs.uSummaryOriginX.value = view.originX;
+  if (refs.uSummaryOriginZ) refs.uSummaryOriginZ.value = view.originZ;
+  if (refs.uSummaryCellM) refs.uSummaryCellM.value = view.cellM;
+  if (refs.uSummaryWidthCells) refs.uSummaryWidthCells.value = view.widthCells;
+  if (refs.uSummaryHeightCells) refs.uSummaryHeightCells.value = view.heightCells;
+  if (refs.uSummaryValid) refs.uSummaryValid.value = view.valid;
 }
