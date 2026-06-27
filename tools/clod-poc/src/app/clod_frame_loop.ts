@@ -200,7 +200,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       setGrassStats: stats.setGrassStats,
       getTreeStats: stats.getTreeStats,
       setTreeStats: stats.setTreeStats,
-      getStoneStats: stats.setStoneStats,
+      getStoneStats: stats.getStoneStats,
       setStoneStats: stats.setStoneStats,
       getUnderstoryStats: stats.getUnderstoryStats,
       setUnderstoryStats: stats.setUnderstoryStats,
