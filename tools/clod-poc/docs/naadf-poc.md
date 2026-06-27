@@ -128,3 +128,31 @@ Runtime overrides:
 | `?scene=infinite-naadf-forest` | Canopy through summary chain |
 | `?scene=infinite-naadf-sun-visibility` | Sun rays + AADF skips |
 | `?scene=infinite-naadf-stress-missing` | Unknown/missing handling |
+| `?scene=infinite-naadf-far` | Far shell summary query mode |
+
+## How to run tests
+
+```powershell
+npm --prefix tools/clod-poc test
+```
+
+NAADF unit tests live under `src/naadf/__tests__/`.
+
+## How to run debug scenes
+
+```powershell
+npm --prefix tools/clod-poc run dev -- --host 127.0.0.1
+```
+
+Examples:
+
+```text
+http://127.0.0.1:5173/?scene=infinite-naadf-flat&farShell=1
+http://127.0.0.1:5173/?scene=infinite-naadf-fast-flight&farShell=1
+http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&farShell=1
+http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfHeightMode=gpu&naadfShellGrid=96
+http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfAtlasWindow=7
+http://127.0.0.1:5173/?scene=infinite-naadf-sun-visibility&naadfTraversal=compare&naadfHddaBounds=1&naadfHeightMode=cpu
+```
+
+Use the **NAADF PoC** GUI folder for overlays and per-frame counters.
