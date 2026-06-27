@@ -2,6 +2,7 @@ import { load } from "js-yaml";
 import type { FarClipmapRingConfig } from "./types.js";
 
 export type NaadfTraversalMode = "dense" | "hdda" | "compare";
+export type NaadfFarShellHeightSamplingMode = "gpu" | "cpu";
 
 export interface NaadfWorldConfig {
   seed: number;
@@ -68,6 +69,7 @@ export interface NaadfFarShellConfig {
   endM: number;
   gridRes: number;
   useNaadfSummary: boolean;
+  heightSamplingMode: NaadfFarShellHeightSamplingMode;
 }
 
 export interface NaadfDebugConfig {
@@ -118,6 +120,7 @@ export interface NaadfPocConfig {
 }
 
 const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
+const FAR_SHELL_HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
 
 function requireNumber(value: unknown, path: string, min?: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -157,6 +160,14 @@ function requireTraversalMode(value: unknown, path: string): NaadfTraversalMode 
     throw new Error(`NAADF config: ${path} must be dense, hdda, or compare, got ${mode}`);
   }
   return mode as NaadfTraversalMode;
+}
+
+function requireFarShellHeightMode(value: unknown, path: string): NaadfFarShellHeightSamplingMode {
+  const mode = requireString(value, path);
+  if (!FAR_SHELL_HEIGHT_MODES.has(mode as NaadfFarShellHeightSamplingMode)) {
+    throw new Error(`NAADF config: ${path} must be gpu or cpu, got ${mode}`);
+  }
+  return mode as NaadfFarShellHeightSamplingMode;
 }
 
 function parseRing(raw: Record<string, unknown>, path: string): FarClipmapRingConfig {
@@ -288,6 +299,7 @@ export function parseNaadfPocConfig(yamlText: string): NaadfPocConfig {
       endM: requireNumber(shellRaw["end_m"], "far_shell.end_m", 0),
       gridRes: requireNumber(shellRaw["grid_res"], "far_shell.grid_res", 1),
       useNaadfSummary: requireBool(shellRaw["use_naadf_summary"], "far_shell.use_naadf_summary"),
+      heightSamplingMode: requireFarShellHeightMode(shellRaw["height_sampling_mode"] ?? "gpu", "far_shell.height_sampling_mode"),
     },
     debug: {
       enabled: requireBool(debugRaw["enabled"], "debug.enabled"),
