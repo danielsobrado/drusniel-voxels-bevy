@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import sharp from "sharp";
-import { load } from "js-yaml";
 import {
   borderOceanCameraForWorld,
   parseBorderOceanSceneConfig,
@@ -34,17 +33,6 @@ const PRESETS: readonly VisualPreset[] = [
   { name: "storm", renderer: "webgl", weather: "storm", extra: ["--weatherIntensity", "0.85", "--hazeIntensity", "1.0"] },
   { name: "cheap", renderer: "webgl", weather: "off", extra: ["--textureMipmaps", "0", "--grass", "0", "--trees", "0", "--stones", "0"] },
 ];
-
-function rawAcceptance(): Record<string, unknown> {
-  const root = load(CONFIG_TEXT) as Record<string, unknown>;
-  const scene = root["border_ocean_scene"] as Record<string, unknown> | undefined;
-  return (scene?.["acceptance"] as Record<string, unknown> | undefined) ?? {};
-}
-
-function numberThreshold(key: string, fallback: number): number {
-  const value = rawAcceptance()[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
 
 function run(label: string, args: string[]): void {
   console.log(`[border-ocean-visual] ${label}`);
@@ -112,10 +100,10 @@ async function main(): Promise<void> {
       run("shoot noon webgpu", shotArgs({ name: "noon", renderer: "webgpu", weather: "off", extra: [] }, image, stats));
       validateStatsFile(stats);
       const diff = await imageDiff(shots["noon-webgl"].image, image);
-      const maxMean = numberThreshold("max_webgl_webgpu_mean_delta", 18);
-      const maxP95 = numberThreshold("max_webgl_webgpu_p95_delta", 80);
+      const maxMean = SCENE_CONFIG.acceptance.maxWebglWebgpuMeanDelta;
+      const maxP95 = SCENE_CONFIG.acceptance.maxWebglWebgpuP95Delta;
       if (diff.mean > maxMean || diff.p95 > maxP95) {
-        throw new Error(`WebGL/WebGPU diff too high: mean=${diff.mean.toFixed(2)} p95=${diff.p95.toFixed(2)}`);
+        throw new Error(`visual renderer parity exceeded: mean=${diff.mean.toFixed(2)} p95=${diff.p95.toFixed(2)}`);
       }
       report["webgpuParity"] = { image, stats, diff, maxMean, maxP95 };
     } catch (error) {
