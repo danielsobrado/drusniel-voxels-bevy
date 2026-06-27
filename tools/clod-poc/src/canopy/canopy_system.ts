@@ -94,6 +94,13 @@ export function shellCenterForTextureSet(set: CanopyTextureSet): { x: number; z:
   };
 }
 
+export function shouldAttemptTextureUpload(
+  maxTextureUploadsPerFrame: number,
+  uploadsUsedThisFrame: number,
+): boolean {
+  return maxTextureUploadsPerFrame > uploadsUsedThisFrame;
+}
+
 export function createCanopyShellSystem(
   yamlText: string,
   searchParams: URLSearchParams,
@@ -121,6 +128,7 @@ export function createCanopyShellSystem(
   let textureSet: CanopyTextureSet | null = null;
   let metrics = createEmptyCanopyMetrics();
   let uploadBudgetUsed = 0;
+  let textureRefreshPending = false;
   let centerX = deps.worldSizeCells / 2;
   let centerZ = deps.worldSizeCells / 2;
 
@@ -161,7 +169,7 @@ export function createCanopyShellSystem(
     positionShellAtTextureCenter();
   };
 
-  const ensureTextures = (forceSynthetic: boolean) => {
+  const ensureTextures = (forceSynthetic: boolean): boolean => {
     const farRadius = config.distances.shellEndM;
     const useSynthetic = forceSynthetic
       || config.debug.forceSyntheticSource
@@ -186,18 +194,20 @@ export function createCanopyShellSystem(
       disposeCanopyTextureSet(textureSet);
       textureSet = next;
       rebuildShell(next);
+    } else {
+      disposeCanopyTextureSet(next);
     }
+    return true;
   };
 
   const update = (cameraX: number, cameraZ: number) => {
     config = deps.getConfig();
-    let forceTextureRefresh = false;
 
     if (config.distances.shellEndM !== terrainSamplerRadius) {
       terrainSamplerRadius = config.distances.shellEndM;
       terrainSampler = createBlendedTerrainSampler(deps.terrainSummary, terrainSamplerRadius);
       clipmap.disposeFarTiles();
-      forceTextureRefresh = true;
+      textureRefreshPending = true;
     }
 
     const nextTreeKey = treeDistributionConfigKey(config);
@@ -205,13 +215,13 @@ export function createCanopyShellSystem(
       treeDistributionKey = nextTreeKey;
       treeDistribution = createTreeDistribution(config.treeDistribution, config.seed);
       clipmap.disposeFarTiles();
-      forceTextureRefresh = true;
+      textureRefreshPending = true;
     }
 
     const nextTextureConfigKey = canopyTextureConfigKey(config);
     if (nextTextureConfigKey !== textureConfigKey) {
       textureConfigKey = nextTextureConfigKey;
-      forceTextureRefresh = true;
+      textureRefreshPending = true;
     }
 
     clipmap.setFreezeCenter(config.debug.freezeClipCenter || debugState.freezeClipCenter);
@@ -221,9 +231,10 @@ export function createCanopyShellSystem(
     metrics = { ...metrics, ...clipUpdate.metrics };
 
     uploadBudgetUsed = 0;
-    if (clipUpdate.texturesDirty || forceTextureRefresh || !textureSet) {
-      if (uploadBudgetUsed < config.budgets.maxTextureUploadsPerFrame) {
-        ensureTextures(false);
+    if (clipUpdate.texturesDirty || textureRefreshPending || !textureSet) {
+      if (shouldAttemptTextureUpload(config.budgets.maxTextureUploadsPerFrame, uploadBudgetUsed)) {
+        const uploaded = ensureTextures(false);
+        if (uploaded) textureRefreshPending = false;
         uploadBudgetUsed++;
       }
     }
@@ -248,7 +259,11 @@ export function createCanopyShellSystem(
     applyDebugConfig() {
       config = deps.getConfig();
       textureConfigKey = canopyTextureConfigKey(config);
-      ensureTextures(config.debug.forceSyntheticSource);
+      textureRefreshPending = true;
+      if (shouldAttemptTextureUpload(config.budgets.maxTextureUploadsPerFrame, 0)) {
+        const uploaded = ensureTextures(config.debug.forceSyntheticSource);
+        if (uploaded) textureRefreshPending = false;
+      }
       publish();
     },
     dispose() {
