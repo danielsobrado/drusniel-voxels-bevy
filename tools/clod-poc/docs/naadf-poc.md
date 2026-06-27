@@ -13,6 +13,7 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 - Query API with explicit counters (near table, hash, far clipmap, missing, HDDA)
 - Multi-ring GPU far-summary height atlas for runtime far-shell displacement
 - Paired GPU far-summary material-color atlas for runtime far-shell color
+- Paired GPU derived-normal atlas for runtime far-shell lighting
 - GPU procedural displacement as fallback where summary atlas data is missing
 - CPU query/HDDA path as oracle/debug only
 - Canopy coverage flowing through summary chain
@@ -34,10 +35,10 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 CPU far summary tile stream
   -> packed RGBA32F GPU height atlas
   -> paired RGBA32F GPU material-color atlas
+  -> paired RGBA32F GPU derived-normal atlas
   -> one vertical atlas band per far-summary ring
   -> nearest-filtered texel-center sampling in GPU material positionNode/colorNode
-  -> distance-selected atlas height/color where alpha is valid
-  -> height-range darkening from maxHeight - minHeight as a cheap slope proxy
+  -> distance-selected atlas height/color/normal where alpha is valid
   -> procedural GPU displacement fallback where atlas is missing
   -> GPU material lighting / haze
 ```
@@ -94,7 +95,7 @@ Runtime overrides:
 ## Known limitations
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
-- Runtime far shell samples GPU height and material-color atlases, but true normals are still not summary-atlas driven
+- Runtime far shell samples GPU height, material-color, and derived-normal atlases, but normals are tile-local gradients, not production filtered normal maps yet
 - Canopy/water coverage are still packed in CPU summaries only; the runtime shader does not consume them yet
 - The atlas is still a small moving 3x3 tile window per ring, not a production bindless/SSBO page table
 - HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
