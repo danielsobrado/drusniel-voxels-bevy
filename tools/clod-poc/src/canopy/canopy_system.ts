@@ -58,8 +58,10 @@ export function shouldRebuildCanopyShell(
 
 /** Conservative shell grid cap from triangle budget (assumes all quads are emitted). */
 export function shellGridForTriangleBudget(maxShellTris: number, preferredGrid = 192): number {
-  const maxGrid = Math.floor(Math.sqrt(maxShellTris / 2));
-  return Math.max(16, Math.min(preferredGrid, maxGrid));
+  const safeTriangleBudget = Number.isFinite(maxShellTris) && maxShellTris > 0 ? maxShellTris : 512;
+  const safePreferredGrid = Number.isFinite(preferredGrid) && preferredGrid > 0 ? preferredGrid : 192;
+  const maxGrid = Math.floor(Math.sqrt(safeTriangleBudget / 2));
+  return Math.max(16, Math.min(safePreferredGrid, maxGrid));
 }
 
 export function treeDistributionConfigKey(config: CanopyShellConfig): string {
