@@ -257,7 +257,7 @@ describe("rebuildDirtyPages", () => {
     expect(node.mesh.indices.length).toBeGreaterThan(trisBefore);
   });
 
-  it("per-chunk rebuild remeshes only dirty chunks when validation passes", () => {
+  it("per-chunk rebuild avoids remeshing clean sibling pages", () => {
     const world = { cellsX: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size, cellsZ: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size };
     const result = buildWorld(2, 2, cfg);
     const node = result.nodesByLevel.get(0)!.find((n) => n.id === "L0:0,0")!;
@@ -274,6 +274,28 @@ describe("rebuildDirtyPages", () => {
     expect(lod0.chunksRemeshed).toBeLessThan(lod0.chunksTotal);
 
     const full = buildLod0PageSource(0, 0, cfg, world);
+    expect(node.mesh.positions).toEqual(full.mesh.positions);
+    expect(node.mesh.indices).toEqual(full.mesh.indices);
+    expect(node.mesh.normals).toEqual(full.mesh.normals);
+  });
+
+  it("per-chunk rebuild remeshes a true subset inside a 4x4 page", () => {
+    const world = { cellsX: 4 * uiCfg.page.chunks_per_page * uiCfg.page.chunk_size, cellsZ: 4 * uiCfg.page.chunks_per_page * uiCfg.page.chunk_size };
+    const result = buildWorld(4, 4, uiCfg);
+    const node = result.nodesByLevel.get(0)!.find((n) => n.id === "L0:0,0")!;
+
+    const x = 8, z = 8, r = 2;
+    const y = surfaceHeight(x, z) - 4;
+    addDigEdit({ x, y, z, r });
+    const margin = r + 4;
+    const dirty = { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin };
+
+    const lod0 = rebuildDirtyLod0Pages(result, dirty, uiCfg, buildNodeIndex(result));
+    expect(lod0.chunksTotal).toBe(uiCfg.page.chunks_per_page ** 2 * 4);
+    expect(lod0.chunksRemeshed).toBe(4);
+    expect(lod0.chunksRemeshed).toBeLessThan(uiCfg.page.chunks_per_page ** 2);
+
+    const full = buildLod0PageSource(0, 0, uiCfg, world);
     expect(node.mesh.positions).toEqual(full.mesh.positions);
     expect(node.mesh.indices).toEqual(full.mesh.indices);
     expect(node.mesh.normals).toEqual(full.mesh.normals);
