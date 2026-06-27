@@ -94,6 +94,43 @@ export class SurfBand {
   }
 }
 
+function appendGrid(
+  positions: number[],
+  indices: number[],
+  xMin: number,
+  xMax: number,
+  zMin: number,
+  zMax: number,
+  cellSizeM: number,
+  y: number,
+  offset: { value: number },
+): void {
+  if (xMax <= xMin || zMax <= zMin) return;
+  const cellsX = Math.max(1, Math.ceil((xMax - xMin) / cellSizeM));
+  const cellsZ = Math.max(1, Math.ceil((zMax - zMin) / cellSizeM));
+  const sideX = cellsX + 1;
+  const base = offset.value;
+
+  for (let z = 0; z <= cellsZ; z += 1) {
+    const worldZ = zMin + (z / cellsZ) * (zMax - zMin);
+    for (let x = 0; x <= cellsX; x += 1) {
+      const worldX = xMin + (x / cellsX) * (xMax - xMin);
+      positions.push(worldX, y, worldZ);
+    }
+  }
+
+  for (let z = 0; z < cellsZ; z += 1) {
+    for (let x = 0; x < cellsX; x += 1) {
+      const a = base + z * sideX + x;
+      const b = a + 1;
+      const c = a + sideX;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  offset.value = base + (cellsZ + 1) * sideX;
+}
+
 function buildStaticSurfGrid(options: SurfBandOptions): THREE.BufferGeometry {
   const { bounds } = options.config.world;
   const maxWidth = Math.max(
@@ -101,47 +138,24 @@ function buildStaticSurfGrid(options: SurfBandOptions): THREE.BufferGeometry {
     options.config.surf.cliff_foam_width_m,
     options.config.surf.reef_foam_width_m,
   );
-  const minX = bounds.min_x - maxWidth;
-  const maxX = bounds.max_x + maxWidth;
-  const minZ = bounds.min_z - maxWidth;
-  const maxZ = bounds.max_z + maxWidth;
-  const cellsX = Math.max(1, Math.ceil((maxX - minX) / options.cellSizeM));
-  const cellsZ = Math.max(1, Math.ceil((maxZ - minZ) / options.cellSizeM));
-  const sideX = cellsX + 1;
-  const sideZ = cellsZ + 1;
-  const positions = new Float32Array(sideX * sideZ * 3);
-  const indices = new Uint32Array(cellsX * cellsZ * 6);
+  const bandWidth = Math.max(maxWidth, options.cellSizeM);
+  const minX = bounds.min_x;
+  const maxX = bounds.max_x;
+  const minZ = bounds.min_z;
+  const maxZ = bounds.max_z;
+  const y = options.config.world.water_level + options.verticalOffsetM;
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const offset = { value: 0 };
 
-  for (let z = 0; z < sideZ; z += 1) {
-    const worldZ = minZ + (z / cellsZ) * (maxZ - minZ);
-    for (let x = 0; x < sideX; x += 1) {
-      const worldX = minX + (x / cellsX) * (maxX - minX);
-      const vertex = z * sideX + x;
-      positions[vertex * 3] = worldX;
-      positions[vertex * 3 + 1] = options.config.world.water_level + options.verticalOffsetM;
-      positions[vertex * 3 + 2] = worldZ;
-    }
-  }
-
-  let index = 0;
-  for (let z = 0; z < cellsZ; z += 1) {
-    for (let x = 0; x < cellsX; x += 1) {
-      const a = z * sideX + x;
-      const b = a + 1;
-      const c = a + sideX;
-      const d = c + 1;
-      indices[index++] = a;
-      indices[index++] = c;
-      indices[index++] = b;
-      indices[index++] = b;
-      indices[index++] = c;
-      indices[index++] = d;
-    }
-  }
+  appendGrid(positions, indices, minX - bandWidth, maxX + bandWidth, maxZ - bandWidth, maxZ + bandWidth, options.cellSizeM, y, offset);
+  appendGrid(positions, indices, minX - bandWidth, maxX + bandWidth, minZ - bandWidth, minZ + bandWidth, options.cellSizeM, y, offset);
+  appendGrid(positions, indices, minX - bandWidth, minX + bandWidth, minZ + bandWidth, maxZ - bandWidth, options.cellSizeM, y, offset);
+  appendGrid(positions, indices, maxX - bandWidth, maxX + bandWidth, minZ + bandWidth, maxZ - bandWidth, options.cellSizeM, y, offset);
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
   geometry.computeBoundingSphere();
   return geometry;
 }
