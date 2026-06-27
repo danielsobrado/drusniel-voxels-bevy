@@ -67,6 +67,14 @@ interface Lod0Snapshot {
   chunkMeshes?: PageMesh[];
 }
 
+interface ParentNodeSnapshot {
+  node: ClodPageNode;
+  mesh: PageMesh;
+  bounds: ClodPageNode["bounds"];
+  errorWorld: number;
+  lowBenefit: boolean;
+}
+
 interface ParentQueueSnapshot {
   pendingByLevel: Map<number, Set<string>>;
   activeParentRequestId: number | null;
@@ -118,6 +126,25 @@ function restoreLod0Nodes(snapshots: readonly Lod0Snapshot[]): void {
     snapshot.node.bounds = cloneBounds(snapshot.bounds);
     if (snapshot.chunkMeshes) snapshot.node.chunkMeshes = snapshot.chunkMeshes;
     else delete snapshot.node.chunkMeshes;
+  }
+}
+
+function snapshotParentNode(node: ClodPageNode): ParentNodeSnapshot {
+  return {
+    node,
+    mesh: node.mesh,
+    bounds: cloneBounds(node.bounds),
+    errorWorld: node.errorWorld,
+    lowBenefit: node.lowBenefit,
+  };
+}
+
+function restoreParentNodes(snapshots: ReadonlyMap<ClodPageNode, ParentNodeSnapshot>): void {
+  for (const [node, snapshot] of snapshots) {
+    node.mesh = snapshot.mesh;
+    node.bounds = cloneBounds(snapshot.bounds);
+    node.errorWorld = snapshot.errorWorld;
+    node.lowBenefit = snapshot.lowBenefit;
   }
 }
 
@@ -238,18 +265,28 @@ function drainParents(budgetMs: number): void {
   if (!cfg || !index) return;
   const startedAt = performance.now();
   const changed: ClodPageNode[] = [];
+  const parentQueueSnapshot = snapshotParentQueue();
+  const parentSnapshots = new Map<ClodPageNode, ParentNodeSnapshot>();
 
-  while (pendingParentCount() > 0 && performance.now() - startedAt < budgetMs) {
-    const next = nextPendingParent();
-    if (!next) break;
-    const t0 = performance.now();
-    const node = resimplifyParent(index, next.level, next.key, cfg, next.level === topLevel);
-    parentMs += performance.now() - t0;
-    if (!node) continue;
-    parentNodes++;
-    changed.push(node);
-    const [nx, nz] = next.key.split(",").map(Number) as [number, number];
-    enqueueParentsForChildren(next.level, [[nx, nz]]);
+  try {
+    while (pendingParentCount() > 0 && performance.now() - startedAt < budgetMs) {
+      const next = nextPendingParent();
+      if (!next) break;
+      const target = index[next.level]?.get(next.key);
+      if (target && !parentSnapshots.has(target)) parentSnapshots.set(target, snapshotParentNode(target));
+      const t0 = performance.now();
+      const node = resimplifyParent(index, next.level, next.key, cfg, next.level === topLevel);
+      parentMs += performance.now() - t0;
+      if (!node) continue;
+      parentNodes++;
+      changed.push(node);
+      const [nx, nz] = next.key.split(",").map(Number) as [number, number];
+      enqueueParentsForChildren(next.level, [[nx, nz]]);
+    }
+  } catch (error) {
+    restoreParentNodes(parentSnapshots);
+    restoreParentQueue(parentQueueSnapshot);
+    throw error;
   }
 
   if (changed.length > 0) {
