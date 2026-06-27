@@ -256,8 +256,8 @@ describe("construction placement", () => {
 
   it("rejects old saved pieces without support metadata by default", () => {
     const result = validateSaved({
-      id: "legacy-wall",
-      typeId: "wall",
+      id: "legacy-floor",
+      typeId: "floor",
       position: [12, 2, 8],
       rotationQuarterTurns: 1,
     });
@@ -265,7 +265,18 @@ describe("construction placement", () => {
     expect(result).toEqual({ valid: false, reason: "missing support" });
   });
 
-  it("keeps old saved pieces loadable only during explicit legacy migration", () => {
+  it("keeps old saved ground pieces loadable only during explicit legacy migration", () => {
+    const result = validateSaved({
+      id: "legacy-floor",
+      typeId: "floor",
+      position: [12, 2, 8],
+      rotationQuarterTurns: 1,
+    }, [], true);
+
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects old saved non-ground pieces even during explicit legacy migration", () => {
     const result = validateSaved({
       id: "legacy-wall",
       typeId: "wall",
@@ -273,6 +284,6 @@ describe("construction placement", () => {
       rotationQuarterTurns: 1,
     }, [], true);
 
-    expect(result.valid).toBe(true);
+    expect(result).toEqual({ valid: false, reason: "invalid support" });
   });
 });
