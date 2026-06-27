@@ -45,6 +45,12 @@ export interface FarTerrainMaterialOptions {
   summaryAtlas?: FarSummaryGpuAtlasView;
 }
 
+type GlobalNaadfAtlasProvider = {
+  __drusnielNaadf?: {
+    getFarSummaryGpuAtlasView?: () => FarSummaryGpuAtlasView | undefined;
+  };
+};
+
 export function createFarTerrainMaterial(
   lighting: FarShellLighting,
   config: FarTerrainUniformData,
@@ -107,19 +113,20 @@ export function createFarTerrainMaterial(
       .add(cos(worldX.mul(0.013).sub(worldZ.mul(0.011))).mul(5.0));
     const detail = sin(worldX.mul(0.041).add(worldZ.mul(0.033))).mul(1.4);
     let terrainHeight = float(46.0).add(continent).add(hills).add(detail);
+    const summaryAtlas = options.summaryAtlas ?? getActiveFarSummaryGpuAtlasView();
 
-    if (options.summaryAtlas) {
-      uSummaryOriginX = uniform(options.summaryAtlas.originX);
-      uSummaryOriginZ = uniform(options.summaryAtlas.originZ);
-      uSummaryCellM = uniform(options.summaryAtlas.cellM);
-      uSummaryWidthCells = uniform(options.summaryAtlas.widthCells);
-      uSummaryHeightCells = uniform(options.summaryAtlas.heightCells);
-      uSummaryValid = uniform(options.summaryAtlas.valid);
+    if (summaryAtlas) {
+      uSummaryOriginX = uniform(summaryAtlas.originX);
+      uSummaryOriginZ = uniform(summaryAtlas.originZ);
+      uSummaryCellM = uniform(summaryAtlas.cellM);
+      uSummaryWidthCells = uniform(summaryAtlas.widthCells);
+      uSummaryHeightCells = uniform(summaryAtlas.heightCells);
+      uSummaryValid = uniform(summaryAtlas.valid);
 
       const atlasU = worldX.sub(uSummaryOriginX).div(uSummaryCellM.mul(uSummaryWidthCells));
       const atlasV = worldZ.sub(uSummaryOriginZ).div(uSummaryCellM.mul(uSummaryHeightCells));
       const atlasUv = vec2(clamp(atlasU, float(0.0), float(1.0)), clamp(atlasV, float(0.0), float(1.0)));
-      const atlasSample = texture(options.summaryAtlas.texture, atlasUv);
+      const atlasSample = texture(summaryAtlas.texture, atlasUv);
       const inside = step(float(0.0), atlasU)
         .mul(step(atlasU, float(1.0)))
         .mul(step(float(0.0), atlasV))
@@ -142,6 +149,12 @@ export function createFarTerrainMaterial(
   material.userData.farTerrainUniforms = refs;
 
   return material;
+}
+
+function getActiveFarSummaryGpuAtlasView(): FarSummaryGpuAtlasView | undefined {
+  if (typeof window === "undefined") return undefined;
+  const record = window as unknown as GlobalNaadfAtlasProvider;
+  return record.__drusnielNaadf?.getFarSummaryGpuAtlasView?.();
 }
 
 export function computeFarTerrainVertexColors(
