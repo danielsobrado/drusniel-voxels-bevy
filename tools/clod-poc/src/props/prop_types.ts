@@ -107,7 +107,7 @@ export interface PropShadowSettings {
 export interface CustomPropsSettings {
   enabled: boolean;
   props: PropAssetDef[];
-  externalCatalogs: PropExternalCatalogRef[];
+  externalCatalogs?: PropExternalCatalogRef[];
   spatial: PropSpatialSettings;
   culling: PropCullingSettings;
   shadows: PropShadowSettings;
