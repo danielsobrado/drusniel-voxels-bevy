@@ -16,7 +16,6 @@ export interface OceanSampler {
 export function createDeepOceanSampler(
   worldCells: number,
   config: DeepOceanRenderConfig,
-  _legacyInnerBandCells = 0,
 ): OceanSampler {
   const extend = Math.max(1, config.extendCells);
   const surfaceY = config.surfaceY;
