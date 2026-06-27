@@ -243,13 +243,13 @@ export async function runRuntimeSystemsStartup(
   const hasImportedProps = importedProps.length > 0;
   const customPropsEnabled = searchParams.get("customProps") === "0"
     ? false
-    : hasImportedProps || resolveCustomPropsEnabled(searchParams, customPropsConfig);
+    : hasImportedProps || searchParams.get("propEditor") === "1" || resolveCustomPropsEnabled(searchParams, customPropsConfig);
   let customProps: CustomPropsStartupResult | null = null;
   if (customPropsEnabled) {
     try {
       if (hasImportedProps) {
         projectPropEditStore.restore(importedProps);
-      } else {
+      } else if (!projectPropEditStore.hasProps()) {
         const scenePreset = resolvePropPlacementScene(searchParams, propPlacementScenes, propPlacementScenes.smoke!);
         projectPropEditStore.restore(propPlacementSceneToProjectProps(scenePreset));
       }
@@ -261,6 +261,7 @@ export async function runRuntimeSystemsStartup(
         enabled: true,
         searchParams,
         getHooks,
+        propEditStore: projectPropEditStore,
       });
     } catch (error) {
       console.error("[custom-props] failed to initialize", error);
