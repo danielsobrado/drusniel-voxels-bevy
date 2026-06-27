@@ -252,7 +252,7 @@ export class InfiniteFarShell {
         this.snappedX,
         this.snappedZ,
       );
-      this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, undefined, 0, 0, this.positions);
+      this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, this.normals, 0, 0, this.positions);
       this.attachVertexColors();
     }
 
