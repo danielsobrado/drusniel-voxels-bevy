@@ -37,6 +37,10 @@ export const DEFAULT_CUSTOM_PROPS_SETTINGS: CustomPropsSettings = {
     cellSizeM: 64,
     maxInstancesPerCellWarning: 512,
     farCellUpdateIntervalFrames: 8,
+    ringRadiusM: 0,
+    cellUpdateBudgetPerFrame: 3,
+    matrixUploadBudgetPerFrame: 256,
+    lodRefreshDistanceM: 10,
   },
   culling: {
     cellFrustumCulling: true,
@@ -68,6 +72,11 @@ function asRecord(value: unknown): YamlRecord | undefined {
 
 function num(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function positiveInt(value: unknown, fallback: number): number {
+  const parsed = num(value, fallback);
+  return Math.max(1, Math.floor(parsed));
 }
 
 function bool(value: unknown, fallback: boolean): boolean {
@@ -200,9 +209,22 @@ function parseSpatial(raw: YamlRecord | undefined, fallback: PropSpatialSettings
       spatial.max_instances_per_cell_warning ?? spatial.maxInstancesPerCellWarning,
       fallback.maxInstancesPerCellWarning,
     ),
-    farCellUpdateIntervalFrames: num(
+    farCellUpdateIntervalFrames: positiveInt(
       spatial.far_cell_update_interval_frames ?? spatial.farCellUpdateIntervalFrames,
       fallback.farCellUpdateIntervalFrames,
+    ),
+    ringRadiusM: Math.max(0, num(spatial.ring_radius_m ?? spatial.ringRadiusM, fallback.ringRadiusM)),
+    cellUpdateBudgetPerFrame: positiveInt(
+      spatial.cell_update_budget_per_frame ?? spatial.cellUpdateBudgetPerFrame,
+      fallback.cellUpdateBudgetPerFrame,
+    ),
+    matrixUploadBudgetPerFrame: positiveInt(
+      spatial.matrix_upload_budget_per_frame ?? spatial.matrixUploadBudgetPerFrame,
+      fallback.matrixUploadBudgetPerFrame,
+    ),
+    lodRefreshDistanceM: Math.max(
+      0,
+      num(spatial.lod_refresh_distance_m ?? spatial.lodRefreshDistanceM, fallback.lodRefreshDistanceM),
     ),
   };
 }
