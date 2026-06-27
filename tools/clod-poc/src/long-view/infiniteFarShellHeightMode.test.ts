@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { InfiniteFarShell } from "./infiniteFarShell.js";
+import { InfiniteFarShell, type InfiniteFarShellOptions } from "./infiniteFarShell.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
 
 const parityConfig: FarTerrainUniformData = {
@@ -46,7 +46,7 @@ const parityConfig: FarTerrainUniformData = {
   freezeMaterialLod: 0,
 };
 
-function makeShell(overrides: Partial<ConstructorParameters<typeof InfiniteFarShell>[0]> = {}): InfiniteFarShell {
+function makeShell(overrides: Partial<InfiniteFarShellOptions> = {}): InfiniteFarShell {
   return new InfiniteFarShell({
     innerMeters: 16,
     outerMeters: 32,
