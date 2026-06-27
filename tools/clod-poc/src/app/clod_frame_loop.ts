@@ -84,6 +84,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           deepOcean: waterWeather.deepOceanConfig,
           deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
           oceanSampler: waterWeather.oceanSampler,
+          playerConfig: player.player.config,
         }
       : undefined,
   });
@@ -199,7 +200,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       setGrassStats: stats.setGrassStats,
       getTreeStats: stats.getTreeStats,
       setTreeStats: stats.setTreeStats,
-      getStoneStats: stats.getStoneStats,
+      getStoneStats: stats.setStoneStats,
       setStoneStats: stats.setStoneStats,
       getUnderstoryStats: stats.getUnderstoryStats,
       setUnderstoryStats: stats.setUnderstoryStats,
