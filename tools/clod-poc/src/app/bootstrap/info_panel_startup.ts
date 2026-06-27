@@ -3,9 +3,7 @@ import { formatTreeInfoLine } from "../../trees/index.js";
 import { formatUnderstoryInfoLine } from "../../understory/index.js";
 import { formatForestLightingInfoLine } from "../../forest_lighting/index.js";
 import { updateClodOverlay, type ClodOverlaySnapshot } from "../../ui/overlay_panel.js";
-import { resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
-import { LiveVoxelChunkStreamer } from "../../stream/live_voxel_chunk_streamer.js";
-import { VisualClodPageStreamer } from "../../stream/page_plan.js";
+import { createStreamDiagnosticTracker } from "../../stream/stream_diagnostics.js";
 import type { UiStartupContext } from "./ui_startup_context.js";
 
 export interface InfoPanelController {
@@ -49,26 +47,13 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
     grassSystem,
   } = input.runtime;
   const { colorByLodUserOverride } = input;
-  const pageSizeM = input.cfg.page.chunks_per_page * input.cfg.page.chunk_size;
-  const ownership = resolveStreamingOwnership({
-    streaming: input.longView.phase0Streaming,
-    targetVisibleM: input.longView.phase0TargetVisibleM,
-    targetFutureVisibleM: input.longView.phase0Config.phase0.target_future_visible_m,
-    streamingScene: input.longView.queryScene?.startsWith("infinite-") ?? false,
+  const streamDiagnostics = createStreamDiagnosticTracker({
+    cfg: input.cfg,
+    maxTerrainLevel: input.maxTerrainLevel,
+    phase0Config: input.longView.phase0Config,
+    phase0TargetVisibleM: input.longView.phase0TargetVisibleM,
+    queryScene: input.longView.queryScene,
   });
-  const liveStreamer = new LiveVoxelChunkStreamer(ownership, {
-    chunkSizeM: input.cfg.page.chunk_size,
-    hysteresisM: input.cfg.page.chunk_size * 2,
-  });
-  const visualPageStreamer = new VisualClodPageStreamer(
-    ownership.liveRadiusM,
-    ownership.clodRadiusM,
-    {
-      pageSizeM,
-      maxLevel: input.maxTerrainLevel,
-      hysteresisM: pageSizeM,
-    },
-  );
 
   const setPerfModeQuery = (enabled: boolean) => {
     const next = new URLSearchParams(location.search);
@@ -96,13 +81,8 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
 
   const updateInfo = () => {
     const selection = selectionController.stats();
-    const streamCenter = { x: input.camera.position.x, z: input.camera.position.z };
-    const liveStream = liveStreamer.update(streamCenter);
-    const pageStream = visualPageStreamer.update(streamCenter.x, streamCenter.z);
     const streamLine = input.longView.isLongView
-      ? `stream ownership: live<=${ownership.liveRadiusM}m chunks req/load/evict=${liveStream.required.length}/${liveStream.loaded.length}/${liveStream.evictable.length}  ` +
-        `clod<=${ownership.clodRadiusM}m pages req/load/evict=${pageStream.required.length}/${pageStream.loaded.length}/${pageStream.evictable.length}  ` +
-        `far-shell>=${ownership.farShellInnerM}m\n`
+      ? `${streamDiagnostics.format(streamDiagnostics.update({ x: input.camera.position.x, z: input.camera.position.z }))}\n`
       : "";
     session.parentsHealthy = clodWorker.isParentsHealthy();
     const lastErr = clodWorker.getLastParentError();
