@@ -5,6 +5,9 @@ import { NAADF_GPU_ATLAS_WINDOW_TILE_OPTIONS, isValidNaadfGpuAtlasWindowTiles } 
 import type { GuiController } from "./gui_controller.js";
 
 const RELOAD_BACKED_PARAMS = new Set(["naadfAtlasWindow", "naadfGpuAtlasWindow"]);
+const FLOAT_RGBA_BYTES = 16;
+const GPU_ATLAS_TEXTURE_COUNT = 4;
+const BYTES_PER_MIB = 1024 * 1024;
 
 export interface NaadfGuiDeps {
   getIntegration: () => NaadfIntegration | null | undefined;
@@ -117,6 +120,12 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
     farShellMissing: 0,
     canopySamples: 0,
     shadowProxySamples: 0,
+    atlasWindowTiles: 0,
+    atlasCells: 0,
+    atlasPixels: 0,
+    atlasTextures: GPU_ATLAS_TEXTURE_COUNT,
+    atlasRevision: 0,
+    atlasMiB: 0,
   };
 
   const statsFolder = folder.addFolder("stats");
@@ -147,6 +156,12 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
   statsFolder.add(stats, "farShellMissing").name("far shell missing/frame").listen();
   statsFolder.add(stats, "canopySamples").name("canopy samples/frame").listen();
   statsFolder.add(stats, "shadowProxySamples").name("shadow proxy samples/frame").listen();
+  statsFolder.add(stats, "atlasWindowTiles").name("atlas window tiles").listen();
+  statsFolder.add(stats, "atlasCells").name("atlas cells/ring").listen();
+  statsFolder.add(stats, "atlasPixels").name("atlas total pixels").listen();
+  statsFolder.add(stats, "atlasTextures").name("atlas textures").listen();
+  statsFolder.add(stats, "atlasRevision").name("atlas upload revision").listen();
+  statsFolder.add(stats, "atlasMiB").name("atlas MiB estimate").listen();
 
   return {
     updateDisplay: () => {
@@ -178,6 +193,18 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
       stats.farShellMissing = snap.farShellMissingSamples;
       stats.canopySamples = snap.canopySamples;
       stats.shadowProxySamples = snap.shadowProxySamples;
+
+      const atlas = integration.getFarSummaryGpuAtlasView();
+      stats.atlasWindowTiles = integration.config.farShell.gpuAtlasWindowTiles;
+      stats.atlasCells = atlas?.rings[0]
+        ? atlas.rings[0].widthCells * atlas.rings[0].heightCells
+        : 0;
+      stats.atlasPixels = atlas ? atlas.widthCells * atlas.heightCells : 0;
+      stats.atlasTextures = GPU_ATLAS_TEXTURE_COUNT;
+      stats.atlasRevision = atlas?.revision ?? 0;
+      stats.atlasMiB = atlas
+        ? Number(((atlas.widthCells * atlas.heightCells * FLOAT_RGBA_BYTES * GPU_ATLAS_TEXTURE_COUNT) / BYTES_PER_MIB).toFixed(3))
+        : 0;
     },
   };
 }
