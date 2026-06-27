@@ -7,7 +7,6 @@ import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 import type { FarSummaryGpuAtlasRingView, FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMaterial/terrainMaterialBands.js";
 
-const MAX_GPU_SUMMARY_RINGS = 8;
 const SUMMARY_EDGE_EPS = 0.0001;
 const SUMMARY_HEIGHT_RANGE_SHADE_M = 36.0;
 const SUMMARY_HEIGHT_RANGE_SHADE_STRENGTH = 0.28;
@@ -121,9 +120,7 @@ export function createFarTerrainMaterial(
       uSummaryWidthCells = uniform(summaryAtlas.widthCells);
       uSummaryHeightCells = uniform(summaryAtlas.heightCells);
       uSummaryValid = uniform(summaryAtlas.valid);
-      uSummaryRings = summaryAtlas.rings
-        .slice(0, MAX_GPU_SUMMARY_RINGS)
-        .map((ring) => createRingUniformRefs(ring));
+      uSummaryRings = summaryAtlas.rings.map((ring) => createRingUniformRefs(ring));
 
       for (const ringRefs of uSummaryRings) {
         const atlasUCells = worldX.sub(ringRefs.uOriginX).div(ringRefs.uCellM);
