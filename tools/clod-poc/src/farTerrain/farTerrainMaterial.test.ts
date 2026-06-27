@@ -172,6 +172,22 @@ describe("createVertexColorBuffer", () => {
     expect(buf.length).toBe(9 * 3);
   });
 
+  it("debugShowFarNormals uses the provided normal buffer", () => {
+    const pos = makePositions(1);
+    const norm = new Float32Array([1, 0, 0]);
+    const cfg = makeUniformData({ debugShowFarNormals: 1 });
+    const vc = computeFarTerrainVertexColors(pos, norm, 1, cfg);
+    const fallback = createVertexColorBuffer(vc, cfg);
+    const actual = createVertexColorBuffer(vc, cfg, norm);
+
+    expect(fallback[0]).toBeCloseTo(0.5, 5);
+    expect(fallback[1]).toBeCloseTo(0.5, 5);
+    expect(fallback[2]).toBeCloseTo(0.75, 5);
+    expect(actual[0]).toBeCloseTo(1.0, 5);
+    expect(actual[1]).toBeCloseTo(0.5, 5);
+    expect(actual[2]).toBeCloseTo(0.5, 5);
+  });
+
   it("debugShowFarNormals shows normal-map colors", () => {
     const pos = makePositions(9);
     const norm = makeNormals(9);
