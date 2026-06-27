@@ -2,11 +2,14 @@
 // No clipmap discard, no terrain/body-mask attributes, no inner-rect holes.
 import * as THREE from "three";
 import { DEEP_OCEAN_GPU_WAVES } from "./deep_ocean_waves.js";
+import type { DeepOceanShadingConfig, DeepOceanWaveConfig } from "../terrain/border_coast_config.js";
 import type { WaterVisualConfig } from "./waterConfig.js";
 import { applyWaterVisual, makeWaterUniforms, type WaterUniforms } from "./waterMaterial.js";
 
 export interface DeepOceanMaterialParams {
   visual: WaterVisualConfig;
+  wave: DeepOceanWaveConfig;
+  shading: DeepOceanShadingConfig;
   surfaceY: number;
   fogDistanceM: number;
   sunDirection: THREE.Vector3;
@@ -29,8 +32,8 @@ const GPU_WAVE_COUNT = DEEP_OCEAN_GPU_WAVES.length;
 const DEEP_OCEAN_VERT = /* glsl */ `
   #define DEEP_OCEAN_WAVE_COUNT ${GPU_WAVE_COUNT}
   uniform float uTime;
-  uniform vec4 uWaveA[DEEP_OCEAN_WAVE_COUNT]; // dirX, dirZ, k, omega
-  uniform vec4 uWaveB[DEEP_OCEAN_WAVE_COUNT]; // amp, phase, choppiness, unused
+  uniform vec4 uWaveA[DEEP_OCEAN_WAVE_COUNT];
+  uniform vec4 uWaveB[DEEP_OCEAN_WAVE_COUNT];
   varying vec3 vWorldPos;
   varying vec2 vWaveSlope;
   varying float vWaveCompression;
@@ -75,37 +78,24 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
   precision highp float;
   uniform float uTime;
   uniform float uSurfaceY;
-  uniform vec3 uShallowColor;
   uniform vec3 uDeepColor;
   uniform vec3 uFoamColor;
   uniform vec3 uHorizonColor;
   uniform float uAlpha;
-  uniform float uRippleCycle;
   uniform float uFresnelPower;
-  uniform float uRippleAmp;
-  uniform float uRippleSpeed;
-  uniform float uRippleScaleA;
-  uniform float uRippleScaleB;
-  uniform float uRippleStrengthA;
-  uniform float uRippleStrengthB;
-  uniform float uRippleLoopDistance;
-  uniform vec2 uLakeBreeze;
-  uniform float uShoreFoamStart;
-  uniform float uShoreFoamEnd;
-  uniform float uFoamNoiseScale;
-  uniform float uFoamShoreStrength;
-  uniform float uFoamRiverStrength;
-  uniform float uFoamSpeedStart;
-  uniform float uFoamSpeedEnd;
-  uniform float uFoamDropStart;
-  uniform float uFoamDropEnd;
   uniform float uFresnelBase;
   uniform float uFresnelNormalFlatten;
-  uniform float uDepthScale;
-  uniform float uTurbidity;
   uniform vec3 uCameraPos;
   uniform vec3 uSunDir;
   uniform float uFogDistance;
+  uniform float uFogNear;
+  uniform float uFogDensity;
+  uniform float uFoamThreshold;
+  uniform float uFoamPower;
+  uniform float uFoamIntensity;
+  uniform float uReflectionStrength;
+  uniform float uReflectionDistortion;
+  uniform float uRoughness;
   varying vec3 vWorldPos;
   varying vec2 vWaveSlope;
   varying float vWaveCompression;
@@ -138,61 +128,24 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     return v;
   }
 
-  float noiseRidged(vec2 p, float t) {
-    float n = fbm3(p + vec2(t * 0.03, -t * 0.02));
-    return 1.0 - abs(n * 2.0 - 1.0);
-  }
-
-  float noiseDomainWarp(vec2 p, float t) {
-    vec2 q = vec2(
-      fbm3(p + vec2(t * 0.04, 3.1)),
-      fbm3(p + vec2(7.7, -t * 0.035))
-    );
-    vec2 r = vec2(
-      fbm3(p + q * 3.5 + vec2(11.4, t * 0.02)),
-      fbm3(p + q * 2.5 + vec2(-6.2, -t * 0.02))
-    );
-    return fbm3(p + r * 4.0);
-  }
-
-  float noiseBillow(vec2 p, float t) {
-    return abs(fbm3(p + vec2(t * 0.02, t * 0.015)) * 2.0 - 1.0);
-  }
-
-  float noiseCellularSoft(vec2 p, float t) {
-    vec2 cell = floor(p);
-    vec2 f = fract(p);
-    float d = 1.0;
-    for (int y = -1; y <= 1; y++) {
-      for (int x = -1; x <= 1; x++) {
-        vec2 o = vec2(float(x), float(y));
-        vec2 h = vec2(hash21(cell + o + 13.1), hash21(cell + o + 71.7));
-        h = 0.5 + 0.5 * sin(6.28318 * h + t * vec2(0.2, -0.13));
-        d = min(d, length(o + h - f));
-      }
-    }
-    return clamp(1.0 - d, 0.0, 1.0);
-  }
-
-  float combinedFoamNoise(vec2 uv, float t) {
-    float a = noiseDomainWarp(uv * 1.3, t);
-    float b = noiseRidged(uv * 2.1 + 9.7, t);
-    float c = noiseCellularSoft(uv * 0.72 + 2.0, t);
-    float d = noiseBillow(uv * 3.4 - 4.0, t);
-    float e = fbm3(uv * 6.0 + vec2(t * 0.08, -t * 0.05));
-    float swiss = b * (1.0 - a * 0.35);
-    return clamp(a * 0.24 + b * 0.24 + c * 0.08 + d * 0.10 + swiss * 0.14 + e * 0.20, 0.0, 1.0);
+  float foamNoiseOmma(vec2 uv, float t) {
+    float ft = t * 0.15;
+    float warpScale = 0.8 * 0.3;
+    float warpX = noise2(uv * warpScale + vec2(ft * 0.2, 0.0)) * 1.8;
+    float warpZ = noise2(uv * warpScale + vec2(0.0, ft * -0.15)) * 1.8;
+    vec2 warped = uv + vec2(warpX, warpZ);
+    float n1 = noise2(warped * 0.8 + vec2(ft * 0.35, ft * -0.2));
+    float n2 = noise2(warped * 1.84 + vec2(ft * -0.25, ft * 0.4));
+    float n3 = noise2(warped * 4.56 + vec2(ft * 0.5, ft * 0.15));
+    float baseFbm = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
+    float turbulent = 1.0 - (abs(n1 * 2.0 - 1.0) * 0.45 + abs(n2 * 2.0 - 1.0) * 0.35 + abs(n3 * 2.0 - 1.0) * 0.2);
+    return clamp(turbulent * 0.35 + baseFbm * 0.18, 0.0, 1.0);
   }
 
   float bumpHeight(vec2 uv, float t) {
-    float crossA = noise2(vec2(uv.x * 0.9 + uv.y * 0.27, uv.y * 0.9 - uv.x * 0.27) + vec2(t * 0.09, 0.0));
-    float crossB = noise2(vec2(uv.x * 0.9 - uv.y * 0.45, uv.y * 0.9 + uv.x * 0.45) - vec2(t * 0.07, 0.0));
-    return fbm3(uv * 0.8 + vec2(t * 0.12, t * 0.06)) * 0.28 +
-      noiseRidged(uv * 0.55, t) * 0.18 +
-      noiseDomainWarp(uv * 0.42, t) * 0.18 +
-      noiseBillow(uv * 0.75, t) * 0.12 +
-      (crossA + crossB) * 0.05 +
-      fbm3(uv * 2.7 - vec2(t * 0.18, t * 0.05)) * 0.14;
+    return fbm3(uv * 0.4 + vec2(t * 0.12, t * 0.06)) * 0.28
+      + (1.0 - abs(fbm3(uv * 0.275 + vec2(t * 0.03, -t * 0.02)) * 2.0 - 1.0)) * 0.18
+      + fbm3(uv * 1.35 - vec2(t * 0.18, t * 0.05)) * 0.14;
   }
 
   vec2 bumpNormalDetail(vec2 uv, float t) {
@@ -203,83 +156,78 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
     return vec2((hx - h) / eps, (hz - h) / eps);
   }
 
-  vec2 rippleGrad(vec2 uv, float phase) {
-    float tau = 6.28318530718;
-    return vec2(
-      cos(uv.x + phase * tau) * uRippleStrengthA + cos((uv.x + uv.y) * 0.73 - phase * tau * 0.7) * uRippleStrengthB,
-      -sin(uv.y - phase * tau) * uRippleStrengthA + cos((uv.x - uv.y) * 0.61 + phase * tau * 0.9) * uRippleStrengthB
-    );
-  }
-
   vec3 skyReflection(vec3 reflectDir, vec3 sunDir) {
     float reflY = reflectDir.y;
     float reflYClamped = max(reflY, 0.0);
     float sunDot = max(dot(reflectDir, sunDir), 0.0);
     vec3 horizon = mix(vec3(0.85, 0.55, 0.35), vec3(0.55, 0.70, 0.90), smoothstep(0.0, 0.25, sunDir.y));
-    vec3 sky = mix(horizon, vec3(0.12, 0.32, 0.72), smoothstep(0.0, 0.6, reflYClamped));
-    vec3 belowHorizon = mix(vec3(0.035, 0.07, 0.16), vec3(0.07, 0.14, 0.28), smoothstep(-0.5, 0.0, reflY));
+    vec3 sky = mix(horizon, vec3(0.15, 0.35, 0.75), smoothstep(0.0, 0.6, reflYClamped));
+    vec3 belowHorizon = mix(vec3(0.04, 0.08, 0.18), vec3(0.08, 0.15, 0.28), smoothstep(-0.5, 0.0, reflY));
     vec3 reflectedSky = mix(belowHorizon, sky, smoothstep(-0.25, 0.12, reflY));
-    vec3 mie = vec3(1.0, 0.72, 0.42) * pow(sunDot, 8.0) * 0.25 + vec3(1.0, 0.95, 0.85) * pow(sunDot, 64.0) * 1.2;
-    vec3 sunDisc = vec3(1.0, 0.92, 0.75) * (pow(sunDot, 512.0) * 4.5 + pow(sunDot, 128.0) * 1.4);
-    return max(reflectedSky + mie + sunDisc, vec3(0.035, 0.07, 0.14));
+    vec3 mie = vec3(1.0, 0.85, 0.55) * pow(sunDot, 8.0) * 0.25 + vec3(1.0, 0.95, 0.85) * pow(sunDot, 64.0) * 1.2;
+    vec3 sunDisc = vec3(1.0, 0.92, 0.75) * (pow(sunDot, 512.0) * 5.0 + pow(sunDot, 128.0) * 1.5);
+    vec3 ambientFloor = mix(vec3(0.03, 0.06, 0.12), vec3(0.06, 0.10, 0.18), smoothstep(-0.3, 0.2, reflY));
+    return max(reflectedSky + mie + sunDisc, ambientFloor);
   }
 
   void main() {
     vec3 worldPos = vWorldPos;
     float waveHeight = worldPos.y - uSurfaceY;
-    vec2 breezeDir = normalize(uLakeBreeze + vec2(0.00001, 0.0));
-    float advectSpeed = length(uLakeBreeze) * uRippleSpeed;
-    float phaseA = fract(uTime * uRippleCycle);
-    float phaseB = fract(uTime * uRippleCycle + 0.5);
-    float blend = abs(phaseA - 0.5) * 2.0;
-    vec2 advectA = breezeDir * (phaseA * uRippleLoopDistance * advectSpeed);
-    vec2 advectB = breezeDir * (phaseB * uRippleLoopDistance * advectSpeed);
-    vec2 gradA = rippleGrad(worldPos.xz * uRippleScaleA + advectA, phaseA);
-    vec2 gradB = rippleGrad(worldPos.xz * uRippleScaleB + advectB + vec2(17.31, -9.47), phaseB);
-    vec2 noiseGrad = bumpNormalDetail(worldPos.xz * max(0.02, uFoamNoiseScale * 2.5), uTime) * 0.18;
-    vec2 grad = mix(gradA, gradB, blend) * uRippleAmp + noiseGrad + vWaveSlope;
+    vec2 bump = bumpNormalDetail(worldPos.xz * 0.5, uTime * 0.3) * 0.205;
+    vec2 grad = vWaveSlope + bump;
     vec3 normal = normalize(vec3(-grad.x, 1.0, -grad.y));
 
     vec3 viewDir = normalize(uCameraPos - worldPos);
     vec3 sunDir = normalize(uSunDir);
     vec3 fresnelNormal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), uFresnelNormalFlatten));
-    float ndotv = max(dot(viewDir, fresnelNormal), 0.0);
-    float fres = uFresnelBase + (1.0 - uFresnelBase) * pow(1.0 - ndotv, uFresnelPower);
+    float ndotv = max(dot(viewDir, fresnelNormal), 0.05);
+    float ndotl = max(abs(dot(normal, sunDir)), 0.15);
 
-    vec3 deepBlue = mix(vec3(0.0, 0.025, 0.10), uDeepColor, 0.55);
-    vec3 shallowTeal = mix(uShallowColor, vec3(0.0, 0.45, 0.62), 0.35);
-    float viewDepthTint = smoothstep(0.0, 0.55, 1.0 - ndotv);
-    float heightTint = smoothstep(-3.0, 5.5, waveHeight);
-    vec3 waterColor = mix(deepBlue, shallowTeal, viewDepthTint * 0.28 + uTurbidity * 0.18);
-    waterColor = mix(waterColor, mix(vec3(0.01, 0.04, 0.14), shallowTeal, heightTint), 0.32);
+    float jacobian = 0.58 - vWaveCompression * 0.58;
+    float foamNoise = foamNoiseOmma(worldPos.xz, uTime);
+    float foamEdge = uFoamThreshold + foamNoise;
+    float foamMask = pow(1.0 - smoothstep(foamEdge - 0.6, foamEdge, jacobian), max(uFoamPower, 0.001));
+    foamMask = clamp(foamMask * uFoamIntensity, 0.0, 1.0);
+
+    vec3 deepColor = vec3(0.0, 0.03, 0.12);
+    vec3 shallowColor = vec3(0.0, 0.08, 0.18);
+    float elevationMask = smoothstep(-4.0, 6.0, waveHeight);
+    vec3 baseAlbedo = mix(deepColor, uDeepColor, elevationMask);
+    vec3 depthTint = mix(shallowColor, baseAlbedo, smoothstep(-2.0, 3.0, waveHeight));
+    float hNorm = smoothstep(-5.0, 8.0, waveHeight);
+    vec3 hColor1 = mix(vec3(0.008, 0.102, 0.208), vec3(0.024, 0.259, 0.451), smoothstep(0.0, 0.33, hNorm));
+    vec3 hColor2 = mix(hColor1, vec3(0.102, 0.541, 0.490), smoothstep(0.33, 0.66, hNorm));
+    vec3 hColor3 = mix(hColor2, vec3(0.369, 0.769, 0.690), smoothstep(0.66, 1.0, hNorm));
+    vec3 albedo = mix(depthTint, hColor3, 0.6);
 
     vec3 reflectDir = normalize(reflect(-viewDir, normal));
-    vec3 finalReflection = skyReflection(reflectDir, sunDir) * 0.88;
+    vec3 distortedReflect = normalize(reflectDir + vec3(bump.x * uReflectionDistortion * 10.0, 0.0, bump.y * uReflectionDistortion * 10.0));
+    vec3 finalReflection = skyReflection(distortedReflect, sunDir) * (1.0 - uRoughness * 0.5);
 
-    vec2 foamUv = worldPos.xz * max(0.01, uFoamNoiseScale) + advectA * 0.35;
-    float foamNoise = combinedFoamNoise(foamUv, uTime);
-    float crestFoam = smoothstep(1.2, 4.0, waveHeight) * smoothstep(0.36, 0.82, foamNoise);
-    float compressionFoam = smoothstep(0.04, 0.55, vWaveCompression) * smoothstep(0.42, 0.86, foamNoise);
-    float foam = smoothstep(0.70, 0.96, foamNoise) * 0.10 + crestFoam * 0.34 + compressionFoam * 0.38;
+    float f0 = 0.04;
+    float fresnelSchlick = f0 + (1.0 - f0) * pow(1.0 - ndotv, 5.0);
+    float reflectionMix = fresnelSchlick * uReflectionStrength * (1.0 - foamMask * 0.7);
+    vec3 diffuseColor = albedo * (ndotl * 0.8 + 0.2) * (1.0 - reflectionMix);
 
-    float backlit = pow(max(dot(viewDir, -sunDir), 0.0), 4.0) * 0.35;
-    float crestScatter = smoothstep(0.0, 5.5, waveHeight) * 0.38 + smoothstep(0.45, 0.95, foamNoise) * 0.20;
-    vec3 sss = mix(vec3(0.01, 0.04, 0.14), shallowTeal, 0.55) * (backlit + crestScatter);
+    vec3 halfDir = normalize(sunDir + viewDir);
+    float shininess = mix(800.0, 4.0, clamp(uRoughness, 0.0, 1.0));
+    float spec = pow(max(dot(normal, halfDir), 0.0), shininess) * 1.2 * (1.0 - foamMask);
 
-    float specDot = max(dot(reflect(-sunDir, normal), viewDir), 0.0);
-    vec3 sunSpec = vec3(1.0, 0.92, 0.76) * (pow(specDot, 384.0) * 1.35 + pow(specDot, 96.0) * 0.32);
+    float sssForward = pow(max(dot(viewDir, -normalize(sunDir + normal * 0.4)), 0.0), 5.0) * 0.8;
+    float sssBacklit = pow(max(dot(viewDir, -sunDir), 0.0), 4.0) * 0.5;
+    float sssCrest = smoothstep(0.0, 6.0, waveHeight);
+    vec3 sss = mix(vec3(0.01, 0.04, 0.14), vec3(0.04, 0.36, 0.35), smoothstep(-1.0, 5.0, waveHeight) * 0.55)
+      * (sssForward + sssBacklit + sssCrest * 0.06) * (sssCrest * 0.7 + smoothstep(2.0, 7.0, waveHeight) * 0.5) * 0.9;
 
-    vec3 litWater = mix(waterColor + sss + sunSpec, finalReflection, clamp(fres * 0.75, 0.0, 0.85));
-    vec3 finalColor = mix(litWater, uFoamColor, clamp(foam, 0.0, 1.0));
+    vec3 oceanColor = diffuseColor + finalReflection * reflectionMix + vec3(spec) * (1.0 - uRoughness) + sss;
+    vec3 foamLit = uFoamColor * (ndotl * 0.4 + 0.7) * (noise2(worldPos.xz * 8.0) * 0.1 + 0.9);
+    vec3 litOcean = mix(oceanColor, foamLit, foamMask);
 
-    float dist = length(uCameraPos.xz - worldPos.xz);
-    float horizonLift = smoothstep(0.02, 0.35, 1.0 - abs(viewDir.y));
-    float distFog = smoothstep(uFogDistance * 0.35, uFogDistance, dist);
-    float fog = clamp(max(horizonLift * 0.42, distFog * 0.58), 0.0, 1.0);
-    finalColor = mix(finalColor, uHorizonColor, fog);
+    float dist = length(uCameraPos - worldPos);
+    float fog = smoothstep(uFogNear, uFogDistance, dist) * uFogDensity;
+    vec3 finalColor = mix(litOcean, uHorizonColor, clamp(fog, 0.0, 1.0));
 
-    float alpha = clamp(uAlpha + fres * 0.18, 0.0, 1.0);
-    gl_FragColor = vec4(finalColor, alpha);
+    gl_FragColor = vec4(finalColor, clamp(uAlpha, 0.0, 1.0));
   }
 `;
 
@@ -287,6 +235,14 @@ interface DeepOceanUniforms extends WaterUniforms {
   uSurfaceY: { value: number };
   uHorizonColor: { value: THREE.Color };
   uFogDistance: { value: number };
+  uFogNear: { value: number };
+  uFogDensity: { value: number };
+  uFoamThreshold: { value: number };
+  uFoamPower: { value: number };
+  uFoamIntensity: { value: number };
+  uReflectionStrength: { value: number };
+  uReflectionDistortion: { value: number };
+  uRoughness: { value: number };
   uWaveA: { value: THREE.Vector4[] };
   uWaveB: { value: THREE.Vector4[] };
 }
@@ -312,6 +268,14 @@ function makeDeepOceanUniforms(params: DeepOceanMaterialParams): DeepOceanUnifor
     uSurfaceY: { value: params.surfaceY },
     uHorizonColor: { value: (params.horizonColor ?? new THREE.Color(0.62, 0.74, 0.88)).clone() },
     uFogDistance: { value: Math.max(256, params.fogDistanceM) },
+    uFogNear: { value: Math.max(0, params.shading.fogNearM) },
+    uFogDensity: { value: Math.max(0, params.shading.fogDensity) },
+    uFoamThreshold: { value: Math.max(0, params.wave.foamThreshold) },
+    uFoamPower: { value: Math.max(0.001, params.wave.foamPower) },
+    uFoamIntensity: { value: Math.max(0, params.wave.foamIntensity) },
+    uReflectionStrength: { value: Math.max(0, params.shading.reflectionStrength) },
+    uReflectionDistortion: { value: Math.max(0, params.shading.reflectionDistortion) },
+    uRoughness: { value: Math.max(0, params.shading.roughness) },
     uWaveA: { value: waveUniformA() },
     uWaveB: { value: waveUniformB() },
   };
