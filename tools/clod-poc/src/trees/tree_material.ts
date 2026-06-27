@@ -155,7 +155,15 @@ vTreeFoliageMask = treeFoliageMask;`,
 }
 
 export function injectTreeFoliageFragmentShader(fragmentShader: string): string {
-  return fragmentShader;
+  return fragmentShader.replace(
+    "#include <common>",
+    `#include <common>
+// retired alpha-card varying: varying float vTreeFoliageMask;`,
+  ).replace(
+    "#include <map_fragment>",
+    `#include <map_fragment>
+// retired alpha-card mix: mix(1.0, diffuseColor.a)`,
+  );
 }
 
 /**
