@@ -70,6 +70,8 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
   const deepOceanMaterial = oceanSampler
     ? await createDeepOceanMaterial(isWebGpu, {
         visual: resolveDeepOceanVisual(waterConfig.visual, deepOceanConfig),
+        wave: deepOceanConfig.wave,
+        shading: deepOceanConfig.shading,
         surfaceY: deepOceanConfig.surfaceY,
         fogDistanceM: deepOceanConfig.shading.fogFarM,
         sunDirection: lighting.sunDirection.clone(),
