@@ -1,21 +1,21 @@
 # CLOD PoC Disk/Cache Streaming (Phase 9)
 
-PoC-scoped persistent cache for generated CLOD page artifacts and far-view helper schemas. Terrain summary uses the same keys and serialization but is **memory-only** for now (persistent terrain-summary is deferred; see Known limitations). This validates cache keys, serialization, invalidation, compression, and lazy streaming in TypeScript/Three.js before any Bevy/Rust port.
+PoC-scoped persistent cache for generated CLOD page artifacts, terrain summary artifacts, and far-view helper schemas. This validates cache keys, serialization, invalidation, compression, and lazy streaming in TypeScript/Three.js before any Bevy/Rust port.
 
-**Phase 9 status:** persistent reload coverage is complete for `clod-page-node` artifacts only. Do not treat terrain-summary or other artifact kinds as Phase-9-complete for persistence until wired to IndexedDB.
+**Phase 9 status:** persistent reload coverage is complete for `clod-page-node` and `terrain-summary` artifacts. `clod-page-tree` is written as schema proof, but not yet used to accelerate tree reconstruction. Far-shell, shadow-proxy, and canopy summary producers are still schema-only.
 
 **This is not production-ready.** It is a design validation step.
 
 ## What is cached
 
-| Artifact kind | Contents |
-|---------------|----------|
-| `clod-page-node` | Positions, normals, paint slots, material weights, indices, error/bounds metadata |
-| `clod-page-tree` | Page tree node ids, levels, child relationships |
-| `terrain-summary` | Coarse height/normal/coverage grids for far shell |
-| `far-shell-summary` | Schema supported; producer not wired yet |
-| `shadow-proxy-summary` | Schema supported; producer not wired yet |
-| `canopy-summary` | Schema supported; producer not wired yet |
+| Artifact kind | Contents | Persistence |
+|---------------|----------|-------------|
+| `clod-page-node` | Positions, normals, paint slots, material weights, indices, error/bounds metadata | IndexedDB via main-thread page broker |
+| `clod-page-tree` | Page tree node ids, levels, child relationships | IndexedDB write only; read path not wired yet |
+| `terrain-summary` | Coarse height/normal/coverage grids for far shell | IndexedDB from main thread |
+| `far-shell-summary` | Schema supported; producer not wired yet | Not produced yet |
+| `shadow-proxy-summary` | Schema supported; producer not wired yet | Not produced yet |
+| `canopy-summary` | Schema supported; producer not wired yet | Not produced yet |
 
 ## What is not cached
 
@@ -60,11 +60,11 @@ Keys are deterministic strings:
 - Scene (`?scene=`)
 - World seed, world page count, generator version
 - Dig edit revision
-- Hydrology carved bed **full SHA-256** (when hydrology terrain is active)
+- Hydrology carved bed full SHA-256 over raw `Float32Array` bytes when hydrology terrain is active
 - Border coast / ocean config hash
 - Water enabled/source/carve/hydrology flags
 - Procedural terrain enabled + seed/resolution fingerprint
-- Staged import manifest hash including canonical terrain edit content digest (when importing a project)
+- Staged import manifest hash including canonical terrain edit content digest when importing a project
 - Long-view scene flag
 
 This hash is used as both `sourceRevision` and `sourceHash` in cache keys. Changing any terrain-affecting input invalidates cached page nodes and terrain summaries.
@@ -86,7 +86,9 @@ Cache misses (not errors) when:
 1. **Memory cache** — LRU by item count and bytes; cleared on reload
 2. **Persistent store** — IndexedDB default (`indexedDbStore.ts` only)
 3. **Scheduler** — Read/write budgets per frame; avoids IndexedDB on hot path bursts
-4. **Manifest** — In-memory LRU eviction tracker per cache service instance. **Not** persisted to IndexedDB. Worker startup hydrates manifest entries by scanning artifact keys (up to 256) via main-thread broker RPC. Main terrain-summary cache is memory-only; page artifacts use IndexedDB on the **main thread** broker (worker never opens IndexedDB directly).
+4. **Manifest** — In-memory LRU eviction tracker per cache service instance. Not persisted to IndexedDB. Services hydrate manifest entries by scanning artifact keys up to 256 entries.
+5. **Page persistence** — CLOD worker never opens IndexedDB directly. It uses RPC to the main-thread broker database `drusniel-clod-poc-cache-pages-v2`.
+6. **Terrain-summary persistence** — Main thread owns its own IndexedDB database `drusniel-clod-poc-cache-summary-v2`.
 
 ## Integration
 
@@ -99,9 +101,12 @@ Cache misses (not errors) when:
 Debug overlay buttons:
 
 - **Clear memory** — main-thread runtime LRU cache only
-- **Clear persistent** — clears main memory cache and worker IndexedDB artifacts (`drusniel-clod-poc-cache-pages`) via worker message
+- **Clear persistent** — clears main memory cache, main terrain-summary IndexedDB, and worker page-node IndexedDB via worker message
 
-Or delete the IndexedDB database `drusniel-clod-poc-cache-pages-v2` in browser devtools.
+Or delete these IndexedDB databases in browser devtools:
+
+- `drusniel-clod-poc-cache-summary-v2`
+- `drusniel-clod-poc-cache-pages-v2`
 
 ## Cold / warm validation
 
@@ -109,7 +114,8 @@ Or delete the IndexedDB database `drusniel-clod-poc-cache-pages-v2` in browser d
 2. Open `http://127.0.0.1:5180/?world=8` (first run = cold cache)
 3. Reload the same URL (second run = warm cache)
 4. Check debug overlay: worker section should show `nodes cached > 0` and `net saved > 0` on warm run
-5. Compare console `[cache]` logs for hit rate, bytes read, decode ms, and `build avoided` ms
+5. Check main section: terrain-summary hits should increase on reload after the first summary write
+6. Compare console `[cache]` logs for hit rate, bytes read, decode ms, and `build avoided` ms
 
 Example warm-run metrics to record (your machine):
 
@@ -118,16 +124,16 @@ Example warm-run metrics to record (your machine):
 | Worker nodes cached | 0 | ~all LOD nodes |
 | Worker net saved ms | 0 | > 0 |
 | Worker decode ms | 0 | > 0 |
+| Main terrain-summary hits | 0 | > 0 |
 | Combined hit rate | ~0% | > 50% typical |
 
 Document your numbers in console via **Dump metrics** after each run.
 
 ## Known limitations
 
-- **Phase 9 persistent artifact coverage (deferred):** page-node cache survives reload; terrain-summary cache does not. Keys/serialization are ready, but main-thread terrain summary stays in the runtime LRU only — acceptable for PoC, not full Phase 9 persistence.
-- **Main-thread broker** (`drusniel-clod-poc-cache-pages-v2`): sole IndexedDB owner; CLOD worker uses RPC for get/put/clear
-- **Main terrain summary**: memory cache only (persistent terrain-summary deferred)
-- Eviction manifest is **memory-only**; IndexedDB manifest persistence was removed after worker `UnknownError` issues
+- `clod-page-tree` cache is written but not used to accelerate tree reconstruction yet
+- Far-shell, shadow-proxy, and canopy summary artifact schemas exist, but producers are not wired yet
+- Eviction manifest is memory-only; IndexedDB manifest persistence was removed after worker `UnknownError` issues
 - Frame budget enforcement in the scheduler is approximate (see TODO in `cacheScheduler.ts`)
 - Warm-cache page nodes restore original `NodeBuildStat` from artifact metadata (`fromCache: true`)
 - Warm-cache LOD0 pages omit `chunkMeshes`; first edit after load does one full page extract, then partial chunk remeshing
