@@ -41,6 +41,7 @@ interface GrassMaterialYaml {
   };
 }
 
+type WarnHandler = (message: string) => void;
 type GrassSettingsWithMaterialBias = GrassSettings & { materialBias?: GrassMaterialBiasSettings };
 
 export const DEFAULT_GRASS_MATERIAL_BIAS: GrassMaterialBiasSettings = {
@@ -58,9 +59,18 @@ export const DEFAULT_GRASS_MATERIAL_BIAS: GrassMaterialBiasSettings = {
   },
 };
 
-export function applyGrassMaterialBiasFromYaml(settings: GrassSettings, text: string): GrassSettings {
+export function applyGrassMaterialBiasFromYaml(
+  settings: GrassSettings,
+  text: string,
+  warn: WarnHandler | null = console.warn,
+): GrassSettings {
   const target = settings as GrassSettingsWithMaterialBias;
-  target.materialBias = parseGrassMaterialBias(text);
+  try {
+    target.materialBias = parseGrassMaterialBias(text);
+  } catch (error) {
+    warn?.(`[grass-material-bias] failed to parse terrain bias; using defaults: ${error instanceof Error ? error.message : String(error)}`);
+    target.materialBias = DEFAULT_GRASS_MATERIAL_BIAS;
+  }
   return target;
 }
 
