@@ -78,27 +78,45 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   const pendingTreeNodeIds = new Set<string>();
   const pendingUnderstoryNodeIds = new Set<string>();
 
+  const clearIds = (pending: Set<string>, ids: readonly string[]): void => {
+    for (const id of ids) pending.delete(id);
+  };
+
   const flushVegetationRebuilds = () => {
     vegetationFlushTimer = null;
     const veg = deps.getVegetationState();
 
     if (veg.grassEnabled && pendingGrassNodeIds.size > 0) {
-      deps.grassSystem?.rebuildNodePatches([...pendingGrassNodeIds]);
-      pendingGrassNodeIds.clear();
-      deps.refreshGrassStats();
+      const ids = [...pendingGrassNodeIds];
+      try {
+        deps.grassSystem?.rebuildNodePatches(ids);
+        deps.refreshGrassStats();
+        clearIds(pendingGrassNodeIds, ids);
+      } catch (error) {
+        console.error("grass rebuild after terrain edit failed:", error);
+      }
     }
     if (veg.treesEnabled && pendingTreeNodeIds.size > 0) {
-      const changedIds = [...pendingTreeNodeIds];
-      pendingTreeNodeIds.clear();
-      const fallen = deps.treeSystem?.removePatchesForNodes(changedIds) ?? [];
-      deps.fallingTrees.push(...fallen);
-      deps.treeSystem?.rebuildNodePatches(changedIds);
-      deps.refreshTreeStats();
+      const ids = [...pendingTreeNodeIds];
+      try {
+        const fallen = deps.treeSystem?.removePatchesForNodes(ids) ?? [];
+        deps.fallingTrees.push(...fallen);
+        deps.treeSystem?.rebuildNodePatches(ids);
+        deps.refreshTreeStats();
+        clearIds(pendingTreeNodeIds, ids);
+      } catch (error) {
+        console.error("tree rebuild after terrain edit failed:", error);
+      }
     }
     if (veg.understoryEnabled && pendingUnderstoryNodeIds.size > 0) {
-      deps.understorySystem?.rebuildNodePatches([...pendingUnderstoryNodeIds]);
-      pendingUnderstoryNodeIds.clear();
-      deps.refreshUnderstoryStats();
+      const ids = [...pendingUnderstoryNodeIds];
+      try {
+        deps.understorySystem?.rebuildNodePatches(ids);
+        deps.refreshUnderstoryStats();
+        clearIds(pendingUnderstoryNodeIds, ids);
+      } catch (error) {
+        console.error("understory rebuild after terrain edit failed:", error);
+      }
     }
   };
 
