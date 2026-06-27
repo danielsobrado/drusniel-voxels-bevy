@@ -14,7 +14,7 @@ import {
   surfaceHeight,
 } from "./terrain/terrain.js";
 import { buildNodeIndex, buildWorld, rebuildDirtyLod0Pages, rebuildDirtyPages } from "./clod/quadtree.js";
-import { buildLod0PageSource } from "./clod/source_mesh.js";
+import { buildLod0PageSource, rebuildPageChunks } from "./clod/source_mesh.js";
 import { initSimplifier } from "./clod/simplify.js";
 import { assertBorderMatch, borderChain } from "./clod/validate.js";
 import { DEFAULT_DIAGONAL_FLIP_CONFIG, type ClodPagesConfig } from "./config.js";
@@ -255,6 +255,31 @@ describe("rebuildDirtyPages", () => {
 
     expect(rebuild.lod0Pages).toBeGreaterThanOrEqual(1);
     expect(node.mesh.indices.length).toBeGreaterThan(trisBefore);
+  });
+
+  it("leaves cached chunks unchanged when candidate validation fails", () => {
+    const world = { cellsX: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size, cellsZ: 2 * cfg.page.chunks_per_page * cfg.page.chunk_size };
+    const source = buildLod0PageSource(0, 0, cfg, world);
+    const originalChunks = [...source.chunks];
+    const badValidationCfg = {
+      ...cfg,
+      validation: { ...cfg.validation, zero_area_epsilon: Number.MAX_VALUE },
+    };
+
+    const x = 6, z = 6, r = 2;
+    const y = surfaceHeight(x, z) - 4;
+    addDigEdit({ x, y, z, r });
+    const margin = r + 4;
+
+    expect(() => rebuildPageChunks(
+      source.chunks,
+      0,
+      0,
+      badValidationCfg,
+      world,
+      { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin },
+    )).toThrow();
+    expect(source.chunks).toEqual(originalChunks);
   });
 
   it("per-chunk rebuild avoids reporting clean sibling pages", () => {
