@@ -1,4 +1,4 @@
-import { resolveConstructionPlacementSupport } from "./support_state.js";
+import { isPlacedPieceSupported, resolveConstructionPlacementSupport } from "./support_state.js";
 import type { ConstructionCandidate, ConstructionPieceDef, ConstructionPlacementConfig, ConstructionSnapResult, PlacedConstructionPiece } from "./types.js";
 
 export interface TerrainHitPoint {
@@ -13,6 +13,15 @@ export interface PlacementValidationInput {
   snapped: boolean;
   snap: ConstructionSnapResult | null;
   terrainHit: TerrainHitPoint | null;
+  placedPieces: readonly PlacedConstructionPiece[];
+  piecesById: ReadonlyMap<string, ConstructionPieceDef>;
+  worldCells: number;
+  config: ConstructionPlacementConfig;
+}
+
+export interface PersistedPlacementValidationInput {
+  piece: ConstructionPieceDef;
+  placed: PlacedConstructionPiece;
   placedPieces: readonly PlacedConstructionPiece[];
   piecesById: ReadonlyMap<string, ConstructionPieceDef>;
   worldCells: number;
@@ -64,10 +73,51 @@ function overlaps(a: Bounds3d, b: Bounds3d): boolean {
     && a.minZ <= b.maxZ && a.maxZ >= b.minZ;
 }
 
-function resolveSupport(input: PlacementValidationInput) {
-  if (input.snapped && !input.snap) {
-    return { supported: true, grounded: false, parentIds: [] as readonly string[], reason: null };
+function validateBoundsAndOverlap(
+  piece: ConstructionPieceDef,
+  position: readonly [number, number, number],
+  rotationQuarterTurns: number,
+  placedPieces: readonly PlacedConstructionPiece[],
+  piecesById: ReadonlyMap<string, ConstructionPieceDef>,
+  worldCells: number,
+  config: ConstructionPlacementConfig,
+): { valid: boolean; reason: string | null } {
+  if (!isFiniteVec3(position) || !Number.isFinite(worldCells) || worldCells <= 0) {
+    return { valid: false, reason: "invalid position" };
   }
+
+  const worldBounds = boundsFor(piece, position, rotationQuarterTurns, 0);
+  if (worldBounds.minX < 0 || worldBounds.maxX > worldCells || worldBounds.minZ < 0 || worldBounds.maxZ > worldCells) {
+    return { valid: false, reason: "outside world" };
+  }
+
+  const bounds = boundsFor(piece, position, rotationQuarterTurns, config.overlapPaddingM);
+  for (const placed of placedPieces) {
+    const otherPiece = piecesById.get(placed.typeId);
+    if (!otherPiece) continue;
+    const otherBounds = boundsFor(otherPiece, placed.position, placed.rotationQuarterTurns, config.overlapPaddingM);
+    if (overlaps(bounds, otherBounds)) {
+      return { valid: false, reason: "overlap" };
+    }
+  }
+  return { valid: true, reason: null };
+}
+
+function hasLegacySupportMetadata(placed: PlacedConstructionPiece): boolean {
+  return placed.grounded === undefined && placed.parentIds === undefined;
+}
+
+function validatePersistedSupport(placed: PlacedConstructionPiece, placedPieces: readonly PlacedConstructionPiece[]): { valid: boolean; reason: string | null } {
+  if (hasLegacySupportMetadata(placed)) return { valid: true, reason: null };
+  if (placed.grounded === true) return { valid: true, reason: null };
+  const parentIds = placed.parentIds ?? [];
+  if (parentIds.some((parentId) => isPlacedPieceSupported(placedPieces, parentId))) {
+    return { valid: true, reason: null };
+  }
+  return { valid: false, reason: "unsupported" };
+}
+
+function resolveSupport(input: PlacementValidationInput) {
   return resolveConstructionPlacementSupport({
     snapped: input.snapped,
     snap: input.snap,
@@ -89,9 +139,6 @@ export function createFreePlacementPosition(
 
 export function validateConstructionPlacement(input: PlacementValidationInput): { valid: boolean; reason: string | null } {
   const { piece, position, rotationQuarterTurns, snapped, terrainHit, placedPieces, piecesById, worldCells, config } = input;
-  if (!isFiniteVec3(position) || !Number.isFinite(worldCells) || worldCells <= 0) {
-    return { valid: false, reason: "invalid position" };
-  }
   if (!snapped && !piece.canGround) {
     return { valid: false, reason: "snap required" };
   }
@@ -101,24 +148,17 @@ export function validateConstructionPlacement(input: PlacementValidationInput): 
 
   const support = resolveSupport(input);
   if (!support.supported) {
-    return { valid: false, reason: support.reason };
+    return { valid: false, reason: support.reason ?? "unsupported" };
   }
 
-  const worldBounds = boundsFor(piece, position, rotationQuarterTurns, 0);
-  if (worldBounds.minX < 0 || worldBounds.maxX > worldCells || worldBounds.minZ < 0 || worldBounds.maxZ > worldCells) {
-    return { valid: false, reason: "outside world" };
-  }
+  return validateBoundsAndOverlap(piece, position, rotationQuarterTurns, placedPieces, piecesById, worldCells, config);
+}
 
-  const bounds = boundsFor(piece, position, rotationQuarterTurns, config.overlapPaddingM);
-  for (const placed of placedPieces) {
-    const otherPiece = piecesById.get(placed.typeId);
-    if (!otherPiece) continue;
-    const otherBounds = boundsFor(otherPiece, placed.position, placed.rotationQuarterTurns, config.overlapPaddingM);
-    if (overlaps(bounds, otherBounds)) {
-      return { valid: false, reason: "overlap" };
-    }
-  }
-  return { valid: true, reason: null };
+export function validatePersistedConstructionPlacement(input: PersistedPlacementValidationInput): { valid: boolean; reason: string | null } {
+  const { piece, placed, placedPieces, piecesById, worldCells, config } = input;
+  const support = validatePersistedSupport(placed, placedPieces);
+  if (!support.valid) return support;
+  return validateBoundsAndOverlap(piece, placed.position, placed.rotationQuarterTurns, placedPieces, piecesById, worldCells, config);
 }
 
 export function createConstructionCandidate(input: PlacementValidationInput): ConstructionCandidate {
