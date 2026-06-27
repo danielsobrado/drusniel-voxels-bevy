@@ -7,6 +7,7 @@ const SUMMARY_EDGE_EPS = 0.0001;
 const WATER_SURFACE_OFFSET_M = 0.42;
 const WATER_ALPHA = 0.62;
 const WATER_MASK_THRESHOLD = 0.04;
+const WATER_VISIBLE_ALPHA_THRESHOLD = 0.01;
 const WATER_RIPPLE_HEIGHT_M = 0.18;
 const WATER_RIPPLE_SCALE_1 = 0.012;
 const WATER_RIPPLE_SCALE_2 = 0.021;
@@ -81,7 +82,7 @@ export function createFarWaterMaterial(
   material.name = "naadf-far-water-overlay";
   material.colorNode = color;
   material.opacityNode = alpha;
-  material.maskNode = alpha.greaterThan(0.01);
+  material.maskNode = alpha.greaterThan(float(WATER_VISIBLE_ALPHA_THRESHOLD));
   material.positionNode = vec3(local.x, waterHeight.add(float(WATER_SURFACE_OFFSET_M)).add(ripple.mul(waterCoverage)), local.z);
   material.transparent = true;
   material.depthTest = true;
