@@ -64,7 +64,7 @@ export function createFarShellController(deps: FarShellControllerDeps): FarShell
   let buildCenterX = currentCenterX;
   let buildCenterZ = currentCenterZ;
 
-  const parityMaterialEnabled = (): boolean => deps.useParityMaterial?.() ?? false;
+  const parityMaterialEnabled = (): boolean => Boolean(deps.useParityMaterial?.() && deps.getParityConfig?.());
 
   const syncParityMaterialCenter = (mesh: THREE.Mesh, x: number, z: number): void => {
     if (!parityMaterialEnabled()) return;
