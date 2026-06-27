@@ -8,7 +8,7 @@ describe("deep ocean sampler boundary", () => {
       extendCells: 64,
       surfaceY: 18,
       segments: 8,
-    }, 48);
+    });
 
     expect(sampler.isInPlayableOcean(300, 128)).toBe(true);
     expect(sampler.isInPlayableOcean(8, 128)).toBe(false);
