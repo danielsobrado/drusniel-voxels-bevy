@@ -11,11 +11,12 @@ fn ocean_wave(
   let phase = dot(world_xz, direction) * k + time_seconds * speed;
   let sine_value = sin(phase);
   let cosine_value = cos(phase);
+  let slope_scale = amplitude * k * max(choppiness, 0.0);
   return vec4<f32>(
     sine_value * amplitude,
-    direction.x * cosine_value * amplitude * choppiness,
-    direction.y * cosine_value * amplitude * choppiness,
-    cosine_value * amplitude * k,
+    direction.x * cosine_value * slope_scale,
+    direction.y * cosine_value * slope_scale,
+    abs(cosine_value * slope_scale),
   );
 }
 
@@ -68,7 +69,7 @@ fn deep_ocean_wave_sample(
   let chop_b = ocean_wave(world_xz, normalize(wind * 0.36 + cross_wind * 0.64), fine_patch * 0.53, local_height * 0.07, speed * 3.1, time_seconds, local_choppiness * 0.78);
   let fine_weight = select(1.0, 0.28, level_id > 0.5);
   let combined = swell_a + swell_b + (chop_a + chop_b) * fine_weight;
-  let slope = abs(combined.w);
+  let slope = length(combined.yz);
   var foam = pow(
     smoothstep(patch_params.z, 1.0, slope),
     max(patch_params.w, 0.001),
