@@ -187,10 +187,9 @@ export function rebuildPageChunks(
     return { mesh, remeshed: 0 };
   }
 
-  const partialChunks = chunkMeshes.slice();
-  for (const li of toRemesh) remeshChunk(partialChunks, li, pageX, pageZ, cfg, world);
-
   try {
+    const partialChunks = chunkMeshes.slice();
+    for (const li of toRemesh) remeshChunk(partialChunks, li, pageX, pageZ, cfg, world);
     const { mesh } = weldChunkMeshes(partialChunks, cfg);
     validatePageMesh(mesh, footprint, cfg.validation.zero_area_epsilon, `L0:${pageX},${pageZ} partial edit-rebuild`);
     commitChunks(chunkMeshes, partialChunks, toRemesh);
