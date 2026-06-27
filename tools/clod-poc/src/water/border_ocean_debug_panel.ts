@@ -1,6 +1,7 @@
 import type * as THREE from "three";
 import { attachDebugPanelChrome } from "../ui/debug_panel_chrome.js";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
+import type { PlayerConfig } from "../player_controller.js";
 import type { OceanSampler } from "./ocean_service.js";
 
 export type BorderOceanZone = "playable" | "transition-gap" | "deep-ocean-ring" | "outside-visual-extent";
@@ -11,6 +12,7 @@ export interface BorderOceanDebugInput {
   deepOcean: DeepOceanRenderConfig;
   deepOceanMeshPresent: boolean;
   oceanSampler: OceanSampler | null;
+  playerConfig?: Readonly<PlayerConfig>;
 }
 
 export interface BorderOceanDebugSnapshot {
@@ -30,6 +32,10 @@ export interface BorderOceanDebugSnapshot {
   choppiness: number;
   fogFarM: number;
   reflectionStrength: number;
+  playerMarginM: number | null;
+  pushbackBandM: number | null;
+  pushbackAcceleration: number | null;
+  softPushbackEnabled: boolean | null;
 }
 
 function insideRect(x: number, z: number, min: number, max: number): boolean {
@@ -54,6 +60,13 @@ export function classifyBorderOceanZone(
 export function buildBorderOceanDebugSnapshot(input: BorderOceanDebugInput): BorderOceanDebugSnapshot {
   const x = input.cameraPosition.x;
   const z = input.cameraPosition.z;
+  const playerMarginM = input.playerConfig?.worldEdgeMargin ?? null;
+  const pushbackBandM = input.playerConfig?.worldEdgePushbackBand ?? null;
+  const pushbackAcceleration = input.playerConfig?.worldEdgePushbackAcceleration ?? null;
+  const softPushbackEnabled = input.playerConfig
+    ? input.playerConfig.worldEdgePushbackBand > 0 && input.playerConfig.worldEdgePushbackAcceleration > 0
+    : null;
+
   return {
     enabled: input.deepOcean.enabled,
     zone: classifyBorderOceanZone(
@@ -77,11 +90,27 @@ export function buildBorderOceanDebugSnapshot(input: BorderOceanDebugInput): Bor
     choppiness: input.deepOcean.wave.choppiness,
     fogFarM: input.deepOcean.shading.fogFarM,
     reflectionStrength: input.deepOcean.shading.reflectionStrength,
+    playerMarginM,
+    pushbackBandM,
+    pushbackAcceleration,
+    softPushbackEnabled,
   };
 }
 
 function yesNo(value: boolean): string {
   return value ? "yes" : "no";
+}
+
+function maybeMeters(value: number | null): string {
+  return value === null ? "n/a" : `${value.toFixed(1)}m`;
+}
+
+function maybeNumber(value: number | null): string {
+  return value === null ? "n/a" : value.toFixed(1);
+}
+
+function maybeEnabled(value: boolean | null): string {
+  return value === null ? "n/a" : yesNo(value);
 }
 
 export function formatBorderOceanDebug(snapshot: BorderOceanDebugSnapshot): string[] {
@@ -94,6 +123,8 @@ export function formatBorderOceanDebug(snapshot: BorderOceanDebugSnapshot): stri
     `extent: ${snapshot.extendCells.toFixed(1)}m`,
     `mesh: ${yesNo(snapshot.meshPresent)}`,
     `sampler: ${yesNo(snapshot.samplerPresent)} valid-here=${yesNo(snapshot.samplerValidHere)}`,
+    `pushback: ${maybeEnabled(snapshot.softPushbackEnabled)} band=${maybeMeters(snapshot.pushbackBandM)}`,
+    `clamp margin: ${maybeMeters(snapshot.playerMarginM)} accel=${maybeNumber(snapshot.pushbackAcceleration)}`,
     `waves: ${snapshot.waveCount} wind=${snapshot.windSpeed.toFixed(1)}`,
     `height: ${snapshot.heightScale.toFixed(2)} chop=${snapshot.choppiness.toFixed(2)}`,
     `fog far: ${snapshot.fogFarM.toFixed(0)}m`,
