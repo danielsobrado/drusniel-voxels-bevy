@@ -88,10 +88,16 @@ function readIntegerAtLeast(value: unknown, fallback: number, min: number): numb
   return Math.max(min, n);
 }
 
-function readStringArray(value: unknown, fallback: readonly string[]): readonly string[] {
-  if (!Array.isArray(value)) return fallback;
-  const parsed = value.filter((item): item is string => typeof item === "string" && item.length > 0);
-  return parsed.length > 0 ? parsed : fallback;
+function readRequiredCounters(value: unknown, fallback: readonly string[]): readonly string[] {
+  if (value === undefined) return fallback;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("border-ocean scene config: acceptance.required_counters must be a non-empty string array");
+  }
+  const invalidIndex = value.findIndex((item) => typeof item !== "string" || item.length === 0);
+  if (invalidIndex >= 0) {
+    throw new Error(`border-ocean scene config: acceptance.required_counters[${invalidIndex}] must be a non-empty string`);
+  }
+  return value as string[];
 }
 
 export function parseBorderOceanSceneConfig(text: string): BorderOceanSceneConfig {
@@ -142,7 +148,7 @@ export function parseBorderOceanSceneConfig(text: string): BorderOceanSceneConfi
         root.acceptance?.max_interior_water_wet_ratio,
         defaults.acceptance.maxInteriorWaterWetRatio,
       ),
-      requiredCounters: readStringArray(
+      requiredCounters: readRequiredCounters(
         root.acceptance?.required_counters,
         defaults.acceptance.requiredCounters,
       ),
@@ -299,14 +305,15 @@ export function validateBorderOceanStats(
   if (!counters) throw new Error("border-ocean stats missing counters");
 
   for (const key of sceneConfig.acceptance.requiredCounters) {
-    if (typeof counters[key] !== "number") {
+    const value = counters[key];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
       throw new Error(`border-ocean required counter missing: ${key}`);
     }
   }
 
   const assertCounter = (key: string, predicate: (value: number) => boolean) => {
     const value = counters[key];
-    if (typeof value !== "number" || !predicate(value)) {
+    if (typeof value !== "number" || !Number.isFinite(value) || !predicate(value)) {
       throw new Error(`border-ocean counter failed: ${key}=${String(value)}`);
     }
   };
