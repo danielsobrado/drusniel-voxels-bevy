@@ -13,21 +13,36 @@ const CANDIDATES: LaunchRecipe[] = [
   { headless: false, args: [] },
 ];
 
+const GENERIC_CANDIDATES: LaunchRecipe[] = [
+  { headless: true, channel: "chromium", args: [] },
+  { headless: true, args: [] },
+  { headless: false, args: [] },
+];
+
 const CACHE_PATH = ".cache/webgpu-flags.json";
 
 export function clodBaseUrl(): string {
   return process.env["CLOD_POC_BASE_URL"] ?? "http://localhost:5173/";
 }
 
-async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<Browser | null> {
-  let browser: Browser | null = null;
+async function tryLaunch(recipe: LaunchRecipe): Promise<Browser | null> {
   try {
     const launchOptions: Parameters<typeof chromium.launch>[0] = {
       headless: recipe.headless,
       args: recipe.args,
     };
     if (recipe.channel) launchOptions.channel = recipe.channel;
-    browser = await chromium.launch(launchOptions);
+    return await chromium.launch(launchOptions);
+  } catch {
+    return null;
+  }
+}
+
+async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<Browser | null> {
+  let browser: Browser | null = null;
+  try {
+    browser = await tryLaunch(recipe);
+    if (!browser) return null;
     const page = await browser.newPage();
     await page.goto(new URL("__webgpu_probe__", baseUrl).toString(), { waitUntil: "domcontentloaded" });
     const ok = await page.evaluate(async () => {
@@ -43,6 +58,16 @@ async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<Brows
     if (browser) await browser.close().catch(() => undefined);
     return null;
   }
+}
+
+export async function launchChromium(): Promise<{ browser: Browser; recipe: LaunchRecipe }> {
+  for (const recipe of GENERIC_CANDIDATES) {
+    const browser = await tryLaunch(recipe);
+    if (!browser) continue;
+    console.log(`[launch] Chromium OK headless=${recipe.headless} channel=${recipe.channel ?? "default"} args=[${recipe.args.join(" ")}]`);
+    return { browser, recipe };
+  }
+  throw new Error("No Chromium launch recipe succeeded. Run `npx playwright install chromium` if this is a fresh machine.");
 }
 
 export async function launchWebGPU(): Promise<{ browser: Browser; recipe: LaunchRecipe }> {
