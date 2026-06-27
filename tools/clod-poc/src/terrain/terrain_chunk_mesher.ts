@@ -25,6 +25,14 @@ function cellKeySN(ci: number, cj: number, ck: number): number {
   return ((ci + 512) * 2048 + (cj + 512)) * 2048 + (ck + 512);
 }
 
+function finiteBounds(world: WorldBounds): boolean {
+  return world.finite !== false;
+}
+
+function cellInsideWorld(ci: number, ck: number, world: WorldBounds): boolean {
+  return !finiteBounds(world) || (ci >= 0 && ci < world.cellsX && ck >= 0 && ck < world.cellsZ);
+}
+
 function cellVertex(ci: number, cj: number, ck: number): [number, number, number] | null {
   const d: number[] = [];
   let neg = 0;
@@ -99,7 +107,7 @@ function emitAxis(
   const loop = QUAD_CELLS[axis];
   for (const [oi, , ok] of loop) {
     const ci = i + oi, ck = k + ok;
-    if (ci < 0 || ci >= world.cellsX || ck < 0 || ck >= world.cellsZ) return;
+    if (!cellInsideWorld(ci, ck, world)) return;
   }
   const v: number[] = [];
   for (const [oi, oj, ok] of loop) {
@@ -122,12 +130,13 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
 
   const x0 = cx * S, x1 = (cx + 1) * S;
   const z0 = cz * S, z1 = (cz + 1) * S;
+  const isFiniteWorld = finiteBounds(world);
 
   const visited = new Set<number>();
   const chunkEdits: DigEdit[] = [];
-  const minGX = Math.max(0, Math.floor(x0 / CELL_SIZE) - 1);
+  const minGX = isFiniteWorld ? Math.max(0, Math.floor(x0 / CELL_SIZE) - 1) : Math.floor(x0 / CELL_SIZE) - 1;
   const maxGX = Math.floor((x1 - 1) / CELL_SIZE) + 1;
-  const minGZ = Math.max(0, Math.floor(z0 / CELL_SIZE) - 1);
+  const minGZ = isFiniteWorld ? Math.max(0, Math.floor(z0 / CELL_SIZE) - 1) : Math.floor(z0 / CELL_SIZE) - 1;
   const maxGZ = Math.floor((z1 - 1) / CELL_SIZE) + 1;
   for (let gx = minGX; gx <= maxGX; gx++) {
     for (let gz = minGZ; gz <= maxGZ; gz++) {
