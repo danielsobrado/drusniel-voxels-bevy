@@ -3,8 +3,8 @@ import type { FarSummaryTile } from "../types.js";
 import type { NaadfWorldState } from "../summaryStreamer.js";
 import { materialColorForDebugId } from "../../terrainMaterial/terrainMaterialBands.js";
 
-const DEFAULT_ATLAS_TILES_X = 3;
-const DEFAULT_ATLAS_TILES_Z = 3;
+const DEFAULT_ATLAS_TILES_X = 5;
+const DEFAULT_ATLAS_TILES_Z = 5;
 const FLOAT_RGBA_COMPONENTS = 4;
 const NORMAL_ENCODE_BIAS = 0.5;
 const NORMAL_ENCODE_SCALE = 0.5;
