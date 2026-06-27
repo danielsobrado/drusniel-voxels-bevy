@@ -8,6 +8,7 @@ import type { GrassStats } from "../grass.js";
 import type { TreeStats } from "../trees/index.js";
 import type { StoneStats } from "../stones/stone_instances.js";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
+import type { PlayerConfig } from "../player_controller.js";
 import type { WaterField } from "../water/waterField.js";
 import { publishBorderOceanAcceptanceCounters } from "../debug/border_ocean_scene.js";
 import type { FarShellMetrics } from "../long-view/farShellMetrics.js";
@@ -52,6 +53,7 @@ export interface LongViewFrameDiagnosticsDeps {
     deepOcean: DeepOceanRenderConfig;
     deepOceanMeshPresent: boolean;
     oceanSampler: import("../water/ocean_service.js").OceanSampler | null;
+    playerConfig: Readonly<PlayerConfig>;
   };
 }
 
@@ -174,6 +176,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
         waterField: deps.borderOceanScene.waterField,
         deepOceanMeshPresent: deps.borderOceanScene.deepOceanMeshPresent,
         oceanSampler: deps.borderOceanScene.oceanSampler,
+        playerConfig: deps.borderOceanScene.playerConfig,
       });
     }
 
