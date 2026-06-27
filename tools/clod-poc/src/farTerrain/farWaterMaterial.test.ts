@@ -56,6 +56,24 @@ function disposeAtlas(atlas: FarSummaryGpuAtlasView): void {
 }
 
 describe("far water material", () => {
+  it("creates a transparent masked render-only material", () => {
+    const atlas = atlasView(1);
+    const material = createFarWaterMaterial(0, 0, atlas);
+
+    expect(material.name).toBe("naadf-far-water-overlay");
+    expect(material.transparent).toBe(true);
+    expect(material.depthWrite).toBe(false);
+    expect(material.depthTest).toBe(true);
+    expect(material.side).toBe(THREE.DoubleSide);
+    expect(material.colorNode).toBeDefined();
+    expect(material.opacityNode).toBeDefined();
+    expect(material.maskNode).toBeDefined();
+    expect(material.positionNode).toBeDefined();
+
+    material.dispose();
+    disposeAtlas(atlas);
+  });
+
   it("creates summary uniforms for every configured atlas ring", () => {
     const atlas = atlasView(5);
     const material = createFarWaterMaterial(10, 20, atlas);
