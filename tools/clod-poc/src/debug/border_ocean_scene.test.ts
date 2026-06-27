@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import yamlText from "../../config/border_ocean_scene.yaml?raw";
 import {
+  DEFAULT_BORDER_OCEAN_REQUIRED_COUNTERS,
+  parseBorderOceanSceneConfig,
   probeCliffDryAboveSea,
   probePlayableOceanOutside,
   validateBorderOceanStats,
@@ -7,7 +10,46 @@ import {
 import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_config.js";
 import { createDeepOceanSampler } from "../water/ocean_service.js";
 
+function validStats(): Record<string, unknown> {
+  return {
+    ready: true,
+    error: null,
+    counters: {
+      "border_ocean.scene": 1,
+      "border_ocean.coast_runtime_active": 1,
+      "border_ocean.deep_ocean_enabled": 1,
+      "border_ocean.deep_ocean_mesh_present": 1,
+      "border_ocean.deep_ocean_vertices": 5000,
+      "border_ocean.deep_ocean_start_outside_m": 64,
+      "border_ocean.deep_ocean_extend_m": 4096,
+      "border_ocean.deep_ocean_surface_y": 18,
+      "border_ocean.wave_count": 54,
+      "border_ocean.wave_wind_speed": 14,
+      "border_ocean.wave_height_scale": 1.3,
+      "border_ocean.wave_choppiness": 1.6,
+      "border_ocean.shading_fog_far_m": 1800,
+      "border_ocean.shading_reflection_strength": 0.46,
+      "border_ocean.player_margin_m": 16,
+      "border_ocean.player_pushback_band_m": 48,
+      "border_ocean.player_pushback_accel": 36,
+      "border_ocean.player_soft_pushback_enabled": 1,
+      "border_ocean.page_source_purity": 1,
+      "border_ocean.interior_water_wet_ratio": 0.05,
+      "border_ocean.playable_ocean_outside_ok": 1,
+      "border_ocean.cliff_dry_above_sea": probeCliffDryAboveSea(18, 256),
+    },
+  };
+}
+
 describe("border-ocean acceptance probes", () => {
+  it("parses required counters from scene YAML", () => {
+    const config = parseBorderOceanSceneConfig(yamlText);
+
+    expect(config.acceptance.requiredCounters).toEqual([...DEFAULT_BORDER_OCEAN_REQUIRED_COUNTERS]);
+    expect(config.acceptance.requiredCounters).toContain("border_ocean.player_margin_m");
+    expect(config.acceptance.requiredCounters).toContain("border_ocean.player_soft_pushback_enabled");
+  });
+
   it("validates playable ocean outside the square", () => {
     const sampler = createDeepOceanSampler(1024, {
       ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
@@ -20,33 +62,16 @@ describe("border-ocean acceptance probes", () => {
   });
 
   it("validates synthetic stats payload", () => {
-    validateBorderOceanStats({
-      ready: true,
-      error: null,
-      counters: {
-        "border_ocean.scene": 1,
-        "border_ocean.coast_runtime_active": 1,
-        "border_ocean.deep_ocean_enabled": 1,
-        "border_ocean.deep_ocean_mesh_present": 1,
-        "border_ocean.deep_ocean_vertices": 5000,
-        "border_ocean.deep_ocean_start_outside_m": 64,
-        "border_ocean.deep_ocean_extend_m": 4096,
-        "border_ocean.deep_ocean_surface_y": 18,
-        "border_ocean.wave_count": 54,
-        "border_ocean.wave_wind_speed": 14,
-        "border_ocean.wave_height_scale": 1.3,
-        "border_ocean.wave_choppiness": 1.6,
-        "border_ocean.shading_fog_far_m": 1800,
-        "border_ocean.shading_reflection_strength": 0.46,
-        "border_ocean.player_margin_m": 16,
-        "border_ocean.player_pushback_band_m": 48,
-        "border_ocean.player_pushback_accel": 36,
-        "border_ocean.player_soft_pushback_enabled": 1,
-        "border_ocean.page_source_purity": 1,
-        "border_ocean.interior_water_wet_ratio": 0.05,
-        "border_ocean.playable_ocean_outside_ok": 1,
-        "border_ocean.cliff_dry_above_sea": probeCliffDryAboveSea(18, 256),
-      },
-    });
+    validateBorderOceanStats(validStats());
+  });
+
+  it("fails clearly when a YAML-required counter is missing", () => {
+    const config = parseBorderOceanSceneConfig(yamlText);
+    const stats = validStats();
+    delete (stats.counters as Record<string, unknown>)["border_ocean.player_margin_m"];
+
+    expect(() => validateBorderOceanStats(stats, config)).toThrow(
+      "border-ocean required counter missing: border_ocean.player_margin_m",
+    );
   });
 });
