@@ -10,6 +10,9 @@ import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMate
 const SUMMARY_EDGE_EPS = 0.0001;
 const SUMMARY_HEIGHT_RANGE_SHADE_M = 36.0;
 const SUMMARY_HEIGHT_RANGE_SHADE_STRENGTH = 0.28;
+const SUMMARY_CANOPY_TINT_STRENGTH = 0.45;
+const SUMMARY_WATER_TINT_STRENGTH = 0.70;
+const SUMMARY_WATER_NORMAL_FLATTEN = 0.45;
 
 export interface FarTerrainVertexColors {
   baseColor: Float32Array;
@@ -126,20 +129,41 @@ export function createFarTerrainMaterial(
         const atlasUv = vec2(atlasU, atlasV);
         const heightSample = texture(summaryAtlas.texture, atlasUv);
         const materialSample = texture(summaryAtlas.materialTexture, atlasUv);
-        const normalSample = texture(summaryAtlas.normalTexture, atlasUv);
+        const coverageSample = texture(summaryAtlas.coverageTexture, atlasUv);
         const inside = step(float(0.0), atlasUCells)
           .mul(step(atlasUCells, ringRefs.uWidthCells.sub(float(SUMMARY_EDGE_EPS))))
           .mul(step(float(0.0), atlasVCells))
           .mul(step(atlasVCells, ringRefs.uHeightCells.sub(float(SUMMARY_EDGE_EPS))));
         const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM.sub(float(SUMMARY_EDGE_EPS))));
         const atlasWeight = heightSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
-        const atlasNormal = normalize(normalSample.rgb.mul(float(2.0)).sub(vec3(1.0, 1.0, 1.0)));
+
+        const atlasUCellL = clamp(atlasUCell.sub(float(1.0)), float(0.0), ringRefs.uWidthCells.sub(float(1.0)));
+        const atlasUCellR = clamp(atlasUCell.add(float(1.0)), float(0.0), ringRefs.uWidthCells.sub(float(1.0)));
+        const atlasVCellD = clamp(atlasVCell.sub(float(1.0)), float(0.0), ringRefs.uHeightCells.sub(float(1.0)));
+        const atlasVCellU = clamp(atlasVCell.add(float(1.0)), float(0.0), ringRefs.uHeightCells.sub(float(1.0)));
+        const atlasUvL = vec2(atlasUCellL.add(float(0.5)).div(ringRefs.uWidthCells), atlasV);
+        const atlasUvR = vec2(atlasUCellR.add(float(0.5)).div(ringRefs.uWidthCells), atlasV);
+        const atlasUvD = vec2(atlasU, ringRefs.uRowOffsetCells.add(atlasVCellD).add(float(0.5)).div(uSummaryHeightCells));
+        const atlasUvU = vec2(atlasU, ringRefs.uRowOffsetCells.add(atlasVCellU).add(float(0.5)).div(uSummaryHeightCells));
+        const hL = texture(summaryAtlas.texture, atlasUvL).r;
+        const hR = texture(summaryAtlas.texture, atlasUvR).r;
+        const hD = texture(summaryAtlas.texture, atlasUvD).r;
+        const hU = texture(summaryAtlas.texture, atlasUvU).r;
+        const dx = max(atlasUCellR.sub(atlasUCellL), float(1.0)).mul(ringRefs.uCellM);
+        const dz = max(atlasVCellU.sub(atlasVCellD), float(1.0)).mul(ringRefs.uCellM);
+        const dhdx = hR.sub(hL).div(dx);
+        const dhdz = hU.sub(hD).div(dz);
+        const atlasNormal = normalize(vec3(float(0.0).sub(dhdx), float(1.0), float(0.0).sub(dhdz)));
+
         const heightRange = clamp(heightSample.b.sub(heightSample.g).div(float(SUMMARY_HEIGHT_RANGE_SHADE_M)), float(0.0), float(1.0));
         const rangeShade = float(1.0).sub(heightRange.mul(float(SUMMARY_HEIGHT_RANGE_SHADE_STRENGTH)).mul(atlasWeight));
         const atlasSurfaceColor = materialSample.rgb.mul(rangeShade);
+        const canopyColor = mix(atlasSurfaceColor, vec3(0.10, 0.24, 0.08), coverageSample.r.mul(float(SUMMARY_CANOPY_TINT_STRENGTH)));
+        const coverageColor = mix(canopyColor, vec3(0.05, 0.13, 0.23), coverageSample.g.mul(float(SUMMARY_WATER_TINT_STRENGTH)));
+        const coverageNormal = normalize(mix(atlasNormal, vec3(0.0, 1.0, 0.0), coverageSample.g.mul(float(SUMMARY_WATER_NORMAL_FLATTEN))));
         terrainHeight = mix(terrainHeight, heightSample.r, atlasWeight);
-        surfaceColor = mix(surfaceColor, atlasSurfaceColor, atlasWeight) as unknown as ReturnType<typeof vec3>;
-        surfaceNormal = normalize(mix(surfaceNormal, atlasNormal, atlasWeight)) as unknown as ReturnType<typeof vec3>;
+        surfaceColor = mix(surfaceColor, coverageColor, atlasWeight) as unknown as ReturnType<typeof vec3>;
+        surfaceNormal = normalize(mix(surfaceNormal, coverageNormal, atlasWeight)) as unknown as ReturnType<typeof vec3>;
       }
     }
 
