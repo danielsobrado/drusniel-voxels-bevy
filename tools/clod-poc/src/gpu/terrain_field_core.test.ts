@@ -57,27 +57,50 @@ describe("terrain_field_core density parity (with edits)", () => {
     { x: -64, y: 20, z: 0, r: 7, op: "add", falloff: 0.4, strength: 0.8 },
   ];
 
-  it("matches canonical density exactly with a mixed edit history", () => {
+  it("matches canonical density exactly with a mixed edit history at integer coordinates", () => {
     replaceDigEdits(edits);
     const resolved = resolveDigEdits(edits);
     for (const x of XS) {
       for (const z of ZS) {
-        const h = surfaceHeight(x, z);
+        const ix = Math.round(x);
+        const iz = Math.round(z);
+        const h = Math.round(surfaceHeight(ix, iz));
         for (const dy of [-8, -1, 0, 1, 10, 30]) {
-          const y = h + dy;
-          expect(densityCore(x, y, z, resolved)).toBe(density(x, y, z));
+          const iy = h + dy;
+          expect(densityCore(ix, iy, iz, resolved)).toBe(density(ix, iy, iz));
         }
       }
     }
   });
 
-  it("matches near each edit center where the brush dominates", () => {
+  it("matches near each edit center where the brush dominates at integer coordinates", () => {
     replaceDigEdits(edits);
     const resolved = resolveDigEdits(edits);
     for (const e of edits) {
-      for (const off of [-3, -0.5, 0, 0.5, 3]) {
-        const y = e.y + off;
-        expect(densityCore(e.x, y, e.z, resolved)).toBe(density(e.x, y, e.z));
+      const ix = Math.round(e.x);
+      const iz = Math.round(e.z);
+      for (const off of [-3, -1, 0, 1, 3]) {
+        const iy = Math.round(e.y) + off;
+        expect(densityCore(ix, iy, iz, resolved)).toBe(density(ix, iy, iz));
+      }
+    }
+  });
+
+  // Fractional coordinates exercise the domain-warp noise interpolation path.
+  // Test WITHOUT edits: the canonical density() uses voxelEditStore.sampleDensity()
+  // which trilinear-interpolates from integer lattice corners near edits, while
+  // densityCore() evaluates the brush SDF continuously — these intentionally
+  // diverge at fractional positions.  Surface height parity is the key check.
+  it("matches canonical density at fractional coordinates (no edits)", () => {
+    const FRAC_XS = [-733.5, 0.25, 37.5, 285.71, 1024.75, -4096.5];
+    const FRAC_ZS = [-129.25, 1.5, 256.5, -2049.75, 5000.25];
+    for (const x of FRAC_XS) {
+      for (const z of FRAC_ZS) {
+        const h = surfaceHeight(x, z);
+        for (const dy of [-8, -0.5, 0, 0.5, 10]) {
+          const y = h + dy;
+          expect(densityCore(x, y, z, [])).toBe(density(x, y, z));
+        }
       }
     }
   });

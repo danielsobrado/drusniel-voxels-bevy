@@ -23,10 +23,6 @@ use super::summary::{
     TerrainSummaryField, TerrainSummaryRebuildState, terrain_summary_rebuild_system,
 };
 
-/// Named set for gate refresh to avoid `SystemTypeSet` ordering ambiguity.
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-struct ClodPageMeshGateSet;
-
 pub struct ClodPagesPlugin;
 
 impl Plugin for ClodPagesPlugin {
@@ -41,10 +37,6 @@ impl Plugin for ClodPagesPlugin {
             .init_resource::<ClodPageMeshGate>()
             .init_resource::<TerrainSummaryField>()
             .init_resource::<TerrainSummaryRebuildState>()
-            .configure_sets(
-                Update,
-                ClodPageMeshGateSet.before(crate::voxel::runtime::update_chunk_lod_system),
-            )
             .add_systems(Startup, clod_pages_startup_log_system)
             // Reads VoxelWorld immutably; the scheduler serializes it after the dirty mesher.
             .add_systems(
@@ -70,7 +62,7 @@ impl Plugin for ClodPagesPlugin {
             .add_systems(
                 Update,
                 (
-                    refresh_clod_page_mesh_gate_system.in_set(ClodPageMeshGateSet),
+                    refresh_clod_page_mesh_gate_system,
                     terrain_summary_rebuild_system,
                 )
                     .chain()
@@ -79,7 +71,7 @@ impl Plugin for ClodPagesPlugin {
             .add_systems(
                 Update,
                 clod_page_chunk_ownership_system
-                    .after(ClodPageMeshGateSet)
+                    .after(refresh_clod_page_mesh_gate_system)
                     .after(VoxelTerrainSet::MeshDirty),
             );
     }

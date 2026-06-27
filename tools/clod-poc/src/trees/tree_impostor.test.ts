@@ -88,8 +88,9 @@ trees:
   it("deep-clones impostor settings", () => {
     const cloned = cloneTreeSettings();
     expect(cloned.impostors).not.toBe(DEFAULT_TREE_SETTINGS.impostors);
-    cloned.impostors.enabled = false;
-    expect(DEFAULT_TREE_SETTINGS.impostors.enabled).toBe(true);
+    const originalValue = DEFAULT_TREE_SETTINGS.impostors.enabled;
+    cloned.impostors.enabled = !originalValue;
+    expect(DEFAULT_TREE_SETTINGS.impostors.enabled).toBe(originalValue);
   });
 });
 

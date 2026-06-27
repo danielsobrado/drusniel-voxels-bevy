@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeEach } from "vitest";
 import * as THREE from "three";
 import {
   DEFAULT_GRASS_SHADER_MODE,
@@ -34,9 +34,15 @@ import {
   grassGpuRingGrid,
   grassGpuRingSlotCount,
 } from "./gpu/grass_ring_compute.js";
-import { addDigEdit, clearDigEdits, surfaceHeight } from "./terrain/terrain.js";
+import { addDigEdit, clearDigEdits, surfaceHeight, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
 import { buildGrassInstancedGeometry } from "./gpu/grass_node_material.js";
 import type { PageFootprint } from "./types.js";
+
+beforeEach(() => {
+  setBorderCoastRuntime(null);
+  setTerrainSurfaceOverride(null);
+  clearDigEdits();
+});
 
 const footprint: PageFootprint = { minX: 0, minZ: 0, maxX: 16, maxZ: 16 };
 const settings: GrassSettings = {
@@ -46,6 +52,12 @@ const settings: GrassSettings = {
   slopeMinY: 0,
   bladeSpacing: 2,
   maxBlades: 1000,
+  placement: {
+    ...DEFAULT_GRASS_SETTINGS.placement,
+    minHeightM: 0,
+    maxHeightM: 128,
+    slopeMinY: 0,
+  },
 };
 
 function findSite(predicate: (site: GrassTerrainSite) => boolean): { x: number; z: number; site: GrassTerrainSite } | null {
@@ -261,20 +273,28 @@ grass:
   });
 
   it("computes terrain-aware grass masks and near-field scruff", () => {
-    const water = findSite((site) => site.waterDepth > 0);
-    expect(water).not.toBeNull();
-    expect(water?.site.grassMask).toBe(0);
+    setTerrainSurfaceOverride((x, z) => {
+      if (x < 32) return 10;
+      return 24;
+    });
+    try {
+      const water = findSite((site) => site.waterDepth > 0);
+      expect(water).not.toBeNull();
+      expect(water?.site.grassMask).toBe(0);
 
-    const viable = findSite((site) =>
-      site.waterDepth === 0 &&
-      site.rockWeight < 0.4 &&
-      site.snowWeight < 0.08 &&
-      site.normalY >= settings.slopeMinY);
-    expect(viable).not.toBeNull();
-    if (!viable) return;
-    const far = sampleGrassTerrainSite(viable.x, viable.z, settings, 128);
-    const near = sampleGrassTerrainSite(viable.x, viable.z, settings, 0);
-    expect(near.grassMask).toBeGreaterThanOrEqual(far.grassMask);
+      const viable = findSite((site) =>
+        site.waterDepth === 0 &&
+        site.rockWeight < 0.4 &&
+        site.snowWeight < 0.08 &&
+        site.normalY >= settings.slopeMinY);
+      expect(viable).not.toBeNull();
+      if (!viable) return;
+      const far = sampleGrassTerrainSite(viable.x, viable.z, settings, 128);
+      const near = sampleGrassTerrainSite(viable.x, viable.z, settings, 0);
+      expect(near.grassMask).toBeGreaterThanOrEqual(far.grassMask);
+    } finally {
+      setTerrainSurfaceOverride(null);
+    }
   });
 
   it("terrain-patch-v2 records generation stats and respects the blade budget", () => {
@@ -314,12 +334,17 @@ grass:
   });
 
   it("generates a super-far ring tier when the distance budget reaches meadow range", () => {
-    const ring = generateGrassRingInstances(
-      { x: 128, z: 128 },
-      { ...settings, shaderMode: "webgpu-ring-v1", distance: 220, bladeSpacing: 2.4, maxBlades: 3500 },
-      256,
-    );
-    expect(ring.super.length).toBeGreaterThan(0);
+    setTerrainSurfaceOverride((x, z) => 24);
+    try {
+      const ring = generateGrassRingInstances(
+        { x: 256, z: 256 },
+        { ...settings, shaderMode: "webgpu-ring-v1", distance: 220, bladeSpacing: 2.4, maxBlades: 8000 },
+        512,
+      );
+      expect(ring.super.length).toBeGreaterThan(0);
+    } finally {
+      setTerrainSurfaceOverride(null);
+    }
   });
 
   it("uses a fixed GPU slot grid instead of a CPU candidate buffer", () => {
@@ -478,7 +503,17 @@ grass:
   });
 
   it("expands grass bounds for actual source width and instance width scale", () => {
-    const boundedSettings = { ...settings, bladeWidth: 0.08, windStrength: 0 };
+    const boundedSettings = {
+      ...settings,
+      bladeWidth: 0.08,
+      windStrength: 0,
+      blade: {
+        ...settings.blade,
+        maxWidthCompensation: 2.6,
+        farTuftWidthM: 0.25,
+        widthM: 0.05,
+      },
+    };
     const source = createGrassTuftGeometry(boundedSettings);
     const geometry = new THREE.InstancedBufferGeometry();
     populateGrassGeometry(geometry, source, { minX: 8, minZ: 8, maxX: 8, maxZ: 8 }, [{

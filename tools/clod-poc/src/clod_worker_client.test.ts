@@ -6,6 +6,8 @@ class MockWorker {
   onerror: ((event: ErrorEvent) => void) | null = null;
   postMessage = vi.fn();
   terminate = vi.fn();
+  addEventListener = vi.fn();
+  removeEventListener = vi.fn();
 }
 
 beforeAll(() => {

@@ -61,7 +61,7 @@ describe("border coast/ocean config", () => {
   });
 
   it("fails clearly when a required section is missing", () => {
-    const missingSurf = yamlText.replace(/surf:\n[\s\S]*?\ndeep_ocean:/, "deep_ocean:");
+    const missingSurf = yamlText.replace(/surf:\r?\n[\s\S]*?\r?\ndeep_ocean:/, "deep_ocean:");
 
     expect(() => parseBorderCoastOceanConfig(missingSurf)).toThrow(
       "missing required section 'surf'",

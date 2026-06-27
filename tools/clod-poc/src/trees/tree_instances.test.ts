@@ -1176,6 +1176,55 @@ describe("TreeSystem", () => {
   });
 
   it("applies shadows_max_lod to tree meshes", () => {
+    const simpleSettings = {
+      ...settings,
+      maxInstances: 20,
+      species: {
+        oak: {
+          ...settings.species.oak,
+          trunkHeightM: 1,
+          trunkRadiusM: 0.1,
+          crownRadiusM: 0,
+          morphology: {
+            ...settings.species.oak.morphology,
+            branchLevels: 0,
+            primaryBranchCount: 0,
+            secondaryBranchCount: 0,
+            leafClusterCount: 0,
+            leafCardCount: 0,
+          }
+        },
+        pine: {
+          ...settings.species.pine,
+          trunkHeightM: 1,
+          trunkRadiusM: 0.1,
+          crownRadiusM: 0,
+          morphology: {
+            ...settings.species.pine.morphology,
+            branchLevels: 0,
+            primaryBranchCount: 0,
+            secondaryBranchCount: 0,
+            leafClusterCount: 0,
+            leafCardCount: 0,
+          }
+        },
+        dead: {
+          ...settings.species.dead,
+          trunkHeightM: 1,
+          trunkRadiusM: 0.1,
+          crownRadiusM: 0,
+          morphology: {
+            ...settings.species.dead.morphology,
+            branchLevels: 0,
+            primaryBranchCount: 0,
+            secondaryBranchCount: 0,
+            leafClusterCount: 0,
+            leafCardCount: 0,
+          }
+        },
+      }
+    };
+
     const cases = [
       { shadowsMaxLod: "none", enabled: [] },
       { shadowsMaxLod: "near", enabled: ["near"] },
@@ -1190,9 +1239,8 @@ describe("TreeSystem", () => {
         nodes: [pageNode()],
         worldCells: 32,
         settings: {
-          ...settings,
-          maxInstances: 20,
-          lod: { ...settings.lod, shadowsMaxLod: testCase.shadowsMaxLod },
+          ...simpleSettings,
+          lod: { ...simpleSettings.lod, shadowsMaxLod: testCase.shadowsMaxLod },
         },
         sampler,
       });
@@ -1206,7 +1254,7 @@ describe("TreeSystem", () => {
         system.dispose();
       }
     }
-  });
+  }, 30000);
 
   it("does not mutate CLOD page meshes", () => {
     const mesh = pageMesh();

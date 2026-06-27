@@ -90,3 +90,5 @@ tools/clod-poc/shots/phase-1/*.png
 tools/clod-poc/shots/phase-1/*
 tools/clod-poc/acceptance-runs/*
 tools/clod-poc/public/tmp/*
+tools/clod-poc/textures/pbr/*.zip
+

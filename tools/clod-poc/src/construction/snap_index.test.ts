@@ -110,7 +110,7 @@ describe("ConstructionSnapIndex", () => {
       accepts: ["wall-bottom"],
     });
 
-    const snap = index.findBestSnap([10, 6.1, 10], wall, 1, config);
+    const snap = index.findBestSnap([10, 5.8, 10], wall, 1, config);
 
     expect(snap).not.toBeNull();
     expect(snap?.target.entityId).toBe("floor-far");

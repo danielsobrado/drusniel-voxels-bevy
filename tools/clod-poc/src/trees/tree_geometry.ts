@@ -53,8 +53,14 @@ export function treeGeometryKey(settings: TreeSettings): string {
     budgets: settings.lod.budgets,
     species: TREE_SPECIES.map((species) => {
       const config = settings.species[species];
-      return [config.trunkHeightM, config.trunkRadiusM, config.crownRadiusM];
+      return {
+        trunkHeightM: config.trunkHeightM,
+        trunkRadiusM: config.trunkRadiusM,
+        crownRadiusM: config.crownRadiusM,
+        morphology: config.morphology,
+      };
     }),
+    foliage: settings.foliage,
   });
 }
 

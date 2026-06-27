@@ -194,15 +194,15 @@ export function generateGrassRingInstances(
         priority: distance + hash2(cellX, cellZ, settings.seed + 1701) * 0.01,
         tier,
         instance: {
-          x,
-          z,
-          y: site.height,
+          offset: [x, site.height, z],
           height: settings.bladeHeight * heightScale,
-          widthScale,
-          yaw: hash2(cellX, cellZ, settings.seed + 1801) * TWO_PI,
-          windPhase,
+          rotationY: hash2(cellX, cellZ, settings.seed + 1801) * TWO_PI,
+          phase: windPhase,
+          colorMix: Math.min(1, Math.pow(hash2(cellX, cellZ, settings.seed + 701), 2) + site.wetBank * 0.16 + site.sandWeight * 0.12),
           edgeFade,
-          normal: site.terrainNormal,
+          normalY: site.normalY,
+          terrainNormal: site.terrainNormal,
+          widthScale,
         },
       });
     }

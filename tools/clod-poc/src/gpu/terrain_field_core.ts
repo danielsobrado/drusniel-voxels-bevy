@@ -22,7 +22,7 @@ export const DIG_INFLUENCE_MARGIN = 4;
 
 const TERRAIN_CONFIG = {
   height: { min: 14, max: 118 },
-  continent: { scale: 0.001, amplitude: 40, octaves: 2, persistence: 0.5, lacunarity: 2.0 },
+  continent: { scale: 0.001, amplitude: 40, octaves: 2, persistence: 0.5, lacunarity: 2.0, warpStrength: 220 },
   mountains: {
     scale: 0.008,
     amplitude: 120,
@@ -34,9 +34,10 @@ const TERRAIN_CONFIG = {
     massifAmplitude: 38,
     massifThreshold: 0.38,
     massifPower: 1.65,
+    warpStrength: 52,
   },
-  hills: { scale: 0.025, amplitude: 25, octaves: 4, persistence: 0.5, lacunarity: 2.0 },
-  detail: { scale: 0.1, amplitude: 3, octaves: 3, persistence: 0.5, lacunarity: 2.0 },
+  hills: { scale: 0.025, amplitude: 25, octaves: 4, persistence: 0.5, lacunarity: 2.0, warpStrength: 19 },
+  detail: { scale: 0.1, amplitude: 3, octaves: 3, persistence: 0.5, lacunarity: 2.0, warpStrength: 4 },
 };
 
 // ---- noise (verbatim from terrain.ts) -------------------------------------
@@ -61,15 +62,15 @@ function smoothstepRange(edge0: number, edge1: number, value: number): number {
   return smooth((value - edge0) / denominator);
 }
 
-function valueNoise2(x: number, z: number): number {
+function valueNoise2(x: number, z: number, seed = TERRAIN_SEED): number {
   const xi = Math.floor(x);
   const zi = Math.floor(z);
-  const xf = smooth(x - Math.floor(x));
-  const zf = smooth(z - Math.floor(z));
-  const a = hashPositionSeeded(xi, zi);
-  const b = hashPositionSeeded(xi + 1, zi);
-  const c = hashPositionSeeded(xi, zi + 1);
-  const d = hashPositionSeeded(xi + 1, zi + 1);
+  const xf = smooth(x - xi);
+  const zf = smooth(z - zi);
+  const a = hashPositionSeeded(xi, zi, seed);
+  const b = hashPositionSeeded(xi + 1, zi, seed);
+  const c = hashPositionSeeded(xi, zi + 1, seed);
+  const d = hashPositionSeeded(xi + 1, zi + 1, seed);
   return a + (b - a) * xf + (c - a) * zf + (a - b - c + d) * xf * zf;
 }
 
@@ -80,36 +81,88 @@ function fbmConfigurable(
   octaves: number,
   persistence: number,
   lacunarity: number,
+  seed = TERRAIN_SEED,
 ): number {
   let value = 0;
   let amplitude = 1;
-  let frequency = scale;
+  let frequency = Math.max(1e-8, scale);
   let maxValue = 0;
-  for (let i = 0; i < octaves; i++) {
-    value += amplitude * valueNoise2(x * frequency, z * frequency);
+  const oct = Math.max(1, Math.floor(octaves));
+  for (let i = 0; i < oct; i++) {
+    value += amplitude * valueNoise2(
+      x * frequency + i * 37.17,
+      z * frequency - i * 19.31,
+      seed + i * 101,
+    );
     maxValue += amplitude;
     amplitude *= persistence;
     frequency *= lacunarity;
   }
-  return value / maxValue;
+  return maxValue > 0 ? value / maxValue : 0;
+}
+
+function ridgedFbmConfigurable(
+  x: number,
+  z: number,
+  scale: number,
+  octaves: number,
+  persistence: number,
+  lacunarity: number,
+  power: number,
+  seed = TERRAIN_SEED,
+): number {
+  let value = 0;
+  let amplitude = 1;
+  let frequency = Math.max(1e-8, scale);
+  let maxValue = 0;
+  const oct = Math.max(1, Math.floor(octaves));
+  for (let i = 0; i < oct; i++) {
+    const n = valueNoise2(
+      x * frequency + i * 83.9,
+      z * frequency - i * 47.3,
+      seed + i * 131,
+    );
+    const ridge = Math.pow(1 - Math.abs(n * 2 - 1), power);
+    value += amplitude * ridge;
+    maxValue += amplitude;
+    amplitude *= persistence;
+    frequency *= lacunarity;
+  }
+  return maxValue > 0 ? value / maxValue : 0;
 }
 
 function ridgedNoise(x: number, z: number): number {
   const cfg = TERRAIN_CONFIG.mountains;
-  let value = 0;
-  let amplitude = 1;
-  let frequency = cfg.scale;
-  let maxValue = 0;
-  for (let i = 0; i < cfg.octaves; i++) {
-    const sample = valueNoise2(x * frequency + i * 100, z * frequency + i * 100);
-    const centered = sample * 2 - 1;
-    const ridge = Math.pow(1 - Math.abs(centered), cfg.ridgePower);
-    value += ridge * amplitude;
-    maxValue += amplitude;
-    amplitude *= cfg.persistence;
-    frequency *= cfg.lacunarity;
-  }
-  return (value / maxValue) * cfg.amplitude;
+  return ridgedFbmConfigurable(
+    x,
+    z,
+    cfg.scale,
+    cfg.octaves,
+    cfg.persistence,
+    cfg.lacunarity,
+    cfg.ridgePower,
+    TERRAIN_SEED + 37,
+  ) * cfg.amplitude;
+}
+
+// Intentional duplication of procedural_noise.ts domainWarpedFbm2 for GPU-shaped
+// parity.  Keep in lockstep with that implementation; the test suite pins both
+// to the same output.
+function domainWarpedFbmConfigurable(
+  x: number,
+  z: number,
+  scale: number,
+  octaves: number,
+  persistence: number,
+  lacunarity: number,
+  warpStrength: number,
+  seed = TERRAIN_SEED,
+): number {
+  const warpScale = scale * 0.31;
+  const warpOctaves = Math.max(1, Math.min(3, octaves));
+  const wx = fbmConfigurable(x + 137.5, z - 91.25, warpScale, warpOctaves, 0.5, 2.0, seed + 811) * 2 - 1;
+  const wz = fbmConfigurable(x - 233.75, z + 57.5, warpScale, warpOctaves, 0.5, 2.0, seed + 1451) * 2 - 1;
+  return fbmConfigurable(x + wx * warpStrength, z + wz * warpStrength, scale, octaves, persistence, lacunarity, seed);
 }
 
 function massifCellMask(x: number, z: number): number {
@@ -152,18 +205,32 @@ function softenHeightCap(height: number, minHeight: number, maxHeight: number): 
 /** Terrain surface height at (x,z). Mirror of terrain.ts surfaceHeight. */
 export function surfaceHeightCore(x: number, z: number): number {
   const cfg = TERRAIN_CONFIG;
-  const continentNoise = fbmConfigurable(
+  const continentNoise = domainWarpedFbmConfigurable(
     x,
     z,
     cfg.continent.scale,
     cfg.continent.octaves,
     cfg.continent.persistence,
     cfg.continent.lacunarity,
+    cfg.continent.warpStrength,
+    TERRAIN_SEED + 101,
   );
   const continent = continentNoise * cfg.continent.amplitude * 0.55;
 
-  const mountainSignal = fbmConfigurable(x, z, cfg.mountains.scale * 0.25, 2, 0.5, 2.0);
-  const massifSignal = fbmConfigurable(x + 4096, z - 2048, cfg.mountains.massifScale, 3, 0.52, 2.0);
+  const mountainSignal = domainWarpedFbmConfigurable(
+    x, z, cfg.mountains.scale * 0.25, 2, 0.5, 2.0,
+    cfg.mountains.warpStrength, TERRAIN_SEED + 211,
+  );
+  const massifSignal = domainWarpedFbmConfigurable(
+    x + 4096,
+    z - 2048,
+    cfg.mountains.massifScale,
+    3,
+    0.52,
+    2.0,
+    cfg.mountains.warpStrength * 1.6,
+    TERRAIN_SEED + 307,
+  );
   const massifMask = Math.max(
     Math.pow(
       smoothstepRange(cfg.mountains.massifThreshold, 1.0, massifSignal),
@@ -176,14 +243,28 @@ export function surfaceHeightCore(x: number, z: number): number {
   const mountains = ridgedNoise(x, z) * mountainRegion * (1 + massifMask * 0.55);
   const mountainUplift = cfg.mountains.amplitude * 0.18 * mountainRegion + cfg.mountains.massifAmplitude * massifMask;
 
-  const valleySignal = fbmConfigurable(x + 1375, z - 911, cfg.continent.scale * 2.2, 3, 0.55, 2.0);
+  const valleySignal = domainWarpedFbmConfigurable(
+    x + 1375, z - 911, cfg.continent.scale * 2.2, 3, 0.55, 2.0,
+    120, TERRAIN_SEED + 409,
+  );
   const valleyMask = smoothstepRange(0.22, 0.08, valleySignal);
   const valleyCarve = valleyMask * 14 * (1 - mountainRegion * 0.75);
 
-  const hillNoise = fbmConfigurable(x, z, cfg.hills.scale, cfg.hills.octaves, cfg.hills.persistence, cfg.hills.lacunarity);
+  const hillNoise = domainWarpedFbmConfigurable(
+    x, z, cfg.hills.scale, cfg.hills.octaves, cfg.hills.persistence,
+    cfg.hills.lacunarity, cfg.hills.warpStrength, TERRAIN_SEED + 503,
+  );
   const hills = hillNoise * cfg.hills.amplitude * 0.45;
 
-  const detailNoise = fbmConfigurable(x, z, cfg.detail.scale, cfg.detail.octaves, cfg.detail.persistence, cfg.detail.lacunarity);
+  const detailFbm = fbmConfigurable(
+    x, z, cfg.detail.scale, cfg.detail.octaves, cfg.detail.persistence,
+    cfg.detail.lacunarity, TERRAIN_SEED + 607,
+  );
+  const detailWarp = domainWarpedFbmConfigurable(
+    x, z, cfg.detail.scale * 0.8, 2, 0.5, 2.0,
+    cfg.detail.warpStrength, TERRAIN_SEED + 701,
+  );
+  const detailNoise = detailFbm * 0.65 + detailWarp * 0.35;
   const detail = detailNoise * cfg.detail.amplitude;
 
   const minSurface = Math.max(cfg.height.min, MIN_NORMAL_TERRAIN_SURFACE_Y);
@@ -252,6 +333,15 @@ function brushSdfCore(shape: number, dx: number, dy: number, dz: number, r: numb
   return Math.hypot(dx, (dy * r) / h, dz) - r; // sphere -> ellipsoid when h != r
 }
 
+/** Blend weight for a brush edit at a given SDF distance.  Hard-edge when falloff is zero,
+ *  smooth ramp otherwise.  Mirrors the WGSL brush_weight function. */
+function brushWeight(sdf: number, falloff: number, r: number, strength: number): number {
+  if (falloff > 0) {
+    return Math.min(1, Math.max(0, -sdf / Math.max(1e-3, falloff * r))) * strength;
+  }
+  return sdf <= 0 ? strength : 0;
+}
+
 /** density > 0 = solid, < 0 = air. Mirror of terrain.ts density with explicit resolved edits. */
 export function densityCore(x: number, y: number, z: number, edits: readonly ResolvedDigEdit[]): number {
   let d = surfaceHeightCore(x, z) - y;
@@ -262,9 +352,7 @@ export function densityCore(x: number, y: number, z: number, edits: readonly Res
       if (Math.abs(dx) > reachXZ || Math.abs(dy) > reachY || Math.abs(dz) > reachXZ) continue;
       const sdf = brushSdfCore(e.shape, dx, dy, dz, e.r, e.h);
       const full = e.opAdd === 1 ? Math.max(d, -sdf) : Math.min(d, sdf);
-      const feather = Math.max(1e-3, e.falloff * e.r);
-      const weight = Math.min(1, Math.max(0, -sdf / feather)) * e.strength;
-      d += (full - d) * weight;
+      d += (full - d) * brushWeight(sdf, e.falloff, e.r, e.strength);
     }
   }
   return d;

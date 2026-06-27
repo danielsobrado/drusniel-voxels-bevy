@@ -293,6 +293,10 @@ fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, norm
 
 fn process_slot(slot: u32) {
   let grid = params.counts_b.y;
+  // Keep density_a live so the pipeline layout stays stable across shader
+  // variants.  Without this read, WGSL may strip the binding and misalign
+  // the uniform offsets for variants that do consume it.
+  _ = params.density_a;
   if (slot >= grid * grid || params.counts_b.x == 0u) { return; }
   let wc = world_cell(slot);
   let seed = params.counts_b.z;

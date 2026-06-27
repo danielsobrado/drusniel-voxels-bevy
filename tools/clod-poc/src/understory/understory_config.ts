@@ -189,10 +189,10 @@ const terrainDefaults = (
 ): UnderstoryTerrainClassWeights => ({ density, shrub, fern, sapling, flower, dead_log: deadLog, stump });
 
 export const DEFAULT_UNDERSTORY_TERRAIN_WEIGHTS: UnderstoryTerrainWeights = {
-  grass: terrainDefaults(1.15, 1.0, 1.15, 0.9, 1.25, 0.65, 0.7),
-  rock: terrainDefaults(0.55, 0.75, 0.35, 0.7, 0.18, 1.25, 1.2),
-  sand: terrainDefaults(0.7, 0.55, 0.35, 0.35, 0.8, 0.55, 0.5),
-  snow: terrainDefaults(0.28, 0.42, 0.18, 0.22, 0.05, 1.45, 1.25),
+  grass: terrainDefaults(1.20, 1.00, 1.18, 0.92, 1.30, 0.60, 0.65),
+  rock: terrainDefaults(0.48, 0.62, 0.24, 0.55, 0.08, 1.35, 1.28),
+  sand: terrainDefaults(0.62, 0.44, 0.22, 0.24, 0.75, 0.48, 0.44),
+  snow: terrainDefaults(0.18, 0.30, 0.10, 0.12, 0.02, 1.60, 1.35),
 };
 
 export const DEFAULT_UNDERSTORY_GPU_SETTINGS: UnderstoryGpuSettings = {

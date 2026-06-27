@@ -39,11 +39,16 @@ trees:
     dither_enabled: false
     shadows_max_lod: near
     budgets:
-      near_max_vertices: 60000
-      mid_max_vertices: 22000
-      far_max_vertices: 9000
+      # Budgets are high because procedural grammar trees generate real
+      # branch/leaf geometry instead of alpha cards.  Typical range:
+      #   near: 30k-260k  mid: 13k-90k  far: 6.5k-40k
+      near_max_vertices: 260000
+      mid_max_vertices: 90000
+      far_max_vertices: 40000
       impostor_max_vertices: 240
 
+  # Impostors disabled: procedural grammar trees use real geometry; billboard
+  # impostors are not needed until the tree count requires them for LOD.
   impostors:
     enabled: false
     bake_on_start: false
@@ -138,6 +143,8 @@ trees:
         cluster_bias: 1.0
         old_forest_bias: 0.85
 
+  # Foliage alpha cards disabled: procedural grammar trees generate real
+  # branch/leaf geometry, making billboard cards redundant.
   foliage:
     enabled: false
     alpha_test: 0

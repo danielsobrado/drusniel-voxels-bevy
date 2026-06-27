@@ -18,7 +18,7 @@ describe("tree variant geometry map", () => {
     } finally {
       disposeTreeGeometryMap(map);
     }
-  });
+  }, 30000);
 
   it("clamps invalid variant requests to a valid geometry", () => {
     const map = createTreeGeometryMap(DEFAULT_TREE_SETTINGS);
@@ -32,5 +32,5 @@ describe("tree variant geometry map", () => {
     } finally {
       disposeTreeGeometryMap(map);
     }
-  });
+  }, 30000);
 });

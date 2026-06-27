@@ -69,8 +69,8 @@ describe("tree GPU ring compute helpers", () => {
     expect(u32[44]).toBe(99);
     expect(u32[45]).toBe(treeGpuRingGrid(settings));
     expect(u32[46]).toBe(1234);
-    expect(f32[48]).toBe(1);
-    expect(f32[51]).toBe(5);
+    expect(f32[48]).toBeCloseTo(1.08, 4);
+    expect(f32[51]).toBeCloseTo(0.08, 4);
   });
 
   it("keys ring resources by settings that affect scatter and draw capacity", () => {

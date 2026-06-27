@@ -8,6 +8,7 @@ import {
   understoryRingRequestsDebugReadback,
   understoryRingSlotCount,
   UNDERSTORY_RING_GROUP_COUNT,
+  UNDERSTORY_RING_CLASS_STRIDE_F32,
 } from "../understory/understory_ring_math.js";
 import {
   packUnderstoryRingClassParams,
@@ -161,9 +162,9 @@ describe("understory ring param packing", () => {
 
   it("packs one class param row per class", () => {
     const rows = packUnderstoryRingClassParams(DEFAULT_UNDERSTORY_SETTINGS);
-    expect(rows.length).toBe(UNDERSTORY_RING_GROUP_COUNT * 8);
+    expect(rows.length).toBe(UNDERSTORY_RING_GROUP_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
     UNDERSTORY_CLASSES.forEach((cls, index) => {
-      const base = index * 8;
+      const base = index * UNDERSTORY_RING_CLASS_STRIDE_F32;
       expect(rows[base + 0]).toBeCloseTo(DEFAULT_UNDERSTORY_SETTINGS.classes[cls].weight);
       expect(rows[base + 1]).toBeCloseTo(DEFAULT_UNDERSTORY_SETTINGS.classes[cls].density);
       expect(rows[base + 6]).toBe(DEFAULT_UNDERSTORY_SETTINGS.classes[cls].enabled ? 1 : 0);

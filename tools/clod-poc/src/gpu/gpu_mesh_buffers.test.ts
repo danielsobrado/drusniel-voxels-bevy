@@ -2,7 +2,8 @@
 // (a byte-offset mismatch silently feeds the GPU garbage), and that assembling readback arrays
 // reproduces the canonical surface end-to-end.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
+import { voxelEditStore } from "../terrain/voxel_edits/voxel_edit_store.js";
 import {
   Y_CELLS,
   DIG_EDIT_WORDS,
@@ -84,6 +85,10 @@ describe("packDigEdits", () => {
 });
 
 describe("assembleChunkMesh end-to-end", () => {
+  beforeEach(() => {
+    voxelEditStore.clear();
+  });
+
   it("reproduces the canonical surface from max-sized readback arrays", () => {
     const S = 4;
     const world = { cellsX: 16, cellsZ: 16 };

@@ -177,9 +177,9 @@ export const DEFAULT_GRASS_PLACEMENT_SETTINGS: GrassPlacementSettings = {
 export const DEFAULT_GRASS_LOD_SETTINGS: GrassLodSettings = {
   nearFraction: 0.42,
   midFraction: 0.78,
-  farDensityRatio: 0.18,
+  farDensityRatio: 0.14,
   midInstanceFraction: 0.35,
-  farInstanceFraction: 0.12,
+  farInstanceFraction: 0.10,
   ditherBandM: 12,
 };
 
@@ -191,9 +191,9 @@ export const DEFAULT_GRASS_BLADE_SETTINGS: GrassBladeSettings = {
   midBladesPerInstance: 3,
   nearSegments: 4,
   midSegments: 2,
-  farTuftWidthM: 0.28,
+  farTuftWidthM: 0.14,
   nearCrossedQuads: true,
-  maxWidthCompensation: 2.6,
+  maxWidthCompensation: 1.35,
 };
 
 export const DEFAULT_GRASS_WIND_SETTINGS: GrassWindSettings = {

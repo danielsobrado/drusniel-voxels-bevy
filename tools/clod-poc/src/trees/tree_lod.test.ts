@@ -49,7 +49,7 @@ describe("tree LOD selection", () => {
   it("returns secondary LOD and fade weights inside a crossfade band", () => {
     const crossfadeSettings: TreeSettings = {
       ...settings,
-      lod: { ...settings.lod, crossfadeEnabled: true, crossfadeBandM: 20 },
+      lod: { ...settings.lod, crossfadeEnabled: true, ditherEnabled: true, crossfadeBandM: 20 },
     };
 
     const beforeThreshold = selectTreeLod(45, null, crossfadeSettings);
