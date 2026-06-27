@@ -110,14 +110,38 @@ function cloneBounds(bounds: ClodPageNode["bounds"]): ClodPageNode["bounds"] {
   };
 }
 
-function snapshotLod0Nodes(): Lod0Snapshot[] {
-  if (!result) return [];
-  return (result.nodesByLevel.get(0) ?? []).map((node) => ({
+function snapshotLod0Node(node: ClodPageNode): Lod0Snapshot {
+  return {
     node,
     mesh: node.mesh,
     bounds: cloneBounds(node.bounds),
     chunkMeshes: node.chunkMeshes ? [...node.chunkMeshes] : undefined,
-  }));
+  };
+}
+
+function snapshotLod0Nodes(regions: readonly DirtyCellBounds[]): Lod0Snapshot[] {
+  if (!result || !cfg || !index) return [];
+  const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const keys = new Set<string>();
+  for (const dirty of pageParentDirtyGroups(regions)) {
+    const touched: [number, number][] = [];
+    const minPx = Math.max(0, Math.floor(dirty.minX / span));
+    const maxPx = Math.min(result.worldPagesX - 1, Math.floor(dirty.maxX / span));
+    const minPz = Math.max(0, Math.floor(dirty.minZ / span));
+    const maxPz = Math.min(result.worldPagesZ - 1, Math.floor(dirty.maxZ / span));
+    for (let pz = minPz; pz <= maxPz; pz++) {
+      for (let px = minPx; px <= maxPx; px++) touched.push([px, pz]);
+    }
+    for (const [px, pz] of expandQuadSiblingPages(touched, 0, result.worldPagesX, result.worldPagesZ)) {
+      keys.add(`${px},${pz}`);
+    }
+  }
+  const snapshots: Lod0Snapshot[] = [];
+  for (const key of keys) {
+    const node = index[0]?.get(key);
+    if (node) snapshots.push(snapshotLod0Node(node));
+  }
+  return snapshots;
 }
 
 function restoreLod0Nodes(snapshots: readonly Lod0Snapshot[]): void {
@@ -501,7 +525,7 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
 function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
   const previousEdits = getDigEditsSnapshot();
-  const lod0Snapshot = snapshotLod0Nodes();
+  const lod0Snapshot = snapshotLod0Nodes(request.dirtyRegions);
   const parentQueueSnapshot = snapshotParentQueue();
   try {
     for (const edit of request.edits) addDigEdit(edit);
