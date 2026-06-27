@@ -6,6 +6,8 @@ const _frustum = new THREE.Frustum();
 const _projScreen = new THREE.Matrix4();
 const _sphere = new THREE.Sphere();
 const _box = new THREE.Box3();
+const _cellCenter = new THREE.Vector3();
+const _instanceCenter = new THREE.Vector3();
 
 export interface PropCullCamera {
   position: THREE.Vector3;
@@ -74,8 +76,8 @@ export function cullPropSpatialGrid(
     }
 
     if (frustum) {
-      const center = new THREE.Vector3(cell.bounds.center[0], cell.bounds.center[1], cell.bounds.center[2]);
-      if (!sphereInFrustum(center, cell.bounds.radius, frustum)) {
+      _cellCenter.set(cell.bounds.center[0], cell.bounds.center[1], cell.bounds.center[2]);
+      if (!sphereInFrustum(_cellCenter, cell.bounds.radius, frustum)) {
         culledCells++;
         culledInstances += cell.instanceIndices.length;
         continue;
@@ -109,8 +111,8 @@ export function cullPropSpatialGrid(
         visibleInstanceIndices.push(idx);
         continue;
       }
-      const center = new THREE.Vector3(inst.position[0], inst.position[1], inst.position[2]);
-      if (sphereInFrustum(center, radius, frustum)) {
+      _instanceCenter.set(inst.position[0], inst.position[1], inst.position[2]);
+      if (sphereInFrustum(_instanceCenter, radius, frustum)) {
         visibleInstanceIndices.push(idx);
       } else {
         culledInstances++;
