@@ -1,7 +1,10 @@
 import type GUI from "lil-gui";
 import type { NaadfIntegration } from "../../naadf/integration.js";
 import type { NaadfTraversalMode } from "../../naadf/config.js";
+import { NAADF_GPU_ATLAS_WINDOW_TILE_OPTIONS, isValidNaadfGpuAtlasWindowTiles } from "../../naadf/config.js";
 import type { GuiController } from "./gui_controller.js";
+
+const RELOAD_BACKED_PARAMS = new Set(["naadfAtlasWindow", "naadfGpuAtlasWindow"]);
 
 export interface NaadfGuiDeps {
   getIntegration: () => NaadfIntegration | null | undefined;
@@ -14,10 +17,12 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
   const folder = gui.addFolder("NAADF PoC");
   const debug = integration.config.debug;
   const traversal = integration.config.traversal;
+  const farShell = integration.config.farShell;
   const toggles = {
     enabled: integration.config.enabled,
     traversalMode: traversal.mode,
     hddaUseDirectionalBounds: traversal.hddaUseDirectionalBounds,
+    gpuAtlasWindowTiles: farShell.gpuAtlasWindowTiles,
     freezeStreamCenter: debug.freezeStreamCenter,
     showStreamCenter: debug.showStreamCenter,
     showPredictedStreamCenter: debug.showPredictedStreamCenter,
@@ -38,6 +43,11 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
   });
   folder.add(toggles, "hddaUseDirectionalBounds").name("HDDA directional bounds").onChange((v: boolean) => {
     traversal.hddaUseDirectionalBounds = v;
+  });
+  folder.add(toggles, "gpuAtlasWindowTiles", [...NAADF_GPU_ATLAS_WINDOW_TILE_OPTIONS]).name("GPU atlas window").onChange((v: number | string) => {
+    const next = Number(v);
+    if (!isValidNaadfGpuAtlasWindowTiles(next) || next === farShell.gpuAtlasWindowTiles) return;
+    reloadWithQueryParam("naadfAtlasWindow", String(next));
   });
   folder.add(toggles, "freezeStreamCenter").name("freeze stream center").onChange((v: boolean) => {
     debug.freezeStreamCenter = v;
@@ -170,4 +180,13 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
       stats.shadowProxySamples = snap.shadowProxySamples;
     },
   };
+}
+
+function reloadWithQueryParam(key: string, value: string): void {
+  const next = new URLSearchParams(location.search);
+  for (const reloadBackedKey of RELOAD_BACKED_PARAMS) {
+    next.delete(reloadBackedKey);
+  }
+  next.set(key, value);
+  location.assign(`${location.pathname}?${next.toString()}${location.hash}`);
 }
