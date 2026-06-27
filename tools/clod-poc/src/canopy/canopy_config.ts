@@ -34,7 +34,7 @@ function readNumber(value: unknown, fallback: number): number {
 }
 
 function readRgb(value: unknown, fallback: [number, number, number]): [number, number, number] {
-  if (!Array.isArray(value) || value.length !== 3) return fallback;
+  if (!Array.isArray(value) || value.length !== 3) return [...fallback];
   const r = readNumber(value[0], fallback[0]);
   const g = readNumber(value[1], fallback[1]);
   const b = readNumber(value[2], fallback[2]);
@@ -57,7 +57,7 @@ function parseRings(raw: unknown, fallback: CanopyClipmapRingConfig[]): CanopyCl
 }
 
 function parseConfig(raw: Record<string, unknown> | undefined, fallback: Config): Config {
-  if (!raw) return { ...fallback, source: { ...fallback.source }, distances: { ...fallback.distances }, clipmap: { ...fallback.clipmap, rings: fallback.clipmap.rings.map((r) => ({ ...r })) }, treeDistribution: { ...fallback.treeDistribution }, material: { ...fallback.material }, debug: { ...fallback.debug }, budgets: { ...fallback.budgets } };
+  if (!raw) return structuredClone(fallback);
   const source = (raw.source ?? {}) as Record<string, unknown>;
   const distances = (raw.distances ?? {}) as Record<string, unknown>;
   const clipmap = (raw.clipmap ?? {}) as Record<string, unknown>;
@@ -135,14 +135,29 @@ export function validateCanopyShellConfig(config: CanopyShellConfig): void {
   if (d.impostorEndM > d.shellFullM) {
     throw new Error(`canopy_shell: impostor_end_m (${d.impostorEndM}) must be <= shell_full_m (${d.shellFullM})`);
   }
+  if (d.shellStartM > d.shellFullM) {
+    throw new Error(`canopy_shell: shell_start_m (${d.shellStartM}) must be <= shell_full_m (${d.shellFullM})`);
+  }
   if (d.shellFullM > d.shellEndM) {
     throw new Error(`canopy_shell: shell_full_m (${d.shellFullM}) must be <= shell_end_m (${d.shellEndM})`);
+  }
+  if (d.shellEndM <= 0) {
+    throw new Error("canopy_shell: shell_end_m must be > 0");
+  }
+  if (d.fadeBandM <= 0) {
+    throw new Error("canopy_shell: fade_band_m must be > 0");
   }
   if (config.clipmap.cellSizeM <= 0) {
     throw new Error("canopy_shell: clipmap.cell_size_m must be > 0");
   }
   if (config.clipmap.tileSizeM <= 0) {
     throw new Error("canopy_shell: clipmap.tile_size_m must be > 0");
+  }
+  if (config.clipmap.evictionGraceSeconds < 0) {
+    throw new Error("canopy_shell: clipmap.eviction_grace_seconds must be >= 0");
+  }
+  if (config.clipmap.evictionGraceTiles < 0) {
+    throw new Error("canopy_shell: clipmap.eviction_grace_tiles must be >= 0");
   }
   let prevEnd = 0;
   for (let i = 0; i < config.clipmap.rings.length; i++) {
@@ -157,6 +172,15 @@ export function validateCanopyShellConfig(config: CanopyShellConfig): void {
       throw new Error(`canopy_shell: clipmap ring ${i} start_m must be < end_m`);
     }
     prevEnd = ring.endM;
+  }
+  if (config.budgets.maxTilesBuiltPerFrame < 0) {
+    throw new Error("canopy_shell: budgets.max_tiles_built_per_frame must be >= 0");
+  }
+  if (config.budgets.maxTextureUploadsPerFrame < 0) {
+    throw new Error("canopy_shell: budgets.max_texture_uploads_per_frame must be >= 0");
+  }
+  if (config.budgets.maxShellTris <= 0) {
+    throw new Error("canopy_shell: budgets.max_shell_tris must be > 0");
   }
   for (const key of ["baseTint", "pineTint", "broadleafTint", "deadwoodTint"] as const) {
     const c = config.material[key];
