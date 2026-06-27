@@ -24,6 +24,7 @@ const AXIS_Z = 2;
 const HIERARCHY_CHUNK_SPAN = 16;
 const HIERARCHY_BLOCK_SPAN = 4;
 const HIERARCHY_VOXEL_SPAN = 1;
+const SUN_MIN_SUMMARY_LEVEL = 2;
 
 const QUERYABLE_STATES: ReadonlySet<ResidentChunkEntry["state"]> = new Set([
   "ready",
@@ -536,12 +537,16 @@ function chooseSpanPlan(
     const mipChain = entry ? activeMipChain(entry) : null;
     if (mipChain) {
       const local = worldToLocalCell(x, z, key, chunkSize);
-      const level = mipLevelForDistance(
+      const rawLevel = mipLevelForDistance(
         dist,
         chunkSize,
         state.config.world.voxelSizeM,
         purpose === "sun" ? state.config.query.sunLodBias : state.config.query.primaryLodBias,
       );
+      const maxLevel = Math.max(0, mipChain.levels.length - 1);
+      const level = purpose === "sun"
+        ? Math.min(maxLevel, Math.max(SUN_MIN_SUMMARY_LEVEL, rawLevel))
+        : rawLevel;
       const node = sampleMipNodeAtWorld(mipChain, local.localX, local.localZ, level, chunkSize);
       if (node) {
         return { spanDim: spanDimForNode(node, level, state.config), node, source: "resident" };
