@@ -33,22 +33,22 @@ construction:
           local_pos: [0.0, 0.1, -1.0]
           direction: [0.0, 0.0, -1.0]
           group: floor-edge
-          accepts: [floor-edge, wall-bottom]
+          accepts: [floor-edge, wall-bottom, wall-top]
         - id: edge-south
           local_pos: [0.0, 0.1, 1.0]
           direction: [0.0, 0.0, 1.0]
           group: floor-edge
-          accepts: [floor-edge, wall-bottom]
+          accepts: [floor-edge, wall-bottom, wall-top]
         - id: edge-west
           local_pos: [-1.0, 0.1, 0.0]
           direction: [-1.0, 0.0, 0.0]
           group: floor-edge
-          accepts: [floor-edge, wall-bottom]
+          accepts: [floor-edge, wall-bottom, wall-top]
         - id: edge-east
           local_pos: [1.0, 0.1, 0.0]
           direction: [1.0, 0.0, 0.0]
           group: floor-edge
-          accepts: [floor-edge, wall-bottom]
+          accepts: [floor-edge, wall-bottom, wall-top]
 
     - id: wood-wall-2x2
       label: Wood Wall
@@ -61,12 +61,12 @@ construction:
           local_pos: [0.0, -1.0, 0.0]
           direction: [0.0, -1.0, 0.0]
           group: wall-bottom
-          accepts: [floor-edge]
+          accepts: [floor-edge, wall-top]
         - id: top
           local_pos: [0.0, 1.0, 0.0]
           direction: [0.0, 1.0, 0.0]
           group: wall-top
-          accepts: [wall-top, roof-edge]
+          accepts: [floor-edge, wall-bottom, wall-top, roof-edge]
         - id: left
           local_pos: [-1.0, 0.0, 0.0]
           direction: [-1.0, 0.0, 0.0]
@@ -89,7 +89,7 @@ construction:
           local_pos: [0.0, -0.5, 0.0]
           direction: [0.0, -1.0, 0.0]
           group: wall-bottom
-          accepts: [floor-edge]
+          accepts: [floor-edge, wall-top]
         - id: left
           local_pos: [-1.0, 0.0, 0.0]
           direction: [-1.0, 0.0, 0.0]
@@ -112,9 +112,9 @@ construction:
           local_pos: [0.0, -1.0, 0.0]
           direction: [0.0, -1.0, 0.0]
           group: floor-edge
-          accepts: [floor-edge]
+          accepts: [floor-edge, wall-top]
         - id: top
           local_pos: [0.0, 1.0, 0.0]
           direction: [0.0, 1.0, 0.0]
           group: wall-top
-          accepts: [wall-top, roof-edge]
+          accepts: [floor-edge, wall-bottom, wall-top, roof-edge]
