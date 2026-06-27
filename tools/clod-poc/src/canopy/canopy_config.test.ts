@@ -22,6 +22,36 @@ describe("canopy config", () => {
     expect(() => validateCanopyShellConfig(bad)).toThrow(/impostor_end_m/);
   });
 
+  it("rejects shell start after shell full distance", () => {
+    const bad = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
+    bad.distances.shellStartM = bad.distances.shellFullM + 1;
+    expect(() => validateCanopyShellConfig(bad)).toThrow(/shell_start_m/);
+  });
+
+  it("rejects non-positive shell and fade distances", () => {
+    const badShell = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
+    badShell.distances.shellEndM = 0;
+    expect(() => validateCanopyShellConfig(badShell)).toThrow(/shell_end_m/);
+
+    const badFade = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
+    badFade.distances.fadeBandM = 0;
+    expect(() => validateCanopyShellConfig(badFade)).toThrow(/fade_band_m/);
+  });
+
+  it("rejects invalid streaming budgets", () => {
+    const badTiles = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
+    badTiles.budgets.maxTilesBuiltPerFrame = -1;
+    expect(() => validateCanopyShellConfig(badTiles)).toThrow(/max_tiles_built_per_frame/);
+
+    const badUploads = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
+    badUploads.budgets.maxTextureUploadsPerFrame = -1;
+    expect(() => validateCanopyShellConfig(badUploads)).toThrow(/max_texture_uploads_per_frame/);
+
+    const badTris = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
+    badTris.budgets.maxShellTris = 0;
+    expect(() => validateCanopyShellConfig(badTris)).toThrow(/max_shell_tris/);
+  });
+
   it("applies query overrides", () => {
     const params = new URLSearchParams("canopy=0&canopySynthetic=1&freezeCanopy=1");
     const next = applyCanopyShellQueryOverrides(DEFAULT_CANOPY_SHELL_CONFIG, params);
