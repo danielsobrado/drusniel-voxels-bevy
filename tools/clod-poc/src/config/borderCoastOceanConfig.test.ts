@@ -147,7 +147,7 @@ describe("border coast/ocean config", () => {
   it("fails clearly for malformed gameplay fields", () => {
     expect(() =>
       parseBorderCoastOceanConfig(
-        yamlText.replace("soft_pushback_enabled: true", "soft_pushback_enabled: yes"),
+        yamlText.replace("soft_pushback_enabled: true", "soft_pushback_enabled: 1"),
       ),
     ).toThrow("gameplay.soft_pushback_enabled must be boolean");
   });
