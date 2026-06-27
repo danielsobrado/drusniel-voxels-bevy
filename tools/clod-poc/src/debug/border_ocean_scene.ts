@@ -90,7 +90,7 @@ export const DEFAULT_BORDER_OCEAN_SCENE_CONFIG: BorderOceanSceneConfig = {
   },
   acceptance: {
     minDeepOceanVertices: 1000,
-    maxDeepOceanTriangles: 65536,
+    maxDeepOceanTriangles: 600000,
     maxDeepOceanDrawCalls: 1,
     maxTransitionGapVertices: 0,
     maxFrameMsP95: 50,
