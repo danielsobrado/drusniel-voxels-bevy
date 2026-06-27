@@ -59,7 +59,6 @@ export function createInfiniteFarShellMaterial(
   const debugOutput = mix(debugLit, debugColor, shellFade.mul(0.5));
 
   const material = new MeshBasicNodeMaterial();
-  material.vertexColors = true;
   material.side = THREE.DoubleSide;
   material.colorNode = mix(normalColor, debugOutput, uDebugFallback);
   material.userData.farShellMaterialUniforms = { uDebugFallback } satisfies FarShellMaterialUniformRefs;
