@@ -15,6 +15,7 @@ const MIN_INLAND_CORE_WORLD_FRACTION = 0.18;
 const BEACH_HIGHLAND_START_ABOVE_BACKSHORE = 6;
 const BEACH_HIGHLAND_FULL_EXTRA_CELLS = 12;
 const BEACH_HIGHLAND_PRESERVE_SHORE_FRACTION = 0.72;
+const BEACH_DRY_INFLUENCE_SHELF_FRACTION = 0.85;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -169,6 +170,13 @@ function beachCoastHeight(
   return lerp(dryBeach, inlandTarget, smooth01(delayedBackshoreT));
 }
 
+function beachShoreInfluence(edgeDistance: number, coast: BorderCoastBandConfig): number {
+  const shelf = Math.max(1, coast.beach.beachShelfCells);
+  const fadeStart = coast.oceanStartCells + shelf * BEACH_DRY_INFLUENCE_SHELF_FRACTION;
+  const fadeEnd = coast.oceanStartCells + shelf;
+  return 1 - smoothstepRange(fadeStart, fadeEnd, edgeDistance);
+}
+
 function beachHighlandPreserveWeight(
   edgeDistance: number,
   inlandHeight: number,
@@ -224,7 +232,9 @@ export function applyBorderCoastShape(
   if (edgeDistance < 0 || edgeDistance >= bandEnd + fadeCells) return inlandHeight;
 
   const cliffW = sampleCoastCliffWeight(x, z, coast);
-  const beach = beachCoastHeight(edgeDistance, inlandHeight, coast, config.ocean);
+  const rawBeach = beachCoastHeight(edgeDistance, inlandHeight, coast, config.ocean);
+  const beachReach = beachShoreInfluence(edgeDistance, coast);
+  const beach = lerp(inlandHeight, rawBeach, beachReach);
   const cliff = cliffCoastHeight(edgeDistance, inlandHeight, coast, config.ocean);
   const shaped = lerp(beach, cliff, cliffW);
   const beachW = 1 - cliffW;
