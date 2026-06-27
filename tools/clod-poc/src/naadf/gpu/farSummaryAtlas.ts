@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { FarSummaryTile } from "../types.js";
 import type { NaadfWorldState } from "../summaryStreamer.js";
+import { materialColorForDebugId } from "../../terrainMaterial/terrainMaterialBands.js";
 
 const DEFAULT_ATLAS_TILES_X = 3;
 const DEFAULT_ATLAS_TILES_Z = 3;
@@ -20,6 +21,7 @@ export interface FarSummaryGpuAtlasRingView {
 
 export interface FarSummaryGpuAtlasView {
   readonly texture: THREE.DataTexture;
+  readonly materialTexture: THREE.DataTexture;
   readonly rings: FarSummaryGpuAtlasRingView[];
   originX: number;
   originZ: number;
@@ -45,7 +47,8 @@ export class FarSummaryGpuAtlas {
   private readonly ringCount: number;
   private readonly ringWidthCells: number;
   private readonly ringHeightCells: number;
-  private readonly data: Float32Array;
+  private readonly heightData: Float32Array;
+  private readonly materialData: Float32Array;
   private lastSignature = "";
 
   constructor(options: FarSummaryGpuAtlasOptions) {
@@ -57,19 +60,15 @@ export class FarSummaryGpuAtlas {
     this.ringHeightCells = this.tileCells * this.tilesZ;
     const width = this.ringWidthCells;
     const height = this.ringHeightCells * this.ringCount;
-    this.data = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
+    this.heightData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
+    this.materialData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
 
-    const texture = new THREE.DataTexture(this.data, width, height, THREE.RGBAFormat, THREE.FloatType);
-    texture.name = "naadf-far-summary-height-atlas";
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.generateMipmaps = false;
-    texture.needsUpdate = true;
+    const texture = createFloatAtlasTexture(this.heightData, width, height, "naadf-far-summary-height-atlas");
+    const materialTexture = createFloatAtlasTexture(this.materialData, width, height, "naadf-far-summary-material-atlas");
 
     this.view = {
       texture,
+      materialTexture,
       rings: Array.from({ length: this.ringCount }, (_, ringIndex) => this.emptyRingView(ringIndex)),
       originX: 0,
       originZ: 0,
@@ -119,7 +118,8 @@ export class FarSummaryGpuAtlas {
     const signature = signatureParts.join(";");
     if (signature === this.lastSignature) return;
 
-    this.data.fill(0);
+    this.heightData.fill(0);
+    this.materialData.fill(0);
     let validRings = 0;
     for (let ringIndex = 0; ringIndex < this.ringCount; ringIndex++) {
       const ring = state.config.farClipmap.rings[ringIndex];
@@ -155,22 +155,26 @@ export class FarSummaryGpuAtlas {
     this.view.valid = validRings > 0 ? 1 : 0;
     this.view.revision++;
     this.view.texture.needsUpdate = true;
+    this.view.materialTexture.needsUpdate = true;
     this.lastSignature = signature;
   }
 
   dispose(): void {
     this.view.texture.dispose();
+    this.view.materialTexture.dispose();
   }
 
   private invalidate(): void {
     if (this.view.valid === 0 && this.lastSignature === "") return;
     this.view.valid = 0;
     this.view.revision++;
-    this.data.fill(0);
+    this.heightData.fill(0);
+    this.materialData.fill(0);
     for (let ringIndex = 0; ringIndex < this.ringCount; ringIndex++) {
       this.view.rings[ringIndex] = this.emptyRingView(ringIndex);
     }
     this.view.texture.needsUpdate = true;
+    this.view.materialTexture.needsUpdate = true;
     this.lastSignature = "";
   }
 
@@ -185,10 +189,16 @@ export class FarSummaryGpuAtlas {
       for (let x = 0; x < copyCells; x++) {
         const src = z * tile.resolution + x;
         const dst = ((baseZ + z) * atlasWidth + baseX + x) * FLOAT_RGBA_COMPONENTS;
-        this.data[dst] = tile.avgHeight[src] ?? 0;
-        this.data[dst + 1] = tile.minHeight[src] ?? 0;
-        this.data[dst + 2] = tile.maxHeight[src] ?? 0;
-        this.data[dst + 3] = 1;
+        this.heightData[dst] = tile.avgHeight[src] ?? 0;
+        this.heightData[dst + 1] = tile.minHeight[src] ?? 0;
+        this.heightData[dst + 2] = tile.maxHeight[src] ?? 0;
+        this.heightData[dst + 3] = 1;
+
+        const color = materialColorForDebugId(tile.dominantMaterial[src] ?? 0);
+        this.materialData[dst] = color[0];
+        this.materialData[dst + 1] = color[1];
+        this.materialData[dst + 2] = color[2];
+        this.materialData[dst + 3] = 1;
       }
     }
   }
@@ -206,6 +216,23 @@ export class FarSummaryGpuAtlas {
       valid: 0,
     };
   }
+}
+
+function createFloatAtlasTexture(
+  data: Float32Array,
+  width: number,
+  height: number,
+  name: string,
+): THREE.DataTexture {
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
+  texture.name = name;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function selectTiles(
