@@ -138,7 +138,7 @@ export const DEFAULT_BORDER_COAST_OCEAN_CONFIG: BorderCoastOceanConfig = {
     startOutsideBorderM: 64,
     extendCells: 384,
     surfaceY: 18,
-    segments: 64,
+    segments: 256,
     wave: { ...DEFAULT_DEEP_OCEAN_WAVE_CONFIG },
     shading: {
       ...DEFAULT_DEEP_OCEAN_SHADING_CONFIG,
@@ -357,9 +357,6 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
 
   const raw = readRecord(load(text));
   if (!raw) return cloneDefaults();
-
-  const legacy = readRecord(raw.border_coast_ocean);
-  if (legacy) return parseLegacyConfig(legacy);
-
-  return parseUnifiedConfig(raw);
+  if (raw.world || raw.materials || raw.surf) return parseUnifiedConfig(raw);
+  return parseLegacyConfig(raw);
 }

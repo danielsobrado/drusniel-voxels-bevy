@@ -73,8 +73,8 @@ deep_ocean:
   visual_extent_m: 4096
   near_grid_size_m: 512
   far_grid_size_m: 2048
-  near_subdivisions: 128
-  far_subdivisions: 64
+  near_subdivisions: 256
+  far_subdivisions: 256
 
   wave:
     gravity: 9.81

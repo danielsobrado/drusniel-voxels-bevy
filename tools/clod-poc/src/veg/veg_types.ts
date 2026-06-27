@@ -51,6 +51,15 @@ export interface LevelParams {
   planar?: number;
 }
 
+export interface FoliageCardParams {
+  /** 'lying' follows the bough plane; 'cross' adds a second perpendicular plane. */
+  mode: "lying" | "cross";
+  /** Scales card size relative to the foliage anchor scale. */
+  sizeK: number;
+  /** Optional bend along the card spine, in radians. */
+  bend?: number;
+}
+
 export interface FoliageParams {
   kind: "needleSpray" | "leafCluster";
   /** branch level that carries anchors */
@@ -69,6 +78,10 @@ export interface FoliageParams {
   normalBend: number;
   /** leaves/sprays alternate two-sided along the twig (vs spiral) */
   planarLeaves?: boolean;
+  /** Capture-tile style override for future atlas baking. */
+  captureStyle?: "frond";
+  /** Fable5-style cluster-card placement parameters. */
+  card?: FoliageCardParams;
   /** species leaf geometry */
   leaf: LeafShapeParams;
 }

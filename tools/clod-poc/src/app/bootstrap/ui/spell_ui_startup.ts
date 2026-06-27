@@ -21,6 +21,12 @@ export function runSpellUiStartup(_ctx: UiStartupContext): void {
     if (event.code === "Digit1" || event.code === "Numpad1") {
       event.preventDefault();
       menu.castFire();
+      return;
+    }
+
+    if (event.code === "Digit2" || event.code === "Numpad2") {
+      event.preventDefault();
+      menu.castWater();
     }
   };
 

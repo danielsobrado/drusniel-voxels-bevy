@@ -43,6 +43,7 @@ export class FireFlameRenderer {
     this.ensureLayer();
 
     if (!this.layer || !this.canvas) return;
+    this.layer.dataset.spell = "fire";
     this.layer.dataset.active = "true";
     delete this.layer.dataset.fallback;
 
@@ -128,6 +129,7 @@ export class FireFlameRenderer {
       document.body.appendChild(layer);
     }
     layer.classList.add("spell-vfx-layer");
+    layer.dataset.spell = "fire";
     layer.style.left = "0";
     layer.style.top = "0";
     layer.style.right = "0";
