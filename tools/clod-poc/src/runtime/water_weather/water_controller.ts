@@ -92,7 +92,7 @@ function readShoreSurfSettings(
   searchParams: URLSearchParams,
   borderCoast?: BorderCoastOceanConfig,
 ): ShoreSurfBandSettings {
-  const fromBorder = borderCoast?.enabled
+  const fromBorder: Partial<ShoreSurfBandSettings> = borderCoast?.enabled
     ? {
         enabled: true,
         startDistance: borderCoast.coast.oceanStartCells,
