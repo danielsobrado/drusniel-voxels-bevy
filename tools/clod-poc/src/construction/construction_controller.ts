@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { surfaceHeight } from "../terrain/terrain.js";
 import { defaultConstructionConfig } from "./config.js";
-import { createConstructionCandidate, createFreePlacementPosition, validatePersistedConstructionPlacement, type TerrainHitPoint } from "./placement.js";
+import { createConstructionCandidate, createFreePlacementPosition, type TerrainHitPoint } from "./placement.js";
+import { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
 import { ConstructionSnapIndex } from "./snap_index.js";
 import type {
   ConstructionCandidate,
@@ -385,7 +386,7 @@ class ConstructionControllerImpl implements ConstructionController {
       grounded: candidate.supportState === "grounded",
       parentIds: candidate.supportParentIds ?? [],
     };
-    if (!this.addPlacedPiece(placed, true, false)) return;
+    if (!this.addPlacedPiece(placed, true)) return;
     this.requestTerrainConform(candidate);
     this.currentCandidate = null;
     this.ghostMesh.visible = false;
@@ -393,25 +394,11 @@ class ConstructionControllerImpl implements ConstructionController {
     this.syncUi(true);
   }
 
-  private addPlacedPiece(placed: PlacedConstructionPiece, logPlacement: boolean, validatePlacement: boolean): boolean {
+  private addPlacedPiece(placed: PlacedConstructionPiece, logPlacement: boolean): boolean {
     const piece = this.piecesById.get(placed.typeId);
     if (!piece) return false;
     const normalized = this.normalizePlacedPiece(placed);
     if (!normalized) return false;
-    if (validatePlacement) {
-      const validation = validatePersistedConstructionPlacement({
-        piece,
-        placed: normalized,
-        placedPieces: this.placedPieces,
-        piecesById: this.piecesById,
-        worldCells: this.deps.worldCells,
-        config: this.config.placement,
-      });
-      if (!validation.valid) {
-        console.warn(`[construction] skipped invalid saved piece ${normalized.id}: ${validation.reason ?? "invalid"}`);
-        return false;
-      }
-    }
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(piece.dimensionsM[0], piece.dimensionsM[1], piece.dimensionsM[2]),
       new THREE.MeshStandardMaterial({ color: MATERIAL_COLORS[piece.material], roughness: 0.78 }),
@@ -450,7 +437,9 @@ class ConstructionControllerImpl implements ConstructionController {
       if (!raw) return;
       const parsed = JSON.parse(raw) as unknown;
       if (!Array.isArray(parsed)) return;
+
       let rewriteStorage = false;
+      const pending: PlacedConstructionPiece[] = [];
       for (const entry of parsed) {
         const placed = this.normalizePlacedPiece(entry);
         if (!placed || !this.piecesById.has(placed.typeId)) {
@@ -459,8 +448,46 @@ class ConstructionControllerImpl implements ConstructionController {
         }
         const suffix = Number(placed.id.startsWith(ENTITY_ID_PREFIX) ? placed.id.slice(ENTITY_ID_PREFIX.length) : NaN);
         if (Number.isInteger(suffix) && suffix >= this.nextEntityId) this.nextEntityId = suffix + 1;
-        if (!this.addPlacedPiece(placed, false, true)) rewriteStorage = true;
+        pending.push(placed);
       }
+
+      let madeProgress = true;
+      while (pending.length > 0 && madeProgress) {
+        madeProgress = false;
+        for (let index = pending.length - 1; index >= 0; index -= 1) {
+          const placed = pending[index]!;
+          const piece = this.piecesById.get(placed.typeId);
+          if (!piece) {
+            pending.splice(index, 1);
+            rewriteStorage = true;
+            continue;
+          }
+          const validation = validateStrictPersistedConstructionPlacement({
+            piece,
+            placed,
+            placedPieces: this.placedPieces,
+            piecesById: this.piecesById,
+            worldCells: this.deps.worldCells,
+            config: this.config.placement,
+            allowLegacySupportMetadata: true,
+          });
+          if (validation.valid) {
+            pending.splice(index, 1);
+            madeProgress = this.addPlacedPiece(placed, false) || madeProgress;
+            continue;
+          }
+          if (validation.reason !== "unsupported") {
+            console.warn(`[construction] skipped invalid saved piece ${placed.id}: ${validation.reason ?? "invalid"}`);
+            pending.splice(index, 1);
+            rewriteStorage = true;
+          }
+        }
+      }
+
+      for (const placed of pending) {
+        console.warn(`[construction] skipped invalid saved piece ${placed.id}: unsupported`);
+      }
+      if (pending.length > 0) rewriteStorage = true;
       if (rewriteStorage || this.placedPieces.length !== parsed.length) this.savePlacedPieces();
     } catch (error) {
       console.warn("[construction] failed to load saved pieces", error);
@@ -488,14 +515,8 @@ class ConstructionControllerImpl implements ConstructionController {
       position,
       rotationQuarterTurns: normalizeRotationQuarterTurns(rotation),
     };
-    const hasGrounded = typeof record.grounded === "boolean";
+    if (typeof record.grounded === "boolean") normalized.grounded = record.grounded;
     const parentIds = readStringArray(record.parentIds);
-    if (!hasGrounded && parentIds === undefined) {
-      normalized.grounded = true;
-      normalized.parentIds = [];
-      return normalized;
-    }
-    if (hasGrounded) normalized.grounded = record.grounded as boolean;
     if (parentIds !== undefined) normalized.parentIds = parentIds;
     return normalized;
   }
