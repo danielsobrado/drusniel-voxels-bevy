@@ -92,9 +92,22 @@ const WATER_DEBUG_LABELS: Record<WaterDebugMode, string> = {
   ssrHit: "SSR hit",
 };
 
+const MATERIAL_DEBUG_MODES = [
+  "final",
+  "depth",
+  "foam",
+  "fresnel",
+  "bodyMask",
+  "clipmapLevel",
+  "flow",
+  "refraction",
+  "reflection",
+  "ssrHit",
+] as const satisfies readonly WaterDebugMode[];
+
 const WATER_MODE_OPTIONS = Object.fromEntries(
-  Object.entries(WATER_DEBUG_MODES).map(([mode, id]) => [
-    `${WATER_DEBUG_LABELS[mode as WaterDebugMode]} (${id})`,
+  MATERIAL_DEBUG_MODES.map((mode) => [
+    `${WATER_DEBUG_LABELS[mode]} (${WATER_DEBUG_MODES[mode]})`,
     mode,
   ]),
 ) as Record<string, WaterDebugMode>;
@@ -195,18 +208,14 @@ function addRiverEcologyDebugFolder(
 ): { refresh: () => void } {
   const folder = parent.addFolder("river ecology debug");
   const actions = {
-    showClassification: () => setWaterDebugMode(state, bindings, "classification"),
-    showCarvedBed: () => setWaterDebugMode(state, bindings, "carvedBed"),
-    showWaterY: () => setWaterDebugMode(state, bindings, "waterY"),
     showFlow: () => setWaterDebugMode(state, bindings, "flow"),
     showFoam: () => setWaterDebugMode(state, bindings, "foam"),
+    showDepth: () => setWaterDebugMode(state, bindings, "depth"),
     showFinal: () => setWaterDebugMode(state, bindings, "final"),
   };
-  folder.add(actions, "showClassification").name("show classification");
-  folder.add(actions, "showCarvedBed").name("show carved bed");
-  folder.add(actions, "showWaterY").name("show water Y");
   folder.add(actions, "showFlow").name("show flow");
   folder.add(actions, "showFoam").name("show foam");
+  folder.add(actions, "showDepth").name("show depth");
   folder.add(actions, "showFinal").name("back to final");
 
   const readout = riverEcologyReadout();
