@@ -16,6 +16,7 @@ import type { ClodSelectionController } from "../selection/clod_selection_contro
 import type { TerrainRaycastService } from "../../player/terrain_raycast_service.js";
 
 const VEGETATION_REBUILD_DEBOUNCE_MS = 160;
+const VEGETATION_REBUILD_RETRY_MS = 1000;
 
 export interface TerrainBrushParams {
   digRadius: number;
@@ -82,6 +83,12 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     for (const id of ids) pending.delete(id);
   };
 
+  const hasEnabledPendingVegetation = (veg: TerrainEditVegetationState): boolean => (
+    (veg.grassEnabled && pendingGrassNodeIds.size > 0) ||
+    (veg.treesEnabled && pendingTreeNodeIds.size > 0) ||
+    (veg.understoryEnabled && pendingUnderstoryNodeIds.size > 0)
+  );
+
   const flushVegetationRebuilds = () => {
     vegetationFlushTimer = null;
     const veg = deps.getVegetationState();
@@ -117,6 +124,10 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       } catch (error) {
         console.error("understory rebuild after terrain edit failed:", error);
       }
+    }
+
+    if (vegetationFlushTimer === null && hasEnabledPendingVegetation(deps.getVegetationState())) {
+      vegetationFlushTimer = setTimeout(flushVegetationRebuilds, VEGETATION_REBUILD_RETRY_MS);
     }
   };
 
