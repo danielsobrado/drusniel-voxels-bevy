@@ -80,7 +80,6 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
     emitAudio("spell.fire.cast", {
       volume: config.fire.audio.volume,
       durationMs: config.fire.castDurationMs,
-      force: true,
     });
     activeReset = window.setTimeout(() => {
       fireButton.setAttribute("aria-pressed", "false");
