@@ -33,7 +33,7 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 CPU far summary tile stream
   -> packed RGBA32F GPU height atlas
   -> one vertical atlas band per far-summary ring
-  -> GPU material positionNode
+  -> nearest-filtered texel-center sampling in GPU material positionNode
   -> distance-selected atlas height displacement where alpha is valid
   -> procedural GPU displacement fallback where atlas is missing
   -> GPU material lighting / haze
@@ -73,7 +73,7 @@ Loaded from [`config/naadf_poc.yaml`](../config/naadf_poc.yaml). Key sections:
 
 Default traversal remains `dense`. Use `compare` before trusting HDDA changes. Compare mode runs the dense oracle with isolated metrics, runs HDDA against live metrics, and returns the dense result as a safe fallback if there is a mismatch. It increments both `naadf_hdda_dense_mismatches` and `naadf_hdda_fallback_to_dense` on fallback.
 
-Runtime far-shell height sampling defaults to `gpu`. CPU height sampling is only for debug/oracle checks and can be forced with `naadfHeightMode=cpu`.
+Runtime far-shell height sampling defaults to `gpu`. CPU height sampling is only for debug/oracle checks and can be forced with `naadfHeightMode=cpu`. GPU mode fails loudly if the required WebGPU far terrain material or GPU atlas is unavailable; it must not silently downgrade to CPU runtime sampling.
 
 Enable with `?naadf=1` or any `infinite-naadf-*` scene.
 
