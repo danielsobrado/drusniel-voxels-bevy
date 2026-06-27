@@ -211,7 +211,7 @@ export function buildFarTerrainShell(
     const debugCenterX = buildRelative ? 0 : centerX;
     const debugCenterZ = buildRelative ? 0 : centerZ;
     const vc = computeFarTerrainVertexColors(positions, normals, vertexCount, parityConfig, colorWorldOffsetX, colorWorldOffsetZ);
-    const colorAttr = createVertexColorBuffer(vc, parityConfig, undefined, debugCenterX, debugCenterZ, positions);
+    const colorAttr = createVertexColorBuffer(vc, parityConfig, normals, debugCenterX, debugCenterZ, positions);
     geometry.setAttribute("color", new THREE.BufferAttribute(colorAttr, 3));
   }
 
