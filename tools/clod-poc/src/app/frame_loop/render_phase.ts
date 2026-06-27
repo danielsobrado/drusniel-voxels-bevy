@@ -69,8 +69,11 @@ function logGrassProfile(
   );
 }
 
-function formatVegetationTiming(timing: VegetationFrameTiming): string {
-  return `grass ${timing.grassMs.toFixed(1)}` +
+function formatVegetationTiming(timing: VegetationFrameTiming, propsMs: number): string {
+  const restMs = Math.max(0, propsMs - timing.totalMs);
+  return `vegTotal ${timing.totalMs.toFixed(1)}` +
+    ` rest ${restMs.toFixed(1)}` +
+    ` grass ${timing.grassMs.toFixed(1)}` +
     ` trees ${timing.treesMs.toFixed(1)}` +
     ` under ${timing.understoryMs.toFixed(1)}` +
     ` forest ${timing.forestLightingMs.toFixed(1)}` +
@@ -133,7 +136,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
           ` | selection ${selectionStats.selectionMs.toFixed(1)}` +
           ` (cut ${selectionStats.subphases.cut.toFixed(1)} book ${selectionStats.subphases.book.toFixed(1)} info ${selectionStats.subphases.info.toFixed(1)} overlays ${selectionStats.subphases.overlays.toFixed(1)})` +
           ` bubble/chunks ${bubbleMs.toFixed(1)} (built ${input.chunkGroupsBuiltThisFrame})` +
-          ` props ${propsMs.toFixed(1)} (${formatVegetationTiming(input.vegetationTiming)})` +
+          ` props ${propsMs.toFixed(1)} (${formatVegetationTiming(input.vegetationTiming, propsMs)})` +
           ` render ${renderMs.toFixed(1)}` +
           ` other ${otherMs.toFixed(1)}` +
           ` | cut=${selectionStats.renderedCount} chunkGroups=${input.nearFieldBubbleController.size()} mode=${input.interaction.mode}`,
