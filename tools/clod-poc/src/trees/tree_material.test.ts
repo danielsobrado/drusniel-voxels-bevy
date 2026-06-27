@@ -27,9 +27,9 @@ describe("tree material shader injections", () => {
     expect(shader).toContain("treeSway");
   });
 
-  it("keeps foliage alpha driven by treeFoliageMask", () => {
+  it("keeps retired foliage alpha fragment injection inactive", () => {
     const shader = injectTreeFoliageFragmentShader(fragmentShader);
-    expect(shader).toContain("varying float vTreeFoliageMask");
-    expect(shader).toContain("diffuseColor.a = mix(1.0, diffuseColor.a, clamp(vTreeFoliageMask, 0.0, 1.0))");
+    expect(shader).toBe(fragmentShader);
+    expect(shader).not.toContain("diffuseColor.a = mix");
   });
 });
