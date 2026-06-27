@@ -7,7 +7,7 @@ import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 import type { FarSummaryGpuAtlasRingView, FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMaterial/terrainMaterialBands.js";
 
-const MAX_GPU_SUMMARY_RINGS = 3;
+const MAX_GPU_SUMMARY_RINGS = 8;
 
 export interface FarTerrainVertexColors {
   baseColor: Float32Array;
