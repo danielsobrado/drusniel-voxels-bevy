@@ -7,6 +7,7 @@ import { editIndex, editIds, editHeight, DIG_INFLUENCE_MARGIN, CELL_SIZE } from 
 import type { DigEdit } from "./terrain_edits.js";
 
 const Y_CELLS = 128;
+const CELL_KEY_STRIDE = 1_048_576;
 
 const QUAD_CELLS: Record<"x" | "y" | "z", [number, number, number][]> = {
   x: [[0, -1, -1], [0, 0, -1], [0, 0, 0], [0, -1, 0]],
@@ -22,7 +23,7 @@ interface VertBuf {
 }
 
 function cellKeySN(ci: number, cj: number, ck: number): number {
-  return ((ci + 512) * 2048 + (cj + 512)) * 2048 + (ck + 512);
+  return ((ci + 512) * CELL_KEY_STRIDE + (cj + 512)) * CELL_KEY_STRIDE + (ck + 512);
 }
 
 function finiteBounds(world: WorldBounds): boolean {
