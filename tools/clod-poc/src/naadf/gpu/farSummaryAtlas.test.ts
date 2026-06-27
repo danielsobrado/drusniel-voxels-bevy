@@ -32,6 +32,16 @@ function testState(farTiles: Map<string, any>, revision = 42): any {
 }
 
 describe("FarSummaryGpuAtlas", () => {
+  it("uses a wider 5x5 moving tile window by default", () => {
+    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, ringCount: 2 });
+
+    expect(atlas.view.widthCells).toBe(10);
+    expect(atlas.view.heightCells).toBe(20);
+    expect(atlas.view.rings[0]?.widthCells).toBe(10);
+    expect(atlas.view.rings[0]?.heightCells).toBe(10);
+    expect(atlas.view.rings[1]?.rowOffsetCells).toBe(10);
+  });
+
   it("packs ready far-summary heights into a float texture", () => {
     const atlas = new FarSummaryGpuAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
     const farTiles = new Map<string, any>();
