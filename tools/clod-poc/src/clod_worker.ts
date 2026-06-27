@@ -13,7 +13,14 @@ import { initClodCacheContext, clearWorkerPersistentCache, type ClodCacheContext
 import { isCacheRpcResponse } from "./cache/cacheWorkerRpc.js";
 import { dispatchCacheRpcResponse } from "./cache/workerRemotePersistentStore.js";
 import { createBuildCacheHooks, type CachedBuildStats } from "./cache/clodBuildCache.js";
-import { addDigEdit, replaceVoxelEdits, setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
+import {
+  addDigEdit,
+  getDigEditsSnapshot,
+  replaceDigEdits,
+  replaceVoxelEdits,
+  setBorderCoastRuntime,
+  setTerrainSurfaceOverride,
+} from "./terrain/terrain.js";
 import {
   collectBuildResultTransferables,
   collectNodeTransferables,
@@ -395,8 +402,14 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
 
 function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
-  for (const edit of request.edits) addDigEdit(edit);
-  postLod0Rebuild([request.requestId], request.dirtyRegions, request.edits.length);
+  const previousEdits = getDigEditsSnapshot();
+  try {
+    for (const edit of request.edits) addDigEdit(edit);
+    postLod0Rebuild([request.requestId], request.dirtyRegions, request.edits.length);
+  } catch (error) {
+    replaceDigEdits(previousEdits);
+    throw error;
+  }
 }
 
 function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): void {
