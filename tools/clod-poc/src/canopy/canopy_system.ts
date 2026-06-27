@@ -101,6 +101,16 @@ export function shouldAttemptTextureUpload(
   return maxTextureUploadsPerFrame > uploadsUsedThisFrame;
 }
 
+export function shouldUseSyntheticCanopyFallback(
+  config: CanopyShellConfig,
+  forceSynthetic: boolean,
+  visibleTileCount: number,
+): boolean {
+  if (forceSynthetic || config.debug.forceSyntheticSource) return true;
+  if (!config.clipmap.enabled) return false;
+  return visibleTileCount === 0 && config.source.allowSyntheticDebugFallback;
+}
+
 export function createCanopyShellSystem(
   yamlText: string,
   searchParams: URLSearchParams,
@@ -170,14 +180,13 @@ export function createCanopyShellSystem(
   };
 
   const ensureTextures = (forceSynthetic: boolean): boolean => {
+    const visibleTiles = clipmap.getVisibleTiles();
     const farRadius = config.distances.shellEndM;
-    const useSynthetic = forceSynthetic
-      || config.debug.forceSyntheticSource
-      || (clipmap.getVisibleTiles().length === 0 && config.source.allowSyntheticDebugFallback);
+    const useSynthetic = shouldUseSyntheticCanopyFallback(config, forceSynthetic, visibleTiles.length);
 
     const t0 = performance.now();
     const next = buildCanopyTextureSet({
-      visibleTiles: clipmap.getVisibleTiles(),
+      visibleTiles,
       config,
       centerX,
       centerZ,
