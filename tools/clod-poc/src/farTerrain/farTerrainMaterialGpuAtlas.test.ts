@@ -49,20 +49,24 @@ function uniformData(): FarTerrainUniformData {
   };
 }
 
-function atlasView(ringCount: number): FarSummaryGpuAtlasView {
-  const widthCells = 4;
-  const ringHeightCells = 4;
-  const heightCells = ringHeightCells * ringCount;
-  const texture = new THREE.DataTexture(
+function texture(widthCells: number, heightCells: number): THREE.DataTexture {
+  return new THREE.DataTexture(
     new Float32Array(widthCells * heightCells * 4),
     widthCells,
     heightCells,
     THREE.RGBAFormat,
     THREE.FloatType,
   );
+}
+
+function atlasView(ringCount: number): FarSummaryGpuAtlasView {
+  const widthCells = 4;
+  const ringHeightCells = 4;
+  const heightCells = ringHeightCells * ringCount;
 
   return {
-    texture,
+    texture: texture(widthCells, heightCells),
+    materialTexture: texture(widthCells, heightCells),
     rings: Array.from({ length: ringCount }, (_, index) => ({
       originX: 0,
       originZ: 0,
