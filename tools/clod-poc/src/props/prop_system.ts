@@ -375,6 +375,7 @@ export class PropSystem {
   }
 
   private enqueueRingJobs(desiredCellKeys: ReadonlySet<string>, camPos: [number, number, number]): void {
+    this.reconcilePendingCellJobs(desiredCellKeys);
     for (const key of this.activeCellKeys) {
       if (!desiredCellKeys.has(key)) this.enqueueCellJob(key, "leave");
     }
@@ -386,6 +387,20 @@ export class PropSystem {
         if (this.activeCellKeys.has(key)) this.enqueueCellJob(key, "refresh");
       }
       this.lastRefreshPos = [...camPos] as [number, number, number];
+    }
+  }
+
+  private reconcilePendingCellJobs(desiredCellKeys: ReadonlySet<string>): void {
+    for (const [key, kind] of this.cellJobMap) {
+      const desired = desiredCellKeys.has(key);
+      const active = this.activeCellKeys.has(key);
+      if (desired && kind === "leave") {
+        if (active) this.cellJobMap.delete(key);
+        else this.cellJobMap.set(key, "enter");
+      } else if (!desired && (kind === "enter" || kind === "refresh")) {
+        if (active) this.cellJobMap.set(key, "leave");
+        else this.cellJobMap.delete(key);
+      }
     }
   }
 
