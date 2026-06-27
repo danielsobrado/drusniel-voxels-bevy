@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
-import { createNearFieldBubbleController } from "./near_field_bubble_controller.js";
+import { createNearFieldBubbleController, requiredStreamingPageCoords } from "./near_field_bubble_controller.js";
 import type { ClodPageNode } from "../../types.js";
 
 vi.mock("../../terrain/terrain.js", async (importOriginal) => {
@@ -38,6 +38,16 @@ function makeView(node: ClodPageNode, target = 1) {
   return { node, mesh, fade: 1, target };
 }
 
+describe("requiredStreamingPageCoords", () => {
+  it("keeps requesting live pages around a moving center outside the finite world", () => {
+    const coords = requiredStreamingPageCoords(new THREE.Vector3(4096, 0, -2048), 96, 32);
+    const keys = new Set(coords.map((c) => `${c.px},${c.pz}`));
+
+    expect(coords.length).toBeGreaterThan(0);
+    expect(keys.has("128,-64")).toBe(true);
+  });
+});
+
 describe("createNearFieldBubbleController", () => {
   it("keeps welded page visible when GPU chunk meshing fails", async () => {
     const scene = new THREE.Scene();
@@ -67,6 +77,7 @@ describe("createNearFieldBubbleController", () => {
       chunkGroupBuildBudget: 4,
       maxCachedChunkGroups: 64,
       evictDistanceMultiplier: 2.5,
+      streamingLiveTerrain: false,
     });
 
     const node = makeNode();
@@ -130,6 +141,7 @@ describe("createNearFieldBubbleController", () => {
       chunkGroupBuildBudget: 4,
       maxCachedChunkGroups: 64,
       evictDistanceMultiplier: 2.5,
+      streamingLiveTerrain: false,
     });
 
     const node = makeNode();
