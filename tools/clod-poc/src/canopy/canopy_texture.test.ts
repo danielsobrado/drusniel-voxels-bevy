@@ -6,6 +6,7 @@ import { buildCanopySummaryTile, tileResolutionForCellSize } from "./canopy_summ
 import { buildTerrainSummary } from "../clod/terrain_summary.js";
 import { createBlendedTerrainSampler } from "./canopy_terrain_sampler.js";
 import { createTreeDistribution } from "./deterministic_tree_distribution.js";
+import type { CanopySummaryTile } from "./canopy_types.js";
 
 describe("canopy texture", () => {
   const config = parseCanopyShellConfig(canopyYaml);
@@ -38,6 +39,57 @@ describe("canopy texture", () => {
       expect(cov[i]).toBeLessThanOrEqual(1);
     }
     expect(set.syntheticFallback).toBe(false);
+  });
+
+  it("sanitizes invalid summary cell values before texture upload", () => {
+    const badTile: CanopySummaryTile = {
+      ...tile,
+      originX: 0,
+      originZ: 0,
+      resolution: 1,
+      cellSizeM: config.clipmap.tileSizeM,
+      cells: [{
+        groundHeight: Number.NaN,
+        canopyHeight: Number.NaN,
+        coverage: -0.25,
+        crownRoughness: Number.POSITIVE_INFINITY,
+        slope: 0,
+        moisture: 0,
+        speciesPine: Number.NaN,
+        speciesBroadleaf: -2,
+        speciesDeadwood: 0,
+      }],
+    };
+
+    const set = buildCanopyTextureSet({
+      visibleTiles: [badTile],
+      config,
+      centerX: config.distances.shellEndM,
+      centerZ: config.distances.shellEndM,
+      syntheticFallback: false,
+    });
+
+    const height = set.heightTexture.image.data as Float32Array;
+    const coverage = set.coverageTexture.image.data as Float32Array;
+    const species = set.speciesTexture.image.data as Float32Array;
+    const roughness = set.roughnessTexture.image.data as Float32Array;
+
+    for (const value of height) expect(Number.isFinite(value)).toBe(true);
+    for (const value of coverage) {
+      expect(Number.isFinite(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(1);
+    }
+    for (const value of species) {
+      expect(Number.isFinite(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(1);
+    }
+    for (const value of roughness) {
+      expect(Number.isFinite(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(1);
+    }
   });
 
   it("uses synthetic fallback only when requested", () => {
