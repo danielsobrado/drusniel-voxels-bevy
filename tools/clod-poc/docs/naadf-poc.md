@@ -11,7 +11,8 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 - NanoVDB-style span stepping at chunk/block/voxel scale in the heightfield PoC
 - Far clipmap summary rings for long-distance queries
 - Query API with explicit counters (near table, hash, far clipmap, missing, HDDA)
-- GPU procedural displacement for the runtime far shell
+- GPU far-summary height atlas for runtime far-shell displacement
+- GPU procedural displacement as fallback where summary atlas data is missing
 - CPU query/HDDA path as oracle/debug only
 - Canopy coverage flowing through summary chain
 - Sun visibility / terrain occlusion debug rays
@@ -20,7 +21,7 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 ## What it intentionally does not validate
 
 - Full 16³ voxel brick occupancy (heightfield PoC approximation only)
-- True GPU NAADF summary-tile texture/SSBO traversal yet
+- Full GPU HDDA/AADF traversal yet
 - Production GPU path tracing
 - CLOD page mesh replacement or gameplay collision
 - Sparse voxel octrees / DAGs
@@ -29,9 +30,11 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 ## Runtime data flow
 
 ```text
-far shell annular mesh
+CPU far summary tile stream
+  -> packed RGBA32F GPU height atlas
   -> GPU material positionNode
-  -> procedural height displacement in vertex shader
+  -> atlas height displacement where alpha is valid
+  -> procedural GPU displacement fallback where atlas is missing
   -> GPU material lighting / haze
 ```
 
@@ -87,7 +90,7 @@ Runtime overrides:
 ## Known limitations
 
 - Heightfield 2D mip summaries, not full 3D brick occupancy
-- Runtime far shell currently uses GPU procedural displacement, not uploaded NAADF summary-tile texture/SSBO sampling
+- Runtime far shell currently samples the first far-summary ring atlas plus procedural fallback; full multi-ring texture/SSBO selection is next
 - HDDA is a CLOD PoC approximation over the heightfield summary chain, not the production Rust/WGSL 16³ chunk → 4³ block → voxel implementation
 - CPU macro terrain fallback still exists for debug/oracle paths, but should not be on the runtime far-shell hot path in GPU mode
 - Sun visibility is debug-only stepping, not a path tracer
