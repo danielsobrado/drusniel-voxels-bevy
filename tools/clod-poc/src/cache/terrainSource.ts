@@ -7,6 +7,7 @@ import type { DigEdit, VoxelEditSnapshot } from "../terrain/terrain.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
+const TERRAIN_SOURCE_CACHE_VERSION = "coast-band-v2";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -142,6 +143,7 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
   const hydrologyHash = await hashHydrologyTerrain(source.hydrologyTerrain);
   const borderCoastHash = await hashBorderCoastConfig(source.borderCoastOceanConfig);
   return hashJson({
+    terrainSourceCacheVersion: TERRAIN_SOURCE_CACHE_VERSION,
     scene: source.scene,
     worldSeed: source.worldSeed,
     worldPages: source.worldPages,
