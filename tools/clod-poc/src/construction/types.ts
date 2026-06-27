@@ -7,9 +7,20 @@ export const SNAP_GROUPS = [
   "generic",
 ] as const;
 
+export const CONSTRUCTION_MATERIALS = [
+  "wood",
+  "brick",
+  "concrete",
+  "marble",
+  "tiles",
+  "stone",
+  "metal",
+  "thatch",
+] as const;
+
 export type SnapGroup = typeof SNAP_GROUPS[number];
 export type ConstructionCategory = "floor" | "wall" | "fence" | "pillar" | "roof" | "generic";
-export type ConstructionMaterial = "wood" | "stone" | "metal" | "thatch";
+export type ConstructionMaterial = typeof CONSTRUCTION_MATERIALS[number];
 export type ConstructionSupportState = "grounded" | "connected" | "unsupported";
 
 export interface ConstructionSnapPoint {
@@ -73,6 +84,7 @@ export interface PlacedConstructionPiece {
   typeId: string;
   position: readonly [number, number, number];
   rotationQuarterTurns: number;
+  material?: ConstructionMaterial;
   grounded?: boolean;
   parentIds?: readonly string[];
 }
