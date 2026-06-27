@@ -110,6 +110,24 @@ describe("player movement helpers", () => {
     ).toThrow("Player world bounds must have positive width and depth");
   });
 
+  it("fails when player bounds are not finite", () => {
+    expect(() =>
+      validatePlayerWorldBoundsFit(
+        { minX: 0, minZ: 0, maxX: Number.NaN, maxZ: 128 },
+        DEFAULT_PLAYER_CONFIG,
+      ),
+    ).toThrow("Player world bounds must be finite numbers");
+  });
+
+  it("fails when player margin is not finite", () => {
+    expect(() =>
+      validatePlayerWorldBoundsFit(
+        { minX: 0, minZ: 0, maxX: 128, maxZ: 128 },
+        { ...DEFAULT_PLAYER_CONFIG, worldEdgeMargin: Number.NaN },
+      ),
+    ).toThrow("Player world edge margin must be a finite number greater than 0");
+  });
+
   it("does not push inside the safe center", () => {
     const push = worldEdgePushbackAcceleration(
       new THREE.Vector3(64, 0, 64),
