@@ -19,6 +19,19 @@ describe("naadf config", () => {
     expect(config.farShell.heightSamplingMode).toBe("gpu");
   });
 
+  it("parses the configured GPU atlas window size", () => {
+    const config = parseNaadfPocConfig(naadfYaml);
+
+    expect(config.farShell.gpuAtlasWindowTiles).toBe(5);
+  });
+
+  it("defaults the GPU atlas window to 5 when omitted", () => {
+    const yaml = naadfYaml.replace("    gpu_atlas_window_tiles: 5\n", "");
+    const config = parseNaadfPocConfig(yaml);
+
+    expect(config.farShell.gpuAtlasWindowTiles).toBe(5);
+  });
+
   it("rejects invalid traversal modes", () => {
     const badYaml = naadfYaml.replace("mode: dense", "mode: unsafe-fast");
 
@@ -29,5 +42,11 @@ describe("naadf config", () => {
     const badYaml = naadfYaml.replace("height_sampling_mode: gpu", "height_sampling_mode: cpu-ish");
 
     expect(() => parseNaadfPocConfig(badYaml)).toThrow(/far_shell\.height_sampling_mode/);
+  });
+
+  it("rejects unsupported GPU atlas window sizes", () => {
+    const badYaml = naadfYaml.replace("gpu_atlas_window_tiles: 5", "gpu_atlas_window_tiles: 4");
+
+    expect(() => parseNaadfPocConfig(badYaml)).toThrow(/far_shell\.gpu_atlas_window_tiles/);
   });
 });
