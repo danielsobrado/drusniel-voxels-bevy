@@ -1,6 +1,8 @@
 import type { DeepOceanRenderConfig, RgbColor } from "../terrain/border_coast_config.js";
 import type { WaterVisualConfig } from "./waterConfig.js";
 
+const NODE_FOG_DISTANCE_SCALE = 4;
+
 function cloneColor(color: RgbColor): [number, number, number] {
   return [color[0], color[1], color[2]];
 }
@@ -20,6 +22,7 @@ export function resolveDeepOceanVisual(
     deepColor: cloneColor(shading.deepColor),
     foamColor: cloneColor(shading.foamColor),
     fresnelPower: shading.fresnelPower,
+    rippleLoopDistance: Math.max(1, shading.fogFarM / NODE_FOG_DISTANCE_SCALE),
     color: {
       ...base.color,
       turbidity: Math.max(0, shading.fogDensity),
