@@ -128,6 +128,14 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     deps.updateInfo();
   };
 
+  const reportRebuildFailure = (label: string, error: unknown): void => {
+    emitAudio("clod.rebuild.error");
+    if (error instanceof Error && error.name === "ClodBuildError") {
+      emitAudio("clod.validation.error");
+    }
+    console.error(`${label} rebuild failed:`, error);
+  };
+
   const performEditRebuild = async (
     edit: DigEdit,
     hit: TerrainRebuildHit,
@@ -139,12 +147,18 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     digRebuildsInFlight++;
     try {
       const margin = radius + DIG_INFLUENCE_MARGIN;
-      const lod0 = await deps.clodWorker.rebuildAfterDig(edit, {
-        minX: hit.point.x - margin,
-        maxX: hit.point.x + margin,
-        minZ: hit.point.z - margin,
-        maxZ: hit.point.z + margin,
-      });
+      let lod0: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>;
+      try {
+        lod0 = await deps.clodWorker.rebuildAfterDig(edit, {
+          minX: hit.point.x - margin,
+          maxX: hit.point.x + margin,
+          minZ: hit.point.z - margin,
+          maxZ: hit.point.z + margin,
+        });
+      } catch (error) {
+        reportRebuildFailure(label, error);
+        return false;
+      }
 
       applyLod0Result(lod0.changed, lod0.pendingParents);
       deps.setPendingParentNodes(0);
@@ -160,13 +174,6 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
         `[${label} ${edit.op ?? "edit"} ${edit.shape ?? "sphere"} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${summary} — ${lod0.pendingParents} ancestors queued in worker`,
       );
       return true;
-    } catch (error) {
-      emitAudio("clod.rebuild.error");
-      if (error instanceof Error && error.name === "ClodBuildError") {
-        emitAudio("clod.validation.error");
-      }
-      console.error(`${label} rebuild failed:`, error);
-      return false;
     } finally {
       digRebuildsInFlight--;
     }
