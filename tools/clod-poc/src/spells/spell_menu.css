@@ -3,7 +3,7 @@
   right: 10px;
   bottom: 10px;
   z-index: 13;
-  display: flex;
+  display: none;
   align-items: center;
   gap: 7px;
   padding: 7px 9px;
@@ -20,8 +20,12 @@
   user-select: none;
 }
 
-body[data-player-mode="choosingSpawn"] #spell-menu {
-  display: none;
+#spell-menu.visible {
+  display: flex;
+}
+
+body[data-player-mode="choosingSpawn"] #spell-menu.visible {
+  display: flex !important;
 }
 
 .spell-menu-hidden {

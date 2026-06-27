@@ -13,7 +13,7 @@ export function runSpellUiStartup(_ctx: UiStartupContext): void {
     const target = event.target;
     if (target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
     if (menuEl) {
-      menuEl.classList.toggle("spell-menu-hidden");
+      menuEl.classList.toggle("visible");
     }
   };
 
