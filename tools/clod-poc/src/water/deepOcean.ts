@@ -219,9 +219,9 @@ function createOceanLevel(
     coast_behavior: uCoastBehavior,
   });
   const displaced = vec3(
-    positionGeometry.x.add(waveSample.y),
+    positionGeometry.x,
     uWaterLevel.add(waveSample.x),
-    positionGeometry.z.add(waveSample.z),
+    positionGeometry.z,
   );
   const normalNode = normalize(vec3(waveSample.y.negate(), 1, waveSample.z.negate()));
   const worldPosition = displaced.add(vec3(uSnapOrigin.x, 0, uSnapOrigin.y));
