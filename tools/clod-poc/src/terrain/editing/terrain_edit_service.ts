@@ -150,9 +150,10 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       deps.setPendingParentMs(0);
 
       const totalMs = performance.now() - t0;
+      const batchSuffix = lod0.requestCount > 1 ? ` · batch ${lod0.requestCount}` : "";
       const summary =
         `${totalMs.toFixed(0)}ms worker LOD0 (build ${lod0.lod0Ms.toFixed(0)}ms · ${lod0.lod0Pages}p · ` +
-        `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · serialize ${lod0.serializeMs.toFixed(0)}ms)`;
+        `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · serialize ${lod0.serializeMs.toFixed(0)}ms${batchSuffix})`;
       deps.setLastDigSummary(summary);
       console.log(
         `[${label} ${edit.op ?? "edit"} ${edit.shape ?? "sphere"} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${summary} — ${lod0.pendingParents} ancestors queued in worker`,
