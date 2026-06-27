@@ -24,8 +24,10 @@ import {
   addDigEdit,
   clearDigEdits,
   DIG_INFLUENCE_MARGIN,
+  getDigEditsSnapshot,
   PAINT_BLEND_CHANNELS,
   paintWeightsAt,
+  replaceDigEdits,
   type DigEdit,
 } from "../terrain/terrain.js";
 import { TerrainColliderSet } from "../terrain/terrain_collider.js";
@@ -423,13 +425,15 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
       op: digOp,
       material: digOp === "add" ? digMaterial : undefined,
     };
+    const previousEdits = getDigEditsSnapshot();
     addDigEdit(edit);
 
     const margin = digRadius + DIG_INFLUENCE_MARGIN;
     const t0 = performance.now();
     digInFlight = true;
+    let rebuild: ReturnType<typeof rebuildDirtyPages>;
     try {
-      const rebuild = rebuildDirtyPages(
+      rebuild = rebuildDirtyPages(
         result,
         {
           minX: hit.point.x - margin,
@@ -439,6 +443,15 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
         },
         cfg,
       );
+    } catch (error) {
+      replaceDigEdits(previousEdits);
+      lastDigSummary = `FAILED: ${error instanceof Error ? error.message : String(error)}`;
+      console.error("[webgpu-preview] dig rebuild failed", error);
+      digInFlight = false;
+      return;
+    }
+
+    try {
       for (const node of rebuild.changed) {
         replaceNodeGeometry(node);
         if (node.level === 0) terrainColliders.updatePage(node.id, node.mesh);
@@ -451,7 +464,7 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
         `${(performance.now() - t0).toFixed(0)}ms sync (${rebuild.lod0Pages} LOD0, ${rebuild.parentNodes} parents)`;
     } catch (error) {
       lastDigSummary = `FAILED: ${error instanceof Error ? error.message : String(error)}`;
-      console.error("[webgpu-preview] dig failed", error);
+      console.error("[webgpu-preview] dig apply failed", error);
     } finally {
       digInFlight = false;
     }
@@ -520,80 +533,48 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
       perLevel.set(node.level, (perLevel.get(node.level) ?? 0) + 1);
     }
     for (const id of visibleIds) {
-      if (!nextVisible.has(id)) {
-        const view = views.get(id);
-        if (view) {
-          view.target = 0;
-          if (!useLodFade) {
-            view.fade = 0;
-            view.mesh.visible = false;
-            view.material.setFade(1, false, false);
-          }
-        }
-      }
+      if (nextVisible.has(id)) continue;
+      const view = views.get(id);
+      if (!view) continue;
+      view.target = 0;
+      if (!useLodFade) view.mesh.visible = false;
     }
     visibleIds = nextVisible;
-    renderedCount = rendered.length;
-    levelSummary = [...perLevel.keys()].sort((a, b) => a - b).map((l) => `L${l}:${perLevel.get(l)}`).join(" ");
   };
 
-  let frames = 0;
-  let fpsAccum = 0;
-  let fps = 0;
-  let elapsed = 0;
-  let last = performance.now();
+  updateSelection();
+
   renderer.setAnimationLoop(() => {
-    const now = performance.now();
-    const dt = Math.min((now - last) / 1000, 0.1);
-    last = now;
-    elapsed += dt;
-    grass?.setTime(elapsed);
-    frames++;
-    fpsAccum += dt;
-    if (fpsAccum >= 0.5) {
-      fps = frames / fpsAccum;
-      frames = 0;
-      fpsAccum = 0;
-    }
-    controls.update();
-    grassFocus.set(controls.target.x, controls.target.z);
-    grass?.setFadeCenter(grassFocus.x, grassFocus.y);
-    skyDome.position.copy(camera.position);
     updateGrassVisibility();
-    updateSelection();
-    if (useLodFade) {
-      for (const view of views.values()) {
-        if (view.fade < view.target) view.fade = Math.min(view.target, view.fade + fadeStep);
-        else if (view.fade > view.target) view.fade = Math.max(view.target, view.fade - fadeStep);
-        view.mesh.visible = view.fade > 0.001;
-        // Only the incoming node dithers in; the outgoing node stays solid underneath until
-        // it fully fades out, so the incoming's screen-door gaps reveal terrain, not holes.
-        const fadingIn = view.target > 0.5;
-        view.material.setFade(view.fade, true, fadingIn && view.fade > 0.001 && view.fade < 0.999);
-      }
-    }
-    stones?.update(camera.position);
-    if (terrainColliders && hoverPointerValid) {
-      raycaster.setFromCamera(hoverPointer, camera);
-      const hoverHit = terrainColliders.raycastSurface(raycaster.ray);
-      if (hoverHit) {
-        digPreview.position.copy(hoverHit.point);
-        digPreview.scale.setScalar(digRadius);
+    if (useDig && hoverPointerValid) {
+      const hit = terrainColliders?.raycastSurface(raycaster.ray) ?? null;
+      if (hit) {
         digPreview.visible = true;
+        digPreview.position.copy(hit.point);
+        digPreview.scale.setScalar(digRadius);
       } else {
         digPreview.visible = false;
       }
     }
-    if (postProcess) postProcess.render(scene, camera);
-    else renderer.render(scene, camera);
-    const stoneStats = stones?.getStats();
+    if (useLodFade) {
+      for (const view of views.values()) {
+        if (view.fade === view.target) continue;
+        view.fade = view.target > view.fade
+          ? Math.min(view.target, view.fade + fadeStep)
+          : Math.max(view.target, view.fade - fadeStep);
+        view.material.setFade(view.fade, true, view.target > 0);
+        if (view.fade <= 0 && view.target <= 0) view.mesh.visible = false;
+        else if (view.target > 0) view.mesh.visible = true;
+      }
+    }
     overlay.textContent =
-      `WebGPU CLOD preview — backend: ${backendName}\n` +
-      `world: ${world}x${world}   textures: ${proceduralTerrain ? `on (app procedural${useTextureParity ? " parity" : ""})` : "off"}   normals: ${useNormalMaps && proceduralTerrain ? "on" : "off"}   lod fade: ${useLodFade ? "on" : "off"}   grass: ${useGrass ? (useGrassV2 ? `v2${useGrassAlphaToCoverage ? " a2c" : ""}${debugGrassAttributes ? " attr-debug" : ""}${useGrassEdgeShape ? " edge-shape" : ""}` : "classic") : "off"}   stones: ${useStones ? "on" : "off"}   post: ${usePost ? "on" : "off"}   dig: ${useDig ? `on ${digOp} r=${digRadius}` : "off"}\n` +
-      `cut: ${renderedCount} nodes   ${levelSummary}\n` +
-      `fps: ${fps.toFixed(0)}   triangles: ${triangles.toLocaleString()}` +
-      (useGrass ? `   grass blades: ${grassBlades.toLocaleString()}${useGrassV2 ? ` (+${grassMidBlades.toLocaleString()} mid)` : ""}` : "") +
-      (stoneStats ? `   stones: ${stoneStats.visible.toLocaleString()}/${stoneStats.total.toLocaleString()}` : "") +
-      (useDig ? `\nedits: ${editCount}   last dig: ${lastDigSummary || "none"}` : "");
+      `WebGPU CLOD preview (${backendName})\n` +
+      `cut: ${renderedCount} nodes, ${triangles.toFixed(0)} tris, levels ${levelSummary}\n` +
+      `camera: ${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}\n` +
+      (useGrass ? `grass: ${grassBlades} near${useGrassV2 ? `, ${grassMidBlades} mid` : ""}\n` : "") +
+      (useStones ? `stones: ${stones?.stats?.totalStones ?? 0}\n` : "") +
+      (useDig ? `dig: ${digOp} r=${digRadius} ${lastDigSummary}\n` : "") +
+      `controls: orbit; ?dig=1 click terrain to edit`;
+    renderer.render(scene, camera);
   });
 }
