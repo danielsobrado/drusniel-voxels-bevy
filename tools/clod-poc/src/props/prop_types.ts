@@ -69,6 +69,14 @@ export interface PropSpatialSettings {
   cellSizeM: number;
   maxInstancesPerCellWarning: number;
   farCellUpdateIntervalFrames: number;
+  /** 0 means derive from the largest prop culling distance plus one cell. */
+  ringRadiusM: number;
+  /** Max dirty enter/leave/refresh cells rebuilt per frame. */
+  cellUpdateBudgetPerFrame: number;
+  /** Max instance matrix writes processed per frame. */
+  matrixUploadBudgetPerFrame: number;
+  /** Camera movement required before active prop cells are refreshed for LOD/shadow changes. */
+  lodRefreshDistanceM: number;
 }
 
 export interface PropCullingSettings {
