@@ -152,6 +152,46 @@ describe("border coast/ocean config", () => {
     ).toThrow("gameplay.soft_pushback_enabled must be boolean");
   });
 
+  it("fails clearly when hard clamp margin is disabled", () => {
+    expect(() =>
+      parseBorderCoastOceanConfig(
+        yamlText.replace("world_edge_margin_m: 16", "world_edge_margin_m: 0"),
+      ),
+    ).toThrow("gameplay.world_edge_margin_m must be greater than 0");
+  });
+
+  it("fails clearly when enabled soft pushback has no band", () => {
+    expect(() =>
+      parseBorderCoastOceanConfig(
+        yamlText.replace("pushback_start_inside_world_m: 48", "pushback_start_inside_world_m: 0"),
+      ),
+    ).toThrow("gameplay.pushback_start_inside_world_m must be greater than 0");
+  });
+
+  it("fails clearly when enabled soft pushback has no acceleration", () => {
+    expect(() =>
+      parseBorderCoastOceanConfig(
+        yamlText.replace("pushback_strength: 36", "pushback_strength: 0"),
+      ),
+    ).toThrow("gameplay.pushback_strength must be greater than 0");
+  });
+
+  it("allows zero pushback values when soft pushback is disabled", () => {
+    const config = parseBorderCoastOceanConfig(
+      yamlText
+        .replace("soft_pushback_enabled: true", "soft_pushback_enabled: false")
+        .replace("pushback_start_inside_world_m: 48", "pushback_start_inside_world_m: 0")
+        .replace("pushback_strength: 36", "pushback_strength: 0"),
+    );
+
+    expect(config.gameplay).toMatchObject({
+      soft_pushback_enabled: false,
+      world_edge_margin_m: 16,
+      pushback_start_inside_world_m: 0,
+      pushback_strength: 0,
+    });
+  });
+
   it("fails clearly for missing gameplay fields", () => {
     expect(() =>
       parseBorderCoastOceanConfig(
