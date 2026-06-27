@@ -19,4 +19,16 @@ describe("deep ocean visual config", () => {
     expect(visual.shallowColor).toEqual([0.4, 0.5, 0.6]);
     expect(visual.foamColor).toEqual([0.7, 0.8, 0.9]);
   });
+
+  it("maps configured deep ocean fog distance for the WebGPU node material", () => {
+    const visual = resolveDeepOceanVisual(DEFAULT_WATER_VISUAL, {
+      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
+      shading: {
+        ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean.shading,
+        fogFarM: 1800,
+      },
+    });
+
+    expect(visual.rippleLoopDistance).toBe(450);
+  });
 });
