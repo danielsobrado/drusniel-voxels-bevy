@@ -131,7 +131,7 @@ export class InfiniteFarShell {
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = false;
     this.mesh.frustumCulled = false;
-    if (this.heightSamplingMode === "gpu" && useParity) this.attachGpuDefaultVertexColors(vertexCount);
+    if (useParity) this.attachGpuDefaultVertexColors(vertexCount);
     this.metrics.farShellVertices = vertexCount;
     this.metrics.farShellTriangles = this.indices.length / 3;
     this.metrics.farShellGridRes = options.radialSegments;
@@ -252,7 +252,7 @@ export class InfiniteFarShell {
         this.snappedX,
         this.snappedZ,
       );
-      this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, this.normals, 0, 0, this.positions);
+      this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, undefined, 0, 0, this.positions);
       this.attachVertexColors();
     }
 
