@@ -8,6 +8,7 @@ import type { FarSummaryGpuAtlasRingView, FarSummaryGpuAtlasView } from "../naad
 import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMaterial/terrainMaterialBands.js";
 
 const MAX_GPU_SUMMARY_RINGS = 8;
+const SUMMARY_EDGE_EPS = 0.0001;
 
 export interface FarTerrainVertexColors {
   baseColor: Float32Array;
@@ -56,12 +57,6 @@ export interface FarTerrainMaterialOptions {
   heightBiasMeters?: number;
   summaryAtlas?: FarSummaryGpuAtlasView;
 }
-
-type GlobalNaadfAtlasProvider = {
-  __drusnielNaadf?: {
-    getFarSummaryGpuAtlasView?: () => FarSummaryGpuAtlasView | undefined;
-  };
-};
 
 export function createFarTerrainMaterial(
   lighting: FarShellLighting,
@@ -123,7 +118,7 @@ export function createFarTerrainMaterial(
       .add(cos(worldX.mul(0.013).sub(worldZ.mul(0.011))).mul(5.0));
     const detail = sin(worldX.mul(0.041).add(worldZ.mul(0.033))).mul(1.4);
     let terrainHeight = float(46.0).add(continent).add(hills).add(detail);
-    const summaryAtlas = options.summaryAtlas ?? getActiveFarSummaryGpuAtlasView();
+    const summaryAtlas = options.summaryAtlas;
 
     if (summaryAtlas) {
       uSummaryWidthCells = uniform(summaryAtlas.widthCells);
@@ -136,15 +131,17 @@ export function createFarTerrainMaterial(
       for (const ringRefs of uSummaryRings) {
         const atlasUCells = worldX.sub(ringRefs.uOriginX).div(ringRefs.uCellM);
         const atlasVCells = worldZ.sub(ringRefs.uOriginZ).div(ringRefs.uCellM);
-        const atlasU = atlasUCells.div(ringRefs.uWidthCells);
-        const atlasV = atlasVCells.add(ringRefs.uRowOffsetCells).div(uSummaryHeightCells);
-        const atlasUv = vec2(clamp(atlasU, float(0.0), float(1.0)), clamp(atlasV, float(0.0), float(1.0)));
+        const atlasUCell = clamp(atlasUCells, float(0.0), ringRefs.uWidthCells.sub(float(1.0)));
+        const atlasVCell = clamp(atlasVCells, float(0.0), ringRefs.uHeightCells.sub(float(1.0)));
+        const atlasU = atlasUCell.add(float(0.5)).div(ringRefs.uWidthCells);
+        const atlasV = ringRefs.uRowOffsetCells.add(atlasVCell).add(float(0.5)).div(uSummaryHeightCells);
+        const atlasUv = vec2(atlasU, atlasV);
         const atlasSample = texture(summaryAtlas.texture, atlasUv);
         const inside = step(float(0.0), atlasUCells)
-          .mul(step(atlasUCells, ringRefs.uWidthCells))
+          .mul(step(atlasUCells, ringRefs.uWidthCells.sub(float(SUMMARY_EDGE_EPS))))
           .mul(step(float(0.0), atlasVCells))
-          .mul(step(atlasVCells, ringRefs.uHeightCells));
-        const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM));
+          .mul(step(atlasVCells, ringRefs.uHeightCells.sub(float(SUMMARY_EDGE_EPS))));
+        const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM.sub(float(SUMMARY_EDGE_EPS))));
         const atlasWeight = atlasSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
         terrainHeight = mix(terrainHeight, atlasSample.r, atlasWeight);
       }
@@ -178,12 +175,6 @@ function createRingUniformRefs(ring: FarSummaryGpuAtlasRingView): FarTerrainSumm
     uHeightCells: uniform(ring.heightCells),
     uValid: uniform(ring.valid),
   };
-}
-
-function getActiveFarSummaryGpuAtlasView(): FarSummaryGpuAtlasView | undefined {
-  if (typeof window === "undefined") return undefined;
-  const record = window as unknown as GlobalNaadfAtlasProvider;
-  return record.__drusnielNaadf?.getFarSummaryGpuAtlasView?.();
 }
 
 export function computeFarTerrainVertexColors(
