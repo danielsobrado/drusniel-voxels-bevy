@@ -26,10 +26,14 @@ export const DIG_INFLUENCE_MARGIN = 4;
 export const CELL_SHIFT = 4;
 export const CELL_SIZE = 16;
 
-export type CellKey = number;
+export type CellKey = string;
+
+export function editCellKey(cx: number, cy: number, cz: number): CellKey {
+  return `${cx},${cy},${cz}`;
+}
 
 export function cellKey(x: number, y: number, z: number): CellKey {
-  return ((x >> CELL_SHIFT) * 1048576 + (y >> CELL_SHIFT)) * 1048576 + (z >> CELL_SHIFT);
+  return editCellKey(x >> CELL_SHIFT, y >> CELL_SHIFT, z >> CELL_SHIFT);
 }
 
 export function overlappingCells(ex: number, ey: number, ez: number, r: number, h: number): CellKey[] {
@@ -43,7 +47,7 @@ export function overlappingCells(ex: number, ey: number, ez: number, r: number, 
   for (let cx = minX; cx <= maxX; cx++) {
     for (let cy = minY; cy <= maxY; cy++) {
       for (let cz = minZ; cz <= maxZ; cz++) {
-        keys.push(((cx * 1048576 + cy) * 1048576 + cz));
+        keys.push(editCellKey(cx, cy, cz));
       }
     }
   }
@@ -176,15 +180,14 @@ export function collectOverlappingEdits(
 ): DigEdit[] {
   const visited = new Set<number>();
   const chunkEdits: DigEdit[] = [];
-  const minGX = Math.max(0, Math.floor(x0 / CELL_SIZE) - 1);
+  const minGX = Math.floor(x0 / CELL_SIZE) - 1;
   const maxGX = Math.floor((x1 - 1) / CELL_SIZE) + 1;
-  const minGZ = Math.max(0, Math.floor(z0 / CELL_SIZE) - 1);
+  const minGZ = Math.floor(z0 / CELL_SIZE) - 1;
   const maxGZ = Math.floor((z1 - 1) / CELL_SIZE) + 1;
   for (let gx = minGX; gx <= maxGX; gx++) {
     for (let gz = minGZ; gz <= maxGZ; gz++) {
       for (let gy = 0; gy < 32; gy++) {
-        const key = (gx * 1048576 + gy) * 1048576 + gz;
-        const bucket = editIndex.get(key);
+        const bucket = editIndex.get(editCellKey(gx, gy, gz));
         if (!bucket) continue;
         for (const e of bucket) {
           const id = editIds.get(e) ?? 0;
