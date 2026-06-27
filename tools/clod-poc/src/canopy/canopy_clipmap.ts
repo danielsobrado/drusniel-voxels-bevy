@@ -71,6 +71,7 @@ export function createCanopyClipmap(): CanopyClipmap {
   let frozenX = 0;
   let frozenZ = 0;
   let revision = 0;
+  let centerInitialized = false;
   let lastCenterX = 0;
   let lastCenterZ = 0;
 
@@ -103,26 +104,34 @@ export function createCanopyClipmap(): CanopyClipmap {
   return {
     update(cameraX, cameraZ, config, terrainSampler, treeDistribution) {
       const t0 = performance.now();
+      if (!centerInitialized) {
+        lastCenterX = cameraX;
+        lastCenterZ = cameraZ;
+        if (freezeCenter) {
+          frozenX = cameraX;
+          frozenZ = cameraZ;
+        }
+        centerInitialized = true;
+      }
+
       const centerX = freezeCenter ? frozenX : cameraX;
       const centerZ = freezeCenter ? frozenZ : cameraZ;
-      lastCenterX = centerX;
-      lastCenterZ = centerZ;
+      if (!freezeCenter) {
+        lastCenterX = centerX;
+        lastCenterZ = centerZ;
+      }
 
       if (!config.clipmap.enabled) {
         const evicted = tiles.size;
-        if (evicted > 0) {
-          tiles.clear();
-          tileRing.clear();
-          staleSince.clear();
-          rebuildQueue.length = 0;
-          metrics.evictedTiles = evicted;
-        }
-        metrics.requestedTiles = 0;
-        metrics.builtThisFrame = 0;
-        metrics.queuedTiles = 0;
-        metrics.builtTiles = 0;
-        metrics.visibleTiles = 0;
-        metrics.buildMs = performance.now() - t0;
+        tiles.clear();
+        tileRing.clear();
+        staleSince.clear();
+        rebuildQueue.length = 0;
+        metrics = {
+          ...createEmptyCanopyMetrics(),
+          evictedTiles: evicted,
+          buildMs: performance.now() - t0,
+        };
         return {
           metrics: { ...metrics },
           texturesDirty: evicted > 0,
@@ -216,11 +225,11 @@ export function createCanopyClipmap(): CanopyClipmap {
       return { ...metrics };
     },
     setFreezeCenter(enabled: boolean) {
-      freezeCenter = enabled;
-      if (enabled) {
+      if (enabled && !freezeCenter && centerInitialized) {
         frozenX = lastCenterX;
         frozenZ = lastCenterZ;
       }
+      freezeCenter = enabled;
     },
     disposeFarTiles() {
       const n = tiles.size;
@@ -228,13 +237,15 @@ export function createCanopyClipmap(): CanopyClipmap {
       tileRing.clear();
       staleSince.clear();
       rebuildQueue.length = 0;
-      metrics.evictedTiles += n;
+      metrics = { ...createEmptyCanopyMetrics(), evictedTiles: n };
     },
     dispose() {
       tiles.clear();
       tileRing.clear();
       staleSince.clear();
       rebuildQueue.length = 0;
+      metrics = createEmptyCanopyMetrics();
+      centerInitialized = false;
     },
   };
 }
