@@ -111,7 +111,9 @@ fn deep_ocean_shade(
   transition_secondary: vec4<f32>,
 ) -> vec4<f32> {
   let outside_distance = deep_ocean_outside_distance(world_position.xz, bounds);
-  let border_alpha = smoothstep(0.0, max(start_outside_m, 1.0), outside_distance);
+  let transition_end = max(start_outside_m, 1.0);
+  let transition_fade = max(transition_end * 0.5, 1.0);
+  let border_alpha = smoothstep(transition_end, transition_end + transition_fade, outside_distance);
   let camera_distance = distance(world_position.xz, camera_position.xz);
   let inner_alpha = smoothstep(level_fade.x, level_fade.y, camera_distance);
   let outer_alpha = 1.0 - smoothstep(level_fade.z, level_fade.w, camera_distance);
