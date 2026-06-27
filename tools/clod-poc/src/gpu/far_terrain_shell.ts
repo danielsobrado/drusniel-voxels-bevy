@@ -169,7 +169,7 @@ export function buildFarTerrainShell(
         const bounds = quadRadiusBounds(x0, z0, x1, z1);
         if (bounds.max <= innerExclusionRadius || bounds.min >= farRadius) continue;
       } else {
-        const fullyInside = heightProvider ? false : (x0 >= innerMin && x1 <= innerMax && z0 >= innerMin && z1 <= innerMax);
+        const fullyInside = x0 >= innerMin && x1 <= innerMax && z0 >= innerMin && z1 <= innerMax;
         if (fullyInside) continue;
       }
       const a = gz * (gridRes + 1) + gx;
