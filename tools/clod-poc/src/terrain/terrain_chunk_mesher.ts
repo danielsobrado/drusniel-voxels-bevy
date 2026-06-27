@@ -3,7 +3,7 @@ import { ClodPagesConfig } from "../config.js";
 import { surfaceHeight, type WorldBounds } from "./terrain_surface.js";
 import { density } from "./terrain_density.js";
 import { paintMaterialAt, terrainWeights } from "./terrain_paint.js";
-import { editIndex, editIds, editHeight, DIG_INFLUENCE_MARGIN, CELL_SIZE } from "./terrain_edits.js";
+import { editIndex, editIds, editHeight, editCellKey, DIG_INFLUENCE_MARGIN, CELL_SIZE } from "./terrain_edits.js";
 import type { DigEdit } from "./terrain_edits.js";
 
 const Y_CELLS = 128;
@@ -141,8 +141,7 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
   for (let gx = minGX; gx <= maxGX; gx++) {
     for (let gz = minGZ; gz <= maxGZ; gz++) {
       for (let gy = 0; gy < 32; gy++) {
-        const key = (gx * 1048576 + gy) * 1048576 + gz;
-        const bucket = editIndex.get(key);
+        const bucket = editIndex.get(editCellKey(gx, gy, gz));
         if (!bucket) continue;
         for (const e of bucket) {
           const id = editIds.get(e) ?? 0;
