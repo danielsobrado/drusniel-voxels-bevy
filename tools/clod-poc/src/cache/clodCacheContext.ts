@@ -12,7 +12,6 @@ import {
 import type { ClodCacheKeyParts } from "./cacheTypes.js";
 import cacheConfigText from "../../config/clod_cache.yaml?raw";
 import type { CachePersistenceRole } from "./indexedDbStore.js";
-import { clearMainThreadCacheBroker } from "./mainThreadCacheBroker.js";
 
 export interface ClodCacheContext {
   config: ClodCacheConfig;
@@ -97,9 +96,10 @@ export function pageNodeSourceHash(ctx: ClodCacheContext): string {
   return ctx.terrainSourceHash;
 }
 
-/** Clears worker-owned cache artifacts via the main-thread IndexedDB broker. */
+/** Clears worker-owned cache artifacts through the worker remote persistent store/RPC path. */
 export async function clearWorkerPersistentCache(): Promise<void> {
   const cacheConfig = parseClodCacheConfig(cacheConfigText);
   if (!cacheConfig.persistent.enabled) return;
-  await clearMainThreadCacheBroker();
+  const service = createClodCacheService(cacheConfig, undefined, "worker");
+  await service.clear();
 }
