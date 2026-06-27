@@ -94,8 +94,8 @@ function readShoreSurfSettings(
         maxShallowDepth: Math.min(2.5, borderCoast.ocean.minDepth),
       }
     : {};
-  const urlEnabled = searchParams.get("shoreSurf") === "1" || searchParams.get("edgeOcean") === "1";
-  const urlDisabled = searchParams.get("shoreSurf") === "0" || searchParams.get("edgeOcean") === "0";
+  const urlEnabled = searchParams.get("shoreSurf") === "1";
+  const urlDisabled = searchParams.get("shoreSurf") === "0";
   const surfEnabled = Boolean(fromBorder.enabled);
   return {
     ...DEFAULT_SHORE_SURF_BAND_SETTINGS,
@@ -339,7 +339,6 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         waterProbe: sampleForDebug,
         setWaterDebugMode,
         setShoreSurfBand,
-        setEdgeOcean: setShoreSurfBand,
         setCameraPose,
         waterDebugInfo,
       });
