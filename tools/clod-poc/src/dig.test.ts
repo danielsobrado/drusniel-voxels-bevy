@@ -279,7 +279,7 @@ describe("rebuildDirtyPages", () => {
       world,
       { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin },
     )).toThrow();
-    expect(source.chunks).toEqual(originalChunks);
+    expect(source.chunks.every((chunk, index) => chunk === originalChunks[index])).toBe(true);
   });
 
   it("per-chunk rebuild avoids reporting clean sibling pages", () => {
