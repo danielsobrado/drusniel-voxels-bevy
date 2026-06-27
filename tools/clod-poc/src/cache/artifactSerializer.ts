@@ -138,6 +138,28 @@ function readJsonSection<T>(sections: Map<number, ArrayBuffer>, type: number, la
   return JSON.parse(text) as T;
 }
 
+function validateNodeArtifact(artifact: ClodPageNodeArtifact): void {
+  if (artifact.positions.length % 3 !== 0) {
+    throw new CacheDecodeError("node positions length must be divisible by 3");
+  }
+  const vertexCount = artifact.positions.length / 3;
+  if (artifact.normals.length !== artifact.positions.length) {
+    throw new CacheDecodeError("node normals length must match positions length");
+  }
+  if (artifact.paintSlots.length !== vertexCount) {
+    throw new CacheDecodeError("node paintSlots length must match vertex count");
+  }
+  if (!Number.isInteger(artifact.materialWeightStride) || artifact.materialWeightStride <= 0) {
+    throw new CacheDecodeError("node materialWeightStride must be a positive integer");
+  }
+  if (artifact.materialWeights.length !== vertexCount * artifact.materialWeightStride) {
+    throw new CacheDecodeError("node materialWeights length must match vertex count and stride");
+  }
+  if (artifact.indices.length % 3 !== 0) {
+    throw new CacheDecodeError("node indices length must be divisible by 3");
+  }
+}
+
 export function encodeClodPageNodeArtifact(artifact: ClodPageNodeArtifact): ArrayBuffer {
   const metadata = {
     nodeId: artifact.nodeId,
@@ -172,7 +194,7 @@ export function decodeClodPageNodeArtifact(bytes: ArrayBuffer): ClodPageNodeArti
     bounds: ClodPageNodeArtifact["bounds"];
   }>(sections, CACHE_SECTION.NODE_METADATA_JSON, "node metadata");
 
-  return {
+  const artifact: ClodPageNodeArtifact = {
     nodeId: meta.nodeId,
     level: meta.level,
     positions: readF32Section(sections, CACHE_SECTION.POSITIONS_F32, "positions"),
@@ -187,6 +209,8 @@ export function decodeClodPageNodeArtifact(bytes: ArrayBuffer): ClodPageNodeArti
     footprint: meta.footprint,
     bounds: meta.bounds,
   };
+  validateNodeArtifact(artifact);
+  return artifact;
 }
 
 export function encodeClodPageTreeArtifact(artifact: ClodPageTreeArtifact): ArrayBuffer {
