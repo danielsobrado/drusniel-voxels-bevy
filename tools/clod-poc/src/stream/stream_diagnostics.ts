@@ -17,6 +17,7 @@ export interface StreamDiagnosticSnapshot extends TerrainOwnershipRuntimeSnapsho
 
 export interface StreamDiagnosticTracker {
   update(center: { x: number; z: number }): StreamDiagnosticSnapshot;
+  snapshot(): StreamDiagnosticSnapshot;
   format(snapshot: StreamDiagnosticSnapshot): string;
 }
 
@@ -40,12 +41,17 @@ export function createStreamDiagnosticTracker(input: StreamDiagnosticInput): Str
     },
   });
 
+  const withOwnership = (snapshot: TerrainOwnershipRuntimeSnapshot): StreamDiagnosticSnapshot => ({
+    ownership,
+    ...snapshot,
+  });
+
   return {
     update(center) {
-      return {
-        ownership,
-        ...runtime.update(center),
-      };
+      return withOwnership(runtime.update(center));
+    },
+    snapshot() {
+      return withOwnership(runtime.snapshot());
     },
     format(snapshot) {
       return `stream ownership: live<=${snapshot.ownership.liveRadiusM}m chunks req/load/evict=${snapshot.live.required.length}/${snapshot.live.loaded.length}/${snapshot.live.evictable.length}  ` +
