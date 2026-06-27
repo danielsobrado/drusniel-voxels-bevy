@@ -25,6 +25,8 @@ import {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
+const POST_PROCESS_TARGET_COUNT = 2;
+
 /** True when the post-process output graph must be recompiled. */
 export function postProcessOutputGraphDirty(
   current: PostProcessSettings,
@@ -38,9 +40,9 @@ export function postProcessOutputGraphDirty(
 
 export class WebGpuPostProcessPipeline {
   private readonly renderer: WebGPURenderer;
-  private readonly target: THREE.RenderTarget;
-  private readonly quad: QuadMesh;
-  private readonly material: NodeMaterial;
+  private readonly targets: THREE.RenderTarget[];
+  private readonly quads: QuadMesh[];
+  private readonly materials: NodeMaterial[];
   private readonly drawingBufferSize = new THREE.Vector2();
   private readonly uOpacity = uniform(DEFAULT_POST_PROCESS_SETTINGS.opacity);
   private readonly uExposure = uniform(DEFAULT_POST_PROCESS_SETTINGS.exposure);
@@ -48,6 +50,8 @@ export class WebGpuPostProcessPipeline {
   private readonly uSaturation = uniform(DEFAULT_POST_PROCESS_SETTINGS.saturation);
   private readonly uVignette = uniform(DEFAULT_POST_PROCESS_SETTINGS.vignette);
   private settings: PostProcessSettings;
+  private readTargetIndex = 0;
+  private hasReadableFrame = false;
 
   constructor(
     renderer: WebGPURenderer,
@@ -58,19 +62,28 @@ export class WebGpuPostProcessPipeline {
     this.renderer = renderer;
     this.settings = { ...DEFAULT_POST_PROCESS_SETTINGS, ...settings };
     // Single-sample RT: MSAA offscreen targets are not sampleable in the composite pass on WebGPU.
-    this.target = new THREE.RenderTarget(1, 1, {
-      depthBuffer: true,
-      stencilBuffer: false,
-      samples: 0,
-      type: renderer.getOutputBufferType(),
-      colorSpace: ColorManagement.workingColorSpace,
+    this.targets = Array.from({ length: POST_PROCESS_TARGET_COUNT }, (_, index) => {
+      const target = new THREE.RenderTarget(1, 1, {
+        depthBuffer: true,
+        stencilBuffer: false,
+        samples: 0,
+        type: renderer.getOutputBufferType(),
+        colorSpace: ColorManagement.workingColorSpace,
+      });
+      target.texture.name = `clod-poc-webgpu-postprocess-color-${index}`;
+      return target;
     });
-    this.target.texture.name = "clod-poc-webgpu-postprocess-color";
 
-    this.material = new NodeMaterial();
-    this.material.name = "clod-poc-webgpu-postprocess";
-    this.quad = new QuadMesh(this.material);
-    this.quad.name = "clod-poc-webgpu-postprocess-quad";
+    this.materials = this.targets.map((_, index) => {
+      const material = new NodeMaterial();
+      material.name = `clod-poc-webgpu-postprocess-${index}`;
+      return material;
+    });
+    this.quads = this.materials.map((material, index) => {
+      const quad = new QuadMesh(material);
+      quad.name = `clod-poc-webgpu-postprocess-quad-${index}`;
+      return quad;
+    });
 
     this.updateSettings(this.settings);
     this.rebuildComposite();
@@ -87,7 +100,10 @@ export class WebGpuPostProcessPipeline {
     const pixelRatio = this.renderer.getPixelRatio();
     const targetWidth = this.drawingBufferSize.x || Math.floor(width * pixelRatio);
     const targetHeight = this.drawingBufferSize.y || Math.floor(height * pixelRatio);
-    this.target.setSize(Math.max(1, targetWidth), Math.max(1, targetHeight));
+    for (const target of this.targets) {
+      target.setSize(Math.max(1, targetWidth), Math.max(1, targetHeight));
+    }
+    this.hasReadableFrame = false;
   }
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
@@ -112,43 +128,54 @@ export class WebGpuPostProcessPipeline {
     const outputColorSpace = renderer.outputColorSpace;
     const currentRenderTarget = renderer.getRenderTarget();
     const currentXr = renderer.xr.enabled;
+    const writeTargetIndex = 1 - this.readTargetIndex;
 
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.outputColorSpace = ColorManagement.workingColorSpace;
     renderer.xr.enabled = false;
-    renderer.setRenderTarget(this.target);
+    renderer.setRenderTarget(this.targets[writeTargetIndex]);
     renderer.render(scene, camera);
     renderer.setRenderTarget(currentRenderTarget);
     renderer.xr.enabled = currentXr;
 
-    // Keep the renderer linear during the composite; renderOutput() in the quad applies tone mapping.
-    this.quad.render(renderer);
+    if (this.hasReadableFrame) {
+      // Sample the previous target while the current frame writes to the other one.
+      this.quads[this.readTargetIndex].render(renderer);
+    } else {
+      renderer.toneMapping = toneMapping;
+      renderer.outputColorSpace = outputColorSpace;
+      renderer.render(scene, camera);
+      this.hasReadableFrame = true;
+    }
 
+    this.readTargetIndex = writeTargetIndex;
     renderer.toneMapping = toneMapping;
     renderer.outputColorSpace = outputColorSpace;
   }
 
   dispose(): void {
-    this.target.dispose();
-    this.material.dispose();
+    for (const target of this.targets) target.dispose();
+    for (const material of this.materials) material.dispose();
   }
 
   private rebuildComposite(): void {
-    const sampled: TslNode = texture(this.target.texture, uv());
-    let output: TslNode;
-    if (!this.settings.enabled || this.settings.debugMode === "off") {
-      output = sampled;
-    } else if (this.settings.debugMode === "copy") {
-      output = vec4(sampled.rgb, sampled.a.mul(this.uOpacity));
-    } else {
-      output = this.outputNode(sampled);
+    for (let index = 0; index < this.targets.length; index += 1) {
+      const sampled: TslNode = texture(this.targets[index].texture, uv());
+      let output: TslNode;
+      if (!this.settings.enabled || this.settings.debugMode === "off") {
+        output = sampled;
+      } else if (this.settings.debugMode === "copy") {
+        output = vec4(sampled.rgb, sampled.a.mul(this.uOpacity));
+      } else {
+        output = this.outputNode(sampled);
+      }
+      this.materials[index].fragmentNode = renderOutput(
+        output,
+        this.renderer.toneMapping,
+        this.renderer.outputColorSpace,
+      );
+      this.materials[index].needsUpdate = true;
     }
-    this.material.fragmentNode = renderOutput(
-      output,
-      this.renderer.toneMapping,
-      this.renderer.outputColorSpace,
-    );
-    this.material.needsUpdate = true;
   }
 
   private outputNode(sampled: TslNode): TslNode {
