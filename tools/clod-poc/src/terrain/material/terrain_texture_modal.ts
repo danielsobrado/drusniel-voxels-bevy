@@ -11,6 +11,7 @@ import { setButtonIcon } from "../../ui/dom_icons.js";
 import { TERRAIN_BAND_ICONS } from "../../app/clod_constants.js";
 import { BUILTIN_TERRAIN_TEXTURES } from "./terrain_builtin_textures.js";
 import {
+  configureNormalTexture,
   loadNormalMap,
   loadTerrainTexture,
   loadTerrainTextureUrl,
@@ -67,7 +68,7 @@ export function createTerrainTextureModal(deps: TerrainTextureModalDeps): Terrai
     if (id.includes("snow")) return "snow";
     if (id.includes("rock") || id.includes("cobble") || id.includes("bedrock")) return "rock";
     if (id.includes("sand")) return "sand";
-    if (id.includes("earth") || id.includes("terracotta") || id.includes("bark")) return "earth";
+    if (id.includes("earth") || id.includes("ground") || id.includes("dirt") || id.includes("terracotta") || id.includes("bark")) return "earth";
     if (id.includes("grass") || id.includes("leaf")) return "grass";
     return TERRAIN_BAND_ICONS[index] ?? "earth";
   };
@@ -115,7 +116,7 @@ export function createTerrainTextureModal(deps: TerrainTextureModalDeps): Terrai
 
   const textureOptionHtml = [
     `<option value="">None</option>`,
-    ...BUILTIN_TERRAIN_TEXTURES.map((texture) => `<option value="${texture.id}">${texture.label}</option>`),
+    ...BUILTIN_TERRAIN_TEXTURES.map((texture) => `<option value="${texture.id}">${texture.label}${texture.normalUrl ? " · PBR" : ""}</option>`),
     `<option value="custom">Custom file...</option>`,
   ].join("");
 
@@ -124,6 +125,14 @@ export function createTerrainTextureModal(deps: TerrainTextureModalDeps): Terrai
     updateTextureSlotPreviews();
     syncTextureModalControls();
     deps.applyTerrainTextures();
+  };
+
+  const loadBuiltinNormalForSlot = async (index: number, normalUrl: string | undefined): Promise<void> => {
+    if (!normalUrl) return;
+    const normalTexture = await loadTerrainTextureUrl(normalUrl, textureLoadOptions);
+    if (!normalTexture) return;
+    configureNormalTexture(normalTexture, textureLoadOptions);
+    textureController.setBuiltinSlotNormal(index, normalTexture, normalUrl);
   };
 
   const textureModal = document.createElement("div");
@@ -240,6 +249,7 @@ export function createTerrainTextureModal(deps: TerrainTextureModalDeps): Terrai
         return;
       }
       textureController.setBuiltinTextureSlot(index, texture, builtin.label, builtin.url, builtin.id);
+      await loadBuiltinNormalForSlot(index, builtin.normalUrl);
       refreshTextureState();
     };
     card.querySelector<HTMLInputElement>(`[data-slot-low="${index}"]`)!.onchange = (event) => {
