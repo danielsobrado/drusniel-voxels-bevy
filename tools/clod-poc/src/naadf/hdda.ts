@@ -237,7 +237,7 @@ export function tracePrimaryDebugRayHdda(params: TraceBaseParams): RayTraceResul
   const { dirX, dirY, dirZ } = normalized;
   const cellSize = state.config.world.voxelSizeM;
   const eps = Math.max(state.config.query.epsilonM, 1e-6);
-  const maxSteps = state.config.traversal.hddaMaxVoxelSteps;
+  const maxSteps = Math.min(state.config.query.maxStepsPrimary, state.config.traversal.hddaMaxVoxelSteps);
   let stepper = HddaSpanStepper.init({
     originX: params.originX,
     originY: params.originY,
@@ -362,7 +362,7 @@ export function traceSunVisibilityHdda(params: SunTraceBaseParams): SunVisibilit
   const { dirX, dirY, dirZ } = normalized;
   const cellSize = state.config.world.voxelSizeM;
   const eps = Math.max(state.config.query.epsilonM, 1e-6);
-  const maxSteps = state.config.traversal.hddaMaxVoxelSteps;
+  const maxSteps = Math.min(state.config.query.maxStepsSun, state.config.traversal.hddaMaxVoxelSteps);
   let stepper = HddaSpanStepper.init({
     originX: params.worldX,
     originY: params.worldY,
@@ -592,7 +592,11 @@ function estimatePlanSkip(params: {
   cellSize: number;
 }): number {
   const spanDistance = params.plan.spanDim * params.cellSize;
-  if (params.plan.node && params.state.config.traversal.hddaUseDirectionalBounds) {
+  if (
+    params.plan.spanDim > HIERARCHY_VOXEL_SPAN
+    && params.plan.node
+    && params.state.config.traversal.hddaUseDirectionalBounds
+  ) {
     return estimateSafeSkipDistance({
       node: params.plan.node,
       rayDirX: params.dirX,
