@@ -88,14 +88,14 @@ describe("border coast shaping", () => {
     expect(shaped).toBeGreaterThan(highMountain - 1);
   });
 
-  it("still smooths low beach terrain on the dry side", () => {
+  it("does not keep making beach when water is not imminent", () => {
     const beachCfg = beachOnlyConfig();
     const lowBackshore = beachCfg.ocean.surfaceY + beachCfg.coast.beach.backshoreHeightAboveWater + 1;
     const x = beachCfg.coast.oceanStartCells + beachCfg.coast.beach.beachShelfCells + 4;
     const z = worldCells * 0.5;
     const shaped = applyBorderCoastShape(x, z, lowBackshore, beachCfg, worldCells);
 
-    expect(shaped).toBeLessThan(lowBackshore);
+    expect(shaped).toBeCloseTo(lowBackshore, 5);
   });
 
   it("keeps the repo coast band from swallowing the default playable world", () => {
