@@ -11,6 +11,7 @@ export function runSpellUiStartup(_ctx: UiStartupContext): void {
   const onKeyDown = (event: KeyboardEvent) => {
     const target = event.target;
     if (target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    if (event.repeat) return;
 
     if (event.code === "KeyV") {
       menuEl?.classList.toggle("spell-menu-hidden");
