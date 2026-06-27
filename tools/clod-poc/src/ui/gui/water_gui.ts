@@ -157,10 +157,10 @@ export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
       visual.depthWrite = on;
       rebuildVisual();
     },
-    onOceanEnabled: (enabled) => deps.waterController.setOceanEnabled(enabled),
-    onOceanStartDistance: (distance) => deps.waterController.setOceanStartDistance(distance),
-    onOceanFullDepthDistance: (distance) => deps.waterController.setOceanFullDepthDistance(distance),
-    onOceanMaxDepth: (depth) => deps.waterController.setOceanMaxDepth(depth),
+    onShoreSurfEnabled: (enabled) => deps.waterController.setShoreSurfEnabled(enabled),
+    onShoreSurfStartDistance: (distance) => deps.waterController.setShoreSurfStartDistance(distance),
+    onShoreSurfFullDistance: (distance) => deps.waterController.setShoreSurfFullDistance(distance),
+    onShoreSurfMaxDepth: (depth) => deps.waterController.setShoreSurfMaxDepth(depth),
     onRebuildVisual: rebuildVisual,
     getRiverStats: () => riverStats(deps.waterController),
   });
