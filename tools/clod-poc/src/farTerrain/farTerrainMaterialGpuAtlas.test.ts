@@ -90,6 +90,7 @@ function atlasView(ringCount: number): FarSummaryGpuAtlasView {
 
 describe("far terrain GPU atlas material", () => {
   it("keeps more than the current three configured summary rings", () => {
+    const atlas = atlasView(4);
     const material = createFarTerrainMaterial({
       sunDirection: new THREE.Vector3(0, 1, 0),
       sunColor: new THREE.Color(1, 1, 1),
@@ -97,11 +98,13 @@ describe("far terrain GPU atlas material", () => {
       groundLight: new THREE.Color(0.2, 0.2, 0.2),
     }, uniformData(), 0, 0, 16384, {
       gpuDisplacement: true,
-      summaryAtlas: atlasView(4),
+      summaryAtlas: atlas,
     });
 
     const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs;
     expect(refs.uSummaryRings?.length).toBe(4);
     material.dispose();
+    atlas.texture.dispose();
+    atlas.materialTexture.dispose();
   });
 });
