@@ -135,7 +135,8 @@ let terrainSurfaceOverride: TerrainSurfaceOverride | null = null;
 
 interface BorderCoastRuntime {
   config: BorderCoastOceanConfig;
-  worldCells: number;
+  worldCellsX: number;
+  worldCellsZ: number;
 }
 
 let borderCoastRuntime: BorderCoastRuntime | null = null;
@@ -144,12 +145,16 @@ export function setTerrainSurfaceOverride(override: TerrainSurfaceOverride | nul
   terrainSurfaceOverride = override;
 }
 
-export function setBorderCoastRuntime(config: BorderCoastOceanConfig | null, worldCells = 0): void {
-  if (!config || !config.enabled || worldCells <= 0) {
+export function setBorderCoastRuntime(
+  config: BorderCoastOceanConfig | null,
+  worldCellsX = 0,
+  worldCellsZ = worldCellsX,
+): void {
+  if (!config || !config.enabled || worldCellsX <= 0 || worldCellsZ <= 0) {
     borderCoastRuntime = null;
     return;
   }
-  borderCoastRuntime = { config, worldCells };
+  borderCoastRuntime = { config, worldCellsX, worldCellsZ };
 }
 
 export function getBorderCoastRuntime(): BorderCoastRuntime | null {
@@ -214,6 +219,6 @@ export function surfaceHeight(x: number, z: number): number {
     z,
     inland,
     borderCoastRuntime.config ?? DEFAULT_BORDER_COAST_OCEAN_CONFIG,
-    borderCoastRuntime.worldCells,
+    { cellsX: borderCoastRuntime.worldCellsX, cellsZ: borderCoastRuntime.worldCellsZ },
   );
 }
