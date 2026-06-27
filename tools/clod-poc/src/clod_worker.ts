@@ -399,7 +399,7 @@ function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   postLod0Rebuild([request.requestId], request.dirtyRegions, request.edits.length);
 }
 
-function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }): void {
+function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): void {
   drainParents(Number.POSITIVE_INFINITY);
   post({ type: "flushed", requestId: request.requestId });
 }
