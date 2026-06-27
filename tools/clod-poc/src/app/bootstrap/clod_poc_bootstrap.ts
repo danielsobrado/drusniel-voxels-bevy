@@ -232,8 +232,8 @@ export async function bootstrapClodPoc() {
     const farSummaryGpuAtlas = naadfHeightSamplingMode === "gpu"
       ? naadfIntegration?.getFarSummaryGpuAtlasView()
       : undefined;
-    const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu" && useParity && farSummaryGpuAtlas
-      ? "gpu"
+    const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu"
+      ? (useParity && farSummaryGpuAtlas ? "gpu" : "cpu")
       : naadfHeightSamplingMode;
     if (!heightProvider && effectiveHeightSamplingMode !== "gpu") {
       throw new Error("long-view scene requires NAADF or far-summary height provider");
