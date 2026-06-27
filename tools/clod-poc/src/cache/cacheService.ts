@@ -50,6 +50,12 @@ function miss<T>(key: string, reason: CacheMissReason, decodeMs = 0): ClodCacheG
   return { status: "miss", reason, key, bytesRead: 0, decodeMs };
 }
 
+function isArtifactValidationError(error: unknown): boolean {
+  return error instanceof CacheCorruptError
+    || error instanceof CacheDecodeError
+    || error instanceof CacheChecksumError;
+}
+
 export class ClodCacheServiceImpl implements ClodCacheService {
   private readonly config: ClodCacheConfig;
   private readonly memory: MemoryCache | null;
@@ -205,7 +211,7 @@ export class ClodCacheServiceImpl implements ClodCacheService {
         cacheLogger.warn(`get failed for ${key} [${name}] ${message}`);
         this.metrics.recordMiss(reason);
         this.metrics.recordError(`[${name}] ${message}`);
-        if (error instanceof CacheCorruptError || error instanceof CacheDecodeError || error instanceof CacheChecksumError) {
+        if (isArtifactValidationError(error)) {
           void this.delete(keyParts);
         }
         if (reason === "backend-error") this.notePersistentError();
@@ -285,7 +291,9 @@ export class ClodCacheServiceImpl implements ClodCacheService {
         const message = error instanceof Error ? error.message : String(error);
         cacheLogger.error(`put failed for ${key} [${name}] ${message}`);
         this.metrics.recordError(`[${name}] ${message}`);
-        this.notePersistentError();
+        if (error instanceof CacheUnavailableError || error instanceof DOMException) {
+          this.notePersistentError();
+        }
         if (this.config.strict) throw error;
         return { key, bytesWritten: 0, encodeMs: performance.now() - t0, compression: "none" };
       }
