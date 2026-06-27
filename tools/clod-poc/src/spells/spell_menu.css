@@ -113,7 +113,8 @@ body[data-player-mode="choosingSpawn"] #spell-menu {
   height: 100%;
 }
 
-.spell-vfx-layer[data-fallback="true"]::before {
+.spell-vfx-layer[data-spell="fire"][data-fallback="true"]::before,
+.spell-vfx-layer[data-spell="water"][data-fallback="true"]::before {
   content: "";
   position: absolute;
   left: 50%;
@@ -122,11 +123,21 @@ body[data-player-mode="choosingSpawn"] #spell-menu {
   height: 76%;
   transform: translateX(-50%);
   transform-origin: 50% 96%;
+  filter: blur(5px);
+}
+
+.spell-vfx-layer[data-spell="fire"][data-fallback="true"]::before {
   background:
     radial-gradient(ellipse at 50% 88%, rgba(255, 244, 170, 0.9), transparent 14%),
     radial-gradient(ellipse at 50% 64%, rgba(255, 132, 38, 0.76), transparent 42%),
     radial-gradient(ellipse at 50% 36%, rgba(170, 31, 16, 0.46), transparent 68%);
-  filter: blur(5px);
+}
+
+.spell-vfx-layer[data-spell="water"][data-fallback="true"]::before {
+  background:
+    radial-gradient(ellipse at 50% 88%, rgba(213, 252, 255, 0.86), transparent 14%),
+    radial-gradient(ellipse at 50% 62%, rgba(49, 170, 255, 0.62), transparent 44%),
+    radial-gradient(ellipse at 50% 34%, rgba(12, 79, 148, 0.44), transparent 70%);
 }
 
 @media (max-width: 760px) {
