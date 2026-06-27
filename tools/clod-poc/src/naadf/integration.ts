@@ -15,6 +15,7 @@ import { runAcceptanceChecks, allAcceptancePassed } from "./validation.js";
 import { setNaadfIntegration } from "./canopyBridge.js";
 
 const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
+const HEIGHT_PROVIDER_KEY_SCALE = 1000;
 
 export const NAADF_SCENES = new Set([
   "infinite-naadf-flat",
@@ -128,18 +129,27 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     },
 
     getHeightProvider(): FarHeightProvider {
+      let lastKey = "";
+      let last = queryTerrainHeight({ state, worldX: 0, worldZ: 0, purpose: "render" });
+      const sample = (x: number, z: number) => {
+        const key = heightProviderKey(x, z);
+        if (key === lastKey) return last;
+        lastKey = key;
+        last = queryTerrainHeight({ state, worldX: x, worldZ: z, purpose: "render" });
+        if (last.missingSample || last.unknown) metrics.farShellMissingSamples++;
+        return last;
+      };
       return {
         sampleHeight: (x, z) => {
-          const r = queryTerrainHeight({ state, worldX: x, worldZ: z, purpose: "render" });
-          if (r.missingSample || r.unknown) metrics.farShellMissingSamples++;
+          const r = sample(x, z);
           return Number.isFinite(r.height) ? r.height : 0;
         },
         sampleNormal: (x, z) => {
-          const r = queryTerrainHeight({ state, worldX: x, worldZ: z, purpose: "render" });
+          const r = sample(x, z);
           return new THREE.Vector3(r.normalX, r.normalY, r.normalZ);
         },
         sampleMaterial: (x, z) => {
-          const r = queryTerrainHeight({ state, worldX: x, worldZ: z, purpose: "render" });
+          const r = sample(x, z);
           return r.material;
         },
       };
@@ -192,6 +202,12 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
 
   setNaadfIntegration(integration);
   return integration;
+}
+
+function heightProviderKey(x: number, z: number): string {
+  const qx = Math.round(x * HEIGHT_PROVIDER_KEY_SCALE);
+  const qz = Math.round(z * HEIGHT_PROVIDER_KEY_SCALE);
+  return `${qx}:${qz}`;
 }
 
 function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig {
