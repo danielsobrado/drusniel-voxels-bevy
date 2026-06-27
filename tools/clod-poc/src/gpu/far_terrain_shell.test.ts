@@ -117,4 +117,28 @@ describe("far terrain shell — horizon skirt around the world", () => {
 
     radialShell.dispose();
   });
+
+  it("falls back to finite heights when the streaming height provider returns bad samples", () => {
+    const badProviderShell = buildFarTerrainShell(summary, lighting, {
+      gridRes: 16,
+      farRadius: 150,
+      centerX: 25,
+      centerZ: -40,
+      buildRelative: true,
+      innerExclusionRadius: 60,
+      heightProvider: {
+        sampleHeight: (x) => {
+          if (x < 0) throw new Error("missing tile");
+          return Number.NaN;
+        },
+        sampleNormal: () => new THREE.Vector3(0, 1, 0),
+      },
+    });
+
+    const badPosition = badProviderShell.mesh.geometry.getAttribute("position");
+    for (let vi = 0; vi < badPosition.count; vi++) {
+      expect(Number.isFinite(badPosition.getY(vi))).toBe(true);
+    }
+    badProviderShell.dispose();
+  });
 });
