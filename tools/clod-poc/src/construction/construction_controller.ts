@@ -385,7 +385,7 @@ class ConstructionControllerImpl implements ConstructionController {
       grounded: candidate.supportState === "grounded",
       parentIds: candidate.supportParentIds ?? [],
     };
-    this.addPlacedPiece(placed, true);
+    if (!this.addPlacedPiece(placed, true)) return;
     this.requestTerrainConform(candidate);
     this.currentCandidate = null;
     this.ghostMesh.visible = false;
@@ -393,11 +393,11 @@ class ConstructionControllerImpl implements ConstructionController {
     this.syncUi(true);
   }
 
-  private addPlacedPiece(placed: PlacedConstructionPiece, logPlacement: boolean): void {
+  private addPlacedPiece(placed: PlacedConstructionPiece, logPlacement: boolean): boolean {
     const piece = this.piecesById.get(placed.typeId);
-    if (!piece) return;
+    if (!piece) return false;
     const normalized = this.normalizePlacedPiece(placed);
-    if (!normalized) return;
+    if (!normalized) return false;
     const validation = validateConstructionPlacement({
       piece,
       position: normalized.position,
@@ -412,7 +412,7 @@ class ConstructionControllerImpl implements ConstructionController {
     });
     if (!validation.valid) {
       console.warn(`[construction] skipped invalid saved piece ${normalized.id}: ${validation.reason ?? "invalid"}`);
-      return;
+      return false;
     }
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(piece.dimensionsM[0], piece.dimensionsM[1], piece.dimensionsM[2]),
@@ -426,6 +426,7 @@ class ConstructionControllerImpl implements ConstructionController {
     this.placedPieces.push(normalized);
     this.snapIndex.addPiece(piece, normalized.id, normalized.position, normalized.rotationQuarterTurns);
     if (logPlacement) console.info(`[construction] placed ${piece.label} at ${normalized.position.map((v) => v.toFixed(2)).join(", ")}`);
+    return true;
   }
 
   private requestTerrainConform(candidate: ConstructionCandidate): void {
@@ -451,13 +452,18 @@ class ConstructionControllerImpl implements ConstructionController {
       if (!raw) return;
       const parsed = JSON.parse(raw) as unknown;
       if (!Array.isArray(parsed)) return;
+      let rewriteStorage = false;
       for (const entry of parsed) {
         const placed = this.normalizePlacedPiece(entry);
-        if (!placed || !this.piecesById.has(placed.typeId)) continue;
+        if (!placed || !this.piecesById.has(placed.typeId)) {
+          rewriteStorage = true;
+          continue;
+        }
         const suffix = Number(placed.id.startsWith(ENTITY_ID_PREFIX) ? placed.id.slice(ENTITY_ID_PREFIX.length) : NaN);
         if (Number.isInteger(suffix) && suffix >= this.nextEntityId) this.nextEntityId = suffix + 1;
-        this.addPlacedPiece(placed, false);
+        if (!this.addPlacedPiece(placed, false)) rewriteStorage = true;
       }
+      if (rewriteStorage || this.placedPieces.length !== parsed.length) this.savePlacedPieces();
     } catch (error) {
       console.warn("[construction] failed to load saved pieces", error);
     }
