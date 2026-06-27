@@ -31,11 +31,13 @@ export class PropSpatialGrid {
   readonly cellSizeM: number;
   readonly instances: PropInstance[];
   readonly cells: Map<string, PropGridCell>;
+  private readonly cellList: PropGridCell[];
 
   private constructor(cellSizeM: number, instances: PropInstance[], cells: Map<string, PropGridCell>) {
     this.cellSizeM = cellSizeM;
     this.instances = instances;
     this.cells = cells;
+    this.cellList = [...cells.values()];
   }
 
   static fromInstances(instances: PropInstance[], cellSizeM: number): PropSpatialGrid {
@@ -67,12 +69,28 @@ export class PropSpatialGrid {
     return this.cells.get(cellKey(coord));
   }
 
+  nearbyCells(position: [number, number, number], radiusM: number): PropGridCell[] {
+    const radius = Math.max(0, radiusM);
+    const minX = Math.floor((position[0] - radius) / this.cellSizeM);
+    const maxX = Math.floor((position[0] + radius) / this.cellSizeM);
+    const minZ = Math.floor((position[2] - radius) / this.cellSizeM);
+    const maxZ = Math.floor((position[2] + radius) / this.cellSizeM);
+    const out: PropGridCell[] = [];
+    for (let z = minZ; z <= maxZ; z++) {
+      for (let x = minX; x <= maxX; x++) {
+        const cell = this.cells.get(`${x},${z}`);
+        if (cell) out.push(cell);
+      }
+    }
+    return out;
+  }
+
   allCells(): PropGridCell[] {
-    return [...this.cells.values()];
+    return this.cellList;
   }
 
   toSpatialCells(visibleKeys: ReadonlySet<string>): PropSpatialCell[] {
-    return this.allCells().map((cell) => ({
+    return this.cellList.map((cell) => ({
       cellCoord: cell.cellCoord,
       bounds: cell.bounds,
       propInstanceIndices: [...cell.instanceIndices],
