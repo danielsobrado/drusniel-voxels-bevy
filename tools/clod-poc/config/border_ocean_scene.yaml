@@ -13,3 +13,26 @@ border_ocean_scene:
   acceptance:
     min_deep_ocean_vertices: 1000
     max_interior_water_wet_ratio: 0.15
+    required_counters:
+      - border_ocean.scene
+      - border_ocean.coast_runtime_active
+      - border_ocean.deep_ocean_enabled
+      - border_ocean.deep_ocean_mesh_present
+      - border_ocean.deep_ocean_vertices
+      - border_ocean.deep_ocean_start_outside_m
+      - border_ocean.deep_ocean_extend_m
+      - border_ocean.deep_ocean_surface_y
+      - border_ocean.wave_count
+      - border_ocean.wave_wind_speed
+      - border_ocean.wave_height_scale
+      - border_ocean.wave_choppiness
+      - border_ocean.shading_fog_far_m
+      - border_ocean.shading_reflection_strength
+      - border_ocean.player_margin_m
+      - border_ocean.player_pushback_band_m
+      - border_ocean.player_pushback_accel
+      - border_ocean.player_soft_pushback_enabled
+      - border_ocean.page_source_purity
+      - border_ocean.interior_water_wet_ratio
+      - border_ocean.playable_ocean_outside_ok
+      - border_ocean.cliff_dry_above_sea
