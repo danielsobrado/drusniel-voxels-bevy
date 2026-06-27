@@ -31,12 +31,12 @@ function sampleSummary(): TerrainSummaryArtifact {
     res: 2,
     worldSize: 128,
     farReduceFactor: 8,
-    heightMin: new Float32Array([1, 2]),
-    heightMax: new Float32Array([3, 4]),
-    normalX: new Float32Array([0.1, 0.2]),
-    normalY: new Float32Array([0.9, 0.8]),
-    normalZ: new Float32Array([0.3, 0.4]),
-    coverage: new Float32Array([1, 0]),
+    heightMin: new Float32Array([1, 2, 3, 4]),
+    heightMax: new Float32Array([5, 6, 7, 8]),
+    normalX: new Float32Array([0.1, 0.2, 0.3, 0.4]),
+    normalY: new Float32Array([0.9, 0.8, 0.7, 0.6]),
+    normalZ: new Float32Array([0.3, 0.4, 0.5, 0.6]),
+    coverage: new Float32Array([1, 0, 1, 0]),
   };
 }
 
@@ -57,22 +57,20 @@ describe("artifact serializer", () => {
     }
   });
 
-  it("rejects clod-page-node with mismatched normal length", () => {
+  it("rejects clod-page-node with mismatched normal length before caching", () => {
     const original = sampleArtifact();
-    const bytes = encodeClodPageNodeArtifact({
+    expect(() => encodeClodPageNodeArtifact({
       ...original,
       normals: new Float32Array([0, 1, 0]),
-    });
-    expect(() => decodeClodPageNodeArtifact(bytes)).toThrow();
+    })).toThrow();
   });
 
-  it("rejects clod-page-node with invalid index count", () => {
+  it("rejects clod-page-node with invalid index count before caching", () => {
     const original = sampleArtifact();
-    const bytes = encodeClodPageNodeArtifact({
+    expect(() => encodeClodPageNodeArtifact({
       ...original,
       indices: new Uint32Array([0, 1]),
-    });
-    expect(() => decodeClodPageNodeArtifact(bytes)).toThrow();
+    })).toThrow();
   });
 
   it("round-trips terrain-summary", () => {
@@ -85,12 +83,16 @@ describe("artifact serializer", () => {
     expect(decoded.coverage[0]).toBeCloseTo(1);
   });
 
-  it("rejects corrupt terrain-summary payload length", () => {
+  it("rejects terrain-summary with wrong channel grid size before caching", () => {
     const original = sampleSummary();
-    const bytes = encodeTerrainSummaryArtifact({
+    expect(() => encodeTerrainSummaryArtifact({
       ...original,
       coverage: new Float32Array([1, 0, 1]),
-    });
+    })).toThrow();
+  });
+
+  it("rejects corrupt terrain-summary payload length on decode", () => {
+    const bytes = encodeTerrainSummaryArtifact(sampleSummary());
     const broken = bytes.slice(0, bytes.byteLength - 4);
     expect(() => decodeTerrainSummaryArtifact(broken)).toThrow();
   });
