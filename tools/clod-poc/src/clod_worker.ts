@@ -69,7 +69,7 @@ function intersectDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds
     minZ: Math.max(a.minZ, b.minZ),
     maxZ: Math.min(a.maxZ, b.maxZ),
   };
-  return clipped.minX <= clipped.maxX && clipped.minZ <= clipped.maxZ ? clipped : null;
+  return clipped.minX < clipped.maxX && clipped.minZ < clipped.maxZ ? clipped : null;
 }
 
 function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | undefined): void {
@@ -399,7 +399,7 @@ function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   postLod0Rebuild([request.requestId], request.dirtyRegions, request.edits.length);
 }
 
-function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): void {
+function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }): void {
   drainParents(Number.POSITIVE_INFINITY);
   post({ type: "flushed", requestId: request.requestId });
 }
