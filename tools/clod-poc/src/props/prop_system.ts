@@ -62,6 +62,7 @@ interface MatrixUploadJob {
   bucketKey: string;
   slot: number;
   matrix: THREE.Matrix4;
+  activateSlot?: boolean;
   releaseSlot?: boolean;
 }
 
@@ -503,7 +504,7 @@ export class PropSystem {
     if (slot === null) return;
     record.slots.push({ bucketKey: key, slot });
     record.instancesVisible++;
-    this.queueMatrixUpload(key, slot, _matrix);
+    this.queueMatrixUpload(key, slot, _matrix, "activate");
 
     if (context.debugEnabled && (this.deps.settings.debug.showBounds || this.deps.settings.debug.lodColorOverlay)) {
       _debugBoxSize.set(radius * 2, radius * 2, radius * 2);
@@ -518,7 +519,7 @@ export class PropSystem {
       this.activeCellKeys.delete(key);
       return;
     }
-    for (const slot of record.slots) this.queueMatrixUpload(slot.bucketKey, slot.slot, _zeroMatrix, true);
+    for (const slot of record.slots) this.queueMatrixUpload(slot.bucketKey, slot.slot, _zeroMatrix, "release");
     this.cellRecords.delete(key);
     this.activeCellKeys.delete(key);
     this.activeInstances -= record.instancesVisible;
@@ -531,14 +532,17 @@ export class PropSystem {
     const bucket = this.buckets.get(key);
     if (!bucket) return null;
     const slot = bucket.freeSlots.pop() ?? bucket.nextSlot++;
-    if (slot >= bucket.maxCount) return null;
-    bucket.occupiedSlots.add(slot);
-    this.refreshBucketVisibility(bucket);
-    return slot;
+    return slot < bucket.maxCount ? slot : null;
   }
 
-  private queueMatrixUpload(bucketKey: string, slot: number, matrix: THREE.Matrix4, releaseSlot = false): void {
-    this.matrixUploadQueue.push({ bucketKey, slot, matrix: matrix.clone(), releaseSlot });
+  private queueMatrixUpload(bucketKey: string, slot: number, matrix: THREE.Matrix4, mode: "activate" | "release"): void {
+    this.matrixUploadQueue.push({
+      bucketKey,
+      slot,
+      matrix: matrix.clone(),
+      activateSlot: mode === "activate",
+      releaseSlot: mode === "release",
+    });
   }
 
   private processMatrixUploads(): void {
@@ -550,11 +554,12 @@ export class PropSystem {
       if (!bucket) continue;
       bucket.mesh.setMatrixAt(job.slot, job.matrix);
       bucket.mesh.instanceMatrix.needsUpdate = true;
+      if (job.activateSlot) bucket.occupiedSlots.add(job.slot);
       if (job.releaseSlot) {
         bucket.occupiedSlots.delete(job.slot);
         bucket.freeSlots.push(job.slot);
-        this.refreshBucketVisibility(bucket);
       }
+      this.refreshBucketVisibility(bucket);
       processed++;
     }
   }
