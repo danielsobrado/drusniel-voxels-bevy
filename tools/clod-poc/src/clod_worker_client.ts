@@ -27,6 +27,7 @@ export interface WorkerLod0Rebuild {
   chunksRemeshed: number;
   chunksTotal: number;
   pendingParents: number;
+  requestCount: number;
 }
 
 export interface WorkerParentBatch {
@@ -44,17 +45,8 @@ interface PendingRequest<T> {
 
 interface DigBatchSlot {
   edits: DigEdit[];
-  dirty: DirtyCellBounds;
+  dirtyRegions: DirtyCellBounds[];
   resolvers: Array<PendingRequest<WorkerLod0Rebuild>>;
-}
-
-function mergeDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds {
-  return {
-    minX: Math.min(a.minX, b.minX),
-    maxX: Math.max(a.maxX, b.maxX),
-    minZ: Math.min(a.minZ, b.minZ),
-    maxZ: Math.max(a.maxZ, b.maxZ),
-  };
 }
 
 export class ClodWorkerClient {
@@ -127,12 +119,12 @@ export class ClodWorkerClient {
       if (!this.digPending) {
         this.digPending = {
           edits: [edit],
-          dirty: { ...dirty },
+          dirtyRegions: [{ ...dirty }],
           resolvers: [{ resolve, reject }],
         };
       } else {
         this.digPending.edits.push(edit);
-        this.digPending.dirty = mergeDirty(this.digPending.dirty, dirty);
+        this.digPending.dirtyRegions.push({ ...dirty });
         this.digPending.resolvers.push({ resolve, reject });
       }
       void this.pumpDigQueue();
@@ -180,7 +172,6 @@ export class ClodWorkerClient {
         try {
           const result = await this.sendDigBatch(batch);
           for (const pending of batch.resolvers) pending.resolve(result);
-          await this.waitForParents();
         } catch (error) {
           for (const pending of batch.resolvers) pending.reject(error);
         }
@@ -193,7 +184,7 @@ export class ClodWorkerClient {
 
   private sendDigBatch(batch: DigBatchSlot): Promise<WorkerLod0Rebuild> {
     const requestId = this.nextRequestId++;
-    const request: ClodWorkerRequest = { type: "dig", requestId, edits: batch.edits, dirty: batch.dirty };
+    const request: ClodWorkerRequest = { type: "dig", requestId, edits: batch.edits, dirtyRegions: batch.dirtyRegions };
     return new Promise((resolve, reject) => {
       this.digRequests.set(requestId, { resolve, reject });
       this.worker.postMessage(request);
@@ -247,6 +238,7 @@ export class ClodWorkerClient {
           chunksRemeshed: message.chunksRemeshed,
           chunksTotal: message.chunksTotal,
           pendingParents: message.pendingParents,
+          requestCount: message.requestIds.length,
         };
         if (message.pendingParents > 0) this.parentsPending = true;
         for (const rid of message.requestIds) {
@@ -324,6 +316,7 @@ export class ClodWorkerClient {
         this.flushRequests.delete(requestId);
         this.clearCacheRequests.delete(requestId);
         pending.reject(error);
+        return;
       }
     }
     this.releaseParentsWaitersAfterFailure(error);
@@ -338,5 +331,7 @@ export class ClodWorkerClient {
     this.digRequests.clear();
     this.flushRequests.clear();
     this.clearCacheRequests.clear();
+    this.progressHandlers.clear();
+    this.resolveParentsWaiters();
   }
 }
