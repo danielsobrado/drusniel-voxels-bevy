@@ -354,7 +354,7 @@ export function parseStoneConfig(
 ): StoneSettings {
   const raw = readStoneYamlRoot(text, warn);
   const base = DEFAULT_STONE_SETTINGS;
-  const slopeRepose = readNumberInRange(raw.slope_repose, base.slopeRepose, 0, 1);
+  const slopeRepose = readNumberInRange(raw.slope_repose, base.slopeRepose, 0, 0.999);
   const slopeReposeStart = Math.max(slopeRepose + 0.001, readNumberInRange(raw.slope_repose_start, base.slopeReposeStart, 0, 1));
   const cliffProbeNearM = readNumberAtLeast(raw.cliff_probe_near_m, base.cliffProbeNearM, 0.001);
   const streambedSandStart = readNumberAtLeast(raw.streambed_sand_start, base.streambedSandStart, 0);
@@ -422,7 +422,7 @@ function readStoneYamlRoot(text: string | null | undefined, warn: WarnHandler | 
   return {};
 }
 
-function cloneStoneSettings(settings: StoneSettings): StoneSettings {
+export function cloneStoneSettings(settings: StoneSettings): StoneSettings {
   return {
     ...settings,
     terrain: cloneStoneTerrainWeights(settings.terrain),
