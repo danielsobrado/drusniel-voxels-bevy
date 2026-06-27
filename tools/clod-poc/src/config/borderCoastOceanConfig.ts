@@ -130,6 +130,13 @@ export interface DeepOceanConfig {
   shading: DeepOceanShadingConfig;
 }
 
+export interface BorderOceanGameplayConfig {
+  soft_pushback_enabled: boolean;
+  world_edge_margin_m: number;
+  pushback_start_inside_world_m: number;
+  pushback_strength: number;
+}
+
 export interface BorderCoastOceanDebugConfig {
   show_world_bounds: boolean;
   show_coast_band: boolean;
@@ -144,6 +151,7 @@ export interface BorderCoastOceanConfig {
   materials: CoastMaterialsConfig;
   surf: SurfConfig;
   deep_ocean: DeepOceanConfig;
+  gameplay: BorderOceanGameplayConfig;
   debug: BorderCoastOceanDebugConfig;
 }
 
@@ -270,6 +278,7 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
   const deepOcean = recordAt(root["deep_ocean"], "deep_ocean");
   const wave = recordAt(deepOcean["wave"], "deep_ocean.wave");
   const shading = recordAt(deepOcean["shading"], "deep_ocean.shading");
+  const gameplay = recordAt(root["gameplay"], "gameplay");
   const debug = recordAt(root["debug"], "debug");
 
   const minX = numberAt(bounds, "min_x", "world.bounds");
@@ -410,6 +419,12 @@ export function parseBorderCoastOceanConfig(text: string): BorderCoastOceanConfi
         fog_far_m: fogFar,
         fog_density: numberAt(shading, "fog_density", "deep_ocean.shading", 0),
       },
+    },
+    gameplay: {
+      soft_pushback_enabled: booleanAt(gameplay, "soft_pushback_enabled", "gameplay"),
+      world_edge_margin_m: numberAt(gameplay, "world_edge_margin_m", "gameplay", 0),
+      pushback_start_inside_world_m: numberAt(gameplay, "pushback_start_inside_world_m", "gameplay", 0),
+      pushback_strength: numberAt(gameplay, "pushback_strength", "gameplay", 0),
     },
     debug: {
       show_world_bounds: booleanAt(debug, "show_world_bounds", "debug"),
