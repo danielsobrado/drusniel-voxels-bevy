@@ -64,15 +64,16 @@ function rectGridVertexCount(
 
 function deepOceanGridLayout(worldCells: number, config: DeepOceanRenderConfig) {
   const extend = Math.max(1, config.extendCells);
+  const startOutside = Math.min(Math.max(0, config.startOutsideBorderM), Math.max(0, extend - 1));
   const segments = Math.max(4, config.segments);
   const outerMin = -extend;
   const outerMax = worldCells + extend;
-  const innerMin = 0;
-  const innerMax = worldCells;
-  const ringWidth = Math.max(extend, 1);
+  const holeMin = -startOutside;
+  const holeMax = worldCells + startOutside;
+  const ringWidth = Math.max(extend - startOutside, 1);
   const radialSegments = Math.max(4, Math.round(segments * ringWidth / Math.max(ringWidth, worldCells * 0.25)));
   const tangentialSegments = segments;
-  return { outerMin, outerMax, innerMin, innerMax, radialSegments, tangentialSegments };
+  return { outerMin, outerMax, holeMin, holeMax, radialSegments, tangentialSegments };
 }
 
 export function createDeepOceanSurface(
@@ -83,15 +84,15 @@ export function createDeepOceanSurface(
   if (!config.enabled || worldCells <= 0) return null;
 
   const y = config.surfaceY;
-  const { outerMin, outerMax, innerMin, innerMax, radialSegments, tangentialSegments } = deepOceanGridLayout(worldCells, config);
+  const { outerMin, outerMax, holeMin, holeMax, radialSegments, tangentialSegments } = deepOceanGridLayout(worldCells, config);
   const positions: number[] = [];
   const indices: number[] = [];
   const vertexOffset = { value: 0 };
 
-  addRectGrid(positions, indices, outerMin, outerMax, innerMax, outerMax, tangentialSegments, radialSegments, y, vertexOffset);
-  addRectGrid(positions, indices, outerMin, outerMax, outerMin, innerMin, tangentialSegments, radialSegments, y, vertexOffset);
-  addRectGrid(positions, indices, outerMin, innerMin, innerMin, innerMax, radialSegments, tangentialSegments, y, vertexOffset);
-  addRectGrid(positions, indices, innerMax, outerMax, innerMin, innerMax, radialSegments, tangentialSegments, y, vertexOffset);
+  addRectGrid(positions, indices, outerMin, outerMax, holeMax, outerMax, tangentialSegments, radialSegments, y, vertexOffset);
+  addRectGrid(positions, indices, outerMin, outerMax, outerMin, holeMin, tangentialSegments, radialSegments, y, vertexOffset);
+  addRectGrid(positions, indices, outerMin, holeMin, holeMin, holeMax, radialSegments, tangentialSegments, y, vertexOffset);
+  addRectGrid(positions, indices, holeMax, outerMax, holeMin, holeMax, radialSegments, tangentialSegments, y, vertexOffset);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
@@ -121,9 +122,9 @@ export function createDeepOceanSurface(
 
 export function deepOceanSurfaceVertexCount(worldCells: number, config: DeepOceanRenderConfig): number {
   if (!config.enabled || worldCells <= 0) return 0;
-  const { outerMin, outerMax, innerMin, innerMax, radialSegments, tangentialSegments } = deepOceanGridLayout(worldCells, config);
-  return rectGridVertexCount(outerMin, outerMax, innerMax, outerMax, tangentialSegments, radialSegments)
-    + rectGridVertexCount(outerMin, outerMax, outerMin, innerMin, tangentialSegments, radialSegments)
-    + rectGridVertexCount(outerMin, innerMin, innerMin, innerMax, radialSegments, tangentialSegments)
-    + rectGridVertexCount(innerMax, outerMax, innerMin, innerMax, radialSegments, tangentialSegments);
+  const { outerMin, outerMax, holeMin, holeMax, radialSegments, tangentialSegments } = deepOceanGridLayout(worldCells, config);
+  return rectGridVertexCount(outerMin, outerMax, holeMax, outerMax, tangentialSegments, radialSegments)
+    + rectGridVertexCount(outerMin, outerMax, outerMin, holeMin, tangentialSegments, radialSegments)
+    + rectGridVertexCount(outerMin, holeMin, holeMin, holeMax, radialSegments, tangentialSegments)
+    + rectGridVertexCount(holeMax, outerMax, holeMin, holeMax, radialSegments, tangentialSegments);
 }
