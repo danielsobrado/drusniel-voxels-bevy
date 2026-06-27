@@ -82,9 +82,9 @@ export function createFarWaterMaterial(
   material.name = "naadf-far-water-overlay";
   material.colorNode = color;
   material.opacityNode = alpha;
-  material.maskNode = alpha.greaterThan(float(WATER_VISIBLE_ALPHA_THRESHOLD));
   material.positionNode = vec3(local.x, waterHeight.add(float(WATER_SURFACE_OFFSET_M)).add(ripple.mul(waterCoverage)), local.z);
   material.transparent = true;
+  material.alphaTest = WATER_VISIBLE_ALPHA_THRESHOLD;
   material.depthTest = true;
   material.depthWrite = false;
   material.side = THREE.DoubleSide;
