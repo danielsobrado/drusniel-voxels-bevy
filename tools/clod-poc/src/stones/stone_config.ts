@@ -165,16 +165,7 @@ export const DEFAULT_STONE_SETTINGS: StoneSettings = {
   patchClumpCellMult: 3.0,
   sinkSlopeMultiplier: 0.9,
   normalLean: 0.4,
-  terrain: {
-    ...DEFAULT_STONE_TERRAIN_WEIGHTS,
-    grass: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.grass },
-    rock: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.rock },
-    sand: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.sand },
-    snow: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.snow },
-    low: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.low },
-    mid: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.mid },
-    high: { ...DEFAULT_STONE_TERRAIN_WEIGHTS.high },
-  },
+  terrain: cloneStoneTerrainWeights(DEFAULT_STONE_TERRAIN_WEIGHTS),
   debug: {
     classColors: false,
     largeOnly: false,
@@ -327,18 +318,18 @@ function terrainClassFromYaml(
   raw: StoneYamlTerrainClassWeights | undefined,
 ): StoneTerrainClassWeights {
   return {
-    density: raw?.density ?? base.density,
-    large: raw?.large ?? base.large,
-    medium: raw?.medium ?? base.medium,
-    small: raw?.small ?? base.small,
+    density: readNumberAtLeast(raw?.density, base.density, 0),
+    large: readNumberAtLeast(raw?.large, base.large, 0),
+    medium: readNumberAtLeast(raw?.medium, base.medium, 0),
+    small: readNumberAtLeast(raw?.small, base.small, 0),
   };
 }
 
 function terrainFromYaml(base: StoneTerrainWeights, raw: StoneYamlTerrainWeights | undefined): StoneTerrainWeights {
   return {
-    lowHeightM: raw?.low_height_m ?? base.lowHeightM,
-    highHeightM: raw?.high_height_m ?? base.highHeightM,
-    heightBlendM: raw?.height_blend_m ?? base.heightBlendM,
+    lowHeightM: readNumber(raw?.low_height_m, base.lowHeightM),
+    highHeightM: readNumber(raw?.high_height_m, base.highHeightM),
+    heightBlendM: readNumberAtLeast(raw?.height_blend_m, base.heightBlendM, 0.001),
     grass: terrainClassFromYaml(base.grass, raw?.grass),
     rock: terrainClassFromYaml(base.rock, raw?.rock),
     sand: terrainClassFromYaml(base.sand, raw?.sand),
@@ -349,8 +340,18 @@ function terrainFromYaml(base: StoneTerrainWeights, raw: StoneYamlTerrainWeights
   };
 }
 
-export function parseStoneConfig(text: string): StoneSettings {
-  const raw = (load(text) ?? {}) as StoneYamlConfig;
+export function parseStoneConfig(
+  text: string | null | undefined,
+  warn: ((message: string) => void) | null = console.warn,
+): StoneSettings {
+  let raw: StoneYamlConfig;
+  try {
+    raw = (text && text.trim() !== "" ? load(text) : {}) as StoneYamlConfig;
+  } catch (error) {
+    warn?.(`[stone-config] failed to parse config/stones.yaml; using defaults: ${error instanceof Error ? error.message : String(error)}`);
+    return cloneStoneSettings(DEFAULT_STONE_SETTINGS);
+  }
+
   const base = DEFAULT_STONE_SETTINGS;
   const debug: StoneDebugSettings = {
     classColors: raw.debug?.class_colors ?? raw.debug?.classColors ?? base.debug.classColors,
@@ -403,4 +404,38 @@ export function parseStoneConfig(text: string): StoneSettings {
       small: classFromYaml(base.classes.small, raw.small),
     },
   };
+}
+
+function cloneStoneSettings(settings: StoneSettings): StoneSettings {
+  return {
+    ...settings,
+    terrain: cloneStoneTerrainWeights(settings.terrain),
+    debug: { ...settings.debug },
+    classes: {
+      large: { ...settings.classes.large, lodDetails: [...settings.classes.large.lodDetails], presets: [...settings.classes.large.presets] },
+      medium: { ...settings.classes.medium, lodDetails: [...settings.classes.medium.lodDetails], presets: [...settings.classes.medium.presets] },
+      small: { ...settings.classes.small, lodDetails: [...settings.classes.small.lodDetails], presets: [...settings.classes.small.presets] },
+    },
+  };
+}
+
+function cloneStoneTerrainWeights(weights: StoneTerrainWeights): StoneTerrainWeights {
+  return {
+    ...weights,
+    grass: { ...weights.grass },
+    rock: { ...weights.rock },
+    sand: { ...weights.sand },
+    snow: { ...weights.snow },
+    low: { ...weights.low },
+    mid: { ...weights.mid },
+    high: { ...weights.high },
+  };
+}
+
+function readNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function readNumberAtLeast(value: unknown, fallback: number, min: number): number {
+  return Math.max(min, readNumber(value, fallback));
 }
