@@ -56,7 +56,7 @@ export type ClodWorkerRequest =
       type: "dig";
       requestId: number;
       edits: DigEdit[];
-      dirty: DirtyCellBounds;
+      dirtyRegions: DirtyCellBounds[];
     }
   | {
       type: "flush";
@@ -220,17 +220,17 @@ export function rehydrateBuildResult(serialized: SerializedBuildResult): BuildRe
     nodesByLevel.set(level, nodes);
   }
 
-  for (const [, serializedNodes] of serialized.nodesByLevel) {
-    for (const serializedNode of serializedNodes) {
-      const node = nodesById.get(serializedNode.id);
-      if (node) applySerializedNode(node, serializedNode, nodesById);
+  for (const [, nodes] of nodesByLevel) {
+    for (const node of nodes) {
+      const serializedNode = serialized.nodesByLevel.flatMap(([, levelNodes]) => levelNodes).find((n) => n.id === node.id);
+      node.children = serializedNode?.childIds.map((id) => (id === null ? null : nodesById.get(id) ?? null)) ?? [];
     }
   }
 
   return {
     roots: serialized.roots.map((id) => nodesById.get(id)).filter((node): node is ClodPageNode => !!node),
     nodesByLevel,
-    stats: serialized.stats,
+    stats: serialized.stats.map((stat) => ({ ...stat, polish: { ...stat.polish } })),
     worldPagesX: serialized.worldPagesX,
     worldPagesZ: serialized.worldPagesZ,
   };
