@@ -22,10 +22,6 @@
   touch-action: none;
 }
 
-#spell-menu.visible {
-  display: flex;
-}
-
 body[data-player-mode="choosingSpawn"] #spell-menu {
   display: none;
 }
