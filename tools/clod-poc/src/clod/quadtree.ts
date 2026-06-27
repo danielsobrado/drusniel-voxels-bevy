@@ -8,7 +8,7 @@
 // decimation of its merged children. Locked outer borders are bit-identical across
 // siblings (inherited verbatim from LOD0), so internal borders weld exactly.
 
-import { ClodPageNode, PageFootprint, PageMesh, ClodBuildError } from "../types.js";
+import { ClodBuildError, ClodPageNode, PageFootprint, PageMesh } from "../types.js";
 import { ClodPagesConfig } from "../config.js";
 import { buildLod0PageSource, dirtyPageChunkIndices, rebuildPageChunks } from "./source_mesh.js";
 import { concatPageSourceMeshes as concat } from "./pageSource.js";
@@ -22,11 +22,7 @@ import {
   validatePageMesh,
   validateWeldedIntermediate,
 } from "./validate.js";
-import {
-  emptyDiagonalPolishStats,
-  polishDiagonals,
-  type DiagonalPolishStats,
-} from "../diagonalPolish.js";
+import { emptyDiagonalPolishStats, polishDiagonals, type DiagonalPolishStats } from "../diagonalPolish.js";
 
 export interface NodeBuildStat {
   id: string;
@@ -57,7 +53,6 @@ export interface BuildProgress {
   phase: string;
 }
 
-/** Optional disk/memory cache hooks — never block rendering on cache miss. */
 export interface BuildCacheHooks {
   tryLoadNode(nodeId: string, level: number, px: number, pz: number): Promise<ClodPageNode | null>;
   getCachedBuildStat?(nodeId: string): NodeBuildStat | undefined;
@@ -65,12 +60,57 @@ export interface BuildCacheHooks {
   onBuildComplete?(result: BuildResult): Promise<void>;
 }
 
+export interface DirtyCellBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+export interface EditRebuildResult {
+  changed: ClodPageNode[];
+  lod0Pages: number;
+  parentNodes: number;
+  lod0Ms: number;
+  parentMs: number;
+}
+
+export interface Lod0RebuildResult {
+  /** LOD0 nodes whose mesh/chunk cache changed, mutated in place. */
+  changed: ClodPageNode[];
+  /** Page coords of changed LOD0 nodes — the seed for the ancestor chain. */
+  dirtyCoords: [number, number][];
+  lod0Pages: number;
+  lod0Ms: number;
+  /** Chunks actually re-meshed vs. chunks considered in the sibling page group. */
+  chunksRemeshed: number;
+  chunksTotal: number;
+}
+
+export interface AncestorRebuildResult {
+  changed: ClodPageNode[];
+  parentNodes: number;
+  parentMs: number;
+}
+
+export type NodeIndex = Map<string, ClodPageNode>[];
+
+interface ParentBuildOutput {
+  mesh: PageMesh;
+  inputTris: number;
+  lockedVerts: number;
+  errorWorld: number;
+  lowBenefit: boolean;
+  polish: DiagonalPolishStats;
+}
+
+const tris = (mesh: PageMesh): number => mesh.indices.length / 3;
+
 function footprintFor(level: number, nx: number, nz: number, cfg: ClodPagesConfig): PageFootprint {
-  const span = (1 << level) * cfg.page.chunks_per_page * cfg.page.chunk_size; // cells per node side
+  const span = (1 << level) * cfg.page.chunks_per_page * cfg.page.chunk_size;
   return { minX: nx * span, minZ: nz * span, maxX: (nx + 1) * span, maxZ: (nz + 1) * span };
 }
 
-/** Simplify a welded parent page; fall back to the welded mesh if decimation opens an internal seam. */
 function clonePageMesh(mesh: PageMesh): PageMesh {
   return {
     positions: mesh.positions.slice(),
@@ -82,12 +122,7 @@ function clonePageMesh(mesh: PageMesh): PageMesh {
   };
 }
 
-function simplifyParentPage(
-  welded: PageMesh,
-  locks: Uint8Array,
-  footprint: PageFootprint,
-  cfg: ClodPagesConfig,
-): SimplifyOutput {
+function simplifyParentPage(welded: PageMesh, locks: Uint8Array, footprint: PageFootprint, cfg: ClodPagesConfig): SimplifyOutput {
   const sim = simplifyPage(clonePageMesh(welded), locks, cfg);
   try {
     stripDegenerateTriangles(sim.mesh, cfg.validation.zero_area_epsilon);
@@ -98,20 +133,21 @@ function simplifyParentPage(
       assertNoInternalBorders(welded, footprint);
       return { mesh: welded, resultError: 0, errorWorld: 0, lowBenefit: true };
     } catch {
-      // Hydrology merge can leave seams on the welded parent while simplification still
-      // produces the cleaner mesh — prefer simplified over welded when both fail the check.
       return { mesh: sim.mesh, resultError: sim.resultError, errorWorld: sim.errorWorld, lowBenefit: true };
     }
   }
 }
 
-/** Diagonal polish is optional quality; skip when a flip would open an internal seam. */
+function pageMeshPolishConfig(cfg: ClodPagesConfig) {
+  return { ...cfg.polish.diagonal_flip, material_error_weight: 0 };
+}
+
 function tryPolishParentPage(
   mesh: PageMesh,
   footprint: PageFootprint,
   cfg: ClodPagesConfig,
   label: string,
-): { mesh: PageMesh; stats: ReturnType<typeof emptyDiagonalPolishStats> } {
+): { mesh: PageMesh; stats: DiagonalPolishStats } {
   const candidate = clonePageMesh(mesh);
   const stats = polishDiagonals(candidate, buildOuterBorderLocks(candidate), pageMeshPolishConfig(cfg));
   try {
@@ -123,27 +159,29 @@ function tryPolishParentPage(
 }
 
 function boundsOf(mesh: PageMesh): { center: [number, number, number]; radius: number; minY: number; maxY: number } {
-  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
   for (let i = 0; i < mesh.positions.length; i += 3) {
-    minX = Math.min(minX, mesh.positions[i]); maxX = Math.max(maxX, mesh.positions[i]);
-    minY = Math.min(minY, mesh.positions[i + 1]); maxY = Math.max(maxY, mesh.positions[i + 1]);
-    minZ = Math.min(minZ, mesh.positions[i + 2]); maxZ = Math.max(maxZ, mesh.positions[i + 2]);
+    minX = Math.min(minX, mesh.positions[i]);
+    maxX = Math.max(maxX, mesh.positions[i]);
+    minY = Math.min(minY, mesh.positions[i + 1]);
+    maxY = Math.max(maxY, mesh.positions[i + 1]);
+    minZ = Math.min(minZ, mesh.positions[i + 2]);
+    maxZ = Math.max(maxZ, mesh.positions[i + 2]);
   }
   const center: [number, number, number] = [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
-  let r = 0;
+  let radius = 0;
   for (let i = 0; i < mesh.positions.length; i += 3) {
-    r = Math.max(r, Math.hypot(mesh.positions[i] - center[0], mesh.positions[i + 1] - center[1], mesh.positions[i + 2] - center[2]));
+    radius = Math.max(
+      radius,
+      Math.hypot(mesh.positions[i] - center[0], mesh.positions[i + 1] - center[1], mesh.positions[i + 2] - center[2]),
+    );
   }
-  return { center, radius: r, minY, maxY };
-}
-
-const tris = (m: PageMesh) => m.indices.length / 3;
-
-function pageMeshPolishConfig(cfg: ClodPagesConfig) {
-  return {
-    ...cfg.polish.diagonal_flip,
-    material_error_weight: 0,
-  };
+  return { center, radius, minY, maxY };
 }
 
 function estimatedNodeCount(worldPagesX: number, worldPagesZ: number, levels: number): number {
@@ -163,8 +201,9 @@ function yieldToBrowser(): Promise<void> {
   return new Promise((resolve) => {
     if (typeof document !== "undefined" && !document.hidden && typeof requestAnimationFrame === "function") {
       requestAnimationFrame(() => resolve());
+    } else {
+      setTimeout(resolve, 0);
     }
-    else setTimeout(resolve, 0);
   });
 }
 
@@ -183,8 +222,92 @@ function resolveBuildShape(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
   return { maxLevels };
 }
 
+function childNodes(index: Map<string, ClodPageNode>[], level: number, nx: number, nz: number): ClodPageNode[] {
+  const children: ClodPageNode[] = [];
+  for (let dz = 0; dz < 2; dz++) {
+    for (let dx = 0; dx < 2; dx++) {
+      const child = index[level - 1].get(`${nx * 2 + dx},${nz * 2 + dz}`);
+      if (child) children.push(child);
+    }
+  }
+  if (children.length !== 4) {
+    throw new ClodBuildError("PageIncomplete", `parent L${level}:${nx},${nz} expected 4 children, got ${children.length}`);
+  }
+  return children;
+}
+
+function buildParentOutput(
+  level: number,
+  nx: number,
+  nz: number,
+  children: readonly ClodPageNode[],
+  cfg: ClodPagesConfig,
+  polishTopLevel: boolean,
+): ParentBuildOutput {
+  const merged = concat(children.map((child) => child.mesh));
+  const { mesh: welded } = weldVertices(merged, cfg.simplify.weld_epsilon_cells, {
+    position: cfg.validation.position_epsilon,
+    normalDot: cfg.validation.normal_dot_min,
+    material: cfg.validation.material_weight_epsilon,
+  });
+  validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
+  const footprint = footprintFor(level, nx, nz, cfg);
+  const locks = buildOuterBorderLocks(welded);
+  const sim = simplifyParentPage(welded, locks, footprint, cfg);
+  const simplified = sim.mesh !== welded;
+  let polish = emptyDiagonalPolishStats();
+  if (simplified) {
+    validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
+    if (polishTopLevel) {
+      const polished = tryPolishParentPage(sim.mesh, footprint, cfg, `L${level}:${nx},${nz}`);
+      sim.mesh = polished.mesh;
+      polish = polished.stats;
+    }
+  }
+  validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
+  return {
+    mesh: sim.mesh,
+    inputTris: tris(welded),
+    lockedVerts: countLocks(locks),
+    errorWorld: sim.errorWorld + Math.max(...children.map((child) => child.errorWorld)),
+    lowBenefit: sim.lowBenefit,
+    polish,
+  };
+}
+
+function createParentNode(
+  level: number,
+  nx: number,
+  nz: number,
+  children: readonly ClodPageNode[],
+  cfg: ClodPagesConfig,
+  polishTopLevel: boolean,
+): { node: ClodPageNode; stat: Omit<NodeBuildStat, "buildMs"> } {
+  const built = buildParentOutput(level, nx, nz, children, cfg, polishTopLevel);
+  const node: ClodPageNode = {
+    id: `L${level}:${nx},${nz}`,
+    level,
+    children: [...children],
+    mesh: built.mesh,
+    footprint: footprintFor(level, nx, nz, cfg),
+    bounds: boundsOf(built.mesh),
+    errorWorld: built.errorWorld,
+    lowBenefit: built.lowBenefit,
+  };
+  const stat = {
+    id: node.id,
+    level,
+    inputTris: built.inputTris,
+    outputTris: tris(built.mesh),
+    lockedVerts: built.lockedVerts,
+    errorWorld: built.errorWorld,
+    lowBenefit: built.lowBenefit,
+    polish: built.polish,
+  };
+  return { node, stat };
+}
+
 export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPagesConfig): BuildResult {
-  const eps = cfg.simplify.weld_epsilon_cells;
   const { maxLevels } = resolveBuildShape(worldPagesX, worldPagesZ, cfg);
   const world = {
     cellsX: worldPagesX * cfg.page.chunks_per_page * cfg.page.chunk_size,
@@ -192,25 +315,22 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
   };
   const nodesByLevel = new Map<number, ClodPageNode[]>();
   const stats: NodeBuildStat[] = [];
-  // index[level] : key "nx,nz" -> node
   const index: Map<string, ClodPageNode>[] = [];
 
-  // ---- LOD0 ----
   const lod0: ClodPageNode[] = [];
   const lod0Index = new Map<string, ClodPageNode>();
   for (let pz = 0; pz < worldPagesZ; pz++) {
     for (let px = 0; px < worldPagesX; px++) {
-      const t0 = performance.now();
+      const startedAt = performance.now();
       const src = buildLod0PageSource(px, pz, cfg, world);
       validatePageMesh(src.mesh, src.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz}`);
-      const b = boundsOf(src.mesh);
       const node: ClodPageNode = {
         id: `L0:${px},${pz}`,
         level: 0,
         children: [],
         mesh: src.mesh,
         footprint: src.footprint,
-        bounds: b,
+        bounds: boundsOf(src.mesh),
         errorWorld: 0,
         lowBenefit: false,
         chunkMeshes: src.chunks,
@@ -218,17 +338,23 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
       lod0.push(node);
       lod0Index.set(`${px},${pz}`, node);
       stats.push({
-        id: node.id, level: 0, inputTris: tris(src.mesh), outputTris: tris(src.mesh),
-        lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
-        buildMs: performance.now() - t0,
+        id: node.id,
+        level: 0,
+        inputTris: tris(src.mesh),
+        outputTris: tris(src.mesh),
+        lockedVerts: 0,
+        errorWorld: 0,
+        lowBenefit: false,
+        polish: emptyDiagonalPolishStats(),
+        buildMs: performance.now() - startedAt,
       });
     }
   }
   nodesByLevel.set(0, lod0);
   index[0] = lod0Index;
 
-  // ---- LOD1+ ----
-  let prevCountX = worldPagesX, prevCountZ = worldPagesZ;
+  let prevCountX = worldPagesX;
+  let prevCountZ = worldPagesZ;
   for (let level = 1; level < maxLevels; level++) {
     const countX = Math.ceil(prevCountX / 2);
     const countZ = Math.ceil(prevCountZ / 2);
@@ -236,71 +362,18 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
     const levelIndex = new Map<string, ClodPageNode>();
     for (let nz = 0; nz < countZ; nz++) {
       for (let nx = 0; nx < countX; nx++) {
-        const t0 = performance.now();
-        const children: ClodPageNode[] = [];
-            for (let dz = 0; dz < 2; dz++) {
-              for (let dx = 0; dx < 2; dx++) {
-                const c = index[level - 1].get(`${nx * 2 + dx},${nz * 2 + dz}`);
-                if (c) children.push(c);
-              }
-            }
-            if (children.length !== 4) {
-              throw new ClodBuildError(
-                "PageIncomplete",
-                `parent L${level}:${nx},${nz} expected 4 children, got ${children.length}`,
-              );
-            }
-
-            const merged = concat(children.map((c) => c.mesh));
-            const { mesh: welded } = weldVertices(merged, eps, {
-              position: cfg.validation.position_epsilon,
-              normalDot: cfg.validation.normal_dot_min,
-              material: cfg.validation.material_weight_epsilon,
-            });
-            validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
-            const footprint = footprintFor(level, nx, nz, cfg);
-        const locks = buildOuterBorderLocks(welded);
-        const sim = simplifyParentPage(welded, locks, footprint, cfg);
-        const simplified = sim.mesh !== welded;
-        let polish = emptyDiagonalPolishStats();
-        if (simplified) {
-          validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
-          if (level === maxLevels - 1) {
-            const polished = tryPolishParentPage(sim.mesh, footprint, cfg, `L${level}:${nx},${nz}`);
-            sim.mesh = polished.mesh;
-            polish = polished.stats;
-          }
-        }
-        validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
-
-        const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
-        const b = boundsOf(sim.mesh);
-        const node: ClodPageNode = {
-          id: `L${level}:${nx},${nz}`,
-          level,
-          children,
-          mesh: sim.mesh,
-          footprint,
-          bounds: b,
-          errorWorld,
-          lowBenefit: sim.lowBenefit,
-        };
+        const startedAt = performance.now();
+        const { node, stat } = createParentNode(level, nx, nz, childNodes(index, level, nx, nz), cfg, level === maxLevels - 1);
         levelNodes.push(node);
         levelIndex.set(`${nx},${nz}`, node);
-        stats.push({
-          id: node.id, level, inputTris: tris(welded), outputTris: tris(sim.mesh),
-          lockedVerts: countLocks(locks), errorWorld, lowBenefit: sim.lowBenefit,
-          polish,
-          buildMs: performance.now() - t0,
-        });
+        stats.push({ ...stat, buildMs: performance.now() - startedAt });
       }
     }
-
     nodesByLevel.set(level, levelNodes);
     index[level] = levelIndex;
     prevCountX = countX;
     prevCountZ = countZ;
-    if (countX === 1 && countZ === 1) break; // reached a single root
+    if (countX === 1 && countZ === 1) break;
   }
 
   const topLevel = Math.max(...nodesByLevel.keys());
@@ -314,7 +387,6 @@ export async function buildWorldAsync(
   onProgress: (progress: BuildProgress) => void,
   cacheHooks?: BuildCacheHooks,
 ): Promise<BuildResult> {
-  const eps = cfg.simplify.weld_epsilon_cells;
   const { maxLevels } = resolveBuildShape(worldPagesX, worldPagesZ, cfg);
   const world = {
     cellsX: worldPagesX * cfg.page.chunks_per_page * cfg.page.chunk_size,
@@ -327,7 +399,7 @@ export async function buildWorldAsync(
   let done = 0;
   let lastYield = performance.now();
 
-  const tick = async (level: number, phase: string) => {
+  const tick = async (level: number, phase: string): Promise<void> => {
     done++;
     onProgress({ done, total, level, phase });
     const now = performance.now();
@@ -344,145 +416,100 @@ export async function buildWorldAsync(
   const lod0Index = new Map<string, ClodPageNode>();
   for (let pz = 0; pz < worldPagesZ; pz++) {
     for (let px = 0; px < worldPagesX; px++) {
-      const t0 = performance.now();
+      const startedAt = performance.now();
       const nodeId = `L0:${px},${pz}`;
-      let node: ClodPageNode | null = cacheHooks
-        ? await cacheHooks.tryLoadNode(nodeId, 0, px, pz)
-        : null;
+      let node = cacheHooks ? await cacheHooks.tryLoadNode(nodeId, 0, px, pz) : null;
       if (!node) {
         const src = buildLod0PageSource(px, pz, cfg, world);
         validatePageMesh(src.mesh, src.footprint, cfg.validation.zero_area_epsilon, nodeId);
-        const b = boundsOf(src.mesh);
-        const buildMs = performance.now() - t0;
+        const buildMs = performance.now() - startedAt;
         node = {
           id: nodeId,
           level: 0,
           children: [],
           mesh: src.mesh,
           footprint: src.footprint,
-          bounds: b,
+          bounds: boundsOf(src.mesh),
           errorWorld: 0,
           lowBenefit: false,
           chunkMeshes: src.chunks,
         };
         const stat: NodeBuildStat = {
-          id: nodeId, level: 0, inputTris: tris(src.mesh), outputTris: tris(src.mesh),
-          lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
+          id: nodeId,
+          level: 0,
+          inputTris: tris(src.mesh),
+          outputTris: tris(src.mesh),
+          lockedVerts: 0,
+          errorWorld: 0,
+          lowBenefit: false,
+          polish: emptyDiagonalPolishStats(),
           buildMs,
         };
         if (cacheHooks) await cacheHooks.storeNode(node, stat);
-        lod0.push(node);
-        lod0Index.set(`${px},${pz}`, node);
         stats.push(stat);
       } else {
-        lod0.push(node);
-        lod0Index.set(`${px},${pz}`, node);
         const cachedStat = cacheHooks?.getCachedBuildStat?.(nodeId);
         stats.push(cachedStat ?? {
-          id: node.id, level: 0, inputTris: tris(node.mesh), outputTris: tris(node.mesh),
-          lockedVerts: 0, errorWorld: 0, lowBenefit: false, polish: emptyDiagonalPolishStats(),
-          buildMs: performance.now() - t0, fromCache: true,
+          id: node.id,
+          level: 0,
+          inputTris: tris(node.mesh),
+          outputTris: tris(node.mesh),
+          lockedVerts: 0,
+          errorWorld: 0,
+          lowBenefit: false,
+          polish: emptyDiagonalPolishStats(),
+          buildMs: performance.now() - startedAt,
+          fromCache: true,
         });
       }
+      lod0.push(node);
+      lod0Index.set(`${px},${pz}`, node);
       await tick(0, "LOD0 pages");
     }
   }
   nodesByLevel.set(0, lod0);
   index[0] = lod0Index;
 
-  let prevCountX = worldPagesX, prevCountZ = worldPagesZ;
+  let prevCountX = worldPagesX;
+  let prevCountZ = worldPagesZ;
   for (let level = 1; level < maxLevels; level++) {
     const countX = Math.ceil(prevCountX / 2);
     const countZ = Math.ceil(prevCountZ / 2);
     const levelNodes: ClodPageNode[] = [];
     const levelIndex = new Map<string, ClodPageNode>();
-
     for (let nz = 0; nz < countZ; nz++) {
       for (let nx = 0; nx < countX; nx++) {
-        const t0 = performance.now();
+        const startedAt = performance.now();
         const nodeId = `L${level}:${nx},${nz}`;
-        let node: ClodPageNode | null = cacheHooks
-          ? await cacheHooks.tryLoadNode(nodeId, level, nx, nz)
-          : null;
-
-        const children: ClodPageNode[] = [];
-        for (let dz = 0; dz < 2; dz++) {
-          for (let dx = 0; dx < 2; dx++) {
-            const c = index[level - 1].get(`${nx * 2 + dx},${nz * 2 + dz}`);
-            if (c) children.push(c);
-          }
-        }
-        if (children.length !== 4) {
-          throw new ClodBuildError(
-            "PageIncomplete",
-            `parent L${level}:${nx},${nz} expected 4 children, got ${children.length}`,
-          );
-        }
-
+        const children = childNodes(index, level, nx, nz);
+        let node = cacheHooks ? await cacheHooks.tryLoadNode(nodeId, level, nx, nz) : null;
         if (node) {
           node.children = children;
-          levelNodes.push(node);
-          levelIndex.set(`${nx},${nz}`, node);
           const cachedStat = cacheHooks?.getCachedBuildStat?.(nodeId);
           stats.push(cachedStat ?? {
-            id: node.id, level, inputTris: tris(node.mesh), outputTris: tris(node.mesh),
-            lockedVerts: 0, errorWorld: node.errorWorld, lowBenefit: node.lowBenefit,
+            id: node.id,
+            level,
+            inputTris: tris(node.mesh),
+            outputTris: tris(node.mesh),
+            lockedVerts: 0,
+            errorWorld: node.errorWorld,
+            lowBenefit: node.lowBenefit,
             polish: emptyDiagonalPolishStats(),
-            buildMs: performance.now() - t0, fromCache: true,
+            buildMs: performance.now() - startedAt,
+            fromCache: true,
           });
-          await tick(level, `LOD${level} parents`);
-          continue;
+        } else {
+          const built = createParentNode(level, nx, nz, children, cfg, level === maxLevels - 1);
+          node = built.node;
+          const stat = { ...built.stat, buildMs: performance.now() - startedAt };
+          if (cacheHooks) await cacheHooks.storeNode(node, stat);
+          stats.push(stat);
         }
-
-        const merged = concat(children.map((c) => c.mesh));
-        const { mesh: welded } = weldVertices(merged, eps, {
-          position: cfg.validation.position_epsilon,
-          normalDot: cfg.validation.normal_dot_min,
-          material: cfg.validation.material_weight_epsilon,
-        });
-        validateWeldedIntermediate(welded, `L${level}:${nx},${nz} welded`, cfg.validation.zero_area_epsilon);
-        const footprint = footprintFor(level, nx, nz, cfg);
-        const locks = buildOuterBorderLocks(welded);
-        const sim = simplifyParentPage(welded, locks, footprint, cfg);
-        const simplified = sim.mesh !== welded;
-        let polish = emptyDiagonalPolishStats();
-        if (simplified) {
-          validateWeldedIntermediate(sim.mesh, `L${level}:${nx},${nz} after simplify`, cfg.validation.zero_area_epsilon);
-          if (level === maxLevels - 1) {
-            const polished = tryPolishParentPage(sim.mesh, footprint, cfg, `L${level}:${nx},${nz}`);
-            sim.mesh = polished.mesh;
-            polish = polished.stats;
-          }
-        }
-        validateFinalPageMesh(sim.mesh, footprint, cfg.validation.zero_area_epsilon, `L${level}:${nx},${nz} final`);
-
-        const errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
-        const b = boundsOf(sim.mesh);
-        node = {
-          id: nodeId,
-          level,
-          children,
-          mesh: sim.mesh,
-          footprint,
-          bounds: b,
-          errorWorld,
-          lowBenefit: sim.lowBenefit,
-        };
-        const buildMs = performance.now() - t0;
-        const stat: NodeBuildStat = {
-          id: node.id, level, inputTris: tris(welded), outputTris: tris(sim.mesh),
-          lockedVerts: countLocks(locks), errorWorld, lowBenefit: sim.lowBenefit,
-          polish,
-          buildMs,
-        };
-        if (cacheHooks) await cacheHooks.storeNode(node, stat);
         levelNodes.push(node);
         levelIndex.set(`${nx},${nz}`, node);
-        stats.push(stat);
         await tick(level, `LOD${level} parents`);
       }
     }
-
     nodesByLevel.set(level, levelNodes);
     index[level] = levelIndex;
     prevCountX = countX;
@@ -498,57 +525,16 @@ export async function buildWorldAsync(
   return buildResult;
 }
 
-// ---- targeted rebuild after a terrain edit ---------------------------------
-
-/** Inclusive world-cell bounds touched by an edit (sphere bbox + influence margin). */
-export interface DirtyCellBounds {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-}
-
-export interface EditRebuildResult {
-  /** Mutated in place (same node objects), LOD0 pages first then parents bottom-up. */
-  changed: ClodPageNode[];
-  lod0Pages: number;
-  parentNodes: number;
-  lod0Ms: number;
-  parentMs: number;
-}
-
-/** Per-level node lookup keyed "nx,nz" (recovered from the build-time ids). */
-export type NodeIndex = Map<string, ClodPageNode>[];
-
 export function buildNodeIndex(result: BuildResult): NodeIndex {
   const index: NodeIndex = [];
   for (const [level, nodes] of result.nodesByLevel) {
-    const m = new Map<string, ClodPageNode>();
-    for (const n of nodes) m.set(n.id.slice(n.id.indexOf(":") + 1), n);
-    index[level] = m;
+    const byCoord = new Map<string, ClodPageNode>();
+    for (const node of nodes) byCoord.set(node.id.slice(node.id.indexOf(":") + 1), node);
+    index[level] = byCoord;
   }
   return index;
 }
 
-export interface Lod0RebuildResult {
-  /** LOD0 nodes whose mesh/chunk cache changed, mutated in place. */
-  changed: ClodPageNode[];
-  /** Page coords of changed LOD0 nodes — the seed for the ancestor chain. */
-  dirtyCoords: [number, number][];
-  lod0Pages: number;
-  lod0Ms: number;
-  /** Chunks actually re-meshed vs. the chunks considered in the sibling page group. */
-  chunksRemeshed: number;
-  chunksTotal: number;
-}
-
-/**
- * First stage of an edit rebuild: re-extract the LOD0 pages whose cells intersect `dirty`,
- * with the same hard-fail validation as the full build. Cheap relative to the ancestor
- * chain and it's the surface the player is looking at, so the viewer applies this
- * synchronously and defers {@link resimplifyParent} to later frames.
- */
-/** When any page at `level` in a 2x2 parent quad is dirty, include all four siblings. */
 export function expandQuadSiblingPages(
   coords: readonly [number, number][],
   level: number,
@@ -559,10 +545,8 @@ export function expandQuadSiblingPages(
   const maxZ = (worldPagesZ >> level) - 1;
   const keys = new Set<string>();
   for (const [nx, nz] of coords) {
-    const parentX = nx >> 1;
-    const parentZ = nz >> 1;
-    const baseX = parentX * 2;
-    const baseZ = parentZ * 2;
+    const baseX = (nx >> 1) * 2;
+    const baseZ = (nz >> 1) * 2;
     for (let dz = 0; dz < 2; dz++) {
       for (let dx = 0; dx < 2; dx++) {
         const px = baseX + dx;
@@ -572,10 +556,7 @@ export function expandQuadSiblingPages(
       }
     }
   }
-  return [...keys].map((k) => {
-    const [px, pz] = k.split(",").map(Number);
-    return [px, pz] as [number, number];
-  });
+  return [...keys].map((key) => key.split(",").map(Number) as [number, number]);
 }
 
 /** @deprecated Use {@link expandQuadSiblingPages} at level 0. */
@@ -595,29 +576,21 @@ export function rebuildDirtyLod0Pages(
 ): Lod0RebuildResult {
   const pageChunks = cfg.page.chunks_per_page ** 2;
   const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
-  const world = {
-    cellsX: result.worldPagesX * span,
-    cellsZ: result.worldPagesZ * span,
-  };
-
+  const world = { cellsX: result.worldPagesX * span, cellsZ: result.worldPagesZ * span };
   const minPx = Math.max(0, Math.floor(dirty.minX / span));
   const maxPx = Math.min(result.worldPagesX - 1, Math.floor(dirty.maxX / span));
   const minPz = Math.max(0, Math.floor(dirty.minZ / span));
   const maxPz = Math.min(result.worldPagesZ - 1, Math.floor(dirty.maxZ / span));
-
   const touched: [number, number][] = [];
   for (let pz = minPz; pz <= maxPz; pz++) {
-    for (let px = minPx; px <= maxPx; px++) {
-      touched.push([px, pz]);
-    }
+    for (let px = minPx; px <= maxPx; px++) touched.push([px, pz]);
   }
   const pages = expandQuadSiblingPages(touched, 0, result.worldPagesX, result.worldPagesZ);
-
   const changed: ClodPageNode[] = [];
   const dirtyCoords: [number, number][] = [];
   let chunksRemeshed = 0;
   let chunksTotal = 0;
-  const t0 = performance.now();
+  const startedAt = performance.now();
   for (const [px, pz] of pages) {
     const node = index[0]?.get(`${px},${pz}`);
     if (!node) continue;
@@ -627,10 +600,10 @@ export function rebuildDirtyLod0Pages(
 
     let mesh: PageMesh;
     if (node.chunkMeshes) {
-      const r = rebuildPageChunks(node.chunkMeshes, px, pz, cfg, world, dirty);
-      if (r.remeshed === 0) continue;
-      mesh = r.mesh;
-      chunksRemeshed += r.remeshed;
+      const rebuilt = rebuildPageChunks(node.chunkMeshes, px, pz, cfg, world, dirty);
+      if (rebuilt.remeshed === 0) continue;
+      mesh = rebuilt.mesh;
+      chunksRemeshed += rebuilt.remeshed;
     } else {
       const src = buildLod0PageSource(px, pz, cfg, world);
       node.chunkMeshes = src.chunks;
@@ -643,81 +616,22 @@ export function rebuildDirtyLod0Pages(
     changed.push(node);
     dirtyCoords.push([px, pz]);
   }
-  return {
-    changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - t0,
-    chunksRemeshed, chunksTotal,
-  };
+  return { changed, dirtyCoords, lod0Pages: changed.length, lod0Ms: performance.now() - startedAt, chunksRemeshed, chunksTotal };
 }
 
-/** Re-extract one LOD0 page from the current voxel field (used before parent merges). */
-function refreshLod0PageFromField(
-  index: NodeIndex,
-  key: string,
-  cfg: ClodPagesConfig,
-  result: BuildResult,
-): void {
-  const node = index[0]?.get(key);
-  if (!node) return;
-  const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
-  const [px, pz] = key.split(",").map(Number);
-  const world = {
-    cellsX: result.worldPagesX * span,
-    cellsZ: result.worldPagesZ * span,
-  };
-  const src = buildLod0PageSource(px, pz, cfg, world);
-  node.chunkMeshes = src.chunks;
-  node.mesh = src.mesh;
-  node.bounds = boundsOf(src.mesh);
-}
-
-/**
- * Second stage, one node at a time: re-simplify a single parent (merge 2x2 children -> weld
- * old internal page borders -> lock new outer border -> simplify -> accumulate error),
- * mutating it in place. Caller must have already rebuilt every dirty child at `level-1`
- * (process strictly lowest-level-first), so the merge reads current child meshes.
- * Returns the node, or null if it isn't in the tree.
- */
-export function resimplifyParent(
-  index: NodeIndex,
-  level: number,
-  key: string,
-  cfg: ClodPagesConfig,
-): ClodPageNode | null {
+export function resimplifyParent(index: NodeIndex, level: number, key: string, cfg: ClodPagesConfig): ClodPageNode | null {
   const node = index[level]?.get(key);
   if (!node) return null;
-  const children = node.children.filter((c): c is ClodPageNode => c !== null);
-  const merged = concat(children.map((c) => c.mesh));
-  const { mesh: welded } = weldVertices(merged, cfg.simplify.weld_epsilon_cells, {
-    position: cfg.validation.position_epsilon,
-    normalDot: cfg.validation.normal_dot_min,
-    material: cfg.validation.material_weight_epsilon,
-  });
-  validateWeldedIntermediate(welded, `${node.id} welded`, cfg.validation.zero_area_epsilon);
-  const locks = buildOuterBorderLocks(welded);
-  const sim = simplifyParentPage(welded, locks, node.footprint, cfg);
-  const simplified = sim.mesh !== welded;
-  if (simplified) {
-    validateWeldedIntermediate(sim.mesh, `${node.id} resimplify`, cfg.validation.zero_area_epsilon);
-    if (node.level >= cfg.page.quadtree_levels - 1) {
-      const polished = tryPolishParentPage(sim.mesh, node.footprint, cfg, node.id);
-      sim.mesh = polished.mesh;
-    }
-  }
-  validateFinalPageMesh(sim.mesh, node.footprint, cfg.validation.zero_area_epsilon, `${node.id} final`);
-  node.mesh = sim.mesh;
-  node.bounds = boundsOf(sim.mesh);
-  node.errorWorld = sim.errorWorld + Math.max(...children.map((c) => c.errorWorld));
-  node.lowBenefit = sim.lowBenefit;
+  const children = node.children.filter((child): child is ClodPageNode => child !== null);
+  const [nx, nz] = key.split(",").map(Number);
+  const built = buildParentOutput(level, nx, nz, children, cfg, node.level >= cfg.page.quadtree_levels - 1);
+  node.mesh = built.mesh;
+  node.bounds = boundsOf(built.mesh);
+  node.errorWorld = built.errorWorld;
+  node.lowBenefit = built.lowBenefit;
   return node;
 }
 
-export interface AncestorRebuildResult {
-  changed: ClodPageNode[];
-  parentNodes: number;
-  parentMs: number;
-}
-
-/** Re-simplify every ancestor touched by a LOD0 dirty set, expanding 2x2 siblings at each level. */
 export function rebuildAncestorLevels(
   result: BuildResult,
   lod0DirtyCoords: readonly [number, number][],
@@ -725,62 +639,35 @@ export function rebuildAncestorLevels(
   cfg: ClodPagesConfig,
 ): AncestorRebuildResult {
   const changed: ClodPageNode[] = [];
-  const t0 = performance.now();
+  const startedAt = performance.now();
   let parentNodes = 0;
   const topLevel = Math.max(...result.nodesByLevel.keys());
   const seed = new Set<string>();
   for (const [nx, nz] of lod0DirtyCoords) seed.add(`${nx >> 1},${nz >> 1}`);
-  let levelCoords = [...seed].map((k) => k.split(",").map(Number) as [number, number]);
+  let levelCoords = [...seed].map((key) => key.split(",").map(Number) as [number, number]);
 
   for (let level = 1; level <= topLevel && levelCoords.length > 0; level++) {
     levelCoords = expandQuadSiblingPages(levelCoords, level, result.worldPagesX, result.worldPagesZ);
-    if (level === 1) {
-      const l0Keys = new Set<string>();
-      for (const [nx, nz] of levelCoords) {
-        const baseX = nx * 2;
-        const baseZ = nz * 2;
-        for (let dz = 0; dz < 2; dz++) {
-          for (let dx = 0; dx < 2; dx++) {
-            l0Keys.add(`${baseX + dx},${baseZ + dz}`);
-          }
-        }
-      }
-      for (const key of l0Keys) {
-        refreshLod0PageFromField(index, key, cfg, result);
-      }
-    }
-    const parentKeys = new Set<string>();
+    const nextKeys = new Set<string>();
     const nextCoords: [number, number][] = [];
     for (const [nx, nz] of levelCoords) {
-      const key = `${nx},${nz}`;
-      const node = resimplifyParent(index, level, key, cfg);
+      const node = resimplifyParent(index, level, `${nx},${nz}`, cfg);
       if (!node) continue;
       changed.push(node);
       parentNodes++;
-      const pk = `${nx >> 1},${nz >> 1}`;
-      if (!parentKeys.has(pk)) {
-        parentKeys.add(pk);
+      const parentKey = `${nx >> 1},${nz >> 1}`;
+      if (!nextKeys.has(parentKey)) {
+        nextKeys.add(parentKey);
         nextCoords.push([nx >> 1, nz >> 1]);
       }
     }
     levelCoords = nextCoords;
   }
 
-  return { changed, parentNodes, parentMs: performance.now() - t0 };
+  return { changed, parentNodes, parentMs: performance.now() - startedAt };
 }
 
-/**
- * Rebuild the LOD0 pages whose cells intersect `dirty`, then every ancestor up the
- * quadtree, with the same hard-fail validation as the full build. Nodes are mutated in
- * place so viewer/selection references stay valid. Synchronous end-to-end — the viewer
- * splits this into {@link rebuildDirtyLod0Pages} + per-frame {@link resimplifyParent};
- * tests and headless callers use this all-at-once form.
- */
-export function rebuildDirtyPages(
-  result: BuildResult,
-  dirty: DirtyCellBounds,
-  cfg: ClodPagesConfig,
-): EditRebuildResult {
+export function rebuildDirtyPages(result: BuildResult, dirty: DirtyCellBounds, cfg: ClodPagesConfig): EditRebuildResult {
   const index = buildNodeIndex(result);
   const lod0 = rebuildDirtyLod0Pages(result, dirty, cfg, index);
   const ancestors = rebuildAncestorLevels(result, lod0.dirtyCoords, index, cfg);
