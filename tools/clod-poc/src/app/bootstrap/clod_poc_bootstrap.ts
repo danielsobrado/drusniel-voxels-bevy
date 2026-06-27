@@ -153,6 +153,9 @@ export async function bootstrapClodPoc() {
     naadfIntegration?.config.farShell.useNaadfSummary
     && (queryScene?.startsWith("infinite-naadf-") ?? false),
   );
+  const naadfHeightSamplingMode = useNaadfFarSummary
+    ? naadfIntegration?.config.farShell.heightSamplingMode
+    : undefined;
 
   const isLongViewCapableScene =
     queryScene === "infinite-stream-far-summary" ||
@@ -190,6 +193,7 @@ export async function bootstrapClodPoc() {
       lvConfig.farShell.endMeters = naadfIntegration.config.farShell.endM;
       if (naadfIntegration.config.farShell.gridRes > 0) {
         lvConfig.farShell.radialSegments = naadfIntegration.config.farShell.gridRes;
+        lvConfig.farShell.angularSegments = naadfIntegration.config.farShell.gridRes;
       }
     }
 
@@ -220,7 +224,7 @@ export async function bootstrapClodPoc() {
     const heightProvider = useNaadfFarSummary && naadfIntegration
       ? naadfIntegration.getHeightProvider()
       : farSummaryIntegration?.getHeightProvider();
-    if (!heightProvider) {
+    if (!heightProvider && naadfHeightSamplingMode !== "gpu") {
       throw new Error("long-view scene requires NAADF or far-summary height provider");
     }
     const lighting = terrainView.currentLighting();
@@ -248,6 +252,7 @@ export async function bootstrapClodPoc() {
       },
       useParityMaterial: useParity,
       parityConfig,
+      heightSamplingMode: naadfHeightSamplingMode,
       debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
       metrics: farShellMetrics,
     });
