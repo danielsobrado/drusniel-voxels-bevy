@@ -437,12 +437,12 @@ export class PropSystem {
     let processed = 0;
     while (processed < budget && this.cellJobQueue.length > 0) {
       const key = this.cellJobQueue.shift()!;
+      processed++;
       const kind = this.cellJobMap.get(key);
       if (!kind) continue;
       this.cellJobMap.delete(key);
       if (kind === "leave") this.releaseCell(key);
       else this.rebuildCell(key, context);
-      processed++;
     }
   }
 
