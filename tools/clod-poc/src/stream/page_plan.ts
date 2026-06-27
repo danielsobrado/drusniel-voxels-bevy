@@ -89,4 +89,13 @@ export class VisualClodPageStreamer {
       evictable,
     };
   }
+
+  snapshot(): VisualPageStreamerSnapshot {
+    return {
+      center: { ...this.center },
+      required: visualPageKeys(this.center.x, this.center.z, this.liveRadiusM, this.clodRadiusM, this.config.pageSizeM, this.config.maxLevel),
+      loaded: [...this.loaded].sort(),
+      evictable: evictableVisualPageKeys(this.loaded, this.center.x, this.center.z, this.clodRadiusM, this.config),
+    };
+  }
 }
