@@ -3,7 +3,7 @@
   left: 50%;
   bottom: 80px;
   z-index: 13;
-  display: none;
+  display: flex;
   align-items: center;
   gap: 7px;
   padding: 7px 9px;
@@ -26,16 +26,16 @@
   display: flex;
 }
 
-body[data-player-mode="choosingSpawn"] #spell-menu.visible {
-  display: flex !important;
+body[data-player-mode="choosingSpawn"] #spell-menu {
+  display: none;
+}
+
+#spell-menu.spell-menu-hidden {
+  display: none !important;
 }
 
 #spell-menu.dragging {
   transition: none;
-}
-
-.spell-menu-hidden {
-  display: none !important;
 }
 
 .spell-menu-title {
@@ -97,15 +97,14 @@ body[data-player-mode="choosingSpawn"] #spell-menu.visible {
 
 .spell-vfx-layer {
   position: fixed;
-  left: 50%;
-  bottom: 28px;
+  inset: 0;
   z-index: 10;
-  width: min(560px, calc(100vw - 28px));
-  height: 320px;
-  transform: translateX(-50%);
+  width: 100vw;
+  height: 100vh;
+  transform: none;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 120ms linear;
+  transition: opacity 100ms linear;
 }
 
 .spell-vfx-layer[data-active="true"] {
@@ -121,16 +120,17 @@ body[data-player-mode="choosingSpawn"] #spell-menu.visible {
 .spell-vfx-layer[data-fallback="true"]::before {
   content: "";
   position: absolute;
-  left: 50%;
-  bottom: 24px;
-  width: 58%;
-  height: 76%;
-  transform: translateX(-50%);
+  right: 10%;
+  bottom: 2%;
+  width: 54%;
+  height: 72%;
+  transform: rotate(-31deg);
+  transform-origin: 70% 92%;
   background:
-    radial-gradient(ellipse at 50% 84%, rgba(255, 244, 170, 0.88), transparent 18%),
-    radial-gradient(ellipse at 50% 68%, rgba(255, 132, 38, 0.72), transparent 44%),
-    radial-gradient(ellipse at 50% 52%, rgba(170, 31, 16, 0.5), transparent 68%);
-  filter: blur(4px);
+    radial-gradient(ellipse at 72% 88%, rgba(255, 244, 170, 0.9), transparent 14%),
+    radial-gradient(ellipse at 60% 66%, rgba(255, 132, 38, 0.76), transparent 42%),
+    radial-gradient(ellipse at 46% 42%, rgba(170, 31, 16, 0.46), transparent 68%);
+  filter: blur(5px);
 }
 
 @media (max-width: 760px) {
