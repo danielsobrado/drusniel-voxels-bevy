@@ -1,5 +1,6 @@
 import type GUI from "lil-gui";
 import type { NaadfIntegration } from "../../naadf/integration.js";
+import type { NaadfTraversalMode } from "../../naadf/config.js";
 import type { GuiController } from "./gui_controller.js";
 
 export interface NaadfGuiDeps {
@@ -12,8 +13,11 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
 
   const folder = gui.addFolder("NAADF PoC");
   const debug = integration.config.debug;
+  const traversal = integration.config.traversal;
   const toggles = {
     enabled: integration.config.enabled,
+    traversalMode: traversal.mode,
+    hddaUseDirectionalBounds: traversal.hddaUseDirectionalBounds,
     freezeStreamCenter: debug.freezeStreamCenter,
     showStreamCenter: debug.showStreamCenter,
     showPredictedStreamCenter: debug.showPredictedStreamCenter,
@@ -29,6 +33,12 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
     showEviction: debug.showEviction,
   };
 
+  folder.add(toggles, "traversalMode", ["dense", "hdda", "compare"]).name("traversal mode").onChange((v: NaadfTraversalMode) => {
+    traversal.mode = v;
+  });
+  folder.add(toggles, "hddaUseDirectionalBounds").name("HDDA directional bounds").onChange((v: boolean) => {
+    traversal.hddaUseDirectionalBounds = v;
+  });
   folder.add(toggles, "freezeStreamCenter").name("freeze stream center").onChange((v: boolean) => {
     debug.freezeStreamCenter = v;
   });
@@ -86,6 +96,13 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
     sunP50: 0,
     sunP95: 0,
     aadfSkips: 0,
+    hddaRays: 0,
+    hddaSpanSteps: 0,
+    hddaChunkSkips: 0,
+    hddaBlockSkips: 0,
+    hddaVoxelSteps: 0,
+    hddaDenseMismatches: 0,
+    hddaFallbackToDense: 0,
     farShellSamples: 0,
     farShellMissing: 0,
     canopySamples: 0,
@@ -109,6 +126,13 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
   statsFolder.add(stats, "sunP50").name("sun ray p50 steps").listen();
   statsFolder.add(stats, "sunP95").name("sun ray p95 steps").listen();
   statsFolder.add(stats, "aadfSkips").name("AADF skips/frame").listen();
+  statsFolder.add(stats, "hddaRays").name("HDDA rays/frame").listen();
+  statsFolder.add(stats, "hddaSpanSteps").name("HDDA span steps/frame").listen();
+  statsFolder.add(stats, "hddaChunkSkips").name("HDDA chunk skips/frame").listen();
+  statsFolder.add(stats, "hddaBlockSkips").name("HDDA block skips/frame").listen();
+  statsFolder.add(stats, "hddaVoxelSteps").name("HDDA voxel steps/frame").listen();
+  statsFolder.add(stats, "hddaDenseMismatches").name("HDDA compare mismatches").listen();
+  statsFolder.add(stats, "hddaFallbackToDense").name("HDDA dense fallbacks").listen();
   statsFolder.add(stats, "farShellSamples").name("far shell samples/frame").listen();
   statsFolder.add(stats, "farShellMissing").name("far shell missing/frame").listen();
   statsFolder.add(stats, "canopySamples").name("canopy samples/frame").listen();
@@ -133,6 +157,13 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
       stats.sunP50 = snap.sunStepsP50;
       stats.sunP95 = snap.sunStepsP95;
       stats.aadfSkips = snap.aadfSkips;
+      stats.hddaRays = snap.hddaRays;
+      stats.hddaSpanSteps = snap.hddaSpanSteps;
+      stats.hddaChunkSkips = snap.hddaChunkSkips;
+      stats.hddaBlockSkips = snap.hddaBlockSkips;
+      stats.hddaVoxelSteps = snap.hddaVoxelSteps;
+      stats.hddaDenseMismatches = snap.hddaDenseMismatches;
+      stats.hddaFallbackToDense = snap.hddaFallbackToDense;
       stats.farShellSamples = snap.farShellSamples;
       stats.farShellMissing = snap.farShellMissingSamples;
       stats.canopySamples = snap.canopySamples;
