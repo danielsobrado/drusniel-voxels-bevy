@@ -9,6 +9,7 @@ import {
   type DirtyCellBounds,
   type NodeIndex,
 } from "./clod/quadtree.js";
+import { nextPendingParentLevelOrdered } from "./clod/parent_queue.js";
 import { initClodCacheContext, clearWorkerPersistentCache, type ClodCacheContext } from "./cache/clodCacheContext.js";
 import { isCacheRpcResponse } from "./cache/cacheWorkerRpc.js";
 import { dispatchCacheRpcResponse } from "./cache/workerRemotePersistentStore.js";
@@ -50,6 +51,8 @@ let parentNodes = 0;
 let parentMs = 0;
 let drainScheduled = false;
 const pendingByLevel = new Map<number, Set<string>>();
+/** Child page coords resimplified at level L; flushed to enqueue level L+1 once level L drains. */
+const pendingChildCoordsByLevel = new Map<number, [number, number][]>();
 
 interface CombinedLod0Rebuild {
   changed: ClodPageNode[];
@@ -77,6 +80,7 @@ interface ParentNodeSnapshot {
 
 interface ParentQueueSnapshot {
   pendingByLevel: Map<number, Set<string>>;
+  pendingChildCoordsByLevel: Map<number, [number, number][]>;
   activeParentRequestId: number | null;
   parentNodes: number;
   parentMs: number;
@@ -175,8 +179,11 @@ function restoreParentNodes(snapshots: ReadonlyMap<ClodPageNode, ParentNodeSnaps
 function snapshotParentQueue(): ParentQueueSnapshot {
   const copy = new Map<number, Set<string>>();
   for (const [level, keys] of pendingByLevel) copy.set(level, new Set(keys));
+  const childCopy = new Map<number, [number, number][]>();
+  for (const [level, coords] of pendingChildCoordsByLevel) childCopy.set(level, coords.map((c) => [...c] as [number, number]));
   return {
     pendingByLevel: copy,
+    pendingChildCoordsByLevel: childCopy,
     activeParentRequestId,
     parentNodes,
     parentMs,
@@ -186,6 +193,10 @@ function snapshotParentQueue(): ParentQueueSnapshot {
 function restoreParentQueue(snapshot: ParentQueueSnapshot): void {
   pendingByLevel.clear();
   for (const [level, keys] of snapshot.pendingByLevel) pendingByLevel.set(level, new Set(keys));
+  pendingChildCoordsByLevel.clear();
+  for (const [level, coords] of snapshot.pendingChildCoordsByLevel) {
+    pendingChildCoordsByLevel.set(level, coords.map((c) => [...c] as [number, number]));
+  }
   activeParentRequestId = snapshot.activeParentRequestId;
   parentNodes = snapshot.parentNodes;
   parentMs = snapshot.parentMs;
@@ -270,19 +281,36 @@ function enqueueParentsForChildren(childLevel: number, childCoords: readonly [nu
   enqueueParentSiblingGroup(childLevel + 1, uniqueParentCoords(childCoords));
 }
 
+function clearPendingParentsFrom(level: number): void {
+  for (let l = level; l <= topLevel; l++) pendingByLevel.delete(l);
+  for (const l of [...pendingChildCoordsByLevel.keys()]) {
+    if (l >= level - 1) pendingChildCoordsByLevel.delete(l);
+  }
+}
+
+function recordResimplifiedChild(level: number, nx: number, nz: number): void {
+  let coords = pendingChildCoordsByLevel.get(level);
+  if (!coords) {
+    coords = [];
+    pendingChildCoordsByLevel.set(level, coords);
+  }
+  coords.push([nx, nz]);
+}
+
+function flushChildEnqueues(completedLevel: number): void {
+  const coords = pendingChildCoordsByLevel.get(completedLevel);
+  pendingChildCoordsByLevel.delete(completedLevel);
+  if (!coords || coords.length === 0) return;
+  enqueueParentSiblingGroup(completedLevel + 1, uniqueParentCoords(coords));
+}
+
 function enqueueParentsForLod0(coords: readonly [number, number][]): void {
+  clearPendingParentsFrom(1);
   enqueueParentsForChildren(0, coords);
 }
 
 function nextPendingParent(): { level: number; key: string } | null {
-  for (let level = 1; level <= topLevel; level++) {
-    const set = pendingByLevel.get(level);
-    if (!set || set.size === 0) continue;
-    const key = set.values().next().value as string;
-    set.delete(key);
-    return { level, key };
-  }
-  return null;
+  return nextPendingParentLevelOrdered(pendingByLevel, topLevel);
 }
 
 function drainParents(budgetMs: number): void {
@@ -306,7 +334,9 @@ function drainParents(budgetMs: number): void {
       parentNodes++;
       changed.push(node);
       const [nx, nz] = next.key.split(",").map(Number) as [number, number];
-      enqueueParentsForChildren(next.level, [[nx, nz]]);
+      recordResimplifiedChild(next.level, nx, nz);
+      const levelSet = pendingByLevel.get(next.level);
+      if (!levelSet || levelSet.size === 0) flushChildEnqueues(next.level);
     }
 
     if (changed.length > 0) {
@@ -353,7 +383,7 @@ function scheduleParentDrain(): void {
   setTimeout(() => {
     drainScheduled = false;
     try {
-      drainParents(8);
+      drainParents(16);
       if (pendingParentCount() > 0) scheduleParentDrain();
     } catch (error) {
       post(errorResponse(activeParentRequestId, error));
@@ -376,6 +406,7 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   installHydrologyTerrain(request.hydrologyTerrain);
   installBorderCoastRuntime(request.borderCoastOceanConfig, request.worldPagesX, request.cfg);
   pendingByLevel.clear();
+  pendingChildCoordsByLevel.clear();
   activeParentRequestId = null;
   parentNodes = 0;
   parentMs = 0;

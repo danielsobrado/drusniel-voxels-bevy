@@ -10,9 +10,14 @@ EXCLUDES=(
   ".git" ".history" "target" "bench-runs" "perf-dumps" "temp"
   "node_modules" "patches" "editor/frontend/src-tauri/target"
   "editor/frontend/src-tauri/gen" "editor/frontend/dist"
-  "editor/frontend/node_modules"
+  "editor/frontend/node_modules" "tools/clod-poc/node_modules"
+  "tools/clod-poc/dist"
+  "tools/clod-poc/config/custom_prop_placements_20000.yaml"
+  "tools/clod-poc/config/custom_prop_placements_5000.yaml"
+  "tools/clod-poc/config/custom_prop_placements_500.yaml"
+  "editor/frontend/pnpm-lock.yaml"
   "saves" "image" "assets/textures" "assets/models" "assets/audio"
-  "debug" "references" ".agent" ".claude" ".cargo"
+  "debug" "docs/reference" ".agent" ".claude" ".cargo"
 )
 
 EXTENSIONS=(rs wgsl toml py ps1 sh md html css js ts tsx jsx vue json yaml yml)

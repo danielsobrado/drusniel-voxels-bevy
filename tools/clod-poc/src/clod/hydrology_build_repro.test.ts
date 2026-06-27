@@ -10,7 +10,7 @@ import {
   setBorderCoastRuntime,
   setTerrainSurfaceOverride,
 } from "../terrain/terrain.js";
-import { parseWaterConfig } from "../water/waterConfig.js";
+import { parseWaterConfig, resolveWaterConfig } from "../water/waterConfig.js";
 import { HydrologySystem } from "../water/hydrologySystem.js";
 import { makeFakeBodyCarvedSampler } from "../water/fakeBodyCarve.js";
 
@@ -19,11 +19,12 @@ const BUILD_TIMEOUT_MS = 300_000;
 
 function setupHydrologyWorld(worldPages: number) {
   const cfg = parseConfig(readFileSync(`${configRoot}clod_pages.yaml`, "utf8"));
-  const waterConfig = parseWaterConfig(readFileSync(`${configRoot}water.yaml`, "utf8"));
+  let waterConfig = parseWaterConfig(readFileSync(`${configRoot}water.yaml`, "utf8"));
   const borderCoastOceanConfig = parseBorderCoastOceanConfig(
     readFileSync(`${configRoot}border_coast_ocean.yaml`, "utf8"),
   );
   const worldCells = worldPages * cfg.page.chunks_per_page * cfg.page.chunk_size;
+  waterConfig = resolveWaterConfig(waterConfig, worldCells);
   setBorderCoastRuntime(borderCoastOceanConfig, worldCells);
   const preHydrology = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
   const hydrology = HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrology);
@@ -35,6 +36,11 @@ describe("hydrology CLOD world build", () => {
   beforeAll(async () => {
     await initSimplifier();
   });
+
+  it("builds 8x8 world with hydrology-carved terrain (default viewer size)", () => {
+    const { cfg, worldPages } = setupHydrologyWorld(8);
+    expect(() => buildWorld(worldPages, worldPages, cfg)).not.toThrow();
+  }, BUILD_TIMEOUT_MS);
 
   it("builds 16x16 world with hydrology-carved terrain (infinite-naadf default)", () => {
     const { cfg, worldPages } = setupHydrologyWorld(16);

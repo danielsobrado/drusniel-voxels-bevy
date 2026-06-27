@@ -19,6 +19,9 @@ interface VertBuf {
   nrm: number[];
   mat: number[];
   index: Map<string, number>;
+  /** Quantized world position -> vertex index; merges SN cells that land on the same point. */
+  posIndex: Map<string, number>;
+  mergeCount: number[];
 }
 
 function cellKeySN(ci: number, cj: number, ck: number): string {
@@ -31,6 +34,10 @@ function finiteBounds(world: WorldBounds): boolean {
 
 function cellInsideWorld(ci: number, ck: number, world: WorldBounds): boolean {
   return !finiteBounds(world) || (ci >= 0 && ci < world.cellsX && ck >= 0 && ck < world.cellsZ);
+}
+
+function positionKey(px: number, py: number, pz: number, inv: number): string {
+  return `${Math.round(px * inv)},${Math.round(py * inv)},${Math.round(pz * inv)}`;
 }
 
 function cellVertex(ci: number, cj: number, ck: number): [number, number, number] | null {
@@ -66,7 +73,7 @@ function cellVertex(ci: number, cj: number, ck: number): [number, number, number
   return n > 0 ? [sx / n, sy / n, sz / n] : null;
 }
 
-function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number): number | null {
+function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number, posInv: number): number | null {
   const key = cellKeySN(ci, cj, ck);
   const existing = buf.index.get(key);
   if (existing !== undefined) return existing;
@@ -74,12 +81,30 @@ function getOrAddVertex(buf: VertBuf, ci: number, cj: number, ck: number): numbe
   if (p === null) return null;
   const [px, py, pz] = p;
   const [nx, ny, nz] = gradient(px, py, pz);
+  const pk = positionKey(px, py, pz, posInv);
+  const posExisting = buf.posIndex.get(pk);
+  if (posExisting !== undefined) {
+    const mc = buf.mergeCount[posExisting];
+    const next = mc + 1;
+    let ax = buf.nrm[posExisting * 3] * mc + nx;
+    let ay = buf.nrm[posExisting * 3 + 1] * mc + ny;
+    let az = buf.nrm[posExisting * 3 + 2] * mc + nz;
+    const len = Math.hypot(ax, ay, az) || 1;
+    buf.nrm[posExisting * 3] = ax / len;
+    buf.nrm[posExisting * 3 + 1] = ay / len;
+    buf.nrm[posExisting * 3 + 2] = az / len;
+    buf.mergeCount[posExisting] = next;
+    buf.index.set(key, posExisting);
+    return posExisting;
+  }
   const paint = paintMaterialAt(px, py, pz);
   const idx = buf.pos.length / 3;
   buf.pos.push(px, py, pz);
   buf.nrm.push(nx, ny, nz);
   buf.mat.push(paint);
   buf.index.set(key, idx);
+  buf.posIndex.set(pk, idx);
+  buf.mergeCount.push(1);
   return idx;
 }
 
@@ -95,7 +120,7 @@ function gradient(x: number, y: number, z: number): [number, number, number] {
 
 function emitAxis(
   axis: "x" | "y" | "z", i: number, j: number, k: number,
-  buf: VertBuf, indices: number[], world: WorldBounds,
+  buf: VertBuf, indices: number[], world: WorldBounds, posInv: number,
 ): void {
   const dBase = density(i, j, k);
   const tx = axis === "x" ? i + 1 : i;
@@ -111,7 +136,7 @@ function emitAxis(
   }
   const v: number[] = [];
   for (const [oi, oj, ok] of loop) {
-    const idx = getOrAddVertex(buf, i + oi, j + oj, k + ok);
+    const idx = getOrAddVertex(buf, i + oi, j + oj, k + ok, posInv);
     if (idx === null) return;
     v.push(idx);
   }
@@ -125,7 +150,8 @@ function emitAxis(
 
 export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: WorldBounds): PageMesh {
   const S = cfg.page.chunk_size;
-  const buf: VertBuf = { pos: [], nrm: [], mat: [], index: new Map() };
+  const posInv = 1 / cfg.simplify.weld_epsilon_cells;
+  const buf: VertBuf = { pos: [], nrm: [], mat: [], index: new Map(), posIndex: new Map(), mergeCount: [] };
   const indices: number[] = [];
 
   const x0 = cx * S, x1 = (cx + 1) * S;
@@ -169,9 +195,9 @@ export function meshChunk(cx: number, cz: number, cfg: ClodPagesConfig, world: W
         j1 = Math.min(Y_CELLS - 1, Math.max(j1, Math.ceil(e.y + eh + DIG_INFLUENCE_MARGIN)));
       }
       for (let j = j0; j <= j1; j++) {
-        emitAxis("x", i, j, k, buf, indices, world);
-        emitAxis("y", i, j, k, buf, indices, world);
-        emitAxis("z", i, j, k, buf, indices, world);
+        emitAxis("x", i, j, k, buf, indices, world, posInv);
+        emitAxis("y", i, j, k, buf, indices, world, posInv);
+        emitAxis("z", i, j, k, buf, indices, world, posInv);
       }
     }
   }

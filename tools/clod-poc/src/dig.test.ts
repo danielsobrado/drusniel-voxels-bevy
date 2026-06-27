@@ -13,7 +13,8 @@ import {
   replaceDigEdits,
   surfaceHeight,
 } from "./terrain/terrain.js";
-import { buildNodeIndex, buildWorld, rebuildDirtyLod0Pages, rebuildDirtyPages } from "./clod/quadtree.js";
+import { buildNodeIndex, buildWorld, expandQuadSiblingPages, rebuildDirtyLod0Pages, rebuildDirtyPages, resimplifyParent } from "./clod/quadtree.js";
+import { nextPendingParentLevelOrdered } from "./clod/parent_queue.js";
 import { buildLod0PageSource, rebuildPageChunks } from "./clod/source_mesh.js";
 import { initSimplifier } from "./clod/simplify.js";
 import { assertBorderMatch, borderChain } from "./clod/validate.js";
@@ -360,4 +361,89 @@ describe("rebuildDirtyPages", () => {
     // Timeout raised from 20s to 100s: domain-warped terrain noise roughly
     // triples per-sample cost, and each raise edit triggers a full rebuild.
   }, 100000);
+
+  it("survives repeated remove spheres at default-world dig sites through ancestors", () => {
+    const result = buildWorld(8, 8, uiCfg);
+    const digs = [
+      { x: 251.2, y: 29.4, z: 315.2 },
+      { x: 242.9, y: 28.6, z: 325.2 },
+    ] as const;
+    for (const { x, y, z } of digs) {
+      const r = 3;
+      addDigEdit({ x, y, z, r, shape: "sphere", op: "remove" });
+      const margin = r + 4;
+      expect(() =>
+        rebuildDirtyPages(
+          result,
+          { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin },
+          uiCfg,
+        ),
+      ).not.toThrow();
+    }
+  }, 120000);
+
+  it("defers parent enqueue until a level fully drains (partial L2 must not seed stale L3)", () => {
+    const topLevel = 3;
+    const drain = (
+      deferChildEnqueue: boolean,
+      parentsPerSlice: number,
+    ) => {
+      const result = buildWorld(8, 8, uiCfg);
+      const index = buildNodeIndex(result);
+      const x = 251.2, y = 29.4, z = 315.2, r = 3;
+      addDigEdit({ x, y, z, r, shape: "sphere", op: "remove" });
+      const margin = r + 4;
+      const dirty = { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin };
+      const lod0 = rebuildDirtyLod0Pages(result, dirty, uiCfg, index);
+
+      const pending = new Map<number, Set<string>>();
+      const childCoords = new Map<number, [number, number][]>();
+      const enqueue = (level: number, nx: number, nz: number) => {
+        let set = pending.get(level);
+        if (!set) { set = new Set(); pending.set(level, set); }
+        set.add(`${nx},${nz}`);
+      };
+      const enqueueSiblingGroup = (level: number, coords: readonly [number, number][]) => {
+        for (const [nx, nz] of expandQuadSiblingPages(coords, level, result.worldPagesX, result.worldPagesZ)) {
+          enqueue(level, nx, nz);
+        }
+      };
+      const uniqueParents = (coords: readonly [number, number][]) => {
+        const keys = new Set<string>();
+        for (const [nx, nz] of coords) keys.add(`${nx >> 1},${nz >> 1}`);
+        return [...keys].map((key) => key.split(",").map(Number) as [number, number]);
+      };
+      const hasPending = () => [...pending.values()].some((set) => set.size > 0);
+
+      enqueueSiblingGroup(1, uniqueParents(lod0.dirtyCoords));
+      let slices = 0;
+      while (hasPending()) {
+        for (let i = 0; i < parentsPerSlice; i++) {
+          const next = nextPendingParentLevelOrdered(pending, topLevel);
+          if (!next) break;
+          resimplifyParent(index, next.level, next.key, uiCfg, next.level === topLevel);
+          const [nx, nz] = next.key.split(",").map(Number) as [number, number];
+          if (deferChildEnqueue) {
+            let coords = childCoords.get(next.level);
+            if (!coords) { coords = []; childCoords.set(next.level, coords); }
+            coords.push([nx, nz]);
+            const levelSet = pending.get(next.level);
+            if (!levelSet || levelSet.size === 0) {
+              const completed = childCoords.get(next.level) ?? [];
+              childCoords.delete(next.level);
+              if (completed.length > 0) enqueueSiblingGroup(next.level + 1, uniqueParents(completed));
+            }
+          } else {
+            enqueueSiblingGroup(next.level + 1, uniqueParents([[nx, nz]]));
+          }
+        }
+        slices++;
+        if (slices > 500) throw new Error("drain exceeded slice budget");
+      }
+    };
+
+    expect(() => drain(false, 2)).toThrow(/InternalBorderNotWelded/);
+    clearDigEdits();
+    expect(() => drain(true, 2)).not.toThrow();
+  }, 180000);
 });
