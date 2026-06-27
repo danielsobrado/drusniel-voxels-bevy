@@ -7,6 +7,7 @@ import {
   clampPlayerToWorld,
   jumpVelocityForHeight,
   normalizeMovementInput,
+  validatePlayerWorldBoundsFit,
   worldEdgePushbackAcceleration,
 } from "./player_controller.js";
 import { TerrainColliderSet, type TerrainColliderPage } from "./terrain/terrain_collider.js";
@@ -80,6 +81,33 @@ describe("player movement helpers", () => {
     const position = new THREE.Vector3(2, 5, 127);
     clampPlayerToWorld(position, { minX: 0, minZ: 0, maxX: 128, maxZ: 128 }, 16);
     expect(position.toArray()).toEqual([16, 5, 112]);
+  });
+
+  it("validates player bounds have room for the edge margin", () => {
+    expect(() =>
+      validatePlayerWorldBoundsFit(
+        { minX: 0, minZ: 0, maxX: 128, maxZ: 128 },
+        DEFAULT_PLAYER_CONFIG,
+      ),
+    ).not.toThrow();
+  });
+
+  it("fails when player bounds are smaller than the edge margin", () => {
+    expect(() =>
+      validatePlayerWorldBoundsFit(
+        { minX: 0, minZ: 0, maxX: 24, maxZ: 128 },
+        DEFAULT_PLAYER_CONFIG,
+      ),
+    ).toThrow("Player world bounds too small for margin 16");
+  });
+
+  it("fails when player bounds are inverted", () => {
+    expect(() =>
+      validatePlayerWorldBoundsFit(
+        { minX: 128, minZ: 0, maxX: 0, maxZ: 128 },
+        DEFAULT_PLAYER_CONFIG,
+      ),
+    ).toThrow("Player world bounds must have positive width and depth");
   });
 
   it("does not push inside the safe center", () => {
