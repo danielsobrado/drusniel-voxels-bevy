@@ -1,3 +1,4 @@
+import { surfaceHeight } from "../terrain/terrain.js";
 import type { PropInstance, PropPlacementScene } from "../props/prop_types.js";
 
 export interface ProjectPropInstance {
@@ -34,6 +35,12 @@ function uniformScale(scale: readonly number[]): number {
   return Number.isFinite(average) && average > 0 ? average : 1;
 }
 
+function anchoredPosition(prop: ProjectPropInstance): [number, number, number] {
+  const [x, y, z] = prop.position;
+  if (prop.anchor !== "terrain") return [x, y, z];
+  return [x, surfaceHeight(x, z), z];
+}
+
 export function propPlacementSceneToProjectProps(scene: PropPlacementScene): ProjectPropInstance[] {
   return scene.instances.map((instance, index) => ({
     id: `${scene.sceneId}:${index}:${instance.assetId}`,
@@ -55,7 +62,7 @@ export function projectPropsToPropPlacementScene(
 ): PropPlacementScene {
   const instances: PropInstance[] = props.map((prop) => ({
     assetId: prop.prefabId,
-    position: [...prop.position],
+    position: anchoredPosition(prop),
     rotationY: quaternionToYaw(prop.rotation),
     scale: uniformScale(prop.scale),
     seed: prop.seed ?? 0,
