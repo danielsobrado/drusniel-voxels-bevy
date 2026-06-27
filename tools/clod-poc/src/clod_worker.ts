@@ -31,7 +31,7 @@ import {
   type SerializedHydrologyTerrain,
 } from "./clod_worker_protocol.js";
 import type { ClodPagesConfig } from "./config.js";
-import type { ClodPageNode } from "./types.js";
+import type { ClodPageNode, PageMesh } from "./types.js";
 
 const DIRTY_BOUNDS_MAX_EPSILON = 1e-6;
 
@@ -60,6 +60,20 @@ interface CombinedLod0Rebuild {
   chunksTotal: number;
 }
 
+interface Lod0Snapshot {
+  node: ClodPageNode;
+  mesh: PageMesh;
+  bounds: ClodPageNode["bounds"];
+  chunkMeshes?: PageMesh[];
+}
+
+interface ParentQueueSnapshot {
+  pendingByLevel: Map<number, Set<string>>;
+  activeParentRequestId: number | null;
+  parentNodes: number;
+  parentMs: number;
+}
+
 function mergeDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds {
   return {
     minX: Math.min(a.minX, b.minX),
@@ -77,6 +91,53 @@ function intersectDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds
     maxZ: Math.min(a.maxZ, b.maxZ),
   };
   return clipped.minX < clipped.maxX && clipped.minZ < clipped.maxZ ? clipped : null;
+}
+
+function cloneBounds(bounds: ClodPageNode["bounds"]): ClodPageNode["bounds"] {
+  return {
+    center: [...bounds.center],
+    radius: bounds.radius,
+    minY: bounds.minY,
+    maxY: bounds.maxY,
+  };
+}
+
+function snapshotLod0Nodes(): Lod0Snapshot[] {
+  if (!result) return [];
+  return (result.nodesByLevel.get(0) ?? []).map((node) => ({
+    node,
+    mesh: node.mesh,
+    bounds: cloneBounds(node.bounds),
+    chunkMeshes: node.chunkMeshes ? [...node.chunkMeshes] : undefined,
+  }));
+}
+
+function restoreLod0Nodes(snapshots: readonly Lod0Snapshot[]): void {
+  for (const snapshot of snapshots) {
+    snapshot.node.mesh = snapshot.mesh;
+    snapshot.node.bounds = cloneBounds(snapshot.bounds);
+    if (snapshot.chunkMeshes) snapshot.node.chunkMeshes = snapshot.chunkMeshes;
+    else delete snapshot.node.chunkMeshes;
+  }
+}
+
+function snapshotParentQueue(): ParentQueueSnapshot {
+  const copy = new Map<number, Set<string>>();
+  for (const [level, keys] of pendingByLevel) copy.set(level, new Set(keys));
+  return {
+    pendingByLevel: copy,
+    activeParentRequestId,
+    parentNodes,
+    parentMs,
+  };
+}
+
+function restoreParentQueue(snapshot: ParentQueueSnapshot): void {
+  pendingByLevel.clear();
+  for (const [level, keys] of snapshot.pendingByLevel) pendingByLevel.set(level, new Set(keys));
+  activeParentRequestId = snapshot.activeParentRequestId;
+  parentNodes = snapshot.parentNodes;
+  parentMs = snapshot.parentMs;
 }
 
 function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | undefined): void {
@@ -403,11 +464,15 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
 function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
   const previousEdits = getDigEditsSnapshot();
+  const lod0Snapshot = snapshotLod0Nodes();
+  const parentQueueSnapshot = snapshotParentQueue();
   try {
     for (const edit of request.edits) addDigEdit(edit);
     postLod0Rebuild([request.requestId], request.dirtyRegions, request.edits.length);
   } catch (error) {
     replaceDigEdits(previousEdits);
+    restoreLod0Nodes(lod0Snapshot);
+    restoreParentQueue(parentQueueSnapshot);
     throw error;
   }
 }
