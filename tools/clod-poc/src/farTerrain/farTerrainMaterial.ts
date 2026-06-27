@@ -4,8 +4,10 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
 
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
-import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
+import type { FarSummaryGpuAtlasRingView, FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMaterial/terrainMaterialBands.js";
+
+const MAX_GPU_SUMMARY_RINGS = 3;
 
 export interface FarTerrainVertexColors {
   baseColor: Float32Array;
@@ -14,6 +16,18 @@ export interface FarTerrainVertexColors {
   slope: Float32Array;
   materialWeights: Float32Array;
   normals?: Float32Array;
+}
+
+export interface FarTerrainSummaryRingUniformRefs {
+  uOriginX: ReturnType<typeof uniform>;
+  uOriginZ: ReturnType<typeof uniform>;
+  uCellM: ReturnType<typeof uniform>;
+  uStartM: ReturnType<typeof uniform>;
+  uEndM: ReturnType<typeof uniform>;
+  uRowOffsetCells: ReturnType<typeof uniform>;
+  uWidthCells: ReturnType<typeof uniform>;
+  uHeightCells: ReturnType<typeof uniform>;
+  uValid: ReturnType<typeof uniform>;
 }
 
 export interface FarTerrainUniformRefs {
@@ -31,12 +45,10 @@ export interface FarTerrainUniformRefs {
   uSunColor: ReturnType<typeof uniform>;
   uSkyColor: ReturnType<typeof uniform>;
   uGroundColor: ReturnType<typeof uniform>;
-  uSummaryOriginX?: ReturnType<typeof uniform>;
-  uSummaryOriginZ?: ReturnType<typeof uniform>;
-  uSummaryCellM?: ReturnType<typeof uniform>;
   uSummaryWidthCells?: ReturnType<typeof uniform>;
   uSummaryHeightCells?: ReturnType<typeof uniform>;
   uSummaryValid?: ReturnType<typeof uniform>;
+  uSummaryRings?: FarTerrainSummaryRingUniformRefs[];
 }
 
 export interface FarTerrainMaterialOptions {
@@ -97,12 +109,10 @@ export function createFarTerrainMaterial(
   material.colorNode = final;
   material.side = THREE.DoubleSide;
 
-  let uSummaryOriginX: ReturnType<typeof uniform> | undefined;
-  let uSummaryOriginZ: ReturnType<typeof uniform> | undefined;
-  let uSummaryCellM: ReturnType<typeof uniform> | undefined;
   let uSummaryWidthCells: ReturnType<typeof uniform> | undefined;
   let uSummaryHeightCells: ReturnType<typeof uniform> | undefined;
   let uSummaryValid: ReturnType<typeof uniform> | undefined;
+  let uSummaryRings: FarTerrainSummaryRingUniformRefs[] | undefined;
 
   if (options.gpuDisplacement) {
     const local = positionGeometry;
@@ -116,23 +126,28 @@ export function createFarTerrainMaterial(
     const summaryAtlas = options.summaryAtlas ?? getActiveFarSummaryGpuAtlasView();
 
     if (summaryAtlas) {
-      uSummaryOriginX = uniform(summaryAtlas.originX);
-      uSummaryOriginZ = uniform(summaryAtlas.originZ);
-      uSummaryCellM = uniform(summaryAtlas.cellM);
       uSummaryWidthCells = uniform(summaryAtlas.widthCells);
       uSummaryHeightCells = uniform(summaryAtlas.heightCells);
       uSummaryValid = uniform(summaryAtlas.valid);
+      uSummaryRings = summaryAtlas.rings
+        .slice(0, MAX_GPU_SUMMARY_RINGS)
+        .map((ring) => createRingUniformRefs(ring));
 
-      const atlasU = worldX.sub(uSummaryOriginX).div(uSummaryCellM.mul(uSummaryWidthCells));
-      const atlasV = worldZ.sub(uSummaryOriginZ).div(uSummaryCellM.mul(uSummaryHeightCells));
-      const atlasUv = vec2(clamp(atlasU, float(0.0), float(1.0)), clamp(atlasV, float(0.0), float(1.0)));
-      const atlasSample = texture(summaryAtlas.texture, atlasUv);
-      const inside = step(float(0.0), atlasU)
-        .mul(step(atlasU, float(1.0)))
-        .mul(step(float(0.0), atlasV))
-        .mul(step(atlasV, float(1.0)));
-      const atlasWeight = atlasSample.a.mul(inside).mul(uSummaryValid);
-      terrainHeight = mix(terrainHeight, atlasSample.r, atlasWeight);
+      for (const ringRefs of uSummaryRings) {
+        const atlasUCells = worldX.sub(ringRefs.uOriginX).div(ringRefs.uCellM);
+        const atlasVCells = worldZ.sub(ringRefs.uOriginZ).div(ringRefs.uCellM);
+        const atlasU = atlasUCells.div(ringRefs.uWidthCells);
+        const atlasV = atlasVCells.add(ringRefs.uRowOffsetCells).div(uSummaryHeightCells);
+        const atlasUv = vec2(clamp(atlasU, float(0.0), float(1.0)), clamp(atlasV, float(0.0), float(1.0)));
+        const atlasSample = texture(summaryAtlas.texture, atlasUv);
+        const inside = step(float(0.0), atlasUCells)
+          .mul(step(atlasUCells, ringRefs.uWidthCells))
+          .mul(step(float(0.0), atlasVCells))
+          .mul(step(atlasVCells, ringRefs.uHeightCells));
+        const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM));
+        const atlasWeight = atlasSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
+        terrainHeight = mix(terrainHeight, atlasSample.r, atlasWeight);
+      }
     }
 
     terrainHeight = terrainHeight.add(float(options.heightBiasMeters ?? 0));
@@ -144,11 +159,25 @@ export function createFarTerrainMaterial(
     uHazeStart, uHazeEnd, uHazeStrength, uHazeEnabled, uHazeColor,
     uHemiStrength, uSunStrength, uAmbientFloor,
     uSunDir, uSunColor, uSkyColor, uGroundColor,
-    uSummaryOriginX, uSummaryOriginZ, uSummaryCellM, uSummaryWidthCells, uSummaryHeightCells, uSummaryValid,
+    uSummaryWidthCells, uSummaryHeightCells, uSummaryValid, uSummaryRings,
   };
   material.userData.farTerrainUniforms = refs;
 
   return material;
+}
+
+function createRingUniformRefs(ring: FarSummaryGpuAtlasRingView): FarTerrainSummaryRingUniformRefs {
+  return {
+    uOriginX: uniform(ring.originX),
+    uOriginZ: uniform(ring.originZ),
+    uCellM: uniform(ring.cellM),
+    uStartM: uniform(ring.startM),
+    uEndM: uniform(ring.endM),
+    uRowOffsetCells: uniform(ring.rowOffsetCells),
+    uWidthCells: uniform(ring.widthCells),
+    uHeightCells: uniform(ring.heightCells),
+    uValid: uniform(ring.valid),
+  };
 }
 
 function getActiveFarSummaryGpuAtlasView(): FarSummaryGpuAtlasView | undefined {
@@ -351,10 +380,23 @@ export function updateFarTerrainMaterialSummaryAtlas(
 ): void {
   const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs | undefined;
   if (!refs) return;
-  if (refs.uSummaryOriginX) refs.uSummaryOriginX.value = view.originX;
-  if (refs.uSummaryOriginZ) refs.uSummaryOriginZ.value = view.originZ;
-  if (refs.uSummaryCellM) refs.uSummaryCellM.value = view.cellM;
   if (refs.uSummaryWidthCells) refs.uSummaryWidthCells.value = view.widthCells;
   if (refs.uSummaryHeightCells) refs.uSummaryHeightCells.value = view.heightCells;
   if (refs.uSummaryValid) refs.uSummaryValid.value = view.valid;
+  if (!refs.uSummaryRings) return;
+
+  for (let i = 0; i < refs.uSummaryRings.length; i++) {
+    const ring = view.rings[i];
+    const ringRefs = refs.uSummaryRings[i];
+    if (!ring || !ringRefs) continue;
+    ringRefs.uOriginX.value = ring.originX;
+    ringRefs.uOriginZ.value = ring.originZ;
+    ringRefs.uCellM.value = ring.cellM;
+    ringRefs.uStartM.value = ring.startM;
+    ringRefs.uEndM.value = ring.endM;
+    ringRefs.uRowOffsetCells.value = ring.rowOffsetCells;
+    ringRefs.uWidthCells.value = ring.widthCells;
+    ringRefs.uHeightCells.value = ring.heightCells;
+    ringRefs.uValid.value = ring.valid;
+  }
 }
