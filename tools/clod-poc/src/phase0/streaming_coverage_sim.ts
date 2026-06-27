@@ -9,6 +9,7 @@ export interface StreamingCoverageInput {
   preloadSeconds: number;
   liveRadiusM: number;
   clodRadiusM: number;
+  infiniteStreaming?: boolean;
 }
 
 export interface StreamingCoverageReport {
@@ -34,6 +35,7 @@ export function simulateStreamingCoverage(input: StreamingCoverageInput): Stream
     worldCells, chunkSize, pageSizeCells,
     playerX, playerZ, velocityX, velocityZ,
     preloadSeconds, liveRadiusM, clodRadiusM,
+    infiniteStreaming = false,
   } = input;
 
   const predictedX = playerX + velocityX * preloadSeconds;
@@ -59,6 +61,18 @@ export function simulateStreamingCoverage(input: StreamingCoverageInput): Stream
       const pz = Math.floor(cz / chunksPerPage);
       requiredPages.add(pageKey(px, pz));
     }
+  }
+
+  if (infiniteStreaming) {
+    return {
+      predictedCenterX: predictedX,
+      predictedCenterZ: predictedZ,
+      requiredChunkCount: requiredChunks.size,
+      requiredPageCount: requiredPages.size,
+      missingChunkCount: 0,
+      missingPageCount: 0,
+      nearestMissingDistanceM: null,
+    };
   }
 
   const worldChunks = worldCells / chunkSize;
