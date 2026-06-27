@@ -136,6 +136,14 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
     console.error(`${label} rebuild failed:`, error);
   };
 
+  const reportApplyFailure = (label: string, error: unknown): void => {
+    emitAudio("clod.rebuild.error");
+    const message = error instanceof Error ? error.message : String(error);
+    deps.setLastDigSummary(`apply failed: ${message}`);
+    deps.updateInfo();
+    console.error(`${label} apply failed after worker rebuild:`, error);
+  };
+
   const performEditRebuild = async (
     edit: DigEdit,
     hit: TerrainRebuildHit,
@@ -160,9 +168,14 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
         return false;
       }
 
-      applyLod0Result(lod0.changed, lod0.pendingParents);
-      deps.setPendingParentNodes(0);
-      deps.setPendingParentMs(0);
+      try {
+        applyLod0Result(lod0.changed, lod0.pendingParents);
+        deps.setPendingParentNodes(0);
+        deps.setPendingParentMs(0);
+      } catch (error) {
+        reportApplyFailure(label, error);
+        return true;
+      }
 
       const totalMs = performance.now() - t0;
       const batchSuffix = lod0.requestCount > 1 ? ` · batch ${lod0.requestCount}` : "";
