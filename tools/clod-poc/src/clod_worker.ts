@@ -59,16 +59,6 @@ function mergeDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds {
   };
 }
 
-function intersectDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds | null {
-  const clipped = {
-    minX: Math.max(a.minX, b.minX),
-    maxX: Math.min(a.maxX, b.maxX),
-    minZ: Math.max(a.minZ, b.minZ),
-    maxZ: Math.min(a.maxZ, b.maxZ),
-  };
-  return clipped.minX <= clipped.maxX && clipped.minZ <= clipped.maxZ ? clipped : null;
-}
-
 function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | undefined): void {
   if (!terrain) {
     setTerrainSurfaceOverride(null);
@@ -150,7 +140,7 @@ function nextPendingParent(): { level: number; key: string } | null {
 function drainParents(budgetMs: number): void {
   if (!cfg || !index) return;
   const startedAt = performance.now();
-  const changed: ClodPageNode[] = [];
+  const changed = [];
 
   while (pendingParentCount() > 0 && performance.now() - startedAt < budgetMs) {
     const next = nextPendingParent();
@@ -267,17 +257,6 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   }, collectBuildResultTransferables(serialized));
 }
 
-function parentGroupFootprint(parentX: number, parentZ: number): DirtyCellBounds {
-  if (!result || !cfg) throw new Error("CLOD worker received a dig before build completion");
-  const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
-  return {
-    minX: parentX * 2 * span,
-    maxX: Math.min(result.worldPagesX * span, (parentX * 2 + 2) * span),
-    minZ: parentZ * 2 * span,
-    maxZ: Math.min(result.worldPagesZ * span, (parentZ * 2 + 2) * span),
-  };
-}
-
 function pageParentDirtyGroups(regions: readonly DirtyCellBounds[]): DirtyCellBounds[] {
   if (!result || !cfg) throw new Error("CLOD worker received a dig before build completion");
   const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
@@ -289,13 +268,9 @@ function pageParentDirtyGroups(regions: readonly DirtyCellBounds[]): DirtyCellBo
     const maxPz = Math.min(result.worldPagesZ - 1, Math.floor(dirty.maxZ / span));
     for (let pz = minPz; pz <= maxPz; pz++) {
       for (let px = minPx; px <= maxPx; px++) {
-        const parentX = px >> 1;
-        const parentZ = pz >> 1;
-        const clipped = intersectDirty(dirty, parentGroupFootprint(parentX, parentZ));
-        if (!clipped) continue;
-        const key = `${parentX},${parentZ}`;
+        const key = `${px >> 1},${pz >> 1}`;
         const previous = groups.get(key);
-        groups.set(key, previous ? mergeDirty(previous, clipped) : clipped);
+        groups.set(key, previous ? mergeDirty(previous, dirty) : { ...dirty });
       }
     }
   }
@@ -328,7 +303,7 @@ function rebuildDirtyRegionGroups(regions: readonly DirtyCellBounds[]): Combined
   };
 }
 
-function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellBounds[]): void {
+function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellBounds[], editCount: number): void {
   if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
   if (requestIds.length === 0 || dirtyRegions.length === 0) return;
 
@@ -353,6 +328,7 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
   post({
     type: "lod0Rebuilt",
     requestIds,
+    editCount,
     changed: lod0Serialized,
     dirtyCoords: lod0.dirtyCoords.map(([x, z]) => [x, z] as [number, number]),
     lod0Pages: lod0.lod0Pages,
@@ -370,7 +346,7 @@ function postLod0Rebuild(requestIds: number[], dirtyRegions: readonly DirtyCellB
 function handleDig(request: Extract<ClodWorkerRequest, { type: "dig" }>): void {
   if (!result || !cfg || !index) throw new Error("CLOD worker received a dig before build completion");
   for (const edit of request.edits) addDigEdit(edit);
-  postLod0Rebuild([request.requestId], request.dirtyRegions);
+  postLod0Rebuild([request.requestId], request.dirtyRegions, request.edits.length);
 }
 
 function handleFlush(request: Extract<ClodWorkerRequest, { type: "flush" }>): void {
