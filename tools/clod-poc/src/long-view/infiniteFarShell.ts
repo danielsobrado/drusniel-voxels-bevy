@@ -56,7 +56,11 @@ export interface SnappedCenter {
 
 function resolveHeightSamplingMode(options: InfiniteFarShellOptions): FarShellHeightSamplingMode {
   const requested = options.heightSamplingMode ?? "cpu";
-  return requested === "gpu" && options.useParityMaterial && options.parityConfig && options.farSummaryGpuAtlas ? "gpu" : "cpu";
+  if (requested !== "gpu") return "cpu";
+  if (!options.useParityMaterial || !options.parityConfig || !options.farSummaryGpuAtlas) {
+    throw new Error("Far shell GPU mode requires parity material, parity config, and a GPU far-summary atlas");
+  }
+  return "gpu";
 }
 
 export class InfiniteFarShell {
