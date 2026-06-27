@@ -11,14 +11,17 @@ class MockWorker {
   removeEventListener = vi.fn();
 }
 
-const originalWorker = globalThis.Worker;
+const workerGlobal = globalThis as unknown as Record<string, unknown>;
+const hadOriginalWorker = "Worker" in workerGlobal;
+const originalWorker = workerGlobal.Worker;
 
 beforeAll(() => {
-  (globalThis as unknown as Record<string, unknown>).Worker = MockWorker as unknown as typeof Worker;
+  workerGlobal.Worker = MockWorker as unknown as typeof Worker;
 });
 
 afterAll(() => {
-  (globalThis as unknown as Record<string, unknown>).Worker = originalWorker;
+  if (hadOriginalWorker) workerGlobal.Worker = originalWorker;
+  else delete workerGlobal.Worker;
 });
 
 describe("ClodWorkerClient parent error lifecycle", () => {
