@@ -61,8 +61,8 @@ export class FarSummaryGpuAtlas {
 
     const texture = new THREE.DataTexture(this.data, width, height, THREE.RGBAFormat, THREE.FloatType);
     texture.name = "naadf-far-summary-height-atlas";
-    texture.magFilter = THREE.LinearFilter;
-    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.generateMipmaps = false;
@@ -116,7 +116,7 @@ export class FarSummaryGpuAtlas {
       signatureParts.push(buildRingSignature(ringIndex, selected, minTileX, minTileZ));
     }
 
-    const signature = `${state.revision}:${signatureParts.join(";")}`;
+    const signature = signatureParts.join(";");
     if (signature === this.lastSignature) return;
 
     this.data.fill(0);
