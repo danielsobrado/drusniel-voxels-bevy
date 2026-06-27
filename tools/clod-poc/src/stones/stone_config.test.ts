@@ -46,19 +46,47 @@ terrain:
     expect(cfg.terrain.snow).toEqual({ density: 0.5, large: 2.0, medium: 0.8, small: 0.2 });
   });
 
-  it("clamps negative terrain weights and falls back on malformed YAML", () => {
+  it("clamps unsafe terrain, radius, and preset YAML", () => {
     const cfg = parseStoneConfig(`
+cell_size_m: -4
+slope_repose: 2
+slope_repose_start: -1
+large:
+  radius_min: -10
+  radius_max: -1
+  variants: 0
+  lod_details: [-2, 3, 99, bad]
+  presets: [not_a_preset, talus]
 terrain:
+  high_height_m: 5
+  low_height_m: 20
   grass:
     density: -1
     large: -2
 `, null);
+
+    expect(cfg.cellSizeM).toBe(0.1);
+    expect(cfg.slopeRepose).toBe(1);
+    expect(cfg.slopeReposeStart).toBeGreaterThan(cfg.slopeRepose);
+    expect(cfg.classes.large.radiusMin).toBeGreaterThan(0);
+    expect(cfg.classes.large.radiusMax).toBeGreaterThanOrEqual(cfg.classes.large.radiusMin);
+    expect(cfg.classes.large.variants).toBe(1);
+    expect(cfg.classes.large.lodDetails).toEqual([0, 3, 4]);
+    expect(cfg.classes.large.presets).toEqual(["talus"]);
+    expect(cfg.terrain.highHeightM).toBe(cfg.terrain.lowHeightM);
     expect(cfg.terrain.grass.density).toBe(0);
     expect(cfg.terrain.grass.large).toBe(0);
+  });
 
+  it("falls back for malformed, null, and non-object YAML roots", () => {
     const warnings: string[] = [];
-    const fallback = parseStoneConfig("terrain:\n  snow: [", (message) => warnings.push(message));
-    expect(warnings).toHaveLength(1);
-    expect(fallback.terrain.snow.large).toBe(1.75);
+    const malformed = parseStoneConfig("terrain:\n  snow: [", (message) => warnings.push(message));
+    const nullRoot = parseStoneConfig("null", (message) => warnings.push(message));
+    const listRoot = parseStoneConfig("[1, 2]", (message) => warnings.push(message));
+
+    expect(warnings).toHaveLength(2);
+    expect(malformed.terrain.snow.large).toBe(1.75);
+    expect(nullRoot.terrain.snow.large).toBe(1.75);
+    expect(listRoot.terrain.snow.large).toBe(1.75);
   });
 });
