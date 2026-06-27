@@ -7,6 +7,8 @@ import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer, updateFarTerrainMaterialCenter } from "../farTerrain/farTerrainMaterial.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
 
+export type FarShellHeightSamplingMode = "cpu" | "gpu";
+
 export interface InfiniteFarShellOptions {
   innerMeters: number;
   outerMeters: number;
@@ -26,6 +28,7 @@ export interface InfiniteFarShellOptions {
   };
   useParityMaterial?: boolean;
   parityConfig?: import("../farTerrain/farTerrainUniforms.js").FarTerrainUniformData;
+  heightSamplingMode?: FarShellHeightSamplingMode;
   debugShowMissingFallback?: boolean;
   debugShowWireframe?: boolean;
   metrics?: FarShellMetrics;
@@ -43,6 +46,7 @@ export class InfiniteFarShell {
   private readonly options: InfiniteFarShellOptions;
   private readonly samplerOptions: FarSummarySamplerOptions;
   private readonly metrics: FarShellMetrics;
+  private readonly heightSamplingMode: FarShellHeightSamplingMode;
   private heightProvider: FarHeightProvider | undefined;
   private receiveSunShadows = false;
 
@@ -62,6 +66,7 @@ export class InfiniteFarShell {
 
   constructor(options: InfiniteFarShellOptions) {
     this.options = options;
+    this.heightSamplingMode = options.heightSamplingMode ?? "cpu";
     this.metrics = options.metrics ?? {
       farShellEnabled: true,
       farShellInnerM: options.innerMeters,
@@ -107,10 +112,16 @@ export class InfiniteFarShell {
       ? createFarTerrainMaterial(
           options.lighting,
           this.parityConfig!,
-          0, 0, options.outerMeters,
+          0,
+          0,
+          options.outerMeters,
+          {
+            gpuDisplacement: this.heightSamplingMode === "gpu",
+            heightBiasMeters: options.heightBiasMeters,
+          },
         )
       : createInfiniteFarShellMaterial(this.materialOptions);
-    if (options.debugShowWireframe && 'wireframe' in material) {
+    if (options.debugShowWireframe && "wireframe" in material) {
       (material as unknown as { wireframe: boolean }).wireframe = true;
     }
 
@@ -132,6 +143,10 @@ export class InfiniteFarShell {
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = false;
     this.mesh.frustumCulled = false;
+
+    if (this.heightSamplingMode === "gpu" && useParity) {
+      this.attachGpuDefaultVertexColors(vertexCount);
+    }
 
     this.metrics.farShellVertices = vertexCount;
     this.metrics.farShellTriangles = this.indices.length / 3;
@@ -193,7 +208,9 @@ export class InfiniteFarShell {
 
   setHeightProvider(provider: FarHeightProvider | undefined): void {
     this.heightProvider = provider;
-    this.rebuildHeights();
+    if (this.heightSamplingMode === "cpu") {
+      this.rebuildHeights();
+    }
   }
 
   setDebugShowMissingFallback(on: boolean): void {
@@ -233,7 +250,7 @@ export class InfiniteFarShell {
     this.metrics.farShellSnappedX = this.snappedX;
     this.metrics.farShellSnappedZ = this.snappedZ;
 
-    if (snappedChanged) {
+    if (snappedChanged && this.heightSamplingMode === "cpu") {
       this.rebuildHeights();
     }
 
@@ -328,6 +345,17 @@ export class InfiniteFarShell {
 
     geometry.computeBoundingSphere();
     geometry.computeBoundingBox();
+  }
+
+  private attachGpuDefaultVertexColors(vertexCount: number): void {
+    const colors = new Float32Array(vertexCount * 3);
+    for (let i = 0; i < vertexCount; i++) {
+      colors[i * 3] = 0.32;
+      colors[i * 3 + 1] = 0.44;
+      colors[i * 3 + 2] = 0.28;
+    }
+    this.parityColorBuffer = colors;
+    this.attachVertexColors();
   }
 
   private attachVertexColors(): void {
