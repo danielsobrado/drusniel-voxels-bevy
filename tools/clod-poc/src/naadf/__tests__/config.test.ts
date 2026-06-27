@@ -13,9 +13,21 @@ describe("naadf config", () => {
     expect(config.traversal.hddaMaxVoxelSteps).toBeGreaterThan(0);
   });
 
+  it("parses GPU far-shell height sampling as the runtime default", () => {
+    const config = parseNaadfPocConfig(naadfYaml);
+
+    expect(config.farShell.heightSamplingMode).toBe("gpu");
+  });
+
   it("rejects invalid traversal modes", () => {
     const badYaml = naadfYaml.replace("mode: dense", "mode: unsafe-fast");
 
     expect(() => parseNaadfPocConfig(badYaml)).toThrow(/traversal\.mode/);
+  });
+
+  it("rejects invalid far-shell height sampling modes", () => {
+    const badYaml = naadfYaml.replace("height_sampling_mode: gpu", "height_sampling_mode: cpu-ish");
+
+    expect(() => parseNaadfPocConfig(badYaml)).toThrow(/far_shell\.height_sampling_mode/);
   });
 });
