@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 import type { NaadfFarShellHeightSamplingMode, NaadfPocConfig, NaadfTraversalMode } from "./config.js";
-import { parseNaadfPocConfig } from "./config.js";
+import { isValidNaadfGpuAtlasWindowTiles, parseNaadfPocConfig } from "./config.js";
 import { NaadfMetricsCollector } from "./metrics.js";
 import { createTerrainSource, type TerrainProfile } from "./terrainSource.js";
 import {
@@ -85,6 +85,8 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     ? new FarSummaryGpuAtlas({
         tileCells: config.farClipmap.tileCells,
         ringCount: config.farClipmap.rings.length,
+        tilesX: config.farShell.gpuAtlasWindowTiles,
+        tilesZ: config.farShell.gpuAtlasWindowTiles,
       })
     : undefined;
   const debugOverlay = options.threeScene
@@ -245,6 +247,11 @@ function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig 
 
   const shellGrid = positiveIntParam(params.get("naadfShellGrid"));
   if (shellGrid !== null) config.farShell.gridRes = shellGrid;
+
+  const atlasWindow = positiveIntParam(params.get("naadfAtlasWindow") ?? params.get("naadfGpuAtlasWindow"));
+  if (atlasWindow !== null && isValidNaadfGpuAtlasWindowTiles(atlasWindow)) {
+    config.farShell.gpuAtlasWindowTiles = atlasWindow;
+  }
 
   return config;
 }
