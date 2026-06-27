@@ -12,6 +12,9 @@ const COAST_NOISE_SEED = 99173;
 const SHORELINE_MEANDER_CELLS = 10;
 const MAX_COAST_BLEND_CELLS = 16;
 const MIN_INLAND_CORE_WORLD_FRACTION = 0.18;
+const BEACH_HIGHLAND_START_ABOVE_BACKSHORE = 6;
+const BEACH_HIGHLAND_FULL_EXTRA_CELLS = 12;
+const BEACH_HIGHLAND_PRESERVE_SHORE_FRACTION = 0.72;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -166,6 +169,27 @@ function beachCoastHeight(
   return lerp(dryBeach, inlandTarget, smooth01(delayedBackshoreT));
 }
 
+function beachHighlandPreserveWeight(
+  edgeDistance: number,
+  inlandHeight: number,
+  coast: BorderCoastBandConfig,
+  ocean: BorderCoastOceanConfig["ocean"],
+): number {
+  const backshoreHeight = ocean.surfaceY + coast.beach.backshoreHeightAboveWater;
+  const startHeight = backshoreHeight + BEACH_HIGHLAND_START_ABOVE_BACKSHORE;
+  const fullHeight = Math.max(
+    startHeight + BEACH_HIGHLAND_FULL_EXTRA_CELLS,
+    ocean.surfaceY + coast.cliff.minHeightAboveWater + coast.cliff.inlandBoost,
+  );
+  const highland = smoothstepRange(startHeight, fullHeight, inlandHeight);
+  const drySide = smoothstepRange(
+    coast.oceanStartCells * BEACH_HIGHLAND_PRESERVE_SHORE_FRACTION,
+    coast.oceanStartCells + Math.max(1, coast.beach.beachShelfCells),
+    edgeDistance,
+  );
+  return highland * drySide;
+}
+
 function cliffCoastHeight(
   edgeDistance: number,
   inlandHeight: number,
@@ -203,9 +227,12 @@ export function applyBorderCoastShape(
   const beach = beachCoastHeight(edgeDistance, inlandHeight, coast, config.ocean);
   const cliff = cliffCoastHeight(edgeDistance, inlandHeight, coast, config.ocean);
   const shaped = lerp(beach, cliff, cliffW);
+  const beachW = 1 - cliffW;
+  const preserveHighland = beachW * beachHighlandPreserveWeight(edgeDistance, inlandHeight, coast, config.ocean);
+  const protectedShape = lerp(shaped, inlandHeight, preserveHighland);
 
   if (edgeDistance >= bandEnd) {
-    return lerp(inlandHeight, shaped, smooth01(1 - (edgeDistance - bandEnd) / fadeCells));
+    return lerp(inlandHeight, protectedShape, smooth01(1 - (edgeDistance - bandEnd) / fadeCells));
   }
-  return shaped;
+  return protectedShape;
 }
