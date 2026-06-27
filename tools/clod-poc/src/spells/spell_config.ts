@@ -14,9 +14,13 @@ export interface FireSpellVfxConfig {
   target: SpellVec2;
 }
 
+export type WaterSpellVfxConfig = FireSpellVfxConfig;
+
 export interface FireSpellAudioConfig {
   volume: number;
 }
+
+export type WaterSpellAudioConfig = FireSpellAudioConfig;
 
 export interface SpellConfig {
   menu: {
@@ -29,6 +33,13 @@ export interface SpellConfig {
     castDurationMs: number;
     audio: FireSpellAudioConfig;
     vfx: FireSpellVfxConfig;
+  };
+  water: {
+    id: "water";
+    label: string;
+    castDurationMs: number;
+    audio: WaterSpellAudioConfig;
+    vfx: WaterSpellVfxConfig;
   };
 }
 
@@ -47,6 +58,24 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
     vfx: {
       layerId: "spell-vfx-layer",
       canvasId: "fire-spell-vfx",
+      fallbackWidthPx: 1280,
+      fallbackHeightPx: 720,
+      maxDpr: 1.25,
+      flameScale: 1.0,
+      origin: [0.0, -0.50],
+      target: [0.0, 0.08],
+    },
+  },
+  water: {
+    id: "water",
+    label: "Water",
+    castDurationMs: 2200,
+    audio: {
+      volume: 0.34,
+    },
+    vfx: {
+      layerId: "spell-vfx-layer",
+      canvasId: "water-spell-vfx",
       fallbackWidthPx: 1280,
       fallbackHeightPx: 720,
       maxDpr: 1.25,
@@ -90,14 +119,30 @@ function readVec2(record: Record<string, unknown> | undefined, key: string, fall
   return [Math.min(2, Math.max(-2, x)), Math.min(2, Math.max(-2, y))];
 }
 
+function readVfxConfig(record: Record<string, unknown> | undefined, fallback: FireSpellVfxConfig): FireSpellVfxConfig {
+  return {
+    layerId: readString(record, "layer_id", fallback.layerId),
+    canvasId: readString(record, "canvas_id", fallback.canvasId),
+    fallbackWidthPx: readNumber(record, "fallback_width_px", fallback.fallbackWidthPx, 160, 2560),
+    fallbackHeightPx: readNumber(record, "fallback_height_px", fallback.fallbackHeightPx, 120, 1440),
+    maxDpr: readNumber(record, "max_dpr", fallback.maxDpr, 1, 3),
+    flameScale: readNumber(record, "flame_scale", fallback.flameScale, 0.25, 3),
+    origin: readVec2(record, "origin", fallback.origin),
+    target: readVec2(record, "target", fallback.target),
+  };
+}
+
 export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
   try {
     const parsed = asRecord(load(text));
     const root = asRecord(parsed?.spells);
     const menu = asRecord(root?.menu);
     const fire = asRecord(root?.fire);
-    const audio = asRecord(fire?.audio);
-    const vfx = asRecord(fire?.vfx);
+    const water = asRecord(root?.water);
+    const fireAudio = asRecord(fire?.audio);
+    const fireVfx = asRecord(fire?.vfx);
+    const waterAudio = asRecord(water?.audio);
+    const waterVfx = asRecord(water?.vfx);
 
     return {
       menu: {
@@ -109,18 +154,18 @@ export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
         label: readString(fire, "label", DEFAULT_SPELL_CONFIG.fire.label),
         castDurationMs: readNumber(fire, "cast_duration_ms", DEFAULT_SPELL_CONFIG.fire.castDurationMs, 250, 8000),
         audio: {
-          volume: readNumber(audio, "volume", DEFAULT_SPELL_CONFIG.fire.audio.volume, 0, 1),
+          volume: readNumber(fireAudio, "volume", DEFAULT_SPELL_CONFIG.fire.audio.volume, 0, 1),
         },
-        vfx: {
-          layerId: readString(vfx, "layer_id", DEFAULT_SPELL_CONFIG.fire.vfx.layerId),
-          canvasId: readString(vfx, "canvas_id", DEFAULT_SPELL_CONFIG.fire.vfx.canvasId),
-          fallbackWidthPx: readNumber(vfx, "fallback_width_px", DEFAULT_SPELL_CONFIG.fire.vfx.fallbackWidthPx, 160, 2560),
-          fallbackHeightPx: readNumber(vfx, "fallback_height_px", DEFAULT_SPELL_CONFIG.fire.vfx.fallbackHeightPx, 120, 1440),
-          maxDpr: readNumber(vfx, "max_dpr", DEFAULT_SPELL_CONFIG.fire.vfx.maxDpr, 1, 3),
-          flameScale: readNumber(vfx, "flame_scale", DEFAULT_SPELL_CONFIG.fire.vfx.flameScale, 0.25, 3),
-          origin: readVec2(vfx, "origin", DEFAULT_SPELL_CONFIG.fire.vfx.origin),
-          target: readVec2(vfx, "target", DEFAULT_SPELL_CONFIG.fire.vfx.target),
+        vfx: readVfxConfig(fireVfx, DEFAULT_SPELL_CONFIG.fire.vfx),
+      },
+      water: {
+        id: "water",
+        label: readString(water, "label", DEFAULT_SPELL_CONFIG.water.label),
+        castDurationMs: readNumber(water, "cast_duration_ms", DEFAULT_SPELL_CONFIG.water.castDurationMs, 250, 8000),
+        audio: {
+          volume: readNumber(waterAudio, "volume", DEFAULT_SPELL_CONFIG.water.audio.volume, 0, 1),
         },
+        vfx: readVfxConfig(waterVfx, DEFAULT_SPELL_CONFIG.water.vfx),
       },
     };
   } catch (error) {
