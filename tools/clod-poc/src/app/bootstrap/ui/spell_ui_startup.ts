@@ -9,10 +9,18 @@ export function runSpellUiStartup(_ctx: UiStartupContext): void {
   const menuEl = document.getElementById(config.menu.rootId);
 
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.code !== "KeyV") return;
     const target = event.target;
     if (target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
-    menuEl?.classList.toggle("spell-menu-hidden");
+
+    if (event.code === "KeyV") {
+      menuEl?.classList.toggle("spell-menu-hidden");
+      return;
+    }
+
+    if (event.code === "Digit1" || event.code === "Numpad1") {
+      event.preventDefault();
+      menu.castFire();
+    }
   };
 
   window.addEventListener("keydown", onKeyDown);
