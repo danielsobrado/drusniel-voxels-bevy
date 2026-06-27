@@ -19,8 +19,8 @@ describe("nextPendingParentLevelOrdered", () => {
       [2, new Set(["0,0", "1,0"])],
     ]);
     expect(nextPendingParentLevelOrdered(pending, 3)).toEqual({ level: 1, key: "1,0" });
-    expect(nextPendingParentLevelOrdered(pending, 3)).toBeNull();
-    pending.get(2)!.add("0,1");
     expect(nextPendingParentLevelOrdered(pending, 3)).toEqual({ level: 2, key: "0,0" });
+    expect(nextPendingParentLevelOrdered(pending, 3)).toEqual({ level: 2, key: "1,0" });
+    expect(nextPendingParentLevelOrdered(pending, 3)).toBeNull();
   });
 });

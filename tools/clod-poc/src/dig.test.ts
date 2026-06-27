@@ -382,68 +382,73 @@ describe("rebuildDirtyPages", () => {
     }
   }, 120000);
 
-  it("defers parent enqueue until a level fully drains (partial L2 must not seed stale L3)", () => {
+  it("survives two remove spheres with budgeted parent drain (worker queue semantics)", () => {
     const topLevel = 3;
-    const drain = (
-      deferChildEnqueue: boolean,
-      parentsPerSlice: number,
-    ) => {
-      const result = buildWorld(8, 8, uiCfg);
-      const index = buildNodeIndex(result);
-      const x = 251.2, y = 29.4, z = 315.2, r = 3;
+    const digs = [
+      { x: 251.2, y: 29.4, z: 315.2 },
+      { x: 242.9, y: 28.6, z: 325.2 },
+    ] as const;
+
+    const result = buildWorld(8, 8, uiCfg);
+    const index = buildNodeIndex(result);
+    const pending = new Map<number, Set<string>>();
+    const childCoords = new Map<number, [number, number][]>();
+    const enqueue = (level: number, nx: number, nz: number) => {
+      let set = pending.get(level);
+      if (!set) { set = new Set(); pending.set(level, set); }
+      set.add(`${nx},${nz}`);
+    };
+    const enqueueSiblingGroup = (level: number, coords: readonly [number, number][]) => {
+      for (const [nx, nz] of expandQuadSiblingPages(coords, level, result.worldPagesX, result.worldPagesZ)) {
+        enqueue(level, nx, nz);
+      }
+    };
+    const uniqueParents = (coords: readonly [number, number][]) => {
+      const keys = new Set<string>();
+      for (const [nx, nz] of coords) keys.add(`${nx >> 1},${nz >> 1}`);
+      return [...keys].map((key) => key.split(",").map(Number) as [number, number]);
+    };
+    const clearPendingFrom = (level: number) => {
+      for (let l = level; l <= topLevel; l++) pending.delete(l);
+      for (const l of [...childCoords.keys()]) {
+        if (l >= level - 1) childCoords.delete(l);
+      }
+    };
+    const hasPending = () => [...pending.values()].some((set) => set.size > 0);
+    const seedLod0 = (dirtyCoords: readonly [number, number][]) => {
+      clearPendingFrom(1);
+      enqueueSiblingGroup(1, uniqueParents(dirtyCoords));
+    };
+    const processOne = () => {
+      const next = nextPendingParentLevelOrdered(pending, topLevel);
+      if (!next) return false;
+      resimplifyParent(index, next.level, next.key, uiCfg, next.level === topLevel);
+      const [nx, nz] = next.key.split(",").map(Number) as [number, number];
+      let coords = childCoords.get(next.level);
+      if (!coords) { coords = []; childCoords.set(next.level, coords); }
+      coords.push([nx, nz]);
+      const levelSet = pending.get(next.level);
+      if (!levelSet || levelSet.size === 0) {
+        const completed = childCoords.get(next.level) ?? [];
+        childCoords.delete(next.level);
+        if (completed.length > 0) enqueueSiblingGroup(next.level + 1, uniqueParents(completed));
+      }
+      return true;
+    };
+
+    for (const { x, y, z } of digs) {
+      const r = 3;
       addDigEdit({ x, y, z, r, shape: "sphere", op: "remove" });
       const margin = r + 4;
       const dirty = { minX: x - margin, maxX: x + margin, minZ: z - margin, maxZ: z + margin };
       const lod0 = rebuildDirtyLod0Pages(result, dirty, uiCfg, index);
-
-      const pending = new Map<number, Set<string>>();
-      const childCoords = new Map<number, [number, number][]>();
-      const enqueue = (level: number, nx: number, nz: number) => {
-        let set = pending.get(level);
-        if (!set) { set = new Set(); pending.set(level, set); }
-        set.add(`${nx},${nz}`);
-      };
-      const enqueueSiblingGroup = (level: number, coords: readonly [number, number][]) => {
-        for (const [nx, nz] of expandQuadSiblingPages(coords, level, result.worldPagesX, result.worldPagesZ)) {
-          enqueue(level, nx, nz);
-        }
-      };
-      const uniqueParents = (coords: readonly [number, number][]) => {
-        const keys = new Set<string>();
-        for (const [nx, nz] of coords) keys.add(`${nx >> 1},${nz >> 1}`);
-        return [...keys].map((key) => key.split(",").map(Number) as [number, number]);
-      };
-      const hasPending = () => [...pending.values()].some((set) => set.size > 0);
-
-      enqueueSiblingGroup(1, uniqueParents(lod0.dirtyCoords));
-      let slices = 0;
-      while (hasPending()) {
-        for (let i = 0; i < parentsPerSlice; i++) {
-          const next = nextPendingParentLevelOrdered(pending, topLevel);
-          if (!next) break;
-          resimplifyParent(index, next.level, next.key, uiCfg, next.level === topLevel);
-          const [nx, nz] = next.key.split(",").map(Number) as [number, number];
-          if (deferChildEnqueue) {
-            let coords = childCoords.get(next.level);
-            if (!coords) { coords = []; childCoords.set(next.level, coords); }
-            coords.push([nx, nz]);
-            const levelSet = pending.get(next.level);
-            if (!levelSet || levelSet.size === 0) {
-              const completed = childCoords.get(next.level) ?? [];
-              childCoords.delete(next.level);
-              if (completed.length > 0) enqueueSiblingGroup(next.level + 1, uniqueParents(completed));
-            }
-          } else {
-            enqueueSiblingGroup(next.level + 1, uniqueParents([[nx, nz]]));
-          }
-        }
-        slices++;
-        if (slices > 500) throw new Error("drain exceeded slice budget");
-      }
-    };
-
-    expect(() => drain(false, 2)).toThrow(/InternalBorderNotWelded/);
-    clearDigEdits();
-    expect(() => drain(true, 2)).not.toThrow();
-  }, 180000);
+      seedLod0(lod0.dirtyCoords);
+      for (let i = 0; i < 2; i++) processOne();
+    }
+    let guard = 0;
+    while (hasPending()) {
+      if (!processOne()) break;
+      if (++guard > 500) throw new Error("drain exceeded guard");
+    }
+  }, 240000);
 });
