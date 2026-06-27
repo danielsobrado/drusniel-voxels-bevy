@@ -211,10 +211,10 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     }));
   const terrainColliders = new TerrainColliderSet(colliderPages);
   const player = new PlayerController(terrainColliders, {
-    minX: -1000,
-    minZ: -1000,
-    maxX: Math.max(worldCells, 1000),
-    maxZ: Math.max(worldCells, 1000),
+    minX: 0,
+    minZ: 0,
+    maxX: worldCells,
+    maxZ: worldCells,
   }, playerConfig);
   const interaction = new PlayerInteractionState();
   const terrainRaycast = createTerrainRaycastService({
