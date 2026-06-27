@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
-import type { NaadfPocConfig, NaadfTraversalMode } from "./config.js";
+import type { NaadfFarShellHeightSamplingMode, NaadfPocConfig, NaadfTraversalMode } from "./config.js";
 import { parseNaadfPocConfig } from "./config.js";
 import { NaadfMetricsCollector } from "./metrics.js";
 import { createTerrainSource, type TerrainProfile } from "./terrainSource.js";
@@ -15,6 +15,7 @@ import { runAcceptanceChecks, allAcceptancePassed } from "./validation.js";
 import { setNaadfIntegration } from "./canopyBridge.js";
 
 const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
+const HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
 const HEIGHT_PROVIDER_KEY_SCALE = 1000;
 
 export const NAADF_SCENES = new Set([
@@ -222,6 +223,11 @@ function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig 
   const bounds = params.get("naadfHddaBounds");
   if (bounds === "1" || bounds === "true") config.traversal.hddaUseDirectionalBounds = true;
   if (bounds === "0" || bounds === "false") config.traversal.hddaUseDirectionalBounds = false;
+
+  const heightMode = params.get("naadfHeightMode") ?? params.get("naadfFarShellHeightMode");
+  if (heightMode && HEIGHT_MODES.has(heightMode as NaadfFarShellHeightSamplingMode)) {
+    config.farShell.heightSamplingMode = heightMode as NaadfFarShellHeightSamplingMode;
+  }
 
   const shellGrid = positiveIntParam(params.get("naadfShellGrid"));
   if (shellGrid !== null) config.farShell.gridRes = shellGrid;
