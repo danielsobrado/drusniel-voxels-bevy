@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { FarSummaryGpuAtlas } from "./farSummaryAtlas.js";
 import { createTestNaadfConfig } from "../__tests__/testConfig.js";
@@ -20,19 +21,28 @@ function readyTile(ring: number, x: number, z: number, height: number): any {
   };
 }
 
+function testState(farTiles: Map<string, any>, revision = 42): any {
+  const config = createTestNaadfConfig();
+  config.farClipmap.tileCells = 2;
+  config.farClipmap.rings = [
+    { name: "near", startM: 0, endM: 4096, cellM: 32 },
+    { name: "far", startM: 4096, endM: 8192, cellM: 64 },
+  ];
+  return { config, farTiles, predictedX: 64, predictedZ: 64, revision };
+}
+
 describe("FarSummaryGpuAtlas", () => {
   it("packs ready far-summary heights into a float texture", () => {
     const atlas = new FarSummaryGpuAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
-    const config = createTestNaadfConfig();
-    config.farClipmap.tileCells = 2;
-    config.farClipmap.rings = [{ name: "test", startM: 0, endM: 4096, cellM: 32 }];
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
 
-    atlas.updateFromState({ config, farTiles, predictedX: 64, predictedZ: 64, revision: 42 } as any);
+    atlas.updateFromState(testState(farTiles));
 
     expect(atlas.view.valid).toBe(1);
     expect(atlas.view.widthCells).toBe(6);
+    expect(atlas.view.texture.magFilter).toBe(THREE.NearestFilter);
+    expect(atlas.view.texture.minFilter).toBe(THREE.NearestFilter);
     const data = atlas.view.texture.image.data as Float32Array;
     const firstPackedPixel = ((2 * atlas.view.widthCells) + 2) * 4;
     expect(data[firstPackedPixel]).toBe(20);
@@ -43,17 +53,11 @@ describe("FarSummaryGpuAtlas", () => {
 
   it("packs each far-summary ring into a separate atlas band", () => {
     const atlas = new FarSummaryGpuAtlas({ tileCells: 2, ringCount: 2, tilesX: 3, tilesZ: 3 });
-    const config = createTestNaadfConfig();
-    config.farClipmap.tileCells = 2;
-    config.farClipmap.rings = [
-      { name: "near", startM: 0, endM: 4096, cellM: 32 },
-      { name: "far", startM: 4096, endM: 8192, cellM: 64 },
-    ];
     const farTiles = new Map<string, any>();
     farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
     farTiles.set("1:1,1", readyTile(1, 1, 1, 80));
 
-    atlas.updateFromState({ config, farTiles, predictedX: 64, predictedZ: 64, revision: 42 } as any);
+    atlas.updateFromState(testState(farTiles));
 
     expect(atlas.view.valid).toBe(1);
     expect(atlas.view.heightCells).toBe(12);
@@ -64,5 +68,17 @@ describe("FarSummaryGpuAtlas", () => {
     const ring1PackedPixel = (((6 + 2) * atlas.view.widthCells) + 2) * 4;
     expect(data[ring1PackedPixel]).toBe(80);
     expect(data[ring1PackedPixel + 3]).toBe(1);
+  });
+
+  it("does not repack when only unrelated world revision changes", () => {
+    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, ringCount: 2, tilesX: 3, tilesZ: 3 });
+    const farTiles = new Map<string, any>();
+    farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
+
+    atlas.updateFromState(testState(farTiles, 42));
+    const revisionAfterFirstPack = atlas.view.revision;
+    atlas.updateFromState(testState(farTiles, 99));
+
+    expect(atlas.view.revision).toBe(revisionAfterFirstPack);
   });
 });
