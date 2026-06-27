@@ -31,6 +31,7 @@ const TERRAIN_CONFIG = {
 export interface WorldBounds {
   cellsX: number;
   cellsZ: number;
+  finite?: boolean;
 }
 
 function hashPositionSeeded(x: number, z: number, seed = TERRAIN_SEED): number {
