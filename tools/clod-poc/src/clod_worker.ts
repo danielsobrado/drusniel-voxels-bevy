@@ -80,7 +80,16 @@ function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | un
 }
 
 function post(message: ClodWorkerResponse, transfer?: Transferable[]): void {
-  ctx.postMessage(message, transfer);
+  if (!transfer || transfer.length === 0) {
+    ctx.postMessage(message);
+    return;
+  }
+  const safeTransfer: Transferable[] = [];
+  for (const item of transfer) {
+    if (!(item instanceof ArrayBuffer) || item.byteLength === 0 || safeTransfer.includes(item)) continue;
+    safeTransfer.push(item);
+  }
+  ctx.postMessage(message, safeTransfer);
 }
 
 function errorResponse(requestId: number | null, error: unknown): ClodWorkerResponse {
