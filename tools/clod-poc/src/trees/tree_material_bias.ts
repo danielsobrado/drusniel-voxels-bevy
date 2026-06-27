@@ -23,6 +23,7 @@ interface TreeMaterialYaml {
   };
 }
 
+type WarnHandler = (message: string) => void;
 type TreeSettingsWithMaterialBias = TreeSettings & {
   ecology: TreeSettings["ecology"] & { materialBias?: TreeMaterialBiasSettings };
 };
@@ -34,13 +35,24 @@ export const DEFAULT_TREE_MATERIAL_BIAS: TreeMaterialBiasSettings = {
   snow: { density: 0.08, oak: 0.04, pine: 0.30, dead: 1.45 },
 };
 
-export function applyTreeMaterialBiasFromYaml(settings: TreeSettings, text: string): TreeSettings {
-  const parsed = parseTreeMaterialBias(text);
+export function applyTreeMaterialBiasFromYaml(
+  settings: TreeSettings,
+  text: string,
+  warn: WarnHandler | null = console.warn,
+): TreeSettings {
   const target = settings as TreeSettingsWithMaterialBias;
-  target.ecology = {
-    ...target.ecology,
-    materialBias: parsed,
-  };
+  try {
+    target.ecology = {
+      ...target.ecology,
+      materialBias: parseTreeMaterialBias(text),
+    };
+  } catch (error) {
+    warn?.(`[tree-material-bias] failed to parse material bias; using defaults: ${error instanceof Error ? error.message : String(error)}`);
+    target.ecology = {
+      ...target.ecology,
+      materialBias: DEFAULT_TREE_MATERIAL_BIAS,
+    };
+  }
   return target;
 }
 
