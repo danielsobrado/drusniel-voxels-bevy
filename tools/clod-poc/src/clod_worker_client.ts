@@ -78,14 +78,14 @@ export class ClodWorkerClient {
     attachMainThreadCacheBroker(this.worker);
     this.worker.onmessage = (event: MessageEvent) => {
       if (isCacheRpcMessage(event.data)) return;
-      this.handleMessage(event.data as ClodWorkerResponse);
+      try {
+        this.handleMessage(event.data as ClodWorkerResponse);
+      } catch (error) {
+        this.failClosed(error);
+      }
     };
     this.worker.onerror = (event) => {
-      const error = new Error(event.message || "CLOD worker failed");
-      this.stopped = true;
-      this.markParentsFailed(error);
-      this.rejectAll(error);
-      this.onError?.(error);
+      this.failClosed(new Error(event.message || "CLOD worker failed"));
     };
   }
 
@@ -320,6 +320,15 @@ export class ClodWorkerClient {
       parentMs: message.parentMs,
       pendingParents: message.pendingParents,
     };
+  }
+
+  private failClosed(error: unknown): void {
+    const err = error instanceof Error ? error : new Error(String(error));
+    this.stopped = true;
+    this.worker.terminate();
+    this.markParentsFailed(err);
+    this.rejectAll(err);
+    this.onError?.(err);
   }
 
   private markParentsFailed(error: Error): void {
