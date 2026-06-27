@@ -26,6 +26,49 @@ function makeRgbTexture(data: Float32Array, res: number): THREE.DataTexture {
   return tex;
 }
 
+function finiteOr(value: number, fallback: number): number {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function textureResolutionForConfig(config: CanopyShellConfig): number {
+  const shellEndM = finiteOr(config.distances.shellEndM, 1024);
+  const extentM = Math.max(1, shellEndM * 2);
+  const cellSizeM = Math.max(
+    1,
+    finiteOr(config.clipmap.rings[0]?.cellSizeM ?? config.clipmap.cellSizeM, 8),
+  );
+  return Math.min(512, Math.max(64, Math.ceil(extentM / cellSizeM)));
+}
+
+function safeCoverage(coverage: number, coverageAlphaPower: number): number {
+  const base = clamp01(finiteOr(coverage, 0));
+  const power = Number.isFinite(coverageAlphaPower) && coverageAlphaPower > 0
+    ? coverageAlphaPower
+    : 1;
+  return clamp01(Math.pow(base, power));
+}
+
+function safeSpeciesTint(
+  pine: number,
+  broadleaf: number,
+  deadwood: number,
+  config: CanopyShellConfig,
+): [number, number, number] {
+  const p = clamp01(finiteOr(pine, 0));
+  const b = clamp01(finiteOr(broadleaf, 0));
+  const d = clamp01(finiteOr(deadwood, 0));
+  const sum = p + b + d;
+  if (sum <= 0) return [...config.material.baseTint];
+  const pn = p / sum;
+  const bn = b / sum;
+  const dn = d / sum;
+  return [
+    clamp01(pn * config.material.pineTint[0] + bn * config.material.broadleafTint[0] + dn * config.material.deadwoodTint[0]),
+    clamp01(pn * config.material.pineTint[1] + bn * config.material.broadleafTint[1] + dn * config.material.deadwoodTint[1]),
+    clamp01(pn * config.material.pineTint[2] + bn * config.material.broadleafTint[2] + dn * config.material.deadwoodTint[2]),
+  ];
+}
+
 function buildTileMap(visibleTiles: CanopySummaryTile[]): Map<string, CanopySummaryTile> {
   const tileMap = new Map<string, CanopySummaryTile>();
   for (const tile of visibleTiles) {
@@ -66,14 +109,14 @@ let textureRevision = 0;
 
 export function buildCanopyTextureSet(params: BuildCanopyTextureSetParams): CanopyTextureSet {
   const { config, centerX, centerZ, visibleTiles, syntheticFallback } = params;
-  const extentM = config.distances.shellEndM * 2;
-  const originX = centerX - config.distances.shellEndM;
-  const originZ = centerZ - config.distances.shellEndM;
-  const cellSizeM = config.clipmap.rings[0]?.cellSizeM ?? config.clipmap.cellSizeM;
-  const resolution = Math.min(512, Math.max(64, Math.ceil(extentM / cellSizeM)));
+  const shellEndM = Math.max(1, finiteOr(config.distances.shellEndM, 1024));
+  const extentM = shellEndM * 2;
+  const originX = centerX - shellEndM;
+  const originZ = centerZ - shellEndM;
+  const resolution = textureResolutionForConfig(config);
 
   if (syntheticFallback && params.terrainSummary) {
-    const farRadius = params.farRadius ?? config.distances.shellEndM;
+    const farRadius = Math.max(1, finiteOr(params.farRadius ?? config.distances.shellEndM, shellEndM));
     const heightTexture = createExtendedHeightTexture(params.terrainSummary, farRadius);
     const coverageTexture = createExtendedCanopyTexture(params.terrainSummary, farRadius, config.seed);
     const speciesData = new Float32Array(resolution * resolution * 3);
@@ -98,7 +141,7 @@ export function buildCanopyTextureSet(params: BuildCanopyTextureSetParams): Cano
   const coverageData = new Float32Array(resolution * resolution);
   const speciesData = new Float32Array(resolution * resolution * 3);
   const roughnessData = new Float32Array(resolution * resolution);
-  const tileSizeM = config.clipmap.tileSizeM;
+  const tileSizeM = Math.max(1, finiteOr(config.clipmap.tileSizeM, 512));
   const tileMap = buildTileMap(visibleTiles);
 
   for (let j = 0; j < resolution; j++) {
@@ -116,18 +159,13 @@ export function buildCanopyTextureSet(params: BuildCanopyTextureSetParams): Cano
         roughnessData[idx] = 0;
         continue;
       }
-      heightData[idx] = Number.isFinite(cell.canopyHeight) ? cell.canopyHeight : cell.groundHeight;
-      coverageData[idx] = clamp01(Math.pow(cell.coverage, config.material.coverageAlphaPower));
-      speciesData[idx * 3] = cell.speciesPine * config.material.pineTint[0]
-        + cell.speciesBroadleaf * config.material.broadleafTint[0]
-        + cell.speciesDeadwood * config.material.deadwoodTint[0];
-      speciesData[idx * 3 + 1] = cell.speciesPine * config.material.pineTint[1]
-        + cell.speciesBroadleaf * config.material.broadleafTint[1]
-        + cell.speciesDeadwood * config.material.deadwoodTint[1];
-      speciesData[idx * 3 + 2] = cell.speciesPine * config.material.pineTint[2]
-        + cell.speciesBroadleaf * config.material.broadleafTint[2]
-        + cell.speciesDeadwood * config.material.deadwoodTint[2];
-      roughnessData[idx] = clamp01(cell.crownRoughness);
+      heightData[idx] = finiteOr(cell.canopyHeight, finiteOr(cell.groundHeight, 0));
+      coverageData[idx] = safeCoverage(cell.coverage, config.material.coverageAlphaPower);
+      const tint = safeSpeciesTint(cell.speciesPine, cell.speciesBroadleaf, cell.speciesDeadwood, config);
+      speciesData[idx * 3] = tint[0];
+      speciesData[idx * 3 + 1] = tint[1];
+      speciesData[idx * 3 + 2] = tint[2];
+      roughnessData[idx] = clamp01(finiteOr(cell.crownRoughness, 0));
     }
   }
 
