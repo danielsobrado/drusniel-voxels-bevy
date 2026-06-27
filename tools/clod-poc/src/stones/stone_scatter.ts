@@ -165,13 +165,21 @@ export function stoneClassWeights(site: StoneSiteSample, settings: StoneSettings
   };
 }
 
+export function stoneClassWeightTotal(weights: Record<StoneClass, number>): number {
+  return Math.max(0, weights.large) + Math.max(0, weights.medium) + Math.max(0, weights.small);
+}
+
 export function selectStoneClass(site: StoneSiteSample, settings: StoneSettings, roll: number): StoneClass {
-  const weights = stoneClassWeights(site, settings);
-  const total = weights.large + weights.medium + weights.small;
+  return selectStoneClassFromWeights(stoneClassWeights(site, settings), roll) ?? "small";
+}
+
+function selectStoneClassFromWeights(weights: Record<StoneClass, number>, roll: number): StoneClass | null {
+  const total = stoneClassWeightTotal(weights);
+  if (total <= 0) return null;
   let acc = 0;
-  const target = roll * total;
+  const target = clamp01(roll) * total;
   for (const cls of STONE_CLASSES) {
-    acc += weights[cls];
+    acc += Math.max(0, weights[cls]);
     if (target < acc) return cls;
   }
   return "small";
@@ -219,7 +227,9 @@ export function generateRankedStoneInstances(
       if (weight <= 0) continue;
       if (hash2(gridX, gridZ, settings.seedSalt + SALT.accept) >= weight) continue;
 
-      const cls = selectStoneClass(site, settings, hash2(gridX, gridZ, settings.seedSalt + SALT.classRoll));
+      const classWeights = stoneClassWeights(site, settings);
+      const cls = selectStoneClassFromWeights(classWeights, hash2(gridX, gridZ, settings.seedSalt + SALT.classRoll));
+      if (!cls) continue;
       const classCfg = settings.classes[cls];
       const preset = selectPreset(cls, site, settings, hash2(gridX, gridZ, settings.seedSalt + SALT.presetRoll));
       const variant = hashU32(gridX, gridZ, settings.seedSalt + SALT.variantRoll) % Math.max(1, classCfg.variants);
