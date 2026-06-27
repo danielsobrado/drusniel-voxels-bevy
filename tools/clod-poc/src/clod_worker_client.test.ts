@@ -157,6 +157,17 @@ describe("ClodWorkerClient parent error lifecycle", () => {
     )).rejects.toThrow("stopped");
   });
 
+  it("ignores queued worker failures after disposal", () => {
+    const mockWorker = (client as unknown as { worker: MockWorker }).worker;
+    client.dispose();
+
+    mockWorker.onerror!({ message: "late worker failure" } as ErrorEvent);
+    mockWorker.onmessage!({ data: { type: "error", requestId: null, message: "late parent failure" } } as MessageEvent);
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(mockWorker.terminate).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed without mutating a parent when a parent batch has an unknown child", () => {
     const mockWorker = (client as unknown as { worker: MockWorker }).worker;
     const child = node("L0:0,0", 0);
