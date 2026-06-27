@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import yamlText from "../../config/border_coast_ocean.yaml?raw";
 import { parseBorderCoastOceanConfig } from "./borderCoastOceanConfig.js";
+import { parseBorderCoastOceanConfig as parseRuntimeBorderCoastOceanConfig } from "../terrain/border_coast_config.js";
+
+function hexToRgb(hex: string): [number, number, number] {
+  const raw = Number.parseInt(hex.slice(1), 16);
+  return [((raw >> 16) & 255) / 255, ((raw >> 8) & 255) / 255, (raw & 255) / 255];
+}
 
 describe("border coast/ocean config", () => {
   it("parses the checked-in config", () => {
@@ -19,7 +25,50 @@ describe("border coast/ocean config", () => {
       cove: 0.1,
       reef: 0.05,
     });
+    expect(config.deep_ocean.wave).toMatchObject({
+      gravity: 9.81,
+      grid_k: 16,
+      active_gpu_waves: 48,
+      wind_speed: 14,
+      wind_direction_deg: 45,
+      height_scale: 1.3,
+      choppiness: 1.6,
+      coarse_patch_m: 250,
+      fine_patch_m: 37,
+      foam_threshold: 0.5,
+      foam_power: 1.36,
+      foam_intensity: 1.25,
+      swell_height_scale: 0.34,
+    });
     expect(config.deep_ocean.shading.deep_color).toBe("#042c4e");
+  });
+
+  it("keeps strict config validation aligned with the runtime border ocean parser", () => {
+    const strict = parseBorderCoastOceanConfig(yamlText);
+    const runtime = parseRuntimeBorderCoastOceanConfig(yamlText);
+
+    expect(runtime.deepOcean.enabled).toBe(strict.deep_ocean.enabled);
+    expect(runtime.deepOcean.surfaceY).toBe(strict.world.water_level);
+    expect(runtime.deepOcean.extendCells).toBe(strict.deep_ocean.visual_extent_m);
+    expect(runtime.deepOcean.segments).toBe(strict.deep_ocean.far_subdivisions);
+    expect(runtime.deepOcean.wave).toMatchObject({
+      gravity: strict.deep_ocean.wave.gravity,
+      gridK: strict.deep_ocean.wave.grid_k,
+      activeGpuWaves: strict.deep_ocean.wave.active_gpu_waves,
+      windSpeed: strict.deep_ocean.wave.wind_speed,
+      windDirectionDeg: strict.deep_ocean.wave.wind_direction_deg,
+      heightScale: strict.deep_ocean.wave.height_scale,
+      choppiness: strict.deep_ocean.wave.choppiness,
+      coarsePatchM: strict.deep_ocean.wave.coarse_patch_m,
+      finePatchM: strict.deep_ocean.wave.fine_patch_m,
+      foamThreshold: strict.deep_ocean.wave.foam_threshold,
+      foamPower: strict.deep_ocean.wave.foam_power,
+      foamIntensity: strict.deep_ocean.wave.foam_intensity,
+      swellHeightScale: strict.deep_ocean.wave.swell_height_scale,
+    });
+    expect(runtime.deepOcean.shading.deepColor).toEqual(hexToRgb(strict.deep_ocean.shading.deep_color));
+    expect(runtime.deepOcean.shading.shallowColor).toEqual(hexToRgb(strict.deep_ocean.shading.shallow_color));
+    expect(runtime.deepOcean.shading.foamColor).toEqual(hexToRgb(strict.deep_ocean.shading.foam_color));
   });
 
   it("normalizes coast type weights", () => {
@@ -74,6 +123,14 @@ describe("border coast/ocean config", () => {
         yamlText.replace("near_subdivisions: 128", "near_subdivisions: many"),
       ),
     ).toThrow("deep_ocean.near_subdivisions must be a finite number");
+  });
+
+  it("fails clearly for missing wave constants", () => {
+    expect(() =>
+      parseBorderCoastOceanConfig(
+        yamlText.replace(/\n    gravity: 9\.81/, ""),
+      ),
+    ).toThrow("missing required field 'deep_ocean.wave.gravity'");
   });
 
   it("fails clearly for malformed YAML", () => {
