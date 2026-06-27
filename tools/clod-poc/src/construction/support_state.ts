@@ -29,7 +29,6 @@ export function hasGroundSupport(
   depth = 0,
 ): boolean {
   if (piece.grounded === true) return true;
-  if (piece.grounded === undefined && piece.parentIds === undefined) return true;
   if (depth >= MAX_SUPPORT_DEPTH || visiting.has(piece.id)) return false;
   const parents = piece.parentIds ?? [];
   if (parents.length === 0) return false;
