@@ -4,12 +4,13 @@ import {
   probePlayableOceanOutside,
   validateBorderOceanStats,
 } from "./border_ocean_scene.js";
+import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_config.js";
 import { createDeepOceanSampler } from "../water/ocean_service.js";
 
 describe("border-ocean acceptance probes", () => {
   it("validates playable ocean outside the square", () => {
     const sampler = createDeepOceanSampler(1024, {
-      enabled: true,
+      ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
       extendCells: 384,
       surfaceY: 18,
       segments: 64,
