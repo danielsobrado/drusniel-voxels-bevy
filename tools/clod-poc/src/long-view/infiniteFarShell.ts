@@ -28,7 +28,6 @@ export interface InfiniteFarShellOptions {
   };
   useParityMaterial?: boolean;
   parityConfig?: import("../farTerrain/farTerrainUniforms.js").FarTerrainUniformData;
-  /** CPU uses the far-summary/NAADF height provider. GPU is experimental and must be explicitly requested. */
   heightSamplingMode?: FarShellHeightSamplingMode;
   debugShowMissingFallback?: boolean;
   debugShowWireframe?: boolean;
@@ -55,7 +54,6 @@ export class InfiniteFarShell {
   private readonly heightSamplingMode: FarShellHeightSamplingMode;
   private heightProvider: FarHeightProvider | undefined;
   private receiveSunShadows = false;
-
   private snappedX = 0;
   private snappedZ = 0;
   private rebuildCount = 0;
@@ -64,7 +62,6 @@ export class InfiniteFarShell {
   private readonly useParityMaterial: boolean;
   private readonly parityConfig: FarTerrainUniformData | undefined;
   private parityColorBuffer: Float32Array | null = null;
-
   private positions: Float32Array;
   private normals: Float32Array;
   private uvs: Float32Array;
@@ -94,16 +91,13 @@ export class InfiniteFarShell {
       farSummaryCacheSize: 0,
       farSummaryFallbackSamples: 0,
     };
-
     this.useParityMaterial = options.useParityMaterial ?? false;
     this.parityConfig = options.parityConfig;
-
     this.samplerOptions = {
       macroBlendStartMeters: options.macroBlendStartMeters,
       macroBlendEndMeters: options.macroBlendEndMeters,
       metrics: this.metrics,
     };
-
     this.materialOptions = {
       lighting: options.lighting,
       innerMeters: options.innerMeters,
@@ -112,48 +106,32 @@ export class InfiniteFarShell {
       farFadeMeters: options.farFadeMeters,
       debugShowMissingFallback: options.debugShowMissingFallback ?? false,
     };
-
     const useParity = this.useParityMaterial && this.parityConfig;
     const material = useParity
-      ? createFarTerrainMaterial(
-          options.lighting,
-          this.parityConfig!,
-          0,
-          0,
-          options.outerMeters,
-          {
-            gpuDisplacement: this.heightSamplingMode === "gpu",
-            heightBiasMeters: options.heightBiasMeters,
-          },
-        )
+      ? createFarTerrainMaterial(options.lighting, this.parityConfig!, 0, 0, options.outerMeters, {
+          gpuDisplacement: this.heightSamplingMode === "gpu",
+          heightBiasMeters: options.heightBiasMeters,
+        })
       : createInfiniteFarShellMaterial(this.materialOptions);
     if (options.debugShowWireframe && "wireframe" in material) {
       (material as unknown as { wireframe: boolean }).wireframe = true;
     }
-
     const vertexCount = this.computeVertexCount();
     this.positions = new Float32Array(vertexCount * 3);
     this.normals = new Float32Array(vertexCount * 3);
     this.uvs = new Float32Array(vertexCount * 2);
     this.indices = [];
-
     this.buildAnnularGeometry(this.positions, this.normals, this.uvs, this.indices);
-
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(this.normals, 3));
     geometry.setAttribute("uv", new THREE.BufferAttribute(this.uvs, 2));
     geometry.setIndex(this.indices);
-
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = false;
     this.mesh.frustumCulled = false;
-
-    if (this.heightSamplingMode === "gpu" && useParity) {
-      this.attachGpuDefaultVertexColors(vertexCount);
-    }
-
+    if (this.heightSamplingMode === "gpu" && useParity) this.attachGpuDefaultVertexColors(vertexCount);
     this.metrics.farShellVertices = vertexCount;
     this.metrics.farShellTriangles = this.indices.length / 3;
     this.metrics.farShellGridRes = options.radialSegments;
@@ -167,67 +145,47 @@ export class InfiniteFarShell {
     return (angularSegments + 1) * (radialSegments + 1);
   }
 
-  private buildAnnularGeometry(
-    positions: Float32Array,
-    normals: Float32Array,
-    uvs: Float32Array,
-    indices: number[],
-  ): void {
+  private buildAnnularGeometry(positions: Float32Array, normals: Float32Array, uvs: Float32Array, indices: number[]): void {
     const { innerMeters, outerMeters, angularSegments, radialSegments } = this.options;
-    const rMin = innerMeters;
-    const rMax = outerMeters;
-
     let vi = 0;
     for (let ri = 0; ri <= radialSegments; ri++) {
-      const r = rMin + (rMax - rMin) * (ri / radialSegments);
+      const r = innerMeters + (outerMeters - innerMeters) * (ri / radialSegments);
       for (let ai = 0; ai <= angularSegments; ai++) {
         const theta = (ai / angularSegments) * Math.PI * 2;
-        const x = r * Math.cos(theta);
-        const z = r * Math.sin(theta);
-
-        positions[vi * 3] = x;
+        positions[vi * 3] = r * Math.cos(theta);
         positions[vi * 3 + 1] = 0;
-        positions[vi * 3 + 2] = z;
-
+        positions[vi * 3 + 2] = r * Math.sin(theta);
         normals[vi * 3] = 0;
         normals[vi * 3 + 1] = 1;
         normals[vi * 3 + 2] = 0;
-
         uvs[vi * 2] = ri / radialSegments;
         uvs[vi * 2 + 1] = ai / angularSegments;
-
         vi++;
       }
     }
-
     for (let ri = 0; ri < radialSegments; ri++) {
       for (let ai = 0; ai < angularSegments; ai++) {
         const a = ri * (angularSegments + 1) + ai;
         const b = a + 1;
         const c = a + (angularSegments + 1);
         const d = c + 1;
-        indices.push(a, c, b);
-        indices.push(b, c, d);
+        indices.push(a, c, b, b, c, d);
       }
     }
   }
 
   setHeightProvider(provider: FarHeightProvider | undefined): void {
     this.heightProvider = provider;
-    if (this.heightSamplingMode === "cpu") {
-      this.rebuildHeights();
-    }
+    if (this.heightSamplingMode === "cpu") this.rebuildHeights();
   }
 
   setDebugShowMissingFallback(on: boolean): void {
     this.materialOptions.debugShowMissingFallback = on;
-    const mat = this.mesh.material as unknown as { needsUpdate: boolean };
-    mat.needsUpdate = true;
+    (this.mesh.material as unknown as { needsUpdate: boolean }).needsUpdate = true;
   }
 
   setDebugShowWireframe(on: boolean): void {
-    const mat = this.mesh.material as unknown as { wireframe: boolean };
-    mat.wireframe = on;
+    (this.mesh.material as unknown as { wireframe: boolean }).wireframe = on;
   }
 
   setReceiveSunShadows(on: boolean): void {
@@ -236,48 +194,28 @@ export class InfiniteFarShell {
     this.mesh.receiveShadow = on;
   }
 
-  update(
-    cameraWorldX: number,
-    cameraWorldZ: number,
-    _frame: number,
-  ): void {
+  update(cameraWorldX: number, cameraWorldZ: number, _frame: number): void {
     const { rebaseSnapMeters } = this.options;
-
     const newSnappedX = Math.round(cameraWorldX / rebaseSnapMeters) * rebaseSnapMeters;
     const newSnappedZ = Math.round(cameraWorldZ / rebaseSnapMeters) * rebaseSnapMeters;
-
     const snappedChanged = newSnappedX !== this.snappedX || newSnappedZ !== this.snappedZ;
-
     this.snappedX = newSnappedX;
     this.snappedZ = newSnappedZ;
-
     this.metrics.farShellCenterX = cameraWorldX;
     this.metrics.farShellCenterZ = cameraWorldZ;
     this.metrics.farShellSnappedX = this.snappedX;
     this.metrics.farShellSnappedZ = this.snappedZ;
-
-    if (snappedChanged && this.heightSamplingMode === "cpu") {
-      this.rebuildHeights();
-    }
-
+    if (snappedChanged && this.heightSamplingMode === "cpu") this.rebuildHeights();
     this.mesh.position.set(this.snappedX, 0, this.snappedZ);
-
     if (this.useParityMaterial && this.parityConfig) {
-      updateFarTerrainMaterialCenter(
-        this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial,
-        this.snappedX,
-        this.snappedZ,
-      );
+      updateFarTerrainMaterialCenter(this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial, this.snappedX, this.snappedZ);
     }
   }
 
   private rebuildHeights(): void {
     const t0 = performance.now();
     const { angularSegments, radialSegments, heightBiasMeters } = this.options;
-
     const vertexCount = this.computeVertexCount();
-    const heights = new Float32Array(vertexCount);
-
     for (let ri = 0; ri <= radialSegments; ri++) {
       const rNorm = ri / radialSegments;
       const r = this.options.innerMeters + (this.options.outerMeters - this.options.innerMeters) * rNorm;
@@ -285,28 +223,20 @@ export class InfiniteFarShell {
         const theta = (ai / angularSegments) * Math.PI * 2;
         const localX = r * Math.cos(theta);
         const localZ = r * Math.sin(theta);
-        const worldX = this.snappedX + localX;
-        const worldZ = this.snappedZ + localZ;
-
         const sample: HeightNormalMaterial = sampleBlendedHeightNormalMaterial(
-          worldX, worldZ, r,
+          this.snappedX + localX,
+          this.snappedZ + localZ,
+          r,
           this.heightProvider,
           this.samplerOptions,
         );
-
-        const height = sample.height + heightBiasMeters;
         const vi = ri * (angularSegments + 1) + ai;
-
-        heights[vi] = Number.isFinite(height) ? height : 0;
-
         this.positions[vi * 3] = localX;
-        this.positions[vi * 3 + 1] = heights[vi];
+        this.positions[vi * 3 + 1] = Number.isFinite(sample.height) ? sample.height + heightBiasMeters : 0;
         this.positions[vi * 3 + 2] = localZ;
-
         this.normals[vi * 3] = sample.normal.x;
         this.normals[vi * 3 + 1] = sample.normal.y;
         this.normals[vi * 3 + 2] = sample.normal.z;
-
         this.uvs[vi * 2] = rNorm;
         this.uvs[vi * 2 + 1] = ai / angularSegments;
       }
