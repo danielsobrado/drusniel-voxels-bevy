@@ -125,6 +125,16 @@ describe("infinite far shell — camera-relative annular geometry", () => {
   });
 });
 
+describe("infinite far shell — GPU mode validation", () => {
+  it("fails loudly when GPU mode lacks required atlas inputs", () => {
+    expect(() => new InfiniteFarShell({
+      ...makeDefaultOptions(),
+      heightSamplingMode: "gpu",
+      useParityMaterial: true,
+    })).toThrow(/GPU mode requires parity material, parity config, and a GPU far-summary atlas/);
+  });
+});
+
 describe("infinite far shell — height continuity and geometry", () => {
   it("emits non-empty mesh with indexed triangles", () => {
     const shell = new InfiniteFarShell(makeDefaultOptions());
