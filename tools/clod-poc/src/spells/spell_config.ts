@@ -1,13 +1,17 @@
 import { load } from "js-yaml";
 import spellsYamlText from "../../config/spells.yaml?raw";
 
+export type SpellVec2 = readonly [number, number];
+
 export interface FireSpellVfxConfig {
   layerId: string;
   canvasId: string;
-  widthPx: number;
-  heightPx: number;
+  fallbackWidthPx: number;
+  fallbackHeightPx: number;
   maxDpr: number;
   flameScale: number;
+  origin: SpellVec2;
+  target: SpellVec2;
 }
 
 export interface FireSpellAudioConfig {
@@ -36,17 +40,19 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
   fire: {
     id: "fire",
     label: "Fire",
-    castDurationMs: 3200,
+    castDurationMs: 2600,
     audio: {
-      volume: 0.34,
+      volume: 0.38,
     },
     vfx: {
       layerId: "spell-vfx-layer",
       canvasId: "fire-spell-vfx",
-      widthPx: 560,
-      heightPx: 320,
-      maxDpr: 1.5,
+      fallbackWidthPx: 1280,
+      fallbackHeightPx: 720,
+      maxDpr: 1.25,
       flameScale: 1.0,
+      origin: [0.33, -0.47],
+      target: [0.0, 0.055],
     },
   },
 };
@@ -74,6 +80,16 @@ function readNumber(
   return Math.min(max, Math.max(min, value));
 }
 
+function readVec2(record: Record<string, unknown> | undefined, key: string, fallback: SpellVec2): SpellVec2 {
+  const value = record?.[key];
+  if (!Array.isArray(value) || value.length < 2) return fallback;
+
+  const x = Number(value[0]);
+  const y = Number(value[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return fallback;
+  return [Math.min(2, Math.max(-2, x)), Math.min(2, Math.max(-2, y))];
+}
+
 export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
   try {
     const parsed = asRecord(load(text));
@@ -98,10 +114,12 @@ export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
         vfx: {
           layerId: readString(vfx, "layer_id", DEFAULT_SPELL_CONFIG.fire.vfx.layerId),
           canvasId: readString(vfx, "canvas_id", DEFAULT_SPELL_CONFIG.fire.vfx.canvasId),
-          widthPx: readNumber(vfx, "width_px", DEFAULT_SPELL_CONFIG.fire.vfx.widthPx, 160, 1280),
-          heightPx: readNumber(vfx, "height_px", DEFAULT_SPELL_CONFIG.fire.vfx.heightPx, 120, 720),
+          fallbackWidthPx: readNumber(vfx, "fallback_width_px", DEFAULT_SPELL_CONFIG.fire.vfx.fallbackWidthPx, 160, 2560),
+          fallbackHeightPx: readNumber(vfx, "fallback_height_px", DEFAULT_SPELL_CONFIG.fire.vfx.fallbackHeightPx, 120, 1440),
           maxDpr: readNumber(vfx, "max_dpr", DEFAULT_SPELL_CONFIG.fire.vfx.maxDpr, 1, 3),
           flameScale: readNumber(vfx, "flame_scale", DEFAULT_SPELL_CONFIG.fire.vfx.flameScale, 0.25, 3),
+          origin: readVec2(vfx, "origin", DEFAULT_SPELL_CONFIG.fire.vfx.origin),
+          target: readVec2(vfx, "target", DEFAULT_SPELL_CONFIG.fire.vfx.target),
         },
       },
     };
