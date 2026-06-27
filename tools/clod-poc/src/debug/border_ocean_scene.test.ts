@@ -47,7 +47,7 @@ function validStats(): Record<string, unknown> {
 }
 
 describe("border-ocean acceptance probes", () => {
-  it("parses required counters from scene YAML", () => {
+  it("parses required counters and thresholds from scene YAML", () => {
     const config = parseBorderOceanSceneConfig(yamlText);
 
     expect(config.acceptance.requiredCounters).toEqual([...DEFAULT_BORDER_OCEAN_REQUIRED_COUNTERS]);
@@ -55,6 +55,12 @@ describe("border-ocean acceptance probes", () => {
     expect(config.acceptance.requiredCounters).toContain("border_ocean.player_soft_pushback_enabled");
     expect(config.acceptance.requiredCounters).toContain("border_ocean.deep_ocean_transition_gap_vertices");
     expect(config.acceptance.requiredCounters).toContain("border_ocean.frame_ms_p95");
+    expect(config.acceptance.maxDeepOceanTriangles).toBe(65536);
+    expect(config.acceptance.maxDeepOceanDrawCalls).toBe(1);
+    expect(config.acceptance.maxTransitionGapVertices).toBe(0);
+    expect(config.acceptance.maxFrameMsP95).toBe(50);
+    expect(config.acceptance.maxWebglWebgpuMeanDelta).toBe(18);
+    expect(config.acceptance.maxWebglWebgpuP95Delta).toBe(80);
   });
 
   it("fails clearly when root config is malformed", () => {
@@ -70,6 +76,12 @@ describe("border-ocean acceptance probes", () => {
   it("fails clearly when integer acceptance config is malformed", () => {
     expect(() => parseBorderOceanSceneConfig(yamlText.replace("min_deep_ocean_vertices: 1000", "min_deep_ocean_vertices: 1000.5"))).toThrow(
       "border_ocean_scene.acceptance.min_deep_ocean_vertices must be an integer",
+    );
+  });
+
+  it("fails clearly when numeric acceptance config is below range", () => {
+    expect(() => parseBorderOceanSceneConfig(yamlText.replace("max_frame_ms_p95: 50", "max_frame_ms_p95: -1"))).toThrow(
+      "border_ocean_scene.acceptance.max_frame_ms_p95 must be >= 0",
     );
   });
 
@@ -109,6 +121,14 @@ describe("border-ocean acceptance probes", () => {
     const stats = validStats();
     (stats.counters as Record<string, unknown>)["border_ocean.deep_ocean_transition_gap_vertices"] = 1;
     expect(() => validateBorderOceanStats(stats)).toThrow("border-ocean counter failed: border_ocean.deep_ocean_transition_gap_vertices=1");
+  });
+
+  it("fails when frame p95 is over the parsed threshold", () => {
+    const stats = validStats();
+    (stats.counters as Record<string, unknown>)["border_ocean.frame_ms_p95"] = 51;
+    expect(() => validateBorderOceanStats(stats, parseBorderOceanSceneConfig(yamlText))).toThrow(
+      "border-ocean counter failed: border_ocean.frame_ms_p95=51",
+    );
   });
 
   it("fails clearly when a YAML-required counter is missing", () => {
