@@ -7,6 +7,7 @@ import {
   clampPlayerToWorld,
   jumpVelocityForHeight,
   normalizeMovementInput,
+  worldEdgePushbackAcceleration,
 } from "./player_controller.js";
 import { TerrainColliderSet, type TerrainColliderPage } from "./terrain/terrain_collider.js";
 
@@ -60,6 +61,8 @@ describe("player movement helpers", () => {
       eyeHeight: 1.7,
       maxSlopeDegrees: 60,
       worldEdgeMargin: 16,
+      worldEdgePushbackBand: 48,
+      worldEdgePushbackAcceleration: 36,
     });
   });
 
@@ -77,6 +80,28 @@ describe("player movement helpers", () => {
     const position = new THREE.Vector3(2, 5, 127);
     clampPlayerToWorld(position, { minX: 0, minZ: 0, maxX: 128, maxZ: 128 }, 16);
     expect(position.toArray()).toEqual([16, 5, 112]);
+  });
+
+  it("does not push inside the safe center", () => {
+    const push = worldEdgePushbackAcceleration(
+      new THREE.Vector3(64, 0, 64),
+      { minX: 0, minZ: 0, maxX: 128, maxZ: 128 },
+      16,
+      24,
+      36,
+    );
+    expect(push.toArray()).toEqual([0, 0]);
+  });
+
+  it("pushes inward before the hard world clamp", () => {
+    const bounds = { minX: 0, minZ: 0, maxX: 128, maxZ: 128 };
+    const fromMin = worldEdgePushbackAcceleration(new THREE.Vector3(20, 0, 20), bounds, 16, 24, 36);
+    const fromMax = worldEdgePushbackAcceleration(new THREE.Vector3(108, 0, 108), bounds, 16, 24, 36);
+
+    expect(fromMin.x).toBeGreaterThan(0);
+    expect(fromMin.y).toBeGreaterThan(0);
+    expect(fromMax.x).toBeLessThan(0);
+    expect(fromMax.y).toBeLessThan(0);
   });
 });
 
