@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { HeightNormalMaterial, FarSummarySamplerOptions } from "./farSummarySampler.js";
 import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
-import { createInfiniteFarShellMaterial, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
+import { createInfiniteFarShellMaterial, updateFarShellMaterialMaterial, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
 import type { FarShellMetrics } from "./farShellMetrics.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer, updateFarTerrainMaterialCenter } from "../farTerrain/farTerrainMaterial.js";
@@ -181,7 +181,8 @@ export class InfiniteFarShell {
 
   setDebugShowMissingFallback(on: boolean): void {
     this.materialOptions.debugShowMissingFallback = on;
-    (this.mesh.material as unknown as { needsUpdate: boolean }).needsUpdate = true;
+    if (Array.isArray(this.mesh.material)) return;
+    updateFarShellMaterialMaterial(this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial, this.materialOptions);
   }
 
   setDebugShowWireframe(on: boolean): void {
