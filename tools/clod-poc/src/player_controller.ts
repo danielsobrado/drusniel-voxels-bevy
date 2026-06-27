@@ -99,10 +99,20 @@ export function jumpVelocityForHeight(height: number, gravity: number): number {
   return Math.sqrt(2 * gravity * height);
 }
 
+function allFinite(values: readonly number[]): boolean {
+  return values.every(Number.isFinite);
+}
+
 export function validatePlayerWorldBoundsFit(
   bounds: HorizontalWorldBounds,
   config: Readonly<PlayerConfig>,
 ): void {
+  if (!allFinite([bounds.minX, bounds.minZ, bounds.maxX, bounds.maxZ])) {
+    throw new Error("Player world bounds must be finite numbers");
+  }
+  if (!Number.isFinite(config.worldEdgeMargin) || config.worldEdgeMargin <= 0) {
+    throw new Error("Player world edge margin must be a finite number greater than 0");
+  }
   if (bounds.minX >= bounds.maxX || bounds.minZ >= bounds.maxZ) {
     throw new Error("Player world bounds must have positive width and depth");
   }
