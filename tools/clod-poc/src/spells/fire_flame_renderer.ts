@@ -16,6 +16,8 @@ interface FlameProgramState {
   buffer: WebGLBuffer;
   aPosition: number;
   uResolution: WebGLUniformLocation;
+  uOrigin: WebGLUniformLocation;
+  uTarget: WebGLUniformLocation;
   uTime: WebGLUniformLocation;
   uProgress: WebGLUniformLocation;
   uScale: WebGLUniformLocation;
@@ -87,6 +89,8 @@ export class FireFlameRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(state.program);
     gl.uniform2f(state.uResolution, this.canvas.width, this.canvas.height);
+    gl.uniform2f(state.uOrigin, this.config.origin[0], this.config.origin[1]);
+    gl.uniform2f(state.uTarget, this.config.target[0], this.config.target[1]);
     gl.uniform1f(state.uTime, elapsedSeconds);
     gl.uniform1f(state.uProgress, progress);
     gl.uniform1f(state.uScale, this.config.flameScale);
@@ -206,10 +210,12 @@ export class FireFlameRenderer {
 
     const aPosition = gl.getAttribLocation(program, "aPosition");
     const uResolution = gl.getUniformLocation(program, "uResolution");
+    const uOrigin = gl.getUniformLocation(program, "uOrigin");
+    const uTarget = gl.getUniformLocation(program, "uTarget");
     const uTime = gl.getUniformLocation(program, "uTime");
     const uProgress = gl.getUniformLocation(program, "uProgress");
     const uScale = gl.getUniformLocation(program, "uScale");
-    if (aPosition < 0 || !uResolution || !uTime || !uProgress || !uScale) {
+    if (aPosition < 0 || !uResolution || !uOrigin || !uTarget || !uTime || !uProgress || !uScale) {
       console.warn("[spells] Fire shader uniforms are incomplete.");
       gl.deleteProgram(program);
       gl.deleteBuffer(buffer);
@@ -226,7 +232,7 @@ export class FireFlameRenderer {
       1, 1,
     ]), gl.STATIC_DRAW);
 
-    return { program, buffer, aPosition, uResolution, uTime, uProgress, uScale };
+    return { program, buffer, aPosition, uResolution, uOrigin, uTarget, uTime, uProgress, uScale };
   }
 
   private compileShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader | null {
@@ -255,8 +261,8 @@ export class FireFlameRenderer {
     if (!this.canvas) return;
     const rect = this.canvas.getBoundingClientRect();
     const dpr = Math.min(this.config.maxDpr, Math.max(1, window.devicePixelRatio || 1));
-    const width = Math.max(1, Math.floor((rect.width || this.config.widthPx) * dpr));
-    const height = Math.max(1, Math.floor((rect.height || this.config.heightPx) * dpr));
+    const width = Math.max(1, Math.floor((rect.width || this.config.fallbackWidthPx) * dpr));
+    const height = Math.max(1, Math.floor((rect.height || this.config.fallbackHeightPx) * dpr));
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;
