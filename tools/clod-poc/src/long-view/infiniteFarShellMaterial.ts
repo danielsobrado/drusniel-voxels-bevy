@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { clamp, dot, float, max, mix, normalGeometry, normalize, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+import { clamp, dot, float, max, mix, normalGeometry, normalize, positionGeometry, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 
 type TslNode = any;
@@ -39,8 +39,7 @@ export function createInfiniteFarShellMaterial(
   const hemi = mix(uGround, uSky, sky);
   const light = hemi.add(uSun.mul(pow(sun, float(1.35))));
 
-  const distXZ = vec2(positionWorld.x, positionWorld.z).length();
-
+  const distXZ = vec2(positionGeometry.x, positionGeometry.z).length();
   const nearFade = smoothstep(uInner, uInner.add(uNearBlend), distXZ);
   const farFade = float(1).sub(smoothstep(uOuter.sub(uFarFade), uOuter, distXZ));
   const shellFade = nearFade.mul(farFade);
