@@ -84,6 +84,7 @@ naadf_poc:
     grid_res: 96
     use_naadf_summary: true
     height_sampling_mode: gpu
+    gpu_atlas_window_tiles: 5
 
   debug:
     enabled: true
