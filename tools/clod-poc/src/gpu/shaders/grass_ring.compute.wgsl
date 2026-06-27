@@ -11,6 +11,11 @@ const GRASS_LOW_BANK_START_M: f32 = 0.8;
 const GRASS_LOW_BANK_END_M: f32 = 4.2;
 const GRASS_MOIST_BANK_START_M: f32 = 3.2;
 const GRASS_MOIST_BANK_END_M: f32 = 11.0;
+const GRASS_MID_HEIGHT_MUL: f32 = 1.18;
+const GRASS_FAR_HEIGHT_MUL: f32 = 1.30;
+const GRASS_SUPER_HEIGHT_MUL: f32 = 1.42;
+const GRASS_FAR_WIDTH_MUL_MAX: f32 = 1.55;
+const GRASS_SUPER_WIDTH_EXTRA: f32 = 1.08;
 
 struct Params {
   center_radius: vec4<f32>,
@@ -264,12 +269,12 @@ fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, norm
   let slot = atomicAdd(&counters[tier], 1u);
   if (slot >= max_per_tier) { return; }
   let seed = params.counts_b.z;
-  let max_width_mul = max(1.0, params.settings_b.w);
+  let max_width_mul = min(max(1.0, params.settings_b.w), GRASS_FAR_WIDTH_MUL_MAX);
   var height_mul = 1.0;
   var width_mul = clamp(1.0 / sqrt(thin), 1.0, max_width_mul);
-  if (tier == TIER_MID) { height_mul = 1.35; }
-  else if (tier == TIER_FAR) { height_mul = 1.75; }
-  else if (tier == TIER_SUPER) { height_mul = 2.25; width_mul = min(max_width_mul, width_mul * 1.35); }
+  if (tier == TIER_MID) { height_mul = GRASS_MID_HEIGHT_MUL; }
+  else if (tier == TIER_FAR) { height_mul = GRASS_FAR_HEIGHT_MUL; }
+  else if (tier == TIER_SUPER) { height_mul = GRASS_SUPER_HEIGHT_MUL; width_mul = min(max_width_mul, width_mul * GRASS_SUPER_WIDTH_EXTRA); }
   let weights = material_weights_with_paint(height, normal.y, wpos.x, wpos.y);
   let bank = wet_bank(height, normal.y);
   let height_jit = pcg2d(wc, seed + 1501u).x * 2.0 - 1.0;
