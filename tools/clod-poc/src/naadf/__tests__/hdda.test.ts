@@ -132,4 +132,24 @@ describe("naadf hdda traversal", () => {
     expect(result.unknown).toBe(true);
     expect(result.hdda?.voxelSteps).toBeGreaterThan(0);
   });
+
+  it("respects the sun query step cap even when HDDA has a larger voxel budget", () => {
+    const state = warmedState("hdda");
+    state.config.query.maxStepsSun = 3;
+    state.config.traversal.hddaMaxVoxelSteps = 4096;
+
+    const result = traceSunVisibility({
+      state,
+      worldX: 8,
+      worldY: 64,
+      worldZ: 8,
+      sunDirX: 0,
+      sunDirY: 1,
+      sunDirZ: 0,
+      maxDistanceM: 4096,
+    });
+
+    expect(result.steps).toBeLessThanOrEqual(3);
+    expect(result.unknown).toBe(true);
+  });
 });
