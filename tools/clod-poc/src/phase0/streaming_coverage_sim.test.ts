@@ -30,7 +30,7 @@ describe("simulateStreamingCoverage", () => {
     expect(report.requiredPageCount).toBeGreaterThan(0);
   });
 
-  it("near edge, predicted forward => missing chunks > 0", () => {
+  it("near edge, predicted forward => missing chunks > 0 for finite coverage", () => {
     const report = simulateStreamingCoverage(centerInput({
       playerX: 900,
       playerZ: 512,
@@ -44,7 +44,22 @@ describe("simulateStreamingCoverage", () => {
     expect(report.nearestMissingDistanceM).not.toBeNull();
   });
 
-  it("larger preload seconds increases required count", () => {
+  it("near edge, predicted forward => no missing chunks for infinite streaming", () => {
+    const report = simulateStreamingCoverage(centerInput({
+      playerX: 900,
+      playerZ: 512,
+      velocityX: 50,
+      velocityZ: 0,
+      preloadSeconds: 5,
+      liveRadiusM: 300,
+      infiniteStreaming: true,
+    }));
+    expect(report.missingChunkCount).toBe(0);
+    expect(report.missingPageCount).toBe(0);
+    expect(report.nearestMissingDistanceM).toBeNull();
+  });
+
+  it("larger preload seconds keeps or increases required count", () => {
     const short = simulateStreamingCoverage(centerInput({ preloadSeconds: 2, liveRadiusM: 200 }));
     const long = simulateStreamingCoverage(centerInput({ preloadSeconds: 10, liveRadiusM: 200 }));
     expect(long.requiredChunkCount).toBeGreaterThanOrEqual(short.requiredChunkCount);
