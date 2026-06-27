@@ -11,6 +11,7 @@ import type { VegetationStatControllerRefs } from "./vegetation_types.js";
 import { formatTreeGpuSummary } from "./vegetation_stats_presenter.js";
 import { packHydrologyData } from "../../systems/hydrology_packing.js";
 import { setTreeGpuRingHydrologyData } from "../../gpu/tree_ring_compute.js";
+import type { TreeSettings } from "../../trees/tree_config.js";
 
 export interface TreeStartupInput {
   scene: THREE.Scene;
@@ -35,12 +36,38 @@ export interface TreeStartupResult {
   formatTreeGpuSummary: (stats: TreeStats) => string;
 }
 
+function sanitizeRuntimeTreeConfig(config: TreeSettings): TreeSettings {
+  const ditherEnabled = config.lod.ditherEnabled === true;
+  return {
+    ...config,
+    lod: {
+      ...config.lod,
+      crossfadeEnabled: config.lod.crossfadeEnabled && ditherEnabled,
+      crossfadeBandM: ditherEnabled ? config.lod.crossfadeBandM : 0,
+      ditherEnabled,
+    },
+    foliage: {
+      ...config.foliage,
+      enabled: false,
+      alphaTest: 0,
+      debugShowAlphaCards: false,
+      oak: { ...config.foliage.oak },
+      pine: { ...config.foliage.pine },
+    },
+    impostors: {
+      ...config.impostors,
+      fallbackToPlaceholder: false,
+    },
+  };
+}
+
 export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
   const {
-    scene, state, lod0Nodes, worldCells, treeConfig,
+    scene, state, lod0Nodes, worldCells,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     currentLighting, statControllers, renderer,
   } = input;
+  const treeConfig = sanitizeRuntimeTreeConfig(input.treeConfig);
 
   setTreeGpuRingHydrologyData(hydrologySystem ? packHydrologyData(hydrologySystem) : null);
 
