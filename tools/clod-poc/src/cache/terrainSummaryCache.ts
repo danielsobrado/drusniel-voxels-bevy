@@ -71,14 +71,14 @@ export async function loadTerrainSummaryWithCache(
   }
 
   const built = buildTerrainSummary(lod0Nodes, worldSize, farReduceFactor);
+  await cacheCtx.service.put(
+    keyParts,
+    summaryToArtifact(built),
+    encodeTerrainSummaryArtifact,
+    { res: built.res, worldSize: built.worldSize },
+  );
 
   if (previousSummary && cacheCtx.config.streaming.keep_stale_until_replacement) {
-    void cacheCtx.service.put(
-      keyParts,
-      summaryToArtifact(built),
-      encodeTerrainSummaryArtifact,
-      { res: built.res, worldSize: built.worldSize },
-    );
     return {
       summary: previousSummary,
       fromCache: false,
@@ -86,12 +86,6 @@ export async function loadTerrainSummaryWithCache(
     };
   }
 
-  await cacheCtx.service.put(
-    keyParts,
-    summaryToArtifact(built),
-    encodeTerrainSummaryArtifact,
-    { res: built.res, worldSize: built.worldSize },
-  );
   return { summary: built, fromCache: false, keptStale: false };
 }
 
