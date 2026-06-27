@@ -160,7 +160,28 @@ function validateNodeArtifact(artifact: ClodPageNodeArtifact): void {
   }
 }
 
+function validateSummaryArtifact(artifact: TerrainSummaryArtifact): void {
+  if (!Number.isInteger(artifact.res) || artifact.res <= 0) {
+    throw new CacheDecodeError("summary res must be a positive integer");
+  }
+  const expected = artifact.res * artifact.res;
+  const channels: Array<[string, Float32Array]> = [
+    ["heightMin", artifact.heightMin],
+    ["heightMax", artifact.heightMax],
+    ["normalX", artifact.normalX],
+    ["normalY", artifact.normalY],
+    ["normalZ", artifact.normalZ],
+    ["coverage", artifact.coverage],
+  ];
+  for (const [label, channel] of channels) {
+    if (channel.length !== expected) {
+      throw new CacheDecodeError(`summary ${label} length must equal res*res`);
+    }
+  }
+}
+
 export function encodeClodPageNodeArtifact(artifact: ClodPageNodeArtifact): ArrayBuffer {
+  validateNodeArtifact(artifact);
   const metadata = {
     nodeId: artifact.nodeId,
     level: artifact.level,
@@ -223,6 +244,7 @@ export function decodeClodPageTreeArtifact(bytes: ArrayBuffer): ClodPageTreeArti
 }
 
 export function encodeTerrainSummaryArtifact(artifact: TerrainSummaryArtifact): ArrayBuffer {
+  validateSummaryArtifact(artifact);
   const f32Data = concatSummaryF32(artifact);
   const metadata = {
     res: artifact.res,
@@ -282,7 +304,7 @@ export function decodeTerrainSummaryArtifact(bytes: ArrayBuffer): TerrainSummary
     offset += len;
     return slice;
   };
-  return {
+  const artifact = {
     res: meta.res,
     worldSize: meta.worldSize,
     farReduceFactor: meta.farReduceFactor,
@@ -293,6 +315,8 @@ export function decodeTerrainSummaryArtifact(bytes: ArrayBuffer): TerrainSummary
     normalZ: take(lengths.normalZ),
     coverage: take(lengths.coverage),
   };
+  validateSummaryArtifact(artifact);
+  return artifact;
 }
 
 function concatSummaryF32(artifact: TerrainSummaryArtifact): ArrayBuffer {
