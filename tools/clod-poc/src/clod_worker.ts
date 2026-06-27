@@ -267,19 +267,20 @@ function postLod0Rebuild(requestIds: number[], dirty: DirtyCellBounds): void {
   const serializeMs = performance.now() - tSer;
   let serializedBytes = 0;
   const transferables: Transferable[] = [];
-  for (const node of [...lod0Serialized, ...ancestorSerialized]) {
+  for (const node of lod0Serialized) {
     serializedBytes += node.mesh.positions.byteLength
       + node.mesh.normals.byteLength
       + node.mesh.paintSlots.byteLength
       + node.mesh.materialWeights.byteLength
       + node.mesh.indices.byteLength;
-    transferables.push(
-      node.mesh.positions.buffer,
-      node.mesh.normals.buffer,
-      node.mesh.paintSlots.buffer,
-      node.mesh.materialWeights.buffer,
-      node.mesh.indices.buffer,
-    );
+    collectNodeTransferables(node, transferables);
+  }
+  for (const node of ancestorSerialized) {
+    serializedBytes += node.mesh.positions.byteLength
+      + node.mesh.normals.byteLength
+      + node.mesh.paintSlots.byteLength
+      + node.mesh.materialWeights.byteLength
+      + node.mesh.indices.byteLength;
   }
 
   post({
