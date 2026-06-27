@@ -3,6 +3,8 @@ import * as THREE from "three";
 import type { BorderCoastOceanConfig } from "../../terrain/border_coast_config.js";
 import { createDeepOceanSurface, type DeepOceanSurface } from "../../water/deep_ocean_surface.js";
 import { createDeepOceanMaterial, type DeepOceanMaterialHandle } from "../../water/deep_ocean_material.js";
+import { configureDeepOceanWaves } from "../../water/deep_ocean_waves.js";
+import { resolveDeepOceanVisual } from "../../water/deep_ocean_visual.js";
 import { createDeepOceanSampler, type OceanSampler } from "../../water/ocean_service.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { HydrologySystem } from "../../water/index.js";
@@ -58,14 +60,17 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
     borderCoastOceanConfig,
   });
 
-  const oceanSampler = borderCoastOceanConfig.deepOcean.enabled
-    ? createDeepOceanSampler(worldCells, borderCoastOceanConfig.deepOcean)
+  const deepOceanConfig = borderCoastOceanConfig.deepOcean;
+  const oceanSampler = deepOceanConfig.enabled
+    ? createDeepOceanSampler(worldCells, deepOceanConfig)
     : null;
+  if (oceanSampler) configureDeepOceanWaves(deepOceanConfig.wave);
+
   const lighting = currentLighting();
   const deepOceanMaterial = oceanSampler
     ? await createDeepOceanMaterial(isWebGpu, {
-        visual: waterConfig.visual,
-        surfaceY: borderCoastOceanConfig.deepOcean.surfaceY,
+        visual: resolveDeepOceanVisual(waterConfig.visual, deepOceanConfig),
+        surfaceY: deepOceanConfig.surfaceY,
         sunDirection: lighting.sunDirection.clone(),
         cameraPosition: camera.position.clone(),
         horizonColor: lighting.skyLight,
@@ -74,7 +79,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
   const deepOceanSurface = deepOceanMaterial
     ? createDeepOceanSurface(
         worldCells,
-        borderCoastOceanConfig.deepOcean,
+        deepOceanConfig,
         deepOceanMaterial.material,
       )
     : null;
@@ -87,7 +92,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
     makeWaterVisual: () => waterController.makeVisual(),
     deepOceanSurface,
     deepOceanMaterial,
-    deepOceanConfig: borderCoastOceanConfig.deepOcean,
+    deepOceanConfig,
     oceanSampler,
   };
 }
