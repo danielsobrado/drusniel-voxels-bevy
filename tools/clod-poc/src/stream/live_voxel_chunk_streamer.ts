@@ -71,12 +71,12 @@ export class LiveVoxelChunkStreamer {
 
   update(center: StreamCenter): LiveVoxelChunkStreamerSnapshot {
     this.center = { ...center };
-    const required = requiredLiveChunks(center, this.ownership, this.config);
+    const required = requiredLiveChunks(this.center, this.ownership, this.config);
     for (const key of required) this.loaded.add(key);
-    const evictable = evictableLiveChunks(this.loaded, center, this.ownership, this.config, this.config.hysteresisM);
+    const evictable = evictableLiveChunks(this.loaded, this.center, this.ownership, this.config, this.config.hysteresisM);
     for (const key of evictable) this.loaded.delete(key);
     return {
-      center: this.center,
+      center: { ...this.center },
       required,
       loaded: [...this.loaded].sort(),
       evictable,
