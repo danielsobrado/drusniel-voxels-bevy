@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
 import { ClodWorkerClient } from "./clod_worker_client.js";
+import type { ClodPageNode, PageMesh } from "./types.js";
 
 class MockWorker {
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -155,7 +156,73 @@ describe("ClodWorkerClient parent error lifecycle", () => {
       { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
     )).rejects.toThrow("stopped");
   });
+
+  it("fails closed without mutating a parent when a parent batch has an unknown child", () => {
+    const mockWorker = (client as unknown as { worker: MockWorker }).worker;
+    const child = node("L0:0,0", 0);
+    const parent = node("L1:0,0", 1, [child]);
+    const previousChildren = parent.children;
+    const previousMesh = parent.mesh;
+    (client as unknown as { nodesById: Map<string, ClodPageNode> }).nodesById = new Map([
+      [child.id, child],
+      [parent.id, parent],
+    ]);
+
+    mockWorker.onmessage!({
+      data: {
+        type: "parentRebuilt",
+        requestId: 7,
+        changed: [serializedNode("L1:0,0", 1, ["L0:missing"])],
+        parentNodes: 1,
+        parentMs: 0,
+        pendingParents: 0,
+      },
+    } as MessageEvent);
+
+    expect(mockWorker.terminate).toHaveBeenCalled();
+    expect(onError).toHaveBeenCalled();
+    expect(client.isParentsHealthy()).toBe(false);
+    expect(parent.children).toBe(previousChildren);
+    expect(parent.mesh).toBe(previousMesh);
+  });
 });
+
+function mesh(): PageMesh {
+  return {
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
+    normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
+    paintSlots: new Float32Array([0, 0, 0]),
+    materialWeights: new Float32Array(12),
+    materialWeightStride: 4,
+    indices: new Uint32Array([0, 1, 2]),
+  };
+}
+
+function node(id: string, level: number, children: ClodPageNode[] = []): ClodPageNode {
+  return {
+    id,
+    level,
+    children,
+    mesh: mesh(),
+    footprint: { minX: 0, minZ: 0, maxX: 1, maxZ: 1 },
+    bounds: { center: [0.5, 0, 0.5], radius: 1, minY: 0, maxY: 0 },
+    errorWorld: level,
+    lowBenefit: false,
+  };
+}
+
+function serializedNode(id: string, level: number, childIds: (string | null)[] = []) {
+  return {
+    id,
+    level,
+    childIds,
+    mesh: mesh(),
+    footprint: { minX: 0, minZ: 0, maxX: 1, maxZ: 1 },
+    bounds: { center: [0.5, 0, 0.5], radius: 1, minY: 0, maxY: 0 },
+    errorWorld: level,
+    lowBenefit: false,
+  };
+}
 
 function digCalls(worker: MockWorker): Array<Record<string, unknown>> {
   return worker.postMessage.mock.calls
