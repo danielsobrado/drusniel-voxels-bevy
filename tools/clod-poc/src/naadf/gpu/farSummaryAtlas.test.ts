@@ -14,8 +14,8 @@ function readyTile(ring: number, x: number, z: number, height: number): any {
     maxHeight: new Float32Array([height + 1, height + 1, height + 1, height + 1]),
     avgHeight: new Float32Array([height, height + 2, height + 4, height + 6]),
     dominantMaterial: new Uint16Array([1, 1, 1, 1]),
-    canopyCoverage: new Float32Array(4),
-    waterCoverage: new Float32Array(4),
+    canopyCoverage: new Float32Array([0.25, 0.5, 0.75, 1]),
+    waterCoverage: new Float32Array([0.1, 0.2, 0.3, 0.4]),
     revision: 1,
     state: "ready",
   };
@@ -57,6 +57,8 @@ describe("FarSummaryGpuAtlas", () => {
     expect(atlas.view.materialTexture.minFilter).toBe(THREE.NearestFilter);
     expect(atlas.view.normalTexture.magFilter).toBe(THREE.NearestFilter);
     expect(atlas.view.normalTexture.minFilter).toBe(THREE.NearestFilter);
+    expect(atlas.view.coverageTexture.magFilter).toBe(THREE.NearestFilter);
+    expect(atlas.view.coverageTexture.minFilter).toBe(THREE.NearestFilter);
     const data = atlas.view.texture.image.data as Float32Array;
     const firstPackedPixel = ((2 * atlas.view.widthCells) + 2) * 4;
     expect(data[firstPackedPixel]).toBe(20);
@@ -93,6 +95,21 @@ describe("FarSummaryGpuAtlas", () => {
     expect(normalData[firstPackedPixel + 1]).toBeGreaterThan(0.5);
     expect(normalData[firstPackedPixel + 2]).toBeLessThan(0.5);
     expect(normalData[firstPackedPixel + 3]).toBe(1);
+  });
+
+  it("packs canopy and water coverage into a paired float texture", () => {
+    const atlas = new FarSummaryGpuAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3 });
+    const farTiles = new Map<string, any>();
+    farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
+
+    atlas.updateFromState(testState(farTiles));
+
+    const coverageData = atlas.view.coverageTexture.image.data as Float32Array;
+    const firstPackedPixel = ((2 * atlas.view.widthCells) + 2) * 4;
+    expect(coverageData[firstPackedPixel]).toBeCloseTo(0.25);
+    expect(coverageData[firstPackedPixel + 1]).toBeCloseTo(0.1);
+    expect(coverageData[firstPackedPixel + 2]).toBe(0);
+    expect(coverageData[firstPackedPixel + 3]).toBe(1);
   });
 
   it("packs each far-summary ring into a separate atlas band", () => {
