@@ -20,6 +20,12 @@ export interface HeightNormalMaterial {
   material: number;
 }
 
+type MacroSample = Readonly<{
+  height: number;
+  normal: THREE.Vector3;
+  material: number;
+}>;
+
 export function sampleBlendedHeightNormalMaterial(
   x: number,
   z: number,
@@ -32,13 +38,19 @@ export function sampleBlendedHeightNormalMaterial(
     options.macroBlendEndMeters,
     distanceFromCenter,
   );
-
-  const macroHeight = sampleMacroTerrainHeight(x, z);
-  const macroNormal = sampleMacroTerrainNormal(x, z);
-  const macroMaterial = sampleMacroTerrainMaterial(x, z);
+  let macro: MacroSample | null = null;
+  const getMacro = () => {
+    macro ??= {
+      height: sampleMacroTerrainHeight(x, z),
+      normal: sampleMacroTerrainNormal(x, z),
+      material: sampleMacroTerrainMaterial(x, z),
+    };
+    return macro;
+  };
 
   if (!heightProvider || macroBlend >= 1) {
-    return { height: macroHeight, normal: macroNormal, material: macroMaterial };
+    const m = getMacro();
+    return { height: m.height, normal: m.normal, material: m.material };
   }
 
   let summaryHeight: number;
@@ -49,19 +61,21 @@ export function sampleBlendedHeightNormalMaterial(
   try {
     summaryHeight = heightProvider.sampleHeight(x, z);
     summaryNormal = heightProvider.sampleNormal(x, z);
-    summaryMaterial = heightProvider.sampleMaterial?.(x, z) ?? macroMaterial;
+    summaryMaterial = heightProvider.sampleMaterial?.(x, z) ?? 0;
 
     if (!Number.isFinite(summaryHeight)) {
       usedFallback = true;
-      summaryHeight = macroHeight;
-      summaryNormal = macroNormal;
-      summaryMaterial = macroMaterial;
+      const m = getMacro();
+      summaryHeight = m.height;
+      summaryNormal = m.normal;
+      summaryMaterial = m.material;
     }
   } catch {
     usedFallback = true;
-    summaryHeight = macroHeight;
-    summaryNormal = macroNormal;
-    summaryMaterial = macroMaterial;
+    const m = getMacro();
+    summaryHeight = m.height;
+    summaryNormal = m.normal;
+    summaryMaterial = m.material;
   }
 
   if (usedFallback && options.metrics) {
@@ -72,9 +86,10 @@ export function sampleBlendedHeightNormalMaterial(
     return { height: summaryHeight, normal: summaryNormal, material: summaryMaterial };
   }
 
-  const height = summaryHeight * (1 - macroBlend) + macroHeight * macroBlend;
-  const normal = new THREE.Vector3().copy(summaryNormal).lerp(macroNormal, macroBlend).normalize();
-  const material = macroBlend > 0.5 ? macroMaterial : summaryMaterial;
+  const m = getMacro();
+  const height = summaryHeight * (1 - macroBlend) + m.height * macroBlend;
+  const normal = new THREE.Vector3().copy(summaryNormal).lerp(m.normal, macroBlend).normalize();
+  const material = macroBlend > 0.5 ? m.material : summaryMaterial;
 
   return { height, normal, material };
 }
