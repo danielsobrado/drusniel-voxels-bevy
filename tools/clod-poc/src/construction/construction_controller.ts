@@ -21,6 +21,7 @@ const MENU_ID = "construction-build-menu";
 const ROTATION_QUARTER_COUNT = 4;
 const RAYCAST_REFINE_STEPS = 12;
 const ENTITY_ID_PREFIX = "piece-";
+const BUILD_POINTER_OPTIONS = { capture: true } as const;
 
 const MATERIAL_COLORS: Record<ConstructionMaterial, number> = {
   wood: 0x9a673a,
@@ -110,6 +111,7 @@ class ConstructionControllerImpl implements ConstructionController {
   private currentCandidate: ConstructionCandidate | null = null;
   private nextEntityId = 1;
   private lastUiStateKey = "";
+  private lastPlacementMessage = "";
   private terrainConformHandler: ((request: ConstructionTerrainConformRequest) => void) | null = null;
   private dragOffset: { x: number; y: number } | null = null;
 
@@ -135,7 +137,7 @@ class ConstructionControllerImpl implements ConstructionController {
     this.installInput();
     this.loadSavedPieces();
     this.syncUi(true);
-    console.info("[construction] CLOD construction ready. B toggle, X snap, R rotate, 1-9 select, right-click place.");
+    console.info("[construction] CLOD construction ready. B toggle, left-click place, X snap, R rotate, 1-9 select.");
   }
 
   update(): void {
@@ -230,13 +232,16 @@ class ConstructionControllerImpl implements ConstructionController {
       this.pointerInside = false;
     };
     const onPointerDown = (event: PointerEvent) => {
-      if (!this.active || event.button !== 2) return;
+      if (!this.active) return;
       event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.button !== 0 && event.button !== 2) return;
       this.placeCurrentCandidate();
     };
     const onContextMenu = (event: MouseEvent) => {
       if (!this.active) return;
       event.preventDefault();
+      event.stopImmediatePropagation();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (this.isTextInputEvent(event)) return;
@@ -271,14 +276,14 @@ class ConstructionControllerImpl implements ConstructionController {
 
     this.deps.rendererDomElement.addEventListener("pointermove", onPointerMove);
     this.deps.rendererDomElement.addEventListener("pointerleave", onPointerLeave);
-    this.deps.rendererDomElement.addEventListener("pointerdown", onPointerDown);
-    this.deps.rendererDomElement.addEventListener("contextmenu", onContextMenu);
+    this.deps.rendererDomElement.addEventListener("pointerdown", onPointerDown, BUILD_POINTER_OPTIONS);
+    this.deps.rendererDomElement.addEventListener("contextmenu", onContextMenu, BUILD_POINTER_OPTIONS);
     window.addEventListener("keydown", onKeyDown);
     this.disposers.push(
       () => this.deps.rendererDomElement.removeEventListener("pointermove", onPointerMove),
       () => this.deps.rendererDomElement.removeEventListener("pointerleave", onPointerLeave),
-      () => this.deps.rendererDomElement.removeEventListener("pointerdown", onPointerDown),
-      () => this.deps.rendererDomElement.removeEventListener("contextmenu", onContextMenu),
+      () => this.deps.rendererDomElement.removeEventListener("pointerdown", onPointerDown, BUILD_POINTER_OPTIONS),
+      () => this.deps.rendererDomElement.removeEventListener("contextmenu", onContextMenu, BUILD_POINTER_OPTIONS),
       () => window.removeEventListener("keydown", onKeyDown),
     );
   }
@@ -292,9 +297,15 @@ class ConstructionControllerImpl implements ConstructionController {
 
   private setActive(active: boolean): void {
     this.active = active;
+    if (active && document.pointerLockElement === this.deps.rendererDomElement) {
+      document.exitPointerLock();
+    }
     if (!active) {
       this.currentCandidate = null;
       this.ghostMesh.visible = false;
+      this.lastPlacementMessage = "";
+    } else {
+      this.lastPlacementMessage = "Left-click to place. Red ghost means blocked; see State below.";
     }
     console.info(`[construction] building mode ${this.active ? "on" : "off"}`);
     this.syncUi(true);
@@ -382,8 +393,20 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   private placeCurrentCandidate(): void {
+    if (!this.currentCandidate) this.update();
     const candidate = this.currentCandidate;
-    if (!candidate?.valid) return;
+    if (!candidate) {
+      this.lastPlacementMessage = "No build target. Aim at terrain or a snap point.";
+      console.warn(`[construction] ${this.lastPlacementMessage}`);
+      this.syncUi(true);
+      return;
+    }
+    if (!candidate.valid) {
+      this.lastPlacementMessage = `Blocked: ${candidate.reason ?? "invalid placement"}`;
+      console.warn(`[construction] ${this.lastPlacementMessage}`);
+      this.syncUi(true);
+      return;
+    }
     const placed: PlacedConstructionPiece = {
       id: `${ENTITY_ID_PREFIX}${this.nextEntityId++}`,
       typeId: candidate.piece.id,
@@ -392,8 +415,14 @@ class ConstructionControllerImpl implements ConstructionController {
       grounded: candidate.supportState === "grounded",
       parentIds: candidate.supportParentIds ?? [],
     };
-    if (!this.addPlacedPiece(placed, true)) return;
+    if (!this.addPlacedPiece(placed, true)) {
+      this.lastPlacementMessage = "Placement failed while adding mesh.";
+      console.warn(`[construction] ${this.lastPlacementMessage}`);
+      this.syncUi(true);
+      return;
+    }
     this.requestTerrainConform(candidate);
+    this.lastPlacementMessage = `Placed ${candidate.piece.label}`;
     this.currentCandidate = null;
     this.ghostMesh.visible = false;
     this.savePlacedPieces();
@@ -631,6 +660,7 @@ class ConstructionControllerImpl implements ConstructionController {
       previewRotation,
       status,
       support,
+      this.lastPlacementMessage,
       candidate?.valid ? "1" : "0",
       candidate?.snapped ? "1" : "0",
     ].join("|");
@@ -642,19 +672,21 @@ class ConstructionControllerImpl implements ConstructionController {
       const selectedAttr = index === this.selectedIndex ? "true" : "false";
       return `<button type="button" data-piece-index="${index}" aria-pressed="${selectedAttr}" style="padding:6px 7px;border:1px solid #46515e;border-radius:3px;color:#dce5ee;background:${selectedAttr === "true" ? "#245781" : "#20262d"};cursor:pointer;font:inherit;">${index + 1}. ${escapeHtml(piece.label)}</button>`;
     }).join("");
+    const statusColor = candidate?.valid ? "#b8f7c7" : candidate ? "#ffb4a8" : "#cdd8e3";
     this.menu.innerHTML = `
       <div data-drag-handle style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;cursor:grab;">
         <strong>Build</strong>
-        <span style="color:#9fb0c0;">B close · R rotate · X snap</span>
+        <span style="color:#9fb0c0;">B close · left-click place · R rotate · X snap</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-bottom:6px;">${pieceButtons}</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;color:#cdd8e3;">
         <span>Selected: ${escapeHtml(selected?.label ?? "none")}</span>
         <span>Snap: ${this.snapEnabled ? "on" : "off"}</span>
         <span>Rot: ${previewRotation * 90}°${candidate?.snapped ? " auto" : ""}</span>
-        <span>State: ${escapeHtml(status)}</span>
+        <span style="color:${statusColor};">State: ${escapeHtml(status)}</span>
         <span>Support: ${escapeHtml(support)}</span>
       </div>
+      <div style="margin-top:5px;color:#9fb0c0;">${escapeHtml(this.lastPlacementMessage || "Green/blue places. Red is blocked; State shows why.")}</div>
     `;
   }
 }
