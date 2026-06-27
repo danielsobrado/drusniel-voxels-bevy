@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
-import type { NaadfPocConfig } from "./config.js";
+import type { NaadfPocConfig, NaadfTraversalMode } from "./config.js";
 import { parseNaadfPocConfig } from "./config.js";
 import { NaadfMetricsCollector } from "./metrics.js";
 import { createTerrainSource, type TerrainProfile } from "./terrainSource.js";
@@ -13,6 +13,8 @@ import { queryTerrainHeight, tracePrimaryDebugRay, traceSunVisibility } from "./
 import { NaadfDebugOverlay } from "./debugOverlay.js";
 import { runAcceptanceChecks, allAcceptancePassed } from "./validation.js";
 import { setNaadfIntegration } from "./canopyBridge.js";
+
+const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
 
 export const NAADF_SCENES = new Set([
   "infinite-naadf-flat",
@@ -63,7 +65,7 @@ export interface NaadfIntegration {
 }
 
 export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfIntegration | null {
-  const config = parseNaadfPocConfig(options.yamlText);
+  const config = applyRuntimeTraversalOverrides(parseNaadfPocConfig(options.yamlText));
   const active = config.enabled && (options.forceEnable || isNaadfScene(options.sceneName));
   if (!active) {
     setNaadfIntegration(undefined);
@@ -190,6 +192,27 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
 
   setNaadfIntegration(integration);
   return integration;
+}
+
+function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig {
+  const params = currentSearchParams();
+  if (!params) return config;
+
+  const mode = params.get("naadfTraversal") ?? params.get("traversal");
+  if (mode && TRAVERSAL_MODES.has(mode as NaadfTraversalMode)) {
+    config.traversal.mode = mode as NaadfTraversalMode;
+  }
+
+  const bounds = params.get("naadfHddaBounds");
+  if (bounds === "1" || bounds === "true") config.traversal.hddaUseDirectionalBounds = true;
+  if (bounds === "0" || bounds === "false") config.traversal.hddaUseDirectionalBounds = false;
+
+  return config;
+}
+
+function currentSearchParams(): URLSearchParams | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search);
 }
 
 declare global {
