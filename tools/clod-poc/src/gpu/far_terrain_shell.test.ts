@@ -21,17 +21,10 @@ describe("far terrain shell — horizon skirt around the world", () => {
   const index = shell.mesh.geometry.getIndex();
   const position = shell.mesh.geometry.getAttribute("position");
 
-  it("emits a non-empty skirt mesh", () => {
-    expect(index).not.toBeNull();
-    expect(shell.triangleCount).toBeGreaterThan(0);
-    expect(index!.count).toBe(shell.triangleCount * 3);
-  });
-
-  it("excludes the page-owned world interior: no triangle lies fully inside [inset, worldSize-inset]²", () => {
-    const idx = index!;
+  function expectNoTriangleFullyInsidePageOwnedInterior(idx: THREE.BufferAttribute, pos: THREE.BufferAttribute): void {
     const insideInterior = (vi: number): boolean => {
-      const x = position.getX(vi);
-      const z = position.getZ(vi);
+      const x = pos.getX(vi);
+      const z = pos.getZ(vi);
       return x > inset && x < worldSize - inset && z > inset && z < worldSize - inset;
     };
     for (let t = 0; t < idx.count; t += 3) {
@@ -41,6 +34,32 @@ describe("far terrain shell — horizon skirt around the world", () => {
       const allInside = insideInterior(a) && insideInterior(b) && insideInterior(c);
       expect(allInside).toBe(false);
     }
+  }
+
+  it("emits a non-empty skirt mesh", () => {
+    expect(index).not.toBeNull();
+    expect(shell.triangleCount).toBeGreaterThan(0);
+    expect(index!.count).toBe(shell.triangleCount * 3);
+  });
+
+  it("excludes the page-owned world interior: no triangle lies fully inside [inset, worldSize-inset]²", () => {
+    expectNoTriangleFullyInsidePageOwnedInterior(index!, position as THREE.BufferAttribute);
+  });
+
+  it("keeps finite-world interior exclusion even when a height provider is present", () => {
+    const providerShell = buildFarTerrainShell(summary, lighting, {
+      gridRes: 32,
+      heightProvider: {
+        sampleHeight: () => 0,
+        sampleNormal: () => new THREE.Vector3(0, 1, 0),
+      },
+    });
+
+    expectNoTriangleFullyInsidePageOwnedInterior(
+      providerShell.mesh.geometry.getIndex()!,
+      providerShell.mesh.geometry.getAttribute("position") as THREE.BufferAttribute,
+    );
+    providerShell.dispose();
   });
 
   it("extends beyond the world edge (some vertices lie past worldSize)", () => {
