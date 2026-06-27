@@ -36,7 +36,7 @@ trees:
     hysteresis_m: 8
     crossfade_enabled: true
     crossfade_band_m: 12
-    dither_enabled: true
+    dither_enabled: false
     shadows_max_lod: near
     budgets:
       near_max_vertices: 60000
@@ -47,7 +47,7 @@ trees:
   impostors:
     enabled: true
     bake_on_start: true
-    fallback_to_placeholder: true
+    fallback_to_placeholder: false
     source_lod: mid
     resolution_px: 128
     octahedral_grid_size: 4
