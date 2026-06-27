@@ -12,6 +12,7 @@ import {
   DEFAULT_PLAYER_CONFIG,
   PlayerController,
   PlayerInteractionState,
+  validatePlayerWorldBoundsFit,
 } from "../../player_controller.js";
 import {
   parseBorderOceanGameplayConfig,
@@ -85,6 +86,13 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     DEFAULT_PLAYER_CONFIG,
     borderOceanGameplayConfig,
   );
+  const playerBounds = {
+    minX: 0,
+    minZ: 0,
+    maxX: worldCells,
+    maxZ: worldCells,
+  };
+  validatePlayerWorldBoundsFit(playerBounds, playerConfig);
 
   const rendererBackend = parseRendererBackend(searchParams);
   let app: AppRenderer;
@@ -210,12 +218,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
       footprint: node.footprint,
     }));
   const terrainColliders = new TerrainColliderSet(colliderPages);
-  const player = new PlayerController(terrainColliders, {
-    minX: 0,
-    minZ: 0,
-    maxX: worldCells,
-    maxZ: worldCells,
-  }, playerConfig);
+  const player = new PlayerController(terrainColliders, playerBounds, playerConfig);
   const interaction = new PlayerInteractionState();
   const terrainRaycast = createTerrainRaycastService({
     terrainColliders,
