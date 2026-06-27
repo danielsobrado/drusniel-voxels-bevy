@@ -24,6 +24,7 @@ export interface TerrainOwnershipRuntimeSnapshot {
 export class TerrainOwnershipRuntime {
   private readonly live: LiveVoxelChunkStreamer;
   private readonly visualPages: VisualClodPageStreamer;
+  private center: StreamCenter = { x: 0, z: 0 };
 
   constructor(
     private readonly ownership: StreamingOwnershipRadii,
@@ -34,10 +35,19 @@ export class TerrainOwnershipRuntime {
   }
 
   update(center: StreamCenter): TerrainOwnershipRuntimeSnapshot {
+    this.center = { ...center };
+    return this.buildSnapshot(true);
+  }
+
+  snapshot(): TerrainOwnershipRuntimeSnapshot {
+    return this.buildSnapshot(false);
+  }
+
+  private buildSnapshot(update: boolean): TerrainOwnershipRuntimeSnapshot {
     return {
-      center: { ...center },
-      live: this.live.update(center),
-      visualPages: this.visualPages.update(center.x, center.z),
+      center: { ...this.center },
+      live: update ? this.live.update(this.center) : this.live.snapshot(),
+      visualPages: update ? this.visualPages.update(this.center.x, this.center.z) : this.visualPages.snapshot(),
       ownership: {
         liveRadiusM: this.ownership.liveRadiusM,
         clodRadiusM: this.ownership.clodRadiusM,
