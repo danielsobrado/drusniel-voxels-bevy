@@ -76,6 +76,12 @@ deep_ocean:
     shallow_color: "#0a5c5a"
     fog_far_m: 1800
     reflection_strength: 0.46
+
+gameplay:
+  soft_pushback_enabled: true
+  world_edge_margin_m: 16
+  pushback_start_inside_world_m: 48
+  pushback_strength: 36
 ```
 
 The strict parser and runtime parser must stay aligned. Tests should fail if one parser accepts or maps fields differently from the other.
@@ -105,6 +111,17 @@ Both render paths should respect the same resolved visual configuration.
 - Fog distance must come from deep-ocean shading config, not generic lake ripple defaults.
 
 The node material currently derives fog distance from `visual.rippleLoopDistance * 4`. The shared deep-ocean visual resolver maps `fogFarM / 4` into `rippleLoopDistance` to preserve parity without duplicating node material logic.
+
+## Gameplay contract
+
+Border-ocean gameplay settings only configure the player boundary behavior. They do not make the deep-ocean ring playable terrain.
+
+- `soft_pushback_enabled` may guide the player away from the edge.
+- `world_edge_margin_m` keeps the hard clamp inside the simulation.
+- `pushback_start_inside_world_m` controls where the soft inward force begins.
+- `pushback_strength` controls the inward acceleration.
+
+If soft pushback is disabled, the hard clamp remains active.
 
 ## Acceptance counters
 
@@ -136,6 +153,8 @@ border_ocean.cliff_dry_above_sea
 Before changing the border ocean, verify:
 
 - The player cannot leave the playable simulation.
+- Soft pushback values come from `border_coast_ocean.yaml`.
+- Disabling soft pushback still keeps the hard clamp active.
 - The deep-ocean sampler is false inside the playable square.
 - The deep-ocean sampler is false inside the transition gap.
 - The deep-ocean mesh has no vertices inside the transition gap.
@@ -146,6 +165,5 @@ Before changing the border ocean, verify:
 
 ## Future work
 
-TODO: add a real debug overlay panel for live border-ocean tuning.
 TODO: add boat-specific gameplay ownership before allowing travel into the deep ocean ring.
 TODO: add visual regression snapshots for several time-of-day and weather presets.
