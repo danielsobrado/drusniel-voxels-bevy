@@ -4,6 +4,7 @@ import { runVegetationFramePhase } from "./frame_loop/vegetation_frame_phase.js"
 import { runStatsSyncPhase } from "./frame_loop/stats_sync_phase.js";
 import { runRenderPhase } from "./frame_loop/render_phase.js";
 import { submitMsChanged } from "./frame_loop/frame_timing.js";
+import { createBorderOceanDebugPanel } from "../water/border_ocean_debug_panel.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
 export type { StatsPresenter } from "./frame_loop/stats_presenter.js";
 export type { FrameRenderer } from "./frame_loop/frame_renderer.js";
@@ -28,6 +29,10 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   let lastFrameAt = performance.now();
   let lastFpsRefreshAt = lastFrameAt;
   let grassProfileFrame = { value: 0 };
+  const debugQuery = new URLSearchParams(window.location.search);
+  const borderOceanDebugPanel = diagnostics.queryScene === "border-ocean" || debugQuery.get("borderOceanDebug") === "1"
+    ? createBorderOceanDebugPanel(document.body)
+    : null;
 
   const updateAverageFps = () => {
     const now = performance.now();
@@ -171,6 +176,16 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       selectionFrameId: selectionStats.frameId,
       worldCells: terrain.worldCells,
     });
+
+    if (borderOceanDebugPanel && selectionStats.frameId % 10 === 0) {
+      borderOceanDebugPanel.update({
+        worldCells: terrain.worldCells,
+        cameraPosition: render.camera.position,
+        deepOcean: waterWeather.deepOceanConfig,
+        deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
+        oceanSampler: waterWeather.oceanSampler,
+      });
+    }
 
     const { currentGrassStats } = runStatsSyncPhase({
       state: player.state,
