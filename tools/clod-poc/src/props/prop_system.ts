@@ -65,6 +65,13 @@ function lodTriangleCount(asset: LoadedPropAsset, lod: number): number {
   return asset.metadata.triangleCount;
 }
 
+function disposeBucket(bucket: RenderBucket): void {
+  const mat = bucket.mesh.material;
+  if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+  else mat.dispose();
+  bucket.mesh.removeFromParent();
+}
+
 export interface PropSystemDeps {
   scene: THREE.Scene;
   settings: CustomPropsSettings;
@@ -100,6 +107,10 @@ export class PropSystem {
 
   getStats(): PropStats {
     return this.stats;
+  }
+
+  availablePrefabIds(): string[] {
+    return [...this.assetById.keys()].sort((a, b) => a.localeCompare(b));
   }
 
   getPlacementSceneSnapshot(): PropPlacementScene {
@@ -150,11 +161,23 @@ export class PropSystem {
   async init(): Promise<void> {
     const { loaded } = await this.registry.loadManifest();
     for (const asset of loaded) this.loadedAssets.set(asset.def.id, asset);
-
-    const instances = assignPropCellCoords(this.deps.placementScene.instances, this.deps.settings.spatial.cellSizeM);
-    this.grid = PropSpatialGrid.fromInstances(instances, this.deps.settings.spatial.cellSizeM);
-    this.ensureBuckets();
+    this.replacePlacementScene(this.deps.placementScene);
     this.ready = true;
+  }
+
+  replacePlacementScene(placementScene: PropPlacementScene): void {
+    this.deps.placementScene = placementScene;
+    const instances = assignPropCellCoords(placementScene.instances, this.deps.settings.spatial.cellSizeM);
+    this.grid = PropSpatialGrid.fromInstances(instances, this.deps.settings.spatial.cellSizeM);
+    this.lodState.clear();
+    this.clearBuckets();
+    this.ensureBuckets();
+    this.stats = {
+      ...EMPTY_PROP_STATS,
+      totalInstances: this.grid.instances.length,
+      cellsTotal: this.grid.cells.size,
+      collidersActive: this.collidersActive,
+    };
   }
 
   update(camera: THREE.PerspectiveCamera): void {
@@ -314,17 +337,15 @@ export class PropSystem {
   }
 
   dispose(): void {
-    for (const bucket of this.buckets.values()) {
-      bucket.mesh.geometry.dispose();
-      const mat = bucket.mesh.material;
-      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-      else mat.dispose();
-      bucket.mesh.removeFromParent();
-    }
-    this.buckets.clear();
+    this.clearBuckets();
     this.registry.dispose();
     this.debug.dispose();
     this.root.removeFromParent();
+  }
+
+  private clearBuckets(): void {
+    for (const bucket of this.buckets.values()) disposeBucket(bucket);
+    this.buckets.clear();
   }
 
   private ensureBuckets(): void {
