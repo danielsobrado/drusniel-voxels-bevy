@@ -86,6 +86,19 @@ describe("border coast shaping", () => {
     expect(coastMask(0, center, repoCfg.coast, defaultWorldCells)).toBeGreaterThan(0.9);
   });
 
+  it("preserves the configured coast width when the world has enough inland space", () => {
+    const yaml = readFileSync(
+      fileURLToPath(new URL("../../config/border_coast_ocean.yaml", import.meta.url)),
+      "utf8",
+    );
+    const repoCfg = parseBorderCoastOceanConfig(yaml);
+    const midWorldCells = 1024;
+    const center = midWorldCells * 0.5;
+
+    expect(coastMask(300, center, repoCfg.coast, midWorldCells)).toBeGreaterThan(0);
+    expect(coastMask(center, center, repoCfg.coast, midWorldCells)).toBe(0);
+  });
+
   it("samples deterministic coast types", () => {
     expect(["beach", "cliff"]).toContain(sampleCoastType(64, 64, cfg.coast));
     expect(sampleCoastType(64, 64, cfg.coast)).toBe(sampleCoastType(64, 64, cfg.coast));
