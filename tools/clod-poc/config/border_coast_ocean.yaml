@@ -105,6 +105,12 @@ deep_ocean:
     fog_far_m: 1800
     fog_density: 0.5
 
+gameplay:
+  soft_pushback_enabled: true
+  world_edge_margin_m: 16
+  pushback_start_inside_world_m: 48
+  pushback_strength: 36
+
 debug:
   show_world_bounds: false
   show_coast_band: false
