@@ -26,6 +26,8 @@ import {
 import type { ClodPagesConfig } from "./config.js";
 import type { ClodPageNode } from "./types.js";
 
+const DIRTY_BOUNDS_MAX_EPSILON = 1e-6;
+
 const ctx = self as unknown as {
   postMessage: (message: ClodWorkerResponse, transfer?: Transferable[]) => void;
   onmessage: ((event: MessageEvent<ClodWorkerRequest>) => void) | null;
@@ -284,14 +286,20 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   }, collectBuildResultTransferables(serialized));
 }
 
+function inclusiveMaxBoundary(value: number): number {
+  return value - DIRTY_BOUNDS_MAX_EPSILON;
+}
+
 function parentGroupFootprint(parentX: number, parentZ: number): DirtyCellBounds {
   if (!result || !cfg) throw new Error("CLOD worker received a dig before build completion");
   const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const worldMaxX = result.worldPagesX * span;
+  const worldMaxZ = result.worldPagesZ * span;
   return {
     minX: parentX * 2 * span,
-    maxX: Math.min(result.worldPagesX * span, (parentX * 2 + 2) * span),
+    maxX: inclusiveMaxBoundary(Math.min(worldMaxX, (parentX * 2 + 2) * span)),
     minZ: parentZ * 2 * span,
-    maxZ: Math.min(result.worldPagesZ * span, (parentZ * 2 + 2) * span),
+    maxZ: inclusiveMaxBoundary(Math.min(worldMaxZ, (parentZ * 2 + 2) * span)),
   };
 }
 
