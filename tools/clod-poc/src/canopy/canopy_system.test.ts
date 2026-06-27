@@ -59,6 +59,13 @@ describe("shellGridForTriangleBudget", () => {
     expect(shellGridForTriangleBudget(8000)).toBe(63);
     expect(shellGridForTriangleBudget(512)).toBe(16);
   });
+
+  it("falls back safely for invalid runtime budgets", () => {
+    expect(shellGridForTriangleBudget(0)).toBe(16);
+    expect(shellGridForTriangleBudget(-1)).toBe(16);
+    expect(shellGridForTriangleBudget(Number.NaN)).toBe(16);
+    expect(shellGridForTriangleBudget(250000, Number.NaN)).toBe(192);
+  });
 });
 
 describe("shouldAttemptTextureUpload", () => {
