@@ -8,6 +8,7 @@ import { applyWaterVisual, makeWaterUniforms, type WaterUniforms } from "./water
 export interface DeepOceanMaterialParams {
   visual: WaterVisualConfig;
   surfaceY: number;
+  fogDistanceM: number;
   sunDirection: THREE.Vector3;
   cameraPosition: THREE.Vector3;
   horizonColor?: THREE.Color;
@@ -89,9 +90,18 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
   uniform float uRippleStrengthB;
   uniform float uRippleLoopDistance;
   uniform vec2 uLakeBreeze;
+  uniform float uShoreFoamStart;
+  uniform float uShoreFoamEnd;
   uniform float uFoamNoiseScale;
+  uniform float uFoamShoreStrength;
+  uniform float uFoamRiverStrength;
+  uniform float uFoamSpeedStart;
+  uniform float uFoamSpeedEnd;
+  uniform float uFoamDropStart;
+  uniform float uFoamDropEnd;
   uniform float uFresnelBase;
   uniform float uFresnelNormalFlatten;
+  uniform float uDepthScale;
   uniform float uTurbidity;
   uniform vec3 uCameraPos;
   uniform vec3 uSunDir;
@@ -118,65 +128,60 @@ const DEEP_OCEAN_FRAG = /* glsl */ `
   }
 
   float fbm3(vec2 p) {
-    float n1 = noise2(p);
-    float n2 = noise2(p * 2.3 + vec2(17.3, -9.1));
-    float n3 = noise2(p * 5.7 + vec2(-3.8, 23.5));
-    return n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
+    float v = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 3; i++) {
+      v += noise2(p) * a;
+      p = mat2(1.6, 1.2, -1.2, 1.6) * p + vec2(17.0, 9.0);
+      a *= 0.5;
+    }
+    return v;
   }
 
-  float noiseDomainWarp(vec2 uv, float t) {
-    float warp = fbm3(uv * 0.35 + vec2(t * 0.035, -t * 0.025));
-    float base = fbm3(uv + vec2(warp * 1.8, -warp * 1.4));
-    float ridged = 1.0 - abs(base * 2.0 - 1.0);
-    return mix(base, ridged, 0.4);
+  float noiseRidged(vec2 p, float t) {
+    float n = fbm3(p + vec2(t * 0.03, -t * 0.02));
+    return 1.0 - abs(n * 2.0 - 1.0);
   }
 
-  float noiseRidged(vec2 uv, float t) {
-    float r1 = 1.0 - abs(noise2(uv + vec2(t * 0.03, -t * 0.02)) * 2.0 - 1.0);
-    float r2 = 1.0 - abs(noise2(uv * 2.3 + vec2(-t * 0.04, t * 0.05)) * 2.0 - 1.0);
-    float r3 = 1.0 - abs(noise2(uv * 5.7 + vec2(t * 0.05, t * 0.02)) * 2.0 - 1.0);
-    return r1 * 0.5 + r2 * r1 * 0.3 + r3 * r2 * 0.2;
+  float noiseDomainWarp(vec2 p, float t) {
+    vec2 q = vec2(
+      fbm3(p + vec2(t * 0.04, 3.1)),
+      fbm3(p + vec2(7.7, -t * 0.035))
+    );
+    vec2 r = vec2(
+      fbm3(p + q * 3.5 + vec2(11.4, t * 0.02)),
+      fbm3(p + q * 2.5 + vec2(-6.2, -t * 0.02))
+    );
+    return fbm3(p + r * 4.0);
   }
 
-  float noiseCellular(vec2 uv, float t) {
-    vec2 p = uv * 0.8 + vec2(t * 0.02, -t * 0.015);
-    float c1 = noise2(p);
-    float c2 = noise2(p + vec2(0.33, 0.77));
-    return clamp((1.0 - abs(c1 - c2)) * 1.5, 0.0, 1.0);
+  float noiseBillow(vec2 p, float t) {
+    return abs(fbm3(p + vec2(t * 0.02, t * 0.015)) * 2.0 - 1.0);
   }
 
-  float noiseBillow(vec2 uv, float t) {
-    float b1 = abs(noise2(uv + vec2(t * 0.03, -t * 0.02)) * 2.0 - 1.0);
-    float b2 = abs(noise2(uv * 2.3 + vec2(-t * 0.04, t * 0.05)) * 2.0 - 1.0);
-    float b3 = abs(noise2(uv * 5.7 + vec2(t * 0.05, t * 0.02)) * 2.0 - 1.0);
-    return b1 * 0.5 + b2 * 0.3 + b3 * 0.2;
-  }
-
-  float noiseSwiss(vec2 uv, float t) {
-    float sw1 = 1.0 - abs(noise2(uv + vec2(t * 0.02, -t * 0.01)) * 2.0 - 1.0);
-    vec2 swUv = uv + vec2(sw1 * 0.3, sw1 * -0.25);
-    float sw2 = 1.0 - abs(noise2(swUv * 2.5 + vec2(-t * 0.03, t * 0.02)) * 2.0 - 1.0);
-    return sw1 * 0.6 + sw2 * sw1 * sw1 * 0.4;
-  }
-
-  float noiseTurbulent(vec2 uv, float t) {
-    float t1 = abs(noise2(uv + vec2(t * 0.04, t * 0.02)) * 2.0 - 1.0);
-    float t2 = abs(noise2(uv * 2.3 + vec2(-t * 0.06, t * 0.035)) * 2.0 - 1.0);
-    float t3 = abs(noise2(uv * 5.7 + vec2(t * 0.05, t * 0.015)) * 2.0 - 1.0);
-    return 1.0 - (t1 * 0.45 + t2 * 0.35 + t3 * 0.2);
+  float noiseCellularSoft(vec2 p, float t) {
+    vec2 cell = floor(p);
+    vec2 f = fract(p);
+    float d = 1.0;
+    for (int y = -1; y <= 1; y++) {
+      for (int x = -1; x <= 1; x++) {
+        vec2 o = vec2(float(x), float(y));
+        vec2 h = vec2(hash21(cell + o + 13.1), hash21(cell + o + 71.7));
+        h = 0.5 + 0.5 * sin(6.28318 * h + t * vec2(0.2, -0.13));
+        d = min(d, length(o + h - f));
+      }
+    }
+    return clamp(1.0 - d, 0.0, 1.0);
   }
 
   float combinedFoamNoise(vec2 uv, float t) {
-    return clamp(
-      noiseDomainWarp(uv, t) * 0.24 +
-      noiseRidged(uv, t) * 0.24 +
-      noiseCellular(uv, t) * 0.08 +
-      noiseBillow(uv, t) * 0.10 +
-      noiseSwiss(uv, t) * 0.14 +
-      noiseTurbulent(uv, t) * 0.20,
-      0.0,
-      1.0
-    );
+    float a = noiseDomainWarp(uv * 1.3, t);
+    float b = noiseRidged(uv * 2.1 + 9.7, t);
+    float c = noiseCellularSoft(uv * 0.72 + 2.0, t);
+    float d = noiseBillow(uv * 3.4 - 4.0, t);
+    float e = fbm3(uv * 6.0 + vec2(t * 0.08, -t * 0.05));
+    float swiss = b * (1.0 - a * 0.35);
+    return clamp(a * 0.24 + b * 0.24 + c * 0.08 + d * 0.10 + swiss * 0.14 + e * 0.20, 0.0, 1.0);
   }
 
   float bumpHeight(vec2 uv, float t) {
@@ -306,7 +311,7 @@ function makeDeepOceanUniforms(params: DeepOceanMaterialParams): DeepOceanUnifor
     ...base,
     uSurfaceY: { value: params.surfaceY },
     uHorizonColor: { value: (params.horizonColor ?? new THREE.Color(0.62, 0.74, 0.88)).clone() },
-    uFogDistance: { value: Math.max(256, params.visual.rippleLoopDistance * 4) },
+    uFogDistance: { value: Math.max(256, params.fogDistanceM) },
     uWaveA: { value: waveUniformA() },
     uWaveB: { value: waveUniformB() },
   };
@@ -334,7 +339,6 @@ export function createDeepOceanShaderMaterial(params: DeepOceanMaterialParams): 
     updateVisual: (visual) => {
       applyWaterVisual(uniforms, visual);
       material.depthWrite = visual.depthWrite;
-      uniforms.uFogDistance.value = Math.max(256, visual.rippleLoopDistance * 4);
       material.needsUpdate = true;
     },
     dispose: () => { material.dispose(); },
