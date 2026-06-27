@@ -31,6 +31,8 @@ export interface PlayerConfig extends CapsuleCollisionConfig {
   jumpHeight: number;
   eyeHeight: number;
   worldEdgeMargin: number;
+  worldEdgePushbackBand: number;
+  worldEdgePushbackAcceleration: number;
   gravity: number;
   fixedStep: number;
   recoveryDepth: number;
@@ -53,6 +55,8 @@ export const DEFAULT_PLAYER_CONFIG: Readonly<PlayerConfig> = Object.freeze({
   eyeHeight: 1.7,
   maxSlopeDegrees: 60,
   worldEdgeMargin: 16,
+  worldEdgePushbackBand: 48,
+  worldEdgePushbackAcceleration: 36,
   gravity: 30,
   fixedStep: 1 / 120,
   recoveryDepth: 32,
@@ -105,6 +109,45 @@ export function clampPlayerToWorld(
   return position;
 }
 
+function edgeStrength(distanceToSafeEdge: number, band: number): number {
+  if (band <= 0) return 0;
+  const t = THREE.MathUtils.clamp(1 - distanceToSafeEdge / band, 0, 1);
+  return t * t;
+}
+
+export function writeWorldEdgePushbackAcceleration(
+  out: THREE.Vector2,
+  position: THREE.Vector3,
+  bounds: HorizontalWorldBounds,
+  margin: number,
+  band: number,
+  acceleration: number,
+): THREE.Vector2 {
+  out.set(0, 0);
+  if (acceleration <= 0 || band <= 0) return out;
+
+  const minX = bounds.minX + margin;
+  const maxX = bounds.maxX - margin;
+  const minZ = bounds.minZ + margin;
+  const maxZ = bounds.maxZ - margin;
+
+  out.x += edgeStrength(position.x - minX, band) * acceleration;
+  out.x -= edgeStrength(maxX - position.x, band) * acceleration;
+  out.y += edgeStrength(position.z - minZ, band) * acceleration;
+  out.y -= edgeStrength(maxZ - position.z, band) * acceleration;
+  return out;
+}
+
+export function worldEdgePushbackAcceleration(
+  position: THREE.Vector3,
+  bounds: HorizontalWorldBounds,
+  margin: number,
+  band: number,
+  acceleration: number,
+): THREE.Vector2 {
+  return writeWorldEdgePushbackAcceleration(new THREE.Vector2(), position, bounds, margin, band, acceleration);
+}
+
 export class PlayerController {
   readonly position = new THREE.Vector3();
   readonly velocity = new THREE.Vector3();
@@ -115,6 +158,7 @@ export class PlayerController {
   private accumulator = 0;
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
+  private readonly edgePushback = new THREE.Vector2();
   private readonly physicsSamples: number[] = [];
 
   constructor(
@@ -176,6 +220,17 @@ export class PlayerController {
     const accel = (this.grounded ? this.config.groundAcceleration : this.config.airAcceleration) * step;
     this.velocity.x += THREE.MathUtils.clamp(desiredMotion.x - this.velocity.x, -accel, accel);
     this.velocity.z += THREE.MathUtils.clamp(desiredMotion.z - this.velocity.z, -accel, accel);
+
+    writeWorldEdgePushbackAcceleration(
+      this.edgePushback,
+      this.position,
+      this.bounds,
+      this.config.worldEdgeMargin,
+      this.config.worldEdgePushbackBand,
+      this.config.worldEdgePushbackAcceleration,
+    );
+    this.velocity.x += this.edgePushback.x * step;
+    this.velocity.z += this.edgePushback.y * step;
 
     this.coyoteTimer = this.grounded ? this.config.coyoteTime : Math.max(0, this.coyoteTimer - step);
     this.jumpBufferTimer = jumpHeld ? this.config.jumpBufferTime : Math.max(0, this.jumpBufferTimer - step);
