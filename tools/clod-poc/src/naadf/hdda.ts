@@ -310,7 +310,7 @@ export function tracePrimaryDebugRayHdda(params: TraceBaseParams): RayTraceResul
     }
 
     const boundaryDistance = stepper.distanceToNextBoundary(eps);
-    let skip = estimatePlanSkip({ state, plan, boundaryDistance, dirX, dirY, dirZ, y, eps, cellSize });
+    let skip = estimatePlanSkip({ state, plan, boundaryDistance, dirX, dirY, dirZ, eps, cellSize });
     if (plan.node && dirY < -1e-6) {
       const verticalLimit = (y - plan.node.maxHeight) / -dirY;
       if (Number.isFinite(verticalLimit) && verticalLimit > eps) {
@@ -433,7 +433,7 @@ export function traceSunVisibilityHdda(params: SunTraceBaseParams): SunVisibilit
     }
 
     const boundaryDistance = stepper.distanceToNextBoundary(eps);
-    const skip = estimatePlanSkip({ state, plan, boundaryDistance, dirX, dirY, dirZ, y, eps, cellSize });
+    const skip = estimatePlanSkip({ state, plan, boundaryDistance, dirX, dirY, dirZ, eps, cellSize });
     if (aadfSkipOccurred(skip, cellSize)) aadfSkips++;
     updateTraversalStats(stats, plan, skip, cellSize);
     stepper = advanceStepper(
@@ -571,12 +571,11 @@ function estimatePlanSkip(params: {
   dirX: number;
   dirY: number;
   dirZ: number;
-  y: number;
   eps: number;
   cellSize: number;
 }): number {
   const spanDistance = params.plan.spanDim * params.cellSize;
-  if (params.plan.node) {
+  if (params.plan.node && params.state.config.traversal.hddaUseDirectionalBounds) {
     return estimateSafeSkipDistance({
       node: params.plan.node,
       rayDirX: params.dirX,
@@ -591,7 +590,7 @@ function estimatePlanSkip(params: {
   if (params.plan.source === "far") {
     return Math.max(params.eps, Math.min(params.boundaryDistance, spanDistance));
   }
-  return Math.max(params.eps, Math.min(params.boundaryDistance, params.cellSize));
+  return Math.max(params.eps, Math.min(params.boundaryDistance, spanDistance));
 }
 
 function updateTraversalStats(stats: HddaTraversalStats, plan: SpanPlan, skip: number, cellSize: number): void {
