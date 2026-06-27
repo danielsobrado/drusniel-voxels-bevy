@@ -77,6 +77,7 @@ function atlasView(ringCount: number): FarSummaryGpuAtlasView {
     texture: dataTexture(widthCells, heightCells),
     materialTexture: dataTexture(widthCells, heightCells),
     normalTexture: dataTexture(widthCells, heightCells),
+    coverageTexture: dataTexture(widthCells, heightCells),
     rings: Array.from({ length: ringCount }, (_, i) => ({
       originX: i * 100,
       originZ: i * 200,
@@ -102,6 +103,7 @@ function disposeAtlas(atlas: FarSummaryGpuAtlasView): void {
   atlas.texture.dispose();
   atlas.materialTexture.dispose();
   atlas.normalTexture.dispose();
+  atlas.coverageTexture.dispose();
 }
 
 function positions(count: number): Float32Array {
