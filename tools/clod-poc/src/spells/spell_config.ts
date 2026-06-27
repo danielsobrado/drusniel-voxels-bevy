@@ -74,7 +74,7 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
       volume: 0.34,
     },
     vfx: {
-      layerId: "spell-vfx-layer",
+      layerId: "water-spell-vfx-layer",
       canvasId: "water-spell-vfx",
       fallbackWidthPx: 1280,
       fallbackHeightPx: 720,
