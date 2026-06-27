@@ -1,4 +1,7 @@
 import { bootstrapClodPoc } from "./app/bootstrap/index.js";
+import { installConstructionBuildMenuLayout } from "./construction/build_menu_style.js";
+
+installConstructionBuildMenuLayout();
 
 bootstrapClodPoc().catch((error) => {
   const buildProgress = document.getElementById("build-progress");
