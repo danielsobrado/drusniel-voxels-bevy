@@ -123,7 +123,7 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
     atlasWindowTiles: 0,
     atlasCells: 0,
     atlasPixels: 0,
-    atlasTextures: GPU_ATLAS_TEXTURE_COUNT,
+    atlasTextures: 0,
     atlasRevision: 0,
     atlasMiB: 0,
   };
@@ -200,7 +200,7 @@ export function createNaadfGui(gui: GUI, deps: NaadfGuiDeps): GuiController | nu
         ? atlas.rings[0].widthCells * atlas.rings[0].heightCells
         : 0;
       stats.atlasPixels = atlas ? atlas.widthCells * atlas.heightCells : 0;
-      stats.atlasTextures = GPU_ATLAS_TEXTURE_COUNT;
+      stats.atlasTextures = atlas ? GPU_ATLAS_TEXTURE_COUNT : 0;
       stats.atlasRevision = atlas?.revision ?? 0;
       stats.atlasMiB = atlas
         ? Number(((atlas.widthCells * atlas.heightCells * FLOAT_RGBA_BYTES * GPU_ATLAS_TEXTURE_COUNT) / BYTES_PER_MIB).toFixed(3))
