@@ -1,3 +1,28 @@
+import grass008AoUrl from "../../../textures/pbr/jpg/Grass008/Grass008_1K-JPG_AmbientOcclusion.jpg?url";
+import grass008ColorUrl from "../../../textures/pbr/jpg/Grass008/Grass008_1K-JPG_Color.jpg?url";
+import grass008NormalUrl from "../../../textures/pbr/jpg/Grass008/Grass008_1K-JPG_NormalGL.jpg?url";
+import grass008RoughnessUrl from "../../../textures/pbr/jpg/Grass008/Grass008_1K-JPG_Roughness.jpg?url";
+import ground048AoUrl from "../../../textures/pbr/jpg/Ground048/Ground048_1K-JPG_AmbientOcclusion.jpg?url";
+import ground048ColorUrl from "../../../textures/pbr/jpg/Ground048/Ground048_1K-JPG_Color.jpg?url";
+import ground048NormalUrl from "../../../textures/pbr/jpg/Ground048/Ground048_1K-JPG_NormalGL.jpg?url";
+import ground048RoughnessUrl from "../../../textures/pbr/jpg/Ground048/Ground048_1K-JPG_Roughness.jpg?url";
+import ground054AoUrl from "../../../textures/pbr/jpg/Ground054/Ground054_1K-JPG_AmbientOcclusion.jpg?url";
+import ground054ColorUrl from "../../../textures/pbr/jpg/Ground054/Ground054_1K-JPG_Color.jpg?url";
+import ground054NormalUrl from "../../../textures/pbr/jpg/Ground054/Ground054_1K-JPG_NormalGL.jpg?url";
+import ground054RoughnessUrl from "../../../textures/pbr/jpg/Ground054/Ground054_1K-JPG_Roughness.jpg?url";
+import ground067AoUrl from "../../../textures/pbr/jpg/Ground067/Ground067_1K-JPG_AmbientOcclusion.jpg?url";
+import ground067ColorUrl from "../../../textures/pbr/jpg/Ground067/Ground067_1K-JPG_Color.jpg?url";
+import ground067NormalUrl from "../../../textures/pbr/jpg/Ground067/Ground067_1K-JPG_NormalGL.jpg?url";
+import ground067RoughnessUrl from "../../../textures/pbr/jpg/Ground067/Ground067_1K-JPG_Roughness.jpg?url";
+import snow007AoUrl from "../../../textures/pbr/jpg/Snow007C/Snow007C_1K-JPG_AmbientOcclusion.jpg?url";
+import snow007ColorUrl from "../../../textures/pbr/jpg/Snow007C/Snow007C_1K-JPG_Color.jpg?url";
+import snow007NormalUrl from "../../../textures/pbr/jpg/Snow007C/Snow007C_1K-JPG_NormalGL.jpg?url";
+import snow007RoughnessUrl from "../../../textures/pbr/jpg/Snow007C/Snow007C_1K-JPG_Roughness.jpg?url";
+import snow015AoUrl from "../../../textures/pbr/jpg/Snow015/Snow015_1K-JPG_AmbientOcclusion.jpg?url";
+import snow015ColorUrl from "../../../textures/pbr/jpg/Snow015/Snow015_1K-JPG_Color.jpg?url";
+import snow015NormalUrl from "../../../textures/pbr/jpg/Snow015/Snow015_1K-JPG_NormalGL.jpg?url";
+import snow015RoughnessUrl from "../../../textures/pbr/jpg/Snow015/Snow015_1K-JPG_Roughness.jpg?url";
+
 // Bundle the texture files with the app so they are served same-origin. Fetching them
 // cross-origin from raw.githubusercontent.com fails: that host sends no
 // Access-Control-Allow-Origin header, so a crossOrigin="anonymous" TextureLoader request
@@ -8,6 +33,15 @@ const BUNDLED_TEXTURE_URLS = import.meta.glob<string>("../../../textures/*.jpg",
   import: "default",
 });
 
+export interface BuiltinTerrainTexture {
+  id: string;
+  label: string;
+  url: string;
+  normalUrl?: string;
+  roughnessUrl?: string;
+  aoUrl?: string;
+}
+
 export const demoTextureUrl = (file: string): string => {
   const entry = Object.entries(BUNDLED_TEXTURE_URLS).find(([path]) => path.endsWith(`/${file}`));
   if (!entry) throw new Error(`Bundled texture not found: ${file}`);
@@ -15,13 +49,19 @@ export const demoTextureUrl = (file: string): string => {
 };
 
 export const DEFAULT_TERRAIN_TEXTURE_PRESETS = [
-  { id: "grass-2", scale: 0.06, heightMin: 12, heightMax: 18 },
-  { id: "earth-2", scale: 0.04, heightMin: 18, heightMax: 40 },
-  { id: "earth-1", scale: 0.04, heightMin: 40, heightMax: 60 },
-  { id: "snow-rocks-1", scale: 0.025, heightMin: 60, heightMax: 118 },
+  { id: "pbr-grass-008", scale: 0.055, heightMin: 12, heightMax: 20 },
+  { id: "pbr-ground-054", scale: 0.05, heightMin: 18, heightMax: 42 },
+  { id: "pbr-ground-048", scale: 0.045, heightMin: 38, heightMax: 66 },
+  { id: "pbr-snow-007c", scale: 0.035, heightMin: 62, heightMax: 118 },
 ] as const;
 
-export const BUILTIN_TERRAIN_TEXTURES = [
+export const BUILTIN_TERRAIN_TEXTURES: readonly BuiltinTerrainTexture[] = [
+  { id: "pbr-grass-008", label: "PBR Grass 008", url: grass008ColorUrl, normalUrl: grass008NormalUrl, roughnessUrl: grass008RoughnessUrl, aoUrl: grass008AoUrl },
+  { id: "pbr-ground-054", label: "PBR Dirt Ground 054", url: ground054ColorUrl, normalUrl: ground054NormalUrl, roughnessUrl: ground054RoughnessUrl, aoUrl: ground054AoUrl },
+  { id: "pbr-ground-048", label: "PBR Rocky Ground 048", url: ground048ColorUrl, normalUrl: ground048NormalUrl, roughnessUrl: ground048RoughnessUrl, aoUrl: ground048AoUrl },
+  { id: "pbr-ground-067", label: "PBR Dry Ground 067", url: ground067ColorUrl, normalUrl: ground067NormalUrl, roughnessUrl: ground067RoughnessUrl, aoUrl: ground067AoUrl },
+  { id: "pbr-snow-007c", label: "PBR Snow 007C", url: snow007ColorUrl, normalUrl: snow007NormalUrl, roughnessUrl: snow007RoughnessUrl, aoUrl: snow007AoUrl },
+  { id: "pbr-snow-015", label: "PBR Snow 015", url: snow015ColorUrl, normalUrl: snow015NormalUrl, roughnessUrl: snow015RoughnessUrl, aoUrl: snow015AoUrl },
   { id: "earth-1", label: "Earth 1", url: demoTextureUrl("earth-1.jpg") },
   { id: "earth-2", label: "Earth 2", url: demoTextureUrl("earth-2.jpg") },
   { id: "grass-1", label: "Grass 1", url: demoTextureUrl("grass-1.jpg") },
@@ -42,4 +82,4 @@ export const BUILTIN_TERRAIN_TEXTURES = [
   { id: "oak-leaf-2", label: "Oak leaf 2", url: demoTextureUrl("oak-leaf-2.jpg") },
   { id: "snow-1", label: "Snow 1", url: demoTextureUrl("snow-1.jpg") },
   { id: "snow-rocks-1", label: "Snow rocks 1", url: demoTextureUrl("snow-rocks-1.jpg") },
-] as const;
+];
