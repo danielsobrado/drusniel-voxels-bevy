@@ -155,6 +155,7 @@ export class InfiniteFarShell {
 
     if (this.heightSamplingMode === "gpu" && this.farSummaryGpuAtlas && useParity) {
       const waterMaterial = createFarWaterMaterial(0, 0, this.farSummaryGpuAtlas);
+      if (options.debugShowWireframe) waterMaterial.wireframe = true;
       this.waterMesh = new THREE.Mesh(geometry, waterMaterial);
       this.waterMesh.name = "naadf-far-water-overlay";
       this.waterMesh.castShadow = false;
@@ -222,6 +223,9 @@ export class InfiniteFarShell {
 
   setDebugShowWireframe(on: boolean): void {
     (this.mesh.material as unknown as { wireframe: boolean }).wireframe = on;
+    if (this.waterMesh && !Array.isArray(this.waterMesh.material)) {
+      this.waterMesh.material.wireframe = on;
+    }
   }
 
   setReceiveSunShadows(on: boolean): void {
