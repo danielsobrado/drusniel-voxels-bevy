@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { clodUrl, launchWebGPU } from "./launch.js";
+import { clodUrl, launchChromium, launchWebGPU } from "./launch.js";
 
 type Args = Record<string, string | boolean>;
 
@@ -33,6 +33,7 @@ async function main(): Promise<void> {
   const out = str(args["out"]) ?? `shots/phase-0/${scene}-${Date.now()}.png`;
   const settleFrames = Number(str(args["settle"]) ?? 8);
   const timeoutMs = Number(str(args["timeout"]) ?? 120000);
+  const rendererParam = str(args["renderer"]);
 
   const consumed = new Set([
     "scene", "seed", "cam", "out", "w", "h", "hud", "settle", "timeout", "stats",
@@ -43,7 +44,7 @@ async function main(): Promise<void> {
     if (!consumed.has(key)) extra[key] = value === true ? "1" : String(value);
   }
 
-  const { browser } = await launchWebGPU();
+  const { browser } = rendererParam === "webgl" ? await launchChromium() : await launchWebGPU();
   try {
     const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
     page.on("console", (msg: { text(): string; type(): string }) => {
@@ -160,9 +161,7 @@ async function main(): Promise<void> {
               terrain_draw_calls: counters["terrain_draw_calls"] ?? 0,
               terrain_triangles: counters["terrain_triangles"] ?? 0,
               horizon_hole_ratio: counters["horizon_hole_ratio"] ?? 0,
-              ...Object.fromEntries(
-                Object.entries(counters).filter(([k]) => k.startsWith("clod_page_count_")),
-              ),
+              ...Object.fromEntries(Object.entries(counters).filter(([k]) => k.startsWith("clod_page_count_"))),
             },
             far_shell: {
               triangles: counters["far_shell_tris"] ?? 0,
@@ -174,7 +173,6 @@ async function main(): Promise<void> {
             canopy_shell: {
               triangles: counters["canopy_tris"] ?? 0,
             },
-            // LV-5: GPU vegetation ring stats for long-view validation.
             gpu_grass: {
               visible: counters["gpu_grass_visible"] ?? 0,
               dispatch_ms: counters["gpu_grass_dispatch_ms"] ?? 0,
