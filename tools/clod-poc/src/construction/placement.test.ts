@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createConstructionCandidate, createFreePlacementPosition, validateConstructionPlacement } from "./placement.js";
-import type { ConstructionPieceDef, ConstructionPlacementConfig, PlacedConstructionPiece } from "./types.js";
+import {
+  createConstructionCandidate,
+  createFreePlacementPosition,
+  validateConstructionPlacement,
+  validatePersistedConstructionPlacement,
+} from "./placement.js";
+import type { ConstructionPieceDef, ConstructionPlacementConfig, ConstructionSnapResult, PlacedConstructionPiece } from "./types.js";
 
 const placementConfig: ConstructionPlacementConfig = {
   maxRayDistanceM: 100,
@@ -29,25 +34,58 @@ const wall: ConstructionPieceDef = {
   snapPoints: [],
 };
 
-function validate(
+const piecesById = new Map<string, ConstructionPieceDef>([[floor.id, floor], [wall.id, wall]]);
+
+function snapTo(entityId: string): ConstructionSnapResult {
+  return {
+    target: {
+      entityId,
+      pieceTypeId: "floor",
+      snapIndex: 0,
+      worldPos: [0, 0, 0],
+      worldDirection: [1, 0, 0],
+      group: "floor-edge",
+      accepts: ["wall-bottom"],
+    },
+    sourceSnapIndex: 0,
+    worldPosition: [12, 2, 8],
+    rotationQuarterTurns: 3,
+    score: 1,
+  };
+}
+
+function validateLive(
   piece: ConstructionPieceDef,
   position: readonly [number, number, number],
   options: {
     placedPieces?: readonly PlacedConstructionPiece[];
     rotationQuarterTurns?: number;
     snapped?: boolean;
+    snap?: ConstructionSnapResult | null;
   } = {},
 ): { valid: boolean; reason: string | null } {
-  const snapped = options.snapped ?? piece.canGround;
+  const snapped = options.snapped ?? false;
   return validateConstructionPlacement({
     piece,
     position,
     rotationQuarterTurns: options.rotationQuarterTurns ?? 0,
     snapped,
-    snap: null,
+    snap: options.snap ?? null,
     terrainHit: piece.canGround && !snapped ? { point: [position[0], 0, position[2]], distanceM: 1 } : null,
     placedPieces: options.placedPieces ?? [],
-    piecesById: new Map([[floor.id, floor], [wall.id, wall]]),
+    piecesById,
+    worldCells: 16,
+    config: placementConfig,
+  });
+}
+
+function validateSaved(placed: PlacedConstructionPiece, placedPieces: readonly PlacedConstructionPiece[] = []) {
+  const piece = piecesById.get(placed.typeId)!;
+  return validatePersistedConstructionPlacement({
+    piece,
+    placed,
+    placedPieces,
+    piecesById,
     worldCells: 16,
     config: placementConfig,
   });
@@ -59,7 +97,7 @@ describe("construction placement", () => {
   });
 
   it("rejects pieces that extend outside the world even when their center is inside", () => {
-    expect(validate(floor, [0.5, 1, 8], { snapped: false })).toEqual({ valid: false, reason: "outside world" });
+    expect(validateLive(floor, [0.5, 1, 8])).toEqual({ valid: false, reason: "outside world" });
   });
 
   it("rejects invalid world dimensions", () => {
@@ -80,7 +118,11 @@ describe("construction placement", () => {
   });
 
   it("rejects non-ground pieces without snap", () => {
-    expect(validate(wall, [8, 2, 8], { snapped: false })).toEqual({ valid: false, reason: "snap required" });
+    expect(validateLive(wall, [8, 2, 8])).toEqual({ valid: false, reason: "snap required" });
+  });
+
+  it("rejects snapped placement without a snap payload", () => {
+    expect(validateLive(wall, [8, 2, 8], { snapped: true })).toEqual({ valid: false, reason: "missing support" });
   });
 
   it("rejects duplicate overlapping placements", () => {
@@ -89,26 +131,82 @@ describe("construction placement", () => {
       typeId: "floor",
       position: [8, 1, 8],
       rotationQuarterTurns: 0,
+      grounded: true,
+      parentIds: [],
     };
 
-    expect(validate(floor, [8, 1, 8], { placedPieces: [placed] })).toEqual({ valid: false, reason: "overlap" });
+    expect(validateLive(floor, [8, 1, 8], { placedPieces: [placed] })).toEqual({ valid: false, reason: "overlap" });
   });
 
   it("keeps candidate rotation from the validated input", () => {
+    const parent: PlacedConstructionPiece = {
+      id: "floor-1",
+      typeId: "floor",
+      position: [8, 1, 8],
+      rotationQuarterTurns: 0,
+      grounded: true,
+      parentIds: [],
+    };
     const candidate = createConstructionCandidate({
       piece: wall,
-      position: [8, 2, 8],
+      position: [12, 2, 8],
       rotationQuarterTurns: 3,
       snapped: true,
-      snap: null,
+      snap: snapTo("floor-1"),
       terrainHit: null,
-      placedPieces: [],
-      piecesById: new Map([[wall.id, wall]]),
+      placedPieces: [parent],
+      piecesById,
       worldCells: 16,
       config: placementConfig,
     });
 
     expect(candidate.valid).toBe(true);
     expect(candidate.rotationQuarterTurns).toBe(3);
+  });
+
+  it("accepts saved pieces connected to a supported parent", () => {
+    const parent: PlacedConstructionPiece = {
+      id: "floor-1",
+      typeId: "floor",
+      position: [8, 1, 8],
+      rotationQuarterTurns: 0,
+      grounded: true,
+      parentIds: [],
+    };
+
+    const result = validateSaved({
+      id: "wall-1",
+      typeId: "wall",
+      position: [12, 2, 8],
+      rotationQuarterTurns: 1,
+      grounded: false,
+      parentIds: ["floor-1"],
+    }, [parent]);
+
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects saved pieces whose parent chain is missing", () => {
+    const result = validateSaved({
+      id: "wall-1",
+      typeId: "wall",
+      position: [12, 2, 8],
+      rotationQuarterTurns: 1,
+      grounded: false,
+      parentIds: ["missing-floor"],
+    });
+
+    expect(result).toEqual({ valid: false, reason: "unsupported" });
+  });
+
+  it("keeps old saved pieces without support metadata loadable", () => {
+    const result = validateSaved({
+      id: "legacy-wall",
+      typeId: "wall",
+      position: [12, 2, 8],
+      rotationQuarterTurns: 1,
+    });
+
+    expect(result.valid).toBe(true);
   });
 });
