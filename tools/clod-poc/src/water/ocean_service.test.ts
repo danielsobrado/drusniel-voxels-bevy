@@ -5,7 +5,7 @@ import { createDeepOceanSampler } from "./ocean_service.js";
 describe("createDeepOceanSampler", () => {
   it("samples the same animated wave field used by the render mesh", () => {
     const worldCells = 256;
-    const sampler = createDeepOceanSampler(worldCells, DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean, 48);
+    const sampler = createDeepOceanSampler(worldCells, DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean);
     const x = worldCells + 32;
     const z = worldCells * 0.5;
 
@@ -23,7 +23,7 @@ describe("createDeepOceanSampler", () => {
 
   it("does not report gameplay water from the playable world or coast band", () => {
     const worldCells = 256;
-    const sampler = createDeepOceanSampler(worldCells, DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean, 48);
+    const sampler = createDeepOceanSampler(worldCells, DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean);
 
     expect(sampler.isInPlayableOcean(worldCells * 0.5, worldCells * 0.5)).toBe(false);
     expect(sampler.isInPlayableOcean(8, worldCells * 0.5)).toBe(false);
