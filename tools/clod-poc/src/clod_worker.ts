@@ -173,7 +173,7 @@ function drainParents(budgetMs: number): void {
     const next = nextPendingParent();
     if (!next) break;
     const t0 = performance.now();
-    const node = resimplifyParent(index, next.level, next.key, cfg);
+    const node = resimplifyParent(index, next.level, next.key, cfg, next.level === topLevel);
     parentMs += performance.now() - t0;
     if (!node) continue;
     parentNodes++;
