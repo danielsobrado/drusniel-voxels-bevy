@@ -70,6 +70,7 @@ export interface NaadfFarShellConfig {
   gridRes: number;
   useNaadfSummary: boolean;
   heightSamplingMode: NaadfFarShellHeightSamplingMode;
+  gpuAtlasWindowTiles: number;
 }
 
 export interface NaadfDebugConfig {
@@ -119,8 +120,11 @@ export interface NaadfPocConfig {
   acceptance: NaadfAcceptanceConfig;
 }
 
+export const NAADF_GPU_ATLAS_WINDOW_TILE_OPTIONS = [3, 5, 7] as const;
+
 const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
 const FAR_SHELL_HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
+const GPU_ATLAS_WINDOW_TILE_OPTIONS: ReadonlySet<number> = new Set(NAADF_GPU_ATLAS_WINDOW_TILE_OPTIONS);
 
 function requireNumber(value: unknown, path: string, min?: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -168,6 +172,18 @@ function requireFarShellHeightMode(value: unknown, path: string): NaadfFarShellH
     throw new Error(`NAADF config: ${path} must be gpu or cpu, got ${mode}`);
   }
   return mode as NaadfFarShellHeightSamplingMode;
+}
+
+export function isValidNaadfGpuAtlasWindowTiles(value: number): boolean {
+  return Number.isInteger(value) && GPU_ATLAS_WINDOW_TILE_OPTIONS.has(value);
+}
+
+function requireGpuAtlasWindowTiles(value: unknown, path: string): number {
+  const parsed = requireNumber(value, path, 1);
+  if (!isValidNaadfGpuAtlasWindowTiles(parsed)) {
+    throw new Error(`NAADF config: ${path} must be one of ${NAADF_GPU_ATLAS_WINDOW_TILE_OPTIONS.join(", ")}, got ${parsed}`);
+  }
+  return parsed;
 }
 
 function parseRing(raw: Record<string, unknown>, path: string): FarClipmapRingConfig {
@@ -300,6 +316,7 @@ export function parseNaadfPocConfig(yamlText: string): NaadfPocConfig {
       gridRes: requireNumber(shellRaw["grid_res"], "far_shell.grid_res", 1),
       useNaadfSummary: requireBool(shellRaw["use_naadf_summary"], "far_shell.use_naadf_summary"),
       heightSamplingMode: requireFarShellHeightMode(shellRaw["height_sampling_mode"] ?? "cpu", "far_shell.height_sampling_mode"),
+      gpuAtlasWindowTiles: requireGpuAtlasWindowTiles(shellRaw["gpu_atlas_window_tiles"] ?? 5, "far_shell.gpu_atlas_window_tiles"),
     },
     debug: {
       enabled: requireBool(debugRaw["enabled"], "debug.enabled"),
