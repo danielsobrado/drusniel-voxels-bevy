@@ -232,8 +232,16 @@ export async function bootstrapClodPoc() {
     const farSummaryGpuAtlas = naadfHeightSamplingMode === "gpu"
       ? naadfIntegration?.getFarSummaryGpuAtlasView()
       : undefined;
+
+    if (naadfHeightSamplingMode === "gpu" && !useParity) {
+      throw new Error("NAADF GPU height mode requires the WebGPU parity far terrain material");
+    }
+    if (naadfHeightSamplingMode === "gpu" && !farSummaryGpuAtlas) {
+      throw new Error("NAADF GPU height mode requires a far-summary GPU atlas");
+    }
+
     const effectiveHeightSamplingMode = naadfHeightSamplingMode === "gpu"
-      ? (useParity && farSummaryGpuAtlas ? "gpu" : "cpu")
+      ? "gpu"
       : naadfHeightSamplingMode;
     if (!heightProvider && effectiveHeightSamplingMode !== "gpu") {
       throw new Error("long-view scene requires NAADF or far-summary height provider");
