@@ -59,6 +59,16 @@ function mergeDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds {
   };
 }
 
+function intersectDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds | null {
+  const clipped = {
+    minX: Math.max(a.minX, b.minX),
+    maxX: Math.min(a.maxX, b.maxX),
+    minZ: Math.max(a.minZ, b.minZ),
+    maxZ: Math.min(a.maxZ, b.maxZ),
+  };
+  return clipped.minX <= clipped.maxX && clipped.minZ <= clipped.maxZ ? clipped : null;
+}
+
 function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | undefined): void {
   if (!terrain) {
     setTerrainSurfaceOverride(null);
@@ -140,7 +150,7 @@ function nextPendingParent(): { level: number; key: string } | null {
 function drainParents(budgetMs: number): void {
   if (!cfg || !index) return;
   const startedAt = performance.now();
-  const changed = [];
+  const changed: ClodPageNode[] = [];
 
   while (pendingParentCount() > 0 && performance.now() - startedAt < budgetMs) {
     const next = nextPendingParent();
@@ -257,6 +267,17 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   }, collectBuildResultTransferables(serialized));
 }
 
+function parentGroupFootprint(parentX: number, parentZ: number): DirtyCellBounds {
+  if (!result || !cfg) throw new Error("CLOD worker received a dig before build completion");
+  const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
+  return {
+    minX: parentX * 2 * span,
+    maxX: Math.min(result.worldPagesX * span, (parentX * 2 + 2) * span),
+    minZ: parentZ * 2 * span,
+    maxZ: Math.min(result.worldPagesZ * span, (parentZ * 2 + 2) * span),
+  };
+}
+
 function pageParentDirtyGroups(regions: readonly DirtyCellBounds[]): DirtyCellBounds[] {
   if (!result || !cfg) throw new Error("CLOD worker received a dig before build completion");
   const span = cfg.page.chunks_per_page * cfg.page.chunk_size;
@@ -268,9 +289,13 @@ function pageParentDirtyGroups(regions: readonly DirtyCellBounds[]): DirtyCellBo
     const maxPz = Math.min(result.worldPagesZ - 1, Math.floor(dirty.maxZ / span));
     for (let pz = minPz; pz <= maxPz; pz++) {
       for (let px = minPx; px <= maxPx; px++) {
-        const key = `${px >> 1},${pz >> 1}`;
+        const parentX = px >> 1;
+        const parentZ = pz >> 1;
+        const clipped = intersectDirty(dirty, parentGroupFootprint(parentX, parentZ));
+        if (!clipped) continue;
+        const key = `${parentX},${parentZ}`;
         const previous = groups.get(key);
-        groups.set(key, previous ? mergeDirty(previous, dirty) : { ...dirty });
+        groups.set(key, previous ? mergeDirty(previous, clipped) : clipped);
       }
     }
   }
