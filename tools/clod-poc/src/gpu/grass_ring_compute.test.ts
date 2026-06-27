@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_GRASS_SETTINGS } from "../grass/grass_config.js";
+import { cloneGrassSettings, DEFAULT_GRASS_SETTINGS } from "../grass/grass_config.js";
+import { grassGpuRingStableKey } from "../grass/grass_gpu_ring.js";
+import { applyGrassMaterialBiasFromYaml } from "../grass/grass_material_bias.js";
 import { computeGrassDensityScale } from "../grass/grass_math.js";
 import {
   GRASS_GPU_RING_STORAGE_BINDINGS,
@@ -54,6 +56,18 @@ describe("grass ring compute capabilities", () => {
     expect(shaderSource).toContain("params.material_density");
     expect(shaderSource).not.toContain("0.02, 1.0");
     expect(shaderSource).not.toContain("4.8");
+  });
+
+  it("includes material bias in the stable GPU ring key", () => {
+    const base = cloneGrassSettings(DEFAULT_GRASS_SETTINGS);
+    const changed = applyGrassMaterialBiasFromYaml(cloneGrassSettings(DEFAULT_GRASS_SETTINGS), `
+grass:
+  terrain:
+    rock:
+      density: 0.99
+`);
+
+    expect(grassGpuRingStableKey(changed, 256)).not.toBe(grassGpuRingStableKey(base, 256));
   });
 
   it("packs YAML LOD, width, and material inputs so GPU density mirrors the CPU helper", () => {
