@@ -50,6 +50,26 @@ describe("border-ocean acceptance probes", () => {
     expect(config.acceptance.requiredCounters).toContain("border_ocean.player_soft_pushback_enabled");
   });
 
+  it("fails clearly when root config is malformed", () => {
+    expect(() => parseBorderOceanSceneConfig("[]\n")).toThrow("root must be an object");
+  });
+
+  it("fails clearly when camera config is malformed", () => {
+    expect(() =>
+      parseBorderOceanSceneConfig(
+        yamlText.replace("eye_y_ratio: 0.14", "eye_y_ratio: high"),
+      ),
+    ).toThrow("border_ocean_scene.camera.eye_y_ratio must be a finite number");
+  });
+
+  it("fails clearly when integer acceptance config is malformed", () => {
+    expect(() =>
+      parseBorderOceanSceneConfig(
+        yamlText.replace("min_deep_ocean_vertices: 1000", "min_deep_ocean_vertices: 1000.5"),
+      ),
+    ).toThrow("border_ocean_scene.acceptance.min_deep_ocean_vertices must be an integer");
+  });
+
   it("fails clearly when required counters config has invalid values", () => {
     expect(() =>
       parseBorderOceanSceneConfig(
