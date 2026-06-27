@@ -23,6 +23,10 @@ use super::summary::{
     TerrainSummaryField, TerrainSummaryRebuildState, terrain_summary_rebuild_system,
 };
 
+/// Named set for gate refresh to avoid `SystemTypeSet` ordering ambiguity.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+struct ClodPageMeshGateSet;
+
 pub struct ClodPagesPlugin;
 
 impl Plugin for ClodPagesPlugin {
@@ -37,6 +41,10 @@ impl Plugin for ClodPagesPlugin {
             .init_resource::<ClodPageMeshGate>()
             .init_resource::<TerrainSummaryField>()
             .init_resource::<TerrainSummaryRebuildState>()
+            .configure_sets(
+                Update,
+                ClodPageMeshGateSet.before(crate::voxel::runtime::update_chunk_lod_system),
+            )
             .add_systems(Startup, clod_pages_startup_log_system)
             // Reads VoxelWorld immutably; the scheduler serializes it after the dirty mesher.
             .add_systems(
@@ -62,28 +70,16 @@ impl Plugin for ClodPagesPlugin {
             .add_systems(
                 Update,
                 (
-                    refresh_clod_page_mesh_gate_system,
+                    refresh_clod_page_mesh_gate_system.in_set(ClodPageMeshGateSet),
                     terrain_summary_rebuild_system,
                 )
                     .chain()
                     .after(clod_page_selection_system),
             )
-            // Second scheduling of the gate refresh: establishes an ordering edge
-            // `refresh_clod_page_mesh_gate_system → update_chunk_lod_system` across
-            // plugin boundaries.  The first instance (chained after selection, above)
-            // only orders it within this plugin.  Without this second entry, the gate
-            // could run *after* LOD on some frames when the schedulers of the two
-            // plugins interleave.  Both runs are idempotent on the same frame state,
-            // so the second is a safe ordering anchor.
-            .add_systems(
-                Update,
-                refresh_clod_page_mesh_gate_system
-                    .before(crate::voxel::runtime::update_chunk_lod_system),
-            )
             .add_systems(
                 Update,
                 clod_page_chunk_ownership_system
-                    .after(refresh_clod_page_mesh_gate_system)
+                    .after(ClodPageMeshGateSet)
                     .after(VoxelTerrainSet::MeshDirty),
             );
     }
