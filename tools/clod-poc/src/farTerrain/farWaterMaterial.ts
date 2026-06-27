@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { clamp, float, mix, normalize, positionGeometry, sin, smoothstep, step, texture, uniform, vec2, vec3 } from "three/tsl";
+import { clamp, float, mix, positionGeometry, sin, smoothstep, step, texture, uniform, vec2, vec3 } from "three/tsl";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarSummaryGpuAtlasRingView, FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 
