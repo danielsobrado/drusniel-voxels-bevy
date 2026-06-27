@@ -50,6 +50,14 @@ describe("border-ocean acceptance probes", () => {
     expect(config.acceptance.requiredCounters).toContain("border_ocean.player_soft_pushback_enabled");
   });
 
+  it("fails clearly when required counters config has invalid values", () => {
+    expect(() =>
+      parseBorderOceanSceneConfig(
+        yamlText.replace("- border_ocean.scene", "- 7"),
+      ),
+    ).toThrow("acceptance.required_counters[0] must be a non-empty string");
+  });
+
   it("validates playable ocean outside the square", () => {
     const sampler = createDeepOceanSampler(1024, {
       ...DEFAULT_BORDER_COAST_OCEAN_CONFIG.deepOcean,
@@ -69,6 +77,16 @@ describe("border-ocean acceptance probes", () => {
     const config = parseBorderOceanSceneConfig(yamlText);
     const stats = validStats();
     delete (stats.counters as Record<string, unknown>)["border_ocean.player_margin_m"];
+
+    expect(() => validateBorderOceanStats(stats, config)).toThrow(
+      "border-ocean required counter missing: border_ocean.player_margin_m",
+    );
+  });
+
+  it("fails clearly when a YAML-required counter is non-finite", () => {
+    const config = parseBorderOceanSceneConfig(yamlText);
+    const stats = validStats();
+    (stats.counters as Record<string, unknown>)["border_ocean.player_margin_m"] = Number.NaN;
 
     expect(() => validateBorderOceanStats(stats, config)).toThrow(
       "border-ocean required counter missing: border_ocean.player_margin_m",
