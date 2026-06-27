@@ -128,6 +128,24 @@ describe("player movement helpers", () => {
     ).toThrow("Player world edge margin must be a finite number greater than 0");
   });
 
+  it("fails when player pushback band is not finite", () => {
+    expect(() =>
+      validatePlayerWorldBoundsFit(
+        { minX: 0, minZ: 0, maxX: 128, maxZ: 128 },
+        { ...DEFAULT_PLAYER_CONFIG, worldEdgePushbackBand: Number.NaN },
+      ),
+    ).toThrow("Player world edge pushback band must be a finite number greater than or equal to 0");
+  });
+
+  it("fails when player pushback acceleration is negative", () => {
+    expect(() =>
+      validatePlayerWorldBoundsFit(
+        { minX: 0, minZ: 0, maxX: 128, maxZ: 128 },
+        { ...DEFAULT_PLAYER_CONFIG, worldEdgePushbackAcceleration: -1 },
+      ),
+    ).toThrow("Player world edge pushback acceleration must be a finite number greater than or equal to 0");
+  });
+
   it("does not push inside the safe center", () => {
     const push = worldEdgePushbackAcceleration(
       new THREE.Vector3(64, 0, 64),
