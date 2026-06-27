@@ -18,9 +18,11 @@ describe("persistent config roles", () => {
     checksum: "sha256" as const,
   };
 
-  it("disables persistence on main thread cache service", () => {
+  it("uses a separate main-thread summary database", () => {
     const resolved = resolvePersistentConfig(base, "main");
-    expect(resolved.enabled).toBe(false);
+    expect(resolved.enabled).toBe(true);
+    expect(resolved.database_name).toBe("drusniel-clod-poc-cache-summary-v2");
+    expect(resolved.object_store_name).toBe("artifacts");
   });
 
   it("disables local worker IndexedDB (brokered on main thread)", () => {
@@ -32,6 +34,7 @@ describe("persistent config roles", () => {
     const resolved = resolveBrokerPersistentConfig(base);
     expect(resolved.enabled).toBe(true);
     expect(resolved.database_name).toBe("drusniel-clod-poc-cache-pages-v2");
+    expect(resolved.object_store_name).toBe("artifacts");
   });
 
   it("createPersistentStore worker role does not throw on persistent config shape", () => {
