@@ -1,9 +1,8 @@
 import { load } from "js-yaml";
 import constructionYamlText from "../../config/construction.yaml?raw";
-import { SNAP_GROUPS, type ConstructionCategory, type ConstructionConfig, type ConstructionMaterial, type ConstructionPieceDef, type ConstructionSnapPoint, type SnapGroup } from "./types.js";
+import { CONSTRUCTION_MATERIALS, SNAP_GROUPS, type ConstructionCategory, type ConstructionConfig, type ConstructionMaterial, type ConstructionPieceDef, type ConstructionSnapPoint, type SnapGroup } from "./types.js";
 
 const CONSTRUCTION_CATEGORIES: readonly ConstructionCategory[] = ["floor", "wall", "fence", "pillar", "roof", "generic"];
-const CONSTRUCTION_MATERIALS: readonly ConstructionMaterial[] = ["wood", "stone", "metal", "thatch"];
 const MIN_DIMENSION_M = 0.01;
 const ZERO_LENGTH_EPSILON = 0.000001;
 const DEFAULT_SNAP_DIRECTION: readonly [number, number, number] = [0, 1, 0];
@@ -59,7 +58,7 @@ function readNumber(
   key: string,
   fallback: number,
   min: number,
-  max: number,
+  max: number
 ): number {
   const value = Number(record?.[key]);
   if (!Number.isFinite(value)) return fallback;
