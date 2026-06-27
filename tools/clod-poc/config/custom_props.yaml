@@ -6,6 +6,11 @@ prop_spatial:
   cell_size_m: 64
   max_instances_per_cell_warning: 512
   far_cell_update_interval_frames: 8
+  # 0 derives the ring from the largest prop culling distance plus one spatial cell.
+  ring_radius_m: 0
+  cell_update_budget_per_frame: 3
+  matrix_upload_budget_per_frame: 256
+  lod_refresh_distance_m: 10
 
 culling:
   cell_frustum_culling: true
@@ -39,7 +44,7 @@ category_budgets:
   interactive:
     max_triangles: 16000
     max_materials: 6
-    max_draw_parts: 10
+    max_drawParts: 10
     max_texture_px: 2048
 
 debug:
