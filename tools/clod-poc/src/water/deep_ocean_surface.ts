@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { DeepOceanRenderConfig } from "../terrain/border_coast_config.js";
-import { deepOceanWaveVerticalBounds } from "./deep_ocean_waves.js";
+import { deepOceanGpuWaves, deepOceanWaveVerticalBounds } from "./deep_ocean_waves.js";
 
 export interface DeepOceanSurface {
   mesh: THREE.Mesh;
@@ -98,7 +98,7 @@ export function createDeepOceanSurface(
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
-  const waveBounds = deepOceanWaveVerticalBounds();
+  const waveBounds = deepOceanWaveVerticalBounds(deepOceanGpuWaves(config.wave));
   geometry.boundingBox = new THREE.Box3(
     new THREE.Vector3(outerMin - waveBounds, y - waveBounds, outerMin - waveBounds),
     new THREE.Vector3(outerMax + waveBounds, y + waveBounds, outerMax + waveBounds),
