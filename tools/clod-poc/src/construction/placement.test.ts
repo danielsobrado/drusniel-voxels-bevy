@@ -191,6 +191,43 @@ describe("construction placement", () => {
     expect(result.valid).toBe(true);
   });
 
+  it("allows child-before-parent loading when the loader retries pending pieces", () => {
+    const child: PlacedConstructionPiece = {
+      id: "wall-1",
+      typeId: "wall",
+      position: [12, 2, 8],
+      rotationQuarterTurns: 1,
+      grounded: false,
+      parentIds: ["floor-1"],
+    };
+    const parent: PlacedConstructionPiece = {
+      id: "floor-1",
+      typeId: "floor",
+      position: [8, 1, 8],
+      rotationQuarterTurns: 0,
+      grounded: true,
+      parentIds: [],
+    };
+    const pending = [child, parent];
+    const loaded: PlacedConstructionPiece[] = [];
+
+    let madeProgress = true;
+    while (pending.length > 0 && madeProgress) {
+      madeProgress = false;
+      for (let index = pending.length - 1; index >= 0; index -= 1) {
+        const candidate = pending[index]!;
+        const result = validateSaved(candidate, loaded);
+        if (!result.valid) continue;
+        pending.splice(index, 1);
+        loaded.push(candidate);
+        madeProgress = true;
+      }
+    }
+
+    expect(loaded.map((piece) => piece.id)).toEqual(["floor-1", "wall-1"]);
+    expect(pending).toEqual([]);
+  });
+
   it("rejects saved pieces whose parent chain is missing", () => {
     const result = validateSaved({
       id: "wall-1",
