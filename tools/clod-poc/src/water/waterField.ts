@@ -1,18 +1,7 @@
-// WaterField — pure spatial service that answers water surface queries for the
-// fake lake/river bodies defined in config/water.yaml.
-//
-// Dry areas return terrainY - drySentinelDepth so the water mesh sits below the
-// terrain and is depth-tested out (or discarded in the shader when depth <= 0).
-// Lakes are flat at terrainHeight(center) + levelOffset. Rivers use a capsule
-// distance to the configured polyline with a sloped level along its length.
-//
-// This module has NO dependency on the CLOD page builder. It only reads the
-// terrain height sampler (an adapter) so water can track the terrain surface.
 import type { LakeBodyConfig, RiverBodyConfig, WaterConfig } from "./waterConfig.js";
 import type { HydrologySystem } from "./hydrologySystem.js";
 import { readRiverMaterialSettings } from "./riverMaterialRuntime.js";
 
-/** Adapter for the terrain surface height used to anchor fake water levels. */
 export interface TerrainHeightSampler {
   surfaceHeight(x: number, z: number): number;
 }
@@ -33,27 +22,19 @@ export interface WaterFieldResult {
   flow: WaterFlow;
 }
 
-/** Shallow shore surf inside the playable border — not deep ocean. */
+/** Shallow shore surf inside the playable border, not deep ocean. */
 export interface ShoreSurfBandSettings {
   enabled: boolean;
-  /** Cells from the nearest world edge where surf begins. */
   startDistance: number;
-  /** Cells from the edge where surf reaches full strength. */
   fullSurfDistance: number;
-  /** Sea level for the surf sheet. */
   level: number;
-  /** Max submerged depth used for surf mask fade (shallow wetness only). */
   maxShallowDepth: number;
 }
 
 export interface ClipmapExclusionBandSettings {
   enabled: boolean;
-  /** Cells from the nearest world edge owned by a separate ocean renderer. */
   distance: number;
 }
-
-/** @deprecated Use ShoreSurfBandSettings */
-export type EdgeOceanSettings = ShoreSurfBandSettings;
 
 export const DEFAULT_SHORE_SURF_BAND_SETTINGS: ShoreSurfBandSettings = {
   enabled: false,
@@ -68,13 +49,11 @@ export const DEFAULT_CLIPMAP_EXCLUSION_BAND_SETTINGS: ClipmapExclusionBandSettin
   distance: 0,
 };
 
-/** @deprecated Use DEFAULT_SHORE_SURF_BAND_SETTINGS */
-export const DEFAULT_EDGE_OCEAN_SETTINGS = DEFAULT_SHORE_SURF_BAND_SETTINGS;
-
 const FLOW_EPSILON = 1e-6;
 const RIVER_GEOMETRY_CELL_FADE_START = 6;
 const RIVER_GEOMETRY_CELL_FADE_END = 24;
 const RIVER_MATERIAL_SETTINGS = readRiverMaterialSettings();
+const STILL_FLOW: WaterFlow = { x: 0, z: 0, speed: 0, progress: 0, drop: 0 };
 
 interface LakeRuntime {
   center: [number, number];
@@ -95,6 +74,28 @@ interface RiverRuntime {
   downstreamDrop: number;
 }
 
+function cloneShoreSurfSettings(settings: ShoreSurfBandSettings): ShoreSurfBandSettings {
+  return { ...settings };
+}
+
+function cloneClipmapExclusionBandSettings(settings: ClipmapExclusionBandSettings): ClipmapExclusionBandSettings {
+  return { ...settings };
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function smooth01(value: number): number {
+  const t = clamp01(value);
+  return t * t * (3 - 2 * t);
+}
+
+function smoothMask(edge0: number, edge1: number, value: number): number {
+  if (edge1 <= edge0) return value >= edge1 ? 1 : 0;
+  return smooth01((value - edge0) / (edge1 - edge0));
+}
+
 function buildLakeRuntime(lake: LakeBodyConfig, sampler: TerrainHeightSampler): LakeRuntime {
   const rx = Math.max(0.001, lake.radius[0]);
   const rz = Math.max(0.001, lake.radius[1]);
@@ -111,13 +112,13 @@ function buildLakeRuntime(lake: LakeBodyConfig, sampler: TerrainHeightSampler): 
   }
   if (terrainSamples.length === 0) terrainSamples.push(sampler.surfaceHeight(lake.center[0], lake.center[1]));
   terrainSamples.sort((a, b) => a - b);
-  const p20 = terrainSamples[Math.min(terrainSamples.length - 1, Math.max(0, Math.floor((terrainSamples.length - 1) * 0.2)))];
+  const p20Index = Math.min(terrainSamples.length - 1, Math.max(0, Math.floor((terrainSamples.length - 1) * 0.2)));
   return {
     center: [...lake.center] as [number, number],
     radius: [rx, rz],
     invRadius: [1 / rx, 1 / rz],
     levelOffset: lake.levelOffset,
-    waterLevel: p20 + lake.levelOffset,
+    waterLevel: terrainSamples[p20Index] + lake.levelOffset,
   };
 }
 
@@ -126,7 +127,7 @@ function buildRiverRuntime(river: RiverBodyConfig, sampler: TerrainHeightSampler
   const segLengths: number[] = [];
   const levelPrefix: number[] = [0];
   let totalLength = 0;
-  for (let i = 1; i < points.length; i++) {
+  for (let i = 1; i < points.length; i += 1) {
     const dx = points[i][0] - points[i - 1][0];
     const dz = points[i][1] - points[i - 1][1];
     const len = Math.hypot(dx, dz);
@@ -134,20 +135,19 @@ function buildRiverRuntime(river: RiverBodyConfig, sampler: TerrainHeightSampler
     totalLength += len;
     levelPrefix.push(totalLength);
   }
+
   const levels = points.map((p) => sampler.surfaceHeight(p[0], p[1]) + river.levelOffset);
   if (river.downstreamDrop > 0 && levels.length > 1) {
     const startLevel = levels[0];
     const endLevel = Math.min(levels[levels.length - 1], startLevel - river.downstreamDrop);
-    for (let i = 1; i < levels.length; i++) {
+    for (let i = 1; i < levels.length; i += 1) {
       const progress = levelPrefix[i] / Math.max(1e-3, totalLength);
       levels[i] = Math.min(levels[i], startLevel + (endLevel - startLevel) * progress);
     }
-  }
-  for (let i = 1; i < levels.length; i++) levels[i] = Math.min(levels[i], levels[i - 1] - 0.02);
-  if (river.downstreamDrop > 0 && levels.length > 1) {
     levels[levels.length - 1] = Math.min(levels[levels.length - 1], levels[0] - river.downstreamDrop);
-    for (let i = levels.length - 2; i >= 0; i--) levels[i] = Math.max(levels[i], levels[i + 1] + 0.02);
   }
+  for (let i = 1; i < levels.length; i += 1) levels[i] = Math.min(levels[i], levels[i - 1] - 0.02);
+
   return {
     points,
     segLengths,
@@ -160,61 +160,28 @@ function buildRiverRuntime(river: RiverBodyConfig, sampler: TerrainHeightSampler
   };
 }
 
-/** Distance from point p to segment a-b, plus projection t in [0,1] along the segment. */
-function pointSegmentInfo(
-  px: number,
-  pz: number,
-  ax: number,
-  az: number,
-  bx: number,
-  bz: number,
-): { dist: number; t: number; closestX: number; closestZ: number } {
+function pointSegmentInfo(px: number, pz: number, ax: number, az: number, bx: number, bz: number) {
   const dx = bx - ax;
   const dz = bz - az;
   const segLenSq = dx * dx + dz * dz;
-  let t = 0;
-  if (segLenSq > FLOW_EPSILON) {
-    t = ((px - ax) * dx + (pz - az) * dz) / segLenSq;
-    t = Math.min(1, Math.max(0, t));
-  }
+  const rawT = segLenSq > FLOW_EPSILON ? ((px - ax) * dx + (pz - az) * dz) / segLenSq : 0;
+  const t = clamp01(rawT);
   const closestX = ax + dx * t;
   const closestZ = az + dz * t;
-  const dist = Math.hypot(px - closestX, pz - closestZ);
-  return { dist, t, closestX, closestZ };
-}
-
-/** Smooth minimum so body overlaps blend without hard seams at capsule/ellipse edges. */
-function smoothMask(edge0: number, edge1: number, value: number): number {
-  if (edge1 <= edge0) return value >= edge1 ? 1 : 0;
-  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
-}
-
-function smooth01(value: number): number {
-  const t = Math.min(1, Math.max(0, value));
-  return t * t * (3 - 2 * t);
-}
-
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
+  return { dist: Math.hypot(px - closestX, pz - closestZ), t, closestX, closestZ };
 }
 
 function cascadeMask(flowSpeed: number, drop: number): number {
   const speedMask = smooth01(flowSpeed / 0.75);
-  const dropMask = smoothMask(
-    RIVER_MATERIAL_SETTINGS.cascadeDropStart,
-    RIVER_MATERIAL_SETTINGS.cascadeDropEnd,
-    drop,
-  );
+  const dropMask = smoothMask(RIVER_MATERIAL_SETTINGS.cascadeDropStart, RIVER_MATERIAL_SETTINGS.cascadeDropEnd, drop);
   return speedMask * dropMask;
 }
 
 function cascadeWhitewaterDrop(drop: number, flowSpeed: number): number {
   const cascade = cascadeMask(flowSpeed, drop);
   if (cascade <= 0) return drop;
-  const boost = 1 + cascade * RIVER_MATERIAL_SETTINGS.cascadeWhitewaterBoost;
-  const lipSignal = cascade * RIVER_MATERIAL_SETTINGS.cascadeDropEnd * 0.35;
-  return drop * boost + lipSignal;
+  return drop * (1 + cascade * RIVER_MATERIAL_SETTINGS.cascadeWhitewaterBoost)
+    + cascade * RIVER_MATERIAL_SETTINGS.cascadeDropEnd * 0.35;
 }
 
 function flowSurfaceOffset(
@@ -234,8 +201,7 @@ function flowSurfaceOffset(
   if (detailFade <= 0) return 0;
 
   const river = clamp01(riverMask);
-  const body = clamp01(bodyMask);
-  const center = smoothMask(0.42, 0.96, body);
+  const center = smoothMask(0.42, 0.96, clamp01(bodyMask));
   const bank = (1 - center) * river;
   const speed = smooth01(flowSpeed / 1.15);
   const rapid = Math.max(speed, smooth01(drop / 1.6));
@@ -246,10 +212,7 @@ function flowSurfaceOffset(
   const sideWave = Math.cos(side * 0.42 + along * 0.035);
   const cascadeLip = smooth01(Math.sin(along * 0.72 + Math.sin(side * 0.11) * 0.9) * 0.5 + 0.5);
   const cascadeSheet = -RIVER_MATERIAL_SETTINGS.cascadeStepStrength * cascade * center * cascadeLip;
-  const cascadeRough = (channelWave * 0.65 + sideWave * 0.35)
-    * RIVER_MATERIAL_SETTINGS.cascadeRoughnessStrength
-    * cascade
-    * center;
+  const cascadeRough = (channelWave * 0.65 + sideWave * 0.35) * RIVER_MATERIAL_SETTINGS.cascadeRoughnessStrength * cascade * center;
   const centerTrough = -RIVER_MATERIAL_SETTINGS.geometryThalwegDip * center * smooth01(depthHint / 2.8);
   const bankLift = RIVER_MATERIAL_SETTINGS.geometryBankLift * bank * (1 + rapid * 0.35);
   const riffle = channelWave * RIVER_MATERIAL_SETTINGS.geometryRiffleStrength * rapid
@@ -276,14 +239,6 @@ function shapeRiverSurfaceY(
   const offset = flowSurfaceOffset(x, z, cellSize, dirX, dirZ, flowSpeed, drop, bodyMask, riverMask, depthHint);
   if (offset === 0) return baseWaterY;
   return Math.max(terrainY + 0.035, baseWaterY + offset);
-}
-
-function cloneShoreSurfSettings(settings: ShoreSurfBandSettings): ShoreSurfBandSettings {
-  return { ...settings };
-}
-
-function cloneClipmapExclusionBandSettings(settings: ClipmapExclusionBandSettings): ClipmapExclusionBandSettings {
-  return { ...settings };
 }
 
 export class WaterField {
@@ -341,47 +296,27 @@ export class WaterField {
     return cloneClipmapExclusionBandSettings(this.clipmapExclusionBand);
   }
 
-  /** @deprecated Use setShoreSurfBand */
-  setEdgeOcean(settings: Partial<ShoreSurfBandSettings & { fullDepthDistance?: number; minDepth?: number; maxDepth?: number }>): void {
-    this.setShoreSurfBand({
-      ...settings,
-      fullSurfDistance: settings.fullSurfDistance ?? settings.fullDepthDistance,
-      maxShallowDepth: settings.maxShallowDepth ?? settings.minDepth ?? settings.maxDepth,
-    });
-  }
-
-  /** @deprecated Use getShoreSurfBand */
-  getEdgeOcean(): ShoreSurfBandSettings {
-    return this.getShoreSurfBand();
-  }
-
-  /** Terrain surface height at (x,z), exposed for the clipmap vertex fill. */
   terrainYAt(x: number, z: number): number {
     if (this.source === "hydrology" && this.hydrology) return this.hydrology.terrainHeight(x, z);
     return this.sampler.surfaceHeight(x, z);
   }
 
-  /** Water surface height at (x,z). Dry areas return terrainY - drySentinelDepth. */
   waterYAt(x: number, z: number): number {
     return this.sample(x, z).waterY;
   }
 
-  /** Water depth (waterY - terrainY). Negative in dry areas. */
   depthAt(x: number, z: number): number {
     return this.sample(x, z).depth;
   }
 
-  /** Flow direction and speed at (x,z). Lakes ~0; rivers follow the closest segment. */
   flowAt(x: number, z: number): WaterFlow {
     return this.sample(x, z).flow;
   }
 
-  /** Body mask in [0,1]: lake/river/ocean occupancy, blended at edges. 0 in dry areas. */
   bodyMaskAt(x: number, z: number): number {
     return this.sample(x, z).bodyMask;
   }
 
-  /** Full result in one pass (cheaper than four separate calls for vertex fill). */
   sample(x: number, z: number): WaterFieldResult {
     return this.sampleForCellSize(x, z, 0);
   }
@@ -390,61 +325,47 @@ export class WaterField {
     const shoreSurf = this.sampleShoreSurfBand(x, z);
     if (shoreSurf) return shoreSurf;
     if (this.isInClipmapExclusionBand(x, z)) return this.sampleDry(x, z);
+    if (this.source === "hydrology" && this.hydrology) return this.sampleHydrology(x, z, cellSize);
+    return this.sampleFakeBodies(x, z, cellSize);
+  }
 
-    if (this.source === "hydrology" && this.hydrology) {
-      const s = this.hydrology.sample(x, z);
-      const useFar = cellSize >= this.farLevelMinCellSize;
-      const baseWaterY = useFar ? s.waterYFar : s.waterY;
-      const baseDepth = baseWaterY - s.terrainY;
-      const riverMask = clamp01(s.riverMask);
-      const flowDirLen = Math.hypot(s.flowX, s.flowZ);
-      const flowSpeed = Math.max(0, s.flowStrength) * riverMask;
-      if (flowDirLen > FLOW_EPSILON && flowSpeed > FLOW_EPSILON) {
-        const dirX = s.flowX / flowDirLen;
-        const dirZ = s.flowZ / flowDirLen;
-        const drop = cascadeWhitewaterDrop(this.hydrologyRiverLocalDrop(x, z, dirX, dirZ), flowSpeed);
-        const bodyMask = baseDepth > 0 ? s.bodyMask : 0;
-        const waterY = shapeRiverSurfaceY(
-          x,
-          z,
-          baseWaterY,
-          s.terrainY,
-          cellSize,
-          dirX,
-          dirZ,
-          flowSpeed,
-          drop,
-          bodyMask,
-          riverMask,
-          Math.max(baseDepth, s.riverDepth),
-        );
-        const depth = waterY - s.terrainY;
-        return {
-          waterY,
-          terrainY: s.terrainY,
-          depth,
-          bodyMask: depth > 0 ? bodyMask : 0,
-          flow: {
-            x: dirX,
-            z: dirZ,
-            speed: flowSpeed,
-            progress: 0,
-            drop,
-          },
-        };
-      }
+  private sampleHydrology(x: number, z: number, cellSize: number): WaterFieldResult {
+    if (!this.hydrology) return this.sampleDry(x, z);
+    const s = this.hydrology.sample(x, z);
+    const useFar = cellSize >= this.farLevelMinCellSize;
+    const baseWaterY = useFar ? s.waterYFar : s.waterY;
+    const baseDepth = baseWaterY - s.terrainY;
+    const riverMask = clamp01(s.riverMask);
+    const flowDirLen = Math.hypot(s.flowX, s.flowZ);
+    const flowSpeed = Math.max(0, s.flowStrength) * riverMask;
 
+    if (flowDirLen > FLOW_EPSILON && flowSpeed > FLOW_EPSILON) {
+      const dirX = s.flowX / flowDirLen;
+      const dirZ = s.flowZ / flowDirLen;
+      const drop = cascadeWhitewaterDrop(this.hydrologyRiverLocalDrop(x, z, dirX, dirZ), flowSpeed);
+      const bodyMask = baseDepth > 0 ? s.bodyMask : 0;
+      const waterY = shapeRiverSurfaceY(x, z, baseWaterY, s.terrainY, cellSize, dirX, dirZ, flowSpeed, drop, bodyMask, riverMask, Math.max(baseDepth, s.riverDepth));
+      const depth = waterY - s.terrainY;
       return {
-        waterY: baseWaterY,
+        waterY,
         terrainY: s.terrainY,
-        depth: baseDepth,
-        bodyMask: baseDepth > 0 ? s.bodyMask : 0,
-        flow: { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
+        depth,
+        bodyMask: depth > 0 ? bodyMask : 0,
+        flow: { x: dirX, z: dirZ, speed: flowSpeed, progress: 0, drop },
       };
     }
 
-    const terrainY = this.sampler.surfaceHeight(x, z);
+    return {
+      waterY: baseWaterY,
+      terrainY: s.terrainY,
+      depth: baseDepth,
+      bodyMask: baseDepth > 0 ? s.bodyMask : 0,
+      flow: { ...STILL_FLOW },
+    };
+  }
 
+  private sampleFakeBodies(x: number, z: number, cellSize: number): WaterFieldResult {
+    const terrainY = this.sampler.surfaceHeight(x, z);
     let bestLakeLevel = Number.POSITIVE_INFINITY;
     let bestLakeWeight = 0;
     let maxLakeMask = 0;
@@ -453,28 +374,20 @@ export class WaterField {
       const dx = (x - lake.center[0]) * lake.invRadius[0];
       const dz = (z - lake.center[1]) * lake.invRadius[1];
       const r2 = dx * dx + dz * dz;
-      const edgeStart = 0.94 * 0.94;
-      const weight = 1 - smoothMask(edgeStart, 1.0, r2);
-      if (weight > 0) {
-        maxLakeMask = Math.max(maxLakeMask, weight);
-        const level = lake.waterLevel;
-        if (weight > bestLakeWeight) {
-          bestLakeWeight = weight;
-          bestLakeLevel = level;
-        }
+      const weight = 1 - smoothMask(0.94 * 0.94, 1, r2);
+      if (weight <= 0) continue;
+      maxLakeMask = Math.max(maxLakeMask, weight);
+      if (weight > bestLakeWeight) {
+        bestLakeWeight = weight;
+        bestLakeLevel = lake.waterLevel;
       }
     }
 
     let bestRiverLevel = Number.POSITIVE_INFINITY;
     let bestRiverWeight = 0;
     let maxRiverMask = 0;
-
-    let bestFlowSpeed = 0;
-    let bestFlowX = 0;
-    let bestFlowZ = 0;
+    let bestFlow: WaterFlow = { ...STILL_FLOW };
     let bestFlowWeight = 0;
-    let bestFlowProgress = 0;
-    let bestFlowDrop = 0;
 
     for (const river of this.rivers) {
       let bestDist = Infinity;
@@ -482,15 +395,8 @@ export class WaterField {
       let accLen = 0;
       let bestAccLen = 0;
 
-      for (let i = 0; i < river.points.length - 1; i++) {
-        const info = pointSegmentInfo(
-          x,
-          z,
-          river.points[i][0],
-          river.points[i][1],
-          river.points[i + 1][0],
-          river.points[i + 1][1],
-        );
+      for (let i = 0; i < river.points.length - 1; i += 1) {
+        const info = pointSegmentInfo(x, z, river.points[i][0], river.points[i][1], river.points[i + 1][0], river.points[i + 1][1]);
         if (info.dist < bestDist) {
           bestDist = info.dist;
           bestSegIdx = i;
@@ -499,16 +405,14 @@ export class WaterField {
         accLen += river.segLengths[i];
       }
 
-      const m = 1 - smoothMask(river.halfWidth * 0.9, river.halfWidth, bestDist);
-      maxRiverMask = Math.max(maxRiverMask, m);
-
+      const riverMask = 1 - smoothMask(river.halfWidth * 0.9, river.halfWidth, bestDist);
+      maxRiverMask = Math.max(maxRiverMask, riverMask);
       const inside = bestDist <= river.halfWidth;
-      const proximity = 1 - smoothMask(river.halfWidth * 0.9, river.halfWidth, bestDist);
-      if (inside || proximity > 0) {
-        const weight = inside ? 1 : proximity;
+      if (inside || riverMask > 0) {
+        const weight = inside ? 1 : riverMask;
         const segStart = river.levelPrefix[bestSegIdx] ?? 0;
         const segLen = Math.max(FLOW_EPSILON, river.segLengths[bestSegIdx] ?? 1);
-        const segT = Math.min(1, Math.max(0, (bestAccLen - segStart) / segLen));
+        const segT = clamp01((bestAccLen - segStart) / segLen);
         const level = river.levels[bestSegIdx] * (1 - segT) + river.levels[bestSegIdx + 1] * segT;
         if (weight > bestRiverWeight) {
           bestRiverWeight = weight;
@@ -517,66 +421,38 @@ export class WaterField {
       }
 
       const flowProximity = 1 - smoothMask(river.halfWidth * 0.5, river.halfWidth, bestDist);
-      if (flowProximity > 0) {
+      if (flowProximity > bestFlowWeight) {
         const ax = river.points[bestSegIdx][0];
         const az = river.points[bestSegIdx][1];
         const bx = river.points[bestSegIdx + 1][0];
         const bz = river.points[bestSegIdx + 1][1];
-        let dirX = bx - ax;
-        let dirZ = bz - az;
-        const len = Math.hypot(dirX, dirZ);
+        const dx = bx - ax;
+        const dz = bz - az;
+        const len = Math.hypot(dx, dz);
         if (len >= FLOW_EPSILON) {
-          dirX /= len;
-          dirZ /= len;
-          if (flowProximity > bestFlowWeight) {
-            bestFlowWeight = flowProximity;
-            const centerFade = 1 - smoothMask(0, river.halfWidth, bestDist);
-            const segDrop = Math.max(0, (river.levels[bestSegIdx] ?? 0) - (river.levels[bestSegIdx + 1] ?? 0));
-            const localSlopeSpeed = (segDrop / Math.max(1, river.segLengths[bestSegIdx] ?? 1)) * 90;
-            const dropSpeed = (river.downstreamDrop / Math.max(1, river.totalLength)) * 60;
-            bestFlowSpeed = Math.max(dropSpeed, localSlopeSpeed) * centerFade;
-            bestFlowX = dirX;
-            bestFlowZ = dirZ;
-            bestFlowProgress = Math.min(1, Math.max(0, bestAccLen / river.totalLength));
-            bestFlowDrop = Math.max(segDrop, river.downstreamDrop);
-          }
+          const segDrop = Math.max(0, (river.levels[bestSegIdx] ?? 0) - (river.levels[bestSegIdx + 1] ?? 0));
+          const localSlopeSpeed = (segDrop / Math.max(1, river.segLengths[bestSegIdx] ?? 1)) * 90;
+          const dropSpeed = (river.downstreamDrop / Math.max(1, river.totalLength)) * 60;
+          bestFlowWeight = flowProximity;
+          bestFlow = {
+            x: dx / len,
+            z: dz / len,
+            speed: Math.max(dropSpeed, localSlopeSpeed) * (1 - smoothMask(0, river.halfWidth, bestDist)),
+            progress: clamp01(bestAccLen / river.totalLength),
+            drop: Math.max(segDrop, river.downstreamDrop),
+          };
         }
       }
     }
 
-    const bodyMask = Math.min(1, Math.max(0, Math.max(maxLakeMask, maxRiverMask)));
-
-    let waterY = terrainY - this.drySentinelDepth;
+    const bodyMask = clamp01(Math.max(maxLakeMask, maxRiverMask));
     const usingRiver = bestRiverWeight > 0 && bestRiverWeight >= bestLakeWeight;
+    let waterY = terrainY - this.drySentinelDepth;
     if (bestLakeWeight > 0 || bestRiverWeight > 0) {
-      waterY = bestLakeWeight > bestRiverWeight ? bestLakeLevel : bestRiverLevel;
+      waterY = usingRiver ? bestRiverLevel : bestLakeLevel;
     }
-
-    const flow = bestFlowWeight > 0
-      ? {
-          x: bestFlowX,
-          z: bestFlowZ,
-          speed: bestFlowSpeed,
-          progress: bestFlowProgress,
-          drop: bestFlowDrop,
-        }
-      : { x: 0, z: 0, speed: 0, progress: 0, drop: 0 };
-
-    if (usingRiver && flow.speed > FLOW_EPSILON) {
-      waterY = shapeRiverSurfaceY(
-        x,
-        z,
-        waterY,
-        terrainY,
-        cellSize,
-        flow.x,
-        flow.z,
-        flow.speed,
-        flow.drop,
-        bodyMask,
-        maxRiverMask,
-        waterY - terrainY,
-      );
+    if (usingRiver && bestFlow.speed > FLOW_EPSILON) {
+      waterY = shapeRiverSurfaceY(x, z, waterY, terrainY, cellSize, bestFlow.x, bestFlow.z, bestFlow.speed, bestFlow.drop, bodyMask, maxRiverMask, waterY - terrainY);
     }
 
     return {
@@ -584,7 +460,7 @@ export class WaterField {
       terrainY,
       depth: waterY - terrainY,
       bodyMask,
-      flow,
+      flow: bestFlow,
     };
   }
 
@@ -601,13 +477,7 @@ export class WaterField {
   private sampleDry(x: number, z: number): WaterFieldResult {
     const terrainY = this.terrainYAt(x, z);
     const waterY = terrainY - this.drySentinelDepth;
-    return {
-      waterY,
-      terrainY,
-      depth: waterY - terrainY,
-      bodyMask: 0,
-      flow: { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
-    };
+    return { waterY, terrainY, depth: waterY - terrainY, bodyMask: 0, flow: { ...STILL_FLOW } };
   }
 
   private isInClipmapExclusionBand(x: number, z: number): boolean {
@@ -632,14 +502,12 @@ export class WaterField {
     if (depth <= 0) return null;
 
     const shallowNorm = Math.min(1, depth / Math.max(0.01, this.shoreSurf.maxShallowDepth));
-    const bodyMask = Math.min(1, strength * shallowNorm);
-
     return {
       waterY,
       terrainY,
       depth,
-      bodyMask,
-      flow: { x: 0, z: 0, speed: 0, progress: 0, drop: 0 },
+      bodyMask: Math.min(1, strength * shallowNorm),
+      flow: { ...STILL_FLOW },
     };
   }
 }
