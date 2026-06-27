@@ -111,6 +111,13 @@ export function shouldUseSyntheticCanopyFallback(
   return visibleTileCount === 0 && config.source.allowSyntheticDebugFallback;
 }
 
+export function shouldKeepCanopyShellActive(
+  config: CanopyShellConfig,
+  forceSynthetic: boolean,
+): boolean {
+  return config.clipmap.enabled || forceSynthetic || config.debug.forceSyntheticSource;
+}
+
 export function createCanopyShellSystem(
   yamlText: string,
   searchParams: URLSearchParams,
@@ -156,6 +163,18 @@ export function createCanopyShellSystem(
     shell.mesh.position.set(center.x, 0, center.z);
   };
 
+  const disposeShellAndTextures = () => {
+    if (shell) {
+      deps.scene.remove(shell.mesh);
+      shell.dispose();
+      shell = null;
+    }
+    disposeCanopyTextureSet(textureSet);
+    textureSet = null;
+    metrics.shellTriangles = 0;
+    debugState.syntheticFallbackActive = false;
+  };
+
   const rebuildShell = (set: CanopyTextureSet) => {
     if (shell) {
       deps.scene.remove(shell.mesh);
@@ -180,6 +199,12 @@ export function createCanopyShellSystem(
   };
 
   const ensureTextures = (forceSynthetic: boolean): boolean => {
+    if (!shouldKeepCanopyShellActive(config, forceSynthetic)) {
+      disposeShellAndTextures();
+      textureRefreshPending = false;
+      return false;
+    }
+
     const visibleTiles = clipmap.getVisibleTiles();
     const farRadius = config.distances.shellEndM;
     const useSynthetic = shouldUseSyntheticCanopyFallback(config, forceSynthetic, visibleTiles.length);
@@ -239,6 +264,14 @@ export function createCanopyShellSystem(
     centerZ = clipUpdate.centerZ;
     metrics = { ...metrics, ...clipUpdate.metrics };
 
+    if (!shouldKeepCanopyShellActive(config, false)) {
+      disposeShellAndTextures();
+      textureRefreshPending = false;
+      updateCanopyDebugOverlays(overlays, clipmap.getVisibleTiles(), config, centerX, centerZ, debugState);
+      publish();
+      return;
+    }
+
     uploadBudgetUsed = 0;
     if (clipUpdate.texturesDirty || textureRefreshPending || !textureSet) {
       if (shouldAttemptTextureUpload(config.budgets.maxTextureUploadsPerFrame, uploadBudgetUsed)) {
@@ -269,6 +302,12 @@ export function createCanopyShellSystem(
       config = deps.getConfig();
       textureConfigKey = canopyTextureConfigKey(config);
       textureRefreshPending = true;
+      if (!shouldKeepCanopyShellActive(config, config.debug.forceSyntheticSource)) {
+        disposeShellAndTextures();
+        textureRefreshPending = false;
+        publish();
+        return;
+      }
       if (shouldAttemptTextureUpload(config.budgets.maxTextureUploadsPerFrame, 0)) {
         const uploaded = ensureTextures(config.debug.forceSyntheticSource);
         if (uploaded) textureRefreshPending = false;
@@ -276,13 +315,7 @@ export function createCanopyShellSystem(
       publish();
     },
     dispose() {
-      if (shell) {
-        deps.scene.remove(shell.mesh);
-        shell.dispose();
-        shell = null;
-      }
-      disposeCanopyTextureSet(textureSet);
-      textureSet = null;
+      disposeShellAndTextures();
       clipmap.dispose();
       overlays.dispose();
     },
