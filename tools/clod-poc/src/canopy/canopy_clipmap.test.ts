@@ -72,7 +72,26 @@ describe("canopy clipmap", () => {
     const update = clipmap.update(0, 0, disabled, terrain, trees);
     expect(clipmap.getVisibleTiles()).toHaveLength(0);
     expect(update.metrics.builtThisFrame).toBe(0);
+    expect(update.metrics.visibleTiles).toBe(0);
+    expect(update.metrics.averageCoverage).toBe(0);
     expect(update.texturesDirty).toBe(true);
+
+    const second = clipmap.update(0, 0, disabled, terrain, trees);
+    expect(second.metrics.evictedTiles).toBe(0);
+    expect(second.texturesDirty).toBe(false);
+  });
+
+  it("uses first camera position as freeze center when frozen before first update", () => {
+    const clipmap = createCanopyClipmap();
+    clipmap.setFreezeCenter(true);
+
+    const first = clipmap.update(2048, 1024, config, terrain, trees);
+    expect(first.centerX).toBe(2048);
+    expect(first.centerZ).toBe(1024);
+
+    const second = clipmap.update(4096, 4096, config, terrain, trees);
+    expect(second.centerX).toBe(2048);
+    expect(second.centerZ).toBe(1024);
   });
 
   it("texture revision changes after clipmap warms at a new camera position", () => {
