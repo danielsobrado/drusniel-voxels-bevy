@@ -16,10 +16,10 @@ Done:
 - clod-poc NAADF far-shell height sampling defaults to GPU.
 - clod-poc has `tools/clod-poc/scripts/export-world-source-golden.mts`.
 - clod-poc has `tools/clod-poc/fixtures/world_source_golden_samples.json` with 70 samples, 10 per biome.
+- Bevy has Rust fixture parity tests in `src/world/source/golden_fixture_tests.rs`.
 
 Not done yet:
 
-- Bevy has no Rust parity reader for the clod-poc fixture.
 - Bevy chunk generation does not default to `WorldSourceTerrainBridge`.
 - Bevy does not yet have the clod-poc biome/splat WGSL path.
 - Bevy content is still behind the seven-biome clod-poc model.
@@ -80,20 +80,20 @@ Acceptance:
 
 ### BVY-WS-03 — Add Bevy golden fixture reader and parity tests
 
-Status: Next.
+Status: Done.
 
 Acceptance:
 
-- [ ] Rust test loads `tools/clod-poc/fixtures/world_source_golden_samples.json`.
-- [ ] Height tolerance is explicit and small.
-- [ ] Biome ID matches exactly.
-- [ ] Ocean mask tolerance is explicit and small.
-- [ ] Dominant material layer matches through the temporary mapping.
-- [ ] Test fails on unsupported contract version.
+- [x] Rust test loads `tools/clod-poc/fixtures/world_source_golden_samples.json`.
+- [x] Height tolerance is explicit and small.
+- [x] Biome ID matches exactly.
+- [x] Ocean mask tolerance is explicit and small.
+- [x] Dominant material layer matches through the temporary mapping.
+- [x] Test fails on unsupported contract version.
 
 ### BVY-WS-04 — Add Bevy terrain-source mode config
 
-Status: Pending.
+Status: Next.
 
 Modes:
 
