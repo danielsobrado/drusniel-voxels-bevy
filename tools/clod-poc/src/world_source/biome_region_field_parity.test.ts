@@ -19,6 +19,19 @@ const LAND_ISLAND: IslandMaskSample = {
   nearestCenterZ: 0,
   cliffWeight: 0,
 };
+const CONTRACT_FIELD_ORDER = [
+  "regionCellM",
+  "oceanHeightMarginM",
+  "oceanIslandMaskMax",
+  "coastHeightBandM",
+  "coastShoreDistanceM",
+  "mountainHeightAboveSeaM",
+  "swampHeightAboveSeaM",
+  "swampNoiseMax",
+  "plainsDistanceMin",
+  "plainsNoiseMin",
+  "forestNoiseMin",
+] as const;
 
 interface GoldenBiomeRow {
   name: string;
@@ -53,6 +66,19 @@ function expectContractField(fieldName: keyof typeof BIOME_REGION_CONTRACT): voi
   expect(wgslFunctionBody("classifyBiomeRegion")).toContain(`contract.${fieldName}`);
 }
 
+function parseDefaultWgslContract(): Record<string, number> {
+  const body = wgslFunctionBody("defaultBiomeRegionContract");
+  const constructorMatch = body.match(/return\s+BiomeRegionContract\(([^)]*)\)/s);
+  expect(constructorMatch, "defaultBiomeRegionContract must return BiomeRegionContract(...)").not.toBeNull();
+  const values = constructorMatch![1]
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => Number(entry));
+  expect(values).toHaveLength(CONTRACT_FIELD_ORDER.length);
+  return Object.fromEntries(CONTRACT_FIELD_ORDER.map((field, index) => [field, values[index]]));
+}
+
 describe("BiomeRegionField canonical classification", () => {
   it("pins a golden table for every biome branch", () => {
     const rows: GoldenBiomeRow[] = [
@@ -78,6 +104,10 @@ describe("BiomeRegionField canonical classification", () => {
     for (const field of Object.keys(BIOME_REGION_CONTRACT) as (keyof typeof BIOME_REGION_CONTRACT)[]) {
       expectContractField(field);
     }
+  });
+
+  it("keeps WGSL default contract values byte-aligned with TypeScript", () => {
+    expect(parseDefaultWgslContract()).toEqual(BIOME_REGION_CONTRACT);
   });
 
   it("does not allow duplicated threshold literals inside the WGSL classifier", () => {
