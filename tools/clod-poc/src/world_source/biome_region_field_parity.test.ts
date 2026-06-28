@@ -1,18 +1,9 @@
 import { describe, expect, it } from "vitest";
 import biomeRegionWgsl from "../gpu/shaders/biome_region_field.wgsl?raw";
 import {
-  BIOME_COAST_HEIGHT_BAND_M,
-  BIOME_COAST_SHORE_DISTANCE_M,
-  BIOME_FOREST_NOISE_MIN,
   BIOME_IDS,
-  BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M,
-  BIOME_OCEAN_HEIGHT_MARGIN_M,
-  BIOME_OCEAN_ISLAND_MASK_MAX,
-  BIOME_PLAINS_DISTANCE_MIN,
-  BIOME_PLAINS_NOISE_MIN,
   BIOME_REGION_CELL_M,
-  BIOME_SWAMP_HEIGHT_ABOVE_SEA_M,
-  BIOME_SWAMP_NOISE_MAX,
+  BIOME_REGION_CONTRACT,
   classifyBiomeRegion,
   type BiomeId,
 } from "./biome_region_field.js";
@@ -51,8 +42,15 @@ function classify(row: GoldenBiomeRow): BiomeId {
   }).biome;
 }
 
-function expectWgslNumber(value: number): void {
-  expect(biomeRegionWgsl).toContain(Number.isInteger(value) ? `${value}.0` : String(value));
+function wgslFunctionBody(name: string): string {
+  const start = biomeRegionWgsl.indexOf(`fn ${name}`);
+  expect(start, `${name} function missing`).toBeGreaterThanOrEqual(0);
+  const next = biomeRegionWgsl.indexOf("\nfn ", start + 1);
+  return biomeRegionWgsl.slice(start, next === -1 ? undefined : next);
+}
+
+function expectContractField(fieldName: keyof typeof BIOME_REGION_CONTRACT): void {
+  expect(wgslFunctionBody("classifyBiomeRegion")).toContain(`contract.${fieldName}`);
 }
 
 describe("BiomeRegionField canonical classification", () => {
@@ -74,28 +72,50 @@ describe("BiomeRegionField canonical classification", () => {
     }
   });
 
-  it("keeps CPU threshold constants mirrored in WGSL", () => {
-    for (const value of [
-      BIOME_REGION_CELL_M,
-      BIOME_OCEAN_HEIGHT_MARGIN_M,
-      BIOME_OCEAN_ISLAND_MASK_MAX,
-      BIOME_COAST_HEIGHT_BAND_M,
-      BIOME_COAST_SHORE_DISTANCE_M,
-      BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M,
-      BIOME_SWAMP_HEIGHT_ABOVE_SEA_M,
-      BIOME_SWAMP_NOISE_MAX,
-      BIOME_PLAINS_DISTANCE_MIN,
-      BIOME_PLAINS_NOISE_MIN,
-      BIOME_FOREST_NOISE_MIN,
-    ]) {
-      expectWgslNumber(value);
+  it("uses the same named contract fields in TypeScript CPU and WGSL classifier paths", () => {
+    expect(biomeRegionWgsl).toContain("struct BiomeRegionContract");
+    expect(wgslFunctionBody("classifyBiomeRegion")).toContain("contract : BiomeRegionContract");
+    for (const field of Object.keys(BIOME_REGION_CONTRACT) as (keyof typeof BIOME_REGION_CONTRACT)[]) {
+      expectContractField(field);
     }
+  });
+
+  it("does not allow duplicated threshold literals inside the WGSL classifier", () => {
+    const classifier = wgslFunctionBody("classifyBiomeRegion");
+    for (const literal of ["1.5", "0.08", "4.0", "42.0", "420.0", "68.0", "8.0", "0.42", "0.72", "0.58", "0.46"]) {
+      expect(classifier, `literal ${literal} must only live in defaultBiomeRegionContract`).not.toContain(literal);
+    }
+  });
+
+  it("proves contract overrides change classification through the shared TypeScript path", () => {
+    const defaultBiome = classifyBiomeRegion({
+      x: 0,
+      z: 0,
+      height: SEA_LEVEL + 70,
+      seed: SEED,
+      seaLevel: SEA_LEVEL,
+      regionCellM: BIOME_REGION_CELL_M,
+      islandRadiusM: ISLAND_RADIUS_M,
+      island: LAND_ISLAND,
+    }).biome;
+    const overriddenBiome = classifyBiomeRegion({
+      x: 0,
+      z: 0,
+      height: SEA_LEVEL + 70,
+      seed: SEED,
+      seaLevel: SEA_LEVEL,
+      regionCellM: BIOME_REGION_CELL_M,
+      islandRadiusM: ISLAND_RADIUS_M,
+      island: LAND_ISLAND,
+      contract: { mountainHeightAboveSeaM: 120 },
+    }).biome;
+
+    expect(defaultBiome).toBe(BIOME_IDS.mountain);
+    expect(overriddenBiome).not.toBe(BIOME_IDS.mountain);
   });
 
   it("keeps the WGSL classifier island-aware instead of origin-radial", () => {
     expect(biomeRegionWgsl).toContain("fn sampleBiomeIslandMask");
-    expect(biomeRegionWgsl).toContain("islandMask < 0.08");
-    expect(biomeRegionWgsl).toContain("shoreDistanceM < 42.0");
     expect(biomeRegionWgsl).toContain("nearestCenterX");
     expect(biomeRegionWgsl).toContain("nearestCenterZ");
     expect(biomeRegionWgsl).toContain("if (islandMask > bestMask)");
