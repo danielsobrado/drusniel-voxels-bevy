@@ -1,4 +1,6 @@
 use super::*;
+use super::world_source_generation::fill_world_source_chunk_voxels;
+use crate::world::source::{ProceduralWorldSourceTerrainBridge, TerrainSourceConfig, TerrainSourceMode};
 
 // =============================================================================
 // Async Chunk Generation
@@ -8,6 +10,21 @@ use super::*;
 struct ChunkGenerationResult {
     chunk: Chunk,
     stats: ChunkStats,
+}
+
+#[derive(Clone)]
+pub(crate) enum ChunkTerrainSource {
+    Legacy(Arc<TerrainGenerator>),
+    WorldSource(Arc<ProceduralWorldSourceTerrainBridge>, TerrainSourceMode),
+}
+
+impl ChunkTerrainSource {
+    pub(crate) fn active_mode(&self) -> TerrainSourceMode {
+        match self {
+            ChunkTerrainSource::Legacy(_) => TerrainSourceMode::Legacy,
+            ChunkTerrainSource::WorldSource(_, mode) => *mode,
+        }
+    }
 }
 
 /// Tracks the state of async world generation.
@@ -32,7 +49,7 @@ impl Default for ChunkGenerationState {
         Self {
             total_chunks: 0,
             chunks_completed: 0,
-            is_complete: true, // Default to complete (no generation needed)
+            is_complete: true,
             loading_from_disk: false,
             world_stats: WorldStats::default(),
             start_time: None,
@@ -41,7 +58,6 @@ impl Default for ChunkGenerationState {
 }
 
 impl ChunkGenerationState {
-    /// Returns the generation progress as a percentage (0.0 to 1.0).
     pub fn progress(&self) -> f32 {
         if self.total_chunks == 0 {
             return 1.0;
@@ -49,7 +65,6 @@ impl ChunkGenerationState {
         self.chunks_completed as f32 / self.total_chunks as f32
     }
 
-    /// Returns true if generation is in progress.
     pub fn is_generating(&self) -> bool {
         !self.is_complete && !self.loading_from_disk
     }
@@ -59,14 +74,12 @@ pub(crate) fn should_poll_chunk_generation_tasks(gen_state: &ChunkGenerationStat
     !gen_state.is_complete && !gen_state.loading_from_disk && gen_state.total_chunks > 0
 }
 
-/// Component to hold a pending chunk generation task.
 #[derive(Component)]
 pub(crate) struct ChunkGenerationTask {
     task: Task<ChunkGenerationResult>,
     chunk_pos: IVec3,
 }
 
-/// Component to hold an asynchronous saved-world load task.
 #[derive(Component)]
 pub(crate) struct WorldLoadTask {
     task: Task<Result<VoxelWorld, String>>,
@@ -81,11 +94,11 @@ pub(crate) struct PendingWorldGeneration {
 pub(crate) struct WorldGenerationQueue {
     positions: Vec<IVec3>,
     next_index: usize,
-    generator: Option<Arc<TerrainGenerator>>,
+    generator: Option<ChunkTerrainSource>,
 }
 
 impl WorldGenerationQueue {
-    pub(crate) fn begin(&mut self, positions: Vec<IVec3>, generator: Arc<TerrainGenerator>) {
+    pub(crate) fn begin(&mut self, positions: Vec<IVec3>, generator: ChunkTerrainSource) {
         self.positions = positions;
         self.next_index = 0;
         self.generator = Some(generator);
@@ -98,7 +111,7 @@ impl WorldGenerationQueue {
     pub(crate) fn take_next_batch(
         &mut self,
         max_batch_size: usize,
-    ) -> Option<(Vec<IVec3>, Arc<TerrainGenerator>, bool)> {
+    ) -> Option<(Vec<IVec3>, ChunkTerrainSource, bool)> {
         if self.remaining() == 0 {
             self.positions.clear();
             self.next_index = 0;
@@ -106,7 +119,7 @@ impl WorldGenerationQueue {
             return None;
         }
 
-        let generator = Arc::clone(self.generator.as_ref()?);
+        let generator = self.generator.as_ref()?.clone();
         let batch_size = max_batch_size.max(1);
         let end_index = (self.next_index + batch_size).min(self.positions.len());
         let batch = self.positions[self.next_index..end_index].to_vec();
@@ -122,11 +135,7 @@ impl WorldGenerationQueue {
         Some((batch, generator, complete))
     }
 }
-// =============================================================================
-// World Setup
-// =============================================================================
 
-/// Debug flag to generate a flat world for testing. Disabled by default.
 const DEBUG_FLAT_WORLD: bool = false;
 
 fn should_attempt_saved_world_load(persistence_settings: &WorldPersistence) -> bool {
@@ -228,7 +237,6 @@ fn enforce_bedrock_floor(world: &mut VoxelWorld) -> bool {
     changed
 }
 
-/// Statistics for a generated chunk.
 #[derive(Default)]
 pub(crate) struct ChunkStats {
     sand: u32,
@@ -238,7 +246,6 @@ pub(crate) struct ChunkStats {
     leaves: u32,
 }
 
-/// Aggregate statistics for world generation.
 #[derive(Default)]
 pub(crate) struct WorldStats {
     total_sand: u32,
@@ -246,7 +253,6 @@ pub(crate) struct WorldStats {
     total_dungeon_floor: u32,
     total_wood: u32,
     total_leaves: u32,
-    // Uniformity statistics
     empty_chunks: u32,
     solid_chunks: u32,
     mixed_chunks: u32,
@@ -264,7 +270,7 @@ impl WorldStats {
             ChunkUniformity::Empty => self.empty_chunks += 1,
             ChunkUniformity::Solid => self.solid_chunks += 1,
             ChunkUniformity::Mixed => self.mixed_chunks += 1,
-            ChunkUniformity::Unknown => {} // Shouldn't happen after compute_uniformity
+            ChunkUniformity::Unknown => {}
         }
     }
 
@@ -280,21 +286,23 @@ impl WorldStats {
         info!("=== WORLD GENERATION SUMMARY ===");
         info!("Generation time: {:.2}s", generation_time.as_secs_f32());
         info!("--- Chunk Uniformity (mesh optimization) ---");
-        info!(
-            "  Empty chunks (all air): {} ({:.1}% of total)",
-            self.empty_chunks,
-            (self.empty_chunks as f32 / total_chunks as f32) * 100.0
-        );
-        info!(
-            "  Solid chunks (no internal surfaces): {} ({:.1}% of total)",
-            self.solid_chunks,
-            (self.solid_chunks as f32 / total_chunks as f32) * 100.0
-        );
-        info!(
-            "  Mixed chunks (need full meshing): {} ({:.1}% of total)",
-            self.mixed_chunks,
-            (self.mixed_chunks as f32 / total_chunks as f32) * 100.0
-        );
+        if total_chunks > 0 {
+            info!(
+                "  Empty chunks (all air): {} ({:.1}% of total)",
+                self.empty_chunks,
+                (self.empty_chunks as f32 / total_chunks as f32) * 100.0
+            );
+            info!(
+                "  Solid chunks (no internal surfaces): {} ({:.1}% of total)",
+                self.solid_chunks,
+                (self.solid_chunks as f32 / total_chunks as f32) * 100.0
+            );
+            info!(
+                "  Mixed chunks (need full meshing): {} ({:.1}% of total)",
+                self.mixed_chunks,
+                (self.mixed_chunks as f32 / total_chunks as f32) * 100.0
+            );
+        }
         info!(
             "  Skippable chunks: {}/{} ({:.1}%)",
             skippable, total_chunks, skip_percent
@@ -308,7 +316,6 @@ impl WorldStats {
     }
 }
 
-/// Saves the world if auto_save is enabled.
 fn try_save_world(world: &VoxelWorld, persistence_settings: &WorldPersistence) {
     if !persistence_settings.auto_save {
         return;
@@ -321,7 +328,6 @@ fn try_save_world(world: &VoxelWorld, persistence_settings: &WorldPersistence) {
     }
 }
 
-/// Main world setup system - spawns async chunk generation tasks.
 pub(crate) fn start_voxel_world_after_overlay_frame(
     mut commands: Commands,
     world: Res<VoxelWorld>,
@@ -360,6 +366,23 @@ pub(crate) fn start_voxel_world_after_overlay_frame(
     begin_world_generation(&world, &mut gen_state, &mut generation_queue, *biome_table);
 }
 
+pub(crate) fn chunk_terrain_source_for_config(
+    config: &TerrainSourceConfig,
+    biome_table: BiomeTable,
+) -> ChunkTerrainSource {
+    match config.mode {
+        TerrainSourceMode::Legacy => ChunkTerrainSource::Legacy(Arc::new(
+            TerrainGenerator::with_biome_table(ValueNoise::default(), biome_table),
+        )),
+        TerrainSourceMode::GpuWorldSource | TerrainSourceMode::CpuWorldSourceReference => {
+            ChunkTerrainSource::WorldSource(
+                Arc::new(ProceduralWorldSourceTerrainBridge::load_or_default()),
+                config.mode,
+            )
+        }
+    }
+}
+
 pub(crate) fn begin_world_generation(
     world: &VoxelWorld,
     gen_state: &mut ChunkGenerationState,
@@ -378,18 +401,16 @@ pub(crate) fn begin_world_generation(
     gen_state.world_stats = WorldStats::default();
     gen_state.start_time = Some(std::time::Instant::now());
 
-    let generator = Arc::new(TerrainGenerator::with_biome_table(
-        ValueNoise::default(),
-        biome_table,
-    ));
-    generation_queue.begin(chunk_positions, generator);
+    let terrain_source_config = TerrainSourceConfig::load_or_default();
+    let source = chunk_terrain_source_for_config(&terrain_source_config, biome_table);
+    info!("Terrain source mode: {:?}", source.active_mode());
+    generation_queue.begin(chunk_positions, source);
     info!(
         "Queued {} async chunk generation tasks for batched startup spawning",
         total_chunks
     );
 }
 
-/// Polls the asynchronous saved-world load before starting generation fallback.
 pub(crate) fn poll_world_load_task(
     mut commands: Commands,
     mut world: ResMut<VoxelWorld>,
@@ -496,7 +517,7 @@ pub(crate) fn spawn_queued_chunk_generation_tasks(
     let spawned_count = chunk_positions.len();
     let task_pool = AsyncComputeTaskPool::get();
     for chunk_pos in chunk_positions {
-        let generator = Arc::clone(&generator);
+        let generator = generator.clone();
         let task = task_pool.spawn(async move {
             let (chunk, stats) = generate_chunk_async(chunk_pos, &generator);
             ChunkGenerationResult { chunk, stats }
@@ -515,7 +536,7 @@ pub(crate) fn spawn_queued_chunk_generation_tasks(
         );
     }
 }
-/// Generates a single chunk using the terrain generator (for async execution).
+
 #[derive(Clone, Copy)]
 struct TerrainColumn {
     terrain_height: i32,
@@ -533,6 +554,26 @@ struct GeneratedTree {
 }
 
 pub(crate) fn generate_chunk_async(
+    chunk_pos: IVec3,
+    source: &ChunkTerrainSource,
+) -> (Chunk, ChunkStats) {
+    match source {
+        ChunkTerrainSource::Legacy(generator) => generate_legacy_chunk_async(chunk_pos, generator),
+        ChunkTerrainSource::WorldSource(bridge, _) => generate_world_source_chunk_async(chunk_pos, bridge),
+    }
+}
+
+fn generate_world_source_chunk_async(
+    chunk_pos: IVec3,
+    bridge: &ProceduralWorldSourceTerrainBridge,
+) -> (Chunk, ChunkStats) {
+    let voxels = fill_world_source_chunk_voxels(chunk_pos, bridge);
+    let stats = collect_chunk_stats(&voxels);
+    let chunk = Chunk::with_voxels(chunk_pos, voxels);
+    (chunk, stats)
+}
+
+fn generate_legacy_chunk_async(
     chunk_pos: IVec3,
     generator: &TerrainGenerator,
 ) -> (Chunk, ChunkStats) {
@@ -813,7 +854,6 @@ fn collect_chunk_stats(voxels: &[VoxelType; CHUNK_VOLUME]) -> ChunkStats {
     stats
 }
 
-/// Polls completed chunk generation tasks and inserts chunks into the world.
 pub(crate) fn poll_chunk_generation_tasks(
     mut commands: Commands,
     mut world: ResMut<VoxelWorld>,
@@ -822,26 +862,17 @@ pub(crate) fn poll_chunk_generation_tasks(
     persistence_settings: Res<WorldPersistence>,
     _lod_control: Res<TerrainLodControl>,
 ) {
-    // NOTE: LOD freeze (Alt+F6) does NOT halt chunk insertion. Freeze only pauses LOD
-    // *reassignment* (enforced via `freeze_lod` in the LOD-update system), so already
-    // loaded chunks keep their LOD while you inspect, while newly generated chunks still
-    // pop in. Halting insertion here made freeze look like loading was permanently stuck
-    // (the "always frozen" symptom), especially in bench mode where LOD auto-freezes.
-    // Skip until actual generation work has been queued.
     if !should_poll_chunk_generation_tasks(&gen_state) {
         return;
     }
 
-    // Poll all pending tasks
     let mut completed_count = 0u32;
     for (entity, mut task) in tasks.iter_mut() {
         if let Some(result) = block_on(poll_once(&mut task.task)) {
             let ChunkGenerationResult { mut chunk, stats } = result;
-            // Task completed - insert chunk into world
             let chunk_pos = task.chunk_pos;
             let uniformity = chunk.uniformity();
 
-            // Log chunks with dungeon content
             if stats.dungeon_wall > 0 || stats.dungeon_floor > 0 {
                 let chunk_world = IVec3::new(
                     chunk_pos.x * CHUNK_SIZE_I32,
@@ -854,41 +885,34 @@ pub(crate) fn poll_chunk_generation_tasks(
                 );
             }
 
-            // Update stats
             gen_state.world_stats.add(&stats, uniformity);
 
-            // Insert chunk into world
             let initial_lod = initial_lod_for_chunk();
             chunk.set_initial_lod_level(initial_lod);
             world.insert_chunk(chunk);
             mark_surface_nets_halo_dirty(&mut world, chunk_pos);
 
-            // Despawn the task entity
             commands.entity(entity).despawn();
-
             completed_count += 1;
         }
     }
 
     gen_state.chunks_completed += completed_count;
 
-    // Log progress periodically (every 10%)
     if completed_count > 0 {
         let progress_pct = (gen_state.progress() * 100.0) as u32;
         let prev_progress_pct = ((gen_state.chunks_completed - completed_count) as f32
             / gen_state.total_chunks as f32
             * 100.0) as u32;
 
-        // Log at 10% intervals
         if progress_pct / 10 > prev_progress_pct / 10 {
             info!(
-                "World generation: {}% ({}/{} chunks)",
+                "World generation: {}% ({}/{}) chunks",
                 progress_pct, gen_state.chunks_completed, gen_state.total_chunks
             );
         }
     }
 
-    // Check if generation is complete
     if gen_state.chunks_completed >= gen_state.total_chunks {
         gen_state.is_complete = true;
         info!(
@@ -900,12 +924,10 @@ pub(crate) fn poll_chunk_generation_tasks(
             gen_state.world_stats.log_summary(start_time.elapsed());
         }
 
-        // Apply bedrock floor
         if enforce_bedrock_floor(&mut world) {
             info!("Enforced bedrock floor at y={}", BEDROCK_DEPTH);
         }
 
-        // Save world
         try_save_world(&world, &persistence_settings);
     }
 }
@@ -924,5 +946,60 @@ pub(crate) fn assign_initial_lods_for_loaded_world(world: &mut VoxelWorld) {
         if let Some(mut chunk) = world.get_chunk_mut(chunk_pos) {
             chunk.set_initial_lod_level(LodLevel::Lod0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terrain_source_config_selects_legacy_generation() {
+        let source = chunk_terrain_source_for_config(
+            &TerrainSourceConfig { mode: TerrainSourceMode::Legacy },
+            BiomeTable::default(),
+        );
+
+        assert!(matches!(source, ChunkTerrainSource::Legacy(_)));
+        assert_eq!(source.active_mode(), TerrainSourceMode::Legacy);
+    }
+
+    #[test]
+    fn terrain_source_config_selects_gpu_world_source_generation() {
+        let source = chunk_terrain_source_for_config(
+            &TerrainSourceConfig { mode: TerrainSourceMode::GpuWorldSource },
+            BiomeTable::default(),
+        );
+
+        assert!(matches!(source, ChunkTerrainSource::WorldSource(_, TerrainSourceMode::GpuWorldSource)));
+        assert_eq!(source.active_mode(), TerrainSourceMode::GpuWorldSource);
+    }
+
+    #[test]
+    fn terrain_source_config_selects_explicit_cpu_reference_generation() {
+        let source = chunk_terrain_source_for_config(
+            &TerrainSourceConfig { mode: TerrainSourceMode::CpuWorldSourceReference },
+            BiomeTable::default(),
+        );
+
+        assert!(matches!(source, ChunkTerrainSource::WorldSource(_, TerrainSourceMode::CpuWorldSourceReference)));
+        assert_eq!(source.active_mode(), TerrainSourceMode::CpuWorldSourceReference);
+    }
+
+    #[test]
+    fn world_source_generation_preserves_bedrock_and_water_fill() {
+        let source = chunk_terrain_source_for_config(
+            &TerrainSourceConfig { mode: TerrainSourceMode::GpuWorldSource },
+            BiomeTable::default(),
+        );
+        let (chunk, _stats) = generate_chunk_async(IVec3::ZERO, &source);
+
+        assert_eq!(chunk.get(UVec3::new(0, BEDROCK_DEPTH as u32, 0)), VoxelType::Bedrock);
+        let has_water = (0..CHUNK_SIZE).any(|x| {
+            (0..CHUNK_SIZE).any(|y| {
+                (0..CHUNK_SIZE).any(|z| chunk.get(UVec3::new(x as u32, y as u32, z as u32)) == VoxelType::Water)
+            })
+        });
+        assert!(has_water || chunk.iter_voxels().any(|voxel| *voxel != VoxelType::Air));
     }
 }
