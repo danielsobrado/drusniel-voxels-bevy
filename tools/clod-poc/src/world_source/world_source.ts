@@ -33,6 +33,24 @@ function terrainDefaultBounds(terrain: TerrainFieldConfig): WorldSourceMetadata[
   return terrain.islandShape.oceanRim ? { radiusM: terrain.islandShape.worldRadiusM } : "infinite";
 }
 
+function resolveMetadataTerrain(metadata: Partial<WorldSourceMetadata>): TerrainFieldConfig {
+  const base = metadata.terrain ?? DEFAULT_TERRAIN_FIELD_CONFIG;
+  const seed = metadata.seed ?? base.seed;
+  const seaLevel = metadata.seaLevel ?? base.seaLevel;
+  const oceanRim = metadata.oceanRim ?? base.islandShape.oceanRim;
+  return resolveTerrainFieldConfig({
+    ...base,
+    seed,
+    seaLevel,
+    islandShape: {
+      ...base.islandShape,
+      oceanRim,
+      seed,
+      seaLevel,
+    },
+  });
+}
+
 function notImplemented(method: string): never {
   throw new Error(`StreamedVoxelWorldSource.${method} is not implemented yet`);
 }
@@ -91,13 +109,12 @@ export class StreamedVoxelWorldSource implements WorldSource {
   readonly metadata: WorldSourceMetadata;
 
   constructor(metadata: Partial<WorldSourceMetadata> = {}) {
-    const terrain = resolveTerrainFieldConfig(metadata.terrain ?? DEFAULT_TERRAIN_FIELD_CONFIG);
-    const oceanRim = metadata.oceanRim ?? terrain.islandShape.oceanRim;
+    const terrain = resolveMetadataTerrain(metadata);
     this.metadata = {
-      seed: metadata.seed ?? terrain.seed,
-      seaLevel: metadata.seaLevel ?? terrain.seaLevel,
-      bounds: metadata.bounds ?? (oceanRim ? { radiusM: terrain.islandShape.worldRadiusM } : "infinite"),
-      oceanRim,
+      seed: terrain.seed,
+      seaLevel: terrain.seaLevel,
+      bounds: metadata.bounds ?? terrainDefaultBounds(terrain),
+      oceanRim: terrain.islandShape.oceanRim,
       terrain,
     };
   }
