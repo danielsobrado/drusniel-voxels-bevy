@@ -71,7 +71,7 @@ impl<S: WorldSource> WorldSourceTerrainBridge<S> {
     }
 }
 
-impl ProceduralWorldSourceTerrainBridge {
+impl WorldSourceTerrainBridge<ProceduralWorldSource> {
     pub fn load_or_default() -> Self {
         Self::new(ProceduralWorldSource::load_or_default())
     }
