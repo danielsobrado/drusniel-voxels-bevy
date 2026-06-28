@@ -34,8 +34,9 @@ When the render camera crosses the snap threshold, the controller:
 
 1. Shifts all scene children by `-delta`.
 2. Shifts camera, orbit target, player position, and player safe position by `-delta`.
-3. Accumulates `originX/originZ`.
-4. Provides a world-space camera proxy for systems that must sample world coordinates.
+3. Shifts terrain collider footprints and lazy collision sources by `-delta`.
+4. Accumulates `originX/originZ`.
+5. Provides a world-space camera proxy for systems that must sample world coordinates.
 
 ## Far shell handling
 
