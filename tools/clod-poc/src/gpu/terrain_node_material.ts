@@ -115,10 +115,13 @@ export interface TerrainNodeMaterialHandle {
   material: MeshBasicNodeMaterial;
   /** Update lighting/colour uniforms in place. */
   setLighting(next: Partial<TerrainNodeLighting>): void;
-  setColorAdjust?(next: Partial<TerrainColorAdjust>): void;
-  setNormalColor?(on: boolean): void;
-  setFade?(fade: number, fadeIn: boolean, dither: boolean): void;
-  setTier?(tier: number): void;
+  setColorAdjust(next: Partial<TerrainColorAdjust>): void;
+  setNormalColor(on: boolean): void;
+  setDebug(state: { normalColor: boolean; normalDivergence?: boolean; divergenceGain?: number }): void;
+  setRoughness(roughness: number): void;
+  setTextureParams(params: { blendWidth: number; normalIntensity: number }): void;
+  setFade(fade: number, fadeIn: boolean, dither: boolean): void;
+  setTier(tier: number): void;
 }
 
 export interface TerrainNodeLighting {
@@ -138,6 +141,14 @@ export interface TerrainColorAdjust {
 }
 
 function v3(c: THREE.Color): TslNode { return vec3(c.r, c.g, c.b); }
+
+function terrainSpecularFromRoughness(roughness: number): { shininess: number; specGain: number } {
+  const rough = Math.min(Math.max(roughness, 0.04), 1.0);
+  return {
+    shininess: 128 * (1 - rough) + 4 * rough,
+    specGain: 1 - rough,
+  };
+}
 
 function hash2(p: TslNode): TslNode {
   return fract(p.dot(vec2(127.1, 311.7)).sin().mul(43758.5453123));
@@ -362,7 +373,12 @@ function proceduralMicroWeight(worldPos: TslNode, procedural: TerrainNodeTexture
   return n.mul(fade).mul(0.45);
 }
 
-function createBakedMacroTintTexture(noiseA: THREE.Texture, noiseB: THREE.Texture, res = 256): THREE.DataTexture {
+export function bakeMacroTint(
+  noiseA: THREE.Texture,
+  noiseB: THREE.Texture,
+  res = 256,
+  _worldCells?: number,
+): THREE.DataTexture {
   const imgA = noiseA.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
   const imgB = noiseB.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
   const srcA = imgA?.data;
@@ -451,8 +467,9 @@ export function createTerrainNodeMaterial(
   const uBlendWidth = uniform(textures?.blendWidth ?? 2.5);
   const uNormalIntensity = uniform(textures?.normalIntensity ?? 1.0);
   const rough = Math.min(Math.max(lighting.roughness, 0.04), 1.0);
-  const uShininess = uniform(128 * (1 - rough) + 4 * rough);
-  const uSpecGain = uniform(1 - rough);
+  const specular = terrainSpecularFromRoughness(rough);
+  const uShininess = uniform(specular.shininess);
+  const uSpecGain = uniform(specular.specGain);
   const uTier = uniform(0);
 
   const geomN = normalize(normalGeometry);
@@ -585,6 +602,16 @@ export function createTerrainNodeMaterial(
       if (next.warmth !== undefined) uWarmth.value = next.warmth;
     },
     setNormalColor(on) { uNormalColor.value = on ? 1 : 0; },
+    setDebug(state) { uNormalColor.value = state.normalColor ? 1 : 0; },
+    setRoughness(roughness) {
+      const spec = terrainSpecularFromRoughness(roughness);
+      uShininess.value = spec.shininess;
+      uSpecGain.value = spec.specGain;
+    },
+    setTextureParams(params) {
+      uBlendWidth.value = params.blendWidth;
+      uNormalIntensity.value = params.normalIntensity;
+    },
     setFade(fadeValue, fadeIn, dither) {
       uFade.value = fadeValue;
       uFadeIn.value = fadeIn ? 1 : 0;
@@ -593,5 +620,3 @@ export function createTerrainNodeMaterial(
     setTier(tier) { uTier.value = tier; },
   };
 }
-
-export { createBakedMacroTintTexture };
