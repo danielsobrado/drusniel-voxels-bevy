@@ -51,6 +51,13 @@ function layerRanges(id: ProceduralMaterialId, fallbackIndex: number): { heightM
     case "moss": return { heightMin: 18, heightMax: 72, scale: 0.07 };
     case "gravel": return { heightMin: 10, heightMax: 54, scale: 0.065 };
     case "wet_soil": return { heightMin: 0, heightMax: 22, scale: 0.05 };
+    case "meadows-ground": return { heightMin: 20, heightMax: 92, scale: 0.062 };
+    case "forest-floor": return { heightMin: 18, heightMax: 88, scale: 0.07 };
+    case "swamp-muck": return { heightMin: 0, heightMax: 64, scale: 0.052 };
+    case "mountain-scree": return { heightMin: 42, heightMax: 118, scale: 0.037 };
+    case "plains-grass": return { heightMin: 18, heightMax: 88, scale: 0.068 };
+    case "coast-sand": return { heightMin: 0, heightMax: 44, scale: 0.058 };
+    case "ocean-floor": return { heightMin: -40, heightMax: 36, scale: 0.052 };
     default: return { heightMin: fallbackIndex * 8, heightMax: fallbackIndex * 8 + 24, scale: 0.05 };
   }
 }
@@ -85,26 +92,38 @@ function materialAlbedo(id: ProceduralMaterialId, recipe: ProceduralMaterialReci
   g *= 1 + macroShift + mesoShift;
   b *= 1 + macroShift + mesoShift;
 
-  if (id === "rock") {
+  if (id === "rock" || id === "mountain-scree") {
     const strata = 0.5 + 0.5 * Math.sin(y01 * Math.PI * 22 + macro * 4);
     const rust = (recipe.strata_strength ?? 0) * Math.max(0, strata - 0.55);
     r = r * (1 + rust * 0.55);
     g = g * (1 - rust * 0.18);
     b = b * (1 - rust * 0.32);
-  } else if (id === "grass") {
+  } else if (id === "grass" || id === "meadows-ground" || id === "plains-grass") {
     const dry = clamp01((worley - 0.44) * 2.2);
-    r = r * (1 + dry * 0.9);
+    const dryGain = id === "plains-grass" ? 1.2 : 0.9;
+    r = r * (1 + dry * dryGain);
     g = g * (1 - dry * 0.18);
     b = b * (1 - dry * 0.55);
+  } else if (id === "forest-floor") {
+    const leaf = clamp01(1 - worley);
+    r *= 0.72 + leaf * 0.10;
+    g *= 0.82 + leaf * 0.16;
+    b *= 0.68 + leaf * 0.08;
   } else if (id === "snow") {
     const sparkle = (recipe.sparkle_strength ?? 0) * Math.max(0, micro - 0.85);
     r += sparkle;
     g += sparkle;
     b += sparkle;
-  } else if (id === "wet_soil") {
-    r *= 0.72;
-    g *= 0.76;
-    b *= 0.82;
+  } else if (id === "wet_soil" || id === "swamp-muck" || id === "ocean-floor") {
+    const wet = id === "swamp-muck" ? 0.58 : 0.72;
+    r *= wet;
+    g *= wet + 0.04;
+    b *= wet + 0.10;
+  } else if (id === "coast-sand") {
+    const shell = clamp01(micro - 0.55);
+    r += shell * 0.08;
+    g += shell * 0.07;
+    b += shell * 0.04;
   } else if (id === "gravel") {
     const pebble = clamp01(1 - worley);
     r *= 0.82 + pebble * 0.34;
@@ -184,7 +203,7 @@ export function createProceduralTerrainTextures(config: ProceduralTextureConfig)
   const slots = order.map((id, index) => ({
     texture: null,
     normalTexture: null,
-    name: id.replace("_", " "),
+    name: id.replaceAll("_", " ").replaceAll("-", " "),
     selectedId: `generated:${id}`,
     previewUrl: previewDataUrl(config.terrain.materials[id]),
     ...layerRanges(id, index),
