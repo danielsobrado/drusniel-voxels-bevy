@@ -34,6 +34,15 @@ export interface TerrainBandContent {
   textureSlotId: string;
 }
 
+export interface BiomeSpatialRegionContent {
+  kind: "spatial";
+  biomeId: number;
+  debugColorRgb: [number, number, number];
+  canopyDensity: number;
+  terrainTextureSlots: string[];
+  notes?: string;
+}
+
 export interface BiomeContent {
   id: string;
   name: string;
@@ -42,6 +51,7 @@ export interface BiomeContent {
   waterMaterialId?: string;
   textureSlotSet: string[];
   biomeId?: number;
+  region?: BiomeSpatialRegionContent;
   tags: string[];
 }
 
