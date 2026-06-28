@@ -7,22 +7,16 @@ import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
-/**
- * WebGPU node-material twin of the classic impostor ShaderMaterial. WebGPURenderer
- * rejects raw `ShaderMaterial` ("Material ShaderMaterial is not compatible"), which
- * rendered the billboard impostor LOD black. Same behaviour as the GLSL version:
- * sample the octahedral atlas at the per-instance `treeImpostorUvRect` frame and
- * alpha-test. instanceMatrix (axial billboard) is applied automatically.
- */
+/** WebGPU node-material impostor path. The baker stores sqrt-encoded albedo. */
 export function createTreeImpostorNodeMaterial(
   settings: TreeSettings,
   atlas: TreeImpostorAtlas,
 ): THREE.Material {
   const uvRect: TslNode = attribute("treeImpostorUvRect", "vec4");
   const atlasUv: TslNode = uvRect.xy.add(uv().mul(uvRect.zw.sub(uvRect.xy)));
-  const sample: TslNode = texture(atlas.texture, atlasUv);
+  const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
   const material = new MeshBasicNodeMaterial();
-  material.colorNode = sample.xyz;
+  material.colorNode = sample.xyz.mul(sample.xyz);
   (material as unknown as { opacityNode: TslNode }).opacityNode = sample.w;
   material.alphaTest = settings.impostors.alphaTest;
   material.side = THREE.DoubleSide;
@@ -38,7 +32,7 @@ export function createTreeImpostorMaterial(
   return new THREE.ShaderMaterial({
     name: `tree-impostor-${atlas.species}`,
     uniforms: {
-      map: { value: atlas.texture },
+      map: { value: atlas.albedo ?? atlas.texture },
       alphaTest: { value: settings.impostors.alphaTest },
     },
     vertexShader: TREE_IMPOSTOR_VERTEX_SHADER,
@@ -84,6 +78,6 @@ varying vec2 vTreeImpostorUv;
 void main() {
   vec4 color = texture2D(map, vTreeImpostorUv);
   if (color.a < alphaTest) discard;
-  gl_FragColor = color;
+  gl_FragColor = vec4(color.rgb * color.rgb, color.a);
 }
 `;
