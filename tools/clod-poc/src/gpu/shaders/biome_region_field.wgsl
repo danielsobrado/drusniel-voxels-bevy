@@ -117,10 +117,8 @@ fn sampleBiomeIslandMask(worldX : f32, worldZ : f32, seed : i32, enabled : bool,
       var islandMask = mask;
       if (d <= center.z) { islandMask = 1.0; }
       if (d >= outer) { islandMask = 0.0; }
-      if (islandMask > bestMask) {
+      if (islandMask > bestMask || shore > bestShore) {
         bestMask = islandMask;
-      }
-      if (shore > bestShore) {
         bestShore = shore;
         nearestX = center.x;
         nearestZ = center.y;
