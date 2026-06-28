@@ -18,6 +18,7 @@ import {
 } from "../farTerrain/farWaterMaterial.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
 import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
+import { writeBiomeRgb } from "../world_source/biome_colors.js";
 
 export type FarShellHeightSamplingMode = "cpu" | "gpu";
 
@@ -81,6 +82,7 @@ export class InfiniteFarShell {
   private readonly useParityMaterial: boolean;
   private readonly parityConfig: FarTerrainUniformData | undefined;
   private parityColorBuffer: Float32Array | null = null;
+  private biomeColorBuffer: Float32Array | null = null;
   private positions: Float32Array;
   private normals: Float32Array;
   private uvs: Float32Array;
@@ -118,6 +120,7 @@ export class InfiniteFarShell {
       macroBlendEndMeters: options.macroBlendEndMeters,
       metrics: this.metrics,
     };
+    const useParity = this.useParityMaterial && this.parityConfig !== undefined;
     this.materialOptions = {
       lighting: options.lighting,
       innerMeters: options.innerMeters,
@@ -125,8 +128,8 @@ export class InfiniteFarShell {
       nearBlendMeters: options.nearBlendMeters,
       farFadeMeters: options.farFadeMeters,
       debugShowMissingFallback: options.debugShowMissingFallback ?? false,
+      useVertexBiomeColor: !useParity,
     };
-    const useParity = this.useParityMaterial && this.parityConfig;
     const material = useParity
       ? createFarTerrainMaterial(options.lighting, this.parityConfig!, 0, 0, options.outerMeters, {
           gpuDisplacement: this.heightSamplingMode === "gpu",
@@ -168,6 +171,7 @@ export class InfiniteFarShell {
     }
 
     if (useParity) this.attachGpuDefaultVertexColors(vertexCount);
+    else this.attachDefaultBiomeVertexColors(vertexCount);
     this.metrics.farShellVertices = vertexCount;
     this.metrics.farShellTriangles = this.indices.length / 3;
     this.metrics.farShellGridRes = options.radialSegments;
@@ -265,6 +269,10 @@ export class InfiniteFarShell {
     const t0 = performance.now();
     const { angularSegments, radialSegments, heightBiasMeters } = this.options;
     const vertexCount = this.computeVertexCount();
+    const writeBiomeColors = !(this.useParityMaterial && this.parityConfig);
+    if (writeBiomeColors && (!this.biomeColorBuffer || this.biomeColorBuffer.length !== vertexCount * 3)) {
+      this.biomeColorBuffer = new Float32Array(vertexCount * 3);
+    }
     for (let ri = 0; ri <= radialSegments; ri++) {
       const rNorm = ri / radialSegments;
       const r = this.options.innerMeters + (this.options.outerMeters - this.options.innerMeters) * rNorm;
@@ -288,6 +296,7 @@ export class InfiniteFarShell {
         this.normals[vi * 3 + 2] = sample.normal.z;
         this.uvs[vi * 2] = rNorm;
         this.uvs[vi * 2 + 1] = ai / angularSegments;
+        if (writeBiomeColors && this.biomeColorBuffer) writeBiomeRgb(this.biomeColorBuffer, vi, sample.material);
       }
     }
 
@@ -302,6 +311,8 @@ export class InfiniteFarShell {
       );
       this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, this.normals, 0, 0, this.positions);
       this.attachVertexColors();
+    } else {
+      this.attachBiomeVertexColors();
     }
 
     this.rebuildCount++;
@@ -337,6 +348,13 @@ export class InfiniteFarShell {
     this.attachVertexColors();
   }
 
+  private attachDefaultBiomeVertexColors(vertexCount: number): void {
+    const colors = new Float32Array(vertexCount * 3);
+    for (let i = 0; i < vertexCount; i++) writeBiomeRgb(colors, i, 0);
+    this.biomeColorBuffer = colors;
+    this.attachBiomeVertexColors();
+  }
+
   private attachVertexColors(): void {
     if (!this.parityColorBuffer) return;
     const geometry = this.mesh.geometry as THREE.BufferGeometry;
@@ -347,6 +365,19 @@ export class InfiniteFarShell {
       buf.needsUpdate = true;
     } else {
       geometry.setAttribute("color", new THREE.BufferAttribute(this.parityColorBuffer.slice(), 3));
+    }
+  }
+
+  private attachBiomeVertexColors(): void {
+    if (!this.biomeColorBuffer) return;
+    const geometry = this.mesh.geometry as THREE.BufferGeometry;
+    const existing = geometry.getAttribute("color");
+    if (existing) {
+      const buf = existing as THREE.BufferAttribute;
+      buf.array.set(this.biomeColorBuffer);
+      buf.needsUpdate = true;
+    } else {
+      geometry.setAttribute("color", new THREE.BufferAttribute(this.biomeColorBuffer.slice(), 3));
     }
   }
 
