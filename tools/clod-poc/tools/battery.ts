@@ -32,6 +32,9 @@ const BORDER_OCEAN_SCENE_CONFIG = parseBorderOceanSceneConfig(
   readFileSync("config/border_ocean_scene.yaml", "utf8"),
 );
 const BORDER_OCEAN_CAM = borderOceanCameraForWorld(16 * 4 * 16, BORDER_OCEAN_SCENE_CONFIG);
+const INFINITE_ISLANDS_DIR = "shots/infinite-islands";
+const INFINITE_ISLANDS_SHOT = `${INFINITE_ISLANDS_DIR}/walk.png`;
+const INFINITE_ISLANDS_STATS = `${INFINITE_ISLANDS_DIR}/walk-stats.json`;
 
 function run(label: string, args: string[]): void {
   console.log(`[battery] ${label}`);
@@ -121,6 +124,22 @@ function validateForestLongViewStats(): void {
   assertCounter(stats, "canopy_visible_tiles", (value) => value > 0);
 }
 
+function validateInfiniteIslandsStats(): void {
+  const stats = JSON.parse(readFileSync(INFINITE_ISLANDS_STATS, "utf8")) as Record<string, unknown>;
+  if (stats["ready"] !== true) throw new Error("infinite-islands stats ready flag is not true");
+  if (stats["error"] !== null) throw new Error(`infinite-islands stats error is not null: ${String(stats["error"])}`);
+  const counters = stats["counters"] as Record<string, unknown> | undefined;
+  if (!counters) throw new Error("infinite-islands counters missing");
+  const p95 = counters["frame_ms_p95"];
+  if (typeof p95 === "number" && p95 > 8) throw new Error(`infinite-islands p95 frame_ms ${p95} exceeds 8 ms threshold`);
+  assertCounter(stats, "streamer_live_radius_m", (value) => value > 0);
+  assertCounter(stats, "streamer_clod_radius_m", (value) => value > 0);
+  assertCounter(stats, "streamer_far_shell_inner_m", (value) => value > 0);
+  assertCounter(stats, "streamer_far_shell_outer_m", (value) => value > 0);
+  assertCounter(stats, "streamer_far_shell_ownership_ok", (value) => value === 1);
+  assertCounter(stats, "ring_boundary_holes", (value) => value === 0);
+}
+
 function runPhase1Shots(): void {
   mkdirSync(PHASE1_DIR, { recursive: true });
   const common = [
@@ -204,6 +223,23 @@ function main(): void {
     "--stats", LONG_VIEW_FOREST_STATS,
   ]);
   validateForestLongViewStats();
+
+  mkdirSync(INFINITE_ISLANDS_DIR, { recursive: true });
+  run("shoot infinite-islands walk", [
+    "run", "shoot", "--",
+    "--scene", "infinite-islands",
+    "--seed", "1",
+    "--world", "16",
+    "--freeze", "0",
+    "--hud", "1",
+    "--framealign", "0",
+    "--clodPerf", "1",
+    "--webgpuSelection", "1",
+    "--proceduralDebug", "biome",
+    "--out", INFINITE_ISLANDS_SHOT,
+    "--stats", INFINITE_ISLANDS_STATS,
+  ]);
+  validateInfiniteIslandsStats();
 
   mkdirSync(BORDER_OCEAN_DIR, { recursive: true });
   run("shoot border-ocean", [

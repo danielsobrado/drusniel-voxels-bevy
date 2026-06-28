@@ -63,6 +63,7 @@ export function parseSceneQueryFlags(searchParams: URLSearchParams): SceneQueryF
       || queryScene === "infinite-stream-fast-turn"
       || queryScene === "infinite-stream-far-summary"
       || queryScene === "infinite-stream-slow-builds"
+      || queryScene === "infinite-islands"
       || queryScene === "infinite-far-shell-straight"
       || queryScene === "infinite-far-shell-fast-turn"
       || queryScene === "infinite-far-shell-mountain-approach"
@@ -94,6 +95,7 @@ const sceneNameToConfigKey: Record<string, string> = {
   "infinite-stream-fast-turn": "infinite_stream_fast_turn",
   "infinite-stream-far-summary": "infinite_stream_far_summary",
   "infinite-stream-slow-builds": "infinite_stream_slow_builds",
+  "infinite-islands": "infinite_islands",
   "infinite-far-shell-straight": "infinite_far_shell_straight",
   "infinite-far-shell-fast-turn": "infinite_far_shell_fast_turn",
   "infinite-far-shell-mountain-approach": "infinite_far_shell_mountain_approach",

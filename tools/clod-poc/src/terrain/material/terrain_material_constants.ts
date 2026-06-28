@@ -10,6 +10,7 @@ export const PROCEDURAL_DEBUG_MODES = {
   "river wetness": 8,
   "river foam residue": 9,
   "river droplets": 10,
+  biome: 11,
 } as const;
 
 export type ProceduralDebugMode = keyof typeof PROCEDURAL_DEBUG_MODES;

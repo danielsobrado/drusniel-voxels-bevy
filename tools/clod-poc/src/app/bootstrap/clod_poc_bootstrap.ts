@@ -13,11 +13,10 @@ import { runPostRendererStartup } from "./post_renderer_startup.js";
 import { runTerrainViewStartup } from "./terrain_view_startup.js";
 import { runRuntimeSystemsStartup } from "./runtime/runtime_systems_startup.js";
 import { runUiStartup } from "./ui/ui_startup.js";
-import { surfaceHeightCore } from "../../gpu/terrain_field_core.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
 import { initNaadfIntegration, isNaadfScene, type NaadfIntegration } from "../../naadf/integration.js";
-import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig, sampleMacroTerrainMaterial } from "../../long-view/index.js";
+import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
 import type { FarShellMetrics } from "../../long-view/index.js";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
@@ -160,6 +159,7 @@ export async function bootstrapClodPoc() {
   const isLongViewCapableScene =
     queryScene === "infinite-stream-far-summary" ||
     queryScene === "infinite-stream-slow-builds" ||
+    queryScene === "infinite-islands" ||
     queryScene === "infinite-stream-straight" ||
     queryScene === "infinite-stream-fast-turn" ||
     queryScene === "long-view-4km" ||
@@ -208,10 +208,10 @@ export async function bootstrapClodPoc() {
     if (!useNaadfFarSummary) {
       farSummaryIntegration = initFarSummaryIntegration({
         terrainSampler: {
-          sampleHeight: (x: number, z: number) => surfaceHeightCore(x, z),
-          sampleMaterial: (x, z) => sampleMacroTerrainMaterial(x, z),
+          sampleHeight: (x: number, z: number) => world.worldSource.sampleHeight(x, z),
+          sampleMaterial: (x, z) => world.worldSource.sampleBiome(x, z),
           sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
-          sampleWaterCoverage: () => 0,
+          sampleWaterCoverage: (x, z) => world.worldSource.oceanMask(x, z),
         },
         scene: renderer.scene,
         camera: renderer.camera,

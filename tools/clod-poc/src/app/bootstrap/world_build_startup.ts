@@ -4,6 +4,8 @@ import { ClodWorkerClient } from "../../clod_worker_client.js";
 import { emitAudio } from "../../audio/index.js";
 import {
   baseSurfaceHeight,
+  resolveTerrainFieldConfig,
+  setTerrainFieldConfig,
   getDigEditRevision,
   getVoxelEditSnapshot,
   replaceVoxelEdits,
@@ -13,6 +15,7 @@ import {
   type BorderCoastOceanConfig,
   type VoxelEditSnapshot,
 } from "../../terrain/terrain.js";
+import { setTerrainFieldCoreConfig } from "../../gpu/terrain_field_core.js";
 import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
 import {
   initClodCacheContext,
@@ -75,6 +78,27 @@ import type { CustomPropsSettings } from "../../props/prop_types.js";
 import type { PropPlacementScene } from "../../props/prop_types.js";
 import { parseBorderOceanSceneConfig } from "../../debug/border_ocean_scene.js";
 import { splitWorldBuildNodes } from "./world_build_nodes.js";
+import { ProceduralWorldSource } from "../../world_source/world_source.js";
+import type { WorldSource } from "../../world_source/world_source.js";
+
+function numberParam(searchParams: URLSearchParams, keys: readonly string[]): number | undefined {
+  for (const key of keys) {
+    const raw = searchParams.get(key);
+    if (raw === null) continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function booleanParam(searchParams: URLSearchParams, keys: readonly string[], fallback: boolean): boolean {
+  for (const key of keys) {
+    const raw = searchParams.get(key);
+    if (raw === null) continue;
+    return raw !== "0" && raw !== "false";
+  }
+  return fallback;
+}
 
 export interface WorldBuildStartupInput {
   stagedImport: VoxelProjectArchiveContents | null;
@@ -114,6 +138,7 @@ export interface WorldBuildResult {
   allNodes: ClodPageNode[];
   maxTerrainLevel: number;
   terrainSummary: TerrainSummaryField;
+  worldSource: WorldSource;
   result: Awaited<ReturnType<ClodWorkerClient["buildWorld"]>>;
   hydrologySystem: HydrologySystem | null;
   polishLine: string;
@@ -160,6 +185,25 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const borderCoastOceanConfig = parseBorderCoastOceanConfig(borderCoastOceanConfigText);
   const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
   const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
+  const sceneName = searchParams.get("scene") ?? "default";
+  const seed = numberParam(searchParams, ["seed"]) ?? 0;
+  const seaLevel = numberParam(searchParams, ["seaLevel", "sea_level"]) ?? 18;
+  const isInfiniteIslands = sceneName === "infinite-islands";
+  const terrainFieldConfig = resolveTerrainFieldConfig({
+    seed,
+    seaLevel,
+    islandShape: {
+      enabled: booleanParam(searchParams, ["islands"], isInfiniteIslands),
+      oceanRim: booleanParam(searchParams, ["oceanRim", "ocean_rim"], isInfiniteIslands),
+      worldRadiusM: numberParam(searchParams, ["worldRadius", "world_radius_m"]) ?? (isInfiniteIslands ? 8192 : 8192),
+      spacingM: numberParam(searchParams, ["islandSpacing", "island_spacing_m"]) ?? 1500,
+      radiusM: numberParam(searchParams, ["islandRadius", "island_radius_m"]) ?? 560,
+      blendM: numberParam(searchParams, ["islandBlend", "island_blend_m"]) ?? 260,
+    },
+  });
+  setTerrainFieldConfig(terrainFieldConfig);
+  setTerrainFieldCoreConfig(terrainFieldConfig);
+  const worldSource = new ProceduralWorldSource(terrainFieldConfig);
   const proceduralTerrain = proceduralTextureConfig.enabled
     ? createProceduralTerrainTextures(proceduralTextureConfig)
     : null;
@@ -236,15 +280,15 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
       }
     : null;
 
-  const scene = searchParams.get("scene") ?? "default";
   const proceduralTextureHash = await buildProceduralTextureHash(
     proceduralTextureConfig.enabled,
     proceduralTextureConfig.enabled ? `${proceduralTextureConfig.seed}:${proceduralTextureConfig.noise.resolution}` : null,
   );
   const stagedImportHash = await buildStagedImportHash(stagedImport?.manifest ?? null);
   const terrainSource: TerrainSourceInputs = {
-    scene,
-    worldSeed: "0",
+    scene: sceneName,
+    worldSeed: String(seed),
+    terrainFieldConfig,
     worldPages: WORLD,
     generatorVersion: cfg.meshopt_package_version,
     digRevision: getDigEditRevision(),
@@ -288,7 +332,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     info.textContent = `building ${WORLD}x${WORLD} world… ${Math.floor(fraction * 100)}%\n${phase}  L${level}  ${done}/${total}`;
     buildStatus.value = `${phase} L${level} ${done}/${total}`;
     updateBuildOverlay();
-  }, hydrologyTerrain, borderCoastOceanConfig, cacheDisabled || isCacheSessionDisabled(), terrainSource);
+  }, terrainFieldConfig, hydrologyTerrain, borderCoastOceanConfig, cacheDisabled || isCacheSessionDisabled(), terrainSource);
 
   buildProgress.hidden = true;
   buildStatus.value = "ready";
@@ -323,6 +367,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     allNodes,
     maxTerrainLevel,
     terrainSummary,
+    worldSource,
     result,
     hydrologySystem,
     polishLine,

@@ -9,6 +9,8 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../types.js";
 import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
+import { BiomeRegionField } from "../world_source/biome_region_field.js";
+import { getTerrainFieldCoreConfig } from "../gpu/terrain_field_core.js";
 
 export interface TerrainSummaryField {
   /** Number of cells per axis in the coarse grid. */
@@ -29,6 +31,8 @@ export interface TerrainSummaryField {
   normalZ: Float32Array;
   /** Coverage per cell (0 = no page, 1 = fully covered by page envelopes). */
   coverage: Float32Array;
+  /** Dominant biome/material id per cell when built analytically. */
+  biomeId?: Uint8Array;
 }
 
 function gridIndex(res: number, x: number, z: number): number {
@@ -66,6 +70,13 @@ export function buildTerrainSummary(
   const normalY = new Float32Array(summaryRes * summaryRes).fill(0);
   const normalZ = new Float32Array(summaryRes * summaryRes).fill(0);
   const coverage = new Float32Array(summaryRes * summaryRes).fill(0);
+  const biomeId = new Uint8Array(summaryRes * summaryRes);
+  const terrainConfig = getTerrainFieldCoreConfig();
+  const biomeField = new BiomeRegionField({
+    seed: terrainConfig.seed,
+    seaLevel: terrainConfig.seaLevel,
+    islandShape: terrainConfig.islandShape,
+  });
 
   const cellSize = worldSize / summaryRes;
 
@@ -100,6 +111,8 @@ export function buildTerrainSummary(
         heightMin[idx] = y;
         heightMax[idx] = y;
       }
+      const [wx, wz] = cellCenter(summaryRes, worldSize, fx, fz);
+      biomeId[idx] = biomeField.sample(wx, wz, heightMax[idx]).biome;
     }
   }
 
@@ -122,7 +135,7 @@ export function buildTerrainSummary(
     }
   }
 
-  return { res: summaryRes, worldSize, farReduceFactor: reduce, heightMin, heightMax, normalX, normalY, normalZ, coverage };
+  return { res: summaryRes, worldSize, farReduceFactor: reduce, heightMin, heightMax, normalX, normalY, normalZ, coverage, biomeId };
 }
 
 /** Sample height at world position (x, z). Bilinear interpolation. */
@@ -210,6 +223,15 @@ export function sampleCoverage(field: TerrainSummaryField, x: number, z: number)
     + c(ix + 1, iz) * tx * (1 - tz)
     + c(ix, iz + 1) * (1 - tx) * tz
     + c(ix + 1, iz + 1) * tx * tz;
+}
+
+export function sampleBiomeId(field: TerrainSummaryField, x: number, z: number): number {
+  if (!field.biomeId) return 0;
+  const fx = (x / field.worldSize) * field.res - 0.5;
+  const fz = (z / field.worldSize) * field.res - 0.5;
+  const ix = Math.min(field.res - 1, Math.max(0, Math.round(fx)));
+  const iz = Math.min(field.res - 1, Math.max(0, Math.round(fz)));
+  return field.biomeId[gridIndex(field.res, ix, iz)] ?? 0;
 }
 
 /**

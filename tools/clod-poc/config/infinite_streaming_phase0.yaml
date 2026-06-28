@@ -85,6 +85,19 @@ phase0:
         duration_seconds: 30
         look_distance_m: 4096
 
+    infinite_islands:
+      world: 16
+      camera:
+        mode: scripted
+        start_x_ratio: 0.50
+        start_z_ratio: 0.50
+        direction_degrees: 60
+        speed_mps: 24
+        duration_seconds: 160
+        turn_degrees_per_second: 12
+        look_distance_m: 8192
+      require_visible_m: 8192
+
     infinite_far_shell_straight:
       world: 16
       camera:
@@ -181,6 +194,10 @@ metrics:
     - streamer_visual_loaded_pages
     - streamer_far_shell_inner_m
     - streamer_far_shell_outer_m
+    - streamer_clod_radius_m
+    - streamer_live_radius_m
+    - streamer_far_shell_ownership_ok
+    - ring_boundary_holes
     - horizon_hole_ratio
     - stale_fallback_count
     - far_shell_inner_m

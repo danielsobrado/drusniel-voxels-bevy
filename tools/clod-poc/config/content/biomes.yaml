@@ -2,7 +2,8 @@
   name: Test Plain
   defaultMaterialId: top-soil
   waterMaterialId: water
-  tags: [plain]
+  textureSlotSet: [grass-top, sand, dirt]
+  tags: [plain, legacy-test]
   terrainBands:
     - id: plain-low
       name: Plain Low
@@ -17,65 +18,185 @@
       materialId: top-soil
       textureSlotId: grass-top
 
-- id: rocky-hills
-  name: Rocky Hills
-  defaultMaterialId: sub-soil
+- id: meadows
+  name: Meadows
+  biomeId: 0
+  defaultMaterialId: top-soil
   waterMaterialId: water
-  tags: [hills]
+  textureSlotSet: [grass-top, dirt, sand]
+  tags: [islands, starting, grassland]
   terrainBands:
-    - id: hills-low
-      name: Hills Low
+    - id: meadows-shore
+      name: Meadows Shore
       minHeight: -50
-      maxHeight: 30
-      materialId: sub-soil
-      textureSlotId: dirt
-    - id: hills-high
-      name: Hills High
-      minHeight: 30
-      maxHeight: 200
-      materialId: rock
-      textureSlotId: rock
-
-- id: lake-basin
-  name: Lake Basin
-  defaultMaterialId: clay
-  waterMaterialId: water
-  tags: [basin]
-  terrainBands:
-    - id: basin-floor
-      name: Basin Floor
-      minHeight: -100
-      maxHeight: -10
-      materialId: clay
-      textureSlotId: dirt
-    - id: basin-shore
-      name: Basin Shore
-      minHeight: -10
-      maxHeight: 5
+      maxHeight: 24
       materialId: sand
       textureSlotId: sand
-    - id: basin-bank
-      name: Basin Bank
-      minHeight: 5
-      maxHeight: 50
+    - id: meadows-field
+      name: Meadows Field
+      minHeight: 24
+      maxHeight: 90
       materialId: top-soil
       textureSlotId: grass-top
-
-- id: snow-peak
-  name: Snow Peak
-  defaultMaterialId: rock
-  waterMaterialId: water
-  tags: [mountain]
-  terrainBands:
-    - id: peak-lower
-      name: Peak Lower
-      minHeight: 0
-      maxHeight: 80
+    - id: meadows-high
+      name: Meadows High
+      minHeight: 90
+      maxHeight: 160
       materialId: rock
       textureSlotId: rock
-    - id: peak-upper
-      name: Peak Upper
-      minHeight: 80
-      maxHeight: 500
+
+- id: forest
+  name: Forest
+  biomeId: 1
+  defaultMaterialId: top-soil
+  waterMaterialId: water
+  textureSlotSet: [grass-top, dirt, rock]
+  tags: [islands, forest]
+  terrainBands:
+    - id: forest-low
+      name: Forest Low
+      minHeight: -50
+      maxHeight: 24
+      materialId: sand
+      textureSlotId: sand
+    - id: forest-floor
+      name: Forest Floor
+      minHeight: 24
+      maxHeight: 78
+      materialId: top-soil
+      textureSlotId: grass-top
+    - id: forest-rock
+      name: Forest Rock
+      minHeight: 78
+      maxHeight: 160
+      materialId: rock
+      textureSlotId: rock
+
+- id: swamp
+  name: Swamp
+  biomeId: 2
+  defaultMaterialId: clay
+  waterMaterialId: water
+  textureSlotSet: [dirt, sand, grass-top]
+  tags: [islands, wetland]
+  terrainBands:
+    - id: swamp-muck
+      name: Swamp Muck
+      minHeight: -50
+      maxHeight: 28
+      materialId: clay
+      textureSlotId: dirt
+    - id: swamp-bank
+      name: Swamp Bank
+      minHeight: 28
+      maxHeight: 78
+      materialId: top-soil
+      textureSlotId: grass-top
+    - id: swamp-rise
+      name: Swamp Rise
+      minHeight: 78
+      maxHeight: 160
+      materialId: rock
+      textureSlotId: rock
+
+- id: mountain
+  name: Mountain
+  biomeId: 3
+  defaultMaterialId: rock
+  waterMaterialId: water
+  textureSlotSet: [rock, snow, dirt]
+  tags: [islands, mountain]
+  terrainBands:
+    - id: mountain-foot
+      name: Mountain Foot
+      minHeight: -50
+      maxHeight: 58
+      materialId: rock
+      textureSlotId: rock
+    - id: mountain-slope
+      name: Mountain Slope
+      minHeight: 58
+      maxHeight: 92
+      materialId: rock
+      textureSlotId: rock
+    - id: mountain-snow
+      name: Mountain Snow
+      minHeight: 92
+      maxHeight: 220
       materialId: snow
       textureSlotId: snow
+
+- id: plains
+  name: Plains
+  biomeId: 4
+  defaultMaterialId: top-soil
+  waterMaterialId: water
+  textureSlotSet: [grass-top, sand, rock]
+  tags: [islands, dry-grassland]
+  terrainBands:
+    - id: plains-shore
+      name: Plains Shore
+      minHeight: -50
+      maxHeight: 26
+      materialId: sand
+      textureSlotId: sand
+    - id: plains-grass
+      name: Plains Grass
+      minHeight: 26
+      maxHeight: 86
+      materialId: top-soil
+      textureSlotId: grass-top
+    - id: plains-stone
+      name: Plains Stone
+      minHeight: 86
+      maxHeight: 160
+      materialId: rock
+      textureSlotId: rock
+
+- id: coast
+  name: Coast
+  biomeId: 5
+  defaultMaterialId: sand
+  waterMaterialId: water
+  textureSlotSet: [sand, rock, grass-top]
+  tags: [islands, shoreline]
+  terrainBands:
+    - id: coast-wet
+      name: Coast Wet
+      minHeight: -50
+      maxHeight: 22
+      materialId: sand
+      textureSlotId: sand
+    - id: coast-dry
+      name: Coast Dry
+      minHeight: 22
+      maxHeight: 46
+      materialId: sand
+      textureSlotId: sand
+    - id: coast-cliff
+      name: Coast Cliff
+      minHeight: 46
+      maxHeight: 180
+      materialId: rock
+      textureSlotId: rock
+
+- id: ocean
+  name: Ocean
+  biomeId: 6
+  defaultMaterialId: sand
+  waterMaterialId: water
+  textureSlotSet: [sand, dirt, rock]
+  tags: [islands, ocean]
+  terrainBands:
+    - id: ocean-floor
+      name: Ocean Floor
+      minHeight: -120
+      maxHeight: 20
+      materialId: sand
+      textureSlotId: sand
+    - id: ocean-rise
+      name: Ocean Rise
+      minHeight: 20
+      maxHeight: 180
+      materialId: rock
+      textureSlotId: rock

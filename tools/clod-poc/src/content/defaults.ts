@@ -38,6 +38,7 @@ export const DEFAULT_BIOMES: BiomeContent[] = [
     name: "Test Plain",
     defaultMaterialId: "top-soil",
     waterMaterialId: "water",
+    textureSlotSet: ["grass-top", "sand", "dirt"],
     tags: ["plain"],
     terrainBands: [
       { id: "plain-low", name: "Plain Low", minHeight: -50, maxHeight: 10, materialId: "sand", textureSlotId: "sand" },
@@ -49,6 +50,7 @@ export const DEFAULT_BIOMES: BiomeContent[] = [
     name: "Rocky Hills",
     defaultMaterialId: "sub-soil",
     waterMaterialId: "water",
+    textureSlotSet: ["dirt", "rock", "grass-top"],
     tags: ["hills"],
     terrainBands: [
       { id: "hills-low", name: "Hills Low", minHeight: -50, maxHeight: 30, materialId: "sub-soil", textureSlotId: "dirt" },
@@ -60,6 +62,7 @@ export const DEFAULT_BIOMES: BiomeContent[] = [
     name: "Lake Basin",
     defaultMaterialId: "clay",
     waterMaterialId: "water",
+    textureSlotSet: ["dirt", "sand", "grass-top"],
     tags: ["basin"],
     terrainBands: [
       { id: "basin-floor", name: "Basin Floor", minHeight: -100, maxHeight: -10, materialId: "clay", textureSlotId: "dirt" },
@@ -72,6 +75,7 @@ export const DEFAULT_BIOMES: BiomeContent[] = [
     name: "Snow Peak",
     defaultMaterialId: "rock",
     waterMaterialId: "water",
+    textureSlotSet: ["rock", "snow", "dirt"],
     tags: ["mountain"],
     terrainBands: [
       { id: "peak-lower", name: "Peak Lower", minHeight: 0, maxHeight: 80, materialId: "rock", textureSlotId: "rock" },

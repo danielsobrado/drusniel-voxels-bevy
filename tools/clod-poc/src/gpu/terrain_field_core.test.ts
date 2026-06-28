@@ -9,6 +9,7 @@ import {
   surfaceNormal,
   replaceDigEdits,
   clearDigEdits,
+  setTerrainFieldConfig,
   DigEdit,
 } from "../terrain/terrain.js";
 import {
@@ -16,6 +17,7 @@ import {
   densityCore,
   densityGradientCore,
   resolveDigEdits,
+  setTerrainFieldCoreConfig,
 } from "./terrain_field_core.js";
 
 // A spread of coords: negatives, fractionals, and large values that exercise the massif cell
@@ -23,7 +25,11 @@ import {
 const XS = [-733.5, -64, 0, 0.25, 37.5, 128, 285.71, 1024.75, 4096, -4096.5];
 const ZS = [-2048, -129.25, 0, 1.5, 96, 256.5, 911, 2047, -2049.75, 5000.25];
 
-afterEach(() => clearDigEdits());
+afterEach(() => {
+  clearDigEdits();
+  setTerrainFieldConfig(null);
+  setTerrainFieldCoreConfig(null);
+});
 
 describe("terrain_field_core surfaceHeight parity", () => {
   it("matches canonical surfaceHeight exactly across the grid", () => {
@@ -32,6 +38,31 @@ describe("terrain_field_core surfaceHeight parity", () => {
         expect(surfaceHeightCore(x, z)).toBe(surfaceHeight(x, z));
       }
     }
+  });
+
+  it("changes deterministically with seed while default seed remains pinned", () => {
+    const defaultHeight = surfaceHeight(285.71, 911);
+    setTerrainFieldConfig({ seed: 1 });
+    setTerrainFieldCoreConfig({ seed: 1 });
+    const seededHeight = surfaceHeight(285.71, 911);
+    expect(surfaceHeightCore(285.71, 911)).toBe(seededHeight);
+    expect(seededHeight).not.toBe(defaultHeight);
+  });
+
+  it("applies island shaping in parity when enabled", () => {
+    const islandShape = {
+      enabled: true,
+      oceanRim: true,
+      worldRadiusM: 2200,
+      spacingM: 1100,
+      radiusM: 420,
+      blendM: 180,
+    };
+    setTerrainFieldConfig({ seed: 7, islandShape });
+    setTerrainFieldCoreConfig({ seed: 7, islandShape });
+    expect(surfaceHeightCore(0, 0)).toBe(surfaceHeight(0, 0));
+    expect(surfaceHeightCore(2600, 0)).toBe(surfaceHeight(2600, 0));
+    expect(surfaceHeightCore(2600, 0)).toBeLessThan(18);
   });
 });
 

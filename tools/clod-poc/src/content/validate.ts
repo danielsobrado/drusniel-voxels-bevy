@@ -229,6 +229,27 @@ export function validateContentRegistry(
     const bands = biome.terrainBands || [];
     const sortedBands = [...bands].sort((a, b) => a.minHeight - b.minHeight);
 
+    if (!Array.isArray(biome.textureSlotSet) || biome.textureSlotSet.length === 0) {
+      issues.push({
+        severity: "error",
+        code: "MISSING_TEXTURE_SLOT_SET",
+        path: `${prefix}.textureSlotSet`,
+        message: `Biome "${id}" must define a non-empty textureSlotSet.`,
+      });
+    } else {
+      for (let i = 0; i < biome.textureSlotSet.length; i++) {
+        const slotId = biome.textureSlotSet[i];
+        if (!registry.textureSlots.has(slotId)) {
+          issues.push({
+            severity: "error",
+            code: "MISSING_TEXTURE_SLOT_REF",
+            path: `${prefix}.textureSlotSet[${i}]`,
+            message: `Biome "${id}" textureSlotSet references missing texture slot "${slotId}".`,
+          });
+        }
+      }
+    }
+
     for (let i = 0; i < bands.length; i++) {
       const band = bands[i];
       const bandPath = `${prefix}.terrainBands[${i}]`;

@@ -1,5 +1,5 @@
 import type { BuildProgress, BuildResult, DirtyCellBounds } from "./clod/quadtree.js";
-import type { DigEdit, VoxelEditSnapshot } from "./terrain/terrain.js";
+import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "./terrain/terrain.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
@@ -100,6 +100,7 @@ export class ClodWorkerClient {
     cfg: ClodPagesConfig,
     voxelEdits: VoxelEditSnapshot,
     onProgress: (progress: BuildProgress) => void,
+    terrainFieldConfig: TerrainFieldConfig | null = null,
     hydrologyTerrain: SerializedHydrologyTerrain | null = null,
     borderCoastOceanConfig: BorderCoastOceanConfig | null = null,
     cacheDisabled = false,
@@ -114,6 +115,7 @@ export class ClodWorkerClient {
       worldPagesZ,
       cfg,
       voxelEdits,
+      terrainFieldConfig,
       hydrologyTerrain,
       borderCoastOceanConfig,
       cacheDisabled,

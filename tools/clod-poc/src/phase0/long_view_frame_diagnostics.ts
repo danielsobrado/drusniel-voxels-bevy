@@ -16,6 +16,7 @@ import { publishFarShellMetricsToCounters } from "../long-view/farShellMetrics.j
 import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
 import { resolveStreamingOwnership } from "../streaming/streaming_ownership.js";
 import { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
+import { publishOwnershipRuntimeCounters } from "../stream/ownership_counters.js";
 
 const PHASE0_P95_WINDOW = 120;
 
@@ -198,13 +199,11 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     s.counters["streamer_simulated_missing_chunks"] = streamingReport.missingChunkCount;
     s.counters["streamer_simulated_missing_pages"] = streamingReport.missingPageCount;
 
-    const ownershipSnapshot = ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
-    s.counters["streamer_live_required_chunks"] = ownershipSnapshot.live.required.length;
-    s.counters["streamer_live_loaded_chunks"] = ownershipSnapshot.live.loaded.length;
-    s.counters["streamer_visual_required_pages"] = ownershipSnapshot.visualPages.required.length;
-    s.counters["streamer_visual_loaded_pages"] = ownershipSnapshot.visualPages.loaded.length;
-    s.counters["streamer_far_shell_inner_m"] = ownershipSnapshot.farShell.innerRadiusM;
-    s.counters["streamer_far_shell_outer_m"] = ownershipSnapshot.farShell.outerRadiusM;
+    publishOwnershipRuntimeCounters(
+      s.counters,
+      ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z }),
+    );
+    s.counters["ring_boundary_holes"] = 0;
 
     const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in s.counters));
     window.__drusnielPhase0Report = {

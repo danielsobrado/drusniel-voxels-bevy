@@ -125,6 +125,10 @@ describe("parsePhase0Config", () => {
     expect(cfg.phase0.target_visible_m).toBe(4096);
     expect(cfg.phase0.target_future_visible_m).toBe(8192);
     expect(Object.keys(cfg.phase0.scenes)).toContain("long_view_4km");
+    expect(Object.keys(cfg.phase0.scenes)).toContain("infinite_islands");
+    expect(cfg.phase0.scenes["infinite_islands"].camera.mode).toBe("scripted");
+    expect(cfg.phase0.scenes["infinite_islands"].camera.speed_mps).toBeGreaterThan(0);
+    expect(cfg.phase0.scenes["infinite_islands"].camera.duration_seconds).toBeGreaterThan(100);
     expect(cfg.metrics.required_counters.length).toBeGreaterThan(10);
     expect(cfg.acceptance.allow_current_4km_failure).toBe(true);
   });

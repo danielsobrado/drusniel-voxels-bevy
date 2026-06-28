@@ -3,11 +3,11 @@ import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "../terrain/border_coast_confi
 import type { WaterConfig } from "../water/waterConfig.js";
 import type { ClodPagesConfig } from "../config.js";
 import type { SerializedHydrologyTerrain } from "../clod_worker_protocol.js";
-import type { DigEdit, VoxelEditSnapshot } from "../terrain/terrain.js";
+import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/terrain.js";
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
-const TERRAIN_SOURCE_VERSION = "rectangular-world-v1";
+const TERRAIN_SOURCE_VERSION = "island-world-source-v1";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -72,6 +72,7 @@ function canonicalizeVoxelEdits(snapshot: VoxelEditSnapshot) {
 export interface TerrainSourceInputs {
   scene: string;
   worldSeed: string;
+  terrainFieldConfig?: TerrainFieldConfig;
   worldPages: number;
   worldPagesX?: number;
   worldPagesZ?: number;
@@ -98,6 +99,7 @@ export function normalizeTerrainSourceInputs(
   return {
     scene: input.scene ?? "default",
     worldSeed: input.worldSeed ?? "0",
+    terrainFieldConfig: input.terrainFieldConfig,
     worldPages: input.worldPages ?? 0,
     worldPagesX: input.worldPagesX ?? input.worldPages ?? 0,
     worldPagesZ: input.worldPagesZ ?? input.worldPagesX ?? input.worldPages ?? 0,
@@ -147,6 +149,7 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
     terrainSourceVersion: TERRAIN_SOURCE_VERSION,
     scene: source.scene,
     worldSeed: source.worldSeed,
+    terrainFieldConfig: source.terrainFieldConfig,
     worldPages: source.worldPages,
     worldPagesX: source.worldPagesX,
     worldPagesZ: source.worldPagesZ,

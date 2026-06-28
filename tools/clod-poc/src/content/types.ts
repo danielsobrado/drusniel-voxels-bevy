@@ -40,6 +40,8 @@ export interface BiomeContent {
   terrainBands: TerrainBandContent[];
   defaultMaterialId: string;
   waterMaterialId?: string;
+  textureSlotSet: string[];
+  biomeId?: number;
   tags: string[];
 }
 

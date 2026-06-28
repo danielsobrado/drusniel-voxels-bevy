@@ -629,6 +629,20 @@ export function createTerrainNodeMaterial(
     colorNode = vec3(riverFoamResidue);
   } else if (debugMode === 10) {
     colorNode = vec3(riverDroplets);
+  } else if (debugMode === 11) {
+    const regionNoise: TslNode = fract(fract(worldPos.x.mul(0.0037).add(worldPos.z.mul(0.0061))).mul(17.173));
+    const coastT: TslNode = smoothstep(22.0, 18.0, abs(worldPos.y.sub(18.0)));
+    const mountainT: TslNode = smoothstep(78.0, 108.0, worldPos.y);
+    const swampT: TslNode = smoothstep(28.0, 18.0, worldPos.y).mul(smoothstep(0.48, 0.12, regionNoise));
+    const plainsT: TslNode = smoothstep(0.55, 0.85, regionNoise);
+    const forestT: TslNode = smoothstep(0.38, 0.62, regionNoise);
+    let biomeColor: TslNode = vec3(0.38, 0.62, 0.26);
+    biomeColor = mix(biomeColor, vec3(0.10, 0.34, 0.16), forestT);
+    biomeColor = mix(biomeColor, vec3(0.18, 0.19, 0.12), swampT);
+    biomeColor = mix(biomeColor, vec3(0.70, 0.66, 0.43), plainsT);
+    biomeColor = mix(biomeColor, vec3(0.74, 0.76, 0.78), mountainT);
+    biomeColor = mix(biomeColor, vec3(0.78, 0.68, 0.42), coastT);
+    colorNode = biomeColor;
   }
   const ditherNoise = interleavedGradientNoise(screenCoordinate);
   const fade = clamp(uFade, 0.0, 1.0);

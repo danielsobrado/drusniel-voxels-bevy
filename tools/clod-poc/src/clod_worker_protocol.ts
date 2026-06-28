@@ -5,7 +5,7 @@ import type {
   DirtyCellBounds,
   NodeBuildStat,
 } from "./clod/quadtree.js";
-import type { DigEdit, VoxelEditSnapshot } from "./terrain/terrain.js";
+import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "./terrain/terrain.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 import type { TerrainSourceInputs } from "./cache/terrainSource.js";
@@ -45,6 +45,7 @@ export type ClodWorkerRequest =
       worldPagesZ: number;
       cfg: ClodPagesConfig;
       voxelEdits: VoxelEditSnapshot;
+      terrainFieldConfig?: TerrainFieldConfig | null;
       hydrologyTerrain?: SerializedHydrologyTerrain | null;
       borderCoastOceanConfig?: BorderCoastOceanConfig | null;
       cacheDisabled?: boolean;

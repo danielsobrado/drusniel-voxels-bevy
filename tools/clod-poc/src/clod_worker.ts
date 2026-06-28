@@ -20,8 +20,10 @@ import {
   replaceDigEdits,
   replaceVoxelEdits,
   setBorderCoastRuntime,
+  setTerrainFieldConfig,
   setTerrainSurfaceOverride,
 } from "./terrain/terrain.js";
+import { setTerrainFieldCoreConfig } from "./gpu/terrain_field_core.js";
 import {
   collectBuildResultTransferables,
   collectNodeTransferables,
@@ -402,6 +404,8 @@ function installBorderCoastRuntime(
 
 async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }>): Promise<void> {
   cfg = request.cfg;
+  setTerrainFieldConfig(request.terrainFieldConfig ?? null);
+  setTerrainFieldCoreConfig(request.terrainFieldConfig ?? null);
   replaceVoxelEdits(request.voxelEdits);
   installHydrologyTerrain(request.hydrologyTerrain);
   installBorderCoastRuntime(request.borderCoastOceanConfig, request.worldPagesX, request.cfg);
