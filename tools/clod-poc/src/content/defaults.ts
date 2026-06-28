@@ -42,8 +42,8 @@ function biome(
   canopyDensity: number,
 ): BiomeContent {
   const primarySlot = textureSlotSet[0] ?? "natural";
-  const lowMaterial = textureSlotSet.includes("sand") ? "sand" : defaultMaterialId;
-  const highSlot = textureSlotSet.includes("snow") ? "snow" : textureSlotSet.includes("rock") ? "rock" : primarySlot;
+  const lowMaterial = primarySlot === "sand" ? "sand" : defaultMaterialId;
+  const highSlot = textureSlotSet[2] ?? textureSlotSet[1] ?? primarySlot;
   const highMaterial = highSlot === "snow" ? "snow" : highSlot === "rock" ? "rock" : defaultMaterialId;
   return {
     id,
@@ -58,23 +58,23 @@ function biome(
     },
     defaultMaterialId,
     waterMaterialId: "water",
-    textureSlotSet: textureSlotSet.length > 0 ? textureSlotSet : [primarySlot],
+    textureSlotSet: Array.from(new Set(textureSlotSet.length > 0 ? textureSlotSet : [primarySlot])),
     tags: ["islands", "spatial-region"],
     terrainBands: [
       { id: `${id}-low`, name: `${name} Low`, minHeight: -120, maxHeight: 28, materialId: lowMaterial, textureSlotId: primarySlot },
-      { id: `${id}-mid`, name: `${name} Mid`, minHeight: 28, maxHeight: 92, materialId: defaultMaterialId, textureSlotId: primarySlot },
+      { id: `${id}-mid`, name: `${name} Mid`, minHeight: 28, maxHeight: 92, materialId: defaultMaterialId, textureSlotId: textureSlotSet[1] ?? primarySlot },
       { id: `${id}-high`, name: `${name} High`, minHeight: 92, maxHeight: 260, materialId: highMaterial, textureSlotId: highSlot },
     ],
   };
 }
 
 export const DEFAULT_BIOMES: BiomeContent[] = [
-  biome("meadows", "Meadows", 0, ["grass-top", "dirt", "sand"], "top-soil", [77, 97, 54], 0.2),
-  biome("forest", "Forest", 1, ["grass-top", "dirt", "rock"], "top-soil", [46, 79, 36], 1.0),
-  biome("swamp", "Swamp", 2, ["dirt", "sand", "grass-top"], "clay", [48, 71, 51], 0.65),
-  biome("mountain", "Mountain", 3, ["rock", "snow", "dirt"], "rock", [107, 102, 92], 0.0),
-  biome("plains", "Plains", 4, ["grass-top", "sand", "rock"], "top-soil", [120, 110, 64], 0.05),
-  biome("coast", "Coast", 5, ["sand", "rock", "grass-top"], "sand", [163, 140, 87], 0.0),
+  biome("meadows", "Meadows", 0, ["sand", "grass-top", "rock"], "top-soil", [77, 97, 54], 0.2),
+  biome("forest", "Forest", 1, ["sand", "grass-top", "rock"], "top-soil", [46, 79, 36], 1.0),
+  biome("swamp", "Swamp", 2, ["dirt", "grass-top", "rock"], "clay", [48, 71, 51], 0.65),
+  biome("mountain", "Mountain", 3, ["rock", "rock", "snow"], "rock", [107, 102, 92], 0.0),
+  biome("plains", "Plains", 4, ["sand", "grass-top", "rock"], "top-soil", [120, 110, 64], 0.05),
+  biome("coast", "Coast", 5, ["sand", "sand", "rock"], "sand", [163, 140, 87], 0.0),
   biome("ocean", "Ocean", 6, ["sand", "dirt", "rock"], "sand", [26, 51, 77], 0.0),
 ];
 
