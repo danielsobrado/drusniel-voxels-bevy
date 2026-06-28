@@ -121,6 +121,7 @@ export interface NaadfPocConfig {
 }
 
 export const NAADF_GPU_ATLAS_WINDOW_TILE_OPTIONS = [3, 5, 7] as const;
+export const DEFAULT_NAADF_FAR_SHELL_HEIGHT_SAMPLING_MODE: NaadfFarShellHeightSamplingMode = "gpu";
 
 const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
 const FAR_SHELL_HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
@@ -315,7 +316,7 @@ export function parseNaadfPocConfig(yamlText: string): NaadfPocConfig {
       endM: requireNumber(shellRaw["end_m"], "far_shell.end_m", 0),
       gridRes: requireNumber(shellRaw["grid_res"], "far_shell.grid_res", 1),
       useNaadfSummary: requireBool(shellRaw["use_naadf_summary"], "far_shell.use_naadf_summary"),
-      heightSamplingMode: requireFarShellHeightMode(shellRaw["height_sampling_mode"] ?? "cpu", "far_shell.height_sampling_mode"),
+      heightSamplingMode: requireFarShellHeightMode(shellRaw["height_sampling_mode"] ?? DEFAULT_NAADF_FAR_SHELL_HEIGHT_SAMPLING_MODE, "far_shell.height_sampling_mode"),
       gpuAtlasWindowTiles: requireGpuAtlasWindowTiles(shellRaw["gpu_atlas_window_tiles"] ?? 5, "far_shell.gpu_atlas_window_tiles"),
     },
     debug: {
