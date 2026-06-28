@@ -13,6 +13,22 @@ export const TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES = [
 ] as const;
 export const TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME = "treeImpostorBlendWeights";
 
+export function createTreeImpostorBlendGeometry(
+  source: THREE.BufferGeometry,
+  attributes: TreeImpostorBlendAttributes,
+): THREE.InstancedBufferGeometry {
+  const geometry = new THREE.InstancedBufferGeometry();
+  geometry.name = source.name ? `${source.name}-impostor-blend` : "tree-impostor-blend";
+  geometry.index = source.index?.clone() ?? null;
+  for (const [name, attribute] of Object.entries(source.attributes)) {
+    geometry.setAttribute(name, attribute.clone());
+  }
+  if (source.boundingBox) geometry.boundingBox = source.boundingBox.clone();
+  if (source.boundingSphere) geometry.boundingSphere = source.boundingSphere.clone();
+  attachTreeImpostorBlendAttributes(geometry, attributes);
+  return geometry;
+}
+
 export function attachTreeImpostorBlendAttributes(
   geometry: THREE.InstancedBufferGeometry,
   attributes: TreeImpostorBlendAttributes,
