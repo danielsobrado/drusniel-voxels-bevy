@@ -68,29 +68,36 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
   let horizonSamples = 0;
   let horizonHoles = 0;
 
-  const outerRadius = Math.max(snapshot.farShell.outerRadiusM, snapshot.farShell.innerRadiusM, snapshot.ownership.clodRadiusM);
-  const minX = Math.floor((snapshot.center.x - outerRadius) / coverageCellM);
-  const maxX = Math.ceil((snapshot.center.x + outerRadius) / coverageCellM);
-  const minZ = Math.floor((snapshot.center.z - outerRadius) / coverageCellM);
-  const maxZ = Math.ceil((snapshot.center.z + outerRadius) / coverageCellM);
+  const clodCenter = snapshot.center;
+  const farCenter = input.farShellCenter;
+  const clodOuterRadius = Math.max(snapshot.ownership.liveRadiusM, snapshot.ownership.clodRadiusM);
+  const farOuterRadius = Math.max(snapshot.farShell.outerRadiusM, snapshot.farShell.innerRadiusM);
+  const sampleMargin = coverageCellM * Math.SQRT2 * 0.5;
+  const minX = Math.floor((Math.min(clodCenter.x - clodOuterRadius, farCenter.x - farOuterRadius) - sampleMargin) / coverageCellM);
+  const maxX = Math.ceil((Math.max(clodCenter.x + clodOuterRadius, farCenter.x + farOuterRadius) + sampleMargin) / coverageCellM);
+  const minZ = Math.floor((Math.min(clodCenter.z - clodOuterRadius, farCenter.z - farOuterRadius) - sampleMargin) / coverageCellM);
+  const maxZ = Math.ceil((Math.max(clodCenter.z + clodOuterRadius, farCenter.z + farOuterRadius) + sampleMargin) / coverageCellM);
 
   for (let gx = minX; gx <= maxX; gx++) {
     for (let gz = minZ; gz <= maxZ; gz++) {
       const x = (gx + 0.5) * coverageCellM;
       const z = (gz + 0.5) * coverageCellM;
-      const d = Math.hypot(x - snapshot.center.x, z - snapshot.center.z);
-      if (d > outerRadius + coverageCellM * Math.SQRT2 * 0.5) continue;
+      const clodDistance = Math.hypot(x - clodCenter.x, z - clodCenter.z);
+      const farDistance = Math.hypot(x - farCenter.x, z - farCenter.z);
+      if (clodDistance > clodOuterRadius + sampleMargin && farDistance > farOuterRadius + sampleMargin) continue;
 
       const live = liveOwns(loadedLive, x, z, chunkSizeM);
       const clod = clodOwns(loadedClod, x, z, pageSizeM, input.maxLevel);
-      const far = d >= snapshot.farShell.innerRadiusM && d <= snapshot.farShell.outerRadiusM;
+      const far = farDistance >= snapshot.farShell.innerRadiusM && farDistance <= snapshot.farShell.outerRadiusM;
 
       if (live && clod) liveClodOverlap++;
       if (clod && far) clodFarOverlap++;
-      if (d <= snapshot.ownership.clodRadiusM && !live && !clod) liveClodGap++;
-      if (d > snapshot.ownership.clodRadiusM && d < snapshot.farShell.innerRadiusM && !clod && !far) clodFarGap++;
+      if (clodDistance <= snapshot.ownership.clodRadiusM && !live && !clod) liveClodGap++;
+      if (clodDistance > snapshot.ownership.clodRadiusM && farDistance < snapshot.farShell.innerRadiusM && !clod && !far) clodFarGap++;
 
-      if (d >= snapshot.ownership.clodRadiusM - coverageCellM && d <= snapshot.farShell.innerRadiusM + coverageCellM) {
+      const nearClodOuterBoundary = Math.abs(clodDistance - snapshot.ownership.clodRadiusM) <= coverageCellM;
+      const nearFarInnerBoundary = Math.abs(farDistance - snapshot.farShell.innerRadiusM) <= coverageCellM;
+      if (nearClodOuterBoundary || nearFarInnerBoundary) {
         horizonSamples++;
         if ((!clod && !far) || (clod && far)) horizonHoles++;
       }
@@ -99,8 +106,8 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
 
   const ringBoundaryHoles = liveClodGap + clodFarGap + missingLive + missingClod;
   return {
-    camera_to_clod_center_m: Math.hypot(input.camera.x - snapshot.center.x, input.camera.z - snapshot.center.z),
-    camera_to_far_shell_center_m: Math.hypot(input.camera.x - input.farShellCenter.x, input.camera.z - input.farShellCenter.z),
+    camera_to_clod_center_m: Math.hypot(input.camera.x - clodCenter.x, input.camera.z - clodCenter.z),
+    camera_to_far_shell_center_m: Math.hypot(input.camera.x - farCenter.x, input.camera.z - farCenter.z),
     far_shell_inner_minus_clod_radius_m: snapshot.farShell.innerRadiusM - snapshot.ownership.clodRadiusM,
     live_clod_gap_holes: liveClodGap,
     clod_far_gap_holes: clodFarGap,
