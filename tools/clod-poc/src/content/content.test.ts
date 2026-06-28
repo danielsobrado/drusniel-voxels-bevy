@@ -175,6 +175,7 @@ describe("Content Registry Validation Tests", () => {
       expect(biome!.region?.biomeId).toBe(biomeId);
       expect(biome!.region!.canopyDensity).toBeGreaterThanOrEqual(0);
       expect(biome!.region!.canopyDensity).toBeLessThanOrEqual(1);
+      expect(biome!.region!.terrainTextureSlots.length).toBeGreaterThanOrEqual(3);
       const textureSlotSet = getBiomeTextureSlotSet(registry, biomeId);
       expect(textureSlotSet?.slots.length).toBeGreaterThan(0);
       expect(textureSlotSet?.slotIndices.every(Number.isInteger)).toBe(true);
@@ -217,5 +218,22 @@ describe("Content Registry Validation Tests", () => {
     const material = readFileSync(materialPath, "utf8");
     expect(material).toContain("debugMode === 11");
     expect(material).toContain("attribute(\"biomeId\", \"float\")");
+  });
+
+  it("18. terrain material samples biome layer sets with rounded array layers", () => {
+    const materialPath = resolve(import.meta.dirname, "../gpu/terrain_node_material.ts");
+    const material = readFileSync(materialPath, "utf8");
+    expect(material).toContain("biomeLayerSets");
+    expect(material).toContain("sampleBiomeTerrainTexture");
+    expect(material).toContain("sampleBiomeTerrainNormal");
+    expect(material).toContain("function roundedLayer");
+  });
+
+  it("19. WebGPU wrapper builds biome layer sets from content registry", () => {
+    const wrapperPath = resolve(import.meta.dirname, "../rendering/terrain_material_webgpu.ts");
+    const wrapper = readFileSync(wrapperPath, "utf8");
+    expect(wrapper).toContain("buildBiomeLayerSets");
+    expect(wrapper).toContain("getBiomeTextureSlotSet");
+    expect(wrapper).toContain("EXPECTED_BIOME_REGION_IDS");
   });
 });
