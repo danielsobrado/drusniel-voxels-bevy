@@ -16,6 +16,11 @@ export const TREE_STRUCTURAL_VARIANTS = 4;
 
 const TREE_CONTACT_OFFSET_PER_SCALE_M = -0.12;
 const TREE_VARIANT_HASH_SALT = 1103;
+const TREE_VARIANT_SEED_X = 0.013;
+const TREE_VARIANT_SEED_Z = 0.037;
+const TREE_VARIANT_HASH_X = 127.1;
+const TREE_VARIANT_HASH_Z = 311.7;
+const TREE_VARIANT_HASH_MUL = 43758.5453123;
 
 export interface TreeTerrainSampler {
   surfaceHeight(x: number, z: number): number;
@@ -156,7 +161,7 @@ export function generateTreeInstances(
         instance: {
           position: [x, height + scale * TREE_CONTACT_OFFSET_PER_SCALE_M, z],
           species,
-          variant: treeVariant(gridX, gridZ, settings.seed),
+          variant: treeVariantFromWorldXZ(x, z, settings.seed),
           scale,
           rotationY: treeHash2(gridX, gridZ, settings.seed + 701) * Math.PI * 2,
           normalY,
@@ -169,10 +174,14 @@ export function generateTreeInstances(
   return ranked.slice(0, limit).map(({ instance }) => instance);
 }
 
-function treeVariant(gridX: number, gridZ: number, seed: number): number {
+export function treeVariantFromWorldXZ(x: number, z: number, seed: number): number {
+  const sx = x + seed * TREE_VARIANT_SEED_X + TREE_VARIANT_HASH_SALT;
+  const sz = z + seed * TREE_VARIANT_SEED_Z - TREE_VARIANT_HASH_SALT;
+  const phase = fract(Math.sin(sx * TREE_VARIANT_HASH_X + sz * TREE_VARIANT_HASH_Z) * TREE_VARIANT_HASH_MUL);
+  const safePhase = Number.isFinite(phase) ? phase : 0;
   return Math.min(
     TREE_STRUCTURAL_VARIANTS - 1,
-    Math.floor(treeHash2(gridX, gridZ, seed + TREE_VARIANT_HASH_SALT) * TREE_STRUCTURAL_VARIANTS),
+    Math.floor(safePhase * TREE_STRUCTURAL_VARIANTS),
   );
 }
 
@@ -211,4 +220,8 @@ function treeSuppressionRadius(
   const jitterRange = settings.ecology.clustering.minSpacingJitter;
   const jitter = 1 + (treeHash2(gridX, gridZ, settings.seed + 907) * 2 - 1) * jitterRange;
   return Math.max(0, base * speciesFactor * ecology.scaleMultiplier * jitter);
+}
+
+function fract(value: number): number {
+  return value - Math.floor(value);
 }
