@@ -1,6 +1,7 @@
 use crate::constants::{BEACH_HEIGHT_OFFSET, BEDROCK_DEPTH};
 use crate::voxel::types::VoxelType;
 
+use super::biome_content::BIOME_CONTENT_TABLE;
 use super::biome_region_field::BiomeId;
 use super::world_source::{ProceduralWorldSource, WorldSource};
 
@@ -32,25 +33,7 @@ impl<S: WorldSource> WorldSourceTerrainBridge<S> {
     }
 
     pub fn surface_material(&self, biome: BiomeId, depth: i32, near_water: bool) -> VoxelType {
-        if near_water {
-            return match biome {
-                BiomeId::Mountain => VoxelType::Rock,
-                _ => VoxelType::Sand,
-            };
-        }
-
-        match biome {
-            BiomeId::Ocean | BiomeId::Coast => VoxelType::Sand,
-            BiomeId::Mountain => VoxelType::Rock,
-            BiomeId::Swamp => {
-                if depth <= 1 { VoxelType::Clay } else { VoxelType::SubSoil }
-            }
-            BiomeId::Plains | BiomeId::Forest | BiomeId::Meadows => match depth {
-                d if d <= 0 => VoxelType::TopSoil,
-                1 | 2 => VoxelType::SubSoil,
-                _ => VoxelType::Rock,
-            },
-        }
+        BIOME_CONTENT_TABLE.voxel_for_depth(biome, depth, near_water)
     }
 
     pub fn get_voxel(&self, world_x: i32, world_y: i32, world_z: i32) -> VoxelType {
@@ -134,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn bridge_maps_biomes_to_legacy_voxel_materials() {
+    fn bridge_maps_biomes_to_content_table_materials() {
         let cases = [
             (BiomeId::Meadows, VoxelType::TopSoil),
             (BiomeId::Forest, VoxelType::TopSoil),
@@ -148,6 +131,11 @@ mod tests {
         for (biome, expected) in cases {
             let bridge = WorldSourceTerrainBridge::new(FixedSource::new(32.0, 18.0, biome));
             assert_eq!(bridge.get_voxel(0, 32, 0), expected, "{biome:?}");
+            assert_eq!(
+                bridge.surface_material(biome, 0, false),
+                BIOME_CONTENT_TABLE.voxel_for_depth(biome, 0, false),
+                "{biome:?} must come from the content table"
+            );
         }
     }
 
