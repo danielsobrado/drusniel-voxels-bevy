@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BIOME_IDS } from "../world_source/biome_region_field.js";
 import {
   DEFAULT_PROCEDURAL_TEXTURE_CONFIG,
   MAX_ACTIVE_BIOME_TEXTURES,
@@ -11,10 +12,20 @@ import {
   withActiveBiomeProceduralMaterials,
 } from "./materialRecipes.js";
 import {
+  biomeTextureMaterialForBiomeId,
+  createBiomeTextureStreamingManager,
+} from "./biome_texture_streaming_manager.js";
+import {
   TEXTURE_DOMAIN_BUDGETS,
   getTextureDomainBudget,
   totalResidentTextureSetBudget,
 } from "./texture_domain_policy.js";
+
+const silentLogger = {
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+};
 
 describe("texture domain streaming policy", () => {
   it("caps terrain authored biome layers to two active materials", () => {
@@ -87,5 +98,57 @@ procedural_textures:
     expect(getTextureDomainBudget("character").eviction).toBe("lru-distance");
     expect(TEXTURE_DOMAIN_BUDGETS.ui.maxResidentSets).toBeGreaterThan(0);
     expect(totalResidentTextureSetBudget()).toBeGreaterThan(2);
+  });
+
+  it("maps runtime biome ids to authored texture materials", () => {
+    expect(biomeTextureMaterialForBiomeId(BIOME_IDS.meadows)).toBe("meadows-ground");
+    expect(biomeTextureMaterialForBiomeId(BIOME_IDS.forest)).toBe("forest-floor");
+    expect(biomeTextureMaterialForBiomeId(BIOME_IDS.swamp)).toBe("swamp-muck");
+    expect(biomeTextureMaterialForBiomeId(BIOME_IDS.mountain)).toBe("mountain-scree");
+    expect(biomeTextureMaterialForBiomeId(BIOME_IDS.plains)).toBe("plains-grass");
+    expect(biomeTextureMaterialForBiomeId(BIOME_IDS.coast)).toBe("coast-sand");
+    expect(biomeTextureMaterialForBiomeId(BIOME_IDS.ocean)).toBe("ocean-floor");
+  });
+
+  it("updates the active texture pair only when the sampled biome window changes", () => {
+    const applied: string[][] = [];
+    const manager = createBiomeTextureStreamingManager({
+      baseConfig: DEFAULT_PROCEDURAL_TEXTURE_CONFIG,
+      sampleBiome: (x) => x < 100 ? BIOME_IDS.meadows : BIOME_IDS.swamp,
+      probeDistanceM: 64,
+      minMoveDistanceM: 1,
+      logger: silentLogger,
+      onActiveWindowChanged: (_config, active) => {
+        applied.push([...active]);
+      },
+    });
+
+    const first = manager.update({ x: 0, z: 0, frameIndex: 1 });
+    const second = manager.update({ x: 10, z: 0, frameIndex: 2 });
+    const third = manager.update({ x: 120, z: 0, frameIndex: 3 });
+
+    expect(first.changed).toBe(true);
+    expect(second.changed).toBe(false);
+    expect(third.changed).toBe(true);
+    expect(applied.at(-1)).toEqual(["swamp-muck"]);
+    expect(manager.stats().textureWindowSwaps).toBe(2);
+  });
+
+  it("forces explicit biome windows without sampling coordinates", () => {
+    const applied: string[][] = [];
+    const manager = createBiomeTextureStreamingManager({
+      baseConfig: DEFAULT_PROCEDURAL_TEXTURE_CONFIG,
+      sampleBiome: () => BIOME_IDS.meadows,
+      logger: silentLogger,
+      onActiveWindowChanged: (_config, active) => {
+        applied.push([...active]);
+      },
+    });
+
+    const result = manager.forceActiveBiomes([BIOME_IDS.mountain, BIOME_IDS.coast, BIOME_IDS.ocean]);
+
+    expect(result.activeBiomeMaterials).toEqual(["mountain-scree", "coast-sand"]);
+    expect(manager.currentConfig().terrain.active_biome_materials).toEqual(["mountain-scree", "coast-sand"]);
+    expect(applied).toEqual([["mountain-scree", "coast-sand"]]);
   });
 });
