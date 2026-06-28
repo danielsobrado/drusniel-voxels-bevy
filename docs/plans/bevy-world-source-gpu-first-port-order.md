@@ -17,10 +17,11 @@ Done:
 - clod-poc has `tools/clod-poc/scripts/export-world-source-golden.mts`.
 - clod-poc has `tools/clod-poc/fixtures/world_source_golden_samples.json` with 70 samples, 10 per biome.
 - Bevy has Rust fixture parity tests in `src/world/source/golden_fixture_tests.rs`.
+- Bevy has `assets/config/terrain_source.yaml` with `gpu_world_source` as the target default.
+- Bevy chunk generation now selects legacy or WorldSource bridge through terrain-source config.
 
 Not done yet:
 
-- Bevy chunk generation does not default to `WorldSourceTerrainBridge`.
 - Bevy does not yet have the clod-poc biome/splat WGSL path.
 - Bevy content is still behind the seven-biome clod-poc model.
 - Bevy renderer/material path does not yet consume `BiomeSplatSample`.
@@ -93,7 +94,7 @@ Acceptance:
 
 ### BVY-WS-04 — Add Bevy terrain-source mode config
 
-Status: Next.
+Status: Done.
 
 Modes:
 
@@ -103,28 +104,28 @@ Modes:
 
 Acceptance:
 
-- [ ] Config loads from YAML.
-- [ ] Default mode is `gpu_world_source` where GPU is supported.
-- [ ] CPU mode name clearly says reference/debug/fallback.
-- [ ] Legacy mode remains available during migration.
-- [ ] Invalid mode fails loudly.
+- [x] Config loads from YAML.
+- [x] Default mode is `gpu_world_source` where GPU is supported.
+- [x] CPU mode name clearly says reference/debug/fallback.
+- [x] Legacy mode remains available during migration.
+- [x] Invalid mode fails loudly.
 
 ### BVY-WS-05 — Bridge chunk generation behind source-mode flag
 
-Status: Pending.
+Status: Done.
 
 Acceptance:
 
-- [ ] Chunk generation can use `WorldSourceTerrainBridge` behind a config flag.
-- [ ] Legacy path still works.
-- [ ] Bedrock floor is preserved.
-- [ ] Water fills between surface and sea level.
-- [ ] Seven clod-poc biome IDs map deterministically to temporary Bevy voxel materials.
-- [ ] Tests cover source-mode selection.
+- [x] Chunk generation can use `WorldSourceTerrainBridge` behind a config flag.
+- [x] Legacy path still works.
+- [x] Bedrock floor is preserved.
+- [x] Water fills between surface and sea level.
+- [x] Seven clod-poc biome IDs map deterministically to temporary Bevy voxel materials.
+- [x] Tests cover source-mode selection.
 
 ### BVY-WS-06 — Move biome-region constants into shared GPU uniform/config contract
 
-Status: Pending.
+Status: Next.
 
 Acceptance:
 
