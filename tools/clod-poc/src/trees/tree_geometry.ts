@@ -25,7 +25,11 @@ export function createTreeGeometryMap(settings: TreeSettings): TreeGeometryMap {
         variants[variant][lod] = createTreeGeometry(species, variant, lod, settings);
       }
     }
-    const speciesMap = variants[0] as TreeSpeciesGeometryMap;
+
+    const speciesMap = {} as TreeSpeciesGeometryMap;
+    for (const lod of TREE_LODS) {
+      speciesMap[lod] = createTreeVariantSelectorGeometry(variants, lod);
+    }
     speciesMap.variants = variants;
     out[species] = speciesMap;
   }
@@ -33,10 +37,13 @@ export function createTreeGeometryMap(settings: TreeSettings): TreeGeometryMap {
 }
 
 export function disposeTreeGeometryMap(map: TreeGeometryMap): void {
+  const disposed = new Set<THREE.BufferGeometry>();
   for (const species of TREE_SPECIES) {
-    const variants = map[species].variants ?? { 0: map[species] };
+    const speciesMap = map[species];
+    for (const lod of TREE_LODS) disposeGeometryOnce(speciesMap[lod], disposed);
+    const variants = speciesMap.variants ?? { 0: speciesMap };
     for (const variant of Object.values(variants)) {
-      for (const lod of TREE_LODS) variant[lod].dispose();
+      for (const lod of TREE_LODS) disposeGeometryOnce(variant[lod], disposed);
     }
   }
 }
@@ -50,6 +57,7 @@ export function treeGeometryKey(settings: TreeSettings): string {
   return JSON.stringify({
     seed: settings.seed,
     variants: TREE_STRUCTURAL_VARIANTS,
+    variantSelector: true,
     budgets: settings.lod.budgets,
     species: TREE_SPECIES.map((species) => {
       const config = settings.species[species];
@@ -93,6 +101,7 @@ export function createTreeBakedImpostorGeometry(
     1,
   );
   const geometry = builder.build();
+  setTreeVariantAttribute(geometry, 0);
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
@@ -139,7 +148,9 @@ function createTreeGeometry(
   const config = settings.species[species];
 
   if (lod === "impostor") {
-    return createOpaqueImpostorTree(species, config);
+    const geometry = createOpaqueImpostorTree(species, config);
+    setTreeVariantAttribute(geometry, variant);
+    return geometry;
   }
 
   // All LODs for the same species+variant derive from the same skeleton seed;
@@ -153,6 +164,7 @@ function createTreeGeometry(
     const s = target / built.stats.height;
     geometry.scale(s, s, s);
   }
+  setTreeVariantAttribute(geometry, variant);
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
@@ -208,6 +220,85 @@ export function treeGeometryVariant(
 ): THREE.BufferGeometry {
   const safeVariant = Math.max(0, Math.min(TREE_STRUCTURAL_VARIANTS - 1, Math.floor(variant)));
   return map[species].variants?.[safeVariant]?.[lod] ?? map[species][lod];
+}
+
+function createTreeVariantSelectorGeometry(
+  variants: TreeVariantGeometryMap,
+  lod: TreeLod,
+): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colors: number[] = [];
+  const uvs: number[] = [];
+  const wind: number[] = [];
+  const foliageMasks: number[] = [];
+  const treeVariants: number[] = [];
+  const indices: number[] = [];
+
+  const entries = Object.entries(variants)
+    .map(([variant, geometry]) => [Number(variant), geometry] as const)
+    .sort(([a], [b]) => a - b);
+
+  for (const [variant, geometryByLod] of entries) {
+    const source = geometryByLod[lod];
+    const vertexCount = source.getAttribute("position")?.count ?? 0;
+    const vertexOffset = positions.length / 3;
+    appendAttribute(source, "position", 3, positions, vertexCount);
+    appendAttribute(source, "normal", 3, normals, vertexCount);
+    appendAttribute(source, "color", 3, colors, vertexCount);
+    appendAttribute(source, "uv", 2, uvs, vertexCount);
+    appendAttribute(source, "treeWind", 2, wind, vertexCount);
+    appendAttribute(source, "treeFoliageMask", 1, foliageMasks, vertexCount);
+    for (let i = 0; i < vertexCount; i++) treeVariants.push(variant);
+
+    const sourceIndex = source.getIndex();
+    if (sourceIndex) {
+      const array = sourceIndex.array;
+      for (let i = 0; i < array.length; i++) indices.push(vertexOffset + Number(array[i]));
+    } else {
+      for (let i = 0; i < vertexCount; i++) indices.push(vertexOffset + i);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute("treeWind", new THREE.Float32BufferAttribute(wind, 2));
+  geometry.setAttribute("treeFoliageMask", new THREE.Float32BufferAttribute(foliageMasks, 1));
+  geometry.setAttribute("treeVariant", new THREE.Float32BufferAttribute(treeVariants, 1));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  geometry.computeBoundingBox();
+  return geometry;
+}
+
+function appendAttribute(
+  geometry: THREE.BufferGeometry,
+  name: string,
+  itemSize: number,
+  target: number[],
+  vertexCount: number,
+): void {
+  const attribute = geometry.getAttribute(name);
+  if (!attribute) {
+    for (let i = 0; i < vertexCount * itemSize; i++) target.push(0);
+    return;
+  }
+  const array = attribute.array;
+  for (let i = 0; i < vertexCount * itemSize; i++) target.push(Number(array[i]));
+}
+
+function setTreeVariantAttribute(geometry: THREE.BufferGeometry, variant: number): void {
+  const vertexCount = geometry.getAttribute("position")?.count ?? 0;
+  geometry.setAttribute("treeVariant", new THREE.Float32BufferAttribute(new Float32Array(vertexCount).fill(variant), 1));
+}
+
+function disposeGeometryOnce(geometry: THREE.BufferGeometry, disposed: Set<THREE.BufferGeometry>): void {
+  if (disposed.has(geometry)) return;
+  disposed.add(geometry);
+  geometry.dispose();
 }
 
 class GeometryBuilder {
@@ -383,21 +474,21 @@ function maxAttributeValue(attribute: THREE.BufferAttribute | THREE.InterleavedB
   if (!attribute) return 0;
   let max = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < attribute.count; i++) max = Math.max(max, attribute.getX(i));
-  return max;
+  return max === Number.NEGATIVE_INFINITY ? 0 : max;
 }
 
 function maxAttributeComponent(
   attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined,
-  axis: "x" | "y",
+  component: "x" | "y",
 ): number {
   if (!attribute) return 0;
   let max = Number.NEGATIVE_INFINITY;
   for (let i = 0; i < attribute.count; i++) {
-    max = Math.max(max, axis === "x" ? attribute.getX(i) : attribute.getY(i));
+    max = Math.max(max, component === "x" ? attribute.getX(i) : attribute.getY(i));
   }
-  return max;
+  return max === Number.NEGATIVE_INFINITY ? 0 : max;
 }
 
 function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+  return Math.min(1, Math.max(0, value));
 }
