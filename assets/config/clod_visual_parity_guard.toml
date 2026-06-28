@@ -1,0 +1,32 @@
+# CLOD visual parity integration guard thresholds.
+#
+# This guard compares three CSV streams:
+#
+# - clod-selection-runtime.csv       from VOXEL_CLOD_STATS_CSV=1
+# - clod-crossfade-runtime.csv      from VOXEL_CLOD_CROSSFADE_STATS_CSV=1
+# - clod-cut-freeze.csv             from VOXEL_CLOD_CUT_FREEZE_CSV=1
+
+# Crossfade page entities should track the selected rendered page count. A small
+# tolerance is allowed because fade-out pages can coexist with fade-in pages for
+# a few frames and because some render paths may keep one frame of stale ECS
+# entities around while despawn commands are flushed.
+rendered_page_delta_max = 4
+
+# The crossfade material path should be enabled when collecting crossfade stats
+# in visual parity benches.
+require_crossfade_material_enabled = true
+
+# Cut-freeze CSV and selection CSV should agree on the frozen state for the same
+# frame.
+require_selection_freeze_matches_cut_freeze = true
+
+# While the cut is frozen, the crossfade transition id should not advance.
+max_transition_changes_while_frozen = 0
+
+# By the end of the bench, no fade-out pages/entities should remain alive.
+max_nonzero_fade_out_tail_rows = 0
+tail_rows = 24
+
+# Set to 1 or 2 only if the CSV exporters are sampled on slightly different
+# schedules. The default expects same-frame sampling.
+frame_tolerance = 0

@@ -64,14 +64,19 @@ export class ForestLightingSystem {
     this.stats = this.emptyStats();
   }
 
+  shouldUpdate(center: THREE.Vector3, sunDirection: THREE.Vector3, force = false): boolean {
+    if (this.disposed) return false;
+    return force || this.dirty ||
+      this.lastCenter.distanceTo(center) >= this.settings.field.updateDistanceM ||
+      this.lastSunDirection.distanceTo(sunDirection) >= 0.025;
+  }
+
   update(timeSeconds: number, center: THREE.Vector3, inputs: ForestLightingUpdateInputs): void {
     void timeSeconds;
     if (this.disposed) return;
     const treeProxies = inputs.treeProxies;
     const understoryProxies = inputs.understoryProxies ?? [];
-    const shouldUpdate = inputs.force || this.dirty ||
-      this.lastCenter.distanceTo(center) >= this.settings.field.updateDistanceM ||
-      this.lastSunDirection.distanceTo(inputs.sunDirection) >= 0.025;
+    const shouldUpdate = this.shouldUpdate(center, inputs.sunDirection, inputs.force);
     if (!shouldUpdate) {
       this.stats.treeProxies = treeProxies.length;
       this.stats.understoryProxies = understoryProxies.length;

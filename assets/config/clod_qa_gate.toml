@@ -1,0 +1,21 @@
+require_files = [
+  "clod-edit-plan.csv",
+  "clod-edit-events.csv",
+  "clod-edit-dispatch.csv",
+  "clod-edit-dry-run.csv",
+  "clod-edit-mutation-requests.csv",
+  "clod-edit-mutation-sink.csv",
+  "clod-edit-authoritative-hook.csv",
+  "clod-collider-refresh.csv",
+  "clod-selection-runtime.csv",
+  "clod-rebuild-observer.csv",
+  "clod-crossfade-runtime.csv",
+  "clod-cut-freeze.csv",
+  "clod-border-locks.csv",
+  "clod-topology.csv",
+  "clod-simplify.csv",
+  "clod-weld.csv"
+]
+require_report_markdown = true
+require_report_json = true
+allow_empty_optional_files = false

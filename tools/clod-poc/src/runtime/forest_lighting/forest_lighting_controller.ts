@@ -34,6 +34,7 @@ export interface ForestLightingController {
   applySettings(): void;
   bumpSettingsVersion(): void;
   applyToPropMaterials(): void;
+  shouldUpdate(center: import("three").Vector3, sunDirection: EnvironmentLighting["sunDirection"], force?: boolean): boolean;
   refreshStats(): void;
   update(
     elapsedSeconds: number,
@@ -122,6 +123,9 @@ export function createForestLightingController(deps: ForestLightingControllerDep
       settingsVersion++;
     },
     applyToPropMaterials,
+    shouldUpdate(center, sunDirection, force = false) {
+      return system.shouldUpdate(center, sunDirection, force);
+    },
     refreshStats,
     update(elapsedSeconds, center, proxies) {
       system.update(elapsedSeconds, center, proxies);

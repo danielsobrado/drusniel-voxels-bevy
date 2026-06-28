@@ -151,10 +151,13 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
   if (params.searchParams.get("grass") === "0") state.grassEnabled = false;
   if (params.searchParams.get("trees") === "1") state.treesEnabled = true;
   if (params.searchParams.get("trees") === "0") state.treesEnabled = false;
+  const treeGpuParam = params.searchParams.get("treeGpu") ?? params.searchParams.get("treeGpuRing");
+  if (params.isWebGpu && treeGpuParam !== "0") state.treeGpuEnabled = true;
   if (params.queryTreeGpuRing) {
     state.treesEnabled = true;
     state.treeGpuEnabled = true;
   }
+  if (treeGpuParam === "0") state.treeGpuEnabled = false;
   if (params.searchParams.get("understory") === "1") state.understoryEnabled = true;
   if (params.searchParams.get("understory") === "0") state.understoryEnabled = false;
   if (params.searchParams.get("water") === "1") state.waterEnabled = true;

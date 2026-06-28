@@ -1,0 +1,53 @@
+name: CLOD QA
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/voxel/pages/**'
+      - 'src/bin/clod_*'
+      - 'assets/config/clod_*'
+      - 'bench/scenes/**'
+      - 'scripts/*clod*'
+      - 'docs/rendering/clod-*'
+      - 'assets/shaders/**'
+      - '.github/workflows/clod-qa.yml'
+
+jobs:
+  clod-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOD_PAGES: '1'
+      CLOD_QA_RUN_DIR: bench-runs/ci-clod-qa
+      VOXEL_CLOD_STATS_CSV: '1'
+      VOXEL_CLOD_REBUILD_CSV: '1'
+      VOXEL_CLOD_CROSSFADE_BRIDGE: '1'
+      VOXEL_CLOD_CROSSFADE_MATERIAL: '1'
+      VOXEL_CLOD_CROSSFADE_STATS_CSV: '1'
+      VOXEL_CLOD_BORDER_LOCK_CSV: '1'
+      VOXEL_CLOD_TOPOLOGY_CSV: '1'
+      VOXEL_CLOD_SIMPLIFY_CSV: '1'
+      VOXEL_CLOD_WELD_CSV: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Build CLOD guard binaries
+        run: |
+          cargo test --no-run --bin clod_collider_refresh_export
+          cargo test --no-run --bin clod_collider_refresh_guard
+          cargo test --no-run --bin clod_apply_mode_guard
+      - name: Run final CLOD QA
+        run: scripts/run-clod-final-qa.sh
+      - name: Upload CLOD QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clod-qa-artifacts
+          path: |
+            bench-runs/ci-clod-qa
+            perf-dumps
+          if-no-files-found: warn

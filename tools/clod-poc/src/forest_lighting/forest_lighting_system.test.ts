@@ -183,6 +183,23 @@ describe("forest lighting system lifecycle", () => {
     system.dispose();
   });
 
+  it("reports whether a lighting field update is needed before callers build proxy arrays", () => {
+    const settings = cloneForestLightingSettings();
+    settings.field.resolution = 8;
+    settings.field.updateDistanceM = 8;
+    const system = new ForestLightingSystem({ worldCells: 64, settings });
+    const center = new THREE.Vector3(16, 0, 16);
+    const sun = new THREE.Vector3(1, 1, 0).normalize();
+    expect(system.shouldUpdate(center, sun)).toBe(true);
+
+    system.update(0, center, { treeProxies: [tree()], sunDirection: sun });
+    expect(system.shouldUpdate(center, sun)).toBe(false);
+    expect(system.shouldUpdate(new THREE.Vector3(19, 0, 16), sun)).toBe(false);
+    expect(system.shouldUpdate(new THREE.Vector3(25, 0, 16), sun)).toBe(true);
+    expect(system.shouldUpdate(center, new THREE.Vector3(0, 1, 0).normalize())).toBe(true);
+    system.dispose();
+  });
+
   it("disabled system produces neutral texture stats", () => {
     const settings = cloneForestLightingSettings();
     settings.enabled = false;
