@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseNaadfPocConfig } from "../config.js";
+import { DEFAULT_NAADF_FAR_SHELL_HEIGHT_SAMPLING_MODE, parseNaadfPocConfig } from "../config.js";
 import naadfYaml from "../../../config/naadf_poc.yaml?raw";
 
 describe("naadf config", () => {
@@ -16,7 +16,22 @@ describe("naadf config", () => {
   it("parses GPU far-shell height sampling as the runtime default", () => {
     const config = parseNaadfPocConfig(naadfYaml);
 
+    expect(DEFAULT_NAADF_FAR_SHELL_HEIGHT_SAMPLING_MODE).toBe("gpu");
     expect(config.farShell.heightSamplingMode).toBe("gpu");
+  });
+
+  it("defaults far-shell height sampling to GPU when omitted", () => {
+    const yaml = naadfYaml.replace("    height_sampling_mode: gpu\n", "");
+    const config = parseNaadfPocConfig(yaml);
+
+    expect(config.farShell.heightSamplingMode).toBe("gpu");
+  });
+
+  it("allows explicit CPU far-shell height sampling only as an override", () => {
+    const yaml = naadfYaml.replace("height_sampling_mode: gpu", "height_sampling_mode: cpu");
+    const config = parseNaadfPocConfig(yaml);
+
+    expect(config.farShell.heightSamplingMode).toBe("cpu");
   });
 
   it("parses the configured GPU atlas window size", () => {
