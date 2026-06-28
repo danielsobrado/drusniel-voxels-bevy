@@ -137,6 +137,18 @@ mod tests {
     }
 
     #[test]
+    fn checked_in_config_keeps_gpu_world_source_as_default_runtime_path() {
+        let config = TerrainSourceConfig::load(TERRAIN_SOURCE_CONFIG_PATH)
+            .expect("terrain_source.yaml should deserialize");
+
+        assert_eq!(config.mode, TerrainSourceMode::GpuWorldSource);
+        assert!(config.is_gpu_default_path());
+        assert_eq!(config.mode.acceptance_label(), "gpu_world_source");
+        assert_eq!(config.mode.selection_reason(), "default_gpu");
+        assert!(!config.mode.is_opt_in_non_gpu());
+    }
+
+    #[test]
     fn loads_legacy_mode() {
         let file = write_temp_yaml("terrain_source:\n  mode: legacy\n");
         let config = TerrainSourceConfig::load(file.path()).expect("legacy config");
