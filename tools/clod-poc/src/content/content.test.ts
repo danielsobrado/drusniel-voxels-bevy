@@ -216,6 +216,6 @@ describe("Content Registry Validation Tests", () => {
     const materialPath = resolve(import.meta.dirname, "../gpu/terrain_node_material.ts");
     const material = readFileSync(materialPath, "utf8");
     expect(material).toContain("debugMode === 11");
-    expect(material).toContain("attribute(\"biomeId\")");
+    expect(material).toContain("attribute(\"biomeId\", \"float\")");
   });
 });
