@@ -4,11 +4,14 @@ use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32, CHUNK_VOLUME};
 use crate::voxel::chunk::Chunk;
 use crate::voxel::materials::MaterialId;
 use crate::voxel::types::VoxelType;
-use crate::world::source::{material_biome, material_with_biome, BiomeId, ProceduralWorldSourceTerrainBridge};
+use crate::world::source::{
+    material_biome, material_with_biome, BiomeId, ProceduralWorldSourceTerrainBridge,
+    WorldSource, WorldSourceTerrainBridge,
+};
 
-pub(crate) fn build_world_source_chunk(
+pub(crate) fn build_world_source_chunk<S: WorldSource>(
     chunk_pos: IVec3,
-    bridge: &ProceduralWorldSourceTerrainBridge,
+    bridge: &WorldSourceTerrainBridge<S>,
 ) -> Chunk {
     let voxels = fill_world_source_chunk_voxels(chunk_pos, bridge);
     let mut chunk = Chunk::with_voxels(chunk_pos, voxels);
@@ -16,9 +19,9 @@ pub(crate) fn build_world_source_chunk(
     chunk
 }
 
-pub(crate) fn fill_world_source_chunk_voxels(
+pub(crate) fn fill_world_source_chunk_voxels<S: WorldSource>(
     chunk_pos: IVec3,
-    bridge: &ProceduralWorldSourceTerrainBridge,
+    bridge: &WorldSourceTerrainBridge<S>,
 ) -> [VoxelType; CHUNK_VOLUME] {
     let chunk_world_x = chunk_pos.x * CHUNK_SIZE_I32;
     let chunk_world_y = chunk_pos.y * CHUNK_SIZE_I32;
@@ -41,7 +44,10 @@ pub(crate) fn fill_world_source_chunk_voxels(
     voxels
 }
 
-fn tag_world_source_chunk_biomes(chunk: &mut Chunk, bridge: &ProceduralWorldSourceTerrainBridge) {
+fn tag_world_source_chunk_biomes<S: WorldSource>(
+    chunk: &mut Chunk,
+    bridge: &WorldSourceTerrainBridge<S>,
+) {
     let chunk_pos = chunk.position();
     let chunk_world_x = chunk_pos.x * CHUNK_SIZE_I32;
     let chunk_world_z = chunk_pos.z * CHUNK_SIZE_I32;
@@ -91,7 +97,10 @@ impl Chunk {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::source::{material_base, IslandShapeConfig, ProceduralWorldSource, TerrainFieldConfig, WorldSourceBounds, WorldSourceMetadata};
+    use crate::world::source::{
+        material_base, IslandShapeConfig, TerrainFieldConfig, WorldSourceBounds,
+        WorldSourceMetadata,
+    };
 
     #[derive(Debug, Clone)]
     struct FixedBiomeSource {
@@ -115,7 +124,7 @@ mod tests {
         }
     }
 
-    impl crate::world::source::WorldSource for FixedBiomeSource {
+    impl WorldSource for FixedBiomeSource {
         fn metadata(&self) -> &WorldSourceMetadata {
             &self.metadata
         }
@@ -135,9 +144,9 @@ mod tests {
 
     #[test]
     fn world_source_chunk_tags_solid_voxels_with_true_biome_id() {
-        let bridge = crate::world::source::WorldSourceTerrainBridge::new(FixedBiomeSource::new(BiomeId::Forest));
+        let bridge = WorldSourceTerrainBridge::new(FixedBiomeSource::new(BiomeId::Forest));
         let chunk = build_world_source_chunk(IVec3::ZERO, &bridge);
-        let local = UVec3::new(0, 16 - 1, 0);
+        let local = UVec3::new(0, 15, 0);
         let material = chunk.get_material_id(local);
 
         assert_eq!(material_biome(material), Some(BiomeId::Forest));
@@ -146,7 +155,7 @@ mod tests {
 
     #[test]
     fn world_source_chunk_does_not_tag_air_or_water() {
-        let bridge = crate::world::source::WorldSourceTerrainBridge::new(FixedBiomeSource::new(BiomeId::Ocean));
+        let bridge = WorldSourceTerrainBridge::new(FixedBiomeSource::new(BiomeId::Ocean));
         let chunk = build_world_source_chunk(IVec3::new(0, 3, 0), &bridge);
         let local = UVec3::new(0, 15, 0);
 
