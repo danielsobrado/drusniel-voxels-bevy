@@ -128,6 +128,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
         camera: render.camera,
         controls: player.controls,
         player: player.player,
+        terrainColliders: floatingOrigin.terrainColliders,
         frameIndex: selectionStats.frameId,
       });
       render.skyEnvironment?.updateCamera(render.camera);
