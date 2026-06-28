@@ -64,6 +64,14 @@ function resolveHeightSamplingMode(options: InfiniteFarShellOptions): FarShellHe
   return "gpu";
 }
 
+function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
+  if (Array.isArray(material)) {
+    for (const entry of material) entry.dispose();
+  } else {
+    material.dispose();
+  }
+}
+
 export class InfiniteFarShell {
   readonly mesh: THREE.Mesh;
   private readonly waterMesh: THREE.Mesh | undefined;
@@ -272,6 +280,12 @@ export class InfiniteFarShell {
       updateFarWaterMaterialCenter(waterMaterial, this.snappedX, this.snappedZ);
       updateFarWaterMaterialSummaryAtlas(waterMaterial, this.farSummaryGpuAtlas);
     }
+  }
+
+  dispose(): void {
+    this.mesh.geometry.dispose();
+    disposeMaterial(this.mesh.material as THREE.Material | THREE.Material[]);
+    if (this.waterMesh) disposeMaterial(this.waterMesh.material as THREE.Material | THREE.Material[]);
   }
 
   private applyRenderPosition(): void {
