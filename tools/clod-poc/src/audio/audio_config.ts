@@ -1,7 +1,6 @@
 import { load } from "js-yaml";
 import { AudioEventId, ALL_AUDIO_EVENTS } from "./audio_event_id.js";
 import audioEventsYamlText from "../../config/audio_events.yaml?raw";
-import airAudioEventsYamlText from "../../config/audio_events_air.yaml?raw";
 
 export interface EventAudioConfig {
   enabled: boolean;
@@ -25,9 +24,19 @@ export interface AudioConfig {
   events: Record<AudioEventId, EventAudioConfig>;
 }
 
+const DEFAULT_EVENT_AUDIO: Partial<Record<AudioEventId, EventAudioConfig>> = {
+  "spell.air.cast": {
+    enabled: true,
+    volume: 0.28,
+    cooldown_ms: 160,
+    synth: "smooth",
+    pitch: 920,
+    duration_ms: 1800,
+  },
+};
+
 export function parseAudioConfig(text: string): AudioConfig {
   const parsed = load(text) as any;
-  const extra = load(airAudioEventsYamlText) as any;
   if (!parsed || typeof parsed !== "object") {
     throw new Error("Invalid audio configuration");
   }
@@ -37,9 +46,8 @@ export function parseAudioConfig(text: string): AudioConfig {
   if (!parsed.events || typeof parsed.events !== "object") {
     throw new Error("Missing events audio configuration");
   }
-  if (extra?.events && typeof extra.events === "object") {
-    parsed.events = { ...parsed.events, ...extra.events };
-  }
+
+  parsed.events = { ...DEFAULT_EVENT_AUDIO, ...parsed.events };
 
   const requiredFields: Array<[keyof EventAudioConfig, string]> = [
     ["enabled", "boolean"],
