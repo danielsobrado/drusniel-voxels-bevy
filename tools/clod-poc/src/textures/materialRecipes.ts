@@ -1,6 +1,6 @@
 import { load } from "js-yaml";
 
-export const PROCEDURAL_MATERIAL_IDS = [
+export const BASE_PROCEDURAL_MATERIAL_IDS = [
   "grass",
   "rock",
   "sand",
@@ -10,6 +10,29 @@ export const PROCEDURAL_MATERIAL_IDS = [
   "gravel",
   "wet_soil",
 ] as const;
+
+export const BIOME_PROCEDURAL_MATERIAL_IDS = [
+  "meadows-ground",
+  "forest-floor",
+  "swamp-muck",
+  "mountain-scree",
+  "plains-grass",
+  "coast-sand",
+  "ocean-floor",
+] as const;
+
+export const PROCEDURAL_MATERIAL_IDS = [
+  ...BASE_PROCEDURAL_MATERIAL_IDS,
+  ...BIOME_PROCEDURAL_MATERIAL_IDS,
+] as const;
+
+export const PROCEDURAL_TEXTURE_LAYER_BUDGET = {
+  maxLayers: 16,
+  defaultLayerResolution: 512,
+  bytesPerPixelPerMap: 4,
+  mapsPerLayer: 2,
+  estimatedMipOverheadRatio: 1 / 3,
+} as const;
 
 export type ProceduralMaterialId = typeof PROCEDURAL_MATERIAL_IDS[number];
 
@@ -87,7 +110,7 @@ export const DEFAULT_PROCEDURAL_TEXTURE_CONFIG: ProceduralTextureConfig = {
     periods: { value: 256, fbm: 64, ridged: 32, worley: 128 },
   },
   terrain: {
-    layer_resolution: 1024,
+    layer_resolution: PROCEDURAL_TEXTURE_LAYER_BUDGET.defaultLayerResolution,
     macro_variation_m: [2, 50],
     meso_variation_m: [0.8, 4],
     micro_variation_m: [0.05, 0.4],
@@ -129,6 +152,13 @@ export const DEFAULT_PROCEDURAL_TEXTURE_CONFIG: ProceduralTextureConfig = {
       moss: { ...defaultRecipe([0.16, 0.31, 0.13], 0.98, 0.24, 0.1), moisture_bias: 0.65 },
       gravel: defaultRecipe([0.42, 0.41, 0.39], 0.88, 0.14, 0.22),
       wet_soil: defaultRecipe([0.18, 0.13, 0.1], 0.38, 0.16, 0.1),
+      "meadows-ground": defaultRecipe([0.31, 0.48, 0.19], 0.86, 0.20, 0.16),
+      "forest-floor": { ...defaultRecipe([0.12, 0.28, 0.10], 0.94, 0.28, 0.14), moisture_bias: 0.72 },
+      "swamp-muck": { ...defaultRecipe([0.12, 0.16, 0.10], 0.42, 0.20, 0.08), moisture_bias: 0.90 },
+      "mountain-scree": { ...defaultRecipe([0.41, 0.40, 0.37], 0.82, 0.18, 0.36), strata_strength: 0.62 },
+      "plains-grass": defaultRecipe([0.48, 0.42, 0.18], 0.90, 0.24, 0.13),
+      "coast-sand": defaultRecipe([0.70, 0.62, 0.42], 0.96, 0.10, 0.06),
+      "ocean-floor": { ...defaultRecipe([0.30, 0.27, 0.20], 0.62, 0.18, 0.07), moisture_bias: 0.85 },
     },
   },
   terrain_material_quality: {
@@ -183,13 +213,22 @@ function readQualityTiers(raw: unknown, fallback: Record<string, { max_noise_fet
   }));
 }
 
+export function estimateTerrainTextureArrayBytes(layerCount: number, layerResolution: number): number {
+  const baseBytes = layerCount
+    * layerResolution
+    * layerResolution
+    * PROCEDURAL_TEXTURE_LAYER_BUDGET.bytesPerPixelPerMap
+    * PROCEDURAL_TEXTURE_LAYER_BUDGET.mapsPerLayer;
+  return Math.ceil(baseBytes * (1 + PROCEDURAL_TEXTURE_LAYER_BUDGET.estimatedMipOverheadRatio));
+}
+
 export function parseProceduralTextureConfig(text: string): ProceduralTextureConfig {
   const parsed = load(text) as { procedural_textures?: Record<string, unknown> } | undefined;
   const root = parsed?.procedural_textures ?? {};
   const defaults = DEFAULT_PROCEDURAL_TEXTURE_CONFIG;
   const noise = root.noise && typeof root.noise === "object" ? root.noise as Record<string, unknown> : {};
   const periods = noise.periods && typeof noise.periods === "object" ? noise.periods as Record<string, unknown> : {};
-  const terrain = root.terrain && typeof root.terrain === "object" ? root.terrain as Record<string, unknown> : {};
+  const terrain = root.terrain && typeof root.terrain === "object" ? terrain as Record<string, unknown> : {};
   const micro = terrain.micro_normal && typeof terrain.micro_normal === "object" ? terrain.micro_normal as Record<string, unknown> : {};
   const masks = terrain.masks && typeof terrain.masks === "object" ? terrain.masks as Record<string, unknown> : {};
   const rawMaterials = terrain.materials && typeof terrain.materials === "object" ? terrain.materials as Record<string, unknown> : {};
