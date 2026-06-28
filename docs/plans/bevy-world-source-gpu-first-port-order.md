@@ -11,8 +11,9 @@ CPU and GPU world generation must not diverge. GPU is the default runtime path w
 Done:
 
 - Bevy has `src/world/source/` with `WorldSource`, `ProceduralWorldSource`, island shaping, biome region classification, splat types, and the temporary terrain bridge.
-- Bevy locks `BiomeRegionField.region_cell_m` to `420` and rejects CPU-only overrides.
-- clod-poc locks `BiomeRegionField.regionCellM` to `420` because WGSL currently hardcodes `420.0`.
+- clod-poc and Bevy use named `BiomeRegionContract` payloads instead of classifier-local duplicated threshold literals.
+- clod-poc WGSL classifier reads `contract.*` fields and its default WGSL payload is tested against TypeScript.
+- Bevy tests parse the clod-poc WGSL default contract and compare it against Rust `BIOME_REGION_CONTRACT`.
 - clod-poc NAADF far-shell height sampling defaults to GPU.
 - clod-poc has `tools/clod-poc/scripts/export-world-source-golden.mts`.
 - clod-poc has `tools/clod-poc/fixtures/world_source_golden_samples.json` with 70 samples, 10 per biome.
@@ -31,17 +32,17 @@ Not done yet:
 | Contract value | Canonical value | clod-poc CPU | clod-poc GPU | Bevy CPU/reference | Status |
 | --- | ---: | --- | --- | --- | --- |
 | Biome ids | 0..6 | `biome_region_field.ts` | `biome_region_field.wgsl` | `biome_region_field.rs` | Frozen |
-| Region cell | `420m` | `BIOME_REGION_CELL_M` | hardcoded `420.0` | `BIOME_REGION_CELL_M` | Frozen until uniformized |
-| Ocean height margin | `1.5m` | constant | literal | constant | Frozen |
-| Ocean island mask max | `0.08` | constant | literal | constant | Frozen |
-| Coast height band | `4m` | constant | literal | constant | Frozen |
-| Coast shore distance | `42m` | constant | literal | constant | Frozen |
-| Mountain above sea | `68m` | constant | literal | constant | Frozen |
-| Swamp above sea | `8m` | constant | literal | constant | Frozen |
-| Swamp noise max | `0.42` | constant | literal | constant | Frozen |
-| Plains distance min | `0.72` | constant | literal | constant | Frozen |
-| Plains noise min | `0.58` | constant | literal | constant | Frozen |
-| Forest noise min | `0.46` | constant | literal | constant | Frozen |
+| Region cell | `420m` | `BiomeRegionContract.regionCellM` | `BiomeRegionContract.regionCellM` | `BiomeRegionContract.region_cell_m` | Shared contract |
+| Ocean height margin | `1.5m` | contract | contract | contract | Shared contract |
+| Ocean island mask max | `0.08` | contract | contract | contract | Shared contract |
+| Coast height band | `4m` | contract | contract | contract | Shared contract |
+| Coast shore distance | `42m` | contract | contract | contract | Shared contract |
+| Mountain above sea | `68m` | contract | contract | contract | Shared contract |
+| Swamp above sea | `8m` | contract | contract | contract | Shared contract |
+| Swamp noise max | `0.42` | contract | contract | contract | Shared contract |
+| Plains distance min | `0.72` | contract | contract | contract | Shared contract |
+| Plains noise min | `0.58` | contract | contract | contract | Shared contract |
+| Forest noise min | `0.46` | contract | contract | contract | Shared contract |
 | Sea level | default `18m` | config | uniform/config path | config | Config |
 | Island shape | config | config | GPU parity path | config | Config |
 | Ocean rim | config | config | GPU parity path | config | Config |
@@ -125,18 +126,19 @@ Acceptance:
 
 ### BVY-WS-06 — Move biome-region constants into shared GPU uniform/config contract
 
-Status: Next.
+Status: Done.
 
 Acceptance:
 
-- [ ] Region cell size supplied to WGSL as uniform/config, not hardcoded.
-- [ ] Biome thresholds supplied from one shared source.
-- [ ] CPU tests verify config equals GPU uniform payload.
-- [ ] Bevy uses the same contract values.
+- [x] Region cell size is supplied to WGSL classifier through `BiomeRegionContract`, not as a classifier-local hardcoded literal.
+- [x] Biome thresholds are supplied from named TypeScript/Rust/WGSL contract payloads.
+- [x] TypeScript tests verify WGSL default contract values equal the TypeScript contract and that classifier code reads `contract.*` fields.
+- [x] Bevy tests parse the WGSL default contract and compare it against Rust `BIOME_REGION_CONTRACT`.
+- [x] Bevy uses the same contract values through `BiomeRegionContract`.
 
 ### BVY-WS-07 — Port biome/splat WGSL to Bevy GPU terrain path
 
-Status: Pending.
+Status: Next.
 
 Acceptance:
 
