@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { loadContentRegistry } from "./load_yaml.js";
 import { validateContentRegistry } from "./validate.js";
 import { isValidId } from "./ids.js";
+import {
+  EXPECTED_BIOME_REGION_IDS,
+  buildBiomeTextureLayerMap,
+  getBiomeContentByBiomeId,
+  getBiomeTextureSlotSet,
+} from "./biome_content.js";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
 
@@ -37,10 +43,7 @@ describe("Content Registry Validation Tests", () => {
 
   it("3. duplicate material IDs fail", () => {
     const registry = loadContentRegistry();
-    // Simulate duplicate material ID
     const firstMaterial = Array.from(registry.materials.values())[0];
-    
-    // We manually add an error to simulate duplicate loading
     const registryWithDupe = {
       ...registry,
       _errors: [
@@ -50,10 +53,10 @@ describe("Content Registry Validation Tests", () => {
           code: "DUPLICATE_ID",
           path: `materials.${firstMaterial.id}`,
           message: `Duplicate ID found`,
-        }
-      ]
+        },
+      ],
     };
-    
+
     const report = validateContentRegistry(registryWithDupe);
     expect(report.ok).toBe(false);
     expect(report.errors.some(e => e.code === "DUPLICATE_ID")).toBe(true);
@@ -61,11 +64,8 @@ describe("Content Registry Validation Tests", () => {
 
   it("4. missing material referenced by biome fails", () => {
     const registry = loadContentRegistry();
-    // Set biome's default material to something non-existent
-    const biome = registry.biomes.get("test-plain");
-    if (biome) {
-      biome.defaultMaterialId = "non-existent-material";
-    }
+    const biome = registry.biomes.get("meadows");
+    if (biome) biome.defaultMaterialId = "non-existent-material";
     const report = validateContentRegistry(registry);
     expect(report.ok).toBe(false);
     expect(report.errors.some(e => e.code === "MISSING_MATERIAL_REF")).toBe(true);
@@ -85,9 +85,7 @@ describe("Content Registry Validation Tests", () => {
   it("6. invalid RGB fails", () => {
     const registry = loadContentRegistry();
     const material = registry.materials.get("top-soil");
-    if (material) {
-      material.colorRgb = [300, -5, 12]; // Invalid RGB values
-    }
+    if (material) material.colorRgb = [300, -5, 12];
     const report = validateContentRegistry(registry);
     expect(report.ok).toBe(false);
     expect(report.errors.some(e => e.code === "INVALID_COLOR_RGB")).toBe(true);
@@ -96,9 +94,7 @@ describe("Content Registry Validation Tests", () => {
   it("7. invalid texture slot index fails", () => {
     const registry = loadContentRegistry();
     const slot = registry.textureSlots.get("natural");
-    if (slot) {
-      slot.slotIndex = -1; // Must be non-negative
-    }
+    if (slot) slot.slotIndex = -1;
     const report = validateContentRegistry(registry);
     expect(report.ok).toBe(false);
     expect(report.errors.some(e => e.code === "INVALID_SLOT_INDEX")).toBe(true);
@@ -107,9 +103,7 @@ describe("Content Registry Validation Tests", () => {
   it("7b. invalid texture slot source fails", () => {
     const registry = loadContentRegistry();
     const slot = registry.textureSlots.get("natural");
-    if (slot) {
-      slot.source = "external" as any;
-    }
+    if (slot) slot.source = "external" as any;
     const report = validateContentRegistry(registry);
     expect(report.ok).toBe(false);
     expect(report.errors.some(e => e.code === "INVALID_TEXTURE_SOURCE")).toBe(true);
@@ -120,7 +114,7 @@ describe("Content Registry Validation Tests", () => {
     const biome = registry.biomes.get("test-plain");
     if (biome && biome.terrainBands.length > 0) {
       biome.terrainBands[0].minHeight = 50;
-      biome.terrainBands[0].maxHeight = 10; // minHeight >= maxHeight
+      biome.terrainBands[0].maxHeight = 10;
     }
     const report = validateContentRegistry(registry);
     expect(report.ok).toBe(false);
@@ -130,9 +124,7 @@ describe("Content Registry Validation Tests", () => {
   it("9. invalid snap piece dimensions fail", () => {
     const registry = loadContentRegistry();
     const piece = registry.snapPieces.get("wood-floor");
-    if (piece) {
-      piece.dimensions = [0, 4, -2]; // Must be positive finite numbers
-    }
+    if (piece) piece.dimensions = [0, 4, -2];
     const report = validateContentRegistry(registry);
     expect(report.ok).toBe(false);
     expect(report.errors.some(e => e.code === "INVALID_SNAP_PIECE_DIMENSIONS")).toBe(true);
@@ -142,7 +134,7 @@ describe("Content Registry Validation Tests", () => {
     const registry = loadContentRegistry();
     const piece = registry.snapPieces.get("wood-floor");
     if (piece && piece.snapPoints.length > 0) {
-      piece.snapPoints[0].direction = [0, 0, 0]; // Cannot be zero vector (unnormalizable)
+      piece.snapPoints[0].direction = [0, 0, 0];
     }
     const report = validateContentRegistry(registry);
     expect(report.ok).toBe(false);
@@ -151,11 +143,8 @@ describe("Content Registry Validation Tests", () => {
 
   it("11. banned gameplay terms are rejected from production YAML if present", () => {
     const registry = loadContentRegistry();
-    // Simulate banned term injection
     const piece = registry.snapPieces.get("wood-floor");
-    if (piece) {
-      (piece as any).notes = "This is a quest item for dungeons"; // "quest" and "dungeon" are banned
-    }
+    if (piece) (piece as any).notes = "This is a quest item for dungeons";
     const report = validateContentRegistry(registry);
     expect(report.ok).toBe(false);
     expect(report.errors.some(e => e.code === "BANNED_TERM")).toBe(true);
@@ -166,9 +155,7 @@ describe("Content Registry Validation Tests", () => {
     const files = getAllTsFiles(srcDir);
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
-      if (file.endsWith("content.test.ts") || file.endsWith("deployment.test.ts")) {
-        continue;
-      }
+      if (file.endsWith("content.test.ts") || file.endsWith("deployment.test.ts")) continue;
       const content = readFileSync(file, "utf8");
       const lines = content.split("\n");
       for (const line of lines) {
@@ -177,5 +164,58 @@ describe("Content Registry Validation Tests", () => {
         }
       }
     }
+  });
+
+  it("13. every runtime biome id maps to spatial content and texture slots", () => {
+    const registry = loadContentRegistry();
+    for (const biomeId of EXPECTED_BIOME_REGION_IDS) {
+      const biome = getBiomeContentByBiomeId(registry, biomeId);
+      expect(biome, `biomeId ${biomeId}`).toBeDefined();
+      expect(biome!.region?.kind).toBe("spatial");
+      expect(biome!.region?.biomeId).toBe(biomeId);
+      expect(biome!.region!.canopyDensity).toBeGreaterThanOrEqual(0);
+      expect(biome!.region!.canopyDensity).toBeLessThanOrEqual(1);
+      const textureSlotSet = getBiomeTextureSlotSet(registry, biomeId);
+      expect(textureSlotSet?.slots.length).toBeGreaterThan(0);
+      expect(textureSlotSet?.slotIndices.every(Number.isInteger)).toBe(true);
+    }
+  });
+
+  it("14. detects missing spatial biome content", () => {
+    const registry = loadContentRegistry();
+    registry.biomes.delete("ocean");
+    const report = validateContentRegistry(registry);
+    expect(report.ok).toBe(false);
+    expect(report.errors.some(e => e.code === "MISSING_SPATIAL_BIOME_CONTENT")).toBe(true);
+  });
+
+  it("15. detects duplicated runtime biome ids", () => {
+    const registry = loadContentRegistry();
+    const plains = registry.biomes.get("plains");
+    if (plains?.region) {
+      plains.biomeId = 0;
+      plains.region.biomeId = 0;
+    }
+    const report = validateContentRegistry(registry);
+    expect(report.ok).toBe(false);
+    expect(report.errors.some(e => e.code === "DUPLICATE_BIOME_ID")).toBe(true);
+  });
+
+  it("16. builds a complete biome-to-texture-layer map for ISLE-11", () => {
+    const registry = loadContentRegistry();
+    const map = buildBiomeTextureLayerMap(registry);
+    expect(map.size).toBe(EXPECTED_BIOME_REGION_IDS.length);
+    for (const biomeId of EXPECTED_BIOME_REGION_IDS) {
+      const layers = map.get(biomeId) ?? [];
+      expect(layers.length).toBeGreaterThan(0);
+      expect(layers.every(layer => Number.isInteger(layer) && layer >= 0)).toBe(true);
+    }
+  });
+
+  it("17. terrain material keeps biome debug overlay wired to biomeId", () => {
+    const materialPath = resolve(import.meta.dirname, "../gpu/terrain_node_material.ts");
+    const material = readFileSync(materialPath, "utf8");
+    expect(material).toContain("debugMode === 11");
+    expect(material).toContain("attribute(\"biomeId\")");
   });
 });
