@@ -13,7 +13,7 @@ export interface TreeImpostorAtlas {
   texture: THREE.Texture;
   /** Sqrt-encoded RGB albedo + coverage in A. */
   albedo?: THREE.Texture;
-  /** Normal capture atlas. Depth-in-alpha is reserved for the MRT bake path. */
+  /** View/capture-space normal in RGB, normalized linear depth in A. */
   normalDepth?: THREE.Texture;
   gridSize: number;
   resolutionPx: number;
@@ -99,9 +99,11 @@ function bakeSpeciesAtlas(
   const radius = Math.max(geometry.boundingSphere?.radius ?? 1, 1);
   const center = geometry.boundingSphere?.center ?? new THREE.Vector3();
   const centerY = geometry.boundingBox?.getCenter(new THREE.Vector3()).y ?? center.y;
-  const camera = new THREE.OrthographicCamera(-radius, radius, radius, -radius, 0.01, radius * 6);
+  const near = 0.01;
+  const far = radius * 6;
+  const camera = new THREE.OrthographicCamera(-radius, radius, radius, -radius, near, far);
   const albedoMaterial = createBakeMaterial(options.material, settings);
-  const normalDepthMaterial = createNormalDepthBakeMaterial();
+  const normalDepthMaterial = createNormalDepthBakeMaterial(near, far);
   const mesh = new THREE.Mesh(geometry, albedoMaterial);
   mesh.position.copy(center).multiplyScalar(-1);
   scene.add(mesh);
@@ -205,15 +207,44 @@ function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettin
   return material;
 }
 
-function createNormalDepthBakeMaterial(): THREE.MeshNormalMaterial {
-  // TODO(TREE-2): replace this compatibility pass with a WebGPU MRT/TSL pass
-  // that writes linear depth into alpha after the runtime relight path consumes it.
-  return new THREE.MeshNormalMaterial({
+function createNormalDepthBakeMaterial(near: number, far: number): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    name: "tree-impostor-normal-depth-bake",
+    uniforms: {
+      near: { value: near },
+      far: { value: far },
+    },
+    vertexShader: TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER,
+    fragmentShader: TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER,
     side: THREE.DoubleSide,
     transparent: false,
     depthWrite: true,
   });
 }
+
+export const TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER = `
+uniform float near;
+uniform float far;
+varying vec3 vTreeImpostorViewNormal;
+varying float vTreeImpostorLinearDepth;
+
+void main() {
+  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+  vTreeImpostorViewNormal = normalize(normalMatrix * normal);
+  vTreeImpostorLinearDepth = clamp((-mvPosition.z - near) / max(far - near, 0.0001), 0.0, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+}
+`;
+
+export const TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER = `
+varying vec3 vTreeImpostorViewNormal;
+varying float vTreeImpostorLinearDepth;
+
+void main() {
+  vec3 packedNormal = normalize(vTreeImpostorViewNormal) * 0.5 + 0.5;
+  gl_FragColor = vec4(packedNormal, vTreeImpostorLinearDepth);
+}
+`;
 
 export function encodeTreeImpostorAlbedo(channel: number): number {
   return Math.sqrt(clamp01(channel));
@@ -230,6 +261,14 @@ export function encodeTreeImpostorNormalComponent(component: number): number {
 
 export function decodeTreeImpostorNormalComponent(channel: number): number {
   return clamp01(channel) * 2 - 1;
+}
+
+export function encodeTreeImpostorDepth(depth: number): number {
+  return clamp01(depth);
+}
+
+export function decodeTreeImpostorDepth(channel: number): number {
+  return clamp01(channel);
 }
 
 function nextFrame(): Promise<void> {
