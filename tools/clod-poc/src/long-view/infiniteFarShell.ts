@@ -55,10 +55,14 @@ export interface SnappedCenter {
   snappedZ: number;
 }
 
+function hasGpuSamplingInputs(options: InfiniteFarShellOptions): boolean {
+  return Boolean(options.useParityMaterial && options.parityConfig && options.farSummaryGpuAtlas);
+}
+
 function resolveHeightSamplingMode(options: InfiniteFarShellOptions): FarShellHeightSamplingMode {
-  const requested = options.heightSamplingMode ?? "cpu";
+  const requested = options.heightSamplingMode ?? (hasGpuSamplingInputs(options) ? "gpu" : "cpu");
   if (requested !== "gpu") return "cpu";
-  if (!options.useParityMaterial || !options.parityConfig || !options.farSummaryGpuAtlas) {
+  if (!hasGpuSamplingInputs(options)) {
     throw new Error("Far shell GPU mode requires parity material, parity config, and a GPU far-summary atlas");
   }
   return "gpu";
