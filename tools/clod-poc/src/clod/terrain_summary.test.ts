@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTerrainSummary,
+  createExtendedCanopyTexture,
   sampleHeight,
   sampleHeightBlend,
   sampleNormal,
@@ -10,6 +11,7 @@ import {
   summaryBaseLevel,
 } from "./terrain_summary.js";
 import type { ClodPageNode, PageMesh } from "../types.js";
+import { BIOME_IDS } from "../world_source/biome_region_field.js";
 
 const mesh: PageMesh = {
   positions: new Float32Array([0, 5, 0, 1, 5, 0, 0, 5, 1]),
@@ -55,7 +57,6 @@ describe("terrain summary field", () => {
     expect(summary.res).toBe(worldSize);
     expect(summary.worldSize).toBe(worldSize);
 
-    // Cell at page center should have coverage > 0
     const cx = 40, cz = 40;
     const h = sampleHeight(summary, cx, cz);
     expect(h).toBeGreaterThanOrEqual(10);
@@ -70,11 +71,9 @@ describe("terrain summary field", () => {
     const page = pageNode("L0:0,0", 0, 0, 50, 50, 10, 50);
     const summary = buildTerrainSummary([page], worldSize, 1);
 
-    // Cell far from any page should still produce a finite height
     const farH = sampleHeight(summary, 90, 90);
     expect(Number.isFinite(farH)).toBe(true);
 
-    // No NaN anywhere in the grid
     for (let i = 0; i < summary.heightMin.length; i++) {
       expect(Number.isFinite(summary.heightMin[i])).toBe(true);
       expect(Number.isFinite(summary.heightMax[i])).toBe(true);
@@ -84,13 +83,28 @@ describe("terrain summary field", () => {
   it("uses WorldSource for uncovered summary cells and skirt fallback", () => {
     const worldSource = {
       sampleHeight: () => 77,
-      sampleBiome: () => 4,
+      sampleBiome: () => BIOME_IDS.plains,
     };
     const summary = buildTerrainSummary([], 16, 16, { worldSource });
 
     expect(sampleHeight(summary, 8, 8)).toBe(77);
-    expect(sampleBiomeId(summary, 8, 8)).toBe(4);
+    expect(sampleBiomeId(summary, 8, 8)).toBe(BIOME_IDS.plains);
+    expect(sampleBiomeId(summary, -8, -8)).toBe(BIOME_IDS.plains);
     expect(sampleSkirtHeight(summary, -4, -4, 100, summaryBaseLevel(summary), 1)).toBe(77);
+  });
+
+  it("gates extended canopy by biome", () => {
+    const oceanSummary = buildTerrainSummary([], 16, 16, {
+      worldSource: {
+        sampleHeight: () => 0,
+        sampleBiome: () => BIOME_IDS.ocean,
+      },
+    });
+    const canopy = createExtendedCanopyTexture(oceanSummary, 32, 1);
+    const data = canopy.image.data as Float32Array;
+
+    for (const value of data) expect(value).toBe(0);
+    canopy.dispose();
   });
 
   it("normals are unit vectors", () => {
@@ -118,10 +132,9 @@ describe("terrain summary field", () => {
     ];
     const summary = buildTerrainSummary(pages, worldSize, 4);
 
-    expect(summary.res).toBe(25); // 100 / 4
+    expect(summary.res).toBe(25);
     expect(summary.farReduceFactor).toBe(4);
 
-    // Center of first quadrant should reflect page 0's height range
     const h = sampleHeight(summary, 25, 25);
     expect(h).toBeGreaterThanOrEqual(10);
     expect(h).toBeLessThanOrEqual(30);
@@ -135,10 +148,7 @@ describe("terrain summary field", () => {
     const centerCov = sampleCoverage(summary, 50, 50);
     expect(centerCov).toBeGreaterThan(0);
 
-    // Edge of world has no page coverage (the page is in the center)
     const edgeCov = sampleCoverage(summary, 5, 5);
-    // Edge may or may not have coverage depending on the box-reduce overlap;
-    // just check it doesn't crash and returns a finite value
     expect(Number.isFinite(edgeCov)).toBe(true);
   });
 
@@ -148,20 +158,16 @@ describe("terrain summary field", () => {
     const summary = buildTerrainSummary([page], worldSize, 1);
 
     const cx = 40, cz = 40;
-    // bias=0 → valley floor
     const hMin = sampleHeightBlend(summary, cx, cz, 0);
     const expectedMin = summary.heightMin[
-      // grid index for cell containing (cx, cz) — same lookup as sampleHeight
       Math.floor((cz / worldSize) * summary.res) * summary.res + Math.floor((cx / worldSize) * summary.res)
     ];
     expect(hMin).toBeCloseTo(expectedMin, 5);
 
-    // bias=1 → peak ≈ sampleHeight
     const hMax = sampleHeightBlend(summary, cx, cz, 1);
     const hPeak = sampleHeight(summary, cx, cz);
     expect(hMax).toBeCloseTo(hPeak, 5);
 
-    // bias=0.5 → between min and max
     const hMid = sampleHeightBlend(summary, cx, cz, 0.5);
     expect(hMid).toBeGreaterThanOrEqual(hMin);
     expect(hMid).toBeLessThanOrEqual(hMax);
