@@ -43,6 +43,11 @@
   display: none !important;
 }
 
+.debug-panel-chrome--floating[data-panel-id="clod-cache"]:hover .debug-panel-chrome-body,
+.debug-panel-chrome--floating[data-panel-id="clod-cache"]:focus-within .debug-panel-chrome-body {
+  display: block !important;
+}
+
 .debug-panel-chrome--floating[data-panel-id="clod-cache"] [data-panel-minimize] {
   font-size: 0 !important;
 }
