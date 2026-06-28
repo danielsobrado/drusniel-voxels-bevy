@@ -23,6 +23,13 @@ The summary includes:
 - estimated solid/water draw impact from generated meshes;
 - CPU/GPU drift gate status.
 
+BVY-WS-12 status:
+
+- the acceptance bench now writes source-aware biome material tags into generated chunks;
+- Surface Nets reads those source-aware biome tags before using the old compatibility adapter;
+- `material_draw_impact.compatibility_biome_channel_active` should be `false` for this bench path;
+- runtime chunk generation still needs the same source-aware material tagging hook before the temporary compatibility adapter can be fully removed.
+
 Current limitation:
 
 - GPU readback samples are not produced yet, so `drift_gate.status` is expected to be `skipped` with `gpu_readback_unavailable` until the readback producer is added.
