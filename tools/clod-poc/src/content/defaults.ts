@@ -30,6 +30,13 @@ export const DEFAULT_TEXTURE_SLOTS: TextureSlotContent[] = [
   { id: "water", name: "Water", slotIndex: 5, source: "builtin", materialId: "water", tags: ["water"] },
   { id: "snow", name: "Snow", slotIndex: 6, source: "builtin", materialId: "snow", tags: ["organic"] },
   { id: "lava", name: "Lava", slotIndex: 7, source: "builtin", materialId: "lava", tags: ["terrain"] },
+  { id: "meadows-ground", name: "Meadows Ground", slotIndex: 8, source: "generated", materialId: "top-soil", tags: ["terrain", "biome", "meadows"] },
+  { id: "forest-floor", name: "Forest Floor", slotIndex: 9, source: "generated", materialId: "top-soil", tags: ["terrain", "biome", "forest"] },
+  { id: "swamp-muck", name: "Swamp Muck", slotIndex: 10, source: "generated", materialId: "clay", tags: ["terrain", "biome", "swamp"] },
+  { id: "mountain-scree", name: "Mountain Scree", slotIndex: 11, source: "generated", materialId: "rock", tags: ["terrain", "biome", "mountain"] },
+  { id: "plains-grass", name: "Plains Grass", slotIndex: 12, source: "generated", materialId: "top-soil", tags: ["terrain", "biome", "plains"] },
+  { id: "coast-sand", name: "Coast Sand", slotIndex: 13, source: "generated", materialId: "sand", tags: ["terrain", "biome", "coast"] },
+  { id: "ocean-floor", name: "Ocean Floor", slotIndex: 14, source: "generated", materialId: "sand", tags: ["terrain", "biome", "ocean"] },
 ];
 
 function biome(
@@ -69,13 +76,13 @@ function biome(
 }
 
 export const DEFAULT_BIOMES: BiomeContent[] = [
-  biome("meadows", "Meadows", 0, ["sand", "grass-top", "rock"], "top-soil", [77, 97, 54], 0.2),
-  biome("forest", "Forest", 1, ["sand", "grass-top", "rock"], "top-soil", [46, 79, 36], 1.0),
-  biome("swamp", "Swamp", 2, ["dirt", "grass-top", "rock"], "clay", [48, 71, 51], 0.65),
-  biome("mountain", "Mountain", 3, ["rock", "rock", "snow"], "rock", [107, 102, 92], 0.0),
-  biome("plains", "Plains", 4, ["sand", "grass-top", "rock"], "top-soil", [120, 110, 64], 0.05),
-  biome("coast", "Coast", 5, ["sand", "sand", "rock"], "sand", [163, 140, 87], 0.0),
-  biome("ocean", "Ocean", 6, ["sand", "dirt", "rock"], "sand", [26, 51, 77], 0.0),
+  biome("meadows", "Meadows", 0, ["sand", "meadows-ground", "rock"], "top-soil", [77, 97, 54], 0.2),
+  biome("forest", "Forest", 1, ["sand", "forest-floor", "rock"], "top-soil", [46, 79, 36], 1.0),
+  biome("swamp", "Swamp", 2, ["dirt", "swamp-muck", "rock"], "clay", [48, 71, 51], 0.65),
+  biome("mountain", "Mountain", 3, ["rock", "mountain-scree", "snow"], "rock", [107, 102, 92], 0.0),
+  biome("plains", "Plains", 4, ["sand", "plains-grass", "rock"], "top-soil", [120, 110, 64], 0.05),
+  biome("coast", "Coast", 5, ["sand", "coast-sand", "rock"], "sand", [163, 140, 87], 0.0),
+  biome("ocean", "Ocean", 6, ["sand", "ocean-floor", "rock"], "sand", [26, 51, 77], 0.0),
 ];
 
 export const DEFAULT_CLOD_DEBUG_PRESETS: ClodDebugPreset[] = [
