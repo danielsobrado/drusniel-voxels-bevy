@@ -9,6 +9,7 @@ import type { ClodSelectionController } from "../../terrain/selection/clod_selec
 import type { PlayerInteractionState } from "../../player_controller.js";
 import type { FrameRenderer } from "./frame_renderer.js";
 import type { VegetationFrameTiming } from "./vegetation_frame_phase.js";
+import type { FramePerfPhaseTiming, FramePerfProbe } from "./perf_probe.js";
 
 export interface RenderPhaseInput {
   renderer: FrameRenderer;
@@ -34,6 +35,8 @@ export interface RenderPhaseInput {
   interaction: PlayerInteractionState;
   makeGrassSettings: () => import("../../grass.js").GrassSettings;
   grassPrepassEnabled: boolean;
+  perfProbe: FramePerfProbe | null;
+  phaseTiming: FramePerfPhaseTiming;
 }
 
 const grassProfileMs = (value: number | null): string => value === null ? "-" : `${value.toFixed(2)}ms`;
@@ -122,14 +125,86 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     if (index >= 0) input.longViewSettleWaiters.splice(index, 1);
   }
 
-  if (input.profileEnabled) {
+  if (input.profileEnabled || input.perfProbe) {
     const end = performance.now();
     const frameMs = end - input.frameStart;
-    if (frameMs >= input.profileFrameMs) {
-      const bubbleMs = input.tPropsStart - input.tBubbleStart;
-      const propsMs = tRenderStart - input.tPropsStart;
-      const renderMs = end - tRenderStart;
-      const otherMs = frameMs - selectionStats.selectionMs - bubbleMs - propsMs - renderMs;
+    const bubbleMs = input.tPropsStart - input.tBubbleStart;
+    const propsMs = tRenderStart - input.tPropsStart;
+    const renderMs = end - tRenderStart;
+    const otherMs = frameMs - selectionStats.selectionMs - bubbleMs - propsMs - renderMs;
+    const propsUnattributedMs = Math.max(
+      0,
+      propsMs -
+        input.phaseTiming.shadowProxyMs -
+        input.phaseTiming.clodShadowMs -
+        input.phaseTiming.canopyMs -
+        input.vegetationTiming.totalMs -
+        input.phaseTiming.borderOceanDebugMs -
+        input.phaseTiming.statsSyncMs,
+    );
+    const measuredTopLevelMs =
+      input.phaseTiming.frameSetupMs +
+      input.phaseTiming.selectionUpdateMs +
+      input.phaseTiming.longViewDiagnosticsMs +
+      input.phaseTiming.farSummaryMs +
+      input.phaseTiming.constructionMs +
+      input.phaseTiming.brushMs +
+      input.phaseTiming.combatMs +
+      input.phaseTiming.spellsMs +
+      input.phaseTiming.terrainPhaseMs +
+      input.phaseTiming.shadowProxyMs +
+      input.phaseTiming.clodShadowMs +
+      input.phaseTiming.canopyMs +
+      input.vegetationTiming.totalMs +
+      input.phaseTiming.borderOceanDebugMs +
+      input.phaseTiming.statsSyncMs +
+      renderMs;
+    input.perfProbe?.record({
+      frameId: selectionStats.frameId,
+      frameMs,
+      selectionMs: selectionStats.selectionMs,
+      frameSetupMs: input.phaseTiming.frameSetupMs,
+      selectionUpdateMs: input.phaseTiming.selectionUpdateMs,
+      longViewDiagnosticsMs: input.phaseTiming.longViewDiagnosticsMs,
+      farSummaryMs: input.phaseTiming.farSummaryMs,
+      constructionMs: input.phaseTiming.constructionMs,
+      brushMs: input.phaseTiming.brushMs,
+      combatMs: input.phaseTiming.combatMs,
+      spellsMs: input.phaseTiming.spellsMs,
+      terrainPhaseMs: input.phaseTiming.terrainPhaseMs,
+      shadowProxyMs: input.phaseTiming.shadowProxyMs,
+      clodShadowMs: input.phaseTiming.clodShadowMs,
+      canopyMs: input.phaseTiming.canopyMs,
+      borderOceanDebugMs: input.phaseTiming.borderOceanDebugMs,
+      statsSyncMs: input.phaseTiming.statsSyncMs,
+      unattributedMs: Math.max(0, frameMs - measuredTopLevelMs),
+      selectionCutMs: selectionStats.subphases.cut,
+      selectionBookMs: selectionStats.subphases.book,
+      selectionInfoMs: selectionStats.subphases.info,
+      selectionOverlaysMs: selectionStats.subphases.overlays,
+      bubbleMs,
+      propsMs,
+      vegetationTotalMs: input.vegetationTiming.totalMs,
+      propsRestMs: Math.max(0, propsMs - input.vegetationTiming.totalMs),
+      grassMs: input.vegetationTiming.grassMs,
+      treesMs: input.vegetationTiming.treesMs,
+      understoryMs: input.vegetationTiming.understoryMs,
+      forestLightingMs: input.vegetationTiming.forestLightingMs,
+      stonesMs: input.vegetationTiming.stonesMs,
+      customPropsMs: input.vegetationTiming.customPropsMs,
+      waterMs: input.vegetationTiming.waterMs,
+      deepOceanMs: input.vegetationTiming.deepOceanMs,
+      weatherMs: input.vegetationTiming.weatherMs,
+      propsUnattributedMs,
+      renderMs,
+      otherMs,
+      renderedCount: selectionStats.renderedCount,
+      terrainTriangles: selectionStats.triCount,
+      chunkGroupsBuilt: input.chunkGroupsBuiltThisFrame,
+      nearFieldChunkGroups: input.nearFieldBubbleController.size(),
+      interactionMode: input.interaction.mode,
+    });
+    if (input.profileEnabled && frameMs >= input.profileFrameMs) {
       // eslint-disable-next-line no-console
       console.warn(
         `[profile] frame ${frameMs.toFixed(1)}ms` +
@@ -137,6 +212,11 @@ export function runRenderPhase(input: RenderPhaseInput): void {
           ` (cut ${selectionStats.subphases.cut.toFixed(1)} book ${selectionStats.subphases.book.toFixed(1)} info ${selectionStats.subphases.info.toFixed(1)} overlays ${selectionStats.subphases.overlays.toFixed(1)})` +
           ` bubble/chunks ${bubbleMs.toFixed(1)} (built ${input.chunkGroupsBuiltThisFrame})` +
           ` props ${propsMs.toFixed(1)} (${formatVegetationTiming(input.vegetationTiming, propsMs)})` +
+          ` postTerrain shadowProxy ${input.phaseTiming.shadowProxyMs.toFixed(1)}` +
+          ` clodShadow ${input.phaseTiming.clodShadowMs.toFixed(1)}` +
+          ` canopy ${input.phaseTiming.canopyMs.toFixed(1)}` +
+          ` stats ${input.phaseTiming.statsSyncMs.toFixed(1)}` +
+          ` rest ${propsUnattributedMs.toFixed(1)}` +
           ` render ${renderMs.toFixed(1)}` +
           ` other ${otherMs.toFixed(1)}` +
           ` | cut=${selectionStats.renderedCount} chunkGroups=${input.nearFieldBubbleController.size()} mode=${input.interaction.mode}`,

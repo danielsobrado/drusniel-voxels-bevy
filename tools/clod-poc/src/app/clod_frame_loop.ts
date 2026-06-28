@@ -5,6 +5,7 @@ import { runStatsSyncPhase } from "./frame_loop/stats_sync_phase.js";
 import { runRenderPhase } from "./frame_loop/render_phase.js";
 import { submitMsChanged } from "./frame_loop/frame_timing.js";
 import { createBorderOceanDebugPanel } from "../water/border_ocean_debug_panel.js";
+import { createFramePerfPhaseTiming, createFramePerfProbeFromQuery, type FramePerfPhaseTiming } from "./frame_loop/perf_probe.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
 export type { StatsPresenter } from "./frame_loop/stats_presenter.js";
 export type { FrameRenderer } from "./frame_loop/frame_renderer.js";
@@ -20,6 +21,21 @@ export type {
 } from "./frame_loop/frame_loop_deps.js";
 
 import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
+
+function timed<T>(
+  enabled: boolean,
+  phaseTiming: FramePerfPhaseTiming,
+  key: keyof FramePerfPhaseTiming,
+  fn: () => T,
+): T {
+  if (!enabled) return fn();
+  const start = performance.now();
+  try {
+    return fn();
+  } finally {
+    phaseTiming[key] += performance.now() - start;
+  }
+}
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, clodShadow, canopy, construction, combat, spells } = deps;
@@ -51,6 +67,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   };
 
   let frameStart = 0;
+  const perfProbe = createFramePerfProbeFromQuery(debugQuery);
   const updateLongViewDiagnostics = createLongViewFrameDiagnostics({
     getHooks: render.getHooks,
     getAverageFps: () => averageFpsRef.value,
@@ -91,53 +108,68 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
 
   render.renderer.setAnimationLoop(() => {
     frameStart = performance.now();
-    terrain.selectionController.advanceFrame();
-    const selectionStats = terrain.selectionController.stats();
-    player.playerInputController.playerTimer.update();
-    const playerDelta = Math.min(player.playerInputController.playerTimer.getDelta(), 0.1);
-    if (vegetation.propController) {
-      const p = player.player.position;
-      vegetation.propController.syncColliders([p.x, p.y, p.z]);
-    }
-    elapsedSeconds += playerDelta;
-    updateAverageFps();
-    player.playerInputController.updateFrame(playerDelta);
-    render.skyEnvironment?.updateCamera(render.camera);
-    vegetation.drainVegetationDirtyQueue();
-    vegetation.treeController.updateFallingTrees(playerDelta);
-    if (!player.state.freeze) terrain.updateSelection();
-
-    updateLongViewDiagnostics();
-
-    farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera);
-
-    construction?.update();
-    const constructionActive = construction?.isActive() ?? false;
-    const terraformEditActive = !constructionActive && player.playerTerraformEditActive();
-    if (constructionActive) {
-      player.playerInputController.clearDigHold();
-      player.brushPreview.hide();
-    } else {
-      player.playerInputController.updateHoldToDig();
-    }
-
-    player.brushPreview.update({
-      digEnabled: player.state.digEnabled && !constructionActive,
-      interactionMode: player.interaction.mode,
-      terraformEditActive,
-      brushShape: player.state.brushShape,
-      brushOp: player.state.brushOp,
-      digRadius: player.state.digRadius,
-      brushHeight: player.state.brushHeight,
-      raycastEditableTerrain: player.terrainRaycast.raycastEditableTerrain,
-      getPlayingAimRay: () => player.playerInputController.getPlayingAimRay(),
-      getOrbitHoverRay: () => player.playerInputController.getOrbitHoverRay(),
+    const collectFrameTiming = player.state.profileEnabled || perfProbe !== null;
+    const phaseTiming = createFramePerfPhaseTiming();
+    let selectionStats = terrain.selectionController.stats();
+    let playerDelta = 0;
+    timed(collectFrameTiming, phaseTiming, "frameSetupMs", () => {
+      terrain.selectionController.advanceFrame();
+      selectionStats = terrain.selectionController.stats();
+      player.playerInputController.playerTimer.update();
+      playerDelta = Math.min(player.playerInputController.playerTimer.getDelta(), 0.1);
+      if (vegetation.propController) {
+        const p = player.player.position;
+        vegetation.propController.syncColliders([p.x, p.y, p.z]);
+      }
+      elapsedSeconds += playerDelta;
+      updateAverageFps();
+      player.playerInputController.updateFrame(playerDelta);
+      render.skyEnvironment?.updateCamera(render.camera);
+      vegetation.drainVegetationDirtyQueue();
+      vegetation.treeController.updateFallingTrees(playerDelta);
+    });
+    timed(collectFrameTiming, phaseTiming, "selectionUpdateMs", () => {
+      if (!player.state.freeze) terrain.updateSelection();
     });
 
-    combat?.update(performance.now());
-    spells?.update(performance.now());
+    timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics);
 
-    const terrainPhase = runTerrainFramePhase({
+    timed(collectFrameTiming, phaseTiming, "farSummaryMs", () => {
+      farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera);
+    });
+
+    let constructionActive = false;
+    timed(collectFrameTiming, phaseTiming, "constructionMs", () => {
+      construction?.update();
+      constructionActive = construction?.isActive() ?? false;
+    });
+    timed(collectFrameTiming, phaseTiming, "brushMs", () => {
+      const terraformEditActive = !constructionActive && player.playerTerraformEditActive();
+      if (constructionActive) {
+        player.playerInputController.clearDigHold();
+        player.brushPreview.hide();
+      } else {
+        player.playerInputController.updateHoldToDig();
+      }
+
+      player.brushPreview.update({
+        digEnabled: player.state.digEnabled && !constructionActive,
+        interactionMode: player.interaction.mode,
+        terraformEditActive,
+        brushShape: player.state.brushShape,
+        brushOp: player.state.brushOp,
+        digRadius: player.state.digRadius,
+        brushHeight: player.state.brushHeight,
+        raycastEditableTerrain: player.terrainRaycast.raycastEditableTerrain,
+        getPlayingAimRay: () => player.playerInputController.getPlayingAimRay(),
+        getOrbitHoverRay: () => player.playerInputController.getOrbitHoverRay(),
+      });
+    });
+
+    timed(collectFrameTiming, phaseTiming, "combatMs", () => combat?.update(performance.now()));
+    timed(collectFrameTiming, phaseTiming, "spellsMs", () => spells?.update(performance.now()));
+
+    const terrainPhase = timed(collectFrameTiming, phaseTiming, "terrainPhaseMs", () => runTerrainFramePhase({
       state: player.state,
       pageTransitionMode: terrain.pageTransitionMode,
       crossfadeStep: terrain.crossfadeStep,
@@ -148,15 +180,19 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       nearFieldBubbleController: terrain.nearFieldBubbleController,
       views: terrain.views,
       worldCells: terrain.worldCells,
+    }));
+
+    timed(collectFrameTiming, phaseTiming, "shadowProxyMs", () => shadowProxy?.rebuildIfNeeded());
+    timed(collectFrameTiming, phaseTiming, "clodShadowMs", () => {
+      clodShadow?.update();
+      if (clodShadow?.isActive()) {
+        clodShadow.statsController?.updateDisplay();
+      }
     });
 
-    shadowProxy?.rebuildIfNeeded();
-    clodShadow?.update();
-    if (clodShadow?.isActive()) {
-      clodShadow.statsController?.updateDisplay();
-    }
-
-    canopy?.update(render.camera.position.x, render.camera.position.z);
+    timed(collectFrameTiming, phaseTiming, "canopyMs", () => {
+      canopy?.update(render.camera.position.x, render.camera.position.z);
+    });
 
     const vegetationTiming = runVegetationFramePhase({
       elapsedSeconds,
@@ -181,21 +217,23 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       currentLighting: vegetation.currentLighting,
       selectionFrameId: selectionStats.frameId,
       worldCells: terrain.worldCells,
-      collectTiming: player.state.profileEnabled,
+      collectTiming: collectFrameTiming,
     });
 
-    if (borderOceanDebugPanel && selectionStats.frameId % 10 === 0) {
-      borderOceanDebugPanel.update({
-        worldCells: terrain.worldCells,
-        cameraPosition: render.camera.position,
-        deepOcean: waterWeather.deepOceanConfig,
-        deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
-        oceanSampler: waterWeather.oceanSampler,
-        playerConfig: player.player.config,
-      });
-    }
+    timed(collectFrameTiming, phaseTiming, "borderOceanDebugMs", () => {
+      if (borderOceanDebugPanel && selectionStats.frameId % 10 === 0) {
+        borderOceanDebugPanel.update({
+          worldCells: terrain.worldCells,
+          cameraPosition: render.camera.position,
+          deepOcean: waterWeather.deepOceanConfig,
+          deepOceanMeshPresent: waterWeather.deepOceanMeshPresent,
+          oceanSampler: waterWeather.oceanSampler,
+          playerConfig: player.player.config,
+        });
+      }
+    });
 
-    const { currentGrassStats } = runStatsSyncPhase({
+    const { currentGrassStats } = timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
       state: player.state,
       grassSystem: vegetation.grassSystem,
       treeSystem: vegetation.treeSystem,
@@ -215,7 +253,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       formatTreeGpuSummary: stats.formatTreeGpuSummary,
       formatUnderstoryGpuSummary: stats.formatUnderstoryGpuSummary,
       statsPresenter: stats.statsPresenter,
-    });
+    }));
 
     runRenderPhase({
       renderer: render.renderer,
@@ -241,6 +279,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       interaction: player.interaction,
       makeGrassSettings: render.makeGrassSettings,
       grassPrepassEnabled: render.grassPrepassEnabled,
+      perfProbe,
+      phaseTiming,
     });
   });
 }

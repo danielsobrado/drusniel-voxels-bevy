@@ -237,7 +237,15 @@ describe("Content Registry Validation Tests", () => {
     expect(wrapper).toContain("EXPECTED_BIOME_REGION_IDS");
   });
 
-  it("20. terrain material color uniforms use runtime vector values", () => {
+  it("20. WebGPU wrapper keeps biome splat opt-in", () => {
+    const wrapperPath = resolve(import.meta.dirname, "../rendering/terrain_material_webgpu.ts");
+    const wrapper = readFileSync(wrapperPath, "utf8");
+    expect(wrapper).toContain("extras.biomeSplat === true");
+    expect(wrapper).toContain("biomeLayerSets: extras.biomeSplat === true ? buildBiomeLayerSets(slots) : undefined");
+    expect(wrapper).not.toContain("biomeLayerSets: buildBiomeLayerSets(slots)");
+  });
+
+  it("21. terrain material color uniforms use runtime vector values", () => {
     const materialPath = resolve(import.meta.dirname, "../gpu/terrain_node_material.ts");
     const material = readFileSync(materialPath, "utf8");
     expect(material).toContain("function v3(c: THREE.Color): THREE.Vector3");

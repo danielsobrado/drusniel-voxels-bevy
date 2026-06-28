@@ -157,6 +157,13 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
   }
   if (params.searchParams.get("understory") === "1") state.understoryEnabled = true;
   if (params.searchParams.get("understory") === "0") state.understoryEnabled = false;
+  if (params.searchParams.get("water") === "1") state.waterEnabled = true;
+  if (params.searchParams.get("water") === "0") state.waterEnabled = false;
+  const postProcessParam = params.searchParams.get("postProcess") ?? params.searchParams.get("postprocess");
+  if (postProcessParam === "1") state.postProcessEnabled = true;
+  if (postProcessParam === "0") state.postProcessEnabled = false;
+  if (params.searchParams.get("freeze") === "1") state.freeze = true;
+  if (params.searchParams.get("freeze") === "0") state.freeze = false;
   if (params.searchParams.get("scene") === "long-view-shadow-proxy-low-sun") {
     state.sunElevationDeg = 8;
   }
