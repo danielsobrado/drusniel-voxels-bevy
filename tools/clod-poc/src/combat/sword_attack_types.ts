@@ -17,8 +17,10 @@ export interface CombatConfig {
   camera_offset: [number, number, number];
 }
 
+const FIRST_PERSON_SWORD_MODEL_PATH = "assets/combat/quaternius/rpg_items/models/sword_01.glb";
+
 export const DEFAULT_COMBAT_CONFIG: CombatConfig = {
-  model_path: "/assets/combat/quaternius/rpg_items/models/sword_01.glb",
+  model_path: FIRST_PERSON_SWORD_MODEL_PATH,
   cooldown_ms: 650,
   windup_ms: 120,
   active_ms: 130,
