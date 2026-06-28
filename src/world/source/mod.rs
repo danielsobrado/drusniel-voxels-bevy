@@ -1,6 +1,7 @@
 pub mod biome_content;
 pub mod biome_region_contract;
 pub mod biome_region_field;
+pub mod drift_gate;
 pub mod height_field;
 pub mod island_shape;
 pub mod noise;
@@ -21,6 +22,13 @@ pub use biome_region_contract::{
     BIOME_SWAMP_HEIGHT_ABOVE_SEA_M, BIOME_SWAMP_NOISE_MAX,
 };
 pub use biome_region_field::{BiomeId, BiomeRegionField, BiomeRegionSample};
+pub use drift_gate::{
+    evaluate_world_source_cpu_gpu_drift, evaluate_world_source_drift_gate,
+    sample_cpu_world_source, WorldSourceDriftFailure, WorldSourceDriftFailureKind,
+    WorldSourceDriftGateConfig, WorldSourceDriftGateReport, WorldSourceDriftGateStatus,
+    WorldSourceDriftSample, WorldSourceDriftSamplePoint,
+    WORLD_SOURCE_DRIFT_HEIGHT_TOLERANCE_M, WORLD_SOURCE_DRIFT_OCEAN_MASK_TOLERANCE,
+};
 pub use height_field::base_surface_height;
 pub use island_shape::{sample_island_mask, IslandMaskSample, IslandShapeConfig};
 pub use splat::{sample_biome_splat, BiomeSplatSample, MaterialLayerId};
