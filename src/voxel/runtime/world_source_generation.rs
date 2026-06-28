@@ -29,3 +29,22 @@ pub(crate) fn fill_world_source_chunk_voxels(
 
     voxels
 }
+
+#[cfg(test)]
+pub(crate) struct VoxelValueRef(VoxelType);
+
+#[cfg(test)]
+impl std::ops::Deref for VoxelValueRef {
+    type Target = VoxelType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+impl Chunk {
+    pub(crate) fn iter_voxels(&self) -> impl Iterator<Item = VoxelValueRef> + '_ {
+        self.iter().map(|(_, voxel)| VoxelValueRef(voxel))
+    }
+}
