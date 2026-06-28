@@ -41,4 +41,21 @@ describe("TerrainColliderSet lazy mesh sources", () => {
     expect(colliders.loadedPageCount()).toBe(1);
     colliders.dispose();
   });
+
+  it("moves footprints and lazy sources during floating-origin translation", () => {
+    const colliders = new TerrainColliderSet([
+      { id: "near", mesh: planeMesh(100, 0, 110, 10), footprint: { minX: 100, minZ: 0, maxX: 110, maxZ: 10 } },
+    ]);
+
+    colliders.translateHorizontal(-96, 32);
+    const hit = colliders.raycastSurface(new THREE.Ray(
+      new THREE.Vector3(9, 10, 37),
+      new THREE.Vector3(0, -1, 0),
+    ));
+
+    expect(hit?.pageId).toBe("near");
+    expect(hit?.point.x).toBeCloseTo(9);
+    expect(hit?.point.z).toBeCloseTo(37);
+    colliders.dispose();
+  });
 });
