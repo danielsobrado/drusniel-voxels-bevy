@@ -43,7 +43,7 @@ struct TreeLodParams {
 };
 
 struct TreeLodRing {
-  active: vec4<u32>,
+  lod_active: vec4<u32>,
   fade: vec4<f32>,
 };
 
@@ -305,19 +305,19 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
   let far_m = max(mid_m, params.far_m);
   let radius_m = max(far_m, params.radius_m);
   let band_m = max(0.0, params.band_m);
-  var active = vec4<u32>(0u);
+  var lod_active = vec4<u32>(0u);
   var fade = vec4<f32>(0.0);
   if (band_m <= 0.0) {
-    if (dist <= near_m) { active.x = 1u; fade.x = 1.0; }
-    else if (dist <= mid_m) { active.y = 1u; fade.y = 1.0; }
-    else if (dist <= far_m) { active.z = 1u; fade.z = 1.0; }
-    else if (dist <= radius_m) { active.w = 1u; fade.w = 1.0; }
-    return TreeLodRing(active, fade);
+    if (dist <= near_m) { lod_active.x = 1u; fade.x = 1.0; }
+    else if (dist <= mid_m) { lod_active.y = 1u; fade.y = 1.0; }
+    else if (dist <= far_m) { lod_active.z = 1u; fade.z = 1.0; }
+    else if (dist <= radius_m) { lod_active.w = 1u; fade.w = 1.0; }
+    return TreeLodRing(lod_active, fade);
   }
-  if (dist < near_m + band_m) { active.x = 1u; fade.x = 1.0; }
-  if (dist >= near_m - band_m && dist < mid_m + band_m) { active.y = 1u; fade.y = 1.0; }
-  if (dist >= mid_m - band_m && dist < far_m + band_m) { active.z = 1u; fade.z = 1.0; }
-  if (dist >= far_m - band_m && dist <= radius_m + band_m) { active.w = 1u; fade.w = 1.0; }
+  if (dist < near_m + band_m) { lod_active.x = 1u; fade.x = 1.0; }
+  if (dist >= near_m - band_m && dist < mid_m + band_m) { lod_active.y = 1u; fade.y = 1.0; }
+  if (dist >= mid_m - band_m && dist < far_m + band_m) { lod_active.z = 1u; fade.z = 1.0; }
+  if (dist >= far_m - band_m && dist <= radius_m + band_m) { lod_active.w = 1u; fade.w = 1.0; }
   if (dist >= near_m - band_m && dist <= near_m + band_m) {
     let t = clamp((dist - (near_m - band_m)) / (band_m * 2.0), 0.0, 1.0);
     fade.x = min(fade.x, 1.0 - t);
@@ -333,8 +333,8 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
     fade.z = min(fade.z, 1.0 - t);
     fade.w = min(fade.w, t);
   }
-  fade = fade * vec4<f32>(active);
-  return TreeLodRing(active, fade);
+  fade = fade * vec4<f32>(lod_active);
+  return TreeLodRing(lod_active, fade);
 }
 
 fn group_index(species: u32, lod: u32) -> u32 { return species * TREE_LOD_COUNT + lod; }
@@ -420,8 +420,8 @@ fn append_tree(species: u32, lod: u32, wc: vec2<f32>, height: f32, scale: f32) {
   out_cell[out_index] = vec4<f32>(wc.x, wc.y, height, scale);
 }
 
-fn append_lod_if_active(species: u32, lod: u32, active: u32, wc: vec2<f32>, height: f32, scale: f32) {
-  if (active != 0u) { append_tree(species, lod, wc, height, scale); }
+fn append_lod_if_active(species: u32, lod: u32, lod_active: u32, wc: vec2<f32>, height: f32, scale: f32) {
+  if (lod_active != 0u) { append_tree(species, lod, wc, height, scale); }
 }
 
 fn process_tree_slot(slot: u32) {
@@ -452,10 +452,10 @@ fn process_tree_slot(slot: u32) {
   if (species >= TREE_SPECIES_COUNT) { return; }
   let scale = tree_instance_scale(wc, wpos, normal.y, species) * tree_hydrology_scale_mask(hydro, height);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
-  append_lod_if_active(species, TREE_LOD_NEAR, ring.active.x, wc, height, scale);
-  append_lod_if_active(species, TREE_LOD_MID, ring.active.y, wc, height, scale);
-  append_lod_if_active(species, TREE_LOD_FAR, ring.active.z, wc, height, scale);
-  append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.active.w, wc, height, scale);
+  append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);
+  append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);
+  append_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, wc, height, scale);
+  append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, wc, height, scale);
 }
 
 @compute @workgroup_size(TREE_WORKGROUP_SIZE)

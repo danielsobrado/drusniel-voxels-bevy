@@ -35,10 +35,6 @@ const CASES: PerfCase[] = [
   { name: "debug-flat", params: { terrainMaterial: "debug_flat", terrainTriplanar: "0" } },
   { name: "triplanar-off", params: { terrainTriplanar: "0" } },
   { name: "tree-gpu-ring", params: { treeGpu: "1" } },
-<<<<<<< Updated upstream
-  { name: "tree-cpu", params: { treeGpu: "0" } },
-=======
->>>>>>> Stashed changes
   { name: "trees-off", params: { trees: "0", understory: "0" } },
   { name: "grass-off", params: { grass: "0" } },
   { name: "stones-off", params: { stones: "0" } },
