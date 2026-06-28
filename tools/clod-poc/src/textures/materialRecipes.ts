@@ -1,6 +1,6 @@
 import { load } from "js-yaml";
 
-export const BASE_PROCEDURAL_MATERIAL_IDS = [
+export const TERRAIN_COMMON_PROCEDURAL_MATERIAL_IDS = [
   "grass",
   "rock",
   "sand",
@@ -21,19 +21,31 @@ export const BIOME_PROCEDURAL_MATERIAL_IDS = [
   "ocean-floor",
 ] as const;
 
+export const DEFAULT_ACTIVE_BIOME_PROCEDURAL_MATERIAL_IDS = [
+  "meadows-ground",
+  "forest-floor",
+] as const;
+
+export const MAX_ACTIVE_BIOME_TEXTURES = 2;
+
 export const PROCEDURAL_MATERIAL_IDS = [
-  ...BASE_PROCEDURAL_MATERIAL_IDS,
+  ...TERRAIN_COMMON_PROCEDURAL_MATERIAL_IDS,
   ...BIOME_PROCEDURAL_MATERIAL_IDS,
 ] as const;
 
 export const PROCEDURAL_TEXTURE_LAYER_BUDGET = {
-  maxLayers: 16,
-  defaultLayerResolution: 512,
+  maxCommonLayers: TERRAIN_COMMON_PROCEDURAL_MATERIAL_IDS.length,
+  maxActiveBiomeLayers: MAX_ACTIVE_BIOME_TEXTURES,
+  maxResidentTerrainLayers: TERRAIN_COMMON_PROCEDURAL_MATERIAL_IDS.length + MAX_ACTIVE_BIOME_TEXTURES,
+  maxAuthoredBiomeLayers: BIOME_PROCEDURAL_MATERIAL_IDS.length,
+  defaultLayerResolution: 1024,
   bytesPerPixelPerMap: 4,
   mapsPerLayer: 2,
   estimatedMipOverheadRatio: 1 / 3,
 } as const;
 
+export type CommonProceduralMaterialId = typeof TERRAIN_COMMON_PROCEDURAL_MATERIAL_IDS[number];
+export type BiomeProceduralMaterialId = typeof BIOME_PROCEDURAL_MATERIAL_IDS[number];
 export type ProceduralMaterialId = typeof PROCEDURAL_MATERIAL_IDS[number];
 
 export interface ProceduralMaterialRecipe {
@@ -56,6 +68,7 @@ export interface ProceduralTextureConfig {
   };
   terrain: {
     layer_resolution: number;
+    active_biome_materials: BiomeProceduralMaterialId[];
     macro_variation_m: [number, number];
     meso_variation_m: [number, number];
     micro_variation_m: [number, number];
@@ -101,6 +114,64 @@ const defaultRecipe = (base_color: [number, number, number], roughness: number, 
   normal_strength,
 });
 
+export const DEFAULT_PROCEDURAL_MATERIAL_RECIPES: Record<ProceduralMaterialId, ProceduralMaterialRecipe> = {
+  grass: defaultRecipe([0.24, 0.42, 0.16], 0.85, 0.22, 0.18),
+  rock: { ...defaultRecipe([0.37, 0.36, 0.33], 0.78, 0.16, 0.32), strata_strength: 0.45 },
+  sand: defaultRecipe([0.62, 0.54, 0.36], 0.95, 0.12, 0.08),
+  snow: { ...defaultRecipe([0.82, 0.86, 0.88], 0.55, 0.06, 0.06), sparkle_strength: 0.04 },
+  dirt: defaultRecipe([0.34, 0.23, 0.14], 0.92, 0.18, 0.12),
+  moss: { ...defaultRecipe([0.16, 0.31, 0.13], 0.98, 0.24, 0.1), moisture_bias: 0.65 },
+  gravel: defaultRecipe([0.42, 0.41, 0.39], 0.88, 0.14, 0.22),
+  wet_soil: defaultRecipe([0.18, 0.13, 0.1], 0.38, 0.16, 0.1),
+  "meadows-ground": defaultRecipe([0.31, 0.48, 0.19], 0.86, 0.20, 0.16),
+  "forest-floor": { ...defaultRecipe([0.12, 0.28, 0.10], 0.94, 0.28, 0.14), moisture_bias: 0.72 },
+  "swamp-muck": { ...defaultRecipe([0.12, 0.16, 0.10], 0.42, 0.20, 0.08), moisture_bias: 0.90 },
+  "mountain-scree": { ...defaultRecipe([0.41, 0.40, 0.37], 0.82, 0.18, 0.36), strata_strength: 0.62 },
+  "plains-grass": defaultRecipe([0.48, 0.42, 0.18], 0.90, 0.24, 0.13),
+  "coast-sand": defaultRecipe([0.70, 0.62, 0.42], 0.96, 0.10, 0.06),
+  "ocean-floor": { ...defaultRecipe([0.30, 0.27, 0.20], 0.62, 0.18, 0.07), moisture_bias: 0.85 },
+};
+
+export function isProceduralMaterialId(value: unknown): value is ProceduralMaterialId {
+  return typeof value === "string" && (PROCEDURAL_MATERIAL_IDS as readonly string[]).includes(value);
+}
+
+export function isBiomeProceduralMaterialId(value: unknown): value is BiomeProceduralMaterialId {
+  return typeof value === "string" && (BIOME_PROCEDURAL_MATERIAL_IDS as readonly string[]).includes(value);
+}
+
+export function resolveActiveBiomeMaterials(values: readonly unknown[] | undefined): BiomeProceduralMaterialId[] {
+  const result: BiomeProceduralMaterialId[] = [];
+  const source = values && values.length > 0 ? values : DEFAULT_ACTIVE_BIOME_PROCEDURAL_MATERIAL_IDS;
+  for (const value of source) {
+    if (isBiomeProceduralMaterialId(value) && !result.includes(value)) result.push(value);
+    if (result.length >= MAX_ACTIVE_BIOME_TEXTURES) break;
+  }
+  return result.length > 0 ? result : [...DEFAULT_ACTIVE_BIOME_PROCEDURAL_MATERIAL_IDS];
+}
+
+export function resolveActiveProceduralMaterialOrder(activeBiomeMaterials?: readonly unknown[]): ProceduralMaterialId[] {
+  return [
+    ...TERRAIN_COMMON_PROCEDURAL_MATERIAL_IDS,
+    ...resolveActiveBiomeMaterials(activeBiomeMaterials),
+  ];
+}
+
+export function withActiveBiomeProceduralMaterials(
+  config: ProceduralTextureConfig,
+  activeBiomeMaterials: readonly unknown[],
+): ProceduralTextureConfig {
+  const active = resolveActiveBiomeMaterials(activeBiomeMaterials);
+  return {
+    ...config,
+    terrain: {
+      ...config.terrain,
+      active_biome_materials: active,
+      material_order: resolveActiveProceduralMaterialOrder(active),
+    },
+  };
+}
+
 export const DEFAULT_PROCEDURAL_TEXTURE_CONFIG: ProceduralTextureConfig = {
   enabled: true,
   seed: 1337,
@@ -111,6 +182,7 @@ export const DEFAULT_PROCEDURAL_TEXTURE_CONFIG: ProceduralTextureConfig = {
   },
   terrain: {
     layer_resolution: PROCEDURAL_TEXTURE_LAYER_BUDGET.defaultLayerResolution,
+    active_biome_materials: [...DEFAULT_ACTIVE_BIOME_PROCEDURAL_MATERIAL_IDS],
     macro_variation_m: [2, 50],
     meso_variation_m: [0.8, 4],
     micro_variation_m: [0.05, 0.4],
@@ -142,24 +214,8 @@ export const DEFAULT_PROCEDURAL_TEXTURE_CONFIG: ProceduralTextureConfig = {
       wet_tint: [0.18, 0.15, 0.12],
       snow_tint: [0.86, 0.89, 0.9],
     },
-    material_order: [...PROCEDURAL_MATERIAL_IDS],
-    materials: {
-      grass: defaultRecipe([0.24, 0.42, 0.16], 0.85, 0.22, 0.18),
-      rock: { ...defaultRecipe([0.37, 0.36, 0.33], 0.78, 0.16, 0.32), strata_strength: 0.45 },
-      sand: defaultRecipe([0.62, 0.54, 0.36], 0.95, 0.12, 0.08),
-      snow: { ...defaultRecipe([0.82, 0.86, 0.88], 0.55, 0.06, 0.06), sparkle_strength: 0.04 },
-      dirt: defaultRecipe([0.34, 0.23, 0.14], 0.92, 0.18, 0.12),
-      moss: { ...defaultRecipe([0.16, 0.31, 0.13], 0.98, 0.24, 0.1), moisture_bias: 0.65 },
-      gravel: defaultRecipe([0.42, 0.41, 0.39], 0.88, 0.14, 0.22),
-      wet_soil: defaultRecipe([0.18, 0.13, 0.1], 0.38, 0.16, 0.1),
-      "meadows-ground": defaultRecipe([0.31, 0.48, 0.19], 0.86, 0.20, 0.16),
-      "forest-floor": { ...defaultRecipe([0.12, 0.28, 0.10], 0.94, 0.28, 0.14), moisture_bias: 0.72 },
-      "swamp-muck": { ...defaultRecipe([0.12, 0.16, 0.10], 0.42, 0.20, 0.08), moisture_bias: 0.90 },
-      "mountain-scree": { ...defaultRecipe([0.41, 0.40, 0.37], 0.82, 0.18, 0.36), strata_strength: 0.62 },
-      "plains-grass": defaultRecipe([0.48, 0.42, 0.18], 0.90, 0.24, 0.13),
-      "coast-sand": defaultRecipe([0.70, 0.62, 0.42], 0.96, 0.10, 0.06),
-      "ocean-floor": { ...defaultRecipe([0.30, 0.27, 0.20], 0.62, 0.18, 0.07), moisture_bias: 0.85 },
-    },
+    material_order: resolveActiveProceduralMaterialOrder(DEFAULT_ACTIVE_BIOME_PROCEDURAL_MATERIAL_IDS),
+    materials: DEFAULT_PROCEDURAL_MATERIAL_RECIPES,
   },
   terrain_material_quality: {
     debug_flat: { max_noise_fetches: 0 },
@@ -169,10 +225,6 @@ export const DEFAULT_PROCEDURAL_TEXTURE_CONFIG: ProceduralTextureConfig = {
   },
   debug: { mode: "final" },
 };
-
-function isProceduralMaterialId(value: unknown): value is ProceduralMaterialId {
-  return typeof value === "string" && (PROCEDURAL_MATERIAL_IDS as readonly string[]).includes(value);
-}
 
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -236,9 +288,12 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
     id,
     mergeRecipe(rawMaterials[id], defaults.terrain.materials[id]),
   ])) as Record<ProceduralMaterialId, ProceduralMaterialRecipe>;
-  const order = Array.isArray(terrain.material_order)
-    ? terrain.material_order.filter(isProceduralMaterialId)
-    : defaults.terrain.material_order;
+  const orderBiomes = Array.isArray(terrain.material_order)
+    ? terrain.material_order.filter(isBiomeProceduralMaterialId)
+    : [];
+  const activeBiomeMaterials = resolveActiveBiomeMaterials(
+    Array.isArray(terrain.active_biome_materials) ? terrain.active_biome_materials : orderBiomes,
+  );
 
   return {
     enabled: root.enabled === undefined ? defaults.enabled : Boolean(root.enabled),
@@ -255,6 +310,7 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
     },
     terrain: {
       layer_resolution: Math.floor(readNumber(terrain.layer_resolution, defaults.terrain.layer_resolution)),
+      active_biome_materials: activeBiomeMaterials,
       macro_variation_m: defaults.terrain.macro_variation_m,
       meso_variation_m: defaults.terrain.meso_variation_m,
       micro_variation_m: defaults.terrain.micro_variation_m,
@@ -286,7 +342,7 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
         wet_tint: readColor(masks.wet_tint, defaults.terrain.masks.wet_tint),
         snow_tint: readColor(masks.snow_tint, defaults.terrain.masks.snow_tint),
       },
-      material_order: order.length > 0 ? order : defaults.terrain.material_order,
+      material_order: resolveActiveProceduralMaterialOrder(activeBiomeMaterials),
       materials,
     },
     terrain_material_quality: readQualityTiers(root.terrain_material_quality, defaults.terrain_material_quality),
