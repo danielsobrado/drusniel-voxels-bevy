@@ -7,6 +7,7 @@ import {
   createTerrainNodeMaterial,
   DEFAULT_TERRAIN_COLOR_ADJUST,
   DEFAULT_TERRAIN_NODE_LIGHTING,
+  type BiomeLayerSet,
   type TerrainColorAdjust,
   type TerrainArraySamplingMode,
   type TerrainNodeLighting,
@@ -19,8 +20,32 @@ import type {
   TerrainTextureApplyOptions,
 } from "./terrain_material.js";
 import type { TerrainTextureSlotUniform } from "../material/material.js";
+import { EXPECTED_BIOME_REGION_IDS, getBiomeTextureSlotSet, loadContentRegistry } from "../content/index.js";
 
 type MaterialChangedCallback = (material: THREE.Material) => void;
+type RuntimeTextureSlot = TerrainTextureSlotUniform & { selectedId?: string; name?: string };
+
+const EXTERNAL_LAYER_FALLBACK: Record<string, number> = {
+  "natural": 0,
+  "grass-top": 0,
+  "dirt": 1,
+  "rock": 2,
+  "sand": 1,
+  "water": 1,
+  "snow": 3,
+  "lava": 2,
+};
+
+const CONTENT_SLOT_SELECTED_ID_HINTS: Record<string, readonly string[]> = {
+  "natural": ["grass", "generated:grass"],
+  "grass-top": ["grass", "generated:grass"],
+  "dirt": ["dirt", "ground-054", "generated:dirt"],
+  "rock": ["rock", "ground-048", "generated:rock"],
+  "sand": ["sand", "generated:sand"],
+  "water": ["sand", "generated:sand"],
+  "snow": ["snow", "generated:snow"],
+  "lava": ["rock", "generated:rock"],
+};
 
 export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandle {
   let lighting: TerrainNodeLighting = {
@@ -146,14 +171,13 @@ function textureOptionsSignature(
   slots: readonly TerrainTextureSlotUniform[],
   options: TerrainTextureApplyOptions,
 ): string {
-  if (!options.enabled || !options.albedoArray || slots.length === 0) {
-    return "off";
-  }
+  if (!options.enabled || !options.albedoArray || slots.length === 0) return "off";
   const procedural = options.procedural;
   const extras = options as Record<string, unknown>;
   const normalMapMask = procedural?.normalMapMask
     ? Array.from(procedural.normalMapMask).join(",")
     : slots.map((slot) => (slot.normalTexture ? 1 : 0)).join(",");
+  const biomeLayerSets = buildBiomeLayerSets(slots).map((set) => set.join(",")).join(";");
   return [
     "on",
     options.albedoArray.uuid,
@@ -172,7 +196,7 @@ function textureOptionsSignature(
     procedural?.microFadeEnd ?? 85,
     procedural?.lodBias ?? 0,
     normalMapMask,
-    // LV-6: baked macro tint + world size (change triggers rebuild).
+    biomeLayerSets,
     extras.bakedMacroTint ? (extras.bakedMacroTint as THREE.Texture).uuid : "_",
     extras.riverWetnessMask ? (extras.riverWetnessMask as THREE.Texture).uuid : "_",
     extras.worldSize ?? "_",
@@ -182,6 +206,7 @@ function textureOptionsSignature(
       slot.scale,
       slot.heightMin,
       slot.heightMax,
+      (slot as RuntimeTextureSlot).selectedId ?? "_",
     ].join(":")).join(";"),
   ].join("|");
 }
@@ -210,6 +235,7 @@ function toNodeTextures(
     normalMapMask,
     painted: options.painted ?? false,
     debugMode: options.procedural?.debugMode ?? 0,
+    biomeLayerSets: buildBiomeLayerSets(slots),
     procedural: options.procedural?.enabled && options.procedural.noiseA && options.procedural.noiseB
       ? {
           noiseA: options.procedural.noiseA,
@@ -219,9 +245,42 @@ function toNodeTextures(
           lodBias: options.procedural.lodBias,
         }
       : null,
-    // LV-6: baked macro tint + world size, passed through from main.ts options.
     bakedMacroTint: extras.bakedMacroTint as THREE.Texture | null | undefined,
     riverWetnessMask: extras.riverWetnessMask as THREE.Texture | null | undefined,
     worldSize: extras.worldSize as number | undefined,
   };
+}
+
+function buildBiomeLayerSets(slots: readonly TerrainTextureSlotUniform[]): BiomeLayerSet[] {
+  const registry = loadContentRegistry();
+  return EXPECTED_BIOME_REGION_IDS.map((biomeId) => {
+    const slotSet = getBiomeTextureSlotSet(registry, biomeId);
+    const layers = (slotSet?.slots ?? [])
+      .map((slot) => resolveContentTextureSlotLayer(slot.id, slots))
+      .filter((layer) => Number.isInteger(layer) && layer >= 0);
+    return normalizeLayerSet(layers, slots.length);
+  });
+}
+
+function normalizeLayerSet(layers: readonly number[], layerCount: number): BiomeLayerSet {
+  const maxLayer = Math.max(0, layerCount - 1);
+  const clampLayer = (layer: number): number => Math.max(0, Math.min(maxLayer, Math.round(layer)));
+  const first = clampLayer(layers[0] ?? 0);
+  const second = clampLayer(layers[1] ?? first);
+  const third = clampLayer(layers[2] ?? second);
+  return [first, second, third];
+}
+
+function resolveContentTextureSlotLayer(contentSlotId: string, slots: readonly TerrainTextureSlotUniform[]): number {
+  const runtimeSlots = slots as readonly RuntimeTextureSlot[];
+  const hints = CONTENT_SLOT_SELECTED_ID_HINTS[contentSlotId] ?? [];
+  for (const hint of hints) {
+    const found = runtimeSlots.findIndex((slot) => {
+      const selected = slot.selectedId?.toLowerCase() ?? "";
+      const name = slot.name?.toLowerCase() ?? "";
+      return selected.includes(hint) || name.includes(hint.replace("generated:", ""));
+    });
+    if (found >= 0) return found;
+  }
+  return EXTERNAL_LAYER_FALLBACK[contentSlotId] ?? 0;
 }
