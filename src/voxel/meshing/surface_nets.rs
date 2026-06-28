@@ -1,8 +1,8 @@
+use super::biome_channel::source_or_compatibility_biome_id_for_uv;
 use super::{
     ChunkMeshResult, LodTransitionSnapStats, MeshData, MeshGenerationTimingStats, MeshSdfCache,
     PaddedChunkShape, SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode,
     compute_vertex_material_weights, generate_sdf, generate_water_mesh,
-    source_or_compatibility_biome_id_for_uv,
 };
 use crate::constants::{CHUNK_SIZE, VOXEL_SIZE};
 use crate::rendering::ao_config::BakedAoConfig;
