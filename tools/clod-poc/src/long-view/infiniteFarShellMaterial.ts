@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { clamp, dot, float, max, mix, normalGeometry, normalize, positionGeometry, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+import { attribute, clamp, dot, float, max, mix, normalGeometry, normalize, positionGeometry, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 
+// TSL node typing is intentionally loose in Three examples and current package typings.
 type TslNode = any;
 
 interface FarShellMaterialUniformRefs {
@@ -16,6 +17,7 @@ export interface InfiniteFarShellMaterialOptions {
   nearBlendMeters: number;
   farFadeMeters: number;
   debugShowMissingFallback: boolean;
+  useVertexBiomeColor?: boolean;
 }
 
 function v3c(c: THREE.Color): TslNode {
@@ -50,7 +52,10 @@ export function createInfiniteFarShellMaterial(
   const shellFade = nearFade.mul(farFade);
   const hazeT = smoothstep(uOuter.mul(0.55), uOuter.mul(0.98), distXZ);
 
-  const base = vec3(0.30, 0.34, 0.22);
+  const fallbackBase = vec3(0.30, 0.34, 0.22);
+  const base = options.useVertexBiomeColor
+    ? mix(fallbackBase, attribute("color", "vec3"), float(1))
+    : fallbackBase;
   const normalFaded = mix(uHaze, base.mul(light), shellFade);
   const normalColor = mix(normalFaded, uHaze, hazeT);
   const debugColor = vec3(1, 0.3, 0.3);
