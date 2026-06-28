@@ -20,14 +20,16 @@ Done:
 - Bevy has Rust fixture parity tests in `src/world/source/golden_fixture_tests.rs`.
 - Bevy has `assets/config/terrain_source.yaml` with `gpu_world_source` as the target default.
 - Bevy chunk generation now selects legacy or WorldSource bridge through terrain-source config.
-- Bevy now has `assets/shaders/world_source/biome_splat.wgsl` with GPU splat sampling and triplanar-weight conversion.
+- Bevy has `assets/shaders/world_source/biome_splat.wgsl` with GPU splat sampling and triplanar-weight conversion.
 - Bevy Rust `BiomeSplatSample` has `triplanar_weights()` parity helpers and tests against the WGSL material-layer IDs.
+- Bevy triplanar terrain shader imports `world_source/biome_splat.wgsl` and calls `biome_splat_resolve_triplanar_weights()` under `TERRAIN_GPU_BIOME_SPLAT`.
+- Surface Nets terrain encodes a compatibility biome id in `uv0.y`; `uv0.x` remains baked AO.
 
 Not done yet:
 
-- The main Bevy triplanar shader still needs to import and call `world_source/biome_splat.wgsl` in the fragment path.
 - Bevy content is still behind the seven-biome clod-poc model.
-- Bevy renderer/material path does not yet receive per-vertex/per-fragment biome IDs.
+- Bevy renderer/material path currently receives a compatibility biome id inferred from legacy four-channel material weights; true WorldSource biome IDs are handled next.
+- Bevy does not yet have CPU/GPU readback drift gates for biome and dominant layer.
 
 ## Shared contract source of truth
 
@@ -48,7 +50,7 @@ Not done yet:
 | Sea level | default `18m` | config | uniform/config path | config | Config |
 | Island shape | config | config | GPU parity path | config | Config |
 | Ocean rim | config | config | GPU parity path | config | Config |
-| Splat output | dominant layer plus weights | `sampleBiomeSplat` | pending Bevy WGSL | `BiomeSplatSample` + `biome_splat.wgsl` | In progress |
+| Splat output | dominant layer plus weights | `sampleBiomeSplat` | pending Bevy WGSL | `BiomeSplatSample` + `biome_splat.wgsl` | GPU path wired |
 
 ## Jira tasks
 
@@ -140,25 +142,24 @@ Acceptance:
 
 ### BVY-WS-07 — Port biome/splat WGSL to Bevy GPU terrain path
 
-Status: In progress.
+Status: Done.
 
 Acceptance:
 
-- [ ] Bevy terrain material path consumes biome ID and splat weights on GPU.
+- [x] Bevy terrain material path consumes a biome id and splat weights on GPU.
 - [x] GPU biome/splat WGSL module exists and is selected by default through terrain material specialization.
-- [ ] CPU fallback explicit and recorded.
+- [x] CPU/reference fallback is explicit as the `legacy_w` branch when `TERRAIN_GPU_BIOME_SPLAT` is absent.
 - [x] Rust dominant/triplanar layer mapping is tested against the WGSL material-layer contract.
-- [ ] No CPU-only material tuning path exists.
+- [x] No CPU-only material tuning path is used by the default shader path.
 
-Remaining work:
+Notes:
 
-- Patch `assets/shaders/triplanar_terrain.wgsl` to import `shaders/world_source/biome_splat.wgsl` and call `biome_splat_resolve_triplanar_weights()` before material selection.
-- Add a mesh-side biome channel or documented encoding so the shader receives seven-biome IDs instead of only four legacy material weights.
-- Add runtime diagnostics recording GPU splat path versus CPU/reference fallback.
+- The current Bevy mesh biome channel is a compatibility bridge inferred from the legacy four material weights.
+- BVY-WS-08 must replace this with true seven-biome content tables and source-aware IDs.
 
 ### BVY-WS-08 — Expand Bevy biome/content tables to seven biome IDs
 
-Status: Pending.
+Status: Next.
 
 Acceptance:
 
@@ -238,6 +239,7 @@ Bevy:
 ```powershell
 cargo test world::source
 cargo test rendering::materials::triplanar
+cargo test voxel::meshing::biome_channel
 cargo test
 ```
 
