@@ -27,11 +27,13 @@ Done:
 - Bevy now has `BiomeContentTable` covering Meadows, Forest, Swamp, Mountain, Plains, Coast, and Ocean.
 - WorldSource terrain generation uses `BiomeContentTable` instead of bridge-local material rules.
 - Bevy now has `WorldSourceDriftGateReport` with explicit `passed`, `failed`, and `skipped` states for CPU/GPU drift checks.
+- Bevy now has `TerrainSourceStartupReport` and config-bound startup diagnostics for active terrain source mode.
 
 Not done yet:
 
 - Bevy renderer/material path currently receives a compatibility biome id inferred from legacy four-channel material weights; true WorldSource biome IDs should replace it before visual parity is claimed.
 - GPU readback producer is not implemented yet; until it is available, the drift gate reports `skipped`, not `passed`.
+- Release bench and acceptance JSON output are still pending.
 
 ## Shared contract source of truth
 
@@ -55,6 +57,7 @@ Not done yet:
 | Splat output | dominant layer plus weights | `sampleBiomeSplat` | pending Bevy WGSL | `BiomeSplatSample` + `biome_splat.wgsl` | GPU path wired |
 | Voxel biome content | seven-biome table | compatibility | n/a | `BiomeContentTable` | Shared Bevy content |
 | Drift gate status | pass/fail/skip | n/a | readback input | `WorldSourceDriftGateReport` | Explicit status |
+| Terrain source runtime path | GPU default / CPU reference / legacy | n/a | n/a | `TerrainSourceStartupReport` | Explicit status |
 
 ## Jira tasks
 
@@ -191,19 +194,19 @@ Notes:
 
 ### BVY-WS-10 — Make GPU WorldSource default runtime path
 
-Status: Next.
+Status: Done.
 
 Acceptance:
 
-- [ ] `gpu_world_source` default in config.
-- [ ] Legacy mode opt-in only.
-- [ ] CPU reference mode opt-in only.
-- [ ] Startup diagnostics report active terrain source mode.
-- [ ] Acceptance records GPU, CPU fallback, or legacy path.
+- [x] `gpu_world_source` default in config.
+- [x] Legacy mode opt-in only.
+- [x] CPU reference mode opt-in only.
+- [x] Startup diagnostics report active terrain source mode.
+- [x] Acceptance can record GPU, CPU fallback/reference, or legacy path through `TerrainSourceStartupReport` and `TerrainSourceMode::acceptance_label()`.
 
 ### BVY-WS-11 — Add Bevy release bench and acceptance report
 
-Status: Pending.
+Status: Next.
 
 Acceptance:
 
@@ -230,7 +233,7 @@ Acceptance:
 
 BVY-WS-01, BVY-WS-02, BVY-WS-03, BVY-WS-04, BVY-WS-05, BVY-WS-06, BVY-WS-07, BVY-WS-08, BVY-WS-09, BVY-WS-10, BVY-WS-11, BVY-WS-12.
 
-Do not make GPU WorldSource the runtime default before BVY-WS-09 passes or reports an explicit skip.
+Do not remove the legacy bridge until BVY-WS-11 produces an acceptance report with explicit terrain source and drift-gate status.
 
 ## Verification commands
 
@@ -246,7 +249,8 @@ npm --prefix tools/clod-poc run build
 Bevy:
 
 ```powershell
-cargo test world::source::drift_gate
+cargo test world::source::terrain_source_config
+cargo test world::source::terrain_source_diagnostics
 cargo test world::source
 cargo test
 ```
