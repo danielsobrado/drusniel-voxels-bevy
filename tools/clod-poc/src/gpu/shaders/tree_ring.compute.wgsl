@@ -223,16 +223,13 @@ fn tree_local_competition_mask(wc: vec2<f32>, wpos: vec2<f32>, cfg: TreeAcceptPa
   return mix(1.05, 0.72, pressure);
 }
 
-fn tree_terrain_roughness_mask(height: f32, wpos: vec2<f32>) -> f32 {
-  let sample_radius = max(params.settings_a.x * 1.5, 4.0);
-  let hx0 = surfaceHeightField(wpos.x - sample_radius, wpos.y);
-  let hx1 = surfaceHeightField(wpos.x + sample_radius, wpos.y);
-  let hz0 = surfaceHeightField(wpos.x, wpos.y - sample_radius);
-  let hz1 = surfaceHeightField(wpos.x, wpos.y + sample_radius);
-  let roughness = (abs(hx0 - height) + abs(hx1 - height) + abs(hz0 - height) + abs(hz1 - height)) * 0.25;
-  let rough_mask = 1.0 - smoothstep(2.6, 8.5, roughness) * 0.48;
-  let terrace_bonus = smoothstep(0.0, 2.4, 2.4 - roughness) * 0.06;
-  return clamp(rough_mask + terrace_bonus, 0.52, 1.06);
+fn tree_height_normal_y(wpos: vec2<f32>) -> f32 {
+  let e = max(params.settings_a.x, 1.0);
+  let hx0 = placement_ground_height(wpos.x - e, wpos.y, params.center_radius.w);
+  let hx1 = placement_ground_height(wpos.x + e, wpos.y, params.center_radius.w);
+  let hz0 = placement_ground_height(wpos.x, wpos.y - e, params.center_radius.w);
+  let hz1 = placement_ground_height(wpos.x, wpos.y + e, params.center_radius.w);
+  return normalize(vec3<f32>(hx0 - hx1, e * 2.0, hz0 - hz1)).y;
 }
 
 fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAcceptParams) -> f32 {
@@ -253,8 +250,7 @@ fn tree_accept_mask(height: f32, normal_y: f32, wpos: vec2<f32>, cfg: TreeAccept
   let forest_cover = tree_forest_cover_mask(wpos, cfg);
   let shoreline_mask = tree_shoreline_density_mask(height, normal_y, cfg);
   let competition_mask = tree_local_competition_mask(floor(wpos / max(params.settings_a.x, 0.001)), wpos, cfg);
-  let roughness_mask = tree_terrain_roughness_mask(height, wpos);
-  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask * forest_cover * shoreline_mask * competition_mask * roughness_mask, 0.0, 1.0);
+  return clamp(cfg.base_density * lower_height * upper_height * slope_mask * material_mask * clump_mask * forest_cover * shoreline_mask * competition_mask, 0.0, 1.0);
 }
 
 fn tree_accept_params_from_uniforms() -> TreeAcceptParams {
@@ -442,15 +438,14 @@ fn process_tree_slot(slot: u32) {
   let hydro = tree_hydrology_at(wpos.x, wpos.y);
   let height = tree_hydrology_ground_height(raw_height, hydro);
   if (tree_hydrology_reject_tree(hydro, height, cfg)) { return; }
-  let normal = normalize(densityGradient(wpos.x, height, wpos.y));
-  let accept = tree_accept_mask(height, normal.y, wpos, cfg)
-    * tree_hydrology_bank_density_mask(hydro, height, normal.y, cfg);
+  let normal_y = tree_height_normal_y(wpos);
+  let accept = tree_accept_mask(height, normal_y, wpos, cfg)
+    * tree_hydrology_bank_density_mask(hydro, height, normal_y, cfg);
   if (tree_hash(wc, 809u) >= accept) { return; }
   if (!in_frustum(vec3<f32>(wpos.x, height + 4.0, wpos.y), 8.0)) { return; }
-  if (terrain_ridge_filter(wpos, height, dist)) { return; }
-  let species = select_species(wc, wpos, height, normal.y);
+  let species = select_species(wc, wpos, height, normal_y);
   if (species >= TREE_SPECIES_COUNT) { return; }
-  let scale = tree_instance_scale(wc, wpos, normal.y, species) * tree_hydrology_scale_mask(hydro, height);
+  let scale = tree_instance_scale(wc, wpos, normal_y, species) * tree_hydrology_scale_mask(hydro, height);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
   append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);
   append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);

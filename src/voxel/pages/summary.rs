@@ -296,6 +296,7 @@ pub(crate) fn terrain_summary_rebuild_system(
 mod tests {
     use super::*;
     use crate::voxel::pages::build_queue::ClodPageTree;
+    use crate::voxel::pages::selection::ClodPageNodeKey;
     use crate::voxel::pages::config::ClodPagesConfig;
     use crate::voxel::pages::quadtree::build_quadtree;
     use crate::voxel::pages::render::ClodPageMeshBounds;

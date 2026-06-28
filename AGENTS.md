@@ -93,6 +93,34 @@ For the current high-load CLOD/WebGPU selection scenario, start clod-poc and ver
 http://127.0.0.1:5180/?world=16&clodPerf=1&webgpuSelection=1
 ```
 
+### clod-poc Deterministic Performance Process
+
+For clod-poc frame-time, WebGPU compute, vegetation, terrain material, postprocess, water, shadow, or CLOD-selection changes, use the perf harness instead of manual FPS checks.
+
+1. Start the dev server directly, not through `rtk`:
+
+```powershell
+npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
+```
+
+2. Run a baseline and changed case with the same world, scene, warmup, and frame count. Use `rtk cmd /c` only to set `CLOD_POC_BASE_URL` for the Node tool:
+
+```powershell
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run perf:main -- --world 8 --warmup 120 --frames 300 --case current-textured --out perf-runs/baseline"
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run perf:main -- --world 8 --warmup 120 --frames 300 --case current-textured --out perf-runs/after"
+```
+
+3. For tree/vegetation regressions, run a focused A/B scene:
+
+```powershell
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run perf:main -- --world 8 --warmup 120 --frames 300 --case current-textured --params scene=trees-perf,treeGpu=0 --out perf-runs/tree-cpu"
+rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run perf:main -- --world 8 --warmup 600 --frames 300 --case tree-gpu-ring --params scene=trees-perf --out perf-runs/tree-gpu"
+```
+
+Use longer warmup such as `--warmup 600` when WebGPU compute pipelines, indirect draws, or debug readbacks are involved; first-run async pipeline compilation can otherwise pollute the sample window.
+
+4. Compare `tools/clod-poc/perf-runs/<run>/summary.md` and `summary.json`. Report `frameMs` p50/p95, `renderMs` p95, the top phase/prop bucket, and relevant counters such as tree GPU status, visible count, LOD distribution, dispatch timing, triangles, and rendered count. Do not claim a performance fix from FPS alone.
+
 ### clod-poc Shot Harness, Hooks, And Deterministic Scenes
 
 For deterministic clod-poc browser verification, use the Phase-0/Phase-1 shot harness instead of ad hoc screenshots.

@@ -77,6 +77,10 @@ describe("WGSL module composition", () => {
     expect(source).toContain("fn tree_lod_ring");
     expect(source).toContain("let raw_height = placement_ground_height(wpos.x, wpos.y, params.center_radius.w);");
     expect(source).toContain("let height = raw_height;");
+    expect(source).toContain("let normal_y = tree_height_normal_y(wpos);");
+    expect(source).not.toContain("densityGradient(wpos.x, height, wpos.y)");
+    expect(source).not.toContain("terrain_ridge_filter(wpos, height, dist)");
+    expect(source).not.toContain("tree_terrain_roughness_mask");
     expect(bindingDeclarationCount(source, "digEdits")).toBe(1);
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
   });

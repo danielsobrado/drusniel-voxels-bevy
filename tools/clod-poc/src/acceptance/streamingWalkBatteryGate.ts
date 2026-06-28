@@ -4,7 +4,7 @@ import { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js"
 import { computeOwnershipCoverageCounters, type OwnershipCoverageCounters } from "../stream/ownership_coverage_oracle.js";
 import { createBiomeTextureStreamingManager } from "../textures/biome_texture_streaming_manager.js";
 import { DEFAULT_PROCEDURAL_TEXTURE_CONFIG, MAX_ACTIVE_BIOME_TEXTURES } from "../textures/materialRecipes.js";
-import { BIOME_IDS } from "../world_source/biome_region_field.js";
+import { ProceduralWorldSource } from "../world_source/world_source.js";
 
 interface StreamingWalkAggregate {
   frames: number;
@@ -31,18 +31,16 @@ function routePoint(frame: number, config: AcceptanceConfig): { x: number; z: nu
   return { x, z };
 }
 
+// Deterministic procedural world used to drive the biome-texture window from the *real*
+// BiomeRegionField (islands enabled, fixed seed) rather than a synthetic biome sequence, so the
+// gate proves the actual classifier keeps the active texture window within budget along the route.
+const WALK_BATTERY_WORLD_SOURCE = new ProceduralWorldSource({
+  seed: 1337,
+  islandShape: { enabled: true, oceanRim: false, spacingM: 1500, radiusM: 560, blendM: 260 },
+});
+
 function sampleRouteBiome(x: number, z: number): number {
-  const band = Math.abs(Math.floor((x * 0.0035 + z * 0.002) % 7));
-  const ids = [
-    BIOME_IDS.meadows,
-    BIOME_IDS.forest,
-    BIOME_IDS.swamp,
-    BIOME_IDS.mountain,
-    BIOME_IDS.plains,
-    BIOME_IDS.coast,
-    BIOME_IDS.ocean,
-  ];
-  return ids[Math.min(ids.length - 1, band)] ?? BIOME_IDS.meadows;
+  return WALK_BATTERY_WORLD_SOURCE.sampleBiome(x, z);
 }
 
 function failIf(
@@ -86,6 +84,15 @@ function buildRuntime(clodCfg: ClodPagesConfig, config: AcceptanceConfig): Terra
   });
 }
 
+/**
+ * Streaming-ownership bookkeeping gate. Walks a deterministic route and asserts the ownership
+ * runtime keeps live/CLOD/far-shell footprints gap- and overlap-free, centred on the camera, with
+ * the real BiomeRegionField holding the active texture window within budget.
+ *
+ * Scope: this validates ownership-set *bookkeeping* and the biome/texture windowing logic over a
+ * simulated route — it does NOT render frames. It cannot prove the absence of rasterised holes or
+ * that GPU frame time stays within budget; those require the in-browser shot/battery harness.
+ */
 export function runGateA7(
   clodCfg: ClodPagesConfig,
   config: AcceptanceConfig,

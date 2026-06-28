@@ -35,6 +35,23 @@ function makeConfig(visualEnabled: boolean): AcceptanceConfig {
       ridgeBorder: true, cliffCorner: true, caveMouthBorder: true, thinBridge: true,
       forcedNeighborLodDeltas: [1, 2, 3], nearFieldBubbleMask: true,
     },
+    streamingWalk: {
+      enabled: false,
+      frames: 1,
+      stepM: 1,
+      liveRadiusM: 1,
+      clodRadiusM: 1,
+      farShellOuterM: 1,
+      hysteresisM: 0,
+      coverageCellM: 1,
+      maxClodLevel: 0,
+      biomeProbeDistanceM: 1,
+      maxCenterDriftM: 0,
+      maxGapHoles: 0,
+      maxOverlapCells: 0,
+      maxHorizonHoleRatio: 0,
+      maxActiveBiomeTextures: 1,
+    },
     logging: { level: "info" },
   };
 }
