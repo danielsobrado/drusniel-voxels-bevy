@@ -29,6 +29,18 @@ const CAMERA_REBUILD_THRESHOLD = 8;
 /** Minimum milliseconds between camera-move rebuilds to avoid thrashing. */
 const REBUILD_COOLDOWN_MS = 200;
 
+/**
+ * Cheap change-detection for the live page-root set, so the overlay also refreshes
+ * when tiles stream in/out (or a clipmap shifts its roots) while the camera is still.
+ * Catches add/remove/replace of roots; in-place re-meshing under a stable root set is
+ * intentionally not tracked (too costly to walk every frame for a debug overlay).
+ */
+function rootsSignature(roots: readonly ClodPageNode[]): string {
+  let sig = `${roots.length}`;
+  for (const r of roots) sig += `|${r.id}`;
+  return sig;
+}
+
 export function createClodShadowOverlayController(
   deps: ClodShadowOverlayControllerDeps,
 ): ClodShadowOverlayController {
@@ -59,6 +71,7 @@ export function createClodShadowOverlayController(
   let lastWireframe = true;
   let lastCamPos = new THREE.Vector3();
   let lastRebuildAt = 0;
+  let lastRootsSig = "";
 
   function clearGroup(g: THREE.Group): void {
     while (g.children.length > 0) {
@@ -89,6 +102,7 @@ export function createClodShadowOverlayController(
     }
 
     const roots = deps.roots();
+    lastRootsSig = rootsSignature(roots);
     if (roots.length === 0) return;
 
     const center = deps.getSelectionCenter();
@@ -207,8 +221,9 @@ export function createClodShadowOverlayController(
 
     const cam = deps.camera.position;
     const moved = cam.distanceTo(lastCamPos);
+    const rootsChanged = rootsSignature(deps.roots()) !== lastRootsSig;
     const cooledDown = performance.now() - lastRebuildAt >= REBUILD_COOLDOWN_MS;
-    if (moved >= CAMERA_REBUILD_THRESHOLD && cooledDown) {
+    if ((moved >= CAMERA_REBUILD_THRESHOLD || rootsChanged) && cooledDown) {
       rebuild();
     }
   }
