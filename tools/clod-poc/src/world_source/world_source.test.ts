@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setTerrainFieldConfig, resolveTerrainFieldConfig } from "../terrain/terrain.js";
 import { surfaceHeightCore, setTerrainFieldCoreConfig } from "../gpu/terrain_field_core.js";
-import { BIOME_IDS, BiomeRegionField } from "./biome_region_field.js";
+import { BIOME_IDS, BIOME_REGION_CELL_M, BiomeRegionField } from "./biome_region_field.js";
 import { ProceduralWorldSource, StreamedVoxelWorldSource } from "./world_source.js";
 
 afterEach(() => {
@@ -65,6 +65,13 @@ describe("BiomeRegionField", () => {
     const first = field.sample(125, 512, 42);
     const second = field.sample(125, 512, 42);
     expect(second).toEqual(first);
+  });
+
+  it("uses the fixed GPU-compatible region cell size", () => {
+    const field = new BiomeRegionField({ seed: 3, seaLevel: 18, regionCellM: BIOME_REGION_CELL_M });
+
+    expect(field.regionCellM).toBe(BIOME_REGION_CELL_M);
+    expect(() => new BiomeRegionField({ seed: 3, seaLevel: 18, regionCellM: BIOME_REGION_CELL_M + 1 })).toThrow(/match the GPU shader/);
   });
 
   it("does not drift when the constructor island shape is mutated later", () => {
