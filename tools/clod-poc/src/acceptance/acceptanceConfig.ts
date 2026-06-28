@@ -72,6 +72,7 @@ export function parseAcceptanceConfig(text: string): AcceptanceConfig {
   const thresholds = asRecord(acceptance["thresholds"], "acceptance.thresholds");
   const visual = asRecord(acceptance["visual"], "acceptance.visual");
   const stressScenes = asRecord(acceptance["stress_scenes"], "acceptance.stress_scenes");
+  const streamingWalk = asRecord(acceptance["streaming_walk"], "acceptance.streaming_walk");
   const logging = asRecord(acceptance["logging"], "acceptance.logging");
 
   return {
@@ -110,6 +111,23 @@ export function parseAcceptanceConfig(text: string): AcceptanceConfig {
       thinBridge: boolAt(stressScenes, "thin_bridge", "acceptance.stress_scenes"),
       forcedNeighborLodDeltas: intArrayAt(stressScenes, "forced_neighbor_lod_deltas", "acceptance.stress_scenes", 1, 3),
       nearFieldBubbleMask: boolAt(stressScenes, "near_field_bubble_mask", "acceptance.stress_scenes"),
+    },
+    streamingWalk: {
+      enabled: boolAt(streamingWalk, "enabled", "acceptance.streaming_walk"),
+      frames: positiveIntAt(streamingWalk, "frames", "acceptance.streaming_walk"),
+      stepM: numberAt(streamingWalk, "step_m", "acceptance.streaming_walk", 0),
+      liveRadiusM: numberAt(streamingWalk, "live_radius_m", "acceptance.streaming_walk", 0),
+      clodRadiusM: numberAt(streamingWalk, "clod_radius_m", "acceptance.streaming_walk", 0),
+      farShellOuterM: numberAt(streamingWalk, "far_shell_outer_m", "acceptance.streaming_walk", 0),
+      hysteresisM: numberAt(streamingWalk, "hysteresis_m", "acceptance.streaming_walk", 0),
+      coverageCellM: numberAt(streamingWalk, "coverage_cell_m", "acceptance.streaming_walk", 0),
+      maxClodLevel: intAt(streamingWalk, "max_clod_level", "acceptance.streaming_walk", 0),
+      biomeProbeDistanceM: numberAt(streamingWalk, "biome_probe_distance_m", "acceptance.streaming_walk", 0),
+      maxCenterDriftM: numberAt(streamingWalk, "max_center_drift_m", "acceptance.streaming_walk", 0),
+      maxGapHoles: intAt(streamingWalk, "max_gap_holes", "acceptance.streaming_walk", 0),
+      maxOverlapCells: intAt(streamingWalk, "max_overlap_cells", "acceptance.streaming_walk", 0),
+      maxHorizonHoleRatio: numberAt(streamingWalk, "max_horizon_hole_ratio", "acceptance.streaming_walk", 0, 1),
+      maxActiveBiomeTextures: intAt(streamingWalk, "max_active_biome_textures", "acceptance.streaming_walk", 1),
     },
     logging: {
       level: logLevelAt(logging, "level", "acceptance.logging"),
