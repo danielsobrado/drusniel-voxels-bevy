@@ -1,14 +1,93 @@
-use crate::world::source::BiomeId;
+use crate::voxel::chunk::Chunk;
+use crate::voxel::materials::MaterialId;
+use crate::voxel::types::VoxelType;
+use crate::voxel::world::VoxelWorld;
+use crate::world::source::{material_biome, BiomeId};
+use bevy::prelude::{IVec3, UVec3, Vec3};
 
 pub(crate) fn encode_biome_id_for_uv(biome: BiomeId) -> f32 {
     biome.layer_index() as f32
 }
 
-/// Temporary adapter while Surface Nets still receives four legacy triplanar
-/// weights instead of true seven-biome WorldSource IDs.
-///
-/// TODO(BVY-WS-08 follow-up): replace callers with source-aware biome IDs once
-/// meshing has direct WorldSource biome samples at each emitted vertex.
+pub(crate) fn source_or_compatibility_biome_id_for_uv(
+    local_pos: Vec3,
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+    fallback_weights: [f32; 4],
+) -> f32 {
+    let biome = source_biome_from_neighbor_materials(local_pos, chunk, world, chunk_origin)
+        .unwrap_or_else(|| compatibility_biome_from_triplanar_weights(fallback_weights));
+    encode_biome_id_for_uv(biome)
+}
+
+fn source_biome_from_neighbor_materials(
+    local_pos: Vec3,
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+) -> Option<BiomeId> {
+    let mut counts = [0u8; 7];
+    let base_x = local_pos.x.floor() as i32;
+    let base_y = local_pos.y.floor() as i32;
+    let base_z = local_pos.z.floor() as i32;
+
+    for dz in 0..2 {
+        for dy in 0..2 {
+            for dx in 0..2 {
+                let local = IVec3::new(base_x + dx, base_y + dy, base_z + dz);
+                let material = terrain_material_at_neighbor(local, chunk, world, chunk_origin)?;
+                if let Some(biome) = material_biome(material) {
+                    counts[biome.layer_index() as usize] += 1;
+                }
+            }
+        }
+    }
+
+    let (best_index, best_count) = counts
+        .iter()
+        .copied()
+        .enumerate()
+        .max_by_key(|(_, count)| *count)?;
+    if best_count == 0 {
+        return None;
+    }
+
+    match best_index {
+        0 => Some(BiomeId::Meadows),
+        1 => Some(BiomeId::Forest),
+        2 => Some(BiomeId::Swamp),
+        3 => Some(BiomeId::Mountain),
+        4 => Some(BiomeId::Plains),
+        5 => Some(BiomeId::Coast),
+        6 => Some(BiomeId::Ocean),
+        _ => None,
+    }
+}
+
+fn terrain_material_at_neighbor(
+    local: IVec3,
+    chunk: &Chunk,
+    world: &VoxelWorld,
+    chunk_origin: IVec3,
+) -> Option<MaterialId> {
+    if local.x >= 0 && local.x < 16 && local.y >= 0 && local.y < 16 && local.z >= 0 && local.z < 16 {
+        let local = UVec3::new(local.x as u32, local.y as u32, local.z as u32);
+        let voxel = chunk.get(local);
+        if voxel == VoxelType::Air || voxel == VoxelType::Water {
+            return None;
+        }
+        return Some(chunk.get_material_id(local));
+    }
+
+    let world_pos = chunk_origin + local;
+    let voxel = world.get_voxel(world_pos)?;
+    if voxel == VoxelType::Air || voxel == VoxelType::Water {
+        return None;
+    }
+    world.get_material_id(world_pos)
+}
+
 pub(crate) fn compatibility_biome_from_triplanar_weights(weights: [f32; 4]) -> BiomeId {
     let mut best = 0usize;
     for index in 1..weights.len() {
@@ -32,6 +111,7 @@ pub(crate) fn compatibility_biome_id_for_uv(weights: [f32; 4]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::source::material_with_biome;
 
     #[test]
     fn encodes_biome_id_as_exact_float_for_shader_uv_channel() {
@@ -64,5 +144,27 @@ mod tests {
         assert!(!mapped.contains(&BiomeId::Forest));
         assert!(!mapped.contains(&BiomeId::Plains));
         assert!(!mapped.contains(&BiomeId::Ocean));
+    }
+
+    #[test]
+    fn source_material_tags_override_compatibility_adapter() {
+        let mut chunk = Chunk::new(IVec3::ZERO);
+        chunk.set(UVec3::new(0, 0, 0), VoxelType::TopSoil);
+        chunk.set_material_id(
+            UVec3::new(0, 0, 0),
+            material_with_biome(MaterialId::from_voxel(VoxelType::TopSoil), BiomeId::Forest),
+        );
+        let world = VoxelWorld::new(IVec3::ONE);
+
+        assert_eq!(
+            source_or_compatibility_biome_id_for_uv(
+                Vec3::ZERO,
+                &chunk,
+                &world,
+                IVec3::ZERO,
+                [0.0, 1.0, 0.0, 0.0],
+            ),
+            encode_biome_id_for_uv(BiomeId::Forest),
+        );
     }
 }
