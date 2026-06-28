@@ -4,9 +4,7 @@ use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32, CHUNK_VOLUME};
 use crate::voxel::chunk::Chunk;
 use crate::voxel::materials::MaterialId;
 use crate::voxel::types::VoxelType;
-use crate::world::source::{
-    material_biome, material_with_biome, BiomeId, WorldSource, WorldSourceTerrainBridge,
-};
+use crate::world::source::{material_with_biome, WorldSource, WorldSourceTerrainBridge};
 
 pub(crate) fn build_world_source_chunk<S: WorldSource>(
     chunk_pos: IVec3,
@@ -97,8 +95,8 @@ impl Chunk {
 mod tests {
     use super::*;
     use crate::world::source::{
-        material_base, IslandShapeConfig, TerrainFieldConfig, WorldSourceBounds,
-        WorldSourceMetadata,
+        material_base, material_biome, BiomeId, IslandShapeConfig, TerrainFieldConfig,
+        WorldSourceBounds, WorldSourceMetadata,
     };
 
     #[derive(Debug, Clone)]
