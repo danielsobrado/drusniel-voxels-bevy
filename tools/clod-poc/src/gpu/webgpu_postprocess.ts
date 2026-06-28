@@ -1,9 +1,6 @@
 import * as THREE from "three";
 import type { WebGPURenderer } from "three/webgpu";
-import {
-  DEFAULT_POST_PROCESS_SETTINGS,
-  type PostProcessSettings,
-} from "../environment/postprocess.js";
+import type { PostProcessSettings } from "../environment/postprocess.js";
 
 const TERRAIN_NON_INDEXED_FALLBACK_KEY = "__drusnielWebGpuTerrainNonIndexedFallback";
 
@@ -56,15 +53,13 @@ function convertVisibleTerrainMeshesToNonIndexed(scene: THREE.Scene): number {
 }
 
 export class WebGpuPostProcessPipeline {
-  private settings: PostProcessSettings;
-
   constructor(
     private readonly renderer: WebGPURenderer,
     _scene: THREE.Scene,
     _camera: THREE.Camera,
     settings: Partial<PostProcessSettings> = {},
   ) {
-    this.settings = { ...DEFAULT_POST_PROCESS_SETTINGS, ...settings };
+    void settings;
     console.warn("[webgpu] postprocess disabled: Three WebGPU cannot safely sample its render target in this path yet");
   }
 
@@ -73,7 +68,7 @@ export class WebGpuPostProcessPipeline {
   }
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
-    this.settings = { ...this.settings, ...settings };
+    void settings;
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera): void {
