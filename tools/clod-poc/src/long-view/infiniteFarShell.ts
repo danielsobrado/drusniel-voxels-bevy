@@ -76,6 +76,8 @@ export class InfiniteFarShell {
   private receiveSunShadows = false;
   private snappedX = 0;
   private snappedZ = 0;
+  private renderOriginX = 0;
+  private renderOriginZ = 0;
   private rebuildCount = 0;
   private lastRebuildMs = 0;
   private materialOptions: InfiniteFarShellMaterialOptions;
@@ -219,6 +221,13 @@ export class InfiniteFarShell {
     if (this.heightSamplingMode === "cpu") this.rebuildHeights();
   }
 
+  setRenderOriginOffset(originX: number, originZ: number): void {
+    if (this.renderOriginX === originX && this.renderOriginZ === originZ) return;
+    this.renderOriginX = originX;
+    this.renderOriginZ = originZ;
+    this.applyRenderPosition();
+  }
+
   setDebugShowMissingFallback(on: boolean): void {
     this.materialOptions.debugShowMissingFallback = on;
     if (Array.isArray(this.mesh.material)) return;
@@ -250,7 +259,7 @@ export class InfiniteFarShell {
     this.metrics.farShellSnappedX = this.snappedX;
     this.metrics.farShellSnappedZ = this.snappedZ;
     if (snappedChanged && this.heightSamplingMode === "cpu") this.rebuildHeights();
-    this.mesh.position.set(this.snappedX, 0, this.snappedZ);
+    this.applyRenderPosition();
     if (this.useParityMaterial && this.parityConfig) {
       const material = this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial;
       updateFarTerrainMaterialCenter(material, this.snappedX, this.snappedZ);
@@ -263,6 +272,10 @@ export class InfiniteFarShell {
       updateFarWaterMaterialCenter(waterMaterial, this.snappedX, this.snappedZ);
       updateFarWaterMaterialSummaryAtlas(waterMaterial, this.farSummaryGpuAtlas);
     }
+  }
+
+  private applyRenderPosition(): void {
+    this.mesh.position.set(this.snappedX - this.renderOriginX, 0, this.snappedZ - this.renderOriginZ);
   }
 
   private rebuildHeights(): void {
@@ -358,51 +371,12 @@ export class InfiniteFarShell {
   private attachVertexColors(): void {
     if (!this.parityColorBuffer) return;
     const geometry = this.mesh.geometry as THREE.BufferGeometry;
-    const existing = geometry.getAttribute("color");
-    if (existing) {
-      const buf = existing as THREE.BufferAttribute;
-      buf.array.set(this.parityColorBuffer);
-      buf.needsUpdate = true;
-    } else {
-      geometry.setAttribute("color", new THREE.BufferAttribute(this.parityColorBuffer.slice(), 3));
-    }
+    geometry.setAttribute("color", new THREE.BufferAttribute(this.parityColorBuffer, 3));
   }
 
   private attachBiomeVertexColors(): void {
     if (!this.biomeColorBuffer) return;
     const geometry = this.mesh.geometry as THREE.BufferGeometry;
-    const existing = geometry.getAttribute("color");
-    if (existing) {
-      const buf = existing as THREE.BufferAttribute;
-      buf.array.set(this.biomeColorBuffer);
-      buf.needsUpdate = true;
-    } else {
-      geometry.setAttribute("color", new THREE.BufferAttribute(this.biomeColorBuffer.slice(), 3));
-    }
+    geometry.setAttribute("color", new THREE.BufferAttribute(this.biomeColorBuffer, 3));
   }
-
-  dispose(): void {
-    if (this.waterMesh) {
-      this.waterMesh.removeFromParent();
-      const waterMat = this.waterMesh.material;
-      if (Array.isArray(waterMat)) {
-        for (const m of waterMat) m.dispose();
-      } else {
-        waterMat.dispose();
-      }
-    }
-    const geometry = this.mesh.geometry;
-    geometry.dispose();
-    const mat = this.mesh.material;
-    if (Array.isArray(mat)) {
-      for (const m of mat) m.dispose();
-    } else {
-      mat.dispose();
-    }
-    this.mesh.removeFromParent();
-  }
-}
-
-export function createInfiniteFarShell(options: InfiniteFarShellOptions): InfiniteFarShell {
-  return new InfiniteFarShell(options);
 }
