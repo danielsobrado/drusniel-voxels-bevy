@@ -25,10 +25,10 @@ The summary includes:
 
 BVY-WS-12 status:
 
-- the acceptance bench now writes source-aware biome material tags into generated chunks;
+- the acceptance bench writes source-aware biome material tags into generated chunks;
+- runtime async WorldSource chunk generation uses the same source-aware tagging path;
 - Surface Nets reads those source-aware biome tags before using the old compatibility adapter;
-- `material_draw_impact.compatibility_biome_channel_active` should be `false` for this bench path;
-- runtime chunk generation still needs the same source-aware material tagging hook before the temporary compatibility adapter can be fully removed.
+- `material_draw_impact.compatibility_biome_channel_active` should be `false` for this bench path.
 
 Current limitation:
 
