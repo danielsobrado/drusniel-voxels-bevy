@@ -52,3 +52,52 @@
   source: builtin
   materialId: lava
   tags: [terrain]
+
+- id: meadows-ground
+  name: Meadows Ground
+  slotIndex: 8
+  source: generated
+  materialId: top-soil
+  tags: [terrain, biome, meadows]
+
+- id: forest-floor
+  name: Forest Floor
+  slotIndex: 9
+  source: generated
+  materialId: top-soil
+  tags: [terrain, biome, forest]
+
+- id: swamp-muck
+  name: Swamp Muck
+  slotIndex: 10
+  source: generated
+  materialId: clay
+  tags: [terrain, biome, swamp]
+
+- id: mountain-scree
+  name: Mountain Scree
+  slotIndex: 11
+  source: generated
+  materialId: rock
+  tags: [terrain, biome, mountain]
+
+- id: plains-grass
+  name: Plains Grass
+  slotIndex: 12
+  source: generated
+  materialId: top-soil
+  tags: [terrain, biome, plains]
+
+- id: coast-sand
+  name: Coast Sand
+  slotIndex: 13
+  source: generated
+  materialId: sand
+  tags: [terrain, biome, coast]
+
+- id: ocean-floor
+  name: Ocean Floor
+  slotIndex: 14
+  source: generated
+  materialId: sand
+  tags: [terrain, biome, ocean]
