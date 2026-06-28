@@ -1,9 +1,18 @@
+use std::sync::OnceLock;
+
 use crate::voxel::chunk::Chunk;
 use crate::voxel::materials::MaterialId;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
-use crate::world::source::{material_biome, BiomeId};
+use crate::world::source::{
+    material_biome, BiomeId, ProceduralWorldSource, TerrainSourceConfig, WorldSource,
+};
 use bevy::prelude::{IVec3, UVec3, Vec3};
+
+struct MeshBiomeSource {
+    config: TerrainSourceConfig,
+    source: ProceduralWorldSource,
+}
 
 pub(crate) fn encode_biome_id_for_uv(biome: BiomeId) -> f32 {
     biome.layer_index() as f32
@@ -17,8 +26,27 @@ pub(crate) fn source_or_compatibility_biome_id_for_uv(
     fallback_weights: [f32; 4],
 ) -> f32 {
     let biome = source_biome_from_neighbor_materials(local_pos, chunk, world, chunk_origin)
+        .or_else(|| active_world_source_biome(local_pos, chunk_origin))
         .unwrap_or_else(|| compatibility_biome_from_triplanar_weights(fallback_weights));
     encode_biome_id_for_uv(biome)
+}
+
+fn mesh_biome_source() -> &'static MeshBiomeSource {
+    static SOURCE: OnceLock<MeshBiomeSource> = OnceLock::new();
+    SOURCE.get_or_init(|| MeshBiomeSource {
+        config: TerrainSourceConfig::load_or_default(),
+        source: ProceduralWorldSource::load_or_default(),
+    })
+}
+
+fn active_world_source_biome(local_pos: Vec3, chunk_origin: IVec3) -> Option<BiomeId> {
+    let source = mesh_biome_source();
+    if source.config.is_legacy() {
+        return None;
+    }
+
+    let world_pos = chunk_origin.as_vec3() + local_pos;
+    Some(source.source.sample_biome(world_pos.x, world_pos.z))
 }
 
 fn source_biome_from_neighbor_materials(
@@ -36,7 +64,9 @@ fn source_biome_from_neighbor_materials(
         for dy in 0..2 {
             for dx in 0..2 {
                 let local = IVec3::new(base_x + dx, base_y + dy, base_z + dz);
-                let material = terrain_material_at_neighbor(local, chunk, world, chunk_origin)?;
+                let Some(material) = terrain_material_at_neighbor(local, chunk, world, chunk_origin) else {
+                    continue;
+                };
                 if let Some(biome) = material_biome(material) {
                     counts[biome.layer_index() as usize] += 1;
                 }
@@ -147,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn source_material_tags_override_compatibility_adapter() {
+    fn source_material_tags_override_active_world_source_and_compatibility_adapter() {
         let mut chunk = Chunk::new(IVec3::ZERO);
         chunk.set(UVec3::new(0, 0, 0), VoxelType::TopSoil);
         chunk.set_material_id(
