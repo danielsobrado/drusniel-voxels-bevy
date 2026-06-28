@@ -66,7 +66,14 @@ function clodConfig(): ClodPagesConfig {
   };
 }
 
-function configYaml(overrides = ""): string {
+interface TestConfigOptions {
+  frames?: number;
+  maxActiveBiomeTextures?: number;
+}
+
+function configYaml(options: TestConfigOptions = {}): string {
+  const frames = options.frames ?? 8;
+  const maxActiveBiomeTextures = options.maxActiveBiomeTextures ?? 2;
   return `
 acceptance:
   output_dir: acceptance-runs
@@ -103,7 +110,7 @@ acceptance:
     near_field_bubble_mask: true
   streaming_walk:
     enabled: true
-    frames: 8
+    frames: ${frames}
     step_m: 32
     live_radius_m: 128
     clod_radius_m: 512
@@ -116,15 +123,14 @@ acceptance:
     max_gap_holes: 100000
     max_overlap_cells: 100000
     max_horizon_hole_ratio: 1.0
-    max_active_biome_textures: 2
-${overrides}
+    max_active_biome_textures: ${maxActiveBiomeTextures}
   logging:
     level: info
 `;
 }
 
-function config(overrides = ""): AcceptanceConfig {
-  return parseAcceptanceConfig(configYaml(overrides));
+function config(options: TestConfigOptions = {}): AcceptanceConfig {
+  return parseAcceptanceConfig(configYaml(options));
 }
 
 describe("streaming walk battery gate", () => {
@@ -145,7 +151,7 @@ describe("streaming walk battery gate", () => {
   });
 
   it("fails when the accepted biome texture window is below the required cap", () => {
-    const gate = runGateA7(clodConfig(), config("    max_active_biome_textures: 1\n"));
+    const gate = runGateA7(clodConfig(), config({ frames: 80, maxActiveBiomeTextures: 1 }));
 
     expect(gate.status).toBe("fail");
     expect(gate.failures.some((failure) => failure.code === "STREAMING_BIOME_TEXTURE_WINDOW")).toBe(true);
