@@ -146,8 +146,6 @@ pub struct TriplanarMaterial {
     pub hex_tiling_shader_enabled: bool,
     /// Pipeline specialization flag: page meshes use alpha-hash crossfade.
     pub clod_page_dither: bool,
-    /// Pipeline specialization flag: compile GPU WorldSource biome/splat material branch.
-    pub gpu_biome_splat_shader_enabled: bool,
 
     #[texture(1)]
     #[sampler(2)]
@@ -202,7 +200,6 @@ pub struct TriplanarMaterialKey {
     quality: TerrainMaterialQuality,
     hex_tiling_shader_enabled: bool,
     clod_page_dither: bool,
-    gpu_biome_splat_shader_enabled: bool,
 }
 
 impl From<&TriplanarMaterial> for TriplanarMaterialKey {
@@ -211,7 +208,6 @@ impl From<&TriplanarMaterial> for TriplanarMaterialKey {
             quality: material.quality,
             hex_tiling_shader_enabled: material.hex_tiling_shader_enabled,
             clod_page_dither: material.clod_page_dither,
-            gpu_biome_splat_shader_enabled: material.gpu_biome_splat_shader_enabled,
         }
     }
 }
@@ -223,7 +219,6 @@ impl Default for TriplanarMaterial {
             quality: TerrainMaterialQuality::FullTriplanar,
             hex_tiling_shader_enabled: false,
             clod_page_dither: false,
-            gpu_biome_splat_shader_enabled: true,
             grass_albedo: None,
             grass_normal: None,
             rock_albedo: None,
@@ -319,9 +314,7 @@ impl Material for TriplanarMaterial {
             if _key.bind_group_data.clod_page_dither {
                 fragment.shader_defs.push("TERRAIN_CLOD_DITHER".into());
             }
-            if _key.bind_group_data.gpu_biome_splat_shader_enabled {
-                fragment.shader_defs.push("TERRAIN_GPU_BIOME_SPLAT".into());
-            }
+            fragment.shader_defs.push("TERRAIN_GPU_BIOME_SPLAT".into());
         }
         Ok(())
     }
@@ -351,8 +344,9 @@ mod tests {
     }
 
     #[test]
-    fn triplanar_material_defaults_to_gpu_biome_splat_shader() {
-        assert!(TriplanarMaterial::default().gpu_biome_splat_shader_enabled);
+    fn gpu_biome_splat_shader_contract_exists() {
+        let source = include_str!("../../../assets/shaders/world_source/biome_splat.wgsl");
+        assert!(source.contains("fn biome_splat_resolve_triplanar_weights"));
     }
 }
 
