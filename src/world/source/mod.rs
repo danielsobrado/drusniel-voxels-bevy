@@ -1,4 +1,5 @@
 pub mod biome_content;
+pub mod biome_material_id;
 pub mod biome_region_contract;
 pub mod biome_region_field;
 pub mod drift_gate;
@@ -15,6 +16,7 @@ pub mod world_source;
 mod golden_fixture_tests;
 
 pub use biome_content::{BiomeContent, BiomeContentTable, BIOME_CONTENT_TABLE};
+pub use biome_material_id::{material_base, material_biome, material_with_biome};
 pub use biome_region_contract::{
     BiomeRegionContract, BIOME_COAST_HEIGHT_BAND_M, BIOME_COAST_SHORE_DISTANCE_M,
     BIOME_FOREST_NOISE_MIN, BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M,
