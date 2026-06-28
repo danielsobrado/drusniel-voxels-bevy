@@ -4,9 +4,13 @@ import {
   bakeTreeImpostorAtlases,
   cloneTreeSettings,
   decodeTreeImpostorAlbedo,
+  decodeTreeImpostorDepth,
   decodeTreeImpostorNormalComponent,
   encodeTreeImpostorAlbedo,
+  encodeTreeImpostorDepth,
   encodeTreeImpostorNormalComponent,
+  TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER,
+  TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER,
   TREE_SPECIES,
   type TreeGeometryMap,
   type TreeSettings,
@@ -40,13 +44,23 @@ describe("tree impostor baker", () => {
     expect(renderer.renderCalls).toBe(TREE_SPECIES.length * settings.impostors.octahedralGridSize ** 2 * 2);
   });
 
-  it("round-trips impostor albedo and normal encode/decode helpers", () => {
+  it("round-trips impostor albedo, normal, and depth encode/decode helpers", () => {
     for (const value of [0, 0.1, 0.25, 0.5, 0.9, 1]) {
       expect(decodeTreeImpostorAlbedo(encodeTreeImpostorAlbedo(value))).toBeCloseTo(value, 6);
+      expect(decodeTreeImpostorDepth(encodeTreeImpostorDepth(value))).toBeCloseTo(value, 6);
     }
     for (const value of [-1, -0.25, 0, 0.5, 1]) {
       expect(decodeTreeImpostorNormalComponent(encodeTreeImpostorNormalComponent(value))).toBeCloseTo(value, 6);
     }
+  });
+
+  it("uses a normal-depth shader with linear depth in alpha", () => {
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("vTreeImpostorLinearDepth");
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("normalMatrix * normal");
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("far - near");
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("packedNormal");
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("vTreeImpostorLinearDepth");
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("gl_FragColor = vec4(packedNormal, vTreeImpostorLinearDepth)");
   });
 });
 
