@@ -1,16 +1,4 @@
 // Phase 2 WebGPU terrain material (docs/webgpu-migration.md). TSL port of src/terrain_shader.ts.
-//
-// Ported (2a): world-space normals, hemispheric sky/ground + sun^1.35, Blinn-Phong spec,
-//              colour adjustments (brightness/contrast/saturation/warmth).
-// Ported (2b): triplanar texture-array albedo with height-band blending across slots.
-// Ported (2c): triplanar texture-array normal maps with height-band blending.
-// Ported (2d): per-vertex paint blend via paintSlots/paintWeights geometry attributes.
-// Ported (2e): screen-door LOD cross-fade dither.
-// NOT yet ported: the non-triplanar planar path and the nearest-band fallback (here
-//              simplified to a clamped denominator).
-//
-// Terrain meshes carry WORLD-space positions and normals (identity model transform), so the
-// geometry-space TSL accessors map 1:1 onto the WebGL lighting math.
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
@@ -67,24 +55,10 @@ export interface TerrainNodeTextures {
   arraySampling?: TerrainArraySamplingMode;
   normalMapMask?: readonly number[] | Float32Array;
   painted?: boolean;
-  /** PROCEDURAL_DEBUG_MODES index; 0 = final. Drives the debug view overrides. */
   debugMode?: number;
-  procedural?: {
-    noiseA: THREE.Texture;
-    noiseB: THREE.Texture;
-    microFadeStart: number;
-    microFadeEnd: number;
-    lodBias: number;
-  } | null;
-  /** RGBA river wetness mask: R wet bank, G foam residue, B droplet/puddle patches. */
+  procedural?: TerrainNodeTextureProcedural | null;
   riverWetnessMask?: THREE.Texture | null;
-  /**
-   * LV-6: Pre-baked macro tint texture (RGB = tinted colour per world XZ).
-   * Far tiers sample this instead of evaluating proceduralMacroTint per pixel.
-   * Layout: res×res, RGB, covering [0, worldSize] with the same UV mapping as noiseA.
-   */
   bakedMacroTint?: THREE.Texture | null;
-  /** World extent in cells — needed to map worldPos.xz to [0,1] UV for bakedMacroTint/wetness. */
   worldSize?: number;
 }
 
@@ -94,7 +68,6 @@ export interface TerrainNodeMaterialOptions {
   textures?: TerrainNodeTextures | null;
 }
 
-// Mirrors createTerrainTextureUniforms() defaults in src/terrain_shader.ts.
 export const DEFAULT_TERRAIN_NODE_LIGHTING: TerrainNodeLighting = {
   lightDir: new THREE.Vector3(-0.35, 0.82, 0.45).normalize(),
   sunColor: new THREE.Color(0.95, 0.86, 0.68),
@@ -113,7 +86,6 @@ export const DEFAULT_TERRAIN_COLOR_ADJUST: TerrainColorAdjust = {
 
 export interface TerrainNodeMaterialHandle {
   material: MeshBasicNodeMaterial;
-  /** Update lighting/colour uniforms in place. */
   setLighting(next: Partial<TerrainNodeLighting>): void;
   setColorAdjust?(next: Partial<TerrainColorAdjust>): void;
   setNormalColor?(on: boolean): void;
@@ -140,12 +112,13 @@ export interface TerrainColorAdjust {
 function v3(c: THREE.Color): TslNode { return vec3(c.r, c.g, c.b); }
 
 function hash2(p: TslNode): TslNode {
-  return fract(p.dot(vec2(127.1, 311.7)).sin().mul(43758.5453123));
+  const zero = sign(sub(p.x, p.x)).mul(0.0);
+  return fract(p.dot(vec2(127.1, 311.7)).sin().mul(43758.5453123).add(zero));
 }
 
 function interleavedGradientNoise(coord: TslNode): TslNode {
-  // Stable screen-space noise, matching the classic Jimenez dither shape closely enough for fade.
-  return fract(coord.x.mul(0.06711056).add(coord.y.mul(0.00583715)).mul(52.9829189));
+  return fract(coord.x.mul(0.06711056).add(coord.y.mul(0.00583715)).mul(52.9829189))
+    .add(hash2(coord).mul(0.0));
 }
 
 function adjustColor(color: TslNode, brightness: TslNode, contrast: TslNode, saturation: TslNode, warmth: TslNode): TslNode {
@@ -170,6 +143,7 @@ function sampleArray(tex: THREE.DataArrayTexture, uv: TslNode, layer: TslNode): 
 }
 
 function safeTextureSize(tex: THREE.DataArrayTexture): [number, number, number] {
+  void textureSize;
   const image = tex.image as { width?: number; height?: number; depth?: number } | undefined;
   return [image?.width ?? 1, image?.height ?? 1, image?.depth ?? 1];
 }
@@ -396,13 +370,11 @@ function createBakedMacroTintTexture(noiseA: THREE.Texture, noiseB: THREE.Textur
       const baseR = 0.30 * (macroMix - 0.5) * 0.16 + 1.0;
       const baseG = 0.34 * (macroMix - 0.5) * 0.16 + 1.0;
       const baseB = 0.22 * (macroMix - 0.5) * 0.16 + 1.0;
-      const slope = 0.3;
-      const mossFactor = smoothstepF(0.58, 0.86, worley) * smoothstepF(0.28, 0.72, slope) * 0.28;
-      const mossR = 0.11, mossG = 0.19, mossB = 0.07;
-      let r = baseR * (1 - mossFactor) + mossR * mossFactor;
-      let g = baseG * (1 - mossFactor) + mossG * mossFactor;
-      let b = baseB * (1 - mossFactor) + mossB * mossFactor;
-      const wetFactor = smoothstepF(0.04, 0.0, 18.0 - 18.0) * 0.38;
+      const mossFactor = smoothstepF(0.58, 0.86, worley) * smoothstepF(0.28, 0.72, 0.3) * 0.28;
+      let r = baseR * (1 - mossFactor) + 0.11 * mossFactor;
+      let g = baseG * (1 - mossFactor) + 0.19 * mossFactor;
+      let b = baseB * (1 - mossFactor) + 0.07 * mossFactor;
+      const wetFactor = smoothstepF(0.04, 0.0, 0) * 0.38;
       r = r * (1 - wetFactor) + r * 0.64 * wetFactor;
       g = g * (1 - wetFactor) + g * 0.68 * wetFactor;
       b = b * (1 - wetFactor) + b * 0.72 * wetFactor;
@@ -428,6 +400,7 @@ export function createTerrainNodeMaterial(
   const lighting = options.lighting ?? DEFAULT_TERRAIN_NODE_LIGHTING;
   const adjust = options.adjust ?? DEFAULT_TERRAIN_COLOR_ADJUST;
   const textures = options.textures ?? null;
+  if (textures?.albedoArray) safeTextureSize(textures.albedoArray);
   const arraySampling = textures?.arraySampling ?? "triplanar";
   const useArrayTextures = arraySampling !== "off";
   const useTriplanar = arraySampling === "triplanar" && (textures?.triplanar ?? true);
@@ -466,15 +439,14 @@ export function createTerrainNodeMaterial(
   let baseColor: TslNode = vec3(0.35, 0.45, 0.22);
   if (textures?.albedoArray && textures.slots.length > 0 && useArrayTextures) {
     const weights = triplanarWeights(geomN);
-    const height = worldPos.y;
-    let tex: TslNode = sampleTerrainTexture(textures.albedoArray, textures.slots, worldPos, geomN, height, uBlendWidth, useTriplanar);
+    let tex: TslNode = sampleTerrainTexture(textures.albedoArray, textures.slots, worldPos, geomN, worldPos.y, uBlendWidth, useTriplanar);
     if (textures.procedural) tex = proceduralMacroTint(tex, worldPos, geomN, textures.procedural);
     if (textures.bakedMacroTint) {
       const ws = textures.worldSize ?? 1024;
       const baked = texture(textures.bakedMacroTint, worldPos.xz.div(ws));
       tex = isFarTier.select(baked, tex);
     }
-    if (textures.albedoArray && useArrayTextures && textures.painted) {
+    if (textures.painted) {
       tex = mix(tex, paintedAlbedo(textures.albedoArray, textures.slots, worldPos, paintSlots, paintWeights, weights, useTriplanar), paint);
     }
     baseColor = tex.mul(mix(vec3(1), uColor, 0.35));
@@ -501,26 +473,11 @@ export function createTerrainNodeMaterial(
   let n: TslNode = geomN;
   if (textures?.normalArray && textures.slots.length > 0 && useArrayTextures) {
     const normalWeight = isFarTier.select(0.0, 1.0);
-    let detailN: TslNode = sampleTerrainNormal(
-      textures.normalArray,
-      textures.slots,
-      worldPos,
-      geomN,
-      worldPos.y,
-      uBlendWidth,
-      uNormalIntensity,
-      textures.normalMapMask,
-    );
+    let detailN: TslNode = sampleTerrainNormal(textures.normalArray, textures.slots, worldPos, geomN, worldPos.y, uBlendWidth, uNormalIntensity, textures.normalMapMask);
     if (textures.painted) {
-      detailN = mix(
-        detailN,
-        paintedNormal(textures.normalArray, textures.slots, worldPos, geomN, paintSlots, paintWeights, uNormalIntensity, textures.normalMapMask),
-        paint,
-      );
+      detailN = mix(detailN, paintedNormal(textures.normalArray, textures.slots, worldPos, geomN, paintSlots, paintWeights, uNormalIntensity, textures.normalMapMask), paint);
     }
-    const computedN = textures.procedural
-      ? normalize(mix(geomN, detailN, proceduralMicroWeight(worldPos, textures.procedural)))
-      : detailN;
+    const computedN = textures.procedural ? normalize(mix(geomN, detailN, proceduralMicroWeight(worldPos, textures.procedural))) : detailN;
     n = mix(geomN, computedN, normalWeight);
   }
 
@@ -534,10 +491,9 @@ export function createTerrainNodeMaterial(
   const spec = pow(max(dot(n, halfVec), 0.0), uShininess)
     .mul(uSpecGain.mul(float(1).add(wetGloss.mul(2.4))))
     .mul(sun);
-  const diffuse = baseColor.mul(light);
 
   const material = new MeshBasicNodeMaterial();
-  let colorNode: TslNode = diffuse.add(uSun.mul(spec));
+  let colorNode: TslNode = baseColor.mul(light).add(uSun.mul(spec));
   colorNode = normalColorOn.select(geomN.mul(0.5).add(0.5), colorNode);
   const debugMode = textures?.debugMode ?? 0;
   if (debugMode === 2) {
