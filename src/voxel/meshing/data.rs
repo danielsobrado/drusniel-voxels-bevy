@@ -209,7 +209,7 @@ impl ExtractComponent for WaterMeshDetail {
     }
 }
 
-#[derive(Component, Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct WaterBodyId(pub u32);
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -258,7 +258,7 @@ impl WaterBodyMaterialMode {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WaterAirExposureMode {
-    /// Debug mode: any water/air boundary can render, matching the old behavior.
+    /// Legacy/debug path: every air-adjacent water face is rendered.
     AllAir,
     /// Production fast path: air must have an open vertical column to sky.
     OpenToSky,
@@ -325,6 +325,7 @@ pub enum Face {
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
+    /// UV0.x stores baked AO. UV0.y stores encoded terrain biome id for GPU splat sampling.
     pub uvs: Vec<[f32; 2]>,
     pub barycentric_uvs: Vec<[f32; 2]>,
     /// Chunk LOD index baked into UV1 for wireframe tinting.
