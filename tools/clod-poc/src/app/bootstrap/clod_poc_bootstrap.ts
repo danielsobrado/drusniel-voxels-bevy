@@ -130,11 +130,12 @@ export async function bootstrapClodPoc() {
     colorByLodController: postRenderer.uiRefs.colorByLodController,
   });
 
+  let terrainTextureWindowSwaps = 0;
   const biomeTextureStreaming = world.proceduralTerrain
     ? createBiomeTextureStreamingManager({
         baseConfig: world.proceduralTextureConfig,
         sampleBiome: (x, z) => world.worldSource.sampleBiome(x, z),
-        onActiveWindowChanged: (nextConfig) => {
+        onActiveWindowChanged: (nextConfig, activeBiomeMaterials) => {
           const nextTerrain = createProceduralTerrainTextures(nextConfig);
           const bakeRes = Math.min(512, nextTerrain.noise.resolution);
           const nextMacroTint = createBakedMacroTintTexture(
@@ -145,12 +146,13 @@ export async function bootstrapClodPoc() {
           world.proceduralTextureConfig = nextConfig;
           world.proceduralTerrain = nextTerrain;
           world.bakedMacroTint = nextMacroTint;
+          terrainTextureWindowSwaps++;
           terrainView.materialController.setProceduralTerrain(nextTerrain, nextConfig, nextMacroTint);
           terrainView.applyTerrainTextures();
-          postRenderer.longViewHooks?.stats && Object.assign(postRenderer.longViewHooks.stats.counters, {
-            terrainTextureWindowSwaps: biomeTextureStreaming?.stats().textureWindowSwaps ?? 0,
-            terrainTextureFallbackBiomes: biomeTextureStreaming?.stats().fallbackBiomeTextureCount ?? 0,
-          });
+          if (postRenderer.longViewHooks?.stats) {
+            postRenderer.longViewHooks.stats.counters.terrainTextureWindowSwaps = terrainTextureWindowSwaps;
+            postRenderer.longViewHooks.stats.counters.terrainTextureActiveBiomes = activeBiomeMaterials.length;
+          }
         },
       })
     : null;
