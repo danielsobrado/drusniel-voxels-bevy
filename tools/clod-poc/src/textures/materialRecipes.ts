@@ -140,6 +140,10 @@ export function isBiomeProceduralMaterialId(value: unknown): value is BiomeProce
   return typeof value === "string" && (BIOME_PROCEDURAL_MATERIAL_IDS as readonly string[]).includes(value);
 }
 
+function isCommonProceduralMaterialId(value: unknown): value is CommonProceduralMaterialId {
+  return typeof value === "string" && (TERRAIN_COMMON_PROCEDURAL_MATERIAL_IDS as readonly string[]).includes(value);
+}
+
 export function resolveActiveBiomeMaterials(values: readonly unknown[] | undefined): BiomeProceduralMaterialId[] {
   const result: BiomeProceduralMaterialId[] = [];
   const source = values && values.length > 0 ? values : DEFAULT_ACTIVE_BIOME_PROCEDURAL_MATERIAL_IDS;
@@ -284,16 +288,22 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
   const micro = terrain.micro_normal && typeof terrain.micro_normal === "object" ? terrain.micro_normal as Record<string, unknown> : {};
   const masks = terrain.masks && typeof terrain.masks === "object" ? terrain.masks as Record<string, unknown> : {};
   const rawMaterials = terrain.materials && typeof terrain.materials === "object" ? terrain.materials as Record<string, unknown> : {};
+  const rawOrder = Array.isArray(terrain.material_order)
+    ? terrain.material_order.filter(isProceduralMaterialId)
+    : [];
+  const rawActiveBiomes = Array.isArray(terrain.active_biome_materials)
+    ? terrain.active_biome_materials
+    : rawOrder.filter(isBiomeProceduralMaterialId);
+  const activeBiomeMaterials = resolveActiveBiomeMaterials(rawActiveBiomes.length > 0 ? rawActiveBiomes : undefined);
+  const commonOrder = rawOrder.filter(isCommonProceduralMaterialId);
+  const hasExplicitBiomeWindow = rawActiveBiomes.length > 0;
+  const materialOrder: ProceduralMaterialId[] = hasExplicitBiomeWindow
+    ? [...(commonOrder.length > 0 ? commonOrder : TERRAIN_COMMON_PROCEDURAL_MATERIAL_IDS), ...activeBiomeMaterials]
+    : (commonOrder.length > 0 ? commonOrder : defaults.terrain.material_order);
   const materials = Object.fromEntries(PROCEDURAL_MATERIAL_IDS.map((id) => [
     id,
     mergeRecipe(rawMaterials[id], defaults.terrain.materials[id]),
   ])) as Record<ProceduralMaterialId, ProceduralMaterialRecipe>;
-  const orderBiomes = Array.isArray(terrain.material_order)
-    ? terrain.material_order.filter(isBiomeProceduralMaterialId)
-    : [];
-  const activeBiomeMaterials = resolveActiveBiomeMaterials(
-    Array.isArray(terrain.active_biome_materials) ? terrain.active_biome_materials : orderBiomes,
-  );
 
   return {
     enabled: root.enabled === undefined ? defaults.enabled : Boolean(root.enabled),
@@ -342,7 +352,7 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
         wet_tint: readColor(masks.wet_tint, defaults.terrain.masks.wet_tint),
         snow_tint: readColor(masks.snow_tint, defaults.terrain.masks.snow_tint),
       },
-      material_order: resolveActiveProceduralMaterialOrder(activeBiomeMaterials),
+      material_order: materialOrder,
       materials,
     },
     terrain_material_quality: readQualityTiers(root.terrain_material_quality, defaults.terrain_material_quality),
