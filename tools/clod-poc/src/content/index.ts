@@ -4,3 +4,4 @@ export * from "./defaults.js";
 export * from "./load_yaml.js";
 export * from "./validate.js";
 export * from "./registry.js";
+export * from "./biome_content.js";
