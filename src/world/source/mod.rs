@@ -6,6 +6,9 @@ pub mod splat;
 pub mod terrain_bridge;
 pub mod world_source;
 
+#[cfg(test)]
+mod golden_fixture_tests;
+
 pub use biome_region_field::{
     BiomeId, BiomeRegionField, BiomeRegionSample, BIOME_COAST_HEIGHT_BAND_M,
     BIOME_COAST_SHORE_DISTANCE_M, BIOME_FOREST_NOISE_MIN, BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M,
