@@ -63,8 +63,7 @@ const DEFAULT_PROBE_DISTANCE_M = 96;
 const DEFAULT_MIN_MOVE_DISTANCE_M = 8;
 
 export function biomeTextureMaterialForBiomeId(biomeId: number): BiomeProceduralMaterialId {
-  const rounded = Math.max(0, Math.round(biomeId)) as BiomeId;
-  return BIOME_TEXTURE_MATERIAL_BY_ID[rounded] ?? "meadows-ground";
+  return BIOME_TEXTURE_MATERIAL_BY_ID[normalizeBiomeId(biomeId)];
 }
 
 export function createBiomeTextureStreamingManager(
@@ -76,7 +75,7 @@ export function createBiomeTextureStreamingManager(
   let config = deps.baseConfig;
   let lastX: number | null = null;
   let lastZ: number | null = null;
-  let activeSignature = "";
+  let activeSignature = config.terrain.active_biome_materials.join("|");
   const statsState: BiomeTextureStreamingStats = {
     currentBiomeId: null,
     adjacentBiomeId: null,
@@ -88,10 +87,7 @@ export function createBiomeTextureStreamingManager(
     lastError: null,
   };
 
-  const sampleBiomeId = (x: number, z: number): BiomeId => {
-    const id = Math.max(0, Math.round(deps.sampleBiome(x, z))) as BiomeId;
-    return BIOME_TEXTURE_MATERIAL_BY_ID[id] ? id : BIOME_IDS.meadows;
-  };
+  const sampleBiomeId = (x: number, z: number): BiomeId => normalizeBiomeId(deps.sampleBiome(x, z));
 
   const resolveAdjacentBiome = (x: number, z: number, current: BiomeId): BiomeId => {
     if (lastX !== null && lastZ !== null) {
@@ -116,12 +112,11 @@ export function createBiomeTextureStreamingManager(
     biomeIds: readonly number[],
     frameIndex: number,
   ): BiomeTextureStreamingUpdateResult => {
-    const currentBiomeId = sampleBiomeId(0, 0);
-    const validBiomeIds = biomeIds.map((id) => sampleBiomeId(id, 0));
-    const activeBiomeMaterials = dedupe(validBiomeIds.map(biomeTextureMaterialForBiomeId)).slice(0, 2);
-    const adjacentBiomeId = validBiomeIds[1] ?? validBiomeIds[0] ?? currentBiomeId;
-    const result = applyActiveMaterials(currentBiomeId, adjacentBiomeId, activeBiomeMaterials, frameIndex);
-    return result;
+    const validBiomeIds = dedupe(biomeIds.map(normalizeBiomeId)).slice(0, 2);
+    const currentBiomeId = validBiomeIds[0] ?? BIOME_IDS.meadows;
+    const adjacentBiomeId = validBiomeIds[1] ?? currentBiomeId;
+    const activeBiomeMaterials = validBiomeIds.map(biomeTextureMaterialForBiomeId).slice(0, 2);
+    return applyActiveMaterials(currentBiomeId, adjacentBiomeId, activeBiomeMaterials, frameIndex);
   };
 
   const applyActiveMaterials = (
@@ -149,7 +144,7 @@ export function createBiomeTextureStreamingManager(
     try {
       deps.onActiveWindowChanged(nextConfig, nextConfig.terrain.active_biome_materials);
       config = nextConfig;
-      activeSignature = signature;
+      activeSignature = nextConfig.terrain.active_biome_materials.join("|");
       statsState.textureWindowSwaps++;
       statsState.activeBiomeMaterials = [...nextConfig.terrain.active_biome_materials];
       statsState.fallbackBiomeTextureCount = Math.max(0, BIOME_PROCEDURAL_MATERIAL_IDS.length - statsState.activeBiomeMaterials.length);
@@ -188,6 +183,11 @@ export function createBiomeTextureStreamingManager(
       return { ...statsState, activeBiomeMaterials: [...statsState.activeBiomeMaterials] };
     },
   };
+}
+
+function normalizeBiomeId(value: number): BiomeId {
+  const rounded = Math.max(0, Math.round(value)) as BiomeId;
+  return BIOME_TEXTURE_MATERIAL_BY_ID[rounded] ? rounded : BIOME_IDS.meadows;
 }
 
 function dedupe<T>(values: readonly T[]): T[] {
