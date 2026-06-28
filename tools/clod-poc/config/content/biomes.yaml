@@ -26,11 +26,11 @@
     biomeId: 0
     debugColorRgb: [77, 97, 54]
     canopyDensity: 0.20
-    terrainTextureSlots: [sand, grass-top, rock]
+    terrainTextureSlots: [sand, meadows-ground, rock]
     notes: Gentle island fields with light tree cover.
   defaultMaterialId: top-soil
   waterMaterialId: water
-  textureSlotSet: [sand, grass-top, rock]
+  textureSlotSet: [sand, meadows-ground, rock]
   tags: [islands, starting, grassland, spatial-region]
   terrainBands:
     - id: meadows-shore
@@ -44,7 +44,7 @@
       minHeight: 24
       maxHeight: 90
       materialId: top-soil
-      textureSlotId: grass-top
+      textureSlotId: meadows-ground
     - id: meadows-high
       name: Meadows High
       minHeight: 90
@@ -60,11 +60,11 @@
     biomeId: 1
     debugColorRgb: [46, 79, 36]
     canopyDensity: 1.00
-    terrainTextureSlots: [sand, grass-top, rock]
+    terrainTextureSlots: [sand, forest-floor, rock]
     notes: Dense green interior regions with strong canopy coverage.
   defaultMaterialId: top-soil
   waterMaterialId: water
-  textureSlotSet: [sand, grass-top, rock]
+  textureSlotSet: [sand, forest-floor, rock]
   tags: [islands, forest, spatial-region]
   terrainBands:
     - id: forest-low
@@ -78,7 +78,7 @@
       minHeight: 24
       maxHeight: 78
       materialId: top-soil
-      textureSlotId: grass-top
+      textureSlotId: forest-floor
     - id: forest-rock
       name: Forest Rock
       minHeight: 78
@@ -94,15 +94,15 @@
     biomeId: 2
     debugColorRgb: [48, 71, 51]
     canopyDensity: 0.65
-    terrainTextureSlots: [dirt, grass-top, rock]
+    terrainTextureSlots: [dirt, swamp-muck, rock]
     notes: Low wetland regions near sea level and sheltered basins.
   defaultMaterialId: clay
   waterMaterialId: water
-  textureSlotSet: [dirt, grass-top, rock]
+  textureSlotSet: [dirt, swamp-muck, rock]
   tags: [islands, wetland, spatial-region]
   terrainBands:
-    - id: swamp-muck
-      name: Swamp Muck
+    - id: swamp-muck-low
+      name: Swamp Muck Low
       minHeight: -50
       maxHeight: 28
       materialId: clay
@@ -111,8 +111,8 @@
       name: Swamp Bank
       minHeight: 28
       maxHeight: 78
-      materialId: top-soil
-      textureSlotId: grass-top
+      materialId: clay
+      textureSlotId: swamp-muck
     - id: swamp-rise
       name: Swamp Rise
       minHeight: 78
@@ -128,11 +128,11 @@
     biomeId: 3
     debugColorRgb: [107, 102, 92]
     canopyDensity: 0.00
-    terrainTextureSlots: [rock, rock, snow]
+    terrainTextureSlots: [rock, mountain-scree, snow]
     notes: High elevation regions dominated by rock and snow slots.
   defaultMaterialId: rock
   waterMaterialId: water
-  textureSlotSet: [rock, rock, snow]
+  textureSlotSet: [rock, mountain-scree, snow]
   tags: [islands, mountain, spatial-region]
   terrainBands:
     - id: mountain-foot
@@ -146,7 +146,7 @@
       minHeight: 58
       maxHeight: 92
       materialId: rock
-      textureSlotId: rock
+      textureSlotId: mountain-scree
     - id: mountain-snow
       name: Mountain Snow
       minHeight: 92
@@ -162,11 +162,11 @@
     biomeId: 4
     debugColorRgb: [120, 110, 64]
     canopyDensity: 0.05
-    terrainTextureSlots: [sand, grass-top, rock]
+    terrainTextureSlots: [sand, plains-grass, rock]
     notes: Open dry-grass island regions with sparse canopy.
   defaultMaterialId: top-soil
   waterMaterialId: water
-  textureSlotSet: [sand, grass-top, rock]
+  textureSlotSet: [sand, plains-grass, rock]
   tags: [islands, dry-grassland, spatial-region]
   terrainBands:
     - id: plains-shore
@@ -180,7 +180,7 @@
       minHeight: 26
       maxHeight: 86
       materialId: top-soil
-      textureSlotId: grass-top
+      textureSlotId: plains-grass
     - id: plains-stone
       name: Plains Stone
       minHeight: 86
@@ -196,11 +196,11 @@
     biomeId: 5
     debugColorRgb: [163, 140, 87]
     canopyDensity: 0.00
-    terrainTextureSlots: [sand, sand, rock]
+    terrainTextureSlots: [sand, coast-sand, rock]
     notes: Shoreline transition region around islands.
   defaultMaterialId: sand
   waterMaterialId: water
-  textureSlotSet: [sand, sand, rock]
+  textureSlotSet: [sand, coast-sand, rock]
   tags: [islands, shoreline, spatial-region]
   terrainBands:
     - id: coast-wet
@@ -214,7 +214,7 @@
       minHeight: 22
       maxHeight: 46
       materialId: sand
-      textureSlotId: sand
+      textureSlotId: coast-sand
     - id: coast-cliff
       name: Coast Cliff
       minHeight: 46
@@ -230,22 +230,28 @@
     biomeId: 6
     debugColorRgb: [26, 51, 77]
     canopyDensity: 0.00
-    terrainTextureSlots: [sand, dirt, rock]
+    terrainTextureSlots: [sand, ocean-floor, rock]
     notes: Sea-floor and open water terrain region.
   defaultMaterialId: sand
   waterMaterialId: water
-  textureSlotSet: [sand, dirt, rock]
+  textureSlotSet: [sand, ocean-floor, rock]
   tags: [islands, ocean, spatial-region]
   terrainBands:
-    - id: ocean-floor
-      name: Ocean Floor
+    - id: ocean-floor-low
+      name: Ocean Floor Low
       minHeight: -120
       maxHeight: 20
       materialId: sand
       textureSlotId: sand
+    - id: ocean-floor
+      name: Ocean Floor
+      minHeight: 20
+      maxHeight: 80
+      materialId: sand
+      textureSlotId: ocean-floor
     - id: ocean-rise
       name: Ocean Rise
-      minHeight: 20
+      minHeight: 80
       maxHeight: 180
       materialId: rock
       textureSlotId: rock
