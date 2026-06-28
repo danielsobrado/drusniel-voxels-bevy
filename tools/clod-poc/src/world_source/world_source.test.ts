@@ -29,6 +29,22 @@ describe("ProceduralWorldSource", () => {
     expect(source.sampleHeight(285.71, 911)).toBe(surfaceHeightCore(285.71, 911, terrain));
   });
 
+  it("does not drift when the constructor input is mutated later", () => {
+    const terrain = resolveTerrainFieldConfig({ seed: 11, seaLevel: 18, islandShape: { enabled: true } });
+    const source = new ProceduralWorldSource(terrain);
+    const before = source.sampleHeight(128, 256);
+
+    terrain.seed = 99;
+    terrain.seaLevel = 30;
+    terrain.islandShape.enabled = false;
+
+    expect(source.metadata.seed).toBe(11);
+    expect(source.metadata.seaLevel).toBe(18);
+    expect(source.metadata.terrain.seed).toBe(11);
+    expect(source.metadata.terrain.islandShape.enabled).toBe(true);
+    expect(source.sampleHeight(128, 256)).toBe(before);
+  });
+
   it("exposes sea level, seed, and ocean rim metadata", () => {
     const terrain = resolveTerrainFieldConfig({
       seed: 42,
@@ -51,6 +67,19 @@ describe("BiomeRegionField", () => {
     expect(second).toEqual(first);
   });
 
+  it("does not drift when the constructor island shape is mutated later", () => {
+    const islandShape = { enabled: true, radiusM: 560 };
+    const field = new BiomeRegionField({ seed: 3, seaLevel: 18, islandShape });
+    const first = field.sample(125, 512, 42);
+
+    islandShape.radiusM = 1200;
+    islandShape.enabled = false;
+
+    expect(field.sample(125, 512, 42)).toEqual(first);
+    expect(field.islandShape.radiusM).toBe(560);
+    expect(field.islandShape.enabled).toBe(true);
+  });
+
   it("covers the expected biome id range on a sampled island grid", () => {
     const field = new BiomeRegionField({ seed: 5, seaLevel: 18, islandShape: { enabled: true } });
     const seen = new Set<number>();
@@ -67,10 +96,29 @@ describe("BiomeRegionField", () => {
 });
 
 describe("StreamedVoxelWorldSource", () => {
-  it("is a real future-source stub with metadata", () => {
-    const source = new StreamedVoxelWorldSource({ seed: 9, seaLevel: 21 });
+  it("is a future-source stub with internally consistent metadata", () => {
+    const source = new StreamedVoxelWorldSource({
+      seed: 9,
+      seaLevel: 21,
+      oceanRim: true,
+      terrain: resolveTerrainFieldConfig({ seed: 1, seaLevel: 18, islandShape: { oceanRim: false, worldRadiusM: 4096 } }),
+    });
+
     expect(source.metadata.seed).toBe(9);
     expect(source.metadata.seaLevel).toBe(21);
-    expect(() => source.sampleHeight(0, 0)).toThrow(/not implemented/);
+    expect(source.metadata.terrain.seed).toBe(9);
+    expect(source.metadata.terrain.seaLevel).toBe(21);
+    expect(source.metadata.terrain.islandShape.seed).toBe(9);
+    expect(source.metadata.terrain.islandShape.seaLevel).toBe(21);
+    expect(source.metadata.oceanRim).toBe(true);
+    expect(source.metadata.terrain.islandShape.oceanRim).toBe(true);
+    expect(source.metadata.bounds).toEqual({ radiusM: 4096 });
+  });
+
+  it("throws for every sampling method until backed by streamed voxel data", () => {
+    const source = new StreamedVoxelWorldSource({ seed: 9, seaLevel: 21 });
+    expect(() => source.sampleHeight(0, 0)).toThrow(/sampleHeight is not implemented/);
+    expect(() => source.sampleBiome(0, 0)).toThrow(/sampleBiome is not implemented/);
+    expect(() => source.oceanMask(0, 0)).toThrow(/oceanMask is not implemented/);
   });
 });
