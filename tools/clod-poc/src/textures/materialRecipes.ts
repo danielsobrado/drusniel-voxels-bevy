@@ -228,7 +228,7 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
   const defaults = DEFAULT_PROCEDURAL_TEXTURE_CONFIG;
   const noise = root.noise && typeof root.noise === "object" ? root.noise as Record<string, unknown> : {};
   const periods = noise.periods && typeof noise.periods === "object" ? noise.periods as Record<string, unknown> : {};
-  const terrain = root.terrain && typeof root.terrain === "object" ? terrain as Record<string, unknown> : {};
+  const terrain = root.terrain && typeof root.terrain === "object" ? root.terrain as Record<string, unknown> : {};
   const micro = terrain.micro_normal && typeof terrain.micro_normal === "object" ? terrain.micro_normal as Record<string, unknown> : {};
   const masks = terrain.masks && typeof terrain.masks === "object" ? terrain.masks as Record<string, unknown> : {};
   const rawMaterials = terrain.materials && typeof terrain.materials === "object" ? terrain.materials as Record<string, unknown> : {};
