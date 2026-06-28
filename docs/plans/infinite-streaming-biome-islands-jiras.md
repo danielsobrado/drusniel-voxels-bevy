@@ -30,6 +30,12 @@ npm --prefix tools/clod-poc run build           # vite build — NO rtk
 npm --prefix tools/clod-poc run dev -- --host 127.0.0.1   # server for shot harness
 ```
 
+**Current code state (as of commit `d7b9efed` — NOT greenfield).** An in-progress implementation already exists with known gaps that several tickets exist to fix. Verified gaps:
+- **Acceptance gate is fake.** `tools/clod-poc/src/phase0/long_view_frame_diagnostics.ts` hardcodes `ring_boundary_holes = 0` and `horizon_hole_ratio = -1`. Holes/seams cannot currently fail the battery. (→ ISLE-3b)
+- **`WorldSource` is not pure.** `tools/clod-poc/src/world_source/world_source.ts` `ProceduralWorldSource.sampleHeight` ignores its own `metadata.terrain` config and calls global `surfaceHeightCore`; `sampleBiome`/`oceanMask` inherit the divergence. (→ ISLE-5b)
+- **CPU↔WGSL biome parity is broken.** CPU `biome_region_field.ts` uses nearest-island-center distance + island-mask ocean/coast; WGSL `gpu/shaders/biome_region_field.wgsl` uses world-origin radial distance and height-only ocean/coast (no island mask, no `sampleIslandMask` port). Near/far biome mismatch is already present. (→ ISLE-9, rewritten)
+- **Build order is currently backwards** — biome/material/WGSL work landed before the ownership/parity gates are real. The milestone slicing below corrects this.
+
 ---
 
 ## Ticket index
@@ -39,22 +45,24 @@ npm --prefix tools/clod-poc run dev -- --host 127.0.0.1   # server for shot harn
 | **E0 Measurement gate** | ISLE-1 | Author long-form design doc | — |
 | | ISLE-2 | `infinite-islands` scene + scripted walk | ISLE-1 |
 | | ISLE-3 | Walk-battery + acceptance counters | ISLE-2 |
+| | **ISLE-3b** | **Footprint-coverage ownership oracle (replaces fake holes counter)** | ISLE-3 |
 | **E1 WorldSource** | ISLE-4 | `WorldSource` interface + 2 impls | ISLE-1 |
 | | ISLE-5 | Plumb `?seed=` + sea level via config | ISLE-4 |
-| **E2 Island height (triplet)** | ISLE-6 | Island masks + ocean rim in parity triplet | ISLE-5 |
+| | **ISLE-5b** | **Make `ProceduralWorldSource` pure (config-threaded height)** | ISLE-5 |
+| **E2 Island height (triplet)** | ISLE-6 | Island masks + ocean rim in parity triplet | ISLE-5b |
 | | ISLE-7 | Inter-island coastlines (beach/cliff) | ISLE-6 |
-| **E3 Biome regions** | ISLE-8 | `BiomeRegionField` (CPU TS) | ISLE-5 |
-| | ISLE-9 | `BiomeRegionField` WGSL mirror | ISLE-8 |
+| **E3 Biome regions** | ISLE-8 | `BiomeRegionField` (CPU TS) | ISLE-5b |
+| | ISLE-9 | `BiomeRegionField` CPU↔WGSL parity (golden table + island-mask port) | ISLE-8 |
 | | ISLE-10 | Biome content schema → spatial regions | ISLE-8 |
 | **E4 Splat material** | ISLE-11 | Biome splat blend in terrain TSL node | ISLE-9, ISLE-10 |
 | | ISLE-12 | Author per-biome PBR texture sets | ISLE-11 |
-| **E5 Wire streaming** | ISLE-13 | All rings follow camera; far-shell `moveTo` | ISLE-3, ISLE-6 |
+| **E5 Wire streaming** | ISLE-13 | All rings follow camera; far-shell `moveTo`; one-owner invariant | ISLE-3b, ISLE-5b |
 | | ISLE-14 | TerrainSummaryField ← WorldSource; biome horizon | ISLE-13, ISLE-9 |
 | | ISLE-15 | Streaming walk-battery acceptance | ISLE-14, ISLE-12 |
 | **E6 Precision (cond.)** | ISLE-16 | Floating-origin rebasing (unbounded only) | ISLE-15 |
 | **E7 Bevy port (later)** | ISLE-17 | Port WorldSource + biomes + splat to Bevy | ISLE-15 |
 
-**First shippable milestone = ISLE-1 … ISLE-15.** ISLE-16 conditional; ISLE-17 later.
+**First shippable milestone = ISLE-1 … ISLE-15** (see Milestones below — ownership/parity gates land before visual richness). ISLE-16 conditional; ISLE-17 later.
 
 ---
 
@@ -105,6 +113,22 @@ Obey the Shared Context in docs/plans/infinite-streaming-biome-islands-jiras.md.
 Obey the Shared Context. Add a Playwright shot/battery entry under tools/clod-poc that runs the `infinite-islands` scripted walk and records window.__drusnielClod.stats (fps, frame ms p50/p95, and the streamer_* ownership counters). Wire it like the existing shoot/battery scripts (see CLAUDE.md "Shot Harness" section). Write the captured stats JSON under shots/. Document acceptance thresholds in the battery: no stall >8 ms, streamer_far_shell_ownership_ok==1, zero ring-boundary holes. Start the dev server first: `npm --prefix tools/clod-poc run dev -- --host 127.0.0.1`. Use npm, never rtk, for the harness.
 ```
 
+## ISLE-3b — Footprint-coverage ownership oracle (replaces the fake holes counter)
+**Type:** Story · **Epic:** E0 · **Depends on:** ISLE-3
+
+**Description:** The acceptance gate is currently fake — `tools/clod-poc/src/phase0/long_view_frame_diagnostics.ts:206` hardcodes `ring_boundary_holes = 0` and `:171` sets `horizon_hole_ratio = -1`. Replace this with a **deterministic, footprint/ownership-set oracle**: from the ownership runtime + page/chunk/far-shell geometry bounds, assert that every cell within the required radius is covered by **exactly one owner** (live chunk **or** CLOD page **or** far-shell annulus — never zero, never two). This both detects holes and encodes the mutual-exclusion invariant (overlap = z-fight). Do **not** detect holes from pixels; measure from footprints.
+
+**Acceptance criteria:**
+- [ ] `ring_boundary_holes` and `horizon_hole_ratio` are computed from footprint coverage, not assigned.
+- [ ] New counters emitted and measured (not hardcoded): `camera_to_clod_center_m`, `camera_to_far_shell_center_m`, `far_shell_inner_minus_clod_radius_m`, `live_clod_gap_holes`, `clod_far_gap_holes`, `live_clod_overlap_cells`, `missing_live_chunks_in_required_radius`, `missing_clod_pages_in_required_radius`, `far_shell_recenter_count`, `far_shell_last_recenter_frame`.
+- [ ] Unit test: synthetic ownership states with a known gap and a known overlap produce non-zero `*_gap_holes` / `*_overlap_cells`.
+- [ ] Battery thresholds updated to hard-fail on any gap or overlap.
+
+**AI execution prompt:**
+```
+Obey the Shared Context. The acceptance gate is currently fake: tools/clod-poc/src/phase0/long_view_frame_diagnostics.ts:206 hardcodes ring_boundary_holes = 0 and :171 sets horizon_hole_ratio = -1. Replace with a deterministic footprint/ownership-set oracle: using the TerrainOwnershipRuntime (tools/clod-poc/src/stream/terrain_ownership_runtime.ts) plus live-chunk, CLOD-page, and far-shell geometry bounds, verify every cell within the required radius has EXACTLY ONE owner (live chunk OR CLOD page OR far-shell annulus) — never zero (hole), never two (overlap → z-fight). Compute holes from footprints, NOT from pixels. Emit and MEASURE these counters (none hardcoded): camera_to_clod_center_m, camera_to_far_shell_center_m, far_shell_inner_minus_clod_radius_m, live_clod_gap_holes, clod_far_gap_holes, live_clod_overlap_cells, missing_live_chunks_in_required_radius, missing_clod_pages_in_required_radius, far_shell_recenter_count, far_shell_last_recenter_frame. Add a vitest test driving synthetic ownership states with a known gap and a known overlap and asserting non-zero counters. Update the battery (ISLE-3) to hard-fail on any gap or overlap. Verify: `npm --prefix tools/clod-poc test` (NO rtk).
+```
+
 ---
 
 # EPIC E1 — WorldSource abstraction + seed/sea-level plumbing
@@ -139,12 +163,27 @@ Obey the Shared Context (esp. the parity-locked height triplet — do NOT change
 Obey the Shared Context — this ticket DOES touch the parity triplet, so edit all three in lockstep: tools/clod-poc/src/terrain/terrain.ts (CPU), tools/clod-poc/src/gpu/terrain_field_core.ts (GPU-shaped spec), and the WGSL field shader named in terrain_field_core.ts's header (shaders/terrain_field_common.wgsl). Replace hardcoded TERRAIN_SEED=0 and WATER_LEVEL=18 with parameters from config/URL, defaulting to those exact values so default output is unchanged. Expose them on WorldSource metadata (ISLE-4). Re-pin tools/clod-poc/src/gpu/terrain_field_core.test.ts after confirming default parity. Verify the parity test and full suite: `npm --prefix tools/clod-poc test` (NO rtk). Then confirm `?seed=1` visibly changes terrain in the shot harness.
 ```
 
+## ISLE-5b — Make `ProceduralWorldSource` pure (config-threaded height)
+**Type:** Task · **Epic:** E1 · **Depends on:** ISLE-5
+
+**Description:** Today `ProceduralWorldSource.sampleHeight` ([world_source.ts:46-48](../../tools/clod-poc/src/world_source/world_source.ts#L46)) ignores its own `metadata.terrain` and calls global `surfaceHeightCore(x,z)`; `sampleBiome`/`oceanMask` inherit the divergence. Make the source pure: a `ProceduralWorldSource` built with a given `TerrainFieldConfig` must sample height/biome/ocean **only** from that config. Thread the config into `surfaceHeightCore` (explicit param or a bound sampler) instead of module globals. This is a prerequisite for biome CPU↔GPU parity (ISLE-9), since biome/ocean classification routes through `sampleHeight`.
+
+**Acceptance criteria:**
+- [ ] `surfaceHeightCore` accepts config explicitly (or `ProceduralWorldSource` owns a bound sampler); no read of mutable global terrain config on the sample path.
+- [ ] Two sources with different configs produce different heights from the same `(x,z)`; default config still byte-matches current output (parity test green).
+- [ ] Unit test asserts source purity (config in == height out, no global leakage).
+
+**AI execution prompt:**
+```
+Obey the Shared Context, including the parity triplet. Today ProceduralWorldSource.sampleHeight (tools/clod-poc/src/world_source/world_source.ts:46) ignores its metadata.terrain config and calls global surfaceHeightCore; sampleBiome/oceanMask inherit this. Make the source pure: thread TerrainFieldConfig explicitly into surfaceHeightCore (tools/clod-poc/src/gpu/terrain_field_core.ts) as a parameter (or give ProceduralWorldSource a bound sampler), so a source built with a config samples height/biome/ocean ONLY from that config — no mutable global reads on the sample path. Mirror any signature change consistently with the CPU (terrain/terrain.ts) and WGSL representations; keep default-config output byte-identical and re-pin terrain_field_core.test.ts. Add a vitest test: two configs → different heights at the same (x,z); default config unchanged. Verify with `npm --prefix tools/clod-poc test` (NO rtk).
+```
+
 ---
 
 # EPIC E2 — Island shaping + ocean rim (HEIGHT layer — parity triplet)
 
 ## ISLE-6 — Island/continent masks + optional ocean rim in the parity triplet
-**Type:** Story · **Epic:** E2 · **Depends on:** ISLE-5
+**Type:** Story · **Epic:** E2 · **Depends on:** ISLE-5b
 
 **Description:** Add big-island shaping (low-freq domain-warped masks + per-island radial falloff) and an optional bounded ocean rim (clamp height below sea level beyond `world_radius_m`) into the height field, **in lockstep across the triplet**. Re-pin the parity test. Expose island/rim params via config + `WorldSource` metadata. This is the riskiest ticket — isolate it.
 
@@ -179,7 +218,7 @@ Obey the Shared Context. Extend the coastline system (tools/clod-poc/src/terrain
 # EPIC E3 — Discrete biome region field
 
 ## ISLE-8 — `BiomeRegionField` (CPU TS)
-**Type:** Story · **Epic:** E3 · **Depends on:** ISLE-5
+**Type:** Story · **Epic:** E3 · **Depends on:** ISLE-5b
 
 **Description:** Implement `tools/clod-poc/src/world_source/biome_region_field.ts`: assigns a biome id per world cell Valheim-style — region/distance-from-island-center + elevation bands + low-freq region noise to break perfect rings. Fully deterministic (`pcg2d(cell, seed)`). Wire into `ProceduralWorldSource.sampleBiome`.
 
@@ -193,18 +232,19 @@ Obey the Shared Context. Extend the coastline system (tools/clod-poc/src/terrain
 Obey the Shared Context. Create tools/clod-poc/src/world_source/biome_region_field.ts assigning a biome id per world cell, Valheim-style: region/distance-from-island-center + elevation bands + a low-frequency region noise that breaks perfect concentric rings. Make it fully deterministic with pcg2d(cell, seed). Wire it into ProceduralWorldSource.sampleBiome (ISLE-4). This is additive — do NOT change the height triplet. Add vitest tests for determinism and that all expected biomes get coverage. Verify: typecheck (rtk ok) + `npm --prefix tools/clod-poc test` (NO rtk).
 ```
 
-## ISLE-9 — `BiomeRegionField` WGSL mirror
-**Type:** Task · **Epic:** E3 · **Depends on:** ISLE-8
+## ISLE-9 — `BiomeRegionField` CPU↔WGSL parity (golden table + island-mask port)
+**Type:** Story · **Epic:** E3 · **Depends on:** ISLE-8
 
-**Description:** Port `BiomeRegionField` to WGSL so the terrain material (ISLE-11) and far shell (ISLE-14) classify biomes on-GPU identically. Classification is tolerant (not byte-pinned like the SDF) but must visually match CPU at near/far boundaries.
+**Description:** The committed WGSL classifier already **diverges** from CPU and must be brought to parity. CPU `biome_region_field.ts` uses nearest-island-center distance ([:87-88](../../tools/clod-poc/src/world_source/biome_region_field.ts#L87)) and **island-mask** ocean/coast ([:79-83](../../tools/clod-poc/src/world_source/biome_region_field.ts#L79)); the WGSL `gpu/shaders/biome_region_field.wgsl` uses **world-origin radial** distance ([:49](../../tools/clod-poc/src/gpu/shaders/biome_region_field.wgsl#L49)) and **height-only** ocean/coast with no island mask ([:46-47](../../tools/clod-poc/src/gpu/shaders/biome_region_field.wgsl#L46)). Declare the **island-aware CPU version canonical**, port `sampleIslandMask` (`island_shape.ts`, ~173 LOC) to WGSL, and rewrite the WGSL classifier to match (nearest-island-center distance, island-mask ocean/coast). Lock it with a CPU-generated **golden table**, not a visual check. Classification is tolerant of float epsilon but boundaries must align.
 
 **Acceptance criteria:**
-- [ ] WGSL biome classifier matches CPU output at sampled cells (test or visual parity shot).
-- [ ] No near-vs-far biome mismatch at the streamed/summary boundary.
+- [ ] `sampleIslandMask` ported to WGSL; WGSL classifier uses nearest-island-center distance + island-mask ocean/coast (matches CPU branch order).
+- [ ] Golden-table test: CPU emits `(x, z, height, seed, seaLevel) → biomeId` rows; the same inputs through the WGSL/shader-test path produce the same `biomeId` (allow a tiny epsilon band only at boundaries).
+- [ ] No near-vs-far biome mismatch at the streamed/summary boundary in a parity shot.
 
 **AI execution prompt:**
 ```
-Obey the Shared Context. Port the BiomeRegionField logic from tools/clod-poc/src/world_source/biome_region_field.ts to WGSL for use by the terrain material and far shell. Keep the algorithm aligned with the CPU version (same pcg2d, same region/elevation/noise rules). Add a parity check (sample a grid of cells CPU vs GPU, or a visual parity shot) to confirm no near/far biome mismatch. Verify with the shot harness + `npm --prefix tools/clod-poc test`.
+Obey the Shared Context. The committed WGSL biome classifier diverges from CPU and must be fixed to parity. CPU tools/clod-poc/src/world_source/biome_region_field.ts uses nearest-island-center distance (:87) and island-mask ocean/coast (:79-83); WGSL tools/clod-poc/src/gpu/shaders/biome_region_field.wgsl uses world-origin radial (:49) and height-only ocean/coast with no island mask (:46-47). Make the island-aware CPU version CANONICAL: port sampleIslandMask from tools/clod-poc/src/world_source/island_shape.ts to WGSL, then rewrite classifyBiomeRegion to use nearest-island-center distance and island-mask ocean/coast in the same branch order as CPU. Add a golden-table parity test: have the CPU emit (x,z,height,seed,seaLevel)→biomeId rows for a grid, then run the identical inputs through the WGSL/shader-test path and assert equal biomeId (small epsilon allowed only at boundaries). Add a visual parity shot confirming no near/far biome seam. Verify with `npm --prefix tools/clod-poc test` (NO rtk) and the shot harness.
 ```
 
 ## ISLE-10 — Biome content schema → spatial regions + debug overlay
@@ -260,19 +300,19 @@ Obey the Shared Context. Author or import albedo/normal/roughness texture sets f
 
 # EPIC E5 — Wire streaming-ownership as the default for the islands scene
 
-## ISLE-13 — All rings follow the camera; close the far-shell `moveTo` gap
-**Type:** Story · **Epic:** E5 · **Depends on:** ISLE-3, ISLE-6
+## ISLE-13 — All rings follow the camera; close the far-shell `moveTo` gap; one-owner invariant
+**Type:** Story · **Epic:** E5 · **Depends on:** ISLE-3b, ISLE-6
 
-**Description:** For `infinite-islands`, drive every ring off the camera each frame: live chunks (already follow via `bubbleCenter`), CLOD page tree centered on camera, and the **far-shell annulus repositioned via `moveTo()` each frame** (the gap — `moveTo` exists in `far_shell_controller.ts` but has no frame-loop caller). Use the inner-exclusion annulus (`farShellInnerRadiusForOwnership`) so the far shell never overlaps playable terrain and recedes with the player.
+**Description:** For `infinite-islands`, drive every ring off the camera each frame: live chunks (already follow via `bubbleCenter`), CLOD page tree centered on camera, and the **far-shell annulus repositioned via `moveTo()` each frame** (the gap — `moveTo` exists in `far_shell_controller.ts` but has no frame-loop caller). Use the inner-exclusion annulus (`farShellInnerRadiusForOwnership`) so the far shell never overlaps playable terrain and recedes with the player. **Enforce the invariant: exactly one owner per terrain footprint** — live chunks own the inner bubble, CLOD pages the middle ring, far shell the outer annulus; live/CLOD footprints must be mutually exclusive (overlap-fading identical terrain causes z-fighting). The ISLE-3b oracle gates this.
 
 **Acceptance criteria:**
 - [ ] Walking, the live + CLOD + far-shell rings all recenter on the camera; far shell never reached.
 - [ ] `streamer_far_shell_ownership_ok == 1` throughout the walk.
-- [ ] No holes/seams at ring boundaries.
+- [ ] ISLE-3b oracle reports zero `*_gap_holes` and zero `live_clod_overlap_cells` for the whole traverse.
 
 **AI execution prompt:**
 ```
-Obey the Shared Context. In the infinite-islands streaming path, make every terrain ring follow the camera each frame. Live chunks already follow (tools/clod-poc/src/app/frame_loop/terrain_frame_phase.ts bubbleCenter). Center the CLOD page selection on the camera, and CLOSE THE GAP: call FarShellController.moveTo(x,z) every frame from the frame loop (tools/clod-poc/src/app/frame_loop/clod_frame_loop.ts / terrain_frame_phase.ts), using the inner-exclusion annulus from tools/clod-poc/src/streaming/streaming_ownership.ts (farShellInnerRadiusForOwnership) so the far shell never overlaps playable terrain. Keep far-shell inner >= CLOD radius. Verify with the scripted walk battery (ISLE-3): assert streamer_far_shell_ownership_ok==1 and no ring-boundary holes for the whole traverse.
+Obey the Shared Context. In the infinite-islands streaming path, make every terrain ring follow the camera each frame. Live chunks already follow (tools/clod-poc/src/app/frame_loop/terrain_frame_phase.ts bubbleCenter). Center the CLOD page selection on the camera, and CLOSE THE GAP: call FarShellController.moveTo(x,z) every frame from the frame loop (tools/clod-poc/src/app/frame_loop/clod_frame_loop.ts / terrain_frame_phase.ts), using the inner-exclusion annulus from tools/clod-poc/src/streaming/streaming_ownership.ts (farShellInnerRadiusForOwnership) so the far shell never overlaps playable terrain. Enforce exactly one owner per footprint: live chunks own the inner bubble, CLOD pages the middle ring, far shell the outer annulus, and live/CLOD footprints must be mutually exclusive (overlap → z-fight). Keep far-shell inner >= CLOD radius. Verify with the scripted walk battery (ISLE-3) gated by the ISLE-3b oracle: assert streamer_far_shell_ownership_ok==1, zero *_gap_holes, and zero live_clod_overlap_cells for the whole traverse.
 ```
 
 ## ISLE-14 — TerrainSummaryField ← WorldSource; biome on the horizon
@@ -344,9 +384,15 @@ Obey CLAUDE.md performance rules (use cargo run --release -- --bench ...; do not
 
 ---
 
-## Suggested sprint slicing
+## Milestones (ordered to make ownership & parity REAL before visual richness)
 
-- **Sprint 1 (foundation):** ISLE-1, ISLE-2, ISLE-3, ISLE-4, ISLE-5.
-- **Sprint 2 (world shape):** ISLE-6, ISLE-7, ISLE-8, ISLE-9, ISLE-10.
-- **Sprint 3 (look + wiring):** ISLE-11, ISLE-12, ISLE-13, ISLE-14, ISLE-15 → **milestone demo**.
-- **Backlog:** ISLE-16 (if unbounded), ISLE-17 (Bevy).
+The original phase order put biomes/materials before the ownership and parity gates were trustworthy — and the committed code shows exactly that hazard (fake holes counter, impure `WorldSource`, CPU↔WGSL biome divergence). Re-sliced:
+
+- **Milestone A — Infinite ownership proof.** ISLE-1, ISLE-2, ISLE-3, **ISLE-3b**, ISLE-4, ISLE-5, **ISLE-5b**, ISLE-13 (rings follow + one-owner invariant), partial ISLE-14 (TerrainSummaryField uses `WorldSource` height only). *Goal: walk forever; rings follow; far shell recedes; oracle proves zero gaps/overlaps. No authored biome textures yet.*
+- **Milestone B — Island world shape.** ISLE-6, ISLE-7. *Goal: real islands + ocean rim with full height-triplet parity.*
+- **Milestone C — Biomes.** ISLE-8, ISLE-9 (golden-table CPU↔WGSL parity), ISLE-10. *Goal: identical biome classification near/far/CPU/GPU.*
+- **Milestone D — Materials.** ISLE-11, ISLE-12. *Goal: real per-biome PBR splat, no speckle.*
+- **Milestone E — Acceptance demo.** finish ISLE-14, ISLE-15. *Goal: full long-walk acceptance; archive stats + shots.*
+- **Backlog:** ISLE-16 (only if unbounded mode is used), ISLE-17 (Bevy port, after clod-poc proves out).
+
+**Rule:** Milestone A's oracle (ISLE-3b) and purity (ISLE-5b) are hard gates — do not start C/D until A passes with measured (not assigned) counters.
