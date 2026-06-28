@@ -1,4 +1,4 @@
-import { sampleIslandMask, type IslandMaskSample, type IslandShapeConfig } from "./island_shape.js";
+import { resolveIslandShapeConfig, sampleIslandMask, type IslandMaskSample, type IslandShapeConfig } from "./island_shape.js";
 
 export const BIOME_IDS = {
   meadows: 0,
@@ -59,8 +59,9 @@ function smooth01(value: number): number {
 }
 
 export function biomeRegionNoise(x: number, z: number, cellM: number, seed: number): number {
-  const gx = x / cellM;
-  const gz = z / cellM;
+  const safeCellM = Math.max(64, Number.isFinite(cellM) ? cellM : 420);
+  const gx = x / safeCellM;
+  const gz = z / safeCellM;
   const x0 = Math.floor(gx);
   const z0 = Math.floor(gz);
   const tx = smooth01(gx - x0);
@@ -96,13 +97,17 @@ export class BiomeRegionField {
   readonly seed: number;
   readonly seaLevel: number;
   readonly regionCellM: number;
-  readonly islandShape?: Partial<IslandShapeConfig>;
+  readonly islandShape: IslandShapeConfig;
 
   constructor(options: BiomeRegionFieldOptions) {
-    this.seed = Math.floor(options.seed);
-    this.seaLevel = options.seaLevel;
-    this.regionCellM = Math.max(64, options.regionCellM ?? 420);
-    this.islandShape = options.islandShape;
+    this.seed = Number.isFinite(options.seed) ? Math.floor(options.seed) : 0;
+    this.seaLevel = Number.isFinite(options.seaLevel) ? options.seaLevel : 18;
+    this.regionCellM = Math.max(64, Number.isFinite(options.regionCellM) ? options.regionCellM! : 420);
+    this.islandShape = resolveIslandShapeConfig({
+      ...options.islandShape,
+      seed: options.islandShape?.seed ?? this.seed,
+      seaLevel: this.seaLevel,
+    });
   }
 
   sample(x: number, z: number, height: number): BiomeRegionSample {
@@ -113,7 +118,7 @@ export class BiomeRegionField {
       seed: this.seed,
       seaLevel: this.seaLevel,
       regionCellM: this.regionCellM,
-      islandRadiusM: this.islandShape?.radiusM ?? 560,
+      islandRadiusM: this.islandShape.radiusM,
       island: sampleIslandMask(x, z, this.islandShape),
     });
   }
