@@ -5,14 +5,17 @@ import { createTreeGeometryMap, disposeTreeGeometryMap, treeGeometryVariant } fr
 import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
 
 describe("tree variant geometry map", () => {
-  it("builds all configured variants while preserving variant-zero compatibility", () => {
+  it("builds selector geometries plus all configured structural variants", () => {
     const map = createTreeGeometryMap(DEFAULT_TREE_SETTINGS);
     try {
       for (const species of TREE_SPECIES) {
         expect(Object.keys(map[species].variants)).toHaveLength(TREE_STRUCTURAL_VARIANTS);
         for (const lod of TREE_LODS) {
-          expect(map[species][lod]).toBe(map[species].variants[0][lod]);
-          expect(treeGeometryVariant(map, species, 0, lod)).toBe(map[species][lod]);
+          expect(map[species][lod]).not.toBe(map[species].variants[0][lod]);
+          expect(map[species][lod].getAttribute("treeVariant")?.count).toBe(
+            map[species][lod].getAttribute("position")?.count,
+          );
+          expect(treeGeometryVariant(map, species, 0, lod)).toBe(map[species].variants[0][lod]);
         }
       }
     } finally {
