@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { createPropBillboardGeometry } from "../props/prop_billboard.js";
 import { createFireNodeMaterial, type SpellNodeMaterialHandle } from "./fire_node_material.js";
 import { createWaterNodeMaterial } from "./water_node_material.js";
+import { createAirNodeMaterial } from "./air_node_material.js";
 import type { FireSpellVfxConfig } from "./spell_config.js";
 
 export interface SpellVfxMeshConfig {
@@ -10,7 +11,7 @@ export interface SpellVfxMeshConfig {
   flameScale: number;
 }
 
-/** Caster pose: the flame base (hand) and the direction the jet travels. */
+/** Caster pose: the spell base (hand) and the direction the jet travels. */
 export interface SpellPose {
   base: THREE.Vector3;
   dir: THREE.Vector3;
@@ -22,11 +23,9 @@ export interface SpellPoseDeps {
 }
 
 /**
- * Resolves the caster pose each frame from the camera. The flame base sits at a
+ * Resolves the caster pose each frame from the camera. The spell base sits at a
  * hand offset (forward + to the side + down) from the eye, and the jet travels
- * along the aim (look) direction — so the spell shoots forward from the hand and
- * follows where the player looks. Camera-relative, so it works in player and
- * orbit modes alike.
+ * along the aim (look) direction.
  */
 export function createSpellPoseResolver(deps: SpellPoseDeps): () => SpellPose {
   const { camera, vfx } = deps;
@@ -54,8 +53,7 @@ export function createSpellPoseResolver(deps: SpellPoseDeps): () => SpellPose {
 /**
  * Orientation for a beam-style billboard: local +Y (geometry base→tip) aligns
  * with `dir`, and the quad rolls around that axis so its face turns toward the
- * camera. Falls back to an arbitrary perpendicular when the camera sits exactly
- * on the jet axis (degenerate roll).
+ * camera.
  */
 export function orientFireJet(
   base: THREE.Vector3,
@@ -85,6 +83,7 @@ export interface SpellVfxControllerDeps {
   getPose: () => SpellPose;
   fire: SpellVfxMeshConfig;
   water: SpellVfxMeshConfig;
+  air: SpellVfxMeshConfig;
   /** Clock source; defaults to performance.now. Injectable for tests. */
   now?: () => number;
 }
@@ -92,6 +91,7 @@ export interface SpellVfxControllerDeps {
 export interface SpellVfxController {
   playFire: (durationMs: number) => void;
   playWater: (durationMs: number) => void;
+  playAir: (durationMs: number) => void;
   /** Drive active spells; call once per frame with a performance.now() timestamp. */
   update: (nowMs: number) => void;
   dispose: () => void;
@@ -117,11 +117,8 @@ export function computeSpellFrame(
 }
 
 /**
- * Owns the in-scene fire/water billboards. Each spell is a single beam-style
- * quad anchored at the caster's hand, its long axis along the aim direction so
- * the jet shoots forward, drawn only while a cast is active. Depth-tested so
- * terrain occludes it; depth-write off so the flame blends without
- * self-occlusion.
+ * Owns the in-scene spell billboards. Each spell is a single beam-style quad
+ * anchored at the caster's hand, its long axis along the aim direction.
  */
 export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfxController {
   const { scene, getCamera, getPose } = deps;
@@ -140,6 +137,8 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
 
   const fire = buildSpell("fire-spell", createFireNodeMaterial(), deps.fire);
   const water = buildSpell("water-spell", createWaterNodeMaterial(), deps.water);
+  const air = buildSpell("air-spell", createAirNodeMaterial(), deps.air);
+  const spells = [fire, water, air];
 
   const start = (spell: SpellState, durationMs: number): void => {
     spell.startMs = now();
@@ -168,12 +167,12 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
   return {
     playFire: (durationMs) => start(fire, durationMs),
     playWater: (durationMs) => start(water, durationMs),
+    playAir: (durationMs) => start(air, durationMs),
     update: (nowMs) => {
-      tick(fire, nowMs);
-      tick(water, nowMs);
+      for (const spell of spells) tick(spell, nowMs);
     },
     dispose: () => {
-      for (const spell of [fire, water]) {
+      for (const spell of spells) {
         scene.remove(spell.mesh);
         spell.mesh.geometry.dispose();
         spell.handle.material.dispose();
