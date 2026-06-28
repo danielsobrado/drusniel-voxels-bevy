@@ -26,11 +26,11 @@
     biomeId: 0
     debugColorRgb: [77, 97, 54]
     canopyDensity: 0.20
-    terrainTextureSlots: [grass-top, dirt, sand]
+    terrainTextureSlots: [sand, grass-top, rock]
     notes: Gentle island fields with light tree cover.
   defaultMaterialId: top-soil
   waterMaterialId: water
-  textureSlotSet: [grass-top, dirt, sand]
+  textureSlotSet: [sand, grass-top, rock]
   tags: [islands, starting, grassland, spatial-region]
   terrainBands:
     - id: meadows-shore
@@ -60,11 +60,11 @@
     biomeId: 1
     debugColorRgb: [46, 79, 36]
     canopyDensity: 1.00
-    terrainTextureSlots: [grass-top, dirt, rock]
+    terrainTextureSlots: [sand, grass-top, rock]
     notes: Dense green interior regions with strong canopy coverage.
   defaultMaterialId: top-soil
   waterMaterialId: water
-  textureSlotSet: [grass-top, dirt, rock]
+  textureSlotSet: [sand, grass-top, rock]
   tags: [islands, forest, spatial-region]
   terrainBands:
     - id: forest-low
@@ -94,11 +94,11 @@
     biomeId: 2
     debugColorRgb: [48, 71, 51]
     canopyDensity: 0.65
-    terrainTextureSlots: [dirt, sand, grass-top]
+    terrainTextureSlots: [dirt, grass-top, rock]
     notes: Low wetland regions near sea level and sheltered basins.
   defaultMaterialId: clay
   waterMaterialId: water
-  textureSlotSet: [dirt, sand, grass-top]
+  textureSlotSet: [dirt, grass-top, rock]
   tags: [islands, wetland, spatial-region]
   terrainBands:
     - id: swamp-muck
@@ -128,7 +128,7 @@
     biomeId: 3
     debugColorRgb: [107, 102, 92]
     canopyDensity: 0.00
-    terrainTextureSlots: [rock, snow, dirt]
+    terrainTextureSlots: [rock, rock, snow]
     notes: High elevation regions dominated by rock and snow slots.
   defaultMaterialId: rock
   waterMaterialId: water
@@ -162,11 +162,11 @@
     biomeId: 4
     debugColorRgb: [120, 110, 64]
     canopyDensity: 0.05
-    terrainTextureSlots: [grass-top, sand, rock]
+    terrainTextureSlots: [sand, grass-top, rock]
     notes: Open dry-grass island regions with sparse canopy.
   defaultMaterialId: top-soil
   waterMaterialId: water
-  textureSlotSet: [grass-top, sand, rock]
+  textureSlotSet: [sand, grass-top, rock]
   tags: [islands, dry-grassland, spatial-region]
   terrainBands:
     - id: plains-shore
@@ -196,7 +196,7 @@
     biomeId: 5
     debugColorRgb: [163, 140, 87]
     canopyDensity: 0.00
-    terrainTextureSlots: [sand, rock, grass-top]
+    terrainTextureSlots: [sand, sand, rock]
     notes: Shoreline transition region around islands.
   defaultMaterialId: sand
   waterMaterialId: water
