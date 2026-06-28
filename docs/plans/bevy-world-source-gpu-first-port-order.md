@@ -19,6 +19,7 @@ Already started:
 - `assets/config/world_source.yaml` exists.
 - `tools/clod-poc` now defaults NAADF far-shell height sampling to GPU.
 - `tools/clod-poc` now locks `BiomeRegionField.regionCellM` to the GPU contract value `420` because WGSL currently hardcodes `420.0`.
+- Bevy now locks `BiomeRegionField.region_cell_m` to the same GPU contract value and rejects CPU-only overrides.
 
 Not done yet:
 
@@ -42,7 +43,7 @@ Not done yet:
 
 3. **No silent CPU-only knobs.**
    - Do not expose config values on CPU that GPU ignores.
-   - Current example: `BiomeRegionField.regionCellM` must stay fixed to `420` until WGSL accepts it as a uniform.
+   - Current example: `BiomeRegionField.regionCellM`/`region_cell_m` must stay fixed to `420` until WGSL accepts it as a uniform.
 
 4. **Parity before visual richness.**
    - Do not tune Bevy visuals before the fixed-seed CPU/GPU parity tests pass.
@@ -51,6 +52,35 @@ Not done yet:
 5. **Fail loudly.**
    - Stubs must throw or return explicit errors.
    - No fake heights, fake biomes, fake ocean masks, or fake splat values.
+
+## Shared contract source of truth
+
+These values are canonical for the Bevy port until BVY-WS-06 moves them into one shared CPU/GPU uniform/config payload.
+
+| Contract value | Canonical value | clod-poc CPU | clod-poc GPU/WGSL | Bevy CPU/reference | Status |
+| --- | ---: | --- | --- | --- | --- |
+| Biome ids | Meadows=0, Forest=1, Swamp=2, Mountain=3, Plains=4, Coast=5, Ocean=6 | `tools/clod-poc/src/world_source/biome_region_field.ts` | `tools/clod-poc/src/gpu/shaders/biome_region_field.wgsl` | `src/world/source/biome_region_field.rs` | Frozen |
+| Biome region cell | `420m` | `BIOME_REGION_CELL_M` | hardcoded `420.0` | `BIOME_REGION_CELL_M` | Frozen until BVY-WS-06 |
+| Ocean height margin | `1.5m` | `BIOME_OCEAN_HEIGHT_MARGIN_M` | WGSL literal | `BIOME_OCEAN_HEIGHT_MARGIN_M` | Frozen |
+| Ocean island-mask max | `0.08` | `BIOME_OCEAN_ISLAND_MASK_MAX` | WGSL literal | `BIOME_OCEAN_ISLAND_MASK_MAX` | Frozen |
+| Coast height band | `4m` | `BIOME_COAST_HEIGHT_BAND_M` | WGSL literal | `BIOME_COAST_HEIGHT_BAND_M` | Frozen |
+| Coast shore distance | `42m` | `BIOME_COAST_SHORE_DISTANCE_M` | WGSL literal | `BIOME_COAST_SHORE_DISTANCE_M` | Frozen |
+| Mountain height above sea | `68m` | `BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M` | WGSL literal | `BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M` | Frozen |
+| Swamp height above sea | `8m` | `BIOME_SWAMP_HEIGHT_ABOVE_SEA_M` | WGSL literal | `BIOME_SWAMP_HEIGHT_ABOVE_SEA_M` | Frozen |
+| Swamp noise max | `0.42` | `BIOME_SWAMP_NOISE_MAX` | WGSL literal | `BIOME_SWAMP_NOISE_MAX` | Frozen |
+| Plains distance min | `0.72` | `BIOME_PLAINS_DISTANCE_MIN` | WGSL literal | `BIOME_PLAINS_DISTANCE_MIN` | Frozen |
+| Plains noise min | `0.58` | `BIOME_PLAINS_NOISE_MIN` | WGSL literal | `BIOME_PLAINS_NOISE_MIN` | Frozen |
+| Forest noise min | `0.46` | `BIOME_FOREST_NOISE_MIN` | WGSL literal | `BIOME_FOREST_NOISE_MIN` | Frozen |
+| Sea level | config-driven, default `18m` | `TerrainFieldConfig.seaLevel` | uniform/config dependent path | `TerrainFieldConfig.sea_level` | Config |
+| Island shape | config-driven | `IslandShapeConfig` | GPU parity shader path where present | `IslandShapeConfig` | Config |
+| Ocean rim | config-driven | `IslandShapeConfig.oceanRim` | GPU parity shader path where present | `IslandShapeConfig.ocean_rim` | Config |
+| Splat output | 4 layers + 4 normalized weights | `BiomeSplatSample` equivalent path | pending Bevy WGSL port | `BiomeSplatSample` | CPU contract until BVY-WS-07 |
+
+### Current source-of-truth policy
+
+- If a value appears in WGSL today, CPU must match it exactly.
+- If a value is not yet wired to WGSL, it must not be exposed as a runtime tuning knob for only CPU.
+- Bevy may keep CPU reference code, but runtime default must move to GPU after BVY-WS-09 passes.
 
 ---
 
@@ -68,10 +98,10 @@ Define the canonical shared contract for Bevy and clod-poc world sampling. This 
 
 ### Acceptance criteria
 
-- [ ] `docs/plans/bevy-world-source-gpu-first-port-order.md` lists all shared constants and their source of truth.
-- [ ] `BiomeRegionField.regionCellM` remains locked to `420` until WGSL uniformization lands.
-- [ ] No Bevy config exposes CPU-only values that the GPU path ignores.
-- [ ] Any source stub fails loudly instead of returning fake data.
+- [x] `docs/plans/bevy-world-source-gpu-first-port-order.md` lists all shared constants and their source of truth.
+- [x] `BiomeRegionField.regionCellM` remains locked to `420` until WGSL uniformization lands.
+- [x] No Bevy config exposes CPU-only values that the GPU path ignores.
+- [x] Any source stub fails loudly instead of returning fake data.
 
 ### AI execution prompt
 
