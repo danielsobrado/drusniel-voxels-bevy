@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { PlayerController } from "../player_controller.js";
+import type { TerrainColliderSet } from "../terrain/terrain_collider.js";
 
 export interface FloatingOriginConfig {
   enabled: boolean;
@@ -22,6 +23,7 @@ export interface FloatingOriginRebaseTarget {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   player: PlayerController;
+  terrainColliders?: TerrainColliderSet;
   frameIndex: number;
 }
 
@@ -124,6 +126,7 @@ export class FloatingOriginController {
     target.player.position.z += shiftZ;
     target.player.lastSafePosition.x += shiftX;
     target.player.lastSafePosition.z += shiftZ;
+    target.terrainColliders?.translateHorizontal(shiftX, shiftZ);
   }
 
   private syncWorldCamera(renderCamera: THREE.PerspectiveCamera): void {
