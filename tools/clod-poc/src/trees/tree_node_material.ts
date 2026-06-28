@@ -49,6 +49,7 @@ const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 // atlas roughly every 1.25 m on a trunk.
 const BARK_TILE_SCALE = 0.8;
 const BARK_RESOLUTION = 256;
+const TREE_VARIANT_HASH_SALT = 1103;
 
 // One furrowed-bark atlas, baked once and shared across every tree material handle
 // (the CPU InstancedMesh path plus the four per-LOD ring handles), keyed by seed.
@@ -178,6 +179,7 @@ export function createTreeNodeMaterialHandle(
   const uForestShadowStrength = uniform(1);
   const uForestFogStrength = uniform(1);
   const uForestFogColor = uniform(new THREE.Vector3(0.72, 0.78, 0.81));
+  const uVariantSeed = uniform(settings.seed);
 
   const forestMapNodes: TslNode[] = [];
   const materials: MeshBasicNodeMaterial[] = [];
@@ -188,10 +190,12 @@ export function createTreeNodeMaterialHandle(
   const buildMaterial = (albedoFactory: (vertexColor: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
+    const aVariant: TslNode = attribute("treeVariant", "float");
     const aWind: TslNode = attribute("treeWind", "vec2");
     const aWindWeight: TslNode = aWind.x;
     const aFlutterWeight: TslNode = aWind.y;
     const aWorldXZ: TslNode = attribute("treeWorldXZ", "vec2");
+    const variantKeep: TslNode = treeVariantKeep(aVariant, aWorldXZ, uVariantSeed);
 
     const forestUv: TslNode = clamp(aWorldXZ.div(uForestWorldSize), vec2(0), vec2(1));
     const forestPacked: TslNode = texture(neutralForestTexture, forestUv);
@@ -217,8 +221,8 @@ export function createTreeNodeMaterialHandle(
     const flutter: TslNode = sin(t.mul(7.0).add(phase.mul(19.19)).add(positionGeometry.y.mul(2.3)))
       .mul(wind.uWindStrength).mul(wind.uLeafFlutter).mul(aFlutterWeight);
     const disp: TslNode = sway.add(flutter);
-    const positionNode: TslNode = positionGeometry.add(
-      vec3(wind.uWindDir.x.mul(disp), float(0), wind.uWindDir.y.mul(disp)),
+    const positionNode: TslNode = positionGeometry.mul(variantKeep).add(
+      vec3(wind.uWindDir.x.mul(disp), float(0), wind.uWindDir.y.mul(disp)).mul(variantKeep),
     );
 
     // Double-sided hemispheric + sun lighting (same model as grass/stones).
@@ -280,6 +284,7 @@ export function createTreeNodeMaterialHandle(
     },
     updateSettings(next: TreeSettings) {
       applyWindUniforms(wind, next);
+      uVariantSeed.value = next.seed;
       for (const material of materials) {
         material.alphaTest = 0;
         material.transparent = false;
@@ -350,6 +355,7 @@ export function createTreeRingNodeMaterialHandle(
   const buildMaterial = (albedoFactory: (vertexColor: TslNode, tint: TslNode) => TslNode, withBark: boolean): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
     const aFoliageMask: TslNode = attribute("treeFoliageMask", "float");
+    const aVariant: TslNode = attribute("treeVariant", "float");
     const aWind: TslNode = attribute("treeWind", "vec2");
     const aWindWeight: TslNode = aWind.x;
     const aFlutterWeight: TslNode = aWind.y;
@@ -364,6 +370,7 @@ export function createTreeRingNodeMaterialHandle(
     const aScale: TslNode = max(aCell.w, float(0.001));
     const aYaw: TslNode = treeRingHash(worldCell, uSeed, 701).mul(6.28318530718);
     const aTint: TslNode = treeRingHash(worldCell, uSeed, 1901);
+    const variantKeep: TslNode = treeVariantKeep(aVariant, aWorldXZ, uSeed);
 
     const foliageAlbedo: TslNode = albedoFactory(aColor, aTint);
     const albedo: TslNode = withBark
@@ -380,8 +387,8 @@ export function createTreeRingNodeMaterialHandle(
     const flutter: TslNode = sin(t.mul(7.0).add(phase.mul(19.19)).add(positionGeometry.y.mul(2.3)))
       .mul(wind.uWindStrength).mul(wind.uLeafFlutter).mul(aFlutterWeight).mul(aScale);
     const disp: TslNode = sway.add(flutter);
-    const localPosition: TslNode = positionGeometry.mul(aScale).add(
-      vec3(wind.uWindDir.x.mul(disp), float(0), wind.uWindDir.y.mul(disp)),
+    const localPosition: TslNode = positionGeometry.mul(aScale).mul(variantKeep).add(
+      vec3(wind.uWindDir.x.mul(disp), float(0), wind.uWindDir.y.mul(disp)).mul(variantKeep),
     );
 
     const c: TslNode = cos(aYaw);
@@ -490,6 +497,27 @@ function treeRingHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode 
   return fract(
     sin(dot(cell.add(vec2(seed.add(salt), seed.mul(0.37).add(salt.mul(1.17)))), vec2(41.3, 289.1))).mul(43758.5453),
   );
+}
+
+function treeVariantPhase(worldXZ: TslNode, seed: TslNode): TslNode {
+  return fract(
+    sin(dot(
+      worldXZ.add(vec2(seed.mul(0.013).add(TREE_VARIANT_HASH_SALT), seed.mul(0.037).sub(TREE_VARIANT_HASH_SALT))),
+      vec2(127.1, 311.7),
+    )).mul(43758.5453123),
+  );
+}
+
+function treeVariantKeep(aVariant: TslNode, worldXZ: TslNode, seed: TslNode): TslNode {
+  const phase = treeVariantPhase(worldXZ, seed);
+  const v0 = phase.lessThan(0.25).and(aVariant.lessThan(0.5));
+  const v1 = phase.greaterThanEqual(0.25).and(phase.lessThan(0.5))
+    .and(aVariant.greaterThanEqual(0.5)).and(aVariant.lessThan(1.5));
+  const v2 = phase.greaterThanEqual(0.5).and(phase.lessThan(0.75))
+    .and(aVariant.greaterThanEqual(1.5)).and(aVariant.lessThan(2.5));
+  const v3 = phase.greaterThanEqual(0.75)
+    .and(aVariant.greaterThanEqual(2.5)).and(aVariant.lessThan(3.5));
+  return v0.or(v1).or(v2).or(v3).select(float(1), float(0));
 }
 
 function treeRingLodMask(
