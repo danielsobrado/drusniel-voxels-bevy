@@ -1,20 +1,9 @@
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
+use super::biome_region_contract::{BiomeRegionContract, BIOME_REGION_CELL_M, BIOME_REGION_CONTRACT};
 use super::island_shape::{sample_island_mask, IslandMaskSample, IslandShapeConfig};
 use super::noise::smooth01;
-
-pub const BIOME_REGION_CELL_M: f32 = 420.0;
-pub const BIOME_OCEAN_HEIGHT_MARGIN_M: f32 = 1.5;
-pub const BIOME_OCEAN_ISLAND_MASK_MAX: f32 = 0.08;
-pub const BIOME_COAST_HEIGHT_BAND_M: f32 = 4.0;
-pub const BIOME_COAST_SHORE_DISTANCE_M: f32 = 42.0;
-pub const BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M: f32 = 68.0;
-pub const BIOME_SWAMP_HEIGHT_ABOVE_SEA_M: f32 = 8.0;
-pub const BIOME_SWAMP_NOISE_MAX: f32 = 0.42;
-pub const BIOME_PLAINS_DISTANCE_MIN: f32 = 0.72;
-pub const BIOME_PLAINS_NOISE_MIN: f32 = 0.58;
-pub const BIOME_FOREST_NOISE_MIN: f32 = 0.46;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
@@ -41,6 +30,7 @@ pub struct BiomeRegionField {
     pub sea_level: f32,
     pub region_cell_m: f32,
     pub island_shape: IslandShapeConfig,
+    pub contract: BiomeRegionContract,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -53,6 +43,7 @@ pub struct BiomeRegionClassifyInput {
     pub region_cell_m: f32,
     pub island_radius_m: f32,
     pub island: IslandMaskSample,
+    pub contract: BiomeRegionContract,
 }
 
 impl BiomeId {
@@ -68,11 +59,18 @@ impl BiomeRegionField {
             sea_level,
             region_cell_m: BIOME_REGION_CELL_M,
             island_shape,
+            contract: BIOME_REGION_CONTRACT,
         }
     }
 
     pub fn with_region_cell_m(mut self, region_cell_m: f32) -> Self {
-        self.region_cell_m = resolve_region_cell_m(region_cell_m);
+        self.region_cell_m = resolve_region_cell_m(region_cell_m, self.contract);
+        self
+    }
+
+    pub fn with_contract(mut self, contract: BiomeRegionContract) -> Self {
+        self.contract = contract;
+        self.region_cell_m = resolve_region_cell_m(contract.region_cell_m, contract);
         self
     }
 
@@ -87,6 +85,7 @@ impl BiomeRegionField {
             region_cell_m: self.region_cell_m,
             island_radius_m: self.island_shape.radius_m.max(1.0),
             island,
+            contract: self.contract,
         })
     }
 }
@@ -97,16 +96,17 @@ impl Default for BiomeRegionField {
     }
 }
 
-fn resolve_region_cell_m(region_cell_m: f32) -> f32 {
+fn resolve_region_cell_m(region_cell_m: f32, contract: BiomeRegionContract) -> f32 {
     if !region_cell_m.is_finite() {
-        return BIOME_REGION_CELL_M;
+        return contract.region_cell_m;
     }
-    if (region_cell_m - BIOME_REGION_CELL_M).abs() > f32::EPSILON {
+    if (region_cell_m - contract.region_cell_m).abs() > f32::EPSILON {
         panic!(
-            "BiomeRegionField region_cell_m must be {BIOME_REGION_CELL_M} to match the GPU shader; got {region_cell_m}"
+            "BiomeRegionField region_cell_m must be {} to match the shared GPU contract; got {}",
+            contract.region_cell_m, region_cell_m,
         );
     }
-    BIOME_REGION_CELL_M
+    contract.region_cell_m
 }
 
 fn mix32(value: u32) -> u32 {
@@ -126,8 +126,8 @@ pub fn pcg2d(x: i32, z: i32, seed: i32) -> f32 {
     mix32(value) as f32 / 4_294_967_296.0
 }
 
-pub fn biome_region_noise(x: f32, z: f32, cell_m: f32, seed: i32) -> f32 {
-    let cell_m = resolve_region_cell_m(cell_m);
+pub fn biome_region_noise(x: f32, z: f32, cell_m: f32, seed: i32, contract: BiomeRegionContract) -> f32 {
+    let cell_m = resolve_region_cell_m(cell_m, contract);
     let gx = x / cell_m;
     let gz = z / cell_m;
     let x0 = gx.floor() as i32;
@@ -142,8 +142,8 @@ pub fn biome_region_noise(x: f32, z: f32, cell_m: f32, seed: i32) -> f32 {
 }
 
 pub fn classify_biome_region(input: BiomeRegionClassifyInput) -> BiomeRegionSample {
-    if input.height < input.sea_level - BIOME_OCEAN_HEIGHT_MARGIN_M
-        || input.island.mask < BIOME_OCEAN_ISLAND_MASK_MAX
+    if input.height < input.sea_level - input.contract.ocean_height_margin_m
+        || input.island.mask < input.contract.ocean_island_mask_max
     {
         return BiomeRegionSample {
             biome: BiomeId::Ocean,
@@ -151,8 +151,8 @@ pub fn classify_biome_region(input: BiomeRegionClassifyInput) -> BiomeRegionSamp
             island_distance_t: 0.0,
         };
     }
-    if (input.height - input.sea_level).abs() < BIOME_COAST_HEIGHT_BAND_M
-        || input.island.shore_distance_m < BIOME_COAST_SHORE_DISTANCE_M
+    if (input.height - input.sea_level).abs() < input.contract.coast_height_band_m
+        || input.island.shore_distance_m < input.contract.coast_shore_distance_m
     {
         return BiomeRegionSample {
             biome: BiomeId::Coast,
@@ -166,20 +166,21 @@ pub fn classify_biome_region(input: BiomeRegionClassifyInput) -> BiomeRegionSamp
         input.z,
         input.region_cell_m,
         input.seed.wrapping_add(711),
+        input.contract,
     );
     let center_distance = (input.x - input.island.nearest_center_x)
         .hypot(input.z - input.island.nearest_center_z);
     let distance_t = (center_distance / input.island_radius_m.max(1.0)).clamp(0.0, 1.0);
 
-    let biome = if input.height >= input.sea_level + BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M {
+    let biome = if input.height >= input.sea_level + input.contract.mountain_height_above_sea_m {
         BiomeId::Mountain
-    } else if input.height <= input.sea_level + BIOME_SWAMP_HEIGHT_ABOVE_SEA_M
-        && n < BIOME_SWAMP_NOISE_MAX
+    } else if input.height <= input.sea_level + input.contract.swamp_height_above_sea_m
+        && n < input.contract.swamp_noise_max
     {
         BiomeId::Swamp
-    } else if distance_t > BIOME_PLAINS_DISTANCE_MIN && n > BIOME_PLAINS_NOISE_MIN {
+    } else if distance_t > input.contract.plains_distance_min && n > input.contract.plains_noise_min {
         BiomeId::Plains
-    } else if n > BIOME_FOREST_NOISE_MIN {
+    } else if n > input.contract.forest_noise_min {
         BiomeId::Forest
     } else {
         BiomeId::Meadows
@@ -212,6 +213,7 @@ mod tests {
                 nearest_center_z: 0.0,
                 cliff_weight: 0.0,
             },
+            contract: BIOME_REGION_CONTRACT,
         }
     }
 
@@ -234,6 +236,19 @@ mod tests {
     }
 
     #[test]
+    fn contract_controls_classification_thresholds() {
+        let default_input = land_input(90.0, 0.0);
+        let mut overridden_input = default_input;
+        overridden_input.contract = BiomeRegionContract {
+            mountain_height_above_sea_m: 120.0,
+            ..BIOME_REGION_CONTRACT
+        };
+
+        assert_eq!(classify_biome_region(default_input).biome, BiomeId::Mountain);
+        assert_ne!(classify_biome_region(overridden_input).biome, BiomeId::Mountain);
+    }
+
+    #[test]
     fn field_sampling_is_deterministic() {
         let field = BiomeRegionField::default();
         let a = field.sample(512.0, -128.0, 72.0);
@@ -242,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "match the GPU shader")]
+    #[should_panic(expected = "shared GPU contract")]
     fn region_cell_m_rejects_cpu_only_values() {
         let _ = BiomeRegionField::default().with_region_cell_m(BIOME_REGION_CELL_M + 1.0);
     }
