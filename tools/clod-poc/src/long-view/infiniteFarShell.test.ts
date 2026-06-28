@@ -76,6 +76,22 @@ describe("infinite far shell — camera-relative annular geometry", () => {
     shell.dispose();
   });
 
+  it("renders shell relative to floating-origin offset while sampling world center", () => {
+    const metrics = createFarShellMetrics();
+    const shell = new InfiniteFarShell({ ...makeDefaultOptions(), metrics });
+
+    shell.setRenderOriginOffset(8192, -2048);
+    shell.update(10000, -2000, 0);
+
+    expect(metrics.farShellCenterX).toBe(10000);
+    expect(metrics.farShellCenterZ).toBe(-2000);
+    expect(metrics.farShellSnappedX).toBe(10000);
+    expect(metrics.farShellSnappedZ).toBe(-2000);
+    expect(shell.mesh.position.x).toBe(1808);
+    expect(shell.mesh.position.z).toBe(48);
+    shell.dispose();
+  });
+
   it("shell does not rebuild every frame within snap threshold", () => {
     const metrics = createFarShellMetrics();
     const shell = new InfiniteFarShell({ ...makeDefaultOptions(), metrics, rebaseSnapMeters: 100 });
