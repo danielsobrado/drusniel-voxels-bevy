@@ -24,6 +24,15 @@ export interface AudioConfig {
   events: Record<AudioEventId, EventAudioConfig>;
 }
 
+const AIR_SPELL_AUDIO_FALLBACK: EventAudioConfig = {
+  enabled: true,
+  volume: 0.28,
+  cooldown_ms: 160,
+  synth: "smooth",
+  pitch: 920,
+  duration_ms: 1800,
+};
+
 export function parseAudioConfig(text: string): AudioConfig {
   const parsed = load(text) as any;
   if (!parsed || typeof parsed !== "object") {
@@ -35,6 +44,8 @@ export function parseAudioConfig(text: string): AudioConfig {
   if (!parsed.events || typeof parsed.events !== "object") {
     throw new Error("Missing events audio configuration");
   }
+
+  parsed.events["spell.air.cast"] ??= AIR_SPELL_AUDIO_FALLBACK;
 
   // Validate each registered event has a well-formed entry
   const requiredFields: Array<[keyof EventAudioConfig, string]> = [
