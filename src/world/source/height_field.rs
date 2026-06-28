@@ -218,7 +218,16 @@ pub fn base_surface_height(x: f32, z: f32, field: &TerrainFieldConfig) -> f32 {
         * TERRAIN.hills.amplitude
         * 0.45;
     let detail_noise = fbm_configurable(x, z, TERRAIN.detail, seed.wrapping_add(607)) * 0.65
-        + domain_fbm_configurable(x, z, TERRAIN.detail, seed.wrapping_add(701)) * 0.35;
+        + domain_fbm_custom(
+            x,
+            z,
+            TERRAIN.detail.scale * 0.8,
+            2,
+            0.5,
+            2.0,
+            TERRAIN.detail.warp_strength,
+            seed.wrapping_add(701),
+        ) * 0.35;
     let detail = detail_noise * TERRAIN.detail.amplitude;
 
     let min_surface = TERRAIN.min_height.max(min_normal_surface_y);
