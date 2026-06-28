@@ -6,6 +6,7 @@ import {
   cloneTreeSettings,
   DEFAULT_TREE_IMPOSTOR_SETTINGS,
   DEFAULT_TREE_SETTINGS,
+  createTreeImpostorBlendMaterial,
   createTreeImpostorMaterial,
   octDecode,
   octEncode,
@@ -13,6 +14,8 @@ import {
   octFrameIndexForDirection,
   octFrames,
   parseTreeConfig,
+  TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER,
+  TREE_IMPOSTOR_BLEND_VERTEX_SHADER,
   TREE_IMPOSTOR_FRAGMENT_SHADER,
   TREE_IMPOSTOR_VERTEX_SHADER,
   TreeSystem,
@@ -151,6 +154,25 @@ describe("tree impostor material", () => {
       expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("normalDepthMap");
       expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("treeImpostorRelight");
       expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("discard");
+    } finally {
+      material.dispose();
+    }
+  });
+
+  it("adds an opt-in four-sample blend shader contract", () => {
+    const atlas = fakeAtlas("oak");
+    const material = createTreeImpostorBlendMaterial(settings, atlas);
+    try {
+      expect(material.side).toBe(THREE.DoubleSide);
+      expect(material.uniforms.normalDepthMap.value).toBe(atlas.normalDepth);
+      expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("treeImpostorUvRect0");
+      expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("treeImpostorUvRect3");
+      expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("treeImpostorBlendWeights");
+      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("vTreeImpostorBlendWeights");
+      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("texture2D(map, vTreeImpostorUv0)");
+      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("texture2D(map, vTreeImpostorUv3)");
+      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("normalDepthMap");
+      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorRelight");
     } finally {
       material.dispose();
     }
