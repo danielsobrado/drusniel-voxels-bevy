@@ -19,21 +19,23 @@ Done:
 - clod-poc has `tools/clod-poc/fixtures/world_source_golden_samples.json` with 70 samples, 10 per biome.
 - Bevy has Rust fixture parity tests in `src/world/source/golden_fixture_tests.rs`.
 - Bevy has `assets/config/terrain_source.yaml` with `gpu_world_source` as the target default.
-- Bevy chunk generation now selects legacy or WorldSource bridge through terrain-source config.
+- Bevy chunk generation selects legacy or WorldSource bridge through terrain-source config.
 - Bevy has `assets/shaders/world_source/biome_splat.wgsl` with GPU splat sampling and triplanar-weight conversion.
 - Bevy Rust `BiomeSplatSample` has `triplanar_weights()` parity helpers and tests against the WGSL material-layer IDs.
 - Bevy triplanar terrain shader imports `world_source/biome_splat.wgsl` and calls `biome_splat_resolve_triplanar_weights()` under `TERRAIN_GPU_BIOME_SPLAT`.
-- Surface Nets terrain encodes a compatibility biome id in `uv0.y`; `uv0.x` remains baked AO.
+- Surface Nets terrain encodes biome id in `uv0.y`; `uv0.x` remains baked AO.
+- Bevy mesh biome channel now resolves biome id from true WorldSource material tags, then active `ProceduralWorldSource`, then the named legacy compatibility adapter.
 - Bevy now has `BiomeContentTable` covering Meadows, Forest, Swamp, Mountain, Plains, Coast, and Ocean.
 - WorldSource terrain generation uses `BiomeContentTable` instead of bridge-local material rules.
 - Bevy now has `WorldSourceDriftGateReport` with explicit `passed`, `failed`, and `skipped` states for CPU/GPU drift checks.
 - Bevy now has `TerrainSourceStartupReport` and config-bound startup diagnostics for active terrain source mode.
 - Bevy now has `world_source_acceptance`, a release-oriented acceptance bench that writes `bench-runs/<run>/summary.json`.
+- `src/voxel/runtime/generation.rs` was restored to the full runtime module after an accidental truncation.
 
 Not done yet:
 
-- Bevy renderer/material path currently receives a compatibility biome id inferred from legacy four-channel material weights; true WorldSource biome IDs should replace it before visual parity is claimed.
 - GPU readback producer is not implemented yet; until it is available, the drift gate reports `skipped`, not `passed`.
+- MC/Transvoxel remains a legacy/fallback mesh path and is not a blocker for the CLOD/WorldSource default path.
 - Legacy bridge removal is still pending final visual parity and accepted bench thresholds.
 
 ## Shared contract source of truth
@@ -57,6 +59,8 @@ Not done yet:
 | Ocean rim | config | config | GPU parity path | config | Config |
 | Splat output | dominant layer plus weights | `sampleBiomeSplat` | pending Bevy WGSL | `BiomeSplatSample` + `biome_splat.wgsl` | GPU path wired |
 | Voxel biome content | seven-biome table | compatibility | n/a | `BiomeContentTable` | Shared Bevy content |
+| Mesh biome channel | seven-biome id in `uv0.y` | n/a | triplanar shader | material tag / active WorldSource / compatibility fallback | CLOD path wired |
+| MC/Transvoxel | legacy/fallback only | n/a | n/a | not blocking CLOD path | Legacy |
 | Drift gate status | pass/fail/skip | n/a | readback input | `WorldSourceDriftGateReport` | Explicit status |
 | Terrain source runtime path | GPU default / CPU reference / legacy | n/a | n/a | `TerrainSourceStartupReport` | Explicit status |
 | Acceptance summary | `bench-runs/<run>/summary.json` | n/a | n/a | `world_source_acceptance` | Explicit report |
@@ -163,8 +167,9 @@ Acceptance:
 
 Notes:
 
-- The current Bevy mesh biome channel is a compatibility bridge inferred from the legacy four material weights.
-- BVY-WS-09 should add a drift gate before this is treated as visual parity.
+- The active CLOD/WorldSource path resolves biome id from true material tags or active `ProceduralWorldSource` before using the legacy compatibility adapter.
+- MC/Transvoxel is legacy/fallback for this port and does not block GPU biome/splat parity.
+- BVY-WS-09 should add a real GPU-readback producer before this is treated as full runtime visual parity.
 
 ### BVY-WS-08 — Expand Bevy biome/content tables to seven biome IDs
 
@@ -258,8 +263,9 @@ Bevy:
 ```powershell
 cargo test --bin world_source_acceptance
 cargo test world::source
+cargo test voxel::meshing::biome_channel
+cargo test voxel::runtime::world_source_generation
 cargo test
-cargo run --release --bin world_source_acceptance
 ```
 
 Bevy bench after BVY-WS-11:
