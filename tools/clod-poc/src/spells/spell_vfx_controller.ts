@@ -9,6 +9,9 @@ export interface SpellVfxMeshConfig {
   worldWidth: number;
   worldHeight: number;
   flameScale: number;
+  handForwardM: number;
+  handRightM: number;
+  handUpM: number;
 }
 
 /** Caster pose: the spell base (hand) and the direction the jet travels. */
@@ -18,36 +21,48 @@ export interface SpellPose {
 }
 
 export interface SpellPoseDeps {
-  camera: THREE.PerspectiveCamera;
-  vfx: FireSpellVfxConfig;
+  camera: THREE.Camera;
+  vfx: Pick<FireSpellVfxConfig, "handForwardM" | "handRightM" | "handUpM">;
 }
 
-/**
- * Resolves the caster pose each frame from the camera. The spell base sits at a
- * hand offset (forward + to the side + down) from the eye, and the jet travels
- * along the aim (look) direction.
- */
-export function createSpellPoseResolver(deps: SpellPoseDeps): () => SpellPose {
-  const { camera, vfx } = deps;
-  const worldUp = new THREE.Vector3(0, 1, 0);
-  const aim = new THREE.Vector3();
-  const right = new THREE.Vector3();
-  const camUp = new THREE.Vector3();
-  const base = new THREE.Vector3();
-  const dir = new THREE.Vector3();
-  return () => {
-    camera.getWorldDirection(aim).normalize();
-    right.crossVectors(aim, worldUp);
-    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
-    else right.normalize();
-    camUp.crossVectors(right, aim).normalize();
-    base.copy(camera.position)
-      .addScaledVector(aim, vfx.handForwardM)
-      .addScaledVector(right, vfx.handRightM)
-      .addScaledVector(camUp, vfx.handUpM);
-    dir.copy(aim);
-    return { base, dir };
+interface SpellPoseScratch {
+  worldUp: THREE.Vector3;
+  aim: THREE.Vector3;
+  right: THREE.Vector3;
+  camUp: THREE.Vector3;
+  base: THREE.Vector3;
+  dir: THREE.Vector3;
+}
+
+function createPoseScratch(): SpellPoseScratch {
+  return {
+    worldUp: new THREE.Vector3(0, 1, 0),
+    aim: new THREE.Vector3(),
+    right: new THREE.Vector3(),
+    camUp: new THREE.Vector3(),
+    base: new THREE.Vector3(),
+    dir: new THREE.Vector3(),
   };
+}
+
+export function resolveSpellPose(camera: THREE.Camera, vfx: SpellPoseDeps["vfx"], scratch = createPoseScratch()): SpellPose {
+  camera.getWorldDirection(scratch.aim).normalize();
+  scratch.right.crossVectors(scratch.aim, scratch.worldUp);
+  if (scratch.right.lengthSq() < 1e-6) scratch.right.set(1, 0, 0);
+  else scratch.right.normalize();
+  scratch.camUp.crossVectors(scratch.right, scratch.aim).normalize();
+  scratch.base.copy(camera.position)
+    .addScaledVector(scratch.aim, vfx.handForwardM)
+    .addScaledVector(scratch.right, vfx.handRightM)
+    .addScaledVector(scratch.camUp, vfx.handUpM);
+  scratch.dir.copy(scratch.aim);
+  return { base: scratch.base, dir: scratch.dir };
+}
+
+/** Resolves the caster pose each frame from the camera and spell hand offset. */
+export function createSpellPoseResolver(deps: SpellPoseDeps): () => SpellPose {
+  const scratch = createPoseScratch();
+  return () => resolveSpellPose(deps.camera, deps.vfx, scratch);
 }
 
 /**
@@ -77,10 +92,8 @@ export function orientFireJet(
 
 export interface SpellVfxControllerDeps {
   scene: THREE.Scene;
-  /** Active render camera (read each frame for billboarding). */
+  /** Active render camera (read each frame for billboarding and pose). */
   getCamera: () => THREE.Camera;
-  /** Caster pose (hand position + jet direction), re-resolved each frame. */
-  getPose: () => SpellPose;
   fire: SpellVfxMeshConfig;
   water: SpellVfxMeshConfig;
   air: SpellVfxMeshConfig;
@@ -100,6 +113,8 @@ export interface SpellVfxController {
 interface SpellState {
   mesh: THREE.Mesh;
   handle: SpellNodeMaterialHandle;
+  config: SpellVfxMeshConfig;
+  poseScratch: SpellPoseScratch;
   startMs: number;
   durationMs: number;
   active: boolean;
@@ -118,21 +133,21 @@ export function computeSpellFrame(
 
 /**
  * Owns the in-scene spell billboards. Each spell is a single beam-style quad
- * anchored at the caster's hand, its long axis along the aim direction.
+ * anchored at that spell's configured hand offset, aimed along the camera.
  */
 export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfxController {
-  const { scene, getCamera, getPose } = deps;
+  const { scene, getCamera } = deps;
   const now = deps.now ?? (() => performance.now());
 
-  const buildSpell = (name: string, handle: SpellNodeMaterialHandle, cfg: SpellVfxMeshConfig): SpellState => {
-    const geometry = createPropBillboardGeometry(cfg.worldWidth * cfg.flameScale, cfg.worldHeight * cfg.flameScale);
+  const buildSpell = (name: string, handle: SpellNodeMaterialHandle, config: SpellVfxMeshConfig): SpellState => {
+    const geometry = createPropBillboardGeometry(config.worldWidth * config.flameScale, config.worldHeight * config.flameScale);
     const mesh = new THREE.Mesh(geometry, handle.material);
     mesh.name = name;
     mesh.frustumCulled = false;
     mesh.renderOrder = 4000;
     mesh.visible = false;
     scene.add(mesh);
-    return { mesh, handle, startMs: 0, durationMs: 0, active: false };
+    return { mesh, handle, config, poseScratch: createPoseScratch(), startMs: 0, durationMs: 0, active: false };
   };
 
   const fire = buildSpell("fire-spell", createFireNodeMaterial(), deps.fire);
@@ -159,9 +174,10 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     }
     spell.handle.uTime.value = frame.timeSeconds;
     spell.handle.uProgress.value = frame.progress;
-    const pose = getPose();
+    const camera = getCamera();
+    const pose = resolveSpellPose(camera, spell.config, spell.poseScratch);
     spell.mesh.position.copy(pose.base);
-    orientFireJet(pose.base, pose.dir, getCamera().position, spell.mesh.quaternion);
+    orientFireJet(pose.base, pose.dir, camera.position, spell.mesh.quaternion);
   };
 
   return {
