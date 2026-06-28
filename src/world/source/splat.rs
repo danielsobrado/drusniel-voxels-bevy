@@ -41,6 +41,37 @@ impl BiomeSplatSample {
         }
         self
     }
+
+    pub fn triplanar_weights(self) -> [f32; 4] {
+        let mut weights = [0.0; 4];
+        for (layer, weight) in self.layers.into_iter().zip(self.weights) {
+            let index = layer.triplanar_weight_index();
+            weights[index] += weight;
+        }
+        normalize_weights4(weights)
+    }
+}
+
+impl MaterialLayerId {
+    pub fn triplanar_weight_index(self) -> usize {
+        match self {
+            MaterialLayerId::Rock => 1,
+            MaterialLayerId::Sand | MaterialLayerId::OceanBed => 2,
+            MaterialLayerId::Mud => 3,
+            MaterialLayerId::Grass | MaterialLayerId::ForestFloor | MaterialLayerId::DryGrass => 0,
+        }
+    }
+}
+
+fn normalize_weights4(mut weights: [f32; 4]) -> [f32; 4] {
+    let sum: f32 = weights.iter().sum();
+    if sum <= f32::EPSILON {
+        return [1.0, 0.0, 0.0, 0.0];
+    }
+    for weight in &mut weights {
+        *weight = (*weight / sum).clamp(0.0, 1.0);
+    }
+    weights
 }
 
 pub fn sample_biome_splat(biome: BiomeId, height: f32, sea_level: f32, slope: f32) -> BiomeSplatSample {
@@ -83,9 +114,10 @@ pub fn sample_biome_splat(biome: BiomeId, height: f32, sea_level: f32, slope: f3
 mod tests {
     use super::*;
 
-    #[test]
-    fn weights_are_normalized() {
-        for biome in [
+    const WGSL: &str = include_str!("../../../assets/shaders/world_source/biome_splat.wgsl");
+
+    fn all_biomes() -> [BiomeId; 7] {
+        [
             BiomeId::Ocean,
             BiomeId::Coast,
             BiomeId::Meadows,
@@ -93,7 +125,12 @@ mod tests {
             BiomeId::Swamp,
             BiomeId::Mountain,
             BiomeId::Plains,
-        ] {
+        ]
+    }
+
+    #[test]
+    fn weights_are_normalized() {
+        for biome in all_biomes() {
             let sample = sample_biome_splat(biome, 32.0, 18.0, 0.7);
             let sum: f32 = sample.weights.iter().sum();
             assert!((sum - 1.0).abs() < 0.0001, "{biome:?} weights sum to {sum}");
@@ -105,5 +142,36 @@ mod tests {
         assert_eq!(sample_biome_splat(BiomeId::Ocean, 10.0, 18.0, 0.1).dominant_layer(), MaterialLayerId::OceanBed);
         assert_eq!(sample_biome_splat(BiomeId::Coast, 18.0, 18.0, 0.1).dominant_layer(), MaterialLayerId::Sand);
         assert_eq!(sample_biome_splat(BiomeId::Mountain, 100.0, 18.0, 0.8).dominant_layer(), MaterialLayerId::Rock);
+    }
+
+    #[test]
+    fn triplanar_weights_are_normalized() {
+        for biome in all_biomes() {
+            let sample = sample_biome_splat(biome, 32.0, 18.0, 0.7);
+            let sum: f32 = sample.triplanar_weights().iter().sum();
+            assert!((sum - 1.0).abs() < 0.0001, "{biome:?} triplanar weights sum to {sum}");
+        }
+    }
+
+    #[test]
+    fn rust_material_layer_ids_match_wgsl() {
+        for (name, id) in [
+            ("MATERIAL_GRASS", MaterialLayerId::Grass as u32),
+            ("MATERIAL_FOREST_FLOOR", MaterialLayerId::ForestFloor as u32),
+            ("MATERIAL_MUD", MaterialLayerId::Mud as u32),
+            ("MATERIAL_ROCK", MaterialLayerId::Rock as u32),
+            ("MATERIAL_DRY_GRASS", MaterialLayerId::DryGrass as u32),
+            ("MATERIAL_SAND", MaterialLayerId::Sand as u32),
+            ("MATERIAL_OCEAN_BED", MaterialLayerId::OceanBed as u32),
+        ] {
+            assert!(WGSL.contains(&format!("const {name} : u32 = {id}u;")), "missing WGSL constant {name}={id}");
+        }
+    }
+
+    #[test]
+    fn wgsl_contains_gpu_splat_entry_points() {
+        assert!(WGSL.contains("fn biome_splat_sample"));
+        assert!(WGSL.contains("fn biome_splat_to_triplanar_weights"));
+        assert!(WGSL.contains("fn biome_splat_resolve_triplanar_weights"));
     }
 }
