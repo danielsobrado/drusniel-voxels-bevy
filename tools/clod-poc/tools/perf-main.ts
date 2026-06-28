@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Browser } from "playwright";
 import { launchChromium, launchWebGPU } from "./launch.js";
 import type { FramePerfMetric, FramePerfSnapshot } from "../src/app/frame_loop/perf_probe.js";
 
@@ -18,12 +19,26 @@ interface PerfCaseResult {
   snapshot: FramePerfSnapshot;
 }
 
+interface PerfCaseProgress {
+  fatal: string | null;
+  ready: boolean;
+  observedFrames: number;
+  sampleCount: number;
+  targetSampleFrames: number;
+  progressMsg: string | null;
+  clodReady: boolean | null;
+  lastFrameId: number | null;
+}
+
 const CASES: PerfCase[] = [
   { name: "current-textured", params: {} },
   { name: "debug-flat", params: { terrainMaterial: "debug_flat", terrainTriplanar: "0" } },
   { name: "triplanar-off", params: { terrainTriplanar: "0" } },
   { name: "tree-gpu-ring", params: { treeGpu: "1" } },
+<<<<<<< Updated upstream
   { name: "tree-cpu", params: { treeGpu: "0" } },
+=======
+>>>>>>> Stashed changes
   { name: "trees-off", params: { trees: "0", understory: "0" } },
   { name: "grass-off", params: { grass: "0" } },
   { name: "stones-off", params: { stones: "0" } },
@@ -80,6 +95,15 @@ function ms(value: number): string {
   return value.toFixed(2);
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function writeCaseArtifact(outDir: string, name: string, value: unknown): void {
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, `${name}.json`), JSON.stringify(value, null, 2));
+}
+
 function markdown(results: readonly PerfCaseResult[]): string {
   const lines = [
     "# clod-poc main perf",
@@ -114,13 +138,17 @@ async function runCase(
   baseParams: Record<string, string>,
   baseUrl: string,
   timeoutMs: number,
-  browser: Awaited<ReturnType<typeof launchWebGPU>>["browser"],
+  browser: Browser,
+  outDir: string,
 ): Promise<PerfCaseResult> {
   const params = { ...baseParams, ...perfCase.params };
   const url = buildUrl(baseUrl, params);
   const warnings: string[] = [];
   const errors: string[] = [];
+  let lastProgress: PerfCaseProgress | null = null;
+  let lastProgressLogAt = 0;
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+  page.setDefaultTimeout(Math.min(timeoutMs, 15000));
   page.on("console", (msg: { text(): string; type(): string }) => {
     const text = msg.text();
     if (msg.type() === "warning") warnings.push(text);
@@ -130,20 +158,58 @@ async function runCase(
   try {
     console.log(`[perf-main] ${perfCase.name}: ${url}`);
     await page.goto(url, { waitUntil: "domcontentloaded" });
-    await page.waitForFunction(
-      () => {
-        const fatal = window.__drusnielClod?.error;
-        return Boolean(fatal) || Boolean(window.__drusnielPerf?.ready);
-      },
-      undefined,
-      { timeout: timeoutMs, polling: 100 },
-    );
-    const fatal = await page.evaluate(() => window.__drusnielClod?.error ?? null);
-    if (fatal) throw new Error(`App fatal error: ${fatal}`);
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      lastProgress = await page.evaluate<PerfCaseProgress>(() => {
+        const perf = window.__drusnielPerf;
+        const clod = window.__drusnielClod;
+        return {
+          fatal: clod?.error ?? null,
+          ready: perf?.ready ?? false,
+          observedFrames: perf?.observedFrames ?? 0,
+          sampleCount: perf?.sampleCount ?? 0,
+          targetSampleFrames: perf?.targetSampleFrames ?? 0,
+          progressMsg: clod?.progressMsg ?? null,
+          clodReady: clod?.ready ?? null,
+          lastFrameId: perf?.lastSample?.frameId ?? null,
+        };
+      }).catch((error: unknown) => {
+        errors.push(error instanceof Error ? error.message : String(error));
+        return lastProgress;
+      });
+      if (lastProgress?.fatal) throw new Error(`App fatal error: ${lastProgress.fatal}`);
+      if (lastProgress?.ready) break;
+      if (Date.now() - lastProgressLogAt >= 5000) {
+        lastProgressLogAt = Date.now();
+        const progress = lastProgress
+          ? `${lastProgress.sampleCount}/${lastProgress.targetSampleFrames} samples, ${lastProgress.observedFrames} observed, ${lastProgress.progressMsg ?? "no clod hooks"}`
+          : "no progress";
+        console.log(`[perf-main] ${perfCase.name}: waiting (${progress})`);
+      }
+      await delay(250);
+    }
     const snapshot = await page.evaluate(() => window.__drusnielPerf?.snapshot() ?? null);
     if (!snapshot) throw new Error("Missing window.__drusnielPerf snapshot");
-    if (!snapshot.ready) throw new Error(`Perf probe did not collect enough samples (${snapshot.sampleCount})`);
-    return { name: perfCase.name, url, warnings, errors, snapshot };
+    if (!snapshot.ready) {
+      throw new Error(
+        `Perf probe timed out after ${timeoutMs}ms: ` +
+          `${snapshot.sampleCount}/${snapshot.targetSampleFrames} samples, ${snapshot.observedFrames} observed frames`,
+      );
+    }
+    const result = { name: perfCase.name, url, warnings, errors, snapshot };
+    writeCaseArtifact(outDir, perfCase.name, result);
+    return result;
+  } catch (error) {
+    const failure = {
+      name: perfCase.name,
+      url,
+      warnings,
+      errors,
+      lastProgress,
+      error: error instanceof Error ? error.message : String(error),
+    };
+    writeCaseArtifact(outDir, `${perfCase.name}-FAILED`, failure);
+    throw error;
   } finally {
     await page.close().catch(() => undefined);
   }
@@ -162,6 +228,7 @@ async function main(): Promise<void> {
   const runId = startedAt.toISOString().replace(/[:.]/g, "-");
   const outDir = str(args["out"]) ?? join("perf-runs", `main-${runId}`);
   const renderer = str(args["renderer"]) ?? "webgpu";
+  mkdirSync(outDir, { recursive: true });
 
   const baseParams: Record<string, string> = {
     world,
@@ -180,13 +247,12 @@ async function main(): Promise<void> {
   const results: PerfCaseResult[] = [];
   try {
     for (const perfCase of selectedCases) {
-      results.push(await runCase(perfCase, baseParams, baseUrl, timeoutMs, browser));
+      results.push(await runCase(perfCase, baseParams, baseUrl, timeoutMs, browser, outDir));
     }
   } finally {
     await browser.close().catch(() => undefined);
   }
 
-  mkdirSync(outDir, { recursive: true });
   const summary = {
     schemaVersion: 1,
     startedAt: startedAt.toISOString(),

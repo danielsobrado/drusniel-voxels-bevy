@@ -10,6 +10,9 @@ interface LaunchRecipe {
 const CANDIDATES: LaunchRecipe[] = [
   { headless: true, channel: "chromium", args: [] },
   { headless: true, channel: "chromium", args: ["--enable-unsafe-webgpu"] },
+  { headless: true, channel: "chrome", args: ["--enable-unsafe-webgpu"] },
+  { headless: false, channel: "chrome", args: ["--enable-unsafe-webgpu"] },
+  { headless: false, args: ["--enable-unsafe-webgpu"] },
   { headless: false, args: [] },
 ];
 
@@ -44,7 +47,9 @@ async function probeRecipe(recipe: LaunchRecipe, baseUrl: string): Promise<Brows
     browser = await tryLaunch(recipe);
     if (!browser) return null;
     const page = await browser.newPage();
-    await page.goto(new URL("__webgpu_probe__", baseUrl).toString(), { waitUntil: "domcontentloaded" });
+    const probeUrl = new URL(baseUrl);
+    probeUrl.searchParams.set("webgpuProbe", "1");
+    await page.goto(probeUrl.toString(), { waitUntil: "domcontentloaded" });
     const ok = await page.evaluate(async () => {
       const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
       if (!gpu) return false;
