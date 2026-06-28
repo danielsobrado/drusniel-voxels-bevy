@@ -32,62 +32,55 @@ export const DEFAULT_TEXTURE_SLOTS: TextureSlotContent[] = [
   { id: "lava", name: "Lava", slotIndex: 7, source: "builtin", materialId: "lava", tags: ["terrain"] },
 ];
 
+function biome(
+  id: string,
+  name: string,
+  biomeId: number,
+  textureSlotSet: string[],
+  defaultMaterialId: string,
+  debugColorRgb: [number, number, number],
+  canopyDensity: number,
+): BiomeContent {
+  const lowMaterial = textureSlotSet.includes("sand") ? "sand" : defaultMaterialId;
+  const highSlot = textureSlotSet.includes("snow") ? "snow" : textureSlotSet.includes("rock") ? "rock" : textureSlotSet[0];
+  const highMaterial = highSlot === "snow" ? "snow" : highSlot === "rock" ? "rock" : defaultMaterialId;
+  return {
+    id,
+    name,
+    biomeId,
+    region: {
+      kind: "spatial",
+      biomeId,
+      debugColorRgb,
+      canopyDensity,
+      terrainTextureSlots: textureSlotSet,
+    },
+    defaultMaterialId,
+    waterMaterialId: "water",
+    textureSlotSet,
+    tags: ["islands", "spatial-region"],
+    terrainBands: [
+      { id: `${id}-low`, name: `${name} Low`, minHeight: -120, maxHeight: 28, materialId: lowMaterial, textureSlotId: textureSlotSet[0] },
+      { id: `${id}-mid`, name: `${name} Mid`, minHeight: 28, maxHeight: 92, materialId: defaultMaterialId, textureSlotId: textureSlotSet[0] },
+      { id: `${id}-high`, name: `${name} High`, minHeight: 92, maxHeight: 260, materialId: highMaterial, textureSlotId: highSlot },
+    ],
+  };
+}
+
 export const DEFAULT_BIOMES: BiomeContent[] = [
-  {
-    id: "test-plain",
-    name: "Test Plain",
-    defaultMaterialId: "top-soil",
-    waterMaterialId: "water",
-    textureSlotSet: ["grass-top", "sand", "dirt"],
-    tags: ["plain"],
-    terrainBands: [
-      { id: "plain-low", name: "Plain Low", minHeight: -50, maxHeight: 10, materialId: "sand", textureSlotId: "sand" },
-      { id: "plain-mid", name: "Plain Mid", minHeight: 10, maxHeight: 100, materialId: "top-soil", textureSlotId: "grass-top" },
-    ],
-  },
-  {
-    id: "rocky-hills",
-    name: "Rocky Hills",
-    defaultMaterialId: "sub-soil",
-    waterMaterialId: "water",
-    textureSlotSet: ["dirt", "rock", "grass-top"],
-    tags: ["hills"],
-    terrainBands: [
-      { id: "hills-low", name: "Hills Low", minHeight: -50, maxHeight: 30, materialId: "sub-soil", textureSlotId: "dirt" },
-      { id: "hills-high", name: "Hills High", minHeight: 30, maxHeight: 200, materialId: "rock", textureSlotId: "rock" },
-    ],
-  },
-  {
-    id: "lake-basin",
-    name: "Lake Basin",
-    defaultMaterialId: "clay",
-    waterMaterialId: "water",
-    textureSlotSet: ["dirt", "sand", "grass-top"],
-    tags: ["basin"],
-    terrainBands: [
-      { id: "basin-floor", name: "Basin Floor", minHeight: -100, maxHeight: -10, materialId: "clay", textureSlotId: "dirt" },
-      { id: "basin-shore", name: "Basin Shore", minHeight: -10, maxHeight: 5, materialId: "sand", textureSlotId: "sand" },
-      { id: "basin-bank", name: "Basin Bank", minHeight: 5, maxHeight: 50, materialId: "top-soil", textureSlotId: "grass-top" },
-    ],
-  },
-  {
-    id: "snow-peak",
-    name: "Snow Peak",
-    defaultMaterialId: "rock",
-    waterMaterialId: "water",
-    textureSlotSet: ["rock", "snow", "dirt"],
-    tags: ["mountain"],
-    terrainBands: [
-      { id: "peak-lower", name: "Peak Lower", minHeight: 0, maxHeight: 80, materialId: "rock", textureSlotId: "rock" },
-      { id: "peak-upper", name: "Peak Upper", minHeight: 80, maxHeight: 500, materialId: "snow", textureSlotId: "snow" },
-    ],
-  },
+  biome("meadows", "Meadows", 0, ["grass-top", "dirt", "sand"], "top-soil", [77, 97, 54], 0.2),
+  biome("forest", "Forest", 1, ["grass-top", "dirt", "rock"], "top-soil", [46, 79, 36], 1.0),
+  biome("swamp", "Swamp", 2, ["dirt", "sand", "grass-top"], "clay", [48, 71, 51], 0.65),
+  biome("mountain", "Mountain", 3, ["rock", "snow", "dirt"], "rock", [107, 102, 92], 0.0),
+  biome("plains", "Plains", 4, ["grass-top", "sand", "rock"], "top-soil", [120, 110, 64], 0.05),
+  biome("coast", "Coast", 5, ["sand", "rock", "grass-top"], "sand", [163, 140, 87], 0.0),
+  biome("ocean", "Ocean", 6, ["sand", "dirt", "rock"], "sand", [26, 51, 77], 0.0),
 ];
 
 export const DEFAULT_CLOD_DEBUG_PRESETS: ClodDebugPreset[] = [
   { id: "default", name: "Default View", showWireframe: false, showPageBoundaries: false, showLockedBorders: false, showNodeLabels: false, colorByLod: false, errorPx: 2.0 },
   { id: "seam-debug", name: "Seam Debug", showWireframe: true, showPageBoundaries: true, showLockedBorders: false, showNodeLabels: true, colorByLod: false, errorPx: 1.5 },
-  { id: "locked-border-debug", name: "Locked Border Debug", showWireframe: true, showPageBoundaries: false, showLockedBorders: true, showNodeLabels: false, colorByLod: false, errorPx: 2.0 },
+  { id: "locked-border-debug", name: "Locked Border Debug", showWireframe: true, showPageBoundaries: false, showLockedBorders: true, showNodeLabels: false, errorPx: 2.0 },
   { id: "performance", name: "Performance View", showWireframe: false, showPageBoundaries: false, showLockedBorders: false, showNodeLabels: false, colorByLod: true, errorPx: 4.0 },
   { id: "validation", name: "Validation View", showWireframe: true, showPageBoundaries: true, showLockedBorders: true, showNodeLabels: true, colorByLod: true, errorPx: 1.0 },
 ];
