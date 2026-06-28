@@ -158,10 +158,10 @@ describe("tree GPU ring shader source", () => {
 
   it("overlaps all adjacent LOD rings before the material dithers the transition", () => {
     expect(treeRingShader).toContain("tree_lod_ring(dist");
-    expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_NEAR, ring.active.x");
-    expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_MID, ring.active.y");
-    expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_FAR, ring.active.z");
-    expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.active.w");
+    expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x");
+    expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y");
+    expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z");
+    expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w");
     expect(treeRingShader).toContain("dist > params.center_radius.z + params.lod.w");
   });
 });
