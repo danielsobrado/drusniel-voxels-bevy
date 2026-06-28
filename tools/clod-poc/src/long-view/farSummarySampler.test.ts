@@ -4,7 +4,7 @@ import { createFarShellMetrics } from "./farShellMetrics.js";
 import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 
-function countingProvider(calls: { height: number; normal: number; material: number }): FarHeightProvider {
+function countingProvider(calls: { height: number; normal: number; material: number }, material = 2): FarHeightProvider {
   return {
     sampleHeight: () => {
       calls.height++;
@@ -16,19 +16,19 @@ function countingProvider(calls: { height: number; normal: number; material: num
     },
     sampleMaterial: () => {
       calls.material++;
-      return 2;
+      return material;
     },
   };
 }
 
 describe("far summary sampler", () => {
-  it("skips provider calls in the macro-only band", () => {
+  it("keeps provider biome material even in the macro horizon band", () => {
     const calls = { height: 0, normal: 0, material: 0 };
     const sample = sampleBlendedHeightNormalMaterial(
       1000,
       1000,
       20000,
-      countingProvider(calls),
+      countingProvider(calls, 6),
       {
         macroBlendStartMeters: 8192,
         macroBlendEndMeters: 16384,
@@ -36,9 +36,10 @@ describe("far summary sampler", () => {
     );
 
     expect(Number.isFinite(sample.height)).toBe(true);
-    expect(calls.height).toBe(0);
-    expect(calls.normal).toBe(0);
-    expect(calls.material).toBe(0);
+    expect(sample.material).toBe(6);
+    expect(calls.height).toBe(1);
+    expect(calls.normal).toBe(1);
+    expect(calls.material).toBe(1);
   });
 
   it("uses provider once per channel when summary data contributes", () => {
