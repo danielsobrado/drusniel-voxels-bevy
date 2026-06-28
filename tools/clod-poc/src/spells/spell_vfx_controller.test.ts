@@ -9,6 +9,7 @@ import {
 } from "./spell_vfx_controller.js";
 import { createFireNodeMaterial } from "./fire_node_material.js";
 import { createWaterNodeMaterial } from "./water_node_material.js";
+import { createAirNodeMaterial } from "./air_node_material.js";
 import { defaultSpellConfig } from "./spell_config.js";
 
 const meshCfg: SpellVfxMeshConfig = { worldWidth: 1.8, worldHeight: 3, flameScale: 1 };
@@ -57,7 +58,8 @@ describe("spell node materials", () => {
   it.each([
     ["fire", createFireNodeMaterial, THREE.AdditiveBlending],
     ["water", createWaterNodeMaterial, THREE.NormalBlending],
-  ] as const)("%s blends additively/normally without writing depth", (_name, factory, blending) => {
+    ["air", createAirNodeMaterial, THREE.AdditiveBlending],
+  ] as const)("%s blends correctly without writing depth", (_name, factory, blending) => {
     const { material, uProgress, uTime } = factory();
     expect(material.transparent).toBe(true);
     expect(material.depthWrite).toBe(false);
@@ -102,6 +104,7 @@ describe("createSpellVfxController", () => {
       getPose: () => ({ base, dir }),
       fire: meshCfg,
       water: meshCfg,
+      air: meshCfg,
       now: () => clock,
     });
 
@@ -128,5 +131,6 @@ describe("createSpellVfxController", () => {
 
     controller.dispose();
     expect(scene.getObjectByName("fire-spell")).toBeFalsy();
+    expect(scene.getObjectByName("air-spell")).toBeFalsy();
   });
 });
