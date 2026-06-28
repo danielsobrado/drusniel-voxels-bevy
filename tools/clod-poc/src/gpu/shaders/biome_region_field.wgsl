@@ -6,6 +6,36 @@ const BIOME_PLAINS : u32 = 4u;
 const BIOME_COAST : u32 = 5u;
 const BIOME_OCEAN : u32 = 6u;
 
+struct BiomeRegionContract {
+  regionCellM : f32,
+  oceanHeightMarginM : f32,
+  oceanIslandMaskMax : f32,
+  coastHeightBandM : f32,
+  coastShoreDistanceM : f32,
+  mountainHeightAboveSeaM : f32,
+  swampHeightAboveSeaM : f32,
+  swampNoiseMax : f32,
+  plainsDistanceMin : f32,
+  plainsNoiseMin : f32,
+  forestNoiseMin : f32,
+};
+
+fn defaultBiomeRegionContract() -> BiomeRegionContract {
+  return BiomeRegionContract(
+    420.0,
+    1.5,
+    0.08,
+    4.0,
+    42.0,
+    68.0,
+    8.0,
+    0.42,
+    0.72,
+    0.58,
+    0.46,
+  );
+}
+
 fn biomeMix32(value_in : u32) -> u32 {
   var mixed = value_in;
   mixed = mixed ^ (mixed >> 16u);
@@ -156,19 +186,20 @@ fn classifyBiomeRegion(
   nearestCenterX : f32,
   nearestCenterZ : f32,
   islandRadiusM : f32,
+  contract : BiomeRegionContract,
 ) -> u32 {
-  if (height < seaLevel - 1.5 || islandMask < 0.08) { return BIOME_OCEAN; }
-  if (abs(height - seaLevel) < 4.0 || shoreDistanceM < 42.0) { return BIOME_COAST; }
-  let n = biomeRegionNoise(worldX, worldZ, 420.0, seed + 711);
+  if (height < seaLevel - contract.oceanHeightMarginM || islandMask < contract.oceanIslandMaskMax) { return BIOME_OCEAN; }
+  if (abs(height - seaLevel) < contract.coastHeightBandM || shoreDistanceM < contract.coastShoreDistanceM) { return BIOME_COAST; }
+  let n = biomeRegionNoise(worldX, worldZ, contract.regionCellM, seed + 711);
   let islandDistanceT = clamp(
     distance(vec2<f32>(worldX, worldZ), vec2<f32>(nearestCenterX, nearestCenterZ)) / max(1.0, islandRadiusM),
     0.0,
     1.0,
   );
-  if (height >= seaLevel + 68.0) { return BIOME_MOUNTAIN; }
-  if (height <= seaLevel + 8.0 && n < 0.42) { return BIOME_SWAMP; }
-  if (islandDistanceT > 0.72 && n > 0.58) { return BIOME_PLAINS; }
-  if (n > 0.46) { return BIOME_FOREST; }
+  if (height >= seaLevel + contract.mountainHeightAboveSeaM) { return BIOME_MOUNTAIN; }
+  if (height <= seaLevel + contract.swampHeightAboveSeaM && n < contract.swampNoiseMax) { return BIOME_SWAMP; }
+  if (islandDistanceT > contract.plainsDistanceMin && n > contract.plainsNoiseMin) { return BIOME_PLAINS; }
+  if (n > contract.forestNoiseMin) { return BIOME_FOREST; }
   return BIOME_MEADOWS;
 }
 
@@ -205,5 +236,6 @@ fn classifyBiomeRegionIslandAware(
     island.z,
     island.w,
     islandRadiusM,
+    defaultBiomeRegionContract(),
   );
 }

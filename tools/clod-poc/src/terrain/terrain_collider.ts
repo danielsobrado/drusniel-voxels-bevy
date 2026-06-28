@@ -78,6 +78,13 @@ function rayCanHitFootprint(ray: THREE.Ray, footprint: TerrainColliderFootprint)
   return ray.intersectsBox(tempRayBox);
 }
 
+function translatePageMesh(mesh: PageMesh, dx: number, dz: number): void {
+  for (let i = 0; i < mesh.positions.length; i += 3) {
+    mesh.positions[i] += dx;
+    mesh.positions[i + 2] += dz;
+  }
+}
+
 export class TerrainColliderSet {
   private readonly entries: ColliderEntry[];
 
@@ -86,9 +93,14 @@ export class TerrainColliderSet {
       if (!page.geometry && !page.mesh) throw new Error(`Collider page ${page.id} needs geometry or mesh source`);
       return {
         id: page.id,
-        footprint: page.footprint,
+        footprint: { ...page.footprint },
         sourceGeometry: page.geometry?.clone() ?? null,
-        sourceMesh: page.mesh ?? null,
+        sourceMesh: page.mesh
+          ? {
+              ...page.mesh,
+              positions: new Float32Array(page.mesh.positions),
+            }
+          : null,
         geometry: null,
         boundsTree: null,
       };
@@ -97,6 +109,21 @@ export class TerrainColliderSet {
 
   loadedPageCount(): number {
     return this.entries.filter((entry) => entry.boundsTree !== null).length;
+  }
+
+  translateHorizontal(dx: number, dz: number): void {
+    if (dx === 0 && dz === 0) return;
+    for (const entry of this.entries) {
+      entry.footprint.minX += dx;
+      entry.footprint.maxX += dx;
+      entry.footprint.minZ += dz;
+      entry.footprint.maxZ += dz;
+      entry.sourceGeometry?.translate(dx, 0, dz);
+      if (entry.sourceMesh) translatePageMesh(entry.sourceMesh, dx, dz);
+      entry.geometry?.dispose();
+      entry.geometry = null;
+      entry.boundsTree = null;
+    }
   }
 
   private ensureEntry(entry: ColliderEntry): MeshBVH {
@@ -161,7 +188,7 @@ export class TerrainColliderSet {
       entry.sourceMesh = null;
     } else {
       entry.sourceGeometry = null;
-      entry.sourceMesh = source;
+      entry.sourceMesh = { ...source, positions: new Float32Array(source.positions) };
     }
     if (wasLoaded) this.ensureEntry(entry);
     return true;

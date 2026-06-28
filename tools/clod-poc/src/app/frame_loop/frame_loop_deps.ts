@@ -25,9 +25,11 @@ import type { AppPostProcess } from "../app_post_process.js";
 import type { AppSky } from "../../scene/app_sky.js";
 import type { Phase0Config } from "../../phase0/phase0_config.js";
 import type { PlayerController, PlayerInteractionState } from "../../player_controller.js";
+import type { TerrainColliderSet } from "../../terrain/terrain_collider.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import type { StatsPresenter, GuiDisplayController } from "./stats_presenter.js";
 import type { FrameRenderer } from "./frame_renderer.js";
+import type { FloatingOriginController } from "../../precision/floating_origin.js";
 
 interface TerrainFadeView {
   fade: number;
@@ -151,6 +153,11 @@ export interface FrameLoopFarSummaryDeps {
   onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
 }
 
+export interface FrameLoopFloatingOriginDeps {
+  controller: FloatingOriginController;
+  terrainColliders: TerrainColliderSet;
+}
+
 export interface FrameLoopShadowProxyDeps {
   rebuildIfNeeded: () => void;
 }
@@ -187,6 +194,7 @@ export interface ClodFrameLoopDeps {
   stats: FrameLoopStatsDeps;
   diagnostics: FrameLoopDiagnosticsDeps;
   farSummary?: FrameLoopFarSummaryDeps;
+  floatingOrigin?: FrameLoopFloatingOriginDeps;
   shadowProxy?: FrameLoopShadowProxyDeps;
   clodShadow?: FrameLoopClodShadowDeps;
   canopy?: FrameLoopCanopyDeps;

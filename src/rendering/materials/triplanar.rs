@@ -101,18 +101,12 @@ pub struct TerrainIsoBandUniforms {
 impl Default for TriplanarUniforms {
     fn default() -> Self {
         Self {
-            // Warm tint for natural V0.3-like terrain colors (slightly golden/peachy)
             base_color: LinearRgba::new(1.0, 0.97, 0.92, 1.0),
-            // One texture repeat per 64 world units, matching the CLOD PoC
-            // (uTextureScales = 1/64). The previous 2.0 tiled 32× more often and
-            // read as obvious repetition at any distance.
             tex_scale: 64.0,
             blend_sharpness: 4.0,
             normal_intensity: 1.0,
-            // Parallax depth is in UV units; rescaled with tex_scale (0.04 at
-            // tex_scale 2.0 → /32) so the world-space depth is unchanged.
             parallax_scale: 0.00125,
-            ao_strength: 0.0, // Default to V0.3 look (no baked AO)
+            ao_strength: 0.0,
             rain_factor: 0.0,
             wetness: 0.0,
             in_rainy: 0.0,
@@ -153,36 +147,27 @@ pub struct TriplanarMaterial {
     /// Pipeline specialization flag: page meshes use alpha-hash crossfade.
     pub clod_page_dither: bool,
 
-    // Grass textures (mat 0)
     #[texture(1)]
     #[sampler(2)]
     pub grass_albedo: Option<Handle<Image>>,
     #[texture(3)]
     pub grass_normal: Option<Handle<Image>>,
 
-    // Rock textures (mat 1)
     #[texture(4)]
     pub rock_albedo: Option<Handle<Image>>,
     #[texture(5)]
     pub rock_normal: Option<Handle<Image>>,
 
-    // Sand textures (mat 2)
     #[texture(6)]
     pub sand_albedo: Option<Handle<Image>>,
     #[texture(7)]
     pub sand_normal: Option<Handle<Image>>,
 
-    // Dirt textures (mat 3)
     #[texture(8)]
     pub dirt_albedo: Option<Handle<Image>>,
     #[texture(9)]
     pub dirt_normal: Option<Handle<Image>>,
 
-    /// Mesher SDF brick for iso-band debug (`epsilon <= 0` disables sampling in shader).
-    /// Must be `dimension = "3d"` because the shader binding declares
-    /// `texture_3d<f32>` (see `assets/shaders/triplanar_terrain.wgsl:287`).
-    /// Without this, Bevy's `AsBindGroup` derives a 2D binding descriptor and
-    /// `Device::create_bind_group` panics with "given a view with dimension = D3".
     #[texture(10, dimension = "3d")]
     #[sampler(11)]
     pub iso_band_volume: Option<Handle<Image>>,
@@ -288,7 +273,6 @@ impl Material for TriplanarMaterial {
         _layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // Disable backface culling to match v0.3 behavior
         descriptor.primitive.cull_mode = None;
 
         if let Some(fragment) = descriptor.fragment.as_mut() {
@@ -298,9 +282,7 @@ impl Material for TriplanarMaterial {
                     fragment.shader_defs.push("TERRAIN_CHEAP_TRIPLANAR".into());
                 }
                 TerrainMaterialQuality::SingleProjectionFar => {
-                    fragment
-                        .shader_defs
-                        .push("TERRAIN_SINGLE_PROJECTION_FAR".into());
+                    fragment.shader_defs.push("TERRAIN_SINGLE_PROJECTION_FAR".into());
                 }
                 TerrainMaterialQuality::HorizonProxy => {
                     fragment.shader_defs.push("TERRAIN_HORIZON_PROXY".into());
@@ -332,6 +314,7 @@ impl Material for TriplanarMaterial {
             if _key.bind_group_data.clod_page_dither {
                 fragment.shader_defs.push("TERRAIN_CLOD_DITHER".into());
             }
+            fragment.shader_defs.push("TERRAIN_GPU_BIOME_SPLAT".into());
         }
         Ok(())
     }
@@ -358,6 +341,12 @@ mod tests {
         let source = include_str!("../../../assets/shaders/triplanar_terrain.wgsl");
         assert!(source.contains("terrain/hextile.wgsl"));
         assert!(source.contains("terrain/surfgrad.wgsl"));
+    }
+
+    #[test]
+    fn gpu_biome_splat_shader_contract_exists() {
+        let source = include_str!("../../../assets/shaders/world_source/biome_splat.wgsl");
+        assert!(source.contains("fn biome_splat_resolve_triplanar_weights"));
     }
 }
 

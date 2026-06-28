@@ -14,7 +14,7 @@ import {
   writeAllArtifacts,
   recommendationFromGates,
 } from "../reportWriter.js";
-import type { AcceptanceGateResult, AcceptanceConfig, AcceptanceMetrics } from "../acceptanceTypes.js";
+import type { AcceptanceGateId, AcceptanceGateResult, AcceptanceConfig, AcceptanceMetrics } from "../acceptanceTypes.js";
 
 let tmpRunDir: string;
 
@@ -25,7 +25,7 @@ beforeEach(() => {
   mkdirSync(join(tmpRunDir, "debug"), { recursive: true });
 });
 
-function makeGate(id: "A1" | "A2" | "A3" | "A4" | "A5" | "A6", name: string, status: "pass" | "warn" | "fail"): AcceptanceGateResult {
+function makeGate(id: AcceptanceGateId, name: string, status: "pass" | "warn" | "fail"): AcceptanceGateResult {
   return {
     id,
     name,
@@ -54,6 +54,23 @@ const DEFAULT_CONFIG: AcceptanceConfig = {
   },
   visual: { enabled: false, screenshotWidth: 1920, screenshotHeight: 1080, cameraFovYDeg: 60, grazingAngleDeg: 7, crossfadeFrames: 12 },
   stressScenes: { ridgeBorder: true, cliffCorner: true, caveMouthBorder: true, thinBridge: true, forcedNeighborLodDeltas: [1, 2, 3], nearFieldBubbleMask: true },
+  streamingWalk: {
+    enabled: true,
+    frames: 180,
+    stepM: 32,
+    liveRadiusM: 128,
+    clodRadiusM: 512,
+    farShellOuterM: 2048,
+    hysteresisM: 128,
+    coverageCellM: 32,
+    maxClodLevel: 3,
+    biomeProbeDistanceM: 160,
+    maxCenterDriftM: 0.001,
+    maxGapHoles: 0,
+    maxOverlapCells: 0,
+    maxHorizonHoleRatio: 0,
+    maxActiveBiomeTextures: 2,
+  },
   logging: { level: "info" },
 };
 
@@ -85,6 +102,15 @@ const METRICS: AcceptanceMetrics = {
   mixedLodEdgesTested: 12,
   mixedLodFailureCount: 0,
   mixedLodUntestableDeltaCount: 0,
+  streamingWalkFrames: 180,
+  streamingMaxCameraToClodCenterM: 0,
+  streamingMaxCameraToFarShellCenterM: 0,
+  streamingMaxLiveClodGapHoles: 0,
+  streamingMaxClodFarGapHoles: 0,
+  streamingMaxLiveClodOverlapCells: 0,
+  streamingMaxHorizonHoleRatio: 0,
+  streamingTextureWindowSwaps: 4,
+  streamingMaxActiveBiomeTextures: 2,
 };
 
 describe("reportWriter", () => {
@@ -134,10 +160,11 @@ describe("reportWriter", () => {
     expect(content).toContain("CLOD Phase 3 Acceptance Report");
     expect(content).toContain("PASS");
     expect(content).toContain("N/A (sweep not available)");
+    expect(content).toContain("Streaming walk frames");
   });
 
   it("writes metrics.csv with new fields", () => {
-    const gates = [makeGate("A1", "Watertight", "pass")];
+    const gates = [makeGate("A1", "Watertight", "pass"), makeGate("A7", "Streaming walk", "pass")];
     const csvPath = writeMetricsCsv(tmpRunDir, METRICS, gates);
     expect(existsSync(csvPath)).toBe(true);
     const content = readFileSync(csvPath, "utf-8");
@@ -146,6 +173,8 @@ describe("reportWriter", () => {
     expect(content).toContain("mixedLodDeltasTested");
     expect(content).toContain("visualSweepAvailable");
     expect(content).toContain("fullHierarchyBuildRuns");
+    expect(content).toContain("streamingWalkFrames");
+    expect(content).toContain("streamingMaxActiveBiomeTextures");
   });
 
   it("preserves failed gate details in report", () => {
@@ -176,6 +205,12 @@ describe("reportWriter", () => {
     const rec = recommendationFromGates(gates);
     expect(rec).toContain("Do not port");
     expect(rec).toContain("topology");
+  });
+
+  it("recommendation blocks infinite streaming when A7 fails", () => {
+    const gates = [makeGate("A7", "Streaming walk", "fail")];
+    const rec = recommendationFromGates(gates);
+    expect(rec).toContain("Do not ship infinite streaming");
   });
 
   it("writeAllArtifacts produces summary.json with correct artifact list", () => {

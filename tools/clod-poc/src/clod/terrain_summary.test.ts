@@ -93,6 +93,25 @@ describe("terrain summary field", () => {
     expect(sampleSkirtHeight(summary, -4, -4, 100, summaryBaseLevel(summary), 1)).toBe(77);
   });
 
+  it("samples WorldSource height, normal, coverage, and biome beyond the finite summary footprint", () => {
+    const worldSource = {
+      sampleHeight: (x: number, z: number) => 100 + x * 0.5 + z * 0.25,
+      sampleBiome: () => BIOME_IDS.forest,
+    };
+    const summary = buildTerrainSummary([pageNode("L0:0,0", 0, 0, 16, 16, 1, 2)], 16, 1, { worldSource });
+
+    expect(sampleHeight(summary, 64, 32)).toBe(worldSource.sampleHeight(64, 32));
+    expect(sampleHeightBlend(summary, 64, 32, 0)).toBe(worldSource.sampleHeight(64, 32));
+    expect(sampleCoverage(summary, 64, 32)).toBe(0);
+    expect(sampleBiomeId(summary, 64, 32)).toBe(BIOME_IDS.forest);
+
+    const [nx, ny, nz] = sampleNormal(summary, 64, 32);
+    expect(Number.isFinite(nx)).toBe(true);
+    expect(Number.isFinite(ny)).toBe(true);
+    expect(Number.isFinite(nz)).toBe(true);
+    expect(Math.abs(Math.hypot(nx, ny, nz) - 1)).toBeLessThan(0.01);
+  });
+
   it("gates extended canopy by biome", () => {
     const oceanSummary = buildTerrainSummary([], 16, 16, {
       worldSource: {

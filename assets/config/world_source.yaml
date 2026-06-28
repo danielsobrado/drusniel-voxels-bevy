@@ -1,0 +1,16 @@
+world_source:
+  seed: 0
+  sea_level: 18.0
+  island_shape:
+    enabled: true
+    sea_level: 18.0
+    seed: 0
+    spacing_m: 1500.0
+    radius_m: 560.0
+    blend_m: 260.0
+    warp_strength_m: 190.0
+    beach_width_m: 28.0
+    cliff_width_m: 48.0
+    world_radius_m: 8192.0
+    ocean_rim: true
+    ocean_rim_drop_m: 42.0

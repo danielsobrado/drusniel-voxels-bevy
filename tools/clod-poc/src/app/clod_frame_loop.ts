@@ -38,7 +38,7 @@ function timed<T>(
 }
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
-  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, clodShadow, canopy, construction, combat, spells } = deps;
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, floatingOrigin, shadowProxy, clodShadow, canopy, construction, combat, spells } = deps;
   let elapsedSeconds = 0;
   const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
@@ -124,6 +124,13 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       elapsedSeconds += playerDelta;
       updateAverageFps();
       player.playerInputController.updateFrame(playerDelta);
+      floatingOrigin?.controller.rebaseIfNeeded({
+        camera: render.camera,
+        controls: player.controls,
+        player: player.player,
+        terrainColliders: floatingOrigin.terrainColliders,
+        frameIndex: selectionStats.frameId,
+      });
       render.skyEnvironment?.updateCamera(render.camera);
       vegetation.drainVegetationDirtyQueue();
       vegetation.treeController.updateFallingTrees(playerDelta);
@@ -135,7 +142,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics);
 
     timed(collectFrameTiming, phaseTiming, "farSummaryMs", () => {
-      farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera);
+      const worldCamera = floatingOrigin?.controller.getWorldCamera(render.camera) ?? render.camera;
+      farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, worldCamera);
     });
 
     let constructionActive = false;
@@ -191,7 +199,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     });
 
     timed(collectFrameTiming, phaseTiming, "canopyMs", () => {
-      canopy?.update(render.camera.position.x, render.camera.position.z);
+      const worldCamera = floatingOrigin?.controller.getWorldCamera(render.camera) ?? render.camera;
+      canopy?.update(worldCamera.position.x, worldCamera.position.z);
     });
 
     const vegetationTiming = runVegetationFramePhase({

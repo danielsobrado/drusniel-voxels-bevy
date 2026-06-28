@@ -21,11 +21,22 @@ import type { FarShellMetrics } from "../../long-view/index.js";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import { applyOwnershipToFarShellRange, resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
+import { FloatingOriginController } from "../../precision/floating_origin.js";
 import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 import { createBakedMacroTintTexture } from "../../gpu/terrain_node_material.js";
 import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
 import { createBiomeTextureStreamingManager } from "../../textures/biome_texture_streaming_manager.js";
 import * as THREE from "three";
+
+function booleanQueryParam(searchParams: URLSearchParams, key: string): boolean {
+  const raw = searchParams.get(key);
+  return raw !== null && raw !== "0" && raw !== "false";
+}
+
+function positiveNumberQueryParam(searchParams: URLSearchParams, key: string, fallback: number): number {
+  const value = Number(searchParams.get(key));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 export async function bootstrapClodPoc() {
   const searchParams = new URLSearchParams(location.search);
@@ -75,6 +86,12 @@ export async function bootstrapClodPoc() {
     activePhase0Scene: queries.activePhase0Scene,
   });
   if (!renderer) return;
+
+  const floatingOrigin = new FloatingOriginController(renderer.scene, {
+    enabled: booleanQueryParam(searchParams, "floatingOrigin") || booleanQueryParam(searchParams, "floating_origin"),
+    snapMeters: positiveNumberQueryParam(searchParams, "floatingOriginSnap", 4096),
+    unboundedWorld: world.worldSource.metadata.bounds === "infinite",
+  });
 
   const postRenderer = await runPostRendererStartup({
     info: dom.info,
@@ -158,7 +175,8 @@ export async function bootstrapClodPoc() {
     : null;
 
   if (postRenderer.state.terrainMaterialSource === "procedural") {
-    biomeTextureStreaming?.update({ x: renderer.camera.position.x, z: renderer.camera.position.z, frameIndex: 0 });
+    const initialWorldCamera = floatingOrigin.getWorldCamera(renderer.camera);
+    biomeTextureStreaming?.update({ x: initialWorldCamera.position.x, z: initialWorldCamera.position.z, frameIndex: 0 });
   }
 
   let farSummaryIntegration: FarSummaryIntegration | undefined;
@@ -410,8 +428,18 @@ export async function bootstrapClodPoc() {
       infiniteFarShell,
       farShellMetrics,
     },
-    onFarSummaryUpdate: (farSummaryIntegration || naadfIntegration || terrainView.shadowProxyController || biomeTextureStreaming)
+    floatingOrigin,
+    onFarSummaryUpdate: (farSummaryIntegration || naadfIntegration || terrainView.shadowProxyController || biomeTextureStreaming || infiniteFarShell || floatingOrigin)
       ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
+          const originStats = floatingOrigin.stats();
+          if (postRenderer.longViewHooks?.stats) {
+            postRenderer.longViewHooks.stats.counters.floatingOriginEnabled = originStats.enabled ? 1 : 0;
+            postRenderer.longViewHooks.stats.counters.floatingOriginRebaseCount = originStats.rebaseCount;
+            postRenderer.longViewHooks.stats.counters.floatingOriginLastRebaseFrame = originStats.lastRebaseFrame;
+            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetX = originStats.originX;
+            postRenderer.longViewHooks.stats.counters.floatingOriginOffsetZ = originStats.originZ;
+          }
+          infiniteFarShell?.setRenderOriginOffset(originStats.originX, originStats.originZ);
           if (farSummaryIntegration) {
             farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
           }

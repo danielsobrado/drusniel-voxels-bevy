@@ -40,5 +40,22 @@ acceptance:
     forced_neighbor_lod_deltas: [1, 2, 3]
     near_field_bubble_mask: true
 
+  streaming_walk:
+    enabled: true
+    frames: 180
+    step_m: 32
+    live_radius_m: 128
+    clod_radius_m: 512
+    far_shell_outer_m: 2048
+    hysteresis_m: 128
+    coverage_cell_m: 32
+    max_clod_level: 3
+    biome_probe_distance_m: 160
+    max_center_drift_m: 0.001
+    max_gap_holes: 0
+    max_overlap_cells: 0
+    max_horizon_hole_ratio: 0.0
+    max_active_biome_textures: 2
+
   logging:
     level: "info"

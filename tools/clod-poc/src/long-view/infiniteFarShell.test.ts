@@ -4,12 +4,57 @@ import { InfiniteFarShell } from "./infiniteFarShell.js";
 import { createFarShellMetrics } from "./farShellMetrics.js";
 import { sampleMacroTerrainHeight, sampleMacroTerrainNormal, sampleMacroTerrainMaterial } from "./macroTerrain.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
+import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
+import { FarSummaryGpuAtlas } from "../naadf/gpu/farSummaryAtlas.js";
 
 const FAKE_LIGHTING = {
   sunDirection: new THREE.Vector3(0.3, 0.8, 0.5).normalize(),
   sunColor: new THREE.Color(1, 0.95, 0.85),
   skyLight: new THREE.Color(0.4, 0.5, 0.65),
   groundLight: new THREE.Color(0.2, 0.18, 0.14),
+};
+
+const FAKE_PARITY_CONFIG: FarTerrainUniformData = {
+  materialQuality: "horizon_proxy",
+  materialQualityIndex: 3,
+  waterlineM: 18,
+  sandMaxHeightM: 24,
+  grassMaxSlope: 0.5,
+  dirtMaxSlope: 0.7,
+  rockMinSlope: 0.75,
+  snowMinHeightM: 120,
+  snowMinSlope: 0.4,
+  macroEnabled: 1,
+  macroScale1: 300,
+  macroScale2: 900,
+  macroStrength: 0.2,
+  macroSlopeStrength: 0.2,
+  macroHeightStrength: 0.2,
+  farNormalStrength: 1,
+  farNormalFiniteDiffM: 4,
+  farNormalFlattenStartM: 8192,
+  farNormalFlattenEndM: 16384,
+  hemiStrength: 0.6,
+  sunStrength: 0.8,
+  wrapLighting: 0.2,
+  roughness: 0.9,
+  ambientFloor: 0.15,
+  hazeEnabled: 0,
+  hazeStartM: 8192,
+  hazeEndM: 16384,
+  hazeColor: [0.7, 0.8, 1.0],
+  hazeStrength: 0.4,
+  hazeHeightFalloff: 0.01,
+  shellInnerDropM: 0,
+  normalBlendM: 256,
+  materialBlendM: 256,
+  pageToShellBlendM: 128,
+  debugShowMaterialBands: 0,
+  debugShowSlope: 0,
+  debugShowMacroNoise: 0,
+  debugShowFarNormals: 0,
+  debugShowHazeFactor: 0,
+  freezeMaterialLod: 0,
 };
 
 function makeDefaultOptions() {
@@ -76,6 +121,22 @@ describe("infinite far shell — camera-relative annular geometry", () => {
     shell.dispose();
   });
 
+  it("renders shell relative to floating-origin offset while sampling world center", () => {
+    const metrics = createFarShellMetrics();
+    const shell = new InfiniteFarShell({ ...makeDefaultOptions(), metrics });
+
+    shell.setRenderOriginOffset(8192, -2048);
+    shell.update(10000, -2000, 0);
+
+    expect(metrics.farShellCenterX).toBe(10000);
+    expect(metrics.farShellCenterZ).toBe(-2000);
+    expect(metrics.farShellSnappedX).toBe(10000);
+    expect(metrics.farShellSnappedZ).toBe(-2000);
+    expect(shell.mesh.position.x).toBe(1808);
+    expect(shell.mesh.position.z).toBe(48);
+    shell.dispose();
+  });
+
   it("shell does not rebuild every frame within snap threshold", () => {
     const metrics = createFarShellMetrics();
     const shell = new InfiniteFarShell({ ...makeDefaultOptions(), metrics, rebaseSnapMeters: 100 });
@@ -132,6 +193,41 @@ describe("infinite far shell — GPU mode validation", () => {
       heightSamplingMode: "gpu",
       useParityMaterial: true,
     })).toThrow(/GPU mode requires parity material, parity config, and a GPU far-summary atlas/);
+  });
+
+  it("defaults to GPU sampling when GPU inputs are present", () => {
+    const atlas = new FarSummaryGpuAtlas({ tileCells: 4, ringCount: 1, tilesX: 1, tilesZ: 1 });
+    const shell = new InfiniteFarShell({
+      ...makeDefaultOptions(),
+      useParityMaterial: true,
+      parityConfig: FAKE_PARITY_CONFIG,
+      farSummaryGpuAtlas: atlas.view,
+    });
+
+    expect(shell.mesh.children.some((child) => child.name === "naadf-far-water-overlay")).toBe(true);
+    shell.dispose();
+    atlas.view.texture.dispose();
+    atlas.view.materialTexture.dispose();
+    atlas.view.normalTexture.dispose();
+    atlas.view.coverageTexture.dispose();
+  });
+
+  it("keeps explicit CPU sampling as a fallback override", () => {
+    const atlas = new FarSummaryGpuAtlas({ tileCells: 4, ringCount: 1, tilesX: 1, tilesZ: 1 });
+    const shell = new InfiniteFarShell({
+      ...makeDefaultOptions(),
+      useParityMaterial: true,
+      parityConfig: FAKE_PARITY_CONFIG,
+      farSummaryGpuAtlas: atlas.view,
+      heightSamplingMode: "cpu",
+    });
+
+    expect(shell.mesh.children.some((child) => child.name === "naadf-far-water-overlay")).toBe(false);
+    shell.dispose();
+    atlas.view.texture.dispose();
+    atlas.view.materialTexture.dispose();
+    atlas.view.normalTexture.dispose();
+    atlas.view.coverageTexture.dispose();
   });
 });
 

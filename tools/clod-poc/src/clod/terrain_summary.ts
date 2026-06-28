@@ -64,6 +64,31 @@ function defaultBiomeSampler(): (x: number, z: number, height: number) => number
   return (x, z, height) => biomeField.sample(x, z, height).biome;
 }
 
+function outsideSummaryFootprint(field: TerrainSummaryField, x: number, z: number): boolean {
+  return x < 0 || x > field.worldSize || z < 0 || z > field.worldSize;
+}
+
+function summaryCellSize(field: TerrainSummaryField): number {
+  return Math.max(1, field.worldSize / Math.max(1, field.res));
+}
+
+function sampleAnalyticNormal(field: TerrainSummaryField, x: number, z: number): [number, number, number] | null {
+  if (!field.analyticHeightSampler) return null;
+  const e = summaryCellSize(field);
+  const hL = field.analyticHeightSampler(x - e, z);
+  const hR = field.analyticHeightSampler(x + e, z);
+  const hD = field.analyticHeightSampler(x, z - e);
+  const hU = field.analyticHeightSampler(x, z + e);
+  if (!Number.isFinite(hL) || !Number.isFinite(hR) || !Number.isFinite(hD) || !Number.isFinite(hU)) {
+    return null;
+  }
+  const nx = (hL - hR) / (2 * e);
+  const ny = 1;
+  const nz = (hD - hU) / (2 * e);
+  const len = Math.hypot(nx, ny, nz) || 1;
+  return [nx / len, ny / len, nz / len];
+}
+
 export function populateTerrainSummaryBiomes(
   field: TerrainSummaryField,
   worldSource: Pick<WorldSource, "sampleHeight" | "sampleBiome">,
@@ -173,6 +198,9 @@ export function buildTerrainSummary(
 
 /** Sample height at world position (x, z). Bilinear interpolation. */
 export function sampleHeight(field: TerrainSummaryField, x: number, z: number): number {
+  if (outsideSummaryFootprint(field, x, z) && field.analyticHeightSampler) {
+    return field.analyticHeightSampler(x, z);
+  }
   const fx = (x / field.worldSize) * field.res - 0.5;
   const fz = (z / field.worldSize) * field.res - 0.5;
   const ix = Math.floor(fx);
@@ -191,6 +219,9 @@ export function sampleHeight(field: TerrainSummaryField, x: number, z: number): 
 }
 
 export function sampleHeightBlend(field: TerrainSummaryField, x: number, z: number, bias: number): number {
+  if (outsideSummaryFootprint(field, x, z) && field.analyticHeightSampler) {
+    return field.analyticHeightSampler(x, z);
+  }
   const clamped = Math.max(0, Math.min(1, bias));
   const fx = (x / field.worldSize) * field.res - 0.5;
   const fz = (z / field.worldSize) * field.res - 0.5;
@@ -212,6 +243,10 @@ export function sampleHeightBlend(field: TerrainSummaryField, x: number, z: numb
 
 /** Sample normal at world position (x, z). Bilinear interpolation. */
 export function sampleNormal(field: TerrainSummaryField, x: number, z: number): [number, number, number] {
+  if (outsideSummaryFootprint(field, x, z)) {
+    const analyticNormal = sampleAnalyticNormal(field, x, z);
+    if (analyticNormal) return analyticNormal;
+  }
   const fx = (x / field.worldSize) * field.res - 0.5;
   const fz = (z / field.worldSize) * field.res - 0.5;
   const ix = Math.floor(fx);
@@ -233,6 +268,7 @@ export function sampleNormal(field: TerrainSummaryField, x: number, z: number): 
 
 /** Sample coverage at world position (x, z). Bilinear interpolation. 0 = no pages, 1 = fully covered. */
 export function sampleCoverage(field: TerrainSummaryField, x: number, z: number): number {
+  if (outsideSummaryFootprint(field, x, z)) return 0;
   const fx = (x / field.worldSize) * field.res - 0.5;
   const fz = (z / field.worldSize) * field.res - 0.5;
   const ix = Math.floor(fx);
@@ -252,7 +288,7 @@ export function sampleCoverage(field: TerrainSummaryField, x: number, z: number)
 
 export function sampleBiomeId(field: TerrainSummaryField, x: number, z: number): number {
   if (!field.biomeId) return field.analyticBiomeSampler?.(x, z) ?? 0;
-  if ((x < 0 || x > field.worldSize || z < 0 || z > field.worldSize) && field.analyticBiomeSampler) {
+  if (outsideSummaryFootprint(field, x, z) && field.analyticBiomeSampler) {
     return field.analyticBiomeSampler(x, z);
   }
   const fx = (x / field.worldSize) * field.res - 0.5;

@@ -54,10 +54,12 @@ export function runFrameLoopStartup(
     controls,
     player,
     interaction,
+    terrainColliders,
     terrainRaycast,
     worldCells,
     maxTerrainLevel,
     longView,
+    floatingOrigin,
   } = input;
   const {
     postProcess,
@@ -128,6 +130,7 @@ export function runFrameLoopStartup(
   const { updateInfo } = infoPanel;
   const { playerTerraformEditActive } = terrainEdit;
   const statsPresenter = statsPresenterFromSession(ctx);
+  const streamingScene = longView.queryScene?.startsWith("infinite-") ?? false;
 
   if (!session.playerInputController) {
     throw new Error("Frame loop startup requires playerInputController");
@@ -256,14 +259,14 @@ export function runFrameLoopStartup(
       getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert,
       getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled,
     },
-    farSummary: input.onFarSummaryUpdate
+    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene
       ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
-          input.onFarSummaryUpdate!(frameIndex, deltaSeconds, camera);
+          if (streamingScene) farShellController.moveTo(camera.position.x, camera.position.z);
+          input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera);
           session.naadfStatsController?.updateDisplay();
         } }
-      : session.naadfStatsController
-        ? { onFarSummaryUpdate: () => { session.naadfStatsController?.updateDisplay(); } }
-        : undefined,
+      : undefined,
+    floatingOrigin: floatingOrigin ? { controller: floatingOrigin, terrainColliders } : undefined,
     construction: constructionController
       ? {
           update: () => {

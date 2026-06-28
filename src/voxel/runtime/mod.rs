@@ -114,6 +114,7 @@ pub(crate) mod startup_overlay;
 pub(crate) mod stats;
 pub(crate) mod visibility;
 pub(crate) mod water_bodies;
+pub(crate) mod world_source_generation;
 
 pub(crate) use config::TerrainLodTransitionState;
 pub use config::{TerrainLodControl, VoxelTerrainSet, WorldConfig};

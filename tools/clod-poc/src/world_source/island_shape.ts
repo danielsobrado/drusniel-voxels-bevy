@@ -38,20 +38,26 @@ export interface IslandMaskSample {
   cliffWeight: number;
 }
 
+function finiteAtLeast(value: unknown, fallback: number, min: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(min, value) : Math.max(min, fallback);
+}
+
 export function resolveIslandShapeConfig(input?: Partial<IslandShapeConfig>): IslandShapeConfig {
   const merged = { ...DEFAULT_ISLAND_SHAPE_CONFIG, ...(input ?? {}) };
   return {
     ...merged,
+    enabled: Boolean(merged.enabled),
+    oceanRim: Boolean(merged.oceanRim),
     seaLevel: Number.isFinite(merged.seaLevel) ? merged.seaLevel : DEFAULT_ISLAND_SHAPE_CONFIG.seaLevel,
     seed: Number.isFinite(merged.seed) ? Math.floor(merged.seed) : DEFAULT_ISLAND_SHAPE_CONFIG.seed,
-    spacingM: Math.max(64, merged.spacingM),
-    radiusM: Math.max(16, merged.radiusM),
-    blendM: Math.max(1, merged.blendM),
-    warpStrengthM: Math.max(0, merged.warpStrengthM),
-    beachWidthM: Math.max(1, merged.beachWidthM),
-    cliffWidthM: Math.max(1, merged.cliffWidthM),
-    worldRadiusM: Math.max(1, merged.worldRadiusM),
-    oceanRimDropM: Math.max(1, merged.oceanRimDropM),
+    spacingM: finiteAtLeast(merged.spacingM, DEFAULT_ISLAND_SHAPE_CONFIG.spacingM, 64),
+    radiusM: finiteAtLeast(merged.radiusM, DEFAULT_ISLAND_SHAPE_CONFIG.radiusM, 16),
+    blendM: finiteAtLeast(merged.blendM, DEFAULT_ISLAND_SHAPE_CONFIG.blendM, 1),
+    warpStrengthM: finiteAtLeast(merged.warpStrengthM, DEFAULT_ISLAND_SHAPE_CONFIG.warpStrengthM, 0),
+    beachWidthM: finiteAtLeast(merged.beachWidthM, DEFAULT_ISLAND_SHAPE_CONFIG.beachWidthM, 1),
+    cliffWidthM: finiteAtLeast(merged.cliffWidthM, DEFAULT_ISLAND_SHAPE_CONFIG.cliffWidthM, 1),
+    worldRadiusM: finiteAtLeast(merged.worldRadiusM, DEFAULT_ISLAND_SHAPE_CONFIG.worldRadiusM, 1),
+    oceanRimDropM: finiteAtLeast(merged.oceanRimDropM, DEFAULT_ISLAND_SHAPE_CONFIG.oceanRimDropM, 1),
   };
 }
 

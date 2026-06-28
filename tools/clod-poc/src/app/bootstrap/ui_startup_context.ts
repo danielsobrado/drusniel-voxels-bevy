@@ -26,6 +26,7 @@ import type { createPlayerModeController } from "../../player/player_mode_contro
 import type { SwordAttackController } from "../../combat/index.js";
 import type { SpellVfxController } from "../../spells/spell_vfx_controller.js";
 import type { ClodShadowOverlayController } from "../../clod_shadow_overlay_controller.js";
+import type { FloatingOriginController } from "../../precision/floating_origin.js";
 
 export interface UiStartupInput {
   dom: DomShell;
@@ -79,6 +80,7 @@ export interface UiStartupInput {
     infiniteFarShell?: import("../../long-view/infiniteFarShell.js").InfiniteFarShell;
     farShellMetrics?: import("../../long-view/farShellMetrics.js").FarShellMetrics;
   };
+  floatingOrigin?: FloatingOriginController;
   onFarSummaryUpdate?: (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => void;
   naadfIntegration?: import("../../naadf/integration.js").NaadfIntegration;
   getClodErrorCompute: () => import("../../gpu/clod_error_px_compute.js").ClodErrorPxCompute | null;

@@ -21,6 +21,7 @@ import { runGateA6, computeLowBenefitRates } from "./lowBenefitGate.js";
 import { runGateA5, runFullHierarchyBuild, type BuildTimingMetrics } from "./buildCostGate.js";
 import { runGateA3 } from "./densityScarGate.js";
 import { runGateA1VisualSweep } from "./visualSweepGate.js";
+import { runGateA7 } from "./streamingWalkBatteryGate.js";
 import { defineScreenshots, writeVisualSweepUnavailable } from "./screenshots.js";
 
 const _runnerDir = dirname(fileURLToPath(import.meta.url));
@@ -158,6 +159,11 @@ function percentileFromSamples(values: number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b);
   const index = Math.ceil((p / 100) * sorted.length) - 1;
   return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
+}
+
+function numericMeasurement(gate: AcceptanceGateResult | undefined, key: string, fallback = 0): number {
+  const value = gate?.measurements[key];
+  return typeof value === "number" ? value : fallback;
 }
 
 export async function runAcceptance(
@@ -320,8 +326,10 @@ export async function runAcceptance(
 
   const a5Result = runGateA5(new Map(), config, computedTimings, activeFixtures[0].name);
   logger.info(`  A5 Build cost: ${a5Result.status}`);
+  const a7Result = runGateA7(clodCfg, config);
+  logger.info(`  A7 Streaming walk: ${a7Result.status}`);
 
-  const mergedGates = mergeGatesAcrossScenes(perSceneGates, a5Result);
+  const mergedGates = mergeGatesAcrossScenes(perSceneGates, a5Result, a7Result);
 
   const firstResult = buildFixtureWorld(clodCfg, config, firstFixture);
   const firstFixtureTriangles = computeTriangleReduction(firstResult.nodesByLevel);
@@ -330,6 +338,7 @@ export async function runAcceptance(
   const combinedA1Result = mergedGates.find((g) => g.id === "A1");
   const combinedA2Result = mergedGates.find((g) => g.id === "A2");
   const combinedA3Result = mergedGates.find((g) => g.id === "A3");
+  const combinedA7Result = mergedGates.find((g) => g.id === "A7");
 
   const metrics: AcceptanceMetrics = {
     lod0Triangles: firstFixtureTriangles.lod0Triangles,
@@ -346,19 +355,28 @@ export async function runAcceptance(
     singleNodeRebuildMsP95: computedTimings.singleNodeRebuildMsP95,
     lowBenefitRateLevel1: firstFixtureLowBenefit.lowBenefitRateLevel1,
     lowBenefitRateLevel2: firstFixtureLowBenefit.lowBenefitRateLevel2,
-    maxBorderPositionDelta: typeof combinedA2Result?.measurements.maxPositionDelta === "number" ? combinedA2Result.measurements.maxPositionDelta : 0,
-    minBorderNormalDot: typeof combinedA2Result?.measurements.minNormalDot === "number" ? combinedA2Result.measurements.minNormalDot : 1,
-    maxBorderMaterialWeightDelta: typeof combinedA2Result?.measurements.maxMaterialWeightDelta === "number" ? combinedA2Result.measurements.maxMaterialWeightDelta : 0,
-    densityScarScore: typeof combinedA3Result?.measurements.densityScarScore === "number" ? combinedA3Result.measurements.densityScarScore : 0,
+    maxBorderPositionDelta: numericMeasurement(combinedA2Result, "maxPositionDelta", 0),
+    minBorderNormalDot: numericMeasurement(combinedA2Result, "minNormalDot", 1),
+    maxBorderMaterialWeightDelta: numericMeasurement(combinedA2Result, "maxMaterialWeightDelta", 0),
+    densityScarScore: numericMeasurement(combinedA3Result, "densityScarScore", 0),
     visualHolePixelRatio: -1,
     visualLipPixelRatio: -1,
     visualSweepAvailable: false,
-    sameLevelEdgesTested: typeof combinedA1Result?.measurements.sameLevelEdgesTested === "number" ? combinedA1Result.measurements.sameLevelEdgesTested : 0,
-    sameLevelFailureCount: typeof combinedA1Result?.measurements.sameLevelFailureCount === "number" ? combinedA1Result.measurements.sameLevelFailureCount : 0,
-    mixedLodDeltasTested: typeof combinedA1Result?.measurements.mixedLodDeltasTested === "number" ? combinedA1Result.measurements.mixedLodDeltasTested : 0,
-    mixedLodEdgesTested: typeof combinedA1Result?.measurements.mixedLodEdgesTested === "number" ? combinedA1Result.measurements.mixedLodEdgesTested : 0,
-    mixedLodFailureCount: typeof combinedA1Result?.measurements.mixedLodFailureCount === "number" ? combinedA1Result.measurements.mixedLodFailureCount : 0,
-    mixedLodUntestableDeltaCount: typeof combinedA1Result?.measurements.mixedLodUntestableDeltaCount === "number" ? combinedA1Result.measurements.mixedLodUntestableDeltaCount : 0,
+    sameLevelEdgesTested: numericMeasurement(combinedA1Result, "sameLevelEdgesTested", 0),
+    sameLevelFailureCount: numericMeasurement(combinedA1Result, "sameLevelFailureCount", 0),
+    mixedLodDeltasTested: numericMeasurement(combinedA1Result, "mixedLodDeltasTested", 0),
+    mixedLodEdgesTested: numericMeasurement(combinedA1Result, "mixedLodEdgesTested", 0),
+    mixedLodFailureCount: numericMeasurement(combinedA1Result, "mixedLodFailureCount", 0),
+    mixedLodUntestableDeltaCount: numericMeasurement(combinedA1Result, "mixedLodUntestableDeltaCount", 0),
+    streamingWalkFrames: numericMeasurement(combinedA7Result, "frames", 0),
+    streamingMaxCameraToClodCenterM: numericMeasurement(combinedA7Result, "maxCameraToClodCenterM", 0),
+    streamingMaxCameraToFarShellCenterM: numericMeasurement(combinedA7Result, "maxCameraToFarShellCenterM", 0),
+    streamingMaxLiveClodGapHoles: numericMeasurement(combinedA7Result, "maxLiveClodGapHoles", 0),
+    streamingMaxClodFarGapHoles: numericMeasurement(combinedA7Result, "maxClodFarGapHoles", 0),
+    streamingMaxLiveClodOverlapCells: numericMeasurement(combinedA7Result, "maxLiveClodOverlapCells", 0),
+    streamingMaxHorizonHoleRatio: numericMeasurement(combinedA7Result, "maxHorizonHoleRatio", 0),
+    streamingTextureWindowSwaps: numericMeasurement(combinedA7Result, "textureWindowSwaps", 0),
+    streamingMaxActiveBiomeTextures: numericMeasurement(combinedA7Result, "maxActiveBiomeTextures", 0),
   };
 
   const tEnd = performance.now();
@@ -387,6 +405,10 @@ export async function runAcceptance(
   };
   writeFileSync(buildTimingsPath, JSON.stringify(buildTimingsData, null, 2), "utf-8");
   debugFiles.push(buildTimingsPath);
+
+  const streamingWalkPath = join(runDir, "debug", "streaming_walk.json");
+  writeFileSync(streamingWalkPath, JSON.stringify({ gate: a7Result }, null, 2), "utf-8");
+  debugFiles.push(streamingWalkPath);
 
   if (!config.visual.enabled) {
     const visualUnavailPaths = writeVisualSweepUnavailable(runDir, config, allScreenshotSpecs);
@@ -433,6 +455,7 @@ export async function runAcceptance(
 function mergeGatesAcrossScenes(
   perSceneGates: Map<string, AcceptanceGateResult[]>,
   a5Result: AcceptanceGateResult,
+  a7Result: AcceptanceGateResult,
 ): AcceptanceGateResult[] {
   const merged: Map<string, AcceptanceGateResult> = new Map();
 
@@ -447,10 +470,12 @@ function mergeGatesAcrossScenes(
     }
   }
 
-  if (!merged.has("A5")) {
-    merged.set("A5", a5Result);
-  } else {
-    merged.set("A5", mergeGateResults(merged.get("A5")!, a5Result));
+  for (const gate of [a5Result, a7Result]) {
+    if (!merged.has(gate.id)) {
+      merged.set(gate.id, gate);
+    } else {
+      merged.set(gate.id, mergeGateResults(merged.get(gate.id)!, gate));
+    }
   }
 
   return Array.from(merged.values());
