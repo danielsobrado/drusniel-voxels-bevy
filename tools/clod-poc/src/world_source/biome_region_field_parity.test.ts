@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
 import biomeRegionWgsl from "../gpu/shaders/biome_region_field.wgsl?raw";
-import { BIOME_IDS, classifyBiomeRegion, type BiomeId } from "./biome_region_field.js";
+import {
+  BIOME_COAST_HEIGHT_BAND_M,
+  BIOME_COAST_SHORE_DISTANCE_M,
+  BIOME_FOREST_NOISE_MIN,
+  BIOME_IDS,
+  BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M,
+  BIOME_OCEAN_HEIGHT_MARGIN_M,
+  BIOME_OCEAN_ISLAND_MASK_MAX,
+  BIOME_PLAINS_DISTANCE_MIN,
+  BIOME_PLAINS_NOISE_MIN,
+  BIOME_REGION_CELL_M,
+  BIOME_SWAMP_HEIGHT_ABOVE_SEA_M,
+  BIOME_SWAMP_NOISE_MAX,
+  classifyBiomeRegion,
+  type BiomeId,
+} from "./biome_region_field.js";
 import type { IslandMaskSample } from "./island_shape.js";
 
 const SEA_LEVEL = 18;
 const SEED = 3;
-const REGION_CELL_M = 420;
 const ISLAND_RADIUS_M = 560;
 const LAND_ISLAND: IslandMaskSample = {
   mask: 1,
@@ -31,10 +45,14 @@ function classify(row: GoldenBiomeRow): BiomeId {
     height: row.height,
     seed: SEED,
     seaLevel: SEA_LEVEL,
-    regionCellM: REGION_CELL_M,
+    regionCellM: BIOME_REGION_CELL_M,
     islandRadiusM: ISLAND_RADIUS_M,
     island: row.island,
   }).biome;
+}
+
+function expectWgslNumber(value: number): void {
+  expect(biomeRegionWgsl).toContain(Number.isInteger(value) ? `${value}.0` : String(value));
 }
 
 describe("BiomeRegionField canonical classification", () => {
@@ -53,6 +71,24 @@ describe("BiomeRegionField canonical classification", () => {
 
     for (const row of rows) {
       expect(classify(row), row.name).toBe(row.expected);
+    }
+  });
+
+  it("keeps CPU threshold constants mirrored in WGSL", () => {
+    for (const value of [
+      BIOME_REGION_CELL_M,
+      BIOME_OCEAN_HEIGHT_MARGIN_M,
+      BIOME_OCEAN_ISLAND_MASK_MAX,
+      BIOME_COAST_HEIGHT_BAND_M,
+      BIOME_COAST_SHORE_DISTANCE_M,
+      BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M,
+      BIOME_SWAMP_HEIGHT_ABOVE_SEA_M,
+      BIOME_SWAMP_NOISE_MAX,
+      BIOME_PLAINS_DISTANCE_MIN,
+      BIOME_PLAINS_NOISE_MIN,
+      BIOME_FOREST_NOISE_MIN,
+    ]) {
+      expectWgslNumber(value);
     }
   });
 
