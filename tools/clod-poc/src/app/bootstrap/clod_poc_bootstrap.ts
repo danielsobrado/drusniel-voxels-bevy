@@ -22,6 +22,9 @@ import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/l
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import { applyOwnershipToFarShellRange, resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
 import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
+import { createBakedMacroTintTexture } from "../../gpu/terrain_node_material.js";
+import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
+import { createBiomeTextureStreamingManager } from "../../textures/biome_texture_streaming_manager.js";
 import * as THREE from "three";
 
 export async function bootstrapClodPoc() {
@@ -126,6 +129,33 @@ export async function bootstrapClodPoc() {
     colorByLodUserOverride: postRenderer.uiRefs.colorByLodUserOverride,
     colorByLodController: postRenderer.uiRefs.colorByLodController,
   });
+
+  const biomeTextureStreaming = world.proceduralTerrain
+    ? createBiomeTextureStreamingManager({
+        baseConfig: world.proceduralTextureConfig,
+        sampleBiome: (x, z) => world.worldSource.sampleBiome(x, z),
+        onActiveWindowChanged: (nextConfig) => {
+          const nextTerrain = createProceduralTerrainTextures(nextConfig);
+          const bakeRes = Math.min(512, nextTerrain.noise.resolution);
+          const nextMacroTint = createBakedMacroTintTexture(
+            nextTerrain.noise.noiseA,
+            nextTerrain.noise.noiseB,
+            bakeRes,
+          );
+          world.proceduralTextureConfig = nextConfig;
+          world.proceduralTerrain = nextTerrain;
+          world.bakedMacroTint = nextMacroTint;
+          terrainView.materialController.setProceduralTerrain(nextTerrain, nextConfig, nextMacroTint);
+          terrainView.applyTerrainTextures();
+          postRenderer.longViewHooks?.stats && Object.assign(postRenderer.longViewHooks.stats.counters, {
+            terrainTextureWindowSwaps: biomeTextureStreaming?.stats().textureWindowSwaps ?? 0,
+            terrainTextureFallbackBiomes: biomeTextureStreaming?.stats().fallbackBiomeTextureCount ?? 0,
+          });
+        },
+      })
+    : null;
+
+  biomeTextureStreaming?.update({ x: renderer.camera.position.x, z: renderer.camera.position.z, frameIndex: 0 });
 
   let farSummaryIntegration: FarSummaryIntegration | undefined;
   let naadfIntegration: NaadfIntegration | undefined;
@@ -376,7 +406,7 @@ export async function bootstrapClodPoc() {
       infiniteFarShell,
       farShellMetrics,
     },
-    onFarSummaryUpdate: farSummaryIntegration || naadfIntegration
+    onFarSummaryUpdate: (farSummaryIntegration || naadfIntegration || terrainView.shadowProxyController || biomeTextureStreaming)
       ? (frameIndex: number, deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
           if (farSummaryIntegration) {
             farSummaryIntegration.update(frameIndex, deltaSeconds, camera);
@@ -386,12 +416,9 @@ export async function bootstrapClodPoc() {
             infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
           }
           terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
+          biomeTextureStreaming?.update({ x: camera.position.x, z: camera.position.z, frameIndex });
         }
-      : terrainView.shadowProxyController
-          ? (_frameIndex: number, _deltaSeconds: number, camera: THREE.PerspectiveCamera) => {
-              terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
-            }
-          : undefined,
+      : undefined,
     naadfIntegration,
     getClodErrorCompute: postRenderer.getClodErrorCompute,
     ensureClodErrorCompute: postRenderer.ensureClodErrorCompute,
