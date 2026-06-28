@@ -58,6 +58,7 @@ export function runFrameLoopStartup(
     worldCells,
     maxTerrainLevel,
     longView,
+    floatingOrigin,
   } = input;
   const {
     postProcess,
@@ -264,6 +265,7 @@ export function runFrameLoopStartup(
           session.naadfStatsController?.updateDisplay();
         } }
       : undefined,
+    floatingOrigin: floatingOrigin ? { controller: floatingOrigin } : undefined,
     construction: constructionController
       ? {
           update: () => {
