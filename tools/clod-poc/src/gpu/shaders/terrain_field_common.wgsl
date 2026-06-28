@@ -73,6 +73,7 @@ const DETAIL_WARP : f32 = 4.0;
 
 const HEIGHT_MIN : f32 = 14.0;
 const HEIGHT_MAX : f32 = 118.0;
+const WATER_LEVEL : f32 = 18.0;
 
 // ---- noise ----------------------------------------------------------------
 // Math.imul wraps to i32; WGSL i32 multiply wraps by spec. Inputs are integral.

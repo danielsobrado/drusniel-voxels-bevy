@@ -84,6 +84,7 @@ describe("WGSL module composition", () => {
   it("composes understory ring with explicit understory field bindings and shared terrain functions", () => {
     const source = composeUnderstoryRingShader();
 
+    expect(source).toContain("const WATER_LEVEL : f32 = 18.0;");
     expect(source).toContain("@group(0) @binding(7)");
     expect(source).toContain("@group(0) @binding(8)");
     expect(source).toContain("fn surfaceHeightField");
