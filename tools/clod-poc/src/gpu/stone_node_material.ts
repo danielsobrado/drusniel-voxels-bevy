@@ -137,7 +137,7 @@ export function createStoneNodeMaterial(
   rock = mix(rock, vec3(0.22, 0.3, 0.14), moss.mul(0.25));
   rock = mix(rock, vec3(0.18, 0.15, 0.12), up.oneMinus().mul(0.18));
   if (wetRock) {
-    const fleck = smoothstep(0.78, 0.98, hash2(floor(worldPos.xz.mul(3.5).add(worldPos.y.mul(0.4))))).mul(wetRock).mul(0.42);
+    const fleck: TslNode = smoothstep(0.78, 0.98, hash2(floor(worldPos.xz.mul(3.5).add(worldPos.y.mul(0.4))))).mul(wetRock).mul(0.42);
     rock = mix(rock, rock.mul(vec3(0.42, 0.50, 0.48)), wetRock);
     rock = mix(rock, vec3(0.72, 0.78, 0.74), fleck);
   }

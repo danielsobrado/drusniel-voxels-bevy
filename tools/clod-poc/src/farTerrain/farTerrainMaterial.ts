@@ -7,6 +7,9 @@ import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 import type { FarSummaryGpuAtlasRingView, FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 import { classifyTerrainMaterial, materialColorForDebugId } from "../terrainMaterial/terrainMaterialBands.js";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type TslNode = any;
+
 const SUMMARY_EDGE_EPS = 0.0001;
 const SUMMARY_HEIGHT_RANGE_SHADE_M = 36.0;
 const SUMMARY_HEIGHT_RANGE_SHADE_STRENGTH = 0.28;
@@ -24,15 +27,15 @@ export interface FarTerrainVertexColors {
 }
 
 export interface FarTerrainSummaryRingUniformRefs {
-  uOriginX: ReturnType<typeof uniform>;
-  uOriginZ: ReturnType<typeof uniform>;
-  uCellM: ReturnType<typeof uniform>;
-  uStartM: ReturnType<typeof uniform>;
-  uEndM: ReturnType<typeof uniform>;
-  uRowOffsetCells: ReturnType<typeof uniform>;
-  uWidthCells: ReturnType<typeof uniform>;
-  uHeightCells: ReturnType<typeof uniform>;
-  uValid: ReturnType<typeof uniform>;
+  uOriginX: TslNode;
+  uOriginZ: TslNode;
+  uCellM: TslNode;
+  uStartM: TslNode;
+  uEndM: TslNode;
+  uRowOffsetCells: TslNode;
+  uWidthCells: TslNode;
+  uHeightCells: TslNode;
+  uValid: TslNode;
 }
 
 export interface FarTerrainUniformRefs {
@@ -93,9 +96,9 @@ export function createFarTerrainMaterial(
 
   let surfaceNormal = normalize(normalGeometry) as unknown as ReturnType<typeof vec3>;
   let surfaceColor = vertexColor() as unknown as ReturnType<typeof vec3>;
-  let uSummaryWidthCells: ReturnType<typeof uniform> | undefined;
-  let uSummaryHeightCells: ReturnType<typeof uniform> | undefined;
-  let uSummaryValid: ReturnType<typeof uniform> | undefined;
+  let uSummaryWidthCells: TslNode | undefined;
+  let uSummaryHeightCells: TslNode | undefined;
+  let uSummaryValid: TslNode | undefined;
   let uSummaryRings: FarTerrainSummaryRingUniformRefs[] | undefined;
 
   const material = new MeshBasicNodeMaterial();
@@ -135,7 +138,7 @@ export function createFarTerrainMaterial(
           .mul(step(float(0.0), atlasVCells))
           .mul(step(atlasVCells, ringRefs.uHeightCells.sub(float(SUMMARY_EDGE_EPS))));
         const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM.sub(float(SUMMARY_EDGE_EPS))));
-        const atlasWeight = heightSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
+        const atlasWeight: TslNode = heightSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
 
         const atlasUCellL = clamp(atlasUCell.sub(float(1.0)), float(0.0), ringRefs.uWidthCells.sub(float(1.0)));
         const atlasUCellR = clamp(atlasUCell.add(float(1.0)), float(0.0), ringRefs.uWidthCells.sub(float(1.0)));
@@ -151,9 +154,9 @@ export function createFarTerrainMaterial(
         const hU = texture(summaryAtlas.texture, atlasUvU).r;
         const dx = max(atlasUCellR.sub(atlasUCellL), float(1.0)).mul(ringRefs.uCellM);
         const dz = max(atlasVCellU.sub(atlasVCellD), float(1.0)).mul(ringRefs.uCellM);
-        const dhdx = hR.sub(hL).div(dx);
-        const dhdz = hU.sub(hD).div(dz);
-        const atlasNormal = normalize(vec3(float(0.0).sub(dhdx), float(1.0), float(0.0).sub(dhdz)));
+        const dhdx: TslNode = hR.sub(hL).div(dx);
+        const dhdz: TslNode = hU.sub(hD).div(dz);
+        const atlasNormal: TslNode = normalize(vec3(float(0.0).sub(dhdx), float(1.0), float(0.0).sub(dhdz)));
 
         const heightRange = clamp(heightSample.b.sub(heightSample.g).div(float(SUMMARY_HEIGHT_RANGE_SHADE_M)), float(0.0), float(1.0));
         const rangeShade = float(1.0).sub(heightRange.mul(float(SUMMARY_HEIGHT_RANGE_SHADE_STRENGTH)).mul(atlasWeight));

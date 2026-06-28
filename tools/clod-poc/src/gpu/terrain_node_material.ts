@@ -31,9 +31,9 @@ import {
 } from "three/tsl";
 import type { TerrainNodeTextureSlot } from "../textures/terrainTextureArrays.js";
 import type { TerrainDebugState } from "../rendering/terrain_material.js";
-import type { TerrainArraySamplingMode } from "../terrain/material/terrain_texture_controller.js";
 
-export type { TerrainArraySamplingMode };
+/** Array-texture sampling mode: disabled, single-plane, or triplanar projection. */
+export type TerrainArraySamplingMode = "off" | "planar" | "triplanar";
 
 type TslNode = any;
 export type BiomeLayerSet = readonly [number, number, number];
@@ -115,7 +115,7 @@ export interface TerrainColorAdjust {
   warmth: number;
 }
 
-function v3(c: THREE.Color): TslNode { return vec3(c.r, c.g, c.b); }
+function v3(c: THREE.Color): THREE.Vector3 { return new THREE.Vector3(c.r, c.g, c.b); }
 
 function interleavedGradientNoise(coord: TslNode): TslNode {
   return fract(coord.x.mul(0.06711056).add(coord.y.mul(0.00583715)).mul(52.9829189));
@@ -133,7 +133,7 @@ function adjustColor(color: TslNode, brightness: TslNode, contrast: TslNode, sat
 }
 
 function triplanarWeights(n: TslNode): TslNode {
-  const w = pow(abs(n), vec3(4.0));
+  const w: TslNode = pow(abs(n) as TslNode, vec3(4.0) as TslNode);
   const s = w.x.add(w.y).add(w.z);
   return w.div(max(s, 0.0001));
 }
@@ -142,8 +142,24 @@ function roundedLayer(layer: TslNode): TslNode {
   return floor(max(layer, 0.0).add(0.5));
 }
 
+function heightBandWeight(
+  heightMin: number,
+  heightMax: number,
+  height: TslNode,
+  blendWidth: TslNode,
+): TslNode {
+  const minEdge = float(heightMin);
+  const maxEdge = float(heightMax);
+  return smoothstep(minEdge.sub(blendWidth), minEdge.add(blendWidth), height)
+    .mul(float(1).sub(smoothstep(maxEdge.sub(blendWidth), maxEdge.add(blendWidth), height)));
+}
+
 function sampleArray(tex: THREE.DataArrayTexture, uv: TslNode, layer: TslNode): TslNode {
-  return texture(tex, vec3(fract(uv.x), fract(uv.y), roundedLayer(layer)));
+  // DataArrayTexture must be sampled with a vec2 uv + `.depth(layer)`; passing the layer as the
+  // z of a vec3 makes three slice the coord to `.xy` and emit an array sample with no array_index
+  // (invalid WGSL). Round the layer so interpolated/attribute-driven indices don't jitter between
+  // adjacent layers (screen-door speckle).
+  return texture(tex, vec2(fract(uv.x), fract(uv.y))).depth(roundedLayer(layer));
 }
 
 function layerScale(layer: TslNode, slots: readonly TerrainNodeTextureSlot[]): TslNode {
@@ -222,12 +238,11 @@ function sampleTerrainTexture(
   slots.forEach((slot, i) => {
     const layer = float(i);
     const sample = triplanarAlbedo(tex, layer, worldPos, float(slot.scale), weights, useTriplanar);
-    const w = smoothstep(slot.heightMin - blendWidth, slot.heightMin + blendWidth, height)
-      .mul(float(1).sub(smoothstep(slot.heightMax - blendWidth, slot.heightMax + blendWidth, height)));
+    const w = heightBandWeight(slot.heightMin, slot.heightMax, height, blendWidth);
     acc = acc.add(sample.mul(w));
     wsum = wsum.add(w);
     const center = (slot.heightMin + slot.heightMax) * 0.5;
-    const dist: TslNode = abs(height.sub(center));
+    const dist: TslNode = abs(height.sub(float(center)));
     const closer: TslNode = step(dist, bestDist);
     nearest = mix(nearest, sample, closer);
     bestDist = min(bestDist, dist);
@@ -253,17 +268,17 @@ function sampleTerrainNormal(
   slots.forEach((slot, i) => {
     const layer = float(i);
     const sample = triplanarNormal(tex, layer, worldPos, normal, float(slot.scale), weights, intensity, float(normalMapMask?.[i] ?? 1));
-    const w = smoothstep(slot.heightMin - blendWidth, slot.heightMin + blendWidth, height)
-      .mul(float(1).sub(smoothstep(slot.heightMax - blendWidth, slot.heightMax + blendWidth, height)));
+    const w = heightBandWeight(slot.heightMin, slot.heightMax, height, blendWidth);
     acc = acc.add(sample.mul(w));
     wsum = wsum.add(w);
     const center = (slot.heightMin + slot.heightMax) * 0.5;
-    const dist: TslNode = abs(height.sub(center));
+    const dist: TslNode = abs(height.sub(float(center)));
     const closer: TslNode = step(dist, bestDist);
     nearest = mix(nearest, sample, closer);
     bestDist = min(bestDist, dist);
   });
-  return normalize(mix(nearest, acc.div(max(wsum, 0.001)), step(0.0001, wsum)));
+  const blended: TslNode = mix(nearest, acc.div(max(wsum, 0.001)), step(0.0001, wsum));
+  return normalize(blended);
 }
 
 function biomeLayer(biome: TslNode, sets: readonly BiomeLayerSet[], channel: 0 | 1 | 2): TslNode {
@@ -521,7 +536,7 @@ export function createTerrainNodeMaterial(
     if (textures.procedural) tex = proceduralMacroTint(tex, worldPos, geomN, textures.procedural);
     if (textures.bakedMacroTint) {
       const ws = textures.worldSize ?? 1024;
-      const baked = texture(textures.bakedMacroTint, worldPos.xz.div(ws));
+      const baked = texture(textures.bakedMacroTint, worldPos.xz.div(ws)).rgb;
       tex = isFarTier.select(baked, tex);
     }
     if (textures.painted) {

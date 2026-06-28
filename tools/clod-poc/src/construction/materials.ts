@@ -81,16 +81,18 @@ export function createConstructionMaterial(material: ConstructionMaterial): THRE
   const result = new THREE.MeshStandardMaterial({
     name: `construction-${asset.id}`,
     color: textures.albedo ? 0xffffff : asset.color,
-    map: textures.albedo,
-    normalMap: textures.normal,
-    normalScale: textures.normal
-      ? new THREE.Vector2(asset.normalScale ?? DEFAULT_NORMAL_SCALE, asset.normalScale ?? DEFAULT_NORMAL_SCALE)
-      : undefined,
     roughness: asset.roughness,
-    roughnessMap: textures.roughness,
     metalness: asset.metalness,
-    aoMap: textures.ao,
-    aoMapIntensity: asset.aoIntensity ?? DEFAULT_AO_INTENSITY,
+    ...(textures.albedo ? { map: textures.albedo } : {}),
+    ...(textures.normal ? {
+      normalMap: textures.normal,
+      normalScale: new THREE.Vector2(asset.normalScale ?? DEFAULT_NORMAL_SCALE, asset.normalScale ?? DEFAULT_NORMAL_SCALE),
+    } : {}),
+    ...(textures.roughness ? { roughnessMap: textures.roughness } : {}),
+    ...(textures.ao ? {
+      aoMap: textures.ao,
+      aoMapIntensity: asset.aoIntensity ?? DEFAULT_AO_INTENSITY,
+    } : {}),
   });
   return result;
 }

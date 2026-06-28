@@ -236,4 +236,12 @@ describe("Content Registry Validation Tests", () => {
     expect(wrapper).toContain("getBiomeTextureSlotSet");
     expect(wrapper).toContain("EXPECTED_BIOME_REGION_IDS");
   });
+
+  it("20. terrain material color uniforms use runtime vector values", () => {
+    const materialPath = resolve(import.meta.dirname, "../gpu/terrain_node_material.ts");
+    const material = readFileSync(materialPath, "utf8");
+    expect(material).toContain("function v3(c: THREE.Color): THREE.Vector3");
+    expect(material).toContain("new THREE.Vector3(c.r, c.g, c.b)");
+    expect(material).not.toContain("function v3(c: THREE.Color): TslNode");
+  });
 });

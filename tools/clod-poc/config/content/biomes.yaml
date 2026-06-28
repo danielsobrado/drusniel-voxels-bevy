@@ -132,7 +132,7 @@
     notes: High elevation regions dominated by rock and snow slots.
   defaultMaterialId: rock
   waterMaterialId: water
-  textureSlotSet: [rock, snow, dirt]
+  textureSlotSet: [rock, rock, snow]
   tags: [islands, mountain, spatial-region]
   terrainBands:
     - id: mountain-foot
@@ -200,7 +200,7 @@
     notes: Shoreline transition region around islands.
   defaultMaterialId: sand
   waterMaterialId: water
-  textureSlotSet: [sand, rock, grass-top]
+  textureSlotSet: [sand, sand, rock]
   tags: [islands, shoreline, spatial-region]
   terrainBands:
     - id: coast-wet

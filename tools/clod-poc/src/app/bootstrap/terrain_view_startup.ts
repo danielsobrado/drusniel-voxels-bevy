@@ -222,6 +222,11 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     saturation: state.postProcessSaturation,
     vignette: state.postProcessVignette,
     debugMode: state.postProcessDebugMode,
+    godRaysMode: state.godRaysMode,
+    godRaysDensity: state.godRaysDensity,
+    godRaysDecay: state.godRaysDecay,
+    godRaysWeight: state.godRaysWeight,
+    godRaysExposure: state.godRaysExposure,
   });
   const skyEnvironment: AppSky = app.isWebGpu
     ? new WebGpuSkyEnvironment({

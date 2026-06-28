@@ -32,7 +32,7 @@ import {
 } from "../../cache/terrainSource.js";
 import { clearWorkerCacheSnapshot } from "../../cache/cacheMetricsBridge.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
-import { bakeMacroTint } from "../../gpu/terrain_node_material.js";
+import { createBakedMacroTintTexture } from "../../gpu/terrain_node_material.js";
 import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "../../diagonalPolish.js";
 import { parseProceduralTextureConfig } from "../../textures/materialRecipes.js";
 import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
@@ -228,11 +228,10 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   let bakedMacroTint: THREE.DataTexture | null = null;
   if (proceduralTerrain) {
     const bakeRes = Math.min(512, proceduralTerrain.noise.resolution);
-    bakedMacroTint = bakeMacroTint(
+    bakedMacroTint = createBakedMacroTintTexture(
       proceduralTerrain.noise.noiseA,
       proceduralTerrain.noise.noiseB,
       bakeRes,
-      worldCells,
     );
   }
   if (isRiverParityTestScene(searchParams.get("scene"))) waterConfig = applyRiverParityTestWaterConfig(waterConfig);

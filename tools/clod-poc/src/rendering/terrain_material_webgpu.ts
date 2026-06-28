@@ -177,7 +177,12 @@ function textureOptionsSignature(
   const normalMapMask = procedural?.normalMapMask
     ? Array.from(procedural.normalMapMask).join(",")
     : slots.map((slot) => (slot.normalTexture ? 1 : 0)).join(",");
-  const biomeLayerSets = buildBiomeLayerSets(slots).map((set) => set.join(",")).join(";");
+  // Only compute biome layer sets when the splat path is enabled — buildBiomeLayerSets calls the
+  // uncached loadContentRegistry (full YAML parse + validation), which is far too expensive to run
+  // on every setTextures signature when the default height-band path is active.
+  const biomeLayerSets = extras.biomeSplat === true
+    ? buildBiomeLayerSets(slots).map((set) => set.join(",")).join(";")
+    : "";
   return [
     "on",
     options.albedoArray.uuid,
@@ -235,7 +240,10 @@ function toNodeTextures(
     normalMapMask,
     painted: options.painted ?? false,
     debugMode: options.procedural?.debugMode ?? 0,
-    biomeLayerSets: buildBiomeLayerSets(slots),
+    // Opt-in: the biome splat path replaces the proven per-slot height-band blend with a
+    // low/mid/high biome blend. It still needs visual QA, so default to the height-band path
+    // unless explicitly enabled.
+    biomeLayerSets: extras.biomeSplat === true ? buildBiomeLayerSets(slots) : undefined,
     procedural: options.procedural?.enabled && options.procedural.noiseA && options.procedural.noiseB
       ? {
           noiseA: options.procedural.noiseA,

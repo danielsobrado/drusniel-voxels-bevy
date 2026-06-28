@@ -3,6 +3,9 @@ import { clamp, float, mix, positionGeometry, sin, smoothstep, step, texture, un
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarSummaryGpuAtlasRingView, FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type TslNode = any;
+
 const SUMMARY_EDGE_EPS = 0.0001;
 const WATER_SURFACE_OFFSET_M = 0.42;
 const WATER_ALPHA = 0.62;
@@ -13,15 +16,15 @@ const WATER_RIPPLE_SCALE_1 = 0.012;
 const WATER_RIPPLE_SCALE_2 = 0.021;
 
 export interface FarWaterSummaryRingUniformRefs {
-  uOriginX: ReturnType<typeof uniform>;
-  uOriginZ: ReturnType<typeof uniform>;
-  uCellM: ReturnType<typeof uniform>;
-  uStartM: ReturnType<typeof uniform>;
-  uEndM: ReturnType<typeof uniform>;
-  uRowOffsetCells: ReturnType<typeof uniform>;
-  uWidthCells: ReturnType<typeof uniform>;
-  uHeightCells: ReturnType<typeof uniform>;
-  uValid: ReturnType<typeof uniform>;
+  uOriginX: TslNode;
+  uOriginZ: TslNode;
+  uCellM: TslNode;
+  uStartM: TslNode;
+  uEndM: TslNode;
+  uRowOffsetCells: TslNode;
+  uWidthCells: TslNode;
+  uHeightCells: TslNode;
+  uValid: TslNode;
 }
 
 export interface FarWaterUniformRefs {
@@ -47,8 +50,8 @@ export function createFarWaterMaterial(
   const worldX = local.x.add(uCenterX);
   const worldZ = local.z.add(uCenterZ);
   const distXZ = vec2(local.x, local.z).length();
-  let waterHeight = float(0.0);
-  let waterCoverage = float(0.0);
+  let waterHeight: TslNode = float(0.0);
+  let waterCoverage: TslNode = float(0.0);
 
   for (const ringRefs of uSummaryRings) {
     const atlasUCells = worldX.sub(ringRefs.uOriginX).div(ringRefs.uCellM);
@@ -65,7 +68,7 @@ export function createFarWaterMaterial(
       .mul(step(float(0.0), atlasVCells))
       .mul(step(atlasVCells, ringRefs.uHeightCells.sub(float(SUMMARY_EDGE_EPS))));
     const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM.sub(float(SUMMARY_EDGE_EPS))));
-    const atlasWeight = heightSample.a.mul(coverageSample.a).mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
+    const atlasWeight: TslNode = heightSample.a.mul(coverageSample.a).mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
     waterHeight = mix(waterHeight, heightSample.r, atlasWeight);
     waterCoverage = mix(waterCoverage, coverageSample.g, atlasWeight);
   }

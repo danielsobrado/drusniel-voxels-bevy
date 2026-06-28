@@ -25,6 +25,9 @@ import { sampleBiomeId, sampleSkirtHeight, summaryBaseLevel } from "../clod/terr
 import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer } from "../farTerrain/farTerrainMaterial.js";
 import { writeBiomeRgb } from "../world_source/biome_colors.js";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type TslNode = any;
+
 export interface FarHeightProvider {
   sampleHeight(x: number, z: number): number;
   sampleNormal(x: number, z: number): THREE.Vector3;
@@ -222,7 +225,7 @@ export function buildFarTerrainShell(
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
   const uHaze = uniform(v3(lighting.skyLight));
-  const base = attribute("color", "vec3");
+  const base: TslNode = attribute("color", "vec3");
   const sun = max(dot(n, uLight), 0.0);
   const sky = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi = mix(uGround, uSky, sky);

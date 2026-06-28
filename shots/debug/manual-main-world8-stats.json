@@ -1,0 +1,8 @@
+{
+  "url": "http://127.0.0.1:5180/?world=8&clodPerf=1&webgpuSelection=1&farShell=1&hud=1",
+  "title": "Drusniel RPG Voxels with Surfacenets",
+  "hooks": false,
+  "error": null,
+  "stats": null,
+  "body": "CLOD Runtime\n−\n×\n8x8 pages\nTriangles\n86,219\nLOD cut\nL3:1\n2:1 splits\n0\nBlocked\n0\nBubble splits\n0\nError threshold\n1.00 px\nlive cut\nready\n\ndiag polish: candidates=42,077 flips=7,190 rejected=34,887 avg_gain=0.1092\n\nDebug stats\n−\n×\nDrusniel Voxels Web — 8x8 pages\ncut: 1 nodes  (L3:1)\ntris rendered: 86,219   2:1 forced splits: 0   bubble forced splits: 0   xLOD borders: 0\nthreshold: 1.00 px   avg FPS: 144.1   \nrenderer: WebGPU   selection: webgpu 0.00ms   gpu-compute: webgpu=ready rb=async age=3f dispatch=0.00ms read=1.90ms parity=ok d=0.0000px dOnly=0\ndiag polish: candidates=42,077 flips=7,190 rejected=34,887 avg_gain=0.1092\nworker: parents pending=0 rebuilt=0 0ms   colliders loaded=0   CLOD PERF\ngrass: disabled webgpu-ring-v1 0 blades patches=0/0 tiers n/m/f/s=0/0/0/0 edge-skip=0 rebuilds=0 build=0.0ms gpu-grass=disabled\ntrees: disabled 0 trees patches=0/0 lod n/m/f/i=0/0/0/0\nunderstory: enabled 4,592 props patches=0/0 shrub/fern/sap/flower/log/stump=2000/731/408/1453/0/0\nforest light: ca"
+}
