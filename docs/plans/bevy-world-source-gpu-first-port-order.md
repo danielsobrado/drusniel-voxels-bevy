@@ -28,12 +28,13 @@ Done:
 - WorldSource terrain generation uses `BiomeContentTable` instead of bridge-local material rules.
 - Bevy now has `WorldSourceDriftGateReport` with explicit `passed`, `failed`, and `skipped` states for CPU/GPU drift checks.
 - Bevy now has `TerrainSourceStartupReport` and config-bound startup diagnostics for active terrain source mode.
+- Bevy now has `world_source_acceptance`, a release-oriented acceptance bench that writes `bench-runs/<run>/summary.json`.
 
 Not done yet:
 
 - Bevy renderer/material path currently receives a compatibility biome id inferred from legacy four-channel material weights; true WorldSource biome IDs should replace it before visual parity is claimed.
 - GPU readback producer is not implemented yet; until it is available, the drift gate reports `skipped`, not `passed`.
-- Release bench and acceptance JSON output are still pending.
+- Legacy bridge removal is still pending final visual parity and accepted bench thresholds.
 
 ## Shared contract source of truth
 
@@ -58,6 +59,7 @@ Not done yet:
 | Voxel biome content | seven-biome table | compatibility | n/a | `BiomeContentTable` | Shared Bevy content |
 | Drift gate status | pass/fail/skip | n/a | readback input | `WorldSourceDriftGateReport` | Explicit status |
 | Terrain source runtime path | GPU default / CPU reference / legacy | n/a | n/a | `TerrainSourceStartupReport` | Explicit status |
+| Acceptance summary | `bench-runs/<run>/summary.json` | n/a | n/a | `world_source_acceptance` | Explicit report |
 
 ## Jira tasks
 
@@ -206,20 +208,25 @@ Acceptance:
 
 ### BVY-WS-11 — Add Bevy release bench and acceptance report
 
-Status: Next.
+Status: Done.
 
 Acceptance:
 
-- [ ] Release-mode bench runs.
-- [ ] Report includes terrain source mode.
-- [ ] Report includes chunk generation and mesh build time.
-- [ ] Report includes material/draw count impact.
-- [ ] Report includes CPU/GPU drift gate status.
-- [ ] Writes `bench-runs/<run>/summary.json`.
+- [x] Release-mode bench command documented as `cargo run --release --bin world_source_acceptance`.
+- [x] Report includes terrain source mode.
+- [x] Report includes chunk generation and mesh build time.
+- [x] Report includes material/draw count impact.
+- [x] Report includes CPU/GPU drift gate status.
+- [x] Writes `bench-runs/<run>/summary.json`.
+
+Notes:
+
+- GPU readback is still unavailable, so the generated `drift_gate.status` is expected to be `skipped` until a GPU readback producer is added.
+- The acceptance bench measures sampled WorldSource chunk generation and mesh generation outside the full Bevy render loop.
 
 ### BVY-WS-12 — Remove temporary legacy bridge after visual parity
 
-Status: Pending.
+Status: Next.
 
 Acceptance:
 
@@ -249,14 +256,14 @@ npm --prefix tools/clod-poc run build
 Bevy:
 
 ```powershell
-cargo test world::source::terrain_source_config
-cargo test world::source::terrain_source_diagnostics
+cargo test --bin world_source_acceptance
 cargo test world::source
 cargo test
+cargo run --release --bin world_source_acceptance
 ```
 
 Bevy bench after BVY-WS-11:
 
 ```powershell
-cargo run --release -- --bench world_source
+cargo run --release --bin world_source_acceptance
 ```
