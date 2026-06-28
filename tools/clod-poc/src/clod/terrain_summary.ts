@@ -3,14 +3,15 @@
 // Mirrors the far-water downsample pattern (farWaterSurface.ts): box-filter the per-page
 // height envelope into a coarse grid, then provide samplers for the far shell (LV-2),
 // shadow proxy (LV-3), and canopy shell (LV-4).  Cells with no page coverage fall back
-// to the cheap far branch of the terrain field (surfaceHeightCore) so the horizon never
-// gaps.  Built off the render loop, debounced on page-tree revision — never per-frame.
+// to the analytic WorldSource when one is available so the horizon never gaps. Built off
+// the render loop, debounced on page-tree revision — never per-frame.
 
 import * as THREE from "three";
 import type { ClodPageNode } from "../types.js";
 import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
 import { BiomeRegionField } from "../world_source/biome_region_field.js";
 import { getTerrainFieldCoreConfig } from "../gpu/terrain_field_core.js";
+import type { WorldSource } from "../world_source/world_source.js";
 
 export interface TerrainSummaryField {
   /** Number of cells per axis in the coarse grid. */
@@ -33,6 +34,12 @@ export interface TerrainSummaryField {
   coverage: Float32Array;
   /** Dominant biome/material id per cell when built analytically. */
   biomeId?: Uint8Array;
+  /** Analytic height fallback for cells outside the baked summary footprint. */
+  analyticHeightSampler?: (x: number, z: number) => number;
+}
+
+export interface TerrainSummaryBuildOptions {
+  worldSource?: Pick<WorldSource, "sampleHeight" | "sampleBiome">;
 }
 
 function gridIndex(res: number, x: number, z: number): number {
@@ -43,6 +50,32 @@ function gridIndex(res: number, x: number, z: number): number {
 function cellCenter(res: number, worldSize: number, fx: number, fz: number): [number, number] {
   const cellSize = worldSize / res;
   return [(fx + 0.5) * cellSize, (fz + 0.5) * cellSize];
+}
+
+function defaultBiomeSampler(): (x: number, z: number, height: number) => number {
+  const terrainConfig = getTerrainFieldCoreConfig();
+  const biomeField = new BiomeRegionField({
+    seed: terrainConfig.seed,
+    seaLevel: terrainConfig.seaLevel,
+    islandShape: terrainConfig.islandShape,
+  });
+  return (x, z, height) => biomeField.sample(x, z, height).biome;
+}
+
+export function populateTerrainSummaryBiomes(
+  field: TerrainSummaryField,
+  worldSource: Pick<WorldSource, "sampleHeight" | "sampleBiome">,
+): TerrainSummaryField {
+  const biomeId = new Uint8Array(field.res * field.res);
+  for (let fz = 0; fz < field.res; fz++) {
+    for (let fx = 0; fx < field.res; fx++) {
+      const [wx, wz] = cellCenter(field.res, field.worldSize, fx, fz);
+      biomeId[gridIndex(field.res, fx, fz)] = worldSource.sampleBiome(wx, wz);
+    }
+  }
+  field.biomeId = biomeId;
+  field.analyticHeightSampler = (x, z) => worldSource.sampleHeight(x, z);
+  return field;
 }
 
 /**
@@ -57,6 +90,7 @@ export function buildTerrainSummary(
   allNodes: readonly ClodPageNode[],
   worldSize: number,
   farReduceFactor: number,
+  options: TerrainSummaryBuildOptions = {},
 ): TerrainSummaryField {
   const reduce = Math.max(1, Math.floor(farReduceFactor));
   // LOD0 page grid resolution
@@ -71,12 +105,12 @@ export function buildTerrainSummary(
   const normalZ = new Float32Array(summaryRes * summaryRes).fill(0);
   const coverage = new Float32Array(summaryRes * summaryRes).fill(0);
   const biomeId = new Uint8Array(summaryRes * summaryRes);
-  const terrainConfig = getTerrainFieldCoreConfig();
-  const biomeField = new BiomeRegionField({
-    seed: terrainConfig.seed,
-    seaLevel: terrainConfig.seaLevel,
-    islandShape: terrainConfig.islandShape,
-  });
+  const analyticHeight = options.worldSource
+    ? (x: number, z: number) => options.worldSource!.sampleHeight(x, z)
+    : (x: number, z: number) => surfaceHeightCore(x, z);
+  const analyticBiome = options.worldSource
+    ? (x: number, z: number, _height: number) => options.worldSource!.sampleBiome(x, z)
+    : defaultBiomeSampler();
 
   const cellSize = worldSize / summaryRes;
 
@@ -100,19 +134,17 @@ export function buildTerrainSummary(
     }
   }
 
-  // Phase 2: fill uncovered cells with surfaceHeightCore fallback
+  // Phase 2: fill uncovered cells with the analytic world source fallback
   for (let fz = 0; fz < summaryRes; fz++) {
     for (let fx = 0; fx < summaryRes; fx++) {
       const idx = gridIndex(summaryRes, fx, fz);
+      const [wx, wz] = cellCenter(summaryRes, worldSize, fx, fz);
       if (!Number.isFinite(heightMin[idx])) {
-        // No page coverage — sample the analytic terrain field
-        const [wx, wz] = cellCenter(summaryRes, worldSize, fx, fz);
-        const y = surfaceHeightCore(wx, wz);
+        const y = analyticHeight(wx, wz);
         heightMin[idx] = y;
         heightMax[idx] = y;
       }
-      const [wx, wz] = cellCenter(summaryRes, worldSize, fx, fz);
-      biomeId[idx] = biomeField.sample(wx, wz, heightMax[idx]).biome;
+      biomeId[idx] = analyticBiome(wx, wz, heightMax[idx]);
     }
   }
 
@@ -135,7 +167,19 @@ export function buildTerrainSummary(
     }
   }
 
-  return { res: summaryRes, worldSize, farReduceFactor: reduce, heightMin, heightMax, normalX, normalY, normalZ, coverage, biomeId };
+  return {
+    res: summaryRes,
+    worldSize,
+    farReduceFactor: reduce,
+    heightMin,
+    heightMax,
+    normalX,
+    normalY,
+    normalZ,
+    coverage,
+    biomeId,
+    analyticHeightSampler: analyticHeight,
+  };
 }
 
 /** Sample height at world position (x, z). Bilinear interpolation. */
@@ -276,8 +320,8 @@ export function summaryBaseLevel(field: TerrainSummaryField): number {
  * Far-skirt surface height at world (x, z).
  *
  * Inside the summary footprint [0, worldSize] the height comes from the baked summary
- * (sampleHeightBlend); beyond it, from the analytic field (surfaceHeightCore), which continues
- * infinitely.  The two cross-fade over a band near the world edge so the skirt joins the pages
+ * (sampleHeightBlend); beyond it, from the analytic source, which continues infinitely.
+ * The two cross-fade over a band near the world edge so the skirt joins the pages
  * seamlessly.  Past the edge the height also recedes gently toward `baseLevel` (distance from the
  * world edge → `farRadius`) so distant land sinks toward the horizon instead of extruding the
  * edge height flat.
@@ -296,7 +340,7 @@ export function sampleSkirtHeight(
 ): number {
   const worldSize = field.worldSize;
   const baked = sampleHeightBlend(field, x, z, bias);
-  const analytic = surfaceHeightCore(x, z);
+  const analytic = field.analyticHeightSampler?.(x, z) ?? surfaceHeightCore(x, z);
   // signed inset from the world square boundary: >0 inside, <=0 at/beyond the edge
   const inner = Math.min(Math.min(x, worldSize - x), Math.min(z, worldSize - z));
   const edgeBand = worldSize * 0.1;
