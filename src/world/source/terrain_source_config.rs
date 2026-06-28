@@ -28,6 +28,28 @@ impl Default for TerrainSourceMode {
     }
 }
 
+impl TerrainSourceMode {
+    pub fn acceptance_label(self) -> &'static str {
+        match self {
+            Self::GpuWorldSource => "gpu_world_source",
+            Self::CpuWorldSourceReference => "cpu_world_source_reference",
+            Self::Legacy => "legacy",
+        }
+    }
+
+    pub fn selection_reason(self) -> &'static str {
+        match self {
+            Self::GpuWorldSource => "default_gpu",
+            Self::CpuWorldSourceReference => "explicit_cpu_reference",
+            Self::Legacy => "explicit_legacy",
+        }
+    }
+
+    pub fn is_opt_in_non_gpu(self) -> bool {
+        !matches!(self, Self::GpuWorldSource)
+    }
+}
+
 impl Default for TerrainSourceConfig {
     fn default() -> Self {
         Self {
@@ -45,7 +67,7 @@ impl TerrainSourceConfig {
     }
 
     pub fn load_or_default() -> Self {
-        match Self::load(TERRAIN_SOURCE_CONFIG_PATH) {
+        let config = match Self::load(TERRAIN_SOURCE_CONFIG_PATH) {
             Ok(config) => config,
             Err(error) => {
                 bevy::log::warn!(
@@ -55,7 +77,9 @@ impl TerrainSourceConfig {
                 );
                 Self::default()
             }
-        }
+        };
+        config.log_startup_diagnostics();
+        config
     }
 
     pub fn is_gpu_default_path(&self) -> bool {
@@ -68,6 +92,17 @@ impl TerrainSourceConfig {
 
     pub fn is_legacy(&self) -> bool {
         self.mode == TerrainSourceMode::Legacy
+    }
+
+    pub fn log_startup_diagnostics(&self) {
+        bevy::log::info!(
+            "Terrain source startup diagnostics: runtime_path={}, configured_mode={:?}, selection_reason={}, gpu_default_runtime={}, opt_in_non_gpu={}",
+            self.mode.acceptance_label(),
+            self.mode,
+            self.mode.selection_reason(),
+            self.is_gpu_default_path(),
+            self.mode.is_opt_in_non_gpu(),
+        );
     }
 }
 
@@ -88,6 +123,9 @@ mod tests {
 
         assert_eq!(config.mode, TerrainSourceMode::GpuWorldSource);
         assert!(config.is_gpu_default_path());
+        assert_eq!(config.mode.acceptance_label(), "gpu_world_source");
+        assert_eq!(config.mode.selection_reason(), "default_gpu");
+        assert!(!config.mode.is_opt_in_non_gpu());
     }
 
     #[test]
@@ -105,6 +143,9 @@ mod tests {
 
         assert_eq!(config.mode, TerrainSourceMode::Legacy);
         assert!(config.is_legacy());
+        assert_eq!(config.mode.acceptance_label(), "legacy");
+        assert_eq!(config.mode.selection_reason(), "explicit_legacy");
+        assert!(config.mode.is_opt_in_non_gpu());
     }
 
     #[test]
@@ -114,6 +155,9 @@ mod tests {
 
         assert_eq!(config.mode, TerrainSourceMode::CpuWorldSourceReference);
         assert!(config.is_explicit_cpu_reference());
+        assert_eq!(config.mode.acceptance_label(), "cpu_world_source_reference");
+        assert_eq!(config.mode.selection_reason(), "explicit_cpu_reference");
+        assert!(config.mode.is_opt_in_non_gpu());
     }
 
     #[test]
