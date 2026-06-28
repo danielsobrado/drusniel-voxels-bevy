@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use bevy::prelude::{IVec3, UVec3};
+use bevy::prelude::IVec3;
 use clap::Parser;
 use serde::Serialize;
 use voxel_builder::constants::{CHUNK_SIZE, CHUNK_SIZE_I32, CHUNK_VOLUME};
@@ -13,7 +13,6 @@ use voxel_builder::voxel::meshing::{
     WaterAirExposureMode,
 };
 use voxel_builder::voxel::skirt::NeighborLods;
-use voxel_builder::voxel::types::VoxelType;
 use voxel_builder::voxel::world::VoxelWorld;
 use voxel_builder::world::source::{
     evaluate_world_source_cpu_gpu_drift, ProceduralWorldSourceTerrainBridge, TerrainSourceConfig,
