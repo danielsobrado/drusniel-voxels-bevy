@@ -71,7 +71,8 @@ use std::sync::OnceLock;
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
 const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;
 
-pub mod baked_ao;
+mod baked_ao;
+mod biome_channel;
 mod blocky;
 pub mod commit;
 mod data;
@@ -89,6 +90,10 @@ pub use blocky::get_blocky_material_index;
 pub use data::*;
 pub use pipeline::*;
 pub use sdf::{LodMeshConfig, lod_delta_gt_one_face_mask, mesher_smoothed_sdf_at_world_pos};
+pub(crate) use biome_channel::{
+    compatibility_biome_from_triplanar_weights, compatibility_biome_id_for_uv,
+    encode_biome_id_for_uv,
+};
 pub(crate) use sdf::{
     count_missing_in_bounds_boundary_neighbors, empty_chunk_has_surface_nets_boundary_surface,
 };
