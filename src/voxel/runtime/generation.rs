@@ -1,5 +1,5 @@
 use super::*;
-use super::world_source_generation::fill_world_source_chunk_voxels;
+use super::world_source_generation::build_world_source_chunk;
 use crate::world::source::{ProceduralWorldSourceTerrainBridge, TerrainSourceConfig, TerrainSourceMode};
 
 // =============================================================================
@@ -567,9 +567,8 @@ fn generate_world_source_chunk_async(
     chunk_pos: IVec3,
     bridge: &ProceduralWorldSourceTerrainBridge,
 ) -> (Chunk, ChunkStats) {
-    let voxels = fill_world_source_chunk_voxels(chunk_pos, bridge);
-    let stats = collect_chunk_stats(&voxels);
-    let chunk = Chunk::with_voxels(chunk_pos, voxels);
+    let chunk = build_world_source_chunk(chunk_pos, bridge);
+    let stats = collect_chunk_stats_from_chunk(&chunk);
     (chunk, stats)
 }
 
@@ -840,8 +839,16 @@ fn column_index(x: usize, z: usize) -> usize {
 }
 
 fn collect_chunk_stats(voxels: &[VoxelType; CHUNK_VOLUME]) -> ChunkStats {
+    collect_chunk_stats_from_iter(voxels.iter().copied())
+}
+
+fn collect_chunk_stats_from_chunk(chunk: &Chunk) -> ChunkStats {
+    collect_chunk_stats_from_iter(chunk.iter().map(|(_, voxel)| voxel))
+}
+
+fn collect_chunk_stats_from_iter(voxels: impl IntoIterator<Item = VoxelType>) -> ChunkStats {
     let mut stats = ChunkStats::default();
-    for &voxel in voxels {
+    for voxel in voxels {
         match voxel {
             VoxelType::Sand => stats.sand += 1,
             VoxelType::DungeonWall => stats.dungeon_wall += 1,
@@ -952,6 +959,7 @@ pub(crate) fn assign_initial_lods_for_loaded_world(world: &mut VoxelWorld) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::source::material_biome;
 
     #[test]
     fn terrain_source_config_selects_legacy_generation() {
@@ -1001,5 +1009,19 @@ mod tests {
             })
         });
         assert!(has_water || chunk.iter_voxels().any(|voxel| *voxel != VoxelType::Air));
+    }
+
+    #[test]
+    fn world_source_runtime_generation_tags_solid_voxels_with_biome_ids() {
+        let source = chunk_terrain_source_for_config(
+            &TerrainSourceConfig { mode: TerrainSourceMode::GpuWorldSource },
+            BiomeTable::default(),
+        );
+        let (chunk, _stats) = generate_chunk_async(IVec3::ZERO, &source);
+
+        let tagged_solid = chunk
+            .iter_materials()
+            .any(|(_, voxel, material)| voxel != VoxelType::Air && voxel != VoxelType::Water && material_biome(material).is_some());
+        assert!(tagged_solid);
     }
 }
