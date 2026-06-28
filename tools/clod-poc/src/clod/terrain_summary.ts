@@ -9,7 +9,7 @@
 import * as THREE from "three";
 import type { ClodPageNode } from "../types.js";
 import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
-import { BiomeRegionField } from "../world_source/biome_region_field.js";
+import { BIOME_IDS, BiomeRegionField } from "../world_source/biome_region_field.js";
 import { getTerrainFieldCoreConfig } from "../gpu/terrain_field_core.js";
 import type { WorldSource } from "../world_source/world_source.js";
 
@@ -36,6 +36,8 @@ export interface TerrainSummaryField {
   biomeId?: Uint8Array;
   /** Analytic height fallback for cells outside the baked summary footprint. */
   analyticHeightSampler?: (x: number, z: number) => number;
+  /** Analytic biome fallback for cells outside the baked summary footprint. */
+  analyticBiomeSampler?: (x: number, z: number) => number;
 }
 
 export interface TerrainSummaryBuildOptions {
@@ -75,17 +77,10 @@ export function populateTerrainSummaryBiomes(
   }
   field.biomeId = biomeId;
   field.analyticHeightSampler = (x, z) => worldSource.sampleHeight(x, z);
+  field.analyticBiomeSampler = (x, z) => worldSource.sampleBiome(x, z);
   return field;
 }
 
-/**
- * Build the terrain summary from the CLOD page tree.
- *
- * @param allNodes  All rendered or build-time ClodPageNode[] (flattened from nodesByLevel)
- * @param worldSize World extent in cell units (WORLD * chunks_per_page * chunk_size)
- * @param farReduceFactor  Downsample factor (e.g. 8 → res = worldPages / 8)
- * @returns The summary field with height, normal, and coverage channels
- */
 export function buildTerrainSummary(
   allNodes: readonly ClodPageNode[],
   worldSize: number,
@@ -93,7 +88,6 @@ export function buildTerrainSummary(
   options: TerrainSummaryBuildOptions = {},
 ): TerrainSummaryField {
   const reduce = Math.max(1, Math.floor(farReduceFactor));
-  // LOD0 page grid resolution
   const pageRes = Math.max(1, Math.floor(worldSize));
   const res = Math.max(1, Math.floor(pageRes / reduce));
   const summaryRes = res;
@@ -114,10 +108,8 @@ export function buildTerrainSummary(
 
   const cellSize = worldSize / summaryRes;
 
-  // Phase 1: accumulate per-cell min/max from page bounds (same box-reduce as farWaterSurface)
   for (const node of allNodes) {
     const f = node.footprint;
-    // Map page footprint to summary grid cells
     const fx0 = Math.floor((f.minX / worldSize) * summaryRes);
     const fz0 = Math.floor((f.minZ / worldSize) * summaryRes);
     const fx1 = Math.ceil((f.maxX / worldSize) * summaryRes);
@@ -128,13 +120,11 @@ export function buildTerrainSummary(
         const idx = gridIndex(summaryRes, fx, fz);
         heightMin[idx] = Math.min(heightMin[idx], node.bounds.minY);
         heightMax[idx] = Math.max(heightMax[idx], node.bounds.maxY);
-        // Mark coverage for cells touched by pages
         coverage[idx] = Math.min(1, coverage[idx] + 1);
       }
     }
   }
 
-  // Phase 2: fill uncovered cells with the analytic world source fallback
   for (let fz = 0; fz < summaryRes; fz++) {
     for (let fx = 0; fx < summaryRes; fx++) {
       const idx = gridIndex(summaryRes, fx, fz);
@@ -148,8 +138,6 @@ export function buildTerrainSummary(
     }
   }
 
-  // Phase 3: compute normals via central-difference on the final height field
-  // Use max-height field for the normal direction (the "surface" visible from afar)
   for (let fz = 0; fz < summaryRes; fz++) {
     for (let fx = 0; fx < summaryRes; fx++) {
       const idx = gridIndex(summaryRes, fx, fz);
@@ -179,6 +167,7 @@ export function buildTerrainSummary(
     coverage,
     biomeId,
     analyticHeightSampler: analyticHeight,
+    analyticBiomeSampler: (x, z) => analyticBiome(x, z, analyticHeight(x, z)),
   };
 }
 
@@ -201,14 +190,6 @@ export function sampleHeight(field: TerrainSummaryField, x: number, z: number): 
     + h(ix + 1, iz + 1) * tx * tz;
 }
 
-/**
- * Sample blended height at world position (x, z).
- *
- * Per corner, interpolates `mix(heightMin, heightMax, bias)`, then bilinearly blends across
- * the cell.  bias=0 → valley floor (heightMin), bias=1 → peak (heightMax = sampleHeight).
- * Gives heightMin a consumer (previously dead) and lets callers place geometry at a
- * representative mid-surface height instead of always floating at the peak.
- */
 export function sampleHeightBlend(field: TerrainSummaryField, x: number, z: number, bias: number): number {
   const clamped = Math.max(0, Math.min(1, bias));
   const fx = (x / field.worldSize) * field.res - 0.5;
@@ -270,7 +251,10 @@ export function sampleCoverage(field: TerrainSummaryField, x: number, z: number)
 }
 
 export function sampleBiomeId(field: TerrainSummaryField, x: number, z: number): number {
-  if (!field.biomeId) return 0;
+  if (!field.biomeId) return field.analyticBiomeSampler?.(x, z) ?? 0;
+  if ((x < 0 || x > field.worldSize || z < 0 || z > field.worldSize) && field.analyticBiomeSampler) {
+    return field.analyticBiomeSampler(x, z);
+  }
   const fx = (x / field.worldSize) * field.res - 0.5;
   const fz = (z / field.worldSize) * field.res - 0.5;
   const ix = Math.min(field.res - 1, Math.max(0, Math.round(fx)));
@@ -278,19 +262,8 @@ export function sampleBiomeId(field: TerrainSummaryField, x: number, z: number):
   return field.biomeId[gridIndex(field.res, ix, iz)] ?? 0;
 }
 
-/**
- * Create a GPU-sampleable height texture from the terrain summary.
- *
- * This mirrors the heightfield texture pattern (r32float StorageTexture).
- * The texture is sampled in TSL vertex shaders for the shadow proxy (LV-3)
- * and far shell (LV-2) position nodes.
- *
- * Layout: row-major res×res, red channel = max height.
- * UV mapping: uv = worldXZ / worldSize + 0.5 (standard heightfield UV convention).
- */
 export function createHeightTexture(field: TerrainSummaryField): THREE.DataTexture {
   const { res, heightMax } = field;
-  // r32float: one float per texel, stored as Red channel
   const data = new Float32Array(res * res);
   for (let i = 0; i < res * res; i++) {
     data[i] = heightMax[i];
@@ -306,6 +279,13 @@ export function createHeightTexture(field: TerrainSummaryField): THREE.DataTextu
 
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
 
+function canopyBiomeGate(biomeId: number): number {
+  if (biomeId === BIOME_IDS.forest) return 1;
+  if (biomeId === BIOME_IDS.swamp) return 0.65;
+  if (biomeId === BIOME_IDS.meadows) return 0.2;
+  return 0;
+}
+
 /** Lowest finite cell height in the summary — the recede target for the far skirt. */
 export function summaryBaseLevel(field: TerrainSummaryField): number {
   let base = Number.POSITIVE_INFINITY;
@@ -316,20 +296,6 @@ export function summaryBaseLevel(field: TerrainSummaryField): number {
   return Number.isFinite(base) ? base : 0;
 }
 
-/**
- * Far-skirt surface height at world (x, z).
- *
- * Inside the summary footprint [0, worldSize] the height comes from the baked summary
- * (sampleHeightBlend); beyond it, from the analytic source, which continues infinitely.
- * The two cross-fade over a band near the world edge so the skirt joins the pages
- * seamlessly.  Past the edge the height also recedes gently toward `baseLevel` (distance from the
- * world edge → `farRadius`) so distant land sinks toward the horizon instead of extruding the
- * edge height flat.
- *
- * @param farRadius  Skirt half-extent in world units (controls the recede rate).
- * @param baseLevel  Recede target (see summaryBaseLevel).
- * @param bias       Height bias passed to sampleHeightBlend (0 = valley, 1 = peak).
- */
 export function sampleSkirtHeight(
   field: TerrainSummaryField,
   x: number,
@@ -341,10 +307,9 @@ export function sampleSkirtHeight(
   const worldSize = field.worldSize;
   const baked = sampleHeightBlend(field, x, z, bias);
   const analytic = field.analyticHeightSampler?.(x, z) ?? surfaceHeightCore(x, z);
-  // signed inset from the world square boundary: >0 inside, <=0 at/beyond the edge
   const inner = Math.min(Math.min(x, worldSize - x), Math.min(z, worldSize - z));
   const edgeBand = worldSize * 0.1;
-  const blend = clamp01(inner / edgeBand); // 1 well inside → baked, 0 at/beyond edge → analytic
+  const blend = clamp01(inner / edgeBand);
   let h = analytic + (baked - analytic) * blend;
   const outside = Math.max(0, -inner);
   const farFactor = clamp01(outside / (farRadius * 0.9));
@@ -358,13 +323,6 @@ function extendedRes(field: TerrainSummaryField, farRadius: number): number {
   return Math.max(field.res, Math.min(512, Math.round(field.res * (extent / field.worldSize))));
 }
 
-/**
- * Height texture covering the far-skirt extent [center-farRadius, center+farRadius]
- * (center = worldSize/2).  Interior texels mirror createHeightTexture (peak height); exterior
- * texels come from the analytic field, cross-faded near the world edge and receding toward the
- * base level (see sampleSkirtHeight).  Consumed by the LV-4 canopy shell as the base terrain
- * height beyond page coverage.  UV mapping: uv = (worldXZ - (center - farRadius)) / (2*farRadius).
- */
 export function createExtendedHeightTexture(field: TerrainSummaryField, farRadius: number): THREE.DataTexture {
   const worldSize = field.worldSize;
   const center = worldSize / 2;
@@ -389,13 +347,6 @@ export function createExtendedHeightTexture(field: TerrainSummaryField, farRadiu
   return tex;
 }
 
-/**
- * Canopy coverage texture covering the far-skirt extent (same UV mapping as
- * createExtendedHeightTexture).  Forest patches come from a low-frequency region noise; inside
- * the world they are gated by page coverage, beyond it terrain exists analytically (gate = 1) so
- * the forest continues outward.  Coverage dissolves toward the far rim
- * so the canopy fades into haze instead of ending at a hard ring.
- */
 export function createExtendedCanopyTexture(field: TerrainSummaryField, farRadius: number, seed = 42): THREE.DataTexture {
   const worldSize = field.worldSize;
   const center = worldSize / 2;
@@ -430,7 +381,6 @@ export function createExtendedCanopyTexture(field: TerrainSummaryField, farRadiu
     for (let i = 0; i < res; i++) {
       const wx = origin + ((i + 0.5) / res) * extent;
       const wz = origin + ((j + 0.5) / res) * extent;
-      // Region noise in summary-cell space so patch size is stable across the extent.
       const sx = (wx / worldSize) * field.res;
       const sz = (wz / worldSize) * field.res;
       const region = (fbm(sx * 0.03, sz * 0.03) + 0.75) / 1.5;
@@ -438,7 +388,8 @@ export function createExtendedCanopyTexture(field: TerrainSummaryField, farRadiu
       const detail = hash(sx * 0.07, sz * 0.07, seed) * 0.3 + fbm(sx * 0.02, sz * 0.02) * 0.2;
       const inside = wx >= 0 && wx <= worldSize && wz >= 0 && wz <= worldSize;
       const exists = inside ? sampleCoverage(field, wx, wz) : 1;
-      let c = exists * forest * (0.7 + detail);
+      const biomeGate = canopyBiomeGate(sampleBiomeId(field, wx, wz));
+      let c = exists * forest * biomeGate * (0.7 + detail);
       const distFromCenter = Math.hypot(wx - center, wz - center);
       c *= 1 - smooth01(farRadius * 0.7, farRadius * 0.98, distFromCenter);
       data[j * res + i] = clamp01(c);
