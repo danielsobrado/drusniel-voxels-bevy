@@ -1,0 +1,1014 @@
+{
+  "contractVersion": 1,
+  "generatedBy": "tools/clod-poc/scripts/export-world-source-golden.mts",
+  "metadata": {
+    "seed": 0,
+    "seaLevel": 18,
+    "bounds": {
+      "radiusM": 8192
+    },
+    "oceanRim": true,
+    "biomeRegionCellM": 420,
+    "samplesPerBiome": 10
+  },
+  "terrain": {
+    "seed": 0,
+    "seaLevel": 18,
+    "islandShape": {
+      "enabled": true,
+      "seaLevel": 18,
+      "seed": 0,
+      "spacingM": 1500,
+      "radiusM": 560,
+      "blendM": 260,
+      "warpStrengthM": 190,
+      "beachWidthM": 28,
+      "cliffWidthM": 48,
+      "worldRadiusM": 8192,
+      "oceanRim": true,
+      "oceanRimDropM": 42
+    }
+  },
+  "rows": [
+    {
+      "x": 3360,
+      "z": -5760,
+      "height": 22.00592,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4080,
+      "z": -5520,
+      "height": 26.20315,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -240,
+      "z": -5280,
+      "height": 26.33706,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4800,
+      "z": -5040,
+      "height": 26.85674,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4560,
+      "z": -5040,
+      "height": 24.43899,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4320,
+      "z": -5040,
+      "height": 28.93029,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4080,
+      "z": -5040,
+      "height": 35.36822,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -3840,
+      "z": -5040,
+      "height": 37.13772,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -3600,
+      "z": -5040,
+      "height": 36.85686,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -3360,
+      "z": -5040,
+      "height": 32.79548,
+      "biomeId": 0,
+      "oceanMask": 0,
+      "dominantLayer": "meadows-ground",
+      "splatWeights": [
+        {
+          "material": "meadows-ground",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4080,
+      "z": -5760,
+      "height": 23.83977,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 3600,
+      "z": -5760,
+      "height": 26.51965,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 3840,
+      "z": -5760,
+      "height": 28.98134,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 4080,
+      "z": -5760,
+      "height": 32.39067,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 4320,
+      "z": -5760,
+      "height": 33.08541,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 4560,
+      "z": -5760,
+      "height": 35.97147,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 4800,
+      "z": -5760,
+      "height": 35.23969,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 5040,
+      "z": -5760,
+      "height": 35.57291,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 5280,
+      "z": -5760,
+      "height": 35.11445,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 5520,
+      "z": -5760,
+      "height": 35.01905,
+      "biomeId": 1,
+      "oceanMask": 0,
+      "dominantLayer": "forest-floor",
+      "splatWeights": [
+        {
+          "material": "forest-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -3840,
+      "z": -5760,
+      "height": 24.11373,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -2640,
+      "z": -5520,
+      "height": 23.51341,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -3840,
+      "z": -5280,
+      "height": 25.87682,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -3600,
+      "z": -5280,
+      "height": 22.29765,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -2640,
+      "z": -5280,
+      "height": 20.56192,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 480,
+      "z": -5280,
+      "height": 24.87142,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 720,
+      "z": -5280,
+      "height": 22.33298,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 3360,
+      "z": -5280,
+      "height": 23.97338,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 3840,
+      "z": -5280,
+      "height": 22.90829,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 4320,
+      "z": -5280,
+      "height": 20.81824,
+      "biomeId": 2,
+      "oceanMask": 0,
+      "dominantLayer": "swamp-muck",
+      "splatWeights": [
+        {
+          "material": "swamp-muck",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 2640,
+      "z": -5280,
+      "height": 101.38784,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 2640,
+      "z": -5040,
+      "height": 86.36708,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 2880,
+      "z": -5040,
+      "height": 86.88813,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 2640,
+      "z": -4800,
+      "height": 86.46825,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 2880,
+      "z": -4800,
+      "height": 86.29994,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 3120,
+      "z": -4800,
+      "height": 88.56322,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -5280,
+      "z": -4560,
+      "height": 87.04616,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 2160,
+      "z": -4560,
+      "height": 86.7268,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 2400,
+      "z": -4560,
+      "height": 91.36002,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 2640,
+      "z": -4560,
+      "height": 105.70357,
+      "biomeId": 3,
+      "oceanMask": 0,
+      "dominantLayer": "mountain-scree",
+      "splatWeights": [
+        {
+          "material": "mountain-scree",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -2160,
+      "z": -5520,
+      "height": 26.85593,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -5040,
+      "z": -5280,
+      "height": 71.57221,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4800,
+      "z": -5280,
+      "height": 72.15918,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4560,
+      "z": -5280,
+      "height": 72.94993,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4320,
+      "z": -5280,
+      "height": 73.18529,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4080,
+      "z": -5280,
+      "height": 72.32592,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 0,
+      "z": -5280,
+      "height": 32.94343,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": 240,
+      "z": -5280,
+      "height": 31.12524,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -5040,
+      "z": -5040,
+      "height": 69.48854,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4800,
+      "z": -5040,
+      "height": 65.19738,
+      "biomeId": 4,
+      "oceanMask": 0,
+      "dominantLayer": "plains-grass",
+      "splatWeights": [
+        {
+          "material": "plains-grass",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -3600,
+      "z": -5760,
+      "height": 19.51096,
+      "biomeId": 5,
+      "oceanMask": 0,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -2640,
+      "z": -5760,
+      "height": 17.65577,
+      "biomeId": 5,
+      "oceanMask": 1,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -2400,
+      "z": -5760,
+      "height": 16.60213,
+      "biomeId": 5,
+      "oceanMask": 1,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -2160,
+      "z": -5760,
+      "height": 16.82312,
+      "biomeId": 5,
+      "oceanMask": 1,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -1680,
+      "z": -5760,
+      "height": 17.08995,
+      "biomeId": 5,
+      "oceanMask": 1,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -1440,
+      "z": -5760,
+      "height": 17.65699,
+      "biomeId": 5,
+      "oceanMask": 1,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -1200,
+      "z": -5760,
+      "height": 17.93731,
+      "biomeId": 5,
+      "oceanMask": 1,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -960,
+      "z": -5760,
+      "height": 18.08801,
+      "biomeId": 5,
+      "oceanMask": 0,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -720,
+      "z": -5760,
+      "height": 18.07224,
+      "biomeId": 5,
+      "oceanMask": 0,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -480,
+      "z": -5760,
+      "height": 16.96266,
+      "biomeId": 5,
+      "oceanMask": 1,
+      "dominantLayer": "coast-sand",
+      "splatWeights": [
+        {
+          "material": "coast-sand",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -6000,
+      "z": -6000,
+      "height": -26,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -5760,
+      "z": -6000,
+      "height": -26,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -5520,
+      "z": -6000,
+      "height": -26,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -5280,
+      "z": -6000,
+      "height": -26,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -5040,
+      "z": -6000,
+      "height": -26,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4800,
+      "z": -6000,
+      "height": -26,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4560,
+      "z": -6000,
+      "height": -26,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4320,
+      "z": -6000,
+      "height": -26,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -4080,
+      "z": -6000,
+      "height": 12.22138,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "x": -3840,
+      "z": -6000,
+      "height": 13.66602,
+      "biomeId": 6,
+      "oceanMask": 1,
+      "dominantLayer": "ocean-floor",
+      "splatWeights": [
+        {
+          "material": "ocean-floor",
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}
