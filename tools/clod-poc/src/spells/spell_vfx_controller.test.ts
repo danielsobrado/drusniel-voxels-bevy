@@ -12,7 +12,14 @@ import { createWaterNodeMaterial } from "./water_node_material.js";
 import { createAirNodeMaterial } from "./air_node_material.js";
 import { defaultSpellConfig } from "./spell_config.js";
 
-const meshCfg: SpellVfxMeshConfig = { worldWidth: 1.8, worldHeight: 3, flameScale: 1 };
+const meshCfg: SpellVfxMeshConfig = {
+  worldWidth: 1.8,
+  worldHeight: 3,
+  flameScale: 1,
+  handForwardM: 0,
+  handRightM: 0,
+  handUpM: 0,
+};
 
 describe("computeSpellFrame", () => {
   it("tracks progress and elapsed seconds over the cast", () => {
@@ -76,11 +83,10 @@ describe("createSpellPoseResolver", () => {
   const vfx = { ...defaultSpellConfig.fire.vfx, handForwardM: 0.5, handRightM: 0.35, handUpM: -0.35 };
 
   it("places the hand offset from the eye and aims the jet along the look direction", () => {
-    const camera = new THREE.PerspectiveCamera(); // default look direction is -Z
+    const camera = new THREE.PerspectiveCamera();
     camera.position.set(0, 0, 0);
     camera.updateMatrixWorld();
     const pose = createSpellPoseResolver({ camera, vfx })();
-    // forward 0.5 (-Z), right 0.35 (+X), down 0.35 (-Y)
     expect(pose.base.x).toBeCloseTo(0.35);
     expect(pose.base.y).toBeCloseTo(-0.35);
     expect(pose.base.z).toBeCloseTo(-0.5);
@@ -95,13 +101,11 @@ describe("createSpellVfxController", () => {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera();
     camera.position.set(10, 5, 0);
-    const base = new THREE.Vector3(0, 1, 0);
-    const dir = new THREE.Vector3(0, 0, -1);
+    camera.updateMatrixWorld();
     let clock = 1000;
     const controller = createSpellVfxController({
       scene,
       getCamera: () => camera,
-      getPose: () => ({ base, dir }),
       fire: meshCfg,
       water: meshCfg,
       air: meshCfg,
@@ -112,25 +116,59 @@ describe("createSpellVfxController", () => {
     expect(fireMesh).toBeTruthy();
     expect(fireMesh.visible).toBe(false);
 
-    controller.playFire(2000); // startMs = 1000
+    controller.playFire(2000);
     expect(fireMesh.visible).toBe(true);
 
-    clock = 2000; // mid cast
+    clock = 2000;
     controller.update(clock);
     expect(fireMesh.visible).toBe(true);
-    expect(fireMesh.position.x).toBeCloseTo(0);
-    expect(fireMesh.position.y).toBeCloseTo(1);
+    expect(fireMesh.position.x).toBeCloseTo(10);
+    expect(fireMesh.position.y).toBeCloseTo(5);
     expect(fireMesh.position.z).toBeCloseTo(0);
-    // Local +Y (base->tip) must follow the jet direction.
     const tipAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(fireMesh.quaternion);
     expect(tipAxis.z).toBeCloseTo(-1);
 
-    clock = 3500; // past the cast duration
+    clock = 3500;
     controller.update(clock);
     expect(fireMesh.visible).toBe(false);
 
     controller.dispose();
     expect(scene.getObjectByName("fire-spell")).toBeFalsy();
     expect(scene.getObjectByName("air-spell")).toBeFalsy();
+  });
+
+  it("plays air and uses its own hand offset", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(0, 0, 0);
+    camera.updateMatrixWorld();
+    let clock = 1000;
+    const controller = createSpellVfxController({
+      scene,
+      getCamera: () => camera,
+      fire: meshCfg,
+      water: meshCfg,
+      air: { ...meshCfg, handForwardM: 0.5, handRightM: 2, handUpM: -1 },
+      now: () => clock,
+    });
+
+    const airMesh = scene.getObjectByName("air-spell") as THREE.Mesh;
+    expect(airMesh).toBeTruthy();
+    expect(airMesh.visible).toBe(false);
+
+    controller.playAir(1000);
+    expect(airMesh.visible).toBe(true);
+
+    clock = 1200;
+    controller.update(clock);
+    expect(airMesh.position.x).toBeCloseTo(2);
+    expect(airMesh.position.y).toBeCloseTo(-1);
+    expect(airMesh.position.z).toBeCloseTo(-0.5);
+
+    clock = 2100;
+    controller.update(clock);
+    expect(airMesh.visible).toBe(false);
+
+    controller.dispose();
   });
 });
