@@ -6,6 +6,9 @@ import {
 } from "./tree_impostor_baker.js";
 import { octFrameBlendForDirection, type OctahedralBlendSample } from "./tree_impostor_octahedral.js";
 
+export const TREE_IMPOSTOR_BLEND_SAMPLE_COUNT = 4;
+export const TREE_IMPOSTOR_UV_RECT_STRIDE = 4;
+
 export interface TreeImpostorRuntimeSample {
   uvMin: [number, number];
   uvMax: [number, number];
@@ -14,6 +17,11 @@ export interface TreeImpostorRuntimeSample {
 
 export interface TreeImpostorRuntimeBlend {
   samples: [TreeImpostorRuntimeSample, TreeImpostorRuntimeSample, TreeImpostorRuntimeSample, TreeImpostorRuntimeSample];
+}
+
+export interface TreeImpostorBlendAttributes {
+  uvRects: Float32Array;
+  weights: Float32Array;
 }
 
 export interface TreeImpostorPackedSample {
@@ -28,6 +36,33 @@ export interface TreeImpostorLightingInput {
   skyLight: THREE.Color;
   groundLight: THREE.Color;
   yawRadians: number;
+}
+
+export function createTreeImpostorBlendAttributes(instanceCount: number): TreeImpostorBlendAttributes {
+  const safeCount = Math.max(0, Math.floor(instanceCount));
+  return {
+    uvRects: new Float32Array(safeCount * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT * TREE_IMPOSTOR_UV_RECT_STRIDE),
+    weights: new Float32Array(safeCount * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT),
+  };
+}
+
+export function writeTreeImpostorBlendAttributes(
+  attributes: TreeImpostorBlendAttributes,
+  instanceIndex: number,
+  blend: TreeImpostorRuntimeBlend,
+): void {
+  const index = Math.max(0, Math.floor(instanceIndex));
+  const uvBase = index * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT * TREE_IMPOSTOR_UV_RECT_STRIDE;
+  const weightBase = index * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT;
+  for (let i = 0; i < TREE_IMPOSTOR_BLEND_SAMPLE_COUNT; i++) {
+    const sample = blend.samples[i];
+    const uvOffset = uvBase + i * TREE_IMPOSTOR_UV_RECT_STRIDE;
+    attributes.uvRects[uvOffset] = sample.uvMin[0];
+    attributes.uvRects[uvOffset + 1] = sample.uvMin[1];
+    attributes.uvRects[uvOffset + 2] = sample.uvMax[0];
+    attributes.uvRects[uvOffset + 3] = sample.uvMax[1];
+    attributes.weights[weightBase + i] = sample.weight;
+  }
 }
 
 export function treeImpostorRuntimeBlend(
