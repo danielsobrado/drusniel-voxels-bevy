@@ -1,7 +1,7 @@
 use super::{
     ChunkMeshResult, LodTransitionSnapStats, MeshData, MeshGenerationTimingStats, MeshSdfCache,
     PaddedChunkShape, SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode,
-    compute_vertex_material_weights, generate_sdf, generate_water_mesh,
+    compatibility_biome_id_for_uv, compute_vertex_material_weights, generate_sdf, generate_water_mesh,
 };
 use crate::constants::{CHUNK_SIZE, VOXEL_SIZE};
 use crate::rendering::ao_config::BakedAoConfig;
@@ -67,6 +67,7 @@ struct VertexAttributes {
     local: Vec<Vec3>,
     normal: Vec<[f32; 3]>,
     weights: Vec<[f32; 4]>,
+    biome_ids: Vec<f32>,
     ao: Vec<f32>,
 }
 
@@ -84,6 +85,7 @@ fn compute_unique_vertex_attributes(
         local: vec![Vec3::ZERO; vert_count],
         normal: vec![[0.0, 1.0, 0.0]; vert_count],
         weights: vec![[0.0; 4]; vert_count],
+        biome_ids: vec![0.0; vert_count],
         ao: vec![1.0; vert_count],
     };
 
@@ -126,6 +128,7 @@ fn compute_unique_vertex_attributes(
         attrs.normal[i] = sdf_cache.gradient_normal_at_local(world, local);
 
         attrs.weights[i] = compute_vertex_material_weights(local, chunk, world, chunk_origin);
+        attrs.biome_ids[i] = compatibility_biome_id_for_uv(attrs.weights[i]);
 
         // AO only on the high-detail grid — distance makes it imperceptible on
         // coarse LODs, so they keep full brightness (1.0).
@@ -200,7 +203,7 @@ fn generate_chunk_mesh_surface_nets_impl(
                     .positions
                     .push(scale_vertex_from_center(attrs.local[i], chunk_center));
                 solid_mesh.normals.push(attrs.normal[i]);
-                solid_mesh.uvs.push([attrs.ao[i], 0.0]);
+                solid_mesh.uvs.push([attrs.ao[i], attrs.biome_ids[i]]);
                 solid_mesh.colors.push(attrs.weights[i]);
             }
             solid_mesh
