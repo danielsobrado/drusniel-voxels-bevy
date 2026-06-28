@@ -9,7 +9,6 @@ import type {
   AcceptanceConfig,
 } from "./acceptanceTypes.js";
 
-
 export function createRunId(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -48,7 +47,7 @@ export function writeSummaryJson(runDir: string, report: AcceptanceRunReport): s
 export function writeMetricsCsv(runDir: string, metrics: AcceptanceMetrics, gates: AcceptanceGateResult[]): string {
   const path = join(runDir, "metrics.csv");
   const lines: string[] = [];
-  const entries: { key: keyof AcceptanceMetrics; label: string; thresholdKey?: string; gate?: string }[] = [
+  const entries: { key: keyof AcceptanceMetrics; label: string; gate?: string }[] = [
     { key: "lod0Triangles", label: "lod0Triangles" },
     { key: "lod3Triangles", label: "lod3Triangles" },
     { key: "lod3TriangleRatio", label: "lod3TriangleRatio", gate: "A4" },
@@ -76,6 +75,15 @@ export function writeMetricsCsv(runDir: string, metrics: AcceptanceMetrics, gate
     { key: "mixedLodEdgesTested", label: "mixedLodEdgesTested", gate: "A1" },
     { key: "mixedLodFailureCount", label: "mixedLodFailureCount", gate: "A1" },
     { key: "mixedLodUntestableDeltaCount", label: "mixedLodUntestableDeltaCount", gate: "A1" },
+    { key: "streamingWalkFrames", label: "streamingWalkFrames", gate: "A7" },
+    { key: "streamingMaxCameraToClodCenterM", label: "streamingMaxCameraToClodCenterM", gate: "A7" },
+    { key: "streamingMaxCameraToFarShellCenterM", label: "streamingMaxCameraToFarShellCenterM", gate: "A7" },
+    { key: "streamingMaxLiveClodGapHoles", label: "streamingMaxLiveClodGapHoles", gate: "A7" },
+    { key: "streamingMaxClodFarGapHoles", label: "streamingMaxClodFarGapHoles", gate: "A7" },
+    { key: "streamingMaxLiveClodOverlapCells", label: "streamingMaxLiveClodOverlapCells", gate: "A7" },
+    { key: "streamingMaxHorizonHoleRatio", label: "streamingMaxHorizonHoleRatio", gate: "A7" },
+    { key: "streamingTextureWindowSwaps", label: "streamingTextureWindowSwaps", gate: "A7" },
+    { key: "streamingMaxActiveBiomeTextures", label: "streamingMaxActiveBiomeTextures", gate: "A7" },
   ];
 
   lines.push("metric,value,threshold,gate");
@@ -99,6 +107,11 @@ export function recommendationFromGates(gates: AcceptanceGateResult[]): string {
   for (const g of gates) {
     if (g.id === "A1" && g.status === "fail") {
       return "Do not port. Fix builder topology/border chain first.";
+    }
+  }
+  for (const g of gates) {
+    if (g.id === "A7" && g.status === "fail") {
+      return "Do not ship infinite streaming. Fix ownership gaps, far-shell centering, or biome texture-window swaps first.";
     }
   }
   for (const g of gates) {
@@ -216,6 +229,15 @@ export function writeSummaryMarkdown(runDir: string, report: AcceptanceRunReport
   lines.push(`| Mixed-LOD deltas tested | ${report.metrics.mixedLodDeltasTested} |`);
   lines.push(`| Mixed-LOD edges tested | ${report.metrics.mixedLodEdgesTested} |`);
   lines.push(`| Mixed-LOD failures | ${report.metrics.mixedLodFailureCount} |`);
+  lines.push(`| Streaming walk frames | ${report.metrics.streamingWalkFrames} |`);
+  lines.push(`| Streaming max CLOD center drift | ${report.metrics.streamingMaxCameraToClodCenterM.toFixed(4)} m |`);
+  lines.push(`| Streaming max far-shell center drift | ${report.metrics.streamingMaxCameraToFarShellCenterM.toFixed(4)} m |`);
+  lines.push(`| Streaming live/CLOD gap holes | ${report.metrics.streamingMaxLiveClodGapHoles} |`);
+  lines.push(`| Streaming CLOD/far gap holes | ${report.metrics.streamingMaxClodFarGapHoles} |`);
+  lines.push(`| Streaming live/CLOD overlap cells | ${report.metrics.streamingMaxLiveClodOverlapCells} |`);
+  lines.push(`| Streaming horizon hole ratio | ${report.metrics.streamingMaxHorizonHoleRatio.toFixed(6)} |`);
+  lines.push(`| Streaming texture-window swaps | ${report.metrics.streamingTextureWindowSwaps} |`);
+  lines.push(`| Streaming max active biome textures | ${report.metrics.streamingMaxActiveBiomeTextures} |`);
 
   const failed = report.gates.filter((g) => g.failures.length > 0);
   if (failed.length > 0) {
