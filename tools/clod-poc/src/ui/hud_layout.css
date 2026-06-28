@@ -30,6 +30,28 @@
   min-width: 78px !important;
 }
 
+.debug-panel-chrome--floating[data-panel-id="clod-cache"] {
+  left: var(--clod-hud-edge) !important;
+  top: clamp(260px, 58vh, calc(100vh - 76px)) !important;
+  width: min(320px, calc(100vw - 24px)) !important;
+  opacity: 0.78;
+  background: rgba(10, 14, 20, 0.64) !important;
+  backdrop-filter: blur(3px);
+}
+
+.debug-panel-chrome--floating[data-panel-id="clod-cache"] .debug-panel-chrome-body {
+  display: none !important;
+}
+
+.debug-panel-chrome--floating[data-panel-id="clod-cache"] [data-panel-minimize] {
+  font-size: 0 !important;
+}
+
+.debug-panel-chrome--floating[data-panel-id="clod-cache"] [data-panel-minimize]::before {
+  content: "+";
+  font-size: 14px;
+}
+
 @media (max-width: 1440px) {
   :root {
     --clod-right-control-rail-width: 0px;
