@@ -23,6 +23,7 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     getPose,
     fire: meshConfig(config.fire.vfx),
     water: meshConfig(config.water.vfx),
+    air: meshConfig(config.air.vfx),
   });
   ctx.session.spellVfxController = controller;
 
@@ -48,6 +49,12 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     if (event.code === "Digit2" || event.code === "Numpad2") {
       event.preventDefault();
       menu.castWater();
+      return;
+    }
+
+    if (event.code === "Digit3" || event.code === "Numpad3") {
+      event.preventDefault();
+      menu.castAir();
     }
   };
 
