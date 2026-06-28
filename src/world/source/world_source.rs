@@ -1,12 +1,19 @@
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 use super::biome_region_field::{BiomeId, BiomeRegionField};
-use super::island_shape::{sample_island_mask, IslandShapeConfig};
 use super::height_field::base_surface_height;
+use super::island_shape::{sample_island_mask, IslandShapeConfig};
 
 pub const DEFAULT_TERRAIN_SEED: i32 = 0;
 pub const DEFAULT_SEA_LEVEL: f32 = 18.0;
+pub const WORLD_SOURCE_CONFIG_PATH: &str = "assets/config/world_source.yaml";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorldSourceConfigFile {
+    pub world_source: TerrainFieldConfig,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TerrainFieldConfig {
@@ -46,8 +53,34 @@ pub struct ProceduralWorldSource {
 impl TerrainFieldConfig {
     pub fn new(seed: i32, sea_level: f32, island_shape: IslandShapeConfig) -> Self {
         let mut island_shape = island_shape.sanitized();
+        island_shape.seed = seed;
         island_shape.sea_level = sea_level;
         Self { seed, sea_level, island_shape }
+    }
+
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
+        let file = std::fs::File::open(path)?;
+        let reader = std::io::BufReader::new(file);
+        let config_file: WorldSourceConfigFile = serde_yaml::from_reader(reader)?;
+        Ok(Self::new(
+            config_file.world_source.seed,
+            config_file.world_source.sea_level,
+            config_file.world_source.island_shape,
+        ))
+    }
+
+    pub fn load_or_default() -> Self {
+        match Self::load(WORLD_SOURCE_CONFIG_PATH) {
+            Ok(config) => config,
+            Err(error) => {
+                bevy::log::warn!(
+                    "Failed to load world source config from {}: {}; using defaults",
+                    WORLD_SOURCE_CONFIG_PATH,
+                    error
+                );
+                Self::default()
+            }
+        }
     }
 }
 
@@ -73,6 +106,14 @@ impl ProceduralWorldSource {
         };
         let biomes = BiomeRegionField::new(terrain.seed, terrain.sea_level, terrain.island_shape.clone());
         Self { metadata, biomes }
+    }
+
+    pub fn from_config_file(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self::new(TerrainFieldConfig::load(path)?))
+    }
+
+    pub fn load_or_default() -> Self {
+        Self::new(TerrainFieldConfig::load_or_default())
     }
 
     pub fn biome_field(&self) -> &BiomeRegionField {
@@ -132,5 +173,14 @@ mod tests {
         ));
         assert!(matches!(source.metadata().bounds, WorldSourceBounds::RadiusM(_)));
         assert!(source.metadata().ocean_rim);
+    }
+
+    #[test]
+    fn yaml_config_matches_runtime_shape() {
+        let cfg = TerrainFieldConfig::load(WORLD_SOURCE_CONFIG_PATH).expect("world_source.yaml should deserialize");
+        assert_eq!(cfg.seed, 0);
+        assert_eq!(cfg.sea_level, 18.0);
+        assert!(cfg.island_shape.enabled);
+        assert!(cfg.island_shape.ocean_rim);
     }
 }
