@@ -7,8 +7,12 @@ import {
   type TreeImpostorAtlas,
 } from "./index.js";
 import {
+  createTreeImpostorBlendAttributes,
   decodeAndLightTreeImpostorSample,
+  TREE_IMPOSTOR_BLEND_SAMPLE_COUNT,
+  TREE_IMPOSTOR_UV_RECT_STRIDE,
   treeImpostorRuntimeBlend,
+  writeTreeImpostorBlendAttributes,
 } from "./tree_impostor_runtime.js";
 
 describe("tree impostor runtime contract", () => {
@@ -22,6 +26,28 @@ describe("tree impostor runtime contract", () => {
       expect(sample.uvMin[1]).toBeGreaterThanOrEqual(0);
       expect(sample.uvMax[0]).toBeLessThanOrEqual(1);
       expect(sample.uvMax[1]).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("packs four uv rects and weights per impostor instance", () => {
+    const attributes = createTreeImpostorBlendAttributes(2);
+    const blend = treeImpostorRuntimeBlend(fakeAtlas(), new THREE.Vector3(1, 1, 2));
+    writeTreeImpostorBlendAttributes(attributes, 1, blend);
+
+    expect(attributes.uvRects).toHaveLength(2 * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT * TREE_IMPOSTOR_UV_RECT_STRIDE);
+    expect(attributes.weights).toHaveLength(2 * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT);
+    const instanceUvBase = TREE_IMPOSTOR_BLEND_SAMPLE_COUNT * TREE_IMPOSTOR_UV_RECT_STRIDE;
+    const instanceWeightBase = TREE_IMPOSTOR_BLEND_SAMPLE_COUNT;
+    expect(attributes.uvRects[0]).toBe(0);
+    expect(attributes.weights[0]).toBe(0);
+    for (let i = 0; i < TREE_IMPOSTOR_BLEND_SAMPLE_COUNT; i++) {
+      const sample = blend.samples[i];
+      const uvOffset = instanceUvBase + i * TREE_IMPOSTOR_UV_RECT_STRIDE;
+      expect(attributes.uvRects[uvOffset]).toBeCloseTo(sample.uvMin[0]);
+      expect(attributes.uvRects[uvOffset + 1]).toBeCloseTo(sample.uvMin[1]);
+      expect(attributes.uvRects[uvOffset + 2]).toBeCloseTo(sample.uvMax[0]);
+      expect(attributes.uvRects[uvOffset + 3]).toBeCloseTo(sample.uvMax[1]);
+      expect(attributes.weights[instanceWeightBase + i]).toBeCloseTo(sample.weight);
     }
   });
 
