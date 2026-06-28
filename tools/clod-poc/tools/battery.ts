@@ -138,6 +138,15 @@ function validateInfiniteIslandsStats(): void {
   assertCounter(stats, "streamer_far_shell_outer_m", (value) => value > 0);
   assertCounter(stats, "streamer_far_shell_ownership_ok", (value) => value === 1);
   assertCounter(stats, "ring_boundary_holes", (value) => value === 0);
+  assertCounter(stats, "live_clod_gap_holes", (value) => value === 0);
+  assertCounter(stats, "clod_far_gap_holes", (value) => value === 0);
+  assertCounter(stats, "live_clod_overlap_cells", (value) => value === 0);
+  assertCounter(stats, "missing_live_chunks_in_required_radius", (value) => value === 0);
+  assertCounter(stats, "missing_clod_pages_in_required_radius", (value) => value === 0);
+  assertCounter(stats, "far_shell_inner_minus_clod_radius_m", (value) => value >= 0);
+  assertCounter(stats, "camera_to_clod_center_m", (value) => value <= 1);
+  assertCounter(stats, "camera_to_far_shell_center_m", (value) => value <= 1);
+  assertCounter(stats, "horizon_hole_ratio", (value) => value === 0);
 }
 
 function runPhase1Shots(): void {

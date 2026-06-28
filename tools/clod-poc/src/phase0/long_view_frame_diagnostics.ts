@@ -17,6 +17,7 @@ import type { FrameRenderer } from "../app/frame_loop/frame_renderer.js";
 import { resolveStreamingOwnership } from "../streaming/streaming_ownership.js";
 import { TerrainOwnershipRuntime } from "../stream/terrain_ownership_runtime.js";
 import { publishOwnershipRuntimeCounters } from "../stream/ownership_counters.js";
+import { computeOwnershipCoverageCounters, publishOwnershipCoverageCounters } from "../stream/ownership_coverage_oracle.js";
 
 const PHASE0_P95_WINDOW = 120;
 
@@ -78,6 +79,10 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       hysteresisM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
     },
   });
+  let farShellRecenterCount = 0;
+  let farShellLastRecenterFrame = -1;
+  let lastFarShellSnapX = Number.NaN;
+  let lastFarShellSnapZ = Number.NaN;
 
   return () => {
     const hooks = deps.getHooks();
@@ -168,8 +173,6 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
       s.counters["frame_ms_p95"] = sorted[Math.floor(sorted.length * 0.95)] ?? -1;
       s.counters["frame_ms_p99"] = sorted[Math.floor(sorted.length * 0.99)] ?? -1;
     }
-    s.counters["horizon_hole_ratio"] = -1;
-
     if (deps.queryScene === "border-ocean" && deps.borderOceanScene) {
       publishBorderOceanAcceptanceCounters(s.counters, {
         worldCells: deps.worldCells,
@@ -201,9 +204,30 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
 
     const ownershipSnapshot = ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
     publishOwnershipRuntimeCounters(s.counters, ownershipSnapshot);
-    const missingLiveChunks = Math.max(0, ownershipSnapshot.live.required.length - ownershipSnapshot.live.loaded.length);
-    const missingVisualPages = Math.max(0, ownershipSnapshot.visualPages.required.length - ownershipSnapshot.visualPages.loaded.length);
-    s.counters["ring_boundary_holes"] = missingLiveChunks + missingVisualPages;
+    const farShellCenter = shellMetrics
+      ? { x: shellMetrics.farShellCenterX, z: shellMetrics.farShellCenterZ }
+      : { x: deps.camera.position.x, z: deps.camera.position.z };
+    const farShellSnapX = shellMetrics?.farShellSnappedX ?? farShellCenter.x;
+    const farShellSnapZ = shellMetrics?.farShellSnappedZ ?? farShellCenter.z;
+    if (farShellSnapX !== lastFarShellSnapX || farShellSnapZ !== lastFarShellSnapZ) {
+      farShellRecenterCount++;
+      farShellLastRecenterFrame = s.frame;
+      lastFarShellSnapX = farShellSnapX;
+      lastFarShellSnapZ = farShellSnapZ;
+    }
+    publishOwnershipCoverageCounters(
+      s.counters,
+      computeOwnershipCoverageCounters({
+        snapshot: ownershipSnapshot,
+        chunkSizeM: deps.cfg.page.chunk_size,
+        pageSizeM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
+        maxLevel: deps.maxTerrainLevel,
+        camera: { x: deps.camera.position.x, z: deps.camera.position.z },
+        farShellCenter,
+        farShellRecenterCount,
+        farShellLastRecenterFrame,
+      }),
+    );
 
     const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in s.counters));
     window.__drusnielPhase0Report = {

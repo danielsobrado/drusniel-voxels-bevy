@@ -109,8 +109,10 @@ export function sampleIslandMask(x: number, z: number, input?: Partial<IslandSha
       const mask = smooth01(1 - Math.min(1, Math.max(0, (d - radius) / Math.max(1, cfg.blendM))));
       const insideBoost = d <= radius ? 1 : mask;
       const islandMask = d >= outer ? 0 : insideBoost;
-      if (islandMask > bestMask || shore > bestShore) {
+      if (islandMask > bestMask) {
         bestMask = islandMask;
+      }
+      if (shore > bestShore) {
         bestShore = shore;
         nearestCenterX = cx;
         nearestCenterZ = cz;

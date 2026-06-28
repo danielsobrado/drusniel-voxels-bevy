@@ -225,8 +225,10 @@ fn sampleIslandMaskField(x : f32, z : f32) -> vec4<f32> {
       var islandMask = mask;
       if (d <= center.z) { islandMask = 1.0; }
       if (d >= outer) { islandMask = 0.0; }
-      if (islandMask > bestMask || shore > bestShore) {
+      if (islandMask > bestMask) {
         bestMask = islandMask;
+      }
+      if (shore > bestShore) {
         bestShore = shore;
         nearestX = center.x;
         nearestZ = center.y;
