@@ -110,6 +110,7 @@ fn run() -> Result<PathBuf, String> {
     let output_path = output_dir.join("summary.json");
 
     let terrain_config = TerrainSourceConfig::load_or_default();
+    require_default_gpu_runtime_path(&terrain_config)?;
     let terrain_source = TerrainSourceStartupReport::from_config(&terrain_config);
     let bridge = ProceduralWorldSourceTerrainBridge::load_or_default();
 
@@ -145,6 +146,17 @@ fn run() -> Result<PathBuf, String> {
         .map_err(|err| format!("failed to write {}: {err}", output_path.display()))?;
 
     Ok(output_path)
+}
+
+fn require_default_gpu_runtime_path(config: &TerrainSourceConfig) -> Result<(), String> {
+    if config.is_gpu_default_path() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "world_source_acceptance requires terrain_source.mode=gpu_world_source; got {}",
+        config.mode.acceptance_label(),
+    ))
 }
 
 fn bench_chunk_generation(
@@ -318,6 +330,7 @@ fn build_profile() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use voxel_builder::world::source::TerrainSourceMode;
 
     #[test]
     fn default_run_name_is_world_source_prefixed() {
@@ -333,5 +346,18 @@ mod tests {
     #[test]
     fn build_profile_is_stable() {
         assert!(matches!(build_profile(), "debug" | "release"));
+    }
+
+    #[test]
+    fn acceptance_requires_gpu_world_source_mode() {
+        assert!(require_default_gpu_runtime_path(&TerrainSourceConfig {
+            mode: TerrainSourceMode::GpuWorldSource,
+        }).is_ok());
+        assert!(require_default_gpu_runtime_path(&TerrainSourceConfig {
+            mode: TerrainSourceMode::Legacy,
+        }).is_err());
+        assert!(require_default_gpu_runtime_path(&TerrainSourceConfig {
+            mode: TerrainSourceMode::CpuWorldSourceReference,
+        }).is_err());
     }
 }
