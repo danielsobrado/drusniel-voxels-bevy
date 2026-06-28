@@ -73,7 +73,9 @@ export function sampleBlendedHeightNormalMaterial(
 
   const summary = sampleProvider(x, z, heightProvider);
   if (!summary) {
-    options.metrics?.farSummaryFallbackSamples++;
+    if (options.metrics) {
+      options.metrics.farSummaryFallbackSamples = options.metrics.farSummaryFallbackSamples + 1;
+    }
     return sampleMacro(x, z);
   }
 
