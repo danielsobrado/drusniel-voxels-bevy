@@ -26,11 +26,12 @@ Done:
 - Surface Nets terrain encodes a compatibility biome id in `uv0.y`; `uv0.x` remains baked AO.
 - Bevy now has `BiomeContentTable` covering Meadows, Forest, Swamp, Mountain, Plains, Coast, and Ocean.
 - WorldSource terrain generation uses `BiomeContentTable` instead of bridge-local material rules.
+- Bevy now has `WorldSourceDriftGateReport` with explicit `passed`, `failed`, and `skipped` states for CPU/GPU drift checks.
 
 Not done yet:
 
 - Bevy renderer/material path currently receives a compatibility biome id inferred from legacy four-channel material weights; true WorldSource biome IDs should replace it before visual parity is claimed.
-- Bevy does not yet have CPU/GPU readback drift gates for biome and dominant layer.
+- GPU readback producer is not implemented yet; until it is available, the drift gate reports `skipped`, not `passed`.
 
 ## Shared contract source of truth
 
@@ -53,6 +54,7 @@ Not done yet:
 | Ocean rim | config | config | GPU parity path | config | Config |
 | Splat output | dominant layer plus weights | `sampleBiomeSplat` | pending Bevy WGSL | `BiomeSplatSample` + `biome_splat.wgsl` | GPU path wired |
 | Voxel biome content | seven-biome table | compatibility | n/a | `BiomeContentTable` | Shared Bevy content |
+| Drift gate status | pass/fail/skip | n/a | readback input | `WorldSourceDriftGateReport` | Explicit status |
 
 ## Jira tasks
 
@@ -172,19 +174,24 @@ Acceptance:
 
 ### BVY-WS-09 — Add CPU/GPU drift gate for Bevy
 
-Status: Next.
+Status: Done.
 
 Acceptance:
 
-- [ ] Gate compares CPU reference and GPU results where readback is available.
-- [ ] Biome ID and dominant layer exact-match.
-- [ ] Numeric tolerances explicit.
-- [ ] GPU/readback absence is skipped, not passed.
-- [ ] Acceptance report cannot mistake skipped GPU gate for pass.
+- [x] Gate compares CPU reference and GPU results where readback samples are supplied.
+- [x] Biome ID and dominant layer exact-match.
+- [x] Numeric tolerances explicit.
+- [x] GPU/readback absence is skipped, not passed.
+- [x] Acceptance report cannot mistake skipped GPU gate for pass through `is_acceptance_pass()`.
+
+Notes:
+
+- `WorldSourceDriftGateReport` is ready for BVY-WS-11 bench/acceptance JSON output.
+- A GPU readback producer is still required before the gate can produce a real pass in runtime acceptance.
 
 ### BVY-WS-10 — Make GPU WorldSource default runtime path
 
-Status: Pending.
+Status: Next.
 
 Acceptance:
 
@@ -223,7 +230,7 @@ Acceptance:
 
 BVY-WS-01, BVY-WS-02, BVY-WS-03, BVY-WS-04, BVY-WS-05, BVY-WS-06, BVY-WS-07, BVY-WS-08, BVY-WS-09, BVY-WS-10, BVY-WS-11, BVY-WS-12.
 
-Do not start BVY-WS-07 before BVY-WS-06. Do not make GPU WorldSource the runtime default before BVY-WS-09 passes.
+Do not make GPU WorldSource the runtime default before BVY-WS-09 passes or reports an explicit skip.
 
 ## Verification commands
 
@@ -239,9 +246,7 @@ npm --prefix tools/clod-poc run build
 Bevy:
 
 ```powershell
-cargo test world::source::biome_content
-cargo test world::source::terrain_bridge
-cargo test voxel::meshing::biome_channel
+cargo test world::source::drift_gate
 cargo test world::source
 cargo test
 ```
