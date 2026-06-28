@@ -41,8 +41,9 @@ function biome(
   debugColorRgb: [number, number, number],
   canopyDensity: number,
 ): BiomeContent {
+  const primarySlot = textureSlotSet[0] ?? "natural";
   const lowMaterial = textureSlotSet.includes("sand") ? "sand" : defaultMaterialId;
-  const highSlot = textureSlotSet.includes("snow") ? "snow" : textureSlotSet.includes("rock") ? "rock" : textureSlotSet[0];
+  const highSlot = textureSlotSet.includes("snow") ? "snow" : textureSlotSet.includes("rock") ? "rock" : primarySlot;
   const highMaterial = highSlot === "snow" ? "snow" : highSlot === "rock" ? "rock" : defaultMaterialId;
   return {
     id,
@@ -53,15 +54,15 @@ function biome(
       biomeId,
       debugColorRgb,
       canopyDensity,
-      terrainTextureSlots: textureSlotSet,
+      terrainTextureSlots: textureSlotSet.length > 0 ? textureSlotSet : [primarySlot],
     },
     defaultMaterialId,
     waterMaterialId: "water",
-    textureSlotSet,
+    textureSlotSet: textureSlotSet.length > 0 ? textureSlotSet : [primarySlot],
     tags: ["islands", "spatial-region"],
     terrainBands: [
-      { id: `${id}-low`, name: `${name} Low`, minHeight: -120, maxHeight: 28, materialId: lowMaterial, textureSlotId: textureSlotSet[0] },
-      { id: `${id}-mid`, name: `${name} Mid`, minHeight: 28, maxHeight: 92, materialId: defaultMaterialId, textureSlotId: textureSlotSet[0] },
+      { id: `${id}-low`, name: `${name} Low`, minHeight: -120, maxHeight: 28, materialId: lowMaterial, textureSlotId: primarySlot },
+      { id: `${id}-mid`, name: `${name} Mid`, minHeight: 28, maxHeight: 92, materialId: defaultMaterialId, textureSlotId: primarySlot },
       { id: `${id}-high`, name: `${name} High`, minHeight: 92, maxHeight: 260, materialId: highMaterial, textureSlotId: highSlot },
     ],
   };
