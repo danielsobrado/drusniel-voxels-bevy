@@ -47,15 +47,16 @@ trees:
       far_max_vertices: 40000
       impostor_max_vertices: 240
 
-  # Impostors disabled: procedural grammar trees use real geometry; billboard
-  # impostors are not needed until the tree count requires them for LOD.
+  # WebGPU impostor bake target: 8x8 frames at 128px => 1024² atlas.
+  # Albedo RGBA8 + normal-depth RGBA8 cost ~8 MiB/species, ~24 MiB for
+  # the current 3 species. Keep URL/UI toggles available for disabling.
   impostors:
-    enabled: false
-    bake_on_start: false
+    enabled: true
+    bake_on_start: true
     fallback_to_placeholder: false
     source_lod: mid
     resolution_px: 128
-    octahedral_grid_size: 4
+    octahedral_grid_size: 8
     atlas_padding_px: 2
     alpha_test: 0.45
     frame_update_distance_m: 2.0
@@ -64,7 +65,7 @@ trees:
     max_bakes_per_frame: 1
     debug_show_frames: false
     debug_freeze_frame: -1
-    future_normal_depth: false
+    future_normal_depth: true
 
   wind:
     enabled: true
