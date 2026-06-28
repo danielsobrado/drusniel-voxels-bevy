@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildTerrainSummary, sampleHeight, sampleHeightBlend, sampleNormal, sampleCoverage } from "./terrain_summary.js";
+import {
+  buildTerrainSummary,
+  sampleHeight,
+  sampleHeightBlend,
+  sampleNormal,
+  sampleCoverage,
+  sampleBiomeId,
+  sampleSkirtHeight,
+  summaryBaseLevel,
+} from "./terrain_summary.js";
 import type { ClodPageNode, PageMesh } from "../types.js";
 
 const mesh: PageMesh = {
@@ -72,6 +81,18 @@ describe("terrain summary field", () => {
     }
   });
 
+  it("uses WorldSource for uncovered summary cells and skirt fallback", () => {
+    const worldSource = {
+      sampleHeight: () => 77,
+      sampleBiome: () => 4,
+    };
+    const summary = buildTerrainSummary([], 16, 16, { worldSource });
+
+    expect(sampleHeight(summary, 8, 8)).toBe(77);
+    expect(sampleBiomeId(summary, 8, 8)).toBe(4);
+    expect(sampleSkirtHeight(summary, -4, -4, 100, summaryBaseLevel(summary), 1)).toBe(77);
+  });
+
   it("normals are unit vectors", () => {
     const worldSize = 50;
     const pages = [
@@ -127,7 +148,7 @@ describe("terrain summary field", () => {
     const summary = buildTerrainSummary([page], worldSize, 1);
 
     const cx = 40, cz = 40;
-    // bias=0 → valley floor (heightMin)
+    // bias=0 → valley floor
     const hMin = sampleHeightBlend(summary, cx, cz, 0);
     const expectedMin = summary.heightMin[
       // grid index for cell containing (cx, cz) — same lookup as sampleHeight
@@ -135,7 +156,7 @@ describe("terrain summary field", () => {
     ];
     expect(hMin).toBeCloseTo(expectedMin, 5);
 
-    // bias=1 → peak (heightMax) ≈ sampleHeight
+    // bias=1 → peak ≈ sampleHeight
     const hMax = sampleHeightBlend(summary, cx, cz, 1);
     const hPeak = sampleHeight(summary, cx, cz);
     expect(hMax).toBeCloseTo(hPeak, 5);
