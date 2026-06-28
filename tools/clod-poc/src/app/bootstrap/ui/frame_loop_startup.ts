@@ -54,6 +54,7 @@ export function runFrameLoopStartup(
     controls,
     player,
     interaction,
+    terrainColliders,
     terrainRaycast,
     worldCells,
     maxTerrainLevel,
@@ -265,7 +266,7 @@ export function runFrameLoopStartup(
           session.naadfStatsController?.updateDisplay();
         } }
       : undefined,
-    floatingOrigin: floatingOrigin ? { controller: floatingOrigin } : undefined,
+    floatingOrigin: floatingOrigin ? { controller: floatingOrigin, terrainColliders } : undefined,
     construction: constructionController
       ? {
           update: () => {
