@@ -8,6 +8,7 @@ pub mod noise;
 pub mod splat;
 pub mod terrain_bridge;
 pub mod terrain_source_config;
+pub mod terrain_source_diagnostics;
 pub mod world_source;
 
 #[cfg(test)]
@@ -34,6 +35,10 @@ pub use island_shape::{sample_island_mask, IslandMaskSample, IslandShapeConfig};
 pub use splat::{sample_biome_splat, BiomeSplatSample, MaterialLayerId};
 pub use terrain_bridge::{ProceduralWorldSourceTerrainBridge, WorldSourceTerrainBridge};
 pub use terrain_source_config::{TerrainSourceConfig, TerrainSourceMode, TERRAIN_SOURCE_CONFIG_PATH};
+pub use terrain_source_diagnostics::{
+    terrain_source_startup_report, TerrainSourceRuntimePath, TerrainSourceSelectionReason,
+    TerrainSourceStartupReport,
+};
 pub use world_source::{
     ProceduralWorldSource, TerrainFieldConfig, WorldSource, WorldSourceBounds, WorldSourceMetadata,
     WORLD_SOURCE_CONFIG_PATH,
