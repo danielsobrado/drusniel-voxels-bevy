@@ -22,6 +22,8 @@ export interface ProceduralTerrainSlot {
   selectedId: string;
 }
 
+export type TerrainNodeTextureSlot = Pick<ProceduralTerrainSlot, "scale" | "heightMin" | "heightMax">;
+
 export interface ProceduralTerrainTextures {
   noise: NoiseBakeResult;
   classification: TerrainClassificationBakeResult;
