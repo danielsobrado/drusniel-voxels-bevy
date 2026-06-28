@@ -8,6 +8,7 @@ export * from "./tree_alpha_mask.js";
 export * from "./tree_geometry.js";
 export * from "./tree_gpu_ring_geometry.js";
 export * from "./tree_impostor_baker.js";
+export * from "./tree_impostor_blend_geometry.js";
 export * from "./tree_impostor_material.js";
 export * from "./tree_impostor_octahedral.js";
 export * from "./tree_impostor_runtime.js";
