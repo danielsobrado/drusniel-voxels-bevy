@@ -1,0 +1,137 @@
+import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  abs,
+  clamp,
+  float,
+  floor,
+  Fn,
+  length,
+  max,
+  mix,
+  pow,
+  sin,
+  smoothstep,
+  step,
+  uniform,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+} from "three/tsl";
+import { createSpellNoiseNodes } from "./spell_noise_nodes.js";
+import type { SpellNodeMaterialHandle } from "./fire_node_material.js";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type TslNode = any;
+
+/**
+ * Thin pressure-vortex beam for the air spell. It stays mostly transparent and
+ * reads through fast edge ribbons, dust motes, and pale hand/tip rings.
+ */
+export function createAirNodeMaterial(): SpellNodeMaterialHandle {
+  const uTime = uniform(0) as TslNode;
+  const uProgress = uniform(0) as TslNode;
+  const { noise, fbm } = createSpellNoiseNodes({
+    hashSeed: 92831.73245,
+    fbmFreqMul: 2.07,
+    fbmOffset: [4.2, 17.3, 8.9],
+  });
+
+  const ring = (d: TslNode, radius: TslNode, thickness: TslNode): TslNode =>
+    float(1).sub(smoothstep(thickness, thickness.mul(2.15), abs(d.sub(radius))));
+
+  const fragment = Fn(() => {
+    const uvN: TslNode = uv();
+    const side: TslNode = uvN.x.sub(0.5);
+    const t: TslNode = uvN.y;
+    const p: TslNode = vec2(side, uvN.y.sub(0.5));
+
+    const castIn: TslNode = smoothstep(0.0, 0.055, uProgress);
+    const castOut: TslNode = float(1).sub(smoothstep(0.72, 1.0, uProgress));
+    const life: TslNode = castIn.mul(castOut);
+    const grow: TslNode = smoothstep(0.0, 0.18, uProgress);
+
+    const flow: TslNode = fbm(vec3(t.mul(3.1), uTime.mul(2.8), 5.0));
+    const gust: TslNode = sin(t.mul(42.0).sub(uTime.mul(28.0)).add(flow.mul(5.2))).mul(0.027);
+    const crossGust: TslNode = sin(t.mul(19.0).add(uTime.mul(17.0)).add(side.mul(8.0))).mul(0.012);
+    const sideWarp: TslNode = flow.sub(0.5).mul(0.085).mul(smoothstep(0.05, 0.9, t)).add(gust).add(crossGust);
+    const warpedSide: TslNode = side.add(sideWarp);
+    const pathMask: TslNode = smoothstep(-0.02, 0.06, t).mul(
+      float(1).sub(smoothstep(grow.mul(0.96), grow.mul(1.16).add(0.01), t)),
+    );
+
+    let beamWidth: TslNode = mix(float(0.045), float(0.205), pow(max(t, 0.0), 0.72));
+    beamWidth = beamWidth.mul(float(1).sub(smoothstep(0.68, 1.06, t).mul(0.42)));
+    beamWidth = max(beamWidth, 0.022);
+
+    const q: TslNode = vec3(warpedSide.div(beamWidth), t.mul(3.7), uTime.mul(2.9));
+    const ribbonNoise: TslNode = fbm(q.mul(vec3(1.15, 1.9, 1.0)).add(vec3(0.0, uTime.mul(-5.4), 3.5)));
+    const fineNoise: TslNode = fbm(q.mul(vec3(2.8, 3.5, 1.0)).add(vec3(11.0, uTime.mul(-9.0), 1.7)));
+
+    const normalizedSide: TslNode = abs(warpedSide).div(beamWidth);
+    const hollowBand: TslNode = float(1).sub(smoothstep(0.045, 0.18, abs(normalizedSide.sub(0.68))));
+    const windBody: TslNode = float(1).sub(normalizedSide).sub(t.mul(0.24)).add(ribbonNoise.mul(0.34)).add(fineNoise.mul(0.10));
+    const ribbon: TslNode = hollowBand.mul(smoothstep(0.06, 0.78, windBody)).mul(pathMask).mul(life);
+    const pressureCore: TslNode = smoothstep(0.54, 1.06, windBody.add(float(1).sub(t).mul(0.14))).mul(pathMask).mul(life).mul(0.38);
+
+    const handDist: TslNode = length(vec2(side.mul(0.72), t.mul(1.34)));
+    const handGlow: TslNode = float(1).sub(smoothstep(0.035, 0.23, handDist)).mul(life).mul(0.55);
+    const handRing: TslNode = ring(handDist, float(0.135).add(sin(uTime.mul(8.2)).mul(0.014)), float(0.008)).mul(life);
+    const outerRing: TslNode = ring(handDist, float(0.215).add(sin(uTime.mul(4.8)).mul(0.018)), float(0.007)).mul(life).mul(0.48);
+
+    const tipDist: TslNode = length(vec2(warpedSide.mul(1.1), t.sub(0.9).mul(0.78)));
+    const tipRing: TslNode = ring(tipDist, float(0.11).add(uProgress.mul(0.10)), float(0.009))
+      .mul(smoothstep(0.30, 0.88, t))
+      .mul(life)
+      .mul(0.42);
+
+    const dustCell: TslNode = floor(vec2(warpedSide.add(0.58).mul(96.0), t.mul(92.0)));
+    const dustNoise: TslNode = noise(vec3(dustCell.x, dustCell.y, floor(uTime.mul(36.0))));
+    const dust: TslNode = step(0.988, dustNoise)
+      .mul(smoothstep(0.10, 0.96, t))
+      .mul(float(1).sub(smoothstep(0.98, 1.14, t)))
+      .mul(life);
+    const haze: TslNode = smoothstep(0.30, 0.76, fbm(vec3(p.x.mul(2.4), p.y.mul(3.2), uTime.mul(2.0))))
+      .mul(pathMask)
+      .mul(life)
+      .mul(0.055);
+
+    const shadowAir: TslNode = vec3(0.13, 0.25, 0.30);
+    const paleAir: TslNode = vec3(0.68, 0.93, 1.0);
+    const edgeAir: TslNode = vec3(0.90, 0.99, 1.0);
+    const dustColor: TslNode = vec3(0.80, 0.76, 0.56);
+    let color: TslNode = mix(shadowAir, paleAir, ribbon.add(pressureCore));
+    color = mix(color, edgeAir, pressureCore.mul(0.75).add(handGlow.mul(0.28)));
+    color = color.add(edgeAir.mul(handRing.add(outerRing).add(tipRing)).mul(0.82));
+    color = color.add(dustColor.mul(dust).mul(0.52));
+    color = color.add(vec3(0.42, 0.66, 0.72).mul(haze));
+
+    const alpha: TslNode = clamp(
+      ribbon.mul(0.36)
+        .add(pressureCore.mul(0.22))
+        .add(handGlow.mul(0.18))
+        .add(handRing.mul(0.42))
+        .add(outerRing.mul(0.24))
+        .add(tipRing.mul(0.30))
+        .add(dust.mul(0.24))
+        .add(haze),
+      0.0,
+      0.62,
+    );
+    return vec4(color, alpha);
+  })();
+
+  const material = new MeshBasicNodeMaterial();
+  material.name = "air-spell-node";
+  material.colorNode = fragment.xyz;
+  material.opacityNode = fragment.w;
+  material.transparent = true;
+  material.depthWrite = false;
+  material.depthTest = true;
+  material.side = THREE.DoubleSide;
+  material.blending = THREE.AdditiveBlending;
+  material.toneMapped = false;
+
+  return { material, uTime, uProgress };
+}
