@@ -2,27 +2,32 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   attachTreeImpostorBlendAttributes,
+  createTreeImpostorBlendGeometry,
   TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
   TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
   type TreeImpostorBlendAttributes,
 } from "./index.js";
 
 describe("tree impostor blend geometry attributes", () => {
+  it("creates a cloned instanced geometry with blend attributes", () => {
+    const source = new THREE.PlaneGeometry(1, 2);
+    source.name = "oak-billboard";
+    source.computeBoundingBox();
+    source.computeBoundingSphere();
+    const geometry = createTreeImpostorBlendGeometry(source, fakeAttributes());
+
+    expect(geometry.name).toBe("oak-billboard-impostor-blend");
+    expect(geometry.getAttribute("position")).toBeDefined();
+    expect(geometry.getAttribute("uv")).toBeDefined();
+    expect(geometry.getAttribute("treeImpostorUvRect0")).toBeDefined();
+    expect(geometry.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME)).toBeDefined();
+    expect(geometry.boundingBox).not.toBe(source.boundingBox);
+    expect(geometry.boundingSphere).not.toBe(source.boundingSphere);
+  });
+
   it("attaches four uv rect attributes and one weight attribute", () => {
     const geometry = new THREE.InstancedBufferGeometry();
-    const attributes: TreeImpostorBlendAttributes = {
-      uvRects: new Float32Array([
-        0.0, 0.0, 0.1, 0.1,
-        0.1, 0.0, 0.2, 0.1,
-        0.0, 0.1, 0.1, 0.2,
-        0.1, 0.1, 0.2, 0.2,
-        0.3, 0.3, 0.4, 0.4,
-        0.4, 0.3, 0.5, 0.4,
-        0.3, 0.4, 0.4, 0.5,
-        0.4, 0.4, 0.5, 0.5,
-      ]),
-      weights: new Float32Array([0.25, 0.25, 0.25, 0.25, 0.1, 0.2, 0.3, 0.4]),
-    };
+    const attributes = fakeAttributes();
 
     attachTreeImpostorBlendAttributes(geometry, attributes);
 
@@ -58,3 +63,19 @@ describe("tree impostor blend geometry attributes", () => {
     })).toThrow(/four vec4 rects per instance/);
   });
 });
+
+function fakeAttributes(): TreeImpostorBlendAttributes {
+  return {
+    uvRects: new Float32Array([
+      0.0, 0.0, 0.1, 0.1,
+      0.1, 0.0, 0.2, 0.1,
+      0.0, 0.1, 0.1, 0.2,
+      0.1, 0.1, 0.2, 0.2,
+      0.3, 0.3, 0.4, 0.4,
+      0.4, 0.3, 0.5, 0.4,
+      0.3, 0.4, 0.4, 0.5,
+      0.4, 0.4, 0.5, 0.5,
+    ]),
+    weights: new Float32Array([0.25, 0.25, 0.25, 0.25, 0.1, 0.2, 0.3, 0.4]),
+  };
+}
