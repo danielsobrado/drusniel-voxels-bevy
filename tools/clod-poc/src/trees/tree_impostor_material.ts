@@ -89,7 +89,7 @@ function relightTreeImpostorNode(albedo: TslNode, normalSample: TslNode): TslNod
   const sun: TslNode = max(dot(n, sunDirection), 0.0);
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi: TslNode = mix(groundColor, skyColor, sky);
-  return albedo.mul(float(TREE_IMPOSTOR_AMBIENT).add(hemi).add(sunColor.mul(sun)));
+  return albedo.mul(float(TREE_IMPOSTOR_AMBIENT)).add(albedo.mul(hemi.add(sunColor.mul(sun))));
 }
 
 export const TREE_IMPOSTOR_VERTEX_SHADER = `
@@ -123,7 +123,7 @@ vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal) {
   float sun = max(dot(n, sunDir), 0.0);
   float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
   vec3 hemi = mix(groundColor, skyColor, sky);
-  return albedo * (0.25 + hemi + sunColor * sun);
+  return albedo * 0.25 + albedo * (hemi + sunColor * sun);
 }
 
 void main() {
