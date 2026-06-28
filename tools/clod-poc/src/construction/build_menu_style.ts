@@ -162,6 +162,9 @@ function positionBuildMenu(): void {
   const menu = document.getElementById("construction-build-menu");
   if (!menu || menu.dataset.hudDragged === "true" || menu.dataset.hudPositioned === "true") return;
 
+  const menuRect = menu.getBoundingClientRect();
+  if (menuRect.height <= 0) return;
+
   const rightRailLeft = rightControlRailLeft();
   const availableWidth = Math.max(0, rightRailLeft - HUD_EDGE_PX - HUD_GAP_PX);
   const width = window.innerWidth <= MOBILE_BREAKPOINT_PX
@@ -170,7 +173,7 @@ function positionBuildMenu(): void {
   const left = window.innerWidth <= MOBILE_BREAKPOINT_PX
     ? HUD_EDGE_PX
     : clamp(rightRailLeft - width - HUD_GAP_PX, HUD_EDGE_PX, window.innerWidth - width - HUD_EDGE_PX);
-  const top = window.innerHeight - BUILD_MENU_BOTTOM_PX - menuHeightForLayout(menu);
+  const top = window.innerHeight - BUILD_MENU_BOTTOM_PX - menuRect.height;
 
   menu.style.width = `${width}px`;
   setFixedRect(menu, left, Math.max(HUD_EDGE_PX, top));
@@ -199,7 +202,7 @@ function positionCachePanel(): void {
 function clearCalculatedPositionMarkers(): void {
   for (const selector of ["#spell-menu", "#construction-build-menu", ".debug-panel-chrome--floating[data-panel-id='clod-cache']"]) {
     const element = document.querySelector<HTMLElement>(selector);
-    if (element?.dataset.hudDragged !== "true") delete element?.dataset.hudPositioned;
+    if (element && element.dataset.hudDragged !== "true") delete element.dataset.hudPositioned;
   }
 }
 
@@ -217,11 +220,6 @@ function rightControlRailLeft(): number {
   const gui = document.querySelector<HTMLElement>("body > .lil-gui.root");
   const rect = gui?.getBoundingClientRect();
   return rect && rect.width > 0 ? rect.left : window.innerWidth;
-}
-
-function menuHeightForLayout(menu: HTMLElement): number {
-  const rect = menu.getBoundingClientRect();
-  return rect.height > 0 ? rect.height : 300;
 }
 
 function clamp(value: number, min: number, max: number): number {
