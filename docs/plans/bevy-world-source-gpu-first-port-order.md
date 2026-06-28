@@ -24,11 +24,12 @@ Done:
 - Bevy Rust `BiomeSplatSample` has `triplanar_weights()` parity helpers and tests against the WGSL material-layer IDs.
 - Bevy triplanar terrain shader imports `world_source/biome_splat.wgsl` and calls `biome_splat_resolve_triplanar_weights()` under `TERRAIN_GPU_BIOME_SPLAT`.
 - Surface Nets terrain encodes a compatibility biome id in `uv0.y`; `uv0.x` remains baked AO.
+- Bevy now has `BiomeContentTable` covering Meadows, Forest, Swamp, Mountain, Plains, Coast, and Ocean.
+- WorldSource terrain generation uses `BiomeContentTable` instead of bridge-local material rules.
 
 Not done yet:
 
-- Bevy content is still behind the seven-biome clod-poc model.
-- Bevy renderer/material path currently receives a compatibility biome id inferred from legacy four-channel material weights; true WorldSource biome IDs are handled next.
+- Bevy renderer/material path currently receives a compatibility biome id inferred from legacy four-channel material weights; true WorldSource biome IDs should replace it before visual parity is claimed.
 - Bevy does not yet have CPU/GPU readback drift gates for biome and dominant layer.
 
 ## Shared contract source of truth
@@ -51,6 +52,7 @@ Not done yet:
 | Island shape | config | config | GPU parity path | config | Config |
 | Ocean rim | config | config | GPU parity path | config | Config |
 | Splat output | dominant layer plus weights | `sampleBiomeSplat` | pending Bevy WGSL | `BiomeSplatSample` + `biome_splat.wgsl` | GPU path wired |
+| Voxel biome content | seven-biome table | compatibility | n/a | `BiomeContentTable` | Shared Bevy content |
 
 ## Jira tasks
 
@@ -155,22 +157,22 @@ Acceptance:
 Notes:
 
 - The current Bevy mesh biome channel is a compatibility bridge inferred from the legacy four material weights.
-- BVY-WS-08 must replace this with true seven-biome content tables and source-aware IDs.
+- BVY-WS-09 should add a drift gate before this is treated as visual parity.
 
 ### BVY-WS-08 — Expand Bevy biome/content tables to seven biome IDs
 
-Status: Next.
+Status: Done.
 
 Acceptance:
 
-- [ ] Bevy content represents Meadows, Forest, Swamp, Mountain, Plains, Coast, Ocean.
-- [ ] Temporary legacy material mapping documented.
-- [ ] Missing biome content fails loudly or uses named compatibility adapter.
-- [ ] Tests cover all seven IDs.
+- [x] Bevy content represents Meadows, Forest, Swamp, Mountain, Plains, Coast, Ocean through `BiomeContentTable`.
+- [x] Temporary legacy material mapping is documented in `voxel::meshing::biome_channel`.
+- [x] Missing biome content fails at compile time through exhaustive `BiomeId` matching, and the remaining mesh-side compatibility bridge is named as such.
+- [x] Tests cover all seven IDs.
 
 ### BVY-WS-09 — Add CPU/GPU drift gate for Bevy
 
-Status: Pending.
+Status: Next.
 
 Acceptance:
 
@@ -237,9 +239,10 @@ npm --prefix tools/clod-poc run build
 Bevy:
 
 ```powershell
-cargo test world::source
-cargo test rendering::materials::triplanar
+cargo test world::source::biome_content
+cargo test world::source::terrain_bridge
 cargo test voxel::meshing::biome_channel
+cargo test world::source
 cargo test
 ```
 
