@@ -1,4 +1,36 @@
+import {
+  BIOME_COAST_HEIGHT_BAND_M,
+  BIOME_COAST_SHORE_DISTANCE_M,
+  BIOME_FOREST_NOISE_MIN,
+  BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M,
+  BIOME_OCEAN_HEIGHT_MARGIN_M,
+  BIOME_OCEAN_ISLAND_MASK_MAX,
+  BIOME_PLAINS_DISTANCE_MIN,
+  BIOME_PLAINS_NOISE_MIN,
+  BIOME_REGION_CELL_M,
+  BIOME_REGION_CONTRACT,
+  BIOME_SWAMP_HEIGHT_ABOVE_SEA_M,
+  BIOME_SWAMP_NOISE_MAX,
+  resolveBiomeRegionContract,
+  type BiomeRegionContract,
+} from "./biome_region_contract.js";
 import { resolveIslandShapeConfig, sampleIslandMask, type IslandMaskSample, type IslandShapeConfig } from "./island_shape.js";
+
+export {
+  BIOME_COAST_HEIGHT_BAND_M,
+  BIOME_COAST_SHORE_DISTANCE_M,
+  BIOME_FOREST_NOISE_MIN,
+  BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M,
+  BIOME_OCEAN_HEIGHT_MARGIN_M,
+  BIOME_OCEAN_ISLAND_MASK_MAX,
+  BIOME_PLAINS_DISTANCE_MIN,
+  BIOME_PLAINS_NOISE_MIN,
+  BIOME_REGION_CELL_M,
+  BIOME_REGION_CONTRACT,
+  BIOME_SWAMP_HEIGHT_ABOVE_SEA_M,
+  BIOME_SWAMP_NOISE_MAX,
+  type BiomeRegionContract,
+};
 
 export const BIOME_IDS = {
   meadows: 0,
@@ -9,18 +41,6 @@ export const BIOME_IDS = {
   coast: 5,
   ocean: 6,
 } as const;
-
-export const BIOME_REGION_CELL_M = 420;
-export const BIOME_OCEAN_HEIGHT_MARGIN_M = 1.5;
-export const BIOME_OCEAN_ISLAND_MASK_MAX = 0.08;
-export const BIOME_COAST_HEIGHT_BAND_M = 4;
-export const BIOME_COAST_SHORE_DISTANCE_M = 42;
-export const BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M = 68;
-export const BIOME_SWAMP_HEIGHT_ABOVE_SEA_M = 8;
-export const BIOME_SWAMP_NOISE_MAX = 0.42;
-export const BIOME_PLAINS_DISTANCE_MIN = 0.72;
-export const BIOME_PLAINS_NOISE_MIN = 0.58;
-export const BIOME_FOREST_NOISE_MIN = 0.46;
 
 export type BiomeId = typeof BIOME_IDS[keyof typeof BIOME_IDS];
 
@@ -33,9 +53,9 @@ export interface BiomeRegionSample {
 export interface BiomeRegionFieldOptions {
   seed: number;
   seaLevel: number;
-  /** Must stay equal to BIOME_REGION_CELL_M until WGSL accepts this as a uniform. */
   regionCellM?: number;
   islandShape?: Partial<IslandShapeConfig>;
+  contract?: Partial<BiomeRegionContract>;
 }
 
 export interface BiomeRegionClassifyInput {
@@ -44,9 +64,10 @@ export interface BiomeRegionClassifyInput {
   height: number;
   seed: number;
   seaLevel: number;
-  regionCellM: number;
+  regionCellM?: number;
   islandRadiusM: number;
   island: IslandMaskSample;
+  contract?: Partial<BiomeRegionContract>;
 }
 
 function mix32(value: number): number {
@@ -59,13 +80,13 @@ function mix32(value: number): number {
   return mixed >>> 0;
 }
 
-function resolveRegionCellM(value: unknown): number {
-  if (value === undefined) return BIOME_REGION_CELL_M;
-  if (typeof value !== "number" || !Number.isFinite(value)) return BIOME_REGION_CELL_M;
-  if (value !== BIOME_REGION_CELL_M) {
-    throw new Error(`BiomeRegionField regionCellM must be ${BIOME_REGION_CELL_M} to match the GPU shader; got ${value}`);
+function resolveRegionCellM(value: unknown, contract: BiomeRegionContract): number {
+  if (value === undefined) return contract.regionCellM;
+  if (typeof value !== "number" || !Number.isFinite(value)) return contract.regionCellM;
+  if (value !== contract.regionCellM) {
+    throw new Error(`BiomeRegionField regionCellM must be ${contract.regionCellM} to match the shared GPU contract; got ${value}`);
   }
-  return BIOME_REGION_CELL_M;
+  return contract.regionCellM;
 }
 
 export function pcg2d(x: number, z: number, seed: number): number {
@@ -80,8 +101,14 @@ function smooth01(value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-export function biomeRegionNoise(x: number, z: number, cellM: number, seed: number): number {
-  const safeCellM = cellM === BIOME_REGION_CELL_M ? BIOME_REGION_CELL_M : resolveRegionCellM(cellM);
+export function biomeRegionNoise(
+  x: number,
+  z: number,
+  cellM: number | undefined,
+  seed: number,
+  contract: BiomeRegionContract = BIOME_REGION_CONTRACT,
+): number {
+  const safeCellM = resolveRegionCellM(cellM, contract);
   const gx = x / safeCellM;
   const gz = z / safeCellM;
   const x0 = Math.floor(gx);
@@ -96,22 +123,24 @@ export function biomeRegionNoise(x: number, z: number, cellM: number, seed: numb
 }
 
 export function classifyBiomeRegion(input: BiomeRegionClassifyInput): BiomeRegionSample {
-  const { x, z, height, seed, seaLevel, regionCellM, islandRadiusM, island } = input;
-  if (height < seaLevel - BIOME_OCEAN_HEIGHT_MARGIN_M || island.mask < BIOME_OCEAN_ISLAND_MASK_MAX) {
+  const contract = resolveBiomeRegionContract(input.contract);
+  const regionCellM = resolveRegionCellM(input.regionCellM, contract);
+  const { x, z, height, seed, seaLevel, islandRadiusM, island } = input;
+  if (height < seaLevel - contract.oceanHeightMarginM || island.mask < contract.oceanIslandMaskMax) {
     return { biome: BIOME_IDS.ocean, regionNoise: 0, islandDistanceT: 0 };
   }
-  if (Math.abs(height - seaLevel) < BIOME_COAST_HEIGHT_BAND_M || island.shoreDistanceM < BIOME_COAST_SHORE_DISTANCE_M) {
+  if (Math.abs(height - seaLevel) < contract.coastHeightBandM || island.shoreDistanceM < contract.coastShoreDistanceM) {
     return { biome: BIOME_IDS.coast, regionNoise: 0, islandDistanceT: 0 };
   }
 
-  const n = biomeRegionNoise(x, z, regionCellM, seed + 711);
+  const n = biomeRegionNoise(x, z, regionCellM, seed + 711, contract);
   const centerDistance = Math.hypot(x - island.nearestCenterX, z - island.nearestCenterZ);
   const distanceT = Math.min(1, Math.max(0, centerDistance / Math.max(1, islandRadiusM)));
 
-  if (height >= seaLevel + BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M) return { biome: BIOME_IDS.mountain, regionNoise: n, islandDistanceT: distanceT };
-  if (height <= seaLevel + BIOME_SWAMP_HEIGHT_ABOVE_SEA_M && n < BIOME_SWAMP_NOISE_MAX) return { biome: BIOME_IDS.swamp, regionNoise: n, islandDistanceT: distanceT };
-  if (distanceT > BIOME_PLAINS_DISTANCE_MIN && n > BIOME_PLAINS_NOISE_MIN) return { biome: BIOME_IDS.plains, regionNoise: n, islandDistanceT: distanceT };
-  if (n > BIOME_FOREST_NOISE_MIN) return { biome: BIOME_IDS.forest, regionNoise: n, islandDistanceT: distanceT };
+  if (height >= seaLevel + contract.mountainHeightAboveSeaM) return { biome: BIOME_IDS.mountain, regionNoise: n, islandDistanceT: distanceT };
+  if (height <= seaLevel + contract.swampHeightAboveSeaM && n < contract.swampNoiseMax) return { biome: BIOME_IDS.swamp, regionNoise: n, islandDistanceT: distanceT };
+  if (distanceT > contract.plainsDistanceMin && n > contract.plainsNoiseMin) return { biome: BIOME_IDS.plains, regionNoise: n, islandDistanceT: distanceT };
+  if (n > contract.forestNoiseMin) return { biome: BIOME_IDS.forest, regionNoise: n, islandDistanceT: distanceT };
   return { biome: BIOME_IDS.meadows, regionNoise: n, islandDistanceT: distanceT };
 }
 
@@ -120,11 +149,13 @@ export class BiomeRegionField {
   readonly seaLevel: number;
   readonly regionCellM: number;
   readonly islandShape: IslandShapeConfig;
+  readonly contract: BiomeRegionContract;
 
   constructor(options: BiomeRegionFieldOptions) {
     this.seed = Number.isFinite(options.seed) ? Math.floor(options.seed) : 0;
     this.seaLevel = Number.isFinite(options.seaLevel) ? options.seaLevel : 18;
-    this.regionCellM = resolveRegionCellM(options.regionCellM);
+    this.contract = resolveBiomeRegionContract(options.contract);
+    this.regionCellM = resolveRegionCellM(options.regionCellM, this.contract);
     this.islandShape = resolveIslandShapeConfig({
       ...options.islandShape,
       seed: options.islandShape?.seed ?? this.seed,
@@ -142,6 +173,7 @@ export class BiomeRegionField {
       regionCellM: this.regionCellM,
       islandRadiusM: this.islandShape.radiusM,
       island: sampleIslandMask(x, z, this.islandShape),
+      contract: this.contract,
     });
   }
 }
