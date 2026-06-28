@@ -1,13 +1,20 @@
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import { buildTerrainSummary, populateTerrainSummaryBiomes } from "../clod/terrain_summary.js";
+import { getTerrainFieldCoreConfig } from "../gpu/terrain_field_core.js";
 import type { ClodPageNode } from "../types.js";
-import type { WorldSource } from "../world_source/world_source.js";
+import { ProceduralWorldSource, type WorldSource } from "../world_source/world_source.js";
 import { buildBaseKeyParts, type ClodCacheContext } from "./clodCacheContext.js";
 import {
   decodeTerrainSummaryArtifact,
   encodeTerrainSummaryArtifact,
   type TerrainSummaryArtifact,
 } from "./artifactSerializer.js";
+
+type TerrainSummaryWorldSource = Pick<WorldSource, "sampleHeight" | "sampleBiome">;
+
+function resolveWorldSource(worldSource?: TerrainSummaryWorldSource): TerrainSummaryWorldSource {
+  return worldSource ?? new ProceduralWorldSource(getTerrainFieldCoreConfig());
+}
 
 function summaryToArtifact(field: TerrainSummaryField): TerrainSummaryArtifact {
   return {
@@ -39,9 +46,9 @@ function artifactToSummary(artifact: TerrainSummaryArtifact): TerrainSummaryFiel
 
 function withWorldSource(
   summary: TerrainSummaryField,
-  worldSource?: Pick<WorldSource, "sampleHeight" | "sampleBiome">,
+  worldSource: TerrainSummaryWorldSource,
 ): TerrainSummaryField {
-  return worldSource ? populateTerrainSummaryBiomes(summary, worldSource) : summary;
+  return populateTerrainSummaryBiomes(summary, worldSource);
 }
 
 export interface TerrainSummaryCacheResult {
@@ -56,11 +63,13 @@ export async function loadTerrainSummaryWithCache(
   farReduceFactor: number,
   cacheCtx: ClodCacheContext | null,
   previousSummary: TerrainSummaryField | null,
-  worldSource?: Pick<WorldSource, "sampleHeight" | "sampleBiome">,
+  worldSource?: TerrainSummaryWorldSource,
 ): Promise<TerrainSummaryCacheResult> {
+  const resolvedWorldSource = resolveWorldSource(worldSource);
+
   if (!cacheCtx?.effective) {
     return {
-      summary: buildTerrainSummary(lod0Nodes, worldSize, farReduceFactor, { worldSource }),
+      summary: buildTerrainSummary(lod0Nodes, worldSize, farReduceFactor, { worldSource: resolvedWorldSource }),
       fromCache: false,
       keptStale: false,
     };
@@ -73,13 +82,13 @@ export async function loadTerrainSummaryWithCache(
 
   if (cached.status === "hit" && cached.artifact) {
     return {
-      summary: withWorldSource(artifactToSummary(cached.artifact), worldSource),
+      summary: withWorldSource(artifactToSummary(cached.artifact), resolvedWorldSource),
       fromCache: true,
       keptStale: false,
     };
   }
 
-  const built = buildTerrainSummary(lod0Nodes, worldSize, farReduceFactor, { worldSource });
+  const built = buildTerrainSummary(lod0Nodes, worldSize, farReduceFactor, { worldSource: resolvedWorldSource });
   await cacheCtx.service.put(
     keyParts,
     summaryToArtifact(built),
@@ -89,7 +98,7 @@ export async function loadTerrainSummaryWithCache(
 
   if (previousSummary && cacheCtx.config.streaming.keep_stale_until_replacement) {
     return {
-      summary: withWorldSource(previousSummary, worldSource),
+      summary: withWorldSource(previousSummary, resolvedWorldSource),
       fromCache: false,
       keptStale: true,
     };
@@ -103,11 +112,13 @@ export async function loadTerrainSummaryWithCacheSimple(
   worldSize: number,
   farReduceFactor: number,
   cacheCtx: ClodCacheContext | null,
-  worldSource?: Pick<WorldSource, "sampleHeight" | "sampleBiome">,
+  worldSource?: TerrainSummaryWorldSource,
 ): Promise<TerrainSummaryCacheResult> {
+  const resolvedWorldSource = resolveWorldSource(worldSource);
+
   if (!cacheCtx?.effective) {
     return {
-      summary: buildTerrainSummary(lod0Nodes, worldSize, farReduceFactor, { worldSource }),
+      summary: buildTerrainSummary(lod0Nodes, worldSize, farReduceFactor, { worldSource: resolvedWorldSource }),
       fromCache: false,
       keptStale: false,
     };
@@ -119,13 +130,13 @@ export async function loadTerrainSummaryWithCacheSimple(
   const cached = await cacheCtx.service.get(keyParts, decodeTerrainSummaryArtifact);
   if (cached.status === "hit" && cached.artifact) {
     return {
-      summary: withWorldSource(artifactToSummary(cached.artifact), worldSource),
+      summary: withWorldSource(artifactToSummary(cached.artifact), resolvedWorldSource),
       fromCache: true,
       keptStale: false,
     };
   }
 
-  const built = buildTerrainSummary(lod0Nodes, worldSize, farReduceFactor, { worldSource });
+  const built = buildTerrainSummary(lod0Nodes, worldSize, farReduceFactor, { worldSource: resolvedWorldSource });
   await cacheCtx.service.put(
     keyParts,
     summaryToArtifact(built),
