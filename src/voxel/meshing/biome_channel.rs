@@ -197,4 +197,22 @@ mod tests {
             encode_biome_id_for_uv(BiomeId::Forest),
         );
     }
+
+    #[test]
+    fn active_world_source_overrides_legacy_weights_when_no_material_tags_exist() {
+        let chunk = Chunk::new(IVec3::ZERO);
+        let world = VoxelWorld::new(IVec3::ONE);
+        let expected = ProceduralWorldSource::load_or_default().sample_biome(0.0, 0.0);
+
+        assert_eq!(
+            source_or_compatibility_biome_id_for_uv(
+                Vec3::ZERO,
+                &chunk,
+                &world,
+                IVec3::ZERO,
+                [0.0, 1.0, 0.0, 0.0],
+            ),
+            encode_biome_id_for_uv(expected),
+        );
+    }
 }
