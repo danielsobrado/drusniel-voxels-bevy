@@ -19,14 +19,16 @@
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { clamp, dot, float, max, mix, normalGeometry, normalize, positionGeometry, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+import { attribute, clamp, dot, float, max, mix, normalGeometry, normalize, positionGeometry, positionWorld, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
-import { sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
+import { sampleBiomeId, sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
 import { createFarTerrainMaterial, computeFarTerrainVertexColors, createVertexColorBuffer } from "../farTerrain/farTerrainMaterial.js";
+import { writeBiomeRgb } from "../world_source/biome_colors.js";
 
 export interface FarHeightProvider {
   sampleHeight(x: number, z: number): number;
   sampleNormal(x: number, z: number): THREE.Vector3;
+  sampleMaterial?(x: number, z: number): number;
 }
 
 export interface FarShellLighting {
@@ -92,6 +94,7 @@ export function buildFarTerrainShell(
   const originX = buildCenterX - farRadius;
   const originZ = buildCenterZ - farRadius;
   const fallbackHeight = (x: number, z: number): number => sampleSkirtHeight(summary, x, z, farRadius, baseLevel, heightBias);
+  const fallbackMaterial = (x: number, z: number): number => sampleBiomeId(summary, x, z);
   const sampleHeight = (x: number, z: number): number => {
     if (!heightProvider) return fallbackHeight(x, z);
     try {
@@ -101,10 +104,20 @@ export function buildFarTerrainShell(
       return fallbackHeight(x, z);
     }
   };
+  const sampleMaterial = (x: number, z: number): number => {
+    if (!heightProvider?.sampleMaterial) return fallbackMaterial(x, z);
+    try {
+      const id = heightProvider.sampleMaterial(x, z);
+      return Number.isFinite(id) ? id : fallbackMaterial(x, z);
+    } catch {
+      return fallbackMaterial(x, z);
+    }
+  };
 
   const vertexCount = (gridRes + 1) * (gridRes + 1);
   const positions = new Float32Array(vertexCount * 3);
   const normals = new Float32Array(vertexCount * 3);
+  const colors = new Float32Array(vertexCount * 3);
   const uvs = new Float32Array(vertexCount * 2);
   const indices: number[] = [];
   const heightGrid = new Float32Array(vertexCount);
@@ -116,7 +129,9 @@ export function buildFarTerrainShell(
       const sampleX = buildRelative ? localX + centerX : localX;
       const sampleZ = buildRelative ? localZ + centerZ : localZ;
       const h = sampleHeight(sampleX, sampleZ);
-      heightGrid[gz * (gridRes + 1) + gx] = h - heightDrop;
+      const vi = gz * (gridRes + 1) + gx;
+      heightGrid[vi] = h - heightDrop;
+      writeBiomeRgb(colors, vi, sampleMaterial(sampleX, sampleZ));
     }
   }
 
@@ -197,6 +212,7 @@ export function buildFarTerrainShell(
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geometry.setIndex(indices);
 
   const v3 = (c: THREE.Color) => vec3(c.r, c.g, c.b);
@@ -206,7 +222,7 @@ export function buildFarTerrainShell(
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
   const uHaze = uniform(v3(lighting.skyLight));
-  const base = vec3(0.30, 0.34, 0.22);
+  const base = attribute("color", "vec3");
   const sun = max(dot(n, uLight), 0.0);
   const sky = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi = mix(uGround, uSky, sky);
@@ -232,7 +248,7 @@ export function buildFarTerrainShell(
   if (useParityMaterial && parityConfig) {
     material = createFarTerrainMaterial(lighting, parityConfig, centerX, centerZ, farRadius);
   } else if (receiveSunShadows && useDebugLambertReceiver) {
-    material = new THREE.MeshLambertMaterial({ color: 0x5a6b42, side: THREE.DoubleSide });
+    material = new THREE.MeshLambertMaterial({ color: 0x5a6b42, side: THREE.DoubleSide, vertexColors: true });
   } else {
     const nodeMaterial = new MeshBasicNodeMaterial();
     nodeMaterial.colorNode = mix(base.mul(light), uHaze, hazeT);
