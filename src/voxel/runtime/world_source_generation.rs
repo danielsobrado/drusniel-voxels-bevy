@@ -5,8 +5,7 @@ use crate::voxel::chunk::Chunk;
 use crate::voxel::materials::MaterialId;
 use crate::voxel::types::VoxelType;
 use crate::world::source::{
-    material_biome, material_with_biome, BiomeId, ProceduralWorldSourceTerrainBridge,
-    WorldSource, WorldSourceTerrainBridge,
+    material_biome, material_with_biome, BiomeId, WorldSource, WorldSourceTerrainBridge,
 };
 
 pub(crate) fn build_world_source_chunk<S: WorldSource>(
