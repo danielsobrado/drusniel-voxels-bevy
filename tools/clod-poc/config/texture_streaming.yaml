@@ -1,0 +1,31 @@
+texture_streaming:
+  terrain:
+    common_layers: [grass, rock, sand, snow, dirt, moss, gravel, wet_soil]
+    max_active_biomes: 2
+    active_window_policy: current_plus_adjacent_or_target
+    rebuild_on_biome_change: true
+    fallback_when_inactive: common_layers
+
+  construction:
+    core_materials: [wood, stone, thatch, clay_plaster, metal, glass]
+    max_optional_sets: 6
+    texture_form: trim_sheets_and_arrays
+    variation: vertex_color_masks_and_decals
+    eviction: lru_by_last_used_or_visible
+
+  characters:
+    core_sets: [skin, hair, cloth, leather_armor]
+    max_near_character_sets: 8
+    max_mid_character_sets: 16
+    far_mode: impostor_or_palette_only
+    variation: palette_masks_and_outfit_ids
+    eviction: lru_by_distance_and_visibility
+
+  decals:
+    core_sets: [dirt_wetness, damage]
+    max_optional_sets: 6
+    eviction: lru_by_visibility
+
+  ui:
+    max_preview_sets: 4
+    eviction: lru_by_last_used
