@@ -8,10 +8,7 @@ not just as visual output. The suite produces the same classes of artifacts that
 are needed for review:
 
 - expected dirty-node plan from the scripted edit-plan TOML;
-- selection/runtime CSV;
-- rebuild observer CSV;
-- crossfade/dither CSV;
-- guard pass/fail output.
+- border-lock CSV;
 
 ## Run
 
@@ -52,14 +49,10 @@ This is intentional. `clod-edit-stress.toml` declares expected edit dirtiness,
 but scripted edit execution is not wired into the bench runtime yet. The suite
 therefore validates and exports the edit plan, while the runtime bench uses the
 safe live-LOD CLOD scene.
-
-## Guards run by default
-
 - `clod_stats_guard`
 - `clod_rebuild_guard`
 - `clod_crossfade_guard`
-
-The edit-plan-vs-rebuild guard is available but default-off:
+- `clod_border_lock_guard`
 
 ```bash
 VOXEL_CLOD_RUN_EDIT_REBUILD_GUARD=1 scripts/run-clod-full-parity-suite.sh
@@ -74,7 +67,4 @@ occurred.
 ```bash
 CLOD_PARITY_PLAN_SCENE=bench/scenes/terrain/clod-edit-stress.toml
 CLOD_PARITY_BENCH_SCENE=bench/scenes/visual/visual-regression-live-lod.toml
-CLOD_STATS_GUARD_CONFIG=assets/config/clod_stats_guard.toml
-CLOD_REBUILD_GUARD_CONFIG=assets/config/clod_rebuild_guard.toml
-CLOD_CROSSFADE_GUARD_CONFIG=assets/config/clod_crossfade_guard.toml
-```
+CLOD_BORDER_LOCK_GUARD_CONFIG=assets/config/clod_border_lock_guard.toml

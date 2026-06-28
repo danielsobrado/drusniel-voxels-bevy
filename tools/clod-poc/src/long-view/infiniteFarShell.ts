@@ -398,3 +398,7 @@ export class InfiniteFarShell {
     geometry.setAttribute("color", new THREE.BufferAttribute(this.biomeColorBuffer, 3));
   }
 }
+
+export function createInfiniteFarShell(options: InfiniteFarShellOptions): InfiniteFarShell {
+  return new InfiniteFarShell(options);
+}

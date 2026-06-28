@@ -11,30 +11,17 @@ After the CLOD QA stack adds many exporters and guards, it becomes easy to keep
 adding more PRs without a clear stop condition. The tracker gives reviewers a
 single manifest for:
 
-- what is already ported;
-- what is only QA-covered;
-- what remains planned;
-- what is intentionally skipped.
-
-## Config
-
+- what is intentionally skipped;
+- what is QA-covered but intentionally not gameplay-active yet.
 The manifest lives at:
 
 ```text
 assets/config/clod_parity_tracker.toml
 ```
 
-Each `[[item]]` has:
-
-```toml
-id = "scripted-edit-execution"
-category = "editing"
-priority = "high"
-status = "planned"
-title = "Execute scripted CLOD edit operations during benches"
-poc_refs = ["tools/clod-poc/src/clod/edit"]
-bevy_paths = ["src/voxel/pages/edit_dirtiness.rs"]
-notes = "Why this item matters and what is still missing."
+id = "scripted-edit-dry-run"
+status = "qa"
+title = "Scripted CLOD edit dry-run pipeline"
 ```
 
 ## Run
@@ -70,8 +57,10 @@ CLOD_PARITY_TRACKER_FAIL_ON_MISSING=1 scripts/report-clod-parity-tracker.sh
 Fail while any `status = "planned"` items remain:
 
 ```bash
-CLOD_PARITY_TRACKER_FAIL_ON_PLANNED=1 scripts/report-clod-parity-tracker.sh
-```
-
-The second mode is intentionally strict and should only be enabled once scripted
-edit execution and collider refresh guards have landed.
+The second mode is intentionally strict and should only be enabled once real
+scripted edit execution and collider refresh guards have landed. Dry-run QA is
+tracked separately from authoritative terrain mutation so the tracker does not
+claim gameplay parity too early.
+claim gameplay parity too early. Mutation-request CSVs are part of that guarded
+handoff, but they are not the same as applying edits to the authoritative
+`VoxelWorld`.

@@ -219,6 +219,7 @@ export function createVegetationGui(
         enabled: state.treeGpuEnabled as boolean,
         debugForceCpu: state.treeGpuForceCpu as boolean,
         debugShowGpuCounts: state.treeGpuShowCounts as boolean,
+        maxVisible: state.treeGpuMaxVisible as number,
       },
     });
     refreshTreeStats();
@@ -243,6 +244,7 @@ export function createVegetationGui(
   treeFolder.add(state, "treeGpuEnabled").name("GPU ring").onChange(updateTreeGpuSettings);
   treeFolder.add(state, "treeGpuForceCpu").name("force CPU").onChange(updateTreeGpuSettings);
   treeFolder.add(state, "treeGpuShowCounts").name("show GPU counts").onChange(updateTreeGpuSettings);
+  treeFolder.add(state, "treeGpuMaxVisible", 0, 50000, 1000).name("GPU max visible").onFinishChange(updateTreeGpuSettings);
   treeFolder.add(state, "treeWindEnabled").name("wind enabled").onChange(updateTreeWindSettings);
   treeFolder.add(state, "treeWindStrength", 0, 1, 0.01).name("wind strength").onChange(updateTreeWindSettings);
   treeFolder.add(state, "treeWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateTreeWindSettings);

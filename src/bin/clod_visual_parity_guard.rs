@@ -562,3 +562,4 @@ mod tests {
         assert_eq!(config.max_nonzero_fade_out_tail_rows, 0);
     }
 }
+

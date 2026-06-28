@@ -46,21 +46,19 @@ priority = "high"
 status = "qa"
 title = "Geometry parity diagnostics"
 poc_refs = ["tools/clod-poc/src/clod/weld", "tools/clod-poc/src/clod/validate", "tools/clod-poc/src/clod/simplify"]
-bevy_paths = ["src/voxel/pages/border_lock_stats.rs", "src/voxel/pages/topology_stats.rs", "src/voxel/pages/simplify_stats.rs", "src/voxel/pages/weld_stats.rs"]
-notes = "Diagnostics and guards cover locks, topology, simplification and weld health."
-
 [[item]]
-id = "scripted-edit-execution"
+id = "scripted-edit-dry-run"
 category = "editing"
 priority = "high"
-status = "planned"
-title = "Execute scripted CLOD edit operations during benches"
+status = "qa"
+title = "Scripted CLOD edit dry-run pipeline"
 poc_refs = ["tools/clod-poc/src/clod/edit", "tools/clod-poc/src/clod/stress"]
-bevy_paths = ["bench/scenes/terrain/clod-edit-stress.toml", "src/voxel/pages/edit_dirtiness.rs", "src/bin/clod_edit_plan_guard.rs", "src/bin/clod_edit_plan_export.rs"]
-notes = "Schema, dirtiness planner and plan-vs-rebuild guard exist; actual bench-time brush execution remains the next implementation target."
+bevy_paths = ["bench/scenes/terrain/clod-edit-stress.toml", "src/voxel/pages/scripted_edit.rs", "src/voxel/pages/scripted_edit_driver.rs", "src/voxel/pages/scripted_edit_adapter.rs", "src/bin/clod_edit_events_guard.rs", "src/bin/clod_edit_dry_run_guard.rs"]
+notes = "The bench edit plan now expands to events, dispatch records and dry-run terrain edit requests with guardable dirty-page expectations."
 
-[[item]]
-id = "collider-refresh-after-edit"
+priority = "high"
+bevy_paths = ["bench/scenes/terrain/clod-edit-stress.toml", "src/voxel/pages/edit_dirtiness.rs", "src/bin/clod_edit_plan_guard.rs", "src/bin/clod_edit_plan_export.rs", "src/bin/clod_edit_rebuild_guard.rs"]
+notes = "Schema, dirtiness planner, event expansion, dispatch and dry-run guards exist; actual authoritative terrain mutation remains the next implementation target."
 category = "editing"
 priority = "high"
 status = "planned"

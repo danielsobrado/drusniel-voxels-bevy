@@ -6,15 +6,12 @@ run that mirrors the PoC idea of treating CLOD as a measured pipeline rather
 than a screenshot-only feature.
 
 ## What it runs
-
-1. Validate the scripted edit-plan TOML schema.
-2. Export expected dirty CLOD nodes from the edit plan.
-3. Run the live-LOD CLOD bench with every telemetry exporter enabled.
-4. Run all standalone guards.
-5. Generate `clod-qa-report.md` and `clod-qa-report.json`.
-
-## Artifacts
-
+3. Expand and guard scripted edit events from `[[checkpoint.clod_edit]]`.
+4. Export scripted edit dispatch records.
+5. Export and guard dry-run terrain edit requests.
+6. Run the live-LOD CLOD bench with every telemetry exporter enabled.
+7. Run all standalone guards.
+8. Generate `clod-qa-report.md` and `clod-qa-report.json`.
 The run directory defaults to:
 
 ```text
@@ -57,14 +54,9 @@ scripts/run-clod-complete-qa.ps1
 ```bash
 CLOD_PARITY_RUN_DIR=bench-runs/my-run
 CLOD_PARITY_PLAN_SCENE=bench/scenes/terrain/clod-edit-stress.toml
-CLOD_PARITY_BENCH_SCENE=bench/scenes/terrain/clod-parity-stress.toml
-```
-
-The edit-plan-vs-rebuild guard remains default-off until the bench runtime
-executes `[[checkpoint.clod_edit]]` operations:
-
-```bash
-VOXEL_CLOD_RUN_EDIT_REBUILD_GUARD=1 scripts/run-clod-complete-qa.sh
+The scripted edit event, dispatch and dry-run artifacts are always exported and
+guarded. The edit-plan-vs-rebuild guard remains default-off until the bench
+runtime executes `[[checkpoint.clod_edit]]` operations:
 ```
 
 ## Why this is separate from the older full suite

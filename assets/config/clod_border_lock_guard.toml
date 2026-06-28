@@ -1,0 +1,21 @@
+# Guard thresholds for CLOD border-lock telemetry.
+#
+# CSV columns expected:
+# frame,level,x,z,vertex_count,triangle_count,border_edges,locked_vertices,lock_ratio,boundary_vertex_ratio
+
+min_rows = 1
+
+# Any page with topological open border edges should lock at least one vertex.
+require_locked_when_border_edges_present = true
+min_lock_ratio_when_bordered = 0.001
+
+# Ratios are sanity bounds, not art tuning.
+max_lock_ratio = 1.0
+max_boundary_vertex_ratio = 1.0
+
+# Meshes published into the CLOD tree should not be empty.
+max_empty_mesh_rows = 0
+
+# Enable in fixed-size CLOD QA benches once all levels should be produced.
+require_all_levels_present = false
+# expected_max_level = 3

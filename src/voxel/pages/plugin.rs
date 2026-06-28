@@ -17,7 +17,8 @@ use super::runtime::{
     clod_pages_startup_log_system,
 };
 use super::selection::{
-    ClodPageSelectionIndex, ClodPageSelectionState, clod_page_selection_system,
+    ClodPageSelectionIndex, ClodPageSelectionState, ClodSelectionDebugControls,
+    ClodSelectionRuntimeStats, clod_page_selection_system,
 };
 use super::summary::{
     TerrainSummaryField, TerrainSummaryRebuildState, terrain_summary_rebuild_system,
@@ -34,6 +35,8 @@ impl Plugin for ClodPagesPlugin {
             .init_resource::<ClodPageMeshCommitState>()
             .init_resource::<ClodPageSelectionIndex>()
             .init_resource::<ClodPageSelectionState>()
+            .init_resource::<ClodSelectionDebugControls>()
+            .init_resource::<ClodSelectionRuntimeStats>()
             .init_resource::<ClodPageMeshGate>()
             .init_resource::<TerrainSummaryField>()
             .init_resource::<TerrainSummaryRebuildState>()

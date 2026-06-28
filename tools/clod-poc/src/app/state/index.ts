@@ -79,6 +79,16 @@ function mergeSlices(slices: AppStateSlices): ClodAppState {
   };
 }
 
+function nonNegativeNumberParam(searchParams: URLSearchParams, keys: readonly string[]): number | null {
+  for (const key of keys) {
+    const raw = searchParams.get(key);
+    if (raw === null) continue;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return null;
+}
+
 function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
   if (params.isWebGpu) state.normalDivergence = false;
   if (params.queryPerfMode) {
@@ -158,6 +168,12 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
     state.treeGpuEnabled = true;
   }
   if (treeGpuParam === "0") state.treeGpuEnabled = false;
+  const treeDistance = nonNegativeNumberParam(params.searchParams, ["treeDistance", "treeDistanceM"]);
+  if (treeDistance !== null) state.treeDistance = treeDistance;
+  const treeMaxInstances = nonNegativeNumberParam(params.searchParams, ["treeMaxInstances", "treeMax"]);
+  if (treeMaxInstances !== null) state.treeMaxInstances = Math.floor(treeMaxInstances);
+  const treeGpuMaxVisible = nonNegativeNumberParam(params.searchParams, ["treeGpuMaxVisible", "treeGpuMax"]);
+  if (treeGpuMaxVisible !== null) state.treeGpuMaxVisible = Math.floor(treeGpuMaxVisible);
   if (params.searchParams.get("understory") === "1") state.understoryEnabled = true;
   if (params.searchParams.get("understory") === "0") state.understoryEnabled = false;
   if (params.searchParams.get("water") === "1") state.waterEnabled = true;

@@ -17,12 +17,9 @@ const KNOWN_ARTIFACTS: &[(&str, &str)] = &[
     ("cut_freeze", "clod-cut-freeze.csv"),
     ("border_locks", "clod-border-locks.csv"),
     ("topology", "clod-topology.csv"),
-    ("simplify", "clod-simplify.csv"),
-    ("weld", "clod-weld.csv"),
-    ("edit_plan", "clod-edit-plan.csv"),
-];
-
-#[derive(Debug, Clone)]
+    ("edit_events", "clod-edit-events.csv"),
+    ("edit_dispatch", "clod-edit-dispatch.csv"),
+    ("edit_dry_run", "clod-edit-dry-run.csv"),
 struct Args {
     run_dir: PathBuf,
     out_md: PathBuf,

@@ -115,10 +115,37 @@ export interface TerrainColorAdjust {
   warmth: number;
 }
 
+<<<<<<< Updated upstream
 function v3(c: THREE.Color): THREE.Vector3 { return new THREE.Vector3(c.r, c.g, c.b); }
 
 function interleavedGradientNoise(coord: TslNode): TslNode {
   return fract(coord.x.mul(0.06711056).add(coord.y.mul(0.00583715)).mul(52.9829189));
+=======
+function v3(c: THREE.Color): TslNode { return vec3(c.r, c.g, c.b); }
+
+function terrainSpecularFromRoughness(roughness: number): { shininess: number; specGain: number } {
+  const rough = Math.min(Math.max(roughness, 0.04), 1.0);
+  return {
+    shininess: 128 * (1 - rough) + 4 * rough,
+    specGain: 1 - rough,
+  };
+}
+
+function interleavedGradientNoise(coord: TslNode): TslNode {
+  return fract(coord.x.mul(0.06711056).add(coord.y.mul(0.00583715)).mul(52.9829189));
+}
+
+function heightBandWeight(
+  heightMin: number,
+  heightMax: number,
+  height: TslNode,
+  blendWidth: TslNode,
+): TslNode {
+  const minEdge = float(heightMin);
+  const maxEdge = float(heightMax);
+  return smoothstep(minEdge.sub(blendWidth), minEdge.add(blendWidth), height)
+    .mul(float(1).sub(smoothstep(maxEdge.sub(blendWidth), maxEdge.add(blendWidth), height)));
+>>>>>>> Stashed changes
 }
 
 function adjustColor(color: TslNode, brightness: TslNode, contrast: TslNode, saturation: TslNode, warmth: TslNode): TslNode {
@@ -138,8 +165,13 @@ function triplanarWeights(n: TslNode): TslNode {
   return w.div(max(s, 0.0001));
 }
 
+<<<<<<< Updated upstream
 function roundedLayer(layer: TslNode): TslNode {
   return floor(max(layer, 0.0).add(0.5));
+=======
+function sampleArray(tex: THREE.DataArrayTexture, uv: TslNode, layer: TslNode): TslNode {
+  return texture(tex, vec2(fract(uv.x), fract(uv.y))).depth(layer);
+>>>>>>> Stashed changes
 }
 
 function heightBandWeight(
@@ -267,7 +299,12 @@ function sampleTerrainNormal(
   let bestDist: TslNode = float(1e9);
   slots.forEach((slot, i) => {
     const layer = float(i);
+<<<<<<< Updated upstream
     const sample = triplanarNormal(tex, layer, worldPos, normal, float(slot.scale), weights, intensity, float(normalMapMask?.[i] ?? 1));
+=======
+    const useMask = float(normalMapMask?.[i] ?? 1);
+    const sample = triplanarNormal(tex, layer, worldPos, normal, float(slot.scale), weights, intensity, useMask);
+>>>>>>> Stashed changes
     const w = heightBandWeight(slot.heightMin, slot.heightMax, height, blendWidth);
     acc = acc.add(sample.mul(w));
     wsum = wsum.add(w);
@@ -364,9 +401,19 @@ function paintedAlbedo(
   let acc: TslNode = vec3(0);
   let wsum: TslNode = float(0);
   for (const channel of channels) {
+<<<<<<< Updated upstream
     const layer = roundedLayer(channel.slot);
     const w = channel.weight.mul(step(0.0, channel.slot.add(0.5)));
     acc = acc.add(triplanarAlbedo(albedo, layer, worldPos, layerScale(layer, slots), weights, useTriplanar).mul(w));
+=======
+    const layer = floor(max(channel.slot, float(0.0)).add(float(0.5)));
+    let scale: TslNode = float(slots[0].scale);
+    for (let i = 1; i < slots.length; i++) {
+      scale = mix(scale, float(slots[i].scale), step(abs(layer.sub(float(i))), float(0.5)));
+    }
+    const w = channel.weight.mul(step(float(0.0), channel.slot.add(float(0.5))));
+    acc = acc.add(triplanarAlbedo(albedo, layer, worldPos, scale, weights, useTriplanar).mul(w));
+>>>>>>> Stashed changes
     wsum = wsum.add(w);
   }
   return acc.div(max(wsum, 0.001));
@@ -392,9 +439,19 @@ function paintedNormal(
   let acc: TslNode = vec3(0);
   let wsum: TslNode = float(0);
   for (const channel of channels) {
+<<<<<<< Updated upstream
     const layer = roundedLayer(channel.slot);
     const w = channel.weight.mul(step(0.0, channel.slot.add(0.5)));
     acc = acc.add(triplanarNormal(normalArray, layer, worldPos, baseNormal, layerScale(layer, slots), weights, normalIntensity, layerNormalMask(layer, normalMapMask)).mul(w));
+=======
+    const layer = floor(max(channel.slot, float(0.0)).add(float(0.5)));
+    let scale: TslNode = float(slots[0].scale);
+    for (let i = 1; i < slots.length; i++) {
+      scale = mix(scale, float(slots[i].scale), step(abs(layer.sub(float(i))), float(0.5)));
+    }
+    const w = channel.weight.mul(step(float(0.0), channel.slot.add(float(0.5))));
+    acc = acc.add(triplanarNormal(normalArray, layer, worldPos, baseNormal, scale, triplanarWeights(baseNormal), normalIntensity, float(normalMapMask?.[0] ?? 1)).mul(w));
+>>>>>>> Stashed changes
     wsum = wsum.add(w);
   }
   return normalize(acc.div(max(wsum, 0.001)));
@@ -407,9 +464,11 @@ function proceduralMacroTint(base: TslNode, worldPos: TslNode, normal: TslNode, 
   const b = texture(procedural.noiseB, uvB).rgba;
   const macroMix = a.r.mul(0.65).add(a.g.mul(0.35));
   let tinted = base.mul(vec3(1.0).add(vec3(0.30, 0.34, 0.22).mul(macroMix.sub(0.5)).mul(0.16)));
-  const mossFactor = smoothstep(0.58, 0.86, b.a).mul(smoothstep(0.28, 0.72, float(1).sub(normal.y))).mul(0.28);
+  const mossFactor = smoothstep(float(0.58), float(0.86), b.a)
+    .mul(smoothstep(float(0.28), float(0.72), float(1).sub(normal.y)))
+    .mul(float(0.28));
   tinted = mix(tinted, tinted.mul(vec3(0.45, 0.62, 0.34)), mossFactor);
-  const wet = smoothstep(0.04, 0.0, worldPos.y.sub(18.0)).mul(0.38);
+  const wet = smoothstep(float(0.04), float(0.0), worldPos.y.sub(float(18.0))).mul(float(0.38));
   tinted = mix(tinted, tinted.mul(vec3(0.64, 0.68, 0.72)), wet);
   return tinted;
 }
@@ -418,8 +477,8 @@ function proceduralMicroWeight(worldPos: TslNode, procedural: TerrainNodeTexture
   const uv = worldPos.xz.mul(1 / 96).add(vec2(0.17, 0.29));
   const n = texture(procedural.noiseB, uv).r;
   const dist = cameraPosition.sub(worldPos).length();
-  const fade = float(1).sub(smoothstep(procedural.microFadeStart, procedural.microFadeEnd, dist));
-  return n.mul(fade).mul(0.45);
+  const fade = float(1).sub(smoothstep(float(procedural.microFadeStart), float(procedural.microFadeEnd), dist));
+  return n.mul(fade).mul(float(0.45));
 }
 
 function createBakedMacroTintTexture(noiseA: THREE.Texture, noiseB: THREE.Texture, res = 256): THREE.DataTexture {
@@ -525,7 +584,7 @@ export function createTerrainNodeMaterial(
   const paintWeights: TslNode = attribute("paintWeights", "vec4");
   const biomeId: TslNode = attribute("biomeId", "float");
   const paint = clamp(dot(paintWeights, vec4(1)), 0.0, 1.0);
-  const isFarTier = step(1.5, uTier);
+  const isFarTier = step(float(1.5), uTier);
 
   let baseColor: TslNode = vec3(0.35, 0.45, 0.22);
   if (textures?.albedoArray && textures.slots.length > 0 && useArrayTextures) {
@@ -535,23 +594,27 @@ export function createTerrainNodeMaterial(
       : sampleTerrainTexture(textures.albedoArray, textures.slots, worldPos, geomN, worldPos.y, uBlendWidth, useTriplanar);
     if (textures.procedural) tex = proceduralMacroTint(tex, worldPos, geomN, textures.procedural);
     if (textures.bakedMacroTint) {
+<<<<<<< Updated upstream
       const ws = textures.worldSize ?? 1024;
+=======
+      const ws = float(textures.worldSize ?? 1024);
+>>>>>>> Stashed changes
       const baked = texture(textures.bakedMacroTint, worldPos.xz.div(ws)).rgb;
       tex = isFarTier.select(baked, tex);
     }
     if (textures.painted) {
       tex = mix(tex, paintedAlbedo(textures.albedoArray, textures.slots, worldPos, paintSlots, paintWeights, weights, useTriplanar), paint);
     }
-    baseColor = tex.mul(mix(vec3(1), uColor, 0.35));
+    baseColor = tex.mul(mix(vec3(1), uColor, float(0.35)));
   }
 
   let riverWetness: TslNode = float(0);
   let riverFoamResidue: TslNode = float(0);
   let riverDroplets: TslNode = float(0);
   if (textures?.riverWetnessMask) {
-    const ws = textures.worldSize ?? 1024;
+    const ws = float(textures.worldSize ?? 1024);
     const mask: TslNode = texture(textures.riverWetnessMask, worldPos.xz.div(ws));
-    const slopeFade: TslNode = smoothstep(0.34, 0.82, geomN.y);
+    const slopeFade: TslNode = smoothstep(float(0.34), float(0.82), geomN.y);
     riverWetness = clamp(mask.r.mul(slopeFade), 0.0, 1.0);
     riverFoamResidue = clamp(mask.g.mul(slopeFade), 0.0, 1.0);
     riverDroplets = clamp(mask.b.mul(slopeFade), 0.0, 1.0);

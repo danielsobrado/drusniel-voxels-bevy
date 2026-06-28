@@ -19,6 +19,7 @@ export interface TreeControllerUiState {
   treeGpuEnabled: boolean;
   treeGpuForceCpu: boolean;
   treeGpuShowCounts: boolean;
+  treeGpuMaxVisible: number;
 }
 
 export interface TreeControllerDeps {
@@ -90,6 +91,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
         enabled: state.treeGpuEnabled,
         debugForceCpu: state.treeGpuForceCpu,
         debugShowGpuCounts: state.treeGpuShowCounts,
+        maxVisible: state.treeGpuMaxVisible,
       },
     };
   };

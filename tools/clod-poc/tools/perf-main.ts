@@ -35,6 +35,9 @@ const CASES: PerfCase[] = [
   { name: "debug-flat", params: { terrainMaterial: "debug_flat", terrainTriplanar: "0" } },
   { name: "triplanar-off", params: { terrainTriplanar: "0" } },
   { name: "tree-gpu-ring", params: { treeGpu: "1" } },
+  { name: "tree-gpu-visible-12k", params: { treeGpu: "1", treeGpuMaxVisible: "12000" } },
+  { name: "tree-gpu-visible-9k", params: { treeGpu: "1", treeGpuMaxVisible: "9000" } },
+  { name: "tree-distance-360", params: { treeGpu: "1", treeDistance: "360" } },
   { name: "trees-off", params: { trees: "0", understory: "0" } },
   { name: "grass-off", params: { grass: "0" } },
   { name: "stones-off", params: { stones: "0" } },
@@ -64,6 +67,19 @@ function parseArgs(argv: string[]): Args {
 
 function str(value: string | boolean | undefined): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function parseParams(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  const out: Record<string, string> = {};
+  for (const pair of raw.split(",")) {
+    const trimmed = pair.trim();
+    if (!trimmed) continue;
+    const equals = trimmed.indexOf("=");
+    if (equals <= 0) throw new Error(`Invalid --params entry: ${trimmed}`);
+    out[trimmed.slice(0, equals)] = trimmed.slice(equals + 1);
+  }
+  return out;
 }
 
 function buildUrl(baseUrl: string, params: Record<string, string>): string {
@@ -104,22 +120,30 @@ function markdown(results: readonly PerfCaseResult[]): string {
   const lines = [
     "# clod-poc main perf",
     "",
-    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | stats p95 | props unattributed p95 | tris avg |",
-    "| --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |",
+    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | tree lod avg | tris avg |",
+    "| --- | ---: | ---: | --- | --- | ---: | --- | ---: | --- | ---: |",
   ];
   for (const result of results) {
     const snapshot = result.snapshot;
     const frame = metric(snapshot, "frameMs");
     const render = metric(snapshot, "renderMs");
-    const stats = metric(snapshot, "statsSyncMs");
-    const propsUnattributed = metric(snapshot, "propsUnattributedMs");
     const topPhase = snapshot.broadBucketsByP95[0];
     const topProp = snapshot.propBucketsByP95[0];
+    const statusCounts = Object.entries(snapshot.counters.treeGpuStatusCounts)
+      .map(([status, count]) => `${status}:${count}`)
+      .join(" ");
+    const treeLod =
+      `${Math.round(snapshot.counters.treeNearTreesAvg)}/` +
+      `${Math.round(snapshot.counters.treeMidTreesAvg)}/` +
+      `${Math.round(snapshot.counters.treeFarTreesAvg)}/` +
+      `${Math.round(snapshot.counters.treeImpostorTreesAvg)}`;
     lines.push(
       `| ${result.name} | ${ms(frame.p50)} | ${ms(frame.p95)} | ` +
         `${topPhase ? `${topPhase.name} ${ms(topPhase.p95)}` : "-"} | ` +
         `${topProp ? `${topProp.name} ${ms(topProp.p95)}` : "-"} | ` +
-        `${ms(render.p95)} | ${ms(stats.p95)} | ${ms(propsUnattributed.p95)} | ` +
+        `${ms(render.p95)} | ${statusCounts || "-"} | ` +
+        `${Math.round(snapshot.counters.treeGpuVisibleCountAvg).toLocaleString("en-US")} | ` +
+        `${treeLod} | ` +
         `${Math.round(snapshot.counters.terrainTrianglesAvg).toLocaleString("en-US")} |`,
     );
   }
@@ -144,7 +168,7 @@ async function runCase(
   let lastProgress: PerfCaseProgress | null = null;
   let lastProgressLogAt = 0;
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
-  page.setDefaultTimeout(Math.min(timeoutMs, 15000));
+  page.setDefaultTimeout(Math.min(timeoutMs, 60000));
   page.on("console", (msg: { text(): string; type(): string }) => {
     const text = msg.text();
     if (msg.type() === "warning") warnings.push(text);
@@ -153,7 +177,7 @@ async function runCase(
   page.on("pageerror", (error: Error) => errors.push(error.message));
   try {
     console.log(`[perf-main] ${perfCase.name}: ${url}`);
-    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: Math.min(timeoutMs, 60000) });
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       lastProgress = await page.evaluate<PerfCaseProgress>(() => {
@@ -231,11 +255,12 @@ async function main(): Promise<void> {
     seed: "1",
     webgpuSelection: "1",
     farShell: "1",
-    freeze: "1",
+    freeze: str(args["freeze"]) ?? "1",
     perfProbe: "1",
     perfWarmup: warmupFrames,
     perfFrames: sampleFrames,
     profile: "0",
+    ...parseParams(str(args["params"])),
   };
 
   const launcher = renderer === "webgl" ? launchChromium : launchWebGPU;

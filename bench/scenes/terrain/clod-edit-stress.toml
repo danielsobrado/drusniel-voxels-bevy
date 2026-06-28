@@ -1,0 +1,96 @@
+# CLOD edit-operation schema fixture.
+#
+# This scene is primarily a contract for the upcoming bench edit driver. Until
+# that driver consumes [[checkpoint.clod_edit]], the normal bench loader should
+# either ignore these blocks or this scene should be used only with
+# clod_edit_plan_guard.
+
+seed = 12345
+duration_warmup_secs = 3.0
+median_runs = 1
+chunk_load_radius = 7
+freeze_terrain_lod_after_ready = false
+world_cache_path = "bench-runs/cache/clod-edit-stress-world.bin"
+
+[clod_edit_defaults]
+radius = 4.0
+strength = 0.45
+expected_dirty_pages_min = 1
+expected_rebuild_publish_max_frames = 90
+expected_collider_refresh_max_frames = 120
+
+[[checkpoint]]
+name = "clod-edit-dig-ridge"
+position = [256.0, 82.0, 220.0]
+look_at = [282.0, 64.0, 250.0]
+time_of_day = 0.42
+hold_frames = 360
+screenshot = true
+fog_tier = "off"
+motion = { kind = "run", end_position = [312.0, 82.0, 276.0], end_look_at = [336.0, 64.0, 296.0], look_sway_degrees = 12.0 }
+screenshot_points = [
+  { name = "before-edit", frame = 0 },
+  { name = "after-first-edit", frame = 120 },
+  { name = "after-repeat", frame = 240 },
+]
+
+[[checkpoint.clod_edit]]
+name = "dig-ridge-entrance"
+frame = 60
+kind = "dig"
+position = [278.0, 66.0, 244.0]
+radius = 5.5
+strength = 0.55
+repeat_every_frames = 45
+repeat_count = 3
+expected_dirty_pages_min = 1
+expected_dirty_pages_max = 8
+expected_rebuild_publish_max_frames = 90
+expected_collider_refresh_max_frames = 120
+
+[[checkpoint.clod_edit]]
+name = "smooth-ridge-lip"
+frame = 240
+kind = "smooth"
+position = [288.0, 66.0, 254.0]
+radius = 6.0
+strength = 0.35
+expected_dirty_pages_min = 1
+expected_dirty_pages_max = 8
+
+[[checkpoint]]
+name = "clod-edit-level-hole-repro"
+position = [389.6, 52.0, 172.6]
+look_at = [430.0, 47.0, 215.0]
+time_of_day = 0.45
+hold_frames = 420
+screenshot = true
+fog_tier = "off"
+motion = { kind = "run_look_sweep", end_position = [430.0, 52.0, 215.0], end_look_at = [384.0, 47.0, 174.0], look_sway_degrees = 20.0 }
+screenshot_points = [
+  { name = "before-level", frame = 0 },
+  { name = "after-level", frame = 180 },
+  { name = "after-raise", frame = 360 },
+]
+
+[[checkpoint.clod_edit]]
+name = "level-hole-floor"
+frame = 90
+kind = "level"
+position = [401.0, 49.0, 187.0]
+target_height = 48.5
+radius = 4.5
+strength = 0.75
+expected_dirty_pages_min = 1
+expected_dirty_pages_max = 8
+
+[[checkpoint.clod_edit]]
+name = "raise-hole-exit"
+frame = 270
+kind = "raise"
+position = [414.0, 49.0, 202.0]
+radius = 4.0
+strength = 0.40
+expected_dirty_pages_min = 1
+expected_dirty_pages_max = 8
+

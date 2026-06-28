@@ -16,12 +16,7 @@ RUN_DIR="${CLOD_PARITY_RUN_DIR:-bench-runs/clod-complete-${RUN_ID}}"
 PLAN_SCENE="${CLOD_PARITY_PLAN_SCENE:-bench/scenes/terrain/clod-edit-stress.toml}"
 BENCH_SCENE="${CLOD_PARITY_BENCH_SCENE:-bench/scenes/terrain/clod-parity-stress.toml}"
 
-mkdir -p "$RUN_DIR"
-
-PLAN_CSV="$RUN_DIR/clod-edit-plan.csv"
-SELECTION_CSV="$RUN_DIR/clod-selection-runtime.csv"
-REBUILD_CSV="$RUN_DIR/clod-rebuild-observer.csv"
-CROSSFADE_CSV="$RUN_DIR/clod-crossfade-runtime.csv"
+EVENTS_CSV="$RUN_DIR/clod-edit-events.csv"
 CUT_FREEZE_CSV="$RUN_DIR/clod-cut-freeze.csv"
 BORDER_LOCK_CSV="$RUN_DIR/clod-border-locks.csv"
 TOPOLOGY_CSV="$RUN_DIR/clod-topology.csv"
@@ -35,12 +30,14 @@ printf '[CLOD complete QA] validating edit plan schema: %s
 cargo run --bin clod_edit_plan_guard -- "$PLAN_SCENE"
 
 printf '[CLOD complete QA] exporting edit dirty plan: %s
-' "$PLAN_CSV"
-cargo run --bin clod_edit_plan_export -- "$PLAN_SCENE" "$PLAN_CSV"
+printf '[CLOD complete QA] exporting scripted edit events: %s
+' "$EVENTS_CSV"
+cargo run --bin clod_edit_events_export -- "$PLAN_SCENE" --out "$EVENTS_CSV"
 
-printf '[CLOD complete QA] running bench: %s
-' "$BENCH_SCENE"
-CLOD_PAGES=1 VOXEL_CLOD_STATS_CSV=1 VOXEL_CLOD_STATS_CSV_PATH="$SELECTION_CSV" VOXEL_CLOD_REBUILD_CSV=1 VOXEL_CLOD_REBUILD_CSV_PATH="$REBUILD_CSV" VOXEL_CLOD_CROSSFADE_BRIDGE=1 VOXEL_CLOD_CROSSFADE_MATERIAL=1 VOXEL_CLOD_CROSSFADE_STATS_CSV=1 VOXEL_CLOD_CROSSFADE_STATS_CSV_PATH="$CROSSFADE_CSV" VOXEL_CLOD_CUT_FREEZE_CSV=1 VOXEL_CLOD_CUT_FREEZE_CSV_PATH="$CUT_FREEZE_CSV" VOXEL_CLOD_BORDER_LOCK_CSV=1 VOXEL_CLOD_BORDER_LOCK_CSV_PATH="$BORDER_LOCK_CSV" VOXEL_CLOD_TOPOLOGY_CSV=1 VOXEL_CLOD_TOPOLOGY_CSV_PATH="$TOPOLOGY_CSV" VOXEL_CLOD_SIMPLIFY_CSV=1 VOXEL_CLOD_SIMPLIFY_CSV_PATH="$SIMPLIFY_CSV" VOXEL_CLOD_WELD_CSV=1 VOXEL_CLOD_WELD_CSV_PATH="$WELD_CSV" cargo run --release -- --bench "$BENCH_SCENE"
+printf '[CLOD complete QA] guarding scripted edit events
+'
+scripts/guard-clod-edit-events.sh "$EVENTS_CSV"
+
 
 printf '[CLOD complete QA] guarding selection stats
 '

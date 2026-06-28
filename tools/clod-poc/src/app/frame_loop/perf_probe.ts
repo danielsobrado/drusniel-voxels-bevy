@@ -1,4 +1,5 @@
 import type { PlayerInteractionMode } from "../../player_controller.js";
+import type { TreeStats } from "../../trees/index.js";
 
 export const FRAME_PERF_BROAD_BUCKETS = [
   "frameSetupMs",
@@ -77,6 +78,18 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   chunkGroupsBuilt: number;
   nearFieldChunkGroups: number;
   interactionMode: PlayerInteractionMode;
+  treeGpuStatus: TreeStats["gpuStatus"] | "unknown";
+  treeTotalTrees: number;
+  treeVisiblePatches: number;
+  treePatches: number;
+  treeNearTrees: number;
+  treeMidTrees: number;
+  treeFarTrees: number;
+  treeImpostorTrees: number;
+  treeGpuCandidateCount: number;
+  treeGpuAcceptedCount: number;
+  treeGpuVisibleCount: number;
+  treeGpuDispatchMs: number | null;
 }
 
 export interface FramePerfMetricStats {
@@ -105,6 +118,15 @@ export interface FramePerfSummary {
     terrainTrianglesAvg: number;
     chunkGroupsBuiltTotal: number;
     nearFieldChunkGroupsMax: number;
+    treeGpuStatusCounts: Record<string, number>;
+    treeTotalTreesAvg: number;
+    treeGpuCandidateCountAvg: number;
+    treeGpuAcceptedCountAvg: number;
+    treeGpuVisibleCountAvg: number;
+    treeNearTreesAvg: number;
+    treeMidTreesAvg: number;
+    treeFarTreesAvg: number;
+    treeImpostorTreesAvg: number;
   };
 }
 
@@ -200,6 +222,23 @@ function rankBuckets(
     .sort((a, b) => b.p95 - a.p95);
 }
 
+function avgCounter(samples: readonly FramePerfSample[], key: keyof FramePerfSample): number {
+  if (samples.length === 0) return 0;
+  const total = samples.reduce((sum, sample) => {
+    const value = sample[key];
+    return typeof value === "number" ? sum + value : sum;
+  }, 0);
+  return total / samples.length;
+}
+
+function countTreeGpuStatuses(samples: readonly FramePerfSample[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const sample of samples) {
+    counts[sample.treeGpuStatus] = (counts[sample.treeGpuStatus] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export function summarizeFramePerfSamples(
   samples: readonly FramePerfSample[],
   warmupFrames: number,
@@ -222,6 +261,15 @@ export function summarizeFramePerfSamples(
       terrainTrianglesAvg: samples.length > 0 ? trianglesTotal / samples.length : 0,
       chunkGroupsBuiltTotal: samples.reduce((sum, sample) => sum + sample.chunkGroupsBuilt, 0),
       nearFieldChunkGroupsMax: samples.reduce((max, sample) => Math.max(max, sample.nearFieldChunkGroups), 0),
+      treeGpuStatusCounts: countTreeGpuStatuses(samples),
+      treeTotalTreesAvg: avgCounter(samples, "treeTotalTrees"),
+      treeGpuCandidateCountAvg: avgCounter(samples, "treeGpuCandidateCount"),
+      treeGpuAcceptedCountAvg: avgCounter(samples, "treeGpuAcceptedCount"),
+      treeGpuVisibleCountAvg: avgCounter(samples, "treeGpuVisibleCount"),
+      treeNearTreesAvg: avgCounter(samples, "treeNearTrees"),
+      treeMidTreesAvg: avgCounter(samples, "treeMidTrees"),
+      treeFarTreesAvg: avgCounter(samples, "treeFarTrees"),
+      treeImpostorTreesAvg: avgCounter(samples, "treeImpostorTrees"),
     },
   };
 }

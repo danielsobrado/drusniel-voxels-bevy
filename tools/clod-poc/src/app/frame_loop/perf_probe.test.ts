@@ -50,6 +50,18 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
     chunkGroupsBuilt: 0,
     nearFieldChunkGroups: 0,
     interactionMode: "orbit",
+    treeGpuStatus: "ring",
+    treeTotalTrees: 100,
+    treeVisiblePatches: 3,
+    treePatches: 4,
+    treeNearTrees: 10,
+    treeMidTrees: 20,
+    treeFarTrees: 30,
+    treeImpostorTrees: 40,
+    treeGpuCandidateCount: 120,
+    treeGpuAcceptedCount: 100,
+    treeGpuVisibleCount: 80,
+    treeGpuDispatchMs: 0.2,
     ...overrides,
   };
 }
@@ -85,5 +97,7 @@ describe("frame perf probe", () => {
     expect(summary.broadBucketsByP95[0]).toMatchObject({ name: "renderMs", p95: 24 });
     expect(summary.propBucketsByP95[0]).toMatchObject({ name: "propsUnattributedMs", p95: 7 });
     expect(summary.counters.terrainTrianglesAvg).toBe(12000);
+    expect(summary.counters.treeGpuStatusCounts).toEqual({ ring: 2 });
+    expect(summary.counters.treeGpuVisibleCountAvg).toBe(80);
   });
 });

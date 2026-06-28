@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { ClodHooks } from "../../core/hooks.js";
 import type { GrassStats } from "../../grass.js";
+import type { TreeStats } from "../../trees/index.js";
 import type { PostProcessSettings } from "../../environment/postprocess.js";
 import type { NodeLabelOverlay } from "../../ui/node_labels.js";
 import type { AppPostProcess } from "../app_post_process.js";
@@ -27,6 +28,7 @@ export interface RenderPhaseInput {
   grassProfileEnabled: boolean;
   grassProfileFrame: { value: number };
   currentGrassStats: GrassStats | null;
+  currentTreeStats: TreeStats | null;
   tPropsStart: number;
   tBubbleStart: number;
   vegetationTiming: VegetationFrameTiming;
@@ -159,6 +161,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       input.phaseTiming.borderOceanDebugMs +
       input.phaseTiming.statsSyncMs +
       renderMs;
+    const treeStats = input.currentTreeStats;
     input.perfProbe?.record({
       frameId: selectionStats.frameId,
       frameMs,
@@ -203,6 +206,18 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       chunkGroupsBuilt: input.chunkGroupsBuiltThisFrame,
       nearFieldChunkGroups: input.nearFieldBubbleController.size(),
       interactionMode: input.interaction.mode,
+      treeGpuStatus: treeStats?.gpuStatus ?? "unknown",
+      treeTotalTrees: treeStats?.totalTrees ?? 0,
+      treeVisiblePatches: treeStats?.visiblePatches ?? 0,
+      treePatches: treeStats?.patches ?? 0,
+      treeNearTrees: treeStats?.nearTrees ?? 0,
+      treeMidTrees: treeStats?.midTrees ?? 0,
+      treeFarTrees: treeStats?.farTrees ?? 0,
+      treeImpostorTrees: treeStats?.impostorTrees ?? 0,
+      treeGpuCandidateCount: treeStats?.gpuCandidateCount ?? 0,
+      treeGpuAcceptedCount: treeStats?.gpuAcceptedCount ?? 0,
+      treeGpuVisibleCount: treeStats?.gpuVisibleCount ?? 0,
+      treeGpuDispatchMs: treeStats?.gpuDispatchMs ?? null,
     });
     if (input.profileEnabled && frameMs >= input.profileFrameMs) {
       // eslint-disable-next-line no-console

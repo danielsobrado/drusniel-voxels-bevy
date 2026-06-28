@@ -1,0 +1,37 @@
+# Bench-only guard for the CLOD cut-freeze CSV emitted when
+# VOXEL_CLOD_CUT_FREEZE_CSV=1 is enabled.
+#
+# Typical use:
+#   CLOD_PAGES=1 \
+#   VOXEL_CLOD_FREEZE_SELECTION=1 \
+#   VOXEL_CLOD_CUT_FREEZE_CSV=1 \
+#   VOXEL_CLOD_CUT_FREEZE_CSV_PATH=bench-runs/<run>/clod-cut-freeze.csv \
+#   cargo run --release -- --bench bench/scenes/visual/visual-regression-live-lod.toml
+#   cargo run --bin clod_cut_freeze_guard -- bench-runs/<run>/clod-cut-freeze.csv
+
+[freeze]
+min_samples = 1
+
+# Dedicated cut-freeze benches should request freeze and eventually observe the
+# selection system reporting an active frozen cut.
+require_freeze_requested = true
+require_frozen_active = true
+
+# Startup can produce one row where freeze is requested before a previous cut
+# exists. After that, requested freeze should become active.
+max_requested_but_inactive_rows = 1
+
+# Frozen cuts should not change while the index/tree stays valid.
+max_digest_changes_while_frozen = 0
+
+# A frozen cut with no rendered pages is usually a sign that the selection state
+# was cleared or the tree disappeared unexpectedly during the bench.
+max_empty_frozen_rows = 0
+
+# Frozen selection should reuse the previous cut, so split/2:1 counters should
+# not advance while frozen.
+max_nonzero_split_counters_while_frozen = 0
+
+# There should never be rows marked frozen when the debug control is not
+# requesting a freeze.
+max_unrequested_frozen_rows = 0

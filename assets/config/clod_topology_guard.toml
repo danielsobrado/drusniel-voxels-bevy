@@ -1,0 +1,30 @@
+# CLOD topology guard defaults.
+#
+# The guard is intentionally strict by default: topology problems here are
+# usually real CLOD seam/crack/corruption bugs rather than quality trade-offs.
+
+min_rows = 1
+allow_empty_mesh_rows = false
+max_invalid_indices = 0
+max_repeated_index_triangles = 0
+max_zero_area_triangles = 0
+max_duplicate_triangles = 0
+max_non_manifold_edges = 0
+max_non_finite_positions = 0
+max_orphan_vertices = 0
+
+# For generated terrain page meshes, these arrays should either be empty or
+# match vertex count exactly. Mismatches usually mean a later render upload will
+# read wrong attributes.
+require_matching_normals = true
+require_matching_materials = true
+require_matching_paint_slots = false
+
+# It is legal for a closed synthetic test mesh to have zero boundary edges, but
+# real CLOD terrain pages normally have open outer borders. Keep this soft by
+# default so guard can also validate synthetic fixtures.
+warn_on_zero_boundary_edges = true
+
+# Optional level coverage check. Leave disabled for partial/local CLOD benches.
+require_all_levels_present = false
+expected_max_level = 3

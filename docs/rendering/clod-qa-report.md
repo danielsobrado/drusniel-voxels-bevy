@@ -20,12 +20,9 @@ The reporter looks for these files in a bench run directory:
 - `clod-cut-freeze.csv`
 - `clod-border-locks.csv`
 - `clod-topology.csv`
-- `clod-simplify.csv`
-- `clod-weld.csv`
-- `clod-edit-plan.csv`
-
-Missing files are reported as missing instead of causing a hard failure. The
-only hard failure is a completely empty run directory unless `--allow-empty` is
+- `clod-edit-events.csv`
+- `clod-edit-dispatch.csv`
+- `clod-edit-dry-run.csv`
 passed.
 
 ## Run
@@ -50,9 +47,6 @@ cargo run --bin clod_qa_report -- \
 ```
 
 ## Why this exists
-
-The web CLOD PoC has a QA/reporting workflow around runtime diagnostics. The
-Rust/Bevy port now emits separate CSV streams for selection, rebuild,
-crossfade, cut-freeze, border locks, topology, simplification and weld state.
-This reporter makes those streams easier to inspect together without weakening
-the stricter per-metric guards.
+crossfade, cut-freeze, border locks, topology, simplification, weld state and
+the scripted-edit dry-run pipeline. This reporter makes those streams easier to
+inspect together without weakening the stricter per-metric guards.

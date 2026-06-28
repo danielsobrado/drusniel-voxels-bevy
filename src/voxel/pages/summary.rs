@@ -5,7 +5,7 @@ use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 
 use super::build_queue::{ClodPageBuildStatus, ClodPageTree};
 use super::config::TerrainSummaryCfg;
-use super::selection::{ClodPageNodeKey, ClodPageSelectionIndex};
+use super::selection::ClodPageSelectionIndex;
 use super::types::PageFootprint;
 use crate::voxel::terrain::TerrainGenerator;
 

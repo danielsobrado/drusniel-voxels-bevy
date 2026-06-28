@@ -9,12 +9,35 @@
 //! meshes. Page borders are locked (by OPEN topological boundary, a sandbox finding — not
 //! by footprint plane: Surface Nets vertices sit inside cells, so borders are non-planar).
 
+pub mod border_lock_export;
 pub mod build_queue;
 pub mod config;
 pub mod diagonal_polish;
 pub mod export;
 pub mod lock;
+pub mod border_lock_stats;
+pub mod crossfade;
+pub mod crossfade_runtime;
+pub mod crossfade_stats_export;
+pub mod cut_freeze_export;
+pub mod debug_overlay;
+pub mod dither_material;
+pub mod edit_dirtiness;
+pub mod fade_material;
 pub mod material_weights;
+pub mod rebuild_observer;
+pub mod runtime_stats_export;
+pub mod scripted_edit;
+pub mod scripted_edit_adapter;
+pub mod scripted_edit_authoritative_hook;
+pub mod scripted_edit_driver;
+pub mod scripted_edit_mutation_sink;
+pub mod simplify_export;
+pub mod simplify_stats;
+pub mod topology_export;
+pub mod topology_stats;
+pub mod weld_export;
+pub mod weld_stats;
 pub mod material_tier;
 mod ownership;
 pub mod plugin;

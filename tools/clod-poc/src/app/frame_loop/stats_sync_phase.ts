@@ -32,6 +32,7 @@ export interface StatsSyncPhaseInput {
 
 export interface StatsSyncPhaseResult {
   currentGrassStats: GrassStats | null;
+  currentTreeStats: TreeStats | null;
 }
 
 export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseResult {
@@ -154,5 +155,8 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     presenter.grassCandidateCountController?.updateDisplay();
   }
 
-  return { currentGrassStats: nextGrassStats ?? grassStats };
+  return {
+    currentGrassStats: nextGrassStats ?? grassStats,
+    currentTreeStats: nextTreeStats ?? treeStats,
+  };
 }

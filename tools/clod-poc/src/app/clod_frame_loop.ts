@@ -242,7 +242,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       }
     });
 
-    const { currentGrassStats } = timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
+    const { currentGrassStats, currentTreeStats } = timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
       state: player.state,
       grassSystem: vegetation.grassSystem,
       treeSystem: vegetation.treeSystem,
@@ -280,6 +280,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       grassProfileEnabled: render.grassProfileEnabled,
       grassProfileFrame,
       currentGrassStats,
+      currentTreeStats,
       tPropsStart: terrainPhase.tPropsStart,
       tBubbleStart: terrainPhase.tBubbleStart,
       vegetationTiming,

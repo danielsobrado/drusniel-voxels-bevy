@@ -1,0 +1,8 @@
+# Default mode is safe for normal QA: no real terrain apply is expected.
+require_dry_run_only = true
+require_authoritative_acceptance = false
+require_collider_refresh = false
+require_rebuild_after_apply = false
+allow_pending_authoritative_apply = false
+max_apply_to_rebuild_latency_frames = 180
+max_apply_to_collider_latency_frames = 180

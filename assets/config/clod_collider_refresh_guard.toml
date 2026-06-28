@@ -1,0 +1,15 @@
+# Guard policy for clod-collider-refresh.csv.
+# Defaults keep normal QA safe: collider refresh is audited but real refresh rows
+# are not required until scripted terrain mutation is enabled.
+
+require_non_empty = true
+require_unique_request_ids = true
+require_dry_run_only = true
+allow_missing_refresh_when_dry_run = true
+allow_refreshed = false
+allow_stale = false
+allow_timeout = false
+
+max_refresh_latency_frames = 180
+max_stale_collider_frames = 0
+max_dirty_lod0_pages = 512

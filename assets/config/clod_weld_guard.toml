@@ -1,0 +1,6 @@
+[thresholds]
+max_duplicate_position_groups = 0
+max_duplicate_vertices = 0
+max_normal_delta = 0.0001
+max_material_delta = 0.0001
+max_paint_delta = 0.0001

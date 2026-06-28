@@ -1,0 +1,16 @@
+# Guard policy for clod-edit-authoritative-hook.csv.
+# Defaults are deliberately conservative: complete QA may audit the hook handoff,
+# but it must not accept authoritative terrain mutation until the real VoxelWorld
+# mutator and collider-refresh guard are wired.
+
+require_non_empty = true
+require_unique_request_ids = true
+require_dry_run_only = true
+require_requires_authoritative_world_mutation = true
+
+allow_hook_unavailable = false
+allow_rejected_invalid_request = false
+allow_accepted_for_authoritative_mutation = false
+
+max_dirty_lod0_pages = 512
+max_dirty_nodes = 4096

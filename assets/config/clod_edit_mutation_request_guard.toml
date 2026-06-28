@@ -1,0 +1,28 @@
+# Guard policy for clod-edit-mutation-requests.csv.
+# Defaults are conservative because scripted edit mutation is not wired to the
+# authoritative terrain path yet.
+
+# Until the terrain mutator is wired and guarded, complete QA should emit only
+# dry_run_only rows.
+allow_ready_to_apply = false
+
+# Blocked rows usually mean a dry-run/export/schema problem. Keep this false for
+# regression benches. Set true only while intentionally testing invalid fixtures.
+allow_blocked_requests = false
+
+# CLOD pages are derived caches, so every mutation request must be handed to the
+# authoritative world/terrain edit path.
+require_authoritative_world_mutation = true
+
+# If apply_enabled=false, no row may be ready_to_apply. If apply_enabled=true,
+# every valid non-blocked row should be ready_to_apply.
+require_apply_enabled_consistency = true
+
+# Request IDs are used by later rebuild/collider correlation guards.
+require_unique_request_ids = true
+
+# Basic sanity limits.
+max_radius = 256.0
+max_strength = 8.0
+max_dirty_lod0_pages = 512
+max_dirty_total_nodes = 4096

@@ -1,0 +1,15 @@
+# Guard policy for clod-edit-mutation-sink.csv.
+# Defaults are conservative: complete QA must not apply or placeholder-apply
+# scripted terrain edits until the authoritative VoxelWorld hook and collider
+# refresh guards exist.
+
+require_non_empty = true
+require_dry_run_only = true
+require_unique_request_ids = true
+
+allow_blocked = false
+allow_ready = false
+allow_applied_placeholder = false
+
+max_dirty_lod0_pages = 512
+max_dirty_parent_nodes = 4096

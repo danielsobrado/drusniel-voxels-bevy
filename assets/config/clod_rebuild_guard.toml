@@ -1,0 +1,32 @@
+# Bench-only guard for the CLOD rebuild observer CSV emitted when
+# VOXEL_CLOD_REBUILD_CSV=1 is enabled.
+#
+# Example:
+#   CLOD_PAGES=1 \
+#   VOXEL_CLOD_REBUILD_CSV=1 \
+#   VOXEL_CLOD_REBUILD_CSV_PATH=bench-runs/<run>/clod-rebuild-observer.csv \
+#   cargo run --release -- --bench bench/scenes/gameplay-movement-smoke.toml
+#
+#   cargo run --bin clod_rebuild_guard -- bench-runs/<run>/clod-rebuild-observer.csv
+
+[clod_rebuild]
+min_samples = 1
+
+# A published rebuild should have observed the source and async build phases.
+max_rows_missing_source_complete = 0
+max_rows_missing_build_started = 0
+
+# A published tree must advance revision and contain real page geometry.
+max_rows_without_revision_increment = 0
+max_zero_node_publishes = 0
+max_zero_triangle_publishes = 0
+
+# Ordering inconsistencies indicate a broken observer or rebuild lifecycle.
+max_invalid_order_rows = 0
+
+# Generic defaults are intentionally forgiving; tune down per machine/bench.
+max_total_ms = 2500.0
+max_publish_ms = 2500.0
+
+# Keep at 0 for generic benches; raise for dedicated large-world/page-coverage routes.
+min_max_page_coords = 0

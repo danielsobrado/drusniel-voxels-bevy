@@ -2,6 +2,7 @@
 //! `tools/clod-poc/src/selection.ts`, adapted to Bevy ECS visibility.
 
 use std::collections::{HashMap, HashSet};
+use std::env;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -116,19 +117,95 @@ impl ClodPageSelectionIndex {
     pub(crate) fn nodes(&self) -> impl Iterator<Item = &ClodSelectionNode> {
         self.nodes.values()
     }
+
+    pub(crate) fn root_count(&self) -> usize {
+        self.roots.len()
+    }
 }
 
 #[derive(Resource, Default)]
 pub(crate) struct ClodPageSelectionState {
     split: HashSet<ClodPageNodeKey>,
     fades: HashMap<ClodPageNodeKey, f32>,
+    pub(crate) rendered: Vec<ClodPageNodeKey>,
 }
 
 impl ClodPageSelectionState {
     fn clear(&mut self) {
         self.split.clear();
         self.fades.clear();
+        self.rendered.clear();
     }
+
+    pub(crate) fn rendered_keys(&self) -> impl Iterator<Item = ClodPageNodeKey> + '_ {
+        self.rendered.iter().copied()
+    }
+}
+
+#[derive(Resource, Clone, Debug)]
+pub(crate) struct ClodSelectionDebugControls {
+    pub freeze_selection: bool,
+    pub forced_max_level: Option<usize>,
+    pub force_split_ids: HashSet<ClodPageNodeKey>,
+}
+
+impl Default for ClodSelectionDebugControls {
+    fn default() -> Self {
+        Self {
+            freeze_selection: env_flag("VOXEL_CLOD_FREEZE_SELECTION"),
+            forced_max_level: env::var("VOXEL_CLOD_FORCE_MAX_LEVEL")
+                .ok()
+                .and_then(|value| value.trim().parse::<usize>().ok()),
+            force_split_ids: env::var("VOXEL_CLOD_FORCE_SPLIT_IDS")
+                .ok()
+                .map(|value| parse_force_split_ids(&value))
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl ClodSelectionDebugControls {
+    pub(crate) fn disabled() -> Self {
+        Self {
+            freeze_selection: false,
+            forced_max_level: None,
+            force_split_ids: HashSet::new(),
+        }
+    }
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub(crate) struct ClodSelectionRuntimeStats {
+    pub rendered_pages: usize,
+    pub split_pages: usize,
+    pub forced_splits: u32,
+    pub blocked_splits: u32,
+    pub near_field_forced_splits: u32,
+    pub frozen: bool,
+}
+
+impl ClodSelectionRuntimeStats {
+    pub(crate) fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
+
+fn env_flag(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+}
+
+fn parse_force_split_ids(raw: &str) -> HashSet<ClodPageNodeKey> {
+    raw.split(',')
+        .filter_map(|item| {
+            let mut parts = item.trim().split(':');
+            let level = parts.next()?.parse::<usize>().ok()?;
+            let x = parts.next()?.parse::<i32>().ok()?;
+            let z = parts.next()?.parse::<i32>().ok()?;
+            parts.next().is_none().then_some(ClodPageNodeKey::new(level, (x, z)))
+        })
+        .collect()
 }
 
 struct SelectionParams {

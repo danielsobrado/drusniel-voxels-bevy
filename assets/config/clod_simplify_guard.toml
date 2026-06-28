@@ -1,0 +1,31 @@
+# CLOD simplification diagnostics guard.
+#
+# This validates the CSV produced by the runtime simplification export added in
+# the follow-up PR. Values are intentionally loose enough for early tuning.
+
+# Parent nodes should usually simplify below their merged 2x2 children.
+# A small allowance is kept because border locks, material attributes and
+# compacting can make some pages resist simplification.
+max_triangle_ratio = 1.05
+max_vertex_ratio = 1.05
+
+# Detect pathological collapse. Parent pages may simplify aggressively, but
+# if they keep less than this fraction of child triangles/vertices, inspect
+# the page for broken source geometry or bad target ratios.
+min_triangle_ratio = 0.02
+min_vertex_ratio = 0.02
+
+# `error_world` is accumulated by the quadtree. This is a coarse default guard;
+# per-world tuned thresholds should be stricter.
+max_error_world = 256.0
+
+# Too many low-benefit simplifications means the simplifier is spending work but
+# not reducing mesh cost. Allow a few border-heavy pages.
+max_low_benefit_fraction = 0.35
+
+# Hard minimums for non-empty parent nodes.
+min_parent_triangles = 1
+min_parent_vertices = 3
+
+# LOD0 rows are allowed but do not have child ratios.
+require_parent_rows = true

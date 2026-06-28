@@ -56,6 +56,7 @@ export interface VegetationSliceState {
   treeGpuEnabled: boolean;
   treeGpuForceCpu: boolean;
   treeGpuShowCounts: boolean;
+  treeGpuMaxVisible: number;
   treeTotal: TreeTotalDisplay;
   treeVisiblePatches: string;
   treeLodSummary: string;
@@ -145,6 +146,7 @@ export function createVegetationSliceState(input: {
     treeGpuEnabled: treeConfig.gpu.enabled,
     treeGpuForceCpu: treeConfig.gpu.debugForceCpu,
     treeGpuShowCounts: treeConfig.gpu.debugShowGpuCounts,
+    treeGpuMaxVisible: treeConfig.gpu.maxVisible,
     treeTotal: 0,
     treeVisiblePatches: "0/0",
     treeLodSummary: "0/0/0/0",
