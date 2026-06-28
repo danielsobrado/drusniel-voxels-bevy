@@ -1,4 +1,5 @@
 export type AcceptanceStatus = "pass" | "warn" | "fail";
+export type AcceptanceGateId = "A1" | "A2" | "A3" | "A4" | "A5" | "A6" | "A7";
 
 export interface AcceptanceRunReport {
   schemaVersion: number;
@@ -15,7 +16,7 @@ export interface AcceptanceRunReport {
 }
 
 export interface AcceptanceGateResult {
-  id: "A1" | "A2" | "A3" | "A4" | "A5" | "A6";
+  id: AcceptanceGateId;
   name: string;
   status: AcceptanceStatus;
   message: string;
@@ -70,6 +71,15 @@ export interface AcceptanceMetrics {
   mixedLodEdgesTested: number;
   mixedLodFailureCount: number;
   mixedLodUntestableDeltaCount: number;
+  streamingWalkFrames: number;
+  streamingMaxCameraToClodCenterM: number;
+  streamingMaxCameraToFarShellCenterM: number;
+  streamingMaxLiveClodGapHoles: number;
+  streamingMaxClodFarGapHoles: number;
+  streamingMaxLiveClodOverlapCells: number;
+  streamingMaxHorizonHoleRatio: number;
+  streamingTextureWindowSwaps: number;
+  streamingMaxActiveBiomeTextures: number;
 }
 
 export interface AcceptanceArtifacts {
@@ -92,6 +102,24 @@ export interface AcceptanceThresholds {
   visualHolePixelRatioMax: number;
   visualLipPixelRatioMax: number;
   requireMeasuredSingleNodeRebuild: boolean;
+}
+
+export interface StreamingWalkAcceptanceConfig {
+  enabled: boolean;
+  frames: number;
+  stepM: number;
+  liveRadiusM: number;
+  clodRadiusM: number;
+  farShellOuterM: number;
+  hysteresisM: number;
+  coverageCellM: number;
+  maxClodLevel: number;
+  biomeProbeDistanceM: number;
+  maxCenterDriftM: number;
+  maxGapHoles: number;
+  maxOverlapCells: number;
+  maxHorizonHoleRatio: number;
+  maxActiveBiomeTextures: number;
 }
 
 export interface AcceptanceConfig {
@@ -119,6 +147,7 @@ export interface AcceptanceConfig {
     forcedNeighborLodDeltas: number[];
     nearFieldBubbleMask: boolean;
   };
+  streamingWalk: StreamingWalkAcceptanceConfig;
   logging: {
     level: "debug" | "info" | "warn" | "error";
   };
