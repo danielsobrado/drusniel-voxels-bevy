@@ -40,6 +40,7 @@ interface TreeWindUniforms {
   uTreeGustStrength: { value: number };
   uTreeTrunkSwayStrength: { value: number };
   uTreeLeafFlutterStrength: { value: number };
+  uTreeVariantSeed: { value: number };
 }
 
 export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHandle {
@@ -103,6 +104,7 @@ export function injectTreeWindShader(vertexShader: string): string {
 attribute vec2 treeWind;
 attribute vec2 treeWorldXZ;
 attribute float treeLodFade;
+attribute float treeVariant;
 varying float vTreeLodFade;
 uniform float uTreeTime;
 uniform vec2 uTreeWindDirection;
@@ -111,9 +113,15 @@ uniform float uTreeWindSpeed;
 uniform float uTreeGustStrength;
 uniform float uTreeTrunkSwayStrength;
 uniform float uTreeLeafFlutterStrength;
+uniform float uTreeVariantSeed;
 
 float treeWindHash(vec2 value) {
   return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float treeSelectedVariant(vec2 worldXZ) {
+  vec2 seeded = worldXZ + vec2(uTreeVariantSeed * 0.013 + 1103.0, uTreeVariantSeed * 0.037 - 1103.0);
+  return floor(treeWindHash(seeded) * 4.0);
 }`,
     )
     .replace(
@@ -125,19 +133,21 @@ vec2 treeInstanceWorldXZ = treeWorldXZ;
 #else
 vec2 treeInstanceWorldXZ = vec2(0.0);
 #endif
+float treeVariantKeep = 1.0 - step(0.5, abs(treeVariant - treeSelectedVariant(treeInstanceWorldXZ)));
+transformed *= treeVariantKeep;
 float treePhase = treeWindHash(treeInstanceWorldXZ);
 float treeShapePhase = treeWindHash(treeInstanceWorldXZ + vec2(23.17, 91.71));
 float treeHeightMask = smoothstep(0.0, 14.0, position.y);
 float treeShape = (treeShapePhase - 0.5) * treeHeightMask;
-transformed.xz += normalize(transformed.xz + vec2(0.001)) * treeShape * 0.34;
-transformed.y *= 1.0 + treeShape * 0.055;
+transformed.xz += normalize(transformed.xz + vec2(0.001)) * treeShape * 0.34 * treeVariantKeep;
+transformed.y *= 1.0 + treeShape * 0.055 * treeVariantKeep;
 float treeTime = uTreeTime * uTreeWindSpeed;
 float treeWave = sin(treeTime + treePhase * 6.2831853 + dot(treeInstanceWorldXZ, uTreeWindDirection) * 0.035);
 float treeGust = sin(treeTime * 0.37 + treePhase * 12.9898) * uTreeGustStrength;
 float treeSway = (treeWave * uTreeWindStrength + treeGust) * treeWind.x * uTreeTrunkSwayStrength;
 float treeFlutter = sin(treeTime * 7.0 + treePhase * 19.19 + position.y * 2.3) *
   uTreeWindStrength * uTreeLeafFlutterStrength * treeWind.y;
-transformed.xz += uTreeWindDirection * (treeSway + treeFlutter);`,
+transformed.xz += uTreeWindDirection * (treeSway + treeFlutter) * treeVariantKeep;`,
     );
 }
 
@@ -221,6 +231,7 @@ function createTreeWindUniforms(settings: TreeSettings): TreeWindUniforms {
     uTreeGustStrength: { value: 0 },
     uTreeTrunkSwayStrength: { value: 0 },
     uTreeLeafFlutterStrength: { value: 0 },
+    uTreeVariantSeed: { value: settings.seed },
   };
   updateTreeWindUniforms(uniforms, settings);
   return uniforms;
@@ -238,4 +249,5 @@ function updateTreeWindUniforms(uniforms: TreeWindUniforms, settings: TreeSettin
   uniforms.uTreeGustStrength.value = wind.gustStrength * enabled;
   uniforms.uTreeTrunkSwayStrength.value = wind.trunkSwayStrength * enabled;
   uniforms.uTreeLeafFlutterStrength.value = wind.leafFlutterStrength * enabled;
+  uniforms.uTreeVariantSeed.value = settings.seed;
 }
