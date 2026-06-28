@@ -4,8 +4,8 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use drusniel_voxels_bevy::voxel::pages::edit_dirtiness::ClodDirtyPageGrid;
-use drusniel_voxels_bevy::voxel::pages::scripted_edit_adapter::{
+use voxel_builder::voxel::pages::edit_dirtiness::ClodDirtyPageGrid;
+use voxel_builder::voxel::pages::scripted_edit_adapter::{
     build_dry_run_records, dry_run_csv_header, dry_run_record_to_csv_row,
     parse_scripted_edit_dispatch_csv, ScriptedEditDryRunConfig, ScriptedEditMutationMode,
 };

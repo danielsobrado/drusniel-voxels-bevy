@@ -20,6 +20,8 @@ const KNOWN_ARTIFACTS: &[(&str, &str)] = &[
     ("edit_events", "clod-edit-events.csv"),
     ("edit_dispatch", "clod-edit-dispatch.csv"),
     ("edit_dry_run", "clod-edit-dry-run.csv"),
+];
+
 struct Args {
     run_dir: PathBuf,
     out_md: PathBuf,

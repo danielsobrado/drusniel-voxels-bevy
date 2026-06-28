@@ -209,7 +209,7 @@ impl ExtractComponent for WaterMeshDetail {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Component)]
 pub struct WaterBodyId(pub u32);
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]

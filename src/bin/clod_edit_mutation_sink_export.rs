@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-use drusniel_voxels_bevy::voxel::pages::scripted_edit_mutation_sink::{
+use voxel_builder::voxel::pages::scripted_edit_mutation_sink::{
     decide_mutation_requests, MutationRequestRow, MutationSinkMode,
 };
 

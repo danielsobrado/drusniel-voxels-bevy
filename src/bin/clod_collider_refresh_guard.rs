@@ -51,18 +51,17 @@ fn main() {
 }
 
 #[derive(Debug)]
-struct Row<'a> { headers: &'a [&'a str], fields: Vec<&'a str> }
-impl<'a> Row<'a> {
+struct Row { headers: Vec<String>, fields: Vec<String> }
+impl Row {
     fn get(&self, name: &str) -> &str {
-        self.headers.iter().position(|h| h.trim()==name).and_then(|i| self.fields.get(i).copied()).unwrap_or("").trim()
+        self.headers.iter().position(|h| h.trim()==name).and_then(|i| self.fields.get(i).map(|s| s.as_str())).unwrap_or("")
     }
 }
-fn parse_rows(csv: &str) -> Vec<Row<'_>> {
+fn parse_rows(csv: &str) -> Vec<Row> {
     let mut lines = csv.lines();
     let Some(header) = lines.next() else { return Vec::new(); };
-    let boxed: Box<[&str]> = header.split(',').collect::<Vec<_>>().into_boxed_slice();
-    let headers: &'static [&'static str] = Box::leak(boxed);
-    lines.filter(|l| !l.trim().is_empty()).map(|l| Row { headers, fields: l.split(',').collect() }).collect()
+    let headers: Vec<String> = header.split(',').map(|s| s.trim().to_string()).collect();
+    lines.filter(|l| !l.trim().is_empty()).map(|l| Row { headers: headers.clone(), fields: l.split(',').map(|s| s.trim().to_string()).collect() }).collect()
 }
 fn parse_config(toml: &str) -> Config {
     let mut c = Config { require_non_empty:true, require_unique_request_ids:true, require_dry_run_only:true, allow_missing_refresh_when_dry_run:true, max_refresh_latency_frames:180, max_dirty_lod0_pages:512, ..Default::default() };

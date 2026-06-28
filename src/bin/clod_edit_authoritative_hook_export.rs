@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::io;
 
-use drusniel_voxels_bevy::voxel::pages::scripted_edit_authoritative_hook::{
+use voxel_builder::voxel::pages::scripted_edit_authoritative_hook::{
     audit_authoritative_edit_requests, audit_rows_to_csv, AuthoritativeEditHookMode,
     AuthoritativeEditRequest,
 };
