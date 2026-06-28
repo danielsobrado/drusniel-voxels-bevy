@@ -138,13 +138,18 @@ describe("tree impostor octahedral math", () => {
 
 describe("tree impostor material", () => {
   it("uses alpha-tested double-sided shader sampling atlas UV rects", () => {
-    const material = createTreeImpostorMaterial(settings, fakeAtlas("oak"));
+    const atlas = fakeAtlas("oak");
+    const material = createTreeImpostorMaterial(settings, atlas);
     try {
       expect(material.side).toBe(THREE.DoubleSide);
       expect(material.transparent).toBe(false);
       expect(material.depthWrite).toBe(true);
+      expect(material.uniforms.normalDepthMap.value).toBe(atlas.normalDepth);
+      expect(material.uniforms.hasNormalDepthMap.value).toBe(1);
       expect(TREE_IMPOSTOR_VERTEX_SHADER).toContain("treeImpostorUvRect");
       expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("texture2D(map");
+      expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("normalDepthMap");
+      expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("treeImpostorRelight");
       expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("discard");
     } finally {
       material.dispose();
@@ -237,8 +242,8 @@ function pageMesh(): PageMesh {
     positions: new Float32Array([0, 24, 0, 32, 24, 0, 0, 24, 32]),
     normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
     paintSlots: new Float32Array([0, 0, 0]),
-  materialWeights: new Float32Array(12),
-  materialWeightStride: 4,
+    materialWeights: new Float32Array(12),
+    materialWeightStride: 4,
     indices: new Uint32Array([0, 1, 2]),
   };
 }
@@ -262,6 +267,8 @@ function fakeAtlas(species: "oak" | "pine" | "dead"): TreeImpostorAtlas {
   return {
     species,
     texture,
+    albedo: texture,
+    normalDepth: texture,
     gridSize: 4,
     resolutionPx: 32,
     atlasSizePx: 128,
