@@ -5,13 +5,14 @@ import type { SpellVfxController } from "./spell_vfx_controller.js";
 export interface SpellMenu {
   castFire: () => void;
   castWater: () => void;
+  castAir: () => void;
   dispose: () => void;
 }
 
 export interface SpellMenuDeps {
   config?: SpellConfig;
   root?: HTMLElement;
-  /** In-scene VFX controller that plays the 3D fire/water billboards. */
+  /** In-scene VFX controller that plays the 3D spell billboards. */
   controller?: SpellVfxController;
 }
 
@@ -22,6 +23,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   const controller = deps.controller;
   let fireActiveReset = 0;
   let waterActiveReset = 0;
+  let airActiveReset = 0;
   let dragOffset: { x: number; y: number } | null = null;
 
   root.replaceChildren();
@@ -36,10 +38,11 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
 
   const fireButton = createSpellButton(`1 🔥 ${config.fire.label}`, `${config.fire.label} spell (1)`, () => castFire());
   const waterButton = createSpellButton(`2 💧 ${config.water.label}`, `${config.water.label} spell (2)`, () => castWater());
+  const airButton = createSpellButton(`3 Air ${config.air.label}`, `${config.air.label} spell (3)`, () => castAir());
 
   root.addEventListener("pointerdown", stopUiPropagation);
   root.addEventListener("click", stopUiPropagation);
-  slots.append(fireButton, waterButton);
+  slots.append(fireButton, waterButton, airButton);
   root.append(title, slots);
 
   title.addEventListener("pointerdown", onDragStart);
@@ -76,42 +79,44 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
     window.clearTimeout(fireActiveReset);
     fireButton.setAttribute("aria-pressed", "true");
     controller?.playFire(config.fire.castDurationMs);
-    emitAudio("spell.fire.cast", {
-      volume: config.fire.audio.volume,
-      durationMs: config.fire.castDurationMs,
-    });
-    fireActiveReset = window.setTimeout(() => {
-      fireButton.setAttribute("aria-pressed", "false");
-    }, config.fire.castDurationMs);
+    emitAudio("spell.fire.cast", { volume: config.fire.audio.volume, durationMs: config.fire.castDurationMs });
+    fireActiveReset = window.setTimeout(() => fireButton.setAttribute("aria-pressed", "false"), config.fire.castDurationMs);
   }
 
   function castWater(): void {
     window.clearTimeout(waterActiveReset);
     waterButton.setAttribute("aria-pressed", "true");
     controller?.playWater(config.water.castDurationMs);
-    emitAudio("spell.water.cast", {
-      volume: config.water.audio.volume,
-      durationMs: config.water.castDurationMs,
-    });
-    waterActiveReset = window.setTimeout(() => {
-      waterButton.setAttribute("aria-pressed", "false");
-    }, config.water.castDurationMs);
+    emitAudio("spell.water.cast", { volume: config.water.audio.volume, durationMs: config.water.castDurationMs });
+    waterActiveReset = window.setTimeout(() => waterButton.setAttribute("aria-pressed", "false"), config.water.castDurationMs);
+  }
+
+  function castAir(): void {
+    window.clearTimeout(airActiveReset);
+    airButton.setAttribute("aria-pressed", "true");
+    controller?.playAir(config.air.castDurationMs);
+    emitAudio("spell.air.cast", { volume: config.air.audio.volume, durationMs: config.air.castDurationMs });
+    airActiveReset = window.setTimeout(() => airButton.setAttribute("aria-pressed", "false"), config.air.castDurationMs);
   }
 
   return {
     castFire,
     castWater,
+    castAir,
     dispose: () => {
       window.clearTimeout(fireActiveReset);
       window.clearTimeout(waterActiveReset);
+      window.clearTimeout(airActiveReset);
       fireActiveReset = 0;
       waterActiveReset = 0;
+      airActiveReset = 0;
       if (dragOffset) onDragEnd();
       title.removeEventListener("pointerdown", onDragStart);
       root.removeEventListener("pointerdown", stopUiPropagation);
       root.removeEventListener("click", stopUiPropagation);
       fireButton.remove();
       waterButton.remove();
+      airButton.remove();
       if (shouldRemoveRoot) root.remove();
       else root.replaceChildren();
     },
