@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { InfiniteFarShell, type InfiniteFarShellOptions } from "./infiniteFarShell.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
+import { BIOME_IDS } from "../world_source/biome_region_field.js";
+import { biomeRgbForId } from "../world_source/biome_colors.js";
 
 const parityConfig: FarTerrainUniformData = {
   materialQuality: "horizon_proxy",
@@ -96,6 +98,24 @@ describe("InfiniteFarShell height sampling mode", () => {
 
     expect(color).toBeDefined();
     expect(color!.count).toBe(shell.mesh.geometry.getAttribute("position").count);
+    shell.dispose();
+  });
+
+  it("colors the non-parity shell from sampled biome ids", () => {
+    const shell = makeShell();
+
+    shell.setHeightProvider({
+      sampleHeight: () => 22,
+      sampleNormal: () => new THREE.Vector3(0, 1, 0),
+      sampleMaterial: () => BIOME_IDS.ocean,
+    });
+
+    const color = shell.mesh.geometry.getAttribute("color") as THREE.BufferAttribute;
+    const [r, g, b] = biomeRgbForId(BIOME_IDS.ocean);
+    expect(color.count).toBe(shell.mesh.geometry.getAttribute("position").count);
+    expect(color.getX(0)).toBeCloseTo(r, 5);
+    expect(color.getY(0)).toBeCloseTo(g, 5);
+    expect(color.getZ(0)).toBeCloseTo(b, 5);
     shell.dispose();
   });
 
