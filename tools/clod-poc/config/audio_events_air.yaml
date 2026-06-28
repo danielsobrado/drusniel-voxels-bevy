@@ -1,0 +1,8 @@
+events:
+  spell.air.cast:
+    enabled: true
+    volume: 0.28
+    cooldown_ms: 160
+    synth: smooth
+    pitch: 920
+    duration_ms: 1800
