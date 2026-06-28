@@ -215,7 +215,7 @@ export async function bootstrapClodPoc() {
         },
         scene: renderer.scene,
         camera: renderer.camera,
-        farShellController: undefined,
+        farShellController: terrainView.farShellController,
         farShellMetrics,
         config: longViewConfigToFarSummaryConfig(lvConfig),
       });

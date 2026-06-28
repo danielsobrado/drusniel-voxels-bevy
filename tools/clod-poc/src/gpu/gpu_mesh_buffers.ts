@@ -3,14 +3,15 @@
 // shaders/terrain_field_entry.wgsl exactly or the GPU reads garbage — are unit-testable headless
 // (gpu_mesh_buffers.test.ts). No WebGPU here.
 
-import { ResolvedDigEdit } from "./terrain_field_core.js";
+import { getTerrainFieldCoreConfig, type ResolvedDigEdit } from "./terrain_field_core.js";
+import type { TerrainFieldConfig } from "../terrain/terrain.js";
 
 // Mirror of terrain.ts Y_CELLS / the wgsl yCells.
 export const Y_CELLS = 128;
 
 // WGSL struct sizes (4-byte words).
 export const MESH_PARAM_WORDS = 16; // MeshParams: 13 dims + maxIndices + maxVertices + pad
-export const FIELD_PARAM_WORDS = 4; // FieldParams: editCount + 3 pad
+export const FIELD_PARAM_WORDS = 16; // FieldParams: editCount + terrain field config + pad
 export const DIG_EDIT_WORDS = 10; // DigEdit: x,y,z,r,h,shape,opAdd,strength,falloff,material
 export const DIG_EDIT_BYTES = DIG_EDIT_WORDS * 4; // stride 40
 
@@ -60,10 +61,27 @@ export function packMeshParams(
   return p;
 }
 
-/** Pack FieldParams (binding 1): editCount + padding. */
-export function packFieldParams(editCount: number): Uint32Array {
+/** Pack FieldParams (binding 1). The word order mirrors terrain_field_common.wgsl. */
+export function packFieldParams(
+  editCount: number,
+  config: TerrainFieldConfig = getTerrainFieldCoreConfig(),
+): Uint32Array {
   const p = new Uint32Array(FIELD_PARAM_WORDS);
+  const i = new Int32Array(p.buffer);
+  const f = new Float32Array(p.buffer);
   p[0] = editCount >>> 0;
+  i[1] = config.seed | 0;
+  p[2] = config.islandShape.enabled ? 1 : 0;
+  p[3] = config.islandShape.oceanRim ? 1 : 0;
+  f[4] = config.seaLevel;
+  f[5] = config.islandShape.spacingM;
+  f[6] = config.islandShape.radiusM;
+  f[7] = config.islandShape.blendM;
+  f[8] = config.islandShape.warpStrengthM;
+  f[9] = config.islandShape.beachWidthM;
+  f[10] = config.islandShape.cliffWidthM;
+  f[11] = config.islandShape.worldRadiusM;
+  f[12] = config.islandShape.oceanRimDropM;
   return p;
 }
 

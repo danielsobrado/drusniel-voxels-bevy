@@ -54,11 +54,33 @@ describe("packMeshParams", () => {
 });
 
 describe("packFieldParams", () => {
-  it("writes editCount at word 0", () => {
-    const p = packFieldParams(7);
-    expect(p.length).toBe(4);
+  it("writes editCount and terrain config in wgsl struct order", () => {
+    const p = packFieldParams(7, {
+      seed: 123,
+      seaLevel: 19,
+      islandShape: {
+        enabled: true,
+        seaLevel: 19,
+        seed: 123,
+        spacingM: 1400,
+        radiusM: 520,
+        blendM: 240,
+        warpStrengthM: 180,
+        beachWidthM: 30,
+        cliffWidthM: 50,
+        worldRadiusM: 4096,
+        oceanRim: true,
+        oceanRimDropM: 37,
+      },
+    });
+    const i = new Int32Array(p.buffer);
+    const f = new Float32Array(p.buffer);
+    expect(p.length).toBe(16);
     expect(p[0]).toBe(7);
-    expect([p[1], p[2], p[3]]).toEqual([0, 0, 0]);
+    expect(i[1]).toBe(123);
+    expect([p[2], p[3]]).toEqual([1, 1]);
+    expect([f[4], f[5], f[6], f[7]]).toEqual([19, 1400, 520, 240]);
+    expect([f[8], f[9], f[10], f[11], f[12]]).toEqual([180, 30, 50, 4096, 37]);
   });
 });
 

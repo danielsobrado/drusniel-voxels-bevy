@@ -1,4 +1,4 @@
-import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
+import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import type { StoneSettings, StoneTerrainClassWeights } from "../stones/stone_config.js";
 import { composeStoneScatterShader } from "./wgsl_modules.js";
@@ -110,7 +110,7 @@ export class StoneGpuScatterCompute {
     });
     this.fieldParams = device.createBuffer({
       label: "stone scatter field params",
-      size: 4 * Uint32Array.BYTES_PER_ELEMENT,
+      size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.digEdits = device.createBuffer({

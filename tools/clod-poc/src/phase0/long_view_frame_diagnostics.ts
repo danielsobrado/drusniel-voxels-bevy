@@ -199,11 +199,11 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     s.counters["streamer_simulated_missing_chunks"] = streamingReport.missingChunkCount;
     s.counters["streamer_simulated_missing_pages"] = streamingReport.missingPageCount;
 
-    publishOwnershipRuntimeCounters(
-      s.counters,
-      ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z }),
-    );
-    s.counters["ring_boundary_holes"] = 0;
+    const ownershipSnapshot = ownershipRuntime.update({ x: deps.camera.position.x, z: deps.camera.position.z });
+    publishOwnershipRuntimeCounters(s.counters, ownershipSnapshot);
+    const missingLiveChunks = Math.max(0, ownershipSnapshot.live.required.length - ownershipSnapshot.live.loaded.length);
+    const missingVisualPages = Math.max(0, ownershipSnapshot.visualPages.required.length - ownershipSnapshot.visualPages.loaded.length);
+    s.counters["ring_boundary_holes"] = missingLiveChunks + missingVisualPages;
 
     const missingCounters = deps.phase0Config.metrics.required_counters.filter((k) => !(k in s.counters));
     window.__drusnielPhase0Report = {

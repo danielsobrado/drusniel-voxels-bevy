@@ -1,4 +1,4 @@
-import { DIG_EDIT_BYTES, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
+import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
 import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings, type GrassSettings } from "../grass/grass_config.js";
@@ -296,7 +296,7 @@ export class GrassGpuRingCompute {
     });
     this.fieldParams = device.createBuffer({
       label: "grass ring field params",
-      size: 4 * Uint32Array.BYTES_PER_ELEMENT,
+      size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.digEdits = this.createDigEditsBuffer(edits);

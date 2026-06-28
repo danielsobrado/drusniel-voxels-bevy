@@ -49,6 +49,7 @@ import {
   type TerrainNodeMaterialHandle,
 } from "./terrain_node_material.js";
 import { createSkyNodeMaterial } from "./sky_node_material.js";
+import { biomeIdsFor } from "../terrain/geometry/page_geometry.js";
 
 interface PaintAttributeCache {
   slots: Float32Array;
@@ -82,6 +83,7 @@ function terrainGeometry(node: ClodPageNode): THREE.BufferGeometry {
   const { slots: paintSlots, weights: paintWeights } = paintAttributesFor(node.mesh);
   g.setAttribute("paintSlots", new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS));
   g.setAttribute("paintWeights", new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS));
+  g.setAttribute("biomeId", new THREE.BufferAttribute(biomeIdsFor(node.mesh), 1));
   g.setIndex(new THREE.BufferAttribute(node.mesh.indices, 1));
   return g;
 }

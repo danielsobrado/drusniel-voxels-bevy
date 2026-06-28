@@ -1,7 +1,8 @@
 import * as THREE from "three";
-import { PAINT_BLEND_CHANNELS, paintWeightsAt } from "../../terrain/terrain.js";
+import { getTerrainFieldConfig, PAINT_BLEND_CHANNELS, paintWeightsAt } from "../../terrain/terrain.js";
 import type { PageMesh } from "../../types.js";
 import type { ChunkMesh } from "../../gpu/gpu_chunk_mesher.js";
+import { BiomeRegionField } from "../../world_source/biome_region_field.js";
 
 type MeshLike = PageMesh | ChunkMesh;
 
@@ -11,6 +12,7 @@ export interface PaintAttributeCache {
 }
 
 const paintAttributeCache = new WeakMap<MeshLike, PaintAttributeCache>();
+const biomeAttributeCache = new WeakMap<MeshLike, Float32Array>();
 
 export function paintAttributesFor(mesh: MeshLike): PaintAttributeCache {
   const cached = paintAttributeCache.get(mesh);
@@ -30,6 +32,27 @@ export function paintAttributesFor(mesh: MeshLike): PaintAttributeCache {
   return built;
 }
 
+export function biomeIdsFor(mesh: MeshLike): Float32Array {
+  const cached = biomeAttributeCache.get(mesh);
+  if (cached) return cached;
+  const terrain = getTerrainFieldConfig();
+  const field = new BiomeRegionField({
+    seed: terrain.seed,
+    seaLevel: terrain.seaLevel,
+    islandShape: terrain.islandShape,
+  });
+  const vertexCount = mesh.positions.length / 3;
+  const biomeIds = new Float32Array(vertexCount);
+  for (let i = 0; i < vertexCount; i++) {
+    const x = mesh.positions[i * 3];
+    const y = mesh.positions[i * 3 + 1];
+    const z = mesh.positions[i * 3 + 2];
+    biomeIds[i] = field.sample(x, z, y).biome;
+  }
+  biomeAttributeCache.set(mesh, biomeIds);
+  return biomeIds;
+}
+
 export function toGeometry(mesh: MeshLike): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
@@ -37,6 +60,7 @@ export function toGeometry(mesh: MeshLike): THREE.BufferGeometry {
   const { slots: paintSlots, weights: paintWeights } = paintAttributesFor(mesh);
   g.setAttribute("paintSlots", new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS));
   g.setAttribute("paintWeights", new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS));
+  g.setAttribute("biomeId", new THREE.BufferAttribute(biomeIdsFor(mesh), 1));
   g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
   return g;
 }

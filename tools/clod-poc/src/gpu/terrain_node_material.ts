@@ -496,6 +496,7 @@ export function createTerrainNodeMaterial(
   const worldPos = positionGeometry;
   const paintSlots: TslNode = attribute("paintSlots", "vec4");
   const paintWeights: TslNode = attribute("paintWeights", "vec4");
+  const biomeId: TslNode = attribute("biomeId", "float");
   const paint = clamp(dot(paintWeights, vec4(1)), 0.0, 1.0);
   // LV-6: Tier comparisons (used in baseColor section below).
   const isFarTier = uTier.greaterThan(1.5);
@@ -630,18 +631,14 @@ export function createTerrainNodeMaterial(
   } else if (debugMode === 10) {
     colorNode = vec3(riverDroplets);
   } else if (debugMode === 11) {
-    const regionNoise: TslNode = fract(fract(worldPos.x.mul(0.0037).add(worldPos.z.mul(0.0061))).mul(17.173));
-    const coastT: TslNode = smoothstep(22.0, 18.0, abs(worldPos.y.sub(18.0)));
-    const mountainT: TslNode = smoothstep(78.0, 108.0, worldPos.y);
-    const swampT: TslNode = smoothstep(28.0, 18.0, worldPos.y).mul(smoothstep(0.48, 0.12, regionNoise));
-    const plainsT: TslNode = smoothstep(0.55, 0.85, regionNoise);
-    const forestT: TslNode = smoothstep(0.38, 0.62, regionNoise);
+    const id = floor(max(biomeId, 0.0).add(0.5));
     let biomeColor: TslNode = vec3(0.38, 0.62, 0.26);
-    biomeColor = mix(biomeColor, vec3(0.10, 0.34, 0.16), forestT);
-    biomeColor = mix(biomeColor, vec3(0.18, 0.19, 0.12), swampT);
-    biomeColor = mix(biomeColor, vec3(0.70, 0.66, 0.43), plainsT);
-    biomeColor = mix(biomeColor, vec3(0.74, 0.76, 0.78), mountainT);
-    biomeColor = mix(biomeColor, vec3(0.78, 0.68, 0.42), coastT);
+    biomeColor = mix(biomeColor, vec3(0.10, 0.34, 0.16), step(abs(id.sub(1.0)), 0.5));
+    biomeColor = mix(biomeColor, vec3(0.18, 0.19, 0.12), step(abs(id.sub(2.0)), 0.5));
+    biomeColor = mix(biomeColor, vec3(0.74, 0.76, 0.78), step(abs(id.sub(3.0)), 0.5));
+    biomeColor = mix(biomeColor, vec3(0.70, 0.66, 0.43), step(abs(id.sub(4.0)), 0.5));
+    biomeColor = mix(biomeColor, vec3(0.78, 0.68, 0.42), step(abs(id.sub(5.0)), 0.5));
+    biomeColor = mix(biomeColor, vec3(0.04, 0.13, 0.24), step(abs(id.sub(6.0)), 0.5));
     colorNode = biomeColor;
   }
   const ditherNoise = interleavedGradientNoise(screenCoordinate);

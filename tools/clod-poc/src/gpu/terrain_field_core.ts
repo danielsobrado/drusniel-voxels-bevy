@@ -219,9 +219,9 @@ function softenHeightCap(height: number, minHeight: number, maxHeight: number): 
 }
 
 /** Terrain surface height at (x,z). Mirror of terrain.ts surfaceHeight. */
-export function surfaceHeightCore(x: number, z: number): number {
+export function surfaceHeightCore(x: number, z: number, config: TerrainFieldConfig = terrainFieldCoreConfig): number {
   const cfg = TERRAIN_CONFIG;
-  const field = terrainFieldCoreConfig;
+  const field = config;
   const seed = field.seed;
   const minNormalTerrainSurfaceY = field.seaLevel - 4;
   const baseTerrainElevation = minNormalTerrainSurfaceY;

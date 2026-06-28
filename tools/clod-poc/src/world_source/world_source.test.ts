@@ -10,14 +10,23 @@ afterEach(() => {
 });
 
 describe("ProceduralWorldSource", () => {
-  it("delegates height to the current terrain field core", () => {
+  it("delegates height to its own terrain field core config", () => {
     const terrain = resolveTerrainFieldConfig({ seed: 0 });
     setTerrainFieldConfig(terrain);
     setTerrainFieldCoreConfig(terrain);
     const source = new ProceduralWorldSource(terrain);
     for (const [x, z] of [[0, 0], [128.5, 256.25], [-733.5, 5000.25]]) {
-      expect(source.sampleHeight(x, z)).toBe(surfaceHeightCore(x, z));
+      expect(source.sampleHeight(x, z)).toBe(surfaceHeightCore(x, z, terrain));
     }
+  });
+
+  it("does not drift when global terrain config changes", () => {
+    const terrain = resolveTerrainFieldConfig({ seed: 11, seaLevel: 18 });
+    const source = new ProceduralWorldSource(terrain);
+    const before = source.sampleHeight(285.71, 911);
+    setTerrainFieldCoreConfig({ seed: 99, seaLevel: 30 });
+    expect(source.sampleHeight(285.71, 911)).toBe(before);
+    expect(source.sampleHeight(285.71, 911)).toBe(surfaceHeightCore(285.71, 911, terrain));
   });
 
   it("exposes sea level, seed, and ocean rim metadata", () => {

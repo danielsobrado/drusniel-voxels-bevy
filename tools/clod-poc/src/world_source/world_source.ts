@@ -44,7 +44,7 @@ export class ProceduralWorldSource implements WorldSource {
   }
 
   sampleHeight(x: number, z: number): number {
-    return surfaceHeightCore(x, z);
+    return surfaceHeightCore(x, z, this.metadata.terrain);
   }
 
   sampleBiome(x: number, z: number): BiomeId {

@@ -42,14 +42,29 @@ fn biomeRegionNoise(x : f32, z : f32, cellM : f32, seed : i32) -> f32 {
   return a + (b - a) * tx + (c - a) * tz + (a - b - c + d) * tx * tz;
 }
 
-fn classifyBiomeRegion(worldX : f32, worldZ : f32, height : f32, seaLevel : f32, seed : i32) -> u32 {
-  if (height < seaLevel - 1.5) { return BIOME_OCEAN; }
-  if (abs(height - seaLevel) < 4.0) { return BIOME_COAST; }
+fn classifyBiomeRegion(
+  worldX : f32,
+  worldZ : f32,
+  height : f32,
+  seaLevel : f32,
+  seed : i32,
+  islandMask : f32,
+  shoreDistanceM : f32,
+  nearestCenterX : f32,
+  nearestCenterZ : f32,
+  islandRadiusM : f32,
+) -> u32 {
+  if (height < seaLevel - 1.5 || islandMask < 0.08) { return BIOME_OCEAN; }
+  if (abs(height - seaLevel) < 4.0 || shoreDistanceM < 42.0) { return BIOME_COAST; }
   let n = biomeRegionNoise(worldX, worldZ, 420.0, seed + 711);
-  let radial = clamp(length(vec2<f32>(worldX, worldZ)) / 560.0, 0.0, 1.0);
+  let islandDistanceT = clamp(
+    distance(vec2<f32>(worldX, worldZ), vec2<f32>(nearestCenterX, nearestCenterZ)) / max(1.0, islandRadiusM),
+    0.0,
+    1.0,
+  );
   if (height >= seaLevel + 68.0) { return BIOME_MOUNTAIN; }
   if (height <= seaLevel + 8.0 && n < 0.42) { return BIOME_SWAMP; }
-  if (radial > 0.72 && n > 0.58) { return BIOME_PLAINS; }
+  if (islandDistanceT > 0.72 && n > 0.58) { return BIOME_PLAINS; }
   if (n > 0.46) { return BIOME_FOREST; }
   return BIOME_MEADOWS;
 }

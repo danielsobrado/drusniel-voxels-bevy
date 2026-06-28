@@ -18,6 +18,7 @@ import {
   packDigEdits,
   assembleChunkMesh,
   DIG_EDIT_BYTES,
+  FIELD_PARAM_WORDS,
 } from "./gpu_mesh_buffers.js";
 import { composeTerrainFieldShader } from "./wgsl_modules.js";
 
@@ -81,7 +82,7 @@ export class GpuChunkMesher {
       device.createBuffer({ label: `gpu mesher ${label}`, size, usage });
 
     this.digEdits = mk("digEdits", this.editCapacity * DIG_EDIT_BYTES, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-    this.fieldParams = mk("fieldParams", 4 * U32, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+    this.fieldParams = mk("fieldParams", FIELD_PARAM_WORDS * U32, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
     this.meshParams = mk("meshParams", 16 * U32, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
     this.outPositions = mk("positions", this.maxVertices * 3 * F32, STORAGE());
     this.outNormals = mk("normals", this.maxVertices * 3 * F32, STORAGE());
