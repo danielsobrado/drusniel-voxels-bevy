@@ -28,12 +28,19 @@ type RuntimeTextureSlot = TerrainTextureSlotUniform & { selectedId?: string; nam
 const EXTERNAL_LAYER_FALLBACK: Record<string, number> = {
   "natural": 0,
   "grass-top": 0,
-  "dirt": 1,
-  "rock": 2,
-  "sand": 1,
-  "water": 1,
+  "dirt": 4,
+  "rock": 1,
+  "sand": 2,
+  "water": 2,
   "snow": 3,
-  "lava": 2,
+  "lava": 1,
+  "meadows-ground": 0,
+  "forest-floor": 5,
+  "swamp-muck": 7,
+  "mountain-scree": 1,
+  "plains-grass": 0,
+  "coast-sand": 2,
+  "ocean-floor": 7,
 };
 
 const CONTENT_SLOT_SELECTED_ID_HINTS: Record<string, readonly string[]> = {
@@ -45,6 +52,13 @@ const CONTENT_SLOT_SELECTED_ID_HINTS: Record<string, readonly string[]> = {
   "water": ["sand", "generated:sand"],
   "snow": ["snow", "generated:snow"],
   "lava": ["rock", "generated:rock"],
+  "meadows-ground": ["meadows-ground", "generated:meadows-ground", "meadows ground", "grass", "generated:grass"],
+  "forest-floor": ["forest-floor", "generated:forest-floor", "forest floor", "moss", "generated:moss", "grass", "generated:grass"],
+  "swamp-muck": ["swamp-muck", "generated:swamp-muck", "swamp muck", "wet_soil", "generated:wet_soil", "dirt", "generated:dirt"],
+  "mountain-scree": ["mountain-scree", "generated:mountain-scree", "mountain scree", "rock", "generated:rock"],
+  "plains-grass": ["plains-grass", "generated:plains-grass", "plains grass", "grass", "generated:grass"],
+  "coast-sand": ["coast-sand", "generated:coast-sand", "coast sand", "sand", "generated:sand"],
+  "ocean-floor": ["ocean-floor", "generated:ocean-floor", "ocean floor", "wet_soil", "generated:wet_soil", "sand", "generated:sand"],
 };
 
 export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandle {
@@ -177,9 +191,6 @@ function textureOptionsSignature(
   const normalMapMask = procedural?.normalMapMask
     ? Array.from(procedural.normalMapMask).join(",")
     : slots.map((slot) => (slot.normalTexture ? 1 : 0)).join(",");
-  // Only compute biome layer sets when the splat path is enabled — buildBiomeLayerSets calls the
-  // uncached loadContentRegistry (full YAML parse + validation), which is far too expensive to run
-  // on every setTextures signature when the default height-band path is active.
   const biomeLayerSets = extras.biomeSplat === true
     ? buildBiomeLayerSets(slots).map((set) => set.join(",")).join(";")
     : "";
@@ -240,9 +251,6 @@ function toNodeTextures(
     normalMapMask,
     painted: options.painted ?? false,
     debugMode: options.procedural?.debugMode ?? 0,
-    // Opt-in: the biome splat path replaces the proven per-slot height-band blend with a
-    // low/mid/high biome blend. It still needs visual QA, so default to the height-band path
-    // unless explicitly enabled.
     biomeLayerSets: extras.biomeSplat === true ? buildBiomeLayerSets(slots) : undefined,
     procedural: options.procedural?.enabled && options.procedural.noiseA && options.procedural.noiseB
       ? {
