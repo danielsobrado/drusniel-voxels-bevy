@@ -4,6 +4,18 @@ use serde::{Deserialize, Serialize};
 use super::island_shape::{sample_island_mask, IslandMaskSample, IslandShapeConfig};
 use super::noise::smooth01;
 
+pub const BIOME_REGION_CELL_M: f32 = 420.0;
+pub const BIOME_OCEAN_HEIGHT_MARGIN_M: f32 = 1.5;
+pub const BIOME_OCEAN_ISLAND_MASK_MAX: f32 = 0.08;
+pub const BIOME_COAST_HEIGHT_BAND_M: f32 = 4.0;
+pub const BIOME_COAST_SHORE_DISTANCE_M: f32 = 42.0;
+pub const BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M: f32 = 68.0;
+pub const BIOME_SWAMP_HEIGHT_ABOVE_SEA_M: f32 = 8.0;
+pub const BIOME_SWAMP_NOISE_MAX: f32 = 0.42;
+pub const BIOME_PLAINS_DISTANCE_MIN: f32 = 0.72;
+pub const BIOME_PLAINS_NOISE_MIN: f32 = 0.58;
+pub const BIOME_FOREST_NOISE_MIN: f32 = 0.46;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum BiomeId {
@@ -54,13 +66,13 @@ impl BiomeRegionField {
         Self {
             seed,
             sea_level,
-            region_cell_m: 420.0,
+            region_cell_m: BIOME_REGION_CELL_M,
             island_shape,
         }
     }
 
     pub fn with_region_cell_m(mut self, region_cell_m: f32) -> Self {
-        self.region_cell_m = region_cell_m.max(64.0);
+        self.region_cell_m = resolve_region_cell_m(region_cell_m);
         self
     }
 
@@ -72,7 +84,7 @@ impl BiomeRegionField {
             height,
             seed: self.seed,
             sea_level: self.sea_level,
-            region_cell_m: self.region_cell_m.max(64.0),
+            region_cell_m: self.region_cell_m,
             island_radius_m: self.island_shape.radius_m.max(1.0),
             island,
         })
@@ -83,6 +95,18 @@ impl Default for BiomeRegionField {
     fn default() -> Self {
         Self::new(0, 18.0, IslandShapeConfig::default())
     }
+}
+
+fn resolve_region_cell_m(region_cell_m: f32) -> f32 {
+    if !region_cell_m.is_finite() {
+        return BIOME_REGION_CELL_M;
+    }
+    if (region_cell_m - BIOME_REGION_CELL_M).abs() > f32::EPSILON {
+        panic!(
+            "BiomeRegionField region_cell_m must be {BIOME_REGION_CELL_M} to match the GPU shader; got {region_cell_m}"
+        );
+    }
+    BIOME_REGION_CELL_M
 }
 
 fn mix32(value: u32) -> u32 {
@@ -103,7 +127,7 @@ pub fn pcg2d(x: i32, z: i32, seed: i32) -> f32 {
 }
 
 pub fn biome_region_noise(x: f32, z: f32, cell_m: f32, seed: i32) -> f32 {
-    let cell_m = cell_m.max(64.0);
+    let cell_m = resolve_region_cell_m(cell_m);
     let gx = x / cell_m;
     let gz = z / cell_m;
     let x0 = gx.floor() as i32;
@@ -118,14 +142,18 @@ pub fn biome_region_noise(x: f32, z: f32, cell_m: f32, seed: i32) -> f32 {
 }
 
 pub fn classify_biome_region(input: BiomeRegionClassifyInput) -> BiomeRegionSample {
-    if input.height < input.sea_level - 1.5 || input.island.mask < 0.08 {
+    if input.height < input.sea_level - BIOME_OCEAN_HEIGHT_MARGIN_M
+        || input.island.mask < BIOME_OCEAN_ISLAND_MASK_MAX
+    {
         return BiomeRegionSample {
             biome: BiomeId::Ocean,
             region_noise: 0.0,
             island_distance_t: 0.0,
         };
     }
-    if (input.height - input.sea_level).abs() < 4.0 || input.island.shore_distance_m < 42.0 {
+    if (input.height - input.sea_level).abs() < BIOME_COAST_HEIGHT_BAND_M
+        || input.island.shore_distance_m < BIOME_COAST_SHORE_DISTANCE_M
+    {
         return BiomeRegionSample {
             biome: BiomeId::Coast,
             region_noise: 0.0,
@@ -143,13 +171,15 @@ pub fn classify_biome_region(input: BiomeRegionClassifyInput) -> BiomeRegionSamp
         .hypot(input.z - input.island.nearest_center_z);
     let distance_t = (center_distance / input.island_radius_m.max(1.0)).clamp(0.0, 1.0);
 
-    let biome = if input.height >= input.sea_level + 68.0 {
+    let biome = if input.height >= input.sea_level + BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M {
         BiomeId::Mountain
-    } else if input.height <= input.sea_level + 8.0 && n < 0.42 {
+    } else if input.height <= input.sea_level + BIOME_SWAMP_HEIGHT_ABOVE_SEA_M
+        && n < BIOME_SWAMP_NOISE_MAX
+    {
         BiomeId::Swamp
-    } else if distance_t > 0.72 && n > 0.58 {
+    } else if distance_t > BIOME_PLAINS_DISTANCE_MIN && n > BIOME_PLAINS_NOISE_MIN {
         BiomeId::Plains
-    } else if n > 0.46 {
+    } else if n > BIOME_FOREST_NOISE_MIN {
         BiomeId::Forest
     } else {
         BiomeId::Meadows
@@ -173,7 +203,7 @@ mod tests {
             height,
             seed: 0,
             sea_level: 18.0,
-            region_cell_m: 420.0,
+            region_cell_m: BIOME_REGION_CELL_M,
             island_radius_m: 560.0,
             island: IslandMaskSample {
                 mask: 1.0,
@@ -209,5 +239,11 @@ mod tests {
         let a = field.sample(512.0, -128.0, 72.0);
         let b = field.sample(512.0, -128.0, 72.0);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    #[should_panic(expected = "match the GPU shader")]
+    fn region_cell_m_rejects_cpu_only_values() {
+        let _ = BiomeRegionField::default().with_region_cell_m(BIOME_REGION_CELL_M + 1.0);
     }
 }
