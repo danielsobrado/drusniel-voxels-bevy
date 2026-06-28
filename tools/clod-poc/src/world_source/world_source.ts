@@ -1,7 +1,12 @@
 import * as THREE from "three";
 import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
-import { DEFAULT_TERRAIN_FIELD_CONFIG, type TerrainFieldConfig } from "../terrain/terrain.js";
-import { BIOME_IDS, BiomeRegionField, type BiomeId } from "./biome_region_field.js";
+import {
+  DEFAULT_TERRAIN_FIELD_CONFIG,
+  resolveTerrainFieldConfig,
+  type TerrainFieldConfig,
+  type TerrainFieldConfigInput,
+} from "../terrain/terrain.js";
+import { BiomeRegionField, type BiomeId } from "./biome_region_field.js";
 import { sampleIslandMask } from "./island_shape.js";
 
 export interface WorldSourceMetadata {
@@ -24,22 +29,31 @@ export interface FarWorldHeightProvider {
   sampleNormal(x: number, z: number): THREE.Vector3;
 }
 
+function terrainDefaultBounds(terrain: TerrainFieldConfig): WorldSourceMetadata["bounds"] {
+  return terrain.islandShape.oceanRim ? { radiusM: terrain.islandShape.worldRadiusM } : "infinite";
+}
+
+function notImplemented(method: string): never {
+  throw new Error(`StreamedVoxelWorldSource.${method} is not implemented yet`);
+}
+
 export class ProceduralWorldSource implements WorldSource {
   readonly metadata: WorldSourceMetadata;
   private readonly biomes: BiomeRegionField;
 
-  constructor(terrain: TerrainFieldConfig = DEFAULT_TERRAIN_FIELD_CONFIG) {
+  constructor(terrain: TerrainFieldConfigInput = DEFAULT_TERRAIN_FIELD_CONFIG) {
+    const resolvedTerrain = resolveTerrainFieldConfig(terrain);
     this.metadata = {
-      seed: terrain.seed,
-      seaLevel: terrain.seaLevel,
-      bounds: terrain.islandShape.oceanRim ? { radiusM: terrain.islandShape.worldRadiusM } : "infinite",
-      oceanRim: terrain.islandShape.oceanRim,
-      terrain,
+      seed: resolvedTerrain.seed,
+      seaLevel: resolvedTerrain.seaLevel,
+      bounds: terrainDefaultBounds(resolvedTerrain),
+      oceanRim: resolvedTerrain.islandShape.oceanRim,
+      terrain: resolvedTerrain,
     };
     this.biomes = new BiomeRegionField({
-      seed: terrain.seed,
-      seaLevel: terrain.seaLevel,
-      islandShape: terrain.islandShape,
+      seed: resolvedTerrain.seed,
+      seaLevel: resolvedTerrain.seaLevel,
+      islandShape: resolvedTerrain.islandShape,
     });
   }
 
@@ -77,25 +91,26 @@ export class StreamedVoxelWorldSource implements WorldSource {
   readonly metadata: WorldSourceMetadata;
 
   constructor(metadata: Partial<WorldSourceMetadata> = {}) {
-    const terrain = metadata.terrain ?? DEFAULT_TERRAIN_FIELD_CONFIG;
+    const terrain = resolveTerrainFieldConfig(metadata.terrain ?? DEFAULT_TERRAIN_FIELD_CONFIG);
+    const oceanRim = metadata.oceanRim ?? terrain.islandShape.oceanRim;
     this.metadata = {
       seed: metadata.seed ?? terrain.seed,
       seaLevel: metadata.seaLevel ?? terrain.seaLevel,
-      bounds: metadata.bounds ?? "infinite",
-      oceanRim: metadata.oceanRim ?? false,
+      bounds: metadata.bounds ?? (oceanRim ? { radiusM: terrain.islandShape.worldRadiusM } : "infinite"),
+      oceanRim,
       terrain,
     };
   }
 
   sampleHeight(_x: number, _z: number): number {
-    throw new Error("StreamedVoxelWorldSource.sampleHeight is not implemented yet");
+    return notImplemented("sampleHeight");
   }
 
   sampleBiome(_x: number, _z: number): BiomeId {
-    return BIOME_IDS.meadows;
+    return notImplemented("sampleBiome");
   }
 
   oceanMask(_x: number, _z: number): number {
-    return 0;
+    return notImplemented("oceanMask");
   }
 }
