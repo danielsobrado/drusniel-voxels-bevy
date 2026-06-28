@@ -71,7 +71,7 @@ use std::sync::OnceLock;
 const WATER_SHORELINE_EXTENSION: f32 = VOXEL_SIZE * 0.18;
 const WATER_EDGE_SURFACE_SUPPRESSION_MARGIN: i32 = 2;
 
-mod baked_ao;
+pub mod baked_ao;
 mod biome_channel;
 mod blocky;
 pub mod commit;
