@@ -157,7 +157,9 @@ export async function bootstrapClodPoc() {
       })
     : null;
 
-  biomeTextureStreaming?.update({ x: renderer.camera.position.x, z: renderer.camera.position.z, frameIndex: 0 });
+  if (postRenderer.state.terrainMaterialSource === "procedural") {
+    biomeTextureStreaming?.update({ x: renderer.camera.position.x, z: renderer.camera.position.z, frameIndex: 0 });
+  }
 
   let farSummaryIntegration: FarSummaryIntegration | undefined;
   let naadfIntegration: NaadfIntegration | undefined;
@@ -418,7 +420,9 @@ export async function bootstrapClodPoc() {
             infiniteFarShell.update(camera.position.x, camera.position.z, frameIndex);
           }
           terrainView.shadowProxyController?.updateFrame(camera.position.x, camera.position.z);
-          biomeTextureStreaming?.update({ x: camera.position.x, z: camera.position.z, frameIndex });
+          if (postRenderer.state.terrainMaterialSource === "procedural") {
+            biomeTextureStreaming?.update({ x: camera.position.x, z: camera.position.z, frameIndex });
+          }
         }
       : undefined,
     naadfIntegration,
