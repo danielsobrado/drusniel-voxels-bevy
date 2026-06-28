@@ -70,6 +70,11 @@ export interface TerrainMaterialController {
   texturesActive(): boolean;
   terrainTextureUniformOptions(): TerrainTextureApplyOptions;
   applyTerrainTextures(): void;
+  setProceduralTerrain(
+    terrain: ProceduralTerrainTextures | null,
+    config: ProceduralTextureConfig,
+    macroTint?: THREE.DataTexture | null,
+  ): void;
   setRiverTerrainWetnessMask(mask: THREE.Texture | null): void;
   applyColorByLodToMaterials(on: boolean): void;
   syncColorByLod(): void;
@@ -82,6 +87,9 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   let sharedTerrainMaterial: TerrainMaterialHandle | null = null;
   let lastTexturesActive: boolean | null = null;
   let riverTerrainWetnessMask: THREE.Texture | null = null;
+  let proceduralTerrain = deps.proceduralTerrain;
+  let proceduralTextureConfig = deps.proceduralTextureConfig;
+  let bakedMacroTint = deps.bakedMacroTint;
 
   const makeTerrainMaterial = (color: number): TerrainMaterialHandle => {
     if (deps.poolTerrainMaterial) {
@@ -96,7 +104,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
 
   const activeTerrainSlots = (): readonly (TerrainTextureSlot | ProceduralTerrainSlot)[] => {
     const state = deps.getMaterialState();
-    if (state.terrainMaterialSource === "procedural" && deps.proceduralTerrain) return deps.proceduralTerrain.slots;
+    if (state.terrainMaterialSource === "procedural" && proceduralTerrain) return proceduralTerrain.slots;
     if (state.terrainMaterialSource === "debug_flat") return [];
     return deps.textureController.slots;
   };
@@ -104,19 +112,18 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
   const texturesActive = () => {
     const state = deps.getMaterialState();
     return state.albedo && (
-      (state.terrainMaterialSource === "procedural" && deps.proceduralTerrain !== null) ||
+      (state.terrainMaterialSource === "procedural" && proceduralTerrain !== null) ||
       (state.terrainMaterialSource === "external_pbr" && deps.textureController.hasAnyLoadedTexture())
     );
   };
 
   const terrainTextureUniformOptions = (): TerrainTextureApplyOptions => {
     const state = deps.getMaterialState();
-    const proceduralActive = state.terrainMaterialSource === "procedural" && deps.proceduralTerrain !== null;
+    const proceduralActive = state.terrainMaterialSource === "procedural" && proceduralTerrain !== null;
     if (!proceduralActive) deps.textureController.ensureTextureArrays(state.terrainMaterialSource);
     const painted = getDigEditsSnapshot().some((edit) => edit.op === "add");
-    const masks = deps.proceduralTextureConfig.terrain.masks;
-    const materials = deps.proceduralTextureConfig.terrain.materials;
-    const proceduralTerrain = deps.proceduralTerrain;
+    const masks = proceduralTextureConfig.terrain.masks;
+    const materials = proceduralTextureConfig.terrain.materials;
     return {
       enabled: texturesActive(),
       triplanar: state.triplanar,
@@ -135,12 +142,12 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
         noiseA: proceduralTerrain!.noise.noiseA,
         noiseB: proceduralTerrain!.noise.noiseB,
         debugMode: PROCEDURAL_DEBUG_MODES[state.proceduralDebugMode],
-        microFadeStart: deps.proceduralTextureConfig.terrain.micro_normal.fade_start_m,
-        microFadeEnd: deps.proceduralTextureConfig.terrain.micro_normal.fade_end_m,
+        microFadeStart: proceduralTextureConfig.terrain.micro_normal.fade_start_m,
+        microFadeEnd: proceduralTextureConfig.terrain.micro_normal.fade_end_m,
         lodBias: state.colorByLod ? 40 : 0,
         scales: [
-          deps.proceduralTextureConfig.terrain.macro_variation_m[1],
-          deps.proceduralTextureConfig.terrain.meso_variation_m[1],
+          proceduralTextureConfig.terrain.macro_variation_m[1],
+          proceduralTextureConfig.terrain.meso_variation_m[1],
           masks.page_lod_normal_fade_m,
           masks.wet_roughness,
         ],
@@ -168,9 +175,10 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
         microFadeEnd: 85,
         lodBias: 0,
       },
-      bakedMacroTint: deps.bakedMacroTint ?? undefined,
+      bakedMacroTint: bakedMacroTint ?? undefined,
       riverWetnessMask: riverTerrainWetnessMask ?? undefined,
       worldSize: deps.worldCells,
+      biomeSplat: proceduralActive,
     } as TerrainTextureApplyOptions;
   };
 
@@ -180,6 +188,19 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     for (const m of terrainMaterials) m.setTextures(slots, options);
     deps.onTexturesApplied();
     syncColorByLod();
+  };
+
+  const setProceduralTerrain = (
+    terrain: ProceduralTerrainTextures | null,
+    config: ProceduralTextureConfig,
+    macroTint?: THREE.DataTexture | null,
+  ): void => {
+    proceduralTerrain = terrain;
+    proceduralTextureConfig = config;
+    if (macroTint !== undefined) {
+      bakedMacroTint?.dispose();
+      bakedMacroTint = macroTint;
+    }
   };
 
   const applyColorByLodToMaterials = (on: boolean) => {
@@ -214,7 +235,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     mat.setTriplanar(state.triplanar);
     mat.setColorAdjust(deps.getColorAdjustments());
     mat.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
-    mat.setTextures(deps.textureController.slots, terrainTextureUniformOptions());
+    mat.setTextures(activeTerrainSlots(), terrainTextureUniformOptions());
     mat.setLighting(deps.getLighting());
   };
 
@@ -235,6 +256,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     texturesActive,
     terrainTextureUniformOptions,
     applyTerrainTextures,
+    setProceduralTerrain,
     setRiverTerrainWetnessMask(mask) {
       riverTerrainWetnessMask = mask;
     },
