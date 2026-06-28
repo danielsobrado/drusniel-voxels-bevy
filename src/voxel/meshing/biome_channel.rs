@@ -4,6 +4,11 @@ pub(crate) fn encode_biome_id_for_uv(biome: BiomeId) -> f32 {
     biome.layer_index() as f32
 }
 
+/// Temporary adapter while Surface Nets still receives four legacy triplanar
+/// weights instead of true seven-biome WorldSource IDs.
+///
+/// TODO(BVY-WS-08 follow-up): replace callers with source-aware biome IDs once
+/// meshing has direct WorldSource biome samples at each emitted vertex.
 pub(crate) fn compatibility_biome_from_triplanar_weights(weights: [f32; 4]) -> BiomeId {
     let mut best = 0usize;
     for index in 1..weights.len() {
@@ -45,5 +50,19 @@ mod tests {
         assert_eq!(compatibility_biome_from_triplanar_weights([0.0, 1.0, 0.0, 0.0]), BiomeId::Mountain);
         assert_eq!(compatibility_biome_from_triplanar_weights([0.0, 0.0, 1.0, 0.0]), BiomeId::Coast);
         assert_eq!(compatibility_biome_from_triplanar_weights([0.0, 0.0, 0.0, 1.0]), BiomeId::Swamp);
+    }
+
+    #[test]
+    fn compatibility_adapter_is_explicitly_not_full_seven_biome_content() {
+        let mapped = [
+            compatibility_biome_from_triplanar_weights([1.0, 0.0, 0.0, 0.0]),
+            compatibility_biome_from_triplanar_weights([0.0, 1.0, 0.0, 0.0]),
+            compatibility_biome_from_triplanar_weights([0.0, 0.0, 1.0, 0.0]),
+            compatibility_biome_from_triplanar_weights([0.0, 0.0, 0.0, 1.0]),
+        ];
+
+        assert!(!mapped.contains(&BiomeId::Forest));
+        assert!(!mapped.contains(&BiomeId::Plains));
+        assert!(!mapped.contains(&BiomeId::Ocean));
     }
 }
