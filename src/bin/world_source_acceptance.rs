@@ -2,22 +2,24 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use bevy::prelude::IVec3;
+use bevy::prelude::{IVec3, UVec3};
 use clap::Parser;
 use serde::Serialize;
 use voxel_builder::constants::{CHUNK_SIZE, CHUNK_SIZE_I32, CHUNK_VOLUME};
 use voxel_builder::rendering::ao_config::BakedAoConfig;
 use voxel_builder::voxel::chunk::{Chunk, LodLevel};
+use voxel_builder::voxel::materials::MaterialId;
 use voxel_builder::voxel::meshing::{
     generate_chunk_mesh_for_request, MeshForensicsOptions, MeshMode, MeshRequest,
     WaterAirExposureMode,
 };
 use voxel_builder::voxel::skirt::NeighborLods;
+use voxel_builder::voxel::types::VoxelType;
 use voxel_builder::voxel::world::VoxelWorld;
 use voxel_builder::world::source::{
-    evaluate_world_source_cpu_gpu_drift, ProceduralWorldSourceTerrainBridge, TerrainSourceConfig,
-    TerrainSourceStartupReport, WorldSourceDriftGateConfig, WorldSourceDriftGateReport,
-    WorldSourceDriftSamplePoint,
+    evaluate_world_source_cpu_gpu_drift, material_with_biome, ProceduralWorldSourceTerrainBridge,
+    TerrainSourceConfig, TerrainSourceStartupReport, WorldSourceDriftGateConfig,
+    WorldSourceDriftGateReport, WorldSourceDriftSamplePoint,
 };
 
 const DEFAULT_SAMPLE_CHUNKS: [IVec3; 4] = [
@@ -181,7 +183,22 @@ fn generate_world_source_chunk(
             chunk_world.z + z as i32,
         )
     });
-    Chunk::with_voxels(chunk_pos, voxels)
+    let mut chunk = Chunk::with_voxels(chunk_pos, voxels);
+    for z in 0..CHUNK_SIZE {
+        for y in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let local = UVec3::new(x as u32, y as u32, z as u32);
+                let voxel = chunk.get(local);
+                if voxel == VoxelType::Air || voxel == VoxelType::Water {
+                    continue;
+                }
+                let biome = bridge.biome(chunk_world.x + x as i32, chunk_world.z + z as i32);
+                let material = material_with_biome(MaterialId::from_voxel(voxel), biome);
+                chunk.set_material_id(local, material);
+            }
+        }
+    }
+    chunk
 }
 
 fn bench_mesh_build(
@@ -250,7 +267,7 @@ fn bench_mesh_build(
         },
         MaterialDrawImpactSummary {
             gpu_biome_splat_shader_default: true,
-            compatibility_biome_channel_active: true,
+            compatibility_biome_channel_active: false,
             estimated_solid_draws,
             estimated_water_draws,
             estimated_total_draws: estimated_solid_draws + estimated_water_draws,
