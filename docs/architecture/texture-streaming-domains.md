@@ -20,7 +20,7 @@ Terrain has many authored biome recipes, but runtime terrain arrays may only car
 1. Common terrain layers.
 2. At most two active biome-specific terrain layers.
 
-The two active biome layers are the current biome and either the adjacent biome, target biome, or next predicted biome. The loader should rebuild the procedural texture array when the active pair changes. Inactive biomes fall back to common layers until they enter the window.
+The two active biome layers are the current biome and either the adjacent biome, target biome, or next predicted biome. The loader rebuilds the procedural texture array when the active pair changes. Inactive biomes fall back to common layers until they enter the window.
 
 The TypeScript cap is enforced by:
 
@@ -28,6 +28,7 @@ The TypeScript cap is enforced by:
 - `resolveActiveBiomeMaterials()`
 - `resolveActiveProceduralMaterialOrder()`
 - `withActiveBiomeProceduralMaterials()`
+- `createBiomeTextureStreamingManager()`
 
 Configuration uses:
 
@@ -39,6 +40,27 @@ procedural_textures:
 ```
 
 `material_order` is common-only by default. Active biome layers are appended by code.
+
+## Runtime manager
+
+`BiomeTextureStreamingManager` samples the current camera/player biome and a predicted adjacent biome. It maps biome IDs to authored terrain material IDs:
+
+| Biome | Material |
+| --- | --- |
+| meadows | `meadows-ground` |
+| forest | `forest-floor` |
+| swamp | `swamp-muck` |
+| mountain | `mountain-scree` |
+| plains | `plains-grass` |
+| coast | `coast-sand` |
+| ocean | `ocean-floor` |
+
+On active-pair changes, CLOD POC rebuilds procedural terrain textures with common layers plus the two active biome layers, swaps them into `TerrainMaterialController`, and reapplies terrain textures to resident terrain materials.
+
+Debug counters exposed through long-view stats:
+
+- `terrainTextureWindowSwaps`
+- `terrainTextureActiveBiomes`
 
 ## Construction textures
 
@@ -87,16 +109,20 @@ Examples:
 
 UI textures and editor previews are separate from world texture arrays. They can use small preview atlases and LRU eviction by last use.
 
-## Implementation notes
+## Implementation status
 
-The current CLOD POC has the first hard rule implemented: terrain can define many authored biome recipes, but only a two-biome window becomes resident in the terrain texture array.
+Done in CLOD POC:
+
+1. Domain policy constants and `texture_streaming.yaml`.
+2. Authored biome material recipes.
+3. Two-biome active terrain texture window.
+4. Runtime manager that rebuilds terrain procedural textures on active-pair changes.
+5. Material-controller support for swapping procedural texture arrays at runtime.
 
 Next steps:
 
-1. Add a `TextureStreamingManager` that owns domain budgets.
-2. Feed current and adjacent biome IDs into `withActiveBiomeProceduralMaterials()`.
-3. Rebuild or swap terrain arrays only when the active pair changes.
-4. Add construction trim-sheet content schema.
-5. Add character outfit/palette content schema.
+1. Add construction trim-sheet content schema.
+2. Add character outfit/palette content schema.
+3. Add per-domain memory reporting to the debug overlay.
 
 Do not solve construction or NPC textures by expanding the terrain array.
