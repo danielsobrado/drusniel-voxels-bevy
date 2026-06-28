@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { buildFarTerrainShell, type FarShellLighting } from "./far_terrain_shell.js";
 import { buildTerrainSummary } from "../clod/terrain_summary.js";
+import { BIOME_IDS } from "../world_source/biome_region_field.js";
+import { biomeRgbForId } from "../world_source/biome_colors.js";
 
 const lighting: FarShellLighting = {
   sunDirection: new THREE.Vector3(0.3, 0.8, 0.5).normalize(),
@@ -95,6 +97,24 @@ describe("far terrain shell — horizon skirt around the world", () => {
     expect(debugLambertMaterial.type).toBe("MeshLambertMaterial");
     debugLambert.dispose();
     withShadows.dispose();
+  });
+
+  it("uses biome IDs from the terrain summary as shell vertex colors", () => {
+    const biomeSummary = buildTerrainSummary([], worldSize, 8, {
+      worldSource: {
+        sampleHeight: () => 12,
+        sampleBiome: () => BIOME_IDS.coast,
+      },
+    });
+    const biomeShell = buildFarTerrainShell(biomeSummary, lighting, { gridRes: 8 });
+    const color = biomeShell.mesh.geometry.getAttribute("color") as THREE.BufferAttribute;
+    const [r, g, b] = biomeRgbForId(BIOME_IDS.coast);
+
+    expect(color.count).toBe(biomeShell.mesh.geometry.getAttribute("position").count);
+    expect(color.getX(0)).toBeCloseTo(r, 5);
+    expect(color.getY(0)).toBeCloseTo(g, 5);
+    expect(color.getZ(0)).toBeCloseTo(b, 5);
+    biomeShell.dispose();
   });
 
   it("uses a camera-relative radial exclusion when a streaming height provider is active", () => {
