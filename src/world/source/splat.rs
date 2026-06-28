@@ -115,6 +115,7 @@ mod tests {
     use super::*;
 
     const WGSL: &str = include_str!("../../../assets/shaders/world_source/biome_splat.wgsl");
+    const TRIPLANAR_WGSL: &str = include_str!("../../../assets/shaders/triplanar_terrain.wgsl");
 
     fn all_biomes() -> [BiomeId; 7] {
         [
@@ -173,5 +174,14 @@ mod tests {
         assert!(WGSL.contains("fn biome_splat_sample"));
         assert!(WGSL.contains("fn biome_splat_to_triplanar_weights"));
         assert!(WGSL.contains("fn biome_splat_resolve_triplanar_weights"));
+    }
+
+    #[test]
+    fn triplanar_shader_uses_gpu_biome_splat_path() {
+        assert!(TRIPLANAR_WGSL.contains("shaders/world_source/biome_splat.wgsl"));
+        assert!(TRIPLANAR_WGSL.contains("biome_splat_resolve_triplanar_weights"));
+        assert!(TRIPLANAR_WGSL.contains("terrain_biome_id"));
+        assert!(TRIPLANAR_WGSL.contains("in.uv.y"));
+        assert!(TRIPLANAR_WGSL.contains("legacy_w"));
     }
 }
