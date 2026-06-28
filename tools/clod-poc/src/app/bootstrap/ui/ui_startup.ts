@@ -9,6 +9,7 @@ import { runProjectArchiveStartup } from "../project_archive_startup.js";
 import { applyImportedStateSideEffects } from "./imported_state_startup.js";
 import { runFrameLoopStartup } from "./frame_loop_startup.js";
 import { bindBootstrapDisposal } from "../disposal_startup.js";
+import "../../../ui/hud_layout.css";
 
 export type { UiStartupInput } from "../ui_startup_context.js";
 
