@@ -164,8 +164,10 @@ fn conform_construction_terrain(
 
             for y in (target_solid_y + 1)..=trim_max_y {
                 let pos = IVec3::new(x, y, z);
-                if matches!(world.get_voxel(pos), Some(voxel) if voxel.is_solid() && voxel != VoxelType::Bedrock)
-                {
+                if matches!(
+                    world.get_voxel(pos),
+                    Some(voxel) if voxel.is_solid() && voxel != VoxelType::Bedrock
+                ) {
                     let result = world.set_voxel_with_rules(
                         pos,
                         VoxelType::Air,
@@ -246,11 +248,17 @@ mod tests {
         world.insert_chunk(Chunk::new(IVec3::ZERO));
         let request = request();
 
-        assert_eq!(world.set_voxel(IVec3::new(4, 4, 4), VoxelType::Rock), VoxelEditResult::Applied);
+        assert_eq!(
+            world.set_voxel(IVec3::new(4, 4, 4), VoxelType::Rock),
+            VoxelEditResult::Applied
+        );
         let stats = conform_construction_terrain(&mut world, &request, None);
 
         assert!(stats.applied > 0);
-        assert_eq!(world.get_voxel(IVec3::new(4, 3, 4)), Some(VoxelType::TopSoil));
+        assert_eq!(
+            world.get_voxel(IVec3::new(4, 3, 4)),
+            Some(VoxelType::TopSoil)
+        );
         assert_eq!(world.get_voxel(IVec3::new(4, 4, 4)), Some(VoxelType::Air));
     }
 }
