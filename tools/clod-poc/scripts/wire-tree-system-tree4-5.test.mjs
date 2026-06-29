@@ -44,6 +44,13 @@ function createGpuRingDrawResources() {
 }
 
 class TreeSystem {
+  private setImpostorAtlases(atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>): void {
+    for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
+    this.impostorAtlases = { ...atlases };
+    this.disposeImpostorMaterials();
+    this.updateImpostorMaterials();
+  }
+
   private geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {
     // Stage 3b decision: GPU ring uses the procedural impostor-card geometry first.
     // WebGPU render-to-atlas baking can replace this later without blocking the pipeline.
@@ -57,12 +64,13 @@ describe("TREE-4/TREE-5 wiring script", () => {
     const result = wireTreeSystemSource(FIXTURE);
 
     expect(result.changed).toBe(true);
-    expect(result.applied).toHaveLength(5);
+    expect(result.applied).toHaveLength(6);
     expect(result.source).toContain("selectTreeGpuRingGeometry");
     expect(result.source).toContain("createTreeRingImpostorNodeMaterialHandle");
     expect(result.source).toContain("materialHandles: Record<string, TreeMaterialHandle>");
     expect(result.source).toContain('const materialKey = species + ":" + lod;');
     expect(result.source).toContain("return selectTreeGpuRingGeometry({");
+    expect(result.source).toContain("this.clearGpuRing();");
   });
 
   it("is idempotent after the first rewrite", () => {
@@ -71,7 +79,7 @@ describe("TREE-4/TREE-5 wiring script", () => {
 
     expect(second.changed).toBe(false);
     expect(second.applied).toHaveLength(0);
-    expect(second.skipped).toHaveLength(5);
+    expect(second.skipped).toHaveLength(6);
     expect(second.source).toBe(first.source);
   });
 
