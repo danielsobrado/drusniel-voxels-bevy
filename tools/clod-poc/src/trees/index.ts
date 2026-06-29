@@ -32,6 +32,14 @@ export * from "./tree_system_material_application.js";
 export * from "./tree_system_math.js";
 export * from "./tree_system_matrix_state.js";
 export * from "./tree_system_mesh_bounds.js";
+export {
+  attachTreePatchInstanceAttributes,
+  createTreePatchLodMesh,
+  createTreePatchMeshGroup,
+  type TreePatchLodMeshInput,
+  type TreePatchMeshFactoryInput,
+  type TreePatchMeshFactoryResult,
+} from "./tree_system_patch_mesh_factory.js";
 export * from "./tree_system_patch_planner.js";
 export * from "./tree_system_patch_removal.js";
 export * from "./tree_system_settings_plan.js";
