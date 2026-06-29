@@ -79,31 +79,36 @@ describe("tree impostor material contracts", () => {
     expect(material.version).toBeGreaterThan(previousVersion);
   });
 
-  it("keeps single-frame shader attributes, dither fade, and relighting path stable", () => {
+  it("keeps single-frame shader attributes, complementary dither roles, and relighting path stable", () => {
     expect(TREE_IMPOSTOR_VERTEX_SHADER).toContain("attribute vec4 treeImpostorUvRect");
     expect(TREE_IMPOSTOR_VERTEX_SHADER).toContain("attribute float treeLodFade");
-    expect(TREE_IMPOSTOR_VERTEX_SHADER).toContain("varying vec2 vTreeImpostorUv");
-    expect(TREE_IMPOSTOR_VERTEX_SHADER).toContain("varying float vTreeImpostorLodFade");
+    expect(TREE_IMPOSTOR_VERTEX_SHADER).toContain("attribute float treeLodDitherRole");
+    expect(TREE_IMPOSTOR_VERTEX_SHADER).toContain("varying float vTreeImpostorLodDitherRole");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("uniform sampler2D normalDepthMap");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("treeImpostorRelight");
-    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("treeImpostorDither(gl_FragCoord.xy)");
-    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain(">= vTreeImpostorLodFade");
+    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("treeImpostorDitherKeep");
+    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("return ign < fade");
+    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("return ign >= 1.0 - fade");
+    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("vTreeImpostorLodDitherRole");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("color.rgb * color.rgb");
   });
 
-  it("keeps four-tile blend shader attributes, dither fade, and weighted relighting path stable", () => {
+  it("keeps four-tile blend shader attributes, complementary dither roles, and weighted relighting path stable", () => {
     for (let i = 0; i < 4; i++) {
       expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain(`attribute vec4 treeImpostorUvRect${i}`);
       expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain(`vTreeImpostorUv${i}`);
     }
     expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("attribute vec4 treeImpostorBlendWeights");
     expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("attribute float treeLodFade");
-    expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("varying float vTreeImpostorLodFade");
+    expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("attribute float treeLodDitherRole");
+    expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("varying float vTreeImpostorLodDitherRole");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("vTreeImpostorBlendWeights.x");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("normalDepthMap");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorRelight");
-    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorDither(gl_FragCoord.xy)");
-    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain(">= vTreeImpostorLodFade");
+    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorDitherKeep");
+    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("return ign < fade");
+    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("return ign >= 1.0 - fade");
+    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("vTreeImpostorLodDitherRole");
   });
 });
 
