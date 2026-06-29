@@ -86,7 +86,7 @@ describe("GPU ring tree geometry selector", () => {
     expect(first.geometry).not.toBe(geometries.dead.impostor);
     expect(second.geometry).toBe(first.geometry);
     expect(bakedImpostorGeometries.dead).toBe(first.geometry);
-    expect(first.geometry.getAttribute("treeImpostorUvRect")).toBeDefined();
+    expect(first.geometry.getAttribute("uv")).toBeDefined();
     expect(first.geometry.getAttribute("treeVariant")).toBeDefined();
   });
 });
