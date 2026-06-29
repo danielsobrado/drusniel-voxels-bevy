@@ -3,10 +3,13 @@ import * as THREE from "three";
 import {
   cloneTreeSettings,
   octFrames,
+  TREE_LOD_DITHER_SECONDARY,
   treeImpostorUvRectAttribute,
+  treeLodDitherRoleAttribute,
   treeLodFadeAttribute,
   treeWorldXZAttribute,
   writeTreeImpostorUvRectIfChanged,
+  writeTreeLodDitherRoleIfChanged,
   writeTreeLodFadeIfChanged,
   writeTreeWorldXZIfChanged,
   writeUvRectIfChanged,
@@ -29,6 +32,13 @@ describe("tree system instance attribute writers", () => {
     expect(writeTreeLodFadeIfChanged(mesh, 0, 0.5)).toBe(true);
     expect(writeTreeLodFadeIfChanged(mesh, 0, 0.5)).toBe(false);
     expect(treeLodFadeAttribute(mesh).getX(0)).toBe(0.5);
+  });
+
+  it("writes lod dither role only when values change", () => {
+    const mesh = testMesh();
+    expect(writeTreeLodDitherRoleIfChanged(mesh, 0, TREE_LOD_DITHER_SECONDARY)).toBe(true);
+    expect(writeTreeLodDitherRoleIfChanged(mesh, 0, TREE_LOD_DITHER_SECONDARY)).toBe(false);
+    expect(treeLodDitherRoleAttribute(mesh).getX(0)).toBe(TREE_LOD_DITHER_SECONDARY);
   });
 
   it("writes a raw UV rect only when values change", () => {
@@ -120,6 +130,7 @@ function testMesh(): THREE.InstancedMesh {
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, 0]), 3));
   geometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(4), 2));
   geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(2).fill(1), 1));
+  geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(2), 1));
   geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(8), 4));
   return new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial(), 2);
 }
