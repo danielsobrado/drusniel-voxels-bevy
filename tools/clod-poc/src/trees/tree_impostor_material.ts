@@ -5,10 +5,12 @@ import {
   clamp,
   dot,
   float,
+  fract,
   frontFacing,
   max,
   mix,
   normalize,
+  screenCoordinate,
   texture,
   uniform,
   uv,
@@ -39,6 +41,7 @@ export function createTreeImpostorNodeMaterial(
   const material = new MeshBasicNodeMaterial();
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample) : albedo;
   (material as unknown as { opacityNode: TslNode }).opacityNode = sample.w;
+  (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
   material.alphaTest = settings.impostors.alphaTest;
   material.side = THREE.DoubleSide;
   material.transparent = false;
@@ -69,6 +72,7 @@ export function createTreeImpostorBlendNodeMaterial(
   const material = new MeshBasicNodeMaterial();
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample) : albedo;
   (material as unknown as { opacityNode: TslNode }).opacityNode = coverage;
+  (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
   material.alphaTest = settings.impostors.alphaTest;
   material.side = THREE.DoubleSide;
   material.transparent = false;
@@ -144,6 +148,14 @@ function blendTreeImpostorNormal(n0: TslNode, n1: TslNode, n2: TslNode, n3: TslN
     .add(n2.xyz.mul(weights.z))
     .add(n3.xyz.mul(weights.w));
   return { xyz: blended } as TslNode;
+}
+
+function treeImpostorNodeDitherMask(): TslNode {
+  const lodFade: TslNode = attribute("treeLodFade", "float");
+  const ign: TslNode = fract(
+    fract(screenCoordinate.x.mul(0.06711056).add(screenCoordinate.y.mul(0.00583715))).mul(52.9829189),
+  );
+  return ign.lessThan(lodFade);
 }
 
 function relightTreeImpostorNode(albedo: TslNode, normalSample: TslNode): TslNode {
