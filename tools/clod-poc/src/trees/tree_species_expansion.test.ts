@@ -7,6 +7,7 @@ import {
   TREE_SPECIES,
   cloneTreeSettings,
   generateTreeInstances,
+  parseTreeConfig,
   treeExpandedSpeciesNicheWeight,
   type TreeExpandedSpeciesSample,
   type TreeTerrainSampler,
@@ -27,6 +28,29 @@ describe("TREE-9 six-species expansion contract", () => {
       expect(TREE_EXPANDED_SPECIES_DEFAULTS[species].weight).toBeGreaterThan(0);
       expect(TREE_EXPANDED_SPECIES_NICHES[species].materialBias).toHaveLength(4);
     }
+  });
+
+  it("parses YAML overrides for expanded species and zones", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  species:
+    willow:
+      enabled: true
+      weight: 0.31
+    spruce:
+      enabled: false
+      weight: 0.77
+  ecology:
+    species_zones:
+      birch:
+        height_preference: low
+        moisture_preference: 0.61
+`);
+
+    expect(parsed.species.willow.weight).toBeCloseTo(0.31);
+    expect(parsed.species.spruce.enabled).toBe(false);
+    expect(parsed.ecology.speciesZones.birch.heightPreference).toBe("low");
+    expect(parsed.ecology.speciesZones.birch.moisturePreference).toBeCloseTo(0.61);
   });
 
   it("uses a 6 species x 4 LOD GPU ring layout", () => {
