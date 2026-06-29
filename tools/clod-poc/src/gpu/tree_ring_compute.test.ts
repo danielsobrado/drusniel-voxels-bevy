@@ -18,6 +18,7 @@ import {
   treeGpuRingRequestsDebugReadback,
   treeGpuRingSlotCount,
 } from "./tree_ring_compute.js";
+import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { composeTreeRingShader } from "./wgsl_modules.js";
 
 describe("tree GPU ring compute helpers", () => {
@@ -45,6 +46,7 @@ describe("tree GPU ring compute helpers", () => {
         impostorFraction: 1,
       },
     };
+    const layout = treeRingSpeciesLayout(3, 4);
     const shadowPlanes = new Float32Array(96);
     shadowPlanes[0] = 7;
     shadowPlanes[95] = 9;
@@ -65,26 +67,37 @@ describe("tree GPU ring compute helpers", () => {
     const f32 = new Float32Array(packed);
     const u32 = new Uint32Array(packed);
 
+    expect(packed.byteLength).toBe(layout.paramBytes);
     expect(f32[0]).toBe(12);
     expect(f32[1]).toBe(34);
     expect(f32[2]).toBe(100);
     expect(f32[4]).toBe(25);
     expect(f32[5]).toBe(50);
     expect(f32[8]).toBeCloseTo(TREE_GPU_RING_CELL, 6);
-    expect(u32[32]).toBe(111);
-    expect(u32[33]).toBe(222);
-    expect(u32[34]).toBe(333);
-    expect(u32[43]).toBe(1333);
-    expect(u32[44]).toBe(99);
-    expect(u32[45]).toBe(treeGpuRingGrid(settings));
-    expect(u32[46]).toBe(1234);
-    expect(u32[47]).toBe(77);
-    expect(f32[48]).toBeCloseTo(1.08, 4);
-    expect(f32[51]).toBeCloseTo(0.08, 4);
-    expect(f32[64]).toBe(1);
-    expect(f32[67]).toBe(5);
-    expect(f32[88]).toBe(7);
-    expect(f32[183]).toBe(9);
+    expect(u32[layout.indexCountsOffset]).toBe(111);
+    expect(u32[layout.indexCountsOffset + 1]).toBe(222);
+    expect(u32[layout.indexCountsOffset + 2]).toBe(333);
+    expect(u32[layout.settingsOffset - 1]).toBe(1333);
+    expect(u32[layout.settingsOffset]).toBe(99);
+    expect(u32[layout.settingsOffset + 1]).toBe(treeGpuRingGrid(settings));
+    expect(u32[layout.settingsOffset + 2]).toBe(1234);
+    expect(u32[layout.settingsOffset + 3]).toBe(77);
+    expect(f32[layout.materialDensityOffset]).toBeCloseTo(1.08, 4);
+    expect(f32[layout.materialDensityOffset + 3]).toBeCloseTo(0.08, 4);
+    expect(f32[layout.visiblePlanesOffset]).toBe(1);
+    expect(f32[layout.visiblePlanesOffset + 3]).toBe(5);
+    expect(f32[layout.shadowPlanesOffset]).toBe(7);
+    expect(f32[layout.shadowPlanesOffset + 95]).toBe(9);
+  });
+
+  it("keeps current 3-species packing aligned with the dynamic layout helper", () => {
+    const layout = treeRingSpeciesLayout(3, 4);
+
+    expect(layout.groupCount).toBe(TREE_GPU_RING_GROUP_COUNT);
+    expect(layout.shadowGroupCount).toBe(TREE_GPU_RING_SHADOW_GROUP_COUNT);
+    expect(layout.settingsOffset).toBe(44);
+    expect(layout.visiblePlanesOffset).toBe(64);
+    expect(layout.shadowPlanesOffset).toBe(88);
   });
 
   it("keys ring resources by settings that affect scatter and draw capacity", () => {
