@@ -20,6 +20,7 @@ use crate::props::foliage::{FoliageFade, FoliageFadeSettings, GrassPropWind};
 use crate::props::instanced_render::PropBoundsDebugSettings;
 use crate::props::{Prop, PropChunkCullState};
 use crate::rendering::capabilities::GraphicsCapabilities;
+use crate::rendering::clod_shadow_f3_overlay::ClodShadowF3OverlaySnapshot;
 use crate::rendering::shadow_budget::ShadowCullingStats;
 use crate::rendering::water_reflection::{WaterReflectionMaskStats, WaterReflectionStatus};
 use crate::rendering::water_visual_probe::WaterVisualDebugState;
@@ -93,6 +94,7 @@ pub struct DebugOverlayParams<'w> {
     pub enclosure_stats: Res<'w, EnclosureOcclusionStats>,
     pub billboard_stats: Res<'w, BillboardStats>,
     pub prop_bounds_debug: Res<'w, PropBoundsDebugSettings>,
+    pub clod_shadow_f3: Option<Res<'w, ClodShadowF3OverlaySnapshot>>,
 }
 
 #[derive(SystemParam)]
@@ -740,6 +742,7 @@ pub fn update_debug_overlay(
     append_reflection_mask_status(&mut text_content, debug.reflection_mask_stats.as_deref());
     append_water_visual_debug(&mut text_content, debug.water_visual_debug.as_deref());
     append_water_body_status(&mut text_content, debug.water_bodies.as_deref());
+    append_clod_shadow_f3(&mut text_content, debug.clod_shadow_f3.as_deref());
     append_enclosure_status(
         &mut text_content,
         &debug.enclosure,
@@ -973,6 +976,19 @@ pub fn update_debug_overlay(
 
     for mut text in query.iter_mut() {
         **text = text_content.clone();
+    }
+}
+
+fn append_clod_shadow_f3(
+    text_content: &mut String,
+    snapshot: Option<&ClodShadowF3OverlaySnapshot>,
+) {
+    let Some(snapshot) = snapshot else {
+        return;
+    };
+    for line in snapshot.visible_lines() {
+        text_content.push_str(&line.text);
+        text_content.push('\n');
     }
 }
 

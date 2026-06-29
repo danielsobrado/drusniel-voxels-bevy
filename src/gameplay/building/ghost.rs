@@ -132,10 +132,11 @@ pub fn update_building_ghost(
                             .map(|definition| (*stability, definition.support_profile))
                     });
             let predicted = predict_stability(grounded, piece_def.support_profile, source);
+            let support_valid = stability_supports_placement(predicted, &stability_config);
             (
                 snap.world_position,
                 snap.world_rotation,
-                valid,
+                valid && support_valid,
                 true,
                 predicted,
             )
@@ -248,6 +249,10 @@ fn ghost_material_handle(
     } else {
         materials.unstable.clone()
     }
+}
+
+fn stability_supports_placement(stability: Stability, config: &StabilityConfig) -> bool {
+    stability.grounded || stability.value + config.epsilon >= config.collapse_threshold
 }
 
 /// Validate whether a piece can be placed at the given position.
@@ -509,6 +514,30 @@ mod tests {
             &registry,
             None,
             true,
+        ));
+    }
+
+    #[test]
+    fn unsupported_snapped_candidate_is_not_placeable() {
+        let config = StabilityConfig::default();
+        assert!(!stability_supports_placement(
+            Stability {
+                value: 0.0,
+                grounded: false,
+            },
+            &config,
+        ));
+    }
+
+    #[test]
+    fn grounded_candidate_is_placeable_at_any_stability_value() {
+        let config = StabilityConfig::default();
+        assert!(stability_supports_placement(
+            Stability {
+                value: 0.0,
+                grounded: true,
+            },
+            &config,
         ));
     }
 }

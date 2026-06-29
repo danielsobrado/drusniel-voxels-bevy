@@ -170,6 +170,53 @@ pub struct SpellMenuState {
     pub visible: bool,
 }
 
+#[derive(Resource, Default)]
+pub struct SpellButtonFeedback {
+    fire_remaining_secs: f32,
+    water_remaining_secs: f32,
+    air_remaining_secs: f32,
+}
+
+impl SpellButtonFeedback {
+    fn set_active(&mut self, kind: SpellKind, duration_secs: f32) {
+        *self.remaining_mut(kind) = duration_secs.max(0.0);
+    }
+
+    fn is_active(&self, kind: SpellKind) -> bool {
+        self.remaining(kind) > 0.0
+    }
+
+    fn tick(&mut self, delta_secs: f32) {
+        self.fire_remaining_secs = (self.fire_remaining_secs - delta_secs).max(0.0);
+        self.water_remaining_secs = (self.water_remaining_secs - delta_secs).max(0.0);
+        self.air_remaining_secs = (self.air_remaining_secs - delta_secs).max(0.0);
+    }
+
+    fn remaining(&self, kind: SpellKind) -> f32 {
+        match kind {
+            SpellKind::Fire => self.fire_remaining_secs,
+            SpellKind::Water => self.water_remaining_secs,
+            SpellKind::Air => self.air_remaining_secs,
+        }
+    }
+
+    fn remaining_mut(&mut self, kind: SpellKind) -> &mut f32 {
+        match kind {
+            SpellKind::Fire => &mut self.fire_remaining_secs,
+            SpellKind::Water => &mut self.water_remaining_secs,
+            SpellKind::Air => &mut self.air_remaining_secs,
+        }
+    }
+}
+
+#[derive(Component)]
+struct SpellMenuRoot;
+
+#[derive(Component)]
+struct SpellMenuButton {
+    kind: SpellKind,
+}
+
 #[derive(Component)]
 pub struct SpellBeam {
     pub kind: SpellKind,
@@ -218,14 +265,19 @@ impl Plugin for SpellPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SpellConfig::load_or_default(SPELL_CONFIG_PATH))
             .init_resource::<SpellMenuState>()
+            .init_resource::<SpellButtonFeedback>()
             .add_message::<SpellCastEvent>()
             .add_systems(Startup, setup_spell_mesh)
             .add_systems(
                 Update,
                 (
                     handle_spell_input.after(update_action_state),
+                    sync_spell_menu_ui,
+                    handle_spell_menu_buttons,
                     cast_spell_events,
                     update_spell_beams,
+                    tick_spell_button_feedback,
+                    update_spell_menu_button_visuals,
                 )
                     .chain(),
             );
@@ -237,6 +289,96 @@ struct SpellBeamMesh(pub Handle<Mesh>);
 
 fn setup_spell_mesh(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     commands.insert_resource(SpellBeamMesh(meshes.add(create_spell_beam_mesh())));
+}
+
+fn spell_button_label(slot: u8, entry: &SpellEntryConfig) -> String {
+    format!("{slot} {}", entry.label)
+}
+
+fn sync_spell_menu_ui(
+    mut commands: Commands,
+    config: Res<SpellConfig>,
+    menu: Res<SpellMenuState>,
+    roots: Query<Entity, With<SpellMenuRoot>>,
+) {
+    let root_exists = !roots.is_empty();
+    if !menu.visible {
+        for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    if root_exists {
+        return;
+    }
+
+    commands
+        .spawn((
+            Name::new("Spell Menu"),
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(18.0),
+                bottom: Val::Px(78.0),
+                width: Val::Px(260.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.04, 0.05, 0.07, 0.88)),
+            BorderColor(Color::srgba(0.45, 0.58, 0.74, 0.45)),
+            SpellMenuRoot,
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Text::new(config.menu.title.clone()),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.88, 0.92, 0.96, 1.0)),
+            ));
+
+            root.spawn((Node {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(6.0),
+                ..default()
+            },))
+                .with_children(|slots| {
+                    spawn_spell_button(slots, 1, &config.fire);
+                    spawn_spell_button(slots, 2, &config.water);
+                    spawn_spell_button(slots, 3, &config.air);
+                });
+        });
+}
+
+fn spawn_spell_button(parent: &mut ChildSpawnerCommands, slot: u8, entry: &SpellEntryConfig) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(76.0),
+                height: Val::Px(34.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.12, 0.14, 0.18, 0.94)),
+            BorderColor(Color::srgba(0.45, 0.58, 0.74, 0.35)),
+            SpellMenuButton { kind: entry.id },
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(spell_button_label(slot, entry)),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(0.92, 0.94, 0.96, 1.0)),
+            ));
+        });
 }
 
 fn handle_spell_input(
@@ -264,6 +406,17 @@ fn handle_spell_input(
     }
 }
 
+fn handle_spell_menu_buttons(
+    mut interactions: Query<(&Interaction, &SpellMenuButton), (Changed<Interaction>, With<Button>)>,
+    mut casts: MessageWriter<SpellCastEvent>,
+) {
+    for (interaction, button) in &mut interactions {
+        if *interaction == Interaction::Pressed {
+            casts.write(SpellCastEvent { kind: button.kind });
+        }
+    }
+}
+
 fn cast_spell_events(
     mut commands: Commands,
     config: Res<SpellConfig>,
@@ -272,6 +425,7 @@ fn cast_spell_events(
     mut casts: MessageReader<SpellCastEvent>,
     existing: Query<(Entity, &SpellBeam)>,
     mut audio_events: MessageWriter<GameAudioEvent>,
+    mut feedback: ResMut<SpellButtonFeedback>,
 ) {
     for cast in casts.read() {
         let entry = config.entry(cast.kind);
@@ -301,6 +455,10 @@ fn cast_spell_events(
                 vfx: entry.vfx,
             },
         ));
+        feedback.set_active(
+            cast.kind,
+            (entry.cast_duration_ms as f32 / 1000.0).max(0.001),
+        );
         audio_events
             .write(GameAudioEvent::ui(cast.kind.audio_event()).with_strength(entry.audio.volume));
     }
@@ -356,6 +514,30 @@ fn update_spell_beams(
                 1.0,
             );
         }
+    }
+}
+
+fn tick_spell_button_feedback(time: Res<Time>, mut feedback: ResMut<SpellButtonFeedback>) {
+    feedback.tick(time.delta_secs());
+}
+
+fn update_spell_menu_button_visuals(
+    feedback: Res<SpellButtonFeedback>,
+    mut buttons: Query<(&SpellMenuButton, &Interaction, &mut BackgroundColor)>,
+) {
+    for (button, interaction, mut background) in &mut buttons {
+        let color = if feedback.is_active(button.kind) {
+            match button.kind {
+                SpellKind::Fire => Color::srgba(0.62, 0.20, 0.10, 0.96),
+                SpellKind::Water => Color::srgba(0.10, 0.32, 0.58, 0.96),
+                SpellKind::Air => Color::srgba(0.30, 0.46, 0.54, 0.96),
+            }
+        } else if *interaction == Interaction::Hovered {
+            Color::srgba(0.20, 0.24, 0.30, 0.96)
+        } else {
+            Color::srgba(0.12, 0.14, 0.18, 0.94)
+        };
+        *background = BackgroundColor(color);
     }
 }
 

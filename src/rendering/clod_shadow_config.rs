@@ -28,7 +28,7 @@ pub const ENV_CLOD_SHADOW_BENCH: &str = "VOXEL_CLOD_SHADOW_BENCH";
 /// meshes cast mid/far terrain shadows, and no-cast pages are removed from the
 /// shadow workload.  The other modes are A/B tools for bench scenes and bug
 /// isolation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClodShadowRuntimeMode {
     Disabled,
     Proxy,
@@ -66,7 +66,7 @@ impl ClodShadowRuntimeMode {
 }
 
 /// Single source of truth for the CLOD shadow feature gate.
-#[derive(Resource, Debug, Clone, PartialEq, Eq)]
+#[derive(Resource, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClodShadowRuntimeSettings {
     pub mode: ClodShadowRuntimeMode,
     pub snapshot_path: PathBuf,
@@ -97,7 +97,7 @@ impl ClodShadowRuntimeSettings {
     }
 
     pub fn should_load_snapshot(&self) -> bool {
-        self.enabled() && self.load_snapshot
+        self.enabled() && self.load_snapshot && self.snapshot_path.is_file()
     }
 
     pub fn should_spawn_proxy_casters(&self) -> bool {
@@ -329,7 +329,7 @@ mod tests {
             settings.effective_action(ClodShadowRuntimeAction::SpawnProxyShadowCaster),
             Some(ClodShadowRuntimeAction::SpawnProxyShadowCaster)
         );
-        assert!(settings.should_load_snapshot());
+        assert!(!settings.should_load_snapshot());
         assert!(settings.should_configure_light_layers());
     }
 

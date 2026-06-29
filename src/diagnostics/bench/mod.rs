@@ -24,6 +24,10 @@ use crate::props::persistence::PropPersistenceState;
 use crate::props::{Prop, PropAssets};
 use crate::rendering::building_material::BuildingMesh;
 use crate::rendering::cinematic_config::CinematicConfig;
+use crate::rendering::clod_shadow_bench_integration::ClodShadowBenchSnapshot;
+use crate::rendering::clod_shadow_config::{
+    ClodShadowRenderToggles, ClodShadowRuntimeSettings, apply_clod_shadow_render_toggles,
+};
 use crate::rendering::quality::RenderQualityPreset;
 use crate::rendering::ray_tracing::{
     ExperimentalRenderMode, RayTracingSettings, VoxelRayBackendMode,
@@ -43,6 +47,7 @@ use crate::voxel::world::{VoxelEditResult, VoxelSample, VoxelWorld, WorldBounds}
 use avian3d::prelude::{LinearVelocity, Position};
 use bevy::app::AppExit;
 use bevy::diagnostic::FrameCount;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::RenderApp;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -152,6 +157,30 @@ fn resolve_bench_scene_path(requested: &Path) -> PathBuf {
 #[derive(Resource)]
 struct BenchSceneResource(BenchScene);
 
+#[derive(SystemParam)]
+struct BenchStateMachineQueries<'w, 's> {
+    camera: Query<'w, 's, (&'static mut Transform, &'static mut PlayerCamera), With<PlayerCamera>>,
+    player: Query<
+        'w,
+        's,
+        (
+            &'static mut Transform,
+            Option<&'static mut Position>,
+            Option<&'static mut LinearVelocity>,
+        ),
+        (With<Player>, Without<PlayerCamera>),
+    >,
+    collider_query: Query<
+        'w,
+        's,
+        (
+            &'static ChunkMesh,
+            Option<&'static ChunkCollider>,
+            Option<&'static NeedsCollider>,
+        ),
+    >,
+}
+
 #[derive(Resource, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct BenchRenderToggles {
     #[serde(default)]
@@ -260,6 +289,43 @@ pub struct BenchRenderToggles {
     /// Force GPU vegetation cull on (ignore config.enabled).
     #[serde(default)]
     pub force_gpu_vegetation: Option<bool>,
+    #[serde(default)]
+    pub disable_clod_shadows: bool,
+    #[serde(default)]
+    pub force_visual_mesh_shadows: bool,
+    #[serde(default)]
+    pub force_no_cast_shadows: bool,
+    #[serde(default)]
+    pub disable_clod_shadow_proxies: bool,
+    #[serde(default)]
+    pub disable_clod_shadow_snapshot_loading: bool,
+    #[serde(default)]
+    pub disable_clod_shadow_light_layers: bool,
+    #[serde(default)]
+    pub disable_clod_shadow_f3: bool,
+    #[serde(default)]
+    pub disable_clod_shadow_bench_metrics: bool,
+    #[serde(default)]
+    pub clod_shadow_snapshot_path: Option<PathBuf>,
+    #[serde(default)]
+    pub clod_shadow_auto_reload: Option<bool>,
+}
+
+impl BenchRenderToggles {
+    fn clod_shadow_toggles(&self) -> ClodShadowRenderToggles {
+        ClodShadowRenderToggles {
+            disable_clod_shadows: self.disable_clod_shadows,
+            force_visual_mesh_shadows: self.force_visual_mesh_shadows,
+            force_no_cast_shadows: self.force_no_cast_shadows,
+            disable_clod_shadow_proxies: self.disable_clod_shadow_proxies,
+            disable_clod_shadow_snapshot_loading: self.disable_clod_shadow_snapshot_loading,
+            disable_clod_shadow_light_layers: self.disable_clod_shadow_light_layers,
+            disable_clod_shadow_f3: self.disable_clod_shadow_f3,
+            disable_clod_shadow_bench_metrics: self.disable_clod_shadow_bench_metrics,
+            clod_shadow_snapshot_path: self.clod_shadow_snapshot_path.clone(),
+            clod_shadow_auto_reload: self.clod_shadow_auto_reload,
+        }
+    }
 }
 
 #[derive(Resource, Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -735,6 +801,8 @@ struct CheckpointSummary {
     median_frame_ms: f64,
     p99_frame_ms: f64,
     areas: BTreeMap<String, AreaSummary>,
+    metrics: BTreeMap<String, f64>,
+    metric_rows: BTreeMap<String, String>,
     runs: Vec<RunRecord>,
 }
 
@@ -769,6 +837,8 @@ struct RunRecord {
     gameplay_trace_csv: Option<String>,
     ready_mesh_entities: u32,
     ready_water_mesh_entities: u32,
+    clod_shadow_metrics: BTreeMap<String, f64>,
+    clod_shadow_metric_rows: BTreeMap<String, String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -1252,11 +1322,16 @@ fn apply_bench_render_toggles(
     mut spot_lights: Query<&mut SpotLight>,
     mut reflection_config: Option<ResMut<WaterReflectionConfig>>,
     ray_tracing: Option<ResMut<RayTracingSettings>>,
+    clod_shadow_settings: Option<ResMut<ClodShadowRuntimeSettings>>,
     capabilities: Option<Res<crate::rendering::capabilities::GraphicsCapabilities>>,
     #[cfg(feature = "naadf")] mut naadf_config: Option<
         ResMut<crate::rendering::naadf::NaadfConfig>,
     >,
 ) {
+    if let Some(mut settings) = clod_shadow_settings {
+        apply_clod_shadow_render_toggles(&mut settings, &toggles.clod_shadow_toggles());
+    }
+
     if toggles.disable_terrain_meshes {
         for mut visibility in &mut visibility_queries.p0() {
             *visibility = Visibility::Hidden;
@@ -2367,15 +2442,7 @@ fn run_bench_state_machine(
     config: Res<BenchConfig>,
     scene: Res<BenchSceneResource>,
     mut state: ResMut<BenchState>,
-    mut camera: Query<(&mut Transform, &mut PlayerCamera), With<PlayerCamera>>,
-    mut player: Query<
-        (
-            &mut Transform,
-            Option<&mut Position>,
-            Option<&mut LinearVelocity>,
-        ),
-        (With<Player>, Without<PlayerCamera>),
-    >,
+    mut queries: BenchStateMachineQueries,
     mut atmosphere: ResMut<AtmosphereSettings>,
     mut fog_quality: Option<ResMut<FogQuality>>,
     world: Res<VoxelWorld>,
@@ -2384,7 +2451,7 @@ fn run_bench_state_machine(
     mut inventory_control: Option<ResMut<InventoryUiBenchControl>>,
     mut timing: ResMut<AreaTimingRecorder>,
     frame: Res<FrameCount>,
-    collider_query: Query<(&ChunkMesh, Option<&ChunkCollider>, Option<&NeedsCollider>)>,
+    clod_shadow_bench: Option<Res<ClodShadowBenchSnapshot>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if state.phase == BenchPhase::Done {
@@ -2410,7 +2477,7 @@ fn run_bench_state_machine(
                 control.freeze_lod = false;
             }
             let gameplay = checkpoint.gameplay.as_ref();
-            if let Ok((mut transform, mut player_camera)) = camera.single_mut() {
+            if let Ok((mut transform, mut player_camera)) = queries.camera.single_mut() {
                 if let Some(gameplay) = gameplay {
                     player_camera.mode = CameraMode::Walk;
                     let start_position = gameplay.start_position.map(vec3).unwrap_or_else(|| {
@@ -2424,7 +2491,9 @@ fn run_bench_state_machine(
                         .unwrap_or(vec3(checkpoint.look_at));
                     *transform = Transform::from_translation(start_position + Vec3::Y * 1.7)
                         .looking_at(start_look_at, Vec3::Y);
-                    if let Ok((mut player_transform, position, velocity)) = player.single_mut() {
+                    if let Ok((mut player_transform, position, velocity)) =
+                        queries.player.single_mut()
+                    {
                         player_transform.translation = start_position;
                         if let Some(mut position) = position {
                             position.0 = start_position;
@@ -2533,7 +2602,7 @@ fn run_bench_state_machine(
                 readiness_position,
                 scene.chunk_load_radius,
                 bench_collider_ready_stats(
-                    collider_query.iter(),
+                    queries.collider_query.iter(),
                     readiness_position,
                     scene.chunk_load_radius,
                 ),
@@ -2850,7 +2919,7 @@ fn run_bench_state_machine(
                     return;
                 }
                 let checkpoint = &scene.checkpoints[state.checkpoint_index];
-                let ray_probe = camera.single().ok().map(|(transform, _)| {
+                let ray_probe = queries.camera.single().ok().map(|(transform, _)| {
                     bench_center_ray_probe(transform, &world, &chunk_stats, &scene.render_toggles)
                 });
                 if let Some(ray_probe) = ray_probe.as_ref() {
@@ -2861,6 +2930,16 @@ fn run_bench_state_machine(
                 let csv_path = config.output_dir.join(&csv_name);
                 if let Err(err) = write_area_timing_csv(&timing, &csv_path) {
                     warn!("failed to write bench CSV {}: {}", csv_path.display(), err);
+                }
+                let (clod_shadow_metrics, clod_shadow_metric_rows) =
+                    clod_shadow_bench_rows(clod_shadow_bench.as_deref());
+                if let Err(err) = append_clod_shadow_metrics_to_csv(&csv_path, &clod_shadow_metrics)
+                {
+                    warn!(
+                        "failed to append CLOD shadow metrics to bench CSV {}: {}",
+                        csv_path.display(),
+                        err
+                    );
                 }
                 save_bench_world_cache_if_ready(scene, &world);
                 let gameplay_trace_csv = if checkpoint.gameplay.is_some() {
@@ -2964,6 +3043,8 @@ fn run_bench_state_machine(
                         .last_ready_snapshot
                         .signature
                         .water_mesh_entities,
+                    clod_shadow_metrics,
+                    clod_shadow_metric_rows,
                 });
                 state.phase = BenchPhase::Screenshot;
             } else {
@@ -2991,12 +3072,12 @@ fn run_bench_state_machine(
                     frame.0,
                     checkpoint,
                     &mut state,
-                    &mut player,
+                    &mut queries.player,
                     &world,
-                    &collider_query,
+                    &queries.collider_query,
                 );
                 if checkpoint.gameplay.is_none()
-                    && let Ok((mut transform, _player_camera)) = camera.single_mut()
+                    && let Ok((mut transform, _player_camera)) = queries.camera.single_mut()
                 {
                     *transform = transform_for_checkpoint(checkpoint, state.hold_elapsed_frames);
                 }
@@ -3375,6 +3456,8 @@ fn finish_run(
         gameplay_trace_csv: None,
         ready_mesh_entities: 0,
         ready_water_mesh_entities: 0,
+        clod_shadow_metrics: BTreeMap::new(),
+        clod_shadow_metric_rows: BTreeMap::new(),
     });
     if let Some(screenshot) = run.screenshot.as_deref() {
         if !config.output_dir.join(screenshot).exists() {
@@ -3395,6 +3478,8 @@ fn finish_run(
             median_frame_ms: frame.as_ref().map(|s| s.avg_ms).unwrap_or_default(),
             p99_frame_ms: frame.as_ref().map(|s| s.p99_ms).unwrap_or_default(),
             areas: BTreeMap::new(),
+            metrics: BTreeMap::new(),
+            metric_rows: BTreeMap::new(),
             runs: Vec::new(),
         }
     } else {
@@ -3421,6 +3506,12 @@ fn finish_run(
             },
         );
     }
+    summary.metrics = median_metrics(&summary.runs);
+    summary.metric_rows = summary
+        .runs
+        .last()
+        .map(|run| run.clod_shadow_metric_rows.clone())
+        .unwrap_or_default();
     if let Some(tier) = fog_tier {
         summary.areas.insert(
             "Volumetric Fog".to_string(),
@@ -3466,6 +3557,59 @@ fn timing_area_summaries(timing: &AreaTimingRecorder) -> BTreeMap<String, AreaSu
         );
     }
     areas
+}
+
+fn clod_shadow_bench_rows(
+    snapshot: Option<&ClodShadowBenchSnapshot>,
+) -> (BTreeMap<String, f64>, BTreeMap<String, String>) {
+    let mut metrics = BTreeMap::new();
+    let mut rows = BTreeMap::new();
+    let Some(snapshot) = snapshot else {
+        return (metrics, rows);
+    };
+
+    for row in &snapshot.rows {
+        rows.insert(row.name.clone(), row.value.clone());
+        if let Ok(value) = row.value.parse::<f64>() {
+            if value.is_finite() {
+                metrics.insert(row.name.clone(), value);
+            }
+        }
+    }
+    (metrics, rows)
+}
+
+fn append_clod_shadow_metrics_to_csv(
+    path: &Path,
+    metrics: &BTreeMap<String, f64>,
+) -> std::io::Result<()> {
+    if metrics.is_empty() {
+        return Ok(());
+    }
+    use std::io::Write;
+
+    let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
+    for (name, value) in metrics {
+        writeln!(
+            file,
+            "{},{:.3},{:.3},{:.3},1.000",
+            name, value, value, value
+        )?;
+    }
+    Ok(())
+}
+
+fn median_metrics(runs: &[RunRecord]) -> BTreeMap<String, f64> {
+    let mut by_name: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    for run in runs {
+        for (name, value) in &run.clod_shadow_metrics {
+            by_name.entry(name.clone()).or_default().push(*value);
+        }
+    }
+    by_name
+        .into_iter()
+        .map(|(name, values)| (name, median(values)))
+        .collect()
 }
 
 fn append_summary_write_startup_events(state: &mut BenchState, frame: u32) {

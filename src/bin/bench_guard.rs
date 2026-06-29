@@ -1,9 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
 use serde::Deserialize;
+use voxel_builder::rendering::clod_shadow_bench_guard::{
+    ClodShadowBenchGuardThresholds, ClodShadowGuardStatus, evaluate_clod_shadow_bench_metrics,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -22,6 +25,14 @@ struct Args {
     /// Treat warnings as process failures.
     #[arg(long)]
     fail_on_warning: bool,
+
+    /// Require CLOD shadow metrics and validate them against CLOD shadow guardrails.
+    #[arg(long)]
+    require_clod_shadow: bool,
+
+    /// Print extracted CLOD shadow metrics from each summary checkpoint.
+    #[arg(long)]
+    print_clod_shadow_metrics: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -256,6 +267,8 @@ struct CheckpointSummary {
     median_frame_ms: f64,
     p99_frame_ms: f64,
     areas: HashMap<String, AreaSummary>,
+    #[serde(default)]
+    metrics: HashMap<String, f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -570,6 +583,9 @@ fn run() -> Result<bool, String> {
             results.extend(evaluate_lod_seam_audit(lod_audit, path, summary));
         }
     }
+    if args.require_clod_shadow {
+        results.extend(evaluate_clod_shadow_summaries(&summaries));
+    }
 
     println!("Config: {}", args.config.display());
     println!(
@@ -581,6 +597,9 @@ fn run() -> Result<bool, String> {
             .join(", ")
     );
     print_table(&results);
+    if args.print_clod_shadow_metrics {
+        print_clod_shadow_metrics(&summaries);
+    }
 
     let failures = results
         .iter()
@@ -602,6 +621,79 @@ fn run() -> Result<bool, String> {
     }
     println!("PASS: {} check(s), {warnings} warning(s).", results.len());
     Ok(true)
+}
+
+fn evaluate_clod_shadow_summaries(summaries: &[(PathBuf, BenchSummary)]) -> Vec<CheckResult> {
+    let thresholds = ClodShadowBenchGuardThresholds::default();
+    let mut results = Vec::new();
+
+    for (_path, summary) in summaries {
+        if summary.checkpoints.is_empty() {
+            results.push(CheckResult {
+                checkpoint: summary.scene.clone(),
+                metric: "clod_shadow_metrics".to_string(),
+                value: None,
+                threshold: "at least one checkpoint with CLOD shadow metrics".to_string(),
+                status: Status::Missing,
+            });
+            continue;
+        }
+
+        for checkpoint in &summary.checkpoints {
+            let checkpoint_name = format!("{}/{}", summary.scene, checkpoint.name);
+            if checkpoint.metrics.is_empty() {
+                results.push(CheckResult {
+                    checkpoint: checkpoint_name,
+                    metric: "clod_shadow_metrics".to_string(),
+                    value: None,
+                    threshold: "CLOD shadow metrics present in checkpoint.metrics".to_string(),
+                    status: Status::Missing,
+                });
+                continue;
+            }
+
+            let metrics: BTreeMap<String, f64> = checkpoint
+                .metrics
+                .iter()
+                .map(|(name, value)| (name.clone(), *value))
+                .collect();
+            let report = evaluate_clod_shadow_bench_metrics(&metrics, &thresholds);
+            for check in report.checks {
+                results.push(CheckResult {
+                    checkpoint: checkpoint_name.clone(),
+                    metric: format!("clod_shadow: {} ({})", check.name, check.metric),
+                    value: check.observed,
+                    threshold: check.expectation,
+                    status: match check.status {
+                        ClodShadowGuardStatus::Pass => Status::Pass,
+                        ClodShadowGuardStatus::Warn => Status::Warn,
+                        ClodShadowGuardStatus::Fail => Status::Fail,
+                    },
+                });
+            }
+        }
+    }
+
+    results
+}
+
+fn print_clod_shadow_metrics(summaries: &[(PathBuf, BenchSummary)]) {
+    println!();
+    println!("CLOD shadow metrics:");
+    for (_path, summary) in summaries {
+        for checkpoint in &summary.checkpoints {
+            if checkpoint.metrics.is_empty() {
+                println!("  {}/{}: missing", summary.scene, checkpoint.name);
+                continue;
+            }
+            println!("  {}/{}:", summary.scene, checkpoint.name);
+            let mut metrics: Vec<_> = checkpoint.metrics.iter().collect();
+            metrics.sort_by(|left, right| left.0.cmp(right.0));
+            for (name, value) in metrics {
+                println!("    {name}: {value:.4}");
+            }
+        }
+    }
 }
 
 fn evaluate_check(check: &GuardCheck, summaries: &[(PathBuf, BenchSummary)]) -> CheckResult {
@@ -1435,6 +1527,7 @@ mod tests {
                 median_frame_ms: avg_ms,
                 p99_frame_ms: p99_ms,
                 areas: HashMap::new(),
+                metrics: HashMap::new(),
             }],
         }
     }

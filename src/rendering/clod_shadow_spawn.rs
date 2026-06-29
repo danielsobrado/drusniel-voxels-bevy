@@ -11,7 +11,9 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{Hash, Hasher};
 
 use super::clod_shadow_config::ClodShadowRuntimeSettings;
 use super::clod_shadow_runtime::{
@@ -113,7 +115,7 @@ pub struct ClodShadowRuntimeSpawnStats {
 #[derive(Default)]
 struct ClodShadowApplyState {
     generation: Option<u64>,
-    visual_count: usize,
+    signature: u64,
 }
 
 pub struct ClodShadowSpawnPlugin;
@@ -174,6 +176,7 @@ pub fn apply_clod_shadow_runtime_snapshot(
     mut commands: Commands,
     active: Option<Res<ActiveClodShadowRuntimeSnapshot>>,
     settings: Option<Res<ClodShadowRuntimeSettings>>,
+    page_tree: Option<Res<crate::voxel::pages::ClodPageTree>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     visuals: Query<(
@@ -188,7 +191,9 @@ pub fn apply_clod_shadow_runtime_snapshot(
     mut stats: ResMut<ClodShadowRuntimeSpawnStats>,
     mut apply_state: Local<ClodShadowApplyState>,
 ) {
-    let visual_count = visuals.iter().count();
+    let runtime_settings = settings.as_deref().cloned().unwrap_or_default();
+    let visual_signature = clod_visual_entity_signature(&visuals);
+    let tree_revision = page_tree.as_deref().map(|tree| tree.revision);
     let Some(active) = active else {
         if apply_state.generation.take().is_some() || !proxies.is_empty() {
             cleanup_runtime_entities(
@@ -200,17 +205,18 @@ pub fn apply_clod_shadow_runtime_snapshot(
             );
             *stats = ClodShadowRuntimeSpawnStats::default();
         }
-        apply_state.visual_count = visual_count;
+        apply_state.signature = visual_signature;
         return;
     };
 
-    if apply_state.generation == Some(active.generation) && apply_state.visual_count == visual_count
+    let apply_signature =
+        clod_shadow_apply_signature(&runtime_settings, &active, visual_signature, tree_revision);
+    if apply_state.generation == Some(active.generation) && apply_state.signature == apply_signature
     {
         return;
     }
 
     cleanup_proxies(&mut commands, &mut meshes, &mut materials, &proxies);
-    let runtime_settings = settings.as_deref().cloned().unwrap_or_default();
     let visuals_by_id: HashMap<&str, (Entity, &GlobalTransform, bool, bool, bool)> = visuals
         .iter()
         .map(
@@ -310,7 +316,71 @@ pub fn apply_clod_shadow_runtime_snapshot(
         .saturating_sub(next_stats.runtime_shadow_triangles);
     *stats = next_stats;
     apply_state.generation = Some(active.generation);
-    apply_state.visual_count = visual_count;
+    apply_state.signature = apply_signature;
+}
+
+fn clod_visual_entity_signature(
+    visuals: &Query<(
+        Entity,
+        &ClodTerrainVisualMeshId,
+        &GlobalTransform,
+        Option<&NotShadowCaster>,
+        Option<&ClodShadowRuntimeManagedNoCaster>,
+        Option<&ClodShadowRuntimeManagedVisualCaster>,
+    )>,
+) -> u64 {
+    let mut rows: Vec<_> = visuals
+        .iter()
+        .map(
+            |(entity, id, transform, no_shadow, owned_no_shadow, owned_visual)| {
+                let translation = transform.translation();
+                (
+                    id.0.clone(),
+                    entity.to_bits(),
+                    translation.x.to_bits(),
+                    translation.y.to_bits(),
+                    translation.z.to_bits(),
+                    no_shadow.is_some(),
+                    owned_no_shadow.is_some(),
+                    owned_visual.is_some(),
+                )
+            },
+        )
+        .collect();
+    rows.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+
+    let mut hasher = DefaultHasher::new();
+    rows.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn clod_shadow_apply_signature(
+    settings: &ClodShadowRuntimeSettings,
+    active: &ActiveClodShadowRuntimeSnapshot,
+    visual_signature: u64,
+    tree_revision: Option<u64>,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    settings.hash(&mut hasher);
+    visual_signature.hash(&mut hasher);
+    tree_revision.hash(&mut hasher);
+    active.generation.hash(&mut hasher);
+    active.snapshot.plans.len().hash(&mut hasher);
+    active.snapshot.proxy_meshes.len().hash(&mut hasher);
+    for plan in &active.snapshot.plans {
+        plan.node_id.hash(&mut hasher);
+        plan.visual_mesh_id.hash(&mut hasher);
+        plan.shadow_mesh_id.hash(&mut hasher);
+        (plan.action as u8).hash(&mut hasher);
+        plan.visual_triangles.hash(&mut hasher);
+        plan.shadow_triangles.hash(&mut hasher);
+    }
+    for mesh in &active.snapshot.proxy_meshes {
+        mesh.shadow_mesh_id.hash(&mut hasher);
+        mesh.node_id.hash(&mut hasher);
+        mesh.triangle_count.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 fn runtime_shadow_triangles_for_action(
