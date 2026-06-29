@@ -104,8 +104,10 @@ export function injectTreeWindShader(vertexShader: string): string {
 attribute vec2 treeWind;
 attribute vec2 treeWorldXZ;
 attribute float treeLodFade;
+attribute float treeLodDitherRole;
 attribute float treeVariant;
 varying float vTreeLodFade;
+varying float vTreeLodDitherRole;
 uniform float uTreeTime;
 uniform vec2 uTreeWindDirection;
 uniform float uTreeWindStrength;
@@ -128,6 +130,7 @@ float treeSelectedVariant(vec2 worldXZ) {
       "#include <begin_vertex>",
       `#include <begin_vertex>
 vTreeLodFade = treeLodFade;
+vTreeLodDitherRole = treeLodDitherRole;
 #ifdef USE_INSTANCING
 vec2 treeInstanceWorldXZ = treeWorldXZ;
 #else
@@ -185,12 +188,17 @@ export function injectTreeLodFadeFragmentShader(fragmentShader: string): string 
   return fragmentShader.replace(
     "#include <common>",
     `#include <common>
-varying float vTreeLodFade;`,
+varying float vTreeLodFade;
+varying float vTreeLodDitherRole;`,
   ).replace(
     "#include <clipping_planes_fragment>",
     `#include <clipping_planes_fragment>
 float treeLodIgn = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-if (treeLodIgn >= vTreeLodFade) discard;`,
+if (vTreeLodDitherRole < 0.5) {
+  if (treeLodIgn >= vTreeLodFade) discard;
+} else {
+  if (treeLodIgn < 1.0 - vTreeLodFade) discard;
+}`,
   );
 }
 
