@@ -4,8 +4,11 @@ use bevy::prelude::*;
 
 use super::grid::{IndexedSnapPoint, SnapConfig, SnapPointIndex};
 use super::types::{
-    BuildingPieceRegistry, BuildingState, PieceTypeId, SnapPointDef, SnapResult, SnapTarget,
+    BuildingPieceRegistry, BuildingState, PieceDefinition, PieceTypeId, SnapGroup, SnapPointDef,
+    SnapResult, SnapTarget,
 };
+
+const SNAP_COMPATIBILITY_SCORE_WEIGHT: f32 = 10.0;
 
 /// Find the best snap point for placing a piece at the given cursor position.
 pub fn find_best_snap(
@@ -34,13 +37,13 @@ pub fn find_best_snap(
         // For each snap point on the piece we're placing
         for (source_idx, source_def) in piece_def.snap_points.iter().enumerate() {
             // Check compatibility
-            if !source_def.snap_group.is_compatible_with(&target.snap_group) {
+            if !accepts(source_def, target) {
                 continue;
             }
 
             // Calculate where the piece would need to be for these snap points to connect
             let (position, alignment_score) =
-                calculate_snap_transform(target, source_def, rotation, config);
+                calculate_snap_transform(target, source_def, rotation, piece_def, piece_rotation);
 
             // Skip if alignment is too poor
             if alignment_score < config.min_alignment {
@@ -52,8 +55,10 @@ pub fn find_best_snap(
             let distance_score = 1.0 - (dist / config.snap_radius).min(1.0);
 
             // Combined score
-            let score =
-                config.alignment_weight * alignment_score + config.distance_weight * distance_score;
+            let rank = compatibility_rank(source_def.snap_group, target.snap_group);
+            let score = rank as f32 * SNAP_COMPATIBILITY_SCORE_WEIGHT
+                + config.alignment_weight * alignment_score
+                + config.distance_weight * distance_score;
 
             if score > best_score {
                 best_score = score;
@@ -84,22 +89,149 @@ fn calculate_snap_transform(
     target: &IndexedSnapPoint,
     source: &SnapPointDef,
     rotation: Quat,
-    _config: &SnapConfig,
+    piece_def: &PieceDefinition,
+    rotation_quarter_turns: u8,
 ) -> (Vec3, f32) {
     // The source snap point's position in world space (relative to piece origin)
     let rotated_source_offset = rotation * source.local_offset;
     let rotated_source_direction = rotation * source.direction;
 
-    // For a snap connection, the directions should be opposite
-    // (one pointing "out" connects to another pointing "in" from opposite side)
-    let alignment = -rotated_source_direction.dot(target.world_direction);
+    let alignment = connection_alignment(
+        piece_def,
+        source.snap_group,
+        target.snap_group,
+        rotation_quarter_turns,
+        rotated_source_direction,
+        target.world_direction,
+    );
 
     // Calculate where the piece origin should be:
     // target_position = piece_origin + rotated_source_offset
     // Therefore: piece_origin = target_position - rotated_source_offset
-    let piece_origin = target.world_position - rotated_source_offset;
+    let mut piece_origin = target.world_position - rotated_source_offset;
+    if source.snap_group == SnapGroup::FloorEdge && target.snap_group == SnapGroup::WallTop {
+        piece_origin.y += piece_def.dimensions.y;
+    }
 
     (piece_origin, alignment)
+}
+
+fn accepts(source: &SnapPointDef, target: &IndexedSnapPoint) -> bool {
+    let source_allows_target = source.compatible_groups.is_empty()
+        || source.compatible_groups.contains(&target.snap_group);
+    let target_allows_source = target.compatible_groups.is_empty()
+        || target.compatible_groups.contains(&source.snap_group);
+    if source_allows_target && target_allows_source {
+        return true;
+    }
+    source.compatible_groups.is_empty()
+        && target.compatible_groups.is_empty()
+        && source.snap_group.is_compatible_with(&target.snap_group)
+}
+
+fn is_wall_floor_pair(source: SnapGroup, target: SnapGroup) -> bool {
+    ((source == SnapGroup::WallBottom || source == SnapGroup::WallTop)
+        && target == SnapGroup::FloorEdge)
+        || (source == SnapGroup::FloorEdge
+            && (target == SnapGroup::WallBottom || target == SnapGroup::WallTop))
+}
+
+fn is_wall_stack_pair(source: SnapGroup, target: SnapGroup) -> bool {
+    (source == SnapGroup::WallBottom && target == SnapGroup::WallTop)
+        || (source == SnapGroup::WallTop && target == SnapGroup::WallBottom)
+}
+
+fn local_horizontal_snap_normal(piece: &PieceDefinition) -> Vec3 {
+    if piece.dimensions.x <= piece.dimensions.z {
+        Vec3::X
+    } else {
+        Vec3::Z
+    }
+}
+
+fn normalize_horizontal(value: Vec3) -> Option<Vec3> {
+    let horizontal = Vec3::new(value.x, 0.0, value.z);
+    (horizontal.length_squared() > 1.0e-12).then(|| horizontal.normalize())
+}
+
+fn wall_floor_alignment(
+    piece: &PieceDefinition,
+    source_group: SnapGroup,
+    target_group: SnapGroup,
+    rotation_quarter_turns: u8,
+    source_dir: Vec3,
+    target_dir: Vec3,
+) -> Option<f32> {
+    if !is_wall_floor_pair(source_group, target_group) {
+        return None;
+    }
+
+    if source_group == SnapGroup::WallBottom && target_group == SnapGroup::FloorEdge {
+        let rotation =
+            Quat::from_rotation_y((rotation_quarter_turns as f32) * std::f32::consts::FRAC_PI_2);
+        let source_normal = normalize_horizontal(rotation * local_horizontal_snap_normal(piece));
+        let target_normal = normalize_horizontal(target_dir);
+        return Some(
+            source_normal
+                .zip(target_normal)
+                .map(|(source, target)| source.dot(target).abs())
+                .unwrap_or(0.0),
+        );
+    }
+
+    let source_normal = normalize_horizontal(source_dir);
+    let target_normal = normalize_horizontal(target_dir);
+    Some(
+        source_normal
+            .zip(target_normal)
+            .map(|(source, target)| source.dot(target).abs())
+            .unwrap_or(1.0),
+    )
+}
+
+fn connection_alignment(
+    piece: &PieceDefinition,
+    source_group: SnapGroup,
+    target_group: SnapGroup,
+    rotation_quarter_turns: u8,
+    source_dir: Vec3,
+    target_dir: Vec3,
+) -> f32 {
+    if is_wall_stack_pair(source_group, target_group) {
+        return -source_dir.dot(target_dir);
+    }
+    if let Some(alignment) = wall_floor_alignment(
+        piece,
+        source_group,
+        target_group,
+        rotation_quarter_turns,
+        source_dir,
+        target_dir,
+    ) {
+        return alignment;
+    }
+    -source_dir.dot(target_dir)
+}
+
+fn compatibility_rank(source: SnapGroup, target: SnapGroup) -> u8 {
+    if is_wall_floor_pair(source, target) || is_wall_stack_pair(source, target) {
+        return 4;
+    }
+    if (source == SnapGroup::RoofEdge && target == SnapGroup::WallTop)
+        || (source == SnapGroup::WallTop && target == SnapGroup::RoofEdge)
+    {
+        return 4;
+    }
+    if source == SnapGroup::WallSide && target == SnapGroup::WallSide {
+        return 3;
+    }
+    if source == SnapGroup::FloorEdge && target == SnapGroup::FloorEdge {
+        return 2;
+    }
+    if source == SnapGroup::Generic && target == SnapGroup::Generic {
+        return 1;
+    }
+    1
 }
 
 /// System to detect snap points based on cursor/raycast position.
@@ -166,6 +298,7 @@ pub fn calculate_snap_score(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rendering::building_material::BuildingMaterialType;
 
     #[test]
     fn test_snap_group_compatibility() {
@@ -210,5 +343,155 @@ mod tests {
         );
 
         assert!(score1 > score2);
+    }
+
+    fn test_registry() -> BuildingPieceRegistry {
+        let mut registry = BuildingPieceRegistry::default();
+        registry.register(PieceDefinition::floor(
+            1,
+            "Floor",
+            BuildingMaterialType::WoodPlank,
+        ));
+        registry.register(PieceDefinition::wall(
+            2,
+            "Wall",
+            BuildingMaterialType::WoodPlank,
+        ));
+        registry
+    }
+
+    fn snap_target(
+        entity_raw: u32,
+        piece_type: PieceTypeId,
+        snap_group: SnapGroup,
+        position: Vec3,
+        direction: Vec3,
+        compatible_groups: Vec<SnapGroup>,
+    ) -> IndexedSnapPoint {
+        IndexedSnapPoint {
+            entity: Entity::from_raw_u32(entity_raw).unwrap(),
+            piece_type,
+            snap_index: 0,
+            world_position: position,
+            world_direction: direction,
+            snap_group,
+            compatible_groups,
+        }
+    }
+
+    #[test]
+    fn floor_snaps_edge_to_edge_with_ranked_score() {
+        let registry = test_registry();
+        let mut index = SnapPointIndex::new(1.0);
+        index.insert(snap_target(
+            1,
+            PieceTypeId(1),
+            SnapGroup::FloorEdge,
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::NEG_Z,
+            vec![
+                SnapGroup::FloorEdge,
+                SnapGroup::WallBottom,
+                SnapGroup::WallTop,
+            ],
+        ));
+
+        let snap = find_best_snap(
+            Vec3::new(0.0, 0.0, -1.0),
+            PieceTypeId(1),
+            0,
+            &registry,
+            &index,
+            &SnapConfig::default(),
+        )
+        .expect("floor should snap to floor edge");
+
+        assert_eq!(snap.target_snap.snap_group, SnapGroup::FloorEdge);
+        assert!((snap.world_position - Vec3::new(0.0, 0.0, -2.0)).length() < 1.0e-5);
+        assert!(snap.score >= SNAP_COMPATIBILITY_SCORE_WEIGHT * 2.0);
+    }
+
+    #[test]
+    fn wall_bottom_aligns_to_floor_edge_without_opposite_normals() {
+        let registry = test_registry();
+        let mut index = SnapPointIndex::new(1.0);
+        index.insert(snap_target(
+            1,
+            PieceTypeId(1),
+            SnapGroup::FloorEdge,
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::NEG_Z,
+            vec![
+                SnapGroup::FloorEdge,
+                SnapGroup::WallBottom,
+                SnapGroup::WallTop,
+            ],
+        ));
+
+        let snap = find_best_snap(
+            Vec3::new(0.0, 0.0, -1.0),
+            PieceTypeId(2),
+            0,
+            &registry,
+            &index,
+            &SnapConfig::default(),
+        )
+        .expect("wall bottom should align to floor edge");
+
+        assert_eq!(snap.target_snap.snap_group, SnapGroup::FloorEdge);
+        assert_eq!(snap.source_snap_index, 0);
+        assert!((snap.world_position - Vec3::new(0.0, 0.0, -1.0)).length() < 1.0e-5);
+    }
+
+    #[test]
+    fn wall_side_snaps_edge_to_edge() {
+        let registry = test_registry();
+        let mut index = SnapPointIndex::new(1.0);
+        index.insert(snap_target(
+            1,
+            PieceTypeId(2),
+            SnapGroup::WallSide,
+            Vec3::new(5.0, 1.0, 0.0),
+            Vec3::NEG_X,
+            vec![SnapGroup::WallSide],
+        ));
+
+        let snap = find_best_snap(
+            Vec3::new(5.0, 1.0, 0.0),
+            PieceTypeId(2),
+            0,
+            &registry,
+            &index,
+            &SnapConfig::default(),
+        )
+        .expect("wall side should snap to wall side");
+
+        assert_eq!(snap.source_snap_index, 3);
+        assert!((snap.world_position - Vec3::new(4.0, 0.0, 0.0)).length() < 1.0e-5);
+    }
+
+    #[test]
+    fn poor_alignment_is_rejected() {
+        let registry = test_registry();
+        let mut index = SnapPointIndex::new(1.0);
+        index.insert(snap_target(
+            1,
+            PieceTypeId(2),
+            SnapGroup::WallSide,
+            Vec3::new(5.0, 1.0, 0.0),
+            Vec3::Z,
+            vec![SnapGroup::WallSide],
+        ));
+
+        let snap = find_best_snap(
+            Vec3::new(5.0, 1.0, 0.0),
+            PieceTypeId(2),
+            0,
+            &registry,
+            &index,
+            &SnapConfig::default(),
+        );
+
+        assert!(snap.is_none());
     }
 }

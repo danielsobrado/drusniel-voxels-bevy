@@ -5,4 +5,5 @@ pub mod input;
 pub mod interaction;
 pub mod network;
 pub mod player;
+pub mod spells;
 pub mod viewmodel;

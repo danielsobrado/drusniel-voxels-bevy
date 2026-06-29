@@ -22,6 +22,7 @@ use crate::gameplay::entity::EntityPlugin;
 use crate::gameplay::input::InputPlugin;
 use crate::gameplay::interaction::InteractionPlugin;
 use crate::gameplay::player::PlayerPlugin;
+use crate::gameplay::spells::SpellPlugin;
 use crate::gameplay::viewmodel::PickaxePlugin;
 use crate::particles::ParticlePlugin;
 use crate::physics::PhysicsPlugin;
@@ -216,7 +217,8 @@ pub fn run() {
             .add_plugins(DebugUiPlugin)
             .add_plugins(TerrainToolsPlugin)
             .add_plugins(InputPlugin)
-            .add_plugins(BuildingPlugin);
+            .add_plugins(BuildingPlugin)
+            .add_plugins(SpellPlugin);
     } else {
         app.add_plugins(PhysicsPlugin)
             .add_plugins(PlayerPlugin)
@@ -229,7 +231,8 @@ pub fn run() {
             .add_plugins(DebugUiPlugin)
             .add_plugins(TerrainToolsPlugin)
             .add_plugins(InputPlugin)
-            .add_plugins(BuildingPlugin);
+            .add_plugins(BuildingPlugin)
+            .add_plugins(SpellPlugin);
     }
 
     app.run();

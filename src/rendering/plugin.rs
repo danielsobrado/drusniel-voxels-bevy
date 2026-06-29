@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::render::extract_component::ExtractComponentPlugin;
 use bevy::render::{Render, RenderApp, RenderSystems};
 
+use crate::gameplay::spells::SpellBeamMaterial;
 use crate::props::billboard::BillboardMaterial;
 use crate::props::lod_material::SimpleLodMaterial;
 use crate::rendering::assets::array_loader::{create_texture_array, start_loading_texture_arrays};
@@ -117,6 +118,8 @@ impl Plugin for RenderingPlugin {
             .add_plugins(MaterialPlugin::<BillboardMaterial>::default())
             // Register SimpleLodMaterial for distant props (no PBR)
             .add_plugins(MaterialPlugin::<SimpleLodMaterial>::default())
+            // Register SpellBeamMaterial for first-person spell VFX
+            .add_plugins(MaterialPlugin::<SpellBeamMaterial>::default())
             .add_systems(Startup, setup_voxel_ray_backend_notice)
             .add_systems(PostUpdate, disable_msaa_for_screen_space_ao)
             .add_systems(

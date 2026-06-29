@@ -74,6 +74,11 @@ pub enum AudioEventId {
 
     // Player gameplay
     PlayerJump,
+
+    // Spells
+    SpellFireCast,
+    SpellWaterCast,
+    SpellAirCast,
 }
 
 #[derive(Message, Debug, Clone)]

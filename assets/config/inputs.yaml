@@ -24,3 +24,10 @@ bindings:
   MoveRight: KeyD
   Jump: Space
   Hotbar3: Digit3
+  ToggleBuildingMode: KeyB
+  ToggleSnapMode: KeyX
+  RotatePiece: KeyR
+  CastFire: Digit1
+  CastWater: Digit2
+  CastAir: Digit3
+  ToggleSpellMenu: KeyV

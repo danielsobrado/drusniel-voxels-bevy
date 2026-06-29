@@ -1,0 +1,43 @@
+spells:
+  menu:
+    root_id: spell-menu
+    title: Spells
+  fire:
+    id: fire
+    label: Fire
+    cast_duration_ms: 2600
+    audio:
+      volume: 0.38
+    vfx:
+      flame_scale: 1.0
+      world_width: 1.6
+      world_height: 5.0
+      hand_forward_m: 0.5
+      hand_right_m: 0.35
+      hand_up_m: -0.35
+  water:
+    id: water
+    label: Water
+    cast_duration_ms: 2200
+    audio:
+      volume: 0.34
+    vfx:
+      flame_scale: 1.0
+      world_width: 1.2
+      world_height: 4.5
+      hand_forward_m: 0.5
+      hand_right_m: 0.35
+      hand_up_m: -0.35
+  air:
+    id: air
+    label: Air
+    cast_duration_ms: 1800
+    audio:
+      volume: 0.28
+    vfx:
+      flame_scale: 1.0
+      world_width: 1.45
+      world_height: 5.4
+      hand_forward_m: 0.5
+      hand_right_m: 0.35
+      hand_up_m: -0.35

@@ -37,6 +37,11 @@ pub enum GameAction {
     ToggleBuildingMode,
     ToggleSnapMode,
     RotatePiece,
+    // Spells
+    CastFire,
+    CastWater,
+    CastAir,
+    ToggleSpellMenu,
 }
 
 #[derive(Resource, Serialize, Deserialize, Debug, Clone)]
@@ -79,6 +84,12 @@ impl Default for InputConfig {
         bindings.insert(GameAction::ToggleBuildingMode, KeyCode::KeyB);
         bindings.insert(GameAction::ToggleSnapMode, KeyCode::KeyX);
         bindings.insert(GameAction::RotatePiece, KeyCode::KeyR);
+
+        // Spells
+        bindings.insert(GameAction::CastFire, KeyCode::Digit1);
+        bindings.insert(GameAction::CastWater, KeyCode::Digit2);
+        bindings.insert(GameAction::CastAir, KeyCode::Digit3);
+        bindings.insert(GameAction::ToggleSpellMenu, KeyCode::KeyV);
 
         Self { bindings }
     }

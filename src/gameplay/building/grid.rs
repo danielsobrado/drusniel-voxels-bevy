@@ -23,11 +23,11 @@ pub struct SnapConfig {
 impl Default for SnapConfig {
     fn default() -> Self {
         Self {
-            snap_radius: 0.75,
-            cell_size: 2.0,
-            alignment_weight: 0.6,
-            distance_weight: 0.4,
-            min_alignment: 0.7, // ~45 degrees
+            snap_radius: 0.85,
+            cell_size: 1.0,
+            alignment_weight: 0.65,
+            distance_weight: 0.35,
+            min_alignment: 0.7,
         }
     }
 }
@@ -177,6 +177,8 @@ pub struct IndexedSnapPoint {
     pub world_direction: Vec3,
     /// Snap group for compatibility checking.
     pub snap_group: SnapGroup,
+    /// Groups this target accepts. Empty means use built-in group compatibility.
+    pub compatible_groups: Vec<SnapGroup>,
 }
 
 /// Spatial hash index for snap points.
@@ -310,6 +312,7 @@ pub fn update_snap_point_index(
                 world_position: world_pos,
                 world_direction: world_dir,
                 snap_group: snap_def.snap_group,
+                compatible_groups: snap_def.compatible_groups.clone(),
             });
         }
     }

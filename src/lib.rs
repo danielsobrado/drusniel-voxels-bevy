@@ -96,6 +96,10 @@ pub mod player {
     pub use crate::gameplay::player::*;
 }
 
+pub mod spells {
+    pub use crate::gameplay::spells::*;
+}
+
 pub mod runtime_commands {
     pub use crate::editor::runtime::*;
 }

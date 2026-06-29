@@ -113,6 +113,8 @@ pub struct SnapPointDef {
     pub direction: Vec3,
     /// Snap group this point belongs to.
     pub snap_group: SnapGroup,
+    /// Snap groups this point accepts. Empty means use the built-in group compatibility table.
+    pub compatible_groups: Vec<SnapGroup>,
     /// Piece types that can connect to this snap point.
     pub compatible_pieces: Vec<PieceTypeId>,
 }
@@ -124,8 +126,15 @@ impl SnapPointDef {
             local_offset: offset,
             direction: direction.normalize(),
             snap_group: group,
+            compatible_groups: Vec::new(),
             compatible_pieces: Vec::new(),
         }
+    }
+
+    /// Add compatible snap groups.
+    pub fn with_compatible_groups(mut self, groups: Vec<SnapGroup>) -> Self {
+        self.compatible_groups = groups;
+        self
     }
 
     /// Add compatible piece types.
@@ -364,10 +373,25 @@ impl BuildingPieceRegistry {
                     }
                 }
 
+                let compatible_groups = sp
+                    .compatible_groups
+                    .iter()
+                    .filter_map(|group| match group.to_lowercase().as_str() {
+                        "floor-edge" | "floor_edge" => Some(SnapGroup::FloorEdge),
+                        "wall-bottom" | "wall_bottom" => Some(SnapGroup::WallBottom),
+                        "wall-top" | "wall_top" => Some(SnapGroup::WallTop),
+                        "wall-side" | "wall_side" => Some(SnapGroup::WallSide),
+                        "roof-edge" | "roof_edge" => Some(SnapGroup::RoofEdge),
+                        "generic" => Some(SnapGroup::Generic),
+                        _ => None,
+                    })
+                    .collect();
+
                 snap_points.push(SnapPointDef {
                     local_offset: Vec3::from(sp.local_offset),
                     direction,
                     snap_group: group,
+                    compatible_groups,
                     compatible_pieces,
                 });
             }
