@@ -73,6 +73,17 @@ describe("TREE-4/TREE-5 wiring script", () => {
     expect(result.source).toContain("this.clearGpuRing();");
   });
 
+  it("applies rewrites to CRLF source and preserves CRLF output", () => {
+    const crlfFixture = FIXTURE.replace(/\n/g, "\r\n");
+    const result = wireTreeSystemSource(crlfFixture);
+
+    expect(result.changed).toBe(true);
+    expect(result.applied).toHaveLength(6);
+    expect(result.source).toContain("\r\n");
+    expect(result.source).not.toContain("\nimport { selectTreeGpuRingGeometry");
+    expect(result.source).toContain("\r\nimport { selectTreeGpuRingGeometry");
+  });
+
   it("is idempotent after the first rewrite", () => {
     const first = wireTreeSystemSource(FIXTURE);
     const second = wireTreeSystemSource(first.source);
