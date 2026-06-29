@@ -29,6 +29,7 @@ export * from "./tree_system_instance_attributes.js";
 export * from "./tree_system_instance_transform.js";
 export * from "./tree_system_lifecycle.js";
 export * from "./tree_system_lighting_proxies.js";
+export * from "./tree_system_lod_resolution.js";
 export * from "./tree_system_material_application.js";
 export * from "./tree_system_math.js";
 export * from "./tree_system_matrix_state.js";
