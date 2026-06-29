@@ -21,6 +21,7 @@ The summary includes:
 - measured WorldSource chunk voxel generation timing;
 - measured mesh build timing for sampled chunks;
 - estimated solid/water draw impact from generated meshes;
+- GPU readback provider status;
 - CPU/GPU drift gate status.
 
 BVY-WS-12 status:
@@ -29,6 +30,13 @@ BVY-WS-12 status:
 - runtime async WorldSource chunk generation uses the same source-aware tagging path;
 - Surface Nets reads those source-aware biome tags before using the old compatibility adapter;
 - `material_draw_impact.compatibility_biome_channel_active` should be `false` for this bench path.
+
+GPU readback boundary:
+
+- `src/world/source/drift_readback.rs` defines `WorldSourceGpuReadbackProvider`;
+- `world_source_acceptance` now reads GPU drift samples through this provider boundary;
+- the current provider is `UnavailableWorldSourceGpuReadback`, so `gpu_readback.status` is `unavailable` and `drift_gate.status` is `skipped`;
+- the real GPU implementation should replace that provider with one that dispatches the WorldSource WGSL sample kernel, reads back `WorldSourceDriftSample` values, and passes them into the existing drift gate.
 
 Current limitation:
 
