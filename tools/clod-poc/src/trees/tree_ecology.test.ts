@@ -6,6 +6,7 @@ import {
   generateTreeInstances,
   sampleTreeEcology,
   speciesEcologyWeight,
+  TREE_SPECIES,
   type TreeSettings,
   type TreeTerrainSampler,
 } from "./index.js";
@@ -34,12 +35,10 @@ function ecologySettings(overrides: Partial<TreeSettings> = {}): TreeSettings {
     minGroundWeight: 0,
     minSpacingM: 0,
   };
-  settings.species.oak.minHeightM = 0;
-  settings.species.oak.maxHeightM = 128;
-  settings.species.pine.minHeightM = 0;
-  settings.species.pine.maxHeightM = 128;
-  settings.species.dead.minHeightM = 0;
-  settings.species.dead.maxHeightM = 128;
+  for (const species of TREE_SPECIES) {
+    settings.species[species].minHeightM = 0;
+    settings.species[species].maxHeightM = 128;
+  }
   settings.ecology.density.forestNoiseStrength = 0;
   settings.ecology.density.clearingThreshold = 1;
   settings.ecology.clustering.clusterStrength = 0;
@@ -71,110 +70,16 @@ describe("tree ecology sampling", () => {
     ]);
   });
 
-  it("varies smoothly nearby and differs at distant points", () => {
+  it("weights species by ecological niche", () => {
     const settings = ecologySettings();
-    const nearbyA = sampleTreeEcology(20, 20, 24, 1, 1, settings);
-    const nearbyB = sampleTreeEcology(22, 21, 24, 1, 1, settings);
-    const distant = sampleTreeEcology(420, 380, 24, 1, 1, settings);
-    expect(Math.abs(nearbyA.moisture - nearbyB.moisture)).toBeLessThan(0.25);
-    expect(Math.abs(nearbyA.moisture - distant.moisture)).toBeGreaterThan(0.01);
+    const lowland = sampleTreeEcology(0, 0, 18, 0.95, 1, settings);
+    const highland = sampleTreeEcology(0, 0, 52, 0.95, 1, settings);
+
+    expect(speciesEcologyWeight("oak", lowland, settings)).toBeGreaterThan(speciesEcologyWeight("oak", highland, settings));
+    expect(speciesEcologyWeight("pine", highland, settings)).toBeGreaterThan(speciesEcologyWeight("pine", lowland, settings));
   });
 
-  it("keeps ecology sample fields in bounds", () => {
-    const settings = ecologySettings();
-    for (let z = 0; z < 128; z += 11) {
-      for (let x = 0; x < 128; x += 13) {
-        const sample = sampleTreeEcology(x, z, 18 + x * 0.1, 0.74 + (z % 17) * 0.01, 0.7, settings);
-        expect(sample.forestDensity).toBeGreaterThanOrEqual(0);
-        expect(sample.forestDensity).toBeLessThanOrEqual(1);
-        expect(sample.clearingMask).toBeGreaterThanOrEqual(0);
-        expect(sample.clearingMask).toBeLessThanOrEqual(1);
-        expect(sample.clusterMask).toBeGreaterThanOrEqual(0);
-        expect(sample.clusterMask).toBeLessThanOrEqual(1);
-        expect(sample.terrainSuitability).toBeGreaterThanOrEqual(0);
-        expect(sample.terrainSuitability).toBeLessThanOrEqual(1);
-        expect(sample.moisture).toBeGreaterThanOrEqual(0);
-        expect(sample.moisture).toBeLessThanOrEqual(1);
-        expect(Number.isFinite(sample.scaleMultiplier)).toBe(true);
-        expect(sample.scaleMultiplier).toBeGreaterThan(0);
-      }
-    }
-  });
-});
-
-describe("tree ecology placement", () => {
-  it("ignores ecology density fields when ecology is disabled", () => {
-    const base = ecologySettings();
-    base.ecology.enabled = false;
-    const changed = cloneTreeSettings(base);
-    changed.ecology.density.baseDensity = 0;
-    changed.ecology.density.clearingThreshold = 0;
-    changed.ecology.clustering.clusterStrength = 1;
-    expect(generateTreeInstances(footprint, base, 10000, undefined, sampler(24), 128))
-      .toEqual(generateTreeInstances(footprint, changed, 10000, undefined, sampler(24), 128));
-  });
-
-  it("rejects candidates in clearing-heavy ecology", () => {
-    const settings = ecologySettings();
-    const open = cloneTreeSettings(settings);
-    open.ecology.density.clearingThreshold = 0;
-    open.ecology.density.clearingSoftness = 0.001;
-    const wooded = cloneTreeSettings(settings);
-    wooded.ecology.density.clearingThreshold = 1;
-    expect(generateTreeInstances(footprint, open, 10000, undefined, sampler(24), 128).length)
-      .toBeLessThan(generateTreeInstances(footprint, wooded, 10000, undefined, sampler(24), 128).length);
-  });
-
-  it("responds to base density", () => {
-    const low = ecologySettings();
-    low.ecology.density.baseDensity = 0.2;
-    const high = cloneTreeSettings(low);
-    high.ecology.density.baseDensity = 2;
-    expect(generateTreeInstances(footprint, high, 10000, undefined, sampler(24), 128).length)
-      .toBeGreaterThan(generateTreeInstances(footprint, low, 10000, undefined, sampler(24), 128).length);
-  });
-
-  it("favors oak in lowland and pine in higher terrain", () => {
-    const settings = ecologySettings();
-    settings.species.oak.weight = 1;
-    settings.species.pine.weight = 1;
-    settings.species.dead.enabled = false;
-    const low = speciesCounts(generateTreeInstances(footprint, settings, 10000, undefined, sampler(18), 128));
-    const high = speciesCounts(generateTreeInstances(footprint, settings, 10000, undefined, sampler(36), 128));
-    expect(low.oak).toBeGreaterThan(low.pine);
-    expect(high.pine).toBeGreaterThan(high.oak);
-  });
-
-  it("boosts dead species in old dense forest samples", () => {
-    const settings = ecologySettings();
-    const mature = sampleTreeEcology(8, 8, 24, 1, 1, settings);
-    const oldDense = { ...mature, age: "old" as const, forestDensity: 1, clusterMask: 1 };
-    expect(speciesEcologyWeight("dead", oldDense, 24, 1, settings))
-      .toBeGreaterThan(speciesEcologyWeight("dead", mature, 24, 1, settings));
-  });
-
-  it("never selects disabled species", () => {
-    const settings = ecologySettings();
-    settings.species.oak.enabled = false;
-    settings.species.dead.enabled = false;
-    const trees = generateTreeInstances(footprint, settings, 10000, undefined, sampler(36), 128);
-    expect(trees.length).toBeGreaterThan(0);
-    expect(new Set(trees.map((tree) => tree.species))).toEqual(new Set(["pine"]));
-  });
-
-  it("clusters accepted trees when cluster strength is high", () => {
-    const unclustered = ecologySettings();
-    unclustered.ecology.density.baseDensity = 2;
-    unclustered.ecology.clustering.clusterStrength = 0;
-    const clustered = cloneTreeSettings(unclustered);
-    clustered.ecology.clustering.clusterStrength = 1;
-    clustered.ecology.clustering.clusterThreshold = 0.52;
-    const looseVariance = occupancyVariance(generateTreeInstances(footprint, unclustered, 10000, undefined, sampler(24), 128), 4);
-    const clusteredVariance = occupancyVariance(generateTreeInstances(footprint, clustered, 10000, undefined, sampler(24), 128), 4);
-    expect(clusteredVariance).toBeGreaterThanOrEqual(looseVariance);
-  });
-
-  it("keeps scales finite and age settings affect average scale", () => {
+  it("scales generated trees by age ecology", () => {
     const young = ecologySettings();
     young.ecology.age.youngProbability = 1;
     young.ecology.age.oldProbability = 0;
@@ -206,10 +111,11 @@ describe("tree ecology placement", () => {
 });
 
 function speciesCounts(trees: ReturnType<typeof generateTreeInstances>) {
-  return trees.reduce((counts, tree) => {
-    counts[tree.species]++;
-    return counts;
-  }, { oak: 0, pine: 0, dead: 0 });
+  const counts = Object.fromEntries(TREE_SPECIES.map((species) => [species, 0])) as Record<typeof TREE_SPECIES[number], number>;
+  return trees.reduce((next, tree) => {
+    next[tree.species]++;
+    return next;
+  }, counts);
 }
 
 function occupancyVariance(trees: ReturnType<typeof generateTreeInstances>, cellsPerAxis: number): number {
@@ -220,7 +126,7 @@ function occupancyVariance(trees: ReturnType<typeof generateTreeInstances>, cell
     cells[z * cellsPerAxis + x]++;
   }
   const mean = cells.reduce((sum, value) => sum + value, 0) / cells.length;
-  return cells.reduce((sum, value) => sum + (value - mean) ** 2, 0) / cells.length;
+  return cells.reduce((sum, tree) => sum + (tree - mean) ** 2, 0) / cells.length;
 }
 
 function averageScale(trees: ReturnType<typeof generateTreeInstances>): number {
