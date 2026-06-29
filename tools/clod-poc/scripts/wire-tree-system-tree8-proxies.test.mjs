@@ -32,6 +32,19 @@ class TreeSystem {
               );
   }
 
+  private createGpuRingTierDraw(
+    species: TreeSpeciesId,
+    lod: TreeLod,
+    count: number,
+    indirect: StorageBufferAttribute,
+    indirectOffset: number,
+    materialHandle: TreeMaterialHandle,
+  ): TreeGpuRingMesh {
+    const source = this.geometryForGpuRing(species, lod);
+    const geometry = new THREE.InstancedBufferGeometry();
+    return {} as TreeGpuRingMesh;
+  }
+
   private createGpuRingShadowTierDraw(
     species: TreeSpeciesId,
     lod: TreeLod,
@@ -63,6 +76,9 @@ describe("TREE-8 crown proxy wiring script", () => {
     expect(result.source).toContain("createGpuRingShadowMaterialHandle");
     expect(result.source).toContain("geometryForGpuRingShadow");
     expect(result.source).toContain('if (lod === "far" || lod === "impostor")');
+    expect(result.source).toContain("private createGpuRingTierDraw");
+    expect(result.source).toContain("private createGpuRingShadowTierDraw");
+    expect(result.source.indexOf("private createGpuRingTierDraw")).toBeLessThan(result.source.indexOf("geometryForGpuRingShadow"));
   });
 
   it("preserves CRLF output", () => {
