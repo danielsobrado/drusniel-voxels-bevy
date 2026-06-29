@@ -120,8 +120,8 @@ function markdown(results: readonly PerfCaseResult[]): string {
   const lines = [
     "# clod-poc main perf",
     "",
-    "| case | frame p50 | frame p95 | gpu render p50 | gpu render p95 | gpu compute p50 | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | tree lod avg | prop GPU | prop visible avg | tris avg |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | --- | ---: | --- | --- | ---: | ---: |",
+    "| case | frame p50 | frame p95 | gpu render p50 | gpu render p95 | gpu compute p50 | draw calls | total tris | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | tree lod avg | prop GPU | prop visible avg | tris avg |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | --- | ---: | --- | --- | ---: | ---: |",
   ];
   // [DEBUG-bs9f] percentile over sample-level GPU timings (0 values dropped: pre-resolve / unsupported).
   const gpuPctl = (samples: readonly { gpuRenderMs?: number; gpuComputeMs?: number }[], key: "gpuRenderMs" | "gpuComputeMs", ratio: number): number => {
@@ -136,6 +136,11 @@ function markdown(results: readonly PerfCaseResult[]): string {
     const gpuRenderP50 = gpuPctl(snapshot.samples, "gpuRenderMs", 0.5); // [DEBUG-bs9f]
     const gpuRenderP95 = gpuPctl(snapshot.samples, "gpuRenderMs", 0.95); // [DEBUG-bs9f]
     const gpuComputeP50 = gpuPctl(snapshot.samples, "gpuComputeMs", 0.5); // [DEBUG-bs9f]
+    // [DEBUG-bs9f] env-independent geometry load (counts identical on software vs hardware GPU).
+    const avgOf = (key: "drawCalls" | "totalTriangles"): number =>
+      snapshot.samples.length ? snapshot.samples.reduce((sum, s) => sum + (s[key] ?? 0), 0) / snapshot.samples.length : 0;
+    const drawCallsAvg = avgOf("drawCalls"); // [DEBUG-bs9f]
+    const totalTrisAvg = avgOf("totalTriangles"); // [DEBUG-bs9f]
     const topPhase = snapshot.broadBucketsByP95[0];
     const topProp = snapshot.propBucketsByP95[0];
     const statusCounts = Object.entries(snapshot.counters.treeGpuStatusCounts)
@@ -152,6 +157,7 @@ function markdown(results: readonly PerfCaseResult[]): string {
     lines.push(
       `| ${result.name} | ${ms(frame.p50)} | ${ms(frame.p95)} | ` +
         `${ms(gpuRenderP50)} | ${ms(gpuRenderP95)} | ${ms(gpuComputeP50)} | ` +
+        `${Math.round(drawCallsAvg).toLocaleString("en-US")} | ${Math.round(totalTrisAvg).toLocaleString("en-US")} | ` +
         `${topPhase ? `${topPhase.name} ${ms(topPhase.p95)}` : "-"} | ` +
         `${topProp ? `${topProp.name} ${ms(topProp.p95)}` : "-"} | ` +
         `${ms(render.p95)} | ${statusCounts || "-"} | ` +

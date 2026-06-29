@@ -47,11 +47,16 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
     ].join("\n"));
   }
 
-  // [DEBUG-bs9f] temporary: enable GPU timestamp tracking under perfProbe for render/compute pass timing.
-  const perfTimestamps = new URLSearchParams(window.location.search).get("perfProbe") === "1";
+  // [DEBUG-bs9f] temporary: enable GPU timestamp tracking under perfProbe, only when the device supports it.
+  const perfProbeRequested = new URLSearchParams(window.location.search).get("perfProbe") === "1";
+  const timestampSupported = diagnostics.features.includes("timestamp-query");
+  const trackTimestamp = perfProbeRequested && timestampSupported;
+  if (perfProbeRequested) {
+    console.info(`[DEBUG-bs9f] timestamp-query supported=${timestampSupported} trackTimestamp=${trackTimestamp}`);
+  }
   const renderer = new WebGPURenderer({
     antialias: true,
-    trackTimestamp: perfTimestamps,
+    trackTimestamp,
     requiredLimits: buildRequiredLimits(diagnostics),
   });
   try {

@@ -120,23 +120,28 @@ export function runRenderPhase(input: RenderPhaseInput): void {
   else input.renderer.render(input.scene, input.camera);
 
   // [DEBUG-bs9f] temporary: resolve GPU render/compute pass timings (requires trackTimestamp; perfProbe only).
+  // Fully defensive: must never crash the frame loop even if timestamps are unsupported.
   if (input.perfProbe && !gpuTimestampPending) {
-    const gpuRenderer = input.renderer as unknown as {
-      resolveTimestampsAsync?: (query: number) => Promise<void>;
-      info?: { render?: { timestamp?: number }; compute?: { timestamp?: number } };
-    };
-    if (typeof gpuRenderer.resolveTimestampsAsync === "function") {
-      gpuTimestampPending = true;
-      Promise.all([
-        gpuRenderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER),
-        gpuRenderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE),
-      ])
-        .then(() => {
-          latchedGpuRenderMs = gpuRenderer.info?.render?.timestamp ?? 0;
-          latchedGpuComputeMs = gpuRenderer.info?.compute?.timestamp ?? 0;
-        })
-        .catch(() => { /* timestamp-query unsupported; leave latched values */ })
-        .finally(() => { gpuTimestampPending = false; });
+    try {
+      const gpuRenderer = input.renderer as unknown as {
+        resolveTimestampsAsync?: (query: number) => Promise<void>;
+        info?: { render?: { timestamp?: number }; compute?: { timestamp?: number } };
+      };
+      if (typeof gpuRenderer.resolveTimestampsAsync === "function") {
+        gpuTimestampPending = true;
+        Promise.all([
+          gpuRenderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER),
+          gpuRenderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE),
+        ])
+          .then(() => {
+            latchedGpuRenderMs = gpuRenderer.info?.render?.timestamp ?? 0;
+            latchedGpuComputeMs = gpuRenderer.info?.compute?.timestamp ?? 0;
+          })
+          .catch(() => { /* timestamp-query unsupported; leave latched values */ })
+          .finally(() => { gpuTimestampPending = false; });
+      }
+    } catch {
+      gpuTimestampPending = false; // resolveTimestampsAsync threw synchronously; ignore.
     }
   }
 
@@ -256,6 +261,8 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       customPropGpuDispatchMs: propStats?.gpuDispatchMs ?? null,
       gpuRenderMs: latchedGpuRenderMs, // [DEBUG-bs9f]
       gpuComputeMs: latchedGpuComputeMs, // [DEBUG-bs9f]
+      drawCalls: input.renderer.info?.render?.drawCalls ?? 0, // [DEBUG-bs9f]
+      totalTriangles: input.renderer.info?.render?.triangles ?? 0, // [DEBUG-bs9f]
     });
     if (input.profileEnabled && frameMs >= input.profileFrameMs) {
       // eslint-disable-next-line no-console

@@ -100,6 +100,8 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   customPropGpuDispatchMs: number | null;
   gpuRenderMs?: number; // [DEBUG-bs9f] resolved GPU render-pass time (ms)
   gpuComputeMs?: number; // [DEBUG-bs9f] resolved GPU compute-pass time (ms)
+  drawCalls?: number; // [DEBUG-bs9f] renderer.info.render.drawCalls (all passes this frame)
+  totalTriangles?: number; // [DEBUG-bs9f] renderer.info.render.triangles (all passes this frame)
 }
 
 export interface FramePerfMetricStats {
