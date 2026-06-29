@@ -26,6 +26,20 @@ import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";`,
   },
   {
+    label: "realtime shadow caster layer import",
+    expected: `import { getRealtimeSunShadowCascadeCameras } from "../rendering/realtime_sun_shadows.js";`,
+    replacement: `import { getRealtimeSunShadowCascadeCameras, markAsRealtimeSunShadowCaster } from "../rendering/realtime_sun_shadows.js";`,
+  },
+  {
+    label: "tree shadow caster index import",
+    expected: `import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";`,
+    replacement: `import {
+  TREE_RING_SHADOW_CASCADE_COUNT,
+  treeRingShadowCascadePlanesFromCameras,
+  treeRingShadowCasterGroupIndex,
+} from "./tree_ring_shadow_casters.js";`,
+  },
+  {
     label: "tree GPU ring resource shadow fields",
     expected: `  cell: StorageInstancedBufferAttribute;
   indirect: StorageBufferAttribute;
@@ -54,6 +68,63 @@ import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_caste
     const ringBuffers: TreeRingInstanceBuffers = { cell, capacity: sharedInstanceCount };`,
   },
   {
+    label: "tree GPU ring shadow ring buffers",
+    expected: `    const ringBuffers: TreeRingInstanceBuffers = { cell, capacity: sharedInstanceCount };
+    const materialHandles = {} as Record<string, TreeMaterialHandle>;`,
+    replacement: `    const ringBuffers: TreeRingInstanceBuffers = { cell, capacity: sharedInstanceCount };
+    const shadowRingBuffers: TreeRingInstanceBuffers = { cell: shadowCell, capacity: count * TREE_GPU_RING_SHADOW_GROUP_COUNT };
+    const materialHandles = {} as Record<string, TreeMaterialHandle>;`,
+  },
+  {
+    label: "tree GPU ring shadow-only mesh loop",
+    expected: `        meshes.push(this.createGpuRingTierDraw(
+          species,
+          lod,
+          count,
+          indirect,
+          group * 5 * Uint32Array.BYTES_PER_ELEMENT,
+          materialHandles[materialKey],
+        ));`,
+    replacement: `        meshes.push(this.createGpuRingTierDraw(
+          species,
+          lod,
+          count,
+          indirect,
+          group * 5 * Uint32Array.BYTES_PER_ELEMENT,
+          materialHandles[materialKey],
+        ));
+        if (this.treeLodCastsShadow(lod)) {
+          for (let cascade = 0; cascade < TREE_RING_SHADOW_CASCADE_COUNT; cascade++) {
+            const shadowMaterialKey = "shadow:" + cascade + ":" + materialKey;
+            materialHandles[shadowMaterialKey] = lod === "impostor" && this.settings.impostors.enabled && atlas?.ready
+              ? createTreeRingImpostorNodeMaterialHandle(
+                this.settings,
+                shadowRingBuffers,
+                atlas,
+                this.currentLighting ?? undefined,
+                this.hydrologyWater,
+              )
+              : createTreeRingNodeMaterialHandle(
+                this.settings,
+                shadowRingBuffers,
+                lod,
+                this.currentLighting ?? undefined,
+                this.hydrologyWater,
+              );
+            const shadowGroup = treeRingShadowCasterGroupIndex(species, lod, cascade);
+            meshes.push(this.createGpuRingShadowTierDraw(
+              species,
+              lod,
+              cascade,
+              count,
+              shadowIndirect,
+              shadowGroup * 5 * Uint32Array.BYTES_PER_ELEMENT,
+              materialHandles[shadowMaterialKey],
+            ));
+          }
+        }`,
+  },
+  {
     label: "tree GPU ring shadow output buffers",
     expected: `      cell,
       indirect,
@@ -73,6 +144,48 @@ import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_caste
         shadowCell: this.gpuBufferForAttribute(shadowCell),
         shadowIndirectArgs: this.gpuBufferForAttribute(shadowIndirect),
       },`,
+  },
+  {
+    label: "tree visible GPU ring no direct shadow cast",
+    expected: `    // clod-poc has no real-time shadow-map pass; shadow-caster prepass work is N/A here.
+    mesh.castShadow = this.treeLodCastsShadow(lod);`,
+    replacement: `    mesh.castShadow = false;`,
+  },
+  {
+    label: "tree GPU ring shadow tier draw method",
+    expected: `  private usesGpuRingPrepass(lod: TreeLod): boolean {`,
+    replacement: `  private createGpuRingShadowTierDraw(
+    species: TreeSpeciesId,
+    lod: TreeLod,
+    cascade: number,
+    count: number,
+    indirect: StorageBufferAttribute,
+    indirectOffset: number,
+    materialHandle: TreeMaterialHandle,
+  ): TreeGpuRingMesh {
+    const source = this.geometryForGpuRing(species, lod);
+    const geometry = new THREE.InstancedBufferGeometry();
+    geometry.setIndex(source.getIndex());
+    for (const name of Object.keys(source.attributes)) {
+      geometry.setAttribute(name, source.getAttribute(name));
+    }
+    geometry.instanceCount = count;
+    this.setGpuRingIndirect(geometry, indirect, indirectOffset);
+    geometry.boundingBox = new THREE.Box3(
+      new THREE.Vector3(-1, -1, -1),
+      new THREE.Vector3(this.worldCells + 1, 256, this.worldCells + 1),
+    );
+    geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+    const mesh = new THREE.Mesh(geometry, materialHandle.regularMaterial);
+    mesh.name = "trees-ring-gpu-shadow-c" + cascade + "-" + species + "-" + lod;
+    mesh.frustumCulled = false;
+    mesh.castShadow = true;
+    mesh.receiveShadow = false;
+    markAsRealtimeSunShadowCaster(mesh, cascade);
+    return mesh;
+  }
+
+  private usesGpuRingPrepass(lod: TreeLod): boolean {`,
   },
   {
     label: "tree shadow cascade planes before dispatch",
