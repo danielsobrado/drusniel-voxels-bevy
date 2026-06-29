@@ -122,11 +122,12 @@ export function createTreeGpuRingShadowMesh(
   materialHandle: TreeMaterialHandle,
   species: TreeSpeciesId,
   lod: TreeLod,
+  cascadeIndex: number,
 ): TreeGpuRingMesh {
   const mesh = createTreeGpuRingMesh(geometry, materialHandle, species, lod, false, true);
-  mesh.name = `trees-ring-gpu-shadow-${species}-${lod}`;
+  mesh.name = `trees-ring-gpu-shadow-c${Math.max(0, Math.floor(cascadeIndex))}-${species}-${lod}`;
   mesh.receiveShadow = false;
-  markAsRealtimeSunShadowCaster(mesh);
+  markAsRealtimeSunShadowCaster(mesh, cascadeIndex);
   return mesh;
 }
 
