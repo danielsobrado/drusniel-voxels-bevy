@@ -30,17 +30,19 @@ Status: In progress.
 - Added `GpuWorldSourceDriftReadbackSharedResult` so render-world readback results can be consumed from the main app through `WorldSourceGpuReadbackProvider`.
 - Added `src/world/source/drift_readback_request.rs` to populate `GpuWorldSourceDriftReadbackRequest` from BVY-WS-12 drift sample points when `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1` is set.
 - Added `src/world/source/drift_readback_acceptance.rs` so any `WorldSourceGpuReadbackProvider` can be evaluated through the existing CPU/GPU drift gate.
+- Added `src/world/source/drift_readback_runtime_acceptance.rs` so the opt-in runtime path evaluates the shared GPU readback result once matching samples are available.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 - `world_source_acceptance` now fails before writing `summary.json` unless `terrain_source.mode` is `gpu_world_source`.
 
 ## Not completed
 
-- `world_source_acceptance` still uses the unavailable provider, so drift-gate runtime acceptance still reports `skipped`.
+- `world_source_acceptance` still uses the unavailable provider, so the standalone bench still reports `drift_gate.status = skipped`.
 - The render-app bridge must be locally compile-verified, especially Bevy `App` resource access and render graph edge placement.
+- The opt-in runtime readback path must be run with `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1` and checked for a logged runtime drift-gate result.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of the compatibility adapter should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Run the render-app readback path with `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1`, verify `GpuWorldSourceDriftReadbackSharedResult` produces matching samples, then wire `evaluate_world_source_gpu_readback_acceptance` into a dedicated runtime acceptance path instead of the current unavailable provider.
+Run the opt-in render-app readback path with `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1`, fix any local compile/runtime issues, then decide whether `world_source_acceptance` should stay a CPU/bench-only report or gain a separate runtime-assisted mode that reads `GpuWorldSourceDriftRuntimeAcceptanceState`.
