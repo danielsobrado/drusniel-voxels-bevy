@@ -5,7 +5,7 @@ import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expa
 import { composeTreeRingShader } from "./wgsl_modules.js";
 
 describe("TREE-9 conditional WGSL expansion helper", () => {
-  it("leaves current 3-species WGSL unchanged", () => {
+  it("leaves already-composed WGSL unchanged when expansion is disabled", () => {
     expect(applyTreeRingSpeciesWgslExpansion(treeRingShader, 3)).toBe(treeRingShader);
   });
 
@@ -31,7 +31,8 @@ describe("TREE-9 conditional WGSL expansion helper", () => {
     expect(shader).toContain("species_material_birch: vec4<f32>");
     expect(shader).toContain("species_material_willow: vec4<f32>");
     expect(shader).toContain("species_material_spruce: vec4<f32>");
-    expect(shader).toContain("if (group < 24u)");
+    expect(shader).toContain("if (group < 20u) { return params.index_counts_e[group - 16u]; }");
+    expect(shader).toContain("return params.index_counts_f[group - 20u];");
   });
 
   it("keeps generated species selection terrain-aware", () => {
