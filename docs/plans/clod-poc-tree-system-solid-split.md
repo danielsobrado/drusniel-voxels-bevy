@@ -1,10 +1,10 @@
 # clod-poc TreeSystem SOLID Split
 
 `tools/clod-poc/src/trees/tree_system.ts` is too large and currently mixes orchestration,
-math, GPU policy, stats, patch planning, patch removal, shadow policy, material application,
-mesh attribute writes, mesh write-state bookkeeping, mesh bounds refresh, impostor state,
-GPU-ring draw resources, GPU-ring prepass creation, lighting-proxy projection, and lifecycle
-cleanup. Split it in small behavior-preserving steps only.
+settings-update planning, GPU policy/status, stats, patch planning, patch removal, shadow policy,
+material application, mesh attribute writes, mesh write-state bookkeeping, mesh bounds refresh,
+impostor state, GPU-ring draw resources, GPU-ring prepass creation, lighting-proxy projection,
+and lifecycle cleanup. Split it in small behavior-preserving steps only.
 
 ## Current extracted modules
 
@@ -24,6 +24,14 @@ cleanup. Split it in small behavior-preserving steps only.
 - `tree_system_gpu_policy.ts`
   - `treeSystemUsesGpuRingDraw`
   - `packTreeSystemGpuFrustumPlanes`
+
+- `tree_system_gpu_status.ts`
+  - `treeCpuFallbackGpuStatus`
+  - `treeGpuRuntimeStatus`
+  - `treeReportsGpuRingStats`
+
+- `tree_system_settings_plan.ts`
+  - `planTreeSystemSettingsUpdate`
 
 - `tree_system_patch_planner.ts`
   - `treePatchIsInRange`
@@ -116,33 +124,37 @@ Do these as separate commits, with tests after each commit.
    - `packTreeGpuFrustumPlanes` should delegate to `packTreeSystemGpuFrustumPlanes`.
    Keep the public names for backwards compatibility.
 
-3. Replace `emptyTreeStats()` with `createEmptyTreeSystemStats()` or `buildTreeSystemStats()`.
+3. Replace `updateSettings()` decision logic with `planTreeSystemSettingsUpdate()`.
 
-4. Replace refresh patch planning with `tree_system_patch_planner.ts`.
+4. Replace `emptyTreeStats()` / `updateStats()` aggregation with `createEmptyTreeSystemStats()` and `buildTreeSystemStats()`.
 
-5. Replace node removal / falling-tree conversion with `tree_system_patch_removal.ts`.
+5. Replace refresh patch planning with `tree_system_patch_planner.ts`.
 
-6. Replace material application and impostor-geometry replacement with `tree_system_material_application.ts`.
+6. Replace node removal / falling-tree conversion with `tree_system_patch_removal.ts`.
 
-7. Replace mesh attribute private methods with `tree_system_instance_attributes.ts`.
+7. Replace material application and impostor-geometry replacement with `tree_system_material_application.ts`.
 
-8. Replace write-state private methods with `tree_system_write_state.ts`.
+8. Replace GPU status helpers with `tree_system_gpu_status.ts`.
 
-9. Replace mesh post-LOD update/bounds private methods with `tree_system_mesh_bounds.ts`.
+9. Replace mesh attribute private methods with `tree_system_instance_attributes.ts`.
 
-10. Replace impostor private methods with `tree_system_impostor_resources.ts`.
+10. Replace write-state private methods with `tree_system_write_state.ts`.
 
-11. Replace shadow policy with `tree_system_shadow_policy.ts`.
+11. Replace mesh post-LOD update/bounds private methods with `tree_system_mesh_bounds.ts`.
 
-12. Replace patch cleanup and loose object disposal with `tree_system_lifecycle.ts`.
+12. Replace impostor private methods with `tree_system_impostor_resources.ts`.
 
-13. Replace CPU visible lighting-proxy generation with `tree_system_lighting_proxies.ts`.
+13. Replace shadow policy with `tree_system_shadow_policy.ts`.
 
-14. Replace GPU-ring draw internals with `tree_system_gpu_ring_draw.ts`.
+14. Replace patch cleanup and loose object disposal with `tree_system_lifecycle.ts`.
 
-15. Replace GPU-ring prepass private methods with `tree_system_gpu_ring_prepass.ts`.
+15. Replace CPU visible lighting-proxy generation with `tree_system_lighting_proxies.ts`.
 
-16. Wire TREE-4 geometry selection using `selectTreeGpuRingGeometry` after the helper replacements are green.
+16. Replace GPU-ring draw internals with `tree_system_gpu_ring_draw.ts`.
+
+17. Replace GPU-ring prepass private methods with `tree_system_gpu_ring_prepass.ts`.
+
+18. Wire TREE-4 geometry selection using `selectTreeGpuRingGeometry` after the helper replacements are green.
 
 ## Rules
 

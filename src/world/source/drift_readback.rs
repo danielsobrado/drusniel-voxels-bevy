@@ -1,3 +1,4 @@
+use bevy::render::render_resource::ShaderType;
 use bytemuck::{Pod, Zeroable};
 use serde::{Deserialize, Serialize};
 use std::mem::size_of;
@@ -11,7 +12,7 @@ pub const WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH: &str = "shaders/world_source/
 pub const WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE: u32 = 64;
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, ShaderType)]
 pub struct GpuWorldSourceDriftReadbackParams {
     pub sample_count: u32,
     pub _pad0: u32,
