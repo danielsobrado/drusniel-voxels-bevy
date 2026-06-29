@@ -3,6 +3,7 @@ import type { PageFootprint } from "../types.js";
 import {
   DEFAULT_TREE_SETTINGS,
   generateTreeInstances,
+  TREE_SPECIES,
   TREE_STRUCTURAL_VARIANTS,
   type TreeSettings,
   type TreeTerrainSampler,
@@ -29,11 +30,10 @@ const settings: TreeSettings = {
     minGroundWeight: 0.1,
     minSpacingM: 0,
   },
-  species: {
-    oak: { ...DEFAULT_TREE_SETTINGS.species.oak, minHeightM: 0, maxHeightM: 80 },
-    pine: { ...DEFAULT_TREE_SETTINGS.species.pine, minHeightM: 0, maxHeightM: 80 },
-    dead: { ...DEFAULT_TREE_SETTINGS.species.dead, minHeightM: 0, maxHeightM: 80 },
-  },
+  species: Object.fromEntries(TREE_SPECIES.map((species) => [
+    species,
+    { ...DEFAULT_TREE_SETTINGS.species[species], minHeightM: 0, maxHeightM: 80 },
+  ])) as TreeSettings["species"],
 };
 
 describe("tree structural variants", () => {
