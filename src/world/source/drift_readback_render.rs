@@ -9,7 +9,8 @@ use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 use super::drift_readback::{
     GpuWorldSourceDriftInputSample, GpuWorldSourceDriftReadbackDispatchPlan,
     GpuWorldSourceDriftReadbackParams, WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH,
-    WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
+    WorldSourceDriftSamplePoint, WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult,
+    WorldSourceGpuReadbackStatus,
 };
 use super::drift_readback_staging::decode_staged_gpu_world_source_drift_bytes;
 
@@ -39,6 +40,34 @@ impl Default for GpuWorldSourceDriftReadbackState {
         Self {
             latest_result: WorldSourceGpuReadbackResult::unavailable("gpu_readback_not_dispatched"),
             latest_plan: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GpuWorldSourceDriftReadbackStateProvider {
+    result: WorldSourceGpuReadbackResult,
+}
+
+impl GpuWorldSourceDriftReadbackStateProvider {
+    pub fn new(result: WorldSourceGpuReadbackResult) -> Self {
+        Self { result }
+    }
+
+    pub fn from_state(state: &GpuWorldSourceDriftReadbackState) -> Self {
+        Self::new(state.latest_result.clone())
+    }
+}
+
+impl WorldSourceGpuReadbackProvider for GpuWorldSourceDriftReadbackStateProvider {
+    fn read_world_source_samples(
+        &self,
+        points: &[WorldSourceDriftSamplePoint],
+    ) -> WorldSourceGpuReadbackResult {
+        match self.result.samples() {
+            Some(samples) if samples.len() == points.len() => self.result.clone(),
+            Some(_) => WorldSourceGpuReadbackResult::unavailable("gpu_readback_sample_count_mismatch"),
+            None => self.result.clone(),
         }
     }
 }
@@ -350,6 +379,7 @@ pub fn decode_staged_gpu_world_source_drift_readback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::source::{BiomeId, MaterialLayerId, WorldSourceDriftSample};
 
     #[test]
     fn request_empty_when_no_inputs() {
@@ -363,6 +393,39 @@ mod tests {
         assert_eq!(
             state.latest_result.unavailable_reason.as_deref(),
             Some("gpu_readback_not_dispatched")
+        );
+    }
+
+    #[test]
+    fn state_provider_returns_matching_sample_count() {
+        let sample = WorldSourceDriftSample {
+            x: 0.0,
+            z: 0.0,
+            height: 18.0,
+            ocean_mask: 0.0,
+            biome: BiomeId::Meadows,
+            dominant_layer: MaterialLayerId::Grass,
+        };
+        let provider = GpuWorldSourceDriftReadbackStateProvider::new(
+            WorldSourceGpuReadbackResult::available(vec![sample]),
+        );
+        let result = provider.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
+
+        assert_eq!(result.status, WorldSourceGpuReadbackStatus::Available);
+        assert_eq!(result.samples().expect("samples"), &[sample]);
+    }
+
+    #[test]
+    fn state_provider_rejects_mismatched_sample_count() {
+        let provider = GpuWorldSourceDriftReadbackStateProvider::new(
+            WorldSourceGpuReadbackResult::available(Vec::new()),
+        );
+        let result = provider.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
+
+        assert_eq!(result.status, WorldSourceGpuReadbackStatus::Unavailable);
+        assert_eq!(
+            result.unavailable_reason.as_deref(),
+            Some("gpu_readback_sample_count_mismatch")
         );
     }
 }
