@@ -2,11 +2,8 @@ import * as THREE from "three";
 import type { TreeLod, TreeSettings, TreeSpeciesId } from "./tree_config.js";
 import { createTreeBakedImpostorGeometry, type TreeGeometryMap } from "./tree_geometry.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
-import {
-  createTreeImpostorMaterial,
-  createTreeImpostorNodeMaterial,
-  updateTreeImpostorMaterialSettings,
-} from "./tree_impostor_material.js";
+import { createSelectedTreeImpostorMaterial } from "./tree_impostor_material_selector.js";
+import { updateTreeImpostorMaterialSettings } from "./tree_impostor_material.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 
 export interface TreeSystemGeometryInput {
@@ -32,6 +29,7 @@ export interface TreeSystemImpostorMaterialUpdateInput {
   settings: TreeSettings;
   atlas: TreeImpostorAtlas;
   webgpu: boolean;
+  viewBlend?: boolean;
   impostorMaterials: Partial<Record<TreeSpeciesId, THREE.Material>>;
 }
 
@@ -60,9 +58,10 @@ export function selectTreeSystemMaterial(input: TreeSystemMaterialInput): THREE.
 }
 
 export function updateTreeSystemImpostorMaterial(input: TreeSystemImpostorMaterialUpdateInput): THREE.Material {
-  input.impostorMaterials[input.species] ??= input.webgpu
-    ? createTreeImpostorNodeMaterial(input.settings, input.atlas)
-    : createTreeImpostorMaterial(input.settings, input.atlas);
+  input.impostorMaterials[input.species] ??= createSelectedTreeImpostorMaterial(input.settings, input.atlas, {
+    webgpu: input.webgpu,
+    viewBlend: input.viewBlend ?? false,
+  });
   const material = input.impostorMaterials[input.species]!;
   updateTreeImpostorMaterialSettings(material, input.settings);
   return material;
