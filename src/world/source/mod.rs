@@ -3,6 +3,7 @@ pub mod biome_material_id;
 pub mod biome_region_contract;
 pub mod biome_region_field;
 pub mod drift_gate;
+pub mod drift_readback;
 pub mod height_field;
 pub mod island_shape;
 pub mod noise;
@@ -31,6 +32,10 @@ pub use drift_gate::{
     WorldSourceDriftGateConfig, WorldSourceDriftGateReport, WorldSourceDriftGateStatus,
     WorldSourceDriftSample, WorldSourceDriftSamplePoint,
     WORLD_SOURCE_DRIFT_HEIGHT_TOLERANCE_M, WORLD_SOURCE_DRIFT_OCEAN_MASK_TOLERANCE,
+};
+pub use drift_readback::{
+    StaticWorldSourceGpuReadback, UnavailableWorldSourceGpuReadback,
+    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
 };
 pub use height_field::base_surface_height;
 pub use island_shape::{sample_island_mask, IslandMaskSample, IslandShapeConfig};
