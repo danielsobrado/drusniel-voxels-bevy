@@ -1,4 +1,5 @@
-import { treeGeometryKey, type TreeSettings } from "./tree_config.js";
+import type { TreeSettings } from "./tree_config.js";
+import { treeGeometryKey } from "./tree_geometry.js";
 
 export interface TreeSystemSettingsPlan {
   nextGeometryKey: string;
