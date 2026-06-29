@@ -235,6 +235,7 @@ export class TreeGpuRingCompute {
   private readonly shadowCounterBuffer: GPUBuffer;
   private readonly fallbackShadowCellBuffer: GPUBuffer | null;
   private readonly fallbackShadowIndirectBuffer: GPUBuffer | null;
+  private readonly shadowOutputsReady: boolean;
   private readonly counterReadbacks: ReadbackSlot[];
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
@@ -263,6 +264,7 @@ export class TreeGpuRingCompute {
     hydroData: TreeHydrologyData | null,
   ) {
     this.pipelines = pipelines;
+    this.shadowOutputsReady = !!outputBuffers.shadowCell && !!outputBuffers.shadowIndirectArgs;
     this.paramBuffer = device.createBuffer({ label: "tree ring params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.counterBuffer = device.createBuffer({ label: "tree ring counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     this.shadowCounterBuffer = device.createBuffer({ label: "tree ring shadow counters", size: SHADOW_COUNTER_BYTES, usage: GPUBufferUsage.STORAGE });
@@ -325,7 +327,12 @@ export class TreeGpuRingCompute {
     const requestReadback = treeGpuRingRequestsDebugReadback(this.settings, frame);
     const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
     if (requestReadback && !readbackSlot) this.skippedDispatches++;
-    packTreeGpuRingParams(this.settings, params, this.paramScratch);
+    const effectiveParams = this.shadowOutputsReady ? params : {
+      ...params,
+      maxShadowCastersPerGroup: 0,
+      shadowCascadePlanes: undefined,
+    };
+    packTreeGpuRingParams(this.settings, effectiveParams, this.paramScratch);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
     const encoder = this.device.createCommandEncoder({ label: "tree ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, treeGpuRingCounterWorkgroups(this.settings));
