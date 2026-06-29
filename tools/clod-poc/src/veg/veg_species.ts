@@ -1,8 +1,9 @@
 /**
- * Grammar species presets for clod-poc, keyed by the existing `TreeSpeciesId`
- * (oak / pine / dead). These keep the public IDs stable while moving the growth
- * parameters much closer to the reference vegetation implementation:
- * beech-like broadleaf → oak, mountain pine → pine, snag → dead.
+ * Grammar species presets for clod-poc, keyed by `TreeSpeciesId`.
+ * The expanded TREE-9 species reuse the existing grammar families first:
+ * broadleaf variants use the oak/beech grammar, conifers use pine, and dead
+ * trees use the snag grammar. Species-specific morphology still comes from
+ * `tree_config.ts`.
  */
 
 import * as THREE from "three";
@@ -94,12 +95,46 @@ export const DEAD: SpeciesParams = {
   stubChance: 0.28,
 };
 
+export const BIRCH: SpeciesParams = {
+  ...OAK,
+  id: "birch",
+  label: "Birch broadleaf",
+  foliageColor: { r: 0.08, g: 0.16, b: 0.045, hueVar: 0.24 },
+};
+
+export const WILLOW: SpeciesParams = {
+  ...OAK,
+  id: "willow",
+  label: "Willow lowland broadleaf",
+  crown: "irregular",
+  asym: 0.42,
+  foliageColor: { r: 0.075, g: 0.17, b: 0.055, hueVar: 0.28 },
+};
+
+export const SPRUCE: SpeciesParams = {
+  ...PINE,
+  id: "spruce",
+  label: "Spruce conifer",
+  crown: "cone",
+  foliageColor: { r: 0.03, g: 0.075, b: 0.052, hueVar: 0.18 },
+};
+
 /** Grammar species keyed by clod-poc TreeSpeciesId. */
-export const VEG_TREE_SPECIES = { oak: OAK, pine: PINE, dead: DEAD } as const;
+export const VEG_TREE_SPECIES = {
+  oak: OAK,
+  pine: PINE,
+  dead: DEAD,
+  birch: BIRCH,
+  willow: WILLOW,
+  spruce: SPRUCE,
+} as const;
 
 /** Bark base colour per species (hue-jittered per branch by the tube builder). */
 export const VEG_BARK_COLOR: Record<keyof typeof VEG_TREE_SPECIES, THREE.Color> = {
   oak: new THREE.Color(0x5b3a22),
   pine: new THREE.Color(0x4f3a26),
   dead: new THREE.Color(0x7a6653),
+  birch: new THREE.Color(0xd8d3c4),
+  willow: new THREE.Color(0x6a4a2d),
+  spruce: new THREE.Color(0x3f2f22),
 };
