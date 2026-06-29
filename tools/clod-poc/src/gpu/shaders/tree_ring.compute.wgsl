@@ -6,6 +6,9 @@ const TREE_LOD_IMPOSTOR: u32 = 3u;
 const TREE_LOD_COUNT: u32 = 4u;
 const TREE_SPECIES_COUNT: u32 = 3u;
 const TREE_GROUP_COUNT: u32 = TREE_SPECIES_COUNT * TREE_LOD_COUNT;
+const TREE_SHADOW_CASCADE_COUNT: u32 = 4u;
+const TREE_SHADOW_PLANE_COUNT: u32 = 6u;
+const TREE_SHADOW_GROUP_COUNT: u32 = TREE_GROUP_COUNT * TREE_SHADOW_CASCADE_COUNT;
 const TREE_INDIRECT_STRIDE_U32: u32 = 5u;
 const TREE_HYDRO_WATER_CLEARANCE: f32 = 1.5;
 const TREE_RIPARIAN_INNER_END_M: f32 = 8.0;
@@ -65,6 +68,7 @@ struct TreeRingParams {
   species_material_pine: vec4<f32>,
   species_material_dead: vec4<f32>,
   planes: array<vec4<f32>, 6>,
+  shadow_planes: array<vec4<f32>, 24>,
 };
 
 struct TreeHydrologySample {
@@ -78,6 +82,9 @@ struct TreeHydrologySample {
 @group(0) @binding(1) var<storage, read_write> counters: array<atomic<u32>>;
 @group(0) @binding(2) var<storage, read_write> indirect_args: array<u32>;
 @group(0) @binding(3) var<storage, read_write> out_cell: array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read_write> shadow_counters: array<atomic<u32>>;
+@group(0) @binding(5) var<storage, read_write> shadow_indirect_args: array<u32>;
+@group(0) @binding(6) var<storage, read_write> out_shadow_cell: array<vec4<f32>>;
 @group(0) @binding(9) var hydro_texture: texture_2d<f32>;
 @group(0) @binding(10) var hydro_sampler: sampler;
 
@@ -334,6 +341,7 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
 }
 
 fn group_index(species: u32, lod: u32) -> u32 { return species * TREE_LOD_COUNT + lod; }
+fn shadow_group_index(cascade: u32, species: u32, lod: u32) -> u32 { return cascade * TREE_GROUP_COUNT + group_index(species, lod); }
 
 fn index_count_for_group(group: u32) -> u32 {
   if (group < 4u) { return params.index_counts_a[group]; }
@@ -344,6 +352,15 @@ fn index_count_for_group(group: u32) -> u32 {
 fn in_frustum(center: vec3<f32>, slack: f32) -> bool {
   for (var p = 0u; p < 6u; p = p + 1u) {
     let plane = params.planes[p];
+    if (dot(plane.xyz, center) + plane.w < -slack) { return false; }
+  }
+  return true;
+}
+
+fn in_shadow_cascade_frustum(cascade: u32, center: vec3<f32>, slack: f32) -> bool {
+  let base = cascade * TREE_SHADOW_PLANE_COUNT;
+  for (var p = 0u; p < TREE_SHADOW_PLANE_COUNT; p = p + 1u) {
+    let plane = params.shadow_planes[base + p];
     if (dot(plane.xyz, center) + plane.w < -slack) { return false; }
   }
   return true;
@@ -416,8 +433,27 @@ fn append_tree(species: u32, lod: u32, wc: vec2<f32>, height: f32, scale: f32) {
   out_cell[out_index] = vec4<f32>(wc.x, wc.y, height, scale);
 }
 
+fn append_shadow_tree(cascade: u32, species: u32, lod: u32, wc: vec2<f32>, height: f32, scale: f32) {
+  let max_per_group = params.settings_u.w;
+  if (max_per_group == 0u) { return; }
+  let group = shadow_group_index(cascade, species, lod);
+  let slot = atomicAdd(&shadow_counters[group], 1u);
+  if (slot >= max_per_group) { return; }
+  let out_index = group * max_per_group + slot;
+  out_shadow_cell[out_index] = vec4<f32>(wc.x, wc.y, height, scale);
+}
+
 fn append_lod_if_active(species: u32, lod: u32, lod_active: u32, wc: vec2<f32>, height: f32, scale: f32) {
   if (lod_active != 0u) { append_tree(species, lod, wc, height, scale); }
+}
+
+fn append_shadow_lod_if_active(species: u32, lod: u32, lod_active: u32, center: vec3<f32>, wc: vec2<f32>, height: f32, scale: f32) {
+  if (lod_active == 0u || params.settings_u.w == 0u) { return; }
+  for (var cascade = 0u; cascade < TREE_SHADOW_CASCADE_COUNT; cascade = cascade + 1u) {
+    if (in_shadow_cascade_frustum(cascade, center, 12.0)) {
+      append_shadow_tree(cascade, species, lod, wc, height, scale);
+    }
+  }
 }
 
 fn process_tree_slot(slot: u32) {
@@ -442,11 +478,16 @@ fn process_tree_slot(slot: u32) {
   let accept = tree_accept_mask(height, normal_y, wpos, cfg)
     * tree_hydrology_bank_density_mask(hydro, height, normal_y, cfg);
   if (tree_hash(wc, 809u) >= accept) { return; }
-  if (!in_frustum(vec3<f32>(wpos.x, height + 4.0, wpos.y), 8.0)) { return; }
   let species = select_species(wc, wpos, height, normal_y);
   if (species >= TREE_SPECIES_COUNT) { return; }
   let scale = tree_instance_scale(wc, wpos, normal_y, species) * tree_hydrology_scale_mask(hydro, height);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
+  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);
+  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);
+  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);
+  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);
+  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);
+  if (!in_frustum(shadow_center, 8.0)) { return; }
   append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);
   append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);
   append_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, wc, height, scale);
@@ -458,6 +499,8 @@ fn clear_counters(@builtin(global_invocation_id) id: vec3<u32>) {
   let i = id.x;
   if (i < TREE_GROUP_COUNT) { atomicStore(&counters[i], 0u); }
   if (i < TREE_GROUP_COUNT * TREE_INDIRECT_STRIDE_U32) { indirect_args[i] = 0u; }
+  if (i < TREE_SHADOW_GROUP_COUNT) { atomicStore(&shadow_counters[i], 0u); }
+  if (i < TREE_SHADOW_GROUP_COUNT * TREE_INDIRECT_STRIDE_U32) { shadow_indirect_args[i] = 0u; }
 }
 
 @compute @workgroup_size(TREE_WORKGROUP_SIZE)
@@ -474,9 +517,23 @@ fn write_draw_args(group: u32, index_count: u32, instance_count: u32) {
   indirect_args[base + 4u] = group * params.settings_u.x;
 }
 
+fn write_shadow_draw_args(group: u32, instance_count: u32) {
+  let max_per_group = params.settings_u.w;
+  let base = group * TREE_INDIRECT_STRIDE_U32;
+  shadow_indirect_args[base + 0u] = index_count_for_group(group % TREE_GROUP_COUNT);
+  shadow_indirect_args[base + 1u] = min(instance_count, max_per_group);
+  shadow_indirect_args[base + 2u] = 0u;
+  shadow_indirect_args[base + 3u] = 0u;
+  shadow_indirect_args[base + 4u] = group * max_per_group;
+}
+
 @compute @workgroup_size(TREE_WORKGROUP_SIZE)
 fn build_indirect_args(@builtin(global_invocation_id) id: vec3<u32>) {
   let group = id.x;
-  if (group >= TREE_GROUP_COUNT) { return; }
-  write_draw_args(group, index_count_for_group(group), atomicLoad(&counters[group]));
+  if (group < TREE_GROUP_COUNT) {
+    write_draw_args(group, index_count_for_group(group), atomicLoad(&counters[group]));
+  }
+  if (group < TREE_SHADOW_GROUP_COUNT) {
+    write_shadow_draw_args(group, atomicLoad(&shadow_counters[group]));
+  }
 }
