@@ -42,11 +42,7 @@ impl PageSimplifier for MeshoptSimplifier {
 }
 
 /// Convenience wrapper: call simplify_page_inner and expect success (panics on error).
-pub fn simplify_page(
-    mesh: &PageMesh,
-    locks: &[bool],
-    cfg: &ClodPagesConfig,
-) -> SimplifyOutput {
+pub fn simplify_page(mesh: &PageMesh, locks: &[bool], cfg: &ClodPagesConfig) -> SimplifyOutput {
     simplify_page_inner(mesh, locks, cfg).expect("simplify_page failed")
 }
 

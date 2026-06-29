@@ -8,9 +8,9 @@ use bevy::prelude::*;
 
 use super::{
     clod_shadow_assets::ClodShadowSnapshotLoadStats,
-    clod_shadow_config::{clod_shadow_config_debug_line, ClodShadowRuntimeSettings},
+    clod_shadow_config::{ClodShadowRuntimeSettings, clod_shadow_config_debug_line},
     clod_shadow_spawn::ClodShadowRuntimeSpawnStats,
-    clod_shadow_stats_export::{format_clod_shadow_debug_lines, ClodShadowDebugLines},
+    clod_shadow_stats_export::{ClodShadowDebugLines, format_clod_shadow_debug_lines},
 };
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,7 +110,9 @@ pub fn build_configured_clod_shadow_f3_overlay_lines(
 
     if settings.show_config_line {
         if let Some(runtime_settings) = runtime_settings {
-            lines.push(ClodShadowF3OverlayLine::info(clod_shadow_config_debug_line(runtime_settings)));
+            lines.push(ClodShadowF3OverlayLine::info(
+                clod_shadow_config_debug_line(runtime_settings),
+            ));
         }
     }
 
@@ -245,10 +247,8 @@ mod tests {
         load.last_error = Some("missing snapshot".to_owned());
 
         let formatted = format_clod_shadow_debug_lines(&load, &spawn_stats());
-        let lines = build_clod_shadow_f3_overlay_lines(
-            &ClodShadowF3OverlaySettings::default(),
-            &formatted,
-        );
+        let lines =
+            build_clod_shadow_f3_overlay_lines(&ClodShadowF3OverlaySettings::default(), &formatted);
 
         assert_eq!(lines.last().unwrap().kind, ClodShadowF3LineKind::Warning);
         assert!(lines.last().unwrap().text.contains("missing snapshot"));

@@ -4,7 +4,10 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-use super::{sample_biome_splat, IslandShapeConfig, MaterialLayerId, ProceduralWorldSource, TerrainFieldConfig, WorldSource};
+use super::{
+    IslandShapeConfig, MaterialLayerId, ProceduralWorldSource, TerrainFieldConfig, WorldSource,
+    sample_biome_splat,
+};
 
 const SUPPORTED_CONTRACT_VERSION: u32 = 1;
 const HEIGHT_TOLERANCE_M: f32 = 0.75;
@@ -120,10 +123,25 @@ fn bevy_world_source_matches_clod_poc_golden_fixture() {
 
     let source = ProceduralWorldSource::new(fixture.terrain.into());
     for row in &fixture.rows {
-        assert!(!row.splat_weights.is_empty(), "fixture row at {},{} has no splat weights", row.x, row.z);
+        assert!(
+            !row.splat_weights.is_empty(),
+            "fixture row at {},{} has no splat weights",
+            row.x,
+            row.z
+        );
         let weight_sum: f32 = row.splat_weights.iter().map(|entry| entry.weight).sum();
-        assert!((weight_sum - 1.0).abs() <= 0.0001, "fixture row at {},{} has splat weight sum {}", row.x, row.z, weight_sum);
-        assert!(row.splat_weights.iter().any(|entry| entry.material == row.dominant_layer));
+        assert!(
+            (weight_sum - 1.0).abs() <= 0.0001,
+            "fixture row at {},{} has splat weight sum {}",
+            row.x,
+            row.z,
+            weight_sum
+        );
+        assert!(
+            row.splat_weights
+                .iter()
+                .any(|entry| entry.material == row.dominant_layer)
+        );
 
         let height = source.sample_height(row.x, row.z);
         assert!(
@@ -148,7 +166,15 @@ fn bevy_world_source_matches_clod_poc_golden_fixture() {
             row.ocean_mask,
         );
 
-        let splat = sample_biome_splat(source.sample_biome(row.x, row.z), height, source.metadata().sea_level, 0.0);
-        assert_eq!(splat.dominant_layer(), dominant_material_layer(&row.dominant_layer));
+        let splat = sample_biome_splat(
+            source.sample_biome(row.x, row.z),
+            height,
+            source.metadata().sea_level,
+            0.0,
+        );
+        assert_eq!(
+            splat.dominant_layer(),
+            dominant_material_layer(&row.dominant_layer)
+        );
     }
 }

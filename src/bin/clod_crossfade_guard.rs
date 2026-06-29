@@ -225,7 +225,12 @@ fn parse_row(headers: &[&str], fields: &[&str], line: usize) -> Result<Crossfade
     })
 }
 
-fn value<'a>(headers: &[&str], fields: &'a [&str], name: &str, line: usize) -> Result<&'a str, String> {
+fn value<'a>(
+    headers: &[&str],
+    fields: &'a [&str],
+    name: &str,
+    line: usize,
+) -> Result<&'a str, String> {
     let Some(index) = headers.iter().position(|header| *header == name) else {
         return Err(format!("missing column `{name}`"));
     };
@@ -373,7 +378,8 @@ fn summarize(rows: &[CrossfadeRow]) -> CrossfadeSummary {
                 summary.rows_with_fading_runtime_and_no_entities += 1;
             }
         }
-        if row.stable_entities + row.fade_in_entities + row.fade_out_entities != row.faded_entities {
+        if row.stable_entities + row.fade_in_entities + row.fade_out_entities != row.faded_entities
+        {
             summary.role_sum_mismatch_rows += 1;
         }
         if row.visible_faded_entities > row.faded_entities {
@@ -392,8 +398,14 @@ fn summarize(rows: &[CrossfadeRow]) -> CrossfadeSummary {
 
     // transition_id 0 is the initial stable cut. Count only actual cut changes.
     summary.transitions_observed = transitions.iter().filter(|id| **id != 0).count();
-    summary.final_fade_out_pages = rows.last().map(|row| row.fade_out_pages).unwrap_or_default();
-    summary.final_fade_out_entities = rows.last().map(|row| row.fade_out_entities).unwrap_or_default();
+    summary.final_fade_out_pages = rows
+        .last()
+        .map(|row| row.fade_out_pages)
+        .unwrap_or_default();
+    summary.final_fade_out_entities = rows
+        .last()
+        .map(|row| row.fade_out_entities)
+        .unwrap_or_default();
 
     summary
 }
@@ -404,12 +416,27 @@ fn print_report(path: &PathBuf, report: &GuardReport) {
     println!("  samples: {}", summary.samples);
     println!("  frames: {}..{}", summary.first_frame, summary.last_frame);
     println!("  transitions observed: {}", summary.transitions_observed);
-    println!("  material disabled frames: {}", summary.material_disabled_frames);
+    println!(
+        "  material disabled frames: {}",
+        summary.material_disabled_frames
+    );
     println!("  fading runtime rows: {}", summary.fading_runtime_rows);
-    println!("  alpha seen: {}..{}", summary.min_alpha_seen, summary.max_alpha_seen);
-    println!("  max fade-in pages/entities: {}/{}", summary.max_fade_in_pages, summary.max_fade_in_entities);
-    println!("  max fade-out pages/entities: {}/{}", summary.max_fade_out_pages, summary.max_fade_out_entities);
-    println!("  final fade-out pages/entities: {}/{}", summary.final_fade_out_pages, summary.final_fade_out_entities);
+    println!(
+        "  alpha seen: {}..{}",
+        summary.min_alpha_seen, summary.max_alpha_seen
+    );
+    println!(
+        "  max fade-in pages/entities: {}/{}",
+        summary.max_fade_in_pages, summary.max_fade_in_entities
+    );
+    println!(
+        "  max fade-out pages/entities: {}/{}",
+        summary.max_fade_out_pages, summary.max_fade_out_entities
+    );
+    println!(
+        "  final fade-out pages/entities: {}/{}",
+        summary.final_fade_out_pages, summary.final_fade_out_entities
+    );
 
     for warning in &report.warnings {
         println!("warning: {warning}");
@@ -459,10 +486,12 @@ mod tests {
 1,1,true,2,1,1,4,4,4,2,1,1,0.5,0.5\n";
         let rows = parse_csv(csv).unwrap();
         let report = evaluate(&rows, CrossfadeGuardConfig::default());
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("final fade-out pages leak")));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("final fade-out pages leak"))
+        );
     }
 
     #[test]
@@ -471,9 +500,11 @@ mod tests {
 1,0,false,4,0,0,4,4,4,4,0,0,1.0,1.0\n";
         let rows = parse_csv(csv).unwrap();
         let report = evaluate(&rows, CrossfadeGuardConfig::default());
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("material disabled")));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("material disabled"))
+        );
     }
 }

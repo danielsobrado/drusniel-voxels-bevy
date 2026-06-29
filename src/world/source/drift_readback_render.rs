@@ -1,15 +1,21 @@
 use std::borrow::Cow;
+use std::sync::mpsc;
 
 use bevy::prelude::*;
-use bevy::render::render_graph::{NodeRunError, RenderGraphContext, ViewNode};
+use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel, ViewNode};
 use bevy::render::render_resource::*;
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 
+use super::drift_gate::WorldSourceDriftSamplePoint;
 use super::drift_readback::{
-    GpuWorldSourceDriftInputSample, GpuWorldSourceDriftOutputSample,
-    GpuWorldSourceDriftReadbackDispatchPlan, GpuWorldSourceDriftReadbackParams,
-    WorldSourceGpuReadbackResult, WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH,
+    GpuWorldSourceDriftInputSample, GpuWorldSourceDriftReadbackDispatchPlan,
+    GpuWorldSourceDriftReadbackParams, WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH,
+    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
 };
+use super::drift_readback_staging::decode_staged_gpu_world_source_drift_bytes;
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
+pub struct GpuWorldSourceDriftReadbackLabel;
 
 #[derive(Resource, Debug, Clone, Default)]
 pub struct GpuWorldSourceDriftReadbackRequest {
@@ -37,6 +43,34 @@ impl Default for GpuWorldSourceDriftReadbackState {
         Self {
             latest_result: WorldSourceGpuReadbackResult::unavailable("gpu_readback_not_dispatched"),
             latest_plan: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GpuWorldSourceDriftReadbackStateProvider {
+    result: WorldSourceGpuReadbackResult,
+}
+
+impl GpuWorldSourceDriftReadbackStateProvider {
+    pub fn new(result: WorldSourceGpuReadbackResult) -> Self {
+        Self { result }
+    }
+
+    pub fn from_state(state: &GpuWorldSourceDriftReadbackState) -> Self {
+        Self::new(state.latest_result.clone())
+    }
+}
+
+impl WorldSourceGpuReadbackProvider for GpuWorldSourceDriftReadbackStateProvider {
+    fn read_world_source_samples(
+        &self,
+        points: &[WorldSourceDriftSamplePoint],
+    ) -> WorldSourceGpuReadbackResult {
+        match self.result.samples() {
+            Some(samples) if samples.len() == points.len() => self.result.clone(),
+            Some(_) => WorldSourceGpuReadbackResult::unavailable("gpu_readback_sample_count_mismatch"),
+            None => self.result.clone(),
         }
     }
 }
@@ -81,7 +115,8 @@ pub fn prepare_gpu_world_source_drift_readback_dispatch(
     };
     let Some(pipeline) = pipeline else {
         buffers.clear();
-        state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_pipeline_unavailable");
+        state.latest_result =
+            WorldSourceGpuReadbackResult::unavailable("gpu_readback_pipeline_unavailable");
         return;
     };
     if request.is_empty() {
@@ -90,7 +125,8 @@ pub fn prepare_gpu_world_source_drift_readback_dispatch(
         return;
     }
 
-    let Ok(plan) = GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(request.inputs.len()) else {
+    let Ok(plan) = GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(request.inputs.len())
+    else {
         buffers.clear();
         state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_plan_failed");
         return;
@@ -98,9 +134,15 @@ pub fn prepare_gpu_world_source_drift_readback_dispatch(
 
     ensure_readback_buffers(&render_device, &mut buffers, plan);
 
-    let Some(params_buffer) = buffers.params_buffer.clone() else { return };
-    let Some(input_buffer) = buffers.input_buffer.clone() else { return };
-    let Some(output_buffer) = buffers.output_buffer.clone() else { return };
+    let Some(params_buffer) = buffers.params_buffer.clone() else {
+        return;
+    };
+    let Some(input_buffer) = buffers.input_buffer.clone() else {
+        return;
+    };
+    let Some(output_buffer) = buffers.output_buffer.clone() else {
+        return;
+    };
 
     let params = GpuWorldSourceDriftReadbackParams {
         sample_count: plan.sample_count,
@@ -123,7 +165,8 @@ pub fn prepare_gpu_world_source_drift_readback_dispatch(
     buffers.plan = Some(plan);
     buffers.ready = true;
     state.latest_plan = Some(plan);
-    state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_dispatch_pending_map");
+    state.latest_result =
+        WorldSourceGpuReadbackResult::unavailable("gpu_readback_dispatch_pending_map");
 }
 
 fn ensure_readback_buffers(
@@ -132,7 +175,11 @@ fn ensure_readback_buffers(
     plan: GpuWorldSourceDriftReadbackDispatchPlan,
 ) {
     let params_size = plan.params_bytes as u64;
-    if buffers.params_buffer.as_ref().is_none_or(|buffer| buffer.size() < params_size) {
+    if buffers
+        .params_buffer
+        .as_ref()
+        .is_none_or(|buffer| buffer.size() < params_size)
+    {
         buffers.params_buffer = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("world_source_drift_readback_params"),
             size: params_size,
@@ -142,7 +189,11 @@ fn ensure_readback_buffers(
     }
 
     let input_size = plan.input_bytes as u64;
-    if buffers.input_buffer.as_ref().is_none_or(|buffer| buffer.size() < input_size) {
+    if buffers
+        .input_buffer
+        .as_ref()
+        .is_none_or(|buffer| buffer.size() < input_size)
+    {
         buffers.input_buffer = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("world_source_drift_readback_input"),
             size: input_size,
@@ -152,7 +203,11 @@ fn ensure_readback_buffers(
     }
 
     let output_size = plan.output_bytes as u64;
-    if buffers.output_buffer.as_ref().is_none_or(|buffer| buffer.size() < output_size) {
+    if buffers
+        .output_buffer
+        .as_ref()
+        .is_none_or(|buffer| buffer.size() < output_size)
+    {
         buffers.output_buffer = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("world_source_drift_readback_output"),
             size: output_size,
@@ -160,7 +215,11 @@ fn ensure_readback_buffers(
             mapped_at_creation: false,
         }));
     }
-    if buffers.staging_buffer.as_ref().is_none_or(|buffer| buffer.size() < output_size) {
+    if buffers
+        .staging_buffer
+        .as_ref()
+        .is_none_or(|buffer| buffer.size() < output_size)
+    {
         buffers.staging_buffer = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("world_source_drift_readback_staging"),
             size: output_size,
@@ -209,12 +268,13 @@ impl ViewNode for GpuWorldSourceDriftReadbackNode {
             return Ok(());
         };
 
-        let mut pass = render_context
-            .command_encoder()
-            .begin_compute_pass(&ComputePassDescriptor {
-                label: Some("world_source_drift_readback_pass"),
-                timestamp_writes: None,
-            });
+        let mut pass =
+            render_context
+                .command_encoder()
+                .begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("world_source_drift_readback_pass"),
+                    timestamp_writes: None,
+                });
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, bind_group, &[]);
         pass.dispatch_workgroups(plan.workgroup_count, 1, 1);
@@ -247,10 +307,8 @@ pub fn init_gpu_world_source_drift_readback_pipeline(
         ),
     )
     .to_vec();
-    let bind_group_layout = render_device.create_bind_group_layout(
-        Some("world_source_drift_readback_bg_layout_0"),
-        &bg_entries,
-    );
+    let bind_group_layout = render_device
+        .create_bind_group_layout(Some("world_source_drift_readback_bg_layout_0"), &bg_entries);
     let pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
         label: Some(Cow::Borrowed("world_source_drift_readback_pipeline")),
         layout: vec![BindGroupLayoutDescriptor {
@@ -273,19 +331,59 @@ pub fn init_gpu_world_source_drift_readback_pipeline(
 }
 
 pub fn decode_staged_gpu_world_source_drift_readback(
-    _buffers: Res<GpuWorldSourceDriftReadbackBuffers>,
+    buffers: Res<GpuWorldSourceDriftReadbackBuffers>,
     mut state: ResMut<GpuWorldSourceDriftReadbackState>,
+    render_device: Res<RenderDevice>,
 ) {
-    if state.latest_result.status == super::drift_readback::WorldSourceGpuReadbackStatus::Unavailable
-        && state.latest_result.unavailable_reason.as_deref() == Some("gpu_readback_dispatch_pending_map")
+    if state.latest_result.status != WorldSourceGpuReadbackStatus::Unavailable
+        || state.latest_result.unavailable_reason.as_deref()
+            != Some("gpu_readback_dispatch_pending_map")
     {
-        state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_map_not_implemented");
+        return;
+    }
+
+    let Some(plan) = buffers.plan else {
+        state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_missing_plan");
+        return;
+    };
+    if plan.output_bytes == 0 {
+        state.latest_result = WorldSourceGpuReadbackResult::available(Vec::new());
+        return;
+    }
+    let Some(staging_buffer) = buffers.staging_buffer.as_ref() else {
+        state.latest_result =
+            WorldSourceGpuReadbackResult::unavailable("gpu_readback_missing_staging_buffer");
+        return;
+    };
+
+    let slice = staging_buffer.slice(0..plan.output_bytes as u64);
+    let (sender, receiver) = mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    let _ = render_device.poll(wgpu::PollType::wait_indefinitely());
+
+    match receiver.recv() {
+        Ok(Ok(())) => {
+            let data = slice.get_mapped_range();
+            state.latest_result = decode_staged_gpu_world_source_drift_bytes(plan, &data);
+            drop(data);
+            staging_buffer.unmap();
+        }
+        Ok(Err(_)) => {
+            state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_map_failed");
+        }
+        Err(_) => {
+            state.latest_result =
+                WorldSourceGpuReadbackResult::unavailable("gpu_readback_map_channel_closed");
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::source::{BiomeId, MaterialLayerId, WorldSourceDriftSample};
 
     #[test]
     fn request_empty_when_no_inputs() {
@@ -299,6 +397,39 @@ mod tests {
         assert_eq!(
             state.latest_result.unavailable_reason.as_deref(),
             Some("gpu_readback_not_dispatched")
+        );
+    }
+
+    #[test]
+    fn state_provider_returns_matching_sample_count() {
+        let sample = WorldSourceDriftSample {
+            x: 0.0,
+            z: 0.0,
+            height: 18.0,
+            ocean_mask: 0.0,
+            biome: BiomeId::Meadows,
+            dominant_layer: MaterialLayerId::Grass,
+        };
+        let provider = GpuWorldSourceDriftReadbackStateProvider::new(
+            WorldSourceGpuReadbackResult::available(vec![sample]),
+        );
+        let result = provider.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
+
+        assert_eq!(result.status, WorldSourceGpuReadbackStatus::Available);
+        assert_eq!(result.samples().expect("samples"), &[sample]);
+    }
+
+    #[test]
+    fn state_provider_rejects_mismatched_sample_count() {
+        let provider = GpuWorldSourceDriftReadbackStateProvider::new(
+            WorldSourceGpuReadbackResult::available(Vec::new()),
+        );
+        let result = provider.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
+
+        assert_eq!(result.status, WorldSourceGpuReadbackStatus::Unavailable);
+        assert_eq!(
+            result.unavailable_reason.as_deref(),
+            Some("gpu_readback_sample_count_mismatch")
         );
     }
 }

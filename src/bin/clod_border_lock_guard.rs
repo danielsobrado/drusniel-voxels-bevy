@@ -67,7 +67,10 @@ fn main() {
     let rows = match read_rows(&csv_path) {
         Ok(rows) => rows,
         Err(err) => {
-            eprintln!("CLOD border-lock guard failed to read {}: {err}", csv_path.display());
+            eprintln!(
+                "CLOD border-lock guard failed to read {}: {err}",
+                csv_path.display()
+            );
             process::exit(2);
         }
     };
@@ -95,7 +98,9 @@ fn main() {
                 row.frame, row.level, row.x, row.z, row.lock_ratio, config.max_lock_ratio
             ));
         }
-        if row.boundary_vertex_ratio < 0.0 || row.boundary_vertex_ratio > config.max_boundary_vertex_ratio {
+        if row.boundary_vertex_ratio < 0.0
+            || row.boundary_vertex_ratio > config.max_boundary_vertex_ratio
+        {
             failures.push(format!(
                 "frame {} L{}:({},{}) boundary_vertex_ratio {:.6} outside [0,{:.6}]",
                 row.frame,
@@ -143,7 +148,9 @@ fn main() {
 
     if config.require_all_levels_present {
         let Some(max_level) = config.expected_max_level else {
-            failures.push("require_all_levels_present=true but expected_max_level is not set".to_string());
+            failures.push(
+                "require_all_levels_present=true but expected_max_level is not set".to_string(),
+            );
             report(&rows, &levels_seen, failures);
             return;
         };
@@ -170,7 +177,10 @@ fn report(rows: &[Row], levels_seen: &HashMap<usize, usize>, failures: Vec<Strin
         return;
     }
 
-    eprintln!("CLOD border-lock guard failed with {} issue(s):", failures.len());
+    eprintln!(
+        "CLOD border-lock guard failed with {} issue(s):",
+        failures.len()
+    );
     for failure in failures {
         eprintln!("- {failure}");
     }
@@ -200,7 +210,12 @@ fn read_rows(path: &Path) -> Result<Vec<Row>, String> {
             border_edges: parse_cell(&cells, &index, "border_edges", line_no + 2)?,
             locked_vertices: parse_cell(&cells, &index, "locked_vertices", line_no + 2)?,
             lock_ratio: parse_cell(&cells, &index, "lock_ratio", line_no + 2)?,
-            boundary_vertex_ratio: parse_cell(&cells, &index, "boundary_vertex_ratio", line_no + 2)?,
+            boundary_vertex_ratio: parse_cell(
+                &cells,
+                &index,
+                "boundary_vertex_ratio",
+                line_no + 2,
+            )?,
         });
     }
     Ok(rows)
@@ -249,14 +264,17 @@ fn load_config(path: &Path) -> Config {
         match key {
             "min_rows" => cfg.min_rows = value.parse().unwrap_or(cfg.min_rows),
             "require_locked_when_border_edges_present" => {
-                cfg.require_locked_when_border_edges_present = parse_bool(value, cfg.require_locked_when_border_edges_present)
+                cfg.require_locked_when_border_edges_present =
+                    parse_bool(value, cfg.require_locked_when_border_edges_present)
             }
             "min_lock_ratio_when_bordered" => {
-                cfg.min_lock_ratio_when_bordered = value.parse().unwrap_or(cfg.min_lock_ratio_when_bordered)
+                cfg.min_lock_ratio_when_bordered =
+                    value.parse().unwrap_or(cfg.min_lock_ratio_when_bordered)
             }
             "max_lock_ratio" => cfg.max_lock_ratio = value.parse().unwrap_or(cfg.max_lock_ratio),
             "max_boundary_vertex_ratio" => {
-                cfg.max_boundary_vertex_ratio = value.parse().unwrap_or(cfg.max_boundary_vertex_ratio)
+                cfg.max_boundary_vertex_ratio =
+                    value.parse().unwrap_or(cfg.max_boundary_vertex_ratio)
             }
             "max_empty_mesh_rows" => {
                 cfg.max_empty_mesh_rows = value.parse().unwrap_or(cfg.max_empty_mesh_rows)

@@ -61,14 +61,30 @@ struct PointLightShadowFile {
     update_interval: f32,
 }
 
-fn default_true() -> bool { true }
-fn default_terrain_shadow_distance() -> f32 { TERRAIN_SHADOW_DISTANCE }
-fn default_terrain_hysteresis() -> f32 { TERRAIN_SHADOW_HYSTERESIS }
-fn default_terrain_update_interval() -> f32 { TERRAIN_SHADOW_UPDATE_INTERVAL }
-fn default_max_shadow_point_lights() -> usize { MAX_SHADOW_POINT_LIGHTS }
-fn default_point_light_shadow_distance() -> f32 { POINT_LIGHT_SHADOW_DISTANCE }
-fn default_point_light_hysteresis() -> f32 { POINT_LIGHT_SHADOW_HYSTERESIS }
-fn default_point_light_update_interval() -> f32 { 0.1 }
+fn default_true() -> bool {
+    true
+}
+fn default_terrain_shadow_distance() -> f32 {
+    TERRAIN_SHADOW_DISTANCE
+}
+fn default_terrain_hysteresis() -> f32 {
+    TERRAIN_SHADOW_HYSTERESIS
+}
+fn default_terrain_update_interval() -> f32 {
+    TERRAIN_SHADOW_UPDATE_INTERVAL
+}
+fn default_max_shadow_point_lights() -> usize {
+    MAX_SHADOW_POINT_LIGHTS
+}
+fn default_point_light_shadow_distance() -> f32 {
+    POINT_LIGHT_SHADOW_DISTANCE
+}
+fn default_point_light_hysteresis() -> f32 {
+    POINT_LIGHT_SHADOW_HYSTERESIS
+}
+fn default_point_light_update_interval() -> f32 {
+    0.1
+}
 
 impl Default for TerrainShadowFile {
     fn default() -> Self {
@@ -204,12 +220,13 @@ pub fn update_terrain_shadow_culling(
 
     if !config.enabled {
         let mut with_shadows = 0usize;
-        for (entity, _chunk_mesh, _transform, has_no_shadow, is_budget_culled) in
-            chunk_query.iter()
+        for (entity, _chunk_mesh, _transform, has_no_shadow, is_budget_culled) in chunk_query.iter()
         {
             if is_budget_culled.is_some() && has_no_shadow.is_some() {
                 commands.entity(entity).remove::<NotShadowCaster>();
-                commands.entity(entity).remove::<ShadowBudgetTerrainCulled>();
+                commands
+                    .entity(entity)
+                    .remove::<ShadowBudgetTerrainCulled>();
             }
             with_shadows += 1;
         }
@@ -346,14 +363,19 @@ pub fn manage_point_light_shadow_budget(
     // On transition from disabled to enabled: snapshot all current authored states
     if !*was_enabled {
         for (entity, point_light, _) in lights.iter() {
-            authored_state.states.insert(entity, point_light.shadows_enabled);
+            authored_state
+                .states
+                .insert(entity, point_light.shadows_enabled);
         }
         *was_enabled = true;
     }
 
     // Snapshot any newly spawned lights that we haven't seen yet
     for (entity, point_light, _) in lights.iter() {
-        authored_state.states.entry(entity).or_insert(point_light.shadows_enabled);
+        authored_state
+            .states
+            .entry(entity)
+            .or_insert(point_light.shadows_enabled);
     }
 
     let Ok(camera_transform) = camera_query.single() else {

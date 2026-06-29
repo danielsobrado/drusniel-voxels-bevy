@@ -151,12 +151,14 @@ pub fn compute_fade_states(
 
     if let (Some(transition), Some(progress)) = (active_transition, progress) {
         for node_id in &transition.from_node_ids {
-            fade_states.entry(node_id.clone()).or_insert_with(|| ClodFadeState {
-                node_id: node_id.clone(),
-                visible: true,
-                fade_alpha: 1.0 - progress,
-                dither_role: ClodDitherRole::FadeOut,
-            });
+            fade_states
+                .entry(node_id.clone())
+                .or_insert_with(|| ClodFadeState {
+                    node_id: node_id.clone(),
+                    visible: true,
+                    fade_alpha: 1.0 - progress,
+                    dither_role: ClodDitherRole::FadeOut,
+                });
         }
     }
 
@@ -164,9 +166,10 @@ pub fn compute_fade_states(
 }
 
 pub fn is_transition_complete(transition: &ClodTransition, frame: u64) -> bool {
-    frame >= transition
-        .start_frame
-        .saturating_add(transition.duration_frames)
+    frame
+        >= transition
+            .start_frame
+            .saturating_add(transition.duration_frames)
 }
 
 pub fn transition_progress(transition: &ClodTransition, frame: u64) -> Option<f32> {
@@ -195,7 +198,10 @@ pub fn generate_dither_pattern(size: usize) -> Vec<u8> {
 }
 
 fn generate_bayer_matrix(n: usize) -> Vec<Vec<u8>> {
-    assert!(n.is_power_of_two(), "Bayer matrix size must be a power of two");
+    assert!(
+        n.is_power_of_two(),
+        "Bayer matrix size must be a power of two"
+    );
     if n == 1 {
         return vec![vec![0]];
     }
@@ -226,14 +232,9 @@ mod tests {
         let previous = ClodCutSnapshot::from_ids(["0/0/0", "1/0/0", "1/1/0"]);
         let next = ClodCutSnapshot::from_ids(["0/0/0", "2/0/0", "2/1/0"]);
 
-        let transition = create_transition_with_id(
-            "xfade-test".to_string(),
-            Some(&previous),
-            &next,
-            10,
-            8,
-        )
-        .expect("changed cut should create a transition");
+        let transition =
+            create_transition_with_id("xfade-test".to_string(), Some(&previous), &next, 10, 8)
+                .expect("changed cut should create a transition");
 
         assert_eq!(transition.from_node_ids, vec!["1/0/0", "1/1/0"]);
         assert_eq!(transition.to_node_ids, vec!["2/0/0", "2/1/0"]);
@@ -290,12 +291,7 @@ mod tests {
         let pattern = generate_dither_pattern(4);
         assert_eq!(
             pattern,
-            vec![
-                0, 8, 2, 10,
-                12, 4, 14, 6,
-                3, 11, 1, 9,
-                15, 7, 13, 5,
-            ]
+            vec![0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5,]
         );
     }
 

@@ -58,10 +58,16 @@ impl ScriptedEditDriver {
         }
 
         for queue in by_frame.values_mut() {
-            queue.make_contiguous().sort_by_key(|event| (event.event_index, event.occurrence_index));
+            queue
+                .make_contiguous()
+                .sort_by_key(|event| (event.event_index, event.occurrence_index));
         }
 
-        Self { by_frame, last_frame: None, dispatched_count: 0 }
+        Self {
+            by_frame,
+            last_frame: None,
+            dispatched_count: 0,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -78,7 +84,10 @@ impl ScriptedEditDriver {
             .find_map(|(frame, queue)| (!queue.is_empty()).then_some(*frame))
     }
 
-    pub fn dispatch_frame(&mut self, frame: u32) -> Result<Vec<ScriptedEditDispatchRecord>, String> {
+    pub fn dispatch_frame(
+        &mut self,
+        frame: u32,
+    ) -> Result<Vec<ScriptedEditDispatchRecord>, String> {
         if let Some(last_frame) = self.last_frame {
             if frame < last_frame {
                 return Err(format!(
@@ -106,14 +115,18 @@ impl ScriptedEditDriver {
                     expected_dirty_pages_min: event.expected_dirty_pages_min,
                     expected_dirty_pages_max: event.expected_dirty_pages_max,
                     expected_rebuild_publish_max_frames: event.expected_rebuild_publish_max_frames,
-                    expected_collider_refresh_max_frames: event.expected_collider_refresh_max_frames,
+                    expected_collider_refresh_max_frames: event
+                        .expected_collider_refresh_max_frames,
                 });
             }
         }
         Ok(out)
     }
 
-    pub fn dispatch_until(&mut self, max_frame: u32) -> Result<Vec<ScriptedEditDispatchRecord>, String> {
+    pub fn dispatch_until(
+        &mut self,
+        max_frame: u32,
+    ) -> Result<Vec<ScriptedEditDispatchRecord>, String> {
         let mut out = Vec::new();
         for frame in 0..=max_frame {
             out.extend(self.dispatch_frame(frame)?);
@@ -140,7 +153,10 @@ pub fn dispatch_record_to_csv_row(record: &ScriptedEditDispatchRecord) -> String
         record.position[2],
         record.radius,
         record.strength,
-        record.target_height.map(|value| format!("{value:.6}")).unwrap_or_default(),
+        record
+            .target_height
+            .map(|value| format!("{value:.6}"))
+            .unwrap_or_default(),
         record.expected_dirty_pages_min,
         record.expected_dirty_pages_max,
         record.expected_rebuild_publish_max_frames,
@@ -148,9 +164,13 @@ pub fn dispatch_record_to_csv_row(record: &ScriptedEditDispatchRecord) -> String
     )
 }
 
-pub fn parse_scripted_edit_event_csv(input: &str) -> Result<Vec<ScriptedEditDispatchInput>, String> {
+pub fn parse_scripted_edit_event_csv(
+    input: &str,
+) -> Result<Vec<ScriptedEditDispatchInput>, String> {
     let mut lines = input.lines().filter(|line| !line.trim().is_empty());
-    let header = lines.next().ok_or_else(|| "empty scripted edit event CSV".to_string())?;
+    let header = lines
+        .next()
+        .ok_or_else(|| "empty scripted edit event CSV".to_string())?;
     let columns: Vec<&str> = header.split(',').map(str::trim).collect();
 
     let mut events = Vec::new();
@@ -169,7 +189,11 @@ pub fn parse_scripted_edit_event_csv(input: &str) -> Result<Vec<ScriptedEditDisp
 
         events.push(ScriptedEditDispatchInput {
             event_index: parse_u32(read("event_index")?, "event_index", line_index + 2)?,
-            occurrence_index: parse_u32(read("occurrence_index")?, "occurrence_index", line_index + 2)?,
+            occurrence_index: parse_u32(
+                read("occurrence_index")?,
+                "occurrence_index",
+                line_index + 2,
+            )?,
             frame: parse_u32(read("frame")?, "frame", line_index + 2)?,
             name: read("name")?.to_string(),
             kind: read("kind")?.to_string(),
@@ -180,7 +204,11 @@ pub fn parse_scripted_edit_event_csv(input: &str) -> Result<Vec<ScriptedEditDisp
             ],
             radius: parse_f32(read("radius")?, "radius", line_index + 2)?,
             strength: parse_f32(read("strength")?, "strength", line_index + 2)?,
-            target_height: parse_optional_f32(read("target_height").unwrap_or(""), "target_height", line_index + 2)?,
+            target_height: parse_optional_f32(
+                read("target_height").unwrap_or(""),
+                "target_height",
+                line_index + 2,
+            )?,
             expected_dirty_pages_min: parse_u32(
                 read("expected_dirty_pages_min")?,
                 "expected_dirty_pages_min",
@@ -218,7 +246,9 @@ fn parse_f32(value: &str, column: &str, line: usize) -> Result<f32, String> {
         .parse::<f32>()
         .map_err(|error| format!("line {line} invalid `{column}` value `{value}`: {error}"))?;
     if !parsed.is_finite() {
-        return Err(format!("line {line} invalid non-finite `{column}` value `{value}`"));
+        return Err(format!(
+            "line {line} invalid non-finite `{column}` value `{value}`"
+        ));
     }
     Ok(parsed)
 }

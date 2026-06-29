@@ -10,17 +10,17 @@ use voxel_builder::rendering::ao_config::BakedAoConfig;
 use voxel_builder::voxel::chunk::{Chunk, LodLevel};
 use voxel_builder::voxel::materials::MaterialId;
 use voxel_builder::voxel::meshing::{
-    generate_chunk_mesh_for_request, MeshForensicsOptions, MeshMode, MeshRequest,
-    WaterAirExposureMode,
+    MeshForensicsOptions, MeshMode, MeshRequest, WaterAirExposureMode,
+    generate_chunk_mesh_for_request,
 };
 use voxel_builder::voxel::skirt::NeighborLods;
 use voxel_builder::voxel::types::VoxelType;
 use voxel_builder::voxel::world::VoxelWorld;
 use voxel_builder::world::source::{
-    evaluate_world_source_cpu_gpu_drift, material_with_biome, ProceduralWorldSourceTerrainBridge,
-    TerrainSourceConfig, TerrainSourceStartupReport, UnavailableWorldSourceGpuReadback,
-    WorldSourceDriftGateConfig, WorldSourceDriftGateReport, WorldSourceDriftSamplePoint,
-    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult,
+    ProceduralWorldSourceTerrainBridge, TerrainSourceConfig, TerrainSourceStartupReport,
+    UnavailableWorldSourceGpuReadback, WorldSourceDriftGateConfig, WorldSourceDriftGateReport,
+    WorldSourceDriftSamplePoint, WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult,
+    evaluate_world_source_cpu_gpu_drift, material_with_biome,
 };
 
 const DEFAULT_SAMPLE_CHUNKS: [IVec3; 4] = [
@@ -33,7 +33,10 @@ const WORLD_SIZE_CHUNKS: IVec3 = IVec3::new(2, 2, 2);
 const RELEASE_COMMAND: &str = "cargo run --release --bin world_source_acceptance";
 
 #[derive(Parser, Debug)]
-#[command(about = "Write a WorldSource GPU-first acceptance summary.json", version)]
+#[command(
+    about = "Write a WorldSource GPU-first acceptance summary.json",
+    version
+)]
 struct Args {
     #[arg(long, default_value = "bench-runs")]
     output_root: PathBuf,
@@ -52,6 +55,8 @@ struct AcceptanceSummary {
     build_profile: String,
     release_mode: bool,
     release_command: &'static str,
+    acceptance_pass: bool,
+    acceptance_blockers: Vec<&'static str>,
     terrain_source: TerrainSourceStartupReport,
     chunk_generation: ChunkGenerationBenchSummary,
     mesh_build: MeshBuildBenchSummary,
@@ -117,7 +122,11 @@ fn run() -> Result<PathBuf, String> {
     let bridge = ProceduralWorldSourceTerrainBridge::load_or_default();
 
     let (mut world, chunk_generation) = bench_chunk_generation(&bridge);
-    let mesh_mode = if args.blocky { MeshMode::Blocky } else { MeshMode::SurfaceNets };
+    let mesh_mode = if args.blocky {
+        MeshMode::Blocky
+    } else {
+        MeshMode::SurfaceNets
+    };
     let (mesh_build, material_draw_impact) = bench_mesh_build(&mut world, mesh_mode)?;
     let drift_points = drift_points();
     let gpu_readback = UnavailableWorldSourceGpuReadback.read_world_source_samples(&drift_points);
@@ -127,6 +136,8 @@ fn run() -> Result<PathBuf, String> {
         gpu_readback.samples(),
         WorldSourceDriftGateConfig::default(),
     );
+    let acceptance_blockers = acceptance_blockers(&terrain_config, &gpu_readback, &drift_gate);
+    let acceptance_pass = acceptance_blockers.is_empty();
 
     let summary = AcceptanceSummary {
         schema_version: 1,
@@ -134,6 +145,8 @@ fn run() -> Result<PathBuf, String> {
         build_profile: build_profile().to_string(),
         release_mode: !cfg!(debug_assertions),
         release_command: RELEASE_COMMAND,
+        acceptance_pass,
+        acceptance_blockers,
         terrain_source,
         chunk_generation,
         mesh_build,
@@ -162,6 +175,24 @@ fn require_default_gpu_runtime_path(config: &TerrainSourceConfig) -> Result<(), 
         "world_source_acceptance requires terrain_source.mode=gpu_world_source; got {}",
         config.mode.acceptance_label(),
     ))
+}
+
+fn acceptance_blockers(
+    config: &TerrainSourceConfig,
+    gpu_readback: &WorldSourceGpuReadbackResult,
+    drift_gate: &WorldSourceDriftGateReport,
+) -> Vec<&'static str> {
+    let mut blockers = Vec::new();
+    if !config.is_gpu_default_path() {
+        blockers.push("terrain_source_not_gpu_world_source");
+    }
+    if gpu_readback.samples().is_none() {
+        blockers.push("gpu_readback_unavailable");
+    }
+    if !drift_gate.is_acceptance_pass() {
+        blockers.push("drift_gate_not_passed");
+    }
+    blockers
 }
 
 fn bench_chunk_generation(
@@ -335,7 +366,7 @@ fn build_profile() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use voxel_builder::world::source::TerrainSourceMode;
+    use voxel_builder::world::source::{TerrainSourceMode, WorldSourceDriftGateStatus};
 
     #[test]
     fn default_run_name_is_world_source_prefixed() {
@@ -355,14 +386,41 @@ mod tests {
 
     #[test]
     fn acceptance_requires_gpu_world_source_mode() {
-        assert!(require_default_gpu_runtime_path(&TerrainSourceConfig {
+        assert!(
+            require_default_gpu_runtime_path(&TerrainSourceConfig {
+                mode: TerrainSourceMode::GpuWorldSource,
+            })
+            .is_ok()
+        );
+        assert!(
+            require_default_gpu_runtime_path(&TerrainSourceConfig {
+                mode: TerrainSourceMode::Legacy,
+            })
+            .is_err()
+        );
+        assert!(
+            require_default_gpu_runtime_path(&TerrainSourceConfig {
+                mode: TerrainSourceMode::CpuWorldSourceReference,
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn skipped_drift_gate_blocks_acceptance_pass() {
+        let config = TerrainSourceConfig {
             mode: TerrainSourceMode::GpuWorldSource,
-        }).is_ok());
-        assert!(require_default_gpu_runtime_path(&TerrainSourceConfig {
-            mode: TerrainSourceMode::Legacy,
-        }).is_err());
-        assert!(require_default_gpu_runtime_path(&TerrainSourceConfig {
-            mode: TerrainSourceMode::CpuWorldSourceReference,
-        }).is_err());
+        };
+        let gpu_readback = WorldSourceGpuReadbackResult::unavailable("gpu_readback_unavailable");
+        let drift_gate = WorldSourceDriftGateReport {
+            status: WorldSourceDriftGateStatus::Skipped,
+            sample_count: 5,
+            compared_count: 0,
+            skipped_reason: Some("gpu_readback_unavailable".to_string()),
+            failures: Vec::new(),
+        };
+
+        let blockers = acceptance_blockers(&config, &gpu_readback, &drift_gate);
+        assert_eq!(blockers, vec!["gpu_readback_unavailable", "drift_gate_not_passed"]);
     }
 }

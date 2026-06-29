@@ -1,6 +1,6 @@
+use super::TerrainConfig;
 use super::noise::sample_terrain_height_with_world_shape;
 use super::world_shape::{CoastSurfaceClass, OceanClass, WorldShapeSampler};
-use super::TerrainConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FarFieldTerrainSample {

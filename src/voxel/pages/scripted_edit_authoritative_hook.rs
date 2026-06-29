@@ -148,7 +148,9 @@ where
             } else {
                 match mode {
                     AuthoritativeEditHookMode::DryRunOnly => "dry_run_only",
-                    AuthoritativeEditHookMode::ApplyRequestedWithoutHook => "authoritative_hook_missing",
+                    AuthoritativeEditHookMode::ApplyRequestedWithoutHook => {
+                        "authoritative_hook_missing"
+                    }
                     AuthoritativeEditHookMode::ApplyWithHook => "accepted_by_contract_hook",
                 }
             };
@@ -169,7 +171,9 @@ where
 }
 
 pub fn audit_rows_to_csv(rows: &[AuthoritativeEditAuditRow]) -> String {
-    let mut out = String::from("request_id,frame,checkpoint,decision,requires_authoritative_world_mutation,hook_available,apply_requested,dirty_lod0_pages,dirty_nodes,note\n");
+    let mut out = String::from(
+        "request_id,frame,checkpoint,decision,requires_authoritative_world_mutation,hook_available,apply_requested,dirty_lod0_pages,dirty_nodes,note\n",
+    );
     for row in rows {
         out.push_str(&format!(
             "{},{},{},{},{},{},{},{},{},{}\n",
@@ -261,4 +265,3 @@ mod tests {
         );
     }
 }
-

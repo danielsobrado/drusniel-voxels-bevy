@@ -198,9 +198,10 @@ mod tests {
     fn bench_adapter_exports_stable_rows() {
         let rows = build_clod_shadow_bench_rows(&load_stats(), &spawn_stats());
         assert_eq!(rows.len(), 14);
-        assert!(rows.iter().any(|row| {
-            row.name == "Clod Shadow Saved Percent" && row.value == "75.0000"
-        }));
+        assert!(
+            rows.iter()
+                .any(|row| { row.name == "Clod Shadow Saved Percent" && row.value == "75.0000" })
+        );
     }
 
     #[test]
@@ -212,12 +213,15 @@ mod tests {
         );
 
         assert_eq!(rows.len(), 17);
-        assert!(rows.iter().any(|row| {
-            row.name == "Clod Shadow Runtime Mode" && row.value == "proxy"
-        }));
-        assert!(rows.iter().any(|row| {
-            row.name == "Clod Shadow Runtime Mode Code" && row.value == "1.0000"
-        }));
+        assert!(
+            rows.iter()
+                .any(|row| { row.name == "Clod Shadow Runtime Mode" && row.value == "proxy" })
+        );
+        assert!(
+            rows.iter().any(|row| {
+                row.name == "Clod Shadow Runtime Mode Code" && row.value == "1.0000"
+            })
+        );
     }
 
     #[test]
@@ -225,7 +229,10 @@ mod tests {
         let mut rows = vec![("Existing Metric".to_owned(), "1.0000".to_owned())];
         append_clod_shadow_bench_rows(&mut rows, &load_stats(), &spawn_stats());
         assert_eq!(rows.first().unwrap().0, "Existing Metric");
-        assert!(rows.iter().any(|row| row.0 == "Clod Shadow Missing Visual Entities"));
+        assert!(
+            rows.iter()
+                .any(|row| row.0 == "Clod Shadow Missing Visual Entities")
+        );
     }
 
     #[test]

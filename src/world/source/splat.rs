@@ -74,39 +74,96 @@ fn normalize_weights4(mut weights: [f32; 4]) -> [f32; 4] {
     weights
 }
 
-pub fn sample_biome_splat(biome: BiomeId, height: f32, sea_level: f32, slope: f32) -> BiomeSplatSample {
+pub fn sample_biome_splat(
+    biome: BiomeId,
+    height: f32,
+    sea_level: f32,
+    slope: f32,
+) -> BiomeSplatSample {
     let rock_weight = ((slope - 0.55) / 0.35).clamp(0.0, 1.0);
     let shore_weight = ((sea_level + 5.0 - height) / 9.0).clamp(0.0, 1.0);
 
     match biome {
         BiomeId::Ocean => BiomeSplatSample {
-            layers: [MaterialLayerId::OceanBed, MaterialLayerId::Sand, MaterialLayerId::Rock, MaterialLayerId::Mud],
+            layers: [
+                MaterialLayerId::OceanBed,
+                MaterialLayerId::Sand,
+                MaterialLayerId::Rock,
+                MaterialLayerId::Mud,
+            ],
             weights: [1.0 - shore_weight * 0.35, shore_weight * 0.35, 0.0, 0.0],
-        }.normalized(),
+        }
+        .normalized(),
         BiomeId::Coast => BiomeSplatSample {
-            layers: [MaterialLayerId::Sand, MaterialLayerId::Rock, MaterialLayerId::Grass, MaterialLayerId::Mud],
+            layers: [
+                MaterialLayerId::Sand,
+                MaterialLayerId::Rock,
+                MaterialLayerId::Grass,
+                MaterialLayerId::Mud,
+            ],
             weights: [1.0 - rock_weight * 0.45, rock_weight * 0.45, 0.0, 0.0],
-        }.normalized(),
+        }
+        .normalized(),
         BiomeId::Mountain => BiomeSplatSample {
-            layers: [MaterialLayerId::Rock, MaterialLayerId::Grass, MaterialLayerId::ForestFloor, MaterialLayerId::Sand],
-            weights: [0.72 + rock_weight * 0.28, (1.0 - rock_weight) * 0.2, (1.0 - rock_weight) * 0.08, 0.0],
-        }.normalized(),
+            layers: [
+                MaterialLayerId::Rock,
+                MaterialLayerId::Grass,
+                MaterialLayerId::ForestFloor,
+                MaterialLayerId::Sand,
+            ],
+            weights: [
+                0.72 + rock_weight * 0.28,
+                (1.0 - rock_weight) * 0.2,
+                (1.0 - rock_weight) * 0.08,
+                0.0,
+            ],
+        }
+        .normalized(),
         BiomeId::Swamp => BiomeSplatSample {
-            layers: [MaterialLayerId::Mud, MaterialLayerId::ForestFloor, MaterialLayerId::Grass, MaterialLayerId::Sand],
+            layers: [
+                MaterialLayerId::Mud,
+                MaterialLayerId::ForestFloor,
+                MaterialLayerId::Grass,
+                MaterialLayerId::Sand,
+            ],
             weights: [0.68, 0.22, 0.1, 0.0],
-        }.normalized(),
+        }
+        .normalized(),
         BiomeId::Plains => BiomeSplatSample {
-            layers: [MaterialLayerId::DryGrass, MaterialLayerId::Grass, MaterialLayerId::Sand, MaterialLayerId::Rock],
+            layers: [
+                MaterialLayerId::DryGrass,
+                MaterialLayerId::Grass,
+                MaterialLayerId::Sand,
+                MaterialLayerId::Rock,
+            ],
             weights: [0.72, 0.2, 0.08, rock_weight * 0.12],
-        }.normalized(),
+        }
+        .normalized(),
         BiomeId::Forest => BiomeSplatSample {
-            layers: [MaterialLayerId::ForestFloor, MaterialLayerId::Grass, MaterialLayerId::Rock, MaterialLayerId::Mud],
+            layers: [
+                MaterialLayerId::ForestFloor,
+                MaterialLayerId::Grass,
+                MaterialLayerId::Rock,
+                MaterialLayerId::Mud,
+            ],
             weights: [0.72, 0.2 * (1.0 - rock_weight), rock_weight * 0.18, 0.0],
-        }.normalized(),
+        }
+        .normalized(),
         BiomeId::Meadows => BiomeSplatSample {
-            layers: [MaterialLayerId::Grass, MaterialLayerId::ForestFloor, MaterialLayerId::Sand, MaterialLayerId::Rock],
-            weights: [0.78 - shore_weight * 0.3, 0.14, shore_weight * 0.3, rock_weight * 0.08],
-        }.normalized(),
+            layers: [
+                MaterialLayerId::Grass,
+                MaterialLayerId::ForestFloor,
+                MaterialLayerId::Sand,
+                MaterialLayerId::Rock,
+            ],
+            weights: [
+                0.78 - shore_weight * 0.3,
+                0.14,
+                shore_weight * 0.3,
+                rock_weight * 0.08,
+            ],
+        }
+        .normalized(),
     }
 }
 
@@ -140,9 +197,18 @@ mod tests {
 
     #[test]
     fn biome_maps_to_expected_dominant_layer() {
-        assert_eq!(sample_biome_splat(BiomeId::Ocean, 10.0, 18.0, 0.1).dominant_layer(), MaterialLayerId::OceanBed);
-        assert_eq!(sample_biome_splat(BiomeId::Coast, 18.0, 18.0, 0.1).dominant_layer(), MaterialLayerId::Sand);
-        assert_eq!(sample_biome_splat(BiomeId::Mountain, 100.0, 18.0, 0.8).dominant_layer(), MaterialLayerId::Rock);
+        assert_eq!(
+            sample_biome_splat(BiomeId::Ocean, 10.0, 18.0, 0.1).dominant_layer(),
+            MaterialLayerId::OceanBed
+        );
+        assert_eq!(
+            sample_biome_splat(BiomeId::Coast, 18.0, 18.0, 0.1).dominant_layer(),
+            MaterialLayerId::Sand
+        );
+        assert_eq!(
+            sample_biome_splat(BiomeId::Mountain, 100.0, 18.0, 0.8).dominant_layer(),
+            MaterialLayerId::Rock
+        );
     }
 
     #[test]
@@ -150,7 +216,10 @@ mod tests {
         for biome in all_biomes() {
             let sample = sample_biome_splat(biome, 32.0, 18.0, 0.7);
             let sum: f32 = sample.triplanar_weights().iter().sum();
-            assert!((sum - 1.0).abs() < 0.0001, "{biome:?} triplanar weights sum to {sum}");
+            assert!(
+                (sum - 1.0).abs() < 0.0001,
+                "{biome:?} triplanar weights sum to {sum}"
+            );
         }
     }
 
@@ -165,7 +234,10 @@ mod tests {
             ("MATERIAL_SAND", MaterialLayerId::Sand as u32),
             ("MATERIAL_OCEAN_BED", MaterialLayerId::OceanBed as u32),
         ] {
-            assert!(WGSL.contains(&format!("const {name} : u32 = {id}u;")), "missing WGSL constant {name}={id}");
+            assert!(
+                WGSL.contains(&format!("const {name} : u32 = {id}u;")),
+                "missing WGSL constant {name}={id}"
+            );
         }
     }
 

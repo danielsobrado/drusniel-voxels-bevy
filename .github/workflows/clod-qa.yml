@@ -25,6 +25,7 @@ jobs:
       VOXEL_CLOD_CROSSFADE_BRIDGE: '1'
       VOXEL_CLOD_CROSSFADE_MATERIAL: '1'
       VOXEL_CLOD_CROSSFADE_STATS_CSV: '1'
+      VOXEL_CLOD_CUT_FREEZE_CSV: '1'
       VOXEL_CLOD_BORDER_LOCK_CSV: '1'
       VOXEL_CLOD_TOPOLOGY_CSV: '1'
       VOXEL_CLOD_SIMPLIFY_CSV: '1'
@@ -37,6 +38,11 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Build all CLOD binaries
         run: cargo check --bins
+      - name: Compile tests without running
+        run: cargo test --no-run
+      - name: Check CLOD shell scripts
+        run: |
+          bash -n scripts/*clod*.sh scripts/run-clod-*.sh scripts/guard-clod-*.sh scripts/export-clod-*.sh scripts/report-clod-*.sh
       - name: Run final CLOD QA
         run: scripts/run-clod-final-qa.sh
       - name: Upload CLOD QA artifacts

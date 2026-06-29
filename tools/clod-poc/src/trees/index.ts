@@ -10,9 +10,11 @@ export * from "./tree_gpu_ring_geometry.js";
 export * from "./tree_impostor_baker.js";
 export * from "./tree_impostor_blend_geometry.js";
 export * from "./tree_impostor_material.js";
+export * from "./tree_impostor_material_selector.js";
 export * from "./tree_impostor_octahedral.js";
 export * from "./tree_impostor_runtime.js";
 export * from "./tree_lod.js";
+export * from "./tree_ring_impostor_node_material.js";
 export * from "./tree_ring_math.js";
 export * from "./tree_ring_lighting_proxies.js";
 export * from "./tree_morphology.js";
@@ -23,15 +25,25 @@ export * from "./tree_system_gpu_policy.js";
 export * from "./tree_system_gpu_ring_draw.js";
 export * from "./tree_system_gpu_ring_prepass.js";
 export * from "./tree_system_gpu_status.js";
+export * from "./tree_system_gpu_validation.js";
 export * from "./tree_system_impostor_resources.js";
 export * from "./tree_system_instance_attributes.js";
 export * from "./tree_system_instance_transform.js";
 export * from "./tree_system_lifecycle.js";
 export * from "./tree_system_lighting_proxies.js";
+export * from "./tree_system_lod_resolution.js";
 export * from "./tree_system_material_application.js";
 export * from "./tree_system_math.js";
 export * from "./tree_system_matrix_state.js";
 export * from "./tree_system_mesh_bounds.js";
+export {
+  attachTreePatchInstanceAttributes,
+  createTreePatchLodMesh,
+  createTreePatchMeshGroup,
+  type TreePatchLodMeshInput,
+  type TreePatchMeshFactoryInput,
+  type TreePatchMeshFactoryResult,
+} from "./tree_system_patch_mesh_factory.js";
 export * from "./tree_system_patch_planner.js";
 export * from "./tree_system_patch_removal.js";
 export * from "./tree_system_settings_plan.js";

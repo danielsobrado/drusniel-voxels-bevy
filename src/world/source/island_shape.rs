@@ -1,7 +1,10 @@
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
-use super::noise::{domain_warped_fbm2, hash_position_seeded, smooth01, smoothstep_range, DomainWarpSettings, FbmSettings};
+use super::noise::{
+    DomainWarpSettings, FbmSettings, domain_warped_fbm2, hash_position_seeded, smooth01,
+    smoothstep_range,
+};
 
 #[derive(Resource, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct IslandShapeConfig {
@@ -65,9 +68,21 @@ impl IslandShapeConfig {
 }
 
 fn island_center(cell_x: i32, cell_z: i32, cfg: &IslandShapeConfig) -> (f32, f32, f32) {
-    let ox = hash_position_seeded(cell_x.wrapping_mul(43), cell_z.wrapping_mul(59), cfg.seed.wrapping_add(1709)) - 0.5;
-    let oz = hash_position_seeded(cell_x.wrapping_mul(71), cell_z.wrapping_mul(37), cfg.seed.wrapping_add(2203)) - 0.5;
-    let radius_t = hash_position_seeded(cell_x.wrapping_mul(97), cell_z.wrapping_mul(83), cfg.seed.wrapping_add(3251));
+    let ox = hash_position_seeded(
+        cell_x.wrapping_mul(43),
+        cell_z.wrapping_mul(59),
+        cfg.seed.wrapping_add(1709),
+    ) - 0.5;
+    let oz = hash_position_seeded(
+        cell_x.wrapping_mul(71),
+        cell_z.wrapping_mul(37),
+        cfg.seed.wrapping_add(2203),
+    ) - 0.5;
+    let radius_t = hash_position_seeded(
+        cell_x.wrapping_mul(97),
+        cell_z.wrapping_mul(83),
+        cfg.seed.wrapping_add(3251),
+    );
     (
         (cell_x as f32 + 0.5 + ox * 0.58) * cfg.spacing_m,
         (cell_z as f32 + 0.5 + oz * 0.58) * cfg.spacing_m,
@@ -101,7 +116,9 @@ pub fn sample_island_mask(x: f32, z: f32, config: &IslandShapeConfig) -> IslandM
             warp_scale: 0.00021,
             warp_strength: cfg.warp_strength_m * 1.2,
         },
-    ) * 2.0 - 1.0) * cfg.warp_strength_m;
+    ) * 2.0
+        - 1.0)
+        * cfg.warp_strength_m;
     let warp_z = (domain_warped_fbm2(
         x - 577.0,
         z + 1217.0,
@@ -116,7 +133,9 @@ pub fn sample_island_mask(x: f32, z: f32, config: &IslandShapeConfig) -> IslandM
             warp_scale: 0.00021,
             warp_strength: cfg.warp_strength_m * 1.2,
         },
-    ) * 2.0 - 1.0) * cfg.warp_strength_m;
+    ) * 2.0
+        - 1.0)
+        * cfg.warp_strength_m;
 
     let sx = x + warp_x;
     let sz = z + warp_z;
@@ -181,9 +200,12 @@ pub fn apply_island_shape(x: f32, z: f32, inland_height: f32, config: &IslandSha
         let sample = sample_island_mask(x, z, &cfg);
         let ocean_floor = cfg.sea_level - 18.0;
         let cliff_target = inland_height.max(cfg.sea_level + 7.0 + sample.cliff_weight * 18.0);
-        let beach_target = cfg.sea_level + smooth01(sample.shore_distance_m.max(0.0) / cfg.beach_width_m) * 3.5;
-        let coast_t = smooth01(sample.shore_distance_m.max(0.0) / (cfg.beach_width_m + cfg.cliff_width_m));
-        let coast_height = beach_target + (cliff_target - beach_target) * sample.cliff_weight * coast_t;
+        let beach_target =
+            cfg.sea_level + smooth01(sample.shore_distance_m.max(0.0) / cfg.beach_width_m) * 3.5;
+        let coast_t =
+            smooth01(sample.shore_distance_m.max(0.0) / (cfg.beach_width_m + cfg.cliff_width_m));
+        let coast_height =
+            beach_target + (cliff_target - beach_target) * sample.cliff_weight * coast_t;
         let island_height = if sample.shore_distance_m < cfg.beach_width_m + cfg.cliff_width_m {
             inland_height.min(coast_height)
         } else {

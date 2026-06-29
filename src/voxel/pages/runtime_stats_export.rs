@@ -100,7 +100,10 @@ pub(crate) fn clod_runtime_stats_export_system(
     if let Err(err) = append_snapshot_csv(&settings.csv_path, &snapshot) {
         let msg = err.to_string();
         if state.last_error.as_deref() != Some(msg.as_str()) {
-            warn!("Failed to export CLOD runtime stats to {:?}: {msg}", settings.csv_path);
+            warn!(
+                "Failed to export CLOD runtime stats to {:?}: {msg}",
+                settings.csv_path
+            );
             state.last_error = Some(msg);
         }
     } else {
@@ -124,7 +127,9 @@ struct ClodRuntimeStatsSnapshot {
     visible_lods: String,
 }
 
-fn visible_lod_counts(page_query: &Query<(&ClodPageMeshTag, &Visibility)>) -> BTreeMap<usize, usize> {
+fn visible_lod_counts(
+    page_query: &Query<(&ClodPageMeshTag, &Visibility)>,
+) -> BTreeMap<usize, usize> {
     let mut counts = BTreeMap::new();
     for (tag, visibility) in page_query.iter() {
         if is_hidden(visibility) {
@@ -157,7 +162,10 @@ fn append_snapshot_csv(path: &PathBuf, snapshot: &ClodRuntimeStatsSnapshot) -> s
     let needs_header = !path.exists() || path.metadata()?.len() == 0;
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     if needs_header {
-        writeln!(file, "frame,revision,indexed_nodes,root_nodes,visible_pages,rendered_pages,split_pages,forced_splits,blocked_splits,near_field_forced_splits,frozen,visible_lods")?;
+        writeln!(
+            file,
+            "frame,revision,indexed_nodes,root_nodes,visible_pages,rendered_pages,split_pages,forced_splits,blocked_splits,near_field_forced_splits,frozen,visible_lods"
+        )?;
     }
     writeln!(
         file,
@@ -225,4 +233,3 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 }
-

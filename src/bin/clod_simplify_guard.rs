@@ -133,7 +133,9 @@ impl Args {
         }
 
         let Some(csv) = csv else {
-            return Err("usage: clod_simplify_guard [--config config.toml] <clod-simplify.csv>".to_string());
+            return Err(
+                "usage: clod_simplify_guard [--config config.toml] <clod-simplify.csv>".to_string(),
+            );
         };
 
         Ok(Self { csv, config })
@@ -269,8 +271,20 @@ fn validate(rows: &[Row], cfg: &Config) -> Result<BTreeMap<usize, LevelSummary>,
                     ),
                 ));
             }
-            validate_ratio(row, "vertex_ratio", row.vertex_ratio, cfg.min_vertex_ratio, cfg.max_vertex_ratio)?;
-            validate_ratio(row, "triangle_ratio", row.triangle_ratio, cfg.min_triangle_ratio, cfg.max_triangle_ratio)?;
+            validate_ratio(
+                row,
+                "vertex_ratio",
+                row.vertex_ratio,
+                cfg.min_vertex_ratio,
+                cfg.max_vertex_ratio,
+            )?;
+            validate_ratio(
+                row,
+                "triangle_ratio",
+                row.triangle_ratio,
+                cfg.min_triangle_ratio,
+                cfg.max_triangle_ratio,
+            )?;
         }
 
         let s = by_level.entry(row.level).or_default();
@@ -343,15 +357,54 @@ mod tests {
     #[test]
     fn accepts_basic_simplify_rows() {
         let rows = vec![
-            Row { revision: 1, level: 0, x: 0, z: 0, vertices: 10, triangles: 12, child_vertices: 0, child_triangles: 0, vertex_ratio: 1.0, triangle_ratio: 1.0, error_world: 0.0, low_benefit: false },
-            Row { revision: 1, level: 1, x: 0, z: 0, vertices: 20, triangles: 24, child_vertices: 40, child_triangles: 48, vertex_ratio: 0.5, triangle_ratio: 0.5, error_world: 0.1, low_benefit: false },
+            Row {
+                revision: 1,
+                level: 0,
+                x: 0,
+                z: 0,
+                vertices: 10,
+                triangles: 12,
+                child_vertices: 0,
+                child_triangles: 0,
+                vertex_ratio: 1.0,
+                triangle_ratio: 1.0,
+                error_world: 0.0,
+                low_benefit: false,
+            },
+            Row {
+                revision: 1,
+                level: 1,
+                x: 0,
+                z: 0,
+                vertices: 20,
+                triangles: 24,
+                child_vertices: 40,
+                child_triangles: 48,
+                vertex_ratio: 0.5,
+                triangle_ratio: 0.5,
+                error_world: 0.1,
+                low_benefit: false,
+            },
         ];
         validate(&rows, &Config::default()).unwrap();
     }
 
     #[test]
     fn rejects_bad_ratio() {
-        let rows = vec![Row { revision: 1, level: 1, x: 0, z: 0, vertices: 40, triangles: 96, child_vertices: 40, child_triangles: 48, vertex_ratio: 1.0, triangle_ratio: 2.0, error_world: 0.1, low_benefit: false }];
+        let rows = vec![Row {
+            revision: 1,
+            level: 1,
+            x: 0,
+            z: 0,
+            vertices: 40,
+            triangles: 96,
+            child_vertices: 40,
+            child_triangles: 48,
+            vertex_ratio: 1.0,
+            triangle_ratio: 2.0,
+            error_world: 0.1,
+            low_benefit: false,
+        }];
         assert!(validate(&rows, &Config::default()).is_err());
     }
 }

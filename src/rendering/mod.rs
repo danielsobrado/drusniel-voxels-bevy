@@ -22,14 +22,14 @@ pub mod procedural_support_maps;
 pub mod shadows;
 pub mod water;
 
+pub mod clod_shadow_assets;
+pub mod clod_shadow_bench_guard;
+pub mod clod_shadow_bench_integration;
+pub mod clod_shadow_config;
+pub mod clod_shadow_f3_overlay;
 pub mod clod_shadow_runtime;
 pub mod clod_shadow_spawn;
-pub mod clod_shadow_assets;
 pub mod clod_shadow_stats_export;
-pub mod clod_shadow_bench_integration;
-pub mod clod_shadow_f3_overlay;
-pub mod clod_shadow_config;
-pub mod clod_shadow_bench_guard;
 
 pub mod ao_config;
 pub mod plugin;

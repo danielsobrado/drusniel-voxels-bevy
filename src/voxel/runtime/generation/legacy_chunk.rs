@@ -60,7 +60,11 @@ fn fill_debug_flat_world(voxels: &mut [VoxelType; CHUNK_VOLUME], chunk_world_y: 
     for z in 0..CHUNK_SIZE {
         for y in 0..CHUNK_SIZE {
             let world_y = chunk_world_y + y as i32;
-            let voxel = if world_y <= 12 { VoxelType::TopSoil } else { VoxelType::Air };
+            let voxel = if world_y <= 12 {
+                VoxelType::TopSoil
+            } else {
+                VoxelType::Air
+            };
             for x in 0..CHUNK_SIZE {
                 voxels[Chunk::index(x, y, z)] = voxel;
             }

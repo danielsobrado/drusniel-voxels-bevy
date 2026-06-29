@@ -97,7 +97,10 @@ pub(crate) fn topology_csv_rows(
 impl ClodTopologyExportState {
     fn writer(&mut self, path: &Path) -> std::io::Result<&mut BufWriter<File>> {
         if self.writer.is_none() {
-            if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
                 create_dir_all(parent)?;
             }
             let file = OpenOptions::new()
@@ -179,8 +182,12 @@ mod tests {
 
     #[test]
     fn env_flag_accepts_common_truthy_values() {
-        unsafe { std::env::set_var("VOXEL_CLOD_TOPOLOGY_TEST_FLAG", "on"); }
+        unsafe {
+            std::env::set_var("VOXEL_CLOD_TOPOLOGY_TEST_FLAG", "on");
+        }
         assert!(env_flag("VOXEL_CLOD_TOPOLOGY_TEST_FLAG"));
-        unsafe { std::env::remove_var("VOXEL_CLOD_TOPOLOGY_TEST_FLAG"); }
+        unsafe {
+            std::env::remove_var("VOXEL_CLOD_TOPOLOGY_TEST_FLAG");
+        }
     }
 }

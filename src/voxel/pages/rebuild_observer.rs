@@ -146,7 +146,7 @@ pub(crate) fn clod_rebuild_observer_system(
         && matches!(tree.status.as_ref(), Some(ClodPageBuildStatus::Ready));
 
     if !published_new_tree {
-        drop(current);
+        let _ = current;
         state.last_tree_revision = tree.revision;
         return;
     }
@@ -163,7 +163,7 @@ pub(crate) fn clod_rebuild_observer_system(
     let source_complete_at = current.source_complete_at;
     let build_started_at = current.build_started_at;
     let started_at = current.started_at;
-    drop(current);
+    let _ = current;
 
     let published_at = Instant::now();
     let snapshot = ClodRebuildSnapshot {
@@ -257,11 +257,16 @@ fn ms(duration: Duration) -> f64 {
 }
 
 fn append_snapshot_csv(path: &PathBuf, snapshot: &ClodRebuildSnapshot) -> std::io::Result<()> {
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent)?;
     }
 
-    let write_header = fs::metadata(path).map(|meta| meta.len() == 0).unwrap_or(true);
+    let write_header = fs::metadata(path)
+        .map(|meta| meta.len() == 0)
+        .unwrap_or(true);
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     if write_header {
         writeln!(
@@ -323,4 +328,3 @@ mod tests {
         assert_eq!(format_ms(1.23456), "1.235");
     }
 }
-

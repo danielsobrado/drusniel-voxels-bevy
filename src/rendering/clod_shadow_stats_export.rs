@@ -5,8 +5,7 @@
 //! their lines/metrics to the current debug UI and benchmark output.
 
 use super::{
-    clod_shadow_assets::ClodShadowSnapshotLoadStats,
-    clod_shadow_spawn::ClodShadowRuntimeSpawnStats,
+    clod_shadow_assets::ClodShadowSnapshotLoadStats, clod_shadow_spawn::ClodShadowRuntimeSpawnStats,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -218,7 +217,10 @@ mod tests {
         let mut load = load_stats();
         load.last_error = Some("bad json".to_owned());
         let lines = format_clod_shadow_debug_lines(&load, &spawn_stats());
-        assert_eq!(lines.warning, Some("clod shadow load error: bad json".to_owned()));
+        assert_eq!(
+            lines.warning,
+            Some("clod shadow load error: bad json".to_owned())
+        );
     }
 
     #[test]

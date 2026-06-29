@@ -109,13 +109,22 @@ fn main() {
     let mut warnings = Vec::new();
 
     if selection.is_empty() {
-        failures.push(format!("selection CSV has no rows: {}", selection_path.display()));
+        failures.push(format!(
+            "selection CSV has no rows: {}",
+            selection_path.display()
+        ));
     }
     if crossfade.is_empty() {
-        failures.push(format!("crossfade CSV has no rows: {}", crossfade_path.display()));
+        failures.push(format!(
+            "crossfade CSV has no rows: {}",
+            crossfade_path.display()
+        ));
     }
     if cut_freeze.is_empty() {
-        failures.push(format!("cut-freeze CSV has no rows: {}", cut_freeze_path.display()));
+        failures.push(format!(
+            "cut-freeze CSV has no rows: {}",
+            cut_freeze_path.display()
+        ));
     }
 
     let selection_by_frame: BTreeMap<u64, SelectionRow> = selection
@@ -165,7 +174,9 @@ fn main() {
             ));
         }
 
-        if let Some(sel) = find_nearest_selection(&selection_by_frame, cf.frame, config.frame_tolerance) {
+        if let Some(sel) =
+            find_nearest_selection(&selection_by_frame, cf.frame, config.frame_tolerance)
+        {
             let delta = (sel.rendered_pages - cf.page_entities).abs();
             if delta > config.rendered_page_delta_max {
                 failures.push(format!(
@@ -209,8 +220,11 @@ fn main() {
     let mut last_frozen_digest: Option<&str> = None;
 
     for cut in &cut_freeze {
-        if let Some(sel) = find_nearest_selection(&selection_by_frame, cut.frame, config.frame_tolerance) {
-            if config.require_selection_freeze_matches_cut_freeze && sel.frozen != cut.frozen_active {
+        if let Some(sel) =
+            find_nearest_selection(&selection_by_frame, cut.frame, config.frame_tolerance)
+        {
+            if config.require_selection_freeze_matches_cut_freeze && sel.frozen != cut.frozen_active
+            {
                 failures.push(format!(
                     "frame {} freeze mismatch: selection.frozen={} cut_freeze.frozen_active={}",
                     cut.frame, sel.frozen, cut.frozen_active
@@ -261,7 +275,9 @@ fn main() {
                 ));
             }
 
-            if let Some(cf) = find_nearest_crossfade(&crossfade_by_frame, cut.frame, config.frame_tolerance) {
+            if let Some(cf) =
+                find_nearest_crossfade(&crossfade_by_frame, cut.frame, config.frame_tolerance)
+            {
                 if let Some(prev) = last_frozen_transition {
                     if cf.transition_id != prev {
                         frozen_transition_changes += 1;
@@ -494,7 +510,9 @@ fn find_nearest<T>(rows: &BTreeMap<u64, T>, frame: u64, tolerance: u64) -> Optio
     if tolerance == 0 {
         return None;
     }
-    let lower = rows.range(frame.saturating_sub(tolerance)..=frame).next_back();
+    let lower = rows
+        .range(frame.saturating_sub(tolerance)..=frame)
+        .next_back();
     let upper = rows.range(frame..=frame.saturating_add(tolerance)).next();
     match (lower, upper) {
         (Some((lower_frame, lower_row)), Some((upper_frame, upper_row))) => {
@@ -562,4 +580,3 @@ mod tests {
         assert_eq!(config.max_nonzero_fade_out_tail_rows, 0);
     }
 }
-

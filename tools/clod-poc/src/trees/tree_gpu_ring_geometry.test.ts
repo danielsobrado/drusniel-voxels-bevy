@@ -42,6 +42,23 @@ describe("GPU ring tree geometry selector", () => {
     expect(result.geometry).toBe(geometries.pine.impostor);
   });
 
+  it("falls back to procedural impostor geometry when impostors are disabled", () => {
+    const geometries = geometryMap();
+    const settings = cloneTreeSettings();
+    settings.impostors.enabled = false;
+    const result = selectTreeGpuRingGeometry({
+      species: "oak",
+      lod: "impostor",
+      geometries,
+      settings,
+      impostorAtlases: { oak: fakeAtlas("oak") },
+      bakedImpostorGeometries: {},
+    });
+
+    expect(result.bakedImpostor).toBe(false);
+    expect(result.geometry).toBe(geometries.oak.impostor);
+  });
+
   it("uses and caches baked billboard geometry when the species atlas is ready", () => {
     const geometries = geometryMap();
     const settings = cloneTreeSettings();
@@ -69,6 +86,8 @@ describe("GPU ring tree geometry selector", () => {
     expect(first.geometry).not.toBe(geometries.dead.impostor);
     expect(second.geometry).toBe(first.geometry);
     expect(bakedImpostorGeometries.dead).toBe(first.geometry);
+    expect(first.geometry.getAttribute("uv")).toBeDefined();
+    expect(first.geometry.getAttribute("treeVariant")).toBeDefined();
   });
 });
 

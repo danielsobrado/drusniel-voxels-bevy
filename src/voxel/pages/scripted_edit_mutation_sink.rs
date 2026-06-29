@@ -190,10 +190,8 @@ mod tests {
 
     #[test]
     fn apply_without_hook_is_ready_not_applied() {
-        let (decisions, summary) = decide_mutation_requests(
-            &[row("a")],
-            MutationSinkMode::ApplyRequestedWithoutHook,
-        );
+        let (decisions, summary) =
+            decide_mutation_requests(&[row("a")], MutationSinkMode::ApplyRequestedWithoutHook);
         assert_eq!(decisions[0].decision, MutationSinkDecisionKind::Ready);
         assert_eq!(summary.ready, 1);
         assert_eq!(summary.applied_placeholder, 0);
@@ -201,9 +199,9 @@ mod tests {
 
     #[test]
     fn duplicates_are_blocked() {
-        let (decisions, summary) = decide_mutation_requests(&[row("a"), row("a")], MutationSinkMode::DryRun);
+        let (decisions, summary) =
+            decide_mutation_requests(&[row("a"), row("a")], MutationSinkMode::DryRun);
         assert_eq!(decisions[1].decision, MutationSinkDecisionKind::Blocked);
         assert_eq!(summary.duplicate_ids, 1);
     }
 }
-

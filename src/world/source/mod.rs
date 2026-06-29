@@ -5,6 +5,8 @@ pub mod biome_region_field;
 pub mod drift_gate;
 pub mod drift_readback;
 pub mod drift_readback_render;
+pub mod drift_readback_render_plugin;
+pub mod drift_readback_staging;
 pub mod height_field;
 pub mod island_shape;
 pub mod noise;
@@ -17,41 +19,45 @@ pub mod world_source;
 #[cfg(test)]
 mod golden_fixture_tests;
 
-pub use biome_content::{BiomeContent, BiomeContentTable, BIOME_CONTENT_TABLE};
+pub use biome_content::{BIOME_CONTENT_TABLE, BiomeContent, BiomeContentTable};
 pub use biome_material_id::{material_base, material_biome, material_with_biome};
 pub use biome_region_contract::{
-    BiomeRegionContract, BIOME_COAST_HEIGHT_BAND_M, BIOME_COAST_SHORE_DISTANCE_M,
-    BIOME_FOREST_NOISE_MIN, BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M,
-    BIOME_OCEAN_HEIGHT_MARGIN_M, BIOME_OCEAN_ISLAND_MASK_MAX, BIOME_PLAINS_DISTANCE_MIN,
-    BIOME_PLAINS_NOISE_MIN, BIOME_REGION_CELL_M, BIOME_REGION_CONTRACT,
-    BIOME_SWAMP_HEIGHT_ABOVE_SEA_M, BIOME_SWAMP_NOISE_MAX,
+    BIOME_COAST_HEIGHT_BAND_M, BIOME_COAST_SHORE_DISTANCE_M, BIOME_FOREST_NOISE_MIN,
+    BIOME_MOUNTAIN_HEIGHT_ABOVE_SEA_M, BIOME_OCEAN_HEIGHT_MARGIN_M, BIOME_OCEAN_ISLAND_MASK_MAX,
+    BIOME_PLAINS_DISTANCE_MIN, BIOME_PLAINS_NOISE_MIN, BIOME_REGION_CELL_M, BIOME_REGION_CONTRACT,
+    BIOME_SWAMP_HEIGHT_ABOVE_SEA_M, BIOME_SWAMP_NOISE_MAX, BiomeRegionContract,
 };
 pub use biome_region_field::{BiomeId, BiomeRegionField, BiomeRegionSample};
 pub use drift_gate::{
-    evaluate_world_source_cpu_gpu_drift, evaluate_world_source_drift_gate,
-    sample_cpu_world_source, WorldSourceDriftFailure, WorldSourceDriftFailureKind,
-    WorldSourceDriftGateConfig, WorldSourceDriftGateReport, WorldSourceDriftGateStatus,
-    WorldSourceDriftSample, WorldSourceDriftSamplePoint,
     WORLD_SOURCE_DRIFT_HEIGHT_TOLERANCE_M, WORLD_SOURCE_DRIFT_OCEAN_MASK_TOLERANCE,
+    WorldSourceDriftFailure, WorldSourceDriftFailureKind, WorldSourceDriftGateConfig,
+    WorldSourceDriftGateReport, WorldSourceDriftGateStatus, WorldSourceDriftSample,
+    WorldSourceDriftSamplePoint, evaluate_world_source_cpu_gpu_drift,
+    evaluate_world_source_drift_gate, sample_cpu_world_source,
 };
 pub use drift_readback::{
-    build_gpu_world_source_drift_input_samples, decode_gpu_world_source_drift_outputs,
     GpuWorldSourceDriftInputSample, GpuWorldSourceDriftOutputSample,
     GpuWorldSourceDriftReadbackDispatchPlan, GpuWorldSourceDriftReadbackParams,
     StaticWorldSourceGpuReadback, UnavailableWorldSourceGpuReadback,
-    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
     WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH, WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE,
+    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
+    build_gpu_world_source_drift_input_samples, decode_gpu_world_source_drift_outputs,
 };
+pub use drift_readback_render::GpuWorldSourceDriftReadbackStateProvider;
+pub use drift_readback_render_plugin::GpuWorldSourceDriftReadbackPlugin;
+pub use drift_readback_staging::decode_staged_gpu_world_source_drift_bytes;
 pub use height_field::base_surface_height;
-pub use island_shape::{sample_island_mask, IslandMaskSample, IslandShapeConfig};
-pub use splat::{sample_biome_splat, BiomeSplatSample, MaterialLayerId};
+pub use island_shape::{IslandMaskSample, IslandShapeConfig, sample_island_mask};
+pub use splat::{BiomeSplatSample, MaterialLayerId, sample_biome_splat};
 pub use terrain_bridge::{ProceduralWorldSourceTerrainBridge, WorldSourceTerrainBridge};
-pub use terrain_source_config::{TerrainSourceConfig, TerrainSourceMode, TERRAIN_SOURCE_CONFIG_PATH};
+pub use terrain_source_config::{
+    TERRAIN_SOURCE_CONFIG_PATH, TerrainSourceConfig, TerrainSourceMode,
+};
 pub use terrain_source_diagnostics::{
-    terrain_source_startup_report, TerrainSourceRuntimePath, TerrainSourceSelectionReason,
-    TerrainSourceStartupReport,
+    TerrainSourceRuntimePath, TerrainSourceSelectionReason, TerrainSourceStartupReport,
+    terrain_source_startup_report,
 };
 pub use world_source::{
-    ProceduralWorldSource, TerrainFieldConfig, WorldSource, WorldSourceBounds, WorldSourceMetadata,
-    WORLD_SOURCE_CONFIG_PATH,
+    ProceduralWorldSource, TerrainFieldConfig, WORLD_SOURCE_CONFIG_PATH, WorldSource,
+    WorldSourceBounds, WorldSourceMetadata,
 };

@@ -12,8 +12,7 @@
 use bevy::prelude::*;
 use serde_json::Error as SerdeJsonError;
 use std::{
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -21,8 +20,7 @@ use std::{
 use super::{
     clod_shadow_config::ClodShadowRuntimeSettings,
     clod_shadow_runtime::{
-        validate_clod_shadow_runtime_snapshot, ClodShadowRuntimeError,
-        ClodShadowRuntimeSnapshot,
+        ClodShadowRuntimeError, ClodShadowRuntimeSnapshot, validate_clod_shadow_runtime_snapshot,
     },
     clod_shadow_spawn::ActiveClodShadowRuntimeSnapshot,
 };
@@ -42,10 +40,18 @@ impl std::fmt::Display for ClodShadowSnapshotLoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ClodShadowSnapshotLoadError::Io { path, message } => {
-                write!(f, "failed to read CLOD shadow snapshot {}: {message}", path.display())
+                write!(
+                    f,
+                    "failed to read CLOD shadow snapshot {}: {message}",
+                    path.display()
+                )
             }
             ClodShadowSnapshotLoadError::Json { path, message } => {
-                write!(f, "failed to parse CLOD shadow snapshot {}: {message}", path.display())
+                write!(
+                    f,
+                    "failed to parse CLOD shadow snapshot {}: {message}",
+                    path.display()
+                )
             }
             ClodShadowSnapshotLoadError::InvalidSnapshot(err) => {
                 write!(f, "invalid CLOD shadow snapshot: {err:?}")
@@ -135,7 +141,8 @@ pub fn read_clod_shadow_runtime_snapshot_from_path(
     path: impl AsRef<Path>,
 ) -> Result<ClodShadowRuntimeSnapshot, ClodShadowSnapshotLoadError> {
     let path = path.as_ref();
-    let text = fs::read_to_string(path).map_err(|err| ClodShadowSnapshotLoadError::io(path, err))?;
+    let text =
+        fs::read_to_string(path).map_err(|err| ClodShadowSnapshotLoadError::io(path, err))?;
     let snapshot: ClodShadowRuntimeSnapshot =
         serde_json::from_str(&text).map_err(|err| ClodShadowSnapshotLoadError::json(path, err))?;
     validate_clod_shadow_runtime_snapshot(&snapshot)
@@ -279,7 +286,10 @@ mod tests {
     #[test]
     fn default_path_points_to_generated_asset() {
         let source = ClodShadowSnapshotPath::default();
-        assert_eq!(source.path, PathBuf::from(DEFAULT_CLOD_SHADOW_SNAPSHOT_PATH));
+        assert_eq!(
+            source.path,
+            PathBuf::from(DEFAULT_CLOD_SHADOW_SNAPSHOT_PATH)
+        );
         assert!(source.reload_requested);
     }
 

@@ -8,8 +8,8 @@
 use bevy::prelude::*;
 
 use super::crossfade::{
-    ClodCrossfadeSequencer, ClodCutSnapshot, ClodDitherRole, ClodTransition,
-    compute_fade_states, is_transition_complete,
+    ClodCrossfadeSequencer, ClodCutSnapshot, ClodDitherRole, ClodTransition, compute_fade_states,
+    is_transition_complete,
 };
 use super::render::ClodPageMeshTag;
 use super::selection::{ClodPageNodeKey, ClodPageSelectionState};
@@ -188,9 +188,12 @@ fn node_tag_to_id(tag: &ClodPageMeshTag) -> String {
 }
 
 fn env_flag(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+    std::env::var(name).ok().is_some_and(|value| {
+        matches!(
+            value.trim(),
+            "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+        )
+    })
 }
 
 #[cfg(test)]

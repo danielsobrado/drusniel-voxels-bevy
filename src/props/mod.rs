@@ -1253,7 +1253,10 @@ fn update_prop_chunk_visibility(
         }
     }
 
-    instanced_render::sync_prop_distance_hidden_slots(&mut instanced_groups, &slot_distance_updates);
+    instanced_render::sync_prop_distance_hidden_slots(
+        &mut instanced_groups,
+        &slot_distance_updates,
+    );
 
     // Instanced group meshes follow occlusion only: a group renders while any
     // prop referencing it sits in a BFS-visible chunk.

@@ -18,17 +18,25 @@ Status: In progress.
   - `generation.rs` now stays focused on orchestration.
 - Legacy terrain source mode is now marked deprecated and logs a warning when explicitly selected.
 - Added `WorldSourceGpuReadbackProvider` plus a Rust/WGSL wire contract for drift readback samples.
-- Added `assets/shaders/world_source/drift_readback.wgsl` for GPU-side dominant-layer readback from prepared WorldSource samples.
-- Added Rust layout tests for `GpuWorldSourceDriftReadbackParams`, `GpuWorldSourceDriftInputSample`, and `GpuWorldSourceDriftOutputSample`.
+- Added `assets/shaders/world_source/drift_readback.wgsl` for dominant-layer readback from prepared WorldSource samples.
+- Added Rust layout tests for the drift readback params, input sample, and output sample structs.
+- Added `GpuWorldSourceDriftReadbackDispatchPlan` for workgroup and buffer sizing.
+- Added `decode_gpu_world_source_drift_outputs` to validate returned sample IDs before drift-gate comparison.
+- Added `decode_staged_gpu_world_source_drift_bytes` to validate staging-byte length, cast returned GPU bytes, and decode samples into `WorldSourceGpuReadbackResult`.
+- Added `src/world/source/drift_readback_render.rs` with render resources, buffer preparation, compute dispatch, staging-buffer copy, staging-buffer map, and state update.
+- Added `GpuWorldSourceDriftReadbackStateProvider` so mapped render state can be consumed through the same `WorldSourceGpuReadbackProvider` interface as static/unavailable providers.
+- Added `GpuWorldSourceDriftReadbackPlugin`, registered its render startup/prepare/cleanup systems, registered its Core3d graph node, and added it to the app bootstrap.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
+- `world_source_acceptance` now fails before writing `summary.json` unless `terrain_source.mode` is `gpu_world_source`.
 
 ## Not completed
 
-- GPU readback dispatch and buffer mapping are still missing, so drift-gate runtime acceptance still reports `skipped`.
-- Full GPU height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
+- Main-world request extraction/result bridging for `GpuWorldSourceDriftReadbackRequest` and `GpuWorldSourceDriftReadbackState` is still missing.
+- `world_source_acceptance` still uses the unavailable provider, so drift-gate runtime acceptance still reports `skipped`.
+- Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of the compatibility adapter should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Implement the render-device provider that dispatches `assets/shaders/world_source/drift_readback.wgsl`, writes `GpuWorldSourceDriftInputSample` values, maps `GpuWorldSourceDriftOutputSample` back to `WorldSourceDriftSample`, and passes those samples into the existing drift gate.
+Add a small bridge that extracts populated `GpuWorldSourceDriftReadbackRequest` values into the render app and copies `GpuWorldSourceDriftReadbackState.latest_result` back to the main app, then use `GpuWorldSourceDriftReadbackStateProvider` in the drift-gate provider call once local compile and render-app registration are verified.

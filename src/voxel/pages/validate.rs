@@ -253,7 +253,8 @@ pub fn assert_border_match(
         }
         // Material weight channels
         for j in 0..stride {
-            let wd = (a.material_weights[i * stride + j] - b.material_weights[i * stride + j]).abs();
+            let wd =
+                (a.material_weights[i * stride + j] - b.material_weights[i * stride + j]).abs();
             if wd > tolerances.material {
                 return Err(ClodBuildError::BorderMaterialMismatch {
                     message: format!(

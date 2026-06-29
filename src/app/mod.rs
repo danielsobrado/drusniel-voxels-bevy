@@ -40,6 +40,7 @@ use crate::world::environment::atmosphere::{AtmosphereIntegrationPlugin, FogPlug
 use crate::world::environment::vegetation::VegetationPlugin;
 use crate::world::environment::weather::WeatherPlugin;
 use crate::world::rules::WorldRulesPlugin;
+use crate::world::source::GpuWorldSourceDriftReadbackPlugin;
 use bevy::asset::AssetPlugin;
 use bevy::diagnostic::{
     EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
@@ -54,9 +55,7 @@ use clap::Parser;
 use self::cli::{BenchCli, BenchConfig};
 use self::gpu::{detect_gpu_limits, visual_regression_bench_uses_vulkan};
 use self::logging::load_logging_config;
-use self::mode::{
-    editor_native_viewport_requested, editor_runtime_requested, runtime_instance_kind,
-};
+use self::mode::{editor_native_viewport_requested, editor_runtime_requested, runtime_instance_kind};
 use self::plugins::run_editor_runtime;
 use self::runtime_lock::RuntimeInstanceLock;
 use self::window::asset_file_path;
@@ -174,6 +173,7 @@ pub fn run() {
         .add_plugins(VoxelPlugin)
         .add_plugins(WeatherPlugin)
         .add_plugins(RenderingPlugin)
+        .add_plugins(GpuWorldSourceDriftReadbackPlugin)
         .add_plugins(WorldRulesPlugin)
         .add_plugins(RuntimeWriteCommandPlugin)
         .add_plugins(EditorRuntimeBridgePlugin::default())

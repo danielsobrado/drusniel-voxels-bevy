@@ -73,7 +73,11 @@ pub fn fbm2(x: f32, z: f32, settings: FbmSettings) -> f32 {
         frequency *= settings.lacunarity;
     }
 
-    if max_value > 0.0 { value / max_value } else { 0.0 }
+    if max_value > 0.0 {
+        value / max_value
+    } else {
+        0.0
+    }
 }
 
 pub fn ridged_fbm2(x: f32, z: f32, settings: FbmSettings, power: f32) -> f32 {
@@ -96,7 +100,11 @@ pub fn ridged_fbm2(x: f32, z: f32, settings: FbmSettings, power: f32) -> f32 {
         frequency *= settings.lacunarity;
     }
 
-    if max_value > 0.0 { value / max_value } else { 0.0 }
+    if max_value > 0.0 {
+        value / max_value
+    } else {
+        0.0
+    }
 }
 
 pub fn domain_warped_fbm2(x: f32, z: f32, settings: DomainWarpSettings) -> f32 {

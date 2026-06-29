@@ -204,7 +204,12 @@ fn run(args: &Args) -> Result<usize, String> {
             .map_err(|err| format!("{}: failed to read scene: {err}", scene_path.display()))?;
         let scene: BenchScene = toml::from_str(&text)
             .map_err(|err| format!("{}: invalid scene TOML: {err}", scene_path.display()))?;
-        rows.extend(materialize_scene(scene_path, &scene, grid, args.influence_margin)?);
+        rows.extend(materialize_scene(
+            scene_path,
+            &scene,
+            grid,
+            args.influence_margin,
+        )?);
     }
 
     if args.require_edits && rows.is_empty() {
@@ -219,7 +224,9 @@ fn resolve_grid_config(args: &Args) -> Result<ExportGridConfig, String> {
     let cfg = ClodPagesConfig::load();
     let default_lod0_size = (cfg.page.chunks_per_page * cfg.page.chunk_size) as f32;
     let max_levels = args.max_levels.unwrap_or(cfg.page.quadtree_levels);
-    let fallback_pages = 1_i32.checked_shl(max_levels.saturating_sub(1) as u32).unwrap_or(1);
+    let fallback_pages = 1_i32
+        .checked_shl(max_levels.saturating_sub(1) as u32)
+        .unwrap_or(1);
     let default_pages_x = cfg
         .poc_gate
         .as_ref()
@@ -282,7 +289,11 @@ fn materialize_scene(
         };
 
         for op in &checkpoint.clod_edit {
-            let radius = resolve_positive_f32(op.radius.or(scene.clod_edit_defaults.radius), "radius", &op.name)?;
+            let radius = resolve_positive_f32(
+                op.radius.or(scene.clod_edit_defaults.radius),
+                "radius",
+                &op.name,
+            )?;
             let strength = resolve_positive_f32(
                 op.strength.or(scene.clod_edit_defaults.strength),
                 "strength",
@@ -342,16 +353,14 @@ fn materialize_scene(
                     expected_dirty_pages_max: op
                         .expected_dirty_pages_max
                         .or(scene.clod_edit_defaults.expected_dirty_pages_max),
-                    expected_rebuild_publish_max_frames: op.expected_rebuild_publish_max_frames.or(
-                        scene
+                    expected_rebuild_publish_max_frames: op
+                        .expected_rebuild_publish_max_frames
+                        .or(scene.clod_edit_defaults.expected_rebuild_publish_max_frames),
+                    expected_collider_refresh_max_frames: op
+                        .expected_collider_refresh_max_frames
+                        .or(scene
                             .clod_edit_defaults
-                            .expected_rebuild_publish_max_frames,
-                    ),
-                    expected_collider_refresh_max_frames: op.expected_collider_refresh_max_frames.or(
-                        scene
-                            .clod_edit_defaults
-                            .expected_collider_refresh_max_frames,
-                    ),
+                            .expected_collider_refresh_max_frames),
                     plan,
                 });
             }
@@ -366,7 +375,9 @@ fn resolve_positive_f32(value: Option<f32>, field: &str, edit_name: &str) -> Res
         return Err(format!("{edit_name}: missing required {field}"));
     };
     if !value.is_finite() || value <= 0.0 {
-        return Err(format!("{edit_name}: {field} must be finite and > 0, got {value}"));
+        return Err(format!(
+            "{edit_name}: {field} must be finite and > 0, got {value}"
+        ));
     }
     Ok(value)
 }
@@ -408,8 +419,12 @@ fn row_to_csv(row: &PlanRow) -> String {
         row.plan.lod0_page_coords.len().to_string(),
         row.plan.total_ancestor_count().to_string(),
         row.plan.total_node_count().to_string(),
-        row.expected_dirty_pages_min.map(|v| v.to_string()).unwrap_or_default(),
-        row.expected_dirty_pages_max.map(|v| v.to_string()).unwrap_or_default(),
+        row.expected_dirty_pages_min
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+        row.expected_dirty_pages_max
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
         row.expected_rebuild_publish_max_frames
             .map(|v| v.to_string())
             .unwrap_or_default(),
@@ -435,11 +450,7 @@ fn format_ancestor_coords(plan: &ClodDirtyPagePlan) -> String {
         .iter()
         .enumerate()
         .skip(1)
-        .flat_map(|(level, coords)| {
-            coords
-                .iter()
-                .map(move |(x, z)| format!("L{level}:{x}:{z}"))
-        })
+        .flat_map(|(level, coords)| coords.iter().map(move |(x, z)| format!("L{level}:{x}:{z}")))
         .collect::<Vec<_>>()
         .join("|")
 }

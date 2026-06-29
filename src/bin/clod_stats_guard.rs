@@ -268,9 +268,9 @@ fn summarize(rows: &[ClodStatsRow]) -> ClodStatsSummary {
             summary.rows_with_indexed_nodes_and_no_rendered_pages += 1;
         }
         if row.rendered_pages > 0 {
-            summary.max_visible_to_rendered_ratio = summary.max_visible_to_rendered_ratio.max(
-                row.visible_pages as f32 / row.rendered_pages as f32,
-            );
+            summary.max_visible_to_rendered_ratio = summary
+                .max_visible_to_rendered_ratio
+                .max(row.visible_pages as f32 / row.rendered_pages as f32);
         }
     }
 
@@ -339,16 +339,25 @@ fn print_report(path: &PathBuf, report: &GuardReport) {
     println!("  max indexed nodes: {}", report.summary.max_indexed_nodes);
     println!("  max root nodes: {}", report.summary.max_root_nodes);
     println!("  max visible pages: {}", report.summary.max_visible_pages);
-    println!("  max rendered pages: {}", report.summary.max_rendered_pages);
+    println!(
+        "  max rendered pages: {}",
+        report.summary.max_rendered_pages
+    );
     println!("  max split pages: {}", report.summary.max_split_pages);
     println!("  max forced splits: {}", report.summary.max_forced_splits);
-    println!("  max blocked splits: {}", report.summary.max_blocked_splits);
+    println!(
+        "  max blocked splits: {}",
+        report.summary.max_blocked_splits
+    );
     println!(
         "  max near-field forced splits: {}",
         report.summary.max_near_field_forced_splits
     );
     println!("  frozen frames: {}", report.summary.frozen_frames);
-    println!("  max visible LOD0 pages: {}", report.summary.max_lod0_visible_pages);
+    println!(
+        "  max visible LOD0 pages: {}",
+        report.summary.max_lod0_visible_pages
+    );
     println!(
         "  max visible/rendered ratio: {:.2}",
         report.summary.max_visible_to_rendered_ratio
@@ -393,10 +402,12 @@ mod tests {
         let mut rows = parse_csv(CSV).expect("parse csv");
         rows[0].blocked_splits = 1;
         let report = evaluate(&rows, ClodGuardConfig::default());
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("blocked 2:1 splits")));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("blocked 2:1 splits"))
+        );
     }
 
     #[test]
@@ -405,10 +416,12 @@ mod tests {
         rows[0].indexed_nodes = 10;
         rows[0].rendered_pages = 0;
         let report = evaluate(&rows, ClodGuardConfig::default());
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("no rendered pages")));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("no rendered pages"))
+        );
     }
 
     #[test]
@@ -419,9 +432,11 @@ mod tests {
             ..Default::default()
         };
         let report = evaluate(&rows, config);
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("visible LOD0")));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("visible LOD0"))
+        );
     }
 }

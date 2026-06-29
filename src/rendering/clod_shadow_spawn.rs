@@ -23,10 +23,7 @@ pub struct ActiveClodShadowRuntimeSnapshot {
 }
 
 impl ActiveClodShadowRuntimeSnapshot {
-    pub fn new(
-        generation: u64,
-        snapshot: ClodShadowRuntimeSnapshot,
-    ) -> Result<Self, String> {
+    pub fn new(generation: u64, snapshot: ClodShadowRuntimeSnapshot) -> Result<Self, String> {
         let plans_by_node: BTreeMap<String, ClodShadowRuntimePlanEntry> = snapshot
             .plans
             .iter()

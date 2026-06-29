@@ -40,7 +40,9 @@ impl Default for GuardConfig {
 impl GuardConfig {
     fn load(path: Option<PathBuf>) -> Result<Self, String> {
         let mut cfg = Self::default();
-        let Some(path) = path else { return Ok(cfg); };
+        let Some(path) = path else {
+            return Ok(cfg);
+        };
         let text = fs::read_to_string(&path)
             .map_err(|err| format!("failed to read config {}: {err}", path.display()))?;
         for raw in text.lines() {
@@ -48,7 +50,9 @@ impl GuardConfig {
             if line.is_empty() {
                 continue;
             }
-            let Some((key, value)) = line.split_once('=') else { continue; };
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
             let key = key.trim();
             let value = value.trim().trim_matches('"');
             match key {
@@ -59,7 +63,9 @@ impl GuardConfig {
                     cfg.require_requires_authoritative_world_mutation = parse_bool(value)?
                 }
                 "allow_hook_unavailable" => cfg.allow_hook_unavailable = parse_bool(value)?,
-                "allow_rejected_invalid_request" => cfg.allow_rejected_invalid_request = parse_bool(value)?,
+                "allow_rejected_invalid_request" => {
+                    cfg.allow_rejected_invalid_request = parse_bool(value)?
+                }
                 "allow_accepted_for_authoritative_mutation" => {
                     cfg.allow_accepted_for_authoritative_mutation = parse_bool(value)?
                 }
@@ -162,7 +168,10 @@ fn validate_rows(rows: &[HookRow], cfg: &GuardConfig) -> Result<Summary, Vec<Str
             summary.apply_requested_rows += 1;
         }
         if row.dirty_lod0_pages == 0 {
-            errors.push(format!("request {} has zero dirty_lod0_pages", row.request_id));
+            errors.push(format!(
+                "request {} has zero dirty_lod0_pages",
+                row.request_id
+            ));
         }
         if row.dirty_nodes < row.dirty_lod0_pages {
             errors.push(format!(
@@ -187,7 +196,10 @@ fn validate_rows(rows: &[HookRow], cfg: &GuardConfig) -> Result<Summary, Vec<Str
             "hook_unavailable" => {
                 summary.hook_unavailable += 1;
                 if !cfg.allow_hook_unavailable {
-                    errors.push(format!("request {} reached hook_unavailable", row.request_id));
+                    errors.push(format!(
+                        "request {} reached hook_unavailable",
+                        row.request_id
+                    ));
                 }
             }
             "rejected_invalid_request" => {
@@ -208,13 +220,18 @@ fn validate_rows(rows: &[HookRow], cfg: &GuardConfig) -> Result<Summary, Vec<Str
                     ));
                 }
             }
-            other => errors.push(format!("request {} has unknown decision {}", row.request_id, other)),
+            other => errors.push(format!(
+                "request {} has unknown decision {}",
+                row.request_id, other
+            )),
         }
     }
     if cfg.require_dry_run_only {
         let non_dry = summary.total.saturating_sub(summary.dry_run);
         if non_dry > 0 {
-            errors.push(format!("require_dry_run_only=true but {non_dry} rows were not dry_run"));
+            errors.push(format!(
+                "require_dry_run_only=true but {non_dry} rows were not dry_run"
+            ));
         }
         if summary.hook_available_rows > 0 {
             errors.push(format!(
@@ -229,12 +246,18 @@ fn validate_rows(rows: &[HookRow], cfg: &GuardConfig) -> Result<Summary, Vec<Str
             ));
         }
     }
-    if errors.is_empty() { Ok(summary) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(summary)
+    } else {
+        Err(errors)
+    }
 }
 
 fn parse_rows(text: &str) -> Result<Vec<HookRow>, String> {
     let mut lines = text.lines();
-    let Some(header_line) = lines.next() else { return Ok(Vec::new()); };
+    let Some(header_line) = lines.next() else {
+        return Ok(Vec::new());
+    };
     let headers = split_csv_line(header_line);
     lines
         .filter(|line| !line.trim().is_empty())
@@ -257,7 +280,9 @@ fn parse_row(headers: &[String], line: &str) -> Result<HookRow, String> {
         frame: parse_u64(get("frame")?, "frame")?,
         checkpoint: get("checkpoint")?.to_string(),
         decision: get("decision")?.to_string(),
-        requires_authoritative_world_mutation: parse_bool(get("requires_authoritative_world_mutation")?)?,
+        requires_authoritative_world_mutation: parse_bool(get(
+            "requires_authoritative_world_mutation",
+        )?)?,
         hook_available: parse_bool(get("hook_available")?)?,
         apply_requested: parse_bool(get("apply_requested")?)?,
         dirty_lod0_pages: parse_u32(get("dirty_lod0_pages")?, "dirty_lod0_pages")?,
@@ -342,11 +367,13 @@ mod tests {
 
     #[test]
     fn default_policy_rejects_authoritative_acceptance() {
-        assert!(validate_rows(
-            &[row("accepted_for_authoritative_mutation")],
-            &GuardConfig::default(),
-        )
-        .is_err());
+        assert!(
+            validate_rows(
+                &[row("accepted_for_authoritative_mutation")],
+                &GuardConfig::default(),
+            )
+            .is_err()
+        );
     }
 
     #[test]

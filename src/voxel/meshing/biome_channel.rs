@@ -5,7 +5,7 @@ use crate::voxel::materials::MaterialId;
 use crate::voxel::types::VoxelType;
 use crate::voxel::world::VoxelWorld;
 use crate::world::source::{
-    material_biome, BiomeId, ProceduralWorldSource, TerrainSourceConfig, WorldSource,
+    BiomeId, ProceduralWorldSource, TerrainSourceConfig, WorldSource, material_biome,
 };
 use bevy::prelude::{IVec3, UVec3, Vec3};
 
@@ -64,7 +64,9 @@ fn source_biome_from_neighbor_materials(
         for dy in 0..2 {
             for dx in 0..2 {
                 let local = IVec3::new(base_x + dx, base_y + dy, base_z + dz);
-                let Some(material) = terrain_material_at_neighbor(local, chunk, world, chunk_origin) else {
+                let Some(material) =
+                    terrain_material_at_neighbor(local, chunk, world, chunk_origin)
+                else {
                     continue;
                 };
                 if let Some(biome) = material_biome(material) {
@@ -101,7 +103,8 @@ fn terrain_material_at_neighbor(
     world: &VoxelWorld,
     chunk_origin: IVec3,
 ) -> Option<MaterialId> {
-    if local.x >= 0 && local.x < 16 && local.y >= 0 && local.y < 16 && local.z >= 0 && local.z < 16 {
+    if local.x >= 0 && local.x < 16 && local.y >= 0 && local.y < 16 && local.z >= 0 && local.z < 16
+    {
         let local = UVec3::new(local.x as u32, local.y as u32, local.z as u32);
         let voxel = chunk.get(local);
         if voxel == VoxelType::Air || voxel == VoxelType::Water {
@@ -156,10 +159,22 @@ mod tests {
 
     #[test]
     fn maps_legacy_triplanar_weights_to_named_compatibility_biomes() {
-        assert_eq!(compatibility_biome_from_triplanar_weights([1.0, 0.0, 0.0, 0.0]), BiomeId::Meadows);
-        assert_eq!(compatibility_biome_from_triplanar_weights([0.0, 1.0, 0.0, 0.0]), BiomeId::Mountain);
-        assert_eq!(compatibility_biome_from_triplanar_weights([0.0, 0.0, 1.0, 0.0]), BiomeId::Coast);
-        assert_eq!(compatibility_biome_from_triplanar_weights([0.0, 0.0, 0.0, 1.0]), BiomeId::Swamp);
+        assert_eq!(
+            compatibility_biome_from_triplanar_weights([1.0, 0.0, 0.0, 0.0]),
+            BiomeId::Meadows
+        );
+        assert_eq!(
+            compatibility_biome_from_triplanar_weights([0.0, 1.0, 0.0, 0.0]),
+            BiomeId::Mountain
+        );
+        assert_eq!(
+            compatibility_biome_from_triplanar_weights([0.0, 0.0, 1.0, 0.0]),
+            BiomeId::Coast
+        );
+        assert_eq!(
+            compatibility_biome_from_triplanar_weights([0.0, 0.0, 0.0, 1.0]),
+            BiomeId::Swamp
+        );
     }
 
     #[test]

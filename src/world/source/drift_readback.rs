@@ -4,11 +4,14 @@ use serde::{Deserialize, Serialize};
 use std::mem::size_of;
 
 use super::biome_region_field::BiomeId;
-use super::drift_gate::{sample_cpu_world_source, WorldSourceDriftSample, WorldSourceDriftSamplePoint};
+use super::drift_gate::{
+    WorldSourceDriftSample, WorldSourceDriftSamplePoint, sample_cpu_world_source,
+};
 use super::splat::MaterialLayerId;
 use super::world_source::WorldSource;
 
-pub const WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH: &str = "shaders/world_source/drift_readback.wgsl";
+pub const WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH: &str =
+    "shaders/world_source/drift_readback.wgsl";
 pub const WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE: u32 = 64;
 
 #[repr(C)]
@@ -74,7 +77,7 @@ impl GpuWorldSourceDriftOutputSample {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct GpuWorldSourceDriftReadbackDispatchPlan {
     pub sample_count: u32,
     pub workgroup_count: u32,
@@ -245,7 +248,11 @@ mod tests {
     const WGSL: &str = include_str!("../../../assets/shaders/world_source/drift_readback.wgsl");
 
     fn source() -> ProceduralWorldSource {
-        ProceduralWorldSource::new(TerrainFieldConfig::new(7, 18.0, IslandShapeConfig::default()))
+        ProceduralWorldSource::new(TerrainFieldConfig::new(
+            7,
+            18.0,
+            IslandShapeConfig::default(),
+        ))
     }
 
     #[test]
@@ -254,7 +261,10 @@ mod tests {
             .read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
 
         assert_eq!(result.status, WorldSourceGpuReadbackStatus::Unavailable);
-        assert_eq!(result.unavailable_reason.as_deref(), Some("gpu_readback_unavailable"));
+        assert_eq!(
+            result.unavailable_reason.as_deref(),
+            Some("gpu_readback_unavailable")
+        );
         assert!(result.samples().is_none());
     }
 
@@ -284,8 +294,8 @@ mod tests {
 
     #[test]
     fn dispatch_plan_matches_shader_contract() {
-        let plan = GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(129)
-            .expect("dispatch plan");
+        let plan =
+            GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(129).expect("dispatch plan");
 
         assert_eq!(plan.sample_count, 129);
         assert_eq!(plan.workgroup_count, 3);
@@ -297,8 +307,8 @@ mod tests {
 
     #[test]
     fn empty_dispatch_plan_has_no_workgroups() {
-        let plan = GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(0)
-            .expect("dispatch plan");
+        let plan =
+            GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(0).expect("dispatch plan");
 
         assert_eq!(plan.sample_count, 0);
         assert_eq!(plan.workgroup_count, 0);

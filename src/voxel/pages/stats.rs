@@ -55,10 +55,7 @@ impl BuildStats {
             let low_benefit_count = nodes.iter().filter(|n| n.low_benefit).count();
             let average_error_world =
                 nodes.iter().map(|n| n.error_world).sum::<f32>() / node_count as f32;
-            let max_error_world = nodes
-                .iter()
-                .map(|n| n.error_world)
-                .fold(0.0f32, f32::max);
+            let max_error_world = nodes.iter().map(|n| n.error_world).fold(0.0f32, f32::max);
             let average_build_ms =
                 nodes.iter().map(|n| n.build_ms).sum::<f64>() / node_count as f64;
             let max_build_ms = nodes.iter().map(|n| n.build_ms).fold(0.0, f64::max);

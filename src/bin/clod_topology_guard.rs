@@ -90,7 +90,10 @@ fn main() {
     let rows = match read_rows(&csv_path) {
         Ok(rows) => rows,
         Err(err) => {
-            eprintln!("CLOD topology guard failed to read {}: {err}", csv_path.display());
+            eprintln!(
+                "CLOD topology guard failed to read {}: {err}",
+                csv_path.display()
+            );
             process::exit(2);
         }
     };
@@ -102,14 +105,21 @@ fn main() {
     let mut empty_rows = 0usize;
 
     if rows.len() < config.min_rows {
-        failures.push(format!("expected at least {} rows, got {}", config.min_rows, rows.len()));
+        failures.push(format!(
+            "expected at least {} rows, got {}",
+            config.min_rows,
+            rows.len()
+        ));
     }
 
     for row in &rows {
         *levels_seen.entry(row.level).or_insert(0) += 1;
         *revisions_seen.entry(row.revision).or_insert(0) += 1;
 
-        let page = format!("frame {} rev {} L{}:({},{})", row.frame, row.revision, row.level, row.x, row.z);
+        let page = format!(
+            "frame {} rev {} L{}:({},{})",
+            row.frame, row.revision, row.level, row.x, row.z
+        );
 
         if row.vertex_count == 0 || row.triangle_count == 0 {
             empty_rows += 1;
@@ -179,7 +189,9 @@ fn main() {
 
     if config.require_all_levels_present {
         let Some(max_level) = config.expected_max_level else {
-            failures.push("require_all_levels_present=true but expected_max_level is not set".to_string());
+            failures.push(
+                "require_all_levels_present=true but expected_max_level is not set".to_string(),
+            );
             report(&rows, &levels_seen, &revisions_seen, warnings, failures);
             return;
         };
@@ -218,7 +230,10 @@ fn report(
         return;
     }
 
-    eprintln!("CLOD topology guard failed with {} issue(s):", failures.len());
+    eprintln!(
+        "CLOD topology guard failed with {} issue(s):",
+        failures.len()
+    );
     for failure in failures {
         eprintln!("  - {failure}");
     }
@@ -277,14 +292,42 @@ fn read_rows(path: &Path) -> Result<Vec<Row>, String> {
             boundary_edges: parse(get(i_boundary_edges)?, line_no, "boundary_edges")?,
             non_manifold_edges: parse(get(i_non_manifold_edges)?, line_no, "non_manifold_edges")?,
             invalid_indices: parse(get(i_invalid_indices)?, line_no, "invalid_indices")?,
-            repeated_index_triangles: parse(get(i_repeated_index_triangles)?, line_no, "repeated_index_triangles")?,
-            zero_area_triangles: parse(get(i_zero_area_triangles)?, line_no, "zero_area_triangles")?,
-            duplicate_triangles: parse(get(i_duplicate_triangles)?, line_no, "duplicate_triangles")?,
+            repeated_index_triangles: parse(
+                get(i_repeated_index_triangles)?,
+                line_no,
+                "repeated_index_triangles",
+            )?,
+            zero_area_triangles: parse(
+                get(i_zero_area_triangles)?,
+                line_no,
+                "zero_area_triangles",
+            )?,
+            duplicate_triangles: parse(
+                get(i_duplicate_triangles)?,
+                line_no,
+                "duplicate_triangles",
+            )?,
             orphan_vertices: parse(get(i_orphan_vertices)?, line_no, "orphan_vertices")?,
-            non_finite_positions: parse(get(i_non_finite_positions)?, line_no, "non_finite_positions")?,
-            normal_count_mismatch: parse_bool(get(i_normal_count_mismatch)?, line_no, "normal_count_mismatch")?,
-            material_count_mismatch: parse_bool(get(i_material_count_mismatch)?, line_no, "material_count_mismatch")?,
-            paint_count_mismatch: parse_bool(get(i_paint_count_mismatch)?, line_no, "paint_count_mismatch")?,
+            non_finite_positions: parse(
+                get(i_non_finite_positions)?,
+                line_no,
+                "non_finite_positions",
+            )?,
+            normal_count_mismatch: parse_bool(
+                get(i_normal_count_mismatch)?,
+                line_no,
+                "normal_count_mismatch",
+            )?,
+            material_count_mismatch: parse_bool(
+                get(i_material_count_mismatch)?,
+                line_no,
+                "material_count_mismatch",
+            )?,
+            paint_count_mismatch: parse_bool(
+                get(i_paint_count_mismatch)?,
+                line_no,
+                "paint_count_mismatch",
+            )?,
             passed: parse_bool(get(i_passed)?, line_no, "passed")?,
         });
     }
@@ -324,19 +367,51 @@ fn load_config(path: &Path) -> Config {
         let value = value.trim().trim_matches('"');
         match key {
             "min_rows" => cfg.min_rows = value.parse().unwrap_or(cfg.min_rows),
-            "allow_empty_mesh_rows" => cfg.allow_empty_mesh_rows = parse_config_bool(value, cfg.allow_empty_mesh_rows),
-            "max_invalid_indices" => cfg.max_invalid_indices = value.parse().unwrap_or(cfg.max_invalid_indices),
-            "max_repeated_index_triangles" => cfg.max_repeated_index_triangles = value.parse().unwrap_or(cfg.max_repeated_index_triangles),
-            "max_zero_area_triangles" => cfg.max_zero_area_triangles = value.parse().unwrap_or(cfg.max_zero_area_triangles),
-            "max_duplicate_triangles" => cfg.max_duplicate_triangles = value.parse().unwrap_or(cfg.max_duplicate_triangles),
-            "max_non_manifold_edges" => cfg.max_non_manifold_edges = value.parse().unwrap_or(cfg.max_non_manifold_edges),
-            "max_non_finite_positions" => cfg.max_non_finite_positions = value.parse().unwrap_or(cfg.max_non_finite_positions),
-            "max_orphan_vertices" => cfg.max_orphan_vertices = value.parse().unwrap_or(cfg.max_orphan_vertices),
-            "require_matching_normals" => cfg.require_matching_normals = parse_config_bool(value, cfg.require_matching_normals),
-            "require_matching_materials" => cfg.require_matching_materials = parse_config_bool(value, cfg.require_matching_materials),
-            "require_matching_paint_slots" => cfg.require_matching_paint_slots = parse_config_bool(value, cfg.require_matching_paint_slots),
-            "warn_on_zero_boundary_edges" => cfg.warn_on_zero_boundary_edges = parse_config_bool(value, cfg.warn_on_zero_boundary_edges),
-            "require_all_levels_present" => cfg.require_all_levels_present = parse_config_bool(value, cfg.require_all_levels_present),
+            "allow_empty_mesh_rows" => {
+                cfg.allow_empty_mesh_rows = parse_config_bool(value, cfg.allow_empty_mesh_rows)
+            }
+            "max_invalid_indices" => {
+                cfg.max_invalid_indices = value.parse().unwrap_or(cfg.max_invalid_indices)
+            }
+            "max_repeated_index_triangles" => {
+                cfg.max_repeated_index_triangles =
+                    value.parse().unwrap_or(cfg.max_repeated_index_triangles)
+            }
+            "max_zero_area_triangles" => {
+                cfg.max_zero_area_triangles = value.parse().unwrap_or(cfg.max_zero_area_triangles)
+            }
+            "max_duplicate_triangles" => {
+                cfg.max_duplicate_triangles = value.parse().unwrap_or(cfg.max_duplicate_triangles)
+            }
+            "max_non_manifold_edges" => {
+                cfg.max_non_manifold_edges = value.parse().unwrap_or(cfg.max_non_manifold_edges)
+            }
+            "max_non_finite_positions" => {
+                cfg.max_non_finite_positions = value.parse().unwrap_or(cfg.max_non_finite_positions)
+            }
+            "max_orphan_vertices" => {
+                cfg.max_orphan_vertices = value.parse().unwrap_or(cfg.max_orphan_vertices)
+            }
+            "require_matching_normals" => {
+                cfg.require_matching_normals =
+                    parse_config_bool(value, cfg.require_matching_normals)
+            }
+            "require_matching_materials" => {
+                cfg.require_matching_materials =
+                    parse_config_bool(value, cfg.require_matching_materials)
+            }
+            "require_matching_paint_slots" => {
+                cfg.require_matching_paint_slots =
+                    parse_config_bool(value, cfg.require_matching_paint_slots)
+            }
+            "warn_on_zero_boundary_edges" => {
+                cfg.warn_on_zero_boundary_edges =
+                    parse_config_bool(value, cfg.warn_on_zero_boundary_edges)
+            }
+            "require_all_levels_present" => {
+                cfg.require_all_levels_present =
+                    parse_config_bool(value, cfg.require_all_levels_present)
+            }
             "expected_max_level" => cfg.expected_max_level = value.parse().ok(),
             _ => {}
         }

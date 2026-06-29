@@ -4,7 +4,7 @@ use crate::constants::{CHUNK_SIZE, CHUNK_SIZE_I32, CHUNK_VOLUME};
 use crate::voxel::chunk::Chunk;
 use crate::voxel::materials::MaterialId;
 use crate::voxel::types::VoxelType;
-use crate::world::source::{material_with_biome, WorldSource, WorldSourceTerrainBridge};
+use crate::world::source::{WorldSource, WorldSourceTerrainBridge, material_with_biome};
 
 pub(crate) fn build_world_source_chunk<S: WorldSource>(
     chunk_pos: IVec3,
@@ -95,8 +95,8 @@ impl Chunk {
 mod tests {
     use super::*;
     use crate::world::source::{
-        material_base, material_biome, BiomeId, IslandShapeConfig, TerrainFieldConfig,
-        WorldSourceBounds, WorldSourceMetadata,
+        BiomeId, IslandShapeConfig, TerrainFieldConfig, WorldSourceBounds, WorldSourceMetadata,
+        material_base, material_biome,
     };
 
     #[derive(Debug, Clone)]
@@ -147,7 +147,10 @@ mod tests {
         let material = chunk.get_material_id(local);
 
         assert_eq!(material_biome(material), Some(BiomeId::Forest));
-        assert_eq!(material_base(material), MaterialId::from_voxel(chunk.get(local)));
+        assert_eq!(
+            material_base(material),
+            MaterialId::from_voxel(chunk.get(local))
+        );
     }
 
     #[test]
@@ -156,7 +159,10 @@ mod tests {
         let chunk = build_world_source_chunk(IVec3::new(0, 3, 0), &bridge);
         let local = UVec3::new(0, 15, 0);
 
-        assert!(matches!(chunk.get(local), VoxelType::Air | VoxelType::Water));
+        assert!(matches!(
+            chunk.get(local),
+            VoxelType::Air | VoxelType::Water
+        ));
         assert_eq!(material_biome(chunk.get_material_id(local)), None);
     }
 }

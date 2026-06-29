@@ -73,7 +73,11 @@ pub(crate) fn border_lock_stats(
 }
 
 fn ratio(num: usize, den: usize) -> f32 {
-    if den == 0 { 0.0 } else { num as f32 / den as f32 }
+    if den == 0 {
+        0.0
+    } else {
+        num as f32 / den as f32
+    }
 }
 
 #[cfg(test)]

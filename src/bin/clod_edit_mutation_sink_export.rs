@@ -4,11 +4,14 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use voxel_builder::voxel::pages::scripted_edit_mutation_sink::{
-    decide_mutation_requests, MutationRequestRow, MutationSinkMode,
+    MutationRequestRow, MutationSinkMode, decide_mutation_requests,
 };
 
 fn bool_env(name: &str) -> bool {
-    matches!(env::var(name).ok().as_deref(), Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES"))
+    matches!(
+        env::var(name).ok().as_deref(),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
 }
 
 fn parse_bool(value: &str) -> bool {
@@ -17,7 +20,10 @@ fn parse_bool(value: &str) -> bool {
 
 fn parse_optional_f32(value: &str) -> Option<f32> {
     let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") || trimmed.eq_ignore_ascii_case("null") {
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("none")
+        || trimmed.eq_ignore_ascii_case("null")
+    {
         None
     } else {
         trimmed.parse().ok()
@@ -27,12 +33,17 @@ fn parse_optional_f32(value: &str) -> Option<f32> {
 fn split_csv_line(line: &str) -> Vec<String> {
     // The generated QA CSVs intentionally avoid embedded commas/quotes. Keep the
     // parser small and dependency-free so this guard can run in minimal CI jobs.
-    line.split(',').map(|part| part.trim().to_string()).collect()
+    line.split(',')
+        .map(|part| part.trim().to_string())
+        .collect()
 }
 
 fn col(header: &[String], name: &str) -> io::Result<usize> {
     header.iter().position(|h| h == name).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("missing column `{name}`"))
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("missing column `{name}`"),
+        )
     })
 }
 
@@ -56,7 +67,8 @@ fn load_requests(path: &Path) -> io::Result<Vec<MutationRequestRow>> {
     let dirty_lod0_pages = col(&header, "dirty_lod0_pages")?;
     let dirty_parent_nodes = col(&header, "dirty_parent_nodes")?;
     let mutation_status = col(&header, "mutation_status")?;
-    let requires_authoritative_world_mutation = col(&header, "requires_authoritative_world_mutation")?;
+    let requires_authoritative_world_mutation =
+        col(&header, "requires_authoritative_world_mutation")?;
 
     let mut rows = Vec::new();
     for (line_no, line) in lines.enumerate() {
@@ -73,9 +85,15 @@ fn load_requests(path: &Path) -> io::Result<Vec<MutationRequestRow>> {
             frame: at(frame).parse().map_err(|_| parse_err("frame"))?,
             event_id: at(event_id).to_string(),
             kind: at(kind).to_string(),
-            position_x: at(position_x).parse().map_err(|_| parse_err("position_x"))?,
-            position_y: at(position_y).parse().map_err(|_| parse_err("position_y"))?,
-            position_z: at(position_z).parse().map_err(|_| parse_err("position_z"))?,
+            position_x: at(position_x)
+                .parse()
+                .map_err(|_| parse_err("position_x"))?,
+            position_y: at(position_y)
+                .parse()
+                .map_err(|_| parse_err("position_y"))?,
+            position_z: at(position_z)
+                .parse()
+                .map_err(|_| parse_err("position_z"))?,
             radius: at(radius).parse().map_err(|_| parse_err("radius"))?,
             strength: at(strength).parse().map_err(|_| parse_err("strength"))?,
             target_height: parse_optional_f32(at(target_height)),
@@ -86,7 +104,9 @@ fn load_requests(path: &Path) -> io::Result<Vec<MutationRequestRow>> {
                 .parse()
                 .map_err(|_| parse_err("dirty_parent_nodes"))?,
             mutation_status: at(mutation_status).to_string(),
-            requires_authoritative_world_mutation: parse_bool(at(requires_authoritative_world_mutation)),
+            requires_authoritative_world_mutation: parse_bool(at(
+                requires_authoritative_world_mutation,
+            )),
         });
     }
     Ok(rows)
@@ -94,8 +114,12 @@ fn load_requests(path: &Path) -> io::Result<Vec<MutationRequestRow>> {
 
 fn main() -> io::Result<()> {
     let mut args = env::args().skip(1);
-    let input = args.next().unwrap_or_else(|| "bench-runs/local/clod-edit-mutation-requests.csv".to_string());
-    let output = args.next().unwrap_or_else(|| "bench-runs/local/clod-edit-mutation-sink.csv".to_string());
+    let input = args
+        .next()
+        .unwrap_or_else(|| "bench-runs/local/clod-edit-mutation-requests.csv".to_string());
+    let output = args
+        .next()
+        .unwrap_or_else(|| "bench-runs/local/clod-edit-mutation-sink.csv".to_string());
 
     let apply_requested = bool_env("VOXEL_CLOD_SCRIPTED_EDITS_APPLY");
     let hook_available = bool_env("VOXEL_CLOD_SCRIPTED_EDITS_AUTHORITATIVE_HOOK");

@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use voxel_builder::voxel::pages::edit_dirtiness::ClodDirtyPageGrid;
 use voxel_builder::voxel::pages::scripted_edit_adapter::{
-    build_dry_run_records, dry_run_csv_header, dry_run_record_to_csv_row,
-    parse_scripted_edit_dispatch_csv, ScriptedEditDryRunConfig, ScriptedEditMutationMode,
+    ScriptedEditDryRunConfig, ScriptedEditMutationMode, build_dry_run_records, dry_run_csv_header,
+    dry_run_record_to_csv_row, parse_scripted_edit_dispatch_csv,
 };
 
 fn main() {
@@ -76,7 +76,11 @@ fn run() -> Result<(), String> {
     fs::write(&output_path, output)
         .map_err(|error| format!("failed to write {}: {error}", output_path.display()))?;
 
-    println!("wrote {} dry-run edit requests to {}", records.len(), output_path.display());
+    println!(
+        "wrote {} dry-run edit requests to {}",
+        records.len(),
+        output_path.display()
+    );
     Ok(())
 }
 

@@ -70,7 +70,8 @@ pub fn compute_topology_stats(mesh: &PageMesh) -> ClodTopologyStats {
         triangle_count,
         normal_count_mismatch: !mesh.normals.is_empty() && mesh.normals.len() != vertex_count,
         material_count_mismatch: !mesh.materials.is_empty() && mesh.materials.len() != vertex_count,
-        paint_count_mismatch: !mesh.paint_slots.is_empty() && mesh.paint_slots.len() != vertex_count,
+        paint_count_mismatch: !mesh.paint_slots.is_empty()
+            && mesh.paint_slots.len() != vertex_count,
         ..Default::default()
     };
 
@@ -113,7 +114,12 @@ pub fn compute_topology_stats(mesh: &PageMesh) -> ClodTopologyStats {
             continue;
         }
 
-        if triangle_area_sq(mesh.positions[a as usize], mesh.positions[b as usize], mesh.positions[c as usize]) <= 1.0e-12 {
+        if triangle_area_sq(
+            mesh.positions[a as usize],
+            mesh.positions[b as usize],
+            mesh.positions[c as usize],
+        ) <= 1.0e-12
+        {
             stats.zero_area_triangles += 1;
         }
 
@@ -202,7 +208,9 @@ mod tests {
     fn csv_schema_stays_stable() {
         let stats = compute_topology_stats(&triangle_mesh());
         let row = stats.to_csv_record(7, 2, 0, 1, 3);
-        assert_eq!(ClodTopologyStats::csv_header().split(',').count(), row.split(',').count());
+        assert_eq!(
+            ClodTopologyStats::csv_header().split(',').count(),
+            row.split(',').count()
+        );
     }
 }
-

@@ -287,19 +287,20 @@ pub(crate) fn terrain_summary_rebuild_system(
     let nodes = snapshot_nodes(&index);
     let cfg = runtime.cfg.terrain_summary.clone();
     let revision = tree.revision;
-    state.task = Some(AsyncComputeTaskPool::get().spawn(async move {
-        build_terrain_summary_field(&nodes, &cfg, revision)
-    }));
+    state.task = Some(
+        AsyncComputeTaskPool::get()
+            .spawn(async move { build_terrain_summary_field(&nodes, &cfg, revision) }),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::voxel::pages::build_queue::ClodPageTree;
-    use crate::voxel::pages::selection::ClodPageNodeKey;
     use crate::voxel::pages::config::ClodPagesConfig;
     use crate::voxel::pages::quadtree::build_quadtree;
     use crate::voxel::pages::render::ClodPageMeshBounds;
+    use crate::voxel::pages::selection::ClodPageNodeKey;
     use crate::voxel::pages::selection::ClodPageSelectionIndex;
     use crate::voxel::pages::source_mesh::PageSource;
     use crate::voxel::pages::synthetic::build_lod0_world;
@@ -334,13 +335,7 @@ mod tests {
                     .iter()
                     .map(|position| position[1])
                     .fold(f32::INFINITY, f32::min);
-                bounds_by_node.insert(
-                    key,
-                    ClodPageMeshBounds {
-                        min_y,
-                        max_y,
-                    },
-                );
+                bounds_by_node.insert(key, ClodPageMeshBounds { min_y, max_y });
             }
         }
         let mut index = ClodPageSelectionIndex::default();

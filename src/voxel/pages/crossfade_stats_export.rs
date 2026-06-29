@@ -12,9 +12,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 
 use super::crossfade::ClodDitherRole;
-use super::crossfade_runtime::{
-    ClodCrossfadeFrameClock, ClodCrossfadeRuntimeState, ClodPageFade,
-};
+use super::crossfade_runtime::{ClodCrossfadeFrameClock, ClodCrossfadeRuntimeState, ClodPageFade};
 use super::fade_material::ClodFadeMaterialSettings;
 use super::render::ClodPageMeshTag;
 
@@ -130,9 +128,11 @@ pub(crate) fn clod_crossfade_stats_export_system(
         return;
     }
 
-    let stats = fade_entity_stats(pages.iter().map(|(fade, visibility)| {
-        (fade.copied(), !matches!(*visibility, Visibility::Hidden))
-    }));
+    let stats = fade_entity_stats(
+        pages
+            .iter()
+            .map(|(fade, visibility)| (fade.copied(), !matches!(*visibility, Visibility::Hidden))),
+    );
 
     let transition_id = runtime_state.active_transition_id.as_deref().unwrap_or("");
     let line = format!(
@@ -169,7 +169,10 @@ pub(crate) fn clod_crossfade_stats_export_system(
 impl ClodCrossfadeStatsExportState {
     fn writer(&mut self, path: &Path) -> std::io::Result<&mut BufWriter<File>> {
         if self.writer.is_none() {
-            if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
                 create_dir_all(parent)?;
             }
             let file = OpenOptions::new()

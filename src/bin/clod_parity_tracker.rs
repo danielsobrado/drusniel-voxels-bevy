@@ -83,7 +83,11 @@ fn main() {
     let markdown = render_markdown(&config_path, &evaluated);
 
     if let Some(path) = output_path {
-        let output_abs = if path.is_absolute() { path } else { root.join(path) };
+        let output_abs = if path.is_absolute() {
+            path
+        } else {
+            root.join(path)
+        };
         if let Some(parent) = output_abs.parent() {
             if let Err(err) = fs::create_dir_all(parent) {
                 eprintln!("failed to create {}: {err}", parent.display());
@@ -99,7 +103,10 @@ fn main() {
         print!("{markdown}");
     }
 
-    let missing_count = evaluated.iter().map(|entry| entry.missing_paths.len()).sum::<usize>();
+    let missing_count = evaluated
+        .iter()
+        .map(|entry| entry.missing_paths.len())
+        .sum::<usize>();
     let planned_count = evaluated
         .iter()
         .filter(|entry| entry.item.status == "planned")
@@ -147,17 +154,32 @@ fn evaluate_items(root: &Path, items: Vec<Item>) -> Vec<EvaluatedItem> {
                     .cloned()
                     .collect()
             };
-            EvaluatedItem { item, missing_paths }
+            EvaluatedItem {
+                item,
+                missing_paths,
+            }
         })
         .collect()
 }
 
 fn render_markdown(config_path: &Path, entries: &[EvaluatedItem]) -> String {
     let mut out = String::new();
-    let missing_paths = entries.iter().map(|entry| entry.missing_paths.len()).sum::<usize>();
-    let planned = entries.iter().filter(|entry| entry.item.status == "planned").count();
-    let ported = entries.iter().filter(|entry| entry.item.status == "ported").count();
-    let qa = entries.iter().filter(|entry| entry.item.status == "qa").count();
+    let missing_paths = entries
+        .iter()
+        .map(|entry| entry.missing_paths.len())
+        .sum::<usize>();
+    let planned = entries
+        .iter()
+        .filter(|entry| entry.item.status == "planned")
+        .count();
+    let ported = entries
+        .iter()
+        .filter(|entry| entry.item.status == "ported")
+        .count();
+    let qa = entries
+        .iter()
+        .filter(|entry| entry.item.status == "qa")
+        .count();
     let skipped = entries
         .iter()
         .filter(|entry| entry.item.status == "intentional_skip")
@@ -195,7 +217,10 @@ fn render_markdown(config_path: &Path, entries: &[EvaluatedItem]) -> String {
 
     out.push_str("\n## Details\n\n");
     for entry in entries {
-        out.push_str(&format!("### `{}` — {}\n\n", entry.item.id, entry.item.title));
+        out.push_str(&format!(
+            "### `{}` — {}\n\n",
+            entry.item.id, entry.item.title
+        ));
         out.push_str(&format!("- Category: `{}`\n", entry.item.category));
         out.push_str(&format!("- Priority: `{}`\n", entry.item.priority));
         out.push_str(&format!("- Status: `{}`\n", entry.item.status));

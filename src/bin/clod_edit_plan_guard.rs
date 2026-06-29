@@ -135,7 +135,8 @@ fn main() -> ExitCode {
 
 fn validate_scene_file(path: &Path, require_edits: bool) -> Result<ValidationReport, String> {
     let text = fs::read_to_string(path).map_err(|err| format!("failed to read scene: {err}"))?;
-    let scene: BenchScene = toml::from_str(&text).map_err(|err| format!("invalid TOML/schema: {err}"))?;
+    let scene: BenchScene =
+        toml::from_str(&text).map_err(|err| format!("invalid TOML/schema: {err}"))?;
     Ok(validate_scene(&scene, require_edits))
 }
 
@@ -153,9 +154,13 @@ fn validate_scene(scene: &BenchScene, require_edits: bool) -> ValidationReport {
             let op_key = format!("{checkpoint_name}/{}", op.name);
 
             if op.name.trim().is_empty() {
-                report.errors.push(format!("{checkpoint_name}: edit operation has an empty name"));
+                report.errors.push(format!(
+                    "{checkpoint_name}: edit operation has an empty name"
+                ));
             } else if !names.insert(op_key.clone()) {
-                report.errors.push(format!("duplicate edit operation name: {op_key}"));
+                report
+                    .errors
+                    .push(format!("duplicate edit operation name: {op_key}"));
             }
 
             if hold_frames > 0 && op.frame >= hold_frames {
@@ -166,7 +171,9 @@ fn validate_scene(scene: &BenchScene, require_edits: bool) -> ValidationReport {
             }
 
             if !op.position.iter().all(|value| value.is_finite()) {
-                report.errors.push(format!("{op_key}: position contains a non-finite value"));
+                report
+                    .errors
+                    .push(format!("{op_key}: position contains a non-finite value"));
             }
 
             validate_radius(&scene.clod_edit_defaults, op, &op_key, &mut report);
@@ -176,7 +183,10 @@ fn validate_scene(scene: &BenchScene, require_edits: bool) -> ValidationReport {
             validate_expected_dirty_pages(&scene.clod_edit_defaults, op, &op_key, &mut report);
             validate_expected_latencies(&scene.clod_edit_defaults, op, &op_key, &mut report);
 
-            ops_by_checkpoint.entry(checkpoint_name.clone()).or_default().push(op.frame);
+            ops_by_checkpoint
+                .entry(checkpoint_name.clone())
+                .or_default()
+                .push(op.frame);
         }
     }
 
@@ -189,7 +199,9 @@ fn validate_scene(scene: &BenchScene, require_edits: bool) -> ValidationReport {
     }
 
     if require_edits && report.edit_count == 0 {
-        report.errors.push("scene has no [[checkpoint.clod_edit]] operations".to_string());
+        report
+            .errors
+            .push("scene has no [[checkpoint.clod_edit]] operations".to_string());
     }
 
     report
@@ -218,8 +230,12 @@ fn validate_radius(
                 ));
             }
         }
-        Some(value) => report.errors.push(format!("{op_key}: invalid radius {value}")),
-        None => report.errors.push(format!("{op_key}: missing radius and no default radius")),
+        Some(value) => report
+            .errors
+            .push(format!("{op_key}: invalid radius {value}")),
+        None => report
+            .errors
+            .push(format!("{op_key}: missing radius and no default radius")),
     }
 }
 
@@ -238,8 +254,12 @@ fn validate_strength(
                 ));
             }
         }
-        Some(value) => report.errors.push(format!("{op_key}: invalid strength {value}")),
-        None => report.errors.push(format!("{op_key}: missing strength and no default strength")),
+        Some(value) => report
+            .errors
+            .push(format!("{op_key}: invalid strength {value}")),
+        None => report.errors.push(format!(
+            "{op_key}: missing strength and no default strength"
+        )),
     }
 }
 
@@ -251,7 +271,9 @@ fn validate_kind_specific_fields(
     match op.kind {
         ClodEditKind::Level => {
             if op.target_height.is_none() {
-                report.errors.push(format!("{op_key}: level edit requires target_height"));
+                report
+                    .errors
+                    .push(format!("{op_key}: level edit requires target_height"));
             }
         }
         ClodEditKind::Dig | ClodEditKind::Raise | ClodEditKind::Smooth => {
@@ -274,13 +296,19 @@ fn validate_repeat_window(
     match (op.repeat_every_frames, op.repeat_count) {
         (Some(every), Some(count)) => {
             if every == 0 {
-                report.errors.push(format!("{op_key}: repeat_every_frames must be greater than zero"));
+                report.errors.push(format!(
+                    "{op_key}: repeat_every_frames must be greater than zero"
+                ));
             }
             if count == 0 {
-                report.errors.push(format!("{op_key}: repeat_count must be greater than zero"));
+                report
+                    .errors
+                    .push(format!("{op_key}: repeat_count must be greater than zero"));
             }
             if every > 0 && count > 0 && hold_frames > 0 {
-                let last_frame = op.frame.saturating_add(every.saturating_mul(count.saturating_sub(1)));
+                let last_frame = op
+                    .frame
+                    .saturating_add(every.saturating_mul(count.saturating_sub(1)));
                 if last_frame >= hold_frames {
                     report.errors.push(format!(
                         "{op_key}: repeated edit reaches frame {last_frame}, outside hold_frames {hold_frames}"
@@ -304,7 +332,9 @@ fn validate_expected_dirty_pages(
     op_key: &str,
     report: &mut ValidationReport,
 ) {
-    let min_pages = op.expected_dirty_pages_min.or(defaults.expected_dirty_pages_min);
+    let min_pages = op
+        .expected_dirty_pages_min
+        .or(defaults.expected_dirty_pages_min);
     if let Some(0) = min_pages {
         report.warnings.push(format!(
             "{op_key}: expected_dirty_pages_min is zero; this will not prove CLOD rebuild coverage"
@@ -427,10 +457,12 @@ mod tests {
         );
 
         let report = validate_scene(&scene, true);
-        assert!(report
-            .errors
-            .iter()
-            .any(|error| error.contains("level edit requires target_height")));
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("level edit requires target_height"))
+        );
     }
 
     #[test]
@@ -454,10 +486,11 @@ mod tests {
         );
 
         let report = validate_scene(&scene, true);
-        assert!(report
-            .errors
-            .iter()
-            .any(|error| error.contains("outside hold_frames")));
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("outside hold_frames"))
+        );
     }
 }
-

@@ -106,10 +106,21 @@ pub struct ClodShadowRuntimeSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClodShadowRuntimeError {
     UnsupportedVersion(u32),
-    MissingProxyMesh { node_id: String, shadow_mesh_id: String },
-    UnexpectedProxyMesh { shadow_mesh_id: String },
-    ProxyMeshIndexNotTriangulated { shadow_mesh_id: String, index_count: usize },
-    ProxyMeshPositionNotVec3 { shadow_mesh_id: String, position_count: usize },
+    MissingProxyMesh {
+        node_id: String,
+        shadow_mesh_id: String,
+    },
+    UnexpectedProxyMesh {
+        shadow_mesh_id: String,
+    },
+    ProxyMeshIndexNotTriangulated {
+        shadow_mesh_id: String,
+        index_count: usize,
+    },
+    ProxyMeshPositionNotVec3 {
+        shadow_mesh_id: String,
+        position_count: usize,
+    },
 }
 
 pub fn validate_clod_shadow_runtime_snapshot(
@@ -177,7 +188,9 @@ pub fn recompute_clod_shadow_runtime_totals(
     };
 
     for plan in plans {
-        totals.visual_triangles = totals.visual_triangles.saturating_add(plan.visual_triangles);
+        totals.visual_triangles = totals
+            .visual_triangles
+            .saturating_add(plan.visual_triangles);
         totals.runtime_shadow_triangles = totals
             .runtime_shadow_triangles
             .saturating_add(plan.shadow_triangles);
@@ -247,7 +260,12 @@ mod tests {
         let snapshot = ClodShadowRuntimeSnapshot {
             version: 1,
             generated_by: "clod-poc-bevy-shadow-runtime".to_owned(),
-            plans: vec![plan("L2:0,0", ClodShadowRuntimeAction::SpawnProxyShadowCaster, 100, 1)],
+            plans: vec![plan(
+                "L2:0,0",
+                ClodShadowRuntimeAction::SpawnProxyShadowCaster,
+                100,
+                1,
+            )],
             proxy_meshes: vec![mesh("L2:0,0")],
             totals: ClodShadowRuntimeTotals::default(),
         };
@@ -259,7 +277,12 @@ mod tests {
         let snapshot = ClodShadowRuntimeSnapshot {
             version: 1,
             generated_by: "clod-poc-bevy-shadow-runtime".to_owned(),
-            plans: vec![plan("L2:0,0", ClodShadowRuntimeAction::SpawnProxyShadowCaster, 100, 1)],
+            plans: vec![plan(
+                "L2:0,0",
+                ClodShadowRuntimeAction::SpawnProxyShadowCaster,
+                100,
+                1,
+            )],
             proxy_meshes: vec![],
             totals: ClodShadowRuntimeTotals::default(),
         };
@@ -273,7 +296,12 @@ mod tests {
     fn recomputes_triangle_savings() {
         let totals = recompute_clod_shadow_runtime_totals(&[
             plan("near", ClodShadowRuntimeAction::UseVisualMeshCaster, 40, 40),
-            plan("mid", ClodShadowRuntimeAction::SpawnProxyShadowCaster, 100, 25),
+            plan(
+                "mid",
+                ClodShadowRuntimeAction::SpawnProxyShadowCaster,
+                100,
+                25,
+            ),
             plan("far", ClodShadowRuntimeAction::ApplyNotShadowCaster, 80, 0),
         ]);
 
