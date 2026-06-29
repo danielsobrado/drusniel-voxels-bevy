@@ -6,6 +6,7 @@ export * from "./tree_ecology.js";
 export * from "./tree_material_bias.js";
 export * from "./tree_alpha_mask.js";
 export * from "./tree_crown_proxy_math.js";
+export * from "./tree_crown_proxy_node_material.js";
 export * from "./tree_geometry.js";
 export * from "./tree_gpu_ring_geometry.js";
 export * from "./tree_impostor_acceptance.js";
