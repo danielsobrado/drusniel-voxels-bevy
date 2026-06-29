@@ -31,7 +31,6 @@ export function selectTreeGpuRingGeometry(input: TreeGpuRingGeometryInput): Tree
   input.bakedImpostorGeometries[input.species] ??= createTreeGpuRingBakedImpostorGeometry(
     input.species,
     input.settings,
-    atlas,
   );
   return { geometry: input.bakedImpostorGeometries[input.species]!, bakedImpostor: true };
 }
@@ -39,11 +38,8 @@ export function selectTreeGpuRingGeometry(input: TreeGpuRingGeometryInput): Tree
 export function createTreeGpuRingBakedImpostorGeometry(
   species: TreeSpeciesId,
   settings: TreeSettings,
-  atlas: TreeImpostorAtlas,
 ): THREE.BufferGeometry {
-  const geometry = createTreeBakedImpostorGeometry(species, settings);
-  mapTreeGpuRingBakedImpostorUvToFrame(geometry, selectTreeGpuRingFallbackFrame(atlas));
-  return geometry;
+  return createTreeBakedImpostorGeometry(species, settings);
 }
 
 export function selectTreeGpuRingFallbackFrame(atlas: TreeImpostorAtlas): OctahedralFrame {
