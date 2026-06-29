@@ -126,13 +126,14 @@ function validateForestLongViewStats(): void {
 }
 
 function validateInfiniteIslandsStats(): void {
+  if (!existsSync(INFINITE_ISLANDS_SHOT)) throw new Error(`infinite-islands shot not found at ${INFINITE_ISLANDS_SHOT}`);
   const stats = JSON.parse(readFileSync(INFINITE_ISLANDS_STATS, "utf8")) as Record<string, unknown>;
   if (stats["ready"] !== true) throw new Error("infinite-islands stats ready flag is not true");
   if (stats["error"] !== null) throw new Error(`infinite-islands stats error is not null: ${String(stats["error"])}`);
   const counters = stats["counters"] as Record<string, unknown> | undefined;
   if (!counters) throw new Error("infinite-islands counters missing");
-  assertCounter(stats, "frame_ms_p95", (value) => Number.isFinite(value) && value <= INFINITE_ISLANDS_FRAME_MS_P95_MAX);
-  assertCounter(stats, "frame_ms_p99", (value) => Number.isFinite(value));
+  assertCounter(stats, "frame_ms_p95", (value) => Number.isFinite(value) && value >= 0 && value <= INFINITE_ISLANDS_FRAME_MS_P95_MAX);
+  assertCounter(stats, "frame_ms_p99", (value) => Number.isFinite(value) && value >= 0);
   assertCounter(stats, "streamer_live_radius_m", (value) => value > 0);
   assertCounter(stats, "streamer_clod_radius_m", (value) => value > 0);
   assertCounter(stats, "streamer_far_shell_inner_m", (value) => value > 0);
