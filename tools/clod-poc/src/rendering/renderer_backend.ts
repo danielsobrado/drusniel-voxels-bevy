@@ -47,8 +47,11 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
     ].join("\n"));
   }
 
+  // [DEBUG-bs9f] temporary: enable GPU timestamp tracking under perfProbe for render/compute pass timing.
+  const perfTimestamps = new URLSearchParams(window.location.search).get("perfProbe") === "1";
   const renderer = new WebGPURenderer({
     antialias: true,
+    trackTimestamp: perfTimestamps,
     requiredLimits: buildRequiredLimits(diagnostics),
   });
   try {

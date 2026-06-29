@@ -14,6 +14,7 @@ import { readRiverEcologySettings } from "../water/riverEcologyRuntime.js";
 import { TREE_SPECIES } from "../trees/tree_config.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
+import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
 import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
 
 const FIELD_GLOBALS = ["digEdits", "fieldParams"] as const;
@@ -149,7 +150,9 @@ export function composeTreeRingShader(workgroupSize = 64): string {
     ? workgroupSize
     : 64;
   const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
-  const treeEntry = applyTreeRingWgslLayoutConstants(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)), treeLayout).replace(
+  const baseTreeEntry = withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry));
+  const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);
+  const treeEntry = applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout).replace(
     /const TREE_WORKGROUP_SIZE: u32 = \d+u;/,
     `const TREE_WORKGROUP_SIZE: u32 = ${size}u;`,
   );

@@ -1,10 +1,16 @@
 import { load } from "js-yaml";
+import {
+  TREE_EXPANDED_SPECIES,
+  TREE_EXPANDED_SPECIES_DEFAULTS,
+  TREE_EXPANDED_SPECIES_NICHES,
+  type TreeExpandedSpeciesId,
+} from "./tree_species_expansion.js";
 
-export type TreeSpeciesId = "oak" | "pine" | "dead";
+export type TreeSpeciesId = TreeExpandedSpeciesId;
 export type TreeLod = "near" | "mid" | "far" | "impostor";
 export type TreeShadowMaxLod = TreeLod | "none";
 
-export const TREE_SPECIES: readonly TreeSpeciesId[] = ["oak", "pine", "dead"] as const;
+export const TREE_SPECIES: readonly TreeSpeciesId[] = TREE_EXPANDED_SPECIES;
 export const TREE_LODS: readonly TreeLod[] = ["near", "mid", "far", "impostor"] as const;
 
 export interface TreeSpeciesSettings {
@@ -429,11 +435,7 @@ export const DEFAULT_TREE_ECOLOGY_SETTINGS: TreeEcologySettings = {
     scaleOld: 1.28,
     scaleVariation: 0.22,
   },
-  speciesZones: {
-    oak: { heightPreference: "low", moisturePreference: 0.65, slopeTolerance: 0.55, clusterBias: 0.75, oldForestBias: 0 },
-    pine: { heightPreference: "high", moisturePreference: 0.35, slopeTolerance: 0.85, clusterBias: 0.9, oldForestBias: 0 },
-    dead: { heightPreference: "any", moisturePreference: 0.45, slopeTolerance: 0.75, clusterBias: 1.0, oldForestBias: 0.85 },
-  },
+  speciesZones: speciesZonesFromExpandedDefaults(),
 };
 
 export const DEFAULT_TREE_FOLIAGE_SETTINGS: TreeFoliageSettings = {
@@ -545,77 +547,7 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
   foliage: cloneTreeFoliage(DEFAULT_TREE_FOLIAGE_SETTINGS),
   impostors: { ...DEFAULT_TREE_IMPOSTOR_SETTINGS },
   gpu: { ...DEFAULT_TREE_GPU_SETTINGS },
-  species: {
-    oak: {
-      enabled: true,
-      weight: 0.52,
-      minHeightM: 10,
-      maxHeightM: 42,
-      trunkHeightM: 8.0,
-      trunkRadiusM: 0.36,
-      crownRadiusM: 4.2,
-      morphology: {
-        trunkBend: 0.18,
-        trunkTaper: 0.62,
-        branchLevels: 3,
-        primaryBranchCount: 8,
-        secondaryBranchCount: 3,
-        branchSpread: 0.85,
-        branchUpSweep: 0.42,
-        branchLength: 2.4,
-        crownFlattening: 0.72,
-        crownIrregularity: 0.28,
-        leafClusterCount: 18,
-        leafCardCount: 44,
-      },
-    },
-    pine: {
-      enabled: true,
-      weight: 0.36,
-      minHeightM: 14,
-      maxHeightM: 58,
-      trunkHeightM: 9.5,
-      trunkRadiusM: 0.30,
-      crownRadiusM: 3.1,
-      morphology: {
-        trunkBend: 0.08,
-        trunkTaper: 0.42,
-        branchLevels: 3,
-        primaryBranchCount: 9,
-        secondaryBranchCount: 1,
-        branchSpread: 0.58,
-        branchUpSweep: -0.08,
-        branchLength: 2.0,
-        crownFlattening: 1.45,
-        crownIrregularity: 0.16,
-        leafClusterCount: 12,
-        leafCardCount: 36,
-      },
-    },
-    dead: {
-      enabled: true,
-      weight: 0.12,
-      minHeightM: 14,
-      maxHeightM: 58,
-      trunkHeightM: 8.0,
-      trunkRadiusM: 0.27,
-      crownRadiusM: 0.0,
-      morphology: {
-        trunkBend: 0.26,
-        trunkTaper: 0.58,
-        branchLevels: 2,
-        primaryBranchCount: 5,
-        secondaryBranchCount: 1,
-        branchSpread: 0.9,
-        branchUpSweep: 0.18,
-        branchLength: 1.9,
-        crownFlattening: 1.0,
-        crownIrregularity: 0.45,
-        leafClusterCount: 0,
-        leafCardCount: 0,
-      },
-    },
-  },
+  species: cloneSpeciesSettingsMap(TREE_EXPANDED_SPECIES_DEFAULTS),
   render: { debugColorByLod: false },
 };
 
@@ -630,11 +562,7 @@ export function cloneTreeSettings(settings: TreeSettings = DEFAULT_TREE_SETTINGS
     impostors: { ...settings.impostors },
     gpu: { ...settings.gpu },
     render: { ...settings.render },
-    species: {
-      oak: cloneSpecies(settings.species.oak),
-      pine: cloneSpecies(settings.species.pine),
-      dead: cloneSpecies(settings.species.dead),
-    },
+    species: cloneSpeciesSettingsMap(settings.species),
   };
 }
 
@@ -665,11 +593,7 @@ export function parseTreeConfig(text: string | null | undefined, warn: ((message
     foliage: readTreeFoliageSettings(raw.foliage, fallback.foliage),
     impostors: readTreeImpostorSettings(raw.impostors, fallback.impostors),
     gpu: readTreeGpuSettings(raw.gpu, fallback.gpu),
-    species: {
-      oak: readSpecies(fallback.species.oak, raw.species?.oak),
-      pine: readSpecies(fallback.species.pine, raw.species?.pine),
-      dead: readSpecies(fallback.species.dead, raw.species?.dead),
-    },
+    species: readSpeciesSettingsMap(fallback.species, raw.species),
     render: {
       debugColorByLod: readBoolean(raw.render?.debug_color_by_lod, fallback.render.debugColorByLod),
     },
@@ -680,6 +604,47 @@ function cloneSpecies(species: TreeSpeciesSettings): TreeSpeciesSettings {
   return { ...species, morphology: { ...species.morphology } };
 }
 
+function cloneSpeciesSettingsMap(source: Record<TreeSpeciesId, TreeSpeciesSettings>): Record<TreeSpeciesId, TreeSpeciesSettings> {
+  return Object.fromEntries(TREE_SPECIES.map((species) => [species, cloneSpecies(source[species])])) as Record<TreeSpeciesId, TreeSpeciesSettings>;
+}
+
+function readSpeciesSettingsMap(
+  fallback: Record<TreeSpeciesId, TreeSpeciesSettings>,
+  raw: Partial<Record<TreeSpeciesId, TreeYamlSpecies>> | undefined,
+): Record<TreeSpeciesId, TreeSpeciesSettings> {
+  return Object.fromEntries(TREE_SPECIES.map((species) => [species, readSpecies(fallback[species], raw?.[species])])) as Record<TreeSpeciesId, TreeSpeciesSettings>;
+}
+
+function speciesZonesFromExpandedDefaults(): Record<TreeSpeciesId, TreeSpeciesZoneSettings> {
+  return Object.fromEntries(TREE_SPECIES.map((species) => {
+    const niche = TREE_EXPANDED_SPECIES_NICHES[species];
+    return [species, {
+      heightPreference: niche.heightPreference,
+      moisturePreference: niche.moisturePreference,
+      slopeTolerance: niche.slopeTolerance,
+      clusterBias: niche.clusterBias,
+      oldForestBias: niche.oldForestBias,
+    }];
+  })) as Record<TreeSpeciesId, TreeSpeciesZoneSettings>;
+}
+
+function cloneSpeciesZoneMap(source: Record<TreeSpeciesId, TreeSpeciesZoneSettings>): Record<TreeSpeciesId, TreeSpeciesZoneSettings> {
+  return Object.fromEntries(TREE_SPECIES.map((species) => [species, { ...source[species] }])) as Record<TreeSpeciesId, TreeSpeciesZoneSettings>;
+}
+
+function readSpeciesZoneMap(
+  fallback: Record<TreeSpeciesId, TreeSpeciesZoneSettings>,
+  raw: Partial<Record<TreeSpeciesId, Partial<{
+    height_preference: unknown;
+    moisture_preference: number;
+    slope_tolerance: number;
+    cluster_bias: number;
+    old_forest_bias: number;
+  }>>> | undefined,
+): Record<TreeSpeciesId, TreeSpeciesZoneSettings> {
+  return Object.fromEntries(TREE_SPECIES.map((species) => [species, readSpeciesZone(fallback[species], raw?.[species])])) as Record<TreeSpeciesId, TreeSpeciesZoneSettings>;
+}
+
 function cloneTreeEcology(ecology: TreeEcologySettings): TreeEcologySettings {
   return {
     ...ecology,
@@ -687,11 +652,7 @@ function cloneTreeEcology(ecology: TreeEcologySettings): TreeEcologySettings {
     terrain: { ...ecology.terrain },
     clustering: { ...ecology.clustering },
     age: { ...ecology.age },
-    speciesZones: {
-      oak: { ...ecology.speciesZones.oak },
-      pine: { ...ecology.speciesZones.pine },
-      dead: { ...ecology.speciesZones.dead },
-    },
+    speciesZones: cloneSpeciesZoneMap(ecology.speciesZones),
   };
 }
 
@@ -823,11 +784,7 @@ function readTreeEcologySettings(raw: NonNullable<TreeYamlConfig["trees"]>["ecol
       scaleOld: readNumberInRange(raw?.age?.scale_old, fallback.age.scaleOld, 0.1, 4),
       scaleVariation: readNumberInRange(raw?.age?.scale_variation, fallback.age.scaleVariation, 0, 1),
     },
-    speciesZones: {
-      oak: readSpeciesZone(fallback.speciesZones.oak, raw?.species_zones?.oak),
-      pine: readSpeciesZone(fallback.speciesZones.pine, raw?.species_zones?.pine),
-      dead: readSpeciesZone(fallback.speciesZones.dead, raw?.species_zones?.dead),
-    },
+    speciesZones: readSpeciesZoneMap(fallback.speciesZones, raw?.species_zones),
   };
 }
 

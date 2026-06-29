@@ -98,6 +98,8 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   customPropGpuVisibleCount: number;
   customPropGpuOverflowed: number;
   customPropGpuDispatchMs: number | null;
+  gpuRenderMs?: number; // [DEBUG-bs9f] resolved GPU render-pass time (ms)
+  gpuComputeMs?: number; // [DEBUG-bs9f] resolved GPU compute-pass time (ms)
 }
 
 export interface FramePerfMetricStats {
