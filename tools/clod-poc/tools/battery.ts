@@ -35,6 +35,7 @@ const BORDER_OCEAN_CAM = borderOceanCameraForWorld(16 * 4 * 16, BORDER_OCEAN_SCE
 const INFINITE_ISLANDS_DIR = "shots/infinite-islands";
 const INFINITE_ISLANDS_SHOT = `${INFINITE_ISLANDS_DIR}/walk.png`;
 const INFINITE_ISLANDS_STATS = `${INFINITE_ISLANDS_DIR}/walk-stats.json`;
+const INFINITE_ISLANDS_FRAME_MS_P95_MAX = 8;
 
 function run(label: string, args: string[]): void {
   console.log(`[battery] ${label}`);
@@ -130,8 +131,8 @@ function validateInfiniteIslandsStats(): void {
   if (stats["error"] !== null) throw new Error(`infinite-islands stats error is not null: ${String(stats["error"])}`);
   const counters = stats["counters"] as Record<string, unknown> | undefined;
   if (!counters) throw new Error("infinite-islands counters missing");
-  const p95 = counters["frame_ms_p95"];
-  if (typeof p95 === "number" && p95 > 8) throw new Error(`infinite-islands p95 frame_ms ${p95} exceeds 8 ms threshold`);
+  assertCounter(stats, "frame_ms_p95", (value) => Number.isFinite(value) && value <= INFINITE_ISLANDS_FRAME_MS_P95_MAX);
+  assertCounter(stats, "frame_ms_p99", (value) => Number.isFinite(value));
   assertCounter(stats, "streamer_live_radius_m", (value) => value > 0);
   assertCounter(stats, "streamer_clod_radius_m", (value) => value > 0);
   assertCounter(stats, "streamer_far_shell_inner_m", (value) => value > 0);
