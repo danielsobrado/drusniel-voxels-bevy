@@ -15,6 +15,10 @@ use super::drift_readback_request::{
     GpuWorldSourceDriftReadbackRequestSettings,
     populate_gpu_world_source_drift_readback_request_once,
 };
+use super::drift_readback_runtime_acceptance::{
+    GpuWorldSourceDriftRuntimeAcceptanceState,
+    evaluate_gpu_world_source_drift_runtime_acceptance_once,
+};
 
 #[derive(Default)]
 pub struct GpuWorldSourceDriftReadbackPlugin;
@@ -24,7 +28,15 @@ impl Plugin for GpuWorldSourceDriftReadbackPlugin {
         app.init_resource::<GpuWorldSourceDriftReadbackRequest>();
         app.init_resource::<GpuWorldSourceDriftReadbackRequestSettings>();
         app.init_resource::<GpuWorldSourceDriftReadbackSharedResult>();
-        app.add_systems(Update, populate_gpu_world_source_drift_readback_request_once);
+        app.init_resource::<GpuWorldSourceDriftRuntimeAcceptanceState>();
+        app.add_systems(
+            Update,
+            (
+                populate_gpu_world_source_drift_readback_request_once,
+                evaluate_gpu_world_source_drift_runtime_acceptance_once,
+            )
+                .chain(),
+        );
         let shared_result = app
             .world()
             .resource::<GpuWorldSourceDriftReadbackSharedResult>()
