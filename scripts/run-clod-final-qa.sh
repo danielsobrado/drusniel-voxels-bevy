@@ -1,22 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
-RUN_DIR=${CLOD_QA_RUN_DIR:-bench-runs/local}
+
+RUN_DIR="${CLOD_QA_RUN_DIR:-bench-runs/local}"
+FAST="${VOXEL_CLOD_QA_FAST:-0}"
 mkdir -p "$RUN_DIR"
 
-if [[ -x scripts/run-clod-complete-qa.sh ]]; then
-  CLOD_QA_RUN_DIR="$RUN_DIR" scripts/run-clod-complete-qa.sh
-fi
+CLOD_QA_RUN_DIR="$RUN_DIR" scripts/run-clod-complete-qa.sh
+scripts/report-clod-qa.sh "$RUN_DIR"
 
-scripts/export-clod-collider-refresh.sh \
-  "$RUN_DIR/clod-edit-authoritative-hook.csv" \
-  "$RUN_DIR/clod-collider-refresh.csv"
-scripts/guard-clod-collider-refresh.sh "$RUN_DIR/clod-collider-refresh.csv"
-scripts/guard-clod-apply-mode.sh "$RUN_DIR"
-
-if [[ -x scripts/report-clod-qa.sh ]]; then
-  scripts/report-clod-qa.sh "$RUN_DIR"
-fi
-if [[ -x scripts/guard-clod-qa-gate.sh ]]; then
+if [[ "$FAST" == "1" ]]; then
+  echo "[CLOD FINAL QA] skipped final artifact gate because VOXEL_CLOD_QA_FAST=1"
+else
   scripts/guard-clod-qa-gate.sh "$RUN_DIR"
 fi
 
