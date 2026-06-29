@@ -129,6 +129,24 @@ describe("tree system impostor resource helpers", () => {
     disposeTreeSystemImpostorMaterials(materials);
     expect(disposeSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("creates four-frame blend impostor material when requested", () => {
+    const settings = cloneTreeSettings();
+    const atlas = fakeAtlas("dead");
+    const materials: Partial<Record<"oak" | "pine" | "dead", THREE.Material>> = {};
+    const material = updateTreeSystemImpostorMaterial({
+      species: "dead",
+      settings,
+      atlas,
+      webgpu: false,
+      viewBlend: true,
+      impostorMaterials: materials,
+    });
+
+    expect(material).toBeInstanceOf(THREE.ShaderMaterial);
+    expect(material.name).toBe("tree-impostor-blend-dead");
+    expect(materials.dead).toBe(material);
+  });
 });
 
 function fakeHandle(regularMaterial: THREE.Material, debugMaterial: THREE.Material): TreeMaterialHandle {
