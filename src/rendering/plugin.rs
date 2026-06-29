@@ -9,6 +9,11 @@ use crate::rendering::assets::array_loader::{create_texture_array, start_loading
 use crate::rendering::assets::atlas::load_texture_atlas;
 use crate::rendering::camera_modes::cinematic::CinematicPlugin;
 use crate::rendering::camera_modes::photo_mode::PhotoModePlugin;
+use crate::rendering::clod_shadow_assets::ClodShadowSnapshotLoaderPlugin;
+use crate::rendering::clod_shadow_bench_integration::ClodShadowBenchIntegrationPlugin;
+use crate::rendering::clod_shadow_config::ClodShadowConfigPlugin;
+use crate::rendering::clod_shadow_f3_overlay::ClodShadowF3OverlayPlugin;
+use crate::rendering::clod_shadow_spawn::ClodShadowSpawnPlugin;
 use crate::rendering::device::capabilities::{
     GraphicsCapabilities, GraphicsDetectionSet, detect_graphics_capabilities,
     sync_capabilities_to_main,
@@ -98,6 +103,14 @@ impl Plugin for RenderingPlugin {
             .add_plugins(WeatherOverlayPlugin)
             // Shadow budget: terrain shadow culling + point light shadow limits
             .add_plugins(ShadowBudgetPlugin)
+            // Fable-style CLOD shadow runtime: config, snapshot load, entity spawn, F3, bench rows.
+            .add_plugins((
+                ClodShadowConfigPlugin,
+                ClodShadowSnapshotLoaderPlugin,
+                ClodShadowSpawnPlugin,
+                ClodShadowF3OverlayPlugin,
+                ClodShadowBenchIntegrationPlugin,
+            ))
             // Path A lighting backend: inactive unless NAADF is selected and query routing is enabled.
             .add_plugins(RadianceCascadesPlugin)
             // Deterministic generated support maps; consumers bind them explicitly when ready.
@@ -191,5 +204,20 @@ mod tests {
             )
         );
         assert!(source.contains(".add_plugins(RadianceCascadesPlugin)"));
+    }
+
+    #[test]
+    fn rendering_plugin_installs_clod_shadow_runtime_stack() {
+        let source = include_str!("plugin.rs");
+
+        for symbol in [
+            "ClodShadowConfigPlugin",
+            "ClodShadowSnapshotLoaderPlugin",
+            "ClodShadowSpawnPlugin",
+            "ClodShadowF3OverlayPlugin",
+            "ClodShadowBenchIntegrationPlugin",
+        ] {
+            assert!(source.contains(symbol), "missing {symbol}");
+        }
     }
 }
