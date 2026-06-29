@@ -162,11 +162,14 @@ function relightTreeImpostorNode(albedo: TslNode, normalSample: TslNode): TslNod
 
 export const TREE_IMPOSTOR_VERTEX_SHADER = `
 attribute vec4 treeImpostorUvRect;
+attribute float treeLodFade;
 varying vec2 vTreeImpostorUv;
+varying float vTreeImpostorLodFade;
 
 void main() {
   vec2 atlasScale = treeImpostorUvRect.zw - treeImpostorUvRect.xy;
   vTreeImpostorUv = treeImpostorUvRect.xy + uv * atlasScale;
+  vTreeImpostorLodFade = treeLodFade;
   vec4 transformed = vec4(position, 1.0);
 #ifdef USE_INSTANCING
   transformed = instanceMatrix * transformed;
@@ -181,6 +184,11 @@ uniform sampler2D normalDepthMap;
 uniform float hasNormalDepthMap;
 uniform float alphaTest;
 varying vec2 vTreeImpostorUv;
+varying float vTreeImpostorLodFade;
+
+float treeImpostorDither(vec2 fragCoord) {
+  return fract(52.9829189 * fract(dot(fragCoord, vec2(0.06711056, 0.00583715))));
+}
 
 vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal) {
   vec3 n = normalize(packedNormal * 2.0 - 1.0);
@@ -197,6 +205,7 @@ vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal) {
 void main() {
   vec4 color = texture2D(map, vTreeImpostorUv);
   if (color.a < alphaTest) discard;
+  if (treeImpostorDither(gl_FragCoord.xy) >= vTreeImpostorLodFade) discard;
   vec3 albedo = color.rgb * color.rgb;
   if (hasNormalDepthMap > 0.5) {
     vec4 normalDepth = texture2D(normalDepthMap, vTreeImpostorUv);
@@ -212,11 +221,13 @@ attribute vec4 treeImpostorUvRect1;
 attribute vec4 treeImpostorUvRect2;
 attribute vec4 treeImpostorUvRect3;
 attribute vec4 treeImpostorBlendWeights;
+attribute float treeLodFade;
 varying vec2 vTreeImpostorUv0;
 varying vec2 vTreeImpostorUv1;
 varying vec2 vTreeImpostorUv2;
 varying vec2 vTreeImpostorUv3;
 varying vec4 vTreeImpostorBlendWeights;
+varying float vTreeImpostorLodFade;
 
 vec2 treeImpostorAtlasUv(vec4 rect) {
   return rect.xy + uv * (rect.zw - rect.xy);
@@ -228,6 +239,7 @@ void main() {
   vTreeImpostorUv2 = treeImpostorAtlasUv(treeImpostorUvRect2);
   vTreeImpostorUv3 = treeImpostorAtlasUv(treeImpostorUvRect3);
   vTreeImpostorBlendWeights = treeImpostorBlendWeights;
+  vTreeImpostorLodFade = treeLodFade;
   vec4 transformed = vec4(position, 1.0);
 #ifdef USE_INSTANCING
   transformed = instanceMatrix * transformed;
@@ -246,6 +258,11 @@ varying vec2 vTreeImpostorUv1;
 varying vec2 vTreeImpostorUv2;
 varying vec2 vTreeImpostorUv3;
 varying vec4 vTreeImpostorBlendWeights;
+varying float vTreeImpostorLodFade;
+
+float treeImpostorDither(vec2 fragCoord) {
+  return fract(52.9829189 * fract(dot(fragCoord, vec2(0.06711056, 0.00583715))));
+}
 
 vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal) {
   vec3 n = normalize(packedNormal * 2.0 - 1.0);
@@ -266,6 +283,7 @@ void main() {
   vec4 c3 = texture2D(map, vTreeImpostorUv3);
   vec4 color = c0 * vTreeImpostorBlendWeights.x + c1 * vTreeImpostorBlendWeights.y + c2 * vTreeImpostorBlendWeights.z + c3 * vTreeImpostorBlendWeights.w;
   if (color.a < alphaTest) discard;
+  if (treeImpostorDither(gl_FragCoord.xy) >= vTreeImpostorLodFade) discard;
   vec3 albedo = color.rgb * color.rgb;
   if (hasNormalDepthMap > 0.5) {
     vec3 n0 = texture2D(normalDepthMap, vTreeImpostorUv0).rgb;
