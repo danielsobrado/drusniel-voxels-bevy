@@ -24,6 +24,7 @@ Status: In progress.
 - Added `decode_gpu_world_source_drift_outputs` to validate returned sample IDs before drift-gate comparison.
 - Added `decode_staged_gpu_world_source_drift_bytes` to validate staging-byte length, cast returned GPU bytes, and decode samples into `WorldSourceGpuReadbackResult`.
 - Added `src/world/source/drift_readback_render.rs` with render resources, buffer preparation, compute dispatch, staging-buffer copy, staging-buffer map, and state update.
+- Added `GpuWorldSourceDriftReadbackStateProvider` so mapped render state can be consumed through the same `WorldSourceGpuReadbackProvider` interface as static/unavailable providers.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 - `world_source_acceptance` now fails before writing `summary.json` unless `terrain_source.mode` is `gpu_world_source`.
 
@@ -36,4 +37,4 @@ Status: In progress.
 
 ## Required next patch
 
-Wire the readback render node and systems into a small debug/acceptance path, expose `GpuWorldSourceDriftReadbackState.latest_result` through a concrete provider, and use that provider in `world_source_acceptance`.
+Wire the readback render node and systems into a small debug/acceptance path, then use `GpuWorldSourceDriftReadbackStateProvider` in the drift-gate provider call once local compile and render-app registration are verified.
