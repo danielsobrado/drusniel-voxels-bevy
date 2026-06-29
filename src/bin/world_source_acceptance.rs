@@ -55,6 +55,8 @@ struct AcceptanceSummary {
     build_profile: String,
     release_mode: bool,
     release_command: &'static str,
+    acceptance_pass: bool,
+    acceptance_blockers: Vec<&'static str>,
     terrain_source: TerrainSourceStartupReport,
     chunk_generation: ChunkGenerationBenchSummary,
     mesh_build: MeshBuildBenchSummary,
@@ -134,6 +136,8 @@ fn run() -> Result<PathBuf, String> {
         gpu_readback.samples(),
         WorldSourceDriftGateConfig::default(),
     );
+    let acceptance_blockers = acceptance_blockers(&terrain_config, &gpu_readback, &drift_gate);
+    let acceptance_pass = acceptance_blockers.is_empty();
 
     let summary = AcceptanceSummary {
         schema_version: 1,
@@ -141,6 +145,8 @@ fn run() -> Result<PathBuf, String> {
         build_profile: build_profile().to_string(),
         release_mode: !cfg!(debug_assertions),
         release_command: RELEASE_COMMAND,
+        acceptance_pass,
+        acceptance_blockers,
         terrain_source,
         chunk_generation,
         mesh_build,
@@ -169,6 +175,24 @@ fn require_default_gpu_runtime_path(config: &TerrainSourceConfig) -> Result<(), 
         "world_source_acceptance requires terrain_source.mode=gpu_world_source; got {}",
         config.mode.acceptance_label(),
     ))
+}
+
+fn acceptance_blockers(
+    config: &TerrainSourceConfig,
+    gpu_readback: &WorldSourceGpuReadbackResult,
+    drift_gate: &WorldSourceDriftGateReport,
+) -> Vec<&'static str> {
+    let mut blockers = Vec::new();
+    if !config.is_gpu_default_path() {
+        blockers.push("terrain_source_not_gpu_world_source");
+    }
+    if gpu_readback.samples().is_none() {
+        blockers.push("gpu_readback_unavailable");
+    }
+    if !drift_gate.is_acceptance_pass() {
+        blockers.push("drift_gate_not_passed");
+    }
+    blockers
 }
 
 fn bench_chunk_generation(
@@ -342,7 +366,7 @@ fn build_profile() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use voxel_builder::world::source::TerrainSourceMode;
+    use voxel_builder::world::source::{TerrainSourceMode, WorldSourceDriftGateStatus};
 
     #[test]
     fn default_run_name_is_world_source_prefixed() {
@@ -380,5 +404,23 @@ mod tests {
             })
             .is_err()
         );
+    }
+
+    #[test]
+    fn skipped_drift_gate_blocks_acceptance_pass() {
+        let config = TerrainSourceConfig {
+            mode: TerrainSourceMode::GpuWorldSource,
+        };
+        let gpu_readback = WorldSourceGpuReadbackResult::unavailable("gpu_readback_unavailable");
+        let drift_gate = WorldSourceDriftGateReport {
+            status: WorldSourceDriftGateStatus::Skipped,
+            sample_count: 5,
+            compared_count: 0,
+            skipped_reason: Some("gpu_readback_unavailable".to_string()),
+            failures: Vec::new(),
+        };
+
+        let blockers = acceptance_blockers(&config, &gpu_readback, &drift_gate);
+        assert_eq!(blockers, vec!["gpu_readback_unavailable", "drift_gate_not_passed"]);
     }
 }
