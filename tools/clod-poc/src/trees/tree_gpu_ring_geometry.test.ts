@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   cloneTreeSettings,
+  createTreeGpuRingBakedImpostorGeometry,
+  mapTreeGpuRingBakedImpostorUvToFrame,
   octFrames,
+  selectTreeGpuRingFallbackFrame,
   selectTreeGpuRingGeometry,
   TREE_SPECIES,
   type TreeGeometryMap,
@@ -88,6 +91,39 @@ describe("GPU ring tree geometry selector", () => {
     expect(bakedImpostorGeometries.dead).toBe(first.geometry);
     expect(first.geometry.getAttribute("uv")).toBeDefined();
     expect(first.geometry.getAttribute("treeVariant")).toBeDefined();
+  });
+
+  it("maps baked billboard UVs into the selected atlas frame", () => {
+    const settings = cloneTreeSettings();
+    settings.impostors.enabled = true;
+    const atlas = fakeAtlas("oak");
+    const frame = selectTreeGpuRingFallbackFrame(atlas);
+    const geometry = createTreeGpuRingBakedImpostorGeometry("oak", settings, atlas);
+    const uv = geometry.getAttribute("uv");
+
+    for (let index = 0; index < uv.count; index++) {
+      expect(uv.getX(index)).toBeGreaterThanOrEqual(frame.uvMin[0]);
+      expect(uv.getX(index)).toBeLessThanOrEqual(frame.uvMax[0]);
+      expect(uv.getY(index)).toBeGreaterThanOrEqual(frame.uvMin[1]);
+      expect(uv.getY(index)).toBeLessThanOrEqual(frame.uvMax[1]);
+    }
+  });
+
+  it("remaps arbitrary geometry UVs into a frame rect", () => {
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    mapTreeGpuRingBakedImpostorUvToFrame(geometry, {
+      uvMin: [0.25, 0.5],
+      uvMax: [0.5, 0.75],
+    });
+    const uv = geometry.getAttribute("uv");
+    const values = Array.from({ length: uv.count }, (_, index) => [uv.getX(index), uv.getY(index)]);
+
+    expect(values).toEqual(expect.arrayContaining([
+      [0.25, 0.75],
+      [0.5, 0.75],
+      [0.25, 0.5],
+      [0.5, 0.5],
+    ]));
   });
 });
 
