@@ -17,14 +17,18 @@ Status: In progress.
   - `generation/world_load.rs` owns saved-world loading, bedrock enforcement, and saving.
   - `generation.rs` now stays focused on orchestration.
 - Legacy terrain source mode is now marked deprecated and logs a warning when explicitly selected.
+- Added `WorldSourceGpuReadbackProvider` plus a Rust/WGSL wire contract for drift readback samples.
+- Added `assets/shaders/world_source/drift_readback.wgsl` for GPU-side dominant-layer readback from prepared WorldSource samples.
+- Added Rust layout tests for `GpuWorldSourceDriftReadbackParams`, `GpuWorldSourceDriftInputSample`, and `GpuWorldSourceDriftOutputSample`.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 
 ## Not completed
 
-- GPU readback producer is still missing, so drift-gate runtime acceptance still reports `skipped`.
+- GPU readback dispatch and buffer mapping are still missing, so drift-gate runtime acceptance still reports `skipped`.
+- Full GPU height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of the compatibility adapter should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Add the GPU readback producer for WorldSource drift samples, then remove the remaining compatibility adapter once the release acceptance report records an accepted GPU/default path and visual parity has passed.
+Implement the render-device provider that dispatches `assets/shaders/world_source/drift_readback.wgsl`, writes `GpuWorldSourceDriftInputSample` values, maps `GpuWorldSourceDriftOutputSample` back to `WorldSourceDriftSample`, and passes those samples into the existing drift gate.
