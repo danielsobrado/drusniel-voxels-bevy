@@ -257,9 +257,11 @@ function normalizeRealtimeShadowImports(source) {
     .replace(/import \{[^\n]*getRealtimeSunShadowCascadeCameras[^\n]*\} from "\.\.\/rendering\/realtime_sun_shadows\.js";\n/g, "")
     .replace(/import \{\n(?:  [A-Z_]+,\n)?  treeRingShadowCascadePlanesFromCameras,\n(?:  treeRingShadowCasterGroupIndex,\n)?\} from "\.\/tree_ring_shadow_casters\.js";\n/g, "")
     .replace(/import \{[^\n]*treeRingShadowCascadePlanesFromCameras[^\n]*\} from "\.\/tree_ring_shadow_casters\.js";\n/g, "");
-  const anchor = `import type { EnvironmentLighting } from "../environment/environment.js";`;
-  if (!next.includes(anchor)) return source;
-  return next.replace(anchor, FINAL_REALTIME_IMPORTS);
+  const fullAnchor = `import type { EnvironmentLighting } from "../environment/environment.js";\nimport type { ForestLightingMaterialState } from "../forest_lighting/index.js";`;
+  if (next.includes(fullAnchor)) return next.replace(fullAnchor, FINAL_REALTIME_IMPORTS);
+  const envAnchor = `import type { EnvironmentLighting } from "../environment/environment.js";`;
+  if (!next.includes(envAnchor)) return source;
+  return next.replace(envAnchor, FINAL_REALTIME_IMPORTS);
 }
 
 function normalizeEol(source) {
