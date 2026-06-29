@@ -25,18 +25,18 @@ Status: In progress.
 - Added `decode_staged_gpu_world_source_drift_bytes` to validate staging-byte length, cast returned GPU bytes, and decode samples into `WorldSourceGpuReadbackResult`.
 - Added `src/world/source/drift_readback_render.rs` with render resources, buffer preparation, compute dispatch, staging-buffer copy, staging-buffer map, and state update.
 - Added `GpuWorldSourceDriftReadbackStateProvider` so mapped render state can be consumed through the same `WorldSourceGpuReadbackProvider` interface as static/unavailable providers.
-- Added opt-in `GpuWorldSourceDriftReadbackPlugin` to register render resources and render systems for local/debug verification.
+- Added `GpuWorldSourceDriftReadbackPlugin`, registered its render startup/prepare/cleanup systems, registered its Core3d graph node, and added it to the app bootstrap.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 - `world_source_acceptance` now fails before writing `summary.json` unless `terrain_source.mode` is `gpu_world_source`.
 
 ## Not completed
 
-- The readback render graph node is not attached to a render graph edge yet, so `world_source_acceptance` still uses the unavailable provider and drift-gate runtime acceptance still reports `skipped`.
-- The opt-in plugin needs local compile verification before being added to the normal app bootstrap.
+- Main-world request extraction/result bridging for `GpuWorldSourceDriftReadbackRequest` and `GpuWorldSourceDriftReadbackState` is still missing.
+- `world_source_acceptance` still uses the unavailable provider, so drift-gate runtime acceptance still reports `skipped`.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of the compatibility adapter should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Locally compile the opt-in readback plugin, attach `GpuWorldSourceDriftReadbackNode` to the correct render graph edge, then use `GpuWorldSourceDriftReadbackStateProvider` in the drift-gate provider call once render-app registration is verified.
+Add a small bridge that extracts populated `GpuWorldSourceDriftReadbackRequest` values into the render app and copies `GpuWorldSourceDriftReadbackState.latest_result` back to the main app, then use `GpuWorldSourceDriftReadbackStateProvider` in the drift-gate provider call once local compile and render-app registration are verified.
