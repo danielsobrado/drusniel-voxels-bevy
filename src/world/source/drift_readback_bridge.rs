@@ -28,12 +28,34 @@ impl GpuWorldSourceDriftReadbackSharedResult {
         self.inner
             .lock()
             .map(|guard| guard.clone())
-            .unwrap_or_else(|_| WorldSourceGpuReadbackResult::unavailable("gpu_readback_result_lock_poisoned"))
+            .unwrap_or_else(|_| {
+                WorldSourceGpuReadbackResult::unavailable("gpu_readback_result_lock_poisoned")
+            })
     }
 
     pub fn store(&self, result: WorldSourceGpuReadbackResult) {
         if let Ok(mut guard) = self.inner.lock() {
             *guard = result;
+        }
+    }
+
+    pub fn has_matching_samples(&self, expected_count: usize) -> bool {
+        self.latest()
+            .samples()
+            .is_some_and(|samples| samples.len() == expected_count)
+    }
+
+    pub fn matching_provider_result(
+        &self,
+        points: &[WorldSourceDriftSamplePoint],
+    ) -> WorldSourceGpuReadbackResult {
+        let result = self.latest();
+        match result.samples() {
+            Some(samples) if samples.len() == points.len() => result,
+            Some(_) => {
+                WorldSourceGpuReadbackResult::unavailable("gpu_readback_sample_count_mismatch")
+            }
+            None => result,
         }
     }
 }
@@ -43,12 +65,7 @@ impl WorldSourceGpuReadbackProvider for GpuWorldSourceDriftReadbackSharedResult 
         &self,
         points: &[WorldSourceDriftSamplePoint],
     ) -> WorldSourceGpuReadbackResult {
-        let result = self.latest();
-        match result.samples() {
-            Some(samples) if samples.len() == points.len() => result,
-            Some(_) => WorldSourceGpuReadbackResult::unavailable("gpu_readback_sample_count_mismatch"),
-            None => result,
-        }
+        self.matching_provider_result(points)
     }
 }
 
@@ -89,7 +106,8 @@ mod tests {
         let shared = GpuWorldSourceDriftReadbackSharedResult::default();
         shared.store(WorldSourceGpuReadbackResult::available(vec![sample]));
 
-        let result = shared.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
+        let result =
+            shared.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
 
         assert_eq!(result.samples().expect("samples"), &[sample]);
     }
@@ -99,11 +117,30 @@ mod tests {
         let shared = GpuWorldSourceDriftReadbackSharedResult::default();
         shared.store(WorldSourceGpuReadbackResult::available(Vec::new()));
 
-        let result = shared.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
+        let result =
+            shared.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
 
         assert_eq!(
             result.unavailable_reason.as_deref(),
             Some("gpu_readback_sample_count_mismatch")
         );
+    }
+
+    #[test]
+    fn reports_matching_sample_readiness() {
+        let sample = WorldSourceDriftSample {
+            x: 0.0,
+            z: 0.0,
+            height: 18.0,
+            ocean_mask: 0.0,
+            biome: BiomeId::Meadows,
+            dominant_layer: MaterialLayerId::Grass,
+        };
+        let shared = GpuWorldSourceDriftReadbackSharedResult::default();
+
+        assert!(!shared.has_matching_samples(1));
+        shared.store(WorldSourceGpuReadbackResult::available(vec![sample]));
+        assert!(shared.has_matching_samples(1));
+        assert!(!shared.has_matching_samples(2));
     }
 }
