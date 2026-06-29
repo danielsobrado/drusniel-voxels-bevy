@@ -28,17 +28,18 @@ Status: In progress.
 - Added `GpuWorldSourceDriftReadbackPlugin`, registered its render startup/prepare/cleanup systems, registered its Core3d graph node, and added it to the app bootstrap.
 - Added main-world to render-world request extraction for `GpuWorldSourceDriftReadbackRequest`.
 - Added `GpuWorldSourceDriftReadbackSharedResult` so render-world readback results can be consumed from the main app through `WorldSourceGpuReadbackProvider`.
+- Added `src/world/source/drift_readback_request.rs` to populate `GpuWorldSourceDriftReadbackRequest` from BVY-WS-12 drift sample points when `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1` is set.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 - `world_source_acceptance` now fails before writing `summary.json` unless `terrain_source.mode` is `gpu_world_source`.
 
 ## Not completed
 
-- No system currently populates `GpuWorldSourceDriftReadbackRequest` with BVY-WS-12 drift sample inputs before acceptance/debug readback.
 - `world_source_acceptance` still uses the unavailable provider, so drift-gate runtime acceptance still reports `skipped`.
+- The render-app bridge must be locally compile-verified, especially Bevy `App` resource access and render graph edge placement.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of the compatibility adapter should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Populate `GpuWorldSourceDriftReadbackRequest` from BVY-WS-12 drift sample points, wait for `GpuWorldSourceDriftReadbackSharedResult` to produce matching samples, then use that provider in the drift-gate acceptance path.
+Run the render-app readback path with `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1`, verify `GpuWorldSourceDriftReadbackSharedResult` produces matching samples, then use that provider in a dedicated runtime acceptance path instead of the current unavailable provider.
