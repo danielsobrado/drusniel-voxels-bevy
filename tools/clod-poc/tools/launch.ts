@@ -78,6 +78,7 @@ export async function launchChromium(): Promise<{ browser: Browser; recipe: Laun
 
 export async function launchWebGPU(): Promise<{ browser: Browser; recipe: LaunchRecipe }> {
   const baseUrl = clodBaseUrl();
+  const forcedChannel = process.env["CLOD_POC_BROWSER_CHANNEL"];
   const cdpUrl = process.env["CLOD_POC_CDP_URL"];
   if (cdpUrl) {
     const browser = await chromium.connectOverCDP(cdpUrl);
@@ -102,7 +103,7 @@ export async function launchWebGPU(): Promise<{ browser: Browser; recipe: Launch
     }
   }
 
-  if (existsSync(CACHE_PATH)) {
+  if (!forcedChannel && existsSync(CACHE_PATH)) {
     try {
       const recipe = JSON.parse(readFileSync(CACHE_PATH, "utf8")) as LaunchRecipe;
       const browser = await probeRecipe(recipe, baseUrl);
@@ -112,11 +113,22 @@ export async function launchWebGPU(): Promise<{ browser: Browser; recipe: Launch
     }
   }
 
-  for (const recipe of CANDIDATES) {
+  const candidates = forcedChannel
+    ? [
+      { headless: true, channel: forcedChannel, args: ["--enable-unsafe-webgpu"] },
+      { headless: false, channel: forcedChannel, args: ["--enable-unsafe-webgpu"] },
+      { headless: true, channel: forcedChannel, args: [] },
+      { headless: false, channel: forcedChannel, args: [] },
+    ]
+    : CANDIDATES;
+
+  for (const recipe of candidates) {
     const browser = await probeRecipe(recipe, baseUrl);
     if (!browser) continue;
-    mkdirSync(".cache", { recursive: true });
-    writeFileSync(CACHE_PATH, JSON.stringify(recipe, null, 2));
+    if (!forcedChannel) {
+      mkdirSync(".cache", { recursive: true });
+      writeFileSync(CACHE_PATH, JSON.stringify(recipe, null, 2));
+    }
     console.log(`[launch] WebGPU OK headless=${recipe.headless} channel=${recipe.channel ?? "default"} args=[${recipe.args.join(" ")}]`);
     return { browser, recipe };
   }
