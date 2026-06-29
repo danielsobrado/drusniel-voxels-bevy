@@ -21,6 +21,8 @@ export type TreeGpuRingIndexCounts = Record<TreeSpeciesId, Record<TreeLod, numbe
 export interface TreeGpuRingOutputBuffers {
   cell: GPUBuffer;
   indirectArgs: GPUBuffer;
+  shadowCell?: GPUBuffer;
+  shadowIndirectArgs?: GPUBuffer;
 }
 
 export interface TreeHydrologyData {
