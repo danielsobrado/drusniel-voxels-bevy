@@ -1,9 +1,13 @@
+import * as THREE from "three";
 import type { TreeLod, TreeSpeciesId } from "./tree_config.js";
 import { TREE_LODS, TREE_SPECIES } from "./tree_config.js";
 
 export const TREE_RING_SHADOW_CASCADE_COUNT = 4;
 export const TREE_RING_SHADOW_PLANE_COUNT = 6;
 export const TREE_RING_SHADOW_PLANE_WORDS = 4;
+
+const projectionMatrix = new THREE.Matrix4();
+const frustum = new THREE.Frustum();
 
 export function treeRingShadowCasterGroupCount(cascadeCount = TREE_RING_SHADOW_CASCADE_COUNT): number {
   return treeRingShadowSafeCascadeCount(cascadeCount) * TREE_SPECIES.length * TREE_LODS.length;
@@ -34,6 +38,31 @@ export function treeRingShadowCasterGroupRegion(
 
 export function treeRingShadowCascadePlaneOffset(cascade: number): number {
   return Math.max(0, Math.floor(cascade)) * TREE_RING_SHADOW_PLANE_COUNT * TREE_RING_SHADOW_PLANE_WORDS;
+}
+
+export function treeRingShadowCascadePlanesFromCamera(camera: THREE.Camera): Float32Array {
+  camera.updateMatrixWorld(true);
+  projectionMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  frustum.setFromProjectionMatrix(projectionMatrix);
+  const out = new Float32Array(TREE_RING_SHADOW_PLANE_COUNT * TREE_RING_SHADOW_PLANE_WORDS);
+  for (let i = 0; i < TREE_RING_SHADOW_PLANE_COUNT; i++) {
+    const plane = frustum.planes[i];
+    const offset = i * TREE_RING_SHADOW_PLANE_WORDS;
+    out[offset] = plane.normal.x;
+    out[offset + 1] = plane.normal.y;
+    out[offset + 2] = plane.normal.z;
+    out[offset + 3] = plane.constant;
+  }
+  return out;
+}
+
+export function treeRingShadowCascadePlanesFromCameras(
+  cameras: readonly THREE.Camera[],
+  cascadeCount = TREE_RING_SHADOW_CASCADE_COUNT,
+): Float32Array {
+  const safeCascadeCount = treeRingShadowSafeCascadeCount(cascadeCount);
+  const cascades = cameras.slice(0, safeCascadeCount).map((camera) => treeRingShadowCascadePlanesFromCamera(camera));
+  return packTreeRingShadowCascadePlanes(cascades, safeCascadeCount);
 }
 
 export function packTreeRingShadowCascadePlanes(
