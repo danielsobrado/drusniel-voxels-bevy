@@ -8,9 +8,11 @@ import {
   setTreeGpuRingIndirect,
   setTreeGpuRingMeshesVisible,
   treeGpuBufferForAttribute,
+  treeRingShadowCasterGroupCount,
   type TreeMaterialHandle,
   type TreeWebGpuBackendBufferAccess,
 } from "./index.js";
+
 
 describe("tree system GPU ring draw helpers", () => {
   it("creates indirect and cell storage buffers", () => {
@@ -23,10 +25,32 @@ describe("tree system GPU ring draw helpers", () => {
     expect(bundle.cell.name).toBe("tree-ring-cell");
     expect(bundle.cell.itemSize).toBe(4);
     expect(bundle.cell.count).toBe(6);
+    expect(bundle.shadowCell).toBeUndefined();
+    expect(bundle.shadowIndirect).toBeUndefined();
     expect(backend.createIndirectStorageAttribute).toHaveBeenCalledTimes(1);
     expect(backend.createStorageAttribute).toHaveBeenCalledTimes(1);
     expect(bundle.outputBuffers.cell).toBeDefined();
     expect(bundle.outputBuffers.indirectArgs).toBeDefined();
+  });
+
+  it("creates optional per-cascade shadow caster buffers", () => {
+    const backend = fakeBackend();
+    const bundle = createTreeGpuRingDrawBuffers(backend, 3, 2, {
+      maxShadowCastersPerGroup: 5,
+      shadowCascadeCount: 4,
+    });
+    const shadowGroups = treeRingShadowCasterGroupCount(4);
+
+    expect(bundle.shadowIndirect?.name).toBe("tree-ring-shadow-indirect");
+    expect(bundle.shadowIndirect?.itemSize).toBe(5);
+    expect(bundle.shadowIndirect?.count).toBe(shadowGroups);
+    expect(bundle.shadowCell?.name).toBe("tree-ring-shadow-cell");
+    expect(bundle.shadowCell?.itemSize).toBe(4);
+    expect(bundle.shadowCell?.count).toBe(shadowGroups * 5);
+    expect(bundle.outputBuffers.shadowCell).toBeDefined();
+    expect(bundle.outputBuffers.shadowIndirectArgs).toBeDefined();
+    expect(backend.createIndirectStorageAttribute).toHaveBeenCalledTimes(2);
+    expect(backend.createStorageAttribute).toHaveBeenCalledTimes(2);
   });
 
   it("builds indirect instanced geometry from source attributes", () => {
