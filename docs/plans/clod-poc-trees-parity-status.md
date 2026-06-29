@@ -37,6 +37,24 @@ Still required before calling TREE-7 complete:
 - Add GPU caster-count readback if we want full CPU/GPU caster-count parity instead of CPU contract coverage only.
 - Capture a low-sun shot proving off-screen trees can still cast.
 
+## TREE-8 current state
+
+Implemented:
+
+- `tree_crown_proxy_math.ts` provides fitted species crown dimensions, ellipsoid source geometry, edge keep probability, and impostor-band fade math.
+- `tree_crown_proxy_math.test.ts` covers broad oak crowns, tall pine crowns, sparse dead-tree proxies, edge falloff, and impostor-boundary fade.
+- `tree_crown_proxy_node_material.ts` provides a WebGPU/TSL crown proxy material handle using GPU ring storage cells, ellipsoid placement, world/screen anchored dither, crown-edge falloff, and numeric impostor fade masks.
+- `tree_crown_proxy_node_material.test.ts` covers material construction and source-level placement/mask contract.
+- `scripts/wire-tree-system-tree8-proxies.mjs` wires the large `tree_system.ts` file to use crown proxy geometry/materials for far/impostor shadow-only meshes.
+
+Still required before calling TREE-8 complete:
+
+- Apply TREE-7 first: `npm --prefix tools/clod-poc run trees:wire-tree7-shadows`.
+- Then apply TREE-8: `npm --prefix tools/clod-poc run trees:wire-tree8-proxies`.
+- Commit the resulting `tree_system.ts` rewrite.
+- Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
+- Capture noon forest-interior and impostor-boundary shadow shots.
+
 ## Still required before calling Epic A+B closed
 
 - Run `npm --prefix tools/clod-poc test`.
@@ -47,8 +65,7 @@ Still required before calling TREE-7 complete:
 
 ## Next implementation order
 
-1. Finish TREE-7 physical `tree_system.ts` shadow-only mesh wiring and shot evidence.
-2. TREE-8 crown proxy casters.
-3. TREE-9 species expansion.
-4. TREE-10 hero near-tree triangle audit.
-5. TREE-12 closeout docs and evidence links.
+1. Finish TREE-7/TREE-8 physical `tree_system.ts` rewrites and shot evidence.
+2. TREE-9 species expansion.
+3. TREE-10 hero near-tree triangle audit.
+4. TREE-12 closeout docs and evidence links.
