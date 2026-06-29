@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import type { TreeGpuRingOutputBuffers } from "../gpu/tree_ring_compute.js";
 import { TREE_GPU_RING_GROUP_COUNT } from "../gpu/tree_ring_compute.js";
+import { markAsRealtimeSunShadowCaster } from "../rendering/realtime_sun_shadows.js";
 import type { TreeLod, TreeSpeciesId } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT, treeRingShadowCasterGroupCount } from "./tree_ring_shadow_casters.js";
@@ -113,6 +114,19 @@ export function createTreeGpuRingMesh(
   mesh.frustumCulled = false;
   mesh.castShadow = castShadow;
   mesh.receiveShadow = false;
+  return mesh;
+}
+
+export function createTreeGpuRingShadowMesh(
+  geometry: THREE.InstancedBufferGeometry,
+  materialHandle: TreeMaterialHandle,
+  species: TreeSpeciesId,
+  lod: TreeLod,
+): TreeGpuRingMesh {
+  const mesh = createTreeGpuRingMesh(geometry, materialHandle, species, lod, false, true);
+  mesh.name = `trees-ring-gpu-shadow-${species}-${lod}`;
+  mesh.receiveShadow = false;
+  markAsRealtimeSunShadowCaster(mesh);
   return mesh;
 }
 
