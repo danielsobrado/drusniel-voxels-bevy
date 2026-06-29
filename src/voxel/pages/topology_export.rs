@@ -179,8 +179,8 @@ mod tests {
 
     #[test]
     fn env_flag_accepts_common_truthy_values() {
-        std::env::set_var("VOXEL_CLOD_TOPOLOGY_TEST_FLAG", "on");
+        unsafe { std::env::set_var("VOXEL_CLOD_TOPOLOGY_TEST_FLAG", "on"); }
         assert!(env_flag("VOXEL_CLOD_TOPOLOGY_TEST_FLAG"));
-        std::env::remove_var("VOXEL_CLOD_TOPOLOGY_TEST_FLAG");
+        unsafe { std::env::remove_var("VOXEL_CLOD_TOPOLOGY_TEST_FLAG"); }
     }
 }

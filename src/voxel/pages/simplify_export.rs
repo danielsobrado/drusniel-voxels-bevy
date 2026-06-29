@@ -165,8 +165,8 @@ mod tests {
 
     #[test]
     fn env_flag_accepts_common_truthy_values() {
-        std::env::set_var("VOXEL_CLOD_SIMPLIFY_TEST_FLAG", "true");
+        unsafe { std::env::set_var("VOXEL_CLOD_SIMPLIFY_TEST_FLAG", "true"); }
         assert!(env_flag("VOXEL_CLOD_SIMPLIFY_TEST_FLAG"));
-        std::env::remove_var("VOXEL_CLOD_SIMPLIFY_TEST_FLAG");
+        unsafe { std::env::remove_var("VOXEL_CLOD_SIMPLIFY_TEST_FLAG"); }
     }
 }
