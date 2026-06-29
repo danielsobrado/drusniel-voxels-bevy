@@ -137,7 +137,8 @@ import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_n
 ];
 
 export function wireTreeSystemSource(input) {
-  let source = input;
+  const eol = detectEol(input);
+  let source = normalizeEol(input);
   let changed = false;
   const applied = [];
   const skipped = [];
@@ -159,7 +160,7 @@ export function wireTreeSystemSource(input) {
     applied.push(edit.label);
   }
 
-  return { source, changed, applied, skipped };
+  return { source: restoreEol(source, eol), changed, applied, skipped };
 }
 
 export function wireTreeSystemFile(path = defaultTreeSystemPath, options = {}) {
@@ -177,6 +178,18 @@ if (isCli()) {
   console.log(`${mode} ${defaultTreeSystemPath}`);
   console.log(`Applied: ${result.applied.length ? result.applied.join(", ") : "none"}`);
   console.log(`Already present: ${result.skipped.length ? result.skipped.join(", ") : "none"}`);
+}
+
+function normalizeEol(source) {
+  return source.replace(/\r\n/g, "\n");
+}
+
+function restoreEol(source, eol) {
+  return eol === "\r\n" ? source.replace(/\n/g, "\r\n") : source;
+}
+
+function detectEol(source) {
+  return source.includes("\r\n") ? "\r\n" : "\n";
 }
 
 function countOccurrences(source, needle) {
