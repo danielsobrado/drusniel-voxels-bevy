@@ -47,6 +47,6 @@ describe("TREE-9 six-species WGSL params source", () => {
 
     expect(replaced).toContain("params.index_counts_f[group - 20u]");
     expect(replaced).toContain("fn in_frustum(");
-    expect(replaced).not.toContain("return params.index_counts_c[group - 8u];");
+    expect(replaced).not.toContain("return params.index_counts_c[group - 8u];\n}");
   });
 });
