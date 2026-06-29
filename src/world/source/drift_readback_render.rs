@@ -98,9 +98,9 @@ pub fn prepare_gpu_world_source_drift_readback_dispatch(
 
     ensure_readback_buffers(&render_device, &mut buffers, plan);
 
-    let Some(params_buffer) = buffers.params_buffer.as_ref() else { return };
-    let Some(input_buffer) = buffers.input_buffer.as_ref() else { return };
-    let Some(output_buffer) = buffers.output_buffer.as_ref() else { return };
+    let Some(params_buffer) = buffers.params_buffer.clone() else { return };
+    let Some(input_buffer) = buffers.input_buffer.clone() else { return };
+    let Some(output_buffer) = buffers.output_buffer.clone() else { return };
 
     let params = GpuWorldSourceDriftReadbackParams {
         sample_count: plan.sample_count,
@@ -108,8 +108,8 @@ pub fn prepare_gpu_world_source_drift_readback_dispatch(
         _pad1: 0,
         _pad2: 0,
     };
-    render_queue.write_buffer(params_buffer, 0, bytemuck::bytes_of(&params));
-    render_queue.write_buffer(input_buffer, 0, bytemuck::cast_slice(&request.inputs));
+    render_queue.write_buffer(&params_buffer, 0, bytemuck::bytes_of(&params));
+    render_queue.write_buffer(&input_buffer, 0, bytemuck::cast_slice(&request.inputs));
 
     buffers.bind_group = Some(render_device.create_bind_group(
         Some("world_source_drift_readback_bg0"),
