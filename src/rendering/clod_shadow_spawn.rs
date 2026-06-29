@@ -36,6 +36,10 @@ pub struct ClodTerrainVisualMeshId(pub String);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClodShadowRuntimeManagedNoCaster;
 
+/// Marker for visual-caster ownership by the CLOD shadow runtime.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClodShadowRuntimeManagedVisualCaster;
+
 /// Shadow-only proxy caster spawned from a runtime snapshot.
 #[derive(Component, Debug, Clone)]
 pub struct ClodShadowProxyCaster {
@@ -173,6 +177,7 @@ pub fn apply_clod_shadow_runtime_snapshot(
         &GlobalTransform,
         Option<&NotShadowCaster>,
         Option<&ClodShadowRuntimeManagedNoCaster>,
+        Option<&ClodShadowRuntimeManagedVisualCaster>,
     )>,
     proxies: Query<(Entity, &ClodShadowProxyCaster)>,
     mut stats: ResMut<ClodShadowRuntimeSpawnStats>,
@@ -194,9 +199,9 @@ pub fn apply_clod_shadow_runtime_snapshot(
 
     cleanup_proxies(&mut commands, &mut meshes, &mut materials, &proxies);
     let runtime_settings = settings.as_deref().cloned().unwrap_or_default();
-    let visuals_by_id: HashMap<&str, (Entity, &GlobalTransform, bool, bool)> = visuals
+    let visuals_by_id: HashMap<&str, (Entity, &GlobalTransform, bool, bool, bool)> = visuals
         .iter()
-        .map(|(entity, id, transform, no_shadow, owned_no_shadow)| {
+        .map(|(entity, id, transform, no_shadow, owned_no_shadow, owned_visual)| {
             (
                 id.0.as_str(),
                 (
@@ -204,6 +209,7 @@ pub fn apply_clod_shadow_runtime_snapshot(
                     transform,
                     no_shadow.is_some(),
                     owned_no_shadow.is_some(),
+                    owned_visual.is_some(),
                 ),
             )
         })
@@ -223,7 +229,7 @@ pub fn apply_clod_shadow_runtime_snapshot(
             .runtime_shadow_triangles
             .saturating_add(runtime_shadow_triangles_for_action(plan, action));
 
-        let Some((visual_entity, visual_transform, has_no_shadow, owned_no_shadow)) =
+        let Some((visual_entity, visual_transform, has_no_shadow, owned_no_shadow, _owned_visual)) =
             visuals_by_id.get(plan.visual_mesh_id.as_str()).copied()
         else {
             next_stats.missing_visual_entities =
@@ -234,24 +240,29 @@ pub fn apply_clod_shadow_runtime_snapshot(
         match action {
             ClodShadowRuntimeAction::UseVisualMeshCaster => {
                 next_stats.visual_caster_pages = next_stats.visual_caster_pages.saturating_add(1);
-                if has_no_shadow || owned_no_shadow {
-                    commands
-                        .entity(visual_entity)
+                let mut entity = commands.entity(visual_entity);
+                if has_no_shadow {
+                    entity
                         .remove::<NotShadowCaster>()
-                        .remove::<ClodShadowRuntimeManagedNoCaster>();
+                        .insert(ClodShadowRuntimeManagedVisualCaster);
+                }
+                if owned_no_shadow {
+                    entity.remove::<ClodShadowRuntimeManagedNoCaster>();
                 }
             }
             ClodShadowRuntimeAction::ApplyNotShadowCaster => {
                 next_stats.no_cast_pages = next_stats.no_cast_pages.saturating_add(1);
                 commands
                     .entity(visual_entity)
-                    .insert((NotShadowCaster, ClodShadowRuntimeManagedNoCaster));
+                    .insert((NotShadowCaster, ClodShadowRuntimeManagedNoCaster))
+                    .remove::<ClodShadowRuntimeManagedVisualCaster>();
             }
             ClodShadowRuntimeAction::SpawnProxyShadowCaster => {
                 next_stats.proxy_caster_pages = next_stats.proxy_caster_pages.saturating_add(1);
                 commands
                     .entity(visual_entity)
-                    .insert((NotShadowCaster, ClodShadowRuntimeManagedNoCaster));
+                    .insert((NotShadowCaster, ClodShadowRuntimeManagedNoCaster))
+                    .remove::<ClodShadowRuntimeManagedVisualCaster>();
 
                 let Some(shadow_mesh_id) = plan.shadow_mesh_id.as_deref() else {
                     next_stats.missing_proxy_meshes =
@@ -307,16 +318,20 @@ fn cleanup_runtime_entities(
         &GlobalTransform,
         Option<&NotShadowCaster>,
         Option<&ClodShadowRuntimeManagedNoCaster>,
+        Option<&ClodShadowRuntimeManagedVisualCaster>,
     )>,
     proxies: &Query<(Entity, &ClodShadowProxyCaster)>,
 ) {
     cleanup_proxies(commands, meshes, materials, proxies);
-    for (entity, _id, _transform, _no_shadow, owned_no_shadow) in visuals.iter() {
+    for (entity, _id, _transform, _no_shadow, owned_no_shadow, owned_visual) in visuals.iter() {
+        let mut entity_commands = commands.entity(entity);
+        if owned_visual.is_some() {
+            entity_commands
+                .insert(NotShadowCaster)
+                .remove::<ClodShadowRuntimeManagedVisualCaster>();
+        }
         if owned_no_shadow.is_some() {
-            commands
-                .entity(entity)
-                .remove::<NotShadowCaster>()
-                .remove::<ClodShadowRuntimeManagedNoCaster>();
+            entity_commands.remove::<ClodShadowRuntimeManagedNoCaster>();
         }
     }
 }
