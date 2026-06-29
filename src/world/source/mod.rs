@@ -4,6 +4,7 @@ pub mod biome_region_contract;
 pub mod biome_region_field;
 pub mod drift_gate;
 pub mod drift_readback;
+pub mod drift_readback_acceptance;
 pub mod drift_readback_bridge;
 pub mod drift_readback_render;
 pub mod drift_readback_render_plugin;
@@ -44,6 +45,9 @@ pub use drift_readback::{
     WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH, WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE,
     WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
     build_gpu_world_source_drift_input_samples, decode_gpu_world_source_drift_outputs,
+};
+pub use drift_readback_acceptance::{
+    WorldSourceGpuReadbackAcceptanceResult, evaluate_world_source_gpu_readback_acceptance,
 };
 pub use drift_readback_bridge::{
     GpuWorldSourceDriftReadbackSharedResult, publish_gpu_world_source_drift_readback_result,
