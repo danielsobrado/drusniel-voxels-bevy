@@ -21,6 +21,7 @@
     "props:generate-snaps": "tsx tools/generate-prop-snaps.ts",
     "border-ocean:visual": "tsx tools/border-ocean-visual.ts",
     "phase0": "tsx tools/phase0.ts",
+    "accept:infinite-islands": "tsx tools/infinite-islands-acceptance.ts",
     "trees:wire-tree4-tree5": "node scripts/wire-tree-system-tree4-5.mjs",
     "trees:wire-tree4-tree5:check": "node scripts/wire-tree-system-tree4-5.mjs --dry-run",
     "trees:wire-tree7-shadows": "node scripts/wire-tree-system-tree7-shadows.mjs",

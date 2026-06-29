@@ -5,6 +5,7 @@ interface LaunchRecipe {
   headless: boolean;
   channel?: string;
   args: string[];
+  cdpUrl?: string;
 }
 
 const CANDIDATES: LaunchRecipe[] = [
@@ -77,6 +78,30 @@ export async function launchChromium(): Promise<{ browser: Browser; recipe: Laun
 
 export async function launchWebGPU(): Promise<{ browser: Browser; recipe: LaunchRecipe }> {
   const baseUrl = clodBaseUrl();
+  const cdpUrl = process.env["CLOD_POC_CDP_URL"];
+  if (cdpUrl) {
+    const browser = await chromium.connectOverCDP(cdpUrl);
+    const page = await browser.newPage();
+    try {
+      const probeUrl = new URL(baseUrl);
+      probeUrl.searchParams.set("webgpuProbe", "1");
+      await page.goto(probeUrl.toString(), { waitUntil: "domcontentloaded" });
+      const ok = await page.evaluate(async () => {
+        const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
+        if (!gpu) return false;
+        return (await gpu.requestAdapter()) !== null;
+      });
+      if (!ok) throw new Error(`Chrome at ${cdpUrl} did not expose a WebGPU adapter`);
+      console.log(`[launch] WebGPU OK cdp=${cdpUrl}`);
+      return { browser, recipe: { headless: false, args: [], cdpUrl } };
+    } catch (error) {
+      await browser.close().catch(() => undefined);
+      throw error;
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  }
+
   if (existsSync(CACHE_PATH)) {
     try {
       const recipe = JSON.parse(readFileSync(CACHE_PATH, "utf8")) as LaunchRecipe;
