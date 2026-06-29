@@ -130,7 +130,7 @@ describe("tree system impostor resource helpers", () => {
     expect(disposeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("creates four-frame blend impostor material when requested", () => {
+  it("does not create four-frame blend material until blend geometry is ready", () => {
     const settings = cloneTreeSettings();
     const atlas = fakeAtlas("dead");
     const materials: Partial<Record<"oak" | "pine" | "dead", THREE.Material>> = {};
@@ -140,12 +140,59 @@ describe("tree system impostor resource helpers", () => {
       atlas,
       webgpu: false,
       viewBlend: true,
+      viewBlendGeometryReady: false,
+      impostorMaterials: materials,
+    });
+
+    expect(material).toBeInstanceOf(THREE.ShaderMaterial);
+    expect(material.name).toBe("tree-impostor-dead");
+  });
+
+  it("creates four-frame blend impostor material when geometry is ready", () => {
+    const settings = cloneTreeSettings();
+    const atlas = fakeAtlas("dead");
+    const materials: Partial<Record<"oak" | "pine" | "dead", THREE.Material>> = {};
+    const material = updateTreeSystemImpostorMaterial({
+      species: "dead",
+      settings,
+      atlas,
+      webgpu: false,
+      viewBlend: true,
+      viewBlendGeometryReady: true,
       impostorMaterials: materials,
     });
 
     expect(material).toBeInstanceOf(THREE.ShaderMaterial);
     expect(material.name).toBe("tree-impostor-blend-dead");
     expect(materials.dead).toBe(material);
+  });
+
+  it("replaces cached impostor material when selection mode changes", () => {
+    const settings = cloneTreeSettings();
+    const atlas = fakeAtlas("oak");
+    const materials: Partial<Record<"oak" | "pine" | "dead", THREE.Material>> = {};
+    const single = updateTreeSystemImpostorMaterial({
+      species: "oak",
+      settings,
+      atlas,
+      webgpu: false,
+      impostorMaterials: materials,
+    });
+    const disposeSpy = vi.spyOn(single, "dispose");
+    const blend = updateTreeSystemImpostorMaterial({
+      species: "oak",
+      settings,
+      atlas,
+      webgpu: false,
+      viewBlend: true,
+      viewBlendGeometryReady: true,
+      impostorMaterials: materials,
+    });
+
+    expect(blend).not.toBe(single);
+    expect(blend.name).toBe("tree-impostor-blend-oak");
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+    expect(materials.oak).toBe(blend);
   });
 });
 
