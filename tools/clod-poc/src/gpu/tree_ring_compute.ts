@@ -1,5 +1,6 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
+import { treeRingSpeciesGroupIndex, treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { composeTreeRingShader } from "./wgsl_modules.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "../trees/tree_config.js";
 import { treeMaterialDensityVector, treeSpeciesMaterialVector } from "../trees/tree_material_bias.js";
@@ -8,15 +9,16 @@ import {
   TREE_RING_SHADOW_CASCADE_COUNT,
   TREE_RING_SHADOW_PLANE_COUNT,
   TREE_RING_SHADOW_PLANE_WORDS,
-  treeRingShadowCasterGroupCount,
 } from "../trees/tree_ring_shadow_casters.js";
 
+const TREE_GPU_RING_LAYOUT = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
+
 export const TREE_GPU_RING_LOD_COUNT = TREE_LODS.length;
-export const TREE_GPU_RING_GROUP_COUNT = TREE_SPECIES.length * TREE_GPU_RING_LOD_COUNT;
-export const TREE_GPU_RING_SHADOW_GROUP_COUNT = treeRingShadowCasterGroupCount(TREE_RING_SHADOW_CASCADE_COUNT);
+export const TREE_GPU_RING_GROUP_COUNT = TREE_GPU_RING_LAYOUT.groupCount;
+export const TREE_GPU_RING_SHADOW_GROUP_COUNT = TREE_GPU_RING_LAYOUT.shadowGroupCount;
 const TREE_GPU_RING_VISIBLE_PLANE_FLOATS = 6 * 4;
 const TREE_GPU_RING_SHADOW_PLANE_FLOATS = TREE_RING_SHADOW_CASCADE_COUNT * TREE_RING_SHADOW_PLANE_COUNT * TREE_RING_SHADOW_PLANE_WORDS;
-const PARAM_BYTES = 16 * 46;
+const PARAM_BYTES = TREE_GPU_RING_LAYOUT.paramBytes;
 const COUNTER_BYTES = TREE_GPU_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const SHADOW_COUNTER_BYTES = TREE_GPU_RING_SHADOW_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_SLOTS = 2;
@@ -85,7 +87,7 @@ export function emptyTreeGpuRingCounts(): TreeGpuRingCounts {
 }
 
 export function treeGpuRingGroupIndex(species: TreeSpeciesId, lod: TreeLod): number {
-  return TREE_SPECIES.indexOf(species) * TREE_GPU_RING_LOD_COUNT + TREE_LODS.indexOf(lod);
+  return treeRingSpeciesGroupIndex(TREE_SPECIES.indexOf(species), TREE_LODS.indexOf(lod), TREE_SPECIES.length);
 }
 
 export function treeGpuRingGroupRegion(group: number, maxInstancesPerGroup: number): { start: number; end: number; firstInstance: number } {
@@ -151,10 +153,8 @@ export function treeGpuRingKey(settings: TreeSettings, worldCells: number): stri
     accept.minHeightM, accept.maxHeightM, accept.slopeMinY, accept.minGroundWeight,
     accept.parentCellM, accept.clumpStrength, accept.clumpThreshold,
     ...accept.materialDensity,
-    ...treeSpeciesMaterialVector(settings, "oak"),
-    ...treeSpeciesMaterialVector(settings, "pine"),
-    ...treeSpeciesMaterialVector(settings, "dead"),
-    speciesWeight(settings, "oak"), speciesWeight(settings, "pine"), speciesWeight(settings, "dead"),
+    ...TREE_SPECIES.flatMap((species) => treeSpeciesMaterialVector(settings, species)),
+    ...TREE_SPECIES.map((species) => speciesWeight(settings, species)),
     treeGpuRingWorkgroupSize(settings),
   ].join("|");
 }
@@ -198,33 +198,36 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   f32[23] = accept.waterClearanceM;
   f32[24] = accept.rockReject;
   f32[25] = accept.snowReject;
-  f32[28] = speciesWeight(settings, "oak");
-  f32[29] = speciesWeight(settings, "pine");
-  f32[30] = speciesWeight(settings, "dead");
+  TREE_SPECIES.forEach((species, index) => {
+    f32[28 + index] = speciesWeight(settings, species);
+  });
   for (const species of TREE_SPECIES) {
     for (const treeLod of TREE_LODS) {
-      u32[32 + treeGpuRingGroupIndex(species, treeLod)] = Math.max(0, Math.floor(params.indexCounts[species][treeLod])) >>> 0;
+      u32[TREE_GPU_RING_LAYOUT.indexCountsOffset + treeGpuRingGroupIndex(species, treeLod)] = Math.max(0, Math.floor(params.indexCounts[species][treeLod])) >>> 0;
     }
   }
-  u32[44] = Math.max(0, Math.floor(params.maxInstancesPerGroup)) >>> 0;
-  u32[45] = treeGpuRingGrid(settings) >>> 0;
-  u32[46] = settings.seed >>> 0;
-  u32[47] = Math.max(0, Math.floor(params.maxShadowCastersPerGroup ?? 0)) >>> 0;
+  u32[TREE_GPU_RING_LAYOUT.settingsOffset] = Math.max(0, Math.floor(params.maxInstancesPerGroup)) >>> 0;
+  u32[TREE_GPU_RING_LAYOUT.settingsOffset + 1] = treeGpuRingGrid(settings) >>> 0;
+  u32[TREE_GPU_RING_LAYOUT.settingsOffset + 2] = settings.seed >>> 0;
+  u32[TREE_GPU_RING_LAYOUT.settingsOffset + 3] = Math.max(0, Math.floor(params.maxShadowCastersPerGroup ?? 0)) >>> 0;
   const density = treeMaterialDensityVector(settings);
-  const oak = treeSpeciesMaterialVector(settings, "oak");
-  const pine = treeSpeciesMaterialVector(settings, "pine");
-  const dead = treeSpeciesMaterialVector(settings, "dead");
   for (let i = 0; i < 4; i++) {
-    f32[48 + i] = density[i] ?? 1;
-    f32[52 + i] = oak[i] ?? 1;
-    f32[56 + i] = pine[i] ?? 1;
-    f32[60 + i] = dead[i] ?? 1;
+    f32[TREE_GPU_RING_LAYOUT.materialDensityOffset + i] = density[i] ?? 1;
   }
+  TREE_SPECIES.forEach((species, speciesIndex) => {
+    const material = treeSpeciesMaterialVector(settings, species);
+    const offset = TREE_GPU_RING_LAYOUT.speciesMaterialOffset + speciesIndex * 4;
+    for (let i = 0; i < 4; i++) f32[offset + i] = material[i] ?? 1;
+  });
   if (params.frustumPlanes) {
-    for (let i = 0; i < Math.min(TREE_GPU_RING_VISIBLE_PLANE_FLOATS, params.frustumPlanes.length); i++) f32[64 + i] = params.frustumPlanes[i] ?? 0;
+    for (let i = 0; i < Math.min(TREE_GPU_RING_VISIBLE_PLANE_FLOATS, params.frustumPlanes.length); i++) {
+      f32[TREE_GPU_RING_LAYOUT.visiblePlanesOffset + i] = params.frustumPlanes[i] ?? 0;
+    }
   }
   if (params.shadowCascadePlanes) {
-    for (let i = 0; i < Math.min(TREE_GPU_RING_SHADOW_PLANE_FLOATS, params.shadowCascadePlanes.length); i++) f32[88 + i] = params.shadowCascadePlanes[i] ?? 0;
+    for (let i = 0; i < Math.min(TREE_GPU_RING_SHADOW_PLANE_FLOATS, params.shadowCascadePlanes.length); i++) {
+      f32[TREE_GPU_RING_LAYOUT.shadowPlanesOffset + i] = params.shadowCascadePlanes[i] ?? 0;
+    }
   }
   return scratch;
 }
