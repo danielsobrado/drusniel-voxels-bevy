@@ -30,6 +30,15 @@ describe("tree system mesh bounds updater", () => {
 
   it("marks dirty instance attributes and refreshes bounds", () => {
     const mesh = testMesh();
+    const worldXZ = treeWorldXZAttribute(mesh);
+    const fade = treeLodFadeAttribute(mesh);
+    const impostorUv = treeImpostorUvRectAttribute(mesh);
+    const versionsBefore = {
+      matrix: mesh.instanceMatrix.version,
+      worldXZ: worldXZ.version,
+      fade: fade.version,
+      impostorUv: impostorUv.version,
+    };
     const computeSphere = vi.spyOn(mesh, "computeBoundingSphere");
     const computeBox = vi.spyOn(mesh, "computeBoundingBox");
     const state = updateTreeMeshAfterLod({
@@ -45,10 +54,10 @@ describe("tree system mesh bounds updater", () => {
     });
 
     expect(mesh.visible).toBe(true);
-    expect(mesh.instanceMatrix.needsUpdate).toBe(true);
-    expect(treeWorldXZAttribute(mesh).needsUpdate).toBe(true);
-    expect(treeLodFadeAttribute(mesh).needsUpdate).toBe(true);
-    expect(treeImpostorUvRectAttribute(mesh).needsUpdate).toBe(true);
+    expect(mesh.instanceMatrix.version).toBeGreaterThan(versionsBefore.matrix);
+    expect(worldXZ.version).toBeGreaterThan(versionsBefore.worldXZ);
+    expect(fade.version).toBeGreaterThan(versionsBefore.fade);
+    expect(impostorUv.version).toBeGreaterThan(versionsBefore.impostorUv);
     expect(computeSphere).toHaveBeenCalledTimes(1);
     expect(computeBox).toHaveBeenCalledTimes(1);
     expect(state.hasBounds).toBe(true);
