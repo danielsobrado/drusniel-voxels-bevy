@@ -9,6 +9,7 @@ use super::drift_readback::{
     GpuWorldSourceDriftInputSample, GpuWorldSourceDriftOutputSample,
     GpuWorldSourceDriftReadbackDispatchPlan, GpuWorldSourceDriftReadbackParams,
     WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH, WorldSourceGpuReadbackResult,
+    WorldSourceGpuReadbackStatus, decode_gpu_world_source_drift_outputs,
 };
 
 #[derive(Resource, Debug, Clone, Default)]
@@ -296,23 +297,47 @@ pub fn init_gpu_world_source_drift_readback_pipeline(
     commands.insert_resource(GpuWorldSourceDriftReadbackState::default());
 }
 
+pub fn decode_gpu_world_source_drift_readback_mapped_bytes(
+    mapped_bytes: &[u8],
+    plan: GpuWorldSourceDriftReadbackDispatchPlan,
+) -> WorldSourceGpuReadbackResult {
+    let required_len = plan.output_bytes;
+    if required_len == 0 {
+        return WorldSourceGpuReadbackResult::available(Vec::new());
+    }
+    if mapped_bytes.len() < required_len {
+        return WorldSourceGpuReadbackResult::unavailable("gpu_readback_mapped_bytes_too_short");
+    }
+
+    let bytes = &mapped_bytes[..required_len];
+    let outputs = match bytemuck::try_cast_slice::<u8, GpuWorldSourceDriftOutputSample>(bytes) {
+        Ok(outputs) => outputs,
+        Err(_) => return WorldSourceGpuReadbackResult::unavailable("gpu_readback_mapped_bytes_invalid_layout"),
+    };
+
+    match decode_gpu_world_source_drift_outputs(outputs) {
+        Ok(samples) => WorldSourceGpuReadbackResult::available(samples),
+        Err(_) => WorldSourceGpuReadbackResult::unavailable("gpu_readback_output_decode_failed"),
+    }
+}
+
 pub fn decode_staged_gpu_world_source_drift_readback(
     _buffers: Res<GpuWorldSourceDriftReadbackBuffers>,
     mut state: ResMut<GpuWorldSourceDriftReadbackState>,
 ) {
-    if state.latest_result.status
-        == super::drift_readback::WorldSourceGpuReadbackStatus::Unavailable
+    if state.latest_result.status == WorldSourceGpuReadbackStatus::Unavailable
         && state.latest_result.unavailable_reason.as_deref()
             == Some("gpu_readback_dispatch_pending_map")
     {
-        state.latest_result =
-            WorldSourceGpuReadbackResult::unavailable("gpu_readback_map_not_implemented");
+        // TODO: map the staging buffer and call decode_gpu_world_source_drift_readback_mapped_bytes.
+        state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_map_pending");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::drift_readback::GpuWorldSourceDriftOutputSample;
 
     #[test]
     fn request_empty_when_no_inputs() {
@@ -326,6 +351,59 @@ mod tests {
         assert_eq!(
             state.latest_result.unavailable_reason.as_deref(),
             Some("gpu_readback_not_dispatched")
+        );
+    }
+
+    #[test]
+    fn decodes_mapped_bytes_to_available_samples() {
+        let outputs = [GpuWorldSourceDriftOutputSample {
+            x: 1.0,
+            z: 2.0,
+            height: 18.0,
+            ocean_mask: 0.25,
+            biome: 0,
+            dominant_layer: 0,
+            _pad0: 0,
+            _pad1: 0,
+        }];
+        let plan = GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(outputs.len())
+            .expect("dispatch plan");
+        let bytes = bytemuck::cast_slice(&outputs);
+        let result = decode_gpu_world_source_drift_readback_mapped_bytes(bytes, plan);
+
+        assert_eq!(result.status, WorldSourceGpuReadbackStatus::Available);
+        assert_eq!(result.samples.as_ref().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn rejects_short_mapped_bytes() {
+        let plan = GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(1)
+            .expect("dispatch plan");
+        let result = decode_gpu_world_source_drift_readback_mapped_bytes(&[0u8; 4], plan);
+
+        assert_eq!(result.status, WorldSourceGpuReadbackStatus::Unavailable);
+        assert_eq!(
+            result.unavailable_reason.as_deref(),
+            Some("gpu_readback_mapped_bytes_too_short")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_mapped_output_ids() {
+        let outputs = [GpuWorldSourceDriftOutputSample {
+            biome: 99,
+            dominant_layer: 0,
+            ..GpuWorldSourceDriftOutputSample::zeroed()
+        }];
+        let plan = GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(outputs.len())
+            .expect("dispatch plan");
+        let bytes = bytemuck::cast_slice(&outputs);
+        let result = decode_gpu_world_source_drift_readback_mapped_bytes(bytes, plan);
+
+        assert_eq!(result.status, WorldSourceGpuReadbackStatus::Unavailable);
+        assert_eq!(
+            result.unavailable_reason.as_deref(),
+            Some("gpu_readback_output_decode_failed")
         );
     }
 }
