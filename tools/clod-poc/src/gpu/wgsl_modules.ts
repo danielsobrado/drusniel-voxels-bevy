@@ -11,6 +11,10 @@ import treeRingEntry from "./shaders/tree_ring.compute.wgsl?raw";
 import understoryBindings from "./shaders/terrain_field_bindings_understory.wgsl?raw";
 import understoryRingEntry from "./shaders/understory_ring.compute.wgsl?raw";
 import { readRiverEcologySettings } from "../water/riverEcologyRuntime.js";
+import { TREE_SPECIES } from "../trees/tree_config.js";
+import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
+import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
+import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
 
 const FIELD_GLOBALS = ["digEdits", "fieldParams"] as const;
 const GRASS_FRUSTUM_RADIUS_CONST = "const GRASS_FRUSTUM_HORIZONTAL_SLACK_M: f32 = 1.4;";
@@ -144,7 +148,8 @@ export function composeTreeRingShader(workgroupSize = 64): string {
   const size = workgroupSize === 32 || workgroupSize === 64 || workgroupSize === 128 || workgroupSize === 256
     ? workgroupSize
     : 64;
-  const treeEntry = withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)).replace(
+  const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
+  const treeEntry = applyTreeRingWgslLayoutConstants(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)), treeLayout).replace(
     /const TREE_WORKGROUP_SIZE: u32 = \d+u;/,
     `const TREE_WORKGROUP_SIZE: u32 = ${size}u;`,
   );
