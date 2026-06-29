@@ -42,6 +42,7 @@ pub use drift_readback::{
     WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
     build_gpu_world_source_drift_input_samples, decode_gpu_world_source_drift_outputs,
 };
+pub use drift_readback_render::GpuWorldSourceDriftReadbackStateProvider;
 pub use drift_readback_staging::decode_staged_gpu_world_source_drift_bytes;
 pub use height_field::base_surface_height;
 pub use island_shape::{IslandMaskSample, IslandShapeConfig, sample_island_mask};
