@@ -239,6 +239,16 @@ import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_n
 
   private treeImpostorUvRect(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {`,
   },
+  {
+    label: "replaced impostor geometry LOD dither role attribute",
+    expected: `        nextGeometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2));
+        nextGeometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1));
+        nextGeometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4));`,
+    replacement: `        nextGeometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2));
+        nextGeometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1));
+        nextGeometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
+        nextGeometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4));`,
+  },
 ];
 
 export function wireTreeSystemSource(input) {
