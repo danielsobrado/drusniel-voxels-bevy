@@ -54,6 +54,24 @@ Still required before calling TREE-8 complete:
 - Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
 - Capture noon forest-interior and impostor-boundary shadow shots.
 
+## TREE-9 current state
+
+Implemented:
+
+- `tree_species_expansion.ts` defines the six target species contract: oak, pine, dead, birch, willow, spruce.
+- `tree_species_expansion.ts` includes default morphology/config values and distinct ecological niches for all six species.
+- `tree_species_expansion.test.ts` verifies the six-species list, morphology differences, willow wet-bank preference, spruce high/cold slope preference, and dead-tree old-stressed-forest preference.
+- `tree_ring_species_layout.ts` defines dynamic GPU ring layout offsets for arbitrary species counts.
+- `tree_ring_species_layout.test.ts` confirms the existing 3-species layout remains compatible and shows the required 6-species offsets without uniform-slot collisions.
+
+Still required before calling TREE-9 complete:
+
+- Move live `TreeSpeciesId` / `TREE_SPECIES` from 3 to 6 only after `tree_ring_compute.ts` and `tree_ring.compute.wgsl` use the dynamic 6-species uniform layout.
+- Extend `tree_material_bias.ts` and `config/trees.yaml` material bias values for birch, willow, and spruce.
+- Extend the WGSL `select_species` branch from 3 to 6 species and keep the TS niche contract mirrored.
+- Update group buffers/caps and GPU/CPU parity for 6×4 groups.
+- Capture the ecology-sorted species gallery shot.
+
 ## Still required before calling Epic A+B closed
 
 - Run `npm --prefix tools/clod-poc test`.
@@ -65,6 +83,7 @@ Still required before calling TREE-8 complete:
 ## Next implementation order
 
 1. Finish TREE-7/TREE-8 physical `tree_system.ts` rewrites and shot evidence.
-2. TREE-9 species expansion.
-3. TREE-10 hero near-tree triangle audit.
-4. TREE-12 closeout docs and evidence links.
+2. Move TREE-9 GPU uniform packing/WGSL to dynamic 6-species layout.
+3. Flip live `TreeSpeciesId` / `TREE_SPECIES` to six species.
+4. TREE-10 hero near-tree triangle audit.
+5. TREE-12 closeout docs and evidence links.
