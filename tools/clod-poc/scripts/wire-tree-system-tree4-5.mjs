@@ -70,7 +70,7 @@ replaceOnce(
     const meshes: TreeGpuRingMesh[] = [];
     for (const species of TREE_SPECIES) {
       for (const lod of TREE_LODS) {
-        const materialKey = `${"${species}:${lod}"}`;
+        const materialKey = species + ":" + lod;
         const atlas = this.impostorAtlases[species];
         materialHandles[materialKey] = lod === "impostor" && this.settings.impostors.enabled && atlas?.ready
           ? createTreeRingImpostorNodeMaterialHandle(
