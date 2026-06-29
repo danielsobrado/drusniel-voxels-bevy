@@ -22,14 +22,16 @@ Implemented:
 - `tree_system_gpu_ring_draw.ts` can allocate optional `shadowCell` and `shadowIndirect` GPU buffers for per-cascade caster lists.
 - `tree_ring.compute.wgsl` now has shadow counters, shadow indirect args, shadow-cell output, cascade frustum checks, and appends tree casters before visible camera frustum culling.
 - `tree_ring_compute.ts` binds the shadow buffers, packs shadow cascade planes into the WGSL uniform layout, builds shadow indirect args, and disables shadow writes unless real output buffers are available.
-- `realtime_sun_shadows.ts` exposes the active sun shadow cascade cameras through `getRealtimeSunShadowCascadeCameras()`.
-- `scripts/wire-tree-system-tree7-shadows.mjs` is ready to physically wire the large `tree_system.ts` file.
+- `realtime_sun_shadows.ts` exposes active sun shadow cascade cameras and assigns each cascade a dedicated shadow-only caster layer.
+- `tree_system_gpu_ring_draw.ts` includes a tested `createTreeGpuRingShadowMesh(...)` helper for cascade-layered shadow-only ring meshes.
+- `scripts/wire-tree-system-tree7-shadows.mjs` now physically wires the large `tree_system.ts` file for shadow buffers, cascade-plane dispatch, shadow-only meshes, and visible-ring `castShadow=false`.
 
 Still required before calling TREE-7 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:wire-tree7-shadows` and commit the resulting `tree_system.ts` rewrite.
-- Verify `tree_system.ts` now allocates `shadowCell` / `shadowIndirect`, imports `TREE_GPU_RING_SHADOW_GROUP_COUNT`, packs cascade planes from `getRealtimeSunShadowCascadeCameras()`, and passes `maxShadowCastersPerGroup` / `shadowCascadePlanes` into `TreeGpuRingCompute.dispatch()`.
-- Wire the generated shadow caster buffers into the realtime sun shadow draw path, or explicitly document why the current Three.js shadow pass cannot consume indirect GPU-ring caster buffers yet.
+- Run `npm --prefix tools/clod-poc run trees:wire-tree7-shadows` again and commit the resulting `tree_system.ts` rewrite.
+- Verify `tree_system.ts` now imports `markAsRealtimeSunShadowCaster`, `TREE_RING_SHADOW_CASCADE_COUNT`, and `treeRingShadowCasterGroupIndex`.
+- Verify `createGpuRingDrawResources(...)` now creates `shadowRingBuffers`, one shadow material handle per cascade/species/LOD, and one `createGpuRingShadowTierDraw(...)` mesh per caster group.
+- Verify visible GPU-ring meshes have `castShadow=false`, so they do not double-cast against the shadow-only meshes.
 - Add CPU/GPU caster-count parity once shadow readback is available.
 - Capture a low-sun shot proving off-screen trees can still cast.
 
@@ -43,7 +45,7 @@ Still required before calling TREE-7 complete:
 
 ## Next implementation order
 
-1. Finish TREE-7 physical `tree_system.ts` wiring and shadow draw integration.
+1. Finish TREE-7 physical `tree_system.ts` shadow-only mesh wiring and shot evidence.
 2. TREE-8 crown proxy casters.
 3. TREE-9 species expansion.
 4. TREE-10 hero near-tree triangle audit.
