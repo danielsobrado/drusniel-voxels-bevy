@@ -85,6 +85,7 @@ function updateForestLighting(input: VegetationFramePhaseInput): void {
 }
 
 function updateWater(input: VegetationFramePhaseInput): void {
+  if (!input.state.waterEnabled) return;
   input.waterController.update(Math.min(input.playerDelta, 0.1), input.camera.position);
   input.waterController.logDevInitOnce(input.worldCells);
 }

@@ -1,5 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use serde::{Deserialize, Serialize};
+use std::mem::size_of;
 
 use super::biome_region_field::BiomeId;
 use super::drift_gate::{sample_cpu_world_source, WorldSourceDriftSample, WorldSourceDriftSamplePoint};
@@ -72,6 +73,38 @@ impl GpuWorldSourceDriftOutputSample {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuWorldSourceDriftReadbackDispatchPlan {
+    pub sample_count: u32,
+    pub workgroup_count: u32,
+    pub params_bytes: usize,
+    pub input_bytes: usize,
+    pub output_bytes: usize,
+    pub shader_path: &'static str,
+}
+
+impl GpuWorldSourceDriftReadbackDispatchPlan {
+    pub fn for_sample_count(sample_count: usize) -> Result<Self, String> {
+        let sample_count = u32::try_from(sample_count)
+            .map_err(|_| "world source drift readback sample count exceeds u32::MAX".to_string())?;
+        let workgroup_count = if sample_count == 0 {
+            0
+        } else {
+            (sample_count + WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE - 1)
+                / WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE
+        };
+
+        Ok(Self {
+            sample_count,
+            workgroup_count,
+            params_bytes: size_of::<GpuWorldSourceDriftReadbackParams>(),
+            input_bytes: sample_count as usize * size_of::<GpuWorldSourceDriftInputSample>(),
+            output_bytes: sample_count as usize * size_of::<GpuWorldSourceDriftOutputSample>(),
+            shader_path: WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH,
+        })
+    }
+}
+
 pub fn build_gpu_world_source_drift_input_samples<S: WorldSource>(
     source: &S,
     points: &[WorldSourceDriftSamplePoint],
@@ -83,6 +116,21 @@ pub fn build_gpu_world_source_drift_input_samples<S: WorldSource>(
         .map(|point| {
             let sample = sample_cpu_world_source(source, point);
             GpuWorldSourceDriftInputSample::from_cpu_sample(sample, point.slope, sea_level)
+        })
+        .collect()
+}
+
+pub fn decode_gpu_world_source_drift_outputs(
+    outputs: &[GpuWorldSourceDriftOutputSample],
+) -> Result<Vec<WorldSourceDriftSample>, String> {
+    outputs
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, output)| {
+            output
+                .to_drift_sample()
+                .ok_or_else(|| format!("invalid GPU WorldSource drift output at index {index}"))
         })
         .collect()
 }
@@ -192,7 +240,6 @@ impl WorldSourceGpuReadbackProvider for StaticWorldSourceGpuReadback {
 mod tests {
     use super::*;
     use crate::world::source::{IslandShapeConfig, ProceduralWorldSource, TerrainFieldConfig};
-    use std::mem::size_of;
 
     const WGSL: &str = include_str!("../../../assets/shaders/world_source/drift_readback.wgsl");
 
@@ -235,6 +282,30 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_plan_matches_shader_contract() {
+        let plan = GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(129)
+            .expect("dispatch plan");
+
+        assert_eq!(plan.sample_count, 129);
+        assert_eq!(plan.workgroup_count, 3);
+        assert_eq!(plan.params_bytes, 16);
+        assert_eq!(plan.input_bytes, 129 * 32);
+        assert_eq!(plan.output_bytes, 129 * 32);
+        assert_eq!(plan.shader_path, WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH);
+    }
+
+    #[test]
+    fn empty_dispatch_plan_has_no_workgroups() {
+        let plan = GpuWorldSourceDriftReadbackDispatchPlan::for_sample_count(0)
+            .expect("dispatch plan");
+
+        assert_eq!(plan.sample_count, 0);
+        assert_eq!(plan.workgroup_count, 0);
+        assert_eq!(plan.input_bytes, 0);
+        assert_eq!(plan.output_bytes, 0);
+    }
+
+    #[test]
     fn gpu_output_decodes_to_drift_sample() {
         let sample = GpuWorldSourceDriftOutputSample {
             x: 1.0,
@@ -262,6 +333,17 @@ mod tests {
         };
 
         assert!(output.to_drift_sample().is_none());
+    }
+
+    #[test]
+    fn decode_gpu_outputs_fails_on_invalid_output() {
+        let output = GpuWorldSourceDriftOutputSample {
+            biome: 99,
+            dominant_layer: 0,
+            ..GpuWorldSourceDriftOutputSample::zeroed()
+        };
+
+        assert!(decode_gpu_world_source_drift_outputs(&[output]).is_err());
     }
 
     #[test]

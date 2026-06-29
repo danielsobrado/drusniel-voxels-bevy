@@ -11,6 +11,7 @@ export interface ClodFrameLoopUiState {
   digRadius: number;
   brushHeight: number;
   weatherMode: string;
+  waterEnabled: boolean;
   profileEnabled: boolean;
   grassBladeCount: number;
   grassVisiblePatches: string;
