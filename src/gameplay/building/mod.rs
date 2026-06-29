@@ -11,6 +11,7 @@ pub mod grid;
 pub mod persistence;
 pub mod snap;
 pub mod stability;
+pub mod terrain_conform;
 pub mod types;
 
 use bevy::prelude::*;
@@ -23,6 +24,7 @@ pub use grid::*;
 pub use persistence::*;
 pub use snap::*;
 pub use stability::*;
+pub use terrain_conform::*;
 pub use types::*;
 
 /// Plugin for the building system.
@@ -58,7 +60,7 @@ impl Plugin for BuildingPlugin {
                     delete_aimed_building_piece,
                     recompute_dirty_stability,
                     collapse_unstable_building_pieces,
-                    log_unsupported_terrain_conform_requests,
+                    apply_construction_terrain_conform_requests,
                     draw_stability_outlines,
                     load_saved_construction_pieces,
                 )
