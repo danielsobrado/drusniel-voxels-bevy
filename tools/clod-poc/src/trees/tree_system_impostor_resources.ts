@@ -1,0 +1,81 @@
+import * as THREE from "three";
+import type { TreeLod, TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import { createTreeBakedImpostorGeometry, type TreeGeometryMap } from "./tree_geometry.js";
+import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import {
+  createTreeImpostorMaterial,
+  createTreeImpostorNodeMaterial,
+  updateTreeImpostorMaterialSettings,
+} from "./tree_impostor_material.js";
+import type { TreeMaterialHandle } from "./tree_material.js";
+
+export interface TreeSystemGeometryInput {
+  species: TreeSpeciesId;
+  lod: TreeLod;
+  settings: TreeSettings;
+  geometries: TreeGeometryMap;
+  impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
+  bakedImpostorGeometries: Partial<Record<TreeSpeciesId, THREE.BufferGeometry>>;
+}
+
+export interface TreeSystemMaterialInput {
+  species: TreeSpeciesId;
+  lod: TreeLod;
+  settings: TreeSettings;
+  materialHandle: TreeMaterialHandle;
+  impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
+  impostorMaterials: Partial<Record<TreeSpeciesId, THREE.Material>>;
+}
+
+export interface TreeSystemImpostorMaterialUpdateInput {
+  species: TreeSpeciesId;
+  settings: TreeSettings;
+  atlas: TreeImpostorAtlas;
+  webgpu: boolean;
+  impostorMaterials: Partial<Record<TreeSpeciesId, THREE.Material>>;
+}
+
+export function treeCanUseBakedImpostor(
+  settings: TreeSettings,
+  impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>,
+  species: TreeSpeciesId,
+): boolean {
+  return settings.impostors.enabled && !!impostorAtlases[species]?.ready;
+}
+
+export function selectTreeSystemGeometry(input: TreeSystemGeometryInput): THREE.BufferGeometry {
+  if (input.lod === "impostor" && treeCanUseBakedImpostor(input.settings, input.impostorAtlases, input.species)) {
+    input.bakedImpostorGeometries[input.species] ??= createTreeBakedImpostorGeometry(input.species, input.settings);
+    return input.bakedImpostorGeometries[input.species]!;
+  }
+  return input.geometries[input.species][input.lod];
+}
+
+export function selectTreeSystemMaterial(input: TreeSystemMaterialInput): THREE.Material {
+  if (input.settings.render.debugColorByLod) return input.materialHandle.debugMaterials[input.lod];
+  if (input.lod === "impostor" && treeCanUseBakedImpostor(input.settings, input.impostorAtlases, input.species)) {
+    return input.impostorMaterials[input.species] ?? input.materialHandle.regularMaterial;
+  }
+  return input.materialHandle.regularMaterial;
+}
+
+export function updateTreeSystemImpostorMaterial(input: TreeSystemImpostorMaterialUpdateInput): THREE.Material {
+  input.impostorMaterials[input.species] ??= input.webgpu
+    ? createTreeImpostorNodeMaterial(input.settings, input.atlas)
+    : createTreeImpostorMaterial(input.settings, input.atlas);
+  const material = input.impostorMaterials[input.species]!;
+  updateTreeImpostorMaterialSettings(material, input.settings);
+  return material;
+}
+
+export function disposeTreeSystemBakedImpostorGeometries(
+  geometries: Partial<Record<TreeSpeciesId, THREE.BufferGeometry>>,
+): void {
+  for (const geometry of Object.values(geometries)) geometry?.dispose();
+}
+
+export function disposeTreeSystemImpostorMaterials(
+  materials: Partial<Record<TreeSpeciesId, THREE.Material>>,
+): void {
+  for (const material of Object.values(materials)) material?.dispose();
+}
