@@ -2,8 +2,8 @@
 
 `tools/clod-poc/src/trees/tree_system.ts` is too large and currently mixes orchestration,
 math, GPU policy, stats, mesh attribute writes, mesh bounds refresh, impostor state,
-GPU-ring draw resources, lighting-proxy projection, and lifecycle cleanup. Split it in
-small behavior-preserving steps only.
+GPU-ring draw resources, GPU-ring prepass creation, lighting-proxy projection, and
+lifecycle cleanup. Split it in small behavior-preserving steps only.
 
 ## Current extracted modules
 
@@ -30,6 +30,10 @@ small behavior-preserving steps only.
   - indirect draw binding
   - GPU buffer lookup
   - ring visibility toggling
+
+- `tree_system_gpu_ring_prepass.ts`
+  - `treeSystemUsesGpuRingPrepass`
+  - `addTreeGpuRingPrepassTwin`
 
 - `tree_system_instance_attributes.ts`
   - `writeTreeWorldXZIfChanged`
@@ -103,7 +107,9 @@ Do these as separate commits, with tests after each commit.
    - `setGpuRingIndirect`
    - `gpuBufferForAttribute`
 
-10. Extract GPU-ring prepass twin creation into a final small helper, then wire TREE-4 geometry selection using `selectTreeGpuRingGeometry`.
+10. Replace GPU-ring prepass private methods with `tree_system_gpu_ring_prepass.ts`.
+
+11. Wire TREE-4 geometry selection using `selectTreeGpuRingGeometry` after the helper replacements are green.
 
 ## Rules
 
