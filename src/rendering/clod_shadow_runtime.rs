@@ -121,6 +121,15 @@ pub enum ClodShadowRuntimeError {
         shadow_mesh_id: String,
         position_count: usize,
     },
+    TotalsMismatch {
+        field: &'static str,
+        expected: u32,
+        actual: u32,
+    },
+    SavingsRatioMismatch {
+        expected_millis: u32,
+        actual_millis: u32,
+    },
 }
 
 pub fn validate_clod_shadow_runtime_snapshot(
@@ -176,7 +185,76 @@ pub fn validate_clod_shadow_runtime_snapshot(
         }
     }
 
+    validate_clod_shadow_runtime_totals(snapshot)
+}
+
+fn validate_clod_shadow_runtime_totals(
+    snapshot: &ClodShadowRuntimeSnapshot,
+) -> Result<(), ClodShadowRuntimeError> {
+    let expected = recompute_clod_shadow_runtime_totals(&snapshot.plans);
+    let actual = snapshot.totals;
+
+    validate_total("totalPages", expected.total_pages, actual.total_pages)?;
+    validate_total(
+        "visualCasterPages",
+        expected.visual_caster_pages,
+        actual.visual_caster_pages,
+    )?;
+    validate_total(
+        "proxyCasterPages",
+        expected.proxy_caster_pages,
+        actual.proxy_caster_pages,
+    )?;
+    validate_total("noCastPages", expected.no_cast_pages, actual.no_cast_pages)?;
+    validate_total(
+        "visualTriangles",
+        expected.visual_triangles,
+        actual.visual_triangles,
+    )?;
+    validate_total(
+        "runtimeShadowTriangles",
+        expected.runtime_shadow_triangles,
+        actual.runtime_shadow_triangles,
+    )?;
+    validate_total(
+        "savedTriangles",
+        expected.saved_triangles,
+        actual.saved_triangles,
+    )?;
+    validate_total("missingProxyMeshes", 0, actual.missing_proxy_meshes)?;
+
+    let expected_millis = ratio_millis(expected.savings_ratio);
+    let actual_millis = ratio_millis(actual.savings_ratio);
+    if expected_millis != actual_millis {
+        return Err(ClodShadowRuntimeError::SavingsRatioMismatch {
+            expected_millis,
+            actual_millis,
+        });
+    }
+
     Ok(())
+}
+
+fn validate_total(
+    field: &'static str,
+    expected: u32,
+    actual: u32,
+) -> Result<(), ClodShadowRuntimeError> {
+    if expected == actual {
+        return Ok(());
+    }
+    Err(ClodShadowRuntimeError::TotalsMismatch {
+        field,
+        expected,
+        actual,
+    })
+}
+
+fn ratio_millis(value: f32) -> u32 {
+    if !value.is_finite() || value < 0.0 {
+        return u32::MAX;
+    }
+    (value * 1000.0).round() as u32
 }
 
 pub fn recompute_clod_shadow_runtime_totals(
@@ -257,17 +335,18 @@ mod tests {
 
     #[test]
     fn validates_required_proxy_meshes() {
+        let plans = vec![plan(
+            "L2:0,0",
+            ClodShadowRuntimeAction::SpawnProxyShadowCaster,
+            100,
+            1,
+        )];
         let snapshot = ClodShadowRuntimeSnapshot {
             version: 1,
             generated_by: "clod-poc-bevy-shadow-runtime".to_owned(),
-            plans: vec![plan(
-                "L2:0,0",
-                ClodShadowRuntimeAction::SpawnProxyShadowCaster,
-                100,
-                1,
-            )],
+            totals: recompute_clod_shadow_runtime_totals(&plans),
+            plans,
             proxy_meshes: vec![mesh("L2:0,0")],
-            totals: ClodShadowRuntimeTotals::default(),
         };
         assert_eq!(validate_clod_shadow_runtime_snapshot(&snapshot), Ok(()));
     }
@@ -289,6 +368,33 @@ mod tests {
         assert!(matches!(
             validate_clod_shadow_runtime_snapshot(&snapshot),
             Err(ClodShadowRuntimeError::MissingProxyMesh { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_mismatched_totals() {
+        let plans = vec![plan(
+            "L2:0,0",
+            ClodShadowRuntimeAction::SpawnProxyShadowCaster,
+            100,
+            1,
+        )];
+        let mut totals = recompute_clod_shadow_runtime_totals(&plans);
+        totals.runtime_shadow_triangles = 100;
+        let snapshot = ClodShadowRuntimeSnapshot {
+            version: 1,
+            generated_by: "clod-poc-bevy-shadow-runtime".to_owned(),
+            plans,
+            proxy_meshes: vec![mesh("L2:0,0")],
+            totals,
+        };
+
+        assert!(matches!(
+            validate_clod_shadow_runtime_snapshot(&snapshot),
+            Err(ClodShadowRuntimeError::TotalsMismatch {
+                field: "runtimeShadowTriangles",
+                ..
+            })
         ));
     }
 
