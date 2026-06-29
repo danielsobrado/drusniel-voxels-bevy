@@ -38,6 +38,9 @@ const SPECIES_SALT: Record<TreeSpeciesId, number> = {
   oak: 0x1f4d,
   pine: 0x2b67,
   dead: 0x35a9,
+  birch: 0x45c1,
+  willow: 0x5d73,
+  spruce: 0x6a2f,
 };
 
 const LOD_SALT: Record<TreeLod, number> = {
@@ -59,13 +62,13 @@ export function buildTreeMorphology(
   const config = settings.species[species];
   const morphology = config.morphology;
   const seed = treeMorphologySeed(settings.seed, species, lod);
-  const branches = species === "pine"
+  const branches = species === "pine" || species === "spruce"
     ? buildPineBranches(seed, lod, config.trunkHeightM, config.trunkRadiusM, morphology)
     : buildRadialBranches(seed, species, lod, config.trunkHeightM, config.trunkRadiusM, morphology);
   const crownCenters = buildCrownCenters(seed, species, config.trunkHeightM, config.crownRadiusM, branches, morphology);
   const leafCards = species === "dead" || isCheapLod(lod)
     ? []
-    : species === "pine"
+    : species === "pine" || species === "spruce"
       ? buildPineLeafCards(seed, lod, config.trunkHeightM, config.crownRadiusM, branches, morphology, settings)
       : buildOakLeafCards(seed, lod, config.trunkHeightM, config.crownRadiusM, branches, morphology, settings);
   return { branches, leafCards, crownCenters };
@@ -209,7 +212,7 @@ function buildCrownCenters(
     const yNoise = signed(seed, i, 33) * crownRadius * morphology.crownIrregularity;
     centers.push(new THREE.Vector3(
       Math.cos(angle) * radius,
-      trunkHeight + crownRadius * (species === "pine" ? 0.85 : 0.62) + yNoise / Math.max(0.35, morphology.crownFlattening),
+      trunkHeight + crownRadius * (species === "pine" || species === "spruce" ? 0.85 : 0.62) + yNoise / Math.max(0.35, morphology.crownFlattening),
       Math.sin(angle) * radius,
     ));
   }
