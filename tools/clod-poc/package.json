@@ -22,6 +22,7 @@
     "border-ocean:visual": "tsx tools/border-ocean-visual.ts",
     "phase0": "tsx tools/phase0.ts",
     "trees:wire-tree4-tree5": "node scripts/wire-tree-system-tree4-5.mjs",
+    "trees:wire-tree4-tree5:check": "node scripts/wire-tree-system-tree4-5.mjs --dry-run",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
