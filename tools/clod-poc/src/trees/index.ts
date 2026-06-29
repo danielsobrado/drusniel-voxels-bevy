@@ -19,5 +19,8 @@ export * from "./tree_morphology.js";
 export * from "./tree_instances.js";
 export * from "./tree_material.js";
 export * from "./tree_node_material.js";
+export * from "./tree_system_gpu_policy.js";
+export * from "./tree_system_math.js";
+export * from "./tree_system_stats.js";
 export * from "./tree_system.js";
 export * from "./tree_info.js";
