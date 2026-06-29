@@ -34,8 +34,11 @@ pub use drift_gate::{
     WORLD_SOURCE_DRIFT_HEIGHT_TOLERANCE_M, WORLD_SOURCE_DRIFT_OCEAN_MASK_TOLERANCE,
 };
 pub use drift_readback::{
-    StaticWorldSourceGpuReadback, UnavailableWorldSourceGpuReadback,
-    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
+    GpuWorldSourceDriftInputSample, GpuWorldSourceDriftOutputSample,
+    GpuWorldSourceDriftReadbackParams, StaticWorldSourceGpuReadback,
+    UnavailableWorldSourceGpuReadback, WorldSourceGpuReadbackProvider,
+    WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
+    WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH, WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE,
 };
 pub use height_field::base_surface_height;
 pub use island_shape::{sample_island_mask, IslandMaskSample, IslandShapeConfig};
