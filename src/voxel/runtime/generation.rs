@@ -14,7 +14,7 @@ pub(crate) use state::{
     should_poll_chunk_generation_tasks, ChunkGenerationResult, ChunkGenerationTask,
     PendingWorldGeneration, WorldGenerationQueue, WorldLoadTask,
 };
-pub(crate) use stats::{collect_chunk_stats_from_chunk, ChunkStats, WorldStats};
+pub(crate) use stats::{collect_chunk_stats, collect_chunk_stats_from_chunk, ChunkStats, WorldStats};
 pub(crate) use world_load::expected_world_chunk_count;
 
 // =============================================================================
