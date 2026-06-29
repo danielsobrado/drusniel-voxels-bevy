@@ -1,4 +1,6 @@
+import type { TreeLod } from "./tree_config.js";
 import type { TreeGenerationStats } from "./tree_instances.js";
+import { visibleTreeLodCount } from "./tree_system_math.js";
 
 export type TreeSystemGpuStatus = "disabled" | "unsupported" | "ring" | "fallback-cpu" | "error";
 export type TreeSystemImpostorStatus = "disabled" | "pending" | "baking" | "baked" | "fallback";
@@ -16,6 +18,32 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   gpuCandidateCount: number;
   gpuAcceptedCount: number;
   gpuVisibleCount: number;
+  gpuOverflowed: boolean;
+  gpuDispatchMs: number | null;
+  gpuShowCounts: boolean;
+  impostorStatus: TreeSystemImpostorStatus;
+  impostorReason: string | null;
+}
+
+export interface TreeSystemStatsPatchInput {
+  visible: boolean;
+  instances: readonly unknown[];
+  generationStats: TreeGenerationStats;
+}
+
+export interface TreeSystemGpuStatsInput {
+  candidateCount: number;
+  acceptedCandidates: number;
+  counts: Record<TreeLod, number>;
+}
+
+export interface BuildTreeSystemStatsInput {
+  patches: readonly TreeSystemStatsPatchInput[];
+  lodCounts: Record<TreeLod, number>;
+  gpuRing: boolean;
+  gpuRingStats: TreeSystemGpuStatsInput;
+  gpuVisibleCount: number;
+  gpuStatus: TreeSystemGpuStatus;
   gpuOverflowed: boolean;
   gpuDispatchMs: number | null;
   gpuShowCounts: boolean;
@@ -48,4 +76,46 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     rejectedHeight: 0,
     rejectedMaterial: 0,
   };
+}
+
+export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSystemStatsSnapshot {
+  const stats = createEmptyTreeSystemStats();
+  if (input.gpuRing) {
+    const visible = input.gpuVisibleCount || visibleTreeLodCount(input.gpuRingStats.counts);
+    const accepted = input.gpuRingStats.acceptedCandidates || visible;
+    stats.totalTrees = visible;
+    stats.generatedCandidates = input.gpuRingStats.candidateCount;
+    stats.acceptedCandidates = accepted;
+  } else {
+    for (const patch of input.patches) {
+      stats.totalTrees += patch.instances.length;
+      stats.patches++;
+      if (patch.visible) stats.visiblePatches++;
+      else stats.culledPatches++;
+      stats.generatedCandidates += patch.generationStats.generatedCandidates;
+      stats.acceptedCandidates += patch.generationStats.acceptedCandidates;
+      stats.rejectedSlope += patch.generationStats.rejectedSlope;
+      stats.rejectedHeight += patch.generationStats.rejectedHeight;
+      stats.rejectedMaterial += patch.generationStats.rejectedMaterial;
+    }
+  }
+
+  stats.nearTrees = input.lodCounts.near;
+  stats.midTrees = input.lodCounts.mid;
+  stats.farTrees = input.lodCounts.far;
+  stats.impostorTrees = input.lodCounts.impostor;
+  stats.gpuStatus = input.gpuStatus;
+  stats.gpuCandidateCount = input.gpuRing ? input.gpuRingStats.candidateCount : 0;
+  stats.gpuAcceptedCount = input.gpuRing
+    ? (input.gpuRingStats.acceptedCandidates || visibleTreeLodCount(input.gpuRingStats.counts))
+    : 0;
+  stats.gpuVisibleCount = input.gpuRing
+    ? (input.gpuVisibleCount || visibleTreeLodCount(input.gpuRingStats.counts))
+    : 0;
+  stats.gpuOverflowed = input.gpuOverflowed;
+  stats.gpuDispatchMs = input.gpuDispatchMs;
+  stats.gpuShowCounts = input.gpuShowCounts;
+  stats.impostorStatus = input.impostorStatus;
+  stats.impostorReason = input.impostorReason;
+  return stats;
 }
