@@ -26,12 +26,14 @@ Status: In progress.
 - Added `src/world/source/drift_readback_render.rs` with render resources, buffer preparation, compute dispatch, staging-buffer copy, staging-buffer map, and state update.
 - Added `GpuWorldSourceDriftReadbackStateProvider` so mapped render state can be consumed through the same `WorldSourceGpuReadbackProvider` interface as static/unavailable providers.
 - Added `GpuWorldSourceDriftReadbackPlugin`, registered its render startup/prepare/cleanup systems, registered its Core3d graph node, and added it to the app bootstrap.
+- Added main-world to render-world request extraction for `GpuWorldSourceDriftReadbackRequest`.
+- Added `GpuWorldSourceDriftReadbackSharedResult` so render-world readback results can be consumed from the main app through `WorldSourceGpuReadbackProvider`.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 - `world_source_acceptance` now fails before writing `summary.json` unless `terrain_source.mode` is `gpu_world_source`.
 
 ## Not completed
 
-- Main-world request extraction/result bridging for `GpuWorldSourceDriftReadbackRequest` and `GpuWorldSourceDriftReadbackState` is still missing.
+- No system currently populates `GpuWorldSourceDriftReadbackRequest` with BVY-WS-12 drift sample inputs before acceptance/debug readback.
 - `world_source_acceptance` still uses the unavailable provider, so drift-gate runtime acceptance still reports `skipped`.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
@@ -39,4 +41,4 @@ Status: In progress.
 
 ## Required next patch
 
-Add a small bridge that extracts populated `GpuWorldSourceDriftReadbackRequest` values into the render app and copies `GpuWorldSourceDriftReadbackState.latest_result` back to the main app, then use `GpuWorldSourceDriftReadbackStateProvider` in the drift-gate provider call once local compile and render-app registration are verified.
+Populate `GpuWorldSourceDriftReadbackRequest` from BVY-WS-12 drift sample points, wait for `GpuWorldSourceDriftReadbackSharedResult` to produce matching samples, then use that provider in the drift-gate acceptance path.
