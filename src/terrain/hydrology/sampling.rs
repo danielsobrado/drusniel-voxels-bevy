@@ -6,8 +6,8 @@ impl VisualHydrologyField {
     pub fn world_position_for_cell(&self, x: usize, z: usize) -> Vec2 {
         self.metadata.world_min
             + Vec2::new(
-                (x as f32 + 0.5) * self.metadata.cell_size.x,
-                (z as f32 + 0.5) * self.metadata.cell_size.y,
+                x as f32 * self.metadata.cell_size.x,
+                z as f32 * self.metadata.cell_size.y,
             )
     }
 
@@ -21,8 +21,8 @@ impl VisualHydrologyField {
             return None;
         }
 
-        let x = (local.x / self.metadata.cell_size.x).floor() as usize;
-        let z = (local.y / self.metadata.cell_size.y).floor() as usize;
+        let x = (local.x / self.metadata.cell_size.x.max(f32::EPSILON)).round() as usize;
+        let z = (local.y / self.metadata.cell_size.y.max(f32::EPSILON)).round() as usize;
         let max = self.metadata.resolution.saturating_sub(1);
         Some(UVec2::new(x.min(max) as u32, z.min(max) as u32))
     }
