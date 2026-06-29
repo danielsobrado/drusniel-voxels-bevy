@@ -588,6 +588,7 @@ impl Plugin for PropInstancingPlugin {
             .add_render_command::<AlphaMask3d, DrawInstancedProp>()
             .add_render_command::<Transparent3d, DrawInstancedProp>()
             .add_render_command::<Shadow, DrawInstancedPropShadow>()
+            .init_resource::<CascadeShadowBuffers>()
             .init_resource::<SpecializedMeshPipelines<PropInstancingPipeline>>()
             .init_resource::<SpecializedMeshPipelines<PropInstancingShadowPipeline>>()
             .add_systems(RenderStartup, init_prop_instancing_pipeline)
