@@ -258,13 +258,16 @@ describe("tree lighting proxies", () => {
     treeSettings.placement.maxHeightM = 100;
     treeSettings.placement.minGroundWeight = 0;
     treeSettings.ecology.density.baseDensity = 1;
+    treeSettings.ecology.terrain.lowlandHeightM = 0;
+    treeSettings.ecology.terrain.highlandHeightM = 100;
+    treeSettings.ecology.terrain.heightFadeM = 0;
+    treeSettings.ecology.terrain.slopeFadeStartY = 0;
+    treeSettings.ecology.terrain.slopeFadeEndY = 1;
     treeSettings.ecology.clustering.clusterStrength = 0;
-    treeSettings.species.oak.minHeightM = 0;
-    treeSettings.species.oak.maxHeightM = 100;
-    treeSettings.species.pine.minHeightM = 0;
-    treeSettings.species.pine.maxHeightM = 100;
-    treeSettings.species.dead.minHeightM = 0;
-    treeSettings.species.dead.maxHeightM = 100;
+    for (const species of Object.values(treeSettings.species)) {
+      species.minHeightM = 0;
+      species.maxHeightM = 100;
+    }
     treeSettings.gpu.enabled = true;
     treeSettings.gpu.fallbackToCpu = false;
     const treeSystem = new TreeSystem({
