@@ -23,13 +23,19 @@ export interface PropControllerDeps {
   placementScene: PropPlacementScene;
   getHooks?: () => ClodHooks | null;
   syncStatsToState?: (stats: PropStats) => void;
+  gpuDevice?: GPUDevice | null;
+  gpuBackend?: {
+    createStorageAttribute(attribute: THREE.BufferAttribute): void;
+    createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
+    get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
+  } | null;
 }
 
 export interface PropController {
   readonly system: PropSystem;
   readonly colliderSet: PropColliderSet;
   init(): Promise<void>;
-  update(camera: THREE.PerspectiveCamera): void;
+  update(camera: THREE.PerspectiveCamera, ringCenter?: THREE.Vector3): void;
   syncColliders(playerPos: [number, number, number]): void;
   setEnabled(enabled: boolean): void;
   refreshStats(): void;
@@ -46,6 +52,8 @@ export function createPropController(deps: PropControllerDeps): PropController {
     settings: { ...deps.settings },
     placementScene: deps.placementScene,
     getHooks: deps.getHooks,
+    gpuDevice: deps.gpuDevice,
+    gpuBackend: deps.gpuBackend,
   });
   const colliderSet = new PropColliderSet();
   let collidersEnabled = deps.settings.enabled;
@@ -81,8 +89,8 @@ export function createPropController(deps: PropControllerDeps): PropController {
       forceColliderSync = true;
       refreshStats();
     },
-    update(camera) {
-      system.update(camera);
+    update(camera, ringCenter) {
+      system.update(camera, ringCenter);
       refreshStats();
     },
     syncColliders(playerPos) {

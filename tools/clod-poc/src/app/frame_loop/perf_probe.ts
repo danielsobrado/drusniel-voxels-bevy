@@ -1,5 +1,6 @@
 import type { PlayerInteractionMode } from "../../player_controller.js";
 import type { TreeStats } from "../../trees/index.js";
+import type { PropGpuStatus } from "../../props/prop_types.js";
 
 export const FRAME_PERF_BROAD_BUCKETS = [
   "frameSetupMs",
@@ -90,6 +91,13 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   treeGpuAcceptedCount: number;
   treeGpuVisibleCount: number;
   treeGpuDispatchMs: number | null;
+  customPropGpuStatus: PropGpuStatus | "unknown";
+  customPropTotalInstances: number;
+  customPropVisibleInstances: number;
+  customPropGpuCandidateCount: number;
+  customPropGpuVisibleCount: number;
+  customPropGpuOverflowed: number;
+  customPropGpuDispatchMs: number | null;
 }
 
 export interface FramePerfMetricStats {
@@ -127,6 +135,13 @@ export interface FramePerfSummary {
     treeMidTreesAvg: number;
     treeFarTreesAvg: number;
     treeImpostorTreesAvg: number;
+    customPropGpuStatusCounts: Record<string, number>;
+    customPropTotalInstancesAvg: number;
+    customPropVisibleInstancesAvg: number;
+    customPropGpuCandidateCountAvg: number;
+    customPropGpuVisibleCountAvg: number;
+    customPropGpuOverflowedFrames: number;
+    customPropGpuDispatchMsAvg: number;
   };
 }
 
@@ -239,6 +254,14 @@ function countTreeGpuStatuses(samples: readonly FramePerfSample[]): Record<strin
   return counts;
 }
 
+function countCustomPropGpuStatuses(samples: readonly FramePerfSample[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const sample of samples) {
+    counts[sample.customPropGpuStatus] = (counts[sample.customPropGpuStatus] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export function summarizeFramePerfSamples(
   samples: readonly FramePerfSample[],
   warmupFrames: number,
@@ -270,6 +293,13 @@ export function summarizeFramePerfSamples(
       treeMidTreesAvg: avgCounter(samples, "treeMidTrees"),
       treeFarTreesAvg: avgCounter(samples, "treeFarTrees"),
       treeImpostorTreesAvg: avgCounter(samples, "treeImpostorTrees"),
+      customPropGpuStatusCounts: countCustomPropGpuStatuses(samples),
+      customPropTotalInstancesAvg: avgCounter(samples, "customPropTotalInstances"),
+      customPropVisibleInstancesAvg: avgCounter(samples, "customPropVisibleInstances"),
+      customPropGpuCandidateCountAvg: avgCounter(samples, "customPropGpuCandidateCount"),
+      customPropGpuVisibleCountAvg: avgCounter(samples, "customPropGpuVisibleCount"),
+      customPropGpuOverflowedFrames: samples.reduce((sum, sample) => sum + sample.customPropGpuOverflowed, 0),
+      customPropGpuDispatchMsAvg: avgCounter(samples, "customPropGpuDispatchMs"),
     },
   };
 }

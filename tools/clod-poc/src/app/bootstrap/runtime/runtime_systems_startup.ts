@@ -20,6 +20,7 @@ import {
   runVegetationStartup,
   type VegetationStartupResult,
 } from "../../../runtime/vegetation/vegetation_startup.js";
+import { resolveVegetationGpuBackend } from "../../../runtime/vegetation/vegetation_gpu_backend.js";
 import type {
   VegetationStatControllerRefs,
 } from "../../../runtime/vegetation/vegetation_types.js";
@@ -138,6 +139,7 @@ export async function runRuntimeSystemsStartup(
     currentLighting,
     statControllers,
   });
+  const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
 
   const {
     grassController,
@@ -262,6 +264,8 @@ export async function runRuntimeSystemsStartup(
         searchParams,
         getHooks,
         propEditStore: projectPropEditStore,
+        gpuDevice: rendererWebGpuDevice,
+        gpuBackend,
       });
     } catch (error) {
       console.error("[custom-props] failed to initialize", error);

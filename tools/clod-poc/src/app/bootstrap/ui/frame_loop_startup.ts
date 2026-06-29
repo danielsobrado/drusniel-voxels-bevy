@@ -204,6 +204,7 @@ export function runFrameLoopStartup(
       understorySystem,
       forestLightingSystem,
       stoneSystem,
+      propStats: customProps?.propStats ?? null,
       currentLighting,
     },
     waterWeather: {

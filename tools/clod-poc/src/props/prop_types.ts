@@ -125,6 +125,18 @@ export interface PropShadowSettings {
   maxShadowProps: number;
 }
 
+export type PropGpuStatus = "disabled" | "unsupported" | "ring" | "fallback-cpu";
+
+export interface PropGpuSettings {
+  enabled: boolean;
+  preferWebGpu: boolean;
+  fallbackToCpu: boolean;
+  debugForceCpu: boolean;
+  maxVisible: number;
+  workgroupSize: 32 | 64 | 128 | 256;
+  debugShowGpuCounts: boolean;
+}
+
 export interface CustomPropsSettings {
   enabled: boolean;
   props: PropAssetDef[];
@@ -132,6 +144,7 @@ export interface CustomPropsSettings {
   spatial: PropSpatialSettings;
   culling: PropCullingSettings;
   shadows: PropShadowSettings;
+  gpu: PropGpuSettings;
   categoryBudgets: Record<PropCategory, PropCategoryBudget>;
   debug: PropDebugSettings;
 }

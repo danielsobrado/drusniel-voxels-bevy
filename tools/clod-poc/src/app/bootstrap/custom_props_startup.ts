@@ -7,6 +7,7 @@ import { parsePropPlacements, resolvePropPlacementScene } from "../../props/prop
 import type { PropStats } from "../../props/prop_stats.js";
 import { createPropController, type PropController } from "../../systems/prop_controller.js";
 import type { PropEditStore } from "../../project/prop_edit_store.js";
+import type { VegetationGpuBackend } from "../../runtime/vegetation/vegetation_gpu_backend.js";
 
 export interface CustomPropsStartupInput {
   scene: THREE.Scene;
@@ -18,6 +19,8 @@ export interface CustomPropsStartupInput {
   getHooks: () => ClodHooks | null;
   propEditStore?: PropEditStore;
   onStats?: (stats: PropStats) => void;
+  gpuDevice?: GPUDevice | null;
+  gpuBackend?: VegetationGpuBackend | null;
 }
 
 export interface CustomPropsStartupResult {
@@ -36,7 +39,11 @@ export async function runCustomPropsStartup(
     ...externalSettings,
     enabled: true,
     debug: { ...externalSettings.debug },
+    gpu: { ...externalSettings.gpu },
   };
+  if (input.searchParams?.get("customPropsGpuRing") === "1") settings.gpu.enabled = true;
+  if (input.searchParams?.get("customPropsGpuRing") === "0") settings.gpu.enabled = false;
+  if (input.searchParams?.get("customPropsGpuForceCpu") === "1") settings.gpu.debugForceCpu = true;
   if (input.searchParams?.get("customPropsDebug") === "1") {
     settings.debug = {
       showCells: true,
@@ -52,6 +59,8 @@ export async function runCustomPropsStartup(
     settings,
     placementScene: input.placementScene,
     getHooks: input.getHooks,
+    gpuDevice: input.gpuDevice,
+    gpuBackend: input.gpuBackend,
     syncStatsToState: (stats) => {
       propStats.current = stats;
       input.onStats?.(stats);

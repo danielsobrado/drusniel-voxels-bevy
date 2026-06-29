@@ -5,10 +5,11 @@ import type { ClodFrameLoopUiState } from "./ui_state.js";
 
 function makeInput(waterEnabled: boolean): VegetationFramePhaseInput {
   const update = vi.fn();
+  const propUpdate = vi.fn();
   return {
     elapsedSeconds: 1,
     playerDelta: 1 / 60,
-    ringCenter: new THREE.Vector3(),
+    ringCenter: new THREE.Vector3(12, 3, -8),
     grassCenter: new THREE.Vector3(),
     camera: new THREE.PerspectiveCamera(),
     state: { waterEnabled, weatherMode: "off" } as ClodFrameLoopUiState,
@@ -27,7 +28,7 @@ function makeInput(waterEnabled: boolean): VegetationFramePhaseInput {
     } as unknown as VegetationFramePhaseInput["forestLightingController"],
     applyForestLightingToPropMaterials: vi.fn(),
     stoneController: { update: vi.fn() } as unknown as VegetationFramePhaseInput["stoneController"],
-    propController: null,
+    propController: { update: propUpdate } as unknown as VegetationFramePhaseInput["propController"],
     waterController: {
       update,
       logDevInitOnce: vi.fn(),
@@ -62,5 +63,13 @@ describe("vegetation frame phase", () => {
 
     expect(input.waterController.update).toHaveBeenCalledOnce();
     expect(input.waterController.logDevInitOnce).toHaveBeenCalledOnce();
+  });
+
+  it("updates custom props with the vegetation ring center", () => {
+    const input = makeInput(false);
+
+    runVegetationFramePhase(input);
+
+    expect(input.propController?.update).toHaveBeenCalledWith(input.camera, input.ringCenter);
   });
 });

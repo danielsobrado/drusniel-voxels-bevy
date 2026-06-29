@@ -35,11 +35,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format check
         run: cargo fmt --all -- --check
-      - name: Build CLOD guard binaries
-        run: |
-          cargo test --no-run --bin clod_collider_refresh_export
-          cargo test --no-run --bin clod_collider_refresh_guard
-          cargo test --no-run --bin clod_apply_mode_guard
+      - name: Build all CLOD binaries
+        run: cargo check --bins
       - name: Run final CLOD QA
         run: scripts/run-clod-final-qa.sh
       - name: Upload CLOD QA artifacts

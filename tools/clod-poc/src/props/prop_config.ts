@@ -7,6 +7,7 @@ import type {
   PropCullingPolicy,
   PropCullingSettings,
   PropDebugSettings,
+  PropGpuSettings,
   PropLightingProxy,
   PropLodPolicy,
   PropPlacementRules,
@@ -52,6 +53,15 @@ export const DEFAULT_CUSTOM_PROPS_SETTINGS: CustomPropsSettings = {
   },
   shadows: {
     maxShadowProps: 512,
+  },
+  gpu: {
+    enabled: false,
+    preferWebGpu: true,
+    fallbackToCpu: true,
+    debugForceCpu: false,
+    maxVisible: 50_000,
+    workgroupSize: 64,
+    debugShowGpuCounts: true,
   },
   categoryBudgets: { ...DEFAULT_CATEGORY_BUDGETS },
   debug: {
@@ -267,6 +277,23 @@ function parseShadows(raw: YamlRecord | undefined, fallback: PropShadowSettings)
   };
 }
 
+function parseGpu(raw: YamlRecord | undefined, fallback: PropGpuSettings): PropGpuSettings {
+  if (!raw) return { ...fallback };
+  const workgroupSize = raw.workgroup_size ?? raw.workgroupSize;
+  return {
+    enabled: bool(raw.enabled, fallback.enabled),
+    preferWebGpu: bool(raw.prefer_webgpu ?? raw.preferWebGpu, fallback.preferWebGpu),
+    fallbackToCpu: bool(raw.fallback_to_cpu ?? raw.fallbackToCpu, fallback.fallbackToCpu),
+    debugForceCpu: bool(raw.debug_force_cpu ?? raw.debugForceCpu, fallback.debugForceCpu),
+    maxVisible: positiveInt(raw.max_visible ?? raw.maxVisible, fallback.maxVisible),
+    workgroupSize:
+      workgroupSize === 32 || workgroupSize === 64 || workgroupSize === 128 || workgroupSize === 256
+        ? workgroupSize
+        : fallback.workgroupSize,
+    debugShowGpuCounts: bool(raw.debug_show_gpu_counts ?? raw.debugShowGpuCounts, fallback.debugShowGpuCounts),
+  };
+}
+
 export function parseCustomPropsConfig(text: string): CustomPropsSettings {
   const raw = (load(text) ?? {}) as YamlRecord;
   const base = DEFAULT_CUSTOM_PROPS_SETTINGS;
@@ -288,6 +315,7 @@ export function parseCustomPropsConfig(text: string): CustomPropsSettings {
     spatial: parseSpatial(raw, base.spatial),
     culling: parseCullingSettings(asRecord(raw.culling), base.culling),
     shadows: parseShadows(asRecord(raw.shadows), base.shadows),
+    gpu: parseGpu(asRecord(raw.gpu), base.gpu),
     categoryBudgets,
     debug: parseDebug(asRecord(raw.debug), base.debug),
   };

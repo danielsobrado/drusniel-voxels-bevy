@@ -22,6 +22,10 @@ BORDER_LOCK_CSV="$RUN_DIR/clod-border-locks.csv"
 TOPOLOGY_CSV="$RUN_DIR/clod-topology.csv"
 SIMPLIFY_CSV="$RUN_DIR/clod-simplify.csv"
 WELD_CSV="$RUN_DIR/clod-weld.csv"
+PLAN_CSV="$RUN_DIR/clod-edit-plan.csv"
+SELECTION_CSV="$RUN_DIR/clod-selection-runtime.csv"
+REBUILD_CSV="$RUN_DIR/clod-rebuild-observer.csv"
+CROSSFADE_CSV="$RUN_DIR/clod-crossfade-runtime.csv"
 
 printf '[CLOD complete QA] run dir: %s
 ' "$RUN_DIR"
@@ -30,6 +34,8 @@ printf '[CLOD complete QA] validating edit plan schema: %s
 cargo run --bin clod_edit_plan_guard -- "$PLAN_SCENE"
 
 printf '[CLOD complete QA] exporting edit dirty plan: %s
+' "$PLAN_CSV"
+cargo run --bin clod_edit_plan_export -- "$PLAN_SCENE" --out "$PLAN_CSV"
 printf '[CLOD complete QA] exporting scripted edit events: %s
 ' "$EVENTS_CSV"
 cargo run --bin clod_edit_events_export -- "$PLAN_SCENE" --out "$EVENTS_CSV"

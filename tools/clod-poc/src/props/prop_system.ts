@@ -1,6 +1,7 @@
 import * as THREE from "three";
+import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import type { ClodHooks } from "../core/hooks.js";
-import type { CustomPropsSettings, PropAssetDef, PropAssetMetadata, PropPlacementScene } from "./prop_types.js";
+import type { CustomPropsSettings, PropAssetDef, PropAssetMetadata, PropGpuStatus, PropPlacementScene } from "./prop_types.js";
 import { PropAssetRegistry, type LoadedPropAsset } from "./prop_asset_loader.js";
 import { assignPropCellCoords } from "./prop_placements.js";
 import { cullPropSpatialGrid } from "./prop_culling.js";
@@ -15,6 +16,14 @@ import { PropSpatialGrid, type PropGridCell } from "./prop_spatial_grid.js";
 import { EMPTY_PROP_STATS, syncPropStatsToHooks, type PropStats } from "./prop_stats.js";
 import { createBillboardMaterial } from "./prop_billboard.js";
 import type { PropColliderInstanceInput } from "./prop_collider.js";
+import {
+  PropGpuRingCompute,
+  propGpuRingGroupCapacity,
+  propGpuRingUnsupportedReason,
+  type PropGpuRingSourceData,
+  type PropGpuRingStats,
+} from "../gpu/prop_ring_compute.js";
+import { createPropGpuRingMaterial } from "./prop_gpu_ring_material.js";
 
 const _matrix = new THREE.Matrix4();
 const _position = new THREE.Vector3();
@@ -24,6 +33,8 @@ const _box = new THREE.Box3();
 const _debugBoxSize = new THREE.Vector3();
 const _yAxis = new THREE.Vector3(0, 1, 0);
 const _zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+const _gpuFrustumMatrix = new THREE.Matrix4();
+const _gpuFrustum = new THREE.Frustum();
 
 type BucketKind = "opaque" | "shadow" | "billboard";
 type CellJobKind = "enter" | "refresh" | "leave";
@@ -41,6 +52,25 @@ interface RenderBucket {
   freeSlots: number[];
   occupiedSlots: Set<number>;
   nextSlot: number;
+}
+
+interface PropWebGpuBackendAccess {
+  createStorageAttribute(attribute: THREE.BufferAttribute): void;
+  createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
+  get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
+}
+
+type IndirectInstancedBufferGeometry = THREE.InstancedBufferGeometry & {
+  setIndirect?(attribute: THREE.BufferAttribute, offset: number): void;
+};
+
+interface PropGpuRingDrawResources {
+  meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[];
+  instanceA: StorageInstancedBufferAttribute;
+  instanceB: StorageInstancedBufferAttribute;
+  indirect: StorageBufferAttribute;
+  source: PropGpuRingSourceData;
+  maxInstancesPerGroup: number;
 }
 
 interface BucketSlot {
@@ -113,11 +143,37 @@ function disposeBucket(bucket: RenderBucket): void {
   bucket.mesh.removeFromParent();
 }
 
+function emptyGpuRingSource(): PropGpuRingSourceData {
+  return {
+    sourceA: new Float32Array([0, 0, 0, 1]),
+    sourceB: new Float32Array([0, 0, 0, 0]),
+    assetMeta: new Float32Array([0, 0, 0, 0]),
+    assetLods: new Float32Array([0, 0, 0, 0]),
+    groupMeta: new Uint32Array([0, 0, 0, 0]),
+    sourceCount: 0,
+    groupCount: 0,
+  };
+}
+
 export interface PropSystemDeps {
   scene: THREE.Scene;
   settings: CustomPropsSettings;
   placementScene: PropPlacementScene;
   getHooks?: () => ClodHooks | null;
+  gpuDevice?: GPUDevice | null;
+  gpuBackend?: PropWebGpuBackendAccess | null;
+}
+
+export function propStreamingCenter(camera: THREE.Camera, ringCenter?: THREE.Vector3 | null): [number, number, number] {
+  const center = ringCenter ?? camera.position;
+  return [center.x, center.y, center.z];
+}
+
+export function propGpuStatus(settings: CustomPropsSettings, gpuRingBackendAvailable: boolean): PropGpuStatus {
+  if (!settings.gpu.enabled) return "disabled";
+  if (settings.gpu.debugForceCpu) return "fallback-cpu";
+  if (gpuRingBackendAvailable) return "ring";
+  return settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
 }
 
 export class PropSystem {
@@ -145,6 +201,15 @@ export class PropSystem {
   private activeBillboards = 0;
   private activeShadowCasters = 0;
   private lastRefreshPos: [number, number, number] | null = null;
+  private gpuRingDraw: PropGpuRingDrawResources | null = null;
+  private gpuRingCompute: PropGpuRingCompute | null = null;
+  private gpuRingInit: Promise<void> | null = null;
+  private gpuRingKey = "";
+  private gpuRingGeneration = 0;
+  private gpuRingStats: PropGpuRingStats | null = null;
+  private gpuStatus: PropGpuStatus = "disabled";
+  private gpuLoggedError: string | null = null;
+  private readonly frustumPlaneScratch = new Float32Array(24);
 
   constructor(private readonly deps: PropSystemDeps) {
     this.root.name = "custom-props";
@@ -230,6 +295,7 @@ export class PropSystem {
     this.grid = PropSpatialGrid.fromInstances(instances, this.deps.settings.spatial.cellSizeM);
     this.colliderQueryRadius = this.computeColliderQueryRadius();
     this.lodState.clear();
+    this.clearGpuRing();
     this.clearBuckets();
     this.ensureBuckets();
     this.resetStreamingState();
@@ -238,10 +304,11 @@ export class PropSystem {
       totalInstances: this.grid.instances.length,
       cellsTotal: this.grid.cells.size,
       collidersActive: this.collidersActive,
+      gpuStatus: this.resolveGpuStatus(),
     };
   }
 
-  update(camera: THREE.PerspectiveCamera): void {
+  update(camera: THREE.PerspectiveCamera, ringCenter?: THREE.Vector3): void {
     if (!this.ready || !this.grid || !this.deps.settings.enabled) {
       this.root.visible = false;
       return;
@@ -252,8 +319,37 @@ export class PropSystem {
     this.root.visible = true;
 
     const camPos: [number, number, number] = [camera.position.x, camera.position.y, camera.position.z];
+    const streamCenter = propStreamingCenter(camera, ringCenter);
     const ringRadius = this.computeRingRadius();
-    const candidateCells = this.grid.nearbyCells(camPos, ringRadius);
+
+    if (this.usesGpuRingDraw() && this.updateGpuRing(camera, streamCenter, ringRadius)) {
+      const stats = this.gpuRingStats;
+      this.setCpuBucketsVisible(false);
+      this.stats = {
+        ...EMPTY_PROP_STATS,
+        totalInstances: this.grid.instances.length,
+        cellsTotal: this.grid.cells.size,
+        cellsVisible: 0,
+        cellsCulled: 0,
+        instancesVisible: stats?.visibleCount ?? 0,
+        instancesCulled: Math.max(0, this.grid.instances.length - (stats?.visibleCount ?? 0)),
+        drawCallsOpaque: this.gpuRingDraw?.meshes.length ?? 0,
+        drawCallsTotal: this.gpuRingDraw?.meshes.length ?? 0,
+        collidersActive: this.collidersActive,
+        gpuStatus: this.gpuStatus,
+        gpuCandidateCount: stats?.candidateCount ?? this.grid.instances.length,
+        gpuVisibleCount: stats?.visibleCount ?? 0,
+        gpuOverflowed: stats?.overflowed ?? false,
+        gpuDispatchMs: stats?.submitMs ?? null,
+        updateMs: performance.now() - t0,
+      };
+      const hooks = this.deps.getHooks?.();
+      if (hooks?.stats) syncPropStatsToHooks(this.stats, hooks.stats.counters);
+      return;
+    }
+
+    this.setCpuBucketsVisible(true);
+    const candidateCells = this.grid.nearbyCells(streamCenter, ringRadius);
     const cull = cullPropSpatialGrid(this.grid, camera, this.deps.settings, this.metadataByAssetId, this.frameId, candidateCells);
     const visibleInstanceIndices = new Set(cull.visibleInstanceIndices);
     const viewportH = Math.max(1, window.innerHeight);
@@ -262,7 +358,7 @@ export class PropSystem {
       || this.deps.settings.debug.showBounds
       || this.deps.settings.debug.lodColorOverlay;
 
-    this.enqueueRingJobs(cull.visibleCellKeys, camPos);
+    this.enqueueRingJobs(cull.visibleCellKeys, streamCenter);
     const context: CellBuildContext = { camPos, viewportH, fovY, visibleInstanceIndices, debugEnabled };
     this.processCellJobs(context);
     this.processMatrixUploads();
@@ -284,6 +380,11 @@ export class PropSystem {
       shadowCasters: this.activeShadowCasters,
       collidersActive: this.collidersActive,
       billboardInstances: this.activeBillboards,
+      gpuStatus: this.resolveGpuStatus(),
+      gpuCandidateCount: 0,
+      gpuVisibleCount: 0,
+      gpuOverflowed: false,
+      gpuDispatchMs: null,
       updateMs: performance.now() - t0,
     };
 
@@ -297,6 +398,7 @@ export class PropSystem {
   }
 
   dispose(): void {
+    this.clearGpuRing();
     this.clearBuckets();
     this.registry.dispose();
     this.debug.dispose();
@@ -372,6 +474,295 @@ export class PropSystem {
     mesh.visible = false;
     this.root.add(mesh);
     this.buckets.set(key, { assetId, lod, kind, mesh, maxCount, freeSlots: [], occupiedSlots: new Set(), nextSlot: 0 });
+  }
+
+  private usesGpuRingDraw(): boolean {
+    const gpu = this.deps.settings.gpu;
+    return this.deps.settings.enabled && gpu.enabled && !gpu.debugForceCpu;
+  }
+
+  private resolveGpuStatus(): PropGpuStatus {
+    if (!this.deps.settings.gpu.enabled) return "disabled";
+    if (this.deps.settings.gpu.debugForceCpu) return "fallback-cpu";
+    if (this.gpuStatus === "ring") return "ring";
+    if (!this.deps.gpuDevice || !this.deps.gpuBackend) {
+      return this.deps.settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+    }
+    return this.deps.settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+  }
+
+  private updateGpuRing(camera: THREE.PerspectiveCamera, streamCenter: [number, number, number], ringRadius: number): boolean {
+    const gpu = this.deps.settings.gpu;
+    if (!this.deps.gpuDevice || !this.deps.gpuBackend || !this.grid) {
+      this.gpuStatus = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+      this.setGpuRingVisible(false);
+      return false;
+    }
+    const unsupported = propGpuRingUnsupportedReason(this.deps.gpuDevice);
+    if (unsupported) {
+      this.gpuStatus = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+      if (this.gpuLoggedError !== unsupported) {
+        this.gpuLoggedError = unsupported;
+        console.warn(`[props-gpu-ring] falling back to CPU: ${unsupported}`);
+      }
+      this.setGpuRingVisible(false);
+      return false;
+    }
+
+    this.ensureGpuRing();
+    if (!this.gpuRingDraw || !this.gpuRingCompute) {
+      this.gpuStatus = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+      this.setGpuRingVisible(false);
+      return false;
+    }
+
+    const dispatched = this.gpuRingCompute.dispatch({
+      centerX: streamCenter[0],
+      centerY: streamCenter[1],
+      centerZ: streamCenter[2],
+      ringRadius,
+      cameraX: camera.position.x,
+      cameraY: camera.position.y,
+      cameraZ: camera.position.z,
+      maxInstancesPerGroup: this.gpuRingDraw.maxInstancesPerGroup,
+      frustumPlanes: this.frustumPlanes(camera),
+    });
+    if (!dispatched) {
+      const stats = this.gpuRingCompute.stats(this.deps.settings.enabled);
+      this.gpuRingStats = stats;
+      this.gpuStatus = stats.status === "failed" && !gpu.fallbackToCpu ? "unsupported" : "fallback-cpu";
+      this.setGpuRingVisible(false);
+      return false;
+    }
+    this.gpuRingStats = this.gpuRingCompute.stats(this.deps.settings.enabled);
+    if (this.gpuRingStats.status === "failed") {
+      if (this.gpuRingStats.reason && this.gpuLoggedError !== this.gpuRingStats.reason) {
+        this.gpuLoggedError = this.gpuRingStats.reason;
+        console.warn(`[props-gpu-ring] falling back to CPU: ${this.gpuRingStats.reason}`);
+      }
+      this.gpuStatus = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+      this.setGpuRingVisible(false);
+      return false;
+    }
+    this.gpuStatus = "ring";
+    this.setGpuRingVisible(true);
+    return true;
+  }
+
+  private ensureGpuRing(): void {
+    if (!this.grid || !this.deps.gpuDevice || !this.deps.gpuBackend) return;
+    const source = this.buildGpuRingSource();
+    if (source.groupCount === 0 || source.sourceCount === 0) return;
+    const key = [
+      this.grid.instances.length,
+      source.groupCount,
+      this.deps.settings.gpu.maxVisible,
+      this.deps.settings.gpu.workgroupSize,
+      ...this.deps.settings.props.map((prop) => `${prop.id}:${prop.lod.distances.join(",")}:${prop.culling.maxDistance}`),
+    ].join("|");
+    if (this.gpuRingStats?.status === "failed" && this.gpuRingKey === key) return;
+    if (this.gpuRingCompute && this.gpuRingDraw && this.gpuRingKey === key) return;
+    if (this.gpuRingInit && this.gpuRingKey === key) return;
+
+    this.clearGpuRing();
+    this.gpuRingKey = key;
+    this.gpuRingDraw = this.createGpuRingDrawResources(source);
+    for (const mesh of this.gpuRingDraw.meshes) this.root.add(mesh);
+    this.setGpuRingVisible(false);
+    this.gpuRingStats = {
+      status: "initializing",
+      candidateCount: source.sourceCount,
+      visibleCount: 0,
+      groupCounts: new Array<number>(source.groupCount).fill(0),
+      overflowed: false,
+      submitMs: null,
+      readbackMs: null,
+    };
+    const initKey = key;
+    const initGeneration = this.gpuRingGeneration;
+    const outputBuffers = {
+      instanceA: this.gpuBufferForAttribute(this.gpuRingDraw.instanceA),
+      instanceB: this.gpuBufferForAttribute(this.gpuRingDraw.instanceB),
+      indirectArgs: this.gpuBufferForAttribute(this.gpuRingDraw.indirect),
+    };
+    this.gpuRingInit = PropGpuRingCompute.create(this.deps.gpuDevice, source, outputBuffers, this.deps.settings)
+      .then((compute) => {
+        if (this.gpuRingKey !== initKey || this.gpuRingGeneration !== initGeneration) {
+          compute.destroy();
+          return;
+        }
+        this.gpuRingCompute = compute;
+        this.gpuRingStats = compute.stats(this.deps.settings.enabled);
+      })
+      .catch((error) => {
+        if (this.gpuRingKey !== initKey || this.gpuRingGeneration !== initGeneration) return;
+        const reason = error instanceof Error ? error.message : String(error);
+        this.gpuRingStats = { ...this.gpuRingStats!, status: "failed", reason };
+      })
+      .finally(() => {
+        if (this.gpuRingKey === initKey && this.gpuRingGeneration === initGeneration) this.gpuRingInit = null;
+      });
+  }
+
+  private buildGpuRingSource(): PropGpuRingSourceData {
+    if (!this.grid) {
+      return emptyGpuRingSource();
+    }
+    const assetDefs = this.deps.settings.props.filter((def) => this.loadedAssets.has(def.id));
+    const assetIndexById = new Map<string, number>();
+    const groupMeta: number[] = [];
+    const assetMeta = new Float32Array(Math.max(1, assetDefs.length) * 4);
+    const assetLods = new Float32Array(Math.max(1, assetDefs.length) * 4);
+    let group = 0;
+    assetDefs.forEach((def, assetIndex) => {
+      const loaded = this.loadedAssets.get(def.id)!;
+      const lodCount = Math.min(4, Math.max(1, loaded.lodChain?.levels.length ?? def.lod.distances.length));
+      assetIndexById.set(def.id, assetIndex);
+      assetMeta[assetIndex * 4] = def.culling.maxDistance;
+      assetMeta[assetIndex * 4 + 1] = loaded.metadata.boundingSphereRadius;
+      assetMeta[assetIndex * 4 + 2] = lodCount;
+      assetMeta[assetIndex * 4 + 3] = group;
+      for (let lod = 0; lod < 4; lod++) assetLods[assetIndex * 4 + lod] = def.lod.distances[lod] ?? Number.POSITIVE_INFINITY;
+      for (let lod = 0; lod < lodCount; lod++) {
+        const geometry = lodGeometry(loaded, lod);
+        const indexCount = geometry ? this.indexCountFor(geometry) : 0;
+        groupMeta.push(assetIndex, lod, indexCount, 0);
+        group++;
+      }
+    });
+    if (assetDefs.length === 0 || group === 0) return emptyGpuRingSource();
+
+    const sourceA: number[] = [];
+    const sourceB: number[] = [];
+    for (const inst of this.grid.instances) {
+      const assetIndex = assetIndexById.get(inst.assetId);
+      if (assetIndex === undefined) continue;
+      sourceA.push(inst.position[0], inst.position[1], inst.position[2], inst.scale);
+      sourceB.push(inst.rotationY, assetIndex, 0, 0);
+    }
+
+    return {
+      sourceA: new Float32Array(sourceA.length > 0 ? sourceA : [0, 0, 0, 1]),
+      sourceB: new Float32Array(sourceB.length > 0 ? sourceB : [0, 0, 0, 0]),
+      assetMeta,
+      assetLods,
+      groupMeta: new Uint32Array(groupMeta.length > 0 ? groupMeta : [0, 0, 0, 0]),
+      sourceCount: sourceA.length / 4,
+      groupCount: group,
+    };
+  }
+
+  private createGpuRingDrawResources(source: PropGpuRingSourceData): PropGpuRingDrawResources {
+    if (!this.deps.gpuBackend) throw new Error("Cannot create WebGPU prop ring resources without a backend");
+    const maxInstancesPerGroup = propGpuRingGroupCapacity(this.deps.settings, source.groupCount);
+    const capacity = Math.max(1, maxInstancesPerGroup * source.groupCount);
+    const instanceA = this.createStorageInstancedAttribute("instance-a", capacity);
+    const instanceB = this.createStorageInstancedAttribute("instance-b", capacity);
+    const indirect = new StorageBufferAttribute(new Uint32Array(source.groupCount * 5), 5);
+    indirect.name = "prop-ring-indirect";
+    this.deps.gpuBackend.createIndirectStorageAttribute(indirect);
+
+    const meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[] = [];
+    let group = 0;
+    for (const def of this.deps.settings.props) {
+      const loaded = this.loadedAssets.get(def.id);
+      if (!loaded) continue;
+      const lodCount = Math.min(4, Math.max(1, loaded.lodChain?.levels.length ?? def.lod.distances.length));
+      for (let lod = 0; lod < lodCount; lod++) {
+        const geometry = lodGeometry(loaded, lod);
+        if (!geometry) continue;
+        const drawGeometry = this.createGpuRingGeometry(geometry, maxInstancesPerGroup, indirect, group * 5 * Uint32Array.BYTES_PER_ELEMENT);
+        const material = createPropGpuRingMaterial(loaded.sourceMaterial, { instanceA, instanceB, capacity });
+        const mesh = new THREE.Mesh(drawGeometry, material);
+        mesh.name = `props-ring-gpu-${def.id}-lod${lod}`;
+        mesh.frustumCulled = false;
+        mesh.castShadow = false;
+        mesh.receiveShadow = true;
+        meshes.push(mesh);
+        group++;
+      }
+    }
+
+    return { meshes, instanceA, instanceB, indirect, source, maxInstancesPerGroup };
+  }
+
+  private createGpuRingGeometry(
+    source: THREE.BufferGeometry,
+    instanceCount: number,
+    indirect: StorageBufferAttribute,
+    indirectOffset: number,
+  ): THREE.InstancedBufferGeometry {
+    const geometry = new THREE.InstancedBufferGeometry();
+    geometry.setIndex(source.getIndex());
+    for (const name of Object.keys(source.attributes)) geometry.setAttribute(name, source.getAttribute(name));
+    geometry.instanceCount = Math.max(1, instanceCount);
+    const indirectGeometry = geometry as IndirectInstancedBufferGeometry;
+    if (!indirectGeometry.setIndirect) throw new Error("custom prop GPU ring requires InstancedBufferGeometry.setIndirect support");
+    indirectGeometry.setIndirect(indirect, indirectOffset);
+    geometry.boundingBox = new THREE.Box3(
+      new THREE.Vector3(-1, -1024, -1),
+      new THREE.Vector3(1_000_000, 4096, 1_000_000),
+    );
+    geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+    return geometry;
+  }
+
+  private createStorageInstancedAttribute(name: string, count: number): StorageInstancedBufferAttribute {
+    if (!this.deps.gpuBackend) throw new Error("Cannot create WebGPU prop storage attribute without a backend");
+    const attribute = new StorageInstancedBufferAttribute(Math.max(1, Math.floor(count)), 4);
+    attribute.name = `prop-ring-${name}`;
+    this.deps.gpuBackend.createStorageAttribute(attribute);
+    return attribute;
+  }
+
+  private gpuBufferForAttribute(attribute: THREE.BufferAttribute): GPUBuffer {
+    if (!this.deps.gpuBackend) throw new Error("Cannot read WebGPU prop buffer without a backend");
+    const buffer = this.deps.gpuBackend.get(attribute).buffer;
+    if (!buffer) throw new Error(`Missing GPU buffer for ${attribute.name || "prop ring attribute"}`);
+    return buffer;
+  }
+
+  private frustumPlanes(camera: THREE.Camera): Float32Array {
+    (camera as THREE.Camera & { updateProjectionMatrix?: () => void }).updateProjectionMatrix?.();
+    camera.updateMatrixWorld(true);
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+    _gpuFrustumMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _gpuFrustum.setFromProjectionMatrix(_gpuFrustumMatrix);
+    for (let i = 0; i < 6; i++) {
+      const plane = _gpuFrustum.planes[i]!;
+      const offset = i * 4;
+      this.frustumPlaneScratch[offset] = plane.normal.x;
+      this.frustumPlaneScratch[offset + 1] = plane.normal.y;
+      this.frustumPlaneScratch[offset + 2] = plane.normal.z;
+      this.frustumPlaneScratch[offset + 3] = plane.constant;
+    }
+    return this.frustumPlaneScratch;
+  }
+
+  private setGpuRingVisible(visible: boolean): void {
+    if (!this.gpuRingDraw) return;
+    for (const mesh of this.gpuRingDraw.meshes) mesh.visible = visible;
+  }
+
+  private setCpuBucketsVisible(visible: boolean): void {
+    for (const bucket of this.buckets.values()) bucket.mesh.visible = visible && bucket.mesh.count > 0;
+  }
+
+  private clearGpuRing(): void {
+    this.gpuRingGeneration++;
+    this.gpuRingCompute?.destroy();
+    this.gpuRingCompute = null;
+    this.gpuRingInit = null;
+    this.gpuRingKey = "";
+    this.gpuRingStats = null;
+    if (this.gpuRingDraw) {
+      for (const mesh of this.gpuRingDraw.meshes) {
+        mesh.removeFromParent();
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      }
+    }
+    this.gpuRingDraw = null;
   }
 
   private enqueueRingJobs(desiredCellKeys: ReadonlySet<string>, camPos: [number, number, number]): void {
@@ -603,6 +994,10 @@ export class PropSystem {
     let count = 0;
     for (const bucket of this.buckets.values()) if (bucket.mesh.visible) count++;
     return count;
+  }
+
+  private indexCountFor(geometry: THREE.BufferGeometry): number {
+    return geometry.getIndex()?.count ?? geometry.getAttribute("position")?.count ?? 0;
   }
 
   private computeRingRadius(): number {

@@ -1,3 +1,5 @@
+import type { PropGpuStatus } from "./prop_types.js";
+
 export interface PropStats {
   totalInstances: number;
   cellsTotal: number;
@@ -12,6 +14,11 @@ export interface PropStats {
   shadowCasters: number;
   collidersActive: number;
   billboardInstances: number;
+  gpuStatus: PropGpuStatus;
+  gpuCandidateCount: number;
+  gpuVisibleCount: number;
+  gpuOverflowed: boolean;
+  gpuDispatchMs: number | null;
   updateMs: number;
 }
 
@@ -29,6 +36,11 @@ export const EMPTY_PROP_STATS: PropStats = {
   shadowCasters: 0,
   collidersActive: 0,
   billboardInstances: 0,
+  gpuStatus: "disabled",
+  gpuCandidateCount: 0,
+  gpuVisibleCount: 0,
+  gpuOverflowed: false,
+  gpuDispatchMs: null,
   updateMs: 0,
 };
 
@@ -46,5 +58,11 @@ export function syncPropStatsToHooks(stats: PropStats, counters: Record<string, 
   counters["props.shadow_casters"] = stats.shadowCasters;
   counters["props.colliders_active"] = stats.collidersActive;
   counters["props.billboard_instances"] = stats.billboardInstances;
+  counters["props.gpu_ring_active"] = stats.gpuStatus === "ring" ? 1 : 0;
+  counters["props.gpu_fallback_cpu"] = stats.gpuStatus === "fallback-cpu" ? 1 : 0;
+  counters["props.gpu_candidates"] = stats.gpuCandidateCount;
+  counters["props.gpu_visible"] = stats.gpuVisibleCount;
+  counters["props.gpu_overflowed"] = stats.gpuOverflowed ? 1 : 0;
+  counters["props.gpu_dispatch_ms"] = stats.gpuDispatchMs === null ? 0 : Math.round(stats.gpuDispatchMs * 100) / 100;
   counters["props.update_ms"] = Math.round(stats.updateMs * 100) / 100;
 }

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { ClodHooks } from "../../core/hooks.js";
 import type { GrassStats } from "../../grass.js";
 import type { TreeStats } from "../../trees/index.js";
+import type { PropStats } from "../../props/prop_stats.js";
 import type { PostProcessSettings } from "../../environment/postprocess.js";
 import type { NodeLabelOverlay } from "../../ui/node_labels.js";
 import type { AppPostProcess } from "../app_post_process.js";
@@ -29,6 +30,7 @@ export interface RenderPhaseInput {
   grassProfileFrame: { value: number };
   currentGrassStats: GrassStats | null;
   currentTreeStats: TreeStats | null;
+  currentPropStats: PropStats | null;
   tPropsStart: number;
   tBubbleStart: number;
   vegetationTiming: VegetationFrameTiming;
@@ -162,6 +164,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       input.phaseTiming.statsSyncMs +
       renderMs;
     const treeStats = input.currentTreeStats;
+    const propStats = input.currentPropStats;
     input.perfProbe?.record({
       frameId: selectionStats.frameId,
       frameMs,
@@ -218,6 +221,13 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       treeGpuAcceptedCount: treeStats?.gpuAcceptedCount ?? 0,
       treeGpuVisibleCount: treeStats?.gpuVisibleCount ?? 0,
       treeGpuDispatchMs: treeStats?.gpuDispatchMs ?? null,
+      customPropGpuStatus: propStats?.gpuStatus ?? "unknown",
+      customPropTotalInstances: propStats?.totalInstances ?? 0,
+      customPropVisibleInstances: propStats?.instancesVisible ?? 0,
+      customPropGpuCandidateCount: propStats?.gpuCandidateCount ?? 0,
+      customPropGpuVisibleCount: propStats?.gpuVisibleCount ?? 0,
+      customPropGpuOverflowed: propStats?.gpuOverflowed ? 1 : 0,
+      customPropGpuDispatchMs: propStats?.gpuDispatchMs ?? null,
     });
     if (input.profileEnabled && frameMs >= input.profileFrameMs) {
       // eslint-disable-next-line no-console

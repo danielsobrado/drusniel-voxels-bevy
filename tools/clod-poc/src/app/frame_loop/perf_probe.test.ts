@@ -62,6 +62,13 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
     treeGpuAcceptedCount: 100,
     treeGpuVisibleCount: 80,
     treeGpuDispatchMs: 0.2,
+    customPropGpuStatus: "ring",
+    customPropTotalInstances: 50,
+    customPropVisibleInstances: 30,
+    customPropGpuCandidateCount: 45,
+    customPropGpuVisibleCount: 30,
+    customPropGpuOverflowed: 0,
+    customPropGpuDispatchMs: 0.1,
     ...overrides,
   };
 }
@@ -99,5 +106,7 @@ describe("frame perf probe", () => {
     expect(summary.counters.terrainTrianglesAvg).toBe(12000);
     expect(summary.counters.treeGpuStatusCounts).toEqual({ ring: 2 });
     expect(summary.counters.treeGpuVisibleCountAvg).toBe(80);
+    expect(summary.counters.customPropGpuStatusCounts).toEqual({ ring: 2 });
+    expect(summary.counters.customPropGpuVisibleCountAvg).toBe(30);
   });
 });

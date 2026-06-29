@@ -120,8 +120,8 @@ function markdown(results: readonly PerfCaseResult[]): string {
   const lines = [
     "# clod-poc main perf",
     "",
-    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | tree lod avg | tris avg |",
-    "| --- | ---: | ---: | --- | --- | ---: | --- | ---: | --- | ---: |",
+    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | tree lod avg | prop GPU | prop visible avg | tris avg |",
+    "| --- | ---: | ---: | --- | --- | ---: | --- | ---: | --- | --- | ---: | ---: |",
   ];
   for (const result of results) {
     const snapshot = result.snapshot;
@@ -130,6 +130,9 @@ function markdown(results: readonly PerfCaseResult[]): string {
     const topPhase = snapshot.broadBucketsByP95[0];
     const topProp = snapshot.propBucketsByP95[0];
     const statusCounts = Object.entries(snapshot.counters.treeGpuStatusCounts)
+      .map(([status, count]) => `${status}:${count}`)
+      .join(" ");
+    const propStatusCounts = Object.entries(snapshot.counters.customPropGpuStatusCounts)
       .map(([status, count]) => `${status}:${count}`)
       .join(" ");
     const treeLod =
@@ -144,6 +147,8 @@ function markdown(results: readonly PerfCaseResult[]): string {
         `${ms(render.p95)} | ${statusCounts || "-"} | ` +
         `${Math.round(snapshot.counters.treeGpuVisibleCountAvg).toLocaleString("en-US")} | ` +
         `${treeLod} | ` +
+        `${propStatusCounts || "-"} | ` +
+        `${Math.round(snapshot.counters.customPropGpuVisibleCountAvg).toLocaleString("en-US")} | ` +
         `${Math.round(snapshot.counters.terrainTrianglesAvg).toLocaleString("en-US")} |`,
     );
   }

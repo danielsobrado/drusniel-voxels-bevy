@@ -20,6 +20,30 @@ describe("parseCustomPropsConfig", () => {
     expect(settings.enabled).toBe(DEFAULT_CUSTOM_PROPS_SETTINGS.enabled);
     expect(settings.props).toHaveLength(0);
     expect(settings.culling.hysteresisM).toBe(8);
+    expect(settings.gpu).toEqual(DEFAULT_CUSTOM_PROPS_SETTINGS.gpu);
+  });
+
+  it("parses GPU ring settings", () => {
+    const settings = parseCustomPropsConfig(`
+gpu:
+  enabled: true
+  prefer_webgpu: false
+  fallback_to_cpu: false
+  debug_force_cpu: true
+  max_visible: 1234
+  workgroup_size: 128
+  debug_show_gpu_counts: false
+`);
+
+    expect(settings.gpu).toEqual({
+      enabled: true,
+      preferWebGpu: false,
+      fallbackToCpu: false,
+      debugForceCpu: true,
+      maxVisible: 1234,
+      workgroupSize: 128,
+      debugShowGpuCounts: false,
+    });
   });
 
   it("validates the bundled manifest", () => {
