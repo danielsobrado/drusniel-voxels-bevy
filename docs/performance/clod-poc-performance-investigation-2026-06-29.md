@@ -153,3 +153,153 @@ It failed in files unrelated to this change:
 - `world=16` perf runs repeatedly spent a long time before the perf hook appeared. That is startup/world-build behavior, not steady-state FPS. It should be investigated separately if startup latency is the user-visible problem.
 - The perf markdown currently reports tree visible counts and LOD distribution, but it does not surface tree GPU dispatch/readback timing. Adding those counters to the report would make future tree GPU investigations easier.
 - The old zero-visible-tree GPU runs should not be used as performance targets for real tree rendering.
+
+---
+
+# Follow-up: real-GPU tree regression (144 → 30 FPS)
+
+> Added 2026-06-29 (later session). This follow-up **revises the conclusion above.**
+> On real hardware the trees *are* the steady-state regression. The earlier
+> "trees are well under the 16.67 ms budget" reading came from a harness that
+> does not reproduce the real-GPU cost (see *Why the perf harness misled*).
+
+## Symptom
+
+- User reports the world-8 foric-island scene previously ran at ~**144 FPS** (144 Hz
+  display) and now runs at ~**30 FPS** (~33 ms/frame) — a hard ~5× regression.
+- The `docs/reference/fable5-world-demo` reference is *more* complex yet runs
+  faster, so this is a clod-poc-specific regression, not inherent scene cost.
+- A black-screen report just before this was a **stale Vite HMR / renderer
+  state** in a long-lived tab (≈50 commits in one day); a hard reload / dev-server
+  restart cleared it. A fresh load of the current code renders correctly. Not a
+  code regression.
+
+## Why the perf harness (`perf:main`) misled
+
+The earlier conclusion is invalid for steady-state GPU cost because the harness
+cannot see it:
+
+1. **CPU-only metrics.** `perf_probe` `frameMs` is the CPU work inside the frame
+   callback; `renderMs` is the JS `renderer.render()` submit (command encoding),
+   **not** GPU execution. p50 ≈ 1.5 ms reflects a trivial CPU loop, not the frame.
+2. **Software GPU.** Playwright's working launch recipe is headless `chromium
+   args=[]`, i.e. the **SwiftShader** WebGPU adapter. With temporary
+   `trackTimestamp` instrumentation, GPU `render` timestamps came back **0.02 ms**
+   — impossible for the real scene; it is software and unrepresentative. Forcing
+   headed Chrome did not help (channel unavailable → fell back to SwiftShader).
+3. **`freeze=1` + default camera renders no trees.** In the harness the GPU tree
+   ring reports `tree visible avg 0`, and toggling `trees=0` changes nothing:
+   draw calls `19`, total triangles `1,269,035` identical with trees on/off. The
+   harness simply was not drawing the vegetation that loads the real GPU.
+
+Net: every number `perf:main` can produce here is the wrong scene on a software
+device. The real bottleneck is **GPU fill/geometry**, which this path cannot measure.
+
+## Method that worked: no-freeze rAF differential
+
+Temporary harness `tools/clod-poc/tools/diff-fps.ts` ([DEBUG-bs9f]) drives the
+**real app path (no `freeze`, no `perfProbe`)** so vegetation renders, settles
+each page ~18 s, then measures frame throughput by counting `requestAnimationFrame`
+ticks over 5 s and scrapes the HUD. Still software GPU, so **absolute FPS ≠
+hardware** — but the *relative* deltas localize a gross regression.
+
+### Subsystem differential (world 8, software GPU)
+
+| case | rAF fps | reading |
+| --- | ---: | --- |
+| baseline | 60–64 | — |
+| **trees off** (`&trees=0&understory=0`) | **140** | **≈2.2× — dominant** |
+| vegetation off (grass+trees+stones+understory) | 142 | matches trees-off → grass/stones not involved |
+| water off (`&water=0&weather=off`) | 73 | modest |
+| far-shell off | 52 | noise (trees still on) |
+
+### Tree sub-differential
+
+| case | rAF fps | reading |
+| --- | ---: | --- |
+| baseline | 64 | — |
+| sun shadows off (`&sunShadows=0`) | 74 | shadows ≈ +15% only |
+| ablate shadows (`&ablate=shadows`) | 78 | shadows ≈ +20% only |
+| **trees off** | **141** | dominant |
+| tree cap 6861→1500 (`&treeGpuMaxVisible=1500`) | 61 | count barely matters |
+| tree distance 150 (`&treeDistance=150`) | 58 | distance barely matters |
+
+Trees dominate; the TREE-7/8 **shadow-proxy** work is only ~15–20%; cutting tree
+count/distance does **not** help. A cost that is flat vs. tree count but vanishes
+when trees are off points at **per-fragment / full-forest geometry**, not vertex
+count or shadows. (Caveat: the `maxVisible` cap's effect was not independently
+confirmed, and this is the software device.)
+
+## Root cause
+
+**There are no real impostor billboards on the WebGPU path, so the entire visible
+forest renders full grammar tree meshes at every LOD, shaded by a heavy
+double-sided node material.**
+
+- The impostor baker [`tree_impostor_baker.ts`](../../tools/clod-poc/src/trees/tree_impostor_baker.ts)
+  is **WebGL-only** (`getContext()` render-target bake); under `WebGPURenderer`
+  it returns `supported:false`, so **no atlas is ever baked**.
+- Default impostor config is `enabled:true, bakeOnStart:true,
+  fallbackToPlaceholder:false` ([tree_config.ts:481](../../tools/clod-poc/src/trees/tree_config.ts#L481)).
+  With no atlas and no placeholder, `resolveTreeSystemLod`
+  ([tree_system_lod_resolution.ts:14](../../tools/clod-poc/src/trees/tree_system_lod_resolution.ts#L14))
+  **clamps the impostor band to the `far` mesh** — i.e. distant trees that should
+  be ~2-triangle billboards render real reduced-LOD mesh geometry instead.
+- The tree material [`tree_node_material.ts`](../../tools/clod-poc/src/trees/tree_node_material.ts)
+  is `MeshBasicNodeMaterial`, **`side: DoubleSide`, opaque** (`transparent:false`,
+  `alphaTest:0`, [L263](../../tools/clod-poc/src/trees/tree_node_material.ts#L263)),
+  with a per-fragment colorNode doing relight + leaf **transmission** + forest
+  AO/shadow + fog + a screen-door **`maskNode` discard** ([L230-266](../../tools/clod-poc/src/trees/tree_node_material.ts#L230)).
+  `DoubleSide` doubles fragment work and the dither discard weakens early-z.
+
+This matches gap #1 of the parity plan
+([clod-poc-trees-parity-plan.md](../plans/clod-poc-trees-parity-plan.md)):
+"Impostors / billboards are not real on the WebGPU path," and the recent Fable5
+foliage-grammar commits (`36d019c3` foliage card placement, `843593f0` budget
+grammar foliage by anchor targets, `5ab91f4e` structural variants).
+
+## Proposed fix
+
+**Primary (architectural — the real fix):** implement real WebGPU octahedral
+impostor billboards, i.e. parity-plan **EPIC A (TREE-1..3, WebGPU atlas bake)** +
+**EPIC B (TREE-4..6, relit view-blended billboard in the ring)**. This replaces
+full far-mesh geometry beyond the impostor distance with cheap relit billboards
+and is the direct undo of the regression.
+
+**Interim mitigations (no bake pipeline; validate each with a real-GPU A/B):**
+
+1. Lower the grammar foliage/leaf budget per tree (the recently raised anchor
+   targets, `843593f0`) to cut per-tree triangle count.
+2. Pull the far/impostor transition distance inward and/or decimate the `far`/`mid`
+   mesh LODs so distant trees are cheaper while billboards are absent.
+3. Use `FrontSide` for opaque trunk/branch tubes (keep `DoubleSide` only for leaf
+   cards) to halve their fragment work.
+4. Re-evaluate the screen-door dither `maskNode` discard's early-z cost.
+
+## Real-hardware confirmation (CONFIRMED)
+
+Validated on the user's 144 Hz machine (real GPU + vsync):
+
+- **`…/?world=8&trees=0` holds a steady 144 FPS.**
+- Baseline (trees on) is ~30 FPS.
+
+So **trees alone account for the full ~5× regression** (~26 ms of a ~33 ms
+frame). This confirms the software-harness differential on real hardware and
+rules out shadows/water/terrain/far-shell as the primary cost. The software rAF
+differential's *relative* ranking held up; only its absolute FPS differed.
+
+For exact per-pass numbers if needed: load `…/?world=8&perfProbe=1`; the
+temporary instrumentation enables `trackTimestamp` and records real
+`gpuRenderMs`/`gpuComputeMs` into `window.__drusnielPerf.snapshot().samples`.
+
+## Temporary instrumentation (remove after fix)
+
+All tagged `[DEBUG-bs9f]`:
+
+- `src/rendering/renderer_backend.ts` — `trackTimestamp` under `perfProbe` when
+  `timestamp-query` is supported.
+- `src/app/frame_loop/perf_probe.ts` — optional `gpuRenderMs`, `gpuComputeMs`,
+  `drawCalls`, `totalTriangles` sample fields.
+- the frame render phase — defensive GPU-timestamp resolve + record.
+- `tools/perf-main.ts` — GPU render/compute + draw-call/triangle columns.
+- `tools/diff-fps.ts` — the no-freeze rAF differential harness.

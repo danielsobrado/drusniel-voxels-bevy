@@ -1041,41 +1041,10 @@ export class TreeSystem {
         if (this.treeLodCastsShadow(lod)) {
           for (let cascade = 0; cascade < TREE_RING_SHADOW_CASCADE_COUNT; cascade++) {
             const shadowMaterialKey = "shadow:" + cascade + ":" + materialKey;
-            materialHandles[shadowMaterialKey] = lod === "impostor" && this.settings.impostors.enabled && atlas?.ready
-              ? createTreeRingImpostorNodeMaterialHandle(
-                this.settings,
-                shadowRingBuffers,
-                atlas,
-                this.currentLighting ?? undefined,
-                this.hydrologyWater,
-              )
-              : createTreeRingNodeMaterialHandle(
-                this.settings,
-                shadowRingBuffers,
-                lod,
-                this.currentLighting ?? undefined,
-                this.hydrologyWater,
-              );
-            const shadowGroup = treeRingShadowCasterGroupIndex(species, lod, cascade);
-            meshes.push(this.createGpuRingShadowTierDraw(
-              species,
-              lod,
-              cascade,
-              count,
-              shadowIndirect,
-              shadowGroup * 5 * Uint32Array.BYTES_PER_ELEMENT,
-              materialHandles[shadowMaterialKey],
-            ));
-          }
-        }
-        if (this.treeLodCastsShadow(lod)) {
-          for (let cascade = 0; cascade < TREE_RING_SHADOW_CASCADE_COUNT; cascade++) {
-            const shadowMaterialKey = "shadow:" + cascade + ":" + materialKey;
             materialHandles[shadowMaterialKey] = this.createGpuRingShadowMaterialHandle(
               species,
               lod,
               shadowRingBuffers,
-              atlas,
             );
             const shadowGroup = treeRingShadowCasterGroupIndex(species, lod, cascade);
             meshes.push(this.createGpuRingShadowTierDraw(
@@ -1144,7 +1113,6 @@ export class TreeSystem {
     species: TreeSpeciesId,
     lod: TreeLod,
     buffers: TreeRingInstanceBuffers,
-    atlas: TreeImpostorAtlas | undefined,
   ): TreeMaterialHandle {
     if (lod === "far" || lod === "impostor") {
       return createTreeCrownProxyNodeMaterialHandle(this.settings, buffers, species, lod);
@@ -1173,37 +1141,6 @@ export class TreeSystem {
     materialHandle: TreeMaterialHandle,
   ): TreeGpuRingMesh {
     const source = this.geometryForGpuRingShadow(species, lod);
-    const geometry = new THREE.InstancedBufferGeometry();
-    geometry.setIndex(source.getIndex());
-    for (const name of Object.keys(source.attributes)) {
-      geometry.setAttribute(name, source.getAttribute(name));
-    }
-    geometry.instanceCount = count;
-    this.setGpuRingIndirect(geometry, indirect, indirectOffset);
-    geometry.boundingBox = new THREE.Box3(
-      new THREE.Vector3(-1, -1, -1),
-      new THREE.Vector3(this.worldCells + 1, 256, this.worldCells + 1),
-    );
-    geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
-    const mesh = new THREE.Mesh(geometry, materialHandle.regularMaterial);
-    mesh.name = "trees-ring-gpu-shadow-c" + cascade + "-" + species + "-" + lod;
-    mesh.frustumCulled = false;
-    mesh.castShadow = true;
-    mesh.receiveShadow = false;
-    markAsRealtimeSunShadowCaster(mesh, cascade);
-    return mesh;
-  }
-
-  private createGpuRingShadowTierDraw(
-    species: TreeSpeciesId,
-    lod: TreeLod,
-    cascade: number,
-    count: number,
-    indirect: StorageBufferAttribute,
-    indirectOffset: number,
-    materialHandle: TreeMaterialHandle,
-  ): TreeGpuRingMesh {
-    const source = this.geometryForGpuRing(species, lod);
     const geometry = new THREE.InstancedBufferGeometry();
     geometry.setIndex(source.getIndex());
     for (const name of Object.keys(source.attributes)) {

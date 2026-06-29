@@ -9,10 +9,11 @@ interface CaseDef { name: string; query: string }
 const BASE = "world=8&seed=1&webgpuSelection=1&farShell=1";
 const CASES: CaseDef[] = [
   { name: "0-baseline", query: BASE },
-  { name: "A-trees-off", query: `${BASE}&trees=0&understory=0` },
-  { name: "B-vegetation-off", query: `${BASE}&grass=0&trees=0&stones=0&understory=0&weather=off` },
-  { name: "C-water-off", query: `${BASE}&water=0&weather=off` },
-  { name: "D-farshell-off", query: `world=8&seed=1&webgpuSelection=1&farShell=0` },
+  { name: "E-sunShadows-off", query: `${BASE}&sunShadows=0` },
+  { name: "F-ablate-shadows", query: `${BASE}&ablate=shadows` },
+  { name: "G-trees-off", query: `${BASE}&trees=0&understory=0` },
+  { name: "H-trees-1500", query: `${BASE}&treeGpuMaxVisible=1500` },
+  { name: "I-tree-dist-150", query: `${BASE}&treeDistance=150` },
 ];
 
 const SETTLE_MS = 18000; // generous: CLOD cache + hydrology + tree/grass dispatch settle
