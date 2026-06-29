@@ -4,7 +4,7 @@ const TREE_LOD_MID: u32 = 1u;
 const TREE_LOD_FAR: u32 = 2u;
 const TREE_LOD_IMPOSTOR: u32 = 3u;
 const TREE_LOD_COUNT: u32 = 4u;
-const TREE_SPECIES_COUNT: u32 = 3u;
+const TREE_SPECIES_COUNT: u32 = 6u;
 const TREE_GROUP_COUNT: u32 = TREE_SPECIES_COUNT * TREE_LOD_COUNT;
 const TREE_SHADOW_CASCADE_COUNT: u32 = 4u;
 const TREE_SHADOW_PLANE_COUNT: u32 = 6u;
@@ -58,15 +58,22 @@ struct TreeRingParams {
   settings_c: vec4<f32>,
   settings_d: vec4<f32>,
   settings_e: vec4<f32>,
-  species_weights: vec4<f32>,
+  species_weights_a: vec4<f32>,
+  species_weights_b: vec4<f32>,
   index_counts_a: vec4<u32>,
   index_counts_b: vec4<u32>,
   index_counts_c: vec4<u32>,
+  index_counts_d: vec4<u32>,
+  index_counts_e: vec4<u32>,
+  index_counts_f: vec4<u32>,
   settings_u: vec4<u32>,
   material_density: vec4<f32>,
   species_material_oak: vec4<f32>,
   species_material_pine: vec4<f32>,
   species_material_dead: vec4<f32>,
+  species_material_birch: vec4<f32>,
+  species_material_willow: vec4<f32>,
+  species_material_spruce: vec4<f32>,
   planes: array<vec4<f32>, 6>,
   shadow_planes: array<vec4<f32>, 24>,
 };
@@ -284,6 +291,11 @@ fn tree_accept_params_from_uniforms() -> TreeAcceptParams {
   );
 }
 
+fn tree_species_weight(species: u32) -> f32 {
+  if (species < 4u) { return max(0.0, params.species_weights_a[species]); }
+  return max(0.0, params.species_weights_b[species - 4u]);
+}
+
 fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32, species: u32) -> f32 {
   let cfg = tree_accept_params_from_uniforms();
   let age = smoothstep(0.16, 1.0, tree_hash(wc, 601u));
@@ -297,7 +309,10 @@ fn tree_instance_scale(wc: vec2<f32>, wpos: vec2<f32>, normal_y: f32, species: u
   var species_scale = 1.0;
   if (species == 0u) { species_scale = mix(0.92, 1.18, age); }
   else if (species == 1u) { species_scale = mix(1.08, 1.34, age); }
-  else { species_scale = mix(0.72, 0.96, age); }
+  else if (species == 2u) { species_scale = mix(0.72, 0.96, age); }
+  else if (species == 3u) { species_scale = mix(0.86, 1.08, age); }
+  else if (species == 4u) { species_scale = mix(0.82, 1.12, age); }
+  else { species_scale = mix(1.12, 1.42, age); }
   return clamp(base_scale * species_scale, 0.42, 1.62);
 }
 
@@ -346,7 +361,10 @@ fn shadow_group_index(cascade: u32, species: u32, lod: u32) -> u32 { return casc
 fn index_count_for_group(group: u32) -> u32 {
   if (group < 4u) { return params.index_counts_a[group]; }
   if (group < 8u) { return params.index_counts_b[group - 4u]; }
-  return params.index_counts_c[group - 8u];
+  if (group < 12u) { return params.index_counts_c[group - 8u]; }
+  if (group < 16u) { return params.index_counts_d[group - 12u]; }
+  if (group < 20u) { return params.index_counts_e[group - 16u]; }
+  return params.index_counts_f[group - 20u];
 }
 
 fn in_frustum(center: vec3<f32>, slack: f32) -> bool {
@@ -384,12 +402,21 @@ fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> 
 fn species_material_bias(species: u32, materials: vec4<f32>) -> f32 {
   if (species == 0u) { return max(0.0, dot(materials, params.species_material_oak)); }
   if (species == 1u) { return max(0.0, dot(materials, params.species_material_pine)); }
-  return max(0.0, dot(materials, params.species_material_dead));
+  if (species == 2u) { return max(0.0, dot(materials, params.species_material_dead)); }
+  if (species == 3u) { return max(0.0, dot(materials, params.species_material_birch)); }
+  if (species == 4u) { return max(0.0, dot(materials, params.species_material_willow)); }
+  return max(0.0, dot(materials, params.species_material_spruce));
 }
 
 fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) -> u32 {
-  let base = max(params.species_weights.xyz, vec3<f32>(0.0));
-  if (base.x + base.y + base.z <= 0.0) { return 0xffffffffu; }
+  var base = array<f32, 6>(
+    tree_species_weight(0u),
+    tree_species_weight(1u),
+    tree_species_weight(2u),
+    tree_species_weight(3u),
+    tree_species_weight(4u),
+    tree_species_weight(5u),
+  );
   let cfg = tree_accept_params_from_uniforms();
   let materials = tree_material_weights(height, normal_y);
   let height_band = smoothstep(cfg.lowland_height_m, cfg.highland_height_m, height);
@@ -398,30 +425,25 @@ fn select_species(wc: vec2<f32>, wpos: vec2<f32>, height: f32, normal_y: f32) ->
   let ridge_stress = 1.0 - slope_health;
   let clump = clamp(tree_parent_clump_mask(wpos, cfg), 0.0, 1.25);
   let old_age = smoothstep(0.58, 0.96, tree_hash(wc, 2309u));
-  let oak = base.x
-    * species_material_bias(0u, materials)
-    * mix(1.45, 0.52, height_band)
-    * mix(0.78, 1.28, moisture)
-    * mix(0.82, 1.18, slope_health)
-    * (1.0 - materials.y * 0.35)
-    * mix(1.06, 0.82, old_age);
-  let pine = base.y
-    * species_material_bias(1u, materials)
-    * mix(0.52, 1.62, height_band)
-    * mix(0.84, 1.16, 1.0 - moisture)
-    * mix(0.78, 1.25, slope_health)
-    * (1.0 + materials.y * 0.22)
-    * mix(1.02, 0.9, old_age);
-  let dead = base.z
-    * species_material_bias(2u, materials)
-    * (0.38 + clump * 0.28 + ridge_stress * 0.42 + materials.y * 0.32 + old_age * 0.72);
-  let weights = max(vec3<f32>(oak, pine, dead), vec3<f32>(0.0));
-  let total = weights.x + weights.y + weights.z;
+  base[0] = base[0] * species_material_bias(0u, materials) * mix(1.45, 0.52, height_band) * mix(0.78, 1.28, moisture) * mix(0.82, 1.18, slope_health) * (1.0 - materials.y * 0.35) * mix(1.06, 0.82, old_age);
+  base[1] = base[1] * species_material_bias(1u, materials) * mix(0.52, 1.62, height_band) * mix(0.84, 1.16, 1.0 - moisture) * mix(0.78, 1.25, slope_health) * (1.0 + materials.y * 0.22) * mix(1.02, 0.9, old_age);
+  base[2] = base[2] * species_material_bias(2u, materials) * (0.38 + clump * 0.28 + ridge_stress * 0.42 + materials.y * 0.32 + old_age * 0.72);
+  base[3] = base[3] * species_material_bias(3u, materials) * mix(1.28, 0.68, height_band) * mix(0.88, 1.12, moisture) * mix(0.92, 1.12, slope_health) * mix(1.0, 1.08, clump);
+  base[4] = base[4] * species_material_bias(4u, materials) * mix(1.48, 0.38, height_band) * mix(0.72, 1.45, moisture) * mix(1.18, 0.72, ridge_stress) * (1.0 + materials.z * 0.26);
+  base[5] = base[5] * species_material_bias(5u, materials) * mix(0.42, 1.78, height_band) * mix(0.82, 1.18, 1.0 - moisture) * mix(0.74, 1.32, slope_health) * (1.0 + materials.y * 0.28 + materials.w * 0.18);
+  var total = 0.0;
+  for (var i = 0u; i < TREE_SPECIES_COUNT; i = i + 1u) {
+    base[i] = max(0.0, base[i]);
+    total = total + base[i];
+  }
   if (total <= 0.0) { return 0xffffffffu; }
   let roll = tree_hash(wc, 409u) * total;
-  if (roll < weights.x) { return 0u; }
-  if (roll < weights.x + weights.y) { return 1u; }
-  return 2u;
+  var cursor = 0.0;
+  for (var i = 0u; i < TREE_SPECIES_COUNT; i = i + 1u) {
+    cursor = cursor + base[i];
+    if (roll < cursor) { return i; }
+  }
+  return TREE_SPECIES_COUNT - 1u;
 }
 
 fn append_tree(species: u32, lod: u32, wc: vec2<f32>, height: f32, scale: f32) {
