@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { TreeLod } from "./tree_config.js";
 import {
   treeImpostorUvRectAttribute,
+  treeLodDitherRoleAttribute,
   treeLodFadeAttribute,
   treeWorldXZAttribute,
 } from "./tree_system_instance_attributes.js";
@@ -37,7 +38,10 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
 
   if (input.matrixChanged) input.mesh.instanceMatrix.needsUpdate = true;
   if (input.worldXZChanged) treeWorldXZAttribute(input.mesh).needsUpdate = true;
-  if (input.fadeChanged) treeLodFadeAttribute(input.mesh).needsUpdate = true;
+  if (input.fadeChanged) {
+    treeLodFadeAttribute(input.mesh).needsUpdate = true;
+    treeLodDitherRoleAttribute(input.mesh).needsUpdate = true;
+  }
   if (input.impostorUvChanged) treeImpostorUvRectAttribute(input.mesh).needsUpdate = true;
 
   if (input.nextCount <= 0) {
