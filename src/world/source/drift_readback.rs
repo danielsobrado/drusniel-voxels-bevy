@@ -1,7 +1,10 @@
 use bytemuck::{Pod, Zeroable};
 use serde::{Deserialize, Serialize};
 
-use super::{BiomeId, MaterialLayerId, WorldSourceDriftSample, WorldSourceDriftSamplePoint};
+use super::{
+    sample_cpu_world_source, BiomeId, MaterialLayerId, WorldSource, WorldSourceDriftSample,
+    WorldSourceDriftSamplePoint,
+};
 
 pub const WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH: &str = "shaders/world_source/drift_readback.wgsl";
 pub const WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE: u32 = 64;
@@ -67,6 +70,21 @@ impl GpuWorldSourceDriftOutputSample {
             dominant_layer: material_layer_from_u32(self.dominant_layer)?,
         })
     }
+}
+
+pub fn build_gpu_world_source_drift_input_samples<S: WorldSource>(
+    source: &S,
+    points: &[WorldSourceDriftSamplePoint],
+) -> Vec<GpuWorldSourceDriftInputSample> {
+    let sea_level = source.metadata().sea_level;
+    points
+        .iter()
+        .copied()
+        .map(|point| {
+            let sample = sample_cpu_world_source(source, point);
+            GpuWorldSourceDriftInputSample::from_cpu_sample(sample, point.slope, sea_level)
+        })
+        .collect()
 }
 
 fn biome_from_u32(value: u32) -> Option<BiomeId> {
@@ -174,6 +192,13 @@ impl WorldSourceGpuReadbackProvider for StaticWorldSourceGpuReadback {
 mod tests {
     use super::*;
     use std::mem::size_of;
+    use crate::world::source::{IslandShapeConfig, ProceduralWorldSource, TerrainFieldConfig};
+
+    const WGSL: &str = include_str!("../../../assets/shaders/world_source/drift_readback.wgsl");
+
+    fn source() -> ProceduralWorldSource {
+        ProceduralWorldSource::new(TerrainFieldConfig::new(7, 18.0, IslandShapeConfig::default()))
+    }
 
     #[test]
     fn unavailable_provider_returns_no_samples() {
@@ -237,5 +262,29 @@ mod tests {
         };
 
         assert!(output.to_drift_sample().is_none());
+    }
+
+    #[test]
+    fn builds_gpu_input_samples_from_cpu_reference_source() {
+        let source = source();
+        let points = [WorldSourceDriftSamplePoint::new(64.0, 32.0).with_slope(0.7)];
+        let inputs = build_gpu_world_source_drift_input_samples(&source, &points);
+
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].x, 64.0);
+        assert_eq!(inputs[0].z, 32.0);
+        assert_eq!(inputs[0].slope, 0.7);
+        assert_eq!(inputs[0].sea_level, 18.0);
+        assert!(inputs[0].height.is_finite());
+        assert!(inputs[0].biome <= 6);
+    }
+
+    #[test]
+    fn wgsl_contract_names_match_rust_provider_contract() {
+        assert!(WGSL.contains("WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE : u32 = 64u"));
+        assert!(WGSL.contains("struct WorldSourceDriftReadbackParams"));
+        assert!(WGSL.contains("struct WorldSourceDriftInputSample"));
+        assert!(WGSL.contains("struct WorldSourceDriftOutputSample"));
+        assert!(WGSL.contains("biome_splat_dominant_layer"));
     }
 }
