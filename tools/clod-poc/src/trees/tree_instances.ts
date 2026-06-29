@@ -3,7 +3,7 @@ import { terrainWeights, surfaceHeight, surfaceNormal } from "../terrain/terrain
 import type { PageFootprint } from "../types.js";
 import { treeHash2, treeRandomSigned } from "./tree_hash.js";
 import { selectTreeSpecies } from "./tree_species.js";
-import type { TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import { treeMaterialDensity } from "./tree_material_bias.js";
 import {
   ecologyAcceptanceProbability,
@@ -193,11 +193,10 @@ function selectEcologySpecies(
   materialWeights: readonly [number, number, number, number],
   roll: number,
 ): TreeSpeciesId | null {
-  const weights: { species: TreeSpeciesId; weight: number }[] = [
-    { species: "oak", weight: speciesEcologyWeight("oak", ecology, height, normalY, settings, materialWeights) },
-    { species: "pine", weight: speciesEcologyWeight("pine", ecology, height, normalY, settings, materialWeights) },
-    { species: "dead", weight: speciesEcologyWeight("dead", ecology, height, normalY, settings, materialWeights) },
-  ];
+  const weights = TREE_SPECIES.map((species) => ({
+    species,
+    weight: speciesEcologyWeight(species, ecology, height, normalY, settings, materialWeights),
+  }));
   const total = weights.reduce((sum, entry) => sum + entry.weight, 0);
   if (total <= 0) return null;
   let cursor = roll * total;
@@ -216,10 +215,13 @@ function treeSuppressionRadius(
   gridZ: number,
 ): number {
   const base = settings.placement.minSpacingM;
-  const speciesFactor = species === "oak" ? 1.15 : species === "pine" ? 0.95 : 0.8;
+  const zone = settings.ecology.speciesZones[species];
+  const speciesSettings = settings.species[species];
+  const crownFactor = Math.max(0.5, speciesSettings.crownRadiusM / Math.max(0.001, settings.species.oak.crownRadiusM));
+  const clusterFactor = 0.85 + zone.clusterBias * 0.3;
   const jitterRange = settings.ecology.clustering.minSpacingJitter;
   const jitter = 1 + (treeHash2(gridX, gridZ, settings.seed + 907) * 2 - 1) * jitterRange;
-  return Math.max(0, base * speciesFactor * ecology.scaleMultiplier * jitter);
+  return Math.max(0, base * crownFactor * clusterFactor * ecology.scaleMultiplier * jitter);
 }
 
 function fract(value: number): number {
