@@ -2,7 +2,7 @@
 
 `tools/clod-poc/src/trees/tree_system.ts` is too large and currently mixes orchestration,
 math, GPU policy, stats, mesh attribute writes, impostor state, GPU-ring draw resources,
-and lifecycle cleanup. Split it in small behavior-preserving steps only.
+lighting-proxy projection, and lifecycle cleanup. Split it in small behavior-preserving steps only.
 
 ## Current extracted modules
 
@@ -36,6 +36,17 @@ and lifecycle cleanup. Split it in small behavior-preserving steps only.
   - `updateTreeSystemImpostorMaterial`
   - impostor geometry/material disposal helpers
 
+- `tree_system_lifecycle.ts`
+  - `removeTreePatchResources`
+  - `disposeTreeMeshGrid`
+  - `removeAndDisposeObjects`
+  - `disposeTreeMaterialHandles`
+  - `disposeMaterial`
+
+- `tree_system_lighting_proxies.ts`
+  - `buildTreeLightingProxy`
+  - `buildVisibleTreeLightingProxies`
+
 - `tree_impostor_blend_geometry.ts`
   - `createTreeImpostorBlendGeometry`
   - `attachTreeImpostorBlendAttributes`
@@ -60,22 +71,15 @@ Do these as separate commits, with tests after each commit.
 3. Replace `emptyTreeStats()` with `createEmptyTreeSystemStats()`.
    Keep the returned shape equal to `TreeStats`.
 
-4. Replace mesh attribute private methods with `tree_system_instance_attributes.ts`:
-   - `writeTreeWorldXZIfChanged`
-   - `writeTreeLodFadeIfChanged`
-   - `writeTreeImpostorUvRectIfChanged`
-   - `writeUvRectIfChanged`
-   - attribute accessors
+4. Replace mesh attribute private methods with `tree_system_instance_attributes.ts`.
 
-5. Replace impostor private methods with `tree_system_impostor_resources.ts`:
-   - `canUseBakedImpostor`
-   - `geometryFor`
-   - `materialFor`
-   - `updateImpostorMaterials`
-   - `disposeBakedImpostorGeometries`
-   - `disposeImpostorMaterials`
+5. Replace impostor private methods with `tree_system_impostor_resources.ts`.
 
-6. Extract GPU-ring draw resource lifecycle into `tree_system_gpu_ring_draw.ts`:
+6. Replace patch cleanup and loose object disposal with `tree_system_lifecycle.ts`.
+
+7. Replace CPU visible lighting-proxy generation with `tree_system_lighting_proxies.ts`.
+
+8. Extract GPU-ring draw resource lifecycle into `tree_system_gpu_ring_draw.ts`:
    - ring mesh resource creation
    - ring prepass twins
    - clear/dispose lifecycle
