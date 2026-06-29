@@ -5,6 +5,9 @@ import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import { octFrameIndexForDirection } from "./tree_impostor_octahedral.js";
 
 export const TREE_INSTANCE_ATTRIBUTE_EPSILON = 1e-5;
+export const TREE_LOD_DITHER_PRIMARY = 0;
+export const TREE_LOD_DITHER_SECONDARY = 1;
+export type TreeLodDitherRole = typeof TREE_LOD_DITHER_PRIMARY | typeof TREE_LOD_DITHER_SECONDARY;
 
 export interface TreeImpostorUvWriteInput {
   mesh: THREE.InstancedMesh;
@@ -40,6 +43,18 @@ export function writeTreeLodFadeIfChanged(mesh: THREE.InstancedMesh, index: numb
   const array = attribute.array as Float32Array;
   if (Math.abs(array[index] - fade) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
   array[index] = fade;
+  return true;
+}
+
+export function writeTreeLodDitherRoleIfChanged(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  role: TreeLodDitherRole,
+): boolean {
+  const attribute = treeLodDitherRoleAttribute(mesh);
+  const array = attribute.array as Float32Array;
+  if (Math.abs(array[index] - role) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
+  array[index] = role;
   return true;
 }
 
@@ -95,6 +110,10 @@ export function treeWorldXZAttribute(mesh: THREE.InstancedMesh): THREE.Instanced
 
 export function treeLodFadeAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
   return mesh.geometry.getAttribute("treeLodFade") as THREE.InstancedBufferAttribute;
+}
+
+export function treeLodDitherRoleAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
+  return mesh.geometry.getAttribute("treeLodDitherRole") as THREE.InstancedBufferAttribute;
 }
 
 export function treeImpostorUvRectAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
