@@ -10,7 +10,9 @@ import {
   treeRingShadowCascadePlaneOffset,
   treeRingShadowCascadePlanesFromCamera,
   treeRingShadowCascadePlanesFromCameras,
+  treeRingShadowCasterCascadeIndices,
   treeRingShadowCasterGroupCount,
+  treeRingShadowCasterGroupCounts,
   treeRingShadowCasterGroupIndex,
   treeRingShadowCasterGroupRegion,
   treeRingShadowSafeCascadeCount,
@@ -72,4 +74,40 @@ describe("tree ring shadow layout", () => {
     expect(packed[treeRingShadowCascadePlaneOffset(1)]).not.toBeNaN();
     expect(packed[treeRingShadowCascadePlaneOffset(2)]).toBe(0);
   });
+
+  it("selects caster cascades from CSM planes only", () => {
+    const packed = packTreeRingShadowCascadePlanes([
+      boxPlanes(10),
+      boxPlanes(30),
+    ], 2);
+
+    expect(treeRingShadowCasterCascadeIndices([0, 0, 0], 1, packed, 2)).toEqual([0, 1]);
+    expect(treeRingShadowCasterCascadeIndices([20, 0, 0], 1, packed, 2)).toEqual([1]);
+    expect(treeRingShadowCasterCascadeIndices([40, 0, 0], 1, packed, 2)).toEqual([]);
+  });
+
+  it("counts per-cascade caster groups and clamps overflow", () => {
+    const packed = packTreeRingShadowCascadePlanes([boxPlanes(10), boxPlanes(30)], 2);
+    const result = treeRingShadowCasterGroupCounts([
+      { species: "oak", lod: "far", center: [0, 0, 0], radiusM: 1 },
+      { species: "oak", lod: "far", center: [20, 0, 0], radiusM: 1 },
+      { species: "pine", lod: "near", center: [40, 0, 0], radiusM: 1 },
+    ], packed, 1, 2);
+
+    expect(result.groupCounts[treeRingShadowCasterGroupIndex("oak", "far", 0, 2)]).toBe(1);
+    expect(result.groupCounts[treeRingShadowCasterGroupIndex("oak", "far", 1, 2)]).toBe(1);
+    expect(result.groupCounts[treeRingShadowCasterGroupIndex("pine", "near", 1, 2)]).toBe(0);
+    expect(result.overflowed).toBe(true);
+  });
 });
+
+function boxPlanes(extent: number): Float32Array {
+  return new Float32Array([
+    1, 0, 0, extent,
+    -1, 0, 0, extent,
+    0, 1, 0, extent,
+    0, -1, 0, extent,
+    0, 0, 1, extent,
+    0, 0, -1, extent,
+  ]);
+}
