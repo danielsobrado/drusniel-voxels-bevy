@@ -88,12 +88,12 @@ pub struct ConstructionTerrainConformConfig {
 impl Default for ConstructionTerrainConformConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             pad_margin_m: 0.35,
-            fill_depth_m: 1.5,
-            trim_height_m: 0.45,
-            falloff_m: 0.25,
-            material_slot: 0,
+            fill_depth_m: 2.5,
+            trim_height_m: 1.2,
+            falloff_m: 0.12,
+            material_slot: 1,
         }
     }
 }

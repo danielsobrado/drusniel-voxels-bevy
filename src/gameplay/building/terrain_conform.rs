@@ -151,7 +151,10 @@ fn conform_construction_terrain(
 
             for y in fill_min_y..=target_solid_y {
                 let pos = IVec3::new(x, y, z);
-                if matches!(world.get_voxel(pos), Some(VoxelType::Air | VoxelType::Water)) {
+                if matches!(
+                    world.get_voxel(pos),
+                    Some(VoxelType::Air | VoxelType::Water)
+                ) {
                     let result = world.set_voxel_with_rules(
                         pos,
                         fill_voxel,
@@ -216,7 +219,7 @@ mod tests {
     fn request() -> ConstructionTerrainConformRequest {
         ConstructionTerrainConformRequest {
             piece_id: "piece-1".to_string(),
-            position: [4.5, 4.5, 4.5],
+            position: [4.5, 5.5, 4.5],
             dimensions_m: [2.0, 0.2, 2.0],
             rotation_quarter_turns: 0,
             material_slot: 0,
@@ -249,16 +252,16 @@ mod tests {
         let request = request();
 
         assert_eq!(
-            world.set_voxel(IVec3::new(4, 4, 4), VoxelType::Rock),
+            world.set_voxel(IVec3::new(4, 5, 4), VoxelType::Rock),
             VoxelEditResult::Applied
         );
         let stats = conform_construction_terrain(&mut world, &request, None);
 
         assert!(stats.applied > 0);
         assert_eq!(
-            world.get_voxel(IVec3::new(4, 3, 4)),
+            world.get_voxel(IVec3::new(4, 4, 4)),
             Some(VoxelType::TopSoil)
         );
-        assert_eq!(world.get_voxel(IVec3::new(4, 4, 4)), Some(VoxelType::Air));
+        assert_eq!(world.get_voxel(IVec3::new(4, 5, 4)), Some(VoxelType::Air));
     }
 }

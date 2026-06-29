@@ -383,23 +383,30 @@ fn spawn_spell_button(parent: &mut ChildSpawnerCommands, slot: u8, entry: &Spell
 
 fn handle_spell_input(
     action_state: Res<ActionState>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     mut menu: ResMut<SpellMenuState>,
     mut casts: MessageWriter<SpellCastEvent>,
 ) {
     if action_state.just_pressed(GameAction::ToggleSpellMenu) {
         menu.visible = !menu.visible;
     }
-    if action_state.just_pressed(GameAction::CastFire) {
+    if action_state.just_pressed(GameAction::CastFire)
+        || keyboard.any_just_pressed([KeyCode::Digit1, KeyCode::Numpad1])
+    {
         casts.write(SpellCastEvent {
             kind: SpellKind::Fire,
         });
     }
-    if action_state.just_pressed(GameAction::CastWater) {
+    if action_state.just_pressed(GameAction::CastWater)
+        || keyboard.any_just_pressed([KeyCode::Digit2, KeyCode::Numpad2])
+    {
         casts.write(SpellCastEvent {
             kind: SpellKind::Water,
         });
     }
-    if action_state.just_pressed(GameAction::CastAir) {
+    if action_state.just_pressed(GameAction::CastAir)
+        || keyboard.any_just_pressed([KeyCode::Digit3, KeyCode::Numpad3])
+    {
         casts.write(SpellCastEvent {
             kind: SpellKind::Air,
         });
@@ -624,6 +631,81 @@ mod tests {
         let (base, dir) = resolve_spell_pose(&camera, vfx);
         assert!((dir - Vec3::NEG_Z).length() < 1.0e-5);
         assert!((base - Vec3::new(1.35, 1.65, 2.5)).length() < 1.0e-5);
+    }
+
+    #[test]
+    fn spell_button_feedback_expires_independently() {
+        let mut feedback = SpellButtonFeedback::default();
+        feedback.set_active(SpellKind::Fire, 0.5);
+        feedback.set_active(SpellKind::Water, 1.0);
+
+        feedback.tick(0.75);
+
+        assert!(!feedback.is_active(SpellKind::Fire));
+        assert!(feedback.is_active(SpellKind::Water));
+        assert!(!feedback.is_active(SpellKind::Air));
+    }
+
+    #[test]
+    fn spell_menu_button_press_writes_cast_event() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpellCastEvent>()
+            .add_systems(Update, handle_spell_menu_buttons);
+
+        app.world_mut().spawn((
+            Button,
+            Interaction::Pressed,
+            SpellMenuButton {
+                kind: SpellKind::Water,
+            },
+        ));
+
+        app.update();
+
+        let messages = app.world().resource::<Messages<SpellCastEvent>>();
+        let mut cursor = messages.get_cursor();
+        let casts = cursor
+            .read(messages)
+            .map(|event| event.kind)
+            .collect::<Vec<_>>();
+        assert_eq!(casts, vec![SpellKind::Water]);
+    }
+
+    #[test]
+    fn spell_input_preserves_v_toggle_and_direct_digit_casts() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpellCastEvent>()
+            .init_resource::<SpellMenuState>()
+            .init_resource::<ActionState>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .add_systems(Update, handle_spell_input);
+
+        {
+            let mut actions = app.world_mut().resource_mut::<ActionState>();
+            actions.set_pressed(GameAction::ToggleSpellMenu, true);
+        }
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.press(KeyCode::Digit1);
+            keyboard.press(KeyCode::Digit2);
+            keyboard.press(KeyCode::Digit3);
+        }
+
+        app.update();
+
+        assert!(app.world().resource::<SpellMenuState>().visible);
+        let messages = app.world().resource::<Messages<SpellCastEvent>>();
+        let mut cursor = messages.get_cursor();
+        let casts = cursor
+            .read(messages)
+            .map(|event| event.kind)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            casts,
+            vec![SpellKind::Fire, SpellKind::Water, SpellKind::Air]
+        );
     }
 
     #[test]
