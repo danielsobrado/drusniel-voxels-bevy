@@ -12,6 +12,7 @@ import {
 } from "./index.js";
 
 const footprint: PageFootprint = { minX: 0, minZ: 0, maxX: 128, maxZ: 128 };
+const GRASS_MATERIAL_WEIGHTS = [1, 0, 0, 0] as const;
 
 function sampler(height: number, normalY = 1, groundWeight = 1): TreeTerrainSampler {
   return {
@@ -72,11 +73,16 @@ describe("tree ecology sampling", () => {
 
   it("weights species by ecological niche", () => {
     const settings = ecologySettings();
-    const lowland = sampleTreeEcology(0, 0, 18, 0.95, 1, settings);
-    const highland = sampleTreeEcology(0, 0, 52, 0.95, 1, settings);
+    const lowlandHeight = 18;
+    const highlandHeight = 52;
+    const normalY = 0.95;
+    const lowland = sampleTreeEcology(0, 0, lowlandHeight, normalY, 1, settings);
+    const highland = sampleTreeEcology(0, 0, highlandHeight, normalY, 1, settings);
 
-    expect(speciesEcologyWeight("oak", lowland, settings)).toBeGreaterThan(speciesEcologyWeight("oak", highland, settings));
-    expect(speciesEcologyWeight("pine", highland, settings)).toBeGreaterThan(speciesEcologyWeight("pine", lowland, settings));
+    expect(speciesEcologyWeight("oak", lowland, lowlandHeight, normalY, settings, GRASS_MATERIAL_WEIGHTS))
+      .toBeGreaterThan(speciesEcologyWeight("oak", highland, highlandHeight, normalY, settings, GRASS_MATERIAL_WEIGHTS));
+    expect(speciesEcologyWeight("pine", highland, highlandHeight, normalY, settings, GRASS_MATERIAL_WEIGHTS))
+      .toBeGreaterThan(speciesEcologyWeight("pine", lowland, lowlandHeight, normalY, settings, GRASS_MATERIAL_WEIGHTS));
   });
 
   it("scales generated trees by age ecology", () => {
@@ -109,25 +115,6 @@ describe("tree ecology sampling", () => {
     );
   });
 });
-
-function speciesCounts(trees: ReturnType<typeof generateTreeInstances>) {
-  const counts = Object.fromEntries(TREE_SPECIES.map((species) => [species, 0])) as Record<typeof TREE_SPECIES[number], number>;
-  return trees.reduce((next, tree) => {
-    next[tree.species]++;
-    return next;
-  }, counts);
-}
-
-function occupancyVariance(trees: ReturnType<typeof generateTreeInstances>, cellsPerAxis: number): number {
-  const cells = new Array(cellsPerAxis * cellsPerAxis).fill(0) as number[];
-  for (const tree of trees) {
-    const x = Math.min(cellsPerAxis - 1, Math.floor((tree.position[0] / footprint.maxX) * cellsPerAxis));
-    const z = Math.min(cellsPerAxis - 1, Math.floor((tree.position[2] / footprint.maxZ) * cellsPerAxis));
-    cells[z * cellsPerAxis + x]++;
-  }
-  const mean = cells.reduce((sum, value) => sum + value, 0) / cells.length;
-  return cells.reduce((sum, tree) => sum + (tree - mean) ** 2, 0) / cells.length;
-}
 
 function averageScale(trees: ReturnType<typeof generateTreeInstances>): number {
   return trees.reduce((sum, tree) => sum + tree.scale, 0) / Math.max(1, trees.length);
