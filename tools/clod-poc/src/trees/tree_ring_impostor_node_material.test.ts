@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { StorageInstancedBufferAttribute } from "three/webgpu";
@@ -55,6 +56,19 @@ describe("GPU ring baked impostor node material", () => {
     });
 
     expect(handle.regularMaterial).toBe(material);
+  });
+
+  it("keeps the per-instance four-frame atlas blend contract", () => {
+    const source = readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("treeRingImpostorFourFrameSample");
+    expect(source).toContain("treeRingOctEncode(viewDirection)");
+    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x0, y0)");
+    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x1, y0)");
+    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x0, y1)");
+    expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x1, y1)");
+    expect(source).toContain("uFadeCenter.x.sub(aWorldXZ.x)");
+    expect(source).toContain("uFadeCenter.y.sub(aWorldXZ.y)");
   });
 
   it("disposes every owned material", () => {
