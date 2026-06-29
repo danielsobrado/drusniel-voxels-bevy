@@ -147,7 +147,7 @@ function proxyFade(distanceM: TslNode, farDistance: TslNode, impostorDistance: T
   const band: TslNode = max(bandDistance, float(0));
   const start: TslNode = max(farDistance, impostorDistance.sub(band));
   const fadeWithBand: TslNode = float(1).sub(smoothstep(start, impostorDistance, distanceM));
-  const hardFade: TslNode = distanceM.lessThanEqual(impostorDistance);
+  const hardFade: TslNode = distanceM.lessThanEqual(impostorDistance).select(float(1), float(0));
   const fade: TslNode = band.lessThanEqual(float(0.001)).select(hardFade, fadeWithBand);
   return lodIndex.greaterThanEqual(float(TREE_LODS.indexOf("impostor") - 0.5)).select(fade, float(1));
 }
