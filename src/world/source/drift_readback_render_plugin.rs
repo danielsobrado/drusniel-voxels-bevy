@@ -1,7 +1,7 @@
 use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy::prelude::*;
 use bevy::render::render_graph::{RenderGraphExt, ViewNodeRunner};
-use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
+use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems};
 
 use super::drift_readback_render::{
     GpuWorldSourceDriftReadbackLabel, GpuWorldSourceDriftReadbackNode,
@@ -23,6 +23,7 @@ impl Plugin for GpuWorldSourceDriftReadbackPlugin {
 
         render_app
             .init_resource::<GpuWorldSourceDriftReadbackRequest>()
+            .add_systems(ExtractSchedule, extract_gpu_world_source_drift_readback_request)
             .add_systems(RenderStartup, init_gpu_world_source_drift_readback_pipeline)
             .add_systems(
                 Render,
@@ -42,6 +43,13 @@ impl Plugin for GpuWorldSourceDriftReadbackPlugin {
             (GpuWorldSourceDriftReadbackLabel, Node3d::StartMainPass),
         );
     }
+}
+
+fn extract_gpu_world_source_drift_readback_request(
+    mut commands: Commands,
+    request: Extract<Res<GpuWorldSourceDriftReadbackRequest>>,
+) {
+    commands.insert_resource(request.clone());
 }
 
 #[cfg(test)]
