@@ -11,7 +11,6 @@ import {
   selectTreeSystemMaterial,
   treeCanUseBakedImpostor,
   updateTreeSystemImpostorMaterial,
-  type TreeGeometryMap,
   type TreeImpostorAtlas,
   type TreeMaterialHandle,
 } from "./index.js";
