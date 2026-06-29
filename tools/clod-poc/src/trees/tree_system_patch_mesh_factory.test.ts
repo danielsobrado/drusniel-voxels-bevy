@@ -56,6 +56,7 @@ describe("tree patch mesh factory", () => {
     expect(mesh.geometry).not.toBe(source);
     expect(mesh.geometry.getAttribute("treeWorldXZ").count).toBe(3);
     expect(mesh.geometry.getAttribute("treeLodFade").count).toBe(3);
+    expect(mesh.geometry.getAttribute("treeLodDitherRole").count).toBe(3);
     expect(mesh.geometry.getAttribute("treeImpostorUvRect").count).toBe(3);
   });
 
@@ -67,6 +68,8 @@ describe("tree patch mesh factory", () => {
 
     expect(near.getAttribute("treeWorldXZ").itemSize).toBe(2);
     expect(near.getAttribute("treeLodFade").itemSize).toBe(1);
+    expect(near.getAttribute("treeLodDitherRole").itemSize).toBe(1);
+    expect(near.getAttribute("treeLodDitherRole").getX(0)).toBe(0);
     expect(near.getAttribute("treeImpostorUvRect")).toBeUndefined();
     expect(impostor.getAttribute("treeImpostorUvRect").itemSize).toBe(4);
     expect(impostor.getAttribute("treeLodFade").getX(0)).toBe(1);
