@@ -27,7 +27,7 @@ bindings:
   ToggleBuildingMode: KeyB
   ToggleSnapMode: KeyX
   RotatePiece: KeyR
-  CastFire: Digit1
-  CastWater: Digit2
-  CastAir: Digit3
+  CastFire: KeyF
+  CastWater: KeyG
+  CastAir: KeyH
   ToggleSpellMenu: KeyV
