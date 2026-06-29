@@ -265,6 +265,10 @@ pub fn validate_placement(
         return false;
     };
 
+    if !allow_occupied_cell && !piece_def.can_ground {
+        return false;
+    }
+
     let rot = Quat::from_rotation_y((rotation as f32) * std::f32::consts::FRAC_PI_2);
     let half_size = piece_def.dimensions * 0.5;
 
@@ -450,4 +454,61 @@ pub fn place_building_piece(
         "Placed {} ({:?}) at {:?} (grid: {:?})",
         piece_def.name, piece_def.material, position, grid_pos
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rendering::building_material::BuildingMaterialType;
+
+    fn registry_with_floor_and_wall() -> BuildingPieceRegistry {
+        let mut registry = BuildingPieceRegistry::default();
+        registry.register(super::super::types::PieceDefinition::floor(
+            1,
+            "Floor",
+            BuildingMaterialType::WoodPlank,
+        ));
+        registry.register(super::super::types::PieceDefinition::wall(
+            2,
+            "Wall",
+            BuildingMaterialType::WoodPlank,
+        ));
+        registry
+    }
+
+    #[test]
+    fn free_wall_placement_requires_snap_support() {
+        let registry = registry_with_floor_and_wall();
+        let world = VoxelWorld::new(IVec3::ONE);
+        let grid = BuildingGrid::default();
+
+        assert!(!validate_placement(
+            Vec3::new(2.5, 2.5, 2.5),
+            PieceTypeId(2),
+            0,
+            &world,
+            &grid,
+            &registry,
+            None,
+            false,
+        ));
+    }
+
+    #[test]
+    fn snapped_wall_placement_may_share_parent_cell() {
+        let registry = registry_with_floor_and_wall();
+        let world = VoxelWorld::new(IVec3::ONE);
+        let grid = BuildingGrid::default();
+
+        assert!(validate_placement(
+            Vec3::new(2.5, 2.5, 2.5),
+            PieceTypeId(2),
+            0,
+            &world,
+            &grid,
+            &registry,
+            None,
+            true,
+        ));
+    }
 }
