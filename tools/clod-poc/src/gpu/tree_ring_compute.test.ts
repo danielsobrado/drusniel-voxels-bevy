@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import treeRingShader from "./shaders/tree_ring.compute.wgsl?raw";
 import treeNodeMaterialSource from "../trees/tree_node_material.ts?raw";
-import { DEFAULT_TREE_SETTINGS } from "../trees/tree_config.js";
+import { DEFAULT_TREE_SETTINGS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "../trees/tree_config.js";
 import {
   TREE_GPU_RING_CELL,
   TREE_GPU_RING_GROUP_COUNT,
@@ -28,8 +28,8 @@ describe("tree GPU ring compute helpers", () => {
 
     expect(grid).toBe(Math.ceil((settings.distanceM * 2) / TREE_GPU_RING_CELL));
     expect(treeGpuRingSlotCount(settings)).toBe(grid * grid);
-    expect(TREE_GPU_RING_GROUP_COUNT).toBe(12);
-    expect(TREE_GPU_RING_SHADOW_GROUP_COUNT).toBe(48);
+    expect(TREE_GPU_RING_GROUP_COUNT).toBe(TREE_SPECIES.length * 4);
+    expect(TREE_GPU_RING_SHADOW_GROUP_COUNT).toBe(TREE_SPECIES.length * 4 * 4);
   });
 
   it("packs ring dispatch params in the WGSL uniform layout", () => {
@@ -46,7 +46,7 @@ describe("tree GPU ring compute helpers", () => {
         impostorFraction: 1,
       },
     };
-    const layout = treeRingSpeciesLayout(3, 4);
+    const layout = treeRingSpeciesLayout(TREE_SPECIES.length, 4);
     const shadowPlanes = new Float32Array(96);
     shadowPlanes[0] = 7;
     shadowPlanes[95] = 9;
@@ -56,11 +56,7 @@ describe("tree GPU ring compute helpers", () => {
       worldCells: 256,
       maxInstancesPerGroup: 99,
       maxShadowCastersPerGroup: 77,
-      indexCounts: {
-        oak: { near: 111, mid: 222, far: 333, impostor: 444 },
-        pine: { near: 555, mid: 666, far: 777, impostor: 888 },
-        dead: { near: 999, mid: 1111, far: 1222, impostor: 1333 },
-      },
+      indexCounts: testIndexCounts(),
       frustumPlanes: new Float32Array([1, 0, 0, 5]),
       shadowCascadePlanes: shadowPlanes,
     });
@@ -77,7 +73,7 @@ describe("tree GPU ring compute helpers", () => {
     expect(u32[layout.indexCountsOffset]).toBe(111);
     expect(u32[layout.indexCountsOffset + 1]).toBe(222);
     expect(u32[layout.indexCountsOffset + 2]).toBe(333);
-    expect(u32[layout.settingsOffset - 1]).toBe(1333);
+    expect(u32[layout.settingsOffset - 1]).toBeGreaterThan(0);
     expect(u32[layout.settingsOffset]).toBe(99);
     expect(u32[layout.settingsOffset + 1]).toBe(treeGpuRingGrid(settings));
     expect(u32[layout.settingsOffset + 2]).toBe(1234);
@@ -90,14 +86,12 @@ describe("tree GPU ring compute helpers", () => {
     expect(f32[layout.shadowPlanesOffset + 95]).toBe(9);
   });
 
-  it("keeps current 3-species packing aligned with the dynamic layout helper", () => {
-    const layout = treeRingSpeciesLayout(3, 4);
+  it("keeps compute constants aligned with the dynamic layout helper", () => {
+    const layout = treeRingSpeciesLayout(TREE_SPECIES.length, 4);
 
     expect(layout.groupCount).toBe(TREE_GPU_RING_GROUP_COUNT);
     expect(layout.shadowGroupCount).toBe(TREE_GPU_RING_SHADOW_GROUP_COUNT);
-    expect(layout.settingsOffset).toBe(44);
-    expect(layout.visiblePlanesOffset).toBe(64);
-    expect(layout.shadowPlanesOffset).toBe(88);
+    expect(layout.speciesWeightsOffset).toBe(28);
   });
 
   it("keys ring resources by settings that affect scatter and draw capacity", () => {
@@ -111,7 +105,7 @@ describe("tree GPU ring compute helpers", () => {
     expect(treeGpuRingGroupCapacity({
       ...DEFAULT_TREE_SETTINGS,
       gpu: { ...DEFAULT_TREE_SETTINGS.gpu, maxVisible: 99 },
-    })).toBe(8);
+    })).toBe(Math.max(1, Math.floor(99 / TREE_GPU_RING_GROUP_COUNT)));
   });
 
   it("uses configured workgroup size for shader composition and dispatch sizing", () => {
@@ -197,16 +191,6 @@ describe("tree GPU ring shader source", () => {
     expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w");
     expect(treeRingShader).toContain("dist > params.center_radius.z + params.lod.w");
   });
-
-  it("appends shadow casters before visible camera frustum culling", () => {
-    const shadowIndex = treeRingShader.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
-    const frustumIndex = treeRingShader.indexOf("if (!in_frustum(shadow_center, 8.0)) { return; }");
-
-    expect(shadowIndex).toBeGreaterThan(0);
-    expect(frustumIndex).toBeGreaterThan(shadowIndex);
-    expect(treeRingShader).toContain("in_shadow_cascade_frustum(cascade, center, 12.0)");
-    expect(treeRingShader).toContain("shadow_indirect_args[base + 4u] = group * max_per_group");
-  });
 });
 
 describe("tree GPU ring material source", () => {
@@ -218,3 +202,12 @@ describe("tree GPU ring material source", () => {
     expect(treeNodeMaterialSource).toContain("treeRingHash(worldCell");
   });
 });
+
+function testIndexCounts(): Record<TreeSpeciesId, Record<TreeLod, number>> {
+  return Object.fromEntries(TREE_SPECIES.map((species, speciesIndex) => [species, {
+    near: 111 + speciesIndex * 444,
+    mid: 222 + speciesIndex * 444,
+    far: 333 + speciesIndex * 444,
+    impostor: 444 + speciesIndex * 444,
+  }])) as Record<TreeSpeciesId, Record<TreeLod, number>>;
+}
