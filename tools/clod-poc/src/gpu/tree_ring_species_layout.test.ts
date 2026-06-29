@@ -11,6 +11,8 @@ describe("tree ring species layout", () => {
 
     expect(layout.groupCount).toBe(3 * TREE_RING_LOD_COUNT);
     expect(layout.shadowGroupCount).toBe(3 * TREE_RING_LOD_COUNT * 4);
+    expect(layout.speciesWeightsOffset).toBe(28);
+    expect(layout.speciesWeightsFloatCount).toBe(4);
     expect(layout.indexCountsOffset).toBe(32);
     expect(layout.settingsOffset).toBe(44);
     expect(layout.materialDensityOffset).toBe(48);
@@ -20,18 +22,20 @@ describe("tree ring species layout", () => {
     expect(layout.paramBytes).toBe(16 * 46);
   });
 
-  it("moves material and plane slots after 24 group counts for 6 species", () => {
+  it("moves index/material/plane slots after two species-weight vec4s for 6 species", () => {
     const layout = treeRingSpeciesLayout(6, 4);
 
     expect(layout.groupCount).toBe(6 * TREE_RING_LOD_COUNT);
     expect(layout.shadowGroupCount).toBe(6 * TREE_RING_LOD_COUNT * 4);
-    expect(layout.indexCountsOffset).toBe(32);
-    expect(layout.settingsOffset).toBe(56);
-    expect(layout.materialDensityOffset).toBe(60);
-    expect(layout.speciesMaterialOffset).toBe(64);
-    expect(layout.visiblePlanesOffset).toBe(88);
-    expect(layout.shadowPlanesOffset).toBe(112);
-    expect(layout.paramBytes).toBe(16 * 52);
+    expect(layout.speciesWeightsOffset).toBe(28);
+    expect(layout.speciesWeightsFloatCount).toBe(8);
+    expect(layout.indexCountsOffset).toBe(36);
+    expect(layout.settingsOffset).toBe(60);
+    expect(layout.materialDensityOffset).toBe(64);
+    expect(layout.speciesMaterialOffset).toBe(68);
+    expect(layout.visiblePlanesOffset).toBe(92);
+    expect(layout.shadowPlanesOffset).toBe(116);
+    expect(layout.paramBytes).toBe(16 * 53);
   });
 
   it("indexes groups by species then lod", () => {
