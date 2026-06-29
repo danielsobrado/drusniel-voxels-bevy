@@ -64,4 +64,29 @@ describe("tree LOD selection", () => {
     expect(afterThreshold.fade).toBeCloseTo(0.75);
     expect(afterThreshold.secondaryFade).toBeCloseTo(0.25);
   });
+
+  it("keeps far to impostor fades continuous across the impostor threshold", () => {
+    const crossfadeSettings: TreeSettings = {
+      ...settings,
+      lod: { ...settings.lod, crossfadeEnabled: true, ditherEnabled: true, crossfadeBandM: 20 },
+    };
+
+    const beforeThreshold = selectTreeLod(145, null, crossfadeSettings);
+    expect(beforeThreshold.lod).toBe("far");
+    expect(beforeThreshold.secondaryLod).toBe("impostor");
+    expect(beforeThreshold.fade).toBeCloseTo(0.75);
+    expect(beforeThreshold.secondaryFade).toBeCloseTo(0.25);
+
+    const atThreshold = selectTreeLod(150, null, crossfadeSettings);
+    expect(atThreshold.lod).toBe("far");
+    expect(atThreshold.secondaryLod).toBe("impostor");
+    expect(atThreshold.fade).toBeCloseTo(0.5);
+    expect(atThreshold.secondaryFade).toBeCloseTo(0.5);
+
+    const afterThreshold = selectTreeLod(155, null, crossfadeSettings);
+    expect(afterThreshold.lod).toBe("impostor");
+    expect(afterThreshold.secondaryLod).toBe("far");
+    expect(afterThreshold.fade).toBeCloseTo(0.75);
+    expect(afterThreshold.secondaryFade).toBeCloseTo(0.25);
+  });
 });
