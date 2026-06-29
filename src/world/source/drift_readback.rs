@@ -77,7 +77,7 @@ impl GpuWorldSourceDriftOutputSample {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct GpuWorldSourceDriftReadbackDispatchPlan {
     pub sample_count: u32,
     pub workgroup_count: u32,
