@@ -1,11 +1,17 @@
 import { load } from "js-yaml";
 import type { TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import type { TreeExpandedSpeciesId } from "./tree_species_expansion.js";
+
+export type TreeMaterialSpeciesKey = TreeSpeciesId | TreeExpandedSpeciesId;
 
 export interface TreeTerrainClassWeights {
   density: number;
   oak: number;
   pine: number;
   dead: number;
+  birch: number;
+  willow: number;
+  spruce: number;
 }
 
 export interface TreeMaterialBiasSettings {
@@ -29,10 +35,10 @@ type TreeSettingsWithMaterialBias = TreeSettings & {
 };
 
 export const DEFAULT_TREE_MATERIAL_BIAS: TreeMaterialBiasSettings = {
-  grass: { density: 1.08, oak: 1.22, pine: 0.86, dead: 0.52 },
-  rock: { density: 0.46, oak: 0.35, pine: 0.96, dead: 1.55 },
-  sand: { density: 0.55, oak: 0.72, pine: 0.45, dead: 0.68 },
-  snow: { density: 0.08, oak: 0.04, pine: 0.30, dead: 1.45 },
+  grass: { density: 1.08, oak: 1.22, pine: 0.86, dead: 0.52, birch: 1.12, willow: 1.04, spruce: 0.72 },
+  rock: { density: 0.46, oak: 0.35, pine: 0.96, dead: 1.55, birch: 0.42, willow: 0.22, spruce: 1.12 },
+  sand: { density: 0.55, oak: 0.72, pine: 0.45, dead: 0.68, birch: 0.82, willow: 1.16, spruce: 0.28 },
+  snow: { density: 0.08, oak: 0.04, pine: 0.30, dead: 1.45, birch: 0.18, willow: 0.02, spruce: 0.86 },
 };
 
 export function applyTreeMaterialBiasFromYaml(
@@ -67,7 +73,7 @@ export function treeMaterialDensity(settings: TreeSettings, weights: readonly [n
 
 export function treeSpeciesMaterialBias(
   settings: TreeSettings,
-  species: TreeSpeciesId,
+  species: TreeMaterialSpeciesKey,
   weights: readonly [number, number, number, number],
 ): number {
   const bias = getTreeMaterialBias(settings);
@@ -79,7 +85,7 @@ export function treeMaterialDensityVector(settings: TreeSettings): [number, numb
   return [bias.grass.density, bias.rock.density, bias.sand.density, bias.snow.density];
 }
 
-export function treeSpeciesMaterialVector(settings: TreeSettings, species: TreeSpeciesId): [number, number, number, number] {
+export function treeSpeciesMaterialVector(settings: TreeSettings, species: TreeMaterialSpeciesKey): [number, number, number, number] {
   const bias = getTreeMaterialBias(settings);
   return [bias.grass[species], bias.rock[species], bias.sand[species], bias.snow[species]];
 }
@@ -102,6 +108,9 @@ function readClass(base: TreeTerrainClassWeights, raw: Partial<TreeTerrainClassW
     oak: readNonNegative(raw?.oak, base.oak),
     pine: readNonNegative(raw?.pine, base.pine),
     dead: readNonNegative(raw?.dead, base.dead),
+    birch: readNonNegative(raw?.birch, base.birch),
+    willow: readNonNegative(raw?.willow, base.willow),
+    spruce: readNonNegative(raw?.spruce, base.spruce),
   };
 }
 
