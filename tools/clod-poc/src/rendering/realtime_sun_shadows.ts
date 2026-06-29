@@ -7,7 +7,9 @@ import {
   sunDirectionFromAngles,
 } from "../environment/environment.js";
 
-export const REALTIME_SUN_SHADOW_CASTER_LAYER = 2;
+export const REALTIME_SUN_SHADOW_CASTER_LAYER_BASE = 2;
+export const REALTIME_SUN_SHADOW_CASTER_LAYER_COUNT = 4;
+export const REALTIME_SUN_SHADOW_CASTER_LAYER = REALTIME_SUN_SHADOW_CASTER_LAYER_BASE;
 
 const DEFAULT_SHADOW_MAP_SIZE = 2048;
 const DEFAULT_CASCADE_COUNT = 4;
@@ -64,7 +66,7 @@ export function installRealtimeSunShadows(options: RealtimeSunShadowOptions): Su
   sun.shadow.radius = SHADOW_RADIUS;
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = DEFAULT_LIGHT_MARGIN_M + DEFAULT_MAX_FAR_M * 2.2;
-  enableRealtimeSunShadowCasterLayer(sun.shadow.camera);
+  enableRealtimeSunShadowCasterLayer(sun.shadow.camera, 0);
   updateSunPose(sun, lighting.sunDirection, center);
 
   options.scene.add(sun.target);
@@ -76,7 +78,7 @@ export function installRealtimeSunShadows(options: RealtimeSunShadowOptions): Su
   const refresh = (): void => {
     if (!csm) {
       sun.shadow.camera.updateProjectionMatrix();
-      enableRealtimeSunShadowCasterLayer(sun.shadow.camera);
+      enableRealtimeSunShadowCasterLayer(sun.shadow.camera, 0);
       return;
     }
     const csmCamera = (csm as unknown as { camera?: THREE.PerspectiveCamera | null }).camera;
@@ -98,13 +100,18 @@ export function installRealtimeSunShadows(options: RealtimeSunShadowOptions): Su
   return debugHandle;
 }
 
-export function markAsRealtimeSunShadowCaster(object: THREE.Object3D): void {
-  object.layers.set(REALTIME_SUN_SHADOW_CASTER_LAYER);
-  object.traverse((child) => child.layers.set(REALTIME_SUN_SHADOW_CASTER_LAYER));
+export function realtimeSunShadowCasterLayer(cascadeIndex: number): number {
+  return REALTIME_SUN_SHADOW_CASTER_LAYER_BASE + clampInt(cascadeIndex, 0, REALTIME_SUN_SHADOW_CASTER_LAYER_COUNT - 1);
 }
 
-export function enableRealtimeSunShadowCasterLayer(camera: THREE.Camera): void {
-  camera.layers.enable(REALTIME_SUN_SHADOW_CASTER_LAYER);
+export function markAsRealtimeSunShadowCaster(object: THREE.Object3D, cascadeIndex = 0): void {
+  const layer = realtimeSunShadowCasterLayer(cascadeIndex);
+  object.layers.set(layer);
+  object.traverse((child) => child.layers.set(layer));
+}
+
+export function enableRealtimeSunShadowCasterLayer(camera: THREE.Camera, cascadeIndex = 0): void {
+  camera.layers.enable(realtimeSunShadowCasterLayer(cascadeIndex));
 }
 
 export function getRealtimeSunShadowCascadeCameras(): THREE.Camera[] {
@@ -121,7 +128,7 @@ function getCascadeCamerasFromHandle(handle: SunShadowDebugHandle): THREE.Camera
 }
 
 function enableRealtimeSunShadowCasterLayers(cameras: readonly THREE.Camera[]): void {
-  for (const camera of cameras) enableRealtimeSunShadowCasterLayer(camera);
+  for (let i = 0; i < cameras.length; i++) enableRealtimeSunShadowCasterLayer(cameras[i], i);
 }
 
 function setupCsmSunShadows(
@@ -168,7 +175,7 @@ function configureFallbackShadowCamera(sun: THREE.DirectionalLight, worldCells: 
   camera.near = 1;
   camera.far = DEFAULT_LIGHT_MARGIN_M + extent * 2.2;
   camera.updateProjectionMatrix();
-  enableRealtimeSunShadowCasterLayer(camera);
+  enableRealtimeSunShadowCasterLayer(camera, 0);
 }
 
 function updateSunPose(sun: THREE.DirectionalLight, sunDirection: THREE.Vector3, center: THREE.Vector3): void {
