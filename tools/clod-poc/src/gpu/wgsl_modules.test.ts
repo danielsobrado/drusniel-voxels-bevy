@@ -85,6 +85,17 @@ describe("WGSL module composition", () => {
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
   });
 
+  it("injects tree ring layout constants from TS layout helpers", () => {
+    const source = composeTreeRingShader();
+
+    expect(source).toContain("const TREE_LOD_COUNT: u32 = 4u;");
+    expect(source).toContain("const TREE_SPECIES_COUNT: u32 = 3u;");
+    expect(source).toContain("const TREE_GROUP_COUNT: u32 = 12u;");
+    expect(source).toContain("const TREE_SHADOW_CASCADE_COUNT: u32 = 4u;");
+    expect(source).toContain("const TREE_SHADOW_GROUP_COUNT: u32 = 48u;");
+    expect(source).not.toContain("const TREE_GROUP_COUNT: u32 = TREE_SPECIES_COUNT * TREE_LOD_COUNT;");
+  });
+
   it("composes understory ring with explicit understory field bindings and shared terrain functions", () => {
     const source = composeUnderstoryRingShader();
 
