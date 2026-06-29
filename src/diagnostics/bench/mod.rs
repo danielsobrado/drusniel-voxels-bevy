@@ -88,6 +88,8 @@ pub struct BenchCli {
     pub editor_runtime: bool,
     #[arg(long)]
     pub editor_native_viewport: bool,
+    #[arg(long)]
+    pub runtime_assisted: bool,
 }
 
 #[derive(Resource, Clone)]

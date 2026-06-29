@@ -40,7 +40,9 @@ use crate::world::environment::atmosphere::{AtmosphereIntegrationPlugin, FogPlug
 use crate::world::environment::vegetation::VegetationPlugin;
 use crate::world::environment::weather::WeatherPlugin;
 use crate::world::rules::WorldRulesPlugin;
-use crate::world::source::GpuWorldSourceDriftReadbackPlugin;
+use crate::world::source::{
+    GpuWorldSourceDriftReadbackPlugin, GpuWorldSourceDriftReadbackRequestSettings,
+};
 use bevy::asset::AssetPlugin;
 use bevy::diagnostic::{
     EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
@@ -161,6 +163,12 @@ pub fn run() {
     let mut app = App::new();
     if let Some(config) = bench_config.clone() {
         app.insert_resource(config);
+    }
+    if cli.runtime_assisted {
+        app.insert_resource(GpuWorldSourceDriftReadbackRequestSettings {
+            enabled: true,
+            ..default()
+        });
     }
 
     app.add_plugins(plugins)

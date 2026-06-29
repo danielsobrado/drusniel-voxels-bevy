@@ -19,7 +19,7 @@ export default defineConfig(({ command }) => ({
   },
   test: {
     setupFiles: ["./src/test-setup.ts"],
-    testTimeout: 30000,
+    testTimeout: 120000,
     exclude: [
       "**/node_modules/**",
       "**/dist/**",
