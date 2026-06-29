@@ -1355,6 +1355,7 @@ export class TreeSystem {
         const capacity = mesh.instanceMatrix.count;
         nextGeometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2));
         nextGeometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1));
+        nextGeometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
         nextGeometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4));
         mesh.geometry = nextGeometry;
         oldGeometry.dispose();
