@@ -1,0 +1,64 @@
+import { describe, expect, it } from "vitest";
+import { cloneTreeSettings, treeGeometryKey } from "./index.js";
+import { planTreeSystemSettingsUpdate } from "./tree_system_settings_plan.js";
+
+describe("tree system settings update planner", () => {
+  it("detects no-op updates", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, {}, key);
+
+    expect(plan).toEqual({
+      nextGeometryKey: key,
+      needsGeometry: false,
+      needsPatchRefresh: false,
+      clearGpuRing: false,
+      nextGpuStatus: null,
+    });
+  });
+
+  it("refreshes patches for non-geometry patch-affecting fields", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, { distanceM: settings.distanceM + 10 }, key);
+
+    expect(plan.nextGeometryKey).toBe(key);
+    expect(plan.needsGeometry).toBe(false);
+    expect(plan.needsPatchRefresh).toBe(true);
+  });
+
+  it("detects geometry rebuilds", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const nextSpecies = {
+      ...settings.species,
+      oak: {
+        ...settings.species.oak,
+        trunkRadiusM: settings.species.oak.trunkRadiusM + 0.1,
+      },
+    };
+    const plan = planTreeSystemSettingsUpdate(settings, { species: nextSpecies }, key);
+
+    expect(plan.nextGeometryKey).not.toBe(key);
+    expect(plan.needsGeometry).toBe(true);
+    expect(plan.needsPatchRefresh).toBe(true);
+  });
+
+  it("plans GPU ring clear and disabled status", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, { gpu: { ...settings.gpu, enabled: false } }, key);
+
+    expect(plan.clearGpuRing).toBe(true);
+    expect(plan.nextGpuStatus).toBe("disabled");
+  });
+
+  it("plans GPU ring clear and CPU fallback status", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, { gpu: { ...settings.gpu, enabled: true, debugForceCpu: true } }, key);
+
+    expect(plan.clearGpuRing).toBe(true);
+    expect(plan.nextGpuStatus).toBe("fallback-cpu");
+  });
+});
