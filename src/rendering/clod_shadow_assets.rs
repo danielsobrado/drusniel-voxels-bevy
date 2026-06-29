@@ -20,7 +20,8 @@ use std::{
 use super::{
     clod_shadow_config::ClodShadowRuntimeSettings,
     clod_shadow_runtime::{
-        ClodShadowRuntimeError, ClodShadowRuntimeSnapshot, validate_clod_shadow_runtime_snapshot,
+        ClodShadowRuntimeError, ClodShadowRuntimeSnapshot,
+        recompute_clod_shadow_runtime_totals, validate_clod_shadow_runtime_snapshot,
     },
     clod_shadow_spawn::ActiveClodShadowRuntimeSnapshot,
 };
@@ -197,6 +198,9 @@ pub fn load_requested_clod_shadow_snapshot(
         return;
     }
 
+    if changed_on_disk {
+        source.generation = source.generation.saturating_add(1).max(1);
+    }
     source.reload_requested = false;
     source.last_loaded_modified = modified;
     stats.attempted_loads = stats.attempted_loads.saturating_add(1);
@@ -205,13 +209,14 @@ pub fn load_requested_clod_shadow_snapshot(
     match read_clod_shadow_runtime_snapshot_from_path(&source.path) {
         Ok(snapshot) => {
             let generation = source.generation.max(1);
+            let totals = recompute_clod_shadow_runtime_totals(&snapshot.plans);
             stats.successful_loads = stats.successful_loads.saturating_add(1);
             stats.active_generation = generation;
-            stats.loaded_pages = snapshot.plans.len() as u32;
+            stats.loaded_pages = totals.total_pages;
             stats.loaded_proxy_meshes = snapshot.proxy_meshes.len() as u32;
-            stats.loaded_visual_triangles = snapshot.totals.visual_triangles;
-            stats.loaded_runtime_shadow_triangles = snapshot.totals.runtime_shadow_triangles;
-            stats.loaded_saved_triangles = snapshot.totals.saved_triangles;
+            stats.loaded_visual_triangles = totals.visual_triangles;
+            stats.loaded_runtime_shadow_triangles = totals.runtime_shadow_triangles;
+            stats.loaded_saved_triangles = totals.saved_triangles;
             stats.last_error = None;
 
             match ActiveClodShadowRuntimeSnapshot::new(generation, snapshot) {
