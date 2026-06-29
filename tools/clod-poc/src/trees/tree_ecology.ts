@@ -128,7 +128,7 @@ export function speciesEcologyWeight(
   const slopeSteepness = 1 - clamp01(normalY);
   const slopeWeight = clamp(zone.slopeTolerance / Math.max(0.001, slopeSteepness + 0.18), 0.15, 1.25);
   const clusterWeight = 1 + sample.clusterMask * zone.clusterBias * 0.45;
-  const oldForestWeight = species === "dead" && sample.age === "old"
+  const oldForestWeight = sample.age === "old"
     ? 1 + zone.oldForestBias * sample.forestDensity * 1.4
     : 1;
   const materialBias = treeSpeciesMaterialBias(settings, species, materialWeights);
