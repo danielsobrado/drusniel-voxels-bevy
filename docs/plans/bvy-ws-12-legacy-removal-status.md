@@ -29,6 +29,7 @@ Status: In progress.
 - Added main-world to render-world request extraction for `GpuWorldSourceDriftReadbackRequest`.
 - Added `GpuWorldSourceDriftReadbackSharedResult` so render-world readback results can be consumed from the main app through `WorldSourceGpuReadbackProvider`.
 - Added `src/world/source/drift_readback_request.rs` to populate `GpuWorldSourceDriftReadbackRequest` from BVY-WS-12 drift sample points when `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1` is set.
+- Added `src/world/source/drift_readback_acceptance.rs` so any `WorldSourceGpuReadbackProvider` can be evaluated through the existing CPU/GPU drift gate.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 - `world_source_acceptance` now fails before writing `summary.json` unless `terrain_source.mode` is `gpu_world_source`.
 
@@ -42,4 +43,4 @@ Status: In progress.
 
 ## Required next patch
 
-Run the render-app readback path with `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1`, verify `GpuWorldSourceDriftReadbackSharedResult` produces matching samples, then use that provider in a dedicated runtime acceptance path instead of the current unavailable provider.
+Run the render-app readback path with `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1`, verify `GpuWorldSourceDriftReadbackSharedResult` produces matching samples, then wire `evaluate_world_source_gpu_readback_acceptance` into a dedicated runtime acceptance path instead of the current unavailable provider.
