@@ -61,6 +61,8 @@ Implemented:
 - `tree_species_expansion.ts` defines the six target species contract: oak, pine, dead, birch, willow, spruce.
 - `tree_species_expansion.ts` includes default morphology/config values and distinct ecological niches for all six species.
 - `tree_species_expansion.test.ts` verifies the six-species list, morphology differences, willow wet-bank preference, spruce high/cold slope preference, and dead-tree old-stressed-forest preference.
+- `tree_species_expansion_selection.ts` provides deterministic weighted selection over the six-species niche model.
+- `tree_species_expansion_selection.test.ts` verifies deterministic roll selection, six-species weighted choices, roll clamping, and broad-sample coverage.
 - `tree_ring_species_layout.ts` defines dynamic GPU ring layout offsets for arbitrary species counts.
 - `tree_ring_species_layout.test.ts` confirms the existing 3-species layout remains compatible and shows the required 6-species offsets without uniform-slot collisions.
 
