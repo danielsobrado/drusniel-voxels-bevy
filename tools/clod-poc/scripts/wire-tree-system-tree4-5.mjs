@@ -134,6 +134,111 @@ import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_n
     this.clearGpuRing();
   }`,
   },
+  {
+    label: "patch mesh LOD dither role attribute",
+    expected: `        geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(
+          new Float32Array(speciesCapacity).fill(1),
+          1,
+        ));
+        if (lod === "impostor") {`,
+    replacement: `        geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(
+          new Float32Array(speciesCapacity).fill(1),
+          1,
+        ));
+        geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(
+          new Float32Array(speciesCapacity),
+          1,
+        ));
+        if (lod === "impostor") {`,
+  },
+  {
+    label: "primary tree LOD dither role write",
+    expected: `        this.placeTreeInstance(patch, instance, primaryLod, crossfade ? selection.fade : 1, cameraPosition, write);`,
+    replacement: `        this.placeTreeInstance(patch, instance, primaryLod, crossfade ? selection.fade : 1, 0, cameraPosition, write);`,
+  },
+  {
+    label: "secondary tree LOD dither role write",
+    expected: `            this.placeTreeInstance(patch, instance, secondaryLod, selection.secondaryFade, cameraPosition, write);`,
+    replacement: `            this.placeTreeInstance(patch, instance, secondaryLod, selection.secondaryFade, 1, cameraPosition, write);`,
+  },
+  {
+    label: "place tree instance dither role parameter",
+    expected: `    lod: TreeLod,
+    fade: number,
+    cameraPosition: THREE.Vector3,
+    write: TreeMeshWriteState,`,
+    replacement: `    lod: TreeLod,
+    fade: number,
+    ditherRole: number,
+    cameraPosition: THREE.Vector3,
+    write: TreeMeshWriteState,`,
+  },
+  {
+    label: "write tree LOD dither role attribute",
+    expected: `    if (this.writeTreeLodFadeIfChanged(mesh, index, fade)) write.fadeChanged.set(mesh, true);`,
+    replacement: `    if (
+      this.writeTreeLodFadeIfChanged(mesh, index, fade) ||
+      this.writeTreeLodDitherRoleIfChanged(mesh, index, ditherRole)
+    ) write.fadeChanged.set(mesh, true);`,
+  },
+  {
+    label: "tree mesh LOD dither role buffer update",
+    expected: `    if (worldXZChanged) this.treeWorldXZ(mesh).needsUpdate = true;
+    if (fadeChanged) this.treeLodFade(mesh).needsUpdate = true;
+    if (impostorUvChanged) this.treeImpostorUvRect(mesh).needsUpdate = true;`,
+    replacement: `    if (worldXZChanged) this.treeWorldXZ(mesh).needsUpdate = true;
+    if (fadeChanged) {
+      this.treeLodFade(mesh).needsUpdate = true;
+      this.treeLodDitherRole(mesh).needsUpdate = true;
+    }
+    if (impostorUvChanged) this.treeImpostorUvRect(mesh).needsUpdate = true;`,
+  },
+  {
+    label: "tree LOD dither role writer method",
+    expected: `  private writeTreeLodFadeIfChanged(mesh: THREE.InstancedMesh, index: number, fade: number): boolean {
+    const attribute = this.treeLodFade(mesh);
+    const array = attribute.array as Float32Array;
+    if (Math.abs(array[index] - fade) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
+    array[index] = fade;
+    return true;
+  }
+
+  private writeTreeImpostorUvRectIfChanged(`,
+    replacement: `  private writeTreeLodFadeIfChanged(mesh: THREE.InstancedMesh, index: number, fade: number): boolean {
+    const attribute = this.treeLodFade(mesh);
+    const array = attribute.array as Float32Array;
+    if (Math.abs(array[index] - fade) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
+    array[index] = fade;
+    return true;
+  }
+
+  private writeTreeLodDitherRoleIfChanged(mesh: THREE.InstancedMesh, index: number, role: number): boolean {
+    const attribute = this.treeLodDitherRole(mesh);
+    const array = attribute.array as Float32Array;
+    if (Math.abs(array[index] - role) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
+    array[index] = role;
+    return true;
+  }
+
+  private writeTreeImpostorUvRectIfChanged(`,
+  },
+  {
+    label: "tree LOD dither role accessor",
+    expected: `  private treeLodFade(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
+    return mesh.geometry.getAttribute("treeLodFade") as THREE.InstancedBufferAttribute;
+  }
+
+  private treeImpostorUvRect(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {`,
+    replacement: `  private treeLodFade(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
+    return mesh.geometry.getAttribute("treeLodFade") as THREE.InstancedBufferAttribute;
+  }
+
+  private treeLodDitherRole(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
+    return mesh.geometry.getAttribute("treeLodDitherRole") as THREE.InstancedBufferAttribute;
+  }
+
+  private treeImpostorUvRect(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {`,
+  },
 ];
 
 export function wireTreeSystemSource(input) {
