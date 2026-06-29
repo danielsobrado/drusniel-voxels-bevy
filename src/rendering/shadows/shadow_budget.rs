@@ -240,10 +240,10 @@ pub fn update_terrain_shadow_culling(
     };
     let camera_pos = camera_transform.translation();
 
-    // Collect all cascade frusta for the shadow test
+    // Collect all camera/view cascade frusta for the shadow test.
     let cascade_frusta: Vec<&Frustum> = directional_lights
         .iter()
-        .flat_map(|cascades_frusta| cascades_frusta.frusta.values().next())
+        .flat_map(|cascades_frusta| cascades_frusta.frusta.values())
         .flat_map(|frusta| frusta.iter())
         .collect();
 
@@ -410,9 +410,13 @@ pub fn manage_point_light_shadow_budget(
             config.point_light_shadow_distance - config.point_light_shadow_hysteresis
         };
 
+        let authored = *authored_state
+            .states
+            .get(entity)
+            .unwrap_or(&point_light.shadows_enabled);
         let within_distance = *distance <= distance_limit;
         let within_budget = shadows_enabled_count < config.max_shadow_point_lights;
-        let should_have_shadows = within_distance && within_budget;
+        let should_have_shadows = authored && within_distance && within_budget;
 
         if point_light.shadows_enabled != should_have_shadows {
             point_light.shadows_enabled = should_have_shadows;
