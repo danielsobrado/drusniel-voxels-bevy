@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { StorageBufferAttribute } from "three/webgpu";
+import { REALTIME_SUN_SHADOW_CASTER_LAYER } from "../rendering/realtime_sun_shadows.js";
 import {
   createTreeGpuRingDrawBuffers,
   createTreeGpuRingInstancedGeometry,
   createTreeGpuRingMesh,
+  createTreeGpuRingShadowMesh,
   setTreeGpuRingIndirect,
   setTreeGpuRingMeshesVisible,
   treeGpuBufferForAttribute,
@@ -88,6 +90,20 @@ describe("tree system GPU ring draw helpers", () => {
     expect(mesh.frustumCulled).toBe(false);
     expect(mesh.castShadow).toBe(true);
     expect(mesh.receiveShadow).toBe(false);
+  });
+
+  it("creates a shadow-only mesh on the realtime shadow caster layer", () => {
+    const geometry = new THREE.InstancedBufferGeometry();
+    const regular = new THREE.MeshBasicMaterial();
+    const debug = new THREE.MeshBasicMaterial();
+    const mesh = createTreeGpuRingShadowMesh(geometry, fakeHandle(regular, debug), "pine", "far");
+
+    expect(mesh.name).toBe("trees-ring-gpu-shadow-pine-far");
+    expect(mesh.material).toBe(regular);
+    expect(mesh.castShadow).toBe(true);
+    expect(mesh.receiveShadow).toBe(false);
+    expect(mesh.layers.isEnabled(REALTIME_SUN_SHADOW_CASTER_LAYER)).toBe(true);
+    expect(mesh.layers.isEnabled(0)).toBe(false);
   });
 
   it("toggles visibility for ring objects", () => {
