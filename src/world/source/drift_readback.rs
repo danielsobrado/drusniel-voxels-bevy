@@ -1,10 +1,10 @@
 use bytemuck::{Pod, Zeroable};
 use serde::{Deserialize, Serialize};
 
-use super::{
-    sample_cpu_world_source, BiomeId, MaterialLayerId, WorldSource, WorldSourceDriftSample,
-    WorldSourceDriftSamplePoint,
-};
+use super::biome_region_field::BiomeId;
+use super::drift_gate::{sample_cpu_world_source, WorldSourceDriftSample, WorldSourceDriftSamplePoint};
+use super::splat::MaterialLayerId;
+use super::world_source::WorldSource;
 
 pub const WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH: &str = "shaders/world_source/drift_readback.wgsl";
 pub const WORLD_SOURCE_DRIFT_READBACK_WORKGROUP_SIZE: u32 = 64;
@@ -191,8 +191,8 @@ impl WorldSourceGpuReadbackProvider for StaticWorldSourceGpuReadback {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::mem::size_of;
     use crate::world::source::{IslandShapeConfig, ProceduralWorldSource, TerrainFieldConfig};
+    use std::mem::size_of;
 
     const WGSL: &str = include_str!("../../../assets/shaders/world_source/drift_readback.wgsl");
 
