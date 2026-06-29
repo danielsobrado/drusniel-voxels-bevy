@@ -211,8 +211,8 @@ function treeRingOctEncode(direction: TslNode): TslNode {
   const signX: TslNode = direction.x.greaterThanEqual(float(0)).select(float(1), float(-1));
   const signY: TslNode = direction.y.greaterThanEqual(float(0)).select(float(1), float(-1));
   const folded: TslNode = vec2(
-    float(1).sub(abs(projected.y)).mul(signX),
-    float(1).sub(abs(projected.x)).mul(signY),
+    float(1).sub(abs(projected.y)).mul(signX) as any,
+    float(1).sub(abs(projected.x)).mul(signY) as any,
   );
   return direction.z.lessThan(float(0)).select(folded, projected).mul(0.5).add(0.5);
 }
@@ -291,8 +291,8 @@ function treeRingHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode 
 function treeRingLodMask(
   lodIndex: TslNode,
   dist: TslNode,
-  nearDistance: TslNode,
-  midDistance: TslNode,
+  _nearDistance: TslNode,
+  _midDistance: TslNode,
   farDistance: TslNode,
   bandDistance: TslNode,
 ): TslNode {

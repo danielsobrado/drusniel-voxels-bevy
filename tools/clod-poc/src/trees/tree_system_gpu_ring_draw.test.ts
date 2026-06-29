@@ -88,12 +88,12 @@ function withSetIndirectStub(setIndirect: ReturnType<typeof vi.fn>, run: () => v
     setIndirect?: typeof setIndirect;
   };
   const previous = prototype.setIndirect;
-  prototype.setIndirect = setIndirect;
+  (prototype as any).setIndirect = setIndirect;
   try {
     run();
   } finally {
     if (previous) prototype.setIndirect = previous;
-    else delete prototype.setIndirect;
+    else delete (prototype as any).setIndirect;
   }
 }
 

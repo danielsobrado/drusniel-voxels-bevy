@@ -14,7 +14,6 @@ import {
   texture,
   uniform,
   uv,
-  vec3,
 } from "three/tsl";
 import type { TreeSettings } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";

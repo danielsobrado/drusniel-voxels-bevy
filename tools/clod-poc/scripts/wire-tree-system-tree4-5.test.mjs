@@ -140,8 +140,8 @@ describe("TREE-4/TREE-5 wiring script", () => {
     expect(result.changed).toBe(true);
     expect(result.applied).toHaveLength(EDIT_COUNT);
     expect(result.source).toContain("\r\n");
-    expect(result.source).not.toContain("\nimport { selectTreeGpuRingGeometry");
-    expect(result.source).toContain("\r\nimport { selectTreeGpuRingGeometry");
+    expect(result.source).not.toMatch(/(?<!\r)\nimport { selectTreeGpuRingGeometry/);
+    expect(result.source).toMatch(/\r\nimport { selectTreeGpuRingGeometry/);
   });
 
   it("is idempotent after the first rewrite", () => {

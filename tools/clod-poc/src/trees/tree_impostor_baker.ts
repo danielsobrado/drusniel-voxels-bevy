@@ -110,7 +110,7 @@ function bakeSpeciesAtlas(
 
   try {
     bakeAtlasTarget(renderer, albedoTarget, scene, camera, frames, resolutionPx, radius);
-    mesh.material = normalDepthMaterial;
+    (mesh as THREE.Mesh).material = normalDepthMaterial;
     bakeAtlasTarget(renderer, normalDepthTarget, scene, camera, frames, resolutionPx, radius);
   } finally {
     albedoMaterial.dispose();

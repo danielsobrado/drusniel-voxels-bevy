@@ -31,6 +31,7 @@ import {
   treeGeometryKey,
   type TreeGeometryMap,
 } from "./tree_geometry.js";
+import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";
 import {
   bakeTreeImpostorAtlases,
   type TreeImpostorAtlas,
@@ -61,6 +62,7 @@ import {
   type TreeHydrologyWater,
   type TreeRingInstanceBuffers,
 } from "./tree_node_material.js";
+import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_node_material.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 
@@ -204,7 +206,7 @@ interface TreeGpuRingDrawResources {
   cell: StorageInstancedBufferAttribute;
   indirect: StorageBufferAttribute;
   outputBuffers: TreeGpuRingOutputBuffers;
-  materialHandles: Record<TreeLod, TreeMaterialHandle>;
+  materialHandles: Record<string, TreeMaterialHandle>;
 }
 
 export class TreeSystem {
@@ -553,6 +555,7 @@ export class TreeSystem {
     this.impostorAtlases = { ...atlases };
     this.disposeImpostorMaterials();
     this.updateImpostorMaterials();
+    this.clearGpuRing();
   }
 
   private refreshForCenter(center: THREE.Vector3): void {
@@ -619,6 +622,10 @@ export class TreeSystem {
           new Float32Array(speciesCapacity).fill(1),
           1,
         ));
+        geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(
+          new Float32Array(speciesCapacity),
+          1,
+        ));
         if (lod === "impostor") {
           geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(
             new Float32Array(speciesCapacity * 4),
@@ -679,13 +686,13 @@ export class TreeSystem {
         patch.previousLods[instanceIndex] = selection.lod;
         const primaryLod = this.resolveLod(instance.species, selection.lod);
         this.lodCounts[primaryLod]++;
-        this.placeTreeInstance(patch, instance, primaryLod, crossfade ? selection.fade : 1, cameraPosition, write);
+        this.placeTreeInstance(patch, instance, primaryLod, crossfade ? selection.fade : 1, 0, cameraPosition, write);
         // Screen-door crossfade: draw the neighbouring LOD too, dithered by the
         // complementary weight, so the swap is gradual instead of a hard pop.
         if (crossfade && selection.secondaryLod) {
           const secondaryLod = this.resolveLod(instance.species, selection.secondaryLod);
           if (secondaryLod !== primaryLod) {
-            this.placeTreeInstance(patch, instance, secondaryLod, selection.secondaryFade, cameraPosition, write);
+            this.placeTreeInstance(patch, instance, secondaryLod, selection.secondaryFade, 1, cameraPosition, write);
           }
         }
       }
@@ -747,6 +754,7 @@ export class TreeSystem {
     instance: TreeInstance,
     lod: TreeLod,
     fade: number,
+    ditherRole: number,
     cameraPosition: THREE.Vector3,
     write: TreeMeshWriteState,
   ): void {
@@ -768,7 +776,10 @@ export class TreeSystem {
     if (this.writeTreeWorldXZIfChanged(mesh, index, instance.position[0], instance.position[2])) {
       write.worldXZChanged.set(mesh, true);
     }
-    if (this.writeTreeLodFadeIfChanged(mesh, index, fade)) write.fadeChanged.set(mesh, true);
+    if (
+      this.writeTreeLodFadeIfChanged(mesh, index, fade) ||
+      this.writeTreeLodDitherRoleIfChanged(mesh, index, ditherRole)
+    ) write.fadeChanged.set(mesh, true);
     if (lod === "impostor" && this.writeTreeImpostorUvRectIfChanged(mesh, index, instance, cameraPosition)) {
       write.impostorUvChanged.set(mesh, true);
     }
@@ -975,15 +986,27 @@ export class TreeSystem {
     this.gpuBackend.createIndirectStorageAttribute(indirect);
     const cell = this.createStorageInstancedAttribute("cell", sharedInstanceCount);
     const ringBuffers: TreeRingInstanceBuffers = { cell, capacity: sharedInstanceCount };
-    const materialHandles = {} as Record<TreeLod, TreeMaterialHandle>;
-    for (const lod of TREE_LODS) {
-      materialHandles[lod] = this.currentLighting
-        ? createTreeRingNodeMaterialHandle(this.settings, ringBuffers, lod, this.currentLighting, this.hydrologyWater)
-        : createTreeRingNodeMaterialHandle(this.settings, ringBuffers, lod, undefined, this.hydrologyWater);
-    }
+    const materialHandles = {} as Record<string, TreeMaterialHandle>;
     const meshes: TreeGpuRingMesh[] = [];
     for (const species of TREE_SPECIES) {
       for (const lod of TREE_LODS) {
+        const materialKey = species + ":" + lod;
+        const atlas = this.impostorAtlases[species];
+        materialHandles[materialKey] = lod === "impostor" && this.settings.impostors.enabled && atlas?.ready
+          ? createTreeRingImpostorNodeMaterialHandle(
+            this.settings,
+            ringBuffers,
+            atlas,
+            this.currentLighting ?? undefined,
+            this.hydrologyWater,
+          )
+          : createTreeRingNodeMaterialHandle(
+            this.settings,
+            ringBuffers,
+            lod,
+            this.currentLighting ?? undefined,
+            this.hydrologyWater,
+          );
         const group = treeGpuRingGroupIndex(species, lod);
         meshes.push(this.createGpuRingTierDraw(
           species,
@@ -991,7 +1014,7 @@ export class TreeSystem {
           count,
           indirect,
           group * 5 * Uint32Array.BYTES_PER_ELEMENT,
-          materialHandles[lod],
+          materialHandles[materialKey],
         ));
       }
     }
@@ -1110,7 +1133,10 @@ export class TreeSystem {
 
     if (matrixChanged) mesh.instanceMatrix.needsUpdate = true;
     if (worldXZChanged) this.treeWorldXZ(mesh).needsUpdate = true;
-    if (fadeChanged) this.treeLodFade(mesh).needsUpdate = true;
+    if (fadeChanged) {
+      this.treeLodFade(mesh).needsUpdate = true;
+      this.treeLodDitherRole(mesh).needsUpdate = true;
+    }
     if (impostorUvChanged) this.treeImpostorUvRect(mesh).needsUpdate = true;
 
     if (nextCount <= 0) {
@@ -1191,6 +1217,14 @@ export class TreeSystem {
     return true;
   }
 
+  private writeTreeLodDitherRoleIfChanged(mesh: THREE.InstancedMesh, index: number, role: number): boolean {
+    const attribute = this.treeLodDitherRole(mesh);
+    const array = attribute.array as Float32Array;
+    if (Math.abs(array[index] - role) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
+    array[index] = role;
+    return true;
+  }
+
   private writeTreeImpostorUvRectIfChanged(
     mesh: THREE.InstancedMesh,
     index: number,
@@ -1250,6 +1284,10 @@ export class TreeSystem {
     return mesh.geometry.getAttribute("treeLodFade") as THREE.InstancedBufferAttribute;
   }
 
+  private treeLodDitherRole(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
+    return mesh.geometry.getAttribute("treeLodDitherRole") as THREE.InstancedBufferAttribute;
+  }
+
   private treeImpostorUvRect(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
     return mesh.geometry.getAttribute("treeImpostorUvRect") as THREE.InstancedBufferAttribute;
   }
@@ -1283,9 +1321,14 @@ export class TreeSystem {
   }
 
   private geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {
-    // Stage 3b decision: GPU ring uses the procedural impostor-card geometry first.
-    // WebGPU render-to-atlas baking can replace this later without blocking the pipeline.
-    return this.geometries[species][lod];
+    return selectTreeGpuRingGeometry({
+      species,
+      lod,
+      geometries: this.geometries,
+      settings: this.settings,
+      impostorAtlases: this.impostorAtlases,
+      bakedImpostorGeometries: this.bakedImpostorGeometries,
+    }).geometry;
   }
 
   private canUseBakedImpostor(species: TreeSpeciesId): boolean {
