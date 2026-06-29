@@ -25,7 +25,10 @@ const DEFAULT_VISUAL_MESH_PREFIX: &str = "visual:";
 
 /// Stable visual mesh identifier matching the clod-poc runtime snapshot exporter.
 pub fn clod_visual_mesh_id(level: usize, coord: (i32, i32)) -> String {
-    format!("{DEFAULT_VISUAL_MESH_PREFIX}L{level}:{},{}", coord.0, coord.1)
+    format!(
+        "{DEFAULT_VISUAL_MESH_PREFIX}L{level}:{},{}",
+        coord.0, coord.1
+    )
 }
 
 /// Tag applied to visual CLOD terrain page entities so snapshot plans can resolve them.
@@ -136,7 +139,9 @@ pub fn tag_clod_page_visual_meshes(
     for (entity, tag) in pages.iter() {
         commands
             .entity(entity)
-            .insert(ClodTerrainVisualMeshId(clod_visual_mesh_id(tag.level, tag.coord)));
+            .insert(ClodTerrainVisualMeshId(clod_visual_mesh_id(
+                tag.level, tag.coord,
+            )));
     }
 }
 
@@ -186,14 +191,21 @@ pub fn apply_clod_shadow_runtime_snapshot(
     let visual_count = visuals.iter().count();
     let Some(active) = active else {
         if apply_state.generation.take().is_some() || !proxies.is_empty() {
-            cleanup_runtime_entities(&mut commands, &mut meshes, &mut materials, &visuals, &proxies);
+            cleanup_runtime_entities(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &visuals,
+                &proxies,
+            );
             *stats = ClodShadowRuntimeSpawnStats::default();
         }
         apply_state.visual_count = visual_count;
         return;
     };
 
-    if apply_state.generation == Some(active.generation) && apply_state.visual_count == visual_count {
+    if apply_state.generation == Some(active.generation) && apply_state.visual_count == visual_count
+    {
         return;
     }
 
@@ -201,18 +213,20 @@ pub fn apply_clod_shadow_runtime_snapshot(
     let runtime_settings = settings.as_deref().cloned().unwrap_or_default();
     let visuals_by_id: HashMap<&str, (Entity, &GlobalTransform, bool, bool, bool)> = visuals
         .iter()
-        .map(|(entity, id, transform, no_shadow, owned_no_shadow, owned_visual)| {
-            (
-                id.0.as_str(),
+        .map(
+            |(entity, id, transform, no_shadow, owned_no_shadow, owned_visual)| {
                 (
-                    entity,
-                    transform,
-                    no_shadow.is_some(),
-                    owned_no_shadow.is_some(),
-                    owned_visual.is_some(),
-                ),
-            )
-        })
+                    id.0.as_str(),
+                    (
+                        entity,
+                        transform,
+                        no_shadow.is_some(),
+                        owned_no_shadow.is_some(),
+                        owned_visual.is_some(),
+                    ),
+                )
+            },
+        )
         .collect();
 
     let mut next_stats = ClodShadowRuntimeSpawnStats {
@@ -224,7 +238,9 @@ pub fn apply_clod_shadow_runtime_snapshot(
         let Some(action) = runtime_settings.effective_action(plan.action) else {
             continue;
         };
-        next_stats.visual_triangles = next_stats.visual_triangles.saturating_add(plan.visual_triangles);
+        next_stats.visual_triangles = next_stats
+            .visual_triangles
+            .saturating_add(plan.visual_triangles);
         next_stats.runtime_shadow_triangles = next_stats
             .runtime_shadow_triangles
             .saturating_add(runtime_shadow_triangles_for_action(plan, action));
@@ -391,7 +407,10 @@ fn proxy_payload_to_mesh(payload: &ClodShadowRuntimeMeshPayload) -> Mesh {
         RenderAssetUsages::RENDER_WORLD,
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions.clone());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; positions.len()]);
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_NORMAL,
+        vec![[0.0, 1.0, 0.0]; positions.len()],
+    );
     mesh.insert_indices(Indices::U32(payload.indices.clone()));
     mesh
 }

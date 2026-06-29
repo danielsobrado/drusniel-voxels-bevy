@@ -3,9 +3,7 @@ use std::sync::{Arc, Mutex};
 use bevy::prelude::*;
 
 use super::drift_gate::WorldSourceDriftSamplePoint;
-use super::drift_readback::{
-    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult,
-};
+use super::drift_readback::{WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult};
 use super::drift_readback_render::GpuWorldSourceDriftReadbackState;
 
 #[derive(Resource, Debug, Clone)]

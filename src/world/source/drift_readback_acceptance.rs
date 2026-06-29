@@ -1,6 +1,6 @@
 use super::drift_gate::{
-    evaluate_world_source_cpu_gpu_drift, WorldSourceDriftGateConfig, WorldSourceDriftGateReport,
-    WorldSourceDriftSamplePoint,
+    WorldSourceDriftGateConfig, WorldSourceDriftGateReport, WorldSourceDriftSamplePoint,
+    evaluate_world_source_cpu_gpu_drift,
 };
 use super::drift_readback::{WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult};
 use super::world_source::WorldSource;
@@ -22,12 +22,8 @@ where
     P: WorldSourceGpuReadbackProvider,
 {
     let gpu_readback = provider.read_world_source_samples(points);
-    let drift_gate = evaluate_world_source_cpu_gpu_drift(
-        source,
-        points,
-        gpu_readback.samples(),
-        config,
-    );
+    let drift_gate =
+        evaluate_world_source_cpu_gpu_drift(source, points, gpu_readback.samples(), config);
 
     WorldSourceGpuReadbackAcceptanceResult {
         gpu_readback,
@@ -39,9 +35,9 @@ where
 mod tests {
     use super::*;
     use crate::world::source::{
-        sample_cpu_world_source, GpuWorldSourceDriftReadbackSharedResult, IslandShapeConfig,
-        ProceduralWorldSource, StaticWorldSourceGpuReadback, TerrainFieldConfig,
-        WorldSourceDriftGateStatus, WorldSourceGpuReadbackStatus,
+        GpuWorldSourceDriftReadbackSharedResult, IslandShapeConfig, ProceduralWorldSource,
+        StaticWorldSourceGpuReadback, TerrainFieldConfig, WorldSourceDriftGateStatus,
+        WorldSourceGpuReadbackStatus, sample_cpu_world_source,
     };
 
     fn source() -> ProceduralWorldSource {
@@ -70,7 +66,10 @@ mod tests {
             WorldSourceDriftGateConfig::default(),
         );
 
-        assert_eq!(result.gpu_readback.status, WorldSourceGpuReadbackStatus::Available);
+        assert_eq!(
+            result.gpu_readback.status,
+            WorldSourceGpuReadbackStatus::Available
+        );
         assert_eq!(result.drift_gate.status, WorldSourceDriftGateStatus::Passed);
     }
 
@@ -87,7 +86,13 @@ mod tests {
             WorldSourceDriftGateConfig::default(),
         );
 
-        assert_eq!(result.gpu_readback.status, WorldSourceGpuReadbackStatus::Unavailable);
-        assert_eq!(result.drift_gate.status, WorldSourceDriftGateStatus::Skipped);
+        assert_eq!(
+            result.gpu_readback.status,
+            WorldSourceGpuReadbackStatus::Unavailable
+        );
+        assert_eq!(
+            result.drift_gate.status,
+            WorldSourceDriftGateStatus::Skipped
+        );
     }
 }

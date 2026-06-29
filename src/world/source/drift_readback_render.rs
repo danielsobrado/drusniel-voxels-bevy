@@ -69,7 +69,9 @@ impl WorldSourceGpuReadbackProvider for GpuWorldSourceDriftReadbackStateProvider
     ) -> WorldSourceGpuReadbackResult {
         match self.result.samples() {
             Some(samples) if samples.len() == points.len() => self.result.clone(),
-            Some(_) => WorldSourceGpuReadbackResult::unavailable("gpu_readback_sample_count_mismatch"),
+            Some(_) => {
+                WorldSourceGpuReadbackResult::unavailable("gpu_readback_sample_count_mismatch")
+            }
             None => self.result.clone(),
         }
     }
@@ -343,7 +345,8 @@ pub fn decode_staged_gpu_world_source_drift_readback(
     }
 
     let Some(plan) = buffers.plan else {
-        state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_missing_plan");
+        state.latest_result =
+            WorldSourceGpuReadbackResult::unavailable("gpu_readback_missing_plan");
         return;
     };
     if plan.output_bytes == 0 {
@@ -371,7 +374,8 @@ pub fn decode_staged_gpu_world_source_drift_readback(
             staging_buffer.unmap();
         }
         Ok(Err(_)) => {
-            state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_map_failed");
+            state.latest_result =
+                WorldSourceGpuReadbackResult::unavailable("gpu_readback_map_failed");
         }
         Err(_) => {
             state.latest_result =
@@ -413,7 +417,8 @@ mod tests {
         let provider = GpuWorldSourceDriftReadbackStateProvider::new(
             WorldSourceGpuReadbackResult::available(vec![sample]),
         );
-        let result = provider.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
+        let result =
+            provider.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
 
         assert_eq!(result.status, WorldSourceGpuReadbackStatus::Available);
         assert_eq!(result.samples().expect("samples"), &[sample]);
@@ -424,7 +429,8 @@ mod tests {
         let provider = GpuWorldSourceDriftReadbackStateProvider::new(
             WorldSourceGpuReadbackResult::available(Vec::new()),
         );
-        let result = provider.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
+        let result =
+            provider.read_world_source_samples(&[WorldSourceDriftSamplePoint::new(0.0, 0.0)]);
 
         assert_eq!(result.status, WorldSourceGpuReadbackStatus::Unavailable);
         assert_eq!(

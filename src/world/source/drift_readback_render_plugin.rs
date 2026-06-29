@@ -9,7 +9,8 @@ use super::drift_readback_bridge::{
 use super::drift_readback_render::{
     GpuWorldSourceDriftReadbackLabel, GpuWorldSourceDriftReadbackNode,
     GpuWorldSourceDriftReadbackRequest, decode_staged_gpu_world_source_drift_readback,
-    init_gpu_world_source_drift_readback_pipeline, prepare_gpu_world_source_drift_readback_dispatch,
+    init_gpu_world_source_drift_readback_pipeline,
+    prepare_gpu_world_source_drift_readback_dispatch,
 };
 use super::drift_readback_request::{
     GpuWorldSourceDriftReadbackRequestSettings,
@@ -43,14 +44,19 @@ impl Plugin for GpuWorldSourceDriftReadbackPlugin {
             .clone();
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            warn!("WorldSource drift readback render app is unavailable; plugin registration skipped");
+            warn!(
+                "WorldSource drift readback render app is unavailable; plugin registration skipped"
+            );
             return;
         };
 
         render_app
             .init_resource::<GpuWorldSourceDriftReadbackRequest>()
             .insert_resource(shared_result)
-            .add_systems(ExtractSchedule, extract_gpu_world_source_drift_readback_request)
+            .add_systems(
+                ExtractSchedule,
+                extract_gpu_world_source_drift_readback_request,
+            )
             .add_systems(RenderStartup, init_gpu_world_source_drift_readback_pipeline)
             .add_systems(
                 Render,

@@ -57,7 +57,9 @@ use clap::Parser;
 use self::cli::{BenchCli, BenchConfig};
 use self::gpu::{detect_gpu_limits, visual_regression_bench_uses_vulkan};
 use self::logging::load_logging_config;
-use self::mode::{editor_native_viewport_requested, editor_runtime_requested, runtime_instance_kind};
+use self::mode::{
+    editor_native_viewport_requested, editor_runtime_requested, runtime_instance_kind,
+};
 use self::plugins::run_editor_runtime;
 use self::runtime_lock::RuntimeInstanceLock;
 use self::window::asset_file_path;

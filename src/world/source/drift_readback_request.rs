@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use super::drift_gate::WorldSourceDriftSamplePoint;
 use super::drift_readback::{
-    build_gpu_world_source_drift_input_samples, GpuWorldSourceDriftInputSample,
+    GpuWorldSourceDriftInputSample, build_gpu_world_source_drift_input_samples,
 };
 use super::drift_readback_render::GpuWorldSourceDriftReadbackRequest;
 use super::terrain_bridge::ProceduralWorldSourceTerrainBridge;
