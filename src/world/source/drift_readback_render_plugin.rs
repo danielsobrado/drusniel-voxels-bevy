@@ -3,6 +3,9 @@ use bevy::prelude::*;
 use bevy::render::render_graph::{RenderGraphExt, ViewNodeRunner};
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems};
 
+use super::drift_readback_bridge::{
+    GpuWorldSourceDriftReadbackSharedResult, publish_gpu_world_source_drift_readback_result,
+};
 use super::drift_readback_render::{
     GpuWorldSourceDriftReadbackLabel, GpuWorldSourceDriftReadbackNode,
     GpuWorldSourceDriftReadbackRequest, decode_staged_gpu_world_source_drift_readback,
@@ -15,6 +18,11 @@ pub struct GpuWorldSourceDriftReadbackPlugin;
 impl Plugin for GpuWorldSourceDriftReadbackPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GpuWorldSourceDriftReadbackRequest>();
+        app.init_resource::<GpuWorldSourceDriftReadbackSharedResult>();
+        let shared_result = app
+            .world()
+            .resource::<GpuWorldSourceDriftReadbackSharedResult>()
+            .clone();
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             warn!("WorldSource drift readback render app is unavailable; plugin registration skipped");
@@ -23,6 +31,7 @@ impl Plugin for GpuWorldSourceDriftReadbackPlugin {
 
         render_app
             .init_resource::<GpuWorldSourceDriftReadbackRequest>()
+            .insert_resource(shared_result)
             .add_systems(ExtractSchedule, extract_gpu_world_source_drift_readback_request)
             .add_systems(RenderStartup, init_gpu_world_source_drift_readback_pipeline)
             .add_systems(
@@ -32,7 +41,12 @@ impl Plugin for GpuWorldSourceDriftReadbackPlugin {
             )
             .add_systems(
                 Render,
-                decode_staged_gpu_world_source_drift_readback.in_set(RenderSystems::Cleanup),
+                (
+                    decode_staged_gpu_world_source_drift_readback,
+                    publish_gpu_world_source_drift_readback_result,
+                )
+                    .chain()
+                    .in_set(RenderSystems::Cleanup),
             );
         render_app.add_render_graph_node::<ViewNodeRunner<GpuWorldSourceDriftReadbackNode>>(
             Core3d,
