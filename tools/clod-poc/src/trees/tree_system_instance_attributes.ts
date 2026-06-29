@@ -61,7 +61,7 @@ export function writeTreeLodDitherRoleIfChanged(
 export function writeTreeImpostorUvRectIfChanged(input: TreeImpostorUvWriteInput): boolean {
   const attribute = treeImpostorUvRectAttribute(input.mesh);
   const atlas = input.impostorAtlases[input.instance.species];
-  if (!atlas?.ready) return writeUvRectIfChanged(attribute, input.index, 0, 0, 1, 1);
+  if (!atlas?.ready || atlas.frames.length === 0) return writeUvRectIfChanged(attribute, input.index, 0, 0, 1, 1);
 
   const maxFrame = atlas.frames.length - 1;
   const frozen = input.settings.impostors.debugFreezeFrame;
