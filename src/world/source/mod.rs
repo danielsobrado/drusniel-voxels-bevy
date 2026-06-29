@@ -4,6 +4,7 @@ pub mod biome_region_contract;
 pub mod biome_region_field;
 pub mod drift_gate;
 pub mod drift_readback;
+pub mod drift_readback_render;
 pub mod height_field;
 pub mod island_shape;
 pub mod noise;
