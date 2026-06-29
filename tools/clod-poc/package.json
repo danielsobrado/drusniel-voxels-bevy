@@ -34,7 +34,7 @@
     "water:hydrology": "tsx tools/probe-water-hydrology.ts",
     "water:shot": "tsx tools/shoot-water.ts",
     "water:shot:lake-final": "npm run water:shot -- --scene lake-shoreline --debug final --out shots/water/lake-final",
-    "water:shot:river-final": "npm run water:shot -- --scene river-bend --debug depth --out shots/water/river-final",
+    "water:shot:river-final": "npm run water:shot -- --scene river-bend --debug final --out shots/water/river-final",
     "water:shot:lake-depth": "npm run water:shot -- --scene lake-shoreline --debug depth --out shots/water/lake-depth",
     "water:shot:river-foam": "npm run water:shot -- --scene river-bend --debug foam --out shots/water/river-foam",
     "water:shot:flow": "npm run water:shot -- --scene river-bend --debug flow --out shots/water/flow-debug",
