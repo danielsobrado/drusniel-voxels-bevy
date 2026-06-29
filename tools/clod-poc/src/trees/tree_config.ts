@@ -723,21 +723,22 @@ function readTreeShadowMaxLod(value: unknown, fallback: TreeShadowMaxLod, enable
 }
 
 function readTreeImpostorSettings(raw: NonNullable<TreeYamlConfig["trees"]>["impostors"], fallback: TreeImpostorSettings): TreeImpostorSettings {
+  const octahedralGridSize = Math.floor(readNumberInRange(raw?.octahedral_grid_size, fallback.octahedralGridSize, 4, 8));
   return {
     enabled: readBoolean(raw?.enabled, fallback.enabled),
     bakeOnStart: readBoolean(raw?.bake_on_start, fallback.bakeOnStart),
     fallbackToPlaceholder: readBoolean(raw?.fallback_to_placeholder, fallback.fallbackToPlaceholder),
     sourceLod: readImpostorSourceLod(raw?.source_lod, fallback.sourceLod),
-    resolutionPx: Math.floor(readNumberAtLeast(raw?.resolution_px, fallback.resolutionPx, 16)),
-    octahedralGridSize: Math.floor(readNumberAtLeast(raw?.octahedral_grid_size, fallback.octahedralGridSize, 4)),
-    atlasPaddingPx: Math.floor(readNumberAtLeast(raw?.atlas_padding_px, fallback.atlasPaddingPx, 0)),
-    alphaTest: readNumber(raw?.alpha_test, fallback.alphaTest),
-    frameUpdateDistanceM: readNumberAtLeast(raw?.frame_update_distance_m, fallback.frameUpdateDistanceM, 0),
+    resolutionPx: Math.floor(readNumberInRange(raw?.resolution_px, fallback.resolutionPx, 32, 512)),
+    octahedralGridSize,
+    atlasPaddingPx: Math.floor(readNumberInRange(raw?.atlas_padding_px, fallback.atlasPaddingPx, 0, 8)),
+    alphaTest: readFraction(raw?.alpha_test, fallback.alphaTest),
+    frameUpdateDistanceM: readNumberInRange(raw?.frame_update_distance_m, fallback.frameUpdateDistanceM, 0, 32),
     axialBillboard: readBoolean(raw?.axial_billboard, fallback.axialBillboard),
     preserveVertical: readBoolean(raw?.preserve_vertical, fallback.preserveVertical),
-    maxBakesPerFrame: Math.floor(readNumberAtLeast(raw?.max_bakes_per_frame, fallback.maxBakesPerFrame, 1)),
+    maxBakesPerFrame: Math.floor(readNumberInRange(raw?.max_bakes_per_frame, fallback.maxBakesPerFrame, 1, 8)),
     debugShowFrames: readBoolean(raw?.debug_show_frames, fallback.debugShowFrames),
-    debugFreezeFrame: Math.floor(readNumber(raw?.debug_freeze_frame, fallback.debugFreezeFrame)),
+    debugFreezeFrame: Math.floor(readNumberInRange(raw?.debug_freeze_frame, fallback.debugFreezeFrame, -1, octahedralGridSize * octahedralGridSize - 1)),
     futureNormalDepth: readBoolean(raw?.future_normal_depth, fallback.futureNormalDepth),
   };
 }
@@ -886,6 +887,10 @@ function readNumber(value: unknown, fallback: number): number {
 
 function readNumberAtLeast(value: unknown, fallback: number, minimum: number): number {
   return Math.max(minimum, readNumber(value, fallback));
+}
+
+function readNumberInRange(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, readNumber(value, fallback)));
 }
 
 function readFraction(value: unknown, fallback: number): number {

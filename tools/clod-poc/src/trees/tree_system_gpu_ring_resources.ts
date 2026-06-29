@@ -1,0 +1,185 @@
+import * as THREE from "three";
+import type { StorageBufferAttribute } from "three/webgpu";
+import type { EnvironmentLighting } from "../environment/environment.js";
+import {
+  TREE_GPU_RING_GROUP_COUNT,
+  TREE_GPU_RING_SHADOW_GROUP_COUNT,
+  treeGpuRingGroupIndex,
+} from "../gpu/tree_ring_compute.js";
+import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
+import type { TreeMaterialHandle } from "./tree_material.js";
+import { createTreeRingNodeMaterialHandle, type TreeHydrologyWater, type TreeRingInstanceBuffers } from "./tree_node_material.js";
+import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_node_material.js";
+import { createTreeCrownProxyNodeMaterialHandle } from "./tree_crown_proxy_node_material.js";
+import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import {
+  TREE_RING_SHADOW_CASCADE_COUNT,
+  treeRingShadowCasterGroupIndex,
+} from "./tree_ring_shadow_casters.js";
+import {
+  createTreeGpuRingDrawBuffers,
+  createTreeGpuRingInstancedGeometry,
+  createTreeGpuRingMesh,
+  createTreeGpuRingShadowMesh,
+  type TreeGpuRingMesh,
+} from "./tree_system_gpu_ring_draw.js";
+import { addTreeGpuRingPrepassTwin } from "./tree_system_gpu_ring_prepass.js";
+import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
+import type {
+  TreeGpuRingDrawResources,
+  TreeWebGpuBackendAccess,
+} from "./tree_system_types.js";
+
+export interface TreeGpuRingDrawResourcesInput {
+  backend: TreeWebGpuBackendAccess;
+  root: THREE.Object3D;
+  ringPrepassTwins: THREE.Mesh[];
+  settings: TreeSettings;
+  worldCells: number;
+  currentLighting: EnvironmentLighting | undefined;
+  hydrologyWater: TreeHydrologyWater | undefined;
+  impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
+  crownProxyGeometry: THREE.BufferGeometry;
+  useTreePrepass: boolean;
+  geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry;
+}
+
+export function createTreeSystemGpuRingDrawResources(
+  input: TreeGpuRingDrawResourcesInput,
+  maxInstancesPerGroup: number,
+): TreeGpuRingDrawResources {
+  const count = Math.max(1, maxInstancesPerGroup);
+  const buffers = createTreeGpuRingDrawBuffers(input.backend, count, TREE_GPU_RING_GROUP_COUNT, {
+    maxShadowCastersPerGroup: count,
+    shadowCascadeCount: TREE_RING_SHADOW_CASCADE_COUNT,
+  });
+  if (!buffers.shadowCell || !buffers.shadowIndirect) {
+    throw new Error("tree GPU ring requires shadow draw buffers");
+  }
+  const ringBuffers: TreeRingInstanceBuffers = { cell: buffers.cell, capacity: count * TREE_GPU_RING_GROUP_COUNT };
+  const shadowRingBuffers: TreeRingInstanceBuffers = { cell: buffers.shadowCell, capacity: count * TREE_GPU_RING_SHADOW_GROUP_COUNT };
+  const materialHandles = {} as Record<string, TreeMaterialHandle>;
+  const meshes: TreeGpuRingMesh[] = [];
+  for (const species of TREE_SPECIES) {
+    for (const lod of TREE_LODS) {
+      const materialKey = species + ":" + lod;
+      const atlas = input.impostorAtlases[species];
+      materialHandles[materialKey] = lod === "impostor" && input.settings.impostors.enabled && atlas?.ready
+        ? createTreeRingImpostorNodeMaterialHandle(
+          input.settings,
+          ringBuffers,
+          atlas,
+          input.currentLighting ?? undefined,
+          input.hydrologyWater,
+        )
+        : createTreeRingNodeMaterialHandle(
+          input.settings,
+          ringBuffers,
+          lod,
+          input.currentLighting ?? undefined,
+          input.hydrologyWater,
+        );
+      const group = treeGpuRingGroupIndex(species, lod);
+      meshes.push(createGpuRingTierDraw(
+        input,
+        species,
+        lod,
+        count,
+        buffers.indirect,
+        group * 5 * Uint32Array.BYTES_PER_ELEMENT,
+        materialHandles[materialKey],
+      ));
+      if (treeLodCastsShadow(input.settings, lod)) {
+        for (let cascade = 0; cascade < TREE_RING_SHADOW_CASCADE_COUNT; cascade++) {
+          const shadowMaterialKey = "shadow:" + cascade + ":" + materialKey;
+          materialHandles[shadowMaterialKey] = createGpuRingShadowMaterialHandle(input, species, lod, shadowRingBuffers);
+          const shadowGroup = treeRingShadowCasterGroupIndex(species, lod, cascade);
+          meshes.push(createGpuRingShadowTierDraw(
+            input,
+            species,
+            lod,
+            cascade,
+            count,
+            buffers.shadowIndirect,
+            shadowGroup * 5 * Uint32Array.BYTES_PER_ELEMENT,
+            materialHandles[shadowMaterialKey],
+          ));
+        }
+      }
+    }
+  }
+  return {
+    meshes,
+    cell: buffers.cell,
+    indirect: buffers.indirect,
+    shadowCell: buffers.shadowCell,
+    shadowIndirect: buffers.shadowIndirect,
+    materialHandles,
+    outputBuffers: buffers.outputBuffers,
+  };
+}
+
+function createGpuRingTierDraw(
+  input: TreeGpuRingDrawResourcesInput,
+  species: TreeSpeciesId,
+  lod: TreeLod,
+  count: number,
+  indirect: StorageBufferAttribute,
+  indirectOffset: number,
+  materialHandle: TreeMaterialHandle,
+): TreeGpuRingMesh {
+  const source = input.geometryForGpuRing(species, lod);
+  const geometry = createTreeGpuRingInstancedGeometry(source, count, indirect, indirectOffset, input.worldCells);
+  const mesh = createTreeGpuRingMesh(
+    geometry,
+    materialHandle,
+    species,
+    lod,
+    input.settings.render.debugColorByLod,
+    false,
+  );
+  addTreeGpuRingPrepassTwin({
+    root: input.root,
+    twins: input.ringPrepassTwins,
+    lod,
+    mesh,
+    materialHandle,
+    useTreePrepass: input.useTreePrepass,
+  });
+  return mesh;
+}
+
+function createGpuRingShadowMaterialHandle(
+  input: TreeGpuRingDrawResourcesInput,
+  species: TreeSpeciesId,
+  lod: TreeLod,
+  buffers: TreeRingInstanceBuffers,
+): TreeMaterialHandle {
+  if (lod === "far" || lod === "impostor") {
+    return createTreeCrownProxyNodeMaterialHandle(input.settings, buffers, species, lod);
+  }
+  return createTreeRingNodeMaterialHandle(
+    input.settings,
+    buffers,
+    lod,
+    input.currentLighting ?? undefined,
+    input.hydrologyWater,
+  );
+}
+
+function createGpuRingShadowTierDraw(
+  input: TreeGpuRingDrawResourcesInput,
+  species: TreeSpeciesId,
+  lod: TreeLod,
+  cascade: number,
+  count: number,
+  indirect: StorageBufferAttribute,
+  indirectOffset: number,
+  materialHandle: TreeMaterialHandle,
+): TreeGpuRingMesh {
+  const source = lod === "far" || lod === "impostor"
+    ? input.crownProxyGeometry
+    : input.geometryForGpuRing(species, lod);
+  const geometry = createTreeGpuRingInstancedGeometry(source, count, indirect, indirectOffset, input.worldCells);
+  return createTreeGpuRingShadowMesh(geometry, materialHandle, species, lod, cascade);
+}

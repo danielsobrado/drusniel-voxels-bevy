@@ -97,4 +97,20 @@ describe("TREE-8 crown proxy wiring script", () => {
     expect(second.applied).toHaveLength(0);
     expect(second.skipped).toHaveLength(EDIT_COUNT);
   });
+
+  it("treats the split runtime crown proxy implementation as already wired", () => {
+    const result = wireTreeSystemTree8Source(`
+class TreeSystem {
+  private createGpuRingDrawResources(): TreeGpuRingDrawResources {
+    return createTreeSystemGpuRingDrawResources({
+      crownProxyGeometry: this.assets.crownProxyGeometry,
+    }, maxInstancesPerGroup);
+  }
+}
+`);
+
+    expect(result.changed).toBe(false);
+    expect(result.applied).toHaveLength(0);
+    expect(result.skipped).toHaveLength(EDIT_COUNT);
+  });
 });

@@ -1,0 +1,204 @@
+import * as THREE from "three";
+import { disposeTreeGeometryMap, createTreeGeometryMap, treeGeometryKey, type TreeGeometryMap } from "./tree_geometry.js";
+import type { TreeLod, TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import { TREE_SPECIES } from "./tree_config.js";
+import type { TreeHydrologyWater } from "./tree_node_material.js";
+import { createTreeMaterialHandle, type TreeMaterialHandle } from "./tree_material.js";
+import { createTreeNodeMaterialHandle } from "./tree_node_material.js";
+import { createTreeCrownProxyGeometry } from "./tree_crown_proxy_math.js";
+import type { EnvironmentLighting } from "../environment/environment.js";
+import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
+import { bakeTreeImpostorAtlases, type TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";
+import {
+  disposeTreeSystemBakedImpostorGeometries,
+  disposeTreeSystemImpostorMaterials,
+  selectTreeSystemGeometry,
+  selectTreeSystemMaterial,
+  updateTreeSystemImpostorMaterial,
+} from "./tree_system_impostor_resources.js";
+import {
+  applyTreeSystemMaterials,
+  replaceTreeSystemImpostorGeometries,
+} from "./tree_system_material_application.js";
+import type { TreePatch, TreeImpostorStatus } from "./tree_system_types.js";
+import type { TreeMeshBoundsState } from "./tree_system_mesh_bounds.js";
+
+export interface TreeSystemAssetsOptions {
+  settings: TreeSettings;
+  webgpu: boolean;
+  lighting?: EnvironmentLighting;
+  hydrologyWater?: TreeHydrologyWater;
+  impostorAtlases?: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
+}
+
+export class TreeSystemAssets {
+  readonly crownProxyGeometry = createTreeCrownProxyGeometry();
+  readonly materialHandle: TreeMaterialHandle;
+  geometries: TreeGeometryMap;
+  geometryKey: string;
+  impostorStatus: TreeImpostorStatus;
+  impostorReason: string | null = null;
+  bakedImpostorGeometries: Partial<Record<TreeSpeciesId, THREE.BufferGeometry>> = {};
+  impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>> = {};
+  impostorMaterials: Partial<Record<TreeSpeciesId, THREE.Material>> = {};
+  private readonly settings: TreeSettings;
+  private readonly webgpu: boolean;
+
+  constructor(options: TreeSystemAssetsOptions) {
+    this.settings = options.settings;
+    this.webgpu = options.webgpu;
+    this.geometries = createTreeGeometryMap(this.settings);
+    this.geometryKey = treeGeometryKey(this.settings);
+    this.impostorStatus = this.settings.impostors.enabled && this.settings.impostors.bakeOnStart
+      ? "pending"
+      : "disabled";
+    this.materialHandle = this.webgpu
+      ? createTreeNodeMaterialHandle(this.settings, options.lighting, options.hydrologyWater)
+      : createTreeMaterialHandle(this.settings);
+    if (options.impostorAtlases) this.setImpostorAtlases(options.impostorAtlases);
+  }
+
+  updateLighting(lighting: EnvironmentLighting): void {
+    this.materialHandle.updateLighting?.(lighting);
+  }
+
+  updateForestLighting(state: ForestLightingMaterialState | null): void {
+    this.materialHandle.updateForestLighting?.(state);
+  }
+
+  rebuildGeometries(): void {
+    this.geometryKey = treeGeometryKey(this.settings);
+    disposeTreeGeometryMap(this.geometries);
+    this.geometries = createTreeGeometryMap(this.settings);
+    this.disposeBakedImpostorGeometries();
+  }
+
+  async bakeImpostors(renderer: unknown): Promise<{ supported: boolean; reason: string | null }> {
+    if (!this.settings.impostors.enabled || !this.settings.impostors.bakeOnStart) {
+      this.impostorStatus = "disabled";
+      this.impostorReason = "tree impostor baking disabled";
+      return { supported: false, reason: this.impostorReason };
+    }
+    this.impostorStatus = "baking";
+    this.impostorReason = null;
+    const result = await bakeTreeImpostorAtlases({
+      renderer,
+      settings: this.settings,
+      geometries: this.geometries,
+      material: this.materialHandle.regularMaterial,
+    });
+    if (result.supported) {
+      this.setImpostorAtlases(result.atlases);
+      this.impostorStatus = "baked";
+      this.impostorReason = null;
+    } else {
+      this.impostorStatus = "fallback";
+      this.impostorReason = result.reason;
+    }
+    return { supported: result.supported, reason: result.reason };
+  }
+
+  setImpostorAtlases(atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>): void {
+    for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
+    this.impostorAtlases = { ...atlases };
+    this.disposeImpostorMaterials();
+    this.updateImpostorMaterials();
+  }
+
+  materialFor(species: TreeSpeciesId, lod: TreeLod): THREE.Material {
+    return selectTreeSystemMaterial({
+      species,
+      lod,
+      settings: this.settings,
+      materialHandle: this.materialHandle,
+      impostorAtlases: this.impostorAtlases,
+      impostorMaterials: this.impostorMaterials,
+    });
+  }
+
+  applyMaterials(patches: readonly TreePatch[]): void {
+    applyTreeSystemMaterials({
+      patches,
+      settings: this.settings,
+      materialHandle: this.materialHandle,
+      impostorAtlases: this.impostorAtlases,
+      impostorMaterials: this.impostorMaterials,
+    });
+  }
+
+  refreshMaterials(patches: readonly TreePatch[]): void {
+    this.materialHandle.updateSettings(this.settings);
+    this.updateImpostorMaterials();
+    this.applyMaterials(patches);
+  }
+
+  geometryFor(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {
+    return selectTreeSystemGeometry({
+      species,
+      lod,
+      settings: this.settings,
+      geometries: this.geometries,
+      impostorAtlases: this.impostorAtlases,
+      bakedImpostorGeometries: this.bakedImpostorGeometries,
+    });
+  }
+
+  geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {
+    return selectTreeGpuRingGeometry({
+      species,
+      lod,
+      geometries: this.geometries,
+      settings: this.settings,
+      impostorAtlases: this.impostorAtlases,
+      bakedImpostorGeometries: this.bakedImpostorGeometries,
+    }).geometry;
+  }
+
+  replaceImpostorMeshGeometries(
+    patches: readonly TreePatch[],
+    meshBoundsState: WeakMap<THREE.InstancedMesh, TreeMeshBoundsState>,
+  ): void {
+    replaceTreeSystemImpostorGeometries({
+      patches,
+      settings: this.settings,
+      geometries: this.geometries,
+      impostorAtlases: this.impostorAtlases,
+      bakedImpostorGeometries: this.bakedImpostorGeometries,
+      meshBoundsState,
+    });
+  }
+
+  dispose(): void {
+    disposeTreeGeometryMap(this.geometries);
+    this.crownProxyGeometry.dispose();
+    this.disposeBakedImpostorGeometries();
+    this.disposeImpostorMaterials();
+    for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
+    this.materialHandle.dispose();
+  }
+
+  private updateImpostorMaterials(): void {
+    for (const species of TREE_SPECIES) {
+      const atlas = this.impostorAtlases[species];
+      if (!atlas?.ready) continue;
+      updateTreeSystemImpostorMaterial({
+        species,
+        settings: this.settings,
+        atlas,
+        webgpu: this.webgpu,
+        impostorMaterials: this.impostorMaterials,
+      });
+    }
+  }
+
+  private disposeBakedImpostorGeometries(): void {
+    disposeTreeSystemBakedImpostorGeometries(this.bakedImpostorGeometries);
+    this.bakedImpostorGeometries = {};
+  }
+
+  private disposeImpostorMaterials(): void {
+    disposeTreeSystemImpostorMaterials(this.impostorMaterials);
+    this.impostorMaterials = {};
+  }
+}

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system.ts");
+const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system_runtime.ts");
 
 const EDITS = [
   {

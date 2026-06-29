@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import treeSystemSource from "../src/trees/tree_system.ts?raw";
+import treeSystemSource from "../src/trees/tree_system_runtime.ts?raw";
+import treeSystemAssetsSource from "../src/trees/tree_system_assets_runtime.ts?raw";
+import treeGpuRingResourcesSource from "../src/trees/tree_system_gpu_ring_resources.ts?raw";
 import wgslModulesSource from "../src/gpu/wgsl_modules.ts?raw";
 import treeConfigSource from "../src/trees/tree_config.ts?raw";
 import { wireTreeSystemTree7Source } from "./wire-tree-system-tree7-shadows.mjs";
@@ -19,11 +21,13 @@ describe("tree parity wiring against current source", () => {
 
     expect(tree7.applied.length + tree7.skipped.length).toBe(TREE7_EDIT_COUNT);
     expect(tree8.applied.length + tree8.skipped.length).toBe(TREE8_EDIT_COUNT);
-    expect(tree8.source).toContain("markAsRealtimeSunShadowCaster");
-    expect(tree8.source).toContain("createTreeGpuRingShadowTierDraw");
-    expect(tree8.source).toContain("private readonly crownProxyGeometry = createTreeCrownProxyGeometry()");
-    expect(tree8.source).toContain("createTreeCrownProxyNodeMaterialHandle(this.settings, buffers, species, lod)");
-    expect(tree8.source).toContain("mesh.castShadow = false");
+    expect(tree8.source).toContain("createTreeSystemGpuRingDrawResources");
+    expect(treeGpuRingResourcesSource).toContain("createTreeGpuRingDrawBuffers");
+    expect(treeGpuRingResourcesSource).toContain("createTreeGpuRingShadowMesh");
+    expect(treeGpuRingResourcesSource).toContain("createGpuRingShadowTierDraw");
+    expect(treeSystemAssetsSource).toContain("readonly crownProxyGeometry = createTreeCrownProxyGeometry()");
+    expect(treeGpuRingResourcesSource).toContain("createTreeCrownProxyNodeMaterialHandle(input.settings, buffers, species, lod)");
+    expect(treeGpuRingResourcesSource).toContain("TREE_GPU_RING_SHADOW_GROUP_COUNT");
 
     const tree7Again = wireTreeSystemTree7Source(tree8.source);
     const tree8Again = wireTreeSystemTree8Source(tree7Again.source);

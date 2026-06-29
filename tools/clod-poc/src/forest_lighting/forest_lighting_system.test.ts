@@ -275,7 +275,7 @@ describe("tree lighting proxies", () => {
       sampler: flatSampler(),
     });
     treeSystems.push(treeSystem);
-    (treeSystem as unknown as { gpuStatus: "ring" }).gpuStatus = "ring";
+    (treeSystem as unknown as { gpuRing: { status: "ring" } }).gpuRing.status = "ring";
     const proxies = treeSystem.getLightingProxies();
     expect(proxies.length).toBeGreaterThan(0);
 

@@ -1,0 +1,299 @@
+import * as THREE from "three";
+import { getDigEditsSnapshot } from "../terrain/terrain.js";
+import {
+  TREE_GPU_RING_CELL,
+  TreeGpuRingCompute,
+  treeGpuRingGroupCapacity,
+  TREE_GPU_RING_GROUP_COUNT,
+  treeGpuRingKey,
+  treeGpuRingSlotCount,
+  type TreeGpuRingIndexCounts,
+  type TreeGpuRingStats,
+} from "../gpu/tree_ring_compute.js";
+import { resolveDigEdits } from "../gpu/terrain_field_core.js";
+import { getRealtimeSunShadowCascadeCameras } from "../rendering/realtime_sun_shadows.js";
+import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings } from "./tree_config.js";
+import type { TreeTerrainSampler } from "./tree_instances.js";
+import {
+  generateTreeRingValidationCounts,
+} from "./tree_ring_lighting_proxies.js";
+import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";
+import {
+  formatTreeLodCounts,
+  visibleTreeLodCount,
+} from "./tree_system_math.js";
+import { packTreeSystemGpuFrustumPlanes } from "./tree_system_gpu_policy.js";
+import { setTreeGpuRingMeshesVisible, type TreeGpuRingMesh } from "./tree_system_gpu_ring_draw.js";
+import type {
+  TreeGpuRingDrawResources,
+  TreeStats,
+  TreeWebGpuBackendAccess,
+} from "./tree_system_types.js";
+import type { TreeSpeciesId } from "./tree_config.js";
+
+export interface TreeGpuRingRuntimeState {
+  status: TreeStats["gpuStatus"];
+  visibleCount: number;
+  overflowed: boolean;
+  dispatchMs: number | null;
+  loggedError: string | null;
+  compute: TreeGpuRingCompute | null;
+  init: Promise<void> | null;
+  key: string;
+  generation: number;
+  draw: TreeGpuRingDrawResources | null;
+  ringMeshes: TreeGpuRingMesh[];
+  prepassTwins: THREE.Mesh[];
+  stats: TreeGpuRingStats;
+  frustumPlaneScratch: Float32Array<ArrayBuffer>;
+  lastValidationSignature: string;
+}
+
+export interface TreeGpuRingRuntimeInput {
+  state: TreeGpuRingRuntimeState;
+  root: THREE.Object3D;
+  settings: TreeSettings;
+  worldCells: number;
+  sampler: TreeTerrainSampler | undefined;
+  gpuDevice: GPUDevice | null;
+  gpuBackend: TreeWebGpuBackendAccess | null;
+  supportsGpuTrees: boolean;
+  unsupportedReason: string | null;
+  lodCounts: Record<TreeLod, number>;
+  createDrawResources(maxInstancesPerGroup: number): TreeGpuRingDrawResources;
+  geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry;
+}
+
+export function createTreeGpuRingRuntimeState(gpuDevice: GPUDevice | null): TreeGpuRingRuntimeState {
+  return {
+    status: "disabled",
+    visibleCount: 0,
+    overflowed: false,
+    dispatchMs: null,
+    loggedError: null,
+    compute: null,
+    init: null,
+    key: "",
+    generation: 0,
+    draw: null,
+    ringMeshes: [],
+    prepassTwins: [],
+    stats: createTreeGpuRingStats(gpuDevice ? "idle" : "disabled"),
+    frustumPlaneScratch: new Float32Array(24) as Float32Array<ArrayBuffer>,
+    lastValidationSignature: "",
+  };
+}
+
+export function treeGpuRingMaterialHandles(state: TreeGpuRingRuntimeState): Iterable<TreeMaterialHandleLike> {
+  return Object.values(state.draw?.materialHandles ?? {});
+}
+
+export interface TreeMaterialHandleLike {
+  setTime(timeSeconds: number): void;
+  setFadeCenter?(x: number, z: number): void;
+  updateLighting?(lighting: unknown): void;
+  updateForestLighting?(state: unknown): void;
+  dispose(): void;
+}
+
+export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: THREE.Vector3, camera?: THREE.Camera): boolean {
+  const gpu = input.settings.gpu;
+  if (!input.supportsGpuTrees || !input.gpuDevice || !input.gpuBackend) {
+    input.state.status = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+    clearTreeGpuRing(input);
+    return false;
+  }
+  if (input.unsupportedReason) {
+    input.state.status = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+    input.state.loggedError ??= input.unsupportedReason;
+    console.warn(`[trees-gpu-ring] falling back to CPU: ${input.unsupportedReason}`);
+    clearTreeGpuRing(input);
+    return false;
+  }
+
+  ensureTreeGpuRingCompute(input);
+  const stats = input.state.compute?.stats(true) ?? input.state.stats;
+  input.state.stats = stats;
+  if (stats.status === "failed" && gpu.fallbackToCpu) {
+    if (stats.reason && input.state.loggedError !== stats.reason) {
+      input.state.loggedError = stats.reason;
+      console.warn(`[trees-gpu-ring] falling back to CPU: ${stats.reason}`);
+    }
+    clearTreeGpuRing(input);
+    input.state.status = "fallback-cpu";
+    return false;
+  }
+  if (input.state.compute && input.state.draw) {
+    const frustumPlanes = packTreeSystemGpuFrustumPlanes(camera, input.state.frustumPlaneScratch);
+    const shadowCameras = getRealtimeSunShadowCascadeCameras();
+    const shadowCascadePlanes = shadowCameras.length > 0 ? treeRingShadowCascadePlanesFromCameras(shadowCameras) : undefined;
+    const dispatched = input.state.compute.dispatch({
+      centerX: center.x,
+      centerZ: center.z,
+      worldCells: input.worldCells,
+      maxInstancesPerGroup: treeGpuRingGroupCapacity(input.settings),
+      maxShadowCastersPerGroup: shadowCascadePlanes ? treeGpuRingGroupCapacity(input.settings) : 0,
+      indexCounts: treeGpuRingIndexCounts(input),
+      frustumPlanes,
+      shadowCascadePlanes,
+    });
+    if (dispatched) setTreeGpuRingDrawsVisible(input.state, true);
+    input.state.stats = input.state.compute.stats(true);
+    validateTreeGpuRingAgainstCpu(input, center, frustumPlanes);
+  }
+
+  input.lodCounts.near = input.state.stats.counts.near;
+  input.lodCounts.mid = input.state.stats.counts.mid;
+  input.lodCounts.far = input.state.stats.counts.far;
+  input.lodCounts.impostor = input.state.stats.counts.impostor;
+  input.state.status = input.state.stats.status === "failed" ? "error" : "ring";
+  input.state.visibleCount = visibleTreeLodCount(input.state.stats.counts);
+  input.state.overflowed = input.state.stats.overflowed;
+  input.state.dispatchMs = input.state.stats.submitMs;
+  return true;
+}
+
+export function clearTreeGpuRing(input: TreeGpuRingRuntimeInput): void {
+  input.state.generation++;
+  input.state.compute?.destroy();
+  input.state.compute = null;
+  input.state.init = null;
+  input.state.key = "";
+  clearTreeGpuRingDraw(input.state, input.root);
+  input.state.stats = createTreeGpuRingStats(input.gpuDevice ? "idle" : "disabled");
+  input.state.lastValidationSignature = "";
+}
+
+export function setTreeGpuRingDrawsVisible(state: TreeGpuRingRuntimeState, visible: boolean): void {
+  setTreeGpuRingMeshesVisible(state.ringMeshes, visible);
+  setTreeGpuRingMeshesVisible(state.prepassTwins, visible);
+}
+
+function ensureTreeGpuRingCompute(input: TreeGpuRingRuntimeInput): void {
+  if (!input.gpuDevice || !input.gpuBackend) return;
+  const key = treeGpuRingKey(input.settings, input.worldCells);
+  if (input.state.compute && input.state.key === key) return;
+  if (input.state.init && input.state.key === key) return;
+
+  clearTreeGpuRing(input);
+  input.state.key = key;
+  input.state.draw = input.createDrawResources(treeGpuRingGroupCapacity(input.settings));
+  input.state.ringMeshes = input.state.draw.meshes;
+  setTreeGpuRingDrawsVisible(input.state, false);
+  for (const mesh of input.state.ringMeshes) input.root.add(mesh);
+  input.state.stats = {
+    ...createTreeGpuRingStats("initializing"),
+    candidateCount: treeGpuRingSlotCount(input.settings),
+  };
+  const initKey = key;
+  const initGeneration = input.state.generation;
+  const edits = resolveDigEdits(getDigEditsSnapshot());
+  input.state.init = TreeGpuRingCompute.create(input.gpuDevice, edits, input.state.draw.outputBuffers, input.settings)
+    .then((compute) => {
+      if (input.state.key !== initKey || input.state.generation !== initGeneration) {
+        compute.destroy();
+        return;
+      }
+      input.state.compute = compute;
+      input.state.stats = compute.stats(input.settings.enabled);
+    })
+    .catch((error) => {
+      if (input.state.key !== initKey || input.state.generation !== initGeneration) return;
+      input.state.stats = {
+        ...input.state.stats,
+        status: "failed",
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    })
+    .finally(() => {
+      if (input.state.key === initKey && input.state.generation === initGeneration) input.state.init = null;
+    });
+}
+
+function validateTreeGpuRingAgainstCpu(
+  input: TreeGpuRingRuntimeInput,
+  center: THREE.Vector3,
+  frustumPlanes: ArrayLike<number>,
+): void {
+  if (!input.settings.gpu.debugValidateAgainstCpu || input.state.stats.readbackMs === null) return;
+
+  const signature = [
+    Math.round(center.x / TREE_GPU_RING_CELL),
+    Math.round(center.z / TREE_GPU_RING_CELL),
+    input.state.stats.groupCounts.join(","),
+    input.state.stats.overflowed ? 1 : 0,
+  ].join("|");
+  if (signature === input.state.lastValidationSignature) return;
+  input.state.lastValidationSignature = signature;
+
+  const expected = generateTreeRingValidationCounts({
+    centerX: center.x,
+    centerZ: center.z,
+    worldCells: input.worldCells,
+    settings: input.settings,
+    sampler: input.sampler,
+    maxInstancesPerGroup: treeGpuRingGroupCapacity(input.settings),
+    frustumPlanes,
+  });
+  const deltas = TREE_LODS.map((lod) => Math.abs((input.state.stats.counts[lod] ?? 0) - (expected.counts[lod] ?? 0)));
+  const maxDelta = Math.max(...deltas);
+  const tolerance = Math.max(4, Math.ceil(Math.max(visibleTreeLodCount(expected.counts), visibleTreeLodCount(input.state.stats.counts)) * 0.02));
+  if (maxDelta > tolerance || expected.overflowed !== input.state.stats.overflowed) {
+    console.warn(
+      "[trees-gpu-ring] CPU/GPU count parity failed " +
+      `gpu=${formatTreeLodCounts(input.state.stats.counts)} cpu=${formatTreeLodCounts(expected.counts)} ` +
+      `maxDelta=${maxDelta} tolerance=${tolerance} ` +
+      `overflow gpu=${input.state.stats.overflowed} cpu=${expected.overflowed}`,
+    );
+  }
+}
+
+function treeGpuRingIndexCounts(input: TreeGpuRingRuntimeInput): TreeGpuRingIndexCounts {
+  const counts = {} as TreeGpuRingIndexCounts;
+  for (const species of TREE_SPECIES) {
+    counts[species] = {} as Record<TreeLod, number>;
+    for (const lod of TREE_LODS) {
+      counts[species][lod] = indexCountFor(input.geometryForGpuRing(species, lod));
+    }
+  }
+  return counts;
+}
+
+function indexCountFor(geometry: THREE.BufferGeometry): number {
+  return geometry.getIndex()?.count ?? geometry.getAttribute("position")?.count ?? 0;
+}
+
+function clearTreeGpuRingDraw(state: TreeGpuRingRuntimeState, root: THREE.Object3D): void {
+  for (const twin of state.prepassTwins) {
+    root.remove(twin);
+    if (Array.isArray(twin.material)) {
+      for (const material of twin.material) material.dispose();
+    } else {
+      twin.material.dispose();
+    }
+  }
+  state.prepassTwins = [];
+  for (const mesh of state.ringMeshes) {
+    root.remove(mesh);
+    mesh.geometry.dispose();
+  }
+  state.ringMeshes = [];
+  for (const handle of Object.values(state.draw?.materialHandles ?? {})) {
+    handle.dispose();
+  }
+  state.draw = null;
+}
+
+function createTreeGpuRingStats(status: TreeGpuRingStats["status"]): TreeGpuRingStats {
+  return {
+    status,
+    candidateCount: 0,
+    acceptedCandidates: 0,
+    counts: { near: 0, mid: 0, far: 0, impostor: 0 },
+    groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
+    overflowed: false,
+    submitMs: null,
+    readbackMs: null,
+    skippedDispatches: 0,
+  };
+}

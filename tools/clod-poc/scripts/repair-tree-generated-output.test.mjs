@@ -34,7 +34,7 @@ describe("repair generated tree output", () => {
     expect(result.changed).toBe(true);
     expect(result.source.match(/private createGpuRingShadowTierDraw/g)).toHaveLength(1);
     expect(result.source).toContain("geometryForGpuRingShadow(species, lod)");
-    expect(result.source).not.toContain("geometryForGpuRing(species, lod)");
+    expect(result.source).not.toMatch(/private createGpuRingShadowTierDraw\([\s\S]*?geometryForGpuRing\(species, lod\)/);
     expect(result.source).toContain("private usesGpuRingPrepass");
   });
 

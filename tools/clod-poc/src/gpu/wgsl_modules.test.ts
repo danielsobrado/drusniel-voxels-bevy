@@ -7,6 +7,9 @@ import {
   composeTreeRingShader,
   composeUnderstoryRingShader,
 } from "./wgsl_modules.js";
+import { TREE_SPECIES } from "../trees/tree_config.js";
+import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
+import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 
 function bindingDeclarationCount(source: string, name: "digEdits" | "fieldParams"): number {
   return source.match(new RegExp(`\\bvar<[^>]+>\\s+${name}\\s*:`, "g"))?.length ?? 0;
@@ -87,12 +90,13 @@ describe("WGSL module composition", () => {
 
   it("injects tree ring layout constants from TS layout helpers", () => {
     const source = composeTreeRingShader();
+    const layout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
 
-    expect(source).toContain("const TREE_LOD_COUNT: u32 = 4u;");
-    expect(source).toContain("const TREE_SPECIES_COUNT: u32 = 3u;");
-    expect(source).toContain("const TREE_GROUP_COUNT: u32 = 12u;");
-    expect(source).toContain("const TREE_SHADOW_CASCADE_COUNT: u32 = 4u;");
-    expect(source).toContain("const TREE_SHADOW_GROUP_COUNT: u32 = 48u;");
+    expect(source).toContain(`const TREE_LOD_COUNT: u32 = ${layout.lodCount}u;`);
+    expect(source).toContain(`const TREE_SPECIES_COUNT: u32 = ${layout.speciesCount}u;`);
+    expect(source).toContain(`const TREE_GROUP_COUNT: u32 = ${layout.groupCount}u;`);
+    expect(source).toContain(`const TREE_SHADOW_CASCADE_COUNT: u32 = ${layout.shadowCascadeCount}u;`);
+    expect(source).toContain(`const TREE_SHADOW_GROUP_COUNT: u32 = ${layout.shadowGroupCount}u;`);
     expect(source).not.toContain("const TREE_GROUP_COUNT: u32 = TREE_SPECIES_COUNT * TREE_LOD_COUNT;");
   });
 

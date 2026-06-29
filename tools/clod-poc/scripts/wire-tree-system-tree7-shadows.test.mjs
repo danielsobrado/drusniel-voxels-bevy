@@ -124,4 +124,28 @@ describe("TREE-7 tree system wiring script", () => {
     expect(second.applied).toHaveLength(0);
     expect(second.skipped).toHaveLength(EDIT_COUNT);
   });
+
+  it("treats the split runtime shadow implementation as already wired", () => {
+    const result = wireTreeSystemTree7Source(`
+import { clearTreeGpuRing, createTreeGpuRingRuntimeState, treeGpuRingMaterialHandles, updateTreeGpuRingTrees, type TreeGpuRingRuntimeInput } from "./tree_system_gpu_ring_runtime.js";
+
+class TreeSystem {
+  private createGpuRingDrawResources(): TreeGpuRingDrawResources {
+    return createTreeSystemGpuRingDrawResources(input, maxInstancesPerGroup);
+  }
+
+  private gpuRingRuntimeInput(): TreeGpuRingRuntimeInput {
+    return input;
+  }
+
+  update(): void {
+    updateTreeGpuRingTrees(this.gpuRingRuntimeInput(), center, camera);
+  }
+}
+`);
+
+    expect(result.changed).toBe(false);
+    expect(result.applied).toHaveLength(0);
+    expect(result.skipped).toHaveLength(EDIT_COUNT);
+  });
 });

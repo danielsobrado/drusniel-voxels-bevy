@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system.ts");
+const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system_runtime.ts");
 
 const REALTIME_IMPORT_LABEL = "realtime shadow cascade imports";
 const SHADOW_LOOP_LABEL = "tree GPU ring shadow-only mesh loop";
@@ -257,9 +257,16 @@ if (isCli()) {
 }
 
 function tree8AlreadySatisfiesTree7Edit(source, label) {
+  if (modularShadowDrawAlreadySatisfiesTree7(source)) return true;
   if (label === SHADOW_METHOD_LABEL) return countOccurrences(source, "  private createGpuRingShadowTierDraw(") > 0;
   if (label === SHADOW_LOOP_LABEL) return source.includes("this.createGpuRingShadowMaterialHandle(") && source.includes("this.createGpuRingShadowTierDraw(");
   return false;
+}
+
+function modularShadowDrawAlreadySatisfiesTree7(source) {
+  return source.includes("createTreeSystemGpuRingDrawResources(") &&
+    source.includes("updateTreeGpuRingTrees(") &&
+    source.includes("TreeGpuRingRuntimeInput");
 }
 
 function normalizeRealtimeShadowImports(source) {

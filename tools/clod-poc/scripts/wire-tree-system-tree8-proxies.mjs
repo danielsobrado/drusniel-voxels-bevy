@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system.ts");
+const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system_runtime.ts");
 
 const SHADOW_MATERIAL_LABEL = "crown proxy shadow material selection";
 const SHADOW_HELPERS_LABEL = "crown proxy shadow helpers";
@@ -148,9 +148,15 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 }
 
 function tree8AlreadySatisfied(source, label) {
+  if (modularCrownProxyShadowAlreadySatisfied(source)) return true;
   if (label === SHADOW_MATERIAL_LABEL) return source.includes("materialHandles[shadowMaterialKey] = this.createGpuRingShadowMaterialHandle(");
   if (label === SHADOW_HELPERS_LABEL) return source.includes("private createGpuRingShadowMaterialHandle(") && source.includes("private geometryForGpuRingShadow(");
   return false;
+}
+
+function modularCrownProxyShadowAlreadySatisfied(source) {
+  return source.includes("createTreeSystemGpuRingDrawResources(") &&
+    source.includes("crownProxyGeometry: this.assets.crownProxyGeometry");
 }
 
 function edit(label, expected, replacement) {
