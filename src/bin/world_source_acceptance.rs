@@ -18,8 +18,9 @@ use voxel_builder::voxel::types::VoxelType;
 use voxel_builder::voxel::world::VoxelWorld;
 use voxel_builder::world::source::{
     evaluate_world_source_cpu_gpu_drift, material_with_biome, ProceduralWorldSourceTerrainBridge,
-    TerrainSourceConfig, TerrainSourceStartupReport, WorldSourceDriftGateConfig,
-    WorldSourceDriftGateReport, WorldSourceDriftSamplePoint,
+    TerrainSourceConfig, TerrainSourceStartupReport, UnavailableWorldSourceGpuReadback,
+    WorldSourceDriftGateConfig, WorldSourceDriftGateReport, WorldSourceDriftSamplePoint,
+    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult,
 };
 
 const DEFAULT_SAMPLE_CHUNKS: [IVec3; 4] = [
@@ -55,6 +56,7 @@ struct AcceptanceSummary {
     chunk_generation: ChunkGenerationBenchSummary,
     mesh_build: MeshBuildBenchSummary,
     material_draw_impact: MaterialDrawImpactSummary,
+    gpu_readback: WorldSourceGpuReadbackResult,
     drift_gate: WorldSourceDriftGateReport,
     output_path: String,
 }
@@ -117,10 +119,12 @@ fn run() -> Result<PathBuf, String> {
     let (mut world, chunk_generation) = bench_chunk_generation(&bridge);
     let mesh_mode = if args.blocky { MeshMode::Blocky } else { MeshMode::SurfaceNets };
     let (mesh_build, material_draw_impact) = bench_mesh_build(&mut world, mesh_mode)?;
+    let drift_points = drift_points();
+    let gpu_readback = UnavailableWorldSourceGpuReadback.read_world_source_samples(&drift_points);
     let drift_gate = evaluate_world_source_cpu_gpu_drift(
         bridge.source(),
-        &drift_points(),
-        None,
+        &drift_points,
+        gpu_readback.samples(),
         WorldSourceDriftGateConfig::default(),
     );
 
@@ -134,6 +138,7 @@ fn run() -> Result<PathBuf, String> {
         chunk_generation,
         mesh_build,
         material_draw_impact,
+        gpu_readback,
         drift_gate,
         output_path: output_path.display().to_string(),
     };
