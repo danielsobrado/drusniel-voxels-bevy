@@ -129,11 +129,11 @@ export function wireTreeSystemSource(input) {
   for (const edit of EDITS) {
     const expectedCount = countOccurrences(source, edit.expected);
     const replacementCount = countOccurrences(source, edit.replacement);
-    if (expectedCount === 0 && replacementCount === 1) {
+    if (replacementCount === 1) {
       skipped.push(edit.label);
       continue;
     }
-    if (expectedCount !== 1 || replacementCount !== 0) {
+    if (replacementCount > 1 || expectedCount !== 1) {
       throw new Error(
         `Cannot apply ${edit.label}: expected ${expectedCount} source matches and ${replacementCount} already-applied matches.`,
       );
