@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createTreeBakedImpostorGeometry, type TreeGeometryMap } from "./tree_geometry.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import type { OctahedralFrame } from "./tree_impostor_octahedral.js";
 import type { TreeLod, TreeSettings, TreeSpeciesId } from "./tree_config.js";
 
 export interface TreeGpuRingGeometryInput {
@@ -27,6 +28,60 @@ export function selectTreeGpuRingGeometry(input: TreeGpuRingGeometryInput): Tree
     return { geometry: input.geometries[input.species].impostor, bakedImpostor: false };
   }
 
-  input.bakedImpostorGeometries[input.species] ??= createTreeBakedImpostorGeometry(input.species, input.settings);
+  input.bakedImpostorGeometries[input.species] ??= createTreeGpuRingBakedImpostorGeometry(
+    input.species,
+    input.settings,
+    atlas,
+  );
   return { geometry: input.bakedImpostorGeometries[input.species]!, bakedImpostor: true };
+}
+
+export function createTreeGpuRingBakedImpostorGeometry(
+  species: TreeSpeciesId,
+  settings: TreeSettings,
+  atlas: TreeImpostorAtlas,
+): THREE.BufferGeometry {
+  const geometry = createTreeBakedImpostorGeometry(species, settings);
+  mapTreeGpuRingBakedImpostorUvToFrame(geometry, selectTreeGpuRingFallbackFrame(atlas));
+  return geometry;
+}
+
+export function selectTreeGpuRingFallbackFrame(atlas: TreeImpostorAtlas): OctahedralFrame {
+  if (atlas.frames.length === 0) {
+    return {
+      index: 0,
+      x: 0,
+      y: 0,
+      uvMin: [0, 0],
+      uvMax: [1, 1],
+      direction: [0, 0, 1],
+    };
+  }
+  let best = atlas.frames[0];
+  let bestZ = best.direction[2];
+  for (const frame of atlas.frames) {
+    if (frame.direction[2] > bestZ) {
+      best = frame;
+      bestZ = frame.direction[2];
+    }
+  }
+  return best;
+}
+
+export function mapTreeGpuRingBakedImpostorUvToFrame(
+  geometry: THREE.BufferGeometry,
+  frame: Pick<OctahedralFrame, "uvMin" | "uvMax">,
+): void {
+  const uv = geometry.getAttribute("uv");
+  if (!uv) return;
+  const mapped = new Float32Array(uv.count * 2);
+  const minU = frame.uvMin[0];
+  const minV = frame.uvMin[1];
+  const maxU = frame.uvMax[0];
+  const maxV = frame.uvMax[1];
+  for (let index = 0; index < uv.count; index++) {
+    mapped[index * 2] = THREE.MathUtils.lerp(minU, maxU, uv.getX(index));
+    mapped[index * 2 + 1] = THREE.MathUtils.lerp(minV, maxV, uv.getY(index));
+  }
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(mapped, 2));
 }
