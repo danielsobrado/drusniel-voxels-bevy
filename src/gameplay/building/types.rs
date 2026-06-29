@@ -485,6 +485,8 @@ impl BuildingState {
 /// Component marking an entity as a placed building piece.
 #[derive(Component)]
 pub struct BuildingPiece {
+    /// Stable persisted identifier.
+    pub stable_id: String,
     /// Type of this piece.
     pub piece_type: PieceTypeId,
     /// Grid position (for spatial queries).
@@ -493,6 +495,10 @@ pub struct BuildingPiece {
     pub rotation: u8,
     /// Material type of this piece.
     pub material: BuildingMaterialType,
+    /// Whether this piece was placed directly on terrain.
+    pub grounded: bool,
+    /// Stable IDs of support parents this piece depends on.
+    pub parent_ids: Vec<String>,
 }
 
 /// Component marking an entity as a building ghost preview.

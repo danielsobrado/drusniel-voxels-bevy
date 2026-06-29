@@ -10,6 +10,10 @@ use crate::voxel::world::VoxelWorld;
 use crate::world_rules::{ProtectedAreaRegistry, ProtectedEditIntent};
 
 use super::grid::BuildingGrid;
+use super::persistence::{
+    ConstructionPersistenceConfig, ConstructionPersistenceState, ConstructionTerrainConformConfig,
+    maybe_request_terrain_conform, save_snapshot_with_extra, saved_piece_for_new_runtime,
+};
 use super::stability::{
     DirtyStabilityIslands, Stability, StabilityConfig, is_piece_grounded, predict_stability,
     stability_color,
@@ -335,16 +339,21 @@ pub fn place_building_piece(
     mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,
     state: Res<BuildingState>,
+    persistence_config: Res<ConstructionPersistenceConfig>,
+    mut persistence_state: ResMut<ConstructionPersistenceState>,
+    terrain_conform_config: Res<ConstructionTerrainConformConfig>,
     registry: Res<BuildingPieceRegistry>,
     mut grid: ResMut<BuildingGrid>,
     mut dirty_stability: ResMut<DirtyStabilityIslands>,
     ghost_query: Query<(&Transform, &BuildingGhost)>,
+    placed_snapshot: Query<(Entity, &BuildingPiece, &Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     building_mat_handle: Option<Res<BuildingMaterialHandle>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     protected_areas: Option<Res<ProtectedAreaRegistry>>,
+    mut terrain_conform_requests: MessageWriter<super::ConstructionTerrainConformRequest>,
 ) {
-    if !state.active || !mouse.just_pressed(MouseButton::Right) {
+    if !state.active || !mouse.just_pressed(MouseButton::Left) {
         return;
     }
 
@@ -377,6 +386,16 @@ pub fn place_building_piece(
     }
     let rotation = state.rotation;
     let grid_pos = grid.world_to_cell(position);
+    let stable_id = persistence_state.allocate_id();
+    let (grounded, parent_ids) = if let Some(snap) = &state.current_snap {
+        let parent_id = placed_snapshot
+            .get(snap.target_snap.entity)
+            .ok()
+            .map(|(_, piece, _)| piece.stable_id.clone());
+        (false, parent_id.into_iter().collect::<Vec<_>>())
+    } else {
+        (ghost.grounded, Vec::new())
+    };
 
     // Create the building piece entity
     let mesh = meshes.add(Cuboid::new(
@@ -393,14 +412,17 @@ pub fn place_building_piece(
                 MeshMaterial3d(mat_handle.handle.clone()),
                 Transform::from_translation(position).with_rotation(state.rotation_quat()),
                 BuildingPiece {
+                    stable_id: stable_id.clone(),
                     piece_type,
                     grid_position: grid_pos,
                     rotation,
                     material: piece_def.material,
+                    grounded,
+                    parent_ids: parent_ids.clone(),
                 },
                 Stability {
                     value: 0.0,
-                    grounded: ghost.grounded,
+                    grounded,
                 },
                 BuildingMesh {
                     material_type: piece_def.material,
@@ -435,14 +457,17 @@ pub fn place_building_piece(
                 MeshMaterial3d(material),
                 Transform::from_translation(position).with_rotation(state.rotation_quat()),
                 BuildingPiece {
+                    stable_id: stable_id.clone(),
                     piece_type,
                     grid_position: grid_pos,
                     rotation,
                     material: piece_def.material,
+                    grounded,
+                    parent_ids: parent_ids.clone(),
                 },
                 Stability {
                     value: 0.0,
-                    grounded: ghost.grounded,
+                    grounded,
                 },
             ))
             .id()
@@ -454,6 +479,25 @@ pub fn place_building_piece(
         grid.connect(entity, snap.target_snap.entity);
     }
     dirty_stability.mark(entity);
+    let saved = saved_piece_for_new_runtime(
+        stable_id,
+        piece_type,
+        position,
+        rotation,
+        piece_def.material,
+        grounded,
+        parent_ids,
+    );
+    save_snapshot_with_extra(&persistence_config, &placed_snapshot, saved);
+    maybe_request_terrain_conform(
+        &mut terrain_conform_requests,
+        *terrain_conform_config,
+        piece_type,
+        piece_def.category,
+        piece_def.dimensions,
+        position,
+        rotation,
+    );
 
     info!(
         "Placed {} ({:?}) at {:?} (grid: {:?})",

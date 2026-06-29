@@ -743,10 +743,13 @@ mod tests {
             .world_mut()
             .spawn((
                 BuildingPiece {
+                    stable_id: "piece-1".to_string(),
                     piece_type: PieceTypeId(1),
                     grid_position: IVec3::ZERO,
                     rotation: 0,
                     material: BuildingMaterialType::StoneBrick,
+                    grounded: false,
+                    parent_ids: Vec::new(),
                 },
                 Transform::from_xyz(1.0, 2.0, 3.0),
                 Stability {

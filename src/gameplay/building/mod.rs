@@ -8,6 +8,7 @@
 
 pub mod ghost;
 pub mod grid;
+pub mod persistence;
 pub mod snap;
 pub mod stability;
 pub mod types;
@@ -19,6 +20,7 @@ use crate::input::manager::ActionState;
 
 pub use ghost::*;
 pub use grid::*;
+pub use persistence::*;
 pub use snap::*;
 pub use stability::*;
 pub use types::*;
@@ -32,10 +34,14 @@ impl Plugin for BuildingPlugin {
             .init_resource::<BuildingGrid>()
             .init_resource::<SnapPointIndex>()
             .init_resource::<BuildingState>()
+            .init_resource::<ConstructionPersistenceConfig>()
+            .init_resource::<ConstructionPersistenceState>()
+            .init_resource::<ConstructionTerrainConformConfig>()
             .init_resource::<SnapConfig>()
             .init_resource::<StabilityConfig>()
             .init_resource::<DirtyStabilityIslands>()
             .init_resource::<PendingStabilityCollapses>()
+            .add_message::<ConstructionTerrainConformRequest>()
             .add_systems(
                 Startup,
                 (setup_building_piece_registry, setup_ghost_materials),
@@ -49,9 +55,12 @@ impl Plugin for BuildingPlugin {
                     detect_snap_points,
                     update_building_ghost,
                     place_building_piece,
+                    delete_aimed_building_piece,
                     recompute_dirty_stability,
                     collapse_unstable_building_pieces,
+                    log_unsupported_terrain_conform_requests,
                     draw_stability_outlines,
+                    load_saved_construction_pieces,
                 )
                     .chain(),
             );
