@@ -118,6 +118,22 @@ import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_n
     }).geometry;
   }`,
   },
+  {
+    label: "GPU ring invalidation after impostor atlas bake",
+    expected: `  private setImpostorAtlases(atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>): void {
+    for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
+    this.impostorAtlases = { ...atlases };
+    this.disposeImpostorMaterials();
+    this.updateImpostorMaterials();
+  }`,
+    replacement: `  private setImpostorAtlases(atlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>): void {
+    for (const atlas of Object.values(this.impostorAtlases)) atlas?.dispose();
+    this.impostorAtlases = { ...atlases };
+    this.disposeImpostorMaterials();
+    this.updateImpostorMaterials();
+    this.clearGpuRing();
+  }`,
+  },
 ];
 
 export function wireTreeSystemSource(input) {
