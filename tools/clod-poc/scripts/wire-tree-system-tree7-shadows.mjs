@@ -6,6 +6,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system.ts");
 
 const REALTIME_IMPORT_LABEL = "realtime shadow cascade imports";
+const SHADOW_LOOP_LABEL = "tree GPU ring shadow-only mesh loop";
+const SHADOW_METHOD_LABEL = "tree GPU ring shadow tier draw method";
 const FINAL_REALTIME_IMPORTS = `import type { EnvironmentLighting } from "../environment/environment.js";
 import { getRealtimeSunShadowCascadeCameras, markAsRealtimeSunShadowCaster } from "../rendering/realtime_sun_shadows.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
@@ -69,7 +71,7 @@ import type { ForestLightingMaterialState } from "../forest_lighting/index.js";`
     const materialHandles = {} as Record<string, TreeMaterialHandle>;`,
   },
   {
-    label: "tree GPU ring shadow-only mesh loop",
+    label: SHADOW_LOOP_LABEL,
     expected: `        meshes.push(this.createGpuRingTierDraw(
           species,
           lod,
@@ -145,7 +147,7 @@ import type { ForestLightingMaterialState } from "../forest_lighting/index.js";`
     replacement: `    mesh.castShadow = false;`,
   },
   {
-    label: "tree GPU ring shadow tier draw method",
+    label: SHADOW_METHOD_LABEL,
     expected: `  private usesGpuRingPrepass(lod: TreeLod): boolean {`,
     replacement: `  private createGpuRingShadowTierDraw(
     species: TreeSpeciesId,
@@ -216,6 +218,10 @@ export function wireTreeSystemTree7Source(input) {
   }
 
   for (const edit of EDITS) {
+    if (tree8AlreadySatisfiesTree7Edit(source, edit.label)) {
+      skipped.push(edit.label);
+      continue;
+    }
     const expectedCount = countOccurrences(source, edit.expected);
     const replacementCount = countOccurrences(source, edit.replacement);
     if (replacementCount === 1) {
@@ -248,6 +254,12 @@ if (isCli()) {
   console.log(`${mode} ${defaultTreeSystemPath}`);
   console.log(`Applied: ${result.applied.length ? result.applied.join(", ") : "none"}`);
   console.log(`Already present: ${result.skipped.length ? result.skipped.join(", ") : "none"}`);
+}
+
+function tree8AlreadySatisfiesTree7Edit(source, label) {
+  if (label === SHADOW_METHOD_LABEL) return countOccurrences(source, "  private createGpuRingShadowTierDraw(") > 0;
+  if (label === SHADOW_LOOP_LABEL) return source.includes("this.createGpuRingShadowMaterialHandle(") && source.includes("this.createGpuRingShadowTierDraw(");
+  return false;
 }
 
 function normalizeRealtimeShadowImports(source) {
