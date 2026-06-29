@@ -1,14 +1,10 @@
 use std::borrow::Cow;
 use std::sync::mpsc;
 
-use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy::prelude::*;
-use bevy::render::render_graph::{
-    NodeRunError, RenderGraphContext, RenderGraphExt, RenderLabel, ViewNode, ViewNodeRunner,
-};
+use bevy::render::render_graph::{NodeRunError, RenderGraphContext, RenderLabel, ViewNode};
 use bevy::render::render_resource::*;
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
-use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
 use super::drift_gate::WorldSourceDriftSamplePoint;
 use super::drift_readback::{
@@ -20,37 +16,6 @@ use super::drift_readback_staging::decode_staged_gpu_world_source_drift_bytes;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
 pub struct GpuWorldSourceDriftReadbackLabel;
-
-pub struct GpuWorldSourceDriftReadbackPlugin;
-
-impl Plugin for GpuWorldSourceDriftReadbackPlugin {
-    fn build(&self, app: &mut App) {
-        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .init_resource::<GpuWorldSourceDriftReadbackRequest>()
-                .add_systems(RenderStartup, init_gpu_world_source_drift_readback_pipeline)
-                .add_systems(
-                    Render,
-                    prepare_gpu_world_source_drift_readback_dispatch
-                        .in_set(RenderSystems::PrepareResources),
-                )
-                .add_systems(
-                    Render,
-                    decode_staged_gpu_world_source_drift_readback.in_set(RenderSystems::Cleanup),
-                );
-            render_app.add_render_graph_node::<ViewNodeRunner<GpuWorldSourceDriftReadbackNode>>(
-                Core3d,
-                GpuWorldSourceDriftReadbackLabel,
-            );
-            render_app.add_render_graph_edges(
-                Core3d,
-                (GpuWorldSourceDriftReadbackLabel, Node3d::StartMainPass),
-            );
-        } else {
-            warn!("Render sub-app not available; WorldSource drift readback disabled");
-        }
-    }
-}
 
 #[derive(Resource, Debug, Clone, Default)]
 pub struct GpuWorldSourceDriftReadbackRequest {
@@ -386,7 +351,8 @@ pub fn decode_staged_gpu_world_source_drift_readback(
         return;
     }
     let Some(staging_buffer) = buffers.staging_buffer.as_ref() else {
-        state.latest_result = WorldSourceGpuReadbackResult::unavailable("gpu_readback_missing_staging_buffer");
+        state.latest_result =
+            WorldSourceGpuReadbackResult::unavailable("gpu_readback_missing_staging_buffer");
         return;
     };
 
