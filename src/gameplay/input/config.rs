@@ -33,11 +33,9 @@ pub enum GameAction {
     Chat,
     Map,
     Screenshot,
-    // Building
     ToggleBuildingMode,
     ToggleSnapMode,
     RotatePiece,
-    // Spells
     CastFire,
     CastWater,
     CastAir,
@@ -60,16 +58,14 @@ impl Default for InputConfig {
         bindings.insert(GameAction::Sprint, KeyCode::ShiftLeft);
         bindings.insert(GameAction::Crouch, KeyCode::ControlLeft);
         bindings.insert(GameAction::Interact, KeyCode::KeyE);
-        bindings.insert(GameAction::ToggleInventory, KeyCode::KeyI); // Also Tab commonly
+        bindings.insert(GameAction::ToggleInventory, KeyCode::KeyI);
         bindings.insert(GameAction::ToggleMenu, KeyCode::Escape);
-        bindings.insert(GameAction::ToggleFog, KeyCode::KeyP); // Alt+P logic handled in specific system? Or just bind P for now
+        bindings.insert(GameAction::ToggleFog, KeyCode::KeyP);
         bindings.insert(GameAction::ToggleDebug, KeyCode::F3);
         bindings.insert(GameAction::ToggleFly, KeyCode::F1);
         bindings.insert(GameAction::Chat, KeyCode::Enter);
         bindings.insert(GameAction::Map, KeyCode::KeyM);
         bindings.insert(GameAction::Screenshot, KeyCode::F12);
-
-        // Hotbar
         bindings.insert(GameAction::Hotbar1, KeyCode::Digit1);
         bindings.insert(GameAction::Hotbar2, KeyCode::Digit2);
         bindings.insert(GameAction::Hotbar3, KeyCode::Digit3);
@@ -79,16 +75,12 @@ impl Default for InputConfig {
         bindings.insert(GameAction::Hotbar7, KeyCode::Digit7);
         bindings.insert(GameAction::Hotbar8, KeyCode::Digit8);
         bindings.insert(GameAction::Hotbar9, KeyCode::Digit9);
-
-        // Building
         bindings.insert(GameAction::ToggleBuildingMode, KeyCode::KeyB);
         bindings.insert(GameAction::ToggleSnapMode, KeyCode::KeyX);
         bindings.insert(GameAction::RotatePiece, KeyCode::KeyR);
-
-        // Spells
-        bindings.insert(GameAction::CastFire, KeyCode::Digit1);
-        bindings.insert(GameAction::CastWater, KeyCode::Digit2);
-        bindings.insert(GameAction::CastAir, KeyCode::Digit3);
+        bindings.insert(GameAction::CastFire, KeyCode::KeyF);
+        bindings.insert(GameAction::CastWater, KeyCode::KeyG);
+        bindings.insert(GameAction::CastAir, KeyCode::KeyH);
         bindings.insert(GameAction::ToggleSpellMenu, KeyCode::KeyV);
 
         Self { bindings }
@@ -106,7 +98,6 @@ pub fn load_inputs(mut config: ResMut<InputConfig>) {
             Err(e) => warn!("Failed to read input config: {}", e),
         }
     } else {
-        // Create default if missing
         save_inputs(&config);
     }
 }
