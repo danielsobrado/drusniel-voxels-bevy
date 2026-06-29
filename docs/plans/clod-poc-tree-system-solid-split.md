@@ -1,9 +1,9 @@
 # clod-poc TreeSystem SOLID Split
 
 `tools/clod-poc/src/trees/tree_system.ts` is too large and currently mixes orchestration,
-math, GPU policy, stats, mesh attribute writes, mesh bounds refresh, impostor state,
-GPU-ring draw resources, GPU-ring prepass creation, lighting-proxy projection, and
-lifecycle cleanup. Split it in small behavior-preserving steps only.
+math, GPU policy, stats, mesh attribute writes, mesh write-state bookkeeping,
+mesh bounds refresh, impostor state, GPU-ring draw resources, GPU-ring prepass creation,
+lighting-proxy projection, and lifecycle cleanup. Split it in small behavior-preserving steps only.
 
 ## Current extracted modules
 
@@ -41,6 +41,13 @@ lifecycle cleanup. Split it in small behavior-preserving steps only.
   - `writeTreeImpostorUvRectIfChanged`
   - `writeUvRectIfChanged`
   - instance attribute accessors
+
+- `tree_system_write_state.ts`
+  - `createTreeMeshWriteState`
+  - `resetTreeMeshWriteState`
+  - `resetTreeMeshWriteStateForGrid`
+  - write count helpers
+  - dirty-flag mark helpers
 
 - `tree_system_mesh_bounds.ts`
   - `updateTreeMeshAfterLod`
@@ -91,15 +98,17 @@ Do these as separate commits, with tests after each commit.
 
 4. Replace mesh attribute private methods with `tree_system_instance_attributes.ts`.
 
-5. Replace mesh post-LOD update/bounds private methods with `tree_system_mesh_bounds.ts`.
+5. Replace write-state private methods with `tree_system_write_state.ts`.
 
-6. Replace impostor private methods with `tree_system_impostor_resources.ts`.
+6. Replace mesh post-LOD update/bounds private methods with `tree_system_mesh_bounds.ts`.
 
-7. Replace patch cleanup and loose object disposal with `tree_system_lifecycle.ts`.
+7. Replace impostor private methods with `tree_system_impostor_resources.ts`.
 
-8. Replace CPU visible lighting-proxy generation with `tree_system_lighting_proxies.ts`.
+8. Replace patch cleanup and loose object disposal with `tree_system_lifecycle.ts`.
 
-9. Replace GPU-ring draw internals with `tree_system_gpu_ring_draw.ts`:
+9. Replace CPU visible lighting-proxy generation with `tree_system_lighting_proxies.ts`.
+
+10. Replace GPU-ring draw internals with `tree_system_gpu_ring_draw.ts`:
    - `createGpuRingDrawResources`
    - `createGpuRingTierDraw`
    - `createStorageInstancedAttribute`
@@ -107,9 +116,9 @@ Do these as separate commits, with tests after each commit.
    - `setGpuRingIndirect`
    - `gpuBufferForAttribute`
 
-10. Replace GPU-ring prepass private methods with `tree_system_gpu_ring_prepass.ts`.
+11. Replace GPU-ring prepass private methods with `tree_system_gpu_ring_prepass.ts`.
 
-11. Wire TREE-4 geometry selection using `selectTreeGpuRingGeometry` after the helper replacements are green.
+12. Wire TREE-4 geometry selection using `selectTreeGpuRingGeometry` after the helper replacements are green.
 
 ## Rules
 
