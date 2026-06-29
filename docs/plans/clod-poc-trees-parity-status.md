@@ -19,6 +19,8 @@ This status note tracks the implementation state for `docs/plans/clod-poc-trees-
 Implemented:
 
 - `tree_ring_shadow_casters.ts` defines the per-cascade caster group layout, fixed cascade/frustum-plane packing, and cascade-plane extraction from `THREE.Camera`.
+- `tree_ring_shadow_casters.ts` includes CPU-side caster cascade selection and per-(cascade,species,lod) group count helpers for parity checks.
+- `tree_ring_shadow_casters.test.ts` verifies cascade plane packing, cascade selection, group counts, and per-group overflow clamping.
 - `tree_system_gpu_ring_draw.ts` can allocate optional `shadowCell` and `shadowIndirect` GPU buffers for per-cascade caster lists.
 - `tree_ring.compute.wgsl` now has shadow counters, shadow indirect args, shadow-cell output, cascade frustum checks, and appends tree casters before visible camera frustum culling.
 - `tree_ring_compute.ts` binds the shadow buffers, packs shadow cascade planes into the WGSL uniform layout, builds shadow indirect args, and disables shadow writes unless real output buffers are available.
@@ -32,7 +34,7 @@ Still required before calling TREE-7 complete:
 - Verify `tree_system.ts` now imports `markAsRealtimeSunShadowCaster`, `TREE_RING_SHADOW_CASCADE_COUNT`, and `treeRingShadowCasterGroupIndex`.
 - Verify `createGpuRingDrawResources(...)` now creates `shadowRingBuffers`, one shadow material handle per cascade/species/LOD, and one `createGpuRingShadowTierDraw(...)` mesh per caster group.
 - Verify visible GPU-ring meshes have `castShadow=false`, so they do not double-cast against the shadow-only meshes.
-- Add CPU/GPU caster-count parity once shadow readback is available.
+- Add GPU caster-count readback if we want full CPU/GPU caster-count parity instead of CPU contract coverage only.
 - Capture a low-sun shot proving off-screen trees can still cast.
 
 ## Still required before calling Epic A+B closed
