@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { defineScreenshots, writeVisualSweepUnavailable } from "../screenshots.js";
 import { runGateA1VisualSweep } from "../visualSweepGate.js";
 import type { AcceptanceConfig } from "../acceptanceTypes.js";
+import { evaluateTreeImpostorAcceptance } from "../../trees/tree_impostor_acceptance.js";
 
 function makeConfig(visualEnabled: boolean): AcceptanceConfig {
   return {
@@ -94,5 +95,32 @@ describe("visual honesty", () => {
     const screenshotDir = join(tmpDir, "screenshots");
     const fakePng = join(screenshotDir, "test_scene_overview.png");
     expect(existsSync(fakePng)).toBe(false);
+  });
+
+  it("TREE-11 rejects flat, popping, mismatched, or slower tree impostors", () => {
+    const report = evaluateTreeImpostorAcceptance(
+      {
+        luminanceMean: 0.5,
+        luminanceStdDev: 0.001,
+        maxViewBlendDelta: 0.4,
+        nearImpostorColorDelta: 0.5,
+        boundaryHoleRatio: 0.001,
+        boundaryDoubleDrawRatio: 0.002,
+      },
+      {
+        baselineFrameMsP95: 12,
+        impostorFrameMsP95: 12,
+      },
+    );
+
+    expect(report.status).toBe("fail");
+    expect(report.failures.map((failure) => failure.code)).toEqual(expect.arrayContaining([
+      "TREE_IMPOSTOR_FLAT_LIGHTING",
+      "TREE_IMPOSTOR_VIEW_BLEND_POP",
+      "TREE_IMPOSTOR_NEAR_COLOR_MISMATCH",
+      "TREE_IMPOSTOR_BOUNDARY_HOLES",
+      "TREE_IMPOSTOR_BOUNDARY_DOUBLE_DRAW",
+      "TREE_IMPOSTOR_PERF_REGRESSION",
+    ]));
   });
 });

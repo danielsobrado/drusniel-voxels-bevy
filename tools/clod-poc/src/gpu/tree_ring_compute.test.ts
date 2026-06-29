@@ -5,8 +5,11 @@ import { DEFAULT_TREE_SETTINGS } from "../trees/tree_config.js";
 import {
   TREE_GPU_RING_CELL,
   TREE_GPU_RING_GROUP_COUNT,
+  TREE_GPU_RING_SHADOW_GROUP_COUNT,
   packTreeGpuRingParams,
   resolveTreeGpuRingReadbackCounts,
+  treeGpuRingBuildIndirectWorkgroups,
+  treeGpuRingCounterWorkgroups,
   treeGpuRingCullWorkgroups,
   treeGpuRingGroupCapacity,
   treeGpuRingGroupIndex,
@@ -25,6 +28,7 @@ describe("tree GPU ring compute helpers", () => {
     expect(grid).toBe(Math.ceil((settings.distanceM * 2) / TREE_GPU_RING_CELL));
     expect(treeGpuRingSlotCount(settings)).toBe(grid * grid);
     expect(TREE_GPU_RING_GROUP_COUNT).toBe(12);
+    expect(TREE_GPU_RING_SHADOW_GROUP_COUNT).toBe(48);
   });
 
   it("packs ring dispatch params in the WGSL uniform layout", () => {
@@ -41,17 +45,22 @@ describe("tree GPU ring compute helpers", () => {
         impostorFraction: 1,
       },
     };
+    const shadowPlanes = new Float32Array(96);
+    shadowPlanes[0] = 7;
+    shadowPlanes[95] = 9;
     const packed = packTreeGpuRingParams(settings, {
       centerX: 12,
       centerZ: 34,
       worldCells: 256,
       maxInstancesPerGroup: 99,
+      maxShadowCastersPerGroup: 77,
       indexCounts: {
         oak: { near: 111, mid: 222, far: 333, impostor: 444 },
         pine: { near: 555, mid: 666, far: 777, impostor: 888 },
         dead: { near: 999, mid: 1111, far: 1222, impostor: 1333 },
       },
       frustumPlanes: new Float32Array([1, 0, 0, 5]),
+      shadowCascadePlanes: shadowPlanes,
     });
     const f32 = new Float32Array(packed);
     const u32 = new Uint32Array(packed);
@@ -69,8 +78,13 @@ describe("tree GPU ring compute helpers", () => {
     expect(u32[44]).toBe(99);
     expect(u32[45]).toBe(treeGpuRingGrid(settings));
     expect(u32[46]).toBe(1234);
+    expect(u32[47]).toBe(77);
     expect(f32[48]).toBeCloseTo(1.08, 4);
     expect(f32[51]).toBeCloseTo(0.08, 4);
+    expect(f32[64]).toBe(1);
+    expect(f32[67]).toBe(5);
+    expect(f32[88]).toBe(7);
+    expect(f32[183]).toBe(9);
   });
 
   it("keys ring resources by settings that affect scatter and draw capacity", () => {
@@ -87,7 +101,7 @@ describe("tree GPU ring compute helpers", () => {
     })).toBe(8);
   });
 
-  it("uses configured workgroup size for shader composition and cull dispatch sizing", () => {
+  it("uses configured workgroup size for shader composition and dispatch sizing", () => {
     const settings = {
       ...DEFAULT_TREE_SETTINGS,
       gpu: { ...DEFAULT_TREE_SETTINGS.gpu, workgroupSize: 128 as const },
@@ -95,6 +109,8 @@ describe("tree GPU ring compute helpers", () => {
 
     expect(composeTreeRingShader(128)).toContain("const TREE_WORKGROUP_SIZE: u32 = 128u;");
     expect(treeGpuRingCullWorkgroups(settings)).toBe(Math.ceil(treeGpuRingSlotCount(settings) / 128));
+    expect(treeGpuRingCounterWorkgroups(settings)).toBe(Math.ceil((TREE_GPU_RING_SHADOW_GROUP_COUNT * 5) / 128));
+    expect(treeGpuRingBuildIndirectWorkgroups(settings)).toBe(1);
     expect(treeGpuRingKey(settings, 256)).not.toBe(treeGpuRingKey(DEFAULT_TREE_SETTINGS, 256));
   });
 
@@ -144,16 +160,20 @@ describe("tree GPU ring compute helpers", () => {
 });
 
 describe("tree GPU ring shader source", () => {
-  it("contains the Stage 1 compact and indirect entry points", () => {
+  it("contains visible and shadow compact/indirect entry points", () => {
     expect(treeRingShader).toContain("@binding(1) var<storage, read_write> counters");
     expect(treeRingShader).toContain("@binding(2) var<storage, read_write> indirect_args");
     expect(treeRingShader).toContain("@binding(3) var<storage, read_write> out_cell");
+    expect(treeRingShader).toContain("@binding(4) var<storage, read_write> shadow_counters");
+    expect(treeRingShader).toContain("@binding(5) var<storage, read_write> shadow_indirect_args");
+    expect(treeRingShader).toContain("@binding(6) var<storage, read_write> out_shadow_cell");
     expect(treeRingShader).toContain("fn clear_counters");
     expect(treeRingShader).toContain("fn tree_cull");
     expect(treeRingShader).toContain("fn build_indirect_args");
     expect(treeRingShader).toContain("atomicAdd");
     expect(treeRingShader).toContain("TREE_GROUP_COUNT");
-    expect(treeRingShader).toContain("group_index(species, lod)");
+    expect(treeRingShader).toContain("TREE_SHADOW_GROUP_COUNT");
+    expect(treeRingShader).toContain("shadow_group_index(cascade, species, lod)");
   });
 
   it("overlaps all adjacent LOD rings before the material dithers the transition", () => {
@@ -163,6 +183,16 @@ describe("tree GPU ring shader source", () => {
     expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z");
     expect(treeRingShader).toContain("append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w");
     expect(treeRingShader).toContain("dist > params.center_radius.z + params.lod.w");
+  });
+
+  it("appends shadow casters before visible camera frustum culling", () => {
+    const shadowIndex = treeRingShader.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
+    const frustumIndex = treeRingShader.indexOf("if (!in_frustum(shadow_center, 8.0)) { return; }");
+
+    expect(shadowIndex).toBeGreaterThan(0);
+    expect(frustumIndex).toBeGreaterThan(shadowIndex);
+    expect(treeRingShader).toContain("in_shadow_cascade_frustum(cascade, center, 12.0)");
+    expect(treeRingShader).toContain("shadow_indirect_args[base + 4u] = group * max_per_group");
   });
 });
 

@@ -20,6 +20,7 @@ const SHADOW_RADIUS = 1.15;
 const RECEIVER_KEY = "__drusnielTerrainShadowReceiver";
 const IS_RECEIVER_KEY = "__drusnielIsTerrainShadowReceiver";
 const ADD_PATCH_KEY = "__drusnielTerrainShadowAddPatch";
+const SUN_SHADOW_HANDLE_KEY = "__drusnielRealtimeSunShadows";
 
 type ShadowCapableRenderer = (THREE.WebGLRenderer | WebGPURenderer) & {
   shadowMap: { enabled: boolean };
@@ -87,8 +88,17 @@ export function installRealtimeSunShadows(options: RealtimeSunShadowOptions): Su
   requestAnimationFrame(() => refreshUntilReady(csm, refresh));
 
   const debugHandle = { sun, csm, refresh };
-  (window as unknown as { __drusnielRealtimeSunShadows?: SunShadowDebugHandle }).__drusnielRealtimeSunShadows = debugHandle;
+  (window as unknown as { [SUN_SHADOW_HANDLE_KEY]?: SunShadowDebugHandle })[SUN_SHADOW_HANDLE_KEY] = debugHandle;
   return debugHandle;
+}
+
+export function getRealtimeSunShadowCascadeCameras(): THREE.Camera[] {
+  if (typeof window === "undefined") return [];
+  const handle = (window as unknown as { [SUN_SHADOW_HANDLE_KEY]?: SunShadowDebugHandle })[SUN_SHADOW_HANDLE_KEY];
+  const csm = handle?.csm as unknown as { lights?: Array<{ shadow?: { camera?: THREE.Camera } }> } | null | undefined;
+  const cameras = csm?.lights?.map((light) => light.shadow?.camera).filter((camera): camera is THREE.Camera => !!camera) ?? [];
+  if (cameras.length > 0) return cameras;
+  return handle?.sun.shadow.camera ? [handle.sun.shadow.camera] : [];
 }
 
 function setupCsmSunShadows(
