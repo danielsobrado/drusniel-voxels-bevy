@@ -3,7 +3,9 @@ import * as THREE from "three";
 import {
   cloneTreeSettings,
   createTreeImpostorBlendMaterial,
+  createTreeImpostorBlendNodeMaterial,
   createTreeImpostorMaterial,
+  createTreeImpostorNodeMaterial,
   TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER,
   TREE_IMPOSTOR_BLEND_VERTEX_SHADER,
   TREE_IMPOSTOR_FRAGMENT_SHADER,
@@ -40,6 +42,24 @@ describe("tree impostor material contracts", () => {
     expect(material.uniforms.normalDepthMap.value).toBe(atlas.normalDepth);
     expect(material.uniforms.hasNormalDepthMap.value).toBe(1);
     expect(material.uniforms.alphaTest.value).toBe(0.42);
+    expect(material.side).toBe(THREE.DoubleSide);
+    expect(material.depthWrite).toBe(true);
+    expect(material.transparent).toBe(false);
+  });
+
+  it("creates WebGPU single-frame node material with LOD dither mask", () => {
+    const material = createTreeImpostorNodeMaterial(cloneTreeSettings(), fakeAtlas());
+
+    expect((material as unknown as { maskNode?: unknown }).maskNode).toBeDefined();
+    expect(material.side).toBe(THREE.DoubleSide);
+    expect(material.depthWrite).toBe(true);
+    expect(material.transparent).toBe(false);
+  });
+
+  it("creates WebGPU four-tile node material with LOD dither mask", () => {
+    const material = createTreeImpostorBlendNodeMaterial(cloneTreeSettings(), fakeAtlas());
+
+    expect((material as unknown as { maskNode?: unknown }).maskNode).toBeDefined();
     expect(material.side).toBe(THREE.DoubleSide);
     expect(material.depthWrite).toBe(true);
     expect(material.transparent).toBe(false);
