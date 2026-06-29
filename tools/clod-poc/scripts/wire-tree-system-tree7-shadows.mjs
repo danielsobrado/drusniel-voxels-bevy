@@ -5,6 +5,16 @@ import { dirname, resolve } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system.ts");
 
+const REALTIME_IMPORT_LABEL = "realtime shadow cascade imports";
+const FINAL_REALTIME_IMPORTS = `import type { EnvironmentLighting } from "../environment/environment.js";
+import { getRealtimeSunShadowCascadeCameras, markAsRealtimeSunShadowCaster } from "../rendering/realtime_sun_shadows.js";
+import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
+import {
+  TREE_RING_SHADOW_CASCADE_COUNT,
+  treeRingShadowCascadePlanesFromCameras,
+  treeRingShadowCasterGroupIndex,
+} from "./tree_ring_shadow_casters.js";`;
+
 const EDITS = [
   {
     label: "tree shadow group count import",
@@ -17,22 +27,10 @@ const EDITS = [
   treeGpuRingKey,`,
   },
   {
-    // Inserts the realtime-shadow imports in their FINAL form in one step. Splitting this into
-    // three sequential edits (insert, then add markAsRealtimeSunShadowCaster, then expand the
-    // casters import) was not idempotent: the later edits mutated the lines this edit inserted,
-    // so the intermediate `replacement` never persisted and a second pass could neither match the
-    // already-applied text nor the original source.
-    label: "realtime shadow cascade imports",
+    label: REALTIME_IMPORT_LABEL,
     expected: `import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";`,
-    replacement: `import type { EnvironmentLighting } from "../environment/environment.js";
-import { getRealtimeSunShadowCascadeCameras, markAsRealtimeSunShadowCaster } from "../rendering/realtime_sun_shadows.js";
-import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
-import {
-  TREE_RING_SHADOW_CASCADE_COUNT,
-  treeRingShadowCascadePlanesFromCameras,
-  treeRingShadowCasterGroupIndex,
-} from "./tree_ring_shadow_casters.js";`,
+    replacement: FINAL_REALTIME_IMPORTS,
   },
   {
     label: "tree GPU ring resource shadow fields",
@@ -211,6 +209,12 @@ export function wireTreeSystemTree7Source(input) {
   const applied = [];
   const skipped = [];
 
+  const normalized = normalizeRealtimeShadowImports(source);
+  if (normalized !== source) {
+    source = normalized;
+    changed = true;
+  }
+
   for (const edit of EDITS) {
     const expectedCount = countOccurrences(source, edit.expected);
     const replacementCount = countOccurrences(source, edit.replacement);
@@ -244,6 +248,18 @@ if (isCli()) {
   console.log(`${mode} ${defaultTreeSystemPath}`);
   console.log(`Applied: ${result.applied.length ? result.applied.join(", ") : "none"}`);
   console.log(`Already present: ${result.skipped.length ? result.skipped.join(", ") : "none"}`);
+}
+
+function normalizeRealtimeShadowImports(source) {
+  if (source.includes(FINAL_REALTIME_IMPORTS)) return source;
+  if (!source.includes("getRealtimeSunShadowCascadeCameras") && !source.includes("treeRingShadowCascadePlanesFromCameras")) return source;
+  let next = source
+    .replace(/import \{[^\n]*getRealtimeSunShadowCascadeCameras[^\n]*\} from "\.\.\/rendering\/realtime_sun_shadows\.js";\n/g, "")
+    .replace(/import \{\n(?:  [A-Z_]+,\n)?  treeRingShadowCascadePlanesFromCameras,\n(?:  treeRingShadowCasterGroupIndex,\n)?\} from "\.\/tree_ring_shadow_casters\.js";\n/g, "")
+    .replace(/import \{[^\n]*treeRingShadowCascadePlanesFromCameras[^\n]*\} from "\.\/tree_ring_shadow_casters\.js";\n/g, "");
+  const anchor = `import type { EnvironmentLighting } from "../environment/environment.js";`;
+  if (!next.includes(anchor)) return source;
+  return next.replace(anchor, FINAL_REALTIME_IMPORTS);
 }
 
 function normalizeEol(source) {
