@@ -86,7 +86,7 @@ class TreeSystem {
 }
 `;
 
-const EDIT_COUNT = 13;
+const EDIT_COUNT = 11;
 
 describe("TREE-7 tree system wiring script", () => {
   it("applies shadow buffer, shadow-only mesh, and dispatch rewrites", () => {

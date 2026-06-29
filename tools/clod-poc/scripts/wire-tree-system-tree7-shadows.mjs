@@ -17,23 +17,18 @@ const EDITS = [
   treeGpuRingKey,`,
   },
   {
+    // Inserts the realtime-shadow imports in their FINAL form in one step. Splitting this into
+    // three sequential edits (insert, then add markAsRealtimeSunShadowCaster, then expand the
+    // casters import) was not idempotent: the later edits mutated the lines this edit inserted,
+    // so the intermediate `replacement` never persisted and a second pass could neither match the
+    // already-applied text nor the original source.
     label: "realtime shadow cascade imports",
     expected: `import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";`,
     replacement: `import type { EnvironmentLighting } from "../environment/environment.js";
-import { getRealtimeSunShadowCascadeCameras } from "../rendering/realtime_sun_shadows.js";
+import { getRealtimeSunShadowCascadeCameras, markAsRealtimeSunShadowCaster } from "../rendering/realtime_sun_shadows.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
-import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";`,
-  },
-  {
-    label: "realtime shadow caster layer import",
-    expected: `import { getRealtimeSunShadowCascadeCameras } from "../rendering/realtime_sun_shadows.js";`,
-    replacement: `import { getRealtimeSunShadowCascadeCameras, markAsRealtimeSunShadowCaster } from "../rendering/realtime_sun_shadows.js";`,
-  },
-  {
-    label: "tree shadow caster index import",
-    expected: `import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";`,
-    replacement: `import {
+import {
   TREE_RING_SHADOW_CASCADE_COUNT,
   treeRingShadowCascadePlanesFromCameras,
   treeRingShadowCasterGroupIndex,
