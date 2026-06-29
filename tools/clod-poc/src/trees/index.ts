@@ -14,6 +14,7 @@ export * from "./tree_impostor_material_selector.js";
 export * from "./tree_impostor_octahedral.js";
 export * from "./tree_impostor_runtime.js";
 export * from "./tree_lod.js";
+export * from "./tree_ring_impostor_node_material.js";
 export * from "./tree_ring_math.js";
 export * from "./tree_ring_lighting_proxies.js";
 export * from "./tree_morphology.js";
