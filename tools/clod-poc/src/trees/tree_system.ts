@@ -10,6 +10,7 @@ import {
   treeGpuRingGroupCapacity,
   treeGpuRingGroupIndex,
   TREE_GPU_RING_GROUP_COUNT,
+  TREE_GPU_RING_SHADOW_GROUP_COUNT,
   treeGpuRingKey,
   treeGpuRingSlotCount,
   type TreeGpuRingStats,
@@ -64,7 +65,9 @@ import {
 } from "./tree_node_material.js";
 import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_node_material.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import { getRealtimeSunShadowCascadeCameras } from "../rendering/realtime_sun_shadows.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
+import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";
 
 const TREE_BOUNDS_REFRESH_DISTANCE_M = 1.0;
 const TREE_INSTANCE_ATTRIBUTE_EPSILON = 1e-5;
@@ -205,6 +208,8 @@ interface TreeGpuRingDrawResources {
   meshes: TreeGpuRingMesh[];
   cell: StorageInstancedBufferAttribute;
   indirect: StorageBufferAttribute;
+  shadowCell: StorageInstancedBufferAttribute;
+  shadowIndirect: StorageBufferAttribute;
   outputBuffers: TreeGpuRingOutputBuffers;
   materialHandles: Record<string, TreeMaterialHandle>;
 }
@@ -855,13 +860,17 @@ export class TreeSystem {
     }
     if (this.gpuRingCompute && this.gpuRingDraw) {
       const frustumPlanes = this.frustumPlanes(camera);
+      const shadowCameras = getRealtimeSunShadowCascadeCameras();
+      const shadowCascadePlanes = shadowCameras.length > 0 ? treeRingShadowCascadePlanesFromCameras(shadowCameras) : undefined;
       const dispatched = this.gpuRingCompute.dispatch({
         centerX: center.x,
         centerZ: center.z,
         worldCells: this.worldCells,
         maxInstancesPerGroup: treeGpuRingGroupCapacity(this.settings),
+        maxShadowCastersPerGroup: shadowCascadePlanes ? treeGpuRingGroupCapacity(this.settings) : 0,
         indexCounts: this.gpuRingIndexCounts(),
         frustumPlanes,
+        shadowCascadePlanes,
       });
       if (dispatched) this.setRingDrawsVisible(true);
       this.gpuRingStats = this.gpuRingCompute.stats(true);
@@ -985,6 +994,10 @@ export class TreeSystem {
     indirect.name = "tree-ring-indirect";
     this.gpuBackend.createIndirectStorageAttribute(indirect);
     const cell = this.createStorageInstancedAttribute("cell", sharedInstanceCount);
+    const shadowIndirect = new StorageBufferAttribute(new Uint32Array(TREE_GPU_RING_SHADOW_GROUP_COUNT * 5), 5);
+    shadowIndirect.name = "tree-ring-shadow-indirect";
+    this.gpuBackend.createIndirectStorageAttribute(shadowIndirect);
+    const shadowCell = this.createStorageInstancedAttribute("shadow-cell", count * TREE_GPU_RING_SHADOW_GROUP_COUNT);
     const ringBuffers: TreeRingInstanceBuffers = { cell, capacity: sharedInstanceCount };
     const materialHandles = {} as Record<string, TreeMaterialHandle>;
     const meshes: TreeGpuRingMesh[] = [];
@@ -1022,10 +1035,14 @@ export class TreeSystem {
       meshes,
       cell,
       indirect,
+      shadowCell,
+      shadowIndirect,
       materialHandles,
       outputBuffers: {
         cell: this.gpuBufferForAttribute(cell),
         indirectArgs: this.gpuBufferForAttribute(indirect),
+        shadowCell: this.gpuBufferForAttribute(shadowCell),
+        shadowIndirectArgs: this.gpuBufferForAttribute(shadowIndirect),
       },
     };
   }
