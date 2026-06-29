@@ -199,7 +199,7 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   f32[24] = accept.rockReject;
   f32[25] = accept.snowReject;
   TREE_SPECIES.forEach((species, index) => {
-    f32[28 + index] = speciesWeight(settings, species);
+    f32[TREE_GPU_RING_LAYOUT.speciesWeightsOffset + index] = speciesWeight(settings, species);
   });
   for (const species of TREE_SPECIES) {
     for (const treeLod of TREE_LODS) {
