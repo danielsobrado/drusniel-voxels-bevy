@@ -476,7 +476,7 @@ export const DEFAULT_TREE_FOLIAGE_SETTINGS: TreeFoliageSettings = {
 };
 
 // Impostor atlas budget at defaults: 8x8 tiles * 128px = 1024px atlas.
-// Two RGBA8 atlases cost about 8 MiB/species, about 24 MiB for 3 species.
+// Two RGBA8 atlases cost about 8 MiB/species, about 48 MiB for 6 species.
 export const DEFAULT_TREE_IMPOSTOR_SETTINGS: TreeImpostorSettings = {
   enabled: true,
   bakeOnStart: true,
@@ -683,8 +683,8 @@ function readTreeGpuSettings(raw: NonNullable<TreeYamlConfig["trees"]>["gpu"], f
     fallbackToCpu: readBoolean(raw?.fallback_to_cpu, fallback.fallbackToCpu),
     scatterEnabled: readBoolean(raw?.scatter_enabled, fallback.scatterEnabled),
     cullEnabled: readBoolean(raw?.cull_enabled, fallback.cullEnabled),
-    maxVisible: readIntegerInRange(raw?.max_visible, fallback.maxVisible, 0, 500_000),
-    workgroupSize: readTreeGpuWorkgroupSize(raw?.workgroup_size, fallback.workgroupSize),
+    maxVisible: Math.floor(readNumberAtLeast(raw?.max_visible, fallback.maxVisible, 0)),
+    workgroupSize: readWorkgroupSize(raw?.workgroup_size, fallback.workgroupSize),
     readbackVisibleLists: readBoolean(raw?.readback_visible_lists, fallback.readbackVisibleLists),
     debugForceCpu: readBoolean(raw?.debug_force_cpu, fallback.debugForceCpu),
     debugShowGpuCounts: readBoolean(raw?.debug_show_gpu_counts, fallback.debugShowGpuCounts),
@@ -692,8 +692,13 @@ function readTreeGpuSettings(raw: NonNullable<TreeYamlConfig["trees"]>["gpu"], f
   };
 }
 
+function readWorkgroupSize(value: unknown, fallback: TreeGpuSettings["workgroupSize"]): TreeGpuSettings["workgroupSize"] {
+  return value === 32 || value === 64 || value === 128 || value === 256 ? value : fallback;
+}
+
 function readTreeLodSettings(raw: NonNullable<TreeYamlConfig["trees"]>["lod"], fallback: TreeLodSettings, enabled: boolean): TreeLodSettings {
-  const lod = {
+  const shadowsMaxLod = readTreeShadowMaxLod(raw?.shadows_max_lod, fallback.shadowsMaxLod, enabled);
+  return {
     nearFraction: readFraction(raw?.near_fraction, fallback.nearFraction),
     midFraction: readFraction(raw?.mid_fraction, fallback.midFraction),
     farFraction: readFraction(raw?.far_fraction, fallback.farFraction),
@@ -702,46 +707,49 @@ function readTreeLodSettings(raw: NonNullable<TreeYamlConfig["trees"]>["lod"], f
     crossfadeEnabled: readBoolean(raw?.crossfade_enabled, fallback.crossfadeEnabled),
     crossfadeBandM: readNumberAtLeast(raw?.crossfade_band_m, fallback.crossfadeBandM, 0),
     ditherEnabled: readBoolean(raw?.dither_enabled, fallback.ditherEnabled),
-    shadowsMaxLod: readTreeShadowMaxLod(raw?.shadows_max_lod, fallback.shadowsMaxLod),
+    shadowsMaxLod,
     budgets: {
-      nearMaxVertices: readPositiveInteger(raw?.budgets?.near_max_vertices, fallback.budgets.nearMaxVertices),
-      midMaxVertices: readPositiveInteger(raw?.budgets?.mid_max_vertices, fallback.budgets.midMaxVertices),
-      farMaxVertices: readPositiveInteger(raw?.budgets?.far_max_vertices, fallback.budgets.farMaxVertices),
-      impostorMaxVertices: readPositiveInteger(raw?.budgets?.impostor_max_vertices, fallback.budgets.impostorMaxVertices),
+      nearMaxVertices: Math.floor(readNumberAtLeast(raw?.budgets?.near_max_vertices, fallback.budgets.nearMaxVertices, 0)),
+      midMaxVertices: Math.floor(readNumberAtLeast(raw?.budgets?.mid_max_vertices, fallback.budgets.midMaxVertices, 0)),
+      farMaxVertices: Math.floor(readNumberAtLeast(raw?.budgets?.far_max_vertices, fallback.budgets.farMaxVertices, 0)),
+      impostorMaxVertices: Math.floor(readNumberAtLeast(raw?.budgets?.impostor_max_vertices, fallback.budgets.impostorMaxVertices, 0)),
     },
   };
-  if (lod.midFraction < lod.nearFraction) lod.midFraction = lod.nearFraction;
-  if (lod.farFraction < lod.midFraction) lod.farFraction = lod.midFraction;
-  if (lod.impostorFraction < lod.farFraction) lod.impostorFraction = lod.farFraction;
-  if (enabled && lod.impostorFraction < 0.01) lod.impostorFraction = 0.01;
-  return lod;
+}
+
+function readTreeShadowMaxLod(value: unknown, fallback: TreeShadowMaxLod, enabled: boolean): TreeShadowMaxLod {
+  if (!enabled) return "none";
+  return value === "none" || TREE_LODS.includes(value as TreeLod) ? value as TreeShadowMaxLod : fallback;
 }
 
 function readTreeImpostorSettings(raw: NonNullable<TreeYamlConfig["trees"]>["impostors"], fallback: TreeImpostorSettings): TreeImpostorSettings {
-  const gridSize = readIntegerInRange(raw?.octahedral_grid_size, fallback.octahedralGridSize, 2, 8);
   return {
     enabled: readBoolean(raw?.enabled, fallback.enabled),
     bakeOnStart: readBoolean(raw?.bake_on_start, fallback.bakeOnStart),
     fallbackToPlaceholder: readBoolean(raw?.fallback_to_placeholder, fallback.fallbackToPlaceholder),
-    sourceLod: readTreeImpostorSourceLod(raw?.source_lod, fallback.sourceLod),
-    resolutionPx: readIntegerInRange(raw?.resolution_px, fallback.resolutionPx, 32, 512),
-    octahedralGridSize: gridSize,
-    atlasPaddingPx: readIntegerInRange(raw?.atlas_padding_px, fallback.atlasPaddingPx, 0, 8),
-    alphaTest: readNumberInRange(raw?.alpha_test, fallback.alphaTest, 0, 1),
-    frameUpdateDistanceM: readNumberInRange(raw?.frame_update_distance_m, fallback.frameUpdateDistanceM, 0, 32),
+    sourceLod: readImpostorSourceLod(raw?.source_lod, fallback.sourceLod),
+    resolutionPx: Math.floor(readNumberAtLeast(raw?.resolution_px, fallback.resolutionPx, 16)),
+    octahedralGridSize: Math.floor(readNumberAtLeast(raw?.octahedral_grid_size, fallback.octahedralGridSize, 4)),
+    atlasPaddingPx: Math.floor(readNumberAtLeast(raw?.atlas_padding_px, fallback.atlasPaddingPx, 0)),
+    alphaTest: readNumber(raw?.alpha_test, fallback.alphaTest),
+    frameUpdateDistanceM: readNumberAtLeast(raw?.frame_update_distance_m, fallback.frameUpdateDistanceM, 0),
     axialBillboard: readBoolean(raw?.axial_billboard, fallback.axialBillboard),
     preserveVertical: readBoolean(raw?.preserve_vertical, fallback.preserveVertical),
-    maxBakesPerFrame: readIntegerInRange(raw?.max_bakes_per_frame, fallback.maxBakesPerFrame, 1, 8),
+    maxBakesPerFrame: Math.floor(readNumberAtLeast(raw?.max_bakes_per_frame, fallback.maxBakesPerFrame, 1)),
     debugShowFrames: readBoolean(raw?.debug_show_frames, fallback.debugShowFrames),
-    debugFreezeFrame: readIntegerInRange(raw?.debug_freeze_frame, fallback.debugFreezeFrame, -1, gridSize * gridSize - 1),
+    debugFreezeFrame: Math.floor(readNumber(raw?.debug_freeze_frame, fallback.debugFreezeFrame)),
     futureNormalDepth: readBoolean(raw?.future_normal_depth, fallback.futureNormalDepth),
   };
+}
+
+function readImpostorSourceLod(value: unknown, fallback: TreeImpostorSettings["sourceLod"]): TreeImpostorSettings["sourceLod"] {
+  return value === "near" || value === "mid" || value === "far" ? value : fallback;
 }
 
 function readTreeWindSettings(raw: NonNullable<TreeYamlConfig["trees"]>["wind"], fallback: TreeWindSettings): TreeWindSettings {
   return {
     enabled: readBoolean(raw?.enabled, fallback.enabled),
-    direction: readWindDirection(raw?.direction, fallback.direction),
+    direction: readVector2(raw?.direction, fallback.direction),
     strength: readNumberAtLeast(raw?.strength, fallback.strength, 0),
     speed: readNumberAtLeast(raw?.speed, fallback.speed, 0),
     gustStrength: readNumberAtLeast(raw?.gust_strength, fallback.gustStrength, 0),
@@ -754,153 +762,130 @@ function readTreeEcologySettings(raw: NonNullable<TreeYamlConfig["trees"]>["ecol
   return {
     enabled: readBoolean(raw?.enabled, fallback.enabled),
     density: {
-      baseDensity: readNumberInRange(raw?.density?.base_density, fallback.density.baseDensity, 0, 4),
-      forestNoiseScaleM: readNumberInRange(raw?.density?.forest_noise_scale_m, fallback.density.forestNoiseScaleM, 4, 1024),
-      forestNoiseStrength: readNumberInRange(raw?.density?.forest_noise_strength, fallback.density.forestNoiseStrength, 0, 1),
-      clearingNoiseScaleM: readNumberInRange(raw?.density?.clearing_noise_scale_m, fallback.density.clearingNoiseScaleM, 4, 2048),
-      clearingThreshold: readNumberInRange(raw?.density?.clearing_threshold, fallback.density.clearingThreshold, 0, 1),
-      clearingSoftness: readNumberInRange(raw?.density?.clearing_softness, fallback.density.clearingSoftness, 0.001, 1),
-      edgeSoftnessM: readNumberInRange(raw?.density?.edge_softness_m, fallback.density.edgeSoftnessM, 0, 256),
+      baseDensity: readNumberAtLeast(raw?.density?.base_density, fallback.density.baseDensity, 0),
+      forestNoiseScaleM: readNumberAtLeast(raw?.density?.forest_noise_scale_m, fallback.density.forestNoiseScaleM, 1),
+      forestNoiseStrength: readNumberAtLeast(raw?.density?.forest_noise_strength, fallback.density.forestNoiseStrength, 0),
+      clearingNoiseScaleM: readNumberAtLeast(raw?.density?.clearing_noise_scale_m, fallback.density.clearingNoiseScaleM, 1),
+      clearingThreshold: readNumber(raw?.density?.clearing_threshold, fallback.density.clearingThreshold),
+      clearingSoftness: readNumberAtLeast(raw?.density?.clearing_softness, fallback.density.clearingSoftness, 0),
+      edgeSoftnessM: readNumberAtLeast(raw?.density?.edge_softness_m, fallback.density.edgeSoftnessM, 0),
     },
     terrain: {
-      lowlandHeightM: readNumberInRange(raw?.terrain?.lowland_height_m, fallback.terrain.lowlandHeightM, -256, 2048),
-      highlandHeightM: readNumberInRange(raw?.terrain?.highland_height_m, fallback.terrain.highlandHeightM, -256, 4096),
-      heightFadeM: readNumberInRange(raw?.terrain?.height_fade_m, fallback.terrain.heightFadeM, 0.001, 512),
-      slopeFadeStartY: readNumberInRange(raw?.terrain?.slope_fade_start_y, fallback.terrain.slopeFadeStartY, 0, 1),
-      slopeFadeEndY: readNumberInRange(raw?.terrain?.slope_fade_end_y, fallback.terrain.slopeFadeEndY, 0, 1),
-      materialWeightPower: readNumberInRange(raw?.terrain?.material_weight_power, fallback.terrain.materialWeightPower, 0.1, 8),
+      lowlandHeightM: readNumber(raw?.terrain?.lowland_height_m, fallback.terrain.lowlandHeightM),
+      highlandHeightM: readNumber(raw?.terrain?.highland_height_m, fallback.terrain.highlandHeightM),
+      heightFadeM: readNumberAtLeast(raw?.terrain?.height_fade_m, fallback.terrain.heightFadeM, 0),
+      slopeFadeStartY: readNumber(raw?.terrain?.slope_fade_start_y, fallback.terrain.slopeFadeStartY),
+      slopeFadeEndY: readNumber(raw?.terrain?.slope_fade_end_y, fallback.terrain.slopeFadeEndY),
+      materialWeightPower: readNumberAtLeast(raw?.terrain?.material_weight_power, fallback.terrain.materialWeightPower, 0.001),
     },
     clustering: {
-      clusterScaleM: readNumberInRange(raw?.clustering?.cluster_scale_m, fallback.clustering.clusterScaleM, 4, 1024),
-      clusterStrength: readNumberInRange(raw?.clustering?.cluster_strength, fallback.clustering.clusterStrength, 0, 1),
-      clusterThreshold: readNumberInRange(raw?.clustering?.cluster_threshold, fallback.clustering.clusterThreshold, 0, 1),
-      minSpacingJitter: readNumberInRange(raw?.clustering?.min_spacing_jitter, fallback.clustering.minSpacingJitter, 0, 1),
+      clusterScaleM: readNumberAtLeast(raw?.clustering?.cluster_scale_m, fallback.clustering.clusterScaleM, 1),
+      clusterStrength: readNumber(raw?.clustering?.cluster_strength, fallback.clustering.clusterStrength),
+      clusterThreshold: readNumber(raw?.clustering?.cluster_threshold, fallback.clustering.clusterThreshold),
+      minSpacingJitter: readNumberAtLeast(raw?.clustering?.min_spacing_jitter, fallback.clustering.minSpacingJitter, 0),
     },
     age: {
-      youngProbability: readNumberInRange(raw?.age?.young_probability, fallback.age.youngProbability, 0, 1),
-      oldProbability: readNumberInRange(raw?.age?.old_probability, fallback.age.oldProbability, 0, 1),
-      scaleYoung: readNumberInRange(raw?.age?.scale_young, fallback.age.scaleYoung, 0.1, 3),
-      scaleMature: readNumberInRange(raw?.age?.scale_mature, fallback.age.scaleMature, 0.1, 3),
-      scaleOld: readNumberInRange(raw?.age?.scale_old, fallback.age.scaleOld, 0.1, 4),
-      scaleVariation: readNumberInRange(raw?.age?.scale_variation, fallback.age.scaleVariation, 0, 1),
+      youngProbability: readFraction(raw?.age?.young_probability, fallback.age.youngProbability),
+      oldProbability: readFraction(raw?.age?.old_probability, fallback.age.oldProbability),
+      scaleYoung: readNumberAtLeast(raw?.age?.scale_young, fallback.age.scaleYoung, 0.01),
+      scaleMature: readNumberAtLeast(raw?.age?.scale_mature, fallback.age.scaleMature, 0.01),
+      scaleOld: readNumberAtLeast(raw?.age?.scale_old, fallback.age.scaleOld, 0.01),
+      scaleVariation: readNumberAtLeast(raw?.age?.scale_variation, fallback.age.scaleVariation, 0),
     },
     speciesZones: readSpeciesZoneMap(fallback.speciesZones, raw?.species_zones),
+  };
+}
+
+function readSpeciesZone(
+  fallback: TreeSpeciesZoneSettings,
+  raw: Partial<{
+    height_preference: unknown;
+    moisture_preference: number;
+    slope_tolerance: number;
+    cluster_bias: number;
+    old_forest_bias: number;
+  }> | undefined,
+): TreeSpeciesZoneSettings {
+  return {
+    heightPreference: readHeightPreference(raw?.height_preference, fallback.heightPreference),
+    moisturePreference: readNumber(raw?.moisture_preference, fallback.moisturePreference),
+    slopeTolerance: readNumberAtLeast(raw?.slope_tolerance, fallback.slopeTolerance, 0),
+    clusterBias: readNumber(raw?.cluster_bias, fallback.clusterBias),
+    oldForestBias: readNumberAtLeast(raw?.old_forest_bias, fallback.oldForestBias, 0),
   };
 }
 
 function readTreeFoliageSettings(raw: NonNullable<TreeYamlConfig["trees"]>["foliage"], fallback: TreeFoliageSettings): TreeFoliageSettings {
   return {
     enabled: readBoolean(raw?.enabled, fallback.enabled),
-    alphaTest: readNumberInRange(raw?.alpha_test, fallback.alphaTest, 0, 1),
-    maskResolutionPx: readIntegerInRange(raw?.mask_resolution_px, fallback.maskResolutionPx, 16, 256),
-    textureAtlasColumns: readIntegerInRange(raw?.texture_atlas_columns, fallback.textureAtlasColumns, 1, 8),
-    textureAtlasRows: readIntegerInRange(raw?.texture_atlas_rows, fallback.textureAtlasRows, 1, 8),
+    alphaTest: readNumber(raw?.alpha_test, fallback.alphaTest),
+    maskResolutionPx: Math.floor(readNumberAtLeast(raw?.mask_resolution_px, fallback.maskResolutionPx, 16)),
+    textureAtlasColumns: Math.floor(readNumberAtLeast(raw?.texture_atlas_columns, fallback.textureAtlasColumns, 1)),
+    textureAtlasRows: Math.floor(readNumberAtLeast(raw?.texture_atlas_rows, fallback.textureAtlasRows, 1)),
     debugShowAlphaCards: readBoolean(raw?.debug_show_alpha_cards, fallback.debugShowAlphaCards),
-    oak: readSpeciesFoliage(fallback.oak, raw?.oak),
-    pine: readSpeciesFoliage(fallback.pine, raw?.pine),
+    oak: readTreeFoliageSpecies(raw?.oak, fallback.oak),
+    pine: readTreeFoliageSpecies(raw?.pine, fallback.pine),
   };
 }
 
-function readSpecies(base: TreeSpeciesSettings, raw: TreeYamlSpecies | undefined): TreeSpeciesSettings {
+function readTreeFoliageSpecies(raw: TreeYamlFoliageSpecies | undefined, fallback: TreeSpeciesFoliageSettings): TreeSpeciesFoliageSettings {
   return {
-    enabled: readBoolean(raw?.enabled, base.enabled),
-    weight: readNumberAtLeast(raw?.weight, base.weight, 0),
-    minHeightM: readNumber(raw?.min_height_m, base.minHeightM),
-    maxHeightM: readNumber(raw?.max_height_m, base.maxHeightM),
-    trunkHeightM: readNumberAtLeast(raw?.trunk_height_m, base.trunkHeightM, 0.1),
-    trunkRadiusM: readNumberAtLeast(raw?.trunk_radius_m, base.trunkRadiusM, 0.01),
-    crownRadiusM: readNumberAtLeast(raw?.crown_radius_m, base.crownRadiusM, 0),
-    morphology: readMorphology(base.morphology, raw?.morphology),
+    cardCountNear: Math.floor(readNumberAtLeast(raw?.card_count_near, fallback.cardCountNear, 0)),
+    cardCountMid: Math.floor(readNumberAtLeast(raw?.card_count_mid, fallback.cardCountMid, 0)),
+    cardCountFar: Math.floor(readNumberAtLeast(raw?.card_count_far, fallback.cardCountFar, 0)),
+    cardWidthM: readNumberAtLeast(raw?.card_width_m, fallback.cardWidthM, 0),
+    cardHeightM: readNumberAtLeast(raw?.card_height_m, fallback.cardHeightM, 0),
+    cardSizeVariation: readNumberAtLeast(raw?.card_size_variation, fallback.cardSizeVariation, 0),
+    clusterSpreadM: readNumberAtLeast(raw?.cluster_spread_m, fallback.clusterSpreadM, 0),
+    crownFlattening: readNumberAtLeast(raw?.crown_flattening, fallback.crownFlattening, 0.01),
+    tintVariation: readNumberAtLeast(raw?.tint_variation, fallback.tintVariation, 0),
+    edgeNoise: readNumberAtLeast(raw?.edge_noise, fallback.edgeNoise, 0),
+    lobeCount: Math.floor(readNumberAtLeast(raw?.lobe_count, fallback.lobeCount, 1)),
+    cutoutRoundness: readNumberAtLeast(raw?.cutout_roundness, fallback.cutoutRoundness, 0),
   };
 }
 
-function readMorphology(base: TreeMorphologySettings, raw: TreeYamlSpecies["morphology"]): TreeMorphologySettings {
+function readSpecies(fallback: TreeSpeciesSettings, raw: TreeYamlSpecies | undefined): TreeSpeciesSettings {
   return {
-    trunkBend: readNumberInRange(raw?.trunk_bend, base.trunkBend, 0, 1.5),
-    trunkTaper: readNumberInRange(raw?.trunk_taper, base.trunkTaper, 0, 0.95),
-    branchLevels: readIntegerInRange(raw?.branch_levels, base.branchLevels, 0, 4),
-    primaryBranchCount: readIntegerInRange(raw?.primary_branch_count, base.primaryBranchCount, 0, 24),
-    secondaryBranchCount: readIntegerInRange(raw?.secondary_branch_count, base.secondaryBranchCount, 0, 8),
-    branchSpread: readNumberInRange(raw?.branch_spread, base.branchSpread, 0, 2),
-    branchUpSweep: readNumberInRange(raw?.branch_up_sweep, base.branchUpSweep, -1, 1.5),
-    branchLength: readNumberInRange(raw?.branch_length, base.branchLength, 0, 8),
-    crownFlattening: readNumberInRange(raw?.crown_flattening, base.crownFlattening, 0.25, 3),
-    crownIrregularity: readNumberInRange(raw?.crown_irregularity, base.crownIrregularity, 0, 1),
-    leafClusterCount: readIntegerInRange(raw?.leaf_cluster_count, base.leafClusterCount, 0, 96),
-    leafCardCount: readIntegerInRange(raw?.leaf_card_count, base.leafCardCount, 0, 192),
+    enabled: readBoolean(raw?.enabled, fallback.enabled),
+    weight: readNumberAtLeast(raw?.weight, fallback.weight, 0),
+    minHeightM: readNumber(raw?.min_height_m, fallback.minHeightM),
+    maxHeightM: readNumber(raw?.max_height_m, fallback.maxHeightM),
+    trunkHeightM: readNumberAtLeast(raw?.trunk_height_m, fallback.trunkHeightM, 0),
+    trunkRadiusM: readNumberAtLeast(raw?.trunk_radius_m, fallback.trunkRadiusM, 0),
+    crownRadiusM: readNumberAtLeast(raw?.crown_radius_m, fallback.crownRadiusM, 0),
+    morphology: {
+      trunkBend: readNumber(raw?.morphology?.trunk_bend, fallback.morphology.trunkBend),
+      trunkTaper: readNumber(raw?.morphology?.trunk_taper, fallback.morphology.trunkTaper),
+      branchLevels: Math.floor(readNumberAtLeast(raw?.morphology?.branch_levels, fallback.morphology.branchLevels, 0)),
+      primaryBranchCount: Math.floor(readNumberAtLeast(raw?.morphology?.primary_branch_count, fallback.morphology.primaryBranchCount, 0)),
+      secondaryBranchCount: Math.floor(readNumberAtLeast(raw?.morphology?.secondary_branch_count, fallback.morphology.secondaryBranchCount, 0)),
+      branchSpread: readNumber(raw?.morphology?.branch_spread, fallback.morphology.branchSpread),
+      branchUpSweep: readNumber(raw?.morphology?.branch_up_sweep, fallback.morphology.branchUpSweep),
+      branchLength: readNumberAtLeast(raw?.morphology?.branch_length, fallback.morphology.branchLength, 0),
+      crownFlattening: readNumberAtLeast(raw?.morphology?.crown_flattening, fallback.morphology.crownFlattening, 0.01),
+      crownIrregularity: readNumberAtLeast(raw?.morphology?.crown_irregularity, fallback.morphology.crownIrregularity, 0),
+      leafClusterCount: Math.floor(readNumberAtLeast(raw?.morphology?.leaf_cluster_count, fallback.morphology.leafClusterCount, 0)),
+      leafCardCount: Math.floor(readNumberAtLeast(raw?.morphology?.leaf_card_count, fallback.morphology.leafCardCount, 0)),
+    },
   };
-}
-
-function readSpeciesZone(fallback: TreeSpeciesZoneSettings, raw: Partial<{ height_preference: unknown; moisture_preference: number; slope_tolerance: number; cluster_bias: number; old_forest_bias: number }> | undefined): TreeSpeciesZoneSettings {
-  return {
-    heightPreference: readHeightPreference(raw?.height_preference, fallback.heightPreference),
-    moisturePreference: readNumberInRange(raw?.moisture_preference, fallback.moisturePreference, 0, 1),
-    slopeTolerance: readNumberInRange(raw?.slope_tolerance, fallback.slopeTolerance, 0, 1),
-    clusterBias: readNumberInRange(raw?.cluster_bias, fallback.clusterBias, 0, 2),
-    oldForestBias: readNumberInRange(raw?.old_forest_bias, fallback.oldForestBias, 0, 2),
-  };
-}
-
-function readSpeciesFoliage(fallback: TreeSpeciesFoliageSettings, raw: TreeYamlFoliageSpecies | undefined): TreeSpeciesFoliageSettings {
-  return {
-    cardCountNear: readIntegerInRange(raw?.card_count_near, fallback.cardCountNear, 0, 256),
-    cardCountMid: readIntegerInRange(raw?.card_count_mid, fallback.cardCountMid, 0, 128),
-    cardCountFar: readIntegerInRange(raw?.card_count_far, fallback.cardCountFar, 0, 16),
-    cardWidthM: readNumberInRange(raw?.card_width_m, fallback.cardWidthM, 0.05, 8),
-    cardHeightM: readNumberInRange(raw?.card_height_m, fallback.cardHeightM, 0.05, 8),
-    cardSizeVariation: readNumberInRange(raw?.card_size_variation, fallback.cardSizeVariation, 0, 1),
-    clusterSpreadM: readNumberInRange(raw?.cluster_spread_m, fallback.clusterSpreadM, 0, 16),
-    crownFlattening: readNumberInRange(raw?.crown_flattening, fallback.crownFlattening, 0.25, 3),
-    tintVariation: readNumberInRange(raw?.tint_variation, fallback.tintVariation, 0, 1),
-    edgeNoise: readNumberInRange(raw?.edge_noise, fallback.edgeNoise, 0, 1),
-    lobeCount: readIntegerInRange(raw?.lobe_count, fallback.lobeCount, 1, 16),
-    cutoutRoundness: readNumberInRange(raw?.cutout_roundness, fallback.cutoutRoundness, 0, 1),
-  };
-}
-
-function readTreeGpuWorkgroupSize(value: unknown, fallback: TreeGpuSettings["workgroupSize"]): TreeGpuSettings["workgroupSize"] {
-  return value === 32 || value === 64 || value === 128 || value === 256 ? value : fallback;
-}
-
-function readTreeShadowMaxLod(value: unknown, fallback: TreeShadowMaxLod): TreeShadowMaxLod {
-  return value === "near" || value === "mid" || value === "far" || value === "impostor" || value === "none" ? value : fallback;
-}
-
-function readTreeImpostorSourceLod(value: unknown, fallback: TreeImpostorSettings["sourceLod"]): TreeImpostorSettings["sourceLod"] {
-  return value === "near" || value === "mid" || value === "far" ? value : fallback;
-}
-
-function readWindDirection(value: unknown, fallback: [number, number]): [number, number] {
-  if (!Array.isArray(value) || value.length < 2) return [...fallback];
-  const x = readNumber(value[0], Number.NaN);
-  const z = readNumber(value[1], Number.NaN);
-  const length = Math.hypot(x, z);
-  if (!Number.isFinite(length) || length <= 1e-5) return [...fallback];
-  return [x / length, z / length];
 }
 
 function readHeightPreference(value: unknown, fallback: TreeSpeciesZoneSettings["heightPreference"]): TreeSpeciesZoneSettings["heightPreference"] {
   return value === "low" || value === "high" || value === "any" ? value : fallback;
 }
 
+function readVector2(value: unknown, fallback: [number, number]): [number, number] {
+  if (!Array.isArray(value) || value.length < 2) return [...fallback];
+  return [readNumber(value[0], fallback[0]), readNumber(value[1], fallback[1])];
+}
+
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function readNumberAtLeast(value: unknown, fallback: number, min: number): number {
-  return Math.max(min, readNumber(value, fallback));
-}
-
-function readNumberInRange(value: unknown, fallback: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, readNumber(value, fallback)));
-}
-
-function readIntegerInRange(value: unknown, fallback: number, min: number, max: number): number {
-  return Math.round(readNumberInRange(value, fallback, min, max));
-}
-
-function readPositiveInteger(value: unknown, fallback: number): number {
-  return Math.max(1, Math.floor(readNumberAtLeast(value, fallback, 1)));
+function readNumberAtLeast(value: unknown, fallback: number, minimum: number): number {
+  return Math.max(minimum, readNumber(value, fallback));
 }
 
 function readFraction(value: unknown, fallback: number): number {
