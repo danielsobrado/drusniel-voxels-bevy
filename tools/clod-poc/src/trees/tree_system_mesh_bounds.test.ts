@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import {
   treeImpostorUvRectAttribute,
+  treeLodDitherRoleAttribute,
   treeLodFadeAttribute,
   treeWorldXZAttribute,
   updateTreeMeshAfterLod,
@@ -32,11 +33,13 @@ describe("tree system mesh bounds updater", () => {
     const mesh = testMesh();
     const worldXZ = treeWorldXZAttribute(mesh);
     const fade = treeLodFadeAttribute(mesh);
+    const ditherRole = treeLodDitherRoleAttribute(mesh);
     const impostorUv = treeImpostorUvRectAttribute(mesh);
     const versionsBefore = {
       matrix: mesh.instanceMatrix.version,
       worldXZ: worldXZ.version,
       fade: fade.version,
+      ditherRole: ditherRole.version,
       impostorUv: impostorUv.version,
     };
     const computeSphere = vi.spyOn(mesh, "computeBoundingSphere");
@@ -57,6 +60,7 @@ describe("tree system mesh bounds updater", () => {
     expect(mesh.instanceMatrix.version).toBeGreaterThan(versionsBefore.matrix);
     expect(worldXZ.version).toBeGreaterThan(versionsBefore.worldXZ);
     expect(fade.version).toBeGreaterThan(versionsBefore.fade);
+    expect(ditherRole.version).toBeGreaterThan(versionsBefore.ditherRole);
     expect(impostorUv.version).toBeGreaterThan(versionsBefore.impostorUv);
     expect(computeSphere).toHaveBeenCalledTimes(1);
     expect(computeBox).toHaveBeenCalledTimes(1);
@@ -100,6 +104,7 @@ function testMesh(): THREE.InstancedMesh {
   const geometry = new THREE.BoxGeometry(1, 1, 1) as THREE.BufferGeometry;
   geometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(2), 2));
   geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array([1]), 1));
+  geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array([0]), 1));
   geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(4), 4));
   return new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial(), 1);
 }
