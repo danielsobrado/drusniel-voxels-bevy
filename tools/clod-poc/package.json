@@ -25,6 +25,8 @@
     "trees:wire-tree4-tree5:check": "node scripts/wire-tree-system-tree4-5.mjs --dry-run",
     "trees:wire-tree7-shadows": "node scripts/wire-tree-system-tree7-shadows.mjs",
     "trees:wire-tree7-shadows:check": "node scripts/wire-tree-system-tree7-shadows.mjs --dry-run",
+    "trees:wire-tree8-proxies": "node scripts/wire-tree-system-tree8-proxies.mjs",
+    "trees:wire-tree8-proxies:check": "node scripts/wire-tree-system-tree8-proxies.mjs --dry-run",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
