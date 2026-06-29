@@ -6,11 +6,11 @@ use bevy::render::render_graph::{NodeRunError, RenderGraphContext, ViewNode};
 use bevy::render::render_resource::*;
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 
+use super::drift_gate::WorldSourceDriftSamplePoint;
 use super::drift_readback::{
     GpuWorldSourceDriftInputSample, GpuWorldSourceDriftReadbackDispatchPlan,
     GpuWorldSourceDriftReadbackParams, WORLD_SOURCE_DRIFT_READBACK_SHADER_PATH,
-    WorldSourceDriftSamplePoint, WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult,
-    WorldSourceGpuReadbackStatus,
+    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
 };
 use super::drift_readback_staging::decode_staged_gpu_world_source_drift_bytes;
 
