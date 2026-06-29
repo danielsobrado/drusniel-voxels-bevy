@@ -5,6 +5,9 @@ import { dirname, resolve } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system.ts");
 
+const SHADOW_MATERIAL_LABEL = "crown proxy shadow material selection";
+const SHADOW_HELPERS_LABEL = "crown proxy shadow helpers";
+
 const edits = [
   edit(
     "crown proxy imports",
@@ -22,19 +25,82 @@ const edits = [
     `    disposeTreeGeometryMap(this.geometries);\n    this.crownProxyGeometry.dispose();\n    this.disposeBakedImpostorGeometries();`,
   ),
   edit(
-    "crown proxy shadow material selection",
-    `            materialHandles[shadowMaterialKey] = lod === "impostor" && this.settings.impostors.enabled && atlas?.ready\n              ? createTreeRingImpostorNodeMaterialHandle(\n                this.settings,\n                shadowRingBuffers,\n                atlas,\n                this.currentLighting ?? undefined,\n                this.hydrologyWater,\n              )\n              : createTreeRingNodeMaterialHandle(\n                this.settings,\n                shadowRingBuffers,\n                lod,\n                this.currentLighting ?? undefined,\n                this.hydrologyWater,\n              );`,
-    `            materialHandles[shadowMaterialKey] = this.createGpuRingShadowMaterialHandle(\n              species,\n              lod,\n              shadowRingBuffers,\n              atlas,\n            );`,
+    SHADOW_MATERIAL_LABEL,
+    `            materialHandles[shadowMaterialKey] = lod === "impostor" && this.settings.impostors.enabled && atlas?.ready
+              ? createTreeRingImpostorNodeMaterialHandle(
+                this.settings,
+                shadowRingBuffers,
+                atlas,
+                this.currentLighting ?? undefined,
+                this.hydrologyWater,
+              )
+              : createTreeRingNodeMaterialHandle(
+                this.settings,
+                shadowRingBuffers,
+                lod,
+                this.currentLighting ?? undefined,
+                this.hydrologyWater,
+              );`,
+    `            materialHandles[shadowMaterialKey] = this.createGpuRingShadowMaterialHandle(
+              species,
+              lod,
+              shadowRingBuffers,
+              atlas,
+            );`,
   ),
   edit(
     "crown proxy shadow source geometry",
-    `  private createGpuRingShadowTierDraw(\n    species: TreeSpeciesId,\n    lod: TreeLod,\n    cascade: number,\n    count: number,\n    indirect: StorageBufferAttribute,\n    indirectOffset: number,\n    materialHandle: TreeMaterialHandle,\n  ): TreeGpuRingMesh {\n    const source = this.geometryForGpuRing(species, lod);\n    const geometry = new THREE.InstancedBufferGeometry();`,
-    `  private createGpuRingShadowTierDraw(\n    species: TreeSpeciesId,\n    lod: TreeLod,\n    cascade: number,\n    count: number,\n    indirect: StorageBufferAttribute,\n    indirectOffset: number,\n    materialHandle: TreeMaterialHandle,\n  ): TreeGpuRingMesh {\n    const source = this.geometryForGpuRingShadow(species, lod);\n    const geometry = new THREE.InstancedBufferGeometry();`,
+    `  private createGpuRingShadowTierDraw(
+    species: TreeSpeciesId,
+    lod: TreeLod,
+    cascade: number,
+    count: number,
+    indirect: StorageBufferAttribute,
+    indirectOffset: number,
+    materialHandle: TreeMaterialHandle,
+  ): TreeGpuRingMesh {
+    const source = this.geometryForGpuRing(species, lod);
+    const geometry = new THREE.InstancedBufferGeometry();`,
+    `  private createGpuRingShadowTierDraw(
+    species: TreeSpeciesId,
+    lod: TreeLod,
+    cascade: number,
+    count: number,
+    indirect: StorageBufferAttribute,
+    indirectOffset: number,
+    materialHandle: TreeMaterialHandle,
+  ): TreeGpuRingMesh {
+    const source = this.geometryForGpuRingShadow(species, lod);
+    const geometry = new THREE.InstancedBufferGeometry();`,
   ),
   edit(
-    "crown proxy shadow helpers",
+    SHADOW_HELPERS_LABEL,
     `  private createGpuRingShadowTierDraw(\n    species: TreeSpeciesId,`,
-    `  private createGpuRingShadowMaterialHandle(\n    species: TreeSpeciesId,\n    lod: TreeLod,\n    buffers: TreeRingInstanceBuffers,\n    atlas: TreeImpostorAtlas | undefined,\n  ): TreeMaterialHandle {\n    if (lod === "far" || lod === "impostor") {\n      return createTreeCrownProxyNodeMaterialHandle(this.settings, buffers, species, lod);\n    }\n    return createTreeRingNodeMaterialHandle(\n      this.settings,\n      buffers,\n      lod,\n      this.currentLighting ?? undefined,\n      this.hydrologyWater,\n    );\n  }\n\n  private geometryForGpuRingShadow(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {\n    if (lod === "far" || lod === "impostor") return this.crownProxyGeometry;\n    return this.geometryForGpuRing(species, lod);\n  }\n\n  private createGpuRingShadowTierDraw(\n    species: TreeSpeciesId,`,
+    `  private createGpuRingShadowMaterialHandle(
+    species: TreeSpeciesId,
+    lod: TreeLod,
+    buffers: TreeRingInstanceBuffers,
+    atlas: TreeImpostorAtlas | undefined,
+  ): TreeMaterialHandle {
+    if (lod === "far" || lod === "impostor") {
+      return createTreeCrownProxyNodeMaterialHandle(this.settings, buffers, species, lod);
+    }
+    return createTreeRingNodeMaterialHandle(
+      this.settings,
+      buffers,
+      lod,
+      this.currentLighting ?? undefined,
+      this.hydrologyWater,
+    );
+  }
+
+  private geometryForGpuRingShadow(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {
+    if (lod === "far" || lod === "impostor") return this.crownProxyGeometry;
+    return this.geometryForGpuRing(species, lod);
+  }
+
+  private createGpuRingShadowTierDraw(
+    species: TreeSpeciesId,`,
   ),
 ];
 
@@ -46,6 +112,10 @@ export function wireTreeSystemTree8Source(input) {
   const skipped = [];
 
   for (const item of edits) {
+    if (tree8AlreadySatisfied(source, item.label)) {
+      skipped.push(item.label);
+      continue;
+    }
     const expectedCount = countOccurrences(source, item.expected);
     const replacementCount = countOccurrences(source, item.replacement);
     if (replacementCount === 1) {
@@ -75,6 +145,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   console.log(`${dryRun ? "Checked" : "Updated"} ${defaultTreeSystemPath}`);
   console.log(`Applied: ${result.applied.length ? result.applied.join(", ") : "none"}`);
   console.log(`Already present: ${result.skipped.length ? result.skipped.join(", ") : "none"}`);
+}
+
+function tree8AlreadySatisfied(source, label) {
+  if (label === SHADOW_MATERIAL_LABEL) return source.includes("materialHandles[shadowMaterialKey] = this.createGpuRingShadowMaterialHandle(");
+  if (label === SHADOW_HELPERS_LABEL) return source.includes("private createGpuRingShadowMaterialHandle(") && source.includes("private geometryForGpuRingShadow(");
+  return false;
 }
 
 function edit(label, expected, replacement) {
