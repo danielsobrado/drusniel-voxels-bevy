@@ -23,6 +23,7 @@ export * from "./tree_system_gpu_policy.js";
 export * from "./tree_system_impostor_resources.js";
 export * from "./tree_system_instance_attributes.js";
 export * from "./tree_system_lifecycle.js";
+export * from "./tree_system_lighting_proxies.js";
 export * from "./tree_system_math.js";
 export * from "./tree_system_stats.js";
 export * from "./tree_system.js";
