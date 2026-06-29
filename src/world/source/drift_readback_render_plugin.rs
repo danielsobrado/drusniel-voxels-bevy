@@ -1,7 +1,10 @@
+use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy::prelude::*;
-use bevy::render::{Render, RenderApp, RenderStartup};
+use bevy::render::render_graph::{RenderGraphExt, ViewNodeRunner};
+use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
 use super::drift_readback_render::{
+    GpuWorldSourceDriftReadbackLabel, GpuWorldSourceDriftReadbackNode,
     GpuWorldSourceDriftReadbackRequest, decode_staged_gpu_world_source_drift_readback,
     init_gpu_world_source_drift_readback_pipeline, prepare_gpu_world_source_drift_readback_dispatch,
 };
@@ -19,15 +22,25 @@ impl Plugin for GpuWorldSourceDriftReadbackPlugin {
         };
 
         render_app
+            .init_resource::<GpuWorldSourceDriftReadbackRequest>()
             .add_systems(RenderStartup, init_gpu_world_source_drift_readback_pipeline)
             .add_systems(
                 Render,
-                (
-                    prepare_gpu_world_source_drift_readback_dispatch,
-                    decode_staged_gpu_world_source_drift_readback,
-                )
-                    .chain(),
+                prepare_gpu_world_source_drift_readback_dispatch
+                    .in_set(RenderSystems::PrepareResources),
+            )
+            .add_systems(
+                Render,
+                decode_staged_gpu_world_source_drift_readback.in_set(RenderSystems::Cleanup),
             );
+        render_app.add_render_graph_node::<ViewNodeRunner<GpuWorldSourceDriftReadbackNode>>(
+            Core3d,
+            GpuWorldSourceDriftReadbackLabel,
+        );
+        render_app.add_render_graph_edges(
+            Core3d,
+            (GpuWorldSourceDriftReadbackLabel, Node3d::StartMainPass),
+        );
     }
 }
 
