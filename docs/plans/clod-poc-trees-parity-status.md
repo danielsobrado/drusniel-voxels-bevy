@@ -30,7 +30,7 @@ Implemented:
 
 Still required before calling TREE-7 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:wire-shadow-proxies` and commit the resulting `tree_system.ts` rewrite.
+- Run `npm --prefix tools/clod-poc run trees:wire-parity` and commit the resulting rewrites.
 - Verify `tree_system.ts` now imports `markAsRealtimeSunShadowCaster`, `TREE_RING_SHADOW_CASCADE_COUNT`, and `treeRingShadowCasterGroupIndex`.
 - Verify `createGpuRingDrawResources(...)` now creates `shadowRingBuffers`, one shadow material handle per cascade/species/LOD, and one `createGpuRingShadowTierDraw(...)` mesh per caster group.
 - Verify visible GPU-ring meshes have `castShadow=false`, so they do not double-cast against the shadow-only meshes.
@@ -50,7 +50,7 @@ Implemented:
 
 Still required before calling TREE-8 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:wire-shadow-proxies` and commit the resulting `tree_system.ts` rewrite.
+- Run `npm --prefix tools/clod-poc run trees:wire-parity` and commit the resulting rewrites.
 - Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
 - Capture noon forest-interior and impostor-boundary shadow shots.
 
@@ -63,15 +63,20 @@ Implemented:
 - `tree_species_expansion.test.ts` verifies the six-species list, morphology differences, willow wet-bank preference, spruce high/cold slope preference, and dead-tree old-stressed-forest preference.
 - `tree_species_expansion_selection.ts` provides deterministic weighted selection over the six-species niche model.
 - `tree_species_expansion_selection.test.ts` verifies deterministic roll selection, six-species weighted choices, roll clamping, and broad-sample coverage.
-- `tree_ring_species_layout.ts` defines dynamic GPU ring layout offsets for arbitrary species counts.
-- `tree_ring_species_layout.test.ts` confirms the existing 3-species layout remains compatible and shows the required 6-species offsets without uniform-slot collisions.
+- `tree_material_bias.ts`, `tree_material_bias.test.ts`, `config/trees.yaml`, and `tree_species_expansion_config.test.ts` are six-species-ready.
+- `tree_ring_species_layout.ts` defines dynamic GPU ring layout offsets, including the corrected second species-weight vec4 for six species.
+- `tree_ring_compute.ts` packs species weights, group counts, material vectors, and planes through the dynamic layout helper.
+- `tree_ring_wgsl_layout.ts` injects WGSL constants from the same layout helper used by TS packing.
+- `tree_ring_species_wgsl_params.ts` and `tree_ring_species_wgsl_selection.ts` provide tested dormant six-species WGSL params/index-count/selection blocks.
+- `scripts/wire-tree-ring-wgsl-expansion.mjs` wires the composer to activate the six-species WGSL blocks when `TREE_SPECIES.length === 6`.
+- `scripts/wire-tree-config-tree9-species.mjs` wires `tree_config.ts` to use the six-species runtime union, defaults, parser, clone logic, and ecology zones.
+- `npm --prefix tools/clod-poc run trees:wire-parity` applies TREE-7, TREE-8, TREE-9 WGSL composer, and TREE-9 config rewrites in order.
 
 Still required before calling TREE-9 complete:
 
-- Move live `TreeSpeciesId` / `TREE_SPECIES` from 3 to 6 only after `tree_ring_compute.ts` and `tree_ring.compute.wgsl` use the dynamic 6-species uniform layout.
-- Extend `tree_material_bias.ts` and `config/trees.yaml` material bias values for birch, willow, and spruce.
-- Extend the WGSL `select_species` branch from 3 to 6 species and keep the TS niche contract mirrored.
-- Update group buffers/caps and GPU/CPU parity for 6×4 groups.
+- Run `npm --prefix tools/clod-poc run trees:wire-parity` and commit the resulting `tree_system.ts`, `wgsl_modules.ts`, and `tree_config.ts` rewrites.
+- Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
+- Verify the composed WebGPU shader contains `TREE_SPECIES_COUNT: u32 = 6u`, `TREE_GROUP_COUNT: u32 = 24u`, `species_weights_b`, and `species_material_spruce` after the config rewrite.
 - Capture the ecology-sorted species gallery shot.
 
 ## Still required before calling Epic A+B closed
@@ -84,8 +89,8 @@ Still required before calling TREE-9 complete:
 
 ## Next implementation order
 
-1. Finish TREE-7/TREE-8 physical `tree_system.ts` rewrites and shot evidence.
-2. Move TREE-9 GPU uniform packing/WGSL to dynamic 6-species layout.
-3. Flip live `TreeSpeciesId` / `TREE_SPECIES` to six species.
+1. Apply `npm --prefix tools/clod-poc run trees:wire-parity` and commit the generated rewrites.
+2. Run typecheck/tests and fix any generated TypeScript/WGSL errors.
+3. Capture TREE-7/TREE-8/TREE-9 shot evidence.
 4. TREE-10 hero near-tree triangle audit.
 5. TREE-12 closeout docs and evidence links.
