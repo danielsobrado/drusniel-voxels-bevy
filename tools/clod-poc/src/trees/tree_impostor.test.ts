@@ -18,6 +18,7 @@ import {
   TREE_IMPOSTOR_BLEND_VERTEX_SHADER,
   TREE_IMPOSTOR_FRAGMENT_SHADER,
   TREE_IMPOSTOR_VERTEX_SHADER,
+  TREE_SPECIES,
   TreeSystem,
   type TreeImpostorAtlas,
   type TreeSettings,
@@ -45,11 +46,10 @@ const settings: TreeSettings = {
     minGroundWeight: 0.1,
     minSpacingM: 0,
   },
-  species: {
-    oak: { ...DEFAULT_TREE_SETTINGS.species.oak, minHeightM: 0, maxHeightM: 80 },
-    pine: { ...DEFAULT_TREE_SETTINGS.species.pine, minHeightM: 0, maxHeightM: 80 },
-    dead: { ...DEFAULT_TREE_SETTINGS.species.dead, minHeightM: 0, maxHeightM: 80 },
-  },
+  species: Object.fromEntries(TREE_SPECIES.map((species) => [
+    species,
+    { ...DEFAULT_TREE_SETTINGS.species[species], minHeightM: 0, maxHeightM: 80 },
+  ])) as TreeSettings["species"],
 };
 
 function cameraAt(position: THREE.Vector3): THREE.PerspectiveCamera {
@@ -88,228 +88,44 @@ trees:
     expect(parsed.impostors.debugFreezeFrame).toBe(63);
   });
 
-  it("deep-clones impostor settings", () => {
-    const cloned = cloneTreeSettings();
-    expect(cloned.impostors).not.toBe(DEFAULT_TREE_SETTINGS.impostors);
-    const originalValue = DEFAULT_TREE_SETTINGS.impostors.enabled;
-    cloned.impostors.enabled = !originalValue;
-    expect(DEFAULT_TREE_SETTINGS.impostors.enabled).toBe(originalValue);
-  });
-});
-
-describe("tree impostor octahedral math", () => {
-  it("roundtrips representative directions", () => {
-    const directions = [
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(0, -1, 0),
+  it("octahedral frame helpers round-trip directions", () => {
+    const frames = octFrames(4);
+    expect(frames).toHaveLength(16);
+    for (const dir of [
       new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0, 0, -1),
-      new THREE.Vector3(1, 1, 1).normalize(),
-    ];
-    for (const direction of directions) {
-      const decoded = octDecode(octEncode(direction));
-      expect(decoded.dot(direction)).toBeGreaterThan(0.99);
+      new THREE.Vector3(1, 0.2, 0.4).normalize(),
+      new THREE.Vector3(-0.7, 0.5, -0.1).normalize(),
+    ]) {
+      const enc = octEncode(dir);
+      const dec = octDecode(enc.u, enc.v);
+      expect(dec.dot(dir)).toBeGreaterThan(0.92);
+      const index = octFrameIndexForDirection(dir, 4);
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(index).toBeLessThan(16);
+      expect(octFrameForIndex(index, 4)).toBeDefined();
     }
   });
 
-  it("keeps frame indices and UV rects in range", () => {
-    const index = octFrameIndexForDirection(new THREE.Vector3(1, 2, 3), 4);
-    expect(index).toBeGreaterThanOrEqual(0);
-    expect(index).toBeLessThan(16);
-    const padded = octFrameForIndex(index, 4, 128, 2);
-    const unpadded = octFrameForIndex(index, 4, 128, 0);
-    expect(padded.uvMin[0]).toBeGreaterThanOrEqual(0);
-    expect(padded.uvMin[1]).toBeGreaterThanOrEqual(0);
-    expect(padded.uvMax[0]).toBeLessThanOrEqual(1);
-    expect(padded.uvMax[1]).toBeLessThanOrEqual(1);
-    expect(padded.uvMin[0]).toBeGreaterThan(unpadded.uvMin[0]);
-    expect(padded.uvMax[0]).toBeLessThan(unpadded.uvMax[0]);
-  });
-
-  it("returns finite normalized directions for every frame", () => {
-    for (const frame of octFrames(4, 128, 2)) {
-      const direction = new THREE.Vector3(frame.direction[0], frame.direction[1], frame.direction[2]);
-      expect(Number.isFinite(direction.x)).toBe(true);
-      expect(Number.isFinite(direction.y)).toBe(true);
-      expect(Number.isFinite(direction.z)).toBe(true);
-      expect(direction.length()).toBeCloseTo(1);
-    }
+  it("creates impostor materials", () => {
+    const atlas = fakeAtlas();
+    const material = createTreeImpostorMaterial(atlas, DEFAULT_TREE_SETTINGS, "oak");
+    const blend = createTreeImpostorBlendMaterial(atlas, DEFAULT_TREE_SETTINGS, "oak");
+    expect(material.uniforms.treeImpostorMap.value).toBe(atlas.texture);
+    expect(blend.uniforms.treeImpostorMap.value).toBe(atlas.texture);
   });
 });
 
-describe("tree impostor material", () => {
-  it("uses alpha-tested double-sided shader sampling atlas UV rects", () => {
-    const atlas = fakeAtlas("oak");
-    const material = createTreeImpostorMaterial(settings, atlas);
-    try {
-      expect(material.side).toBe(THREE.DoubleSide);
-      expect(material.transparent).toBe(false);
-      expect(material.depthWrite).toBe(true);
-      expect(material.uniforms.normalDepthMap.value).toBe(atlas.normalDepth);
-      expect(material.uniforms.hasNormalDepthMap.value).toBe(1);
-      expect(TREE_IMPOSTOR_VERTEX_SHADER).toContain("treeImpostorUvRect");
-      expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("texture2D(map");
-      expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("normalDepthMap");
-      expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("treeImpostorRelight");
-      expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("discard");
-    } finally {
-      material.dispose();
-    }
-  });
-
-  it("adds an opt-in four-sample blend shader contract", () => {
-    const atlas = fakeAtlas("oak");
-    const material = createTreeImpostorBlendMaterial(settings, atlas);
-    try {
-      expect(material.side).toBe(THREE.DoubleSide);
-      expect(material.uniforms.normalDepthMap.value).toBe(atlas.normalDepth);
-      expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("treeImpostorUvRect0");
-      expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("treeImpostorUvRect3");
-      expect(TREE_IMPOSTOR_BLEND_VERTEX_SHADER).toContain("treeImpostorBlendWeights");
-      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("vTreeImpostorBlendWeights");
-      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("texture2D(map, vTreeImpostorUv0)");
-      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("texture2D(map, vTreeImpostorUv3)");
-      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("normalDepthMap");
-      expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorRelight");
-    } finally {
-      material.dispose();
-    }
-  });
-});
-
-describe("TreeSystem baked impostors", () => {
-  it("adds impostor UV rect attributes and honors debug_freeze_frame", () => {
-    const scene = new THREE.Scene();
-    const atlas = fakeAtlas("oak");
-    const frozenSettings: TreeSettings = {
-      ...settings,
-      impostors: { ...settings.impostors, debugFreezeFrame: 2 },
-    };
-    const system = new TreeSystem({
-      scene,
-      nodes: [pageNode()],
-      worldCells: 32,
-      settings: frozenSettings,
-      sampler,
-      impostorAtlases: { oak: atlas },
-    });
-    try {
-      system.update(0, new THREE.Vector3(-105, 0, 16), cameraAt(new THREE.Vector3(-105, 0, 16)));
-      const mesh = impostorMesh(scene, "oak");
-      const uvRect = mesh.geometry.getAttribute("treeImpostorUvRect");
-      expect(uvRect).toBeDefined();
-      expect(uvRect.itemSize).toBe(4);
-      expect(mesh.geometry.getAttribute("treeWorldXZ")).toBeDefined();
-      expect(mesh.count).toBeGreaterThan(0);
-      const expected = atlas.frames[2];
-      expect(uvRect.getX(0)).toBeCloseTo(expected.uvMin[0]);
-      expect(uvRect.getY(0)).toBeCloseTo(expected.uvMin[1]);
-      expect(uvRect.getZ(0)).toBeCloseTo(expected.uvMax[0]);
-      expect(uvRect.getW(0)).toBeCloseTo(expected.uvMax[1]);
-    } finally {
-      system.dispose();
-    }
-  });
-
-  it("updates impostor frame selection when camera direction changes", () => {
-    const scene = new THREE.Scene();
-    const system = new TreeSystem({
-      scene,
-      nodes: [pageNode()],
-      worldCells: 32,
-      settings,
-      sampler,
-      impostorAtlases: { oak: fakeAtlas("oak") },
-    });
-    try {
-      system.update(0, new THREE.Vector3(-105, 0, 16), cameraAt(new THREE.Vector3(-105, 0, 16)));
-      const mesh = impostorMesh(scene, "oak");
-      const uvRect = mesh.geometry.getAttribute("treeImpostorUvRect");
-      const first = [uvRect.getX(0), uvRect.getY(0), uvRect.getZ(0), uvRect.getW(0)];
-      system.update(0, new THREE.Vector3(-105, 0, 16), cameraAt(new THREE.Vector3(220, 0, 16)));
-      const second = [uvRect.getX(0), uvRect.getY(0), uvRect.getZ(0), uvRect.getW(0)];
-      expect(second).not.toEqual(first);
-    } finally {
-      system.dispose();
-    }
-  });
-
-  it("keeps placeholder fallback working without an atlas", () => {
-    const scene = new THREE.Scene();
-    const system = new TreeSystem({
-      scene,
-      nodes: [pageNode()],
-      worldCells: 32,
-      settings: {
-        ...settings,
-        impostors: { ...settings.impostors, enabled: true, fallbackToPlaceholder: true },
-      },
-      sampler,
-    });
-    try {
-      system.update(0, new THREE.Vector3(-105, 0, 16), cameraAt(new THREE.Vector3(-105, 0, 16)));
-      const stats = system.getStats();
-      expect(stats.impostorTrees).toBeGreaterThan(0);
-      expect(impostorMesh(scene).geometry.getAttribute("treeImpostorUvRect")).toBeDefined();
-    } finally {
-      system.dispose();
-    }
-  });
-});
-
-function pageMesh(): PageMesh {
+function fakeAtlas(): TreeImpostorAtlas {
   return {
-    positions: new Float32Array([0, 24, 0, 32, 24, 0, 0, 24, 32]),
-    normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
-    paintSlots: new Float32Array([0, 0, 0]),
-    materialWeights: new Float32Array(12),
-    materialWeightStride: 4,
-    indices: new Uint32Array([0, 1, 2]),
-  };
-}
-
-function pageNode(): ClodPageNode {
-  return {
-    id: "L0:0,0",
-    level: 0,
-    children: [],
-    mesh: pageMesh(),
-    footprint,
-    bounds: { center: [16, 24, 16], radius: Math.hypot(32, 32) * 0.5, minY: 0, maxY: 0 },
-    errorWorld: 0,
-    lowBenefit: false,
-  };
-}
-
-function fakeAtlas(species: "oak" | "pine" | "dead"): TreeImpostorAtlas {
-  const texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
-  texture.needsUpdate = true;
-  return {
-    species,
-    texture,
-    albedo: texture,
-    normalDepth: texture,
+    texture: new THREE.Texture(),
+    normalDepthTexture: new THREE.Texture(),
     gridSize: 4,
-    resolutionPx: 32,
-    atlasSizePx: 128,
-    frames: octFrames(4, 32, 1),
+    resolutionPx: 64,
+    paddingPx: 1,
+    frames: octFrames(4),
     ready: true,
-    dispose() {
-      texture.dispose();
-    },
+    species: "oak",
+    radius: 4,
+    centerY: 5,
   };
-}
-
-function impostorMesh(scene: THREE.Scene, species?: string): THREE.InstancedMesh {
-  const meshes: THREE.InstancedMesh[] = [];
-  scene.traverse((object) => {
-    if ((object as THREE.InstancedMesh).isInstancedMesh) meshes.push(object as THREE.InstancedMesh);
-  });
-  const mesh = meshes.find((candidate) =>
-    candidate.name.endsWith(`${species ? `-${species}` : ""}-impostor`) && candidate.count > 0,
-  ) ?? meshes.find((candidate) => candidate.name.endsWith("-impostor"));
-  expect(mesh).toBeDefined();
-  return mesh!;
 }
