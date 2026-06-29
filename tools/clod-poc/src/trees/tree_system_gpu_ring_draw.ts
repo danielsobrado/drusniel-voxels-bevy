@@ -4,6 +4,7 @@ import type { TreeGpuRingOutputBuffers } from "../gpu/tree_ring_compute.js";
 import { TREE_GPU_RING_GROUP_COUNT } from "../gpu/tree_ring_compute.js";
 import type { TreeLod, TreeSpeciesId } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
+import { TREE_RING_SHADOW_CASCADE_COUNT, treeRingShadowCasterGroupCount } from "./tree_ring_shadow_casters.js";
 
 export type TreeGpuRingMesh = THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>;
 
@@ -20,13 +21,21 @@ export interface TreeWebGpuBackendBufferAccess {
 export interface TreeGpuRingDrawResourceBundle {
   cell: StorageInstancedBufferAttribute;
   indirect: StorageBufferAttribute;
+  shadowCell?: StorageInstancedBufferAttribute;
+  shadowIndirect?: StorageBufferAttribute;
   outputBuffers: TreeGpuRingOutputBuffers;
+}
+
+export interface TreeGpuRingDrawBufferOptions {
+  maxShadowCastersPerGroup?: number;
+  shadowCascadeCount?: number;
 }
 
 export function createTreeGpuRingDrawBuffers(
   backend: TreeWebGpuBackendBufferAccess,
   maxInstancesPerGroup: number,
   groupCount = TREE_GPU_RING_GROUP_COUNT,
+  options: TreeGpuRingDrawBufferOptions = {},
 ): TreeGpuRingDrawResourceBundle {
   const count = Math.max(1, Math.floor(maxInstancesPerGroup));
   const sharedInstanceCount = count * groupCount;
@@ -34,14 +43,25 @@ export function createTreeGpuRingDrawBuffers(
   indirect.name = "tree-ring-indirect";
   backend.createIndirectStorageAttribute(indirect);
   const cell = createTreeGpuRingStorageInstancedAttribute(backend, "cell", sharedInstanceCount);
-  return {
-    cell,
-    indirect,
-    outputBuffers: {
-      cell: treeGpuBufferForAttribute(backend, cell),
-      indirectArgs: treeGpuBufferForAttribute(backend, indirect),
-    },
+  const outputBuffers: TreeGpuRingOutputBuffers = {
+    cell: treeGpuBufferForAttribute(backend, cell),
+    indirectArgs: treeGpuBufferForAttribute(backend, indirect),
   };
+
+  const shadowCapacity = Math.max(0, Math.floor(options.maxShadowCastersPerGroup ?? 0));
+  if (shadowCapacity > 0) {
+    const shadowCascadeCount = options.shadowCascadeCount ?? TREE_RING_SHADOW_CASCADE_COUNT;
+    const shadowGroupCount = treeRingShadowCasterGroupCount(shadowCascadeCount);
+    const shadowIndirect = new StorageBufferAttribute(new Uint32Array(shadowGroupCount * 5), 5);
+    shadowIndirect.name = "tree-ring-shadow-indirect";
+    backend.createIndirectStorageAttribute(shadowIndirect);
+    const shadowCell = createTreeGpuRingStorageInstancedAttribute(backend, "shadow-cell", shadowCapacity * shadowGroupCount);
+    outputBuffers.shadowCell = treeGpuBufferForAttribute(backend, shadowCell);
+    outputBuffers.shadowIndirectArgs = treeGpuBufferForAttribute(backend, shadowIndirect);
+    return { cell, indirect, shadowCell, shadowIndirect, outputBuffers };
+  }
+
+  return { cell, indirect, outputBuffers };
 }
 
 export function createTreeGpuRingStorageInstancedAttribute(
