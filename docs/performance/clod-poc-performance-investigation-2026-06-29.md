@@ -303,3 +303,46 @@ All tagged `[DEBUG-bs9f]`:
 - the frame render phase — defensive GPU-timestamp resolve + record.
 - `tools/perf-main.ts` — GPU render/compute + draw-call/triangle columns.
 - `tools/diff-fps.ts` — the no-freeze rAF differential harness.
+
+(All `[DEBUG-bs9f]` instrumentation + probe scripts were removed after the fix below.)
+
+---
+
+## Fix applied & measured (real GPU, RTX 4080)
+
+Two config-only changes in **`tools/clod-poc/config/trees.yaml`** (the runtime tree
+config; `DEFAULT_TREE_SETTINGS` is only a fallback and was *not* the source — that
+caused a first no-op attempt):
+
+1. **Pulled the far→impostor transition inward** so the visible forest converts to
+   cheap baked billboards instead of full far-mesh:
+   - `lod.mid_fraction` `0.242 → 0.18` (mid ring 150 m → 112 m)
+   - `lod.far_fraction` `0.742 → 0.35` (far ring 460 m → 217 m; trees 217–620 m → impostors)
+2. **Reduced near/mid foliage-card overdraw** (~40% fewer cards on near/mid trees):
+   - oak `card_count_near` `96 → 58`, `card_count_mid` `44 → 28`
+   - pine `card_count_near` `88 → 54`, `card_count_mid` `38 → 24`
+
+**Result — full-forest view (the user's heavy camera), real GPU:**
+
+| metric | before | after |
+| --- | ---: | ---: |
+| avg FPS | **31** | **44–47** |
+| impostors drawn (`i`) | **0** | **1,651** |
+| mid trees | 3,006 | 1,858 |
+| far trees | 3,513 | 3,010 |
+
+Every dolly step improved (70/53/39/31 → 74/56/44/47). Impostors now engage (the
+far→impostor transition fires within the island). Visual check (`after-dolly-4.png`):
+forest still reads as lush/full, grass present (15,784 blades), no sparse canopy and
+no visible impostor seam at the overview. **~50% FPS recovery** at the worst-case
+camera, visual quality preserved.
+
+**Remaining headroom / follow-ups:**
+
+- Near-canopy close-up is still fill-bound (the near mesh + `DoubleSide` material);
+  further wins need near-mesh decimation or `FrontSide` trunk/branch tubes.
+- Crossfade is disabled (`crossfade_band_m: 0`), so the now-closer far→impostor
+  transition is a hard cut — watch for pop during motion; a small crossfade band
+  would smooth it at a minor overdraw cost.
+- The architectural endgame remains parity-plan EPIC A/B (relit view-blended
+  billboards); this config tuning is the interim win.

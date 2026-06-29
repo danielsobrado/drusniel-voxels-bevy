@@ -17,7 +17,19 @@ function makeDataTexture(data: Float32Array, res: number): THREE.DataTexture {
 }
 
 function makeRgbTexture(data: Float32Array, res: number): THREE.DataTexture {
-  const tex = new THREE.DataTexture(data, res, res, THREE.RGBFormat, THREE.FloatType);
+  // WebGPU has no 3-channel float texture format (RGBFormat throws
+  // "Unsupported texture type with RGBFormat. 1015" on WebGPURenderer), so upload
+  // the RGB tint as RGBA with alpha = 1. The canopy material samples .rgb, so the
+  // padded alpha channel is ignored.
+  const texels = res * res;
+  const rgba = new Float32Array(texels * 4);
+  for (let i = 0; i < texels; i++) {
+    rgba[i * 4] = data[i * 3] ?? 0;
+    rgba[i * 4 + 1] = data[i * 3 + 1] ?? 0;
+    rgba[i * 4 + 2] = data[i * 3 + 2] ?? 0;
+    rgba[i * 4 + 3] = 1;
+  }
+  const tex = new THREE.DataTexture(rgba, res, res, THREE.RGBAFormat, THREE.FloatType);
   tex.needsUpdate = true;
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearFilter;

@@ -30,8 +30,8 @@ trees:
 
   lod:
     near_fraction: 0.042
-    mid_fraction: 0.242
-    far_fraction: 0.742
+    mid_fraction: 0.18
+    far_fraction: 0.35
     impostor_fraction: 1.0
     hysteresis_m: 8
     crossfade_enabled: false
@@ -184,8 +184,8 @@ trees:
     texture_atlas_rows: 2
     debug_show_alpha_cards: false
     oak:
-      card_count_near: 96
-      card_count_mid: 44
+      card_count_near: 58
+      card_count_mid: 28
       card_count_far: 8
       card_width_m: 1.35
       card_height_m: 0.92
@@ -197,8 +197,8 @@ trees:
       lobe_count: 7
       cutout_roundness: 0.72
     pine:
-      card_count_near: 88
-      card_count_mid: 38
+      card_count_near: 54
+      card_count_mid: 24
       card_count_far: 8
       card_width_m: 1.05
       card_height_m: 1.35

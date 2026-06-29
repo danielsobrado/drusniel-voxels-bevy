@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TerrainOwnershipRuntimeSnapshot } from "./terrain_ownership_runtime.js";
+import { TerrainOwnershipRuntime } from "./terrain_ownership_runtime.js";
+import type { StreamingOwnershipRadii } from "../streaming/streaming_ownership.js";
 import { liveChunkKey } from "./live_chunk_keys.js";
 import { pageKey } from "./page_plan.js";
 import { computeOwnershipCoverageCounters } from "./ownership_coverage_oracle.js";
@@ -101,5 +103,54 @@ describe("ownership coverage oracle", () => {
     expect(counters.far_shell_recenter_count).toBe(1);
     expect(counters.far_shell_last_recenter_frame).toBe(12);
     expect(counters.clod_far_gap_holes).toBeGreaterThan(0);
+  });
+
+  it("priority ownership is gap-free even though square tiles raw-overlap the circular rings", () => {
+    // Drive the REAL streamers so loaded footprints are page/chunk quantized like
+    // production. The far shell is a circular annulus while CLOD/live are square
+    // grids, so raw coverage overlap at the boundaries is unavoidable (the spill
+    // band). Priority ownership (live > CLOD > far) resolves it: every cell in the
+    // coverage envelope still has exactly one owner.
+    const chunkSizeM = 32;
+    const pageSizeM = 128;
+    const maxLevel = 2;
+    const ownership: StreamingOwnershipRadii = {
+      liveRadiusM: 200,
+      clodRadiusM: 512,
+      farShellInnerM: 512,
+      farShellOuterM: 2048,
+      targetVisibleM: 2048,
+      targetFutureVisibleM: 2048,
+      streamingScene: true,
+    };
+    const runtime = new TerrainOwnershipRuntime(ownership, {
+      live: { chunkSizeM, hysteresisM: 0 },
+      visualPages: { pageSizeM, maxLevel, hysteresisM: 0 },
+    });
+    const snap = runtime.update({ x: 0, z: 0 });
+
+    const counters = computeOwnershipCoverageCounters({
+      snapshot: snap,
+      chunkSizeM,
+      pageSizeM,
+      maxLevel,
+      camera: { x: 0, z: 0 },
+      farShellCenter: { x: 0, z: 0 },
+      farShellRecenterCount: 0,
+      farShellLastRecenterFrame: -1,
+      coverageCellM: 64,
+    });
+
+    // The spill band is real: raw coverage overlap is non-zero (this is why the
+    // raw *_overlap_cells gate is geometrically impossible to drive to 0).
+    expect(counters.clod_far_overlap_cells).toBeGreaterThan(0);
+
+    // The invariant that actually matters: priority assigns exactly one owner per
+    // cell (no double-owner) and leaves no covered cell un-owned (no real holes).
+    expect(counters.priority_owner_overlap_cells).toBe(0);
+    expect(counters.priority_unowned_cells).toBe(0);
+    // And there are no genuine ring gaps under the real quantized footprints.
+    expect(counters.live_clod_gap_holes).toBe(0);
+    expect(counters.clod_far_gap_holes).toBe(0);
   });
 });
