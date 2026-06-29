@@ -5,7 +5,6 @@ import {
   createTreeGpuRingBakedImpostorGeometry,
   mapTreeGpuRingBakedImpostorUvToFrame,
   octFrames,
-  selectTreeGpuRingFallbackFrame,
   selectTreeGpuRingGeometry,
   TREE_SPECIES,
   type TreeGeometryMap,
@@ -93,19 +92,17 @@ describe("GPU ring tree geometry selector", () => {
     expect(first.geometry.getAttribute("treeVariant")).toBeDefined();
   });
 
-  it("maps baked billboard UVs into the selected atlas frame", () => {
+  it("keeps baked billboard UVs local so the ring material can select atlas frames", () => {
     const settings = cloneTreeSettings();
     settings.impostors.enabled = true;
-    const atlas = fakeAtlas("oak");
-    const frame = selectTreeGpuRingFallbackFrame(atlas);
-    const geometry = createTreeGpuRingBakedImpostorGeometry("oak", settings, atlas);
+    const geometry = createTreeGpuRingBakedImpostorGeometry("oak", settings);
     const uv = geometry.getAttribute("uv");
 
     for (let index = 0; index < uv.count; index++) {
-      expect(uv.getX(index)).toBeGreaterThanOrEqual(frame.uvMin[0]);
-      expect(uv.getX(index)).toBeLessThanOrEqual(frame.uvMax[0]);
-      expect(uv.getY(index)).toBeGreaterThanOrEqual(frame.uvMin[1]);
-      expect(uv.getY(index)).toBeLessThanOrEqual(frame.uvMax[1]);
+      expect(uv.getX(index)).toBeGreaterThanOrEqual(0);
+      expect(uv.getX(index)).toBeLessThanOrEqual(1);
+      expect(uv.getY(index)).toBeGreaterThanOrEqual(0);
+      expect(uv.getY(index)).toBeLessThanOrEqual(1);
     }
   });
 
