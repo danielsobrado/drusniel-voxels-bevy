@@ -30,22 +30,19 @@ describe("tree system GPU ring draw helpers", () => {
   });
 
   it("builds indirect instanced geometry from source attributes", () => {
-    const source = new THREE.BoxGeometry(1, 1, 1);
-    const indirect = new StorageBufferAttribute(new Uint32Array(5), 5);
-    const geometry = createTreeGpuRingInstancedGeometry(
-      source,
-      7,
-      indirect,
-      16,
-      128,
-    ) as THREE.InstancedBufferGeometry & { setIndirect: ReturnType<typeof vi.fn> };
+    const setIndirect = vi.fn();
+    withSetIndirectStub(setIndirect, () => {
+      const source = new THREE.BoxGeometry(1, 1, 1);
+      const indirect = new StorageBufferAttribute(new Uint32Array(5), 5);
+      const geometry = createTreeGpuRingInstancedGeometry(source, 7, indirect, 16, 128);
 
-    expect(geometry.getAttribute("position")).toBe(source.getAttribute("position"));
-    expect(geometry.getIndex()).toBe(source.getIndex());
-    expect(geometry.instanceCount).toBe(7);
-    expect(geometry.boundingBox?.max.x).toBe(129);
-    expect(geometry.boundingSphere?.radius).toBeGreaterThan(0);
-    expect(geometry.setIndirect).toHaveBeenCalledWith(indirect, 16);
+      expect(geometry.getAttribute("position")).toBe(source.getAttribute("position"));
+      expect(geometry.getIndex()).toBe(source.getIndex());
+      expect(geometry.instanceCount).toBe(7);
+      expect(geometry.boundingBox?.max.x).toBe(129);
+      expect(geometry.boundingSphere?.radius).toBeGreaterThan(0);
+      expect(setIndirect).toHaveBeenCalledWith(indirect, 16);
+    });
   });
 
   it("throws when indirect geometry support is unavailable", () => {
@@ -85,6 +82,20 @@ describe("tree system GPU ring draw helpers", () => {
     expect(() => treeGpuBufferForAttribute(backend, attribute)).toThrow(/missing-buffer/);
   });
 });
+
+function withSetIndirectStub(setIndirect: ReturnType<typeof vi.fn>, run: () => void): void {
+  const prototype = THREE.InstancedBufferGeometry.prototype as THREE.InstancedBufferGeometry & {
+    setIndirect?: typeof setIndirect;
+  };
+  const previous = prototype.setIndirect;
+  prototype.setIndirect = setIndirect;
+  try {
+    run();
+  } finally {
+    if (previous) prototype.setIndirect = previous;
+    else delete prototype.setIndirect;
+  }
+}
 
 function fakeBackend(hasBuffer = true): TreeWebGpuBackendBufferAccess {
   const buffers = new WeakMap<THREE.BufferAttribute, GPUBuffer>();
