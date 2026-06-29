@@ -48,8 +48,8 @@ trees:
       impostor_max_vertices: 240
 
   # WebGPU impostor bake target: 8x8 frames at 128px => 1024² atlas.
-  # Albedo RGBA8 + normal-depth RGBA8 cost ~8 MiB/species, ~24 MiB for
-  # the current 3 species. Keep URL/UI toggles available for disabling.
+  # Albedo RGBA8 + normal-depth RGBA8 cost ~8 MiB/species, ~48 MiB for
+  # the six-species TREE-9 target. Keep URL/UI toggles available for disabling.
   impostors:
     enabled: true
     bake_on_start: true
@@ -99,21 +99,33 @@ trees:
         oak: 1.22
         pine: 0.86
         dead: 0.52
+        birch: 1.12
+        willow: 1.04
+        spruce: 0.72
       rock:
         density: 0.46
         oak: 0.35
         pine: 0.96
         dead: 1.55
+        birch: 0.42
+        willow: 0.22
+        spruce: 1.12
       sand:
         density: 0.55
         oak: 0.72
         pine: 0.45
         dead: 0.68
+        birch: 0.82
+        willow: 1.16
+        spruce: 0.28
       snow:
         density: 0.08
         oak: 0.04
         pine: 0.30
         dead: 1.45
+        birch: 0.18
+        willow: 0.02
+        spruce: 0.86
     clustering:
       cluster_scale_m: 26
       cluster_strength: 0.82
@@ -143,6 +155,24 @@ trees:
         slope_tolerance: 0.75
         cluster_bias: 1.0
         old_forest_bias: 0.85
+      birch:
+        height_preference: low
+        moisture_preference: 0.58
+        slope_tolerance: 0.72
+        cluster_bias: 0.45
+        old_forest_bias: 0.12
+      willow:
+        height_preference: low
+        moisture_preference: 0.86
+        slope_tolerance: 0.45
+        cluster_bias: 0.65
+        old_forest_bias: 0.08
+      spruce:
+        height_preference: high
+        moisture_preference: 0.42
+        slope_tolerance: 0.9
+        cluster_bias: 1.05
+        old_forest_bias: 0.18
 
   # Foliage alpha cards disabled: procedural grammar trees generate real
   # branch/leaf geometry, making billboard cards redundant.
@@ -183,7 +213,7 @@ trees:
   species:
     oak:
       enabled: true
-      weight: 0.52
+      weight: 0.34
       min_height_m: 10
       max_height_m: 42
       trunk_height_m: 8.0
@@ -204,7 +234,7 @@ trees:
         leaf_card_count: 44
     pine:
       enabled: true
-      weight: 0.36
+      weight: 0.22
       min_height_m: 14
       max_height_m: 58
       trunk_height_m: 9.5
@@ -225,7 +255,7 @@ trees:
         leaf_card_count: 36
     dead:
       enabled: true
-      weight: 0.12
+      weight: 0.07
       min_height_m: 14
       max_height_m: 58
       trunk_height_m: 8.0
@@ -244,6 +274,69 @@ trees:
         crown_irregularity: 0.45
         leaf_cluster_count: 0
         leaf_card_count: 0
+    birch:
+      enabled: true
+      weight: 0.16
+      min_height_m: 11
+      max_height_m: 46
+      trunk_height_m: 7.2
+      trunk_radius_m: 0.26
+      crown_radius_m: 3.2
+      morphology:
+        trunk_bend: 0.12
+        trunk_taper: 0.55
+        branch_levels: 3
+        primary_branch_count: 7
+        secondary_branch_count: 2
+        branch_spread: 0.72
+        branch_up_sweep: 0.36
+        branch_length: 2.0
+        crown_flattening: 0.88
+        crown_irregularity: 0.20
+        leaf_cluster_count: 14
+        leaf_card_count: 34
+    willow:
+      enabled: true
+      weight: 0.12
+      min_height_m: 8
+      max_height_m: 34
+      trunk_height_m: 6.4
+      trunk_radius_m: 0.34
+      crown_radius_m: 4.6
+      morphology:
+        trunk_bend: 0.32
+        trunk_taper: 0.68
+        branch_levels: 3
+        primary_branch_count: 8
+        secondary_branch_count: 3
+        branch_spread: 1.05
+        branch_up_sweep: 0.18
+        branch_length: 2.5
+        crown_flattening: 0.62
+        crown_irregularity: 0.34
+        leaf_cluster_count: 20
+        leaf_card_count: 48
+    spruce:
+      enabled: true
+      weight: 0.09
+      min_height_m: 20
+      max_height_m: 64
+      trunk_height_m: 10.5
+      trunk_radius_m: 0.32
+      crown_radius_m: 3.0
+      morphology:
+        trunk_bend: 0.06
+        trunk_taper: 0.38
+        branch_levels: 4
+        primary_branch_count: 10
+        secondary_branch_count: 1
+        branch_spread: 0.50
+        branch_up_sweep: -0.16
+        branch_length: 2.1
+        crown_flattening: 1.65
+        crown_irregularity: 0.12
+        leaf_cluster_count: 16
+        leaf_card_count: 40
 
   render:
     debug_color_by_lod: false
