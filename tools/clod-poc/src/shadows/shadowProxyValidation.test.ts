@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildTerrainSummary, sampleHeight, sampleSkirtHeight, summaryBaseLevel } from "../clod/terrain_summary.js";
 import { DEFAULT_SHADOW_PROXY_CONFIG } from "../config/longViewDefaults.js";
+import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
 import {
   clampProxyHeight,
   ringFadeWeight,
@@ -38,11 +39,13 @@ describe("shadow proxy validation", () => {
     const dist = 3000;
     const x = -1000;
 
+    const analytic = surfaceHeightCore(x, 256);
     const edgeClamped = sampleHeight(summary, x, 256);
     const skirt = sampleSkirtHeight(summary, x, 256, config.endM, farBase, 1.0);
     const proxy = sampleProxyHeight(summary, x, 256, config, dist);
 
-    expect(edgeClamped).toBeCloseTo(420, 0);
+    expect(edgeClamped).toBeCloseTo(analytic, 4);
+    expect(edgeClamped).not.toBeCloseTo(420, 0);
     expect(skirt).not.toBeCloseTo(edgeClamped, 1);
     expect(proxy).not.toBeCloseTo(edgeClamped, 1);
     expect(proxy).toBeCloseTo(

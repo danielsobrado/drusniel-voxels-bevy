@@ -21,6 +21,8 @@ export interface BuildTreeOpts {
   inst?: Partial<GrowthInstance>;
   /** bark base colour (hue-jittered per branch by the tube builder) */
   barkColor: THREE.Color;
+  /** Approximate vertex budget for one structural variant. */
+  vertexBudget?: number;
 }
 
 export interface BuiltTreeStats {
@@ -87,13 +89,40 @@ function selectAnchors(anchors: LeafAnchor[], target: number): LeafAnchor[] {
   return anchors.filter((_, i) => i % stride === 0);
 }
 
+function budgetedAnchorTargets(sp: SpeciesParams, lod: VegLod, vertexBudget: number | undefined): {
+  cardTarget: number;
+  meshTarget: number;
+} {
+  const cardTarget = CARD_ANCHOR_TARGETS[lod];
+  const meshTarget = anchorTarget(sp, lod);
+  if (typeof vertexBudget !== "number" || !Number.isFinite(vertexBudget) || vertexBudget <= 0 || !sp.foliage) {
+    return { cardTarget, meshTarget };
+  }
+
+  const barkReserve = sp.id === "dead"
+    ? Math.min(vertexBudget, lod === 2 ? 360 : 900)
+    : Math.min(vertexBudget * 0.28, lod === 0 ? 12_000 : lod === 1 ? 5_000 : 1_800);
+  const foliageBudget = Math.max(0, vertexBudget - barkReserve) * 0.35;
+  const cardVertexCost = (sp.foliage.card?.mode ?? (sp.id === "pine" ? "cross" : "cross")) === "cross" ? 16 : 8;
+  const leafVertexCost = sp.foliage.kind === "needleSpray"
+    ? 366
+    : 17 * ((sp.foliage.clusterSize[0] + sp.foliage.clusterSize[1]) * 0.5);
+  const cardBudget = Math.min(foliageBudget * 0.25, cardTarget * cardVertexCost);
+  const meshBudget = Math.max(0, foliageBudget - cardBudget);
+
+  return {
+    cardTarget: Math.max(0, Math.min(cardTarget, Math.floor(cardBudget / Math.max(1, cardVertexCost)))),
+    meshTarget: Math.max(0, Math.min(meshTarget, Math.floor(meshBudget / Math.max(1, leafVertexCost)))),
+  };
+}
+
 export function buildTree(sp: SpeciesParams, rng: Rng, opts: BuildTreeOpts): BuiltTree {
   const skel = growSkeleton(sp, rng, opts.inst);
   const anchorLevel = sp.foliage?.anchorLevel ?? 2;
   const g = new VegMeshGrower();
 
   const maxLevel = opts.lod === 0
-    ? 99
+    ? Math.max(1, anchorLevel - 1)
     : opts.lod === 1
       ? Math.max(1, anchorLevel - 1)
       : Math.max(1, anchorLevel - 2);
@@ -111,8 +140,9 @@ export function buildTree(sp: SpeciesParams, rng: Rng, opts: BuildTreeOpts): Bui
     const base = new THREE.Color(sp.foliageColor.r, sp.foliageColor.g, sp.foliageColor.b);
     const crownC = new THREE.Vector3(0, skel.crownCenterY, 0);
     const crownR = Math.max(skel.crownRadius, (skel.height - skel.crownCenterY) * 0.9);
-    const cardAnchors = selectAnchors(skel.anchors, CARD_ANCHOR_TARGETS[opts.lod]);
-    const meshAnchors = selectAnchors(skel.anchors, anchorTarget(sp, opts.lod));
+    const targets = budgetedAnchorTargets(sp, opts.lod, opts.vertexBudget);
+    const cardAnchors = selectAnchors(skel.anchors, targets.cardTarget);
+    const meshAnchors = selectAnchors(skel.anchors, targets.meshTarget);
     const folRng = rng.fork("foliage");
     const fromVert = g.vertCount;
     buildFoliageCards(g, sp, cardAnchors, folRng.fork("cards"), base);

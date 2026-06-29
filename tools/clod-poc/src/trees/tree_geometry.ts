@@ -127,6 +127,12 @@ export function treeGeometrySummary(geometry: THREE.BufferGeometry): {
 
 /** discrete grammar LOD for each non-impostor tree LOD */
 const GRAMMAR_LOD: Record<Exclude<TreeLod, "impostor">, VegLod> = { near: 0, mid: 1, far: 2 };
+const TREE_LOD_VERTEX_BUDGET: Record<TreeLod, keyof TreeSettings["lod"]["budgets"]> = {
+  near: "nearMaxVertices",
+  mid: "midMaxVertices",
+  far: "farMaxVertices",
+  impostor: "impostorMaxVertices",
+};
 
 /**
  * Visual height the procedural grammar tree is scaled to, so placement, LOD
@@ -147,7 +153,7 @@ function createTreeGeometry(
 ): THREE.BufferGeometry {
   const config = settings.species[species];
 
-  if (lod === "impostor") {
+  if (lod === "impostor" || (species === "dead" && lod === "far")) {
     const geometry = createOpaqueImpostorTree(species, config);
     setTreeVariantAttribute(geometry, variant);
     return geometry;
@@ -157,7 +163,12 @@ function createTreeGeometry(
   // only bark/foliage budgets vary by LOD.
   const sp = VEG_TREE_SPECIES[species];
   const rng = vegRng(settings.seed, `tree/${species}/${variant}`);
-  const built = buildTree(sp, rng, { lod: GRAMMAR_LOD[lod], barkColor: VEG_BARK_COLOR[species] });
+  const variantBudget = Math.max(1, Math.floor(settings.lod.budgets[TREE_LOD_VERTEX_BUDGET[lod]] / TREE_STRUCTURAL_VARIANTS));
+  const built = buildTree(sp, rng, {
+    lod: GRAMMAR_LOD[lod],
+    barkColor: VEG_BARK_COLOR[species],
+    vertexBudget: variantBudget,
+  });
   const geometry = built.geometry;
   const target = targetTreeHeight(species, config);
   if (built.stats.height > 1e-3 && target > 1e-3) {

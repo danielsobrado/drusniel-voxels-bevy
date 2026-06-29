@@ -1157,7 +1157,12 @@ describe("TreeSystem", () => {
 
   it("counts impostor LOD trees and keeps visible counts coherent", () => {
     const scene = new THREE.Scene();
-    const localSettings = { ...settings, maxInstances: 100, distanceM: 160 };
+    const localSettings = {
+      ...settings,
+      maxInstances: 100,
+      distanceM: 160,
+      impostors: { ...settings.impostors, enabled: true, fallbackToPlaceholder: true },
+    };
     const system = new TreeSystem({
       scene,
       nodes: [pageNode()],

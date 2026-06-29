@@ -139,7 +139,7 @@ describe("border coast/ocean config", () => {
   it("fails clearly for malformed fields", () => {
     expect(() =>
       parseBorderCoastOceanConfig(
-        yamlText.replace("near_subdivisions: 128", "near_subdivisions: many"),
+        yamlText.replace("near_subdivisions: 256", "near_subdivisions: many"),
       ),
     ).toThrow("deep_ocean.near_subdivisions must be a finite number");
   });

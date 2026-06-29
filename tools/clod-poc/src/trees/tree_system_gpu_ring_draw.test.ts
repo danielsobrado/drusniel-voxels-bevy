@@ -47,7 +47,9 @@ describe("tree system GPU ring draw helpers", () => {
 
   it("throws when indirect geometry support is unavailable", () => {
     const indirect = new StorageBufferAttribute(new Uint32Array(5), 5);
-    expect(() => setTreeGpuRingIndirect(new THREE.InstancedBufferGeometry(), indirect, 0))
+    const geometry = new THREE.InstancedBufferGeometry();
+    Object.defineProperty(geometry, "setIndirect", { value: undefined, configurable: true });
+    expect(() => setTreeGpuRingIndirect(geometry, indirect, 0))
       .toThrow(/setIndirect support/);
   });
 

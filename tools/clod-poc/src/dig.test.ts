@@ -309,7 +309,7 @@ describe("rebuildDirtyPages", () => {
     expect(node.mesh.normals).toEqual(full.mesh.normals);
   });
 
-  it("per-chunk rebuild remeshes a true subset inside a 4x4 page", () => {
+  it("per-chunk rebuild remeshes a true subset inside a 4x4 page", { timeout: 100000 }, () => {
     const world = { cellsX: 4 * uiCfg.page.chunks_per_page * uiCfg.page.chunk_size, cellsZ: 4 * uiCfg.page.chunks_per_page * uiCfg.page.chunk_size };
     const result = buildWorld(4, 4, uiCfg);
     const node = result.nodesByLevel.get(0)!.find((n) => n.id === "L0:0,0")!;

@@ -33,11 +33,7 @@ describe("canopy texture", () => {
       syntheticFallback: false,
     });
     const cov = set.coverageTexture.image.data as Float32Array;
-    for (let i = 0; i < cov.length; i++) {
-      expect(Number.isFinite(cov[i])).toBe(true);
-      expect(cov[i]).toBeGreaterThanOrEqual(0);
-      expect(cov[i]).toBeLessThanOrEqual(1);
-    }
+    expect(summarizeTextureValues(cov)).toMatchObject({ finite: true, minAtLeastZero: true, maxAtMostOne: true });
     expect(set.syntheticFallback).toBe(false);
   });
 
@@ -74,22 +70,10 @@ describe("canopy texture", () => {
     const species = set.speciesTexture.image.data as Float32Array;
     const roughness = set.roughnessTexture.image.data as Float32Array;
 
-    for (const value of height) expect(Number.isFinite(value)).toBe(true);
-    for (const value of coverage) {
-      expect(Number.isFinite(value)).toBe(true);
-      expect(value).toBeGreaterThanOrEqual(0);
-      expect(value).toBeLessThanOrEqual(1);
-    }
-    for (const value of species) {
-      expect(Number.isFinite(value)).toBe(true);
-      expect(value).toBeGreaterThanOrEqual(0);
-      expect(value).toBeLessThanOrEqual(1);
-    }
-    for (const value of roughness) {
-      expect(Number.isFinite(value)).toBe(true);
-      expect(value).toBeGreaterThanOrEqual(0);
-      expect(value).toBeLessThanOrEqual(1);
-    }
+    expect(summarizeTextureValues(height).finite).toBe(true);
+    expect(summarizeTextureValues(coverage)).toMatchObject({ finite: true, minAtLeastZero: true, maxAtMostOne: true });
+    expect(summarizeTextureValues(species)).toMatchObject({ finite: true, minAtLeastZero: true, maxAtMostOne: true });
+    expect(summarizeTextureValues(roughness)).toMatchObject({ finite: true, minAtLeastZero: true, maxAtMostOne: true });
   });
 
   it("uses synthetic fallback only when requested", () => {
@@ -105,3 +89,27 @@ describe("canopy texture", () => {
     expect(set.syntheticFallback).toBe(true);
   });
 });
+
+function summarizeTextureValues(data: Float32Array): {
+  finite: boolean;
+  minAtLeastZero: boolean;
+  maxAtMostOne: boolean;
+} {
+  let finite = true;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < data.length; i++) {
+    const value = data[i]!;
+    if (!Number.isFinite(value)) {
+      finite = false;
+      continue;
+    }
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+  return {
+    finite,
+    minAtLeastZero: min >= 0,
+    maxAtMostOne: max <= 1,
+  };
+}

@@ -71,7 +71,7 @@ describe("BiomeRegionField", () => {
     const field = new BiomeRegionField({ seed: 3, seaLevel: 18, regionCellM: BIOME_REGION_CELL_M });
 
     expect(field.regionCellM).toBe(BIOME_REGION_CELL_M);
-    expect(() => new BiomeRegionField({ seed: 3, seaLevel: 18, regionCellM: BIOME_REGION_CELL_M + 1 })).toThrow(/match the GPU shader/);
+    expect(() => new BiomeRegionField({ seed: 3, seaLevel: 18, regionCellM: BIOME_REGION_CELL_M + 1 })).toThrow(/match the shared GPU contract/);
   });
 
   it("does not drift when the constructor island shape is mutated later", () => {
