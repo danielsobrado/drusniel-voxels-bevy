@@ -82,6 +82,20 @@ export function createShadowProxyController(
 
   const sunShadowsEnabled = () => deps.getSunShadowsEnabled();
 
+  const disposeSunLight = () => {
+    if (sunHelper) {
+      deps.scene.remove(sunHelper);
+      sunHelper.dispose();
+      sunHelper = null;
+    }
+    if (sunLight) {
+      deps.scene.remove(sunLight);
+      deps.scene.remove(sunLight.target);
+      sunLight.dispose();
+      sunLight = null;
+    }
+  };
+
   const ensureSunLight = () => {
     if (sunLight || !deps.isLongView) return;
     enableRendererShadowMaps(deps.renderer);
@@ -169,15 +183,21 @@ export function createShadowProxyController(
   rebuildProxy(true);
 
   const applySunShadowState = (enabled: boolean) => {
-    if (enabled) ensureSunLight();
+    if (!enabled) {
+      disposeSunLight();
+      onSunShadowsChanged?.(false);
+      publishCounters();
+      return;
+    }
+    ensureSunLight();
     if (sunLight) {
       sunTarget = resolveSunTarget(deps);
       sunLight.target.position.copy(sunTarget);
-      sunLight.castShadow = enabled;
-      configureLongViewSunShadows(sunLight, deps.getConfig(), { castShadow: enabled });
+      sunLight.castShadow = true;
+      configureLongViewSunShadows(sunLight, deps.getConfig(), { castShadow: true });
       syncLongViewSunLight(sunLight, deps.getLighting(), 2.4, sunTarget);
     }
-    onSunShadowsChanged?.(enabled);
+    onSunShadowsChanged?.(true);
     publishCounters();
   };
 
@@ -186,11 +206,16 @@ export function createShadowProxyController(
     get sunLight() { return sunLight; },
     get sunShadowCameraHelper() { return sunHelper; },
     syncSunLight() {
+      if (!sunShadowsEnabled()) {
+        disposeSunLight();
+        return;
+      }
+      ensureSunLight();
       if (!sunLight) return;
       sunTarget = resolveSunTarget(deps);
       syncLongViewSunLight(sunLight, deps.getLighting(), 2.4, sunTarget);
-      configureLongViewSunShadows(sunLight, deps.getConfig(), { castShadow: sunShadowsEnabled() });
-      sunLight.castShadow = sunShadowsEnabled();
+      configureLongViewSunShadows(sunLight, deps.getConfig(), { castShadow: true });
+      sunLight.castShadow = true;
     },
     setProxyEnabled(enabled: boolean) {
       proxyEnabled = enabled && deps.isLongView;
@@ -213,9 +238,14 @@ export function createShadowProxyController(
       } else {
         updateShadowProxyDebugMaterial(runtime, config);
       }
-      if (sunLight) {
-        configureLongViewSunShadows(sunLight, config, { castShadow: sunShadowsEnabled() });
-        sunLight.castShadow = sunShadowsEnabled();
+      if (!sunShadowsEnabled()) {
+        disposeSunLight();
+      } else {
+        ensureSunLight();
+        if (sunLight) {
+          configureLongViewSunShadows(sunLight, config, { castShadow: true });
+          sunLight.castShadow = true;
+        }
       }
       publishCounters();
     },
@@ -254,17 +284,7 @@ export function createShadowProxyController(
       disposed = true;
       removeProxyMesh();
       runtime.dispose();
-      if (sunHelper) {
-        deps.scene.remove(sunHelper);
-        sunHelper.dispose();
-      }
-      if (sunLight) {
-        deps.scene.remove(sunLight);
-        deps.scene.remove(sunLight.target);
-        sunLight.dispose();
-      }
-      sunLight = null;
-      sunHelper = null;
+      disposeSunLight();
     },
   };
 }
