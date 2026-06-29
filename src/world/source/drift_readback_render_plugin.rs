@@ -11,6 +11,10 @@ use super::drift_readback_render::{
     GpuWorldSourceDriftReadbackRequest, decode_staged_gpu_world_source_drift_readback,
     init_gpu_world_source_drift_readback_pipeline, prepare_gpu_world_source_drift_readback_dispatch,
 };
+use super::drift_readback_request::{
+    GpuWorldSourceDriftReadbackRequestSettings,
+    populate_gpu_world_source_drift_readback_request_once,
+};
 
 #[derive(Default)]
 pub struct GpuWorldSourceDriftReadbackPlugin;
@@ -18,7 +22,9 @@ pub struct GpuWorldSourceDriftReadbackPlugin;
 impl Plugin for GpuWorldSourceDriftReadbackPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GpuWorldSourceDriftReadbackRequest>();
+        app.init_resource::<GpuWorldSourceDriftReadbackRequestSettings>();
         app.init_resource::<GpuWorldSourceDriftReadbackSharedResult>();
+        app.add_systems(Update, populate_gpu_world_source_drift_readback_request_once);
         let shared_result = app
             .world()
             .resource::<GpuWorldSourceDriftReadbackSharedResult>()
