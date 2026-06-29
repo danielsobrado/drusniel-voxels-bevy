@@ -10,6 +10,7 @@ export * from "./tree_gpu_ring_geometry.js";
 export * from "./tree_impostor_baker.js";
 export * from "./tree_impostor_blend_geometry.js";
 export * from "./tree_impostor_material.js";
+export * from "./tree_impostor_material_selector.js";
 export * from "./tree_impostor_octahedral.js";
 export * from "./tree_impostor_runtime.js";
 export * from "./tree_lod.js";
