@@ -48,6 +48,10 @@ impl TerrainSourceMode {
     pub fn is_opt_in_non_gpu(self) -> bool {
         !matches!(self, Self::GpuWorldSource)
     }
+
+    pub fn is_deprecated(self) -> bool {
+        matches!(self, Self::Legacy)
+    }
 }
 
 impl Default for TerrainSourceConfig {
@@ -103,6 +107,12 @@ impl TerrainSourceConfig {
             self.is_gpu_default_path(),
             self.mode.is_opt_in_non_gpu(),
         );
+
+        if self.mode.is_deprecated() {
+            bevy::log::warn!(
+                "Legacy terrain source mode is deprecated and remains only as an explicit fallback during WorldSource migration"
+            );
+        }
     }
 }
 
@@ -126,6 +136,7 @@ mod tests {
         assert_eq!(config.mode.acceptance_label(), "gpu_world_source");
         assert_eq!(config.mode.selection_reason(), "default_gpu");
         assert!(!config.mode.is_opt_in_non_gpu());
+        assert!(!config.mode.is_deprecated());
     }
 
     #[test]
@@ -146,10 +157,11 @@ mod tests {
         assert_eq!(config.mode.acceptance_label(), "gpu_world_source");
         assert_eq!(config.mode.selection_reason(), "default_gpu");
         assert!(!config.mode.is_opt_in_non_gpu());
+        assert!(!config.mode.is_deprecated());
     }
 
     #[test]
-    fn loads_legacy_mode() {
+    fn loads_legacy_mode_as_deprecated_explicit_fallback() {
         let file = write_temp_yaml("terrain_source:\n  mode: legacy\n");
         let config = TerrainSourceConfig::load(file.path()).expect("legacy config");
 
@@ -158,6 +170,7 @@ mod tests {
         assert_eq!(config.mode.acceptance_label(), "legacy");
         assert_eq!(config.mode.selection_reason(), "explicit_legacy");
         assert!(config.mode.is_opt_in_non_gpu());
+        assert!(config.mode.is_deprecated());
     }
 
     #[test]
@@ -170,6 +183,7 @@ mod tests {
         assert_eq!(config.mode.acceptance_label(), "cpu_world_source_reference");
         assert_eq!(config.mode.selection_reason(), "explicit_cpu_reference");
         assert!(config.mode.is_opt_in_non_gpu());
+        assert!(!config.mode.is_deprecated());
     }
 
     #[test]
