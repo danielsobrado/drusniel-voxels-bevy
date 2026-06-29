@@ -5,6 +5,7 @@ pub mod biome_region_field;
 pub mod drift_gate;
 pub mod drift_readback;
 pub mod drift_readback_render;
+pub mod drift_readback_staging;
 pub mod height_field;
 pub mod island_shape;
 pub mod noise;
@@ -41,6 +42,7 @@ pub use drift_readback::{
     WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult, WorldSourceGpuReadbackStatus,
     build_gpu_world_source_drift_input_samples, decode_gpu_world_source_drift_outputs,
 };
+pub use drift_readback_staging::decode_staged_gpu_world_source_drift_bytes;
 pub use height_field::base_surface_height;
 pub use island_shape::{IslandMaskSample, IslandShapeConfig, sample_island_mask};
 pub use splat::{BiomeSplatSample, MaterialLayerId, sample_biome_splat};
