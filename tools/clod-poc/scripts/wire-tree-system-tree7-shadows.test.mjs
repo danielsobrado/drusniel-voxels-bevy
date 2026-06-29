@@ -29,6 +29,22 @@ class TreeSystem {
     const ringBuffers: TreeRingInstanceBuffers = { cell, capacity: sharedInstanceCount };
     const materialHandles = {} as Record<string, TreeMaterialHandle>;
     const meshes: TreeGpuRingMesh[] = [];
+    for (const species of TREE_SPECIES) {
+      for (const lod of TREE_LODS) {
+        const materialKey = species + ":" + lod;
+        const atlas = this.impostorAtlases[species];
+        materialHandles[materialKey] = createTreeRingNodeMaterialHandle(this.settings, ringBuffers, lod);
+        const group = treeGpuRingGroupIndex(species, lod);
+        meshes.push(this.createGpuRingTierDraw(
+          species,
+          lod,
+          count,
+          indirect,
+          group * 5 * Uint32Array.BYTES_PER_ELEMENT,
+          materialHandles[materialKey],
+        ));
+      }
+    }
     return {
       meshes,
       cell,
@@ -39,6 +55,17 @@ class TreeSystem {
         indirectArgs: this.gpuBufferForAttribute(indirect),
       },
     };
+  }
+
+  private createGpuRingTierDraw(): TreeGpuRingMesh {
+    const mesh = {} as TreeGpuRingMesh;
+    // clod-poc has no real-time shadow-map pass; shadow-caster prepass work is N/A here.
+    mesh.castShadow = this.treeLodCastsShadow(lod);
+    return mesh;
+  }
+
+  private usesGpuRingPrepass(lod: TreeLod): boolean {
+    return false;
   }
 
   private updateGpuRingTrees(center: THREE.Vector3, camera?: THREE.Camera): boolean {
@@ -59,19 +86,24 @@ class TreeSystem {
 }
 `;
 
-const EDIT_COUNT = 7;
+const EDIT_COUNT = 13;
 
 describe("TREE-7 tree system wiring script", () => {
-  it("applies shadow buffer and dispatch rewrites", () => {
+  it("applies shadow buffer, shadow-only mesh, and dispatch rewrites", () => {
     const result = wireTreeSystemTree7Source(FIXTURE);
 
     expect(result.changed).toBe(true);
     expect(result.applied).toHaveLength(EDIT_COUNT);
     expect(result.source).toContain("TREE_GPU_RING_SHADOW_GROUP_COUNT");
-    expect(result.source).toContain("getRealtimeSunShadowCascadeCameras");
+    expect(result.source).toContain("getRealtimeSunShadowCascadeCameras, markAsRealtimeSunShadowCaster");
     expect(result.source).toContain("treeRingShadowCascadePlanesFromCameras");
+    expect(result.source).toContain("treeRingShadowCasterGroupIndex");
     expect(result.source).toContain("shadowCell: StorageInstancedBufferAttribute");
     expect(result.source).toContain("tree-ring-shadow-indirect");
+    expect(result.source).toContain("shadowRingBuffers");
+    expect(result.source).toContain("createGpuRingShadowTierDraw");
+    expect(result.source).toContain("markAsRealtimeSunShadowCaster(mesh, cascade)");
+    expect(result.source).toContain("mesh.castShadow = false");
     expect(result.source).toContain("shadowCascadePlanes");
     expect(result.source).toContain("maxShadowCastersPerGroup");
   });
