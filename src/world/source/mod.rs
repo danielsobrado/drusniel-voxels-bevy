@@ -9,6 +9,7 @@ pub mod drift_readback_bridge;
 pub mod drift_readback_render;
 pub mod drift_readback_render_plugin;
 pub mod drift_readback_request;
+pub mod drift_readback_runtime_acceptance;
 pub mod drift_readback_staging;
 pub mod height_field;
 pub mod island_shape;
@@ -58,6 +59,10 @@ pub use drift_readback_request::{
     GpuWorldSourceDriftReadbackRequestSettings, WORLD_SOURCE_DRIFT_READBACK_ENABLE_ENV,
     build_world_source_drift_readback_inputs, default_world_source_drift_readback_points,
     populate_gpu_world_source_drift_readback_request_once,
+};
+pub use drift_readback_runtime_acceptance::{
+    GpuWorldSourceDriftRuntimeAcceptanceState,
+    evaluate_gpu_world_source_drift_runtime_acceptance_once,
 };
 pub use drift_readback_staging::decode_staged_gpu_world_source_drift_bytes;
 pub use height_field::base_surface_height;
