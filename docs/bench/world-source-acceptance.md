@@ -36,7 +36,9 @@ GPU readback boundary:
 - `src/world/source/drift_readback.rs` defines `WorldSourceGpuReadbackProvider`;
 - `assets/shaders/world_source/drift_readback.wgsl` defines the GPU readback shader contract;
 - Rust wire structs are `GpuWorldSourceDriftReadbackParams`, `GpuWorldSourceDriftInputSample`, and `GpuWorldSourceDriftOutputSample`;
+- `GpuWorldSourceDriftReadbackDispatchPlan` calculates sample count, workgroup count, and required buffer byte sizes;
 - `build_gpu_world_source_drift_input_samples` prepares input buffers from the CPU reference source and drift sample points;
+- `decode_gpu_world_source_drift_outputs` maps GPU output wire structs back to `WorldSourceDriftSample` and rejects invalid IDs;
 - `world_source_acceptance` reads GPU drift samples through this provider boundary;
 - the current provider is `UnavailableWorldSourceGpuReadback`, so `gpu_readback.status` is `unavailable` and `drift_gate.status` is `skipped`;
 - the real GPU implementation should replace that provider with one that dispatches `drift_readback.wgsl`, maps the output buffer back to `WorldSourceDriftSample`, and passes it into the existing drift gate.
