@@ -630,17 +630,15 @@ impl Plugin for PropInstancingPlugin {
                             .after(gpu_vegetation_cull::prepare_gpu_cull_dispatch),
                     ),
                 )
-                .add_systems(
-                    RenderStartup,
-                    gpu_vegetation_cull::init_gpu_cull_pipeline,
-                );
+                .add_systems(RenderStartup, gpu_vegetation_cull::init_gpu_cull_pipeline);
 
             // Register the compute cull node in the Core3d render graph.
             use bevy::core_pipeline::core_3d::graph::Core3d;
             use bevy::render::render_graph::RenderGraphExt;
-            app.sub_app_mut(RenderApp).add_render_graph_node::<
-                bevy::render::render_graph::ViewNodeRunner<gpu_vegetation_cull::GpuVegetationCullNode>,
-            >(Core3d, GpuVegetationCullLabel);
+            app.sub_app_mut(RenderApp)
+                .add_render_graph_node::<bevy::render::render_graph::ViewNodeRunner<
+                    gpu_vegetation_cull::GpuVegetationCullNode,
+                >>(Core3d, GpuVegetationCullLabel);
         }
     }
 }
@@ -1214,8 +1212,8 @@ fn rebuild_visible_and_shadow_instances_with_cascades(
         visible_instances.push(*instance);
         visible_bounds.push(*bounds);
 
-        let is_shadow_capable = !*shadow_culled
-            && (disable_shadow_lod || *lod == PropInstanceLod::Full);
+        let is_shadow_capable =
+            !*shadow_culled && (disable_shadow_lod || *lod == PropInstanceLod::Full);
 
         if !is_shadow_capable {
             continue;
@@ -1368,7 +1366,14 @@ fn update_instanced_prop_lod(
                 (forward.x, forward.y, forward.z)
             })
             .unwrap_or((0.0, -1.0, 0.0));
-        CascadeFrustaFingerprint { cam_x, cam_y, cam_z, light_dir_x: ldx, light_dir_y: ldy, light_dir_z: ldz }
+        CascadeFrustaFingerprint {
+            cam_x,
+            cam_y,
+            cam_z,
+            light_dir_x: ldx,
+            light_dir_y: ldy,
+            light_dir_z: ldz,
+        }
     };
 
     let mut full_instances = 0usize;
@@ -2046,8 +2051,9 @@ fn prepare_instance_buffers(
     timing: Option<Res<RenderTimingSink>>,
     bench_toggles: Option<Res<BenchRenderToggles>>,
     mut cascade_buffers: ResMut<CascadeShadowBuffers>,
-    #[cfg(feature = "gpu_vegetation")]
-    gpu_cull_buffers: Option<Res<crate::props::gpu_vegetation_cull::GpuVegetationCullBuffers>>,
+    #[cfg(feature = "gpu_vegetation")] gpu_cull_buffers: Option<
+        Res<crate::props::gpu_vegetation_cull::GpuVegetationCullBuffers>,
+    >,
 ) {
     let sink = timing.as_deref();
     let _timer = render_timing_guard(sink, "Render Instancing Prepare Buffers");
@@ -2330,7 +2336,9 @@ fn prepare_instance_buffers(
         let (gpu_cull_draw_args_buffer, gpu_cull_visible_buffer, gpu_cull_draw_args_offset) =
             if let Some(ref cull_buffers) = gpu_cull_buffers {
                 if let Some(group_idx) = cull_buffers.group_index_for_entity(entity) {
-                    let stride = std::mem::size_of::<crate::props::gpu_vegetation_cull::GpuDrawArgsTemplate>() as u64;
+                    let stride = std::mem::size_of::<
+                        crate::props::gpu_vegetation_cull::GpuDrawArgsTemplate,
+                    >() as u64;
                     (
                         cull_buffers.draw_args_buffer().cloned(),
                         cull_buffers.visible_instances_buffer().cloned(),
@@ -2520,9 +2528,8 @@ fn init_prop_instancing_pipeline(
     let material_layout = PropsMaterial::bind_group_layout_descriptor(&render_device);
     let _ = pipeline_cache.get_bind_group_layout(&material_layout);
     #[cfg(feature = "gpu_vegetation")]
-    let gpu_cull_vertex_entries = Some(
-        crate::props::gpu_vegetation_cull::gpu_cull_vertex_bind_group_entries(),
-    );
+    let gpu_cull_vertex_entries =
+        Some(crate::props::gpu_vegetation_cull::gpu_cull_vertex_bind_group_entries());
     #[cfg(not(feature = "gpu_vegetation"))]
     let gpu_cull_vertex_entries = None;
     commands.insert_resource(PropInstancingPipeline {
@@ -2608,10 +2615,7 @@ impl SpecializedMeshPipeline for PropInstancingPipeline {
         if key.gpu_cull {
             // GPU cull: vertex shader reads instance data from storage buffer (bind group 4).
             // No instance vertex buffer layout needed.
-            descriptor
-                .vertex
-                .shader_defs
-                .push("GPU_VEGETATION".into());
+            descriptor.vertex.shader_defs.push("GPU_VEGETATION".into());
             if let Some(entries) = self.gpu_cull_vertex_entries {
                 descriptor.layout.push(BindGroupLayoutDescriptor {
                     label: std::borrow::Cow::Borrowed("gpu_cull_vertex_bg_layout"),
@@ -2630,9 +2634,7 @@ impl SpecializedMeshPipeline for PropInstancingPipeline {
                 if blends_alpha {
                     fragment.shader_defs.push("PROP_BLEND_ALPHA".into());
                 }
-                fragment
-                    .shader_defs
-                    .push("GPU_VEGETATION".into());
+                fragment.shader_defs.push("GPU_VEGETATION".into());
             }
         } else {
             descriptor
@@ -3336,10 +3338,7 @@ fn queue_instanced_prop_shadows(
 
             let is_directional = matches!(light_entity, LightEntity::Directional { .. });
             let cascade_index = match light_entity {
-                LightEntity::Directional {
-                    cascade_index,
-                    ..
-                } => Some(*cascade_index),
+                LightEntity::Directional { cascade_index, .. } => Some(*cascade_index),
                 _ => None,
             };
 
@@ -3352,7 +3351,8 @@ fn queue_instanced_prop_shadows(
                 }
                 if is_directional {
                     if cascade_index.is_some_and(|ci| {
-                        light_visible_entities.p3()
+                        light_visible_entities
+                            .p3()
                             .as_ref()
                             .is_some_and(|csb| csb.buffers.contains_key(&(render_entity, ci)))
                     }) {
@@ -3518,8 +3518,10 @@ pub struct GpuCullActive;
 #[cfg(feature = "gpu_vegetation")]
 mod gpu_cull_bind_group {
     use super::*;
-    use bevy::render::render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass};
     use bevy::ecs::system::SystemParamItem;
+    use bevy::render::render_phase::{
+        PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass,
+    };
 
     /// Bind group 4: visible instances storage buffer for GPU cull vertex shader path.
     pub struct SetGpuCullBindGroup<const I: usize>;
@@ -3551,8 +3553,10 @@ mod gpu_cull_bind_group {
 
 #[cfg(not(feature = "gpu_vegetation"))]
 mod gpu_cull_bind_group {
-    use bevy::render::render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass};
     use bevy::ecs::system::SystemParamItem;
+    use bevy::render::render_phase::{
+        PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass,
+    };
 
     pub struct SetGpuCullBindGroup<const I: usize>;
 
@@ -3616,10 +3620,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstanced {
         // Instance data comes from bind group 4 (storage buffer), not vertex buffer 1.
         if let Some(ref draw_args_buffer) = instance_buffer.gpu_cull_draw_args_buffer {
             match &gpu_mesh.buffer_info {
-                RenderMeshBufferInfo::Indexed {
-                    index_format,
-                    ..
-                } => {
+                RenderMeshBufferInfo::Indexed { index_format, .. } => {
                     let Some(index_buffer_slice) =
                         mesh_allocator.mesh_index_slice(&mesh_instance.mesh_asset_id)
                     else {
@@ -3632,10 +3633,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstanced {
                     );
                 }
                 RenderMeshBufferInfo::NonIndexed => {
-                    pass.draw_indirect(
-                        draw_args_buffer,
-                        instance_buffer.gpu_cull_draw_args_offset,
-                    );
+                    pass.draw_indirect(draw_args_buffer, instance_buffer.gpu_cull_draw_args_offset);
                 }
             }
             return RenderCommandResult::Success;
@@ -3708,10 +3706,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
 
         let render_entity = item.entity();
         let cascade_index = match light_entity {
-            LightEntity::Directional {
-                cascade_index,
-                ..
-            } => Some(*cascade_index),
+            LightEntity::Directional { cascade_index, .. } => Some(*cascade_index),
             _ => None,
         };
 
@@ -3735,14 +3730,13 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
                         pass.set_vertex_buffer(0, vertex_buffer_slice.buffer.slice(..));
                         pass.set_vertex_buffer(1, visible_buf.slice(..));
 
-                        let args_offset =
-                            group_idx as u64 * std::mem::size_of::<crate::props::gpu_vegetation_cull::GpuDrawArgsTemplate>() as u64;
+                        let args_offset = group_idx as u64
+                            * std::mem::size_of::<
+                                crate::props::gpu_vegetation_cull::GpuDrawArgsTemplate,
+                            >() as u64;
 
                         match &gpu_mesh.buffer_info {
-                            RenderMeshBufferInfo::Indexed {
-                                index_format,
-                                ..
-                            } => {
+                            RenderMeshBufferInfo::Indexed { index_format, .. } => {
                                 let Some(index_buffer_slice) =
                                     mesh_allocator.mesh_index_slice(&mesh_instance.mesh_asset_id)
                                 else {
@@ -3770,10 +3764,16 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
             if let Some(entry) = cascade_buffers_ref.buffers.get(&(render_entity, ci)) {
                 (&entry.buffer, entry.length)
             } else {
-                (&instance_buffer.shadow_buffer, instance_buffer.shadow_length)
+                (
+                    &instance_buffer.shadow_buffer,
+                    instance_buffer.shadow_length,
+                )
             }
         } else {
-            (&instance_buffer.shadow_buffer, instance_buffer.shadow_length)
+            (
+                &instance_buffer.shadow_buffer,
+                instance_buffer.shadow_length,
+            )
         };
 
         if shadow_len == 0 {
@@ -3849,10 +3849,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
 
         let render_entity = item.entity();
         let cascade_index = match light_entity {
-            LightEntity::Directional {
-                cascade_index,
-                ..
-            } => Some(*cascade_index),
+            LightEntity::Directional { cascade_index, .. } => Some(*cascade_index),
             _ => None,
         };
         let cascade_buffers_ref = cascade_buffers.into_inner();
@@ -3860,10 +3857,16 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstancedShadow {
             if let Some(entry) = cascade_buffers_ref.buffers.get(&(render_entity, ci)) {
                 (&entry.buffer, entry.length)
             } else {
-                (&instance_buffer.shadow_buffer, instance_buffer.shadow_length)
+                (
+                    &instance_buffer.shadow_buffer,
+                    instance_buffer.shadow_length,
+                )
             }
         } else {
-            (&instance_buffer.shadow_buffer, instance_buffer.shadow_length)
+            (
+                &instance_buffer.shadow_buffer,
+                instance_buffer.shadow_length,
+            )
         };
 
         if shadow_len == 0 {

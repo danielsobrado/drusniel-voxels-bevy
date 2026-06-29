@@ -10,12 +10,11 @@ use std::collections::BTreeMap;
 use std::env;
 
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{EguiContexts, egui};
 
 use super::render::ClodPageMeshTag;
 use super::selection::{
-    ClodPageNodeKey, ClodPageSelectionIndex, ClodSelectionDebugControls,
-    ClodSelectionRuntimeStats,
+    ClodPageNodeKey, ClodPageSelectionIndex, ClodSelectionDebugControls, ClodSelectionRuntimeStats,
 };
 
 #[derive(Resource, Debug, Clone)]
@@ -63,7 +62,11 @@ pub(crate) fn toggle_clod_debug_overlay_system(
         settings.show_page_bounds = !settings.show_page_bounds;
         info!(
             "CLOD page bounds: {} (Alt+B to toggle)",
-            if settings.show_page_bounds { "ON" } else { "OFF" }
+            if settings.show_page_bounds {
+                "ON"
+            } else {
+                "OFF"
+            }
         );
     }
 }
@@ -98,7 +101,10 @@ pub(crate) fn clod_debug_overlay_ui_system(
             ui.label(format!("Indexed nodes: {indexed_nodes}"));
             ui.label(format!("Roots: {root_count}"));
             ui.label(format!("Visible page entities: {visible_total}"));
-            ui.label(format!("Selected/rendered pages: {}", selection_stats.rendered_pages));
+            ui.label(format!(
+                "Selected/rendered pages: {}",
+                selection_stats.rendered_pages
+            ));
             ui.label(format!("Split nodes: {}", selection_stats.split_pages));
 
             if !visible_counts.is_empty() {

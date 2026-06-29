@@ -123,7 +123,8 @@ mod tests {
 
     fn write_temp_yaml(contents: &str) -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().expect("temp file");
-        file.write_all(contents.as_bytes()).expect("write temp yaml");
+        file.write_all(contents.as_bytes())
+            .expect("write temp yaml");
         file
     }
 

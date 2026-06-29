@@ -75,8 +75,14 @@ mod tests {
     fn gpu_world_source_is_the_default_runtime_path() {
         let report = TerrainSourceStartupReport::from_config(&TerrainSourceConfig::default());
 
-        assert_eq!(report.runtime_path, TerrainSourceRuntimePath::GpuWorldSource);
-        assert_eq!(report.selection_reason, TerrainSourceSelectionReason::DefaultGpu);
+        assert_eq!(
+            report.runtime_path,
+            TerrainSourceRuntimePath::GpuWorldSource
+        );
+        assert_eq!(
+            report.selection_reason,
+            TerrainSourceSelectionReason::DefaultGpu
+        );
         assert!(report.gpu_default_runtime);
         assert!(!report.opt_in_non_gpu);
         assert_eq!(report.acceptance_label(), "gpu_world_source");
@@ -88,8 +94,14 @@ mod tests {
             mode: TerrainSourceMode::CpuWorldSourceReference,
         });
 
-        assert_eq!(report.runtime_path, TerrainSourceRuntimePath::CpuWorldSourceReference);
-        assert_eq!(report.selection_reason, TerrainSourceSelectionReason::ExplicitCpuReference);
+        assert_eq!(
+            report.runtime_path,
+            TerrainSourceRuntimePath::CpuWorldSourceReference
+        );
+        assert_eq!(
+            report.selection_reason,
+            TerrainSourceSelectionReason::ExplicitCpuReference
+        );
         assert!(!report.gpu_default_runtime);
         assert!(report.opt_in_non_gpu);
         assert_eq!(report.acceptance_label(), "cpu_world_source_reference");
@@ -102,7 +114,10 @@ mod tests {
         });
 
         assert_eq!(report.runtime_path, TerrainSourceRuntimePath::Legacy);
-        assert_eq!(report.selection_reason, TerrainSourceSelectionReason::ExplicitLegacy);
+        assert_eq!(
+            report.selection_reason,
+            TerrainSourceSelectionReason::ExplicitLegacy
+        );
         assert!(!report.gpu_default_runtime);
         assert!(report.opt_in_non_gpu);
         assert_eq!(report.acceptance_label(), "legacy");

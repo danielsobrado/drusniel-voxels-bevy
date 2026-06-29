@@ -157,7 +157,11 @@ fn parse_rows(raw: &str) -> Result<Vec<Row>, String> {
         }
         let parts: Vec<&str> = line.split(',').collect();
         if parts.len() != 10 {
-            return Err(format!("line {} has {} columns, expected 10", line_no + 2, parts.len()));
+            return Err(format!(
+                "line {} has {} columns, expected 10",
+                line_no + 2,
+                parts.len()
+            ));
         }
         rows.push(Row {
             frame: parse(parts[0], line_no, "frame")?,
@@ -194,7 +198,10 @@ fn parse_bool(value: &str, line_no: usize, name: &str) -> Result<bool, String> {
 }
 
 fn evaluate(rows: &[Row], cfg: FreezeGuardConfig) -> GuardReport {
-    let mut report = GuardReport { samples: rows.len(), ..Default::default() };
+    let mut report = GuardReport {
+        samples: rows.len(),
+        ..Default::default()
+    };
     let mut previous_frozen_digest: Option<&str> = None;
 
     for row in rows {
@@ -240,7 +247,9 @@ fn evaluate(rows: &[Row], cfg: FreezeGuardConfig) -> GuardReport {
         report.errors.push("freeze was never requested".to_string());
     }
     if cfg.require_frozen_active && report.frozen_rows == 0 {
-        report.errors.push("frozen cut was never active".to_string());
+        report
+            .errors
+            .push("frozen cut was never active".to_string());
     }
     if report.requested_but_inactive_rows > cfg.max_requested_but_inactive_rows {
         report.errors.push(format!(
@@ -263,8 +272,7 @@ fn evaluate(rows: &[Row], cfg: FreezeGuardConfig) -> GuardReport {
     if report.nonzero_split_counters_while_frozen > cfg.max_nonzero_split_counters_while_frozen {
         report.errors.push(format!(
             "nonzero split counters while frozen: {} > {}",
-            report.nonzero_split_counters_while_frozen,
-            cfg.max_nonzero_split_counters_while_frozen
+            report.nonzero_split_counters_while_frozen, cfg.max_nonzero_split_counters_while_frozen
         ));
     }
     if report.unrequested_frozen_rows > cfg.max_unrequested_frozen_rows {

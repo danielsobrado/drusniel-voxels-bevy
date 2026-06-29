@@ -110,8 +110,18 @@ impl ClodDirtyPagePlan {
     /// Flatten as `(level, coord)` pairs. Useful for telemetry and debug overlays.
     pub fn flattened_nodes(&self) -> Vec<(usize, (i32, i32))> {
         let mut out = Vec::with_capacity(self.total_node_count());
-        out.extend(self.lod0_page_coords.iter().copied().map(|coord| (0, coord)));
-        for (level, coords) in self.ancestor_node_coords_by_level.iter().enumerate().skip(1) {
+        out.extend(
+            self.lod0_page_coords
+                .iter()
+                .copied()
+                .map(|coord| (0, coord)),
+        );
+        for (level, coords) in self
+            .ancestor_node_coords_by_level
+            .iter()
+            .enumerate()
+            .skip(1)
+        {
             out.extend(coords.iter().copied().map(|coord| (level, coord)));
         }
         out
@@ -225,7 +235,10 @@ fn dirty_page_range_axis(
     min_allowed: i32,
     max_allowed: i32,
 ) -> Option<(i32, i32)> {
-    if !min_world.is_finite() || !max_world.is_finite() || !page_size.is_finite() || page_size <= 0.0
+    if !min_world.is_finite()
+        || !max_world.is_finite()
+        || !page_size.is_finite()
+        || page_size <= 0.0
     {
         return None;
     }
@@ -274,7 +287,11 @@ mod tests {
     #[test]
     fn clamps_to_current_tree_footprint() {
         let plan = plan_dirty_pages_for_sphere(grid(), -32.0, 8.0, 48.0, 0.0);
-        assert!(plan.lod0_page_coords.iter().all(|(x, z)| *x >= 0 && *z >= 0));
+        assert!(
+            plan.lod0_page_coords
+                .iter()
+                .all(|(x, z)| *x >= 0 && *z >= 0)
+        );
         assert!(plan.lod0_page_coords.iter().all(|(x, z)| *x < 8 && *z < 8));
     }
 

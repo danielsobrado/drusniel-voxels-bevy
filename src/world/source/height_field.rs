@@ -1,5 +1,8 @@
 use super::island_shape::apply_island_shape;
-use super::noise::{domain_warped_fbm2, fbm2, hash_position_seeded, ridged_fbm2, smooth01, smoothstep_range, DomainWarpSettings, FbmSettings};
+use super::noise::{
+    DomainWarpSettings, FbmSettings, domain_warped_fbm2, fbm2, hash_position_seeded, ridged_fbm2,
+    smooth01, smoothstep_range,
+};
 use super::world_source::TerrainFieldConfig;
 
 #[derive(Debug, Clone, Copy)]
@@ -40,7 +43,14 @@ struct MountainConstants {
 const TERRAIN: TerrainConstants = TerrainConstants {
     min_height: 14.0,
     max_height: 118.0,
-    continent: NoiseConstants { scale: 0.001, amplitude: 40.0, octaves: 2, persistence: 0.5, lacunarity: 2.0, warp_strength: 220.0 },
+    continent: NoiseConstants {
+        scale: 0.001,
+        amplitude: 40.0,
+        octaves: 2,
+        persistence: 0.5,
+        lacunarity: 2.0,
+        warp_strength: 220.0,
+    },
     mountains: MountainConstants {
         scale: 0.008,
         amplitude: 120.0,
@@ -54,8 +64,22 @@ const TERRAIN: TerrainConstants = TerrainConstants {
         massif_power: 1.65,
         warp_strength: 52.0,
     },
-    hills: NoiseConstants { scale: 0.025, amplitude: 25.0, octaves: 4, persistence: 0.5, lacunarity: 2.0, warp_strength: 19.0 },
-    detail: NoiseConstants { scale: 0.1, amplitude: 3.0, octaves: 3, persistence: 0.5, lacunarity: 2.0, warp_strength: 4.0 },
+    hills: NoiseConstants {
+        scale: 0.025,
+        amplitude: 25.0,
+        octaves: 4,
+        persistence: 0.5,
+        lacunarity: 2.0,
+        warp_strength: 19.0,
+    },
+    detail: NoiseConstants {
+        scale: 0.1,
+        amplitude: 3.0,
+        octaves: 3,
+        persistence: 0.5,
+        lacunarity: 2.0,
+        warp_strength: 4.0,
+    },
 };
 
 fn fbm_configurable(x: f32, z: f32, cfg: NoiseConstants, seed: i32) -> f32 {
@@ -104,7 +128,13 @@ fn domain_fbm_custom(
         x,
         z,
         DomainWarpSettings {
-            fbm: FbmSettings { scale, octaves, persistence, lacunarity, seed },
+            fbm: FbmSettings {
+                scale,
+                octaves,
+                persistence,
+                lacunarity,
+                seed,
+            },
             warp_scale: scale * 0.31,
             warp_strength,
         },
@@ -138,9 +168,12 @@ fn massif_cell_mask(x: f32, z: f32, seed: i32) -> f32 {
         for dx in -1..=1 {
             let cx = cell_x + dx;
             let cz = cell_z + dz;
-            let offset_x = hash_position_seeded(cx.wrapping_mul(43), cz.wrapping_mul(59), seed) - 0.5;
-            let offset_z = hash_position_seeded(cx.wrapping_mul(71), cz.wrapping_mul(37), seed) - 0.5;
-            let height_t = 0.55 + hash_position_seeded(cx.wrapping_mul(97), cz.wrapping_mul(83), seed) * 0.45;
+            let offset_x =
+                hash_position_seeded(cx.wrapping_mul(43), cz.wrapping_mul(59), seed) - 0.5;
+            let offset_z =
+                hash_position_seeded(cx.wrapping_mul(71), cz.wrapping_mul(37), seed) - 0.5;
+            let height_t =
+                0.55 + hash_position_seeded(cx.wrapping_mul(97), cz.wrapping_mul(83), seed) * 0.45;
             let radius_t = hash_position_seeded(cx.wrapping_mul(113), cz.wrapping_mul(131), seed);
             let center_x = (cx as f32 + 0.5 + offset_x * 0.55) * spacing;
             let center_z = (cz as f32 + 0.5 + offset_z * 0.55) * spacing;
@@ -231,8 +264,10 @@ pub fn base_surface_height(x: f32, z: f32, field: &TerrainFieldConfig) -> f32 {
     let detail = detail_noise * TERRAIN.detail.amplitude;
 
     let min_surface = TERRAIN.min_height.max(min_normal_surface_y);
-    let height = base_elevation + continent + mountains + mountain_uplift + hills + detail - valley_carve;
-    let capped = soften_height_cap(height, min_surface, TERRAIN.max_height).clamp(min_surface, TERRAIN.max_height - 0.5);
+    let height =
+        base_elevation + continent + mountains + mountain_uplift + hills + detail - valley_carve;
+    let capped = soften_height_cap(height, min_surface, TERRAIN.max_height)
+        .clamp(min_surface, TERRAIN.max_height - 0.5);
     apply_island_shape(x, z, capped, &field.island_shape)
 }
 
@@ -244,7 +279,10 @@ mod tests {
     #[test]
     fn height_field_is_deterministic() {
         let cfg = TerrainFieldConfig::default();
-        assert_eq!(base_surface_height(128.0, 64.0, &cfg), base_surface_height(128.0, 64.0, &cfg));
+        assert_eq!(
+            base_surface_height(128.0, 64.0, &cfg),
+            base_surface_height(128.0, 64.0, &cfg)
+        );
     }
 
     #[test]

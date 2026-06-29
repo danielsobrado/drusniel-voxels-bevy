@@ -86,7 +86,11 @@ mod tests {
     use super::*;
     use crate::terrain::generation::{BiomeHint, WorldShapeSample};
 
-    fn sample(ocean_class: OceanClass, coast_surface: CoastSurfaceClass, coast_distance_m: f32) -> WorldShapeSample {
+    fn sample(
+        ocean_class: OceanClass,
+        coast_surface: CoastSurfaceClass,
+        coast_distance_m: f32,
+    ) -> WorldShapeSample {
         WorldShapeSample {
             continental: 0.0,
             island: 0.0,
@@ -101,7 +105,11 @@ mod tests {
 
     #[test]
     fn underwater_rejects_all_placement() {
-        let sample = sample(OceanClass::ShelfSea, CoastSurfaceClass::ShelfSeaFloor, -80.0);
+        let sample = sample(
+            OceanClass::ShelfSea,
+            CoastSurfaceClass::ShelfSeaFloor,
+            -80.0,
+        );
 
         assert_eq!(
             placement_rejection(&sample, PlacementKind::Tree),

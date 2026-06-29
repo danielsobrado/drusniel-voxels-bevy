@@ -31,14 +31,14 @@ use bevy::render::{
 };
 use bevy::shader::Shader;
 
-use crate::camera::controller::PlayerCamera;
-use crate::rendering::render_timing::RenderTimingSink;
-use crate::rendering::water::WaterConfig;
+use super::finish::WitchcraftWaterFinishParams;
 use super::reflection::{
     WaterReflectionBodyParams, WaterReflectionConfig, WaterReflectionDebugViewMode,
     WaterReflectionMaskTexture, WaterReflectionStatus, WaterReflectionTexture,
 };
-use super::finish::WitchcraftWaterFinishParams;
+use crate::camera::controller::PlayerCamera;
+use crate::rendering::render_timing::RenderTimingSink;
+use crate::rendering::water::WaterConfig;
 use crate::weather::{WeatherRuntime, WeatherShaderUniforms};
 
 const COMPOSITOR_SHADER_HANDLE: Handle<Shader> =

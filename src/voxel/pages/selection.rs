@@ -191,9 +191,12 @@ impl ClodSelectionRuntimeStats {
 }
 
 fn env_flag(name: &str) -> bool {
-    env::var(name)
-        .ok()
-        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+    env::var(name).ok().is_some_and(|value| {
+        matches!(
+            value.trim(),
+            "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+        )
+    })
 }
 
 fn parse_force_split_ids(raw: &str) -> HashSet<ClodPageNodeKey> {
@@ -203,7 +206,10 @@ fn parse_force_split_ids(raw: &str) -> HashSet<ClodPageNodeKey> {
             let level = parts.next()?.parse::<usize>().ok()?;
             let x = parts.next()?.parse::<i32>().ok()?;
             let z = parts.next()?.parse::<i32>().ok()?;
-            parts.next().is_none().then_some(ClodPageNodeKey::new(level, (x, z)))
+            parts
+                .next()
+                .is_none()
+                .then_some(ClodPageNodeKey::new(level, (x, z)))
         })
         .collect()
 }
@@ -602,9 +608,9 @@ pub(crate) fn clod_page_selection_system(
     };
     for (tag, mut visibility, material) in pages.iter_mut() {
         let key = ClodPageNodeKey::from(tag);
-        let pending_live_restore = gate.as_deref().is_some_and(|gate| {
-            gate.node_has_pending_restore(key, &tree)
-        });
+        let pending_live_restore = gate
+            .as_deref()
+            .is_some_and(|gate| gate.node_has_pending_restore(key, &tree));
         let outside_near_field = index.node(key).is_some_and(|node| {
             !near_field_intersects_footprint(node.footprint, params.near_field)
         });
@@ -645,12 +651,7 @@ pub(crate) fn clod_page_selection_system(
             })
             .unwrap_or(base_material_handle.clone());
 
-        set_page_fade(
-            &mut materials,
-            &material.0,
-            &quality_base_handle,
-            next,
-        );
+        set_page_fade(&mut materials, &material.0, &quality_base_handle, next);
         let desired_visibility = if next > 0.0 {
             Visibility::Visible
         } else {

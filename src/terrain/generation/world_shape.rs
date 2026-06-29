@@ -202,7 +202,8 @@ impl WorldShapeSampler {
             - self.land_mask(x - COAST_GRADIENT_STEP_M, z);
         let dz = self.land_mask(x, z + COAST_GRADIENT_STEP_M)
             - self.land_mask(x, z - COAST_GRADIENT_STEP_M);
-        let gradient = ((dx * dx + dz * dz).sqrt() / (COAST_GRADIENT_STEP_M * 2.0)).max(MIN_GRADIENT);
+        let gradient =
+            ((dx * dx + dz * dz).sqrt() / (COAST_GRADIENT_STEP_M * 2.0)).max(MIN_GRADIENT);
 
         land_mask / gradient
     }
@@ -260,7 +261,11 @@ impl WorldShapeSampler {
             OceanClass::Coast => self.config.sea_level - 2.0,
             OceanClass::ShelfSea => {
                 let t = (-coast_distance_m / self.config.coast.shelf_width_m).clamp(0.0, 1.0);
-                lerp(self.config.sea_level, self.config.ocean.shelf_depth, smoothstep(t))
+                lerp(
+                    self.config.sea_level,
+                    self.config.ocean.shelf_depth,
+                    smoothstep(t),
+                )
             }
             OceanClass::DeepSea => {
                 let trench = fbm(
@@ -402,9 +407,18 @@ mod tests {
         assert_eq!(sampler.config().seed, defaults.seed);
         assert_eq!(sampler.config().sea_level, defaults.sea_level);
         assert_eq!(sampler.config().continents.scale, defaults.continents.scale);
-        assert_eq!(sampler.config().islands.threshold, defaults.islands.threshold);
-        assert_eq!(sampler.config().coast.beach_width_m, defaults.coast.beach_width_m);
-        assert_eq!(sampler.config().ocean.deep_sea_depth, defaults.ocean.deep_sea_depth);
+        assert_eq!(
+            sampler.config().islands.threshold,
+            defaults.islands.threshold
+        );
+        assert_eq!(
+            sampler.config().coast.beach_width_m,
+            defaults.coast.beach_width_m
+        );
+        assert_eq!(
+            sampler.config().ocean.deep_sea_depth,
+            defaults.ocean.deep_sea_depth
+        );
     }
 
     #[test]

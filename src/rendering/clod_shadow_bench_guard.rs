@@ -86,7 +86,12 @@ pub struct ClodShadowGuardCheck {
 }
 
 impl ClodShadowGuardCheck {
-    pub fn pass(name: impl Into<String>, metric: impl Into<String>, observed: f64, expectation: impl Into<String>) -> Self {
+    pub fn pass(
+        name: impl Into<String>,
+        metric: impl Into<String>,
+        observed: f64,
+        expectation: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             metric: metric.into(),
@@ -96,7 +101,12 @@ impl ClodShadowGuardCheck {
         }
     }
 
-    pub fn fail(name: impl Into<String>, metric: impl Into<String>, observed: Option<f64>, expectation: impl Into<String>) -> Self {
+    pub fn fail(
+        name: impl Into<String>,
+        metric: impl Into<String>,
+        observed: Option<f64>,
+        expectation: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             metric: metric.into(),
@@ -216,7 +226,13 @@ fn evaluate_proxy(
         METRIC_RUNTIME_TRIANGLES,
         METRIC_VISUAL_TRIANGLES,
     );
-    check_at_least(checks, metrics, "saved triangles positive", METRIC_SAVED_TRIANGLES, 1.0);
+    check_at_least(
+        checks,
+        metrics,
+        "saved triangles positive",
+        METRIC_SAVED_TRIANGLES,
+        1.0,
+    );
 }
 
 fn evaluate_visual_only(
@@ -238,7 +254,13 @@ fn evaluate_visual_only(
         METRIC_SAVED_PERCENT,
         thresholds.visual_max_saved_percent,
     );
-    check_at_least(checks, metrics, "visual casters present", METRIC_VISUAL_CASTER_PAGES, 1.0);
+    check_at_least(
+        checks,
+        metrics,
+        "visual casters present",
+        METRIC_VISUAL_CASTER_PAGES,
+        1.0,
+    );
 }
 
 fn evaluate_no_cast(
@@ -260,7 +282,13 @@ fn evaluate_no_cast(
         expectation: format!("<= {:.4}", thresholds.nocast_max_caster_pages),
         status,
     });
-    check_at_most(checks, metrics, "no-cast runtime triangles", METRIC_RUNTIME_TRIANGLES, 0.0);
+    check_at_most(
+        checks,
+        metrics,
+        "no-cast runtime triangles",
+        METRIC_RUNTIME_TRIANGLES,
+        0.0,
+    );
 }
 
 fn evaluate_disabled(
@@ -350,7 +378,9 @@ fn metric(metrics: &BTreeMap<String, f64>, name: &str) -> Option<f64> {
 fn report(mode_code: Option<u32>, checks: Vec<ClodShadowGuardCheck>) -> ClodShadowBenchGuardReport {
     let status = checks
         .iter()
-        .fold(ClodShadowGuardStatus::Pass, |status, check| status.combine(check.status));
+        .fold(ClodShadowGuardStatus::Pass, |status, check| {
+            status.combine(check.status)
+        });
     ClodShadowBenchGuardReport {
         mode_code,
         status,
@@ -397,10 +427,12 @@ mod tests {
             &ClodShadowBenchGuardThresholds::default(),
         );
         assert_eq!(report.status, ClodShadowGuardStatus::Fail);
-        assert!(report
-            .failure_messages()
-            .iter()
-            .any(|message| message.contains("proxy saves triangles")));
+        assert!(
+            report
+                .failure_messages()
+                .iter()
+                .any(|message| message.contains("proxy saves triangles"))
+        );
     }
 
     #[test]
@@ -421,7 +453,10 @@ mod tests {
     #[test]
     fn nocast_mode_requires_zero_casters() {
         let metrics = BTreeMap::from([
-            (METRIC_RUNTIME_MODE_CODE.to_owned(), MODE_NO_CAST_ONLY as f64),
+            (
+                METRIC_RUNTIME_MODE_CODE.to_owned(),
+                MODE_NO_CAST_ONLY as f64,
+            ),
             (METRIC_VISUAL_CASTER_PAGES.to_owned(), 0.0),
             (METRIC_PROXY_CASTER_PAGES.to_owned(), 0.0),
             (METRIC_RUNTIME_TRIANGLES.to_owned(), 0.0),

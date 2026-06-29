@@ -25,6 +25,7 @@ jobs:
       VOXEL_CLOD_CROSSFADE_BRIDGE: '1'
       VOXEL_CLOD_CROSSFADE_MATERIAL: '1'
       VOXEL_CLOD_CROSSFADE_STATS_CSV: '1'
+      VOXEL_CLOD_CUT_FREEZE_CSV: '1'
       VOXEL_CLOD_BORDER_LOCK_CSV: '1'
       VOXEL_CLOD_TOPOLOGY_CSV: '1'
       VOXEL_CLOD_SIMPLIFY_CSV: '1'
@@ -34,12 +35,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Format check
-        run: cargo fmt --all -- --check
-      - name: Build CLOD guard binaries
+        run: cargo fmt --check
+      - name: Check all binaries
+        run: cargo check --bins
+      - name: Compile tests without running
+        run: cargo test --no-run
+      - name: Check CLOD shell scripts
         run: |
-          cargo test --no-run --bin clod_collider_refresh_export
-          cargo test --no-run --bin clod_collider_refresh_guard
-          cargo test --no-run --bin clod_apply_mode_guard
+          bash -n scripts/*clod*.sh scripts/run-clod-*.sh scripts/guard-clod-*.sh scripts/export-clod-*.sh scripts/report-clod-*.sh
       - name: Run final CLOD QA
         run: scripts/run-clod-final-qa.sh
       - name: Upload CLOD QA artifacts

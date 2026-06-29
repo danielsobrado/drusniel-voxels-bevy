@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::biome_region_field::{BiomeId, BiomeRegionField};
 use super::height_field::base_surface_height;
-use super::island_shape::{sample_island_mask, IslandShapeConfig};
+use super::island_shape::{IslandShapeConfig, sample_island_mask};
 
 pub const DEFAULT_TERRAIN_SEED: i32 = 0;
 pub const DEFAULT_SEA_LEVEL: f32 = 18.0;
@@ -55,7 +55,11 @@ impl TerrainFieldConfig {
         let mut island_shape = island_shape.sanitized();
         island_shape.seed = seed;
         island_shape.sea_level = sea_level;
-        Self { seed, sea_level, island_shape }
+        Self {
+            seed,
+            sea_level,
+            island_shape,
+        }
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
@@ -86,7 +90,11 @@ impl TerrainFieldConfig {
 
 impl Default for TerrainFieldConfig {
     fn default() -> Self {
-        Self::new(DEFAULT_TERRAIN_SEED, DEFAULT_SEA_LEVEL, IslandShapeConfig::default())
+        Self::new(
+            DEFAULT_TERRAIN_SEED,
+            DEFAULT_SEA_LEVEL,
+            IslandShapeConfig::default(),
+        )
     }
 }
 
@@ -104,7 +112,11 @@ impl ProceduralWorldSource {
             ocean_rim: terrain.island_shape.ocean_rim,
             terrain: terrain.clone(),
         };
-        let biomes = BiomeRegionField::new(terrain.seed, terrain.sea_level, terrain.island_shape.clone());
+        let biomes = BiomeRegionField::new(
+            terrain.seed,
+            terrain.sea_level,
+            terrain.island_shape.clone(),
+        );
         Self { metadata, biomes }
     }
 
@@ -161,7 +173,10 @@ mod tests {
         let a = source.sample_height(512.0, -128.0);
         let b = source.sample_height(512.0, -128.0);
         assert_eq!(a, b);
-        assert_eq!(source.sample_biome(512.0, -128.0), source.sample_biome(512.0, -128.0));
+        assert_eq!(
+            source.sample_biome(512.0, -128.0),
+            source.sample_biome(512.0, -128.0)
+        );
     }
 
     #[test]
@@ -169,15 +184,22 @@ mod tests {
         let source = ProceduralWorldSource::new(TerrainFieldConfig::new(
             0,
             18.0,
-            IslandShapeConfig { ocean_rim: true, ..IslandShapeConfig::default() },
+            IslandShapeConfig {
+                ocean_rim: true,
+                ..IslandShapeConfig::default()
+            },
         ));
-        assert!(matches!(source.metadata().bounds, WorldSourceBounds::RadiusM(_)));
+        assert!(matches!(
+            source.metadata().bounds,
+            WorldSourceBounds::RadiusM(_)
+        ));
         assert!(source.metadata().ocean_rim);
     }
 
     #[test]
     fn yaml_config_matches_runtime_shape() {
-        let cfg = TerrainFieldConfig::load(WORLD_SOURCE_CONFIG_PATH).expect("world_source.yaml should deserialize");
+        let cfg = TerrainFieldConfig::load(WORLD_SOURCE_CONFIG_PATH)
+            .expect("world_source.yaml should deserialize");
         assert_eq!(cfg.seed, 0);
         assert_eq!(cfg.sea_level, 18.0);
         assert!(cfg.island_shape.enabled);

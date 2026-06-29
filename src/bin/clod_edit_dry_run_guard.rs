@@ -118,24 +118,36 @@ fn load_config(path: &PathBuf) -> Result<Config, String> {
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
-            return Err(format!("{}:{} expected key = value", path.display(), line_index + 1));
+            return Err(format!(
+                "{}:{} expected key = value",
+                path.display(),
+                line_index + 1
+            ));
         };
         let key = key.trim();
         let value = value.trim().trim_matches('"');
         match key {
             "min_rows" => config.min_rows = parse_value(path, line_index, key, value)?,
-            "require_dry_run_mode" => config.require_dry_run_mode = parse_value(path, line_index, key, value)?,
-            "require_ready_status" => config.require_ready_status = parse_value(path, line_index, key, value)?,
+            "require_dry_run_mode" => {
+                config.require_dry_run_mode = parse_value(path, line_index, key, value)?
+            }
+            "require_ready_status" => {
+                config.require_ready_status = parse_value(path, line_index, key, value)?
+            }
             "require_expected_dirty_page_match" => {
-                config.require_expected_dirty_page_match = parse_value(path, line_index, key, value)?
+                config.require_expected_dirty_page_match =
+                    parse_value(path, line_index, key, value)?
             }
             "max_dirty_lod0_pages_per_request" => {
                 config.max_dirty_lod0_pages_per_request = parse_value(path, line_index, key, value)?
             }
             "max_dirty_total_nodes_per_request" => {
-                config.max_dirty_total_nodes_per_request = parse_value(path, line_index, key, value)?
+                config.max_dirty_total_nodes_per_request =
+                    parse_value(path, line_index, key, value)?
             }
-            "require_monotonic_frames" => config.require_monotonic_frames = parse_value(path, line_index, key, value)?,
+            "require_monotonic_frames" => {
+                config.require_monotonic_frames = parse_value(path, line_index, key, value)?
+            }
             "min_radius" => config.min_radius = parse_value(path, line_index, key, value)?,
             "max_radius" => config.max_radius = parse_value(path, line_index, key, value)?,
             "min_strength" => config.min_strength = parse_value(path, line_index, key, value)?,
@@ -221,7 +233,9 @@ fn validate_rows(rows: &[Row], config: &Config) -> Report {
         }
 
         if row.name.trim().is_empty() {
-            report.errors.push(format!("line {} has empty edit name", row.line));
+            report
+                .errors
+                .push(format!("line {} has empty edit name", row.line));
         }
         if !matches!(row.kind.as_str(), "dig" | "raise" | "level" | "smooth") {
             report.errors.push(format!(
@@ -235,7 +249,10 @@ fn validate_rows(rows: &[Row], config: &Config) -> Report {
                 row.line, row.name
             ));
         }
-        if !row.radius.is_finite() || row.radius < config.min_radius || row.radius > config.max_radius {
+        if !row.radius.is_finite()
+            || row.radius < config.min_radius
+            || row.radius > config.max_radius
+        {
             report.errors.push(format!(
                 "line {} radius {} outside [{}, {}]",
                 row.line, row.radius, config.min_radius, config.max_radius
@@ -263,10 +280,9 @@ fn validate_rows(rows: &[Row], config: &Config) -> Report {
             ));
         }
         if row.dirty_lod0_pages == 0 {
-            report.errors.push(format!(
-                "line {} produced zero dirty_lod0_pages",
-                row.line
-            ));
+            report
+                .errors
+                .push(format!("line {} produced zero dirty_lod0_pages", row.line));
         }
         if row.dirty_lod0_pages > config.max_dirty_lod0_pages_per_request {
             report.errors.push(format!(
@@ -364,16 +380,36 @@ fn parse_rows(input: &str) -> Result<Vec<Row>, String> {
             request_id: parse_field(get("request_id")?, line_number, "request_id")?,
             frame: parse_field(get("frame")?, line_number, "frame")?,
             event_index: parse_field(get("event_index")?, line_number, "event_index")?,
-            occurrence_index: parse_field(get("occurrence_index")?, line_number, "occurrence_index")?,
+            occurrence_index: parse_field(
+                get("occurrence_index")?,
+                line_number,
+                "occurrence_index",
+            )?,
             name: get("name")?.to_string(),
             kind: get("kind")?.to_string(),
             radius: parse_field(get("radius")?, line_number, "radius")?,
             strength: parse_field(get("strength")?, line_number, "strength")?,
-            target_height: parse_optional_field(get("target_height")?, line_number, "target_height")?,
+            target_height: parse_optional_field(
+                get("target_height")?,
+                line_number,
+                "target_height",
+            )?,
             mutation_mode: get("mutation_mode")?.to_string(),
-            dirty_lod0_pages: parse_field(get("dirty_lod0_pages")?, line_number, "dirty_lod0_pages")?,
-            dirty_ancestor_nodes: parse_field(get("dirty_ancestor_nodes")?, line_number, "dirty_ancestor_nodes")?,
-            dirty_total_nodes: parse_field(get("dirty_total_nodes")?, line_number, "dirty_total_nodes")?,
+            dirty_lod0_pages: parse_field(
+                get("dirty_lod0_pages")?,
+                line_number,
+                "dirty_lod0_pages",
+            )?,
+            dirty_ancestor_nodes: parse_field(
+                get("dirty_ancestor_nodes")?,
+                line_number,
+                "dirty_ancestor_nodes",
+            )?,
+            dirty_total_nodes: parse_field(
+                get("dirty_total_nodes")?,
+                line_number,
+                "dirty_total_nodes",
+            )?,
             expected_dirty_pages_min: parse_field(
                 get("expected_dirty_pages_min")?,
                 line_number,
@@ -472,7 +508,12 @@ mod tests {
         );
         let rows = parse_rows(&csv).unwrap();
         let report = validate_rows(&rows, &Config::default());
-        assert!(report.errors.iter().any(|error| error.contains("not dry_run")));
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("not dry_run"))
+        );
     }
 
     #[test]
@@ -482,7 +523,12 @@ mod tests {
         );
         let rows = parse_rows(&csv).unwrap();
         let report = validate_rows(&rows, &Config::default());
-        assert!(report.errors.iter().any(|error| error.contains("expectation mismatch")));
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("expectation mismatch"))
+        );
     }
 
     #[test]

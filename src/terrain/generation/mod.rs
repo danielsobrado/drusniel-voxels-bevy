@@ -10,16 +10,13 @@ pub use config::TerrainConfig;
 pub use noise::{fbm, ridged_fbm, sample_terrain_height};
 pub use sdf::sample_terrain_sdf;
 pub use world_shape::{
-    BiomeHint, CoastSurfaceClass, OceanClass, WorldShapeConfig, WorldShapeSample,
-    WorldShapeSampler,
+    BiomeHint, CoastSurfaceClass, OceanClass, WorldShapeConfig, WorldShapeSample, WorldShapeSampler,
 };
-pub use world_shape_debug::{
-    sample_world_shape_debug, WorldShapeDebugMode, WorldShapeDebugSample,
-};
+pub use world_shape_debug::{WorldShapeDebugMode, WorldShapeDebugSample, sample_world_shape_debug};
 pub use world_shape_far_field::{
-    far_field_is_deep_sea, far_field_is_drawn_as_land, sample_far_field_terrain,
-    FarFieldTerrainSample,
+    FarFieldTerrainSample, far_field_is_deep_sea, far_field_is_drawn_as_land,
+    sample_far_field_terrain,
 };
 pub use world_shape_placement::{
-    can_place, placement_rejection, PlacementKind, PlacementRejectReason,
+    PlacementKind, PlacementRejectReason, can_place, placement_rejection,
 };

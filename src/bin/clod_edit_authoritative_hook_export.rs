@@ -3,8 +3,8 @@ use std::fs;
 use std::io;
 
 use voxel_builder::voxel::pages::scripted_edit_authoritative_hook::{
-    audit_authoritative_edit_requests, audit_rows_to_csv, AuthoritativeEditHookMode,
-    AuthoritativeEditRequest,
+    AuthoritativeEditHookMode, AuthoritativeEditRequest, audit_authoritative_edit_requests,
+    audit_rows_to_csv,
 };
 
 fn main() -> io::Result<()> {
@@ -46,7 +46,9 @@ fn env_flag(name: &str) -> bool {
 
 fn parse_requests(csv: &str) -> Vec<AuthoritativeEditRequest> {
     let mut lines = csv.lines();
-    let Some(header) = lines.next() else { return Vec::new(); };
+    let Some(header) = lines.next() else {
+        return Vec::new();
+    };
     let headers: Vec<&str> = header.split(',').collect();
     lines
         .filter(|line| !line.trim().is_empty())

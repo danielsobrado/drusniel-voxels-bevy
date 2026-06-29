@@ -343,8 +343,7 @@ pub(crate) fn clod_page_chunk_ownership_system(
     });
     let ready_pages = ready_visible_page_keys(&tree, &page_query);
     for (entity, chunk_mesh, mut visibility, marker) in &mut chunk_query {
-        let page_covers =
-            chunk_covered_by_page(chunk_mesh.chunk_position, &ready_pages, &tree);
+        let page_covers = chunk_covered_by_page(chunk_mesh.chunk_position, &ready_pages, &tree);
         if live_chunk_hidden_by_clod(
             chunk_footprint(chunk_mesh.chunk_position),
             bubble,
@@ -376,9 +375,9 @@ pub(crate) fn clod_page_chunk_ownership_system(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::build_queue::{ClodPageBuildStatus, ClodPageTree};
     use super::super::diagonal_polish::DiagonalPolishStats;
+    use super::*;
     use std::collections::HashSet;
 
     fn footprint(min_x: f32, min_z: f32, max_x: f32, max_z: f32) -> PageFootprint {

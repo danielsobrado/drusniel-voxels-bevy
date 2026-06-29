@@ -184,7 +184,7 @@ impl Config {
                     "{}:{} unknown config key '{key}'",
                     path.display(),
                     line_no
-                ))
+                ));
             }
         }
         Ok(())
@@ -287,7 +287,10 @@ const REQUIRED_COLUMNS: &[&str] = &[
 fn require_columns(path: &Path, header: &[String], required: &[&str]) -> Result<(), String> {
     for column in required {
         if !header.iter().any(|found| found == column) {
-            return Err(format!("{} missing required column '{column}'", path.display()));
+            return Err(format!(
+                "{} missing required column '{column}'",
+                path.display()
+            ));
         }
     }
     Ok(())
@@ -316,8 +319,20 @@ fn parse_row(
         radius: required_f32(path, line, index, fields, "radius")?,
         strength: required_f32(path, line, index, fields, "strength")?,
         target_height: optional_f32(path, line, index, fields, "target_height")?,
-        expected_dirty_pages_min: optional_u32(path, line, index, fields, "expected_dirty_pages_min")?,
-        expected_dirty_pages_max: optional_u32(path, line, index, fields, "expected_dirty_pages_max")?,
+        expected_dirty_pages_min: optional_u32(
+            path,
+            line,
+            index,
+            fields,
+            "expected_dirty_pages_min",
+        )?,
+        expected_dirty_pages_max: optional_u32(
+            path,
+            line,
+            index,
+            fields,
+            "expected_dirty_pages_max",
+        )?,
         expected_rebuild_publish_max_frames: optional_u32(
             path,
             line,
@@ -343,7 +358,10 @@ fn get_field<'a>(
     column: &str,
 ) -> Result<&'a str, String> {
     let Some(&idx) = index.get(column) else {
-        return Err(format!("{}:{line} missing column '{column}'", path.display()));
+        return Err(format!(
+            "{}:{line} missing column '{column}'",
+            path.display()
+        ));
     };
     fields
         .get(idx)
@@ -360,7 +378,10 @@ fn required_string(
 ) -> Result<String, String> {
     let value = get_field(path, line, index, fields, column)?;
     if value.is_empty() {
-        Err(format!("{}:{line} '{column}' must not be empty", path.display()))
+        Err(format!(
+            "{}:{line} '{column}' must not be empty",
+            path.display()
+        ))
     } else {
         Ok(value.to_string())
     }
@@ -505,7 +526,7 @@ fn validate_row(row: &EditEventRow, config: &Config) -> Result<(), String> {
             return Err(format!(
                 "line {} unsupported edit kind '{}'; expected dig, raise, level or smooth",
                 row.line, row.kind
-            ))
+            ));
         }
     }
 
@@ -536,7 +557,10 @@ fn validate_row(row: &EditEventRow, config: &Config) -> Result<(), String> {
         ));
     }
     if row.kind == "level" && row.target_height.is_none() {
-        return Err(format!("line {} level edit requires target_height", row.line));
+        return Err(format!(
+            "line {} level edit requires target_height",
+            row.line
+        ));
     }
     if let Some(target_height) = row.target_height {
         if !target_height.is_finite() {
@@ -597,12 +621,7 @@ fn validate_group(
             if row.occurrence != expected as u32 {
                 return Err(format!(
                     "edit group {}/{}/{} has non-contiguous occurrence: expected {}, got {} at line {}",
-                    group.scene,
-                    group.checkpoint,
-                    group.edit,
-                    expected,
-                    row.occurrence,
-                    row.line
+                    group.scene, group.checkpoint, group.edit, expected, row.occurrence, row.line
                 ));
             }
         }
@@ -713,7 +732,11 @@ mod tests {
 
     #[test]
     fn accepts_contiguous_repeated_events() {
-        let rows = vec![row("dig-a", 0, 10), row("dig-a", 1, 20), row("dig-a", 2, 30)];
+        let rows = vec![
+            row("dig-a", 0, 10),
+            row("dig-a", 1, 20),
+            row("dig-a", 2, 30),
+        ];
         validate_events(&rows, &Config::default()).unwrap();
     }
 
@@ -732,4 +755,3 @@ mod tests {
         assert!(err.contains("requires target_height"));
     }
 }
-

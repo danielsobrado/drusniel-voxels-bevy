@@ -282,7 +282,9 @@ impl Material for TriplanarMaterial {
                     fragment.shader_defs.push("TERRAIN_CHEAP_TRIPLANAR".into());
                 }
                 TerrainMaterialQuality::SingleProjectionFar => {
-                    fragment.shader_defs.push("TERRAIN_SINGLE_PROJECTION_FAR".into());
+                    fragment
+                        .shader_defs
+                        .push("TERRAIN_SINGLE_PROJECTION_FAR".into());
                 }
                 TerrainMaterialQuality::HorizonProxy => {
                     fragment.shader_defs.push("TERRAIN_HORIZON_PROXY".into());

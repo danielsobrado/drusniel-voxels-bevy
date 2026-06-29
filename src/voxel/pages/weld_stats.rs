@@ -29,10 +29,20 @@ impl ClodWeldStatsRow {
     pub fn to_csv_line(self) -> String {
         format!(
             "{},{},{},{},{},{},{},{},{},{},{},{:.8},{:.8},{:.8}",
-            self.revision, self.level, self.page_x, self.page_z, self.vertices, self.triangles,
-            self.unique_position_buckets, self.duplicate_position_groups, self.duplicate_vertices,
-            self.border_vertices, self.open_boundary_edges, self.max_normal_delta,
-            self.max_material_delta, self.max_paint_delta,
+            self.revision,
+            self.level,
+            self.page_x,
+            self.page_z,
+            self.vertices,
+            self.triangles,
+            self.unique_position_buckets,
+            self.duplicate_position_groups,
+            self.duplicate_vertices,
+            self.border_vertices,
+            self.open_boundary_edges,
+            self.max_normal_delta,
+            self.max_material_delta,
+            self.max_paint_delta,
         )
     }
 }
@@ -45,13 +55,20 @@ pub struct WeldStatsConfig {
 
 impl Default for WeldStatsConfig {
     fn default() -> Self {
-        Self { position_epsilon: 1.0e-5, border_epsilon: 1.0e-4 }
+        Self {
+            position_epsilon: 1.0e-5,
+            border_epsilon: 1.0e-4,
+        }
     }
 }
 
 fn quant_key(p: [f32; 3], epsilon: f32) -> (i64, i64, i64) {
     let inv = if epsilon > 0.0 { epsilon.recip() } else { 1.0 };
-    ((p[0] * inv).round() as i64, (p[1] * inv).round() as i64, (p[2] * inv).round() as i64)
+    (
+        (p[0] * inv).round() as i64,
+        (p[1] * inv).round() as i64,
+        (p[2] * inv).round() as i64,
+    )
 }
 
 fn edge_key(a: u32, b: u32) -> (u32, u32) {
@@ -69,7 +86,10 @@ fn open_boundary_edges(mesh: &PageMesh) -> usize {
 }
 
 fn is_border_vertex(p: [f32; 3], min_x: f32, max_x: f32, min_z: f32, max_z: f32, eps: f32) -> bool {
-    (p[0] - min_x).abs() <= eps || (p[0] - max_x).abs() <= eps || (p[2] - min_z).abs() <= eps || (p[2] - max_z).abs() <= eps
+    (p[0] - min_x).abs() <= eps
+        || (p[0] - max_x).abs() <= eps
+        || (p[2] - min_z).abs() <= eps
+        || (p[2] - max_z).abs() <= eps
 }
 
 pub fn analyze_page_weld_stats(
@@ -85,7 +105,10 @@ pub fn analyze_page_weld_stats(
 ) -> ClodWeldStatsRow {
     let mut buckets: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
     for (i, &p) in mesh.positions.iter().enumerate() {
-        buckets.entry(quant_key(p, cfg.position_epsilon)).or_default().push(i);
+        buckets
+            .entry(quant_key(p, cfg.position_epsilon))
+            .or_default()
+            .push(i);
     }
 
     let mut duplicate_position_groups = 0usize;
@@ -97,7 +120,9 @@ pub fn analyze_page_weld_stats(
     let stride = mesh.material_weight_stride();
 
     for indices in buckets.values() {
-        if indices.len() <= 1 { continue; }
+        if indices.len() <= 1 {
+            continue;
+        }
         duplicate_position_groups += 1;
         duplicate_vertices += indices.len() - 1;
         let base = indices[0];
@@ -109,27 +134,50 @@ pub fn analyze_page_weld_stats(
                 max_normal_delta = max_normal_delta.max(1.0 - dot);
             }
             if base < mesh.paint_slots.len() && idx < mesh.paint_slots.len() {
-                max_paint_delta = max_paint_delta.max((mesh.paint_slots[base] - mesh.paint_slots[idx]).abs());
+                max_paint_delta =
+                    max_paint_delta.max((mesh.paint_slots[base] - mesh.paint_slots[idx]).abs());
             }
             for channel in 0..stride {
                 let a = base * stride + channel;
                 let b = idx * stride + channel;
                 if a < material_weights.len() && b < material_weights.len() {
-                    max_material_delta = max_material_delta.max((material_weights[a] - material_weights[b]).abs());
+                    max_material_delta =
+                        max_material_delta.max((material_weights[a] - material_weights[b]).abs());
                 }
             }
         }
     }
 
-    let border_vertices = mesh.positions.iter().filter(|&&p| {
-        is_border_vertex(p, footprint_min_x, footprint_max_x, footprint_min_z, footprint_max_z, cfg.border_epsilon)
-    }).count();
+    let border_vertices = mesh
+        .positions
+        .iter()
+        .filter(|&&p| {
+            is_border_vertex(
+                p,
+                footprint_min_x,
+                footprint_max_x,
+                footprint_min_z,
+                footprint_max_z,
+                cfg.border_epsilon,
+            )
+        })
+        .count();
 
     ClodWeldStatsRow {
-        revision, level, page_x: coord.0, page_z: coord.1, vertices: mesh.vertex_count(),
-        triangles: mesh.triangle_count(), unique_position_buckets: buckets.len(), duplicate_position_groups,
-        duplicate_vertices, border_vertices, open_boundary_edges: open_boundary_edges(mesh),
-        max_normal_delta, max_material_delta, max_paint_delta,
+        revision,
+        level,
+        page_x: coord.0,
+        page_z: coord.1,
+        vertices: mesh.vertex_count(),
+        triangles: mesh.triangle_count(),
+        unique_position_buckets: buckets.len(),
+        duplicate_position_groups,
+        duplicate_vertices,
+        border_vertices,
+        open_boundary_edges: open_boundary_edges(mesh),
+        max_normal_delta,
+        max_material_delta,
+        max_paint_delta,
     }
 }
 
@@ -138,8 +186,15 @@ pub fn collect_tree_weld_stats(tree: &ClodPageTree, cfg: WeldStatsConfig) -> Vec
     for (level, nodes) in tree.nodes_by_level.iter().enumerate() {
         for node in nodes {
             rows.push(analyze_page_weld_stats(
-                tree.revision, level, node.coord, &node.mesh, node.footprint.min_x, node.footprint.max_x,
-                node.footprint.min_z, node.footprint.max_z, cfg,
+                tree.revision,
+                level,
+                node.coord,
+                &node.mesh,
+                node.footprint.min_x,
+                node.footprint.max_x,
+                node.footprint.min_z,
+                node.footprint.max_z,
+                cfg,
             ));
         }
     }
@@ -152,8 +207,18 @@ mod tests {
 
     fn tiny_mesh() -> PageMesh {
         PageMesh {
-            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]],
-            normals: vec![[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.5, 0.5]],
+            positions: vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0],
+            ],
+            normals: vec![
+                [0.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.5, 0.5],
+            ],
             materials: vec![[1.0, 0.0, 0.0, 0.0]; 4],
             paint_slots: vec![0.0, 0.0, 0.0, 1.0],
             material_weight_stride: 4,
@@ -163,11 +228,20 @@ mod tests {
 
     #[test]
     fn duplicate_bucket_reports_conflict_deltas() {
-        let row = analyze_page_weld_stats(7, 0, (1, 2), &tiny_mesh(), 0.0, 1.0, 0.0, 1.0, WeldStatsConfig::default());
+        let row = analyze_page_weld_stats(
+            7,
+            0,
+            (1, 2),
+            &tiny_mesh(),
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            WeldStatsConfig::default(),
+        );
         assert_eq!(row.duplicate_position_groups, 1);
         assert_eq!(row.duplicate_vertices, 1);
         assert!(row.max_normal_delta > 0.0);
         assert_eq!(row.max_paint_delta, 1.0);
     }
 }
-

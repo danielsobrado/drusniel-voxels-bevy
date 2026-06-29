@@ -82,9 +82,7 @@ pub fn weld_vertices(
             // Material-weight conflict check (for each channel)
             let mut max_weight_delta = 0.0;
             for j in 0..stride {
-                let wd = (weights[i * stride + j]
-                    - out.material_weights()[f * stride + j])
-                .abs();
+                let wd = (weights[i * stride + j] - out.material_weights()[f * stride + j]).abs();
                 if wd > max_weight_delta {
                     max_weight_delta = wd;
                 }
@@ -128,7 +126,8 @@ pub fn weld_vertices(
             } else {
                 out.materials.push([0.0; 4]);
             }
-            out.paint_slots.push(mesh.paint_slots.get(i).copied().unwrap_or(0.0));
+            out.paint_slots
+                .push(mesh.paint_slots.get(i).copied().unwrap_or(0.0));
             canonical_counts.push(1);
         }
     }

@@ -40,7 +40,9 @@ pub struct BuildResult {
 }
 
 /// Inclusive LOD0 page coord span → axis page counts for `resolve_build_shape`.
-pub(crate) fn infer_lod0_page_shape(lod0: &[((i32, i32), PageSource)]) -> (PageBuildOrigin, i32, i32) {
+pub(crate) fn infer_lod0_page_shape(
+    lod0: &[((i32, i32), PageSource)],
+) -> (PageBuildOrigin, i32, i32) {
     if lod0.is_empty() {
         return (PageBuildOrigin::default(), 0, 0);
     }
@@ -99,10 +101,12 @@ pub fn resolve_build_shape(
         .min((world_pages_x.min(world_pages_z) as f32).log2().floor() as usize + 1);
     let required_multiple = 1 << (max_levels - 1);
     if world_pages_x % required_multiple != 0 || world_pages_z % required_multiple != 0 {
-        return Err(ClodBuildError::PageIncomplete { message: format!(
-            "world pages {}x{} not a multiple of {} for {} levels",
-            world_pages_x, world_pages_z, required_multiple, max_levels
-        ) });
+        return Err(ClodBuildError::PageIncomplete {
+            message: format!(
+                "world pages {}x{} not a multiple of {} for {} levels",
+                world_pages_x, world_pages_z, required_multiple, max_levels
+            ),
+        });
     }
     Ok(max_levels)
 }
@@ -147,7 +151,7 @@ fn build_parent_node_from_children(
         let sim = simplify_page(&welded, &locks, cfg);
         (sim.mesh, sim.error_world, sim.low_benefit)
     };
-        strip_degenerate_triangles(&mut mesh, cfg.validation().zero_area_epsilon)?;
+    strip_degenerate_triangles(&mut mesh, cfg.validation().zero_area_epsilon)?;
     let polish_locks = build_outer_border_locks(&mesh);
     let polish = polish_diagonals(&mut mesh, &polish_locks, &cfg.polish.diagonal_flip);
     assert_no_internal_borders(&mesh, &footprint)?;
@@ -352,8 +356,7 @@ pub fn resimplify_parent(
     if children.len() != 4 {
         return Ok(());
     }
-    let rebuilt =
-        build_parent_node_from_children(level, coord, &children, cfg, weld_epsilon)?;
+    let rebuilt = build_parent_node_from_children(level, coord, &children, cfg, weld_epsilon)?;
     nodes_by_level[level][node_idx] = rebuilt;
     Ok(())
 }

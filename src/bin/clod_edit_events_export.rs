@@ -5,8 +5,7 @@ use std::process::ExitCode;
 use clap::Parser;
 use serde::Deserialize;
 use voxel_builder::voxel::pages::scripted_edit::{
-    ClodScriptedEditDefaults, ClodScriptedEditEvent, ClodScriptedEditSpec,
-    expand_scripted_edits,
+    ClodScriptedEditDefaults, ClodScriptedEditEvent, ClodScriptedEditSpec, expand_scripted_edits,
 };
 
 #[derive(Parser, Debug)]
@@ -201,26 +200,24 @@ mod tests {
 
     #[test]
     fn writes_rows_sorted_by_frame() {
-        let rows = vec![
-            ExportRow {
-                scene: "scene".into(),
-                checkpoint: "b".into(),
-                event: ClodScriptedEditEvent {
-                    name: "later".into(),
-                    occurrence: 0,
-                    frame: 20,
-                    kind: ClodScriptedEditKind::Dig,
-                    position: [1.0, 2.0, 3.0],
-                    radius: 2.0,
-                    strength: 0.5,
-                    target_height: None,
-                    expected_dirty_pages_min: None,
-                    expected_dirty_pages_max: None,
-                    expected_rebuild_publish_max_frames: None,
-                    expected_collider_refresh_max_frames: None,
-                },
+        let rows = vec![ExportRow {
+            scene: "scene".into(),
+            checkpoint: "b".into(),
+            event: ClodScriptedEditEvent {
+                name: "later".into(),
+                occurrence: 0,
+                frame: 20,
+                kind: ClodScriptedEditKind::Dig,
+                position: [1.0, 2.0, 3.0],
+                radius: 2.0,
+                strength: 0.5,
+                target_height: None,
+                expected_dirty_pages_min: None,
+                expected_dirty_pages_max: None,
+                expected_rebuild_publish_max_frames: None,
+                expected_collider_refresh_max_frames: None,
             },
-        ];
+        }];
         let mut csv = String::new();
         csv.push_str(&csv_escape(&rows[0].scene));
         assert_eq!(csv, "scene");

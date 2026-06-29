@@ -44,7 +44,11 @@ impl<S: WorldSource> WorldSourceTerrainBridge<S> {
         let height = self.surface_height_i32(world_x, world_z);
         let sea_level = self.source.metadata().sea_level.round() as i32;
         if world_y > height {
-            return if world_y <= sea_level { VoxelType::Water } else { VoxelType::Air };
+            return if world_y <= sea_level {
+                VoxelType::Water
+            } else {
+                VoxelType::Air
+            };
         }
 
         let biome = self.biome(world_x, world_z);
@@ -64,7 +68,9 @@ impl WorldSourceTerrainBridge<ProceduralWorldSource> {
 mod tests {
     use super::*;
     use crate::world::source::island_shape::IslandShapeConfig;
-    use crate::world::source::world_source::{TerrainFieldConfig, WorldSourceBounds, WorldSourceMetadata};
+    use crate::world::source::world_source::{
+        TerrainFieldConfig, WorldSourceBounds, WorldSourceMetadata,
+    };
 
     #[derive(Debug, Clone)]
     struct FixedSource {

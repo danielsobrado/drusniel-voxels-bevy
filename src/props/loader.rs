@@ -1,4 +1,4 @@
-use super::{is_spawnable_prop, PropAssets, PropConfig};
+use super::{PropAssets, PropConfig, is_spawnable_prop};
 use crate::config::loader::load_config;
 use bevy::prelude::*;
 use std::collections::HashMap;

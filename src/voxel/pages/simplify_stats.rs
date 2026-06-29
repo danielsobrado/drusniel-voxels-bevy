@@ -145,7 +145,8 @@ pub fn collect_simplify_stats(nodes_by_level: &[Vec<ClodPageNode>]) -> ClodSimpl
             }
             current_level.max_error_world = current_level.max_error_world.max(row.error_world);
             current_level.max_vertex_ratio = current_level.max_vertex_ratio.max(row.vertex_ratio);
-            current_level.max_triangle_ratio = current_level.max_triangle_ratio.max(row.triangle_ratio);
+            current_level.max_triangle_ratio =
+                current_level.max_triangle_ratio.max(row.triangle_ratio);
 
             nodes.push(row);
         }
@@ -164,7 +165,10 @@ pub fn collect_simplify_stats(nodes_by_level: &[Vec<ClodPageNode>]) -> ClodSimpl
     ClodSimplifyTreeStats { nodes, levels }
 }
 
-fn child_totals(parent_coord: (i32, i32), previous_index: &HashMap<(i32, i32), (usize, usize)>) -> (usize, usize) {
+fn child_totals(
+    parent_coord: (i32, i32),
+    previous_index: &HashMap<(i32, i32), (usize, usize)>,
+) -> (usize, usize) {
     let child_coords = [
         (parent_coord.0 * 2, parent_coord.1 * 2),
         (parent_coord.0 * 2 + 1, parent_coord.1 * 2),
@@ -202,7 +206,12 @@ mod tests {
         ClodPageNode {
             level,
             coord,
-            footprint: PageFootprint { min_x: 0.0, min_z: 0.0, max_x: 1.0, max_z: 1.0 },
+            footprint: PageFootprint {
+                min_x: 0.0,
+                min_z: 0.0,
+                max_x: 1.0,
+                max_z: 1.0,
+            },
             mesh: mesh(vertices, triangles),
             error_world: level as f32,
             low_benefit: false,
@@ -230,4 +239,3 @@ mod tests {
         assert!((parent.triangle_ratio - 0.5).abs() < 1e-6);
     }
 }
-

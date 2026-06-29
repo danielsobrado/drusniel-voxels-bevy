@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{sample_biome_splat, BiomeId, MaterialLayerId, WorldSource};
+use super::{BiomeId, MaterialLayerId, WorldSource, sample_biome_splat};
 
 pub const WORLD_SOURCE_DRIFT_HEIGHT_TOLERANCE_M: f32 = 0.75;
 pub const WORLD_SOURCE_DRIFT_OCEAN_MASK_TOLERANCE: f32 = 0.01;
@@ -96,13 +96,9 @@ pub fn sample_cpu_world_source<S: WorldSource>(
 ) -> WorldSourceDriftSample {
     let height = source.sample_height(point.x, point.z);
     let biome = source.sample_biome(point.x, point.z);
-    let dominant_layer = sample_biome_splat(
-        biome,
-        height,
-        source.metadata().sea_level,
-        point.slope,
-    )
-    .dominant_layer();
+    let dominant_layer =
+        sample_biome_splat(biome, height, source.metadata().sea_level, point.slope)
+            .dominant_layer();
 
     WorldSourceDriftSample {
         x: point.x,
@@ -138,22 +134,28 @@ pub fn evaluate_world_source_drift_gate(
             failures: vec![WorldSourceDriftFailure {
                 sample_index: gpu_samples.len().min(cpu_samples.len()),
                 kind: WorldSourceDriftFailureKind::Height,
-                cpu: cpu_samples.first().copied().unwrap_or(WorldSourceDriftSample {
-                    x: 0.0,
-                    z: 0.0,
-                    height: 0.0,
-                    ocean_mask: 0.0,
-                    biome: BiomeId::Meadows,
-                    dominant_layer: MaterialLayerId::Grass,
-                }),
-                gpu: gpu_samples.first().copied().unwrap_or(WorldSourceDriftSample {
-                    x: 0.0,
-                    z: 0.0,
-                    height: 0.0,
-                    ocean_mask: 0.0,
-                    biome: BiomeId::Meadows,
-                    dominant_layer: MaterialLayerId::Grass,
-                }),
+                cpu: cpu_samples
+                    .first()
+                    .copied()
+                    .unwrap_or(WorldSourceDriftSample {
+                        x: 0.0,
+                        z: 0.0,
+                        height: 0.0,
+                        ocean_mask: 0.0,
+                        biome: BiomeId::Meadows,
+                        dominant_layer: MaterialLayerId::Grass,
+                    }),
+                gpu: gpu_samples
+                    .first()
+                    .copied()
+                    .unwrap_or(WorldSourceDriftSample {
+                        x: 0.0,
+                        z: 0.0,
+                        height: 0.0,
+                        ocean_mask: 0.0,
+                        biome: BiomeId::Meadows,
+                        dominant_layer: MaterialLayerId::Grass,
+                    }),
                 delta: (gpu_samples.len() as i64 - cpu_samples.len() as i64).unsigned_abs() as f32,
                 tolerance: 0.0,
             }],
@@ -242,7 +244,11 @@ mod tests {
     use crate::world::source::{IslandShapeConfig, ProceduralWorldSource, TerrainFieldConfig};
 
     fn source() -> ProceduralWorldSource {
-        ProceduralWorldSource::new(TerrainFieldConfig::new(7, 18.0, IslandShapeConfig::default()))
+        ProceduralWorldSource::new(TerrainFieldConfig::new(
+            7,
+            18.0,
+            IslandShapeConfig::default(),
+        ))
     }
 
     fn points() -> [WorldSourceDriftSamplePoint; 4] {
@@ -265,7 +271,10 @@ mod tests {
 
         assert_eq!(report.status, WorldSourceDriftGateStatus::Skipped);
         assert!(!report.is_acceptance_pass());
-        assert_eq!(report.skipped_reason.as_deref(), Some("gpu_readback_unavailable"));
+        assert_eq!(
+            report.skipped_reason.as_deref(),
+            Some("gpu_readback_unavailable")
+        );
     }
 
     #[test]
@@ -310,8 +319,18 @@ mod tests {
         );
 
         assert_eq!(report.status, WorldSourceDriftGateStatus::Failed);
-        assert!(report.failures.iter().any(|failure| failure.kind == WorldSourceDriftFailureKind::Biome));
-        assert!(report.failures.iter().any(|failure| failure.kind == WorldSourceDriftFailureKind::DominantLayer));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.kind == WorldSourceDriftFailureKind::Biome)
+        );
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.kind == WorldSourceDriftFailureKind::DominantLayer)
+        );
     }
 
     #[test]
@@ -334,7 +353,17 @@ mod tests {
         );
 
         assert_eq!(report.status, WorldSourceDriftGateStatus::Failed);
-        assert!(report.failures.iter().any(|failure| failure.kind == WorldSourceDriftFailureKind::Height));
-        assert!(report.failures.iter().any(|failure| failure.kind == WorldSourceDriftFailureKind::OceanMask));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.kind == WorldSourceDriftFailureKind::Height)
+        );
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.kind == WorldSourceDriftFailureKind::OceanMask)
+        );
     }
 }

@@ -39,13 +39,19 @@ impl Default for GuardConfig {
 impl GuardConfig {
     fn load(path: Option<PathBuf>) -> Result<Self, String> {
         let mut cfg = Self::default();
-        let Some(path) = path else { return Ok(cfg); };
+        let Some(path) = path else {
+            return Ok(cfg);
+        };
         let text = fs::read_to_string(&path)
             .map_err(|err| format!("failed to read config {}: {err}", path.display()))?;
         for raw in text.lines() {
             let line = raw.split('#').next().unwrap_or("").trim();
-            if line.is_empty() { continue; }
-            let Some((key, value)) = line.split_once('=') else { continue; };
+            if line.is_empty() {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
             let key = key.trim();
             let value = value.trim().trim_matches('"');
             match key {
@@ -93,13 +99,17 @@ fn parse_bool(value: &str) -> Result<bool, String> {
 }
 
 fn parse_u32(value: &str, name: &str) -> Result<u32, String> {
-    value.parse::<u32>().map_err(|_| format!("invalid u32 for `{name}`: `{value}`"))
+    value
+        .parse::<u32>()
+        .map_err(|_| format!("invalid u32 for `{name}`: `{value}`"))
 }
 
 fn split_csv_line(line: &str) -> Vec<String> {
     // These QA CSVs are generated without quoted commas. Keep the guard small
     // and dependency-free so it can run in minimal CI jobs.
-    line.split(',').map(|part| part.trim().to_string()).collect()
+    line.split(',')
+        .map(|part| part.trim().to_string())
+        .collect()
 }
 
 fn col(header: &[String], name: &str) -> Result<usize, String> {
@@ -113,7 +123,9 @@ fn load_rows(path: &PathBuf) -> Result<Vec<SinkRow>, String> {
     let text = fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let mut lines = text.lines().filter(|line| !line.trim().is_empty());
-    let Some(header_line) = lines.next() else { return Ok(Vec::new()); };
+    let Some(header_line) = lines.next() else {
+        return Ok(Vec::new());
+    };
     let header = split_csv_line(header_line);
     let request_id = col(&header, "request_id")?;
     let frame = col(&header, "frame")?;
@@ -170,13 +182,19 @@ fn validate(rows: &[SinkRow], cfg: &GuardConfig) -> Result<Summary, Vec<String>>
             "ready" => {
                 summary.ready += 1;
                 if !cfg.allow_ready {
-                    errors.push(format!("row {} is ready but ready decisions are not allowed", idx + 2));
+                    errors.push(format!(
+                        "row {} is ready but ready decisions are not allowed",
+                        idx + 2
+                    ));
                 }
             }
             "applied_placeholder" => {
                 summary.applied_placeholder += 1;
                 if !cfg.allow_applied_placeholder {
-                    errors.push(format!("row {} is applied_placeholder but placeholder apply is not allowed", idx + 2));
+                    errors.push(format!(
+                        "row {} is applied_placeholder but placeholder apply is not allowed",
+                        idx + 2
+                    ));
                 }
             }
             other => errors.push(format!("row {} has unknown decision `{other}`", idx + 2)),
@@ -200,7 +218,10 @@ fn validate(rows: &[SinkRow], cfg: &GuardConfig) -> Result<Summary, Vec<String>>
             errors.push(format!("row {} has empty event_id", idx + 2));
         }
         if row.dirty_lod0_pages == 0 && row.decision != "blocked" {
-            errors.push(format!("row {} has zero dirty_lod0_pages for non-blocked decision", idx + 2));
+            errors.push(format!(
+                "row {} has zero dirty_lod0_pages for non-blocked decision",
+                idx + 2
+            ));
         }
         if row.dirty_lod0_pages > cfg.max_dirty_lod0_pages {
             errors.push(format!(
@@ -220,18 +241,30 @@ fn validate(rows: &[SinkRow], cfg: &GuardConfig) -> Result<Summary, Vec<String>>
         }
         if let Some(prev) = last_frame {
             if row.frame < prev {
-                errors.push(format!("row {} frame {} is before previous frame {}", idx + 2, row.frame, prev));
+                errors.push(format!(
+                    "row {} frame {} is before previous frame {}",
+                    idx + 2,
+                    row.frame,
+                    prev
+                ));
             }
         }
         last_frame = Some(row.frame);
     }
 
-    if errors.is_empty() { Ok(summary) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(summary)
+    } else {
+        Err(errors)
+    }
 }
 
 fn main() {
     let mut args = env::args().skip(1);
-    let csv = PathBuf::from(args.next().unwrap_or_else(|| "perf-dumps/clod-edit-mutation-sink.csv".to_string()));
+    let csv = PathBuf::from(
+        args.next()
+            .unwrap_or_else(|| "perf-dumps/clod-edit-mutation-sink.csv".to_string()),
+    );
     let config_path = args.next().map(PathBuf::from);
     let cfg = match GuardConfig::load(config_path) {
         Ok(cfg) => cfg,
@@ -259,7 +292,10 @@ fn main() {
             );
         }
         Err(errors) => {
-            eprintln!("clod_edit_mutation_sink_guard: failed with {} error(s)", errors.len());
+            eprintln!(
+                "clod_edit_mutation_sink_guard: failed with {} error(s)",
+                errors.len()
+            );
             for err in errors {
                 eprintln!("  - {err}");
             }

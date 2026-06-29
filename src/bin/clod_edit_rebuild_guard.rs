@@ -55,8 +55,10 @@ impl PlanEdit {
     }
 
     fn deadline(&self, default_max_publish_frames: u64) -> u64 {
-        self.frame
-            .saturating_add(self.expected_rebuild_publish_max_frames.unwrap_or(default_max_publish_frames))
+        self.frame.saturating_add(
+            self.expected_rebuild_publish_max_frames
+                .unwrap_or(default_max_publish_frames),
+        )
     }
 }
 
@@ -243,7 +245,10 @@ fn run(args: Args) -> Result<String, String> {
         return Err(out);
     }
 
-    let complete_rebuilds = rebuild_rows.iter().filter(|row| row.is_complete_publication()).count();
+    let complete_rebuilds = rebuild_rows
+        .iter()
+        .filter(|row| row.is_complete_publication())
+        .count();
     let max_publish_latency = rebuild_rows
         .iter()
         .filter(|row| row.is_complete_publication())
@@ -257,7 +262,11 @@ fn run(args: Args) -> Result<String, String> {
 
     Ok(format!(
         "CLOD edit rebuild guard passed: planned_dirty_edits={}, matched_edits={}, complete_rebuilds={}, max_publish_latency_frames={}, max_total_ms={:.3}",
-        matches.len(), matched_count, complete_rebuilds, max_publish_latency, max_total_ms
+        matches.len(),
+        matched_count,
+        complete_rebuilds,
+        max_publish_latency,
+        max_total_ms
     ))
 }
 
@@ -316,7 +325,8 @@ fn parse_args(raw: Vec<String>) -> Args {
             }
             "--default-max-publish-frames" => {
                 i += 1;
-                args.default_max_publish_frames = expect_parse(&raw, i, "--default-max-publish-frames");
+                args.default_max_publish_frames =
+                    expect_parse(&raw, i, "--default-max-publish-frames");
             }
             "--require-distinct-rebuilds" => {
                 args.require_distinct_rebuilds = true;
@@ -391,8 +401,18 @@ fn read_plan_csv(path: &Path) -> Result<Vec<PlanEdit>, String> {
             iteration: parse_field(record, &index, "iteration", row_number)?,
             frame: parse_field(record, &index, "frame", row_number)?,
             dirty_lod0_pages: parse_field(record, &index, "dirty_lod0_pages", row_number)?,
-            expected_dirty_pages_min: parse_opt_field(record, &index, "expected_dirty_pages_min", row_number)?,
-            expected_dirty_pages_max: parse_opt_field(record, &index, "expected_dirty_pages_max", row_number)?,
+            expected_dirty_pages_min: parse_opt_field(
+                record,
+                &index,
+                "expected_dirty_pages_min",
+                row_number,
+            )?,
+            expected_dirty_pages_max: parse_opt_field(
+                record,
+                &index,
+                "expected_dirty_pages_max",
+                row_number,
+            )?,
             expected_rebuild_publish_max_frames: parse_opt_field(
                 record,
                 &index,
@@ -417,10 +437,25 @@ fn read_rebuild_csv(path: &Path) -> Result<Vec<RebuildRow>, String> {
             sequence: parse_field(record, &index, "sequence", row_number)?,
             input_revision: parse_field(record, &index, "input_revision", row_number)?,
             tree_revision_start: parse_field(record, &index, "tree_revision_start", row_number)?,
-            tree_revision_published: parse_field(record, &index, "tree_revision_published", row_number)?,
+            tree_revision_published: parse_field(
+                record,
+                &index,
+                "tree_revision_published",
+                row_number,
+            )?,
             input_frame: parse_field(record, &index, "input_frame", row_number)?,
-            source_complete_frame: parse_opt_field(record, &index, "source_complete_frame", row_number)?,
-            build_started_frame: parse_opt_field(record, &index, "build_started_frame", row_number)?,
+            source_complete_frame: parse_opt_field(
+                record,
+                &index,
+                "source_complete_frame",
+                row_number,
+            )?,
+            build_started_frame: parse_opt_field(
+                record,
+                &index,
+                "build_started_frame",
+                row_number,
+            )?,
             published_frame: parse_field(record, &index, "published_frame", row_number)?,
             complete_pages: parse_field(record, &index, "complete_pages", row_number)?,
             nodes: parse_field(record, &index, "nodes", row_number)?,
@@ -433,12 +468,14 @@ fn read_rebuild_csv(path: &Path) -> Result<Vec<RebuildRow>, String> {
 }
 
 fn read_csv(path: &Path) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
-    let text = fs::read_to_string(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let text = fs::read_to_string(path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let mut lines = text.lines().filter(|line| !line.trim().is_empty());
     let header_line = lines
         .next()
         .ok_or_else(|| format!("{} is empty", path.display()))?;
-    let headers = parse_csv_line(header_line).map_err(|err| format!("{} header: {err}", path.display()))?;
+    let headers =
+        parse_csv_line(header_line).map_err(|err| format!("{} header: {err}", path.display()))?;
     let mut records = Vec::new();
     for (idx, line) in lines.enumerate() {
         records.push(

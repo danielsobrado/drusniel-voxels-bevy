@@ -114,10 +114,26 @@ mod tests {
         for biome in all_biomes() {
             let content = table.content(biome);
             assert_eq!(content.biome, biome);
-            assert_ne!(content.surface, VoxelType::Air, "{biome:?} missing surface content");
-            assert_ne!(content.shallow_subsurface, VoxelType::Air, "{biome:?} missing shallow content");
-            assert_ne!(content.deep_subsurface, VoxelType::Air, "{biome:?} missing deep content");
-            assert_ne!(content.near_water_surface, VoxelType::Air, "{biome:?} missing near-water content");
+            assert_ne!(
+                content.surface,
+                VoxelType::Air,
+                "{biome:?} missing surface content"
+            );
+            assert_ne!(
+                content.shallow_subsurface,
+                VoxelType::Air,
+                "{biome:?} missing shallow content"
+            );
+            assert_ne!(
+                content.deep_subsurface,
+                VoxelType::Air,
+                "{biome:?} missing deep content"
+            );
+            assert_ne!(
+                content.near_water_surface,
+                VoxelType::Air,
+                "{biome:?} missing near-water content"
+            );
         }
     }
 
@@ -135,15 +151,28 @@ mod tests {
         ];
 
         for (biome, expected) in cases {
-            assert_eq!(table.voxel_for_depth(biome, 0, false), expected, "{biome:?}");
+            assert_eq!(
+                table.voxel_for_depth(biome, 0, false),
+                expected,
+                "{biome:?}"
+            );
         }
     }
 
     #[test]
     fn near_water_uses_explicit_biome_content_not_a_hidden_fallback() {
         let table = BiomeContentTable::new();
-        assert_eq!(table.voxel_for_depth(BiomeId::Mountain, 0, true), VoxelType::Rock);
-        assert_eq!(table.voxel_for_depth(BiomeId::Meadows, 0, true), VoxelType::Sand);
-        assert_eq!(table.voxel_for_depth(BiomeId::Swamp, 0, true), VoxelType::Sand);
+        assert_eq!(
+            table.voxel_for_depth(BiomeId::Mountain, 0, true),
+            VoxelType::Rock
+        );
+        assert_eq!(
+            table.voxel_for_depth(BiomeId::Meadows, 0, true),
+            VoxelType::Sand
+        );
+        assert_eq!(
+            table.voxel_for_depth(BiomeId::Swamp, 0, true),
+            VoxelType::Sand
+        );
     }
 }

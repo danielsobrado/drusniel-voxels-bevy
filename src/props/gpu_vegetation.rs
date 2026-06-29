@@ -6,10 +6,10 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use bevy::render::renderer::{RenderDevice, RenderQueue};
-use bevy::render::render_resource::BufferUsages;
-use bevy::render::render_resource::BufferDescriptor;
 use bevy::render::render_resource::Buffer;
+use bevy::render::render_resource::BufferDescriptor;
+use bevy::render::render_resource::BufferUsages;
+use bevy::render::renderer::{RenderDevice, RenderQueue};
 
 use super::GpuVegetationConfig;
 use super::instanced_render::PropInstance;
@@ -132,10 +132,18 @@ pub fn prepare_gpu_vegetation_source_buffer(
     if config.disable_on_integrated_gpu && capabilities.is_some_and(|c| c.integrated_gpu) {
         return;
     }
-    let force_on = bench_toggles.as_ref().is_some_and(|t| t.force_gpu_vegetation.unwrap_or(false));
-    let force_off = bench_toggles.as_ref().is_some_and(|t| t.disable_gpu_vegetation.unwrap_or(false));
-    if force_off { return; }
-    if !config.enabled && !force_on { return; }
+    let force_on = bench_toggles
+        .as_ref()
+        .is_some_and(|t| t.force_gpu_vegetation.unwrap_or(false));
+    let force_off = bench_toggles
+        .as_ref()
+        .is_some_and(|t| t.disable_gpu_vegetation.unwrap_or(false));
+    if force_off {
+        return;
+    }
+    if !config.enabled && !force_on {
+        return;
+    }
 
     let max_instances = config.buffers.max_source_instances;
 
@@ -212,10 +220,8 @@ pub fn cleanup_gpu_vegetation_stale_slots(
     extracted_instances: Local<Vec<ExtractedGroupSource>>,
     mut source_buffer: ResMut<GpuVegetationSourceBuffer>,
 ) {
-    let active_entities: std::collections::HashSet<Entity> = extracted_instances
-        .iter()
-        .map(|e| e.entity)
-        .collect();
+    let active_entities: std::collections::HashSet<Entity> =
+        extracted_instances.iter().map(|e| e.entity).collect();
 
     let stale: Vec<Entity> = source_buffer
         .group_slots

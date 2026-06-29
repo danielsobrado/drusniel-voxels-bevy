@@ -5,13 +5,13 @@
 use bevy::math::{Vec2, Vec3};
 
 use crate::constants::WATER_LEVEL;
-use crate::terrain::generation::{can_place, PlacementKind, WorldShapeSampler};
+use crate::terrain::generation::{PlacementKind, WorldShapeSampler, can_place};
 use crate::voxel::terrain::{NoiseGenerator, TerrainGenerator};
 
 use super::config::{StoneClassId, StoneConfig};
 use super::hash::StoneRng;
 use super::rock_mesh::RockPreset;
-use super::site_sample::{sample_site, StoneSiteSample};
+use super::site_sample::{StoneSiteSample, sample_site};
 use super::{deterministic_hash, hash_to_seed};
 
 const TAU: f32 = std::f32::consts::TAU;
@@ -286,8 +286,8 @@ pub fn class_shares(instances: &[StoneInstance]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terrain::generation::config::TerrainConfig;
     use crate::terrain::generation::WorldShapeConfig;
+    use crate::terrain::generation::config::TerrainConfig;
     use crate::voxel::terrain::ValueNoise;
 
     fn terrain() -> TerrainGenerator<ValueNoise> {

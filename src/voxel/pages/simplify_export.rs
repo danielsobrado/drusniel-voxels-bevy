@@ -82,7 +82,10 @@ pub(crate) fn simplify_csv_rows(revision: u64, nodes_by_level: &[Vec<ClodPageNod
 impl ClodSimplifyExportState {
     fn writer(&mut self, path: &Path) -> std::io::Result<&mut BufWriter<File>> {
         if self.writer.is_none() {
-            if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
                 create_dir_all(parent)?;
             }
             let file = OpenOptions::new()
@@ -159,14 +162,24 @@ mod tests {
 
         let lines: Vec<_> = rows.lines().collect();
         assert_eq!(lines.len(), 5);
-        assert_eq!(lines[0], "7,0,0,0,10,12,0,0,1.000000,1.000000,0.000000,false");
-        assert_eq!(lines[4], "7,1,0,0,20,24,40,48,0.500000,0.500000,1.000000,false");
+        assert_eq!(
+            lines[0],
+            "7,0,0,0,10,12,0,0,1.000000,1.000000,0.000000,false"
+        );
+        assert_eq!(
+            lines[4],
+            "7,1,0,0,20,24,40,48,0.500000,0.500000,1.000000,false"
+        );
     }
 
     #[test]
     fn env_flag_accepts_common_truthy_values() {
-        unsafe { std::env::set_var("VOXEL_CLOD_SIMPLIFY_TEST_FLAG", "true"); }
+        unsafe {
+            std::env::set_var("VOXEL_CLOD_SIMPLIFY_TEST_FLAG", "true");
+        }
         assert!(env_flag("VOXEL_CLOD_SIMPLIFY_TEST_FLAG"));
-        unsafe { std::env::remove_var("VOXEL_CLOD_SIMPLIFY_TEST_FLAG"); }
+        unsafe {
+            std::env::remove_var("VOXEL_CLOD_SIMPLIFY_TEST_FLAG");
+        }
     }
 }

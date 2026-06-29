@@ -86,14 +86,14 @@ mod surface_nets;
 mod tests;
 mod water;
 
-pub use blocky::get_blocky_material_index;
-pub use data::*;
-pub use pipeline::*;
-pub use sdf::{LodMeshConfig, lod_delta_gt_one_face_mask, mesher_smoothed_sdf_at_world_pos};
 pub(crate) use biome_channel::{
     compatibility_biome_from_triplanar_weights, compatibility_biome_id_for_uv,
     encode_biome_id_for_uv,
 };
+pub use blocky::get_blocky_material_index;
+pub use data::*;
+pub use pipeline::*;
+pub use sdf::{LodMeshConfig, lod_delta_gt_one_face_mask, mesher_smoothed_sdf_at_world_pos};
 pub(crate) use sdf::{
     count_missing_in_bounds_boundary_neighbors, empty_chunk_has_surface_nets_boundary_surface,
 };

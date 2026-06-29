@@ -5,7 +5,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use voxel_builder::voxel::pages::scripted_edit_driver::{
-    dispatch_csv_header, dispatch_record_to_csv_row, parse_scripted_edit_event_csv, ScriptedEditDriver,
+    ScriptedEditDriver, dispatch_csv_header, dispatch_record_to_csv_row,
+    parse_scripted_edit_event_csv,
 };
 
 fn main() {

@@ -1,6 +1,8 @@
-use super::*;
 use super::world_source_generation::build_world_source_chunk;
-use crate::world::source::{ProceduralWorldSourceTerrainBridge, TerrainSourceConfig, TerrainSourceMode};
+use super::*;
+use crate::world::source::{
+    ProceduralWorldSourceTerrainBridge, TerrainSourceConfig, TerrainSourceMode,
+};
 
 mod legacy_chunk;
 mod source;
@@ -8,13 +10,15 @@ mod state;
 mod stats;
 mod world_load;
 
-pub(crate) use source::{chunk_terrain_source_for_config, ChunkTerrainSource};
+pub(crate) use source::{ChunkTerrainSource, chunk_terrain_source_for_config};
 pub use state::ChunkGenerationState;
 pub(crate) use state::{
-    should_poll_chunk_generation_tasks, ChunkGenerationResult, ChunkGenerationTask,
-    PendingWorldGeneration, WorldGenerationQueue, WorldLoadTask,
+    ChunkGenerationResult, ChunkGenerationTask, PendingWorldGeneration, WorldGenerationQueue,
+    WorldLoadTask, should_poll_chunk_generation_tasks,
 };
-pub(crate) use stats::{collect_chunk_stats, collect_chunk_stats_from_chunk, ChunkStats, WorldStats};
+pub(crate) use stats::{
+    ChunkStats, WorldStats, collect_chunk_stats, collect_chunk_stats_from_chunk,
+};
 pub(crate) use world_load::expected_world_chunk_count;
 
 // =============================================================================
@@ -339,7 +343,9 @@ mod tests {
     #[test]
     fn terrain_source_config_selects_legacy_generation() {
         let source = chunk_terrain_source_for_config(
-            &TerrainSourceConfig { mode: TerrainSourceMode::Legacy },
+            &TerrainSourceConfig {
+                mode: TerrainSourceMode::Legacy,
+            },
             BiomeTable::default(),
         );
 
@@ -350,37 +356,57 @@ mod tests {
     #[test]
     fn terrain_source_config_selects_gpu_world_source_generation() {
         let source = chunk_terrain_source_for_config(
-            &TerrainSourceConfig { mode: TerrainSourceMode::GpuWorldSource },
+            &TerrainSourceConfig {
+                mode: TerrainSourceMode::GpuWorldSource,
+            },
             BiomeTable::default(),
         );
 
-        assert!(matches!(source, ChunkTerrainSource::WorldSource(_, TerrainSourceMode::GpuWorldSource)));
+        assert!(matches!(
+            source,
+            ChunkTerrainSource::WorldSource(_, TerrainSourceMode::GpuWorldSource)
+        ));
         assert_eq!(source.active_mode(), TerrainSourceMode::GpuWorldSource);
     }
 
     #[test]
     fn terrain_source_config_selects_explicit_cpu_reference_generation() {
         let source = chunk_terrain_source_for_config(
-            &TerrainSourceConfig { mode: TerrainSourceMode::CpuWorldSourceReference },
+            &TerrainSourceConfig {
+                mode: TerrainSourceMode::CpuWorldSourceReference,
+            },
             BiomeTable::default(),
         );
 
-        assert!(matches!(source, ChunkTerrainSource::WorldSource(_, TerrainSourceMode::CpuWorldSourceReference)));
-        assert_eq!(source.active_mode(), TerrainSourceMode::CpuWorldSourceReference);
+        assert!(matches!(
+            source,
+            ChunkTerrainSource::WorldSource(_, TerrainSourceMode::CpuWorldSourceReference)
+        ));
+        assert_eq!(
+            source.active_mode(),
+            TerrainSourceMode::CpuWorldSourceReference
+        );
     }
 
     #[test]
     fn world_source_generation_preserves_bedrock_and_water_fill() {
         let source = chunk_terrain_source_for_config(
-            &TerrainSourceConfig { mode: TerrainSourceMode::GpuWorldSource },
+            &TerrainSourceConfig {
+                mode: TerrainSourceMode::GpuWorldSource,
+            },
             BiomeTable::default(),
         );
         let (chunk, _stats) = generate_chunk_async(IVec3::ZERO, &source);
 
-        assert_eq!(chunk.get(UVec3::new(0, BEDROCK_DEPTH as u32, 0)), VoxelType::Bedrock);
+        assert_eq!(
+            chunk.get(UVec3::new(0, BEDROCK_DEPTH as u32, 0)),
+            VoxelType::Bedrock
+        );
         let has_water = (0..CHUNK_SIZE).any(|x| {
             (0..CHUNK_SIZE).any(|y| {
-                (0..CHUNK_SIZE).any(|z| chunk.get(UVec3::new(x as u32, y as u32, z as u32)) == VoxelType::Water)
+                (0..CHUNK_SIZE).any(|z| {
+                    chunk.get(UVec3::new(x as u32, y as u32, z as u32)) == VoxelType::Water
+                })
             })
         });
         assert!(has_water || chunk.iter_voxels().any(|voxel| *voxel != VoxelType::Air));
@@ -389,14 +415,18 @@ mod tests {
     #[test]
     fn world_source_runtime_generation_tags_solid_voxels_with_biome_ids() {
         let source = chunk_terrain_source_for_config(
-            &TerrainSourceConfig { mode: TerrainSourceMode::GpuWorldSource },
+            &TerrainSourceConfig {
+                mode: TerrainSourceMode::GpuWorldSource,
+            },
             BiomeTable::default(),
         );
         let (chunk, _stats) = generate_chunk_async(IVec3::ZERO, &source);
 
-        let tagged_solid = chunk
-            .iter_materials()
-            .any(|(_, voxel, material)| voxel != VoxelType::Air && voxel != VoxelType::Water && material_biome(material).is_some());
+        let tagged_solid = chunk.iter_materials().any(|(_, voxel, material)| {
+            voxel != VoxelType::Air
+                && voxel != VoxelType::Water
+                && material_biome(material).is_some()
+        });
         assert!(tagged_solid);
     }
 }

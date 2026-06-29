@@ -233,7 +233,11 @@ fn parse_dry_run_csv(input: &str) -> Result<Vec<DryRunRow>, String> {
             request_id: parse_u64(read("request_id")?, "request_id", line_number)?,
             frame: parse_u32(read("frame")?, "frame", line_number)?,
             event_index: parse_u32(read("event_index")?, "event_index", line_number)?,
-            occurrence_index: parse_u32(read("occurrence_index")?, "occurrence_index", line_number)?,
+            occurrence_index: parse_u32(
+                read("occurrence_index")?,
+                "occurrence_index",
+                line_number,
+            )?,
             name: read("name")?.to_string(),
             kind: read("kind")?.to_string(),
             x: parse_f32(read("x")?, "x", line_number)?,
@@ -241,13 +245,37 @@ fn parse_dry_run_csv(input: &str) -> Result<Vec<DryRunRow>, String> {
             z: parse_f32(read("z")?, "z", line_number)?,
             radius: parse_f32(read("radius")?, "radius", line_number)?,
             strength: parse_f32(read("strength")?, "strength", line_number)?,
-            target_height: parse_optional_f32(read("target_height").unwrap_or(""), "target_height", line_number)?,
+            target_height: parse_optional_f32(
+                read("target_height").unwrap_or(""),
+                "target_height",
+                line_number,
+            )?,
             mutation_mode: read("mutation_mode").unwrap_or("dry_run").to_string(),
-            dirty_lod0_pages: parse_u32(read("dirty_lod0_pages")?, "dirty_lod0_pages", line_number)?,
-            dirty_ancestor_nodes: parse_u32(read("dirty_ancestor_nodes")?, "dirty_ancestor_nodes", line_number)?,
-            dirty_total_nodes: parse_u32(read("dirty_total_nodes")?, "dirty_total_nodes", line_number)?,
-            expected_dirty_pages_min: parse_u32(read("expected_dirty_pages_min")?, "expected_dirty_pages_min", line_number)?,
-            expected_dirty_pages_max: parse_u32(read("expected_dirty_pages_max")?, "expected_dirty_pages_max", line_number)?,
+            dirty_lod0_pages: parse_u32(
+                read("dirty_lod0_pages")?,
+                "dirty_lod0_pages",
+                line_number,
+            )?,
+            dirty_ancestor_nodes: parse_u32(
+                read("dirty_ancestor_nodes")?,
+                "dirty_ancestor_nodes",
+                line_number,
+            )?,
+            dirty_total_nodes: parse_u32(
+                read("dirty_total_nodes")?,
+                "dirty_total_nodes",
+                line_number,
+            )?,
+            expected_dirty_pages_min: parse_u32(
+                read("expected_dirty_pages_min")?,
+                "expected_dirty_pages_min",
+                line_number,
+            )?,
+            expected_dirty_pages_max: parse_u32(
+                read("expected_dirty_pages_max")?,
+                "expected_dirty_pages_max",
+                line_number,
+            )?,
             expected_rebuild_publish_max_frames: parse_u32(
                 read("expected_rebuild_publish_max_frames")?,
                 "expected_rebuild_publish_max_frames",
@@ -315,7 +343,9 @@ fn parse_f32(value: &str, column: &str, line: usize) -> Result<f32, String> {
         .parse::<f32>()
         .map_err(|error| format!("line {line} invalid `{column}` value `{value}`: {error}"))?;
     if !parsed.is_finite() {
-        return Err(format!("line {line} invalid non-finite `{column}` value `{value}`"));
+        return Err(format!(
+            "line {line} invalid non-finite `{column}` value `{value}`"
+        ));
     }
     Ok(parsed)
 }
@@ -377,6 +407,9 @@ mod tests {
         let csv = DRY_RUN.replace(",true,ready", ",false,dirty_page_expectation_mismatch");
         let rows = parse_dry_run_csv(&csv).unwrap();
         let requests = build_mutation_requests(&rows, true);
-        assert_eq!(requests[0].mutation_status, MutationStatus::BlockedDirtyPageMismatch);
+        assert_eq!(
+            requests[0].mutation_status,
+            MutationStatus::BlockedDirtyPageMismatch
+        );
     }
 }

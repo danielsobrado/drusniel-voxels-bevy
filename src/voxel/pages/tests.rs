@@ -74,7 +74,11 @@ fn weld_merges_coincident_and_rejects_conflicts() {
     m.materials = vec![[1.0, 0.0, 0.0, 0.0]; 4];
     m.paint_slots = vec![0.0; 4];
     m.indices = vec![0, 1, 2, 3, 1, 2];
-    let tol = super::types::BorderTolerances { position: 0.001, normal_dot: 0.9999, material: 1e-4 };
+    let tol = super::types::BorderTolerances {
+        position: 0.001,
+        normal_dot: 0.9999,
+        material: 1e-4,
+    };
     let (welded, report) = weld_vertices(&m, 0.001, tol).expect("clean weld");
     assert_eq!(report.merged_vertices, 1, "the duplicate vertex merges");
     assert_eq!(welded.vertex_count(), 3);
@@ -158,8 +162,10 @@ fn adjacent_pages_share_matching_borders() {
             if let Some(&ri) = idx.get(&(nx + 1, nz)) {
                 let r = &nodes[ri];
                 let tol = super::types::DEFAULT_TOLERANCES;
-                let a_chain = border_chain(&a.mesh, Axis::X, a.footprint.max_x, &a.footprint).expect("border chain a");
-                let b_chain = border_chain(&r.mesh, Axis::X, r.footprint.min_x, &r.footprint).expect("border chain b");
+                let a_chain = border_chain(&a.mesh, Axis::X, a.footprint.max_x, &a.footprint)
+                    .expect("border chain a");
+                let b_chain = border_chain(&r.mesh, Axis::X, r.footprint.min_x, &r.footprint)
+                    .expect("border chain b");
                 assert_border_match(&a_chain, &b_chain, tol).expect("x border match");
                 checks += 1;
             }
@@ -185,9 +191,18 @@ fn resolve_build_shape_validates_world_size() {
     assert_eq!(levels, 4, "8x8 world → 4 levels");
 
     // non-power-of-two world → error
-    assert!(resolve_build_shape(3, 3, &cfg).is_err(), "3x3 should be rejected");
-    assert!(resolve_build_shape(6, 8, &cfg).is_err(), "6x8 should be rejected");
-    assert!(resolve_build_shape(8, 6, &cfg).is_err(), "8x6 should be rejected");
+    assert!(
+        resolve_build_shape(3, 3, &cfg).is_err(),
+        "3x3 should be rejected"
+    );
+    assert!(
+        resolve_build_shape(6, 8, &cfg).is_err(),
+        "6x8 should be rejected"
+    );
+    assert!(
+        resolve_build_shape(8, 6, &cfg).is_err(),
+        "8x6 should be rejected"
+    );
 }
 
 #[test]

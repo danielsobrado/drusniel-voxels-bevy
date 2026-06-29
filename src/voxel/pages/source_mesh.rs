@@ -24,8 +24,7 @@ pub fn concat(meshes: &[PageMesh]) -> PageMesh {
         out.positions.extend_from_slice(&m.positions);
         out.normals.extend_from_slice(&m.normals);
         out.materials.extend_from_slice(&m.materials);
-        out.paint_slots
-            .extend(m.paint_slots.iter().copied());
+        out.paint_slots.extend(m.paint_slots.iter().copied());
         out.indices.extend(m.indices.iter().map(|&i| i + v_off));
     }
     // ensure paint_slots matches vertex count
@@ -67,7 +66,10 @@ pub fn build_lod0_page_source(
     for e in exports {
         if !matches!(e.lod, LodLevel::Lod0) {
             return Err(ClodBuildError::PageIncomplete {
-                message: format!("page input must be LOD0, got {:?} at {:?}", e.lod, e.chunk_pos),
+                message: format!(
+                    "page input must be LOD0, got {:?} at {:?}",
+                    e.lod, e.chunk_pos
+                ),
             });
         }
     }
@@ -78,8 +80,7 @@ pub fn build_lod0_page_source(
         normal_dot: val.normal_dot_min,
         material: val.material_weight_epsilon,
     };
-    let (mesh, weld) =
-        weld_vertices(&merged, cfg.simplify.weld_epsilon_cells, tolerances)?;
+    let (mesh, weld) = weld_vertices(&merged, cfg.simplify.weld_epsilon_cells, tolerances)?;
     Ok(PageSource {
         mesh,
         footprint,

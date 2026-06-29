@@ -309,8 +309,16 @@ fn evaluate(rows: &[RebuildRow], cfg: ClodRebuildGuardConfig) -> GuardReport {
     };
 
     for row in rows {
-        summary.min_sequence = Some(summary.min_sequence.map_or(row.sequence, |v| v.min(row.sequence)));
-        summary.max_sequence = Some(summary.max_sequence.map_or(row.sequence, |v| v.max(row.sequence)));
+        summary.min_sequence = Some(
+            summary
+                .min_sequence
+                .map_or(row.sequence, |v| v.min(row.sequence)),
+        );
+        summary.max_sequence = Some(
+            summary
+                .max_sequence
+                .map_or(row.sequence, |v| v.max(row.sequence)),
+        );
         summary.max_exports = summary.max_exports.max(row.exports);
         summary.max_complete_pages = summary.max_complete_pages.max(row.complete_pages);
         summary.max_page_coords = summary.max_page_coords.max(row.page_coords);
@@ -323,7 +331,9 @@ fn evaluate(rows: &[RebuildRow], cfg: ClodRebuildGuardConfig) -> GuardReport {
         summary.max_build_started_ms = summary
             .max_build_started_ms
             .max(row.build_started_ms.unwrap_or_default());
-        summary.max_publish_ms = summary.max_publish_ms.max(row.publish_ms.unwrap_or_default());
+        summary.max_publish_ms = summary
+            .max_publish_ms
+            .max(row.publish_ms.unwrap_or_default());
 
         if row.source_complete_frame.is_none() || row.source_complete_ms.is_none() {
             summary.rows_missing_source_complete += 1;
@@ -417,7 +427,8 @@ fn evaluate(rows: &[RebuildRow], cfg: ClodRebuildGuardConfig) -> GuardReport {
     }
     if summary.max_complete_pages == 0 && summary.max_exports > 0 {
         report.warnings.push(
-            "exports were observed, but complete_pages stayed at zero; check source completion".into(),
+            "exports were observed, but complete_pages stayed at zero; check source completion"
+                .into(),
         );
     }
 
@@ -448,7 +459,10 @@ fn has_invalid_order(row: &RebuildRow) -> bool {
         return true;
     }
 
-    if row.publish_ms.is_some_and(|value| value > row.total_ms + f64::EPSILON) {
+    if row
+        .publish_ms
+        .is_some_and(|value| value > row.total_ms + f64::EPSILON)
+    {
         return true;
     }
     if row
@@ -487,18 +501,33 @@ fn print_report(csv: &PathBuf, report: &GuardReport) {
     println!("  max page coords: {}", summary.max_page_coords);
     println!("  max nodes: {}", summary.max_nodes);
     println!("  max triangles: {}", summary.max_triangles);
-    println!("  max source complete ms: {:.3}", summary.max_source_complete_ms);
-    println!("  max build started ms: {:.3}", summary.max_build_started_ms);
+    println!(
+        "  max source complete ms: {:.3}",
+        summary.max_source_complete_ms
+    );
+    println!(
+        "  max build started ms: {:.3}",
+        summary.max_build_started_ms
+    );
     println!("  max publish ms: {:.3}", summary.max_publish_ms);
     println!("  max total ms: {:.3}", summary.max_total_ms);
-    println!("  missing source complete rows: {}", summary.rows_missing_source_complete);
-    println!("  missing build started rows: {}", summary.rows_missing_build_started);
+    println!(
+        "  missing source complete rows: {}",
+        summary.rows_missing_source_complete
+    );
+    println!(
+        "  missing build started rows: {}",
+        summary.rows_missing_build_started
+    );
     println!(
         "  rows without revision increment: {}",
         summary.rows_without_revision_increment
     );
     println!("  zero-node publishes: {}", summary.zero_node_publishes);
-    println!("  zero-triangle publishes: {}", summary.zero_triangle_publishes);
+    println!(
+        "  zero-triangle publishes: {}",
+        summary.zero_triangle_publishes
+    );
     println!("  invalid ordering rows: {}", summary.invalid_order_rows);
 
     for warning in &report.warnings {
@@ -538,9 +567,7 @@ mod tests {
 
     #[test]
     fn blank_optional_fields_parse_as_none() {
-        let csv = format!(
-            "{HEADER}\n1,10,2,3,100,,,110,64,64,16,21,420,L0:16;L1:4;L2:1,,,,10.0\n"
-        );
+        let csv = format!("{HEADER}\n1,10,2,3,100,,,110,64,64,16,21,420,L0:16;L1:4;L2:1,,,,10.0\n");
 
         let rows = parse_csv(&csv).unwrap();
         assert_eq!(rows[0].source_complete_frame, None);
@@ -601,26 +628,36 @@ mod tests {
         };
 
         let report = evaluate(&[row], ClodRebuildGuardConfig::default());
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("missing source completion")));
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("missing build start")));
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("revision increment")));
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("zero-node")));
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("zero-triangle")));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("missing source completion"))
+        );
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("missing build start"))
+        );
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("revision increment"))
+        );
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("zero-node"))
+        );
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("zero-triangle"))
+        );
     }
 
     #[test]
@@ -648,10 +685,11 @@ mod tests {
 
         let report = evaluate(&[row], ClodRebuildGuardConfig::default());
         assert_eq!(report.summary.invalid_order_rows, 1);
-        assert!(report
-            .failures
-            .iter()
-            .any(|failure| failure.contains("ordering")));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.contains("ordering"))
+        );
     }
 }
-

@@ -126,7 +126,9 @@ impl ClodShadowRuntimeSettings {
             ClodShadowRuntimeMode::Disabled => None,
             ClodShadowRuntimeMode::Proxy => Some(requested),
             ClodShadowRuntimeMode::VisualOnly => Some(ClodShadowRuntimeAction::UseVisualMeshCaster),
-            ClodShadowRuntimeMode::NoCastOnly => Some(ClodShadowRuntimeAction::ApplyNotShadowCaster),
+            ClodShadowRuntimeMode::NoCastOnly => {
+                Some(ClodShadowRuntimeAction::ApplyNotShadowCaster)
+            }
         }
     }
 
@@ -383,7 +385,10 @@ mod tests {
         ]);
 
         assert_eq!(settings.mode, ClodShadowRuntimeMode::VisualOnly);
-        assert_eq!(settings.snapshot_path, PathBuf::from("assets/generated/clod/test.json"));
+        assert_eq!(
+            settings.snapshot_path,
+            PathBuf::from("assets/generated/clod/test.json")
+        );
         assert!(settings.auto_reload_snapshot);
         assert!(!settings.f3_overlay_enabled);
     }

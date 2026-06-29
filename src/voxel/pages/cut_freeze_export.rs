@@ -13,8 +13,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 
 use super::selection::{
-    ClodPageNodeKey, ClodPageSelectionState, ClodSelectionDebugControls,
-    ClodSelectionRuntimeStats,
+    ClodPageNodeKey, ClodPageSelectionState, ClodSelectionDebugControls, ClodSelectionRuntimeStats,
 };
 
 #[derive(Resource, Clone, Debug)]
@@ -102,7 +101,10 @@ pub(crate) fn clod_cut_freeze_export_system(
     );
 
     if let Err(err) = append_line(&settings.path, &mut state, &line) {
-        warn!("failed to write CLOD cut-freeze CSV {}: {err}", settings.path.display());
+        warn!(
+            "failed to write CLOD cut-freeze CSV {}: {err}",
+            settings.path.display()
+        );
         state.disabled_after_error = true;
         return;
     }
@@ -182,7 +184,10 @@ fn append_line(
 
 fn env_flag(name: &str) -> bool {
     std::env::var(name).ok().is_some_and(|value| {
-        matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
+        matches!(
+            value.trim(),
+            "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+        )
     })
 }
 
@@ -196,7 +201,14 @@ mod tests {
 
     #[test]
     fn digest_is_order_independent_after_sorting() {
-        let stats = ClodSelectionRuntimeStats { rendered_pages: 2, split_pages: 1, forced_splits: 0, blocked_splits: 0, near_field_forced_splits: 0, frozen: true };
+        let stats = ClodSelectionRuntimeStats {
+            rendered_pages: 2,
+            split_pages: 1,
+            forced_splits: 0,
+            blocked_splits: 0,
+            near_field_forced_splits: 0,
+            frozen: true,
+        };
         let a = build_snapshot(1, true, true, [key(0, 1, 0), key(0, 0, 0)], stats);
         let b = build_snapshot(1, true, true, [key(0, 0, 0), key(0, 1, 0)], stats);
         assert_eq!(a.cut_digest, b.cut_digest);
@@ -205,7 +217,14 @@ mod tests {
 
     #[test]
     fn snapshot_carries_split_counters() {
-        let stats = ClodSelectionRuntimeStats { rendered_pages: 1, split_pages: 7, forced_splits: 2, blocked_splits: 3, near_field_forced_splits: 4, frozen: true };
+        let stats = ClodSelectionRuntimeStats {
+            rendered_pages: 1,
+            split_pages: 7,
+            forced_splits: 2,
+            blocked_splits: 3,
+            near_field_forced_splits: 4,
+            frozen: true,
+        };
         let snapshot = build_snapshot(9, true, true, [key(0, 0, 0)], stats);
         assert_eq!(snapshot.split_pages, 7);
         assert_eq!(snapshot.forced_splits, 2);

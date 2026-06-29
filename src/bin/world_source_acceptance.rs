@@ -10,17 +10,17 @@ use voxel_builder::rendering::ao_config::BakedAoConfig;
 use voxel_builder::voxel::chunk::{Chunk, LodLevel};
 use voxel_builder::voxel::materials::MaterialId;
 use voxel_builder::voxel::meshing::{
-    generate_chunk_mesh_for_request, MeshForensicsOptions, MeshMode, MeshRequest,
-    WaterAirExposureMode,
+    MeshForensicsOptions, MeshMode, MeshRequest, WaterAirExposureMode,
+    generate_chunk_mesh_for_request,
 };
 use voxel_builder::voxel::skirt::NeighborLods;
 use voxel_builder::voxel::types::VoxelType;
 use voxel_builder::voxel::world::VoxelWorld;
 use voxel_builder::world::source::{
-    evaluate_world_source_cpu_gpu_drift, material_with_biome, ProceduralWorldSourceTerrainBridge,
-    TerrainSourceConfig, TerrainSourceStartupReport, UnavailableWorldSourceGpuReadback,
-    WorldSourceDriftGateConfig, WorldSourceDriftGateReport, WorldSourceDriftSamplePoint,
-    WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult,
+    ProceduralWorldSourceTerrainBridge, TerrainSourceConfig, TerrainSourceStartupReport,
+    UnavailableWorldSourceGpuReadback, WorldSourceDriftGateConfig, WorldSourceDriftGateReport,
+    WorldSourceDriftSamplePoint, WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult,
+    evaluate_world_source_cpu_gpu_drift, material_with_biome,
 };
 
 const DEFAULT_SAMPLE_CHUNKS: [IVec3; 4] = [
@@ -33,7 +33,10 @@ const WORLD_SIZE_CHUNKS: IVec3 = IVec3::new(2, 2, 2);
 const RELEASE_COMMAND: &str = "cargo run --release --bin world_source_acceptance";
 
 #[derive(Parser, Debug)]
-#[command(about = "Write a WorldSource GPU-first acceptance summary.json", version)]
+#[command(
+    about = "Write a WorldSource GPU-first acceptance summary.json",
+    version
+)]
 struct Args {
     #[arg(long, default_value = "bench-runs")]
     output_root: PathBuf,
@@ -117,7 +120,11 @@ fn run() -> Result<PathBuf, String> {
     let bridge = ProceduralWorldSourceTerrainBridge::load_or_default();
 
     let (mut world, chunk_generation) = bench_chunk_generation(&bridge);
-    let mesh_mode = if args.blocky { MeshMode::Blocky } else { MeshMode::SurfaceNets };
+    let mesh_mode = if args.blocky {
+        MeshMode::Blocky
+    } else {
+        MeshMode::SurfaceNets
+    };
     let (mesh_build, material_draw_impact) = bench_mesh_build(&mut world, mesh_mode)?;
     let drift_points = drift_points();
     let gpu_readback = UnavailableWorldSourceGpuReadback.read_world_source_samples(&drift_points);
@@ -355,14 +362,23 @@ mod tests {
 
     #[test]
     fn acceptance_requires_gpu_world_source_mode() {
-        assert!(require_default_gpu_runtime_path(&TerrainSourceConfig {
-            mode: TerrainSourceMode::GpuWorldSource,
-        }).is_ok());
-        assert!(require_default_gpu_runtime_path(&TerrainSourceConfig {
-            mode: TerrainSourceMode::Legacy,
-        }).is_err());
-        assert!(require_default_gpu_runtime_path(&TerrainSourceConfig {
-            mode: TerrainSourceMode::CpuWorldSourceReference,
-        }).is_err());
+        assert!(
+            require_default_gpu_runtime_path(&TerrainSourceConfig {
+                mode: TerrainSourceMode::GpuWorldSource,
+            })
+            .is_ok()
+        );
+        assert!(
+            require_default_gpu_runtime_path(&TerrainSourceConfig {
+                mode: TerrainSourceMode::Legacy,
+            })
+            .is_err()
+        );
+        assert!(
+            require_default_gpu_runtime_path(&TerrainSourceConfig {
+                mode: TerrainSourceMode::CpuWorldSourceReference,
+            })
+            .is_err()
+        );
     }
 }

@@ -38,7 +38,8 @@ pub(crate) fn clod_page_fade_material_system(
 
         let state = material_state_for_page(fade.copied(), settings.enabled);
         material.uniforms.clod_fade = state.fade_alpha;
-        material.clod_page_dither = settings.enabled && state.role != dither_role_to_shader_id(ClodDitherRole::Stable);
+        material.clod_page_dither =
+            settings.enabled && state.role != dither_role_to_shader_id(ClodDitherRole::Stable);
     }
 }
 
@@ -68,10 +69,10 @@ fn env_flag(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::dither_material::{
         CLOD_DITHER_ROLE_FADE_IN, CLOD_DITHER_ROLE_FADE_OUT, CLOD_DITHER_ROLE_STABLE,
     };
+    use super::*;
 
     #[test]
     fn disabled_material_path_forces_stable_visibility() {

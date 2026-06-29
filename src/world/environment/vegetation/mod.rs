@@ -250,11 +250,16 @@ pub fn attach_procedural_grass_to_chunks(
     for (entity, chunk, chunk_mesh, _material, transform) in blocky_chunk_query.iter() {
         let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = camera_pos.distance(chunk_center);
-        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center, &veg_config);
+        let lookahead_distance =
+            grass_lookahead_distance(camera_pos, camera_forward, chunk_center, &veg_config);
 
-        let Some((density, max_count)) =
-            grass_spawn_budget(distance, lookahead_distance, base_density, base_max_count, &veg_config)
-        else {
+        let Some((density, max_count)) = grass_spawn_budget(
+            distance,
+            lookahead_distance,
+            base_density,
+            base_max_count,
+            &veg_config,
+        ) else {
             continue;
         };
         chunks_considered += 1;
@@ -284,11 +289,16 @@ pub fn attach_procedural_grass_to_chunks(
     for (entity, chunk, chunk_mesh, _material, transform) in triplanar_chunk_query.iter() {
         let chunk_center = transform.translation + Vec3::splat(CHUNK_SIZE_F32 * 0.5);
         let distance = camera_pos.distance(chunk_center);
-        let lookahead_distance = grass_lookahead_distance(camera_pos, camera_forward, chunk_center, &veg_config);
+        let lookahead_distance =
+            grass_lookahead_distance(camera_pos, camera_forward, chunk_center, &veg_config);
 
-        let Some((density, max_count)) =
-            grass_spawn_budget(distance, lookahead_distance, base_density, base_max_count, &veg_config)
-        else {
+        let Some((density, max_count)) = grass_spawn_budget(
+            distance,
+            lookahead_distance,
+            base_density,
+            base_max_count,
+            &veg_config,
+        ) else {
             continue;
         };
         chunks_considered += 1;
@@ -399,7 +409,8 @@ fn process_chunk_for_grass(
         return GrassProcessResult::Deferred;
     };
 
-    let instances = collect_grass_instances(chunk_source_mesh, transform, density, max_count, world);
+    let instances =
+        collect_grass_instances(chunk_source_mesh, transform, density, max_count, world);
     if instances.is_empty() {
         commands.entity(entity).try_insert(ChunkGrassAttached {
             mesh: chunk_mesh.0.clone(),
@@ -1280,7 +1291,8 @@ mod tests {
     fn grass_spawn_budget_halves_density_beyond_half_distance() {
         let config = test_config();
         let beyond_half = config.half_distance + 1.0;
-        let Some((density, max_count)) = grass_spawn_budget(beyond_half, 0.0, 4, 200, &config) else {
+        let Some((density, max_count)) = grass_spawn_budget(beyond_half, 0.0, 4, 200, &config)
+        else {
             panic!("expected budget beyond half distance");
         };
         assert_eq!(density, 2);

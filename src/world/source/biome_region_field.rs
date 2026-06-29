@@ -1,8 +1,10 @@
 use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
-use super::biome_region_contract::{BiomeRegionContract, BIOME_REGION_CELL_M, BIOME_REGION_CONTRACT};
-use super::island_shape::{sample_island_mask, IslandMaskSample, IslandShapeConfig};
+use super::biome_region_contract::{
+    BIOME_REGION_CELL_M, BIOME_REGION_CONTRACT, BiomeRegionContract,
+};
+use super::island_shape::{IslandMaskSample, IslandShapeConfig, sample_island_mask};
 use super::noise::smooth01;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,13 +122,18 @@ fn mix32(value: u32) -> u32 {
 }
 
 pub fn pcg2d(x: i32, z: i32, seed: i32) -> f32 {
-    let value = (seed as u32)
-        ^ (x as u32).wrapping_mul(0x1f12_3bb5)
-        ^ (z as u32).wrapping_mul(0x5f35_6495);
+    let value =
+        (seed as u32) ^ (x as u32).wrapping_mul(0x1f12_3bb5) ^ (z as u32).wrapping_mul(0x5f35_6495);
     mix32(value) as f32 / 4_294_967_296.0
 }
 
-pub fn biome_region_noise(x: f32, z: f32, cell_m: f32, seed: i32, contract: BiomeRegionContract) -> f32 {
+pub fn biome_region_noise(
+    x: f32,
+    z: f32,
+    cell_m: f32,
+    seed: i32,
+    contract: BiomeRegionContract,
+) -> f32 {
     let cell_m = resolve_region_cell_m(cell_m, contract);
     let gx = x / cell_m;
     let gz = z / cell_m;
@@ -168,8 +175,8 @@ pub fn classify_biome_region(input: BiomeRegionClassifyInput) -> BiomeRegionSamp
         input.seed.wrapping_add(711),
         input.contract,
     );
-    let center_distance = (input.x - input.island.nearest_center_x)
-        .hypot(input.z - input.island.nearest_center_z);
+    let center_distance =
+        (input.x - input.island.nearest_center_x).hypot(input.z - input.island.nearest_center_z);
     let distance_t = (center_distance / input.island_radius_m.max(1.0)).clamp(0.0, 1.0);
 
     let biome = if input.height >= input.sea_level + input.contract.mountain_height_above_sea_m {
@@ -178,7 +185,8 @@ pub fn classify_biome_region(input: BiomeRegionClassifyInput) -> BiomeRegionSamp
         && n < input.contract.swamp_noise_max
     {
         BiomeId::Swamp
-    } else if distance_t > input.contract.plains_distance_min && n > input.contract.plains_noise_min {
+    } else if distance_t > input.contract.plains_distance_min && n > input.contract.plains_noise_min
+    {
         BiomeId::Plains
     } else if n > input.contract.forest_noise_min {
         BiomeId::Forest
@@ -232,7 +240,10 @@ mod tests {
 
     #[test]
     fn high_elevation_is_mountain() {
-        assert_eq!(classify_biome_region(land_input(90.0, 0.0)).biome, BiomeId::Mountain);
+        assert_eq!(
+            classify_biome_region(land_input(90.0, 0.0)).biome,
+            BiomeId::Mountain
+        );
     }
 
     #[test]
@@ -244,8 +255,14 @@ mod tests {
             ..BIOME_REGION_CONTRACT
         };
 
-        assert_eq!(classify_biome_region(default_input).biome, BiomeId::Mountain);
-        assert_ne!(classify_biome_region(overridden_input).biome, BiomeId::Mountain);
+        assert_eq!(
+            classify_biome_region(default_input).biome,
+            BiomeId::Mountain
+        );
+        assert_ne!(
+            classify_biome_region(overridden_input).biome,
+            BiomeId::Mountain
+        );
     }
 
     #[test]

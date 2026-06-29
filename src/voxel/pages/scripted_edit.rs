@@ -299,22 +299,20 @@ mod tests {
 
     #[test]
     fn due_events_match_exact_frame() {
-        let events = vec![
-            ClodScriptedEditEvent {
-                name: "a".into(),
-                occurrence: 0,
-                frame: 7,
-                kind: ClodScriptedEditKind::Smooth,
-                position: [0.0, 0.0, 0.0],
-                radius: 1.0,
-                strength: 1.0,
-                target_height: None,
-                expected_dirty_pages_min: None,
-                expected_dirty_pages_max: None,
-                expected_rebuild_publish_max_frames: None,
-                expected_collider_refresh_max_frames: None,
-            },
-        ];
+        let events = vec![ClodScriptedEditEvent {
+            name: "a".into(),
+            occurrence: 0,
+            frame: 7,
+            kind: ClodScriptedEditKind::Smooth,
+            position: [0.0, 0.0, 0.0],
+            radius: 1.0,
+            strength: 1.0,
+            target_height: None,
+            expected_dirty_pages_min: None,
+            expected_dirty_pages_max: None,
+            expected_rebuild_publish_max_frames: None,
+            expected_collider_refresh_max_frames: None,
+        }];
         assert_eq!(due_scripted_edits(&events, 7).count(), 1);
         assert_eq!(due_scripted_edits(&events, 8).count(), 0);
     }

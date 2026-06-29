@@ -6,7 +6,7 @@
 //! invalidate.  This gives benches an auditable bridge before enabling actual
 //! terrain edits.
 
-use super::edit_dirtiness::{plan_dirty_pages_for_sphere, ClodDirtyPageGrid};
+use super::edit_dirtiness::{ClodDirtyPageGrid, plan_dirty_pages_for_sphere};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScriptedEditMutationMode {
@@ -117,7 +117,11 @@ impl ScriptedEditDryRunConfig {
                 "influence_margin must be finite and >= 0, got {influence_margin}"
             ));
         }
-        Ok(Self { grid, influence_margin, mutation_mode })
+        Ok(Self {
+            grid,
+            influence_margin,
+            mutation_mode,
+        })
     }
 }
 
@@ -129,10 +133,18 @@ pub fn build_dry_run_records(
 
     for (index, row) in rows.iter().enumerate() {
         if row.radius <= 0.0 || !row.radius.is_finite() {
-            return Err(format!("row {} has invalid radius {}", index + 2, row.radius));
+            return Err(format!(
+                "row {} has invalid radius {}",
+                index + 2,
+                row.radius
+            ));
         }
         if row.strength <= 0.0 || !row.strength.is_finite() {
-            return Err(format!("row {} has invalid strength {}", index + 2, row.strength));
+            return Err(format!(
+                "row {} has invalid strength {}",
+                index + 2,
+                row.strength
+            ));
         }
 
         let kind = ScriptedTerrainEditKind::parse(&row.kind)?;
@@ -209,7 +221,11 @@ pub fn dry_run_record_to_csv_row(record: &ScriptedEditDryRunRecord) -> String {
         record.request.position[2],
         record.request.radius,
         record.request.strength,
-        record.request.target_height.map(|value| format!("{value:.6}")).unwrap_or_default(),
+        record
+            .request
+            .target_height
+            .map(|value| format!("{value:.6}"))
+            .unwrap_or_default(),
         record.request.mutation_mode.as_str(),
         record.dirty_lod0_pages,
         record.dirty_ancestor_nodes,
@@ -223,7 +239,9 @@ pub fn dry_run_record_to_csv_row(record: &ScriptedEditDryRunRecord) -> String {
     )
 }
 
-pub fn parse_scripted_edit_dispatch_csv(input: &str) -> Result<Vec<ScriptedEditDispatchRow>, String> {
+pub fn parse_scripted_edit_dispatch_csv(
+    input: &str,
+) -> Result<Vec<ScriptedEditDispatchRow>, String> {
     let mut lines = input.lines().filter(|line| !line.trim().is_empty());
     let header = lines
         .next()
@@ -247,7 +265,11 @@ pub fn parse_scripted_edit_dispatch_csv(input: &str) -> Result<Vec<ScriptedEditD
         rows.push(ScriptedEditDispatchRow {
             driver_frame: parse_u32(read("driver_frame")?, "driver_frame", line_index + 2)?,
             event_index: parse_u32(read("event_index")?, "event_index", line_index + 2)?,
-            occurrence_index: parse_u32(read("occurrence_index")?, "occurrence_index", line_index + 2)?,
+            occurrence_index: parse_u32(
+                read("occurrence_index")?,
+                "occurrence_index",
+                line_index + 2,
+            )?,
             source_frame: parse_u32(read("source_frame")?, "source_frame", line_index + 2)?,
             name: read("name")?.to_string(),
             kind: read("kind")?.to_string(),
@@ -258,7 +280,11 @@ pub fn parse_scripted_edit_dispatch_csv(input: &str) -> Result<Vec<ScriptedEditD
             ],
             radius: parse_f32(read("radius")?, "radius", line_index + 2)?,
             strength: parse_f32(read("strength")?, "strength", line_index + 2)?,
-            target_height: parse_optional_f32(read("target_height").unwrap_or(""), "target_height", line_index + 2)?,
+            target_height: parse_optional_f32(
+                read("target_height").unwrap_or(""),
+                "target_height",
+                line_index + 2,
+            )?,
             expected_dirty_pages_min: parse_u32(
                 read("expected_dirty_pages_min")?,
                 "expected_dirty_pages_min",
@@ -296,7 +322,9 @@ fn parse_f32(value: &str, column: &str, line: usize) -> Result<f32, String> {
         .parse::<f32>()
         .map_err(|error| format!("line {line} invalid `{column}` value `{value}`: {error}"))?;
     if !parsed.is_finite() {
-        return Err(format!("line {line} invalid non-finite `{column}` value `{value}`"));
+        return Err(format!(
+            "line {line} invalid non-finite `{column}` value `{value}`"
+        ));
     }
     Ok(parsed)
 }
@@ -329,7 +357,9 @@ mod tests {
         let csv = "driver_frame,event_index,occurrence_index,source_frame,name,kind,x,y,z,radius,strength,target_height,expected_dirty_pages_min,expected_dirty_pages_max,expected_rebuild_publish_max_frames,expected_collider_refresh_max_frames\n\
 60,0,0,60,dig-ridge,dig,15,66,15,1,0.5,,1,4,90,120\n";
         let rows = parse_scripted_edit_dispatch_csv(csv).unwrap();
-        let config = ScriptedEditDryRunConfig::try_new(grid(), 0.0, ScriptedEditMutationMode::DryRun).unwrap();
+        let config =
+            ScriptedEditDryRunConfig::try_new(grid(), 0.0, ScriptedEditMutationMode::DryRun)
+                .unwrap();
         let records = build_dry_run_records(&rows, config).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].request.kind, ScriptedTerrainEditKind::Dig);
@@ -355,7 +385,9 @@ mod tests {
             expected_rebuild_publish_max_frames: 90,
             expected_collider_refresh_max_frames: 120,
         };
-        let config = ScriptedEditDryRunConfig::try_new(grid(), 0.0, ScriptedEditMutationMode::DryRun).unwrap();
+        let config =
+            ScriptedEditDryRunConfig::try_new(grid(), 0.0, ScriptedEditMutationMode::DryRun)
+                .unwrap();
         assert!(build_dry_run_records(&[row], config).is_err());
     }
 }

@@ -242,7 +242,8 @@ pub fn extract_gpu_cull_params(
 
 // ──────────────────────── Prepare: upload + dispatch ─────────────────────────
 
-static GPU_CULL_FALLBACK_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static GPU_CULL_FALLBACK_LOGGED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 pub fn prepare_gpu_cull_dispatch(
     source_buffer: Res<GpuVegetationSourceBuffer>,
@@ -253,7 +254,10 @@ pub fn prepare_gpu_cull_dispatch(
     extracted_params: Option<Res<ExtractedCullParams>>,
     groups: Query<(Entity, &super::instanced_render::InstancedPropGroup)>,
     config: Option<Res<GpuVegetationConfig>>,
-    directional_lights: Query<&bevy::camera::primitives::CascadesFrusta, With<bevy::light::DirectionalLight>>,
+    directional_lights: Query<
+        &bevy::camera::primitives::CascadesFrusta,
+        With<bevy::light::DirectionalLight>,
+    >,
     capabilities: Option<Res<crate::rendering::device::capabilities::GraphicsCapabilities>>,
     bench_toggles: Option<Res<crate::diagnostics::bench::BenchRenderToggles>>,
     timing: Option<Res<RenderTimingSink>>,
@@ -271,13 +275,27 @@ pub fn prepare_gpu_cull_dispatch(
         }
         return;
     }
-    let force_on = bench_toggles.as_ref().is_some_and(|t| t.force_gpu_vegetation.unwrap_or(false));
-    let force_off = bench_toggles.as_ref().is_some_and(|t| t.disable_gpu_vegetation.unwrap_or(false));
-    if force_off { return; }
-    if !config.enabled && !force_on { return; }
-    let Some(cull_pipeline) = cull_pipeline else { return };
-    let Some(params) = extracted_params else { return };
-    let Some(source_buf) = source_buffer.buffer() else { return };
+    let force_on = bench_toggles
+        .as_ref()
+        .is_some_and(|t| t.force_gpu_vegetation.unwrap_or(false));
+    let force_off = bench_toggles
+        .as_ref()
+        .is_some_and(|t| t.disable_gpu_vegetation.unwrap_or(false));
+    if force_off {
+        return;
+    }
+    if !config.enabled && !force_on {
+        return;
+    }
+    let Some(cull_pipeline) = cull_pipeline else {
+        return;
+    };
+    let Some(params) = extracted_params else {
+        return;
+    };
+    let Some(source_buf) = source_buffer.buffer() else {
+        return;
+    };
 
     // ── Build group metadata ──
     let mut group_metas: Vec<GpuGroupMeta> = Vec::new();
@@ -287,7 +305,9 @@ pub fn prepare_gpu_cull_dispatch(
 
     for (entity, group) in &groups {
         let source = group.source_instances();
-        if source.is_empty() { continue; }
+        if source.is_empty() {
+            continue;
+        }
         let count = source.len() as u32;
         group_metas.push(GpuGroupMeta {
             source_offset: running_offset,
@@ -314,12 +334,13 @@ pub fn prepare_gpu_cull_dispatch(
     // ── Ensure buffers exist ──
     if cull_buffers.source_capacity < max_visible {
         let visible_size = (max_visible as usize * std::mem::size_of::<PropInstance>()) as u64;
-        cull_buffers.visible_instances_buffer = Some(render_device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_cull_visible_instances"),
-            size: visible_size,
-            usage: BufferUsages::STORAGE | BufferUsages::VERTEX,
-            mapped_at_creation: false,
-        }));
+        cull_buffers.visible_instances_buffer =
+            Some(render_device.create_buffer(&BufferDescriptor {
+                label: Some("gpu_cull_visible_instances"),
+                size: visible_size,
+                usage: BufferUsages::STORAGE | BufferUsages::VERTEX,
+                mapped_at_creation: false,
+            }));
 
         let args_size = (max_visible as usize * std::mem::size_of::<GpuDrawArgsTemplate>()) as u64;
         cull_buffers.draw_args_buffer = Some(render_device.create_buffer(&BufferDescriptor {
@@ -329,8 +350,7 @@ pub fn prepare_gpu_cull_dispatch(
             mapped_at_creation: false,
         }));
 
-        let uniforms_size =
-            (max_visible as usize * std::mem::size_of::<GpuGroupUniform>()) as u64;
+        let uniforms_size = (max_visible as usize * std::mem::size_of::<GpuGroupUniform>()) as u64;
         cull_buffers.group_uniforms_buffer = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_cull_group_uniforms"),
             size: uniforms_size,
@@ -383,11 +403,7 @@ pub fn prepare_gpu_cull_dispatch(
     );
 
     // Upload group metadata.
-    render_queue.write_buffer(
-        &group_meta_buf,
-        0,
-        bytemuck::cast_slice(&group_metas),
-    );
+    render_queue.write_buffer(&group_meta_buf, 0, bytemuck::cast_slice(&group_metas));
 
     // Upload cull params.
     // Extract cascade frusta from directional lights.
@@ -420,24 +436,22 @@ pub fn prepare_gpu_cull_dispatch(
         cascade_count,
         max_shadow_distance: params.max_shadow_distance,
     };
-    render_queue.write_buffer(
-        &cull_params_buf,
-        0,
-        bytemuck::bytes_of(&cull_params),
-    );
+    render_queue.write_buffer(&cull_params_buf, 0, bytemuck::bytes_of(&cull_params));
 
     // Upload cascade frusta buffer.
     if !cascade_clip_from_world.is_empty() {
-        let frusta_size = (cascade_clip_from_world.len() * std::mem::size_of::<[[f32; 4]; 4]>()) as u64;
+        let frusta_size =
+            (cascade_clip_from_world.len() * std::mem::size_of::<[[f32; 4]; 4]>()) as u64;
         if cull_buffers.cascade_frusta_buffer.is_none()
             || cull_buffers.cascade_frusta_buffer.as_ref().unwrap().size() < frusta_size
         {
-            cull_buffers.cascade_frusta_buffer = Some(render_device.create_buffer(&BufferDescriptor {
-                label: Some("gpu_cull_cascade_frusta"),
-                size: frusta_size,
-                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            cull_buffers.cascade_frusta_buffer =
+                Some(render_device.create_buffer(&BufferDescriptor {
+                    label: Some("gpu_cull_cascade_frusta"),
+                    size: frusta_size,
+                    usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
         }
         if let Some(ref buf) = cull_buffers.cascade_frusta_buffer {
             render_queue.write_buffer(buf, 0, bytemuck::cast_slice(&cascade_clip_from_world));
@@ -446,19 +460,22 @@ pub fn prepare_gpu_cull_dispatch(
 
     // Create per-cascade shadow buffers.
     let max_shadow = config.buffers.max_visible_shadow_per_cascade;
-    cull_buffers.shadow_cascades.resize_with(cascade_count as usize, || {
-        ShadowCascadeBuffers {
+    cull_buffers
+        .shadow_cascades
+        .resize_with(cascade_count as usize, || ShadowCascadeBuffers {
             visible_buffer: None,
             draw_args_buffer: None,
             group_uniforms_buffer: None,
             group_counters_buffer: None,
             shadow_params_buffer: None,
             bind_group: None,
-        }
-    });
+        });
     for ci in 0..cascade_count as usize {
         let sc = &mut cull_buffers.shadow_cascades[ci];
-        if sc.visible_buffer.is_none() || sc.visible_buffer.as_ref().unwrap().size() < max_shadow as u64 * std::mem::size_of::<PropInstance>() as u64 {
+        if sc.visible_buffer.is_none()
+            || sc.visible_buffer.as_ref().unwrap().size()
+                < max_shadow as u64 * std::mem::size_of::<PropInstance>() as u64
+        {
             let visible_size = max_shadow as u64 * std::mem::size_of::<PropInstance>() as u64;
             sc.visible_buffer = Some(render_device.create_buffer(&BufferDescriptor {
                 label: Some("gpu_cull_shadow_visible"),
@@ -572,11 +589,7 @@ pub fn prepare_gpu_cull_dispatch(
             })
         })
         .collect();
-    render_queue.write_buffer(
-        &draw_args_buf,
-        0,
-        bytemuck::cast_slice(&template_data),
-    );
+    render_queue.write_buffer(&draw_args_buf, 0, bytemuck::cast_slice(&template_data));
 
     // ── Create bind groups ──
     cull_buffers.bind_group_0 = Some(render_device.create_bind_group(
@@ -621,7 +634,8 @@ pub fn prepare_gpu_cull_dispatch(
 
 // ──────────────────────── Render graph node ──────────────────────────────────
 
-static GPU_CULL_PIPELINE_NOT_READY_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static GPU_CULL_PIPELINE_NOT_READY_LOGGED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[derive(Default)]
 pub struct GpuVegetationCullNode;
@@ -645,8 +659,11 @@ impl ViewNode for GpuVegetationCullNode {
         }
 
         let Some(pipeline) = pipeline_cache.get_compute_pipeline(pipeline_res.pipeline_id) else {
-            if !GPU_CULL_PIPELINE_NOT_READY_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                warn_once!("GPU vegetation cull pipeline not yet compiled; falling back to CPU path");
+            if !GPU_CULL_PIPELINE_NOT_READY_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed)
+            {
+                warn_once!(
+                    "GPU vegetation cull pipeline not yet compiled; falling back to CPU path"
+                );
             }
             return Ok(());
         };
@@ -660,12 +677,13 @@ impl ViewNode for GpuVegetationCullNode {
         let config = world.resource::<GpuVegetationConfig>();
         let max_instances = config.buffers.max_source_instances;
 
-        let mut pass = render_context
-            .command_encoder()
-            .begin_compute_pass(&ComputePassDescriptor {
-                label: Some("gpu_vegetation_cull_pass"),
-                timestamp_writes: None,
-            });
+        let mut pass =
+            render_context
+                .command_encoder()
+                .begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("gpu_vegetation_cull_pass"),
+                    timestamp_writes: None,
+                });
 
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, bg0, &[]);
@@ -735,18 +753,12 @@ pub fn init_gpu_cull_pipeline(
     )
     .to_vec();
 
-    let bind_group_layout_0 = render_device.create_bind_group_layout(
-        Some("gpu_cull_bg_layout_0"),
-        &bg_entries_0,
-    );
-    let bind_group_layout_1 = render_device.create_bind_group_layout(
-        Some("gpu_cull_bg_layout_1"),
-        &bg_entries_1,
-    );
-    let bind_group_layout_2 = render_device.create_bind_group_layout(
-        Some("gpu_cull_bg_layout_2"),
-        &bg_entries_2,
-    );
+    let bind_group_layout_0 =
+        render_device.create_bind_group_layout(Some("gpu_cull_bg_layout_0"), &bg_entries_0);
+    let bind_group_layout_1 =
+        render_device.create_bind_group_layout(Some("gpu_cull_bg_layout_1"), &bg_entries_1);
+    let bind_group_layout_2 =
+        render_device.create_bind_group_layout(Some("gpu_cull_bg_layout_2"), &bg_entries_2);
 
     let pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
         label: Some(Cow::Borrowed("gpu_vegetation_cull_pipeline")),
@@ -785,9 +797,7 @@ pub fn init_gpu_cull_pipeline(
 pub fn gpu_cull_vertex_bind_group_entries() -> &'static [BindGroupLayoutEntry] {
     let entries = BindGroupLayoutEntries::sequential(
         ShaderStages::VERTEX,
-        (
-            binding_types::storage_buffer_sized(false, None),
-        ),
+        (binding_types::storage_buffer_sized(false, None),),
     );
     Box::leak(Box::new(entries))
 }

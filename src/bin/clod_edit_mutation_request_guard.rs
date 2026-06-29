@@ -86,9 +86,10 @@ fn run() -> Result<(), String> {
     let csv_path = PathBuf::from(&args[1]);
     let config_path = args.get(2).map(PathBuf::from);
     let config = match config_path {
-        Some(path) if path.exists() => parse_config(&fs::read_to_string(&path).map_err(|error| {
-            format!("failed to read config {}: {error}", path.display())
-        })?)?,
+        Some(path) if path.exists() => parse_config(
+            &fs::read_to_string(&path)
+                .map_err(|error| format!("failed to read config {}: {error}", path.display()))?,
+        )?,
         _ => GuardConfig::default(),
     };
 
@@ -109,7 +110,10 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn validate_rows(rows: &[MutationRequestRow], config: &GuardConfig) -> Result<GuardSummary, String> {
+fn validate_rows(
+    rows: &[MutationRequestRow],
+    config: &GuardConfig,
+) -> Result<GuardSummary, String> {
     if rows.is_empty() {
         return Err("mutation request CSV has no rows".to_string());
     }
@@ -120,8 +124,16 @@ fn validate_rows(rows: &[MutationRequestRow], config: &GuardConfig) -> Result<Gu
 
     for row in rows {
         summary.total += 1;
-        summary.min_frame = Some(summary.min_frame.map_or(row.frame, |value| value.min(row.frame)));
-        summary.max_frame = Some(summary.max_frame.map_or(row.frame, |value| value.max(row.frame)));
+        summary.min_frame = Some(
+            summary
+                .min_frame
+                .map_or(row.frame, |value| value.min(row.frame)),
+        );
+        summary.max_frame = Some(
+            summary
+                .max_frame
+                .map_or(row.frame, |value| value.max(row.frame)),
+        );
 
         if config.require_unique_request_ids && !seen_request_ids.insert(row.request_id) {
             errors.push(format!(
@@ -150,7 +162,8 @@ fn validate_rows(rows: &[MutationRequestRow], config: &GuardConfig) -> Result<Gu
                 row.line_number, row.request_id, row.radius
             ));
         }
-        if !(row.strength.is_finite() && row.strength > 0.0 && row.strength <= config.max_strength) {
+        if !(row.strength.is_finite() && row.strength > 0.0 && row.strength <= config.max_strength)
+        {
             errors.push(format!(
                 "line {} request_id={} invalid strength {}",
                 row.line_number, row.request_id, row.strength
@@ -162,7 +175,9 @@ fn validate_rows(rows: &[MutationRequestRow], config: &GuardConfig) -> Result<Gu
                 row.line_number, row.request_id, row.dirty_lod0_pages, config.max_dirty_lod0_pages
             ));
         }
-        if row.dirty_total_nodes < row.dirty_lod0_pages || row.dirty_total_nodes > config.max_dirty_total_nodes {
+        if row.dirty_total_nodes < row.dirty_lod0_pages
+            || row.dirty_total_nodes > config.max_dirty_total_nodes
+        {
             errors.push(format!(
                 "line {} request_id={} dirty_total_nodes={} inconsistent with dirty_lod0_pages={} or max={}",
                 row.line_number,
@@ -194,7 +209,8 @@ fn validate_rows(rows: &[MutationRequestRow], config: &GuardConfig) -> Result<Gu
             ));
         }
 
-        if config.require_authoritative_world_mutation && !row.requires_authoritative_world_mutation {
+        if config.require_authoritative_world_mutation && !row.requires_authoritative_world_mutation
+        {
             errors.push(format!(
                 "line {} request_id={} does not require authoritative world mutation",
                 row.line_number, row.request_id
@@ -295,11 +311,31 @@ fn parse_mutation_request_csv(input: &str) -> Result<Vec<MutationRequestRow>, St
             kind: read("kind")?.to_string(),
             radius: parse_f32(read("radius")?, "radius", line_number)?,
             strength: parse_f32(read("strength")?, "strength", line_number)?,
-            target_height: parse_optional_f32(read("target_height").unwrap_or(""), "target_height", line_number)?,
-            dirty_lod0_pages: parse_u32(read("dirty_lod0_pages")?, "dirty_lod0_pages", line_number)?,
-            dirty_total_nodes: parse_u32(read("dirty_total_nodes")?, "dirty_total_nodes", line_number)?,
-            expected_dirty_pages_min: parse_u32(read("expected_dirty_pages_min")?, "expected_dirty_pages_min", line_number)?,
-            expected_dirty_pages_max: parse_u32(read("expected_dirty_pages_max")?, "expected_dirty_pages_max", line_number)?,
+            target_height: parse_optional_f32(
+                read("target_height").unwrap_or(""),
+                "target_height",
+                line_number,
+            )?,
+            dirty_lod0_pages: parse_u32(
+                read("dirty_lod0_pages")?,
+                "dirty_lod0_pages",
+                line_number,
+            )?,
+            dirty_total_nodes: parse_u32(
+                read("dirty_total_nodes")?,
+                "dirty_total_nodes",
+                line_number,
+            )?,
+            expected_dirty_pages_min: parse_u32(
+                read("expected_dirty_pages_min")?,
+                "expected_dirty_pages_min",
+                line_number,
+            )?,
+            expected_dirty_pages_max: parse_u32(
+                read("expected_dirty_pages_max")?,
+                "expected_dirty_pages_max",
+                line_number,
+            )?,
             apply_enabled: parse_bool(read("apply_enabled")?, "apply_enabled", line_number)?,
             requires_authoritative_world_mutation: parse_bool(
                 read("requires_authoritative_world_mutation")?,
@@ -326,7 +362,10 @@ fn parse_config(input: &str) -> Result<GuardConfig, String> {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        values.insert(key.trim().to_string(), value.trim().trim_matches('"').to_string());
+        values.insert(
+            key.trim().to_string(),
+            value.trim().trim_matches('"').to_string(),
+        );
     }
 
     if let Some(value) = values.get("allow_ready_to_apply") {
