@@ -1,10 +1,12 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
+  abs,
   clamp,
   cos,
   dot,
   float,
+  floor,
   fract,
   frontFacing,
   instanceIndex,
@@ -88,13 +90,17 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const rotZ: TslNode = s.mul(localPosition.x).negate().add(c.mul(localPosition.z));
     const positionNode: TslNode = vec3(aWorldXZ.x.add(rotX), aHeight.add(localPosition.y), aWorldXZ.y.add(rotZ));
 
-    const albedoSample: TslNode = texture(atlas.albedo ?? atlas.texture, uv());
-    const coverage: TslNode = albedoSample.w;
+    const viewDirection: TslNode = normalize(vec3(
+      uFadeCenter.x.sub(aWorldXZ.x),
+      float(0),
+      uFadeCenter.y.sub(aWorldXZ.y),
+    ));
+    const impostor = treeRingImpostorFourFrameSample(atlas, uv(), viewDirection);
     const albedo: TslNode = debugColor
       ? vec3(debugColor.r, debugColor.g, debugColor.b)
-      : albedoSample.xyz.mul(albedoSample.xyz);
+      : impostor.albedo;
     const lit: TslNode = atlas.normalDepth && !debugColor
-      ? relightTreeRingImpostor(albedo, texture(atlas.normalDepth, uv()).xyz, uLight, uSun, uSky, uGround)
+      ? relightTreeRingImpostor(albedo, impostor.normal, uLight, uSun, uSky, uGround)
       : albedo;
 
     const lodMask: TslNode = treeRingLodMask(
@@ -105,14 +111,14 @@ export function createTreeRingImpostorNodeMaterialHandle(
       uFarDistance,
       uBandDistance,
     );
-    const alphaMask: TslNode = coverage.greaterThan(float(settings.impostors.alphaTest));
+    const alphaMask: TslNode = impostor.coverage.greaterThan(float(settings.impostors.alphaTest));
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
     const mask: TslNode = aboveWater ? lodMask.and(alphaMask).and(aboveWater) : lodMask.and(alphaMask);
 
     const material = new MeshBasicNodeMaterial();
     material.positionNode = positionNode;
     material.colorNode = lit;
-    (material as unknown as { opacityNode: TslNode }).opacityNode = coverage;
+    (material as unknown as { opacityNode: TslNode }).opacityNode = impostor.coverage;
     (material as unknown as { maskNode: TslNode }).maskNode = mask;
     material.alphaTest = 0;
     material.side = THREE.DoubleSide;
@@ -157,6 +163,91 @@ export function createTreeRingImpostorNodeMaterialHandle(
       for (const material of materials) material.dispose();
     },
   };
+}
+
+function treeRingImpostorFourFrameSample(
+  atlas: TreeImpostorAtlas,
+  baseUv: TslNode,
+  viewDirection: TslNode,
+): { albedo: TslNode; coverage: TslNode; normal: TslNode } {
+  const encoded: TslNode = treeRingOctEncode(viewDirection);
+  const grid = float(Math.max(1, Math.floor(atlas.gridSize)));
+  const gridMax = grid.sub(1);
+  const scaled: TslNode = encoded.mul(grid).sub(0.5);
+  const cell0: TslNode = floor(scaled);
+  const fraction: TslNode = clamp(scaled.sub(cell0), vec2(0), vec2(1));
+  const x0: TslNode = clamp(cell0.x, 0, gridMax);
+  const y0: TslNode = clamp(cell0.y, 0, gridMax);
+  const x1: TslNode = clamp(cell0.x.add(1), 0, gridMax);
+  const y1: TslNode = clamp(cell0.y.add(1), 0, gridMax);
+  const one = float(1);
+  const w00: TslNode = one.sub(fraction.x).mul(one.sub(fraction.y));
+  const w10: TslNode = fraction.x.mul(one.sub(fraction.y));
+  const w01: TslNode = one.sub(fraction.x).mul(fraction.y);
+  const w11: TslNode = fraction.x.mul(fraction.y);
+  const s00 = treeRingImpostorAtlasSample(atlas, baseUv, x0, y0);
+  const s10 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y0);
+  const s01 = treeRingImpostorAtlasSample(atlas, baseUv, x0, y1);
+  const s11 = treeRingImpostorAtlasSample(atlas, baseUv, x1, y1);
+  return {
+    albedo: s00.albedo.mul(w00).add(s10.albedo.mul(w10)).add(s01.albedo.mul(w01)).add(s11.albedo.mul(w11)),
+    coverage: s00.coverage.mul(w00).add(s10.coverage.mul(w10)).add(s01.coverage.mul(w01)).add(s11.coverage.mul(w11)),
+    normal: s00.normal.mul(w00).add(s10.normal.mul(w10)).add(s01.normal.mul(w01)).add(s11.normal.mul(w11)),
+  };
+}
+
+function treeRingOctEncode(direction: TslNode): TslNode {
+  const l1: TslNode = max(abs(direction.x).add(abs(direction.y)).add(abs(direction.z)), float(0.0001));
+  const projected: TslNode = direction.xy.div(l1);
+  const signX: TslNode = direction.x.greaterThanEqual(float(0)).select(float(1), float(-1));
+  const signY: TslNode = direction.y.greaterThanEqual(float(0)).select(float(1), float(-1));
+  const folded: TslNode = vec2(
+    float(1).sub(abs(projected.y)).mul(signX),
+    float(1).sub(abs(projected.x)).mul(signY),
+  );
+  return direction.z.lessThan(float(0)).select(folded, projected).mul(0.5).add(0.5);
+}
+
+function treeRingImpostorAtlasSample(
+  atlas: TreeImpostorAtlas,
+  baseUv: TslNode,
+  frameX: TslNode,
+  frameY: TslNode,
+): { albedo: TslNode; coverage: TslNode; normal: TslNode } {
+  const atlasUv = treeRingImpostorAtlasUv(atlas, baseUv, frameX, frameY);
+  const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
+  const normalSample: TslNode = atlas.normalDepth ? texture(atlas.normalDepth, atlasUv).xyz : vec3(0.5, 1.0, 0.5);
+  return {
+    albedo: sample.xyz.mul(sample.xyz),
+    coverage: sample.w,
+    normal: normalSample,
+  };
+}
+
+function treeRingImpostorAtlasUv(
+  atlas: TreeImpostorAtlas,
+  baseUv: TslNode,
+  frameX: TslNode,
+  frameY: TslNode,
+): TslNode {
+  const resolution = float(Math.max(1, Math.floor(atlas.resolutionPx)));
+  const atlasSize = float(Math.max(1, Math.floor(atlas.gridSize * atlas.resolutionPx)));
+  const padding = float(inferAtlasPaddingPx(atlas));
+  const minUv = vec2(
+    frameX.mul(resolution).add(padding).div(atlasSize),
+    frameY.mul(resolution).add(padding).div(atlasSize),
+  );
+  const maxUv = vec2(
+    frameX.add(1).mul(resolution).sub(padding).div(atlasSize),
+    frameY.add(1).mul(resolution).sub(padding).div(atlasSize),
+  );
+  return minUv.add(baseUv.mul(maxUv.sub(minUv)));
+}
+
+function inferAtlasPaddingPx(atlas: TreeImpostorAtlas): number {
+  const first = atlas.frames[0];
+  if (!first) return 0;
+  return Math.max(0, Math.round(first.uvMin[0] * Math.max(1, atlas.gridSize * atlas.resolutionPx)));
 }
 
 function relightTreeRingImpostor(
