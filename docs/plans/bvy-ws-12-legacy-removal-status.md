@@ -23,17 +23,17 @@ Status: In progress.
 - Added `GpuWorldSourceDriftReadbackDispatchPlan` for workgroup and buffer sizing.
 - Added `decode_gpu_world_source_drift_outputs` to validate returned sample IDs before drift-gate comparison.
 - Added `decode_staged_gpu_world_source_drift_bytes` to validate staging-byte length, cast returned GPU bytes, and decode samples into `WorldSourceGpuReadbackResult`.
-- Added `src/world/source/drift_readback_render.rs` with render resources, buffer preparation, compute dispatch, and staging-buffer copy.
+- Added `src/world/source/drift_readback_render.rs` with render resources, buffer preparation, compute dispatch, staging-buffer copy, staging-buffer map, and state update.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 - `world_source_acceptance` now fails before writing `summary.json` unless `terrain_source.mode` is `gpu_world_source`.
 
 ## Not completed
 
-- Staging-buffer mapping and polling are still missing, so drift-gate runtime acceptance still reports `skipped`.
+- The readback render node/systems are not wired into the render app graph yet, so `world_source_acceptance` still uses the unavailable provider and drift-gate runtime acceptance still reports `skipped`.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of the compatibility adapter should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Map the staging buffer from `GpuWorldSourceDriftReadbackBuffers`, pass the mapped byte slice to `decode_staged_gpu_world_source_drift_bytes`, update `GpuWorldSourceDriftReadbackState.latest_result`, and wire that state into `world_source_acceptance`.
+Wire the readback render node and systems into a small debug/acceptance path, expose `GpuWorldSourceDriftReadbackState.latest_result` through a concrete provider, and use that provider in `world_source_acceptance`.
