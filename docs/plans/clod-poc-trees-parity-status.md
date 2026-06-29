@@ -61,13 +61,15 @@ Implemented:
 - `tree_species_expansion.ts` defines the six target species contract: oak, pine, dead, birch, willow, spruce.
 - `tree_config.ts` uses the expanded species union, defaults, parser, clone logic, and ecology zones.
 - `tree_material_bias.ts`, `tree_material_bias.test.ts`, `config/trees.yaml`, and `tree_species_expansion_config.test.ts` are six-species-ready.
-- `tree_instances.ts` now selects ecology species by iterating all `TREE_SPECIES`; it no longer hardcodes only oak/pine/dead.
-- `tree_ecology.ts` now applies `oldForestBias` to every species, not only dead trees.
+- `tree_instances.ts` selects ecology species by iterating all `TREE_SPECIES`; it no longer hardcodes only oak/pine/dead.
+- `tree_ecology.ts` applies `oldForestBias` to every species, not only dead trees.
 - `tree_ring_species_layout.ts` defines dynamic GPU ring layout offsets for 6 species x 4 LOD groups.
 - `tree_ring_compute.ts` packs species weights, group counts, material vectors, and planes through the dynamic layout helper.
-- `tree_ring.compute.wgsl` now uses `TREE_SPECIES_COUNT = 6`, six species material vectors, two species-weight vec4s, six index-count vec4s, 24 visible groups, and six-way species selection.
-- `tree_species_expansion.test.ts` verifies the six-species list, runtime generation coverage, GPU group counts, morphology differences, and ecology niche preferences.
-- `tree_ring_shader_species.test.ts` guards the six-species WGSL contract.
+- `tree_ring.compute.wgsl` uses `TREE_SPECIES_COUNT = 6`, six species material vectors, two species-weight vec4s, six index-count vec4s, 24 visible groups, and six-way species selection.
+- `wgsl_modules.ts` composes the runtime browser shader through the same six-species expansion/layout path.
+- `tree_species_expansion.test.ts` verifies the six-species list, YAML overrides, runtime generation coverage, GPU group counts, morphology differences, and ecology niche preferences.
+- `tree_ring_shader_species.test.ts` guards the raw six-species WGSL contract.
+- `tree_ring_species_wgsl_expansion.test.ts` guards both the expansion helper and final `composeTreeRingShader(...)` output.
 - `npm --prefix tools/clod-poc run trees:wire-parity` applies TREE-7, TREE-8, TREE-9 WGSL composer, and TREE-9 config rewrites in order.
 
 Still required before calling TREE-9 complete:
