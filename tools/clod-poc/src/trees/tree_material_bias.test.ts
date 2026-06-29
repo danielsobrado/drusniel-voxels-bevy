@@ -42,6 +42,50 @@ trees:
     expect(treeSpeciesMaterialBias(settings, "dead", [0, 1, 0, 0])).toBeCloseTo(1.70);
   });
 
+  it("provides default material vectors for expanded species", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+
+    expect(treeSpeciesMaterialVector(settings, "birch")).toEqual([1.12, 0.42, 0.82, 0.18]);
+    expect(treeSpeciesMaterialVector(settings, "willow")).toEqual([1.04, 0.22, 1.16, 0.02]);
+    expect(treeSpeciesMaterialVector(settings, "spruce")).toEqual([0.72, 1.12, 0.28, 0.86]);
+  });
+
+  it("parses six-species material bias YAML without affecting live species union", () => {
+    const settings = applyTreeMaterialBiasFromYaml(cloneTreeSettings(DEFAULT_TREE_SETTINGS), `
+trees:
+  ecology:
+    material_bias:
+      grass:
+        birch: 1.4
+        willow: 1.2
+        spruce: 0.7
+      rock:
+        birch: 0.2
+        willow: 0.1
+        spruce: 1.6
+      sand:
+        birch: 0.8
+        willow: 1.8
+        spruce: 0.2
+      snow:
+        birch: 0.3
+        willow: 0.0
+        spruce: 1.1
+`, null);
+
+    expect(treeSpeciesMaterialVector(settings, "birch")).toEqual([1.4, 0.2, 0.8, 0.3]);
+    expect(treeSpeciesMaterialVector(settings, "willow")).toEqual([1.2, 0.1, 1.8, 0]);
+    expect(treeSpeciesMaterialVector(settings, "spruce")).toEqual([0.7, 1.6, 0.2, 1.1]);
+    expect(treeSpeciesMaterialVector(settings, "oak")[0]).toBe(1.22);
+  });
+
+  it("blends expanded species material bias using terrain weights", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    const spruce = treeSpeciesMaterialBias(settings, "spruce", [0.25, 0.5, 0, 0.25]);
+
+    expect(spruce).toBeCloseTo(0.25 * 0.72 + 0.5 * 1.12 + 0.25 * 0.86, 5);
+  });
+
   it("falls back to defaults when the YAML is malformed", () => {
     const warnings: string[] = [];
     const settings = applyTreeMaterialBiasFromYaml(
@@ -52,5 +96,6 @@ trees:
 
     expect(warnings).toHaveLength(1);
     expect(treeMaterialDensityVector(settings)).toEqual([1.08, 0.46, 0.55, 0.08]);
+    expect(treeSpeciesMaterialVector(settings, "spruce")).toEqual([0.72, 1.12, 0.28, 0.86]);
   });
 });
