@@ -16,12 +16,13 @@ Status: In progress.
   - `generation/legacy_chunk.rs` owns legacy terrain voxel filling.
   - `generation/world_load.rs` owns saved-world loading, bedrock enforcement, and saving.
   - `generation.rs` now stays focused on orchestration.
+- Legacy terrain source mode is now marked deprecated and logs a warning when explicitly selected.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 
 ## Not completed
 
 - GPU readback producer is still missing, so drift-gate runtime acceptance still reports `skipped`.
-- The legacy terrain generator path is still present as an opt-in fallback.
+- The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of the compatibility adapter should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
