@@ -1,0 +1,114 @@
+import { describe, expect, it, vi } from "vitest";
+import * as THREE from "three";
+import { StorageBufferAttribute } from "three/webgpu";
+import {
+  createTreeGpuRingDrawBuffers,
+  createTreeGpuRingInstancedGeometry,
+  createTreeGpuRingMesh,
+  setTreeGpuRingIndirect,
+  setTreeGpuRingMeshesVisible,
+  treeGpuBufferForAttribute,
+  type TreeMaterialHandle,
+  type TreeWebGpuBackendBufferAccess,
+} from "./index.js";
+
+describe("tree system GPU ring draw helpers", () => {
+  it("creates indirect and cell storage buffers", () => {
+    const backend = fakeBackend();
+    const bundle = createTreeGpuRingDrawBuffers(backend, 3, 2);
+
+    expect(bundle.indirect.name).toBe("tree-ring-indirect");
+    expect(bundle.indirect.itemSize).toBe(5);
+    expect(bundle.indirect.count).toBe(2);
+    expect(bundle.cell.name).toBe("tree-ring-cell");
+    expect(bundle.cell.itemSize).toBe(4);
+    expect(bundle.cell.count).toBe(6);
+    expect(backend.createIndirectStorageAttribute).toHaveBeenCalledTimes(1);
+    expect(backend.createStorageAttribute).toHaveBeenCalledTimes(1);
+    expect(bundle.outputBuffers.cell).toBeDefined();
+    expect(bundle.outputBuffers.indirectArgs).toBeDefined();
+  });
+
+  it("builds indirect instanced geometry from source attributes", () => {
+    const source = new THREE.BoxGeometry(1, 1, 1);
+    const indirect = new StorageBufferAttribute(new Uint32Array(5), 5);
+    const geometry = createTreeGpuRingInstancedGeometry(
+      source,
+      7,
+      indirect,
+      16,
+      128,
+    ) as THREE.InstancedBufferGeometry & { setIndirect: ReturnType<typeof vi.fn> };
+
+    expect(geometry.getAttribute("position")).toBe(source.getAttribute("position"));
+    expect(geometry.getIndex()).toBe(source.getIndex());
+    expect(geometry.instanceCount).toBe(7);
+    expect(geometry.boundingBox?.max.x).toBe(129);
+    expect(geometry.boundingSphere?.radius).toBeGreaterThan(0);
+    expect(geometry.setIndirect).toHaveBeenCalledWith(indirect, 16);
+  });
+
+  it("throws when indirect geometry support is unavailable", () => {
+    const indirect = new StorageBufferAttribute(new Uint32Array(5), 5);
+    expect(() => setTreeGpuRingIndirect(new THREE.InstancedBufferGeometry(), indirect, 0))
+      .toThrow(/setIndirect support/);
+  });
+
+  it("creates a mesh with ring draw flags", () => {
+    const geometry = new THREE.InstancedBufferGeometry();
+    const regular = new THREE.MeshBasicMaterial();
+    const debug = new THREE.MeshBasicMaterial();
+    const mesh = createTreeGpuRingMesh(geometry, fakeHandle(regular, debug), "oak", "near", true, true);
+
+    expect(mesh.name).toBe("trees-ring-gpu-oak-near");
+    expect(mesh.material).toBe(debug);
+    expect(mesh.frustumCulled).toBe(false);
+    expect(mesh.castShadow).toBe(true);
+    expect(mesh.receiveShadow).toBe(false);
+  });
+
+  it("toggles visibility for ring objects", () => {
+    const a = new THREE.Object3D();
+    const b = new THREE.Object3D();
+    setTreeGpuRingMeshesVisible([a, b], false);
+    expect(a.visible).toBe(false);
+    expect(b.visible).toBe(false);
+    setTreeGpuRingMeshesVisible([a, b], true);
+    expect(a.visible).toBe(true);
+    expect(b.visible).toBe(true);
+  });
+
+  it("throws when a backend buffer is missing", () => {
+    const backend = fakeBackend(false);
+    const attribute = new THREE.BufferAttribute(new Float32Array(4), 4);
+    attribute.name = "missing-buffer";
+    expect(() => treeGpuBufferForAttribute(backend, attribute)).toThrow(/missing-buffer/);
+  });
+});
+
+function fakeBackend(hasBuffer = true): TreeWebGpuBackendBufferAccess {
+  const buffers = new WeakMap<THREE.BufferAttribute, GPUBuffer>();
+  const register = (attribute: THREE.BufferAttribute) => {
+    if (hasBuffer) buffers.set(attribute, {} as GPUBuffer);
+  };
+  return {
+    createStorageAttribute: vi.fn(register),
+    createIndirectStorageAttribute: vi.fn(register),
+    get: vi.fn((attribute: THREE.BufferAttribute) => ({ buffer: buffers.get(attribute) })),
+  };
+}
+
+function fakeHandle(regularMaterial: THREE.Material, debugMaterial: THREE.Material): TreeMaterialHandle {
+  return {
+    regularMaterial,
+    debugMaterials: {
+      near: debugMaterial,
+      mid: debugMaterial,
+      far: debugMaterial,
+      impostor: debugMaterial,
+    },
+    setTime() {},
+    updateSettings() {},
+    dispose() {},
+  } as TreeMaterialHandle;
+}
