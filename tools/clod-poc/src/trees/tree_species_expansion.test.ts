@@ -3,18 +3,20 @@ import {
   TREE_EXPANDED_SPECIES,
   TREE_EXPANDED_SPECIES_DEFAULTS,
   TREE_EXPANDED_SPECIES_NICHES,
-  TREE_GPU_RING_GROUP_COUNT,
-  TREE_GPU_RING_SHADOW_GROUP_COUNT,
   TREE_RING_SHADOW_CASCADE_COUNT,
   TREE_SPECIES,
   cloneTreeSettings,
   generateTreeInstances,
   treeExpandedSpeciesNicheWeight,
-  treeGpuRingGroupIndex,
-  treeRingSpeciesLayout,
   type TreeExpandedSpeciesSample,
   type TreeTerrainSampler,
 } from "./index.js";
+import {
+  TREE_GPU_RING_GROUP_COUNT,
+  TREE_GPU_RING_SHADOW_GROUP_COUNT,
+  treeGpuRingGroupIndex,
+} from "../gpu/tree_ring_compute.js";
+import { treeRingSpeciesLayout } from "../gpu/tree_ring_species_layout.js";
 
 describe("TREE-9 six-species expansion contract", () => {
   it("defines exactly six species with defaults and niches", () => {
