@@ -55,9 +55,9 @@ mod tests {
             .expect("defaultBiomeRegionContract missing");
         let body = &WGSL[start..];
         let constructor_start = body
-            .find("BiomeRegionContract(")
+            .find("return BiomeRegionContract(")
             .expect("BiomeRegionContract constructor missing")
-            + "BiomeRegionContract(".len();
+            + "return BiomeRegionContract(".len();
         let constructor_tail = &body[constructor_start..];
         let constructor_end = constructor_tail
             .find(')')

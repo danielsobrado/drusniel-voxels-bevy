@@ -327,7 +327,7 @@ fn sync_spell_menu_ui(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.04, 0.05, 0.07, 0.88)),
-            BorderColor(Color::srgba(0.45, 0.58, 0.74, 0.45)),
+            BorderColor::all(Color::srgba(0.45, 0.58, 0.74, 0.45)),
             SpellMenuRoot,
         ))
         .with_children(|root| {
@@ -366,7 +366,7 @@ fn spawn_spell_button(parent: &mut ChildSpawnerCommands, slot: u8, entry: &Spell
                 ..default()
             },
             BackgroundColor(Color::srgba(0.12, 0.14, 0.18, 0.94)),
-            BorderColor(Color::srgba(0.45, 0.58, 0.74, 0.35)),
+            BorderColor::all(Color::srgba(0.45, 0.58, 0.74, 0.35)),
             SpellMenuButton { kind: entry.id },
         ))
         .with_children(|button| {
@@ -633,6 +633,7 @@ mod tests {
             .add_message::<SpellCastEvent>()
             .add_message::<GameAudioEvent>()
             .insert_resource(SpellConfig::default())
+            .init_resource::<SpellButtonFeedback>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<SpellBeamMaterial>>();
 

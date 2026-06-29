@@ -298,7 +298,6 @@ mod naadf_gpu_layout {
             &block_buffer,
             &mip_traversal_buffer,
             &mip_payload_buffer,
-            &mip_bounds_buffer,
             &build_slot_buffer,
         );
         run_build_mips(
@@ -453,7 +452,6 @@ mod naadf_gpu_layout {
         block_buffer: &wgpu::Buffer,
         mip_traversal_buffer: &wgpu::Buffer,
         mip_payload_buffer: &wgpu::Buffer,
-        mip_bounds_buffer: &wgpu::Buffer,
         build_slot_buffer: &wgpu::Buffer,
     ) {
         let layout = gpu
@@ -472,7 +470,6 @@ mod naadf_gpu_layout {
                 buffer_entry(5, block_buffer),
                 buffer_entry(6, mip_traversal_buffer),
                 buffer_entry(7, mip_payload_buffer),
-                buffer_entry(8, mip_bounds_buffer),
                 buffer_entry(30, build_slot_buffer),
             ],
         });

@@ -58,6 +58,10 @@ pub fn populate_gpu_world_source_drift_readback_request_once(
         "WorldSource drift readback request populated with {} samples",
         request.inputs.len()
     );
+    println!(
+        "WorldSource drift readback request populated with {} samples",
+        request.inputs.len()
+    );
 }
 
 fn env_flag(name: &str) -> bool {

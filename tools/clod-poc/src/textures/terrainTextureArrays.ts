@@ -10,6 +10,10 @@ import {
   createProceduralTextureManifest,
   type ProceduralTextureManifest,
 } from "./textureManifest.js";
+import {
+  isAuthoredBiomeMaterialId,
+  sampleAuthoredBiomeMaterial,
+} from "./authoredBiomeMaterials.js";
 
 export interface ProceduralTerrainSlot {
   texture: THREE.Texture | null;
@@ -167,8 +171,9 @@ export function createProceduralTerrainTextures(config: ProceduralTextureConfig)
   for (let layer = 0; layer < layers; layer++) {
     const id = order[layer];
     const recipe = config.terrain.materials[id];
-    roughnessByLayer[layer] = recipe.roughness;
-    normalMapMask[layer] = recipe.normal_strength > 0 ? 1 : 0;
+    const authoredBiome = isAuthoredBiomeMaterialId(id);
+    roughnessByLayer[layer] = authoredBiome ? sampleAuthoredBiomeMaterial(id, 0, 0).roughness : recipe.roughness;
+    normalMapMask[layer] = authoredBiome || recipe.normal_strength > 0 ? 1 : 0;
     for (let y = 0; y < layerSize; y++) {
       for (let x = 0; x < layerSize; x++) {
         const u = (x + 0.5) / layerSize;
@@ -180,7 +185,8 @@ export function createProceduralTerrainTextures(config: ProceduralTextureConfig)
         const ridged = sampleNoiseChannel(noise.dataB, noise.resolution, u * 2 + layer * 0.17, v * 2, 2);
         const worley = sampleNoiseChannel(noise.dataB, noise.resolution, u * 3, v * 3 + layer * 0.19, 3);
         const micro = sampleNoiseChannel(noise.dataA, noise.resolution, u * 15 + 0.37, v * 15 + 0.61, 0);
-        const [r, g, b] = materialAlbedo(id, recipe, macro, meso, micro, worley, v);
+        const authored = authoredBiome ? sampleAuthoredBiomeMaterial(id, u, v) : null;
+        const [r, g, b] = authored?.albedo ?? materialAlbedo(id, recipe, macro, meso, micro, worley, v);
         const i = layer * stride + (y * layerSize + x) * 4;
         albedo[i] = colorByte(r);
         albedo[i + 1] = colorByte(g);
@@ -188,12 +194,13 @@ export function createProceduralTerrainTextures(config: ProceduralTextureConfig)
         albedo[i + 3] = 255;
 
         const strength = recipe.normal_strength * config.terrain.micro_normal.max_strength * (0.6 + ridged * 0.7);
-        const nx = clamp01(0.5 - gradX * strength);
-        const ny = clamp01(0.5 - gradY * strength);
+        const nx = authored ? authored.normal[0] : clamp01(0.5 - gradX * strength);
+        const ny = authored ? authored.normal[1] : clamp01(0.5 - gradY * strength);
+        const roughness = authored?.roughness ?? recipe.roughness;
         normal[i] = colorByte(nx);
         normal[i + 1] = colorByte(ny);
         normal[i + 2] = colorByte(1);
-        normal[i + 3] = colorByte(recipe.roughness);
+        normal[i + 3] = colorByte(roughness);
       }
     }
   }
@@ -204,7 +211,7 @@ export function createProceduralTerrainTextures(config: ProceduralTextureConfig)
     texture: null,
     normalTexture: null,
     name: id.replaceAll("_", " ").replaceAll("-", " "),
-    selectedId: `generated:${id}`,
+    selectedId: isAuthoredBiomeMaterialId(id) ? `authored:${id}` : `generated:${id}`,
     previewUrl: previewDataUrl(config.terrain.materials[id]),
     ...layerRanges(id, index),
   }));

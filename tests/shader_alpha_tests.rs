@@ -227,7 +227,8 @@ fn triplanar_normal_lod_uses_camera_distance() {
         "triplanar terrain should import the view uniform for camera-relative LOD decisions"
     );
     assert!(
-        triplanar.contains("length(view.world_position - pbr_input.world_position.xyz)"),
+        triplanar.contains("let world_pos = pbr_input.world_position.xyz")
+            && triplanar.contains("let frag_dist = length(view.world_position - world_pos);"),
         "triplanar normal-map LOD should use camera distance, not distance from world origin"
     );
     assert!(

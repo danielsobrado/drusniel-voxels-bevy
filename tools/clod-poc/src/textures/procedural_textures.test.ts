@@ -266,6 +266,33 @@ describe("procedural terrain textures", () => {
     expect([...first.noise.dataA]).toEqual([...second.noise.dataA]);
   });
 
+  it("uses authored PBR tiles for biome terrain layers", () => {
+    const base = tinyConfig();
+    const config: ProceduralTextureConfig = {
+      ...base,
+      terrain: {
+        ...base.terrain,
+        material_order: ["meadows-ground", "forest-floor", "coast-sand"],
+      },
+    };
+    const first = createProceduralTerrainTextures(config);
+    const second = createProceduralTerrainTextures(config);
+    const albedoData = first.albedoArray.image.data as Uint8Array;
+    const normalData = first.normalArray.image.data as Uint8Array;
+
+    expect(first.albedoArray.image.depth).toBe(3);
+    expect(first.slots.map((slot) => slot.selectedId)).toEqual([
+      "authored:meadows-ground",
+      "authored:forest-floor",
+      "authored:coast-sand",
+    ]);
+    expect(first.normalMapMask).toEqual(new Float32Array([1, 1, 1]));
+    expect(normalData[3]).toBeGreaterThan(0);
+    expect(normalData[3]).toBeLessThanOrEqual(255);
+    expect([...albedoData]).toEqual([...(second.albedoArray.image.data as Uint8Array)]);
+    expect([...normalData]).toEqual([...(second.normalArray.image.data as Uint8Array)]);
+  });
+
   it("ports the reference BarkSynth species table for generated bark texture bakes", () => {
     expect(BARK_TABLE.map((species) => species.id)).toEqual([
       "spruce",

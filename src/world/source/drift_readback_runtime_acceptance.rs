@@ -40,6 +40,23 @@ pub fn evaluate_gpu_world_source_drift_runtime_acceptance_once(
         result.drift_gate.status,
         result.drift_gate.failures.len()
     );
+    println!(
+        "WorldSource GPU readback runtime acceptance: gpu_readback={:?}, drift_gate={:?}, failures={}",
+        result.gpu_readback.status,
+        result.drift_gate.status,
+        result.drift_gate.failures.len()
+    );
+    for failure in result.drift_gate.failures.iter().take(8) {
+        println!(
+            "WorldSource GPU readback drift failure: sample={} kind={:?} cpu={:?} gpu={:?} delta={} tolerance={}",
+            failure.sample_index,
+            failure.kind,
+            failure.cpu,
+            failure.gpu,
+            failure.delta,
+            failure.tolerance
+        );
+    }
 
     state.evaluated = true;
     state.result = Some(result);

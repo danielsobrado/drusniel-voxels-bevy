@@ -171,11 +171,20 @@ fn terrain_fingerprint_mismatch_is_handled() {
     }
 
     let editor_result = editor_load_world_from_path(&path);
-    assert!(!editor_result.loaded);
+    assert!(editor_result.loaded);
+    assert!(editor_result.error_kind.is_none());
+    let metadata = editor_result
+        .metadata
+        .expect("editor load should report save metadata");
     assert_eq!(
-        editor_result.error_kind.as_deref(),
-        Some("TerrainFingerprintMismatch")
+        metadata.terrain_config_fingerprint,
+        data.terrain_config_fingerprint
     );
+    assert_ne!(
+        metadata.terrain_config_fingerprint,
+        metadata.current_terrain_config_fingerprint
+    );
+    assert!(!metadata.terrain_fingerprint_matches);
 }
 
 #[test]

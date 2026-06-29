@@ -92,6 +92,7 @@ pub struct GpuWorldSourceDriftReadbackBuffers {
     pub bind_group: Option<BindGroup>,
     pub plan: Option<GpuWorldSourceDriftReadbackDispatchPlan>,
     pub ready: bool,
+    pub frames_until_decode: u8,
 }
 
 impl GpuWorldSourceDriftReadbackBuffers {
@@ -99,6 +100,7 @@ impl GpuWorldSourceDriftReadbackBuffers {
         self.bind_group = None;
         self.plan = None;
         self.ready = false;
+        self.frames_until_decode = 0;
     }
 }
 
@@ -109,6 +111,7 @@ pub fn prepare_gpu_world_source_drift_readback_dispatch(
     mut state: ResMut<GpuWorldSourceDriftReadbackState>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    pipeline_cache: Res<PipelineCache>,
 ) {
     let Some(request) = request else {
         buffers.clear();
@@ -124,6 +127,22 @@ pub fn prepare_gpu_world_source_drift_readback_dispatch(
     if request.is_empty() {
         buffers.clear();
         state.latest_result = WorldSourceGpuReadbackResult::available(Vec::new());
+        return;
+    }
+    if buffers.ready
+        && (state.latest_result.status == WorldSourceGpuReadbackStatus::Available
+            || state.latest_result.unavailable_reason.as_deref()
+                == Some("gpu_readback_dispatch_pending_map"))
+    {
+        return;
+    }
+    if pipeline_cache
+        .get_compute_pipeline(pipeline.pipeline_id)
+        .is_none()
+    {
+        buffers.clear();
+        state.latest_result =
+            WorldSourceGpuReadbackResult::unavailable("gpu_readback_pipeline_compiling");
         return;
     }
 
@@ -166,6 +185,7 @@ pub fn prepare_gpu_world_source_drift_readback_dispatch(
     ));
     buffers.plan = Some(plan);
     buffers.ready = true;
+    buffers.frames_until_decode = 1;
     state.latest_plan = Some(plan);
     state.latest_result =
         WorldSourceGpuReadbackResult::unavailable("gpu_readback_dispatch_pending_map");
@@ -304,7 +324,7 @@ pub fn init_gpu_world_source_drift_readback_pipeline(
         ShaderStages::COMPUTE,
         (
             binding_types::uniform_buffer::<GpuWorldSourceDriftReadbackParams>(false),
-            binding_types::storage_buffer_sized(false, None),
+            binding_types::storage_buffer_read_only_sized(false, None),
             binding_types::storage_buffer_sized(false, None),
         ),
     )
@@ -333,7 +353,7 @@ pub fn init_gpu_world_source_drift_readback_pipeline(
 }
 
 pub fn decode_staged_gpu_world_source_drift_readback(
-    buffers: Res<GpuWorldSourceDriftReadbackBuffers>,
+    mut buffers: ResMut<GpuWorldSourceDriftReadbackBuffers>,
     mut state: ResMut<GpuWorldSourceDriftReadbackState>,
     render_device: Res<RenderDevice>,
 ) {
@@ -341,6 +361,10 @@ pub fn decode_staged_gpu_world_source_drift_readback(
         || state.latest_result.unavailable_reason.as_deref()
             != Some("gpu_readback_dispatch_pending_map")
     {
+        return;
+    }
+    if buffers.frames_until_decode > 0 {
+        buffers.frames_until_decode -= 1;
         return;
     }
 
