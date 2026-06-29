@@ -48,6 +48,7 @@ describe("tree impostor material contracts", () => {
   it("updates alpha and render flags", () => {
     const settings = cloneTreeSettings();
     const material = createTreeImpostorMaterial(settings, fakeAtlas());
+    const previousVersion = material.version;
     settings.impostors.alphaTest = 0.61;
     updateTreeImpostorMaterialSettings(material, settings);
 
@@ -55,7 +56,7 @@ describe("tree impostor material contracts", () => {
     expect(material.side).toBe(THREE.DoubleSide);
     expect(material.depthWrite).toBe(true);
     expect(material.transparent).toBe(false);
-    expect(material.needsUpdate).toBe(true);
+    expect(material.version).toBeGreaterThan(previousVersion);
   });
 
   it("keeps single-frame shader attributes and relighting path stable", () => {
