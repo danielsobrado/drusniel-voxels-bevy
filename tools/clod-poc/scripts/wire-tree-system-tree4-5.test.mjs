@@ -111,10 +111,16 @@ class TreeSystem {
     // WebGPU render-to-atlas baking can replace this later without blocking the pipeline.
     return this.geometries[species][lod];
   }
+
+  private replaceImpostorMeshGeometries(): void {
+        nextGeometry.setAttribute("treeWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2));
+        nextGeometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1));
+        nextGeometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4));
+  }
 }
 `;
 
-const EDIT_COUNT = 14;
+const EDIT_COUNT = 15;
 
 describe("TREE-4/TREE-5 wiring script", () => {
   it("applies all guarded tree system rewrites", () => {
@@ -131,6 +137,7 @@ describe("TREE-4/TREE-5 wiring script", () => {
     expect(result.source).toContain("treeLodDitherRole");
     expect(result.source).toContain("ditherRole: number");
     expect(result.source).toContain("this.writeTreeLodDitherRoleIfChanged(mesh, index, ditherRole)");
+    expect(result.source).toContain("nextGeometry.setAttribute(\"treeLodDitherRole\"");
   });
 
   it("applies rewrites to CRLF source and preserves CRLF output", () => {
