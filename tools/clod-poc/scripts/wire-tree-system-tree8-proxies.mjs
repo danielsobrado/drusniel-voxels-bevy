@@ -28,8 +28,8 @@ const edits = [
   ),
   edit(
     "crown proxy shadow source geometry",
-    `  ): TreeGpuRingMesh {\n    const source = this.geometryForGpuRing(species, lod);\n    const geometry = new THREE.InstancedBufferGeometry();`,
-    `  ): TreeGpuRingMesh {\n    const source = this.geometryForGpuRingShadow(species, lod);\n    const geometry = new THREE.InstancedBufferGeometry();`,
+    `  private createGpuRingShadowTierDraw(\n    species: TreeSpeciesId,\n    lod: TreeLod,\n    cascade: number,\n    count: number,\n    indirect: StorageBufferAttribute,\n    indirectOffset: number,\n    materialHandle: TreeMaterialHandle,\n  ): TreeGpuRingMesh {\n    const source = this.geometryForGpuRing(species, lod);\n    const geometry = new THREE.InstancedBufferGeometry();`,
+    `  private createGpuRingShadowTierDraw(\n    species: TreeSpeciesId,\n    lod: TreeLod,\n    cascade: number,\n    count: number,\n    indirect: StorageBufferAttribute,\n    indirectOffset: number,\n    materialHandle: TreeMaterialHandle,\n  ): TreeGpuRingMesh {\n    const source = this.geometryForGpuRingShadow(species, lod);\n    const geometry = new THREE.InstancedBufferGeometry();`,
   ),
   edit(
     "crown proxy shadow helpers",
