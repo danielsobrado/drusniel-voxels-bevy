@@ -3,18 +3,19 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const treeSystemPath = resolve(here, "../src/trees/tree_system.ts");
-let source = readFileSync(treeSystemPath, "utf8");
+const defaultTreeSystemPath = resolve(here, "../src/trees/tree_system.ts");
 
-replaceOnce(
-  `import {
+const EDITS = [
+  {
+    label: "GPU ring geometry selector import",
+    expected: `import {
   disposeTreeGeometryMap,
   createTreeBakedImpostorGeometry,
   createTreeGeometryMap,
   treeGeometryKey,
   type TreeGeometryMap,
 } from "./tree_geometry.js";`,
-  `import {
+    replacement: `import {
   disposeTreeGeometryMap,
   createTreeBakedImpostorGeometry,
   createTreeGeometryMap,
@@ -22,31 +23,31 @@ replaceOnce(
   type TreeGeometryMap,
 } from "./tree_geometry.js";
 import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";`,
-);
-
-replaceOnce(
-  `import {
+  },
+  {
+    label: "GPU ring baked impostor material import",
+    expected: `import {
   createTreeNodeMaterialHandle,
   createTreeRingNodeMaterialHandle,
   type TreeHydrologyWater,
   type TreeRingInstanceBuffers,
 } from "./tree_node_material.js";`,
-  `import {
+    replacement: `import {
   createTreeNodeMaterialHandle,
   createTreeRingNodeMaterialHandle,
   type TreeHydrologyWater,
   type TreeRingInstanceBuffers,
 } from "./tree_node_material.js";
 import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_node_material.js";`,
-);
-
-replaceOnce(
-  `  materialHandles: Record<TreeLod, TreeMaterialHandle>;`,
-  `  materialHandles: Record<string, TreeMaterialHandle>;`,
-);
-
-replaceOnce(
-  `    const materialHandles = {} as Record<TreeLod, TreeMaterialHandle>;
+  },
+  {
+    label: "GPU ring material handle map type",
+    expected: `  materialHandles: Record<TreeLod, TreeMaterialHandle>;`,
+    replacement: `  materialHandles: Record<string, TreeMaterialHandle>;`,
+  },
+  {
+    label: "species-specific GPU ring material handles",
+    expected: `    const materialHandles = {} as Record<TreeLod, TreeMaterialHandle>;
     for (const lod of TREE_LODS) {
       materialHandles[lod] = this.currentLighting
         ? createTreeRingNodeMaterialHandle(this.settings, ringBuffers, lod, this.currentLighting, this.hydrologyWater)
@@ -66,7 +67,7 @@ replaceOnce(
         ));
       }
     }`,
-  `    const materialHandles = {} as Record<string, TreeMaterialHandle>;
+    replacement: `    const materialHandles = {} as Record<string, TreeMaterialHandle>;
     const meshes: TreeGpuRingMesh[] = [];
     for (const species of TREE_SPECIES) {
       for (const lod of TREE_LODS) {
@@ -98,15 +99,15 @@ replaceOnce(
         ));
       }
     }`,
-);
-
-replaceOnce(
-  `  private geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {
+  },
+  {
+    label: "GPU ring baked impostor geometry selector",
+    expected: `  private geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {
     // Stage 3b decision: GPU ring uses the procedural impostor-card geometry first.
     // WebGPU render-to-atlas baking can replace this later without blocking the pipeline.
     return this.geometries[species][lod];
   }`,
-  `  private geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {
+    replacement: `  private geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry {
     return selectTreeGpuRingGeometry({
       species,
       lod,
@@ -116,15 +117,56 @@ replaceOnce(
       bakedImpostorGeometries: this.bakedImpostorGeometries,
     }).geometry;
   }`,
-);
+  },
+];
 
-writeFileSync(treeSystemPath, source, "utf8");
-console.log(`Updated ${treeSystemPath}`);
+export function wireTreeSystemSource(input) {
+  let source = input;
+  let changed = false;
+  const applied = [];
+  const skipped = [];
 
-function replaceOnce(expected, replacement) {
-  const occurrences = source.split(expected).length - 1;
-  if (occurrences !== 1) {
-    throw new Error(`Expected exactly one match for snippet, found ${occurrences}:\n${expected.slice(0, 240)}`);
+  for (const edit of EDITS) {
+    const expectedCount = countOccurrences(source, edit.expected);
+    const replacementCount = countOccurrences(source, edit.replacement);
+    if (expectedCount === 0 && replacementCount === 1) {
+      skipped.push(edit.label);
+      continue;
+    }
+    if (expectedCount !== 1 || replacementCount !== 0) {
+      throw new Error(
+        `Cannot apply ${edit.label}: expected ${expectedCount} source matches and ${replacementCount} already-applied matches.`,
+      );
+    }
+    source = source.replace(edit.expected, edit.replacement);
+    changed = true;
+    applied.push(edit.label);
   }
-  source = source.replace(expected, replacement);
+
+  return { source, changed, applied, skipped };
+}
+
+export function wireTreeSystemFile(path = defaultTreeSystemPath, options = {}) {
+  const source = readFileSync(path, "utf8");
+  const result = wireTreeSystemSource(source);
+  if (options.dryRun) return result;
+  if (result.changed) writeFileSync(path, result.source, "utf8");
+  return result;
+}
+
+if (isCli()) {
+  const dryRun = process.argv.includes("--dry-run");
+  const result = wireTreeSystemFile(defaultTreeSystemPath, { dryRun });
+  const mode = dryRun ? "Checked" : "Updated";
+  console.log(`${mode} ${defaultTreeSystemPath}`);
+  console.log(`Applied: ${result.applied.length ? result.applied.join(", ") : "none"}`);
+  console.log(`Already present: ${result.skipped.length ? result.skipped.join(", ") : "none"}`);
+}
+
+function countOccurrences(source, needle) {
+  return source.split(needle).length - 1;
+}
+
+function isCli() {
+  return process.argv[1] ? resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false;
 }
