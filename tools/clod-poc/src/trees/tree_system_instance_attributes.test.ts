@@ -65,11 +65,24 @@ describe("tree system instance attribute writers", () => {
     });
 
     expect(changed).toBe(true);
-    const attribute = treeImpostorUvRectAttribute(mesh);
-    expect(attribute.getX(0)).toBe(0);
-    expect(attribute.getY(0)).toBe(0);
-    expect(attribute.getZ(0)).toBe(1);
-    expect(attribute.getW(0)).toBe(1);
+    expectUvRect(mesh, 0, [0, 0, 1, 1]);
+  });
+
+  it("falls back to full atlas rect when a ready atlas has no frames", () => {
+    const mesh = testMesh();
+    const settings = cloneTreeSettings();
+    const atlas = { ...fakeAtlas("oak"), frames: [] };
+    const changed = writeTreeImpostorUvRectIfChanged({
+      mesh,
+      index: 0,
+      instance: testInstance("oak"),
+      cameraPosition: new THREE.Vector3(1, 2, 3),
+      settings,
+      impostorAtlases: { oak: atlas },
+    });
+
+    expect(changed).toBe(true);
+    expectUvRect(mesh, 0, [0, 0, 1, 1]);
   });
 
   it("honors frozen impostor frame", () => {
@@ -87,11 +100,7 @@ describe("tree system instance attribute writers", () => {
     });
 
     const expected = atlas.frames[2];
-    const attribute = treeImpostorUvRectAttribute(mesh);
-    expect(attribute.getX(1)).toBeCloseTo(expected.uvMin[0]);
-    expect(attribute.getY(1)).toBeCloseTo(expected.uvMin[1]);
-    expect(attribute.getZ(1)).toBeCloseTo(expected.uvMax[0]);
-    expect(attribute.getW(1)).toBeCloseTo(expected.uvMax[1]);
+    expectUvRect(mesh, 1, [expected.uvMin[0], expected.uvMin[1], expected.uvMax[0], expected.uvMax[1]]);
   });
 
   it("updates camera-selected impostor frame", () => {
@@ -124,6 +133,14 @@ describe("tree system instance attribute writers", () => {
     expect(second).not.toEqual(first);
   });
 });
+
+function expectUvRect(mesh: THREE.InstancedMesh, index: number, expected: [number, number, number, number]): void {
+  const attribute = treeImpostorUvRectAttribute(mesh);
+  expect(attribute.getX(index)).toBeCloseTo(expected[0]);
+  expect(attribute.getY(index)).toBeCloseTo(expected[1]);
+  expect(attribute.getZ(index)).toBeCloseTo(expected[2]);
+  expect(attribute.getW(index)).toBeCloseTo(expected[3]);
+}
 
 function testMesh(): THREE.InstancedMesh {
   const geometry = new THREE.InstancedBufferGeometry();
