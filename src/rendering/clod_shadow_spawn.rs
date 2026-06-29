@@ -117,10 +117,22 @@ impl Plugin for ClodShadowSpawnPlugin {
             .add_systems(
                 Update,
                 (
+                    tag_clod_page_visual_meshes,
                     configure_clod_shadow_light_layers,
-                    apply_clod_shadow_runtime_snapshot.after(configure_clod_shadow_light_layers),
+                    apply_clod_shadow_runtime_snapshot.after(tag_clod_page_visual_meshes),
                 ),
             );
+    }
+}
+
+pub fn tag_clod_page_visual_meshes(
+    mut commands: Commands,
+    pages: Query<(Entity, &crate::voxel::pages::ClodPageMeshTag), Without<ClodTerrainVisualMeshId>>,
+) {
+    for (entity, tag) in pages.iter() {
+        commands
+            .entity(entity)
+            .insert(ClodTerrainVisualMeshId(clod_visual_mesh_id(tag.level, tag.coord)));
     }
 }
 
