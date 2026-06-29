@@ -30,7 +30,7 @@ Implemented:
 
 Still required before calling TREE-7 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:wire-tree7-shadows` again and commit the resulting `tree_system.ts` rewrite.
+- Run `npm --prefix tools/clod-poc run trees:wire-shadow-proxies` and commit the resulting `tree_system.ts` rewrite.
 - Verify `tree_system.ts` now imports `markAsRealtimeSunShadowCaster`, `TREE_RING_SHADOW_CASCADE_COUNT`, and `treeRingShadowCasterGroupIndex`.
 - Verify `createGpuRingDrawResources(...)` now creates `shadowRingBuffers`, one shadow material handle per cascade/species/LOD, and one `createGpuRingShadowTierDraw(...)` mesh per caster group.
 - Verify visible GPU-ring meshes have `castShadow=false`, so they do not double-cast against the shadow-only meshes.
@@ -46,12 +46,11 @@ Implemented:
 - `tree_crown_proxy_node_material.ts` provides a WebGPU/TSL crown proxy material handle using GPU ring storage cells, ellipsoid placement, world/screen anchored dither, crown-edge falloff, and numeric impostor fade masks.
 - `tree_crown_proxy_node_material.test.ts` covers material construction and source-level placement/mask contract.
 - `scripts/wire-tree-system-tree8-proxies.mjs` wires the large `tree_system.ts` file to use crown proxy geometry/materials for far/impostor shadow-only meshes.
+- `npm --prefix tools/clod-poc run trees:wire-shadow-proxies` applies TREE-7 then TREE-8 in the required order.
 
 Still required before calling TREE-8 complete:
 
-- Apply TREE-7 first: `npm --prefix tools/clod-poc run trees:wire-tree7-shadows`.
-- Then apply TREE-8: `npm --prefix tools/clod-poc run trees:wire-tree8-proxies`.
-- Commit the resulting `tree_system.ts` rewrite.
+- Run `npm --prefix tools/clod-poc run trees:wire-shadow-proxies` and commit the resulting `tree_system.ts` rewrite.
 - Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
 - Capture noon forest-interior and impostor-boundary shadow shots.
 
