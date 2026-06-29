@@ -133,12 +133,18 @@ fn write_csv(path: &Path, rows: &[ExportRow]) -> Result<(), String> {
     }
 
     let mut csv = String::new();
-    csv.push_str("scene,checkpoint,edit,occurrence,frame,kind,x,y,z,radius,strength,target_height,expected_dirty_pages_min,expected_dirty_pages_max,expected_rebuild_publish_max_frames,expected_collider_refresh_max_frames\n");
-    for row in rows {
+    csv.push_str("scene,checkpoint,event_index,occurrence_index,edit,name,occurrence,frame,kind,x,y,z,radius,strength,target_height,expected_dirty_pages_min,expected_dirty_pages_max,expected_rebuild_publish_max_frames,expected_collider_refresh_max_frames\n");
+    for (event_index, row) in rows.iter().enumerate() {
         let event = &row.event;
         csv.push_str(&csv_escape(&row.scene));
         csv.push(',');
         csv.push_str(&csv_escape(&row.checkpoint));
+        csv.push(',');
+        csv.push_str(&event_index.to_string());
+        csv.push(',');
+        csv.push_str(&event.occurrence.to_string());
+        csv.push(',');
+        csv.push_str(&csv_escape(&event.name));
         csv.push(',');
         csv.push_str(&csv_escape(&event.name));
         csv.push(',');

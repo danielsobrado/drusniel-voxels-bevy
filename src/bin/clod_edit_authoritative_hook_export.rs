@@ -88,6 +88,8 @@ fn parse_request_line(headers: &[&str], line: &str) -> Option<AuthoritativeEditR
         .unwrap_or(0);
     let dirty_nodes = get("dirty_nodes")
         .or_else(|| get("expected_dirty_nodes"))
+        .or_else(|| get("dirty_total_nodes"))
+        .or_else(|| get("dirty_ancestor_nodes"))
         .and_then(|v| v.parse().ok())
         .unwrap_or(dirty_lod0_pages);
 

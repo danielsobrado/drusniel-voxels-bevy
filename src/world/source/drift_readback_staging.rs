@@ -13,7 +13,8 @@ pub fn decode_staged_gpu_world_source_drift_bytes(
     if bytes.len() < plan.output_bytes {
         return WorldSourceGpuReadbackResult::unavailable(format!(
             "gpu_readback_staging_too_small:{}<{}",
-            bytes.len(), plan.output_bytes,
+            bytes.len(),
+            plan.output_bytes,
         ));
     }
 

@@ -102,6 +102,18 @@ pub const TERRAIN_RIVER_FREQUENCY: f32 = 0.015;
 /// Biome noise frequency for biome distribution.
 pub const TERRAIN_BIOME_FREQUENCY: f32 = 0.01;
 
+/// Noise threshold separating sandy and transitional biome bands.
+pub const BIOME_SANDY_THRESHOLD: f32 = 0.3;
+
+/// Noise threshold separating transitional and rocky biome bands.
+pub const BIOME_ROCKY_THRESHOLD: f32 = 0.7;
+
+/// Lower noise bound for clay deposits.
+pub const BIOME_CLAY_MIN: f32 = 0.45;
+
+/// Upper noise bound for clay deposits.
+pub const BIOME_CLAY_MAX: f32 = 0.65;
+
 /// Cave noise frequency for 3D cave generation.
 pub const TERRAIN_CAVE_FREQUENCY: f32 = 0.05;
 
