@@ -33,7 +33,7 @@ function validateAcceptance(input: TreeParityEvidenceInput, failures: TreeParity
     for (const failure of acceptance?.report.failures ?? []) {
       failures.push({
         captureId: input.manifest.acceptance.id ?? TREE_PARITY_ACCEPTANCE_ID,
-        message: `${failure.code}: ${failure.message} (${failure.value} > ${failure.threshold})`,
+        message: `${failure.code}: ${failure.message} value=${failure.value}, threshold=${failure.threshold}`,
       });
     }
   } catch (error) {
