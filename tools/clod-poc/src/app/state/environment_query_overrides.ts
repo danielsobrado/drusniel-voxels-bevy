@@ -78,6 +78,7 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.postProcessBloomEnabled = false;
     state.postProcessTaaEnabled = false;
     state.postProcessContactShadowsEnabled = false;
+    state.postProcessClarityEnabled = false;
     state.postProcessAerialPerspectiveEnabled = false;
     state.godRaysMode = "off";
     state.hazeIntensity = 0;
@@ -97,6 +98,7 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.postProcessBloomEnabled = false;
     state.postProcessTaaEnabled = false;
     state.postProcessContactShadowsEnabled = false;
+    state.postProcessClarityEnabled = false;
     state.postProcessAerialPerspectiveEnabled = false;
     state.godRaysMode = "off";
   }
@@ -112,6 +114,9 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
 
   const contactShadows = flagParam(searchParams, "contactShadows", "contactshadows", "contact");
   if (contactShadows !== null) state.postProcessContactShadowsEnabled = contactShadows;
+
+  const clarity = flagParam(searchParams, "clarity", "sharpen");
+  if (clarity !== null) state.postProcessClarityEnabled = clarity;
 
   const aerial = flagParam(searchParams, "aerial", "aerialPerspective");
   if (aerial !== null) state.postProcessAerialPerspectiveEnabled = aerial;
