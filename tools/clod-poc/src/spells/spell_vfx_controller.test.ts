@@ -20,6 +20,11 @@ const meshCfg: SpellVfxMeshConfig = {
   handForwardM: 0,
   handRightM: 0,
   handUpM: 0,
+  glowColor: [1, 0.5, 0.2],
+  glowIntensity: 2.5,
+  glowDistance: 7,
+  glowDecay: 2,
+  glowLocalYRatio: 0.35,
 };
 
 describe("computeSpellFrame", () => {
@@ -128,6 +133,7 @@ describe("createSpellVfxController", () => {
     expect(fireMesh).toBeTruthy();
     expect(fireMesh.visible).toBe(false);
     expect(fireLight.visible).toBe(false);
+    expect(fireLight.color.r).toBeCloseTo(meshCfg.glowColor[0]);
 
     controller.playFire(2000);
     expect(fireMesh.visible).toBe(true);
@@ -165,7 +171,7 @@ describe("createSpellVfxController", () => {
       getCamera: () => camera,
       fire: meshCfg,
       water: meshCfg,
-      air: { ...meshCfg, handForwardM: 0.5, handRightM: 2, handUpM: -1 },
+      air: { ...meshCfg, handForwardM: 0.5, handRightM: 2, handUpM: -1, glowLocalYRatio: 0.5 },
       now: () => clock,
     });
 
@@ -174,6 +180,7 @@ describe("createSpellVfxController", () => {
     expect(airMesh).toBeTruthy();
     expect(airMesh.visible).toBe(false);
     expect(airLight.visible).toBe(false);
+    expect(airLight.position.y).toBeCloseTo(meshCfg.worldHeight * 0.5);
 
     controller.playAir(1000);
     expect(airMesh.visible).toBe(true);
