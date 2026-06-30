@@ -79,9 +79,10 @@ Still required before calling TREE-9 complete:
 Implemented:
 
 - `tree_hero_fidelity.ts` adds a 100k-triangle TREE-10 near-ring hero floor contract and helpers to count total near-tree triangles, foliage triangles, min/average triangles per near tree, and pass/fail flags.
-- `tree_hero_fidelity.test.ts` covers triangle counting, foliage-mask counting, visible-near-only aggregation, and empty-shot failure.
+- `tree_hero_fidelity.test.ts` covers triangle counting, foliage-mask counting, visible-near-only aggregation, GPU-ring group-count estimation, and empty-shot failure.
 - `TreeStats` now carries hero near-tree triangle counters and pass/fail flags.
-- `tree_system_runtime_stats.ts` computes TREE-10 hero fidelity stats from visible CPU patches and near LOD state.
+- `tree_system_runtime_stats.ts` computes TREE-10 hero fidelity stats from visible CPU patches and estimates them for GPU ring stats from near group counts when readback is available.
+- If GPU group counts are not available yet, the GPU-ring TREE-10 path falls back to aggregate near count multiplied by average near geometry cost, so WebGPU perf JSON no longer reports zero hero fidelity counters.
 - `perf_probe.ts` and `render_phase.ts` include TREE-10 counters in perf samples and summaries, so shot/perf JSON can archive `treeHeroNearTrianglesAvg`, `treeHeroNearFoliageTrianglesAvg`, min per-tree triangles, and pass-frame counts.
 
 Still required before calling TREE-10 complete:
