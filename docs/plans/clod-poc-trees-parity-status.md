@@ -98,12 +98,14 @@ Still required before calling TREE-10 complete:
 Implemented:
 
 - `tree_parity_evidence.ts` is now a small public facade over focused TREE-12 evidence modules.
-- `tree_parity_evidence_types.ts` owns the evidence manifest, metric, command, and report contracts.
-- `tree_parity_evidence_manifest.ts` validates capture manifest shape, supported query params, unique IDs/paths, perf pairing, and metric/artifact consistency.
-- `tree_parity_evidence_validator.ts` validates required screenshot/stats/perf artifacts and metric thresholds.
+- `tree_parity_evidence_types.ts` owns the evidence manifest, metric, command, report, and optional TREE-11 acceptance evidence contracts.
+- `tree_parity_evidence_manifest.ts` validates capture manifest shape, supported query params, unique IDs/paths, perf pairing, metric/artifact consistency, and optional TREE-11 acceptance artifact/path fields.
+- `tree_parity_evidence_validator.ts` validates required screenshot/stats/perf artifacts, metric thresholds, and optional TREE-11 acceptance pass/fail status.
+- `tree_parity_evidence_acceptance.ts` reads measured visual metrics plus baseline/impostor `perf-main` artifacts and evaluates the existing TREE-11 `tree_impostor_acceptance.ts` contract.
 - `tree_parity_evidence_commands.ts` builds exact capture commands from each manifest `capture` block, including shot paths, perf output directories, explicit renderer, and shared query params.
-- `tree_parity_evidence_report.ts` generates the markdown closeout report with artifact status, metric expectations, actual values, and failures.
-- `tree_parity_evidence.test.ts` covers pass/fail cases, missing artifacts, metric floors, unreadable JSON, manifest self-checks, capture-command generation, and report rendering.
+- `tree_parity_evidence_report.ts` generates the markdown closeout report with artifact status, metric expectations, actual values, failures, and optional TREE-11 acceptance measurements.
+- `tree_parity_evidence.test.ts` covers pass/fail cases, missing artifacts, metric floors, unreadable JSON, manifest self-checks, capture-command generation, TREE-11 acceptance evaluation, and report rendering.
+- `tree_parity_evidence_acceptance.test.ts` covers TREE-11 acceptance manifest validation.
 - `tools/verify-tree-parity-evidence.ts` exposes the validator, the `--check-manifest` YAML-only guard, the `--commands` capture-command printer, and `--report` markdown output.
 - `config/tree-parity-evidence.yaml` defines the current TREE-7/8/9/10/11 evidence contract using supported query params only, including deterministic `sunElevationDeg` for low-sun/noon shots.
 - `app/state/index.ts` supports `sunElevationDeg`/`sunElevation` and `sunAzimuthDeg`/`sunAzimuth` query params for deterministic evidence lighting.
@@ -119,6 +121,7 @@ Still required before calling TREE-12 complete:
 
 - Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`, execute the printed real-GPU commands, and capture the configured artifacts under `shots/tree-parity/latest` and `perf-runs/tree-parity/latest`.
+- Add the optional `acceptance` section to `config/tree-parity-evidence.yaml` once real TREE-11 visual metrics and baseline/impostor perf artifacts are archived.
 - Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` or `npm --prefix tools/clod-poc run trees:report-parity-evidence` and archive the PASS output/report.
 
 ## Still required before calling Epic A+B closed
@@ -126,13 +129,13 @@ Still required before calling TREE-12 complete:
 - Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Run the server-first shot/perf harness for the WebGPU path with impostors enabled.
 - Capture slow dolly-out and frozen-boundary shots to confirm no far/impostor pop, holes, or double-draw.
-- Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` after captures.
-- Feed real screenshot/perf measurements into the TREE-11 acceptance contract.
+- Add the optional TREE-11 `acceptance` manifest section and run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` after captures.
 
 ## Next implementation order
 
 1. Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 2. Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`.
 3. Execute the printed real-GPU capture commands.
-4. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report`.
-5. Commit/archive the generated evidence report and artifacts.
+4. Archive measured TREE-11 visual metrics and baseline/impostor perf artifacts, then add the optional `acceptance` manifest section.
+5. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report`.
+6. Commit/archive the generated evidence report and artifacts.
