@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { instancedDepthPrepassTwin, type PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeInstance } from "./tree_instances.js";
 import type { TreeSystemMeshGrid } from "./tree_system_lifecycle.js";
@@ -9,6 +10,8 @@ export interface TreePatchMeshFactoryInput {
   geometryFor(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry;
   materialFor(species: TreeSpeciesId, lod: TreeLod): THREE.Material;
   castsShadow(lod: TreeLod): boolean;
+  /** TP-3: when present, attach a depth-only prepass twin per LOD mesh. */
+  prepassNodesFor?(species: TreeSpeciesId, lod: TreeLod): PrepassNodes | undefined;
 }
 
 export interface TreePatchMeshFactoryResult {
@@ -35,6 +38,15 @@ export function createTreePatchMeshGroup(input: TreePatchMeshFactoryInput): Tree
       });
       meshes[species][lod] = mesh;
       group.add(mesh);
+      // TP-3: depth-only prepass twin (instanced) so the near canopy gets
+      // early-z. The twin shares the mesh's geometry + instanceMatrix; its
+      // count/visibility are mirrored each frame in updateTreeMeshAfterLod.
+      const prepassNodes = input.prepassNodesFor?.(species, lod);
+      if (prepassNodes) {
+        const twin = instancedDepthPrepassTwin(mesh, prepassNodes);
+        mesh.userData.depthTwin = twin;
+        group.add(twin);
+      }
     }
   }
   return { group, meshes };

@@ -4,6 +4,13 @@ Status: In progress.
 
 This status note tracks the implementation state for `docs/plans/clod-poc-trees-parity-plan.md`.
 
+## Latest automated QA
+
+- 2026-06-30: `npm --prefix tools/clod-poc run trees:qa-parity` passed.
+- The run covered generated tree wiring checks, the TREE-12 manifest guard, TypeScript, and the full Vitest suite.
+- Final Vitest result: 301 test files passed, 1737 tests passed.
+- During QA, `content.test.ts` was updated to guard the current `options.biomeSplat` API, and `tree_system_cpu_runtime.ts` was fixed to import the `PrepassNodes` type used by the CPU prepass hook.
+
 ## Completed or mostly implemented
 
 - TREE-1 WebGPU render-to-atlas baker: the baker now uses generic render-target renderer methods instead of the old WebGL `getContext()` gate.
@@ -33,7 +40,6 @@ Implemented:
 
 Still required before calling TREE-7 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Capture a low-sun shot proving off-screen trees can still cast and archive perf JSON with non-zero `treeGpuShadowCasterCountAvg`.
 
 ## TREE-8 current state
@@ -49,7 +55,6 @@ Implemented:
 
 Still required before calling TREE-8 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Capture noon forest-interior and impostor-boundary shadow shots.
 
 ## TREE-9 current state
@@ -71,7 +76,6 @@ Implemented:
 
 Still required before calling TREE-9 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Capture the ecology-sorted species gallery shot.
 
 ## TREE-10 current state
@@ -88,7 +92,6 @@ Implemented:
 
 Still required before calling TREE-10 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Capture the hero forest bookmark shot/perf run and archive the stats JSON.
 - Verify the archived shot reports `treeHeroNearTrianglesAvg >= 100000` and non-zero `treeHeroNearFoliageTrianglesAvg`.
 - If the shot misses the floor, raise near-tree grammar/leaf detail and rerun the same bookmark A/B.
@@ -119,23 +122,20 @@ Implemented:
 
 Still required before calling TREE-12 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`, execute the printed real-GPU commands, and capture the configured artifacts under `shots/tree-parity/latest` and `perf-runs/tree-parity/latest`.
 - Add the optional `acceptance` section to `config/tree-parity-evidence.yaml` once real TREE-11 visual metrics and baseline/impostor perf artifacts are archived.
 - Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` or `npm --prefix tools/clod-poc run trees:report-parity-evidence` and archive the PASS output/report.
 
 ## Still required before calling Epic A+B closed
 
-- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Run the server-first shot/perf harness for the WebGPU path with impostors enabled.
 - Capture slow dolly-out and frozen-boundary shots to confirm no far/impostor pop, holes, or double-draw.
 - Add the optional TREE-11 `acceptance` manifest section and run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` after captures.
 
 ## Next implementation order
 
-1. Run `npm --prefix tools/clod-poc run trees:qa-parity`.
-2. Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`.
-3. Execute the printed real-GPU capture commands.
-4. Archive measured TREE-11 visual metrics and baseline/impostor perf artifacts, then add the optional `acceptance` manifest section.
-5. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report`.
-6. Commit/archive the generated evidence report and artifacts.
+1. Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`.
+2. Execute the printed real-GPU capture commands.
+3. Archive measured TREE-11 visual metrics and baseline/impostor perf artifacts, then add the optional `acceptance` manifest section.
+4. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report`.
+5. Commit/archive the generated evidence report and artifacts.

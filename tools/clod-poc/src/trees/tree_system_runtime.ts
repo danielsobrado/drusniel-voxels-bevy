@@ -325,6 +325,11 @@ export class TreeSystem {
       materialFor: (species, lod) => this.assets.materialFor(species, lod),
       castsShadow: (lod) => this.treeLodCastsShadow(lod),
       resolveLod: (species, lod) => this.resolveLod(species, lod),
+      // TP-3: depth prepass for the near canopy. Excludes impostors (their
+      // billboard material has a different positionNode than regularMaterial).
+      prepassNodesFor: this.useTreePrepass
+        ? (_species, lod) => (lod === "impostor" ? undefined : this.assets.materialHandle.prepassNodesFor?.(lod))
+        : undefined,
     };
   }
 

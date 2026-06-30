@@ -18,6 +18,10 @@ export function disposeTreeMeshGrid(meshes: TreeSystemMeshGrid): void {
   for (const species of TREE_SPECIES) {
     for (const lod of TREE_LODS) {
       const mesh = meshes[species][lod];
+      // TP-3: dispose the depth-prepass twin's material only — its geometry and
+      // instanceMatrix are shared with the colour mesh (disposed just below).
+      const depthTwin = mesh.userData.depthTwin as THREE.InstancedMesh | undefined;
+      if (depthTwin) disposeMaterial(depthTwin.material);
       mesh.geometry.dispose();
       disposeMaterial(mesh.material);
       mesh.dispose();

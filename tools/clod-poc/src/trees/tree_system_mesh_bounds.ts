@@ -40,6 +40,14 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
   const countChanged = input.mesh.count !== input.nextCount;
   input.mesh.count = input.nextCount;
 
+  // TP-3: mirror count/visibility onto the depth-prepass twin (shares the
+  // instanceMatrix, so its needsUpdate is already handled below via the mesh).
+  const depthTwin = input.mesh.userData.depthTwin as THREE.InstancedMesh | undefined;
+  if (depthTwin) {
+    depthTwin.count = input.nextCount;
+    depthTwin.visible = input.nextCount > 0;
+  }
+
   if (input.matrixChanged) input.mesh.instanceMatrix.needsUpdate = true;
   if (input.worldXZChanged) treeWorldXZAttribute(input.mesh).needsUpdate = true;
   if (input.fadeChanged) {

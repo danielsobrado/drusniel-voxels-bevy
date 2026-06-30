@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import type { ClodPageNode } from "../types.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { selectTreeLod, treeLodDistances } from "./tree_lod.js";
@@ -56,6 +57,8 @@ export interface TreeCpuPatchRuntimeInput {
   materialFor(species: TreeSpeciesId, lod: TreeLod): THREE.Material;
   castsShadow(lod: TreeLod): boolean;
   resolveLod(species: TreeSpeciesId, lod: TreeLod): TreeLod;
+  /** TP-3: depth-prepass nodes per species/LOD; absent ⇒ no CPU prepass. */
+  prepassNodesFor?(species: TreeSpeciesId, lod: TreeLod): PrepassNodes | undefined;
 }
 
 export interface TreePatchRefreshResult {
@@ -167,6 +170,7 @@ function createTreePatch(input: TreeCpuPatchRuntimeInput, node: ClodPageNode, ca
     geometryFor: input.geometryFor,
     materialFor: input.materialFor,
     castsShadow: input.castsShadow,
+    prepassNodesFor: input.prepassNodesFor,
   });
   group.position.set(centerX, 0, centerZ);
   return {

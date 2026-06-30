@@ -240,8 +240,8 @@ describe("Content Registry Validation Tests", () => {
   it("20. WebGPU wrapper keeps biome splat opt-in", () => {
     const wrapperPath = resolve(import.meta.dirname, "../rendering/terrain_material_webgpu.ts");
     const wrapper = readFileSync(wrapperPath, "utf8");
-    expect(wrapper).toContain("extras.biomeSplat === true");
-    expect(wrapper).toContain("biomeLayerSets: extras.biomeSplat === true ? buildBiomeLayerSets(slots) : undefined");
+    expect(wrapper).toContain("options.biomeSplat === true");
+    expect(wrapper).toContain("biomeLayerSets: options.biomeSplat === true ? buildBiomeLayerSets(slots) : undefined");
     expect(wrapper).not.toContain("biomeLayerSets: buildBiomeLayerSets(slots)");
   });
 

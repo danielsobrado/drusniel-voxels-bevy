@@ -65,8 +65,12 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes): Mesh {
  * Unlike `depthPrepassTwin` (plain `Mesh`), the twin must be an `InstancedMesh`
  * that shares the source `instanceMatrix` so per-instance transforms match. The
  * caller mirrors `count`/`visible` each frame (the patch mesh count changes) and
- * sets the colour material to `depthFunc: EqualDepth` + `depthWrite: false` so
- * only the front-most fragment is shaded — early-z for the near canopy.
+ * occluded fragments then fail the colour pass's depth test (default LessEqual)
+ * and skip the heavy relight/transmission/forest shading — early-z for the near
+ * canopy. Unlike `depthPrepassTwin` this does NOT mutate the colour material
+ * (the CPU path shares one material across patches and re-applies it on refresh,
+ * so an `EqualDepth` clone would be fragile); the twin writing depth first via
+ * `renderOrder = -100` is enough to reject the overdraw.
  *
  * Caveat: the twin shares `instanceMatrix` with the source mesh, so disposing the
  * twin must NOT dispose that attribute (it belongs to the colour mesh).
