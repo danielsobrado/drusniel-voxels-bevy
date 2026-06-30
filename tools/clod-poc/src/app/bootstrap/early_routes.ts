@@ -1,12 +1,14 @@
+import { earlySceneRoute, sceneFromSearchParams } from "../../scenes/scene_registry.js";
+
 export async function runEarlyRoutes(searchParams: URLSearchParams): Promise<boolean> {
-  const earlyScene = searchParams.get("scene");
+  const route = earlySceneRoute(sceneFromSearchParams(searchParams));
   if (
-    (earlyScene === "sanity" || earlyScene === "phase1-terrain") &&
+    (route === "sanity" || route === "phase1-terrain") &&
     searchParams.get("webgpuSpike") !== "1" &&
     searchParams.get("webgpu") !== "1" &&
     searchParams.get("grassFirstInstanceSmoke") !== "1"
   ) {
-    if (earlyScene === "phase1-terrain") {
+    if (route === "phase1-terrain") {
       const { runPhase1TerrainScene } = await import("../../phase1/phase1_scene.js");
       await runPhase1TerrainScene();
     } else {
@@ -40,7 +42,7 @@ export async function runEarlyRoutes(searchParams: URLSearchParams): Promise<boo
     return true;
   }
 
-  if (earlyScene === "phase2") {
+  if (route === "phase2") {
     const { runPhase2Scene } = await import("../../phase2/phase2_scene.js");
     await runPhase2Scene();
     return true;
