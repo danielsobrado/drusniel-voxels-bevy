@@ -1,0 +1,44 @@
+seed = 424205
+median_runs = 3
+duration_warmup_secs = 8.0
+chunk_load_radius = 16
+skip_props = false
+
+[render_toggles]
+quality_preset = "high"
+
+[[checkpoint]]
+name = "player_ripple_entry"
+position = [92.0, 24.0, 112.0]
+look_at = [112.0, 18.0, 124.0]
+time_of_day = 0.50
+hold_frames = 540
+screenshot = true
+
+  [checkpoint.gameplay]
+  enabled = true
+  forward = 1.0
+  strafe = 0.0
+  sprint = false
+
+  [[checkpoint.screenshot_points]]
+  name = "player_ripple_entry"
+  frame = 300
+
+[[checkpoint]]
+name = "player_ripple_walkthrough"
+position = [100.0, 23.5, 120.0]
+look_at = [128.0, 18.0, 130.0]
+time_of_day = 0.50
+hold_frames = 540
+screenshot = true
+
+  [checkpoint.gameplay]
+  enabled = true
+  forward = 1.0
+  strafe = 0.25
+  sprint = false
+
+  [[checkpoint.screenshot_points]]
+  name = "player_ripple_walkthrough"
+  frame = 300
