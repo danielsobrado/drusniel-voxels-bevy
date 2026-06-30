@@ -76,6 +76,7 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.postProcessEnabled = false;
     state.postProcessDebugMode = "off";
     state.postProcessBloomEnabled = false;
+    state.postProcessFxaaEnabled = false;
     state.postProcessTaaEnabled = false;
     state.postProcessContactShadowsEnabled = false;
     state.postProcessClarityEnabled = false;
@@ -96,6 +97,7 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.postProcessDebugMode = "output";
     neutralGrade(state);
     state.postProcessBloomEnabled = false;
+    state.postProcessFxaaEnabled = false;
     state.postProcessTaaEnabled = false;
     state.postProcessContactShadowsEnabled = false;
     state.postProcessClarityEnabled = false;
@@ -108,6 +110,9 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
 
   const bloom = flagParam(searchParams, "bloom");
   if (bloom !== null) state.postProcessBloomEnabled = bloom;
+
+  const fxaa = flagParam(searchParams, "fxaa", "aa");
+  if (fxaa !== null) state.postProcessFxaaEnabled = fxaa;
 
   const taa = flagParam(searchParams, "taa");
   if (taa !== null) state.postProcessTaaEnabled = taa;
