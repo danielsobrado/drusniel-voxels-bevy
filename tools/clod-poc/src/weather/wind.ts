@@ -38,11 +38,10 @@ export class WindWeatherSystem {
   private readonly group = new THREE.Group();
   private readonly material: RainWeatherShaderHandle;
   private readonly mesh: THREE.Mesh;
-  private readonly camera: THREE.PerspectiveCamera;
   private settings = { ...DEFAULT_WIND_WEATHER_SETTINGS };
 
   constructor(options: WindWeatherOptions) {
-    this.camera = options.camera;
+    void options.camera;
     this.group.name = "weather-wind";
     this.group.visible = this.settings.enabled;
     this.material = options.isWebGpu ? createWindNodeMaterial() : createWindShaderMaterial();
@@ -72,8 +71,6 @@ export class WindWeatherSystem {
     if (!this.group.visible) return;
     this.material.setTime(elapsedSeconds);
     this.material.setCenter(cameraPosition);
-    this.group.position.set(0, 0, 0);
-    this.mesh.quaternion.copy(this.camera.quaternion);
   }
 
   getStats(): WindWeatherStats {
