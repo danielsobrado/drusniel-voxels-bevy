@@ -99,7 +99,7 @@ function pushParticle(layer: ParticleLayer, particle: Particle): void {
 function writeLayer(layer: ParticleLayer, color: THREE.Color, fadePower: number): void {
   const count = layer.particles.length;
   for (let i = 0; i < count; i += 1) {
-    const p = layer.particles[i];
+    const p = layer.particles[i]!;
     const fade = Math.pow(1 - clamp01(p.age / Math.max(0.001, p.life)), fadePower) * p.strength;
     const vi = i * 3;
     layer.positions[vi + 0] = p.x;
@@ -119,7 +119,7 @@ function writeLayer(layer: ParticleLayer, color: THREE.Color, fadePower: number)
 function advanceLayer(layer: ParticleLayer, deltaSeconds: number): void {
   let write = 0;
   for (let read = 0; read < layer.particles.length; read += 1) {
-    const p = layer.particles[read];
+    const p = layer.particles[read]!;
     p.age += deltaSeconds;
     if (p.age >= p.life) continue;
     p.vy += layer.gravity * deltaSeconds;
@@ -273,7 +273,7 @@ export class RiverCascadeParticleOverlay {
   private advanceFoam(deltaSeconds: number): void {
     let write = 0;
     for (let read = 0; read < this.foam.particles.length; read += 1) {
-      const p = this.foam.particles[read];
+      const p = this.foam.particles[read]!;
       p.age += deltaSeconds;
       if (p.age >= p.life) continue;
       p.x += p.vx * deltaSeconds;
