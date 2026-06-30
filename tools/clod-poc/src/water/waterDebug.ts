@@ -17,6 +17,11 @@ import {
   reloadWithRiverMaterialSettings,
   type RiverMaterialSettings,
 } from "./riverMaterialRuntime.js";
+import {
+  readRiverCascadeParticleSettings,
+  reloadWithRiverCascadeParticleSettings,
+  type RiverCascadeParticleSettings,
+} from "./riverCascadeParticlesRuntime.js";
 
 export interface WaterDebugState {
   enabled: boolean;
@@ -290,6 +295,22 @@ function addRiverMaterialTuningFolder(parent: GUI): { refresh: () => void } {
   };
 }
 
+function addRiverCascadeParticleTuningFolder(parent: GUI): { refresh: () => void } {
+  const folder = parent.addFolder("cascade mist / splash");
+  const settings: RiverCascadeParticleSettings = readRiverCascadeParticleSettings();
+  folder.add(settings, "enabled").name("enabled");
+  folder.add(settings, "mistStrength", 0, 3, 0.05).name("mist strength");
+  folder.add(settings, "splashStrength", 0, 3, 0.05).name("splash strength");
+  folder.add(settings, "foamDriftStrength", 0, 3, 0.05).name("foam drift");
+  folder.add(settings, "spawnRadiusM", 16, 180, 1).name("spawn radius");
+  folder.add(settings, "dropStart", 0, 12, 0.05).name("drop start");
+  folder.add(settings, "dropEnd", 0.05, 24, 0.05).name("drop end");
+  folder.add({ apply: () => reloadWithRiverCascadeParticleSettings(settings) }, "apply").name("apply + rebuild");
+  return {
+    refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()),
+  };
+}
+
 export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugState {
   const riverDefaults = DEFAULT_HYDROLOGY_CONFIG.rivers;
   return {
@@ -348,6 +369,7 @@ export function addWaterDebugFolder(
   const riverEcologyDebug = addRiverEcologyDebugFolder(folder, state, bindings);
   const riverEcologyTuning = addRiverEcologyTuningFolder(folder);
   const riverMaterialTuning = addRiverMaterialTuningFolder(folder);
+  const riverCascadeParticleTuning = addRiverCascadeParticleTuningFolder(folder);
 
   const shoreSurf = folder.addFolder("shore surf");
   shoreSurf.add(state, "shoreSurfEnabled").name("enabled").onChange((enabled: boolean) => bindings.onShoreSurfEnabled(enabled));
@@ -363,6 +385,7 @@ export function addWaterDebugFolder(
       riverEcologyDebug.refresh();
       riverEcologyTuning.refresh();
       riverMaterialTuning.refresh();
+      riverCascadeParticleTuning.refresh();
       shoreSurf.controllers.forEach((controller) => controller.updateDisplay());
     },
   };
