@@ -88,6 +88,14 @@ describe("WGSL module composition", () => {
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
   });
 
+  it("rewrites tree scatter hash to integer PCG", () => {
+    const source = composeTreeRingShader();
+
+    expect(source).toContain("return tree_pcg2d(cell, params.settings_u.z + salt).x;");
+    expect(source).toContain("return tree_pcg2d(cell, params.settings_u.z + salt);");
+    expect(source).not.toContain("fract(sin(dot(cell");
+  });
+
   it("injects tree ring layout constants from TS layout helpers", () => {
     const source = composeTreeRingShader();
     const layout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
