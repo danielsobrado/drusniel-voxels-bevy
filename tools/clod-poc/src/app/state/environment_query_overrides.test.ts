@@ -33,6 +33,11 @@ function createState() {
     treeMaxInstances: 9000,
     treeDensity: 1.2,
     treeSpacing: 5.5,
+    treeGpuEnabled: false,
+    treeGpuForceCpu: true,
+    treeGpuShowCounts: true,
+    treeGpuReadbackVisibleLists: true,
+    treeGpuValidateAgainstCpu: true,
     treeGpuMaxVisible: 50_000,
   };
 }
@@ -97,6 +102,31 @@ describe("environment query overrides", () => {
     expect(state.treeMaxInstances).toBe(4000);
     expect(state.treeDensity).toBe(0.7);
     expect(state.treeSpacing).toBe(8);
+    expect(state.treeGpuEnabled).toBe(true);
+    expect(state.treeGpuForceCpu).toBe(false);
+    expect(state.treeGpuShowCounts).toBe(false);
+    expect(state.treeGpuReadbackVisibleLists).toBe(false);
+    expect(state.treeGpuValidateAgainstCpu).toBe(false);
     expect(state.treeGpuMaxVisible).toBe(12000);
+  });
+
+  it("lets explicit tree GPU debug URL flags override preset defaults", () => {
+    const state = createState();
+    const params = new URLSearchParams({
+      quality: "perf",
+      treeGpu: "0",
+      treeGpuForceCpu: "1",
+      treeGpuCounts: "1",
+      treeGpuReadback: "1",
+      treeGpuValidate: "1",
+    });
+
+    applyEnvironmentQueryOverrides(state as never, params);
+
+    expect(state.treeGpuEnabled).toBe(false);
+    expect(state.treeGpuForceCpu).toBe(true);
+    expect(state.treeGpuShowCounts).toBe(true);
+    expect(state.treeGpuReadbackVisibleLists).toBe(true);
+    expect(state.treeGpuValidateAgainstCpu).toBe(true);
   });
 });
