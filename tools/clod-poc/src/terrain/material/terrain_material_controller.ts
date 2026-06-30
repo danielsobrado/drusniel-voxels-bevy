@@ -179,7 +179,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
       riverWetnessMask: riverTerrainWetnessMask ?? undefined,
       worldSize: deps.worldCells,
       biomeSplat: proceduralActive,
-    } as TerrainTextureApplyOptions;
+    };
   };
 
   const applyTerrainTextures = () => {
@@ -201,6 +201,13 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
       bakedMacroTint?.dispose();
       bakedMacroTint = macroTint;
     }
+  };
+
+  const setRiverTerrainWetnessMask = (mask: THREE.Texture | null): void => {
+    if (riverTerrainWetnessMask === mask) return;
+    riverTerrainWetnessMask?.dispose();
+    riverTerrainWetnessMask = mask;
+    applyTerrainTextures();
   };
 
   const applyColorByLodToMaterials = (on: boolean) => {
@@ -257,9 +264,7 @@ export function createTerrainMaterialController(deps: TerrainMaterialControllerD
     terrainTextureUniformOptions,
     applyTerrainTextures,
     setProceduralTerrain,
-    setRiverTerrainWetnessMask(mask) {
-      riverTerrainWetnessMask = mask;
-    },
+    setRiverTerrainWetnessMask,
     applyColorByLodToMaterials,
     syncColorByLod,
     configureChunkMaterial,
