@@ -1,0 +1,22 @@
+postprocess:
+  enabled: true
+  opacity: 1.0
+  exposure: 1.0
+  contrast: 1.04
+  saturation: 1.05
+  vignette: 0.0
+  debug_mode: output
+  tone_mapping: aces
+
+  bloom:
+    enabled: true
+    threshold: 0.85
+    strength: 0.18
+    radius: 0.35
+
+  god_rays:
+    mode: off
+    density: 0.96
+    decay: 0.92
+    weight: 0.35
+    exposure: 0.6
