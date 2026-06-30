@@ -33,6 +33,14 @@ const DEFAULT_EVENT_AUDIO: Partial<Record<AudioEventId, EventAudioConfig>> = {
     pitch: 920,
     duration_ms: 1800,
   },
+  "spell.earth.cast": {
+    enabled: true,
+    volume: 0.32,
+    cooldown_ms: 180,
+    synth: "lower",
+    pitch: 180,
+    duration_ms: 1700,
+  },
 };
 
 export function parseAudioConfig(text: string): AudioConfig {
