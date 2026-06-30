@@ -1,7 +1,4 @@
-// Water debug UI helper. Adds lil-gui folders for water debug, shore surf,
-// river tuning, live river stats, and river ecology inspection. River generation
-// and ecology/material controls rebuild through URL params because hydrology/GPU
-// scatter/water materials are built before the renderer starts.
+// Water debug UI helper. Runtime-built river generation/ecology/material controls rebuild through URL params.
 import type GUI from "lil-gui";
 import { type WaterDebugMode, type WaterVisualConfig, WATER_DEBUG_MODES } from "./waterConfig.js";
 import { DEFAULT_SHORE_SURF_BAND_SETTINGS } from "./waterField.js";
@@ -22,6 +19,7 @@ import {
   reloadWithRiverCascadeParticleSettings,
   type RiverCascadeParticleSettings,
 } from "./riverCascadeParticlesRuntime.js";
+import type { RiverCascadeParticleStats } from "./riverCascadeParticleOverlay.js";
 
 export interface WaterDebugState {
   enabled: boolean;
@@ -73,6 +71,7 @@ export interface WaterDebugBindings {
   onShoreSurfMaxDepth: (depth: number) => void;
   onRebuildVisual: () => void;
   getRiverStats?: () => WaterRiverDebugStats;
+  getCascadeParticleStats?: () => RiverCascadeParticleStats;
 }
 
 export interface WaterDebugController {
@@ -111,10 +110,7 @@ const MATERIAL_DEBUG_MODES = [
 ] as const satisfies readonly WaterDebugMode[];
 
 const WATER_MODE_OPTIONS = Object.fromEntries(
-  MATERIAL_DEBUG_MODES.map((mode) => [
-    `${WATER_DEBUG_LABELS[mode]} (${WATER_DEBUG_MODES[mode]})`,
-    mode,
-  ]),
+  MATERIAL_DEBUG_MODES.map((mode) => [`${WATER_DEBUG_LABELS[mode]} (${WATER_DEBUG_MODES[mode]})`, mode]),
 ) as Record<string, WaterDebugMode>;
 
 function currentSearchParams(): URLSearchParams {
@@ -173,6 +169,19 @@ function makeEmptyRiverStats(): WaterRiverDebugStats {
   };
 }
 
+function makeEmptyCascadeParticleStats(): RiverCascadeParticleStats {
+  return {
+    mist: 0,
+    splash: 0,
+    foam: 0,
+    lastEmitters: 0,
+    lastCascadeEmitters: 0,
+    lastRapidEmitters: 0,
+    lastMaxCascade: 0,
+    lastMaxRapid: 0,
+  };
+}
+
 function setWaterDebugMode(state: WaterDebugState, bindings: WaterDebugBindings, mode: WaterDebugMode): void {
   state.mode = mode;
   bindings.onMode(mode);
@@ -206,6 +215,28 @@ function addRiverStatsFolder(parent: GUI, bindings: WaterDebugBindings): { refre
   };
 }
 
+function addCascadeParticleStatsFolder(parent: GUI, bindings: WaterDebugBindings): { refresh: () => void } {
+  const folder = parent.addFolder("cascade particle stats");
+  const stats = makeEmptyCascadeParticleStats();
+  const refresh = () => Object.assign(stats, bindings.getCascadeParticleStats?.() ?? makeEmptyCascadeParticleStats());
+  refresh();
+  folder.add(stats, "mist").name("mist count").disable();
+  folder.add(stats, "splash").name("splash count").disable();
+  folder.add(stats, "foam").name("foam drift count").disable();
+  folder.add(stats, "lastEmitters").name("last emitters").disable();
+  folder.add(stats, "lastCascadeEmitters").name("cascade emitters").disable();
+  folder.add(stats, "lastRapidEmitters").name("rapid emitters").disable();
+  folder.add(stats, "lastMaxCascade").name("max cascade").disable();
+  folder.add(stats, "lastMaxRapid").name("max rapid").disable();
+  folder.add({ refresh }, "refresh").name("refresh stats");
+  return {
+    refresh: () => {
+      refresh();
+      folder.controllers.forEach((controller) => controller.updateDisplay());
+    },
+  };
+}
+
 function addRiverEcologyDebugFolder(
   parent: GUI,
   state: WaterDebugState,
@@ -222,13 +253,11 @@ function addRiverEcologyDebugFolder(
   folder.add(actions, "showFoam").name("show foam");
   folder.add(actions, "showDepth").name("show depth");
   folder.add(actions, "showFinal").name("back to final");
-
   const readout = riverEcologyReadout();
   folder.add(readout, "grass").name("grass bands").disable();
   folder.add(readout, "understory").name("understory bands").disable();
   folder.add(readout, "trees").name("tree bands").disable();
   folder.add(readout, "stones").name("stone bands").disable();
-
   return {
     refresh: () => {
       Object.assign(readout, riverEcologyReadout());
@@ -256,9 +285,7 @@ function addRiverEcologyTuningFolder(parent: GUI): { refresh: () => void } {
   folder.add(settings, "treeOuterEndM", 12.0, 80.0, 1.0).name("tree outer end");
   folder.add(settings, "stoneClearanceM", 0.02, 2.0, 0.02).name("stone clear");
   folder.add({ apply: () => reloadWithRiverEcologySettings(settings) }, "apply").name("apply + rebuild");
-  return {
-    refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()),
-  };
+  return { refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()) };
 }
 
 function addRiverMaterialTuningFolder(parent: GUI): { refresh: () => void } {
@@ -290,9 +317,7 @@ function addRiverMaterialTuningFolder(parent: GUI): { refresh: () => void } {
   folder.add(settings, "shallowBankTintStrength", 0, 3, 0.05).name("shallow tint");
   folder.add(settings, "centerChannelDarkening", 0, 3, 0.05).name("center darken");
   folder.add({ apply: () => reloadWithRiverMaterialSettings(settings) }, "apply").name("apply + rebuild");
-  return {
-    refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()),
-  };
+  return { refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()) };
 }
 
 function addRiverCascadeParticleTuningFolder(parent: GUI): { refresh: () => void } {
@@ -303,12 +328,13 @@ function addRiverCascadeParticleTuningFolder(parent: GUI): { refresh: () => void
   folder.add(settings, "splashStrength", 0, 3, 0.05).name("splash strength");
   folder.add(settings, "foamDriftStrength", 0, 3, 0.05).name("foam drift");
   folder.add(settings, "spawnRadiusM", 16, 180, 1).name("spawn radius");
+  folder.add(settings, "maxEmittersPerTick", 4, 80, 1).name("max emitters");
+  folder.add(settings, "rapidSpeedStart", 0.05, 8, 0.05).name("rapid start");
+  folder.add(settings, "rapidSpeedEnd", 0.10, 12, 0.05).name("rapid end");
   folder.add(settings, "dropStart", 0, 12, 0.05).name("drop start");
   folder.add(settings, "dropEnd", 0.05, 24, 0.05).name("drop end");
   folder.add({ apply: () => reloadWithRiverCascadeParticleSettings(settings) }, "apply").name("apply + rebuild");
-  return {
-    refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()),
-  };
+  return { refresh: () => folder.controllers.forEach((controller) => controller.updateDisplay()) };
 }
 
 export function defaultWaterDebugState(visual: WaterVisualConfig): WaterDebugState {
@@ -366,6 +392,7 @@ export function addWaterDebugFolder(
   rivers.add({ apply: () => reloadWithRiverState(state) }, "apply").name("apply + rebuild");
 
   const riverStats = addRiverStatsFolder(folder, bindings);
+  const cascadeStats = addCascadeParticleStatsFolder(folder, bindings);
   const riverEcologyDebug = addRiverEcologyDebugFolder(folder, state, bindings);
   const riverEcologyTuning = addRiverEcologyTuningFolder(folder);
   const riverMaterialTuning = addRiverMaterialTuningFolder(folder);
@@ -382,6 +409,7 @@ export function addWaterDebugFolder(
       folder.controllers.forEach((controller) => controller.updateDisplay());
       rivers.controllers.forEach((controller) => controller.updateDisplay());
       riverStats.refresh();
+      cascadeStats.refresh();
       riverEcologyDebug.refresh();
       riverEcologyTuning.refresh();
       riverMaterialTuning.refresh();
