@@ -5,6 +5,11 @@ export interface TreeQualityPresetState {
   treeMaxInstances: number;
   treeDensity: number;
   treeSpacing: number;
+  treeGpuEnabled: boolean;
+  treeGpuForceCpu: boolean;
+  treeGpuShowCounts: boolean;
+  treeGpuReadbackVisibleLists: boolean;
+  treeGpuValidateAgainstCpu: boolean;
   treeGpuMaxVisible: number;
 }
 
@@ -13,6 +18,11 @@ interface TreeQualityPresetConfig {
   maxInstances: number;
   density: number;
   spacingM: number;
+  gpuEnabled: boolean;
+  gpuForceCpu: boolean;
+  gpuShowCounts: boolean;
+  gpuReadbackVisibleLists: boolean;
+  gpuValidateAgainstCpu: boolean;
   gpuMaxVisible: number;
 }
 
@@ -22,6 +32,11 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     maxInstances: 9000,
     density: 1.2,
     spacingM: 5.5,
+    gpuEnabled: true,
+    gpuForceCpu: false,
+    gpuShowCounts: false,
+    gpuReadbackVisibleLists: false,
+    gpuValidateAgainstCpu: false,
     gpuMaxVisible: 50_000,
   },
   balanced: {
@@ -29,6 +44,11 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     maxInstances: 6000,
     density: 0.85,
     spacingM: 7.0,
+    gpuEnabled: true,
+    gpuForceCpu: false,
+    gpuShowCounts: false,
+    gpuReadbackVisibleLists: false,
+    gpuValidateAgainstCpu: false,
     gpuMaxVisible: 30_000,
   },
   perf: {
@@ -36,6 +56,11 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     maxInstances: 3500,
     density: 0.55,
     spacingM: 9.0,
+    gpuEnabled: true,
+    gpuForceCpu: false,
+    gpuShowCounts: false,
+    gpuReadbackVisibleLists: false,
+    gpuValidateAgainstCpu: false,
     gpuMaxVisible: 16_000,
   },
   potato: {
@@ -43,6 +68,11 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     maxInstances: 1500,
     density: 0.3,
     spacingM: 12.0,
+    gpuEnabled: true,
+    gpuForceCpu: false,
+    gpuShowCounts: false,
+    gpuReadbackVisibleLists: false,
+    gpuValidateAgainstCpu: false,
     gpuMaxVisible: 8_000,
   },
 };
@@ -55,5 +85,10 @@ export function applyTreeQualityPreset(state: TreeQualityPresetState, preset: Po
   state.treeMaxInstances = config.maxInstances;
   state.treeDensity = config.density;
   state.treeSpacing = config.spacingM;
+  state.treeGpuEnabled = config.gpuEnabled;
+  state.treeGpuForceCpu = config.gpuForceCpu;
+  state.treeGpuShowCounts = config.gpuShowCounts;
+  state.treeGpuReadbackVisibleLists = config.gpuReadbackVisibleLists;
+  state.treeGpuValidateAgainstCpu = config.gpuValidateAgainstCpu;
   state.treeGpuMaxVisible = config.gpuMaxVisible;
 }
