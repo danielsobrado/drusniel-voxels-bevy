@@ -53,6 +53,8 @@ use crate::rendering::water::displacement::WaterDisplacementPlugin;
 use crate::rendering::water::finish::WitchcraftWaterFinishPlugin;
 use crate::rendering::water::reflection::WaterReflectionPlugin;
 use crate::rendering::water::reflection_compositor::WaterReflectionCompositorPlugin;
+use crate::rendering::water_clipmap::WaterClipmapPlugin;
+use crate::rendering::water_ownership::WaterOwnershipPlugin;
 
 pub struct RenderingPlugin;
 
@@ -85,6 +87,10 @@ impl Plugin for RenderingPlugin {
             .add_plugins(PhotoModePlugin)
             // Enhanced water shader modules (Gerstner, foam, caustics)
             .add_plugins(EnhancedWaterPlugin)
+            // Water renderer ownership counters and debug state.
+            .add_plugins(WaterOwnershipPlugin)
+            // Disabled-by-default far/large water clipmap skeleton.
+            .add_plugins(WaterClipmapPlugin)
             // Planar water reflections (Valheim-style mirrored camera)
             .add_plugins(WaterReflectionPlugin)
             // Post-process compositor: blends the reflection texture onto water pixels
@@ -219,5 +225,13 @@ mod tests {
         ] {
             assert!(source.contains(symbol), "missing {symbol}");
         }
+    }
+
+    #[test]
+    fn rendering_plugin_installs_water_ownership_and_clipmap_stack() {
+        let source = include_str!("plugin.rs");
+
+        assert!(source.contains("WaterOwnershipPlugin"));
+        assert!(source.contains("WaterClipmapPlugin"));
     }
 }
