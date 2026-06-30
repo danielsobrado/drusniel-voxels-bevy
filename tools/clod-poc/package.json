@@ -56,6 +56,7 @@
     "water:hydrology": "tsx tools/probe-water-hydrology.ts",
     "water:ownership": "tsx tools/water-ownership-report.ts",
     "water:stats": "tsx tools/water-runtime-stats-report.ts",
+    "water:report": "tsx tools/water-verify-report.ts",
     "water:shot": "tsx tools/shoot-water.ts",
     "water:shot:lake-final": "npm run water:shot -- --scene lake-shoreline --debug final --out shots/water/lake-final",
     "water:shot:river-final": "npm run water:shot -- --scene river-bend --debug final --out shots/water/river-final",
@@ -66,7 +67,7 @@
     "water:shot:refraction": "npm run water:shot -- --scene lake-shoreline --debug refraction --out shots/water/lake-refraction",
     "water:shot:reflection": "npm run water:shot -- --scene lake-shoreline --debug reflection --out shots/water/lake-reflection",
     "water:shot:ssr-hit": "npm run water:shot -- --scene lake-shoreline --debug ssrHit --out shots/water/lake-ssr-hit",
-    "water:verify": "npm run water:ownership && npm run water:stats && npm run water:find && npm run water:probe && npm run water:shot -- --scene all --out shots/water/verify"
+    "water:verify": "npm run water:report && npm run water:find && npm run water:probe && npm run water:shot -- --scene all --out shots/water/verify"
   },
   "dependencies": {
     "fflate": "^0.8.3",
