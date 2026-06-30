@@ -11,7 +11,8 @@ import {
 import { createFireNodeMaterial } from "./fire_node_material.js";
 import { createWaterNodeMaterial } from "./water_node_material.js";
 import { createAirNodeMaterial } from "./air_node_material.js";
-import { defaultSpellConfig } from "./spell_config.js";
+import { createEarthNodeMaterial } from "./earth_node_material.js";
+import { defaultSpellConfig, type EarthSpellVfxConfig } from "./spell_config.js";
 
 const meshCfg: SpellVfxMeshConfig = {
   worldWidth: 1.8,
@@ -25,6 +26,12 @@ const meshCfg: SpellVfxMeshConfig = {
   glowDistance: 7,
   glowDecay: 2,
   glowLocalYRatio: 0.35,
+};
+
+const earthCfg: EarthSpellVfxConfig = {
+  ...defaultSpellConfig.earth.vfx,
+  shardCount: 4,
+  shardLifetimeMs: 800,
 };
 
 describe("computeSpellFrame", () => {
@@ -82,6 +89,7 @@ describe("spell node materials", () => {
     ["fire", createFireNodeMaterial, THREE.AdditiveBlending],
     ["water", createWaterNodeMaterial, THREE.NormalBlending],
     ["air", createAirNodeMaterial, THREE.AdditiveBlending],
+    ["earth", createEarthNodeMaterial, THREE.NormalBlending],
   ] as const)("%s blends correctly without writing depth", (_name, factory, blending) => {
     const { material, uProgress, uTime } = factory();
     expect(material.transparent).toBe(true);
@@ -125,6 +133,8 @@ describe("createSpellVfxController", () => {
       fire: meshCfg,
       water: meshCfg,
       air: meshCfg,
+      earth: earthCfg,
+      getEarthTarget: () => ({ point: new THREE.Vector3(1, 2, 3) }),
       now: () => clock,
     });
 
@@ -172,6 +182,8 @@ describe("createSpellVfxController", () => {
       fire: meshCfg,
       water: meshCfg,
       air: { ...meshCfg, handForwardM: 0.5, handRightM: 2, handUpM: -1, glowLocalYRatio: 0.5 },
+      earth: earthCfg,
+      getEarthTarget: () => ({ point: new THREE.Vector3(1, 2, 3) }),
       now: () => clock,
     });
 
@@ -199,5 +211,45 @@ describe("createSpellVfxController", () => {
     expect(airLight.visible).toBe(false);
 
     controller.dispose();
+  });
+
+  it("plays earth at the supplied terrain target", () => {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera();
+    let clock = 1000;
+    const target = new THREE.Vector3(7, 3, 11);
+    const controller = createSpellVfxController({
+      scene,
+      getCamera: () => camera,
+      fire: meshCfg,
+      water: meshCfg,
+      air: meshCfg,
+      earth: earthCfg,
+      getEarthTarget: () => ({ point: target }),
+      now: () => clock,
+    });
+
+    const ground = scene.getObjectByName("earth-spell-ground") as THREE.Mesh;
+    const light = scene.getObjectByName("earth-spell-glow") as THREE.PointLight;
+    expect(ground.visible).toBe(false);
+    expect(light.visible).toBe(false);
+
+    controller.playEarth(1000);
+    expect(ground.visible).toBe(true);
+    expect(light.visible).toBe(true);
+
+    clock = 1200;
+    controller.update(clock);
+    expect(ground.position.x).toBeCloseTo(target.x);
+    expect(ground.position.z).toBeCloseTo(target.z);
+    expect(light.intensity).toBeGreaterThan(0);
+
+    clock = 2200;
+    controller.update(clock);
+    expect(ground.visible).toBe(false);
+    expect(light.visible).toBe(false);
+
+    controller.dispose();
+    expect(scene.getObjectByName("earth-spell-ground")).toBeFalsy();
   });
 });
