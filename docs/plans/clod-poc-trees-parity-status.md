@@ -109,6 +109,7 @@ Implemented:
 - `app/state/index.ts` supports `sunElevationDeg`/`sunElevation` and `sunAzimuthDeg`/`sunAzimuth` query params for deterministic evidence lighting.
 - `tools/shoot.ts` consumes `--renderer` locally instead of forwarding it into the app URL.
 - `npm --prefix tools/clod-poc run trees:check-parity-manifest` validates the evidence manifest without requiring captured artifacts.
+- `npm --prefix tools/clod-poc run trees:preflight-parity` runs generated-wiring checks plus the evidence manifest check before heavier local QA.
 - `npm --prefix tools/clod-poc run trees:capture-parity-evidence` prints the real-GPU capture commands expected by the manifest.
 - `npm --prefix tools/clod-poc run trees:verify-parity-evidence` runs the evidence gate after local real-GPU captures are archived under the manifest paths.
 - `npm --prefix tools/clod-poc run trees:report-parity-evidence` writes `docs/performance/clod-poc-tree-parity-evidence-latest.md` from the archived artifacts.
@@ -116,7 +117,7 @@ Implemented:
 Still required before calling TREE-12 complete:
 
 - Run typecheck/tests.
-- Run `npm --prefix tools/clod-poc run trees:check-parity-manifest`.
+- Run `npm --prefix tools/clod-poc run trees:preflight-parity`.
 - Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`, execute the printed real-GPU commands, and capture the configured artifacts under `shots/tree-parity/latest` and `perf-runs/tree-parity/latest`.
 - Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` or `npm --prefix tools/clod-poc run trees:report-parity-evidence` and archive the PASS output/report.
 
@@ -124,6 +125,7 @@ Still required before calling TREE-12 complete:
 
 - Run `npm --prefix tools/clod-poc test`.
 - Run `npm --prefix tools/clod-poc run typecheck`.
+- Run `npm --prefix tools/clod-poc run trees:preflight-parity`.
 - Run the server-first shot/perf harness for the WebGPU path with impostors enabled.
 - Capture slow dolly-out and frozen-boundary shots to confirm no far/impostor pop, holes, or double-draw.
 - Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` after captures.
@@ -131,10 +133,9 @@ Still required before calling TREE-12 complete:
 
 ## Next implementation order
 
-1. Local generated rewrite check: `npm --prefix tools/clod-poc run trees:wire-parity:check`.
-2. Run `npm --prefix tools/clod-poc run trees:check-parity-manifest`.
-3. Run typecheck/tests.
-4. Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`.
-5. Execute the printed real-GPU capture commands.
-6. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report`.
-7. Commit/archive the generated evidence report and artifacts.
+1. Run `npm --prefix tools/clod-poc run trees:preflight-parity`.
+2. Run typecheck/tests.
+3. Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`.
+4. Execute the printed real-GPU capture commands.
+5. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report`.
+6. Commit/archive the generated evidence report and artifacts.
