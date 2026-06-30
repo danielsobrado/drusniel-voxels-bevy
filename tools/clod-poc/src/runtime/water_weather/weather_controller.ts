@@ -10,9 +10,10 @@ import {
   type StormWeatherSettings,
 } from "../../weather/rain.js";
 import { StormLightningSystem } from "../../weather/storm_ground.js";
+import { WindWeatherSystem, type WindWeatherSettings } from "../../weather/wind.js";
 
 export interface WeatherUiSettings {
-  weatherMode: "off" | "meadow" | "rain" | "snow" | "sandstorm" | "storm";
+  weatherMode: "off" | "meadow" | "rain" | "snow" | "sandstorm" | "storm" | "wind";
   weatherIntensity: number;
   weatherWindX: number;
   weatherWindZ: number;
@@ -48,6 +49,12 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
     scene: deps.scene,
     isWebGpu: deps.isWebGpu,
     seed: 0x6d3a8f21,
+  });
+  const windWeather = new WindWeatherSystem({
+    scene: deps.scene,
+    camera: deps.camera,
+    isWebGpu: deps.isWebGpu,
+    seed: 0x71f14d11,
   });
   const rainWeather = new RainWeatherSystem({
     scene: deps.scene,
@@ -94,6 +101,15 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
       windZ: settings.weatherWindZ,
     };
   };
+  const currentWindWeatherSettings = (): WindWeatherSettings => {
+    const settings = deps.getSettings();
+    return {
+      enabled: settings.weatherMode === "wind",
+      intensity: settings.weatherIntensity,
+      windX: settings.weatherWindX,
+      windZ: settings.weatherWindZ,
+    };
+  };
   const currentRainWeatherSettings = (): RainWeatherSettings => {
     const settings = deps.getSettings();
     return {
@@ -134,6 +150,9 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
     if (settings.weatherMode === "meadow") {
       const stats = meadowWeather.getStats();
       deps.setStatsText(`meadow ${stats.particles} pollen motes`);
+    } else if (settings.weatherMode === "wind") {
+      const stats = windWeather.getStats();
+      deps.setStatsText(`wind ${stats.ribbons} noise ribbons`);
     } else if (settings.weatherMode === "rain") {
       const stats = rainWeather.getStats();
       deps.setStatsText(`rain terrain ${stats.hardSplashes} / water ${stats.waterSplashes}`);
@@ -153,6 +172,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
 
   const applySettings = () => {
     meadowWeather.applySettings(currentMeadowWeatherSettings());
+    windWeather.applySettings(currentWindWeatherSettings());
     rainWeather.applySettings(currentRainWeatherSettings());
     snowWeather.applySettings(currentSnowWeatherSettings());
     sandstormWeather.applySettings(currentSandstormWeatherSettings());
@@ -168,6 +188,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
     refreshStats,
     update(deltaSeconds, elapsedSeconds, cameraPosition, effectCenter) {
       meadowWeather.update(deltaSeconds, elapsedSeconds, effectCenter);
+      windWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
       rainWeather.update(deltaSeconds, elapsedSeconds, cameraPosition, effectCenter);
       snowWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
       sandstormWeather.update(deltaSeconds, elapsedSeconds, cameraPosition);
@@ -178,6 +199,7 @@ export function createWeatherController(deps: WeatherControllerDeps): WeatherCon
     },
     dispose() {
       meadowWeather.dispose();
+      windWeather.dispose();
       rainWeather.dispose();
       snowWeather.dispose();
       sandstormWeather.dispose();
