@@ -1,6 +1,6 @@
 import type { TreeLod } from "./tree_config.js";
 import type { TreePatch, TreeStats } from "./tree_system_types.js";
-import { auditTreeHeroFidelity, createEmptyTreeHeroFidelityStats } from "./tree_hero_fidelity.js";
+import { auditTreeHeroFidelity, estimateTreeGpuHeroFidelity } from "./tree_hero_fidelity.js";
 import type { TreeGeometryMap } from "./tree_geometry.js";
 import { buildTreeSystemStats } from "./tree_system_stats.js";
 import type { TreeGpuRingRuntimeState } from "./tree_system_gpu_ring_runtime.js";
@@ -18,12 +18,18 @@ export interface TreeRuntimeStatsInput {
 }
 
 export function buildTreeRuntimeStats(input: TreeRuntimeStatsInput): TreeStats {
+  const heroFidelity = input.reportsGpuRingStats
+    ? estimateTreeGpuHeroFidelity({
+      geometries: input.geometries,
+      nearCount: input.lodCounts.near,
+      groupCounts: input.gpuRing.stats.groupCounts,
+    })
+    : auditTreeHeroFidelity({ patches: input.patches, geometries: input.geometries });
+
   return buildTreeSystemStats({
     patches: input.patches,
     lodCounts: input.lodCounts,
-    heroFidelity: input.reportsGpuRingStats
-      ? createEmptyTreeHeroFidelityStats()
-      : auditTreeHeroFidelity({ patches: input.patches, geometries: input.geometries }),
+    heroFidelity,
     gpuRing: input.reportsGpuRingStats,
     gpuRingStats: input.gpuRing.stats,
     gpuVisibleCount: input.gpuRing.visibleCount,
