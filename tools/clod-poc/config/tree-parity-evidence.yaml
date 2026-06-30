@@ -1,0 +1,99 @@
+captures:
+  - id: low-sun-shadow-casters
+    description: TREE-7 low-sun shot proving off-screen GPU ring trees still feed shadow-only caster groups.
+    artifacts:
+      image: shots/tree-parity/latest/low-sun-shadow-casters.png
+      stats: shots/tree-parity/latest/low-sun-shadow-casters-stats.json
+      perf: perf-runs/tree-parity/latest/low-sun-shadow-casters-summary.json
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+      - artifact: perf
+        path: counters.treeGpuShadowCasterCountAvg
+        nonZero: true
+      - artifact: perf
+        path: counters.treeGpuShadowOverflowedFrames
+        max: 0
+
+  - id: noon-forest-interior-shadows
+    description: TREE-8 noon forest interior shot proving crown-proxy shadows are present and not overflowing.
+    artifacts:
+      image: shots/tree-parity/latest/noon-forest-interior-shadows.png
+      stats: shots/tree-parity/latest/noon-forest-interior-shadows-stats.json
+      perf: perf-runs/tree-parity/latest/noon-forest-interior-shadows-summary.json
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+      - artifact: perf
+        path: counters.treeGpuShadowCasterCountAvg
+        nonZero: true
+      - artifact: perf
+        path: counters.treeGpuShadowOverflowedFrames
+        max: 0
+
+  - id: six-species-gallery
+    description: TREE-9 ecology-sorted gallery shot proving the expanded species setup is exercised.
+    artifacts:
+      image: shots/tree-parity/latest/six-species-gallery.png
+      stats: shots/tree-parity/latest/six-species-gallery-stats.json
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+
+  - id: hero-forest-fidelity
+    description: TREE-10 hero forest shot proving near-tree geometry passes the triangle and foliage floors.
+    artifacts:
+      image: shots/tree-parity/latest/hero-forest-fidelity.png
+      stats: shots/tree-parity/latest/hero-forest-fidelity-stats.json
+      perf: perf-runs/tree-parity/latest/hero-forest-fidelity-summary.json
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+      - artifact: perf
+        path: counters.treeHeroNearTrianglesAvg
+        min: 100000
+      - artifact: perf
+        path: counters.treeHeroNearFoliageTrianglesAvg
+        nonZero: true
+      - artifact: perf
+        path: counters.treeHeroNearPassesTriangleFloorFrames
+        nonZero: true
+      - artifact: perf
+        path: counters.treeHeroNearPassesRealFoliageFrames
+        nonZero: true
+
+  - id: far-impostor-boundary
+    description: TREE-11 frozen far/impostor boundary shot proving no obvious pop, holes, or double draw.
+    artifacts:
+      image: shots/tree-parity/latest/far-impostor-boundary.png
+      stats: shots/tree-parity/latest/far-impostor-boundary-stats.json
+      perf: perf-runs/tree-parity/latest/far-impostor-boundary-summary.json
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+      - artifact: perf
+        path: counters.treeGpuVisibleCountAvg
+        nonZero: true
+      - artifact: perf
+        path: counters.treeImpostorTreesAvg
+        nonZero: true
