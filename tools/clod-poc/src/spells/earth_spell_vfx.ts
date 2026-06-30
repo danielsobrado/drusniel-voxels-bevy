@@ -1,8 +1,12 @@
 import * as THREE from "three";
 import type { EarthSpellVfxConfig, SpellColor } from "./spell_config.js";
 import { createEarthNodeMaterial, type EarthNodeMaterialHandle } from "./earth_node_material.js";
+import { createEarthDustNodeMaterial, type EarthDustNodeMaterialHandle } from "./earth_dust_node_material.js";
 
 const EARTH_DECAL_Y_BIAS = 0.035;
+const DUST_LAYER_MIN_COUNT = 8;
+const DUST_LAYER_MAX_COUNT = 18;
+const DUST_LAYER_DENSITY = 3.0;
 const SHARD_GOLDEN_ANGLE = 2.399963229728653;
 const SHARD_BASE_RADIUS_RATIO = 0.18;
 const SHARD_OUT_RADIUS_RATIO = 0.82;
@@ -35,6 +39,18 @@ interface ShardState {
   scale: number;
   spin: number;
   tilt: number;
+}
+
+interface DustLayerState {
+  mesh: THREE.Mesh;
+  handle: EarthDustNodeMaterialHandle;
+  angle: number;
+  startRadius: number;
+  endRadius: number;
+  rise: number;
+  size: number;
+  yaw: number;
+  wobble: number;
 }
 
 interface EarthSpellState {
@@ -77,13 +93,17 @@ function makeGroundQuat(normal: THREE.Vector3): THREE.Quaternion {
   return new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal.clone().normalize());
 }
 
+function seeded01(index: number, salt: number): number {
+  const value = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453;
+  return value - Math.floor(value);
+}
+
 function makeShardStates(config: EarthSpellVfxConfig): ShardState[] {
   const count = Math.max(0, Math.floor(config.shardCount));
   const span = Math.max(0, config.shardMaxHeight - config.shardMinHeight);
   return Array.from({ length: count }, (_, i) => {
     const n = count <= 1 ? 0 : i / (count - 1);
-    const jitter = Math.sin(i * 12.9898) * 43758.5453;
-    const rnd = jitter - Math.floor(jitter);
+    const rnd = seeded01(i, 0.0);
     return {
       angle: i * SHARD_GOLDEN_ANGLE + rnd * 0.35,
       startRadius: config.impactRadius * (SHARD_BASE_RADIUS_RATIO + rnd * 0.24),
@@ -92,6 +112,33 @@ function makeShardStates(config: EarthSpellVfxConfig): ShardState[] {
       scale: SHARD_MIN_SCALE + (SHARD_MAX_SCALE - SHARD_MIN_SCALE) * rnd,
       spin: 1.5 + rnd * 4.5,
       tilt: 0.25 + rnd * 0.65,
+    };
+  });
+}
+
+function makeDustLayers(scene: THREE.Scene, config: EarthSpellVfxConfig, geometry: THREE.PlaneGeometry): DustLayerState[] {
+  const count = Math.min(DUST_LAYER_MAX_COUNT, Math.max(DUST_LAYER_MIN_COUNT, Math.round(config.dustRadius * DUST_LAYER_DENSITY)));
+  return Array.from({ length: count }, (_, i) => {
+    const rndA = seeded01(i, 1.0);
+    const rndB = seeded01(i, 2.0);
+    const rndC = seeded01(i, 3.0);
+    const handle = createEarthDustNodeMaterial({ seed: i * 17.17 + 3.1, opacity: 0.40 + rndC * 0.24 });
+    const mesh = new THREE.Mesh(geometry, handle.material);
+    mesh.name = `earth-spell-dust-${i}`;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 4100 + i;
+    mesh.visible = false;
+    scene.add(mesh);
+    return {
+      mesh,
+      handle,
+      angle: i * SHARD_GOLDEN_ANGLE + rndA * 0.55,
+      startRadius: config.impactRadius * (0.15 + rndA * 0.20),
+      endRadius: config.dustRadius * (0.55 + rndB * 0.50),
+      rise: 0.75 + rndC * 1.85,
+      size: config.dustRadius * (0.34 + rndB * 0.42),
+      yaw: i * SHARD_GOLDEN_ANGLE + rndC * Math.PI,
+      wobble: 0.18 + rndA * 0.42,
     };
   });
 }
@@ -107,6 +154,9 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
   ground.visible = false;
   ground.scale.set(config.crackRadius * 2, config.crackRadius * 2, 1);
   scene.add(ground);
+
+  const dustGeometry = new THREE.PlaneGeometry(1, 1);
+  const dustLayers = makeDustLayers(scene, config, dustGeometry);
 
   const shardGeometry = new THREE.ConeGeometry(0.18, 0.72, 5, 1);
   const shardMaterial = new THREE.MeshStandardMaterial({
@@ -145,8 +195,32 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
     state.active = false;
     ground.visible = false;
     shards.visible = false;
+    for (const dust of dustLayers) dust.mesh.visible = false;
     light.visible = false;
     light.intensity = 0;
+  };
+
+  const updateDust = (progress: number, timeSeconds: number): void => {
+    const dustProgress = clamp01(progress * 1.18);
+    const travel = smoothstep(0.0, 0.78, dustProgress);
+    const fade = 1 - smoothstep(0.60, 1.0, dustProgress);
+    const lift = smoothstep(0.0, 0.58, dustProgress);
+    for (const dust of dustLayers) {
+      const radius = THREE.MathUtils.lerp(dust.startRadius, dust.endRadius, travel);
+      const wobble = Math.sin(timeSeconds * 3.2 + dust.angle * 2.7) * dust.wobble;
+      dust.mesh.position.set(
+        state.center.x + Math.cos(dust.angle) * (radius + wobble),
+        state.center.y + 0.38 + lift * dust.rise,
+        state.center.z + Math.sin(dust.angle) * (radius + wobble),
+      );
+      dust.mesh.rotation.set(0.04 * Math.sin(timeSeconds + dust.angle), dust.yaw + timeSeconds * 0.18, 0.10 * Math.cos(timeSeconds * 0.8 + dust.angle));
+      const width = dust.size * (0.72 + travel * 0.62);
+      const height = dust.size * (0.48 + lift * 0.72);
+      dust.mesh.scale.set(width, height, 1);
+      dust.mesh.visible = fade > 0.015;
+      dust.handle.uTime.value = timeSeconds;
+      dust.handle.uProgress.value = progress;
+    }
   };
 
   const updateShards = (progress: number): void => {
@@ -189,6 +263,7 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
       ground.position.copy(state.center).addScaledVector(state.normal, EARTH_DECAL_Y_BIAS);
       ground.quaternion.copy(makeGroundQuat(state.normal));
       ground.visible = true;
+      for (const dust of dustLayers) dust.mesh.visible = true;
       light.position.copy(state.center).addScaledVector(state.normal, 1.2);
       light.visible = true;
       shards.visible = shardStates.length > 0;
@@ -203,14 +278,20 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
       materialHandle.uTime.value = frame.timeSeconds;
       materialHandle.uProgress.value = frame.progress;
       light.intensity = config.glowIntensity * computeEarthLightEnvelope(frame.progress);
+      updateDust(frame.progress, frame.timeSeconds);
       updateShards(frame.progress);
     },
     dispose: () => {
       scene.remove(ground);
       scene.remove(shards);
       scene.remove(light);
+      for (const dust of dustLayers) {
+        scene.remove(dust.mesh);
+        dust.handle.material.dispose();
+      }
       ground.geometry.dispose();
       materialHandle.material.dispose();
+      dustGeometry.dispose();
       shardGeometry.dispose();
       shardMaterial.dispose();
     },
