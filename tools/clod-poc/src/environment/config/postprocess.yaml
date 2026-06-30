@@ -26,6 +26,11 @@ postprocess:
     radius_px: 2.0
     depth_bias: 0.002
 
+  clarity:
+    enabled: true
+    sharpen: 0.08
+    dither: 0.003
+
   god_rays:
     mode: off
     density: 0.96
