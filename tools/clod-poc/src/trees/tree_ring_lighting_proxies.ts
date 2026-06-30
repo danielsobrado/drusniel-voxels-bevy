@@ -17,6 +17,12 @@ import {
   treeRingLodParams,
   treeWorldCellFromSlot,
 } from "./tree_ring_math.js";
+import {
+  TREE_RING_SHADOW_CASCADE_COUNT,
+  treeRingShadowCasterGroupCount,
+  treeRingShadowCasterGroupIndex,
+  treeRingShadowCasterCascadeIndices,
+} from "./tree_ring_shadow_casters.js";
 
 export const TREE_GPU_RING_LIGHTING_PROXY_CAP = 2000;
 
@@ -40,13 +46,17 @@ export interface TreeRingLightingProxyOptions {
 
 export interface TreeRingValidationCountOptions extends TreeRingLightingProxyOptions {
   frustumPlanes?: ArrayLike<number>;
+  shadowCascadePlanes?: ArrayLike<number>;
   maxInstancesPerGroup: number;
+  maxShadowCastersPerGroup?: number;
 }
 
 export interface TreeRingValidationCounts {
   counts: Record<TreeLod, number>;
   groupCounts: number[];
   overflowed: boolean;
+  shadowGroupCounts: number[];
+  shadowOverflowed: boolean;
 }
 
 export function treeRingLightingProxyKey(options: TreeRingLightingProxyOptions): string {
@@ -66,9 +76,7 @@ export function treeRingLightingProxyKey(options: TreeRingLightingProxyOptions):
     options.settings.ecology.clustering.clusterScaleM,
     options.settings.ecology.clustering.clusterStrength,
     options.settings.ecology.clustering.clusterThreshold,
-    speciesWeight(options.settings, "oak"),
-    speciesWeight(options.settings, "pine"),
-    speciesWeight(options.settings, "dead"),
+    ...TREE_SPECIES.map((species) => speciesWeight(options.settings, species)),
     Math.max(0, Math.floor(options.maxProxies ?? TREE_GPU_RING_LIGHTING_PROXY_CAP)),
   ].join("|");
 }
@@ -122,7 +130,16 @@ export function generateTreeRingLightingProxies(options: TreeRingLightingProxyOp
 export function generateTreeRingValidationCounts(options: TreeRingValidationCountOptions): TreeRingValidationCounts {
   const counts: Record<TreeLod, number> = { near: 0, mid: 0, far: 0, impostor: 0 };
   const rawGroupCounts = new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0);
-  if (!options.settings.enabled) return { counts, groupCounts: rawGroupCounts, overflowed: false };
+  const rawShadowGroupCounts = new Array<number>(treeRingShadowCasterGroupCount(TREE_RING_SHADOW_CASCADE_COUNT)).fill(0);
+  if (!options.settings.enabled) {
+    return {
+      counts,
+      groupCounts: rawGroupCounts,
+      overflowed: false,
+      shadowGroupCounts: rawShadowGroupCounts,
+      shadowOverflowed: false,
+    };
+  }
 
   const sampler = options.sampler ?? defaultTreeTerrainSampler;
   const settings = options.settings;
@@ -132,6 +149,7 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
   const lodParams = treeRingLodParams(settings);
   const ringLodParams = { ...lodParams, radius: Math.min(settings.distanceM, lodParams.radius) };
   const maxInstancesPerGroup = Math.max(0, Math.floor(options.maxInstancesPerGroup));
+  const maxShadowCastersPerGroup = Math.max(0, Math.floor(options.maxShadowCastersPerGroup ?? 0));
 
   for (let slot = 0; slot < slots; slot++) {
     const [cellX, cellZ] = treeWorldCellFromSlot(slot, grid, TREE_GPU_RING_CELL, options.centerX, options.centerZ);
@@ -146,12 +164,21 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
     const normalY = sampler.surfaceNormal(x, z)[1];
     const accept = treeAcceptMask(terrainHeight, normalY, x, z, acceptParams);
     if (treeRingHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
-    if (!treeRingPointInFrustum(x, terrainHeight + 4, z, 8, options.frustumPlanes)) continue;
 
     const species = selectRingSpecies(settings, treeRingHash(cellX, cellZ, settings.seed, 409));
     if (!species) continue;
 
     const ring = treeLodRing(distance, ringLodParams);
+    countShadowCasterGroups({
+      rawShadowGroupCounts,
+      species,
+      ring,
+      center: [x, terrainHeight + 4, z],
+      shadowCascadePlanes: options.shadowCascadePlanes,
+      maxShadowCastersPerGroup,
+    });
+
+    if (!treeRingPointInFrustum(x, terrainHeight + 4, z, 8, options.frustumPlanes)) continue;
     for (const lod of TREE_LODS) {
       if (!ring.active[lod]) continue;
       rawGroupCounts[treeGpuRingGroupIndex(species, lod)]++;
@@ -159,6 +186,7 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
   }
 
   const groupCounts = rawGroupCounts.map((count) => Math.min(count, maxInstancesPerGroup));
+  const shadowGroupCounts = rawShadowGroupCounts.map((count) => Math.min(count, maxShadowCastersPerGroup));
   for (const species of TREE_SPECIES) {
     for (const lod of TREE_LODS) {
       counts[lod] += groupCounts[treeGpuRingGroupIndex(species, lod)] ?? 0;
@@ -169,7 +197,26 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
     counts,
     groupCounts,
     overflowed: rawGroupCounts.some((count) => count > maxInstancesPerGroup),
+    shadowGroupCounts,
+    shadowOverflowed: rawShadowGroupCounts.some((count) => count > maxShadowCastersPerGroup),
   };
+}
+
+function countShadowCasterGroups(input: {
+  rawShadowGroupCounts: number[];
+  species: TreeSpeciesId;
+  ring: ReturnType<typeof treeLodRing>;
+  center: readonly [number, number, number];
+  shadowCascadePlanes?: ArrayLike<number>;
+  maxShadowCastersPerGroup: number;
+}): void {
+  if (!input.shadowCascadePlanes || input.maxShadowCastersPerGroup <= 0) return;
+  for (const lod of TREE_LODS) {
+    if (!input.ring.active[lod]) continue;
+    for (const cascade of treeRingShadowCasterCascadeIndices(input.center, 12, input.shadowCascadePlanes)) {
+      input.rawShadowGroupCounts[treeRingShadowCasterGroupIndex(input.species, lod, cascade)]++;
+    }
+  }
 }
 
 function treeRingHash(cellX: number, cellZ: number, seed: number, salt: number): number {

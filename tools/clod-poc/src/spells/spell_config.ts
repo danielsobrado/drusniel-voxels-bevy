@@ -1,6 +1,8 @@
 import { load } from "js-yaml";
 import spellsYamlText from "../../config/spells.yaml?raw";
 
+export type SpellColor = [number, number, number];
+
 export interface FireSpellVfxConfig {
   flameScale: number;
   worldWidth: number;
@@ -8,6 +10,11 @@ export interface FireSpellVfxConfig {
   handForwardM: number;
   handRightM: number;
   handUpM: number;
+  glowColor: SpellColor;
+  glowIntensity: number;
+  glowDistance: number;
+  glowDecay: number;
+  glowLocalYRatio: number;
 }
 
 export type WaterSpellVfxConfig = FireSpellVfxConfig;
@@ -55,21 +62,57 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
     label: "Fire",
     castDurationMs: 2600,
     audio: { volume: 0.38 },
-    vfx: { flameScale: 1.0, worldWidth: 1.6, worldHeight: 5.0, handForwardM: 0.5, handRightM: 0.35, handUpM: -0.35 },
+    vfx: {
+      flameScale: 1.0,
+      worldWidth: 1.6,
+      worldHeight: 5.0,
+      handForwardM: 0.5,
+      handRightM: 0.35,
+      handUpM: -0.35,
+      glowColor: [1.0, 0.48, 0.14],
+      glowIntensity: 3.6,
+      glowDistance: 8.5,
+      glowDecay: 2.0,
+      glowLocalYRatio: 0.34,
+    },
   },
   water: {
     id: "water",
     label: "Water",
     castDurationMs: 2200,
     audio: { volume: 0.34 },
-    vfx: { flameScale: 1.0, worldWidth: 1.2, worldHeight: 4.5, handForwardM: 0.5, handRightM: 0.35, handUpM: -0.35 },
+    vfx: {
+      flameScale: 1.0,
+      worldWidth: 1.2,
+      worldHeight: 4.5,
+      handForwardM: 0.5,
+      handRightM: 0.35,
+      handUpM: -0.35,
+      glowColor: [0.35, 0.78, 1.0],
+      glowIntensity: 1.8,
+      glowDistance: 6.5,
+      glowDecay: 2.0,
+      glowLocalYRatio: 0.38,
+    },
   },
   air: {
     id: "air",
     label: "Air",
     castDurationMs: 1800,
     audio: { volume: 0.28 },
-    vfx: { flameScale: 1.0, worldWidth: 1.45, worldHeight: 5.4, handForwardM: 0.5, handRightM: 0.35, handUpM: -0.35 },
+    vfx: {
+      flameScale: 1.0,
+      worldWidth: 1.45,
+      worldHeight: 5.4,
+      handForwardM: 0.5,
+      handRightM: 0.35,
+      handUpM: -0.35,
+      glowColor: [0.84, 0.98, 1.0],
+      glowIntensity: 1.2,
+      glowDistance: 6.0,
+      glowDecay: 2.0,
+      glowLocalYRatio: 0.42,
+    },
   },
 };
 
@@ -88,6 +131,18 @@ function readNumber(record: Record<string, unknown> | undefined, key: string, fa
   return Math.min(max, Math.max(min, value));
 }
 
+function readColor(record: Record<string, unknown> | undefined, key: string, fallback: SpellColor): SpellColor {
+  const value = record?.[key];
+  if (!Array.isArray(value) || value.length !== 3) return fallback;
+  const color = value.map(Number);
+  if (!color.every(Number.isFinite)) return fallback;
+  return [
+    Math.min(1, Math.max(0, color[0]!)),
+    Math.min(1, Math.max(0, color[1]!)),
+    Math.min(1, Math.max(0, color[2]!)),
+  ];
+}
+
 function readVfxConfig(record: Record<string, unknown> | undefined, fallback: FireSpellVfxConfig): FireSpellVfxConfig {
   return {
     flameScale: readNumber(record, "flame_scale", fallback.flameScale, 0.25, 3),
@@ -96,6 +151,11 @@ function readVfxConfig(record: Record<string, unknown> | undefined, fallback: Fi
     handForwardM: readNumber(record, "hand_forward_m", fallback.handForwardM, -5, 10),
     handRightM: readNumber(record, "hand_right_m", fallback.handRightM, -5, 5),
     handUpM: readNumber(record, "hand_up_m", fallback.handUpM, -5, 5),
+    glowColor: readColor(record, "glow_color", fallback.glowColor),
+    glowIntensity: readNumber(record, "glow_intensity", fallback.glowIntensity, 0, 12),
+    glowDistance: readNumber(record, "glow_distance", fallback.glowDistance, 0, 30),
+    glowDecay: readNumber(record, "glow_decay", fallback.glowDecay, 0, 4),
+    glowLocalYRatio: readNumber(record, "glow_local_y_ratio", fallback.glowLocalYRatio, -1, 2),
   };
 }
 

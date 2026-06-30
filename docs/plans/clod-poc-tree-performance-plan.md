@@ -38,7 +38,14 @@ but do not help the near canopy.
 # EPIC TP-A — Trustworthy GPU timing (unblocks everything)
 
 ## TP-1 — Per-pass GPU timestamps that actually work
-**Type:** Story · **Depends on:** —
+**Type:** Story · **Depends on:** — · **Status:** code landed (needs headed real-GPU confirm)
+
+Implemented via the reference's profiler pattern (three already allocates the
+timestamp pairs; we label + read the per-uid pool instead of the SUM). See
+[../performance/clod-poc-gpu-pass-timing.md](../performance/clod-poc-gpu-pass-timing.md).
+Files: `src/core/gpu_profiler.ts` (+ test), `src/core/gpu_pass_timing.ts`,
+`engine_stats.ts`, `renderer_backend.ts` (gated `trackTimestamp`), perf-probe
+`gpuPasses` / `gpuPassesAvg`.
 
 **Description:** Replace the unreliable `info.render.timestamp` read with explicit
 WebGPU **timestamp-query** brackets around the tree passes (the RTX adapter exposes
@@ -47,10 +54,15 @@ real per-phase GPU ms (main tree pass, shadow caster pass, compute dispatch) int
 headed real-GPU perf report. No production behaviour change when disabled.
 
 **Acceptance criteria:**
-- [ ] Headed real-GPU report shows non-degenerate GPU ms per tree phase that sum
-      sensibly toward the frame budget (not ~0.02 ms).
-- [ ] Off by default / gated; zero cost in normal play.
-- [ ] Documented method so future tree perf work A/Bs against real GPU ms.
+- [~] Headed real-GPU report shows non-degenerate GPU ms per tree phase that sum
+      sensibly toward the frame budget (not ~0.02 ms). *(Confirmed on RTX 4080
+      2026-06-30: profiler reads real per-uid durations — `shadow.c2 ≈ 2.7–3.0 ms`,
+      usable for TP-8. **Gap:** three's pass-boundary timestamps under-report the
+      main color pass (~0.01 ms), so the tree MAIN-pass ms is not yet trustworthy
+      — needs inside-pass brackets or a dedicated tree RT. See doc.)*
+- [x] Off by default / gated; zero cost in normal play. *(per-frame resolve gated
+      on `?perfProbe=1`/`?gpuTiming=1`; inert collector on WebGL / unsupported.)*
+- [x] Documented method so future tree perf work A/Bs against real GPU ms.
 
 **AI execution prompt:**
 ```

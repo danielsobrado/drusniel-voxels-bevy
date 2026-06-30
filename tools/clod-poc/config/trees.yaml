@@ -34,9 +34,9 @@ trees:
     far_fraction: 0.35
     impostor_fraction: 1.0
     hysteresis_m: 8
-    crossfade_enabled: false
-    crossfade_band_m: 0
-    dither_enabled: false
+    crossfade_enabled: true
+    crossfade_band_m: 24
+    dither_enabled: true
     shadows_max_lod: near
     budgets:
       # Budgets are high because procedural grammar trees generate real

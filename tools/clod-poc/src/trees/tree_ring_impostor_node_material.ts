@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   abs,
+  cameraPosition,
   clamp,
   cos,
   dot,
@@ -48,6 +49,8 @@ const LOD_COLORS: Record<TreeLod, THREE.Color> = {
 };
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
+const TREE_RING_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
+const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
 
 function fallbackLighting(): EnvironmentLighting {
   return {
@@ -99,17 +102,22 @@ export function createTreeRingImpostorNodeMaterialHandle(
     const rotZ: TslNode = s.mul(localPosition.x).negate().add(c.mul(localPosition.z));
     const positionNode: TslNode = vec3(aWorldXZ.x.add(rotX), aHeight.add(localPosition.y), aWorldXZ.y.add(rotZ));
 
+    const dirWorld: TslNode = normalize(vec3(
+      cameraPosition.x.sub(aWorldXZ.x),
+      cameraPosition.y.sub(aHeight.add(float(atlas.centerY ?? 0).mul(aScale))),
+      cameraPosition.z.sub(aWorldXZ.y),
+    ));
     const viewDirection: TslNode = normalize(vec3(
-      uFadeCenter.x.sub(aWorldXZ.x),
-      float(0),
-      uFadeCenter.y.sub(aWorldXZ.y),
+      dirWorld.x.mul(c).sub(dirWorld.z.mul(s)),
+      dirWorld.y,
+      dirWorld.x.mul(s).add(dirWorld.z.mul(c)),
     ));
     const impostor = treeRingImpostorFourFrameSample(atlas, uv(), viewDirection);
     const albedo: TslNode = debugColor
       ? vec3(debugColor.r, debugColor.g, debugColor.b)
       : impostor.albedo;
     const lit: TslNode = atlas.normalDepth && !debugColor
-      ? relightTreeRingImpostor(albedo, impostor.normal, uLight, uSun, uSky, uGround)
+      ? relightTreeRingImpostor(albedo, impostor.normal, c, s, uLight, uSun, uSky, uGround)
       : albedo;
 
     const lodMask: TslNode = treeRingLodMask(
@@ -201,7 +209,12 @@ function treeRingImpostorFourFrameSample(
   return {
     albedo: s00.albedo.mul(w00).add(s10.albedo.mul(w10)).add(s01.albedo.mul(w01)).add(s11.albedo.mul(w11)),
     coverage: s00.coverage.mul(w00).add(s10.coverage.mul(w10)).add(s01.coverage.mul(w01)).add(s11.coverage.mul(w11)),
-    normal: s00.normal.mul(w00).add(s10.normal.mul(w10)).add(s01.normal.mul(w01)).add(s11.normal.mul(w11)),
+    normal: normalize(
+      decodeTreeRingImpostorPackedNormal(s00.normal).mul(w00)
+        .add(decodeTreeRingImpostorPackedNormal(s10.normal).mul(w10))
+        .add(decodeTreeRingImpostorPackedNormal(s01.normal).mul(w01))
+        .add(decodeTreeRingImpostorPackedNormal(s11.normal).mul(w11)),
+    ),
   };
 }
 
@@ -233,6 +246,10 @@ function treeRingImpostorAtlasSample(
   };
 }
 
+function decodeTreeRingImpostorPackedNormal(packedNormal: TslNode): TslNode {
+  return packedNormal.mul(2).sub(1);
+}
+
 function treeRingImpostorAtlasUv(
   atlas: TreeImpostorAtlas,
   baseUv: TslNode,
@@ -261,18 +278,28 @@ function inferAtlasPaddingPx(atlas: TreeImpostorAtlas): number {
 
 function relightTreeRingImpostor(
   albedo: TslNode,
-  packedNormal: TslNode,
+  localNormal: TslNode,
+  yawCos: TslNode,
+  yawSin: TslNode,
   uLight: TslNode,
   uSun: TslNode,
   uSky: TslNode,
   uGround: TslNode,
 ): TslNode {
-  const n0: TslNode = normalize(packedNormal.mul(2).sub(1));
+  const n0: TslNode = normalize(vec3(
+    localNormal.x.mul(yawCos).add(localNormal.z.mul(yawSin)),
+    localNormal.y,
+    localNormal.z.mul(yawCos).sub(localNormal.x.mul(yawSin)),
+  ));
   const n: TslNode = frontFacing.select(n0, n0.negate());
-  const sun: TslNode = max(dot(n, uLight), 0.0);
+  const sun: TslNode = clamp(max(dot(n, uLight), 0.0), 0.0, TREE_RING_IMPOSTOR_SUN_MAX);
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi: TslNode = mix(uGround, uSky, sky);
-  return albedo.mul(0.25).add(albedo.mul(hemi.add(uSun.mul(sun))));
+  const direct: TslNode = uSun.mul(sun);
+  const back: TslNode = max(dot(n.negate(), uLight), 0.0);
+  const transmission: TslNode = albedo.mul(uSun).mul(back).mul(TREE_RING_IMPOSTOR_LEAF_TRANSMISSION);
+  const lit: TslNode = albedo.mul(0.25).add(albedo.mul(hemi.add(direct))).add(transmission);
+  return clamp(lit, 0.0, 1.0);
 }
 
 function treeAboveWaterKeep(hydrology: TreeHydrologyWater | undefined, worldXZ: TslNode): TslNode | null {

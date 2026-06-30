@@ -96,6 +96,8 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   treeGpuCandidateCount: number;
   treeGpuAcceptedCount: number;
   treeGpuVisibleCount: number;
+  treeGpuShadowCasterCount: number;
+  treeGpuShadowOverflowed: number;
   treeGpuDispatchMs: number | null;
   customPropGpuStatus: PropGpuStatus | "unknown";
   customPropTotalInstances: number;
@@ -104,6 +106,8 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   customPropGpuVisibleCount: number;
   customPropGpuOverflowed: number;
   customPropGpuDispatchMs: number | null;
+  /** TP-1 real per-pass GPU ms (label → ms) for this frame; absent on WebGL. */
+  gpuPasses?: Record<string, number>;
 }
 
 export interface FramePerfMetricStats {
@@ -137,6 +141,8 @@ export interface FramePerfSummary {
     treeGpuCandidateCountAvg: number;
     treeGpuAcceptedCountAvg: number;
     treeGpuVisibleCountAvg: number;
+    treeGpuShadowCasterCountAvg: number;
+    treeGpuShadowOverflowedFrames: number;
     treeNearTreesAvg: number;
     treeMidTreesAvg: number;
     treeFarTreesAvg: number;
@@ -154,6 +160,8 @@ export interface FramePerfSummary {
     customPropGpuVisibleCountAvg: number;
     customPropGpuOverflowedFrames: number;
     customPropGpuDispatchMsAvg: number;
+    /** TP-1: mean GPU ms per pass label across sampled frames. */
+    gpuPassesAvg: Record<string, number>;
   };
 }
 
@@ -266,6 +274,23 @@ function minPositiveCounter(samples: readonly FramePerfSample[], key: keyof Fram
   return values[0] ?? 0;
 }
 
+function avgGpuPasses(samples: readonly FramePerfSample[]): Record<string, number> {
+  const sums: Record<string, number> = {};
+  const counts: Record<string, number> = {};
+  for (const sample of samples) {
+    if (!sample.gpuPasses) continue;
+    for (const [label, ms] of Object.entries(sample.gpuPasses)) {
+      sums[label] = (sums[label] ?? 0) + ms;
+      counts[label] = (counts[label] ?? 0) + 1;
+    }
+  }
+  const avg: Record<string, number> = {};
+  for (const label of Object.keys(sums)) {
+    avg[label] = sums[label] / Math.max(1, counts[label]);
+  }
+  return avg;
+}
+
 function countTreeGpuStatuses(samples: readonly FramePerfSample[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const sample of samples) {
@@ -309,6 +334,8 @@ export function summarizeFramePerfSamples(
       treeGpuCandidateCountAvg: avgCounter(samples, "treeGpuCandidateCount"),
       treeGpuAcceptedCountAvg: avgCounter(samples, "treeGpuAcceptedCount"),
       treeGpuVisibleCountAvg: avgCounter(samples, "treeGpuVisibleCount"),
+      treeGpuShadowCasterCountAvg: avgCounter(samples, "treeGpuShadowCasterCount"),
+      treeGpuShadowOverflowedFrames: samples.reduce((sum, sample) => sum + sample.treeGpuShadowOverflowed, 0),
       treeNearTreesAvg: avgCounter(samples, "treeNearTrees"),
       treeMidTreesAvg: avgCounter(samples, "treeMidTrees"),
       treeFarTreesAvg: avgCounter(samples, "treeFarTrees"),
@@ -326,6 +353,7 @@ export function summarizeFramePerfSamples(
       customPropGpuVisibleCountAvg: avgCounter(samples, "customPropGpuVisibleCount"),
       customPropGpuOverflowedFrames: samples.reduce((sum, sample) => sum + sample.customPropGpuOverflowed, 0),
       customPropGpuDispatchMsAvg: avgCounter(samples, "customPropGpuDispatchMs"),
+      gpuPassesAvg: avgGpuPasses(samples),
     },
   };
 }

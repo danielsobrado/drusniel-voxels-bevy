@@ -1,11 +1,13 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
+import { treeGpuRingGroupIndex } from "../gpu/tree_ring_compute.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap, TreeSpeciesGeometryMap } from "./tree_geometry.js";
 import type { TreePatch } from "./tree_system_types.js";
 import {
   auditTreeHeroFidelity,
   createEmptyTreeHeroFidelityStats,
+  estimateTreeGpuHeroFidelity,
   treeHeroGeometryStats,
   TREE_HERO_NEAR_TRIANGLE_FLOOR,
 } from "./tree_hero_fidelity.js";
@@ -38,6 +40,34 @@ describe("TREE-10 hero tree fidelity audit", () => {
     expect(stats.avgNearTreeTriangles).toBe(1.5);
     expect(stats.passesTriangleFloor).toBe(true);
     expect(stats.passesRealFoliage).toBe(true);
+  });
+
+  it("estimates GPU ring near-tree triangles from species group counts", () => {
+    const geometries = geometryMap({ oak: geometryWithFoliageMask([1, 1, 1]), pine: geometryWithFoliageMask([1, 1, 1, 1, 1, 1]) });
+    const groupCounts = new Array(TREE_SPECIES.length * TREE_LODS.length).fill(0) as number[];
+    groupCounts[treeGpuRingGroupIndex("oak", "near")] = 3;
+    groupCounts[treeGpuRingGroupIndex("pine", "near")] = 2;
+
+    const stats = estimateTreeGpuHeroFidelity({ geometries, nearCount: 5, groupCounts, triangleFloor: 7 });
+
+    expect(stats.nearTreeCount).toBe(5);
+    expect(stats.nearTriangleCount).toBe(7);
+    expect(stats.nearFoliageTriangleCount).toBe(7);
+    expect(stats.minNearTreeTriangles).toBe(1);
+    expect(stats.avgNearTreeTriangles).toBe(1.4);
+    expect(stats.passesTriangleFloor).toBe(true);
+    expect(stats.passesRealFoliage).toBe(true);
+  });
+
+  it("falls back to average near geometry cost when GPU group counts are unavailable", () => {
+    const geometries = geometryMap({ oak: geometryWithFoliageMask([1, 1, 1]), pine: geometryWithFoliageMask([1, 1, 1, 1, 1, 1]) });
+
+    const stats = estimateTreeGpuHeroFidelity({ geometries, nearCount: 2, groupCounts: [], triangleFloor: 1 });
+
+    expect(stats.nearTreeCount).toBe(2);
+    expect(stats.nearTriangleCount).toBeGreaterThan(0);
+    expect(stats.nearFoliageTriangleCount).toBeGreaterThan(0);
+    expect(stats.passesTriangleFloor).toBe(true);
   });
 
   it("ignores invisible patches and fails an empty hero shot", () => {

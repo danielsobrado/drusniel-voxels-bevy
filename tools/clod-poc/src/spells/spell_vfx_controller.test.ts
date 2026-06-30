@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
   computeSpellFrame,
+  computeSpellLightEnvelope,
   createSpellPoseResolver,
   createSpellVfxController,
   orientFireJet,
@@ -19,6 +20,11 @@ const meshCfg: SpellVfxMeshConfig = {
   handForwardM: 0,
   handRightM: 0,
   handUpM: 0,
+  glowColor: [1, 0.5, 0.2],
+  glowIntensity: 2.5,
+  glowDistance: 7,
+  glowDecay: 2,
+  glowLocalYRatio: 0.35,
 };
 
 describe("computeSpellFrame", () => {
@@ -33,6 +39,16 @@ describe("computeSpellFrame", () => {
   it("becomes inactive once the duration elapses", () => {
     expect(computeSpellFrame(1000, 2000, 3000).active).toBe(false);
     expect(computeSpellFrame(1000, 2000, 3500).active).toBe(false);
+  });
+});
+
+describe("computeSpellLightEnvelope", () => {
+  it("ramps in, holds, and fades out", () => {
+    expect(computeSpellLightEnvelope(0)).toBe(0);
+    expect(computeSpellLightEnvelope(0.06)).toBeGreaterThan(0.4);
+    expect(computeSpellLightEnvelope(0.2)).toBeGreaterThan(0.8);
+    expect(computeSpellLightEnvelope(0.72)).toBeGreaterThan(0.8);
+    expect(computeSpellLightEnvelope(1)).toBe(0);
   });
 });
 
@@ -113,15 +129,20 @@ describe("createSpellVfxController", () => {
     });
 
     const fireMesh = scene.getObjectByName("fire-spell") as THREE.Mesh;
+    const fireLight = scene.getObjectByName("fire-spell-glow") as THREE.PointLight;
     expect(fireMesh).toBeTruthy();
     expect(fireMesh.visible).toBe(false);
+    expect(fireLight.visible).toBe(false);
+    expect(fireLight.color.r).toBeCloseTo(meshCfg.glowColor[0]);
 
     controller.playFire(2000);
     expect(fireMesh.visible).toBe(true);
+    expect(fireLight.visible).toBe(true);
 
     clock = 2000;
     controller.update(clock);
     expect(fireMesh.visible).toBe(true);
+    expect(fireLight.intensity).toBeGreaterThan(0);
     expect(fireMesh.position.x).toBeCloseTo(10);
     expect(fireMesh.position.y).toBeCloseTo(5);
     expect(fireMesh.position.z).toBeCloseTo(0);
@@ -131,6 +152,8 @@ describe("createSpellVfxController", () => {
     clock = 3500;
     controller.update(clock);
     expect(fireMesh.visible).toBe(false);
+    expect(fireLight.visible).toBe(false);
+    expect(fireLight.intensity).toBe(0);
 
     controller.dispose();
     expect(scene.getObjectByName("fire-spell")).toBeFalsy();
@@ -148,26 +171,32 @@ describe("createSpellVfxController", () => {
       getCamera: () => camera,
       fire: meshCfg,
       water: meshCfg,
-      air: { ...meshCfg, handForwardM: 0.5, handRightM: 2, handUpM: -1 },
+      air: { ...meshCfg, handForwardM: 0.5, handRightM: 2, handUpM: -1, glowLocalYRatio: 0.5 },
       now: () => clock,
     });
 
     const airMesh = scene.getObjectByName("air-spell") as THREE.Mesh;
+    const airLight = scene.getObjectByName("air-spell-glow") as THREE.PointLight;
     expect(airMesh).toBeTruthy();
     expect(airMesh.visible).toBe(false);
+    expect(airLight.visible).toBe(false);
+    expect(airLight.position.y).toBeCloseTo(meshCfg.worldHeight * 0.5);
 
     controller.playAir(1000);
     expect(airMesh.visible).toBe(true);
+    expect(airLight.visible).toBe(true);
 
     clock = 1200;
     controller.update(clock);
     expect(airMesh.position.x).toBeCloseTo(2);
     expect(airMesh.position.y).toBeCloseTo(-1);
     expect(airMesh.position.z).toBeCloseTo(-0.5);
+    expect(airLight.intensity).toBeGreaterThan(0);
 
     clock = 2100;
     controller.update(clock);
     expect(airMesh.visible).toBe(false);
+    expect(airLight.visible).toBe(false);
 
     controller.dispose();
   });

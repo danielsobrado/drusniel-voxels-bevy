@@ -5,6 +5,7 @@ import {
   TreeGpuRingCompute,
   treeGpuRingGroupCapacity,
   TREE_GPU_RING_GROUP_COUNT,
+  TREE_GPU_RING_SHADOW_GROUP_COUNT,
   treeGpuRingKey,
   treeGpuRingSlotCount,
   type TreeGpuRingIndexCounts,
@@ -139,7 +140,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
     });
     if (dispatched) setTreeGpuRingDrawsVisible(input.state, true);
     input.state.stats = input.state.compute.stats(true);
-    validateTreeGpuRingAgainstCpu(input, center, frustumPlanes);
+    validateTreeGpuRingAgainstCpu(input, center, frustumPlanes, shadowCascadePlanes);
   }
 
   input.lodCounts.near = input.state.stats.counts.near;
@@ -214,6 +215,7 @@ function validateTreeGpuRingAgainstCpu(
   input: TreeGpuRingRuntimeInput,
   center: THREE.Vector3,
   frustumPlanes: ArrayLike<number>,
+  shadowCascadePlanes: ArrayLike<number> | undefined,
 ): void {
   if (!input.settings.gpu.debugValidateAgainstCpu || input.state.stats.readbackMs === null) return;
 
@@ -221,29 +223,43 @@ function validateTreeGpuRingAgainstCpu(
     Math.round(center.x / TREE_GPU_RING_CELL),
     Math.round(center.z / TREE_GPU_RING_CELL),
     input.state.stats.groupCounts.join(","),
+    input.state.stats.shadowGroupCounts.join(","),
     input.state.stats.overflowed ? 1 : 0,
+    input.state.stats.shadowOverflowed ? 1 : 0,
   ].join("|");
   if (signature === input.state.lastValidationSignature) return;
   input.state.lastValidationSignature = signature;
 
+  const capacity = treeGpuRingGroupCapacity(input.settings);
   const expected = generateTreeRingValidationCounts({
     centerX: center.x,
     centerZ: center.z,
     worldCells: input.worldCells,
     settings: input.settings,
     sampler: input.sampler,
-    maxInstancesPerGroup: treeGpuRingGroupCapacity(input.settings),
+    maxInstancesPerGroup: capacity,
+    maxShadowCastersPerGroup: shadowCascadePlanes ? capacity : 0,
     frustumPlanes,
+    shadowCascadePlanes,
   });
   const deltas = TREE_LODS.map((lod) => Math.abs((input.state.stats.counts[lod] ?? 0) - (expected.counts[lod] ?? 0)));
   const maxDelta = Math.max(...deltas);
   const tolerance = Math.max(4, Math.ceil(Math.max(visibleTreeLodCount(expected.counts), visibleTreeLodCount(input.state.stats.counts)) * 0.02));
-  if (maxDelta > tolerance || expected.overflowed !== input.state.stats.overflowed) {
+  const shadowMaxDelta = maxGroupDelta(input.state.stats.shadowGroupCounts, expected.shadowGroupCounts);
+  const shadowTolerance = Math.max(4, Math.ceil(Math.max(sumCounts(expected.shadowGroupCounts), sumCounts(input.state.stats.shadowGroupCounts)) * 0.02));
+  if (
+    maxDelta > tolerance ||
+    expected.overflowed !== input.state.stats.overflowed ||
+    shadowMaxDelta > shadowTolerance ||
+    expected.shadowOverflowed !== input.state.stats.shadowOverflowed
+  ) {
     console.warn(
       "[trees-gpu-ring] CPU/GPU count parity failed " +
       `gpu=${formatTreeLodCounts(input.state.stats.counts)} cpu=${formatTreeLodCounts(expected.counts)} ` +
       `maxDelta=${maxDelta} tolerance=${tolerance} ` +
-      `overflow gpu=${input.state.stats.overflowed} cpu=${expected.overflowed}`,
+      `overflow gpu=${input.state.stats.overflowed} cpu=${expected.overflowed} ` +
+      `shadowMaxDelta=${shadowMaxDelta} shadowTolerance=${shadowTolerance} ` +
+      `shadowOverflow gpu=${input.state.stats.shadowOverflowed} cpu=${expected.shadowOverflowed}`,
     );
   }
 }
@@ -261,6 +277,19 @@ function treeGpuRingIndexCounts(input: TreeGpuRingRuntimeInput): TreeGpuRingInde
 
 function indexCountFor(geometry: THREE.BufferGeometry): number {
   return geometry.getIndex()?.count ?? geometry.getAttribute("position")?.count ?? 0;
+}
+
+function maxGroupDelta(a: readonly number[], b: readonly number[]): number {
+  const count = Math.max(a.length, b.length);
+  let maxDelta = 0;
+  for (let i = 0; i < count; i++) {
+    maxDelta = Math.max(maxDelta, Math.abs((a[i] ?? 0) - (b[i] ?? 0)));
+  }
+  return maxDelta;
+}
+
+function sumCounts(counts: readonly number[]): number {
+  return counts.reduce((sum, count) => sum + Math.max(0, Math.floor(count)), 0);
 }
 
 function clearTreeGpuRingDraw(state: TreeGpuRingRuntimeState, root: THREE.Object3D): void {
@@ -291,7 +320,9 @@ function createTreeGpuRingStats(status: TreeGpuRingStats["status"]): TreeGpuRing
     acceptedCandidates: 0,
     counts: { near: 0, mid: 0, far: 0, impostor: 0 },
     groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
+    shadowGroupCounts: new Array<number>(TREE_GPU_RING_SHADOW_GROUP_COUNT).fill(0),
     overflowed: false,
+    shadowOverflowed: false,
     submitMs: null,
     readbackMs: null,
     skippedDispatches: 0,

@@ -23,17 +23,19 @@ Implemented:
 - `tree_ring_shadow_casters.test.ts` verifies cascade plane packing, cascade selection, group counts, and per-group overflow clamping.
 - `tree_system_gpu_ring_draw.ts` can allocate optional `shadowCell` and `shadowIndirect` GPU buffers for per-cascade caster lists.
 - `tree_ring.compute.wgsl` has shadow counters, shadow indirect args, shadow-cell output, cascade frustum checks, and appends tree casters before visible camera frustum culling.
-- `tree_ring_compute.ts` binds the shadow buffers, packs shadow cascade planes into the WGSL uniform layout, builds shadow indirect args, and disables shadow writes unless real output buffers are available.
+- `tree_ring_compute.ts` binds the shadow buffers, packs shadow cascade planes into the WGSL uniform layout, builds shadow indirect args, disables shadow writes unless real output buffers are available, and reads back shadow caster counters under the debug/validation gate.
 - `realtime_sun_shadows.ts` exposes active sun shadow cascade cameras and assigns each cascade a dedicated shadow-only caster layer.
 - `tree_system_gpu_ring_draw.ts` includes a tested `createTreeGpuRingShadowMesh(...)` helper for cascade-layered shadow-only ring meshes.
 - `tree_system_gpu_ring_resources.ts` owns GPU-ring draw resource creation after the SOLID split, including visible meshes, shadow-only meshes, shadow buffers, and crown-proxy shadow materials.
+- `tree_ring_lighting_proxies.ts` now mirrors the shader order for validation: shadow casters are counted before visible-camera frustum culling, while visible groups remain camera-frustum culled.
+- `tree_system_gpu_ring_runtime.ts` validates both visible LOD counts and shadow caster group counts when `debugValidateAgainstCpu` is enabled.
+- `TreeStats`, `perf_probe.ts`, and `render_phase.ts` expose `gpuShadowCasterCount` / `gpuShadowOverflowed` and perf summary counters for shot evidence.
 
 Still required before calling TREE-7 complete:
 
 - Run `npm --prefix tools/clod-poc run trees:wire-parity:check` and confirm no pending generated rewrites.
 - Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
-- Add GPU caster-count readback if we want full CPU/GPU caster-count parity instead of CPU contract coverage only.
-- Capture a low-sun shot proving off-screen trees can still cast.
+- Capture a low-sun shot proving off-screen trees can still cast and archive perf JSON with non-zero `treeGpuShadowCasterCountAvg`.
 
 ## TREE-8 current state
 
@@ -79,9 +81,11 @@ Still required before calling TREE-9 complete:
 Implemented:
 
 - `tree_hero_fidelity.ts` adds a 100k-triangle TREE-10 near-ring hero floor contract and helpers to count total near-tree triangles, foliage triangles, min/average triangles per near tree, and pass/fail flags.
-- `tree_hero_fidelity.test.ts` covers triangle counting, foliage-mask counting, visible-near-only aggregation, and empty-shot failure.
+- `tree_hero_fidelity.test.ts` covers triangle counting, foliage-mask counting, visible-near-only aggregation, GPU-ring group-count estimation, and empty-shot failure.
+- `tree_geometry_variants.test.ts` now includes a static near-geometry guard: every leafy species/variant must have real foliage triangles and a conservative triangle floor before any visual shot runs.
 - `TreeStats` now carries hero near-tree triangle counters and pass/fail flags.
-- `tree_system_runtime_stats.ts` computes TREE-10 hero fidelity stats from visible CPU patches and near LOD state.
+- `tree_system_runtime_stats.ts` computes TREE-10 hero fidelity stats from visible CPU patches and estimates them for GPU ring stats from near group counts when readback is available.
+- If GPU group counts are not available yet, the GPU-ring TREE-10 path falls back to aggregate near count multiplied by average near geometry cost, so WebGPU perf JSON no longer reports zero hero fidelity counters.
 - `perf_probe.ts` and `render_phase.ts` include TREE-10 counters in perf samples and summaries, so shot/perf JSON can archive `treeHeroNearTrianglesAvg`, `treeHeroNearFoliageTrianglesAvg`, min per-tree triangles, and pass-frame counts.
 
 Still required before calling TREE-10 complete:

@@ -67,8 +67,9 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x1, y0)");
     expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x0, y1)");
     expect(source).toContain("treeRingImpostorAtlasSample(atlas, baseUv, x1, y1)");
-    expect(source).toContain("uFadeCenter.x.sub(aWorldXZ.x)");
-    expect(source).toContain("uFadeCenter.y.sub(aWorldXZ.y)");
+    expect(source).toContain("cameraPosition.x.sub(aWorldXZ.x)");
+    expect(source).toContain("decodeTreeRingImpostorPackedNormal");
+    expect(source).toContain("localNormal.x.mul(yawCos)");
   });
 
   it("disposes every owned material", () => {

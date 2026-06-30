@@ -67,6 +67,8 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
     treeGpuCandidateCount: 120,
     treeGpuAcceptedCount: 100,
     treeGpuVisibleCount: 80,
+    treeGpuShadowCasterCount: 64,
+    treeGpuShadowOverflowed: 0,
     treeGpuDispatchMs: 0.2,
     customPropGpuStatus: "ring",
     customPropTotalInstances: 50,
@@ -101,8 +103,8 @@ describe("frame perf probe", () => {
 
   it("ranks detailed phase and prop buckets by p95", () => {
     const summary = summarizeFramePerfSamples([
-      sample({ renderMs: 9, frameMs: 16, propsUnattributedMs: 1, treeHeroNearMinTreeTriangles: 9_000 }),
-      sample({ renderMs: 24, frameMs: 32, statsSyncMs: 4, propsUnattributedMs: 7, treeHeroNearTriangles: 150_000, treeHeroNearMinTreeTriangles: 7_000 }),
+      sample({ renderMs: 9, frameMs: 16, propsUnattributedMs: 1, treeHeroNearMinTreeTriangles: 9_000, treeGpuShadowCasterCount: 60 }),
+      sample({ renderMs: 24, frameMs: 32, statsSyncMs: 4, propsUnattributedMs: 7, treeHeroNearTriangles: 150_000, treeHeroNearMinTreeTriangles: 7_000, treeGpuShadowCasterCount: 68, treeGpuShadowOverflowed: 1 }),
     ], 10, 2);
 
     expect(summary.sampleCount).toBe(2);
@@ -112,6 +114,8 @@ describe("frame perf probe", () => {
     expect(summary.counters.terrainTrianglesAvg).toBe(12000);
     expect(summary.counters.treeGpuStatusCounts).toEqual({ ring: 2 });
     expect(summary.counters.treeGpuVisibleCountAvg).toBe(80);
+    expect(summary.counters.treeGpuShadowCasterCountAvg).toBe(64);
+    expect(summary.counters.treeGpuShadowOverflowedFrames).toBe(1);
     expect(summary.counters.treeHeroNearTrianglesAvg).toBe(140_000);
     expect(summary.counters.treeHeroNearFoliageTrianglesAvg).toBe(92_000);
     expect(summary.counters.treeHeroNearMinTreeTrianglesMin).toBe(7_000);

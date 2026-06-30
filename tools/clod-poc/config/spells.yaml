@@ -15,6 +15,11 @@ spells:
       hand_forward_m: 0.5
       hand_right_m: 0.35
       hand_up_m: -0.35
+      glow_color: [1.0, 0.48, 0.14]
+      glow_intensity: 3.6
+      glow_distance: 8.5
+      glow_decay: 2.0
+      glow_local_y_ratio: 0.34
   water:
     id: water
     label: Water
@@ -28,6 +33,11 @@ spells:
       hand_forward_m: 0.5
       hand_right_m: 0.35
       hand_up_m: -0.35
+      glow_color: [0.35, 0.78, 1.0]
+      glow_intensity: 1.8
+      glow_distance: 6.5
+      glow_decay: 2.0
+      glow_local_y_ratio: 0.38
   air:
     id: air
     label: Air
@@ -41,3 +51,8 @@ spells:
       hand_forward_m: 0.5
       hand_right_m: 0.35
       hand_up_m: -0.35
+      glow_color: [0.84, 0.98, 1.0]
+      glow_intensity: 1.2
+      glow_distance: 6.0
+      glow_decay: 2.0
+      glow_local_y_ratio: 0.42
