@@ -39,6 +39,8 @@ export function createEnvironmentGui(
     taaSharpen: state.postProcessTaaSharpen,
     taaJitterEnabled: state.postProcessTaaJitterEnabled,
     taaJitterScale: state.postProcessTaaJitterScale,
+    taaHistoryClampEnabled: state.postProcessTaaHistoryClampEnabled,
+    taaHistoryClampStrength: state.postProcessTaaHistoryClampStrength,
     contactShadowsEnabled: state.postProcessContactShadowsEnabled,
     contactShadowsStrength: state.postProcessContactShadowsStrength,
     contactShadowsRadiusPx: state.postProcessContactShadowsRadiusPx,
@@ -135,6 +137,8 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessTaaSharpen", 0, 0.5, 0.01).name("TAA sharpen").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaJitterEnabled").name("TAA jitter").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaJitterScale", 0, 2, 0.05).name("TAA jitter scale").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessTaaHistoryClampEnabled").name("TAA history clamp").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessTaaHistoryClampStrength", 0, 1, 0.01).name("TAA clamp strength").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessContactShadowsEnabled").name("contact shadows (WebGL)").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessContactShadowsStrength", 0, 1, 0.01).name("contact strength").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessContactShadowsRadiusPx", 0.5, 8, 0.25).name("contact radius px").onChange(applyPostProcessSettings),
@@ -171,6 +175,8 @@ export function createEnvironmentGui(
       state.postProcessTaaSharpen = DEFAULT_POST_PROCESS_SETTINGS.taaSharpen;
       state.postProcessTaaJitterEnabled = DEFAULT_POST_PROCESS_SETTINGS.taaJitterEnabled;
       state.postProcessTaaJitterScale = DEFAULT_POST_PROCESS_SETTINGS.taaJitterScale;
+      state.postProcessTaaHistoryClampEnabled = DEFAULT_POST_PROCESS_SETTINGS.taaHistoryClampEnabled;
+      state.postProcessTaaHistoryClampStrength = DEFAULT_POST_PROCESS_SETTINGS.taaHistoryClampStrength;
       state.postProcessContactShadowsEnabled = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled;
       state.postProcessContactShadowsStrength = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsStrength;
       state.postProcessContactShadowsRadiusPx = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsRadiusPx;
