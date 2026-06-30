@@ -1,0 +1,32 @@
+seed = 424202
+median_runs = 3
+duration_warmup_secs = 8.0
+chunk_load_radius = 16
+skip_props = false
+
+[render_toggles]
+quality_preset = "high"
+
+[[checkpoint]]
+name = "river_flow_midday"
+position = [48.0, 32.0, 160.0]
+look_at = [84.0, 22.0, 136.0]
+time_of_day = 0.45
+hold_frames = 420
+screenshot = true
+
+  [[checkpoint.screenshot_points]]
+  name = "river_flow_midday"
+  frame = 240
+
+[[checkpoint]]
+name = "river_flow_foam_angle"
+position = [108.0, 28.0, 104.0]
+look_at = [72.0, 20.0, 128.0]
+time_of_day = 0.54
+hold_frames = 420
+screenshot = true
+
+  [[checkpoint.screenshot_points]]
+  name = "river_flow_foam_angle"
+  frame = 240
