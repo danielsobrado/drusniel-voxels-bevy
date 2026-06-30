@@ -26,7 +26,9 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   gpuCandidateCount: number;
   gpuAcceptedCount: number;
   gpuVisibleCount: number;
+  gpuShadowCasterCount: number;
   gpuOverflowed: boolean;
+  gpuShadowOverflowed: boolean;
   gpuDispatchMs: number | null;
   gpuShowCounts: boolean;
   impostorStatus: TreeSystemImpostorStatus;
@@ -43,6 +45,8 @@ export interface TreeSystemGpuStatsInput {
   candidateCount: number;
   acceptedCandidates: number;
   counts: Record<TreeLod, number>;
+  shadowGroupCounts?: readonly number[];
+  shadowOverflowed?: boolean;
 }
 
 export interface BuildTreeSystemStatsInput {
@@ -80,7 +84,9 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     gpuCandidateCount: 0,
     gpuAcceptedCount: 0,
     gpuVisibleCount: 0,
+    gpuShadowCasterCount: 0,
     gpuOverflowed: false,
+    gpuShadowOverflowed: false,
     gpuDispatchMs: null,
     gpuShowCounts: true,
     impostorStatus: "disabled",
@@ -134,10 +140,18 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
   stats.gpuVisibleCount = input.gpuRing
     ? (input.gpuVisibleCount || visibleTreeLodCount(input.gpuRingStats.counts))
     : 0;
+  stats.gpuShadowCasterCount = input.gpuRing
+    ? sumCounts(input.gpuRingStats.shadowGroupCounts ?? [])
+    : 0;
   stats.gpuOverflowed = input.gpuOverflowed;
+  stats.gpuShadowOverflowed = input.gpuRing ? !!input.gpuRingStats.shadowOverflowed : false;
   stats.gpuDispatchMs = input.gpuDispatchMs;
   stats.gpuShowCounts = input.gpuShowCounts;
   stats.impostorStatus = input.impostorStatus;
   stats.impostorReason = input.impostorReason;
   return stats;
+}
+
+function sumCounts(counts: readonly number[]): number {
+  return counts.reduce((sum, count) => sum + Math.max(0, Math.floor(count)), 0);
 }
