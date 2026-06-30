@@ -206,6 +206,8 @@ metrics:
     - clod_far_gap_holes
     - live_clod_overlap_cells
     - clod_far_overlap_cells
+    - priority_owner_overlap_cells
+    - priority_unowned_cells
     - missing_live_chunks_in_required_radius
     - missing_clod_pages_in_required_radius
     - far_shell_recenter_count

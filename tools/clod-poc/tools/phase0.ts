@@ -16,6 +16,8 @@ interface Phase0AcceptanceResult {
   scene: string;
   visible_target_met: boolean;
   horizon_hole_ratio_ok: boolean;
+  priority_owner_overlap_ok: boolean;
+  priority_unowned_ok: boolean;
   streamer_missing_chunks_ok: boolean;
   streamer_missing_pages_ok: boolean;
   all_counters_present: boolean;
@@ -80,6 +82,9 @@ function summarizeAcceptance(input: {
     ? true
     : horizonRatio <= config.acceptance.max_horizon_hole_ratio;
 
+  const priority_owner_overlap_ok = Number(metrics["priority_owner_overlap_cells"] ?? 1) === 0;
+  const priority_unowned_ok = Number(metrics["priority_unowned_cells"] ?? 1) === 0;
+
   const missingChunks = Number(metrics["streamer_simulated_missing_chunks"] ?? 0);
   const streamer_missing_chunks_ok =
     missingChunks <= config.acceptance.max_streamer_simulated_missing_chunks;
@@ -91,7 +96,8 @@ function summarizeAcceptance(input: {
   const all_counters_present = missing.length === 0;
 
   const passed = (visible_target_met || config.acceptance.allow_current_4km_failure)
-    && horizon_hole_ratio_ok
+    && priority_owner_overlap_ok
+    && priority_unowned_ok
     && streamer_missing_chunks_ok
     && streamer_missing_pages_ok
     && all_counters_present;
@@ -100,6 +106,8 @@ function summarizeAcceptance(input: {
     scene: sceneName,
     visible_target_met,
     horizon_hole_ratio_ok,
+    priority_owner_overlap_ok,
+    priority_unowned_ok,
     streamer_missing_chunks_ok,
     streamer_missing_pages_ok,
     all_counters_present,
@@ -239,6 +247,8 @@ async function main(): Promise<void> {
       acceptance: {
         passed: a.passed,
         horizon_hole_ratio_ok: a.horizon_hole_ratio_ok,
+        priority_owner_overlap_ok: a.priority_owner_overlap_ok,
+        priority_unowned_ok: a.priority_unowned_ok,
         streamer_missing_chunks_ok: a.streamer_missing_chunks_ok,
         streamer_missing_pages_ok: a.streamer_missing_pages_ok,
         all_counters_present: a.all_counters_present,
@@ -262,7 +272,8 @@ async function main(): Promise<void> {
     if (!a.passed) {
       console.log(`\n  ${a.scene} FAILED:`);
       if (!a.all_counters_present) console.log(`    missing counters: ${a.missing_counters.join(", ")}`);
-      if (!a.horizon_hole_ratio_ok) console.log(`    horizon_hole_ratio check failed`);
+      if (!a.priority_owner_overlap_ok) console.log(`    priority owner overlap check failed`);
+      if (!a.priority_unowned_ok) console.log(`    priority unowned cell check failed`);
       if (!a.streamer_missing_chunks_ok) console.log(`    streamer simulated missing chunks > 0`);
       if (!a.streamer_missing_pages_ok) console.log(`    streamer simulated missing pages > 0`);
     }

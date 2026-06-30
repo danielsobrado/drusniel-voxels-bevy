@@ -34,6 +34,8 @@ export interface Phase0Metrics {
   streamer_simulated_missing_chunks: number;
   streamer_simulated_missing_pages: number;
   horizon_hole_ratio: number;
+  priority_owner_overlap_cells: number;
+  priority_unowned_cells: number;
   stale_fallback_count: number;
 }
 
@@ -50,6 +52,8 @@ export interface Phase0AcceptanceResult {
   scene: string;
   visible_target_met: boolean;
   horizon_hole_ratio_ok: boolean;
+  priority_owner_overlap_ok: boolean;
+  priority_unowned_ok: boolean;
   streamer_missing_chunks_ok: boolean;
   streamer_missing_pages_ok: boolean;
   all_counters_present: boolean;
@@ -92,6 +96,9 @@ export function summarizeAcceptance(input: {
     ? true
     : metrics.horizon_hole_ratio <= config.acceptance.max_horizon_hole_ratio;
 
+  const priority_owner_overlap_ok = metrics.priority_owner_overlap_cells === 0;
+  const priority_unowned_ok = metrics.priority_unowned_cells === 0;
+
   const streamer_missing_chunks_ok =
     metrics.streamer_simulated_missing_chunks <= config.acceptance.max_streamer_simulated_missing_chunks;
 
@@ -101,7 +108,8 @@ export function summarizeAcceptance(input: {
   const all_counters_present = missing.length === 0;
 
   const passed = (visible_target_met || config.acceptance.allow_current_4km_failure)
-    && horizon_hole_ratio_ok
+    && priority_owner_overlap_ok
+    && priority_unowned_ok
     && streamer_missing_chunks_ok
     && streamer_missing_pages_ok
     && all_counters_present;
@@ -110,6 +118,8 @@ export function summarizeAcceptance(input: {
     scene: sceneName,
     visible_target_met,
     horizon_hole_ratio_ok,
+    priority_owner_overlap_ok,
+    priority_unowned_ok,
     streamer_missing_chunks_ok,
     streamer_missing_pages_ok,
     all_counters_present,
@@ -153,6 +163,8 @@ export function buildDefaultMetrics(): Phase0Metrics {
     streamer_simulated_missing_chunks: 0,
     streamer_simulated_missing_pages: 0,
     horizon_hole_ratio: -1,
+    priority_owner_overlap_cells: 0,
+    priority_unowned_cells: 0,
     stale_fallback_count: 0,
   };
 }

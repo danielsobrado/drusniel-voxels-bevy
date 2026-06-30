@@ -35,9 +35,27 @@ ISLE-8 through ISLE-10 add `BiomeRegionField`, a WGSL mirror include, content sc
 
 ISLE-11 and ISLE-12 reuse the existing generated PBR texture-array path. Per-biome content maps to existing terrain slots, keeping texture memory bounded by the current generated arrays.
 
-ISLE-13 through ISLE-15 keep the streaming ownership invariant: live chunks and CLOD pages follow the camera, the far shell starts at or beyond the CLOD radius, and the battery asserts `streamer_far_shell_ownership_ok == 1` with zero ring-boundary holes.
+ISLE-13 through ISLE-15 keep the streaming ownership invariant: live chunks and CLOD pages follow the camera, the far shell starts at or beyond the CLOD radius, and the battery asserts `streamer_far_shell_ownership_ok == 1` with zero ring-boundary holes. The gate uses priority ownership (`live > CLOD > far`): raw square-page/circular-shell overlap and horizon spill are diagnostics, not failures, because that overlap is geometrically unavoidable at a circular boundary between square page grids.
 
 ISLE-16 is conditional for unbounded worlds that travel far enough from the origin to show precision artifacts. ISLE-17 is the later Bevy port and is out of the first clod-poc milestone.
+
+## Status Update - 2026-06-30
+
+Prompt 1's ownership-gate increment is implemented in `tools/clod-poc`:
+
+- `ownership_coverage_oracle.ts` publishes `priority_owner_overlap_cells` and `priority_unowned_cells`; raw `live_clod_overlap_cells`, `clod_far_overlap_cells`, and `horizon_hole_ratio` remain in reports as spill-band diagnostics.
+- `streaming_ownership.ts` page-grid-aligns the far-shell inner radius while keeping the current `2048 m` config unchanged because it already aligns to the `64 m` CLOD page grid.
+- `InfiniteFarShell` now renders underneath CLOD with negative render order, positive polygon offset, and a small height offset so the spill band cannot z-fight.
+- Phase 0, infinite-islands acceptance, and battery gates now assert priority ownership (`priority_owner_overlap_cells == 0`, `priority_unowned_cells == 0`) plus zero gap/missing counters, rather than requiring raw overlap/horizon spill to be zero.
+
+Latest native Windows acceptance run:
+
+- Command: `rtk cmd /c "set CLOD_POC_BASE_URL=http://127.0.0.1:5180/&& npm --prefix tools/clod-poc run accept:infinite-islands"`
+- Artifact: `tools/clod-poc/acceptance-runs/infinite-islands/2026-06-30T14-31-28/report.json`
+- Result: all five scenes passed (`walk`, `biome-near`, `biome-horizon`, `final-near`, `final-horizon`).
+- Priority gates: `priority_owner_overlap_cells=0`, `priority_unowned_cells=0`, `ring_boundary_holes=0`, `far_summary_tiles_missing=0` for every scene.
+- Raw diagnostics remain non-zero as expected: `live_clod_overlap_cells` was `12` for `walk` and `36` for frozen scenes; `clod_far_overlap_cells` was `1198` for `walk` and `1012` for frozen scenes; `horizon_hole_ratio` was about `0.50`.
+- Frame timing: `frame_ms_p95` ranged from `2.0` to `2.6`, under the `8 ms` budget.
 
 ## Critical Files
 
@@ -69,11 +87,11 @@ npm --prefix tools/clod-poc run dev -- --host 127.0.0.1
 npm --prefix tools/clod-poc run shoot -- --scene infinite-islands --seed 1 --world 16 --hud 1 --clodPerf 1 --webgpuSelection 1 --out shots/infinite-islands/walk.png --stats shots/infinite-islands/walk-stats.json
 ```
 
-Acceptance counters: `frame_ms_p95 <= 8`, `streamer_far_shell_ownership_ok == 1`, `ring_boundary_holes == 0`, and far-shell inner radius `>=` CLOD radius.
+Acceptance counters: `frame_ms_p95 <= 8`, `streamer_far_shell_ownership_ok == 1`, `ring_boundary_holes == 0`, `priority_owner_overlap_cells == 0`, `priority_unowned_cells == 0`, and far-shell inner radius `>=` CLOD radius. Keep raw `*_overlap_cells` and `horizon_hole_ratio` in artifacts, but do not gate them to zero.
 
 ## Risks
 
 - Height changes can silently diverge between CPU and GPU-shaped paths. Keep parity tests pinned.
 - Vite commands fail under `rtk`; use direct `npm` for tests/build/harness.
 - A stale CLOD cache can hide seed/island changes. Terrain source hashing includes the world-source config.
-- The far shell must not overlap playable terrain. Keep the ownership inner radius tied to the CLOD radius.
+- The far shell uses priority ownership, not impossible geometry. Keep the ownership inner radius tied to the CLOD radius and page-grid aligned; resolve the unavoidable raw spill band by render order/depth bias (`live > CLOD > far`), not by pushing radii until gaps appear.

@@ -55,6 +55,10 @@ export interface SnappedCenter {
   snappedZ: number;
 }
 
+export const FAR_SHELL_RENDER_ORDER = -20;
+export const FAR_SHELL_WATER_RENDER_ORDER = -19;
+export const FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M = -1.0;
+
 function hasGpuSamplingInputs(options: InfiniteFarShellOptions): boolean {
   return Boolean(options.useParityMaterial && options.parityConfig && options.farSummaryGpuAtlas);
 }
@@ -73,6 +77,15 @@ function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
     for (const entry of material) entry.dispose();
   } else {
     material.dispose();
+  }
+}
+
+function applyFarShellDepthBias(material: THREE.Material | THREE.Material[]): void {
+  const materials = Array.isArray(material) ? material : [material];
+  for (const entry of materials) {
+    entry.polygonOffset = true;
+    entry.polygonOffsetFactor = 1;
+    entry.polygonOffsetUnits = 1;
   }
 }
 
@@ -147,10 +160,11 @@ export class InfiniteFarShell {
     const material = useParity
       ? createFarTerrainMaterial(options.lighting, this.parityConfig!, 0, 0, options.outerMeters, {
           gpuDisplacement: this.heightSamplingMode === "gpu",
-          heightBiasMeters: options.heightBiasMeters,
+          heightBiasMeters: options.heightBiasMeters + FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M,
           summaryAtlas: this.heightSamplingMode === "gpu" ? this.farSummaryGpuAtlas : undefined,
         })
       : createInfiniteFarShellMaterial(this.materialOptions);
+    applyFarShellDepthBias(material);
     if (options.debugShowWireframe && "wireframe" in material) {
       (material as unknown as { wireframe: boolean }).wireframe = true;
     }
@@ -169,16 +183,18 @@ export class InfiniteFarShell {
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = false;
     this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = FAR_SHELL_RENDER_ORDER;
 
     if (this.heightSamplingMode === "gpu" && this.farSummaryGpuAtlas && useParity) {
       const waterMaterial = createFarWaterMaterial(0, 0, this.farSummaryGpuAtlas);
+      applyFarShellDepthBias(waterMaterial);
       if (options.debugShowWireframe) (waterMaterial as unknown as { wireframe: boolean }).wireframe = true;
       this.waterMesh = new THREE.Mesh(geometry, waterMaterial);
       this.waterMesh.name = "naadf-far-water-overlay";
       this.waterMesh.castShadow = false;
       this.waterMesh.receiveShadow = false;
       this.waterMesh.frustumCulled = false;
-      this.waterMesh.renderOrder = 12;
+      this.waterMesh.renderOrder = FAR_SHELL_WATER_RENDER_ORDER;
       this.waterMesh.userData["renderOnly"] = true;
       this.waterMesh.userData["collisionEnabled"] = false;
       this.mesh.add(this.waterMesh);
@@ -299,6 +315,7 @@ export class InfiniteFarShell {
   private rebuildHeights(): void {
     const t0 = performance.now();
     const { angularSegments, radialSegments, heightBiasMeters } = this.options;
+    const farShellHeightBiasMeters = heightBiasMeters + FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M;
     const vertexCount = this.computeVertexCount();
     const writeBiomeColors = !(this.useParityMaterial && this.parityConfig);
     if (writeBiomeColors && (!this.biomeColorBuffer || this.biomeColorBuffer.length !== vertexCount * 3)) {
@@ -320,7 +337,7 @@ export class InfiniteFarShell {
         );
         const vi = ri * (angularSegments + 1) + ai;
         this.positions[vi * 3] = localX;
-        this.positions[vi * 3 + 1] = Number.isFinite(sample.height) ? sample.height + heightBiasMeters : 0;
+        this.positions[vi * 3 + 1] = Number.isFinite(sample.height) ? sample.height + farShellHeightBiasMeters : 0;
         this.positions[vi * 3 + 2] = localZ;
         this.normals[vi * 3] = sample.normal.x;
         this.normals[vi * 3 + 1] = sample.normal.y;

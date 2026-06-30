@@ -66,6 +66,7 @@ export function createLongViewFrameDiagnostics(deps: LongViewFrameDiagnosticsDep
     streaming: deps.phase0Streaming,
     targetVisibleM: deps.phase0TargetVisibleM,
     targetFutureVisibleM: deps.phase0Config.phase0.target_future_visible_m,
+    pageSizeM: deps.cfg.page.chunks_per_page * deps.cfg.page.chunk_size,
     streamingScene,
   });
   const ownershipRuntime = new TerrainOwnershipRuntime(ownership, {

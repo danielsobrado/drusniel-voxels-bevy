@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { InfiniteFarShell } from "./infiniteFarShell.js";
+import {
+  FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M,
+  FAR_SHELL_RENDER_ORDER,
+  FAR_SHELL_WATER_RENDER_ORDER,
+  InfiniteFarShell,
+} from "./infiniteFarShell.js";
 import { createFarShellMetrics } from "./farShellMetrics.js";
 import { sampleMacroTerrainHeight, sampleMacroTerrainNormal, sampleMacroTerrainMaterial } from "./macroTerrain.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
@@ -121,6 +126,17 @@ describe("infinite far shell — camera-relative annular geometry", () => {
     shell.dispose();
   });
 
+  it("draws under CLOD terrain in the priority spill band", () => {
+    const shell = new InfiniteFarShell(makeDefaultOptions());
+    const material = shell.mesh.material as THREE.Material;
+
+    expect(shell.mesh.renderOrder).toBe(FAR_SHELL_RENDER_ORDER);
+    expect(material.polygonOffset).toBe(true);
+    expect(material.polygonOffsetFactor).toBe(1);
+    expect(material.polygonOffsetUnits).toBe(1);
+    shell.dispose();
+  });
+
   it("renders shell relative to floating-origin offset while sampling world center", () => {
     const metrics = createFarShellMetrics();
     const shell = new InfiniteFarShell({ ...makeDefaultOptions(), metrics });
@@ -205,6 +221,10 @@ describe("infinite far shell — GPU mode validation", () => {
     });
 
     expect(shell.mesh.children.some((child) => child.name === "naadf-far-water-overlay")).toBe(true);
+    const water = shell.mesh.children.find((child) => child.name === "naadf-far-water-overlay") as THREE.Mesh | undefined;
+    expect(water?.renderOrder).toBe(FAR_SHELL_WATER_RENDER_ORDER);
+    expect(water!.renderOrder).toBeGreaterThan(shell.mesh.renderOrder);
+    expect(water!.renderOrder).toBeLessThan(0);
     shell.dispose();
     atlas.view.texture.dispose();
     atlas.view.materialTexture.dispose();
@@ -326,7 +346,7 @@ describe("infinite far shell — height provider integration", () => {
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i);
       expect(Number.isFinite(y)).toBe(true);
-      expect(y).toBeCloseTo(50, 0);
+      expect(y).toBeCloseTo(50 + FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M, 0);
     }
     shell.dispose();
   });

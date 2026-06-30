@@ -148,6 +148,8 @@ function qaSummary(scene: string, stats: JsonRecord): JsonRecord {
           ring_boundary_holes: counters["ring_boundary_holes"] ?? 0,
           live_clod_gap_holes: counters["live_clod_gap_holes"] ?? 0,
           clod_far_gap_holes: counters["clod_far_gap_holes"] ?? 0,
+          priority_owner_overlap_cells: counters["priority_owner_overlap_cells"] ?? 0,
+          priority_unowned_cells: counters["priority_unowned_cells"] ?? 0,
           missing_live_chunks_in_required_radius: counters["missing_live_chunks_in_required_radius"] ?? 0,
           missing_clod_pages_in_required_radius: counters["missing_clod_pages_in_required_radius"] ?? 0,
         },

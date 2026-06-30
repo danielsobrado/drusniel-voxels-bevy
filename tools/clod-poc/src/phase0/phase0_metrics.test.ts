@@ -73,6 +73,8 @@ describe("summarizeAcceptance", () => {
     metrics.effective_visible_m = 4096;
     metrics.target_visible_m = 4096;
     metrics.horizon_hole_ratio = 0;
+    metrics.priority_owner_overlap_cells = 0;
+    metrics.priority_unowned_cells = 0;
     metrics.streamer_simulated_missing_chunks = 0;
     metrics.streamer_simulated_missing_pages = 0;
     const result = summarizeAcceptance({ metrics, config, sceneName: "test_scene" });
@@ -85,6 +87,8 @@ describe("summarizeAcceptance", () => {
     metrics.effective_visible_m = 1536;
     metrics.target_visible_m = 4096;
     metrics.horizon_hole_ratio = 0;
+    metrics.priority_owner_overlap_cells = 0;
+    metrics.priority_unowned_cells = 0;
     metrics.streamer_simulated_missing_chunks = 0;
     metrics.streamer_simulated_missing_pages = 0;
     const result = summarizeAcceptance({ metrics, config, sceneName: "test_scene" });
@@ -96,10 +100,38 @@ describe("summarizeAcceptance", () => {
     metrics.effective_visible_m = 1536;
     metrics.target_visible_m = 4096;
     metrics.horizon_hole_ratio = 0;
+    metrics.priority_owner_overlap_cells = 0;
+    metrics.priority_unowned_cells = 0;
     metrics.streamer_simulated_missing_chunks = 0;
     metrics.streamer_simulated_missing_pages = 0;
     const result = summarizeAcceptance({ metrics, config, sceneName: "test_scene" });
     expect(result.passed).toBe(true);
+  });
+
+  it("passes with raw horizon spill when priority ownership is clean", () => {
+    const metrics = buildDefaultMetrics();
+    metrics.effective_visible_m = 4096;
+    metrics.target_visible_m = 4096;
+    metrics.horizon_hole_ratio = 0.5;
+    metrics.priority_owner_overlap_cells = 0;
+    metrics.priority_unowned_cells = 0;
+    metrics.streamer_simulated_missing_chunks = 0;
+    metrics.streamer_simulated_missing_pages = 0;
+    const result = summarizeAcceptance({ metrics, config, sceneName: "test_scene" });
+    expect(result.horizon_hole_ratio_ok).toBe(false);
+    expect(result.passed).toBe(true);
+  });
+
+  it("fails when priority ownership has overlap or unowned cells", () => {
+    const metrics = buildDefaultMetrics();
+    metrics.effective_visible_m = 4096;
+    metrics.target_visible_m = 4096;
+    metrics.priority_owner_overlap_cells = 1;
+    metrics.priority_unowned_cells = 1;
+    const result = summarizeAcceptance({ metrics, config, sceneName: "test_scene" });
+    expect(result.priority_owner_overlap_ok).toBe(false);
+    expect(result.priority_unowned_ok).toBe(false);
+    expect(result.passed).toBe(false);
   });
 
   it("reports missing counters", () => {

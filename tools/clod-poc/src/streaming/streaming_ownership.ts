@@ -5,6 +5,7 @@ export interface StreamingOwnershipInput {
   targetVisibleM: number;
   targetFutureVisibleM?: number;
   farShellOuterOverrideM?: number | null;
+  pageSizeM?: number;
   streamingScene: boolean;
 }
 
@@ -30,24 +31,31 @@ function finitePositive(value: number, name: string): number {
   return value;
 }
 
+export function pageGridAlignedRadius(radiusM: number, pageSizeM?: number): number {
+  if (pageSizeM === undefined) return radiusM;
+  const pageSize = finitePositive(pageSizeM, "pageSizeM");
+  return Math.ceil(radiusM / pageSize) * pageSize;
+}
+
 export function resolveStreamingOwnership(input: StreamingOwnershipInput): StreamingOwnershipRadii {
   const liveRadiusM = finitePositive(input.streaming.live_radius_m, "live_radius_m");
   const clodRadiusM = finitePositive(input.streaming.clod_radius_m, "clod_radius_m");
   const targetVisibleM = finitePositive(input.targetVisibleM, "targetVisibleM");
   const targetFutureVisibleM = finitePositive(input.targetFutureVisibleM ?? targetVisibleM, "targetFutureVisibleM");
   const farShellOuterM = finitePositive(input.farShellOuterOverrideM ?? targetFutureVisibleM, "farShellOuterM");
+  const farShellInnerM = pageGridAlignedRadius(clodRadiusM, input.pageSizeM);
 
   if (liveRadiusM >= clodRadiusM) {
     throw new Error(`Streaming ownership: live radius ${liveRadiusM} must be smaller than CLOD radius ${clodRadiusM}`);
   }
-  if (clodRadiusM >= farShellOuterM) {
-    throw new Error(`Streaming ownership: CLOD radius ${clodRadiusM} must be smaller than far shell outer radius ${farShellOuterM}`);
+  if (farShellInnerM >= farShellOuterM) {
+    throw new Error(`Streaming ownership: far shell inner radius ${farShellInnerM} must be smaller than far shell outer radius ${farShellOuterM}`);
   }
 
   return {
     liveRadiusM,
     clodRadiusM,
-    farShellInnerM: clodRadiusM,
+    farShellInnerM,
     farShellOuterM,
     targetVisibleM,
     targetFutureVisibleM,

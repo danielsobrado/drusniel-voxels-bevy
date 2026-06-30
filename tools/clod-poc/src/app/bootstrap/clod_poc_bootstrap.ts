@@ -188,6 +188,7 @@ export async function bootstrapClodPoc() {
     streaming: queries.phase0Streaming,
     targetVisibleM: queries.phase0TargetVisibleM,
     targetFutureVisibleM: queries.phase0Config.phase0.target_future_visible_m,
+    pageSizeM: world.cfg.page.chunks_per_page * world.cfg.page.chunk_size,
     streamingScene: queryScene?.startsWith("infinite-") ?? false,
   });
 

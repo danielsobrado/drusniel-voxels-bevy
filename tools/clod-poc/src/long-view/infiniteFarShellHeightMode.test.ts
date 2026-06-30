@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { InfiniteFarShell, type InfiniteFarShellOptions } from "./infiniteFarShell.js";
+import { FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M, InfiniteFarShell, type InfiniteFarShellOptions } from "./infiniteFarShell.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
 import { BIOME_IDS } from "../world_source/biome_region_field.js";
 import { biomeRgbForId } from "../world_source/biome_colors.js";
@@ -80,7 +80,7 @@ describe("InfiniteFarShell height sampling mode", () => {
     });
 
     const positions = shell.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
-    expect(positions.getY(0)).toBe(123);
+    expect(positions.getY(0)).toBe(123 + FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M);
     shell.dispose();
   });
 
