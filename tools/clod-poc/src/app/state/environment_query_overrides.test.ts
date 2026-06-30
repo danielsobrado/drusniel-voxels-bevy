@@ -33,6 +33,7 @@ function createState() {
     treeMaxInstances: 9000,
     treeDensity: 1.2,
     treeSpacing: 5.5,
+    treeShadowMaxLod: "mid",
     treeGpuEnabled: false,
     treeGpuForceCpu: true,
     treeGpuShowCounts: true,
@@ -92,6 +93,7 @@ describe("environment query overrides", () => {
       treeDensity: "0.7",
       treeSpacing: "8",
       treeGpuMax: "12000",
+      treeShadowMaxLod: "none",
     });
 
     applyEnvironmentQueryOverrides(state as never, params);
@@ -102,6 +104,7 @@ describe("environment query overrides", () => {
     expect(state.treeMaxInstances).toBe(4000);
     expect(state.treeDensity).toBe(0.7);
     expect(state.treeSpacing).toBe(8);
+    expect(state.treeShadowMaxLod).toBe("none");
     expect(state.treeGpuEnabled).toBe(true);
     expect(state.treeGpuForceCpu).toBe(false);
     expect(state.treeGpuShowCounts).toBe(false);
@@ -140,5 +143,12 @@ describe("environment query overrides", () => {
     applyEnvironmentQueryOverrides(validationState as never, new URLSearchParams({ quality: "perf", treeGpuValidate: "1" }));
     expect(validationState.treeGpuValidateAgainstCpu).toBe(true);
     expect(validationState.treeGpuReadbackVisibleLists).toBe(true);
+  });
+
+  it("ignores invalid tree shadow LOD overrides", () => {
+    const state = createState();
+    applyEnvironmentQueryOverrides(state as never, new URLSearchParams({ quality: "perf", treeShadowMaxLod: "bad" }));
+
+    expect(state.treeShadowMaxLod).toBe("near");
   });
 });
