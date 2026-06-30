@@ -24,6 +24,8 @@ postprocess:
     history_weight: 0.88
     depth_threshold: 0.0025
     sharpen: 0.06
+    jitter_enabled: true
+    jitter_scale: 1.0
 
   contact_shadows:
     enabled: false
