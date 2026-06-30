@@ -19,6 +19,8 @@ describe("tree system stats aggregation", () => {
       heroNearPassesTriangleFloor: false,
       heroNearPassesRealFoliage: false,
       gpuStatus: "disabled",
+      gpuShadowCasterCount: 0,
+      gpuShadowOverflowed: false,
       gpuDispatchMs: null,
       impostorStatus: "disabled",
       generatedCandidates: 0,
@@ -69,6 +71,7 @@ describe("tree system stats aggregation", () => {
     expect(stats.heroNearPassesRealFoliage).toBe(true);
     expect(stats.gpuCandidateCount).toBe(0);
     expect(stats.gpuVisibleCount).toBe(0);
+    expect(stats.gpuShadowCasterCount).toBe(0);
   });
 
   it("aggregates GPU ring stats", () => {
@@ -77,7 +80,13 @@ describe("tree system stats aggregation", () => {
       lodCounts: { near: 10, mid: 20, far: 30, impostor: 40 },
       heroFidelity: createEmptyTreeHeroFidelityStats(),
       gpuRing: true,
-      gpuRingStats: { candidateCount: 123, acceptedCandidates: 0, counts: { near: 1, mid: 2, far: 3, impostor: 4 } },
+      gpuRingStats: {
+        candidateCount: 123,
+        acceptedCandidates: 0,
+        counts: { near: 1, mid: 2, far: 3, impostor: 4 },
+        shadowGroupCounts: [1, 2, 3],
+        shadowOverflowed: true,
+      },
       gpuVisibleCount: 0,
       gpuStatus: "ring",
       gpuOverflowed: true,
@@ -94,7 +103,9 @@ describe("tree system stats aggregation", () => {
     expect(stats.gpuCandidateCount).toBe(123);
     expect(stats.gpuAcceptedCount).toBe(10);
     expect(stats.gpuVisibleCount).toBe(10);
+    expect(stats.gpuShadowCasterCount).toBe(6);
     expect(stats.gpuOverflowed).toBe(true);
+    expect(stats.gpuShadowOverflowed).toBe(true);
     expect(stats.gpuDispatchMs).toBe(1.5);
     expect(stats.gpuShowCounts).toBe(false);
     expect(stats.impostorStatus).toBe("fallback");
