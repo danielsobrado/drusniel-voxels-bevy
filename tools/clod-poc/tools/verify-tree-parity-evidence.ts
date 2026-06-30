@@ -1,16 +1,19 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import yaml from "js-yaml";
 import {
   buildTreeParityCaptureCommands,
+  buildTreeParityEvidenceMarkdownReport,
   validateTreeParityEvidence,
   type TreeParityCaptureCommandOptions,
+  type TreeParityEvidenceInput,
   type TreeParityEvidenceManifest,
 } from "../src/trees/tree_parity_evidence.js";
 
 type Args = Record<string, string | boolean>;
 
 const DEFAULT_CONFIG = "config/tree-parity-evidence.yaml";
+const DEFAULT_REPORT = "docs/performance/clod-poc-tree-parity-evidence-latest.md";
 
 function parseArgs(argv: readonly string[]): Args {
   const out: Args = {};
@@ -52,16 +55,14 @@ function main(): void {
     return;
   }
 
-  const result = validateTreeParityEvidence({
-    manifest,
-    fileInfo: (path) => {
-      const resolved = resolve(root, path);
-      if (!existsSync(resolved)) return { exists: false, sizeBytes: 0 };
-      return { exists: true, sizeBytes: statSync(resolved).size };
-    },
-    readJson: (path) => JSON.parse(readFileSync(resolve(root, path), "utf8")),
-  });
+  const input = treeParityEvidenceInput(root, manifest);
+  const reportArg = args["report"];
+  if (reportArg !== undefined) {
+    const reportPath = resolve(root, typeof reportArg === "string" ? reportArg : DEFAULT_REPORT);
+    writeReport(reportPath, input);
+  }
 
+  const result = validateTreeParityEvidence(input);
   if (result.ok) {
     console.log(`[tree-evidence] PASS ${manifest.captures.length} captures`);
     return;
@@ -72,6 +73,24 @@ function main(): void {
     console.error(`- ${failure.captureId}: ${failure.message}`);
   }
   process.exit(1);
+}
+
+function treeParityEvidenceInput(root: string, manifest: TreeParityEvidenceManifest): TreeParityEvidenceInput {
+  return {
+    manifest,
+    fileInfo: (path) => {
+      const resolved = resolve(root, path);
+      if (!existsSync(resolved)) return { exists: false, sizeBytes: 0 };
+      return { exists: true, sizeBytes: statSync(resolved).size };
+    },
+    readJson: (path) => JSON.parse(readFileSync(resolve(root, path), "utf8")),
+  };
+}
+
+function writeReport(reportPath: string, input: TreeParityEvidenceInput): void {
+  mkdirSync(dirname(reportPath), { recursive: true });
+  writeFileSync(reportPath, buildTreeParityEvidenceMarkdownReport(input), "utf8");
+  console.log(`[tree-evidence] wrote ${reportPath}`);
 }
 
 function captureCommandOptions(args: Args): TreeParityCaptureCommandOptions {
@@ -95,7 +114,7 @@ function printCaptureCommands(manifest: TreeParityEvidenceManifest, options: Tre
     if (command.perfCommand) console.log(command.perfCommand);
     console.log("");
   }
-  console.log("npm --prefix tools/clod-poc run trees:verify-parity-evidence");
+  console.log("npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report");
 }
 
 main();
