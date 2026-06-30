@@ -75,20 +75,21 @@ Obey CLAUDE.md. Add gated WebGPU timestamp-query brackets around the tree main/s
 # EPIC TP-B — Near-canopy fill cost (the dominant term)
 
 ## TP-2 — FrontSide trunk/branch tubes
-**Type:** Story · **Depends on:** TP-1
+**Type:** Story · **Depends on:** TP-1 · **Status:** WON'T DO (contradicted by the reference)
 
-**Description:** The tree material is `side: DoubleSide`
-([tree_node_material.ts:264](../../tools/clod-poc/src/trees/tree_node_material.ts#L264)),
-which doubles fragment work. Opaque solid geometry (trunks, branch tubes from
-`veg_tube_mesh`) does not need two-sided shading — render those `FrontSide` and keep
-`DoubleSide` only for the thin leaf cards. Split the material/draw so tubes and cards
-use the right culling.
+**Original idea:** render trunk/branch tubes `FrontSide` to halve fragment work.
 
-**Acceptance criteria:**
-- [ ] Trunk/branch geometry renders single-sided; no visible backface holes on near
-      trees.
-- [ ] Measured hero-camera GPU ms drop for the tree main pass (TP-1), FPS up, no
-      visual regression.
+**Why dropped:** the `fable5-world-demo` reference *deliberately keeps* `DoubleSide`
+on closed tubes — `render/VegMaterials.ts` (`barkTexturedMaterial`/`deadwoodMaterial`)
+comment: *"tubes are closed — DoubleSide costs ~nothing and guarantees a trunk can
+never read hollow regardless of LOD/dither state."* Once a closed tube's frontface
+depth is written, early-z rejects its backfaces, so DoubleSide is ~free there; it
+also insures against a dither/LOD hole reading through to a hollow interior. The
+real near-canopy fill win lives in **TP-3** (early-z via a depth prepass) — the
+hero forest's CPU/patch tree path has **no** depth prepass today (only the GPU-ring
+path does, via `tree_system_gpu_ring_prepass.ts`).
+
+**Acceptance criteria:** n/a (superseded by TP-3).
 
 ## TP-3 — Restore early-z: alpha cutout instead of shaded discard
 **Type:** Story · **Depends on:** TP-1
