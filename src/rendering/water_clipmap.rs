@@ -1,7 +1,9 @@
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use serde::Deserialize;
 
 use crate::camera::controller::PlayerCamera;
+use crate::performance::AreaTimingRecorder;
 use crate::rendering::device::capabilities::GraphicsCapabilities;
 use crate::rendering::water_ownership::{WaterOwnerMarker, WaterSurfaceOwner};
 
@@ -87,6 +89,15 @@ impl WaterClipmapConfig {
     pub fn effective_enabled(&self, renderer: &WaterRendererConfig) -> bool {
         self.enabled && renderer.clipmap_enabled
     }
+
+    pub fn placeholder_triangle_count(&self) -> u32 {
+        // Each future grid cell resolves to two triangles. Placeholder entities
+        // use the same accounting so bench rows stay comparable when meshes land.
+        self.levels
+            .saturating_mul(self.cells_per_level)
+            .saturating_mul(self.cells_per_level)
+            .saturating_mul(2)
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -152,6 +163,8 @@ fn sync_clipmap_placeholders(
     origin: Res<WaterClipmapOrigin>,
     mut status: ResMut<WaterClipmapStatus>,
     existing: Query<(Entity, &WaterClipmapLevel)>,
+    frame: Res<FrameCount>,
+    mut timing: ResMut<AreaTimingRecorder>,
 ) {
     let integrated = capabilities
         .as_ref()
@@ -170,6 +183,7 @@ fn sync_clipmap_placeholders(
             mesh_count: 0,
             origin: origin.snapped_xz,
         };
+        record_clipmap_counters(&mut timing, frame.0, *status, 0);
         return;
     }
 
@@ -198,6 +212,24 @@ fn sync_clipmap_placeholders(
         mesh_count: config.levels,
         origin: origin.snapped_xz,
     };
+    record_clipmap_counters(&mut timing, frame.0, *status, config.placeholder_triangle_count());
+}
+
+fn record_clipmap_counters(
+    timing: &mut AreaTimingRecorder,
+    frame: u32,
+    status: WaterClipmapStatus,
+    triangles: u32,
+) {
+    timing.record_count(frame, "Water Clipmap Enabled", u8::from(status.enabled) as f64);
+    timing.record_count(frame, "Water Clipmap Levels Visible", status.levels as f64);
+    timing.record_count(frame, "Water Clipmap Meshes", status.mesh_count as f64);
+    timing.record_count(frame, "Water Clipmap Triangles", triangles as f64);
+    timing.record_count(
+        frame,
+        "Water Clipmap Integrated GPU Disabled",
+        u8::from(status.force_disabled_integrated_gpu) as f64,
+    );
 }
 
 #[cfg(test)]
@@ -230,5 +262,17 @@ mod tests {
         assert_eq!(config.base_cell_size, 0.25);
         assert_eq!(config.max_distance, 0.25);
         assert_eq!(config.min_body_area, 0.0);
+    }
+
+    #[test]
+    fn placeholder_triangle_count_matches_grid_accounting() {
+        let config = WaterClipmapConfig {
+            enabled: true,
+            levels: 2,
+            cells_per_level: 8,
+            ..default()
+        };
+
+        assert_eq!(config.placeholder_triangle_count(), 256);
     }
 }
