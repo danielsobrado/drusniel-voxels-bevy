@@ -14,7 +14,11 @@ const unbound = (name: string): (() => void) => () => {
 
 export function createClodRuntimeBindings(): ClodRuntimeBindings {
   return {
-    refreshTerraformSwatches: unbound("refreshTerraformSwatches"),
+    // Defaults to a no-op: terrain textures are applied (→ onTexturesApplied →
+    // refreshTerraformSwatches) during runtime-systems startup, which runs
+    // before texture-UI startup binds the real impl. A swatch refresh before the
+    // terraform menu mounts is a no-op; the real binding takes over once mounted.
+    refreshTerraformSwatches: () => {},
     syncTerraformMenu: unbound("syncTerraformMenu"),
     refreshGrassStats: unbound("refreshGrassStats"),
     refreshTreeStats: unbound("refreshTreeStats"),

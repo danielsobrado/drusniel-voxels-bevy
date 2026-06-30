@@ -69,6 +69,11 @@ export class TreeSystem {
   private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   private readonly lastCenter: THREE.Vector3;
   private readonly useTreePrepass: boolean;
+  // TP-3: CPU/patch depth prepass is OPT-IN. Headed A/B (RTX, trees-perf hero)
+  // showed it REGRESSES r.treeMain (~20→29 ms): the extra double-sided masked
+  // depth pass costs more than the LessEqual early-z saves. Kept for the proper
+  // EqualDepth/FrontSide experiment; off by default so no regression ships.
+  private readonly useCpuTreePrepass: boolean;
   // Visible instance count per *primary* LOD (crossfade secondary draws excluded),
   // so the reported LOD distribution still sums to the visible instance count.
   private readonly lodCounts = createTreeLodCounts();
@@ -106,6 +111,8 @@ export class TreeSystem {
     this.useTreePrepass = typeof location === "undefined"
       ? true
       : new URLSearchParams(location.search).get("prepass") !== "0";
+    this.useCpuTreePrepass = typeof location !== "undefined"
+      && new URLSearchParams(location.search).get("treeCpuPrepass") === "1";
     this.root.name = "trees";
     this.scene.add(this.root);
     this.root.visible = this.settings.enabled;
@@ -325,9 +332,10 @@ export class TreeSystem {
       materialFor: (species, lod) => this.assets.materialFor(species, lod),
       castsShadow: (lod) => this.treeLodCastsShadow(lod),
       resolveLod: (species, lod) => this.resolveLod(species, lod),
-      // TP-3: depth prepass for the near canopy. Excludes impostors (their
-      // billboard material has a different positionNode than regularMaterial).
-      prepassNodesFor: this.useTreePrepass
+      // TP-3: opt-in depth prepass for the near canopy (default off — see field
+      // comment). Excludes impostors (their billboard material has a different
+      // positionNode than regularMaterial).
+      prepassNodesFor: this.useCpuTreePrepass
         ? (_species, lod) => (lod === "impostor" ? undefined : this.assets.materialHandle.prepassNodesFor?.(lod))
         : undefined,
     };
