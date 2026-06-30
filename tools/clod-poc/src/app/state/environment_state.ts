@@ -38,6 +38,9 @@ export interface EnvironmentSliceState {
   postProcessContactShadowsStrength: number;
   postProcessContactShadowsRadiusPx: number;
   postProcessContactShadowsDepthBias: number;
+  postProcessClarityEnabled: boolean;
+  postProcessClaritySharpen: number;
+  postProcessClarityDither: number;
   postProcessAerialPerspectiveEnabled: boolean;
   postProcessAerialPerspectiveStart: number;
   postProcessAerialPerspectiveEnd: number;
@@ -98,6 +101,9 @@ export function createEnvironmentSliceState(input: {
     postProcessContactShadowsStrength: DEFAULT_POST_PROCESS_SETTINGS.contactShadowsStrength,
     postProcessContactShadowsRadiusPx: DEFAULT_POST_PROCESS_SETTINGS.contactShadowsRadiusPx,
     postProcessContactShadowsDepthBias: DEFAULT_POST_PROCESS_SETTINGS.contactShadowsDepthBias,
+    postProcessClarityEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.clarityEnabled,
+    postProcessClaritySharpen: DEFAULT_POST_PROCESS_SETTINGS.claritySharpen,
+    postProcessClarityDither: DEFAULT_POST_PROCESS_SETTINGS.clarityDither,
     postProcessAerialPerspectiveEnabled: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnabled,
     postProcessAerialPerspectiveStart: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveStart,
     postProcessAerialPerspectiveEnd: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnd,
