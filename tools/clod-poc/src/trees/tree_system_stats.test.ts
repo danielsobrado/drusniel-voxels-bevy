@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTreeSystemStats,
+  createEmptyTreeHeroFidelityStats,
   createEmptyTreeSystemStats,
   type TreeGenerationStats,
   type TreeSystemStatsPatchInput,
@@ -13,6 +14,10 @@ describe("tree system stats aggregation", () => {
       patches: 0,
       visiblePatches: 0,
       culledPatches: 0,
+      heroNearTreeTriangles: 0,
+      heroNearFoliageTriangles: 0,
+      heroNearPassesTriangleFloor: false,
+      heroNearPassesRealFoliage: false,
       gpuStatus: "disabled",
       gpuDispatchMs: null,
       impostorStatus: "disabled",
@@ -28,6 +33,15 @@ describe("tree system stats aggregation", () => {
         patch(false, 3, generation(6, 3, 0, 2, 1)),
       ],
       lodCounts: { near: 1, mid: 2, far: 3, impostor: 4 },
+      heroFidelity: {
+        nearTreeCount: 2,
+        nearTriangleCount: 130_000,
+        nearFoliageTriangleCount: 80_000,
+        minNearTreeTriangles: 50_000,
+        avgNearTreeTriangles: 65_000,
+        passesTriangleFloor: true,
+        passesRealFoliage: true,
+      },
       gpuRing: false,
       gpuRingStats: { candidateCount: 99, acceptedCandidates: 88, counts: { near: 9, mid: 8, far: 7, impostor: 6 } },
       gpuVisibleCount: 77,
@@ -49,6 +63,10 @@ describe("tree system stats aggregation", () => {
     expect(stats.rejectedHeight).toBe(2);
     expect(stats.rejectedMaterial).toBe(2);
     expect(stats.nearTrees).toBe(1);
+    expect(stats.heroNearTreeTriangles).toBe(130_000);
+    expect(stats.heroNearFoliageTriangles).toBe(80_000);
+    expect(stats.heroNearPassesTriangleFloor).toBe(true);
+    expect(stats.heroNearPassesRealFoliage).toBe(true);
     expect(stats.gpuCandidateCount).toBe(0);
     expect(stats.gpuVisibleCount).toBe(0);
   });
@@ -57,6 +75,7 @@ describe("tree system stats aggregation", () => {
     const stats = buildTreeSystemStats({
       patches: [patch(true, 100, generation(100, 100, 0, 0, 0))],
       lodCounts: { near: 10, mid: 20, far: 30, impostor: 40 },
+      heroFidelity: createEmptyTreeHeroFidelityStats(),
       gpuRing: true,
       gpuRingStats: { candidateCount: 123, acceptedCandidates: 0, counts: { near: 1, mid: 2, far: 3, impostor: 4 } },
       gpuVisibleCount: 0,
@@ -71,6 +90,7 @@ describe("tree system stats aggregation", () => {
     expect(stats.totalTrees).toBe(10);
     expect(stats.generatedCandidates).toBe(123);
     expect(stats.acceptedCandidates).toBe(10);
+    expect(stats.heroNearTreeTriangles).toBe(0);
     expect(stats.gpuCandidateCount).toBe(123);
     expect(stats.gpuAcceptedCount).toBe(10);
     expect(stats.gpuVisibleCount).toBe(10);
