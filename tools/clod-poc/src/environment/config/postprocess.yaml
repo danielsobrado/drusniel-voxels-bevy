@@ -26,6 +26,8 @@ postprocess:
     sharpen: 0.06
     jitter_enabled: true
     jitter_scale: 1.0
+    history_clamp_enabled: true
+    history_clamp_strength: 1.0
 
   contact_shadows:
     enabled: false
