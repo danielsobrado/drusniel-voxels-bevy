@@ -1,0 +1,32 @@
+seed = 424203
+median_runs = 3
+duration_warmup_secs = 8.0
+chunk_load_radius = 16
+skip_props = false
+
+[render_toggles]
+quality_preset = "high"
+
+[[checkpoint]]
+name = "shore_foam_edge"
+position = [88.0, 24.0, 92.0]
+look_at = [112.0, 18.0, 120.0]
+time_of_day = 0.48
+hold_frames = 420
+screenshot = true
+
+  [[checkpoint.screenshot_points]]
+  name = "shore_foam_edge"
+  frame = 240
+
+[[checkpoint]]
+name = "shore_foam_backlit"
+position = [148.0, 30.0, 96.0]
+look_at = [112.0, 18.0, 120.0]
+time_of_day = 0.71
+hold_frames = 420
+screenshot = true
+
+  [[checkpoint.screenshot_points]]
+  name = "shore_foam_backlit"
+  frame = 240
