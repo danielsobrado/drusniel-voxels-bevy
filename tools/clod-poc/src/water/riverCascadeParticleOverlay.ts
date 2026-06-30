@@ -26,17 +26,26 @@ interface ParticleLayer {
   readonly gravity: number;
 }
 
+interface CascadeParticleSignal {
+  cascade: number;
+  rapid: number;
+  foam: number;
+}
+
 export interface RiverCascadeParticleStats {
   mist: number;
   splash: number;
   foam: number;
   lastEmitters: number;
+  lastCascadeEmitters: number;
+  lastRapidEmitters: number;
+  lastMaxCascade: number;
+  lastMaxRapid: number;
 }
 
 const EMIT_INTERVAL_S = 0.085;
 const EMIT_GRID = 19;
 const EMIT_SPACING_M = 4.75;
-const MAX_EMITTERS_PER_TICK = 28;
 const MAX_MIST_PARTICLES = 180;
 const MAX_SPLASH_PARTICLES = 150;
 const MAX_FOAM_PARTICLES = 220;
@@ -82,13 +91,28 @@ function makeLayer(name: string, max: number, size: number, opacity: number, gra
   return { points, positions, colors, particles: [], max, gravity };
 }
 
-function cascadeIntensity(sample: WaterFieldResult, settings: RiverCascadeParticleSettings): number {
-  if (!settings.enabled || sample.depth <= 0.03 || sample.bodyMask <= 0.08) return 0;
-  const drop = smooth01((sample.flow.drop - settings.dropStart) / Math.max(0.05, settings.dropEnd - settings.dropStart));
-  const speed = smooth01(sample.flow.speed / 0.85);
+export function cascadeParticleSignal(
+  sample: WaterFieldResult,
+  settings: RiverCascadeParticleSettings,
+): CascadeParticleSignal {
+  if (!settings.enabled || sample.depth <= 0.03 || sample.bodyMask <= 0.08) {
+    return { cascade: 0, rapid: 0, foam: 0 };
+  }
   const body = smooth01(sample.bodyMask);
-  const depth = 1 - smooth01((sample.depth - 4.0) / 8.0);
-  return clamp01(Math.max(drop, speed * 0.58) * body * Math.max(0.25, depth));
+  const shallowBoost = 1 - smooth01((sample.depth - 4.0) / 8.0);
+  const depth = Math.max(0.25, shallowBoost);
+  const cascade = smooth01((sample.flow.drop - settings.dropStart) / Math.max(0.05, settings.dropEnd - settings.dropStart))
+    * body
+    * depth;
+  const rapid = smooth01((sample.flow.speed - settings.rapidSpeedStart) / Math.max(0.05, settings.rapidSpeedEnd - settings.rapidSpeedStart))
+    * body
+    * depth
+    * (1 - cascade * 0.35);
+  return {
+    cascade: clamp01(cascade),
+    rapid: clamp01(rapid),
+    foam: clamp01(Math.max(rapid * 0.78, cascade)),
+  };
 }
 
 function pushParticle(layer: ParticleLayer, particle: Particle): void {
@@ -136,15 +160,19 @@ function advanceLayer(layer: ParticleLayer, deltaSeconds: number): void {
 
 export class RiverCascadeParticleOverlay {
   private readonly group = new THREE.Group();
-  private readonly mist = makeLayer("river-cascade-mist", MAX_MIST_PARTICLES, 1.8, 0.42, 0.05);
-  private readonly splash = makeLayer("river-cascade-splash", MAX_SPLASH_PARTICLES, 1.05, 0.72, -3.2);
-  private readonly foam = makeLayer("river-cascade-foam-drift", MAX_FOAM_PARTICLES, 1.28, 0.58, 0.0);
+  private readonly mist = makeLayer("river-cascade-mist", MAX_MIST_PARTICLES, 2.2, 0.36, 0.03);
+  private readonly splash = makeLayer("river-cascade-splash", MAX_SPLASH_PARTICLES, 0.92, 0.76, -3.4);
+  private readonly foam = makeLayer("river-cascade-foam-drift", MAX_FOAM_PARTICLES, 1.22, 0.58, 0.0);
   private readonly mistColor = new THREE.Color(0xdceff5);
   private readonly splashColor = new THREE.Color(0xf4fbff);
   private readonly foamColor = new THREE.Color(0xe4eee9);
   private readonly settings = readRiverCascadeParticleSettings();
   private emitTime = EMIT_INTERVAL_S;
   private lastEmitters = 0;
+  private lastCascadeEmitters = 0;
+  private lastRapidEmitters = 0;
+  private lastMaxCascade = 0;
+  private lastMaxRapid = 0;
 
   constructor(private readonly scene: THREE.Scene, private readonly field: WaterField) {
     this.group.name = "river-cascade-particle-overlay";
@@ -163,6 +191,10 @@ export class RiverCascadeParticleOverlay {
       splash: this.splash.particles.length,
       foam: this.foam.particles.length,
       lastEmitters: this.lastEmitters,
+      lastCascadeEmitters: this.lastCascadeEmitters,
+      lastRapidEmitters: this.lastRapidEmitters,
+      lastMaxCascade: this.lastMaxCascade,
+      lastMaxRapid: this.lastMaxRapid,
     };
   }
 
@@ -176,8 +208,8 @@ export class RiverCascadeParticleOverlay {
       this.emitTime = 0;
       this.emit(cameraPosition);
     }
-    writeLayer(this.mist, this.mistColor, 1.8);
-    writeLayer(this.splash, this.splashColor, 1.2);
+    writeLayer(this.mist, this.mistColor, 1.9);
+    writeLayer(this.splash, this.splashColor, 1.15);
     writeLayer(this.foam, this.foamColor, 1.5);
   }
 
@@ -191,30 +223,38 @@ export class RiverCascadeParticleOverlay {
 
   private emit(cameraPosition: THREE.Vector3): void {
     this.lastEmitters = 0;
+    this.lastCascadeEmitters = 0;
+    this.lastRapidEmitters = 0;
+    this.lastMaxCascade = 0;
+    this.lastMaxRapid = 0;
     const radius = this.settings.spawnRadiusM;
     const half = Math.floor(EMIT_GRID / 2);
     const baseX = Math.round(cameraPosition.x / EMIT_SPACING_M);
     const baseZ = Math.round(cameraPosition.z / EMIT_SPACING_M);
     for (let gz = -half; gz <= half; gz += 1) {
       for (let gx = -half; gx <= half; gx += 1) {
-        if (this.lastEmitters >= MAX_EMITTERS_PER_TICK) return;
+        if (this.lastEmitters >= this.settings.maxEmittersPerTick) return;
         const cellX = baseX + gx;
         const cellZ = baseZ + gz;
         const x = (cellX + 0.5 + randomSigned(0.28)) * EMIT_SPACING_M;
         const z = (cellZ + 0.5 + randomSigned(0.28)) * EMIT_SPACING_M;
         if (Math.hypot(x - cameraPosition.x, z - cameraPosition.z) > radius) continue;
         const sample = this.field.sample(x, z);
-        const intensity = cascadeIntensity(sample, this.settings);
-        if (intensity <= 0.08) continue;
-        const chance = Math.min(0.92, intensity * 0.72 + hash2(cellX, cellZ, 19) * 0.12);
+        const signal = cascadeParticleSignal(sample, this.settings);
+        this.lastMaxCascade = Math.max(this.lastMaxCascade, signal.cascade);
+        this.lastMaxRapid = Math.max(this.lastMaxRapid, signal.rapid);
+        if (signal.foam <= 0.08) continue;
+        const chance = Math.min(0.92, signal.foam * 0.74 + hash2(cellX, cellZ, 19) * 0.10);
         if (Math.random() > chance) continue;
         this.lastEmitters += 1;
-        this.spawnAt(x, z, sample, intensity);
+        if (signal.cascade > 0.12) this.lastCascadeEmitters += 1;
+        if (signal.rapid > 0.12) this.lastRapidEmitters += 1;
+        this.spawnAt(x, z, sample, signal);
       }
     }
   }
 
-  private spawnAt(x: number, z: number, sample: WaterFieldResult, intensity: number): void {
+  private spawnAt(x: number, z: number, sample: WaterFieldResult, signal: CascadeParticleSignal): void {
     const flowX = Math.abs(sample.flow.x) > 0.001 ? sample.flow.x : randomSigned(1);
     const flowZ = Math.abs(sample.flow.z) > 0.001 ? sample.flow.z : randomSigned(1);
     const flowLen = Math.max(0.001, Math.hypot(flowX, flowZ));
@@ -225,46 +265,46 @@ export class RiverCascadeParticleOverlay {
     const y = sample.waterY + WATER_SURFACE_OFFSET_M;
 
     if (this.settings.foamDriftStrength > 0) {
-      const strength = intensity * this.settings.foamDriftStrength;
+      const strength = signal.foam * this.settings.foamDriftStrength;
       pushParticle(this.foam, {
         x: x + randomSigned(0.45),
         y: y + 0.04,
         z: z + randomSigned(0.45),
-        vx: dirX * (0.55 + sample.flow.speed * 0.42) + sideX * randomSigned(0.18),
+        vx: dirX * (0.46 + sample.flow.speed * 0.38) + sideX * randomSigned(0.18),
         vy: 0,
-        vz: dirZ * (0.55 + sample.flow.speed * 0.42) + sideZ * randomSigned(0.18),
+        vz: dirZ * (0.46 + sample.flow.speed * 0.38) + sideZ * randomSigned(0.18),
         age: 0,
-        life: 1.2 + Math.random() * 1.7,
+        life: 1.25 + Math.random() * 1.8,
         strength,
       });
     }
 
-    if (this.settings.mistStrength > 0 && intensity > 0.16) {
-      const strength = intensity * this.settings.mistStrength;
+    if (this.settings.mistStrength > 0 && signal.cascade > 0.24) {
+      const strength = signal.cascade * this.settings.mistStrength;
       pushParticle(this.mist, {
         x: x + sideX * randomSigned(0.95),
-        y: y + 0.28 + Math.random() * 0.45,
+        y: y + 0.34 + Math.random() * 0.52,
         z: z + sideZ * randomSigned(0.95),
-        vx: dirX * (0.18 + sample.flow.speed * 0.18) + randomSigned(0.16),
-        vy: 0.28 + Math.random() * 0.52,
-        vz: dirZ * (0.18 + sample.flow.speed * 0.18) + randomSigned(0.16),
+        vx: dirX * (0.14 + sample.flow.speed * 0.12) + randomSigned(0.18),
+        vy: 0.22 + Math.random() * 0.44,
+        vz: dirZ * (0.14 + sample.flow.speed * 0.12) + randomSigned(0.18),
         age: 0,
-        life: 1.7 + Math.random() * 1.6,
+        life: 1.85 + Math.random() * 1.85,
         strength,
       });
     }
 
-    if (this.settings.splashStrength > 0 && intensity > 0.20) {
-      const strength = intensity * this.settings.splashStrength;
+    if (this.settings.splashStrength > 0 && signal.cascade > 0.18) {
+      const strength = signal.cascade * this.settings.splashStrength;
       pushParticle(this.splash, {
         x: x + sideX * randomSigned(0.55),
         y: y + 0.14,
         z: z + sideZ * randomSigned(0.55),
-        vx: dirX * (0.65 + sample.flow.speed * 0.55) + sideX * randomSigned(0.65),
-        vy: 1.0 + Math.random() * 1.5 + intensity * 0.55,
-        vz: dirZ * (0.65 + sample.flow.speed * 0.55) + sideZ * randomSigned(0.65),
+        vx: dirX * (0.78 + sample.flow.speed * 0.50) + sideX * randomSigned(0.72),
+        vy: 1.2 + Math.random() * 1.7 + signal.cascade * 0.78,
+        vz: dirZ * (0.78 + sample.flow.speed * 0.50) + sideZ * randomSigned(0.72),
         age: 0,
-        life: 0.45 + Math.random() * 0.55,
+        life: 0.42 + Math.random() * 0.58,
         strength,
       });
     }
