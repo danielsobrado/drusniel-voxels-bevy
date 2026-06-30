@@ -1,8 +1,7 @@
 param(
-    [string]$Out = "perf-dumps/clod-edit-events.csv"
+  [string]$Out = "perf-dumps/clod-edit-events.csv",
+  [string]$Scene = "bench/scenes/terrain/clod-edit-stress.toml"
 )
 
-cargo run --bin clod_edit_events_export -- `
-  bench/scenes/terrain/clod-edit-stress.toml `
-  --out $Out `
-  --require-edits
+$ErrorActionPreference = "Stop"
+cargo run --bin clod_edit_events_export -- $Scene --out $Out --require-edits

@@ -46,6 +46,9 @@ priority = "high"
 status = "qa"
 title = "Geometry parity diagnostics"
 poc_refs = ["tools/clod-poc/src/clod/weld", "tools/clod-poc/src/clod/validate", "tools/clod-poc/src/clod/simplify"]
+bevy_paths = ["src/voxel/pages/weld.rs", "src/voxel/pages/validate.rs", "src/voxel/pages/simplify.rs", "src/bin/clod_weld_guard.rs", "src/bin/clod_topology_guard.rs", "src/bin/clod_simplify_guard.rs"]
+notes = "Builder modules and guard binaries exist; this remains QA-class because parity is proven through exported diagnostics and bench gates."
+
 [[item]]
 id = "scripted-edit-dry-run"
 category = "editing"
@@ -56,16 +59,35 @@ poc_refs = ["tools/clod-poc/src/clod/edit", "tools/clod-poc/src/clod/stress"]
 bevy_paths = ["bench/scenes/terrain/clod-edit-stress.toml", "src/voxel/pages/scripted_edit.rs", "src/voxel/pages/scripted_edit_driver.rs", "src/voxel/pages/scripted_edit_adapter.rs", "src/bin/clod_edit_events_guard.rs", "src/bin/clod_edit_dry_run_guard.rs"]
 notes = "The bench edit plan now expands to events, dispatch records and dry-run terrain edit requests with guardable dirty-page expectations."
 
-priority = "high"
-bevy_paths = ["bench/scenes/terrain/clod-edit-stress.toml", "src/voxel/pages/edit_dirtiness.rs", "src/bin/clod_edit_plan_guard.rs", "src/bin/clod_edit_plan_export.rs", "src/bin/clod_edit_rebuild_guard.rs"]
-notes = "Schema, dirtiness planner, event expansion, dispatch and dry-run guards exist; actual authoritative terrain mutation remains the next implementation target."
+[[item]]
+id = "scripted-edit-rebuild-observation"
 category = "editing"
 priority = "high"
-status = "planned"
-title = "Verify collider refresh after CLOD edits"
+status = "qa"
+title = "Scripted CLOD edit rebuild observation"
 poc_refs = ["tools/clod-poc/src/clod/edit", "tools/clod-poc/src/clod/stress"]
-bevy_paths = ["src/voxel/pages/rebuild_observer.rs", "src/bin/clod_edit_rebuild_guard.rs"]
-notes = "Rebuild publication is observable, but the edit stress bench must emit collider refresh timing before this can be guarded strictly."
+bevy_paths = ["bench/scenes/terrain/clod-edit-stress.toml", "src/voxel/pages/edit_dirtiness.rs", "src/bin/clod_edit_plan_guard.rs", "src/bin/clod_edit_plan_export.rs", "src/bin/clod_edit_rebuild_guard.rs"]
+notes = "Schema, dirtiness planner, event expansion, dispatch and dry-run guards exist; actual authoritative terrain mutation remains the next implementation target."
+
+[[item]]
+id = "collider-refresh-after-edits"
+category = "editing"
+priority = "high"
+status = "qa"
+title = "Collider refresh audit after CLOD edits"
+poc_refs = ["tools/clod-poc/src/clod/edit", "tools/clod-poc/src/clod/stress"]
+bevy_paths = ["src/bin/clod_collider_refresh_export.rs", "src/bin/clod_collider_refresh_guard.rs", "scripts/run-clod-complete-qa.sh", "scripts/run-clod-complete-qa.ps1", "scripts/export-clod-collider-refresh.ps1", "scripts/guard-clod-collider-refresh.ps1"]
+notes = "Complete QA now emits and guards clod-collider-refresh.csv on both Bash and native Windows PowerShell paths. Real refreshed rows remain gated on authoritative terrain mutation; dry-run QA proves the audit chain."
+
+[[item]]
+id = "visual-hydrology"
+category = "water"
+priority = "high"
+status = "ported"
+title = "Visual hydrology field"
+poc_refs = ["tools/clod-poc/src/water/hydrologySystem.ts", "tools/clod-poc/src/water/visualHydrologyField.ts", "tools/clod-poc/src/systems/hydrology_packing.ts"]
+bevy_paths = ["src/terrain/hydrology/mod.rs", "src/terrain/hydrology/builder.rs", "src/terrain/hydrology/sampling.rs", "src/terrain/hydrology/debug_dump.rs"]
+notes = "Bevy now builds derived visual hydrology arrays for water height, far water height, wet mask, flow direction/speed, river depth, moisture and body kind. Voxel water remains authoritative."
 
 [[item]]
 id = "water-clipmap"
@@ -76,3 +98,23 @@ title = "Fake PoC water clipmap"
 poc_refs = ["tools/clod-poc/src/water"]
 bevy_paths = ["src/rendering/water_reflection.rs", "src/rendering/water_displacement.rs", "assets/config/water.yaml"]
 notes = "The Bevy water stack is more advanced and should not be replaced by the PoC fake water clipmap."
+
+[[item]]
+id = "spell-menu-vfx"
+category = "gameplay"
+priority = "medium"
+status = "ported"
+title = "Spell menu, config and cast VFX"
+poc_refs = ["tools/clod-poc/src/spells/spell_menu.ts", "tools/clod-poc/src/spells/spell_config.ts", "tools/clod-poc/src/spells/spell_vfx_controller.ts"]
+bevy_paths = ["src/gameplay/spells/mod.rs", "assets/config/spells.yaml", "assets/shaders/spell_beam.wgsl"]
+notes = "Fire, water and air spells have Bevy-side config loading, UI state, cast events, audio event mapping and beam material/VFX."
+
+[[item]]
+id = "construction-runtime"
+category = "gameplay"
+priority = "medium"
+status = "ported"
+title = "Construction runtime"
+poc_refs = ["tools/clod-poc/src/construction", "tools/clod-poc/config/construction.yaml", "tools/clod-poc/docs/construction-runtime.md"]
+bevy_paths = ["src/gameplay/building/mod.rs", "src/gameplay/building/ghost.rs", "src/gameplay/building/snap.rs", "src/gameplay/building/stability.rs", "src/gameplay/building/persistence.rs", "src/gameplay/building/terrain_conform.rs", "assets/config/building_materials.yaml", "assets/shaders/building.wgsl"]
+notes = "Bevy construction includes snap placement, ghost feedback, stability/collapse, persistence, material rendering and optional terrain conformance."
