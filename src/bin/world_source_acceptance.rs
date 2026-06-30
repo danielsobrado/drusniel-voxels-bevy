@@ -21,6 +21,7 @@ use voxel_builder::world::source::{
     UnavailableWorldSourceGpuReadback, WorldSourceDriftGateConfig, WorldSourceDriftGateReport,
     WorldSourceDriftSamplePoint, WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult,
     evaluate_world_source_cpu_gpu_drift, material_with_biome,
+    world_source_gpu_readback_acceptance_blockers,
 };
 
 const DEFAULT_SAMPLE_CHUNKS: [IVec3; 4] = [
@@ -146,7 +147,7 @@ fn run() -> Result<PathBuf, String> {
         build_profile: build_profile().to_string(),
         release_mode: !cfg!(debug_assertions),
         release_command: RELEASE_COMMAND,
-        acceptance_mode: "cpu_only",
+        acceptance_mode: "gpu_world_source_drift_gate",
         acceptance_pass,
         acceptance_blockers,
         terrain_source,
@@ -181,13 +182,17 @@ fn require_default_gpu_runtime_path(config: &TerrainSourceConfig) -> Result<(), 
 
 fn acceptance_blockers(
     config: &TerrainSourceConfig,
-    _gpu_readback: &WorldSourceGpuReadbackResult,
-    _drift_gate: &WorldSourceDriftGateReport,
+    gpu_readback: &WorldSourceGpuReadbackResult,
+    drift_gate: &WorldSourceDriftGateReport,
 ) -> Vec<&'static str> {
     let mut blockers = Vec::new();
     if !config.is_gpu_default_path() {
         blockers.push("terrain_source_not_gpu_world_source");
     }
+    blockers.extend(world_source_gpu_readback_acceptance_blockers(
+        gpu_readback,
+        drift_gate,
+    ));
     blockers
 }
 
@@ -403,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn cpu_only_acceptance_does_not_require_gpu_readback() {
+    fn acceptance_requires_gpu_readback_and_passed_drift_gate() {
         let config = TerrainSourceConfig {
             mode: TerrainSourceMode::GpuWorldSource,
         };
@@ -417,6 +422,9 @@ mod tests {
         };
 
         let blockers = acceptance_blockers(&config, &gpu_readback, &drift_gate);
-        assert!(blockers.is_empty());
+        assert_eq!(
+            blockers,
+            vec!["gpu_readback_unavailable", "drift_gate_not_passed"]
+        );
     }
 }

@@ -49,10 +49,14 @@ So LAAS's cell-field tricks (sink dry cells, N smoothing iterations, border clam
 **don't drop in verbatim** — they translate to Drusniel's *mesh-edge + far-LOD +
 material-mode* world. The plan does that translation rather than copying the field.
 
-**clod-poc water is minimal:** a flat `WATER_LEVEL = 18` plus a sand/water material
-band ([`terrain.ts`](../../tools/clod-poc/src/terrain.ts)); `waterMaterialId: water`
-in biomes. No hydrology. So clod-poc gets only the lightweight gating rule + a debug
-view, and serves as a cheap prototyping ground for the rules.
+**clod-poc water has grown beyond the original minimal path:** the older flat
+`WATER_LEVEL = 18` / sand-band setup now sits beside visual hydrology code such
+as `tools/clod-poc/src/water/hydrologySystem.ts`,
+`tools/clod-poc/src/water/visualHydrologyField.ts`, and
+`tools/clod-poc/src/systems/hydrology_packing.ts`. Bevy also has the corresponding
+derived visual hydrology field under `src/terrain/hydrology/`. The architectural
+split still matters: use clod-poc as the fast browser proving ground, and keep
+Bevy's authoritative target on voxel water plus render-oriented hydrology fields.
 
 ## The LAAS lessons (the actual steal)
 

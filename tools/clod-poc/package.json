@@ -38,6 +38,8 @@
     "trees:wire-shadow-proxies:check": "npm run trees:wire-tree7-shadows:check && npm run trees:wire-tree8-proxies:check && npm run trees:repair-generated:check",
     "trees:wire-parity": "npm run trees:wire-shadow-proxies && npm run trees:wire-tree9-wgsl && npm run trees:wire-tree9-config",
     "trees:wire-parity:check": "npm run trees:wire-shadow-proxies:check && npm run trees:wire-tree9-wgsl:check && npm run trees:wire-tree9-config:check",
+    "trees:capture-parity-evidence": "tsx tools/verify-tree-parity-evidence.ts --commands",
+    "trees:verify-parity-evidence": "tsx tools/verify-tree-parity-evidence.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",

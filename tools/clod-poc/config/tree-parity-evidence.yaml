@@ -1,0 +1,137 @@
+captures:
+  - id: low-sun-shadow-casters
+    description: TREE-7 low-sun shot proving off-screen GPU ring trees still feed shadow-only caster groups.
+    artifacts:
+      image: shots/tree-parity/latest/low-sun-shadow-casters.png
+      stats: shots/tree-parity/latest/low-sun-shadow-casters-stats.json
+      perf: perf-runs/tree-parity/latest/low-sun-shadow-casters/tree-gpu-ring.json
+    capture:
+      scene: trees-perf
+      params:
+        treeGpu: "1"
+        webgpuSelection: "1"
+        freeze: "1"
+        sunPreset: low
+      perfCase: tree-gpu-ring
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+      - artifact: perf
+        path: snapshot.counters.treeGpuShadowCasterCountAvg
+        nonZero: true
+      - artifact: perf
+        path: snapshot.counters.treeGpuShadowOverflowedFrames
+        max: 0
+
+  - id: noon-forest-interior-shadows
+    description: TREE-8 noon forest interior shot proving crown-proxy shadows are present and not overflowing.
+    artifacts:
+      image: shots/tree-parity/latest/noon-forest-interior-shadows.png
+      stats: shots/tree-parity/latest/noon-forest-interior-shadows-stats.json
+      perf: perf-runs/tree-parity/latest/noon-forest-interior-shadows/tree-gpu-ring.json
+    capture:
+      scene: trees-perf
+      params:
+        treeGpu: "1"
+        webgpuSelection: "1"
+        freeze: "1"
+        sunPreset: noon
+      perfCase: tree-gpu-ring
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+      - artifact: perf
+        path: snapshot.counters.treeGpuShadowCasterCountAvg
+        nonZero: true
+      - artifact: perf
+        path: snapshot.counters.treeGpuShadowOverflowedFrames
+        max: 0
+
+  - id: six-species-gallery
+    description: TREE-9 ecology-sorted gallery shot proving the expanded species setup is exercised.
+    artifacts:
+      image: shots/tree-parity/latest/six-species-gallery.png
+      stats: shots/tree-parity/latest/six-species-gallery-stats.json
+    capture:
+      scene: trees-perf
+      params:
+        treeGpu: "1"
+        webgpuSelection: "1"
+        freeze: "1"
+        treeDebugSpecies: "1"
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+
+  - id: hero-forest-fidelity
+    description: TREE-10 hero forest shot proving near-tree geometry passes the triangle and foliage floors.
+    artifacts:
+      image: shots/tree-parity/latest/hero-forest-fidelity.png
+      stats: shots/tree-parity/latest/hero-forest-fidelity-stats.json
+      perf: perf-runs/tree-parity/latest/hero-forest-fidelity/tree-gpu-ring.json
+    capture:
+      scene: trees-perf
+      params:
+        treeGpu: "1"
+        webgpuSelection: "1"
+        freeze: "1"
+      perfCase: tree-gpu-ring
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+      - artifact: perf
+        path: snapshot.counters.treeHeroNearTrianglesAvg
+        min: 100000
+      - artifact: perf
+        path: snapshot.counters.treeHeroNearFoliageTrianglesAvg
+        nonZero: true
+      - artifact: perf
+        path: snapshot.counters.treeHeroNearPassesTriangleFloorFrames
+        nonZero: true
+      - artifact: perf
+        path: snapshot.counters.treeHeroNearPassesRealFoliageFrames
+        nonZero: true
+
+  - id: far-impostor-boundary
+    description: TREE-11 frozen far/impostor boundary shot proving no obvious pop, holes, or double draw.
+    artifacts:
+      image: shots/tree-parity/latest/far-impostor-boundary.png
+      stats: shots/tree-parity/latest/far-impostor-boundary-stats.json
+      perf: perf-runs/tree-parity/latest/far-impostor-boundary/tree-gpu-ring.json
+    capture:
+      scene: trees-perf
+      params:
+        treeGpu: "1"
+        webgpuSelection: "1"
+        freeze: "1"
+        treeDistance: "520"
+      perfCase: tree-gpu-ring
+    metrics:
+      - artifact: stats
+        path: ready
+        equals: true
+      - artifact: stats
+        path: error
+        equals: null
+      - artifact: perf
+        path: snapshot.counters.treeGpuVisibleCountAvg
+        nonZero: true
+      - artifact: perf
+        path: snapshot.counters.treeImpostorTreesAvg
+        nonZero: true

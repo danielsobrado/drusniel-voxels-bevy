@@ -2,6 +2,7 @@ use super::drift_gate::{
     WorldSourceDriftGateConfig, WorldSourceDriftGateReport, WorldSourceDriftSamplePoint,
     evaluate_world_source_cpu_gpu_drift,
 };
+use super::drift_readback::WorldSourceGpuReadbackStatus;
 use super::drift_readback::{WorldSourceGpuReadbackProvider, WorldSourceGpuReadbackResult};
 use super::world_source::WorldSource;
 
@@ -29,6 +30,20 @@ where
         gpu_readback,
         drift_gate,
     }
+}
+
+pub fn world_source_gpu_readback_acceptance_blockers(
+    gpu_readback: &WorldSourceGpuReadbackResult,
+    drift_gate: &WorldSourceDriftGateReport,
+) -> Vec<&'static str> {
+    let mut blockers = Vec::new();
+    if gpu_readback.status == WorldSourceGpuReadbackStatus::Unavailable {
+        blockers.push("gpu_readback_unavailable");
+    }
+    if !drift_gate.is_acceptance_pass() {
+        blockers.push("drift_gate_not_passed");
+    }
+    blockers
 }
 
 #[cfg(test)]
@@ -93,6 +108,25 @@ mod tests {
         assert_eq!(
             result.drift_gate.status,
             WorldSourceDriftGateStatus::Skipped
+        );
+    }
+
+    #[test]
+    fn unavailable_readback_blocks_acceptance() {
+        let source = source();
+        let points = [WorldSourceDriftSamplePoint::new(64.0, 32.0).with_slope(0.7)];
+        let provider = GpuWorldSourceDriftReadbackSharedResult::default();
+
+        let result = evaluate_world_source_gpu_readback_acceptance(
+            &source,
+            &provider,
+            &points,
+            WorldSourceDriftGateConfig::default(),
+        );
+
+        assert_eq!(
+            world_source_gpu_readback_acceptance_blockers(&result.gpu_readback, &result.drift_gate),
+            vec!["gpu_readback_unavailable", "drift_gate_not_passed"]
         );
     }
 }

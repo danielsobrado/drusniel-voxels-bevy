@@ -1,8 +1,6 @@
 # Construction System Project Plan
 
-Document status (2026-05-17): mixed implementation record and roadmap. The implemented building surface is `src/building/mod.rs`, `src/building/types.rs`, `src/building/grid.rs`, `src/building/snap.rs`, and `src/building/ghost.rs`. Sections for materials, stability, collapse, build zones, persistence, audio, and config assets remain roadmap targets unless the code tree adds those modules later.
-
-> Update (2026-06-14): the building module now lives under `src/gameplay/building/`, and the Phase 3 stability/collapse system is implemented in `src/gameplay/building/stability.rs`. For the intentional v1 trade-offs in the shipped stability and biome systems, see [construction-biome-known-limitations.md](construction-biome-known-limitations.md).
+Document status (2026-06-30): implementation record plus remaining roadmap. The implemented building surface now lives under `src/gameplay/building/` and includes core placement, snap detection, ghost preview, stability/collapse, persistence, material rendering, deletion helpers, and optional terrain conformance. For the intentional v1 trade-offs in the shipped stability and biome systems, see [construction-biome-known-limitations.md](construction-biome-known-limitations.md).
 
 ## Overview
 
@@ -55,15 +53,51 @@ The following features from the plan have been implemented:
   - `BuildingState` resource tracking active mode, selection, rotation
   - Rotation in 90° increments
 
+#### Phase 3: Stability System
+- **Task 3.1: Support Graph** - ✅ Implemented
+  - `BuildingGrid` tracks snap-driven piece connections
+  - Dirty stability islands are recomputed incrementally
+
+- **Task 3.2: Stability Calculation** - ✅ Implemented
+  - `src/gameplay/building/stability.rs` computes support propagation by material/profile
+  - Unsupported pieces are queued for collapse
+
+- **Task 3.3: Visual Feedback** - ✅ Implemented
+  - Ghost preview tints by predicted support
+  - Stability outlines are available for runtime feedback
+
+#### Phase 4: Destruction & Collapse
+- **Task 4.1: Piece Destruction** - ✅ Implemented
+  - Aimed deletion support removes pieces and marks affected stability islands dirty
+
+- **Task 4.2: Collapse Detection** - ✅ Implemented
+  - Unstable pieces are detected after recomputing dirty islands
+
+- **Task 4.3: Collapse Handling** - ✅ Implemented
+  - Collapse removes unstable placed pieces through the current construction runtime
+
+#### Phase 6: Persistence
+- **Task 6.1: Save/Load** - ✅ Implemented
+  - `src/gameplay/building/persistence.rs` serializes placed pieces to `saves/construction/placed_pieces.json`
+  - Load validates saved pieces and reconstructs grid/stability links
+
+#### Terrain Integration
+- **Construction Terrain Conformance** - ✅ Implemented, default off
+  - `src/gameplay/building/terrain_conform.rs` consumes foundation conform requests
+  - Requests safely fill/trim terrain columns through protected edit rules
+
 ### 📁 Implementation Files
 
 ```
-src/building/
-├── mod.rs          # Plugin definition, input handling
-├── types.rs        # Core types: PieceTypeId, SnapGroup, PieceDefinition, BuildingState, SnapResult
-├── grid.rs         # BuildingGrid, SnapPointIndex, IndexedSnapPoint
-├── snap.rs         # Snap detection: find_best_snap(), calculate_snap_score()
-└── ghost.rs        # Ghost preview: update_building_ghost(), validate_placement(), place_building_piece()
+src/gameplay/building/
+├── mod.rs              # Plugin definition, input handling
+├── types.rs            # Core types: PieceTypeId, SnapGroup, PieceDefinition, BuildingState, SnapResult
+├── grid.rs             # BuildingGrid, SnapPointIndex, IndexedSnapPoint
+├── snap.rs             # Snap detection: find_best_snap(), calculate_snap_score()
+├── ghost.rs            # Ghost preview, validation, placement, deletion entry points
+├── stability.rs        # Support propagation, dirty islands, collapse queue
+├── persistence.rs      # Save/load, deletion helpers, terrain-conform request diagnostics
+└── terrain_conform.rs  # Safe terrain mutation consumer for foundation pads
 ```
 
 ### 🎮 Controls
@@ -103,28 +137,28 @@ src/building/
 ## Remaining Work
 
 ### Phase 1: Core Data Structures
-- [ ] **Task 1.2: Material System** - Material variants (wood, stone, metal) with different properties
+- [x] **Task 1.2: Material System** - Material variants and shader/config assets exist through `src/rendering/materials/building.rs`, `assets/config/building_materials.yaml`, and `assets/shaders/building.wgsl`.
 
 ### Phase 2: Placement System
-- [ ] **Task 2.3: Terrain Integration** - SDF carving for embedded foundations
+- [x] **Task 2.3: Terrain Integration** - Foundation terrain-conform requests are implemented in `terrain_conform.rs`; the feature is default off.
 
-### Phase 3: Stability System (Not Started)
-- [ ] **Task 3.1: Support Graph** - Track piece connections for stability
-- [ ] **Task 3.2: Stability Calculation** - Valheim-style propagation
-- [ ] **Task 3.3: Visual Feedback** - Color-coded stability display
+### Phase 3: Stability System
+- [x] **Task 3.1: Support Graph** - Track piece connections for stability
+- [x] **Task 3.2: Stability Calculation** - Support propagation
+- [x] **Task 3.3: Visual Feedback** - Color-coded ghost/support display
 
-### Phase 4: Destruction & Collapse (Not Started)
-- [ ] **Task 4.1: Piece Destruction** - Remove pieces with graph updates
-- [ ] **Task 4.2: Collapse Detection** - Identify unstable pieces
-- [ ] **Task 4.3: Physics-Based Collapse** - Convert to dynamic rigid bodies
-- [ ] **Task 4.4: Collapse Optimization** - Performance limits
+### Phase 4: Destruction & Collapse
+- [x] **Task 4.1: Piece Destruction** - Remove pieces with graph updates
+- [x] **Task 4.2: Collapse Detection** - Identify unstable pieces
+- [x] **Task 4.3: Collapse Handling** - Current runtime removes collapsed pieces
+- [ ] **Task 4.4: Collapse Optimization / Physics Debris** - Optional dramatic debris and perf limits
 
 ### Phase 5: Building UI & Tools
 - [ ] **Task 5.1: Building Menu** - Full radial/category menu
 - [ ] **Task 5.3: Build Zone System** - Define permitted areas
 
 ### Phase 6: Persistence & Multiplayer
-- [ ] **Task 6.1: Save/Load** - Serialize building state
+- [x] **Task 6.1: Save/Load** - Serialize building state
 - [ ] **Task 6.2: Multiplayer Prep** - Network events
 
 ### Phase 7: Polish
@@ -142,7 +176,7 @@ src/building/
 **Objective**: Define all building piece types, their properties, and snap point configurations.
 
 **Implementation**:
-- `src/building/types.rs` - Core type definitions
+- `src/gameplay/building/types.rs` - Core type definitions
 - `PieceDefinition` with dimensions, snap points, mesh path, ground capability
 - Factory methods for common pieces (floor, wall, fence, pillar)
 - `BuildingPieceRegistry` resource initialized at startup
@@ -171,28 +205,21 @@ pub struct SnapPointDef {
 
 ### Task 1.2: Material System
 
-**Status**: Not Started
+**Status**: Implemented
 
 **Objective**: Define building materials with stability properties matching Valheim's model.
 
 **Technical Details**:
 - Materials: Wood, HardWood, Stone, Metal, Thatch
-- Each material defines: MaxSupport, MinSupport, VerticalLoss%, HorizontalLoss%
-- Materials affect visual appearance (texture/mesh variants)
-- Materials define crafting requirements
+- Material support tuning is represented through `SupportProfile` and `BuildingMaterialType`
+- Materials affect visual appearance through the building material shader/config path
+- Crafting requirements remain out of scope
 
-**Material Properties Table** (from Valheim analysis):
-| Material | MaxSupport | MinSupport | VerticalLoss | HorizontalLoss |
-|----------|------------|------------|--------------|----------------|
-| Wood     | 100        | 10         | 12.5%        | 20%            |
-| HardWood | 140        | 10         | 10%          | 16.7%          |
-| Stone    | 1000       | 100        | 12.5%        | 100%           |
-| Metal    | 1500       | 20         | 7.7%         | 7.7%           |
-| Thatch   | 50         | 5          | 25%          | 40%            |
-
-**Deliverables**:
-- Planned target: `src/building/materials.rs` - Material definitions. This file is not present in the current tree.
-- Planned target: `assets/config/materials.yaml` - Material configuration. This file is not present in the current tree.
+**Implementation**:
+- `src/rendering/materials/building.rs` - Building material asset/rendering path
+- `assets/config/building_materials.yaml` - Building material config
+- `assets/shaders/building.wgsl` - Building shader
+- `src/gameplay/building/stability.rs` - Material support profiles consumed by stability
 
 ---
 
@@ -203,7 +230,7 @@ pub struct SnapPointDef {
 **Objective**: Implement spatial data structures for O(1) piece lookups and snap detection.
 
 **Implementation**:
-- `src/building/grid.rs` - Grid and spatial index
+- `src/gameplay/building/grid.rs` - Grid and spatial index
 - `BuildingGrid` with `HashMap<IVec3, Entity>` for occupied cells
 - `SnapPointIndex` with smaller cell size for precision queries
 - `query_radius()` for finding snap points within distance
@@ -243,7 +270,7 @@ pub struct IndexedSnapPoint {
 **Objective**: Show placement preview with validity feedback before confirming placement.
 
 **Implementation**:
-- `src/building/ghost.rs` - Ghost preview entity management
+- `src/gameplay/building/ghost.rs` - Ghost preview entity management
 - Color coding: Green (valid), Red (invalid), Blue (snapped)
 - Gizmo-based cuboid visualization
 - Snap line visualization when connected
@@ -262,7 +289,7 @@ pub struct IndexedSnapPoint {
 **Objective**: Find and prioritize valid snap points for piece placement.
 
 **Implementation**:
-- `src/building/snap.rs` - Snap detection and scoring
+- `src/gameplay/building/snap.rs` - Snap detection and scoring
 - `find_best_snap()` queries spatial index within radius
 - Filters by snap group compatibility
 - Scores by alignment (60%) + distance (40%)
@@ -296,16 +323,20 @@ pub struct SnapConfig {
 
 ### Task 2.3: Terrain Integration
 
-**Status**: Not Started
+**Status**: Implemented, default off
 
 **Objective**: Handle building placement on Surface Nets terrain.
 
 **Technical Details**:
 - Foundations can embed partially into terrain
-- Sample terrain SDF at placement corners to determine ground contact
-- Optional terrain carving (SDF subtraction) for embedded foundations
+- Optional terrain-conform request fills and trims a foundation footprint through voxel edits
 - Ground contact grants "grounded" status for stability
 - Terrain modification triggers chunk remesh
+
+**Implementation**:
+- `ConstructionTerrainConformRequest` is emitted by the construction persistence/placement path
+- `src/gameplay/building/terrain_conform.rs` applies protected voxel edits for fill/trim footprints
+- `ConstructionTerrainConformConfig.enabled` defaults to `false`
 
 ---
 
@@ -341,52 +372,59 @@ commands.spawn((
 
 ### Task 3.1: Support Graph
 
-**Status**: Not Started
+**Status**: Implemented
 
 **Objective**: Track piece connections as a directed graph for stability propagation.
 
 **Technical Details**:
-- Each piece maintains list of supporting pieces (incoming edges)
-- Each piece maintains list of supported pieces (outgoing edges)
-- Graph updates on piece placement/destruction
+- `BuildingGrid` tracks piece connections produced by snap placement and persisted parent links
+- Dirty stability islands are marked after placement, deletion, load and collapse
 - Detect "grounded" status through graph traversal to terrain-touching pieces
-- Support material hierarchy resets (wood on stone = new grounded root)
+- Material support profile controls propagation
 
 ---
 
 ### Task 3.2: Stability Calculation
 
-**Status**: Not Started
+**Status**: Implemented
 
 **Objective**: Implement Valheim-style stability value propagation.
 
 **Technical Details**:
 - Grounded pieces start at MaxSupport for their material
 - Stability propagates through connections with directional loss
-- Vertical connections: lose VerticalLoss% per step
-- Horizontal connections: lose HorizontalLoss% per step
-- Piece is stable if current_stability >= MinSupport
-- Material hierarchy: placing on higher-tier material resets to grounded
+- Piece is stable if current support stays above the collapse threshold
+- Unstable pieces are queued for collapse
+
+**Implementation**:
+- `src/gameplay/building/stability.rs`
+- `recompute_dirty_stability`
+- `collapse_unstable_building_pieces`
 
 ---
 
 ### Task 3.3: Visual Feedback
 
-**Status**: Not Started
+**Status**: Implemented
 
 **Objective**: Show stability status through color-coded visual feedback.
 
 **Technical Details**:
 - Color gradient: Blue (grounded) → Green → Yellow → Orange → Red (unstable)
-- Toggle with key press (H for "health" or stability view)
-- Overlay shader or vertex colors on building pieces
-- Update colors when stability changes
+- Ghost preview tints by predicted support before placement
+- Stability outlines are drawn from current stability state
 
 ---
 
 ## Phase 4: Destruction & Collapse
 
-(See original plan for full details - not yet implemented)
+Deletion and collapse are implemented in the current runtime:
+
+- Aimed deletion removes targeted building pieces and marks affected stability islands dirty.
+- Dirty islands recompute support.
+- Unstable pieces are collapsed through the current construction runtime.
+
+Physics debris remains an optional polish/performance follow-up.
 
 ---
 
@@ -441,13 +479,20 @@ pub struct BuildingState {
 
 ## Phase 6: Persistence & Multiplayer Prep
 
-(See original plan for full details - not yet implemented)
+Save/load is implemented by `src/gameplay/building/persistence.rs`.
+
+Still pending:
+- Multiplayer command/event replication
+- Network authority rules for placed/deleted/collapsed pieces
 
 ---
 
 ## Phase 7: Polish & Optimization
 
-(See original plan for full details - not yet implemented)
+Remaining polish targets:
+- Construction-specific audio and particles
+- Optional physics debris for collapse
+- Profiling and hot-path tuning for dense construction scenes
 
 ---
 
@@ -456,25 +501,25 @@ pub struct BuildingState {
 ```
 Phase 1 (Foundation)
 ├── 1.1 Piece Registry ✅
-├── 1.2 Material System
+├── 1.2 Material System ✅
 └── 1.3 Grid & Spatial Index ✅
 
 Phase 2 (Placement) - depends on Phase 1
 ├── 2.1 Ghost Preview ✅ ─────┐
 ├── 2.2 Snap Detection ✅ ────┼── 2.4 Piece Spawning ✅
-├── 2.3 Terrain Integration ──┘
+├── 2.3 Terrain Integration ✅
 └── 2.4 Piece Spawning ✅
 
 Phase 3 (Stability) - depends on Phase 2
-├── 3.1 Support Graph
-├── 3.2 Stability Calculation ── depends on 3.1
-└── 3.3 Visual Feedback ──────── depends on 3.2
+├── 3.1 Support Graph ✅
+├── 3.2 Stability Calculation ✅
+└── 3.3 Visual Feedback ✅
 
 Phase 4 (Destruction) - depends on Phase 3
-├── 4.1 Piece Destruction
-├── 4.2 Collapse Detection ───── depends on 4.1
-├── 4.3 Physics Collapse ─────── depends on 4.2
-└── 4.4 Collapse Optimization ── depends on 4.3
+├── 4.1 Piece Destruction ✅
+├── 4.2 Collapse Detection ✅
+├── 4.3 Collapse Handling ✅
+└── 4.4 Physics Debris / Collapse Optimization
 
 Phase 5 (UI) - can parallel with Phase 3+
 ├── 5.1 Building Menu
@@ -482,7 +527,7 @@ Phase 5 (UI) - can parallel with Phase 3+
 └── 5.3 Build Zone System
 
 Phase 6 (Persistence) - depends on Phase 4
-├── 6.1 Save/Load
+├── 6.1 Save/Load ✅
 └── 6.2 Multiplayer Prep
 
 Phase 7 (Polish) - depends on Phase 6
@@ -495,50 +540,29 @@ Phase 7 (Polish) - depends on Phase 6
 ## File Structure
 
 ```
-src/building/
+src/gameplay/building/
 ├── mod.rs              # Plugin, input handling ✅
 ├── types.rs            # Core types ✅
 ├── grid.rs             # Grid & spatial index ✅
 ├── snap.rs             # Snap detection ✅
 ├── ghost.rs            # Ghost preview & spawning ✅
-│
-├── materials.rs        # Material properties (TODO)
-├── stability/          # Stability system (TODO)
-│   ├── mod.rs
-│   ├── graph.rs
-│   ├── calculation.rs
-│   └── visual.rs
-├── collapse/           # Collapse system (TODO)
-│   ├── mod.rs
-│   ├── detection.rs
-│   ├── physics.rs
-│   └── budget.rs
-├── tools/              # Building tools (TODO)
-│   ├── mod.rs
-│   ├── demolish.rs
-│   └── repair.rs
-├── zones.rs            # Build zones (TODO)
-├── save.rs             # Persistence (TODO)
-└── audio.rs            # Sound effects (TODO)
+├── stability.rs        # Support propagation and collapse queue ✅
+├── persistence.rs      # Save/load and deletion helpers ✅
+└── terrain_conform.rs  # Optional foundation terrain conform ✅
 ```
 
 ---
 
 ## Configuration Files
 
-Current tree note: only `mod.rs`, `types.rs`, `grid.rs`, `snap.rs`, and `ghost.rs` exist under `src/building/`. The remaining entries in the preceding file-structure diagram are intended future modules, not files that a reader should expect to find today. No `assets/config/building/` directory is present today; building definitions are still hardcoded in the Rust building modules.
+Current tree note: construction code lives under `src/gameplay/building/`. Building material rendering uses `assets/config/building_materials.yaml` and `assets/shaders/building.wgsl`; piece definitions are still code-defined in the Rust building registry.
 
 ```
-assets/config/building/     # (TODO)
-├── pieces.yaml             # Piece definitions
-├── materials.yaml          # Material properties
-├── stability.yaml          # Stability thresholds
-├── collapse.yaml           # Physics settings
-├── zones.yaml              # Build zone defaults
-└── audio.yaml              # Sound mappings
+assets/config/building_materials.yaml  # Building material render config
+assets/shaders/building.wgsl           # Building material shader
 ```
 
-Currently using hardcoded configuration in `src/building/grid.rs`:
+Snap tuning is code-defined in `src/gameplay/building/grid.rs`:
 ```rust
 pub struct SnapConfig {
     pub snap_radius: f32,        // 0.75

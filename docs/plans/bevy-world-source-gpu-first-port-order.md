@@ -30,11 +30,15 @@ Done:
 - Bevy now has `WorldSourceDriftGateReport` with explicit `passed`, `failed`, and `skipped` states for CPU/GPU drift checks.
 - Bevy now has `TerrainSourceStartupReport` and config-bound startup diagnostics for active terrain source mode.
 - Bevy now has `world_source_acceptance`, a release-oriented acceptance bench that writes `bench-runs/<run>/summary.json`.
+- Bevy has opt-in render-app WorldSource drift readback infrastructure: request population, compute dispatch, staging-buffer map/decode, shared-result publication, and runtime drift-gate evaluation when `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1` or `--runtime-assisted` is enabled.
+- Runtime-assisted WorldSource readback writes `bench-runs/world-source-runtime-acceptance/summary.json` by default, or `VOXEL_WORLD_SOURCE_DRIFT_ACCEPTANCE_OUT` when overridden.
+- `bench/scenes/terrain/world-source-readback-acceptance.toml` is the minimal no-screenshot runtime scene for collecting that readback artifact.
 - `src/voxel/runtime/generation.rs` was restored to the full runtime module after an accidental truncation.
 
 Not done yet:
 
-- GPU readback producer is not implemented yet; until it is available, the drift gate reports `skipped`, not `passed`.
+- The standalone `world_source_acceptance` report still uses the unavailable readback provider, so `acceptance_pass` must remain `false` with `gpu_readback_unavailable` and `drift_gate_not_passed` until real GPU samples feed the report.
+- The opt-in runtime readback path still needs native Windows runtime verification and review of the generated readback artifact.
 - MC/Transvoxel remains a legacy/fallback mesh path and is not a blocker for the CLOD/WorldSource default path.
 - Legacy bridge removal is still pending final visual parity and accepted bench thresholds.
 
@@ -61,9 +65,9 @@ Not done yet:
 | Voxel biome content | seven-biome table | compatibility | n/a | `BiomeContentTable` | Shared Bevy content |
 | Mesh biome channel | seven-biome id in `uv0.y` | n/a | triplanar shader | material tag / active WorldSource / compatibility fallback | CLOD path wired |
 | MC/Transvoxel | legacy/fallback only | n/a | n/a | not blocking CLOD path | Legacy |
-| Drift gate status | pass/fail/skip | n/a | readback input | `WorldSourceDriftGateReport` | Explicit status |
+| Drift gate status | pass/fail/skip | n/a | readback input | `WorldSourceDriftGateReport` | Explicit status; skipped blocks acceptance |
 | Terrain source runtime path | GPU default / CPU reference / legacy | n/a | n/a | `TerrainSourceStartupReport` | Explicit status |
-| Acceptance summary | `bench-runs/<run>/summary.json` | n/a | n/a | `world_source_acceptance` | Explicit report |
+| Acceptance summary | `bench-runs/<run>/summary.json` | n/a | n/a | `world_source_acceptance` | Explicit report; unavailable readback blocks pass |
 
 ## Jira tasks
 
@@ -192,12 +196,12 @@ Acceptance:
 - [x] Biome ID and dominant layer exact-match.
 - [x] Numeric tolerances explicit.
 - [x] GPU/readback absence is skipped, not passed.
-- [x] Acceptance report cannot mistake skipped GPU gate for pass through `is_acceptance_pass()`.
+- [x] Acceptance report cannot mistake skipped GPU gate for pass through `is_acceptance_pass()` or `world_source_acceptance.acceptance_pass`.
 
 Notes:
 
 - `WorldSourceDriftGateReport` is ready for BVY-WS-11 bench/acceptance JSON output.
-- A GPU readback producer is still required before the gate can produce a real pass in runtime acceptance.
+- Runtime readback infrastructure exists, but a real pass still needs opt-in runtime verification and connection to the final acceptance report.
 
 ### BVY-WS-10 — Make GPU WorldSource default runtime path
 
@@ -226,7 +230,7 @@ Acceptance:
 
 Notes:
 
-- GPU readback is still unavailable, so the generated `drift_gate.status` is expected to be `skipped` until a GPU readback producer is added.
+- The standalone report still uses the unavailable readback provider, so `gpu_readback.status` is expected to be `unavailable`, `drift_gate.status` is expected to be `skipped`, and `acceptance_pass` is expected to be `false` until real GPU samples are accepted.
 - The acceptance bench measures sampled WorldSource chunk generation and mesh generation outside the full Bevy render loop.
 
 ### BVY-WS-12 — Remove temporary legacy bridge after visual parity
@@ -236,6 +240,8 @@ Status: Next.
 Acceptance:
 
 - [ ] Visual parity scene passes.
+- [ ] Opt-in runtime GPU readback produces matching samples and a passed drift gate.
+- [ ] Final acceptance report consumes real GPU readback or records the reviewed runtime-assisted acceptance artifact from `bench-runs/world-source-runtime-acceptance/summary.json`.
 - [ ] Bench within accepted thresholds.
 - [ ] Legacy path removed or explicitly deprecated.
 - [ ] Temporary seven-biome-to-legacy-material mapping removed from default path.
@@ -245,7 +251,7 @@ Acceptance:
 
 BVY-WS-01, BVY-WS-02, BVY-WS-03, BVY-WS-04, BVY-WS-05, BVY-WS-06, BVY-WS-07, BVY-WS-08, BVY-WS-09, BVY-WS-10, BVY-WS-11, BVY-WS-12.
 
-Do not remove the legacy bridge until BVY-WS-11 produces an acceptance report with explicit terrain source and drift-gate status.
+Do not remove the legacy bridge until the acceptance path has explicit terrain source, real GPU readback status, and a passed drift gate.
 
 ## Verification commands
 
@@ -261,15 +267,21 @@ npm --prefix tools/clod-poc run build
 Bevy:
 
 ```powershell
-cargo test --bin world_source_acceptance
-cargo test world::source
-cargo test voxel::meshing::biome_channel
-cargo test voxel::runtime::world_source_generation
-cargo test
+rtk cargo test --bin world_source_acceptance
+rtk cargo test world::source
+rtk cargo test voxel::meshing::biome_channel
+rtk cargo test voxel::runtime::world_source_generation
+rtk cargo test
 ```
 
 Bevy bench after BVY-WS-11:
 
 ```powershell
-cargo run --release --bin world_source_acceptance
+rtk cargo run --release --bin world_source_acceptance
+```
+
+Runtime-assisted GPU readback artifact, from a native Windows shell:
+
+```powershell
+rtk cargo run --release -- --runtime-assisted --bench bench/scenes/terrain/world-source-readback-acceptance.toml --bench-out bench-runs/world-source-runtime-readback
 ```
