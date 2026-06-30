@@ -13,6 +13,7 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
     expect(DEFAULT_POST_PROCESS_SETTINGS).toEqual({
       enabled: true,
       opacity: 1,
+      renderScale: 1,
       exposure: 1,
       contrast: 1.04,
       saturation: 1.05,
@@ -58,6 +59,8 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
     expect(parsePostProcessSettings(`
 postprocess:
   enabled: false
+  opacity: 0.9
+  render_scale: 0.75
   tone_mapping: agx
   bloom:
     enabled: false
@@ -88,6 +91,8 @@ postprocess:
     dither: 0.01
 `)).toMatchObject({
       enabled: false,
+      opacity: 0.9,
+      renderScale: 0.75,
       toneMapping: "agx",
       bloomEnabled: false,
       bloomThreshold: 1.1,
@@ -114,6 +119,15 @@ postprocess:
     });
   });
 
+  it("clamps render scale overrides to the safe range", () => {
+    expect(parsePostProcessSettings("postprocess:\n  render_scale: 0.1\n").renderScale).toBe(0.5);
+    expect(parsePostProcessSettings("postprocess:\n  render_scale: 2\n").renderScale).toBe(1);
+    expect(applyPostProcessQueryOverrides(DEFAULT_POST_PROCESS_SETTINGS, new URLSearchParams("renderScale=0.2")).renderScale)
+      .toBe(0.5);
+    expect(applyPostProcessQueryOverrides(DEFAULT_POST_PROCESS_SETTINGS, new URLSearchParams("postScale=1.4")).renderScale)
+      .toBe(1);
+  });
+
   it("parses aerial perspective YAML", () => {
     expect(parseAerialPerspectiveSettings(`
 aerial_perspective:
@@ -132,7 +146,7 @@ aerial_perspective:
   });
 
   it("applies URL ablation overrides", () => {
-    const params = new URLSearchParams("postmin=1&bloom=0&fxaa=1&taa=1&taaJitter=1&taaClamp=1&contactShadows=1&clarity=1&grade=0&toneMap=agx");
+    const params = new URLSearchParams("renderScale=0.75&postmin=1&bloom=0&fxaa=1&taa=1&taaJitter=1&taaClamp=1&contactShadows=1&clarity=1&grade=0&toneMap=agx");
     expect(applyPostProcessQueryOverrides({
       ...DEFAULT_POST_PROCESS_SETTINGS,
       exposure: 1.8,
@@ -149,6 +163,7 @@ aerial_perspective:
       aerialPerspectiveEnabled: true,
     }, params)).toMatchObject({
       enabled: true,
+      renderScale: 0.75,
       exposure: 1,
       contrast: 1,
       saturation: 1,
