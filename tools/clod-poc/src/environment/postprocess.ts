@@ -19,6 +19,7 @@ export type PostProcessColor = [number, number, number];
 export interface PostProcessSettings {
   enabled: boolean;
   opacity: number;
+  renderScale?: number;
   exposure: number;
   contrast: number;
   saturation: number;
@@ -67,6 +68,7 @@ export interface PostProcessSettings {
 const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   enabled: true,
   opacity: 1.0,
+  renderScale: 1.0,
   exposure: 1.0,
   contrast: 1.04,
   saturation: 1.05,
@@ -162,6 +164,17 @@ function flagValue(params: URLSearchParams, key: string): boolean | null {
   return null;
 }
 
+function numberValue(params: URLSearchParams, key: string): number | null {
+  const raw = params.get(key);
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function clampedRenderScale(value: number): number {
+  return Math.min(1, Math.max(0.5, value));
+}
+
 function neutralGrade(settings: Required<PostProcessSettings>): void {
   settings.exposure = 1.0;
   settings.contrast = 1.0;
@@ -180,6 +193,12 @@ export function applyPostProcessQueryOverrides(
 ): Required<PostProcessSettings> {
   const next = withPostProcessDefaults(settings);
   if (!searchParams) return next;
+
+  const renderScale = numberValue(searchParams, "renderScale")
+    ?? numberValue(searchParams, "renderscale")
+    ?? numberValue(searchParams, "postScale")
+    ?? numberValue(searchParams, "postprocessScale");
+  if (renderScale !== null) next.renderScale = clampedRenderScale(renderScale);
 
   const fx = flagValue(searchParams, "fx");
   if (fx === false) {
@@ -312,6 +331,7 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       ...fallback,
       enabled: booleanValue(postprocess.enabled, fallback.enabled),
       opacity: finiteNumber(postprocess.opacity, fallback.opacity),
+      renderScale: clampedRenderScale(finiteNumber(postprocess.render_scale, fallback.renderScale)),
       exposure: finiteNumber(postprocess.exposure, fallback.exposure),
       contrast: finiteNumber(postprocess.contrast, fallback.contrast),
       saturation: finiteNumber(postprocess.saturation, fallback.saturation),
@@ -689,6 +709,8 @@ export class PostProcessPipeline {
   private readonly outputMaterial: THREE.ShaderMaterial;
   private readonly fullscreenMesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly drawingBufferSize = new THREE.Vector2();
+  private readonly cssSize = new THREE.Vector2(1, 1);
+  private readonly renderTargetSize = new THREE.Vector2(1, 1);
   private readonly currentViewProjection = new THREE.Matrix4();
   private readonly inverseCurrentViewProjection = new THREE.Matrix4();
   private readonly previousViewProjection = new THREE.Matrix4();
@@ -771,26 +793,32 @@ export class PostProcessPipeline {
   setSize(width: number, height: number): void {
     // The render target uses physical pixels so it tracks renderer pixel ratio without
     // changing the public resize API, which continues to receive CSS pixel dimensions.
+    this.cssSize.set(Math.max(1, width), Math.max(1, height));
     this.renderer.getDrawingBufferSize(this.drawingBufferSize);
     const pixelRatio = this.renderer.getPixelRatio();
-    const targetWidth = this.drawingBufferSize.x || Math.floor(width * pixelRatio);
-    const targetHeight = this.drawingBufferSize.y || Math.floor(height * pixelRatio);
-    this.target.setSize(Math.max(1, targetWidth), Math.max(1, targetHeight));
-    this.historyTarget.setSize(Math.max(1, targetWidth), Math.max(1, targetHeight));
+    const fullWidth = this.drawingBufferSize.x || Math.floor(width * pixelRatio);
+    const fullHeight = this.drawingBufferSize.y || Math.floor(height * pixelRatio);
+    const renderScale = clampedRenderScale(this.settings.renderScale);
+    const targetWidth = Math.max(1, Math.floor(fullWidth * renderScale));
+    const targetHeight = Math.max(1, Math.floor(fullHeight * renderScale));
+    this.renderTargetSize.set(targetWidth, targetHeight);
+    this.target.setSize(targetWidth, targetHeight);
+    this.historyTarget.setSize(targetWidth, targetHeight);
     this.historyReady = false;
-    this.outputMaterial.uniforms.uTexelSize.value.set(
-      1 / Math.max(1, targetWidth),
-      1 / Math.max(1, targetHeight),
-    );
+    this.outputMaterial.uniforms.uTexelSize.value.set(1 / targetWidth, 1 / targetHeight);
   }
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
+    const previousRenderScale = this.settings?.renderScale ?? 1;
     const previousTaaEnabled = this.settings?.taaEnabled ?? false;
     const previousTaaJitterEnabled = this.settings?.taaJitterEnabled ?? false;
     const previousTaaHistoryClampEnabled = this.settings?.taaHistoryClampEnabled ?? false;
     this.settings = withPostProcessDefaults({ ...this.settings, ...settings });
+    this.settings.renderScale = clampedRenderScale(this.settings.renderScale);
+    if (previousRenderScale !== this.settings.renderScale) this.setSize(this.cssSize.x, this.cssSize.y);
     if (
-      previousTaaEnabled !== this.settings.taaEnabled
+      previousRenderScale !== this.settings.renderScale
+      || previousTaaEnabled !== this.settings.taaEnabled
       || previousTaaJitterEnabled !== this.settings.taaJitterEnabled
       || previousTaaHistoryClampEnabled !== this.settings.taaHistoryClampEnabled
     ) {
@@ -839,8 +867,8 @@ export class PostProcessPipeline {
   }
 
   private applyCameraJitter(camera: THREE.Camera): void {
-    const width = Math.max(1, this.drawingBufferSize.x || this.target.width);
-    const height = Math.max(1, this.drawingBufferSize.y || this.target.height);
+    const width = Math.max(1, this.renderTargetSize.x || this.target.width);
+    const height = Math.max(1, this.renderTargetSize.y || this.target.height);
     const sampleIndex = (this.jitterFrame % TAA_JITTER_SEQUENCE_LENGTH) + 1;
     const jitterX = (halton(sampleIndex, 2) - 0.5) * 2 * this.settings.taaJitterScale / width;
     const jitterY = (halton(sampleIndex, 3) - 0.5) * 2 * this.settings.taaJitterScale / height;
