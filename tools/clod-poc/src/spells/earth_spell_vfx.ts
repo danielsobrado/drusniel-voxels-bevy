@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { EarthSpellVfxConfig, SpellColor } from "./spell_config.js";
 import { createEarthNodeMaterial, type EarthNodeMaterialHandle } from "./earth_node_material.js";
 import { createEarthDustNodeMaterial, type EarthDustNodeMaterialHandle } from "./earth_dust_node_material.js";
+import { createEarthDustParticleSystem } from "./earth_dust_particles.js";
 
 const EARTH_DECAL_Y_BIAS = 0.035;
 const DUST_LAYER_MIN_COUNT = 8;
@@ -22,6 +23,7 @@ export interface EarthSpellVfxDeps {
   scene: THREE.Scene;
   config: EarthSpellVfxConfig;
   getTarget: () => EarthSpellTarget | null;
+  getCamera?: () => THREE.Camera;
   now?: () => number;
 }
 
@@ -157,6 +159,7 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
 
   const dustGeometry = new THREE.PlaneGeometry(1, 1);
   const dustLayers = makeDustLayers(scene, config, dustGeometry);
+  const dustParticles = createEarthDustParticleSystem({ scene, config, getCamera: deps.getCamera });
 
   const shardGeometry = new THREE.ConeGeometry(0.18, 0.72, 5, 1);
   const shardMaterial = new THREE.MeshStandardMaterial({
@@ -196,6 +199,7 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
     ground.visible = false;
     shards.visible = false;
     for (const dust of dustLayers) dust.mesh.visible = false;
+    dustParticles.hide();
     light.visible = false;
     light.intensity = 0;
   };
@@ -264,6 +268,7 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
       ground.quaternion.copy(makeGroundQuat(state.normal));
       ground.visible = true;
       for (const dust of dustLayers) dust.mesh.visible = true;
+      dustParticles.spawn(state.center, state.normal);
       light.position.copy(state.center).addScaledVector(state.normal, 1.2);
       light.visible = true;
       shards.visible = shardStates.length > 0;
@@ -279,6 +284,7 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
       materialHandle.uProgress.value = frame.progress;
       light.intensity = config.glowIntensity * computeEarthLightEnvelope(frame.progress);
       updateDust(frame.progress, frame.timeSeconds);
+      dustParticles.update(frame.timeSeconds, frame.progress);
       updateShards(frame.progress);
     },
     dispose: () => {
@@ -289,6 +295,7 @@ export function createEarthSpellVfx(deps: EarthSpellVfxDeps): EarthSpellVfx {
         scene.remove(dust.mesh);
         dust.handle.material.dispose();
       }
+      dustParticles.dispose();
       ground.geometry.dispose();
       materialHandle.material.dispose();
       dustGeometry.dispose();
