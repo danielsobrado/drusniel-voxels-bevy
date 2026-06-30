@@ -79,14 +79,19 @@ function mergeSlices(slices: AppStateSlices): ClodAppState {
   };
 }
 
-function nonNegativeNumberParam(searchParams: URLSearchParams, keys: readonly string[]): number | null {
+function numberParam(searchParams: URLSearchParams, keys: readonly string[]): number | null {
   for (const key of keys) {
     const raw = searchParams.get(key);
     if (raw === null) continue;
     const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+}
+
+function nonNegativeNumberParam(searchParams: URLSearchParams, keys: readonly string[]): number | null {
+  const value = numberParam(searchParams, keys);
+  return value !== null && value >= 0 ? value : null;
 }
 
 function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
@@ -183,6 +188,10 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
   if (postProcessParam === "0") state.postProcessEnabled = false;
   if (params.searchParams.get("freeze") === "1") state.freeze = true;
   if (params.searchParams.get("freeze") === "0") state.freeze = false;
+  const sunElevation = numberParam(params.searchParams, ["sunElevationDeg", "sunElevation"]);
+  if (sunElevation !== null) state.sunElevationDeg = sunElevation;
+  const sunAzimuth = numberParam(params.searchParams, ["sunAzimuthDeg", "sunAzimuth"]);
+  if (sunAzimuth !== null) state.sunAzimuthDeg = sunAzimuth;
   if (params.searchParams.get("scene") === "long-view-shadow-proxy-low-sun") {
     state.sunElevationDeg = 8;
   }
@@ -258,27 +267,3 @@ export type { TreeControllerUiState } from "../../runtime/vegetation/tree_contro
 export type { UnderstoryControllerUiState } from "../../runtime/vegetation/understory_controller.js";
 export type { ForestLightingControllerUiState } from "../../runtime/forest_lighting/forest_lighting_controller.js";
 export type { WaterControllerUiState } from "../../runtime/water_weather/water_controller.js";
-
-export function grassUiState(state: ClodAppState): import("../../runtime/vegetation/grass_controller.js").GrassControllerUiState {
-  return state;
-}
-
-export function stoneUiState(state: ClodAppState): import("../../runtime/vegetation/stone_controller.js").StoneControllerUiState {
-  return state;
-}
-
-export function treeUiState(state: ClodAppState): import("../../runtime/vegetation/tree_controller.js").TreeControllerUiState {
-  return state;
-}
-
-export function understoryUiState(state: ClodAppState): import("../../runtime/vegetation/understory_controller.js").UnderstoryControllerUiState {
-  return state;
-}
-
-export function forestLightingUiState(state: ClodAppState): import("../../runtime/forest_lighting/forest_lighting_controller.js").ForestLightingControllerUiState {
-  return state;
-}
-
-export function waterUiState(state: ClodAppState): import("../../runtime/water_weather/water_controller.js").WaterControllerUiState {
-  return state;
-}
