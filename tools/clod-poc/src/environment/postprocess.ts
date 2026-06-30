@@ -1,5 +1,6 @@
 import { load } from "js-yaml";
 import * as THREE from "three";
+import aerialPerspectiveYaml from "./config/aerial_perspective.yaml?raw";
 import postProcessYaml from "./config/postprocess.yaml?raw";
 
 /**
@@ -13,6 +14,7 @@ import postProcessYaml from "./config/postprocess.yaml?raw";
 export type GodRaysMode = "off" | "cheap" | "heavy" | "volumetric";
 export type PostProcessDebugMode = "output" | "copy" | "off";
 export type PostProcessToneMapping = "aces" | "agx" | "linear" | "none";
+export type PostProcessColor = [number, number, number];
 
 export interface PostProcessSettings {
   enabled: boolean;
@@ -27,6 +29,11 @@ export interface PostProcessSettings {
   bloomThreshold?: number;
   bloomStrength?: number;
   bloomRadius?: number;
+  aerialPerspectiveEnabled?: boolean;
+  aerialPerspectiveStart?: number;
+  aerialPerspectiveEnd?: number;
+  aerialPerspectiveStrength?: number;
+  aerialPerspectiveColor?: PostProcessColor;
   /** Light-shaft technique to apply after grading (WebGPU pipeline only). */
   godRaysMode: GodRaysMode;
   /** Step size of the screen-space raymarch toward the sun. Higher = longer shafts. */
@@ -52,12 +59,26 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   bloomThreshold: 0.85,
   bloomStrength: 0.18,
   bloomRadius: 0.35,
+  aerialPerspectiveEnabled: true,
+  aerialPerspectiveStart: 120,
+  aerialPerspectiveEnd: 1800,
+  aerialPerspectiveStrength: 0.35,
+  aerialPerspectiveColor: [0.62, 0.72, 0.86],
   godRaysMode: "off",
   godRaysDensity: 0.96,
   godRaysDecay: 0.92,
   godRaysWeight: 0.35,
   godRaysExposure: 0.6,
 };
+
+type AerialPerspectiveSettings = Pick<
+  Required<PostProcessSettings>,
+  | "aerialPerspectiveEnabled"
+  | "aerialPerspectiveStart"
+  | "aerialPerspectiveEnd"
+  | "aerialPerspectiveStrength"
+  | "aerialPerspectiveColor"
+>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -70,6 +91,12 @@ function finiteNumber(value: unknown, fallback: number): number {
 
 function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function colorValue(value: unknown, fallback: PostProcessColor): PostProcessColor {
+  if (!Array.isArray(value) || value.length !== 3) return fallback;
+  const parsed = value.map(Number);
+  return parsed.every(Number.isFinite) ? [parsed[0], parsed[1], parsed[2]] : fallback;
 }
 
 function debugMode(value: unknown, fallback: PostProcessDebugMode): PostProcessDebugMode {
@@ -123,6 +150,7 @@ export function applyPostProcessQueryOverrides(
     next.enabled = false;
     next.debugMode = "off";
     next.bloomEnabled = false;
+    next.aerialPerspectiveEnabled = false;
     next.godRaysMode = "off";
   }
 
@@ -138,6 +166,7 @@ export function applyPostProcessQueryOverrides(
     next.debugMode = "output";
     neutralGrade(next);
     next.bloomEnabled = false;
+    next.aerialPerspectiveEnabled = false;
     next.godRaysMode = "off";
   }
 
@@ -147,6 +176,12 @@ export function applyPostProcessQueryOverrides(
   const bloom = flagValue(searchParams, "bloom");
   if (bloom !== null) next.bloomEnabled = bloom;
 
+  const aerial = flagValue(searchParams, "aerial") ?? flagValue(searchParams, "aerialPerspective");
+  if (aerial !== null) next.aerialPerspectiveEnabled = aerial;
+
+  const fog = flagValue(searchParams, "fog") ?? flagValue(searchParams, "haze");
+  if (fog === false) next.aerialPerspectiveEnabled = false;
+
   const godRays = flagValue(searchParams, "godRays") ?? flagValue(searchParams, "godrays");
   if (godRays === false) next.godRaysMode = "off";
 
@@ -154,6 +189,39 @@ export function applyPostProcessQueryOverrides(
   next.toneMapping = toneMapping(toneMap, next.toneMapping);
 
   return next;
+}
+
+export function parseAerialPerspectiveSettings(yamlText = aerialPerspectiveYaml): AerialPerspectiveSettings {
+  const fallback = POST_PROCESS_FALLBACK_SETTINGS;
+  try {
+    const raw = load(yamlText);
+    if (!isRecord(raw)) {
+      return {
+        aerialPerspectiveEnabled: fallback.aerialPerspectiveEnabled,
+        aerialPerspectiveStart: fallback.aerialPerspectiveStart,
+        aerialPerspectiveEnd: fallback.aerialPerspectiveEnd,
+        aerialPerspectiveStrength: fallback.aerialPerspectiveStrength,
+        aerialPerspectiveColor: fallback.aerialPerspectiveColor,
+      };
+    }
+    const aerial = isRecord(raw.aerial_perspective) ? raw.aerial_perspective : raw;
+    return {
+      aerialPerspectiveEnabled: booleanValue(aerial.enabled, fallback.aerialPerspectiveEnabled),
+      aerialPerspectiveStart: finiteNumber(aerial.start_m, fallback.aerialPerspectiveStart),
+      aerialPerspectiveEnd: finiteNumber(aerial.end_m, fallback.aerialPerspectiveEnd),
+      aerialPerspectiveStrength: finiteNumber(aerial.strength, fallback.aerialPerspectiveStrength),
+      aerialPerspectiveColor: colorValue(aerial.color, fallback.aerialPerspectiveColor),
+    };
+  } catch (error) {
+    console.warn("[postprocess] failed to parse aerial_perspective.yaml; using fallback settings", error);
+    return {
+      aerialPerspectiveEnabled: fallback.aerialPerspectiveEnabled,
+      aerialPerspectiveStart: fallback.aerialPerspectiveStart,
+      aerialPerspectiveEnd: fallback.aerialPerspectiveEnd,
+      aerialPerspectiveStrength: fallback.aerialPerspectiveStrength,
+      aerialPerspectiveColor: fallback.aerialPerspectiveColor,
+    };
+  }
 }
 
 export function parsePostProcessSettings(yamlText = postProcessYaml): Required<PostProcessSettings> {
@@ -165,6 +233,7 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
     const bloom = isRecord(postprocess.bloom) ? postprocess.bloom : {};
     const godRays = isRecord(postprocess.god_rays) ? postprocess.god_rays : {};
     return {
+      ...fallback,
       enabled: booleanValue(postprocess.enabled, fallback.enabled),
       opacity: finiteNumber(postprocess.opacity, fallback.opacity),
       exposure: finiteNumber(postprocess.exposure, fallback.exposure),
@@ -190,7 +259,10 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
 }
 
 export const DEFAULT_POST_PROCESS_SETTINGS: Required<PostProcessSettings> = applyPostProcessQueryOverrides(
-  parsePostProcessSettings(),
+  {
+    ...parsePostProcessSettings(),
+    ...parseAerialPerspectiveSettings(),
+  },
   browserSearchParams(),
 );
 
@@ -224,7 +296,10 @@ const COPY_FRAG = /* glsl */ `
 
 const OUTPUT_FRAG = /* glsl */ `
   uniform sampler2D tDiffuse;
+  uniform sampler2D tDepth;
   uniform vec2 uTexelSize;
+  uniform float uCameraNear;
+  uniform float uCameraFar;
   uniform float uExposure;
   uniform float uContrast;
   uniform float uSaturation;
@@ -233,7 +308,14 @@ const OUTPUT_FRAG = /* glsl */ `
   uniform float uBloomThreshold;
   uniform float uBloomStrength;
   uniform float uBloomRadius;
+  uniform float uAerialPerspectiveEnabled;
+  uniform float uAerialPerspectiveStart;
+  uniform float uAerialPerspectiveEnd;
+  uniform float uAerialPerspectiveStrength;
+  uniform vec3 uAerialPerspectiveColor;
   varying vec2 vUv;
+
+  #include <packing>
 
   vec3 brightPass(vec2 uv) {
     vec3 sampleColor = texture2D(tDiffuse, uv).rgb;
@@ -265,10 +347,22 @@ const OUTPUT_FRAG = /* glsl */ `
     return bloom;
   }
 
+  vec3 aerialPerspective(vec3 color) {
+    float depth = texture2D(tDepth, vUv).x;
+    float geometryMask = 1.0 - step(0.999999, depth);
+    float viewZ = perspectiveDepthToViewZ(depth, uCameraNear, uCameraFar);
+    float distanceM = max(-viewZ, 0.0);
+    float startM = min(uAerialPerspectiveStart, uAerialPerspectiveEnd - 0.001);
+    float haze = smoothstep(startM, uAerialPerspectiveEnd, distanceM);
+    haze *= clamp(uAerialPerspectiveStrength, 0.0, 1.0) * uAerialPerspectiveEnabled * geometryMask;
+    return mix(color, uAerialPerspectiveColor, haze);
+  }
+
   void main() {
     vec4 sampled = texture2D(tDiffuse, vUv);
     vec3 color = sampled.rgb * uExposure;
     color += bloomColor() * uBloomStrength * uBloomEnabled;
+    color = aerialPerspective(color);
     color = (color - 0.5) * uContrast + 0.5;
 
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
@@ -301,6 +395,11 @@ function createFullscreenTriangle(): THREE.BufferGeometry {
   return geometry;
 }
 
+function cameraClip(camera: THREE.Camera, key: "near" | "far", fallback: number): number {
+  const value = (camera as unknown as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 export function toneMappingModeToThree(mode: PostProcessToneMapping) {
   switch (mode) {
     case "agx":
@@ -318,6 +417,7 @@ export function toneMappingModeToThree(mode: PostProcessToneMapping) {
 export class PostProcessPipeline {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly target: THREE.WebGLRenderTarget;
+  private readonly depthTexture = new THREE.DepthTexture(1, 1);
   private readonly fullscreenScene = new THREE.Scene();
   private readonly fullscreenCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly fullscreenGeometry = createFullscreenTriangle();
@@ -330,8 +430,11 @@ export class PostProcessPipeline {
   constructor(renderer: THREE.WebGLRenderer, settings: PostProcessSettings) {
     this.renderer = renderer;
     this.settings = withPostProcessDefaults(settings);
+    this.depthTexture.format = THREE.DepthFormat;
+    this.depthTexture.type = THREE.UnsignedIntType;
     this.target = new THREE.WebGLRenderTarget(1, 1, {
       depthBuffer: true,
+      depthTexture: this.depthTexture,
       stencilBuffer: false,
       // Multisampled so grass alpha-to-coverage (and general edge AA) survive this offscreen
       // pass. Without it the post-process target is single-sample and A2C collapses to a hard
@@ -339,6 +442,7 @@ export class PostProcessPipeline {
       samples: 4,
     });
     this.target.texture.name = "clod-poc-postprocess-color";
+    this.depthTexture.name = "clod-poc-postprocess-depth";
 
     this.copyMaterial = new THREE.ShaderMaterial({
       uniforms: {
@@ -355,7 +459,10 @@ export class PostProcessPipeline {
     this.outputMaterial = new THREE.ShaderMaterial({
       uniforms: {
         tDiffuse: { value: this.target.texture },
+        tDepth: { value: this.depthTexture },
         uTexelSize: { value: new THREE.Vector2(1, 1) },
+        uCameraNear: { value: 0.1 },
+        uCameraFar: { value: 8000 },
         uExposure: { value: this.settings.exposure },
         uContrast: { value: this.settings.contrast },
         uSaturation: { value: this.settings.saturation },
@@ -364,6 +471,11 @@ export class PostProcessPipeline {
         uBloomThreshold: { value: this.settings.bloomThreshold },
         uBloomStrength: { value: this.settings.bloomStrength },
         uBloomRadius: { value: this.settings.bloomRadius },
+        uAerialPerspectiveEnabled: { value: this.settings.aerialPerspectiveEnabled ? 1 : 0 },
+        uAerialPerspectiveStart: { value: this.settings.aerialPerspectiveStart },
+        uAerialPerspectiveEnd: { value: this.settings.aerialPerspectiveEnd },
+        uAerialPerspectiveStrength: { value: this.settings.aerialPerspectiveStrength },
+        uAerialPerspectiveColor: { value: new THREE.Color(...this.settings.aerialPerspectiveColor) },
       },
       vertexShader: FULLSCREEN_VERT,
       fragmentShader: OUTPUT_FRAG,
@@ -404,6 +516,11 @@ export class PostProcessPipeline {
     this.outputMaterial.uniforms.uBloomThreshold.value = this.settings.bloomThreshold;
     this.outputMaterial.uniforms.uBloomStrength.value = this.settings.bloomStrength;
     this.outputMaterial.uniforms.uBloomRadius.value = this.settings.bloomRadius;
+    this.outputMaterial.uniforms.uAerialPerspectiveEnabled.value = this.settings.aerialPerspectiveEnabled ? 1 : 0;
+    this.outputMaterial.uniforms.uAerialPerspectiveStart.value = this.settings.aerialPerspectiveStart;
+    this.outputMaterial.uniforms.uAerialPerspectiveEnd.value = this.settings.aerialPerspectiveEnd;
+    this.outputMaterial.uniforms.uAerialPerspectiveStrength.value = this.settings.aerialPerspectiveStrength;
+    this.outputMaterial.uniforms.uAerialPerspectiveColor.value.setRGB(...this.settings.aerialPerspectiveColor);
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera): void {
@@ -412,6 +529,9 @@ export class PostProcessPipeline {
       this.renderer.render(scene, camera);
       return;
     }
+
+    this.outputMaterial.uniforms.uCameraNear.value = cameraClip(camera, "near", 0.1);
+    this.outputMaterial.uniforms.uCameraFar.value = cameraClip(camera, "far", 8000);
 
     this.renderer.setRenderTarget(this.target);
     this.renderer.render(scene, camera);
@@ -425,6 +545,7 @@ export class PostProcessPipeline {
 
   dispose(): void {
     this.target.dispose();
+    this.depthTexture.dispose();
     this.fullscreenGeometry.dispose();
     this.copyMaterial.dispose();
     this.outputMaterial.dispose();
