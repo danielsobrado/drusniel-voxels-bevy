@@ -3,6 +3,7 @@ export * from "./waterField.js";
 export * from "./waterMaterial.js";
 export * from "./waterClipmap.js";
 export * from "./waterDebug.js";
+export * from "./waterOwnership.js";
 export * from "./hydrologyConfig.js";
 export * from "./hydrologyGrid.js";
 export * from "./depressionFill.js";
