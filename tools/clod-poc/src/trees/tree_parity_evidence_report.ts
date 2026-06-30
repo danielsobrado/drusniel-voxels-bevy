@@ -1,3 +1,4 @@
+import { evaluateTreeParityAcceptanceEvidence } from "./tree_parity_evidence_acceptance.js";
 import { validateTreeParityEvidence } from "./tree_parity_evidence_validator.js";
 import {
   errorMessage,
@@ -17,11 +18,12 @@ export function buildTreeParityEvidenceMarkdownReport(
   options: TreeParityEvidenceReportOptions = {},
 ): string {
   const result = validateTreeParityEvidence(input);
+  const acceptance = evaluateTreeParityAcceptanceEvidence(input);
   const lines = [
     `# ${options.title ?? "clod-poc tree parity evidence"}`,
     "",
     `Generated: ${options.generatedAt ?? new Date().toISOString()}`,
-    `Status: ${result.ok ? "PASS" : "FAIL"}`,
+    `Status: ${result.ok && (!acceptance || acceptance.report.status === "pass") ? "PASS" : "FAIL"}`,
     `Captures: ${input.manifest.captures.length}`,
     "",
     "## Captures",
@@ -41,6 +43,23 @@ export function buildTreeParityEvidenceMarkdownReport(
       lines.push(metricReportRow(capture, rule, input));
     }
     lines.push("");
+  }
+
+  if (acceptance) {
+    lines.push("## TREE-11 acceptance", "");
+    lines.push(`Status: ${acceptance.report.status.toUpperCase()}`, "");
+    lines.push("| measurement | value |", "| --- | ---: |");
+    for (const [key, value] of Object.entries(acceptance.report.measurements)) {
+      lines.push(`| ${key} | ${formatMetricValue(value)} |`);
+    }
+    lines.push("");
+    if (acceptance.report.failures.length > 0) {
+      lines.push("| failure | value | threshold |", "| --- | ---: | ---: |");
+      for (const failure of acceptance.report.failures) {
+        lines.push(`| ${failure.code} | ${failure.value} | ${failure.threshold} |`);
+      }
+      lines.push("");
+    }
   }
 
   if (result.failures.length > 0) {
