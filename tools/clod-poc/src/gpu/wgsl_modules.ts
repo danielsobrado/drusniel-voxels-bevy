@@ -112,6 +112,19 @@ function withTreeFinalPlacementHeight(source: string): string {
     );
 }
 
+export function withTreePcgHash(source: string): string {
+  return source.replace(
+    /fn tree_hash\(cell: vec2<f32>, salt: u32\) -> f32 \{[\s\S]*?\n\}\n\nfn tree_hash2\(cell: vec2<f32>, salt: u32\) -> vec2<f32> \{[\s\S]*?\n\}/,
+    `fn tree_hash(cell: vec2<f32>, salt: u32) -> f32 {
+  return tree_pcg2d(cell, params.settings_u.z + salt).x;
+}
+
+fn tree_hash2(cell: vec2<f32>, salt: u32) -> vec2<f32> {
+  return tree_pcg2d(cell, params.settings_u.z + salt);
+}`,
+  );
+}
+
 function withRiverEcologyConstants(source: string): string {
   const ecology = readRiverEcologySettings();
   return [
@@ -150,7 +163,7 @@ export function composeTreeRingShader(workgroupSize = 64): string {
     ? workgroupSize
     : 64;
   const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
-  const baseTreeEntry = withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry));
+  const baseTreeEntry = withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)));
   const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);
   const treeEntry = applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout).replace(
     /const TREE_WORKGROUP_SIZE: u32 = \d+u;/,
