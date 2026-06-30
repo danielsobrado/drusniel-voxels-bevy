@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import type { TreeLod } from "./tree_config.js";
 import {
+  TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
+  TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
+} from "./tree_impostor_blend_geometry.js";
+import {
   treeImpostorUvRectAttribute,
   treeLodDitherRoleAttribute,
   treeLodFadeAttribute,
@@ -42,7 +46,15 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
     treeLodFadeAttribute(input.mesh).needsUpdate = true;
     treeLodDitherRoleAttribute(input.mesh).needsUpdate = true;
   }
-  if (input.impostorUvChanged) treeImpostorUvRectAttribute(input.mesh).needsUpdate = true;
+  if (input.impostorUvChanged) {
+    treeImpostorUvRectAttribute(input.mesh).needsUpdate = true;
+    for (const name of TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES) {
+      const attribute = input.mesh.geometry.getAttribute(name) as THREE.InstancedBufferAttribute | undefined;
+      if (attribute) attribute.needsUpdate = true;
+    }
+    const weights = input.mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME) as THREE.InstancedBufferAttribute | undefined;
+    if (weights) weights.needsUpdate = true;
+  }
 
   if (input.nextCount <= 0) {
     input.mesh.visible = false;

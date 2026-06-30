@@ -3,6 +3,9 @@ import * as THREE from "three";
 import {
   cloneTreeSettings,
   octFrames,
+  TREE_IMPOSTOR_BLEND_SAMPLE_COUNT,
+  TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
+  TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
   TREE_LOD_DITHER_SECONDARY,
   treeImpostorUvRectAttribute,
   treeLodDitherRoleAttribute,
@@ -66,6 +69,7 @@ describe("tree system instance attribute writers", () => {
 
     expect(changed).toBe(true);
     expectUvRect(mesh, 0, [0, 0, 1, 1]);
+    expectBlendWeights(mesh, 0, [1, 0, 0, 0]);
   });
 
   it("falls back to full atlas rect when a ready atlas has no frames", () => {
@@ -83,6 +87,7 @@ describe("tree system instance attribute writers", () => {
 
     expect(changed).toBe(true);
     expectUvRect(mesh, 0, [0, 0, 1, 1]);
+    expectBlendWeights(mesh, 0, [1, 0, 0, 0]);
   });
 
   it("honors frozen impostor frame", () => {
@@ -101,6 +106,8 @@ describe("tree system instance attribute writers", () => {
 
     const expected = atlas.frames[2];
     expectUvRect(mesh, 1, [expected.uvMin[0], expected.uvMin[1], expected.uvMax[0], expected.uvMax[1]]);
+    expectBlendUvRect(mesh, 1, 0, [expected.uvMin[0], expected.uvMin[1], expected.uvMax[0], expected.uvMax[1]]);
+    expectBlendWeights(mesh, 1, [1, 0, 0, 0]);
   });
 
   it("updates camera-selected impostor frame", () => {
@@ -131,11 +138,43 @@ describe("tree system instance attribute writers", () => {
     });
     const second = [attribute.getX(0), attribute.getY(0), attribute.getZ(0), attribute.getW(0)];
     expect(second).not.toEqual(first);
+    const weights = mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME);
+    const actualWeights = [weights.getX(0), weights.getY(0), weights.getZ(0), weights.getW(0)];
+    for (const weight of actualWeights) {
+      expect(weight).toBeGreaterThanOrEqual(0);
+      expect(weight).toBeLessThanOrEqual(1);
+    }
+    expect(actualWeights.reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1, 6);
   });
 });
 
 function expectUvRect(mesh: THREE.InstancedMesh, index: number, expected: [number, number, number, number]): void {
   const attribute = treeImpostorUvRectAttribute(mesh);
+  expect(attribute.getX(index)).toBeCloseTo(expected[0]);
+  expect(attribute.getY(index)).toBeCloseTo(expected[1]);
+  expect(attribute.getZ(index)).toBeCloseTo(expected[2]);
+  expect(attribute.getW(index)).toBeCloseTo(expected[3]);
+}
+
+function expectBlendUvRect(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  sampleIndex: number,
+  expected: [number, number, number, number],
+): void {
+  const attribute = mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES[sampleIndex]);
+  expect(attribute.getX(index)).toBeCloseTo(expected[0]);
+  expect(attribute.getY(index)).toBeCloseTo(expected[1]);
+  expect(attribute.getZ(index)).toBeCloseTo(expected[2]);
+  expect(attribute.getW(index)).toBeCloseTo(expected[3]);
+}
+
+function expectBlendWeights(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  expected: [number, number, number, number],
+): void {
+  const attribute = mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME);
   expect(attribute.getX(index)).toBeCloseTo(expected[0]);
   expect(attribute.getY(index)).toBeCloseTo(expected[1]);
   expect(attribute.getZ(index)).toBeCloseTo(expected[2]);
@@ -149,6 +188,16 @@ function testMesh(): THREE.InstancedMesh {
   geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(2).fill(1), 1));
   geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(2), 1));
   geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(8), 4));
+  for (const name of TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES) {
+    geometry.setAttribute(name, new THREE.InstancedBufferAttribute(new Float32Array(8), 4));
+  }
+  const weights = new Float32Array(2 * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT);
+  weights[0] = 1;
+  weights[TREE_IMPOSTOR_BLEND_SAMPLE_COUNT] = 1;
+  geometry.setAttribute(
+    TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
+    new THREE.InstancedBufferAttribute(weights, TREE_IMPOSTOR_BLEND_SAMPLE_COUNT),
+  );
   return new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial(), 2);
 }
 

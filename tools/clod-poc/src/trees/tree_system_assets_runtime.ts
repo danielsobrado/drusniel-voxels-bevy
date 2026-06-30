@@ -187,6 +187,8 @@ export class TreeSystemAssets {
         settings: this.settings,
         atlas,
         webgpu: this.webgpu,
+        viewBlend: true,
+        viewBlendGeometryReady: true,
         impostorMaterials: this.impostorMaterials,
       });
     }
