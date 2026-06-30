@@ -3,6 +3,7 @@ import {
   DEFAULT_LONG_VIEW_SUN_SHADOWS_CONFIG,
   DEFAULT_SHADOW_PROXY_CONFIG,
 } from "../config/longViewDefaults.js";
+import { shadowProxySceneMode } from "../scenes/scene_registry.js";
 import type {
   LongViewSunShadowsConfig,
   ShadowProxyConfig,
@@ -91,24 +92,10 @@ export function applyShadowProxySceneOverrides(
   scene: string | null,
 ): ShadowProxyConfig {
   const next = { ...config };
-  switch (scene) {
-    case "long-view-shadow-proxy-off":
-      next.enabled = false;
-      break;
-    case "long-view-shadow-proxy-debug-visible":
-      next.enabled = true;
-      next.debugVisibleProxy = true;
-      break;
-    case "long-view-shadow-proxy-basic":
-    case "long-view-shadow-proxy-forest":
-      next.enabled = true;
-      break;
-    case "long-view-shadow-proxy-low-sun":
-      next.enabled = true;
-      break;
-    default:
-      break;
-  }
+  const mode = shadowProxySceneMode(scene);
+  if (mode === "off") next.enabled = false;
+  if (mode === "enabled" || mode === "debug-visible" || mode === "low-sun") next.enabled = true;
+  if (mode === "debug-visible") next.debugVisibleProxy = true;
   return next;
 }
 
