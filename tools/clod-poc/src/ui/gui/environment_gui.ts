@@ -37,6 +37,8 @@ export function createEnvironmentGui(
     taaHistoryWeight: state.postProcessTaaHistoryWeight,
     taaDepthThreshold: state.postProcessTaaDepthThreshold,
     taaSharpen: state.postProcessTaaSharpen,
+    taaJitterEnabled: state.postProcessTaaJitterEnabled,
+    taaJitterScale: state.postProcessTaaJitterScale,
     contactShadowsEnabled: state.postProcessContactShadowsEnabled,
     contactShadowsStrength: state.postProcessContactShadowsStrength,
     contactShadowsRadiusPx: state.postProcessContactShadowsRadiusPx,
@@ -131,6 +133,8 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessTaaHistoryWeight", 0, 0.97, 0.01).name("TAA history").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaDepthThreshold", 0, 0.05, 0.0005).name("TAA depth reject").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaSharpen", 0, 0.5, 0.01).name("TAA sharpen").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessTaaJitterEnabled").name("TAA jitter").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessTaaJitterScale", 0, 2, 0.05).name("TAA jitter scale").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessContactShadowsEnabled").name("contact shadows (WebGL)").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessContactShadowsStrength", 0, 1, 0.01).name("contact strength").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessContactShadowsRadiusPx", 0.5, 8, 0.25).name("contact radius px").onChange(applyPostProcessSettings),
@@ -165,6 +169,8 @@ export function createEnvironmentGui(
       state.postProcessTaaHistoryWeight = DEFAULT_POST_PROCESS_SETTINGS.taaHistoryWeight;
       state.postProcessTaaDepthThreshold = DEFAULT_POST_PROCESS_SETTINGS.taaDepthThreshold;
       state.postProcessTaaSharpen = DEFAULT_POST_PROCESS_SETTINGS.taaSharpen;
+      state.postProcessTaaJitterEnabled = DEFAULT_POST_PROCESS_SETTINGS.taaJitterEnabled;
+      state.postProcessTaaJitterScale = DEFAULT_POST_PROCESS_SETTINGS.taaJitterScale;
       state.postProcessContactShadowsEnabled = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled;
       state.postProcessContactShadowsStrength = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsStrength;
       state.postProcessContactShadowsRadiusPx = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsRadiusPx;
