@@ -192,6 +192,13 @@ describe("TREE-11 acceptance evidence bridge", () => {
     expect(report).toContain("Status: FAIL");
     expect(report).toContain("TREE_IMPOSTOR_FLAT_LIGHTING");
   });
+
+  it("fails evidence validation when TREE-11 acceptance fails", () => {
+    const result = validateTreeParityEvidence(acceptanceInput({ luminanceStdDev: 0.001 }));
+
+    expect(result.ok).toBe(false);
+    expect(result.failures.map((failure) => failure.message).join("\n")).toContain("TREE_IMPOSTOR_FLAT_LIGHTING");
+  });
 });
 
 function manifest(extraParams: Record<string, string> = {}): TreeParityEvidenceManifest {
