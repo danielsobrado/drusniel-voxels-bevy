@@ -37,6 +37,8 @@ export interface EnvironmentSliceState {
   postProcessTaaHistoryWeight: number;
   postProcessTaaDepthThreshold: number;
   postProcessTaaSharpen: number;
+  postProcessTaaJitterEnabled: boolean;
+  postProcessTaaJitterScale: number;
   postProcessContactShadowsEnabled: boolean;
   postProcessContactShadowsStrength: number;
   postProcessContactShadowsRadiusPx: number;
@@ -103,6 +105,8 @@ export function createEnvironmentSliceState(input: {
     postProcessTaaHistoryWeight: DEFAULT_POST_PROCESS_SETTINGS.taaHistoryWeight,
     postProcessTaaDepthThreshold: DEFAULT_POST_PROCESS_SETTINGS.taaDepthThreshold,
     postProcessTaaSharpen: DEFAULT_POST_PROCESS_SETTINGS.taaSharpen,
+    postProcessTaaJitterEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.taaJitterEnabled,
+    postProcessTaaJitterScale: DEFAULT_POST_PROCESS_SETTINGS.taaJitterScale,
     postProcessContactShadowsEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled,
     postProcessContactShadowsStrength: DEFAULT_POST_PROCESS_SETTINGS.contactShadowsStrength,
     postProcessContactShadowsRadiusPx: DEFAULT_POST_PROCESS_SETTINGS.contactShadowsRadiusPx,
