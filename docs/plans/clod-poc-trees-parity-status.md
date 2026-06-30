@@ -100,11 +100,13 @@ Still required before calling TREE-10 complete:
 Implemented:
 
 - `tree_parity_evidence.ts` provides a generic manifest-driven evidence validator for required screenshot/stats/perf artifacts and metric thresholds.
-- `tree_parity_evidence.ts` also builds exact capture commands from each manifest `capture` block, including shot paths, perf output directories, and shared query params.
+- `tree_parity_evidence.ts` also builds exact capture commands from each manifest `capture` block, including shot paths, perf output directories, explicit renderer, and shared query params.
 - `tree_parity_evidence.ts` can generate a markdown closeout report with artifact status, metric expectations, actual values, and failures.
 - `tree_parity_evidence.test.ts` covers pass/fail cases, missing artifacts, metric floors, unreadable JSON, capture-command generation, and report rendering.
 - `tools/verify-tree-parity-evidence.ts` exposes the validator, the `--commands` capture-command printer, and `--report` markdown output.
-- `config/tree-parity-evidence.yaml` defines the current TREE-7/8/9/10/11 evidence contract without hardcoding paths or thresholds in code.
+- `config/tree-parity-evidence.yaml` defines the current TREE-7/8/9/10/11 evidence contract using supported query params only, including deterministic `sunElevationDeg` for low-sun/noon shots.
+- `app/state/index.ts` supports `sunElevationDeg`/`sunElevation` and `sunAzimuthDeg`/`sunAzimuth` query params for deterministic evidence lighting.
+- `tools/shoot.ts` consumes `--renderer` locally instead of forwarding it into the app URL.
 - `npm --prefix tools/clod-poc run trees:capture-parity-evidence` prints the real-GPU capture commands expected by the manifest.
 - `npm --prefix tools/clod-poc run trees:verify-parity-evidence` runs the evidence gate after local real-GPU captures are archived under the manifest paths.
 - `npm --prefix tools/clod-poc run trees:report-parity-evidence` writes `docs/performance/clod-poc-tree-parity-evidence-latest.md` from the archived artifacts.
