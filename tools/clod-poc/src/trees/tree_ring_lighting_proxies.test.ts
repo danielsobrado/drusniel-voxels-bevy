@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TREE_SETTINGS, TREE_LODS, TREE_SPECIES } from "./tree_config.js";
+import { DEFAULT_TREE_SETTINGS, TREE_SPECIES } from "./tree_config.js";
 import { treeRingShadowCasterGroupCount } from "./tree_ring_shadow_casters.js";
 import { generateTreeRingValidationCounts } from "./tree_ring_lighting_proxies.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
