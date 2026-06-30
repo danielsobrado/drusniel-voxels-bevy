@@ -7,6 +7,7 @@ import type { ForestLightingSettings } from "../../forest_lighting/forest_lighti
 import type { ForestLightingDebugMode } from "../../forest_lighting/index.js";
 import type { TreeTotalDisplay } from "../../trees/tree_info.js";
 import { assignArchiveFields } from "./archive_fields.js";
+import type { TreeShadowMaxLod } from "./tree_quality_presets.js";
 
 export interface VegetationSliceState {
   grassEnabled: boolean;
@@ -48,6 +49,7 @@ export interface VegetationSliceState {
   treeMaxInstances: number;
   treeDensity: number;
   treeSpacing: number;
+  treeShadowMaxLod: TreeShadowMaxLod;
   treeDebugColorByLod: boolean;
   treeWindEnabled: boolean;
   treeWindStrength: number;
@@ -142,6 +144,7 @@ export function createVegetationSliceState(input: {
     treeMaxInstances: treeConfig.maxInstances,
     treeDensity: treeConfig.ecology.density.baseDensity,
     treeSpacing: treeConfig.placement.spacingM,
+    treeShadowMaxLod: treeConfig.lod.shadowsMaxLod,
     treeDebugColorByLod: treeConfig.render.debugColorByLod,
     treeWindEnabled: treeConfig.wind.enabled,
     treeWindStrength: treeConfig.wind.strength,
