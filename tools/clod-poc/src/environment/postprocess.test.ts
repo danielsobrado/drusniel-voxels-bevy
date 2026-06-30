@@ -23,6 +23,10 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       bloomThreshold: 0.85,
       bloomStrength: 0.18,
       bloomRadius: 0.35,
+      taaEnabled: false,
+      taaHistoryWeight: 0.88,
+      taaDepthThreshold: 0.0025,
+      taaSharpen: 0.06,
       aerialPerspectiveEnabled: true,
       aerialPerspectiveStart: 120,
       aerialPerspectiveEnd: 1800,
@@ -36,7 +40,7 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
     });
   });
 
-  it("parses bloom and tone-mapping overrides from YAML", () => {
+  it("parses bloom, TAA, and tone-mapping overrides from YAML", () => {
     expect(parsePostProcessSettings(`
 postprocess:
   enabled: false
@@ -46,6 +50,11 @@ postprocess:
     threshold: 1.1
     strength: 0.4
     radius: 0.6
+  taa:
+    enabled: true
+    history_weight: 0.75
+    depth_threshold: 0.01
+    sharpen: 0.12
 `)).toMatchObject({
       enabled: false,
       toneMapping: "agx",
@@ -53,6 +62,10 @@ postprocess:
       bloomThreshold: 1.1,
       bloomStrength: 0.4,
       bloomRadius: 0.6,
+      taaEnabled: true,
+      taaHistoryWeight: 0.75,
+      taaDepthThreshold: 0.01,
+      taaSharpen: 0.12,
     });
   });
 
@@ -74,7 +87,7 @@ aerial_perspective:
   });
 
   it("applies URL ablation overrides", () => {
-    const params = new URLSearchParams("postmin=1&bloom=0&grade=0&toneMap=agx");
+    const params = new URLSearchParams("postmin=1&bloom=0&taa=1&grade=0&toneMap=agx");
     expect(applyPostProcessQueryOverrides({
       ...DEFAULT_POST_PROCESS_SETTINGS,
       exposure: 1.8,
@@ -82,6 +95,7 @@ aerial_perspective:
       saturation: 0.5,
       vignette: 0.7,
       bloomEnabled: true,
+      taaEnabled: true,
       aerialPerspectiveEnabled: true,
     }, params)).toMatchObject({
       enabled: true,
@@ -90,6 +104,7 @@ aerial_perspective:
       saturation: 1,
       vignette: 0,
       bloomEnabled: false,
+      taaEnabled: true,
       aerialPerspectiveEnabled: false,
       godRaysMode: "off",
       toneMapping: "agx",
@@ -102,13 +117,15 @@ aerial_perspective:
         enabled: false,
         debugMode: "off",
         bloomEnabled: false,
+        taaEnabled: false,
         aerialPerspectiveEnabled: false,
         godRaysMode: "off",
       });
   });
 
-  it("defaults god rays off so existing scenes are unchanged", () => {
+  it("defaults god rays and TAA off so existing scenes are unchanged", () => {
     expect(DEFAULT_POST_PROCESS_SETTINGS.godRaysMode).toBe("off");
+    expect(DEFAULT_POST_PROCESS_SETTINGS.taaEnabled).toBe(false);
   });
 });
 
@@ -127,6 +144,12 @@ describe("postprocess shaders", () => {
   it("declares the output pass uniforms", () => {
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("tDiffuse");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("tDepth");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("tHistory");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("tHistoryDepth");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uPrevViewProjection");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uInvCurrentViewProjection");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uTaaHistoryWeight");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("temporalSceneColor");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uExposure");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uContrast");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uSaturation");
