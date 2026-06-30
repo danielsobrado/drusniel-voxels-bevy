@@ -1,5 +1,9 @@
 import type GUI from "lil-gui";
 import type { ClodAppState } from "../../app/clod_app_state.js";
+import {
+  applyPostProcessQualityPreset,
+  type PostProcessQualityPreset,
+} from "../../app/state/postprocess_quality_presets.js";
 import { setAudioEnabled, setMasterVolume } from "../../audio/index.js";
 import {
   DEFAULT_ENVIRONMENT_SETTINGS,
@@ -150,9 +154,29 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessAerialPerspectiveEnd", 1, 8000, 10).name("aerial end m").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveStrength", 0, 1, 0.01).name("aerial strength").onChange(applyPostProcessSettings),
   ];
+  const refreshPostControllers = () => {
+    for (const controller of postControllers) controller.updateDisplay();
+  };
+  const applyPreset = (preset: PostProcessQualityPreset) => {
+    applyPostProcessQualityPreset(state, preset);
+    applyPostProcessSettings();
+    refreshPostControllers();
+  };
+  const presetActions = {
+    ultra: () => applyPreset("ultra"),
+    balanced: () => applyPreset("balanced"),
+    perf: () => applyPreset("perf"),
+    potato: () => applyPreset("potato"),
+  };
+  postFolder.add(presetActions, "ultra").name("preset: ultra");
+  postFolder.add(presetActions, "balanced").name("preset: balanced");
+  postFolder.add(presetActions, "perf").name("preset: perf");
+  postFolder.add(presetActions, "potato").name("preset: potato");
+
   const postActions = {
     reset: () => {
       const aerialColor = DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveColor;
+      state.postProcessQualityPreset = "custom";
       state.postProcessEnabled = DEFAULT_POST_PROCESS_SETTINGS.enabled;
       state.postProcessOpacity = DEFAULT_POST_PROCESS_SETTINGS.opacity;
       state.postProcessRenderScale = DEFAULT_POST_PROCESS_SETTINGS.renderScale;
@@ -192,7 +216,7 @@ export function createEnvironmentGui(
       state.postProcessAerialPerspectiveColorG = aerialColor[1];
       state.postProcessAerialPerspectiveColorB = aerialColor[2];
       applyPostProcessSettings();
-      for (const controller of postControllers) controller.updateDisplay();
+      refreshPostControllers();
     },
   };
   postFolder.add(postActions, "reset").name("reset");
