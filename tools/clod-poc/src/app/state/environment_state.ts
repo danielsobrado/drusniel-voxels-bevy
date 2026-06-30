@@ -30,6 +30,13 @@ export interface EnvironmentSliceState {
   postProcessBloomThreshold: number;
   postProcessBloomStrength: number;
   postProcessBloomRadius: number;
+  postProcessAerialPerspectiveEnabled: boolean;
+  postProcessAerialPerspectiveStart: number;
+  postProcessAerialPerspectiveEnd: number;
+  postProcessAerialPerspectiveStrength: number;
+  postProcessAerialPerspectiveColorR: number;
+  postProcessAerialPerspectiveColorG: number;
+  postProcessAerialPerspectiveColorB: number;
   godRaysMode: GodRaysMode;
   godRaysDensity: number;
   godRaysDecay: number;
@@ -51,6 +58,7 @@ export function createEnvironmentSliceState(input: {
   audioEnabled: boolean;
   audioVolume: number;
 }): EnvironmentSliceState {
+  const aerialColor = DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveColor;
   return {
     sunAzimuthDeg: DEFAULT_ENVIRONMENT_SETTINGS.sunAzimuthDeg,
     sunElevationDeg: DEFAULT_ENVIRONMENT_SETTINGS.sunElevationDeg,
@@ -74,6 +82,13 @@ export function createEnvironmentSliceState(input: {
     postProcessBloomThreshold: DEFAULT_POST_PROCESS_SETTINGS.bloomThreshold,
     postProcessBloomStrength: DEFAULT_POST_PROCESS_SETTINGS.bloomStrength,
     postProcessBloomRadius: DEFAULT_POST_PROCESS_SETTINGS.bloomRadius,
+    postProcessAerialPerspectiveEnabled: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnabled,
+    postProcessAerialPerspectiveStart: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveStart,
+    postProcessAerialPerspectiveEnd: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnd,
+    postProcessAerialPerspectiveStrength: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveStrength,
+    postProcessAerialPerspectiveColorR: aerialColor[0],
+    postProcessAerialPerspectiveColorG: aerialColor[1],
+    postProcessAerialPerspectiveColorB: aerialColor[2],
     godRaysMode: DEFAULT_POST_PROCESS_SETTINGS.godRaysMode,
     godRaysDensity: DEFAULT_POST_PROCESS_SETTINGS.godRaysDensity,
     godRaysDecay: DEFAULT_POST_PROCESS_SETTINGS.godRaysDecay,
