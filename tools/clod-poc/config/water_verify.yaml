@@ -1,0 +1,23 @@
+water_verify:
+  output:
+    default_path: qa-runs/water/water-verify-report.json
+
+  ownership:
+    require_runtime_only: true
+    max_terrain_clod_surfaces: 0
+
+  clipmap:
+    require_enabled_when_water_enabled: true
+    min_visible_levels_when_enabled: 1
+    min_triangles_when_enabled: 1
+    max_triangles_when_enabled: 250000
+
+  reflection:
+    require_safe_fallback: true
+    allow_unwired_ssr: false
+
+  wetness_mask:
+    enabled: true
+    resolution: 128
+    min_wet_pixels: 1
+    max_channel_value: 255
