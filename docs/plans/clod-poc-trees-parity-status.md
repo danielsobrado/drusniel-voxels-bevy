@@ -26,14 +26,12 @@ Implemented:
 - `tree_ring_compute.ts` binds the shadow buffers, packs shadow cascade planes into the WGSL uniform layout, builds shadow indirect args, and disables shadow writes unless real output buffers are available.
 - `realtime_sun_shadows.ts` exposes active sun shadow cascade cameras and assigns each cascade a dedicated shadow-only caster layer.
 - `tree_system_gpu_ring_draw.ts` includes a tested `createTreeGpuRingShadowMesh(...)` helper for cascade-layered shadow-only ring meshes.
-- `scripts/wire-tree-system-tree7-shadows.mjs` physically wires the large `tree_system.ts` file for shadow buffers, cascade-plane dispatch, shadow-only meshes, and visible-ring `castShadow=false`.
+- `tree_system_gpu_ring_resources.ts` owns GPU-ring draw resource creation after the SOLID split, including visible meshes, shadow-only meshes, shadow buffers, and crown-proxy shadow materials.
 
 Still required before calling TREE-7 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:wire-parity` locally and commit any generated `tree_system.ts` rewrite.
-- Verify `tree_system.ts` now imports `markAsRealtimeSunShadowCaster`, `TREE_RING_SHADOW_CASCADE_COUNT`, and `treeRingShadowCasterGroupIndex`.
-- Verify `createGpuRingDrawResources(...)` now creates `shadowRingBuffers`, one shadow material handle per cascade/species/LOD, and one `createGpuRingShadowTierDraw(...)` mesh per caster group.
-- Verify visible GPU-ring meshes have `castShadow=false`, so they do not double-cast against the shadow-only meshes.
+- Run `npm --prefix tools/clod-poc run trees:wire-parity:check` and confirm no pending generated rewrites.
+- Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
 - Add GPU caster-count readback if we want full CPU/GPU caster-count parity instead of CPU contract coverage only.
 - Capture a low-sun shot proving off-screen trees can still cast.
 
@@ -45,13 +43,12 @@ Implemented:
 - `tree_crown_proxy_math.test.ts` covers broad oak crowns, tall pine crowns, sparse dead-tree proxies, edge falloff, and impostor-boundary fade.
 - `tree_crown_proxy_node_material.ts` provides a WebGPU/TSL crown proxy material handle using GPU ring storage cells, ellipsoid placement, world/screen anchored dither, crown-edge falloff, and numeric impostor fade masks.
 - `tree_crown_proxy_node_material.test.ts` covers material construction and source-level placement/mask contract.
-- `scripts/wire-tree-system-tree8-proxies.mjs` wires the large `tree_system.ts` file to use crown proxy geometry/materials for far/impostor shadow-only meshes.
-- `npm --prefix tools/clod-poc run trees:wire-shadow-proxies` applies TREE-7 then TREE-8 in the required order.
+- `tree_system_gpu_ring_resources.ts` uses crown proxy geometry/materials for far/impostor shadow-only meshes after the SOLID split.
+- `npm --prefix tools/clod-poc run trees:wire-shadow-proxies` applies TREE-7 then TREE-8 in the required order for older local checkouts.
 
 Still required before calling TREE-8 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:wire-parity` locally and commit any generated `tree_system.ts` rewrite.
-- Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
+- Run `npm --prefix tools/clod-poc run trees:wire-parity:check`, `npm --prefix tools/clod-poc run typecheck`, and `npm --prefix tools/clod-poc test`.
 - Capture noon forest-interior and impostor-boundary shadow shots.
 
 ## TREE-9 current state
@@ -70,13 +67,29 @@ Implemented:
 - `tree_species_expansion.test.ts` verifies the six-species list, YAML overrides, runtime generation coverage, GPU group counts, morphology differences, and ecology niche preferences.
 - `tree_ring_shader_species.test.ts` guards the raw six-species WGSL contract.
 - `tree_ring_species_wgsl_expansion.test.ts` guards both the expansion helper and final `composeTreeRingShader(...)` output.
-- `npm --prefix tools/clod-poc run trees:wire-parity` applies TREE-7, TREE-8, TREE-9 WGSL composer, and TREE-9 config rewrites in order.
 
 Still required before calling TREE-9 complete:
 
 - Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
 - Run `npm --prefix tools/clod-poc run trees:wire-parity:check` and confirm it reports no pending rewrites.
 - Capture the ecology-sorted species gallery shot.
+
+## TREE-10 current state
+
+Implemented:
+
+- `tree_hero_fidelity.ts` adds a 100k-triangle TREE-10 near-ring hero floor contract and helpers to count total near-tree triangles, foliage triangles, min/average triangles per near tree, and pass/fail flags.
+- `tree_hero_fidelity.test.ts` covers triangle counting, foliage-mask counting, visible-near-only aggregation, and empty-shot failure.
+- `TreeStats` now carries hero near-tree triangle counters and pass/fail flags.
+- `tree_system_runtime_stats.ts` computes TREE-10 hero fidelity stats from visible CPU patches and near LOD state.
+- `perf_probe.ts` and `render_phase.ts` include TREE-10 counters in perf samples and summaries, so shot/perf JSON can archive `treeHeroNearTrianglesAvg`, `treeHeroNearFoliageTrianglesAvg`, min per-tree triangles, and pass-frame counts.
+
+Still required before calling TREE-10 complete:
+
+- Run typecheck/tests.
+- Capture the hero forest bookmark shot/perf run and archive the stats JSON.
+- Verify the archived shot reports `treeHeroNearTrianglesAvg >= 100000` and non-zero `treeHeroNearFoliageTrianglesAvg`.
+- If the shot misses the floor, raise near-tree grammar/leaf detail and rerun the same bookmark A/B.
 
 ## Still required before calling Epic A+B closed
 
@@ -89,5 +102,6 @@ Still required before calling TREE-9 complete:
 ## Next implementation order
 
 1. Local generated rewrite check: `npm --prefix tools/clod-poc run trees:wire-parity:check`.
-2. TREE-10 hero near-tree triangle audit.
-3. TREE-12 closeout docs and evidence links.
+2. Run typecheck/tests.
+3. Capture TREE-7/TREE-8/TREE-9/TREE-10 evidence shots and perf JSON.
+4. TREE-12 closeout docs and evidence links.
