@@ -23,6 +23,9 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       bloomThreshold: 0.85,
       bloomStrength: 0.18,
       bloomRadius: 0.35,
+      fxaaEnabled: true,
+      fxaaEdgeThreshold: 0.125,
+      fxaaSubpixelBlend: 0.75,
       taaEnabled: false,
       taaHistoryWeight: 0.88,
       taaDepthThreshold: 0.0025,
@@ -47,7 +50,7 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
     });
   });
 
-  it("parses bloom, TAA, contact shadows, clarity, and tone-mapping overrides from YAML", () => {
+  it("parses bloom, FXAA, TAA, contact shadows, clarity, and tone-mapping overrides from YAML", () => {
     expect(parsePostProcessSettings(`
 postprocess:
   enabled: false
@@ -57,6 +60,10 @@ postprocess:
     threshold: 1.1
     strength: 0.4
     radius: 0.6
+  fxaa:
+    enabled: false
+    edge_threshold: 0.2
+    subpixel_blend: 0.5
   taa:
     enabled: true
     history_weight: 0.75
@@ -78,6 +85,9 @@ postprocess:
       bloomThreshold: 1.1,
       bloomStrength: 0.4,
       bloomRadius: 0.6,
+      fxaaEnabled: false,
+      fxaaEdgeThreshold: 0.2,
+      fxaaSubpixelBlend: 0.5,
       taaEnabled: true,
       taaHistoryWeight: 0.75,
       taaDepthThreshold: 0.01,
@@ -110,7 +120,7 @@ aerial_perspective:
   });
 
   it("applies URL ablation overrides", () => {
-    const params = new URLSearchParams("postmin=1&bloom=0&taa=1&contactShadows=1&clarity=1&grade=0&toneMap=agx");
+    const params = new URLSearchParams("postmin=1&bloom=0&fxaa=1&taa=1&contactShadows=1&clarity=1&grade=0&toneMap=agx");
     expect(applyPostProcessQueryOverrides({
       ...DEFAULT_POST_PROCESS_SETTINGS,
       exposure: 1.8,
@@ -118,6 +128,7 @@ aerial_perspective:
       saturation: 0.5,
       vignette: 0.7,
       bloomEnabled: true,
+      fxaaEnabled: false,
       taaEnabled: true,
       contactShadowsEnabled: true,
       clarityEnabled: false,
@@ -129,6 +140,7 @@ aerial_perspective:
       saturation: 1,
       vignette: 0,
       bloomEnabled: false,
+      fxaaEnabled: true,
       taaEnabled: true,
       contactShadowsEnabled: true,
       clarityEnabled: true,
@@ -144,6 +156,7 @@ aerial_perspective:
         enabled: false,
         debugMode: "off",
         bloomEnabled: false,
+        fxaaEnabled: false,
         taaEnabled: false,
         contactShadowsEnabled: false,
         clarityEnabled: false,
@@ -178,6 +191,8 @@ describe("postprocess shaders", () => {
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("tHistoryDepth");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uPrevViewProjection");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uInvCurrentViewProjection");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uFxaaEdgeThreshold");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("fxaaSceneColor");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uTaaHistoryWeight");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("temporalSceneColor");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uContactShadowsStrength");
