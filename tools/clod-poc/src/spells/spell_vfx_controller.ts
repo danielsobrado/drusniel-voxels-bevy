@@ -5,6 +5,19 @@ import { createWaterNodeMaterial } from "./water_node_material.js";
 import { createAirNodeMaterial } from "./air_node_material.js";
 import type { FireSpellVfxConfig } from "./spell_config.js";
 
+const SPELL_LIGHTS = {
+  fire: { color: 0xff7a24, intensity: 3.6, distance: 8.5, decay: 2.0, localYRatio: 0.34 },
+  water: { color: 0x58c8ff, intensity: 1.8, distance: 6.5, decay: 2.0, localYRatio: 0.38 },
+  air: { color: 0xd7fbff, intensity: 1.2, distance: 6.0, decay: 2.0, localYRatio: 0.42 },
+} as const;
+
+const SPELL_LIGHT_ENVELOPE = {
+  castInEnd: 0.12,
+  castOutStart: 0.72,
+  pulseStrength: 0.08,
+  pulseCycles: 8.0,
+} as const;
+
 export interface SpellVfxMeshConfig {
   worldWidth: number;
   worldHeight: number;
@@ -110,8 +123,18 @@ export interface SpellVfxController {
   dispose: () => void;
 }
 
+interface SpellLightConfig {
+  color: number;
+  intensity: number;
+  distance: number;
+  decay: number;
+  localYRatio: number;
+}
+
 interface SpellState {
   mesh: THREE.Mesh;
+  light: THREE.PointLight;
+  baseLightIntensity: number;
   handle: SpellNodeMaterialHandle;
   config: SpellVfxMeshConfig;
   poseScratch: SpellPoseScratch;
@@ -131,6 +154,15 @@ export function computeSpellFrame(
   return { active: progress < 1, progress, timeSeconds: elapsed / 1000 };
 }
 
+export function computeSpellLightEnvelope(progress: number): number {
+  const p = Math.min(1, Math.max(0, progress));
+  const castIn = Math.min(1, p / SPELL_LIGHT_ENVELOPE.castInEnd);
+  const castOut = 1 - Math.min(1, Math.max(0, (p - SPELL_LIGHT_ENVELOPE.castOutStart) / (1 - SPELL_LIGHT_ENVELOPE.castOutStart)));
+  const pulse = 1 - SPELL_LIGHT_ENVELOPE.pulseStrength * 0.5
+    + Math.sin(p * Math.PI * 2 * SPELL_LIGHT_ENVELOPE.pulseCycles) * SPELL_LIGHT_ENVELOPE.pulseStrength * 0.5;
+  return Math.min(1, Math.max(0, castIn * castOut * pulse));
+}
+
 /**
  * Owns the in-scene spell billboards. Each spell is a single beam-style quad
  * anchored at that spell's configured hand offset, aimed along the camera.
@@ -139,20 +171,42 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
   const { scene, getCamera } = deps;
   const now = deps.now ?? (() => performance.now());
 
-  const buildSpell = (name: string, handle: SpellNodeMaterialHandle, config: SpellVfxMeshConfig): SpellState => {
+  const buildSpell = (
+    name: string,
+    handle: SpellNodeMaterialHandle,
+    config: SpellVfxMeshConfig,
+    lightConfig: SpellLightConfig,
+  ): SpellState => {
     const geometry = createPropBillboardGeometry(config.worldWidth * config.flameScale, config.worldHeight * config.flameScale);
     const mesh = new THREE.Mesh(geometry, handle.material);
     mesh.name = name;
     mesh.frustumCulled = false;
     mesh.renderOrder = 4000;
     mesh.visible = false;
+
+    const light = new THREE.PointLight(lightConfig.color, 0, lightConfig.distance, lightConfig.decay);
+    light.name = `${name}-glow`;
+    light.position.set(0, config.worldHeight * config.flameScale * lightConfig.localYRatio, 0);
+    light.visible = false;
+    mesh.add(light);
+
     scene.add(mesh);
-    return { mesh, handle, config, poseScratch: createPoseScratch(), startMs: 0, durationMs: 0, active: false };
+    return {
+      mesh,
+      light,
+      baseLightIntensity: lightConfig.intensity,
+      handle,
+      config,
+      poseScratch: createPoseScratch(),
+      startMs: 0,
+      durationMs: 0,
+      active: false,
+    };
   };
 
-  const fire = buildSpell("fire-spell", createFireNodeMaterial(), deps.fire);
-  const water = buildSpell("water-spell", createWaterNodeMaterial(), deps.water);
-  const air = buildSpell("air-spell", createAirNodeMaterial(), deps.air);
+  const fire = buildSpell("fire-spell", createFireNodeMaterial(), deps.fire, SPELL_LIGHTS.fire);
+  const water = buildSpell("water-spell", createWaterNodeMaterial(), deps.water, SPELL_LIGHTS.water);
+  const air = buildSpell("air-spell", createAirNodeMaterial(), deps.air, SPELL_LIGHTS.air);
   const spells = [fire, water, air];
 
   const start = (spell: SpellState, durationMs: number): void => {
@@ -161,6 +215,8 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     spell.active = true;
     spell.handle.uTime.value = 0;
     spell.handle.uProgress.value = 0;
+    spell.light.intensity = 0;
+    spell.light.visible = true;
     spell.mesh.visible = true;
   };
 
@@ -169,11 +225,14 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     const frame = computeSpellFrame(spell.startMs, spell.durationMs, nowMs);
     if (!frame.active) {
       spell.active = false;
+      spell.light.intensity = 0;
+      spell.light.visible = false;
       spell.mesh.visible = false;
       return;
     }
     spell.handle.uTime.value = frame.timeSeconds;
     spell.handle.uProgress.value = frame.progress;
+    spell.light.intensity = spell.baseLightIntensity * computeSpellLightEnvelope(frame.progress);
     const camera = getCamera();
     const pose = resolveSpellPose(camera, spell.config, spell.poseScratch);
     spell.mesh.position.copy(pose.base);
