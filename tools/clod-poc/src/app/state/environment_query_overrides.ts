@@ -4,6 +4,7 @@ import {
   applyPostProcessQualityPreset,
   isPostProcessQualityPreset,
 } from "./postprocess_quality_presets.js";
+import { applyTreeQualityPreset } from "./tree_quality_presets.js";
 
 function finiteParam(searchParams: URLSearchParams, ...keys: string[]): number | null {
   for (const key of keys) {
@@ -82,10 +83,26 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   const qualityPreset = qualityPresetParam(searchParams);
   if (isPostProcessQualityPreset(qualityPreset)) {
     applyPostProcessQualityPreset(state, qualityPreset);
+    applyTreeQualityPreset(state, qualityPreset);
   }
 
   apply(searchParams, ["renderScale", "renderscale", "postScale", "postprocessScale"], (value) => {
     state.postProcessRenderScale = clamp(value, 0.5, 1);
+  });
+  apply(searchParams, ["treeDistance", "treeDistanceM", "treeRing", "treeRingM"], (value) => {
+    state.treeDistance = Math.max(0, value);
+  });
+  apply(searchParams, ["treeMaxInstances", "treeMax"], (value) => {
+    state.treeMaxInstances = Math.floor(Math.max(0, value));
+  });
+  apply(searchParams, ["treeDensity", "treeBaseDensity"], (value) => {
+    state.treeDensity = Math.max(0, value);
+  });
+  apply(searchParams, ["treeSpacing", "treeSpacingM"], (value) => {
+    state.treeSpacing = Math.max(0.5, value);
+  });
+  apply(searchParams, ["treeGpuMaxVisible", "treeGpuMax"], (value) => {
+    state.treeGpuMaxVisible = Math.floor(Math.max(0, value));
   });
 
   const fx = flagParam(searchParams, "fx");
