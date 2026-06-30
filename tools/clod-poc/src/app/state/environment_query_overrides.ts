@@ -4,7 +4,10 @@ import {
   applyPostProcessQualityPreset,
   isPostProcessQualityPreset,
 } from "./postprocess_quality_presets.js";
-import { applyTreeQualityPreset } from "./tree_quality_presets.js";
+import {
+  applyTreeQualityPreset,
+  isTreeShadowMaxLod,
+} from "./tree_quality_presets.js";
 
 function finiteParam(searchParams: URLSearchParams, ...keys: string[]): number | null {
   for (const key of keys) {
@@ -35,6 +38,10 @@ function toneMappingParam(searchParams: URLSearchParams): PostProcessToneMapping
 
 function qualityPresetParam(searchParams: URLSearchParams): string | null {
   return searchParams.get("quality") ?? searchParams.get("qualityPreset") ?? searchParams.get("preset");
+}
+
+function treeShadowMaxLodParam(searchParams: URLSearchParams): string | null {
+  return searchParams.get("treeShadowMaxLod") ?? searchParams.get("treeShadowLod") ?? searchParams.get("treeShadows");
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -104,6 +111,9 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   apply(searchParams, ["treeGpuMaxVisible", "treeGpuMax"], (value) => {
     state.treeGpuMaxVisible = Math.floor(Math.max(0, value));
   });
+
+  const treeShadowMaxLod = treeShadowMaxLodParam(searchParams);
+  if (isTreeShadowMaxLod(treeShadowMaxLod)) state.treeShadowMaxLod = treeShadowMaxLod;
 
   const treeGpu = flagParam(searchParams, "treeGpu", "treeGPU", "gpuTrees");
   if (treeGpu !== null) state.treeGpuEnabled = treeGpu;
