@@ -1,5 +1,7 @@
 import type { TreeLod } from "./tree_config.js";
 import type { TreeGenerationStats } from "./tree_instances.js";
+import type { TreeHeroFidelityStats } from "./tree_hero_fidelity.js";
+import { createEmptyTreeHeroFidelityStats } from "./tree_hero_fidelity.js";
 import { visibleTreeLodCount } from "./tree_system_math.js";
 
 export type TreeSystemGpuStatus = "disabled" | "unsupported" | "ring" | "fallback-cpu" | "error";
@@ -14,6 +16,12 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   midTrees: number;
   farTrees: number;
   impostorTrees: number;
+  heroNearTreeTriangles: number;
+  heroNearFoliageTriangles: number;
+  heroNearMinTreeTriangles: number;
+  heroNearAvgTreeTriangles: number;
+  heroNearPassesTriangleFloor: boolean;
+  heroNearPassesRealFoliage: boolean;
   gpuStatus: TreeSystemGpuStatus;
   gpuCandidateCount: number;
   gpuAcceptedCount: number;
@@ -40,6 +48,7 @@ export interface TreeSystemGpuStatsInput {
 export interface BuildTreeSystemStatsInput {
   patches: readonly TreeSystemStatsPatchInput[];
   lodCounts: Record<TreeLod, number>;
+  heroFidelity: TreeHeroFidelityStats;
   gpuRing: boolean;
   gpuRingStats: TreeSystemGpuStatsInput;
   gpuVisibleCount: number;
@@ -61,6 +70,12 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     midTrees: 0,
     farTrees: 0,
     impostorTrees: 0,
+    heroNearTreeTriangles: 0,
+    heroNearFoliageTriangles: 0,
+    heroNearMinTreeTriangles: 0,
+    heroNearAvgTreeTriangles: 0,
+    heroNearPassesTriangleFloor: false,
+    heroNearPassesRealFoliage: false,
     gpuStatus: "disabled",
     gpuCandidateCount: 0,
     gpuAcceptedCount: 0,
@@ -104,6 +119,13 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
   stats.midTrees = input.lodCounts.mid;
   stats.farTrees = input.lodCounts.far;
   stats.impostorTrees = input.lodCounts.impostor;
+  const heroFidelity = input.heroFidelity ?? createEmptyTreeHeroFidelityStats();
+  stats.heroNearTreeTriangles = heroFidelity.nearTriangleCount;
+  stats.heroNearFoliageTriangles = heroFidelity.nearFoliageTriangleCount;
+  stats.heroNearMinTreeTriangles = heroFidelity.minNearTreeTriangles;
+  stats.heroNearAvgTreeTriangles = heroFidelity.avgNearTreeTriangles;
+  stats.heroNearPassesTriangleFloor = heroFidelity.passesTriangleFloor;
+  stats.heroNearPassesRealFoliage = heroFidelity.passesRealFoliage;
   stats.gpuStatus = input.gpuStatus;
   stats.gpuCandidateCount = input.gpuRing ? input.gpuRingStats.candidateCount : 0;
   stats.gpuAcceptedCount = input.gpuRing
