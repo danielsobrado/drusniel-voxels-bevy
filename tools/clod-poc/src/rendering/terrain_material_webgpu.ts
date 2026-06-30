@@ -9,7 +9,6 @@ import {
   DEFAULT_TERRAIN_NODE_LIGHTING,
   type BiomeLayerSet,
   type TerrainColorAdjust,
-  type TerrainArraySamplingMode,
   type TerrainNodeLighting,
   type TerrainNodeMaterialHandle,
   type TerrainNodeTextures,
@@ -187,11 +186,10 @@ function textureOptionsSignature(
 ): string {
   if (!options.enabled || !options.albedoArray || slots.length === 0) return "off";
   const procedural = options.procedural;
-  const extras = options as Record<string, unknown>;
   const normalMapMask = procedural?.normalMapMask
     ? Array.from(procedural.normalMapMask).join(",")
     : slots.map((slot) => (slot.normalTexture ? 1 : 0)).join(",");
-  const biomeLayerSets = extras.biomeSplat === true
+  const biomeLayerSets = options.biomeSplat === true
     ? buildBiomeLayerSets(slots).map((set) => set.join(",")).join(";")
     : "";
   return [
@@ -202,7 +200,7 @@ function textureOptionsSignature(
     options.normalMap ? 1 : 0,
     options.textureScale,
     options.blendBands ? 1 : 0,
-    (extras.arraySampling as string | undefined) ?? "triplanar",
+    options.arraySampling ?? "triplanar",
     options.painted ? 1 : 0,
     procedural?.enabled ? 1 : 0,
     procedural?.noiseA?.uuid ?? "_",
@@ -213,9 +211,9 @@ function textureOptionsSignature(
     procedural?.lodBias ?? 0,
     normalMapMask,
     biomeLayerSets,
-    extras.bakedMacroTint ? (extras.bakedMacroTint as THREE.Texture).uuid : "_",
-    extras.riverWetnessMask ? (extras.riverWetnessMask as THREE.Texture).uuid : "_",
-    extras.worldSize ?? "_",
+    options.bakedMacroTint ? options.bakedMacroTint.uuid : "_",
+    options.riverWetnessMask ? options.riverWetnessMask.uuid : "_",
+    options.worldSize ?? "_",
     slots.map((slot) => [
       slot.texture?.uuid ?? "_",
       slot.normalTexture?.uuid ?? "_",
@@ -232,7 +230,6 @@ function toNodeTextures(
   options: TerrainTextureApplyOptions,
 ): TerrainNodeTextures | null {
   if (!options.enabled || !options.albedoArray || slots.length === 0) return null;
-  const extras = options as Record<string, unknown>;
   const normalMapMask = options.procedural?.normalMapMask
     ?? slots.map((slot) => (slot.normalTexture ? 1 : 0));
   return {
@@ -247,11 +244,11 @@ function toNodeTextures(
     blendWidth: options.blendWidth,
     normalIntensity: options.normalIntensity,
     triplanar: options.triplanar,
-    arraySampling: ((extras.arraySampling as TerrainArraySamplingMode | undefined) ?? "triplanar"),
+    arraySampling: options.arraySampling ?? "triplanar",
     normalMapMask,
     painted: options.painted ?? false,
     debugMode: options.procedural?.debugMode ?? 0,
-    biomeLayerSets: extras.biomeSplat === true ? buildBiomeLayerSets(slots) : undefined,
+    biomeLayerSets: options.biomeSplat === true ? buildBiomeLayerSets(slots) : undefined,
     procedural: options.procedural?.enabled && options.procedural.noiseA && options.procedural.noiseB
       ? {
           noiseA: options.procedural.noiseA,
@@ -261,9 +258,9 @@ function toNodeTextures(
           lodBias: options.procedural.lodBias,
         }
       : null,
-    bakedMacroTint: extras.bakedMacroTint as THREE.Texture | null | undefined,
-    riverWetnessMask: extras.riverWetnessMask as THREE.Texture | null | undefined,
-    worldSize: extras.worldSize as number | undefined,
+    bakedMacroTint: options.bakedMacroTint,
+    riverWetnessMask: options.riverWetnessMask,
+    worldSize: options.worldSize,
   };
 }
 
