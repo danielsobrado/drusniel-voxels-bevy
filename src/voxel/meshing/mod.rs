@@ -86,10 +86,6 @@ mod surface_nets;
 mod tests;
 mod water;
 
-pub(crate) use biome_channel::{
-    compatibility_biome_from_triplanar_weights, compatibility_biome_id_for_uv,
-    encode_biome_id_for_uv,
-};
 pub use blocky::get_blocky_material_index;
 pub use data::*;
 pub use pipeline::*;

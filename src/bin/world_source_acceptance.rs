@@ -4,7 +4,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::{IVec3, UVec3};
 use clap::Parser;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use voxel_builder::constants::{CHUNK_SIZE, CHUNK_SIZE_I32, CHUNK_VOLUME};
 use voxel_builder::rendering::ao_config::BakedAoConfig;
 use voxel_builder::voxel::chunk::{Chunk, LodLevel};
@@ -47,6 +47,12 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     blocky: bool,
+
+    #[arg(
+        long,
+        default_value = "bench-runs/world-source-runtime-acceptance/summary.json"
+    )]
+    runtime_acceptance_summary: PathBuf,
 }
 
 #[derive(Debug, Serialize)]
@@ -63,9 +69,40 @@ struct AcceptanceSummary {
     chunk_generation: ChunkGenerationBenchSummary,
     mesh_build: MeshBuildBenchSummary,
     material_draw_impact: MaterialDrawImpactSummary,
+    runtime_gpu_readback_acceptance: RuntimeGpuReadbackAcceptanceEvidence,
     gpu_readback: WorldSourceGpuReadbackResult,
     drift_gate: WorldSourceDriftGateReport,
     output_path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RuntimeGpuReadbackAcceptanceStatus {
+    Accepted,
+    Missing,
+    NotAccepted,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RuntimeGpuReadbackAcceptanceEvidence {
+    path: String,
+    status: RuntimeGpuReadbackAcceptanceStatus,
+    acceptance_pass: Option<bool>,
+    acceptance_blockers: Vec<String>,
+    gpu_readback: Option<WorldSourceGpuReadbackResult>,
+    drift_gate: Option<WorldSourceDriftGateReport>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimeGpuReadbackAcceptanceArtifact {
+    schema_version: u32,
+    acceptance_mode: String,
+    acceptance_pass: bool,
+    acceptance_blockers: Vec<String>,
+    gpu_readback: WorldSourceGpuReadbackResult,
+    drift_gate: WorldSourceDriftGateReport,
 }
 
 #[derive(Debug, Serialize)]
@@ -131,12 +168,20 @@ fn run() -> Result<PathBuf, String> {
     };
     let (mesh_build, material_draw_impact) = bench_mesh_build(&mut world, mesh_mode)?;
     let drift_points = drift_points();
-    let gpu_readback = UnavailableWorldSourceGpuReadback.read_world_source_samples(&drift_points);
-    let drift_gate = evaluate_world_source_cpu_gpu_drift(
+    let standalone_gpu_readback =
+        UnavailableWorldSourceGpuReadback.read_world_source_samples(&drift_points);
+    let standalone_drift_gate = evaluate_world_source_cpu_gpu_drift(
         bridge.source(),
         &drift_points,
-        gpu_readback.samples(),
+        standalone_gpu_readback.samples(),
         WorldSourceDriftGateConfig::default(),
+    );
+    let runtime_gpu_readback_acceptance =
+        runtime_gpu_readback_acceptance_evidence(&args.runtime_acceptance_summary, &drift_points);
+    let (gpu_readback, drift_gate) = acceptance_readback_result(
+        &runtime_gpu_readback_acceptance,
+        standalone_gpu_readback,
+        standalone_drift_gate,
     );
     let acceptance_blockers = acceptance_blockers(&terrain_config, &gpu_readback, &drift_gate);
     let acceptance_pass = acceptance_blockers.is_empty();
@@ -154,6 +199,7 @@ fn run() -> Result<PathBuf, String> {
         chunk_generation,
         mesh_build,
         material_draw_impact,
+        runtime_gpu_readback_acceptance,
         gpu_readback,
         drift_gate,
         output_path: output_path.display().to_string(),
@@ -194,6 +240,154 @@ fn acceptance_blockers(
         drift_gate,
     ));
     blockers
+}
+
+fn runtime_gpu_readback_acceptance_evidence(
+    path: &std::path::Path,
+    expected_points: &[WorldSourceDriftSamplePoint],
+) -> RuntimeGpuReadbackAcceptanceEvidence {
+    let path_string = path.display().to_string();
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return RuntimeGpuReadbackAcceptanceEvidence {
+                path: path_string,
+                status: RuntimeGpuReadbackAcceptanceStatus::Missing,
+                acceptance_pass: None,
+                acceptance_blockers: Vec::new(),
+                gpu_readback: None,
+                drift_gate: None,
+                error: Some("runtime acceptance summary not found".to_string()),
+            };
+        }
+        Err(err) => {
+            return RuntimeGpuReadbackAcceptanceEvidence {
+                path: path_string,
+                status: RuntimeGpuReadbackAcceptanceStatus::Invalid,
+                acceptance_pass: None,
+                acceptance_blockers: Vec::new(),
+                gpu_readback: None,
+                drift_gate: None,
+                error: Some(format!("failed to read runtime acceptance summary: {err}")),
+            };
+        }
+    };
+
+    let artifact: RuntimeGpuReadbackAcceptanceArtifact = match serde_json::from_str(&text) {
+        Ok(artifact) => artifact,
+        Err(err) => {
+            return RuntimeGpuReadbackAcceptanceEvidence {
+                path: path_string,
+                status: RuntimeGpuReadbackAcceptanceStatus::Invalid,
+                acceptance_pass: None,
+                acceptance_blockers: Vec::new(),
+                gpu_readback: None,
+                drift_gate: None,
+                error: Some(format!("failed to parse runtime acceptance summary: {err}")),
+            };
+        }
+    };
+
+    let (status, error) = runtime_gpu_readback_acceptance_status(&artifact, expected_points);
+    RuntimeGpuReadbackAcceptanceEvidence {
+        path: path_string,
+        status,
+        acceptance_pass: Some(artifact.acceptance_pass),
+        acceptance_blockers: artifact.acceptance_blockers,
+        gpu_readback: Some(artifact.gpu_readback),
+        drift_gate: Some(artifact.drift_gate),
+        error,
+    }
+}
+
+fn runtime_gpu_readback_acceptance_status(
+    artifact: &RuntimeGpuReadbackAcceptanceArtifact,
+    expected_points: &[WorldSourceDriftSamplePoint],
+) -> (RuntimeGpuReadbackAcceptanceStatus, Option<String>) {
+    if artifact.schema_version != 1 {
+        return (
+            RuntimeGpuReadbackAcceptanceStatus::Invalid,
+            Some(format!(
+                "unsupported runtime acceptance schema_version {}",
+                artifact.schema_version
+            )),
+        );
+    }
+    if artifact.acceptance_mode != "runtime_gpu_world_source_drift_gate" {
+        return (
+            RuntimeGpuReadbackAcceptanceStatus::Invalid,
+            Some(format!(
+                "unexpected runtime acceptance_mode {}",
+                artifact.acceptance_mode
+            )),
+        );
+    }
+
+    let sample_count = artifact
+        .gpu_readback
+        .samples()
+        .map(|samples| samples.len())
+        .unwrap_or_default();
+    let expected_sample_count = expected_points.len();
+    let sample_points_match = artifact
+        .gpu_readback
+        .samples()
+        .is_some_and(|samples| samples_match_expected_points(samples, expected_points));
+    let accepted = artifact.acceptance_pass
+        && artifact.acceptance_blockers.is_empty()
+        && sample_count == expected_sample_count
+        && sample_points_match
+        && artifact.drift_gate.sample_count == expected_sample_count
+        && artifact.drift_gate.compared_count == expected_sample_count
+        && artifact.drift_gate.failures.is_empty()
+        && artifact.drift_gate.is_acceptance_pass()
+        && world_source_gpu_readback_acceptance_blockers(
+            &artifact.gpu_readback,
+            &artifact.drift_gate,
+        )
+        .is_empty();
+
+    if accepted {
+        return (RuntimeGpuReadbackAcceptanceStatus::Accepted, None);
+    }
+
+    (
+        RuntimeGpuReadbackAcceptanceStatus::NotAccepted,
+        Some(format!(
+            "runtime acceptance summary did not pass validation: samples={}, expected={}, compared={}, failures={}",
+            sample_count,
+            expected_sample_count,
+            artifact.drift_gate.compared_count,
+            artifact.drift_gate.failures.len()
+        )),
+    )
+}
+
+fn samples_match_expected_points(
+    samples: &[voxel_builder::world::source::WorldSourceDriftSample],
+    expected_points: &[WorldSourceDriftSamplePoint],
+) -> bool {
+    samples.len() == expected_points.len()
+        && samples
+            .iter()
+            .zip(expected_points)
+            .all(|(sample, point)| sample.x == point.x && sample.z == point.z)
+}
+
+fn acceptance_readback_result(
+    runtime: &RuntimeGpuReadbackAcceptanceEvidence,
+    standalone_gpu_readback: WorldSourceGpuReadbackResult,
+    standalone_drift_gate: WorldSourceDriftGateReport,
+) -> (WorldSourceGpuReadbackResult, WorldSourceDriftGateReport) {
+    if runtime.status == RuntimeGpuReadbackAcceptanceStatus::Accepted {
+        if let (Some(gpu_readback), Some(drift_gate)) =
+            (runtime.gpu_readback.clone(), runtime.drift_gate.clone())
+        {
+            return (gpu_readback, drift_gate);
+        }
+    }
+
+    (standalone_gpu_readback, standalone_drift_gate)
 }
 
 fn bench_chunk_generation(
@@ -425,6 +619,134 @@ mod tests {
         assert_eq!(
             blockers,
             vec!["gpu_readback_unavailable", "drift_gate_not_passed"]
+        );
+    }
+
+    #[test]
+    fn missing_runtime_acceptance_artifact_is_reported_without_passing() {
+        let path = PathBuf::from("missing-runtime-acceptance-summary.json");
+        let expected_points = [WorldSourceDriftSamplePoint::new(0.0, 0.0)];
+        let evidence = runtime_gpu_readback_acceptance_evidence(&path, &expected_points);
+
+        assert_eq!(evidence.status, RuntimeGpuReadbackAcceptanceStatus::Missing);
+        assert!(evidence.gpu_readback.is_none());
+        assert!(evidence.drift_gate.is_none());
+    }
+
+    #[test]
+    fn accepted_runtime_artifact_supplies_final_readback_result() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("summary.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "schema_version": 1,
+  "acceptance_mode": "runtime_gpu_world_source_drift_gate",
+  "acceptance_pass": true,
+  "acceptance_blockers": [],
+  "gpu_readback": {
+    "status": "available",
+    "unavailable_reason": null,
+    "samples": [
+      {
+        "x": 0.0,
+        "z": 0.0,
+        "height": 18.0,
+        "ocean_mask": 0.0,
+        "biome": "Meadows",
+        "dominant_layer": "Grass"
+      }
+    ]
+  },
+  "drift_gate": {
+    "status": "passed",
+    "sample_count": 1,
+    "compared_count": 1,
+    "skipped_reason": null,
+    "failures": []
+  },
+  "output_path": "bench-runs/world-source-runtime-acceptance/summary.json"
+}"#,
+        )
+        .expect("write runtime summary");
+
+        let evidence = runtime_gpu_readback_acceptance_evidence(
+            &path,
+            &[WorldSourceDriftSamplePoint::new(0.0, 0.0)],
+        );
+        let standalone_gpu_readback =
+            WorldSourceGpuReadbackResult::unavailable("gpu_readback_unavailable");
+        let standalone_drift_gate = WorldSourceDriftGateReport {
+            status: WorldSourceDriftGateStatus::Skipped,
+            sample_count: 1,
+            compared_count: 0,
+            skipped_reason: Some("gpu_readback_unavailable".to_string()),
+            failures: Vec::new(),
+        };
+
+        let (gpu_readback, drift_gate) =
+            acceptance_readback_result(&evidence, standalone_gpu_readback, standalone_drift_gate);
+
+        assert_eq!(
+            evidence.status,
+            RuntimeGpuReadbackAcceptanceStatus::Accepted
+        );
+        assert!(
+            acceptance_blockers(
+                &TerrainSourceConfig {
+                    mode: TerrainSourceMode::GpuWorldSource,
+                },
+                &gpu_readback,
+                &drift_gate
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn runtime_artifact_with_wrong_sample_points_is_not_accepted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("summary.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "schema_version": 1,
+  "acceptance_mode": "runtime_gpu_world_source_drift_gate",
+  "acceptance_pass": true,
+  "acceptance_blockers": [],
+  "gpu_readback": {
+    "status": "available",
+    "unavailable_reason": null,
+    "samples": [
+      {
+        "x": 99.0,
+        "z": 99.0,
+        "height": 18.0,
+        "ocean_mask": 0.0,
+        "biome": "Meadows",
+        "dominant_layer": "Grass"
+      }
+    ]
+  },
+  "drift_gate": {
+    "status": "passed",
+    "sample_count": 1,
+    "compared_count": 1,
+    "skipped_reason": null,
+    "failures": []
+  }
+}"#,
+        )
+        .expect("write runtime summary");
+
+        let evidence = runtime_gpu_readback_acceptance_evidence(
+            &path,
+            &[WorldSourceDriftSamplePoint::new(0.0, 0.0)],
+        );
+
+        assert_eq!(
+            evidence.status,
+            RuntimeGpuReadbackAcceptanceStatus::NotAccepted
         );
     }
 }

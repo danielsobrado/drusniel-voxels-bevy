@@ -14,20 +14,21 @@ struct MeshBiomeSource {
     source: ProceduralWorldSource,
 }
 
-pub(crate) fn encode_biome_id_for_uv(biome: BiomeId) -> f32 {
+fn encode_biome_id_for_uv(biome: BiomeId) -> f32 {
     biome.layer_index() as f32
 }
 
-pub(crate) fn source_or_compatibility_biome_id_for_uv(
+pub(crate) fn source_biome_id_for_uv(
     local_pos: Vec3,
     chunk: &Chunk,
     world: &VoxelWorld,
     chunk_origin: IVec3,
     fallback_weights: [f32; 4],
 ) -> f32 {
+    let source = mesh_biome_source();
     let biome = source_biome_from_neighbor_materials(local_pos, chunk, world, chunk_origin)
-        .or_else(|| active_world_source_biome(local_pos, chunk_origin))
-        .unwrap_or_else(|| compatibility_biome_from_triplanar_weights(fallback_weights));
+        .or_else(|| active_world_source_biome(source, local_pos, chunk_origin))
+        .unwrap_or_else(|| legacy_compatibility_biome_from_triplanar_weights(fallback_weights));
     encode_biome_id_for_uv(biome)
 }
 
@@ -39,8 +40,11 @@ fn mesh_biome_source() -> &'static MeshBiomeSource {
     })
 }
 
-fn active_world_source_biome(local_pos: Vec3, chunk_origin: IVec3) -> Option<BiomeId> {
-    let source = mesh_biome_source();
+fn active_world_source_biome(
+    source: &MeshBiomeSource,
+    local_pos: Vec3,
+    chunk_origin: IVec3,
+) -> Option<BiomeId> {
     if source.config.is_legacy() {
         return None;
     }
@@ -121,7 +125,7 @@ fn terrain_material_at_neighbor(
     world.get_material_id(world_pos)
 }
 
-pub(crate) fn compatibility_biome_from_triplanar_weights(weights: [f32; 4]) -> BiomeId {
+fn legacy_compatibility_biome_from_triplanar_weights(weights: [f32; 4]) -> BiomeId {
     let mut best = 0usize;
     for index in 1..weights.len() {
         if weights[index] > weights[best] {
@@ -135,10 +139,6 @@ pub(crate) fn compatibility_biome_from_triplanar_weights(weights: [f32; 4]) -> B
         3 => BiomeId::Swamp,
         _ => BiomeId::Meadows,
     }
-}
-
-pub(crate) fn compatibility_biome_id_for_uv(weights: [f32; 4]) -> f32 {
-    encode_biome_id_for_uv(compatibility_biome_from_triplanar_weights(weights))
 }
 
 #[cfg(test)]
@@ -160,19 +160,19 @@ mod tests {
     #[test]
     fn maps_legacy_triplanar_weights_to_named_compatibility_biomes() {
         assert_eq!(
-            compatibility_biome_from_triplanar_weights([1.0, 0.0, 0.0, 0.0]),
+            legacy_compatibility_biome_from_triplanar_weights([1.0, 0.0, 0.0, 0.0]),
             BiomeId::Meadows
         );
         assert_eq!(
-            compatibility_biome_from_triplanar_weights([0.0, 1.0, 0.0, 0.0]),
+            legacy_compatibility_biome_from_triplanar_weights([0.0, 1.0, 0.0, 0.0]),
             BiomeId::Mountain
         );
         assert_eq!(
-            compatibility_biome_from_triplanar_weights([0.0, 0.0, 1.0, 0.0]),
+            legacy_compatibility_biome_from_triplanar_weights([0.0, 0.0, 1.0, 0.0]),
             BiomeId::Coast
         );
         assert_eq!(
-            compatibility_biome_from_triplanar_weights([0.0, 0.0, 0.0, 1.0]),
+            legacy_compatibility_biome_from_triplanar_weights([0.0, 0.0, 0.0, 1.0]),
             BiomeId::Swamp
         );
     }
@@ -180,10 +180,10 @@ mod tests {
     #[test]
     fn compatibility_adapter_is_explicitly_not_full_seven_biome_content() {
         let mapped = [
-            compatibility_biome_from_triplanar_weights([1.0, 0.0, 0.0, 0.0]),
-            compatibility_biome_from_triplanar_weights([0.0, 1.0, 0.0, 0.0]),
-            compatibility_biome_from_triplanar_weights([0.0, 0.0, 1.0, 0.0]),
-            compatibility_biome_from_triplanar_weights([0.0, 0.0, 0.0, 1.0]),
+            legacy_compatibility_biome_from_triplanar_weights([1.0, 0.0, 0.0, 0.0]),
+            legacy_compatibility_biome_from_triplanar_weights([0.0, 1.0, 0.0, 0.0]),
+            legacy_compatibility_biome_from_triplanar_weights([0.0, 0.0, 1.0, 0.0]),
+            legacy_compatibility_biome_from_triplanar_weights([0.0, 0.0, 0.0, 1.0]),
         ];
 
         assert!(!mapped.contains(&BiomeId::Forest));
@@ -202,7 +202,7 @@ mod tests {
         let world = VoxelWorld::new(IVec3::ONE);
 
         assert_eq!(
-            source_or_compatibility_biome_id_for_uv(
+            source_biome_id_for_uv(
                 Vec3::ZERO,
                 &chunk,
                 &world,
@@ -220,7 +220,7 @@ mod tests {
         let expected = ProceduralWorldSource::load_or_default().sample_biome(0.0, 0.0);
 
         assert_eq!(
-            source_or_compatibility_biome_id_for_uv(
+            source_biome_id_for_uv(
                 Vec3::ZERO,
                 &chunk,
                 &world,

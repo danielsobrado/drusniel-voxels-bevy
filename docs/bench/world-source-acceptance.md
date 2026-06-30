@@ -8,6 +8,14 @@ Run it in release mode:
 rtk cargo run --release --bin world_source_acceptance
 ```
 
+By default, the binary also looks for the reviewed runtime-assisted GPU readback artifact:
+
+```text
+bench-runs/world-source-runtime-acceptance/summary.json
+```
+
+Use `--runtime-acceptance-summary <path>` to point at a different runtime artifact.
+
 The binary writes:
 
 ```text
@@ -21,6 +29,7 @@ The summary includes:
 - measured WorldSource chunk voxel generation timing;
 - measured mesh build timing for sampled chunks;
 - estimated solid/water draw impact from generated meshes;
+- runtime GPU readback acceptance evidence, when the artifact exists;
 - GPU readback provider status;
 - CPU/GPU drift gate status.
 
@@ -28,7 +37,7 @@ BVY-WS-12 status:
 
 - the acceptance bench writes source-aware biome material tags into generated chunks;
 - runtime async WorldSource chunk generation uses the same source-aware tagging path;
-- Surface Nets reads those source-aware biome tags before using the old compatibility adapter;
+- Surface Nets reads source-aware biome tags or the active WorldSource; the old four-weight compatibility adapter is private legacy-mode fallback only;
 - `material_draw_impact.compatibility_biome_channel_active` should be `false` for this bench path.
 
 GPU readback boundary:
@@ -41,13 +50,14 @@ GPU readback boundary:
 - `decode_gpu_world_source_drift_outputs` maps GPU output wire structs back to `WorldSourceDriftSample` and rejects invalid IDs;
 - the render-app path can dispatch `drift_readback.wgsl`, map the staging buffer, publish `WorldSourceGpuReadbackResult`, and evaluate the runtime drift gate when `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1`;
 - the runtime-assisted path writes `bench-runs/world-source-runtime-acceptance/summary.json` by default, or the path in `VOXEL_WORLD_SOURCE_DRIFT_ACCEPTANCE_OUT`;
-- `world_source_acceptance` still uses `UnavailableWorldSourceGpuReadback`, so `gpu_readback.status` is `unavailable`, `drift_gate.status` is `skipped`, and `acceptance_pass` is `false`;
-- the remaining acceptance work is to verify the opt-in runtime path and either feed that result into a runtime-assisted report or archive it alongside the standalone bench.
+- `world_source_acceptance` validates that artifact before using it: schema version, acceptance mode, no runtime blockers, expected sample count, available GPU samples, passed drift gate, matching comparison count, and zero failures;
+- when the artifact is accepted, `world_source_acceptance` records `runtime_gpu_readback_acceptance.status = accepted` and uses the artifact GPU readback/drift-gate result for top-level `acceptance_pass`;
+- when the artifact is missing or not accepted, `world_source_acceptance` falls back to `UnavailableWorldSourceGpuReadback`, so `gpu_readback.status` is `unavailable`, `drift_gate.status` is `skipped`, and `acceptance_pass` is `false`.
 
 Current limitation:
 
 - `drift_readback.wgsl` currently validates GPU splat/dominant-layer resolution from prepared WorldSource samples. Full GPU height/biome drift requires a later WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
-- The standalone bench does not produce GPU readback samples, so `drift_gate.status` is expected to be `skipped` with blockers `gpu_readback_unavailable` and `drift_gate_not_passed` until runtime readback evidence is accepted.
+- The standalone bench does not produce GPU readback samples by itself. It passes only when paired with an accepted runtime-assisted GPU readback artifact.
 
 Optional blocky comparison:
 

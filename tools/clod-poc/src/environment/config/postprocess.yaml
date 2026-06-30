@@ -20,6 +20,12 @@ postprocess:
     depth_threshold: 0.0025
     sharpen: 0.06
 
+  contact_shadows:
+    enabled: false
+    strength: 0.25
+    radius_px: 2.0
+    depth_bias: 0.002
+
   god_rays:
     mode: off
     density: 0.96

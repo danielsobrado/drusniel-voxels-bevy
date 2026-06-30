@@ -34,6 +34,10 @@ export interface EnvironmentSliceState {
   postProcessTaaHistoryWeight: number;
   postProcessTaaDepthThreshold: number;
   postProcessTaaSharpen: number;
+  postProcessContactShadowsEnabled: boolean;
+  postProcessContactShadowsStrength: number;
+  postProcessContactShadowsRadiusPx: number;
+  postProcessContactShadowsDepthBias: number;
   postProcessAerialPerspectiveEnabled: boolean;
   postProcessAerialPerspectiveStart: number;
   postProcessAerialPerspectiveEnd: number;
@@ -90,6 +94,10 @@ export function createEnvironmentSliceState(input: {
     postProcessTaaHistoryWeight: DEFAULT_POST_PROCESS_SETTINGS.taaHistoryWeight,
     postProcessTaaDepthThreshold: DEFAULT_POST_PROCESS_SETTINGS.taaDepthThreshold,
     postProcessTaaSharpen: DEFAULT_POST_PROCESS_SETTINGS.taaSharpen,
+    postProcessContactShadowsEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled,
+    postProcessContactShadowsStrength: DEFAULT_POST_PROCESS_SETTINGS.contactShadowsStrength,
+    postProcessContactShadowsRadiusPx: DEFAULT_POST_PROCESS_SETTINGS.contactShadowsRadiusPx,
+    postProcessContactShadowsDepthBias: DEFAULT_POST_PROCESS_SETTINGS.contactShadowsDepthBias,
     postProcessAerialPerspectiveEnabled: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnabled,
     postProcessAerialPerspectiveStart: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveStart,
     postProcessAerialPerspectiveEnd: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnd,
