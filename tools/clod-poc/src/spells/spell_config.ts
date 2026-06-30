@@ -20,12 +20,30 @@ export interface FireSpellVfxConfig {
 export type WaterSpellVfxConfig = FireSpellVfxConfig;
 export type AirSpellVfxConfig = FireSpellVfxConfig;
 
+export interface EarthSpellVfxConfig {
+  handForwardM: number;
+  handRightM: number;
+  handUpM: number;
+  impactRadius: number;
+  crackRadius: number;
+  dustRadius: number;
+  shardCount: number;
+  shardMinHeight: number;
+  shardMaxHeight: number;
+  shardLifetimeMs: number;
+  glowColor: SpellColor;
+  glowIntensity: number;
+  glowDistance: number;
+  glowDecay: number;
+}
+
 export interface FireSpellAudioConfig {
   volume: number;
 }
 
 export type WaterSpellAudioConfig = FireSpellAudioConfig;
 export type AirSpellAudioConfig = FireSpellAudioConfig;
+export type EarthSpellAudioConfig = FireSpellAudioConfig;
 
 export interface SpellConfig {
   menu: {
@@ -52,6 +70,13 @@ export interface SpellConfig {
     castDurationMs: number;
     audio: AirSpellAudioConfig;
     vfx: AirSpellVfxConfig;
+  };
+  earth: {
+    id: "earth";
+    label: string;
+    castDurationMs: number;
+    audio: EarthSpellAudioConfig;
+    vfx: EarthSpellVfxConfig;
   };
 }
 
@@ -114,6 +139,28 @@ const DEFAULT_SPELL_CONFIG: SpellConfig = {
       glowLocalYRatio: 0.42,
     },
   },
+  earth: {
+    id: "earth",
+    label: "Earth",
+    castDurationMs: 1700,
+    audio: { volume: 0.32 },
+    vfx: {
+      handForwardM: 0.5,
+      handRightM: 0.35,
+      handUpM: -0.35,
+      impactRadius: 3.2,
+      crackRadius: 4.5,
+      dustRadius: 3.8,
+      shardCount: 24,
+      shardMinHeight: 0.45,
+      shardMaxHeight: 1.8,
+      shardLifetimeMs: 1300,
+      glowColor: [0.75, 0.48, 0.22],
+      glowIntensity: 0.7,
+      glowDistance: 5.0,
+      glowDecay: 2.0,
+    },
+  },
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -129,6 +176,10 @@ function readNumber(record: Record<string, unknown> | undefined, key: string, fa
   const value = Number(record?.[key]);
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+function readInteger(record: Record<string, unknown> | undefined, key: string, fallback: number, min: number, max: number): number {
+  return Math.floor(readNumber(record, key, fallback, min, max));
 }
 
 function readColor(record: Record<string, unknown> | undefined, key: string, fallback: SpellColor): SpellColor {
@@ -159,7 +210,26 @@ function readVfxConfig(record: Record<string, unknown> | undefined, fallback: Fi
   };
 }
 
-function parseSpellEntry<TId extends "fire" | "water" | "air">(
+function readEarthVfxConfig(record: Record<string, unknown> | undefined, fallback: EarthSpellVfxConfig): EarthSpellVfxConfig {
+  return {
+    handForwardM: readNumber(record, "hand_forward_m", fallback.handForwardM, -5, 10),
+    handRightM: readNumber(record, "hand_right_m", fallback.handRightM, -5, 5),
+    handUpM: readNumber(record, "hand_up_m", fallback.handUpM, -5, 5),
+    impactRadius: readNumber(record, "impact_radius", fallback.impactRadius, 0.5, 20),
+    crackRadius: readNumber(record, "crack_radius", fallback.crackRadius, 0.5, 30),
+    dustRadius: readNumber(record, "dust_radius", fallback.dustRadius, 0.5, 30),
+    shardCount: readInteger(record, "shard_count", fallback.shardCount, 0, 128),
+    shardMinHeight: readNumber(record, "shard_min_height", fallback.shardMinHeight, 0, 10),
+    shardMaxHeight: readNumber(record, "shard_max_height", fallback.shardMaxHeight, 0, 20),
+    shardLifetimeMs: readNumber(record, "shard_lifetime_ms", fallback.shardLifetimeMs, 100, 8000),
+    glowColor: readColor(record, "glow_color", fallback.glowColor),
+    glowIntensity: readNumber(record, "glow_intensity", fallback.glowIntensity, 0, 12),
+    glowDistance: readNumber(record, "glow_distance", fallback.glowDistance, 0, 30),
+    glowDecay: readNumber(record, "glow_decay", fallback.glowDecay, 0, 4),
+  };
+}
+
+function parseBeamSpellEntry<TId extends "fire" | "water" | "air">(
   id: TId,
   record: Record<string, unknown> | undefined,
   fallback: SpellConfig[TId],
@@ -175,6 +245,18 @@ function parseSpellEntry<TId extends "fire" | "water" | "air">(
   } as SpellConfig[TId];
 }
 
+function parseEarthSpellEntry(record: Record<string, unknown> | undefined, fallback: SpellConfig["earth"]): SpellConfig["earth"] {
+  const audio = asRecord(record?.audio);
+  const vfx = asRecord(record?.vfx);
+  return {
+    id: "earth",
+    label: readString(record, "label", fallback.label),
+    castDurationMs: readNumber(record, "cast_duration_ms", fallback.castDurationMs, 250, 8000),
+    audio: { volume: readNumber(audio, "volume", fallback.audio.volume, 0, 1) },
+    vfx: readEarthVfxConfig(vfx, fallback.vfx),
+  };
+}
+
 export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
   try {
     const parsed = asRecord(load(text));
@@ -185,9 +267,10 @@ export function parseSpellConfig(text: string = spellsYamlText): SpellConfig {
         rootId: readString(menu, "root_id", DEFAULT_SPELL_CONFIG.menu.rootId),
         title: readString(menu, "title", DEFAULT_SPELL_CONFIG.menu.title),
       },
-      fire: parseSpellEntry("fire", asRecord(root?.fire), DEFAULT_SPELL_CONFIG.fire),
-      water: parseSpellEntry("water", asRecord(root?.water), DEFAULT_SPELL_CONFIG.water),
-      air: parseSpellEntry("air", asRecord(root?.air), DEFAULT_SPELL_CONFIG.air),
+      fire: parseBeamSpellEntry("fire", asRecord(root?.fire), DEFAULT_SPELL_CONFIG.fire),
+      water: parseBeamSpellEntry("water", asRecord(root?.water), DEFAULT_SPELL_CONFIG.water),
+      air: parseBeamSpellEntry("air", asRecord(root?.air), DEFAULT_SPELL_CONFIG.air),
+      earth: parseEarthSpellEntry(asRecord(root?.earth), DEFAULT_SPELL_CONFIG.earth),
     };
   } catch (error) {
     console.warn("[spells] Failed to parse spell config, using defaults.", error);
