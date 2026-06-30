@@ -1,0 +1,32 @@
+seed = 424204
+median_runs = 3
+duration_warmup_secs = 8.0
+chunk_load_radius = 16
+skip_props = false
+
+[render_toggles]
+quality_preset = "high"
+
+[[checkpoint]]
+name = "shallow_caustics_topdown"
+position = [96.0, 42.0, 96.0]
+look_at = [104.0, 16.0, 112.0]
+time_of_day = 0.42
+hold_frames = 420
+screenshot = true
+
+  [[checkpoint.screenshot_points]]
+  name = "shallow_caustics_topdown"
+  frame = 240
+
+[[checkpoint]]
+name = "shallow_caustics_oblique"
+position = [136.0, 30.0, 120.0]
+look_at = [104.0, 16.0, 112.0]
+time_of_day = 0.58
+hold_frames = 420
+screenshot = true
+
+  [[checkpoint.screenshot_points]]
+  name = "shallow_caustics_oblique"
+  frame = 240
