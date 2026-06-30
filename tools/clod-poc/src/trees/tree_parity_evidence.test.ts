@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTreeParityCaptureCommands,
+  buildTreeParityEvidenceMarkdownReport,
   validateTreeParityEvidence,
   type TreeParityEvidenceFileInfo,
   type TreeParityEvidenceManifest,
@@ -8,51 +9,13 @@ import {
 
 describe("TREE-12 parity evidence validator", () => {
   it("passes when required artifacts and metric floors are present", () => {
-    const result = validateTreeParityEvidence({
-      manifest: manifest(),
-      fileInfo: fileInfo({
-        "shots/low-sun.png": { exists: true, sizeBytes: 128 },
-        "shots/low-sun-stats.json": { exists: true, sizeBytes: 256 },
-        "perf/low-sun/tree-gpu-ring.json": { exists: true, sizeBytes: 512 },
-      }),
-      readJson: jsonReader({
-        "shots/low-sun-stats.json": { ready: true, error: null },
-        "perf/low-sun/tree-gpu-ring.json": {
-          snapshot: {
-            counters: {
-              treeGpuShadowCasterCountAvg: 12,
-              treeHeroNearTrianglesAvg: 120_000,
-              treeHeroNearFoliageTrianglesAvg: 42_000,
-            },
-          },
-        },
-      }),
-    });
+    const result = validateTreeParityEvidence(validInput());
 
     expect(result).toEqual({ ok: true, failures: [] });
   });
 
   it("fails missing artifacts and metric floors clearly", () => {
-    const result = validateTreeParityEvidence({
-      manifest: manifest(),
-      fileInfo: fileInfo({
-        "shots/low-sun.png": { exists: false, sizeBytes: 0 },
-        "shots/low-sun-stats.json": { exists: true, sizeBytes: 32 },
-        "perf/low-sun/tree-gpu-ring.json": { exists: true, sizeBytes: 32 },
-      }),
-      readJson: jsonReader({
-        "shots/low-sun-stats.json": { ready: false, error: null },
-        "perf/low-sun/tree-gpu-ring.json": {
-          snapshot: {
-            counters: {
-              treeGpuShadowCasterCountAvg: 0,
-              treeHeroNearTrianglesAvg: 20_000,
-              treeHeroNearFoliageTrianglesAvg: 0,
-            },
-          },
-        },
-      }),
-    });
+    const result = validateTreeParityEvidence(failingInput());
 
     expect(result.ok).toBe(false);
     expect(result.failures.map((failure) => failure.message)).toEqual(expect.arrayContaining([
@@ -105,6 +68,30 @@ describe("TREE-12 parity capture command generation", () => {
   });
 });
 
+describe("TREE-12 parity evidence markdown report", () => {
+  it("renders a reusable PASS report with artifact and metric values", () => {
+    const report = buildTreeParityEvidenceMarkdownReport(validInput(), {
+      generatedAt: "2026-06-30T00:00:00.000Z",
+    });
+
+    expect(report).toContain("Status: PASS");
+    expect(report).toContain("### low-sun-shadows");
+    expect(report).toContain("| image | shots/low-sun.png | 128 bytes |");
+    expect(report).toContain("| perf.snapshot.counters.treeGpuShadowCasterCountAvg | non-zero | 12 |");
+    expect(report).toContain("| perf.snapshot.counters.treeHeroNearTrianglesAvg | >= 100000 | 120000 |");
+  });
+
+  it("renders failures for closeout review", () => {
+    const report = buildTreeParityEvidenceMarkdownReport(failingInput(), {
+      generatedAt: "2026-06-30T00:00:00.000Z",
+    });
+
+    expect(report).toContain("Status: FAIL");
+    expect(report).toContain("## Failures");
+    expect(report).toContain("- low-sun-shadows: image artifact is missing: shots/low-sun.png");
+  });
+});
+
 function manifest(): TreeParityEvidenceManifest {
   return {
     captures: [{
@@ -131,6 +118,52 @@ function manifest(): TreeParityEvidenceManifest {
         { artifact: "perf", path: "snapshot.counters.treeHeroNearFoliageTrianglesAvg", nonZero: true },
       ],
     }],
+  };
+}
+
+function validInput() {
+  return {
+    manifest: manifest(),
+    fileInfo: fileInfo({
+      "shots/low-sun.png": { exists: true, sizeBytes: 128 },
+      "shots/low-sun-stats.json": { exists: true, sizeBytes: 256 },
+      "perf/low-sun/tree-gpu-ring.json": { exists: true, sizeBytes: 512 },
+    }),
+    readJson: jsonReader({
+      "shots/low-sun-stats.json": { ready: true, error: null },
+      "perf/low-sun/tree-gpu-ring.json": {
+        snapshot: {
+          counters: {
+            treeGpuShadowCasterCountAvg: 12,
+            treeHeroNearTrianglesAvg: 120_000,
+            treeHeroNearFoliageTrianglesAvg: 42_000,
+          },
+        },
+      },
+    }),
+  };
+}
+
+function failingInput() {
+  return {
+    manifest: manifest(),
+    fileInfo: fileInfo({
+      "shots/low-sun.png": { exists: false, sizeBytes: 0 },
+      "shots/low-sun-stats.json": { exists: true, sizeBytes: 32 },
+      "perf/low-sun/tree-gpu-ring.json": { exists: true, sizeBytes: 32 },
+    }),
+    readJson: jsonReader({
+      "shots/low-sun-stats.json": { ready: false, error: null },
+      "perf/low-sun/tree-gpu-ring.json": {
+        snapshot: {
+          counters: {
+            treeGpuShadowCasterCountAvg: 0,
+            treeHeroNearTrianglesAvg: 20_000,
+            treeHeroNearFoliageTrianglesAvg: 0,
+          },
+        },
+      },
+    }),
   };
 }
 
