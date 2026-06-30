@@ -101,7 +101,7 @@ Implemented:
 
 - `tree_parity_evidence.ts` provides a generic manifest-driven evidence validator for required screenshot/stats/perf artifacts and metric thresholds.
 - `tree_parity_evidence.ts` also builds exact capture commands from each manifest `capture` block, including shot paths, perf output directories, explicit renderer, and shared query params.
-- `tree_parity_evidence.ts` now validates the capture manifest before command generation, rejecting unsupported query params and unpaired perf artifacts/perf cases.
+- `tree_parity_evidence.ts` now validates the capture manifest before command generation, rejecting unsupported query params, duplicate capture IDs, duplicate artifact paths, empty artifact paths, unpaired perf artifacts/perf cases, and metric/artifact mismatches.
 - `tree_parity_evidence.ts` can generate a markdown closeout report with artifact status, metric expectations, actual values, and failures.
 - `tree_parity_evidence.test.ts` covers pass/fail cases, missing artifacts, metric floors, unreadable JSON, manifest self-checks, capture-command generation, and report rendering.
 - `tools/verify-tree-parity-evidence.ts` exposes the validator, the `--check-manifest` YAML-only guard, the `--commands` capture-command printer, and `--report` markdown output.
