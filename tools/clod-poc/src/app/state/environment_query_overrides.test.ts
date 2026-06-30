@@ -129,4 +129,16 @@ describe("environment query overrides", () => {
     expect(state.treeGpuReadbackVisibleLists).toBe(true);
     expect(state.treeGpuValidateAgainstCpu).toBe(true);
   });
+
+  it("enables tree GPU readback when counts or validation are requested", () => {
+    const countsState = createState();
+    applyEnvironmentQueryOverrides(countsState as never, new URLSearchParams({ quality: "perf", treeGpuCounts: "1" }));
+    expect(countsState.treeGpuShowCounts).toBe(true);
+    expect(countsState.treeGpuReadbackVisibleLists).toBe(true);
+
+    const validationState = createState();
+    applyEnvironmentQueryOverrides(validationState as never, new URLSearchParams({ quality: "perf", treeGpuValidate: "1" }));
+    expect(validationState.treeGpuValidateAgainstCpu).toBe(true);
+    expect(validationState.treeGpuReadbackVisibleLists).toBe(true);
+  });
 });
