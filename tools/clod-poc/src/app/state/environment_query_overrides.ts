@@ -79,6 +79,7 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.postProcessFxaaEnabled = false;
     state.postProcessTaaEnabled = false;
     state.postProcessTaaJitterEnabled = false;
+    state.postProcessTaaHistoryClampEnabled = false;
     state.postProcessContactShadowsEnabled = false;
     state.postProcessClarityEnabled = false;
     state.postProcessAerialPerspectiveEnabled = false;
@@ -101,6 +102,7 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.postProcessFxaaEnabled = false;
     state.postProcessTaaEnabled = false;
     state.postProcessTaaJitterEnabled = false;
+    state.postProcessTaaHistoryClampEnabled = false;
     state.postProcessContactShadowsEnabled = false;
     state.postProcessClarityEnabled = false;
     state.postProcessAerialPerspectiveEnabled = false;
@@ -121,6 +123,9 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
 
   const taaJitter = flagParam(searchParams, "taaJitter", "taajitter", "jitter");
   if (taaJitter !== null) state.postProcessTaaJitterEnabled = taaJitter;
+
+  const taaClamp = flagParam(searchParams, "taaClamp", "taaclamp", "historyClamp");
+  if (taaClamp !== null) state.postProcessTaaHistoryClampEnabled = taaClamp;
 
   const contactShadows = flagParam(searchParams, "contactShadows", "contactshadows", "contact");
   if (contactShadows !== null) state.postProcessContactShadowsEnabled = contactShadows;
