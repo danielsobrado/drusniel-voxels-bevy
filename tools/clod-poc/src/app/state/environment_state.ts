@@ -30,6 +30,9 @@ export interface EnvironmentSliceState {
   postProcessBloomThreshold: number;
   postProcessBloomStrength: number;
   postProcessBloomRadius: number;
+  postProcessFxaaEnabled: boolean;
+  postProcessFxaaEdgeThreshold: number;
+  postProcessFxaaSubpixelBlend: number;
   postProcessTaaEnabled: boolean;
   postProcessTaaHistoryWeight: number;
   postProcessTaaDepthThreshold: number;
@@ -93,6 +96,9 @@ export function createEnvironmentSliceState(input: {
     postProcessBloomThreshold: DEFAULT_POST_PROCESS_SETTINGS.bloomThreshold,
     postProcessBloomStrength: DEFAULT_POST_PROCESS_SETTINGS.bloomStrength,
     postProcessBloomRadius: DEFAULT_POST_PROCESS_SETTINGS.bloomRadius,
+    postProcessFxaaEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.fxaaEnabled,
+    postProcessFxaaEdgeThreshold: DEFAULT_POST_PROCESS_SETTINGS.fxaaEdgeThreshold,
+    postProcessFxaaSubpixelBlend: DEFAULT_POST_PROCESS_SETTINGS.fxaaSubpixelBlend,
     postProcessTaaEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.taaEnabled,
     postProcessTaaHistoryWeight: DEFAULT_POST_PROCESS_SETTINGS.taaHistoryWeight,
     postProcessTaaDepthThreshold: DEFAULT_POST_PROCESS_SETTINGS.taaDepthThreshold,
