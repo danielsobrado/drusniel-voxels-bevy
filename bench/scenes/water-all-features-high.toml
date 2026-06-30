@@ -1,0 +1,32 @@
+seed = 424207
+median_runs = 3
+duration_warmup_secs = 10.0
+chunk_load_radius = 18
+skip_props = false
+
+[render_toggles]
+quality_preset = "high"
+
+[[checkpoint]]
+name = "water_all_features_high_lake"
+position = [96.0, 34.0, 112.0]
+look_at = [124.0, 18.0, 132.0]
+time_of_day = 0.44
+hold_frames = 480
+screenshot = true
+
+  [[checkpoint.screenshot_points]]
+  name = "water_all_features_high_lake"
+  frame = 300
+
+[[checkpoint]]
+name = "water_all_features_high_river"
+position = [144.0, 30.0, 104.0]
+look_at = [92.0, 18.0, 136.0]
+time_of_day = 0.60
+hold_frames = 480
+screenshot = true
+
+  [[checkpoint.screenshot_points]]
+  name = "water_all_features_high_river"
+  frame = 300
