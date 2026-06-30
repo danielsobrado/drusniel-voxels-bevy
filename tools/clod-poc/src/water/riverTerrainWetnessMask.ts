@@ -2,10 +2,23 @@ import * as THREE from "three";
 import type { WaterField } from "./waterField.js";
 import { readRiverMaterialSettings } from "./riverMaterialRuntime.js";
 
+export const DEFAULT_RIVER_TERRAIN_WETNESS_MASK_RESOLUTION = 384;
+export const MIN_RIVER_TERRAIN_WETNESS_MASK_RESOLUTION = 64;
+export const MAX_RIVER_TERRAIN_WETNESS_MASK_RESOLUTION = 768;
+
 export interface RiverTerrainWetnessMaskOptions {
   resolution?: number;
   worldCells: number;
   field: WaterField;
+}
+
+export function parseRiverTerrainWetnessMaskResolution(value: string | number | null | undefined): number {
+  const parsed = typeof value === "number" ? value : value === null || value === undefined ? Number.NaN : Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_RIVER_TERRAIN_WETNESS_MASK_RESOLUTION;
+  return Math.min(
+    MAX_RIVER_TERRAIN_WETNESS_MASK_RESOLUTION,
+    Math.max(MIN_RIVER_TERRAIN_WETNESS_MASK_RESOLUTION, Math.floor(parsed)),
+  );
 }
 
 function clamp01(value: number): number {
@@ -24,7 +37,7 @@ function hash2(x: number, z: number, seed: number): number {
 
 export function buildRiverTerrainWetnessMask(options: RiverTerrainWetnessMaskOptions): THREE.DataTexture {
   const settings = readRiverMaterialSettings();
-  const res = Math.max(16, Math.floor(options.resolution ?? 384));
+  const res = parseRiverTerrainWetnessMaskResolution(options.resolution);
   const worldCells = Math.max(1, options.worldCells);
   const data = new Uint8Array(res * res * 4);
   const searchRadius = Math.max(1.5, settings.wetBankDistanceM);
