@@ -27,6 +27,10 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       taaHistoryWeight: 0.88,
       taaDepthThreshold: 0.0025,
       taaSharpen: 0.06,
+      contactShadowsEnabled: false,
+      contactShadowsStrength: 0.25,
+      contactShadowsRadiusPx: 2,
+      contactShadowsDepthBias: 0.002,
       aerialPerspectiveEnabled: true,
       aerialPerspectiveStart: 120,
       aerialPerspectiveEnd: 1800,
@@ -40,7 +44,7 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
     });
   });
 
-  it("parses bloom, TAA, and tone-mapping overrides from YAML", () => {
+  it("parses bloom, TAA, contact shadows, and tone-mapping overrides from YAML", () => {
     expect(parsePostProcessSettings(`
 postprocess:
   enabled: false
@@ -55,6 +59,11 @@ postprocess:
     history_weight: 0.75
     depth_threshold: 0.01
     sharpen: 0.12
+  contact_shadows:
+    enabled: true
+    strength: 0.5
+    radius_px: 3.5
+    depth_bias: 0.004
 `)).toMatchObject({
       enabled: false,
       toneMapping: "agx",
@@ -66,6 +75,10 @@ postprocess:
       taaHistoryWeight: 0.75,
       taaDepthThreshold: 0.01,
       taaSharpen: 0.12,
+      contactShadowsEnabled: true,
+      contactShadowsStrength: 0.5,
+      contactShadowsRadiusPx: 3.5,
+      contactShadowsDepthBias: 0.004,
     });
   });
 
@@ -87,7 +100,7 @@ aerial_perspective:
   });
 
   it("applies URL ablation overrides", () => {
-    const params = new URLSearchParams("postmin=1&bloom=0&taa=1&grade=0&toneMap=agx");
+    const params = new URLSearchParams("postmin=1&bloom=0&taa=1&contactShadows=1&grade=0&toneMap=agx");
     expect(applyPostProcessQueryOverrides({
       ...DEFAULT_POST_PROCESS_SETTINGS,
       exposure: 1.8,
@@ -96,6 +109,7 @@ aerial_perspective:
       vignette: 0.7,
       bloomEnabled: true,
       taaEnabled: true,
+      contactShadowsEnabled: true,
       aerialPerspectiveEnabled: true,
     }, params)).toMatchObject({
       enabled: true,
@@ -105,6 +119,7 @@ aerial_perspective:
       vignette: 0,
       bloomEnabled: false,
       taaEnabled: true,
+      contactShadowsEnabled: true,
       aerialPerspectiveEnabled: false,
       godRaysMode: "off",
       toneMapping: "agx",
@@ -118,14 +133,16 @@ aerial_perspective:
         debugMode: "off",
         bloomEnabled: false,
         taaEnabled: false,
+        contactShadowsEnabled: false,
         aerialPerspectiveEnabled: false,
         godRaysMode: "off",
       });
   });
 
-  it("defaults god rays and TAA off so existing scenes are unchanged", () => {
+  it("defaults god rays, TAA, and contact shadows off so existing scenes are unchanged", () => {
     expect(DEFAULT_POST_PROCESS_SETTINGS.godRaysMode).toBe("off");
     expect(DEFAULT_POST_PROCESS_SETTINGS.taaEnabled).toBe(false);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled).toBe(false);
   });
 });
 
@@ -150,6 +167,8 @@ describe("postprocess shaders", () => {
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uInvCurrentViewProjection");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uTaaHistoryWeight");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("temporalSceneColor");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uContactShadowsStrength");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("contactShadowFactor");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uExposure");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uContrast");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uSaturation");
