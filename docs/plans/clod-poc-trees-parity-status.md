@@ -95,17 +95,35 @@ Still required before calling TREE-10 complete:
 - Verify the archived shot reports `treeHeroNearTrianglesAvg >= 100000` and non-zero `treeHeroNearFoliageTrianglesAvg`.
 - If the shot misses the floor, raise near-tree grammar/leaf detail and rerun the same bookmark A/B.
 
+## TREE-12 current state
+
+Implemented:
+
+- `tree_parity_evidence.ts` provides a generic manifest-driven evidence validator for required screenshot/stats/perf artifacts and metric thresholds.
+- `tree_parity_evidence.test.ts` covers pass/fail cases, missing artifacts, metric floors, and unreadable JSON.
+- `tools/verify-tree-parity-evidence.ts` exposes the validator as a CLI.
+- `config/tree-parity-evidence.yaml` defines the current TREE-7/8/9/10/11 evidence contract without hardcoding paths or thresholds in code.
+- `npm --prefix tools/clod-poc run trees:verify-parity-evidence` runs the evidence gate after local real-GPU captures are archived under the manifest paths.
+
+Still required before calling TREE-12 complete:
+
+- Run typecheck/tests.
+- Capture the configured artifacts under `shots/tree-parity/latest` and `perf-runs/tree-parity/latest`.
+- Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence` and archive the PASS output.
+
 ## Still required before calling Epic A+B closed
 
 - Run `npm --prefix tools/clod-poc test`.
 - Run `npm --prefix tools/clod-poc run typecheck`.
 - Run the server-first shot/perf harness for the WebGPU path with impostors enabled.
 - Capture slow dolly-out and frozen-boundary shots to confirm no far/impostor pop, holes, or double-draw.
+- Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence` after captures.
 - Feed real screenshot/perf measurements into the TREE-11 acceptance contract.
 
 ## Next implementation order
 
 1. Local generated rewrite check: `npm --prefix tools/clod-poc run trees:wire-parity:check`.
 2. Run typecheck/tests.
-3. Capture TREE-7/TREE-8/TREE-9/TREE-10 evidence shots and perf JSON.
-4. TREE-12 closeout docs and evidence links.
+3. Capture TREE-7/TREE-8/TREE-9/TREE-10/TREE-11 evidence shots and perf JSON.
+4. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence`.
+5. TREE-12 closeout docs and evidence links.
