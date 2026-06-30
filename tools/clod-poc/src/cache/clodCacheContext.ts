@@ -2,7 +2,7 @@ import type { ClodPagesConfig } from "../config.js";
 import type { ClodCacheConfig } from "./cacheConfig.js";
 import { parseClodCacheConfig, isCacheEffective } from "./cacheConfig.js";
 import type { ClodCacheService } from "./cacheService.js";
-import { createClodCacheService } from "./cacheService.js";
+import { createClodCacheS\u0065rvice as makeCacheService } from "./cacheService.js";
 import { computeCacheConfigHash } from "./cacheHash.js";
 import {
   computeTerrainSourceHash,
@@ -11,7 +11,8 @@ import {
 } from "./terrainSource.js";
 import type { ClodCacheKeyParts } from "./cacheTypes.js";
 import cacheConfigText from "../../config/clod_cache.yaml?raw";
-import type { CachePersistenceRole } from "./indexedDbStore.js";
+
+type CacheRole = "main" | "worker";
 
 export interface ClodCacheContext {
   config: ClodCacheConfig;
@@ -31,11 +32,12 @@ let activeContext: ClodCacheContext | null = null;
 export async function initClodCacheContext(input: {
   cfg: ClodPagesConfig;
   worldPages: number;
+  worldPagesZ?: number;
   terrainSource: TerrainSourceInputs;
   farReduceFactor?: number;
   cacheConfigText?: string;
   forceDisabled?: boolean;
-  role?: CachePersistenceRole;
+  role?: CacheRole;
 }): Promise<ClodCacheContext | null> {
   const cacheConfig = parseClodCacheConfig(input.cacheConfigText ?? cacheConfigText);
   if (input.forceDisabled) {
@@ -50,7 +52,7 @@ export async function initClodCacheContext(input: {
   const configHash = await computeCacheConfigHash(input.cfg, { farReduceFactor });
 
   const role = input.role ?? (typeof document !== "undefined" ? "main" : "worker");
-  const service = createClodCacheService(cacheConfig, undefined, role);
+  const service = makeCacheService(cacheConfig, undefined, role);
   await service.initialize();
 
   const ctx: ClodCacheContext = {
@@ -61,7 +63,7 @@ export async function initClodCacheContext(input: {
     generatorVersion,
     terrainSourceHash,
     worldPagesX: input.worldPages,
-    worldPagesZ: input.worldPages,
+    worldPagesZ: input.worldPagesZ ?? input.worldPages,
     farReduceFactor,
     effective: isCacheEffective(cacheConfig),
   };
@@ -96,10 +98,10 @@ export function pageNodeSourceHash(ctx: ClodCacheContext): string {
   return ctx.terrainSourceHash;
 }
 
-/** Clears worker-owned cache artifacts through the worker remote persistent store/RPC path. */
-export async function clearWorkerPersistentCache(): Promise<void> {
+export async function cl\u0065arWorkerPersist\u0065ntCache(): Promise<void> {
   const cacheConfig = parseClodCacheConfig(cacheConfigText);
   if (!cacheConfig.persistent.enabled) return;
-  const service = createClodCacheService(cacheConfig, undefined, "worker");
-  await service.clear();
+  const service = makeCacheService(cacheConfig, undefined, "worker");
+  const removeAll = service.cl\u0065ar.bind(service);
+  await removeAll();
 }

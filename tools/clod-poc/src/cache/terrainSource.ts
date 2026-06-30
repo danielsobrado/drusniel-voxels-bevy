@@ -7,7 +7,7 @@ import type { DigEdit, TerrainFieldConfig, VoxelEditSnapshot } from "../terrain/
 import { sha256Hex } from "./checksum.js";
 
 const textEncoder = new TextEncoder();
-const TERRAIN_SOURCE_VERSION = "island-world-source-v1";
+const TERRAIN_SOURCE_VERSION = "rectangular-world-v1";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);

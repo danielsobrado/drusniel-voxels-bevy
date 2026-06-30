@@ -263,6 +263,6 @@ export function surfaceHeight(x: number, z: number): number {
     z,
     inland,
     borderCoastRuntime.config ?? DEFAULT_BORDER_COAST_OCEAN_CONFIG,
-    Math.min(borderCoastRuntime.worldCellsX, borderCoastRuntime.worldCellsZ),
+    { cellsX: borderCoastRuntime.worldCellsX, cellsZ: borderCoastRuntime.worldCellsZ },
   );
 }
