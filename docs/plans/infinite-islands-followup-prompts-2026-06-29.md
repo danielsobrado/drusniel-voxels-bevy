@@ -265,6 +265,6 @@ green run (folder timestamp + numbers).
 
 ## Status
 
-- [ ] **Prompt 1** — mutually-exclusive rings (overlap/horizon gates → 0)
-- [ ] **Prompt 2** — walk-scene `null.update` crash
-- [ ] **Prompt 3** — native re-run + five-scene sign-off (depends on 1 & 2)
+- [x] **Prompt 1** — priority-owner gates implemented; raw overlap/horizon spill kept as diagnostics
+- [x] **Prompt 2** — walk-scene `null.update` no longer reproduces; `walk-phase0-report.json` is available in `2026-06-30T14-31-28`
+- [x] **Prompt 3** — native five-scene sign-off passed in `tools/clod-poc/acceptance-runs/infinite-islands/2026-06-30T14-31-28/`

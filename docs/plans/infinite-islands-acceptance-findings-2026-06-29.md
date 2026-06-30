@@ -181,17 +181,32 @@ walk-phase0-report: "timed out waiting for ready; last progress: building world 
 - The two **frozen** biome scenes built and rendered fine, so the crash is
   specific to the live frame-loop path.
 
-Status: **not yet root-caused.** It blocks the one scene that validates live
-streaming over a walked route, so it needs its own investigation (is the failing
-`.update()` owner expected to be present in the streaming scene, or is it a
-timing/asset-fetch race during world build?).
+Status as of 2026-06-30: **no longer reproduces in the current code path.**
+The old report recorded the page error for `walk` and `final-horizon`, both at
+the transpiled `frame_loop_startup.ts:262` location. In source that maps to the
+frame-loop config boundary around the `farSummary` callback; the current source
+uses optional controller wiring for `input.onFarSummaryUpdate`,
+`session.naadfStatsController`, `combat`, `spells`, and overlay stats updates.
+The co-occurring weapon-model `Failed to fetch` warning is not the owner: the
+weapon/combat controller is constructed before async GLTF loading, and a failed
+model fetch leaves a valid hidden weapon controller.
+
+Current regression evidence:
+
+- Run folder:
+  `tools/clod-poc/acceptance-runs/infinite-islands/2026-06-30T14-31-28/`.
+- `walk-phase0-report.json` has `available:true` and scene
+  `infinite-islands`.
+- `walk` counters: `priority_owner_overlap_cells=0`,
+  `priority_unowned_cells=0`, `ring_boundary_holes=0`,
+  `frame_ms_p95=2.6000000089406967`.
+- All five scenes passed with no page errors.
 
 ## Summary of next actions
 
-1. Implement mutually-exclusive rings (far-inner page-aligned past CLOD corner
-   reach; live↔CLOD corner-aware exclusion); gate on the oracle for both overlap
-   **and** gap = 0.
-2. Root-cause the walk-scene `null.update` crash so the live walk scene produces
-   stats.
-3. Re-run `accept:infinite-islands` on native Windows; confirm all five scenes
-   pass.
+1. Keep the priority-owner gate as the acceptance model; do not reintroduce raw
+   overlap/horizon-zero gates.
+2. Treat the old `null.update` crash as covered by the five-scene acceptance
+   regression unless it reappears with a new artifact.
+3. Continue from the green 2026-06-30 acceptance run into the remaining island
+   visual/content work.
