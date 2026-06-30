@@ -24,7 +24,7 @@ Done:
 - Bevy Rust `BiomeSplatSample` has `triplanar_weights()` parity helpers and tests against the WGSL material-layer IDs.
 - Bevy triplanar terrain shader imports `world_source/biome_splat.wgsl` and calls `biome_splat_resolve_triplanar_weights()` under `TERRAIN_GPU_BIOME_SPLAT`.
 - Surface Nets terrain encodes biome id in `uv0.y`; `uv0.x` remains baked AO.
-- Bevy mesh biome channel now resolves biome id from true WorldSource material tags, then active `ProceduralWorldSource`, then the named legacy compatibility adapter.
+- Bevy mesh biome channel now resolves biome id from true WorldSource material tags, then active `ProceduralWorldSource`; the old four-weight compatibility adapter is private legacy-mode fallback only.
 - Bevy now has `BiomeContentTable` covering Meadows, Forest, Swamp, Mountain, Plains, Coast, and Ocean.
 - WorldSource terrain generation uses `BiomeContentTable` instead of bridge-local material rules.
 - Bevy now has `WorldSourceDriftGateReport` with explicit `passed`, `failed`, and `skipped` states for CPU/GPU drift checks.
@@ -34,12 +34,13 @@ Done:
 - Runtime-assisted WorldSource readback writes `bench-runs/world-source-runtime-acceptance/summary.json` by default, or `VOXEL_WORLD_SOURCE_DRIFT_ACCEPTANCE_OUT` when overridden.
 - `bench/scenes/terrain/world-source-readback-acceptance.toml` is the minimal no-screenshot runtime scene for collecting that readback artifact.
 - Native Windows runtime verification on 2026-06-30 produced accepted GPU readback evidence in `bench-runs/world-source-runtime-acceptance/summary.json`: `acceptance_pass: true`, no blockers, `gpu_readback.status: available`, 5 samples, `drift_gate.status: passed`, 5 comparisons, and 0 failures.
+- `world_source_acceptance` now validates the runtime-assisted artifact and records it as `runtime_gpu_readback_acceptance`; when the artifact is accepted, the report uses its GPU readback/drift-gate result for top-level acceptance.
 - `src/voxel/runtime/generation.rs` was restored to the full runtime module after an accidental truncation.
 
 Not done yet:
 
-- The standalone `world_source_acceptance` report still uses the unavailable readback provider, so `acceptance_pass` must remain `false` with `gpu_readback_unavailable` and `drift_gate_not_passed` until real GPU samples feed the report.
-- The final acceptance decision still needs to choose whether `world_source_acceptance` consumes real GPU readback directly or remains paired with the reviewed runtime-assisted artifact.
+- `world_source_acceptance` still falls back to the unavailable readback provider when no accepted runtime artifact is available, so missing or rejected runtime evidence remains red with `gpu_readback_unavailable` and `drift_gate_not_passed`.
+- Direct in-process runtime readback consumption by `world_source_acceptance` is still not implemented; the accepted path is the paired runtime-assisted artifact.
 - MC/Transvoxel remains a legacy/fallback mesh path and is not a blocker for the CLOD/WorldSource default path.
 - Legacy bridge removal is still pending final visual parity and accepted bench thresholds.
 
@@ -64,7 +65,7 @@ Not done yet:
 | Ocean rim | config | config | GPU parity path | config | Config |
 | Splat output | dominant layer plus weights | `sampleBiomeSplat` | pending Bevy WGSL | `BiomeSplatSample` + `biome_splat.wgsl` | GPU path wired |
 | Voxel biome content | seven-biome table | compatibility | n/a | `BiomeContentTable` | Shared Bevy content |
-| Mesh biome channel | seven-biome id in `uv0.y` | n/a | triplanar shader | material tag / active WorldSource / compatibility fallback | CLOD path wired |
+| Mesh biome channel | seven-biome id in `uv0.y` | n/a | triplanar shader | material tag / active WorldSource; private legacy fallback | CLOD path wired |
 | MC/Transvoxel | legacy/fallback only | n/a | n/a | not blocking CLOD path | Legacy |
 | Drift gate status | pass/fail/skip | n/a | readback input | `WorldSourceDriftGateReport` | Explicit status; skipped blocks acceptance |
 | Terrain source runtime path | GPU default / CPU reference / legacy | n/a | n/a | `TerrainSourceStartupReport` | Explicit status |
@@ -172,7 +173,7 @@ Acceptance:
 
 Notes:
 
-- The active CLOD/WorldSource path resolves biome id from true material tags or active `ProceduralWorldSource` before using the legacy compatibility adapter.
+- The active CLOD/WorldSource path resolves biome id from true material tags or active `ProceduralWorldSource`; the legacy compatibility adapter is not exported from the mesh module and remains private fallback for explicit legacy mode.
 - MC/Transvoxel is legacy/fallback for this port and does not block GPU biome/splat parity.
 - BVY-WS-09 should add a real GPU-readback producer before this is treated as full runtime visual parity.
 
@@ -202,7 +203,7 @@ Acceptance:
 Notes:
 
 - `WorldSourceDriftGateReport` is ready for BVY-WS-11 bench/acceptance JSON output.
-- Runtime readback infrastructure now has accepted native Windows evidence, but the final acceptance report still needs to consume that evidence directly or explicitly pair with the runtime artifact.
+- Runtime readback infrastructure now has accepted native Windows evidence, and the final acceptance report explicitly pairs with the runtime artifact when it validates as accepted.
 
 ### BVY-WS-10 — Make GPU WorldSource default runtime path
 
@@ -231,7 +232,7 @@ Acceptance:
 
 Notes:
 
-- The standalone report still uses the unavailable readback provider, so `gpu_readback.status` is expected to be `unavailable`, `drift_gate.status` is expected to be `skipped`, and `acceptance_pass` is expected to be `false` until real GPU samples are accepted.
+- The report uses the paired runtime artifact when it validates as accepted. Without that artifact, it falls back to the unavailable readback provider, so `gpu_readback.status` is expected to be `unavailable`, `drift_gate.status` is expected to be `skipped`, and `acceptance_pass` is expected to be `false`.
 - The acceptance bench measures sampled WorldSource chunk generation and mesh generation outside the full Bevy render loop.
 
 ### BVY-WS-12 — Remove temporary legacy bridge after visual parity
@@ -242,10 +243,10 @@ Acceptance:
 
 - [ ] Visual parity scene passes.
 - [x] Opt-in runtime GPU readback produces matching samples and a passed drift gate.
-- [ ] Final acceptance report consumes real GPU readback or records the reviewed runtime-assisted acceptance artifact from `bench-runs/world-source-runtime-acceptance/summary.json`.
+- [x] Final acceptance report consumes real GPU readback or records the reviewed runtime-assisted acceptance artifact from `bench-runs/world-source-runtime-acceptance/summary.json`.
 - [ ] Bench within accepted thresholds.
 - [ ] Legacy path removed or explicitly deprecated.
-- [ ] Temporary seven-biome-to-legacy-material mapping removed from default path.
+- [x] Temporary seven-biome-to-legacy-material mapping removed from default path.
 - [ ] Docs updated with final GPU WorldSource flow.
 
 ## Required order

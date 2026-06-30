@@ -1,4 +1,4 @@
-use super::biome_channel::source_or_compatibility_biome_id_for_uv;
+use super::biome_channel::source_biome_id_for_uv;
 use super::{
     ChunkMeshResult, LodTransitionSnapStats, MeshData, MeshGenerationTimingStats, MeshSdfCache,
     PaddedChunkShape, SMOOTH_TERRAIN_SDF_LOD0, TerrainMeshSectionStats, WaterAirExposureMode,
@@ -129,13 +129,8 @@ fn compute_unique_vertex_attributes(
         attrs.normal[i] = sdf_cache.gradient_normal_at_local(world, local);
 
         attrs.weights[i] = compute_vertex_material_weights(local, chunk, world, chunk_origin);
-        attrs.biome_ids[i] = source_or_compatibility_biome_id_for_uv(
-            local,
-            chunk,
-            world,
-            chunk_origin,
-            attrs.weights[i],
-        );
+        attrs.biome_ids[i] =
+            source_biome_id_for_uv(local, chunk, world, chunk_origin, attrs.weights[i]);
 
         // AO only on the high-detail grid — distance makes it imperceptible on
         // coarse LODs, so they keep full brightness (1.0).

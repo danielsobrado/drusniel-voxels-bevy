@@ -6,7 +6,7 @@ Status: In progress.
 
 - Added source-aware biome material helpers in `src/world/source/biome_material_id.rs`.
 - Surface Nets now resolves `uv0.y` from source-aware biome material tags when present.
-- The old four-weight compatibility adapter is now a fallback, not the preferred path.
+- The old four-weight compatibility adapter is no longer exported from the mesh module and is private legacy-mode fallback only.
 - `world_source_acceptance` now tags its generated chunks with source-aware biome material IDs.
 - Runtime async WorldSource chunk generation now builds chunks through `build_world_source_chunk`, so generated solid voxels carry source-aware biome material tags.
 - Runtime generation was split by responsibility:
@@ -36,15 +36,16 @@ Status: In progress.
 - `world_source_acceptance` reports `material_draw_impact.compatibility_biome_channel_active = false` for the bench path.
 - `world_source_acceptance` now fails before writing `summary.json` unless `terrain_source.mode` is `gpu_world_source`.
 - `world_source_acceptance` now treats unavailable GPU readback and skipped/failed drift gates as acceptance blockers instead of allowing a CPU-only pass.
+- Native Windows runtime-assisted GPU readback produced an accepted artifact at `bench-runs/world-source-runtime-acceptance/summary.json`.
+- `world_source_acceptance` now validates the runtime artifact and records it as `runtime_gpu_readback_acceptance`; when accepted, the report uses its GPU readback/drift-gate result for top-level acceptance.
 
 ## Not completed
 
-- `world_source_acceptance` still uses the unavailable provider, so the standalone bench reports `acceptance_pass = false`, `gpu_readback.status = unavailable`, and `drift_gate.status = skipped`.
-- The opt-in runtime readback path must be run from native Windows with `--runtime-assisted` and checked for `acceptance_pass: true` in the generated artifact.
+- Direct in-process runtime readback consumption by `world_source_acceptance` is still not implemented; the accepted path is pairing the focused bench report with the reviewed runtime-assisted artifact.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
-- Full removal of the compatibility adapter should wait until the release acceptance report is reviewed and visual parity is accepted.
+- Full removal of explicit legacy mode should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Run the opt-in render-app readback path with `--runtime-assisted`, fix any local runtime issues, then decide whether `world_source_acceptance` should stay a CPU/bench-only report paired with the runtime artifact or gain a runtime-assisted mode that reads `GpuWorldSourceDriftRuntimeAcceptanceState`.
+Review the paired `world_source_acceptance` report with visual parity and bench thresholds, then remove or deprecate the remaining legacy bridge only after those gates are accepted together.
