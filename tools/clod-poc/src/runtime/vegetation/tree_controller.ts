@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
+import type { TreeShadowMaxLod } from "../../app/state/tree_quality_presets.js";
 import { TreeSystem, type FallingTree, type TreeSettings, type TreeStats } from "../../trees/index.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
 
@@ -11,6 +12,7 @@ export interface TreeControllerUiState {
   treeMaxInstances: number;
   treeDensity: number;
   treeSpacing: number;
+  treeShadowMaxLod: TreeShadowMaxLod;
   treeWindEnabled: boolean;
   treeWindStrength: number;
   treeWindSpeed: number;
@@ -86,6 +88,10 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       placement: {
         ...deps.treeConfig.placement,
         spacingM: treeSpacing,
+      },
+      lod: {
+        ...deps.treeConfig.lod,
+        shadowsMaxLod: state.treeShadowMaxLod,
       },
       ecology: {
         ...deps.treeConfig.ecology,
