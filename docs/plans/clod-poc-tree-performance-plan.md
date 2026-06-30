@@ -100,9 +100,22 @@ which weakens early-z and pays shading for discarded fragments. Evaluate moving 
 LOD-fade + coverage to an **alpha-test/cutout** path (or a cheap pre-pass) so hidden
 fragments are rejected before the heavy relight/transmission/forest terms run.
 
+**Status (2026-06-30):** depth prepass for the CPU/patch path implemented behind
+`?treeCpuPrepass=1` (opt-in, **default off**). `instancedDepthPrepassTwin` +
+wiring through the patch factory / cpu runtime / mesh bounds / lifecycle.
+
 **Acceptance criteria:**
-- [ ] Overdraw cost of the near canopy drops at the hero camera (TP-1 GPU ms).
-- [ ] Dithered LOD crossfade still looks identical (no banding/regression).
+- [~] Overdraw cost of the near canopy drops at the hero camera. *Inconclusive /
+      net-negative as built.* Headed RTX A/B (trees-perf hero, 471 near/7640
+      trees): the **isolated** `r.treeMain` pass REGRESSES ~20→29 ms — the extra
+      double-sided masked depth pass costs more than the `LessEqual` early-z saves
+      in isolation, and the isolated harness can't capture the real-frame terrain
+      occlusion benefit (and adds its own GPU load). So it ships opt-in/off.
+      Likely needs a *proper* prepass (colour pass `EqualDepth`/`depthWrite:false`
+      + a cheaper FrontSide/non-masked depth twin) to net positive — or pivot to
+      TP-4/TP-5 (cut the foliage fill directly, which `r.treeMain` measures cleanly).
+- [x] Dithered LOD crossfade still looks identical (no banding/regression).
+      *Verified: prepass-on vs off screenshots are visually identical.*
 
 ## TP-4 — Foliage card overlap / size budget
 **Type:** Task · **Depends on:** TP-1
