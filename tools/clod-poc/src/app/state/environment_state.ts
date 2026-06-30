@@ -25,6 +25,11 @@ export interface EnvironmentSliceState {
   postProcessSaturation: number;
   postProcessVignette: number;
   postProcessDebugMode: PostProcessSettings["debugMode"];
+  postProcessToneMapping: PostProcessSettings["toneMapping"];
+  postProcessBloomEnabled: boolean;
+  postProcessBloomThreshold: number;
+  postProcessBloomStrength: number;
+  postProcessBloomRadius: number;
   godRaysMode: GodRaysMode;
   godRaysDensity: number;
   godRaysDecay: number;
@@ -64,6 +69,11 @@ export function createEnvironmentSliceState(input: {
     postProcessSaturation: DEFAULT_POST_PROCESS_SETTINGS.saturation,
     postProcessVignette: DEFAULT_POST_PROCESS_SETTINGS.vignette,
     postProcessDebugMode: DEFAULT_POST_PROCESS_SETTINGS.debugMode,
+    postProcessToneMapping: DEFAULT_POST_PROCESS_SETTINGS.toneMapping,
+    postProcessBloomEnabled: DEFAULT_POST_PROCESS_SETTINGS.bloomEnabled,
+    postProcessBloomThreshold: DEFAULT_POST_PROCESS_SETTINGS.bloomThreshold,
+    postProcessBloomStrength: DEFAULT_POST_PROCESS_SETTINGS.bloomStrength,
+    postProcessBloomRadius: DEFAULT_POST_PROCESS_SETTINGS.bloomRadius,
     godRaysMode: DEFAULT_POST_PROCESS_SETTINGS.godRaysMode,
     godRaysDensity: DEFAULT_POST_PROCESS_SETTINGS.godRaysDensity,
     godRaysDecay: DEFAULT_POST_PROCESS_SETTINGS.godRaysDecay,
