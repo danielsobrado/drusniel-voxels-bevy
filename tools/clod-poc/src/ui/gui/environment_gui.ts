@@ -23,8 +23,16 @@ export function createEnvironmentGui(
   state: ClodAppState,
   deps: EnvironmentGuiDeps,
 ): void {
+  const currentGuiPostProcessSettings = (): Partial<PostProcessSettings> => ({
+    ...deps.currentPostProcessSettings(),
+    toneMapping: state.postProcessToneMapping,
+    bloomEnabled: state.postProcessBloomEnabled,
+    bloomThreshold: state.postProcessBloomThreshold,
+    bloomStrength: state.postProcessBloomStrength,
+    bloomRadius: state.postProcessBloomRadius,
+  });
   const applyPostProcessSettings = () => {
-    deps.postProcess?.updateSettings(deps.currentPostProcessSettings());
+    deps.postProcess?.updateSettings(currentGuiPostProcessSettings());
   };
 
   const audioFolder = gui.addFolder("Audio");
