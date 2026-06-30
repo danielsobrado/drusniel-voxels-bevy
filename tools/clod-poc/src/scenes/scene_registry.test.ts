@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  earlySceneRoute,
   isLongViewScene,
   isRegisteredNaadfScene,
   phase0ConfigKeyForScene,
@@ -11,6 +12,11 @@ describe("scene registry", () => {
   it("maps UI labels to scene ids", () => {
     expect(sceneOptionsByLabel()["long view 4 km"]).toBe("long-view-4km");
     expect(sceneOptionsByLabel()["infinite islands"]).toBe("infinite-islands");
+  });
+
+  it("keeps early-only routes out of the GUI selector", () => {
+    expect(earlySceneRoute("sanity")).toBe("sanity");
+    expect(sceneOptionsByLabel().sanity).toBeUndefined();
   });
 
   it("centralizes long-view scene metadata", () => {
