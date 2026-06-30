@@ -33,8 +33,7 @@ Implemented:
 
 Still required before calling TREE-7 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:wire-parity:check` and confirm no pending generated rewrites.
-- Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
+- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Capture a low-sun shot proving off-screen trees can still cast and archive perf JSON with non-zero `treeGpuShadowCasterCountAvg`.
 
 ## TREE-8 current state
@@ -50,7 +49,7 @@ Implemented:
 
 Still required before calling TREE-8 complete:
 
-- Run `npm --prefix tools/clod-poc run trees:wire-parity:check`, `npm --prefix tools/clod-poc run typecheck`, and `npm --prefix tools/clod-poc test`.
+- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Capture noon forest-interior and impostor-boundary shadow shots.
 
 ## TREE-9 current state
@@ -72,8 +71,7 @@ Implemented:
 
 Still required before calling TREE-9 complete:
 
-- Run `npm --prefix tools/clod-poc run typecheck` and `npm --prefix tools/clod-poc test`.
-- Run `npm --prefix tools/clod-poc run trees:wire-parity:check` and confirm it reports no pending rewrites.
+- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Capture the ecology-sorted species gallery shot.
 
 ## TREE-10 current state
@@ -90,7 +88,7 @@ Implemented:
 
 Still required before calling TREE-10 complete:
 
-- Run typecheck/tests.
+- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Capture the hero forest bookmark shot/perf run and archive the stats JSON.
 - Verify the archived shot reports `treeHeroNearTrianglesAvg >= 100000` and non-zero `treeHeroNearFoliageTrianglesAvg`.
 - If the shot misses the floor, raise near-tree grammar/leaf detail and rerun the same bookmark A/B.
@@ -110,22 +108,20 @@ Implemented:
 - `tools/shoot.ts` consumes `--renderer` locally instead of forwarding it into the app URL.
 - `npm --prefix tools/clod-poc run trees:check-parity-manifest` validates the evidence manifest without requiring captured artifacts.
 - `npm --prefix tools/clod-poc run trees:preflight-parity` runs generated-wiring checks plus the evidence manifest check before heavier local QA.
+- `npm --prefix tools/clod-poc run trees:qa-parity` runs preflight, TypeScript, and Vitest before real-GPU capture.
 - `npm --prefix tools/clod-poc run trees:capture-parity-evidence` prints the real-GPU capture commands expected by the manifest.
 - `npm --prefix tools/clod-poc run trees:verify-parity-evidence` runs the evidence gate after local real-GPU captures are archived under the manifest paths.
 - `npm --prefix tools/clod-poc run trees:report-parity-evidence` writes `docs/performance/clod-poc-tree-parity-evidence-latest.md` from the archived artifacts.
 
 Still required before calling TREE-12 complete:
 
-- Run typecheck/tests.
-- Run `npm --prefix tools/clod-poc run trees:preflight-parity`.
+- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`, execute the printed real-GPU commands, and capture the configured artifacts under `shots/tree-parity/latest` and `perf-runs/tree-parity/latest`.
 - Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` or `npm --prefix tools/clod-poc run trees:report-parity-evidence` and archive the PASS output/report.
 
 ## Still required before calling Epic A+B closed
 
-- Run `npm --prefix tools/clod-poc test`.
-- Run `npm --prefix tools/clod-poc run typecheck`.
-- Run `npm --prefix tools/clod-poc run trees:preflight-parity`.
+- Run `npm --prefix tools/clod-poc run trees:qa-parity`.
 - Run the server-first shot/perf harness for the WebGPU path with impostors enabled.
 - Capture slow dolly-out and frozen-boundary shots to confirm no far/impostor pop, holes, or double-draw.
 - Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` after captures.
@@ -133,9 +129,8 @@ Still required before calling TREE-12 complete:
 
 ## Next implementation order
 
-1. Run `npm --prefix tools/clod-poc run trees:preflight-parity`.
-2. Run typecheck/tests.
-3. Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`.
-4. Execute the printed real-GPU capture commands.
-5. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report`.
-6. Commit/archive the generated evidence report and artifacts.
+1. Run `npm --prefix tools/clod-poc run trees:qa-parity`.
+2. Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`.
+3. Execute the printed real-GPU capture commands.
+4. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report`.
+5. Commit/archive the generated evidence report and artifacts.
