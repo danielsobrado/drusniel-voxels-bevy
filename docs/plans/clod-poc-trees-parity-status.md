@@ -97,10 +97,12 @@ Still required before calling TREE-10 complete:
 
 Implemented:
 
-- `tree_parity_evidence.ts` provides a generic manifest-driven evidence validator for required screenshot/stats/perf artifacts and metric thresholds.
-- `tree_parity_evidence.ts` also builds exact capture commands from each manifest `capture` block, including shot paths, perf output directories, explicit renderer, and shared query params.
-- `tree_parity_evidence.ts` now validates the capture manifest before command generation, rejecting unsupported query params, duplicate capture IDs, duplicate artifact paths, empty artifact paths, unpaired perf artifacts/perf cases, and metric/artifact mismatches.
-- `tree_parity_evidence.ts` can generate a markdown closeout report with artifact status, metric expectations, actual values, and failures.
+- `tree_parity_evidence.ts` is now a small public facade over focused TREE-12 evidence modules.
+- `tree_parity_evidence_types.ts` owns the evidence manifest, metric, command, and report contracts.
+- `tree_parity_evidence_manifest.ts` validates capture manifest shape, supported query params, unique IDs/paths, perf pairing, and metric/artifact consistency.
+- `tree_parity_evidence_validator.ts` validates required screenshot/stats/perf artifacts and metric thresholds.
+- `tree_parity_evidence_commands.ts` builds exact capture commands from each manifest `capture` block, including shot paths, perf output directories, explicit renderer, and shared query params.
+- `tree_parity_evidence_report.ts` generates the markdown closeout report with artifact status, metric expectations, actual values, and failures.
 - `tree_parity_evidence.test.ts` covers pass/fail cases, missing artifacts, metric floors, unreadable JSON, manifest self-checks, capture-command generation, and report rendering.
 - `tools/verify-tree-parity-evidence.ts` exposes the validator, the `--check-manifest` YAML-only guard, the `--commands` capture-command printer, and `--report` markdown output.
 - `config/tree-parity-evidence.yaml` defines the current TREE-7/8/9/10/11 evidence contract using supported query params only, including deterministic `sunElevationDeg` for low-sun/noon shots.
