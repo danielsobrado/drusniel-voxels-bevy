@@ -20,6 +20,7 @@ export interface EnvironmentSliceState {
   hazeIntensity: number;
   postProcessEnabled: boolean;
   postProcessOpacity: number;
+  postProcessRenderScale: number;
   postProcessExposure: number;
   postProcessContrast: number;
   postProcessSaturation: number;
@@ -90,6 +91,7 @@ export function createEnvironmentSliceState(input: {
     hazeIntensity: DEFAULT_ENVIRONMENT_SETTINGS.hazeIntensity,
     postProcessEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.enabled,
     postProcessOpacity: DEFAULT_POST_PROCESS_SETTINGS.opacity,
+    postProcessRenderScale: DEFAULT_POST_PROCESS_SETTINGS.renderScale,
     postProcessExposure: DEFAULT_POST_PROCESS_SETTINGS.exposure,
     postProcessContrast: DEFAULT_POST_PROCESS_SETTINGS.contrast,
     postProcessSaturation: DEFAULT_POST_PROCESS_SETTINGS.saturation,
