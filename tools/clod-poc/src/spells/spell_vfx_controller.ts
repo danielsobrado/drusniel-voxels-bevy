@@ -190,7 +190,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
   const fire = buildSpell("fire-spell", createFireNodeMaterial(), deps.fire);
   const water = buildSpell("water-spell", createWaterNodeMaterial(), deps.water);
   const air = buildSpell("air-spell", createAirNodeMaterial(), deps.air);
-  const earth = createEarthSpellVfx({ scene, config: deps.earth, getTarget: deps.getEarthTarget, now });
+  const earth = createEarthSpellVfx({ scene, config: deps.earth, getTarget: deps.getEarthTarget, getCamera, now });
   const spells = [fire, water, air];
 
   const start = (spell: SpellState, durationMs: number): void => {
