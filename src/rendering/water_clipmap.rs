@@ -136,7 +136,10 @@ impl Plugin for WaterClipmapPlugin {
             .insert_resource(clipmap_config)
             .init_resource::<WaterClipmapOrigin>()
             .init_resource::<WaterClipmapStatus>()
-            .add_systems(Update, (sync_clipmap_origin, sync_clipmap_placeholders).chain());
+            .add_systems(
+                Update,
+                (sync_clipmap_origin, sync_clipmap_placeholders).chain(),
+            );
     }
 }
 
@@ -150,7 +153,10 @@ fn sync_clipmap_origin(
     };
 
     let cell_size = config.base_cell_size;
-    let camera_xz = Vec2::new(camera_transform.translation.x, camera_transform.translation.z);
+    let camera_xz = Vec2::new(
+        camera_transform.translation.x,
+        camera_transform.translation.z,
+    );
     origin.snapped_xz = (camera_xz / cell_size).round() * cell_size;
     origin.cell_size = cell_size;
 }
@@ -198,7 +204,11 @@ fn sync_clipmap_placeholders(
                 WaterOwnerMarker {
                     owner: WaterSurfaceOwner::Clipmap,
                 },
-                Transform::from_translation(Vec3::new(origin.snapped_xz.x, 0.0, origin.snapped_xz.y)),
+                Transform::from_translation(Vec3::new(
+                    origin.snapped_xz.x,
+                    0.0,
+                    origin.snapped_xz.y,
+                )),
                 GlobalTransform::default(),
                 Visibility::Hidden,
             ));
@@ -212,7 +222,12 @@ fn sync_clipmap_placeholders(
         mesh_count: config.levels,
         origin: origin.snapped_xz,
     };
-    record_clipmap_counters(&mut timing, frame.0, *status, config.placeholder_triangle_count());
+    record_clipmap_counters(
+        &mut timing,
+        frame.0,
+        *status,
+        config.placeholder_triangle_count(),
+    );
 }
 
 fn record_clipmap_counters(
@@ -221,7 +236,11 @@ fn record_clipmap_counters(
     status: WaterClipmapStatus,
     triangles: u32,
 ) {
-    timing.record_count(frame, "Water Clipmap Enabled", u8::from(status.enabled) as f64);
+    timing.record_count(
+        frame,
+        "Water Clipmap Enabled",
+        u8::from(status.enabled) as f64,
+    );
     timing.record_count(frame, "Water Clipmap Levels Visible", status.levels as f64);
     timing.record_count(frame, "Water Clipmap Meshes", status.mesh_count as f64);
     timing.record_count(frame, "Water Clipmap Triangles", triangles as f64);

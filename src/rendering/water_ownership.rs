@@ -68,10 +68,26 @@ fn collect_water_ownership_stats(
         stats.record(marker.owner);
     }
 
-    timing.record_count(frame.0, "Water Owner Near Voxel Meshes", stats.near_voxel_meshes as f64);
-    timing.record_count(frame.0, "Water Owner Clipmap Surfaces", stats.clipmap_surfaces as f64);
-    timing.record_count(frame.0, "Water Owner Hidden Surfaces", stats.hidden_surfaces as f64);
-    timing.record_count(frame.0, "Water Owner Fallback Surfaces", stats.fallback_surfaces as f64);
+    timing.record_count(
+        frame.0,
+        "Water Owner Near Voxel Meshes",
+        stats.near_voxel_meshes as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Owner Clipmap Surfaces",
+        stats.clipmap_surfaces as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Owner Hidden Surfaces",
+        stats.hidden_surfaces as f64,
+    );
+    timing.record_count(
+        frame.0,
+        "Water Owner Fallback Surfaces",
+        stats.fallback_surfaces as f64,
+    );
 }
 
 #[cfg(test)]
