@@ -221,6 +221,8 @@ export function createVegetationGui(
         enabled: state.treeGpuEnabled as boolean,
         debugForceCpu: state.treeGpuForceCpu as boolean,
         debugShowGpuCounts: state.treeGpuShowCounts as boolean,
+        readbackVisibleLists: state.treeGpuReadbackVisibleLists as boolean,
+        debugValidateAgainstCpu: state.treeGpuValidateAgainstCpu as boolean,
         maxVisible: state.treeGpuMaxVisible as number,
       },
     });
@@ -266,10 +268,12 @@ export function createVegetationGui(
     treeFolder.add(state, "treeSpacing", 0.5, 24, 0.25).name("spacing m").onFinishChange(treeActions.rebuild),
   );
   treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(updateTreeRenderSettings);
-  treeFolder.add(state, "treeGpuEnabled").name("GPU ring").onChange(updateTreeGpuSettings);
-  treeFolder.add(state, "treeGpuForceCpu").name("force CPU").onChange(updateTreeGpuSettings);
-  treeFolder.add(state, "treeGpuShowCounts").name("show GPU counts").onChange(updateTreeGpuSettings);
   treeSettingControllers.push(
+    treeFolder.add(state, "treeGpuEnabled").name("GPU ring").onChange(updateTreeGpuSettings),
+    treeFolder.add(state, "treeGpuForceCpu").name("force CPU").onChange(updateTreeGpuSettings),
+    treeFolder.add(state, "treeGpuShowCounts").name("show GPU counts").onChange(updateTreeGpuSettings),
+    treeFolder.add(state, "treeGpuReadbackVisibleLists").name("GPU readback lists").onChange(updateTreeGpuSettings),
+    treeFolder.add(state, "treeGpuValidateAgainstCpu").name("validate GPU vs CPU").onChange(updateTreeGpuSettings),
     treeFolder.add(state, "treeGpuMaxVisible", 0, 50000, 1000).name("GPU max visible").onFinishChange(updateTreeGpuSettings),
   );
   treeFolder.add(state, "treeWindEnabled").name("wind enabled").onChange(updateTreeWindSettings);
