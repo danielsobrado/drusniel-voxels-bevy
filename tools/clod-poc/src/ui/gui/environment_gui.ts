@@ -30,6 +30,10 @@ export function createEnvironmentGui(
     bloomThreshold: state.postProcessBloomThreshold,
     bloomStrength: state.postProcessBloomStrength,
     bloomRadius: state.postProcessBloomRadius,
+    taaEnabled: state.postProcessTaaEnabled,
+    taaHistoryWeight: state.postProcessTaaHistoryWeight,
+    taaDepthThreshold: state.postProcessTaaDepthThreshold,
+    taaSharpen: state.postProcessTaaSharpen,
     aerialPerspectiveEnabled: state.postProcessAerialPerspectiveEnabled,
     aerialPerspectiveStart: state.postProcessAerialPerspectiveStart,
     aerialPerspectiveEnd: state.postProcessAerialPerspectiveEnd,
@@ -107,6 +111,10 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessBloomThreshold", 0, 2, 0.01).name("bloom threshold").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBloomStrength", 0, 1.5, 0.01).name("bloom strength").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBloomRadius", 0, 2, 0.01).name("bloom radius").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessTaaEnabled").name("TAA-lite (WebGL)").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessTaaHistoryWeight", 0, 0.97, 0.01).name("TAA history").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessTaaDepthThreshold", 0, 0.05, 0.0005).name("TAA depth reject").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessTaaSharpen", 0, 0.5, 0.01).name("TAA sharpen").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveEnabled").name("aerial haze (WebGL)").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveStart", 0, 4000, 10).name("aerial start m").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveEnd", 1, 8000, 10).name("aerial end m").onChange(applyPostProcessSettings),
@@ -127,6 +135,10 @@ export function createEnvironmentGui(
       state.postProcessBloomThreshold = DEFAULT_POST_PROCESS_SETTINGS.bloomThreshold;
       state.postProcessBloomStrength = DEFAULT_POST_PROCESS_SETTINGS.bloomStrength;
       state.postProcessBloomRadius = DEFAULT_POST_PROCESS_SETTINGS.bloomRadius;
+      state.postProcessTaaEnabled = DEFAULT_POST_PROCESS_SETTINGS.taaEnabled;
+      state.postProcessTaaHistoryWeight = DEFAULT_POST_PROCESS_SETTINGS.taaHistoryWeight;
+      state.postProcessTaaDepthThreshold = DEFAULT_POST_PROCESS_SETTINGS.taaDepthThreshold;
+      state.postProcessTaaSharpen = DEFAULT_POST_PROCESS_SETTINGS.taaSharpen;
       state.postProcessAerialPerspectiveEnabled = DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnabled;
       state.postProcessAerialPerspectiveStart = DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveStart;
       state.postProcessAerialPerspectiveEnd = DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnd;
