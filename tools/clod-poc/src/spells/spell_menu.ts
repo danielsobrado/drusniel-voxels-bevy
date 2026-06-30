@@ -6,6 +6,7 @@ export interface SpellMenu {
   castFire: () => void;
   castWater: () => void;
   castAir: () => void;
+  castEarth: () => void;
   dispose: () => void;
 }
 
@@ -24,6 +25,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   let fireActiveReset = 0;
   let waterActiveReset = 0;
   let airActiveReset = 0;
+  let earthActiveReset = 0;
   let dragOffset: { x: number; y: number } | null = null;
 
   root.replaceChildren();
@@ -39,10 +41,11 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
   const fireButton = createSpellButton(`1 🔥 ${config.fire.label}`, `${config.fire.label} spell (1)`, () => castFire());
   const waterButton = createSpellButton(`2 💧 ${config.water.label}`, `${config.water.label} spell (2)`, () => castWater());
   const airButton = createSpellButton(`3 ${config.air.label}`, `${config.air.label} spell (3)`, () => castAir());
+  const earthButton = createSpellButton(`4 🪨 ${config.earth.label}`, `${config.earth.label} spell (4)`, () => castEarth());
 
   root.addEventListener("pointerdown", stopUiPropagation);
   root.addEventListener("click", stopUiPropagation);
-  slots.append(fireButton, waterButton, airButton);
+  slots.append(fireButton, waterButton, airButton, earthButton);
   root.append(title, slots);
 
   title.addEventListener("pointerdown", onDragStart);
@@ -99,17 +102,28 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
     airActiveReset = window.setTimeout(() => airButton.setAttribute("aria-pressed", "false"), config.air.castDurationMs);
   }
 
+  function castEarth(): void {
+    window.clearTimeout(earthActiveReset);
+    earthButton.setAttribute("aria-pressed", "true");
+    controller?.playEarth(config.earth.castDurationMs);
+    emitAudio("spell.earth.cast", { volume: config.earth.audio.volume, durationMs: config.earth.castDurationMs });
+    earthActiveReset = window.setTimeout(() => earthButton.setAttribute("aria-pressed", "false"), config.earth.castDurationMs);
+  }
+
   return {
     castFire,
     castWater,
     castAir,
+    castEarth,
     dispose: () => {
       window.clearTimeout(fireActiveReset);
       window.clearTimeout(waterActiveReset);
       window.clearTimeout(airActiveReset);
+      window.clearTimeout(earthActiveReset);
       fireActiveReset = 0;
       waterActiveReset = 0;
       airActiveReset = 0;
+      earthActiveReset = 0;
       if (dragOffset) onDragEnd();
       title.removeEventListener("pointerdown", onDragStart);
       root.removeEventListener("pointerdown", stopUiPropagation);
@@ -117,6 +131,7 @@ export function createSpellMenu(deps: SpellMenuDeps = {}): SpellMenu {
       fireButton.remove();
       waterButton.remove();
       airButton.remove();
+      earthButton.remove();
       if (shouldRemoveRoot) root.remove();
       else root.replaceChildren();
     },
