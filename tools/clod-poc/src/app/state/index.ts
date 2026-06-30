@@ -267,3 +267,30 @@ export type { TreeControllerUiState } from "../../runtime/vegetation/tree_contro
 export type { UnderstoryControllerUiState } from "../../runtime/vegetation/understory_controller.js";
 export type { ForestLightingControllerUiState } from "../../runtime/forest_lighting/forest_lighting_controller.js";
 export type { WaterControllerUiState } from "../../runtime/water_weather/water_controller.js";
+
+// UI-state accessors (restored — accidentally deleted by c0eb25ce while doing
+// unrelated parity-shot work). ClodAppState structurally satisfies each
+// controller's UI-state interface; these narrow it for the *_startup callers.
+export function grassUiState(state: ClodAppState): import("../../runtime/vegetation/grass_controller.js").GrassControllerUiState {
+  return state;
+}
+
+export function stoneUiState(state: ClodAppState): import("../../runtime/vegetation/stone_controller.js").StoneControllerUiState {
+  return state;
+}
+
+export function treeUiState(state: ClodAppState): import("../../runtime/vegetation/tree_controller.js").TreeControllerUiState {
+  return state;
+}
+
+export function understoryUiState(state: ClodAppState): import("../../runtime/vegetation/understory_controller.js").UnderstoryControllerUiState {
+  return state;
+}
+
+export function forestLightingUiState(state: ClodAppState): import("../../runtime/forest_lighting/forest_lighting_controller.js").ForestLightingControllerUiState {
+  return state;
+}
+
+export function waterUiState(state: ClodAppState): import("../../runtime/water_weather/water_controller.js").WaterControllerUiState {
+  return state;
+}
