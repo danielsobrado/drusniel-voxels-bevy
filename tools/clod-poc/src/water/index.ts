@@ -25,6 +25,8 @@ export * from "./deepOceanMesh.js";
 export * from "./deepOcean.js";
 export * from "./riverEcologyRuntime.js";
 export * from "./riverMaterialRuntime.js";
+export * from "./riverCascadeParticlesRuntime.js";
+export * from "./riverCascadeParticleOverlay.js";
 export * from "./riverTerrainWetnessMask.js";
 export * from "./riverBankResidueOverlay.js";
 export * from "./riverParityScene.js";
