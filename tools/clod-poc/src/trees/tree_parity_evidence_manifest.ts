@@ -82,5 +82,24 @@ export function validateTreeParityManifestCaptureConfig(manifest: TreeParityEvid
     }
   }
 
+  validateAcceptanceManifest(manifest, failures);
   return failures;
+}
+
+function validateAcceptanceManifest(manifest: TreeParityEvidenceManifest, failures: TreeParityEvidenceFailure[]): void {
+  const acceptance = manifest.acceptance;
+  if (!acceptance) return;
+  const captureId = acceptance.id ?? "tree-impostor-acceptance";
+  if (!acceptance.visualArtifact?.trim()) failures.push({ captureId, message: "acceptance.visualArtifact is required" });
+  if (!acceptance.baselinePerfArtifact?.trim()) failures.push({ captureId, message: "acceptance.baselinePerfArtifact is required" });
+  if (!acceptance.impostorPerfArtifact?.trim()) failures.push({ captureId, message: "acceptance.impostorPerfArtifact is required" });
+  for (const [key, path] of Object.entries(acceptance.visualPaths ?? {})) {
+    if (!path?.trim()) failures.push({ captureId, message: `acceptance.visualPaths.${key} is required` });
+  }
+  if (acceptance.baselineFrameMsP95Path !== undefined && !acceptance.baselineFrameMsP95Path.trim()) {
+    failures.push({ captureId, message: "acceptance.baselineFrameMsP95Path is required" });
+  }
+  if (acceptance.impostorFrameMsP95Path !== undefined && !acceptance.impostorFrameMsP95Path.trim()) {
+    failures.push({ captureId, message: "acceptance.impostorFrameMsP95Path is required" });
+  }
 }
