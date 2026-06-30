@@ -87,6 +87,12 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   treeMidTrees: number;
   treeFarTrees: number;
   treeImpostorTrees: number;
+  treeHeroNearTriangles: number;
+  treeHeroNearFoliageTriangles: number;
+  treeHeroNearMinTreeTriangles: number;
+  treeHeroNearAvgTreeTriangles: number;
+  treeHeroNearPassesTriangleFloor: number;
+  treeHeroNearPassesRealFoliage: number;
   treeGpuCandidateCount: number;
   treeGpuAcceptedCount: number;
   treeGpuVisibleCount: number;
@@ -135,6 +141,12 @@ export interface FramePerfSummary {
     treeMidTreesAvg: number;
     treeFarTreesAvg: number;
     treeImpostorTreesAvg: number;
+    treeHeroNearTrianglesAvg: number;
+    treeHeroNearFoliageTrianglesAvg: number;
+    treeHeroNearMinTreeTrianglesMin: number;
+    treeHeroNearAvgTreeTrianglesAvg: number;
+    treeHeroNearPassesTriangleFloorFrames: number;
+    treeHeroNearPassesRealFoliageFrames: number;
     customPropGpuStatusCounts: Record<string, number>;
     customPropTotalInstancesAvg: number;
     customPropVisibleInstancesAvg: number;
@@ -246,6 +258,14 @@ function avgCounter(samples: readonly FramePerfSample[], key: keyof FramePerfSam
   return total / samples.length;
 }
 
+function minPositiveCounter(samples: readonly FramePerfSample[], key: keyof FramePerfSample): number {
+  const values = samples
+    .map((sample) => sample[key])
+    .filter((value): value is number => typeof value === "number" && value > 0)
+    .sort((a, b) => a - b);
+  return values[0] ?? 0;
+}
+
 function countTreeGpuStatuses(samples: readonly FramePerfSample[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const sample of samples) {
@@ -293,6 +313,12 @@ export function summarizeFramePerfSamples(
       treeMidTreesAvg: avgCounter(samples, "treeMidTrees"),
       treeFarTreesAvg: avgCounter(samples, "treeFarTrees"),
       treeImpostorTreesAvg: avgCounter(samples, "treeImpostorTrees"),
+      treeHeroNearTrianglesAvg: avgCounter(samples, "treeHeroNearTriangles"),
+      treeHeroNearFoliageTrianglesAvg: avgCounter(samples, "treeHeroNearFoliageTriangles"),
+      treeHeroNearMinTreeTrianglesMin: minPositiveCounter(samples, "treeHeroNearMinTreeTriangles"),
+      treeHeroNearAvgTreeTrianglesAvg: avgCounter(samples, "treeHeroNearAvgTreeTriangles"),
+      treeHeroNearPassesTriangleFloorFrames: samples.reduce((sum, sample) => sum + sample.treeHeroNearPassesTriangleFloor, 0),
+      treeHeroNearPassesRealFoliageFrames: samples.reduce((sum, sample) => sum + sample.treeHeroNearPassesRealFoliage, 0),
       customPropGpuStatusCounts: countCustomPropGpuStatuses(samples),
       customPropTotalInstancesAvg: avgCounter(samples, "customPropTotalInstances"),
       customPropVisibleInstancesAvg: avgCounter(samples, "customPropVisibleInstances"),
