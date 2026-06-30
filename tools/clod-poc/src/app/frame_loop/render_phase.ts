@@ -41,6 +41,8 @@ export interface RenderPhaseInput {
   grassPrepassEnabled: boolean;
   perfProbe: FramePerfProbe | null;
   phaseTiming: FramePerfPhaseTiming;
+  /** TP-1 real per-pass GPU ms (label → ms); null on WebGL / unsupported. */
+  gpuPasses: Record<string, number> | null;
 }
 
 const grassProfileMs = (value: number | null): string => value === null ? "-" : `${value.toFixed(2)}ms`;
@@ -234,6 +236,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       customPropGpuVisibleCount: propStats?.gpuVisibleCount ?? 0,
       customPropGpuOverflowed: propStats?.gpuOverflowed ? 1 : 0,
       customPropGpuDispatchMs: propStats?.gpuDispatchMs ?? null,
+      gpuPasses: input.gpuPasses ? { ...input.gpuPasses } : undefined,
     });
     if (input.profileEnabled && frameMs >= input.profileFrameMs) {
       // eslint-disable-next-line no-console

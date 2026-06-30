@@ -264,10 +264,23 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       statsPresenter: stats.statsPresenter,
     }));
 
+    // TP-1: resolve the previous frame's GPU timestamps and mirror the
+    // per-pass ms into the long-view stats hook when present.
+    render.gpuPassTiming?.update();
+    if (render.gpuPassTiming?.enabled) {
+      const hooks = render.getHooks();
+      if (hooks?.stats) {
+        const dst = hooks.stats.gpuPasses;
+        for (const key of Object.keys(dst)) delete dst[key];
+        Object.assign(dst, render.gpuPassTiming.passes);
+      }
+    }
+
     runRenderPhase({
       renderer: render.renderer,
       scene: render.scene,
       camera: render.camera,
+      gpuPasses: render.gpuPassTiming?.passes ?? null,
       postProcess: render.postProcess,
       currentPostProcessSettings: render.currentPostProcessSettings,
       nodeLabelOverlay: render.nodeLabelOverlay,

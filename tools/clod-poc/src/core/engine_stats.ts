@@ -1,6 +1,7 @@
 import { TimestampQuery } from "three";
 import type { WebGPURenderer } from "three/webgpu";
 import { PHASE0 } from "./constants.js";
+import { GpuProfiler } from "./gpu_profiler.js";
 import type { ClodHooks, EngineStats } from "./hooks.js";
 
 interface RenderInfo {
@@ -23,6 +24,7 @@ export class EngineStatsTracker {
   private readonly frameMs: number[] = [];
   private fpsEma = 0;
   private timestampPending = false;
+  private readonly profiler: GpuProfiler | null;
 
   constructor(
     private readonly renderer: WebGPURenderer,
@@ -31,6 +33,10 @@ export class EngineStatsTracker {
   ) {
     hooks.stats = this.stats;
     this.stats.counters["phase0.timestampQuerySupported"] = timestampsSupported ? 1 : 0;
+    // TP-1: real per-pass attribution. `info.render.timestamp` is the pool SUM
+    // and under-reports once the query pool wraps; the profiler reads the
+    // resolved per-uid durations directly and labels them per pass.
+    this.profiler = timestampsSupported ? new GpuProfiler(renderer) : null;
   }
 
   update(rawDt: number): void {
@@ -57,12 +63,15 @@ export class EngineStatsTracker {
         this.renderer.resolveTimestampsAsync(TimestampQuery.COMPUTE),
       ])
         .then(() => {
-          this.stats.gpuPasses["render"] = info.render.timestamp ?? 0;
-          this.stats.gpuPasses["compute"] = info.compute?.timestamp ?? 0;
+          if (this.profiler) {
+            this.profiler.collect(this.stats.gpuPasses);
+          } else {
+            this.stats.gpuPasses["render"] = info.render.timestamp ?? 0;
+            this.stats.gpuPasses["compute"] = info.compute?.timestamp ?? 0;
+          }
         })
         .catch(() => {
-          delete this.stats.gpuPasses["render"];
-          delete this.stats.gpuPasses["compute"];
+          for (const key of Object.keys(this.stats.gpuPasses)) delete this.stats.gpuPasses[key];
         })
         .finally(() => {
           this.timestampPending = false;

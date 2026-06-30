@@ -4,6 +4,7 @@ import type { TreeStats } from "../../../trees/index.js";
 import type { UnderstoryStats } from "../../../understory/index.js";
 import type { ForestLightingStats } from "../../../forest_lighting/index.js";
 import { bindClodFrameLoop } from "../../clod_frame_loop.js";
+import { GpuPassTiming } from "../../../core/gpu_pass_timing.js";
 import { resolveSlowFrameMsThreshold } from "../../runtime_config.js";
 import { shadowProxyStatsToCounters } from "../../../shadows/shadowProxyStats.js";
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
@@ -155,6 +156,20 @@ export function runFrameLoopStartup(
   const grassPrepassEnabled = searchParams.get("prepass") !== "0";
   const profileFrameMs = resolveSlowFrameMsThreshold(searchParams, clodRuntime.profiling.slowFrameMs);
 
+  // TP-1: real per-pass GPU timing for the hero-forest path. Only on WebGPU,
+  // and only when the renderer was created with timestamp tracking (gated on
+  // the adapter exposing `timestamp-query` in renderer_backend).
+  // TP-1: only resolve timestamps every frame when a perf capture is requested
+  // (perfProbe) or explicitly via ?gpuTiming=1 — otherwise zero cost in normal
+  // play. Support is read from three's *actual* post-init backend, not the
+  // adapter probe (three uses a different compatibility-mode device).
+  const wantGpuTiming = searchParams.get("perfProbe") === "1" || searchParams.get("gpuTiming") === "1";
+  const gpuTimestampReady = input.app.isWebGpu
+    && (input.app.renderer.backend as unknown as { trackTimestamp?: boolean }).trackTimestamp === true;
+  const gpuPassTiming = input.app.isWebGpu
+    ? new GpuPassTiming(input.app.renderer, wantGpuTiming && gpuTimestampReady)
+    : null;
+
   bindClodFrameLoop({
     render: {
       renderer,
@@ -170,6 +185,7 @@ export function runFrameLoopStartup(
       grassProfileEnabled,
       grassPrepassEnabled,
       makeGrassSettings,
+      gpuPassTiming,
     },
     player: {
       controls,

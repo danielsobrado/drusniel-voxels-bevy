@@ -49,6 +49,13 @@ export async function createWebGpuAppRenderer(): Promise<WebGpuAppRenderer> {
 
   const renderer = new WebGPURenderer({
     antialias: true,
+    // TP-1: request per-context timestamp-query pairs so the hero-forest path
+    // can be profiled. three downgrades this to false internally if its own
+    // device lacks the feature (it creates a compatibility-mode adapter that
+    // differs from the probe above, so the probe's feature list is not a
+    // reliable gate). Allocating the pairs is cheap; the actual per-frame
+    // resolve is gated separately (only when a perf capture is requested).
+    trackTimestamp: true,
     requiredLimits: buildRequiredLimits(diagnostics),
   });
   try {

@@ -30,6 +30,7 @@ import type { TerrainColliderSet } from "../../terrain/terrain_collider.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 import type { StatsPresenter, GuiDisplayController } from "./stats_presenter.js";
 import type { FrameRenderer } from "./frame_renderer.js";
+import type { GpuPassTiming } from "../../core/gpu_pass_timing.js";
 import type { FloatingOriginController } from "../../precision/floating_origin.js";
 
 interface TerrainFadeView {
@@ -57,6 +58,8 @@ export interface FrameLoopRenderDeps {
   grassProfileEnabled: boolean;
   grassPrepassEnabled: boolean;
   makeGrassSettings: () => GrassSettings;
+  /** TP-1 per-pass GPU timing collector (null on WebGL / unsupported). */
+  gpuPassTiming?: GpuPassTiming | null;
 }
 
 export interface FrameLoopPlayerDeps {
