@@ -16,9 +16,7 @@ hold_frames = 540
 screenshot = true
 
   [checkpoint.gameplay]
-  enabled = true
-  forward = 1.0
-  strafe = 0.0
+  movement = [1.0, 0.0]
   sprint = false
 
   [[checkpoint.screenshot_points]]
@@ -34,9 +32,7 @@ hold_frames = 540
 screenshot = true
 
   [checkpoint.gameplay]
-  enabled = true
-  forward = 1.0
-  strafe = 0.25
+  movement = [1.0, 0.25]
   sprint = false
 
   [[checkpoint.screenshot_points]]
