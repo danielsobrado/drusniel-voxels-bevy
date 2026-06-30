@@ -22,7 +22,7 @@ The following clod-poc-facing systems are already represented in the Rust/Bevy r
 
 The next parity work should stay on verification and gaps, not re-porting these systems:
 
-- Next missing parity is WorldSource GPU readback acceptance: `world_source_acceptance` must stay red while GPU readback is unavailable, and the `--runtime-assisted` readback path must produce `bench-runs/world-source-runtime-acceptance/summary.json` with accepted samples before the legacy bridge is removed.
+- WorldSource GPU readback runtime acceptance is verified from a native Windows shell: `bench-runs/world-source-runtime-acceptance/summary.json` records `acceptance_pass: true`, 5 available GPU samples, `drift_gate.status: passed`, and 0 failures. `world_source_acceptance` must still stay red while its standalone provider is unavailable; the remaining decision is whether it consumes real GPU readback directly or is explicitly paired with the reviewed runtime artifact before the legacy bridge is removed.
 - Run the relevant clod-poc Node/Vite checks directly, not through `rtk`, when changing the web side.
 - Run Bevy benches from a native Windows shell for visual/frame-timing claims; this WSL path should not be used for visual benches.
 - For construction changes, verify placement/stability/persistence behavior and terrain-conform edits when enabled.

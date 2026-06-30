@@ -12,6 +12,7 @@ CLOD/WorldSource is the default terrain path. MC/Transvoxel is legacy/fallback o
 - Missing GPU readback is a blocker, not a pass: the standalone report records `acceptance_pass: false` with `gpu_readback_unavailable` and `drift_gate_not_passed`.
 - The render-app readback path has request extraction, compute dispatch, staging-buffer map/decode, shared-result publication, and opt-in runtime drift-gate evaluation behind `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1` or `--runtime-assisted`.
 - Runtime-assisted readback writes `bench-runs/world-source-runtime-acceptance/summary.json` by default; override with `VOXEL_WORLD_SOURCE_DRIFT_ACCEPTANCE_OUT`.
+- Native Windows runtime verification on 2026-06-30 produced `acceptance_pass: true`, `gpu_readback.status: available`, 5 GPU samples, `drift_gate.status: passed`, 5 comparisons, and 0 failures.
 - WorldSource chunk generation uses biome-tagged material IDs.
 - Surface Nets writes the terrain biome id into `uv0.y`.
 - The triplanar terrain shader imports `world_source/biome_splat.wgsl` and resolves GPU splat weights from the biome id.
@@ -19,7 +20,7 @@ CLOD/WorldSource is the default terrain path. MC/Transvoxel is legacy/fallback o
 
 ## Remaining blocker before removing legacy bridge
 
-The standalone acceptance report still uses `UnavailableWorldSourceGpuReadback`, and the opt-in runtime readback artifact has not yet been verified on native Windows and promoted to the final accepted evidence.
+The standalone acceptance report still uses `UnavailableWorldSourceGpuReadback`, so it intentionally remains red while the accepted GPU readback evidence lives in the runtime-assisted artifact.
 
 Current state:
 
@@ -34,6 +35,14 @@ Until real mapped GPU readback samples are accepted by the final report, `WorldS
 - `gpu_readback_unavailable`
 - `drift_gate_not_passed`
 
+Accepted runtime-assisted evidence:
+
+- Command: `rtk cargo run --release -- --runtime-assisted --bench bench/scenes/terrain/world-source-readback-acceptance.toml --bench-out bench-runs/world-source-runtime-readback`
+- Runtime acceptance artifact: `bench-runs/world-source-runtime-acceptance/summary.json`
+- Bench artifact: `bench-runs/world-source-runtime-readback/summary.json`
+- Result: `acceptance_pass: true`, no blockers, `gpu_readback.status: available`, 5 samples, `drift_gate.status: passed`, 5 comparisons, 0 failures.
+- Bench note: the scene run completed after a readiness timeout, but the readback acceptance artifact was written before the timeout and contains the accepted drift-gate result.
+
 ## What not to do
 
 - Do not spend BVY-WS-12 time porting MC/Transvoxel biome UVs.
@@ -42,13 +51,11 @@ Until real mapped GPU readback samples are accepted by the final report, `WorldS
 
 ## Next implementation task
 
-Verify and promote the runtime-assisted readback path:
+Decide how the final acceptance path consumes the accepted runtime readback evidence:
 
-1. Run `rtk cargo run --release -- --runtime-assisted --bench bench/scenes/terrain/world-source-readback-acceptance.toml --bench-out bench-runs/world-source-runtime-readback` from a native Windows shell.
-2. Confirm the runtime log reports `gpu_readback=Available` and `drift_gate=Passed`.
-3. Review `bench-runs/world-source-runtime-acceptance/summary.json` for `acceptance_pass: true`.
-4. Decide whether `world_source_acceptance` gains a runtime-assisted mode or stays as the CPU/bench report paired with that artifact.
-5. Remove or deprecate the legacy bridge only after the final accepted report has real GPU readback evidence.
+1. Keep `world_source_acceptance` red until it either consumes real GPU readback or explicitly pairs with the accepted runtime-assisted artifact.
+2. Decide whether `world_source_acceptance` gains a runtime-assisted mode or stays as the CPU/bench report paired with `bench-runs/world-source-runtime-acceptance/summary.json`.
+3. Remove or deprecate the legacy bridge only after the final accepted report has real GPU readback evidence.
 
 ## Verification
 

@@ -33,12 +33,13 @@ Done:
 - Bevy has opt-in render-app WorldSource drift readback infrastructure: request population, compute dispatch, staging-buffer map/decode, shared-result publication, and runtime drift-gate evaluation when `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1` or `--runtime-assisted` is enabled.
 - Runtime-assisted WorldSource readback writes `bench-runs/world-source-runtime-acceptance/summary.json` by default, or `VOXEL_WORLD_SOURCE_DRIFT_ACCEPTANCE_OUT` when overridden.
 - `bench/scenes/terrain/world-source-readback-acceptance.toml` is the minimal no-screenshot runtime scene for collecting that readback artifact.
+- Native Windows runtime verification on 2026-06-30 produced accepted GPU readback evidence in `bench-runs/world-source-runtime-acceptance/summary.json`: `acceptance_pass: true`, no blockers, `gpu_readback.status: available`, 5 samples, `drift_gate.status: passed`, 5 comparisons, and 0 failures.
 - `src/voxel/runtime/generation.rs` was restored to the full runtime module after an accidental truncation.
 
 Not done yet:
 
 - The standalone `world_source_acceptance` report still uses the unavailable readback provider, so `acceptance_pass` must remain `false` with `gpu_readback_unavailable` and `drift_gate_not_passed` until real GPU samples feed the report.
-- The opt-in runtime readback path still needs native Windows runtime verification and review of the generated readback artifact.
+- The final acceptance decision still needs to choose whether `world_source_acceptance` consumes real GPU readback directly or remains paired with the reviewed runtime-assisted artifact.
 - MC/Transvoxel remains a legacy/fallback mesh path and is not a blocker for the CLOD/WorldSource default path.
 - Legacy bridge removal is still pending final visual parity and accepted bench thresholds.
 
@@ -201,7 +202,7 @@ Acceptance:
 Notes:
 
 - `WorldSourceDriftGateReport` is ready for BVY-WS-11 bench/acceptance JSON output.
-- Runtime readback infrastructure exists, but a real pass still needs opt-in runtime verification and connection to the final acceptance report.
+- Runtime readback infrastructure now has accepted native Windows evidence, but the final acceptance report still needs to consume that evidence directly or explicitly pair with the runtime artifact.
 
 ### BVY-WS-10 — Make GPU WorldSource default runtime path
 
@@ -240,7 +241,7 @@ Status: Next.
 Acceptance:
 
 - [ ] Visual parity scene passes.
-- [ ] Opt-in runtime GPU readback produces matching samples and a passed drift gate.
+- [x] Opt-in runtime GPU readback produces matching samples and a passed drift gate.
 - [ ] Final acceptance report consumes real GPU readback or records the reviewed runtime-assisted acceptance artifact from `bench-runs/world-source-runtime-acceptance/summary.json`.
 - [ ] Bench within accepted thresholds.
 - [ ] Legacy path removed or explicitly deprecated.
