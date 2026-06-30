@@ -6,6 +6,7 @@ import {
   collectWaterClipmapRuntimeStats,
   parseWaterConfig,
   resolveWaterConfig,
+  resolveWaterReflectionPolicy,
 } from "../src/water/index.js";
 import { createWaterShaderMaterial } from "../src/water/waterMaterial.js";
 import { surfaceHeight } from "../src/terrain/terrain.js";
@@ -39,6 +40,7 @@ function main(): void {
       worldCells: DEFAULT_WORLD_CELLS,
       waterEnabled: waterConfig.enabled,
       clipmap: stats,
+      reflection: resolveWaterReflectionPolicy(waterConfig.visual.reflection, "webgl"),
     }, null, 2));
   } finally {
     clipmap.dispose();
