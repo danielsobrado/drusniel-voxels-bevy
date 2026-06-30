@@ -1,0 +1,21 @@
+seed = 424206
+median_runs = 3
+duration_warmup_secs = 8.0
+chunk_load_radius = 12
+skip_props = false
+
+[render_toggles]
+quality_preset = "performance100"
+disable_reflection_cameras = true
+
+[[checkpoint]]
+name = "water_integrated_gpu_fallback"
+position = [96.0, 30.0, 104.0]
+look_at = [112.0, 18.0, 124.0]
+time_of_day = 0.50
+hold_frames = 420
+screenshot = true
+
+  [[checkpoint.screenshot_points]]
+  name = "water_integrated_gpu_fallback"
+  frame = 240
