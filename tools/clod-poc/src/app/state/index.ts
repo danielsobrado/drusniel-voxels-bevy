@@ -10,6 +10,7 @@ import type { TreeSettings } from "../../trees/tree_config.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
 import type { ForestLightingSettings } from "../../forest_lighting/forest_lighting_config.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
+import { isLowSunScene, sceneFromSearchParams } from "../../scenes/scene_registry.js";
 import { applyValidatedArchiveState } from "./archive_state_mapper.js";
 import { createBrushSliceState } from "./brush_state.js";
 import { createClodSliceState } from "./clod_state.js";
@@ -95,6 +96,7 @@ function nonNegativeNumberParam(searchParams: URLSearchParams, keys: readonly st
 }
 
 function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
+  const scene = sceneFromSearchParams(params.searchParams);
   if (params.isWebGpu) state.normalDivergence = false;
   if (params.queryPerfMode) {
     state.clodPerfMode = true;
@@ -192,7 +194,7 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
   if (sunElevation !== null) state.sunElevationDeg = sunElevation;
   const sunAzimuth = numberParam(params.searchParams, ["sunAzimuthDeg", "sunAzimuth"]);
   if (sunAzimuth !== null) state.sunAzimuthDeg = sunAzimuth;
-  if (params.searchParams.get("scene") === "long-view-shadow-proxy-low-sun") {
+  if (isLowSunScene(scene)) {
     state.sunElevationDeg = 8;
   }
   const clodShadowOverlayQuery = params.searchParams.get("clodShadowOverlay");
