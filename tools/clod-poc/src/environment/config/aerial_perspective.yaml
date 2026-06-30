@@ -1,0 +1,6 @@
+aerial_perspective:
+  enabled: true
+  start_m: 120
+  end_m: 1800
+  strength: 0.35
+  color: [0.62, 0.72, 0.86]
