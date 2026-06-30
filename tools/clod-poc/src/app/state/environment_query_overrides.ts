@@ -105,6 +105,21 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
     state.treeGpuMaxVisible = Math.floor(Math.max(0, value));
   });
 
+  const treeGpu = flagParam(searchParams, "treeGpu", "treeGPU", "gpuTrees");
+  if (treeGpu !== null) state.treeGpuEnabled = treeGpu;
+
+  const treeGpuForceCpu = flagParam(searchParams, "treeGpuForceCpu", "treeForceCpu", "treeCpu");
+  if (treeGpuForceCpu !== null) state.treeGpuForceCpu = treeGpuForceCpu;
+
+  const treeGpuCounts = flagParam(searchParams, "treeGpuCounts", "treeCounts");
+  if (treeGpuCounts !== null) state.treeGpuShowCounts = treeGpuCounts;
+
+  const treeGpuReadback = flagParam(searchParams, "treeGpuReadback", "treeReadback", "treeGpuReadbackVisibleLists");
+  if (treeGpuReadback !== null) state.treeGpuReadbackVisibleLists = treeGpuReadback;
+
+  const treeGpuValidate = flagParam(searchParams, "treeGpuValidate", "treeValidate", "treeGpuValidation");
+  if (treeGpuValidate !== null) state.treeGpuValidateAgainstCpu = treeGpuValidate;
+
   const fx = flagParam(searchParams, "fx");
   if (fx === false) {
     state.postProcessEnabled = false;
