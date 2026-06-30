@@ -3,7 +3,8 @@ import { createPropBillboardGeometry } from "../props/prop_billboard.js";
 import { createFireNodeMaterial, type SpellNodeMaterialHandle } from "./fire_node_material.js";
 import { createWaterNodeMaterial } from "./water_node_material.js";
 import { createAirNodeMaterial } from "./air_node_material.js";
-import type { FireSpellVfxConfig, SpellColor } from "./spell_config.js";
+import { createEarthSpellVfx, type EarthSpellTarget } from "./earth_spell_vfx.js";
+import type { EarthSpellVfxConfig, FireSpellVfxConfig, SpellColor } from "./spell_config.js";
 
 const SPELL_LIGHT_ENVELOPE = {
   castInEnd: 0.12,
@@ -26,7 +27,6 @@ export interface SpellVfxMeshConfig {
   glowLocalYRatio: number;
 }
 
-/** Caster pose: the spell base (hand) and the direction the jet travels. */
 export interface SpellPose {
   base: THREE.Vector3;
   dir: THREE.Vector3;
@@ -71,17 +71,11 @@ export function resolveSpellPose(camera: THREE.Camera, vfx: SpellPoseDeps["vfx"]
   return { base: scratch.base, dir: scratch.dir };
 }
 
-/** Resolves the caster pose each frame from the camera and spell hand offset. */
 export function createSpellPoseResolver(deps: SpellPoseDeps): () => SpellPose {
   const scratch = createPoseScratch();
   return () => resolveSpellPose(deps.camera, deps.vfx, scratch);
 }
 
-/**
- * Orientation for a beam-style billboard: local +Y (geometry base→tip) aligns
- * with `dir`, and the quad rolls around that axis so its face turns toward the
- * camera.
- */
 export function orientFireJet(
   base: THREE.Vector3,
   dir: THREE.Vector3,
@@ -104,12 +98,12 @@ export function orientFireJet(
 
 export interface SpellVfxControllerDeps {
   scene: THREE.Scene;
-  /** Active render camera (read each frame for billboarding and pose). */
   getCamera: () => THREE.Camera;
   fire: SpellVfxMeshConfig;
   water: SpellVfxMeshConfig;
   air: SpellVfxMeshConfig;
-  /** Clock source; defaults to performance.now. Injectable for tests. */
+  earth: EarthSpellVfxConfig;
+  getEarthTarget: () => EarthSpellTarget | null;
   now?: () => number;
 }
 
@@ -117,7 +111,7 @@ export interface SpellVfxController {
   playFire: (durationMs: number) => void;
   playWater: (durationMs: number) => void;
   playAir: (durationMs: number) => void;
-  /** Drive active spells; call once per frame with a performance.now() timestamp. */
+  playEarth: (durationMs: number) => void;
   update: (nowMs: number) => void;
   dispose: () => void;
 }
@@ -134,7 +128,6 @@ interface SpellState {
   active: boolean;
 }
 
-/** Lifetime/animation state for an active spell at a given frame time. */
 export function computeSpellFrame(
   startMs: number,
   durationMs: number,
@@ -158,10 +151,6 @@ function spellLightColor(color: SpellColor): THREE.Color {
   return new THREE.Color(color[0], color[1], color[2]);
 }
 
-/**
- * Owns the in-scene spell billboards. Each spell is a single beam-style quad
- * anchored at that spell's configured hand offset, aimed along the camera.
- */
 export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfxController {
   const { scene, getCamera } = deps;
   const now = deps.now ?? (() => performance.now());
@@ -201,6 +190,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
   const fire = buildSpell("fire-spell", createFireNodeMaterial(), deps.fire);
   const water = buildSpell("water-spell", createWaterNodeMaterial(), deps.water);
   const air = buildSpell("air-spell", createAirNodeMaterial(), deps.air);
+  const earth = createEarthSpellVfx({ scene, config: deps.earth, getTarget: deps.getEarthTarget, now });
   const spells = [fire, water, air];
 
   const start = (spell: SpellState, durationMs: number): void => {
@@ -237,8 +227,10 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     playFire: (durationMs) => start(fire, durationMs),
     playWater: (durationMs) => start(water, durationMs),
     playAir: (durationMs) => start(air, durationMs),
+    playEarth: (durationMs) => earth.play(durationMs),
     update: (nowMs) => {
       for (const spell of spells) tick(spell, nowMs);
+      earth.update(nowMs);
     },
     dispose: () => {
       for (const spell of spells) {
@@ -246,6 +238,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
         spell.mesh.geometry.dispose();
         spell.handle.material.dispose();
       }
+      earth.dispose();
     },
   };
 }
