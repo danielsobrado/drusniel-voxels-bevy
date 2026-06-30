@@ -38,6 +38,8 @@ export interface PostProcessSettings {
   taaSharpen?: number;
   taaJitterEnabled?: boolean;
   taaJitterScale?: number;
+  taaHistoryClampEnabled?: boolean;
+  taaHistoryClampStrength?: number;
   contactShadowsEnabled?: boolean;
   contactShadowsStrength?: number;
   contactShadowsRadiusPx?: number;
@@ -84,6 +86,8 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   taaSharpen: 0.06,
   taaJitterEnabled: true,
   taaJitterScale: 1.0,
+  taaHistoryClampEnabled: true,
+  taaHistoryClampStrength: 1.0,
   contactShadowsEnabled: false,
   contactShadowsStrength: 0.25,
   contactShadowsRadiusPx: 2.0,
@@ -185,6 +189,7 @@ export function applyPostProcessQueryOverrides(
     next.fxaaEnabled = false;
     next.taaEnabled = false;
     next.taaJitterEnabled = false;
+    next.taaHistoryClampEnabled = false;
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
@@ -206,6 +211,7 @@ export function applyPostProcessQueryOverrides(
     next.fxaaEnabled = false;
     next.taaEnabled = false;
     next.taaJitterEnabled = false;
+    next.taaHistoryClampEnabled = false;
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
@@ -228,6 +234,11 @@ export function applyPostProcessQueryOverrides(
     ?? flagValue(searchParams, "taajitter")
     ?? flagValue(searchParams, "jitter");
   if (taaJitter !== null) next.taaJitterEnabled = taaJitter;
+
+  const taaClamp = flagValue(searchParams, "taaClamp")
+    ?? flagValue(searchParams, "taaclamp")
+    ?? flagValue(searchParams, "historyClamp");
+  if (taaClamp !== null) next.taaHistoryClampEnabled = taaClamp;
 
   const contactShadows = flagValue(searchParams, "contactShadows")
     ?? flagValue(searchParams, "contactshadows")
@@ -320,6 +331,8 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       taaSharpen: finiteNumber(taa.sharpen, fallback.taaSharpen),
       taaJitterEnabled: booleanValue(taa.jitter_enabled, fallback.taaJitterEnabled),
       taaJitterScale: finiteNumber(taa.jitter_scale, fallback.taaJitterScale),
+      taaHistoryClampEnabled: booleanValue(taa.history_clamp_enabled, fallback.taaHistoryClampEnabled),
+      taaHistoryClampStrength: finiteNumber(taa.history_clamp_strength, fallback.taaHistoryClampStrength),
       contactShadowsEnabled: booleanValue(contactShadows.enabled, fallback.contactShadowsEnabled),
       contactShadowsStrength: finiteNumber(contactShadows.strength, fallback.contactShadowsStrength),
       contactShadowsRadiusPx: finiteNumber(contactShadows.radius_px, fallback.contactShadowsRadiusPx),
@@ -395,6 +408,8 @@ const OUTPUT_FRAG = /* glsl */ `
   uniform float uTaaHistoryWeight;
   uniform float uTaaDepthThreshold;
   uniform float uTaaSharpen;
+  uniform float uTaaHistoryClampEnabled;
+  uniform float uTaaHistoryClampStrength;
   uniform float uContactShadowsEnabled;
   uniform float uContactShadowsStrength;
   uniform float uContactShadowsRadiusPx;
@@ -484,6 +499,18 @@ const OUTPUT_FRAG = /* glsl */ `
     return (north + south + east + west) * 0.25;
   }
 
+  vec3 historyClampColor(vec3 historyColor, vec3 currentColor) {
+    if (uTaaHistoryClampEnabled < 0.5) return historyColor;
+    vec3 north = texture2D(tDiffuse, vUv + vec2(0.0, uTexelSize.y)).rgb;
+    vec3 south = texture2D(tDiffuse, vUv - vec2(0.0, uTexelSize.y)).rgb;
+    vec3 east = texture2D(tDiffuse, vUv + vec2(uTexelSize.x, 0.0)).rgb;
+    vec3 west = texture2D(tDiffuse, vUv - vec2(uTexelSize.x, 0.0)).rgb;
+    vec3 minColor = min(currentColor, min(min(north, south), min(east, west)));
+    vec3 maxColor = max(currentColor, max(max(north, south), max(east, west)));
+    vec3 clampedHistory = clamp(historyColor, minColor, maxColor);
+    return mix(historyColor, clampedHistory, clamp(uTaaHistoryClampStrength, 0.0, 1.0));
+  }
+
   vec3 sharpenCurrent(vec3 color) {
     vec3 blur = sceneBlur();
     return max(color + (color - blur) * clamp(uTaaSharpen, 0.0, 1.0), vec3(0.0));
@@ -511,7 +538,7 @@ const OUTPUT_FRAG = /* glsl */ `
     float depthDelta = abs(historyDepth - expectedHistoryDepth);
     if (historyDepth >= 0.999999 || depthDelta > uTaaDepthThreshold) return currentColor;
 
-    vec3 historyColor = texture2D(tHistory, prevUv).rgb;
+    vec3 historyColor = historyClampColor(texture2D(tHistory, prevUv).rgb, currentColor);
     float historyWeight = clamp(uTaaHistoryWeight, 0.0, 0.97);
     return sharpenCurrent(mix(currentColor, historyColor, historyWeight));
   }
@@ -705,6 +732,8 @@ export class PostProcessPipeline {
         uTaaHistoryWeight: { value: this.settings.taaHistoryWeight },
         uTaaDepthThreshold: { value: this.settings.taaDepthThreshold },
         uTaaSharpen: { value: this.settings.taaSharpen },
+        uTaaHistoryClampEnabled: { value: this.settings.taaHistoryClampEnabled ? 1 : 0 },
+        uTaaHistoryClampStrength: { value: this.settings.taaHistoryClampStrength },
         uContactShadowsEnabled: { value: this.settings.contactShadowsEnabled ? 1 : 0 },
         uContactShadowsStrength: { value: this.settings.contactShadowsStrength },
         uContactShadowsRadiusPx: { value: this.settings.contactShadowsRadiusPx },
@@ -758,10 +787,12 @@ export class PostProcessPipeline {
   updateSettings(settings: Partial<PostProcessSettings>): void {
     const previousTaaEnabled = this.settings?.taaEnabled ?? false;
     const previousTaaJitterEnabled = this.settings?.taaJitterEnabled ?? false;
+    const previousTaaHistoryClampEnabled = this.settings?.taaHistoryClampEnabled ?? false;
     this.settings = withPostProcessDefaults({ ...this.settings, ...settings });
     if (
       previousTaaEnabled !== this.settings.taaEnabled
       || previousTaaJitterEnabled !== this.settings.taaJitterEnabled
+      || previousTaaHistoryClampEnabled !== this.settings.taaHistoryClampEnabled
     ) {
       this.historyReady = false;
       this.jitterFrame = 0;
@@ -775,6 +806,8 @@ export class PostProcessPipeline {
     this.outputMaterial.uniforms.uTaaHistoryWeight.value = this.settings.taaHistoryWeight;
     this.outputMaterial.uniforms.uTaaDepthThreshold.value = this.settings.taaDepthThreshold;
     this.outputMaterial.uniforms.uTaaSharpen.value = this.settings.taaSharpen;
+    this.outputMaterial.uniforms.uTaaHistoryClampEnabled.value = this.settings.taaHistoryClampEnabled ? 1 : 0;
+    this.outputMaterial.uniforms.uTaaHistoryClampStrength.value = this.settings.taaHistoryClampStrength;
     this.outputMaterial.uniforms.uContactShadowsEnabled.value = this.settings.contactShadowsEnabled ? 1 : 0;
     this.outputMaterial.uniforms.uContactShadowsStrength.value = this.settings.contactShadowsStrength;
     this.outputMaterial.uniforms.uContactShadowsRadiusPx.value = this.settings.contactShadowsRadiusPx;
