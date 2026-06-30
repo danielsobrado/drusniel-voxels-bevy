@@ -37,6 +37,9 @@ export interface PostProcessSettings {
   contactShadowsStrength?: number;
   contactShadowsRadiusPx?: number;
   contactShadowsDepthBias?: number;
+  clarityEnabled?: boolean;
+  claritySharpen?: number;
+  clarityDither?: number;
   aerialPerspectiveEnabled?: boolean;
   aerialPerspectiveStart?: number;
   aerialPerspectiveEnd?: number;
@@ -75,6 +78,9 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   contactShadowsStrength: 0.25,
   contactShadowsRadiusPx: 2.0,
   contactShadowsDepthBias: 0.002,
+  clarityEnabled: true,
+  claritySharpen: 0.08,
+  clarityDither: 0.003,
   aerialPerspectiveEnabled: true,
   aerialPerspectiveStart: 120,
   aerialPerspectiveEnd: 1800,
@@ -168,6 +174,7 @@ export function applyPostProcessQueryOverrides(
     next.bloomEnabled = false;
     next.taaEnabled = false;
     next.contactShadowsEnabled = false;
+    next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
     next.godRaysMode = "off";
   }
@@ -186,6 +193,7 @@ export function applyPostProcessQueryOverrides(
     next.bloomEnabled = false;
     next.taaEnabled = false;
     next.contactShadowsEnabled = false;
+    next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
     next.godRaysMode = "off";
   }
@@ -203,6 +211,9 @@ export function applyPostProcessQueryOverrides(
     ?? flagValue(searchParams, "contactshadows")
     ?? flagValue(searchParams, "contact");
   if (contactShadows !== null) next.contactShadowsEnabled = contactShadows;
+
+  const clarity = flagValue(searchParams, "clarity") ?? flagValue(searchParams, "sharpen");
+  if (clarity !== null) next.clarityEnabled = clarity;
 
   const aerial = flagValue(searchParams, "aerial") ?? flagValue(searchParams, "aerialPerspective");
   if (aerial !== null) next.aerialPerspectiveEnabled = aerial;
@@ -261,6 +272,7 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
     const bloom = isRecord(postprocess.bloom) ? postprocess.bloom : {};
     const taa = isRecord(postprocess.taa) ? postprocess.taa : {};
     const contactShadows = isRecord(postprocess.contact_shadows) ? postprocess.contact_shadows : {};
+    const clarity = isRecord(postprocess.clarity) ? postprocess.clarity : {};
     const godRays = isRecord(postprocess.god_rays) ? postprocess.god_rays : {};
     return {
       ...fallback,
@@ -284,6 +296,9 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       contactShadowsStrength: finiteNumber(contactShadows.strength, fallback.contactShadowsStrength),
       contactShadowsRadiusPx: finiteNumber(contactShadows.radius_px, fallback.contactShadowsRadiusPx),
       contactShadowsDepthBias: finiteNumber(contactShadows.depth_bias, fallback.contactShadowsDepthBias),
+      clarityEnabled: booleanValue(clarity.enabled, fallback.clarityEnabled),
+      claritySharpen: finiteNumber(clarity.sharpen, fallback.claritySharpen),
+      clarityDither: finiteNumber(clarity.dither, fallback.clarityDither),
       godRaysMode: godRaysMode(godRays.mode, fallback.godRaysMode),
       godRaysDensity: finiteNumber(godRays.density, fallback.godRaysDensity),
       godRaysDecay: finiteNumber(godRays.decay, fallback.godRaysDecay),
@@ -351,6 +366,9 @@ const OUTPUT_FRAG = /* glsl */ `
   uniform float uContactShadowsStrength;
   uniform float uContactShadowsRadiusPx;
   uniform float uContactShadowsDepthBias;
+  uniform float uClarityEnabled;
+  uniform float uClaritySharpen;
+  uniform float uClarityDither;
   uniform float uExposure;
   uniform float uContrast;
   uniform float uSaturation;
@@ -367,6 +385,10 @@ const OUTPUT_FRAG = /* glsl */ `
   varying vec2 vUv;
 
   #include <packing>
+
+  float interleavedNoise(vec2 p) {
+    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+  }
 
   vec3 brightPass(vec2 uv) {
     vec3 sampleColor = texture2D(tDiffuse, uv).rgb;
@@ -398,12 +420,16 @@ const OUTPUT_FRAG = /* glsl */ `
     return bloom;
   }
 
-  vec3 sharpenCurrent(vec3 color) {
+  vec3 sceneBlur() {
     vec3 north = texture2D(tDiffuse, vUv + vec2(0.0, uTexelSize.y)).rgb;
     vec3 south = texture2D(tDiffuse, vUv - vec2(0.0, uTexelSize.y)).rgb;
     vec3 east = texture2D(tDiffuse, vUv + vec2(uTexelSize.x, 0.0)).rgb;
     vec3 west = texture2D(tDiffuse, vUv - vec2(uTexelSize.x, 0.0)).rgb;
-    vec3 blur = (north + south + east + west) * 0.25;
+    return (north + south + east + west) * 0.25;
+  }
+
+  vec3 sharpenCurrent(vec3 color) {
+    vec3 blur = sceneBlur();
     return max(color + (color - blur) * clamp(uTaaSharpen, 0.0, 1.0), vec3(0.0));
   }
 
@@ -470,6 +496,14 @@ const OUTPUT_FRAG = /* glsl */ `
     return mix(color, uAerialPerspectiveColor, haze);
   }
 
+  vec3 clarityOutput(vec3 color) {
+    if (uClarityEnabled < 0.5) return color;
+    vec3 detail = color - sceneBlur();
+    color = max(color + detail * clamp(uClaritySharpen, 0.0, 1.0), vec3(0.0));
+    float dither = (interleavedNoise(gl_FragCoord.xy) - 0.5) * clamp(uClarityDither, 0.0, 0.05);
+    return max(color + vec3(dither), vec3(0.0));
+  }
+
   void main() {
     vec4 sampled = texture2D(tDiffuse, vUv);
     vec3 color = temporalSceneColor(sampled.rgb) * contactShadowFactor() * uExposure;
@@ -483,7 +517,7 @@ const OUTPUT_FRAG = /* glsl */ `
     vec2 center = vUv - 0.5;
     float vignetteMask = smoothstep(0.2, 0.75, length(center));
     color *= 1.0 - uVignette * vignetteMask;
-    color = max(color, vec3(0.0));
+    color = clarityOutput(max(color, vec3(0.0)));
 
     gl_FragColor = vec4(color, sampled.a);
     #include <tonemapping_fragment>
@@ -596,6 +630,9 @@ export class PostProcessPipeline {
         uContactShadowsStrength: { value: this.settings.contactShadowsStrength },
         uContactShadowsRadiusPx: { value: this.settings.contactShadowsRadiusPx },
         uContactShadowsDepthBias: { value: this.settings.contactShadowsDepthBias },
+        uClarityEnabled: { value: this.settings.clarityEnabled ? 1 : 0 },
+        uClaritySharpen: { value: this.settings.claritySharpen },
+        uClarityDither: { value: this.settings.clarityDither },
         uExposure: { value: this.settings.exposure },
         uContrast: { value: this.settings.contrast },
         uSaturation: { value: this.settings.saturation },
@@ -653,6 +690,9 @@ export class PostProcessPipeline {
     this.outputMaterial.uniforms.uContactShadowsStrength.value = this.settings.contactShadowsStrength;
     this.outputMaterial.uniforms.uContactShadowsRadiusPx.value = this.settings.contactShadowsRadiusPx;
     this.outputMaterial.uniforms.uContactShadowsDepthBias.value = this.settings.contactShadowsDepthBias;
+    this.outputMaterial.uniforms.uClarityEnabled.value = this.settings.clarityEnabled ? 1 : 0;
+    this.outputMaterial.uniforms.uClaritySharpen.value = this.settings.claritySharpen;
+    this.outputMaterial.uniforms.uClarityDither.value = this.settings.clarityDither;
     this.outputMaterial.uniforms.uExposure.value = this.settings.exposure;
     this.outputMaterial.uniforms.uContrast.value = this.settings.contrast;
     this.outputMaterial.uniforms.uSaturation.value = this.settings.saturation;
