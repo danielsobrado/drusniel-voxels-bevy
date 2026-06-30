@@ -30,6 +30,10 @@ export interface EnvironmentSliceState {
   postProcessBloomThreshold: number;
   postProcessBloomStrength: number;
   postProcessBloomRadius: number;
+  postProcessTaaEnabled: boolean;
+  postProcessTaaHistoryWeight: number;
+  postProcessTaaDepthThreshold: number;
+  postProcessTaaSharpen: number;
   postProcessAerialPerspectiveEnabled: boolean;
   postProcessAerialPerspectiveStart: number;
   postProcessAerialPerspectiveEnd: number;
@@ -82,6 +86,10 @@ export function createEnvironmentSliceState(input: {
     postProcessBloomThreshold: DEFAULT_POST_PROCESS_SETTINGS.bloomThreshold,
     postProcessBloomStrength: DEFAULT_POST_PROCESS_SETTINGS.bloomStrength,
     postProcessBloomRadius: DEFAULT_POST_PROCESS_SETTINGS.bloomRadius,
+    postProcessTaaEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.taaEnabled,
+    postProcessTaaHistoryWeight: DEFAULT_POST_PROCESS_SETTINGS.taaHistoryWeight,
+    postProcessTaaDepthThreshold: DEFAULT_POST_PROCESS_SETTINGS.taaDepthThreshold,
+    postProcessTaaSharpen: DEFAULT_POST_PROCESS_SETTINGS.taaSharpen,
     postProcessAerialPerspectiveEnabled: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnabled,
     postProcessAerialPerspectiveStart: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveStart,
     postProcessAerialPerspectiveEnd: DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnd,
