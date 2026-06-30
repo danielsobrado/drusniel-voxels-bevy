@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import type { UiStartupContext } from "../ui_startup_context.js";
 import { createSpellMenu } from "../../../spells/spell_menu.js";
 import { defaultSpellConfig, type FireSpellVfxConfig } from "../../../spells/spell_config.js";
@@ -25,7 +26,9 @@ function meshConfig(vfx: FireSpellVfxConfig): SpellVfxMeshConfig {
 
 export function runSpellUiStartup(ctx: UiStartupContext): void {
   const config = defaultSpellConfig;
-  const { scene, camera } = ctx.input;
+  const { scene, camera, terrainRaycast } = ctx.input;
+  const earthRay = new THREE.Ray();
+  const earthDir = new THREE.Vector3();
 
   const controller = createSpellVfxController({
     scene,
@@ -33,6 +36,14 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     fire: meshConfig(config.fire.vfx),
     water: meshConfig(config.water.vfx),
     air: meshConfig(config.air.vfx),
+    earth: config.earth.vfx,
+    getEarthTarget: () => {
+      camera.getWorldDirection(earthDir).normalize();
+      earthRay.origin.copy(camera.position);
+      earthRay.direction.copy(earthDir);
+      const hit = terrainRaycast.raycastEditableTerrain(earthRay);
+      return hit ? { point: hit.point, normal: new THREE.Vector3(0, 1, 0) } : null;
+    },
   });
   ctx.session.spellVfxController = controller;
 
@@ -64,6 +75,12 @@ export function runSpellUiStartup(ctx: UiStartupContext): void {
     if (event.code === "Digit3" || event.code === "Numpad3") {
       event.preventDefault();
       menu.castAir();
+      return;
+    }
+
+    if (event.code === "Digit4" || event.code === "Numpad4") {
+      event.preventDefault();
+      menu.castEarth();
     }
   };
 
