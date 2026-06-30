@@ -3,13 +3,7 @@ import { createPropBillboardGeometry } from "../props/prop_billboard.js";
 import { createFireNodeMaterial, type SpellNodeMaterialHandle } from "./fire_node_material.js";
 import { createWaterNodeMaterial } from "./water_node_material.js";
 import { createAirNodeMaterial } from "./air_node_material.js";
-import type { FireSpellVfxConfig } from "./spell_config.js";
-
-const SPELL_LIGHTS = {
-  fire: { color: 0xff7a24, intensity: 3.6, distance: 8.5, decay: 2.0, localYRatio: 0.34 },
-  water: { color: 0x58c8ff, intensity: 1.8, distance: 6.5, decay: 2.0, localYRatio: 0.38 },
-  air: { color: 0xd7fbff, intensity: 1.2, distance: 6.0, decay: 2.0, localYRatio: 0.42 },
-} as const;
+import type { FireSpellVfxConfig, SpellColor } from "./spell_config.js";
 
 const SPELL_LIGHT_ENVELOPE = {
   castInEnd: 0.12,
@@ -25,6 +19,11 @@ export interface SpellVfxMeshConfig {
   handForwardM: number;
   handRightM: number;
   handUpM: number;
+  glowColor: SpellColor;
+  glowIntensity: number;
+  glowDistance: number;
+  glowDecay: number;
+  glowLocalYRatio: number;
 }
 
 /** Caster pose: the spell base (hand) and the direction the jet travels. */
@@ -123,14 +122,6 @@ export interface SpellVfxController {
   dispose: () => void;
 }
 
-interface SpellLightConfig {
-  color: number;
-  intensity: number;
-  distance: number;
-  decay: number;
-  localYRatio: number;
-}
-
 interface SpellState {
   mesh: THREE.Mesh;
   light: THREE.PointLight;
@@ -163,6 +154,10 @@ export function computeSpellLightEnvelope(progress: number): number {
   return Math.min(1, Math.max(0, castIn * castOut * pulse));
 }
 
+function spellLightColor(color: SpellColor): THREE.Color {
+  return new THREE.Color(color[0], color[1], color[2]);
+}
+
 /**
  * Owns the in-scene spell billboards. Each spell is a single beam-style quad
  * anchored at that spell's configured hand offset, aimed along the camera.
@@ -175,7 +170,6 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     name: string,
     handle: SpellNodeMaterialHandle,
     config: SpellVfxMeshConfig,
-    lightConfig: SpellLightConfig,
   ): SpellState => {
     const geometry = createPropBillboardGeometry(config.worldWidth * config.flameScale, config.worldHeight * config.flameScale);
     const mesh = new THREE.Mesh(geometry, handle.material);
@@ -184,9 +178,9 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     mesh.renderOrder = 4000;
     mesh.visible = false;
 
-    const light = new THREE.PointLight(lightConfig.color, 0, lightConfig.distance, lightConfig.decay);
+    const light = new THREE.PointLight(spellLightColor(config.glowColor), 0, config.glowDistance, config.glowDecay);
     light.name = `${name}-glow`;
-    light.position.set(0, config.worldHeight * config.flameScale * lightConfig.localYRatio, 0);
+    light.position.set(0, config.worldHeight * config.flameScale * config.glowLocalYRatio, 0);
     light.visible = false;
     mesh.add(light);
 
@@ -194,7 +188,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     return {
       mesh,
       light,
-      baseLightIntensity: lightConfig.intensity,
+      baseLightIntensity: config.glowIntensity,
       handle,
       config,
       poseScratch: createPoseScratch(),
@@ -204,9 +198,9 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     };
   };
 
-  const fire = buildSpell("fire-spell", createFireNodeMaterial(), deps.fire, SPELL_LIGHTS.fire);
-  const water = buildSpell("water-spell", createWaterNodeMaterial(), deps.water, SPELL_LIGHTS.water);
-  const air = buildSpell("air-spell", createAirNodeMaterial(), deps.air, SPELL_LIGHTS.air);
+  const fire = buildSpell("fire-spell", createFireNodeMaterial(), deps.fire);
+  const water = buildSpell("water-spell", createWaterNodeMaterial(), deps.water);
+  const air = buildSpell("air-spell", createAirNodeMaterial(), deps.air);
   const spells = [fire, water, air];
 
   const start = (spell: SpellState, durationMs: number): void => {
