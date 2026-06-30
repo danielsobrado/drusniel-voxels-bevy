@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { computeEarthLightEnvelope, computeEarthSpellFrame, createEarthSpellVfx } from "./earth_spell_vfx.js";
 import { createEarthDustNodeMaterial } from "./earth_dust_node_material.js";
+import { createEarthDustParticleSystem } from "./earth_dust_particles.js";
 import { defaultSpellConfig } from "./spell_config.js";
 
 describe("earth spell VFX", () => {
@@ -28,6 +29,28 @@ describe("earth spell VFX", () => {
     expect(uTime.value).toBe(0);
   });
 
+  it("simulates instanced dust particles", () => {
+    const scene = new THREE.Scene();
+    const system = createEarthDustParticleSystem({
+      scene,
+      config: { impactRadius: 3.2, dustRadius: 3.8 },
+    });
+    const particles = scene.getObjectByName("earth-spell-dust-particles") as THREE.InstancedMesh;
+    expect(system.particleCount).toBeGreaterThanOrEqual(64);
+    expect(particles.visible).toBe(false);
+
+    system.spawn(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0));
+    expect(particles.visible).toBe(true);
+
+    system.update(0.35, 0.25);
+    expect(particles.instanceMatrix.needsUpdate).toBe(true);
+
+    system.hide();
+    expect(particles.visible).toBe(false);
+    system.dispose();
+    expect(scene.getObjectByName("earth-spell-dust-particles")).toBeFalsy();
+  });
+
   it("shows and hides scene objects", () => {
     const scene = new THREE.Scene();
     let clock = 1000;
@@ -42,17 +65,20 @@ describe("earth spell VFX", () => {
     const ground = scene.getObjectByName("earth-spell-ground") as THREE.Mesh;
     const shards = scene.getObjectByName("earth-spell-shards") as THREE.InstancedMesh;
     const dust = scene.children.filter((child) => child.name.startsWith("earth-spell-dust-"));
+    const particles = scene.getObjectByName("earth-spell-dust-particles") as THREE.InstancedMesh;
     const light = scene.getObjectByName("earth-spell-glow") as THREE.PointLight;
     expect(ground.visible).toBe(false);
     expect(shards.visible).toBe(false);
     expect(dust.length).toBeGreaterThanOrEqual(8);
     expect(dust.every((child) => child.visible === false)).toBe(true);
+    expect(particles.visible).toBe(false);
     expect(light.visible).toBe(false);
 
     vfx.play(1000);
     expect(ground.visible).toBe(true);
     expect(shards.visible).toBe(true);
     expect(dust.some((child) => child.visible)).toBe(true);
+    expect(particles.visible).toBe(true);
     expect(light.visible).toBe(true);
 
     clock = 1200;
@@ -67,10 +93,12 @@ describe("earth spell VFX", () => {
     expect(ground.visible).toBe(false);
     expect(shards.visible).toBe(false);
     expect(dust.every((child) => child.visible === false)).toBe(true);
+    expect(particles.visible).toBe(false);
     expect(light.visible).toBe(false);
 
     vfx.dispose();
     expect(scene.getObjectByName("earth-spell-ground")).toBeFalsy();
     expect(scene.children.some((child) => child.name.startsWith("earth-spell-dust-"))).toBe(false);
+    expect(scene.getObjectByName("earth-spell-dust-particles")).toBeFalsy();
   });
 });
