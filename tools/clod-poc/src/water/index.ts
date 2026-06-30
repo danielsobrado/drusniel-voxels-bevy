@@ -31,5 +31,6 @@ export * from "./riverMaterialRuntime.js";
 export * from "./riverCascadeParticlesRuntime.js";
 export * from "./riverCascadeParticleOverlay.js";
 export * from "./riverTerrainWetnessMask.js";
+export * from "./riverTerrainWetnessMaskStats.js";
 export * from "./riverBankResidueOverlay.js";
 export * from "./riverParityScene.js";
