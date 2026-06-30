@@ -1,6 +1,8 @@
 import type GUI from "lil-gui";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { FAR_SHELL_DEFAULTS } from "../../app/clod_constants.js";
+import type { PostProcessQualityPreset } from "../../app/state/postprocess_quality_presets.js";
+import { applyTreeQualityPreset } from "../../app/state/tree_quality_presets.js";
 import { GRASS_SHADER_MODES } from "../../grass.js";
 import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
 import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
@@ -233,18 +235,43 @@ export function createVegetationGui(
     },
   };
   const treeFolder = gui.addFolder("trees (props)");
+  const treeSettingControllers: GuiController[] = [];
+  const refreshTreeSettingControllers = () => {
+    for (const controller of treeSettingControllers) controller.updateDisplay();
+  };
+  const applyTreePreset = (preset: Exclude<PostProcessQualityPreset, "custom">) => {
+    applyTreeQualityPreset(state, preset);
+    treeActions.rebuild();
+    refreshTreeSettingControllers();
+  };
+  const treePresetActions = {
+    ultra: () => applyTreePreset("ultra"),
+    balanced: () => applyTreePreset("balanced"),
+    perf: () => applyTreePreset("perf"),
+    potato: () => applyTreePreset("potato"),
+  };
+  treeFolder.add(treePresetActions, "ultra").name("preset: ultra");
+  treeFolder.add(treePresetActions, "balanced").name("preset: balanced");
+  treeFolder.add(treePresetActions, "perf").name("preset: perf");
+  treeFolder.add(treePresetActions, "potato").name("preset: potato");
   treeFolder.add(state, "treesEnabled").name("enabled").onChange((enabled: boolean) => {
     deps.treeController.setEnabled(enabled);
     refreshTreeStats();
     deps.updateInfo();
   });
-  treeFolder.add(state, "treeDistance", 0, 600, 5).name("distance").onFinishChange(treeActions.rebuild);
-  treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild);
+  treeSettingControllers.push(
+    treeFolder.add(state, "treeDistance", 0, 800, 5).name("active ring m").onFinishChange(treeActions.rebuild),
+    treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild),
+    treeFolder.add(state, "treeDensity", 0, 2, 0.05).name("density").onFinishChange(treeActions.rebuild),
+    treeFolder.add(state, "treeSpacing", 0.5, 24, 0.25).name("spacing m").onFinishChange(treeActions.rebuild),
+  );
   treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(updateTreeRenderSettings);
   treeFolder.add(state, "treeGpuEnabled").name("GPU ring").onChange(updateTreeGpuSettings);
   treeFolder.add(state, "treeGpuForceCpu").name("force CPU").onChange(updateTreeGpuSettings);
   treeFolder.add(state, "treeGpuShowCounts").name("show GPU counts").onChange(updateTreeGpuSettings);
-  treeFolder.add(state, "treeGpuMaxVisible", 0, 50000, 1000).name("GPU max visible").onFinishChange(updateTreeGpuSettings);
+  treeSettingControllers.push(
+    treeFolder.add(state, "treeGpuMaxVisible", 0, 50000, 1000).name("GPU max visible").onFinishChange(updateTreeGpuSettings),
+  );
   treeFolder.add(state, "treeWindEnabled").name("wind enabled").onChange(updateTreeWindSettings);
   treeFolder.add(state, "treeWindStrength", 0, 1, 0.01).name("wind strength").onChange(updateTreeWindSettings);
   treeFolder.add(state, "treeWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateTreeWindSettings);
