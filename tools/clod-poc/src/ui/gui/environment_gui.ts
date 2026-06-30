@@ -34,6 +34,10 @@ export function createEnvironmentGui(
     taaHistoryWeight: state.postProcessTaaHistoryWeight,
     taaDepthThreshold: state.postProcessTaaDepthThreshold,
     taaSharpen: state.postProcessTaaSharpen,
+    contactShadowsEnabled: state.postProcessContactShadowsEnabled,
+    contactShadowsStrength: state.postProcessContactShadowsStrength,
+    contactShadowsRadiusPx: state.postProcessContactShadowsRadiusPx,
+    contactShadowsDepthBias: state.postProcessContactShadowsDepthBias,
     aerialPerspectiveEnabled: state.postProcessAerialPerspectiveEnabled,
     aerialPerspectiveStart: state.postProcessAerialPerspectiveStart,
     aerialPerspectiveEnd: state.postProcessAerialPerspectiveEnd,
@@ -115,6 +119,10 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessTaaHistoryWeight", 0, 0.97, 0.01).name("TAA history").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaDepthThreshold", 0, 0.05, 0.0005).name("TAA depth reject").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaSharpen", 0, 0.5, 0.01).name("TAA sharpen").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessContactShadowsEnabled").name("contact shadows (WebGL)").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessContactShadowsStrength", 0, 1, 0.01).name("contact strength").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessContactShadowsRadiusPx", 0.5, 8, 0.25).name("contact radius px").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessContactShadowsDepthBias", 0, 0.05, 0.0005).name("contact depth bias").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveEnabled").name("aerial haze (WebGL)").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveStart", 0, 4000, 10).name("aerial start m").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveEnd", 1, 8000, 10).name("aerial end m").onChange(applyPostProcessSettings),
@@ -139,6 +147,10 @@ export function createEnvironmentGui(
       state.postProcessTaaHistoryWeight = DEFAULT_POST_PROCESS_SETTINGS.taaHistoryWeight;
       state.postProcessTaaDepthThreshold = DEFAULT_POST_PROCESS_SETTINGS.taaDepthThreshold;
       state.postProcessTaaSharpen = DEFAULT_POST_PROCESS_SETTINGS.taaSharpen;
+      state.postProcessContactShadowsEnabled = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled;
+      state.postProcessContactShadowsStrength = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsStrength;
+      state.postProcessContactShadowsRadiusPx = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsRadiusPx;
+      state.postProcessContactShadowsDepthBias = DEFAULT_POST_PROCESS_SETTINGS.contactShadowsDepthBias;
       state.postProcessAerialPerspectiveEnabled = DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnabled;
       state.postProcessAerialPerspectiveStart = DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveStart;
       state.postProcessAerialPerspectiveEnd = DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveEnd;
