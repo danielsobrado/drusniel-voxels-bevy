@@ -26,6 +26,8 @@ const TREE_IMPOSTOR_SUN_COLOR = new THREE.Vector3(1.0, 0.96, 0.88);
 const TREE_IMPOSTOR_SKY_COLOR = new THREE.Vector3(0.42, 0.48, 0.58);
 const TREE_IMPOSTOR_GROUND_COLOR = new THREE.Vector3(0.18, 0.16, 0.13);
 const TREE_IMPOSTOR_AMBIENT = 0.25;
+const TREE_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
+const TREE_IMPOSTOR_SUN_MAX = 0.85;
 
 /** WebGPU node-material impostor path. The baker stores sqrt-encoded albedo. */
 export function createTreeImpostorNodeMaterial(
@@ -142,11 +144,15 @@ function sampleTreeImpostorNode(atlas: TreeImpostorAtlas, uvRect: TslNode): { al
 }
 
 function blendTreeImpostorNormal(n0: TslNode, n1: TslNode, n2: TslNode, n3: TslNode, weights: TslNode): TslNode {
-  const blended = n0.xyz.mul(weights.x)
-    .add(n1.xyz.mul(weights.y))
-    .add(n2.xyz.mul(weights.z))
-    .add(n3.xyz.mul(weights.w));
-  return { xyz: blended } as TslNode;
+  const blended = decodeTreeImpostorPackedNormalNode(n0).mul(weights.x)
+    .add(decodeTreeImpostorPackedNormalNode(n1).mul(weights.y))
+    .add(decodeTreeImpostorPackedNormalNode(n2).mul(weights.z))
+    .add(decodeTreeImpostorPackedNormalNode(n3).mul(weights.w));
+  return { xyz: normalize(blended).mul(0.5).add(0.5) } as TslNode;
+}
+
+function decodeTreeImpostorPackedNormalNode(sample: TslNode): TslNode {
+  return sample.xyz.mul(2).sub(1);
 }
 
 function treeImpostorNodeDitherMask(): TslNode {
@@ -168,10 +174,14 @@ function relightTreeImpostorNode(albedo: TslNode, normalSample: TslNode): TslNod
   const sunColor = uniform(TREE_IMPOSTOR_SUN_COLOR.clone());
   const skyColor = uniform(TREE_IMPOSTOR_SKY_COLOR.clone());
   const groundColor = uniform(TREE_IMPOSTOR_GROUND_COLOR.clone());
-  const sun: TslNode = max(dot(n, sunDirection), 0.0);
+  const sun: TslNode = clamp(max(dot(n, sunDirection), 0.0), 0.0, TREE_IMPOSTOR_SUN_MAX);
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi: TslNode = mix(groundColor, skyColor, sky);
-  return albedo.mul(float(TREE_IMPOSTOR_AMBIENT)).add(albedo.mul(hemi.add(sunColor.mul(sun))));
+  const direct: TslNode = sunColor.mul(sun);
+  const back: TslNode = max(dot(n.negate(), sunDirection), 0.0);
+  const transmission: TslNode = albedo.mul(sunColor).mul(back).mul(TREE_IMPOSTOR_LEAF_TRANSMISSION);
+  const lit: TslNode = albedo.mul(float(TREE_IMPOSTOR_AMBIENT)).add(albedo.mul(hemi.add(direct))).add(transmission);
+  return clamp(lit, 0.0, 1.0);
 }
 
 export const TREE_IMPOSTOR_VERTEX_SHADER = `
@@ -219,10 +229,12 @@ vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal) {
   vec3 sunColor = vec3(1.0, 0.96, 0.88);
   vec3 skyColor = vec3(0.42, 0.48, 0.58);
   vec3 groundColor = vec3(0.18, 0.16, 0.13);
-  float sun = max(dot(n, sunDir), 0.0);
+  float sun = clamp(max(dot(n, sunDir), 0.0), 0.0, 0.85);
   float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+  float back = max(dot(-n, sunDir), 0.0);
   vec3 hemi = mix(groundColor, skyColor, sky);
-  return albedo * 0.25 + albedo * (hemi + sunColor * sun);
+  vec3 transmission = albedo * sunColor * back * 0.22;
+  return clamp(albedo * 0.25 + albedo * (hemi + sunColor * sun) + transmission, 0.0, 1.0);
 }
 
 void main() {
@@ -302,10 +314,22 @@ vec3 treeImpostorRelight(vec3 albedo, vec3 packedNormal) {
   vec3 sunColor = vec3(1.0, 0.96, 0.88);
   vec3 skyColor = vec3(0.42, 0.48, 0.58);
   vec3 groundColor = vec3(0.18, 0.16, 0.13);
-  float sun = max(dot(n, sunDir), 0.0);
+  float sun = clamp(max(dot(n, sunDir), 0.0), 0.0, 0.85);
   float sky = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+  float back = max(dot(-n, sunDir), 0.0);
   vec3 hemi = mix(groundColor, skyColor, sky);
-  return albedo * 0.25 + albedo * (hemi + sunColor * sun);
+  vec3 transmission = albedo * sunColor * back * 0.22;
+  return clamp(albedo * 0.25 + albedo * (hemi + sunColor * sun) + transmission, 0.0, 1.0);
+}
+
+vec3 treeImpostorBlendPackedNormal(vec3 n0, vec3 n1, vec3 n2, vec3 n3, vec4 weights) {
+  vec3 decoded =
+    (n0 * 2.0 - 1.0) * weights.x +
+    (n1 * 2.0 - 1.0) * weights.y +
+    (n2 * 2.0 - 1.0) * weights.z +
+    (n3 * 2.0 - 1.0) * weights.w;
+  float lenSq = max(dot(decoded, decoded), 0.000001);
+  return decoded * inversesqrt(lenSq) * 0.5 + 0.5;
 }
 
 void main() {
@@ -322,7 +346,7 @@ void main() {
     vec3 n1 = texture2D(normalDepthMap, vTreeImpostorUv1).rgb;
     vec3 n2 = texture2D(normalDepthMap, vTreeImpostorUv2).rgb;
     vec3 n3 = texture2D(normalDepthMap, vTreeImpostorUv3).rgb;
-    vec3 normal = n0 * vTreeImpostorBlendWeights.x + n1 * vTreeImpostorBlendWeights.y + n2 * vTreeImpostorBlendWeights.z + n3 * vTreeImpostorBlendWeights.w;
+    vec3 normal = treeImpostorBlendPackedNormal(n0, n1, n2, n3, vTreeImpostorBlendWeights);
     albedo = treeImpostorRelight(albedo, normal);
   }
   gl_FragColor = vec4(albedo, color.a);

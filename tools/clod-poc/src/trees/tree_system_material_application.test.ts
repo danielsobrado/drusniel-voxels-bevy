@@ -81,6 +81,13 @@ describe("tree system material application helpers", () => {
     expect(geometry.getAttribute("treeLodFade").getX(0)).toBe(1);
     expect(geometry.getAttribute("treeImpostorUvRect").count).toBe(3);
     expect(geometry.getAttribute("treeImpostorUvRect").itemSize).toBe(4);
+    for (let sample = 0; sample < 4; sample++) {
+      expect(geometry.getAttribute(`treeImpostorUvRect${sample}`).count).toBe(3);
+      expect(geometry.getAttribute(`treeImpostorUvRect${sample}`).itemSize).toBe(4);
+    }
+    expect(geometry.getAttribute("treeImpostorBlendWeights").count).toBe(3);
+    expect(geometry.getAttribute("treeImpostorBlendWeights").itemSize).toBe(4);
+    expect(geometry.getAttribute("treeImpostorBlendWeights").getX(0)).toBe(1);
   });
 
   it("replaces one impostor mesh geometry and invalidates bounds state", () => {

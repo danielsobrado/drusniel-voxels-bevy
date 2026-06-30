@@ -3,6 +3,15 @@ import type { TreeSettings, TreeSpeciesId } from "./tree_config.js";
 import type { TreeInstance } from "./tree_instances.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import { octFrameIndexForDirection } from "./tree_impostor_octahedral.js";
+import {
+  TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
+  TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
+} from "./tree_impostor_blend_geometry.js";
+import {
+  TREE_IMPOSTOR_BLEND_SAMPLE_COUNT,
+  treeImpostorRuntimeBlend,
+  type TreeImpostorRuntimeSample,
+} from "./tree_impostor_runtime.js";
 
 export const TREE_INSTANCE_ATTRIBUTE_EPSILON = 1e-5;
 export const TREE_LOD_DITHER_PRIMARY = 0;
@@ -61,22 +70,25 @@ export function writeTreeLodDitherRoleIfChanged(
 export function writeTreeImpostorUvRectIfChanged(input: TreeImpostorUvWriteInput): boolean {
   const attribute = treeImpostorUvRectAttribute(input.mesh);
   const atlas = input.impostorAtlases[input.instance.species];
-  if (!atlas?.ready || atlas.frames.length === 0) return writeUvRectIfChanged(attribute, input.index, 0, 0, 1, 1);
+  if (!atlas?.ready || atlas.frames.length === 0) {
+    const singleChanged = writeUvRectIfChanged(attribute, input.index, 0, 0, 1, 1);
+    const blendChanged = writeTreeImpostorBlendIfChanged(input.mesh, input.index, fallbackTreeImpostorRuntimeSamples());
+    return singleChanged || blendChanged;
+  }
 
   const maxFrame = atlas.frames.length - 1;
   const frozen = input.settings.impostors.debugFreezeFrame;
+  const viewDirection = treeImpostorViewDirection(input.instance, input.cameraPosition);
   const frameIndex = frozen >= 0
     ? Math.min(maxFrame, frozen)
-    : octFrameIndexForDirection(
-      new THREE.Vector3(
-        input.cameraPosition.x - input.instance.position[0],
-        input.cameraPosition.y - input.instance.position[1],
-        input.cameraPosition.z - input.instance.position[2],
-      ),
-      atlas.gridSize,
-    );
+    : octFrameIndexForDirection(viewDirection, atlas.gridSize);
   const frame = atlas.frames[frameIndex] ?? atlas.frames[0];
-  return writeUvRectIfChanged(attribute, input.index, frame.uvMin[0], frame.uvMin[1], frame.uvMax[0], frame.uvMax[1]);
+  const singleChanged = writeUvRectIfChanged(attribute, input.index, frame.uvMin[0], frame.uvMin[1], frame.uvMax[0], frame.uvMax[1]);
+  const blendSamples = frozen >= 0
+    ? frozenTreeImpostorRuntimeSamples(frame)
+    : treeImpostorRuntimeBlend(atlas, viewDirection).samples;
+  const blendChanged = writeTreeImpostorBlendIfChanged(input.mesh, input.index, blendSamples);
+  return singleChanged || blendChanged;
 }
 
 export function writeUvRectIfChanged(
@@ -118,4 +130,69 @@ export function treeLodDitherRoleAttribute(mesh: THREE.InstancedMesh): THREE.Ins
 
 export function treeImpostorUvRectAttribute(mesh: THREE.InstancedMesh): THREE.InstancedBufferAttribute {
   return mesh.geometry.getAttribute("treeImpostorUvRect") as THREE.InstancedBufferAttribute;
+}
+
+function writeTreeImpostorBlendIfChanged(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  samples: readonly TreeImpostorRuntimeSample[],
+): boolean {
+  const weights = mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME) as THREE.InstancedBufferAttribute | undefined;
+  if (!weights) return false;
+  let changed = false;
+  for (let sampleIndex = 0; sampleIndex < TREE_IMPOSTOR_BLEND_SAMPLE_COUNT; sampleIndex++) {
+    const uvRect = mesh.geometry.getAttribute(TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES[sampleIndex]) as THREE.InstancedBufferAttribute | undefined;
+    const sample = samples[sampleIndex] ?? fallbackTreeImpostorRuntimeSamples()[sampleIndex];
+    if (uvRect) {
+      changed = writeUvRectIfChanged(
+        uvRect,
+        index,
+        sample.uvMin[0],
+        sample.uvMin[1],
+        sample.uvMax[0],
+        sample.uvMax[1],
+      ) || changed;
+    }
+    changed = writeBlendWeightIfChanged(weights, index, sampleIndex, sample.weight) || changed;
+  }
+  return changed;
+}
+
+function writeBlendWeightIfChanged(
+  attribute: THREE.InstancedBufferAttribute,
+  index: number,
+  sampleIndex: number,
+  weight: number,
+): boolean {
+  const array = attribute.array as Float32Array;
+  const offset = index * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT + sampleIndex;
+  if (Math.abs(array[offset] - weight) <= TREE_INSTANCE_ATTRIBUTE_EPSILON) return false;
+  array[offset] = weight;
+  return true;
+}
+
+function treeImpostorViewDirection(instance: TreeInstance, cameraPosition: THREE.Vector3): THREE.Vector3 {
+  return new THREE.Vector3(
+    cameraPosition.x - instance.position[0],
+    cameraPosition.y - instance.position[1],
+    cameraPosition.z - instance.position[2],
+  );
+}
+
+function frozenTreeImpostorRuntimeSamples(frame: TreeImpostorAtlas["frames"][number]): TreeImpostorRuntimeSample[] {
+  return [
+    { uvMin: [...frame.uvMin], uvMax: [...frame.uvMax], weight: 1 },
+    { uvMin: [...frame.uvMin], uvMax: [...frame.uvMax], weight: 0 },
+    { uvMin: [...frame.uvMin], uvMax: [...frame.uvMax], weight: 0 },
+    { uvMin: [...frame.uvMin], uvMax: [...frame.uvMax], weight: 0 },
+  ];
+}
+
+function fallbackTreeImpostorRuntimeSamples(): TreeImpostorRuntimeSample[] {
+  return [
+    { uvMin: [0, 0], uvMax: [1, 1], weight: 1 },
+    { uvMin: [0, 0], uvMax: [1, 1], weight: 0 },
+    { uvMin: [0, 0], uvMax: [1, 1], weight: 0 },
+    { uvMin: [0, 0], uvMax: [1, 1], weight: 0 },
+  ];
 }

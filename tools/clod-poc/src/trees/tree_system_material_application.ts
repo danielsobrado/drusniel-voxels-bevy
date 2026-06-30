@@ -7,6 +7,11 @@ import {
   selectTreeSystemGeometry,
   selectTreeSystemMaterial,
 } from "./tree_system_impostor_resources.js";
+import {
+  TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES,
+  TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
+} from "./tree_impostor_blend_geometry.js";
+import { TREE_IMPOSTOR_BLEND_SAMPLE_COUNT } from "./tree_impostor_runtime.js";
 import type { TreeSystemMeshGrid } from "./tree_system_lifecycle.js";
 import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
 import type { TreeSettings } from "./tree_config.js";
@@ -89,5 +94,14 @@ export function createTreeSystemImpostorGeometryForCapacity(
   geometry.setAttribute("treeLodFade", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity).fill(1), 1));
   geometry.setAttribute("treeLodDitherRole", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity), 1));
   geometry.setAttribute("treeImpostorUvRect", new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
+  for (const name of TREE_IMPOSTOR_BLEND_UV_ATTRIBUTE_NAMES) {
+    geometry.setAttribute(name, new THREE.InstancedBufferAttribute(new Float32Array(safeCapacity * 4), 4));
+  }
+  const weights = new Float32Array(safeCapacity * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT);
+  for (let index = 0; index < safeCapacity; index++) weights[index * TREE_IMPOSTOR_BLEND_SAMPLE_COUNT] = 1;
+  geometry.setAttribute(
+    TREE_IMPOSTOR_BLEND_WEIGHT_ATTRIBUTE_NAME,
+    new THREE.InstancedBufferAttribute(weights, TREE_IMPOSTOR_BLEND_SAMPLE_COUNT),
+  );
   return geometry;
 }

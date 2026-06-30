@@ -8,6 +8,7 @@ import {
   TREE_GPU_RING_SHADOW_GROUP_COUNT,
   packTreeGpuRingParams,
   resolveTreeGpuRingReadbackCounts,
+  resolveTreeGpuRingShadowReadbackCounts,
   treeGpuRingBuildIndirectWorkgroups,
   treeGpuRingCounterWorkgroups,
   treeGpuRingCullWorkgroups,
@@ -163,6 +164,19 @@ describe("tree GPU ring compute helpers", () => {
     expect(resolved.groupCounts[treeGpuRingGroupIndex("oak", "near")]).toBe(3);
     expect(resolved.counts.near).toBe(5);
     expect(resolved.counts.far).toBe(3);
+  });
+
+  it("reports overflow from raw shadow caster readback counters before clamping", () => {
+    const raw = new Uint32Array(TREE_GPU_RING_SHADOW_GROUP_COUNT);
+    raw[0] = 6;
+    raw[TREE_GPU_RING_SHADOW_GROUP_COUNT - 1] = 2;
+
+    const resolved = resolveTreeGpuRingShadowReadbackCounts(raw, 4);
+
+    expect(resolved.overflowed).toBe(true);
+    expect(resolved.groupCounts).toHaveLength(TREE_GPU_RING_SHADOW_GROUP_COUNT);
+    expect(resolved.groupCounts[0]).toBe(4);
+    expect(resolved.groupCounts[TREE_GPU_RING_SHADOW_GROUP_COUNT - 1]).toBe(2);
   });
 });
 
