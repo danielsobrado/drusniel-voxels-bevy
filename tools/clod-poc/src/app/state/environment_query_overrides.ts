@@ -112,13 +112,19 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   if (treeGpuForceCpu !== null) state.treeGpuForceCpu = treeGpuForceCpu;
 
   const treeGpuCounts = flagParam(searchParams, "treeGpuCounts", "treeCounts");
-  if (treeGpuCounts !== null) state.treeGpuShowCounts = treeGpuCounts;
+  if (treeGpuCounts !== null) {
+    state.treeGpuShowCounts = treeGpuCounts;
+    if (treeGpuCounts) state.treeGpuReadbackVisibleLists = true;
+  }
 
   const treeGpuReadback = flagParam(searchParams, "treeGpuReadback", "treeReadback", "treeGpuReadbackVisibleLists");
   if (treeGpuReadback !== null) state.treeGpuReadbackVisibleLists = treeGpuReadback;
 
   const treeGpuValidate = flagParam(searchParams, "treeGpuValidate", "treeValidate", "treeGpuValidation");
-  if (treeGpuValidate !== null) state.treeGpuValidateAgainstCpu = treeGpuValidate;
+  if (treeGpuValidate !== null) {
+    state.treeGpuValidateAgainstCpu = treeGpuValidate;
+    if (treeGpuValidate) state.treeGpuReadbackVisibleLists = true;
+  }
 
   const fx = flagParam(searchParams, "fx");
   if (fx === false) {
