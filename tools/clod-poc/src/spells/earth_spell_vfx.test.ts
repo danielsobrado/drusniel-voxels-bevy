@@ -43,7 +43,9 @@ describe("earth spell VFX", () => {
     expect(particles.visible).toBe(true);
 
     system.update(0.35, 0.25);
-    expect(particles.instanceMatrix.needsUpdate).toBe(true);
+    const matrix = new THREE.Matrix4();
+    particles.getMatrixAt(8, matrix);
+    expect(matrix.elements.some((value) => Math.abs(value) > 0.001)).toBe(true);
 
     system.hide();
     expect(particles.visible).toBe(false);
