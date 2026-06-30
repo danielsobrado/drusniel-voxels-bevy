@@ -2,10 +2,26 @@
 #
 # Per-body wave/colour/reflection tuning lives in `body_presets`. The water
 # fragment shader reads those values via `WaterMaterial`'s uniform binding.
-# `reflections`, `refraction`, `displacement`, `weather`, and
-# `witchcraft_finish` configure the planar reflection camera, screen-space
-# refraction, the CPU wave-displacement sim, weather coupling, and the
-# optional Aurora/Complementary-style colour finish respectively.
+# `renderer` and `clipmap` configure renderer ownership and the disabled-by-default
+# far/large-water clipmap skeleton. `reflections`, `refraction`, `displacement`,
+# `weather`, and `witchcraft_finish` configure the planar reflection camera,
+# screen-space refraction, the CPU wave-displacement sim, weather coupling, and
+# the optional Aurora/Complementary-style colour finish respectively.
+
+renderer:
+  near_voxel_meshes_enabled: true
+  clipmap_enabled: false
+  clipmap_min_body_area: 2048.0
+  clipmap_max_distance: 4000.0
+
+clipmap:
+  enabled: false
+  levels: 6
+  cells_per_level: 64
+  base_cell_size: 1.0
+  max_distance: 4000.0
+  min_body_area: 2048.0
+  debug_visible: false
 
 body_presets:
   ocean:
