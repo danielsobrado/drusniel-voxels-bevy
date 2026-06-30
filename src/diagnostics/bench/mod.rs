@@ -434,6 +434,9 @@ struct BenchState {
     render_ready_wait_frames: u32,
     render_ready_stable_frames: u32,
     render_ready_last_signature: Option<BenchRenderReadySignature>,
+    render_ready_max_stable_frames: u32,
+    render_ready_signature_changes: u32,
+    render_ready_last_changed_fields: Vec<&'static str>,
     last_ready_wait_frames: u32,
     last_ready_wait_secs: f32,
     last_ready_stable_frames: u32,
@@ -531,6 +534,40 @@ struct BenchRenderReadySignature {
     naadf_preview_first_hit_dispatches: u32,
     naadf_preview_composite_passes: u32,
     naadf_preview_pixels: u32,
+}
+
+fn bench_render_ready_signature_changed_fields(
+    previous: BenchRenderReadySignature,
+    current: BenchRenderReadySignature,
+) -> Vec<&'static str> {
+    let mut fields = Vec::new();
+    macro_rules! push_if_changed {
+        ($field:ident) => {
+            if previous.$field != current.$field {
+                fields.push(stringify!($field));
+            }
+        };
+    }
+
+    push_if_changed!(opaque_items);
+    push_if_changed!(alpha_mask_items);
+    push_if_changed!(transparent_items);
+    push_if_changed!(shadow_items);
+    push_if_changed!(terrain_items);
+    push_if_changed!(water_items);
+    push_if_changed!(instanced_prop_items);
+    push_if_changed!(queued_instanced_draws);
+    push_if_changed!(queued_instanced_instances);
+    push_if_changed!(water_reflection_sampled);
+    push_if_changed!(terrain_full_triplanar_meshes);
+    push_if_changed!(terrain_cheap_triplanar_meshes);
+    push_if_changed!(terrain_triplanar_textures_configured);
+    push_if_changed!(naadf_preview_active);
+    push_if_changed!(naadf_preview_first_hit_dispatches);
+    push_if_changed!(naadf_preview_composite_passes);
+    push_if_changed!(naadf_preview_pixels);
+
+    fields
 }
 
 #[derive(Clone, Serialize)]
@@ -823,6 +860,12 @@ struct RunRecord {
     render_ready_wait_frames: u32,
     render_ready_secs: f32,
     render_ready_stable_frames: u32,
+    render_ready_max_stable_frames: u32,
+    render_ready_signature_changes: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    render_ready_last_changed_fields: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    render_ready_signature: Option<BenchRenderReadySignature>,
     render_ready_timed_out: bool,
     gameplay_stall_events: u32,
     gameplay_failed: bool,
@@ -1166,6 +1209,9 @@ impl Plugin for BenchPlugin {
                 render_ready_wait_frames: 0,
                 render_ready_stable_frames: 0,
                 render_ready_last_signature: None,
+                render_ready_max_stable_frames: 0,
+                render_ready_signature_changes: 0,
+                render_ready_last_changed_fields: Vec::new(),
                 last_ready_wait_frames: 0,
                 last_ready_wait_secs: 0.0,
                 last_ready_stable_frames: 0,
@@ -2565,6 +2611,9 @@ fn run_bench_state_machine(
             state.render_ready_wait_frames = 0;
             state.render_ready_stable_frames = 0;
             state.render_ready_last_signature = None;
+            state.render_ready_max_stable_frames = 0;
+            state.render_ready_signature_changes = 0;
+            state.render_ready_last_changed_fields.clear();
             state.last_ready_wait_frames = 0;
             state.last_ready_wait_secs = 0.0;
             state.last_ready_stable_frames = 0;
@@ -2726,6 +2775,9 @@ fn run_bench_state_machine(
                     state.last_render_ready_secs = 0.0;
                     state.last_render_ready_stable_frames = 0;
                     state.last_render_ready_timed_out = false;
+                    state.render_ready_max_stable_frames = 0;
+                    state.render_ready_signature_changes = 0;
+                    state.render_ready_last_changed_fields.clear();
                     record_bench_render_ready_counts(
                         &mut timing,
                         frame.0,
@@ -2756,6 +2808,9 @@ fn run_bench_state_machine(
                     state.render_ready_wait_frames = 0;
                     state.render_ready_stable_frames = 0;
                     state.render_ready_last_signature = None;
+                    state.render_ready_max_stable_frames = 0;
+                    state.render_ready_signature_changes = 0;
+                    state.render_ready_last_changed_fields.clear();
                     if let Some(trace) = state.startup_trace.as_mut() {
                         trace.start_phase("render-ready", frame.0);
                     }
@@ -2776,13 +2831,27 @@ fn run_bench_state_machine(
             );
 
             let signature = bench_render_ready_signature(&timing);
+            let previous_signature = state.render_ready_last_signature;
             let signature_stable = signature.is_some()
-                && state.render_ready_last_signature.is_some()
-                && signature == state.render_ready_last_signature;
+                && previous_signature.is_some()
+                && signature == previous_signature;
             if signature_stable {
                 state.render_ready_stable_frames += 1;
+                state.render_ready_max_stable_frames = state
+                    .render_ready_max_stable_frames
+                    .max(state.render_ready_stable_frames);
             } else {
                 state.render_ready_stable_frames = 0;
+            }
+            if previous_signature != signature {
+                state.render_ready_signature_changes += 1;
+                state.render_ready_last_changed_fields = match (previous_signature, signature) {
+                    (Some(previous), Some(current)) => {
+                        bench_render_ready_signature_changed_fields(previous, current)
+                    }
+                    (None, Some(_)) | (Some(_), None) => vec!["signature_presence"],
+                    (None, None) => Vec::new(),
+                };
             }
             state.render_ready_wait_frames += 1;
             state.render_ready_last_signature = signature;
@@ -2816,21 +2885,27 @@ fn run_bench_state_machine(
                 state.last_render_ready_timed_out = timed_out && !ready;
                 if state.last_render_ready_timed_out {
                     warn!(
-                        "Bench checkpoint '{}' run {} render-ready timeout after {:.1}s, stable {}/{} frames, signature {:?}",
+                        "Bench checkpoint '{}' run {} render-ready timeout after {:.1}s, stable {}/{} frames, max stable {}, signature changes {}, last changed {:?}, signature {:?}",
                         checkpoint.name,
                         state.run_index,
                         wait_secs,
                         state.render_ready_stable_frames,
                         RENDER_READY_STABLE_FRAMES,
+                        state.render_ready_max_stable_frames,
+                        state.render_ready_signature_changes,
+                        state.render_ready_last_changed_fields,
                         signature,
                     );
                     println!(
-                        "[BENCH RENDER READY TIMEOUT] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_frames={} signature={:?}",
+                        "[BENCH RENDER READY TIMEOUT] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} max_stable_frames={} signature_changes={} last_changed={:?} min_frames={} signature={:?}",
                         checkpoint.name,
                         state.run_index,
                         state.render_ready_wait_frames,
                         wait_secs,
                         state.render_ready_stable_frames,
+                        state.render_ready_max_stable_frames,
+                        state.render_ready_signature_changes,
+                        state.render_ready_last_changed_fields,
                         RENDER_READY_MIN_FRAMES,
                         signature,
                     );
@@ -2844,12 +2919,15 @@ fn run_bench_state_machine(
                         signature,
                     );
                     println!(
-                        "[BENCH RENDER READY] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} min_frames={} signature={:?}",
+                        "[BENCH RENDER READY] checkpoint={} run={} wait_frames={} wait_secs={:.1} stable_frames={} max_stable_frames={} signature_changes={} last_changed={:?} min_frames={} signature={:?}",
                         checkpoint.name,
                         state.run_index,
                         state.render_ready_wait_frames,
                         wait_secs,
                         state.render_ready_stable_frames,
+                        state.render_ready_max_stable_frames,
+                        state.render_ready_signature_changes,
+                        state.render_ready_last_changed_fields,
                         RENDER_READY_MIN_FRAMES,
                         signature,
                     );
@@ -3016,6 +3094,12 @@ fn run_bench_state_machine(
                     render_ready_wait_frames: state.last_render_ready_wait_frames,
                     render_ready_secs: state.last_render_ready_secs,
                     render_ready_stable_frames: state.last_render_ready_stable_frames,
+                    render_ready_max_stable_frames: state.render_ready_max_stable_frames,
+                    render_ready_signature_changes: state.render_ready_signature_changes,
+                    render_ready_last_changed_fields: state
+                        .render_ready_last_changed_fields
+                        .clone(),
+                    render_ready_signature: state.last_render_ready_signature,
                     render_ready_timed_out: state.last_render_ready_timed_out,
                     gameplay_stall_events: state.gameplay_stall_events,
                     gameplay_failed: state.gameplay_failed,
@@ -3443,6 +3527,10 @@ fn finish_run(
         render_ready_wait_frames: 0,
         render_ready_secs: 0.0,
         render_ready_stable_frames: 0,
+        render_ready_max_stable_frames: 0,
+        render_ready_signature_changes: 0,
+        render_ready_last_changed_fields: Vec::new(),
+        render_ready_signature: None,
         render_ready_timed_out: false,
         gameplay_stall_events: 0,
         gameplay_failed: false,
@@ -4027,28 +4115,40 @@ fn bench_render_ready_signature(timing: &AreaTimingRecorder) -> Option<BenchRend
     }
 
     Some(BenchRenderReadySignature {
-        opaque_items: latest_counter_u32(timing, "Render Phase Items Opaque3d Total")?,
-        alpha_mask_items: latest_counter_u32(timing, "Render Phase Items AlphaMask3d Total")?,
-        transparent_items: latest_counter_u32(timing, "Render Phase Items Transparent3d Total")?,
-        shadow_items: latest_counter_u32(timing, "Render Phase Items Shadow Total")?,
-        terrain_items: latest_counter_u32(timing, "Render Phase Items Terrain")?,
-        water_items: latest_counter_u32(timing, "Render Phase Items Water")?,
-        instanced_prop_items: latest_counter_u32(timing, "Render Phase Items Instanced Props")?,
-        queued_instanced_draws: latest_counter_u32(timing, "Render Instancing Props Queued Total")?,
-        queued_instanced_instances: latest_counter_u32(
+        opaque_items: latest_counter_presence_u32(timing, "Render Phase Items Opaque3d Total")?,
+        alpha_mask_items: latest_counter_presence_u32(
+            timing,
+            "Render Phase Items AlphaMask3d Total",
+        )?,
+        transparent_items: latest_counter_presence_u32(
+            timing,
+            "Render Phase Items Transparent3d Total",
+        )?,
+        shadow_items: latest_counter_presence_u32(timing, "Render Phase Items Shadow Total")?,
+        terrain_items: latest_counter_presence_u32(timing, "Render Phase Items Terrain")?,
+        water_items: latest_counter_presence_u32(timing, "Render Phase Items Water")?,
+        instanced_prop_items: latest_counter_presence_u32(
+            timing,
+            "Render Phase Items Instanced Props",
+        )?,
+        queued_instanced_draws: latest_counter_presence_u32(
+            timing,
+            "Render Instancing Props Queued Total",
+        )?,
+        queued_instanced_instances: latest_counter_presence_u32(
             timing,
             "Render Instancing Queue Instances",
         )?,
-        water_reflection_sampled: latest_counter_u32(timing, "Water Reflection Sampled")?,
-        terrain_full_triplanar_meshes: latest_counter_u32(
+        water_reflection_sampled: latest_counter_presence_u32(timing, "Water Reflection Sampled")?,
+        terrain_full_triplanar_meshes: latest_counter_presence_u32(
             timing,
             "Terrain Material Quality FullTriplanar Meshes",
         )?,
-        terrain_cheap_triplanar_meshes: latest_counter_u32(
+        terrain_cheap_triplanar_meshes: latest_counter_presence_u32(
             timing,
             "Terrain Material Quality CheapTriplanar Meshes",
         )?,
-        terrain_triplanar_textures_configured: latest_counter_u32(
+        terrain_triplanar_textures_configured: latest_counter_presence_u32(
             timing,
             "Terrain Triplanar Textures Configured",
         )?,
@@ -4057,6 +4157,10 @@ fn bench_render_ready_signature(timing: &AreaTimingRecorder) -> Option<BenchRend
         naadf_preview_composite_passes: 0,
         naadf_preview_pixels: 0,
     })
+}
+
+fn latest_counter_presence_u32(timing: &AreaTimingRecorder, area: &str) -> Option<u32> {
+    latest_counter_u32(timing, area).map(|value| u32::from(value > 0))
 }
 
 fn latest_counter_u32(timing: &AreaTimingRecorder, area: &str) -> Option<u32> {
@@ -4697,6 +4801,33 @@ hold_frames = 30
         assert!(scene.startup_trace.capture_csv);
         assert_eq!(scene.startup_trace.max_phase_frames, 12_000);
         assert_eq!(scene.checkpoints.len(), 1);
+    }
+
+    #[test]
+    fn render_ready_signature_changed_fields_names_changed_counters() {
+        let previous = BenchRenderReadySignature {
+            opaque_items: 10,
+            shadow_items: 20,
+            water_reflection_sampled: 1,
+            terrain_full_triplanar_meshes: 30,
+            ..BenchRenderReadySignature::default()
+        };
+        let current = BenchRenderReadySignature {
+            opaque_items: 11,
+            shadow_items: 20,
+            water_reflection_sampled: 0,
+            terrain_full_triplanar_meshes: 32,
+            ..BenchRenderReadySignature::default()
+        };
+
+        assert_eq!(
+            bench_render_ready_signature_changed_fields(previous, current),
+            vec![
+                "opaque_items",
+                "water_reflection_sampled",
+                "terrain_full_triplanar_meshes"
+            ]
+        );
     }
 
     #[test]

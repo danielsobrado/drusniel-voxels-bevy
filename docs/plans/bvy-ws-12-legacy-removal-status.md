@@ -38,15 +38,17 @@ Status: In progress.
 - `world_source_acceptance` now treats unavailable GPU readback and skipped/failed drift gates as acceptance blockers instead of allowing a CPU-only pass.
 - Native Windows runtime-assisted GPU readback produced an accepted artifact at `bench-runs/world-source-runtime-acceptance/summary.json`.
 - `world_source_acceptance` now validates the runtime artifact and records it as `runtime_gpu_readback_acceptance`; when accepted, the report uses its GPU readback/drift-gate result for top-level acceptance.
+- The visual-regression render-ready gate now records final render signatures and instability diagnostics in each run record.
+- Native Windows visual-regression verification at `bench-runs/2026-06-30T15-14-58Z/summary.json` cleared the previous render-ready timeout on all 7 checkpoints; each checkpoint reported `ready_timed_out: false`, `render_ready_timed_out: false`, and `render_ready_wait_frames: 90`.
 
 ## Not completed
 
 - Direct in-process runtime readback consumption by `world_source_acceptance` is still not implemented; the accepted path is pairing the focused bench report with the reviewed runtime-assisted artifact.
-- Visual/bench acceptance is not complete. The native Windows visual regression run at `bench-runs/2026-06-30T14-11-11Z/summary.json` produced screenshots for all 7 checkpoints, but each run recorded `render_ready_timed_out: true`. `bench_guard` also failed frame-total thresholds while GPU opaque, mesh dirty, and instancing-specific checks passed.
+- Visual/bench acceptance is not complete. The native Windows visual regression run at `bench-runs/2026-06-30T15-14-58Z/summary.json` produced screenshots for all 7 checkpoints and cleared render-ready, but `bench_guard` still failed frame-total thresholds: ridge p99, jump avg/p99, and forest avg/p99. GPU opaque, mesh dirty, and instancing-specific checks passed.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of explicit legacy mode should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Fix or explain the visual bench frame-total failures and render-ready timeouts, then rerun `bench_guard` before removing explicit legacy mode.
+Fix or explain the visual bench frame-total failures, then rerun `bench_guard` before removing explicit legacy mode.
