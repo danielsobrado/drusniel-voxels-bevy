@@ -5,7 +5,7 @@ BVY-WS-11 uses `world_source_acceptance` as the focused GPU-first WorldSource ac
 Run it in release mode:
 
 ```powershell
-cargo run --release --bin world_source_acceptance
+rtk cargo run --release --bin world_source_acceptance
 ```
 
 The binary writes:
@@ -39,17 +39,24 @@ GPU readback boundary:
 - `GpuWorldSourceDriftReadbackDispatchPlan` calculates sample count, workgroup count, and required buffer byte sizes;
 - `build_gpu_world_source_drift_input_samples` prepares input buffers from the CPU reference source and drift sample points;
 - `decode_gpu_world_source_drift_outputs` maps GPU output wire structs back to `WorldSourceDriftSample` and rejects invalid IDs;
-- `world_source_acceptance` reads GPU drift samples through this provider boundary;
-- the current provider is `UnavailableWorldSourceGpuReadback`, so `gpu_readback.status` is `unavailable` and `drift_gate.status` is `skipped`;
-- the real GPU implementation should replace that provider with one that dispatches `drift_readback.wgsl`, maps the output buffer back to `WorldSourceDriftSample`, and passes it into the existing drift gate.
+- the render-app path can dispatch `drift_readback.wgsl`, map the staging buffer, publish `WorldSourceGpuReadbackResult`, and evaluate the runtime drift gate when `VOXEL_WORLD_SOURCE_DRIFT_READBACK=1`;
+- the runtime-assisted path writes `bench-runs/world-source-runtime-acceptance/summary.json` by default, or the path in `VOXEL_WORLD_SOURCE_DRIFT_ACCEPTANCE_OUT`;
+- `world_source_acceptance` still uses `UnavailableWorldSourceGpuReadback`, so `gpu_readback.status` is `unavailable`, `drift_gate.status` is `skipped`, and `acceptance_pass` is `false`;
+- the remaining acceptance work is to verify the opt-in runtime path and either feed that result into a runtime-assisted report or archive it alongside the standalone bench.
 
 Current limitation:
 
 - `drift_readback.wgsl` currently validates GPU splat/dominant-layer resolution from prepared WorldSource samples. Full GPU height/biome drift requires a later WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
-- GPU readback samples are not produced yet, so `drift_gate.status` is expected to be `skipped` with `gpu_readback_unavailable` until the readback producer is added.
+- The standalone bench does not produce GPU readback samples, so `drift_gate.status` is expected to be `skipped` with blockers `gpu_readback_unavailable` and `drift_gate_not_passed` until runtime readback evidence is accepted.
 
 Optional blocky comparison:
 
 ```powershell
-cargo run --release --bin world_source_acceptance -- --blocky --run-name world-source-blocky
+rtk cargo run --release --bin world_source_acceptance -- --blocky --run-name world-source-blocky
+```
+
+Runtime-assisted readback artifact, from a native Windows shell:
+
+```powershell
+rtk cargo run --release -- --runtime-assisted --bench bench/scenes/terrain/world-source-readback-acceptance.toml --bench-out bench-runs/world-source-runtime-readback
 ```

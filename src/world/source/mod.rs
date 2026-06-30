@@ -49,6 +49,7 @@ pub use drift_readback::{
 };
 pub use drift_readback_acceptance::{
     WorldSourceGpuReadbackAcceptanceResult, evaluate_world_source_gpu_readback_acceptance,
+    world_source_gpu_readback_acceptance_blockers,
 };
 pub use drift_readback_bridge::{
     GpuWorldSourceDriftReadbackSharedResult, publish_gpu_world_source_drift_readback_result,
@@ -61,7 +62,7 @@ pub use drift_readback_request::{
     populate_gpu_world_source_drift_readback_request_once,
 };
 pub use drift_readback_runtime_acceptance::{
-    GpuWorldSourceDriftRuntimeAcceptanceState,
+    GpuWorldSourceDriftRuntimeAcceptanceState, WORLD_SOURCE_DRIFT_RUNTIME_ACCEPTANCE_OUT_ENV,
     evaluate_gpu_world_source_drift_runtime_acceptance_once,
 };
 pub use drift_readback_staging::decode_staged_gpu_world_source_drift_bytes;

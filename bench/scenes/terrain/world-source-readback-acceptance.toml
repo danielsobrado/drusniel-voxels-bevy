@@ -1,0 +1,21 @@
+# Minimal runtime scene for WorldSource GPU drift readback acceptance.
+#
+# Run from a native Windows shell with `--runtime-assisted`; the runtime writes
+# `bench-runs/world-source-runtime-acceptance/summary.json` unless
+# `VOXEL_WORLD_SOURCE_DRIFT_ACCEPTANCE_OUT` overrides it.
+
+seed = 12345
+duration_warmup_secs = 0.2
+median_runs = 1
+chunk_load_radius = 2
+skip_props = true
+world_cache_path = "bench-runs/cache/world-source-readback-acceptance-world.bin"
+
+[[checkpoint]]
+name = "world-source-readback"
+position = [128.0, 44.0, 128.0]
+look_at = [144.0, 36.0, 144.0]
+time_of_day = 0.5
+hold_frames = 30
+screenshot = false
+fog_tier = "off"
