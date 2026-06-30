@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTreeParityCaptureCommands,
   buildTreeParityEvidenceMarkdownReport,
+  evaluateTreeParityAcceptanceEvidence,
   validateTreeParityEvidence,
   validateTreeParityManifestCaptureConfig,
   type TreeParityEvidenceFileInfo,
@@ -165,6 +166,34 @@ describe("TREE-12 parity evidence markdown report", () => {
   });
 });
 
+describe("TREE-11 acceptance evidence bridge", () => {
+  it("evaluates acceptance from measured visual and perf artifacts", () => {
+    const result = evaluateTreeParityAcceptanceEvidence(acceptanceInput());
+
+    expect(result?.report.status).toBe("pass");
+    expect(result?.report.measurements.perfSpeedup).toBeCloseTo(1.5);
+  });
+
+  it("adds TREE-11 acceptance results to the markdown report", () => {
+    const report = buildTreeParityEvidenceMarkdownReport(acceptanceInput(), {
+      generatedAt: "2026-06-30T00:00:00.000Z",
+    });
+
+    expect(report).toContain("## TREE-11 acceptance");
+    expect(report).toContain("Status: PASS");
+    expect(report).toContain("| perfSpeedup | 1.5 |");
+  });
+
+  it("fails the report when TREE-11 acceptance fails", () => {
+    const report = buildTreeParityEvidenceMarkdownReport(acceptanceInput({ luminanceStdDev: 0.001 }), {
+      generatedAt: "2026-06-30T00:00:00.000Z",
+    });
+
+    expect(report).toContain("Status: FAIL");
+    expect(report).toContain("TREE_IMPOSTOR_FLAT_LIGHTING");
+  });
+});
+
 function manifest(extraParams: Record<string, string> = {}): TreeParityEvidenceManifest {
   return {
     captures: [{
@@ -195,6 +224,17 @@ function manifest(extraParams: Record<string, string> = {}): TreeParityEvidenceM
   };
 }
 
+function acceptanceManifest(): TreeParityEvidenceManifest {
+  return {
+    ...manifest(),
+    acceptance: {
+      visualArtifact: "shots/tree-acceptance-visual.json",
+      baselinePerfArtifact: "perf/baseline.json",
+      impostorPerfArtifact: "perf/impostor.json",
+    },
+  };
+}
+
 function validInput() {
   return {
     manifest: manifest(),
@@ -205,15 +245,7 @@ function validInput() {
     }),
     readJson: jsonReader({
       "shots/low-sun-stats.json": { ready: true, error: null },
-      "perf/low-sun/tree-gpu-ring.json": {
-        snapshot: {
-          counters: {
-            treeGpuShadowCasterCountAvg: 12,
-            treeHeroNearTrianglesAvg: 120_000,
-            treeHeroNearFoliageTrianglesAvg: 42_000,
-          },
-        },
-      },
+      "perf/low-sun/tree-gpu-ring.json": perfJson(12, 120_000, 42_000),
     }),
   };
 }
@@ -228,17 +260,54 @@ function failingInput() {
     }),
     readJson: jsonReader({
       "shots/low-sun-stats.json": { ready: false, error: null },
-      "perf/low-sun/tree-gpu-ring.json": {
-        snapshot: {
-          counters: {
-            treeGpuShadowCasterCountAvg: 0,
-            treeHeroNearTrianglesAvg: 20_000,
-            treeHeroNearFoliageTrianglesAvg: 0,
-          },
-        },
-      },
+      "perf/low-sun/tree-gpu-ring.json": perfJson(0, 20_000, 0),
     }),
   };
+}
+
+function acceptanceInput(visualOverrides: Record<string, number> = {}) {
+  return {
+    manifest: acceptanceManifest(),
+    fileInfo: fileInfo({
+      "shots/low-sun.png": { exists: true, sizeBytes: 128 },
+      "shots/low-sun-stats.json": { exists: true, sizeBytes: 256 },
+      "perf/low-sun/tree-gpu-ring.json": { exists: true, sizeBytes: 512 },
+      "shots/tree-acceptance-visual.json": { exists: true, sizeBytes: 128 },
+      "perf/baseline.json": { exists: true, sizeBytes: 512 },
+      "perf/impostor.json": { exists: true, sizeBytes: 512 },
+    }),
+    readJson: jsonReader({
+      "shots/low-sun-stats.json": { ready: true, error: null },
+      "perf/low-sun/tree-gpu-ring.json": perfJson(12, 120_000, 42_000),
+      "shots/tree-acceptance-visual.json": {
+        luminanceMean: 0.5,
+        luminanceStdDev: 0.08,
+        maxViewBlendDelta: 0.05,
+        nearImpostorColorDelta: 0.08,
+        boundaryHoleRatio: 0,
+        boundaryDoubleDrawRatio: 0,
+        ...visualOverrides,
+      },
+      "perf/baseline.json": framePerfJson(18),
+      "perf/impostor.json": framePerfJson(12),
+    }),
+  };
+}
+
+function perfJson(treeGpuShadowCasterCountAvg: number, treeHeroNearTrianglesAvg: number, treeHeroNearFoliageTrianglesAvg: number) {
+  return {
+    snapshot: {
+      counters: {
+        treeGpuShadowCasterCountAvg,
+        treeHeroNearTrianglesAvg,
+        treeHeroNearFoliageTrianglesAvg,
+      },
+    },
+  };
+}
+
+function framePerfJson(frameMsP95: number) {
+  return { snapshot: { metrics: { frameMs: { p95: frameMsP95 } } } };
 }
 
 function fileInfo(files: Record<string, TreeParityEvidenceFileInfo>) {
