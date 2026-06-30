@@ -90,6 +90,72 @@ function withPostProcessDefaults(settings: Partial<PostProcessSettings>): Requir
   return { ...POST_PROCESS_FALLBACK_SETTINGS, ...settings };
 }
 
+function flagValue(params: URLSearchParams, key: string): boolean | null {
+  const raw = params.get(key);
+  if (raw === null) return null;
+  const value = raw.trim().toLowerCase();
+  if (value === "1" || value === "true" || value === "on" || value === "yes") return true;
+  if (value === "0" || value === "false" || value === "off" || value === "no") return false;
+  return null;
+}
+
+function neutralGrade(settings: Required<PostProcessSettings>): void {
+  settings.exposure = 1.0;
+  settings.contrast = 1.0;
+  settings.saturation = 1.0;
+  settings.vignette = 0.0;
+}
+
+function browserSearchParams(): URLSearchParams | null {
+  if (typeof globalThis.location === "undefined") return null;
+  return new URLSearchParams(globalThis.location.search);
+}
+
+export function applyPostProcessQueryOverrides(
+  settings: Partial<PostProcessSettings>,
+  searchParams: URLSearchParams | null,
+): Required<PostProcessSettings> {
+  const next = withPostProcessDefaults(settings);
+  if (!searchParams) return next;
+
+  const fx = flagValue(searchParams, "fx");
+  if (fx === false) {
+    next.enabled = false;
+    next.debugMode = "off";
+    next.bloomEnabled = false;
+    next.godRaysMode = "off";
+  }
+
+  const postProcess = flagValue(searchParams, "postprocess") ?? flagValue(searchParams, "postProcess");
+  if (postProcess !== null) {
+    next.enabled = postProcess;
+    if (!postProcess) next.debugMode = "off";
+  }
+
+  const postMin = flagValue(searchParams, "postmin") ?? flagValue(searchParams, "postMin");
+  if (postMin === true) {
+    next.enabled = true;
+    next.debugMode = "output";
+    neutralGrade(next);
+    next.bloomEnabled = false;
+    next.godRaysMode = "off";
+  }
+
+  const grade = flagValue(searchParams, "grade");
+  if (grade === false) neutralGrade(next);
+
+  const bloom = flagValue(searchParams, "bloom");
+  if (bloom !== null) next.bloomEnabled = bloom;
+
+  const godRays = flagValue(searchParams, "godRays") ?? flagValue(searchParams, "godrays");
+  if (godRays === false) next.godRaysMode = "off";
+
+  const toneMap = searchParams.get("toneMap") ?? searchParams.get("toneMapping");
+  next.toneMapping = toneMapping(toneMap, next.toneMapping);
+
+  return next;
+}
+
 export function parsePostProcessSettings(yamlText = postProcessYaml): Required<PostProcessSettings> {
   const fallback = POST_PROCESS_FALLBACK_SETTINGS;
   try {
@@ -123,7 +189,10 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
   }
 }
 
-export const DEFAULT_POST_PROCESS_SETTINGS: Required<PostProcessSettings> = parsePostProcessSettings();
+export const DEFAULT_POST_PROCESS_SETTINGS: Required<PostProcessSettings> = applyPostProcessQueryOverrides(
+  parsePostProcessSettings(),
+  browserSearchParams(),
+);
 
 /** Screen-space raymarch sample count per god-rays mode. Drives shader cost. */
 export const GOD_RAYS_SCREEN_SAMPLES: Record<"cheap" | "heavy", number> = {
