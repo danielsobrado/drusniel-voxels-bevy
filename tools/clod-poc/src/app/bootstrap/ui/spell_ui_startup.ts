@@ -15,6 +15,11 @@ function meshConfig(vfx: FireSpellVfxConfig): SpellVfxMeshConfig {
     handForwardM: vfx.handForwardM,
     handRightM: vfx.handRightM,
     handUpM: vfx.handUpM,
+    glowColor: vfx.glowColor,
+    glowIntensity: vfx.glowIntensity,
+    glowDistance: vfx.glowDistance,
+    glowDecay: vfx.glowDecay,
+    glowLocalYRatio: vfx.glowLocalYRatio,
   };
 }
 
