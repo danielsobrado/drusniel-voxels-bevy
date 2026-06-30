@@ -1,3 +1,4 @@
+import { evaluateTreeParityAcceptanceEvidence } from "./tree_parity_evidence_acceptance.js";
 import { validateTreeParityManifestCaptureConfig } from "./tree_parity_evidence_manifest.js";
 import {
   errorMessage,
@@ -13,13 +14,34 @@ import type {
   TreeParityEvidenceResult,
 } from "./tree_parity_evidence_types.js";
 
+const TREE_PARITY_ACCEPTANCE_ID = "tree-impostor-acceptance";
+
 export function validateTreeParityEvidence(input: TreeParityEvidenceInput): TreeParityEvidenceResult {
   const failures: TreeParityEvidenceFailure[] = validateTreeParityManifestCaptureConfig(input.manifest);
   for (const capture of input.manifest.captures) {
     validateCaptureFiles(capture, input, failures);
     validateCaptureMetrics(capture, input, failures);
   }
+  validateAcceptance(input, failures);
   return { ok: failures.length === 0, failures };
+}
+
+function validateAcceptance(input: TreeParityEvidenceInput, failures: TreeParityEvidenceFailure[]): void {
+  if (!input.manifest.acceptance) return;
+  try {
+    const acceptance = evaluateTreeParityAcceptanceEvidence(input);
+    for (const failure of acceptance?.report.failures ?? []) {
+      failures.push({
+        captureId: input.manifest.acceptance.id ?? TREE_PARITY_ACCEPTANCE_ID,
+        message: `${failure.code}: ${failure.message} (${failure.value} > ${failure.threshold})`,
+      });
+    }
+  } catch (error) {
+    failures.push({
+      captureId: input.manifest.acceptance.id ?? TREE_PARITY_ACCEPTANCE_ID,
+      message: `cannot evaluate TREE-11 acceptance: ${errorMessage(error)}`,
+    });
+  }
 }
 
 function validateCaptureFiles(
