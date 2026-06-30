@@ -476,6 +476,7 @@ const OUTPUT_FRAG = /* glsl */ `
   }
 
   vec3 bloomColor() {
+    if (uBloomEnabled < 0.5 || uBloomStrength <= 0.0) return vec3(0.0);
     vec3 bloom = brightPass(vUv) * 0.18;
     bloom += bloomSample(vec2(1.0, 0.0), 0.10);
     bloom += bloomSample(vec2(-1.0, 0.0), 0.10);
@@ -589,13 +590,14 @@ const OUTPUT_FRAG = /* glsl */ `
   }
 
   vec3 aerialPerspective(vec3 color) {
+    if (uAerialPerspectiveEnabled < 0.5 || uAerialPerspectiveStrength <= 0.0) return color;
     float depth = texture2D(tDepth, vUv).x;
     float geometryMask = 1.0 - step(0.999999, depth);
     float viewZ = perspectiveDepthToViewZ(depth, uCameraNear, uCameraFar);
     float distanceM = max(-viewZ, 0.0);
     float startM = min(uAerialPerspectiveStart, uAerialPerspectiveEnd - 0.001);
     float haze = smoothstep(startM, uAerialPerspectiveEnd, distanceM);
-    haze *= clamp(uAerialPerspectiveStrength, 0.0, 1.0) * uAerialPerspectiveEnabled * geometryMask;
+    haze *= clamp(uAerialPerspectiveStrength, 0.0, 1.0) * geometryMask;
     return mix(color, uAerialPerspectiveColor, haze);
   }
 
@@ -611,7 +613,7 @@ const OUTPUT_FRAG = /* glsl */ `
     vec4 sampled = texture2D(tDiffuse, vUv);
     vec3 sourceColor = fxaaSceneColor();
     vec3 color = temporalSceneColor(sourceColor) * contactShadowFactor() * uExposure;
-    color += bloomColor() * uBloomStrength * uBloomEnabled;
+    color += bloomColor() * uBloomStrength;
     color = aerialPerspective(color);
     color = (color - 0.5) * uContrast + 0.5;
 
