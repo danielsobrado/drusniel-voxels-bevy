@@ -39,8 +39,28 @@ export interface TreeParityEvidenceCapture {
   metrics?: TreeParityEvidenceMetricRule[];
 }
 
+export interface TreeParityAcceptanceVisualPaths {
+  luminanceMean?: string;
+  luminanceStdDev?: string;
+  maxViewBlendDelta?: string;
+  nearImpostorColorDelta?: string;
+  boundaryHoleRatio?: string;
+  boundaryDoubleDrawRatio?: string;
+}
+
+export interface TreeParityAcceptanceEvidenceConfig {
+  id?: string;
+  visualArtifact: string;
+  baselinePerfArtifact: string;
+  impostorPerfArtifact: string;
+  visualPaths?: TreeParityAcceptanceVisualPaths;
+  baselineFrameMsP95Path?: string;
+  impostorFrameMsP95Path?: string;
+}
+
 export interface TreeParityEvidenceManifest {
   captures: TreeParityEvidenceCapture[];
+  acceptance?: TreeParityAcceptanceEvidenceConfig;
 }
 
 export interface TreeParityEvidenceFileInfo {
