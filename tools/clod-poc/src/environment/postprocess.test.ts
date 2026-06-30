@@ -3,6 +3,7 @@ import {
   DEFAULT_POST_PROCESS_SETTINGS,
   GOD_RAYS_SCREEN_SAMPLES,
   POSTPROCESS_SHADER_TEST_HOOKS,
+  applyPostProcessQueryOverrides,
   parsePostProcessSettings,
 } from "./postprocess.js";
 
@@ -47,6 +48,37 @@ postprocess:
       bloomStrength: 0.4,
       bloomRadius: 0.6,
     });
+  });
+
+  it("applies URL ablation overrides", () => {
+    const params = new URLSearchParams("postmin=1&bloom=0&grade=0&toneMap=agx");
+    expect(applyPostProcessQueryOverrides({
+      ...DEFAULT_POST_PROCESS_SETTINGS,
+      exposure: 1.8,
+      contrast: 1.4,
+      saturation: 0.5,
+      vignette: 0.7,
+      bloomEnabled: true,
+    }, params)).toMatchObject({
+      enabled: true,
+      exposure: 1,
+      contrast: 1,
+      saturation: 1,
+      vignette: 0,
+      bloomEnabled: false,
+      godRaysMode: "off",
+      toneMapping: "agx",
+    });
+  });
+
+  it("lets fx=0 disable the post stack", () => {
+    expect(applyPostProcessQueryOverrides(DEFAULT_POST_PROCESS_SETTINGS, new URLSearchParams("fx=0")))
+      .toMatchObject({
+        enabled: false,
+        debugMode: "off",
+        bloomEnabled: false,
+        godRaysMode: "off",
+      });
   });
 
   it("defaults god rays off so existing scenes are unchanged", () => {
