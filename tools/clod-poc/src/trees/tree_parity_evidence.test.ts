@@ -71,6 +71,50 @@ describe("TREE-12 parity manifest capture validation", () => {
       }],
     })).toEqual([{ captureId: "missing-artifact", message: "capture.perfCase requires perf artifact" }]);
   });
+
+  it("rejects duplicate capture ids and artifact paths", () => {
+    const failures = validateTreeParityManifestCaptureConfig({
+      captures: [
+        {
+          id: "same-id",
+          artifacts: {
+            image: "shots/tree.png",
+            stats: "shots/tree-stats.json",
+          },
+        },
+        {
+          id: "same-id",
+          artifacts: {
+            image: "shots/tree.png",
+          },
+        },
+      ],
+    });
+
+    expect(failures).toEqual(expect.arrayContaining([
+      { captureId: "same-id", message: "duplicate capture id: same-id" },
+      { captureId: "same-id", message: "image artifact duplicates same-id.image: shots/tree.png" },
+    ]));
+  });
+
+  it("rejects empty artifact paths and metric rules without matching artifacts", () => {
+    const failures = validateTreeParityManifestCaptureConfig({
+      captures: [{
+        id: "broken-metric",
+        artifacts: { stats: "" },
+        metrics: [
+          { artifact: "stats", path: "", equals: true },
+          { artifact: "perf", path: "snapshot.counters.value", nonZero: true },
+        ],
+      }],
+    });
+
+    expect(failures).toEqual(expect.arrayContaining([
+      { captureId: "broken-metric", message: "stats artifact path is required" },
+      { captureId: "broken-metric", message: "metric path is required" },
+      { captureId: "broken-metric", message: "metric snapshot.counters.value has no perf artifact configured" },
+    ]));
+  });
 });
 
 describe("TREE-12 parity capture command generation", () => {
