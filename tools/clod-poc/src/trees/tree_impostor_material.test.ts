@@ -86,6 +86,8 @@ describe("tree impostor material contracts", () => {
     expect(TREE_IMPOSTOR_VERTEX_SHADER).toContain("varying float vTreeImpostorLodDitherRole");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("uniform sampler2D normalDepthMap");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("treeImpostorRelight");
+    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("float sun = clamp");
+    expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("vec3 transmission");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("treeImpostorDitherKeep");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("return ign < fade");
     expect(TREE_IMPOSTOR_FRAGMENT_SHADER).toContain("return ign >= 1.0 - fade");
@@ -105,6 +107,8 @@ describe("tree impostor material contracts", () => {
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("vTreeImpostorBlendWeights.x");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("normalDepthMap");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorRelight");
+    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorBlendPackedNormal");
+    expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("inversesqrt");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("treeImpostorDitherKeep");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("return ign < fade");
     expect(TREE_IMPOSTOR_BLEND_FRAGMENT_SHADER).toContain("return ign >= 1.0 - fade");

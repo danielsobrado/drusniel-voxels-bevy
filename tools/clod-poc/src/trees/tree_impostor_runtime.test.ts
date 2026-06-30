@@ -7,6 +7,7 @@ import {
   type TreeImpostorAtlas,
 } from "./index.js";
 import {
+  blendTreeImpostorPackedNormals,
   createTreeImpostorBlendAttributes,
   decodeAndLightTreeImpostorSample,
   TREE_IMPOSTOR_BLEND_SAMPLE_COUNT,
@@ -78,6 +79,56 @@ describe("tree impostor runtime contract", () => {
     expect(lit[1]).toBeGreaterThan(lit[0]);
     expect(lit[2]).toBeGreaterThan(lit[1]);
     expect(lit[3]).toBeCloseTo(0.2, 6);
+  });
+
+  it("normalizes weighted normal blends after decoding packed samples", () => {
+    const blended = blendTreeImpostorPackedNormals([
+      {
+        normalDepth: [
+          encodeTreeImpostorNormalComponent(1),
+          encodeTreeImpostorNormalComponent(0),
+          encodeTreeImpostorNormalComponent(0),
+          0,
+        ],
+        weight: 0.5,
+      },
+      {
+        normalDepth: [
+          encodeTreeImpostorNormalComponent(0),
+          encodeTreeImpostorNormalComponent(1),
+          encodeTreeImpostorNormalComponent(0),
+          0,
+        ],
+        weight: 0.5,
+      },
+    ]);
+    const length = Math.hypot(blended[0], blended[1], blended[2]);
+    expect(length).toBeCloseTo(1, 6);
+    expect(blended[0]).toBeGreaterThan(0.7);
+    expect(blended[1]).toBeGreaterThan(0.7);
+  });
+
+  it("clamps relit impostor colors under direct sun", () => {
+    const lit = decodeAndLightTreeImpostorSample({
+      albedoCoverage: [1, 1, 1, 1],
+      normalDepth: [
+        encodeTreeImpostorNormalComponent(0),
+        encodeTreeImpostorNormalComponent(1),
+        encodeTreeImpostorNormalComponent(0),
+        0.5,
+      ],
+      weight: 1,
+    }, {
+      sunDirection: new THREE.Vector3(0, 1, 0),
+      sunColor: new THREE.Color(4, 4, 4),
+      skyLight: new THREE.Color(1, 1, 1),
+      groundLight: new THREE.Color(1, 1, 1),
+      yawRadians: 0,
+    });
+
+    expect(lit[0]).toBeLessThanOrEqual(1);
+    expect(lit[1]).toBeLessThanOrEqual(1);
+    expect(lit[2]).toBeLessThanOrEqual(1);
   });
 });
 

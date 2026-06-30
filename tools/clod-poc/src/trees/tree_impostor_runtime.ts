@@ -38,6 +38,15 @@ export interface TreeImpostorLightingInput {
   yawRadians: number;
 }
 
+export interface TreeImpostorNormalBlendSample {
+  normalDepth: [number, number, number, number];
+  weight: number;
+}
+
+const TREE_IMPOSTOR_LIGHT_AMBIENT = 0.25;
+const TREE_IMPOSTOR_LIGHT_TRANSMISSION = 0.22;
+const TREE_IMPOSTOR_LIGHT_SUN_MAX = 0.85;
+
 export function createTreeImpostorBlendAttributes(instanceCount: number): TreeImpostorBlendAttributes {
   const safeCount = Math.max(0, Math.floor(instanceCount));
   return {
@@ -95,14 +104,34 @@ export function decodeAndLightTreeImpostorSample(
     decodeTreeImpostorNormalComponent(sample.normalDepth[1]),
     decodeTreeImpostorNormalComponent(sample.normalDepth[2]),
   );
-  const normal = rotateNormalY(captureNormal, lighting.yawRadians).normalize();
-  const sun = Math.max(0, normal.dot(lighting.sunDirection.clone().normalize()));
+  const normal = rotateNormalY(safeNormalize(captureNormal), lighting.yawRadians).normalize();
+  const lightDir = lighting.sunDirection.clone().normalize();
+  const sun = Math.min(Math.max(0, normal.dot(lightDir)), TREE_IMPOSTOR_LIGHT_SUN_MAX);
   const sky = clamp01(normal.y * 0.5 + 0.5);
-  const hemi = lighting.groundLight.clone().lerp(lighting.skyLight, sky);
-  const direct = lighting.sunColor.clone().multiplyScalar(sun);
-  const rgb = new THREE.Color(albedo.x, albedo.y, albedo.z)
-    .multiply(hemi.add(direct).addScalar(0.25));
-  return [clamp01(rgb.r), clamp01(rgb.g), clamp01(rgb.b), coverage * sample.weight];
+  const hemi = colorToVector(lighting.groundLight).lerp(colorToVector(lighting.skyLight), sky);
+  const direct = colorToVector(lighting.sunColor).multiplyScalar(sun);
+  const transmission = albedo.clone()
+    .multiply(colorToVector(lighting.sunColor))
+    .multiplyScalar(Math.max(0, normal.clone().negate().dot(lightDir)) * TREE_IMPOSTOR_LIGHT_TRANSMISSION);
+  const rgb = albedo.clone()
+    .multiply(hemi.add(direct).addScalar(TREE_IMPOSTOR_LIGHT_AMBIENT))
+    .add(transmission);
+  return [clamp01(rgb.x), clamp01(rgb.y), clamp01(rgb.z), coverage * sample.weight];
+}
+
+export function blendTreeImpostorPackedNormals(
+  samples: readonly TreeImpostorNormalBlendSample[],
+): [number, number, number] {
+  const blended = new THREE.Vector3();
+  for (const sample of samples) {
+    blended.addScaledVector(new THREE.Vector3(
+      decodeTreeImpostorNormalComponent(sample.normalDepth[0]),
+      decodeTreeImpostorNormalComponent(sample.normalDepth[1]),
+      decodeTreeImpostorNormalComponent(sample.normalDepth[2]),
+    ), sample.weight);
+  }
+  const normal = safeNormalize(blended);
+  return [normal.x, normal.y, normal.z];
 }
 
 function toRuntimeSample(sample: OctahedralBlendSample): TreeImpostorRuntimeSample {
@@ -128,6 +157,18 @@ function rotateNormalY(normal: THREE.Vector3, yawRadians: number): THREE.Vector3
     normal.y,
     -sin * normal.x + cos * normal.z,
   );
+}
+
+function colorToVector(color: THREE.Color): THREE.Vector3 {
+  return new THREE.Vector3(color.r, color.g, color.b);
+}
+
+function safeNormalize(vector: THREE.Vector3): THREE.Vector3 {
+  if (!Number.isFinite(vector.x) || !Number.isFinite(vector.y) || !Number.isFinite(vector.z)) {
+    return new THREE.Vector3(0, 1, 0);
+  }
+  if (vector.lengthSq() <= 1e-12) return new THREE.Vector3(0, 1, 0);
+  return vector.clone().normalize();
 }
 
 function clamp01(value: number): number {
