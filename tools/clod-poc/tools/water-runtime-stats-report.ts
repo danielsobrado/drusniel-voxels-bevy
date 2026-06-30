@@ -3,6 +3,8 @@ import * as THREE from "three";
 import {
   WaterClipmap,
   WaterField,
+  buildRiverTerrainWetnessMask,
+  collectRiverTerrainWetnessMaskStats,
   collectWaterClipmapRuntimeStats,
   parseWaterConfig,
   resolveWaterConfig,
@@ -13,6 +15,7 @@ import { surfaceHeight } from "../src/terrain/terrain.js";
 
 const WATER_CONFIG_PATH = "config/water.yaml";
 const DEFAULT_WORLD_CELLS = 512;
+const REPORT_WETNESS_MASK_RESOLUTION = 128;
 
 function main(): void {
   const waterConfig = resolveWaterConfig(
@@ -31,6 +34,11 @@ function main(): void {
     cameraPosition,
     worldBounds: { cellsX: DEFAULT_WORLD_CELLS, cellsZ: DEFAULT_WORLD_CELLS },
   });
+  const wetnessMask = buildRiverTerrainWetnessMask({
+    field,
+    worldCells: DEFAULT_WORLD_CELLS,
+    resolution: REPORT_WETNESS_MASK_RESOLUTION,
+  });
 
   try {
     clipmap.update(0.016, cameraPosition);
@@ -41,8 +49,10 @@ function main(): void {
       waterEnabled: waterConfig.enabled,
       clipmap: stats,
       reflection: resolveWaterReflectionPolicy(waterConfig.visual.reflection, "webgl"),
+      wetnessMask: collectRiverTerrainWetnessMaskStats(wetnessMask),
     }, null, 2));
   } finally {
+    wetnessMask.dispose();
     clipmap.dispose();
   }
 }
