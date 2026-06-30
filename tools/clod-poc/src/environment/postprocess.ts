@@ -36,6 +36,8 @@ export interface PostProcessSettings {
   taaHistoryWeight?: number;
   taaDepthThreshold?: number;
   taaSharpen?: number;
+  taaJitterEnabled?: boolean;
+  taaJitterScale?: number;
   contactShadowsEnabled?: boolean;
   contactShadowsStrength?: number;
   contactShadowsRadiusPx?: number;
@@ -80,6 +82,8 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   taaHistoryWeight: 0.88,
   taaDepthThreshold: 0.0025,
   taaSharpen: 0.06,
+  taaJitterEnabled: true,
+  taaJitterScale: 1.0,
   contactShadowsEnabled: false,
   contactShadowsStrength: 0.25,
   contactShadowsRadiusPx: 2.0,
@@ -180,6 +184,7 @@ export function applyPostProcessQueryOverrides(
     next.bloomEnabled = false;
     next.fxaaEnabled = false;
     next.taaEnabled = false;
+    next.taaJitterEnabled = false;
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
@@ -200,6 +205,7 @@ export function applyPostProcessQueryOverrides(
     next.bloomEnabled = false;
     next.fxaaEnabled = false;
     next.taaEnabled = false;
+    next.taaJitterEnabled = false;
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
@@ -217,6 +223,11 @@ export function applyPostProcessQueryOverrides(
 
   const taa = flagValue(searchParams, "taa");
   if (taa !== null) next.taaEnabled = taa;
+
+  const taaJitter = flagValue(searchParams, "taaJitter")
+    ?? flagValue(searchParams, "taajitter")
+    ?? flagValue(searchParams, "jitter");
+  if (taaJitter !== null) next.taaJitterEnabled = taaJitter;
 
   const contactShadows = flagValue(searchParams, "contactShadows")
     ?? flagValue(searchParams, "contactshadows")
@@ -307,6 +318,8 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       taaHistoryWeight: finiteNumber(taa.history_weight, fallback.taaHistoryWeight),
       taaDepthThreshold: finiteNumber(taa.depth_threshold, fallback.taaDepthThreshold),
       taaSharpen: finiteNumber(taa.sharpen, fallback.taaSharpen),
+      taaJitterEnabled: booleanValue(taa.jitter_enabled, fallback.taaJitterEnabled),
+      taaJitterScale: finiteNumber(taa.jitter_scale, fallback.taaJitterScale),
       contactShadowsEnabled: booleanValue(contactShadows.enabled, fallback.contactShadowsEnabled),
       contactShadowsStrength: finiteNumber(contactShadows.strength, fallback.contactShadowsStrength),
       contactShadowsRadiusPx: finiteNumber(contactShadows.radius_px, fallback.contactShadowsRadiusPx),
@@ -339,6 +352,8 @@ export const GOD_RAYS_SCREEN_SAMPLES: Record<"cheap" | "heavy", number> = {
   cheap: 24,
   heavy: 60,
 };
+
+const TAA_JITTER_SEQUENCE_LENGTH = 8;
 
 const FULLSCREEN_VERT = /* glsl */ `
   varying vec2 vUv;
@@ -588,6 +603,23 @@ function cameraClip(camera: THREE.Camera, key: "near" | "far", fallback: number)
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function halton(index: number, base: number): number {
+  let result = 0;
+  let fraction = 1 / base;
+  let current = index;
+  while (current > 0) {
+    result += fraction * (current % base);
+    current = Math.floor(current / base);
+    fraction /= base;
+  }
+  return result;
+}
+
+function setProjectionMatrixInverse(camera: THREE.Camera): void {
+  const cameraWithInverse = camera as THREE.Camera & { projectionMatrixInverse?: THREE.Matrix4 };
+  cameraWithInverse.projectionMatrixInverse?.copy(camera.projectionMatrix).invert();
+}
+
 function createSceneTarget(name: string): THREE.WebGLRenderTarget {
   const depthTexture = new THREE.DepthTexture(1, 1);
   depthTexture.format = THREE.DepthFormat;
@@ -633,7 +665,9 @@ export class PostProcessPipeline {
   private readonly currentViewProjection = new THREE.Matrix4();
   private readonly inverseCurrentViewProjection = new THREE.Matrix4();
   private readonly previousViewProjection = new THREE.Matrix4();
+  private readonly originalProjectionMatrix = new THREE.Matrix4();
   private historyReady = false;
+  private jitterFrame = 0;
   private settings: Required<PostProcessSettings>;
 
   constructor(renderer: THREE.WebGLRenderer, settings: PostProcessSettings) {
@@ -723,8 +757,15 @@ export class PostProcessPipeline {
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
     const previousTaaEnabled = this.settings?.taaEnabled ?? false;
+    const previousTaaJitterEnabled = this.settings?.taaJitterEnabled ?? false;
     this.settings = withPostProcessDefaults({ ...this.settings, ...settings });
-    if (previousTaaEnabled !== this.settings.taaEnabled) this.historyReady = false;
+    if (
+      previousTaaEnabled !== this.settings.taaEnabled
+      || previousTaaJitterEnabled !== this.settings.taaJitterEnabled
+    ) {
+      this.historyReady = false;
+      this.jitterFrame = 0;
+    }
     this.renderer.toneMapping = toneMappingModeToThree(this.settings.toneMapping);
     this.copyMaterial.uniforms.uOpacity.value = this.settings.opacity;
     this.outputMaterial.uniforms.uFxaaEnabled.value = this.settings.fxaaEnabled ? 1 : 0;
@@ -756,15 +797,46 @@ export class PostProcessPipeline {
     this.outputMaterial.uniforms.uAerialPerspectiveColor.value.setRGB(...this.settings.aerialPerspectiveColor);
   }
 
+  private shouldJitterCamera(): boolean {
+    return this.settings.enabled
+      && this.settings.debugMode === "output"
+      && this.settings.taaEnabled
+      && this.settings.taaJitterEnabled
+      && this.settings.taaJitterScale > 0;
+  }
+
+  private applyCameraJitter(camera: THREE.Camera): void {
+    const width = Math.max(1, this.drawingBufferSize.x || this.target.width);
+    const height = Math.max(1, this.drawingBufferSize.y || this.target.height);
+    const sampleIndex = (this.jitterFrame % TAA_JITTER_SEQUENCE_LENGTH) + 1;
+    const jitterX = (halton(sampleIndex, 2) - 0.5) * 2 * this.settings.taaJitterScale / width;
+    const jitterY = (halton(sampleIndex, 3) - 0.5) * 2 * this.settings.taaJitterScale / height;
+    this.jitterFrame += 1;
+
+    this.originalProjectionMatrix.copy(camera.projectionMatrix);
+    camera.projectionMatrix.elements[8] += jitterX;
+    camera.projectionMatrix.elements[9] += jitterY;
+    setProjectionMatrixInverse(camera);
+  }
+
+  private restoreCameraProjection(camera: THREE.Camera): void {
+    camera.projectionMatrix.copy(this.originalProjectionMatrix);
+    setProjectionMatrixInverse(camera);
+  }
+
   render(scene: THREE.Scene, camera: THREE.Camera): void {
     if (!this.settings.enabled || this.settings.debugMode === "off") {
       this.historyReady = false;
+      this.jitterFrame = 0;
       this.renderer.setRenderTarget(null);
       this.renderer.render(scene, camera);
       return;
     }
 
     camera.updateMatrixWorld();
+    const shouldJitter = this.shouldJitterCamera();
+    if (shouldJitter) this.applyCameraJitter(camera);
+
     this.currentViewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.inverseCurrentViewProjection.copy(this.currentViewProjection).invert();
 
@@ -780,7 +852,11 @@ export class PostProcessPipeline {
     this.copyMaterial.uniforms.tDiffuse.value = this.target.texture;
 
     this.renderer.setRenderTarget(this.target);
-    this.renderer.render(scene, camera);
+    try {
+      this.renderer.render(scene, camera);
+    } finally {
+      if (shouldJitter) this.restoreCameraProjection(camera);
+    }
 
     this.renderer.setRenderTarget(null);
     this.fullscreenMesh.material = this.settings.debugMode === "copy"
@@ -797,6 +873,7 @@ export class PostProcessPipeline {
     } else {
       this.previousViewProjection.copy(this.currentViewProjection);
       this.historyReady = false;
+      this.jitterFrame = 0;
     }
   }
 
