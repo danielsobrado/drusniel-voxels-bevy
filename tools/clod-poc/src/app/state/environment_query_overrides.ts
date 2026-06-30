@@ -71,6 +71,10 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   const timings = flagParam(searchParams, "timings", "profile");
   if (timings !== null) state.profileEnabled = timings;
 
+  apply(searchParams, ["renderScale", "renderscale", "postScale", "postprocessScale"], (value) => {
+    state.postProcessRenderScale = clamp(value, 0.5, 1);
+  });
+
   const fx = flagParam(searchParams, "fx");
   if (fx === false) {
     state.postProcessEnabled = false;
