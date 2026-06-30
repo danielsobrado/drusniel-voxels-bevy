@@ -5,6 +5,7 @@ import {
   TreeGpuRingCompute,
   treeGpuRingGroupCapacity,
   TREE_GPU_RING_GROUP_COUNT,
+  TREE_GPU_RING_SHADOW_GROUP_COUNT,
   treeGpuRingKey,
   treeGpuRingSlotCount,
   type TreeGpuRingIndexCounts,
@@ -221,7 +222,9 @@ function validateTreeGpuRingAgainstCpu(
     Math.round(center.x / TREE_GPU_RING_CELL),
     Math.round(center.z / TREE_GPU_RING_CELL),
     input.state.stats.groupCounts.join(","),
+    input.state.stats.shadowGroupCounts.join(","),
     input.state.stats.overflowed ? 1 : 0,
+    input.state.stats.shadowOverflowed ? 1 : 0,
   ].join("|");
   if (signature === input.state.lastValidationSignature) return;
   input.state.lastValidationSignature = signature;
@@ -291,7 +294,9 @@ function createTreeGpuRingStats(status: TreeGpuRingStats["status"]): TreeGpuRing
     acceptedCandidates: 0,
     counts: { near: 0, mid: 0, far: 0, impostor: 0 },
     groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
+    shadowGroupCounts: new Array<number>(TREE_GPU_RING_SHADOW_GROUP_COUNT).fill(0),
     overflowed: false,
+    shadowOverflowed: false,
     submitMs: null,
     readbackMs: null,
     skippedDispatches: 0,
