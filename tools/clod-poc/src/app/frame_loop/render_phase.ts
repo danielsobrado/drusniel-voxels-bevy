@@ -226,6 +226,8 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       treeGpuCandidateCount: treeStats?.gpuCandidateCount ?? 0,
       treeGpuAcceptedCount: treeStats?.gpuAcceptedCount ?? 0,
       treeGpuVisibleCount: treeStats?.gpuVisibleCount ?? 0,
+      treeGpuShadowCasterCount: treeStats?.gpuShadowCasterCount ?? 0,
+      treeGpuShadowOverflowed: treeStats?.gpuShadowOverflowed ? 1 : 0,
       treeGpuDispatchMs: treeStats?.gpuDispatchMs ?? null,
       customPropGpuStatus: propStats?.gpuStatus ?? "unknown",
       customPropTotalInstances: propStats?.totalInstances ?? 0,
