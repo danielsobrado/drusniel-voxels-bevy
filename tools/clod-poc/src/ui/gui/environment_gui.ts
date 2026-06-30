@@ -30,6 +30,9 @@ export function createEnvironmentGui(
     bloomThreshold: state.postProcessBloomThreshold,
     bloomStrength: state.postProcessBloomStrength,
     bloomRadius: state.postProcessBloomRadius,
+    fxaaEnabled: state.postProcessFxaaEnabled,
+    fxaaEdgeThreshold: state.postProcessFxaaEdgeThreshold,
+    fxaaSubpixelBlend: state.postProcessFxaaSubpixelBlend,
     taaEnabled: state.postProcessTaaEnabled,
     taaHistoryWeight: state.postProcessTaaHistoryWeight,
     taaDepthThreshold: state.postProcessTaaDepthThreshold,
@@ -118,6 +121,9 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessBloomThreshold", 0, 2, 0.01).name("bloom threshold").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBloomStrength", 0, 1.5, 0.01).name("bloom strength").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBloomRadius", 0, 2, 0.01).name("bloom radius").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessFxaaEnabled").name("FXAA-lite (WebGL)").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessFxaaEdgeThreshold", 0.03, 0.33, 0.005).name("FXAA edge threshold").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessFxaaSubpixelBlend", 0, 1, 0.01).name("FXAA subpixel").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessClarityEnabled").name("clarity (WebGL)").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessClaritySharpen", 0, 0.5, 0.01).name("clarity sharpen").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessClarityDither", 0, 0.02, 0.0005).name("clarity dither").onChange(applyPostProcessSettings),
@@ -149,6 +155,9 @@ export function createEnvironmentGui(
       state.postProcessBloomThreshold = DEFAULT_POST_PROCESS_SETTINGS.bloomThreshold;
       state.postProcessBloomStrength = DEFAULT_POST_PROCESS_SETTINGS.bloomStrength;
       state.postProcessBloomRadius = DEFAULT_POST_PROCESS_SETTINGS.bloomRadius;
+      state.postProcessFxaaEnabled = DEFAULT_POST_PROCESS_SETTINGS.fxaaEnabled;
+      state.postProcessFxaaEdgeThreshold = DEFAULT_POST_PROCESS_SETTINGS.fxaaEdgeThreshold;
+      state.postProcessFxaaSubpixelBlend = DEFAULT_POST_PROCESS_SETTINGS.fxaaSubpixelBlend;
       state.postProcessClarityEnabled = DEFAULT_POST_PROCESS_SETTINGS.clarityEnabled;
       state.postProcessClaritySharpen = DEFAULT_POST_PROCESS_SETTINGS.claritySharpen;
       state.postProcessClarityDither = DEFAULT_POST_PROCESS_SETTINGS.clarityDither;
