@@ -29,6 +29,9 @@ export interface PostProcessSettings {
   bloomThreshold?: number;
   bloomStrength?: number;
   bloomRadius?: number;
+  fxaaEnabled?: boolean;
+  fxaaEdgeThreshold?: number;
+  fxaaSubpixelBlend?: number;
   taaEnabled?: boolean;
   taaHistoryWeight?: number;
   taaDepthThreshold?: number;
@@ -70,6 +73,9 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   bloomThreshold: 0.85,
   bloomStrength: 0.18,
   bloomRadius: 0.35,
+  fxaaEnabled: true,
+  fxaaEdgeThreshold: 0.125,
+  fxaaSubpixelBlend: 0.75,
   taaEnabled: false,
   taaHistoryWeight: 0.88,
   taaDepthThreshold: 0.0025,
@@ -172,6 +178,7 @@ export function applyPostProcessQueryOverrides(
     next.enabled = false;
     next.debugMode = "off";
     next.bloomEnabled = false;
+    next.fxaaEnabled = false;
     next.taaEnabled = false;
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
@@ -191,6 +198,7 @@ export function applyPostProcessQueryOverrides(
     next.debugMode = "output";
     neutralGrade(next);
     next.bloomEnabled = false;
+    next.fxaaEnabled = false;
     next.taaEnabled = false;
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
@@ -203,6 +211,9 @@ export function applyPostProcessQueryOverrides(
 
   const bloom = flagValue(searchParams, "bloom");
   if (bloom !== null) next.bloomEnabled = bloom;
+
+  const fxaa = flagValue(searchParams, "fxaa") ?? flagValue(searchParams, "aa");
+  if (fxaa !== null) next.fxaaEnabled = fxaa;
 
   const taa = flagValue(searchParams, "taa");
   if (taa !== null) next.taaEnabled = taa;
@@ -270,6 +281,7 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
     if (!isRecord(raw)) return fallback;
     const postprocess = isRecord(raw.postprocess) ? raw.postprocess : raw;
     const bloom = isRecord(postprocess.bloom) ? postprocess.bloom : {};
+    const fxaa = isRecord(postprocess.fxaa) ? postprocess.fxaa : {};
     const taa = isRecord(postprocess.taa) ? postprocess.taa : {};
     const contactShadows = isRecord(postprocess.contact_shadows) ? postprocess.contact_shadows : {};
     const clarity = isRecord(postprocess.clarity) ? postprocess.clarity : {};
@@ -288,6 +300,9 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       bloomThreshold: finiteNumber(bloom.threshold, fallback.bloomThreshold),
       bloomStrength: finiteNumber(bloom.strength, fallback.bloomStrength),
       bloomRadius: finiteNumber(bloom.radius, fallback.bloomRadius),
+      fxaaEnabled: booleanValue(fxaa.enabled, fallback.fxaaEnabled),
+      fxaaEdgeThreshold: finiteNumber(fxaa.edge_threshold, fallback.fxaaEdgeThreshold),
+      fxaaSubpixelBlend: finiteNumber(fxaa.subpixel_blend, fallback.fxaaSubpixelBlend),
       taaEnabled: booleanValue(taa.enabled, fallback.taaEnabled),
       taaHistoryWeight: finiteNumber(taa.history_weight, fallback.taaHistoryWeight),
       taaDepthThreshold: finiteNumber(taa.depth_threshold, fallback.taaDepthThreshold),
@@ -358,6 +373,9 @@ const OUTPUT_FRAG = /* glsl */ `
   uniform mat4 uInvCurrentViewProjection;
   uniform mat4 uPrevViewProjection;
   uniform float uHistoryReady;
+  uniform float uFxaaEnabled;
+  uniform float uFxaaEdgeThreshold;
+  uniform float uFxaaSubpixelBlend;
   uniform float uTaaEnabled;
   uniform float uTaaHistoryWeight;
   uniform float uTaaDepthThreshold;
@@ -385,6 +403,10 @@ const OUTPUT_FRAG = /* glsl */ `
   varying vec2 vUv;
 
   #include <packing>
+
+  float luminance(vec3 color) {
+    return dot(color, vec3(0.299, 0.587, 0.114));
+  }
 
   float interleavedNoise(vec2 p) {
     return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
@@ -418,6 +440,25 @@ const OUTPUT_FRAG = /* glsl */ `
     bloom += bloomSample(vec2(0.0, 2.0), 0.04);
     bloom += bloomSample(vec2(0.0, -2.0), 0.04);
     return bloom;
+  }
+
+  vec3 fxaaSceneColor() {
+    vec3 center = texture2D(tDiffuse, vUv).rgb;
+    if (uFxaaEnabled < 0.5) return center;
+
+    vec3 north = texture2D(tDiffuse, vUv + vec2(0.0, uTexelSize.y)).rgb;
+    vec3 south = texture2D(tDiffuse, vUv - vec2(0.0, uTexelSize.y)).rgb;
+    vec3 east = texture2D(tDiffuse, vUv + vec2(uTexelSize.x, 0.0)).rgb;
+    vec3 west = texture2D(tDiffuse, vUv - vec2(uTexelSize.x, 0.0)).rgb;
+
+    float centerLuma = luminance(center);
+    float minLuma = min(centerLuma, min(min(luminance(north), luminance(south)), min(luminance(east), luminance(west))));
+    float maxLuma = max(centerLuma, max(max(luminance(north), luminance(south)), max(luminance(east), luminance(west))));
+    float contrast = maxLuma - minLuma;
+    if (contrast < clamp(uFxaaEdgeThreshold, 0.001, 1.0)) return center;
+
+    vec3 cross = (north + south + east + west) * 0.25;
+    return mix(center, cross, clamp(uFxaaSubpixelBlend, 0.0, 1.0));
   }
 
   vec3 sceneBlur() {
@@ -506,12 +547,13 @@ const OUTPUT_FRAG = /* glsl */ `
 
   void main() {
     vec4 sampled = texture2D(tDiffuse, vUv);
-    vec3 color = temporalSceneColor(sampled.rgb) * contactShadowFactor() * uExposure;
+    vec3 sourceColor = fxaaSceneColor();
+    vec3 color = temporalSceneColor(sourceColor) * contactShadowFactor() * uExposure;
     color += bloomColor() * uBloomStrength * uBloomEnabled;
     color = aerialPerspective(color);
     color = (color - 0.5) * uContrast + 0.5;
 
-    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    float luma = luminance(color);
     color = mix(vec3(luma), color, uSaturation);
 
     vec2 center = vUv - 0.5;
@@ -622,6 +664,9 @@ export class PostProcessPipeline {
         uInvCurrentViewProjection: { value: this.inverseCurrentViewProjection },
         uPrevViewProjection: { value: this.previousViewProjection },
         uHistoryReady: { value: 0 },
+        uFxaaEnabled: { value: this.settings.fxaaEnabled ? 1 : 0 },
+        uFxaaEdgeThreshold: { value: this.settings.fxaaEdgeThreshold },
+        uFxaaSubpixelBlend: { value: this.settings.fxaaSubpixelBlend },
         uTaaEnabled: { value: this.settings.taaEnabled ? 1 : 0 },
         uTaaHistoryWeight: { value: this.settings.taaHistoryWeight },
         uTaaDepthThreshold: { value: this.settings.taaDepthThreshold },
@@ -682,6 +727,9 @@ export class PostProcessPipeline {
     if (previousTaaEnabled !== this.settings.taaEnabled) this.historyReady = false;
     this.renderer.toneMapping = toneMappingModeToThree(this.settings.toneMapping);
     this.copyMaterial.uniforms.uOpacity.value = this.settings.opacity;
+    this.outputMaterial.uniforms.uFxaaEnabled.value = this.settings.fxaaEnabled ? 1 : 0;
+    this.outputMaterial.uniforms.uFxaaEdgeThreshold.value = this.settings.fxaaEdgeThreshold;
+    this.outputMaterial.uniforms.uFxaaSubpixelBlend.value = this.settings.fxaaSubpixelBlend;
     this.outputMaterial.uniforms.uTaaEnabled.value = this.settings.taaEnabled ? 1 : 0;
     this.outputMaterial.uniforms.uTaaHistoryWeight.value = this.settings.taaHistoryWeight;
     this.outputMaterial.uniforms.uTaaDepthThreshold.value = this.settings.taaDepthThreshold;
