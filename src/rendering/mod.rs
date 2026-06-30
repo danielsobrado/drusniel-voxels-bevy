@@ -6,6 +6,8 @@
 //! - [`effects`] - Screen-space and post-process effects
 //! - [`lighting`] - GI and ray-query backends
 //! - [`water`] - Water shading, reflections, displacement, and finish passes
+//! - [`water_clipmap`] - Disabled-by-default far/large water clipmap skeleton
+//! - [`water_ownership`] - Water renderer ownership counters and debug state
 //! - [`shadows`] - Shadow budget and PCSS compatibility config
 //! - [`camera_modes`] - Cinematic, cutscene, and photo mode systems
 //! - [`device`] - GPU capabilities and render quality settings
@@ -21,6 +23,8 @@ pub mod materials;
 pub mod procedural_support_maps;
 pub mod shadows;
 pub mod water;
+pub mod water_clipmap;
+pub mod water_ownership;
 
 pub mod clod_shadow_assets;
 pub mod clod_shadow_bench_guard;
@@ -41,7 +45,6 @@ pub mod naadf;
 pub use ao_config::AmbientOcclusionConfig;
 pub use camera_modes::cinematic::{CinematicCamera, CinematicEvent, CinematicPlugin};
 pub use camera_modes::cinematic_config::CinematicConfig;
-pub use camera_modes::photo_mode::PhotoModePlugin;
 pub use device::quality::RenderQualityPreset;
 pub use effects::ssao::{SsaoPlugin, SsaoSupported, ssao_camera_components};
 pub use lighting::adaptive_gi::{AdaptiveGIPlugin, AdaptiveGIQuality, AdaptiveGISettings};
@@ -54,6 +57,8 @@ pub use materials::building::{
 pub use materials::props::{PropMesh, PropsMaterial, PropsMaterialHandle, PropsMaterialType};
 pub use procedural_support_maps::ProceduralSupportMapPlugin;
 pub use terrain_hex_tiling::TerrainTexturingConfig;
+pub use water_clipmap::{WaterClipmapConfig, WaterClipmapPlugin, WaterClipmapStatus};
+pub use water_ownership::{WaterOwnershipPlugin, WaterOwnershipStats, WaterSurfaceOwner};
 
 pub mod adaptive_gi {
     pub use super::lighting::adaptive_gi::*;
@@ -151,8 +156,16 @@ pub mod voxel_ray_backend {
     pub use super::lighting::voxel_ray_backend::*;
 }
 
+pub mod water_clipmap_api {
+    pub use super::water_clipmap::*;
+}
+
 pub mod water_displacement {
     pub use super::water::displacement::*;
+}
+
+pub mod water_ownership_api {
+    pub use super::water_ownership::*;
 }
 
 pub mod water_reflection {
