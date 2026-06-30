@@ -1,11 +1,14 @@
 import { NAADF_SCENES } from "../naadf/integration.js";
 import { RIVER_PARITY_TEST_SCENE } from "../water/riverParityScene.js";
 
+export type EarlySceneRoute = "sanity" | "phase1-terrain" | "phase2";
 export type ShadowProxySceneMode = "enabled" | "off" | "debug-visible" | "low-sun";
 
 export interface SceneRegistryEntry {
   readonly id: string;
   readonly label: string;
+  readonly showInGui?: boolean;
+  readonly earlyRoute?: EarlySceneRoute;
   readonly phase0ConfigKey?: string;
   readonly grassPerf?: boolean;
   readonly treePerf?: boolean;
@@ -35,6 +38,9 @@ const NAADF_PHASE0_CONFIG_KEYS: Record<string, string> = {
 
 const BASE_SCENE_REGISTRY: readonly SceneRegistryEntry[] = [
   { id: "", label: "default" },
+  { id: "sanity", label: "sanity", earlyRoute: "sanity", showInGui: false },
+  { id: "phase1-terrain", label: "phase1 terrain", earlyRoute: "phase1-terrain", showInGui: false },
+  { id: "phase2", label: "phase2", earlyRoute: "phase2", showInGui: false },
   { id: "grass-perf", label: "grass perf", grassPerf: true },
   { id: "trees-perf", label: "trees perf", treePerf: true },
   { id: "forest-floor", label: "forest floor", forestFloor: true },
@@ -169,11 +175,17 @@ export function sceneRegistryEntry(scene: string | null): SceneRegistryEntry | u
 }
 
 export function sceneOptions(): readonly SceneOption[] {
-  return SCENE_REGISTRY.map((scene) => ({ label: scene.label, value: scene.id }));
+  return SCENE_REGISTRY
+    .filter((scene) => scene.showInGui !== false)
+    .map((scene) => ({ label: scene.label, value: scene.id }));
 }
 
 export function sceneOptionsByLabel(): Record<string, string> {
   return Object.fromEntries(sceneOptions().map((scene) => [scene.label, scene.value]));
+}
+
+export function earlySceneRoute(scene: string | null): EarlySceneRoute | undefined {
+  return sceneRegistryEntry(scene)?.earlyRoute;
 }
 
 export function isGrassPerfScene(scene: string | null): boolean {
