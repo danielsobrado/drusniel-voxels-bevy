@@ -22,11 +22,11 @@ export interface PostProcessSettings {
   saturation: number;
   vignette: number;
   debugMode: PostProcessDebugMode;
-  toneMapping: PostProcessToneMapping;
-  bloomEnabled: boolean;
-  bloomThreshold: number;
-  bloomStrength: number;
-  bloomRadius: number;
+  toneMapping?: PostProcessToneMapping;
+  bloomEnabled?: boolean;
+  bloomThreshold?: number;
+  bloomStrength?: number;
+  bloomRadius?: number;
   /** Light-shaft technique to apply after grading (WebGPU pipeline only). */
   godRaysMode: GodRaysMode;
   /** Step size of the screen-space raymarch toward the sun. Higher = longer shafts. */
@@ -39,7 +39,7 @@ export interface PostProcessSettings {
   godRaysExposure: number;
 }
 
-const POST_PROCESS_FALLBACK_SETTINGS: PostProcessSettings = {
+const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   enabled: true,
   opacity: 1.0,
   exposure: 1.0,
@@ -86,7 +86,11 @@ function godRaysMode(value: unknown, fallback: GodRaysMode): GodRaysMode {
     : fallback;
 }
 
-export function parsePostProcessSettings(yamlText = postProcessYaml): PostProcessSettings {
+function withPostProcessDefaults(settings: Partial<PostProcessSettings>): Required<PostProcessSettings> {
+  return { ...POST_PROCESS_FALLBACK_SETTINGS, ...settings };
+}
+
+export function parsePostProcessSettings(yamlText = postProcessYaml): Required<PostProcessSettings> {
   const fallback = POST_PROCESS_FALLBACK_SETTINGS;
   try {
     const raw = load(yamlText);
@@ -119,7 +123,7 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): PostProces
   }
 }
 
-export const DEFAULT_POST_PROCESS_SETTINGS: PostProcessSettings = parsePostProcessSettings();
+export const DEFAULT_POST_PROCESS_SETTINGS: Required<PostProcessSettings> = parsePostProcessSettings();
 
 /** Screen-space raymarch sample count per god-rays mode. Drives shader cost. */
 export const GOD_RAYS_SCREEN_SAMPLES: Record<"cheap" | "heavy", number> = {
@@ -252,11 +256,11 @@ export class PostProcessPipeline {
   private readonly outputMaterial: THREE.ShaderMaterial;
   private readonly fullscreenMesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly drawingBufferSize = new THREE.Vector2();
-  private settings: PostProcessSettings;
+  private settings: Required<PostProcessSettings>;
 
   constructor(renderer: THREE.WebGLRenderer, settings: PostProcessSettings) {
     this.renderer = renderer;
-    this.settings = { ...settings };
+    this.settings = withPostProcessDefaults(settings);
     this.target = new THREE.WebGLRenderTarget(1, 1, {
       depthBuffer: true,
       stencilBuffer: false,
@@ -270,7 +274,7 @@ export class PostProcessPipeline {
     this.copyMaterial = new THREE.ShaderMaterial({
       uniforms: {
         tDiffuse: { value: this.target.texture },
-        uOpacity: { value: settings.opacity },
+        uOpacity: { value: this.settings.opacity },
       },
       vertexShader: FULLSCREEN_VERT,
       fragmentShader: COPY_FRAG,
@@ -283,14 +287,14 @@ export class PostProcessPipeline {
       uniforms: {
         tDiffuse: { value: this.target.texture },
         uTexelSize: { value: new THREE.Vector2(1, 1) },
-        uExposure: { value: settings.exposure },
-        uContrast: { value: settings.contrast },
-        uSaturation: { value: settings.saturation },
-        uVignette: { value: settings.vignette },
-        uBloomEnabled: { value: settings.bloomEnabled ? 1 : 0 },
-        uBloomThreshold: { value: settings.bloomThreshold },
-        uBloomStrength: { value: settings.bloomStrength },
-        uBloomRadius: { value: settings.bloomRadius },
+        uExposure: { value: this.settings.exposure },
+        uContrast: { value: this.settings.contrast },
+        uSaturation: { value: this.settings.saturation },
+        uVignette: { value: this.settings.vignette },
+        uBloomEnabled: { value: this.settings.bloomEnabled ? 1 : 0 },
+        uBloomThreshold: { value: this.settings.bloomThreshold },
+        uBloomStrength: { value: this.settings.bloomStrength },
+        uBloomRadius: { value: this.settings.bloomRadius },
       },
       vertexShader: FULLSCREEN_VERT,
       fragmentShader: OUTPUT_FRAG,
@@ -302,7 +306,7 @@ export class PostProcessPipeline {
     this.fullscreenMesh = new THREE.Mesh(this.fullscreenGeometry, this.outputMaterial);
     this.fullscreenMesh.frustumCulled = false;
     this.fullscreenScene.add(this.fullscreenMesh);
-    this.updateSettings(settings);
+    this.updateSettings(this.settings);
   }
 
   setSize(width: number, height: number): void {
@@ -320,7 +324,7 @@ export class PostProcessPipeline {
   }
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
-    this.settings = { ...this.settings, ...settings };
+    this.settings = withPostProcessDefaults({ ...this.settings, ...settings });
     this.renderer.toneMapping = toneMappingModeToThree(this.settings.toneMapping);
     this.copyMaterial.uniforms.uOpacity.value = this.settings.opacity;
     this.outputMaterial.uniforms.uExposure.value = this.settings.exposure;
