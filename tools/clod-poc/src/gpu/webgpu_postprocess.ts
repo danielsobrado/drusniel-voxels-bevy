@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import type { WebGPURenderer } from "three/webgpu";
-import type { PostProcessSettings } from "../environment/postprocess.js";
+import {
+  toneMappingModeToThree,
+  type PostProcessSettings,
+} from "../environment/postprocess.js";
 
 const TERRAIN_NON_INDEXED_FALLBACK_KEY = "__drusnielWebGpuTerrainNonIndexedFallback";
 
@@ -53,22 +56,25 @@ function convertVisibleTerrainMeshesToNonIndexed(scene: THREE.Scene): number {
 }
 
 export class WebGpuPostProcessPipeline {
+  private settings: Partial<PostProcessSettings> = {};
+
   constructor(
     private readonly renderer: WebGPURenderer,
     _scene: THREE.Scene,
     _camera: THREE.Camera,
     settings: Partial<PostProcessSettings> = {},
   ) {
-    void settings;
-    console.warn("[webgpu] postprocess disabled: Three WebGPU cannot safely sample its render target in this path yet");
+    console.warn("[webgpu] bloom postprocess disabled: Three WebGPU cannot safely sample its render target in this path yet");
+    this.updateSettings(settings);
   }
 
   setSize(_width?: number, _height?: number): void {
-    // WebGPU postprocess is disabled; keep the method for renderer startup parity.
+    // WebGPU bloom postprocess is disabled; keep the method for renderer startup parity.
   }
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
-    void settings;
+    this.settings = { ...this.settings, ...settings };
+    if (this.settings.toneMapping) this.renderer.toneMapping = toneMappingModeToThree(this.settings.toneMapping);
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera): void {
@@ -84,6 +90,6 @@ export class WebGpuPostProcessPipeline {
   }
 
   dispose(): void {
-    // No GPU resources are allocated while the WebGPU postprocess path is disabled.
+    // No GPU resources are allocated while the WebGPU bloom path is disabled.
   }
 }
