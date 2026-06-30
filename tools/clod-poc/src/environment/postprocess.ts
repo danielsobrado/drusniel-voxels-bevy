@@ -521,9 +521,9 @@ function createSceneTarget(name: string): THREE.WebGLRenderTarget {
     depthBuffer: true,
     depthTexture,
     stencilBuffer: false,
-    // Multisampled so grass alpha-to-coverage (and general edge AA) survive this offscreen
-    // pass. WebGL2 resolves the multisample buffer automatically on read.
-    samples: 4,
+    // Depth-sampled passes must work across stricter WebGL2/browser combinations.
+    // MSAA + depthTexture can fail or resolve inconsistently, so keep this target single-sample.
+    samples: 0,
   });
   target.texture.name = `${name}-color`;
   return target;
