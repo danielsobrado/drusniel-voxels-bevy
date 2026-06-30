@@ -11,6 +11,8 @@ Known state:
   probe covers the full viewport.
 - No committed screenshot baselines have been established yet, so default runs may
   report `baseline_missing`.
+- WorldSource parity test status is tracked in
+  [`world-source-parity-test-ledger.md`](world-source-parity-test-ledger.md).
 
 Do not relax a threshold to hide a real regression. Update baselines only from a
 known-good run and record the reason in the commit or PR.

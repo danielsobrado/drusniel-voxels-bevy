@@ -2,6 +2,9 @@
 
 BVY-WS-11 uses `world_source_acceptance` as the focused GPU-first WorldSource acceptance bench.
 
+Current BVY-WS-12 test results and artifact paths are tracked in
+[`../qa/world-source-parity-test-ledger.md`](../qa/world-source-parity-test-ledger.md).
+
 Run it in release mode:
 
 ```powershell
