@@ -7,6 +7,11 @@ function createState(): TreeQualityPresetState {
     treeMaxInstances: 9000,
     treeDensity: 1.2,
     treeSpacing: 5.5,
+    treeGpuEnabled: false,
+    treeGpuForceCpu: true,
+    treeGpuShowCounts: true,
+    treeGpuReadbackVisibleLists: true,
+    treeGpuValidateAgainstCpu: true,
     treeGpuMaxVisible: 50_000,
   };
 }
@@ -18,7 +23,7 @@ describe("tree quality presets", () => {
     expect(state).toEqual(createState());
   });
 
-  it("applies perf values", () => {
+  it("applies perf values and disables debug GPU readbacks", () => {
     const state = createState();
     applyTreeQualityPreset(state, "perf");
     expect(state).toEqual({
@@ -26,6 +31,11 @@ describe("tree quality presets", () => {
       treeMaxInstances: 3500,
       treeDensity: 0.55,
       treeSpacing: 9,
+      treeGpuEnabled: true,
+      treeGpuForceCpu: false,
+      treeGpuShowCounts: false,
+      treeGpuReadbackVisibleLists: false,
+      treeGpuValidateAgainstCpu: false,
       treeGpuMaxVisible: 16_000,
     });
   });
