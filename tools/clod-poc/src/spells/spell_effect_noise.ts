@@ -1,4 +1,4 @@
-import { abs, dot, float, floor, fract, mix, sin, smoothstep, vec2, vec3 } from "three/tsl";
+import { abs, dot, float, floor, fract, sin, smoothstep, vec2, vec3 } from "three/tsl";
 import { createSpellNoiseNodes, type SpellNoiseParams } from "./spell_noise_nodes.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
