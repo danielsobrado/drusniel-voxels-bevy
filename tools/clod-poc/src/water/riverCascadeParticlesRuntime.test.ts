@@ -13,6 +13,8 @@ describe("river cascade particle runtime settings", () => {
     expect(settings.splashStrength).toBeGreaterThan(0);
     expect(settings.foamDriftStrength).toBeGreaterThan(0);
     expect(settings.spawnRadiusM).toBeGreaterThanOrEqual(16);
+    expect(settings.maxEmittersPerTick).toBeGreaterThanOrEqual(4);
+    expect(settings.rapidSpeedEnd).toBeGreaterThan(settings.rapidSpeedStart);
     expect(settings.dropEnd).toBeGreaterThan(settings.dropStart);
   });
 
@@ -23,6 +25,9 @@ describe("river cascade particle runtime settings", () => {
       splashStrength: 10,
       foamDriftStrength: Number.NaN,
       spawnRadiusM: 10000,
+      maxEmittersPerTick: 10000,
+      rapidSpeedStart: 20,
+      rapidSpeedEnd: 0.01,
       dropStart: 20,
       dropEnd: 0.01,
     });
@@ -32,6 +37,9 @@ describe("river cascade particle runtime settings", () => {
     expect(settings.splashStrength).toBe(3);
     expect(settings.foamDriftStrength).toBe(DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS.foamDriftStrength);
     expect(settings.spawnRadiusM).toBe(180);
+    expect(settings.maxEmittersPerTick).toBe(80);
+    expect(settings.rapidSpeedStart).toBe(8);
+    expect(settings.rapidSpeedEnd).toBe(8.05);
     expect(settings.dropStart).toBe(12);
     expect(settings.dropEnd).toBe(12.05);
   });
