@@ -7,7 +7,11 @@ import { parseTreeConfig } from "../../../trees/index.js";
 import { parseUnderstoryConfig } from "../../../understory/index.js";
 import type { BorderCoastOceanConfig } from "../../../terrain/border_coast_config.js";
 import type { WaterConfig } from "../../../water/waterConfig.js";
-import { buildRiverTerrainWetnessMask, type HydrologySystem } from "../../../water/index.js";
+import {
+  buildRiverTerrainWetnessMask,
+  parseRiverTerrainWetnessMaskResolution,
+  type HydrologySystem,
+} from "../../../water/index.js";
 import type { EnvironmentLighting } from "../../../environment/environment.js";
 import { drainVegetationDirty, type VegetationDirtyQueue } from "../../../systems/vegetation_dirty.js";
 import type { ClodHooks } from "../../../core/hooks.js";
@@ -179,7 +183,7 @@ export async function runRuntimeSystemsStartup(
     const riverTerrainWetnessMask = buildRiverTerrainWetnessMask({
       field: waterController.field,
       worldCells,
-      resolution: Number(searchParams.get("riverWetnessMaskRes") ?? 384),
+      resolution: parseRiverTerrainWetnessMaskResolution(searchParams.get("riverWetnessMaskRes")),
     });
     materialController.setRiverTerrainWetnessMask(riverTerrainWetnessMask);
   }
