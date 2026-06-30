@@ -15,6 +15,7 @@ import { defaultWaterDebugState } from "../../water/waterDebug.js";
 import type { HydrologySystem } from "../../water/hydrologySystem.js";
 import { createWaterShaderMaterial } from "../../water/waterMaterial.js";
 import { RiverBankResidueOverlay } from "../../water/riverBankResidueOverlay.js";
+import { RiverCascadeParticleOverlay, type RiverCascadeParticleStats } from "../../water/riverCascadeParticleOverlay.js";
 
 export interface WaterControllerUiState {
   waterEnabled: boolean;
@@ -69,6 +70,7 @@ export interface WaterController {
   updateVisual(visual: ReturnType<WaterController["makeVisual"]>): void;
   updateSunDirection(direction: THREE.Vector3): void;
   update(deltaSeconds: number, cameraPosition: THREE.Vector3): void;
+  getCascadeParticleStats(): RiverCascadeParticleStats;
   installDebugApi(hooks: WaterDebugPoseHooks): void;
   logDevInitOnce(worldCells: number): void;
   dispose(): void;
@@ -158,9 +160,11 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     worldBounds: { cellsX: deps.worldCells, cellsZ: deps.worldCells },
   });
   const residueOverlay = new RiverBankResidueOverlay(deps.scene, field);
+  const cascadeParticles = new RiverCascadeParticleOverlay(deps.scene, field);
   const ui = deps.getUiState();
   clipmap.setVisible(ui.waterEnabled);
   residueOverlay.setVisible(ui.waterEnabled);
+  cascadeParticles.setVisible(ui.waterEnabled);
   clipmap.setClipmapTint(ui.waterClipmapTint);
   clipmap.setWireframe(ui.waterWireframe);
   assertPageMeshSignaturesUnchanged(pageSignaturesBefore, pageMeshSignatures(deps.nodes));
@@ -206,6 +210,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     setVisible(enabled) {
       clipmap.setVisible(enabled);
       residueOverlay.setVisible(enabled);
+      cascadeParticles.setVisible(enabled);
     },
     setDebugMode(mode) {
       clipmap.setDebugMode(WATER_DEBUG_MODES[mode]);
@@ -241,6 +246,10 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     update(deltaSeconds, cameraPosition) {
       clipmap.update(deltaSeconds, cameraPosition);
       residueOverlay.update(deltaSeconds, cameraPosition);
+      cascadeParticles.update(deltaSeconds, cameraPosition);
+    },
+    getCascadeParticleStats() {
+      return cascadeParticles.getStats();
     },
     installDebugApi(hooks) {
       const enabled = deps.devMode || deps.searchParams.get("waterDebug") === "1" || deps.searchParams.get("debug") === "1";
@@ -304,6 +313,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         hooks.controlsUpdate();
         hooks.updatePlayerModeUi();
         clipmap.update(0, deps.camera.position as THREE.Vector3);
+        cascadeParticles.update(0, deps.camera.position as THREE.Vector3);
         hooks.updateSelection();
         return {
           position: [(deps.camera.position as THREE.Vector3).x, (deps.camera.position as THREE.Vector3).y, (deps.camera.position as THREE.Vector3).z],
@@ -323,6 +333,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
           clipmapExclusionBand: field.getClipmapExclusionBand(),
           debugModes: { ...WATER_DEBUG_MODES },
           residueOverlay: true,
+          cascadeParticles: cascadeParticles.getStats(),
           clipmap: {
             levelCount: clipmap.levelCount,
             levels: Array.from({ length: clipmap.levelCount }, (_, index) => clipmap.getLevelRect(index)),
@@ -371,6 +382,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
         worldBounds: { minX: 0, minZ: 0, maxX: worldCells, maxZ: worldCells },
         shoreSurf: field.getShoreSurfBand(),
         clipmapExclusionBand: field.getClipmapExclusionBand(),
+        cascadeParticles: cascadeParticles.getStats(),
         resolvedLakes: deps.waterConfig.fakeBodies.lakes.map((l) => ({ center: l.center, radius: l.radius, levelOffset: l.levelOffset })),
         resolvedRivers: deps.waterConfig.fakeBodies.rivers.map((r) => r.points),
         lakeCenterSample: lakeCenterSample ? {
@@ -389,6 +401,7 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
       });
     },
     dispose() {
+      cascadeParticles.dispose();
       residueOverlay.dispose();
       clipmap.dispose();
     },
