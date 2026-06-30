@@ -4,6 +4,7 @@ import {
   GOD_RAYS_SCREEN_SAMPLES,
   POSTPROCESS_SHADER_TEST_HOOKS,
   applyPostProcessQueryOverrides,
+  parseAerialPerspectiveSettings,
   parsePostProcessSettings,
 } from "./postprocess.js";
 
@@ -22,6 +23,11 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       bloomThreshold: 0.85,
       bloomStrength: 0.18,
       bloomRadius: 0.35,
+      aerialPerspectiveEnabled: true,
+      aerialPerspectiveStart: 120,
+      aerialPerspectiveEnd: 1800,
+      aerialPerspectiveStrength: 0.35,
+      aerialPerspectiveColor: [0.62, 0.72, 0.86],
       godRaysMode: "off",
       godRaysDensity: 0.96,
       godRaysDecay: 0.92,
@@ -50,6 +56,23 @@ postprocess:
     });
   });
 
+  it("parses aerial perspective YAML", () => {
+    expect(parseAerialPerspectiveSettings(`
+aerial_perspective:
+  enabled: false
+  start_m: 300
+  end_m: 1200
+  strength: 0.25
+  color: [0.5, 0.6, 0.7]
+`)).toEqual({
+      aerialPerspectiveEnabled: false,
+      aerialPerspectiveStart: 300,
+      aerialPerspectiveEnd: 1200,
+      aerialPerspectiveStrength: 0.25,
+      aerialPerspectiveColor: [0.5, 0.6, 0.7],
+    });
+  });
+
   it("applies URL ablation overrides", () => {
     const params = new URLSearchParams("postmin=1&bloom=0&grade=0&toneMap=agx");
     expect(applyPostProcessQueryOverrides({
@@ -59,6 +82,7 @@ postprocess:
       saturation: 0.5,
       vignette: 0.7,
       bloomEnabled: true,
+      aerialPerspectiveEnabled: true,
     }, params)).toMatchObject({
       enabled: true,
       exposure: 1,
@@ -66,6 +90,7 @@ postprocess:
       saturation: 1,
       vignette: 0,
       bloomEnabled: false,
+      aerialPerspectiveEnabled: false,
       godRaysMode: "off",
       toneMapping: "agx",
     });
@@ -77,6 +102,7 @@ postprocess:
         enabled: false,
         debugMode: "off",
         bloomEnabled: false,
+        aerialPerspectiveEnabled: false,
         godRaysMode: "off",
       });
   });
@@ -100,11 +126,13 @@ describe("postprocess shaders", () => {
 
   it("declares the output pass uniforms", () => {
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("tDiffuse");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("tDepth");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uExposure");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uContrast");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uSaturation");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uVignette");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uBloomThreshold");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("bloomColor");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("aerialPerspective");
   });
 });
