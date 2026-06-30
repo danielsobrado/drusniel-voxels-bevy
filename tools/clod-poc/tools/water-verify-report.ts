@@ -11,6 +11,7 @@ import {
   collectWaterClipmapRuntimeStats,
   createWaterOwnershipStats,
   parseWaterConfig,
+  resolveWaterCausticsPolicy,
   resolveWaterConfig,
   resolveWaterReflectionPolicy,
   summarizeWaterOwnership,
@@ -155,6 +156,7 @@ function main(): void {
     });
     const clipmapStats = collectWaterClipmapRuntimeStats(clipmap, scene, waterConfig.cellSizes);
     const reflectionPolicy = resolveWaterReflectionPolicy(waterConfig.visual.reflection, "webgl");
+    const causticsPolicy = resolveWaterCausticsPolicy(waterConfig.caustics);
     const wetnessStats = collectRiverTerrainWetnessMaskStats(wetnessMask);
 
     const checks: string[] = [];
@@ -215,6 +217,12 @@ function main(): void {
         "SSR is not requested unless runtime-wired",
       );
     }
+    addCheck(
+      checks,
+      failures,
+      causticsPolicy.computeAvailable === false,
+      "compute caustics are not claimed before implementation",
+    );
 
     if (verifyConfig.wetnessMask.enabled) {
       addCheck(checks, failures, wetnessStats.enabled, "wetness mask was generated");
@@ -243,6 +251,7 @@ function main(): void {
       ownership: summarizeWaterOwnership(ownershipStats),
       clipmap: clipmapStats,
       reflection: reflectionPolicy,
+      caustics: causticsPolicy,
       wetnessMask: wetnessStats,
     };
 
