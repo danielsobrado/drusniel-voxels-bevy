@@ -37,7 +37,7 @@ async function main(): Promise<void> {
 
   const consumed = new Set([
     "scene", "seed", "cam", "out", "w", "h", "hud", "settle", "timeout", "stats",
-    "framealign", "gpusample", "freeze",
+    "framealign", "gpusample", "freeze", "renderer",
   ]);
   const extra: Record<string, string> = {};
   for (const [key, value] of Object.entries(args)) {
