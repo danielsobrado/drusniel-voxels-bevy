@@ -129,7 +129,7 @@ export function parseClodRuntimeQueryFlags(searchParams: URLSearchParams): ClodR
     queryWebGpuSelection: searchParams.get("webgpuSelection") === "1",
     queryReadbackMode: parseReadbackMode(searchParams),
     queryMaterialTiers: searchParams.get("materialTiers") === "1",
-    queryWebGpuParity: searchParams.get("webGpuParity") === "1",
+    queryWebGpuParity: searchParams.get("webgpuParity") === "1",
     queryTerrainMaterialSource: terrainMaterialSourceParam(searchParams.get("terrainMaterial")),
     queryTerrainMaterial: searchParams.get("terrainMaterial"),
     queryDebugMaterialBands: searchParams.get("debugMaterialBands") === "1",
