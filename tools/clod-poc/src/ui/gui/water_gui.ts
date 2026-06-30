@@ -163,6 +163,7 @@ export function createWaterGui(gui: GUI, deps: WaterGuiDeps): void {
     onShoreSurfMaxDepth: (depth) => deps.waterController.setShoreSurfMaxDepth(depth),
     onRebuildVisual: rebuildVisual,
     getRiverStats: () => riverStats(deps.waterController),
+    getCascadeParticleStats: () => deps.waterController.getCascadeParticleStats(),
   });
 
   addDeepWaterLookFolder(gui, visual, rebuildVisual);
