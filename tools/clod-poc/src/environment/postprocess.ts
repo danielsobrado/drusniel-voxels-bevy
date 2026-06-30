@@ -29,6 +29,10 @@ export interface PostProcessSettings {
   bloomThreshold?: number;
   bloomStrength?: number;
   bloomRadius?: number;
+  taaEnabled?: boolean;
+  taaHistoryWeight?: number;
+  taaDepthThreshold?: number;
+  taaSharpen?: number;
   aerialPerspectiveEnabled?: boolean;
   aerialPerspectiveStart?: number;
   aerialPerspectiveEnd?: number;
@@ -59,6 +63,10 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   bloomThreshold: 0.85,
   bloomStrength: 0.18,
   bloomRadius: 0.35,
+  taaEnabled: false,
+  taaHistoryWeight: 0.88,
+  taaDepthThreshold: 0.0025,
+  taaSharpen: 0.06,
   aerialPerspectiveEnabled: true,
   aerialPerspectiveStart: 120,
   aerialPerspectiveEnd: 1800,
@@ -150,6 +158,7 @@ export function applyPostProcessQueryOverrides(
     next.enabled = false;
     next.debugMode = "off";
     next.bloomEnabled = false;
+    next.taaEnabled = false;
     next.aerialPerspectiveEnabled = false;
     next.godRaysMode = "off";
   }
@@ -166,6 +175,7 @@ export function applyPostProcessQueryOverrides(
     next.debugMode = "output";
     neutralGrade(next);
     next.bloomEnabled = false;
+    next.taaEnabled = false;
     next.aerialPerspectiveEnabled = false;
     next.godRaysMode = "off";
   }
@@ -175,6 +185,9 @@ export function applyPostProcessQueryOverrides(
 
   const bloom = flagValue(searchParams, "bloom");
   if (bloom !== null) next.bloomEnabled = bloom;
+
+  const taa = flagValue(searchParams, "taa");
+  if (taa !== null) next.taaEnabled = taa;
 
   const aerial = flagValue(searchParams, "aerial") ?? flagValue(searchParams, "aerialPerspective");
   if (aerial !== null) next.aerialPerspectiveEnabled = aerial;
@@ -231,6 +244,7 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
     if (!isRecord(raw)) return fallback;
     const postprocess = isRecord(raw.postprocess) ? raw.postprocess : raw;
     const bloom = isRecord(postprocess.bloom) ? postprocess.bloom : {};
+    const taa = isRecord(postprocess.taa) ? postprocess.taa : {};
     const godRays = isRecord(postprocess.god_rays) ? postprocess.god_rays : {};
     return {
       ...fallback,
@@ -246,6 +260,10 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       bloomThreshold: finiteNumber(bloom.threshold, fallback.bloomThreshold),
       bloomStrength: finiteNumber(bloom.strength, fallback.bloomStrength),
       bloomRadius: finiteNumber(bloom.radius, fallback.bloomRadius),
+      taaEnabled: booleanValue(taa.enabled, fallback.taaEnabled),
+      taaHistoryWeight: finiteNumber(taa.history_weight, fallback.taaHistoryWeight),
+      taaDepthThreshold: finiteNumber(taa.depth_threshold, fallback.taaDepthThreshold),
+      taaSharpen: finiteNumber(taa.sharpen, fallback.taaSharpen),
       godRaysMode: godRaysMode(godRays.mode, fallback.godRaysMode),
       godRaysDensity: finiteNumber(godRays.density, fallback.godRaysDensity),
       godRaysDecay: finiteNumber(godRays.decay, fallback.godRaysDecay),
@@ -297,9 +315,18 @@ const COPY_FRAG = /* glsl */ `
 const OUTPUT_FRAG = /* glsl */ `
   uniform sampler2D tDiffuse;
   uniform sampler2D tDepth;
+  uniform sampler2D tHistory;
+  uniform sampler2D tHistoryDepth;
   uniform vec2 uTexelSize;
   uniform float uCameraNear;
   uniform float uCameraFar;
+  uniform mat4 uInvCurrentViewProjection;
+  uniform mat4 uPrevViewProjection;
+  uniform float uHistoryReady;
+  uniform float uTaaEnabled;
+  uniform float uTaaHistoryWeight;
+  uniform float uTaaDepthThreshold;
+  uniform float uTaaSharpen;
   uniform float uExposure;
   uniform float uContrast;
   uniform float uSaturation;
@@ -347,6 +374,42 @@ const OUTPUT_FRAG = /* glsl */ `
     return bloom;
   }
 
+  vec3 sharpenCurrent(vec3 color) {
+    vec3 north = texture2D(tDiffuse, vUv + vec2(0.0, uTexelSize.y)).rgb;
+    vec3 south = texture2D(tDiffuse, vUv - vec2(0.0, uTexelSize.y)).rgb;
+    vec3 east = texture2D(tDiffuse, vUv + vec2(uTexelSize.x, 0.0)).rgb;
+    vec3 west = texture2D(tDiffuse, vUv - vec2(uTexelSize.x, 0.0)).rgb;
+    vec3 blur = (north + south + east + west) * 0.25;
+    return max(color + (color - blur) * clamp(uTaaSharpen, 0.0, 1.0), vec3(0.0));
+  }
+
+  vec3 temporalSceneColor(vec3 currentColor) {
+    if (uTaaEnabled < 0.5 || uHistoryReady < 0.5) return sharpenCurrent(currentColor);
+
+    float depth = texture2D(tDepth, vUv).x;
+    if (depth >= 0.999999) return currentColor;
+
+    vec4 ndc = vec4(vUv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 world = uInvCurrentViewProjection * ndc;
+    world /= max(abs(world.w), 0.000001);
+
+    vec4 prevClip = uPrevViewProjection * world;
+    if (prevClip.w <= 0.000001) return currentColor;
+
+    vec3 prevNdc = prevClip.xyz / prevClip.w;
+    vec2 prevUv = prevNdc.xy * 0.5 + 0.5;
+    if (prevUv.x < 0.0 || prevUv.x > 1.0 || prevUv.y < 0.0 || prevUv.y > 1.0) return currentColor;
+
+    float historyDepth = texture2D(tHistoryDepth, prevUv).x;
+    float expectedHistoryDepth = prevNdc.z * 0.5 + 0.5;
+    float depthDelta = abs(historyDepth - expectedHistoryDepth);
+    if (historyDepth >= 0.999999 || depthDelta > uTaaDepthThreshold) return currentColor;
+
+    vec3 historyColor = texture2D(tHistory, prevUv).rgb;
+    float historyWeight = clamp(uTaaHistoryWeight, 0.0, 0.97);
+    return sharpenCurrent(mix(currentColor, historyColor, historyWeight));
+  }
+
   vec3 aerialPerspective(vec3 color) {
     float depth = texture2D(tDepth, vUv).x;
     float geometryMask = 1.0 - step(0.999999, depth);
@@ -360,7 +423,7 @@ const OUTPUT_FRAG = /* glsl */ `
 
   void main() {
     vec4 sampled = texture2D(tDiffuse, vUv);
-    vec3 color = sampled.rgb * uExposure;
+    vec3 color = temporalSceneColor(sampled.rgb) * uExposure;
     color += bloomColor() * uBloomStrength * uBloomEnabled;
     color = aerialPerspective(color);
     color = (color - 0.5) * uContrast + 0.5;
@@ -400,6 +463,23 @@ function cameraClip(camera: THREE.Camera, key: "near" | "far", fallback: number)
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function createSceneTarget(name: string): THREE.WebGLRenderTarget {
+  const depthTexture = new THREE.DepthTexture(1, 1);
+  depthTexture.format = THREE.DepthFormat;
+  depthTexture.type = THREE.UnsignedIntType;
+  depthTexture.name = `${name}-depth`;
+  const target = new THREE.WebGLRenderTarget(1, 1, {
+    depthBuffer: true,
+    depthTexture,
+    stencilBuffer: false,
+    // Multisampled so grass alpha-to-coverage (and general edge AA) survive this offscreen
+    // pass. WebGL2 resolves the multisample buffer automatically on read.
+    samples: 4,
+  });
+  target.texture.name = `${name}-color`;
+  return target;
+}
+
 export function toneMappingModeToThree(mode: PostProcessToneMapping) {
   switch (mode) {
     case "agx":
@@ -416,8 +496,8 @@ export function toneMappingModeToThree(mode: PostProcessToneMapping) {
 
 export class PostProcessPipeline {
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly target: THREE.WebGLRenderTarget;
-  private readonly depthTexture = new THREE.DepthTexture(1, 1);
+  private target = createSceneTarget("clod-poc-postprocess-current");
+  private historyTarget = createSceneTarget("clod-poc-postprocess-history");
   private readonly fullscreenScene = new THREE.Scene();
   private readonly fullscreenCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly fullscreenGeometry = createFullscreenTriangle();
@@ -425,24 +505,15 @@ export class PostProcessPipeline {
   private readonly outputMaterial: THREE.ShaderMaterial;
   private readonly fullscreenMesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private readonly drawingBufferSize = new THREE.Vector2();
+  private readonly currentViewProjection = new THREE.Matrix4();
+  private readonly inverseCurrentViewProjection = new THREE.Matrix4();
+  private readonly previousViewProjection = new THREE.Matrix4();
+  private historyReady = false;
   private settings: Required<PostProcessSettings>;
 
   constructor(renderer: THREE.WebGLRenderer, settings: PostProcessSettings) {
     this.renderer = renderer;
     this.settings = withPostProcessDefaults(settings);
-    this.depthTexture.format = THREE.DepthFormat;
-    this.depthTexture.type = THREE.UnsignedIntType;
-    this.target = new THREE.WebGLRenderTarget(1, 1, {
-      depthBuffer: true,
-      depthTexture: this.depthTexture,
-      stencilBuffer: false,
-      // Multisampled so grass alpha-to-coverage (and general edge AA) survive this offscreen
-      // pass. Without it the post-process target is single-sample and A2C collapses to a hard
-      // 1-bit cutout. WebGL2 resolves the multisample buffer automatically on read.
-      samples: 4,
-    });
-    this.target.texture.name = "clod-poc-postprocess-color";
-    this.depthTexture.name = "clod-poc-postprocess-depth";
 
     this.copyMaterial = new THREE.ShaderMaterial({
       uniforms: {
@@ -459,10 +530,19 @@ export class PostProcessPipeline {
     this.outputMaterial = new THREE.ShaderMaterial({
       uniforms: {
         tDiffuse: { value: this.target.texture },
-        tDepth: { value: this.depthTexture },
+        tDepth: { value: this.target.depthTexture },
+        tHistory: { value: this.historyTarget.texture },
+        tHistoryDepth: { value: this.historyTarget.depthTexture },
         uTexelSize: { value: new THREE.Vector2(1, 1) },
         uCameraNear: { value: 0.1 },
         uCameraFar: { value: 8000 },
+        uInvCurrentViewProjection: { value: this.inverseCurrentViewProjection },
+        uPrevViewProjection: { value: this.previousViewProjection },
+        uHistoryReady: { value: 0 },
+        uTaaEnabled: { value: this.settings.taaEnabled ? 1 : 0 },
+        uTaaHistoryWeight: { value: this.settings.taaHistoryWeight },
+        uTaaDepthThreshold: { value: this.settings.taaDepthThreshold },
+        uTaaSharpen: { value: this.settings.taaSharpen },
         uExposure: { value: this.settings.exposure },
         uContrast: { value: this.settings.contrast },
         uSaturation: { value: this.settings.saturation },
@@ -498,6 +578,8 @@ export class PostProcessPipeline {
     const targetWidth = this.drawingBufferSize.x || Math.floor(width * pixelRatio);
     const targetHeight = this.drawingBufferSize.y || Math.floor(height * pixelRatio);
     this.target.setSize(Math.max(1, targetWidth), Math.max(1, targetHeight));
+    this.historyTarget.setSize(Math.max(1, targetWidth), Math.max(1, targetHeight));
+    this.historyReady = false;
     this.outputMaterial.uniforms.uTexelSize.value.set(
       1 / Math.max(1, targetWidth),
       1 / Math.max(1, targetHeight),
@@ -505,9 +587,15 @@ export class PostProcessPipeline {
   }
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
+    const previousTaaEnabled = this.settings?.taaEnabled ?? false;
     this.settings = withPostProcessDefaults({ ...this.settings, ...settings });
+    if (previousTaaEnabled !== this.settings.taaEnabled) this.historyReady = false;
     this.renderer.toneMapping = toneMappingModeToThree(this.settings.toneMapping);
     this.copyMaterial.uniforms.uOpacity.value = this.settings.opacity;
+    this.outputMaterial.uniforms.uTaaEnabled.value = this.settings.taaEnabled ? 1 : 0;
+    this.outputMaterial.uniforms.uTaaHistoryWeight.value = this.settings.taaHistoryWeight;
+    this.outputMaterial.uniforms.uTaaDepthThreshold.value = this.settings.taaDepthThreshold;
+    this.outputMaterial.uniforms.uTaaSharpen.value = this.settings.taaSharpen;
     this.outputMaterial.uniforms.uExposure.value = this.settings.exposure;
     this.outputMaterial.uniforms.uContrast.value = this.settings.contrast;
     this.outputMaterial.uniforms.uSaturation.value = this.settings.saturation;
@@ -525,13 +613,26 @@ export class PostProcessPipeline {
 
   render(scene: THREE.Scene, camera: THREE.Camera): void {
     if (!this.settings.enabled || this.settings.debugMode === "off") {
+      this.historyReady = false;
       this.renderer.setRenderTarget(null);
       this.renderer.render(scene, camera);
       return;
     }
 
+    camera.updateMatrixWorld();
+    this.currentViewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.inverseCurrentViewProjection.copy(this.currentViewProjection).invert();
+
+    this.outputMaterial.uniforms.tDiffuse.value = this.target.texture;
+    this.outputMaterial.uniforms.tDepth.value = this.target.depthTexture;
+    this.outputMaterial.uniforms.tHistory.value = this.historyTarget.texture;
+    this.outputMaterial.uniforms.tHistoryDepth.value = this.historyTarget.depthTexture;
+    this.outputMaterial.uniforms.uHistoryReady.value = this.historyReady && this.settings.taaEnabled ? 1 : 0;
     this.outputMaterial.uniforms.uCameraNear.value = cameraClip(camera, "near", 0.1);
     this.outputMaterial.uniforms.uCameraFar.value = cameraClip(camera, "far", 8000);
+    this.outputMaterial.uniforms.uInvCurrentViewProjection.value.copy(this.inverseCurrentViewProjection);
+    this.outputMaterial.uniforms.uPrevViewProjection.value.copy(this.previousViewProjection);
+    this.copyMaterial.uniforms.tDiffuse.value = this.target.texture;
 
     this.renderer.setRenderTarget(this.target);
     this.renderer.render(scene, camera);
@@ -541,11 +642,22 @@ export class PostProcessPipeline {
       ? this.copyMaterial
       : this.outputMaterial;
     this.renderer.render(this.fullscreenScene, this.fullscreenCamera);
+
+    if (this.settings.taaEnabled) {
+      this.previousViewProjection.copy(this.currentViewProjection);
+      const renderedTarget = this.target;
+      this.target = this.historyTarget;
+      this.historyTarget = renderedTarget;
+      this.historyReady = true;
+    } else {
+      this.previousViewProjection.copy(this.currentViewProjection);
+      this.historyReady = false;
+    }
   }
 
   dispose(): void {
     this.target.dispose();
-    this.depthTexture.dispose();
+    this.historyTarget.dispose();
     this.fullscreenGeometry.dispose();
     this.copyMaterial.dispose();
     this.outputMaterial.dispose();
