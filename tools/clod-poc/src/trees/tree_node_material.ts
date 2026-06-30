@@ -183,6 +183,10 @@ export function createTreeNodeMaterialHandle(
 
   const forestMapNodes: TslNode[] = [];
   const materials: MeshBasicNodeMaterial[] = [];
+  // TP-3: depth-prepass nodes for the CPU/patch tree path (mirrors the GPU-ring
+  // handle). Lets the patch meshes get a depth-only twin so the near canopy
+  // gets early-z and stops paying full shading for occluded fragments.
+  const prepassNodes = new Map<MeshBasicNodeMaterial, PrepassNodes>();
 
   // Shared per-vertex / per-instance attribute nodes (rebuilt per material to avoid
   // sharing a node instance across compiled materials).
@@ -259,12 +263,14 @@ export function createTreeNodeMaterialHandle(
     (material as unknown as { opacityNode: TslNode }).opacityNode = opacity;
     const lodMask: TslNode = ign.lessThan(aLodFade);
     const aboveWater: TslNode | null = treeAboveWaterKeep(hydrology, aWorldXZ);
-    (material as unknown as { maskNode: TslNode }).maskNode = aboveWater ? lodMask.and(aboveWater) : lodMask;
+    const maskNode: TslNode = aboveWater ? lodMask.and(aboveWater) : lodMask;
+    (material as unknown as { maskNode: TslNode }).maskNode = maskNode;
     material.alphaTest = 0;
     material.side = THREE.DoubleSide;
     material.transparent = false;
     material.depthWrite = true;
     materials.push(material);
+    prepassNodes.set(material, { positionNode, maskNode, side: material.side });
     return material;
   };
 
@@ -279,6 +285,11 @@ export function createTreeNodeMaterialHandle(
   return {
     regularMaterial,
     debugMaterials,
+    prepassNodesFor() {
+      // Depth-only prepass is colour-agnostic; the regular and debug materials
+      // share the same position/mask node graph, so one set works for any LOD.
+      return prepassNodes.get(regularMaterial);
+    },
     setTime(timeSeconds: number) {
       wind.uTime.value = timeSeconds;
     },
