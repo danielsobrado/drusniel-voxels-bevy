@@ -3,6 +3,7 @@ import {
   buildTreeParityCaptureCommands,
   buildTreeParityEvidenceMarkdownReport,
   validateTreeParityEvidence,
+  validateTreeParityManifestCaptureConfig,
   type TreeParityEvidenceFileInfo,
   type TreeParityEvidenceManifest,
 } from "./tree_parity_evidence.js";
@@ -33,6 +34,7 @@ describe("TREE-12 parity evidence validator", () => {
         captures: [{
           id: "bad-json",
           artifacts: { perf: "perf/missing.json" },
+          capture: { perfCase: "tree-gpu-ring" },
           metrics: [{ artifact: "perf", path: "snapshot.counters.frameMs", min: 1 }],
         }],
       },
@@ -42,6 +44,32 @@ describe("TREE-12 parity evidence validator", () => {
 
     expect(result.ok).toBe(false);
     expect(result.failures[0]?.message).toContain("cannot read perf JSON perf/missing.json: not json");
+  });
+});
+
+describe("TREE-12 parity manifest capture validation", () => {
+  it("rejects unsupported capture params before command generation", () => {
+    const invalid = manifest({ sunPreset: "low" });
+
+    expect(validateTreeParityManifestCaptureConfig(invalid)).toEqual([
+      { captureId: "low-sun-shadows", message: "unsupported capture param: sunPreset" },
+    ]);
+    expect(() => buildTreeParityCaptureCommands(invalid)).toThrow("unsupported capture param: sunPreset");
+  });
+
+  it("requires perf artifacts and perf cases to be paired", () => {
+    expect(validateTreeParityManifestCaptureConfig({
+      captures: [{
+        id: "missing-case",
+        artifacts: { perf: "perf/run/tree-gpu-ring.json" },
+      }],
+    })).toEqual([{ captureId: "missing-case", message: "perf artifact requires capture.perfCase" }]);
+    expect(validateTreeParityManifestCaptureConfig({
+      captures: [{
+        id: "missing-artifact",
+        capture: { perfCase: "tree-gpu-ring" },
+      }],
+    })).toEqual([{ captureId: "missing-artifact", message: "capture.perfCase requires perf artifact" }]);
   });
 });
 
@@ -93,7 +121,7 @@ describe("TREE-12 parity evidence markdown report", () => {
   });
 });
 
-function manifest(): TreeParityEvidenceManifest {
+function manifest(extraParams: Record<string, string> = {}): TreeParityEvidenceManifest {
   return {
     captures: [{
       id: "low-sun-shadows",
@@ -109,6 +137,7 @@ function manifest(): TreeParityEvidenceManifest {
           webgpuSelection: "1",
           freeze: "1",
           sunElevationDeg: "8",
+          ...extraParams,
         },
         perfCase: "tree-gpu-ring",
       },
