@@ -99,8 +99,40 @@ const DEFAULT_CAPTURE_OPTIONS: Required<TreeParityCaptureCommandOptions> = {
   timeoutMs: 240000,
 };
 
+const TREE_PARITY_SUPPORTED_CAPTURE_PARAMS = new Set([
+  "treeGpu",
+  "treeGpuRing",
+  "webgpuSelection",
+  "freeze",
+  "sunElevationDeg",
+  "sunElevation",
+  "sunAzimuthDeg",
+  "sunAzimuth",
+  "treeDistance",
+  "treeDistanceM",
+  "treeGpuMaxVisible",
+  "treeGpuMax",
+  "treeMaxInstances",
+  "treeMax",
+  "trees",
+  "understory",
+  "grass",
+  "stones",
+  "water",
+  "weather",
+  "postProcess",
+  "postprocess",
+  "terrainMaterial",
+  "terrainTriplanar",
+  "farShell",
+  "clodPerf",
+  "clodShadowOverlay",
+  "clodShadowProxy",
+  "profile",
+]);
+
 export function validateTreeParityEvidence(input: TreeParityEvidenceInput): TreeParityEvidenceResult {
-  const failures: TreeParityEvidenceFailure[] = [];
+  const failures: TreeParityEvidenceFailure[] = validateTreeParityManifestCaptureConfig(input.manifest);
   for (const capture of input.manifest.captures) {
     validateCaptureFiles(capture, input, failures);
     validateCaptureMetrics(capture, input, failures);
@@ -108,10 +140,30 @@ export function validateTreeParityEvidence(input: TreeParityEvidenceInput): Tree
   return { ok: failures.length === 0, failures };
 }
 
+export function validateTreeParityManifestCaptureConfig(manifest: TreeParityEvidenceManifest): TreeParityEvidenceFailure[] {
+  const failures: TreeParityEvidenceFailure[] = [];
+  for (const capture of manifest.captures) {
+    for (const key of Object.keys(capture.capture?.params ?? {})) {
+      if (!TREE_PARITY_SUPPORTED_CAPTURE_PARAMS.has(key)) {
+        failures.push({ captureId: capture.id, message: `unsupported capture param: ${key}` });
+      }
+    }
+    if (capture.artifacts?.perf && !capture.capture?.perfCase) {
+      failures.push({ captureId: capture.id, message: "perf artifact requires capture.perfCase" });
+    }
+    if (capture.capture?.perfCase && !capture.artifacts?.perf) {
+      failures.push({ captureId: capture.id, message: "capture.perfCase requires perf artifact" });
+    }
+  }
+  return failures;
+}
+
 export function buildTreeParityCaptureCommands(
   manifest: TreeParityEvidenceManifest,
   options: TreeParityCaptureCommandOptions = {},
 ): TreeParityCaptureCommandSet[] {
+  const manifestFailures = validateTreeParityManifestCaptureConfig(manifest);
+  if (manifestFailures.length > 0) throw new Error(formatManifestFailures(manifestFailures));
   const defaults = { ...DEFAULT_CAPTURE_OPTIONS, ...options };
   return manifest.captures.map((capture) => buildCaptureCommandSet(capture, defaults));
 }
@@ -317,6 +369,13 @@ function stringifyParams(params: Record<string, string | number | boolean>): [st
 function perfOutputDirectory(perfArtifact: string, perfCase: string): string {
   const suffix = `/${perfCase}.json`;
   return perfArtifact.endsWith(suffix) ? perfArtifact.slice(0, -suffix.length) : perfArtifact.replace(/\.json$/i, "");
+}
+
+function formatManifestFailures(failures: readonly TreeParityEvidenceFailure[]): string {
+  return [
+    "Invalid tree parity evidence manifest:",
+    ...failures.map((failure) => `- ${failure.captureId}: ${failure.message}`),
+  ].join("\n");
 }
 
 function artifactStatus(info: TreeParityEvidenceFileInfo): string {
