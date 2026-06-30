@@ -37,6 +37,7 @@ export const ALL_AUDIO_EVENTS = [
   "spell.fire.cast",
   "spell.water.cast",
   "spell.air.cast",
+  "spell.earth.cast",
   // CLOD/debug
   "clod.rebuild.start",
   "clod.rebuild.done",
