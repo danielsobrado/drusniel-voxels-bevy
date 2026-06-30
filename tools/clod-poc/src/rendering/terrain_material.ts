@@ -17,7 +17,17 @@ import {
   type TerrainTextureSlotUniform,
 } from "../material/material.js";
 
-export type TerrainTextureApplyOptions = Parameters<typeof applyTerrainTextureUniforms>[2];
+export type TerrainArraySamplingMode = "off" | "planar" | "triplanar";
+
+type BaseTerrainTextureApplyOptions = Parameters<typeof applyTerrainTextureUniforms>[2];
+
+export type TerrainTextureApplyOptions = BaseTerrainTextureApplyOptions & {
+  arraySampling?: TerrainArraySamplingMode;
+  bakedMacroTint?: THREE.Texture | null;
+  riverWetnessMask?: THREE.Texture | null;
+  worldSize?: number;
+  biomeSplat?: boolean;
+};
 
 export interface TerrainDebugState {
   normalColor: boolean;
