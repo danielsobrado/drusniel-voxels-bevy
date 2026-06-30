@@ -101,17 +101,19 @@ Implemented:
 
 - `tree_parity_evidence.ts` provides a generic manifest-driven evidence validator for required screenshot/stats/perf artifacts and metric thresholds.
 - `tree_parity_evidence.ts` also builds exact capture commands from each manifest `capture` block, including shot paths, perf output directories, and shared query params.
-- `tree_parity_evidence.test.ts` covers pass/fail cases, missing artifacts, metric floors, unreadable JSON, and capture-command generation.
-- `tools/verify-tree-parity-evidence.ts` exposes both the validator and the `--commands` capture-command printer.
+- `tree_parity_evidence.ts` can generate a markdown closeout report with artifact status, metric expectations, actual values, and failures.
+- `tree_parity_evidence.test.ts` covers pass/fail cases, missing artifacts, metric floors, unreadable JSON, capture-command generation, and report rendering.
+- `tools/verify-tree-parity-evidence.ts` exposes the validator, the `--commands` capture-command printer, and `--report` markdown output.
 - `config/tree-parity-evidence.yaml` defines the current TREE-7/8/9/10/11 evidence contract without hardcoding paths or thresholds in code.
 - `npm --prefix tools/clod-poc run trees:capture-parity-evidence` prints the real-GPU capture commands expected by the manifest.
 - `npm --prefix tools/clod-poc run trees:verify-parity-evidence` runs the evidence gate after local real-GPU captures are archived under the manifest paths.
+- `npm --prefix tools/clod-poc run trees:report-parity-evidence` writes `docs/performance/clod-poc-tree-parity-evidence-latest.md` from the archived artifacts.
 
 Still required before calling TREE-12 complete:
 
 - Run typecheck/tests.
 - Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`, execute the printed real-GPU commands, and capture the configured artifacts under `shots/tree-parity/latest` and `perf-runs/tree-parity/latest`.
-- Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence` and archive the PASS output.
+- Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` or `npm --prefix tools/clod-poc run trees:report-parity-evidence` and archive the PASS output/report.
 
 ## Still required before calling Epic A+B closed
 
@@ -119,7 +121,7 @@ Still required before calling TREE-12 complete:
 - Run `npm --prefix tools/clod-poc run typecheck`.
 - Run the server-first shot/perf harness for the WebGPU path with impostors enabled.
 - Capture slow dolly-out and frozen-boundary shots to confirm no far/impostor pop, holes, or double-draw.
-- Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence` after captures.
+- Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report` after captures.
 - Feed real screenshot/perf measurements into the TREE-11 acceptance contract.
 
 ## Next implementation order
@@ -128,5 +130,5 @@ Still required before calling TREE-12 complete:
 2. Run typecheck/tests.
 3. Run `npm --prefix tools/clod-poc run trees:capture-parity-evidence`.
 4. Execute the printed real-GPU capture commands.
-5. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence`.
-6. TREE-12 closeout docs and evidence links.
+5. Run `npm --prefix tools/clod-poc run trees:verify-parity-evidence -- --report`.
+6. Commit/archive the generated evidence report and artifacts.
