@@ -33,6 +33,10 @@ export interface PostProcessSettings {
   taaHistoryWeight?: number;
   taaDepthThreshold?: number;
   taaSharpen?: number;
+  contactShadowsEnabled?: boolean;
+  contactShadowsStrength?: number;
+  contactShadowsRadiusPx?: number;
+  contactShadowsDepthBias?: number;
   aerialPerspectiveEnabled?: boolean;
   aerialPerspectiveStart?: number;
   aerialPerspectiveEnd?: number;
@@ -67,6 +71,10 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   taaHistoryWeight: 0.88,
   taaDepthThreshold: 0.0025,
   taaSharpen: 0.06,
+  contactShadowsEnabled: false,
+  contactShadowsStrength: 0.25,
+  contactShadowsRadiusPx: 2.0,
+  contactShadowsDepthBias: 0.002,
   aerialPerspectiveEnabled: true,
   aerialPerspectiveStart: 120,
   aerialPerspectiveEnd: 1800,
@@ -159,6 +167,7 @@ export function applyPostProcessQueryOverrides(
     next.debugMode = "off";
     next.bloomEnabled = false;
     next.taaEnabled = false;
+    next.contactShadowsEnabled = false;
     next.aerialPerspectiveEnabled = false;
     next.godRaysMode = "off";
   }
@@ -176,6 +185,7 @@ export function applyPostProcessQueryOverrides(
     neutralGrade(next);
     next.bloomEnabled = false;
     next.taaEnabled = false;
+    next.contactShadowsEnabled = false;
     next.aerialPerspectiveEnabled = false;
     next.godRaysMode = "off";
   }
@@ -188,6 +198,11 @@ export function applyPostProcessQueryOverrides(
 
   const taa = flagValue(searchParams, "taa");
   if (taa !== null) next.taaEnabled = taa;
+
+  const contactShadows = flagValue(searchParams, "contactShadows")
+    ?? flagValue(searchParams, "contactshadows")
+    ?? flagValue(searchParams, "contact");
+  if (contactShadows !== null) next.contactShadowsEnabled = contactShadows;
 
   const aerial = flagValue(searchParams, "aerial") ?? flagValue(searchParams, "aerialPerspective");
   if (aerial !== null) next.aerialPerspectiveEnabled = aerial;
@@ -245,6 +260,7 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
     const postprocess = isRecord(raw.postprocess) ? raw.postprocess : raw;
     const bloom = isRecord(postprocess.bloom) ? postprocess.bloom : {};
     const taa = isRecord(postprocess.taa) ? postprocess.taa : {};
+    const contactShadows = isRecord(postprocess.contact_shadows) ? postprocess.contact_shadows : {};
     const godRays = isRecord(postprocess.god_rays) ? postprocess.god_rays : {};
     return {
       ...fallback,
@@ -264,6 +280,10 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       taaHistoryWeight: finiteNumber(taa.history_weight, fallback.taaHistoryWeight),
       taaDepthThreshold: finiteNumber(taa.depth_threshold, fallback.taaDepthThreshold),
       taaSharpen: finiteNumber(taa.sharpen, fallback.taaSharpen),
+      contactShadowsEnabled: booleanValue(contactShadows.enabled, fallback.contactShadowsEnabled),
+      contactShadowsStrength: finiteNumber(contactShadows.strength, fallback.contactShadowsStrength),
+      contactShadowsRadiusPx: finiteNumber(contactShadows.radius_px, fallback.contactShadowsRadiusPx),
+      contactShadowsDepthBias: finiteNumber(contactShadows.depth_bias, fallback.contactShadowsDepthBias),
       godRaysMode: godRaysMode(godRays.mode, fallback.godRaysMode),
       godRaysDensity: finiteNumber(godRays.density, fallback.godRaysDensity),
       godRaysDecay: finiteNumber(godRays.decay, fallback.godRaysDecay),
@@ -327,6 +347,10 @@ const OUTPUT_FRAG = /* glsl */ `
   uniform float uTaaHistoryWeight;
   uniform float uTaaDepthThreshold;
   uniform float uTaaSharpen;
+  uniform float uContactShadowsEnabled;
+  uniform float uContactShadowsStrength;
+  uniform float uContactShadowsRadiusPx;
+  uniform float uContactShadowsDepthBias;
   uniform float uExposure;
   uniform float uContrast;
   uniform float uSaturation;
@@ -410,6 +434,31 @@ const OUTPUT_FRAG = /* glsl */ `
     return sharpenCurrent(mix(currentColor, historyColor, historyWeight));
   }
 
+  float contactShadowSample(float centerDepth, vec2 offset) {
+    float sampleDepth = texture2D(tDepth, clamp(vUv + offset, vec2(0.0), vec2(1.0))).x;
+    if (centerDepth >= 0.999999 || sampleDepth >= 0.999999) return 0.0;
+    float closerDelta = centerDepth - sampleDepth;
+    return smoothstep(uContactShadowsDepthBias, uContactShadowsDepthBias + 0.02, closerDelta);
+  }
+
+  float contactShadowFactor() {
+    if (uContactShadowsEnabled < 0.5) return 1.0;
+    float centerDepth = texture2D(tDepth, vUv).x;
+    if (centerDepth >= 0.999999) return 1.0;
+    vec2 radius = uTexelSize * max(uContactShadowsRadiusPx, 0.5);
+    float occlusion = 0.0;
+    occlusion += contactShadowSample(centerDepth, radius * vec2( 1.0,  0.0));
+    occlusion += contactShadowSample(centerDepth, radius * vec2(-1.0,  0.0));
+    occlusion += contactShadowSample(centerDepth, radius * vec2( 0.0,  1.0));
+    occlusion += contactShadowSample(centerDepth, radius * vec2( 0.0, -1.0));
+    occlusion += contactShadowSample(centerDepth, radius * vec2( 1.0,  1.0));
+    occlusion += contactShadowSample(centerDepth, radius * vec2(-1.0,  1.0));
+    occlusion += contactShadowSample(centerDepth, radius * vec2( 1.0, -1.0));
+    occlusion += contactShadowSample(centerDepth, radius * vec2(-1.0, -1.0));
+    occlusion *= 0.125;
+    return 1.0 - clamp(occlusion * uContactShadowsStrength, 0.0, 0.55);
+  }
+
   vec3 aerialPerspective(vec3 color) {
     float depth = texture2D(tDepth, vUv).x;
     float geometryMask = 1.0 - step(0.999999, depth);
@@ -423,7 +472,7 @@ const OUTPUT_FRAG = /* glsl */ `
 
   void main() {
     vec4 sampled = texture2D(tDiffuse, vUv);
-    vec3 color = temporalSceneColor(sampled.rgb) * uExposure;
+    vec3 color = temporalSceneColor(sampled.rgb) * contactShadowFactor() * uExposure;
     color += bloomColor() * uBloomStrength * uBloomEnabled;
     color = aerialPerspective(color);
     color = (color - 0.5) * uContrast + 0.5;
@@ -543,6 +592,10 @@ export class PostProcessPipeline {
         uTaaHistoryWeight: { value: this.settings.taaHistoryWeight },
         uTaaDepthThreshold: { value: this.settings.taaDepthThreshold },
         uTaaSharpen: { value: this.settings.taaSharpen },
+        uContactShadowsEnabled: { value: this.settings.contactShadowsEnabled ? 1 : 0 },
+        uContactShadowsStrength: { value: this.settings.contactShadowsStrength },
+        uContactShadowsRadiusPx: { value: this.settings.contactShadowsRadiusPx },
+        uContactShadowsDepthBias: { value: this.settings.contactShadowsDepthBias },
         uExposure: { value: this.settings.exposure },
         uContrast: { value: this.settings.contrast },
         uSaturation: { value: this.settings.saturation },
@@ -596,6 +649,10 @@ export class PostProcessPipeline {
     this.outputMaterial.uniforms.uTaaHistoryWeight.value = this.settings.taaHistoryWeight;
     this.outputMaterial.uniforms.uTaaDepthThreshold.value = this.settings.taaDepthThreshold;
     this.outputMaterial.uniforms.uTaaSharpen.value = this.settings.taaSharpen;
+    this.outputMaterial.uniforms.uContactShadowsEnabled.value = this.settings.contactShadowsEnabled ? 1 : 0;
+    this.outputMaterial.uniforms.uContactShadowsStrength.value = this.settings.contactShadowsStrength;
+    this.outputMaterial.uniforms.uContactShadowsRadiusPx.value = this.settings.contactShadowsRadiusPx;
+    this.outputMaterial.uniforms.uContactShadowsDepthBias.value = this.settings.contactShadowsDepthBias;
     this.outputMaterial.uniforms.uExposure.value = this.settings.exposure;
     this.outputMaterial.uniforms.uContrast.value = this.settings.contrast;
     this.outputMaterial.uniforms.uSaturation.value = this.settings.saturation;
