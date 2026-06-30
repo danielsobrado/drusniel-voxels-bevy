@@ -96,6 +96,8 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   treeGpuCandidateCount: number;
   treeGpuAcceptedCount: number;
   treeGpuVisibleCount: number;
+  treeGpuShadowCasterCount: number;
+  treeGpuShadowOverflowed: number;
   treeGpuDispatchMs: number | null;
   customPropGpuStatus: PropGpuStatus | "unknown";
   customPropTotalInstances: number;
@@ -137,6 +139,8 @@ export interface FramePerfSummary {
     treeGpuCandidateCountAvg: number;
     treeGpuAcceptedCountAvg: number;
     treeGpuVisibleCountAvg: number;
+    treeGpuShadowCasterCountAvg: number;
+    treeGpuShadowOverflowedFrames: number;
     treeNearTreesAvg: number;
     treeMidTreesAvg: number;
     treeFarTreesAvg: number;
@@ -309,6 +313,8 @@ export function summarizeFramePerfSamples(
       treeGpuCandidateCountAvg: avgCounter(samples, "treeGpuCandidateCount"),
       treeGpuAcceptedCountAvg: avgCounter(samples, "treeGpuAcceptedCount"),
       treeGpuVisibleCountAvg: avgCounter(samples, "treeGpuVisibleCount"),
+      treeGpuShadowCasterCountAvg: avgCounter(samples, "treeGpuShadowCasterCount"),
+      treeGpuShadowOverflowedFrames: samples.reduce((sum, sample) => sum + sample.treeGpuShadowOverflowed, 0),
       treeNearTreesAvg: avgCounter(samples, "treeNearTrees"),
       treeMidTreesAvg: avgCounter(samples, "treeMidTrees"),
       treeFarTreesAvg: avgCounter(samples, "treeFarTrees"),
