@@ -57,14 +57,15 @@ describe("TREE-12 parity capture command generation", () => {
     expect(commands).toHaveLength(1);
     expect(commands[0]?.screenshotCommand).toContain("npm --prefix tools/clod-poc run shoot --");
     expect(commands[0]?.screenshotCommand).toContain("--scene trees-perf");
+    expect(commands[0]?.screenshotCommand).toContain("--renderer webgpu");
     expect(commands[0]?.screenshotCommand).toContain("--out shots/low-sun.png");
     expect(commands[0]?.screenshotCommand).toContain("--stats shots/low-sun-stats.json");
     expect(commands[0]?.screenshotCommand).toContain("--treeGpu 1");
-    expect(commands[0]?.screenshotCommand).toContain("--sunPreset low");
+    expect(commands[0]?.screenshotCommand).toContain("--sunElevationDeg 8");
     expect(commands[0]?.perfCommand).toContain("npm --prefix tools/clod-poc run perf:main --");
     expect(commands[0]?.perfCommand).toContain("--case tree-gpu-ring");
     expect(commands[0]?.perfCommand).toContain("--out perf/low-sun");
-    expect(commands[0]?.perfCommand).toContain("--params treeGpu=1,webgpuSelection=1,freeze=1,sunPreset=low");
+    expect(commands[0]?.perfCommand).toContain("--params treeGpu=1,webgpuSelection=1,freeze=1,sunElevationDeg=8");
   });
 });
 
@@ -107,7 +108,7 @@ function manifest(): TreeParityEvidenceManifest {
           treeGpu: "1",
           webgpuSelection: "1",
           freeze: "1",
-          sunPreset: "low",
+          sunElevationDeg: "8",
         },
         perfCase: "tree-gpu-ring",
       },

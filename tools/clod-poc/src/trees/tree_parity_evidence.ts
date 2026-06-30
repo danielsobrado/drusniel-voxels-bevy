@@ -175,6 +175,7 @@ function buildCaptureCommandSet(
     ? [
       "npm --prefix tools/clod-poc run shoot --",
       `--scene ${shellArg(config.scene ?? "trees-perf")}`,
+      `--renderer ${defaults.renderer}`,
       `--out ${shellArg(capture.artifacts.image)}`,
       `--stats ${shellArg(capture.artifacts.stats)}`,
       `--w ${width}`,
