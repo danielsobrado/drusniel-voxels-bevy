@@ -5,6 +5,7 @@ import {
   buildTreeParityCaptureCommands,
   buildTreeParityEvidenceMarkdownReport,
   validateTreeParityEvidence,
+  validateTreeParityManifestCaptureConfig,
   type TreeParityCaptureCommandOptions,
   type TreeParityEvidenceInput,
   type TreeParityEvidenceManifest,
@@ -50,6 +51,11 @@ function main(): void {
   const configPath = resolve(root, stringArg(args, "config", DEFAULT_CONFIG));
   const manifest = yaml.load(readFileSync(configPath, "utf8")) as TreeParityEvidenceManifest;
 
+  if (args["check-manifest"] === true) {
+    checkManifest(manifest);
+    return;
+  }
+
   if (args["commands"] === true) {
     printCaptureCommands(manifest, captureCommandOptions(args));
     return;
@@ -72,6 +78,17 @@ function main(): void {
   for (const failure of result.failures) {
     console.error(`- ${failure.captureId}: ${failure.message}`);
   }
+  process.exit(1);
+}
+
+function checkManifest(manifest: TreeParityEvidenceManifest): void {
+  const failures = validateTreeParityManifestCaptureConfig(manifest);
+  if (failures.length === 0) {
+    console.log(`[tree-evidence] manifest PASS ${manifest.captures.length} captures`);
+    return;
+  }
+  console.error(`[tree-evidence] manifest FAIL ${failures.length} issues`);
+  for (const failure of failures) console.error(`- ${failure.captureId}: ${failure.message}`);
   process.exit(1);
 }
 
