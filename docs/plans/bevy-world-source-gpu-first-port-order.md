@@ -41,6 +41,7 @@ Not done yet:
 
 - `world_source_acceptance` still falls back to the unavailable readback provider when no accepted runtime artifact is available, so missing or rejected runtime evidence remains red with `gpu_readback_unavailable` and `drift_gate_not_passed`.
 - Direct in-process runtime readback consumption by `world_source_acceptance` is still not implemented; the accepted path is the paired runtime-assisted artifact.
+- Visual/bench acceptance is still blocked: `bench-runs/2026-06-30T14-11-11Z/summary.json` captured all visual-regression checkpoints, but each run recorded `render_ready_timed_out: true`, and `bench_guard` failed frame-total thresholds.
 - MC/Transvoxel remains a legacy/fallback mesh path and is not a blocker for the CLOD/WorldSource default path.
 - Legacy bridge removal is still pending final visual parity and accepted bench thresholds.
 
@@ -234,6 +235,7 @@ Notes:
 
 - The report uses the paired runtime artifact when it validates as accepted. Without that artifact, it falls back to the unavailable readback provider, so `gpu_readback.status` is expected to be `unavailable`, `drift_gate.status` is expected to be `skipped`, and `acceptance_pass` is expected to be `false`.
 - The acceptance bench measures sampled WorldSource chunk generation and mesh generation outside the full Bevy render loop.
+- The current native Windows visual-regression evidence is not an accepted visual parity pass because render-ready timed out on all checkpoints and `bench_guard` failed frame-total thresholds, despite GPU opaque, mesh dirty, and instancing-specific checks passing.
 
 ### BVY-WS-12 — Remove temporary legacy bridge after visual parity
 

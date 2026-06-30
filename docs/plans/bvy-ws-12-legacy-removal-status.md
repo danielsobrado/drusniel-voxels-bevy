@@ -42,10 +42,11 @@ Status: In progress.
 ## Not completed
 
 - Direct in-process runtime readback consumption by `world_source_acceptance` is still not implemented; the accepted path is pairing the focused bench report with the reviewed runtime-assisted artifact.
+- Visual/bench acceptance is not complete. The native Windows visual regression run at `bench-runs/2026-06-30T14-11-11Z/summary.json` produced screenshots for all 7 checkpoints, but each run recorded `render_ready_timed_out: true`. `bench_guard` also failed frame-total thresholds while GPU opaque, mesh dirty, and instancing-specific checks passed.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of explicit legacy mode should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Review the paired `world_source_acceptance` report with visual parity and bench thresholds, then remove or deprecate the remaining legacy bridge only after those gates are accepted together.
+Fix or explain the visual bench frame-total failures and render-ready timeouts, then rerun `bench_guard` before removing explicit legacy mode.
