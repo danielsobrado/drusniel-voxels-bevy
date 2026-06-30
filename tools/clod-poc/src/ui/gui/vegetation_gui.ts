@@ -2,7 +2,7 @@ import type GUI from "lil-gui";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { FAR_SHELL_DEFAULTS } from "../../app/clod_constants.js";
 import type { PostProcessQualityPreset } from "../../app/state/postprocess_quality_presets.js";
-import { applyTreeQualityPreset } from "../../app/state/tree_quality_presets.js";
+import { applyTreeQualityPreset, TREE_SHADOW_MAX_LOD_VALUES } from "../../app/state/tree_quality_presets.js";
 import { GRASS_SHADER_MODES } from "../../grass.js";
 import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
 import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
@@ -266,6 +266,7 @@ export function createVegetationGui(
     treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild),
     treeFolder.add(state, "treeDensity", 0, 2, 0.05).name("density").onFinishChange(treeActions.rebuild),
     treeFolder.add(state, "treeSpacing", 0.5, 24, 0.25).name("spacing m").onFinishChange(treeActions.rebuild),
+    treeFolder.add(state, "treeShadowMaxLod", [...TREE_SHADOW_MAX_LOD_VALUES]).name("shadow max LOD").onFinishChange(treeActions.rebuild),
   );
   treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(updateTreeRenderSettings);
   treeSettingControllers.push(
