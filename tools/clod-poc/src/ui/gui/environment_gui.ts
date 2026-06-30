@@ -25,6 +25,7 @@ export function createEnvironmentGui(
 ): void {
   const currentGuiPostProcessSettings = (): Partial<PostProcessSettings> => ({
     ...deps.currentPostProcessSettings(),
+    renderScale: state.postProcessRenderScale,
     toneMapping: state.postProcessToneMapping,
     bloomEnabled: state.postProcessBloomEnabled,
     bloomThreshold: state.postProcessBloomThreshold,
@@ -115,6 +116,7 @@ export function createEnvironmentGui(
   const postControllers: GuiController[] = [
     postFolder.add(state, "postProcessEnabled").name("enabled").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessDebugMode", ["output", "copy", "off"]).name("mode").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessRenderScale", 0.5, 1, 0.05).name("render scale").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessToneMapping", ["aces", "agx", "linear", "none"]).name("tone map").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessOpacity", 0, 1, 0.01).name("copy opacity").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessExposure", 0.25, 2.5, 0.01).name("pass exposure").onChange(applyPostProcessSettings),
@@ -153,6 +155,7 @@ export function createEnvironmentGui(
       const aerialColor = DEFAULT_POST_PROCESS_SETTINGS.aerialPerspectiveColor;
       state.postProcessEnabled = DEFAULT_POST_PROCESS_SETTINGS.enabled;
       state.postProcessOpacity = DEFAULT_POST_PROCESS_SETTINGS.opacity;
+      state.postProcessRenderScale = DEFAULT_POST_PROCESS_SETTINGS.renderScale;
       state.postProcessExposure = DEFAULT_POST_PROCESS_SETTINGS.exposure;
       state.postProcessContrast = DEFAULT_POST_PROCESS_SETTINGS.contrast;
       state.postProcessSaturation = DEFAULT_POST_PROCESS_SETTINGS.saturation;
