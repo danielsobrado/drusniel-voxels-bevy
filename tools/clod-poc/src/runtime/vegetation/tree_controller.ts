@@ -9,6 +9,8 @@ export interface TreeControllerUiState {
   treesEnabled: boolean;
   treeDistance: number;
   treeMaxInstances: number;
+  treeDensity: number;
+  treeSpacing: number;
   treeWindEnabled: boolean;
   treeWindStrength: number;
   treeWindSpeed: number;
@@ -57,6 +59,10 @@ const FALLING_TERMINAL_VELOCITY = 30;
 const FALLING_MAX_TILT = 0.3;
 const FALLING_TREE_MAX = 1024;
 
+function clampAtLeast(value: number, min: number): number {
+  return Number.isFinite(value) ? Math.max(min, value) : min;
+}
+
 export function createTreeController(deps: TreeControllerDeps): TreeController {
   const fallingTrees: FallingTree[] = [];
   const fallingTrunkGeo = new THREE.CylinderGeometry(0.15, 0.25, 1.5, 6);
@@ -68,11 +74,24 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
 
   const makeSettings = (): TreeSettings => {
     const state = deps.getUiState();
+    const treeSpacing = clampAtLeast(state.treeSpacing, 0.5);
+    const treeDensity = clampAtLeast(state.treeDensity, 0);
     return {
       ...deps.treeConfig,
       enabled: state.treesEnabled,
-      distanceM: state.treeDistance,
-      maxInstances: state.treeMaxInstances,
+      distanceM: clampAtLeast(state.treeDistance, 0),
+      maxInstances: Math.floor(clampAtLeast(state.treeMaxInstances, 0)),
+      placement: {
+        ...deps.treeConfig.placement,
+        spacingM: treeSpacing,
+      },
+      ecology: {
+        ...deps.treeConfig.ecology,
+        density: {
+          ...deps.treeConfig.ecology.density,
+          baseDensity: treeDensity,
+        },
+      },
       wind: {
         ...deps.treeConfig.wind,
         enabled: state.treeWindEnabled,
@@ -91,7 +110,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
         enabled: state.treeGpuEnabled,
         debugForceCpu: state.treeGpuForceCpu,
         debugShowGpuCounts: state.treeGpuShowCounts,
-        maxVisible: state.treeGpuMaxVisible,
+        maxVisible: Math.floor(clampAtLeast(state.treeGpuMaxVisible, 0)),
       },
     };
   };

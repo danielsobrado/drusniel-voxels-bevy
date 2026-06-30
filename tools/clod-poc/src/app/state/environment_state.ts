@@ -6,6 +6,7 @@ import {
   type PostProcessSettings,
 } from "../../environment/postprocess.js";
 import { assignArchiveFields } from "./archive_fields.js";
+import type { PostProcessQualityPreset } from "./postprocess_quality_presets.js";
 
 export interface EnvironmentSliceState {
   sunAzimuthDeg: number;
@@ -19,6 +20,7 @@ export interface EnvironmentSliceState {
   sunGlowIntensity: number;
   hazeIntensity: number;
   postProcessEnabled: boolean;
+  postProcessQualityPreset: PostProcessQualityPreset;
   postProcessOpacity: number;
   postProcessRenderScale: number;
   postProcessExposure: number;
@@ -90,6 +92,7 @@ export function createEnvironmentSliceState(input: {
     sunGlowIntensity: DEFAULT_ENVIRONMENT_SETTINGS.sunGlowIntensity,
     hazeIntensity: DEFAULT_ENVIRONMENT_SETTINGS.hazeIntensity,
     postProcessEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.enabled,
+    postProcessQualityPreset: "custom",
     postProcessOpacity: DEFAULT_POST_PROCESS_SETTINGS.opacity,
     postProcessRenderScale: DEFAULT_POST_PROCESS_SETTINGS.renderScale,
     postProcessExposure: DEFAULT_POST_PROCESS_SETTINGS.exposure,

@@ -46,6 +46,8 @@ export interface VegetationSliceState {
   treesEnabled: boolean;
   treeDistance: number;
   treeMaxInstances: number;
+  treeDensity: number;
+  treeSpacing: number;
   treeDebugColorByLod: boolean;
   treeWindEnabled: boolean;
   treeWindStrength: number;
@@ -136,6 +138,8 @@ export function createVegetationSliceState(input: {
     treesEnabled: treeConfig.enabled,
     treeDistance: treeConfig.distanceM,
     treeMaxInstances: treeConfig.maxInstances,
+    treeDensity: treeConfig.ecology.density.baseDensity,
+    treeSpacing: treeConfig.placement.spacingM,
     treeDebugColorByLod: treeConfig.render.debugColorByLod,
     treeWindEnabled: treeConfig.wind.enabled,
     treeWindStrength: treeConfig.wind.strength,
