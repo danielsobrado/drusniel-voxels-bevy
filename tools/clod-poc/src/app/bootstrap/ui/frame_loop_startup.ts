@@ -5,6 +5,7 @@ import type { UnderstoryStats } from "../../../understory/index.js";
 import type { ForestLightingStats } from "../../../forest_lighting/index.js";
 import { bindClodFrameLoop } from "../../clod_frame_loop.js";
 import { GpuPassTiming } from "../../../core/gpu_pass_timing.js";
+import { TreeTimingPass } from "../../frame_loop/tree_timing_pass.js";
 import { resolveSlowFrameMsThreshold } from "../../runtime_config.js";
 import { shadowProxyStatsToCounters } from "../../../shadows/shadowProxyStats.js";
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
@@ -150,6 +151,7 @@ export function runFrameLoopStartup(
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
     postProcess?.setSize(window.innerWidth, window.innerHeight);
+    treeTimingPass?.setSize(window.innerWidth, window.innerHeight);
   });
 
   const grassProfileEnabled = searchParams.get("grassProfile") === "1";
@@ -169,6 +171,11 @@ export function runFrameLoopStartup(
   const gpuPassTiming = input.app.isWebGpu
     ? new GpuPassTiming(input.app.renderer, wantGpuTiming && gpuTimestampReady)
     : null;
+  // TP-1: isolated offscreen tree pass so the tree main pass is timeable
+  // (`r.treeMain`). Same gate as the resolve; only meaningful on WebGPU.
+  const treeTimingPass = input.app.isWebGpu && wantGpuTiming && gpuTimestampReady
+    ? new TreeTimingPass(input.app.renderer, window.innerWidth, window.innerHeight)
+    : null;
 
   bindClodFrameLoop({
     render: {
@@ -186,6 +193,9 @@ export function runFrameLoopStartup(
       grassPrepassEnabled,
       makeGrassSettings,
       gpuPassTiming,
+      runGpuTreeTiming: treeTimingPass
+        ? () => treeTimingPass.render(treeSystem, camera)
+        : null,
     },
     player: {
       controls,

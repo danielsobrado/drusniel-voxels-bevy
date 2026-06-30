@@ -306,6 +306,10 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       perfProbe,
       phaseTiming,
     });
+
+    // TP-1: gated isolated tree pass for trustworthy tree main-pass GPU ms,
+    // after the visible frame so it does not disturb it.
+    render.runGpuTreeTiming?.();
   });
 }
 

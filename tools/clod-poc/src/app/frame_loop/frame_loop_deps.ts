@@ -60,6 +60,8 @@ export interface FrameLoopRenderDeps {
   makeGrassSettings: () => GrassSettings;
   /** TP-1 per-pass GPU timing collector (null on WebGL / unsupported). */
   gpuPassTiming?: GpuPassTiming | null;
+  /** TP-1 gated offscreen tree-timing pass; runs after the visible frame. */
+  runGpuTreeTiming?: (() => void) | null;
 }
 
 export interface FrameLoopPlayerDeps {

@@ -54,12 +54,13 @@ real per-phase GPU ms (main tree pass, shadow caster pass, compute dispatch) int
 headed real-GPU perf report. No production behaviour change when disabled.
 
 **Acceptance criteria:**
-- [~] Headed real-GPU report shows non-degenerate GPU ms per tree phase that sum
-      sensibly toward the frame budget (not ~0.02 ms). *(Confirmed on RTX 4080
-      2026-06-30: profiler reads real per-uid durations — `shadow.c2 ≈ 2.7–3.0 ms`,
-      usable for TP-8. **Gap:** three's pass-boundary timestamps under-report the
-      main color pass (~0.01 ms), so the tree MAIN-pass ms is not yet trustworthy
-      — needs inside-pass brackets or a dedicated tree RT. See doc.)*
+- [x] Headed real-GPU report shows non-degenerate GPU ms per tree phase (not
+      ~0.02 ms). *(Confirmed on RTX 4080 2026-06-30: `r.treeMain ≈ 31 ms` isolated
+      tree fill (offscreen pass), `r.shadow.c0..c2 ≈ 6 ms` per-cascade, plus
+      `c.*` compute — all real/content-sensitive. The main app draws to the
+      swapchain whose timestamps are unreliable, so the tree pass is rendered to
+      a tagged offscreen target; `r.treeMain` is an isolated/unoccluded upper
+      bound — right signal for near-canopy overdraw and TP-3/4/5 A/Bs. See doc.)*
 - [x] Off by default / gated; zero cost in normal play. *(per-frame resolve gated
       on `?perfProbe=1`/`?gpuTiming=1`; inert collector on WebGL / unsupported.)*
 - [x] Documented method so future tree perf work A/Bs against real GPU ms.

@@ -41,6 +41,13 @@ export function packTreeGpuFrustumPlanes(camera?: THREE.Camera, out = new Float3
   return packTreeSystemGpuFrustumPlanes(camera, out);
 }
 
+/** Minimal renderer surface needed by the TP-1 isolated tree timing pass. */
+export interface TreeIsolatedRenderer {
+  getRenderTarget(): THREE.RenderTarget | null;
+  setRenderTarget(target: THREE.RenderTarget | null): void;
+  render(scene: THREE.Scene, camera: THREE.Camera): void;
+}
+
 export class TreeSystem {
   private readonly scene: THREE.Scene;
   private readonly nodes: ClodPageNode[];
@@ -67,6 +74,8 @@ export class TreeSystem {
   private readonly lodCounts = createTreeLodCounts();
   private stats: TreeStats = createEmptyTreeSystemStats();
   private readonly gpuLightingProxyCache = new TreeGpuLightingProxyCache();
+  /** Lazily-created throwaway scene for the TP-1 isolated tree timing pass. */
+  private measureScene: THREE.Scene | null = null;
 
   constructor(options: TreeSystemOptions) {
     this.scene = options.scene;
@@ -127,6 +136,31 @@ export class TreeSystem {
       this.resetLodCounts();
       this.updateStats();
     }
+  }
+
+  /**
+   * TP-1 measurement only: render just the tree meshes into `target` so the tree
+   * main pass becomes a distinctly-timeable offscreen render context. The main
+   * app draws straight to the swapchain, whose begin/end-of-pass timestamps are
+   * unreliable on Dawn/RTX; an offscreen target times correctly. Trees render
+   * against a cleared depth buffer, so this is the *isolated* tree fragment cost
+   * (an upper bound, dominated by near-canopy overdraw — exactly the fill term
+   * the perf plan targets). Reparents the tree root into a private scene and
+   * restores it; call after the visible frame so it is not disturbed.
+   */
+  renderIsolatedForTiming(renderer: TreeIsolatedRenderer, target: THREE.RenderTarget, camera: THREE.Camera): void {
+    const prevParent = this.root.parent;
+    const wasVisible = this.root.visible;
+    this.root.visible = true;
+    if (!this.measureScene) this.measureScene = new THREE.Scene();
+    this.measureScene.add(this.root);
+    const prevTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(target);
+    renderer.render(this.measureScene, camera);
+    renderer.setRenderTarget(prevTarget);
+    this.root.visible = wasVisible;
+    if (prevParent) prevParent.add(this.root);
+    else this.measureScene.remove(this.root);
   }
 
   updateSettings(settings: Partial<TreeSettings>): void {
