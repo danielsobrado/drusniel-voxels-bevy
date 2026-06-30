@@ -38,6 +38,9 @@ export function createEnvironmentGui(
     contactShadowsStrength: state.postProcessContactShadowsStrength,
     contactShadowsRadiusPx: state.postProcessContactShadowsRadiusPx,
     contactShadowsDepthBias: state.postProcessContactShadowsDepthBias,
+    clarityEnabled: state.postProcessClarityEnabled,
+    claritySharpen: state.postProcessClaritySharpen,
+    clarityDither: state.postProcessClarityDither,
     aerialPerspectiveEnabled: state.postProcessAerialPerspectiveEnabled,
     aerialPerspectiveStart: state.postProcessAerialPerspectiveStart,
     aerialPerspectiveEnd: state.postProcessAerialPerspectiveEnd,
@@ -115,6 +118,9 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessBloomThreshold", 0, 2, 0.01).name("bloom threshold").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBloomStrength", 0, 1.5, 0.01).name("bloom strength").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBloomRadius", 0, 2, 0.01).name("bloom radius").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessClarityEnabled").name("clarity (WebGL)").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessClaritySharpen", 0, 0.5, 0.01).name("clarity sharpen").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessClarityDither", 0, 0.02, 0.0005).name("clarity dither").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaEnabled").name("TAA-lite (WebGL)").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaHistoryWeight", 0, 0.97, 0.01).name("TAA history").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaDepthThreshold", 0, 0.05, 0.0005).name("TAA depth reject").onChange(applyPostProcessSettings),
@@ -143,6 +149,9 @@ export function createEnvironmentGui(
       state.postProcessBloomThreshold = DEFAULT_POST_PROCESS_SETTINGS.bloomThreshold;
       state.postProcessBloomStrength = DEFAULT_POST_PROCESS_SETTINGS.bloomStrength;
       state.postProcessBloomRadius = DEFAULT_POST_PROCESS_SETTINGS.bloomRadius;
+      state.postProcessClarityEnabled = DEFAULT_POST_PROCESS_SETTINGS.clarityEnabled;
+      state.postProcessClaritySharpen = DEFAULT_POST_PROCESS_SETTINGS.claritySharpen;
+      state.postProcessClarityDither = DEFAULT_POST_PROCESS_SETTINGS.clarityDither;
       state.postProcessTaaEnabled = DEFAULT_POST_PROCESS_SETTINGS.taaEnabled;
       state.postProcessTaaHistoryWeight = DEFAULT_POST_PROCESS_SETTINGS.taaHistoryWeight;
       state.postProcessTaaDepthThreshold = DEFAULT_POST_PROCESS_SETTINGS.taaDepthThreshold;
