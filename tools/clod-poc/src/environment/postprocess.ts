@@ -1,4 +1,6 @@
+import { load } from "js-yaml";
 import * as THREE from "three";
+import postProcessYaml from "./config/postprocess.yaml?raw";
 
 /**
  * God-rays / light-shaft mode.
@@ -9,6 +11,8 @@ import * as THREE from "three";
  *   volumetric controller to stand up a shadow-casting directional light, so it is the most costly.
  */
 export type GodRaysMode = "off" | "cheap" | "heavy" | "volumetric";
+export type PostProcessDebugMode = "output" | "copy" | "off";
+export type PostProcessToneMapping = "aces" | "agx" | "linear" | "none";
 
 export interface PostProcessSettings {
   enabled: boolean;
@@ -17,7 +21,12 @@ export interface PostProcessSettings {
   contrast: number;
   saturation: number;
   vignette: number;
-  debugMode: "output" | "copy" | "off";
+  debugMode: PostProcessDebugMode;
+  toneMapping: PostProcessToneMapping;
+  bloomEnabled: boolean;
+  bloomThreshold: number;
+  bloomStrength: number;
+  bloomRadius: number;
   /** Light-shaft technique to apply after grading (WebGPU pipeline only). */
   godRaysMode: GodRaysMode;
   /** Step size of the screen-space raymarch toward the sun. Higher = longer shafts. */
@@ -30,20 +39,87 @@ export interface PostProcessSettings {
   godRaysExposure: number;
 }
 
-export const DEFAULT_POST_PROCESS_SETTINGS: PostProcessSettings = {
+const POST_PROCESS_FALLBACK_SETTINGS: PostProcessSettings = {
   enabled: true,
   opacity: 1.0,
   exposure: 1.0,
-  contrast: 1.0,
-  saturation: 1.0,
+  contrast: 1.04,
+  saturation: 1.05,
   vignette: 0.0,
   debugMode: "output",
+  toneMapping: "aces",
+  bloomEnabled: true,
+  bloomThreshold: 0.85,
+  bloomStrength: 0.18,
+  bloomRadius: 0.35,
   godRaysMode: "off",
   godRaysDensity: 0.96,
   godRaysDecay: 0.92,
   godRaysWeight: 0.35,
   godRaysExposure: 0.6,
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function booleanValue(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function debugMode(value: unknown, fallback: PostProcessDebugMode): PostProcessDebugMode {
+  return value === "output" || value === "copy" || value === "off" ? value : fallback;
+}
+
+function toneMapping(value: unknown, fallback: PostProcessToneMapping): PostProcessToneMapping {
+  return value === "aces" || value === "agx" || value === "linear" || value === "none" ? value : fallback;
+}
+
+function godRaysMode(value: unknown, fallback: GodRaysMode): GodRaysMode {
+  return value === "off" || value === "cheap" || value === "heavy" || value === "volumetric"
+    ? value
+    : fallback;
+}
+
+export function parsePostProcessSettings(yamlText = postProcessYaml): PostProcessSettings {
+  const fallback = POST_PROCESS_FALLBACK_SETTINGS;
+  try {
+    const raw = load(yamlText);
+    if (!isRecord(raw)) return fallback;
+    const postprocess = isRecord(raw.postprocess) ? raw.postprocess : raw;
+    const bloom = isRecord(postprocess.bloom) ? postprocess.bloom : {};
+    const godRays = isRecord(postprocess.god_rays) ? postprocess.god_rays : {};
+    return {
+      enabled: booleanValue(postprocess.enabled, fallback.enabled),
+      opacity: finiteNumber(postprocess.opacity, fallback.opacity),
+      exposure: finiteNumber(postprocess.exposure, fallback.exposure),
+      contrast: finiteNumber(postprocess.contrast, fallback.contrast),
+      saturation: finiteNumber(postprocess.saturation, fallback.saturation),
+      vignette: finiteNumber(postprocess.vignette, fallback.vignette),
+      debugMode: debugMode(postprocess.debug_mode, fallback.debugMode),
+      toneMapping: toneMapping(postprocess.tone_mapping, fallback.toneMapping),
+      bloomEnabled: booleanValue(bloom.enabled, fallback.bloomEnabled),
+      bloomThreshold: finiteNumber(bloom.threshold, fallback.bloomThreshold),
+      bloomStrength: finiteNumber(bloom.strength, fallback.bloomStrength),
+      bloomRadius: finiteNumber(bloom.radius, fallback.bloomRadius),
+      godRaysMode: godRaysMode(godRays.mode, fallback.godRaysMode),
+      godRaysDensity: finiteNumber(godRays.density, fallback.godRaysDensity),
+      godRaysDecay: finiteNumber(godRays.decay, fallback.godRaysDecay),
+      godRaysWeight: finiteNumber(godRays.weight, fallback.godRaysWeight),
+      godRaysExposure: finiteNumber(godRays.exposure, fallback.godRaysExposure),
+    };
+  } catch (error) {
+    console.warn("[postprocess] failed to parse postprocess.yaml; using fallback settings", error);
+    return fallback;
+  }
+}
+
+export const DEFAULT_POST_PROCESS_SETTINGS: PostProcessSettings = parsePostProcessSettings();
 
 /** Screen-space raymarch sample count per god-rays mode. Drives shader cost. */
 export const GOD_RAYS_SCREEN_SAMPLES: Record<"cheap" | "heavy", number> = {
@@ -75,15 +151,51 @@ const COPY_FRAG = /* glsl */ `
 
 const OUTPUT_FRAG = /* glsl */ `
   uniform sampler2D tDiffuse;
+  uniform vec2 uTexelSize;
   uniform float uExposure;
   uniform float uContrast;
   uniform float uSaturation;
   uniform float uVignette;
+  uniform float uBloomEnabled;
+  uniform float uBloomThreshold;
+  uniform float uBloomStrength;
+  uniform float uBloomRadius;
   varying vec2 vUv;
+
+  vec3 brightPass(vec2 uv) {
+    vec3 sampleColor = texture2D(tDiffuse, uv).rgb;
+    float brightness = max(max(sampleColor.r, sampleColor.g), sampleColor.b);
+    float range = max(1.0 - uBloomThreshold, 0.0001);
+    float mask = clamp((brightness - uBloomThreshold) / range, 0.0, 1.0);
+    return sampleColor * mask;
+  }
+
+  vec3 bloomSample(vec2 offset, float weight) {
+    vec2 spread = uTexelSize * max(uBloomRadius, 0.0) * 8.0;
+    return brightPass(vUv + offset * spread) * weight;
+  }
+
+  vec3 bloomColor() {
+    vec3 bloom = brightPass(vUv) * 0.18;
+    bloom += bloomSample(vec2(1.0, 0.0), 0.10);
+    bloom += bloomSample(vec2(-1.0, 0.0), 0.10);
+    bloom += bloomSample(vec2(0.0, 1.0), 0.10);
+    bloom += bloomSample(vec2(0.0, -1.0), 0.10);
+    bloom += bloomSample(vec2(1.0, 1.0), 0.07);
+    bloom += bloomSample(vec2(-1.0, 1.0), 0.07);
+    bloom += bloomSample(vec2(1.0, -1.0), 0.07);
+    bloom += bloomSample(vec2(-1.0, -1.0), 0.07);
+    bloom += bloomSample(vec2(2.0, 0.0), 0.04);
+    bloom += bloomSample(vec2(-2.0, 0.0), 0.04);
+    bloom += bloomSample(vec2(0.0, 2.0), 0.04);
+    bloom += bloomSample(vec2(0.0, -2.0), 0.04);
+    return bloom;
+  }
 
   void main() {
     vec4 sampled = texture2D(tDiffuse, vUv);
     vec3 color = sampled.rgb * uExposure;
+    color += bloomColor() * uBloomStrength * uBloomEnabled;
     color = (color - 0.5) * uContrast + 0.5;
 
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
@@ -114,6 +226,20 @@ function createFullscreenTriangle(): THREE.BufferGeometry {
   );
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 2, 0, 0, 2], 2));
   return geometry;
+}
+
+export function toneMappingModeToThree(mode: PostProcessToneMapping) {
+  switch (mode) {
+    case "agx":
+      return THREE.AgXToneMapping;
+    case "linear":
+      return THREE.LinearToneMapping;
+    case "none":
+      return THREE.NoToneMapping;
+    case "aces":
+    default:
+      return THREE.ACESFilmicToneMapping;
+  }
 }
 
 export class PostProcessPipeline {
@@ -156,10 +282,15 @@ export class PostProcessPipeline {
     this.outputMaterial = new THREE.ShaderMaterial({
       uniforms: {
         tDiffuse: { value: this.target.texture },
+        uTexelSize: { value: new THREE.Vector2(1, 1) },
         uExposure: { value: settings.exposure },
         uContrast: { value: settings.contrast },
         uSaturation: { value: settings.saturation },
         uVignette: { value: settings.vignette },
+        uBloomEnabled: { value: settings.bloomEnabled ? 1 : 0 },
+        uBloomThreshold: { value: settings.bloomThreshold },
+        uBloomStrength: { value: settings.bloomStrength },
+        uBloomRadius: { value: settings.bloomRadius },
       },
       vertexShader: FULLSCREEN_VERT,
       fragmentShader: OUTPUT_FRAG,
@@ -182,15 +313,24 @@ export class PostProcessPipeline {
     const targetWidth = this.drawingBufferSize.x || Math.floor(width * pixelRatio);
     const targetHeight = this.drawingBufferSize.y || Math.floor(height * pixelRatio);
     this.target.setSize(Math.max(1, targetWidth), Math.max(1, targetHeight));
+    this.outputMaterial.uniforms.uTexelSize.value.set(
+      1 / Math.max(1, targetWidth),
+      1 / Math.max(1, targetHeight),
+    );
   }
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
     this.settings = { ...this.settings, ...settings };
+    this.renderer.toneMapping = toneMappingModeToThree(this.settings.toneMapping);
     this.copyMaterial.uniforms.uOpacity.value = this.settings.opacity;
     this.outputMaterial.uniforms.uExposure.value = this.settings.exposure;
     this.outputMaterial.uniforms.uContrast.value = this.settings.contrast;
     this.outputMaterial.uniforms.uSaturation.value = this.settings.saturation;
     this.outputMaterial.uniforms.uVignette.value = this.settings.vignette;
+    this.outputMaterial.uniforms.uBloomEnabled.value = this.settings.bloomEnabled ? 1 : 0;
+    this.outputMaterial.uniforms.uBloomThreshold.value = this.settings.bloomThreshold;
+    this.outputMaterial.uniforms.uBloomStrength.value = this.settings.bloomStrength;
+    this.outputMaterial.uniforms.uBloomRadius.value = this.settings.bloomRadius;
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera): void {
