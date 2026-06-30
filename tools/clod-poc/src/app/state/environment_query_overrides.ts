@@ -1,5 +1,9 @@
 import type { PostProcessToneMapping } from "../../environment/postprocess.js";
 import type { ClodAppState } from "./index.js";
+import {
+  applyPostProcessQualityPreset,
+  isPostProcessQualityPreset,
+} from "./postprocess_quality_presets.js";
 
 function finiteParam(searchParams: URLSearchParams, ...keys: string[]): number | null {
   for (const key of keys) {
@@ -26,6 +30,10 @@ function toneMappingParam(searchParams: URLSearchParams): PostProcessToneMapping
   const value = searchParams.get("toneMap") ?? searchParams.get("toneMapping");
   if (value === "aces" || value === "agx" || value === "linear" || value === "none") return value;
   return null;
+}
+
+function qualityPresetParam(searchParams: URLSearchParams): string | null {
+  return searchParams.get("quality") ?? searchParams.get("qualityPreset") ?? searchParams.get("preset");
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -70,6 +78,11 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
 
   const timings = flagParam(searchParams, "timings", "profile");
   if (timings !== null) state.profileEnabled = timings;
+
+  const qualityPreset = qualityPresetParam(searchParams);
+  if (isPostProcessQualityPreset(qualityPreset)) {
+    applyPostProcessQualityPreset(state, qualityPreset);
+  }
 
   apply(searchParams, ["renderScale", "renderscale", "postScale", "postprocessScale"], (value) => {
     state.postProcessRenderScale = clamp(value, 0.5, 1);
