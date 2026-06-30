@@ -240,7 +240,9 @@ describe("postprocess shaders", () => {
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uSaturation");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uVignette");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uBloomThreshold");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uBloomEnabled < 0.5");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("bloomColor");
+    expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("uAerialPerspectiveEnabled < 0.5");
     expect(POSTPROCESS_SHADER_TEST_HOOKS.outputFragment).toContain("aerialPerspective");
   });
 });
