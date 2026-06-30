@@ -23,6 +23,10 @@ export function createEnvironmentGui(
   state: ClodAppState,
   deps: EnvironmentGuiDeps,
 ): void {
+  const applyPostProcessSettings = () => {
+    deps.postProcess?.updateSettings(deps.currentPostProcessSettings());
+  };
+
   const audioFolder = gui.addFolder("Audio");
   audioFolder.add(state, "audioEnabled").name("Audio feedback").onChange((enabled: boolean) => {
     setAudioEnabled(enabled);
@@ -74,13 +78,18 @@ export function createEnvironmentGui(
 
   const postFolder = gui.addFolder("postprocess");
   const postControllers: GuiController[] = [
-    postFolder.add(state, "postProcessEnabled").name("enabled"),
-    postFolder.add(state, "postProcessDebugMode", ["output", "copy", "off"]).name("mode"),
-    postFolder.add(state, "postProcessOpacity", 0, 1, 0.01).name("copy opacity"),
-    postFolder.add(state, "postProcessExposure", 0.25, 2.5, 0.01).name("pass exposure"),
-    postFolder.add(state, "postProcessContrast", 0.25, 2.5, 0.01).name("contrast"),
-    postFolder.add(state, "postProcessSaturation", 0, 2.5, 0.01).name("saturation"),
-    postFolder.add(state, "postProcessVignette", 0, 1.5, 0.01).name("vignette"),
+    postFolder.add(state, "postProcessEnabled").name("enabled").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessDebugMode", ["output", "copy", "off"]).name("mode").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessToneMapping", ["aces", "agx", "linear", "none"]).name("tone map").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessOpacity", 0, 1, 0.01).name("copy opacity").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessExposure", 0.25, 2.5, 0.01).name("pass exposure").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessContrast", 0.25, 2.5, 0.01).name("contrast").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessSaturation", 0, 2.5, 0.01).name("saturation").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessVignette", 0, 1.5, 0.01).name("vignette").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessBloomEnabled").name("bloom (WebGL)").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessBloomThreshold", 0, 2, 0.01).name("bloom threshold").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessBloomStrength", 0, 1.5, 0.01).name("bloom strength").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessBloomRadius", 0, 2, 0.01).name("bloom radius").onChange(applyPostProcessSettings),
   ];
   const postActions = {
     reset: () => {
@@ -91,7 +100,12 @@ export function createEnvironmentGui(
       state.postProcessSaturation = DEFAULT_POST_PROCESS_SETTINGS.saturation;
       state.postProcessVignette = DEFAULT_POST_PROCESS_SETTINGS.vignette;
       state.postProcessDebugMode = DEFAULT_POST_PROCESS_SETTINGS.debugMode;
-      deps.postProcess?.updateSettings(deps.currentPostProcessSettings());
+      state.postProcessToneMapping = DEFAULT_POST_PROCESS_SETTINGS.toneMapping;
+      state.postProcessBloomEnabled = DEFAULT_POST_PROCESS_SETTINGS.bloomEnabled;
+      state.postProcessBloomThreshold = DEFAULT_POST_PROCESS_SETTINGS.bloomThreshold;
+      state.postProcessBloomStrength = DEFAULT_POST_PROCESS_SETTINGS.bloomStrength;
+      state.postProcessBloomRadius = DEFAULT_POST_PROCESS_SETTINGS.bloomRadius;
+      applyPostProcessSettings();
       for (const controller of postControllers) controller.updateDisplay();
     },
   };
@@ -101,11 +115,12 @@ export function createEnvironmentGui(
   const godRaysControllers: GuiController[] = [
     godRaysFolder
       .add(state, "godRaysMode", ["off", "cheap", "heavy", "volumetric"])
-      .name("mode (WebGPU)"),
-    godRaysFolder.add(state, "godRaysDensity", 0.5, 1.5, 0.01).name("density"),
-    godRaysFolder.add(state, "godRaysDecay", 0.8, 0.99, 0.005).name("decay"),
-    godRaysFolder.add(state, "godRaysWeight", 0.0, 1.0, 0.01).name("weight"),
-    godRaysFolder.add(state, "godRaysExposure", 0.0, 2.0, 0.01).name("exposure"),
+      .name("mode (WebGPU)")
+      .onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysDensity", 0.5, 1.5, 0.01).name("density").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysDecay", 0.8, 0.99, 0.005).name("decay").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysWeight", 0.0, 1.0, 0.01).name("weight").onChange(applyPostProcessSettings),
+    godRaysFolder.add(state, "godRaysExposure", 0.0, 2.0, 0.01).name("exposure").onChange(applyPostProcessSettings),
   ];
   const godRaysActions = {
     reset: () => {
@@ -114,7 +129,7 @@ export function createEnvironmentGui(
       state.godRaysDecay = DEFAULT_POST_PROCESS_SETTINGS.godRaysDecay;
       state.godRaysWeight = DEFAULT_POST_PROCESS_SETTINGS.godRaysWeight;
       state.godRaysExposure = DEFAULT_POST_PROCESS_SETTINGS.godRaysExposure;
-      deps.postProcess?.updateSettings(deps.currentPostProcessSettings());
+      applyPostProcessSettings();
       for (const controller of godRaysControllers) controller.updateDisplay();
     },
   };
