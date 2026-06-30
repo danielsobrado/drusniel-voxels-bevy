@@ -49,7 +49,8 @@ function applyScene(value: string): void {
   const next = new URLSearchParams(location.search);
   if (value) next.set("scene", value);
   else next.delete("scene");
-  location.search = `?${next.toString()}`;
+  const query = next.toString();
+  location.assign(`${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
 }
 
 export function createSceneGui(gui: GUI): void {
