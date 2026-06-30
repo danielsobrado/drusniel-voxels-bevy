@@ -86,7 +86,7 @@ function createParticleMaterial(): MeshBasicNodeMaterial {
     const r: TslNode = length(p).mul(2.0);
     const disc: TslNode = float(1).sub(smoothstep(0.42, 1.0, r));
     const core: TslNode = float(1).sub(smoothstep(0.0, 0.26, r));
-    const edgeBreakup: TslNode = smoothstep(0.92, 0.22, r).mul(0.55).add(0.28);
+    const edgeBreakup: TslNode = float(1).sub(smoothstep(0.22, 0.92, r)).mul(0.55).add(0.28);
     const alpha: TslNode = clamp(disc.mul(edgeBreakup).add(core.mul(0.12)), 0.0, 0.42);
     const darkDust: TslNode = vec3(0.34, 0.24, 0.15);
     const warmDust: TslNode = vec3(0.66, 0.52, 0.36);
