@@ -388,6 +388,7 @@ export class TreeSystem {
   private updateStats(): void {
     this.stats = buildTreeRuntimeStats({
       patches: this.patches,
+      geometries: this.assets.geometries,
       lodCounts: this.lodCounts,
       reportsGpuRingStats: this.reportsGpuRingStats(),
       gpuRing: this.gpuRing,
