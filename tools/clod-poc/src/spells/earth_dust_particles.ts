@@ -1,12 +1,27 @@
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  clamp,
+  float,
+  Fn,
+  length,
+  mix,
+  smoothstep,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+} from "three/tsl";
 import type { EarthSpellVfxConfig } from "./spell_config.js";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type TslNode = any;
 
 const PARTICLE_COUNT_MIN = 64;
 const PARTICLE_COUNT_MAX = 160;
 const PARTICLE_DENSITY_PER_METER = 24;
 const PARTICLE_GRAVITY_MPS2 = -2.2;
 const PARTICLE_DRAG = 0.68;
-const PARTICLE_BASE_OPACITY = 0.46;
 const PARTICLE_MIN_LIFETIME_S = 0.62;
 const PARTICLE_MAX_LIFETIME_S = 1.22;
 const GOLDEN_ANGLE = 2.399963229728653;
@@ -41,7 +56,7 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-function smoothstep(edge0: number, edge1: number, x: number): number {
+function smoothstepCpu(edge0: number, edge1: number, x: number): number {
   const t = clamp01((x - edge0) / Math.max(1e-6, edge1 - edge0));
   return t * t * (3 - 2 * t);
 }
@@ -65,6 +80,33 @@ function tangentBasis(normal: THREE.Vector3): { tangent: THREE.Vector3; bitangen
   return { tangent, bitangent };
 }
 
+function createParticleMaterial(): MeshBasicNodeMaterial {
+  const fragment = Fn(() => {
+    const p: TslNode = uv().sub(vec2(0.5, 0.5));
+    const r: TslNode = length(p).mul(2.0);
+    const disc: TslNode = float(1).sub(smoothstep(0.42, 1.0, r));
+    const core: TslNode = float(1).sub(smoothstep(0.0, 0.26, r));
+    const edgeBreakup: TslNode = smoothstep(0.92, 0.22, r).mul(0.55).add(0.28);
+    const alpha: TslNode = clamp(disc.mul(edgeBreakup).add(core.mul(0.12)), 0.0, 0.42);
+    const darkDust: TslNode = vec3(0.34, 0.24, 0.15);
+    const warmDust: TslNode = vec3(0.66, 0.52, 0.36);
+    const color: TslNode = mix(darkDust, warmDust, core.mul(0.25).add(disc.mul(0.55)));
+    return vec4(color, alpha);
+  })();
+
+  const material = new MeshBasicNodeMaterial();
+  material.name = "earth-spell-dust-particle-node";
+  material.colorNode = fragment.xyz;
+  material.opacityNode = fragment.w;
+  material.transparent = true;
+  material.depthWrite = false;
+  material.depthTest = true;
+  material.side = THREE.DoubleSide;
+  material.blending = THREE.NormalBlending;
+  material.toneMapped = false;
+  return material;
+}
+
 function resetInstance(mesh: THREE.InstancedMesh, index: number, matrix: THREE.Matrix4): void {
   matrix.compose(new THREE.Vector3(0, -100000, 0), new THREE.Quaternion(), ZERO_SCALE);
   mesh.setMatrixAt(index, matrix);
@@ -73,17 +115,7 @@ function resetInstance(mesh: THREE.InstancedMesh, index: number, matrix: THREE.M
 export function createEarthDustParticleSystem(deps: EarthDustParticleSystemDeps): EarthDustParticleSystem {
   const count = particleCount(deps.config);
   const geometry = new THREE.PlaneGeometry(1, 1);
-  const material = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(0.62, 0.49, 0.34),
-    transparent: true,
-    opacity: PARTICLE_BASE_OPACITY,
-    depthWrite: false,
-    depthTest: true,
-    side: THREE.DoubleSide,
-    blending: THREE.NormalBlending,
-    vertexColors: true,
-    toneMapped: false,
-  });
+  const material = createParticleMaterial();
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.name = "earth-spell-dust-particles";
   mesh.frustumCulled = false;
@@ -102,15 +134,7 @@ export function createEarthDustParticleSystem(deps: EarthDustParticleSystemDeps)
   const roll = new THREE.Quaternion();
   let active = false;
 
-  for (let i = 0; i < count; i++) {
-    mesh.setColorAt(i, new THREE.Color(
-      0.44 + seeded01(i, 4) * 0.22,
-      0.32 + seeded01(i, 5) * 0.16,
-      0.20 + seeded01(i, 6) * 0.12,
-    ));
-    resetInstance(mesh, i, matrix);
-  }
-  mesh.instanceColor!.needsUpdate = true;
+  for (let i = 0; i < count; i++) resetInstance(mesh, i, matrix);
   mesh.instanceMatrix.needsUpdate = true;
 
   const buildSeeds = (): void => {
@@ -148,8 +172,8 @@ export function createEarthDustParticleSystem(deps: EarthDustParticleSystemDeps)
       .addScaledVector(normal, gravityFall)
       .addScaledVector(seed.sideDrift, turbulence);
 
-    const fade = smoothstep(0.0, 0.12, lifeT) * (1 - smoothstep(0.58, 1.0, lifeT));
-    const grow = 0.48 + smoothstep(0.0, 0.65, lifeT) * 1.75;
+    const fade = smoothstepCpu(0.0, 0.12, lifeT) * (1 - smoothstepCpu(0.58, 1.0, lifeT));
+    const grow = 0.48 + smoothstepCpu(0.0, 0.65, lifeT) * 1.75;
     const size = seed.sizeM * grow * Math.max(0.001, fade);
     scale.set(size, size * (0.72 + lifeT * 0.55), 1);
 
