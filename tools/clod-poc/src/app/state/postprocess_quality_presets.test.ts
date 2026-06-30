@@ -23,7 +23,7 @@ function createState(): PostProcessQualityPresetState {
 }
 
 describe("postprocess quality presets", () => {
-  it.each([
+  it.each<[string | null, boolean]>([
     ["custom", true],
     ["ultra", true],
     ["balanced", true],
