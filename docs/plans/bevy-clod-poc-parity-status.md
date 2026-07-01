@@ -1,6 +1,6 @@
 # Bevy / clod-poc Parity Status
 
-Document status (2026-06-30): current code check from the Bevy tree and `tools/clod-poc`.
+Document status (updated 2026-07-01): current code check from the Bevy tree and `tools/clod-poc`.
 
 ## Implemented in Bevy
 
@@ -22,7 +22,10 @@ The following clod-poc-facing systems are already represented in the Rust/Bevy r
 
 The next parity work should stay on verification and gaps, not re-porting these systems:
 
-- WorldSource GPU readback runtime acceptance is verified from a native Windows shell: `bench-runs/world-source-runtime-acceptance/summary.json` records `acceptance_pass: true`, 5 available GPU samples, `drift_gate.status: passed`, and 0 failures. `world_source_acceptance` now validates and pairs with that artifact; it stays red only when `runtime_gpu_readback_acceptance.status` is not `accepted`. Legacy bridge removal still waits on reviewed paired acceptance, visual parity, and bench thresholds.
+- WorldSource GPU readback runtime acceptance is verified from a native Windows shell: `bench-runs/world-source-runtime-acceptance/summary.json` records `acceptance_pass: true`, 5 available GPU samples, `drift_gate.status: passed`, and 0 failures. `world_source_acceptance` now validates and pairs with that artifact; it stays red only when `runtime_gpu_readback_acceptance.status` is not `accepted`.
+- Explicit `terrain_source.mode = legacy` has been removed from supported config/runtime selection. `legacy` now fails terrain-source YAML deserialization, and async chunk generation no longer has a selectable legacy terrain branch. Remaining cleanup is dead-code/doc removal after a native Windows visual guard rerun.
+- `bench_guard` now scopes the LOD seam-audit JSON check to seam-audit scenes/counters, so `visual-regression.toml` summaries are not failed solely for missing `seam-audit.json`.
+- Bevy GPU vegetation parity has an opt-in vertical slice behind `--features gpu_vegetation`: source instance storage upload, compute cull buffers/node, indirect draw path, shadow cascade buffers, and forest A/B bench scenes. Native PowerShell smoke benches now complete after fixing compute binding/layout validation issues, but the current forest A/B artifacts contain 0 queued instanced props, so real-GPU A/B benches with actual instanced prop coverage are still required before performance claims.
 - Run the relevant clod-poc Node/Vite checks directly, not through `rtk`, when changing the web side.
 - Run Bevy benches from a native Windows shell for visual/frame-timing claims; this WSL path should not be used for visual benches.
 - For construction changes, verify placement/stability/persistence behavior and terrain-conform edits when enabled.

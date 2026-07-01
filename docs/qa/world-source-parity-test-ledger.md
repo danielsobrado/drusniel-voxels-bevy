@@ -13,7 +13,7 @@ Scope: BVY-WS-12 WorldSource GPU readback acceptance, paired acceptance, visual-
 | Missing-runtime-artifact path | Expected red | `world_source_acceptance` must stay red when the runtime artifact is missing or rejected, with `gpu_readback_unavailable` and `drift_gate_not_passed`. |
 | Visual-regression render-ready | Pass | `bench-runs/2026-07-01T01-50-08Z/summary.json` has 7 checkpoints, all with `ready_timed_out: false`, `render_ready_timed_out: false`, and `render_ready_wait_frames: 90`. |
 | Visual `bench_guard` | Pass | `bench_guard` exits 0 for `bench-runs/2026-07-01T01-50-08Z/summary.json`. `__frame_total` is now a presence check because it is `Time<Real>` wall-clock cadence; GPU opaque, mesh dirty, instancing, water, and render-counter thresholds remain gated. |
-| Legacy bridge removal | Review-ready | Paired GPU readback acceptance, visual render-ready, and visual guard now pass. Do not remove the legacy bridge until these artifacts are reviewed together. |
+| Legacy bridge removal | Runtime path removed | Paired GPU readback acceptance, visual render-ready, and visual guard passed. `terrain_source.mode = legacy`, `ChunkTerrainSource::Legacy`, and `generation/legacy_chunk.rs` have been removed. |
 
 ## Commands and results
 
@@ -122,8 +122,6 @@ Recorded results:
 
 ## Next required verification
 
-Before removing or further deprecating the explicit legacy path:
-
-1. Review the paired runtime acceptance report, visual artifact, and guard decision together.
-2. Re-run runtime-assisted readback if making new GPU-output claims.
-3. Re-run the focused Rust tests above after any code/config changes.
+1. Re-run runtime-assisted readback if making new GPU-output claims.
+2. Re-run the focused Rust tests above after any code/config changes.
+3. Keep `terrain_source.mode = legacy` rejected by config tests.

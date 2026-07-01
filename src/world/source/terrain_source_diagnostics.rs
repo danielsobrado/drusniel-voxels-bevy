@@ -7,7 +7,6 @@ use super::terrain_source_config::{TerrainSourceConfig, TerrainSourceMode};
 pub enum TerrainSourceRuntimePath {
     GpuWorldSource,
     CpuWorldSourceReference,
-    Legacy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,7 +14,6 @@ pub enum TerrainSourceRuntimePath {
 pub enum TerrainSourceSelectionReason {
     DefaultGpu,
     ExplicitCpuReference,
-    ExplicitLegacy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,13 +42,6 @@ impl TerrainSourceStartupReport {
                 gpu_default_runtime: false,
                 opt_in_non_gpu: true,
             },
-            TerrainSourceMode::Legacy => Self {
-                configured_mode: TerrainSourceMode::Legacy,
-                runtime_path: TerrainSourceRuntimePath::Legacy,
-                selection_reason: TerrainSourceSelectionReason::ExplicitLegacy,
-                gpu_default_runtime: false,
-                opt_in_non_gpu: true,
-            },
         }
     }
 
@@ -58,7 +49,6 @@ impl TerrainSourceStartupReport {
         match self.runtime_path {
             TerrainSourceRuntimePath::GpuWorldSource => "gpu_world_source",
             TerrainSourceRuntimePath::CpuWorldSourceReference => "cpu_world_source_reference",
-            TerrainSourceRuntimePath::Legacy => "legacy",
         }
     }
 }
@@ -105,21 +95,5 @@ mod tests {
         assert!(!report.gpu_default_runtime);
         assert!(report.opt_in_non_gpu);
         assert_eq!(report.acceptance_label(), "cpu_world_source_reference");
-    }
-
-    #[test]
-    fn legacy_is_explicit_opt_in() {
-        let report = TerrainSourceStartupReport::from_config(&TerrainSourceConfig {
-            mode: TerrainSourceMode::Legacy,
-        });
-
-        assert_eq!(report.runtime_path, TerrainSourceRuntimePath::Legacy);
-        assert_eq!(
-            report.selection_reason,
-            TerrainSourceSelectionReason::ExplicitLegacy
-        );
-        assert!(!report.gpu_default_runtime);
-        assert!(report.opt_in_non_gpu);
-        assert_eq!(report.acceptance_label(), "legacy");
     }
 }

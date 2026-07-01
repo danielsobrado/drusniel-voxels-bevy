@@ -19,9 +19,9 @@ CLOD/WorldSource is the default terrain path. MC/Transvoxel is legacy/fallback o
 - WorldSource chunk generation uses biome-tagged material IDs.
 - Surface Nets writes the terrain biome id into `uv0.y`.
 - The triplanar terrain shader imports `world_source/biome_splat.wgsl` and resolves GPU splat weights from the biome id.
-- The compatibility biome adapter is no longer exported from the mesh module and exists only as private fallback for explicit legacy mode.
+- The compatibility biome adapter is no longer exported from the mesh module, and explicit legacy terrain-source mode has been removed.
 
-## Remaining blocker before removing legacy bridge
+## Legacy bridge removal status
 
 The standalone bench path still uses `UnavailableWorldSourceGpuReadback` when no accepted runtime artifact is available. With the reviewed runtime artifact present, `world_source_acceptance` pairs the focused CPU/mesh bench report with the accepted GPU readback evidence.
 
@@ -52,16 +52,16 @@ Accepted runtime-assisted evidence:
 
 - Do not spend BVY-WS-12 time porting MC/Transvoxel biome UVs.
 - Do not mark visual parity accepted while GPU readback is skipped.
-- Do not remove explicit legacy mode until the paired acceptance report, visual parity, and bench thresholds are reviewed together.
+- Do not reintroduce explicit legacy terrain-source mode; keep missing/rejected runtime readback artifacts red in `world_source_acceptance`.
 
 ## Next implementation task
 
-Use the paired report as the acceptance handoff, then continue legacy-removal gating:
+Use the paired report as the acceptance handoff, then continue cleanup:
 
 1. Keep `world_source_acceptance` red when `runtime_gpu_readback_acceptance.status` is not `accepted`.
 2. Re-run the runtime-assisted artifact before making visual or frame-timing claims that depend on current GPU output.
-3. Review the paired acceptance report, visual parity artifact, and updated guard decision together.
-4. Remove or deprecate the legacy bridge only after that review.
+3. Keep `terrain_source.mode = legacy` rejected by config tests.
+4. Remove remaining stale docs that describe `legacy` as selectable.
 
 ## Verification
 

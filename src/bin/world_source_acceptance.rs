@@ -589,12 +589,6 @@ mod tests {
         );
         assert!(
             require_default_gpu_runtime_path(&TerrainSourceConfig {
-                mode: TerrainSourceMode::Legacy,
-            })
-            .is_err()
-        );
-        assert!(
-            require_default_gpu_runtime_path(&TerrainSourceConfig {
                 mode: TerrainSourceMode::CpuWorldSourceReference,
             })
             .is_err()

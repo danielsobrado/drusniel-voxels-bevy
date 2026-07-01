@@ -580,7 +580,9 @@ fn run() -> Result<bool, String> {
     }
     if let Some(lod_audit) = config.lod_seam_audit.as_ref() {
         for (path, summary) in &summaries {
-            results.extend(evaluate_lod_seam_audit(lod_audit, path, summary));
+            if summary_requests_lod_seam_audit(summary) {
+                results.extend(evaluate_lod_seam_audit(lod_audit, path, summary));
+            }
         }
     }
     if args.require_clod_shadow {
@@ -1076,6 +1078,17 @@ fn evaluate_lod_seam_audit(
     ]
 }
 
+fn summary_requests_lod_seam_audit(summary: &BenchSummary) -> bool {
+    summary.scene == "lod-seam-audit.toml"
+        || summary.scene == "lod-seam-hard-cases.toml"
+        || summary.checkpoints.iter().any(|checkpoint| {
+            checkpoint
+                .areas
+                .keys()
+                .any(|area| area.starts_with("Counter Seam Audit:"))
+        })
+}
+
 fn seam_audit_check(scene: &str, metric: &str, value: f64, max: f64) -> CheckResult {
     let status = if value > max {
         Status::Fail
@@ -1262,6 +1275,60 @@ fn print_table(results: &[CheckResult]) {
     );
     for row in rows {
         println!("  {}", format_row(&row, &widths));
+    }
+}
+
+#[cfg(test)]
+mod lod_seam_applicability_tests {
+    use super::*;
+
+    fn summary(scene: &str, areas: &[&str]) -> BenchSummary {
+        BenchSummary {
+            scene: scene.to_string(),
+            checkpoints: vec![CheckpointSummary {
+                name: "checkpoint".to_string(),
+                median_frame_ms: 0.0,
+                p99_frame_ms: 0.0,
+                areas: areas
+                    .iter()
+                    .map(|area| {
+                        (
+                            (*area).to_string(),
+                            AreaSummary {
+                                median_ms: 0.0,
+                                p99_ms: 0.0,
+                                calls_per_frame: 0.0,
+                            },
+                        )
+                    })
+                    .collect(),
+                metrics: HashMap::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn visual_summary_does_not_require_lod_seam_dump() {
+        let summary = summary("visual-regression.toml", &["Render Graph CPU"]);
+
+        assert!(!summary_requests_lod_seam_audit(&summary));
+    }
+
+    #[test]
+    fn seam_scene_requires_lod_seam_dump() {
+        let summary = summary("lod-seam-audit.toml", &[]);
+
+        assert!(summary_requests_lod_seam_audit(&summary));
+    }
+
+    #[test]
+    fn seam_counter_requires_lod_seam_dump() {
+        let summary = summary(
+            "custom-seam-scene.toml",
+            &["Counter Seam Audit: Open Edge Faces"],
+        );
+
+        assert!(summary_requests_lod_seam_audit(&summary));
     }
 }
 

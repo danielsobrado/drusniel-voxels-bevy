@@ -8,7 +8,6 @@ pub const TERRAIN_SOURCE_CONFIG_PATH: &str = "assets/config/terrain_source.yaml"
 #[serde(rename_all = "snake_case")]
 pub enum TerrainSourceMode {
     GpuWorldSource,
-    Legacy,
     CpuWorldSourceReference,
 }
 
@@ -33,7 +32,6 @@ impl TerrainSourceMode {
         match self {
             Self::GpuWorldSource => "gpu_world_source",
             Self::CpuWorldSourceReference => "cpu_world_source_reference",
-            Self::Legacy => "legacy",
         }
     }
 
@@ -41,7 +39,6 @@ impl TerrainSourceMode {
         match self {
             Self::GpuWorldSource => "default_gpu",
             Self::CpuWorldSourceReference => "explicit_cpu_reference",
-            Self::Legacy => "explicit_legacy",
         }
     }
 
@@ -50,7 +47,7 @@ impl TerrainSourceMode {
     }
 
     pub fn is_deprecated(self) -> bool {
-        matches!(self, Self::Legacy)
+        false
     }
 }
 
@@ -95,7 +92,7 @@ impl TerrainSourceConfig {
     }
 
     pub fn is_legacy(&self) -> bool {
-        self.mode == TerrainSourceMode::Legacy
+        false
     }
 
     pub fn log_startup_diagnostics(&self) {
@@ -108,11 +105,7 @@ impl TerrainSourceConfig {
             self.mode.is_opt_in_non_gpu(),
         );
 
-        if self.mode.is_deprecated() {
-            bevy::log::warn!(
-                "Legacy terrain source mode is deprecated and remains only as an explicit fallback during WorldSource migration"
-            );
-        }
+        debug_assert!(!self.mode.is_deprecated());
     }
 }
 
@@ -162,16 +155,10 @@ mod tests {
     }
 
     #[test]
-    fn loads_legacy_mode_as_deprecated_explicit_fallback() {
+    fn rejects_legacy_mode_after_world_source_acceptance() {
         let file = write_temp_yaml("terrain_source:\n  mode: legacy\n");
-        let config = TerrainSourceConfig::load(file.path()).expect("legacy config");
 
-        assert_eq!(config.mode, TerrainSourceMode::Legacy);
-        assert!(config.is_legacy());
-        assert_eq!(config.mode.acceptance_label(), "legacy");
-        assert_eq!(config.mode.selection_reason(), "explicit_legacy");
-        assert!(config.mode.is_opt_in_non_gpu());
-        assert!(config.mode.is_deprecated());
+        assert!(TerrainSourceConfig::load(file.path()).is_err());
     }
 
     #[test]

@@ -4,7 +4,6 @@ use crate::world::source::{
     ProceduralWorldSourceTerrainBridge, TerrainSourceConfig, TerrainSourceMode,
 };
 
-mod legacy_chunk;
 mod source;
 mod state;
 mod stats;
@@ -222,9 +221,6 @@ pub(crate) fn generate_chunk_async(
     source: &ChunkTerrainSource,
 ) -> (Chunk, ChunkStats) {
     match source {
-        ChunkTerrainSource::Legacy(generator) => {
-            legacy_chunk::generate_legacy_chunk_async(chunk_pos, generator)
-        }
         ChunkTerrainSource::WorldSource(bridge, _) => {
             generate_world_source_chunk_async(chunk_pos, bridge)
         }
@@ -339,19 +335,6 @@ pub(crate) fn assign_initial_lods_for_loaded_world(world: &mut VoxelWorld) {
 mod tests {
     use super::*;
     use crate::world::source::material_biome;
-
-    #[test]
-    fn terrain_source_config_selects_legacy_generation() {
-        let source = chunk_terrain_source_for_config(
-            &TerrainSourceConfig {
-                mode: TerrainSourceMode::Legacy,
-            },
-            BiomeTable::default(),
-        );
-
-        assert!(matches!(source, ChunkTerrainSource::Legacy(_)));
-        assert_eq!(source.active_mode(), TerrainSourceMode::Legacy);
-    }
 
     #[test]
     fn terrain_source_config_selects_gpu_world_source_generation() {

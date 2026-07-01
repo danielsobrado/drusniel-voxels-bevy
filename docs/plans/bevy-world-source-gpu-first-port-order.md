@@ -175,7 +175,7 @@ Acceptance:
 
 Notes:
 
-- The active CLOD/WorldSource path resolves biome id from true material tags or active `ProceduralWorldSource`; the legacy compatibility adapter is not exported from the mesh module and remains private fallback for explicit legacy mode.
+- The active CLOD/WorldSource path resolves biome id from true material tags or active `ProceduralWorldSource`; the legacy compatibility adapter is not exported from the mesh module and the explicit legacy terrain-source mode has been removed.
 - MC/Transvoxel is legacy/fallback for this port and does not block GPU biome/splat parity.
 - BVY-WS-09 should add a real GPU-readback producer before this is treated as full runtime visual parity.
 
@@ -217,7 +217,7 @@ Acceptance:
 - [x] Legacy mode opt-in only.
 - [x] CPU reference mode opt-in only.
 - [x] Startup diagnostics report active terrain source mode.
-- [x] Acceptance can record GPU, CPU fallback/reference, or legacy path through `TerrainSourceStartupReport` and `TerrainSourceMode::acceptance_label()`.
+- [x] Acceptance can record GPU or CPU reference path through `TerrainSourceStartupReport` and `TerrainSourceMode::acceptance_label()`.
 
 ### BVY-WS-11 — Add Bevy release bench and acceptance report
 
@@ -240,15 +240,15 @@ Notes:
 
 ### BVY-WS-12 — Remove temporary legacy bridge after visual parity
 
-Status: Next.
+Status: In progress; explicit legacy runtime path removed.
 
 Acceptance:
 
-- [ ] Visual parity scene passes.
+- [x] Visual parity scene passes via `bench-runs/2026-07-01T01-50-08Z/summary.json` plus native PowerShell `bench_guard`.
 - [x] Opt-in runtime GPU readback produces matching samples and a passed drift gate.
 - [x] Final acceptance report consumes real GPU readback or records the reviewed runtime-assisted acceptance artifact from `bench-runs/world-source-runtime-acceptance/summary.json`.
-- [ ] Bench within accepted thresholds.
-- [ ] Legacy path removed or explicitly deprecated.
+- [x] Bench within accepted thresholds for the reviewed visual artifact.
+- [x] Legacy path removed or explicitly deprecated.
 - [x] Temporary seven-biome-to-legacy-material mapping removed from default path.
 - [ ] Docs updated with final GPU WorldSource flow.
 
@@ -256,7 +256,7 @@ Acceptance:
 
 BVY-WS-01, BVY-WS-02, BVY-WS-03, BVY-WS-04, BVY-WS-05, BVY-WS-06, BVY-WS-07, BVY-WS-08, BVY-WS-09, BVY-WS-10, BVY-WS-11, BVY-WS-12.
 
-Do not remove the legacy bridge until the acceptance path has explicit terrain source, real GPU readback status, and a passed drift gate.
+The explicit legacy terrain-source mode has been removed after the acceptance path gained explicit terrain source, accepted GPU readback status, and a passed drift gate.
 
 ## Verification commands
 

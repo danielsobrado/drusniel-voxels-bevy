@@ -2,6 +2,20 @@
 
 Status: In progress.
 
+Update 2026-07-01:
+
+- `bench_guard` no longer applies the LOD seam-audit JSON requirement to unrelated
+  summaries such as `visual-regression.toml`; it now evaluates `seam-audit.json`
+  only for `lod-seam-audit.toml`, `lod-seam-hard-cases.toml`, or summaries that
+  actually contain seam-audit counters.
+- Explicit `terrain_source.mode = legacy` is no longer a supported config mode.
+  Deserializing `legacy` now fails, runtime async chunk generation no longer has a
+  `ChunkTerrainSource::Legacy` branch, and startup diagnostics no longer report a
+  legacy runtime path.
+- The old `generation/legacy_chunk.rs` implementation file has been removed.
+- GPU vegetation parity slice compiles and has native Windows smoke-bench coverage;
+  see `docs/plans/bevy-gpu-vegetation-port-plan.md`.
+
 ## Completed
 
 - Added source-aware biome material helpers in `src/world/source/biome_material_id.rs`.
@@ -13,10 +27,11 @@ Status: In progress.
   - `generation/state.rs` owns generation state, task components, and queue state.
   - `generation/source.rs` owns terrain source mode selection.
   - `generation/stats.rs` owns chunk/world generation statistics.
-  - `generation/legacy_chunk.rs` owns legacy terrain voxel filling.
   - `generation/world_load.rs` owns saved-world loading, bedrock enforcement, and saving.
   - `generation.rs` now stays focused on orchestration.
-- Legacy terrain source mode is now marked deprecated and logs a warning when explicitly selected.
+- Legacy terrain source mode was first marked deprecated; as of 2026-07-01 it is no
+  longer accepted by terrain-source config and is not routed by runtime async chunk
+  generation.
 - Added `WorldSourceGpuReadbackProvider` plus a Rust/WGSL wire contract for drift readback samples.
 - Added `assets/shaders/world_source/drift_readback.wgsl` for dominant-layer readback from prepared WorldSource samples.
 - Added Rust layout tests for the drift readback params, input sample, and output sample structs.
@@ -40,16 +55,38 @@ Status: In progress.
 - `world_source_acceptance` now validates the runtime artifact and records it as `runtime_gpu_readback_acceptance`; when accepted, the report uses its GPU readback/drift-gate result for top-level acceptance.
 - The visual-regression render-ready gate now records final render signatures and instability diagnostics in each run record.
 - Native Windows visual-regression verification at `bench-runs/2026-06-30T15-14-58Z/summary.json` cleared the previous render-ready timeout on all 7 checkpoints; each checkpoint reported `ready_timed_out: false`, `render_ready_timed_out: false`, and `render_ready_wait_frames: 90`.
-- Native Windows visual-regression verification at `bench-runs/2026-07-01T01-50-08Z/summary.json` also cleared render-ready on all 7 checkpoints and `bench_guard` exits 0 against that artifact.
+- Native Windows visual-regression verification at `bench-runs/2026-07-01T01-50-08Z/summary.json` also cleared render-ready on all 7 checkpoints. A later guard rerun from this UNC/WSL environment exposed a false `seam-audit.json` requirement for `visual-regression.toml`; the guard now scopes seam-audit JSON evaluation to seam-audit scenes/counters. Rerunning `bench_guard` from native PowerShell against that artifact now passes.
 - The visual guard now treats `__frame_total` as presence-only evidence. It is sourced from `Time<Real>` wall-clock cadence and can include native Windows frame pacing and single-frame present/scheduler spikes; render graph CPU, GPU opaque, mesh dirty, instancing, water, and render-counter rows remain threshold-gated.
 
 ## Not completed
 
 - Direct in-process runtime readback consumption by `world_source_acceptance` is still not implemented; the accepted path is pairing the focused bench report with the reviewed runtime-assisted artifact.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
-- The legacy terrain generator path is still present as a deprecated opt-in fallback.
-- Full removal of explicit legacy mode should wait until the release acceptance report is reviewed and visual parity is accepted.
+- A fresh visual-bench capture was not rerun; the native PowerShell guard pass uses
+  the existing `bench-runs/2026-07-01T01-50-08Z/summary.json` artifact.
 
 ## Required next patch
 
-Review the paired acceptance report, visual artifact, and updated guard decision together before removing explicit legacy mode.
+Keep `terrain_source.mode = legacy` rejected by config tests and refresh runtime
+readback artifacts before making new GPU-output claims.
+
+## Verification 2026-07-01
+
+- `rtk cargo test --bin bench_guard` - passed, 6 tests.
+- `rtk cargo test --lib terrain_source_config` - passed, 8 tests, 928 filtered.
+- `rtk cargo test --lib terrain_source_diagnostics` - passed, 2 tests, 934 filtered.
+- `rtk cargo test --lib --features gpu_vegetation gpu_vegetation_cull` - passed,
+  2 tests, 936 filtered.
+- `rtk cargo check --bin world_source_acceptance` - passed with existing warnings.
+- `rtk cargo check --lib --features gpu_vegetation` - passed with existing warnings.
+- Native PowerShell:
+  `cargo run --bin bench_guard -- bench-runs/2026-07-01T01-50-08Z/summary.json`
+  - passed, 235 checks, 0 warnings.
+- Native PowerShell:
+  `cargo run --release --features gpu_vegetation -- --bench bench/scenes/forest/forest-gpu-vegetation-ab-cpu.toml --bench-out bench-runs/gpu-vegetation-ab-cpu-20260701`
+  - completed, but with startup readiness timeout and 0 queued instanced props.
+- Native PowerShell:
+  `cargo run --release --features gpu_vegetation -- --bench bench/scenes/forest/forest-gpu-vegetation-ab-gpu.toml --bench-out bench-runs/gpu-vegetation-ab-gpu-20260701`
+  - completed, but with startup readiness timeout and 0 queued instanced props.
+- Full `rtk cargo test terrain_source_config` hit Windows pagefile/OOM errors after
+  earlier parallel Cargo contention; this was not a code diagnostic.

@@ -1,6 +1,6 @@
 # Bevy GPU Vegetation/Prop Cull + Indirect Draw — Port Plan
 
-> Created: 2026-06-17 · Status: Planning
+> Created: 2026-06-17 · Status: In progress — first gated vertical slice compiles
 > Scope: `src/props/instanced_render.rs`, `src/world/environment/vegetation/`,
 > `assets/shaders/instanced_prop.wgsl`, `assets/config/props.yaml`,
 > `bench/scenes/forest/`
@@ -13,6 +13,63 @@ GPU vegetation scatter/cull/indirect-draw idea from LAAS/fable5 to Drusniel's
 existing Bevy/wgpu renderer. It is a **refinement** of an externally-suggested
 plan, rewritten against what the repo actually contains (audit below) so it does
 not reinvent infrastructure that already exists.
+
+## Current status — 2026-07-01
+
+Implemented in the Bevy tree behind `--features gpu_vegetation`:
+
+- `Cargo.toml` has the opt-in `gpu_vegetation` feature; default builds keep the CPU
+  path.
+- `PropConfig` includes a default-off `gpu_vegetation` config with buffer,
+  culling, fallback, and debug settings.
+- `src/props/gpu_vegetation.rs` uploads persistent source instances from
+  `InstancedPropGroup::source_instances()` into a GPU storage buffer and skips
+  unchanged group versions.
+- `src/props/gpu_vegetation_cull.rs` prepares compute cull inputs, visible-instance
+  buffers, indirect draw args, per-group uniforms, cascade shadow buffers, and a
+  Core3d render-graph cull node.
+- `src/props/instanced_render.rs` has feature-gated draw commands that use
+  `draw_indexed_indirect` / `draw_indirect` for the GPU cull path and retain the
+  CPU instance-buffer path as fallback.
+- Forest A/B bench scenes exist:
+  `bench/scenes/forest/forest-gpu-vegetation-ab-cpu.toml` and
+  `bench/scenes/forest/forest-gpu-vegetation-ab-gpu.toml`.
+- Runtime validation fixes from the native Windows smoke benches:
+  - compute input buffers now use read-only storage binding layout entries to match
+    `prop_cull.wgsl`;
+  - `GpuCullParams` is padded to the WGSL uniform size (`128` bytes).
+
+Verification:
+
+- `rtk cargo check --lib --features gpu_vegetation` passed on 2026-07-01 with
+  existing warnings.
+- `rtk cargo test --lib --features gpu_vegetation gpu_vegetation_cull` passed on
+  2026-07-01.
+- Native PowerShell release smoke benches completed and wrote:
+  - `bench-runs/gpu-vegetation-ab-cpu-20260701/summary.json`
+  - `bench-runs/gpu-vegetation-ab-gpu-20260701/summary.json`
+
+Smoke-bench result:
+
+- Both scenes reached render-ready without render-ready timeout, but startup
+  readiness timed out.
+- Both summaries recorded `instanced_prop_items = 0`, `queued_instanced_draws = 0`,
+  and `queued_instanced_instances = 0` because the loaded prop manifest contained
+  `0 total props`.
+- Recorded frame rows were CPU path `median_frame_ms = 12.956`, `p99_frame_ms =
+  93.590`; forced GPU path `median_frame_ms = 12.337`, `p99_frame_ms = 53.734`.
+  Do not compare these as vegetation performance because the prop workload was
+  absent.
+- Treat these runs as runtime smoke coverage only. They prove the feature-gated
+  pipeline no longer panics during setup on the RTX 4080/DX12 path, but they do not
+  prove visual parity or performance.
+
+Still required before performance claims:
+
+- Run forest A/B benches against a scene/save/config that actually queues instanced
+  props.
+- Verify screenshot parity, visible-count parity, overflow counters, and per-cascade
+  shadow behavior on real GPU.
 
 ## What this is / is not
 

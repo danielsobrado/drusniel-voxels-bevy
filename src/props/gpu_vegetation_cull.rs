@@ -63,6 +63,7 @@ struct GpuCullParams {
     total_groups: u32,
     cascade_count: u32,
     max_shadow_distance: f32,
+    _pad0: [u32; 3],
 }
 
 /// CPU-side template for `DrawIndexedIndirectArgs`.
@@ -435,6 +436,7 @@ pub fn prepare_gpu_cull_dispatch(
         total_groups,
         cascade_count,
         max_shadow_distance: params.max_shadow_distance,
+        _pad0: [0; 3],
     };
     render_queue.write_buffer(&cull_params_buf, 0, bytemuck::bytes_of(&cull_params));
 
@@ -720,8 +722,8 @@ pub fn init_gpu_cull_pipeline(
     let bg_entries_0: Vec<BindGroupLayoutEntry> = BindGroupLayoutEntries::sequential(
         ShaderStages::COMPUTE,
         (
-            binding_types::storage_buffer_sized(false, None),
-            binding_types::storage_buffer_sized(false, None),
+            binding_types::storage_buffer_read_only_sized(false, None),
+            binding_types::storage_buffer_read_only_sized(false, None),
             binding_types::uniform_buffer::<GpuCullParams>(false),
         ),
     )
@@ -808,4 +810,39 @@ pub fn gpu_cull_vertex_bind_group_layout(render_device: &RenderDevice) -> BindGr
         Some("gpu_cull_vertex_bg_layout"),
         &gpu_cull_vertex_bind_group_entries(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cull_params_uniform_matches_wgsl_uniform_size() {
+        assert_eq!(std::mem::size_of::<GpuCullParams>(), 128);
+        assert_eq!(GpuCullParams::min_size().get(), 128);
+    }
+
+    #[test]
+    fn cull_input_storage_bindings_are_read_only() {
+        let entries: Vec<BindGroupLayoutEntry> = BindGroupLayoutEntries::sequential(
+            ShaderStages::COMPUTE,
+            (
+                binding_types::storage_buffer_read_only_sized(false, None),
+                binding_types::storage_buffer_read_only_sized(false, None),
+                binding_types::uniform_buffer::<GpuCullParams>(false),
+            ),
+        )
+        .to_vec();
+
+        for entry in &entries[0..2] {
+            let BindingType::Buffer {
+                ty: BufferBindingType::Storage { read_only },
+                ..
+            } = entry.ty
+            else {
+                panic!("expected storage buffer binding");
+            };
+            assert!(read_only);
+        }
+    }
 }
