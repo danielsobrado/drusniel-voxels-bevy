@@ -1,0 +1,20 @@
+postfx_perf_gate:
+  enabled: true
+  baseline_case: postfx-off
+  default_thresholds:
+    max_frame_p50_delta_ms: 6.0
+    max_frame_p95_delta_ms: 10.0
+    max_render_p95_delta_ms: 10.0
+  cases:
+    postfx-postmin:
+      max_frame_p50_delta_ms: 2.0
+      max_frame_p95_delta_ms: 4.0
+      max_render_p95_delta_ms: 4.0
+    postfx-default:
+      max_frame_p50_delta_ms: 4.0
+      max_frame_p95_delta_ms: 7.0
+      max_render_p95_delta_ms: 7.0
+    postfx-all-on:
+      max_frame_p50_delta_ms: 10.0
+      max_frame_p95_delta_ms: 16.0
+      max_render_p95_delta_ms: 16.0
