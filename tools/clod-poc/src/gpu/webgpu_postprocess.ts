@@ -10,6 +10,7 @@ import {
   dot,
   exp2,
   float,
+  getScreenPosition,
   getViewPosition,
   instanceIndex,
   instancedArray,
@@ -52,6 +53,10 @@ const TERRAIN_NON_INDEXED_FALLBACK_KEY = "__drusnielWebGpuTerrainNonIndexedFallb
 const WEBGPU_POST_EXPOSURE = 1.0;
 const DEFAULT_ALPHA = 1.0;
 const VIGNETTE_SCALE = 1.6;
+const CONTACT_SHADOW_STEPS = 8;
+const CONTACT_SHADOW_MAX_DISTANCE_M = 260;
+const CONTACT_SHADOW_FULL_DISTANCE_M = 120;
+const CONTACT_SHADOW_DEPTH_RANGE_FACTOR = 0.85;
 const LUMA_WEIGHTS = [0.2126, 0.7152, 0.0722] as const;
 
 type TslAny = any;
@@ -82,6 +87,7 @@ function webGpuPostProcessGraphKey(settings: Required<PostProcessSettings>): str
     numberKey(settings.bloomRadius),
     settings.taaEnabled ? "taa" : "no-taa",
     settings.aerialPerspectiveEnabled ? "aerial" : "no-aerial",
+    settings.contactShadowsEnabled ? "contact" : "no-contact",
   ].join("|");
 }
 
@@ -178,6 +184,10 @@ export class WebGpuPostProcessPipeline {
   private readonly uHighlightTint = uniform(new THREE.Vector3(1.0, 1.0, 1.0)) as unknown as VectorUniform;
   private readonly uShadowAmount = uniform(0.0) as unknown as NumericUniform;
   private readonly uHighlightAmount = uniform(0.0) as unknown as NumericUniform;
+  private readonly uSunDirection = uniform(new THREE.Vector3(0.0, 1.0, 0.0)) as unknown as VectorUniform;
+  private readonly uContactStrength = uniform(0.0) as unknown as NumericUniform;
+  private readonly uContactRadius = uniform(1.7) as unknown as NumericUniform;
+  private readonly uContactDepthBias = uniform(0.05) as unknown as NumericUniform;
   private readonly uAerialStart = uniform(120.0) as unknown as NumericUniform;
   private readonly uAerialEnd = uniform(1800.0) as unknown as NumericUniform;
   private readonly uAerialStrength = uniform(0.0) as unknown as NumericUniform;
@@ -264,6 +274,9 @@ export class WebGpuPostProcessPipeline {
     this.uExposure.value = this.settings.exposure;
     this.uVignette.value = this.settings.vignette;
     this.uOpacity.value = this.settings.opacity;
+    this.uContactStrength.value = this.settings.contactShadowsEnabled ? this.settings.contactShadowsStrength : 0;
+    this.uContactRadius.value = Math.max(0.01, this.settings.contactShadowsRadiusPx);
+    this.uContactDepthBias.value = Math.max(0.0001, this.settings.contactShadowsDepthBias);
     this.uAerialStart.value = this.settings.aerialPerspectiveStart;
     this.uAerialEnd.value = this.settings.aerialPerspectiveEnd;
     this.uAerialStrength.value = this.settings.aerialPerspectiveStrength;
@@ -272,7 +285,9 @@ export class WebGpuPostProcessPipeline {
   }
 
   private updateColorScriptUniforms(): void {
-    const grade = this.resolveGrade();
+    const lighting = this.resolveLighting();
+    const grade = lighting ? gradeForLighting(lighting, this.colorScript) : DEFAULT_POSTFX_GRADE;
+    if (lighting) this.uSunDirection.value.copy(lighting.sunDirection).normalize();
     this.uContrast.value = this.settings.contrast * grade.contrast;
     this.uSaturation.value = this.settings.saturation * grade.saturation;
     this.uWhiteBalance.value.set(...grade.whiteBalance);
@@ -282,16 +297,16 @@ export class WebGpuPostProcessPipeline {
     this.uHighlightAmount.value = grade.highlightAmount;
   }
 
-  private resolveGrade(): PostFxGradeParams {
-    if (!this.getLighting) return DEFAULT_POSTFX_GRADE;
+  private resolveLighting(): EnvironmentLighting | null {
+    if (!this.getLighting) return null;
     try {
-      return gradeForLighting(this.getLighting(), this.colorScript);
+      return this.getLighting();
     } catch (error) {
       if (!this.lightingErrorReported) {
         this.lightingErrorReported = true;
         console.warn("[webgpu-post] failed to read lighting for color script; using default grade", error);
       }
-      return DEFAULT_POSTFX_GRADE;
+      return null;
     }
   }
 
@@ -336,7 +351,10 @@ export class WebGpuPostProcessPipeline {
           this.settings.bloomRadius,
         ) as TslAny).rgb)
       : temporalRgb;
-    return this.createGradeNode(beauty.rgb, bloomRgb);
+    const contactRgb = this.settings.contactShadowsEnabled
+      ? bloomRgb.mul(this.createContactShadowNode(depthTex))
+      : bloomRgb;
+    return this.createGradeNode(beauty.rgb, contactRgb);
   }
 
   private createAerialNode(sourceRgb: TslAny, depthTex: TslAny): TslAny {
@@ -380,6 +398,54 @@ export class WebGpuPostProcessPipeline {
     } as TslAny;
 
     return traa(vec4(sourceRgb, DEFAULT_ALPHA), depthTex, velocity, camera as TslAny) as TslAny;
+  }
+
+  private createContactShadowNode(depthTex: TslAny): TslAny {
+    const uProjectionInverse = this.uProjectionInverse as unknown as TslAny;
+    const uProjection = this.uProjection as unknown as TslAny;
+    const uView = this.uView as unknown as TslAny;
+    const uSunDirection = this.uSunDirection as unknown as TslAny;
+    const uContactStrength = this.uContactStrength as unknown as TslAny;
+    const uContactRadius = this.uContactRadius as unknown as TslAny;
+    const uContactDepthBias = this.uContactDepthBias as unknown as TslAny;
+
+    return Fn((): TslAny => {
+      const result = float(1).toVar();
+      const depth = depthTex.x;
+      const isSky = depth.lessThanEqual(1e-7).or(depth.greaterThanEqual(0.9999999));
+      const viewPosition = getViewPosition(screenUV, depth, uProjectionInverse) as TslAny;
+      const distance = viewPosition.length();
+      If(isSky.not().and(distance.lessThan(CONTACT_SHADOW_MAX_DISTANCE_M)), () => {
+        const sunView = uView.mul(vec4(uSunDirection, 0)).xyz.normalize();
+        const hitF = float(2).toVar();
+        for (let step = 1; step <= CONTACT_SHADOW_STEPS; step++) {
+          const fraction = (step / CONTACT_SHADOW_STEPS) ** 1.6;
+          If(hitF.greaterThan(1.5), () => {
+            const sampleView = viewPosition.add(sunView.mul(uContactRadius).mul(fraction));
+            const uvSample = getScreenPosition(sampleView, uProjection);
+            const inFrame = uvSample.x
+              .greaterThan(0.001)
+              .and(uvSample.x.lessThan(0.999))
+              .and(uvSample.y.greaterThan(0.001))
+              .and(uvSample.y.lessThan(0.999));
+            const depthSample = texture(depthTex.value, uvSample).x;
+            const bufferView = getViewPosition(uvSample, depthSample, uProjectionInverse) as TslAny;
+            const depthDelta = bufferView.z.sub(sampleView.z);
+            const hit = depthDelta
+              .greaterThan(uContactDepthBias)
+              .and(depthDelta.lessThan(uContactRadius.mul(CONTACT_SHADOW_DEPTH_RANGE_FACTOR)))
+              .and(inFrame);
+            If(hit, () => {
+              hitF.assign(fraction);
+            });
+          });
+        }
+        const occlusion = hitF.lessThan(1.5).select(float(1).sub(hitF.mul(0.5)), float(0));
+        const fade = smoothstep(CONTACT_SHADOW_MAX_DISTANCE_M, CONTACT_SHADOW_FULL_DISTANCE_M, distance);
+        result.assign(float(1).sub(occlusion.mul(uContactStrength).mul(fade)));
+      });
+      return result;
+    })();
   }
 
   private createGradeNode(sourceRgb: TslAny, postRgb: TslAny): TslAny {
