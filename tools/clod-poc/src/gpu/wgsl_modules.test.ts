@@ -96,6 +96,13 @@ describe("WGSL module composition", () => {
     expect(source).not.toContain("fract(sin(dot(cell");
   });
 
+  it("gates GPU tree shadow appends by max shadow LOD", () => {
+    const source = composeTreeRingShader();
+
+    expect(source).toContain("let max_shadow_lod = params.settings_e.z;");
+    expect(source).toContain("if (max_shadow_lod < 0.0 || f32(lod) > max_shadow_lod) { return; }");
+  });
+
   it("injects tree ring layout constants from TS layout helpers", () => {
     const source = composeTreeRingShader();
     const layout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
