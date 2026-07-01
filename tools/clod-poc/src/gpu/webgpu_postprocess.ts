@@ -43,7 +43,9 @@ import {
   DEFAULT_POSTFX_GTAO,
   type PostFxGtaoSettings,
 } from "./postfx_gtao.js";
+import { createPostFxCloudShadowTexture, type PostFxCloudShadowTexture } from "./postfx_cloud_shadow.js";
 import { PostFxFroxelVolume, type PostFxFroxelVolumeTerrainInput } from "./postfx_froxel_volume.js";
+import { PostFxHillaireLuts } from "./postfx_hillaire_luts.js";
 import {
   parsePostFxStageFlags,
   stageAllowed,
@@ -94,6 +96,8 @@ export { postProcessOutputGraphDirty } from "./webgpu_postprocess_config.js";
 export interface WebGpuPostProcessPipelineOptions {
   froxelTerrainSummary?: TerrainSummaryField | null;
   froxelTerrainRadiusMeters?: number;
+  froxelHydrologyTexture?: THREE.Texture | null;
+  froxelHydrologyWorldSizeMeters?: number;
 }
 
 function reportPostProcessError(error: unknown): void {
@@ -112,6 +116,8 @@ export class WebGpuPostProcessPipeline {
   private lightingErrorReported = false;
   private froxelVolume: PostFxFroxelVolume | null = null;
   private froxelTerrainInput: PostFxFroxelVolumeTerrainInput | null = null;
+  private froxelCloudShadow: PostFxCloudShadowTexture | null = null;
+  private hillaireLuts: PostFxHillaireLuts | null = null;
   private readonly autoExposureMeter: WebGpuAutoExposureMeter;
   private readonly projectionInverse = new THREE.Matrix4();
   private readonly colorScript: PostFxColorScript = DEFAULT_POSTFX_COLOR_SCRIPT;
@@ -240,6 +246,9 @@ export class WebGpuPostProcessPipeline {
     this.froxelVolume?.dispose();
     this.froxelVolume = null;
     this.disposeFroxelTerrainInput();
+    this.disposeFroxelCloudShadow();
+    this.hillaireLuts?.dispose();
+    this.hillaireLuts = null;
   }
 
   private graphKey(): string {
@@ -283,20 +292,42 @@ export class WebGpuPostProcessPipeline {
     if (!summary) return null;
     const radius = Math.max(1, this.options.froxelTerrainRadiusMeters ?? summary.worldSize);
     const origin = summary.worldSize / 2 - radius;
+    const cloudShadow = this.ensureFroxelCloudShadow(summary.worldSize);
     this.froxelTerrainInput = {
       heightTexture: createExtendedHeightTexture(summary, radius),
       canopyTexture: createExtendedCanopyTexture(summary, radius, 42),
+      hydrologyTexture: this.options.froxelHydrologyTexture ?? null,
+      cloudShadowTexture: cloudShadow.texture,
       originX: origin,
       originZ: origin,
       extentMeters: radius * 2,
+      hydrologyWorldSizeMeters: this.options.froxelHydrologyWorldSizeMeters ?? summary.worldSize,
+      cloudShadowWorldSizeMeters: cloudShadow.worldSizeMeters,
+      cloudShadowStrength: cloudShadow.strength,
     };
     return this.froxelTerrainInput;
+  }
+
+  private ensureFroxelCloudShadow(worldSizeMeters: number): PostFxCloudShadowTexture {
+    if (this.froxelCloudShadow) return this.froxelCloudShadow;
+    this.froxelCloudShadow = createPostFxCloudShadowTexture({
+      worldSizeMeters: Math.max(1, worldSizeMeters),
+      resolution: 256,
+      strength: 0.55,
+      seed: 17,
+    });
+    return this.froxelCloudShadow;
   }
 
   private disposeFroxelTerrainInput(): void {
     this.froxelTerrainInput?.heightTexture.dispose();
     this.froxelTerrainInput?.canopyTexture?.dispose();
     this.froxelTerrainInput = null;
+  }
+
+  private disposeFroxelCloudShadow(): void {
+    this.froxelCloudShadow?.texture.dispose();
+    this.froxelCloudShadow = null;
   }
 
   private applyRendererSettings(): void {
@@ -430,7 +461,13 @@ export class WebGpuPostProcessPipeline {
       },
       froxelDebugMode: this.froxelDebugMode,
       froxelVolume: this.froxelVolume?.nodeInput() ?? null,
+      hillaireLuts: this.ensureHillaireLuts().nodeInput(),
     });
+  }
+
+  private ensureHillaireLuts(): PostFxHillaireLuts {
+    if (!this.hillaireLuts) this.hillaireLuts = new PostFxHillaireLuts(this.atmosphere.hillaire);
+    return this.hillaireLuts;
   }
 
   private createTraaNode(sourceRgb: TslAny, depthTex: TslAny, camera: THREE.Camera): TslAny {

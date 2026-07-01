@@ -89,6 +89,7 @@ export interface TerrainViewStartupInput {
   worldCells: number;
   worldSizeCells: number;
   terrainSummary: TerrainSummaryField;
+  hydrologyFieldsTexture: THREE.Texture | null;
   isLongView: boolean;
   queryFarShell: boolean;
   queryCanopy: boolean;
@@ -168,6 +169,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     worldCells,
     worldSizeCells,
     terrainSummary,
+    hydrologyFieldsTexture,
     isLongView,
     queryFarShell,
     queryCanopy,
@@ -266,6 +268,8 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings(), currentLighting, {
         froxelTerrainSummary: terrainSummary,
         froxelTerrainRadiusMeters: worldSizeCells * FAR_SHELL_DEFAULTS.radiusFactor,
+        froxelHydrologyTexture: hydrologyFieldsTexture,
+        froxelHydrologyWorldSizeMeters: worldSizeCells,
       })
     : new PostProcessPipeline(app.renderer, currentPostProcessSettings());
   postProcess.setSize(window.innerWidth, window.innerHeight);

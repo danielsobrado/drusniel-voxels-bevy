@@ -1,5 +1,5 @@
 import type { ClodPagesConfig } from "../config.js";
-import { isGrassShaderMode, type GrassShaderMode } from "../grass.js";
+import { isGrassShaderMode, type GrassShaderMode } from "../grass/grass_config.js";
 import type { BrushOp, BrushShape, VoxelEditSnapshot } from "../terrain/terrain.js";
 import { MAX_TERRAIN_TEXTURES } from "../terrain/terrain_textures.js";
 import type { WeatherMode } from "../app/clod_constants.js";

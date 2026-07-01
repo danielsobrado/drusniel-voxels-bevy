@@ -110,6 +110,7 @@ export async function bootstrapClodPoc() {
     worldCells: world.worldCells,
     worldSizeCells: world.worldSizeCells,
     terrainSummary: world.terrainSummary,
+    hydrologyFieldsTexture: world.hydrologySystem?.hydrologyFieldsTexture() ?? null,
     isLongView: postRenderer.isLongView,
     queryFarShell: queries.queryFarShell,
     queryCanopy: queries.queryCanopy,
