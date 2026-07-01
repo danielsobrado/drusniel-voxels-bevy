@@ -43,7 +43,8 @@ const CASES: readonly PostFxPerfCase[] = [
   { name: "postfx-contact", params: { contact: "1" } },
   { name: "postfx-gtao", params: { gtao: "1" } },
   { name: "postfx-bounce", params: { bounce: "1" } },
-  { name: "postfx-all-on", params: { contact: "1", gtao: "1", bounce: "1" } },
+  { name: "postfx-froxels", params: { froxels: "1" } },
+  { name: "postfx-all-on", params: { contact: "1", gtao: "1", bounce: "1", froxels: "1" } },
 ];
 
 function parseArgs(argv: string[]): Record<string, string | boolean> {
