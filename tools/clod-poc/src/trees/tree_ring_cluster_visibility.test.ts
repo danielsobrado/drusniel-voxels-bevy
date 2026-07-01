@@ -9,8 +9,7 @@ import type { TreeTerrainSampler } from "./tree_instances.js";
 
 describe("tree ring cluster visibility", () => {
   it("keeps every cluster visible when terrain visibility is disabled", () => {
-    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
-    settings.distanceM = 24;
+    const settings = smallSettings();
     settings.gpu.terrainVisibility.enabled = false;
 
     const mask = buildTreeRingClusterVisibilityMask({
@@ -30,15 +29,12 @@ describe("tree ring cluster visibility", () => {
   });
 
   it("keeps unknown terrain clusters visible", () => {
-    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
-    settings.distanceM = 24;
-
     const mask = buildTreeRingClusterVisibilityMask({
       centerX: 64,
       centerZ: 64,
       cameraY: 10,
       worldCells: 512,
-      settings,
+      settings: smallSettings(),
       sampler: constantTerrain(Number.NaN),
       clusterDimCells: 4,
     });
@@ -48,19 +44,13 @@ describe("tree ring cluster visibility", () => {
     expect(Array.from(mask.words).every((value) => value === 1)).toBe(true);
   });
 
-  it("marks terrain-hidden clusters as not visible", () => {
-    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
-    settings.distanceM = 24;
-    settings.gpu.terrainVisibility.minDistanceM = 0;
-    settings.gpu.terrainVisibility.heightMarginM = 0;
-    settings.gpu.terrainVisibility.crownHeightM = 0;
-
+  it("marks clusters hidden only when every representative probe is hidden", () => {
     const mask = buildTreeRingClusterVisibilityMask({
       centerX: 64,
       centerZ: 64,
       cameraY: 0,
       worldCells: 512,
-      settings,
+      settings: aggressiveVisibilitySettings(),
       sampler: constantTerrain(100),
       clusterDimCells: 4,
     });
@@ -70,9 +60,23 @@ describe("tree ring cluster visibility", () => {
     expect(Array.from(mask.words).some((value) => value === 0)).toBe(true);
   });
 
+  it("keeps a cluster visible when any representative probe is visible", () => {
+    const mask = buildTreeRingClusterVisibilityMask({
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      settings: aggressiveVisibilitySettings(),
+      sampler: mixedTerrain(),
+      clusterDimCells: 4,
+    });
+
+    expect(mask.hiddenClusters).toBe(0);
+    expect(Array.from(mask.words).every((value) => value === 1)).toBe(true);
+  });
+
   it("maps slots to their cluster visibility", () => {
-    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
-    settings.distanceM = 24;
+    const settings = smallSettings();
     const byteLength = treeRingClusterMaskByteLength(settings, 4);
     const words = new Uint32Array(byteLength / Uint32Array.BYTES_PER_ELEMENT).fill(1);
     const mask = {
@@ -100,9 +104,31 @@ describe("tree ring cluster visibility", () => {
   });
 });
 
+function smallSettings() {
+  const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+  settings.distanceM = 24;
+  return settings;
+}
+
+function aggressiveVisibilitySettings() {
+  const settings = smallSettings();
+  settings.gpu.terrainVisibility.minDistanceM = 0;
+  settings.gpu.terrainVisibility.heightMarginM = 0;
+  settings.gpu.terrainVisibility.crownHeightM = 0;
+  return settings;
+}
+
 function constantTerrain(height: number): TreeTerrainSampler {
   return {
     surfaceHeight: () => height,
+    surfaceNormal: () => [0, 1, 0],
+    materialWeights: () => [1, 0, 0, 0],
+  };
+}
+
+function mixedTerrain(): TreeTerrainSampler {
+  return {
+    surfaceHeight: (x) => x < 64 ? 0 : 100,
     surfaceNormal: () => [0, 1, 0],
     materialWeights: () => [1, 0, 0, 0],
   };
