@@ -1,5 +1,5 @@
 import type { HydrologyConfig } from "./hydrologyConfig.js";
-import type { WaterConfig } from "./waterConfig.js";
+import type { WaterConfig } from "./water_config_types.js";
 
 export interface WaterRuntimeOverrideOptions {
   clone(config: WaterConfig): WaterConfig;
