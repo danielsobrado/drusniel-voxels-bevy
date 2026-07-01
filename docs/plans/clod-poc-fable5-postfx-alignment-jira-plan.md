@@ -16,6 +16,41 @@ preserving current strengths:
 - Every stage is measured with the deterministic perf harness (`perf:main`) before it is called a win.
 - Per-pass GPU timing reuses the existing profiler ([`tools/clod-poc/src/core/gpu_profiler.ts`](../../tools/clod-poc/src/core/gpu_profiler.ts), [`gpu_pass_timing.ts`](../../tools/clod-poc/src/core/gpu_pass_timing.ts)).
 
+## Implementation Status (updated 2026-07-01)
+
+The WebGPU/TSL pipeline is built and is the **default** path (`gpu/webgpu_postprocess.ts`,
+selected at `terrain_view_startup.ts`). Landed since this plan was written:
+
+- **POSTFX-100/200/300/400** — scaffold, AgX + Bloom, TRAA (analytic velocity), GPU
+  auto-exposure + per-ToD colour script: **done**.
+- **POSTFX-500** half-res merged MRT — **done**: `gpu/postfx_half_res_mrt.ts` (`HalfResMrtNode`)
+  renders GTAO + screen-space bounce in one half-res raster; GTAO is consumed through a
+  joint-bilateral upsample with the gated average-fallback (`createGtaoBilateralUpsampleNode`).
+  Full-res nodes remain as the fallback (`?halfres=0`).
+- **POSTFX-600/700** aerial + froxels, contact + bounce: **done** (opt-in).
+- **MSAA depth fix** — the scene pass is forced single-sample (`pass(scene, camera, { samples: 0 })`);
+  the aerial/froxel/temporal depth-copy sample-count mismatch is removed at the source.
+- **POSTFX-801** per-pass GPU rows: scene pass tagged (`postfxScene`); compute kernels named;
+  the perf matrix `summary.md` now prints a per-pass GPU-ms table.
+- **POSTFX-802/803** — the perf matrix (`tools/postfx-perf-matrix.ts`) covers
+  off/postmin/default/per-stage ablations/opt-ins/all-on; per-case gate thresholds added for the
+  opt-in stages (`config/postfx_perf_gate.yaml`).
+- **POSTFX-804** — WebGL pipeline decision recorded: keep as a frozen fallback
+  (`tools/clod-poc/docs/postfx-webgl-decommission-decision.md`).
+
+**Default-on decision (POSTFX-4xx follow-up):** the default stage set is left unchanged —
+aerial + TAA + bloom + auto-exposure + colour-script on; GTAO, froxels, contact and bounce
+opt-in. The MSAA fix makes the current default set validation-clean. Flipping GTAO to default-on
+is **gated on a headed (real-GPU) validation run** confirming the half-res upsample shows no
+horizon-black collapse and stays within the `postfx-gtao` perf budget; that run could not be
+performed in the authoring environment (no WebGPU adapter available to headless Chromium here),
+so the flip is deferred rather than shipped blind.
+
+**Verification performed:** `tsc` typecheck clean; full vitest suite 1849/1850 (the one failure,
+`tree_ring_cluster_visibility`, is an unrelated upstream tree change). Headed perf/visual runs
+(MSAA-clean confirmation, half-res GTAO/bounce timing) are **not yet run** — they require a
+GPU-enabled shell; see `CLAUDE.md` clod-poc perf process.
+
 ## Current State (the gap being closed)
 
 | Aspect | Reference (`PostStack.ts`) | clod-poc WebGL path (`PostProcessPipeline`) | clod-poc **WebGPU default** (`WebGpuPostProcessPipeline`) |
