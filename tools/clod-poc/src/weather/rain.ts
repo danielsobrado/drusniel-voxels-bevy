@@ -4,3 +4,5 @@ export * from "./rain_system.js";
 export * from "./snow_system.js";
 export * from "./sandstorm_system.js";
 export * from "./storm_billboard_system.js";
+export * from "./rain_splash_placement.js";
+export * from "./weather_camera_billboard.js";
