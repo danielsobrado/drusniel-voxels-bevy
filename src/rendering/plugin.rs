@@ -53,7 +53,7 @@ use crate::rendering::water::displacement::WaterDisplacementPlugin;
 use crate::rendering::water::finish::WitchcraftWaterFinishPlugin;
 use crate::rendering::water::reflection::WaterReflectionPlugin;
 use crate::rendering::water::reflection_compositor::WaterReflectionCompositorPlugin;
-use crate::rendering::water_clipmap::WaterClipmapPlugin;
+use crate::rendering::water_clipmap::{DeepOceanMaterial, WaterClipmapPlugin};
 use crate::rendering::water_ownership::WaterOwnershipPlugin;
 
 pub struct RenderingPlugin;
@@ -137,6 +137,8 @@ impl Plugin for RenderingPlugin {
             .add_plugins(MaterialPlugin::<BillboardMaterial>::default())
             // Register SimpleLodMaterial for distant props (no PBR)
             .add_plugins(MaterialPlugin::<SimpleLodMaterial>::default())
+            // Register render-only deep ocean material.
+            .add_plugins(MaterialPlugin::<DeepOceanMaterial>::default())
             // Register SpellBeamMaterial for first-person spell VFX
             .add_plugins(MaterialPlugin::<SpellBeamMaterial>::default())
             .add_systems(Startup, setup_voxel_ray_backend_notice)

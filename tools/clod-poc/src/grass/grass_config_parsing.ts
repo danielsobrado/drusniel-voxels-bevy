@@ -18,7 +18,7 @@ function objectFrom(value: unknown): RawObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value as RawObject : {};
 }
 
-function isGrassShaderMode(value: unknown): value is GrassShaderMode {
+export function isGrassShaderMode(value: unknown): value is GrassShaderMode {
   return typeof value === "string" && (GRASS_SHADER_MODES as readonly string[]).includes(value);
 }
 

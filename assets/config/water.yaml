@@ -25,6 +25,7 @@ clipmap:
 
 deep_ocean:
   enabled: true
+  gpu_material_enabled: true
   start_outside_border_m: 64.0
   visual_extent_m: 4096.0
   subdivisions: 256

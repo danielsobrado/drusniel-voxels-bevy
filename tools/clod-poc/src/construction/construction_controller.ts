@@ -6,6 +6,24 @@ import { preloadConstructionMaterialPreviews, preloadConstructionMaterialWindow 
 import { createConstructionCandidate, createFreePlacementPosition, type TerrainHitPoint } from "./placement.js";
 import { validateStrictPersistedConstructionPlacement } from "./persisted_placement.js";
 import { ConstructionSnapIndex } from "./snap_index.js";
+import {
+  BUILD_POINTER_OPTIONS,
+  ENTITY_ID_PREFIX,
+  GHOST_INVALID_COLOR,
+  GHOST_SNAPPED_COLOR,
+  GHOST_VALID_COLOR,
+  MENU_ID,
+  RAYCAST_REFINE_STEPS,
+  ROTATION_QUARTER_COUNT,
+  asFiniteVec3,
+  createPieceGeometry,
+  disposeMesh,
+  escapeHtml,
+  escapeStyleUrl,
+  hasExplicitSupportMetadata,
+  normalizeRotationQuarterTurns,
+  readStringArray,
+} from "./construction_controller_support.js";
 import type {
   ConstructionCandidate,
   ConstructionConfig,
@@ -15,66 +33,6 @@ import type {
   ConstructionTerrainConformRequest,
   PlacedConstructionPiece,
 } from "./types.js";
-
-const GHOST_VALID_COLOR = 0x35d46b;
-const GHOST_SNAPPED_COLOR = 0x4ea1ff;
-const GHOST_INVALID_COLOR = 0xff4f4f;
-const MENU_ID = "construction-build-menu";
-const ROTATION_QUARTER_COUNT = 4;
-const RAYCAST_REFINE_STEPS = 12;
-const ENTITY_ID_PREFIX = "piece-";
-const BUILD_POINTER_OPTIONS = { capture: true } as const;
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function escapeStyleUrl(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-}
-
-function normalizeRotationQuarterTurns(value: number): number {
-  const turns = Math.trunc(value);
-  return ((turns % ROTATION_QUARTER_COUNT) + ROTATION_QUARTER_COUNT) % ROTATION_QUARTER_COUNT;
-}
-
-function asFiniteVec3(value: unknown): [number, number, number] | null {
-  if (!Array.isArray(value) || value.length !== 3) return null;
-  const parsed = value.map(Number);
-  return parsed.every(Number.isFinite) ? [parsed[0], parsed[1], parsed[2]] : null;
-}
-
-function readStringArray(value: unknown): readonly string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const parsed = value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
-  return parsed.length > 0 ? parsed : [];
-}
-
-function hasExplicitSupportMetadata(placed: PlacedConstructionPiece): boolean {
-  return placed.grounded !== undefined || placed.parentIds !== undefined;
-}
-
-function disposeMesh(mesh: THREE.Mesh): void {
-  mesh.geometry.dispose();
-  const material = mesh.material;
-  if (Array.isArray(material)) {
-    for (const entry of material) entry.dispose();
-  } else {
-    material.dispose();
-  }
-}
-
-function createPieceGeometry(piece: ConstructionPieceDef): THREE.BoxGeometry {
-  const geometry = new THREE.BoxGeometry(piece.dimensionsM[0], piece.dimensionsM[1], piece.dimensionsM[2]);
-  const uv = geometry.getAttribute("uv");
-  if (uv) geometry.setAttribute("uv2", uv.clone());
-  return geometry;
-}
 
 export interface ConstructionControllerDeps {
   scene: THREE.Scene;

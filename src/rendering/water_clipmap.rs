@@ -1,8 +1,11 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::diagnostic::FrameCount;
 use bevy::light::NotShadowCaster;
+use bevy::pbr::Material;
 use bevy::prelude::*;
+use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy_mesh::{Indices, PrimitiveTopology};
+use bevy_shader::ShaderRef;
 use serde::Deserialize;
 use std::cmp::Ordering;
 
@@ -170,6 +173,7 @@ impl WaterClipmapConfig {
 #[serde(default)]
 pub struct DeepOceanConfig {
     pub enabled: bool,
+    pub gpu_material_enabled: bool,
     pub start_outside_border_m: f32,
     pub visual_extent_m: f32,
     pub subdivisions: u32,
@@ -182,6 +186,7 @@ impl Default for DeepOceanConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            gpu_material_enabled: true,
             start_outside_border_m: DEFAULT_DEEP_OCEAN_START_OUTSIDE_BORDER_M,
             visual_extent_m: DEFAULT_DEEP_OCEAN_VISUAL_EXTENT_M,
             subdivisions: DEFAULT_DEEP_OCEAN_SUBDIVISIONS,
@@ -352,8 +357,54 @@ pub struct DeepOceanStatus {
     pub transition_gap_vertices: u32,
     pub world_extent: Vec2,
     pub surface_y: f32,
+    pub active_gpu_waves: u32,
     pub active_cpu_waves: u32,
     pub cpu_animation_vertices: u32,
+}
+
+#[derive(Clone, Copy, Debug, ShaderType)]
+pub struct DeepOceanUniforms {
+    pub time_surface_start_level: Vec4,
+    pub wind_wave: Vec4,
+    pub wave_patch: Vec4,
+    pub foam_fade: Vec4,
+    pub fade_outer: Vec4,
+    pub bounds: Vec4,
+    pub deep_color: Vec4,
+    pub shallow_color: Vec4,
+    pub foam_color: Vec4,
+    pub fog_color: Vec4,
+    pub shading: Vec4,
+    pub fog: Vec4,
+    pub sun_direction: Vec4,
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+pub struct DeepOceanMaterial {
+    #[uniform(0)]
+    pub uniforms: DeepOceanUniforms,
+}
+
+impl Material for DeepOceanMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/deep_ocean_bevy.wgsl".into()
+    }
+
+    fn fragment_shader() -> ShaderRef {
+        "shaders/deep_ocean_bevy.wgsl".into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Blend
+    }
+
+    fn enable_prepass() -> bool {
+        false
+    }
+
+    fn enable_shadows() -> bool {
+        false
+    }
 }
 
 #[derive(Component)]
@@ -491,7 +542,7 @@ fn sync_deep_ocean_surface(
     config: Res<DeepOceanConfig>,
     world: Option<Res<VoxelWorld>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<DeepOceanMaterial>>,
     mut status: ResMut<DeepOceanStatus>,
     existing: Query<(Entity, &DeepOceanSurface)>,
     frame: Res<FrameCount>,
@@ -538,7 +589,7 @@ fn sync_deep_ocean_surface(
 
         let build = build_deep_ocean_mesh(world_extent, &config);
         let mesh_handle = meshes.add(build.mesh);
-        let material_handle = materials.add(deep_ocean_material(&config.shading));
+        let material_handle = materials.add(deep_ocean_material(&config, world_extent, 0.0));
         commands.spawn((
             Mesh3d(mesh_handle),
             MeshMaterial3d(material_handle),
@@ -569,6 +620,7 @@ fn sync_deep_ocean_surface(
             transition_gap_vertices: build.transition_gap_vertices,
             world_extent,
             surface_y: config.surface_y,
+            active_gpu_waves: u32::from(config.gpu_material_enabled) * 4,
             active_cpu_waves: 0,
             cpu_animation_vertices: 0,
         };
@@ -583,6 +635,7 @@ fn sync_deep_ocean_surface(
             transition_gap_vertices: surface.transition_gap_vertices,
             world_extent,
             surface_y: surface.surface_y,
+            active_gpu_waves: u32::from(config.gpu_material_enabled) * 4,
             active_cpu_waves: 0,
             cpu_animation_vertices: 0,
         };
@@ -793,7 +846,12 @@ struct DeepOceanWaveCache {
 fn animate_deep_ocean_surface(
     config: Res<DeepOceanConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
-    surfaces: Query<(&DeepOceanSurface, &Mesh3d)>,
+    mut materials: ResMut<Assets<DeepOceanMaterial>>,
+    surfaces: Query<(
+        &DeepOceanSurface,
+        &Mesh3d,
+        Option<&MeshMaterial3d<DeepOceanMaterial>>,
+    )>,
     time: Res<Time>,
     frame: Res<FrameCount>,
     mut status: ResMut<DeepOceanStatus>,
@@ -801,6 +859,27 @@ fn animate_deep_ocean_surface(
     mut wave_cache: Local<DeepOceanWaveCache>,
 ) {
     if !config.enabled {
+        return;
+    }
+
+    if config.gpu_material_enabled {
+        let mut gpu_surfaces = 0u32;
+        for (_, _, material_handle) in &surfaces {
+            let Some(material_handle) = material_handle else {
+                continue;
+            };
+            let Some(material) = materials.get_mut(&material_handle.0) else {
+                continue;
+            };
+            material.uniforms.time_surface_start_level.x = time.elapsed_secs();
+            gpu_surfaces += 1;
+        }
+        if gpu_surfaces > 0 {
+            status.active_gpu_waves = 4;
+            status.active_cpu_waves = 0;
+            status.cpu_animation_vertices = 0;
+            record_deep_ocean_counters(&mut timing, frame.0, &config, *status);
+        }
         return;
     }
 
@@ -814,7 +893,7 @@ fn animate_deep_ocean_surface(
     let time_seconds = time.elapsed_secs();
     {
         let _timer = area_timer(&mut timing, frame.0, "Deep Ocean CPU Wave Update");
-        for (surface, mesh_handle) in &surfaces {
+        for (surface, mesh_handle, _) in &surfaces {
             let Some(mesh) = meshes.get_mut(&mesh_handle.0) else {
                 continue;
             };
@@ -836,6 +915,7 @@ fn animate_deep_ocean_surface(
         }
     }
 
+    status.active_gpu_waves = 0;
     status.active_cpu_waves = wave_cache.waves.len() as u32;
     status.cpu_animation_vertices = animated_vertices;
     record_deep_ocean_counters(&mut timing, frame.0, &config, *status);
@@ -1008,23 +1088,60 @@ fn hash_key_u32(hash: u64, value: u32) -> u64 {
     (hash ^ value as u64).wrapping_mul(0x100_0000_01b3)
 }
 
-fn deep_ocean_material(shading: &DeepOceanShadingConfig) -> StandardMaterial {
-    StandardMaterial {
-        base_color: Color::srgba(
-            shading.deep_color[0],
-            shading.deep_color[1],
-            shading.deep_color[2],
-            shading.deep_color[3],
-        ),
-        alpha_mode: AlphaMode::Blend,
-        perceptual_roughness: shading.roughness,
-        metallic: 0.0,
-        reflectance: shading.reflection_strength.clamp(0.02, 0.5),
-        clearcoat: shading.fresnel_strength.clamp(0.0, 1.0),
-        clearcoat_perceptual_roughness: shading.roughness.clamp(0.02, 0.35),
-        double_sided: true,
-        cull_mode: None,
-        ..default()
+fn deep_ocean_material(
+    config: &DeepOceanConfig,
+    world_extent: Vec2,
+    level_id: f32,
+) -> DeepOceanMaterial {
+    let wind_radians = config.wave.wind_direction_deg.to_radians();
+    let wind = Vec2::new(wind_radians.cos(), wind_radians.sin()).normalize_or(Vec2::X);
+    let outer_fade = config.visual_extent_m.max(1.0);
+    DeepOceanMaterial {
+        uniforms: DeepOceanUniforms {
+            time_surface_start_level: Vec4::new(
+                0.0,
+                config.surface_y,
+                config.start_outside_border_m,
+                level_id,
+            ),
+            wind_wave: Vec4::new(
+                wind.x,
+                wind.y,
+                config.wave.wind_speed,
+                config.wave.height_scale,
+            ),
+            wave_patch: Vec4::new(
+                config.wave.choppiness,
+                config.wave.coarse_patch_m,
+                config.wave.fine_patch_m,
+                config.wave.foam_threshold,
+            ),
+            foam_fade: Vec4::new(
+                config.wave.foam_power,
+                config.wave.foam_intensity,
+                0.0,
+                config.start_outside_border_m,
+            ),
+            fade_outer: Vec4::new(outer_fade * 0.82, outer_fade, config.shading.roughness, 0.0),
+            bounds: Vec4::new(0.0, world_extent.x, 0.0, world_extent.y),
+            deep_color: Vec4::from_array(config.shading.deep_color),
+            shallow_color: Vec4::from_array(config.shading.shallow_color),
+            foam_color: Vec4::from_array(config.shading.foam_color),
+            fog_color: Vec4::from_array(config.shading.fog_color),
+            shading: Vec4::new(
+                config.shading.fresnel_power,
+                config.shading.fresnel_strength,
+                config.shading.reflection_strength,
+                config.shading.reflection_distortion,
+            ),
+            fog: Vec4::new(
+                config.shading.fog_near_m,
+                config.shading.fog_far_m,
+                config.shading.fog_density,
+                config.shading.roughness,
+            ),
+            sun_direction: Vec4::new(0.35, 0.72, 0.60, 0.0),
+        },
     }
 }
 
@@ -1078,7 +1195,11 @@ fn record_deep_ocean_counters(
         "border_ocean.configured_gpu_waves",
         config.wave.active_gpu_waves as f64,
     );
-    timing.record_count(frame, "border_ocean.active_gpu_waves", 0.0);
+    timing.record_count(
+        frame,
+        "border_ocean.active_gpu_waves",
+        status.active_gpu_waves as f64,
+    );
     timing.record_count(
         frame,
         "border_ocean.active_cpu_waves",
@@ -1240,5 +1361,31 @@ mod tests {
         assert!(sample.offset_z.is_finite());
         assert!(sample.compression.is_finite());
         assert!((normal.length() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn deep_ocean_material_uniforms_match_config_contract() {
+        let config = DeepOceanConfig {
+            enabled: true,
+            ..default()
+        }
+        .sanitized();
+        let material = deep_ocean_material(&config, Vec2::new(512.0, 768.0), 0.0);
+
+        assert_eq!(
+            material.uniforms.time_surface_start_level.y,
+            config.surface_y
+        );
+        assert_eq!(
+            material.uniforms.time_surface_start_level.z,
+            config.start_outside_border_m
+        );
+        assert_eq!(material.uniforms.bounds, Vec4::new(0.0, 512.0, 0.0, 768.0));
+        assert_eq!(material.uniforms.wind_wave.z, config.wave.wind_speed);
+        assert_eq!(material.uniforms.wave_patch.y, config.wave.coarse_patch_m);
+        assert_eq!(
+            material.uniforms.shading.z,
+            config.shading.reflection_strength
+        );
     }
 }
