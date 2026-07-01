@@ -14,9 +14,9 @@ trees:
     cull_enabled: true
     max_visible: 50000
     workgroup_size: 64
-    readback_visible_lists: true
+    readback_visible_lists: false
     debug_force_cpu: false
-    debug_show_gpu_counts: true
+    debug_show_gpu_counts: false
     debug_validate_against_cpu: false
 
   placement:

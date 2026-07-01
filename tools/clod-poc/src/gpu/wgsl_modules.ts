@@ -114,7 +114,7 @@ function withTreeFinalPlacementHeight(source: string): string {
 
 export function withTreePcgHash(source: string): string {
   return source.replace(
-    /fn tree_hash\(cell: vec2<f32>, salt: u32\) -> f32 \{[\s\S]*?\n\}\n\nfn tree_hash2\(cell: vec2<f32>, salt: u32\) -> vec2<f32> \{[\s\S]*?\n\}/,
+    /fn tree_hash\(cell: vec2<f32>, salt: u32\) -> f32 \{[\s\S]*?\r?\n\}\r?\n\r?\nfn tree_hash2\(cell: vec2<f32>, salt: u32\) -> vec2<f32> \{[\s\S]*?\r?\n\}/,
     `fn tree_hash(cell: vec2<f32>, salt: u32) -> f32 {
   return tree_pcg2d(cell, params.settings_u.z + salt).x;
 }

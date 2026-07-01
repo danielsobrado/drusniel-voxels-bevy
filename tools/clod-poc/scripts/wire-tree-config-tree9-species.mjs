@@ -62,6 +62,9 @@ const edits = [
 export function wireTreeConfigTree9Source(input) {
   const eol = input.includes("\r\n") ? "\r\n" : "\n";
   let source = input.replace(/\r\n/g, "\n");
+  if (isCurrentSixSpeciesConfig(source)) {
+    return { source: eol === "\r\n" ? source.replace(/\n/g, "\r\n") : source, changed: false, applied: [], skipped: edits.map((edit) => edit.label) };
+  }
   let changed = false;
   const applied = [];
   const skipped = [];
@@ -115,4 +118,15 @@ function applyRangeEdit(source, edit) {
 
 function countOccurrences(source, needle) {
   return source.split(needle).length - 1;
+}
+
+function isCurrentSixSpeciesConfig(source) {
+  return [
+    `export const TREE_SPECIES = ["oak", "pine", "dead", "birch", "willow", "spruce"] as const;`,
+    "export interface TreeSpeciesMorphologySettings",
+    "export interface TreeSpeciesZoneSettings",
+    "spruce: species(0.09, 20, 64, 10.5, 0.32, 3.0",
+    "for (const id of TREE_SPECIES) species[id] = parseSpeciesSettings(speciesRoot[id], fallback.species[id]);",
+    "for (const id of TREE_SPECIES) speciesZones[id] = parseSpeciesZone(zonesRoot[id], fallback.ecology.speciesZones[id]);",
+  ].every((marker) => source.includes(marker));
 }

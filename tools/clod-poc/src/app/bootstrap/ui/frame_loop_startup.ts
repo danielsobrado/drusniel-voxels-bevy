@@ -133,6 +133,9 @@ export function runFrameLoopStartup(
   const { playerTerraformEditActive } = terrainEdit;
   const statsPresenter = statsPresenterFromSession(ctx);
   const streamingScene = longView.queryScene?.startsWith("infinite-") ?? false;
+  const combatController = session.combatController;
+  const spellVfxController = session.spellVfxController;
+  const clodShadowOverlayController = session.clodShadowOverlayController;
 
   if (!session.playerInputController) {
     throw new Error("Frame loop startup requires playerInputController");
@@ -303,15 +306,15 @@ export function runFrameLoopStartup(
           isActive: () => constructionController.stats().active,
         }
       : undefined,
-    combat: session.combatController
-      ? { update: (timeMs) => session.combatController!.update(timeMs) }
+    combat: combatController
+      ? { update: (timeMs) => combatController.update(timeMs) }
       : undefined,
-    spells: session.spellVfxController
-      ? { update: (timeMs) => session.spellVfxController!.update(timeMs) }
+    spells: spellVfxController
+      ? { update: (timeMs) => spellVfxController.update(timeMs) }
       : undefined,
-    clodShadow: session.clodShadowOverlayController
+    clodShadow: clodShadowOverlayController
       ? {
-          update: () => session.clodShadowOverlayController!.update(),
+          update: () => clodShadowOverlayController.update(),
           statsController: session.clodShadowStatsController,
           isActive: () => state.clodShadowOverlayMode !== "off" || state.clodShadowProxyView !== "off",
         }

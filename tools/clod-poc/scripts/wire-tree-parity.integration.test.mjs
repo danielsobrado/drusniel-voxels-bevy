@@ -40,7 +40,7 @@ describe("tree parity wiring against current source", () => {
 
     expect(result.applied.length + result.skipped.length).toBe(WGSL_EDIT_COUNT);
     expect(result.source).toContain("applyTreeRingSpeciesWgslExpansion");
-    expect(result.source).toContain("const baseTreeEntry = withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))");
+    expect(result.source).toContain("const baseTreeEntry = withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)))");
     expect(result.source).toContain("const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length)");
     expect(result.source).toContain("applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout)");
 
@@ -52,12 +52,12 @@ describe("tree parity wiring against current source", () => {
     const result = wireTreeConfigTree9Source(treeConfigSource);
 
     expect(result.applied.length + result.skipped.length).toBe(CONFIG_EDIT_COUNT);
-    expect(result.source).toContain("type TreeExpandedSpeciesId");
-    expect(result.source).toContain("export type TreeSpeciesId = TreeExpandedSpeciesId");
-    expect(result.source).toContain("export const TREE_SPECIES: readonly TreeSpeciesId[] = TREE_EXPANDED_SPECIES");
-    expect(result.source).toContain("species: cloneSpeciesSettingsMap(TREE_EXPANDED_SPECIES_DEFAULTS)");
-    expect(result.source).toContain("species: readSpeciesSettingsMap(fallback.species, raw.species)");
-    expect(result.source).toContain("speciesZones: readSpeciesZoneMap(fallback.speciesZones, raw?.species_zones)");
+    expect(result.source).toContain(`export const TREE_SPECIES = ["oak", "pine", "dead", "birch", "willow", "spruce"] as const;`);
+    expect(result.source).toContain("export interface TreeSpeciesMorphologySettings");
+    expect(result.source).toContain("export interface TreeSpeciesZoneSettings");
+    expect(result.source).toContain("spruce: species(0.09, 20, 64, 10.5, 0.32, 3.0");
+    expect(result.source).toContain("for (const id of TREE_SPECIES) species[id] = parseSpeciesSettings(speciesRoot[id], fallback.species[id]);");
+    expect(result.source).toContain("for (const id of TREE_SPECIES) speciesZones[id] = parseSpeciesZone(zonesRoot[id], fallback.ecology.speciesZones[id]);");
 
     const again = wireTreeConfigTree9Source(result.source);
     expect(again.changed).toBe(false);

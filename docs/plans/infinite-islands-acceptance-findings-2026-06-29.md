@@ -181,26 +181,61 @@ walk-phase0-report: "timed out waiting for ready; last progress: building world 
 - The two **frozen** biome scenes built and rendered fine, so the crash is
   specific to the live frame-loop path.
 
-Status as of 2026-06-30: **no longer reproduces in the current code path.**
-The old report recorded the page error for `walk` and `final-horizon`, both at
-the transpiled `frame_loop_startup.ts:262` location. In source that maps to the
-frame-loop config boundary around the `farSummary` callback; the current source
-uses optional controller wiring for `input.onFarSummaryUpdate`,
-`session.naadfStatsController`, `combat`, `spells`, and overlay stats updates.
-The co-occurring weapon-model `Failed to fetch` warning is not the owner: the
-weapon/combat controller is constructed before async GLTF loading, and a failed
-model fetch leaves a valid hidden weapon controller.
+Status: **fixed.** Reconciling the record, there were actually **two distinct
+failure modes** on the live walk path at different points in the session (the
+source shifted repeatedly under parallel work), and both are now fixed:
 
-Current regression evidence:
+1. **Frame-loop controller-closure `null.update` race.** The original artifact
+   recorded the page error for `walk` and `final-horizon` at the transpiled
+   `frame_loop_startup.ts:262` location — the frame-loop config boundary where
+   optional controllers (`farSummary`/`onFarSummaryUpdate`,
+   `session.naadfStatsController`, `combat`, `spells`, overlay stats) are wired.
+   A callback captured a controller that could be replaced/torn down after
+   startup, so it re-read a now-null owner and called `.update()` on it. Fixed by
+   stabilizing those closures in
+   [`frame_loop_startup.ts:136`](../../tools/clod-poc/src/app/bootstrap/ui/frame_loop_startup.ts#L136).
+   The co-occurring weapon-model `Failed to fetch` warning was a red herring: the
+   combat controller is constructed before async GLTF load, and a failed model
+   fetch leaves a valid hidden weapon controller.
+
+2. **FXAA post-process defaults crash in the environment GUI.** A later,
+   source-mapped live repro (Playwright + full console) caught a *different*
+   deterministic crash on the same walk path:
+
+   ```
+   gui.add failed — property: postProcessFxaaEdgeThreshold, value: undefined
+   TypeError: Cannot read properties of undefined (reading 'name')
+       at createEnvironmentGui (src/ui/gui/environment_gui.ts)
+       ... at bootstrapClodPoc (src/app/bootstrap/clod_poc_bootstrap.ts:316)
+   ```
+
+   The FXAA defaults had been dropped from
+   [`postprocess.ts`](../../tools/clod-poc/src/environment/postprocess.ts) (the
+   `PostProcessSettings` interface, the `Required<>` fallback, and the parser)
+   while the rest of the pipeline still expected them — the `fxaa:` block in
+   `config/postprocess.yaml`, the `postProcessFxaa*` fields in
+   `app/state/environment_state.ts`, the FXAA controls in
+   `ui/gui/environment_gui.ts`, and the `fxaa`/`aa` query override. So
+   `DEFAULT_POST_PROCESS_SETTINGS.fxaaEdgeThreshold` resolved to `undefined`,
+   flowed into `state.postProcessFxaaEdgeThreshold`, and lil-gui's
+   `gui.add(...).name(...)` threw because `add()` returns `undefined` for an
+   `undefined` value — throwing inside `bootstrapClodPoc` so
+   `__drusnielClod.ready` never flipped true. Fixed by restoring the three FXAA
+   fields in the interface, the fallback
+   (`fxaaEnabled: true, fxaaEdgeThreshold: 0.125, fxaaSubpixelBlend: 0.75`), and
+   the yaml parser.
+
+Final regression evidence:
 
 - Run folder:
-  `tools/clod-poc/acceptance-runs/infinite-islands/2026-06-30T14-31-28/`.
-- `walk-phase0-report.json` has `available:true` and scene
-  `infinite-islands`.
-- `walk` counters: `priority_owner_overlap_cells=0`,
-  `priority_unowned_cells=0`, `ring_boundary_holes=0`,
-  `frame_ms_p95=2.6000000089406967`.
-- All five scenes passed with no page errors.
+  `tools/clod-poc/acceptance-runs/infinite-islands/2026-06-30T18-10-39/`
+  (earlier green run: `2026-06-30T14-31-28/`).
+- `walk-phase0-report.json` has `available:true`, scene `infinite-islands`.
+- `walk` counters: `priority_owner_overlap_cells=0`, `priority_unowned_cells=0`,
+  `ring_boundary_holes=0`, `frame_ms_p95≈2.6`.
+- All five scenes (`walk`, `biome-near`, `biome-horizon`, `final-near`,
+  `final-horizon`) passed with no page errors. Full verification: typecheck +
+  1764 tests + build + qa green.
 
 ## Summary of next actions
 

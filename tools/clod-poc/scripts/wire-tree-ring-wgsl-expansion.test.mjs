@@ -25,7 +25,7 @@ describe("TREE-9 WGSL expansion wiring script", () => {
     expect(result.changed).toBe(true);
     expect(result.applied).toHaveLength(EDIT_COUNT);
     expect(result.source).toContain("applyTreeRingSpeciesWgslExpansion");
-    expect(result.source).toContain("const baseTreeEntry = withTreeFinalPlacementHeight");
+    expect(result.source).toContain("const baseTreeEntry = withTreePcgHash(withTreeFinalPlacementHeight");
     expect(result.source).toContain("const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length)");
     expect(result.source).toContain("applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout)");
   });

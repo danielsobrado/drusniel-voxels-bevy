@@ -12,6 +12,7 @@ import { formatTreeGpuSummary } from "./vegetation_stats_presenter.js";
 import { packHydrologyData } from "../../systems/hydrology_packing.js";
 import { setTreeGpuRingHydrologyData } from "../../gpu/tree_ring_compute.js";
 import type { TreeSettings } from "../../trees/tree_config.js";
+import { createEmptyTreeSystemStats } from "../../trees/tree_system_stats.js";
 
 export interface TreeStartupInput {
   scene: THREE.Scene;
@@ -69,6 +70,8 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
     currentLighting, statControllers, renderer,
   } = input;
+  if (state.clodPerfMode) return runPerfModeTreeStartup(input);
+
   const treeConfig = sanitizeRuntimeTreeConfig(input.treeConfig);
 
   setTreeGpuRingHydrologyData(hydrologySystem ? packHydrologyData(hydrologySystem) : null);
@@ -114,5 +117,57 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
 
   return {
     treeController, treeSystem, fallingTrees, treeStats, formatTreeGpuSummary,
+  };
+}
+
+function runPerfModeTreeStartup(input: TreeStartupInput): TreeStartupResult {
+  const stats = createEmptyTreeSystemStats();
+  const treeStats = { current: stats };
+  input.state.treeTotal = formatTreeTotalDisplay(stats);
+  input.state.treeVisiblePatches = "0/0";
+  input.state.treeLodSummary = "0/0/0/0";
+  input.state.treeGpuSummary = formatTreeGpuSummary(stats);
+  input.statControllers.treeTotal?.updateDisplay();
+  input.statControllers.treeVisiblePatches?.updateDisplay();
+  input.statControllers.treeLodSummary?.updateDisplay();
+  input.statControllers.treeGpuSummary?.updateDisplay();
+
+  const disabledSettings: TreeSettings = { ...input.treeConfig, enabled: false };
+  const system = {
+    getStats: () => stats,
+    updateSettings: () => undefined,
+    rebuild: () => undefined,
+    update: () => undefined,
+    updateLighting: () => undefined,
+    updateForestLighting: () => undefined,
+    setEnabled: () => undefined,
+    markPatchesDirty: () => undefined,
+    getLightingProxies: () => [],
+    bakeImpostors: async () => ({ supported: false, reason: "disabled in CLOD perf mode" }),
+    dispose: () => undefined,
+  } as unknown as ReturnType<typeof createTreeController>["system"];
+
+  const treeController = {
+    system,
+    fallingTrees: [],
+    makeSettings: () => disabledSettings,
+    applySettings: () => undefined,
+    rebuild: () => undefined,
+    refreshStats: () => undefined,
+    update: () => undefined,
+    updateLighting: () => undefined,
+    setEnabled: () => undefined,
+    markPatchesDirty: () => undefined,
+    bakeImpostors: async () => ({ supported: false, reason: "disabled in CLOD perf mode" }),
+    updateFallingTrees: () => undefined,
+    dispose: () => undefined,
+  } as ReturnType<typeof createTreeController>;
+
+  return {
+    treeController,
+    treeSystem: system,
+    fallingTrees: treeController.fallingTrees,
+    treeStats,
+    formatTreeGpuSummary,
   };
 }

@@ -75,8 +75,15 @@ export class GpuProfiler {
     const orig = this.backend.updateTimeStampUID.bind(this.backend);
     this.backend.updateTimeStampUID = (ctx: object): void => {
       orig(ctx);
-      const uid = this.backend.get(ctx).timestampUID;
-      if (uid !== undefined) this.uidLabels.set(uid, this.describe(ctx));
+      // Labelling must never break rendering/world-gen: orig() already ran, so a
+      // describe() failure (e.g. an undefined element in a compute ctx array) is
+      // swallowed rather than propagated into the GPU dispatch.
+      try {
+        const uid = this.backend.get(ctx).timestampUID;
+        if (uid !== undefined) this.uidLabels.set(uid, this.describe(ctx));
+      } catch {
+        /* profiling label failed; ignore */
+      }
     };
   }
 
@@ -84,7 +91,8 @@ export class GpuProfiler {
     const tagged = tags.get(ctx);
     if (tagged !== undefined) return tagged;
     if (Array.isArray(ctx)) {
-      for (const n of ctx as CtxShape[]) {
+      for (const n of ctx as (CtxShape | null | undefined)[]) {
+        if (n == null) continue;
         const t = tags.get(n as object) ?? (n.name !== undefined && n.name !== "" ? n.name : undefined);
         if (t !== undefined) return t;
       }
