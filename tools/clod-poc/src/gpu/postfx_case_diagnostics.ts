@@ -15,6 +15,7 @@ const STAGES: readonly PostFxStage[] = [
   "bounce",
   "colorScript",
   "contact",
+  "froxels",
   "gtao",
   "taa",
 ] as const;
@@ -26,6 +27,7 @@ const DEFAULT_STAGE_STATE: PostFxCaseStageState = {
   bounce: false,
   colorScript: true,
   contact: false,
+  froxels: false,
   gtao: false,
   taa: true,
 };
@@ -57,6 +59,7 @@ export function postFxCaseDiagnostics(input: URLSearchParams | Record<string, st
   stages.contact = queryFlag(params, ["contact", "contactShadows", "contactshadows"], stages.contact);
   stages.gtao = queryFlag(params, ["gtao", "ao", "ambientOcclusion", "ambientocclusion"], stages.gtao);
   stages.bounce = queryFlag(params, ["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], stages.bounce);
+  stages.froxels = queryFlag(params, ["froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog"], stages.froxels);
   stages.autoExposure = queryFlag(params, ["autoExposure", "autoexposure"], stages.autoExposure);
 
   for (const stage of STAGES) {
