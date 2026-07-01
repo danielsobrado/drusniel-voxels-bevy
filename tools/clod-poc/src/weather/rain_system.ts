@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createRainNodeMaterial, createSplashNodeMaterial } from "./rainNodeMaterial.js";
-import { createRainShaderMaterial, createSplashShaderMaterial, type RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import { createRainShaderMaterial, createSplashShaderMaterial } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 import { HARD_SPLASH_COUNT, REPOSITION_DISTANCE, WATER_SPLASH_COUNT } from "./rain_constants.js";
 import { DEFAULT_RAIN_WEATHER_SETTINGS } from "./rain_defaults.js";
 import { createRainGeometry, createSplashGeometry } from "./rain_geometry.js";
