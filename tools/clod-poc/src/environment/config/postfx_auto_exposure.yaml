@@ -1,0 +1,9 @@
+postfx_auto_exposure:
+  enabled: true
+  lock: false
+  samples_per_axis: 12
+  target_luminance: 0.10
+  min_exposure: 0.18
+  max_exposure: 4.0
+  adaptation_rate: 0.07
+  center_weight_strength: 0.55
