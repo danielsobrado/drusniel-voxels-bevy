@@ -5,6 +5,7 @@ import {
   If,
   Loop,
   Return,
+  clamp,
   dot,
   exp,
   float,
@@ -95,7 +96,7 @@ export class PostFxFroxelVolume {
     const terrain = options.terrain ?? null;
     const terrainExtent = terrain ? Math.max(1, terrain.extentMeters) : 1;
     const terrainOrigin = terrain ? vec2(terrain.originX, terrain.originZ) : vec2(0, 0);
-    const sampleTerrainUv = (xz: TslAny): TslAny => xz.sub(terrainOrigin).div(terrainExtent).clamp(0, 1);
+    const sampleTerrainUv = (xz: TslAny): TslAny => clamp(xz.sub(terrainOrigin).div(terrainExtent), 0, 1);
     const sampleTerrainHeight = (xz: TslAny): TslAny => terrain
       ? (texture(terrain.heightTexture, sampleTerrainUv(xz)) as TslAny).r
       : float(froxels.groundReferenceHeightMeters);
@@ -158,7 +159,7 @@ export class PostFxFroxelVolume {
         sunDir.xz.mul(crownTop.sub(worldPos.y).max(0).div(sunDir.y.max(0.08))),
       );
       const projectedCanopy = sampleCanopy(canopyProjection);
-      const canopyVisibility = float(1).sub(projectedCanopy.mul(0.85).mul(crownBand)).clamp(0.15, 1);
+      const canopyVisibility = clamp(float(1).sub(projectedCanopy.mul(0.85).mul(crownBand)), 0.15, 1);
       const sunVisibility = terrainVisibility.mul(canopyVisibility);
       const shaft = lowSun.mul(froxels.sunShaftsStrength).add(1);
       const density = rhoGround.add(rhoAlt).mul(noise).mul(densitySunScale).mul(moistureBoost).mul(froxels.strength);
