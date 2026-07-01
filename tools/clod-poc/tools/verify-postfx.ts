@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 const TEST_FILES = [
   "src/gpu/webgpu_postprocess.test.ts",
+  "src/gpu/postfx_atmosphere.test.ts",
   "src/gpu/postfx_auto_exposure.test.ts",
   "src/gpu/postfx_bounce.test.ts",
   "src/gpu/postfx_case_diagnostics.test.ts",
