@@ -19,6 +19,7 @@ describe("postProcessOutputGraphDirty", () => {
     expect(postProcessOutputGraphDirty(current, { bloomEnabled: !current.bloomEnabled })).toBe(true);
     expect(postProcessOutputGraphDirty(current, { taaEnabled: !current.taaEnabled })).toBe(true);
     expect(postProcessOutputGraphDirty(current, { aerialPerspectiveEnabled: !current.aerialPerspectiveEnabled })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { contactShadowsEnabled: !current.contactShadowsEnabled })).toBe(true);
   });
 
   it("rebuilds when bloom node constants change", () => {
@@ -36,6 +37,15 @@ describe("postProcessOutputGraphDirty", () => {
       saturation: 1.1,
       vignette: 0.2,
       opacity: 0.8,
+    })).toBe(false);
+  });
+
+  it("does not rebuild when only contact shadow uniforms change", () => {
+    const current = { ...DEFAULT_POST_PROCESS_SETTINGS, contactShadowsEnabled: true };
+    expect(postProcessOutputGraphDirty(current, {
+      contactShadowsStrength: current.contactShadowsStrength + 0.05,
+      contactShadowsRadiusPx: current.contactShadowsRadiusPx + 0.25,
+      contactShadowsDepthBias: current.contactShadowsDepthBias + 0.001,
     })).toBe(false);
   });
 });
