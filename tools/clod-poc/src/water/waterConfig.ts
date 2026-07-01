@@ -10,8 +10,8 @@ import {
   type HydrologyConfig,
 } from "./hydrologyConfig.js";
 import { DEFAULT_CAUSTICS_CONFIG, type CausticsConfig } from "./causticsConfig.js";
+import { readWaterDebugConfig } from "./water_config_debug_parsing.js";
 import { readLakeBody, readRiverBody } from "./water_config_fake_bodies.js";
-import { isWaterDebugModeId, riverHasValidPoints } from "./water_config_guards.js";
 import { readHydrologyConfig } from "./water_config_hydrology_parsing.js";
 import {
   readBoolean,
@@ -19,6 +19,7 @@ import {
   readNumberArray,
 } from "./water_config_readers.js";
 import { applyRuntimeRiverOverrides } from "./water_config_runtime_overrides.js";
+import { validateWaterConfig } from "./water_config_validation.js";
 import { readWaterCausticsConfig, readWaterVisualConfig } from "./water_config_visual_parsing.js";
 
 /** Debug render modes for the water material. */
@@ -312,11 +313,7 @@ export function parseWaterConfigYaml(source: string): WaterConfig {
     hydrology,
     visual: readWaterVisualConfig(waterRecord.visual, DEFAULT_WATER_VISUAL),
     caustics: readWaterCausticsConfig(waterRecord.caustics, DEFAULT_CAUSTICS_CONFIG),
-    debug: {
-      mode: readNumber((waterRecord.debug as Record<string, unknown> | undefined)?.mode, DEFAULT_WATER_CONFIG.debug.mode) as WaterDebugModeId,
-      clipmapTint: readBoolean((waterRecord.debug as Record<string, unknown> | undefined)?.clipmap_tint, DEFAULT_WATER_CONFIG.debug.clipmapTint),
-      wireframe: readBoolean((waterRecord.debug as Record<string, unknown> | undefined)?.wireframe, DEFAULT_WATER_CONFIG.debug.wireframe),
-    },
+    debug: readWaterDebugConfig(waterRecord.debug, DEFAULT_WATER_CONFIG.debug),
   };
 }
 
@@ -342,31 +339,7 @@ export function parseWaterConfig(
     return fallback;
   }
 
-  const debugMode = isWaterDebugModeId(config.debug.mode)
-    ? config.debug.mode
-    : DEFAULT_WATER_CONFIG.debug.mode;
-
-  const rivers: RiverBodyConfig[] = [];
-  for (const [idx, river] of config.fakeBodies.rivers.entries()) {
-    if (!riverHasValidPoints(river)) {
-      warnWater(
-        `skipping river entry ${idx}: expected at least 2 valid points or points_norm entries`,
-        warn ?? undefined,
-      );
-      continue;
-    }
-    rivers.push(river);
-  }
-
-  if (debugMode === config.debug.mode && rivers.length === config.fakeBodies.rivers.length) {
-    return config;
-  }
-
-  return {
-    ...config,
-    debug: { ...config.debug, mode: debugMode },
-    fakeBodies: { ...config.fakeBodies, rivers },
-  };
+  return validateWaterConfig(config, DEFAULT_WATER_CONFIG.debug.mode, warn ?? null);
 }
 
 /** Resolves normalized fake bodies to absolute coordinate space. */
