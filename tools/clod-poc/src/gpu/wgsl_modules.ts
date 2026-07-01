@@ -88,6 +88,19 @@ function withTreeFinalPlacementHeight(source: string): string {
     .replace("let height = tree_hydrology_ground_height(raw_height, hydro);", "let height = raw_height;");
 }
 
+function withTreeTerrainVisibilityCull(source: string): string {
+  if (source.includes("tree_terrain_visibility_enabled()")) return source;
+  return source
+    .replace(
+      "fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
+      "fn tree_terrain_visibility_enabled() -> bool {\n  return params.settings_e.w > 0.5;\n}\n\nfn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
+    )
+    .replace(
+      "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  append_shadow_lod_if_active",
+      "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  if (tree_terrain_visibility_enabled() && terrain_ridge_filter(wpos, height, dist)) { return; }\n  append_shadow_lod_if_active",
+    );
+}
+
 export function withTreePcgHash(source: string): string {
   return source.replace(
     /fn tree_hash\(cell: vec2<f32>, salt: u32\) -> f32 \{[\s\S]*?\r?\n\}\r?\n\r?\nfn tree_hash2\(cell: vec2<f32>, salt: u32\) -> vec2<f32> \{[\s\S]*?\r?\n\}/,
@@ -148,7 +161,7 @@ export function composeTreeRingShader(workgroupSize = 64): string {
     ? workgroupSize
     : 64;
   const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
-  const baseTreeEntry = withTreeShadowLodGate(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))));
+  const baseTreeEntry = withTreeTerrainVisibilityCull(withTreeShadowLodGate(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)))));
   const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);
   const treeEntry = applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout).replace(
     /const TREE_WORKGROUP_SIZE: u32 = \d+u;/,
