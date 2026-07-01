@@ -36,6 +36,11 @@ import {
   type PostProcessSettings,
 } from "../environment/postprocess.js";
 import {
+  DEFAULT_POSTFX_ATMOSPHERE,
+  type PostFxAtmosphereSettings,
+} from "./postfx_atmosphere.js";
+import { createHillaireFroxelAerialNode } from "./postfx_atmosphere_nodes.js";
+import {
   autoExposureWeightTotal,
   centerMeterWeight,
   DEFAULT_POSTFX_AUTO_EXPOSURE,
@@ -84,6 +89,7 @@ const POSTFX_GRAPH_STAGES: readonly PostFxStage[] = [
   "bounce",
   "colorScript",
   "contact",
+  "froxels",
   "gtao",
   "taa",
 ] as const;
@@ -211,12 +217,14 @@ export class WebGpuPostProcessPipeline {
   private readonly projectionInverse = new THREE.Matrix4();
   private readonly colorScript: PostFxColorScript = DEFAULT_POSTFX_COLOR_SCRIPT;
   private readonly autoExposure: PostFxAutoExposureSettings = DEFAULT_POSTFX_AUTO_EXPOSURE;
+  private readonly atmosphere: PostFxAtmosphereSettings = DEFAULT_POSTFX_ATMOSPHERE;
   private readonly bounce: PostFxBounceSettings = DEFAULT_POSTFX_BOUNCE;
   private readonly gtao: PostFxGtaoSettings = DEFAULT_POSTFX_GTAO;
   private readonly stageFlags: PostFxStageFlags;
   private readonly autoExposureEnabled: boolean;
   private readonly lockExposure: boolean;
   private readonly bounceEnabled: boolean;
+  private readonly froxelsEnabled: boolean;
   private readonly gtaoEnabled: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
   private readonly uContrast = uniform(1.0) as unknown as NumericUniform;
@@ -246,12 +254,9 @@ export class WebGpuPostProcessPipeline {
   private readonly uGtaoDepthTolerance = uniform(1.2) as unknown as NumericUniform;
   private readonly uGtaoMinUvRadius = uniform(0.002) as unknown as NumericUniform;
   private readonly uGtaoMaxUvRadius = uniform(0.035) as unknown as NumericUniform;
-  private readonly uAerialStart = uniform(120.0) as unknown as NumericUniform;
-  private readonly uAerialEnd = uniform(1800.0) as unknown as NumericUniform;
-  private readonly uAerialStrength = uniform(0.0) as unknown as NumericUniform;
-  private readonly uAerialColor = uniform(new THREE.Vector3(0.62, 0.72, 0.86)) as unknown as VectorUniform;
   private readonly uProjectionInverse = uniform(new THREE.Matrix4()) as unknown as MatrixUniform;
   private readonly uCameraWorld = uniform(new THREE.Matrix4()) as unknown as MatrixUniform;
+  private readonly uCameraPosition = uniform(new THREE.Vector3()) as unknown as VectorUniform;
   private readonly uProjection = uniform(new THREE.Matrix4()) as unknown as MatrixUniform;
   private readonly uView = uniform(new THREE.Matrix4()) as unknown as MatrixUniform;
   private readonly uPrevView = uniform(new THREE.Matrix4()) as unknown as MatrixUniform;
@@ -271,6 +276,7 @@ export class WebGpuPostProcessPipeline {
     this.autoExposureEnabled = this.stageEnabled("autoExposure") && queryFlag(["autoExposure", "autoexposure"], this.autoExposure.enabled);
     this.lockExposure = queryFlag(["lockexp", "lockExposure", "lockexposure"], this.autoExposure.lock);
     this.bounceEnabled = this.stageEnabled("bounce") && queryFlag(["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], this.bounce.enabled);
+    this.froxelsEnabled = this.stageEnabled("froxels") && queryFlag(["froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog"], this.atmosphere.froxels.enabled);
     this.gtaoEnabled = this.stageEnabled("gtao") && queryFlag(["gtao", "ao", "ambientOcclusion", "ambientocclusion"], this.gtao.enabled);
     this.applyRendererSettings();
     this.updateUniforms();
@@ -332,6 +338,7 @@ export class WebGpuPostProcessPipeline {
       this.stageFlags.postMin ? "postmin" : "postfull",
       this.stageKey(),
       this.bounceEnabled ? "bounce" : "no-bounce",
+      this.froxelsEnabled ? "froxels" : "no-froxels",
       this.gtaoEnabled ? "gtao" : "no-gtao",
     ].join("|");
   }
@@ -372,10 +379,6 @@ export class WebGpuPostProcessPipeline {
     this.uGtaoDepthTolerance.value = this.gtao.depthToleranceMeters;
     this.uGtaoMinUvRadius.value = this.gtao.minUvRadius;
     this.uGtaoMaxUvRadius.value = this.gtao.maxUvRadius;
-    this.uAerialStart.value = this.settings.aerialPerspectiveStart;
-    this.uAerialEnd.value = this.settings.aerialPerspectiveEnd;
-    this.uAerialStrength.value = this.settings.aerialPerspectiveStrength;
-    this.uAerialColor.value.set(...this.settings.aerialPerspectiveColor);
     this.updateColorScriptUniforms();
   }
 
@@ -461,23 +464,21 @@ export class WebGpuPostProcessPipeline {
   }
 
   private createAerialNode(sourceRgb: TslAny, depthTex: TslAny): TslAny {
-    const uProjectionInverse = this.uProjectionInverse as unknown as TslAny;
-    const uAerialStart = this.uAerialStart as unknown as TslAny;
-    const uAerialEnd = this.uAerialEnd as unknown as TslAny;
-    const uAerialStrength = this.uAerialStrength as unknown as TslAny;
-    const uAerialColor = this.uAerialColor as unknown as TslAny;
-
-    return Fn((): TslAny => {
-      const depth = depthTex.x;
-      const isSky = depth.lessThanEqual(1e-7).or(depth.greaterThanEqual(0.9999999));
-      const viewPosition = getViewPosition(screenUV, depth, uProjectionInverse) as TslAny;
-      const distance = viewPosition.length();
-      const geometryMask = isSky.select(float(0), float(1));
-      const haze = smoothstep(uAerialStart, uAerialEnd, distance)
-        .mul(uAerialStrength)
-        .mul(geometryMask);
-      return tslMix(sourceRgb, uAerialColor, clamp(haze, 0, 1));
-    })();
+    return createHillaireFroxelAerialNode({
+      sourceRgb,
+      depthTex,
+      projectionInverse: this.uProjectionInverse as unknown as TslAny,
+      cameraWorld: this.uCameraWorld as unknown as TslAny,
+      cameraPosition: this.uCameraPosition as unknown as TslAny,
+      sunDirection: this.uSunDirection as unknown as TslAny,
+      settings: {
+        hillaire: this.atmosphere.hillaire,
+        froxels: {
+          ...this.atmosphere.froxels,
+          enabled: this.froxelsEnabled,
+        },
+      },
+    });
   }
 
   private createTraaNode(sourceRgb: TslAny, depthTex: TslAny, camera: THREE.Camera): TslAny {
@@ -771,6 +772,7 @@ export class WebGpuPostProcessPipeline {
     this.firstCameraSync = false;
     this.uProjectionInverse.value.copy(this.projectionInverse);
     this.uCameraWorld.value.copy(camera.matrixWorld);
+    this.uCameraPosition.value.setFromMatrixPosition(camera.matrixWorld);
     this.uProjection.value.copy(camera.projectionMatrix);
     this.uView.value.copy(camera.matrixWorldInverse);
   }
