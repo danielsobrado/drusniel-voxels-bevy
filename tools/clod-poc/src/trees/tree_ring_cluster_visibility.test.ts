@@ -24,9 +24,9 @@ describe("tree ring cluster visibility", () => {
     });
 
     expect(mask.hiddenClusters).toBe(0);
-    expect(mask.visibleClusters).toBe(mask.mask.length);
-    expect(mask.reasonCounts.disabled).toBe(mask.mask.length);
-    expect(Array.from(mask.mask).every((value) => value === 1)).toBe(true);
+    expect(mask.visibleClusters).toBe(mask.words.length);
+    expect(mask.reasonCounts.disabled).toBe(mask.words.length);
+    expect(Array.from(mask.words).every((value) => value === 1)).toBe(true);
   });
 
   it("keeps unknown terrain clusters visible", () => {
@@ -44,8 +44,8 @@ describe("tree ring cluster visibility", () => {
     });
 
     expect(mask.hiddenClusters).toBe(0);
-    expect(mask.unknownKeptClusters).toBe(mask.mask.length);
-    expect(Array.from(mask.mask).every((value) => value === 1)).toBe(true);
+    expect(mask.unknownKeptClusters).toBe(mask.words.length);
+    expect(Array.from(mask.words).every((value) => value === 1)).toBe(true);
   });
 
   it("marks terrain-hidden clusters as not visible", () => {
@@ -67,30 +67,31 @@ describe("tree ring cluster visibility", () => {
 
     expect(mask.hiddenClusters).toBeGreaterThan(0);
     expect(mask.reasonCounts.terrain_hidden).toBe(mask.hiddenClusters);
-    expect(Array.from(mask.mask).some((value) => value === 0)).toBe(true);
+    expect(Array.from(mask.words).some((value) => value === 0)).toBe(true);
   });
 
   it("maps slots to their cluster visibility", () => {
     const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
     settings.distanceM = 24;
     const byteLength = treeRingClusterMaskByteLength(settings, 4);
+    const words = new Uint32Array(byteLength / Uint32Array.BYTES_PER_ELEMENT).fill(1);
     const mask = {
       grid: 15,
       clusterDimCells: 4,
       clusterGrid: 4,
-      mask: new Uint8Array(byteLength).fill(1),
+      words,
       hiddenClusters: 1,
-      visibleClusters: byteLength - 1,
+      visibleClusters: words.length - 1,
       unknownKeptClusters: 0,
       reasonCounts: {
-        visible: byteLength - 1,
+        visible: words.length - 1,
         terrain_hidden: 1,
         unknown_kept: 0,
         near_forced_visible: 0,
         disabled: 0,
       },
     };
-    mask.mask[0] = 0;
+    mask.words[0] = 0;
 
     expect(treeRingSlotClusterVisible(mask, 0)).toBe(false);
     expect(treeRingSlotClusterVisible(mask, 1)).toBe(false);
