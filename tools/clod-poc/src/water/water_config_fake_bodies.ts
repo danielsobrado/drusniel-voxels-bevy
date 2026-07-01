@@ -1,8 +1,26 @@
-import type { LakeBodyConfig, RiverBodyConfig } from "./waterConfig.js";
-import { readNumber, readNumberTuple } from "./water_config_readers.js";
+import type { LakeBodyConfig, RiverBodyConfig, WaterConfig } from "./waterConfig.js";
+import { readBoolean, readNumber, readNumberTuple, recordFrom } from "./water_config_readers.js";
+
+export function readFakeBodiesConfig(value: unknown, defaults: WaterConfig["fakeBodies"]): WaterConfig["fakeBodies"] {
+  const fakeBodies = recordFrom(value);
+  const defaultLakes = defaults.lakes;
+  const defaultRivers = defaults.rivers;
+  const lakes = Array.isArray(fakeBodies.lakes)
+    ? fakeBodies.lakes.map((lake, index) => readLakeBody(lake, defaultLakes[index] ?? defaultLakes[0]))
+    : defaultLakes.map((lake) => readLakeBody(lake, lake));
+  const rivers = Array.isArray(fakeBodies.rivers)
+    ? fakeBodies.rivers.map((river, index) => readRiverBody(river, defaultRivers[index] ?? defaultRivers[0]))
+    : defaultRivers.map((river) => readRiverBody(river, river));
+
+  return {
+    carveTerrain: readBoolean(fakeBodies.carve_terrain ?? fakeBodies.carveTerrain, defaults.carveTerrain),
+    lakes,
+    rivers,
+  };
+}
 
 export function readLakeBody(value: unknown, fallback: LakeBodyConfig): LakeBodyConfig {
-  const record = (value ?? {}) as Record<string, unknown>;
+  const record = recordFrom(value);
   const centerNorm = record.center_norm ?? record.centerNorm;
   return {
     center: readNumberTuple(record.center, fallback.center),
@@ -13,7 +31,7 @@ export function readLakeBody(value: unknown, fallback: LakeBodyConfig): LakeBody
 }
 
 export function readRiverBody(value: unknown, fallback: RiverBodyConfig): RiverBodyConfig {
-  const record = (value ?? {}) as Record<string, unknown>;
+  const record = recordFrom(value);
   const pointsExplicit = Array.isArray(record.points);
   const points = pointsExplicit
     ? (record.points as unknown[]).map((point: unknown, index: number) => readNumberTuple(point, fallback.points[index] ?? [0, 0]))
