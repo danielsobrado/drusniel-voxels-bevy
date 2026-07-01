@@ -103,26 +103,35 @@ disabled
 
 ### TVIS-007 — Pre-generation culling
 
-Current state: **early per-slot rejection**, not true page/cluster dispatch reduction.
+Current state: **early per-slot rejection plus tested CPU-side cluster visibility mask foundation**, not true GPU compacted page dispatch.
+
+Implemented foundation:
+
+- `tools/clod-poc/src/trees/tree_ring_cluster_visibility.ts`
+- `tools/clod-poc/src/trees/tree_ring_cluster_visibility.test.ts`
 
 What is done:
 
 - terrain-hidden GPU tree slots return before species/scale/LOD/appends;
 - CPU/GPU debug validation now follows the same early-rejection order;
-- shadow and visible lists both skip terrain-hidden slots.
+- shadow and visible lists both skip terrain-hidden slots;
+- a conservative tree-ring cluster visibility mask can be built from the shared vegetation visibility provider;
+- the cluster mask keeps unknown/missing terrain visible;
+- utility lookup maps tree-ring slots back to their cluster visibility.
 
 What is not done:
 
 - GPU dispatch still covers the full tree ring slot grid;
 - `gpuCandidateCount` may not drop yet;
-- true page/cluster masks are not uploaded to the compute shader;
+- cluster masks are not uploaded to the compute shader yet;
+- the compute shader does not yet read a cluster mask before per-slot work;
 - there is no compacted cluster dispatch yet.
 
 ## Remaining architectural work
 
 ### TVIS-007 next step
 
-Add a cluster/page visibility mask before candidate generation.
+Upload and consume the cluster visibility mask in the GPU tree-ring path.
 
 Target shape:
 
