@@ -18,6 +18,7 @@ Drusniel is not missing all of Fable5's tree ideas. It already has many of the r
 - Terrain ridge filtering.
 - Tree density, spacing, ring-size, GPU-visible, and shadow-LOD quality presets.
 - Crown proxy geometry for far/impostor GPU tree shadow casters.
+- Runtime labels that expose whether trees are using `gpu-ring`, `cpu-patches`, `fallback-cpu`, `unsupported`, or `error`.
 
 Fable5 is still ahead because its vegetation pipeline is GPU-first end to end. It scatters, culls, compacts, classifies LODs, and writes indirect draw counts on the GPU during normal rendering. Drusniel now requests the GPU tree ring from presets, but the CPU patch path still exists as fallback/debug, and the current work still needs local typecheck/build plus browser validation.
 
@@ -33,7 +34,8 @@ Current status:
 
 - Quality presets now enable GPU trees by default.
 - CPU fallback/debug switches still exist.
-- Remaining work: verify WebGPU path on target browsers and show a clearer runtime status line.
+- Runtime display now names the active path clearly.
+- Remaining work: verify WebGPU path on target browsers and measure dense-forest captures.
 
 ### 2. Fable5 avoids normal-frame CPU readback
 
@@ -44,6 +46,7 @@ Current status:
 - Normal presets disable GPU counts, readback visible lists, and CPU/GPU validation.
 - `treeGpuCounts=1` and `treeGpuValidate=1` explicitly request readback.
 - GUI exposes GPU debug controls.
+- GUI/overlay summary now shows `counts=off` explicitly for GPU ring when readback is disabled.
 
 ### 3. Fable5 reduces distant tree shadow cost
 
@@ -232,6 +235,31 @@ Implemented:
 - CPU validation shadow counts now respect `treeLodCastsShadow(settings, lod)`.
 - Tests cover PCG hash/jitter parity and shadow LOD filtering in CPU validation counts.
 
+### Done: explicit tree runtime status labels
+
+Implemented:
+
+- Added user-facing runtime path labels:
+  - `gpu-ring`
+  - `cpu-patches`
+  - `fallback-cpu`
+  - `unsupported`
+  - `error`
+  - `disabled`
+- Updated tree overlay formatting to show the active path first.
+- Updated the lil-gui tree GPU summary to use the same labels.
+- Added GPU dispatch time, shadow caster count, and shadow overflow marker when GPU counts are enabled.
+- Updated frame stats sync so tree GPU summary refreshes when dispatch time, shadow caster count, overflow, or count-visibility changes.
+- Added tests for tree overlay formatting and vegetation GUI summary formatting.
+
+Useful display examples:
+
+```text
+trees: gpu-ring counts=off
+trees: gpu-ring 421 trees ... path=gpu-ring candidates=900 accepted=421 visible=421 shadow=82 dispatch=1.2ms
+trees: cpu-patches 1,250 trees ... path=cpu-patches
+```
+
 ## Code Health Findings
 
 ### CPU validation is closer, but not guaranteed perfect
@@ -258,7 +286,7 @@ Status: mostly done.
 Remaining:
 
 - Verify in browser that WebGPU path is actually active for presets.
-- Improve status overlay: `trees: gpu-ring`, `trees: cpu-patches`, `trees: fallback-cpu`, `trees: unsupported`.
+- Capture before/after performance numbers for `ultra`, `balanced`, `perf`, and `potato`.
 
 ### Phase 2: Make GPU ring the normal WebGPU tree path
 
@@ -276,7 +304,7 @@ Keep CPU patches as fallback for:
 Remaining:
 
 - Confirm startup defaults without an explicit preset.
-- Add clear status line in overlay/menu.
+- Confirm overlay shows `gpu-ring` for WebGPU preset paths.
 
 ### Phase 3: Remove debug readback from normal presets
 
@@ -355,6 +383,8 @@ Performance checks:
 - `treeShadowMaxLod=none` must skip GPU shadow work.
 - `treeShadowMaxLod=near` must skip mid/far/impostor GPU shadow append work.
 - `treeGpuValidate=1` should not produce obvious false positives caused only by hash/jitter or shadow LOD mismatch.
+- Overlay or GUI must show `gpu-ring` when GPU path is active.
+- Overlay or GUI must show `cpu-patches` / `fallback-cpu` when GPU path is not active.
 - No shader compile errors.
 - No missing near-camera trees.
 
@@ -363,13 +393,12 @@ Performance checks:
 Suggested commit title:
 
 ```text
-Expose tree GPU runtime status in overlay
+Add tree preset perf capture checklist
 ```
 
 Likely files:
 
-- `tools/clod-poc/src/trees/tree_info.ts`
-- `tools/clod-poc/src/runtime/vegetation/tree_controller.ts`
-- UI/info overlay files that render tree stats
+- `docs/plans/fable5-tree-performance-gap-plan.md`
+- optional local-only capture notes if a measured output format is added later
 
-Do not start with a new visual tree effect. The biggest remaining tree win is proving that the GPU path is actually active, visible, and measurable in the running app.
+Do not start with a new visual tree effect. The biggest remaining tree win is proving that the GPU path is actually active and measuring the preset impact in the running app.
