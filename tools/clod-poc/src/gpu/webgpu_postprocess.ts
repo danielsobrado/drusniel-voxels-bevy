@@ -42,6 +42,10 @@ import {
   type PostFxAutoExposureSettings,
 } from "./postfx_auto_exposure.js";
 import {
+  DEFAULT_POSTFX_BOUNCE,
+  type PostFxBounceSettings,
+} from "./postfx_bounce.js";
+import {
   DEFAULT_POSTFX_COLOR_SCRIPT,
   DEFAULT_POSTFX_GRADE,
   gradeForLighting,
@@ -57,6 +61,7 @@ const CONTACT_SHADOW_STEPS = 8;
 const CONTACT_SHADOW_MAX_DISTANCE_M = 260;
 const CONTACT_SHADOW_FULL_DISTANCE_M = 120;
 const CONTACT_SHADOW_DEPTH_RANGE_FACTOR = 0.85;
+const BOUNCE_GOLDEN_ANGLE = 2.399963;
 const LUMA_WEIGHTS = [0.2126, 0.7152, 0.0722] as const;
 
 type TslAny = any;
@@ -172,8 +177,10 @@ export class WebGpuPostProcessPipeline {
   private readonly projectionInverse = new THREE.Matrix4();
   private readonly colorScript: PostFxColorScript = DEFAULT_POSTFX_COLOR_SCRIPT;
   private readonly autoExposure: PostFxAutoExposureSettings = DEFAULT_POSTFX_AUTO_EXPOSURE;
+  private readonly bounce: PostFxBounceSettings = DEFAULT_POSTFX_BOUNCE;
   private readonly autoExposureEnabled: boolean;
   private readonly lockExposure: boolean;
+  private readonly bounceEnabled: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
   private readonly uContrast = uniform(1.0) as unknown as NumericUniform;
   private readonly uSaturation = uniform(1.0) as unknown as NumericUniform;
@@ -188,6 +195,12 @@ export class WebGpuPostProcessPipeline {
   private readonly uContactStrength = uniform(0.0) as unknown as NumericUniform;
   private readonly uContactRadius = uniform(1.7) as unknown as NumericUniform;
   private readonly uContactDepthBias = uniform(0.05) as unknown as NumericUniform;
+  private readonly uBounceStrength = uniform(0.0) as unknown as NumericUniform;
+  private readonly uBounceRadius = uniform(0.55) as unknown as NumericUniform;
+  private readonly uBounceMaxDistance = uniform(180.0) as unknown as NumericUniform;
+  private readonly uBounceDepthTolerance = uniform(1.8) as unknown as NumericUniform;
+  private readonly uBounceMinUvRadius = uniform(0.004) as unknown as NumericUniform;
+  private readonly uBounceMaxUvRadius = uniform(0.07) as unknown as NumericUniform;
   private readonly uAerialStart = uniform(120.0) as unknown as NumericUniform;
   private readonly uAerialEnd = uniform(1800.0) as unknown as NumericUniform;
   private readonly uAerialStrength = uniform(0.0) as unknown as NumericUniform;
@@ -211,6 +224,7 @@ export class WebGpuPostProcessPipeline {
     this.settings = withPostProcessDefaults(settings);
     this.autoExposureEnabled = queryFlag(["autoExposure", "autoexposure"], this.autoExposure.enabled);
     this.lockExposure = queryFlag(["lockexp", "lockExposure", "lockexposure"], this.autoExposure.lock);
+    this.bounceEnabled = queryFlag(["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], this.bounce.enabled);
     this.applyRendererSettings();
     this.updateUniforms();
   }
@@ -220,11 +234,11 @@ export class WebGpuPostProcessPipeline {
   }
 
   updateSettings(settings: Partial<PostProcessSettings>): void {
-    const previousKey = webGpuPostProcessGraphKey(this.settings);
+    const previousKey = this.graphKey();
     this.settings = withPostProcessDefaults({ ...this.settings, ...settings });
     this.applyRendererSettings();
     this.updateUniforms();
-    const nextKey = webGpuPostProcessGraphKey(this.settings);
+    const nextKey = this.graphKey();
     if (nextKey !== previousKey) this.disposePipeline();
   }
 
@@ -265,6 +279,10 @@ export class WebGpuPostProcessPipeline {
     this.disposePipeline();
   }
 
+  private graphKey(): string {
+    return `${webGpuPostProcessGraphKey(this.settings)}|${this.bounceEnabled ? "bounce" : "no-bounce"}`;
+  }
+
   private applyRendererSettings(): void {
     this.renderer.toneMapping = toneMappingModeToThree(this.settings.toneMapping);
     (this.renderer as unknown as { toneMappingExposure?: number }).toneMappingExposure = WEBGPU_POST_EXPOSURE;
@@ -277,6 +295,12 @@ export class WebGpuPostProcessPipeline {
     this.uContactStrength.value = this.settings.contactShadowsEnabled ? this.settings.contactShadowsStrength : 0;
     this.uContactRadius.value = Math.max(0.01, this.settings.contactShadowsRadiusPx);
     this.uContactDepthBias.value = Math.max(0.0001, this.settings.contactShadowsDepthBias);
+    this.uBounceStrength.value = this.bounceEnabled ? this.bounce.strength : 0;
+    this.uBounceRadius.value = this.bounce.radiusMeters;
+    this.uBounceMaxDistance.value = this.bounce.maxDistanceMeters;
+    this.uBounceDepthTolerance.value = this.bounce.depthToleranceMeters;
+    this.uBounceMinUvRadius.value = this.bounce.minUvRadius;
+    this.uBounceMaxUvRadius.value = this.bounce.maxUvRadius;
     this.uAerialStart.value = this.settings.aerialPerspectiveStart;
     this.uAerialEnd.value = this.settings.aerialPerspectiveEnd;
     this.uAerialStrength.value = this.settings.aerialPerspectiveStrength;
@@ -311,7 +335,7 @@ export class WebGpuPostProcessPipeline {
   }
 
   private ensurePipeline(scene: THREE.Scene, camera: THREE.Camera): RenderPipeline {
-    const key = webGpuPostProcessGraphKey(this.settings);
+    const key = this.graphKey();
     if (this.pipeline && this.pipelineKey === key) return this.pipeline;
     this.disposePipeline();
     this.pipeline = this.createPipeline(scene, camera);
@@ -354,7 +378,10 @@ export class WebGpuPostProcessPipeline {
     const contactRgb = this.settings.contactShadowsEnabled
       ? bloomRgb.mul(this.createContactShadowNode(depthTex))
       : bloomRgb;
-    return this.createGradeNode(beauty.rgb, contactRgb);
+    const bounceRgb = this.bounceEnabled
+      ? this.createBounceNode(contactRgb, beauty, depthTex)
+      : contactRgb;
+    return this.createGradeNode(beauty.rgb, bounceRgb);
   }
 
   private createAerialNode(sourceRgb: TslAny, depthTex: TslAny): TslAny {
@@ -443,6 +470,53 @@ export class WebGpuPostProcessPipeline {
         const occlusion = hitF.lessThan(1.5).select(float(1).sub(hitF.mul(0.5)), float(0));
         const fade = smoothstep(CONTACT_SHADOW_MAX_DISTANCE_M, CONTACT_SHADOW_FULL_DISTANCE_M, distance);
         result.assign(float(1).sub(occlusion.mul(uContactStrength).mul(fade)));
+      });
+      return result;
+    })();
+  }
+
+  private createBounceNode(sourceRgb: TslAny, beauty: TslAny, depthTex: TslAny): TslAny {
+    const uProjectionInverse = this.uProjectionInverse as unknown as TslAny;
+    const uBounceStrength = this.uBounceStrength as unknown as TslAny;
+    const uBounceRadius = this.uBounceRadius as unknown as TslAny;
+    const uBounceMaxDistance = this.uBounceMaxDistance as unknown as TslAny;
+    const uBounceDepthTolerance = this.uBounceDepthTolerance as unknown as TslAny;
+    const uBounceMinUvRadius = this.uBounceMinUvRadius as unknown as TslAny;
+    const uBounceMaxUvRadius = this.uBounceMaxUvRadius as unknown as TslAny;
+    const taps = this.bounce.taps;
+
+    return Fn((): TslAny => {
+      const result = sourceRgb.toVar();
+      const depth = depthTex.x;
+      const isSky = depth.lessThanEqual(1e-7).or(depth.greaterThanEqual(0.9999999));
+      const viewPosition = getViewPosition(screenUV, depth, uProjectionInverse) as TslAny;
+      const distance = viewPosition.length();
+      If(isSky.not().and(distance.lessThan(uBounceMaxDistance)), () => {
+        const radiusUv = clamp(uBounceRadius.div(distance.max(0.0001)), uBounceMinUvRadius, uBounceMaxUvRadius);
+        const sum = vec3(0).toVar();
+        const weightSum = float(0).toVar();
+        for (let tap = 0; tap < taps; tap++) {
+          const angle = tap * BOUNCE_GOLDEN_ANGLE + 0.7;
+          const radius = Math.sqrt((tap + 0.5) / taps);
+          const uvSample = screenUV.add(vec2(Math.cos(angle), Math.sin(angle)).mul(radiusUv).mul(radius));
+          const inFrame = uvSample.x
+            .greaterThan(0.001)
+            .and(uvSample.x.lessThan(0.999))
+            .and(uvSample.y.greaterThan(0.001))
+            .and(uvSample.y.lessThan(0.999));
+          const depthSample = texture(depthTex.value, uvSample).x;
+          const sampleSky = depthSample.lessThanEqual(1e-7).or(depthSample.greaterThanEqual(0.9999999));
+          const sampleView = getViewPosition(uvSample, depthSample, uProjectionInverse) as TslAny;
+          const support = smoothstep(uBounceDepthTolerance, 0.05, sampleView.sub(viewPosition).length())
+            .mul(inFrame.and(sampleSky.not()).select(float(1), float(0)));
+          sum.addAssign(texture(beauty.value, uvSample).rgb.mul(support));
+          weightSum.addAssign(support);
+        }
+        const receiverLum = luminance(sourceRgb).add(0.25);
+        const receiverTint = sourceRgb.div(receiverLum);
+        const fade = smoothstep(uBounceMaxDistance, uBounceMaxDistance.mul(0.5), distance);
+        const bounce = sum.div(weightSum.max(1e-3)).mul(receiverTint).mul(uBounceStrength).mul(fade);
+        result.assign(sourceRgb.add(bounce));
       });
       return result;
     })();
