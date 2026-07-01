@@ -21,16 +21,25 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
+import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   DEFAULT_POST_PROCESS_SETTINGS,
   toneMappingModeToThree,
   type PostProcessSettings,
 } from "../environment/postprocess.js";
+import {
+  DEFAULT_POSTFX_COLOR_SCRIPT,
+  DEFAULT_POSTFX_GRADE,
+  gradeForLighting,
+  type PostFxColorScript,
+  type PostFxGradeParams,
+} from "./postfx_color_script.js";
 
 const TERRAIN_NON_INDEXED_FALLBACK_KEY = "__drusnielWebGpuTerrainNonIndexedFallback";
 const WEBGPU_POST_EXPOSURE = 1.0;
 const DEFAULT_ALPHA = 1.0;
 const VIGNETTE_SCALE = 1.6;
+const LUMA_WEIGHTS = [0.2126, 0.7152, 0.0722] as const;
 
 type TslAny = any;
 type NumericUniform = { value: number };
@@ -118,12 +127,19 @@ export class WebGpuPostProcessPipeline {
   private scene: THREE.Scene;
   private camera: THREE.Camera;
   private firstCameraSync = true;
+  private lightingErrorReported = false;
   private readonly projectionInverse = new THREE.Matrix4();
+  private readonly colorScript: PostFxColorScript = DEFAULT_POSTFX_COLOR_SCRIPT;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
   private readonly uContrast = uniform(1.0) as unknown as NumericUniform;
   private readonly uSaturation = uniform(1.0) as unknown as NumericUniform;
   private readonly uVignette = uniform(0.0) as unknown as NumericUniform;
   private readonly uOpacity = uniform(1.0) as unknown as NumericUniform;
+  private readonly uWhiteBalance = uniform(new THREE.Vector3(1.0, 1.0, 1.0)) as unknown as VectorUniform;
+  private readonly uShadowTint = uniform(new THREE.Vector3(1.0, 1.0, 1.0)) as unknown as VectorUniform;
+  private readonly uHighlightTint = uniform(new THREE.Vector3(1.0, 1.0, 1.0)) as unknown as VectorUniform;
+  private readonly uShadowAmount = uniform(0.0) as unknown as NumericUniform;
+  private readonly uHighlightAmount = uniform(0.0) as unknown as NumericUniform;
   private readonly uAerialStart = uniform(120.0) as unknown as NumericUniform;
   private readonly uAerialEnd = uniform(1800.0) as unknown as NumericUniform;
   private readonly uAerialStrength = uniform(0.0) as unknown as NumericUniform;
@@ -140,6 +156,7 @@ export class WebGpuPostProcessPipeline {
     scene: THREE.Scene,
     camera: THREE.Camera,
     settings: Partial<PostProcessSettings> = {},
+    private readonly getLighting: (() => EnvironmentLighting) | null = null,
   ) {
     this.scene = scene;
     this.camera = camera;
@@ -175,6 +192,7 @@ export class WebGpuPostProcessPipeline {
       return;
     }
 
+    this.updateColorScriptUniforms();
     this.syncCameraUniforms(camera);
     const pipeline = this.ensurePipeline(scene, camera);
     try {
@@ -202,14 +220,37 @@ export class WebGpuPostProcessPipeline {
 
   private updateUniforms(): void {
     this.uExposure.value = this.settings.exposure;
-    this.uContrast.value = this.settings.contrast;
-    this.uSaturation.value = this.settings.saturation;
     this.uVignette.value = this.settings.vignette;
     this.uOpacity.value = this.settings.opacity;
     this.uAerialStart.value = this.settings.aerialPerspectiveStart;
     this.uAerialEnd.value = this.settings.aerialPerspectiveEnd;
     this.uAerialStrength.value = this.settings.aerialPerspectiveStrength;
     this.uAerialColor.value.set(...this.settings.aerialPerspectiveColor);
+    this.updateColorScriptUniforms();
+  }
+
+  private updateColorScriptUniforms(): void {
+    const grade = this.resolveGrade();
+    this.uContrast.value = this.settings.contrast * grade.contrast;
+    this.uSaturation.value = this.settings.saturation * grade.saturation;
+    this.uWhiteBalance.value.set(...grade.whiteBalance);
+    this.uShadowTint.value.set(...grade.shadowTint);
+    this.uHighlightTint.value.set(...grade.highlightTint);
+    this.uShadowAmount.value = grade.shadowAmount;
+    this.uHighlightAmount.value = grade.highlightAmount;
+  }
+
+  private resolveGrade(): PostFxGradeParams {
+    if (!this.getLighting) return DEFAULT_POSTFX_GRADE;
+    try {
+      return gradeForLighting(this.getLighting(), this.colorScript);
+    } catch (error) {
+      if (!this.lightingErrorReported) {
+        this.lightingErrorReported = true;
+        console.warn("[webgpu-post] failed to read lighting for color script; using default grade", error);
+      }
+      return DEFAULT_POSTFX_GRADE;
+    }
   }
 
   private ensurePipeline(scene: THREE.Scene, camera: THREE.Camera): RenderPipeline {
@@ -301,10 +342,20 @@ export class WebGpuPostProcessPipeline {
     const uSaturation = this.uSaturation as unknown as TslAny;
     const uVignette = this.uVignette as unknown as TslAny;
     const uOpacity = this.uOpacity as unknown as TslAny;
+    const uWhiteBalance = this.uWhiteBalance as unknown as TslAny;
+    const uShadowTint = this.uShadowTint as unknown as TslAny;
+    const uShadowAmount = this.uShadowAmount as unknown as TslAny;
+    const uHighlightTint = this.uHighlightTint as unknown as TslAny;
+    const uHighlightAmount = this.uHighlightAmount as unknown as TslAny;
 
     return Fn((): TslAny => {
-      const exposed = postRgb.mul(uExposure);
-      const contrasted = exposed.sub(0.5).mul(uContrast).add(0.5);
+      const balanced = postRgb.mul(uExposure).mul(vec3(uWhiteBalance));
+      const luma = dot(balanced, vec3(...LUMA_WEIGHTS));
+      const shadowMask = smoothstep(0.45, 0.08, luma).mul(uShadowAmount);
+      const shadowed = mix(balanced, balanced.mul(vec3(uShadowTint)), shadowMask);
+      const highlightMask = smoothstep(0.35, 0.95, luma).mul(uHighlightAmount);
+      const tinted = mix(shadowed, shadowed.mul(vec3(uHighlightTint)), highlightMask);
+      const contrasted = tinted.sub(0.5).mul(uContrast).add(0.5);
       const saturated = mix(vec3(luminance(contrasted)), contrasted, uSaturation);
       const center = screenUV.sub(0.5);
       const vignette = clamp(float(1).sub(dot(center, center).mul(uVignette).mul(VIGNETTE_SCALE)), 0, 1);
