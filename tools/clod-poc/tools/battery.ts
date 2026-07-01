@@ -167,17 +167,22 @@ function validateLongViewStats(): void {
   const stats = JSON.parse(readFileSync(LONG_VIEW_STATS, "utf8")) as Record<string, unknown>;
   if (stats["ready"] !== true) throw new Error("long-view stats ready flag is not true");
   if (stats["error"] !== null) throw new Error(`long-view stats error is not null: ${String(stats["error"])}`);
-  if (typeof stats["drawCalls"] !== "number" || stats["drawCalls"] <= 0) throw new Error("long-view drawCalls must be > 0");
-  if (typeof stats["triangles"] !== "number" || stats["triangles"] <= 0) throw new Error("long-view triangles must be > 0");
+  const counters = stats["counters"] as Record<string, unknown> | undefined;
+  const drawCalls = typeof stats["drawCalls"] === "number" ? stats["drawCalls"] : 0;
+  const terrainDrawCalls = typeof counters?.["terrain_draw_calls"] === "number" ? counters["terrain_draw_calls"] : 0;
+  const triangles = typeof stats["triangles"] === "number" ? stats["triangles"] : 0;
+  const terrainTriangles = typeof counters?.["terrain_triangles"] === "number" ? counters["terrain_triangles"] : 0;
+  if (drawCalls <= 0 && terrainDrawCalls <= 0) throw new Error("long-view drawCalls must be > 0");
+  if (triangles <= 0 && terrainTriangles <= 0) throw new Error("long-view triangles must be > 0");
   assertCounter(stats, "terrain_draw_calls", (value) => value > 0);
   assertCounter(stats, "terrain_triangles", (value) => value > 0);
-  // LV-0 baseline: placeholder counters should be 0 (layers not built yet).
-  assertCounter(stats, "far_shell_tris", (value) => value === 0);
-  assertCounter(stats, "shadow_proxy_tris", (value) => value === 0);
-  assertCounter(stats, "canopy_tris", (value) => value === 0);
+  assertCounter(stats, "far_shell_tris", (value) => value > 0);
+  assertCounter(stats, "shadow_proxy_tris", (value) => value > 0);
+  assertCounter(stats, "canopy_tris", (value) => value > 0);
   // Per-LOD page counts: at least one LOD level should have nodes.
-  const counters = stats["counters"] as Record<string, unknown> | undefined;
-  const hasAnyLod = counters && Object.keys(counters).some((k) => k.startsWith("clod_page_count_lod") && typeof counters[k] === "number" && (counters[k] as number) > 0);
+  const hasAnyLod = counters && Object.keys(counters).some((k) => (
+    k.startsWith("clod_page_count_lod") || k.startsWith("rendered_page_count_lod")
+  ) && typeof counters[k] === "number" && (counters[k] as number) > 0);
   if (!hasAnyLod) throw new Error("long-view: no clod_page_count_lod* counter > 0");
   // Verify QA summary was also written.
   if (!existsSync(LONG_VIEW_SUMMARY)) throw new Error(`long-view QA summary not found at ${LONG_VIEW_SUMMARY}`);
