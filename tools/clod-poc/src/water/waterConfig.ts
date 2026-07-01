@@ -10,6 +10,14 @@ import {
   type HydrologyConfig,
 } from "./hydrologyConfig.js";
 import { DEFAULT_CAUSTICS_CONFIG, type CausticsConfig } from "./causticsConfig.js";
+import { isWaterDebugModeId, riverHasValidPoints } from "./water_config_guards.js";
+import {
+  readBoolean,
+  readColorTuple,
+  readNumber,
+  readNumberArray,
+  readNumberTuple,
+} from "./water_config_readers.js";
 
 /** Debug render modes for the water material. */
 export const WATER_DEBUG_MODES = {
@@ -266,37 +274,6 @@ export function cloneWaterConfig(config: WaterConfig = DEFAULT_WATER_CONFIG): Wa
   };
 }
 
-function readNumber(value: unknown, fallback: number): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  return fallback;
-}
-
-function readBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
-}
-
-function readNumberTuple(value: unknown, fallback: [number, number]): [number, number] {
-  if (Array.isArray(value) && value.length >= 2) {
-    return [readNumber(value[0], fallback[0]), readNumber(value[1], fallback[1])];
-  }
-  return [...fallback] as [number, number];
-}
-
-function readColorTuple(value: unknown, fallback: [number, number, number]): [number, number, number] {
-  if (Array.isArray(value) && value.length >= 3) {
-    return [readNumber(value[0], fallback[0]), readNumber(value[1], fallback[1]), readNumber(value[2], fallback[2])];
-  }
-  return [...fallback] as [number, number, number];
-}
-
-function readNumberArray(value: unknown, fallback: number[]): number[] {
-  if (Array.isArray(value)) {
-    const numbers = value.map((entry, index) => readNumber(entry, fallback[index] ?? 0));
-    return numbers.length > 0 ? numbers : [...fallback];
-  }
-  return [...fallback];
-}
-
 function readLakeBody(value: unknown, fallback: LakeBodyConfig): LakeBodyConfig {
   const record = (value ?? {}) as Record<string, unknown>;
   const centerNorm = record.center_norm ?? record.centerNorm;
@@ -522,17 +499,8 @@ export function parseWaterConfigYaml(source: string): WaterConfig {
   };
 }
 
-function isWaterDebugModeId(value: unknown): value is WaterDebugModeId {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 14;
-}
-
 function warnWater(message: string, warn?: ((message: string) => void) | null): void {
   warn?.(`[water-config] ${message}`);
-}
-
-function riverHasValidPoints(river: RiverBodyConfig): boolean {
-  if (river.points.length >= 2) return true;
-  return (river.pointsNorm?.length ?? 0) >= 2;
 }
 
 function runtimeSearchParams(): URLSearchParams | null {
