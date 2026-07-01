@@ -19,6 +19,7 @@ Drusniel is not missing all of Fable5's tree ideas. It already has many of the r
 - Tree density, spacing, ring-size, GPU-visible, and shadow-LOD quality presets.
 - Crown proxy geometry for far/impostor GPU tree shadow casters.
 - Runtime labels that expose whether trees are using `gpu-ring`, `cpu-patches`, `fallback-cpu`, `unsupported`, or `error`.
+- A reusable local capture template at `docs/perf/tree-preset-capture-template.md`.
 
 Fable5 is still ahead because its vegetation pipeline is GPU-first end to end. It scatters, culls, compacts, classifies LODs, and writes indirect draw counts on the GPU during normal rendering. Drusniel now requests the GPU tree ring from presets, but the CPU patch path still exists as fallback/debug, and the current work still needs local typecheck/build plus browser validation.
 
@@ -301,37 +302,29 @@ Shadow-budget URLs:
 ?quality=ultra&treeShadowMaxLod=far
 ```
 
-Metrics to record:
+The reusable output template is now in:
 
-| Metric | Source | Why it matters |
-|---|---|---|
-| runtime path | overlay / GUI | Must show `gpu-ring` for GPU tests. |
-| FPS or frame ms | browser perf overlay / profiler | Main user-visible result. |
-| tree GPU dispatch ms | tree GUI when counts enabled | Shows compute cost. |
-| candidates / accepted / visible | tree GUI when counts enabled | Shows scatter and cull volume. |
-| shadow caster count | tree GUI when counts enabled | Shows shadow budget impact. |
-| shadow overflow | tree GUI | Must stay false. |
-| total trees / counts off | overlay | Confirms readback mode. |
-| near/mid/far/impostor | overlay / GUI | Confirms preset LOD distribution. |
-| GPU memory if available | browser / OS tool | Checks impostor and buffer pressure. |
-| visible artifacts | manual note | Missing trees, popping, bad shadows, shader errors. |
+```text
+docs/perf/tree-preset-capture-template.md
+```
 
-Capture table template:
+### Done: local tree perf capture output format
 
-| Commit | URL | Runtime path | FPS / frame ms | Dispatch ms | Candidates | Accepted | Visible | Shadow | Shadow overflow | Notes |
-|---|---|---|---:|---:|---:|---:|---:|---:|---|---|
-| TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+Added `docs/perf/tree-preset-capture-template.md`.
 
-Acceptance rules:
+The template includes:
 
-- `quality=perf&treeGpu=1` must show `gpu-ring`, not `cpu-patches` or `fallback-cpu`.
-- `quality=perf&treeGpu=0` must show `cpu-patches` or a CPU fallback path.
-- Normal preset URLs must show `counts=off` for GPU ring unless a count/debug flag is present.
-- `perf` must reduce active tree work compared with `ultra`.
-- `potato` must have the lowest tree/shadow cost.
-- `treeShadowMaxLod=none` must report zero shadow casters when counts are enabled.
-- `treeShadowMaxLod=near` must have fewer shadow casters than `mid` or `far` in a dense forest view.
-- No preset should introduce missing near-camera trees, broken shadows, or shader compile errors.
+- capture metadata
+- scene setup
+- preflight checks
+- primary preset results
+- debug-count results
+- CPU fallback control results
+- shadow-budget results
+- CPU/GPU validation run
+- visual artifact notes
+- decision summary
+- follow-up actions
 
 ## Code Health Findings
 
@@ -466,12 +459,12 @@ Performance checks:
 Suggested commit title:
 
 ```text
-Add local tree perf capture output format
+Measure tree preset GPU path locally
 ```
 
 Likely files:
 
-- `docs/plans/fable5-tree-performance-gap-plan.md`
-- optional `docs/perf/` capture template if real measured data is recorded
+- `docs/perf/tree-preset-capture-template.md` copied to a dated measured result file
+- optional preset tuning files if the measured data shows clear issues
 
 Do not start with a new visual tree effect. The biggest remaining tree win is proving that the GPU path is actually active and measuring the preset impact in the running app.
