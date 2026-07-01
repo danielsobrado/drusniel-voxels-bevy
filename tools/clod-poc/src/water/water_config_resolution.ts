@@ -1,4 +1,4 @@
-import type { WaterConfig } from "./waterConfig.js";
+import type { WaterConfig } from "./water_config_types.js";
 
 export type CloneWaterConfig = (config: WaterConfig) => WaterConfig;
 
