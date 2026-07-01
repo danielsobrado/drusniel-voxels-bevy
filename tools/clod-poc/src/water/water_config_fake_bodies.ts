@@ -1,4 +1,4 @@
-import type { LakeBodyConfig, RiverBodyConfig, WaterConfig } from "./waterConfig.js";
+import type { LakeBodyConfig, RiverBodyConfig, WaterConfig } from "./water_config_types.js";
 import { readBoolean, readNumber, readNumberTuple, recordFrom } from "./water_config_readers.js";
 
 export function readFakeBodiesConfig(value: unknown, defaults: WaterConfig["fakeBodies"]): WaterConfig["fakeBodies"] {
