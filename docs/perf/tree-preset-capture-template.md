@@ -52,7 +52,9 @@ Browser checks:
 - Confirm no WebGPU initialization errors.
 - Confirm the overlay or lil-gui tree summary is visible.
 - Confirm camera and scene are stable before recording.
-- Use `trees (props) > log perf snapshot` after each run and paste the console output into the matching notes cell or snapshot block.
+- Use `trees (props) > log perf snapshot` after each run.
+- Paste the `Capture Table Row` line into the matching table when it has the same columns.
+- Paste the full console output into `Snapshot Blocks` when you need complete settings.
 
 ## Primary Preset Results
 
@@ -75,6 +77,8 @@ Expected:
 ## Debug Count Results
 
 Use these runs only for measurement detail. These are not normal gameplay settings because they enable readback.
+
+The `Capture Table Row` from the console matches this table shape.
 
 | URL | Runtime path | FPS | Frame ms | Dispatch ms | Candidates | Accepted | Visible | Shadow casters | Shadow overflow | Notes |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
@@ -109,6 +113,8 @@ Expected:
 
 Use these to prove `treeShadowMaxLod` changes the GPU shadow workload.
 
+The `Capture Table Row` from the console also works here. Ignore the accepted/visible columns if you only care about shadow cost.
+
 | URL | Runtime path | FPS | Frame ms | Dispatch ms | Shadow casters | Shadow overflow | Visual shadow notes |
 |---|---|---:|---:|---:|---:|---|---|
 | `?quality=perf&treeGpu=1&treeGpuCounts=1&treeShadowMaxLod=none` | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
@@ -138,7 +144,7 @@ Expected:
 
 ## Snapshot Blocks
 
-Paste selected `log perf snapshot` console outputs here.
+Paste selected full `log perf snapshot` console outputs here.
 
 ```text
 TODO
