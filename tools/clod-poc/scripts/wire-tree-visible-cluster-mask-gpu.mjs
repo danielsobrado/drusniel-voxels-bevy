@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
+const dryRun = process.argv.includes("--dry-run") || process.argv.includes("--check");
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 
@@ -129,12 +130,12 @@ function applyEdit(edit) {
   const source = readFileSync(edit.path, "utf8");
   if (source.includes(edit.done)) return { name: edit.name, status: "already-applied" };
   if (!source.includes(edit.needle)) return { name: edit.name, status: "missing-anchor" };
-  writeFileSync(edit.path, source.replace(edit.needle, edit.replacement));
-  return { name: edit.name, status: "applied" };
+  if (!dryRun) writeFileSync(edit.path, source.replace(edit.needle, edit.replacement));
+  return { name: edit.name, status: dryRun ? "would-apply" : "applied" };
 }
 
 const results = edits.map(applyEdit);
-console.log(JSON.stringify(results, null, 2));
+console.log(JSON.stringify({ dryRun, results }, null, 2));
 
 if (results.some((result) => result.status === "missing-anchor")) {
   process.exitCode = 1;
