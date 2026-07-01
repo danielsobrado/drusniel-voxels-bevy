@@ -5,6 +5,7 @@ import {
   If,
   clamp,
   dot,
+  exp2,
   float,
   getScreenPosition,
   getViewPosition,
@@ -119,6 +120,182 @@ export function createGtaoPostProcessNode(input: GtaoNodeInput): TslAny {
       result.assign(tslMix(float(1), litAo, farFade));
     });
     return clamp(result, 0, 1);
+  })();
+}
+
+export interface GtaoHalfResLayerInput {
+  depthTex: TslAny;
+  projectionInverse: TslAny;
+  strength: TslAny;
+  radius: TslAny;
+  fadeEnd: TslAny;
+  depthBias: TslAny;
+  depthTolerance: TslAny;
+  minUvRadius: TslAny;
+  maxUvRadius: TslAny;
+  samples: number;
+}
+
+/**
+ * Raw ambient occlusion for the merged half-res pass. Same horizon gather as the
+ * full-res node, but it emits only the occlusion term (no distance fade, no
+ * direct-light reduction) — those belong to the bilateral upsample that reads
+ * this attachment back at full resolution. The attachment is single-channel, so
+ * the value is written to `.x`.
+ */
+export function createGtaoHalfResLayerNode(input: GtaoHalfResLayerInput): TslAny {
+  return Fn((): TslAny => {
+    const result = float(1).toVar();
+    const depth = input.depthTex.x;
+    const isSky = depth.lessThanEqual(1e-7).or(depth.greaterThanEqual(0.9999999));
+    const viewPosition = getViewPosition(screenUV, depth, input.projectionInverse) as TslAny;
+    const distance = viewPosition.length();
+    If(isSky.not().and(distance.lessThan(input.fadeEnd)), () => {
+      const radiusUv = clamp(input.radius.div(distance.max(0.0001)), input.minUvRadius, input.maxUvRadius);
+      const occlusionSum = float(0).toVar();
+      const weightSum = float(0).toVar();
+      for (let tap = 0; tap < input.samples; tap++) {
+        const angle = tap * GTAO_GOLDEN_ANGLE + 0.35;
+        const radius = Math.sqrt((tap + 0.5) / input.samples);
+        const uvSample = screenUV.add(vec2(Math.cos(angle), Math.sin(angle)).mul(radiusUv).mul(radius));
+        const inFrame = uvSample.x
+          .greaterThan(0.001)
+          .and(uvSample.x.lessThan(0.999))
+          .and(uvSample.y.greaterThan(0.001))
+          .and(uvSample.y.lessThan(0.999));
+        const sampleDepth = texture(input.depthTex.value, uvSample).x;
+        const sampleSky = sampleDepth.lessThanEqual(1e-7).or(sampleDepth.greaterThanEqual(0.9999999));
+        const sampleView = getViewPosition(uvSample, sampleDepth, input.projectionInverse) as TslAny;
+        const sampleCloser = sampleView.z.sub(viewPosition.z).greaterThan(input.depthBias);
+        const sameSurface = smoothstep(input.depthTolerance, input.depthBias, sampleView.sub(viewPosition).length());
+        const support = inFrame.and(sampleSky.not()).and(sampleCloser).select(float(1), float(0));
+        occlusionSum.addAssign(sameSurface.mul(support));
+        weightSum.addAssign(inFrame.and(sampleSky.not()).select(float(1), float(0)));
+      }
+      result.assign(float(1).sub(occlusionSum.div(weightSum.max(1e-3)).mul(input.strength)));
+    });
+    return vec4(clamp(result, 0, 1), 0, 0, 1);
+  })();
+}
+
+export interface GtaoUpsampleInput {
+  aoTex: TslAny;
+  depthTex: TslAny;
+  beautyRgb: TslAny;
+  projectionInverse: TslAny;
+  fadeStart: TslAny;
+  fadeEnd: TslAny;
+}
+
+/**
+ * Joint-bilateral upsample of the half-res AO, guided by full-res depth. Plain
+ * bilinear at half resolution streaks on grazing terrain; weighting the four
+ * half-res taps by view-depth similarity restores the near-field contact
+ * darkening. A gated fallback prevents the horizon-black collapse: when every
+ * tap is rejected (a half-res texel spans tens of metres of depth on grazing
+ * slopes) the weighted result would fabricate ao=0, so support-free pixels fall
+ * back to the plain average. Distance fade and an indirect-only reduction on
+ * sun-lit pixels are applied here rather than in the half-res layer.
+ */
+export function createGtaoBilateralUpsampleNode(input: GtaoUpsampleInput): TslAny {
+  return Fn((): TslAny => {
+    const viewC = getViewPosition(screenUV, input.depthTex.x, input.projectionInverse) as TslAny;
+    const dist = viewC.length();
+    const farK = smoothstep(input.fadeStart, input.fadeEnd, dist);
+    const directK = smoothstep(
+      GTAO_DIRECT_LIGHT_LUMA_START,
+      GTAO_DIRECT_LIGHT_LUMA_END,
+      luminance(input.beautyRgb),
+    ).mul(GTAO_DIRECT_LIGHT_REDUCTION);
+    const halfTexel = vec2(1).div(screenSize.mul(0.5));
+    const zC = viewC.z;
+    const acc = float(0).toVar();
+    const avg = float(0).toVar();
+    const wsum = float(1e-4).toVar();
+    for (const [ox, oy] of [
+      [-0.5, -0.5],
+      [0.5, -0.5],
+      [-0.5, 0.5],
+      [0.5, 0.5],
+    ] as const) {
+      const uvi = screenUV.add(halfTexel.mul(vec2(ox, oy)));
+      const ai = (input.aoTex.sample(uvi) as TslAny).x;
+      const zi = (getViewPosition(uvi, (input.depthTex.sample(uvi) as TslAny).x, input.projectionInverse) as TslAny).z;
+      const w = exp2(zi.sub(zC).abs().mul(-3.5));
+      acc.addAssign(ai.mul(w));
+      avg.addAssign(ai);
+      wsum.addAssign(w);
+    }
+    const aoRaw = tslMix(avg.mul(0.25), acc.div(wsum), smoothstep(0.002, 0.02, wsum));
+    return tslMix(tslMix(aoRaw, float(1), directK), float(1), farK);
+  })();
+}
+
+export interface BounceHalfResLayerInput {
+  beauty: TslAny;
+  depthTex: TslAny;
+  projectionInverse: TslAny;
+  radius: TslAny;
+  maxDistance: TslAny;
+  depthTolerance: TslAny;
+  minUvRadius: TslAny;
+  maxUvRadius: TslAny;
+  taps: number;
+}
+
+/**
+ * Half-res screen-space bounce gather. Emits the depth-gated neighbourhood
+ * radiance (rgb) and its accumulated weight (a); the full-res composite adds it
+ * back modulated by the receiver's chroma.
+ */
+export function createBounceHalfResLayerNode(input: BounceHalfResLayerInput): TslAny {
+  return Fn((): TslAny => {
+    const result = vec4(0).toVar();
+    const depth = input.depthTex.x;
+    const isSky = depth.lessThanEqual(1e-7).or(depth.greaterThanEqual(0.9999999));
+    const viewPosition = getViewPosition(screenUV, depth, input.projectionInverse) as TslAny;
+    const distance = viewPosition.length();
+    If(isSky.not().and(distance.lessThan(input.maxDistance)), () => {
+      const radiusUv = clamp(input.radius.div(distance.max(0.0001)), input.minUvRadius, input.maxUvRadius);
+      const sum = vec3(0).toVar();
+      const weightSum = float(0).toVar();
+      for (let tap = 0; tap < input.taps; tap++) {
+        const angle = tap * BOUNCE_GOLDEN_ANGLE + 0.7;
+        const radius = Math.sqrt((tap + 0.5) / input.taps);
+        const uvSample = screenUV.add(vec2(Math.cos(angle), Math.sin(angle)).mul(radiusUv).mul(radius));
+        const inFrame = uvSample.x
+          .greaterThan(0.001)
+          .and(uvSample.x.lessThan(0.999))
+          .and(uvSample.y.greaterThan(0.001))
+          .and(uvSample.y.lessThan(0.999));
+        const depthSample = texture(input.depthTex.value, uvSample).x;
+        const sampleSky = depthSample.lessThanEqual(1e-7).or(depthSample.greaterThanEqual(0.9999999));
+        const sampleView = getViewPosition(uvSample, depthSample, input.projectionInverse) as TslAny;
+        const support = smoothstep(input.depthTolerance, 0.05, sampleView.sub(viewPosition).length())
+          .mul(inFrame.and(sampleSky.not()).select(float(1), float(0)));
+        sum.addAssign(texture(input.beauty.value, uvSample).rgb.mul(support));
+        weightSum.addAssign(support);
+      }
+      result.assign(vec4(sum.div(weightSum.max(1e-3)), weightSum.div(input.taps)));
+    });
+    return result;
+  })();
+}
+
+export interface BounceCompositeInput {
+  sourceRgb: TslAny;
+  bounceTex: TslAny;
+  strength: TslAny;
+}
+
+/** Adds the half-res bounce gather back, modulated by the receiver's chroma. */
+export function createBounceCompositeNode(input: BounceCompositeInput): TslAny {
+  return Fn((): TslAny => {
+    const receiverLum = luminance(input.sourceRgb).add(0.25);
+    const receiverTint = input.sourceRgb.div(receiverLum);
+    return input.sourceRgb.add(
+      input.bounceTex.rgb.mul(receiverTint).mul(input.bounceTex.a).mul(input.strength),
+    );
   })();
 }
 

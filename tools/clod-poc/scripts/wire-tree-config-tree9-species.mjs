@@ -1,9 +1,14 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const defaultPath = resolve(here, "../src/trees/tree_config.ts");
+const splitConfigPaths = [
+  resolve(here, "../src/trees/tree_config_types.ts"),
+  resolve(here, "../src/trees/tree_config_defaults.ts"),
+  resolve(here, "../src/trees/tree_config_parsing.ts"),
+];
 
 const edits = [
   {
@@ -81,8 +86,12 @@ export function wireTreeConfigTree9Source(input) {
 }
 
 export function wireTreeConfigTree9File(path = defaultPath, options = {}) {
-  const result = wireTreeConfigTree9Source(readFileSync(path, "utf8"));
-  if (!options.dryRun && result.changed) writeFileSync(path, result.source, "utf8");
+  const input = readTreeConfigInput(path);
+  const result = wireTreeConfigTree9Source(input.source);
+  if (!options.dryRun && result.changed) {
+    if (!input.writePath) throw new Error("Cannot rewrite split tree config sources with the legacy monolithic patcher.");
+    writeFileSync(input.writePath, result.source, "utf8");
+  }
   return result;
 }
 
@@ -126,7 +135,27 @@ function isCurrentSixSpeciesConfig(source) {
     "export interface TreeSpeciesMorphologySettings",
     "export interface TreeSpeciesZoneSettings",
     "spruce: species(0.09, 20, 64, 10.5, 0.32, 3.0",
-    "for (const id of TREE_SPECIES) species[id] = parseSpeciesSettings(speciesRoot[id], fallback.species[id]);",
-    "for (const id of TREE_SPECIES) speciesZones[id] = parseSpeciesZone(zonesRoot[id], fallback.ecology.speciesZones[id]);",
+    "for (const id of TREE_SPECIES) species[id] = parseSpeciesSettings(root[id], fallback.species[id]);",
+    "for (const id of TREE_SPECIES) speciesZones[id] = parseSpeciesZone(root[id], fallback.ecology.speciesZones[id]);",
   ].every((marker) => source.includes(marker));
+}
+
+function readTreeConfigInput(path) {
+  const source = readFileSync(path, "utf8");
+  if (resolve(path) === defaultPath && isTreeConfigBarrel(source) && splitConfigPaths.every((candidate) => existsSync(candidate))) {
+    return {
+      source: splitConfigPaths.map((candidate) => readFileSync(candidate, "utf8")).join("\n"),
+      writePath: null,
+    };
+  }
+  return { source, writePath: path };
+}
+
+function isTreeConfigBarrel(source) {
+  const normalized = source.replace(/\r\n/g, "\n").trim();
+  return [
+    `export * from "./tree_config_types.js";`,
+    `export * from "./tree_config_defaults.js";`,
+    `export * from "./tree_config_parsing.js";`,
+  ].every((line) => normalized.includes(line));
 }

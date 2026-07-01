@@ -112,6 +112,39 @@ function ms(value: number): string {
   return value.toFixed(2);
 }
 
+/** Per-pass GPU ms collected by the profiler (label → avg ms), if the run resolved timestamps. */
+function passMs(snapshot: any, label: string): number {
+  const passes = snapshot?.counters?.gpuPassesAvg as Record<string, number> | undefined;
+  return Number(passes?.[label] ?? 0);
+}
+
+/** Named postfx GPU passes surfaced as their own rows (POSTFX-801). */
+const POSTFX_PASS_COLUMNS: readonly { header: string; label: string }[] = [
+  { header: "scene ms", label: "r.postfxScene" },
+  { header: "autoExp ms", label: "c.autoExposure" },
+  { header: "froxScatter ms", label: "c.postfxFroxelScatter" },
+  { header: "froxIntegrate ms", label: "c.postfxFroxelIntegrate" },
+  { header: "render total ms", label: "render" },
+  { header: "compute total ms", label: "compute" },
+];
+
+function perPassMarkdown(results: readonly PerfCaseResult[]): string[] {
+  const header = POSTFX_PASS_COLUMNS.map((column) => column.header).join(" | ");
+  const divider = POSTFX_PASS_COLUMNS.map(() => "---:").join(" | ");
+  const lines = [
+    "## Per-pass GPU ms (avg; 0 when the run did not resolve timestamps — e.g. software adapters)",
+    "",
+    `| case | ${header} |`,
+    `| --- | ${divider} |`,
+  ];
+  for (const result of results) {
+    const cells = POSTFX_PASS_COLUMNS.map((column) => ms(passMs(result.snapshot, column.label))).join(" | ");
+    lines.push(`| ${result.name} | ${cells} |`);
+  }
+  lines.push("");
+  return lines;
+}
+
 function markdown(results: readonly PerfCaseResult[]): string {
   const lines = [
     "# clod-poc WebGPU postfx perf matrix",
@@ -130,6 +163,7 @@ function markdown(results: readonly PerfCaseResult[]): string {
     );
   }
   lines.push("");
+  lines.push(...perPassMarkdown(results));
   lines.push("Run with a deterministic camera/seed and compare deltas between `postfx-off`, `postfx-postmin`, ablated cases, and opt-in heavy stages.");
   lines.push("");
   return `${lines.join("\n")}\n`;

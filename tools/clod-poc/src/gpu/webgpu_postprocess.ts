@@ -13,6 +13,7 @@ import {
   createExtendedHeightTexture,
   type TerrainSummaryField,
 } from "../clod/terrain_summary.js";
+import { tagGpu } from "../core/gpu_profiler.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import {
   toneMappingModeToThree,
@@ -61,13 +62,18 @@ import {
   withPostProcessDefaults,
 } from "./webgpu_postprocess_config.js";
 import {
+  createBounceCompositeNode,
+  createBounceHalfResLayerNode,
   createBouncePostProcessNode,
   createContactShadowPostProcessNode,
   createGradePostProcessNode,
+  createGtaoBilateralUpsampleNode,
+  createGtaoHalfResLayerNode,
   createGtaoPostProcessNode,
   createTraaPostProcessNode,
   type TslAny,
 } from "./webgpu_postprocess_nodes.js";
+import { HalfResMrtNode, type HalfResEntry } from "./postfx_half_res_mrt.js";
 import {
   convertVisibleTerrainMeshesToNonIndexed,
   isSetIndexBufferError,
@@ -115,6 +121,7 @@ export class WebGpuPostProcessPipeline {
   private firstCameraSync = true;
   private lightingErrorReported = false;
   private froxelVolume: PostFxFroxelVolume | null = null;
+  private halfResPass: HalfResMrtNode | null = null;
   private froxelTerrainInput: PostFxFroxelVolumeTerrainInput | null = null;
   private froxelCloudShadow: PostFxCloudShadowTexture | null = null;
   private hillaireLuts: PostFxHillaireLuts | null = null;
@@ -129,6 +136,7 @@ export class WebGpuPostProcessPipeline {
   private readonly froxelsEnabled: boolean;
   private readonly froxelDebugMode: PostFxFroxelDebugMode;
   private readonly gtaoEnabled: boolean;
+  private readonly halfResEnabled: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
   private readonly uContrast = uniform(1.0) as unknown as NumericUniform;
   private readonly uSaturation = uniform(1.0) as unknown as NumericUniform;
@@ -187,6 +195,9 @@ export class WebGpuPostProcessPipeline {
     this.froxelsEnabled = this.stageEnabled("froxels") && queryFlag(["froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog"], this.atmosphere.froxels.enabled);
     this.froxelDebugMode = parsePostFxFroxelDebugMode(queryValue(["froxelDebug", "froxelsDebug", "volumetricDebug", "volumetricsDebug"]));
     this.gtaoEnabled = this.stageEnabled("gtao") && queryFlag(["gtao", "ao", "ambientOcclusion", "ambientocclusion"], this.gtao.enabled);
+    // Merged half-res screen-space pass for GTAO + bounce. Full-res is the
+    // fallback when disabled (?halfres=0) — quality parity, higher cost.
+    this.halfResEnabled = queryFlag(["halfres", "halfResScreenSpace", "halfresscreenspace"], true);
     if (this.shouldUseFroxelVolume()) {
       this.froxelVolume = new PostFxFroxelVolume(this.atmosphere, { terrain: this.ensureFroxelTerrainInput() });
     }
@@ -260,6 +271,7 @@ export class WebGpuPostProcessPipeline {
       this.froxelsEnabled ? "froxels" : "no-froxels",
       `froxel-debug-${this.froxelDebugMode}`,
       this.gtaoEnabled ? "gtao" : "no-gtao",
+      this.halfResEnabled ? "halfres" : "fullres",
     ].join("|");
   }
 
@@ -397,7 +409,16 @@ export class WebGpuPostProcessPipeline {
   }
 
   private createPipeline(scene: THREE.Scene, camera: THREE.Camera): RenderPipeline {
-    const scenePass = pass(scene, camera);
+    // Single-sample scene pass. The renderer requests MSAA for the direct
+    // render path, but a multisampled depth attachment cannot be copy-resolved
+    // into the single-sample depth target that the aerial/froxel/temporal nodes
+    // sample — it raises a sample-count mismatch on copyTextureToTexture. The
+    // temporal resolve provides anti-aliasing for this pass instead, so the
+    // scene pass is forced to one sample here.
+    const scenePass = pass(scene, camera, { samples: 0 });
+    // Per-pass GPU timing label; the profiler tags the render target so the
+    // scene pass shows up as its own `r.postfxScene` row.
+    tagGpu(scenePass.renderTarget as object, "postfxScene");
     scenePass.setMRT(mrt({ output }));
     const beauty = scenePass.getTextureNode("output") as TslAny;
     const depthTex = scenePass.getTextureNode("depth") as TslAny;
@@ -420,8 +441,17 @@ export class WebGpuPostProcessPipeline {
       ? this.createAerialNode(beauty.rgb, depthTex)
       : beauty.rgb;
     if (this.froxelDebugMode !== "off") return aerialRgb;
+    // GTAO and screen-space bounce share one merged half-res raster; the
+    // full-res nodes are the fallback when the half-res path is disabled.
+    const halfRes = this.halfResEnabled && (this.gtaoEnabled || this.bounceEnabled)
+      ? this.buildHalfResPass(beauty, depthTex)
+      : null;
     const aoRgb = this.gtaoEnabled
-      ? aerialRgb.mul(this.createGtaoNode(aerialRgb, depthTex))
+      ? aerialRgb.mul(
+          halfRes?.aoTex
+            ? this.createGtaoUpsampleNode(halfRes.aoTex, beauty.rgb, depthTex)
+            : this.createGtaoNode(aerialRgb, depthTex),
+        )
       : aerialRgb;
     const temporalColor = this.settings.taaEnabled && this.stageEnabled("taa")
       ? this.createTraaNode(aoRgb, depthTex, camera)
@@ -439,9 +469,70 @@ export class WebGpuPostProcessPipeline {
       ? bloomRgb.mul(this.createContactShadowNode(depthTex))
       : bloomRgb;
     const bounceRgb = this.bounceEnabled
-      ? this.createBounceNode(contactRgb, beauty, depthTex)
+      ? (halfRes?.bounceTex
+          ? createBounceCompositeNode({
+              sourceRgb: contactRgb,
+              bounceTex: halfRes.bounceTex,
+              strength: this.uBounceStrength as unknown as TslAny,
+            })
+          : this.createBounceNode(contactRgb, beauty, depthTex))
       : contactRgb;
     return this.createGradeNode(beauty.rgb, bounceRgb);
+  }
+
+  private buildHalfResPass(beauty: TslAny, depthTex: TslAny): { aoTex: TslAny | null; bounceTex: TslAny | null } {
+    const entries: HalfResEntry[] = [];
+    if (this.gtaoEnabled) {
+      entries.push({
+        name: "ao",
+        red: true,
+        node: createGtaoHalfResLayerNode({
+          depthTex,
+          projectionInverse: this.uProjectionInverse as unknown as TslAny,
+          strength: this.uGtaoStrength as unknown as TslAny,
+          radius: this.uGtaoRadius as unknown as TslAny,
+          fadeEnd: this.uGtaoFadeEnd as unknown as TslAny,
+          depthBias: this.uGtaoDepthBias as unknown as TslAny,
+          depthTolerance: this.uGtaoDepthTolerance as unknown as TslAny,
+          minUvRadius: this.uGtaoMinUvRadius as unknown as TslAny,
+          maxUvRadius: this.uGtaoMaxUvRadius as unknown as TslAny,
+          samples: this.gtao.samples,
+        }),
+      });
+    }
+    if (this.bounceEnabled) {
+      entries.push({
+        name: "bounce",
+        node: createBounceHalfResLayerNode({
+          beauty,
+          depthTex,
+          projectionInverse: this.uProjectionInverse as unknown as TslAny,
+          radius: this.uBounceRadius as unknown as TslAny,
+          maxDistance: this.uBounceMaxDistance as unknown as TslAny,
+          depthTolerance: this.uBounceDepthTolerance as unknown as TslAny,
+          minUvRadius: this.uBounceMinUvRadius as unknown as TslAny,
+          maxUvRadius: this.uBounceMaxUvRadius as unknown as TslAny,
+          taps: this.bounce.taps,
+        }),
+      });
+    }
+    if (entries.length === 0) return { aoTex: null, bounceTex: null };
+    this.halfResPass = new HalfResMrtNode(entries);
+    return {
+      aoTex: this.gtaoEnabled ? (this.halfResPass.getTextureNode("ao") as unknown as TslAny) : null,
+      bounceTex: this.bounceEnabled ? (this.halfResPass.getTextureNode("bounce") as unknown as TslAny) : null,
+    };
+  }
+
+  private createGtaoUpsampleNode(aoTex: TslAny, beautyRgb: TslAny, depthTex: TslAny): TslAny {
+    return createGtaoBilateralUpsampleNode({
+      aoTex,
+      depthTex,
+      beautyRgb,
+      projectionInverse: this.uProjectionInverse as unknown as TslAny,
+      fadeStart: this.uGtaoMaxDistance as unknown as TslAny,
+      fadeEnd: this.uGtaoFadeEnd as unknown as TslAny,
+    });
   }
 
   private createAerialNode(sourceRgb: TslAny, depthTex: TslAny): TslAny {
@@ -590,5 +681,7 @@ export class WebGpuPostProcessPipeline {
     this.pipeline = null;
     this.pipelineKey = "";
     this.autoExposureMeter.clearKernel();
+    this.halfResPass?.dispose();
+    this.halfResPass = null;
   }
 }

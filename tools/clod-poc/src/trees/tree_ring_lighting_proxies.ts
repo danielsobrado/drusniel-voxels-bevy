@@ -184,18 +184,6 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
     if (distance > ringLodParams.radius + ringLodParams.band) continue;
 
     const terrainHeight = sampler.surfaceHeight(x, z);
-    if (treeRingTerrainHiddenForValidation({
-      settings,
-      sampler,
-      centerX: options.centerX,
-      centerZ: options.centerZ,
-      cameraY: options.cameraY,
-      x,
-      z,
-      terrainHeight,
-      distance,
-    })) continue;
-
     const normalY = sampler.surfaceNormal(x, z)[1];
     const accept = treeAcceptMask(terrainHeight, normalY, x, z, acceptParams);
     if (treeRingValidationHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
@@ -213,6 +201,18 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
       shadowCascadePlanes: options.shadowCascadePlanes,
       maxShadowCastersPerGroup,
     });
+
+    if (treeRingTerrainHiddenForValidation({
+      settings,
+      sampler,
+      centerX: options.centerX,
+      centerZ: options.centerZ,
+      cameraY: options.cameraY,
+      x,
+      z,
+      terrainHeight,
+      distance,
+    })) continue;
 
     if (!treeRingPointInFrustum(x, terrainHeight + 4, z, 8, options.frustumPlanes)) continue;
     for (const lod of TREE_LODS) {
