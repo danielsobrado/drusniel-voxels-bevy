@@ -9,38 +9,41 @@ describe("postfx case diagnostics", () => {
     expect(diagnostics.stages.taa).toBe(true);
     expect(diagnostics.stages.aerial).toBe(true);
     expect(diagnostics.stages.contact).toBe(false);
+    expect(diagnostics.stages.froxels).toBe(false);
     expect(diagnostics.stages.gtao).toBe(false);
     expect(diagnostics.stages.bounce).toBe(false);
   });
 
   it("marks post disabled when fx is off", () => {
-    const diagnostics = postFxCaseDiagnostics({ fx: "0", contact: "1", gtao: "1", bounce: "1" });
+    const diagnostics = postFxCaseDiagnostics({ fx: "0", contact: "1", gtao: "1", bounce: "1", froxels: "1" });
     expect(diagnostics.postEnabled).toBe(false);
     expect(compactStageList(diagnostics)).toBe("off");
     expect(Object.values(diagnostics.stages).every((enabled) => !enabled)).toBe(true);
   });
 
   it("applies postmin and keeps only color script", () => {
-    const diagnostics = postFxCaseDiagnostics({ postmin: "1", contact: "1", gtao: "1", bounce: "1" });
+    const diagnostics = postFxCaseDiagnostics({ postmin: "1", contact: "1", gtao: "1", bounce: "1", froxels: "1" });
     expect(diagnostics.postMin).toBe(true);
     expect(diagnostics.stages.colorScript).toBe(true);
     expect(diagnostics.stages.bloom).toBe(false);
     expect(diagnostics.stages.taa).toBe(false);
     expect(diagnostics.stages.contact).toBe(false);
+    expect(diagnostics.stages.froxels).toBe(false);
     expect(diagnostics.stages.gtao).toBe(false);
     expect(diagnostics.stages.bounce).toBe(false);
   });
 
   it("applies ablation after opt-in flags", () => {
-    const diagnostics = postFxCaseDiagnostics({ contact: "1", gtao: "1", bounce: "1", ablate: "contact,ao,color-bounce" });
+    const diagnostics = postFxCaseDiagnostics({ contact: "1", gtao: "1", bounce: "1", froxels: "1", ablate: "contact,ao,color-bounce,volumetric-fog" });
     expect(diagnostics.stages.contact).toBe(false);
     expect(diagnostics.stages.gtao).toBe(false);
     expect(diagnostics.stages.bounce).toBe(false);
+    expect(diagnostics.stages.froxels).toBe(false);
     expect(diagnostics.stages.bloom).toBe(true);
   });
 
   it("prints a compact active stage list", () => {
-    const diagnostics = postFxCaseDiagnostics({ contact: "1", ablate: "bloom,taa" });
-    expect(compactStageList(diagnostics)).toBe("aerial+autoExposure+colorScript+contact");
+    const diagnostics = postFxCaseDiagnostics({ contact: "1", froxels: "1", ablate: "bloom,taa" });
+    expect(compactStageList(diagnostics)).toBe("aerial+autoExposure+colorScript+contact+froxels");
   });
 });
