@@ -1,0 +1,11 @@
+postfx_gtao:
+  enabled: false
+  samples: 8
+  radius_m: 1.6
+  strength: 0.55
+  max_distance_m: 700.0
+  fade_end_m: 1800.0
+  depth_bias_m: 0.05
+  depth_tolerance_m: 1.2
+  min_uv_radius: 0.002
+  max_uv_radius: 0.035
