@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TREE_SETTINGS, TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "./tree_config.js";
+import { DEFAULT_TREE_SETTINGS, TREE_SPECIES, type TreeLod } from "./tree_config.js";
 import {
   treeRingShadowCasterGroupCount,
   treeRingShadowCasterGroupIndex,
@@ -119,7 +119,7 @@ function validationSettings() {
 function shadowCountForLod(counts: readonly number[], lod: TreeLod): number {
   let total = 0;
   for (const species of TREE_SPECIES) {
-    for (let cascade = 0; cascade < 4; cascade++) total += counts[treeRingShadowCasterGroupIndex(species as TreeSpeciesId, lod, cascade)] ?? 0;
+    for (let cascade = 0; cascade < 4; cascade++) total += counts[treeRingShadowCasterGroupIndex(species, lod, cascade)] ?? 0;
   }
   return total;
 }
