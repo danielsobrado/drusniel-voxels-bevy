@@ -31,6 +31,11 @@ export interface TreeRingClusterVisibilityMask {
   reasonCounts: Record<VegetationVisibilityReason, number>;
 }
 
+interface ClusterProbe {
+  x: number;
+  z: number;
+}
+
 export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisibilityOptions): TreeRingClusterVisibilityMask {
   const grid = treeGpuRingGrid(options.settings);
   const clusterDimCells = Math.max(1, Math.floor(options.clusterDimCells ?? TREE_RING_CLUSTER_DIM_CELLS));
@@ -46,28 +51,14 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
   for (let clusterZ = 0; clusterZ < clusterGrid; clusterZ++) {
     for (let clusterX = 0; clusterX < clusterGrid; clusterX++) {
       const index = clusterIndex(clusterX, clusterZ, clusterGrid);
-      const centerSlotX = Math.min(grid - 1, clusterX * clusterDimCells + Math.floor(clusterDimCells / 2));
-      const centerSlotZ = Math.min(grid - 1, clusterZ * clusterDimCells + Math.floor(clusterDimCells / 2));
-      const [cellX, cellZ] = treeWorldCell(centerSlotX, centerSlotZ, grid, TREE_GPU_RING_CELL, options.centerX, options.centerZ);
-      const targetX = cellX * TREE_GPU_RING_CELL;
-      const targetZ = cellZ * TREE_GPU_RING_CELL;
-      const targetGroundY = terrainSampler?.sampleHeight(targetX, targetZ).height ?? 0;
-      const result = provider.sampleTerrainVisibility({
-        sampler: terrainSampler,
-        settings: {
-          enabled: options.settings.gpu.enabled && options.settings.gpu.terrainVisibility.enabled,
-          minDistanceM: options.settings.gpu.terrainVisibility.minDistanceM,
-          sampleCount: options.settings.gpu.terrainVisibility.sampleCount,
-          heightMarginM: options.settings.gpu.terrainVisibility.heightMarginM,
-          crownHeightM: options.settings.gpu.terrainVisibility.crownHeightM,
-        },
-        cameraX: options.centerX,
-        cameraY: options.cameraY,
-        cameraZ: options.centerZ,
-        targetX,
-        targetZ,
-        targetGroundY,
-        targetRadiusM: clusterRadiusM(clusterDimCells),
+      const result = evaluateClusterVisibility({
+        clusterX,
+        clusterZ,
+        grid,
+        clusterDimCells,
+        provider,
+        terrainSampler,
+        options,
       });
       reasonCounts[result.reason]++;
       if (result.reason === "unknown_kept") unknownKeptClusters++;
@@ -94,6 +85,100 @@ export function treeRingClusterMaskByteLength(settings: TreeSettings, clusterDim
   const grid = treeGpuRingGrid(settings);
   const clusterGrid = Math.max(1, Math.ceil(grid / Math.max(1, Math.floor(clusterDimCells))));
   return clusterGrid * clusterGrid * Uint32Array.BYTES_PER_ELEMENT;
+}
+
+function evaluateClusterVisibility(input: {
+  clusterX: number;
+  clusterZ: number;
+  grid: number;
+  clusterDimCells: number;
+  provider: ReturnType<typeof createVegetationVisibilityProvider>;
+  terrainSampler: TerrainHeightSampler | undefined;
+  options: TreeRingClusterVisibilityOptions;
+}): { visible: boolean; reason: VegetationVisibilityReason } {
+  const probes = clusterProbes(input.clusterX, input.clusterZ, input.grid, input.clusterDimCells, input.options);
+  let hiddenProbeCount = 0;
+  for (const probe of probes) {
+    const targetSample = input.terrainSampler?.sampleHeight(probe.x, probe.z);
+    if (!targetSample || targetSample.unknown || !Number.isFinite(targetSample.height)) {
+      return { visible: true, reason: "unknown_kept" };
+    }
+    const result = input.provider.sampleTerrainVisibility({
+      sampler: input.terrainSampler,
+      settings: {
+        enabled: input.options.settings.gpu.enabled && input.options.settings.gpu.terrainVisibility.enabled,
+        minDistanceM: input.options.settings.gpu.terrainVisibility.minDistanceM,
+        sampleCount: input.options.settings.gpu.terrainVisibility.sampleCount,
+        heightMarginM: input.options.settings.gpu.terrainVisibility.heightMarginM,
+        crownHeightM: input.options.settings.gpu.terrainVisibility.crownHeightM,
+      },
+      cameraX: input.options.centerX,
+      cameraY: input.options.cameraY,
+      cameraZ: input.options.centerZ,
+      targetX: probe.x,
+      targetZ: probe.z,
+      targetGroundY: targetSample.height,
+      targetRadiusM: clusterRadiusM(input.clusterDimCells),
+    });
+    if (result.visible) return { visible: true, reason: result.reason };
+    hiddenProbeCount++;
+  }
+  return hiddenProbeCount === probes.length
+    ? { visible: false, reason: "terrain_hidden" }
+    : { visible: true, reason: "visible" };
+}
+
+function clusterProbes(
+  clusterX: number,
+  clusterZ: number,
+  grid: number,
+  clusterDimCells: number,
+  options: TreeRingClusterVisibilityOptions,
+): ClusterProbe[] {
+  const startX = clusterX * clusterDimCells;
+  const startZ = clusterZ * clusterDimCells;
+  const endX = Math.min(grid - 1, startX + clusterDimCells - 1);
+  const endZ = Math.min(grid - 1, startZ + clusterDimCells - 1);
+  const centerX = Math.min(grid - 1, startX + Math.floor((endX - startX) / 2));
+  const centerZ = Math.min(grid - 1, startZ + Math.floor((endZ - startZ) / 2));
+  const slotPairs: Array<readonly [number, number]> = [
+    nearestSlotToCamera([[startX, startZ], [startX, endZ], [endX, startZ], [endX, endZ], [centerX, centerZ]], grid, options),
+    [centerX, centerZ],
+    [startX, startZ],
+    [startX, endZ],
+    [endX, startZ],
+    [endX, endZ],
+  ];
+  const seen = new Set<string>();
+  const probes: ClusterProbe[] = [];
+  for (const [slotX, slotZ] of slotPairs) {
+    const key = `${slotX}|${slotZ}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const [cellX, cellZ] = treeWorldCell(slotX, slotZ, grid, TREE_GPU_RING_CELL, options.centerX, options.centerZ);
+    probes.push({ x: cellX * TREE_GPU_RING_CELL, z: cellZ * TREE_GPU_RING_CELL });
+  }
+  return probes;
+}
+
+function nearestSlotToCamera(
+  slots: Array<readonly [number, number]>,
+  grid: number,
+  options: TreeRingClusterVisibilityOptions,
+): readonly [number, number] {
+  let nearest = slots[0] ?? [0, 0];
+  let nearestDist = Number.POSITIVE_INFINITY;
+  for (const slot of slots) {
+    const [cellX, cellZ] = treeWorldCell(slot[0], slot[1], grid, TREE_GPU_RING_CELL, options.centerX, options.centerZ);
+    const x = cellX * TREE_GPU_RING_CELL;
+    const z = cellZ * TREE_GPU_RING_CELL;
+    const dist = Math.hypot(x - options.centerX, z - options.centerZ);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearest = slot;
+    }
+  }
+  return nearest;
 }
 
 function createTerrainHeightSampler(sampler: TreeTerrainSampler | undefined): TerrainHeightSampler | undefined {
