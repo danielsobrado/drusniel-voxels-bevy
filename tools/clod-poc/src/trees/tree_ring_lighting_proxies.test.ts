@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TREE_SETTINGS, TREE_SPECIES } from "./tree_config.js";
-import { treeRingShadowCasterGroupCount } from "./tree_ring_shadow_casters.js";
-import { generateTreeRingValidationCounts } from "./tree_ring_lighting_proxies.js";
+import { DEFAULT_TREE_SETTINGS, TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "./tree_config.js";
+import {
+  treeRingShadowCasterGroupCount,
+  treeRingShadowCasterGroupIndex,
+} from "./tree_ring_shadow_casters.js";
+import {
+  generateTreeRingValidationCounts,
+  treeRingValidationHash,
+  treeRingValidationJitter,
+} from "./tree_ring_lighting_proxies.js";
+import { treePcg2d } from "./tree_ring_math.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
 
 const flatSampler: TreeTerrainSampler = {
@@ -59,6 +67,32 @@ describe("tree ring validation counts", () => {
     expect(result.overflowed).toBe(false);
     expect(result.shadowOverflowed).toBe(true);
   });
+
+  it("uses the same PCG hash and jitter shape as the GPU tree ring", () => {
+    expect(treeRingValidationHash(12, -7, 99, 1103)).toBe(treePcg2d(12, -7, 99 + 1103)[0]);
+    expect(treeRingValidationJitter(12, -7, 99, 1103)).toEqual(treePcg2d(12, -7, 99 + 1103));
+  });
+
+  it("applies the tree shadow LOD budget to CPU validation shadow counts", () => {
+    const settings = validationSettings();
+    settings.lod.shadowsMaxLod = "near";
+
+    const result = generateTreeRingValidationCounts({
+      centerX: 64,
+      centerZ: 64,
+      worldCells: 128,
+      settings,
+      sampler: flatSampler,
+      maxInstancesPerGroup: 9999,
+      maxShadowCastersPerGroup: 9999,
+      shadowCascadePlanes: acceptEverythingCascadePlanes(),
+    });
+
+    expect(shadowCountForLod(result.shadowGroupCounts, "near")).toBeGreaterThan(0);
+    expect(shadowCountForLod(result.shadowGroupCounts, "mid")).toBe(0);
+    expect(shadowCountForLod(result.shadowGroupCounts, "far")).toBe(0);
+    expect(shadowCountForLod(result.shadowGroupCounts, "impostor")).toBe(0);
+  });
 });
 
 function validationSettings() {
@@ -80,6 +114,14 @@ function validationSettings() {
   settings.lod.crossfadeBandM = 4;
   for (const species of TREE_SPECIES) settings.species[species].weight = species === "oak" ? 1 : 0;
   return settings;
+}
+
+function shadowCountForLod(counts: readonly number[], lod: TreeLod): number {
+  let total = 0;
+  for (const species of TREE_SPECIES) {
+    for (let cascade = 0; cascade < 4; cascade++) total += counts[treeRingShadowCasterGroupIndex(species as TreeSpeciesId, lod, cascade)] ?? 0;
+  }
+  return total;
 }
 
 function acceptEverythingCascadePlanes(): Float32Array {
