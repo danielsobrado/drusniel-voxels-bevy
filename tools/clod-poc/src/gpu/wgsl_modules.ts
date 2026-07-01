@@ -10,11 +10,12 @@ import treeBindings from "./shaders/tree_bindings.wgsl?raw";
 import treeRingEntry from "./shaders/tree_ring.compute.wgsl?raw";
 import understoryBindings from "./shaders/understory_bindings.wgsl?raw";
 import understoryRingEntry from "./shaders/understory_ring.compute.wgsl?raw";
-import { readRiverEcologySettings } from "../config/river_ecology_config.js";
+import { readRiverEcologySettings } from "../water/riverEcologyRuntime.js";
 import { TREE_SPECIES } from "../trees/tree_config.js";
+import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
-import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl.js";
-import { applyTreeRingWgslLayoutConstants, TREE_RING_SHADOW_CASCADE_COUNT } from "./tree_ring_wgsl_layout.js";
+import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
+import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
 
 function composeShader(label: string, chunks: readonly string[]): string {
   const source = chunks.join("\n\n");
