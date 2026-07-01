@@ -128,19 +128,20 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
     const frustumPlanes = packTreeSystemGpuFrustumPlanes(camera, input.state.frustumPlaneScratch);
     const shadowCameras = getRealtimeSunShadowCascadeCameras();
     const shadowCascadePlanes = shadowCameras.length > 0 ? treeRingShadowCascadePlanesFromCameras(shadowCameras) : undefined;
+    const shadowCapacity = treeGpuRingShadowGroupCapacity(input.settings, shadowCascadePlanes);
     const dispatched = input.state.compute.dispatch({
       centerX: center.x,
       centerZ: center.z,
       worldCells: input.worldCells,
       maxInstancesPerGroup: treeGpuRingGroupCapacity(input.settings),
-      maxShadowCastersPerGroup: shadowCascadePlanes ? treeGpuRingGroupCapacity(input.settings) : 0,
+      maxShadowCastersPerGroup: shadowCapacity,
       indexCounts: treeGpuRingIndexCounts(input),
       frustumPlanes,
-      shadowCascadePlanes,
+      shadowCascadePlanes: shadowCapacity > 0 ? shadowCascadePlanes : undefined,
     });
     if (dispatched) setTreeGpuRingDrawsVisible(input.state, true);
     input.state.stats = input.state.compute.stats(true);
-    validateTreeGpuRingAgainstCpu(input, center, frustumPlanes, shadowCascadePlanes);
+    validateTreeGpuRingAgainstCpu(input, center, frustumPlanes, shadowCapacity > 0 ? shadowCascadePlanes : undefined);
   }
 
   input.lodCounts.near = input.state.stats.counts.near;
@@ -231,6 +232,7 @@ function validateTreeGpuRingAgainstCpu(
   input.state.lastValidationSignature = signature;
 
   const capacity = treeGpuRingGroupCapacity(input.settings);
+  const shadowCapacity = treeGpuRingShadowGroupCapacity(input.settings, shadowCascadePlanes);
   const expected = generateTreeRingValidationCounts({
     centerX: center.x,
     centerZ: center.z,
@@ -238,9 +240,9 @@ function validateTreeGpuRingAgainstCpu(
     settings: input.settings,
     sampler: input.sampler,
     maxInstancesPerGroup: capacity,
-    maxShadowCastersPerGroup: shadowCascadePlanes ? capacity : 0,
+    maxShadowCastersPerGroup: shadowCapacity,
     frustumPlanes,
-    shadowCascadePlanes,
+    shadowCascadePlanes: shadowCapacity > 0 ? shadowCascadePlanes : undefined,
   });
   const deltas = TREE_LODS.map((lod) => Math.abs((input.state.stats.counts[lod] ?? 0) - (expected.counts[lod] ?? 0)));
   const maxDelta = Math.max(...deltas);
@@ -277,6 +279,11 @@ function treeGpuRingIndexCounts(input: TreeGpuRingRuntimeInput): TreeGpuRingInde
 
 function indexCountFor(geometry: THREE.BufferGeometry): number {
   return geometry.getIndex()?.count ?? geometry.getAttribute("position")?.count ?? 0;
+}
+
+function treeGpuRingShadowGroupCapacity(settings: TreeSettings, shadowCascadePlanes: ArrayLike<number> | undefined): number {
+  if (!shadowCascadePlanes || settings.lod.shadowsMaxLod === "none") return 0;
+  return treeGpuRingGroupCapacity(settings);
 }
 
 function maxGroupDelta(a: readonly number[], b: readonly number[]): number {
