@@ -103,7 +103,7 @@ disabled
 
 ### TVIS-007 — Pre-generation culling
 
-Current state: **early per-slot rejection plus tested CPU-side cluster visibility mask foundation**, not true GPU compacted page dispatch.
+Current state: **early per-slot rejection plus tested CPU-side cluster camera-visibility mask foundation**, not true GPU compacted page dispatch.
 
 Implemented foundation:
 
@@ -114,42 +114,49 @@ What is done:
 
 - terrain-hidden GPU tree slots return before species/scale/LOD/appends;
 - CPU/GPU debug validation now follows the same early-rejection order;
-- shadow and visible lists both skip terrain-hidden slots;
-- a conservative tree-ring cluster visibility mask can be built from the shared vegetation visibility provider;
+- shadow and visible lists both skip terrain-hidden slots for the existing per-slot cull;
+- a conservative tree-ring camera-visibility mask can be built from the shared vegetation visibility provider;
 - the cluster mask keeps unknown/missing terrain visible;
-- the cluster mask is stored as `Uint32Array` words so it can be uploaded directly to a WGSL `array<u32>` storage buffer;
+- a cluster is hidden only when every representative probe is terrain-hidden;
+- representative probes include the nearest cluster point, center, and corners, not only the center;
+- the cluster mask is stored as `Uint32Array` entries so it can be uploaded directly to a WGSL `array<u32>` storage buffer;
 - utility lookup maps tree-ring slots back to their cluster visibility.
+
+Important constraint:
+
+- The cluster camera-visibility mask must **never** gate shadow caster generation. It is a camera occlusion result, so using it to skip the whole `process_tree_slot` path would incorrectly remove camera-hidden shadow casters. Future GPU wiring must apply the mask only to the visible-list path, or split visible and shadow generation into separate paths.
 
 What is not done:
 
 - GPU dispatch still covers the full tree ring slot grid;
 - `gpuCandidateCount` may not drop yet;
-- cluster mask words are not uploaded to the compute shader yet;
-- the compute shader does not yet read a cluster mask before per-slot work;
+- cluster mask entries are not uploaded to the compute shader yet;
+- the compute shader does not yet read a cluster mask before visible-list work;
 - there is no compacted cluster dispatch yet.
 
 ## Remaining architectural work
 
 ### TVIS-007 next step
 
-Upload and consume the cluster visibility mask in the GPU tree-ring path.
+Upload and consume the cluster camera-visibility mask in the GPU tree-ring path, but only for visible-list generation.
 
 Target shape:
 
 ```text
 CPU/NAADF visibility provider
-  -> compact cluster visibility mask as Uint32Array words
+  -> conservative cluster camera-visibility mask as Uint32Array entries
   -> storage binding exposed to GPU tree-ring compute
-  -> GPU tree ring reads mask before per-slot work
-  -> hidden cluster returns before candidate work
-  -> future: dispatch only visible clusters
+  -> GPU visible-list path reads mask before visible append work
+  -> GPU shadow-caster path ignores camera-visibility mask
+  -> future: compact visible dispatch only, or split visible/shadow dispatches
 ```
 
 Acceptance:
 
 - hidden cluster count is reported;
-- per-slot work is skipped for hidden clusters;
-- later, GPU candidate count drops when dispatch becomes cluster-compacted;
+- visible-list work is skipped for hidden clusters;
+- shadow caster generation is not gated by the camera-visibility mask;
+- later, visible candidate work drops when dispatch becomes cluster-compacted;
 - unknown/missing data keeps clusters visible;
 - no visible popping in fast-turn scenes.
 
