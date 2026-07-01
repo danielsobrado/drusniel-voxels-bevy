@@ -1,0 +1,108 @@
+import { describe, expect, it } from "vitest";
+import { DEFAULT_TREE_SETTINGS, cloneTreeSettings } from "./tree_config.js";
+import {
+  buildTreeRingClusterVisibilityMask,
+  treeRingClusterMaskByteLength,
+  treeRingSlotClusterVisible,
+} from "./tree_ring_cluster_visibility.js";
+import type { TreeTerrainSampler } from "./tree_instances.js";
+
+describe("tree ring cluster visibility", () => {
+  it("keeps every cluster visible when terrain visibility is disabled", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    settings.distanceM = 24;
+    settings.gpu.terrainVisibility.enabled = false;
+
+    const mask = buildTreeRingClusterVisibilityMask({
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 10,
+      worldCells: 512,
+      settings,
+      sampler: constantTerrain(100),
+      clusterDimCells: 4,
+    });
+
+    expect(mask.hiddenClusters).toBe(0);
+    expect(mask.visibleClusters).toBe(mask.mask.length);
+    expect(mask.reasonCounts.disabled).toBe(mask.mask.length);
+    expect(Array.from(mask.mask).every((value) => value === 1)).toBe(true);
+  });
+
+  it("keeps unknown terrain clusters visible", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    settings.distanceM = 24;
+
+    const mask = buildTreeRingClusterVisibilityMask({
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 10,
+      worldCells: 512,
+      settings,
+      sampler: constantTerrain(Number.NaN),
+      clusterDimCells: 4,
+    });
+
+    expect(mask.hiddenClusters).toBe(0);
+    expect(mask.unknownKeptClusters).toBe(mask.mask.length);
+    expect(Array.from(mask.mask).every((value) => value === 1)).toBe(true);
+  });
+
+  it("marks terrain-hidden clusters as not visible", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    settings.distanceM = 24;
+    settings.gpu.terrainVisibility.minDistanceM = 0;
+    settings.gpu.terrainVisibility.heightMarginM = 0;
+    settings.gpu.terrainVisibility.crownHeightM = 0;
+
+    const mask = buildTreeRingClusterVisibilityMask({
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      settings,
+      sampler: constantTerrain(100),
+      clusterDimCells: 4,
+    });
+
+    expect(mask.hiddenClusters).toBeGreaterThan(0);
+    expect(mask.reasonCounts.terrain_hidden).toBe(mask.hiddenClusters);
+    expect(Array.from(mask.mask).some((value) => value === 0)).toBe(true);
+  });
+
+  it("maps slots to their cluster visibility", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    settings.distanceM = 24;
+    const byteLength = treeRingClusterMaskByteLength(settings, 4);
+    const mask = {
+      grid: 15,
+      clusterDimCells: 4,
+      clusterGrid: 4,
+      mask: new Uint8Array(byteLength).fill(1),
+      hiddenClusters: 1,
+      visibleClusters: byteLength - 1,
+      unknownKeptClusters: 0,
+      reasonCounts: {
+        visible: byteLength - 1,
+        terrain_hidden: 1,
+        unknown_kept: 0,
+        near_forced_visible: 0,
+        disabled: 0,
+      },
+    };
+    mask.mask[0] = 0;
+
+    expect(treeRingSlotClusterVisible(mask, 0)).toBe(false);
+    expect(treeRingSlotClusterVisible(mask, 1)).toBe(false);
+    expect(treeRingSlotClusterVisible(mask, 15)).toBe(false);
+    expect(treeRingSlotClusterVisible(mask, 4)).toBe(true);
+  });
+});
+
+function constantTerrain(height: number): TreeTerrainSampler {
+  return {
+    surfaceHeight: () => height,
+    surfaceNormal: () => [0, 1, 0],
+    materialWeights: () => [1, 0, 0, 0],
+  };
+}
