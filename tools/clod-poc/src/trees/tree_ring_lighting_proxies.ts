@@ -1,33 +1,27 @@
+import type { TreeLod, TreeSettings, TreeSpeciesId } from "./tree_config.js";
+import { TREE_LODS, TREE_SPECIES } from "./tree_config.js";
+import { defaultTreeTerrainSampler, type TreeTerrainSampler } from "./tree_instances.js";
+import { isTreeClusterTerrainOccluded } from "./tree_terrain_occlusion.js";
+import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
+import { treeLodDistances, treeLodRing } from "./tree_system_lod_math.js";
+import { visibleTreeLodCount } from "./tree_system_math.js";
 import {
   TREE_GPU_RING_CELL,
   TREE_GPU_RING_GROUP_COUNT,
-  treeGpuRingGroupIndex,
   treeGpuRingGrid,
+  treeGpuRingGroupIndex,
   treeGpuRingSlotCount,
 } from "../gpu/tree_ring_compute.js";
-import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
-import {
-  defaultTreeTerrainSampler,
-  type TreeTerrainSampler,
-} from "./tree_instances.js";
-import {
-  treeAcceptMask,
-  treeLodRing,
-  treePcg2d,
-  treeRingAcceptParams,
-  treeRingLodParams,
-  treeWorldCellFromSlot,
-} from "./tree_ring_math.js";
 import {
   TREE_RING_SHADOW_CASCADE_COUNT,
+  treeRingShadowCasterCascadeIndices,
   treeRingShadowCasterGroupCount,
   treeRingShadowCasterGroupIndex,
-  treeRingShadowCasterCascadeIndices,
-} from "./tree_ring_shadow_casters.js";
-import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
-import { isTreeClusterTerrainOccluded } from "./tree_terrain_occlusion.js";
+} from "../gpu/tree_ring_shadows.js";
+import { treeAcceptMask, treeRingAcceptParams } from "./tree_ring_acceptance.js";
+import { treePcg2d } from "./tree_ring_hash.js";
 
-export const TREE_GPU_RING_LIGHTING_PROXY_CAP = 2000;
+export const TREE_GPU_RING_LIGHTING_PROXY_CAP = 2048;
 
 export interface TreeRingLightingProxy {
   x: number;
@@ -184,6 +178,18 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
     if (distance > ringLodParams.radius + ringLodParams.band) continue;
 
     const terrainHeight = sampler.surfaceHeight(x, z);
+    if (treeRingTerrainHiddenForValidation({
+      settings,
+      sampler,
+      centerX: options.centerX,
+      centerZ: options.centerZ,
+      cameraY: options.cameraY,
+      x,
+      z,
+      terrainHeight,
+      distance,
+    })) continue;
+
     const normalY = sampler.surfaceNormal(x, z)[1];
     const accept = treeAcceptMask(terrainHeight, normalY, x, z, acceptParams);
     if (treeRingValidationHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
@@ -201,18 +207,6 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
       shadowCascadePlanes: options.shadowCascadePlanes,
       maxShadowCastersPerGroup,
     });
-
-    if (treeRingTerrainHiddenForValidation({
-      settings,
-      sampler,
-      centerX: options.centerX,
-      centerZ: options.centerZ,
-      cameraY: options.cameraY,
-      x,
-      z,
-      terrainHeight,
-      distance,
-    })) continue;
 
     if (!treeRingPointInFrustum(x, terrainHeight + 4, z, 8, options.frustumPlanes)) continue;
     for (const lod of TREE_LODS) {
@@ -336,4 +330,31 @@ function treeRingPointInFrustum(
 function speciesWeight(settings: TreeSettings, species: TreeSpeciesId): number {
   const config = settings.species[species];
   return config.enabled ? Math.max(0, config.weight) : 0;
+}
+
+function treeWorldCellFromSlot(slot: number, grid: number, cellSize: number, centerX: number, centerZ: number): [number, number] {
+  const safeGrid = Math.max(1, Math.floor(grid));
+  const sx = slot % safeGrid;
+  const sz = Math.floor(slot / safeGrid);
+  const camCellX = centerX / Math.max(cellSize, 0.001);
+  const camCellZ = centerZ / Math.max(cellSize, 0.001);
+  return [
+    Math.round((camCellX - sx) / safeGrid) * safeGrid + sx,
+    Math.round((camCellZ - sz) / safeGrid) * safeGrid + sz,
+  ];
+}
+
+function treeRingLodParams(settings: TreeSettings): { near: number; mid: number; far: number; radius: number; band: number } {
+  const lod = treeLodDistances(settings);
+  return {
+    near: lod.near,
+    mid: lod.mid,
+    far: lod.far,
+    radius: lod.impostor,
+    band: settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0,
+  };
+}
+
+function sumCounts(counts: readonly number[]): number {
+  return counts.reduce((sum, count) => sum + Math.max(0, Math.floor(count)), 0);
 }
