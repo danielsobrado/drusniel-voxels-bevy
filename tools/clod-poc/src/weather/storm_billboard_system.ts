@@ -3,6 +3,9 @@ import { createStormNodeMaterial } from "./rainNodeMaterial.js";
 import { createStormShaderMaterial, type RainWeatherShaderHandle } from "./rainShaderMaterial.js";
 import { DEFAULT_STORM_WEATHER_SETTINGS } from "./rain_defaults.js";
 import type { StormWeatherOptions, StormWeatherSettings, StormWeatherStats } from "./rain_types.js";
+import { placeCameraFacingBillboard } from "./weather_camera_billboard.js";
+
+const LIGHTNING_DISTANCE = 1.5;
 
 export class StormLightningSystem {
   private readonly group = new THREE.Group();
@@ -44,12 +47,13 @@ export class StormLightningSystem {
 
     this.center.copy(cameraPosition);
     this.stormMaterial.setTime(elapsedSeconds);
-
-    this.camera.getWorldDirection(this.cameraDirection);
-    this.stormMesh.position.copy(cameraPosition).addScaledVector(this.cameraDirection, 1.5);
-    this.stormMesh.quaternion.copy(this.camera.quaternion);
-    const height = 2 * 1.5 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5);
-    this.stormMesh.scale.set(height * this.camera.aspect, height, 1);
+    placeCameraFacingBillboard({
+      camera: this.camera,
+      mesh: this.stormMesh,
+      cameraPosition,
+      distance: LIGHTNING_DISTANCE,
+      scratchDirection: this.cameraDirection,
+    });
   }
 
   getStats(): StormWeatherStats {
