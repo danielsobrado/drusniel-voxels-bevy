@@ -3,8 +3,8 @@ import { createSandstormHazeNodeMaterial, createSandstormNodeMaterial } from "./
 import {
   createSandstormHazeShaderMaterial,
   createSandstormShaderMaterial,
-  type RainWeatherShaderHandle,
 } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 import { SANDSTORM_PARTICLE_COUNT } from "./rain_constants.js";
 import { DEFAULT_SANDSTORM_WEATHER_SETTINGS } from "./rain_defaults.js";
 import { createSandstormGeometry } from "./rain_geometry.js";
