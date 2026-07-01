@@ -58,9 +58,9 @@ describe("tree placement", () => {
   it("deep-clones tree GPU settings", () => {
     const cloned = cloneTreeSettings();
     expect(cloned.gpu).not.toBe(DEFAULT_TREE_SETTINGS.gpu);
-    cloned.gpu.enabled = true;
+    cloned.gpu.enabled = false;
     cloned.gpu.maxVisible = 1;
-    expect(DEFAULT_TREE_SETTINGS.gpu.enabled).toBe(false);
+    expect(DEFAULT_TREE_SETTINGS.gpu.enabled).toBe(true);
     expect(DEFAULT_TREE_SETTINGS.gpu.maxVisible).toBe(50_000);
   });
 

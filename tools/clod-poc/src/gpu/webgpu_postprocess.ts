@@ -42,6 +42,7 @@ const VIGNETTE_SCALE = 1.6;
 const LUMA_WEIGHTS = [0.2126, 0.7152, 0.0722] as const;
 
 type TslAny = any;
+const tslMix = mix as unknown as (a: TslAny, b: TslAny, amount: TslAny) => TslAny;
 type NumericUniform = { value: number };
 type MatrixUniform = { value: THREE.Matrix4 };
 type VectorUniform = { value: THREE.Vector3 };
@@ -309,7 +310,7 @@ export class WebGpuPostProcessPipeline {
       const haze = smoothstep(uAerialStart, uAerialEnd, distance)
         .mul(uAerialStrength)
         .mul(geometryMask);
-      return mix(sourceRgb, vec3(uAerialColor), clamp(haze, 0, 1));
+      return tslMix(sourceRgb, uAerialColor, clamp(haze, 0, 1));
     })();
   }
 
@@ -349,18 +350,18 @@ export class WebGpuPostProcessPipeline {
     const uHighlightAmount = this.uHighlightAmount as unknown as TslAny;
 
     return Fn((): TslAny => {
-      const balanced = postRgb.mul(uExposure).mul(vec3(uWhiteBalance));
+      const balanced = postRgb.mul(uExposure).mul(uWhiteBalance);
       const luma = dot(balanced, vec3(...LUMA_WEIGHTS));
       const shadowMask = smoothstep(0.45, 0.08, luma).mul(uShadowAmount);
-      const shadowed = mix(balanced, balanced.mul(vec3(uShadowTint)), shadowMask);
+      const shadowed = tslMix(balanced, balanced.mul(uShadowTint), shadowMask);
       const highlightMask = smoothstep(0.35, 0.95, luma).mul(uHighlightAmount);
-      const tinted = mix(shadowed, shadowed.mul(vec3(uHighlightTint)), highlightMask);
+      const tinted = tslMix(shadowed, shadowed.mul(uHighlightTint), highlightMask);
       const contrasted = tinted.sub(0.5).mul(uContrast).add(0.5);
-      const saturated = mix(vec3(luminance(contrasted)), contrasted, uSaturation);
+      const saturated = tslMix(luminance(contrasted) as TslAny, contrasted, uSaturation);
       const center = screenUV.sub(0.5);
       const vignette = clamp(float(1).sub(dot(center, center).mul(uVignette).mul(VIGNETTE_SCALE)), 0, 1);
       const graded = saturated.mul(vignette);
-      return mix(sourceRgb, graded, clamp(uOpacity, 0, 1));
+      return tslMix(sourceRgb, graded, clamp(uOpacity, 0, 1));
     })();
   }
 

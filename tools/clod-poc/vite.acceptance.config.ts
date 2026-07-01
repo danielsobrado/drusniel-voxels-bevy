@@ -10,9 +10,6 @@ export default defineConfig((env) => {
       port: 5173,
       strictPort: true,
       hmr: false,
-      watch: {
-        ignored: ["**/*"],
-      },
     },
   });
 });

@@ -39,6 +39,7 @@ const INFINITE_ISLANDS_FRAME_MS_P95_MAX = 8;
 const DEFAULT_BASE_URL = "http://127.0.0.1:5173/";
 const SERVER_TIMEOUT_MS = 90_000;
 const SERVER_POLL_MS = 500;
+const BATTERY_COMMAND_TIMEOUT_MS = 300_000;
 
 process.env["CLOD_POC_BASE_URL"] ??= DEFAULT_BASE_URL;
 
@@ -104,7 +105,10 @@ function run(label: string, args: string[]): void {
   const result = spawnSync("npm", args, {
     stdio: "inherit",
     shell: process.platform === "win32",
+    timeout: BATTERY_COMMAND_TIMEOUT_MS,
   });
+  if (result.error) throw new Error(`${label} failed: ${result.error.message}`);
+  if (result.signal) throw new Error(`${label} failed with signal ${result.signal}`);
   if (result.status !== 0) throw new Error(`${label} failed with exit ${result.status}`);
 }
 

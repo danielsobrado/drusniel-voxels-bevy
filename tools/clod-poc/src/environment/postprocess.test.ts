@@ -19,15 +19,15 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       saturation: 1.05,
       vignette: 0,
       debugMode: "output",
-      toneMapping: "aces",
+      toneMapping: "agx",
       bloomEnabled: true,
-      bloomThreshold: 0.85,
-      bloomStrength: 0.18,
-      bloomRadius: 0.35,
+      bloomThreshold: 0.28,
+      bloomStrength: 0.45,
+      bloomRadius: 1.5,
       fxaaEnabled: true,
       fxaaEdgeThreshold: 0.125,
       fxaaSubpixelBlend: 0.75,
-      taaEnabled: false,
+      taaEnabled: true,
       taaHistoryWeight: 0.88,
       taaDepthThreshold: 0.0025,
       taaSharpen: 0.06,
@@ -198,9 +198,9 @@ aerial_perspective:
       });
   });
 
-  it("defaults god rays, TAA, and contact shadows off so existing scenes are unchanged", () => {
+  it("keeps god rays and contact shadows off while TAA defaults on", () => {
     expect(DEFAULT_POST_PROCESS_SETTINGS.godRaysMode).toBe("off");
-    expect(DEFAULT_POST_PROCESS_SETTINGS.taaEnabled).toBe(false);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.taaEnabled).toBe(true);
     expect(DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled).toBe(false);
   });
 });

@@ -37,6 +37,10 @@ const settings: TreeSettings = {
   seed: 12,
   maxInstances: 100,
   distanceM: 160,
+  gpu: {
+    ...DEFAULT_TREE_SETTINGS.gpu,
+    enabled: false,
+  },
   placement: {
     ...DEFAULT_TREE_SETTINGS.placement,
     spacingM: 4,

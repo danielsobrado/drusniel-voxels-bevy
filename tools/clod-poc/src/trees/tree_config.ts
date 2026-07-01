@@ -340,7 +340,7 @@ export const DEFAULT_TREE_WIND_SETTINGS: TreeWindSettings = {
 };
 
 export const DEFAULT_TREE_GPU_SETTINGS: TreeGpuSettings = {
-  enabled: false,
+  enabled: true,
   preferWebGpu: true,
   fallbackToCpu: true,
   scatterEnabled: true,
