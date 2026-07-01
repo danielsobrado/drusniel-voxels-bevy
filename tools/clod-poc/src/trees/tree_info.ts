@@ -16,6 +16,7 @@ export function formatTreeInfoLine(treesEnabled: boolean, totalTrees: TreeTotalD
   return `trees: ${runtimePath} ${formatTreeTotal(totalTrees)} trees` +
     (treeStats
       ? ` patches=${treeStats.visiblePatches}/${treeStats.patches}` +
+        formatTreeTerrainHidden(treeStats) +
         ` lod n/m/f/i=${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}` +
         formatTreeImpostorStatus(treeStats) +
         formatTreeGpuStats(treeStats)
@@ -45,6 +46,10 @@ function treeGpuCountsHidden(treeStats: TreeStats): boolean {
 
 function formatTreeTotal(totalTrees: TreeTotalDisplay): string {
   return typeof totalTrees === "number" ? totalTrees.toLocaleString() : totalTrees;
+}
+
+function formatTreeTerrainHidden(treeStats: TreeStats): string {
+  return treeStats.terrainOccludedPatches > 0 ? ` terrainHidden=${treeStats.terrainOccludedPatches}` : "";
 }
 
 function formatTreeImpostorStatus(treeStats: TreeStats): string {
