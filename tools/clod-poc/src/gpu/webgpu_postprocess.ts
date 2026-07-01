@@ -536,6 +536,9 @@ export class WebGpuPostProcessPipeline {
   }
 
   private createAerialNode(sourceRgb: TslAny, depthTex: TslAny): TslAny {
+    const hillaireEnabled = this.atmosphere.hillaire.enabled
+      && this.settings.aerialPerspectiveEnabled
+      && this.stageEnabled("aerial");
     return createHillaireFroxelAerialNode({
       sourceRgb,
       depthTex,
@@ -546,9 +549,7 @@ export class WebGpuPostProcessPipeline {
       settings: {
         hillaire: {
           ...this.atmosphere.hillaire,
-          enabled: this.atmosphere.hillaire.enabled
-            && this.settings.aerialPerspectiveEnabled
-            && this.stageEnabled("aerial"),
+          enabled: hillaireEnabled,
         },
         froxels: {
           ...this.atmosphere.froxels,
@@ -557,7 +558,7 @@ export class WebGpuPostProcessPipeline {
       },
       froxelDebugMode: this.froxelDebugMode,
       froxelVolume: this.froxelVolume?.nodeInput() ?? null,
-      hillaireLuts: this.ensureHillaireLuts().nodeInput(),
+      hillaireLuts: hillaireEnabled ? this.ensureHillaireLuts().nodeInput() : null,
     });
   }
 
