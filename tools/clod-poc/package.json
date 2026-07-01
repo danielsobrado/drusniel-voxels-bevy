@@ -25,6 +25,7 @@
     "phase0": "tsx tools/phase0.ts",
     "accept:infinite-islands": "node tools/run-infinite-islands-acceptance.mjs",
     "trees:verify-terrain-cull": "node scripts/apply-tree-terrain-cull.mjs",
+    "trees:wire-visible-cluster-mask": "node scripts/wire-tree-visible-cluster-mask-gpu.mjs",
     "trees:wire-tree4-tree5": "node scripts/wire-tree-system-tree4-5.mjs",
     "trees:wire-tree4-tree5:check": "node scripts/wire-tree-system-tree4-5.mjs --dry-run",
     "trees:wire-tree7-shadows": "node scripts/wire-tree-system-tree7-shadows.mjs",
