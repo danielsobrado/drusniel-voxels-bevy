@@ -13,6 +13,7 @@ import {
 import {
   treeAcceptMask,
   treeLodRing,
+  treePcg2d,
   treeRingAcceptParams,
   treeRingLodParams,
   treeWorldCellFromSlot,
@@ -23,6 +24,7 @@ import {
   treeRingShadowCasterGroupIndex,
   treeRingShadowCasterCascadeIndices,
 } from "./tree_ring_shadow_casters.js";
+import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
 
 export const TREE_GPU_RING_LIGHTING_PROXY_CAP = 2000;
 
@@ -94,8 +96,9 @@ export function generateTreeRingLightingProxies(options: TreeRingLightingProxyOp
 
   for (let slot = 0; slot < slots; slot++) {
     const [cellX, cellZ] = treeWorldCellFromSlot(slot, grid, TREE_GPU_RING_CELL, options.centerX, options.centerZ);
-    const x = (cellX + treeRingHash(cellX, cellZ, settings.seed, 1103)) * TREE_GPU_RING_CELL;
-    const z = (cellZ + treeRingHash(cellX, cellZ, settings.seed, 1200)) * TREE_GPU_RING_CELL;
+    const [jitterX, jitterZ] = treeRingValidationJitter(cellX, cellZ, settings.seed, 1103);
+    const x = (cellX + jitterX) * TREE_GPU_RING_CELL;
+    const z = (cellZ + jitterZ) * TREE_GPU_RING_CELL;
     if (x <= 0 || z <= 0 || x >= options.worldCells || z >= options.worldCells) continue;
     const distance = Math.hypot(x - options.centerX, z - options.centerZ);
     if (distance > settings.distanceM + settings.lod.crossfadeBandM) continue;
@@ -103,15 +106,15 @@ export function generateTreeRingLightingProxies(options: TreeRingLightingProxyOp
     const terrainHeight = sampler.surfaceHeight(x, z);
     const normalY = sampler.surfaceNormal(x, z)[1];
     const accept = treeAcceptMask(terrainHeight, normalY, x, z, acceptParams);
-    if (treeRingHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
+    if (treeRingValidationHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
 
-    const species = selectRingSpecies(settings, treeRingHash(cellX, cellZ, settings.seed, 409));
+    const species = selectRingSpecies(settings, treeRingValidationHash(cellX, cellZ, settings.seed, 409));
     if (!species) continue;
     const speciesSettings = settings.species[species];
     if (terrainHeight < speciesSettings.minHeightM || terrainHeight > speciesSettings.maxHeightM) continue;
-    const scale = 0.82 + treeRingHash(cellX, cellZ, settings.seed, 601) * 0.42;
+    const scale = 0.82 + treeRingValidationHash(cellX, cellZ, settings.seed, 601) * 0.42;
     ranked.push({
-      priority: treeRingHash(cellX, cellZ, settings.seed, 503),
+      priority: treeRingValidationHash(cellX, cellZ, settings.seed, 503),
       proxy: {
         x,
         z,
@@ -153,8 +156,9 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
 
   for (let slot = 0; slot < slots; slot++) {
     const [cellX, cellZ] = treeWorldCellFromSlot(slot, grid, TREE_GPU_RING_CELL, options.centerX, options.centerZ);
-    const x = (cellX + treeRingHash(cellX, cellZ, settings.seed, 1103)) * TREE_GPU_RING_CELL;
-    const z = (cellZ + treeRingHash(cellX, cellZ, settings.seed, 1200)) * TREE_GPU_RING_CELL;
+    const [jitterX, jitterZ] = treeRingValidationJitter(cellX, cellZ, settings.seed, 1103);
+    const x = (cellX + jitterX) * TREE_GPU_RING_CELL;
+    const z = (cellZ + jitterZ) * TREE_GPU_RING_CELL;
     if (x <= 0 || z <= 0 || x >= options.worldCells || z >= options.worldCells) continue;
 
     const distance = Math.hypot(x - options.centerX, z - options.centerZ);
@@ -163,9 +167,9 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
     const terrainHeight = sampler.surfaceHeight(x, z);
     const normalY = sampler.surfaceNormal(x, z)[1];
     const accept = treeAcceptMask(terrainHeight, normalY, x, z, acceptParams);
-    if (treeRingHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
+    if (treeRingValidationHash(cellX, cellZ, settings.seed, 809) >= accept) continue;
 
-    const species = selectRingSpecies(settings, treeRingHash(cellX, cellZ, settings.seed, 409));
+    const species = selectRingSpecies(settings, treeRingValidationHash(cellX, cellZ, settings.seed, 409));
     if (!species) continue;
 
     const ring = treeLodRing(distance, ringLodParams);
@@ -173,6 +177,7 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
       rawShadowGroupCounts,
       species,
       ring,
+      settings,
       center: [x, terrainHeight + 4, z],
       shadowCascadePlanes: options.shadowCascadePlanes,
       maxShadowCastersPerGroup,
@@ -202,27 +207,30 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
   };
 }
 
+export function treeRingValidationHash(cellX: number, cellZ: number, seed: number, salt: number): number {
+  return treePcg2d(cellX, cellZ, seed + salt)[0];
+}
+
+export function treeRingValidationJitter(cellX: number, cellZ: number, seed: number, salt: number): [number, number] {
+  return treePcg2d(cellX, cellZ, seed + salt);
+}
+
 function countShadowCasterGroups(input: {
   rawShadowGroupCounts: number[];
   species: TreeSpeciesId;
   ring: ReturnType<typeof treeLodRing>;
+  settings: TreeSettings;
   center: readonly [number, number, number];
   shadowCascadePlanes?: ArrayLike<number>;
   maxShadowCastersPerGroup: number;
 }): void {
   if (!input.shadowCascadePlanes || input.maxShadowCastersPerGroup <= 0) return;
   for (const lod of TREE_LODS) {
-    if (!input.ring.active[lod]) continue;
+    if (!input.ring.active[lod] || !treeLodCastsShadow(input.settings, lod)) continue;
     for (const cascade of treeRingShadowCasterCascadeIndices(input.center, 12, input.shadowCascadePlanes)) {
       input.rawShadowGroupCounts[treeRingShadowCasterGroupIndex(input.species, lod, cascade)]++;
     }
   }
-}
-
-function treeRingHash(cellX: number, cellZ: number, seed: number, salt: number): number {
-  const x = cellX + seed + salt;
-  const z = cellZ + seed * 0.37 + salt * 1.17;
-  return fract(Math.sin(x * 41.3 + z * 289.1) * 43758.5453);
 }
 
 function selectRingSpecies(settings: TreeSettings, roll: number): TreeSpeciesId | null {
@@ -260,8 +268,4 @@ function treeRingPointInFrustum(
 function speciesWeight(settings: TreeSettings, species: TreeSpeciesId): number {
   const config = settings.species[species];
   return config.enabled ? Math.max(0, config.weight) : 0;
-}
-
-function fract(value: number): number {
-  return value - Math.floor(value);
 }
