@@ -19,7 +19,7 @@ Drusniel is not missing all of Fable5's tree ideas. It already has many of the r
 - Tree density, spacing, ring-size, GPU-visible, and shadow-LOD quality presets.
 - Crown proxy geometry for far/impostor GPU tree shadow casters.
 
-Fable5 is still ahead because its vegetation pipeline is GPU-first end to end. It scatters, culls, compacts, classifies LODs, and writes indirect draw counts on the GPU during normal rendering. Drusniel now requests the GPU tree ring from presets, but the CPU patch path still exists as fallback/debug, and some GPU-path work still needs validation on target browsers.
+Fable5 is still ahead because its vegetation pipeline is GPU-first end to end. It scatters, culls, compacts, classifies LODs, and writes indirect draw counts on the GPU during normal rendering. Drusniel now requests the GPU tree ring from presets, but the CPU patch path still exists as fallback/debug, and the current work still needs local typecheck/build plus browser validation.
 
 ## Main Differences
 
@@ -55,7 +55,8 @@ Current status:
 
 - Presets control `lod.shadowsMaxLod`.
 - `treeShadowMaxLod=none` skips GPU shadow capacity/planes, so the WGSL shadow append path exits early.
-- `near`, `mid`, and `far` are now gated in composed WGSL using the packed max shadow LOD budget before shadow append atomics.
+- `near`, `mid`, and `far` are gated in composed WGSL using the packed max shadow LOD budget before shadow append atomics.
+- CPU validation now applies the same shadow LOD budget.
 
 ### 4. Fable5 uses integer hash scatter
 
@@ -64,12 +65,13 @@ Fable5 uses integer PCG-style hashing for stable large-coordinate scatter.
 Current status:
 
 - Drusniel already had `tree_pcg2d` in WGSL.
-- The composed GPU tree ring shader now rewrites `tree_hash` and `tree_hash2` to use PCG instead of `fract(sin(dot(...)))`.
-- Test coverage confirms the old sin hash is not present in the composed tree ring shader.
+- The composed GPU tree ring shader rewrites `tree_hash` and `tree_hash2` to use PCG instead of `fract(sin(dot(...)))`.
+- CPU validation now uses `treePcg2d` for hash and jitter parity with the composed GPU shader.
+- Tests cover the composed WGSL PCG rewrite and the CPU validation hash/jitter helpers.
 
 Remaining work:
 
-- CPU validation/scatter helper should be checked for PCG parity too. Some CPU helper paths still appear to use a sin/fract hash.
+- CPU validation species selection and hydrology logic may still be approximate compared with the full GPU shader path. Treat validation as a debug guard, not a perfect oracle, until local measurements confirm parity.
 
 ### 5. Fable5 has a more integrated impostor path
 
@@ -174,7 +176,7 @@ Explicit debug flags can still enable them.
 
 ### Done: GPU tree scatter hash moved to PCG
 
-Shader composition now rewrites the GPU tree ring hash helpers to use `tree_pcg2d`.
+Shader composition rewrites the GPU tree ring hash helpers to use `tree_pcg2d`.
 
 Tests confirm:
 
@@ -204,8 +206,8 @@ Implemented:
 - When `settings.lod.shadowsMaxLod === "none"`, GPU tree ring dispatch passes zero shadow capacity.
 - Shadow cascade planes are not sent to compute in `none` mode.
 - Packed max shadow LOD into `settings_e.z` in the tree ring uniform block.
-- Composed WGSL now checks `max_shadow_lod` before shadow append atomics.
-- `near`, `mid`, and `far` now skip shadow appends for LODs above the budget.
+- Composed WGSL checks `max_shadow_lod` before shadow append atomics.
+- `near`, `mid`, and `far` skip shadow appends for LODs above the budget.
 - `treeGpuRingKey` includes `settings.lod.shadowsMaxLod`, so changing the budget rebuilds the relevant GPU ring resources.
 - Tests cover WGSL gate insertion and TypeScript param packing.
 
@@ -219,22 +221,33 @@ This directly benefits:
 ?quality=balanced&treeShadowMaxLod=mid
 ```
 
+### Done: CPU validation hash and shadow parity cleanup
+
+Implemented:
+
+- Replaced the CPU validation helper's old sin/fract hash with `treePcg2d`.
+- Matched CPU validation jitter to the GPU shape:
+  - GPU: `tree_hash2(wc, 1103u)` returns both jitter components from one PCG call.
+  - CPU validation now does the same via `treeRingValidationJitter`.
+- CPU validation shadow counts now respect `treeLodCastsShadow(settings, lod)`.
+- Tests cover PCG hash/jitter parity and shadow LOD filtering in CPU validation counts.
+
 ## Code Health Findings
 
-### CPU validation/scatter helper may still use older ecology names
+### CPU validation is closer, but not guaranteed perfect
 
-While reviewing CPU/GPU parity code, some helper files appeared to reference older ecology field names such as `ecology.terrain` and `ecology.clustering`, while the current tree config shape uses `ecology.density` and `ecology.clumping`.
+The CPU helper now matches the GPU hash/jitter and shadow LOD budget. It may still differ from the full GPU shader in species ecology, hydrology, or material weighting details. Keep validation as a debug tool until local tests and real captures prove acceptable tolerance.
 
-This needs a local `npm run typecheck` confirmation. If typecheck fails there, fix the helper names before relying on GPU validation.
+### Local validation still required
 
-### CPU validation hash parity still needs cleanup
+The GitHub connector cannot run the local suite. The new work must be checked locally with:
 
-GPU tree ring scatter now uses PCG in the composed shader. Some CPU helper paths still use a sin/fract hash. If those helpers are used for CPU/GPU validation, validation may disagree with the GPU even if rendering is correct.
-
-Next cleanup:
-
-- Replace CPU helper `treeRingHash` with `treePcg2d(...)[0]` where parity matters.
-- Add validation tests for CPU/GPU scatter parity.
+```bash
+cd tools/clod-poc
+npm run typecheck
+npm test
+npm run build
+```
 
 ## Implementation Plan
 
@@ -271,11 +284,11 @@ Status: done.
 
 ### Phase 4: Replace GPU tree hash with PCG
 
-Status: done for composed GPU shader.
+Status: done for composed GPU shader and CPU validation helper.
 
 Remaining:
 
-- CPU parity helper cleanup.
+- Verify tolerance with `treeGpuValidate=1` in real captures.
 
 ### Phase 5: Reduce tree shadow cost
 
@@ -341,6 +354,7 @@ Performance checks:
 - CPU fallback must still work.
 - `treeShadowMaxLod=none` must skip GPU shadow work.
 - `treeShadowMaxLod=near` must skip mid/far/impostor GPU shadow append work.
+- `treeGpuValidate=1` should not produce obvious false positives caused only by hash/jitter or shadow LOD mismatch.
 - No shader compile errors.
 - No missing near-camera trees.
 
@@ -349,12 +363,13 @@ Performance checks:
 Suggested commit title:
 
 ```text
-Fix CPU tree validation parity with GPU PCG scatter
+Expose tree GPU runtime status in overlay
 ```
 
 Likely files:
 
-- `tools/clod-poc/src/trees/tree_ring_lighting_proxies.ts`
-- tests around CPU/GPU validation helpers
+- `tools/clod-poc/src/trees/tree_info.ts`
+- `tools/clod-poc/src/runtime/vegetation/tree_controller.ts`
+- UI/info overlay files that render tree stats
 
-Do not start with a new visual tree effect. The biggest remaining tree win is validating that the GPU path is actually active and then cleaning CPU/GPU validation parity.
+Do not start with a new visual tree effect. The biggest remaining tree win is proving that the GPU path is actually active, visible, and measurable in the running app.
