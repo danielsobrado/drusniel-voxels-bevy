@@ -362,7 +362,7 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
   controls.update();
 
   const usePost = searchParams.get("post") === "1";
-  const postProcess = usePost ? new WebGpuPostProcessPipeline(renderer, scene, camera) : null;
+  const postProcess = usePost ? new WebGpuPostProcessPipeline(renderer, scene, camera, {}, () => sky.lighting) : null;
   const fadeFrames = Number(searchParams.get("lodFadeFrames"));
   const fadeStep = 1 / (Number.isFinite(fadeFrames) ? THREE.MathUtils.clamp(fadeFrames, 2, 60) : 12);
   const useDig = searchParams.get("dig") === "1";
@@ -577,6 +577,7 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
       (useStones ? `stones: ${stones?.getStats()?.total ?? 0}\n` : "") +
       (useDig ? `dig: ${digOp} r=${digRadius} ${lastDigSummary}\n` : "") +
       `controls: orbit; ?dig=1 click terrain to edit`;
-    renderer.render(scene, camera);
+    if (postProcess) postProcess.render(scene, camera);
+    else renderer.render(scene, camera);
   });
 }
