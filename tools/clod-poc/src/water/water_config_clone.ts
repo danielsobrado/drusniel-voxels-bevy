@@ -1,5 +1,5 @@
 import { cloneHydrologyConfig } from "./hydrologyConfig.js";
-import type { WaterConfig } from "./waterConfig.js";
+import type { WaterConfig } from "./water_config_types.js";
 
 export function cloneWaterConfig(config: WaterConfig): WaterConfig {
   return {
