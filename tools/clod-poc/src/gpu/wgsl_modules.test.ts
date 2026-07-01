@@ -45,6 +45,19 @@ describe("WGSL module composition", () => {
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
   });
 
+  it("skips visible and shadow appends for terrain hidden tree candidates", () => {
+    const source = composeTreeRingShader();
+    const hiddenReturn = source.indexOf("if (terrain_hidden) { return; }");
+    const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
+    const visibleAppend = source.indexOf("append_lod_if_active(species, TREE_LOD_NEAR");
+
+    expect(hiddenReturn).toBeGreaterThan(-1);
+    expect(shadowAppend).toBeGreaterThan(-1);
+    expect(visibleAppend).toBeGreaterThan(-1);
+    expect(hiddenReturn).toBeLessThan(shadowAppend);
+    expect(hiddenReturn).toBeLessThan(visibleAppend);
+  });
+
   it("rewrites tree scatter hash to integer PCG", () => {
     const source = composeTreeRingShader();
     expect(source).toContain("return tree_pcg2d(cell, params.settings_u.z + salt).x;");
