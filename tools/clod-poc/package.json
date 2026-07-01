@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "shoot": "tsx tools/shoot.ts",
     "perf:main": "tsx tools/perf-main.ts",
+    "perf:postfx": "tsx tools/postfx-perf-matrix.ts",
     "shoot-props": "tsx tools/shoot-props.ts",
     "compare": "tsx tools/compare.ts",
     "battery": "tsx tools/battery.ts",
