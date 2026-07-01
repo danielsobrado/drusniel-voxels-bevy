@@ -16,7 +16,7 @@ export function formatTreeInfoLine(treesEnabled: boolean, totalTrees: TreeTotalD
   return `trees: ${runtimePath} ${formatTreeTotal(totalTrees)} trees` +
     (treeStats
       ? ` patches=${treeStats.visiblePatches}/${treeStats.patches}` +
-        formatTreeTerrainHidden(treeStats) +
+        formatTreeTerrainPatchStats(treeStats) +
         ` lod n/m/f/i=${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}` +
         formatTreeImpostorStatus(treeStats) +
         formatTreeGpuStats(treeStats)
@@ -48,8 +48,8 @@ function formatTreeTotal(totalTrees: TreeTotalDisplay): string {
   return typeof totalTrees === "number" ? totalTrees.toLocaleString() : totalTrees;
 }
 
-function formatTreeTerrainHidden(treeStats: TreeStats): string {
-  return treeStats.terrainOccludedPatches > 0 ? ` terrainHidden=${treeStats.terrainOccludedPatches}` : "";
+function formatTreeTerrainPatchStats(treeStats: TreeStats): string {
+  return treeStats.terrainOccludedPatches > 0 ? ` terrainOccPatches=${treeStats.terrainOccludedPatches}` : "";
 }
 
 function formatTreeImpostorStatus(treeStats: TreeStats): string {
@@ -69,13 +69,13 @@ function formatTreeGpuStats(treeStats: TreeStats): string {
   const dispatch = treeStats.gpuDispatchMs !== null ? ` dispatch=${treeStats.gpuDispatchMs.toFixed(1)}ms` : "";
   return ` path=${path} candidates=${treeStats.gpuCandidateCount}` +
     ` accepted=${treeStats.gpuAcceptedCount} visible=${treeStats.gpuVisibleCount}` +
-    ` shadow=${treeStats.gpuShadowCasterCount}${formatTreeTerrainDebugCounts(treeStats)}${dispatch}${overflow}${shadowOverflow}`;
+    ` shadow=${treeStats.gpuShadowCasterCount}${formatTreeTerrainCandidateStats(treeStats)}${dispatch}${overflow}${shadowOverflow}`;
 }
 
-function formatTreeTerrainDebugCounts(treeStats: TreeStats): string {
+function formatTreeTerrainCandidateStats(treeStats: TreeStats): string {
   const hasCounts = treeStats.terrainHiddenCandidates > 0 ||
     treeStats.terrainVisibleCandidates > 0;
   if (!hasCounts) return "";
-  return ` terrainHidden=${treeStats.terrainHiddenCandidates}` +
-    ` terrainVisible=${treeStats.terrainVisibleCandidates}`;
+  return ` terrainOccCandidates=${treeStats.terrainHiddenCandidates}` +
+    ` terrainVisibleCandidates=${treeStats.terrainVisibleCandidates}`;
 }
