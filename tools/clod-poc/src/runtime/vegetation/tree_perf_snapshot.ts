@@ -1,5 +1,6 @@
 import type { TreeStats } from "../../trees/index.js";
 import { formatTreeGpuStatusPath } from "../../trees/tree_info.js";
+import { formatTreePerfSnapshotRow } from "./tree_perf_snapshot_row.js";
 
 export interface TreePerfSnapshotState {
   postProcessQualityPreset?: string;
@@ -45,6 +46,10 @@ export function formatTreePerfSnapshot(input: TreePerfSnapshotInput): string {
     `- gpu shadow casters: ${stats?.gpuShadowCasterCount ?? "unknown"}`,
     `- gpu overflow: ${stats ? yesNo(stats.gpuOverflowed) : "unknown"}`,
     `- gpu shadow overflow: ${stats ? yesNo(stats.gpuShadowOverflowed) : "unknown"}`,
+    "",
+    "## Capture Table Row",
+    "",
+    formatTreePerfSnapshotRow(input),
     "",
     "## Tree Settings",
     "",
