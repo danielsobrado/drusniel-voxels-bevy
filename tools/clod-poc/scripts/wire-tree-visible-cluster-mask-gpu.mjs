@@ -176,9 +176,34 @@ function applyEdit(edit) {
   return { name: edit.name, status: dryRun ? "would-apply" : "applied" };
 }
 
-const results = edits.map(applyEdit);
-console.log(JSON.stringify({ dryRun, results }, null, 2));
+function validateVisibleOnlySemantics() {
+  const source = readFileSync(modulesPath, "utf8");
+  const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
+  const visibleReject = source.indexOf("if (terrain_hidden || !tree_slot_visible_cluster_visible(slot)) { return; }") >= 0
+    ? source.indexOf("if (terrain_hidden || !tree_slot_visible_cluster_visible(slot)) { return; }")
+    : source.indexOf("if (terrain_hidden) { return; }");
+  const visibleAppend = source.indexOf("append_lod_if_active(species, TREE_LOD_NEAR");
+  const unsafeFullSlotSkip = source.includes("if (!tree_slot_cluster_visible(slot)) { return; }") ||
+    source.includes("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
 
-if (results.some((result) => result.status === "missing-anchor")) {
+  const errors = [];
+  if (unsafeFullSlotSkip) errors.push("cluster visibility appears to skip the whole slot before shadow generation");
+  if (shadowAppend < 0) errors.push("shadow append anchor missing");
+  if (visibleReject < 0) errors.push("visible reject anchor missing");
+  if (visibleAppend < 0) errors.push("visible append anchor missing");
+  if (shadowAppend >= 0 && visibleReject >= 0 && visibleReject <= shadowAppend) {
+    errors.push("visible reject must stay after shadow append");
+  }
+  if (visibleReject >= 0 && visibleAppend >= 0 && visibleReject >= visibleAppend) {
+    errors.push("visible reject must stay before visible append");
+  }
+  return { name: "visible-only semantic validation", status: errors.length === 0 ? "ok" : "invalid", errors };
+}
+
+const results = edits.map(applyEdit);
+const semanticValidation = dryRun ? null : validateVisibleOnlySemantics();
+console.log(JSON.stringify({ dryRun, results, semanticValidation }, null, 2));
+
+if (results.some((result) => result.status === "missing-anchor") || semanticValidation?.status === "invalid") {
   process.exitCode = 1;
 }
