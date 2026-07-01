@@ -4,7 +4,6 @@ import { defaultTreeTerrainSampler, type TreeTerrainSampler } from "./tree_insta
 import { isTreeClusterTerrainOccluded } from "./tree_terrain_occlusion.js";
 import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
 import { treeLodDistances, treeLodRing } from "./tree_system_lod_math.js";
-import { visibleTreeLodCount } from "./tree_system_math.js";
 import {
   TREE_GPU_RING_CELL,
   TREE_GPU_RING_GROUP_COUNT,
@@ -353,8 +352,4 @@ function treeRingLodParams(settings: TreeSettings): { near: number; mid: number;
     radius: lod.impostor,
     band: settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0,
   };
-}
-
-function sumCounts(counts: readonly number[]): number {
-  return counts.reduce((sum, count) => sum + Math.max(0, Math.floor(count)), 0);
 }
