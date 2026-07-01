@@ -1,6 +1,10 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { compactStageList, postFxCaseDiagnostics, type PostFxCaseDiagnostics } from "../src/gpu/postfx_case_diagnostics.js";
+import {
+  evaluatePostFxPerfGate,
+  parsePostFxPerfGateConfig,
+} from "../src/gpu/postfx_perf_gate.js";
 import { launchWebGPU } from "./launch.js";
 
 interface PostFxPerfCase {
@@ -55,6 +59,14 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
     }
   }
   return parsed;
+}
+
+function boolArg(args: Record<string, string | boolean>, key: string): boolean {
+  const value = args[key];
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "on" || normalized === "yes";
 }
 
 function stringArg(args: Record<string, string | boolean>, key: string, fallback: string): string {
@@ -157,6 +169,25 @@ async function runCase(
   }
 }
 
+function enforcePerfThresholds(summary: { cases: PerfCaseResult[] }, configPath: string): void {
+  const config = parsePostFxPerfGateConfig(readFileSync(configPath, "utf8"));
+  const result = evaluatePostFxPerfGate(summary, config);
+  if (!result.enabled) return;
+  for (const row of result.rows) {
+    console.log(
+      `[postfx-perf] ${row.caseName}: ` +
+        `frameP50 +${ms(row.frameP50DeltaMs)}/${row.thresholds.maxFrameP50DeltaMs}, ` +
+        `frameP95 +${ms(row.frameP95DeltaMs)}/${row.thresholds.maxFrameP95DeltaMs}, ` +
+        `renderP95 +${ms(row.renderP95DeltaMs)}/${row.thresholds.maxRenderP95DeltaMs}`,
+    );
+  }
+  if (result.failures.length === 0) return;
+  for (const item of result.failures) {
+    console.error(`[postfx-perf] LIMIT ${item.caseName} ${item.metric}: +${ms(item.deltaMs)} > ${item.thresholdMs}`);
+  }
+  throw new Error(`${result.failures.length} postfx perf threshold(s) exceeded`);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const baseUrl = stringArg(args, "baseUrl", process.env["CLOD_POC_BASE_URL"] ?? "http://127.0.0.1:5180/");
@@ -165,6 +196,8 @@ async function main(): Promise<void> {
   const timeoutMs = Number(stringArg(args, "timeout", "180000"));
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
   const outDir = stringArg(args, "out", join("perf-runs", `postfx-${runId}`));
+  const shouldCheck = boolArg(args, "check");
+  const gateConfig = stringArg(args, "gateConfig", "src/environment/config/postfx_perf_gate.yaml");
   mkdirSync(outDir, { recursive: true });
 
   const baseParams = {
@@ -192,6 +225,7 @@ async function main(): Promise<void> {
   const summary = { schemaVersion: 1, baseUrl, baseParams, launchRecipe: recipe, cases: results };
   writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
   writeFileSync(join(outDir, "summary.md"), markdown(results));
+  if (shouldCheck) enforcePerfThresholds(summary, gateConfig);
   console.log(`[postfx-perf] wrote ${join(outDir, "summary.md")}`);
 }
 
