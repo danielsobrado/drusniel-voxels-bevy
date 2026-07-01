@@ -24,7 +24,7 @@ export interface TreeRingClusterVisibilityMask {
   grid: number;
   clusterDimCells: number;
   clusterGrid: number;
-  mask: Uint8Array;
+  words: Uint32Array;
   hiddenClusters: number;
   visibleClusters: number;
   unknownKeptClusters: number;
@@ -35,7 +35,7 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
   const grid = treeGpuRingGrid(options.settings);
   const clusterDimCells = Math.max(1, Math.floor(options.clusterDimCells ?? TREE_RING_CLUSTER_DIM_CELLS));
   const clusterGrid = Math.max(1, Math.ceil(grid / clusterDimCells));
-  const mask = new Uint8Array(clusterGrid * clusterGrid);
+  const words = new Uint32Array(clusterGrid * clusterGrid);
   const reasonCounts = createReasonCounts();
   const provider = createVegetationVisibilityProvider();
   const terrainSampler = createTerrainHeightSampler(options.sampler);
@@ -71,13 +71,13 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
       });
       reasonCounts[result.reason]++;
       if (result.reason === "unknown_kept") unknownKeptClusters++;
-      mask[index] = result.visible ? 1 : 0;
+      words[index] = result.visible ? 1 : 0;
       if (result.visible) visibleClusters++;
       else hiddenClusters++;
     }
   }
 
-  return { grid, clusterDimCells, clusterGrid, mask, hiddenClusters, visibleClusters, unknownKeptClusters, reasonCounts };
+  return { grid, clusterDimCells, clusterGrid, words, hiddenClusters, visibleClusters, unknownKeptClusters, reasonCounts };
 }
 
 export function treeRingSlotClusterVisible(clusterMask: TreeRingClusterVisibilityMask | null | undefined, slot: number): boolean {
@@ -87,13 +87,13 @@ export function treeRingSlotClusterVisible(clusterMask: TreeRingClusterVisibilit
   const slotZ = Math.floor(safeSlot / clusterMask.grid);
   const clusterX = Math.min(clusterMask.clusterGrid - 1, Math.floor(slotX / clusterMask.clusterDimCells));
   const clusterZ = Math.min(clusterMask.clusterGrid - 1, Math.floor(slotZ / clusterMask.clusterDimCells));
-  return clusterMask.mask[clusterIndex(clusterX, clusterZ, clusterMask.clusterGrid)] !== 0;
+  return clusterMask.words[clusterIndex(clusterX, clusterZ, clusterMask.clusterGrid)] !== 0;
 }
 
 export function treeRingClusterMaskByteLength(settings: TreeSettings, clusterDimCells = TREE_RING_CLUSTER_DIM_CELLS): number {
   const grid = treeGpuRingGrid(settings);
   const clusterGrid = Math.max(1, Math.ceil(grid / Math.max(1, Math.floor(clusterDimCells))));
-  return clusterGrid * clusterGrid;
+  return clusterGrid * clusterGrid * Uint32Array.BYTES_PER_ELEMENT;
 }
 
 function createTerrainHeightSampler(sampler: TreeTerrainSampler | undefined): TerrainHeightSampler | undefined {
