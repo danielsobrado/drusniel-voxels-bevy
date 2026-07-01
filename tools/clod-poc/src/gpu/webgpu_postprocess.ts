@@ -4,10 +4,16 @@ import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { traa } from "three/addons/tsl/display/TRAANode.js";
 import {
   Fn,
+  If,
+  Return,
   clamp,
   dot,
+  exp2,
   float,
   getViewPosition,
+  instanceIndex,
+  instancedArray,
+  log2,
   luminance,
   mix,
   mrt,
@@ -16,6 +22,7 @@ import {
   screenSize,
   screenUV,
   smoothstep,
+  texture,
   uniform,
   vec2,
   vec3,
@@ -27,6 +34,12 @@ import {
   toneMappingModeToThree,
   type PostProcessSettings,
 } from "../environment/postprocess.js";
+import {
+  autoExposureWeightTotal,
+  centerMeterWeight,
+  DEFAULT_POSTFX_AUTO_EXPOSURE,
+  type PostFxAutoExposureSettings,
+} from "./postfx_auto_exposure.js";
 import {
   DEFAULT_POSTFX_COLOR_SCRIPT,
   DEFAULT_POSTFX_GRADE,
@@ -82,6 +95,24 @@ export function postProcessOutputGraphDirty(
   return webGpuPostProcessGraphKey(currentResolved) !== webGpuPostProcessGraphKey(nextResolved);
 }
 
+function searchParams(): URLSearchParams | null {
+  if (typeof globalThis.location === "undefined") return null;
+  return new URLSearchParams(globalThis.location.search);
+}
+
+function queryFlag(keys: string[], fallback: boolean): boolean {
+  const params = searchParams();
+  if (!params) return fallback;
+  for (const key of keys) {
+    const raw = params.get(key);
+    if (raw === null) continue;
+    const value = raw.trim().toLowerCase();
+    if (value === "1" || value === "true" || value === "on" || value === "yes") return true;
+    if (value === "0" || value === "false" || value === "off" || value === "no") return false;
+  }
+  return fallback;
+}
+
 function isSetIndexBufferError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("setIndexBuffer") && message.includes("GPUBuffer");
@@ -129,8 +160,14 @@ export class WebGpuPostProcessPipeline {
   private camera: THREE.Camera;
   private firstCameraSync = true;
   private lightingErrorReported = false;
+  private exposureErrorReported = false;
+  private exposureBuffer: TslAny | null = null;
+  private exposureKernel: TslAny | null = null;
   private readonly projectionInverse = new THREE.Matrix4();
   private readonly colorScript: PostFxColorScript = DEFAULT_POSTFX_COLOR_SCRIPT;
+  private readonly autoExposure: PostFxAutoExposureSettings = DEFAULT_POSTFX_AUTO_EXPOSURE;
+  private readonly autoExposureEnabled: boolean;
+  private readonly lockExposure: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
   private readonly uContrast = uniform(1.0) as unknown as NumericUniform;
   private readonly uSaturation = uniform(1.0) as unknown as NumericUniform;
@@ -162,6 +199,8 @@ export class WebGpuPostProcessPipeline {
     this.scene = scene;
     this.camera = camera;
     this.settings = withPostProcessDefaults(settings);
+    this.autoExposureEnabled = queryFlag(["autoExposure", "autoexposure"], this.autoExposure.enabled);
+    this.lockExposure = queryFlag(["lockexp", "lockExposure", "lockexposure"], this.autoExposure.lock);
     this.applyRendererSettings();
     this.updateUniforms();
   }
@@ -198,6 +237,7 @@ export class WebGpuPostProcessPipeline {
     const pipeline = this.ensurePipeline(scene, camera);
     try {
       pipeline.render();
+      this.meterExposure();
     } catch (error) {
       if (!isSetIndexBufferError(error)) {
         reportPostProcessError(error);
@@ -207,6 +247,7 @@ export class WebGpuPostProcessPipeline {
       if (converted <= 0) throw error;
       console.warn(`[webgpu-post] converted ${converted} indexed terrain mesh(es) to non-indexed geometry after setIndexBuffer failure`);
       pipeline.render();
+      this.meterExposure();
     }
   }
 
@@ -269,9 +310,13 @@ export class WebGpuPostProcessPipeline {
     const beauty = scenePass.getTextureNode("output") as TslAny;
     const depthTex = scenePass.getTextureNode("depth") as TslAny;
     const pipeline = new RenderPipeline(this.renderer);
-    pipeline.outputNode = this.settings.debugMode === "copy"
-      ? beauty
-      : this.createOutputNode(beauty, depthTex, camera);
+    if (this.settings.debugMode === "copy") {
+      this.exposureKernel = null;
+      pipeline.outputNode = beauty;
+    } else {
+      this.configureAutoExposure(beauty);
+      pipeline.outputNode = this.createOutputNode(beauty, depthTex, camera);
+    }
     return pipeline;
   }
 
@@ -348,9 +393,12 @@ export class WebGpuPostProcessPipeline {
     const uShadowAmount = this.uShadowAmount as unknown as TslAny;
     const uHighlightTint = this.uHighlightTint as unknown as TslAny;
     const uHighlightAmount = this.uHighlightAmount as unknown as TslAny;
+    const autoExposure = this.autoExposureEnabled && this.exposureBuffer
+      ? this.exposureBuffer.element(0)
+      : float(1);
 
     return Fn((): TslAny => {
-      const balanced = postRgb.mul(uExposure).mul(uWhiteBalance);
+      const balanced = postRgb.mul(uExposure).mul(autoExposure).mul(uWhiteBalance);
       const luma = dot(balanced, vec3(...LUMA_WEIGHTS));
       const shadowMask = smoothstep(0.45, 0.08, luma).mul(uShadowAmount);
       const shadowed = tslMix(balanced, balanced.mul(uShadowTint), shadowMask);
@@ -363,6 +411,80 @@ export class WebGpuPostProcessPipeline {
       const graded = saturated.mul(vignette);
       return tslMix(sourceRgb, graded, clamp(uOpacity, 0, 1));
     })();
+  }
+
+  private configureAutoExposure(beauty: TslAny): void {
+    this.exposureKernel = null;
+    if (!this.autoExposureEnabled) return;
+    this.ensureExposureBuffer();
+    this.exposureKernel = this.createExposureKernel(beauty);
+    this.exposureKernel.setName?.("autoExposure");
+  }
+
+  private ensureExposureBuffer(): void {
+    if (this.exposureBuffer) return;
+    this.exposureBuffer = instancedArray(2, "float") as TslAny;
+    const exposureBuffer = this.exposureBuffer;
+    const initKernel = Fn((): void => {
+      exposureBuffer.element(0).assign(1);
+      exposureBuffer.element(1).assign(1);
+    })().compute(1);
+    this.runExposureCompute(initKernel, true);
+  }
+
+  private createExposureKernel(beauty: TslAny): TslAny {
+    const exposureBuffer = this.exposureBuffer as TslAny;
+    const settings = this.autoExposure;
+    const samples = settings.samplesPerAxis;
+    const weightTotal = autoExposureWeightTotal(samples, settings.centerWeightStrength);
+
+    return Fn((): void => {
+      If(instanceIndex.greaterThanEqual(1), () => {
+        Return();
+      });
+      const logSum = float(0).toVar();
+      for (let gy = 0; gy < samples; gy++) {
+        for (let gx = 0; gx < samples; gx++) {
+          const u = (gx + 0.5) / samples;
+          const v = (gy + 0.5) / samples;
+          const weight = centerMeterWeight(u, v, settings.centerWeightStrength);
+          const color = texture(beauty.value, vec2(u, v)).rgb;
+          const lum = luminance(color).max(1e-4);
+          logSum.addAssign(log2(lum).mul(weight));
+        }
+      }
+      const averageLum = exp2(logSum.div(weightTotal));
+      const target = clamp(float(settings.targetLuminance).div(averageLum), settings.minExposure, settings.maxExposure);
+      const previous = exposureBuffer.element(0);
+      exposureBuffer.element(0).assign(tslMix(previous, target, settings.adaptationRate));
+    })().compute(1);
+  }
+
+  private meterExposure(): void {
+    if (this.lockExposure || !this.exposureKernel) return;
+    this.runExposureCompute(this.exposureKernel, false);
+  }
+
+  private runExposureCompute(kernel: TslAny, preferAsync: boolean): void {
+    const renderer = this.renderer as unknown as {
+      compute?: (node: TslAny) => void;
+      computeAsync?: (node: TslAny) => Promise<unknown>;
+    };
+    try {
+      if (preferAsync && renderer.computeAsync) {
+        void renderer.computeAsync(kernel).catch((error: unknown) => this.reportExposureError(error));
+        return;
+      }
+      renderer.compute?.(kernel);
+    } catch (error) {
+      this.reportExposureError(error);
+    }
+  }
+
+  private reportExposureError(error: unknown): void {
+    if (this.exposureErrorReported) return;
+    this.exposureErrorReported = true;
+    console.warn("[webgpu-post] auto-exposure compute failed; continuing with last exposure", error);
   }
 
   private syncCameraUniforms(camera: THREE.Camera): void {
@@ -399,5 +521,6 @@ export class WebGpuPostProcessPipeline {
     (this.pipeline as unknown as { dispose?: () => void } | null)?.dispose?.();
     this.pipeline = null;
     this.pipelineKey = "";
+    this.exposureKernel = null;
   }
 }
