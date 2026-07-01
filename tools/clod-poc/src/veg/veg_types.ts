@@ -80,7 +80,7 @@ export interface FoliageParams {
   planarLeaves?: boolean;
   /** Capture-tile style override for future atlas baking. */
   captureStyle?: "frond";
-  /** Fable5-style cluster-card placement parameters. */
+  /** cluster-card placement parameters. */
   card?: FoliageCardParams;
   /** species leaf geometry */
   leaf: LeafShapeParams;

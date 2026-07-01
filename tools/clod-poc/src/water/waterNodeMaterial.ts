@@ -371,7 +371,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       mix(waterBase, waterEmissive, float(0.6)),
       mix(waterBase, skyReflection, clamp(fres.mul(0.72), 0.0, 0.82)),
     );
-    // Two-phase decorrelated foam (Fable5-style): two noise scales, each blended
+    // Two-phase decorrelated foam : two noise scales, each blended
     // across both phases, with variance renormalization to avoid flat midpoints.
     const foamHashA1: TslNode = fract(sin(dot(worldPos.xz.mul(uFoamNoiseScale).add(advectA.mul(float(0.7))), vec2(12.9898, 78.233))).mul(43758.5453));
     const foamHashB1: TslNode = fract(sin(dot(worldPos.xz.add(vec2(3.71, 1.13)).mul(uFoamNoiseScale).add(advectB.mul(float(0.7))), vec2(12.9898, 78.233))).mul(43758.5453));

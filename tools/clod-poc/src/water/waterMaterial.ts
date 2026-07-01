@@ -244,7 +244,7 @@ const WATER_FRAG = /* glsl */ `
     vec3 reflectDir = normalize(reflect(-viewDir, normal));
     vec3 envReflection = skyReflection(reflectDir, sunDir) * 0.88;
 
-    // Two-phase decorrelated foam (Fable5-style): two noise scales, each blended
+    // Two-phase decorrelated foam : two noise scales, each blended
     // across both phases, with variance renormalization to avoid flat midpoints.
     float foamA1 = noise2(worldPos.xz * uFoamNoiseScale + advectA * 0.7);
     float foamB1 = noise2((worldPos.xz + vec2(3.71, 1.13)) * uFoamNoiseScale + advectB * 0.7);
@@ -256,7 +256,7 @@ const WATER_FRAG = /* glsl */ `
     float breakup = smoothstep(0.35, 0.82, foamBlend * 0.62 + foamDetail * 0.38);
     float wetFade = smoothstep(0.005, 0.05, depth) * vBodyMask;
     float shore = (1.0 - smoothstep(uShoreFoamStart, uShoreFoamEnd, depth)) * wetFade * breakup * uFoamShoreStrength;
-    // Rapids: speed + per-vertex drop from aFlow.w (Fable5-style).
+    // Rapids: speed + per-vertex drop from aFlow.w .
     // Only fast + steep water froths — a large calm river stays clear.
     float riverFast = smoothstep(uFoamSpeedStart, uFoamSpeedEnd, vFlow.z);
     float riverDrop = smoothstep(uFoamDropStart, uFoamDropEnd, vFlow.w);
