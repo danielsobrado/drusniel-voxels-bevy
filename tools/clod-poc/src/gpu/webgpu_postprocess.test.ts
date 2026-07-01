@@ -14,6 +14,20 @@ describe("postProcessOutputGraphDirty", () => {
     expect(postProcessOutputGraphDirty(current, { debugMode: "copy" })).toBe(true);
   });
 
+  it("rebuilds when effect graph stages change", () => {
+    const current = { ...DEFAULT_POST_PROCESS_SETTINGS };
+    expect(postProcessOutputGraphDirty(current, { bloomEnabled: !current.bloomEnabled })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { taaEnabled: !current.taaEnabled })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { aerialPerspectiveEnabled: !current.aerialPerspectiveEnabled })).toBe(true);
+  });
+
+  it("rebuilds when bloom node constants change", () => {
+    const current = { ...DEFAULT_POST_PROCESS_SETTINGS };
+    expect(postProcessOutputGraphDirty(current, { bloomThreshold: current.bloomThreshold + 0.01 })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { bloomStrength: current.bloomStrength + 0.01 })).toBe(true);
+    expect(postProcessOutputGraphDirty(current, { bloomRadius: current.bloomRadius + 0.01 })).toBe(true);
+  });
+
   it("does not rebuild when only grading uniforms change", () => {
     const current = { ...DEFAULT_POST_PROCESS_SETTINGS };
     expect(postProcessOutputGraphDirty(current, {
