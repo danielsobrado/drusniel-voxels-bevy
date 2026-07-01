@@ -6,6 +6,7 @@ import {
   exp,
   float,
   getViewPosition,
+  log2,
   mix,
   screenUV,
   smoothstep,
@@ -70,12 +71,11 @@ export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeIn
       if (volume) {
         const volumeNear = Math.max(0.0001, volume.nearMeters);
         const volumeFar = Math.max(volumeNear, volume.maxDistanceMeters);
-        const volumeDepth = fogDistance
-          .max(volumeNear)
-          .div(volumeNear)
-          .log2()
-          .div(Math.log2(volumeFar / volumeNear))
-          .clamp(0, 1);
+        const volumeDepth = clamp(
+          log2(fogDistance.max(volumeNear).div(volumeNear)).div(Math.log2(volumeFar / volumeNear)),
+          0,
+          1,
+        );
         const integrated = texture3D(volume.integratedTexture, vec3(screenUV.x, screenUV.y, volumeDepth), 0) as TslAny;
         if (froxelDebugMode === "density") {
           return vec3(clamp(float(1).sub(integrated.a), 0, 1));
