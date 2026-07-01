@@ -50,13 +50,16 @@ import {
 } from "./grass_gpu_ring.js";
 import type { GrassGenerationStats, GrassStats } from "./grass_stats.js";
 import { grassFadeDistance, grassRingBands } from "./grass_math.js";
+import {
+  grassThinnedInstanceCount,
+  type GrassGpuRingComputeFactory,
+  type GrassPatch,
+} from "./grass_system_support.js";
 
-export type GrassGpuRingComputeFactory = (
-  device: GPUDevice,
-  edits: readonly import("../gpu/terrain_field_core.js").ResolvedDigEdit[],
-  outputBuffers: import("../gpu/grass_ring_compute.js").GrassGpuRingOutputBuffers | null,
-  ring: import("./grass_config.js").GrassRingSettings,
-) => Promise<GrassGpuRingCompute>;
+export {
+  grassThinnedInstanceCount,
+  type GrassGpuRingComputeFactory,
+} from "./grass_system_support.js";
 
 export interface GrassSystemOptions {
   scene: THREE.Scene;
@@ -71,24 +74,6 @@ export interface GrassSystemOptions {
   createMaterial?: GrassMaterialFactory;
   buildGeometry?: GrassGeometryBuilder;
   createGpuRingCompute?: GrassGpuRingComputeFactory;
-}
-
-interface GrassPatch {
-  nodeId: string;
-  meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[];
-  centerX: number;
-  centerZ: number;
-  radius: number;
-  bladeCount: number;
-  midBladeCount: number;
-  visibleTier: "hidden" | GrassTier;
-}
-
-export function grassThinnedInstanceCount(instanceCount: number, thinRatio: number): number {
-  if (instanceCount <= 0) return 0;
-  const clamped = THREE.MathUtils.clamp(thinRatio, 0, 1);
-  if (clamped <= 0) return 0;
-  return Math.max(1, Math.floor(instanceCount * clamped));
 }
 
 export class GrassSystem {

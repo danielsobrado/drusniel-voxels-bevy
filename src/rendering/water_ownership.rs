@@ -14,6 +14,7 @@ pub enum WaterSurfaceOwner {
     Fallback,
     NearVoxelMesh,
     Clipmap,
+    DeepOcean,
     Hidden,
 }
 
@@ -21,6 +22,7 @@ pub enum WaterSurfaceOwner {
 pub struct WaterOwnershipStats {
     pub near_voxel_meshes: u32,
     pub clipmap_surfaces: u32,
+    pub deep_ocean_surfaces: u32,
     pub hidden_surfaces: u32,
     pub fallback_surfaces: u32,
 }
@@ -29,6 +31,7 @@ impl WaterOwnershipStats {
     pub fn clear(&mut self) {
         self.near_voxel_meshes = 0;
         self.clipmap_surfaces = 0;
+        self.deep_ocean_surfaces = 0;
         self.hidden_surfaces = 0;
         self.fallback_surfaces = 0;
     }
@@ -37,6 +40,7 @@ impl WaterOwnershipStats {
         match owner {
             WaterSurfaceOwner::NearVoxelMesh => self.near_voxel_meshes += 1,
             WaterSurfaceOwner::Clipmap => self.clipmap_surfaces += 1,
+            WaterSurfaceOwner::DeepOcean => self.deep_ocean_surfaces += 1,
             WaterSurfaceOwner::Hidden => self.hidden_surfaces += 1,
             WaterSurfaceOwner::Fallback => self.fallback_surfaces += 1,
         }
@@ -80,6 +84,11 @@ fn collect_water_ownership_stats(
     );
     timing.record_count(
         frame.0,
+        "Water Owner Deep Ocean Surfaces",
+        stats.deep_ocean_surfaces as f64,
+    );
+    timing.record_count(
+        frame.0,
         "Water Owner Hidden Surfaces",
         stats.hidden_surfaces as f64,
     );
@@ -100,11 +109,13 @@ mod tests {
 
         stats.record(WaterSurfaceOwner::NearVoxelMesh);
         stats.record(WaterSurfaceOwner::Clipmap);
+        stats.record(WaterSurfaceOwner::DeepOcean);
         stats.record(WaterSurfaceOwner::Hidden);
         stats.record(WaterSurfaceOwner::Fallback);
 
         assert_eq!(stats.near_voxel_meshes, 1);
         assert_eq!(stats.clipmap_surfaces, 1);
+        assert_eq!(stats.deep_ocean_surfaces, 1);
         assert_eq!(stats.hidden_surfaces, 1);
         assert_eq!(stats.fallback_surfaces, 1);
     }

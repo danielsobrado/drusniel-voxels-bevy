@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import type { ClodPageNode, PageFootprint } from "../types.js";
-import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstoryClassSettings, type UnderstorySettings } from "./understory_config.js";
+import type { ClodPageNode } from "../types.js";
+import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
 import {
   createUnderstoryGeometryMap,
   disposeUnderstoryGeometryMap,
@@ -9,8 +9,6 @@ import {
 import {
   emptyUnderstoryGenerationStats,
   generateUnderstoryInstances,
-  type UnderstoryGenerationStats,
-  type UnderstoryInstance,
   type UnderstoryTerrainSampler,
 } from "./understory_instances.js";
 import { createUnderstoryMaterialHandle, type UnderstoryMaterialHandle } from "./understory_material.js";
@@ -28,9 +26,23 @@ import {
   type UnderstoryHydrologyData,
 } from "../gpu/understory_ring_compute.js";
 import { understoryRingGroupCapacity, understoryRingCell } from "./understory_ring_math.js";
-import { getDigEditsSnapshot, getDigEditRevision } from "../terrain/terrain.js";
+import { getDigEditsSnapshot } from "../terrain/terrain.js";
 import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import { generateUnderstoryRingValidationCounts } from "./understory_ring_validation.js";
+import {
+  clampFootprint,
+  distance2d,
+  emptyUnderstoryStats,
+  footprintCenterX,
+  footprintCenterZ,
+  footprintRadius,
+  mergeGenerationStats,
+  understoryGpuRingKey,
+  understoryUsesGpuRingDraw,
+  type UnderstoryLightingProxy,
+  type UnderstoryPatch,
+  type UnderstoryStats,
+} from "./understory_system_support.js";
 
 export interface UnderstorySystemOptions {
   scene: THREE.Scene;
@@ -49,52 +61,6 @@ export interface UnderstorySystemOptions {
   hydrologyData?: UnderstoryHydrologyData | null;
   hydrologyWaterTexture?: THREE.Texture | null;
 }
-
-export function understoryUsesGpuRingDraw(settings: UnderstorySettings): boolean {
-  return settings.enabled && settings.gpu.enabled && !settings.gpu.debugForceCpu;
-}
-
-export interface UnderstoryStats extends UnderstoryGenerationStats {
-  totalInstances: number;
-  patches: number;
-  visiblePatches: number;
-  culledPatches: number;
-  shrub: number;
-  fern: number;
-  sapling: number;
-  flower: number;
-  deadLog: number;
-  stump: number;
-  gpuStatus: "disabled" | "unsupported" | "ring" | "fallback-cpu" | "error";
-  gpuCandidateCount: number;
-  gpuAcceptedCount: number;
-  gpuVisibleCount: number;
-  gpuOverflowed: boolean;
-  gpuDispatchMs: number | null;
-}
-
-export interface UnderstoryLightingProxy {
-  x: number;
-  z: number;
-  classId: UnderstoryClass;
-  scale: number;
-  densityWeight: number;
-}
-
-interface UnderstoryPatch {
-  nodeId: string;
-  footprint: PageFootprint;
-  centerX: number;
-  centerZ: number;
-  radius: number;
-  group: THREE.Group;
-  instances: UnderstoryInstance[];
-  meshes: Record<UnderstoryClass, THREE.InstancedMesh>;
-  visible: boolean;
-  generationStats: UnderstoryGenerationStats;
-}
-
-const INSTANCE_ATTRIBUTE_EPSILON = 1e-5;
 
 export class UnderstorySystem {
   private readonly scene: THREE.Scene;
@@ -736,106 +702,9 @@ export class UnderstorySystem {
   }
 }
 
-export function emptyUnderstoryStats(): UnderstoryStats {
-  return {
-    totalInstances: 0,
-    patches: 0,
-    visiblePatches: 0,
-    culledPatches: 0,
-    shrub: 0,
-    fern: 0,
-    sapling: 0,
-    flower: 0,
-    deadLog: 0,
-    stump: 0,
-    gpuStatus: "disabled",
-    gpuCandidateCount: 0,
-    gpuAcceptedCount: 0,
-    gpuVisibleCount: 0,
-    gpuOverflowed: false,
-    gpuDispatchMs: null,
-    ...emptyUnderstoryGenerationStats(),
-  };
-}
-
-function mergeGenerationStats(target: UnderstoryGenerationStats, source: UnderstoryGenerationStats): void {
-  target.generatedCandidates += source.generatedCandidates;
-  target.acceptedCandidates += source.acceptedCandidates;
-  target.rejectedSlope += source.rejectedSlope;
-  target.rejectedHeight += source.rejectedHeight;
-  target.rejectedMaterial += source.rejectedMaterial;
-  target.rejectedEcology += source.rejectedEcology;
-  target.rejectedSpacing += source.rejectedSpacing;
-  target.acceptedShrub += source.acceptedShrub;
-  target.acceptedFern += source.acceptedFern;
-  target.acceptedSapling += source.acceptedSapling;
-  target.acceptedFlower += source.acceptedFlower;
-  target.acceptedDeadLog += source.acceptedDeadLog;
-  target.acceptedStump += source.acceptedStump;
-}
-
-function clampFootprint(footprint: PageFootprint, worldCells: number): PageFootprint {
-  return {
-    minX: THREE.MathUtils.clamp(footprint.minX, 0, worldCells),
-    minZ: THREE.MathUtils.clamp(footprint.minZ, 0, worldCells),
-    maxX: THREE.MathUtils.clamp(footprint.maxX, 0, worldCells),
-    maxZ: THREE.MathUtils.clamp(footprint.maxZ, 0, worldCells),
-  };
-}
-
-function footprintCenterX(footprint: PageFootprint): number {
-  return (footprint.minX + footprint.maxX) * 0.5;
-}
-
-function footprintCenterZ(footprint: PageFootprint): number {
-  return (footprint.minZ + footprint.maxZ) * 0.5;
-}
-
-function footprintRadius(footprint: PageFootprint): number {
-  return Math.hypot(footprint.maxX - footprint.minX, footprint.maxZ - footprint.minZ) * 0.5;
-}
-
-function distance2d(ax: number, az: number, bx: number, bz: number): number {
-  if (Math.abs(ax - bx) < INSTANCE_ATTRIBUTE_EPSILON && Math.abs(az - bz) < INSTANCE_ATTRIBUTE_EPSILON) return 0;
-  return Math.hypot(ax - bx, az - bz);
-}
-
-function classKeyRow(cls: UnderstoryClassSettings): string {
-  return `${cls.enabled ? 1 : 0}:${cls.weight}:${cls.density}:${cls.minScale}:${cls.maxScale}:${cls.heightPreference}:${cls.shadePreference}:${cls.moisturePreference}:${cls.forestEdgeBias}:${cls.windWeight}`;
-}
-
-function understoryGpuRingKey(settings: UnderstorySettings, worldCells: number): string {
-  const gpu = settings.gpu;
-  const eco = settings.ecology;
-  const cls = settings.classes;
-  return [
-    worldCells,
-    settings.seed,
-    settings.distanceM,
-    gpu.maxVisible,
-    gpu.workgroupSize,
-    settings.placement.spacingM,
-    settings.placement.slopeMinY,
-    settings.placement.minHeightM,
-    settings.placement.maxHeightM,
-    settings.placement.minGroundWeight,
-    settings.placement.minTreeInfluence,
-    eco.enabled ? 1 : 0,
-    eco.forestInfluenceScaleM,
-    eco.forestEdgeWidthM,
-    eco.clearingPreference,
-    eco.moistureNoiseScaleM,
-    eco.moistureStrength,
-    eco.shadeStrength,
-    eco.densityNoiseScaleM,
-    eco.densityNoiseStrength,
-    eco.deadfallOldForestBias,
-    classKeyRow(cls.shrub),
-    classKeyRow(cls.fern),
-    classKeyRow(cls.sapling),
-    classKeyRow(cls.flower),
-    classKeyRow(cls.dead_log),
-    classKeyRow(cls.stump),
-    getDigEditRevision(),
-  ].join(":");
-}
+export {
+  emptyUnderstoryStats,
+  understoryUsesGpuRingDraw,
+  type UnderstoryLightingProxy,
+  type UnderstoryStats,
+} from "./understory_system_support.js";

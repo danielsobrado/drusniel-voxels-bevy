@@ -24,136 +24,37 @@ import {
   type PropGpuRingStats,
 } from "../gpu/prop_ring_compute.js";
 import { createPropGpuRingMaterial } from "./prop_gpu_ring_material.js";
-
-const _matrix = new THREE.Matrix4();
-const _position = new THREE.Vector3();
-const _quaternion = new THREE.Quaternion();
-const _scale = new THREE.Vector3();
-const _box = new THREE.Box3();
-const _debugBoxSize = new THREE.Vector3();
-const _yAxis = new THREE.Vector3(0, 1, 0);
-const _zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
-const _gpuFrustumMatrix = new THREE.Matrix4();
-const _gpuFrustum = new THREE.Frustum();
-
-type BucketKind = "opaque" | "shadow" | "billboard";
-type CellJobKind = "enter" | "refresh" | "leave";
-
-interface InstanceLodState {
-  lod: number;
-}
-
-interface RenderBucket {
-  assetId: string;
-  lod: number;
-  kind: BucketKind;
-  mesh: THREE.InstancedMesh;
-  maxCount: number;
-  freeSlots: number[];
-  occupiedSlots: Set<number>;
-  nextSlot: number;
-}
-
-interface PropWebGpuBackendAccess {
-  createStorageAttribute(attribute: THREE.BufferAttribute): void;
-  createIndirectStorageAttribute(attribute: THREE.BufferAttribute): void;
-  get(attribute: THREE.BufferAttribute): { buffer?: GPUBuffer };
-}
-
-type IndirectInstancedBufferGeometry = THREE.InstancedBufferGeometry & {
-  setIndirect?(attribute: THREE.BufferAttribute, offset: number): void;
-};
-
-interface PropGpuRingDrawResources {
-  meshes: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>[];
-  instanceA: StorageInstancedBufferAttribute;
-  instanceB: StorageInstancedBufferAttribute;
-  indirect: StorageBufferAttribute;
-  source: PropGpuRingSourceData;
-  maxInstancesPerGroup: number;
-}
-
-interface BucketSlot {
-  bucketKey: string;
-  slot: number;
-}
-
-interface CellRenderRecord {
-  key: string;
-  slots: BucketSlot[];
-  instancesVisible: number;
-  billboardInstances: number;
-  shadowCasters: number;
-  trianglesByLod: number[];
-  debugBounds: { min: THREE.Vector3; max: THREE.Vector3; lod: number }[];
-}
-
-interface MatrixUploadJob {
-  bucketKey: string;
-  slot: number;
-  matrix: THREE.Matrix4;
-  activateSlot?: boolean;
-  releaseSlot?: boolean;
-}
-
-interface CellBuildContext {
-  camPos: [number, number, number];
-  viewportH: number;
-  fovY: number;
-  visibleInstanceIndices: ReadonlySet<number>;
-  debugEnabled: boolean;
-}
-
-function bucketKey(assetId: string, lod: number, kind: BucketKind): string {
-  return `${assetId}:${lod}:${kind}`;
-}
-
-function cellKey(coord: [number, number]): string {
-  return `${coord[0]},${coord[1]}`;
-}
-
-function parseCellKey(key: string): [number, number] {
-  const [x, z] = key.split(",").map(Number);
-  return [x ?? 0, z ?? 0];
-}
-
-function addLodTotals(target: number[], delta: readonly number[], sign: 1 | -1): void {
-  for (let i = 0; i < delta.length; i++) target[i] = (target[i] ?? 0) + (delta[i] ?? 0) * sign;
-}
-
-function lodGeometry(asset: LoadedPropAsset, lod: number): THREE.BufferGeometry | null {
-  if (asset.lodChain) return asset.lodChain.levels[lod]?.geometry ?? null;
-  let found: THREE.Mesh | null = null;
-  asset.root.traverse((obj) => {
-    if (!found && obj instanceof THREE.Mesh) found = obj;
-  });
-  const mesh = found as THREE.Mesh | null;
-  return mesh?.geometry ?? null;
-}
-
-function lodTriangleCount(asset: LoadedPropAsset, lod: number): number {
-  if (asset.lodChain) return asset.lodChain.levels[lod]?.triangleCount ?? asset.metadata.triangleCount;
-  return asset.metadata.triangleCount;
-}
-
-function disposeBucket(bucket: RenderBucket): void {
-  const mat = bucket.mesh.material;
-  if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-  else mat.dispose();
-  bucket.mesh.removeFromParent();
-}
-
-function emptyGpuRingSource(): PropGpuRingSourceData {
-  return {
-    sourceA: new Float32Array([0, 0, 0, 1]),
-    sourceB: new Float32Array([0, 0, 0, 0]),
-    assetMeta: new Float32Array([0, 0, 0, 0]),
-    assetLods: new Float32Array([0, 0, 0, 0]),
-    groupMeta: new Uint32Array([0, 0, 0, 0]),
-    sourceCount: 0,
-    groupCount: 0,
-  };
-}
+import {
+  addLodTotals,
+  bucketKey,
+  cellKey,
+  disposeBucket,
+  emptyGpuRingSource,
+  lodGeometry,
+  lodTriangleCount,
+  parseCellKey,
+  propBoxScratch as _box,
+  propDebugBoxSizeScratch as _debugBoxSize,
+  propGpuFrustum as _gpuFrustum,
+  propGpuFrustumMatrix as _gpuFrustumMatrix,
+  propMatrixScratch as _matrix,
+  propPositionScratch as _position,
+  propQuaternionScratch as _quaternion,
+  propScaleScratch as _scale,
+  propYAxis as _yAxis,
+  propZeroMatrix as _zeroMatrix,
+  type BucketKind,
+  type BucketSlot,
+  type CellBuildContext,
+  type CellJobKind,
+  type CellRenderRecord,
+  type InstanceLodState,
+  type IndirectInstancedBufferGeometry,
+  type MatrixUploadJob,
+  type PropGpuRingDrawResources,
+  type PropWebGpuBackendAccess,
+  type RenderBucket,
+} from "./prop_system_support.js";
 
 export interface PropSystemDeps {
   scene: THREE.Scene;
@@ -169,12 +70,7 @@ export function propStreamingCenter(camera: THREE.Camera, ringCenter?: THREE.Vec
   return [center.x, center.y, center.z];
 }
 
-export function propGpuStatus(settings: CustomPropsSettings, gpuRingBackendAvailable: boolean): PropGpuStatus {
-  if (!settings.gpu.enabled) return "disabled";
-  if (settings.gpu.debugForceCpu) return "fallback-cpu";
-  if (gpuRingBackendAvailable) return "ring";
-  return settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
-}
+export { propGpuStatus } from "./prop_system_support.js";
 
 export class PropSystem {
   private readonly root = new THREE.Group();
