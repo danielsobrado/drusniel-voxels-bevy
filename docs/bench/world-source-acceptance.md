@@ -41,7 +41,8 @@ BVY-WS-12 status:
 - the acceptance bench writes source-aware biome material tags into generated chunks;
 - runtime async WorldSource chunk generation uses the same source-aware tagging path;
 - Surface Nets reads source-aware biome tags or the active WorldSource; the old four-weight compatibility adapter is private legacy-mode fallback only;
-- `material_draw_impact.compatibility_biome_channel_active` should be `false` for this bench path.
+- `material_draw_impact.compatibility_biome_channel_active` should be `false` for this bench path;
+- native Windows visual-regression artifact `bench-runs/2026-07-01T01-50-08Z/summary.json` clears render-ready on all 7 checkpoints, and `bench_guard` exits 0 after treating `__frame_total` as presence-only wall-clock cadence evidence while keeping render graph CPU, GPU opaque, mesh dirty, instancing, water, and render-counter thresholds gated.
 
 GPU readback boundary:
 

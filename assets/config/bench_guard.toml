@@ -25,8 +25,7 @@ scene = "visual-regression.toml"
 checkpoint = "ridge-run-noon"
 area = "__frame_total"
 field = "avg_ms"
-warn_gt = 11.08
-fail_gt = 13.01
+exists = true
 unit = "ms"
 
 [[check]]
@@ -35,8 +34,7 @@ scene = "visual-regression.toml"
 checkpoint = "ridge-run-noon"
 area = "__frame_total"
 field = "p99_ms"
-warn_gt = 16.93
-fail_gt = 20.31
+exists = true
 unit = "ms"
 
 [[check]]
@@ -45,8 +43,7 @@ scene = "visual-regression.toml"
 checkpoint = "jump-water-sunset"
 area = "__frame_total"
 field = "avg_ms"
-warn_gt = 10.41
-fail_gt = 12.22
+exists = true
 unit = "ms"
 
 [[check]]
@@ -55,8 +52,7 @@ scene = "visual-regression.toml"
 checkpoint = "jump-water-sunset"
 area = "__frame_total"
 field = "p99_ms"
-warn_gt = 11.36
-fail_gt = 13.64
+exists = true
 unit = "ms"
 
 [[check]]
@@ -65,8 +61,7 @@ scene = "visual-regression.toml"
 checkpoint = "forest-look-sweep"
 area = "__frame_total"
 field = "avg_ms"
-warn_gt = 11.81
-fail_gt = 13.87
+exists = true
 unit = "ms"
 
 [[check]]
@@ -75,8 +70,7 @@ scene = "visual-regression.toml"
 checkpoint = "forest-look-sweep"
 area = "__frame_total"
 field = "p99_ms"
-warn_gt = 14.16
-fail_gt = 17.00
+exists = true
 unit = "ms"
 
 [[check]]

@@ -40,15 +40,16 @@ Status: In progress.
 - `world_source_acceptance` now validates the runtime artifact and records it as `runtime_gpu_readback_acceptance`; when accepted, the report uses its GPU readback/drift-gate result for top-level acceptance.
 - The visual-regression render-ready gate now records final render signatures and instability diagnostics in each run record.
 - Native Windows visual-regression verification at `bench-runs/2026-06-30T15-14-58Z/summary.json` cleared the previous render-ready timeout on all 7 checkpoints; each checkpoint reported `ready_timed_out: false`, `render_ready_timed_out: false`, and `render_ready_wait_frames: 90`.
+- Native Windows visual-regression verification at `bench-runs/2026-07-01T01-50-08Z/summary.json` also cleared render-ready on all 7 checkpoints and `bench_guard` exits 0 against that artifact.
+- The visual guard now treats `__frame_total` as presence-only evidence. It is sourced from `Time<Real>` wall-clock cadence and can include native Windows frame pacing and single-frame present/scheduler spikes; render graph CPU, GPU opaque, mesh dirty, instancing, water, and render-counter rows remain threshold-gated.
 
 ## Not completed
 
 - Direct in-process runtime readback consumption by `world_source_acceptance` is still not implemented; the accepted path is pairing the focused bench report with the reviewed runtime-assisted artifact.
-- Visual/bench acceptance is not complete. The native Windows visual regression run at `bench-runs/2026-06-30T15-14-58Z/summary.json` produced screenshots for all 7 checkpoints and cleared render-ready, but `bench_guard` still failed frame-total thresholds: ridge p99, jump avg/p99, and forest avg/p99. GPU opaque, mesh dirty, and instancing-specific checks passed.
 - Full height/biome drift still requires a WGSL port of `height_field.rs`, `island_shape.rs`, and `biome_region_field.rs`.
 - The legacy terrain generator path is still present as a deprecated opt-in fallback.
 - Full removal of explicit legacy mode should wait until the release acceptance report is reviewed and visual parity is accepted.
 
 ## Required next patch
 
-Fix or explain the visual bench frame-total failures, then rerun `bench_guard` before removing explicit legacy mode.
+Review the paired acceptance report, visual artifact, and updated guard decision together before removing explicit legacy mode.

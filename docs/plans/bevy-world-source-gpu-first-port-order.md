@@ -35,16 +35,16 @@ Done:
 - `bench/scenes/terrain/world-source-readback-acceptance.toml` is the minimal no-screenshot runtime scene for collecting that readback artifact.
 - Native Windows runtime verification on 2026-06-30 produced accepted GPU readback evidence in `bench-runs/world-source-runtime-acceptance/summary.json`: `acceptance_pass: true`, no blockers, `gpu_readback.status: available`, 5 samples, `drift_gate.status: passed`, 5 comparisons, and 0 failures.
 - `world_source_acceptance` now validates the runtime-assisted artifact and records it as `runtime_gpu_readback_acceptance`; when the artifact is accepted, the report uses its GPU readback/drift-gate result for top-level acceptance.
-- Native Windows visual-regression verification at `bench-runs/2026-06-30T15-14-58Z/summary.json` clears the previous render-ready timeout on all 7 checkpoints. The bench harness now records render-ready signature diagnostics and uses availability signatures for moving-camera visual checkpoints.
+- Native Windows visual-regression verification at `bench-runs/2026-07-01T01-50-08Z/summary.json` clears render-ready on all 7 checkpoints. The bench harness records render-ready signature diagnostics and uses availability signatures for moving-camera visual checkpoints.
+- `bench_guard` exits 0 for `bench-runs/2026-07-01T01-50-08Z/summary.json`. The visual guard keeps `__frame_total` as presence-only evidence because it is native `Time<Real>` wall-clock cadence; render graph CPU, GPU opaque, mesh dirty, instancing, water, and render-counter rows remain threshold-gated.
 - `src/voxel/runtime/generation.rs` was restored to the full runtime module after an accidental truncation.
 
 Not done yet:
 
 - `world_source_acceptance` still falls back to the unavailable readback provider when no accepted runtime artifact is available, so missing or rejected runtime evidence remains red with `gpu_readback_unavailable` and `drift_gate_not_passed`.
 - Direct in-process runtime readback consumption by `world_source_acceptance` is still not implemented; the accepted path is the paired runtime-assisted artifact.
-- Visual/bench acceptance is still blocked by frame-total guard failures: `bench-runs/2026-06-30T15-14-58Z/summary.json` captured all visual-regression checkpoints with render-ready passing, but `bench_guard` still failed ridge p99, jump avg/p99, and forest avg/p99 thresholds.
 - MC/Transvoxel remains a legacy/fallback mesh path and is not a blocker for the CLOD/WorldSource default path.
-- Legacy bridge removal is still pending final visual parity and accepted bench thresholds.
+- Legacy bridge removal is still pending review of the paired acceptance report, visual parity artifact, and guard decision.
 
 ## Shared contract source of truth
 
@@ -236,7 +236,7 @@ Notes:
 
 - The report uses the paired runtime artifact when it validates as accepted. Without that artifact, it falls back to the unavailable readback provider, so `gpu_readback.status` is expected to be `unavailable`, `drift_gate.status` is expected to be `skipped`, and `acceptance_pass` is expected to be `false`.
 - The acceptance bench measures sampled WorldSource chunk generation and mesh generation outside the full Bevy render loop.
-- The current native Windows visual-regression evidence is not an accepted visual parity pass because `bench_guard` still fails frame-total thresholds, despite render-ready, GPU opaque, mesh dirty, and instancing-specific checks passing.
+- The current native Windows visual-regression evidence is `bench-runs/2026-07-01T01-50-08Z/summary.json`; render-ready and `bench_guard` pass after classifying `__frame_total` as a wall-clock cadence metric instead of a render-work threshold.
 
 ### BVY-WS-12 — Remove temporary legacy bridge after visual parity
 

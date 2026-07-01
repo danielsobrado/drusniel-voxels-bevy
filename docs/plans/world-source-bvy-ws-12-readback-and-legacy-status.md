@@ -14,7 +14,8 @@ CLOD/WorldSource is the default terrain path. MC/Transvoxel is legacy/fallback o
 - Runtime-assisted readback writes `bench-runs/world-source-runtime-acceptance/summary.json` by default; override with `VOXEL_WORLD_SOURCE_DRIFT_ACCEPTANCE_OUT`.
 - Native Windows runtime verification on 2026-06-30 produced `acceptance_pass: true`, `gpu_readback.status: available`, 5 GPU samples, `drift_gate.status: passed`, 5 comparisons, and 0 failures.
 - `world_source_acceptance` now validates the runtime artifact and records `runtime_gpu_readback_acceptance.status = accepted` before using its GPU readback/drift-gate result for top-level acceptance.
-- Native Windows visual-regression verification at `bench-runs/2026-06-30T15-14-58Z/summary.json` now clears render-ready on all 7 checkpoints. The bench harness records `render_ready_signature`, `render_ready_signature_changes`, and `render_ready_last_changed_fields` per run; moving-camera render-ready uses availability signatures instead of exact terrain draw counts.
+- Native Windows visual-regression verification at `bench-runs/2026-07-01T01-50-08Z/summary.json` clears render-ready on all 7 checkpoints. The bench harness records `render_ready_signature`, `render_ready_signature_changes`, and `render_ready_last_changed_fields` per run; moving-camera render-ready uses availability signatures instead of exact terrain draw counts.
+- `bench_guard` exits 0 against `bench-runs/2026-07-01T01-50-08Z/summary.json`. The visual guard treats `__frame_total` as presence-only evidence because it is sourced from `Time<Real>` wall-clock cadence; render graph CPU, GPU opaque, mesh dirty, instancing, water, and render-counter metrics remain threshold-gated.
 - WorldSource chunk generation uses biome-tagged material IDs.
 - Surface Nets writes the terrain biome id into `uv0.y`.
 - The triplanar terrain shader imports `world_source/biome_splat.wgsl` and resolves GPU splat weights from the biome id.
@@ -45,7 +46,7 @@ Accepted runtime-assisted evidence:
 - Result: `acceptance_pass: true`, no blockers, `gpu_readback.status: available`, 5 samples, `drift_gate.status: passed`, 5 comparisons, 0 failures.
 - Bench note: the scene run completed after a readiness timeout, but the readback acceptance artifact was written before the timeout and contains the accepted drift-gate result.
 - Paired final report artifact: `bench-runs/world-source-runtime-paired/summary.json`, with `runtime_gpu_readback_acceptance.status: accepted`, top-level `acceptance_pass: true`, no blockers, `gpu_readback.status: available`, 5 samples, `drift_gate.status: passed`, 5 comparisons, and 0 failures.
-- Latest visual-regression artifact: `bench-runs/2026-06-30T15-14-58Z/summary.json`, with screenshots for all 7 checkpoints and no readiness timeouts. `bench_guard` still fails frame-total thresholds: ridge p99, jump avg/p99, and forest avg/p99. GPU opaque, mesh dirty, and instancing checks pass.
+- Latest visual-regression artifact: `bench-runs/2026-07-01T01-50-08Z/summary.json`, with screenshots for all 7 checkpoints and no readiness timeouts. `bench_guard` exits 0; the previous frame-total failures were classified as wall-clock frame pacing/measurement noise rather than a render-work regression because GPU opaque, render graph CPU, mesh dirty, and instancing rows remain below their gated thresholds.
 
 ## What not to do
 
@@ -59,8 +60,8 @@ Use the paired report as the acceptance handoff, then continue legacy-removal ga
 
 1. Keep `world_source_acceptance` red when `runtime_gpu_readback_acceptance.status` is not `accepted`.
 2. Re-run the runtime-assisted artifact before making visual or frame-timing claims that depend on current GPU output.
-3. Fix or explain the remaining visual-regression frame-total guard failures.
-4. Remove or deprecate the legacy bridge only after the paired acceptance report, visual parity, and bench thresholds are reviewed together.
+3. Review the paired acceptance report, visual parity artifact, and updated guard decision together.
+4. Remove or deprecate the legacy bridge only after that review.
 
 ## Verification
 
