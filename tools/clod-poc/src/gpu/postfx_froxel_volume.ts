@@ -24,6 +24,8 @@ import type { PostFxAtmosphereSettings, PostFxFroxelSettings } from "./postfx_at
 
 type TslAny = any;
 type ComputeNode = { setName?: (name: string) => void };
+type MatrixUniformNode = TslAny & { value: Matrix4 };
+type VectorUniformNode = TslAny & { value: Vector3 };
 
 export const POSTFX_FROXEL_VOLUME_GRID = {
   width: 160,
@@ -59,10 +61,11 @@ export class PostFxFroxelVolume {
   readonly integratedTexture: Storage3DTexture;
   private readonly scatterKernel: TslAny;
   private readonly integrateKernel: TslAny;
-  private readonly uCameraPosition = uniform(new Vector3());
-  private readonly uProjectionInverse = uniform(new Matrix4());
-  private readonly uCameraWorld = uniform(new Matrix4());
-  private readonly uSunDirection = uniform(new Vector3(0, 1, 0));
+  private readonly uCameraPosition = uniform(new Vector3()) as unknown as VectorUniformNode;
+  private readonly uProjectionInverse = uniform(new Matrix4()) as unknown as MatrixUniformNode;
+  private readonly uCameraWorld = uniform(new Matrix4()) as unknown as MatrixUniformNode;
+  private readonly uSunDirection = uniform(new Vector3(0, 1, 0)) as unknown as VectorUniformNode;
+  private readonly projectionInverseScratch = new Matrix4();
   private readonly froxels: PostFxFroxelSettings;
 
   constructor(settings: PostFxAtmosphereSettings) {
@@ -176,13 +179,18 @@ export class PostFxFroxelVolume {
     camera.updateMatrixWorld();
     const cameraWithInverse = camera as Camera & { projectionMatrixInverse?: Matrix4 };
     this.uProjectionInverse.value.copy(
-      cameraWithInverse.projectionMatrixInverse ?? new Matrix4().copy(camera.projectionMatrix).invert(),
+      cameraWithInverse.projectionMatrixInverse ?? this.projectionInverseScratch.copy(camera.projectionMatrix).invert(),
     );
     this.uCameraWorld.value.copy(camera.matrixWorld);
     this.uCameraPosition.value.setFromMatrixPosition(camera.matrixWorld);
     this.uSunDirection.value.copy(sunDirection).normalize();
     renderer.compute(this.scatterKernel);
     renderer.compute(this.integrateKernel);
+  }
+
+  dispose(): void {
+    this.scatterTexture.dispose?.();
+    this.integratedTexture.dispose?.();
   }
 
   private createTexture(): Storage3DTexture {
