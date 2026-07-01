@@ -1,4 +1,4 @@
-use super::{PropAssets, PropConfig, is_spawnable_prop};
+use super::{PropAssets, PropConfig, is_spawnable_prop, understory::understory_asset_ids};
 use crate::config::loader::load_config;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -26,6 +26,7 @@ pub fn load_prop_config(
         && config.props.rocks.is_empty()
         && config.props.bushes.is_empty()
         && config.props.flowers.is_empty()
+        && config.props.understory.is_empty()
     {
         info!("No props defined in config, skipping asset loading");
         prop_assets.loaded = true;
@@ -42,10 +43,14 @@ pub fn load_prop_config(
         .iter()
         .chain(config.props.rocks.iter())
         .chain(config.props.bushes.iter())
-        .chain(config.props.flowers.iter());
+        .chain(config.props.flowers.iter())
+        .chain(config.props.understory.iter());
+
+    let understory_ids = understory_asset_ids(&config.understory);
 
     for def in all_defs {
-        if !is_spawnable_prop(def) {
+        let referenced_by_understory = understory_ids.iter().any(|id| id == &def.id);
+        if !is_spawnable_prop(def) && !referenced_by_understory {
             info!(
                 "Skipping non-spawnable prop asset load: {} (density={}, max_count={:?})",
                 def.id, def.density, def.max_count

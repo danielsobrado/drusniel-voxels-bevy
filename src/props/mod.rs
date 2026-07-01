@@ -15,6 +15,7 @@ pub mod persistence;
 pub mod placement;
 pub mod spawner;
 pub mod stones;
+pub mod understory;
 
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
@@ -280,6 +281,8 @@ pub struct PropConfig {
     pub persistence: PersistenceConfig,
     #[serde(default)]
     pub gpu_vegetation: GpuVegetationConfig,
+    #[serde(default)]
+    pub understory: understory::UnderstoryConfig,
 }
 
 /// Configuration for prop persistence
@@ -497,6 +500,8 @@ pub struct PropCategories {
     pub bushes: Vec<PropDefinition>,
     #[serde(default)]
     pub flowers: Vec<PropDefinition>,
+    #[serde(default)]
+    pub understory: Vec<PropDefinition>,
 }
 
 #[derive(Deserialize, Clone)]

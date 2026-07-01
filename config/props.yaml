@@ -642,6 +642,242 @@ props:
       max_slope: 0.7
       max_count: 240
 
+  understory:
+    - id: understory_shrub
+      path: "models/vegetation/crops/quaternius/Crops.glb"
+      scale_range: [0.45, 0.8]
+      scale_jitter: 0.12
+      y_offset: 0.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 1.0
+      min_slope: 0.0
+      max_slope: 0.8
+      max_count: 1
+
+    - id: understory_shrub_flowers
+      path: "models/vegetation/crops/quaternius/Crops.glb"
+      scale_range: [0.4, 0.7]
+      scale_jitter: 0.12
+      y_offset: 0.0
+      spawn_on: [TopSoil]
+      density: 1.0
+      min_slope: 0.0
+      max_slope: 0.8
+      max_count: 1
+
+    - id: understory_fern
+      path: "models/vegetation/crops/quaternius/Crops.glb"
+      scale_range: [0.35, 0.65]
+      scale_jitter: 0.12
+      y_offset: 0.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 1.0
+      min_slope: 0.0
+      max_slope: 0.8
+      max_count: 1
+
+    - id: understory_sapling
+      path: "models/vegetation/crops/quaternius/Crops.glb"
+      scale_range: [0.5, 0.95]
+      scale_jitter: 0.1
+      y_offset: 0.0
+      spawn_on: [TopSoil, SubSoil]
+      density: 1.0
+      min_slope: 0.0
+      max_slope: 0.8
+      max_count: 1
+
+    - id: understory_flower
+      path: "models/vegetation/crops/quaternius/Crops.glb"
+      scale_range: [0.28, 0.55]
+      scale_jitter: 0.15
+      y_offset: 0.0
+      spawn_on: [TopSoil]
+      density: 1.0
+      min_slope: 0.0
+      max_slope: 0.8
+      max_count: 1
+
+    - id: understory_dead_log
+      path: "models/Models/GLB format/Wood.glb"
+      scale_range: [0.25, 0.55]
+      scale_jitter: 0.1
+      y_offset: 0.0
+      spawn_on: [TopSoil, SubSoil, Rock]
+      density: 1.0
+      min_slope: 0.0
+      max_slope: 0.9
+      max_count: 1
+
+    - id: understory_stump
+      path: "models/Models/GLB format/Rock Flat.glb"
+      scale_range: [0.18, 0.4]
+      scale_jitter: 0.1
+      y_offset: 0.0
+      spawn_on: [TopSoil, SubSoil, Rock]
+      density: 1.0
+      min_slope: 0.0
+      max_slope: 0.9
+      max_count: 1
+
+understory:
+  enabled: true
+  seed: 9137
+  distance_m: 150
+  refresh_distance_m: 12
+  max_new_patches_per_frame: 2
+  max_instances: 12000
+
+  placement:
+    spacing_m: 3.0
+    jitter: 0.55
+    slope_min_y: 0.68
+    min_height_m: 8
+    max_height_m: 52
+    min_ground_weight: 0.12
+    min_tree_influence: 0.0
+
+  ecology:
+    enabled: true
+    forest_influence_scale_m: 36
+    forest_edge_width_m: 18
+    clearing_preference: 0.55
+    moisture_noise_scale_m: 80
+    moisture_strength: 0.65
+    shade_strength: 0.75
+    density_noise_scale_m: 28
+    density_noise_strength: 0.55
+    deadfall_old_forest_bias: 0.75
+
+  terrain:
+    grass:
+      density: 1.20
+      shrub: 1.00
+      fern: 1.18
+      sapling: 0.92
+      flower: 1.30
+      dead_log: 0.60
+      stump: 0.65
+    rock:
+      density: 0.48
+      shrub: 0.62
+      fern: 0.24
+      sapling: 0.55
+      flower: 0.08
+      dead_log: 1.35
+      stump: 1.28
+    sand:
+      density: 0.62
+      shrub: 0.44
+      fern: 0.22
+      sapling: 0.24
+      flower: 0.75
+      dead_log: 0.48
+      stump: 0.44
+    snow:
+      density: 0.18
+      shrub: 0.30
+      fern: 0.10
+      sapling: 0.12
+      flower: 0.02
+      dead_log: 1.60
+      stump: 1.35
+
+  classes:
+    shrub:
+      enabled: true
+      asset_ids: [understory_shrub, understory_shrub_flowers]
+      weight: 0.30
+      density: 1.0
+      min_scale: 0.7
+      max_scale: 1.6
+      height_preference: any
+      shade_preference: 0.55
+      moisture_preference: 0.45
+      forest_edge_bias: 0.65
+      wind_weight: 0.35
+
+    fern:
+      enabled: true
+      asset_ids: [understory_fern]
+      weight: 0.24
+      density: 1.0
+      min_scale: 0.55
+      max_scale: 1.25
+      height_preference: low
+      shade_preference: 0.85
+      moisture_preference: 0.80
+      forest_edge_bias: 0.25
+      wind_weight: 0.55
+
+    sapling:
+      enabled: true
+      asset_ids: [understory_sapling]
+      weight: 0.16
+      density: 0.55
+      min_scale: 0.45
+      max_scale: 1.15
+      height_preference: any
+      shade_preference: 0.45
+      moisture_preference: 0.50
+      forest_edge_bias: 0.55
+      wind_weight: 0.45
+
+    flower:
+      enabled: true
+      asset_ids: [understory_flower]
+      weight: 0.18
+      density: 0.85
+      min_scale: 0.35
+      max_scale: 0.95
+      height_preference: low
+      shade_preference: 0.15
+      moisture_preference: 0.45
+      forest_edge_bias: 0.85
+      wind_weight: 0.65
+
+    dead_log:
+      enabled: true
+      asset_ids: [understory_dead_log]
+      weight: 0.08
+      density: 0.22
+      min_scale: 0.8
+      max_scale: 1.9
+      height_preference: any
+      shade_preference: 0.75
+      moisture_preference: 0.55
+      forest_edge_bias: 0.30
+      wind_weight: 0.0
+
+    stump:
+      enabled: true
+      asset_ids: [understory_stump]
+      weight: 0.04
+      density: 0.16
+      min_scale: 0.7
+      max_scale: 1.4
+      height_preference: any
+      shade_preference: 0.65
+      moisture_preference: 0.45
+      forest_edge_bias: 0.25
+      wind_weight: 0.0
+
+  render:
+    debug_color_by_class: false
+    alpha_test: 0.45
+    shadows: false
+    max_shadow_class: shrub
+
+  gpu:
+    enabled: true
+    fallback_to_cpu: true
+    debug_force_cpu: false
+    max_visible: 12000
+    workgroup_size: 64
+    readback_visible_lists: true
+    debug_show_gpu_counts: true
+    debug_validate_against_cpu: false
+
 # Prop persistence configuration
 persistence:
   # Enable/disable prop persistence (saves placements to disk)

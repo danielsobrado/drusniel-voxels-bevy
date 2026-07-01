@@ -14,6 +14,7 @@ use super::{
     LandmarkLocations, Prop, PropAssets, PropChunkOwner, PropConfig, PropDefinition, PropType,
     billboard::{BillboardCache, BillboardLod, get_billboard_config, should_use_billboard_lod},
     foliage::GrassPropWind,
+    understory::{UnderstoryGenerationStats, generate_understory_props},
 };
 use crate::constants::{CHUNK_SIZE_I32, WATER_LEVEL};
 use crate::performance::{AreaTimingRecorder, area_timer};
@@ -211,6 +212,7 @@ pub fn spawn_props_on_terrain(
     let num_chunks_z = (WORLD_SCAN_SIZE + PROP_CHUNK_SIZE - 1) / PROP_CHUNK_SIZE;
 
     let mut terrain_modified = false;
+    let mut understory_stats = UnderstoryGenerationStats::default();
 
     // Process each prop chunk
     for chunk_x in 0..num_chunks_x {
@@ -245,6 +247,7 @@ pub fn spawn_props_on_terrain(
                     &placement_config,
                     &mut terrain_modified,
                     protected_areas.as_deref(),
+                    &mut understory_stats,
                 );
 
                 // Save to disk
@@ -299,6 +302,24 @@ pub fn spawn_props_on_terrain(
         instancing_stats.instanced_spawns,
         instancing_stats.scene_spawns,
     );
+    if config.understory.enabled {
+        info!(
+            "Understory scatter: accepted={} shrub/fern/sapling/flower/log/stump={}/{}/{}/{}/{}/{} candidates={} rejected slope/height/material/ecology/spacing={}/{}/{}/{}/{}",
+            understory_stats.accepted_total(),
+            understory_stats.accepted_shrub,
+            understory_stats.accepted_fern,
+            understory_stats.accepted_sapling,
+            understory_stats.accepted_flower,
+            understory_stats.accepted_dead_log,
+            understory_stats.accepted_stump,
+            understory_stats.generated_candidates,
+            understory_stats.rejected_slope,
+            understory_stats.rejected_height,
+            understory_stats.rejected_material,
+            understory_stats.rejected_ecology,
+            understory_stats.rejected_spacing,
+        );
+    }
 }
 
 fn should_clear_props_for_world_regeneration() -> bool {
@@ -316,6 +337,7 @@ fn generate_chunk_props(
     placement_config: &PlacementConfig,
     terrain_modified: &mut bool,
     protected_areas: Option<&ProtectedAreaRegistry>,
+    understory_stats: &mut UnderstoryGenerationStats,
 ) -> Vec<PropPlacementData> {
     let mut props = Vec::new();
 
@@ -396,6 +418,41 @@ fn generate_chunk_props(
             protected_areas,
         );
     }
+
+    let all_defs: Vec<(&PropDefinition, PropType)> = config
+        .props
+        .trees
+        .iter()
+        .map(|def| (def, PropType::Tree))
+        .chain(config.props.rocks.iter().map(|def| (def, PropType::Rock)))
+        .chain(config.props.bushes.iter().map(|def| (def, PropType::Bush)))
+        .chain(
+            config
+                .props
+                .flowers
+                .iter()
+                .map(|def| (def, PropType::Flower)),
+        )
+        .chain(config.props.understory.iter().map(|def| {
+            let prop_type = understory_prop_type(&def.id);
+            (def, prop_type)
+        }))
+        .collect();
+
+    generate_understory_props(
+        &mut props,
+        understory_stats,
+        chunk_min_x,
+        chunk_min_z,
+        chunk_max_x,
+        chunk_max_z,
+        world,
+        generator,
+        &all_defs,
+        placement_config,
+        protected_areas,
+        &config.understory,
+    );
 
     props
 }
@@ -1384,7 +1441,22 @@ fn find_def<'a>(config: &'a PropConfig, id: &str) -> Option<&'a PropDefinition> 
         .chain(config.props.rocks.iter())
         .chain(config.props.bushes.iter())
         .chain(config.props.flowers.iter())
+        .chain(config.props.understory.iter())
         .find(|def| def.id == id)
+}
+
+fn understory_prop_type(id: &str) -> PropType {
+    let id_lower = id.to_lowercase();
+    if id_lower.contains("flower") {
+        PropType::Flower
+    } else if id_lower.contains("dead_log")
+        || id_lower.contains("stump")
+        || id_lower.contains("log")
+    {
+        PropType::Rock
+    } else {
+        PropType::Bush
+    }
 }
 
 fn rock_region_modifiers(
@@ -1605,11 +1677,16 @@ fn prop_scale(
 }
 
 fn should_apply_grass_wind(id: &str, prop_type: PropType) -> bool {
-    if prop_type != PropType::Bush {
+    if prop_type != PropType::Bush && prop_type != PropType::Flower {
         return false;
     }
     let id_lower = id.to_lowercase();
     id_lower.contains("grass")
+        || id_lower.contains("fern")
+        || id_lower.contains("shrub")
+        || id_lower.contains("sapling")
+        || id_lower.contains("flower")
+        || id_lower.contains("understory")
 }
 
 #[cfg(not(feature = "legacy_prop_spawn"))]
