@@ -52,6 +52,10 @@ import {
   type PostFxColorScript,
   type PostFxGradeParams,
 } from "./postfx_color_script.js";
+import {
+  DEFAULT_POSTFX_GTAO,
+  type PostFxGtaoSettings,
+} from "./postfx_gtao.js";
 
 const TERRAIN_NON_INDEXED_FALLBACK_KEY = "__drusnielWebGpuTerrainNonIndexedFallback";
 const WEBGPU_POST_EXPOSURE = 1.0;
@@ -62,6 +66,10 @@ const CONTACT_SHADOW_MAX_DISTANCE_M = 260;
 const CONTACT_SHADOW_FULL_DISTANCE_M = 120;
 const CONTACT_SHADOW_DEPTH_RANGE_FACTOR = 0.85;
 const BOUNCE_GOLDEN_ANGLE = 2.399963;
+const GTAO_GOLDEN_ANGLE = 2.399963;
+const GTAO_DIRECT_LIGHT_LUMA_START = 1.2;
+const GTAO_DIRECT_LIGHT_LUMA_END = 4.0;
+const GTAO_DIRECT_LIGHT_REDUCTION = 0.75;
 const LUMA_WEIGHTS = [0.2126, 0.7152, 0.0722] as const;
 
 type TslAny = any;
@@ -178,9 +186,11 @@ export class WebGpuPostProcessPipeline {
   private readonly colorScript: PostFxColorScript = DEFAULT_POSTFX_COLOR_SCRIPT;
   private readonly autoExposure: PostFxAutoExposureSettings = DEFAULT_POSTFX_AUTO_EXPOSURE;
   private readonly bounce: PostFxBounceSettings = DEFAULT_POSTFX_BOUNCE;
+  private readonly gtao: PostFxGtaoSettings = DEFAULT_POSTFX_GTAO;
   private readonly autoExposureEnabled: boolean;
   private readonly lockExposure: boolean;
   private readonly bounceEnabled: boolean;
+  private readonly gtaoEnabled: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
   private readonly uContrast = uniform(1.0) as unknown as NumericUniform;
   private readonly uSaturation = uniform(1.0) as unknown as NumericUniform;
@@ -201,6 +211,14 @@ export class WebGpuPostProcessPipeline {
   private readonly uBounceDepthTolerance = uniform(1.8) as unknown as NumericUniform;
   private readonly uBounceMinUvRadius = uniform(0.004) as unknown as NumericUniform;
   private readonly uBounceMaxUvRadius = uniform(0.07) as unknown as NumericUniform;
+  private readonly uGtaoStrength = uniform(0.0) as unknown as NumericUniform;
+  private readonly uGtaoRadius = uniform(1.6) as unknown as NumericUniform;
+  private readonly uGtaoMaxDistance = uniform(700.0) as unknown as NumericUniform;
+  private readonly uGtaoFadeEnd = uniform(1800.0) as unknown as NumericUniform;
+  private readonly uGtaoDepthBias = uniform(0.05) as unknown as NumericUniform;
+  private readonly uGtaoDepthTolerance = uniform(1.2) as unknown as NumericUniform;
+  private readonly uGtaoMinUvRadius = uniform(0.002) as unknown as NumericUniform;
+  private readonly uGtaoMaxUvRadius = uniform(0.035) as unknown as NumericUniform;
   private readonly uAerialStart = uniform(120.0) as unknown as NumericUniform;
   private readonly uAerialEnd = uniform(1800.0) as unknown as NumericUniform;
   private readonly uAerialStrength = uniform(0.0) as unknown as NumericUniform;
@@ -225,6 +243,7 @@ export class WebGpuPostProcessPipeline {
     this.autoExposureEnabled = queryFlag(["autoExposure", "autoexposure"], this.autoExposure.enabled);
     this.lockExposure = queryFlag(["lockexp", "lockExposure", "lockexposure"], this.autoExposure.lock);
     this.bounceEnabled = queryFlag(["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], this.bounce.enabled);
+    this.gtaoEnabled = queryFlag(["gtao", "ao", "ambientOcclusion", "ambientocclusion"], this.gtao.enabled);
     this.applyRendererSettings();
     this.updateUniforms();
   }
@@ -280,7 +299,11 @@ export class WebGpuPostProcessPipeline {
   }
 
   private graphKey(): string {
-    return `${webGpuPostProcessGraphKey(this.settings)}|${this.bounceEnabled ? "bounce" : "no-bounce"}`;
+    return [
+      webGpuPostProcessGraphKey(this.settings),
+      this.bounceEnabled ? "bounce" : "no-bounce",
+      this.gtaoEnabled ? "gtao" : "no-gtao",
+    ].join("|");
   }
 
   private applyRendererSettings(): void {
@@ -301,6 +324,14 @@ export class WebGpuPostProcessPipeline {
     this.uBounceDepthTolerance.value = this.bounce.depthToleranceMeters;
     this.uBounceMinUvRadius.value = this.bounce.minUvRadius;
     this.uBounceMaxUvRadius.value = this.bounce.maxUvRadius;
+    this.uGtaoStrength.value = this.gtaoEnabled ? this.gtao.strength : 0;
+    this.uGtaoRadius.value = this.gtao.radiusMeters;
+    this.uGtaoMaxDistance.value = this.gtao.maxDistanceMeters;
+    this.uGtaoFadeEnd.value = this.gtao.fadeEndMeters;
+    this.uGtaoDepthBias.value = this.gtao.depthBiasMeters;
+    this.uGtaoDepthTolerance.value = this.gtao.depthToleranceMeters;
+    this.uGtaoMinUvRadius.value = this.gtao.minUvRadius;
+    this.uGtaoMaxUvRadius.value = this.gtao.maxUvRadius;
     this.uAerialStart.value = this.settings.aerialPerspectiveStart;
     this.uAerialEnd.value = this.settings.aerialPerspectiveEnd;
     this.uAerialStrength.value = this.settings.aerialPerspectiveStrength;
@@ -363,9 +394,12 @@ export class WebGpuPostProcessPipeline {
     const aerialRgb = this.settings.aerialPerspectiveEnabled
       ? this.createAerialNode(beauty.rgb, depthTex)
       : beauty.rgb;
+    const aoRgb = this.gtaoEnabled
+      ? aerialRgb.mul(this.createGtaoNode(aerialRgb, depthTex))
+      : aerialRgb;
     const temporalColor = this.settings.taaEnabled
-      ? this.createTraaNode(aerialRgb, depthTex, camera)
-      : vec4(aerialRgb, DEFAULT_ALPHA);
+      ? this.createTraaNode(aoRgb, depthTex, camera)
+      : vec4(aoRgb, DEFAULT_ALPHA);
     const temporalRgb = (temporalColor as TslAny).rgb;
     const bloomRgb = this.settings.bloomEnabled
       ? temporalRgb.add((bloom(
@@ -425,6 +459,60 @@ export class WebGpuPostProcessPipeline {
     } as TslAny;
 
     return traa(vec4(sourceRgb, DEFAULT_ALPHA), depthTex, velocity, camera as TslAny) as TslAny;
+  }
+
+  private createGtaoNode(sourceRgb: TslAny, depthTex: TslAny): TslAny {
+    const uProjectionInverse = this.uProjectionInverse as unknown as TslAny;
+    const uGtaoStrength = this.uGtaoStrength as unknown as TslAny;
+    const uGtaoRadius = this.uGtaoRadius as unknown as TslAny;
+    const uGtaoMaxDistance = this.uGtaoMaxDistance as unknown as TslAny;
+    const uGtaoFadeEnd = this.uGtaoFadeEnd as unknown as TslAny;
+    const uGtaoDepthBias = this.uGtaoDepthBias as unknown as TslAny;
+    const uGtaoDepthTolerance = this.uGtaoDepthTolerance as unknown as TslAny;
+    const uGtaoMinUvRadius = this.uGtaoMinUvRadius as unknown as TslAny;
+    const uGtaoMaxUvRadius = this.uGtaoMaxUvRadius as unknown as TslAny;
+    const taps = this.gtao.samples;
+
+    return Fn((): TslAny => {
+      const result = float(1).toVar();
+      const depth = depthTex.x;
+      const isSky = depth.lessThanEqual(1e-7).or(depth.greaterThanEqual(0.9999999));
+      const viewPosition = getViewPosition(screenUV, depth, uProjectionInverse) as TslAny;
+      const distance = viewPosition.length();
+      If(isSky.not().and(distance.lessThan(uGtaoFadeEnd)), () => {
+        const radiusUv = clamp(uGtaoRadius.div(distance.max(0.0001)), uGtaoMinUvRadius, uGtaoMaxUvRadius);
+        const occlusionSum = float(0).toVar();
+        const weightSum = float(0).toVar();
+        for (let tap = 0; tap < taps; tap++) {
+          const angle = tap * GTAO_GOLDEN_ANGLE + 0.35;
+          const radius = Math.sqrt((tap + 0.5) / taps);
+          const uvSample = screenUV.add(vec2(Math.cos(angle), Math.sin(angle)).mul(radiusUv).mul(radius));
+          const inFrame = uvSample.x
+            .greaterThan(0.001)
+            .and(uvSample.x.lessThan(0.999))
+            .and(uvSample.y.greaterThan(0.001))
+            .and(uvSample.y.lessThan(0.999));
+          const sampleDepth = texture(depthTex.value, uvSample).x;
+          const sampleSky = sampleDepth.lessThanEqual(1e-7).or(sampleDepth.greaterThanEqual(0.9999999));
+          const sampleView = getViewPosition(uvSample, sampleDepth, uProjectionInverse) as TslAny;
+          const sampleCloser = sampleView.z.sub(viewPosition.z).greaterThan(uGtaoDepthBias);
+          const sameSurface = smoothstep(uGtaoDepthTolerance, uGtaoDepthBias, sampleView.sub(viewPosition).length());
+          const support = inFrame.and(sampleSky.not()).and(sampleCloser).select(float(1), float(0));
+          occlusionSum.addAssign(sameSurface.mul(support));
+          weightSum.addAssign(inFrame.and(sampleSky.not()).select(float(1), float(0)));
+        }
+        const rawAo = float(1).sub(occlusionSum.div(weightSum.max(1e-3)).mul(uGtaoStrength));
+        const farFade = smoothstep(uGtaoFadeEnd, uGtaoMaxDistance, distance);
+        const directReduction = smoothstep(
+          GTAO_DIRECT_LIGHT_LUMA_START,
+          GTAO_DIRECT_LIGHT_LUMA_END,
+          luminance(sourceRgb),
+        ).mul(GTAO_DIRECT_LIGHT_REDUCTION);
+        const litAo = tslMix(rawAo, float(1), directReduction);
+        result.assign(tslMix(float(1), litAo, farFade));
+      });
+      return clamp(result, 0, 1);
+    })();
   }
 
   private createContactShadowNode(depthTex: TslAny): TslAny {
