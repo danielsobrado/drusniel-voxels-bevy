@@ -4,6 +4,7 @@ import { createStormShaderMaterial, type RainWeatherShaderHandle } from "./rainS
 import { DEFAULT_STORM_WEATHER_SETTINGS } from "./rain_defaults.js";
 import type { StormWeatherOptions, StormWeatherSettings, StormWeatherStats } from "./rain_types.js";
 import { placeCameraFacingBillboard } from "./weather_camera_billboard.js";
+import { applyStormWeatherToMaterials, clampStormWeatherSettings, isWeatherVisible } from "./weather_settings.js";
 
 const LIGHTNING_DISTANCE = 1.5;
 
@@ -33,12 +34,9 @@ export class StormLightningSystem {
   }
 
   applySettings(settings: StormWeatherSettings): void {
-    this.settings = {
-      enabled: settings.enabled,
-      intensity: THREE.MathUtils.clamp(settings.intensity, 0, 1.6),
-    };
-    this.group.visible = this.settings.enabled && this.settings.intensity > 0.001;
-    this.stormMaterial.setIntensity(this.settings.intensity);
+    this.settings = clampStormWeatherSettings(settings);
+    this.group.visible = isWeatherVisible(this.settings);
+    applyStormWeatherToMaterials(this.settings, [this.stormMaterial]);
   }
 
   update(deltaSeconds: number, elapsedSeconds: number, cameraPosition: THREE.Vector3): void {
