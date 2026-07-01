@@ -1,5 +1,5 @@
 import type { CausticsConfig } from "./causticsConfig.js";
-import type { WaterVisualConfig } from "./waterConfig.js";
+import type { WaterVisualConfig } from "./water_config_types.js";
 import {
   readBoolean,
   readColorTuple,
