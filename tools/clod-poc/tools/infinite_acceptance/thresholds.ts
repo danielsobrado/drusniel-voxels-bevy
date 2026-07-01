@@ -39,12 +39,14 @@ export interface ThresholdRule {
 }
 
 export const THRESHOLD_RULES: ThresholdRule[] = [
-  { key: "frame_ms_p95", label: "must be <= 8", pass: (value) => value <= 8 },
+  { key: "frame_ms_p95", label: "must be >= 0 and <= 8", pass: (value) => value >= 0 && value <= 8 },
   { key: "frame_ms_p99", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "streamer_far_shell_ownership_ok", label: "must equal 1", pass: (value) => value === 1 },
   { key: "ring_boundary_holes", label: "must equal 0", pass: (value) => value === 0 },
   { key: "live_clod_gap_holes", label: "must equal 0", pass: (value) => value === 0 },
   { key: "clod_far_gap_holes", label: "must equal 0", pass: (value) => value === 0 },
+  { key: "live_clod_overlap_cells", label: "must equal 0", pass: (value) => value === 0 },
+  { key: "clod_far_overlap_cells", label: "must equal 0", pass: (value) => value === 0 },
   { key: "priority_owner_overlap_cells", label: "must equal 0", pass: (value) => value === 0 },
   { key: "priority_unowned_cells", label: "must equal 0", pass: (value) => value === 0 },
   { key: "missing_live_chunks_in_required_radius", label: "must equal 0", pass: (value) => value === 0 },
@@ -52,6 +54,7 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "camera_to_clod_center_m", label: "must be <= 1", pass: (value) => value <= 1 },
   { key: "camera_to_far_shell_center_m", label: "must be <= 1", pass: (value) => value <= 1 },
   { key: "far_shell_inner_minus_clod_radius_m", label: "must be >= 0", pass: (value) => value >= 0 },
+  { key: "horizon_hole_ratio", label: "must equal 0", pass: (value) => value === 0 },
   { key: "far_summary_tiles_missing", label: "must equal 0 after warmup", pass: (value) => value === 0 },
 ];
 
