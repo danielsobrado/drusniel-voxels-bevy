@@ -544,7 +544,12 @@ export class WebGpuPostProcessPipeline {
       cameraPosition: this.uCameraPosition as unknown as TslAny,
       sunDirection: this.uSunDirection as unknown as TslAny,
       settings: {
-        hillaire: this.atmosphere.hillaire,
+        hillaire: {
+          ...this.atmosphere.hillaire,
+          enabled: this.atmosphere.hillaire.enabled
+            && this.settings.aerialPerspectiveEnabled
+            && this.stageEnabled("aerial"),
+        },
         froxels: {
           ...this.atmosphere.froxels,
           enabled: this.froxelsEnabled || this.froxelDebugMode !== "off",
