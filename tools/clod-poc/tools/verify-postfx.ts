@@ -19,7 +19,7 @@ interface CommandSpec {
 
 const COMMANDS: readonly CommandSpec[] = [
   { command: "npm", args: ["run", "typecheck"] },
-  { command: "vitest", args: ["run", ...TEST_FILES] },
+  { command: "npx", args: ["vitest", "run", ...TEST_FILES] },
 ] as const;
 
 function runCommand(spec: CommandSpec): Promise<void> {
