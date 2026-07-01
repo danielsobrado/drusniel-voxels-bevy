@@ -80,18 +80,20 @@ function checkNeedles(check) {
   return { name: check.name, status: missing.length === 0 ? "ok" : "missing", missing };
 }
 
-function checkComposedShadowOrder() {
+function checkComposedEarlyCullOrder() {
   const source = readProjectFile("src/gpu/wgsl_modules.test.ts");
   const needles = [
-    "skips visible and shadow appends for terrain hidden tree candidates",
+    "runs terrain culling before species, scale, visible, and shadow appends",
+    "expect(hiddenReturn).toBeLessThan(speciesSelection);",
+    "expect(hiddenReturn).toBeLessThan(scaleSelection);",
     "expect(hiddenReturn).toBeLessThan(shadowAppend);",
     "expect(hiddenReturn).toBeLessThan(visibleAppend);",
   ];
   const missing = needles.filter((needle) => !source.includes(needle));
-  return { name: "composed shader shadow order test", status: missing.length === 0 ? "ok" : "missing", missing };
+  return { name: "composed shader early cull order test", status: missing.length === 0 ? "ok" : "missing", missing };
 }
 
-const results = [...checks.map(checkNeedles), checkComposedShadowOrder()];
+const results = [...checks.map(checkNeedles), checkComposedEarlyCullOrder()];
 console.log(JSON.stringify(results, null, 2));
 
 if (results.some((result) => result.status !== "ok")) {
