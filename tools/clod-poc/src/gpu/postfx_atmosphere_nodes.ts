@@ -20,6 +20,8 @@ import {
 import type { PostFxAtmosphereSettings, PostFxFroxelDebugMode } from "./postfx_atmosphere.js";
 import type { PostFxFroxelVolumeNodeInput } from "./postfx_froxel_volume.js";
 import type { PostFxHillaireLutNodeInput } from "./postfx_hillaire_luts.js";
+import { parsePostFxStageFlags, stageAllowed } from "./postfx_stage_flags.js";
+import { searchParams } from "./webgpu_postprocess_config.js";
 
 type TslAny = any;
 const tslMix = mix as unknown as (a: TslAny, b: TslAny, amount: TslAny) => TslAny;
@@ -35,6 +37,10 @@ export interface HillaireFroxelAerialNodeInput {
   froxelDebugMode?: PostFxFroxelDebugMode;
   froxelVolume?: PostFxFroxelVolumeNodeInput | null;
   hillaireLuts?: PostFxHillaireLutNodeInput | null;
+}
+
+export function hillaireAerialAllowedByStageFlags(): boolean {
+  return stageAllowed(parsePostFxStageFlags(searchParams() ?? ""), "aerial");
 }
 
 function phaseHenyeyGreenstein(cosTheta: TslAny, g: number): TslAny {
@@ -53,6 +59,7 @@ function hashNoise(uv: TslAny): TslAny {
 
 export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeInput): TslAny {
   const { hillaire, froxels } = input.settings;
+  const hillaireEnabled = hillaire.enabled && hillaireAerialAllowedByStageFlags();
   const maxAerialDistance = Math.max(1, hillaire.maxDistanceMeters);
   const maxFroxelDistance = Math.max(froxels.nearMeters, froxels.maxDistanceMeters);
   const froxelSteps = froxels.steps;
@@ -150,7 +157,7 @@ export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeIn
       }
     }
 
-    if (hillaire.enabled) {
+    if (hillaireEnabled) {
       const clampedDistance = isSky.select(float(maxAerialDistance), distance.min(maxAerialDistance));
       const cameraHeight = input.cameraPosition.y.max(0);
       const rayleighDensity = densityAtHeight(cameraHeight, hillaire.rayleighScaleHeightMeters);
