@@ -260,6 +260,79 @@ trees: gpu-ring 421 trees ... path=gpu-ring candidates=900 accepted=421 visible=
 trees: cpu-patches 1,250 trees ... path=cpu-patches
 ```
 
+### Done: tree preset performance capture checklist
+
+Implemented this checklist so the next step is measured, not guessed.
+
+Capture rules:
+
+- Use the same camera location and direction for every capture.
+- Reload the page before each capture.
+- Wait until tree stats stop changing before recording values.
+- Capture three runs per URL and use the median.
+- Keep debug readback off for normal preset comparison.
+- Enable `treeGpuCounts=1` only in the separate debug-count pass.
+- Record the exact browser, GPU, OS, window size, and commit SHA.
+
+Primary URLs:
+
+```text
+?quality=ultra&treeGpu=1
+?quality=balanced&treeGpu=1
+?quality=perf&treeGpu=1
+?quality=potato&treeGpu=1
+```
+
+Fallback/control URLs:
+
+```text
+?quality=perf&treeGpu=0
+?quality=perf&treeGpuForceCpu=1
+?quality=perf&treeGpu=1&treeGpuCounts=1
+?quality=perf&treeGpu=1&treeGpuValidate=1
+```
+
+Shadow-budget URLs:
+
+```text
+?quality=perf&treeShadowMaxLod=none
+?quality=perf&treeShadowMaxLod=near
+?quality=balanced&treeShadowMaxLod=mid
+?quality=ultra&treeShadowMaxLod=far
+```
+
+Metrics to record:
+
+| Metric | Source | Why it matters |
+|---|---|---|
+| runtime path | overlay / GUI | Must show `gpu-ring` for GPU tests. |
+| FPS or frame ms | browser perf overlay / profiler | Main user-visible result. |
+| tree GPU dispatch ms | tree GUI when counts enabled | Shows compute cost. |
+| candidates / accepted / visible | tree GUI when counts enabled | Shows scatter and cull volume. |
+| shadow caster count | tree GUI when counts enabled | Shows shadow budget impact. |
+| shadow overflow | tree GUI | Must stay false. |
+| total trees / counts off | overlay | Confirms readback mode. |
+| near/mid/far/impostor | overlay / GUI | Confirms preset LOD distribution. |
+| GPU memory if available | browser / OS tool | Checks impostor and buffer pressure. |
+| visible artifacts | manual note | Missing trees, popping, bad shadows, shader errors. |
+
+Capture table template:
+
+| Commit | URL | Runtime path | FPS / frame ms | Dispatch ms | Candidates | Accepted | Visible | Shadow | Shadow overflow | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|---|
+| TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
+
+Acceptance rules:
+
+- `quality=perf&treeGpu=1` must show `gpu-ring`, not `cpu-patches` or `fallback-cpu`.
+- `quality=perf&treeGpu=0` must show `cpu-patches` or a CPU fallback path.
+- Normal preset URLs must show `counts=off` for GPU ring unless a count/debug flag is present.
+- `perf` must reduce active tree work compared with `ultra`.
+- `potato` must have the lowest tree/shadow cost.
+- `treeShadowMaxLod=none` must report zero shadow casters when counts are enabled.
+- `treeShadowMaxLod=near` must have fewer shadow casters than `mid` or `far` in a dense forest view.
+- No preset should introduce missing near-camera trees, broken shadows, or shader compile errors.
+
 ## Code Health Findings
 
 ### CPU validation is closer, but not guaranteed perfect
@@ -393,12 +466,12 @@ Performance checks:
 Suggested commit title:
 
 ```text
-Add tree preset perf capture checklist
+Add local tree perf capture output format
 ```
 
 Likely files:
 
 - `docs/plans/fable5-tree-performance-gap-plan.md`
-- optional local-only capture notes if a measured output format is added later
+- optional `docs/perf/` capture template if real measured data is recorded
 
 Do not start with a new visual tree effect. The biggest remaining tree win is proving that the GPU path is actually active and measuring the preset impact in the running app.
