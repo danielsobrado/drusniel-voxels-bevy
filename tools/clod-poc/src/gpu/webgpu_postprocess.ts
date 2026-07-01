@@ -372,7 +372,7 @@ export class WebGpuPostProcessPipeline {
     const depthTex = scenePass.getTextureNode("depth") as TslAny;
     const pipeline = new RenderPipeline(this.renderer);
     if (this.settings.debugMode === "copy") {
-      this.exposureKernel = null;
+      this.autoExposureMeter.clearKernel();
       pipeline.outputNode = beauty;
     } else {
       this.configureAutoExposure(beauty);
