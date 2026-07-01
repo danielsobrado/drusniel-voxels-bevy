@@ -14,7 +14,7 @@ import {
   type ThresholdEvaluation,
 } from "./infinite_acceptance/thresholds.js";
 
-process.env["CLOD_POC_BASE_URL"] ??= "http://127.0.0.1:5180/";
+process.env["CLOD_POC_BASE_URL"] ??= "http://127.0.0.1:5173/";
 
 const WIDTH = 1920;
 const HEIGHT = 1080;
@@ -175,9 +175,13 @@ async function waitReady(page: Page, sceneName: string, failedPath: string): Pro
   await page.waitForFunction(
     () => {
       const hooks = (window as typeof window & {
-        __drusnielClod?: { ready?: boolean; error?: string | null };
+        __drusnielClod?: { ready?: boolean; error?: string | null; progress?: number; progressMsg?: string };
       }).__drusnielClod;
-      return Boolean(hooks && (hooks.ready || hooks.error !== null));
+      return Boolean(hooks && (
+        hooks.ready === true ||
+        hooks.error != null ||
+        (hooks.progressMsg === "ready" && (hooks.progress ?? 0) >= 1)
+      ));
     },
     undefined,
     { timeout: READY_TIMEOUT_MS, polling: 250 },

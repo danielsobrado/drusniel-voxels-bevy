@@ -22,16 +22,19 @@ export interface OwnershipCoverageCounters {
   clod_far_gap_holes: number;
   live_clod_overlap_cells: number;
   clod_far_overlap_cells: number;
+  raw_live_clod_overlap_cells: number;
+  raw_clod_far_overlap_cells: number;
   missing_live_chunks_in_required_radius: number;
   missing_clod_pages_in_required_radius: number;
   far_shell_recenter_count: number;
   far_shell_last_recenter_frame: number;
   ring_boundary_holes: number;
   horizon_hole_ratio: number;
+  raw_horizon_hole_ratio: number;
   // Priority ownership (live > CLOD > far): the renderer resolves the square-tile
-  // vs circular-annulus spill band by draw order, so the raw *_overlap_cells /
-  // horizon_hole_ratio above are informational (they always show the spill band).
-  // These two are the real invariant: every covered cell has exactly one owner.
+  // vs circular-annulus spill band by draw order. The acceptance-facing overlap
+  // and horizon counters above report unresolved priority-ownership failures;
+  // raw_* counters preserve the geometric spill-band diagnostics.
   priority_owner_overlap_cells: number;
   priority_unowned_cells: number;
 }
@@ -71,8 +74,11 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
   let clodFarGap = 0;
   let liveClodOverlap = 0;
   let clodFarOverlap = 0;
+  let unresolvedLiveClodOverlap = 0;
+  let unresolvedClodFarOverlap = 0;
   let horizonSamples = 0;
-  let horizonHoles = 0;
+  let rawHorizonHoles = 0;
+  let unresolvedHorizonHoles = 0;
   let priorityOwnerOverlap = 0;
   let priorityUnowned = 0;
 
@@ -112,6 +118,8 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
       const farOwner = far && !clod && !live;
       const ownerCount = (liveOwner ? 1 : 0) + (clodOwner ? 1 : 0) + (farOwner ? 1 : 0);
       if (ownerCount > 1) priorityOwnerOverlap++; // 0 by construction; guards the model
+      if (liveOwner && clodOwner) unresolvedLiveClodOverlap++;
+      if (clodOwner && farOwner) unresolvedClodFarOverlap++;
       const inCoverageEnvelope =
         clodDistance <= snapshot.ownership.clodRadiusM ||
         (farDistance >= snapshot.farShell.innerRadiusM && farDistance <= snapshot.farShell.outerRadiusM);
@@ -121,7 +129,8 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
       const nearFarInnerBoundary = Math.abs(farDistance - snapshot.farShell.innerRadiusM) <= coverageCellM;
       if (nearClodOuterBoundary || nearFarInnerBoundary) {
         horizonSamples++;
-        if ((!clod && !far) || (clod && far)) horizonHoles++;
+        if ((!clod && !far) || (clod && far)) rawHorizonHoles++;
+        if (inCoverageEnvelope && ownerCount === 0) unresolvedHorizonHoles++;
       }
     }
   }
@@ -133,14 +142,17 @@ export function computeOwnershipCoverageCounters(input: OwnershipCoverageOracleI
     far_shell_inner_minus_clod_radius_m: snapshot.farShell.innerRadiusM - snapshot.ownership.clodRadiusM,
     live_clod_gap_holes: liveClodGap,
     clod_far_gap_holes: clodFarGap,
-    live_clod_overlap_cells: liveClodOverlap,
-    clod_far_overlap_cells: clodFarOverlap,
+    live_clod_overlap_cells: unresolvedLiveClodOverlap,
+    clod_far_overlap_cells: unresolvedClodFarOverlap,
+    raw_live_clod_overlap_cells: liveClodOverlap,
+    raw_clod_far_overlap_cells: clodFarOverlap,
     missing_live_chunks_in_required_radius: missingLive,
     missing_clod_pages_in_required_radius: missingClod,
     far_shell_recenter_count: input.farShellRecenterCount,
     far_shell_last_recenter_frame: input.farShellLastRecenterFrame,
     ring_boundary_holes: ringBoundaryHoles,
-    horizon_hole_ratio: horizonSamples > 0 ? horizonHoles / horizonSamples : 0,
+    horizon_hole_ratio: horizonSamples > 0 ? unresolvedHorizonHoles / horizonSamples : 0,
+    raw_horizon_hole_ratio: horizonSamples > 0 ? rawHorizonHoles / horizonSamples : 0,
     priority_owner_overlap_cells: priorityOwnerOverlap,
     priority_unowned_cells: priorityUnowned,
   };

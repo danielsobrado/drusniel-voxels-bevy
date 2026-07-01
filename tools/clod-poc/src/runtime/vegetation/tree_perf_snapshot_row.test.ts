@@ -59,4 +59,24 @@ describe("tree perf snapshot row", () => {
 
     expect(row).toContain("total=counts off");
   });
+
+  it("shows the ring total when the readback runs even if debugShowGpuCounts is off", () => {
+    const row = formatTreePerfSnapshotRow({
+      state: state({ treeGpuShowCounts: false, treeGpuReadbackVisibleLists: true }),
+      stats: stats({ gpuStatus: "ring", gpuShowCounts: false, totalTrees: 321 }),
+      url: "?quality=perf&treeGpu=1",
+    });
+
+    expect(row).toContain("total=321");
+  });
+
+  it("shows the ring total when CPU-parity validation forces a readback", () => {
+    const row = formatTreePerfSnapshotRow({
+      state: state({ treeGpuShowCounts: false, treeGpuReadbackVisibleLists: false, treeGpuValidateAgainstCpu: true }),
+      stats: stats({ gpuStatus: "ring", gpuShowCounts: false, totalTrees: 654 }),
+      url: "?quality=perf&treeGpu=1",
+    });
+
+    expect(row).toContain("total=654");
+  });
 });

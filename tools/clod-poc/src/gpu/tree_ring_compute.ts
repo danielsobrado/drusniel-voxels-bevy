@@ -137,8 +137,11 @@ export function treeGpuRingBuildIndirectWorkgroups(settings: TreeSettings): numb
 }
 
 export function treeGpuRingRequestsDebugReadback(settings: TreeSettings, frame: number): boolean {
-  return settings.gpu.readbackVisibleLists &&
-    (settings.gpu.debugShowGpuCounts || settings.gpu.debugValidateAgainstCpu) &&
+  // `readbackVisibleLists` alone is enough to populate the visible/shadow counts
+  // (e.g. for the HUD). CPU-parity validation also needs the readback, so it
+  // triggers one regardless of the readback flag. `debugShowGpuCounts` is a
+  // pure display toggle and no longer gates the readback.
+  return (settings.gpu.readbackVisibleLists || settings.gpu.debugValidateAgainstCpu) &&
     frame % READBACK_INTERVAL_FRAMES === 0;
 }
 

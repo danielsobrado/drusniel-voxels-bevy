@@ -39,7 +39,7 @@ export interface ThresholdRule {
 }
 
 export const THRESHOLD_RULES: ThresholdRule[] = [
-  { key: "frame_ms_p95", label: "must be >= 0 and <= 8", pass: (value) => value >= 0 && value <= 8 },
+  { key: "frame_ms_p95", label: "must be finite, >= 0 and <= 8", pass: (value) => Number.isFinite(value) && value >= 0 && value <= 8 },
   { key: "frame_ms_p99", label: "must be >= 0", pass: (value) => value >= 0 },
   { key: "streamer_far_shell_ownership_ok", label: "must equal 1", pass: (value) => value === 1 },
   { key: "ring_boundary_holes", label: "must equal 0", pass: (value) => value === 0 },

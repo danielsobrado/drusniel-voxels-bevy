@@ -122,33 +122,36 @@ describe("tree GPU ring compute helpers", () => {
     expect(treeGpuRingKey(settings, 256)).not.toBe(treeGpuRingKey(DEFAULT_TREE_SETTINGS, 256));
   });
 
-  it("gates periodic debug counter readback behind readbackVisibleLists and debug consumers", () => {
-    const enabled = {
+  it("runs periodic readback for readbackVisibleLists or CPU-parity validation, independent of debugShowGpuCounts", () => {
+    const readbackOnly = {
       ...DEFAULT_TREE_SETTINGS,
-      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: true },
+      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: false },
     };
     const noReadback = {
       ...DEFAULT_TREE_SETTINGS,
-      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: false, debugShowGpuCounts: true },
-    };
-    const hiddenCounts = {
-      ...DEFAULT_TREE_SETTINGS,
-      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: false },
+      gpu: {
+        ...DEFAULT_TREE_SETTINGS.gpu,
+        readbackVisibleLists: false,
+        debugShowGpuCounts: true,
+        debugValidateAgainstCpu: false,
+      },
     };
     const validateOnly = {
       ...DEFAULT_TREE_SETTINGS,
       gpu: {
         ...DEFAULT_TREE_SETTINGS.gpu,
-        readbackVisibleLists: true,
+        readbackVisibleLists: false,
         debugShowGpuCounts: false,
         debugValidateAgainstCpu: true,
       },
     };
 
-    expect(treeGpuRingRequestsDebugReadback(enabled, 0)).toBe(true);
-    expect(treeGpuRingRequestsDebugReadback(enabled, 1)).toBe(false);
+    // readbackVisibleLists alone is sufficient, on the periodic interval only.
+    expect(treeGpuRingRequestsDebugReadback(readbackOnly, 0)).toBe(true);
+    expect(treeGpuRingRequestsDebugReadback(readbackOnly, 1)).toBe(false);
+    // debugShowGpuCounts is display-only and does not trigger a readback.
     expect(treeGpuRingRequestsDebugReadback(noReadback, 0)).toBe(false);
-    expect(treeGpuRingRequestsDebugReadback(hiddenCounts, 0)).toBe(false);
+    // CPU-parity validation still forces a readback on its own.
     expect(treeGpuRingRequestsDebugReadback(validateOnly, 0)).toBe(true);
   });
 

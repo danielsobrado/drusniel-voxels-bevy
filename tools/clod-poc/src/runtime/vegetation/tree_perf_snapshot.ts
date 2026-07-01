@@ -1,6 +1,6 @@
 import type { TreeStats } from "../../trees/index.js";
 import { formatTreeGpuStatusPath } from "../../trees/tree_info.js";
-import { formatTreePerfSnapshotRow } from "./tree_perf_snapshot_row.js";
+import { formatTreePerfSnapshotRow, formatTreePerfTotal } from "./tree_perf_snapshot_row.js";
 
 export interface TreePerfSnapshotState {
   postProcessQualityPreset?: string;
@@ -39,7 +39,7 @@ export function formatTreePerfSnapshot(input: TreePerfSnapshotInput): string {
     `- url: ${input.url ?? "unknown"}`,
     `- quality: ${state.postProcessQualityPreset ?? "unknown"}`,
     `- runtime path: ${runtimePath}`,
-    `- total / counts: ${stats ? formatTotal(stats) : "unknown"}`,
+    `- total / counts: ${stats ? formatTreePerfTotal(state, stats) : "unknown"}`,
     `- lod n/m/f/i: ${stats ? `${stats.nearTrees}/${stats.midTrees}/${stats.farTrees}/${stats.impostorTrees}` : "unknown"}`,
     `- gpu dispatch ms: ${dispatchMs}`,
     `- gpu candidates / accepted / visible: ${stats ? `${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}` : "unknown"}`,
@@ -66,10 +66,6 @@ export function formatTreePerfSnapshot(input: TreePerfSnapshotInput): string {
     `- treeGpuMaxVisible: ${state.treeGpuMaxVisible}`,
     "",
   ].join("\n");
-}
-
-function formatTotal(stats: TreeStats): string {
-  return stats.gpuStatus === "ring" && !stats.gpuShowCounts ? "counts off" : String(stats.totalTrees);
 }
 
 function yesNo(value: boolean): "yes" | "no" {

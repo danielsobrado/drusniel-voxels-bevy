@@ -18,7 +18,7 @@ function snapshot(overrides: Partial<TerrainOwnershipRuntimeSnapshot> = {}): Ter
 }
 
 describe("ownership coverage oracle", () => {
-  it("reports known live/CLOD overlaps from footprints", () => {
+  it("keeps raw live/CLOD overlap diagnostics while acceptance overlap is priority-resolved", () => {
     const counters = computeOwnershipCoverageCounters({
       snapshot: snapshot({
         live: {
@@ -43,7 +43,8 @@ describe("ownership coverage oracle", () => {
       farShellLastRecenterFrame: -1,
       coverageCellM: 8,
     });
-    expect(counters.live_clod_overlap_cells).toBeGreaterThan(0);
+    expect(counters.raw_live_clod_overlap_cells).toBeGreaterThan(0);
+    expect(counters.live_clod_overlap_cells).toBe(0);
   });
 
   it("reports known live/CLOD and CLOD/far-shell gaps", () => {
@@ -141,9 +142,10 @@ describe("ownership coverage oracle", () => {
       coverageCellM: 64,
     });
 
-    // The spill band is real: raw coverage overlap is non-zero (this is why the
-    // raw *_overlap_cells gate is geometrically impossible to drive to 0).
-    expect(counters.clod_far_overlap_cells).toBeGreaterThan(0);
+    // The spill band is real: raw coverage overlap is non-zero. The acceptance
+    // overlap counter is priority-resolved, so it stays gateable at 0.
+    expect(counters.raw_clod_far_overlap_cells).toBeGreaterThan(0);
+    expect(counters.clod_far_overlap_cells).toBe(0);
 
     // The invariant that actually matters: priority assigns exactly one owner per
     // cell (no double-owner) and leaves no covered cell un-owned (no real holes).

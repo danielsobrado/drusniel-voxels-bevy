@@ -36,7 +36,8 @@ describe("infinite islands threshold validation", () => {
     expect(result.failures.some((failure) => failure.includes("frame_ms_p95 missing"))).toBe(true);
   });
 
-  it("fails when p95 is negative or above budget", () => {
+  it("fails when p95 is non-finite, negative, or above budget", () => {
+    expect(evaluateThresholds(validCounters({ frame_ms_p95: Infinity })).passed).toBe(false);
     expect(evaluateThresholds(validCounters({ frame_ms_p95: -1 })).passed).toBe(false);
     expect(evaluateThresholds(validCounters({ frame_ms_p95: 9 })).passed).toBe(false);
   });

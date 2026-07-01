@@ -276,6 +276,41 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       }
     }
 
+    // Mirror GPU-driven scatter culling counts into the HUD counters. The
+    // renderer's `info.render.triangles` reports fixed indirect-draw capacity,
+    // not what the GPU frustum cull actually kept, so these are the only live
+    // signal that culling responds to the camera. `trees.visible` / per-LOD
+    // stay 0 unless the GPU count readback is enabled
+    // (trees.gpu.readback_visible_lists + debug_show_gpu_counts); the readback
+    // is a GPU->CPU stall so it is opt-in.
+    {
+      const hooks = render.getHooks();
+      if (hooks?.stats) {
+        const counters = hooks.stats.counters;
+        if (currentTreeStats) {
+          // CPU patch path (trees.gpu.enabled=false): three.js frustum-culls
+          // whole patches, so visible<patches when the camera looks away.
+          counters["trees.total"] = currentTreeStats.totalTrees;
+          counters["trees.visiblePatches"] = currentTreeStats.visiblePatches;
+          counters["trees.patches"] = currentTreeStats.patches;
+          // GPU ring path (trees.gpu.enabled=true): readback-derived counts.
+          counters["trees.visible"] = currentTreeStats.gpuVisibleCount;
+          counters["trees.near"] = currentTreeStats.nearTrees;
+          counters["trees.mid"] = currentTreeStats.midTrees;
+          counters["trees.far"] = currentTreeStats.farTrees;
+          counters["trees.impostor"] = currentTreeStats.impostorTrees;
+          counters["trees.shadowCasters"] = currentTreeStats.gpuShadowCasterCount;
+          counters["trees.candidates"] = currentTreeStats.gpuCandidateCount;
+          counters["trees.overflow"] = currentTreeStats.gpuOverflowed ? 1 : 0;
+        }
+        const propStats = vegetation.propStats?.current ?? null;
+        if (propStats) {
+          counters["props.visible"] = propStats.gpuVisibleCount;
+          counters["props.candidates"] = propStats.gpuCandidateCount;
+        }
+      }
+    }
+
     runRenderPhase({
       renderer: render.renderer,
       scene: render.scene,

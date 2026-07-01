@@ -15,6 +15,9 @@ const edits = [
     label: "species expansion compose body",
     expected: `  const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);\n  const treeEntry = applyTreeRingWgslLayoutConstants(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)), treeLayout).replace(`,
     replacement: `  const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);\n  const baseTreeEntry = withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)));\n  const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);\n  const treeEntry = applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout).replace(`,
+    alreadyApplied: [
+      `  const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);\n  const baseTreeEntry = withTreeShadowLodGate(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))));\n  const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);\n  const treeEntry = applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout).replace(`,
+    ],
   },
 ];
 
@@ -26,13 +29,14 @@ export function wireTreeRingWgslExpansionSource(input) {
   const skipped = [];
   for (const edit of edits) {
     const expectedCount = countOccurrences(source, edit.expected);
-    const replacementCount = countOccurrences(source, edit.replacement);
-    if (replacementCount === 1) {
+    const appliedCount = [edit.replacement, ...(edit.alreadyApplied ?? [])]
+      .reduce((count, applied) => count + countOccurrences(source, applied), 0);
+    if (appliedCount === 1) {
       skipped.push(edit.label);
       continue;
     }
-    if (replacementCount > 1 || expectedCount !== 1) {
-      throw new Error(`Cannot apply ${edit.label}: expected ${expectedCount} source matches and ${replacementCount} already-applied matches.`);
+    if (appliedCount > 1 || expectedCount !== 1) {
+      throw new Error(`Cannot apply ${edit.label}: expected ${expectedCount} source matches and ${appliedCount} already-applied matches.`);
     }
     source = source.replace(edit.expected, edit.replacement);
     changed = true;
