@@ -93,7 +93,7 @@ function withTreeTerrainVisibilityCull(source: string): string {
   return source
     .replace(
       "fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
-      "fn tree_terrain_visibility_enabled() -> bool {\n  return params.settings_e.w > 0.5;\n}\n\nfn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
+      "fn tree_terrain_visibility_enabled() -> bool {\n  return true;\n}\n\nfn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
     )
     .replace(
       "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  append_shadow_lod_if_active",
