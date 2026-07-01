@@ -117,13 +117,14 @@ What is done:
 - shadow and visible lists both skip terrain-hidden slots;
 - a conservative tree-ring cluster visibility mask can be built from the shared vegetation visibility provider;
 - the cluster mask keeps unknown/missing terrain visible;
+- the cluster mask is stored as `Uint32Array` words so it can be uploaded directly to a WGSL `array<u32>` storage buffer;
 - utility lookup maps tree-ring slots back to their cluster visibility.
 
 What is not done:
 
 - GPU dispatch still covers the full tree ring slot grid;
 - `gpuCandidateCount` may not drop yet;
-- cluster masks are not uploaded to the compute shader yet;
+- cluster mask words are not uploaded to the compute shader yet;
 - the compute shader does not yet read a cluster mask before per-slot work;
 - there is no compacted cluster dispatch yet.
 
@@ -137,7 +138,8 @@ Target shape:
 
 ```text
 CPU/NAADF visibility provider
-  -> compact cluster visibility mask
+  -> compact cluster visibility mask as Uint32Array words
+  -> storage binding exposed to GPU tree-ring compute
   -> GPU tree ring reads mask before per-slot work
   -> hidden cluster returns before candidate work
   -> future: dispatch only visible clusters
