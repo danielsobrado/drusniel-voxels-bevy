@@ -120,46 +120,23 @@ export interface TerrainViewStartupInput {
 
 export interface TerrainViewStartupResult {
   postProcess: AppPostProcess;
-  skyEnvironment: AppSky;
-  currentTerrainColorAdjustments: () => TerrainColorAdjustments;
-  currentEnvironmentSettings: () => EnvironmentSettings;
-  currentPostProcessSettings: () => PostProcessSettings;
   currentLighting: () => EnvironmentLighting;
   views: Map<string, NodeView>;
-  textureController: ReturnType<typeof createTerrainTextureController>;
-  materialController: ReturnType<typeof createTerrainMaterialController>;
-  applyTerrainTextures: () => void;
-  applyColorByLodToMaterials: (on: boolean) => void;
-  applyColorAdjustmentsToTerrain: () => void;
-  farShellController: ReturnType<typeof createFarShellController>;
-  canopyShellSystem: CanopyShellSystem | null;
-  canopyDebugState: CanopyDebugState | null;
-  getCanopyConfig: () => CanopyShellConfig;
-  setCanopyConfig: (config: CanopyShellConfig) => void;
-  shadowProxyController: ShadowProxyController | null;
-  shadowProxyDebugState: ShadowProxyDebugState | null;
-  getShadowProxyConfig: () => import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig;
-  setShadowProxyConfig: (config: import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig) => void;
-  boundaryGroup: THREE.Group;
-  seamGroup: THREE.Group;
-  crossLodBorderGroup: THREE.Group;
+  selectionController: ClodSelectionController;
   lockedBorderOverlay: LockedBorderOverlay;
   nodeLabelOverlay: NodeLabelOverlay;
-  brushPreview: ReturnType<typeof createBrushPreviewController>;
-  nearFieldBubbleController: ReturnType<typeof createNearFieldBubbleController>;
-  pageTransitionMode: string;
-  crossfadeStep: number;
-  selectionController: ClodSelectionController;
-  updateSelection: () => void;
-  cutChangedRef: { fn: () => void };
-  applyNodeMesh: (node: ClodPageNode) => { geometrySwapMs: number; colliderMs: number };
+  shadowProxyController: ShadowProxyController | null;
+  shadowProxyDebugState: ShadowProxyDebugState | null;
+  canopySystem: CanopyShellSystem | null;
+  canopyDebugState: CanopyDebugState | null;
 }
 
-export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainViewStartupResult {
+export function createTerrainViews(input: TerrainViewStartupInput): TerrainViewStartupResult {
   const {
     app,
     scene,
     camera,
+    controls,
     state,
     bindings,
     clodRuntime,
@@ -172,6 +149,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     isLongView,
     queryFarShell,
     queryCanopy,
+    queryScene,
     longViewHooks,
     isWebGpu,
     poolTerrainMaterial,
@@ -197,10 +175,12 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   } = input;
 
   const currentTerrainColorAdjustments = (): TerrainColorAdjustments => ({
-    brightness: state.terrainBrightness,
-    contrast: state.terrainContrast,
-    saturation: state.terrainSaturation,
-    warmth: state.terrainWarmth,
+    base: state.baseColor,
+    slopeTint: state.slopeTint,
+    heightTint: state.heightTint,
+    slopeStrength: state.slopeStrength,
+    heightStrength: state.heightStrength,
+    macroVariation: state.macroVariation,
   });
   const currentEnvironmentSettings = (): EnvironmentSettings => ({
     sunAzimuthDeg: state.sunAzimuthDeg,
@@ -208,7 +188,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     sunIntensity: state.sunIntensity,
     skyIntensity: state.skyIntensity,
     groundIntensity: state.groundIntensity,
-    exposure: state.exposure,
+    exposure: state.environmentExposure,
     horizonSoftness: state.horizonSoftness,
     sunDiskIntensity: state.sunDiskIntensity,
     sunGlowIntensity: state.sunGlowIntensity,
@@ -299,11 +279,10 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   }
 
   const postProcess: AppPostProcess = app.isWebGpu
-    ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings())
+    ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings(), currentLighting)
     : new PostProcessPipeline(app.renderer, currentPostProcessSettings());
   postProcess.setSize(window.innerWidth, window.innerHeight);
 
-  const queryScene = searchParams.get("scene");
   const streamingLongView = isStreamingLongViewScene(queryScene);
   const longViewSunConfig = parseLongViewSunShadowsConfig(longViewYaml);
   const shadowProxyConfig = applyShadowProxySceneOverrides(
@@ -338,244 +317,110 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     getSettings: () => ({
       enabled: state.farShellEnabled,
       radiusFactor: state.farShellRadiusFactor,
-      heightBias: state.farShellHeightBias,
-      heightDrop: state.farShellHeightDrop,
+      horizonBlend: state.farShellHorizonBlend,
+      canopyEnabled: state.farCanopyEnabled,
+      canopyRadiusFactor: state.farCanopyRadiusFactor,
+      canopyHorizonBlend: state.farCanopyHorizonBlend,
+      materialParity: parityUniformData,
     }),
-    receiveSunShadows: () => Boolean(isLongView && shadowProxyDebugState?.sunShadowsEnabled),
-    useDebugLambertReceiver: () => Boolean(shadowProxyDebugState?.debugLambertFarShellReceiver),
-    useParityMaterial: () => materialConfig.enabled,
-    getParityConfig: () => parityUniformData,
-    skipLegacyCanopy: useDeterministicCanopy,
-    onTriangleCount: (counter, count) => {
-      if (longViewHooks?.stats) longViewHooks.stats.counters[counter] = count;
+  });
+
+  const selectionController = createClodSelectionController({
+    roots: result.roots,
+    views,
+    camera,
+    renderer: app.renderer,
+    controls,
+    config: cfg,
+    state,
+    farShellController,
+    staleEditedAncestorIds,
+  });
+
+  const lockedBorderOverlay = new LockedBorderOverlay(scene);
+  const nodeLabelOverlay = new NodeLabelOverlay();
+  document.body.appendChild(nodeLabelOverlay.element);
+
+  const shadowProxyController = isLongView && longViewSunConfig.enabled
+    ? createShadowProxyController({
+        scene,
+        terrainSummary,
+        config: liveShadowProxyConfig,
+        lighting: currentLighting(),
+        debugState: shadowProxyDebugState,
+        snapMeters: resolveShadowProxyRebuildSnapMeters(longViewSunConfig),
+        getCamera: () => camera,
+      })
+    : null;
+
+  const canopySystem = useDeterministicCanopy
+    ? createCanopyShellSystem({
+        scene,
+        terrainSummary,
+        worldSizeCells,
+        config: liveCanopyConfig,
+        debugState: canopyDebugState,
+        getLighting: currentLighting,
+        getCamera: () => camera,
+      })
+    : null;
+
+  bindings.registerRuntimeCallbacks({
+    currentEnvironmentSettings,
+    updateEnvironment: () => {
+      skyEnvironment.updateSettings(currentEnvironmentSettings());
+      const lighting = currentLighting();
+      materialController.applyLightingToAll(lighting);
+      shadowProxyController?.updateLighting(lighting);
+      canopySystem?.updateLighting(lighting);
+    },
+    currentTerrainColorAdjustments,
+    updateTerrainColors: () => materialController.applyColorAdjustmentsToAll(currentTerrainColorAdjustments()),
+    applyTerrainTextures,
+    applyColorByLodToMaterials,
+    updateFarShell: () => farShellController.update(),
+    updateShadowProxy: () => {
+      liveShadowProxyConfig = applyShadowProxyDebugQueryOverrides(
+        applyShadowProxySceneOverrides(longViewSunConfig.shadowProxy, searchParams),
+        searchParams,
+      );
+      shadowProxyController?.updateConfig(liveShadowProxyConfig);
+    },
+    updateCanopy: () => {
+      liveCanopyConfig = applyCanopyShellQueryOverrides(parseCanopyShellConfig(canopyShellYaml), searchParams);
+      if (canopyDebugState) applyConfigToCanopyDebugState(canopyDebugState, liveCanopyConfig);
+      canopySystem?.updateConfig(liveCanopyConfig);
     },
   });
 
-  if (state.farShellEnabled) {
-    farShellController.rebuild();
-  } else {
-    farShellController.setEnabled(false);
-  }
-
-  const canopyShellSystem = useDeterministicCanopy
-    ? createCanopyShellSystem(canopyShellYaml, searchParams, queryScene, input.queryCanopy, {
-      scene,
-      terrainSummary,
-      worldSizeCells,
-      getLighting: currentLighting,
-      getConfig: () => liveCanopyConfig,
-      getDebugState: () => canopyDebugState!,
-      onCounters: (counters) => {
-        if (!longViewHooks?.stats) return;
-        for (const [key, value] of Object.entries(counters)) {
-          longViewHooks.stats.counters[key] = value;
-        }
-      },
-    })
-    : null;
-  if (canopyShellSystem) {
-    canopyDebugState = canopyShellSystem.debugState;
-  }
-
-  const shadowProxyController = isLongView
-    ? createShadowProxyController(
-      { enabled: longViewSunConfig.enabled, shadowProxy: liveShadowProxyConfig },
-      {
-        scene,
-        renderer: input.renderer,
-        getTerrainSummary: () => window.__drusnielTerrainSummary ?? terrainSummary,
-        worldSize: worldSizeCells,
-        isLongView,
-        streamingCentered: streamingLongView,
-        rebuildSnapMeters: resolveShadowProxyRebuildSnapMeters(liveShadowProxyConfig),
-        getSunShadowsEnabled: () => shadowProxyDebugState?.sunShadowsEnabled ?? false,
-        getConfig: () => liveShadowProxyConfig,
-        getLighting: currentLighting,
-        getCoverageCenter: () => ({ x: camera.position.x, z: camera.position.z }),
-        onCounters: (counters) => {
-          if (!longViewHooks?.stats) return;
-          for (const [key, value] of Object.entries(counters)) {
-            longViewHooks.stats.counters[key] = value;
-          }
-        },
-      },
-    )
-    : null;
-
-  if (shadowProxyDebugState && shadowProxyController) {
-    shadowProxyDebugState.shadowProxyStatsLine = shadowProxyController.runtime.stats.built
-      ? `tris ${shadowProxyController.runtime.stats.triangleCount}`
-      : "shadow proxy: not built";
-  }
-
-  const boundaryGroup = new THREE.Group();
-  scene.add(boundaryGroup);
-  const brushPreview = createBrushPreviewController(scene);
-  const seamGroup = new THREE.Group();
-  scene.add(seamGroup);
-  const crossLodBorderGroup = new THREE.Group();
-  scene.add(crossLodBorderGroup);
-  const lockedBorderOverlay = new LockedBorderOverlay(scene);
-  const nodeLabelRoot = document.createElement("div");
-  document.body.appendChild(nodeLabelRoot);
-  const nodeLabelOverlay = new NodeLabelOverlay(nodeLabelRoot);
-  nodeLabelOverlay.setVisible(state.showNodeLabels);
-
-  const worldBounds = { cellsX: worldCells, cellsZ: worldCells };
-  const gpuMeshEnabled = searchParams.get("gpuMesh") === "1";
-  const gpuMeshVerify = searchParams.get("gpuMeshVerify") === "1";
-  let gpuMesher: GpuChunkMesher | null = null;
-  if (gpuMeshEnabled) {
-    void GpuChunkMesher.create(cfg.page.chunk_size, { sharedDevice: rendererWebGpuDevice ?? undefined }).then(async (res) => {
-      if (!res.mesher) {
-        console.warn("[gpuMesh] WebGPU unavailable; using CPU meshChunk", res.unavailable);
-        return;
-      }
-      gpuMesher = res.mesher;
-      console.info("[gpuMesh] GPU chunk mesher ready");
-      if (gpuMeshVerify) {
-        const edits = resolveDigEdits(getDigEditsSnapshot());
-        for (const [cx, cz] of [[0, 0], [2, 2], [4, 4]] as const) {
-          try {
-            const g = await res.mesher.meshChunk(cx, cz, worldBounds, edits);
-            const c = meshChunk(cx, cz, cfg, worldBounds);
-            const cmp = compareChunkSurfaces(c, g, 0.05);
-            console.info(
-              `[gpuMesh] parity chunk(${cx},${cz}) tris G/C ${cmp.gpuTriangles}/${cmp.cpuTriangles}` +
-                ` verts ${cmp.gpuVertices}/${cmp.cpuVertices} (halo ${cmp.haloVertices})` +
-                ` maxDelta ${cmp.maxVertexDelta.toFixed(4)}` +
-                ` unmatched ${cmp.unmatched} ${cmp.withinTol ? "OK" : "DRIFT"}`,
-            );
-          } catch (e) {
-            console.error(`[gpuMesh] parity chunk(${cx},${cz}) failed`, e);
-          }
-        }
-      }
+  if (queryWebGpuParity && rendererWebGpuDevice) {
+    const gpuMesher = new GpuChunkMesher({ device: rendererWebGpuDevice, readbackMode: queryReadbackMode });
+    const edits = getDigEditsSnapshot();
+    const chunkMesh = meshChunk(0, 0, 0, cfg.page.chunk_size);
+    void gpuMesher.meshChunk({
+      x0: 0,
+      y0: 0,
+      z0: 0,
+      size: cfg.page.chunk_size,
+      edits: resolveDigEdits(edits),
+    }).then((gpuMesh) => {
+      const report = compareChunkSurfaces(chunkMesh, gpuMesh);
+      console.info("[webgpu-parity]", report);
+    }).catch((error) => {
+      console.error("[webgpu-parity] failed", error);
     });
   }
-  const nearFieldBubbleController = createNearFieldBubbleController({
-    scene,
-    materialController,
-    cfg,
-    worldBounds,
-    getTintBubble: () => state.tintBubble,
-    getGpuMesher: () => gpuMesher,
-    chunkGroupBuildBudget: clodRuntime.nearField.chunkGroupBuildBudget,
-    maxCachedChunkGroups: clodRuntime.nearField.maxCachedChunkGroups,
-    evictDistanceMultiplier: clodRuntime.nearField.evictDistanceMultiplier,
-  });
-
-  const pageTransitionMode = cfg.selection.transition_mode;
-  const crossfadeStep = cfg.selection.crossfade_frames > 0
-    ? 1 / cfg.selection.crossfade_frames
-    : 1;
-  const applyColorAdjustmentsToTerrain = () => {
-    materialController.applyColorAdjustments();
-  };
-
-  const cutChangedRef: { fn: () => void } = { fn: () => {} };
-  const selectionController = createClodSelectionController({
-    config: {
-      clodRuntime,
-      hysteresisMergeFactor: cfg.selection.hysteresis_merge_factor,
-      chunksPerPage: cfg.page.chunks_per_page,
-      chunkSize: cfg.page.chunk_size,
-      readbackMode: queryReadbackMode,
-      forceContinuousParity: queryWebGpuParity,
-      webGpuUnavailableReason: getWebGpuUnavailableReason(),
-      poolTerrainMaterial,
-    },
-    roots: result.roots,
-    allNodes,
-    views,
-    getClodErrorCompute,
-    getSettings: () => ({
-      thresholdPx: state.thresholdPx,
-      enforce21: state.enforce21,
-      freezeSelection: (state as any).freezeSelection ?? false,
-      neighborLevelDeltaMax: (state as any).neighborLevelDeltaMax ?? 1,
-      bubble: state.bubble,
-      bubbleRadius: state.bubbleRadius,
-      forceMaxLevel: state.forceMaxLevel as number | "auto",
-      webgpuSelection: state.webgpuSelection,
-      showBounds: state.showBounds,
-      showSeamPoints: state.showSeamPoints,
-      showCrossLodBorders: state.showCrossLodBorders,
-      showLockedBorderVertices: state.showLockedBorderVertices,
-      materialTiers: state.materialTiers,
-    }),
-    getSelectionCenter: () => interaction.mode === "playing" ? player.position : input.controls.target,
-    renderer: input.renderer,
-    camera,
-    overlays: { boundaryGroup, seamGroup, crossLodBorderGroup },
-    lockedBorderOverlay,
-    staleEditedAncestorIds,
-    onCutChanged: () => cutChangedRef.fn(),
-  });
-  const updateSelection = () => selectionController.update();
-
-  const applyNodeMesh = (node: ClodPageNode): { geometrySwapMs: number; colliderMs: number } => {
-    const v = views.get(node.id);
-    let geometrySwapMs = 0;
-    if (v) {
-      const gs = performance.now();
-      v.mesh.geometry.dispose();
-      v.mesh.geometry = toGeometry(node.mesh);
-      v.sourceNormals = node.mesh.normals;
-      v.recomputedNormals = null;
-      if (state.recomputedNormals) {
-        v.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(v), 3));
-      }
-      geometrySwapMs = performance.now() - gs;
-    }
-    if (node.level !== 0) return { geometrySwapMs, colliderMs: 0 };
-    const tc = performance.now();
-    terrainColliders.updatePage(node.id, node.mesh);
-    nearFieldBubbleController.invalidatePage(node.id);
-    return { geometrySwapMs, colliderMs: performance.now() - tc };
-  };
 
   return {
     postProcess,
-    skyEnvironment,
-    currentTerrainColorAdjustments,
-    currentEnvironmentSettings,
-    currentPostProcessSettings,
     currentLighting,
     views,
-    textureController,
-    materialController,
-    applyTerrainTextures,
-    applyColorByLodToMaterials,
-    applyColorAdjustmentsToTerrain,
-    farShellController,
-    canopyShellSystem,
-    canopyDebugState,
-    getCanopyConfig: () => liveCanopyConfig,
-    setCanopyConfig: (config: CanopyShellConfig) => {
-      liveCanopyConfig = { ...config };
-      if (canopyDebugState) {
-        applyConfigToCanopyDebugState(canopyDebugState, config);
-      }
-    },
-    shadowProxyController,
-    shadowProxyDebugState,
-    getShadowProxyConfig: () => liveShadowProxyConfig,
-    setShadowProxyConfig: (config: import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig) => {
-      liveShadowProxyConfig = { ...config };
-    },
-    boundaryGroup,
-    seamGroup,
-    crossLodBorderGroup,
+    selectionController,
     lockedBorderOverlay,
     nodeLabelOverlay,
-    brushPreview,
-    nearFieldBubbleController,
-    pageTransitionMode,
-    crossfadeStep,
-    selectionController,
-    updateSelection,
-    cutChangedRef,
-    applyNodeMesh,
+    shadowProxyController,
+    shadowProxyDebugState,
+    canopySystem,
+    canopyDebugState,
   };
 }
