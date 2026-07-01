@@ -45,15 +45,21 @@ describe("WGSL module composition", () => {
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
   });
 
-  it("skips visible and shadow appends for terrain hidden tree candidates", () => {
+  it("runs terrain culling before species, scale, visible, and shadow appends", () => {
     const source = composeTreeRingShader();
     const hiddenReturn = source.indexOf("if (terrain_hidden) { return; }");
+    const speciesSelection = source.indexOf("let species = select_species");
+    const scaleSelection = source.indexOf("let scale = tree_instance_scale");
     const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
     const visibleAppend = source.indexOf("append_lod_if_active(species, TREE_LOD_NEAR");
 
     expect(hiddenReturn).toBeGreaterThan(-1);
+    expect(speciesSelection).toBeGreaterThan(-1);
+    expect(scaleSelection).toBeGreaterThan(-1);
     expect(shadowAppend).toBeGreaterThan(-1);
     expect(visibleAppend).toBeGreaterThan(-1);
+    expect(hiddenReturn).toBeLessThan(speciesSelection);
+    expect(hiddenReturn).toBeLessThan(scaleSelection);
     expect(hiddenReturn).toBeLessThan(shadowAppend);
     expect(hiddenReturn).toBeLessThan(visibleAppend);
   });
