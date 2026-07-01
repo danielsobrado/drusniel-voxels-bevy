@@ -17,140 +17,48 @@ import {
   createStormShaderMaterial,
   type RainWeatherShaderHandle,
 } from "./rainShaderMaterial.js";
+import {
+  HARD_SPLASH_COUNT,
+  REPOSITION_DISTANCE,
+  SANDSTORM_PARTICLE_COUNT,
+  SNOW_FLAKE_COUNT,
+  SPLASH_AREA,
+  TAU,
+  WATER_DEPTH_EPSILON,
+  WATER_MASK_EPSILON,
+  WATER_SPLASH_COUNT,
+} from "./rain_constants.js";
+import {
+  DEFAULT_RAIN_WEATHER_SETTINGS,
+  DEFAULT_SANDSTORM_WEATHER_SETTINGS,
+  DEFAULT_SNOW_WEATHER_SETTINGS,
+  DEFAULT_STORM_WEATHER_SETTINGS,
+} from "./rain_defaults.js";
+import {
+  createRainGeometry,
+  createSandstormGeometry,
+  createSnowGeometry,
+  createSplashGeometry,
+} from "./rain_geometry.js";
+import type {
+  RainWeatherOptions,
+  RainWeatherSamplers,
+  RainWeatherSettings,
+  RainWeatherStats,
+  SandstormWeatherOptions,
+  SandstormWeatherSettings,
+  SandstormWeatherStats,
+  SnowWeatherOptions,
+  SnowWeatherSettings,
+  SnowWeatherStats,
+  SplashBuffers,
+  StormWeatherOptions,
+  StormWeatherSettings,
+  StormWeatherStats,
+} from "./rain_types.js";
 
-export interface RainWeatherSettings {
-  enabled: boolean;
-  intensity: number;
-  windX: number;
-  windZ: number;
-}
-
-export interface SnowWeatherSettings {
-  enabled: boolean;
-  intensity: number;
-  windX: number;
-  windZ: number;
-}
-
-export interface SandstormWeatherSettings {
-  enabled: boolean;
-  intensity: number;
-  windX: number;
-  windZ: number;
-}
-
-export interface RainWaterSample {
-  waterY: number;
-  terrainY: number;
-  depth: number;
-  bodyMask: number;
-}
-
-export interface RainWeatherSamplers {
-  surfaceHeight(x: number, z: number): number;
-  surfaceNormal(x: number, z: number): [number, number, number];
-  waterSample(x: number, z: number): RainWaterSample;
-}
-
-export interface RainWeatherStats {
-  hardSplashes: number;
-  waterSplashes: number;
-}
-
-export interface SnowWeatherStats {
-  flakes: number;
-}
-
-export interface StormWeatherSettings {
-  enabled: boolean;
-  intensity: number;
-}
-
-export interface StormWeatherStats {
-  active: boolean;
-}
-
-export interface StormWeatherOptions {
-  scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  isWebGpu: boolean;
-}
-
-export interface SandstormWeatherStats {
-  particles: number;
-  haze: boolean;
-}
-
-export interface RainWeatherOptions {
-  scene: THREE.Scene;
-  isWebGpu: boolean;
-  samplers: RainWeatherSamplers;
-  worldCells: number;
-  seed?: number;
-}
-
-export interface SnowWeatherOptions {
-  scene: THREE.Scene;
-  isWebGpu: boolean;
-  seed?: number;
-}
-
-export interface SandstormWeatherOptions {
-  scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  isWebGpu: boolean;
-  seed?: number;
-}
-
-const DROP_COUNT = 1800;
-const SNOW_FLAKE_COUNT = 3600;
-const SANDSTORM_PARTICLE_COUNT = 9800;
-const HARD_SPLASH_COUNT = 220;
-const WATER_SPLASH_COUNT = 120;
-const RAIN_AREA = 48;
-const SNOW_NEAR_AREA = 28;
-const SNOW_MID_AREA = 36;
-const SNOW_FAR_AREA = 46;
-const SANDSTORM_NEAR_COUNT = 3900;
-const SANDSTORM_MID_COUNT = 3400;
-const SANDSTORM_FAR_COUNT = 2500;
-const SPLASH_AREA = 36;
-const REPOSITION_DISTANCE = 8;
-const WATER_DEPTH_EPSILON = 0.035;
-const WATER_MASK_EPSILON = 0.05;
-const TAU = Math.PI * 2;
-
-export const DEFAULT_RAIN_WEATHER_SETTINGS: RainWeatherSettings = {
-  enabled: false,
-  intensity: 0.9,
-  windX: -1.05,
-  windZ: 0.28,
-};
-
-export const DEFAULT_SNOW_WEATHER_SETTINGS: SnowWeatherSettings = {
-  enabled: false,
-  intensity: 1,
-  windX: -0.62,
-  windZ: 0.21,
-};
-
-export const DEFAULT_SANDSTORM_WEATHER_SETTINGS: SandstormWeatherSettings = {
-  enabled: false,
-  intensity: 1,
-  windX: -1.8,
-  windZ: 0.24,
-};
-
-export const DEFAULT_STORM_WEATHER_SETTINGS: StormWeatherSettings = {
-  enabled: false,
-  intensity: 1,
-};
-
-interface SplashBuffers {
-  center: Float32Array;
-  normal: Float32Array;
-  params: Float32Array;
-}
+export * from "./rain_types.js";
+export * from "./rain_defaults.js";
 
 export class RainWeatherSystem {
   private readonly group = new THREE.Group();
@@ -468,7 +376,7 @@ export class StormLightningSystem {
   private readonly camera: THREE.PerspectiveCamera;
   private readonly center = new THREE.Vector3();
   private readonly cameraDirection = new THREE.Vector3();
-  private settings = { enabled: false, intensity: 1 };
+  private settings = { ...DEFAULT_STORM_WEATHER_SETTINGS };
 
   constructor(options: StormWeatherOptions) {
     this.camera = options.camera;
@@ -518,249 +426,4 @@ export class StormLightningSystem {
     this.stormMesh.geometry.dispose();
     this.stormMaterial.dispose();
   }
-}
-
-function createRainGeometry(seed: number): THREE.InstancedBufferGeometry {
-  const geometry = new THREE.InstancedBufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
-    -1, 0, 0,
-    1, 0, 0,
-    -1, 1, 0,
-    1, 1, 0,
-  ]), 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
-    0, 0,
-    1, 0,
-    0, 1,
-    1, 1,
-  ]), 2));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([0, 1, 2, 2, 1, 3]), 1));
-  geometry.instanceCount = DROP_COUNT;
-
-  const offset = new Float32Array(DROP_COUNT * 4);
-  const shape = new Float32Array(DROP_COUNT * 4);
-  const rng = new Rng(hashCombine(seed, hashString("rain-drops")));
-  for (let i = 0; i < DROP_COUNT; i++) {
-    const o = i * 4;
-    offset[o] = rng.range(-RAIN_AREA * 0.5, RAIN_AREA * 0.5);
-    offset[o + 1] = rng.float();
-    offset[o + 2] = rng.range(-RAIN_AREA * 0.5, RAIN_AREA * 0.5);
-    offset[o + 3] = rng.range(13.0, 27.0);
-    shape[o] = rng.range(0.7, 1.65);
-    shape[o + 1] = rng.range(0.008, 0.022);
-    shape[o + 2] = rng.float();
-    shape[o + 3] = rng.float();
-  }
-  geometry.setAttribute("aRainOffset", new THREE.InstancedBufferAttribute(offset, 4));
-  geometry.setAttribute("aRainShape", new THREE.InstancedBufferAttribute(shape, 4));
-  return geometry;
-}
-
-function createSnowGeometry(seed: number): THREE.InstancedBufferGeometry {
-  const geometry = new THREE.InstancedBufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
-    -1, -1, 0,
-    1, -1, 0,
-    -1, 1, 0,
-    1, 1, 0,
-    0, -1, -1,
-    0, -1, 1,
-    0, 1, -1,
-    0, 1, 1,
-  ]), 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
-    0, 0,
-    1, 0,
-    0, 1,
-    1, 1,
-    0, 0,
-    1, 0,
-    0, 1,
-    1, 1,
-  ]), 2));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([
-    0, 1, 2, 2, 1, 3,
-    4, 5, 6, 6, 5, 7,
-  ]), 1));
-  geometry.instanceCount = SNOW_FLAKE_COUNT;
-
-  const offset = new Float32Array(SNOW_FLAKE_COUNT * 4);
-  const shape = new Float32Array(SNOW_FLAKE_COUNT * 4);
-  const rng = new Rng(hashCombine(seed, hashString("snow-flakes")));
-  for (let i = 0; i < SNOW_FLAKE_COUNT; i++) {
-    const o = i * 4;
-    const band = rng.float();
-    const area = band < 0.42 ? SNOW_NEAR_AREA : band < 0.74 ? SNOW_MID_AREA : SNOW_FAR_AREA;
-    offset[o] = rng.range(-area * 0.5, area * 0.5);
-    offset[o + 1] = rng.float();
-    offset[o + 2] = rng.range(-area * 0.5, area * 0.5);
-
-    if (band < 0.42) {
-      offset[o + 3] = rng.range(1.1, 2.4);
-      shape[o] = rng.range(0.11, 0.23);
-      shape[o + 1] = rng.range(0.38, 0.82);
-      shape[o + 2] = rng.range(0.18, 0.3);
-    } else if (band < 0.74) {
-      offset[o + 3] = rng.range(1.85, 3.1);
-      shape[o] = rng.range(0.065, 0.135);
-      shape[o + 1] = rng.range(0.24, 0.5);
-      shape[o + 2] = rng.range(0.25, 0.39);
-    } else {
-      offset[o + 3] = rng.range(2.4, 4.2);
-      shape[o] = rng.range(0.035, 0.078);
-      shape[o + 1] = rng.range(0.1, 0.3);
-      shape[o + 2] = rng.range(0.32, 0.48);
-    }
-    shape[o + 3] = rng.float();
-  }
-  geometry.setAttribute("aSnowOffset", new THREE.InstancedBufferAttribute(offset, 4));
-  geometry.setAttribute("aSnowShape", new THREE.InstancedBufferAttribute(shape, 4));
-  return geometry;
-}
-
-function createSandstormGeometry(seed: number): THREE.InstancedBufferGeometry {
-  const geometry = new THREE.InstancedBufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
-    -1, -1, 0,
-    1, -1, 0,
-    -1, 1, 0,
-    1, 1, 0,
-    0, -1, -1,
-    0, -1, 1,
-    0, 1, -1,
-    0, 1, 1,
-  ]), 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
-    0, 0,
-    1, 0,
-    0, 1,
-    1, 1,
-    0, 0,
-    1, 0,
-    0, 1,
-    1, 1,
-  ]), 2));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([
-    0, 1, 2, 2, 1, 3,
-    4, 5, 6, 6, 5, 7,
-  ]), 1));
-  geometry.instanceCount = SANDSTORM_PARTICLE_COUNT;
-
-  const offset = new Float32Array(SANDSTORM_PARTICLE_COUNT * 4);
-  const shape = new Float32Array(SANDSTORM_PARTICLE_COUNT * 4);
-  const rng = new Rng(hashCombine(seed, hashString("sandstorm-puffs")));
-  writeSandstormBand({
-    rng,
-    offset,
-    shape,
-    start: 0,
-    count: SANDSTORM_NEAR_COUNT,
-    area: 28,
-    yMin: -3.0,
-    yMax: 0.85,
-    speedMin: 1.1,
-    speedMax: 3.0,
-    sizeMin: 0.058,
-    sizeMax: 0.21,
-    opacityMin: 0.05,
-    opacityMax: 0.18,
-  });
-  writeSandstormBand({
-    rng,
-    offset,
-    shape,
-    start: SANDSTORM_NEAR_COUNT,
-    count: SANDSTORM_MID_COUNT,
-    area: 48,
-    yMin: -2.7,
-    yMax: 2.8,
-    speedMin: 1.8,
-    speedMax: 4.1,
-    sizeMin: 0.04,
-    sizeMax: 0.145,
-    opacityMin: 0.035,
-    opacityMax: 0.12,
-  });
-  writeSandstormBand({
-    rng,
-    offset,
-    shape,
-    start: SANDSTORM_NEAR_COUNT + SANDSTORM_MID_COUNT,
-    count: SANDSTORM_FAR_COUNT,
-    area: 72,
-    yMin: -2.2,
-    yMax: 5.8,
-    speedMin: 2.5,
-    speedMax: 5.4,
-    sizeMin: 0.024,
-    sizeMax: 0.095,
-    opacityMin: 0.024,
-    opacityMax: 0.082,
-  });
-  geometry.setAttribute("aSandOffset", new THREE.InstancedBufferAttribute(offset, 4));
-  geometry.setAttribute("aSandShape", new THREE.InstancedBufferAttribute(shape, 4));
-  return geometry;
-}
-
-interface SandstormBandOptions {
-  rng: Rng;
-  offset: Float32Array;
-  shape: Float32Array;
-  start: number;
-  count: number;
-  area: number;
-  yMin: number;
-  yMax: number;
-  speedMin: number;
-  speedMax: number;
-  sizeMin: number;
-  sizeMax: number;
-  opacityMin: number;
-  opacityMax: number;
-}
-
-function writeSandstormBand(options: SandstormBandOptions): void {
-  const { rng, offset, shape } = options;
-  for (let i = 0; i < options.count; i++) {
-    const o = (options.start + i) * 4;
-    offset[o] = rng.range(-options.area * 0.5, options.area * 0.5);
-    offset[o + 1] = rng.float();
-    offset[o + 2] = rng.range(options.yMin, options.yMax);
-    offset[o + 3] = options.area;
-    shape[o] = rng.range(options.sizeMin, options.sizeMax);
-    shape[o + 1] = rng.range(options.opacityMin, options.opacityMax);
-    shape[o + 2] = rng.range(options.speedMin, options.speedMax);
-    shape[o + 3] = rng.float() * 1000;
-  }
-}
-
-function createSplashGeometry(count: number): { geometry: THREE.InstancedBufferGeometry; buffers: SplashBuffers } {
-  const geometry = new THREE.InstancedBufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
-    -1, -1, 0,
-    1, -1, 0,
-    -1, 1, 0,
-    1, 1, 0,
-  ]), 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
-    0, 0,
-    1, 0,
-    0, 1,
-    1, 1,
-  ]), 2));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([0, 1, 2, 2, 1, 3]), 1));
-  geometry.instanceCount = count;
-
-  const buffers: SplashBuffers = {
-    center: new Float32Array(count * 3),
-    normal: new Float32Array(count * 3),
-    params: new Float32Array(count * 4),
-  };
-  for (let i = 0; i < count; i++) {
-    buffers.normal[i * 3 + 1] = 1;
-  }
-  geometry.setAttribute("aSplashCenter", new THREE.InstancedBufferAttribute(buffers.center, 3));
-  geometry.setAttribute("aSplashNormal", new THREE.InstancedBufferAttribute(buffers.normal, 3));
-  geometry.setAttribute("aSplashParams", new THREE.InstancedBufferAttribute(buffers.params, 4));
-  return { geometry, buffers };
 }
