@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createSnowNodeMaterial } from "./rainNodeMaterial.js";
-import { createSnowShaderMaterial, type RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import { createSnowShaderMaterial } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 import { SNOW_FLAKE_COUNT } from "./rain_constants.js";
 import { DEFAULT_SNOW_WEATHER_SETTINGS } from "./rain_defaults.js";
 import { createSnowGeometry } from "./rain_geometry.js";
