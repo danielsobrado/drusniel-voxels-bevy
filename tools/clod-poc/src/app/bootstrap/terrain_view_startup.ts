@@ -21,12 +21,7 @@ import type { ClodPagesConfig } from "../../config.js";
 import type { ClodPageNode } from "../../types.js";
 import type { ClodHooks } from "../../core/hooks.js";
 import type { TerrainColorAdjustments } from "../../material/material.js";
-import {
-  DEFAULT_ENVIRONMENT_COLORS,
-  SkyEnvironment,
-  type EnvironmentLighting,
-  type EnvironmentSettings,
-} from "../../environment/environment.js";
+import type { EnvironmentLighting, EnvironmentSettings } from "../../environment/environment.js";
 import {
   PostProcessPipeline,
   type PostProcessSettings,
@@ -34,7 +29,6 @@ import {
 import { WebGpuPostProcessPipeline } from "../../gpu/webgpu_postprocess.js";
 import type { AppPostProcess } from "../app_post_process.js";
 import type { AppSky } from "../../scene/app_sky.js";
-import { WebGpuSkyEnvironment } from "../../scene/webgpu_sky_environment.js";
 import { FAR_SHELL_DEFAULTS, LOD_COLORS } from "../clod_constants.js";
 import { toGeometry } from "../../terrain/geometry/page_geometry.js";
 import { createNearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";
@@ -74,6 +68,11 @@ import type { AppRenderer } from "./renderer_startup.js";
 import { type NodeView, recomputedNormalsFor } from "./bootstrap_types.js";
 import type { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
 import type { parseProceduralTextureConfig } from "../../textures/materialRecipes.js";
+import {
+  createCurrentLightingReader,
+  createTerrainViewSkyEnvironment,
+  createTerrainViewStateReaders,
+} from "./terrain_view_state.js";
 
 export interface TerrainViewStartupInput {
   app: AppRenderer;
@@ -196,54 +195,19 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     colorByLodController,
   } = input;
 
-  const currentTerrainColorAdjustments = (): TerrainColorAdjustments => ({
-    brightness: state.terrainBrightness,
-    contrast: state.terrainContrast,
-    saturation: state.terrainSaturation,
-    warmth: state.terrainWarmth,
+  const {
+    currentTerrainColorAdjustments,
+    currentEnvironmentSettings,
+    currentPostProcessSettings,
+  } = createTerrainViewStateReaders(state);
+  const skyEnvironment: AppSky = createTerrainViewSkyEnvironment({
+    app,
+    scene,
+    worldCells,
+    settings: currentEnvironmentSettings(),
   });
-  const currentEnvironmentSettings = (): EnvironmentSettings => ({
-    sunAzimuthDeg: state.sunAzimuthDeg,
-    sunElevationDeg: state.sunElevationDeg,
-    sunIntensity: state.sunIntensity,
-    skyIntensity: state.skyIntensity,
-    groundIntensity: state.groundIntensity,
-    exposure: state.exposure,
-    horizonSoftness: state.horizonSoftness,
-    sunDiskIntensity: state.sunDiskIntensity,
-    sunGlowIntensity: state.sunGlowIntensity,
-    hazeIntensity: state.hazeIntensity,
-  });
-  const currentPostProcessSettings = (): PostProcessSettings => ({
-    enabled: state.postProcessEnabled,
-    opacity: state.postProcessOpacity,
-    exposure: state.postProcessExposure,
-    contrast: state.postProcessContrast,
-    saturation: state.postProcessSaturation,
-    vignette: state.postProcessVignette,
-    debugMode: state.postProcessDebugMode,
-    godRaysMode: state.godRaysMode,
-    godRaysDensity: state.godRaysDensity,
-    godRaysDecay: state.godRaysDecay,
-    godRaysWeight: state.godRaysWeight,
-    godRaysExposure: state.godRaysExposure,
-  });
-  const skyEnvironment: AppSky = app.isWebGpu
-    ? new WebGpuSkyEnvironment({
-        scene,
-        renderer: app.renderer,
-        radius: Math.max(1600, worldCells * 5),
-        settings: currentEnvironmentSettings(),
-      })
-    : new SkyEnvironment({
-        scene,
-        renderer: app.renderer,
-        radius: Math.max(1600, worldCells * 5),
-        settings: currentEnvironmentSettings(),
-        colors: DEFAULT_ENVIRONMENT_COLORS,
-      });
   skyEnvironment.setVisible(!state.clodPerfMode);
-  const currentLighting = (): EnvironmentLighting => skyEnvironment.lighting();
+  const currentLighting = createCurrentLightingReader(skyEnvironment);
 
   const views = new Map<string, NodeView>();
   const textureController = createTerrainTextureController({

@@ -11,8 +11,9 @@ function readSource(name: string): string {
 
 describe("clod_poc_bootstrap NAADF wiring", () => {
   it("enables far shell only for named NAADF scenes, not bare ?naadf=1", () => {
-    const source = readSource("clod_poc_bootstrap.ts");
-    expect(source).toContain("isNaadfScene(queryScene)");
-    expect(source).not.toMatch(/\|\|\s*isNaadfCapable\s*;/);
+    const bootstrapSource = readSource("clod_poc_bootstrap.ts");
+    const longViewSource = readSource("bootstrap_long_view.ts");
+    expect(longViewSource).toContain("isNaadfScene(queryScene)");
+    expect(bootstrapSource).not.toMatch(/\|\|\s*isNaadfCapable\s*;/);
   });
 });

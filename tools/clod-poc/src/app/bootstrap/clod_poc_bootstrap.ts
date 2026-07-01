@@ -15,28 +15,19 @@ import { runRuntimeSystemsStartup } from "./runtime/runtime_systems_startup.js";
 import { runUiStartup } from "./ui/ui_startup.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import type { FarSummaryIntegration } from "../../far-summary/integration.js";
-import { initNaadfIntegration, isNaadfScene, type NaadfIntegration } from "../../naadf/integration.js";
+import { initNaadfIntegration, type NaadfIntegration } from "../../naadf/integration.js";
 import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
 import type { FarShellMetrics } from "../../long-view/index.js";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import { applyOwnershipToFarShellRange, resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
 import { FloatingOriginController } from "../../precision/floating_origin.js";
-import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
 import { createBakedMacroTintTexture } from "../../gpu/terrain_node_material.js";
 import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
 import { createBiomeTextureStreamingManager } from "../../textures/biome_texture_streaming_manager.js";
 import * as THREE from "three";
-
-function booleanQueryParam(searchParams: URLSearchParams, key: string): boolean {
-  const raw = searchParams.get(key);
-  return raw !== null && raw !== "0" && raw !== "false";
-}
-
-function positiveNumberQueryParam(searchParams: URLSearchParams, key: string, fallback: number): number {
-  const value = Number(searchParams.get(key));
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
+import { booleanQueryParam, positiveNumberQueryParam } from "./bootstrap_query_params.js";
+import { applyLongViewScenePreset, isLongViewCapableScene } from "./bootstrap_long_view.js";
 
 export async function bootstrapClodPoc() {
   const searchParams = new URLSearchParams(location.search);
@@ -209,46 +200,12 @@ export async function bootstrapClodPoc() {
     ? naadfIntegration?.config.farShell.heightSamplingMode
     : undefined;
 
-  const isLongViewCapableScene =
-    queryScene === "infinite-stream-far-summary" ||
-    queryScene === "infinite-stream-slow-builds" ||
-    queryScene === "infinite-islands" ||
-    queryScene === "infinite-stream-straight" ||
-    queryScene === "infinite-stream-fast-turn" ||
-    queryScene === "long-view-4km" ||
-    queryScene === "long-view-8km" ||
-    queryScene === "long-view-16km" ||
-    queryScene === "long-view-forest-4km" ||
-    queryScene === "long-view-edit-stress" ||
-    queryScene === RIVER_PARITY_TEST_SCENE ||
-    queryScene === "infinite-far-shell-straight" ||
-    queryScene === "infinite-far-shell-fast-turn" ||
-    queryScene === "infinite-far-shell-mountain-approach" ||
-    isNaadfScene(queryScene);
-
   let infiniteFarShell: InfiniteFarShell | undefined;
   let farShellMetrics: FarShellMetrics | undefined;
 
-  if (isLongViewCapableScene) {
+  if (isLongViewCapableScene(queryScene)) {
     const lvConfig = createDefaultLongViewConfig();
-
-    if (queryScene === "long-view-8km" || queryScene === "infinite-far-shell-straight" || queryScene === "infinite-far-shell-fast-turn" || queryScene === "infinite-far-shell-mountain-approach") {
-      lvConfig.targetVisibleMeters = 8192;
-      lvConfig.farShell.endMeters = 16384;
-    } else if (queryScene === "long-view-16km") {
-      lvConfig.targetVisibleMeters = 16384;
-      lvConfig.farShell.endMeters = 32768;
-      lvConfig.farShell.farFadeMeters = 4096;
-    }
-
-    if (naadfIntegration && (queryScene?.startsWith("infinite-naadf-") ?? false)) {
-      lvConfig.farShell.startMeters = naadfIntegration.config.farShell.startM;
-      lvConfig.farShell.endMeters = naadfIntegration.config.farShell.endM;
-      if (naadfIntegration.config.farShell.gridRes > 0) {
-        lvConfig.farShell.radialSegments = naadfIntegration.config.farShell.gridRes;
-        lvConfig.farShell.angularSegments = naadfIntegration.config.farShell.gridRes;
-      }
-    }
+    applyLongViewScenePreset(lvConfig, queryScene, naadfIntegration);
 
     applyOwnershipToFarShellRange(lvConfig.farShell, streamingOwnership);
 
