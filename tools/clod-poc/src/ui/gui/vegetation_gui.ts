@@ -7,6 +7,7 @@ import { GRASS_SHADER_MODES } from "../../grass.js";
 import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
 import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
 import type { TreeController } from "../../runtime/vegetation/tree_controller.js";
+import { formatTreePerfSnapshot } from "../../runtime/vegetation/tree_perf_snapshot.js";
 import type { UnderstoryController } from "../../runtime/vegetation/understory_controller.js";
 import type { ForestLightingController } from "../../runtime/forest_lighting/forest_lighting_controller.js";
 import type { FarShellController } from "../../systems/far_shell_controller.js";
@@ -235,6 +236,11 @@ export function createVegetationGui(
       if (deps.impostorsEnabled && deps.bakeImpostorsOnStart) void deps.treeController.bakeImpostors(deps.renderer);
       deps.updateInfo();
     },
+    snapshot: () => {
+      refreshTreeStats();
+      const url = typeof window === "undefined" ? undefined : `${window.location.pathname}${window.location.search}`;
+      console.info(formatTreePerfSnapshot({ state, stats: deps.treeController.system.getStats(), url }));
+    },
   };
   const treeFolder = gui.addFolder("trees (props)");
   const treeSettingControllers: GuiController[] = [];
@@ -287,6 +293,7 @@ export function createVegetationGui(
   const treeVisiblePatchesController = treeFolder.add(state, "treeVisiblePatches").name("visible patches").disable();
   const treeLodSummaryController = treeFolder.add(state, "treeLodSummary").name("near/mid/far/impostor").disable();
   const treeGpuSummaryController = treeFolder.add(state, "treeGpuSummary").name("GPU").disable();
+  treeFolder.add(treeActions, "snapshot").name("log perf snapshot");
   treeFolder.add(treeActions, "rebuild").name("rebuild");
 
   const refreshUnderstoryStats = () => {
