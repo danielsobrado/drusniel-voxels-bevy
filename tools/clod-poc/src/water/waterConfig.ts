@@ -11,13 +11,14 @@ import {
 } from "./hydrologyConfig.js";
 import { DEFAULT_CAUSTICS_CONFIG, type CausticsConfig } from "./causticsConfig.js";
 import { readWaterDebugConfig } from "./water_config_debug_parsing.js";
-import { readLakeBody, readRiverBody } from "./water_config_fake_bodies.js";
+import { readFakeBodiesConfig } from "./water_config_fake_bodies.js";
 import { readHydrologyConfig } from "./water_config_hydrology_parsing.js";
 import {
   readBoolean,
   readNumber,
   readNumberArray,
 } from "./water_config_readers.js";
+import { resolveNormalizedFakeBodies } from "./water_config_resolution.js";
 import { applyRuntimeRiverOverrides } from "./water_config_runtime_overrides.js";
 import { validateWaterConfig } from "./water_config_validation.js";
 import { readWaterCausticsConfig, readWaterVisualConfig } from "./water_config_visual_parsing.js";
@@ -285,18 +286,8 @@ const WATER_RUNTIME_OVERRIDE_OPTIONS = {
 export function parseWaterConfigYaml(source: string): WaterConfig {
   const parsed = load(source) as Record<string, unknown> | undefined;
   const waterRecord = (parsed?.water ?? {}) as Record<string, unknown>;
-  const fakeBodies = (waterRecord.fake_bodies ?? waterRecord.fakeBodies ?? {}) as Record<string, unknown>;
-  const defaultFakeBodies = DEFAULT_WATER_CONFIG.fakeBodies;
+  const fakeBodies = readFakeBodiesConfig(waterRecord.fake_bodies ?? waterRecord.fakeBodies, DEFAULT_WATER_CONFIG.fakeBodies);
   const hydrology = readHydrologyConfig(waterRecord.hydrology, DEFAULT_WATER_CONFIG.hydrology);
-
-  const defaultLakes = defaultFakeBodies.lakes;
-  const defaultRivers = defaultFakeBodies.rivers;
-  const lakes = Array.isArray(fakeBodies.lakes)
-    ? fakeBodies.lakes.map((lake, index) => readLakeBody(lake, defaultLakes[index] ?? defaultLakes[0]))
-    : defaultLakes.map((lake) => readLakeBody(lake, lake));
-  const rivers = Array.isArray(fakeBodies.rivers)
-    ? fakeBodies.rivers.map((river, index) => readRiverBody(river, defaultRivers[index] ?? defaultRivers[0]))
-    : defaultRivers.map((river) => readRiverBody(river, river));
 
   return {
     enabled: readBoolean(waterRecord.enabled, DEFAULT_WATER_CONFIG.enabled),
@@ -305,11 +296,7 @@ export function parseWaterConfigYaml(source: string): WaterConfig {
     cellSizes: readNumberArray(waterRecord.cell_sizes ?? waterRecord.cellSizes, DEFAULT_WATER_CONFIG.cellSizes),
     snapCells: readNumber(waterRecord.snap_cells ?? waterRecord.snapCells, DEFAULT_WATER_CONFIG.snapCells),
     drySentinelDepth: readNumber(waterRecord.dry_sentinel_depth ?? waterRecord.drySentinelDepth, DEFAULT_WATER_CONFIG.drySentinelDepth),
-    fakeBodies: {
-      carveTerrain: readBoolean(fakeBodies.carve_terrain ?? fakeBodies.carveTerrain, defaultFakeBodies.carveTerrain),
-      lakes,
-      rivers,
-    },
+    fakeBodies,
     hydrology,
     visual: readWaterVisualConfig(waterRecord.visual, DEFAULT_WATER_VISUAL),
     caustics: readWaterCausticsConfig(waterRecord.caustics, DEFAULT_CAUSTICS_CONFIG),
@@ -344,16 +331,5 @@ export function parseWaterConfig(
 
 /** Resolves normalized fake bodies to absolute coordinate space. */
 export function resolveWaterConfig(config: WaterConfig, worldCells: number): WaterConfig {
-  const resolved = cloneWaterConfig(config);
-  for (const lake of resolved.fakeBodies.lakes) {
-    if (lake.centerNorm) {
-      lake.center = [lake.centerNorm[0] * worldCells, lake.centerNorm[1] * worldCells];
-    }
-  }
-  for (const river of resolved.fakeBodies.rivers) {
-    if (river.pointsNorm) {
-      river.points = river.pointsNorm.map((point) => [point[0] * worldCells, point[1] * worldCells]);
-    }
-  }
-  return resolved;
+  return resolveNormalizedFakeBodies(config, worldCells, cloneWaterConfig);
 }
