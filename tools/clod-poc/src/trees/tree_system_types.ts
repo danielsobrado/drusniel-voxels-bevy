@@ -13,7 +13,6 @@ import type { TreeFallingInstance } from "./tree_system_patch_removal.js";
 import type { TreeSystemStatsSnapshot } from "./tree_system_stats.js";
 import type { TreeSystemLightingProxy } from "./tree_system_lighting_proxies.js";
 import type { TreeGpuRingMesh } from "./tree_system_gpu_ring_draw.js";
-import type { TreeTerrainOcclusionSampler } from "./tree_terrain_occlusion.js";
 
 export interface TreeSystemOptions {
   scene: THREE.Scene;
@@ -22,17 +21,12 @@ export interface TreeSystemOptions {
   settings: TreeSettings;
   sampler?: TreeTerrainSampler;
   impostorAtlases?: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
-  /** Use the WebGPU node material path instead of the classic WebGL material. */
   webgpu?: boolean;
-  /** Initial lighting for the WebGPU node material path. */
   lighting?: EnvironmentLighting;
   gpuDevice?: GPUDevice | null;
   gpuBackend?: TreeWebGpuBackendAccess | null;
-  /** Hydrology water field (RGBA32F; G = wet mask) to drop trees standing in water. */
   hydrologyWaterTexture?: THREE.Texture | null;
   supportsGpuTrees?: boolean;
-  /** Optional NAADF/summary terrain query for cluster-level visibility. */
-  terrainOcclusion?: TreeTerrainOcclusionSampler;
 }
 
 export interface TreeWebGpuBackendAccess {
@@ -57,7 +51,6 @@ export interface TreePatch {
   meshes: TreeSystemMeshGrid;
   previousLods: (TreeLod | null)[];
   visible: boolean;
-  terrainOccluded: boolean;
   generationStats: TreeGenerationStats;
 }
 
