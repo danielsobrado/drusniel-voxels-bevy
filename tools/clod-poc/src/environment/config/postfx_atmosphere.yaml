@@ -1,0 +1,24 @@
+postfx_atmosphere:
+  hillaire:
+    enabled: true
+    strength: 0.42
+    rayleigh_color: [0.48, 0.66, 1.0]
+    mie_color: [1.0, 0.86, 0.68]
+    rayleigh_scale_height_m: 8200.0
+    mie_scale_height_m: 1200.0
+    rayleigh_extinction: 0.0016
+    mie_extinction: 0.0032
+    mie_g: 0.76
+    max_distance_m: 12000.0
+  froxels:
+    enabled: false
+    strength: 0.32
+    max_distance_m: 480.0
+    near_m: 2.0
+    steps: 16
+    ground_fog_density: 0.011
+    altitude_fog_density: 0.0025
+    ground_falloff_m: 22.0
+    altitude_falloff_m: 150.0
+    sun_shafts_strength: 0.55
+    noise_strength: 0.35
