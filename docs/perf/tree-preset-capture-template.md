@@ -52,6 +52,7 @@ Browser checks:
 - Confirm no WebGPU initialization errors.
 - Confirm the overlay or lil-gui tree summary is visible.
 - Confirm camera and scene are stable before recording.
+- Use `trees (props) > log perf snapshot` after each run and paste the console output into the matching notes cell or snapshot block.
 
 ## Primary Preset Results
 
@@ -134,6 +135,14 @@ Expected:
 
 - No repeated false-positive CPU/GPU parity warnings caused by hash/jitter or shadow LOD mismatch.
 - Some small tolerance differences can still happen because validation is a debug guard, not a perfect oracle.
+
+## Snapshot Blocks
+
+Paste selected `log perf snapshot` console outputs here.
+
+```text
+TODO
+```
 
 ## Visual Artifact Notes
 
