@@ -43,8 +43,29 @@ function currentSearchParams(): URLSearchParams | null {
   return new URLSearchParams(globalThis.location.search);
 }
 
+function normalizedSearch(search: string | URLSearchParams | null): URLSearchParams {
+  if (search instanceof URLSearchParams) return search;
+  if (!search) return new URLSearchParams();
+  return new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+}
+
+function queryFlag(params: URLSearchParams, keys: readonly string[]): boolean | null {
+  for (const key of keys) {
+    const raw = params.get(key);
+    if (raw === null) continue;
+    const value = raw.trim().toLowerCase();
+    if (value === "1" || value === "true" || value === "on" || value === "yes") return true;
+    if (value === "0" || value === "false" || value === "off" || value === "no") return false;
+  }
+  return null;
+}
+
 export function hillaireAerialAllowedByStageFlags(search: string | URLSearchParams | null = currentSearchParams()): boolean {
-  return stageAllowed(parsePostFxStageFlags(search ?? ""), "aerial");
+  const params = normalizedSearch(search);
+  if (!stageAllowed(parsePostFxStageFlags(params), "aerial")) return false;
+  if (queryFlag(params, ["aerial", "aerialPerspective"]) === false) return false;
+  if (queryFlag(params, ["fog", "haze"]) === false) return false;
+  return true;
 }
 
 function phaseHenyeyGreenstein(cosTheta: TslAny, g: number): TslAny {
