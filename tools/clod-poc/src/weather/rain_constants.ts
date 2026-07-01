@@ -1,0 +1,17 @@
+export const DROP_COUNT = 1800;
+export const SNOW_FLAKE_COUNT = 3600;
+export const SANDSTORM_PARTICLE_COUNT = 9800;
+export const HARD_SPLASH_COUNT = 220;
+export const WATER_SPLASH_COUNT = 120;
+export const RAIN_AREA = 48;
+export const SNOW_NEAR_AREA = 28;
+export const SNOW_MID_AREA = 36;
+export const SNOW_FAR_AREA = 46;
+export const SANDSTORM_NEAR_COUNT = 3900;
+export const SANDSTORM_MID_COUNT = 3400;
+export const SANDSTORM_FAR_COUNT = 2500;
+export const SPLASH_AREA = 36;
+export const REPOSITION_DISTANCE = 8;
+export const WATER_DEPTH_EPSILON = 0.035;
+export const WATER_MASK_EPSILON = 0.05;
+export const TAU = Math.PI * 2;
