@@ -114,6 +114,42 @@ Artifacts: `perf-runs/shadow-{none,near}-2026-07-01` (counts on) and
   run-to-run p95 variance (a second client was on the dev server), so treat p95
   as soft.
 
+## Hero-Forest A/B: GPU ring vs CPU path (`scene=trees-perf`, world 8)
+
+`scene=trees-perf` isolates trees (grass/stones/postprocess off) with a fixed
+elevated forest-overview camera and a much denser scene (terrain ~371k tris vs
+~88k at the default view). Readback off. **This is the capture that explains the
+reported degradation.**
+
+| Path | Runtime | FPS p50 | Frame ms p50 | Frame ms p95 | Render ms p50 | treesMs p50 | statsSync p95 | Errors |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| GPU ring (`treeGpu=1`) | ring:300 | **~435** | 2.30 | 3.40 | 1.70 | 0.10 | — | 0 |
+| CPU patches (`treeGpu=0`) | disabled:300 | **~40** | 24.70 | 27.00 | 10.70 | 7.50 | 6.20 | **8** |
+
+Artifacts: `perf-runs/hero-gpu-2026-07-01`, `perf-runs/hero-cpu-2026-07-01`.
+
+### Findings (headline)
+
+- **The CPU tree path is ~10× slower than the GPU ring in the dense forest**
+  (40 fps vs 435 fps). Cost is spread across `treesMs` (7.5 ms CPU geometry),
+  `renderMs` (10.7 ms), and `statsSyncMs` (6.2 ms patch aggregation).
+- **The CPU path throws D3D12 resource errors**:
+  `ID3D12Device::CreateHeap` / `CreateBuffer(bindingBuffer)` (8+ captured).
+  The per-patch CPU tree path allocates enough GPU buffers to exhaust the D3D12
+  heap in this scene — a real bug, and it means the 40 fps CPU number may even
+  be optimistic (failed allocations / missing geometry).
+- **The default runtime config has `trees.gpu.enabled: false`**, so normal play
+  uses the slow CPU path. This matches the reported "trees cause degradation /
+  hero forest ~30–40 fps."
+- The GPU ring in the same dense scene is effectively free on the tree side
+  (`treesMs` 0.1 ms); frame time is dominated by terrain/render, not trees.
+
+### Recommended action
+
+Enable the GPU tree ring for normal play (`trees.gpu.enabled: true`, or ensure
+the quality presets set it). That is the single biggest tree-perf win here —
+far larger than any `maxVisible` / `distance` / shadow-LOD tuning.
+
 ## Not captured yet (and why)
 
 - **Quality-preset rows** (`?quality=ultra|balanced|perf|potato`), **FPS via
@@ -134,7 +170,9 @@ Artifacts: `perf-runs/shadow-{none,near}-2026-07-01` (counts on) and
 | Tree cost at default world=8 view | +0.4 ms p50 / +2.2 ms p95 vs trees-off. Modest. |
 | Does maxVisible / distance tuning help? | Inconclusive — sweep was noisy (GPU contention). Re-run needed. |
 | Does shadow LOD gating reduce cost? | Not at this view in normal gameplay (none≈near, ~0). The big shadow delta was a `treeGpuCounts=1` readback artifact. |
-| Should we tune preset values now? | No — not on this data. Trees are cheap at this view; get a dense hero-forest capture before tuning. |
+| GPU ring vs CPU path in dense forest? | GPU ring ~435 fps vs CPU ~40 fps (~10×). CPU path also throws D3D12 buffer errors. |
+| Biggest tree-perf win? | Enable `trees.gpu.enabled: true` (default is false → slow CPU path). Bigger than any preset tuning. |
+| Should we tune preset values now? | No — first switch to the GPU ring. Then re-measure before tuning maxVisible/distance/shadow. |
 
 ## Follow-up Actions
 

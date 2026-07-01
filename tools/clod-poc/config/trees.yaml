@@ -7,7 +7,7 @@ trees:
   max_instances: 9000
 
   gpu:
-    enabled: false
+    enabled: true
     prefer_webgpu: true
     fallback_to_cpu: true
     scatter_enabled: true

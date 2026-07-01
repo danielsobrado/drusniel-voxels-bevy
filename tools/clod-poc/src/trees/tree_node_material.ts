@@ -379,13 +379,16 @@ export function createTreeRingNodeMaterialHandle(
     const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
     const aCell: TslNode = cellStore.element(instanceIndex);
     const worldCell: TslNode = aCell.xy;
-    const jitter: TslNode = vec2(treeRingHash(worldCell, uSeed, 1103), treeRingHash(worldCell, uSeed, 1200));
+    const jitter: TslNode = vec2(
+      treeRingHash(worldCell, uSeed, TREE_RING_JITTER_X_SALT),
+      treeRingHash(worldCell, uSeed, TREE_RING_JITTER_Z_SALT),
+    );
     const aWorldXZ: TslNode = worldCell.add(jitter).mul(uCellSize);
     const aHeight: TslNode = aCell.z;
     // GPU scatter writes scale into aCell.w so tree age/clump variation is shared
     // by culling and rendering instead of being a material-only hash.
     const aScale: TslNode = max(aCell.w, float(0.001));
-    const aYaw: TslNode = treeRingHash(worldCell, uSeed, 701).mul(6.28318530718);
+    const aYaw: TslNode = treeRingHash(worldCell, uSeed, TREE_RING_YAW_SALT).mul(6.28318530718);
     const aTint: TslNode = treeRingHash(worldCell, uSeed, 1901);
     const variantKeep: TslNode = treeVariantKeep(aVariant, aWorldXZ, uSeed);
 
@@ -572,4 +575,5 @@ function applyWindUniforms(wind: TreeWindNodeUniforms, settings: TreeSettings): 
   wind.uWindSpeed.value = settings.wind.speed;
   wind.uGust.value = settings.wind.gustStrength * enabled;
   wind.uTrunkSway.value = settings.wind.trunkSwayStrength * enabled;
-  wind.uLeafFlutter.value = settings.wind.leafFlutterStreng
+  wind.uLeafFlutter.value = settings.wind.leafFlutterStrength * enabled;
+}
