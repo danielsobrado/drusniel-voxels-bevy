@@ -1,6 +1,18 @@
 # NAADF PoC (CLOD Phase 10)
 
-Browser validation prototype for NAADF-inspired far-terrain query backends inside `tools/clod-poc`. This is **not** production Bevy/Rust code.
+Document status: 2026-07-01.  
+Status: shipped browser validation prototype for `tools/clod-poc`, not production Bevy/Rust code.
+
+The CLOD NAADF PoC is now an implemented validation track. It proves the far-terrain summary/data-flow ideas in the browser sandbox and gives the Rust/Bevy NAADF work an oracle/debug comparison surface. It should not be described as pending or unstarted.
+
+## Relationship To Rust/Bevy NAADF
+
+There are two NAADF tracks on `main`:
+
+- **Rust/Bevy NAADF:** feature-gated experimental backend under `src/rendering/naadf/`, with GPU buffers, render-graph nodes, preview/compositor paths, and default-off config.
+- **CLOD PoC NAADF:** browser validation prototype under `tools/clod-poc/src/naadf/`, focused on far-terrain summary streaming, shell rendering, debug traversal, and GUI metrics.
+
+The CLOD PoC informs Rust, but it is not the production implementation. It uses a heightfield approximation and browser-friendly far-shell rendering instead of the Rust 16³ chunk → 4³ block → voxel implementation.
 
 ## What this PoC validates
 
@@ -27,12 +39,13 @@ Browser validation prototype for NAADF-inspired far-terrain query backends insid
 
 ## What it intentionally does not validate
 
-- Full 16³ voxel brick occupancy (heightfield PoC approximation only)
-- Full GPU HDDA/AADF traversal yet
+- Full 16³ voxel brick occupancy
+- Production Rust/WGSL chunk/block/voxel traversal parity
+- Full GPU HDDA/AADF traversal for the production Bevy backend
 - Production GPU path tracing
 - CLOD page mesh replacement or gameplay collision
 - Sparse voxel octrees / DAGs
-- Bevy/Rust integration
+- Bevy/Rust runtime integration
 
 ## Runtime data flow
 
