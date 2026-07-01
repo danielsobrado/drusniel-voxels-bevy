@@ -1,4 +1,4 @@
-import type { RiverBodyConfig, WaterConfig } from "./waterConfig.js";
+import type { RiverBodyConfig, WaterConfig } from "./water_config_types.js";
 import { isWaterDebugModeId, riverHasValidPoints } from "./water_config_guards.js";
 
 export function validateWaterConfig(
