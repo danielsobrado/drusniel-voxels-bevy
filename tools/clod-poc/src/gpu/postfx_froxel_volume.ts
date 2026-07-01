@@ -1,4 +1,4 @@
-import { HalfFloatType, Matrix4, Vector3, type Camera } from "three";
+import { HalfFloatType, Matrix4, Vector3, type Camera, type Texture } from "three";
 import { Storage3DTexture, type WebGPURenderer } from "three/webgpu";
 import {
   Fn,
@@ -11,6 +11,7 @@ import {
   instanceIndex,
   mat4,
   smoothstep,
+  texture,
   texture3D,
   textureStore,
   time,
@@ -37,6 +38,18 @@ export interface PostFxFroxelVolumeNodeInput {
   integratedTexture: Storage3DTexture;
   nearMeters: number;
   maxDistanceMeters: number;
+}
+
+export interface PostFxFroxelVolumeTerrainInput {
+  heightTexture: Texture;
+  canopyTexture?: Texture | null;
+  originX: number;
+  originZ: number;
+  extentMeters: number;
+}
+
+export interface PostFxFroxelVolumeOptions {
+  terrain?: PostFxFroxelVolumeTerrainInput | null;
 }
 
 function phaseHenyeyGreenstein(cosTheta: TslAny, g: number): TslAny {
@@ -68,7 +81,7 @@ export class PostFxFroxelVolume {
   private readonly projectionInverseScratch = new Matrix4();
   private readonly froxels: PostFxFroxelSettings;
 
-  constructor(settings: PostFxAtmosphereSettings) {
+  constructor(settings: PostFxAtmosphereSettings, options: PostFxFroxelVolumeOptions = {}) {
     this.froxels = settings.froxels;
     this.scatterTexture = this.createTexture();
     this.integratedTexture = this.createTexture();
@@ -79,6 +92,16 @@ export class PostFxFroxelVolume {
     const maxRatio = maxDistanceMeters / nearMeters;
     const hillaire = settings.hillaire;
     const froxels = this.froxels;
+    const terrain = options.terrain ?? null;
+    const terrainExtent = terrain ? Math.max(1, terrain.extentMeters) : 1;
+    const terrainOrigin = terrain ? vec2(terrain.originX, terrain.originZ) : vec2(0, 0);
+    const sampleTerrainUv = (xz: TslAny): TslAny => xz.sub(terrainOrigin).div(terrainExtent).clamp(0, 1);
+    const sampleTerrainHeight = (xz: TslAny): TslAny => terrain
+      ? (texture(terrain.heightTexture, sampleTerrainUv(xz)) as TslAny).r
+      : float(froxels.groundReferenceHeightMeters);
+    const sampleCanopy = (xz: TslAny): TslAny => terrain?.canopyTexture
+      ? (texture(terrain.canopyTexture, sampleTerrainUv(xz)) as TslAny).r
+      : float(0);
 
     const sliceDist = (u: TslAny): TslAny => float(nearMeters).mul(float(maxRatio).pow(u));
 
@@ -103,7 +126,8 @@ export class PostFxFroxelVolume {
       const worldPos = cameraPosition.add(dirW.mul(dist)).toVar();
       const sunDir = vec3(this.uSunDirection).normalize().toVar();
 
-      const hGround = worldPos.y.sub(froxels.groundReferenceHeightMeters).max(0);
+      const groundY = sampleTerrainHeight(worldPos.xz);
+      const hGround = worldPos.y.sub(groundY).max(0);
       const rhoGround = densityAtHeight(hGround, froxels.groundFalloffMeters).mul(froxels.groundFogDensity);
       const rhoAlt = densityAtHeight(worldPos.y, froxels.altitudeFalloffMeters).mul(froxels.altitudeFogDensity);
       const lowSun = float(1).sub(smoothstep(0.08, 0.65, sunDir.y));
@@ -118,12 +142,30 @@ export class PostFxFroxelVolume {
         .mul(froxels.noiseStrength)
         .add(1)
         .max(0);
+      const canopyCoverage = sampleCanopy(worldPos.xz);
+      const moistureBoost = canopyCoverage.mul(0.45).add(1);
+      const terrainVisibility = float(1).toVar();
+      for (const probeDistance of [24, 60, 140, 320, 720]) {
+        const probePos = worldPos.add(sunDir.mul(probeDistance));
+        const probeGroundY = sampleTerrainHeight(probePos.xz);
+        terrainVisibility.mulAssign(smoothstep(-6, 4, probePos.y.sub(probeGroundY)));
+      }
+      const crownBase = groundY.add(3);
+      const crownTop = groundY.add(21);
+      const crownBand = smoothstep(crownBase, crownBase.add(5), worldPos.y)
+        .mul(float(1).sub(smoothstep(crownTop.sub(5), crownTop, worldPos.y)));
+      const canopyProjection = worldPos.xz.add(
+        sunDir.xz.mul(crownTop.sub(worldPos.y).max(0).div(sunDir.y.max(0.08))),
+      );
+      const projectedCanopy = sampleCanopy(canopyProjection);
+      const canopyVisibility = float(1).sub(projectedCanopy.mul(0.85).mul(crownBand)).clamp(0.15, 1);
+      const sunVisibility = terrainVisibility.mul(canopyVisibility);
       const shaft = lowSun.mul(froxels.sunShaftsStrength).add(1);
-      const density = rhoGround.add(rhoAlt).mul(noise).mul(densitySunScale).mul(froxels.strength);
+      const density = rhoGround.add(rhoAlt).mul(noise).mul(densitySunScale).mul(moistureBoost).mul(froxels.strength);
       const phase = phaseHenyeyGreenstein(dirW.dot(sunDir), 0.5);
       const fogColor = vec3(...hillaire.mieColor)
-        .mul(phase.mul(18).mul(shaft))
-        .add(vec3(...hillaire.rayleighColor).mul(0.035));
+        .mul(phase.mul(18).mul(shaft).mul(sunVisibility))
+        .add(vec3(...hillaire.rayleighColor).mul(0.035).mul(float(0.6).add(sunVisibility.mul(0.4))));
       textureStore(
         this.scatterTexture,
         uvec3(x.toUint(), y.toUint(), z.toUint()),

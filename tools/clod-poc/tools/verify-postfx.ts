@@ -1,4 +1,9 @@
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import path from "node:path";
+
+const require = createRequire(import.meta.url);
+const vitestCli = path.join(path.dirname(require.resolve("vitest/package.json")), "vitest.mjs");
 
 const TEST_FILES = [
   "src/gpu/webgpu_postprocess.test.ts",
@@ -19,7 +24,7 @@ interface CommandSpec {
 
 const COMMANDS: readonly CommandSpec[] = [
   { command: "npm", args: ["run", "typecheck"] },
-  { command: "npx", args: ["vitest", "run", ...TEST_FILES] },
+  { command: process.execPath, args: [vitestCli, "run", ...TEST_FILES] },
 ] as const;
 
 function runCommand(spec: CommandSpec): Promise<void> {

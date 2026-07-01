@@ -35,7 +35,7 @@ import { WebGpuPostProcessPipeline } from "../../gpu/webgpu_postprocess.js";
 import type { AppPostProcess } from "../app_post_process.js";
 import type { AppSky } from "../../scene/app_sky.js";
 import { WebGpuSkyEnvironment } from "../../scene/webgpu_sky_environment.js";
-import { LOD_COLORS } from "../clod_constants.js";
+import { FAR_SHELL_DEFAULTS, LOD_COLORS } from "../clod_constants.js";
 import { toGeometry } from "../../terrain/geometry/page_geometry.js";
 import { createNearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";
 import { createClodSelectionController, type ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
@@ -299,7 +299,10 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   }
 
   const postProcess: AppPostProcess = app.isWebGpu
-    ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings(), currentLighting)
+    ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings(), currentLighting, {
+        froxelTerrainSummary: terrainSummary,
+        froxelTerrainRadiusMeters: worldSizeCells * FAR_SHELL_DEFAULTS.radiusFactor,
+      })
     : new PostProcessPipeline(app.renderer, currentPostProcessSettings());
   postProcess.setSize(window.innerWidth, window.innerHeight);
 
