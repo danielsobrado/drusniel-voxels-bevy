@@ -44,9 +44,14 @@ export interface PostFxFroxelVolumeNodeInput {
 export interface PostFxFroxelVolumeTerrainInput {
   heightTexture: Texture;
   canopyTexture?: Texture | null;
+  hydrologyTexture?: Texture | null;
+  cloudShadowTexture?: Texture | null;
   originX: number;
   originZ: number;
   extentMeters: number;
+  hydrologyWorldSizeMeters?: number;
+  cloudShadowWorldSizeMeters?: number;
+  cloudShadowStrength?: number;
 }
 
 export interface PostFxFroxelVolumeOptions {
@@ -103,6 +108,20 @@ export class PostFxFroxelVolume {
     const sampleCanopy = (xz: TslAny): TslAny => terrain?.canopyTexture
       ? (texture(terrain.canopyTexture, sampleTerrainUv(xz)) as TslAny).r
       : float(0);
+    const sampleHydrologyMoisture = (xz: TslAny): TslAny => terrain?.hydrologyTexture
+      ? (texture(
+          terrain.hydrologyTexture,
+          xz.div(Math.max(1, terrain.hydrologyWorldSizeMeters ?? terrain.extentMeters)).clamp(0, 1),
+        ) as TslAny).b
+      : float(0);
+    const sampleCloudShadow = (xz: TslAny): TslAny => terrain?.cloudShadowTexture
+      ? (texture(
+          terrain.cloudShadowTexture,
+          xz.div(Math.max(1, terrain.cloudShadowWorldSizeMeters ?? terrain.extentMeters))
+            .add(vec2(time.mul(0.003), time.mul(0.0017)))
+            .fract(),
+        ) as TslAny).r
+      : float(1);
 
     const sliceDist = (u: TslAny): TslAny => float(nearMeters).mul(float(maxRatio).pow(u));
 
@@ -144,7 +163,8 @@ export class PostFxFroxelVolume {
         .add(1)
         .max(0);
       const canopyCoverage = sampleCanopy(worldPos.xz);
-      const moistureBoost = canopyCoverage.mul(0.45).add(1);
+      const hydrologyMoisture = sampleHydrologyMoisture(worldPos.xz);
+      const moistureBoost = hydrologyMoisture.mul(0.7).add(canopyCoverage.mul(0.18)).add(1);
       const terrainVisibility = float(1).toVar();
       for (const probeDistance of [24, 60, 140, 320, 720]) {
         const probePos = worldPos.add(sunDir.mul(probeDistance));
@@ -160,7 +180,10 @@ export class PostFxFroxelVolume {
       );
       const projectedCanopy = sampleCanopy(canopyProjection);
       const canopyVisibility = clamp(float(1).sub(projectedCanopy.mul(0.85).mul(crownBand)), 0.15, 1);
-      const sunVisibility = terrainVisibility.mul(canopyVisibility);
+      const cloudVisibility = sampleCloudShadow(worldPos.xz.add(sunDir.xz.mul(280)));
+      const cloudStrength = float(Math.max(0, Math.min(1, terrain?.cloudShadowStrength ?? 0)));
+      const cloudVisibilityWeighted = float(1).sub(float(1).sub(cloudVisibility).mul(cloudStrength));
+      const sunVisibility = terrainVisibility.mul(canopyVisibility).mul(cloudVisibilityWeighted);
       const shaft = lowSun.mul(froxels.sunShaftsStrength).add(1);
       const density = rhoGround.add(rhoAlt).mul(noise).mul(densitySunScale).mul(moistureBoost).mul(froxels.strength);
       const phase = phaseHenyeyGreenstein(dirW.dot(sunDir), 0.5);

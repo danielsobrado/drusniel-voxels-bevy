@@ -8,11 +8,13 @@ const vitestCli = path.join(path.dirname(require.resolve("vitest/package.json"))
 const TEST_FILES = [
   "src/gpu/webgpu_postprocess.test.ts",
   "src/gpu/postfx_atmosphere.test.ts",
+  "src/gpu/postfx_cloud_shadow.test.ts",
   "src/gpu/postfx_auto_exposure.test.ts",
   "src/gpu/postfx_bounce.test.ts",
   "src/gpu/postfx_case_diagnostics.test.ts",
   "src/gpu/postfx_color_script.test.ts",
   "src/gpu/postfx_gtao.test.ts",
+  "src/gpu/postfx_hillaire_luts.test.ts",
   "src/gpu/postfx_perf_gate.test.ts",
   "src/gpu/postfx_stage_flags.test.ts",
 ] as const;
