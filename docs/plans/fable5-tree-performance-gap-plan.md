@@ -4,11 +4,11 @@
 
 Close the tree performance gap between `tools/clod-poc` and `Braffolk/fable5-world-demo` while keeping Drusniel's editable CLOD terrain workflow.
 
-Trees are now the main performance cost. The next work should focus on tree instance count, active ring distance, GPU tree path defaults, debug readbacks, alpha-card overdraw, and shadow caster cost.
+Trees are now the main performance cost. The active work is focused on tree count, active ring distance, GPU tree defaults, debug readbacks, alpha-card overdraw, impostors, and shadow caster cost.
 
 ## Summary Verdict
 
-Drusniel already has many of the right pieces:
+Drusniel is not missing all of Fable5's tree ideas. It already has many of the right building blocks:
 
 - GPU tree ring compute.
 - Indirect draw buffers.
@@ -16,28 +16,28 @@ Drusniel already has many of the right pieces:
 - Per-cascade tree shadow buffers.
 - Octahedral impostors.
 - Terrain ridge filtering.
-- Quality presets for tree distance, density, spacing, GPU max visible count, and now shadow LOD policy.
+- Tree density, spacing, ring-size, GPU-visible, and shadow-LOD quality presets.
 - Crown proxy geometry for far/impostor GPU tree shadow casters.
 
-Fable5 is still ahead because its vegetation pipeline is GPU-first. Fable5 scatters, culls, compacts, classifies LODs, and writes indirect draw counts on the GPU during normal rendering. Drusniel has a similar GPU ring path, but the CPU patch path still needs to remain as fallback/debug and some GPU-path work is still not as complete or consistently used as Fable5.
+Fable5 is still ahead because its vegetation pipeline is GPU-first end to end. It scatters, culls, compacts, classifies LODs, and writes indirect draw counts on the GPU during normal rendering. Drusniel now requests the GPU tree ring from presets, but the CPU patch path still exists as fallback/debug, and some GPU-path work is still less complete than Fable5.
 
 ## Main Differences
 
 ### 1. Fable5 is GPU-first
 
-Fable5 uses compute passes to clear counters, cull vegetation, compact visible instances, classify LOD rings, and write indirect draw arguments. Instance counts do not need CPU work every frame.
+Fable5 uses compute passes to clear counters, cull vegetation, compact visible instances, classify LOD rings, and write indirect draw arguments. Instance counts normally stay on GPU.
 
-Drusniel has a GPU tree ring path with compute + indirect draws, but it still has a CPU patch fallback that selects patches, generates tree instances, updates LODs, and writes per-instance matrices from JavaScript.
+Drusniel has a GPU tree ring path with compute and indirect draws, but it also keeps a CPU patch path that selects patches, generates instances, updates LODs, and writes matrices from JavaScript.
 
 Current status:
 
 - Quality presets now enable GPU trees by default.
 - CPU fallback/debug switches still exist.
-- Remaining work: make the runtime status/overlay clearer and verify that WebGPU path is the actual path on target browsers.
+- Remaining work: verify WebGPU path on target browsers and show a clearer runtime status line.
 
 ### 2. Fable5 avoids normal-frame CPU readback
 
-Fable5 reads stats only for debug/HUD. Drusniel exposes GPU readback/debug count options.
+Fable5 reads stats only for debug/HUD. Drusniel exposes GPU count/readback options.
 
 Current status:
 
@@ -45,7 +45,7 @@ Current status:
 - `treeGpuCounts=1` and `treeGpuValidate=1` explicitly request readback.
 - GUI exposes GPU debug controls.
 
-### 3. Fable5 uses stronger far-tree shadow optimization
+### 3. Fable5 reduces distant tree shadow cost
 
 Earlier assumption: Drusniel needed crown proxy casters from scratch.
 
@@ -53,9 +53,9 @@ Updated finding: Drusniel already has crown proxy shadow support in the GPU ring
 
 Remaining gap:
 
-- Presets need stronger control over `lod.shadowsMaxLod`.
-- CPU and GPU paths should both respect shadow LOD budgets.
-- GPU compute should avoid writing shadow candidates for disabled shadow LODs. Otherwise the renderer skips them, but compute still spends atomics/counter work.
+- Presets now control `lod.shadowsMaxLod`, but GPU compute still needs finer per-LOD shadow append gating.
+- `treeShadowMaxLod=none` now skips GPU shadow capacity/planes, so the WGSL shadow append path exits early.
+- `near`, `mid`, and `far` still need packed per-LOD budget data in the GPU params so the shader can skip disabled LODs before atomics.
 
 ### 4. Fable5 uses integer hash scatter
 
@@ -65,11 +65,11 @@ Current status:
 
 - Drusniel already had `tree_pcg2d` in WGSL.
 - The composed GPU tree ring shader now rewrites `tree_hash` and `tree_hash2` to use PCG instead of `fract(sin(dot(...)))`.
-- Test coverage was added so the compiled tree ring shader should not regress to the old sin hash accidentally.
+- Test coverage confirms the old sin hash is not present in the composed tree ring shader.
 
 Remaining work:
 
-- CPU validation/scatter helper should be checked for PCG parity too. Some CPU helper code still uses a sin hash path.
+- CPU validation/scatter helper should be checked for PCG parity too. Some CPU helper paths still appear to use a sin/fract hash.
 
 ### 5. Fable5 has a more integrated impostor path
 
@@ -83,7 +83,7 @@ Current status:
 Remaining work:
 
 - Confirm baked impostor atlas is always used by GPU ring when ready.
-- Add cheaper impostor quality modes later only if measurements show startup or memory pressure.
+- Add cheaper impostor quality modes only if measurements show startup or memory pressure.
 
 ## Progress Log
 
@@ -96,16 +96,14 @@ Presets added:
 - `quality=perf`
 - `quality=potato`
 
-They control postprocess first, then tree cost.
+Tree preset values:
 
-Tree preset values before shadow policy:
-
-| Preset | Ring | Max instances | Density | Spacing | GPU max visible |
-|---|---:|---:|---:|---:|---:|
-| ultra | 620 m | 9000 | 1.2 | 5.5 m | 50000 |
-| balanced | 420 m | 6000 | 0.85 | 7.0 m | 30000 |
-| perf | 300 m | 3500 | 0.55 | 9.0 m | 16000 |
-| potato | 180 m | 1500 | 0.3 | 12.0 m | 8000 |
+| Preset | Ring | Max instances | Density | Spacing | GPU max visible | Shadow max LOD |
+|---|---:|---:|---:|---:|---:|---|
+| ultra | 620 m | 9000 | 1.2 | 5.5 m | 50000 | far |
+| balanced | 420 m | 6000 | 0.85 | 7.0 m | 30000 | mid |
+| perf | 300 m | 3500 | 0.55 | 9.0 m | 16000 | near |
+| potato | 180 m | 1500 | 0.3 | 12.0 m | 8000 | none |
 
 ### Done: tree density and active ring controlled by presets
 
@@ -183,35 +181,46 @@ Tests confirm:
 - PCG hash is present in the composed shader.
 - Old `fract(sin(dot(...)))` hash is not present in the composed shader.
 
-### In progress: shadow LOD preset policy
+### Done: shadow max LOD preset policy and controls
 
-Started implementation:
+Implemented:
 
 - Added `TreeShadowMaxLod` type.
 - Added `treeShadowMaxLod` to tree quality preset state.
-- Preset targets:
-
-| Preset | Shadow max LOD |
-|---|---|
-| ultra | far |
-| balanced | mid |
-| perf | near |
-| potato | none |
-
 - Added vegetation state field: `treeShadowMaxLod`.
 - Wired tree controller settings so `state.treeShadowMaxLod` maps to `settings.lod.shadowsMaxLod`.
 - Added URL override parsing for:
   - `treeShadowMaxLod=none|near|mid|far|impostor`
   - `treeShadowLod=...`
   - `treeShadows=...`
-- Updated tree preset tests for shadow LOD validation and `perf` behavior.
+- Added lil-gui dropdown under `trees (props)`:
+  - `shadow max LOD`
+- Updated tests for:
+  - preset shadow LOD validation
+  - `perf` behavior
+  - query override precedence
+  - invalid value ignore behavior
+
+### Done: skip GPU tree shadow work when shadows are disabled
+
+Implemented:
+
+- When `settings.lod.shadowsMaxLod === "none"`, GPU tree ring dispatch passes zero shadow capacity.
+- Shadow cascade planes are not sent to the compute dispatch in this mode.
+- The WGSL shadow append path already exits when `params.settings_u.w == 0u`, so `treeShadowMaxLod=none` avoids shadow append atomics.
+- CPU/GPU validation now receives the same zero shadow capacity for this mode.
+
+This directly benefits `quality=potato` and any manual URL like:
+
+```text
+?quality=perf&treeShadowMaxLod=none
+```
 
 Still pending:
 
-- Add lil-gui dropdown for shadow max LOD under `trees (props)`.
-- Add query override test coverage for `treeShadowMaxLod`.
-- Add GPU compute-side shadow append gating so disabled shadow LODs do not spend atomic/counter work.
-- Add composed WGSL/test coverage for the shadow LOD gate.
+- Pack the max shadow LOD enum into GPU tree ring params.
+- Gate WGSL shadow appends for `near`, `mid`, and `far`, not only `none`.
+- Add composed WGSL/test coverage for the per-LOD shadow gate.
 
 ## Code Health Findings
 
@@ -235,13 +244,6 @@ Next cleanup:
 ### Phase 1: Wire presets into the GPU tree path
 
 Status: mostly done.
-
-Implemented:
-
-- GPU tree preset fields.
-- GPU tree URL flags.
-- GUI GPU controls.
-- debug readback disabled by default.
 
 Remaining:
 
@@ -270,16 +272,6 @@ Remaining:
 
 Status: done.
 
-Normal presets should not request GPU readback.
-
-Current target defaults:
-
-- `readbackVisibleLists=false`
-- `debugShowGpuCounts=false`
-- `debugValidateAgainstCpu=false`
-
-Only enable them through URL or GUI.
-
 ### Phase 4: Replace GPU tree hash with PCG
 
 Status: done for composed GPU shader.
@@ -292,19 +284,20 @@ Remaining:
 
 Status: in progress.
 
-Updated finding: crown proxy casters already exist for GPU far/impostor shadows.
+Done:
 
-Immediate remaining work:
+1. `treeShadowMaxLod` preset state.
+2. URL override.
+3. GUI dropdown.
+4. CPU path controller wiring.
+5. GPU dispatch skip when shadow max LOD is `none`.
 
-1. Finish `treeShadowMaxLod` GUI + tests.
-2. Pack shadow max LOD into GPU ring params.
-3. Gate WGSL shadow appends by max shadow LOD.
-4. Keep CPU patch path using existing `treeLodCastsShadow` policy.
+Remaining:
 
-Future optional work:
-
-- Add `treeShadowProxy=0/1` only if we need to compare proxy vs original far geometry.
-- Add per-preset shadow caster capacity if max LOD is not enough.
+1. Pack shadow max LOD into GPU ring params.
+2. Gate WGSL shadow appends by max shadow LOD for `near`, `mid`, and `far`.
+3. Keep CPU patch path using existing `treeLodCastsShadow` policy.
+4. Add composed WGSL/test coverage for the per-LOD gate.
 
 ### Phase 6: Measure card prepass before copying Fable5
 
@@ -349,6 +342,7 @@ Manual checks:
 ?quality=perf&treeShadowMaxLod=near
 ?quality=perf&treeShadowMaxLod=none
 ?quality=ultra&treeShadowMaxLod=far
+?quality=potato&treeShadowMaxLod=none
 ```
 
 Performance checks:
@@ -357,29 +351,22 @@ Performance checks:
 - GPU ring must avoid CPU patch churn when active.
 - Debug readbacks must be off unless requested.
 - CPU fallback must still work.
-- Shadow LOD policy must reduce far/impostor shadow caster work.
+- `treeShadowMaxLod=none` must skip GPU shadow work.
 - No shader compile errors.
 - No missing near-camera trees.
 
 ## Recommended Next Commit
 
-Finish Phase 5 low-risk wiring before deeper shadow work.
-
 Suggested commit title:
 
 ```text
-Gate GPU tree shadow append by shadow LOD budget
+Gate GPU tree shadow appends by LOD budget
 ```
 
 Likely files:
 
-- `tools/clod-poc/src/app/state/tree_quality_presets.ts`
-- `tools/clod-poc/src/app/state/environment_query_overrides.ts`
-- `tools/clod-poc/src/ui/gui/vegetation_gui.ts`
-- `tools/clod-poc/src/runtime/vegetation/tree_controller.ts`
 - `tools/clod-poc/src/gpu/tree_ring_compute.ts`
 - `tools/clod-poc/src/gpu/shaders/tree_ring.compute.wgsl`
 - `tools/clod-poc/src/gpu/wgsl_modules.test.ts`
-- tests under `tools/clod-poc/src/app/state/`
 
 Do not start with a new visual tree effect. The biggest remaining tree win is reducing work already being generated: active ring, density, debug readback, and shadow caster workload.
