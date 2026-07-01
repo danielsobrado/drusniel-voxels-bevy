@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createStormNodeMaterial } from "./rainNodeMaterial.js";
-import { createStormShaderMaterial, type RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import { createStormShaderMaterial } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 import { DEFAULT_STORM_WEATHER_SETTINGS } from "./rain_defaults.js";
 import type { StormWeatherOptions, StormWeatherSettings, StormWeatherStats } from "./rain_types.js";
 import { placeCameraFacingBillboard } from "./weather_camera_billboard.js";
