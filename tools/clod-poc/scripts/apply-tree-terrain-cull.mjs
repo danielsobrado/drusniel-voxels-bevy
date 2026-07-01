@@ -18,6 +18,17 @@ const checks = [
     ],
   },
   {
+    name: "tree ring cluster visibility mask",
+    path: "src/trees/tree_ring_cluster_visibility.ts",
+    needles: [
+      "export interface TreeRingClusterVisibilityMask",
+      "buildTreeRingClusterVisibilityMask",
+      "treeRingSlotClusterVisible",
+      "treeRingClusterMaskByteLength",
+      "unknownKeptClusters",
+    ],
+  },
+  {
     name: "tree config terrain visibility settings",
     path: "src/trees/tree_config.ts",
     needles: [
@@ -80,20 +91,28 @@ function checkNeedles(check) {
   return { name: check.name, status: missing.length === 0 ? "ok" : "missing", missing };
 }
 
-function checkComposedEarlyCullOrder() {
+function checkVisibleOnlyTerrainCullOrder() {
   const source = readProjectFile("src/gpu/wgsl_modules.test.ts");
   const needles = [
-    "runs terrain culling before species, scale, visible, and shadow appends",
-    "expect(hiddenReturn).toBeLessThan(speciesSelection);",
-    "expect(hiddenReturn).toBeLessThan(scaleSelection);",
-    "expect(hiddenReturn).toBeLessThan(shadowAppend);",
+    "runs terrain culling after shadow appends but before visible appends",
+    "expect(hiddenReturn).toBeGreaterThan(shadowAppend);",
     "expect(hiddenReturn).toBeLessThan(visibleAppend);",
   ];
   const missing = needles.filter((needle) => !source.includes(needle));
-  return { name: "composed shader early cull order test", status: missing.length === 0 ? "ok" : "missing", missing };
+  return { name: "visible-only terrain cull order test", status: missing.length === 0 ? "ok" : "missing", missing };
 }
 
-const results = [...checks.map(checkNeedles), checkComposedEarlyCullOrder()];
+function checkUnsafeClusterSlotSkipAbsent() {
+  const source = readProjectFile("src/gpu/wgsl_modules.ts");
+  const unsafeNeedles = [
+    "if (!tree_slot_cluster_visible(slot)) { return; }",
+    "if (!tree_slot_visible_cluster_visible(slot)) { return; }",
+  ];
+  const present = unsafeNeedles.filter((needle) => source.includes(needle));
+  return { name: "no unsafe full-slot cluster skip", status: present.length === 0 ? "ok" : "unsafe", present };
+}
+
+const results = [...checks.map(checkNeedles), checkVisibleOnlyTerrainCullOrder(), checkUnsafeClusterSlotSkipAbsent()];
 console.log(JSON.stringify(results, null, 2));
 
 if (results.some((result) => result.status !== "ok")) {
