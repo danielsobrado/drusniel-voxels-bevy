@@ -1,91 +1,44 @@
-import terrainBindings from "./shaders/terrain_field_bindings_terrain.wgsl?raw";
-import grassBindings from "./shaders/terrain_field_bindings_grass.wgsl?raw";
-import stoneBindings from "./shaders/terrain_field_bindings_stone.wgsl?raw";
-import treeBindings from "./shaders/terrain_field_bindings_tree.wgsl?raw";
-import terrainCommon from "./shaders/terrain_field_common.wgsl?raw";
+import terrainBindings from "./shaders/terrain_bindings.wgsl?raw";
+import terrainCommon from "./shaders/terrain_common.wgsl?raw";
 import placementHeight from "./shaders/placement_height.wgsl?raw";
-import terrainEntry from "./shaders/terrain_field_entry.wgsl?raw";
+import terrainEntry from "./shaders/terrain_field.compute.wgsl?raw";
+import grassBindings from "./shaders/grass_bindings.wgsl?raw";
 import grassRingEntry from "./shaders/grass_ring.compute.wgsl?raw";
+import stoneBindings from "./shaders/stone_bindings.wgsl?raw";
 import stoneScatterEntry from "./shaders/stone_scatter.compute.wgsl?raw";
+import treeBindings from "./shaders/tree_bindings.wgsl?raw";
 import treeRingEntry from "./shaders/tree_ring.compute.wgsl?raw";
-import understoryBindings from "./shaders/terrain_field_bindings_understory.wgsl?raw";
+import understoryBindings from "./shaders/understory_bindings.wgsl?raw";
 import understoryRingEntry from "./shaders/understory_ring.compute.wgsl?raw";
-import { readRiverEcologySettings } from "../water/riverEcologyRuntime.js";
+import { readRiverEcologySettings } from "../config/river_ecology_config.js";
 import { TREE_SPECIES } from "../trees/tree_config.js";
-import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
-import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
-import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
+import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl.js";
+import { applyTreeRingWgslLayoutConstants, TREE_RING_SHADOW_CASCADE_COUNT } from "./tree_ring_wgsl_layout.js";
 
-const FIELD_GLOBALS = ["digEdits", "fieldParams"] as const;
-const GRASS_FRUSTUM_RADIUS_CONST = "const GRASS_FRUSTUM_HORIZONTAL_SLACK_M: f32 = 1.4;";
-
-function composeShader(label: string, parts: readonly string[]): string {
-  const source = parts.join("\n");
-  validateSingleFieldBindings(label, source);
+function composeShader(label: string, chunks: readonly string[]): string {
+  const source = chunks.join("\n\n");
+  if (source.includes("[object Object]")) {
+    throw new Error(`${label} contains unresolved shader module object`);
+  }
   return source;
 }
 
-function validateSingleFieldBindings(label: string, source: string): void {
-  for (const name of FIELD_GLOBALS) {
-    const declarations = source.match(new RegExp(`\\bvar<[^>]+>\\s+${name}\\s*:`, "g")) ?? [];
-    if (declarations.length !== 1) {
-      throw new Error(`${label} must declare exactly one ${name} binding; found ${declarations.length}`);
-    }
-  }
-}
-
-function formatWgslFloat(value: number): string {
-  const safe = Number.isFinite(value) ? value : 0;
-  return safe.toFixed(3).replace(/0+$/, "").replace(/\.$/, ".0");
-}
-
 function replaceConst(source: string, name: string, value: number): string {
-  return source.replace(
-    new RegExp(`const ${name}: f32 = [-+]?[0-9]*\.?[0-9]+;`),
-    `const ${name}: f32 = ${formatWgslFloat(value)};`,
-  );
+  const escaped = Number.isFinite(value) ? value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") : "0";
+  return source.replace(new RegExp(`const ${name}: f32 = [-0-9.]+;`), `const ${name}: f32 = ${escaped};`);
 }
 
 function withConservativeGrassFrustum(source: string): string {
-  if (source.includes("in_frustum_sphere")) return source;
-  const normalized = source.replace(/\r\n/g, "\n");
-  const withConst = normalized.replace(
-    "const GRASS_MOIST_BANK_END_M: f32 = 11.0;",
-    `const GRASS_MOIST_BANK_END_M: f32 = 11.0;\n${GRASS_FRUSTUM_RADIUS_CONST}`,
-  );
-  const withSphereFn = withConst.replace(
-    /fn in_frustum\(center: vec3<f32>, slack: f32\) -> bool \{[\s\S]*?\n\}/,
-    `fn in_frustum_sphere(center: vec3<f32>, radius: f32) -> bool {
-  let safe_radius = max(0.0, radius);
-  for (var p = 0u; p < 6u; p = p + 1u) {
-    let plane = params.planes[p];
-    if (dot(plane.xyz, center) + plane.w < -safe_radius) { return false; }
-  }
-  return true;
-}`,
-  );
-  return withSphereFn.replace(
-    /  if \(!in_frustum\(vec3<f32>\(wpos\.x, height \+ 0\.5, wpos\.y\), 1\.4\)\) \{ return; \}\r?\n  let river_band = river_grass_ecology_band\(wpos\.x, wpos\.y, hydro, height\);/,
-    `  let river_band = river_grass_ecology_band(wpos.x, wpos.y, hydro, height);
-  let max_height_scale = max(0.1, 1.0 + abs(params.settings_a.z)) * river_band.height;
-  let max_blade_height = params.settings_a.y * max_height_scale * 2.25;
-  let blade_center = vec3<f32>(wpos.x, height + 0.02 + max_blade_height * 0.5, wpos.y);
-  let blade_radius = max_blade_height * 0.5 + GRASS_FRUSTUM_HORIZONTAL_SLACK_M;
-  if (!in_frustum_sphere(blade_center, blade_radius)) { return; }`,
-  );
+  return source.replace("if (!in_frustum(vec3<f32>(wpos.x, height + 1.0, wpos.y), 2.5)) { return; }", "if (!in_frustum(vec3<f32>(wpos.x, height + 1.0, wpos.y), max(6.0, cell_size * 0.75))) { return; }");
 }
 
 function withTreeFinalPlacementHeight(source: string): string {
   return source
-    .replace("let hx0 = surfaceHeightField(wpos.x - sample_radius, wpos.y);", "let hx0 = placement_ground_height(wpos.x - sample_radius, wpos.y, params.center_radius.w);")
-    .replace("let hx1 = surfaceHeightField(wpos.x + sample_radius, wpos.y);", "let hx1 = placement_ground_height(wpos.x + sample_radius, wpos.y, params.center_radius.w);")
-    .replace("let hz0 = surfaceHeightField(wpos.x, wpos.y - sample_radius);", "let hz0 = placement_ground_height(wpos.x, wpos.y - sample_radius, params.center_radius.w);")
-    .replace("let hz1 = surfaceHeightField(wpos.x, wpos.y + sample_radius);", "let hz1 = placement_ground_height(wpos.x, wpos.y + sample_radius, params.center_radius.w);")
-    .replace("let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;", "let start_height = params.settings_e.w;")
     .replace("let sample_ground_height = surfaceHeightField(sample_xz.x, sample_xz.y);", "let sample_ground_height = placement_ground_height(sample_xz.x, sample_xz.y, params.center_radius.w);")
     .replace("let raw_height = surfaceHeightField(wpos.x, wpos.y);", "let raw_height = placement_ground_height(wpos.x, wpos.y, params.center_radius.w);")
-    .replace("let height = tree_hydrology_ground_height(raw_height, hydro);", "let height = raw_height;");
+    .replace("let height = tree_hydrology_ground_height(raw_height, hydro);", "let height = raw_height;")
+    .replace("let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;", "let start_height = params.settings_e.w;");
 }
 
 function withTreeTerrainVisibilityCull(source: string): string {
@@ -96,10 +49,13 @@ function withTreeTerrainVisibilityCull(source: string): string {
       "fn tree_terrain_visibility_enabled() -> bool {\n  return params.terrain_visibility.x > 0.5;\n}\n\nfn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
     );
   }
+  const oldOrder = "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  var terrain_hidden = false;\n  if (tree_terrain_visibility_enabled()) {\n    terrain_hidden = terrain_ridge_filter(wpos, height, dist);\n    record_tree_terrain_visibility(terrain_hidden);\n  }\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);\n  if (terrain_hidden) { return; }";
+  const earlyOrder = "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  var terrain_hidden = false;\n  if (tree_terrain_visibility_enabled()) {\n    terrain_hidden = terrain_ridge_filter(wpos, height, dist);\n    record_tree_terrain_visibility(terrain_hidden);\n  }\n  if (terrain_hidden) { return; }\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);";
+  next = next.replace(oldOrder, earlyOrder);
   if (!next.includes("terrain_ridge_filter(wpos, height, dist)")) {
     next = next.replace(
       "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);",
-      "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  var terrain_hidden = false;\n  if (tree_terrain_visibility_enabled()) {\n    terrain_hidden = terrain_ridge_filter(wpos, height, dist);\n    record_tree_terrain_visibility(terrain_hidden);\n  }\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);\n  if (terrain_hidden) { return; }",
+      earlyOrder,
     );
   }
   return next;
