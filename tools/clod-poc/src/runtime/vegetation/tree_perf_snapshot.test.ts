@@ -37,6 +37,8 @@ describe("tree perf snapshot", () => {
     expect(snapshot).toContain("- url: ?quality=perf&treeGpu=1");
     expect(snapshot).toContain("- runtime path: gpu-ring");
     expect(snapshot).toContain("- total / counts: counts off");
+    expect(snapshot).toContain("## Capture Table Row");
+    expect(snapshot).toContain("total=counts off");
     expect(snapshot).toContain("- treeShadowMaxLod: near");
   });
 
@@ -68,5 +70,6 @@ describe("tree perf snapshot", () => {
     expect(snapshot).toContain("- gpu candidates / accepted / visible: 100/50/42");
     expect(snapshot).toContain("- gpu shadow casters: 12");
     expect(snapshot).toContain("- gpu shadow overflow: yes");
+    expect(snapshot).toContain("| unknown | gpu-ring | TODO | TODO | 1.23 | 100 | 50 | 42 | 12 | yes | total=42 lod=10/20/8/4 shadowLod=near |");
   });
 });
