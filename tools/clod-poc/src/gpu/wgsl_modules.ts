@@ -78,38 +78,14 @@ function withConservativeGrassFrustum(source: string): string {
 
 function withTreeFinalPlacementHeight(source: string): string {
   return source
-    .replace(
-      "let hx0 = surfaceHeightField(wpos.x - sample_radius, wpos.y);",
-      "let hx0 = placement_ground_height(wpos.x - sample_radius, wpos.y, params.center_radius.w);",
-    )
-    .replace(
-      "let hx1 = surfaceHeightField(wpos.x + sample_radius, wpos.y);",
-      "let hx1 = placement_ground_height(wpos.x + sample_radius, wpos.y, params.center_radius.w);",
-    )
-    .replace(
-      "let hz0 = surfaceHeightField(wpos.x, wpos.y - sample_radius);",
-      "let hz0 = placement_ground_height(wpos.x, wpos.y - sample_radius, params.center_radius.w);",
-    )
-    .replace(
-      "let hz1 = surfaceHeightField(wpos.x, wpos.y + sample_radius);",
-      "let hz1 = placement_ground_height(wpos.x, wpos.y + sample_radius, params.center_radius.w);",
-    )
-    .replace(
-      "let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;",
-      "let start_height = placement_ground_height(start_xz.x, start_xz.y, params.center_radius.w) + 18.0;",
-    )
-    .replace(
-      "let sample_ground_height = surfaceHeightField(sample_xz.x, sample_xz.y);",
-      "let sample_ground_height = placement_ground_height(sample_xz.x, sample_xz.y, params.center_radius.w);",
-    )
-    .replace(
-      "let raw_height = surfaceHeightField(wpos.x, wpos.y);",
-      "let raw_height = placement_ground_height(wpos.x, wpos.y, params.center_radius.w);",
-    )
-    .replace(
-      "let height = tree_hydrology_ground_height(raw_height, hydro);",
-      "let height = raw_height;",
-    );
+    .replace("let hx0 = surfaceHeightField(wpos.x - sample_radius, wpos.y);", "let hx0 = placement_ground_height(wpos.x - sample_radius, wpos.y, params.center_radius.w);")
+    .replace("let hx1 = surfaceHeightField(wpos.x + sample_radius, wpos.y);", "let hx1 = placement_ground_height(wpos.x + sample_radius, wpos.y, params.center_radius.w);")
+    .replace("let hz0 = surfaceHeightField(wpos.x, wpos.y - sample_radius);", "let hz0 = placement_ground_height(wpos.x, wpos.y - sample_radius, params.center_radius.w);")
+    .replace("let hz1 = surfaceHeightField(wpos.x, wpos.y + sample_radius);", "let hz1 = placement_ground_height(wpos.x, wpos.y + sample_radius, params.center_radius.w);")
+    .replace("let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;", "let start_height = placement_ground_height(start_xz.x, start_xz.y, params.center_radius.w) + 18.0;")
+    .replace("let sample_ground_height = surfaceHeightField(sample_xz.x, sample_xz.y);", "let sample_ground_height = placement_ground_height(sample_xz.x, sample_xz.y, params.center_radius.w);")
+    .replace("let raw_height = surfaceHeightField(wpos.x, wpos.y);", "let raw_height = placement_ground_height(wpos.x, wpos.y, params.center_radius.w);")
+    .replace("let height = tree_hydrology_ground_height(raw_height, hydro);", "let height = raw_height;");
 }
 
 export function withTreePcgHash(source: string): string {
@@ -122,6 +98,15 @@ export function withTreePcgHash(source: string): string {
 fn tree_hash2(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   return tree_pcg2d(cell, params.settings_u.z + salt);
 }`,
+  );
+}
+
+function withTreeShadowLodGate(source: string): string {
+  return source.replace(
+    "if (lod_active == 0u || params.settings_u.w == 0u) { return; }",
+    `if (lod_active == 0u || params.settings_u.w == 0u) { return; }
+  let max_shadow_lod = params.settings_e.z;
+  if (max_shadow_lod < 0.0 || f32(lod) > max_shadow_lod) { return; }`,
   );
 }
 
@@ -163,7 +148,7 @@ export function composeTreeRingShader(workgroupSize = 64): string {
     ? workgroupSize
     : 64;
   const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
-  const baseTreeEntry = withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)));
+  const baseTreeEntry = withTreeShadowLodGate(withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry))));
   const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length);
   const treeEntry = applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout).replace(
     /const TREE_WORKGROUP_SIZE: u32 = \d+u;/,

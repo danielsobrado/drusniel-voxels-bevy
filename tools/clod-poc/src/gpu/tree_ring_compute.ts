@@ -24,6 +24,7 @@ const SHADOW_COUNTER_BYTES = TREE_GPU_RING_SHADOW_GROUP_COUNT * Uint32Array.BYTE
 const READBACK_BYTES = COUNTER_BYTES + SHADOW_COUNTER_BYTES;
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
+const SHADOW_MAX_LOD_NONE = -1;
 
 export const TREE_GPU_RING_CELL = 3.4;
 export const TREE_GPU_RING_STORAGE_BINDINGS = 7;
@@ -92,6 +93,11 @@ export function emptyTreeGpuRingCounts(): TreeGpuRingCounts {
 
 export function treeGpuRingGroupIndex(species: TreeSpeciesId, lod: TreeLod): number {
   return treeRingSpeciesGroupIndex(TREE_SPECIES.indexOf(species), TREE_LODS.indexOf(lod), TREE_SPECIES.length);
+}
+
+export function treeGpuRingShadowMaxLodIndex(settings: TreeSettings): number {
+  const maxLod = settings.lod.shadowsMaxLod;
+  return maxLod === "none" ? SHADOW_MAX_LOD_NONE : TREE_LODS.indexOf(maxLod);
 }
 
 export function treeGpuRingGroupRegion(group: number, maxInstancesPerGroup: number): { start: number; end: number; firstInstance: number } {
@@ -168,6 +174,7 @@ export function treeGpuRingKey(settings: TreeSettings, worldCells: number): stri
   return [
     worldCells, settings.seed, settings.distanceM, settings.gpu.maxVisible,
     lod.near, lod.mid, lod.far, lod.radius, lod.band,
+    settings.lod.shadowsMaxLod,
     accept.minHeightM, accept.maxHeightM, accept.slopeMinY, accept.minGroundWeight,
     accept.parentCellM, accept.clumpStrength, accept.clumpThreshold,
     ...accept.materialDensity,
@@ -216,6 +223,7 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   f32[23] = accept.waterClearanceM;
   f32[24] = accept.rockReject;
   f32[25] = accept.snowReject;
+  f32[26] = treeGpuRingShadowMaxLodIndex(settings);
   TREE_SPECIES.forEach((species, index) => {
     f32[TREE_GPU_RING_LAYOUT.speciesWeightsOffset + index] = speciesWeight(settings, species);
   });
