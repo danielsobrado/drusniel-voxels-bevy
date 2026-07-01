@@ -30,8 +30,10 @@ interface PerfCaseResult {
   snapshot: any;
 }
 
+const BASELINE_CASE = "postfx-off";
+
 const CASES: readonly PostFxPerfCase[] = [
-  { name: "postfx-off", params: { fx: "0" } },
+  { name: BASELINE_CASE, params: { fx: "0" } },
   { name: "postfx-postmin", params: { postmin: "1" } },
   { name: "postfx-default", params: {} },
   { name: "postfx-no-bloom", params: { ablate: "bloom" } },
@@ -72,6 +74,22 @@ function boolArg(args: Record<string, string | boolean>, key: string): boolean {
 function stringArg(args: Record<string, string | boolean>, key: string, fallback: string): string {
   const value = args[key];
   return typeof value === "string" ? value : fallback;
+}
+
+function selectCases(rawCases: string, includeBaseline: boolean): readonly PostFxPerfCase[] {
+  if (!rawCases.trim()) return CASES;
+  const wanted = new Set(rawCases.split(",").map((name) => name.trim()).filter(Boolean));
+  if (includeBaseline) wanted.add(BASELINE_CASE);
+  const selected = CASES.filter((perfCase) => wanted.has(perfCase.name));
+  const known = new Set(CASES.map((perfCase) => perfCase.name));
+  const unknown = [...wanted].filter((name) => !known.has(name));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown postfx perf case(s): ${unknown.join(", ")}`);
+  }
+  if (selected.length === 0) {
+    throw new Error("No postfx perf cases selected");
+  }
+  return selected;
 }
 
 function delay(ms: number): Promise<void> {
@@ -197,6 +215,7 @@ async function main(): Promise<void> {
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
   const outDir = stringArg(args, "out", join("perf-runs", `postfx-${runId}`));
   const shouldCheck = boolArg(args, "check");
+  const selectedCases = selectCases(stringArg(args, "case", ""), shouldCheck);
   const gateConfig = stringArg(args, "gateConfig", "src/environment/config/postfx_perf_gate.yaml");
   mkdirSync(outDir, { recursive: true });
 
@@ -215,14 +234,14 @@ async function main(): Promise<void> {
   const { browser, recipe } = await launchWebGPU();
   const results: PerfCaseResult[] = [];
   try {
-    for (const perfCase of CASES) {
+    for (const perfCase of selectedCases) {
       results.push(await runCase(perfCase, baseUrl, baseParams, outDir, timeoutMs, browser));
     }
   } finally {
     await browser.close().catch(() => undefined);
   }
 
-  const summary = { schemaVersion: 1, baseUrl, baseParams, launchRecipe: recipe, cases: results };
+  const summary = { schemaVersion: 1, baseUrl, baseParams, selectedCases: selectedCases.map((entry) => entry.name), launchRecipe: recipe, cases: results };
   writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
   writeFileSync(join(outDir, "summary.md"), markdown(results));
   if (shouldCheck) enforcePerfThresholds(summary, gateConfig);
