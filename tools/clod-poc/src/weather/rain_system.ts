@@ -6,6 +6,7 @@ import { DEFAULT_RAIN_WEATHER_SETTINGS } from "./rain_defaults.js";
 import { createRainGeometry, createSplashGeometry } from "./rain_geometry.js";
 import { RainSplashPlacement } from "./rain_splash_placement.js";
 import type { RainWeatherOptions, RainWeatherSettings, RainWeatherStats, SplashBuffers } from "./rain_types.js";
+import { applyWindWeatherToMaterials, clampWindWeatherSettings, isWeatherVisible } from "./weather_settings.js";
 
 export class RainWeatherSystem {
   private readonly group = new THREE.Group();
@@ -58,17 +59,9 @@ export class RainWeatherSystem {
   }
 
   applySettings(settings: RainWeatherSettings): void {
-    this.settings = {
-      enabled: settings.enabled,
-      intensity: THREE.MathUtils.clamp(settings.intensity, 0, 1.6),
-      windX: THREE.MathUtils.clamp(settings.windX, -5, 5),
-      windZ: THREE.MathUtils.clamp(settings.windZ, -5, 5),
-    };
-    this.group.visible = this.settings.enabled && this.settings.intensity > 0.001;
-    for (const material of [this.rainMaterial, this.hardSplashMaterial, this.waterSplashMaterial]) {
-      material.setIntensity(this.settings.intensity);
-      material.setWind(this.settings.windX, this.settings.windZ);
-    }
+    this.settings = clampWindWeatherSettings(settings);
+    this.group.visible = isWeatherVisible(this.settings);
+    applyWindWeatherToMaterials(this.settings, [this.rainMaterial, this.hardSplashMaterial, this.waterSplashMaterial]);
   }
 
   update(deltaSeconds: number, elapsedSeconds: number, cameraPosition: THREE.Vector3, focus: THREE.Vector3): void {
