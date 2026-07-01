@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { compactStageList, postFxCaseDiagnostics, type PostFxCaseDiagnostics } from "../src/gpu/postfx_case_diagnostics.js";
 import { launchWebGPU } from "./launch.js";
 
 interface PostFxPerfCase {
@@ -19,6 +20,7 @@ interface PerfProgress {
 interface PerfCaseResult {
   name: string;
   url: string;
+  diagnostics: PostFxCaseDiagnostics;
   warnings: string[];
   errors: string[];
   snapshot: any;
@@ -83,15 +85,15 @@ function markdown(results: readonly PerfCaseResult[]): string {
   const lines = [
     "# clod-poc WebGPU postfx perf matrix",
     "",
-    "| case | frame p50 | frame p95 | render p95 | top phase p95 | warnings | errors |",
-    "| --- | ---: | ---: | ---: | --- | ---: | ---: |",
+    "| case | expected stages | frame p50 | frame p95 | render p95 | top phase p95 | warnings | errors |",
+    "| --- | --- | ---: | ---: | ---: | --- | ---: | ---: |",
   ];
   for (const result of results) {
     const frame = metric(result.snapshot, "frameMs");
     const render = metric(result.snapshot, "renderMs");
     const topPhase = result.snapshot.broadBucketsByP95?.[0];
     lines.push(
-      `| ${result.name} | ${ms(frame.p50)} | ${ms(frame.p95)} | ${ms(render.p95)} | ` +
+      `| ${result.name} | ${compactStageList(result.diagnostics)} | ${ms(frame.p50)} | ${ms(frame.p95)} | ${ms(render.p95)} | ` +
         `${topPhase ? `${topPhase.name} ${ms(Number(topPhase.p95 ?? 0))}` : "-"} | ` +
         `${result.warnings.length} | ${result.errors.length} |`,
     );
@@ -110,7 +112,9 @@ async function runCase(
   timeoutMs: number,
   browser: Awaited<ReturnType<typeof launchWebGPU>>["browser"],
 ): Promise<PerfCaseResult> {
-  const url = buildUrl(baseUrl, { ...baseParams, ...perfCase.params });
+  const caseParams = { ...baseParams, ...perfCase.params };
+  const url = buildUrl(baseUrl, caseParams);
+  const diagnostics = postFxCaseDiagnostics(caseParams);
   const warnings: string[] = [];
   const errors: string[] = [];
   let lastProgress: PerfProgress | null = null;
@@ -145,7 +149,7 @@ async function runCase(
     if (!snapshot?.ready) {
       throw new Error(`Perf probe did not finish: ${JSON.stringify(lastProgress)}`);
     }
-    const result = { name: perfCase.name, url, warnings, errors, snapshot };
+    const result = { name: perfCase.name, url, diagnostics, warnings, errors, snapshot };
     writeFileSync(join(outDir, `${perfCase.name}.json`), JSON.stringify(result, null, 2));
     return result;
   } finally {
