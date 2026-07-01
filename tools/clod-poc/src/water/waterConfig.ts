@@ -20,6 +20,7 @@ import {
   readNumberArray,
   readNumberTuple,
 } from "./water_config_readers.js";
+import { applyRuntimeRiverOverrides } from "./water_config_runtime_overrides.js";
 
 /** Debug render modes for the water material. */
 export const WATER_DEBUG_MODES = {
@@ -276,6 +277,11 @@ export function cloneWaterConfig(config: WaterConfig = DEFAULT_WATER_CONFIG): Wa
   };
 }
 
+const WATER_RUNTIME_OVERRIDE_OPTIONS = {
+  clone: cloneWaterConfig,
+  defaultHydrology: DEFAULT_HYDROLOGY_CONFIG,
+};
+
 export function parseWaterConfigYaml(source: string): WaterConfig {
   const parsed = load(source) as Record<string, unknown> | undefined;
   const waterRecord = (parsed?.water ?? {}) as Record<string, unknown>;
@@ -395,54 +401,16 @@ function warnWater(message: string, warn?: ((message: string) => void) | null): 
   warn?.(`[water-config] ${message}`);
 }
 
-function runtimeSearchParams(): URLSearchParams | null {
-  if (typeof window === "undefined") return null;
-  return new URLSearchParams(window.location.search);
-}
-
-function queryBool(params: URLSearchParams, key: string, fallback: boolean): boolean {
-  const raw = params.get(key);
-  if (raw === null) return fallback;
-  return raw === "1" || raw === "true";
-}
-
-function queryNumber(params: URLSearchParams, key: string, fallback: number): number {
-  const raw = params.get(key);
-  if (raw === null) return fallback;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function applyRuntimeRiverOverrides(config: WaterConfig): WaterConfig {
-  const params = runtimeSearchParams();
-  if (!params) return config;
-  const next = cloneWaterConfig(config);
-  const source = params.get("waterSource");
-  if (source === "hydrology" || source === "fake_bodies") next.source = source;
-  next.hydrology.rivers.guaranteeFallbackRivers = queryBool(params, "riversFallback", next.hydrology.rivers.guaranteeFallbackRivers);
-  next.hydrology.rivers.fallbackMainRiver = queryBool(params, "riverMain", next.hydrology.rivers.fallbackMainRiver);
-  next.hydrology.rivers.fallbackTributaries = queryBool(params, "riverTributaries", next.hydrology.rivers.fallbackTributaries);
-  next.hydrology.rivers.widenRadius = queryNumber(params, "riverWidth", next.hydrology.rivers.widenRadius);
-  next.hydrology.rivers.visibleDepthM = queryNumber(params, "riverVisibleDepth", next.hydrology.rivers.visibleDepthM);
-  next.hydrology.rivers.carveDepthM = queryNumber(params, "riverCarveDepth", next.hydrology.rivers.carveDepthM);
-  next.hydrology.rivers.flowSpeedMultiplier = queryNumber(params, "riverFlowSpeed", next.hydrology.rivers.flowSpeedMultiplier);
-  next.visual.foam.riverStrength = queryNumber(params, "riverFoamStrength", next.visual.foam.riverStrength);
-  for (const river of next.fakeBodies.rivers) {
-    river.width = Math.max(0.1, river.width * Math.max(0.1, next.hydrology.rivers.widenRadius / DEFAULT_HYDROLOGY_CONFIG.rivers.widenRadius));
-  }
-  return next;
-}
-
 export function parseWaterConfig(
   text: string | null | undefined,
   warn: ((message: string) => void) | null = console.warn,
 ): WaterConfig {
-  const fallback = applyRuntimeRiverOverrides(cloneWaterConfig());
+  const fallback = applyRuntimeRiverOverrides(cloneWaterConfig(), WATER_RUNTIME_OVERRIDE_OPTIONS);
   if (!text || text.trim() === "") return fallback;
 
   let config: WaterConfig;
   try {
-    config = applyRuntimeRiverOverrides(parseWaterConfigYaml(text));
+    config = applyRuntimeRiverOverrides(parseWaterConfigYaml(text), WATER_RUNTIME_OVERRIDE_OPTIONS);
   } catch (error) {
     warnWater(
       `failed to parse config/water.yaml; using defaults: ${error instanceof Error ? error.message : String(error)}`,
