@@ -12,6 +12,7 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   patches: number;
   visiblePatches: number;
   culledPatches: number;
+  terrainOccludedPatches: number;
   nearTrees: number;
   midTrees: number;
   farTrees: number;
@@ -37,6 +38,7 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
 
 export interface TreeSystemStatsPatchInput {
   visible: boolean;
+  terrainOccluded?: boolean;
   instances: readonly unknown[];
   generationStats: TreeGenerationStats;
 }
@@ -70,6 +72,7 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     patches: 0,
     visiblePatches: 0,
     culledPatches: 0,
+    terrainOccludedPatches: 0,
     nearTrees: 0,
     midTrees: 0,
     farTrees: 0,
@@ -111,6 +114,7 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
     for (const patch of input.patches) {
       stats.totalTrees += patch.instances.length;
       stats.patches++;
+      if (patch.terrainOccluded) stats.terrainOccludedPatches++;
       if (patch.visible) stats.visiblePatches++;
       else stats.culledPatches++;
       stats.generatedCandidates += patch.generationStats.generatedCandidates;
