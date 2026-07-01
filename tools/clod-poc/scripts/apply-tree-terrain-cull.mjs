@@ -30,18 +30,17 @@ const checks = [
     ],
   },
   {
-    name: "raw shader terrain visibility cull",
+    name: "raw shader terrain visibility support",
     path: "src/gpu/shaders/tree_ring.compute.wgsl",
     needles: [
       "fn tree_terrain_visibility_enabled() -> bool",
       "fn record_tree_terrain_visibility(terrain_hidden: bool)",
       "terrain_ridge_filter(wpos, height, dist)",
       "TREE_TERRAIN_HIDDEN_COUNTER",
-      "if (terrain_hidden) { return; }",
     ],
   },
   {
-    name: "composer terrain visibility cull",
+    name: "composer terrain visibility support",
     path: "src/gpu/wgsl_modules.ts",
     needles: [
       "withTreeTerrainVisibilityCull",
@@ -50,7 +49,7 @@ const checks = [
     ],
   },
   {
-    name: "CPU patch terrain culling",
+    name: "CPU patch terrain visibility support",
     path: "src/trees/tree_system_cpu_runtime.ts",
     needles: [
       "isTreeClusterTerrainOccluded",
@@ -60,12 +59,28 @@ const checks = [
   },
 ];
 
-const results = checks.map((check) => {
-  const source = readFileSync(resolve(root, check.path), "utf8");
+function readProjectFile(path) {
+  return readFileSync(resolve(root, path), "utf8");
+}
+
+function checkNeedles(check) {
+  const source = readProjectFile(check.path);
   const missing = check.needles.filter((needle) => !source.includes(needle));
   return { name: check.name, status: missing.length === 0 ? "ok" : "missing", missing };
-});
+}
 
+function checkComposedShadowOrder() {
+  const source = readProjectFile("src/gpu/wgsl_modules.test.ts");
+  const needles = [
+    "skips visible and shadow appends for terrain hidden tree candidates",
+    "expect(hiddenReturn).toBeLessThan(shadowAppend);",
+    "expect(hiddenReturn).toBeLessThan(visibleAppend);",
+  ];
+  const missing = needles.filter((needle) => !source.includes(needle));
+  return { name: "composed shader shadow order test", status: missing.length === 0 ? "ok" : "missing", missing };
+}
+
+const results = [...checks.map(checkNeedles), checkComposedShadowOrder()];
 console.log(JSON.stringify(results, null, 2));
 
 if (results.some((result) => result.status !== "ok")) {
