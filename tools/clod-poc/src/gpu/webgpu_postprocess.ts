@@ -56,6 +56,12 @@ import {
   DEFAULT_POSTFX_GTAO,
   type PostFxGtaoSettings,
 } from "./postfx_gtao.js";
+import {
+  parsePostFxStageFlags,
+  stageAllowed,
+  type PostFxStage,
+  type PostFxStageFlags,
+} from "./postfx_stage_flags.js";
 
 const TERRAIN_NON_INDEXED_FALLBACK_KEY = "__drusnielWebGpuTerrainNonIndexedFallback";
 const WEBGPU_POST_EXPOSURE = 1.0;
@@ -71,6 +77,26 @@ const GTAO_DIRECT_LIGHT_LUMA_START = 1.2;
 const GTAO_DIRECT_LIGHT_LUMA_END = 4.0;
 const GTAO_DIRECT_LIGHT_REDUCTION = 0.75;
 const LUMA_WEIGHTS = [0.2126, 0.7152, 0.0722] as const;
+const POSTFX_GRAPH_STAGES: readonly PostFxStage[] = [
+  "aerial",
+  "autoExposure",
+  "bloom",
+  "bounce",
+  "colorScript",
+  "contact",
+  "gtao",
+  "taa",
+] as const;
+
+const NEUTRAL_GRADE: PostFxGradeParams = {
+  whiteBalance: [1.0, 1.0, 1.0],
+  shadowTint: [1.0, 1.0, 1.0],
+  shadowAmount: 0.0,
+  highlightTint: [1.0, 1.0, 1.0],
+  highlightAmount: 0.0,
+  saturation: 1.0,
+  contrast: 1.0,
+};
 
 type TslAny = any;
 const tslMix = mix as unknown as (a: TslAny, b: TslAny, amount: TslAny) => TslAny;
@@ -187,6 +213,7 @@ export class WebGpuPostProcessPipeline {
   private readonly autoExposure: PostFxAutoExposureSettings = DEFAULT_POSTFX_AUTO_EXPOSURE;
   private readonly bounce: PostFxBounceSettings = DEFAULT_POSTFX_BOUNCE;
   private readonly gtao: PostFxGtaoSettings = DEFAULT_POSTFX_GTAO;
+  private readonly stageFlags: PostFxStageFlags;
   private readonly autoExposureEnabled: boolean;
   private readonly lockExposure: boolean;
   private readonly bounceEnabled: boolean;
@@ -240,10 +267,11 @@ export class WebGpuPostProcessPipeline {
     this.scene = scene;
     this.camera = camera;
     this.settings = withPostProcessDefaults(settings);
-    this.autoExposureEnabled = queryFlag(["autoExposure", "autoexposure"], this.autoExposure.enabled);
+    this.stageFlags = parsePostFxStageFlags(searchParams() ?? "");
+    this.autoExposureEnabled = this.stageEnabled("autoExposure") && queryFlag(["autoExposure", "autoexposure"], this.autoExposure.enabled);
     this.lockExposure = queryFlag(["lockexp", "lockExposure", "lockexposure"], this.autoExposure.lock);
-    this.bounceEnabled = queryFlag(["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], this.bounce.enabled);
-    this.gtaoEnabled = queryFlag(["gtao", "ao", "ambientOcclusion", "ambientocclusion"], this.gtao.enabled);
+    this.bounceEnabled = this.stageEnabled("bounce") && queryFlag(["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], this.bounce.enabled);
+    this.gtaoEnabled = this.stageEnabled("gtao") && queryFlag(["gtao", "ao", "ambientOcclusion", "ambientocclusion"], this.gtao.enabled);
     this.applyRendererSettings();
     this.updateUniforms();
   }
@@ -301,9 +329,21 @@ export class WebGpuPostProcessPipeline {
   private graphKey(): string {
     return [
       webGpuPostProcessGraphKey(this.settings),
+      this.stageFlags.postMin ? "postmin" : "postfull",
+      this.stageKey(),
       this.bounceEnabled ? "bounce" : "no-bounce",
       this.gtaoEnabled ? "gtao" : "no-gtao",
     ].join("|");
+  }
+
+  private stageKey(): string {
+    return POSTFX_GRAPH_STAGES
+      .map((stage) => `${this.stageEnabled(stage) ? "" : "no-"}${stage}`)
+      .join("|");
+  }
+
+  private stageEnabled(stage: PostFxStage): boolean {
+    return stageAllowed(this.stageFlags, stage);
   }
 
   private applyRendererSettings(): void {
@@ -315,7 +355,7 @@ export class WebGpuPostProcessPipeline {
     this.uExposure.value = this.settings.exposure;
     this.uVignette.value = this.settings.vignette;
     this.uOpacity.value = this.settings.opacity;
-    this.uContactStrength.value = this.settings.contactShadowsEnabled ? this.settings.contactShadowsStrength : 0;
+    this.uContactStrength.value = this.settings.contactShadowsEnabled && this.stageEnabled("contact") ? this.settings.contactShadowsStrength : 0;
     this.uContactRadius.value = Math.max(0.01, this.settings.contactShadowsRadiusPx);
     this.uContactDepthBias.value = Math.max(0.0001, this.settings.contactShadowsDepthBias);
     this.uBounceStrength.value = this.bounceEnabled ? this.bounce.strength : 0;
@@ -341,8 +381,10 @@ export class WebGpuPostProcessPipeline {
 
   private updateColorScriptUniforms(): void {
     const lighting = this.resolveLighting();
-    const grade = lighting ? gradeForLighting(lighting, this.colorScript) : DEFAULT_POSTFX_GRADE;
     if (lighting) this.uSunDirection.value.copy(lighting.sunDirection).normalize();
+    const grade = this.stageEnabled("colorScript")
+      ? (lighting ? gradeForLighting(lighting, this.colorScript) : DEFAULT_POSTFX_GRADE)
+      : NEUTRAL_GRADE;
     this.uContrast.value = this.settings.contrast * grade.contrast;
     this.uSaturation.value = this.settings.saturation * grade.saturation;
     this.uWhiteBalance.value.set(...grade.whiteBalance);
@@ -391,17 +433,17 @@ export class WebGpuPostProcessPipeline {
   }
 
   private createOutputNode(beauty: TslAny, depthTex: TslAny, camera: THREE.Camera): TslAny {
-    const aerialRgb = this.settings.aerialPerspectiveEnabled
+    const aerialRgb = this.settings.aerialPerspectiveEnabled && this.stageEnabled("aerial")
       ? this.createAerialNode(beauty.rgb, depthTex)
       : beauty.rgb;
     const aoRgb = this.gtaoEnabled
       ? aerialRgb.mul(this.createGtaoNode(aerialRgb, depthTex))
       : aerialRgb;
-    const temporalColor = this.settings.taaEnabled
+    const temporalColor = this.settings.taaEnabled && this.stageEnabled("taa")
       ? this.createTraaNode(aoRgb, depthTex, camera)
       : vec4(aoRgb, DEFAULT_ALPHA);
     const temporalRgb = (temporalColor as TslAny).rgb;
-    const bloomRgb = this.settings.bloomEnabled
+    const bloomRgb = this.settings.bloomEnabled && this.stageEnabled("bloom")
       ? temporalRgb.add((bloom(
           temporalColor,
           this.settings.bloomThreshold,
@@ -409,7 +451,7 @@ export class WebGpuPostProcessPipeline {
           this.settings.bloomRadius,
         ) as TslAny).rgb)
       : temporalRgb;
-    const contactRgb = this.settings.contactShadowsEnabled
+    const contactRgb = this.settings.contactShadowsEnabled && this.stageEnabled("contact")
       ? bloomRgb.mul(this.createContactShadowNode(depthTex))
       : bloomRgb;
     const bounceRgb = this.bounceEnabled
