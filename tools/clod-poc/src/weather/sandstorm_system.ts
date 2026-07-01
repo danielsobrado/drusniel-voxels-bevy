@@ -9,6 +9,12 @@ import { SANDSTORM_PARTICLE_COUNT } from "./rain_constants.js";
 import { DEFAULT_SANDSTORM_WEATHER_SETTINGS } from "./rain_defaults.js";
 import { createSandstormGeometry } from "./rain_geometry.js";
 import type { SandstormWeatherOptions, SandstormWeatherSettings, SandstormWeatherStats } from "./rain_types.js";
+import { placeCameraFacingBillboard } from "./weather_camera_billboard.js";
+import { applyWindWeatherToMaterials, clampWindWeatherSettings, isWeatherVisible } from "./weather_settings.js";
+
+const HAZE_DISTANCE = 1.2;
+const HAZE_WIDTH_SCALE = 0.56;
+const HAZE_HEIGHT_SCALE = 0.56;
 
 export class SandstormWeatherSystem {
   private readonly group = new THREE.Group();
@@ -44,17 +50,9 @@ export class SandstormWeatherSystem {
   }
 
   applySettings(settings: SandstormWeatherSettings): void {
-    this.settings = {
-      enabled: settings.enabled,
-      intensity: THREE.MathUtils.clamp(settings.intensity, 0, 1.6),
-      windX: THREE.MathUtils.clamp(settings.windX, -5, 5),
-      windZ: THREE.MathUtils.clamp(settings.windZ, -5, 5),
-    };
-    this.group.visible = this.settings.enabled && this.settings.intensity > 0.001;
-    for (const material of [this.sandMaterial, this.hazeMaterial]) {
-      material.setIntensity(this.settings.intensity);
-      material.setWind(this.settings.windX, this.settings.windZ);
-    }
+    this.settings = clampWindWeatherSettings(settings);
+    this.group.visible = isWeatherVisible(this.settings);
+    applyWindWeatherToMaterials(this.settings, [this.sandMaterial, this.hazeMaterial]);
   }
 
   update(deltaSeconds: number, elapsedSeconds: number, cameraPosition: THREE.Vector3): void {
@@ -66,11 +64,15 @@ export class SandstormWeatherSystem {
     this.sandMaterial.setTime(elapsedSeconds);
     this.hazeMaterial.setTime(elapsedSeconds);
 
-    this.camera.getWorldDirection(this.cameraDirection);
-    this.hazeMesh.position.copy(cameraPosition).addScaledVector(this.cameraDirection, 1.2);
-    this.hazeMesh.quaternion.copy(this.camera.quaternion);
-    const height = 2 * 1.2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5);
-    this.hazeMesh.scale.set(height * this.camera.aspect * 0.56, height * 0.56, 1);
+    placeCameraFacingBillboard({
+      camera: this.camera,
+      mesh: this.hazeMesh,
+      cameraPosition,
+      distance: HAZE_DISTANCE,
+      widthScale: HAZE_WIDTH_SCALE,
+      heightScale: HAZE_HEIGHT_SCALE,
+      scratchDirection: this.cameraDirection,
+    });
   }
 
   getStats(): SandstormWeatherStats {
