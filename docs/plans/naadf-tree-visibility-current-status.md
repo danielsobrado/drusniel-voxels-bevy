@@ -9,16 +9,9 @@ Scope: `tools/clod-poc`
 
 Implemented through `tools/clod-poc/src/gpu/wgsl_modules.ts` and covered by `tools/clod-poc/src/gpu/wgsl_modules.test.ts`.
 
-The composed tree-ring WGSL now performs terrain visibility rejection after terrain/hydrology height is known and before:
+The composed tree-ring WGSL now performs camera terrain-visibility rejection after shadow-caster appends and before visible appends.
 
-- normal sampling;
-- species selection;
-- scale selection;
-- LOD selection;
-- visible appends;
-- shadow appends.
-
-This is still per-slot rejection, not page-level dispatch reduction.
+This is still per-slot visible-list rejection, not page-level dispatch reduction.
 
 ### TVIS-002 — Config gate
 
@@ -103,42 +96,55 @@ disabled
 
 ### TVIS-007 — Pre-generation culling
 
-Current state: **early per-slot rejection plus tested CPU-side cluster camera-visibility mask foundation**, not true GPU compacted page dispatch.
+Current state: **visible-list per-slot rejection plus tested CPU-side cluster camera-visibility mask foundation**, not true GPU compacted page dispatch.
 
 Implemented foundation:
 
 - `tools/clod-poc/src/trees/tree_ring_cluster_visibility.ts`
 - `tools/clod-poc/src/trees/tree_ring_cluster_visibility.test.ts`
+- `tools/clod-poc/scripts/wire-tree-visible-cluster-mask-gpu.mjs`
 
 What is done:
 
-- terrain-hidden GPU tree slots return before species/scale/LOD/appends;
-- CPU/GPU debug validation now follows the same early-rejection order;
-- shadow and visible lists both skip terrain-hidden slots for the existing per-slot cull;
+- terrain-hidden GPU tree slots still generate shadow casters, then skip visible appends;
+- CPU/GPU debug validation follows the same visible-list rejection order;
 - a conservative tree-ring camera-visibility mask can be built from the shared vegetation visibility provider;
 - the cluster mask keeps unknown/missing terrain visible;
 - a cluster is hidden only when every representative probe is terrain-hidden;
 - representative probes include the nearest cluster point, center, and corners, not only the center;
 - the cluster mask is stored as `Uint32Array` entries so it can be uploaded directly to a WGSL `array<u32>` storage buffer;
-- utility lookup maps tree-ring slots back to their cluster visibility.
+- utility lookup maps tree-ring slots back to their cluster visibility;
+- a deterministic local script can wire the mask into the GPU visible-list path only.
 
 Important constraint:
 
-- The cluster camera-visibility mask must **never** gate shadow caster generation. It is a camera occlusion result, so using it to skip the whole `process_tree_slot` path would incorrectly remove camera-hidden shadow casters. Future GPU wiring must apply the mask only to the visible-list path, or split visible and shadow generation into separate paths.
+- The cluster camera-visibility mask must **never** gate shadow caster generation. It is a camera occlusion result, so using it to skip the whole `process_tree_slot` path would incorrectly remove camera-hidden shadow casters. GPU wiring must apply the mask only to the visible-list path, or split visible and shadow generation into separate paths.
 
-What is not done:
+Current local wiring command:
+
+```bash
+cd tools/clod-poc
+npm run trees:wire-visible-cluster-mask
+npm run typecheck
+npm test
+```
+
+What is not done on `main` until that wiring command is applied locally:
+
+- cluster mask entries are not uploaded to the compute shader yet;
+- the compute shader does not yet read a cluster mask before visible-list work.
+
+What remains architecturally pending even after that command:
 
 - GPU dispatch still covers the full tree ring slot grid;
 - `gpuCandidateCount` may not drop yet;
-- cluster mask entries are not uploaded to the compute shader yet;
-- the compute shader does not yet read a cluster mask before visible-list work;
 - there is no compacted cluster dispatch yet.
 
 ## Remaining architectural work
 
 ### TVIS-007 next step
 
-Upload and consume the cluster camera-visibility mask in the GPU tree-ring path, but only for visible-list generation.
+Apply and validate the visible-list-only cluster mask GPU wiring locally, then commit the generated diff if tests pass.
 
 Target shape:
 
@@ -153,8 +159,7 @@ CPU/NAADF visibility provider
 
 Acceptance:
 
-- hidden cluster count is reported;
-- visible-list work is skipped for hidden clusters;
+- visible-list work is skipped for hidden visible clusters;
 - shadow caster generation is not gated by the camera-visibility mask;
 - later, visible candidate work drops when dispatch becomes cluster-compacted;
 - unknown/missing data keeps clusters visible;
