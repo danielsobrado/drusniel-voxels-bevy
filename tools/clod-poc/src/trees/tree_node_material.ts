@@ -39,6 +39,12 @@ import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { bakeBarkTextures, type BarkTextures } from "../textures/barkSynth.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
+import {
+  TREE_RING_CELL_SIZE_M,
+  TREE_RING_JITTER_X_SALT,
+  TREE_RING_JITTER_Z_SALT,
+  TREE_RING_YAW_SALT,
+} from "./tree_ring_placement.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -351,7 +357,7 @@ export function createTreeRingNodeMaterialHandle(
   const uMidDistance = uniform(settings.distanceM * settings.lod.midFraction);
   const uFarDistance = uniform(settings.distanceM * settings.lod.farFraction);
   const uBandDistance = uniform(settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0);
-  const uCellSize = uniform(3.4);
+  const uCellSize = uniform(TREE_RING_CELL_SIZE_M);
   const uSeed = uniform(settings.seed);
   const uLodIndex = uniform(TREE_LODS.indexOf(lod));
   const uLight = uniform(lighting.sunDirection.clone().normalize());
@@ -566,5 +572,4 @@ function applyWindUniforms(wind: TreeWindNodeUniforms, settings: TreeSettings): 
   wind.uWindSpeed.value = settings.wind.speed;
   wind.uGust.value = settings.wind.gustStrength * enabled;
   wind.uTrunkSway.value = settings.wind.trunkSwayStrength * enabled;
-  wind.uLeafFlutter.value = settings.wind.leafFlutterStrength * enabled;
-}
+  wind.uLeafFlutter.value = settings.wind.leafFlutterStreng

@@ -78,6 +78,42 @@ A second client was connected to the dev server on 5180 during the run
   observation — that view has near-canopy overdraw this camera pose does not.
   A hero-forest capture needs a fixed dense-forest camera pose.
 
+## Shadow Budget Results (`treeShadowMaxLod` none vs near, world 8)
+
+Two passes: one with debug counts (`treeGpuCounts=1`, readback on) and one
+without (normal gameplay). FPS derived from `1000 / frameMs p50`.
+
+| Run | Readback | FPS p50 | Frame ms p50 | Frame ms p95 | Frame ms avg | Render ms p95 | Top phase p95 | Shadow casters avg |
+|---|---|---:|---:|---:|---:|---:|---|---:|
+| shadow none | on | ~278 | 3.60 | 6.90 | 4.04 | 5.30 | renderMs 5.30 | 0 |
+| shadow near | on | ~58 | 17.10 | 22.60 | 18.35 | 4.60 | vegetationTotalMs 12.10 | 473 |
+| shadow none | off | ~244 | 4.10 | 12.20 | 6.66 | 7.80 | renderMs 7.80 | n/a |
+| shadow near | off | ~238 | 4.20 | 10.70 | 5.59 | 5.60 | renderMs 5.60 | n/a |
+
+Artifacts: `perf-runs/shadow-{none,near}-2026-07-01` (counts on) and
+`perf-runs/shadow-{none,near}-nocounts-2026-07-01` (counts off).
+
+### Findings
+
+- **`treeShadowMaxLod=none` produces 0 shadow casters** (confirmed with
+  readback on). Working as intended.
+- **In normal gameplay (readback off), shadow LOD none vs near is NOT a
+  meaningful cost at this view**: 4.10 vs 4.20 ms p50, tree CPU sub-phase
+  0.1–0.2 ms either way. This **corrects an earlier hypothesis** that
+  view-independent shadows dominate tree cost — not supported by clean data
+  here.
+- **The 5× slowdown (3.6 → 17.1 ms) appeared only with `treeGpuCounts=1`.**
+  The extra ~13 ms landed in `vegetationTotalMs` (12.1) and `statsSyncMs` (6.9),
+  not the GPU `renderMs`. So it is a **debug-readback artifact**, worst when
+  shadow casters exist — not a real gameplay shadow cost.
+  - Practical caveat for the HUD visible-count instrument: enabling readback to
+    see live counts costs ~13 ms/frame here when tree shadows are on. Use it as
+    a diagnostic, not a normal-play setting. The readback-with-shadows CPU path
+    is itself a possible optimization target (debug-only).
+- Tree cost at this default world=8 view remains small; the machine also showed
+  run-to-run p95 variance (a second client was on the dev server), so treat p95
+  as soft.
+
 ## Not captured yet (and why)
 
 - **Quality-preset rows** (`?quality=ultra|balanced|perf|potato`), **FPS via
@@ -85,9 +121,8 @@ A second client was connected to the dev server on 5180 during the run
   by this harness pass.
 - **Debug-count rows** (visible/candidates/accepted/shadow casters): need
   `treeGpuCounts=1` (readback on). Not enabled in this run.
-- **Shadow-budget rows** (`treeShadowMaxLod=none|near|mid|far`): not run.
-  This is the highest-value next measurement given the view-independent shadow
-  hypothesis.
+- **Shadow-budget rows** for `mid`/`far`: only `none` and `near` captured
+  (see Shadow Budget Results above).
 - **CPU fallback control** (`treeGpu=0`, `treeGpuForceCpu=1`) and
   **CPU/GPU validation** (`treeGpuValidate=1`): not run.
 
@@ -98,13 +133,17 @@ A second client was connected to the dev server on 5180 during the run
 | Is the WebGPU tree path active? | Yes — `ring:300`, RTX 4080, no errors. |
 | Tree cost at default world=8 view | +0.4 ms p50 / +2.2 ms p95 vs trees-off. Modest. |
 | Does maxVisible / distance tuning help? | Inconclusive — sweep was noisy (GPU contention). Re-run needed. |
-| Does shadow LOD gating reduce cost? | Not measured yet. Highest-value next run. |
-| Should we tune preset values now? | No — not on this data. Get a clean hero-forest capture + shadow sweep first. |
+| Does shadow LOD gating reduce cost? | Not at this view in normal gameplay (none≈near, ~0). The big shadow delta was a `treeGpuCounts=1` readback artifact. |
+| Should we tune preset values now? | No — not on this data. Trees are cheap at this view; get a dense hero-forest capture before tuning. |
 
 ## Follow-up Actions
 
 - Re-run the `maxVisible`/`treeDistance` sweep on a quiet machine (close other
   tabs on 5180) to get monotonic, trustworthy deltas.
-- Capture a fixed **dense-forest** camera pose to measure the real hero cost.
-- Run the shadow-budget sweep with `treeGpuCounts=1` to test whether shadow
-  casters (view-independent) dominate tree cost.
+- Capture a fixed **dense-forest** camera pose to measure the real hero cost —
+  this is now the top priority, since trees are cheap at the default view and
+  shadows don't move gameplay frame time here.
+- Investigate the `treeGpuCounts=1` (readback) CPU cost with shadow casters
+  (~13 ms/frame): the count-visible-lists path stalls `vegetationTotalMs` /
+  `statsSyncMs`. Debug-only, but a clean-up target if we want a cheap live HUD
+  count.

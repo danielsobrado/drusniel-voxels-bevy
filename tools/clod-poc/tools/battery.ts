@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   borderOceanCameraForWorld,
   parseBorderOceanSceneConfig,
@@ -36,6 +36,68 @@ const INFINITE_ISLANDS_DIR = "shots/infinite-islands";
 const INFINITE_ISLANDS_SHOT = `${INFINITE_ISLANDS_DIR}/walk.png`;
 const INFINITE_ISLANDS_STATS = `${INFINITE_ISLANDS_DIR}/walk-stats.json`;
 const INFINITE_ISLANDS_FRAME_MS_P95_MAX = 8;
+const DEFAULT_BASE_URL = "http://127.0.0.1:5173/";
+const SERVER_TIMEOUT_MS = 90_000;
+const SERVER_POLL_MS = 500;
+
+process.env["CLOD_POC_BASE_URL"] ??= DEFAULT_BASE_URL;
+
+const isWindows = process.platform === "win32";
+const npxBin = isWindows ? "npx.cmd" : "npx";
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function isServerReady(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: "GET" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function spawnVite(): ChildProcess {
+  const child = spawn(npxBin, ["vite", "--config", "vite.acceptance.config.ts"], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: isWindows,
+  });
+  child.stdout?.on("data", (chunk) => process.stdout.write(`[vite] ${chunk}`));
+  child.stderr?.on("data", (chunk) => process.stderr.write(`[vite] ${chunk}`));
+  child.on("error", (error) => {
+    console.error("[battery:vite] failed to start:", error.message);
+  });
+  return child;
+}
+
+async function ensureServer(): Promise<ChildProcess | null> {
+  const baseUrl = process.env["CLOD_POC_BASE_URL"] ?? DEFAULT_BASE_URL;
+  if (await isServerReady(baseUrl)) return null;
+
+  console.log(`[battery] starting Vite at ${baseUrl}`);
+  const server = spawnVite();
+  const deadline = Date.now() + SERVER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (server.exitCode !== null) throw new Error(`Vite exited before becoming ready with code ${server.exitCode}`);
+    if (await isServerReady(baseUrl)) return server;
+    await delay(SERVER_POLL_MS);
+  }
+
+  stopChildTree(server);
+  throw new Error(`Timed out waiting for Vite at ${baseUrl}`);
+}
+
+function stopChildTree(child: ChildProcess | null): void {
+  if (!child || child.exitCode !== null || !child.pid) return;
+  if (isWindows) {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+    return;
+  }
+  child.kill("SIGTERM");
+}
 
 function run(label: string, args: string[]): void {
   console.log(`[battery] ${label}`);
@@ -270,9 +332,13 @@ function main(): void {
   console.log("[battery] ok");
 }
 
+let server: ChildProcess | null = null;
 try {
+  server = await ensureServer();
   main();
 } catch (error) {
   console.error("[battery] FAILED:", error instanceof Error ? error.message : error);
-  process.exit(1);
+  process.exitCode = 1;
+} finally {
+  stopChildTree(server);
 }

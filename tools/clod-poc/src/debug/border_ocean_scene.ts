@@ -3,7 +3,6 @@ import type { PlayerConfig } from "../player_controller.js";
 import type { WaterField } from "../water/waterField.js";
 import { WaterField as WaterFieldImpl } from "../water/waterField.js";
 import { parseWaterConfig } from "../water/waterConfig.js";
-import waterYaml from "../../config/water.yaml?raw";
 import type { OceanSampler } from "../water/ocean_service.js";
 import {
   countDeepOceanTransitionGapVertices,
@@ -246,7 +245,7 @@ export function probePlayableOceanOutside(sampler: OceanSampler, worldCells: num
 }
 
 export function probeCliffDryAboveSea(seaLevel: number, worldCells: number): number {
-  const field = new WaterFieldImpl(parseWaterConfig(waterYaml), { surfaceHeight: () => seaLevel + 24 }, null, worldCells);
+  const field = new WaterFieldImpl(parseWaterConfig(""), { surfaceHeight: () => seaLevel + 24 }, null, worldCells);
   field.setShoreSurfBand({ enabled: true, startDistance: 48, fullSurfDistance: 16, level: seaLevel, maxShallowDepth: 2.5 });
   const sample = field.sample(4, worldCells * 0.5);
   return sample.depth > 0 ? 0 : 1;
