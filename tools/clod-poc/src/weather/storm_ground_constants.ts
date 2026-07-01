@@ -1,0 +1,9 @@
+export const STRIKE_COUNT = 32;
+export const IMPACT_ROOT_COUNT = 6;
+export const STRIKE_AREA = 48;
+export const REPOSITION_DISTANCE = 8;
+export const SURFACE_OFFSET = 0.09;
+export const IMPACT_SURFACE_OFFSET = 0.045;
+export const WATER_DEPTH_EPSILON = 0.035;
+export const WATER_MASK_EPSILON = 0.05;
+export const DEFAULT_SEED = 0x57a4d0c7;
