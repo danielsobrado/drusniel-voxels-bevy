@@ -5,6 +5,7 @@ export type PostFxStage =
   | "bounce"
   | "colorScript"
   | "contact"
+  | "froxels"
   | "gtao"
   | "taa";
 
@@ -20,6 +21,7 @@ const STAGES: readonly PostFxStage[] = [
   "bounce",
   "colorScript",
   "contact",
+  "froxels",
   "gtao",
   "taa",
 ] as const;
@@ -27,6 +29,7 @@ const STAGES: readonly PostFxStage[] = [
 const STAGE_ALIASES = new Map<string, PostFxStage>([
   ["aerial", "aerial"],
   ["haze", "aerial"],
+  ["hillaire", "aerial"],
   ["autoexposure", "autoExposure"],
   ["exposure", "autoExposure"],
   ["bloom", "bloom"],
@@ -39,6 +42,10 @@ const STAGE_ALIASES = new Map<string, PostFxStage>([
   ["contact", "contact"],
   ["contactshadow", "contact"],
   ["contactshadows", "contact"],
+  ["froxel", "froxels"],
+  ["froxels", "froxels"],
+  ["volumetrics", "froxels"],
+  ["volumetricfog", "froxels"],
   ["gtao", "gtao"],
   ["ao", "gtao"],
   ["ambientocclusion", "gtao"],
