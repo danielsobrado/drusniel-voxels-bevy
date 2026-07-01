@@ -1,0 +1,92 @@
+import { DEFAULT_CAUSTICS_CONFIG } from "./causticsConfig.js";
+import { cloneHydrologyConfig } from "./hydrologyConfig.js";
+import type { WaterConfig, WaterVisualConfig } from "./water_config_types.js";
+import { WATER_DEBUG_MODES } from "./water_config_types.js";
+
+export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
+  shallowColor: [0.00, 0.32, 0.55],
+  deepColor: [0.00, 0.025, 0.12],
+  foamColor: [0.90, 0.95, 0.96],
+  alpha: 0.90,
+  rippleCycle: 0.07,
+  fresnelPower: 5.0,
+  rippleAmp: 1.25,
+  rippleSpeed: 0.52,
+  rippleScaleA: 0.16,
+  rippleScaleB: 0.105,
+  rippleStrengthA: 0.24,
+  rippleStrengthB: 0.16,
+  rippleLoopDistance: 22.0,
+  lakeBreeze: [0.20, 0.07],
+  shoreFoamStart: 0.03,
+  shoreFoamEnd: 0.16,
+  maxDepthForColor: 5.0,
+  foam: {
+    noiseScale: 0.075,
+    shoreStrength: 0.52,
+    riverStrength: 0.38,
+    speedStart: 0.25,
+    speedEnd: 1.0,
+    dropStart: 0.5,
+    dropEnd: 2.0,
+  },
+  fresnel: {
+    base: 0.045,
+    power: 4.2,
+    normalFlatten: 0.55,
+  },
+  color: {
+    depthScale: 5.0,
+    turbidity: 0.10,
+  },
+  refraction: {
+    enabled: true,
+    strength: 0.055,
+    depthValidationBias: 0.02,
+    absorptionR: 0.42,
+    absorptionG: 0.135,
+    absorptionB: 0.095,
+    turbidityStrength: 0.032,
+    maxThickness: 8.0,
+  },
+  reflection: {
+    mode: "fake",
+    ssrEnabled: false,
+    maxSteps: 18,
+    stepScale: 0.09,
+    edgeFadeStart: 1.0,
+    edgeFadeEnd: 0.82,
+    skyFallbackStrength: 0.78,
+    terrainFallbackStrength: 0.12,
+  },
+  depthWrite: false,
+};
+
+export const DEFAULT_WATER_CONFIG: WaterConfig = {
+  enabled: true,
+  source: "hydrology",
+  cellsPerLevel: 128,
+  cellSizes: [1.5, 3.0, 6.0, 12.0, 24.0, 48.0],
+  snapCells: 2,
+  drySentinelDepth: 2.0,
+  fakeBodies: {
+    carveTerrain: true,
+    lakes: [
+      { center: [0, 0], centerNorm: [0.50, 0.50], radius: [42, 30], levelOffset: 1.2 },
+      { center: [0, 0], centerNorm: [0.25, 0.72], radius: [32, 24], levelOffset: 1.0 },
+    ],
+    rivers: [
+      {
+        points: [],
+        pointsNorm: [[0.16, 0.34], [0.30, 0.42], [0.48, 0.48], [0.66, 0.57], [0.84, 0.66]],
+        width: 9.0,
+        levelOffset: 0.8,
+        downstreamDrop: 3.0,
+      },
+    ],
+  },
+  hydrology: cloneHydrologyConfig(),
+  visual: { ...DEFAULT_WATER_VISUAL },
+  caustics: { ...DEFAULT_CAUSTICS_CONFIG },
+  debug: { mode: WATER_DEBUG_MODES.final, clipmapTint: false, wireframe: false },
+};
