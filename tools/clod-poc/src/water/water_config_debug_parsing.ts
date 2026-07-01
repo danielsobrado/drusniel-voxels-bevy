@@ -1,4 +1,4 @@
-import type { WaterDebugConfig } from "./waterConfig.js";
+import type { WaterDebugConfig } from "./water_config_types.js";
 import { readBoolean, readNumber, recordFrom } from "./water_config_readers.js";
 
 export function readWaterDebugConfig(value: unknown, defaults: WaterDebugConfig): WaterDebugConfig {
