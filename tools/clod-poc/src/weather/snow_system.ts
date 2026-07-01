@@ -5,6 +5,7 @@ import { SNOW_FLAKE_COUNT } from "./rain_constants.js";
 import { DEFAULT_SNOW_WEATHER_SETTINGS } from "./rain_defaults.js";
 import { createSnowGeometry } from "./rain_geometry.js";
 import type { SnowWeatherOptions, SnowWeatherSettings, SnowWeatherStats } from "./rain_types.js";
+import { applyWindWeatherToMaterials, clampWindWeatherSettings, isWeatherVisible } from "./weather_settings.js";
 
 export class SnowWeatherSystem {
   private readonly group = new THREE.Group();
@@ -29,15 +30,9 @@ export class SnowWeatherSystem {
   }
 
   applySettings(settings: SnowWeatherSettings): void {
-    this.settings = {
-      enabled: settings.enabled,
-      intensity: THREE.MathUtils.clamp(settings.intensity, 0, 1.6),
-      windX: THREE.MathUtils.clamp(settings.windX, -5, 5),
-      windZ: THREE.MathUtils.clamp(settings.windZ, -5, 5),
-    };
-    this.group.visible = this.settings.enabled && this.settings.intensity > 0.001;
-    this.snowMaterial.setIntensity(this.settings.intensity);
-    this.snowMaterial.setWind(this.settings.windX, this.settings.windZ);
+    this.settings = clampWindWeatherSettings(settings);
+    this.group.visible = isWeatherVisible(this.settings);
+    applyWindWeatherToMaterials(this.settings, [this.snowMaterial]);
   }
 
   update(deltaSeconds: number, elapsedSeconds: number, cameraPosition: THREE.Vector3): void {
