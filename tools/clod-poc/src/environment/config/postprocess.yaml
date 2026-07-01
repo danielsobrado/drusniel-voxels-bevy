@@ -7,13 +7,13 @@ postprocess:
   saturation: 1.05
   vignette: 0.0
   debug_mode: output
-  tone_mapping: aces
+  tone_mapping: agx
 
   bloom:
     enabled: true
-    threshold: 0.85
-    strength: 0.18
-    radius: 0.35
+    threshold: 0.28
+    strength: 0.45
+    radius: 1.5
 
   fxaa:
     enabled: true
@@ -21,7 +21,7 @@ postprocess:
     subpixel_blend: 0.75
 
   taa:
-    enabled: false
+    enabled: true
     history_weight: 0.88
     depth_threshold: 0.0025
     sharpen: 0.06
