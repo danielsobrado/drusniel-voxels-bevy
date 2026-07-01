@@ -21,7 +21,6 @@ import type { PostFxAtmosphereSettings, PostFxFroxelDebugMode } from "./postfx_a
 import type { PostFxFroxelVolumeNodeInput } from "./postfx_froxel_volume.js";
 import type { PostFxHillaireLutNodeInput } from "./postfx_hillaire_luts.js";
 import { parsePostFxStageFlags, stageAllowed } from "./postfx_stage_flags.js";
-import { searchParams } from "./webgpu_postprocess_config.js";
 
 type TslAny = any;
 const tslMix = mix as unknown as (a: TslAny, b: TslAny, amount: TslAny) => TslAny;
@@ -39,8 +38,13 @@ export interface HillaireFroxelAerialNodeInput {
   hillaireLuts?: PostFxHillaireLutNodeInput | null;
 }
 
-export function hillaireAerialAllowedByStageFlags(): boolean {
-  return stageAllowed(parsePostFxStageFlags(searchParams() ?? ""), "aerial");
+function currentSearchParams(): URLSearchParams | null {
+  if (typeof globalThis.location === "undefined") return null;
+  return new URLSearchParams(globalThis.location.search);
+}
+
+export function hillaireAerialAllowedByStageFlags(search: string | URLSearchParams | null = currentSearchParams()): boolean {
+  return stageAllowed(parsePostFxStageFlags(search ?? ""), "aerial");
 }
 
 function phaseHenyeyGreenstein(cosTheta: TslAny, g: number): TslAny {
