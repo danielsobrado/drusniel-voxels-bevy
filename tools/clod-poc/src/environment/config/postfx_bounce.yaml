@@ -1,0 +1,9 @@
+postfx_bounce:
+  enabled: false
+  strength: 0.16
+  radius_m: 0.55
+  max_distance_m: 180.0
+  depth_tolerance_m: 1.8
+  min_uv_radius: 0.004
+  max_uv_radius: 0.07
+  taps: 8
