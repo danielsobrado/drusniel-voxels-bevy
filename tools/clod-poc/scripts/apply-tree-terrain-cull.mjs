@@ -7,6 +7,17 @@ const root = resolve(here, "..");
 
 const checks = [
   {
+    name: "shared vegetation visibility provider",
+    path: "src/vegetation/vegetation_visibility_provider.ts",
+    needles: [
+      "export interface VegetationVisibilityProvider",
+      "sampleTerrainVisibility",
+      "unknown_kept",
+      "terrain_hidden",
+      "near_forced_visible",
+    ],
+  },
+  {
     name: "tree config terrain visibility settings",
     path: "src/trees/tree_config.ts",
     needles: [
