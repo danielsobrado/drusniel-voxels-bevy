@@ -53,7 +53,11 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     nextTreeStats.gpuCandidateCount !== treeStats.gpuCandidateCount ||
     nextTreeStats.gpuAcceptedCount !== treeStats.gpuAcceptedCount ||
     nextTreeStats.gpuVisibleCount !== treeStats.gpuVisibleCount ||
-    nextTreeStats.gpuOverflowed !== treeStats.gpuOverflowed)
+    nextTreeStats.gpuShadowCasterCount !== treeStats.gpuShadowCasterCount ||
+    nextTreeStats.gpuOverflowed !== treeStats.gpuOverflowed ||
+    nextTreeStats.gpuShadowOverflowed !== treeStats.gpuShadowOverflowed ||
+    nextTreeStats.gpuShowCounts !== treeStats.gpuShowCounts ||
+    submitMsChanged(nextTreeStats.gpuDispatchMs, treeStats.gpuDispatchMs))
   ) {
     input.setTreeStats(nextTreeStats);
     input.state.treeTotal = formatTreeTotalDisplay(nextTreeStats);
