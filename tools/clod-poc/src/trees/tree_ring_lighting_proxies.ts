@@ -1,26 +1,33 @@
-import type { TreeLod, TreeSettings, TreeSpeciesId } from "./tree_config.js";
-import { TREE_LODS, TREE_SPECIES } from "./tree_config.js";
-import { defaultTreeTerrainSampler, type TreeTerrainSampler } from "./tree_instances.js";
-import { isTreeClusterTerrainOccluded } from "./tree_terrain_occlusion.js";
-import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
-import { treeLodDistances, treeLodRing } from "./tree_system_lod_math.js";
 import {
   TREE_GPU_RING_CELL,
   TREE_GPU_RING_GROUP_COUNT,
-  treeGpuRingGrid,
   treeGpuRingGroupIndex,
+  treeGpuRingGrid,
   treeGpuRingSlotCount,
 } from "../gpu/tree_ring_compute.js";
+import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
+import {
+  defaultTreeTerrainSampler,
+  type TreeTerrainSampler,
+} from "./tree_instances.js";
+import {
+  treeAcceptMask,
+  treeLodRing,
+  treePcg2d,
+  treeRingAcceptParams,
+  treeRingLodParams,
+  treeWorldCellFromSlot,
+} from "./tree_ring_math.js";
 import {
   TREE_RING_SHADOW_CASCADE_COUNT,
-  treeRingShadowCasterCascadeIndices,
   treeRingShadowCasterGroupCount,
   treeRingShadowCasterGroupIndex,
-} from "../gpu/tree_ring_shadows.js";
-import { treeAcceptMask, treeRingAcceptParams } from "./tree_ring_acceptance.js";
-import { treePcg2d } from "./tree_ring_hash.js";
+  treeRingShadowCasterCascadeIndices,
+} from "./tree_ring_shadow_casters.js";
+import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
+import { isTreeClusterTerrainOccluded } from "./tree_terrain_occlusion.js";
 
-export const TREE_GPU_RING_LIGHTING_PROXY_CAP = 2048;
+export const TREE_GPU_RING_LIGHTING_PROXY_CAP = 2000;
 
 export interface TreeRingLightingProxy {
   x: number;
@@ -296,7 +303,7 @@ function treeRingTerrainHiddenForValidation(input: {
 
 function selectRingSpecies(settings: TreeSettings, roll: number): TreeSpeciesId | null {
   const weights = TREE_SPECIES.map((species) => ({ species, weight: speciesWeight(settings, species) }));
-  const total = weights.reduce((sum, entry) => sum + entry.weight, 0);
+  const total = weights.reduce((sum, entry) => entry.weight + sum, 0);
   if (total <= 0) return null;
   let cursor = roll * total;
   for (const entry of weights) {
@@ -329,27 +336,4 @@ function treeRingPointInFrustum(
 function speciesWeight(settings: TreeSettings, species: TreeSpeciesId): number {
   const config = settings.species[species];
   return config.enabled ? Math.max(0, config.weight) : 0;
-}
-
-function treeWorldCellFromSlot(slot: number, grid: number, cellSize: number, centerX: number, centerZ: number): [number, number] {
-  const safeGrid = Math.max(1, Math.floor(grid));
-  const sx = slot % safeGrid;
-  const sz = Math.floor(slot / safeGrid);
-  const camCellX = centerX / Math.max(cellSize, 0.001);
-  const camCellZ = centerZ / Math.max(cellSize, 0.001);
-  return [
-    Math.round((camCellX - sx) / safeGrid) * safeGrid + sx,
-    Math.round((camCellZ - sz) / safeGrid) * safeGrid + sz,
-  ];
-}
-
-function treeRingLodParams(settings: TreeSettings): { near: number; mid: number; far: number; radius: number; band: number } {
-  const lod = treeLodDistances(settings);
-  return {
-    near: lod.near,
-    mid: lod.mid,
-    far: lod.far,
-    radius: lod.impostor,
-    band: settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0,
-  };
 }
