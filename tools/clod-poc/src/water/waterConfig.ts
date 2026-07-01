@@ -15,12 +15,11 @@ import { isWaterDebugModeId, riverHasValidPoints } from "./water_config_guards.j
 import { readHydrologyConfig } from "./water_config_hydrology_parsing.js";
 import {
   readBoolean,
-  readColorTuple,
   readNumber,
   readNumberArray,
-  readNumberTuple,
 } from "./water_config_readers.js";
 import { applyRuntimeRiverOverrides } from "./water_config_runtime_overrides.js";
+import { readWaterCausticsConfig, readWaterVisualConfig } from "./water_config_visual_parsing.js";
 
 /** Debug render modes for the water material. */
 export const WATER_DEBUG_MODES = {
@@ -285,17 +284,9 @@ const WATER_RUNTIME_OVERRIDE_OPTIONS = {
 export function parseWaterConfigYaml(source: string): WaterConfig {
   const parsed = load(source) as Record<string, unknown> | undefined;
   const waterRecord = (parsed?.water ?? {}) as Record<string, unknown>;
-  const visual = (waterRecord.visual ?? {}) as Record<string, unknown>;
-  const foam = (visual.foam ?? {}) as Record<string, unknown>;
-  const fresnel = (visual.fresnel ?? {}) as Record<string, unknown>;
-  const color = (visual.color ?? {}) as Record<string, unknown>;
-  const refraction = (visual.refraction ?? {}) as Record<string, unknown>;
-  const reflection = (visual.reflection ?? {}) as Record<string, unknown>;
   const fakeBodies = (waterRecord.fake_bodies ?? waterRecord.fakeBodies ?? {}) as Record<string, unknown>;
   const defaultFakeBodies = DEFAULT_WATER_CONFIG.fakeBodies;
   const hydrology = readHydrologyConfig(waterRecord.hydrology, DEFAULT_WATER_CONFIG.hydrology);
-  const caustics = (waterRecord.caustics ?? {}) as Record<string, unknown>;
-  const causticsDefaults = DEFAULT_CAUSTICS_CONFIG;
 
   const defaultLakes = defaultFakeBodies.lakes;
   const defaultRivers = defaultFakeBodies.rivers;
@@ -306,7 +297,6 @@ export function parseWaterConfigYaml(source: string): WaterConfig {
     ? fakeBodies.rivers.map((river, index) => readRiverBody(river, defaultRivers[index] ?? defaultRivers[0]))
     : defaultRivers.map((river) => readRiverBody(river, river));
 
-  const defaults = DEFAULT_WATER_VISUAL;
   return {
     enabled: readBoolean(waterRecord.enabled, DEFAULT_WATER_CONFIG.enabled),
     source: waterRecord.source === "fake_bodies" ? "fake_bodies" : "hydrology",
@@ -320,75 +310,8 @@ export function parseWaterConfigYaml(source: string): WaterConfig {
       rivers,
     },
     hydrology,
-    visual: {
-      shallowColor: readColorTuple(visual.shallow_color ?? visual.shallowColor, defaults.shallowColor),
-      deepColor: readColorTuple(visual.deep_color ?? visual.deepColor, defaults.deepColor),
-      foamColor: readColorTuple(visual.foam_color ?? visual.foamColor, defaults.foamColor),
-      alpha: readNumber(visual.alpha, defaults.alpha),
-      rippleCycle: readNumber(visual.ripple_cycle ?? visual.rippleCycle, defaults.rippleCycle),
-      fresnelPower: readNumber(visual.fresnel_power ?? visual.fresnelPower, defaults.fresnelPower),
-      rippleAmp: readNumber(visual.ripple_amp ?? visual.rippleAmp, defaults.rippleAmp),
-      rippleSpeed: readNumber(visual.ripple_speed ?? visual.rippleSpeed, defaults.rippleSpeed),
-      rippleScaleA: readNumber(visual.ripple_scale_a ?? visual.rippleScaleA, defaults.rippleScaleA),
-      rippleScaleB: readNumber(visual.ripple_scale_b ?? visual.rippleScaleB, defaults.rippleScaleB),
-      rippleStrengthA: readNumber(visual.ripple_strength_a ?? visual.rippleStrengthA, defaults.rippleStrengthA),
-      rippleStrengthB: readNumber(visual.ripple_strength_b ?? visual.rippleStrengthB, defaults.rippleStrengthB),
-      rippleLoopDistance: readNumber(visual.ripple_loop_distance ?? visual.rippleLoopDistance, defaults.rippleLoopDistance),
-      lakeBreeze: readNumberTuple(visual.lake_breeze ?? visual.lakeBreeze, defaults.lakeBreeze),
-      shoreFoamStart: readNumber(visual.shore_foam_start ?? visual.shoreFoamStart, defaults.shoreFoamStart),
-      shoreFoamEnd: readNumber(visual.shore_foam_end ?? visual.shoreFoamEnd, defaults.shoreFoamEnd),
-      maxDepthForColor: readNumber(visual.max_depth_for_color ?? visual.maxDepthForColor, defaults.maxDepthForColor),
-      foam: {
-        noiseScale: readNumber(foam.noise_scale ?? foam.noiseScale, defaults.foam.noiseScale),
-        shoreStrength: readNumber(foam.shore_strength ?? foam.shoreStrength, defaults.foam.shoreStrength),
-        riverStrength: readNumber(foam.river_strength ?? foam.riverStrength, defaults.foam.riverStrength),
-        speedStart: readNumber(foam.speed_start ?? foam.speedStart, defaults.foam.speedStart),
-        speedEnd: readNumber(foam.speed_end ?? foam.speedEnd, defaults.foam.speedEnd),
-        dropStart: readNumber(foam.drop_start ?? foam.dropStart, defaults.foam.dropStart),
-        dropEnd: readNumber(foam.drop_end ?? foam.dropEnd, defaults.foam.dropEnd),
-      },
-      fresnel: {
-        base: readNumber(fresnel.base, defaults.fresnel.base),
-        power: readNumber(fresnel.power, defaults.fresnel.power),
-        normalFlatten: readNumber(fresnel.normal_flatten ?? fresnel.normalFlatten, defaults.fresnel.normalFlatten),
-      },
-      color: {
-        depthScale: readNumber(color.depth_scale ?? color.depthScale, defaults.color.depthScale),
-        turbidity: readNumber(color.turbidity, defaults.color.turbidity),
-      },
-      refraction: {
-        enabled: readBoolean(refraction.enabled, defaults.refraction.enabled),
-        strength: readNumber(refraction.strength, defaults.refraction.strength),
-        depthValidationBias: readNumber(refraction.depth_validation_bias ?? refraction.depthValidationBias, defaults.refraction.depthValidationBias),
-        absorptionR: readNumber(refraction.absorption_r ?? refraction.absorptionR, defaults.refraction.absorptionR),
-        absorptionG: readNumber(refraction.absorption_g ?? refraction.absorptionG, defaults.refraction.absorptionG),
-        absorptionB: readNumber(refraction.absorption_b ?? refraction.absorptionB, defaults.refraction.absorptionB),
-        turbidityStrength: readNumber(refraction.turbidity_strength ?? refraction.turbidityStrength, defaults.refraction.turbidityStrength),
-        maxThickness: readNumber(refraction.max_thickness ?? refraction.maxThickness, defaults.refraction.maxThickness),
-      },
-      reflection: {
-        mode: reflection.mode === "ssr" ? "ssr" : "fake",
-        ssrEnabled: readBoolean(reflection.ssr_enabled ?? reflection.ssrEnabled, defaults.reflection.ssrEnabled),
-        maxSteps: readNumber(reflection.max_steps ?? reflection.maxSteps, defaults.reflection.maxSteps),
-        stepScale: readNumber(reflection.step_scale ?? reflection.stepScale, defaults.reflection.stepScale),
-        edgeFadeStart: readNumber(reflection.edge_fade_start ?? reflection.edgeFadeStart, defaults.reflection.edgeFadeStart),
-        edgeFadeEnd: readNumber(reflection.edge_fade_end ?? reflection.edgeFadeEnd, defaults.reflection.edgeFadeEnd),
-        skyFallbackStrength: readNumber(reflection.sky_fallback_strength ?? reflection.skyFallbackStrength, defaults.reflection.skyFallbackStrength),
-        terrainFallbackStrength: readNumber(reflection.terrain_fallback_strength ?? reflection.terrainFallbackStrength, defaults.reflection.terrainFallbackStrength),
-      },
-      depthWrite: readBoolean(visual.depth_write ?? visual.depthWrite, defaults.depthWrite),
-    },
-    caustics: {
-      enabled: readBoolean(caustics.enabled, causticsDefaults.enabled),
-      gain: readNumber(caustics.gain, causticsDefaults.gain),
-      depthFade: readNumber(caustics.depth_fade ?? caustics.depthFade, causticsDefaults.depthFade),
-      focalDepth: readNumber(caustics.focal_depth ?? caustics.focalDepth, causticsDefaults.focalDepth),
-      sunGateStart: readNumber(caustics.sun_gate_start ?? caustics.sunGateStart, causticsDefaults.sunGateStart),
-      sunGateEnd: readNumber(caustics.sun_gate_end ?? caustics.sunGateEnd, causticsDefaults.sunGateEnd),
-      flowAdvection: readNumber(caustics.flow_advection ?? caustics.flowAdvection, causticsDefaults.flowAdvection),
-      scale: readNumber(caustics.scale, causticsDefaults.scale),
-      speed: readNumber(caustics.speed, causticsDefaults.speed),
-    },
+    visual: readWaterVisualConfig(waterRecord.visual, DEFAULT_WATER_VISUAL),
+    caustics: readWaterCausticsConfig(waterRecord.caustics, DEFAULT_CAUSTICS_CONFIG),
     debug: {
       mode: readNumber((waterRecord.debug as Record<string, unknown> | undefined)?.mode, DEFAULT_WATER_CONFIG.debug.mode) as WaterDebugModeId,
       clipmapTint: readBoolean((waterRecord.debug as Record<string, unknown> | undefined)?.clipmap_tint, DEFAULT_WATER_CONFIG.debug.clipmapTint),
