@@ -1,4 +1,5 @@
 import type { TreeStats } from "./tree_system.js";
+import type { TreeSystemGpuStatus } from "./tree_system_stats.js";
 
 export type TreeTotalDisplay = number | string;
 
@@ -8,16 +9,34 @@ export function formatTreeTotalDisplay(treeStats: TreeStats | null): TreeTotalDi
 }
 
 export function formatTreeInfoLine(treesEnabled: boolean, totalTrees: TreeTotalDisplay, treeStats: TreeStats | null): string {
+  const runtimePath = formatTreeRuntimePath(treesEnabled, treeStats);
   if (treeStats && treeGpuCountsHidden(treeStats)) {
-    return `trees: ${treesEnabled ? "enabled" : "disabled"} gpu=${treeStats.gpuStatus} counts=off`;
+    return `trees: ${runtimePath} counts=off`;
   }
-  return `trees: ${treesEnabled ? "enabled" : "disabled"} ${formatTreeTotal(totalTrees)} trees` +
+  return `trees: ${runtimePath} ${formatTreeTotal(totalTrees)} trees` +
     (treeStats
       ? ` patches=${treeStats.visiblePatches}/${treeStats.patches}` +
         ` lod n/m/f/i=${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}` +
         formatTreeImpostorStatus(treeStats) +
         formatTreeGpuStats(treeStats)
       : "");
+}
+
+export function formatTreeRuntimePath(treesEnabled: boolean, treeStats: TreeStats | null): string {
+  if (!treesEnabled) return "disabled";
+  if (!treeStats) return "unknown";
+  return formatTreeGpuStatusPath(treeStats.gpuStatus);
+}
+
+export function formatTreeGpuStatusPath(status: TreeSystemGpuStatus): string {
+  switch (status) {
+    case "ring": return "gpu-ring";
+    case "disabled": return "cpu-patches";
+    case "fallback-cpu": return "fallback-cpu";
+    case "unsupported": return "unsupported";
+    case "error": return "error";
+    default: return "unknown";
+  }
 }
 
 function treeGpuCountsHidden(treeStats: TreeStats): boolean {
@@ -37,9 +56,13 @@ function formatTreeImpostorStatus(treeStats: TreeStats): string {
 }
 
 function formatTreeGpuStats(treeStats: TreeStats): string {
-  if (treeStats.gpuStatus === "disabled") return "";
-  if (!treeStats.gpuShowCounts) return ` gpu=${treeStats.gpuStatus}`;
+  const path = formatTreeGpuStatusPath(treeStats.gpuStatus);
+  if (treeStats.gpuStatus === "disabled") return ` path=${path}`;
+  if (!treeStats.gpuShowCounts) return ` path=${path}`;
   const overflow = treeStats.gpuOverflowed ? " overflow" : "";
-  return ` gpu=${treeStats.gpuStatus} candidates=${treeStats.gpuCandidateCount}` +
-    ` accepted=${treeStats.gpuAcceptedCount} visible=${treeStats.gpuVisibleCount}${overflow}`;
+  const shadowOverflow = treeStats.gpuShadowOverflowed ? " shadow-overflow" : "";
+  const dispatch = treeStats.gpuDispatchMs !== null ? ` dispatch=${treeStats.gpuDispatchMs.toFixed(1)}ms` : "";
+  return ` path=${path} candidates=${treeStats.gpuCandidateCount}` +
+    ` accepted=${treeStats.gpuAcceptedCount} visible=${treeStats.gpuVisibleCount}` +
+    ` shadow=${treeStats.gpuShadowCasterCount}${dispatch}${overflow}${shadowOverflow}`;
 }
