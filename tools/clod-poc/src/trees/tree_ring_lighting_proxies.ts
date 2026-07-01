@@ -25,6 +25,7 @@ import {
   treeRingShadowCasterCascadeIndices,
 } from "./tree_ring_shadow_casters.js";
 import { treeLodCastsShadow } from "./tree_system_shadow_policy.js";
+import { isTreeClusterTerrainOccluded } from "./tree_terrain_occlusion.js";
 
 export const TREE_GPU_RING_LIGHTING_PROXY_CAP = 2000;
 
@@ -47,6 +48,7 @@ export interface TreeRingLightingProxyOptions {
 }
 
 export interface TreeRingValidationCountOptions extends TreeRingLightingProxyOptions {
+  cameraY?: number;
   frustumPlanes?: ArrayLike<number>;
   shadowCascadePlanes?: ArrayLike<number>;
   maxInstancesPerGroup: number;
@@ -183,6 +185,18 @@ export function generateTreeRingValidationCounts(options: TreeRingValidationCoun
       maxShadowCastersPerGroup,
     });
 
+    if (treeRingTerrainHiddenForValidation({
+      settings,
+      sampler,
+      centerX: options.centerX,
+      centerZ: options.centerZ,
+      cameraY: options.cameraY,
+      x,
+      z,
+      terrainHeight,
+      distance,
+    })) continue;
+
     if (!treeRingPointInFrustum(x, terrainHeight + 4, z, 8, options.frustumPlanes)) continue;
     for (const lod of TREE_LODS) {
       if (!ring.active[lod]) continue;
@@ -231,6 +245,43 @@ function countShadowCasterGroups(input: {
       input.rawShadowGroupCounts[treeRingShadowCasterGroupIndex(input.species, lod, cascade)]++;
     }
   }
+}
+
+function treeRingTerrainHiddenForValidation(input: {
+  settings: TreeSettings;
+  sampler: TreeTerrainSampler;
+  centerX: number;
+  centerZ: number;
+  cameraY: number | undefined;
+  x: number;
+  z: number;
+  terrainHeight: number;
+  distance: number;
+}): boolean {
+  const visibility = input.settings.gpu.terrainVisibility;
+  if (input.distance <= Math.max(0, visibility.minDistanceM)) return false;
+  return isTreeClusterTerrainOccluded({
+    sampler: {
+      sampleHeight: (x, z) => {
+        const height = input.sampler.surfaceHeight(x, z);
+        return { height, unknown: !Number.isFinite(height) };
+      },
+    },
+    settings: {
+      enabled: input.settings.gpu.enabled && visibility.enabled,
+      minDistanceM: visibility.minDistanceM,
+      sampleCount: visibility.sampleCount,
+      heightMarginM: visibility.heightMarginM,
+      canopyHeightM: visibility.crownHeightM,
+    },
+    cameraX: input.centerX,
+    cameraY: typeof input.cameraY === "number" && Number.isFinite(input.cameraY) ? input.cameraY : input.terrainHeight,
+    cameraZ: input.centerZ,
+    targetX: input.x,
+    targetZ: input.z,
+    targetGroundY: input.terrainHeight,
+    targetRadiusM: 0,
+  });
 }
 
 function selectRingSpecies(settings: TreeSettings, roll: number): TreeSpeciesId | null {

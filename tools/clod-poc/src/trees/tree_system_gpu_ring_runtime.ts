@@ -132,6 +132,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
     const dispatched = input.state.compute.dispatch({
       centerX: center.x,
       centerZ: center.z,
+      cameraY: camera?.position.y ?? center.y,
       worldCells: input.worldCells,
       maxInstancesPerGroup: treeGpuRingGroupCapacity(input.settings),
       maxShadowCastersPerGroup: shadowCapacity,
@@ -141,7 +142,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
     });
     if (dispatched) setTreeGpuRingDrawsVisible(input.state, true);
     input.state.stats = input.state.compute.stats(true);
-    validateTreeGpuRingAgainstCpu(input, center, frustumPlanes, shadowCapacity > 0 ? shadowCascadePlanes : undefined);
+    validateTreeGpuRingAgainstCpu(input, center, camera, frustumPlanes, shadowCapacity > 0 ? shadowCascadePlanes : undefined);
   }
 
   input.lodCounts.near = input.state.stats.counts.near;
@@ -215,6 +216,7 @@ function ensureTreeGpuRingCompute(input: TreeGpuRingRuntimeInput): void {
 function validateTreeGpuRingAgainstCpu(
   input: TreeGpuRingRuntimeInput,
   center: THREE.Vector3,
+  camera: THREE.Camera | undefined,
   frustumPlanes: ArrayLike<number>,
   shadowCascadePlanes: ArrayLike<number> | undefined,
 ): void {
@@ -236,6 +238,7 @@ function validateTreeGpuRingAgainstCpu(
   const expected = generateTreeRingValidationCounts({
     centerX: center.x,
     centerZ: center.z,
+    cameraY: camera?.position.y ?? center.y,
     worldCells: input.worldCells,
     settings: input.settings,
     sampler: input.sampler,
@@ -333,5 +336,6 @@ function createTreeGpuRingStats(status: TreeGpuRingStats["status"]): TreeGpuRing
     submitMs: null,
     readbackMs: null,
     skippedDispatches: 0,
+    terrainVisibilityCounts: null,
   };
 }

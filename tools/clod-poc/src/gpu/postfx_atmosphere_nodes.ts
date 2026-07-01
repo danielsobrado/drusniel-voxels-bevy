@@ -9,11 +9,14 @@ import {
   mix,
   screenUV,
   smoothstep,
+  time,
   vec2,
   vec3,
   vec4,
+  texture3D,
 } from "three/tsl";
-import type { PostFxAtmosphereSettings } from "./postfx_atmosphere.js";
+import type { PostFxAtmosphereSettings, PostFxFroxelDebugMode } from "./postfx_atmosphere.js";
+import type { PostFxFroxelVolumeNodeInput } from "./postfx_froxel_volume.js";
 
 type TslAny = any;
 const tslMix = mix as unknown as (a: TslAny, b: TslAny, amount: TslAny) => TslAny;
@@ -26,6 +29,8 @@ export interface HillaireFroxelAerialNodeInput {
   cameraPosition: TslAny;
   sunDirection: TslAny;
   settings: PostFxAtmosphereSettings;
+  froxelDebugMode?: PostFxFroxelDebugMode;
+  froxelVolume?: PostFxFroxelVolumeNodeInput | null;
 }
 
 function phaseHenyeyGreenstein(cosTheta: TslAny, g: number): TslAny {
@@ -47,6 +52,8 @@ export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeIn
   const maxAerialDistance = Math.max(1, hillaire.maxDistanceMeters);
   const maxFroxelDistance = Math.max(froxels.nearMeters, froxels.maxDistanceMeters);
   const froxelSteps = froxels.steps;
+  const froxelDebugMode = input.froxelDebugMode ?? "off";
+  const volume = input.froxelVolume;
 
   return Fn((): TslAny => {
     const depth = input.depthTex.x;
@@ -60,36 +67,83 @@ export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeIn
 
     if (froxels.enabled) {
       const fogDistance = isSky.select(float(maxFroxelDistance), distance.min(maxFroxelDistance));
-      const transmittance = float(1).toVar();
-      const scatter = vec3(0).toVar();
-      for (let step = 0; step < froxelSteps; step++) {
-        const a = step / froxelSteps;
-        const b = (step + 1) / froxelSteps;
-        const t0 = froxels.nearMeters * Math.pow(maxFroxelDistance / froxels.nearMeters, a);
-        const t1 = froxels.nearMeters * Math.pow(maxFroxelDistance / froxels.nearMeters, b);
-        const mid = (t0 + t1) * 0.5;
-        const dz = Math.max(0.0001, t1 - t0);
-        If(fogDistance.greaterThan(t0), () => {
-          const worldPos = input.cameraPosition.add(dirW.mul(mid));
-          const hGround = worldPos.y.sub(input.cameraPosition.y).max(0);
-          const rhoGround = densityAtHeight(hGround, froxels.groundFalloffMeters).mul(froxels.groundFogDensity);
-          const rhoAlt = densityAtHeight(worldPos.y, froxels.altitudeFalloffMeters).mul(froxels.altitudeFogDensity);
-          const noise = hashNoise(screenUV.mul(911.3).add(float(step).mul(17.17)))
-            .mul(2)
-            .sub(1)
-            .mul(froxels.noiseStrength)
-            .add(1)
-            .max(0);
-          const shaft = smoothstep(0.02, 0.65, sunDir.y).mul(froxels.sunShaftsStrength).add(1);
-          const density = rhoGround.add(rhoAlt).mul(noise).mul(shaft).mul(froxels.strength);
-          const sliceT = exp(density.mul(-dz));
-          const phase = phaseHenyeyGreenstein(dirW.dot(sunDir), 0.5);
-          const fogColor = vec3(...hillaire.mieColor).mul(phase.mul(18)).add(vec3(...hillaire.rayleighColor).mul(0.035));
-          scatter.addAssign(fogColor.mul(float(1).sub(sliceT)).mul(transmittance));
-          transmittance.mulAssign(sliceT);
-        });
+      if (volume) {
+        const volumeNear = Math.max(0.0001, volume.nearMeters);
+        const volumeFar = Math.max(volumeNear, volume.maxDistanceMeters);
+        const volumeDepth = fogDistance
+          .max(volumeNear)
+          .div(volumeNear)
+          .log2()
+          .div(Math.log2(volumeFar / volumeNear))
+          .clamp(0, 1);
+        const integrated = texture3D(volume.integratedTexture, vec3(screenUV.x, screenUV.y, volumeDepth), 0) as TslAny;
+        if (froxelDebugMode === "density") {
+          return vec3(clamp(float(1).sub(integrated.a), 0, 1));
+        }
+        if (froxelDebugMode === "transmittance") {
+          return vec3(clamp(integrated.a, 0, 1));
+        }
+        if (froxelDebugMode === "scatter") {
+          return clamp(integrated.rgb.mul(4), 0, 1);
+        }
+        color.assign(color.mul(integrated.a).add(integrated.rgb));
+      } else {
+        const groundAnchor = input.cameraPosition.add(dirW.mul(fogDistance));
+        const groundReferenceHeight = isSky.select(float(froxels.groundReferenceHeightMeters), groundAnchor.y);
+        const transmittance = float(1).toVar();
+        const scatter = vec3(0).toVar();
+        const opticalDepth = float(0).toVar();
+        const lowSun = float(1).sub(smoothstep(0.08, 0.65, sunDir.y));
+        const densitySunScale = lowSun.mul(froxels.sunDensityBoost).add(froxels.ambientDensityFloor);
+        for (let step = 0; step < froxelSteps; step++) {
+          const a = step / froxelSteps;
+          const b = (step + 1) / froxelSteps;
+          const t0 = froxels.nearMeters * Math.pow(maxFroxelDistance / froxels.nearMeters, a);
+          const t1 = froxels.nearMeters * Math.pow(maxFroxelDistance / froxels.nearMeters, b);
+          If(fogDistance.greaterThan(t0), () => {
+            const segmentEnd = fogDistance.min(t1);
+            const segmentLength = segmentEnd.sub(t0).max(0.0001);
+            const sliceJitter = hashNoise(screenUV
+              .mul(vec2(911.3, 423.7))
+              .add(vec2(float(step).mul(13.13), float(step).mul(71.71))))
+              .mul(0.8)
+              .add(0.1);
+            const sampleDistance = float(t0).add(segmentLength.mul(sliceJitter));
+            const worldPos = input.cameraPosition.add(dirW.mul(sampleDistance));
+            const hGround = worldPos.y.sub(groundReferenceHeight).max(0);
+            const rhoGround = densityAtHeight(hGround, froxels.groundFalloffMeters).mul(froxels.groundFogDensity);
+            const rhoAlt = densityAtHeight(worldPos.y, froxels.altitudeFalloffMeters).mul(froxels.altitudeFogDensity);
+            const noiseUv = worldPos.xz
+              .mul(0.037)
+              .add(vec2(time.mul(0.19), time.mul(0.11)))
+              .add(vec2(float(step).mul(17.17), float(step).mul(31.31)));
+            const noise = hashNoise(noiseUv)
+              .mul(2)
+              .sub(1)
+              .mul(froxels.noiseStrength)
+              .add(1)
+              .max(0);
+            const shaft = lowSun.mul(froxels.sunShaftsStrength).add(1);
+            const density = rhoGround.add(rhoAlt).mul(noise).mul(densitySunScale).mul(froxels.strength);
+            const sliceT = exp(density.mul(segmentLength.negate()));
+            const phase = phaseHenyeyGreenstein(dirW.dot(sunDir), 0.5);
+            const fogColor = vec3(...hillaire.mieColor).mul(phase.mul(18).mul(shaft)).add(vec3(...hillaire.rayleighColor).mul(0.035));
+            opticalDepth.addAssign(density.mul(segmentLength));
+            scatter.addAssign(fogColor.mul(float(1).sub(sliceT)).mul(transmittance));
+            transmittance.mulAssign(sliceT);
+          });
+        }
+        if (froxelDebugMode === "density") {
+          return vec3(clamp(opticalDepth.mul(0.6), 0, 1));
+        }
+        if (froxelDebugMode === "transmittance") {
+          return vec3(clamp(transmittance, 0, 1));
+        }
+        if (froxelDebugMode === "scatter") {
+          return clamp(scatter.mul(4), 0, 1);
+        }
+        color.assign(color.mul(transmittance).add(scatter));
       }
-      color.assign(color.mul(transmittance).add(scatter.mul(isSky.select(float(0), float(1)))));
     }
 
     if (hillaire.enabled) {

@@ -137,7 +137,7 @@ export async function launchWebGPU(): Promise<{ browser: Browser; recipe: Launch
 }
 
 export interface ClodUrlOptions {
-  scene?: string;
+  scene?: string | null;
   seed?: number;
   cam?: string;
   hud?: boolean;
@@ -147,7 +147,7 @@ export interface ClodUrlOptions {
 
 export function clodUrl(options: ClodUrlOptions, baseUrl = clodBaseUrl()): string {
   const params = new URLSearchParams();
-  params.set("scene", options.scene ?? "sanity");
+  if (options.scene !== null) params.set("scene", options.scene ?? "sanity");
   if (options.seed !== undefined) params.set("seed", String(options.seed));
   if (options.cam) params.set("cam", options.cam);
   if (options.hud) params.set("hud", "1");

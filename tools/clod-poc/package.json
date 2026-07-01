@@ -16,7 +16,7 @@
     "shoot": "tsx tools/shoot.ts",
     "perf:main": "tsx tools/perf-main.ts",
     "perf:postfx": "tsx tools/postfx-perf-matrix.ts",
-    "postfx:verify": "npm run typecheck && vitest run src/gpu/webgpu_postprocess.test.ts src/gpu/postfx_auto_exposure.test.ts src/gpu/postfx_bounce.test.ts src/gpu/postfx_case_diagnostics.test.ts src/gpu/postfx_color_script.test.ts src/gpu/postfx_gtao.test.ts src/gpu/postfx_stage_flags.test.ts",
+    "postfx:verify": "tsx tools/verify-postfx.ts",
     "shoot-props": "tsx tools/shoot-props.ts",
     "compare": "tsx tools/compare.ts",
     "battery": "tsx tools/battery.ts",

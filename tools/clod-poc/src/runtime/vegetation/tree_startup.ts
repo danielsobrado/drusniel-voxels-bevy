@@ -12,6 +12,7 @@ import { formatTreeGpuSummary } from "./vegetation_stats_presenter.js";
 import { packHydrologyData } from "../../systems/hydrology_packing.js";
 import { setTreeGpuRingHydrologyData } from "../../gpu/tree_ring_compute.js";
 import type { TreeSettings } from "../../trees/tree_config.js";
+import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlusion.js";
 import { createEmptyTreeSystemStats } from "../../trees/tree_system_stats.js";
 
 export interface TreeStartupInput {
@@ -22,6 +23,7 @@ export interface TreeStartupInput {
   treeConfig: ReturnType<typeof import("../../trees/index.js").parseTreeConfig>;
   isWebGpu: boolean;
   hydrologySystem: HydrologySystem | null;
+  terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
   rendererWebGpuDevice: GPUDevice | null;
   gpuBackend: VegetationGpuBackend | null;
   currentLighting: () => EnvironmentLighting;
@@ -85,6 +87,7 @@ export function runTreeStartup(input: TreeStartupInput): TreeStartupResult {
     treeConfig,
     webgpu: isWebGpu,
     hydrologyWaterTexture: hydrologySystem ? hydrologySystem.waterSurfaceTexture() : null,
+    terrainOcclusionSampler: input.terrainOcclusionSampler,
     gpuDevice: rendererWebGpuDevice,
     gpuBackend,
     getUiState: () => treeUiState(state),

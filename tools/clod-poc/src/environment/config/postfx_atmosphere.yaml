@@ -16,9 +16,12 @@ postfx_atmosphere:
     max_distance_m: 480.0
     near_m: 2.0
     steps: 16
+    ground_reference_m: 0.0
     ground_fog_density: 0.011
     altitude_fog_density: 0.0025
     ground_falloff_m: 22.0
     altitude_falloff_m: 150.0
+    sun_density_boost: 1.8
+    ambient_density_floor: 0.12
     sun_shafts_strength: 0.55
     noise_strength: 0.35

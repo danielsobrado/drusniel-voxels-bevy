@@ -29,8 +29,10 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const width = Number(str(args["w"]) ?? 1920);
   const height = Number(str(args["h"]) ?? 1080);
-  const scene = str(args["scene"]) ?? "sanity";
-  const out = str(args["out"]) ?? `shots/phase-0/${scene}-${Date.now()}.png`;
+  const sceneArg = str(args["scene"]) ?? "sanity";
+  const scene = sceneArg === "main" || sceneArg === "default" ? null : sceneArg;
+  const sceneLabel = scene ?? "main";
+  const out = str(args["out"]) ?? `shots/phase-0/${sceneLabel}-${Date.now()}.png`;
   const settleFrames = Number(str(args["settle"]) ?? 8);
   const timeoutMs = Number(str(args["timeout"]) ?? 120000);
   const rendererParam = str(args["renderer"]);
@@ -146,7 +148,7 @@ async function main(): Promise<void> {
       const counters = (rawStats["counters"] as Record<string, number>) ?? {};
       const qaSummary = {
         schema_version: 1,
-        scene: scene,
+        scene: sceneLabel,
         platform: "web",
         checkpoints: [{
           name: "main",

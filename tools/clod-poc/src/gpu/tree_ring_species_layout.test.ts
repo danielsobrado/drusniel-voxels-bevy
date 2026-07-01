@@ -13,13 +13,15 @@ describe("tree ring species layout", () => {
     expect(layout.shadowGroupCount).toBe(3 * TREE_RING_LOD_COUNT * 4);
     expect(layout.speciesWeightsOffset).toBe(28);
     expect(layout.speciesWeightsFloatCount).toBe(4);
-    expect(layout.indexCountsOffset).toBe(32);
-    expect(layout.settingsOffset).toBe(44);
-    expect(layout.materialDensityOffset).toBe(48);
-    expect(layout.speciesMaterialOffset).toBe(52);
-    expect(layout.visiblePlanesOffset).toBe(64);
-    expect(layout.shadowPlanesOffset).toBe(88);
-    expect(layout.paramBytes).toBe(16 * 46);
+    expect(layout.terrainVisibilityOffset).toBe(32);
+    expect(layout.terrainVisibilityUOffset).toBe(36);
+    expect(layout.indexCountsOffset).toBe(40);
+    expect(layout.settingsOffset).toBe(52);
+    expect(layout.materialDensityOffset).toBe(56);
+    expect(layout.speciesMaterialOffset).toBe(60);
+    expect(layout.visiblePlanesOffset).toBe(72);
+    expect(layout.shadowPlanesOffset).toBe(96);
+    expect(layout.paramBytes).toBe(16 * 48);
   });
 
   it("moves index/material/plane slots after two species-weight vec4s for 6 species", () => {
@@ -29,13 +31,15 @@ describe("tree ring species layout", () => {
     expect(layout.shadowGroupCount).toBe(6 * TREE_RING_LOD_COUNT * 4);
     expect(layout.speciesWeightsOffset).toBe(28);
     expect(layout.speciesWeightsFloatCount).toBe(8);
-    expect(layout.indexCountsOffset).toBe(36);
-    expect(layout.settingsOffset).toBe(60);
-    expect(layout.materialDensityOffset).toBe(64);
-    expect(layout.speciesMaterialOffset).toBe(68);
-    expect(layout.visiblePlanesOffset).toBe(92);
-    expect(layout.shadowPlanesOffset).toBe(116);
-    expect(layout.paramBytes).toBe(16 * 53);
+    expect(layout.terrainVisibilityOffset).toBe(36);
+    expect(layout.terrainVisibilityUOffset).toBe(40);
+    expect(layout.indexCountsOffset).toBe(44);
+    expect(layout.settingsOffset).toBe(68);
+    expect(layout.materialDensityOffset).toBe(72);
+    expect(layout.speciesMaterialOffset).toBe(76);
+    expect(layout.visiblePlanesOffset).toBe(100);
+    expect(layout.shadowPlanesOffset).toBe(124);
+    expect(layout.paramBytes).toBe(16 * 55);
   });
 
   it("indexes groups by species then lod", () => {

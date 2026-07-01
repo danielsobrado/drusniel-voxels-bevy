@@ -8,6 +8,7 @@ import type { TreeGeometryMap } from "./tree_geometry.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import type { TreeGenerationStats, TreeInstance, TreeTerrainSampler } from "./tree_instances.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
+import type { TreeTerrainOcclusionSampler } from "./tree_terrain_occlusion.js";
 import type { TreeSystemMeshGrid } from "./tree_system_lifecycle.js";
 import type { TreeFallingInstance } from "./tree_system_patch_removal.js";
 import type { TreeSystemStatsSnapshot } from "./tree_system_stats.js";
@@ -20,6 +21,7 @@ export interface TreeSystemOptions {
   worldCells: number;
   settings: TreeSettings;
   sampler?: TreeTerrainSampler;
+  terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
   impostorAtlases?: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
   webgpu?: boolean;
   lighting?: EnvironmentLighting;
@@ -52,6 +54,7 @@ export interface TreePatch {
   previousLods: (TreeLod | null)[];
   visible: boolean;
   generationStats: TreeGenerationStats;
+  terrainOccluded?: boolean;
 }
 
 export interface TreeGpuRingDrawResources {

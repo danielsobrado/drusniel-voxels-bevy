@@ -9,6 +9,8 @@ export function treeRingSixSpeciesParamsStructSource(): string {
   settings_e: vec4<f32>,
   species_weights_a: vec4<f32>,
   species_weights_b: vec4<f32>,
+  terrain_visibility: vec4<f32>,
+  terrain_visibility_u: vec4<u32>,
   index_counts_a: vec4<u32>,
   index_counts_b: vec4<u32>,
   index_counts_c: vec4<u32>,

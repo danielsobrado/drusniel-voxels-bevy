@@ -169,6 +169,15 @@ export interface TreeGpuSettings {
   debugForceCpu: boolean;
   debugShowGpuCounts: boolean;
   debugValidateAgainstCpu: boolean;
+  terrainVisibility: TreeTerrainVisibilitySettings;
+}
+
+export interface TreeTerrainVisibilitySettings {
+  enabled: boolean;
+  minDistanceM: number;
+  sampleCount: number;
+  heightMarginM: number;
+  crownHeightM: number;
 }
 
 export interface TreeSpeciesZoneSettings {
@@ -351,6 +360,13 @@ export const DEFAULT_TREE_GPU_SETTINGS: TreeGpuSettings = {
   debugForceCpu: false,
   debugShowGpuCounts: false,
   debugValidateAgainstCpu: false,
+  terrainVisibility: {
+    enabled: true,
+    minDistanceM: 96,
+    sampleCount: 6,
+    heightMarginM: 1.75,
+    crownHeightM: 5.5,
+  },
 };
 
 export const DEFAULT_TREE_ECOLOGY_SETTINGS: TreeEcologySettings = {
@@ -563,6 +579,7 @@ export function parseTreeConfig(yamlText = treesYaml, warn: WarnHandler = consol
     const windRoot = record(trees.wind);
     const renderRoot = record(trees.render);
     const gpuRoot = record(trees.gpu);
+    const terrainVisibilityRoot = record(gpuRoot.terrain_visibility);
     const speciesRoot = record(trees.species);
     const ecologyRoot = record(trees.ecology);
     const densityRoot = record(ecologyRoot.density);
@@ -667,6 +684,13 @@ export function parseTreeConfig(yamlText = treesYaml, warn: WarnHandler = consol
         debugForceCpu: boolFrom(gpuRoot.debug_force_cpu, fallback.gpu.debugForceCpu),
         debugShowGpuCounts: boolFrom(gpuRoot.debug_show_gpu_counts, fallback.gpu.debugShowGpuCounts),
         debugValidateAgainstCpu: boolFrom(gpuRoot.debug_validate_against_cpu, fallback.gpu.debugValidateAgainstCpu),
+        terrainVisibility: {
+          enabled: boolFrom(terrainVisibilityRoot.enabled, fallback.gpu.terrainVisibility.enabled),
+          minDistanceM: Math.max(0, numberFrom(terrainVisibilityRoot.min_distance_m, fallback.gpu.terrainVisibility.minDistanceM)),
+          sampleCount: clampedIntFrom(terrainVisibilityRoot.sample_count, fallback.gpu.terrainVisibility.sampleCount, 1, 16),
+          heightMarginM: numberFrom(terrainVisibilityRoot.height_margin_m, fallback.gpu.terrainVisibility.heightMarginM),
+          crownHeightM: Math.max(0, numberFrom(terrainVisibilityRoot.crown_height_m, fallback.gpu.terrainVisibility.crownHeightM)),
+        },
       },
       ecology: {
         enabled: boolFrom(ecologyRoot.enabled, fallback.ecology.enabled),
@@ -758,7 +782,7 @@ export function cloneTreeSettings(settings: TreeSettings = DEFAULT_TREE_SETTINGS
     foliage: cloneFoliageSettings(settings.foliage),
     wind: cloneWindSettings(settings.wind),
     render: { ...settings.render },
-    gpu: { ...settings.gpu },
+    gpu: { ...settings.gpu, terrainVisibility: { ...settings.gpu.terrainVisibility } },
     ecology: cloneEcologySettings(settings.ecology),
   };
 }

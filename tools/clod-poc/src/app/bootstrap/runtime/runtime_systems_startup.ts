@@ -4,6 +4,7 @@ import type { ClodPageNode } from "../../../types.js";
 import { parseGrassConfig } from "../../../grass.js";
 import { parseStoneConfig } from "../../../stones/stone_config.js";
 import { parseTreeConfig } from "../../../trees/index.js";
+import type { TreeTerrainOcclusionSampler } from "../../../trees/tree_terrain_occlusion.js";
 import { parseUnderstoryConfig } from "../../../understory/index.js";
 import type { BorderCoastOceanConfig } from "../../../terrain/border_coast_config.js";
 import type { WaterConfig } from "../../../water/waterConfig.js";
@@ -70,6 +71,7 @@ export interface RuntimeSystemsStartupInput {
   isWebGpu: boolean;
   rendererWebGpuDevice: GPUDevice | null;
   hydrologySystem: HydrologySystem | null;
+  terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
   searchParams: URLSearchParams;
   materialController: ReturnType<typeof createTerrainMaterialController>;
   skyEnvironment: AppSky;
@@ -115,6 +117,7 @@ export async function runRuntimeSystemsStartup(
     isWebGpu,
     rendererWebGpuDevice,
     hydrologySystem,
+    terrainOcclusionSampler,
     searchParams,
     materialController,
     skyEnvironment,
@@ -140,6 +143,7 @@ export async function runRuntimeSystemsStartup(
     isWebGpu,
     rendererWebGpuDevice,
     hydrologySystem,
+    terrainOcclusionSampler,
     currentLighting,
     statControllers,
   });

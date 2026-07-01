@@ -1,6 +1,6 @@
 # NAADF Tree Visibility Plan
 
-Status: implementation plan with Jira-style tickets  
+Status: CLOD implementation partially wired; shared provider/page-level work remains  
 Last updated: 2026-07-01  
 Scope: `tools/clod-poc` first, Rust/Bevy parity after CLOD proves value
 
@@ -9,6 +9,24 @@ Scope: `tools/clod-poc` first, Rust/Bevy parity after CLOD proves value
 Use NAADF-style terrain visibility to reduce tree rendering cost without changing the visible forest result.
 
 The goal is **not** to ray trace trees. The goal is to use terrain acceleration data to avoid generating, drawing, and shadowing tree clusters that are fully hidden behind hills, cliffs, ridges, or far terrain.
+
+## Current CLOD Status
+
+Implemented in `tools/clod-poc`:
+
+- TVIS-001: GPU tree-ring terrain ridge cull is active before visible and shadow appends.
+- TVIS-002: `trees.gpu.terrain_visibility` is parsed, defaulted, clamped, and deep-cloned.
+- TVIS-003: GPU uniform packing uses the parsed terrain visibility gate, and the tree GPU ring key includes the gate.
+- TVIS-004: terrain visibility debug counters are wired through the existing debug readback path only.
+- TVIS-005: CPU patch fallback can conservatively cull terrain-hidden patches through an optional NAADF-backed height sampler.
+
+Still remaining:
+
+- TVIS-006: extract a shared NAADF/far-summary vegetation visibility provider.
+- TVIS-007: move GPU work to cluster/page-level rejection before candidate generation.
+- TVIS-008/009: share the provider beyond trees and port proven behavior to Rust/Bevy.
+
+`tools/clod-poc/scripts/apply-tree-terrain-cull.mjs` is now a verification script. It does not patch files; it reports whether the direct implementation is present.
 
 Target runtime flow:
 
@@ -228,8 +246,6 @@ gpu:
     sample_count: 6
     height_margin_m: 1.75
     crown_height_m: 5.5
-    cull_shadows: true
-    cull_visible: true
 ```
 
 **Suggested TypeScript types:**
@@ -241,8 +257,6 @@ export interface TreeTerrainVisibilitySettings {
   sampleCount: number;
   heightMarginM: number;
   crownHeightM: number;
-  cullShadows: boolean;
-  cullVisible: boolean;
 }
 ```
 
@@ -256,6 +270,7 @@ Recommended new WGSL field:
 
 ```wgsl
 terrain_visibility: vec4<f32>,
+terrain_visibility_u: vec4<u32>,
 ```
 
 Suggested packing:
@@ -265,7 +280,11 @@ x = enabled ? 1.0 : 0.0
 y = min_distance_m
 z = height_margin_m
 w = crown_height_m
+terrain_visibility_u.x = sample_count
+terrain_visibility_u.y = debug counter readback enabled for this dispatch
 ```
+
+Terrain-hidden candidates are rejected before both visible and shadow appends. There is intentionally no separate visible/shadow cull flag.
 
 If adding a struct field changes uniform layout, update:
 
@@ -299,10 +318,10 @@ If adding a struct field changes uniform layout, update:
 
 ```text
 terrainHiddenCandidates
-terrainUnknownKeptCandidates
 terrainVisibleCandidates
-terrainHiddenShadowCandidates
 ```
+
+The current GPU ridge filter has no missing-data state, so it does not report an unknown-kept counter. Unknown-kept accounting belongs with the shared NAADF/far-summary provider phase.
 
 **Important:**
 
@@ -397,7 +416,6 @@ treeTerrainVisibilityStats
 
 ```text
 terrainHidden=<count>
-unknownKept=<count>
 visibleBeforeTerrain=<count>
 visibleAfterTerrain=<count>
 shadowBeforeTerrain=<count>
@@ -672,7 +690,6 @@ Add display:
 
 ```text
 terrainHidden=<patches or clusters>
-unknownKept=<count>
 visibleBeforeTerrain=<count>
 visibleAfterTerrain=<count>
 shadowBeforeTerrain=<count>

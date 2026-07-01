@@ -9,6 +9,8 @@ export interface TreeRingSpeciesLayout {
   shadowGroupCount: number;
   speciesWeightsOffset: number;
   speciesWeightsFloatCount: number;
+  terrainVisibilityOffset: number;
+  terrainVisibilityUOffset: number;
   indexCountsOffset: number;
   settingsOffset: number;
   materialDensityOffset: number;
@@ -22,6 +24,8 @@ export interface TreeRingSpeciesLayout {
 const VISIBLE_PLANE_FLOATS = 6 * 4;
 const SHADOW_PLANE_FLOATS_PER_CASCADE = 6 * 4;
 const BASE_HEADER_FLOATS = 28;
+const TERRAIN_VISIBILITY_FLOATS = 4;
+const TERRAIN_VISIBILITY_U32S = 4;
 const SETTINGS_FLOATS = 4;
 const MATERIAL_DENSITY_FLOATS = 4;
 
@@ -31,7 +35,9 @@ export function treeRingSpeciesLayout(speciesCount: number, shadowCascadeCount: 
   const groupCount = safeSpeciesCount * TREE_RING_LOD_COUNT;
   const speciesWeightsOffset = BASE_HEADER_FLOATS;
   const speciesWeightsFloatCount = align4(safeSpeciesCount);
-  const indexCountsOffset = speciesWeightsOffset + speciesWeightsFloatCount;
+  const terrainVisibilityOffset = speciesWeightsOffset + speciesWeightsFloatCount;
+  const terrainVisibilityUOffset = terrainVisibilityOffset + TERRAIN_VISIBILITY_FLOATS;
+  const indexCountsOffset = terrainVisibilityUOffset + TERRAIN_VISIBILITY_U32S;
   const settingsOffset = indexCountsOffset + align4(groupCount);
   const materialDensityOffset = settingsOffset + SETTINGS_FLOATS;
   const speciesMaterialOffset = materialDensityOffset + MATERIAL_DENSITY_FLOATS;
@@ -46,6 +52,8 @@ export function treeRingSpeciesLayout(speciesCount: number, shadowCascadeCount: 
     shadowGroupCount: groupCount * safeCascadeCount,
     speciesWeightsOffset,
     speciesWeightsFloatCount,
+    terrainVisibilityOffset,
+    terrainVisibilityUOffset,
     indexCountsOffset,
     settingsOffset,
     materialDensityOffset,

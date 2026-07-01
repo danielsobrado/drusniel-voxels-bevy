@@ -4,6 +4,7 @@ import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
 import type { TreeShadowMaxLod } from "../../app/state/tree_quality_presets.js";
 import { TreeSystem, type FallingTree, type TreeSettings, type TreeStats } from "../../trees/index.js";
+import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlusion.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
 
 export interface TreeControllerUiState {
@@ -37,6 +38,7 @@ export interface TreeControllerDeps {
   getUiState: () => TreeControllerUiState;
   getLighting: () => EnvironmentLighting;
   hydrologyWaterTexture: THREE.Texture | null;
+  terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
   gpuDevice: GPUDevice | null;
   gpuBackend: GrassWebGpuBackendAccess | null;
   syncStatsToState: (stats: TreeStats) => void;
@@ -134,6 +136,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
     webgpu: deps.webgpu,
     lighting: deps.getLighting(),
     hydrologyWaterTexture: deps.hydrologyWaterTexture,
+    terrainOcclusionSampler: deps.terrainOcclusionSampler,
     gpuDevice: deps.gpuDevice,
     gpuBackend: deps.gpuBackend,
     supportsGpuTrees: deps.webgpu,

@@ -40,6 +40,7 @@ describe("tree ring shadow LOD GPU params", () => {
     const scratch = packTreeGpuRingParams(createSettings("mid"), {
       centerX: 0,
       centerZ: 0,
+      cameraY: 24,
       worldCells: 512,
       maxInstancesPerGroup: 128,
       maxShadowCastersPerGroup: 64,

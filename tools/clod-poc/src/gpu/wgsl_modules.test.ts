@@ -39,6 +39,8 @@ describe("WGSL module composition", () => {
     expect(source).toContain("let raw_height = placement_ground_height(wpos.x, wpos.y, params.center_radius.w);");
     expect(source).toContain("let height = raw_height;");
     expect(source).toContain("let normal_y = tree_height_normal_y(wpos);");
+    expect(source).toContain("tree_terrain_visibility_enabled()");
+    expect(source).toContain("terrain_ridge_filter(wpos, height, dist)");
     expect(bindingDeclarationCount(source, "digEdits")).toBe(1);
     expect(bindingDeclarationCount(source, "fieldParams")).toBe(1);
   });

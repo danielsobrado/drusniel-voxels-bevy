@@ -44,10 +44,6 @@ function positiveNumber(value: unknown, fallback: number): number {
   return Math.max(0.0001, finiteNumber(value, fallback));
 }
 
-function nonNegativeNumber(value: unknown, fallback: number): number {
-  return Math.max(0, finiteNumber(value, fallback));
-}
-
 function integerValue(value: unknown, fallback: number, min: number, max: number): number {
   return Math.round(clamp(finiteNumber(value, fallback), min, max));
 }

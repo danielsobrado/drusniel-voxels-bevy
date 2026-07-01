@@ -52,6 +52,33 @@ describe("tree ring validation counts", () => {
     expect(result.shadowGroupCounts.reduce((sum, count) => sum + count, 0)).toBeGreaterThan(0);
   });
 
+  it("keeps terrain-hidden trees as shadow casters while removing them from visible counts", () => {
+    const settings = validationSettings();
+    settings.gpu.terrainVisibility.minDistanceM = 0;
+    settings.gpu.terrainVisibility.heightMarginM = 0;
+    settings.species.oak.maxHeightM = 128;
+    const ridgeSampler: TreeTerrainSampler = {
+      surfaceHeight: (x, z) => Math.hypot(x - 64, z - 64) < 20 ? 100 : 24,
+      surfaceNormal: () => [0, 1, 0],
+      materialWeights: () => [1, 0, 0, 0],
+    };
+
+    const result = generateTreeRingValidationCounts({
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 128,
+      settings,
+      sampler: ridgeSampler,
+      maxInstancesPerGroup: 9999,
+      maxShadowCastersPerGroup: 9999,
+      shadowCascadePlanes: acceptEverythingCascadePlanes(),
+    });
+
+    expect(result.counts.near + result.counts.mid + result.counts.far + result.counts.impostor).toBe(0);
+    expect(result.shadowGroupCounts.reduce((sum, count) => sum + count, 0)).toBeGreaterThan(0);
+  });
+
   it("reports shadow caster overflow separately from visible overflow", () => {
     const result = generateTreeRingValidationCounts({
       centerX: 64,

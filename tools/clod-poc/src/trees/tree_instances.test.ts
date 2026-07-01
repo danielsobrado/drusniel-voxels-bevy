@@ -58,10 +58,13 @@ describe("tree placement", () => {
   it("deep-clones tree GPU settings", () => {
     const cloned = cloneTreeSettings();
     expect(cloned.gpu).not.toBe(DEFAULT_TREE_SETTINGS.gpu);
+    expect(cloned.gpu.terrainVisibility).not.toBe(DEFAULT_TREE_SETTINGS.gpu.terrainVisibility);
     cloned.gpu.enabled = false;
     cloned.gpu.maxVisible = 1;
+    cloned.gpu.terrainVisibility.enabled = false;
     expect(DEFAULT_TREE_SETTINGS.gpu.enabled).toBe(true);
     expect(DEFAULT_TREE_SETTINGS.gpu.maxVisible).toBe(50_000);
+    expect(DEFAULT_TREE_SETTINGS.gpu.terrainVisibility.enabled).toBe(true);
   });
 
   it("parses config/trees.yaml to the typed defaults", () => {
@@ -88,5 +91,26 @@ trees:
 `, null);
 
     expect(parsed.ecology).toEqual(DEFAULT_TREE_SETTINGS.ecology);
+  });
+
+  it("parses and clamps tree terrain visibility settings", () => {
+    const parsed = parseTreeConfig(`
+trees:
+  gpu:
+    terrain_visibility:
+      enabled: false
+      min_distance_m: 128
+      sample_count: 99
+      height_margin_m: 2.25
+      crown_height_m: 7
+`, null);
+
+    expect(parsed.gpu.terrainVisibility).toEqual({
+      enabled: false,
+      minDistanceM: 128,
+      sampleCount: 16,
+      heightMarginM: 2.25,
+      crownHeightM: 7,
+    });
   });
 });

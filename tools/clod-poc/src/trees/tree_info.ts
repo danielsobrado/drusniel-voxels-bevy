@@ -69,5 +69,13 @@ function formatTreeGpuStats(treeStats: TreeStats): string {
   const dispatch = treeStats.gpuDispatchMs !== null ? ` dispatch=${treeStats.gpuDispatchMs.toFixed(1)}ms` : "";
   return ` path=${path} candidates=${treeStats.gpuCandidateCount}` +
     ` accepted=${treeStats.gpuAcceptedCount} visible=${treeStats.gpuVisibleCount}` +
-    ` shadow=${treeStats.gpuShadowCasterCount}${dispatch}${overflow}${shadowOverflow}`;
+    ` shadow=${treeStats.gpuShadowCasterCount}${formatTreeTerrainDebugCounts(treeStats)}${dispatch}${overflow}${shadowOverflow}`;
+}
+
+function formatTreeTerrainDebugCounts(treeStats: TreeStats): string {
+  const hasCounts = treeStats.terrainHiddenCandidates > 0 ||
+    treeStats.terrainVisibleCandidates > 0;
+  if (!hasCounts) return "";
+  return ` terrainHidden=${treeStats.terrainHiddenCandidates}` +
+    ` terrainVisible=${treeStats.terrainVisibleCandidates}`;
 }

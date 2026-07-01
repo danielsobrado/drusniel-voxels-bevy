@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   exponentialFroxelSliceDistance,
+  froxelSliceMarchSegment,
   henyeyGreenstein,
+  parsePostFxFroxelDebugMode,
   parsePostFxAtmosphereSettings,
 } from "./postfx_atmosphere.js";
 
@@ -26,10 +28,13 @@ postfx_atmosphere:
     max_distance_m: 480
     near_m: 2
     steps: 99
+    ground_reference_m: -12
     ground_fog_density: 0.012
     altitude_fog_density: 0.003
     ground_falloff_m: 18
     altitude_falloff_m: 130
+    sun_density_boost: 9
+    ambient_density_floor: 2
     sun_shafts_strength: 0.7
     noise_strength: 2
 `);
@@ -38,6 +43,9 @@ postfx_atmosphere:
     expect(settings.hillaire.maxDistanceMeters).toBeCloseTo(9000);
     expect(settings.froxels.enabled).toBe(true);
     expect(settings.froxels.steps).toBe(48);
+    expect(settings.froxels.groundReferenceHeightMeters).toBe(-12);
+    expect(settings.froxels.sunDensityBoost).toBe(4);
+    expect(settings.froxels.ambientDensityFloor).toBe(1);
     expect(settings.froxels.noiseStrength).toBe(1);
   });
 
@@ -47,10 +55,35 @@ postfx_atmosphere:
     expect(exponentialFroxelSliceDistance(2, 512, 0.5)).toBeCloseTo(32);
   });
 
+  it("clips the last froxel slice at scene depth", () => {
+    const segment = froxelSliceMarchSegment(2, 512, 2, 4, 40, 0.5);
+    expect(segment.active).toBe(true);
+    expect(segment.startMeters).toBeCloseTo(32);
+    expect(segment.endMeters).toBeCloseTo(40);
+    expect(segment.lengthMeters).toBeCloseTo(8);
+    expect(segment.sampleMeters).toBeGreaterThan(segment.startMeters);
+    expect(segment.sampleMeters).toBeLessThan(segment.endMeters);
+  });
+
+  it("skips froxel slices behind the scene depth", () => {
+    const segment = froxelSliceMarchSegment(2, 512, 3, 4, 40);
+    expect(segment.active).toBe(false);
+    expect(segment.lengthMeters).toBe(0);
+    expect(segment.endMeters).toBeCloseTo(segment.startMeters);
+  });
+
   it("keeps Henyey-Greenstein finite and forward weighted", () => {
     const forward = henyeyGreenstein(1, 0.5);
     const backward = henyeyGreenstein(-1, 0.5);
     expect(forward).toBeGreaterThan(backward);
     expect(Number.isFinite(forward)).toBe(true);
+  });
+
+  it("parses froxel debug view aliases", () => {
+    expect(parsePostFxFroxelDebugMode("density")).toBe("density");
+    expect(parsePostFxFroxelDebugMode("optical-depth")).toBe("density");
+    expect(parsePostFxFroxelDebugMode("transmission")).toBe("transmittance");
+    expect(parsePostFxFroxelDebugMode("in_scatter")).toBe("scatter");
+    expect(parsePostFxFroxelDebugMode("unknown")).toBe("off");
   });
 });

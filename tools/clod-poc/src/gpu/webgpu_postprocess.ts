@@ -37,7 +37,9 @@ import {
 } from "../environment/postprocess.js";
 import {
   DEFAULT_POSTFX_ATMOSPHERE,
+  parsePostFxFroxelDebugMode,
   type PostFxAtmosphereSettings,
+  type PostFxFroxelDebugMode,
 } from "./postfx_atmosphere.js";
 import { createHillaireFroxelAerialNode } from "./postfx_atmosphere_nodes.js";
 import {
@@ -61,6 +63,7 @@ import {
   DEFAULT_POSTFX_GTAO,
   type PostFxGtaoSettings,
 } from "./postfx_gtao.js";
+import { PostFxFroxelVolume } from "./postfx_froxel_volume.js";
 import {
   parsePostFxStageFlags,
   stageAllowed,
@@ -164,6 +167,16 @@ function queryFlag(keys: string[], fallback: boolean): boolean {
   return fallback;
 }
 
+function queryValue(keys: string[]): string | null {
+  const params = searchParams();
+  if (!params) return null;
+  for (const key of keys) {
+    const value = params.get(key);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
 function isSetIndexBufferError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("setIndexBuffer") && message.includes("GPUBuffer");
@@ -214,6 +227,7 @@ export class WebGpuPostProcessPipeline {
   private exposureErrorReported = false;
   private exposureBuffer: TslAny | null = null;
   private exposureKernel: TslAny | null = null;
+  private froxelVolume: PostFxFroxelVolume | null = null;
   private readonly projectionInverse = new THREE.Matrix4();
   private readonly colorScript: PostFxColorScript = DEFAULT_POSTFX_COLOR_SCRIPT;
   private readonly autoExposure: PostFxAutoExposureSettings = DEFAULT_POSTFX_AUTO_EXPOSURE;
@@ -225,6 +239,7 @@ export class WebGpuPostProcessPipeline {
   private readonly lockExposure: boolean;
   private readonly bounceEnabled: boolean;
   private readonly froxelsEnabled: boolean;
+  private readonly froxelDebugMode: PostFxFroxelDebugMode;
   private readonly gtaoEnabled: boolean;
   private readonly uExposure = uniform(WEBGPU_POST_EXPOSURE) as unknown as NumericUniform;
   private readonly uContrast = uniform(1.0) as unknown as NumericUniform;
@@ -277,7 +292,9 @@ export class WebGpuPostProcessPipeline {
     this.lockExposure = queryFlag(["lockexp", "lockExposure", "lockexposure"], this.autoExposure.lock);
     this.bounceEnabled = this.stageEnabled("bounce") && queryFlag(["bounce", "ssBounce", "ssbounce", "colorBounce", "colorbounce"], this.bounce.enabled);
     this.froxelsEnabled = this.stageEnabled("froxels") && queryFlag(["froxels", "froxel", "volumetrics", "volumetricFog", "volumetricfog"], this.atmosphere.froxels.enabled);
+    this.froxelDebugMode = parsePostFxFroxelDebugMode(queryValue(["froxelDebug", "froxelsDebug", "volumetricDebug", "volumetricsDebug"]));
     this.gtaoEnabled = this.stageEnabled("gtao") && queryFlag(["gtao", "ao", "ambientOcclusion", "ambientocclusion"], this.gtao.enabled);
+    if (this.shouldUseFroxelVolume()) this.froxelVolume = new PostFxFroxelVolume(this.atmosphere);
     this.applyRendererSettings();
     this.updateUniforms();
   }
@@ -311,6 +328,7 @@ export class WebGpuPostProcessPipeline {
 
     this.updateColorScriptUniforms();
     this.syncCameraUniforms(camera);
+    this.updateFroxelVolume(camera);
     const pipeline = this.ensurePipeline(scene, camera);
     try {
       pipeline.render();
@@ -339,6 +357,7 @@ export class WebGpuPostProcessPipeline {
       this.stageKey(),
       this.bounceEnabled ? "bounce" : "no-bounce",
       this.froxelsEnabled ? "froxels" : "no-froxels",
+      `froxel-debug-${this.froxelDebugMode}`,
       this.gtaoEnabled ? "gtao" : "no-gtao",
     ].join("|");
   }
@@ -351,6 +370,19 @@ export class WebGpuPostProcessPipeline {
 
   private stageEnabled(stage: PostFxStage): boolean {
     return stageAllowed(this.stageFlags, stage);
+  }
+
+  private shouldUseFroxelVolume(): boolean {
+    return this.froxelsEnabled || this.froxelDebugMode !== "off";
+  }
+
+  private updateFroxelVolume(camera: THREE.Camera): void {
+    if (!this.shouldUseFroxelVolume()) return;
+    if (!this.froxelVolume) {
+      this.froxelVolume = new PostFxFroxelVolume(this.atmosphere);
+      this.disposePipeline();
+    }
+    this.froxelVolume.update(this.renderer, camera, this.uSunDirection.value);
   }
 
   private applyRendererSettings(): void {
@@ -436,9 +468,12 @@ export class WebGpuPostProcessPipeline {
   }
 
   private createOutputNode(beauty: TslAny, depthTex: TslAny, camera: THREE.Camera): TslAny {
-    const aerialRgb = this.settings.aerialPerspectiveEnabled && this.stageEnabled("aerial")
+    const shouldRunAerial = this.froxelDebugMode !== "off"
+      || (this.settings.aerialPerspectiveEnabled && this.stageEnabled("aerial"));
+    const aerialRgb = shouldRunAerial
       ? this.createAerialNode(beauty.rgb, depthTex)
       : beauty.rgb;
+    if (this.froxelDebugMode !== "off") return aerialRgb;
     const aoRgb = this.gtaoEnabled
       ? aerialRgb.mul(this.createGtaoNode(aerialRgb, depthTex))
       : aerialRgb;
@@ -475,9 +510,11 @@ export class WebGpuPostProcessPipeline {
         hillaire: this.atmosphere.hillaire,
         froxels: {
           ...this.atmosphere.froxels,
-          enabled: this.froxelsEnabled,
+          enabled: this.froxelsEnabled || this.froxelDebugMode !== "off",
         },
       },
+      froxelDebugMode: this.froxelDebugMode,
+      froxelVolume: this.froxelVolume?.nodeInput() ?? null,
     });
   }
 

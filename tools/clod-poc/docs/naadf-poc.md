@@ -37,6 +37,12 @@ The CLOD PoC informs Rust, but it is not the production implementation. It uses 
 - Sun visibility / terrain occlusion debug rays
 - Acceptance scenes and metrics for port/no-port decisions
 
+## Tree Terrain Visibility
+
+Tree terrain visibility is wired in the CLOD PoC. The GPU tree-ring path can reject terrain-hidden far candidates before visible appends while preserving shadow casters, gated by `trees.gpu.terrain_visibility`; debug terrain-hidden counters use the existing explicit GPU readback path only. The CPU patch fallback can also cull whole hidden patches when a NAADF height sampler is available, while unknown or missing samples keep patches visible.
+
+The remaining vegetation visibility work is to extract a shared NAADF/far-summary provider and move GPU rejection earlier to page/cluster level so candidate generation drops, not just accepted visible/shadow counts.
+
 ## What it intentionally does not validate
 
 - Full 16³ voxel brick occupancy

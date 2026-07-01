@@ -6,6 +6,7 @@ import type { StoneStats } from "../../stones/stone_instances.js";
 import type { TreeStats } from "../../trees/index.js";
 import type { UnderstoryStats } from "../../understory/index.js";
 import type { HydrologySystem } from "../../water/index.js";
+import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlusion.js";
 import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import type { AppRenderer } from "../../app/bootstrap/renderer_startup.js";
@@ -49,6 +50,7 @@ export interface VegetationStartupInput {
   isWebGpu: boolean;
   rendererWebGpuDevice: GPUDevice | null;
   hydrologySystem: HydrologySystem | null;
+  terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
   currentLighting: () => EnvironmentLighting;
   statControllers: VegetationStatControllerRefs;
 }

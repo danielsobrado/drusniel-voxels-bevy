@@ -82,23 +82,27 @@ function withTreeFinalPlacementHeight(source: string): string {
     .replace("let hx1 = surfaceHeightField(wpos.x + sample_radius, wpos.y);", "let hx1 = placement_ground_height(wpos.x + sample_radius, wpos.y, params.center_radius.w);")
     .replace("let hz0 = surfaceHeightField(wpos.x, wpos.y - sample_radius);", "let hz0 = placement_ground_height(wpos.x, wpos.y - sample_radius, params.center_radius.w);")
     .replace("let hz1 = surfaceHeightField(wpos.x, wpos.y + sample_radius);", "let hz1 = placement_ground_height(wpos.x, wpos.y + sample_radius, params.center_radius.w);")
-    .replace("let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;", "let start_height = placement_ground_height(start_xz.x, start_xz.y, params.center_radius.w) + 18.0;")
+    .replace("let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;", "let start_height = params.settings_e.w;")
     .replace("let sample_ground_height = surfaceHeightField(sample_xz.x, sample_xz.y);", "let sample_ground_height = placement_ground_height(sample_xz.x, sample_xz.y, params.center_radius.w);")
     .replace("let raw_height = surfaceHeightField(wpos.x, wpos.y);", "let raw_height = placement_ground_height(wpos.x, wpos.y, params.center_radius.w);")
     .replace("let height = tree_hydrology_ground_height(raw_height, hydro);", "let height = raw_height;");
 }
 
 function withTreeTerrainVisibilityCull(source: string): string {
-  if (source.includes("tree_terrain_visibility_enabled()")) return source;
-  return source
-    .replace(
+  let next = source;
+  if (!next.includes("fn tree_terrain_visibility_enabled()")) {
+    next = next.replace(
       "fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
-      "fn tree_terrain_visibility_enabled() -> bool {\n  return true;\n}\n\nfn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
-    )
-    .replace(
-      "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  append_shadow_lod_if_active",
-      "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  if (tree_terrain_visibility_enabled() && terrain_ridge_filter(wpos, height, dist)) { return; }\n  append_shadow_lod_if_active",
+      "fn tree_terrain_visibility_enabled() -> bool {\n  return params.terrain_visibility.x > 0.5;\n}\n\nfn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
     );
+  }
+  if (!next.includes("terrain_ridge_filter(wpos, height, dist)")) {
+    next = next.replace(
+      "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);",
+      "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  var terrain_hidden = false;\n  if (tree_terrain_visibility_enabled()) {\n    terrain_hidden = terrain_ridge_filter(wpos, height, dist);\n  }\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);\n  if (terrain_hidden) { return; }",
+    );
+  }
+  return next;
 }
 
 export function withTreePcgHash(source: string): string {

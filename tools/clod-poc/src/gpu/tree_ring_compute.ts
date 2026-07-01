@@ -20,7 +20,9 @@ const TREE_GPU_RING_VISIBLE_PLANE_FLOATS = 6 * 4;
 const TREE_GPU_RING_SHADOW_PLANE_FLOATS = TREE_RING_SHADOW_CASCADE_COUNT * TREE_RING_SHADOW_PLANE_COUNT * TREE_RING_SHADOW_PLANE_WORDS;
 const PARAM_BYTES = TREE_GPU_RING_LAYOUT.paramBytes;
 const COUNTER_BYTES = TREE_GPU_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
-const SHADOW_COUNTER_BYTES = TREE_GPU_RING_SHADOW_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
+const TREE_TERRAIN_VISIBILITY_COUNTER_COUNT = 2;
+const TREE_TERRAIN_VISIBILITY_COUNTER_OFFSET = TREE_GPU_RING_SHADOW_GROUP_COUNT;
+const SHADOW_COUNTER_BYTES = (TREE_GPU_RING_SHADOW_GROUP_COUNT + TREE_TERRAIN_VISIBILITY_COUNTER_COUNT) * Uint32Array.BYTES_PER_ELEMENT;
 const READBACK_BYTES = COUNTER_BYTES + SHADOW_COUNTER_BYTES;
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
@@ -64,11 +66,18 @@ export interface TreeGpuRingStats {
   submitMs: number | null;
   readbackMs: number | null;
   skippedDispatches: number;
+  terrainVisibilityCounts: TreeGpuTerrainVisibilityCounts | null;
+}
+
+export interface TreeGpuTerrainVisibilityCounts {
+  terrainHiddenCandidates: number;
+  terrainVisibleCandidates: number;
 }
 
 export interface TreeGpuRingDispatchParams {
   centerX: number;
   centerZ: number;
+  cameraY: number;
   worldCells: number;
   maxInstancesPerGroup: number;
   maxShadowCastersPerGroup?: number;
@@ -83,12 +92,20 @@ interface ReadbackSlot {
   destroyAfterMap: boolean;
   visibleCpu: Uint32Array;
   shadowCpu: Uint32Array;
+  terrainVisibilityCpu: Uint32Array;
 }
 
 type PipelineName = "clear_counters" | "tree_cull" | "build_indirect_args";
 
 export function emptyTreeGpuRingCounts(): TreeGpuRingCounts {
   return { near: 0, mid: 0, far: 0, impostor: 0 };
+}
+
+export function emptyTreeGpuTerrainVisibilityCounts(): TreeGpuTerrainVisibilityCounts {
+  return {
+    terrainHiddenCandidates: 0,
+    terrainVisibleCandidates: 0,
+  };
 }
 
 export function treeGpuRingGroupIndex(species: TreeSpeciesId, lod: TreeLod): number {
@@ -98,6 +115,10 @@ export function treeGpuRingGroupIndex(species: TreeSpeciesId, lod: TreeLod): num
 export function treeGpuRingShadowMaxLodIndex(settings: TreeSettings): number {
   const maxLod = settings.lod.shadowsMaxLod;
   return maxLod === "none" ? SHADOW_MAX_LOD_NONE : TREE_LODS.indexOf(maxLod);
+}
+
+export function treeGpuRingTerrainVisibilityEnabled(settings: TreeSettings): boolean {
+  return settings.gpu.enabled && settings.gpu.terrainVisibility.enabled;
 }
 
 export function treeGpuRingGroupRegion(group: number, maxInstancesPerGroup: number): { start: number; end: number; firstInstance: number } {
@@ -183,6 +204,11 @@ export function treeGpuRingKey(settings: TreeSettings, worldCells: number): stri
     ...accept.materialDensity,
     ...TREE_SPECIES.flatMap((species) => treeSpeciesMaterialVector(settings, species)),
     ...TREE_SPECIES.map((species) => speciesWeight(settings, species)),
+    treeGpuRingTerrainVisibilityEnabled(settings) ? 1 : 0,
+    settings.gpu.terrainVisibility.minDistanceM,
+    settings.gpu.terrainVisibility.sampleCount,
+    settings.gpu.terrainVisibility.heightMarginM,
+    settings.gpu.terrainVisibility.crownHeightM,
     treeGpuRingWorkgroupSize(settings),
   ].join("|");
 }
@@ -227,6 +253,12 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   f32[24] = accept.rockReject;
   f32[25] = accept.snowReject;
   f32[26] = treeGpuRingShadowMaxLodIndex(settings);
+  f32[27] = Number.isFinite(params.cameraY) ? params.cameraY : 0;
+  f32[TREE_GPU_RING_LAYOUT.terrainVisibilityOffset] = treeGpuRingTerrainVisibilityEnabled(settings) ? 1 : 0;
+  f32[TREE_GPU_RING_LAYOUT.terrainVisibilityOffset + 1] = settings.gpu.terrainVisibility.minDistanceM;
+  f32[TREE_GPU_RING_LAYOUT.terrainVisibilityOffset + 2] = settings.gpu.terrainVisibility.heightMarginM;
+  f32[TREE_GPU_RING_LAYOUT.terrainVisibilityOffset + 3] = settings.gpu.terrainVisibility.crownHeightM;
+  u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset] = Math.max(1, Math.min(16, Math.floor(settings.gpu.terrainVisibility.sampleCount))) >>> 0;
   TREE_SPECIES.forEach((species, index) => {
     f32[TREE_GPU_RING_LAYOUT.speciesWeightsOffset + index] = speciesWeight(settings, species);
   });
@@ -278,6 +310,7 @@ export class TreeGpuRingCompute {
   private counts: TreeGpuRingCounts = emptyTreeGpuRingCounts();
   private groupCounts = new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0);
   private shadowGroupCounts = new Array<number>(TREE_GPU_RING_SHADOW_GROUP_COUNT).fill(0);
+  private terrainVisibilityCounts: TreeGpuTerrainVisibilityCounts | null = null;
   private overflowed = false;
   private shadowOverflowed = false;
   private runningReadbacks = 0;
@@ -315,6 +348,7 @@ export class TreeGpuRingCompute {
       destroyAfterMap: false,
       visibleCpu: new Uint32Array(TREE_GPU_RING_GROUP_COUNT),
       shadowCpu: new Uint32Array(TREE_GPU_RING_SHADOW_GROUP_COUNT),
+      terrainVisibilityCpu: new Uint32Array(TREE_TERRAIN_VISIBILITY_COUNTER_COUNT),
     }));
     this.hydroTexture = this.createHydrologyTexture(hydroData);
     const hydroSampler = device.createSampler({ label: "tree ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
@@ -368,6 +402,7 @@ export class TreeGpuRingCompute {
       shadowCascadePlanes: undefined,
     };
     packTreeGpuRingParams(this.settings, effectiveParams, this.paramScratch);
+    new Uint32Array(this.paramScratch)[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 1] = readbackSlot ? 1 : 0;
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
     const encoder = this.device.createCommandEncoder({ label: "tree ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, treeGpuRingCounterWorkgroups(this.settings));
@@ -392,6 +427,7 @@ export class TreeGpuRingCompute {
         const mapped = slot.buffer.getMappedRange(0, READBACK_BYTES);
         slot.visibleCpu.set(new Uint32Array(mapped, 0, TREE_GPU_RING_GROUP_COUNT));
         slot.shadowCpu.set(new Uint32Array(mapped, COUNTER_BYTES, TREE_GPU_RING_SHADOW_GROUP_COUNT));
+        slot.terrainVisibilityCpu.set(new Uint32Array(mapped, COUNTER_BYTES + TREE_TERRAIN_VISIBILITY_COUNTER_OFFSET * Uint32Array.BYTES_PER_ELEMENT, TREE_TERRAIN_VISIBILITY_COUNTER_COUNT));
         slot.buffer.unmap();
         slot.busy = false;
         this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
@@ -403,6 +439,10 @@ export class TreeGpuRingCompute {
         this.counts = resolved.counts;
         this.overflowed = resolved.overflowed;
         this.shadowOverflowed = resolvedShadow.overflowed;
+        this.terrainVisibilityCounts = {
+          terrainHiddenCandidates: slot.terrainVisibilityCpu[0] ?? 0,
+          terrainVisibleCandidates: slot.terrainVisibilityCpu[1] ?? 0,
+        };
         if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); }
       }).catch((error) => {
         if (submittedGeneration !== this.generation) {
@@ -432,6 +472,7 @@ export class TreeGpuRingCompute {
       submitMs: this.submitMs,
       readbackMs: this.readbackMs,
       skippedDispatches: this.skippedDispatches,
+      terrainVisibilityCounts: this.terrainVisibilityCounts ? { ...this.terrainVisibilityCounts } : null,
     };
   }
 

@@ -18,7 +18,7 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
     grassConfig, stoneConfig, treeConfig, understoryConfig,
     queryGrassRingGrid, queryGrassRingCell,
     isWebGpu, rendererWebGpuDevice,
-    hydrologySystem, currentLighting, statControllers,
+    hydrologySystem, terrainOcclusionSampler, currentLighting, statControllers,
   } = input;
 
   const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
@@ -39,6 +39,7 @@ export function runVegetationStartup(input: VegetationStartupInput): VegetationS
   const tree = runTreeStartup({
     scene, state, lod0Nodes, worldCells, treeConfig,
     isWebGpu, hydrologySystem, rendererWebGpuDevice, gpuBackend,
+    terrainOcclusionSampler,
     currentLighting, statControllers, renderer: app.renderer,
   });
 

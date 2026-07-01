@@ -3,6 +3,7 @@ import type { ClodPageNode } from "../types.js";
 import { treeGpuRingComputeUnsupportedReason } from "../gpu/tree_ring_compute.js";
 import type { TreeLod, TreeSettings, TreeSpeciesId } from "./tree_config.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
+import type { TreeTerrainOcclusionSampler } from "./tree_terrain_occlusion.js";
 import type { TreeHydrologyWater } from "./tree_node_material.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
@@ -54,6 +55,7 @@ export class TreeSystem {
   private readonly worldCells: number;
   private readonly root = new THREE.Group();
   private readonly sampler: TreeTerrainSampler | undefined;
+  private readonly terrainOcclusionSampler: TreeTerrainOcclusionSampler | undefined;
   private readonly gpuDevice: GPUDevice | null;
   private readonly gpuBackend: TreeWebGpuBackendAccess | null;
   private readonly supportsGpuTrees: boolean;
@@ -90,6 +92,7 @@ export class TreeSystem {
     this.worldCells = options.worldCells;
     this.settings = { ...options.settings };
     this.sampler = options.sampler;
+    this.terrainOcclusionSampler = options.terrainOcclusionSampler;
     this.gpuDevice = options.gpuDevice ?? null;
     this.gpuBackend = options.gpuBackend ?? null;
     this.supportsGpuTrees = options.supportsGpuTrees ?? !!this.gpuDevice;
@@ -325,6 +328,7 @@ export class TreeSystem {
       patches: this.patches,
       settings: this.settings,
       sampler: this.sampler,
+      terrainOcclusionSampler: this.terrainOcclusionSampler,
       worldCells: this.worldCells,
       meshBoundsState: this.meshBoundsState,
       impostorAtlases: this.assets.impostorAtlases,

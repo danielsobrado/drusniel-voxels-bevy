@@ -38,7 +38,17 @@ describe("tree GPU ring compute helpers", () => {
       ...DEFAULT_TREE_SETTINGS,
       seed: 1234,
       distanceM: 100,
-      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, maxVisible: 200 },
+      gpu: {
+        ...DEFAULT_TREE_SETTINGS.gpu,
+        maxVisible: 200,
+        terrainVisibility: {
+          ...DEFAULT_TREE_SETTINGS.gpu.terrainVisibility,
+          minDistanceM: 144,
+          sampleCount: 9,
+          heightMarginM: 2.5,
+          crownHeightM: 8,
+        },
+      },
       lod: {
         ...DEFAULT_TREE_SETTINGS.lod,
         nearFraction: 0.25,
@@ -54,6 +64,7 @@ describe("tree GPU ring compute helpers", () => {
     const packed = packTreeGpuRingParams(settings, {
       centerX: 12,
       centerZ: 34,
+      cameraY: 56,
       worldCells: 256,
       maxInstancesPerGroup: 99,
       maxShadowCastersPerGroup: 77,
@@ -68,12 +79,18 @@ describe("tree GPU ring compute helpers", () => {
     expect(f32[0]).toBe(12);
     expect(f32[1]).toBe(34);
     expect(f32[2]).toBe(100);
+    expect(f32[27]).toBe(56);
     expect(f32[4]).toBe(25);
     expect(f32[5]).toBe(50);
     expect(f32[8]).toBeCloseTo(TREE_GPU_RING_CELL, 6);
     expect(u32[layout.indexCountsOffset]).toBe(111);
     expect(u32[layout.indexCountsOffset + 1]).toBe(222);
     expect(u32[layout.indexCountsOffset + 2]).toBe(333);
+    expect(f32[layout.terrainVisibilityOffset]).toBe(1);
+    expect(f32[layout.terrainVisibilityOffset + 1]).toBe(144);
+    expect(f32[layout.terrainVisibilityOffset + 2]).toBe(2.5);
+    expect(f32[layout.terrainVisibilityOffset + 3]).toBe(8);
+    expect(u32[layout.terrainVisibilityUOffset]).toBe(9);
     expect(u32[layout.settingsOffset - 1]).toBeGreaterThan(0);
     expect(u32[layout.settingsOffset]).toBe(99);
     expect(u32[layout.settingsOffset + 1]).toBe(treeGpuRingGrid(settings));

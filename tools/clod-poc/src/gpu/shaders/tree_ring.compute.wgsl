@@ -10,6 +10,8 @@ const TREE_SHADOW_CASCADE_COUNT: u32 = 4u;
 const TREE_SHADOW_PLANE_COUNT: u32 = 6u;
 const TREE_SHADOW_GROUP_COUNT: u32 = TREE_GROUP_COUNT * TREE_SHADOW_CASCADE_COUNT;
 const TREE_INDIRECT_STRIDE_U32: u32 = 5u;
+const TREE_TERRAIN_HIDDEN_COUNTER: u32 = TREE_SHADOW_GROUP_COUNT;
+const TREE_TERRAIN_VISIBLE_COUNTER: u32 = TREE_SHADOW_GROUP_COUNT + 1u;
 const TREE_HYDRO_WATER_CLEARANCE: f32 = 1.5;
 const TREE_RIPARIAN_INNER_END_M: f32 = 8.0;
 const TREE_RIPARIAN_OUTER_START_M: f32 = 9.0;
@@ -60,6 +62,8 @@ struct TreeRingParams {
   settings_e: vec4<f32>,
   species_weights_a: vec4<f32>,
   species_weights_b: vec4<f32>,
+  terrain_visibility: vec4<f32>,
+  terrain_visibility_u: vec4<u32>,
   index_counts_a: vec4<u32>,
   index_counts_b: vec4<u32>,
   index_counts_c: vec4<u32>,
@@ -384,17 +388,35 @@ fn in_shadow_cascade_frustum(cascade: u32, center: vec3<f32>, slack: f32) -> boo
   return true;
 }
 
+fn tree_terrain_visibility_enabled() -> bool {
+  return params.terrain_visibility.x > 0.5;
+}
+
+fn tree_terrain_debug_counts_enabled() -> bool {
+  return params.terrain_visibility_u.y != 0u;
+}
+
+fn record_tree_terrain_visibility(terrain_hidden: bool) {
+  if (!tree_terrain_debug_counts_enabled()) { return; }
+  if (terrain_hidden) {
+    atomicAdd(&shadow_counters[TREE_TERRAIN_HIDDEN_COUNTER], 1u);
+    return;
+  }
+  atomicAdd(&shadow_counters[TREE_TERRAIN_VISIBLE_COUNTER], 1u);
+}
+
 fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {
-  if (distance_m <= params.lod.y) { return false; }
+  if (distance_m <= params.terrain_visibility.y) { return false; }
   let start_xz = params.center_radius.xy;
-  let start_height = surfaceHeightField(start_xz.x, start_xz.y) + 18.0;
-  let crown_height = end_height + 5.5;
-  for (var i = 1u; i <= 6u; i = i + 1u) {
-    let t = f32(i) / 7.0;
+  let start_height = params.settings_e.w;
+  let crown_height = end_height + max(0.0, params.terrain_visibility.w);
+  let sample_count = max(1u, min(16u, params.terrain_visibility_u.x));
+  for (var i = 1u; i <= sample_count; i = i + 1u) {
+    let t = f32(i) / f32(sample_count + 1u);
     let sample_xz = mix(start_xz, end_xz, t);
     let sample_line_height = mix(start_height, crown_height, t);
     let sample_ground_height = surfaceHeightField(sample_xz.x, sample_xz.y);
-    if (sample_ground_height > sample_line_height + 1.75) { return true; }
+    if (sample_ground_height > sample_line_height + max(0.0, params.terrain_visibility.z)) { return true; }
   }
   return false;
 }
@@ -505,10 +527,16 @@ fn process_tree_slot(slot: u32) {
   let scale = tree_instance_scale(wc, wpos, normal_y, species) * tree_hydrology_scale_mask(hydro, height);
   let ring = tree_lod_ring(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
   let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);
+  var terrain_hidden = false;
+  if (tree_terrain_visibility_enabled()) {
+    terrain_hidden = terrain_ridge_filter(wpos, height, dist);
+    record_tree_terrain_visibility(terrain_hidden);
+  }
   append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);
   append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);
   append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);
   append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);
+  if (terrain_hidden) { return; }
   if (!in_frustum(shadow_center, 8.0)) { return; }
   append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);
   append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);
@@ -522,6 +550,7 @@ fn clear_counters(@builtin(global_invocation_id) id: vec3<u32>) {
   if (i < TREE_GROUP_COUNT) { atomicStore(&counters[i], 0u); }
   if (i < TREE_GROUP_COUNT * TREE_INDIRECT_STRIDE_U32) { indirect_args[i] = 0u; }
   if (i < TREE_SHADOW_GROUP_COUNT) { atomicStore(&shadow_counters[i], 0u); }
+  if (i < 2u) { atomicStore(&shadow_counters[TREE_SHADOW_GROUP_COUNT + i], 0u); }
   if (i < TREE_SHADOW_GROUP_COUNT * TREE_INDIRECT_STRIDE_U32) { shadow_indirect_args[i] = 0u; }
 }
 

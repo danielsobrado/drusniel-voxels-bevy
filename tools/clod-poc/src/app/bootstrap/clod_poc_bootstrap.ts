@@ -343,6 +343,15 @@ export async function bootstrapClodPoc() {
     }
   }
 
+  const treeTerrainOcclusionSampler = naadfIntegration
+    ? {
+        sampleHeight: (x: number, z: number) => {
+          const sample = naadfIntegration!.queryHeight(x, z, "render");
+          return { height: sample.height, unknown: sample.unknown || sample.missingSample };
+        },
+      }
+    : undefined;
+
   const runtime = await runRuntimeSystemsStartup({
     app: renderer.app,
     scene: renderer.scene,
@@ -367,6 +376,7 @@ export async function bootstrapClodPoc() {
     isWebGpu: renderer.isWebGpu,
     rendererWebGpuDevice: renderer.rendererWebGpuDevice,
     hydrologySystem: world.hydrologySystem,
+    terrainOcclusionSampler: treeTerrainOcclusionSampler,
     searchParams,
     materialController: terrainView.materialController,
     skyEnvironment: terrainView.skyEnvironment,

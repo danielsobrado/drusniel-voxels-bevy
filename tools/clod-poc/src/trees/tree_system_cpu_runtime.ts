@@ -21,6 +21,11 @@ import {
   treeFootprintRadius,
 } from "./tree_system_math.js";
 import {
+  isTreeClusterTerrainOccluded,
+  type TreeTerrainOcclusionSampler,
+  type TreeTerrainOcclusionSettings,
+} from "./tree_terrain_occlusion.js";
+import {
   writeTreeImpostorUvRectIfChanged,
   writeTreeLodDitherRoleIfChanged,
   writeTreeLodFadeIfChanged,
@@ -50,6 +55,7 @@ export interface TreeCpuPatchRuntimeInput {
   patches: readonly TreePatch[];
   settings: TreeSettings;
   sampler: TreeTerrainSampler | undefined;
+  terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
   worldCells: number;
   meshBoundsState: WeakMap<THREE.InstancedMesh, TreeMeshBoundsState>;
   impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
@@ -124,8 +130,19 @@ export function updateTreePatchLods(
   for (const patch of input.patches) {
     resetTreeMeshWriteStateForGrid(patch.meshes, write);
     patch.visible = treeDistance2d(center.x, center.z, patch.centerX, patch.centerZ) <= lodDistances.impostor + patch.radius;
-    patch.group.visible = patch.visible;
-    if (!patch.visible) {
+    patch.terrainOccluded = patch.visible && isTreeClusterTerrainOccluded({
+      sampler: input.terrainOcclusionSampler,
+      settings: treeTerrainOcclusionSettings(input.settings),
+      cameraX: cameraPosition.x,
+      cameraY: cameraPosition.y,
+      cameraZ: cameraPosition.z,
+      targetX: patch.centerX,
+      targetZ: patch.centerZ,
+      targetGroundY: treePatchTargetGroundY(input.terrainOcclusionSampler, patch),
+      targetRadiusM: patch.radius,
+    });
+    patch.group.visible = patch.visible && !patch.terrainOccluded;
+    if (!patch.visible || patch.terrainOccluded) {
       flushPatchMeshes(input, patch, center, write);
       continue;
     }
@@ -184,8 +201,27 @@ function createTreePatch(input: TreeCpuPatchRuntimeInput, node: ClodPageNode, ca
     meshes,
     previousLods: instances.map(() => null),
     visible: false,
+    terrainOccluded: false,
     generationStats,
   };
+}
+
+function treeTerrainOcclusionSettings(settings: TreeSettings): TreeTerrainOcclusionSettings {
+  const visibility = settings.gpu.terrainVisibility;
+  return {
+    enabled: visibility.enabled,
+    minDistanceM: visibility.minDistanceM,
+    sampleCount: visibility.sampleCount,
+    heightMarginM: visibility.heightMarginM,
+    canopyHeightM: visibility.crownHeightM,
+  };
+}
+
+function treePatchTargetGroundY(sampler: TreeTerrainOcclusionSampler | undefined, patch: TreePatch): number {
+  const sampled = sampler?.sampleHeight(patch.centerX, patch.centerZ);
+  if (sampled && !sampled.unknown && Number.isFinite(sampled.height)) return sampled.height;
+  const instance = patch.instances[0];
+  return instance ? instance.position[1] : 0;
 }
 
 function flushPatchMeshes(
