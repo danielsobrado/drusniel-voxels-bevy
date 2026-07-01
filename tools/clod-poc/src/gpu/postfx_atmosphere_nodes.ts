@@ -20,7 +20,6 @@ import {
 import type { PostFxAtmosphereSettings, PostFxFroxelDebugMode } from "./postfx_atmosphere.js";
 import type { PostFxFroxelVolumeNodeInput } from "./postfx_froxel_volume.js";
 import type { PostFxHillaireLutNodeInput } from "./postfx_hillaire_luts.js";
-import { parsePostFxStageFlags, stageAllowed } from "./postfx_stage_flags.js";
 
 type TslAny = any;
 const tslMix = mix as unknown as (a: TslAny, b: TslAny, amount: TslAny) => TslAny;
@@ -36,36 +35,6 @@ export interface HillaireFroxelAerialNodeInput {
   froxelDebugMode?: PostFxFroxelDebugMode;
   froxelVolume?: PostFxFroxelVolumeNodeInput | null;
   hillaireLuts?: PostFxHillaireLutNodeInput | null;
-}
-
-function currentSearchParams(): URLSearchParams | null {
-  if (typeof globalThis.location === "undefined") return null;
-  return new URLSearchParams(globalThis.location.search);
-}
-
-function normalizedSearch(search: string | URLSearchParams | null): URLSearchParams {
-  if (search instanceof URLSearchParams) return search;
-  if (!search) return new URLSearchParams();
-  return new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-}
-
-function queryFlag(params: URLSearchParams, keys: readonly string[]): boolean | null {
-  for (const key of keys) {
-    const raw = params.get(key);
-    if (raw === null) continue;
-    const value = raw.trim().toLowerCase();
-    if (value === "1" || value === "true" || value === "on" || value === "yes") return true;
-    if (value === "0" || value === "false" || value === "off" || value === "no") return false;
-  }
-  return null;
-}
-
-export function hillaireAerialAllowedByStageFlags(search: string | URLSearchParams | null = currentSearchParams()): boolean {
-  const params = normalizedSearch(search);
-  if (!stageAllowed(parsePostFxStageFlags(params), "aerial")) return false;
-  if (queryFlag(params, ["aerial", "aerialPerspective"]) === false) return false;
-  if (queryFlag(params, ["fog", "haze"]) === false) return false;
-  return true;
 }
 
 function phaseHenyeyGreenstein(cosTheta: TslAny, g: number): TslAny {
@@ -84,7 +53,7 @@ function hashNoise(uv: TslAny): TslAny {
 
 export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeInput): TslAny {
   const { hillaire, froxels } = input.settings;
-  const hillaireEnabled = hillaire.enabled && hillaireAerialAllowedByStageFlags();
+  const hillaireEnabled = hillaire.enabled;
   const maxAerialDistance = Math.max(1, hillaire.maxDistanceMeters);
   const maxFroxelDistance = Math.max(froxels.nearMeters, froxels.maxDistanceMeters);
   const froxelSteps = froxels.steps;
@@ -113,15 +82,9 @@ export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeIn
           1,
         );
         const integrated = texture3D(volume.integratedTexture, vec3(screenUV.x, screenUV.y, volumeDepth), 0) as TslAny;
-        if (froxelDebugMode === "density") {
-          return vec3(clamp(float(1).sub(integrated.a), 0, 1));
-        }
-        if (froxelDebugMode === "transmittance") {
-          return vec3(clamp(integrated.a, 0, 1));
-        }
-        if (froxelDebugMode === "scatter") {
-          return clamp(integrated.rgb.mul(4), 0, 1);
-        }
+        if (froxelDebugMode === "density") return vec3(clamp(float(1).sub(integrated.a), 0, 1));
+        if (froxelDebugMode === "transmittance") return vec3(clamp(integrated.a, 0, 1));
+        if (froxelDebugMode === "scatter") return clamp(integrated.rgb.mul(4), 0, 1);
         color.assign(color.mul(integrated.a).add(integrated.rgb));
       } else {
         const groundAnchor = input.cameraPosition.add(dirW.mul(fogDistance));
@@ -169,15 +132,9 @@ export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeIn
             transmittance.mulAssign(sliceT);
           });
         }
-        if (froxelDebugMode === "density") {
-          return vec3(clamp(opticalDepth.mul(0.6), 0, 1));
-        }
-        if (froxelDebugMode === "transmittance") {
-          return vec3(clamp(transmittance, 0, 1));
-        }
-        if (froxelDebugMode === "scatter") {
-          return clamp(scatter.mul(4), 0, 1);
-        }
+        if (froxelDebugMode === "density") return vec3(clamp(opticalDepth.mul(0.6), 0, 1));
+        if (froxelDebugMode === "transmittance") return vec3(clamp(transmittance, 0, 1));
+        if (froxelDebugMode === "scatter") return clamp(scatter.mul(4), 0, 1);
         color.assign(color.mul(transmittance).add(scatter));
       }
     }
