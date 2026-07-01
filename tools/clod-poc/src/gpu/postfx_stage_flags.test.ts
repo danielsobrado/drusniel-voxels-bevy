@@ -8,23 +8,26 @@ describe("postfx stage flags", () => {
     expect(stageAllowed(flags, "bloom")).toBe(true);
     expect(stageAllowed(flags, "taa")).toBe(true);
     expect(stageAllowed(flags, "gtao")).toBe(true);
+    expect(stageAllowed(flags, "froxels")).toBe(true);
   });
 
   it("ablates comma-separated stage names and aliases", () => {
-    const flags = parsePostFxStageFlags("?ablate=bloom,traa,ao,contactShadows,color-bounce");
+    const flags = parsePostFxStageFlags("?ablate=bloom,traa,ao,contactShadows,color-bounce,froxels");
     expect(stageAllowed(flags, "bloom")).toBe(false);
     expect(stageAllowed(flags, "taa")).toBe(false);
     expect(stageAllowed(flags, "gtao")).toBe(false);
     expect(stageAllowed(flags, "contact")).toBe(false);
     expect(stageAllowed(flags, "bounce")).toBe(false);
+    expect(stageAllowed(flags, "froxels")).toBe(false);
     expect(stageAllowed(flags, "aerial")).toBe(true);
   });
 
   it("supports whitespace and plus separated ablation lists", () => {
-    const flags = parsePostFxStageFlags("ablate=aerial+autoExposure colorScript");
+    const flags = parsePostFxStageFlags("ablate=aerial+autoExposure colorScript volumetric-fog");
     expect(stageAllowed(flags, "aerial")).toBe(false);
     expect(stageAllowed(flags, "autoExposure")).toBe(false);
     expect(stageAllowed(flags, "colorScript")).toBe(false);
+    expect(stageAllowed(flags, "froxels")).toBe(false);
     expect(stageAllowed(flags, "bloom")).toBe(true);
   });
 
@@ -35,6 +38,7 @@ describe("postfx stage flags", () => {
     expect(stageAllowed(flags, "taa")).toBe(false);
     expect(stageAllowed(flags, "aerial")).toBe(false);
     expect(stageAllowed(flags, "gtao")).toBe(false);
+    expect(stageAllowed(flags, "froxels")).toBe(false);
     expect(stageAllowed(flags, "colorScript")).toBe(true);
   });
 
