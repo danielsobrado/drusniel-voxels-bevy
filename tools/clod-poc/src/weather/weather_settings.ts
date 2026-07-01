@@ -5,7 +5,7 @@ import type {
   SnowWeatherSettings,
   StormWeatherSettings,
 } from "./rain_types.js";
-import type { RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 
 export type WindWeatherSettings = RainWeatherSettings | SnowWeatherSettings | SandstormWeatherSettings;
 
