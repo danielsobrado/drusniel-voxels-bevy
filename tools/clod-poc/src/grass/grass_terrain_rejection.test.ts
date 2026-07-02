@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PageFootprint } from "../types.js";
 import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import { DEFAULT_GRASS_SETTINGS, cloneGrassSettings } from "./grass_config.js";
-import { generateGrassInstances } from "./grass_cpu_patch.js";
+import { clearGrassTerrainRejectionCache, generateGrassInstances } from "./grass_cpu_patch.js";
 import type { GrassGenerationStats } from "./grass_stats.js";
 
 function makeStats(): GrassGenerationStats {
@@ -13,7 +13,10 @@ function makeStats(): GrassGenerationStats {
   };
 }
 
-beforeEach(resetTerrainRejectionConfig);
+beforeEach(() => {
+  resetTerrainRejectionConfig();
+  clearGrassTerrainRejectionCache();
+});
 afterEach(resetTerrainRejectionConfig);
 
 describe("grass terrain rejection", () => {
@@ -34,6 +37,7 @@ describe("grass terrain rejection", () => {
     const settings = cloneGrassSettings(DEFAULT_GRASS_SETTINGS);
     settings.minHeight = 10_000;
     settings.placement.minHeightM = 10_000;
+    settings.slopeMinY = 0;
     const stats = makeStats();
     const footprint: PageFootprint = { minX: 32, minZ: 32, maxX: 48, maxZ: 48 };
 

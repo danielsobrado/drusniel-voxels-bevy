@@ -136,7 +136,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       selectionStats = terrain.selectionController.stats();
       player.playerInputController.playerTimer.update();
       playerDelta = Math.min(player.playerInputController.playerTimer.getDelta(), 0.1);
-      vegetation.propController?.updateDynamicPlacements();
     });
     updateAverageFps();
 

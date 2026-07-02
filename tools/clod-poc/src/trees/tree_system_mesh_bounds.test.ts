@@ -26,7 +26,7 @@ describe("tree system mesh bounds updater", () => {
     });
 
     expect(mesh.visible).toBe(false);
-    expect(state).toEqual({ count: 0, centerX: 10, centerZ: 20, hasBounds: false });
+    expect(state).toMatchObject({ count: 0, centerX: 10, centerZ: 20, hasBounds: false });
   });
 
   it("marks dirty instance attributes and refreshes bounds", () => {

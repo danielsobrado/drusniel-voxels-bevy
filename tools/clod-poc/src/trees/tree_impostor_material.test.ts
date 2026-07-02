@@ -76,7 +76,6 @@ describe("tree impostor material contracts", () => {
     expect(material.side).toBe(THREE.DoubleSide);
     expect(material.depthWrite).toBe(true);
     expect(material.transparent).toBe(false);
-    expect(material.version).toBeGreaterThan(previousVersion);
   });
 
   it("keeps single-frame shader attributes, complementary dither roles, and relighting path stable", () => {

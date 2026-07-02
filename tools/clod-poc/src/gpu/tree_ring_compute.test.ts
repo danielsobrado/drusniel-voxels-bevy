@@ -25,7 +25,7 @@ import { composeTreeRingShader } from "./wgsl_modules.js";
 function withGpuReadbacks(search: string, run: () => void): void {
   const root = globalThis as typeof globalThis & { window?: { location?: { search?: string } } };
   const previous = root.window;
-  root.window = { location: { search } };
+  root.window = { location: { search } } as typeof root.window;
   try {
     run();
   } finally {

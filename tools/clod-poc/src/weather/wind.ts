@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { Rng, hashCombine, hashString } from "../core/seed.js";
 import { createWindNodeMaterial } from "./windNodeMaterial.js";
 import { createWindShaderMaterial } from "./windShaderMaterial.js";
-import type { RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 
 export interface WindWeatherSettings {
   enabled: boolean;

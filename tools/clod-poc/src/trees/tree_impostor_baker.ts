@@ -206,7 +206,7 @@ function bakeAtlasTarget(
   }
 }
 
-function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettings): THREE.MeshBasicMaterial {
+function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettings): THREE.Material {
   const map = sourceMaterial instanceof THREE.MeshStandardMaterial || sourceMaterial instanceof THREE.MeshBasicMaterial
     ? sourceMaterial.map
     : null;

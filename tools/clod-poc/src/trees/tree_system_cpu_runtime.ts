@@ -284,18 +284,18 @@ function placeTreeInstance(
   write: TreeMeshWriteState,
 ): void {
   const mesh = patch.meshes[instance.species][lod];
-  const writeIndex = treeMeshWriteCount(write, mesh);
+  const writeIndex = treeMeshWriteCount(mesh, write);
   if (writeIndex >= mesh.count) return;
   const resolveLod = input.resolveLod(instance.species, lod);
   const renderLod = resolveLod === lod ? lod : resolveLod;
   const effectiveMesh = patch.meshes[instance.species][renderLod];
-  const effectiveIndex = effectiveMesh === mesh ? writeIndex : treeMeshWriteCount(write, effectiveMesh);
+  const effectiveIndex = effectiveMesh === mesh ? writeIndex : treeMeshWriteCount(effectiveMesh, write);
   if (effectiveIndex >= effectiveMesh.count) return;
-  writeTreeWorldXZIfChanged(effectiveMesh, effectiveIndex, instance.position[0], instance.position[2], () => markTreeMeshWorldXZChanged(write, effectiveMesh));
-  writeTreeLodFadeIfChanged(effectiveMesh, effectiveIndex, fade, () => markTreeMeshFadeChanged(write, effectiveMesh));
-  writeTreeLodDitherRoleIfChanged(effectiveMesh, effectiveIndex, ditherRole, () => markTreeMeshFadeChanged(write, effectiveMesh));
+  if (writeTreeWorldXZIfChanged(effectiveMesh, effectiveIndex, instance.position[0], instance.position[2])) markTreeMeshWorldXZChanged(effectiveMesh, write);
+  if (writeTreeLodFadeIfChanged(effectiveMesh, effectiveIndex, fade)) markTreeMeshFadeChanged(effectiveMesh, write);
+  if (writeTreeLodDitherRoleIfChanged(effectiveMesh, effectiveIndex, ditherRole)) markTreeMeshFadeChanged(effectiveMesh, write);
   if (renderLod === "impostor") {
-    writeTreeImpostorUvRectIfChanged(effectiveMesh, effectiveIndex, instance.species, cameraPosition, input.impostorAtlases, () => markTreeMeshImpostorUvChanged(write, effectiveMesh));
+    if (writeTreeImpostorUvRectIfChanged({ mesh: effectiveMesh, index: effectiveIndex, instance, cameraPosition, settings: input.settings, impostorAtlases: input.impostorAtlases })) markTreeMeshImpostorUvChanged(effectiveMesh, write);
   }
   TREE_CPU_TRANSLATION.set(instance.position[0] - patch.centerX, instance.position[1], instance.position[2] - patch.centerZ);
   TREE_CPU_SCALE.set(instance.scale, instance.scale, instance.scale);
@@ -312,8 +312,8 @@ function placeTreeInstance(
     effectiveMesh.matrixWorld.decompose(TREE_CPU_TRANSLATION, TREE_CPU_ROTATION, TREE_CPU_SCALE);
     TREE_CPU_MATRIX_SCRATCH.copy(TREE_CPU_MATRIX);
   }
-  setTreeInstanceMatrixWhenChanged(effectiveMesh, effectiveIndex, TREE_CPU_MATRIX, () => markTreeMeshMatrixChanged(write, effectiveMesh));
-  incrementTreeMeshWriteCount(write, effectiveMesh);
+  if (setTreeInstanceMatrixWhenChanged(effectiveMesh, effectiveIndex, TREE_CPU_MATRIX)) markTreeMeshMatrixChanged(effectiveMesh, write);
+  incrementTreeMeshWriteCount(effectiveMesh, write);
 }
 
 function noopEarlyTerrainRejectionStats(): TreeEarlyTerrainRejectionStats {
@@ -323,12 +323,21 @@ function noopEarlyTerrainRejectionStats(): TreeEarlyTerrainRejectionStats {
     acceptedPatches: 0,
     unknownKeptPatches: 0,
     skippedCandidateEstimate: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
     reasonCounts: {
+      accepted: 0,
       visible: 0,
       terrain_hidden: 0,
       unknown_kept: 0,
       near_forced_visible: 0,
       disabled: 0,
+      missing_sampler: 0,
+      below_water: 0,
+      wrong_biome: 0,
+      too_steep: 0,
+      height_range: 0,
+      outside_world: 0,
       not_tested: 0,
     },
   };

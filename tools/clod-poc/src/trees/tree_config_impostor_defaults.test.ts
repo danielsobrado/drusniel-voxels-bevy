@@ -6,7 +6,7 @@ describe("tree impostor parity defaults", () => {
     expect(DEFAULT_TREE_IMPOSTOR_SETTINGS.enabled).toBe(true);
     expect(DEFAULT_TREE_IMPOSTOR_SETTINGS.bakeOnStart).toBe(true);
     expect(DEFAULT_TREE_IMPOSTOR_SETTINGS.octahedralGridSize).toBe(8);
-    expect(DEFAULT_TREE_IMPOSTOR_SETTINGS.resolutionPx).toBe(128);
+    expect(DEFAULT_TREE_IMPOSTOR_SETTINGS.resolutionPx).toBe(256);
     expect(DEFAULT_TREE_IMPOSTOR_SETTINGS.futureNormalDepth).toBe(true);
   });
 

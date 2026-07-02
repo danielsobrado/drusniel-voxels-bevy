@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 import type { MeadowWeatherSettings, MeadowWeatherStats, MeadowWeatherOptions } from "./meadow_types.js";
 import { DEFAULT_MEADOW_WEATHER_SETTINGS, MEADOW_CELL_SIZE, MEADOW_PARTICLE_COUNT } from "./meadow_defaults.js";
 import { createMeadowGeometry, createMeadowNodeMaterial, createMeadowShaderMaterial } from "./meadow_material.js";

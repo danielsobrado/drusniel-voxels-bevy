@@ -10,6 +10,7 @@ import { createTreeSystemGpuRingDrawResources } from "./tree_system_gpu_ring_res
 const materialFactoryMocks = vi.hoisted(() => ({
   regular: vi.fn(),
   impostor: vi.fn(),
+  far: vi.fn(),
 }));
 
 vi.mock("./tree_node_material.js", () => ({
@@ -20,20 +21,27 @@ vi.mock("./tree_ring_impostor_node_material.js", () => ({
   createTreeRingImpostorNodeMaterialHandle: materialFactoryMocks.impostor,
 }));
 
+vi.mock("./tree_ring_far_node_material.js", () => ({
+  createTreeRingFarNodeMaterialHandle: materialFactoryMocks.far,
+  treeRingUsesFarMaterial: (lod: string) => lod === "far" || lod === "impostor",
+}));
+
 describe("tree system GPU ring resources", () => {
   beforeEach(() => {
     materialFactoryMocks.regular.mockReset();
     materialFactoryMocks.impostor.mockReset();
-    materialFactoryMocks.regular.mockImplementation((_settings, _buffers, lod: string) => fakeHandle(`regular:${lod}`));
-    materialFactoryMocks.impostor.mockImplementation((_settings, _buffers, atlas: TreeImpostorAtlas) =>
+    materialFactoryMocks.far.mockReset();
+    materialFactoryMocks.regular.mockImplementation((_settings: unknown, _buffers: unknown, lod: string) => fakeHandle(`regular:${lod}`));
+    materialFactoryMocks.impostor.mockImplementation((_settings: unknown, _buffers: unknown, atlas: TreeImpostorAtlas) =>
       fakeHandle(`impostor:${atlas.species}`),
     );
+    materialFactoryMocks.far.mockImplementation((_settings: unknown, _buffers: unknown, lod: string) => fakeHandle(`far:${lod}`));
   });
 
   it("switches the impostor LOD from regular ring material to baked impostor material when the atlas is ready", () => {
     const pending = createResources({ oak: atlas("oak", false) });
 
-    expect(pending.materialHandles["oak:impostor"].regularMaterial.name).toBe("regular:impostor");
+    expect(pending.materialHandles["oak:impostor"].regularMaterial.name).toBe("far:impostor");
     expect(materialFactoryMocks.impostor).not.toHaveBeenCalled();
 
     materialFactoryMocks.regular.mockClear();
@@ -60,6 +68,7 @@ function createResources(impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpo
     impostorAtlases,
     crownProxyGeometry: sourceGeometry,
     useTreePrepass: false,
+    treePrepassMaxLod: "far",
     geometryForGpuRing: () => sourceGeometry,
   }, 2);
 }

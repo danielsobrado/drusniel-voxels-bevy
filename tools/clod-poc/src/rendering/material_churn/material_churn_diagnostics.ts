@@ -178,7 +178,7 @@ export class MaterialChurnDiagnostics {
   }
 
   private trackMaterial(material: THREE.Material): boolean {
-    const key = material.uuid || String(material.id);
+    const key = material.uuid || String((material as THREE.Material & { id?: number }).id);
     if (this.trackedMaterials.has(key)) return false;
     if (this.trackedMaterials.size >= this.config.maxTrackedMaterials) return false;
     this.trackedMaterials.set(key, { material, version: material.version });

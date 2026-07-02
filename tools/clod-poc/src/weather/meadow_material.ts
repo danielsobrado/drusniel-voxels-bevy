@@ -5,7 +5,7 @@ import {
   positionGeometry, sin, smoothstep, uniform, uv, vec2, vec3, vec4,
 } from "three/tsl";
 import { Rng, hashCombine, hashString } from "../core/seed.js";
-import type { RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 import type { MeadowBandOptions } from "./meadow_types.js";
 import {
   DEFAULT_MEADOW_WEATHER_SETTINGS, MEADOW_BOUNDS_RADIUS, MEADOW_FAR_COUNT,
@@ -129,10 +129,10 @@ export function createMeadowShaderMaterial(): RainWeatherShaderHandle {
   material.name = "weather-meadow-shader";
   return {
     material,
-    setTime: (time) => { uniforms.uTime.value = time; },
-    setIntensity: (intensity) => { uniforms.uIntensity.value = intensity; },
-    setCenter: (center) => { uniforms.uAnchor.value.copy(center); },
-    setWind: (x, z) => { uniforms.uWindX.value = x; uniforms.uWindZ.value = z; },
+    setTime: (time: number) => { uniforms.uTime.value = time; },
+    setIntensity: (intensity: number) => { uniforms.uIntensity.value = intensity; },
+    setCenter: (center: THREE.Vector3) => { uniforms.uAnchor.value.copy(center); },
+    setWind: (x: number, z: number) => { uniforms.uWindX.value = x; uniforms.uWindZ.value = z; },
     dispose: () => { material.dispose(); },
   };
 }
@@ -213,10 +213,10 @@ export function createMeadowNodeMaterial(): RainWeatherShaderHandle {
   material.blending = THREE.AdditiveBlending;
   return {
     material,
-    setTime: (time) => { uTime.value = time; },
-    setIntensity: (intensity) => { uIntensity.value = intensity; },
-    setCenter: (centerValue) => { uAnchor.value.copy(centerValue); },
-    setWind: (x, z) => { uWindX.value = x; uWindZ.value = z; },
+    setTime: (time: number) => { uTime.value = time; },
+    setIntensity: (intensity: number) => { uIntensity.value = intensity; },
+    setCenter: (centerValue: THREE.Vector3) => { uAnchor.value.copy(centerValue); },
+    setWind: (x: number, z: number) => { uWindX.value = x; uWindZ.value = z; },
     dispose: () => { material.dispose(); },
   };
 }

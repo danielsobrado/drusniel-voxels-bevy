@@ -231,7 +231,7 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
   },
   impostors: DEFAULT_TREE_IMPOSTOR_SETTINGS,
   foliage: DEFAULT_TREE_FOLIAGE_SETTINGS,
-  wind: DEFAULT_TREE_WIND_SETTINGS,
+  wind: { ...DEFAULT_TREE_WIND_SETTINGS, direction: [...DEFAULT_TREE_WIND_SETTINGS.direction] },
   render: {
     alphaTest: 0.42,
     castShadows: true,
@@ -243,6 +243,6 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
   ecology: DEFAULT_TREE_ECOLOGY_SETTINGS,
 };
 
-export function cloneTreeSettings(): TreeSettings {
-  return structuredClone(DEFAULT_TREE_SETTINGS);
+export function cloneTreeSettings(source: TreeSettings = DEFAULT_TREE_SETTINGS): TreeSettings {
+  return structuredClone(source);
 }

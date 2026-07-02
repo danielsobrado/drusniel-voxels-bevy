@@ -785,7 +785,7 @@ class ConstructionControllerImpl implements ConstructionController {
     const materialButtons = CONSTRUCTION_MATERIAL_OPTIONS.map((option, index) => {
       const active = option.id === material;
       const label = `${escapeHtml(option.label)}`;
-      const preview = escapeStyleUrl(option.thumbnailUrl);
+      const preview = escapeStyleUrl(option.previewUrl);
       return `<button data-material-index="${index}" title="${label}" style="${this.swatchStyle(active, option.color, preview)}"><span>${label}</span></button>`;
     }).join("");
     const status = this.currentCandidate

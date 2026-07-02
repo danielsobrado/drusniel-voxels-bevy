@@ -41,7 +41,7 @@ describe("GPU ring tree geometry selector", () => {
     });
 
     expect(result.bakedImpostor).toBe(false);
-    expect(result.geometry).toBe(geometries.pine.impostor);
+    expect(result.geometry).toBe(geometries.pine.far);
   });
 
   it("falls back to procedural impostor geometry when impostors are disabled", () => {
@@ -58,7 +58,7 @@ describe("GPU ring tree geometry selector", () => {
     });
 
     expect(result.bakedImpostor).toBe(false);
-    expect(result.geometry).toBe(geometries.oak.impostor);
+    expect(result.geometry).toBe(geometries.oak.far);
   });
 
   it("uses and caches baked billboard geometry when the species atlas is ready", () => {

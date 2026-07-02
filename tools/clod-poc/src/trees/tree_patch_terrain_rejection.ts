@@ -29,8 +29,10 @@ export interface TreeEarlyTerrainRejectionStats {
   reasonCounts: Record<TreeEarlyTerrainRejectionReason, number>;
 }
 
-export interface TreeEarlyTerrainRejectionDecision extends VegetationTerrainRejectionDecision {
+export interface TreeEarlyTerrainRejectionDecision {
+  reject: boolean;
   reason: TreeEarlyTerrainRejectionReason;
+  skippedCandidateEstimate: number;
 }
 
 export interface TreeEarlyTerrainRejectionInput {
@@ -83,7 +85,7 @@ export function rejectTreePatchBeforeGeneration(input: TreeEarlyTerrainRejection
 
   const decision = evaluateTreePatchBeforeGeneration(input);
   if (DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.decisionCacheEnabled) {
-    TREE_EARLY_TERRAIN_REJECTION_CACHE.set(cacheKey, decision);
+    TREE_EARLY_TERRAIN_REJECTION_CACHE.set(cacheKey, decision as VegetationTerrainRejectionDecision);
   }
   return decision;
 }

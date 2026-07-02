@@ -6,6 +6,8 @@ import { LockedBorderOverlay } from "../../../ui/locked_border_overlay.js";
 import { DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG } from "../../geometry/page_geometry_cache.js";
 import { DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG } from "../../rendering/clod_render_node_cache_config.js";
 import { DEFAULT_SELECTION_CUT_CACHE_CONFIG } from "../selection_cut_cache.js";
+import { DEFAULT_MATERIAL_CHURN_CONFIG } from "../../../rendering/material_churn/material_churn_diagnostics.js";
+import { DEFAULT_RENDER_RESOLUTION_CONFIG } from "../../../rendering/render_resolution_config.js";
 import { createClodSelectionController, type ClodSelectionTerrainView } from "../clod_selection_controller.js";
 
 function runtimeConfig(): ClodRuntimeConfig {
@@ -26,6 +28,8 @@ function runtimeConfig(): ClodRuntimeConfig {
     pageGeometryCache: DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG,
     renderNodeCache: DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG,
     selectionCutCache: DEFAULT_SELECTION_CUT_CACHE_CONFIG,
+    materialChurn: DEFAULT_MATERIAL_CHURN_CONFIG,
+    renderResolution: DEFAULT_RENDER_RESOLUTION_CONFIG,
     digging: { holdIntervalMs: 400 },
     profiling: { slowFrameMs: 24 },
   };
@@ -141,9 +145,9 @@ describe("createClodSelectionController cache hits", () => {
     controller.update();
 
     expect(controller.stats().selectionCache.hits).toBe(1);
-    expect(getOrCreateView).toHaveBeenCalledTimes(2);
-    expect(markActiveNodes).toHaveBeenCalledTimes(2);
-    expect(prefetchNodes).toHaveBeenCalledTimes(2);
+    expect(getOrCreateView).toHaveBeenCalledTimes(1);
+    expect(markActiveNodes).toHaveBeenCalledTimes(1);
+    expect(prefetchNodes).toHaveBeenCalledTimes(1);
     expect([...views.values()][0].selected).toBe(true);
     expect([...views.values()][0].target).toBe(1);
 

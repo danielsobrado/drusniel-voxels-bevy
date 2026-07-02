@@ -19,6 +19,7 @@ export interface TreeMeshBoundsState {
   centerX: number;
   centerZ: number;
   hasBounds: boolean;
+  worldMatrix?: THREE.Matrix4;
 }
 
 export interface TreeMeshLodUpdateInput {
@@ -71,6 +72,7 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
       centerX: input.center.x,
       centerZ: input.center.z,
       hasBounds: false,
+      worldMatrix: input.mesh.matrixWorld.clone(),
     };
   }
 
@@ -87,6 +89,7 @@ export function updateTreeMeshAfterLod(input: TreeMeshLodUpdateInput): TreeMeshB
       centerX: input.center.x,
       centerZ: input.center.z,
       hasBounds: true,
+      worldMatrix: input.mesh.matrixWorld.clone(),
     };
   }
 

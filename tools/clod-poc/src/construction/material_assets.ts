@@ -38,6 +38,7 @@ export interface ConstructionMaterialAsset {
 export interface ConstructionMaterialOption {
   id: ConstructionMaterial;
   label: string;
+  color: number;
   previewUrl: string;
 }
 

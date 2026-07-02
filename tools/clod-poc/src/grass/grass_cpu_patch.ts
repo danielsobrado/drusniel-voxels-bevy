@@ -34,6 +34,10 @@ interface FootprintProbe {
 
 const GRASS_TERRAIN_REJECTION_CACHE = new VegetationTerrainRejectionCache();
 
+export function clearGrassTerrainRejectionCache(): void {
+  GRASS_TERRAIN_REJECTION_CACHE.clear();
+}
+
 export function edgeFadeForCandidate(x: number, z: number, height: number, normalY: number, spacing: number): number {
   const sampleDistance = Math.max(0.75, spacing * 1.25);
   const samples = [

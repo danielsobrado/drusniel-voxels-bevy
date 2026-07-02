@@ -7,7 +7,7 @@ function withoutFarSummaryAtlasSection(yaml: string): string {
 }
 
 function withFarSummaryAtlasFormat(yaml: string, format: string): string {
-  return yaml.replace(/(\n  far_summary_atlas:\n    format: )[^\n]+\n/, `$1${format}\n`);
+  return yaml.replace(/(\r?\n\s+far_summary_atlas:\r?\n\s+format:\s*).+\r?(\n|$)/, `$1${format}$2`);
 }
 
 describe("naadf config", () => {
