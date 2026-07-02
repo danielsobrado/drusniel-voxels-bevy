@@ -15,6 +15,7 @@ import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_caster
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
 import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
+import { withConservativeGrassFrustum } from "./grass_ring_wgsl_transforms.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
   withTreeFinalPlacementHeight,
@@ -31,10 +32,6 @@ function composeShader(label: string, chunks: readonly string[]): string {
     throw new Error(`${label} contains unresolved shader module object`);
   }
   return source;
-}
-
-function withConservativeGrassFrustum(source: string): string {
-  return source.replace("if (!in_frustum(vec3<f32>(wpos.x, height + 1.0, wpos.y), 2.5)) { return; }", "if (!in_frustum(vec3<f32>(wpos.x, height + 1.0, wpos.y), max(6.0, cell_size * 0.75))) { return; }");
 }
 
 export function composeTerrainFieldShader(): string {
