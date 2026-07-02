@@ -91,7 +91,8 @@ export interface UiStartupInput {
 }
 
 export interface UiSessionState {
-  [key: string]: unknown;
+  // Extra bootstrap modules attach optional controllers after their startup phases.
+  [key: string]: any;
   averageFpsRef: { value: number };
   lastDigSummary: string;
   lastArchiveSummary: string;
