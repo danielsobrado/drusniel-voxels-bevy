@@ -65,6 +65,20 @@ describe("tree LOD selection", () => {
     expect(afterThreshold.secondaryFade).toBeCloseTo(0.25);
   });
 
+  it("can force one hard LOD even when crossfade settings are enabled", () => {
+    const crossfadeSettings: TreeSettings = {
+      ...settings,
+      lod: { ...settings.lod, crossfadeEnabled: true, ditherEnabled: true, crossfadeBandM: 20 },
+    };
+
+    const selection = selectTreeLod(50, "near", crossfadeSettings, { allowCrossfade: false });
+
+    expect(selection.lod).toBe("near");
+    expect(selection.fade).toBe(1);
+    expect(selection.secondaryLod).toBeNull();
+    expect(selection.secondaryFade).toBe(0);
+  });
+
   it("keeps far to impostor fades continuous across the impostor threshold", () => {
     const crossfadeSettings: TreeSettings = {
       ...settings,
