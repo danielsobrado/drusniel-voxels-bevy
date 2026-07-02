@@ -32,6 +32,10 @@ interface SunLightWindowHooks {
   __drusnielSunLightRefresh?: () => void;
 }
 
+function queryFlag(searchParams: URLSearchParams, key: string, fallback: boolean): boolean {
+  return searchParams.has(key) ? searchParams.get(key) !== "0" : fallback;
+}
+
 function setQueryValue(key: string, value: string | null): void {
   const next = new URLSearchParams(location.search);
   if (value === null) next.delete(key);
@@ -58,11 +62,12 @@ function clearRuntimeCache(): void {
 
 export function createSunLightGui(gui: GUI): void {
   const initialOptions = readRuntimeOptions() ?? loadBundledSunLightOptions();
+  const searchParams = new URLSearchParams(location.search);
   const folder = gui.addFolder("sun light cache");
   const state = {
-    active: new URLSearchParams(location.search).get("sunLightCache") !== "0" && initialOptions.active,
-    stats: new URLSearchParams(location.search).get("sunLightStats") === "1" || initialOptions.diagnostics,
-    debug: new URLSearchParams(location.search).get("sunLightDebug") === "1" || initialOptions.debugView.active === true,
+    active: queryFlag(searchParams, "sunLightCache", initialOptions.active),
+    stats: queryFlag(searchParams, "sunLightStats", initialOptions.diagnostics),
+    debug: queryFlag(searchParams, "sunLightDebug", initialOptions.debugView.active === true),
     maxTilesPerFrame: initialOptions.build.maxTilesPerFrame,
     maxBuildMsPerFrame: initialOptions.build.maxBuildMsPerFrame,
     tileResolution: initialOptions.tile.resolution,
@@ -79,17 +84,17 @@ export function createSunLightGui(gui: GUI): void {
   folder.add(state, "active").name("enabled").onChange((enabled: boolean) => {
     const options = readRuntimeOptions();
     if (options) options.active = enabled;
-    setQueryValue("sunLightCache", enabled ? null : "0");
+    setQueryValue("sunLightCache", enabled ? "1" : "0");
   });
   folder.add(state, "stats").name("stats counters").onChange((enabled: boolean) => {
     const options = readRuntimeOptions();
     if (options) options.diagnostics = enabled;
-    setQueryValue("sunLightStats", enabled ? "1" : null);
+    setQueryValue("sunLightStats", enabled ? "1" : "0");
   });
   folder.add(state, "debug").name("debug overlay").onChange((enabled: boolean) => {
     const options = readRuntimeOptions();
     if (options) options.debugView.active = enabled;
-    setQueryValue("sunLightDebug", enabled ? "1" : null);
+    setQueryValue("sunLightDebug", enabled ? "1" : "0");
   });
   folder.add(state, "maxTilesPerFrame", 1, 16, 1).name("tiles / frame").onChange((value: number) => {
     const options = readRuntimeOptions();
