@@ -15,6 +15,7 @@ import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_caster
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
 import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
+import { composeShader } from "./wgsl_compose.js";
 import { withConservativeGrassFrustum } from "./grass_ring_wgsl_transforms.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
@@ -25,14 +26,6 @@ import {
 } from "./tree_ring_wgsl_transforms.js";
 
 export { withTreePcgHash } from "./tree_ring_wgsl_transforms.js";
-
-function composeShader(label: string, chunks: readonly string[]): string {
-  const source = chunks.join("\n\n");
-  if (source.includes("[object Object]")) {
-    throw new Error(`${label} contains unresolved shader module object`);
-  }
-  return source;
-}
 
 export function composeTerrainFieldShader(): string {
   return composeShader("terrain field shader", [terrainBindings, terrainCommon, terrainEntry]);
