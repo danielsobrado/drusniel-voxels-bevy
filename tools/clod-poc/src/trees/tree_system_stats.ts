@@ -7,6 +7,12 @@ import { visibleTreeLodCount } from "./tree_system_math.js";
 export type TreeSystemGpuStatus = "disabled" | "unsupported" | "ring" | "fallback-cpu" | "error";
 export type TreeSystemImpostorStatus = "disabled" | "pending" | "baking" | "baked" | "fallback";
 
+export interface TreeVisibleClusterMaskStats {
+  visibleClusterHidden: number;
+  visibleClusterVisible: number;
+  visibleClusterUnknownKept: number;
+}
+
 export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   totalTrees: number;
   patches: number;
@@ -34,6 +40,9 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   gpuShowCounts: boolean;
   terrainHiddenCandidates: number;
   terrainVisibleCandidates: number;
+  visibleClusterHidden: number;
+  visibleClusterVisible: number;
+  visibleClusterUnknownKept: number;
   impostorStatus: TreeSystemImpostorStatus;
   impostorReason: string | null;
 }
@@ -55,6 +64,7 @@ export interface TreeSystemGpuStatsInput {
     terrainHiddenCandidates: number;
     terrainVisibleCandidates: number;
   } | null;
+  visibleClusterMaskStats?: TreeVisibleClusterMaskStats | null;
 }
 
 export interface BuildTreeSystemStatsInput {
@@ -100,6 +110,9 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     gpuShowCounts: true,
     terrainHiddenCandidates: 0,
     terrainVisibleCandidates: 0,
+    visibleClusterHidden: 0,
+    visibleClusterVisible: 0,
+    visibleClusterUnknownKept: 0,
     impostorStatus: "disabled",
     impostorReason: null,
     generatedCandidates: 0,
@@ -162,6 +175,11 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
   if (input.gpuRingStats.terrainVisibilityCounts) {
     stats.terrainHiddenCandidates = input.gpuRingStats.terrainVisibilityCounts.terrainHiddenCandidates;
     stats.terrainVisibleCandidates = input.gpuRingStats.terrainVisibilityCounts.terrainVisibleCandidates;
+  }
+  if (input.gpuRingStats.visibleClusterMaskStats) {
+    stats.visibleClusterHidden = input.gpuRingStats.visibleClusterMaskStats.visibleClusterHidden;
+    stats.visibleClusterVisible = input.gpuRingStats.visibleClusterMaskStats.visibleClusterVisible;
+    stats.visibleClusterUnknownKept = input.gpuRingStats.visibleClusterMaskStats.visibleClusterUnknownKept;
   }
   stats.impostorStatus = input.impostorStatus;
   stats.impostorReason = input.impostorReason;
