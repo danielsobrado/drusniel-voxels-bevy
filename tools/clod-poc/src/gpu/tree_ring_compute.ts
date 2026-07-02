@@ -1,4 +1,5 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
+import { createTreeHydrologyTexture } from "./tree_ring_compute_resources.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { treeRingSpeciesGroupIndex, treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { composeTreeRingShader } from "./wgsl_modules.js";
@@ -360,7 +361,7 @@ export class TreeGpuRingCompute {
       shadowCpu: new Uint32Array(TREE_GPU_RING_SHADOW_GROUP_COUNT),
       terrainVisibilityCpu: new Uint32Array(TREE_TERRAIN_VISIBILITY_COUNTER_COUNT),
     }));
-    this.hydroTexture = this.createHydrologyTexture(hydroData);
+    this.hydroTexture = createTreeHydrologyTexture(device, hydroData);
     const hydroSampler = device.createSampler({ label: "tree ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
     this.bindGroup = device.createBindGroup({
       label: "tree ring bind group",
@@ -525,19 +526,6 @@ export class TreeGpuRingCompute {
     pass.setBindGroup(0, this.bindGroup);
     pass.dispatchWorkgroups(Math.max(1, workgroups));
     pass.end();
-  }
-
-  private createHydrologyTexture(hydroData: TreeHydrologyData | null): GPUTexture {
-    if (hydroData && hydroData.data.length > 0) {
-      const texture = this.device.createTexture({ label: "tree ring hydro texture", size: { width: hydroData.res, height: hydroData.res }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-      const bytes = new Uint8Array(hydroData.data.byteLength);
-      bytes.set(new Uint8Array(hydroData.data.buffer, hydroData.data.byteOffset, hydroData.data.byteLength));
-      this.device.queue.writeTexture(
-        { texture },
-        bytes, { bytesPerRow: hydroData.res * 16 }, { width: hydroData.res, height: hydroData.res });
-      return texture;
-    }
-    return this.device.createTexture({ label: "tree ring fallback hydro texture", size: { width: 1, height: 1 }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING });
   }
 }
 
