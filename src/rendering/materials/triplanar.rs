@@ -285,9 +285,11 @@ impl Material for TriplanarMaterial {
                     fragment
                         .shader_defs
                         .push("TERRAIN_SINGLE_PROJECTION_FAR".into());
+                    fragment.shader_defs.push("TERRAIN_VERTEX_SPLAT_CACHE".into());
                 }
                 TerrainMaterialQuality::HorizonProxy => {
                     fragment.shader_defs.push("TERRAIN_HORIZON_PROXY".into());
+                    fragment.shader_defs.push("TERRAIN_VERTEX_SPLAT_CACHE".into());
                 }
                 TerrainMaterialQuality::AtlasOnlyDebug => {
                     fragment.shader_defs.push("TERRAIN_ATLAS_ONLY_DEBUG".into());
@@ -349,6 +351,16 @@ mod tests {
     fn gpu_biome_splat_shader_contract_exists() {
         let source = include_str!("../../../assets/shaders/world_source/biome_splat.wgsl");
         assert!(source.contains("fn biome_splat_resolve_triplanar_weights"));
+    }
+
+    #[test]
+    fn far_quality_uses_cached_vertex_splat_weights() {
+        let material_source = include_str!("triplanar.rs");
+        let splat_source = include_str!("../../../assets/shaders/world_source/biome_splat.wgsl");
+
+        assert!(material_source.contains("TERRAIN_VERTEX_SPLAT_CACHE"));
+        assert!(splat_source.contains("#ifdef TERRAIN_VERTEX_SPLAT_CACHE"));
+        assert!(splat_source.contains("return vertex_weights;"));
     }
 }
 
