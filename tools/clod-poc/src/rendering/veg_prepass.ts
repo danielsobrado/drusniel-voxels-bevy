@@ -45,9 +45,9 @@ interface NodeMaterialShape {
   maskNode: unknown;
 }
 
-interface UniformMaterialShape extends Material {
+type UniformMaterialShape = Material & {
   uniforms?: unknown;
-}
+};
 
 export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: DepthPrepassTwinOptions = {}): Mesh {
   const material = createPrepassNodeMaterial(nodes, `veg-depth-prepass:${mesh.name || "mesh"}`);
