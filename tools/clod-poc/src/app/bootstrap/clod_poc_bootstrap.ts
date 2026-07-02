@@ -67,6 +67,7 @@ export async function bootstrapClodPoc() {
 
   const renderer = await runRendererStartup({
     searchParams,
+    clodRuntime,
     cfg: world.cfg,
     worldCells: world.worldCells,
     lod0Nodes: world.lod0Nodes,
@@ -365,6 +366,7 @@ export async function bootstrapClodPoc() {
     statControllers: postRenderer.uiRefs.statControllers,
     app: renderer.app,
     renderer: renderer.renderer,
+    renderResolution: renderer.renderResolution,
     scene: renderer.scene,
     camera: renderer.camera,
     controls: renderer.controls,
