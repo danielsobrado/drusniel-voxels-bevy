@@ -1,7 +1,5 @@
-import { LIGHT_SAMPLE, buildLightTile } from "./light_builder.js";
+import { LIGHT_SAMPLE, type LightTile } from "./light_builder.js";
 import type { SunLightOptions } from "./sun_light_options.js";
-
-type LightTile = ReturnType<typeof buildLightTile>;
 
 export interface SunLightDebugOverlay {
   update(tiles: readonly LightTile[], options: SunLightOptions): void;
