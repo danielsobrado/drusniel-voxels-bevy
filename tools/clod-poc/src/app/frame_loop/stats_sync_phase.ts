@@ -154,6 +154,8 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     nextGrassStats.gpuRingVisibleNear !== grassStats.gpuRingVisibleNear ||
     nextGrassStats.gpuRingVisibleMid !== grassStats.gpuRingVisibleMid ||
     nextGrassStats.gpuRingVisibleFar !== grassStats.gpuRingVisibleFar ||
+    nextGrassStats.gpuRingCandidateCountBeforePrefilter !== grassStats.gpuRingCandidateCountBeforePrefilter ||
+    nextGrassStats.gpuRingCandidateCountAfterPrefilter !== grassStats.gpuRingCandidateCountAfterPrefilter ||
     nextGrassStats.edgeSuppressedCandidates !== grassStats.edgeSuppressedCandidates ||
     (nextGrassStats.earlyTerrainRejectedPatches ?? 0) !== (grassStats.earlyTerrainRejectedPatches ?? 0) ||
     (nextGrassStats.earlyTerrainSkippedCandidates ?? 0) !== (grassStats.earlyTerrainSkippedCandidates ?? 0) ||
@@ -163,7 +165,8 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     input.state.grassBladeCount = nextGrassStats.blades;
     input.state.grassVisiblePatches = `${nextGrassStats.visiblePatches}/${nextGrassStats.patches}`;
     input.state.grassTierSummary = `${nextGrassStats.nearPatches}/${nextGrassStats.midPatches}/${nextGrassStats.coveragePatches}/${nextGrassStats.superPatches}` +
-      formatEarlyTerrainSuffix(nextGrassStats.earlyTerrainRejectedPatches, nextGrassStats.earlyTerrainSkippedCandidates);
+      formatEarlyTerrainSuffix(nextGrassStats.earlyTerrainRejectedPatches, nextGrassStats.earlyTerrainSkippedCandidates) +
+      formatGpuPrefilterSuffix(nextGrassStats.gpuRingCandidateCountBeforePrefilter, nextGrassStats.gpuRingCandidateCountAfterPrefilter);
     input.state.grassEdgeSuppressed = nextGrassStats.edgeSuppressedCandidates;
     input.state.grassCandidateCount = nextGrassStats.generatedCandidates;
     presenter.grassBladeCountController?.updateDisplay();
@@ -183,4 +186,9 @@ function formatEarlyTerrainSuffix(rejected: number | undefined, skipped: number 
   const rejectedCount = rejected ?? 0;
   if (rejectedCount <= 0) return "";
   return ` terrainReject=${rejectedCount} skipped=${skipped ?? 0}`;
+}
+
+function formatGpuPrefilterSuffix(before: number | undefined, after: number | undefined): string {
+  if (before === undefined || after === undefined || before <= 0 || before === after) return "";
+  return ` prefilter=${after}/${before}`;
 }
