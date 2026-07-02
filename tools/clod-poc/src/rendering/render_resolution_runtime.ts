@@ -122,7 +122,7 @@ export function createRenderResolutionRuntime(
     const changed = changedSinceLastApply(resolution);
     if (changed) {
       renderer.setPixelRatio(resolution.effectivePixelRatio);
-      renderer.setSize(resolution.cssWidth, resolution.cssHeight, false);
+      renderer.setSize(resolution.cssWidth, resolution.cssHeight);
       camera.aspect = resolution.cssWidth / resolution.cssHeight;
       camera.updateProjectionMatrix();
     }
