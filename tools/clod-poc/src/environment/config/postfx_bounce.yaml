@@ -1,5 +1,5 @@
 postfx_bounce:
-  enabled: false
+  enabled: true
   strength: 0.16
   radius_m: 0.55
   max_distance_m: 180.0
