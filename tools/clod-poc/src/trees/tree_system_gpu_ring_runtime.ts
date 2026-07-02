@@ -141,6 +141,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
         sampler: input.sampler,
       })
       : null;
+    const slotCount = treeGpuRingSlotCount(input.settings);
     const dispatched = input.state.compute.dispatch({
       centerX: center.x,
       centerZ: center.z,
@@ -154,6 +155,9 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
       visibleClusterMaskWords: visibleClusterMask?.words,
       visibleClusterDimCells: visibleClusterMask?.clusterDimCells,
       visibleClusterGrid: visibleClusterMask?.clusterGrid,
+      activeSlotIndices: visibleClusterMask?.activeSlotIndices,
+      candidateCountBeforePrefilter: visibleClusterMask?.candidateSlotsBeforePrefilter ?? slotCount,
+      candidateCountAfterPrefilter: visibleClusterMask?.candidateSlotsAfterPrefilter ?? slotCount,
     });
     if (dispatched) setTreeGpuRingDrawsVisible(input.state, true);
     const nextStats = input.state.compute.stats(true) as TreeGpuRingStats & {
@@ -203,9 +207,12 @@ function ensureTreeGpuRingCompute(input: TreeGpuRingRuntimeInput): void {
   input.state.ringMeshes = input.state.draw.meshes;
   setTreeGpuRingDrawsVisible(input.state, false);
   for (const mesh of input.state.ringMeshes) input.root.add(mesh);
+  const slotCount = treeGpuRingSlotCount(input.settings);
   input.state.stats = {
     ...createTreeGpuRingStats("initializing"),
-    candidateCount: treeGpuRingSlotCount(input.settings),
+    candidateCount: slotCount,
+    candidateCountBeforePrefilter: slotCount,
+    candidateCountAfterPrefilter: slotCount,
   };
   const initKey = key;
   const initGeneration = input.state.generation;
@@ -248,6 +255,7 @@ function validateTreeGpuRingAgainstCpu(
     input.state.stats.shadowGroupCounts.join(","),
     input.state.stats.overflowed ? 1 : 0,
     input.state.stats.shadowOverflowed ? 1 : 0,
+    input.state.stats.candidateCountAfterPrefilter,
   ].join("|");
   if (signature === input.state.lastValidationSignature) return;
   input.state.lastValidationSignature = signature;
@@ -314,6 +322,15 @@ function treeVisibleClusterMaskStats(mask: TreeRingClusterVisibilityMask | null)
     visibleClusterHidden: mask.hiddenClusters,
     visibleClusterVisible: mask.visibleClusters,
     visibleClusterUnknownKept: mask.unknownKeptClusters,
+    gpuPrefilterTestedClusters: mask.hiddenClusters + mask.visibleClusters,
+    gpuPrefilterRejectedClusters: mask.hiddenClusters,
+    gpuPrefilterAcceptedClusters: mask.visibleClusters - mask.unknownKeptClusters,
+    gpuPrefilterUnknownKeptClusters: mask.unknownKeptClusters,
+    gpuPrefilterSkippedCandidateEstimate: mask.skippedCandidateEstimate,
+    gpuCandidateCountBeforePrefilter: mask.candidateSlotsBeforePrefilter,
+    gpuCandidateCountAfterPrefilter: mask.candidateSlotsAfterPrefilter,
+    gpuPrefilterCacheHits: 0,
+    gpuPrefilterCacheMisses: mask.hiddenClusters + mask.visibleClusters,
   };
 }
 
@@ -355,6 +372,8 @@ function createTreeGpuRingStats(status: TreeGpuRingStats["status"]): TreeGpuRing
   return {
     status,
     candidateCount: 0,
+    candidateCountBeforePrefilter: 0,
+    candidateCountAfterPrefilter: 0,
     acceptedCandidates: 0,
     counts: { near: 0, mid: 0, far: 0, impostor: 0 },
     groupCounts: new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0),
