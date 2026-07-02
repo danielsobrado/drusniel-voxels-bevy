@@ -54,6 +54,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   let lastCrossLodAdjacencyCount = 0;
   let lastRenderedCount = 0;
   let lastRenderedNodes: ClodPageNode[] = [];
+  let lastRenderedNodeIds = new Set<string>();
   let currentTerrainViews = new Set<ClodSelectionTerrainView>();
   const activeTerrainViews = new Set<ClodSelectionTerrainView>();
   let lastLevelSummary = "";
@@ -186,6 +187,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     }
     lastRenderedCount = rendered.length;
     lastRenderedNodes = rendered;
+    lastRenderedNodeIds = new Set(rendered.map((n) => n.id));
     lastNodesByLod = Object.fromEntries([...perLevel.entries()]);
     lastLevelSummary = [...perLevel.keys()].sort().map((l) => `L${l}:${perLevel.get(l)}`).join("  ");
     lastTriCount = tris;
@@ -264,11 +266,9 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
       selSub.cut = 0;
       const tBook = performance.now();
-      applyRenderedCut(lastRenderedNodes, settings);
-      updateRenderedStats(lastRenderedNodes);
+      deps.markActiveNodes?.(lastRenderedNodeIds, selectionFrameId);
       selSub.book = performance.now() - tBook;
-      const tInfo = performance.now();
-      selSub.info = performance.now() - tInfo;
+      selSub.info = 0;
       const tOverlays = performance.now();
       maybeRebuildDebugOverlays(lastRenderedNodes, lastCutHash, settings);
       selSub.overlays = performance.now() - tOverlays;
