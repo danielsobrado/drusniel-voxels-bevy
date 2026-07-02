@@ -23,6 +23,7 @@ const TREE_VARIANT_HASH_Z = 311.7;
 const TREE_VARIANT_HASH_MUL = 43758.5453123;
 
 export interface TreeTerrainSampler {
+  readonly sourceRevision?: number | (() => number);
   surfaceHeight(x: number, z: number): number;
   surfaceNormal(x: number, z: number): [number, number, number];
   materialWeights(height: number, normalY: number): [number, number, number, number];
@@ -118,52 +119,26 @@ export function generateTreeInstances(
         continue;
       }
 
-      const ecology = settings.ecology.enabled
-        ? sampleTreeEcology(x, z, height, normalY, groundWeight, settings)
-        : null;
-      if (ecology && treeHash2(gridX, gridZ, settings.seed + 809) > ecologyAcceptanceProbability(ecology, settings)) {
+      const ecology = settings.ecology.enabled ? sampleTreeEcology(settings, x, z, height, normalY, weights) : null;
+      if (ecology && treeHash2(gridX, gridZ, settings.seed + 701) > ecologyAcceptanceProbability(settings, ecology)) {
         stats.rejectedMaterial++;
         continue;
       }
-
-      const species = ecology
-        ? selectEcologySpecies(settings, ecology, height, normalY, weights, treeHash2(gridX, gridZ, settings.seed + 409))
-        : selectTreeSpecies(settings, treeHash2(gridX, gridZ, settings.seed + 409));
-      if (!species) {
-        stats.rejectedMaterial++;
-        continue;
-      }
+      const species = selectTreeSpecies(settings, height, normalY, weights, treeHash2(gridX, gridZ, settings.seed + 409), ecology);
+      if (!species) { stats.rejectedMaterial++; continue; }
       const speciesSettings = settings.species[species];
-      if (height < speciesSettings.minHeightM || height > speciesSettings.maxHeightM) {
-        stats.rejectedHeight++;
-        continue;
-      }
-
-      const suppressionRadius = ecology
-        ? treeSuppressionRadius(species, ecology, settings, gridX, gridZ)
-        : settings.placement.minSpacingM;
-      if (minSpacingSq > 0 && ranked.some(({ instance, suppressionRadius: acceptedRadius }) => {
-        const dx = instance.position[0] - x;
-        const dz = instance.position[2] - z;
-        const radius = Math.max(suppressionRadius, acceptedRadius);
-        return dx * dx + dz * dz < radius * radius;
-      })) {
-        stats.rejectedMaterial++;
-        continue;
-      }
-
-      stats.acceptedCandidates++;
-      const baseScale = 0.82 + treeHash2(gridX, gridZ, settings.seed + 601) * 0.42;
-      const scale = baseScale * (ecology?.scaleMultiplier ?? 1);
+      const variant = Math.floor(treeHash2(gridX, gridZ, settings.seed + 509) * TREE_STRUCTURAL_VARIANTS) % TREE_STRUCTURAL_VARIANTS;
+      const scale = 0.82 + treeHash2(gridX, gridZ, settings.seed + 601) * 0.42;
+      const rotationY = treeHash2(gridX, gridZ, settings.seed + 907) * Math.PI * 2;
       ranked.push({
-        priority: treeHash2(gridX, gridZ, settings.seed + 503),
-        suppressionRadius,
+        priority: treeInstancePriority(gridX, gridZ, settings.seed, ecology, species),
+        suppressionRadius: speciesSettings.crownRadiusM * scale,
         instance: {
-          position: [x, height + scale * TREE_CONTACT_OFFSET_PER_SCALE_M, z],
+          position: [x, height + TREE_CONTACT_OFFSET_PER_SCALE_M * scale, z],
           species,
-          variant: treeVariantFromWorldXZ(x, z, settings.seed),
+          variant,
           scale,
-          rotationY: treeHash2(gridX, gridZ, settings.seed + 701) * Math.PI * 2,
+          rotationY,
           normalY,
         },
       });
@@ -171,59 +146,23 @@ export function generateTreeInstances(
   }
 
   ranked.sort((a, b) => a.priority - b.priority);
-  return ranked.slice(0, limit).map(({ instance }) => instance);
-}
-
-export function treeVariantFromWorldXZ(x: number, z: number, seed: number): number {
-  const sx = x + seed * TREE_VARIANT_SEED_X + TREE_VARIANT_HASH_SALT;
-  const sz = z + seed * TREE_VARIANT_SEED_Z - TREE_VARIANT_HASH_SALT;
-  const phase = fract(Math.sin(sx * TREE_VARIANT_HASH_X + sz * TREE_VARIANT_HASH_Z) * TREE_VARIANT_HASH_MUL);
-  const safePhase = Number.isFinite(phase) ? phase : 0;
-  return Math.min(
-    TREE_STRUCTURAL_VARIANTS - 1,
-    Math.floor(safePhase * TREE_STRUCTURAL_VARIANTS),
-  );
-}
-
-function selectEcologySpecies(
-  settings: TreeSettings,
-  ecology: TreeEcologySample,
-  height: number,
-  normalY: number,
-  materialWeights: readonly [number, number, number, number],
-  roll: number,
-): TreeSpeciesId | null {
-  const weights = TREE_SPECIES.map((species) => ({
-    species,
-    weight: speciesEcologyWeight(species, ecology, height, normalY, settings, materialWeights),
-  }));
-  const total = weights.reduce((sum, entry) => sum + entry.weight, 0);
-  if (total <= 0) return null;
-  let cursor = roll * total;
-  for (const entry of weights) {
-    cursor -= entry.weight;
-    if (cursor <= 0) return entry.species;
+  const accepted: TreeInstance[] = [];
+  for (const candidate of ranked) {
+    if (accepted.length >= limit) break;
+    if (accepted.some((existing) => {
+      const dx = existing.position[0] - candidate.instance.position[0];
+      const dz = existing.position[2] - candidate.instance.position[2];
+      const minDistance = Math.max(settings.placement.minSpacingM, candidate.suppressionRadius * 0.45);
+      return dx * dx + dz * dz < Math.max(minSpacingSq, minDistance * minDistance);
+    })) continue;
+    stats.acceptedCandidates++;
+    accepted.push(candidate.instance);
   }
-  return weights[weights.length - 1]?.species ?? null;
+  return accepted;
 }
 
-function treeSuppressionRadius(
-  species: TreeSpeciesId,
-  ecology: TreeEcologySample,
-  settings: TreeSettings,
-  gridX: number,
-  gridZ: number,
-): number {
-  const base = settings.placement.minSpacingM;
-  const zone = settings.ecology.speciesZones[species];
-  const speciesSettings = settings.species[species];
-  const crownFactor = Math.max(0.5, speciesSettings.crownRadiusM / Math.max(0.001, settings.species.oak.crownRadiusM));
-  const clusterFactor = 0.85 + zone.clusterBias * 0.3;
-  const jitterRange = settings.ecology.clustering.minSpacingJitter;
-  const jitter = 1 + (treeHash2(gridX, gridZ, settings.seed + 907) * 2 - 1) * jitterRange;
-  return Math.max(0, base * crownFactor * clusterFactor * ecology.scaleMultiplier * jitter);
-}
-
-function fract(value: number): number {
-  return value - Math.floor(value);
+function treeInstancePriority(gridX: number, gridZ: number, seed: number, ecology: TreeEcologySample | null, species: TreeSpeciesId): number {
+  const base = treeHash2(gridX, gridZ, seed + 503);
+  if (!ecology) return base;
+  return base * (1 - Math.min(0.25, ecology.density * 0.1)) + speciesEcologyWeight(ecology, species) * -0.01;
 }
