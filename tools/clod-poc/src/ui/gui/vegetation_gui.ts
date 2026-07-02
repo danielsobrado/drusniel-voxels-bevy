@@ -14,6 +14,7 @@ import type { ForestLightingController } from "../../runtime/forest_lighting/for
 import type { FarShellController } from "../../systems/far_shell_controller.js";
 import { TREE_DEPTH_PREPASS_MAX_LODS } from "../../trees/tree_depth_prepass_runtime.js";
 import type { TreeSettings } from "../../trees/index.js";
+import { understoryDepthPrepassFromQuery } from "../../understory/understory_depth_prepass_runtime.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
 import type { GuiController } from "./gui_controller.js";
 
@@ -343,6 +344,9 @@ export function createVegetationGui(
     refreshUnderstoryStats();
     deps.updateInfo();
   };
+  const understoryDepthPrepassState = {
+    enabled: typeof window !== "undefined" ? understoryDepthPrepassFromQuery(new URLSearchParams(window.location.search)) : false,
+  };
   const understoryActions = {
     rebuild: () => {
       deps.understoryController.rebuild();
@@ -352,6 +356,11 @@ export function createVegetationGui(
   const understoryFolder = gui.addFolder("understory (props)");
   understoryFolder.add(state, "understoryEnabled").name("enabled").onChange((enabled: boolean) => {
     deps.understoryController.setEnabled(enabled);
+    refreshUnderstoryStats();
+    deps.updateInfo();
+  });
+  understoryFolder.add(understoryDepthPrepassState, "enabled").name("depth prepass").onChange((enabled: boolean) => {
+    deps.understoryController.setDepthPrepassEnabled(enabled);
     refreshUnderstoryStats();
     deps.updateInfo();
   });
