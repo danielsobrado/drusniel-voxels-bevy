@@ -4,13 +4,15 @@ import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
 import type { UnderstoryHydrologyData } from "../../gpu/understory_ring_compute.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
-import { setUnderstoryDepthPrepassEnabled } from "../../understory/understory_depth_prepass_runtime.js";
+import {
+  setUnderstoryDepthPrepassEnabled,
+  understoryDepthPrepassFromQuery,
+} from "../../understory/understory_depth_prepass_runtime.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
 import { UnderstorySystem, type UnderstoryStats } from "../../understory/understory_system.js";
 
 export interface UnderstoryControllerUiState {
   understoryEnabled: boolean;
-  understoryDepthPrepassEnabled: boolean;
   understoryDistance: number;
   understoryMaxInstances: number;
   understoryDebugColorByClass: boolean;
@@ -45,7 +47,7 @@ export interface UnderstoryController {
 }
 
 export function createUnderstoryController(deps: UnderstoryControllerDeps): UnderstoryController {
-  setUnderstoryDepthPrepassEnabled(deps.getUiState().understoryDepthPrepassEnabled);
+  setUnderstoryDepthPrepassEnabled(initialUnderstoryDepthPrepassEnabled());
 
   const makeSettings = (): UnderstorySettings => {
     const state = deps.getUiState();
@@ -113,7 +115,6 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
       system.setEnabled(enabled);
     },
     setDepthPrepassEnabled(enabled) {
-      deps.getUiState().understoryDepthPrepassEnabled = enabled;
       setUnderstoryDepthPrepassEnabled(enabled);
       system.rebuild();
       refreshStats();
@@ -122,4 +123,9 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
       system.markPatchesDirty();
     },
   };
+}
+
+function initialUnderstoryDepthPrepassEnabled(): boolean {
+  if (typeof location === "undefined") return false;
+  return understoryDepthPrepassFromQuery(new URLSearchParams(location.search));
 }
