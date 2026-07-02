@@ -1,8 +1,14 @@
+import type * as THREE from "three";
+import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { worldToSunVisibilityTile } from "./sun_visibility_tile.js";
 import { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
 import { createSunLightCacheRuntime } from "./far_light_cache_runtime.js";
 import { loadBundledSunLightOptions } from "./sun_light_config_loader.js";
 import { createSunLightDebugOverlay } from "./sun_light_debug_overlay.js";
+
+interface LightUpdateArgs {
+  terrainSummary: TerrainSummaryField;
+}
 
 function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptions>): void {
   const searchParams = new URLSearchParams(location.search);
@@ -11,7 +17,7 @@ function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptio
   if (searchParams.has("sunLightDebug")) options.debugView.active = searchParams.get("sunLightDebug") === "1";
 }
 
-export function createLightUpdate(args: any) {
+export function createLightUpdate(args: LightUpdateArgs) {
   const options = loadBundledSunLightOptions();
   applyQueryOverrides(options);
   const provider = createTerrainSummaryLightHeightProvider(args.terrainSummary);
@@ -23,7 +29,7 @@ export function createLightUpdate(args: any) {
   globals.__drusnielSunLightStats = () => cache.stats();
   globals.__drusnielSunLightRefresh = () => cache.markAllStale();
   return {
-    update(camera: any, sunVec: any, frameIndex: number, nowMs: number) {
+    update(camera: THREE.PerspectiveCamera, sunVec: THREE.Vector3, frameIndex: number, nowMs: number) {
       const terrainRevision = provider.terrainRevision();
       if (terrainRevision !== lastTerrainRevision) {
         cache.markAllStale();
