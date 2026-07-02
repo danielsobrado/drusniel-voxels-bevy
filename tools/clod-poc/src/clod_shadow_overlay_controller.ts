@@ -6,6 +6,10 @@ import { buildShadowManifest } from "./shadow_manifest.js";
 import { buildShadowMeshSet } from "./shadow_mesh.js";
 import { buildShadowOverlayModel, shadowPolicyColor, type ShadowOverlayMode } from "./shadow_overlay.js";
 import { buildShadowProxyViewerModel, shadowProxyViewerSummaryLine, type ShadowProxyViewerMode } from "./shadow_proxy_overlay.js";
+import {
+  trackedLineBasicMaterial,
+  trackedMeshBasicMaterial,
+} from "./rendering/material_churn/tracked_material_factory.js";
 
 export interface ClodShadowOverlayControllerDeps {
   roots: () => ClodPageNode[];
@@ -23,18 +27,9 @@ export interface ClodShadowOverlayController {
 }
 
 const OVERLAY_GROUP_NAME = "__clodShadowOverlay";
-
-/** Rebuild the overlay when the camera moves more than this many world units. */
 const CAMERA_REBUILD_THRESHOLD = 8;
-/** Minimum milliseconds between camera-move rebuilds to avoid thrashing. */
 const REBUILD_COOLDOWN_MS = 200;
 
-/**
- * Cheap change-detection for the live page-root set, so the overlay also refreshes
- * when tiles stream in/out (or a clipmap shifts its roots) while the camera is still.
- * Catches add/remove/replace of roots; in-place re-meshing under a stable root set is
- * intentionally not tracked (too costly to walk every frame for a debug overlay).
- */
 function rootsSignature(roots: readonly ClodPageNode[]): string {
   let sig = `${roots.length}`;
   for (const r of roots) sig += `|${r.id}`;
@@ -52,37 +47,63 @@ export function createClodShadowOverlayController(
   proxyGroup.name = "__clodShadowProxyMeshes";
   deps.scene.add(proxyGroup);
 
-  const footprintMaterial = new THREE.MeshBasicMaterial({
-    transparent: true,
-    opacity: 0.35,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    depthTest: false,
-  });
-
-  const proxyWireMaterial = new THREE.LineBasicMaterial({
+  const footprintMaterials = new Map<string, THREE.MeshBasicMaterial>();
+  const proxyMeshMaterials = new Map<string, THREE.MeshBasicMaterial>();
+  const proxyWireMaterial = trackedLineBasicMaterial({
     transparent: true,
     opacity: 0.6,
     depthTest: false,
-  });
+  }, "clod-shadow-proxy-wire");
 
   let lastOverlayMode: ShadowOverlayMode = "off";
   let lastProxyMode: ShadowProxyViewerMode = "off";
   let lastWireframe = true;
-  let lastCamPos = new THREE.Vector3();
+  const lastCamPos = new THREE.Vector3();
   let lastRebuildAt = 0;
   let lastRootsSig = "";
+
+  function materialKey(color: number, opacity: number): string {
+    return `${color.toString(16)}:${opacity.toFixed(3)}`;
+  }
+
+  function footprintMaterial(color: number, opacity: number): THREE.MeshBasicMaterial {
+    const key = materialKey(color, opacity);
+    const existing = footprintMaterials.get(key);
+    if (existing) return existing;
+    const material = trackedMeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      depthTest: false,
+    }, `clod-shadow-footprint:${key}`);
+    footprintMaterials.set(key, material);
+    return material;
+  }
+
+  function proxyMeshMaterial(color: number, opacity: number): THREE.MeshBasicMaterial {
+    const key = materialKey(color, opacity);
+    const existing = proxyMeshMaterials.get(key);
+    if (existing) return existing;
+    const material = trackedMeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      side: THREE.DoubleSide,
+      wireframe: false,
+      depthWrite: false,
+    }, `clod-shadow-proxy:${key}`);
+    proxyMeshMaterials.set(key, material);
+    return material;
+  }
 
   function clearGroup(g: THREE.Group): void {
     while (g.children.length > 0) {
       const child = g.children[0]!;
       g.remove(child);
-      if (child instanceof THREE.Mesh) {
+      if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
         child.geometry.dispose();
-        if (child.material instanceof THREE.Material) child.material.dispose();
-      } else if (child instanceof THREE.LineSegments) {
-        child.geometry.dispose();
-        if (child.material instanceof THREE.Material) child.material.dispose();
       }
     }
   }
@@ -134,13 +155,9 @@ export function createClodShadowOverlayController(
         const d = fp.maxZ - fp.minZ;
         const cx = (fp.minX + fp.maxX) / 2;
         const cz = (fp.minZ + fp.maxZ) / 2;
-        const cy = (entry.bounds.center[1]);
-
+        const cy = entry.bounds.center[1];
         const geo = new THREE.BoxGeometry(w, 0.5, d);
-        const color = shadowPolicyColor(entry.policy);
-        const mat = footprintMaterial.clone();
-        mat.color.setHex(color);
-        mat.opacity = entry.opacity * 0.45;
+        const mat = footprintMaterial(shadowPolicyColor(entry.policy), entry.opacity * 0.45);
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.set(cx, cy + 0.25, cz);
         mesh.renderOrder = 22;
@@ -165,20 +182,12 @@ export function createClodShadowOverlayController(
         if (wireframe) {
           const edges = new THREE.EdgesGeometry(geo);
           geo.dispose();
-          const line = new THREE.LineSegments(edges, proxyWireMaterial.clone());
+          const line = new THREE.LineSegments(edges, proxyWireMaterial);
           line.renderOrder = 23;
           line.name = `shadow-proxy:${entry.nodeId}`;
           proxyGroup.add(line);
         } else {
-          const mat = new THREE.MeshBasicMaterial({
-            color: entry.color,
-            transparent: true,
-            opacity: entry.opacity,
-            side: THREE.DoubleSide,
-            wireframe: false,
-            depthWrite: false,
-          });
-          const mesh = new THREE.Mesh(geo, mat);
+          const mesh = new THREE.Mesh(geo, proxyMeshMaterial(entry.color, entry.opacity));
           mesh.renderOrder = 23;
           mesh.name = `shadow-proxy:${entry.nodeId}`;
           proxyGroup.add(mesh);
@@ -186,9 +195,7 @@ export function createClodShadowOverlayController(
       }
 
       state.clodShadowStatsLine = [
-        overlayMode !== "off"
-          ? `overlay: ${manifest.totals.casterPages} casters`
-          : "",
+        overlayMode !== "off" ? `overlay: ${manifest.totals.casterPages} casters` : "",
         shadowProxyViewerSummaryLine(proxyModel.summary),
       ].filter(Boolean).join(" · ");
     } else if (overlayMode !== "off") {
@@ -223,9 +230,7 @@ export function createClodShadowOverlayController(
     const moved = cam.distanceTo(lastCamPos);
     const rootsChanged = rootsSignature(deps.roots()) !== lastRootsSig;
     const cooledDown = performance.now() - lastRebuildAt >= REBUILD_COOLDOWN_MS;
-    if ((moved >= CAMERA_REBUILD_THRESHOLD || rootsChanged) && cooledDown) {
-      rebuild();
-    }
+    if ((moved >= CAMERA_REBUILD_THRESHOLD || rootsChanged) && cooledDown) rebuild();
   }
 
   function dispose(): void {
@@ -233,7 +238,8 @@ export function createClodShadowOverlayController(
     clearGroup(proxyGroup);
     deps.scene.remove(group);
     deps.scene.remove(proxyGroup);
-    footprintMaterial.dispose();
+    for (const material of footprintMaterials.values()) material.dispose();
+    for (const material of proxyMeshMaterials.values()) material.dispose();
     proxyWireMaterial.dispose();
   }
 
