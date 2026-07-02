@@ -85,6 +85,7 @@ export function createTreeRingFarNodeMaterialHandle(
   const uGround = uniform(v3(lighting.groundLight));
   const materials: MeshBasicNodeMaterial[] = [];
   const prepassNodes = new Map<MeshBasicNodeMaterial, PrepassNodes>();
+  let debugColorByLod = settings.render.debugColorByLod;
 
   const buildMaterial = (albedoFactory: (vertexColor: TslNode, tint: TslNode) => TslNode): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
@@ -161,10 +162,11 @@ export function createTreeRingFarNodeMaterialHandle(
       uFadeCenter.value.set(x, z);
     },
     prepassNodesFor(prepassLod: TreeLod) {
-      const material = settings.render.debugColorByLod ? debugMaterials[prepassLod] : regularMaterial;
+      const material = debugColorByLod ? debugMaterials[prepassLod] : regularMaterial;
       return prepassNodes.get(material as MeshBasicNodeMaterial);
     },
     updateSettings(next: TreeSettings) {
+      debugColorByLod = next.render.debugColorByLod;
       uNearDistance.value = next.distanceM * next.lod.nearFraction;
       uMidDistance.value = next.distanceM * next.lod.midFraction;
       uFarDistance.value = next.distanceM * next.lod.farFraction;
