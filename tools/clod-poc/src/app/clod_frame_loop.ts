@@ -158,11 +158,11 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     }
 
     timed(collectFrameTiming, phaseTiming, "farSummaryMs", () => {
-      farSummary.update();
-      floatingOrigin.update();
-      shadowProxy.update();
-      clodShadow.update();
-      canopy.update();
+      farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera);
+      if (floatingOrigin) floatingOrigin.controller.rebaseIfNeeded({ camera: render.camera, controls: player.controls, player: player.player, terrainColliders: floatingOrigin.terrainColliders, frameIndex: selectionStats.frameId });
+      shadowProxy?.rebuildIfNeeded();
+      clodShadow?.update();
+      canopy?.update(render.camera.position.x, render.camera.position.z);
     });
 
     const vegetationResult = timed(collectFrameTiming, phaseTiming, "vegetationTotalMs", () => runVegetationFramePhase({
