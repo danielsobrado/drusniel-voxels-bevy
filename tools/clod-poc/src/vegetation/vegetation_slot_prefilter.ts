@@ -123,12 +123,14 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
   const grid = Math.max(1, Math.floor(options.grid));
   const clusterDimSlots = Math.max(1, Math.floor(options.clusterDimSlots));
   const clusterGrid = Math.max(1, Math.ceil(grid / clusterDimSlots));
+  const candidateSlotsBeforePrefilter = grid * grid;
   const clusterWords = new Uint32Array(clusterGrid * clusterGrid);
-  const activeSlots: number[] = [];
+  const activeSlotScratch = new Uint32Array(candidateSlotsBeforePrefilter);
   const provider = createVegetationVisibilityProvider();
   const reasonCounts = createReasonCounts();
   const cacheEnabled = (options.cacheConfig?.decisionCacheEnabled ?? DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.decisionCacheEnabled) && !!options.cache;
   const cacheStatsBefore = options.cache?.stats() ?? null;
+  let activeSlotCount = 0;
   let rejectedClusters = 0;
   let visibleClusters = 0;
   let unknownKeptClusters = 0;
@@ -141,30 +143,28 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
       const decision = cacheEnabled
         ? options.cache!.get(cacheKey) ?? evaluateAndCache({ cache: options.cache!, cacheKey, clusterX, clusterZ, grid, clusterDimSlots, provider, options })
         : evaluateCluster({ clusterX, clusterZ, grid, clusterDimSlots, provider, options });
-      const slots = slotsForCluster(clusterX, clusterZ, grid, clusterDimSlots);
       reasonCounts[decision.reason]++;
       if (decision.reason === "unknown_kept") unknownKeptClusters++;
       clusterWords[clusterIndex] = decision.visible ? 1 : 0;
       if (decision.visible) {
         visibleClusters++;
-        activeSlots.push(...slots);
+        activeSlotCount = appendClusterSlots(activeSlotScratch, activeSlotCount, clusterX, clusterZ, grid, clusterDimSlots);
       } else {
         rejectedClusters++;
-        skippedCandidateEstimate += slots.length;
+        skippedCandidateEstimate += clusterSlotCount(clusterX, clusterZ, grid, clusterDimSlots);
       }
     }
   }
 
-  const candidateSlotsBeforePrefilter = grid * grid;
   const cacheStatsAfter = options.cache?.stats() ?? null;
   return {
     grid,
     clusterDimSlots,
     clusterGrid,
     clusterWords,
-    activeSlotIndices: Uint32Array.from(activeSlots),
+    activeSlotIndices: activeSlotScratch.slice(0, activeSlotCount),
     candidateSlotsBeforePrefilter,
-    candidateSlotsAfterPrefilter: activeSlots.length,
+    candidateSlotsAfterPrefilter: activeSlotCount,
     rejectedClusters,
     visibleClusters,
     unknownKeptClusters,
@@ -278,16 +278,25 @@ function nearestSlotToCamera(
   return nearest;
 }
 
-function slotsForCluster(clusterX: number, clusterZ: number, grid: number, clusterDimSlots: number): number[] {
+function appendClusterSlots(target: Uint32Array, offset: number, clusterX: number, clusterZ: number, grid: number, clusterDimSlots: number): number {
   const startX = clusterX * clusterDimSlots;
   const startZ = clusterZ * clusterDimSlots;
   const endX = Math.min(grid - 1, startX + clusterDimSlots - 1);
   const endZ = Math.min(grid - 1, startZ + clusterDimSlots - 1);
-  const slots: number[] = [];
+  let cursor = offset;
   for (let slotZ = startZ; slotZ <= endZ; slotZ++) {
-    for (let slotX = startX; slotX <= endX; slotX++) slots.push(slotZ * grid + slotX);
+    const rowStart = slotZ * grid;
+    for (let slotX = startX; slotX <= endX; slotX++) target[cursor++] = rowStart + slotX;
   }
-  return slots;
+  return cursor;
+}
+
+function clusterSlotCount(clusterX: number, clusterZ: number, grid: number, clusterDimSlots: number): number {
+  const startX = clusterX * clusterDimSlots;
+  const startZ = clusterZ * clusterDimSlots;
+  const endX = Math.min(grid - 1, startX + clusterDimSlots - 1);
+  const endZ = Math.min(grid - 1, startZ + clusterDimSlots - 1);
+  return Math.max(0, endX - startX + 1) * Math.max(0, endZ - startZ + 1);
 }
 
 function vegetationWorldCell(slotX: number, slotZ: number, grid: number, cell: number, centerX: number, centerZ: number): readonly [number, number] {
