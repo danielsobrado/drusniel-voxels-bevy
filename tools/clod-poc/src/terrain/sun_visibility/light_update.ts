@@ -36,6 +36,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
   globals.__drusnielSunLightPeekWorld = (x: number, z: number, sunVec: THREE.Vector3) => cache.peekWorld(x, z, sunVec, provider);
   return {
     update(camera: THREE.PerspectiveCamera, sunVec: THREE.Vector3, frameIndex: number, nowMs: number) {
+      globals.__drusnielSunLightSunDirection = sunVec.clone();
       const terrainRevision = provider.terrainRevision();
       if (terrainRevision !== lastTerrainRevision) {
         cache.markAllStale();
