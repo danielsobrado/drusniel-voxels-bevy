@@ -10,8 +10,9 @@ export function formatTreeTotalDisplay(treeStats: TreeStats | null): TreeTotalDi
 
 export function formatTreeInfoLine(treesEnabled: boolean, totalTrees: TreeTotalDisplay, treeStats: TreeStats | null): string {
   const runtimePath = formatTreeRuntimePath(treesEnabled, treeStats);
+  const warning = formatTreeGpuStatusWarning(treeStats);
   if (treeStats && treeGpuCountsHidden(treeStats)) {
-    return `trees: ${runtimePath} counts=off`;
+    return `trees: ${runtimePath} counts=off${warning}`;
   }
   return `trees: ${runtimePath} ${formatTreeTotal(totalTrees)} trees` +
     (treeStats
@@ -19,8 +20,9 @@ export function formatTreeInfoLine(treesEnabled: boolean, totalTrees: TreeTotalD
         formatTreeTerrainPatchStats(treeStats) +
         ` lod n/m/f/i=${treeStats.nearTrees}/${treeStats.midTrees}/${treeStats.farTrees}/${treeStats.impostorTrees}` +
         formatTreeImpostorStatus(treeStats) +
-        formatTreeGpuStats(treeStats)
-      : "");
+        formatTreeGpuStats(treeStats) +
+        warning
+      : warning);
 }
 
 export function formatTreeRuntimePath(treesEnabled: boolean, treeStats: TreeStats | null): string {
@@ -40,8 +42,49 @@ export function formatTreeGpuStatusPath(status: TreeSystemGpuStatus): string {
   }
 }
 
+export function formatTreeGpuFallbackWarning(
+  treesEnabled: boolean,
+  treeGpuEnabled: boolean,
+  treeStats: TreeStats | null,
+): string | null {
+  if (!treesEnabled || !treeGpuEnabled || !treeStats) return null;
+  switch (treeStats.gpuStatus) {
+    case "ring":
+      return null;
+    case "fallback-cpu":
+      return "TREE GPU FALLBACK TO CPU";
+    case "unsupported":
+      return "TREE GPU UNSUPPORTED";
+    case "error":
+      return "TREE GPU ERROR";
+    case "disabled":
+      return "TREE GPU DISABLED";
+    default:
+      return "TREE GPU UNKNOWN";
+  }
+}
+
+export function formatTreeGpuOverlayStatus(
+  treesEnabled: boolean,
+  treeGpuEnabled: boolean,
+  treeStats: TreeStats | null,
+): string {
+  return formatTreeGpuFallbackWarning(treesEnabled, treeGpuEnabled, treeStats) ??
+    formatTreeRuntimePath(treesEnabled, treeStats);
+}
+
 function treeGpuCountsHidden(treeStats: TreeStats): boolean {
   return treeStats.gpuStatus === "ring" && !treeStats.gpuShowCounts;
+}
+
+function formatTreeGpuStatusWarning(treeStats: TreeStats | null): string {
+  if (!treeStats) return "";
+  switch (treeStats.gpuStatus) {
+    case "fallback-cpu": return "  TREE GPU FALLBACK TO CPU";
+    case "unsupported": return "  TREE GPU UNSUPPORTED";
+    case "error": return "  TREE GPU ERROR";
+    default: return "";
+  }
 }
 
 function formatTreeTotal(totalTrees: TreeTotalDisplay): string {
