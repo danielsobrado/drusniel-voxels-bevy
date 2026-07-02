@@ -1,6 +1,25 @@
+export interface VegetationGpuEarlyRejectConfig {
+  enabled: boolean;
+  debugValidateCpuOracle: boolean;
+  debugReadbackCounters: boolean;
+  statsHz: number;
+  minClusterSize: number;
+  maxRejectedUnknownRatio: number;
+  rejectKinds: {
+    trees: boolean;
+    grass: boolean;
+    understory: boolean;
+  };
+  conservative: {
+    acceptWhenSummaryMissing: boolean;
+    acceptWhenRevisionMismatch: boolean;
+    minCoverageToAccept: number;
+  };
+}
+
 export interface VegetationTerrainRejectionConfig {
   enabled: boolean;
-  /** Probe-only static rules are heuristic; keep them opt-in until summary coverage can prove full-footprint invalidity. */
+  gpuEarlyReject: VegetationGpuEarlyRejectConfig;
   staticRulesEnabled: boolean;
   viewRulesEnabled: boolean;
   decisionCacheEnabled: boolean;
@@ -13,8 +32,28 @@ export interface VegetationTerrainRejectionConfig {
   understoryCrownHeightM: number;
 }
 
+export const DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG: VegetationGpuEarlyRejectConfig = {
+  enabled: true,
+  debugValidateCpuOracle: false,
+  debugReadbackCounters: false,
+  statsHz: 4,
+  minClusterSize: 16,
+  maxRejectedUnknownRatio: 0,
+  rejectKinds: {
+    trees: true,
+    grass: true,
+    understory: true,
+  },
+  conservative: {
+    acceptWhenSummaryMissing: true,
+    acceptWhenRevisionMismatch: true,
+    minCoverageToAccept: 0.05,
+  },
+};
+
 export const DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG: VegetationTerrainRejectionConfig = {
   enabled: true,
+  gpuEarlyReject: DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG,
   staticRulesEnabled: false,
   viewRulesEnabled: true,
   decisionCacheEnabled: true,
