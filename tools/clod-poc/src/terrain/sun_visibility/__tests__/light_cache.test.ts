@@ -12,7 +12,11 @@ function provider() {
 
 describe("sun light cache", () => {
   it("queues before first budgeted build, then hits warm cache", () => {
-    const options = parseSunLightOptions({ tile: { size_world: 32, resolution: 4 }, ray: { max_distance_world: 16, step_world: 4 } });
+    const options = parseSunLightOptions({
+      tile: { size_world: 32, resolution: 4 },
+      ray: { max_distance_world: 16, step_world: 4 },
+      build: { max_build_ms_per_frame: 999 },
+    });
     const cache = createSunLightCacheRuntime(options);
     const p = provider();
     cache.enqueueTile({ tileX: 0, tileZ: 0, lod: 0 }, new THREE.Vector3(1, 1, 0), 1, p);
@@ -24,7 +28,11 @@ describe("sun light cache", () => {
   });
 
   it("respects max tiles per frame", () => {
-    const options = parseSunLightOptions({ tile: { size_world: 32, resolution: 4 }, ray: { max_distance_world: 16, step_world: 4 }, build: { max_tiles_per_frame: 1 } });
+    const options = parseSunLightOptions({
+      tile: { size_world: 32, resolution: 4 },
+      ray: { max_distance_world: 16, step_world: 4 },
+      build: { max_tiles_per_frame: 1, max_build_ms_per_frame: 999 },
+    });
     const cache = createSunLightCacheRuntime(options);
     const p = provider();
     cache.enqueueTile({ tileX: 0, tileZ: 0, lod: 0 }, new THREE.Vector3(1, 1, 0), 1, p);
@@ -35,13 +43,17 @@ describe("sun light cache", () => {
   });
 
   it("evicts least recently used entries", () => {
-    const options = parseSunLightOptions({ tile: { size_world: 32, resolution: 4 }, ray: { max_distance_world: 16, step_world: 4 }, cache: { max_entries: 1 } });
+    const options = parseSunLightOptions({
+      tile: { size_world: 32, resolution: 4 },
+      ray: { max_distance_world: 16, step_world: 4 },
+      build: { max_tiles_per_frame: 2, max_build_ms_per_frame: 999 },
+      cache: { max_entries: 1 },
+    });
     const cache = createSunLightCacheRuntime(options);
     const p = provider();
     cache.enqueueTile({ tileX: 0, tileZ: 0, lod: 0 }, new THREE.Vector3(1, 1, 0), 1, p);
     cache.enqueueTile({ tileX: 1, tileZ: 0, lod: 0 }, new THREE.Vector3(1, 1, 0), 1, p);
     cache.updateBudgeted(p, 1, performance.now());
-    cache.updateBudgeted(p, 2, performance.now());
     expect(cache.stats().entries).toBe(1);
     expect(cache.stats().evictions).toBeGreaterThan(0);
   });
