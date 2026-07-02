@@ -32,6 +32,7 @@ All other values keep the path disabled.
 
 - `GrassMaterial::enable_prepass()` is gated by `VOXEL_VEGETATION_DEPTH_PREPASS`.
 - `VegetationDepthPrepassConfig` records the startup state as a typed resource.
+- Startup logs print `Vegetation depth prepass: off/on` with the env flag value.
 - The timing recorder emits `Vegetation Depth Prepass Enabled` as `0` or `1` so bench output can prove which path ran.
 - The default path remains unchanged.
 - Grass shadow specialization remains disabled; this gate is for the camera depth prepass, not for shadow maps.
@@ -58,6 +59,7 @@ VOXEL_RENDER_TIMING=1 VOXEL_VEGETATION_DEPTH_PREPASS=1 cargo run --release
 Compare:
 
 ```text
+startup log: Vegetation depth prepass: off/on
 __frame_total p50/p95
 Vegetation Depth Prepass Enabled
 Grass Collect
