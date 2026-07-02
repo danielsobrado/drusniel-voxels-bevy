@@ -54,6 +54,10 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     nextTreeStats.impostorTrees !== treeStats.impostorTrees ||
     nextTreeStats.gpuStatus !== treeStats.gpuStatus ||
     nextTreeStats.gpuCandidateCount !== treeStats.gpuCandidateCount ||
+    nextTreeStats.gpuCandidateCountBeforePrefilter !== treeStats.gpuCandidateCountBeforePrefilter ||
+    nextTreeStats.gpuCandidateCountAfterPrefilter !== treeStats.gpuCandidateCountAfterPrefilter ||
+    nextTreeStats.gpuPrefilterRejectedClusters !== treeStats.gpuPrefilterRejectedClusters ||
+    nextTreeStats.gpuPrefilterSkippedCandidateEstimate !== treeStats.gpuPrefilterSkippedCandidateEstimate ||
     nextTreeStats.gpuAcceptedCount !== treeStats.gpuAcceptedCount ||
     nextTreeStats.gpuVisibleCount !== treeStats.gpuVisibleCount ||
     nextTreeStats.gpuShadowCasterCount !== treeStats.gpuShadowCasterCount ||
