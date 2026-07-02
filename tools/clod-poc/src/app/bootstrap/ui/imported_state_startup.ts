@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { LOD_COLORS } from "../../clod_constants.js";
-import { recomputedNormalsFor } from "../bootstrap_types.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
 
@@ -15,6 +14,7 @@ export function applyImportedStateSideEffects(
     materialController,
     applyColorAdjustmentsToTerrain,
     applyTerrainTextures,
+    setViewNormalMode,
     updateSelection,
   } = input.terrainView;
   const {
@@ -41,7 +41,7 @@ export function applyImportedStateSideEffects(
   for (const view of views.values()) {
     view.mat.setBaseColor(state.colorByLod ? LOD_COLORS[Math.min(view.node.level, 3)] : 0xb9c0c8);
     if (state.recomputedNormals) {
-      view.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(view), 3));
+      setViewNormalMode(view, "recomputed");
     }
   }
   applyColorAdjustmentsToTerrain();

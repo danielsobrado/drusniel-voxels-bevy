@@ -4,7 +4,7 @@ import { createSceneGui } from "../../../ui/gui/scene_gui.js";
 import { shadowProxyDebugStateToConfig } from "../../../shadows/shadowProxyDebug.js";
 import { createClodShadowOverlayController } from "../../../clod_shadow_overlay_controller.js";
 import type GUI from "lil-gui";
-import { type NodeView, recomputedNormalsFor } from "../bootstrap_types.js";
+import type { NodeView } from "../bootstrap_types.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { UiStartupContext } from "../ui_startup_context.js";
 
@@ -116,7 +116,10 @@ export function runGuiStartup(
       updateInfo,
       applyColorByLodToMaterials,
       setColorByLodUserOverride: (on) => { colorByLodUserOverride.value = on; },
-      recomputedNormalsFor: (view) => recomputedNormalsFor(view as NodeView),
+      setViewNormalMode: (view, normalMode) => input.terrainView.setViewNormalMode(
+        view as NodeView,
+        normalMode,
+      ),
     },
     environment: {
       updateLighting,

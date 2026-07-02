@@ -11,8 +11,6 @@ export interface ClodGuiDeps {
   views: Iterable<{
     mat: { setWireframe: (on: boolean) => void; setTier: (tier: number) => void };
     mesh: THREE.Mesh;
-    sourceNormals: Float32Array;
-    recomputedNormals?: Float32Array | null;
   }>;
   materialController: {
     forEachMaterial: (fn: (mat: {
@@ -31,11 +29,7 @@ export interface ClodGuiDeps {
   updateInfo: () => void;
   applyColorByLodToMaterials: (on: boolean) => void;
   setColorByLodUserOverride: (on: boolean) => void;
-  recomputedNormalsFor: (view: {
-    mesh: THREE.Mesh;
-    sourceNormals: Float32Array;
-    recomputedNormals?: Float32Array | null;
-  }) => Float32Array;
+  setViewNormalMode: (view: { mesh: THREE.Mesh }, normalMode: "source" | "recomputed") => void;
 }
 
 export interface ClodGuiResult {
@@ -150,9 +144,7 @@ export function createClodGui(
   });
   gui.add(state, "recomputedNormals").name("recomputed normals").onChange((on: boolean) => {
     for (const v of deps.views) {
-      const g = v.mesh.geometry as THREE.BufferGeometry;
-      g.setAttribute("normal", new THREE.BufferAttribute(on ? deps.recomputedNormalsFor(v) : v.sourceNormals, 3));
-      g.attributes.normal.needsUpdate = true;
+      deps.setViewNormalMode(v, on ? "recomputed" : "source");
     }
   });
   const colorByLodController = gui.add(state, "colorByLod").name("color by LOD").onChange((on: boolean) => {

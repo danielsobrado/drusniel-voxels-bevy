@@ -1,5 +1,6 @@
 import { load } from "js-yaml";
 import clodRuntimeYaml from "./config/clod_runtime.yaml?raw";
+import { DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG, type PageGeometryCacheConfig } from "../terrain/geometry/page_geometry_cache.js";
 
 export interface ClodRuntimeConfig {
   runtime: {
@@ -19,6 +20,7 @@ export interface ClodRuntimeConfig {
     maxCachedChunkGroups: number;
     evictDistanceMultiplier: number;
   };
+  pageGeometryCache: PageGeometryCacheConfig;
   digging: {
     holdIntervalMs: number;
   };
@@ -45,6 +47,7 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
     maxCachedChunkGroups: 64,
     evictDistanceMultiplier: 2.5,
   },
+  pageGeometryCache: DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG,
   digging: {
     holdIntervalMs: 400,
   },
@@ -63,6 +66,10 @@ function positiveNumber(value: unknown, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 function worldOptions(value: unknown, fallback: number[]): number[] {
   if (!Array.isArray(value) || value.length === 0) return fallback;
   const parsed = value.map((entry) => Number(entry)).filter((n) => Number.isFinite(n) && n > 0);
@@ -78,6 +85,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
     const webgpuSelection = (raw.webgpu_selection ?? {}) as Record<string, unknown>;
     const terrainTextures = (raw.terrain_textures ?? {}) as Record<string, unknown>;
     const nearField = (raw.near_field ?? {}) as Record<string, unknown>;
+    const pageGeometryCache = (raw.page_geometry_cache ?? {}) as Record<string, unknown>;
     const digging = (raw.digging ?? {}) as Record<string, unknown>;
     const profiling = (raw.profiling ?? {}) as Record<string, unknown>;
     return {
@@ -120,6 +128,17 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
         evictDistanceMultiplier: positiveNumber(
           nearField.evict_distance_multiplier,
           defaults.nearField.evictDistanceMultiplier,
+        ),
+      },
+      pageGeometryCache: {
+        enabled: bool(pageGeometryCache.enabled, defaults.pageGeometryCache.enabled),
+        maxEntries: positiveInt(
+          pageGeometryCache.max_entries,
+          defaults.pageGeometryCache.maxEntries,
+        ),
+        warnAtEntries: positiveInt(
+          pageGeometryCache.warn_at_entries,
+          defaults.pageGeometryCache.warnAtEntries,
         ),
       },
       digging: {

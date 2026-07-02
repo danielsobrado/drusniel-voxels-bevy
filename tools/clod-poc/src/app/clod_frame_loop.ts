@@ -308,6 +308,17 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["props.visible"] = propStats.gpuVisibleCount;
           counters["props.candidates"] = propStats.gpuCandidateCount;
         }
+        const pageGeometryCacheStats = stats.getPageGeometryCacheStats?.();
+        if (pageGeometryCacheStats) {
+          counters["pageGeometryCache.enabled"] = pageGeometryCacheStats.enabled ? 1 : 0;
+          counters["pageGeometryCache.entries"] = pageGeometryCacheStats.entries;
+          counters["pageGeometryCache.hits"] = pageGeometryCacheStats.hits;
+          counters["pageGeometryCache.misses"] = pageGeometryCacheStats.misses;
+          counters["pageGeometryCache.evictions"] = pageGeometryCacheStats.evictions;
+          counters["pageGeometryCache.invalidations"] = pageGeometryCacheStats.invalidations;
+          counters["pageGeometryCache.disposals"] = pageGeometryCacheStats.disposals;
+          counters["pageGeometryCache.estimatedBytes"] = pageGeometryCacheStats.estimatedBytes;
+        }
       }
     }
 

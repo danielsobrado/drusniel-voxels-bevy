@@ -32,6 +32,7 @@ import type { StatsPresenter, GuiDisplayController } from "./stats_presenter.js"
 import type { FrameRenderer } from "./frame_renderer.js";
 import type { GpuPassTiming } from "../../core/gpu_pass_timing.js";
 import type { FloatingOriginController } from "../../precision/floating_origin.js";
+import type { PageGeometryCacheStats } from "../../terrain/geometry/page_geometry_cache.js";
 
 interface TerrainFadeView {
   fade: number;
@@ -129,6 +130,7 @@ export interface FrameLoopStatsDeps {
   setForestLightingStats: (stats: ForestLightingStats | null) => void;
   formatTreeGpuSummary: (stats: TreeStats) => string;
   formatUnderstoryGpuSummary: (stats: UnderstoryStats) => string;
+  getPageGeometryCacheStats?: () => PageGeometryCacheStats;
   statsPresenter: StatsPresenter;
   updateInfo: () => void;
   averageFpsRef: { value: number };

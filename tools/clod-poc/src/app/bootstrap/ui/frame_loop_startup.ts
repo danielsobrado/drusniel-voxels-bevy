@@ -261,6 +261,7 @@ export function runFrameLoopStartup(
       setForestLightingStats: (stats: ForestLightingStats | null) => { forestLightingStats.current = stats; },
       formatTreeGpuSummary,
       formatUnderstoryGpuSummary,
+      getPageGeometryCacheStats: () => input.terrainView.pageGeometryCache.stats(),
       statsPresenter,
       updateInfo,
       averageFpsRef: session.averageFpsRef,

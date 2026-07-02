@@ -31,6 +31,10 @@ import type { AppPostProcess } from "../app_post_process.js";
 import type { AppSky } from "../../scene/app_sky.js";
 import { FAR_SHELL_DEFAULTS, LOD_COLORS } from "../clod_constants.js";
 import { toGeometry } from "../../terrain/geometry/page_geometry.js";
+import {
+  PageGeometryCache,
+  type PageGeometryNormalMode,
+} from "../../terrain/geometry/page_geometry_cache.js";
 import { createNearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";
 import { createClodSelectionController, type ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_loader.js";
@@ -147,12 +151,14 @@ export interface TerrainViewStartupResult {
   nodeLabelOverlay: NodeLabelOverlay;
   brushPreview: ReturnType<typeof createBrushPreviewController>;
   nearFieldBubbleController: ReturnType<typeof createNearFieldBubbleController>;
+  pageGeometryCache: PageGeometryCache;
   pageTransitionMode: string;
   crossfadeStep: number;
   selectionController: ClodSelectionController;
   updateSelection: () => void;
   cutChangedRef: { fn: () => void };
   applyNodeMesh: (node: ClodPageNode) => { geometrySwapMs: number; colliderMs: number };
+  setViewNormalMode: (view: NodeView, normalMode: PageGeometryNormalMode) => void;
 }
 
 export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainViewStartupResult {
@@ -212,6 +218,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   const currentLighting = createCurrentLightingReader(skyEnvironment);
 
   const views = new Map<string, NodeView>();
+  const pageGeometryCache = new PageGeometryCache(clodRuntime.pageGeometryCache);
   const textureController = createTerrainTextureController({
     textureArraySize: clodRuntime.terrainTextures.textureArraySize,
     textureMipmapsEnabled,
@@ -240,13 +247,23 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   const applyTerrainTextures = () => materialController.applyTerrainTextures();
   const applyColorByLodToMaterials = (on: boolean) => materialController.applyColorByLodToMaterials(on);
 
+  const cachedSourceGeometry = (node: ClodPageNode): THREE.BufferGeometry => {
+    const geometry = pageGeometryCache.getOrCreate({
+      node,
+      normalMode: "source",
+      createGeometry: () => toGeometry(node.mesh),
+    });
+    pageGeometryCache.setGeometryActive(geometry, true);
+    return geometry;
+  };
+
   for (const node of allNodes) {
     const mat = materialController.makeTerrainMaterial(
       state.colorByLod ? LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)] : 0xb9c0c8,
     );
     mat.setColorAdjust(currentTerrainColorAdjustments());
     materialController.applyLighting(mat);
-    const mesh = new THREE.Mesh(toGeometry(node.mesh), mat.material);
+    const mesh = new THREE.Mesh(cachedSourceGeometry(node), mat.material);
     mat.onMaterialChanged((material) => {
       mesh.material = material;
     });
@@ -485,18 +502,52 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   });
   const updateSelection = () => selectionController.update();
 
+  const geometryForView = (view: NodeView, normalMode: PageGeometryNormalMode): THREE.BufferGeometry => (
+    pageGeometryCache.getOrCreate({
+      node: view.node,
+      normalMode,
+      createGeometry: () => {
+        const geometry = toGeometry(view.node.mesh);
+        if (normalMode === "recomputed") {
+          geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(view), 3));
+        }
+        return geometry;
+      },
+    })
+  );
+
+  const assignViewGeometry = (
+    view: NodeView,
+    geometry: THREE.BufferGeometry,
+    previousWasCacheOwned = pageGeometryCache.owns(view.mesh.geometry as THREE.BufferGeometry),
+  ): void => {
+    const previous = view.mesh.geometry as THREE.BufferGeometry;
+    if (previous === geometry) {
+      pageGeometryCache.setGeometryActive(geometry, true);
+      return;
+    }
+    if (previousWasCacheOwned) pageGeometryCache.setGeometryActive(previous, false);
+    else previous.dispose();
+    view.mesh.geometry = geometry;
+    pageGeometryCache.setGeometryActive(geometry, true);
+  };
+
+  const setViewNormalMode = (view: NodeView, normalMode: PageGeometryNormalMode): void => {
+    assignViewGeometry(view, geometryForView(view, normalMode));
+  };
+
   const applyNodeMesh = (node: ClodPageNode): { geometrySwapMs: number; colliderMs: number } => {
     const v = views.get(node.id);
     let geometrySwapMs = 0;
     if (v) {
       const gs = performance.now();
-      v.mesh.geometry.dispose();
-      v.mesh.geometry = toGeometry(node.mesh);
+      const previousWasCacheOwned = pageGeometryCache.owns(v.mesh.geometry as THREE.BufferGeometry);
+      pageGeometryCache.invalidateNode(node.id);
+      v.node = node;
       v.sourceNormals = node.mesh.normals;
       v.recomputedNormals = null;
-      if (state.recomputedNormals) {
-        v.mesh.geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(v), 3));
-      }
+      const normalMode: PageGeometryNormalMode = state.recomputedNormals ? "recomputed" : "source";
+      assignViewGeometry(v, geometryForView(v, normalMode), previousWasCacheOwned);
       geometrySwapMs = performance.now() - gs;
     }
     if (node.level !== 0) return { geometrySwapMs, colliderMs: 0 };
@@ -542,11 +593,13 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     nodeLabelOverlay,
     brushPreview,
     nearFieldBubbleController,
+    pageGeometryCache,
     pageTransitionMode,
     crossfadeStep,
     selectionController,
     updateSelection,
     cutChangedRef,
     applyNodeMesh,
+    setViewNormalMode,
   };
 }
