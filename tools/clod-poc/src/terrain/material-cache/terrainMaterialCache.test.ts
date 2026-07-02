@@ -42,6 +42,26 @@ describe("TerrainMaterialCache", () => {
     expect(stale.kind === "fallback" ? stale.staleEntry?.status : null).toBe("stale");
   });
 
+  it("requeues an invalidated pending entry instead of leaving it stuck", () => {
+    const cache = new TerrainMaterialCache(DEFAULT_TERRAIN_MATERIAL_CACHE_CONFIG);
+    cache.getOrQueue(key(1), () => payload(16), 1);
+    cache.invalidateSource("far_tile", "ring:0:1,2");
+    cache.getOrQueue(key(1), () => payload(16), 2);
+    cache.processFrame(3, fakeClock());
+
+    const lookup = cache.getOrQueue(key(1), () => payload(16), 4);
+    expect(lookup.kind).toBe("ready");
+    expect(cache.counters().terrainMaterialCacheReady).toBe(1);
+  });
+
+  it("increments content revision when baked content changes", () => {
+    const cache = new TerrainMaterialCache(DEFAULT_TERRAIN_MATERIAL_CACHE_CONFIG);
+    const before = cache.contentRevision();
+    cache.getOrQueue(key(1), () => payload(16), 1);
+    cache.processFrame(2, fakeClock());
+    expect(cache.contentRevision()).toBeGreaterThan(before);
+  });
+
   it("prunes least recently used ready entries by byte budget", () => {
     const cfg = { ...DEFAULT_TERRAIN_MATERIAL_CACHE_CONFIG, budget: { maxBytes: 20 } };
     const cache = new TerrainMaterialCache(cfg);
