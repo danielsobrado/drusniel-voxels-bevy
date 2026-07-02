@@ -87,6 +87,16 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
     treeVisibleClusterHidden: 2,
     treeVisibleClusterVisible: 14,
     treeVisibleClusterUnknownKept: 1,
+    grassGpuCandidateCount: 256,
+    grassGpuCandidateCountBeforePrefilter: 512,
+    grassGpuCandidateCountAfterPrefilter: 256,
+    grassGpuAcceptedCount: 128,
+    grassGpuVisibleCount: 96,
+    understoryGpuCandidateCount: 128,
+    understoryGpuCandidateCountBeforePrefilter: 256,
+    understoryGpuCandidateCountAfterPrefilter: 128,
+    understoryGpuAcceptedCount: 64,
+    understoryGpuVisibleCount: 48,
     customPropGpuStatus: "ring",
     customPropTotalInstances: 50,
     customPropVisibleInstances: 30,
@@ -124,7 +134,7 @@ describe("frame perf probe", () => {
   it("ranks detailed phase and prop buckets by p95", () => {
     const summary = summarizeFramePerfSamples([
       sample({ renderMs: 9, frameMs: 16, propsUnattributedMs: 1, treeHeroNearMinTreeTriangles: 9_000, treeGpuShadowCasterCount: 60, treeVisibleClusterHidden: 2, treeVisibleClusterVisible: 14, treeVisibleClusterUnknownKept: 1 }),
-      sample({ renderMs: 24, frameMs: 32, statsSyncMs: 4, propsUnattributedMs: 7, treeHeroNearTriangles: 150_000, treeHeroNearMinTreeTriangles: 7_000, treeGpuCandidateCountBeforePrefilter: 160, treeGpuCandidateCountAfterPrefilter: 100, treeGpuPrefilterRejectedClusters: 6, treeGpuPrefilterSkippedCandidateEstimate: 60, treeGpuShadowCasterCount: 68, treeGpuShadowOverflowed: 1, treeVisibleClusterHidden: 6, treeVisibleClusterVisible: 10, treeVisibleClusterUnknownKept: 3 }),
+      sample({ renderMs: 24, frameMs: 32, statsSyncMs: 4, propsUnattributedMs: 7, treeHeroNearTriangles: 150_000, treeHeroNearMinTreeTriangles: 7_000, treeGpuCandidateCountBeforePrefilter: 160, treeGpuCandidateCountAfterPrefilter: 100, treeGpuPrefilterRejectedClusters: 6, treeGpuPrefilterSkippedCandidateEstimate: 60, treeGpuShadowCasterCount: 68, treeGpuShadowOverflowed: 1, treeVisibleClusterHidden: 6, treeVisibleClusterVisible: 10, treeVisibleClusterUnknownKept: 3, grassGpuCandidateCountBeforePrefilter: 640, grassGpuCandidateCountAfterPrefilter: 320, understoryGpuCandidateCountBeforePrefilter: 384, understoryGpuCandidateCountAfterPrefilter: 192 }),
     ], 10, 2);
 
     expect(summary.sampleCount).toBe(2);
@@ -149,6 +159,12 @@ describe("frame perf probe", () => {
     expect(summary.counters.treeHeroNearMinTreeTrianglesMin).toBe(7_000);
     expect(summary.counters.treeHeroNearPassesTriangleFloorFrames).toBe(2);
     expect(summary.counters.treeHeroNearPassesRealFoliageFrames).toBe(2);
+    expect(summary.counters.grassGpuCandidateCountAvg).toBe(256);
+    expect(summary.counters.grassGpuCandidateCountBeforePrefilterAvg).toBe(576);
+    expect(summary.counters.grassGpuCandidateCountAfterPrefilterAvg).toBe(288);
+    expect(summary.counters.understoryGpuCandidateCountAvg).toBe(128);
+    expect(summary.counters.understoryGpuCandidateCountBeforePrefilterAvg).toBe(320);
+    expect(summary.counters.understoryGpuCandidateCountAfterPrefilterAvg).toBe(160);
     expect(summary.counters.customPropGpuStatusCounts).toEqual({ ring: 2 });
     expect(summary.counters.customPropGpuVisibleCountAvg).toBe(30);
   });
