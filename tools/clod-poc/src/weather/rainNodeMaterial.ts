@@ -4,7 +4,7 @@ import {
   abs, attribute, clamp, cos, cross, float, Fn, fract, length,
   max, min, mix, normalize, positionGeometry, sin, smoothstep, uniform, uv, vec2, vec3, vec4,
 } from "three/tsl";
-import type { RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 import type { TslNode } from "./rain_node_material_types.js";
 import { fbm, hash12, hardSplashFragment, waterSplashFragment } from "./rain_node_material_helpers.js";
 
