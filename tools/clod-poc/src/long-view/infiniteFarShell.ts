@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { HeightNormalMaterial, FarSummarySamplerOptions } from "./farSummarySampler.js";
 import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
-import { createInfiniteFarShellMaterial, updateFarShellMaterialMaterial, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
+import { createInfiniteFarShellMaterial, updateFarShellMaterialMaterial, updateFarShellMaterialSunVisibility, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
 import type { FarShellMetrics } from "./farShellMetrics.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 import { createFarTerrainMaterial, updateFarTerrainMaterialCenter, updateFarTerrainMaterialSummaryAtlas } from "../farTerrain/farTerrainMaterial.js";
@@ -19,30 +19,6 @@ import {
   buildAnnularGeometryData, flushGeometryAttributes,
   attachColorAttribute, createDefaultParityColors, createDefaultBiomeColors,
 } from "./infinite_far_shell_helpers.js";
-
-const FAR_SUN_VISIBILITY_SHADE_MIN = 0.62;
-const FAR_SUN_VISIBILITY_MISSING_VALUE = 0.5;
-
-type SunLightLookup = { kind: "lit" | "shaded" | "missing" | "pending"; value: number };
-type SunLightStats = { active: boolean; entries: number; refreshes: number; tilesBuiltTotal: number };
-type SunLightPeekWorld = (x: number, z: number, sunVec: THREE.Vector3) => SunLightLookup;
-
-interface SunLightWindowHooks {
-  __drusnielSunLightPeekWorld?: SunLightPeekWorld;
-  __drusnielSunLightStats?: () => SunLightStats;
-}
-
-function sunLightHooks(): SunLightWindowHooks {
-  return typeof window === "undefined"
-    ? {}
-    : window as unknown as SunLightWindowHooks;
-}
-
-function sunVisibilityMultiplier(lookup: SunLightLookup): number {
-  if (lookup.kind === "pending") return 1;
-  const visibility = lookup.kind === "missing" ? FAR_SUN_VISIBILITY_MISSING_VALUE : lookup.value;
-  return FAR_SUN_VISIBILITY_SHADE_MIN + (1 - FAR_SUN_VISIBILITY_SHADE_MIN) * THREE.MathUtils.clamp(visibility, 0, 1);
-}
 
 export class InfiniteFarShell {
   readonly mesh: THREE.Mesh;
@@ -65,8 +41,6 @@ export class InfiniteFarShell {
   private readonly parityConfig: FarTerrainUniformData | undefined;
   private parityColorBuffer: Float32Array | null = null;
   private biomeColorBuffer: Float32Array | null = null;
-  private baseColorBuffer: Float32Array | null = null;
-  private sunVisibilityColorSignature = "";
   private positions: Float32Array;
   private normals: Float32Array;
   private uvs: Float32Array;
@@ -142,13 +116,9 @@ export class InfiniteFarShell {
 
     if (useParity) {
       this.parityColorBuffer = createDefaultParityColors(vertexCount);
-      this.captureBaseColors(this.parityColorBuffer);
-      this.applySunVisibilityVertexTint(true);
       this.attachVertexColors();
     } else {
       this.biomeColorBuffer = createDefaultBiomeColors(vertexCount);
-      this.captureBaseColors(this.biomeColorBuffer);
-      this.applySunVisibilityVertexTint(true);
       this.attachBiomeVertexColors();
     }
     this.metrics.farShellVertices = vertexCount;
@@ -214,13 +184,14 @@ export class InfiniteFarShell {
       if (this.heightSamplingMode === "gpu" && this.farSummaryGpuAtlas) {
         updateFarTerrainMaterialSummaryAtlas(material, this.farSummaryGpuAtlas);
       }
+    } else if (!Array.isArray(this.mesh.material)) {
+      updateFarShellMaterialSunVisibility(this.mesh.material as import("three/webgpu").MeshBasicNodeMaterial);
     }
     if (this.waterMesh && this.farSummaryGpuAtlas) {
       const waterMaterial = this.waterMesh.material as import("three/webgpu").MeshBasicNodeMaterial;
       updateFarWaterMaterialCenter(waterMaterial, this.snappedX, this.snappedZ);
       updateFarWaterMaterialSummaryAtlas(waterMaterial, this.farSummaryGpuAtlas);
     }
-    this.applySunVisibilityVertexTint(false);
   }
 
   dispose(): void {
@@ -265,12 +236,8 @@ export class InfiniteFarShell {
     if (this.useParityMaterial && this.parityConfig) {
       const vertexColors = computeFarTerrainVertexColors(this.positions, this.normals, vertexCount, this.parityConfig, this.snappedX, this.snappedZ);
       this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, this.normals, 0, 0, this.positions);
-      this.captureBaseColors(this.parityColorBuffer);
-      this.applySunVisibilityVertexTint(true);
       this.attachVertexColors();
     } else {
-      if (this.biomeColorBuffer) this.captureBaseColors(this.biomeColorBuffer);
-      this.applySunVisibilityVertexTint(true);
       this.attachBiomeVertexColors();
     }
     this.rebuildCount++;
@@ -278,51 +245,6 @@ export class InfiniteFarShell {
     this.metrics.farShellRebuilds = this.rebuildCount;
     this.metrics.farShellLastRebuildMs = this.lastRebuildMs;
     this.flushAttributes();
-  }
-
-  private captureBaseColors(buffer: Float32Array | null): void {
-    this.baseColorBuffer = buffer ? buffer.slice() : null;
-    this.sunVisibilityColorSignature = "";
-  }
-
-  private currentColorBuffer(): Float32Array | null {
-    return this.useParityMaterial && this.parityConfig ? this.parityColorBuffer : this.biomeColorBuffer;
-  }
-
-  private applySunVisibilityVertexTint(force: boolean): void {
-    const colorBuffer = this.currentColorBuffer();
-    if (!colorBuffer || !this.baseColorBuffer || this.baseColorBuffer.length !== colorBuffer.length) return;
-    const hooks = sunLightHooks();
-    const stats = hooks.__drusnielSunLightStats?.();
-    const peekWorld = hooks.__drusnielSunLightPeekWorld;
-    const active = Boolean(stats?.active && peekWorld);
-    const signature = active
-      ? `on:${stats!.tilesBuiltTotal}:${stats!.refreshes}:${stats!.entries}:${this.snappedX}:${this.snappedZ}`
-      : `off:${this.snappedX}:${this.snappedZ}`;
-    if (!force && signature === this.sunVisibilityColorSignature) return;
-    this.sunVisibilityColorSignature = signature;
-
-    if (!active) {
-      colorBuffer.set(this.baseColorBuffer);
-      this.markColorAttributeDirty();
-      return;
-    }
-
-    const vertexCount = colorBuffer.length / 3;
-    for (let vi = 0; vi < vertexCount; vi++) {
-      const worldX = this.snappedX + this.positions[vi * 3];
-      const worldZ = this.snappedZ + this.positions[vi * 3 + 2];
-      const multiplier = sunVisibilityMultiplier(peekWorld!(worldX, worldZ, this.options.lighting.sunDirection));
-      colorBuffer[vi * 3] = this.baseColorBuffer[vi * 3] * multiplier;
-      colorBuffer[vi * 3 + 1] = this.baseColorBuffer[vi * 3 + 1] * multiplier;
-      colorBuffer[vi * 3 + 2] = this.baseColorBuffer[vi * 3 + 2] * multiplier;
-    }
-    this.markColorAttributeDirty();
-  }
-
-  private markColorAttributeDirty(): void {
-    const attribute = (this.mesh.geometry as THREE.BufferGeometry).getAttribute("color") as THREE.BufferAttribute | undefined;
-    if (attribute) attribute.needsUpdate = true;
   }
 
   private flushAttributes(): void {
