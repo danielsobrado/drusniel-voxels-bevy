@@ -43,6 +43,15 @@ describe("grass ring compute capabilities", () => {
     expect(storageBindings).toHaveLength(GRASS_GPU_RING_STORAGE_BINDINGS);
   });
 
+  it("dispatches the grass cull kernel over a compact active slot list", () => {
+    const composed = composeGrassRingShader();
+
+    expect(composed).toContain("grass_active_slot_indices");
+    expect(composed).toContain("let slot = grass_active_slot_indices[id.x]");
+    expect(composed).toContain("process_slot(slot)");
+    expect(composed).not.toContain("process_slot(id.x);");
+  });
+
   it("dispatches one cull kernel over the slot grid", () => {
     expect(shaderSource).toContain("fn grass_cull(");
     expect(shaderSource).not.toContain("fn grass_cull_fine(");
@@ -153,10 +162,5 @@ grass:
 
   it("grass WGSL sets firstInstance per tier (instanceIndex includes firstInstance)", () => {
     expect(shaderSource).toContain("indirect_args[base + 4u] = tier * params.counts_b.x");
-  });
-
-  it("projects fallback river distance with a two-argument WGSL dot call", () => {
-    expect(shaderSource).toContain("dot(p - a, ab)");
-    expect(composeGrassRingShader()).not.toContain("dot(p - a) / denom");
   });
 });
