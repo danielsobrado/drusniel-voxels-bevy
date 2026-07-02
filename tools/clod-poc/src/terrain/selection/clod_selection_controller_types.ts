@@ -4,7 +4,6 @@ import type { ClodPageNode } from "../../types.js";
 import type { ClodErrorPxCompute, ClodErrorPxStats } from "../../gpu/clod_error_px_compute.js";
 import type { WebGpuReadbackMode } from "../../core/webgpu_readback_mode.js";
 import type { LockedBorderOverlay } from "../../ui/locked_border_overlay.js";
-import type { ClodSelectionCacheStats } from "./clod_selection_cache.js";
 import type { SelectionCutCacheStats } from "./selection_cut_cache.js";
 
 export interface ClodSelectionSettings {
@@ -90,7 +89,6 @@ export interface ClodSelectionStats {
   selectionMs: number;
   selectionSource: "cpu" | "webgpu";
   frameId: number;
-  cache: ClodSelectionCacheStats;
   subphases: ClodSelectionSubphases;
   selectionCache: SelectionCutCacheStats;
 }
