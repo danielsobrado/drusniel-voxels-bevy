@@ -1,6 +1,6 @@
 # CLOD-POC far sun visibility cache
 
-The CLOD-POC far sun visibility cache is a GPU-first far-lighting prototype. CPU code still builds the coarse visibility tiles, but the visual path uploads those tiles into a red-channel GPU atlas and samples that atlas in the far materials. The terrain summary remains the source of truth.
+The CLOD-POC far sun visibility cache is a GPU-first far-lighting prototype. CPU code still builds the coarse visibility tiles, but the visual path uploads those tiles into a red-channel GPU atlas and samples that atlas in far materials and post-process fog/light shafts. The terrain summary remains the source of truth.
 
 ## Runtime behavior
 
@@ -50,6 +50,15 @@ The atlas uniforms are updated before the far-shell material update path each fr
 
 CPU-side vertex color modulation is no longer the active visual path.
 
+## Post-process fog and god rays
+
+The WebGL post-process output shader now samples the same GPU atlas after reconstructing world position from the depth buffer.
+
+- Aerial perspective/fog is reduced and darkened in sun-hidden regions.
+- Screen-space god rays use the atlas as a terrain-aware visibility term during the radial march.
+- Sky pixels still contribute to shafts, while geometry pixels are attenuated by far sun visibility.
+- The existing `god rays` lil-gui folder controls mode, density, decay, weight, and exposure.
+
 ## Debugging
 
 The lil-gui folder is `sun light cache`.
@@ -72,7 +81,6 @@ The debug overlay is a small DOM canvas minimap of the cached tiles. It intentio
 
 ## Limitations
 
-- The tile builder is still CPU-side. The render/material consumption path is GPU-first.
-- It does not yet feed the screen-space god-ray pass.
+- The tile builder is still CPU-side. The render/material/post-process consumption path is GPU-first.
 - Dynamic props and vegetation are not occluders.
 - The cache should not extend CSM shadow distance.
