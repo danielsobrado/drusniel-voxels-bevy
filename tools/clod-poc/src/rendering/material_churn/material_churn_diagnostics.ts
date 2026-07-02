@@ -74,15 +74,15 @@ export class MaterialChurnDiagnostics {
   }
 
   beginFrame(frame: number): void {
-    if (this.config.enabled && this.config.collectMaterialVersions) {
-      this.sampleTrackedMaterialVersions();
-    }
     if (this.config.enabled && this.config.logSpikeWarnings) {
       this.warnIfNeeded();
     }
     this.currentFrame = frame;
     this.frame = this.emptyFrame(frame);
     this.frameReasons.clear();
+    if (this.config.enabled && this.config.collectMaterialVersions) {
+      this.sampleTrackedMaterialVersions();
+    }
   }
 
   trackNewMaterial(material: THREE.Material, reason: string): void {
