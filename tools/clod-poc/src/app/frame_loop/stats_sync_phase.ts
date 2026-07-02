@@ -102,6 +102,8 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     nextUnderstoryStats.gpuStatus !== understoryStats.gpuStatus ||
     nextUnderstoryStats.gpuVisibleCount !== understoryStats.gpuVisibleCount ||
     nextUnderstoryStats.gpuCandidateCount !== understoryStats.gpuCandidateCount ||
+    nextUnderstoryStats.gpuCandidateCountBeforePrefilter !== understoryStats.gpuCandidateCountBeforePrefilter ||
+    nextUnderstoryStats.gpuCandidateCountAfterPrefilter !== understoryStats.gpuCandidateCountAfterPrefilter ||
     nextUnderstoryStats.gpuAcceptedCount !== understoryStats.gpuAcceptedCount ||
     nextUnderstoryStats.gpuOverflowed !== understoryStats.gpuOverflowed ||
     submitMsChanged(nextUnderstoryStats.gpuDispatchMs, understoryStats.gpuDispatchMs))
