@@ -11,6 +11,12 @@ import type { TreeTerrainOcclusionSampler } from "./tree_terrain_occlusion.js";
 import type { TreeHydrologyWater } from "./tree_node_material.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
+import {
+  DEFAULT_TREE_DEPTH_PREPASS_MAX_LOD,
+  parseTreeDepthPrepassMaxLod,
+  treeDepthPrepassEnabled,
+  type TreeDepthPrepassMaxLod,
+} from "./tree_depth_prepass_runtime.js";
 import { treeSystemUsesGpuRingDraw } from "./tree_system_gpu_policy.js";
 import { createEmptyTreeSystemStats } from "./tree_system_stats.js";
 import { createEmptyTreeEarlyTerrainRejectionStats } from "./tree_patch_terrain_rejection.js";
@@ -49,8 +55,10 @@ export class TreeSystem {
   currentLighting: EnvironmentLighting | undefined;
   readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   readonly lastCenter: THREE.Vector3;
-  readonly useTreePrepass: boolean;
-  readonly useCpuTreePrepass: boolean;
+  useTreePrepass: boolean;
+  useCpuTreePrepass: boolean;
+  treePrepassMaxLod: TreeDepthPrepassMaxLod;
+  private readonly cpuTreePrepassRequested: boolean;
   readonly lodCounts = createTreeLodCounts();
   stats: TreeStats = createEmptyTreeSystemStats();
   readonly earlyTerrainRejectionStats = createEmptyTreeEarlyTerrainRejectionStats();
@@ -72,8 +80,15 @@ export class TreeSystem {
     this.hydrologyWater = options.hydrologyWaterTexture ? { texture: options.hydrologyWaterTexture, worldSize: this.worldCells } : undefined;
     this.assets = new TreeSystemAssets({ settings: this.settings, webgpu: options.webgpu ?? false, lighting: options.lighting, hydrologyWater: this.hydrologyWater, impostorAtlases: options.impostorAtlases });
     this.lastCenter = new THREE.Vector3(this.worldCells * 0.5, 0, this.worldCells * 0.5);
-    this.useTreePrepass = typeof location === "undefined" ? true : new URLSearchParams(location.search).get("prepass") !== "0";
-    this.useCpuTreePrepass = typeof location !== "undefined" && new URLSearchParams(location.search).get("treeCpuPrepass") === "1";
+    const searchParams = typeof location === "undefined" ? null : new URLSearchParams(location.search);
+    const globalPrepassDisabled = searchParams?.get("prepass") === "0";
+    const treePrepassDisabled = searchParams?.get("treePrepass") === "0";
+    this.treePrepassMaxLod = globalPrepassDisabled || treePrepassDisabled
+      ? "none"
+      : parseTreeDepthPrepassMaxLod(searchParams?.get("treePrepassMaxLod") ?? DEFAULT_TREE_DEPTH_PREPASS_MAX_LOD);
+    this.useTreePrepass = treeDepthPrepassEnabled(this.treePrepassMaxLod);
+    this.cpuTreePrepassRequested = searchParams?.get("treeCpuPrepass") === "1";
+    this.useCpuTreePrepass = this.cpuTreePrepassRequested && this.useTreePrepass;
     this.root.name = "trees";
     this.scene.add(this.root);
     this.root.visible = this.settings.enabled;
@@ -89,6 +104,16 @@ export class TreeSystem {
   updateForestLighting(state: ForestLightingMaterialState | null): void {
     this.assets.updateForestLighting(state);
     for (const handle of treeGpuRingMaterialHandles(this.gpuRing)) handle.updateForestLighting?.(state);
+  }
+
+  setDepthPrepassMaxLod(maxLod: TreeDepthPrepassMaxLod): void {
+    this.treePrepassMaxLod = maxLod;
+    this.useTreePrepass = treeDepthPrepassEnabled(maxLod);
+    this.useCpuTreePrepass = this.cpuTreePrepassRequested && this.useTreePrepass;
+    this.clearGpuRing();
+    this.clearPatches();
+    if (this.settings.enabled && !treeSystemUsesGpuRingDraw(this.settings)) this.refreshForCenter(this.lastCenter);
+    this.updateStats();
   }
 
   setEnabled(enabled: boolean): void {
