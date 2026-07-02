@@ -285,12 +285,10 @@ function placeTreeInstance(
 ): void {
   const mesh = patch.meshes[instance.species][lod];
   const writeIndex = treeMeshWriteCount(mesh, write);
-  if (writeIndex >= mesh.count) return;
   const resolveLod = input.resolveLod(instance.species, lod);
   const renderLod = resolveLod === lod ? lod : resolveLod;
   const effectiveMesh = patch.meshes[instance.species][renderLod];
   const effectiveIndex = effectiveMesh === mesh ? writeIndex : treeMeshWriteCount(effectiveMesh, write);
-  if (effectiveIndex >= effectiveMesh.count) return;
   if (writeTreeWorldXZIfChanged(effectiveMesh, effectiveIndex, instance.position[0], instance.position[2])) markTreeMeshWorldXZChanged(effectiveMesh, write);
   if (writeTreeLodFadeIfChanged(effectiveMesh, effectiveIndex, fade)) markTreeMeshFadeChanged(effectiveMesh, write);
   if (writeTreeLodDitherRoleIfChanged(effectiveMesh, effectiveIndex, ditherRole)) markTreeMeshFadeChanged(effectiveMesh, write);

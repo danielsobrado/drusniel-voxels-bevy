@@ -68,7 +68,7 @@ export function createTreePatchLodMesh(input: TreePatchLodMeshInput): THREE.Inst
   attachTreePatchInstanceAttributes(geometry, input.lod, capacity);
   const mesh = new THREE.InstancedMesh(geometry, input.material, capacity);
   mesh.name = `trees-${input.nodeId}-${input.species}-${input.lod}`;
-  mesh.count = 0;
+  mesh.count = capacity;
   mesh.frustumCulled = true;
   mesh.visible = false;
   mesh.castShadow = input.castShadow;

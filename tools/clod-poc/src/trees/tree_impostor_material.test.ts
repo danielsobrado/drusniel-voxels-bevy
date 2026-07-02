@@ -68,7 +68,6 @@ describe("tree impostor material contracts", () => {
   it("updates alpha and render flags", () => {
     const settings = cloneTreeSettings();
     const material = createTreeImpostorMaterial(settings, fakeAtlas());
-    const previousVersion = material.version;
     settings.impostors.alphaTest = 0.61;
     updateTreeImpostorMaterialSettings(material, settings);
 

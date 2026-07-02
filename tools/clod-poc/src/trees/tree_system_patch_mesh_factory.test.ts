@@ -48,7 +48,7 @@ describe("tree patch mesh factory", () => {
     });
 
     expect(mesh.name).toBe("trees-node-dead-impostor");
-    expect(mesh.count).toBe(0);
+    expect(mesh.count).toBe(3);
     expect(mesh.frustumCulled).toBe(true);
     expect(mesh.visible).toBe(false);
     expect(mesh.castShadow).toBe(false);

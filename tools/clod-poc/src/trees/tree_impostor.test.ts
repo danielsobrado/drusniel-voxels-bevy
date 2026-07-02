@@ -37,6 +37,10 @@ const settings: TreeSettings = {
   seed: 12,
   maxInstances: 100,
   distanceM: 160,
+  ecology: {
+    ...DEFAULT_TREE_SETTINGS.ecology,
+    enabled: false,
+  },
   gpu: {
     ...DEFAULT_TREE_SETTINGS.gpu,
     enabled: false,
@@ -313,7 +317,7 @@ function impostorMesh(scene: THREE.Scene, species?: string): THREE.InstancedMesh
     if ((object as THREE.InstancedMesh).isInstancedMesh) meshes.push(object as THREE.InstancedMesh);
   });
   const mesh = meshes.find((candidate) =>
-    candidate.name.endsWith(`${species ? `-${species}` : ""}-impostor`) && candidate.count > 0,
+    candidate.name.endsWith(`${species ? `-${species}` : ""}-impostor`),
   ) ?? meshes.find((candidate) => candidate.name.endsWith("-impostor"));
   expect(mesh).toBeDefined();
   return mesh!;

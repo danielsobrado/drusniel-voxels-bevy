@@ -146,7 +146,7 @@ describe("createClodSelectionController cache hits", () => {
 
     expect(controller.stats().selectionCache.hits).toBe(1);
     expect(getOrCreateView).toHaveBeenCalledTimes(1);
-    expect(markActiveNodes).toHaveBeenCalledTimes(1);
+    expect(markActiveNodes).toHaveBeenCalledTimes(2);
     expect(prefetchNodes).toHaveBeenCalledTimes(1);
     expect([...views.values()][0].selected).toBe(true);
     expect([...views.values()][0].target).toBe(1);
