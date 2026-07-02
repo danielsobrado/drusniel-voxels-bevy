@@ -3,6 +3,7 @@ use super::config::{ProceduralSupportMapConfig, ProceduralSupportMapRuntimeMode}
 use super::manifest::ProceduralSupportMapManifest;
 use super::material_bindings::{ProceduralSupportMapSource, ProceduralTerrainSupportMapHandles};
 use super::recipes::ProceduralMaterialId;
+use super::status::ProceduralSupportMapStatus;
 use super::texture_images::{
     GeneratedProceduralSupportMapSet, generate_procedural_support_map_set,
 };
@@ -14,7 +15,8 @@ pub struct ProceduralSupportMapPlugin;
 
 impl Plugin for ProceduralSupportMapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_procedural_support_maps)
+        app.init_resource::<ProceduralSupportMapStatus>()
+            .add_systems(Startup, setup_procedural_support_maps)
             .add_systems(Update, sync_procedural_support_maps_to_triplanar_materials);
     }
 }
@@ -67,23 +69,30 @@ pub fn setup_procedural_support_maps(
     let config = match ProceduralSupportMapConfig::load_or_default() {
         Ok(config) => config,
         Err(error) => {
-            warn!("Procedural support maps disabled: {error}");
+            let message = format!("Procedural support maps disabled: {error}");
+            warn!("{message}");
+            commands.insert_resource(ProceduralSupportMapStatus::disabled(message));
             return;
         }
     };
 
     if !config.enabled {
-        info!("Procedural support maps disabled by config");
+        let message = "Procedural support maps disabled by config";
+        info!("{message}");
+        commands.insert_resource(ProceduralSupportMapStatus::disabled(message));
         return;
     }
 
     let expected_manifest = match ProceduralSupportMapManifest::expected(&config) {
         Ok(manifest) => manifest,
         Err(error) => {
-            warn!("Procedural support maps disabled: {error}");
+            let message = format!("Procedural support maps disabled: {error}");
+            warn!("{message}");
+            commands.insert_resource(ProceduralSupportMapStatus::disabled(message));
             return;
         }
     };
+    let manifest_key = manifest_key_for_manifest(&expected_manifest);
     let cache_status = match cache::manifest_status(&config.cache_dir, &expected_manifest) {
         Ok(status) => status,
         Err(error) => {
@@ -97,20 +106,31 @@ pub fn setup_procedural_support_maps(
     if cache_files_ready && config.runtime_mode != ProceduralSupportMapRuntimeMode::ForceRegenerate
     {
         let handles = handles_from_cache(&config, expected_manifest, &asset_server);
+        let status = ProceduralSupportMapStatus::ready(
+            ProceduralSupportMapSource::CachedAsset,
+            manifest_key,
+            config.cache_dir.clone(),
+            "Procedural support maps loaded from cache",
+        );
         commands.insert_resource(handles);
+        commands.insert_resource(status);
         info!("Procedural support maps loaded from cache");
         return;
     }
 
     if config.runtime_mode == ProceduralSupportMapRuntimeMode::CacheOnly {
-        warn!("Procedural support map cache_only mode found no matching cache");
+        let message = "Procedural support map cache_only mode found no matching cache";
+        warn!("{message}");
+        commands.insert_resource(ProceduralSupportMapStatus::disabled(message));
         return;
     }
 
     let generated = match generate_procedural_support_map_set(&config) {
         Ok(generated) => generated,
         Err(error) => {
-            warn!("Procedural support map generation failed: {error}");
+            let message = format!("Procedural support map generation failed: {error}");
+            warn!("{message}");
+            commands.insert_resource(ProceduralSupportMapStatus::disabled(message));
             return;
         }
     };
@@ -118,8 +138,15 @@ pub fn setup_procedural_support_maps(
     if let Err(error) = generated.write_cache(&config.cache_dir) {
         warn!("Procedural support map cache write failed: {error}");
     }
+    let status = ProceduralSupportMapStatus::ready(
+        ProceduralSupportMapSource::GeneratedRuntime,
+        manifest_key,
+        config.cache_dir.clone(),
+        "Procedural support maps generated",
+    );
     let handles = handles_from_generated(generated, config, &mut images);
     commands.insert_resource(handles);
+    commands.insert_resource(status);
     info!("Procedural support maps generated");
 }
 
@@ -127,6 +154,7 @@ pub fn sync_procedural_support_maps_to_triplanar_materials(
     support_maps: Option<Res<ProceduralTerrainSupportMapHandles>>,
     triplanar_handles: Option<Res<TriplanarMaterialHandle>>,
     mut materials: ResMut<Assets<TriplanarMaterial>>,
+    mut status: Option<ResMut<ProceduralSupportMapStatus>>,
     mut applied_manifest_key: Local<Option<String>>,
 ) {
     let (Some(support_maps), Some(triplanar_handles)) = (support_maps, triplanar_handles) else {
@@ -149,6 +177,9 @@ pub fn sync_procedural_support_maps_to_triplanar_materials(
 
     if applied > 0 {
         *applied_manifest_key = Some(manifest_key);
+        if let Some(status) = status.as_deref_mut() {
+            status.record_material_variants_applied(applied);
+        }
         info!(
             "Procedural support maps enabled for {applied} terrain material variants ({:?})",
             support_maps.source
@@ -156,11 +187,15 @@ pub fn sync_procedural_support_maps_to_triplanar_materials(
     }
 }
 
-fn material_manifest_key(handles: &ProceduralTerrainSupportMapHandles) -> String {
+fn manifest_key_for_manifest(manifest: &ProceduralSupportMapManifest) -> String {
     format!(
         "{}:{}:{}",
-        handles.manifest.schema_version, handles.manifest.config_hash, handles.manifest.shader_hash
+        manifest.schema_version, manifest.config_hash, manifest.shader_hash
     )
+}
+
+fn material_manifest_key(handles: &ProceduralTerrainSupportMapHandles) -> String {
+    manifest_key_for_manifest(&handles.manifest)
 }
 
 fn triplanar_material_handles(handles: &TriplanarMaterialHandle) -> [&Handle<TriplanarMaterial>; 10] {
