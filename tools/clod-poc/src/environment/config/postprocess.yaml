@@ -42,6 +42,7 @@ postprocess:
     dither: 0.003
 
   webgpu:
+    clouds_enabled: true
     gtao_enabled: true
     froxels_enabled: true
     bounce_enabled: true
