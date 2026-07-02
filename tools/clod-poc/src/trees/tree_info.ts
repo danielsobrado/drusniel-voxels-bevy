@@ -92,7 +92,12 @@ function formatTreeTotal(totalTrees: TreeTotalDisplay): string {
 }
 
 function formatTreeTerrainPatchStats(treeStats: TreeStats): string {
-  return treeStats.terrainOccludedPatches > 0 ? ` terrainOccPatches=${treeStats.terrainOccludedPatches}` : "";
+  const late = treeStats.terrainOccludedPatches > 0 ? ` terrainOccPatches=${treeStats.terrainOccludedPatches}` : "";
+  const early = treeStats.earlyTerrainRejectedPatches > 0
+    ? ` earlyTerrainReject=${treeStats.earlyTerrainRejectedPatches}` +
+      ` skippedCandidates=${treeStats.earlyTerrainSkippedCandidates}`
+    : "";
+  return `${late}${early}`;
 }
 
 function formatTreeImpostorStatus(treeStats: TreeStats): string {
