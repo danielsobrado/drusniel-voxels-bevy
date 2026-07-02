@@ -4,6 +4,7 @@ import { MeshBasicNodeMaterial } from "three/webgpu";
 import type { FarTerrainUniformData } from "./farTerrainUniforms.js";
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
 import type { FarSummaryGpuAtlasRingView, FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
+import { getSunLightGpuAtlas } from "../terrain/sun_visibility/sun_light_gpu_atlas.js";
 export type { FarTerrainVertexColors, FarTerrainSummaryRingUniformRefs, FarTerrainUniformRefs, FarTerrainMaterialOptions, TslNode } from "./far_terrain_material_types.js";
 import type { FarTerrainSummaryRingUniformRefs, FarTerrainUniformRefs, FarTerrainMaterialOptions, TslNode } from "./far_terrain_material_types.js";
 export { computeFarTerrainVertexColors, createVertexColorBuffer } from "./far_terrain_vertex_colors.js";
@@ -14,6 +15,7 @@ const SUMMARY_HEIGHT_RANGE_SHADE_STRENGTH = 0.28;
 const SUMMARY_CANOPY_TINT_STRENGTH = 0.45;
 const SUMMARY_WATER_TINT_STRENGTH = 0.70;
 const SUMMARY_WATER_NORMAL_FLATTEN = 0.45;
+const FAR_SUN_VISIBILITY_SHADE_MIN = 0.62;
 
 export function createFarTerrainMaterial(
   lighting: FarShellLighting,
@@ -23,6 +25,7 @@ export function createFarTerrainMaterial(
   _farRadius: number,
   options: FarTerrainMaterialOptions = {},
 ): MeshBasicNodeMaterial {
+  const sunVisibilityAtlas = getSunLightGpuAtlas();
   const uSunDir = uniform(lighting.sunDirection.clone());
   const uSunColor = uniform(vec3(lighting.sunColor.r, lighting.sunColor.g, lighting.sunColor.b));
   const uSkyColor = uniform(vec3(lighting.skyLight.r, lighting.skyLight.g, lighting.skyLight.b));
@@ -37,6 +40,10 @@ export function createFarTerrainMaterial(
   const uHemiStrength = uniform(config.hemiStrength);
   const uSunStrength = uniform(config.sunStrength);
   const uAmbientFloor = uniform(config.ambientFloor);
+  const uSunVisibilityOriginX = uniform(sunVisibilityAtlas.originX);
+  const uSunVisibilityOriginZ = uniform(sunVisibilityAtlas.originZ);
+  const uSunVisibilityWorldSize = uniform(sunVisibilityAtlas.worldSize);
+  const uSunVisibilityValid = uniform(sunVisibilityAtlas.valid);
   const dp = vec2(positionWorld.x.sub(uCenterX), positionWorld.z.sub(uCenterZ));
   const distXZ = dp.length();
   const hazeT = smoothstep(uHazeStart, uHazeEnd, distXZ);
@@ -118,11 +125,24 @@ export function createFarTerrainMaterial(
     material.positionNode = vec3(local.x, terrainHeight, local.z);
   }
 
+  const visibilityWorldUv = vec2(
+    positionWorld.x.sub(uSunVisibilityOriginX).div(uSunVisibilityWorldSize),
+    positionWorld.z.sub(uSunVisibilityOriginZ).div(uSunVisibilityWorldSize),
+  );
+  const visibilityInside = step(float(0.0), visibilityWorldUv.x)
+    .mul(step(visibilityWorldUv.x, float(1.0)))
+    .mul(step(float(0.0), visibilityWorldUv.y))
+    .mul(step(visibilityWorldUv.y, float(1.0)))
+    .mul(uSunVisibilityValid);
+  const visibilitySample = texture(sunVisibilityAtlas.texture, clamp(visibilityWorldUv, float(0.0), float(1.0))).r;
+  const sunVisibility = mix(float(1.0), mix(float(FAR_SUN_VISIBILITY_SHADE_MIN), float(1.0), visibilitySample), visibilityInside);
+
   const sun = max(dot(surfaceNormal, uSunDir), float(0));
   const sky = clamp(surfaceNormal.y.mul(0.5).add(0.5), float(0), float(1));
   const hemi = mix(uGroundColor, uSkyColor, sky).mul(uHemiStrength);
   const ambientFloor = vec3(uAmbientFloor, uAmbientFloor, uAmbientFloor);
-  const light = ambientFloor.add(hemi).add(uSunColor.mul(pow(sun, float(1.35))).mul(uSunStrength));
+  const directSun = uSunColor.mul(pow(sun, float(1.35))).mul(uSunStrength).mul(sunVisibility);
+  const light = ambientFloor.add(hemi).add(directSun);
   const colorNode = surfaceColor as unknown as { mul: (x: unknown) => unknown };
   const lit = (colorNode.mul(light) as unknown as ReturnType<typeof vec3>);
   material.colorNode = mix(lit, uHazeColor, hazeFactor);
@@ -130,6 +150,7 @@ export function createFarTerrainMaterial(
   const refs: FarTerrainUniformRefs = {
     uCenterX, uCenterZ, uHazeStart, uHazeEnd, uHazeStrength, uHazeEnabled, uHazeColor,
     uHemiStrength, uSunStrength, uAmbientFloor, uSunDir, uSunColor, uSkyColor, uGroundColor,
+    uSunVisibilityOriginX, uSunVisibilityOriginZ, uSunVisibilityWorldSize, uSunVisibilityValid,
     uSummaryWidthCells, uSummaryHeightCells, uSummaryValid, uSummaryRings,
   };
   material.userData.farTerrainUniforms = refs;
@@ -167,6 +188,17 @@ export function updateFarTerrainMaterialCenter(material: MeshBasicNodeMaterial, 
   if (!refs) return;
   refs.uCenterX.value = centerX;
   refs.uCenterZ.value = centerZ;
+  updateFarTerrainMaterialSunVisibility(material);
+}
+
+export function updateFarTerrainMaterialSunVisibility(material: MeshBasicNodeMaterial): void {
+  const refs = material.userData.farTerrainUniforms as FarTerrainUniformRefs | undefined;
+  if (!refs) return;
+  const atlas = getSunLightGpuAtlas();
+  refs.uSunVisibilityOriginX.value = atlas.originX;
+  refs.uSunVisibilityOriginZ.value = atlas.originZ;
+  refs.uSunVisibilityWorldSize.value = atlas.worldSize;
+  refs.uSunVisibilityValid.value = atlas.valid;
 }
 
 export function updateFarTerrainMaterialSummaryAtlas(material: MeshBasicNodeMaterial, view: FarSummaryGpuAtlasView): void {
