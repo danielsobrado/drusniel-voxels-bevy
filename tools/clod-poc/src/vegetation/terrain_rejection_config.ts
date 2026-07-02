@@ -1,5 +1,6 @@
 export interface VegetationTerrainRejectionConfig {
   enabled: boolean;
+  /** Probe-only static rules are heuristic; keep them opt-in until summary coverage can prove full-footprint invalidity. */
   staticRulesEnabled: boolean;
   viewRulesEnabled: boolean;
   decisionCacheEnabled: boolean;
@@ -9,7 +10,7 @@ export interface VegetationTerrainRejectionConfig {
 
 export const DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG: VegetationTerrainRejectionConfig = {
   enabled: true,
-  staticRulesEnabled: true,
+  staticRulesEnabled: false,
   viewRulesEnabled: true,
   decisionCacheEnabled: true,
   decisionCacheMaxEntries: 8192,
