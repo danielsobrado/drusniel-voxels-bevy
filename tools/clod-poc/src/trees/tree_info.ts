@@ -69,7 +69,10 @@ function formatTreeGpuStats(treeStats: TreeStats): string {
   const dispatch = treeStats.gpuDispatchMs !== null ? ` dispatch=${treeStats.gpuDispatchMs.toFixed(1)}ms` : "";
   return ` path=${path} candidates=${treeStats.gpuCandidateCount}` +
     ` accepted=${treeStats.gpuAcceptedCount} visible=${treeStats.gpuVisibleCount}` +
-    ` shadow=${treeStats.gpuShadowCasterCount}${formatTreeTerrainCandidateStats(treeStats)}${dispatch}${overflow}${shadowOverflow}`;
+    ` shadow=${treeStats.gpuShadowCasterCount}` +
+    formatTreeTerrainCandidateStats(treeStats) +
+    formatTreeVisibleClusterStats(treeStats) +
+    `${dispatch}${overflow}${shadowOverflow}`;
 }
 
 function formatTreeTerrainCandidateStats(treeStats: TreeStats): string {
@@ -78,4 +81,14 @@ function formatTreeTerrainCandidateStats(treeStats: TreeStats): string {
   if (!hasCounts) return "";
   return ` terrainOccCandidates=${treeStats.terrainHiddenCandidates}` +
     ` terrainVisibleCandidates=${treeStats.terrainVisibleCandidates}`;
+}
+
+function formatTreeVisibleClusterStats(treeStats: TreeStats): string {
+  const hasCounts = treeStats.visibleClusterHidden > 0 ||
+    treeStats.visibleClusterVisible > 0 ||
+    treeStats.visibleClusterUnknownKept > 0;
+  if (!hasCounts) return "";
+  return ` visibleClusters hidden=${treeStats.visibleClusterHidden}` +
+    ` visible=${treeStats.visibleClusterVisible}` +
+    (treeStats.visibleClusterUnknownKept > 0 ? ` unknown=${treeStats.visibleClusterUnknownKept}` : "");
 }
