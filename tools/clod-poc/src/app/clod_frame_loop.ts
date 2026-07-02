@@ -139,7 +139,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     });
 
     const terrainPhaseResult = timed(collectFrameTiming, phaseTiming, "terrainPhaseMs", () => runTerrainFramePhase({
-      state: terrain.state,
+      state: player.state,
       pageTransitionMode: terrain.pageTransitionMode,
       crossfadeStep: terrain.crossfadeStep,
       interaction: player.interaction,
@@ -165,7 +165,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     });
 
     const vegetationResult = timed(collectFrameTiming, phaseTiming, "vegetationTotalMs", () => runVegetationFramePhase({
-      state: terrain.state,
+      state: player.state,
       player: player.player,
       controls: player.controls,
       interaction: player.interaction,
@@ -180,7 +180,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     const currentTreeStats = vegetationResult.currentTreeStats;
 
     timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
-      state: terrain.state,
+      state: player.state,
       player: player.player,
       renderer: render.renderer,
       selectionStats,
