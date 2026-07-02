@@ -35,6 +35,9 @@ export function webGpuPostProcessGraphKey(settings: Required<PostProcessSettings
     settings.taaEnabled ? "taa" : "no-taa",
     settings.aerialPerspectiveEnabled ? "aerial" : "no-aerial",
     settings.contactShadowsEnabled ? "contact" : "no-contact",
+    settings.gtaoEnabled ? "gtao" : "no-gtao",
+    settings.froxelsEnabled ? "froxels" : "no-froxels",
+    settings.bounceEnabled ? "bounce" : "no-bounce",
   ].join("|");
 }
 
