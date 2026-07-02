@@ -26,7 +26,7 @@ export function addTreeGpuRingPrepassTwin(input: AddTreeGpuRingPrepassTwinInput)
   if (!treeSystemUsesGpuRingPrepass(input.useTreePrepass, input.maxLod, input.lod)) return null;
   const nodes = input.materialHandle.prepassNodesFor?.(input.lod);
   if (!nodes) return null;
-  const twin = depthPrepassTwin(input.mesh, nodes);
+  const twin = depthPrepassTwin(input.mesh, nodes, { cloneColorMaterial: false });
   input.twins.push(twin);
   input.root.add(twin);
   return twin;
