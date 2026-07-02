@@ -26,6 +26,8 @@ describe("tree ring cluster visibility", () => {
     expect(mask.hiddenClusters).toBe(0);
     expect(mask.visibleClusters).toBe(mask.words.length);
     expect(mask.reasonCounts.disabled).toBe(mask.words.length);
+    expect(mask.candidateSlotsAfterPrefilter).toBe(mask.candidateSlotsBeforePrefilter);
+    expect(mask.activeSlotIndices).toHaveLength(mask.candidateSlotsBeforePrefilter);
     expect(Array.from(mask.words).every((value) => value === 1)).toBe(true);
   });
 
@@ -46,10 +48,11 @@ describe("tree ring cluster visibility", () => {
 
     expect(mask.hiddenClusters).toBe(0);
     expect(mask.unknownKeptClusters).toBe(mask.words.length);
+    expect(mask.candidateSlotsAfterPrefilter).toBe(mask.candidateSlotsBeforePrefilter);
     expect(Array.from(mask.words).every((value) => value === 1)).toBe(true);
   });
 
-  it("marks terrain-hidden clusters as not visible", () => {
+  it("marks terrain-hidden clusters as not visible before GPU slot dispatch", () => {
     const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
     settings.distanceM = 24;
     settings.gpu.terrainVisibility.minDistanceM = 0;
@@ -68,6 +71,9 @@ describe("tree ring cluster visibility", () => {
 
     expect(mask.hiddenClusters).toBeGreaterThan(0);
     expect(mask.reasonCounts.terrain_hidden).toBe(mask.hiddenClusters);
+    expect(mask.candidateSlotsAfterPrefilter).toBeLessThan(mask.candidateSlotsBeforePrefilter);
+    expect(mask.activeSlotIndices.length).toBe(mask.candidateSlotsAfterPrefilter);
+    expect(mask.skippedCandidateEstimate).toBe(mask.candidateSlotsBeforePrefilter - mask.candidateSlotsAfterPrefilter);
     expect(Array.from(mask.words).some((value) => value === 0)).toBe(true);
   });
 
@@ -81,9 +87,13 @@ describe("tree ring cluster visibility", () => {
       clusterDimCells: 4,
       clusterGrid: 4,
       words,
+      activeSlotIndices: new Uint32Array([4]),
       hiddenClusters: 1,
       visibleClusters: words.length - 1,
       unknownKeptClusters: 0,
+      candidateSlotsBeforePrefilter: 225,
+      candidateSlotsAfterPrefilter: 1,
+      skippedCandidateEstimate: 224,
       reasonCounts: {
         visible: words.length - 1,
         terrain_hidden: 1,
