@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { getDigEditsSnapshot } from "../terrain/terrain.js";
+import { getDigEditRevision, getDigEditsSnapshot } from "../terrain/terrain.js";
 import {
   TREE_GPU_RING_CELL,
   TreeGpuRingCompute,
@@ -19,7 +19,7 @@ import {
   generateTreeRingValidationCounts,
 } from "./tree_ring_lighting_proxies.js";
 import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";
-import { buildTreeRingClusterVisibilityMask, type TreeRingClusterVisibilityMask } from "./tree_ring_cluster_visibility.js";
+import { buildTreeRingClusterVisibilityMask, TreeRingClusterVisibilityCache, type TreeRingClusterVisibilityMask } from "./tree_ring_cluster_visibility.js";
 import type { TreeVisibleClusterMaskStats } from "./tree_system_stats.js";
 import {
   formatTreeLodCounts,
@@ -50,6 +50,7 @@ export interface TreeGpuRingRuntimeState {
   stats: TreeGpuRingStats;
   frustumPlaneScratch: Float32Array<ArrayBuffer>;
   lastValidationSignature: string;
+  clusterVisibilityCache: TreeRingClusterVisibilityCache;
 }
 
 export interface TreeGpuRingRuntimeInput {
@@ -84,6 +85,7 @@ export function createTreeGpuRingRuntimeState(gpuDevice: GPUDevice | null): Tree
     stats: createTreeGpuRingStats(gpuDevice ? "idle" : "disabled"),
     frustumPlaneScratch: new Float32Array(24) as Float32Array<ArrayBuffer>,
     lastValidationSignature: "",
+    clusterVisibilityCache: new TreeRingClusterVisibilityCache(),
   };
 }
 
@@ -131,6 +133,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
     const shadowCameras = getRealtimeSunShadowCascadeCameras();
     const shadowCascadePlanes = shadowCameras.length > 0 ? treeRingShadowCascadePlanesFromCameras(shadowCameras) : undefined;
     const shadowCapacity = treeGpuRingShadowGroupCapacity(input.settings, shadowCascadePlanes);
+    const terrainRevision = getDigEditRevision();
     const visibleClusterMask = input.settings.gpu.terrainVisibility.enabled && input.sampler
       ? buildTreeRingClusterVisibilityMask({
         centerX: center.x,
@@ -139,6 +142,8 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
         worldCells: input.worldCells,
         settings: input.settings,
         sampler: input.sampler,
+        terrainRevision,
+        cache: input.state.clusterVisibilityCache,
       })
       : null;
     const slotCount = treeGpuRingSlotCount(input.settings);
@@ -165,7 +170,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
     };
     nextStats.visibleClusterMaskStats = treeVisibleClusterMaskStats(visibleClusterMask);
     input.state.stats = nextStats;
-    validateTreeGpuRingAgainstCpu(input, center, camera, frustumPlanes, shadowCapacity > 0 ? shadowCascadePlanes : undefined);
+    validateTreeGpuRingAgainstCpu(input, center, camera, frustumPlanes, shadowCapacity > 0 ? shadowCascadePlanes : undefined, visibleClusterMask);
   }
 
   input.lodCounts.near = input.state.stats.counts.near;
@@ -245,6 +250,7 @@ function validateTreeGpuRingAgainstCpu(
   camera: THREE.Camera | undefined,
   frustumPlanes: ArrayLike<number>,
   shadowCascadePlanes: ArrayLike<number> | undefined,
+  visibleClusterMask: TreeRingClusterVisibilityMask | null,
 ): void {
   if (!input.settings.gpu.debugValidateAgainstCpu || input.state.stats.readbackMs === null) return;
 
@@ -256,6 +262,7 @@ function validateTreeGpuRingAgainstCpu(
     input.state.stats.overflowed ? 1 : 0,
     input.state.stats.shadowOverflowed ? 1 : 0,
     input.state.stats.candidateCountAfterPrefilter,
+    visibleClusterMask?.activeSlotIndices.length ?? -1,
   ].join("|");
   if (signature === input.state.lastValidationSignature) return;
   input.state.lastValidationSignature = signature;
@@ -273,6 +280,7 @@ function validateTreeGpuRingAgainstCpu(
     maxShadowCastersPerGroup: shadowCapacity,
     frustumPlanes,
     shadowCascadePlanes: shadowCapacity > 0 ? shadowCascadePlanes : undefined,
+    activeSlotIndices: visibleClusterMask?.activeSlotIndices,
   });
   const deltas = TREE_LODS.map((lod) => Math.abs((input.state.stats.counts[lod] ?? 0) - (expected.counts[lod] ?? 0)));
   const maxDelta = Math.max(...deltas);
@@ -329,8 +337,8 @@ function treeVisibleClusterMaskStats(mask: TreeRingClusterVisibilityMask | null)
     gpuPrefilterSkippedCandidateEstimate: mask.skippedCandidateEstimate,
     gpuCandidateCountBeforePrefilter: mask.candidateSlotsBeforePrefilter,
     gpuCandidateCountAfterPrefilter: mask.candidateSlotsAfterPrefilter,
-    gpuPrefilterCacheHits: 0,
-    gpuPrefilterCacheMisses: mask.hiddenClusters + mask.visibleClusters,
+    gpuPrefilterCacheHits: mask.cacheHits,
+    gpuPrefilterCacheMisses: mask.cacheMisses,
   };
 }
 
