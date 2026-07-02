@@ -7,6 +7,10 @@ export interface TreeLodSelection {
   secondaryFade: number;
 }
 
+export interface TreeLodSelectionOptions {
+  allowCrossfade?: boolean;
+}
+
 const LOD_ORDER: readonly TreeLod[] = ["near", "mid", "far", "impostor"] as const;
 
 export function treeLodDistances(settings: TreeSettings): {
@@ -27,11 +31,13 @@ export function selectTreeLod(
   distance: number,
   previousLod: TreeLod | null,
   settings: TreeSettings,
+  options: TreeLodSelectionOptions = {},
 ): TreeLodSelection {
   const distances = treeLodDistances(settings);
   const baseLod = lodForDistance(distance, distances);
+  const allowCrossfade = options.allowCrossfade ?? true;
 
-  if (settings.lod.crossfadeEnabled && settings.lod.ditherEnabled) {
+  if (allowCrossfade && settings.lod.crossfadeEnabled && settings.lod.ditherEnabled) {
     return selectTreeLodWithCrossfade(distance, baseLod, settings);
   }
 
