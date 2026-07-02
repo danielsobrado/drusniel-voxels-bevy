@@ -48,6 +48,10 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   treeHeroNearPassesTriangleFloor: number;
   treeHeroNearPassesRealFoliage: number;
   treeGpuCandidateCount: number;
+  treeGpuCandidateCountBeforePrefilter: number;
+  treeGpuCandidateCountAfterPrefilter: number;
+  treeGpuPrefilterRejectedClusters: number;
+  treeGpuPrefilterSkippedCandidateEstimate: number;
   treeGpuAcceptedCount: number;
   treeGpuVisibleCount: number;
   treeGpuShadowCasterCount: number;
@@ -95,6 +99,10 @@ export interface FramePerfSummary {
     treeGpuStatusCounts: Record<string, number>;
     treeTotalTreesAvg: number;
     treeGpuCandidateCountAvg: number;
+    treeGpuCandidateCountBeforePrefilterAvg: number;
+    treeGpuCandidateCountAfterPrefilterAvg: number;
+    treeGpuPrefilterRejectedClustersAvg: number;
+    treeGpuPrefilterSkippedCandidateEstimateAvg: number;
     treeGpuAcceptedCountAvg: number;
     treeGpuVisibleCountAvg: number;
     treeGpuShadowCasterCountAvg: number;
