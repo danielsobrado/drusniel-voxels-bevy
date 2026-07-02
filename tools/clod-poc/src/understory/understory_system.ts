@@ -265,6 +265,11 @@ export class UnderstorySystem {
   }
 
   rebuildNodePatches(nodeIds: Iterable<string>): void {
+    if (this.usesGpuRingDraw()) {
+      this.clearGpuRing();
+      this.markPatchesDirty();
+      return;
+    }
     this.removePatchesForNodes(nodeIds);
     this.refreshForCenter(this.lastCenter);
   }
@@ -321,7 +326,10 @@ export class UnderstorySystem {
     if (this.gpuRingCompute && this.gpuRingKey === key) return;
     if (this.gpuRingInit && this.gpuRingKey === key) return;
 
-    this.clearGpuRingDraw();
+    if (this.gpuRingCompute || this.gpuRingInit || this.gpuRingDraw || this.ringMeshes.length > 0) {
+      this.clearGpuRing();
+    }
+
     this.gpuRingKey = key;
     this.gpuRingDraw = createGpuRingDrawResources(
       this.settings,
@@ -363,9 +371,12 @@ export class UnderstorySystem {
       this.gpuRingCompute = compute;
       this.gpuRingStats = compute.stats(this.settings.enabled);
     }).catch((error) => {
+      if (this.gpuRingKey !== initKey || this.gpuRingGeneration !== initGeneration) return;
       console.warn("[understory] GPU ring compute init failed:", error);
       this.gpuRingStats = { ...this.gpuRingStats, status: "failed", reason: String(error) };
-    }).finally(() => { this.gpuRingInit = null; });
+    }).finally(() => {
+      if (this.gpuRingKey === initKey && this.gpuRingGeneration === initGeneration) this.gpuRingInit = null;
+    });
   }
 
   private updateGpuRingUnderstory(center: THREE.Vector3, camera?: THREE.Camera): void {
