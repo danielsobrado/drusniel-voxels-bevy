@@ -1,14 +1,31 @@
 import * as THREE from "three";
-import { worldToSunVisibilityTile, sunVisibilityTileBounds, sunVisibilityTileKeyToString } from "./sun_visibility_tile.js";
-import { toSunBin, sunBinKey } from "./sun_bins.js";
-import { buildLightTile, LIGHT_SAMPLE } from "./light_builder.js";
+import { worldToSunVisibilityTile, sunVisibilityTileBounds, sunVisibilityTileKeyToString, type SunVisibilityTileKey } from "./sun_visibility_tile.js";
+import { toSunBin, sunBinKey, type SunDirectionBin } from "./sun_bins.js";
+import { buildLightTile, LIGHT_SAMPLE, type LightTile, type LightTileBuildRequest } from "./light_builder.js";
 import type { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
+import type { SunLightOptions } from "./sun_light_options.js";
 
-function fullKey(tile: any, bin: any, revision: number): string {
+interface SunLightCacheStats {
+  active: boolean;
+  entries: number;
+  pendingTiles: number;
+  hits: number;
+  misses: number;
+  missingValues: number;
+  evictions: number;
+  refreshes: number;
+  tilesBuiltTotal: number;
+  tilesBuiltThisFrame: number;
+  buildMsLastFrame: number;
+  buildMsAvg: number;
+  currentSunBin: SunDirectionBin | null;
+}
+
+function fullKey(tile: SunVisibilityTileKey, bin: SunDirectionBin, revision: number): string {
   return `${sunVisibilityTileKeyToString(tile)}|${sunBinKey(bin)}|${revision}`;
 }
 
-function readTileValue(tile: ReturnType<typeof buildLightTile>, x: number, z: number, options: any): number {
+function readTileValue(tile: LightTile, x: number, z: number, options: SunLightOptions): number {
   const bounds = sunVisibilityTileBounds(tile.key, options.tile);
   const u = THREE.MathUtils.clamp((x - bounds.minX) / (bounds.maxX - bounds.minX), 0, 0.999999);
   const v = THREE.MathUtils.clamp((z - bounds.minZ) / (bounds.maxZ - bounds.minZ), 0, 0.999999);
@@ -17,10 +34,10 @@ function readTileValue(tile: ReturnType<typeof buildLightTile>, x: number, z: nu
   return tile.values[cellZ * tile.resolution + cellX] ?? LIGHT_SAMPLE.missing;
 }
 
-export function createSunLightCacheCore(options: any) {
-  const entries = new Map<string, { tile: ReturnType<typeof buildLightTile>; lastUsedFrame: number }>();
-  const pending = new Map<string, any>();
-  const stats = {
+export function createSunLightCacheCore(options: SunLightOptions) {
+  const entries = new Map<string, { tile: LightTile; lastUsedFrame: number }>();
+  const pending = new Map<string, LightTileBuildRequest>();
+  const stats: SunLightCacheStats = {
     active: options.active,
     entries: 0,
     pendingTiles: 0,
@@ -33,10 +50,15 @@ export function createSunLightCacheCore(options: any) {
     tilesBuiltThisFrame: 0,
     buildMsLastFrame: 0,
     buildMsAvg: 0,
-    currentSunBin: null as any,
+    currentSunBin: null,
   };
 
-  const enqueueTile = (tile: any, sunVec: THREE.Vector3, frameIndex: number, provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>) => {
+  const enqueueTile = (
+    tile: SunVisibilityTileKey,
+    sunVec: THREE.Vector3,
+    frameIndex: number,
+    provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>,
+  ) => {
     const sunBin = toSunBin(sunVec, options.directionBins);
     const terrainRevision = provider.tileRevision(tile);
     const key = fullKey(tile, sunBin, terrainRevision);
@@ -48,7 +70,7 @@ export function createSunLightCacheCore(options: any) {
       return key;
     }
     if (!pending.has(key)) {
-      pending.set(key, { tile, sunVec: sunVec.clone(), sunBin, terrainRevision });
+      pending.set(key, { tile, sunVec: sunVec.clone(), sunBin, terrainRevision, frameIndex });
       stats.misses += 1;
     }
     return key;
@@ -78,5 +100,5 @@ export function createSunLightCacheCore(options: any) {
     return { kind: "missing", value: 0.5 } as const;
   };
 
-  return { entries, pending, stats, enqueueTile, evictIfNeeded, readWorld };
+  return { entries, pending, stats, enqueueTile, evictIfNeeded, readWorld, buildLightTile };
 }
