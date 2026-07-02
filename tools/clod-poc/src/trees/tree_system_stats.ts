@@ -2,6 +2,7 @@ import type { TreeLod } from "./tree_config.js";
 import type { TreeGenerationStats } from "./tree_instances.js";
 import type { TreeHeroFidelityStats } from "./tree_hero_fidelity.js";
 import { createEmptyTreeHeroFidelityStats } from "./tree_hero_fidelity.js";
+import type { TreeEarlyTerrainRejectionStats } from "./tree_patch_terrain_rejection.js";
 import { visibleTreeLodCount } from "./tree_system_math.js";
 
 export type TreeSystemGpuStatus = "disabled" | "unsupported" | "ring" | "fallback-cpu" | "error";
@@ -19,6 +20,11 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   visiblePatches: number;
   culledPatches: number;
   terrainOccludedPatches: number;
+  earlyTerrainTestedPatches: number;
+  earlyTerrainRejectedPatches: number;
+  earlyTerrainAcceptedPatches: number;
+  earlyTerrainUnknownKeptPatches: number;
+  earlyTerrainSkippedCandidates: number;
   nearTrees: number;
   midTrees: number;
   farTrees: number;
@@ -80,6 +86,7 @@ export interface BuildTreeSystemStatsInput {
   gpuShowCounts: boolean;
   impostorStatus: TreeSystemImpostorStatus;
   impostorReason: string | null;
+  earlyTerrainRejectionStats?: TreeEarlyTerrainRejectionStats;
 }
 
 export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
@@ -89,6 +96,11 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     visiblePatches: 0,
     culledPatches: 0,
     terrainOccludedPatches: 0,
+    earlyTerrainTestedPatches: 0,
+    earlyTerrainRejectedPatches: 0,
+    earlyTerrainAcceptedPatches: 0,
+    earlyTerrainUnknownKeptPatches: 0,
+    earlyTerrainSkippedCandidates: 0,
     nearTrees: 0,
     midTrees: 0,
     farTrees: 0,
@@ -146,6 +158,14 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
     }
   }
 
+  if (input.earlyTerrainRejectionStats) {
+    stats.earlyTerrainTestedPatches = input.earlyTerrainRejectionStats.testedPatches;
+    stats.earlyTerrainRejectedPatches = input.earlyTerrainRejectionStats.rejectedPatches;
+    stats.earlyTerrainAcceptedPatches = input.earlyTerrainRejectionStats.acceptedPatches;
+    stats.earlyTerrainUnknownKeptPatches = input.earlyTerrainRejectionStats.unknownKeptPatches;
+    stats.earlyTerrainSkippedCandidates = input.earlyTerrainRejectionStats.skippedCandidateEstimate;
+  }
+
   stats.nearTrees = input.lodCounts.near;
   stats.midTrees = input.lodCounts.mid;
   stats.farTrees = input.lodCounts.far;
@@ -154,7 +174,7 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
   stats.heroNearTreeTriangles = heroFidelity.nearTriangleCount;
   stats.heroNearFoliageTriangles = heroFidelity.nearFoliageTriangleCount;
   stats.heroNearMinTreeTriangles = heroFidelity.minNearTreeTriangles;
-  stats.heroNearAvgTreeTriangles = heroFidelity.avgNearTreeTriangles;
+  stats.heroNearAvgTreeTriangles = heroFidelity.avgTreeTriangles;
   stats.heroNearPassesTriangleFloor = heroFidelity.passesTriangleFloor;
   stats.heroNearPassesRealFoliage = heroFidelity.passesRealFoliage;
   stats.gpuStatus = input.gpuStatus;
