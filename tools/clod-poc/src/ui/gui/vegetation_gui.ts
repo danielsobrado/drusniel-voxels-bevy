@@ -220,6 +220,7 @@ export function createVegetationGui(
       gpu: {
         ...deps.treeConfig.gpu,
         enabled: state.treeGpuEnabled as boolean,
+        fallbackToCpu: state.treeGpuFallbackToCpu as boolean,
         debugForceCpu: state.treeGpuForceCpu as boolean,
         debugShowGpuCounts: state.treeGpuShowCounts as boolean,
         readbackVisibleLists: state.treeGpuReadbackVisibleLists as boolean,
@@ -277,6 +278,7 @@ export function createVegetationGui(
   treeFolder.add(state, "treeDebugColorByLod").name("debug color by LOD").onChange(updateTreeRenderSettings);
   treeSettingControllers.push(
     treeFolder.add(state, "treeGpuEnabled").name("GPU ring").onChange(updateTreeGpuSettings),
+    treeFolder.add(state, "treeGpuFallbackToCpu").name("fallback to CPU").onChange(updateTreeGpuSettings),
     treeFolder.add(state, "treeGpuForceCpu").name("force CPU").onChange(updateTreeGpuSettings),
     treeFolder.add(state, "treeGpuShowCounts").name("show GPU counts").onChange(updateTreeGpuSettings),
     treeFolder.add(state, "treeGpuReadbackVisibleLists").name("GPU readback lists").onChange(updateTreeGpuSettings),
