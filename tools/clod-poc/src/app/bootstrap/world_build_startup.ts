@@ -32,7 +32,7 @@ import {
 } from "../../cache/terrainSource.js";
 import { clearWorkerCacheSnapshot } from "../../cache/cacheMetricsBridge.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
-import { createBakedMacroTintTexture } from "../../gpu/terrain_node_material.js";
+import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
 import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "../../diagonalPolish.js";
 import { parseProceduralTextureConfig } from "../../textures/materialRecipes.js";
 import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
@@ -78,29 +78,8 @@ import type { CustomPropsSettings } from "../../props/prop_types.js";
 import type { PropPlacementScene } from "../../props/prop_types.js";
 import { parseBorderOceanSceneConfig } from "../../debug/border_ocean_scene.js";
 import { splitWorldBuildNodes } from "./world_build_nodes.js";
-import { ProceduralWorldSource } from "../../world_source/world_source.js";
-import type { WorldSource } from "../../world_source/world_source.js";
 
-function numberParam(searchParams: URLSearchParams, keys: readonly string[]): number | undefined {
-  for (const key of keys) {
-    const raw = searchParams.get(key);
-    if (raw === null) continue;
-    const value = Number(raw);
-    if (Number.isFinite(value)) return value;
-  }
-  return undefined;
-}
-
-function booleanParam(searchParams: URLSearchParams, keys: readonly string[], fallback: boolean): boolean {
-  for (const key of keys) {
-    const raw = searchParams.get(key);
-    if (raw === null) continue;
-    return raw !== "0" && raw !== "false";
-  }
-  return fallback;
-}
-
-export interface WorldBuildStartupInput {
+export interface WorldBuildStartupOptions {
   stagedImport: VoxelProjectArchiveContents | null;
   clodRuntime: ClodRuntimeConfig;
   searchParams: URLSearchParams;
@@ -109,267 +88,176 @@ export interface WorldBuildStartupInput {
   queryForestFloorScene: boolean;
   queryLongViewScene: boolean;
   queryBorderOceanScene: boolean;
-  buildProgress: HTMLElement;
-  buildProgressPhase: HTMLElement;
-  buildProgressPercent: HTMLElement;
-  buildProgressBar: HTMLProgressElement;
+  buildProgress: HTMLElement | null;
+  buildProgressPhase: HTMLElement | null;
+  buildProgressPercent: HTMLElement | null;
+  buildProgressBar: HTMLElement | null;
   info: HTMLElement;
 }
 
-export interface WorldBuildResult {
+export interface WorldBuildStartupResult {
   cfg: ClodPagesConfig;
-  stoneConfig: ReturnType<typeof parseStoneConfig>;
-  treeConfig: ReturnType<typeof parseTreeConfig>;
-  understoryConfig: ReturnType<typeof parseUnderstoryConfig>;
-  forestLightingConfig: ReturnType<typeof parseForestLightingConfig>;
-  grassConfig: ReturnType<typeof parseGrassConfig>;
-  waterConfig: WaterConfig;
-  borderCoastOceanConfig: BorderCoastOceanConfig;
-  customPropsConfig: CustomPropsSettings;
-  propPlacementScenes: Record<string, PropPlacementScene>;
-  proceduralTerrain: ReturnType<typeof createProceduralTerrainTextures> | null;
-  proceduralTextureConfig: ReturnType<typeof parseProceduralTextureConfig>;
-  bakedMacroTint: THREE.DataTexture | null;
-  clodWorker: ClodWorkerClient;
-  WORLD: number;
-  worldCells: number;
-  worldSizeCells: number;
+  worker: ClodWorkerClient;
+  nodes: ClodPageNode[];
   lod0Nodes: ClodPageNode[];
-  allNodes: ClodPageNode[];
-  maxTerrainLevel: number;
-  terrainSummary: TerrainSummaryField;
-  worldSource: WorldSource;
-  result: Awaited<ReturnType<ClodWorkerClient["buildWorld"]>>;
-  hydrologySystem: HydrologySystem | null;
-  polishLine: string;
-  buildStatus: { value: string };
+  worldCells: number;
+  waterConfig: WaterConfig;
+  cacheCtx: ClodCacheContext | null;
+  borderCoastConfig: BorderCoastOceanConfig | null;
+  voxelEditSnapshot: VoxelEditSnapshot;
+  terrainSummary: TerrainSummaryField | null;
+  customPropsSettings: CustomPropsSettings | null;
+  propPlacementScene: PropPlacementScene | null;
 }
 
-function importedVoxelSnapshot(stagedImport: VoxelProjectArchiveContents | null): VoxelEditSnapshot {
-  if (!stagedImport) return { revision: 0, deltas: [] };
-  return stagedImport.manifest.voxelTerrainEdits;
-}
-
-export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promise<WorldBuildResult> {
-  const {
-    stagedImport,
-    clodRuntime,
-    searchParams,
-    queryGrassPerfScene,
-    queryTreePerfScene,
-    queryForestFloorScene,
-    queryLongViewScene,
-    queryBorderOceanScene,
-    buildProgress,
-    buildProgressPhase,
-    buildProgressPercent,
-    buildProgressBar,
-    info,
-  } = input;
-
-  const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
-  const stoneConfig = parseStoneConfig(stoneConfigText);
-  const treeConfig = applyTreeMaterialBiasFromYaml(parseTreeConfig(treeConfigText), treeConfigText);
-  const understoryConfig = parseUnderstoryConfig(understoryConfigText);
-  const forestLightingConfig = parseForestLightingConfig(forestLightingConfigText);
-  createForestLightingIntegrationWarner()(forestLightingConfig);
-  const grassConfig = applyGrassMaterialBiasFromYaml(parseGrassConfig(grassConfigText), grassConfigText);
-  const customPropsConfig = parseCustomPropsConfig(customPropsConfigText);
-  const propPlacementScenes: Record<string, PropPlacementScene> = {
-    smoke: parsePropPlacements(customPropPlacementsText),
-    "500": parsePropPlacements(customPropPlacements500Text),
-    "5000": parsePropPlacements(customPropPlacements5000Text),
-    "20000": parsePropPlacements(customPropPlacements20000Text),
-  };
-  let waterConfig = parseWaterConfig(waterConfigText);
-  const borderCoastOceanConfig = parseBorderCoastOceanConfig(borderCoastOceanConfigText);
-  const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
-  const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
-  const sceneName = searchParams.get("scene") ?? "default";
-  const seed = numberParam(searchParams, ["seed"]) ?? 0;
-  const seaLevel = numberParam(searchParams, ["seaLevel", "sea_level"]) ?? 18;
-  const isInfiniteIslands = sceneName === "infinite-islands";
-  const terrainFieldConfig = resolveTerrainFieldConfig({
-    seed,
-    seaLevel,
-    islandShape: {
-      enabled: booleanParam(searchParams, ["islands"], isInfiniteIslands),
-      oceanRim: booleanParam(searchParams, ["oceanRim", "ocean_rim"], isInfiniteIslands),
-      worldRadiusM: numberParam(searchParams, ["worldRadius", "world_radius_m"]) ?? (isInfiniteIslands ? 8192 : 8192),
-      spacingM: numberParam(searchParams, ["islandSpacing", "island_spacing_m"]) ?? 1500,
-      radiusM: numberParam(searchParams, ["islandRadius", "island_radius_m"]) ?? 560,
-      blendM: numberParam(searchParams, ["islandBlend", "island_blend_m"]) ?? 260,
-    },
-  });
+export async function runWorldBuildStartup(options: WorldBuildStartupOptions): Promise<WorldBuildStartupResult> {
+  const cfg = parseConfig(configText);
+  const terrainFieldConfig = resolveTerrainFieldConfig(cfg.terrainField);
   setTerrainFieldConfig(terrainFieldConfig);
   setTerrainFieldCoreConfig(terrainFieldConfig);
-  const worldSource = new ProceduralWorldSource(terrainFieldConfig);
-  const proceduralTerrain = proceduralTextureConfig.enabled
-    ? createProceduralTerrainTextures(proceduralTextureConfig)
-    : null;
-  const clodWorker = new ClodWorkerClient();
-  clodWorker.onError = (error) => {
-    emitAudio("clod.rebuild.error");
-    console.error("[clod worker]", error);
-  };
 
-  const requested = Number(searchParams.get("world"));
-  const WORLD = stagedImport?.manifest.worldSize ?? (
-    clodRuntime.runtime.worldOptions.includes(requested)
-      ? requested
-      : queryGrassPerfScene || queryTreePerfScene || queryForestFloorScene || queryLongViewScene || queryBorderOceanScene
-        ? queryBorderOceanScene
-          ? borderOceanSceneConfig.defaultWorldPages
-          : 16
-        : 8
-  );
-  const worldCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
+  const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
+  const proceduralTerrainTextures = createProceduralTerrainTextures(proceduralTextureConfig);
+  const bakedMacroTint = createBakedMacroTintTexture(proceduralTerrainTextures.noiseA, proceduralTerrainTextures.noiseB);
 
-  let bakedMacroTint: THREE.DataTexture | null = null;
-  if (proceduralTerrain) {
-    const bakeRes = Math.min(512, proceduralTerrain.noise.resolution);
-    bakedMacroTint = createBakedMacroTintTexture(
-      proceduralTerrain.noise.noiseA,
-      proceduralTerrain.noise.noiseB,
-      bakeRes,
-    );
-  }
-  if (isRiverParityTestScene(searchParams.get("scene"))) waterConfig = applyRiverParityTestWaterConfig(waterConfig);
-  waterConfig = resolveWaterConfig(waterConfig, worldCells);
-  setBorderCoastRuntime(borderCoastOceanConfig, worldCells);
+  const stoneConfig = parseStoneConfig(stoneConfigText);
+  const treeConfig = parseTreeConfig(treeConfigText);
+  const understoryConfig = parseUnderstoryConfig(understoryConfigText);
+  const grassConfig = parseGrassConfig(grassConfigText);
+  applyGrassMaterialBiasFromYaml(grassConfig);
+  applyTreeMaterialBiasFromYaml(treeConfig);
 
-  const buildStatus = { value: "preparing" };
-  const updateBuildOverlay = () => updateClodOverlay({
-    worldSize: WORLD,
-    renderedTriangles: 0,
-    nodesByLod: {},
-    forcedSplits: 0,
-    blockedSplits: 0,
-    bubbleForcedSplits: 0,
-    cutFrozen: false,
-    errorThreshold: cfg.selection.error_threshold_px,
-    buildStatus: buildStatus.value,
+  const forestLightingConfig = parseForestLightingConfig(forestLightingConfigText);
+  const warnForestLighting = createForestLightingIntegrationWarner(forestLightingConfig);
+
+  const baseWaterConfig = parseWaterConfig(waterConfigText);
+  const waterConfig = isRiverParityTestScene(options.searchParams)
+    ? applyRiverParityTestWaterConfig(baseWaterConfig)
+    : baseWaterConfig;
+
+  const worldPagesX = options.clodRuntime.worldPages;
+  const worldPagesZ = options.clodRuntime.worldPagesZ ?? worldPagesX;
+  const worldCells = worldPagesX * cfg.page.chunks_per_page * cfg.page.chunk_size;
+
+  const resolvedWaterConfig = resolveWaterConfig(waterConfig, worldCells);
+  const hydrology = new HydrologySystem({
+    worldCells,
+    config: resolvedWaterConfig,
+    terrainHeight: baseSurfaceHeight,
   });
-  updateBuildOverlay();
-
-  const cacheParam = searchParams.get("cache");
-  const cacheDisabled = cacheParam === "0" || cacheParam === "false";
-  if (cacheDisabled) setCacheSessionDisabled(true);
-  clearWorkerCacheSnapshot();
-
-  replaceVoxelEdits(importedVoxelSnapshot(stagedImport));
-
-  const preHydrologyTerrain = makeFakeBodyCarvedSampler(waterConfig, { surfaceHeight: baseSurfaceHeight });
-  const hydrologySystem = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
-    ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain)
+  const hydrologyTerrain = resolvedWaterConfig.source === "hydrology" ? hydrology.buildTerrainOverride() : null;
+  const fakeWaterCarver = resolvedWaterConfig.source === "fake_bodies"
+    ? makeFakeBodyCarvedSampler(resolvedWaterConfig, worldCells, baseSurfaceHeight)
     : null;
-  if (hydrologySystem) {
-    setTerrainSurfaceOverride((x, z) => hydrologySystem.terrainHeight(x, z));
-    console.log("[water] hydrology built", hydrologySystem.stats);
-  } else if (waterConfig.enabled && waterConfig.fakeBodies.carveTerrain) {
-    setTerrainSurfaceOverride((x, z) => preHydrologyTerrain.surfaceHeight(x, z));
+  const borderCoastConfig = parseBorderCoastOceanConfig(borderCoastOceanConfigText);
+  setBorderCoastRuntime(borderCoastConfig, worldCells);
+
+  if (hydrologyTerrain) {
+    const { res, carvedBed } = hydrologyTerrain;
+    const scale = (res - 1) / Math.max(1e-6, worldCells);
+    setTerrainSurfaceOverride((x, z) => {
+      const gx = Math.max(0, Math.min(res - 1, x * scale));
+      const gz = Math.max(0, Math.min(res - 1, z * scale));
+      const x0 = Math.floor(gx);
+      const z0 = Math.floor(gz);
+      const x1 = Math.min(res - 1, x0 + 1);
+      const z1 = Math.min(res - 1, z0 + 1);
+      const fx = gx - x0;
+      const fz = gz - z0;
+      const a = carvedBed[z0 * res + x0] * (1 - fx) + carvedBed[z0 * res + x1] * fx;
+      const b = carvedBed[z1 * res + x0] * (1 - fx) + carvedBed[z1 * res + x1] * fx;
+      return a * (1 - fz) + b * fz;
+    });
+  } else if (fakeWaterCarver) {
+    setTerrainSurfaceOverride(fakeWaterCarver);
   } else {
     setTerrainSurfaceOverride(null);
   }
-  const hydrologyTerrain = hydrologySystem
-    ? {
-        res: hydrologySystem.grid.res,
-        worldCells: hydrologySystem.grid.worldCells,
-        carvedBed: hydrologySystem.grid.carvedBed,
-      }
-    : null;
 
-  const proceduralTextureHash = await buildProceduralTextureHash(
-    proceduralTextureConfig.enabled,
-    proceduralTextureConfig.enabled ? `${proceduralTextureConfig.seed}:${proceduralTextureConfig.noise.resolution}` : null,
-  );
-  const stagedImportHash = await buildStagedImportHash(stagedImport?.manifest ?? null);
-  const terrainSource: TerrainSourceInputs = {
-    scene: sceneName,
-    worldSeed: String(seed),
-    terrainFieldConfig,
-    worldPages: WORLD,
-    generatorVersion: cfg.meshopt_package_version,
-    digRevision: getDigEditRevision(),
-    hydrologyTerrain,
-    borderCoastOceanConfig,
-    waterConfig: {
-      enabled: waterConfig.enabled,
-      source: waterConfig.source,
-      fakeBodies: { carveTerrain: waterConfig.fakeBodies.carveTerrain },
-      hydrology: { enabled: waterConfig.hydrology.enabled },
-    },
-    proceduralTextureEnabled: proceduralTextureConfig.enabled,
-    proceduralTextureHash,
-    stagedImportHash,
-    longViewScene: queryLongViewScene,
-  };
+  const stagedTerrainSources: TerrainSourceInputs[] = [];
+  if (options.stagedImport) {
+    stagedTerrainSources.push(...buildStagedImportHash(options.stagedImport));
+  }
+  stagedTerrainSources.push(...buildProceduralTextureHash(proceduralTextureConfig));
 
-  const cacheCtx: ClodCacheContext | null = await initClodCacheContext({
+  const cacheCtx = await initClodCacheContext({
     cfg,
-    worldPages: WORLD,
-    terrainSource,
-    forceDisabled: cacheDisabled,
+    worldPages: worldPagesX,
+    terrainSource: stagedTerrainSources,
+    forceDisabled: options.searchParams.has("noClodCache"),
     role: "main",
   });
+  const cacheSessionDisabled = isCacheSessionDisabled(options.searchParams);
+  setCacheSessionDisabled(cacheSessionDisabled);
+  clearWorkerCacheSnapshot();
 
-  const buildNote = WORLD >= 16 ? " (worker build; large world may take a while)" : WORLD >= 8 ? " (worker build)" : "";
-  info.textContent = `building ${WORLD}x${WORLD} world…${buildNote}`;
-  buildProgress.hidden = false;
-  buildProgressPhase.textContent = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
-  buildProgressPercent.textContent = "0%";
-  buildProgressBar.value = 0;
-  buildStatus.value = `${stagedImport ? "import: " : ""}building ${WORLD}x${WORLD}`;
-  updateBuildOverlay();
-  await new Promise((r) => setTimeout(r, 16));
+  const worker = new ClodWorkerClient(new URL("../../clod_worker.ts", import.meta.url), {
+    cfg,
+    worldPagesX,
+    worldPagesZ,
+    voxelEdits: options.stagedImport?.voxelEdits,
+    terrainFieldConfig,
+    hydrologyTerrain,
+    borderCoastOceanConfig: borderCoastConfig,
+    terrainSource: stagedTerrainSources,
+    cacheDisabled: cacheSessionDisabled,
+  });
 
-  const result = await clodWorker.buildWorld(WORLD, WORLD, cfg, getVoxelEditSnapshot(), ({ done, total, level, phase }) => {
-    const fraction = total > 0 ? Math.min(1, done / total) : 0;
-    buildProgressBar.value = fraction;
-    buildProgressPercent.textContent = `${Math.floor(fraction * 100)}%`;
-    buildProgressPhase.textContent = `${phase}  L${level}  ${done}/${total}`;
-    info.textContent = `building ${WORLD}x${WORLD} world… ${Math.floor(fraction * 100)}%\n${phase}  L${level}  ${done}/${total}`;
-    buildStatus.value = `${phase} L${level} ${done}/${total}`;
-    updateBuildOverlay();
-  }, terrainFieldConfig, hydrologyTerrain, borderCoastOceanConfig, cacheDisabled || isCacheSessionDisabled(), terrainSource);
+  worker.onProgress((progress) => {
+    options.buildProgressPhase && (options.buildProgressPhase.textContent = progress.phase);
+    if (options.buildProgressPercent) options.buildProgressPercent.textContent = `${Math.round(progress.fraction * 100)}%`;
+    if (options.buildProgressBar) options.buildProgressBar.style.width = `${Math.round(progress.fraction * 100)}%`;
+  });
 
-  buildProgress.hidden = true;
-  buildStatus.value = "ready";
-  const polishLine = formatDiagonalPolishStats(aggregateDiagonalPolishStats(result.stats.map((s) => s.polish)));
-  const { lod0Nodes, allNodes } = splitWorldBuildNodes(result.nodesByLevel);
-  const maxTerrainLevel = Math.max(...result.nodesByLevel.keys());
-  const worldSizeCells = WORLD * cfg.page.chunks_per_page * cfg.page.chunk_size;
-  const summaryResult = await loadTerrainSummaryWithCacheSimple(lod0Nodes, worldSizeCells, 8, cacheCtx);
-  const terrainSummary = summaryResult.summary;
-  publishTerrainSummaryForDiagnostics(terrainSummary);
-  if (cacheCtx) createCacheDebugOverlay();
+  const build = await worker.build();
+  if (cacheCtx) {
+    const overlay = createCacheDebugOverlay(options.info);
+    overlay.update(cacheCtx.service.getMetrics());
+  }
+
+  const nodes = build.nodes;
+  const lod0Nodes = nodes.filter((node) => node.level === 0);
+  const terrainSummary = publishTerrainSummaryForDiagnostics(nodes, worldCells);
+  const voxelEditSnapshot = getVoxelEditSnapshot();
+  replaceVoxelEdits(voxelEditSnapshot);
+
+  const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
+  if (options.queryBorderOceanScene) {
+    const overlaySummary = `border ocean scene active: ${borderOceanSceneConfig.label}`;
+    options.info.textContent = `${options.info.textContent}\n${overlaySummary}`;
+  }
+
+  const customPropsSettings = parseCustomPropsConfig(customPropsConfigText);
+  const propPlacementScene = parsePropPlacements(
+    [customPropPlacementsText, customPropPlacements500Text, customPropPlacements5000Text, customPropPlacements20000Text],
+    customPropsSettings,
+  );
+
+  const diag = aggregateDiagonalPolishStats(nodes);
+  const diagLine = formatDiagonalPolishStats(diag);
+  updateClodOverlay({
+    nodes: nodes.length,
+    lod0: lod0Nodes.length,
+    worldPages: worldPagesX,
+    lodRingMode: options.clodRuntime.lodRingMode,
+    diagonalPolish: diagLine,
+    digRevision: getDigEditRevision(),
+    cache: build.cacheStats,
+    bakedMacroTint,
+  });
 
   return {
     cfg,
-    stoneConfig,
-    treeConfig,
-    understoryConfig,
-    forestLightingConfig,
-    grassConfig,
-    waterConfig,
-    borderCoastOceanConfig,
-    customPropsConfig,
-    propPlacementScenes,
-    proceduralTerrain,
-    proceduralTextureConfig,
-    bakedMacroTint,
-    clodWorker,
-    WORLD,
-    worldCells,
-    worldSizeCells,
+    worker,
+    nodes,
     lod0Nodes,
-    allNodes,
-    maxTerrainLevel,
+    worldCells,
+    waterConfig: resolvedWaterConfig,
+    cacheCtx,
+    borderCoastConfig,
+    voxelEditSnapshot,
     terrainSummary,
-    worldSource,
-    result,
-    hydrologySystem,
-    polishLine,
-    buildStatus,
+    customPropsSettings,
+    propPlacementScene,
   };
 }
