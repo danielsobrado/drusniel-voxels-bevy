@@ -10,6 +10,7 @@ export interface TreePerfSnapshotState {
   treeSpacing: number;
   treeShadowMaxLod: string;
   treeGpuEnabled: boolean;
+  treeGpuFallbackToCpu: boolean;
   treeGpuForceCpu: boolean;
   treeGpuShowCounts: boolean;
   treeGpuReadbackVisibleLists: boolean;
@@ -59,6 +60,7 @@ export function formatTreePerfSnapshot(input: TreePerfSnapshotInput): string {
     `- treeSpacing: ${state.treeSpacing}`,
     `- treeShadowMaxLod: ${state.treeShadowMaxLod}`,
     `- treeGpuEnabled: ${state.treeGpuEnabled}`,
+    `- treeGpuFallbackToCpu: ${state.treeGpuFallbackToCpu}`,
     `- treeGpuForceCpu: ${state.treeGpuForceCpu}`,
     `- treeGpuShowCounts: ${state.treeGpuShowCounts}`,
     `- treeGpuReadbackVisibleLists: ${state.treeGpuReadbackVisibleLists}`,
