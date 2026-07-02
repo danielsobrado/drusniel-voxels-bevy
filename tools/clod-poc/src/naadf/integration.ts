@@ -15,7 +15,10 @@ import { runAcceptanceChecks, allAcceptancePassed } from "./validation.js";
 import { setNaadfIntegration } from "./canopyBridge.js";
 import { FarSummaryGpuAtlas, type FarSummaryGpuAtlasView } from "./gpu/farSummaryAtlas.js";
 import terrainMaterialCacheYaml from "../../config/terrain_material_cache.yaml?raw";
-import { parseTerrainMaterialCacheConfig } from "../terrain/material-cache/terrainMaterialCacheConfig.js";
+import {
+  parseTerrainMaterialCacheConfig,
+  TERRAIN_MATERIAL_CACHE_DEBUG_CHANNELS,
+} from "../terrain/material-cache/terrainMaterialCacheConfig.js";
 import { TerrainMaterialCache } from "../terrain/material-cache/terrainMaterialCache.js";
 import { terrainMaterialCacheCountersForHud } from "../terrain/material-cache/terrainMaterialDebug.js";
 
@@ -104,6 +107,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
 
   let prevX: number | null = null;
   let prevZ: number | null = null;
+  let lastMaterialCacheContentRevision = materialCache?.contentRevision() ?? 0;
   const onMaterialCacheDebug = (event: Event): void => {
     const detail = (event as CustomEvent).detail as Partial<{
       enabled: boolean;
@@ -158,6 +162,11 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
         materialCacheConfig.debug.forceRebake = false;
       }
       materialCache?.processFrame(state.frame);
+      const materialCacheContentRevision = materialCache?.contentRevision() ?? 0;
+      if (gpuAtlas && materialCacheContentRevision !== lastMaterialCacheContentRevision) {
+        invalidateFarSummaryAtlasSignature(gpuAtlas);
+        lastMaterialCacheContentRevision = materialCacheContentRevision;
+      }
       gpuAtlas?.updateFromState(state);
       debugOverlay?.update(state);
 
@@ -305,11 +314,15 @@ function applyRuntimeMaterialCacheOverrides(config: ReturnType<typeof parseTerra
   if (enabled === "1" || enabled === "true") config.enabled = true;
   if (enabled === "0" || enabled === "false") config.enabled = false;
   const debugChannel = params.get("terrainMaterialCacheDebug");
-  if (debugChannel) {
+  if (debugChannel && TERRAIN_MATERIAL_CACHE_DEBUG_CHANNELS.includes(debugChannel as typeof config.debug.showFormatChannels)) {
     config.debug.showFormatChannels = debugChannel as typeof config.debug.showFormatChannels;
   }
   if (params.get("terrainMaterialCacheForceRebake") === "1") config.debug.forceRebake = true;
   return config;
+}
+
+function invalidateFarSummaryAtlasSignature(atlas: FarSummaryGpuAtlas): void {
+  (atlas as unknown as { lastSignature: string }).lastSignature = "";
 }
 
 function positiveIntParam(value: string | null): number | null {
