@@ -128,11 +128,20 @@ function formatTreeGpuStats(treeStats: TreeStats): string {
   const shadowOverflow = treeStats.gpuShadowOverflowed ? " shadow-overflow" : "";
   const dispatch = treeStats.gpuDispatchMs !== null ? ` dispatch=${treeStats.gpuDispatchMs.toFixed(1)}ms` : "";
   return ` path=${path} candidates=${treeStats.gpuCandidateCount}` +
+    formatTreeGpuPrefilterStats(treeStats) +
     ` accepted=${treeStats.gpuAcceptedCount} visible=${treeStats.gpuVisibleCount}` +
     ` shadow=${treeStats.gpuShadowCasterCount}` +
     formatTreeTerrainCandidateStats(treeStats) +
     formatTreeVisibleClusterStats(treeStats) +
     `${dispatch}${overflow}${shadowOverflow}`;
+}
+
+function formatTreeGpuPrefilterStats(treeStats: TreeStats): string {
+  if (treeStats.gpuCandidateCountBeforePrefilter <= 0) return "";
+  if (treeStats.gpuCandidateCountBeforePrefilter === treeStats.gpuCandidateCountAfterPrefilter && treeStats.gpuPrefilterRejectedClusters <= 0) return "";
+  return ` prefilter=${treeStats.gpuCandidateCountBeforePrefilter}->${treeStats.gpuCandidateCountAfterPrefilter}` +
+    ` rejectedClusters=${treeStats.gpuPrefilterRejectedClusters}` +
+    (treeStats.gpuPrefilterUnknownKeptClusters > 0 ? ` unknownClusters=${treeStats.gpuPrefilterUnknownKeptClusters}` : "");
 }
 
 function formatTreeTerrainCandidateStats(treeStats: TreeStats): string {
