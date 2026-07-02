@@ -46,10 +46,17 @@ export function treeCanUseBakedImpostor(
   return settings.impostors.enabled && !!impostorAtlases[species]?.ready;
 }
 
+export function treeUnbakedImpostorFallbackLod(settings: TreeSettings): TreeLod {
+  return settings.impostors.fallbackToPlaceholder ? "impostor" : "far";
+}
+
 export function selectTreeSystemGeometry(input: TreeSystemGeometryInput): THREE.BufferGeometry {
-  if (input.lod === "impostor" && treeCanUseBakedImpostor(input.settings, input.impostorAtlases, input.species)) {
-    input.bakedImpostorGeometries[input.species] ??= createTreeBakedImpostorGeometry(input.species, input.settings);
-    return input.bakedImpostorGeometries[input.species]!;
+  if (input.lod === "impostor") {
+    if (treeCanUseBakedImpostor(input.settings, input.impostorAtlases, input.species)) {
+      input.bakedImpostorGeometries[input.species] ??= createTreeBakedImpostorGeometry(input.species, input.settings);
+      return input.bakedImpostorGeometries[input.species]!;
+    }
+    return input.geometries[input.species][treeUnbakedImpostorFallbackLod(input.settings)];
   }
   return input.geometries[input.species][input.lod];
 }
