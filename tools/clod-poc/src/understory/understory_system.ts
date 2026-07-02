@@ -88,6 +88,7 @@ export class UnderstorySystem {
   private readonly gpuBackend: UnderstoryWebGpuBackendAccess | null;
   private readonly supportsGpu: boolean;
   private readonly gpuRingUnsupportedReason: string | null;
+  private currentLighting: EnvironmentLighting | undefined;
   private gpuStatus: UnderstoryStats["gpuStatus"] = "disabled";
   private gpuVisibleCount = 0;
   private gpuOverflowed = false;
@@ -125,6 +126,7 @@ export class UnderstorySystem {
     this.gpuDevice = options.gpuDevice ?? null;
     this.gpuBackend = options.gpuBackend ?? null;
     this.supportsGpu = options.supportsGpu ?? !!this.gpuDevice;
+    this.currentLighting = options.lighting;
     this.hydrologyData = options.hydrologyData ?? null;
     this.hydrologyWaterTexture = options.hydrologyWaterTexture ?? null;
     this.gpuRingUnsupportedReason = this.gpuDevice
@@ -286,6 +288,7 @@ export class UnderstorySystem {
   }
 
   updateLighting(lighting: EnvironmentLighting): void {
+    this.currentLighting = lighting;
     this.materialHandle.updateLighting?.(lighting);
     for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
       handle.updateLighting?.(lighting);
@@ -319,7 +322,12 @@ export class UnderstorySystem {
     this.clearGpuRingDraw();
     this.gpuRingKey = key;
     this.gpuRingDraw = createGpuRingDrawResources(
-      this.settings, this.worldCells, this.gpuBackend, undefined, this.hydrologyData, this.hydrologyWaterTexture,
+      this.settings,
+      this.worldCells,
+      this.gpuBackend,
+      this.currentLighting,
+      this.hydrologyData,
+      this.hydrologyWaterTexture,
     );
     for (const mesh of this.gpuRingDraw.meshes) {
       mesh.visible = false;
@@ -518,211 +526,21 @@ export class UnderstorySystem {
       .map((node) => ({ node, distance: distance2d(center.x, center.z, footprintCenterX(node.footprint), footprintCenterZ(node.footprint)) }))
       .filter(({ node, distance: d }) => d <= distance + footprintRadius(node.footprint))
       .sort((a, b) => a.distance - b.distance);
-    let totalInstances = this.patches.reduce((sum, patch) => sum + patch.instances.length, 0);
-    let added = 0;
-    let deferred = false;
+
+    let remainingBudget = Math.max(0, this.settings.maxInstances - this.instanceCount());
     for (const { node } of candidates) {
-      if (totalInstances >= this.settings.maxInstances) break;
-      if (added >= this.settings.maxNewPatchesPerFrame) {
-        deferred = true;
-        break;
-      }
+      if (remainingBudget <= 0) break;
       const footprint = clampFootprint(node.footprint, this.worldCells);
-      const rejection = rejectUnderstoryPatchBeforeGeneration(
-        footprint,
-        this.settings,
-        this.sampler ?? defaultUnderstoryTerrainSampler,
-        this.worldCells,
-      );
-      if (rejection.reject) {
-        recordUnderstoryEarlyRejection(this.earlyGenerationStats, rejection);
+      if (rejectUnderstoryPatchBeforeGeneration(this.settings, footprint, this.sampler ?? defaultUnderstoryTerrainSampler)) {
+        recordUnderstoryEarlyRejection(this.earlyGenerationStats, node.id);
         continue;
       }
-      const patch = this.createPatch(node, this.settings.maxInstances - totalInstances);
-      totalInstances += patch.instances.length;
+      const instances = generateUnderstoryInstances(node.id, footprint, this.worldCells, this.settings, this.sampler, remainingBudget);
+      if (instances.length === 0) continue;
+      const patch = this.createPatch(node.id, footprint, instances);
       this.patches.push(patch);
       this.root.add(patch.group);
-      added++;
+      remainingBudget -= instances.length;
     }
-    this.patchesDirty = deferred;
     this.updatePatchVisibility(center);
   }
-
-  private createPatch(node: ClodPageNode, capacityLeft: number): UnderstoryPatch {
-    const generationStats = emptyUnderstoryGenerationStats();
-    const footprint = clampFootprint(node.footprint, this.worldCells);
-    const instances = generateUnderstoryInstances(
-      footprint,
-      this.settings,
-      capacityLeft,
-      generationStats,
-      this.sampler,
-      this.worldCells,
-    );
-    const centerX = footprintCenterX(footprint);
-    const centerZ = footprintCenterZ(footprint);
-    const group = new THREE.Group();
-    group.name = `understory-patch-${node.id}`;
-    group.position.set(centerX, 0, centerZ);
-    const meshes = {} as Record<UnderstoryClass, THREE.InstancedMesh>;
-    for (const cls of UNDERSTORY_CLASSES) {
-      const classInstances = instances.filter((instance) => instance.classId === cls);
-      const capacity = Math.max(1, classInstances.length);
-      const geometry = this.geometries[cls].clone();
-      geometry.setAttribute("understoryWindPhase", new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
-      geometry.setAttribute("understoryWorldXZ", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2));
-      const mesh = new THREE.InstancedMesh(geometry, this.materialFor(cls), capacity);
-      mesh.name = `understory-${node.id}-${cls}`;
-      mesh.count = 0;
-      mesh.frustumCulled = true;
-      mesh.castShadow = this.classCastsShadow(cls);
-      mesh.receiveShadow = false;
-      meshes[cls] = mesh;
-      group.add(mesh);
-    }
-    const patch = {
-      nodeId: node.id,
-      footprint,
-      centerX,
-      centerZ,
-      radius: footprintRadius(footprint),
-      group,
-      instances,
-      meshes,
-      visible: false,
-      generationStats,
-    };
-    this.populatePatchMeshes(patch);
-    return patch;
-  }
-
-  private populatePatchMeshes(patch: UnderstoryPatch): void {
-    const counts = new Map<UnderstoryClass, number>();
-    for (const cls of UNDERSTORY_CLASSES) counts.set(cls, 0);
-    for (const instance of patch.instances) {
-      const mesh = patch.meshes[instance.classId];
-      const index = counts.get(instance.classId) ?? 0;
-      if (index >= mesh.instanceMatrix.count) continue;
-      this.translation.set(instance.position[0] - patch.centerX, instance.position[1], instance.position[2] - patch.centerZ);
-      this.rotation.setFromAxisAngle(this.upAxis, instance.rotationY);
-      this.scale.setScalar(instance.scale);
-      this.matrix.compose(this.translation, this.rotation, this.scale);
-      mesh.setMatrixAt(index, this.matrix);
-      const phase = mesh.geometry.getAttribute("understoryWindPhase") as THREE.InstancedBufferAttribute;
-      (phase.array as Float32Array)[index] = instance.windPhase;
-      const worldXZ = mesh.geometry.getAttribute("understoryWorldXZ") as THREE.InstancedBufferAttribute;
-      const worldArray = worldXZ.array as Float32Array;
-      worldArray[index * 2] = instance.position[0];
-      worldArray[index * 2 + 1] = instance.position[2];
-      counts.set(instance.classId, index + 1);
-    }
-    for (const cls of UNDERSTORY_CLASSES) {
-      const mesh = patch.meshes[cls];
-      const count = counts.get(cls) ?? 0;
-      mesh.count = count;
-      mesh.visible = count > 0;
-      mesh.instanceMatrix.needsUpdate = true;
-      const phase = mesh.geometry.getAttribute("understoryWindPhase");
-      if (phase) phase.needsUpdate = true;
-      const worldXZ = mesh.geometry.getAttribute("understoryWorldXZ");
-      if (worldXZ) worldXZ.needsUpdate = true;
-      if (count > 0) {
-        mesh.computeBoundingBox();
-        mesh.computeBoundingSphere();
-      }
-    }
-  }
-
-  private updatePatchVisibility(center: THREE.Vector3): void {
-    for (const patch of this.patches) {
-      const visible = distance2d(center.x, center.z, patch.centerX, patch.centerZ) <= this.settings.distanceM + patch.radius;
-      patch.visible = visible;
-      patch.group.visible = visible;
-      for (const mesh of Object.values(patch.meshes)) mesh.visible = visible && mesh.count > 0;
-    }
-    this.updateStats();
-  }
-
-  private clearPatches(): void {
-    for (const patch of this.patches) this.removePatch(patch);
-    this.patches = [];
-    Object.assign(this.earlyGenerationStats, emptyUnderstoryGenerationStats());
-    this.updateStats();
-  }
-
-  private removePatch(patch: UnderstoryPatch): void {
-    this.root.remove(patch.group);
-    for (const mesh of Object.values(patch.meshes)) {
-      mesh.geometry.dispose();
-      mesh.dispose();
-    }
-  }
-
-  private materialFor(cls: UnderstoryClass): THREE.Material {
-    return this.settings.render.debugColorByClass
-      ? this.materialHandle.debugMaterials[cls]
-      : this.materialHandle.regularMaterial;
-  }
-
-  private applyMaterials(): void {
-    for (const patch of this.patches) {
-      for (const cls of UNDERSTORY_CLASSES) {
-        patch.meshes[cls].material = this.materialFor(cls);
-        patch.meshes[cls].castShadow = this.classCastsShadow(cls);
-      }
-    }
-  }
-
-  private classCastsShadow(cls: UnderstoryClass): boolean {
-    if (!this.settings.render.shadows) return false;
-    return UNDERSTORY_CLASSES.indexOf(cls) <= UNDERSTORY_CLASSES.indexOf(this.settings.render.maxShadowClass);
-  }
-
-  private updateStats(): void {
-    const stats = emptyUnderstoryStats();
-    const gpuRing = this.gpuStatus === "ring" || this.gpuStatus === "error";
-    if (gpuRing) {
-      const c = this.gpuRingStats.counts;
-      stats.totalInstances = this.gpuVisibleCount;
-      stats.shrub = c.shrub;
-      stats.fern = c.fern;
-      stats.sapling = c.sapling;
-      stats.flower = c.flower;
-      stats.deadLog = c.dead_log;
-      stats.stump = c.stump;
-      stats.generatedCandidates = this.gpuRingStats.candidateCount;
-      stats.acceptedCandidates = this.gpuRingStats.acceptedCandidates || this.gpuVisibleCount;
-    } else {
-      mergeGenerationStats(stats, this.earlyGenerationStats);
-      for (const patch of this.patches) {
-        stats.totalInstances += patch.instances.length;
-        stats.patches++;
-        if (patch.visible) stats.visiblePatches++;
-        else stats.culledPatches++;
-        mergeGenerationStats(stats, patch.generationStats);
-        for (const instance of patch.instances) {
-          if (instance.classId === "shrub") stats.shrub++;
-          else if (instance.classId === "fern") stats.fern++;
-          else if (instance.classId === "sapling") stats.sapling++;
-          else if (instance.classId === "flower") stats.flower++;
-          else if (instance.classId === "dead_log") stats.deadLog++;
-          else stats.stump++;
-        }
-      }
-    }
-    stats.gpuStatus = this.gpuStatus;
-    stats.gpuCandidateCount = gpuRing ? this.gpuRingStats.candidateCount : 0;
-    stats.gpuAcceptedCount = gpuRing ? (this.gpuRingStats.acceptedCandidates || this.gpuVisibleCount) : 0;
-    stats.gpuVisibleCount = gpuRing ? this.gpuVisibleCount : 0;
-    stats.gpuOverflowed = this.gpuOverflowed;
-    stats.gpuDispatchMs = this.gpuDispatchMs;
-    this.stats = stats;
-  }
-}
-
-export {
-  emptyUnderstoryStats,
-  understoryUsesGpuRingDraw,
-  type UnderstoryLightingProxy,
-  type UnderstoryStats,
-} from "./understory_system_support.js";
