@@ -19,9 +19,7 @@ import {
   getDigEditsSnapshot,
   replaceDigEdits,
   replaceVoxelEdits,
-  setBorderCoastRuntime,
   setTerrainFieldConfig,
-  setTerrainSurfaceOverride,
 } from "./terrain/terrain.js";
 import { setTerrainFieldCoreConfig } from "./gpu/terrain_field_core.js";
 import {
@@ -31,12 +29,29 @@ import {
   serializeNodes,
   type ClodWorkerRequest,
   type ClodWorkerResponse,
-  type SerializedHydrologyTerrain,
 } from "./clod_worker_protocol.js";
 import type { ClodPagesConfig } from "./config.js";
-import type { ClodPageNode, PageMesh } from "./types.js";
-
-const DIRTY_BOUNDS_MAX_EPSILON = 1e-6;
+import type { ClodPageNode } from "./types.js";
+import { inclusiveMaxBoundary, intersectDirty, mergeDirty } from "./clod_worker_dirty.js";
+import {
+  cloneBounds,
+  restoreLod0Nodes,
+  restoreParentNodes,
+  snapshotLod0Node,
+  snapshotParentNode,
+} from "./clod_worker_snapshots.js";
+import type {
+  CombinedLod0Rebuild,
+  Lod0Snapshot,
+  ParentNodeSnapshot,
+  ParentQueueSnapshot,
+} from "./clod_worker_types.js";
+import {
+  errorResponse,
+  installBorderCoastRuntime,
+  installHydrologyTerrain,
+  postWorkerMessage,
+} from "./clod_worker_runtime.js";
 
 const ctx = self as unknown as {
   postMessage: (message: ClodWorkerResponse, transfer?: Transferable[]) => void;
@@ -55,75 +70,6 @@ let drainScheduled = false;
 const pendingByLevel = new Map<number, Set<string>>();
 /** Child page coords resimplified at level L; flushed to enqueue level L+1 once level L drains. */
 const pendingChildCoordsByLevel = new Map<number, [number, number][]>();
-
-interface CombinedLod0Rebuild {
-  changed: ClodPageNode[];
-  dirtyCoords: [number, number][];
-  lod0Pages: number;
-  lod0Ms: number;
-  chunksRemeshed: number;
-  chunksTotal: number;
-}
-
-interface Lod0Snapshot {
-  node: ClodPageNode;
-  mesh: PageMesh;
-  bounds: ClodPageNode["bounds"];
-  chunkMeshes?: PageMesh[];
-}
-
-interface ParentNodeSnapshot {
-  node: ClodPageNode;
-  mesh: PageMesh;
-  bounds: ClodPageNode["bounds"];
-  errorWorld: number;
-  lowBenefit: boolean;
-}
-
-interface ParentQueueSnapshot {
-  pendingByLevel: Map<number, Set<string>>;
-  pendingChildCoordsByLevel: Map<number, [number, number][]>;
-  activeParentRequestId: number | null;
-  parentNodes: number;
-  parentMs: number;
-}
-
-function mergeDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds {
-  return {
-    minX: Math.min(a.minX, b.minX),
-    maxX: Math.max(a.maxX, b.maxX),
-    minZ: Math.min(a.minZ, b.minZ),
-    maxZ: Math.max(a.maxZ, b.maxZ),
-  };
-}
-
-function intersectDirty(a: DirtyCellBounds, b: DirtyCellBounds): DirtyCellBounds | null {
-  const clipped = {
-    minX: Math.max(a.minX, b.minX),
-    maxX: Math.min(a.maxX, b.maxX),
-    minZ: Math.max(a.minZ, b.minZ),
-    maxZ: Math.min(a.maxZ, b.maxZ),
-  };
-  return clipped.minX < clipped.maxX && clipped.minZ < clipped.maxZ ? clipped : null;
-}
-
-function cloneBounds(bounds: ClodPageNode["bounds"]): ClodPageNode["bounds"] {
-  return {
-    center: [...bounds.center],
-    radius: bounds.radius,
-    minY: bounds.minY,
-    maxY: bounds.maxY,
-  };
-}
-
-function snapshotLod0Node(node: ClodPageNode): Lod0Snapshot {
-  return {
-    node,
-    mesh: node.mesh,
-    bounds: cloneBounds(node.bounds),
-    chunkMeshes: node.chunkMeshes ? [...node.chunkMeshes] : undefined,
-  };
-}
 
 function snapshotLod0Nodes(regions: readonly DirtyCellBounds[]): Lod0Snapshot[] {
   if (!result || !cfg || !index) return [];
@@ -148,34 +94,6 @@ function snapshotLod0Nodes(regions: readonly DirtyCellBounds[]): Lod0Snapshot[] 
     if (node) snapshots.push(snapshotLod0Node(node));
   }
   return snapshots;
-}
-
-function restoreLod0Nodes(snapshots: readonly Lod0Snapshot[]): void {
-  for (const snapshot of snapshots) {
-    snapshot.node.mesh = snapshot.mesh;
-    snapshot.node.bounds = cloneBounds(snapshot.bounds);
-    if (snapshot.chunkMeshes) snapshot.node.chunkMeshes = snapshot.chunkMeshes;
-    else delete snapshot.node.chunkMeshes;
-  }
-}
-
-function snapshotParentNode(node: ClodPageNode): ParentNodeSnapshot {
-  return {
-    node,
-    mesh: node.mesh,
-    bounds: cloneBounds(node.bounds),
-    errorWorld: node.errorWorld,
-    lowBenefit: node.lowBenefit,
-  };
-}
-
-function restoreParentNodes(snapshots: ReadonlyMap<ClodPageNode, ParentNodeSnapshot>): void {
-  for (const [node, snapshot] of snapshots) {
-    node.mesh = snapshot.mesh;
-    node.bounds = cloneBounds(snapshot.bounds);
-    node.errorWorld = snapshot.errorWorld;
-    node.lowBenefit = snapshot.lowBenefit;
-  }
 }
 
 function snapshotParentQueue(): ParentQueueSnapshot {
@@ -204,51 +122,8 @@ function restoreParentQueue(snapshot: ParentQueueSnapshot): void {
   parentMs = snapshot.parentMs;
 }
 
-function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | undefined): void {
-  if (!terrain) {
-    setTerrainSurfaceOverride(null);
-    return;
-  }
-  const { res, worldCells, carvedBed } = terrain;
-  const scale = (res - 1) / Math.max(1e-6, worldCells);
-  setTerrainSurfaceOverride((x, z) => {
-    const gx = Math.max(0, Math.min(res - 1, x * scale));
-    const gz = Math.max(0, Math.min(res - 1, z * scale));
-    const x0 = Math.floor(gx);
-    const z0 = Math.floor(gz);
-    const x1 = Math.min(res - 1, x0 + 1);
-    const z1 = Math.min(res - 1, z0 + 1);
-    const fx = gx - x0;
-    const fz = gz - z0;
-    const a = carvedBed[z0 * res + x0] * (1 - fx) + carvedBed[z0 * res + x1] * fx;
-    const b = carvedBed[z1 * res + x0] * (1 - fx) + carvedBed[z1 * res + x1] * fx;
-    return a * (1 - fz) + b * fz;
-  });
-}
-
 function post(message: ClodWorkerResponse, transfer?: Transferable[]): void {
-  if (!transfer || transfer.length === 0) {
-    ctx.postMessage(message);
-    return;
-  }
-  const safeTransfer: Transferable[] = [];
-  for (const item of transfer) {
-    if (!(item instanceof ArrayBuffer) || item.byteLength === 0 || safeTransfer.includes(item)) continue;
-    safeTransfer.push(item);
-  }
-  ctx.postMessage(message, safeTransfer);
-}
-
-function errorResponse(requestId: number | null, error: unknown): ClodWorkerResponse {
-  const err = error as Error & { code?: string; details?: Record<string, unknown> };
-  return {
-    type: "error",
-    requestId,
-    message: err?.message ?? String(error),
-    name: err?.name,
-    code: err?.code,
-    details: err?.details,
-  };
+  postWorkerMessage(ctx, message, transfer);
 }
 
 function pendingParentCount(): number {
@@ -393,15 +268,6 @@ function scheduleParentDrain(): void {
   }, 0);
 }
 
-function installBorderCoastRuntime(
-  config: Extract<ClodWorkerRequest, { type: "build" }>["borderCoastOceanConfig"],
-  worldPagesX: number,
-  pagesCfg: ClodPagesConfig,
-): void {
-  const worldCells = worldPagesX * pagesCfg.page.chunks_per_page * pagesCfg.page.chunk_size;
-  setBorderCoastRuntime(config ?? null, worldCells);
-}
-
 async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }>): Promise<void> {
   cfg = request.cfg;
   setTerrainFieldConfig(request.terrainFieldConfig ?? null);
@@ -455,10 +321,6 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
     cacheBuildStats: cacheCtx?.effective ? cacheStats : undefined,
     cacheServiceMetrics: cacheCtx?.effective ? cacheServiceMetrics : undefined,
   }, collectBuildResultTransferables(serialized));
-}
-
-function inclusiveMaxBoundary(value: number): number {
-  return value - DIRTY_BOUNDS_MAX_EPSILON;
 }
 
 function parentGroupFootprint(parentX: number, parentZ: number): DirtyCellBounds {
