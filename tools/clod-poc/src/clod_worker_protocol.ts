@@ -18,8 +18,16 @@ export interface SerializedHydrologyTerrain {
   carvedBed: Float32Array;
 }
 
+export interface SerializedSourceRevision {
+  chunkX: number;
+  chunkZ: number;
+  revision: number;
+}
+
 export interface SerializedClodNode {
   id: string;
+  revision?: number;
+  sourceRevisions?: SerializedSourceRevision[];
   level: number;
   childIds: (string | null)[];
   mesh: PageMesh;
@@ -116,6 +124,12 @@ function cloneMesh(mesh: PageMesh): PageMesh {
   };
 }
 
+function cloneSourceRevisions(
+  revisions: readonly SerializedSourceRevision[] | undefined,
+): SerializedSourceRevision[] | undefined {
+  return revisions?.map((entry) => ({ ...entry }));
+}
+
 function resolveChildIds(
   ownerId: string,
   childIds: readonly (string | null)[],
@@ -132,6 +146,8 @@ function resolveChildIds(
 export function serializeNode(node: ClodPageNode): SerializedClodNode {
   return {
     id: node.id,
+    revision: node.revision,
+    sourceRevisions: cloneSourceRevisions(node.sourceRevisions),
     level: node.level,
     childIds: node.children.map((child) => child?.id ?? null),
     mesh: cloneMesh(node.mesh),
@@ -188,6 +204,8 @@ export function applySerializedNode(
   nodesById: Map<string, ClodPageNode>,
 ): ClodPageNode {
   const children = resolveChildIds(serialized.id, serialized.childIds, nodesById);
+  target.revision = serialized.revision;
+  target.sourceRevisions = cloneSourceRevisions(serialized.sourceRevisions);
   target.level = serialized.level;
   target.children = children;
   target.mesh = serialized.mesh;
@@ -208,6 +226,8 @@ export function rehydrateBuildResult(serialized: SerializedBuildResult): BuildRe
       if (nodesById.has(node.id)) throw new Error(`CLOD build result contains duplicate node ${node.id}`);
       const rehydrated: ClodPageNode = {
         id: node.id,
+        revision: node.revision,
+        sourceRevisions: cloneSourceRevisions(node.sourceRevisions),
         level: node.level,
         children: [],
         mesh: node.mesh,
