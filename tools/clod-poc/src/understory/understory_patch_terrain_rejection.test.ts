@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { PageFootprint } from "../types.js";
+import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import { DEFAULT_UNDERSTORY_SETTINGS } from "./understory_config.js";
 import type { UnderstoryTerrainSampler } from "./understory_instances.js";
 import {
@@ -16,8 +17,26 @@ function makeSampler(height: number, normalY = 1): UnderstoryTerrainSampler {
   };
 }
 
+afterEach(() => {
+  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = false;
+});
+
 describe("understory patch terrain rejection", () => {
-  it("rejects full patches before candidate generation when height is outside range", () => {
+  it("keeps probe-only static rejection disabled by default", () => {
+    const footprint: PageFootprint = { minX: 10, minZ: 10, maxX: 26, maxZ: 26 };
+    const decision = rejectUnderstoryPatchBeforeGeneration(
+      footprint,
+      DEFAULT_UNDERSTORY_SETTINGS,
+      makeSampler(DEFAULT_UNDERSTORY_SETTINGS.placement.maxHeightM + 100),
+      512,
+    );
+
+    expect(decision.reject).toBe(false);
+    expect(decision.reason).toBe("disabled");
+  });
+
+  it("rejects full patches when opted in and height is outside range", () => {
+    DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = true;
     const footprint: PageFootprint = { minX: 10, minZ: 10, maxX: 26, maxZ: 26 };
     const decision = rejectUnderstoryPatchBeforeGeneration(
       footprint,
