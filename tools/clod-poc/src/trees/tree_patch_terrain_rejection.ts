@@ -13,6 +13,7 @@ import {
 } from "../vegetation/vegetation_visibility_provider.js";
 import type { TreeSettings } from "./tree_config.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
+import { getTreeMaterialBias, treeMaterialDensity } from "./tree_material_bias.js";
 import { treeFootprintCenterX, treeFootprintCenterZ, treeFootprintRadius } from "./tree_system_math.js";
 
 export type TreeEarlyTerrainRejectionReason = VegetationTerrainRejectionReason | "not_tested";
@@ -66,6 +67,8 @@ export function resetTreeEarlyTerrainRejectionStats(stats: TreeEarlyTerrainRejec
   stats.acceptedPatches = 0;
   stats.unknownKeptPatches = 0;
   stats.skippedCandidateEstimate = 0;
+  stats.cacheHits = 0;
+  stats.cacheMisses = 0;
   for (const reason of Object.keys(stats.reasonCounts) as TreeEarlyTerrainRejectionReason[]) {
     stats.reasonCounts[reason] = 0;
   }
@@ -90,9 +93,9 @@ export function recordTreeEarlyTerrainRejection(
   decision: TreeEarlyTerrainRejectionDecision,
 ): void {
   if (!stats) return;
-  const before = TREE_EARLY_TERRAIN_REJECTION_CACHE.stats();
-  stats.cacheHits = before.hits;
-  stats.cacheMisses = before.misses;
+  const cache = TREE_EARLY_TERRAIN_REJECTION_CACHE.stats();
+  stats.cacheHits = cache.hits;
+  stats.cacheMisses = cache.misses;
   stats.testedPatches++;
   stats.reasonCounts[decision.reason]++;
   if (decision.reason === "unknown_kept" || decision.reason === "missing_sampler") stats.unknownKeptPatches++;
@@ -183,7 +186,7 @@ function staticTreeRejectReason(input: TreeEarlyTerrainRejectionInput, probe: Fo
   if (normalY < input.settings.placement.slopeMinY) return "too_steep";
   if (height < input.settings.placement.minHeightM || height > input.settings.placement.maxHeightM) return "height_range";
   const weights = sampler.materialWeights(height, normalY);
-  const groundWeight = weights[0] + weights[1] * 0.25;
+  const groundWeight = (weights[0] + weights[1] * 0.25) * treeMaterialDensity(input.settings, weights);
   if (groundWeight < input.settings.placement.minGroundWeight) return "wrong_biome";
   return null;
 }
@@ -224,6 +227,7 @@ function treeRejectionCacheKey(input: TreeEarlyTerrainRejectionInput): string {
     input.settings.placement.minHeightM,
     input.settings.placement.maxHeightM,
     input.settings.placement.minGroundWeight,
+    JSON.stringify(getTreeMaterialBias(input.settings)),
     visibility.enabled ? 1 : 0,
     visibility.minDistanceM,
     visibility.sampleCount,
