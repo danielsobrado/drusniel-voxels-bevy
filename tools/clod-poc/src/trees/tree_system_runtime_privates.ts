@@ -10,7 +10,9 @@ export function treeCpuPatchInput(self: TreeSystem) {
   return {
     root: self.root, nodes: self.nodes, patches: self.patches,
     settings: self.settings, sampler: self.sampler,
-    terrainOcclusionSampler: self.terrainOcclusionSampler, worldCells: self.worldCells,
+    terrainOcclusionSampler: self.terrainOcclusionSampler,
+    earlyTerrainRejectionStats: self.earlyTerrainRejectionStats,
+    worldCells: self.worldCells,
     meshBoundsState: self.meshBoundsState,
     impostorAtlases: self.assets.impostorAtlases,
     geometryFor: (s: TreeSpeciesId, l: TreeLod) => self.assets.geometryFor(s, l),
@@ -58,5 +60,6 @@ export function treeUpdateStats(self: TreeSystem): void {
     lodCounts: self.lodCounts, reportsGpuRingStats: true,
     gpuRing: self.gpuRing, debugShowGpuCounts: self.settings.gpu.debugShowGpuCounts,
     impostorStatus: self.assets.impostorStatus, impostorReason: self.assets.impostorReason,
+    earlyTerrainRejectionStats: self.earlyTerrainRejectionStats,
   });
 }
