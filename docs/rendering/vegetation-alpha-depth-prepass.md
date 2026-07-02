@@ -31,6 +31,8 @@ All other values keep the path disabled.
 ## What is currently implemented
 
 - `GrassMaterial::enable_prepass()` is gated by `VOXEL_VEGETATION_DEPTH_PREPASS`.
+- `VegetationDepthPrepassConfig` records the startup state as a typed resource.
+- The timing recorder emits `Vegetation Depth Prepass Enabled` as `0` or `1` so bench output can prove which path ran.
 - The default path remains unchanged.
 - Grass shadow specialization remains disabled; this gate is for the camera depth prepass, not for shadow maps.
 - The same `shaders/grass.wgsl` material path is used, so wind and alpha behavior are still owned by the grass material.
@@ -57,6 +59,7 @@ Compare:
 
 ```text
 __frame_total p50/p95
+Vegetation Depth Prepass Enabled
 Grass Collect
 Grass Cull
 Grass Animate
@@ -98,10 +101,9 @@ The previous code disabled prepass because of shader-variant mismatch risk. Keep
 ## Pending production work
 
 ```text
-TODO: add a typed graphics/vegetation config field instead of env-only control.
+TODO: add full graphics/vegetation config-file support instead of env-only control.
 TODO: add bench render_toggles support once the bench schema path is verified.
 TODO: add debug overlay text for the current prepass state.
-TODO: add a render timing row that explicitly reports vegetation depth prepass state.
 TODO: implement a custom depth-only grass material if Bevy's built-in prepass variant still mismatches grass.wgsl.
 TODO: extend to hero tree leaves / understory only after grass A/B data is clean.
 ```
