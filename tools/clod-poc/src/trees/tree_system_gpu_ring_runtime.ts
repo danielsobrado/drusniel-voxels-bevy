@@ -15,9 +15,7 @@ import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import { getRealtimeSunShadowCascadeCameras } from "../rendering/realtime_sun_shadows.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings } from "./tree_config.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
-import {
-  generateTreeRingValidationCounts,
-} from "./tree_ring_lighting_proxies.js";
+import { generateTreeRingValidationCounts } from "./tree_ring_validation_counts.js";
 import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";
 import { buildTreeRingClusterVisibilityMask, TreeRingClusterVisibilityCache, type TreeRingClusterVisibilityMask } from "./tree_ring_cluster_visibility.js";
 import type { TreeVisibleClusterMaskStats } from "./tree_system_stats.js";
