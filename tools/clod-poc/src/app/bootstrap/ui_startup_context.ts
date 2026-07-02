@@ -15,6 +15,7 @@ import type { ClodAppState } from "../clod_app_state.js";
 import type { ClodRuntimeBindings } from "../clod_runtime_bindings.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import type { AppRenderer } from "./renderer_startup.js";
+import type { RenderResolutionRuntime } from "../../rendering/render_resolution_runtime.js";
 import type { DomShell } from "./dom_shell.js";
 import type { RuntimeSystemsStartupResult, VegetationStatControllerRefs } from "./runtime/runtime_systems_startup.js";
 import type { TerrainViewStartupResult } from "./terrain_view_startup.js";
@@ -23,8 +24,6 @@ import type { parseUnderstoryConfig } from "../../understory/understory_config.j
 import type { GuiDisplayController } from "./bootstrap_refs.js";
 import type { createPlayerInputController } from "../../player/player_input_controller.js";
 import type { createPlayerModeController } from "../../player/player_mode_controller.js";
-import type { SwordAttackController } from "../../combat/index.js";
-import type { SpellVfxController } from "../../spells/spell_vfx_controller.js";
 import type { ClodShadowOverlayController } from "../../clod_shadow_overlay_controller.js";
 import type { FloatingOriginController } from "../../precision/floating_origin.js";
 
@@ -46,6 +45,7 @@ export interface UiStartupInput {
   statControllers: VegetationStatControllerRefs;
   app: AppRenderer;
   renderer: AppRenderer["renderer"];
+  renderResolution?: RenderResolutionRuntime;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
@@ -91,6 +91,8 @@ export interface UiStartupInput {
 }
 
 export interface UiSessionState {
+  // Extra bootstrap modules attach optional controllers after their startup phases.
+  [key: string]: any;
   averageFpsRef: { value: number };
   lastDigSummary: string;
   lastArchiveSummary: string;
@@ -112,10 +114,9 @@ export interface UiSessionState {
   digRadiusController: GuiDisplayController | null;
   playerInputController: ReturnType<typeof createPlayerInputController> | null;
   playerModeController: ReturnType<typeof createPlayerModeController> | null;
-  combatController: SwordAttackController | null;
-  spellVfxController: SpellVfxController | null;
   clodShadowOverlayController: ClodShadowOverlayController | null;
   clodShadowStatsController: GuiDisplayController | null;
+  frameLoopAbortController: AbortController | null;
 }
 
 export interface UiStartupContext {
@@ -148,10 +149,9 @@ export function createUiStartupContext(input: UiStartupInput): UiStartupContext 
       digRadiusController: null,
       playerInputController: null,
       playerModeController: null,
-      combatController: null,
-      spellVfxController: null,
       clodShadowOverlayController: null,
       clodShadowStatsController: null,
+      frameLoopAbortController: null,
     },
   };
 }

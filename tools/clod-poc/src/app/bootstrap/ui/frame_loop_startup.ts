@@ -8,6 +8,12 @@ import { GpuPassTiming } from "../../../core/gpu_pass_timing.js";
 import { TreeTimingPass } from "../../frame_loop/tree_timing_pass.js";
 import { resolveSlowFrameMsThreshold } from "../../runtime_config.js";
 import { shadowProxyStatsToCounters } from "../../../shadows/shadowProxyStats.js";
+import {
+  RENDER_RESOLUTION_CHANGED_EVENT,
+  type RenderResolutionChangedEventDetail,
+} from "../../../rendering/render_resolution_runtime.js";
+import { parseSunLightOptions } from "../../../terrain/sun_visibility/sun_light_options.js";
+import { createLightUpdate } from "../../../terrain/sun_visibility/light_update.js";
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
@@ -152,6 +158,32 @@ export function runFrameLoopStartup(
   const grassProfileEnabled = searchParams.get("grassProfile") === "1";
   const grassPrepassEnabled = searchParams.get("prepass") !== "0";
   const profileFrameMs = resolveSlowFrameMsThreshold(searchParams, clodRuntime.profiling.slowFrameMs);
+  const sunLightOptions = parseSunLightOptions({
+    active: searchParams.get("sunLightCache") !== "0",
+    diagnostics: searchParams.get("sunLightStats") === "1",
+    debug_view: {
+      active: searchParams.get("sunLightDebug") === "1",
+    },
+  });
+  const sunLightRuntime = window.__drusnielTerrainSummary
+    ? createLightUpdate({ terrainSummary: window.__drusnielTerrainSummary, options: sunLightOptions })
+    : null;
+  const syncSunLightCounters = () => {
+    const sunStats = sunLightRuntime?.stats();
+    if (!sunStats || !longView.hooks?.stats) return;
+    const counters = longView.hooks.stats.counters;
+    counters["sunLightCache.active"] = sunStats.active ? 1 : 0;
+    counters["sunLightCache.entries"] = sunStats.entries;
+    counters["sunLightCache.pendingTiles"] = sunStats.pendingTiles;
+    counters["sunLightCache.hits"] = sunStats.hits;
+    counters["sunLightCache.misses"] = sunStats.misses;
+    counters["sunLightCache.missingValues"] = sunStats.missingValues;
+    counters["sunLightCache.evictions"] = sunStats.evictions;
+    counters["sunLightCache.refreshes"] = sunStats.refreshes;
+    counters["sunLightCache.tilesBuiltThisFrame"] = sunStats.tilesBuiltThisFrame;
+    counters["sunLightCache.buildMsLastFrame"] = sunStats.buildMsLastFrame;
+    counters["sunLightCache.buildMsAvg"] = sunStats.buildMsAvg;
+  };
 
   // TP-1: real per-pass GPU timing for the hero-forest path. Only on WebGPU,
   // and only when the renderer was created with timestamp tracking (gated on
@@ -169,7 +201,7 @@ export function runFrameLoopStartup(
   // TP-1: isolated offscreen tree pass so the tree main pass is timeable
   // (`r.treeMain`). Same gate as the resolve; only meaningful on WebGPU.
   const initialRenderResolution = window.__drusnielRenderResolution?.current();
-  let treeTimingPass: TreeTimingPass | null = input.app.isWebGpu && wantGpuTiming && gpuTimestampReady
+  const treeTimingPass: TreeTimingPass | null = input.app.isWebGpu && wantGpuTiming && gpuTimestampReady
     ? new TreeTimingPass(
         input.app.renderer,
         initialRenderResolution?.physicalWidth ?? window.innerWidth,
@@ -177,14 +209,19 @@ export function runFrameLoopStartup(
       )
     : null;
 
+  const resizeDependentTargets = (detail: RenderResolutionChangedEventDetail) => {
+    postProcess?.setSize(detail.resolution.cssWidth, detail.resolution.cssHeight);
+    treeTimingPass?.setSize(detail.resolution.physicalWidth, detail.resolution.physicalHeight);
+  };
+
+  window.addEventListener(RENDER_RESOLUTION_CHANGED_EVENT, (event) => {
+    resizeDependentTargets((event as CustomEvent<RenderResolutionChangedEventDetail>).detail);
+  });
+
   window.addEventListener("resize", () => {
     const renderResolution = window.__drusnielRenderResolution;
     if (renderResolution) {
-      const result = renderResolution.applyCurrentViewport({ renderer, camera });
-      if (result.changed) {
-        postProcess?.setSize(result.resolution.cssWidth, result.resolution.cssHeight);
-        treeTimingPass?.setSize(result.resolution.physicalWidth, result.resolution.physicalHeight);
-      }
+      renderResolution.applyCurrentViewport({ renderer, camera });
       return;
     }
 
@@ -212,7 +249,7 @@ export function runFrameLoopStartup(
       makeGrassSettings,
       gpuPassTiming,
       runGpuTreeTiming: treeTimingPass
-        ? () => treeTimingPass?.render(treeSystem, camera)
+        ? () => treeTimingPass.render(treeSystem, camera)
         : null,
     },
     player: {
@@ -307,10 +344,12 @@ export function runFrameLoopStartup(
       getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert,
       getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled,
     },
-    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene
+    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime
       ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
           if (streamingScene) farShellController.moveTo(camera.position.x, camera.position.z);
           input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera);
+          sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now());
+          syncSunLightCounters();
           session.naadfStatsController?.updateDisplay();
         } }
       : undefined,
