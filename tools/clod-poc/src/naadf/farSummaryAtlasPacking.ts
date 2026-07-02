@@ -1,4 +1,5 @@
 export type FarSummaryAtlasFormat = "debug_rgba32f" | "balanced" | "packed_low_bandwidth";
+export type FarSummaryAtlasHeightFormat = "r32f" | "r16f";
 
 export const DEFAULT_FAR_SUMMARY_ATLAS_FORMAT: FarSummaryAtlasFormat = "balanced";
 
@@ -9,12 +10,14 @@ const FORMAT_VALUES: ReadonlySet<string> = new Set([
 ]);
 
 const FLOAT32_BYTES = 4;
+const FLOAT16_BYTES = 2;
 const UINT8_BYTES = 1;
 const RGBA_COMPONENTS = 4;
 const RED_COMPONENTS = 1;
 
 export interface FarSummaryAtlasPackingSpec {
   readonly format: FarSummaryAtlasFormat;
+  readonly heightFormat: FarSummaryAtlasHeightFormat;
   readonly heightComponents: number;
   readonly heightBytesPerPixel: number;
   readonly materialBytesPerPixel: number;
@@ -43,6 +46,7 @@ export function resolveFarSummaryAtlasPackingSpec(format: FarSummaryAtlasFormat 
   if (format === "debug_rgba32f") {
     return {
       format,
+      heightFormat: "r32f",
       heightComponents: RGBA_COMPONENTS,
       heightBytesPerPixel: RGBA_COMPONENTS * FLOAT32_BYTES,
       materialBytesPerPixel: RGBA_COMPONENTS * FLOAT32_BYTES,
@@ -53,8 +57,23 @@ export function resolveFarSummaryAtlasPackingSpec(format: FarSummaryAtlasFormat 
     };
   }
 
+  if (format === "packed_low_bandwidth") {
+    return {
+      format,
+      heightFormat: "r16f",
+      heightComponents: RED_COMPONENTS,
+      heightBytesPerPixel: RED_COMPONENTS * FLOAT16_BYTES,
+      materialBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
+      coverageBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
+      normalBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
+      storesHeightRange: false,
+      storesNormalAtlas: false,
+    };
+  }
+
   return {
     format,
+    heightFormat: "r32f",
     heightComponents: RED_COMPONENTS,
     heightBytesPerPixel: RED_COMPONENTS * FLOAT32_BYTES,
     materialBytesPerPixel: RGBA_COMPONENTS * UINT8_BYTES,
