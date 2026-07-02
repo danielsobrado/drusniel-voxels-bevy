@@ -22,6 +22,8 @@ export type {
 
 import type { ClodFrameLoopDeps } from "./frame_loop/frame_loop_deps.js";
 
+const DEBUG_COUNTER_MIRROR_INTERVAL_MS = 250;
+
 function timed<T>(
   enabled: boolean,
   phaseTiming: FramePerfPhaseTiming,
@@ -44,6 +46,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   const fpsSamples: number[] = [];
   let lastFrameAt = performance.now();
   let lastFpsRefreshAt = lastFrameAt;
+  let lastDebugCounterMirrorAt = -Infinity;
   let grassProfileFrame = { value: 0 };
   const debugQuery = new URLSearchParams(window.location.search);
   const borderOceanDebugPanel = diagnostics.queryScene === "border-ocean" || debugQuery.get("borderOceanDebug") === "1"
@@ -220,14 +223,10 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       }
     }
 
-    // Mirror GPU-driven scatter culling counts into the HUD counters. The
-    // renderer's `info.render.triangles` reports fixed indirect-draw capacity,
-    // not what the GPU frustum cull actually kept, so these are the only live
-    // signal that culling responds to the camera. `trees.visible` / per-LOD
-    // stay 0 unless the GPU count readback is enabled
-    // (trees.gpu.readback_visible_lists + debug_show_gpu_counts); the readback
-    // is a GPU->CPU stall so it is opt-in.
-    {
+    // Mirror debug/perf counters at HUD cadence unless frame profiling is active.
+    // This keeps gameplay frames from spending work on diagnostic maps every tick.
+    if (collectFrameTiming || frameStart - lastDebugCounterMirrorAt >= DEBUG_COUNTER_MIRROR_INTERVAL_MS) {
+      lastDebugCounterMirrorAt = frameStart;
       const hooks = render.getHooks();
       if (hooks?.stats) {
         const counters = hooks.stats.counters;
