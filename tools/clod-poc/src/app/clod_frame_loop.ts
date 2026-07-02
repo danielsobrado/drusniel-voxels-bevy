@@ -6,6 +6,7 @@ import { runRenderPhase } from "./frame_loop/render_phase.js";
 import { submitMsChanged } from "./frame_loop/frame_timing.js";
 import { createBorderOceanDebugPanel } from "../water/border_ocean_debug_panel.js";
 import { createFramePerfPhaseTiming, createFramePerfProbeFromQuery, type FramePerfPhaseTiming } from "./frame_loop/perf_probe.js";
+import { materialChurnDiagnostics } from "../rendering/material_churn/material_churn_diagnostics.js";
 export type { ClodFrameLoopUiState } from "./frame_loop/ui_state.js";
 export type { StatsPresenter } from "./frame_loop/stats_presenter.js";
 export type { FrameRenderer } from "./frame_loop/frame_renderer.js";
@@ -48,6 +49,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   let lastFpsRefreshAt = lastFrameAt;
   let lastDebugCounterMirrorAt = -Infinity;
   let grassProfileFrame = { value: 0 };
+  let materialChurnFrame = 0;
   const debugQuery = new URLSearchParams(window.location.search);
   const borderOceanDebugPanel = diagnostics.queryScene === "border-ocean" || debugQuery.get("borderOceanDebug") === "1"
     ? createBorderOceanDebugPanel(document.body)
@@ -110,6 +112,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   });
 
   render.renderer.setAnimationLoop(() => {
+    materialChurnDiagnostics.beginFrame(++materialChurnFrame);
     frameStart = performance.now();
     const collectFrameTiming = player.state.profileEnabled || perfProbe !== null;
     const phaseTiming = createFramePerfPhaseTiming();
@@ -274,6 +277,16 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["renderNodeCache.evictions"] = renderNodeCacheStats.evictions;
           counters["renderNodeCache.prefetches"] = renderNodeCacheStats.prefetches;
         }
+        const materialChurnStats = materialChurnDiagnostics.frameStats();
+        counters["materialChurn.enabled"] = materialChurnStats.enabled ? 1 : 0;
+        counters["materialChurn.newMaterials"] = materialChurnStats.newMaterials;
+        counters["materialChurn.materialAssignments"] = materialChurnStats.materialReplacements;
+        counters["materialChurn.needsUpdate"] = materialChurnStats.materialNeedsUpdate;
+        counters["materialChurn.versionChanges"] = materialChurnStats.materialVersionChanges;
+        counters["materialChurn.pipelineSensitiveChanges"] = materialChurnStats.pipelineSensitiveChanges;
+        counters["materialChurn.rendererProgramCount"] = materialChurnStats.rendererProgramCount ?? -1;
+        counters["materialChurn.rendererProgramDelta"] = materialChurnStats.rendererProgramDelta ?? 0;
+        counters["materialChurn.suspectedPipelineKeyChanges"] = materialChurnStats.suspectedPipelineKeyChanges;
         const selectionCacheStats = terrain.selectionController.stats().selectionCache;
         counters["selectionCutCache.enabled"] = selectionCacheStats.enabled ? 1 : 0;
         counters["selectionCutCache.hits"] = selectionCacheStats.hits;
