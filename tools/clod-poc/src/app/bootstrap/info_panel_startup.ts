@@ -1,5 +1,9 @@
 import { digEditCount } from "../../terrain/terrain.js";
-import { formatTreeInfoLine } from "../../trees/index.js";
+import {
+  formatTreeGpuFallbackWarning,
+  formatTreeGpuOverlayStatus,
+  formatTreeInfoLine,
+} from "../../trees/index.js";
 import { formatUnderstoryInfoLine } from "../../understory/index.js";
 import { formatForestLightingInfoLine } from "../../forest_lighting/index.js";
 import { updateClodOverlay, type ClodOverlaySnapshot } from "../../ui/overlay_panel.js";
@@ -73,6 +77,8 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
       bubbleForcedSplits: selection.nearFieldForcedSplits,
       cutFrozen: state.freeze,
       errorThreshold: state.thresholdPx,
+      treeGpuStatus: formatTreeGpuOverlayStatus(state.treesEnabled, state.treeGpuEnabled, treeStats.current),
+      treeGpuWarning: formatTreeGpuFallbackWarning(state.treesEnabled, state.treeGpuEnabled, treeStats.current),
       buildStatus: buildStatusRef.value,
       digCostLine: session.lastDigSummary || undefined,
       polishLine,
