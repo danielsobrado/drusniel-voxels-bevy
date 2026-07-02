@@ -180,44 +180,41 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   ): Promise<boolean> => {
     const t0 = performance.now();
     lastDigAt = t0;
+    const margin = radius + DIG_INFLUENCE_MARGIN;
+    let lod0: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>;
     try {
-      const margin = radius + DIG_INFLUENCE_MARGIN;
-      let lod0: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>;
-      try {
-        const workerStartedAt = performance.now();
-        lod0 = await deps.clodWorker.rebuildAfterDig(edit, {
-          minX: hit.point.x - margin,
-          maxX: hit.point.x + margin,
-          minZ: hit.point.z - margin,
-          maxZ: hit.point.z + margin,
-        });
-        deps.recordClodWorkerRebuild(performance.now() - workerStartedAt);
-      } catch (error) {
-        reportRebuildFailure(label, error);
-        return false;
-      }
-
-      try {
-        applyLod0Result(lod0.changed, lod0.pendingParents);
-        deps.setPendingParentNodes(0);
-        deps.setPendingParentMs(0);
-      } catch (error) {
-        reportApplyFailure(label, error);
-        return true;
-      }
-
-      const totalMs = performance.now() - t0;
-      const batchSuffix = lod0.requestCount > 1 ? ` · batch ${lod0.requestCount}` : "";
-      const summary =
-        `${totalMs.toFixed(0)}ms worker LOD0 (build ${lod0.lod0Ms.toFixed(0)}ms · ${lod0.lod0Pages}p · ` +
-        `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · serialize ${lod0.serializeMs.toFixed(0)}ms${batchSuffix})`;
-      deps.setLastDigSummary(summary);
-      console.log(
-        `[${label} ${edit.op ?? "edit"} ${edit.shape ?? "sphere"} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${summary} — ${lod0.pendingParents} ancestors queued in worker`,
-      );
-      return true;
-    } finally {
+      const workerStartedAt = performance.now();
+      lod0 = await deps.clodWorker.rebuildAfterDig(edit, {
+        minX: hit.point.x - margin,
+        maxX: hit.point.x + margin,
+        minZ: hit.point.z - margin,
+        maxZ: hit.point.z + margin,
+      });
+      deps.recordClodWorkerRebuild(performance.now() - workerStartedAt);
+    } catch (error) {
+      reportRebuildFailure(label, error);
+      return false;
     }
+
+    try {
+      applyLod0Result(lod0.changed, lod0.pendingParents);
+      deps.setPendingParentNodes(0);
+      deps.setPendingParentMs(0);
+    } catch (error) {
+      reportApplyFailure(label, error);
+      return true;
+    }
+
+    const totalMs = performance.now() - t0;
+    const batchSuffix = lod0.requestCount > 1 ? ` · batch ${lod0.requestCount}` : "";
+    const summary =
+      `${totalMs.toFixed(0)}ms worker LOD0 (build ${lod0.lod0Ms.toFixed(0)}ms · ${lod0.lod0Pages}p · ` +
+      `${lod0.chunksRemeshed}/${lod0.chunksTotal} chunks · serialize ${lod0.serializeMs.toFixed(0)}ms${batchSuffix})`;
+    deps.setLastDigSummary(summary);
+    console.log(
+      `[${label} ${edit.op ?? "edit"} ${edit.shape ?? "sphere"} r=${radius}] at (${hit.point.x.toFixed(1)},${hit.point.y.toFixed(1)},${hit.point.z.toFixed(1)}) — ${summary} — ${lod0.pendingParents} ancestors queued in worker`,
+    );
+    return true;
   };
 
   const performDig = async (ray: THREE.Ray) => {
