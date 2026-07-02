@@ -12,7 +12,6 @@ import {
   countTreePatchInstances,
   selectRetainedTreePatches,
   selectTreePatchCandidates,
-  shouldDeferTreePatchRefresh,
 } from "./tree_system_patch_planner.js";
 import {
   treeDistance2d,
@@ -25,6 +24,12 @@ import {
   type TreeTerrainOcclusionSampler,
   type TreeTerrainOcclusionSettings,
 } from "./tree_terrain_occlusion.js";
+import {
+  recordTreeEarlyTerrainRejection,
+  rejectTreePatchBeforeGeneration,
+  resetTreeEarlyTerrainRejectionStats,
+  type TreeEarlyTerrainRejectionStats,
+} from "./tree_patch_terrain_rejection.js";
 import {
   writeTreeImpostorUvRectIfChanged,
   writeTreeLodDitherRoleIfChanged,
@@ -57,6 +62,7 @@ export interface TreeCpuPatchRuntimeInput {
   settings: TreeSettings;
   sampler: TreeTerrainSampler | undefined;
   terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
+  earlyTerrainRejectionStats?: TreeEarlyTerrainRejectionStats;
   worldCells: number;
   meshBoundsState: WeakMap<THREE.InstancedMesh, TreeMeshBoundsState>;
   impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
@@ -91,7 +97,12 @@ export function resetTreeLodCounts(lodCounts: TreeLodCounts): void {
   lodCounts.impostor = 0;
 }
 
-export function refreshTreePatchesForCenter(input: TreeCpuPatchRuntimeInput, center: THREE.Vector3): TreePatchRefreshResult {
+export function refreshTreePatchesForCenter(
+  input: TreeCpuPatchRuntimeInput,
+  center: THREE.Vector3,
+  cameraPosition: THREE.Vector3 = center,
+): TreePatchRefreshResult {
+  resetTreeEarlyTerrainRejectionStats(input.earlyTerrainRejectionStats ?? noopEarlyTerrainRejectionStats());
   const retained = selectRetainedTreePatches(input.patches, center.x, center.z, input.settings.distanceM);
   const retainedNodeIds = new Set(retained.map((patch) => patch.nodeId));
   for (const patch of input.patches) {
@@ -102,9 +113,21 @@ export function refreshTreePatchesForCenter(input: TreeCpuPatchRuntimeInput, cen
   const candidates = selectTreePatchCandidates(input.nodes, existing, center.x, center.z, input.settings.distanceM);
   let totalTrees = countTreePatchInstances(retained);
   let added = 0;
+  let deferred = false;
   const patches = [...retained];
   for (const { node } of candidates) {
-    if (added >= input.settings.maxNewPatchesPerFrame || totalTrees >= input.settings.maxInstances) break;
+    if (totalTrees >= input.settings.maxInstances) break;
+    if (added >= input.settings.maxNewPatchesPerFrame) { deferred = true; break; }
+    const rejection = rejectTreePatchBeforeGeneration({
+      node,
+      settings: input.settings,
+      sampler: input.sampler,
+      cameraPosition,
+      worldCells: input.worldCells,
+    });
+    recordTreeEarlyTerrainRejection(input.earlyTerrainRejectionStats, rejection);
+    if (rejection.reject) continue;
+
     const patch = createTreePatch(input, node, input.settings.maxInstances - totalTrees);
     totalTrees += patch.instances.length;
     patches.push(patch);
@@ -114,7 +137,7 @@ export function refreshTreePatchesForCenter(input: TreeCpuPatchRuntimeInput, cen
 
   return {
     patches,
-    patchesDirty: shouldDeferTreePatchRefresh(added, candidates.length),
+    patchesDirty: deferred,
   };
 }
 
@@ -291,4 +314,22 @@ function placeTreeInstance(
   }
   setTreeInstanceMatrixWhenChanged(effectiveMesh, effectiveIndex, TREE_CPU_MATRIX, () => markTreeMeshMatrixChanged(write, effectiveMesh));
   incrementTreeMeshWriteCount(write, effectiveMesh);
+}
+
+function noopEarlyTerrainRejectionStats(): TreeEarlyTerrainRejectionStats {
+  return {
+    testedPatches: 0,
+    rejectedPatches: 0,
+    acceptedPatches: 0,
+    unknownKeptPatches: 0,
+    skippedCandidateEstimate: 0,
+    reasonCounts: {
+      visible: 0,
+      terrain_hidden: 0,
+      unknown_kept: 0,
+      near_forced_visible: 0,
+      disabled: 0,
+      not_tested: 0,
+    },
+  };
 }
