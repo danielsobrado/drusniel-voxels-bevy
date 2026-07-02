@@ -7,6 +7,7 @@ import {
 } from "../../rendering/renderer_backend.js";
 import { getRendererGpuDevice } from "../../rendering/webgpu_device_bridge.js";
 import { installRealtimeSunShadows } from "../../rendering/realtime_sun_shadows.js";
+import { createRenderResolutionRuntime, type RenderResolutionRuntime } from "../../rendering/render_resolution_runtime.js";
 import { failLoud } from "../../core/diagnostics.js";
 import { TerrainColliderSet, type TerrainColliderPage } from "../../terrain/terrain_collider.js";
 import {
@@ -27,6 +28,7 @@ import type { VoxelProjectArchiveContents } from "../../project/voxel_project_ar
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { Phase0SceneConfig } from "../../phase0/phase0_config.js";
 import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
+import { parseClodRuntimeConfig } from "../runtime_config.js";
 import borderOceanSceneConfigText from "../../../config/border_ocean_scene.yaml?raw";
 import borderCoastOceanConfigText from "../../../config/border_coast_ocean.yaml?raw";
 import {
@@ -57,6 +59,7 @@ export interface RendererStartupResult {
   isWebGpu: boolean;
   rendererWebGpuDevice: GPUDevice | null;
   poolTerrainMaterial: boolean;
+  renderResolution: RenderResolutionRuntime;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
@@ -117,9 +120,16 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   const isWebGpu = app.isWebGpu;
   const rendererWebGpuDevice = getRendererGpuDevice(app);
   const poolTerrainMaterial = isWebGpu && cfg.selection.transition_mode === "instant";
+  const renderResolution = createRenderResolutionRuntime(
+    parseClodRuntimeConfig().renderResolution,
+    searchParams,
+  );
+  const initialRenderResolution = renderResolution.resolveCurrentViewport();
 
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setPixelRatio(initialRenderResolution.effectivePixelRatio);
+  renderer.setSize(initialRenderResolution.cssWidth, initialRenderResolution.cssHeight);
+  renderResolution.markApplied(initialRenderResolution);
+  window.__drusnielRenderResolution = renderResolution;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   document.body.appendChild(renderer.domElement);
@@ -148,7 +158,12 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   }
 
   const mid = worldCells / 2;
-  const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 8000);
+  const camera = new THREE.PerspectiveCamera(
+    55,
+    initialRenderResolution.cssWidth / initialRenderResolution.cssHeight,
+    0.5,
+    8000,
+  );
   camera.position.set(mid, worldCells * 0.7, mid + worldCells * 1.1);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(mid, 24, mid);
@@ -243,6 +258,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
     isWebGpu,
     rendererWebGpuDevice,
     poolTerrainMaterial,
+    renderResolution,
     scene,
     camera,
     controls,

@@ -130,6 +130,7 @@ export function buildClodErrorDispatchOptions(options: {
   readbackState: WebGpuReadbackState;
 }): DispatchOptions {
   const { readbackMode, compute, readbackState } = options;
+  compute.setReadbackMode(readbackMode);
   switch (readbackMode) {
     case "off":
       return { readback: false };

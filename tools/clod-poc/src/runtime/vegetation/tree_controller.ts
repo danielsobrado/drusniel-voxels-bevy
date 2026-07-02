@@ -4,11 +4,13 @@ import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
 import type { TreeShadowMaxLod } from "../../app/state/tree_quality_presets.js";
 import { TreeSystem, type FallingTree, type TreeSettings, type TreeStats } from "../../trees/index.js";
+import type { TreeDepthPrepassMaxLod } from "../../trees/tree_depth_prepass_runtime.js";
 import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlusion.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
 
 export interface TreeControllerUiState {
   treesEnabled: boolean;
+  treeDepthPrepassMaxLod: TreeDepthPrepassMaxLod;
   treeDistance: number;
   treeMaxInstances: number;
   treeDensity: number;
@@ -55,6 +57,7 @@ export interface TreeController {
   update(elapsedSeconds: number, ringCenter: THREE.Vector3, camera: THREE.Camera): void;
   updateLighting(lighting: EnvironmentLighting): void;
   setEnabled(enabled: boolean): void;
+  setDepthPrepassMaxLod(maxLod: TreeDepthPrepassMaxLod): void;
   markPatchesDirty(): void;
   bakeImpostors(renderer: unknown): ReturnType<TreeSystem["bakeImpostors"]>;
   updateFallingTrees(deltaSeconds: number): void;
@@ -143,6 +146,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
     gpuBackend: deps.gpuBackend,
     supportsGpuTrees: deps.webgpu,
   });
+  system.setDepthPrepassMaxLod(deps.getUiState().treeDepthPrepassMaxLod);
   assertPageMeshSignaturesUnchanged(signaturesBefore, pageMeshSignatures(deps.nodes));
 
   const refreshStats = () => {
@@ -170,6 +174,12 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
     },
     setEnabled(enabled) {
       system.setEnabled(enabled);
+    },
+    setDepthPrepassMaxLod(maxLod) {
+      const state = deps.getUiState();
+      state.treeDepthPrepassMaxLod = maxLod;
+      system.setDepthPrepassMaxLod(maxLod);
+      refreshStats();
     },
     markPatchesDirty() {
       system.markPatchesDirty();

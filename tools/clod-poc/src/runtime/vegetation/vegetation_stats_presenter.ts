@@ -25,7 +25,14 @@ export function formatTreeGpuSummary(stats: TreeStats): string {
 }
 
 export function formatUnderstoryGpuSummary(stats: UnderstoryStats): string {
+  const early = formatEarlyTerrainSummary(stats.earlyTerrainRejectedPatches, stats.earlyTerrainSkippedCandidates);
   return stats.gpuStatus === "disabled"
-    ? "disabled"
-    : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}${stats.gpuDispatchMs !== null ? ` ${stats.gpuDispatchMs.toFixed(1)}ms` : ""}`;
+    ? `disabled${early}`
+    : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}${stats.gpuDispatchMs !== null ? ` ${stats.gpuDispatchMs.toFixed(1)}ms` : ""}${early}`;
+}
+
+function formatEarlyTerrainSummary(rejected: number | undefined, skipped: number | undefined): string {
+  const rejectedCount = rejected ?? 0;
+  if (rejectedCount <= 0) return "";
+  return ` terrainReject=${rejectedCount} skipped=${skipped ?? 0}`;
 }

@@ -1,11 +1,13 @@
 import * as THREE from "three";
 import type { ClodNodeId, ClodPageNodeRuntime, ClodCut } from "../runtime/clodRuntimeTypes.js";
+import { trackedLineBasicMaterial } from "../../rendering/material_churn/tracked_material_factory.js";
 
 export class ClodWireframeOverlay {
   private readonly scene: THREE.Scene;
   private wireframeGroup: THREE.Group;
   private visible = false;
   private lodColors: Record<string, string>;
+  private readonly materials = new Map<string, THREE.LineBasicMaterial>();
 
   constructor(scene: THREE.Scene, lodColors: Record<string, string>) {
     this.scene = scene;
@@ -33,11 +35,8 @@ export class ClodWireframeOverlay {
       if (!node || !node.mesh) continue;
 
       const colorStr = this.lodColors[`lod${node.level}`] ?? "#ffffff";
-      const color = new THREE.Color(colorStr);
-
       const wireframe = new THREE.WireframeGeometry(node.mesh.geometry);
-      const material = new THREE.LineBasicMaterial({ color, depthTest: true });
-      const line = new THREE.LineSegments(wireframe, material);
+      const line = new THREE.LineSegments(wireframe, this.materialFor(colorStr));
       line.position.copy(node.mesh.position);
       line.quaternion.copy(node.mesh.quaternion);
       this.wireframeGroup.add(line);
@@ -47,20 +46,23 @@ export class ClodWireframeOverlay {
   clear(): void {
     while (this.wireframeGroup.children.length > 0) {
       const child = this.wireframeGroup.children[0];
-      if (child instanceof THREE.LineSegments) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else {
-          child.material.dispose();
-        }
-      }
+      if (child instanceof THREE.LineSegments) child.geometry.dispose();
       this.wireframeGroup.remove(child);
     }
   }
 
   dispose(): void {
     this.clear();
+    for (const material of this.materials.values()) material.dispose();
+    this.materials.clear();
     this.scene.remove(this.wireframeGroup);
+  }
+
+  private materialFor(color: string): THREE.LineBasicMaterial {
+    const existing = this.materials.get(color);
+    if (existing) return existing;
+    const material = trackedLineBasicMaterial({ color: new THREE.Color(color), depthTest: true }, `clod-wireframe:${color}`);
+    this.materials.set(color, material);
+    return material;
   }
 }

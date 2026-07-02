@@ -7,6 +7,10 @@ import { computeGeometryNormals, toGeometry } from "../geometry/page_geometry.js
 import type { PageGeometryCache, PageGeometryNormalMode } from "../geometry/page_geometry_cache.js";
 import type { ClodPageNode } from "../../types.js";
 import type { ClodRenderNodeCacheConfig } from "./clod_render_node_cache_config.js";
+import {
+  applyMaterialIfChanged,
+  materialChurnDiagnostics,
+} from "../../rendering/material_churn/material_churn_diagnostics.js";
 
 export interface ClodRenderNodeCacheStats {
   enabled: boolean;
@@ -53,6 +57,8 @@ interface CacheEntry {
   view: ClodRenderNodeView;
   unsubscribeMaterial: () => void;
 }
+
+type RenderNodeDisposeReason = "dispose" | "evict" | "invalidate";
 
 export class ClodRenderNodeCache {
   private readonly deps: ClodRenderNodeCacheDeps;
@@ -133,44 +139,20 @@ export class ClodRenderNodeCache {
     while (inactive.length > config.maxInactiveNodes) {
       const view = inactive.shift();
       if (!view) return;
-      this.disposeNode(view.node.id, true);
+      this.disposeNodeInternal(view.node.id, "evict");
     }
   }
 
   invalidateNode(nodeId: string): void {
-    this.disposeNode(nodeId);
+    this.disposeNodeInternal(nodeId, "invalidate");
   }
 
   disposeNode(nodeId: string, evicted = false): void {
-    const entry = this.entries.get(nodeId);
-    if (!entry) return;
-    this.entries.delete(nodeId);
-    this.viewMap.delete(nodeId);
-    this.activeNodeIds.delete(nodeId);
-
-    const { view } = entry;
-    this.deps.scene.remove(view.mesh);
-    entry.unsubscribeMaterial();
-    const geometry = view.mesh.geometry as THREE.BufferGeometry;
-    if (this.deps.pageGeometryCache.owns(geometry)) {
-      this.deps.pageGeometryCache.setGeometryActive(geometry, false);
-      if (evicted && this.deps.config.evictGeometryWithRenderNode) {
-        this.deps.pageGeometryCache.invalidateNode(nodeId, { includeActive: true });
-      }
-    } else {
-      geometry.dispose();
-    }
-
-    if (view.mat !== this.deps.materialController.sharedMaterial) {
-      this.deps.materialController.materials.delete(view.mat);
-      view.mat.material.dispose();
-    }
-    this.statDisposals++;
-    if (evicted) this.statEvictions++;
+    this.disposeNodeInternal(nodeId, evicted ? "evict" : "dispose");
   }
 
   dispose(): void {
-    for (const nodeId of [...this.viewMap.keys()]) this.disposeNode(nodeId);
+    for (const nodeId of [...this.viewMap.keys()]) this.disposeNodeInternal(nodeId, "invalidate");
   }
 
   views(): Map<string, ClodRenderNodeView> {
@@ -193,6 +175,34 @@ export class ClodRenderNodeCache {
       evictions: this.statEvictions,
       prefetches: this.statPrefetches,
     };
+  }
+
+  private disposeNodeInternal(nodeId: string, reason: RenderNodeDisposeReason): void {
+    const entry = this.entries.get(nodeId);
+    if (!entry) return;
+    this.entries.delete(nodeId);
+    this.viewMap.delete(nodeId);
+    this.activeNodeIds.delete(nodeId);
+
+    const { view } = entry;
+    this.deps.scene.remove(view.mesh);
+    entry.unsubscribeMaterial();
+    const geometry = view.mesh.geometry as THREE.BufferGeometry;
+    if (this.deps.pageGeometryCache.owns(geometry)) {
+      this.deps.pageGeometryCache.setGeometryActive(geometry, false);
+      if (reason !== "dispose" && this.deps.config.evictGeometryWithRenderNode) {
+        this.deps.pageGeometryCache.invalidateNode(nodeId, { includeActive: true });
+      }
+    } else {
+      geometry.dispose();
+    }
+
+    if (view.mat !== this.deps.materialController.sharedMaterial) {
+      this.deps.materialController.materials.delete(view.mat);
+      view.mat.material.dispose();
+    }
+    this.statDisposals++;
+    if (reason === "evict") this.statEvictions++;
   }
 
   private createRenderNodeView(node: ClodPageNode, frameId: number): CacheEntry {
@@ -219,7 +229,13 @@ export class ClodRenderNodeCache {
     const mesh = new THREE.Mesh(geometry, mat.material);
     mesh.visible = false;
     const unsubscribeMaterial = mat.onMaterialChanged((material) => {
-      mesh.material = material;
+      applyMaterialIfChanged(
+        materialChurnDiagnostics,
+        node.id,
+        mesh,
+        material,
+        "terrain-material-handle-rebuild",
+      );
     });
     this.deps.scene.add(mesh);
 

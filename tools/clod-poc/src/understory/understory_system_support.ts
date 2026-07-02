@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { PageFootprint } from "../types.js";
 import { getDigEditRevision } from "../terrain/terrain.js";
+import type { VegetationTerrainRejectionReason } from "../vegetation/terrain_rejection_config.js";
 import type {
   UnderstoryClass,
   UnderstoryClassSettings,
@@ -94,6 +95,9 @@ export function mergeGenerationStats(target: UnderstoryGenerationStats, source: 
   target.acceptedFlower += source.acceptedFlower;
   target.acceptedDeadLog += source.acceptedDeadLog;
   target.acceptedStump += source.acceptedStump;
+  target.earlyTerrainRejectedPatches = (target.earlyTerrainRejectedPatches ?? 0) + (source.earlyTerrainRejectedPatches ?? 0);
+  target.earlyTerrainSkippedCandidates = (target.earlyTerrainSkippedCandidates ?? 0) + (source.earlyTerrainSkippedCandidates ?? 0);
+  mergeReasonCounts(target, source);
 }
 
 export function clampFootprint(footprint: PageFootprint, worldCells: number): PageFootprint {
@@ -120,6 +124,14 @@ export function footprintRadius(footprint: PageFootprint): number {
 export function distance2d(ax: number, az: number, bx: number, bz: number): number {
   if (Math.abs(ax - bx) < INSTANCE_ATTRIBUTE_EPSILON && Math.abs(az - bz) < INSTANCE_ATTRIBUTE_EPSILON) return 0;
   return Math.hypot(ax - bx, az - bz);
+}
+
+function mergeReasonCounts(target: UnderstoryGenerationStats, source: UnderstoryGenerationStats): void {
+  if (!source.earlyTerrainReasonCounts) return;
+  target.earlyTerrainReasonCounts ??= {};
+  for (const [reason, count] of Object.entries(source.earlyTerrainReasonCounts) as Array<[VegetationTerrainRejectionReason, number]>) {
+    target.earlyTerrainReasonCounts[reason] = (target.earlyTerrainReasonCounts[reason] ?? 0) + count;
+  }
 }
 
 function classKeyRow(cls: UnderstoryClassSettings): string {

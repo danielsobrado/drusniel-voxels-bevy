@@ -32,7 +32,7 @@ import {
 } from "../../cache/terrainSource.js";
 import { clearWorkerCacheSnapshot } from "../../cache/cacheMetricsBridge.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
-import { createBakedMacroTintTexture } from "../../gpu/terrain_node_material.js";
+import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
 import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "../../diagonalPolish.js";
 import { parseProceduralTextureConfig } from "../../textures/materialRecipes.js";
 import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
@@ -246,7 +246,17 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     forcedSplits: 0,
     blockedSplits: 0,
     bubbleForcedSplits: 0,
-    cutFrozen: false,
+    budgetBlockedSplits: 0,
+    seamProtectSplits: 0,
+    selectedNodes: 0,
+    selectedTriangles: 0,
+    lastFrameMs: 0,
+    maxSplitsPerFrame: cfg.selection.max_splits_per_frame,
+    maxUploadsPerFrame: 0,
+    maxGpuBytes: 0,
+    residentGpuBytes: 0,
+    uploadedThisFrame: 0,
+    minDelayMs: 0,
     errorThreshold: cfg.selection.error_threshold_px,
     buildStatus: buildStatus.value,
   });

@@ -25,15 +25,13 @@ import {
   clearDigEdits,
   DIG_INFLUENCE_MARGIN,
   getDigEditsSnapshot,
-  PAINT_BLEND_CHANNELS,
-  paintWeightsAt,
   replaceDigEdits,
   type DigEdit,
 } from "../terrain/terrain.js";
 import { TerrainColliderSet } from "../terrain/terrain_collider.js";
 import { parseProceduralTextureConfig } from "../textures/materialRecipes.js";
 import { createProceduralTerrainTextures } from "../textures/terrainTextureArrays.js";
-import type { ClodPageNode, PageMesh } from "../types.js";
+import type { ClodPageNode } from "../types.js";
 import configText from "../../config/clod_pages.yaml?raw";
 import proceduralConfigText from "../../config/procedural_textures.yaml?raw";
 import {
@@ -43,82 +41,21 @@ import {
   GRASS_V2_MID_DISTANCE_FRACTION,
   GRASS_V2_NEAR_DISTANCE_FRACTION,
 } from "./grass_node_material.js";
-import { WebGpuPostProcessPipeline } from "./webgpu_postprocess.js";
+import { createSkyNodeMaterial } from "./sky_node_material.js";
 import {
   createTerrainNodeMaterial,
   type TerrainNodeMaterialHandle,
 } from "./terrain_node_material.js";
-import { createSkyNodeMaterial } from "./sky_node_material.js";
-import { biomeIdsFor } from "../terrain/geometry/page_geometry.js";
-
-interface PaintAttributeCache {
-  slots: Float32Array;
-  weights: Float32Array;
-}
-
-const paintAttributeCache = new WeakMap<PageMesh, PaintAttributeCache>();
-
-function paintAttributesFor(mesh: PageMesh): PaintAttributeCache {
-  const cached = paintAttributeCache.get(mesh);
-  if (cached) return cached;
-  const vertexCount = mesh.positions.length / 3;
-  const slots = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
-  const weights = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
-  for (let i = 0; i < vertexCount; i++) {
-    const p = paintWeightsAt(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]);
-    for (let c = 0; c < PAINT_BLEND_CHANNELS; c++) {
-      slots[i * PAINT_BLEND_CHANNELS + c] = p.slots[c];
-      weights[i * PAINT_BLEND_CHANNELS + c] = p.weights[c];
-    }
-  }
-  const built = { slots, weights };
-  paintAttributeCache.set(mesh, built);
-  return built;
-}
-
-function terrainGeometry(node: ClodPageNode): THREE.BufferGeometry {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(node.mesh.positions, 3));
-  g.setAttribute("normal", new THREE.BufferAttribute(node.mesh.normals, 3));
-  const { slots: paintSlots, weights: paintWeights } = paintAttributesFor(node.mesh);
-  g.setAttribute("paintSlots", new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS));
-  g.setAttribute("paintWeights", new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS));
-  g.setAttribute("biomeId", new THREE.BufferAttribute(biomeIdsFor(node.mesh), 1));
-  g.setIndex(new THREE.BufferAttribute(node.mesh.indices, 1));
-  return g;
-}
-
-// The preview short-circuits main(), so the app's UI shell never initializes and would sit
-// frozen at "building…"/"preparing". Hide the chrome; only the canvas + preview overlay show.
-function hideAppChrome(): void {
-  for (const id of [
-    "clod-left-stack",
-    "project-toolbar",
-    "player-mode-bar",
-    "crosshair",
-    "terraform-menu",
-    "build-progress",
-  ]) {
-    document.getElementById(id)?.style.setProperty("display", "none");
-  }
-}
-
-function makeOverlay(): HTMLDivElement {
-  const el = document.createElement("div");
-  el.style.cssText =
-    "position:fixed;top:8px;left:8px;z-index:10;font:12px/1.4 monospace;" +
-    "color:#cde;background:rgba(0,0,0,0.55);padding:8px 10px;border-radius:6px;white-space:pre";
-  document.body.appendChild(el);
-  return el;
-}
+import { terrainGeometry } from "./webgpu_preview_geometry.js";
+import { hideWebGpuPreviewAppChrome, makeWebGpuPreviewOverlay } from "./webgpu_preview_ui.js";
+import { WebGpuPostProcessPipeline } from "./webgpu_postprocess.js";
+import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<void> {
-  hideAppChrome();
-  const overlay = makeOverlay();
+  hideWebGpuPreviewAppChrome();
+  const overlay = makeWebGpuPreviewOverlay();
   overlay.textContent = "WebGPU CLOD preview: building world…";
 
-  // Synchronous main-thread build, so keep the world small. buildWorld -> simplifyPage
-  // needs the meshoptimizer WASM ready (the worker path does this before building).
   await initSimplifier();
   clearDigEdits();
   const cfg = parseConfig(configText);
@@ -150,17 +87,12 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-
-  // Sky dome (Phase 3): follows the camera, drawn first; also yields the sun/sky/ground
-  // lighting used to light the terrain so both agree.
   const sky = createSkyNodeMaterial();
   const skyDome = new THREE.Mesh(new THREE.SphereGeometry(4000, 48, 24), sky.material);
   skyDome.frustumCulled = false;
   skyDome.renderOrder = -1000;
   scene.add(skyDome);
 
-  // Optional texture-array path (?tex=1): use the same generated procedural terrain
-  // texture arrays and height bands as the normal WebGL app's procedural material source.
   const useTextures = searchParams.get("tex") === "1";
   const useNormalMaps = useTextures && searchParams.get("normal") === "1";
   const useTextureParity = useTextures && searchParams.get("texParity") === "1";
@@ -174,7 +106,6 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
     heightMax: slot.heightMax,
   })) ?? [];
   const terrainMaterialOptions = {
-    // Light the terrain with the sky's sun/sky/ground so the two agree.
     lighting: {
       lightDir: sky.lighting.sunDirection,
       sunColor: sky.lighting.sunColor,
@@ -212,13 +143,9 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
     target: number;
   }
 
-  // LOD cross-fade needs a per-view uFade uniform, so each view gets its own material then.
-  // With fades off (the default) every view can share one material — far fewer node-graph
-  // pipeline compilations and much less GPU memory when the cut is large.
   const useLodFade = searchParams.get("lodFade") === "1";
   let sharedTerrainMaterial: TerrainNodeMaterialHandle | null = null;
 
-  // Lazily realise one mesh per node. Visibility is driven by the cut.
   const views = new Map<string, TerrainView>();
   const viewFor = (node: ClodPageNode): TerrainView => {
     let view = views.get(node.id);
@@ -243,10 +170,6 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
 
   const worldCells = world * cfg.page.chunks_per_page * cfg.page.chunk_size;
   const mid = worldCells / 2;
-
-  // Optional grass (?grass=1): blades placed on LOD0 footprints (reusing the app's
-  // generateGrassInstances), rendered with the ported instanced grass NodeMaterial. Classic
-  // remains the default; `grassMode=v2` opts into terrain-patch-v2 for QA.
   const useGrass = searchParams.get("grass") === "1";
   const useGrassV2 = useGrass && searchParams.get("grassMode") === "v2";
   const useGrassAlphaToCoverage = useGrassV2 && searchParams.get("grassA2C") === "1";
@@ -330,7 +253,6 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
     }
   };
 
-  // Optional stones (?stones=1): boot-scattered GPU storage instances plus indirect draws.
   const useStones = searchParams.get("stones") === "1";
   let stones: StoneSystem | null = null;
   if (useStones) {
@@ -392,12 +314,12 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
   let lastDigSummary = "";
   const digPreview = new THREE.Mesh(
     new THREE.SphereGeometry(1, 24, 16),
-    new THREE.MeshBasicMaterial({
+    trackedMeshBasicMaterial({
       color: digOp === "add" ? 0x66cc55 : 0xff5533,
       transparent: true,
       opacity: 0.28,
       depthWrite: false,
-    }),
+    }, "webgpu-preview-dig-preview"),
   );
   digPreview.visible = false;
   digPreview.frustumCulled = false;
@@ -458,8 +380,6 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
         replaceNodeGeometry(node);
         if (node.level === 0) terrainColliders.updatePage(node.id, node.mesh);
       }
-      // Stones are not re-scattered here: a full StoneSystem.rebuild() re-scatters the whole
-      // world (cost ∝ total stones) for a local edit. They stay on the pre-edit surface.
       updateSelection();
       editCount++;
       lastDigSummary =
@@ -542,6 +462,8 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
       if (!useLodFade) view.mesh.visible = false;
     }
     visibleIds = nextVisible;
+    renderedCount = rendered.length;
+    levelSummary = [...perLevel.entries()].map(([level, count]) => `L${level}:${count}`).join(" ");
   };
 
   updateSelection();

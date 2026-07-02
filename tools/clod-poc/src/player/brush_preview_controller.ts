@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { BrushOp, BrushShape } from "../terrain/terrain.js";
 import type { TerrainSurfaceHit } from "../terrain/terrain_collider.js";
 import type { PlayerInteractionMode } from "../player_controller.js";
+import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 export interface BrushPreviewController {
   readonly mesh: THREE.Mesh;
@@ -28,7 +29,7 @@ export function createBrushPreviewController(scene: THREE.Scene): BrushPreviewCo
   };
   const mesh = new THREE.Mesh(
     brushPreviewGeometries.sphere,
-    new THREE.MeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.28, depthWrite: false }),
+    trackedMeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.28, depthWrite: false }, "brush-preview"),
   );
   mesh.visible = false;
   scene.add(mesh);

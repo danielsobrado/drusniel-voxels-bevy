@@ -22,12 +22,13 @@ import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/l
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import { applyOwnershipToFarShellRange, resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
 import { FloatingOriginController } from "../../precision/floating_origin.js";
-import { createBakedMacroTintTexture } from "../../gpu/terrain_node_material.js";
+import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
 import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
 import { createBiomeTextureStreamingManager } from "../../textures/biome_texture_streaming_manager.js";
 import * as THREE from "three";
 import { booleanQueryParam, positiveNumberQueryParam } from "./bootstrap_query_params.js";
 import { applyLongViewScenePreset, isLongViewCapableScene } from "./bootstrap_long_view.js";
+import { materialChurnDiagnostics } from "../../rendering/material_churn/material_churn_diagnostics.js";
 
 export async function bootstrapClodPoc() {
   const searchParams = new URLSearchParams(location.search);
@@ -35,6 +36,7 @@ export async function bootstrapClodPoc() {
 
   installGlobalErrorHooks();
   const clodRuntime = parseClodRuntimeConfig();
+  materialChurnDiagnostics.configure(clodRuntime.materialChurn);
   const dom = initDomShell();
   runContentRegistryStartup(dom.info);
 

@@ -7,10 +7,15 @@ import {
   type UnderstoryGeometryMap,
 } from "./understory_geometry.js";
 import {
+  defaultUnderstoryTerrainSampler,
   emptyUnderstoryGenerationStats,
   generateUnderstoryInstances,
   type UnderstoryTerrainSampler,
 } from "./understory_instances.js";
+import {
+  recordUnderstoryEarlyRejection,
+  rejectUnderstoryPatchBeforeGeneration,
+} from "./understory_patch_terrain_rejection.js";
 import { createUnderstoryMaterialHandle, type UnderstoryMaterialHandle } from "./understory_material.js";
 import { createUnderstoryNodeMaterialHandle } from "./understory_node_material.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
@@ -50,14 +55,11 @@ export interface UnderstorySystemOptions {
   worldCells: number;
   settings: UnderstorySettings;
   sampler?: UnderstoryTerrainSampler;
-  /** Use the WebGPU node material path instead of the classic WebGL material. */
   webgpu?: boolean;
-  /** Initial lighting for the WebGPU node material path. */
   lighting?: EnvironmentLighting;
   gpuDevice?: GPUDevice | null;
   gpuBackend?: UnderstoryWebGpuBackendAccess | null;
   supportsGpu?: boolean;
-  /** Hydrology water-surface data (R=waterY, G=wetMask, B=carvedBed). When set, GPU understory uses carved-bed height and rejects water bodies. */
   hydrologyData?: UnderstoryHydrologyData | null;
   hydrologyWaterTexture?: THREE.Texture | null;
 }
@@ -81,10 +83,12 @@ export class UnderstorySystem {
   private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   private readonly lastCenter: THREE.Vector3;
   private stats: UnderstoryStats = emptyUnderstoryStats();
+  private readonly earlyGenerationStats = emptyUnderstoryGenerationStats();
   private readonly gpuDevice: GPUDevice | null;
   private readonly gpuBackend: UnderstoryWebGpuBackendAccess | null;
   private readonly supportsGpu: boolean;
   private readonly gpuRingUnsupportedReason: string | null;
+  private currentLighting: EnvironmentLighting | undefined;
   private gpuStatus: UnderstoryStats["gpuStatus"] = "disabled";
   private gpuVisibleCount = 0;
   private gpuOverflowed = false;
@@ -122,6 +126,7 @@ export class UnderstorySystem {
     this.gpuDevice = options.gpuDevice ?? null;
     this.gpuBackend = options.gpuBackend ?? null;
     this.supportsGpu = options.supportsGpu ?? !!this.gpuDevice;
+    this.currentLighting = options.lighting;
     this.hydrologyData = options.hydrologyData ?? null;
     this.hydrologyWaterTexture = options.hydrologyWaterTexture ?? null;
     this.gpuRingUnsupportedReason = this.gpuDevice
@@ -242,13 +247,10 @@ export class UnderstorySystem {
     this.root.visible = this.settings.enabled;
   }
 
-  /** Schedule deferred re-scatter on the next update cycle. */
   markPatchesDirty(): void {
     this.patchesDirty = true;
   }
 
-  /** Remove patches for edited LOD0 nodes (fast path — no re-scatter).
-   *  Caller must trigger refreshForCenter later. */
   removePatchesForNodes(nodeIds: Iterable<string>): void {
     const ids = new Set(nodeIds);
     if (ids.size === 0) return;
@@ -286,6 +288,7 @@ export class UnderstorySystem {
   }
 
   updateLighting(lighting: EnvironmentLighting): void {
+    this.currentLighting = lighting;
     this.materialHandle.updateLighting?.(lighting);
     for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
       handle.updateLighting?.(lighting);
@@ -319,7 +322,12 @@ export class UnderstorySystem {
     this.clearGpuRingDraw();
     this.gpuRingKey = key;
     this.gpuRingDraw = createGpuRingDrawResources(
-      this.settings, this.worldCells, this.gpuBackend, undefined, this.hydrologyData, this.hydrologyWaterTexture,
+      this.settings,
+      this.worldCells,
+      this.gpuBackend,
+      this.currentLighting,
+      this.hydrologyData,
+      this.hydrologyWaterTexture,
     );
     for (const mesh of this.gpuRingDraw.meshes) {
       mesh.visible = false;
@@ -518,17 +526,34 @@ export class UnderstorySystem {
       .map((node) => ({ node, distance: distance2d(center.x, center.z, footprintCenterX(node.footprint), footprintCenterZ(node.footprint)) }))
       .filter(({ node, distance: d }) => d <= distance + footprintRadius(node.footprint))
       .sort((a, b) => a.distance - b.distance);
+
     let totalInstances = this.patches.reduce((sum, patch) => sum + patch.instances.length, 0);
     let added = 0;
+    let deferred = false;
     for (const { node } of candidates) {
-      if (added >= this.settings.maxNewPatchesPerFrame || totalInstances >= this.settings.maxInstances) break;
+      if (totalInstances >= this.settings.maxInstances) break;
+      if (added >= this.settings.maxNewPatchesPerFrame) {
+        deferred = true;
+        break;
+      }
+      const footprint = clampFootprint(node.footprint, this.worldCells);
+      const rejection = rejectUnderstoryPatchBeforeGeneration(
+        footprint,
+        this.settings,
+        this.sampler ?? defaultUnderstoryTerrainSampler,
+        this.worldCells,
+      );
+      if (rejection.reject) {
+        recordUnderstoryEarlyRejection(this.earlyGenerationStats, rejection);
+        continue;
+      }
       const patch = this.createPatch(node, this.settings.maxInstances - totalInstances);
       totalInstances += patch.instances.length;
       this.patches.push(patch);
       this.root.add(patch.group);
       added++;
     }
-    if (added < candidates.length) this.patchesDirty = true;
+    this.patchesDirty = deferred;
     this.updatePatchVisibility(center);
   }
 
@@ -630,6 +655,7 @@ export class UnderstorySystem {
   private clearPatches(): void {
     for (const patch of this.patches) this.removePatch(patch);
     this.patches = [];
+    Object.assign(this.earlyGenerationStats, emptyUnderstoryGenerationStats());
     this.updateStats();
   }
 
@@ -676,6 +702,7 @@ export class UnderstorySystem {
       stats.generatedCandidates = this.gpuRingStats.candidateCount;
       stats.acceptedCandidates = this.gpuRingStats.acceptedCandidates || this.gpuVisibleCount;
     } else {
+      mergeGenerationStats(stats, this.earlyGenerationStats);
       for (const patch of this.patches) {
         stats.totalInstances += patch.instances.length;
         stats.patches++;

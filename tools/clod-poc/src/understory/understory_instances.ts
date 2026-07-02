@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { terrainWeights, surfaceHeight, surfaceNormal } from "../terrain/terrain.js";
 import type { PageFootprint } from "../types.js";
+import type { VegetationTerrainRejectionReason } from "../vegetation/terrain_rejection_config.js";
 import {
   UNDERSTORY_CLASSES,
   type UnderstoryClass,
@@ -46,6 +47,9 @@ export interface UnderstoryGenerationStats {
   acceptedFlower: number;
   acceptedDeadLog: number;
   acceptedStump: number;
+  earlyTerrainRejectedPatches?: number;
+  earlyTerrainSkippedCandidates?: number;
+  earlyTerrainReasonCounts?: Partial<Record<VegetationTerrainRejectionReason, number>>;
 }
 
 export const defaultUnderstoryTerrainSampler: UnderstoryTerrainSampler = {

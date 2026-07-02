@@ -5,12 +5,15 @@ import { createTreeSystemGpuRingDrawResources } from "./tree_system_gpu_ring_res
 import { clearTreeGpuRing } from "./tree_system_gpu_ring_runtime.js";
 import { buildTreeRuntimeStats } from "./tree_system_runtime_stats.js";
 import type { TreeSystem } from "./tree_system_runtime.js";
+import { treeLodWithinDepthPrepass } from "./tree_depth_prepass_runtime.js";
 
 export function treeCpuPatchInput(self: TreeSystem) {
   return {
     root: self.root, nodes: self.nodes, patches: self.patches,
     settings: self.settings, sampler: self.sampler,
-    terrainOcclusionSampler: self.terrainOcclusionSampler, worldCells: self.worldCells,
+    terrainOcclusionSampler: self.terrainOcclusionSampler,
+    earlyTerrainRejectionStats: self.earlyTerrainRejectionStats,
+    worldCells: self.worldCells,
     meshBoundsState: self.meshBoundsState,
     impostorAtlases: self.assets.impostorAtlases,
     geometryFor: (s: TreeSpeciesId, l: TreeLod) => self.assets.geometryFor(s, l),
@@ -18,7 +21,9 @@ export function treeCpuPatchInput(self: TreeSystem) {
     castsShadow: (l: TreeLod) => treeLodCastsShadow(self.settings, l),
     resolveLod: (s: TreeSpeciesId, l: TreeLod) => resolveTreeSystemLod({ species: s, lod: l, settings: self.settings, impostorAtlases: self.assets.impostorAtlases }),
     prepassNodesFor: self.useCpuTreePrepass
-      ? (_s: TreeSpeciesId, l: TreeLod) => (l === "impostor" ? undefined : self.assets.materialHandle.prepassNodesFor?.(l))
+      ? (_s: TreeSpeciesId, l: TreeLod) => treeLodWithinDepthPrepass(self.treePrepassMaxLod, l)
+        ? self.assets.materialHandle.prepassNodesFor?.(l)
+        : undefined
       : undefined,
   };
 }
@@ -44,6 +49,7 @@ export function treeCreateGpuRingResources(self: TreeSystem, maxInstancesPerGrou
     hydrologyWater: self.hydrologyWater, impostorAtlases: self.assets.impostorAtlases,
     crownProxyGeometry: self.assets.crownProxyGeometry,
     useTreePrepass: self.useTreePrepass,
+    treePrepassMaxLod: self.treePrepassMaxLod,
     geometryForGpuRing: (s, l) => self.assets.geometryForGpuRing(s, l),
   }, maxInstancesPerGroup);
 }
@@ -58,5 +64,6 @@ export function treeUpdateStats(self: TreeSystem): void {
     lodCounts: self.lodCounts, reportsGpuRingStats: true,
     gpuRing: self.gpuRing, debugShowGpuCounts: self.settings.gpu.debugShowGpuCounts,
     impostorStatus: self.assets.impostorStatus, impostorReason: self.assets.impostorReason,
+    earlyTerrainRejectionStats: self.earlyTerrainRejectionStats,
   });
 }

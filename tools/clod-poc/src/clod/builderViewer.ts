@@ -9,6 +9,11 @@ import { formatBuildStats } from "./stats.js";
 import { buildDebugSummary } from "./debugExport.js";
 import configText from "../../config/clod_pages.yaml?raw";
 import { buildOuterBorderLocks } from "../lock.js";
+import {
+  trackedLineBasicMaterial,
+  trackedMeshStandardMaterial,
+  trackedPointsMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 function heightfieldPageMesh(fixture: FixtureDef, pageX: number, pageZ: number, cellsPerSide: number) {
   const baseX = pageX * cellsPerSide;
@@ -128,8 +133,8 @@ export async function runBuilderViewer(): Promise<void> {
 
   function rebuild(): void {
     for (const m of meshes) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
-    for (const h of boundsHelpers) h.geometry.dispose();
-    for (const h of lockHelpers) h.geometry.dispose();
+    for (const h of boundsHelpers) { h.geometry.dispose(); (h.material as THREE.Material).dispose(); }
+    for (const h of lockHelpers) { h.geometry.dispose(); (h.material as THREE.Material).dispose(); }
     meshes = [];
     boundsHelpers = [];
     lockHelpers = [];
@@ -160,14 +165,14 @@ export async function runBuilderViewer(): Promise<void> {
         geom.setIndex(new THREE.BufferAttribute(node.mesh.indices.slice(), 1));
 
         const color = LOD_COLORS[node.level % LOD_COLORS.length];
-        const mat = new THREE.MeshStandardMaterial({
+        const mat = trackedMeshStandardMaterial({
           color,
           flatShading: true,
           wireframe: state.wireframe,
           transparent: true,
           opacity: 0.85,
           side: THREE.DoubleSide,
-        });
+        }, `builder-viewer-lod:${node.level}`);
         const mesh = new THREE.Mesh(geom, mat);
         mesh.name = node.id;
         meshes.push(mesh);
@@ -184,7 +189,10 @@ export async function runBuilderViewer(): Promise<void> {
             new THREE.Vector3(f.minX, y, f.minZ),
           ];
           const bg = new THREE.BufferGeometry().setFromPoints(pts);
-          const bl = new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: 0xffff00, depthTest: false }));
+          const bl = new THREE.LineSegments(
+            bg,
+            trackedLineBasicMaterial({ color: 0xffff00, depthTest: false }, "builder-viewer-page-bounds"),
+          );
           boundsHelpers.push(bl);
           scene.add(bl);
         }
@@ -200,7 +208,10 @@ export async function runBuilderViewer(): Promise<void> {
           if (lockPositions.length > 0) {
             const lg = new THREE.BufferGeometry();
             lg.setAttribute("position", new THREE.Float32BufferAttribute(lockPositions, 3));
-            const lp = new THREE.Points(lg, new THREE.PointsMaterial({ color: 0xff0000, size: 0.3, depthTest: false }));
+            const lp = new THREE.Points(
+              lg,
+              trackedPointsMaterial({ color: 0xff0000, size: 0.3, depthTest: false }, "builder-viewer-locked-border"),
+            );
             lockHelpers.push(lp);
             scene.add(lp);
           }

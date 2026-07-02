@@ -46,6 +46,17 @@ if (typeof globalThis.GPUTextureUsage === "undefined") {
   };
 }
 
+function withGpuReadbacks(search: string, run: () => void): void {
+  const root = globalThis as typeof globalThis & { window?: { location?: { search?: string } } };
+  const previous = root.window;
+  root.window = { location: { search } };
+  try {
+    run();
+  } finally {
+    root.window = previous;
+  }
+}
+
 describe("understory GPU ring compute helpers", () => {
   it("derives a stable slot grid from the understory spacing", () => {
     const grid = understoryRingGrid(DEFAULT_UNDERSTORY_SETTINGS);
@@ -80,7 +91,16 @@ describe("understory GPU ring compute helpers", () => {
 });
 
 describe("understory ring debug readback gating", () => {
-  it("gates periodic debug counter readback behind readbackVisibleLists and debug consumers", () => {
+  it("keeps periodic debug counter readback off by default", () => {
+    const enabled = {
+      ...DEFAULT_UNDERSTORY_SETTINGS,
+      gpu: { ...DEFAULT_UNDERSTORY_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: true },
+    };
+
+    expect(understoryRingRequestsDebugReadback(enabled, 0)).toBe(false);
+  });
+
+  it("gates periodic debug counter readback behind policy, readbackVisibleLists, and debug consumers", () => {
     const enabled = {
       ...DEFAULT_UNDERSTORY_SETTINGS,
       gpu: { ...DEFAULT_UNDERSTORY_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: true },
@@ -103,11 +123,13 @@ describe("understory ring debug readback gating", () => {
       },
     };
 
-    expect(understoryRingRequestsDebugReadback(enabled, 0)).toBe(true);
-    expect(understoryRingRequestsDebugReadback(enabled, 1)).toBe(false);
-    expect(understoryRingRequestsDebugReadback(noReadback, 0)).toBe(false);
-    expect(understoryRingRequestsDebugReadback(hiddenCounts, 0)).toBe(false);
-    expect(understoryRingRequestsDebugReadback(validateOnly, 0)).toBe(true);
+    withGpuReadbacks("?gpuReadbacks=debug", () => {
+      expect(understoryRingRequestsDebugReadback(enabled, 0)).toBe(true);
+      expect(understoryRingRequestsDebugReadback(enabled, 1)).toBe(false);
+      expect(understoryRingRequestsDebugReadback(noReadback, 0)).toBe(false);
+      expect(understoryRingRequestsDebugReadback(hiddenCounts, 0)).toBe(false);
+      expect(understoryRingRequestsDebugReadback(validateOnly, 0)).toBe(true);
+    });
   });
 });
 
@@ -150,10 +172,8 @@ describe("understory ring param packing", () => {
     expect(u32[25]).toBe(understoryRingGrid(s));
     expect(u32[26]).toBe(4242);
     expect(u32[27]).toBe(UNDERSTORY_RING_GROUP_COUNT);
-    // lane 7: counts 4 and 5 (dead_log, stump)
     expect(u32[28]).toBe(12);
     expect(u32[29]).toBe(12);
-    // lane 8: counts 0..3 (shrub, fern, sapling, flower)
     expect(u32[32]).toBe(36);
     expect(u32[33]).toBe(48);
     expect(u32[34]).toBe(60);
@@ -316,7 +336,7 @@ describe("UnderstoryGpuRingCompute.create", () => {
 });
 
 describe("UnderstoryGpuRingCompute.dispatch", () => {
-  it("transitions stats from idle to running after dispatch", async () => {
+  it("keeps stats ready after dispatch when normal-mode readbacks are disabled", async () => {
     const device = createMockGpuDevice();
     const outputBuffers: UnderstoryGpuRingOutputBuffers = {
       cell: device.createBuffer({} as GPUBufferDescriptor),
@@ -335,7 +355,7 @@ describe("UnderstoryGpuRingCompute.dispatch", () => {
     });
     expect(dispatched).toBe(true);
     const stats = compute.stats(true);
-    expect(stats.status).toBe("running");
+    expect(stats.status).toBe("ready");
     expect(stats.submitMs).toBeGreaterThanOrEqual(0);
     compute.destroy();
   });
@@ -386,25 +406,5 @@ describe("understory ring class base offset contract", () => {
       const offset = understoryRingClassBaseOffset(group, capacity);
       expect(offset).toBe(group * capacity);
     }
-  });
-
-  it("class base offset regions are contiguous and non-overlapping", () => {
-    const capacity = 1500;
-    for (let group = 0; group < UNDERSTORY_RING_GROUP_COUNT; group++) {
-      const start = understoryRingClassBaseOffset(group, capacity);
-      const end = start + capacity;
-      if (group > 0) {
-        const prevEnd = understoryRingClassBaseOffset(group - 1, capacity) + capacity;
-        expect(start).toBe(prevEnd);
-      }
-      expect(end - start).toBe(capacity);
-    }
-  });
-
-  it("total shared buffer size covers all groups", () => {
-    const capacity = 2000;
-    const totalExpected = UNDERSTORY_RING_GROUP_COUNT * capacity;
-    const lastOffset = understoryRingClassBaseOffset(UNDERSTORY_RING_GROUP_COUNT - 1, capacity);
-    expect(lastOffset + capacity).toBe(totalExpected);
   });
 });

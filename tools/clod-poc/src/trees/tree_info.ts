@@ -92,7 +92,24 @@ function formatTreeTotal(totalTrees: TreeTotalDisplay): string {
 }
 
 function formatTreeTerrainPatchStats(treeStats: TreeStats): string {
-  return treeStats.terrainOccludedPatches > 0 ? ` terrainOccPatches=${treeStats.terrainOccludedPatches}` : "";
+  const late = treeStats.terrainOccludedPatches > 0 ? ` terrainOccPatches=${treeStats.terrainOccludedPatches}` : "";
+  const early = treeStats.earlyTerrainRejectedPatches > 0
+    ? ` earlyTerrainReject=${treeStats.earlyTerrainRejectedPatches}` +
+      ` skippedCandidates=${treeStats.earlyTerrainSkippedCandidates}` +
+      formatTreeEarlyTerrainReasonStats(treeStats)
+    : "";
+  return `${late}${early}`;
+}
+
+function formatTreeEarlyTerrainReasonStats(treeStats: TreeStats): string {
+  const parts: string[] = [];
+  if (treeStats.earlyTerrainHiddenPatches > 0) parts.push(`hidden=${treeStats.earlyTerrainHiddenPatches}`);
+  if (treeStats.earlyTerrainWaterPatches > 0) parts.push(`water=${treeStats.earlyTerrainWaterPatches}`);
+  if (treeStats.earlyTerrainBiomePatches > 0) parts.push(`biome=${treeStats.earlyTerrainBiomePatches}`);
+  if (treeStats.earlyTerrainSteepPatches > 0) parts.push(`steep=${treeStats.earlyTerrainSteepPatches}`);
+  if (treeStats.earlyTerrainHeightPatches > 0) parts.push(`height=${treeStats.earlyTerrainHeightPatches}`);
+  if (treeStats.earlyTerrainOutsidePatches > 0) parts.push(`outside=${treeStats.earlyTerrainOutsidePatches}`);
+  return parts.length > 0 ? ` reasons(${parts.join(",")})` : "";
 }
 
 function formatTreeImpostorStatus(treeStats: TreeStats): string {

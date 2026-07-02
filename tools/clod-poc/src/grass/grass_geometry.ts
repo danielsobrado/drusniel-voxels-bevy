@@ -3,6 +3,7 @@ import type { GrassLighting, GrassSettings, GrassShaderMode, GrassTier } from ".
 import type { GrassRingInstanceBuffers } from "./grass_gpu_ring.js";
 import { grassFadeDistance } from "./grass_math.js";
 import { grassShaderDefinition } from "./grass_geometry_shaders.js";
+import { trackedShaderMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 export type { GrassShaderDefinition } from "./grass_geometry_shaders.js";
 export { grassShaderDefinition } from "./grass_geometry_shaders.js";
@@ -42,7 +43,7 @@ export function createGrassMaterial(
 ): THREE.ShaderMaterial {
   const shader = grassShaderDefinition(shaderMode);
   const useAlphaToCoverage = shader.patchStyle === "terrain-patch" && settings.alphaToCoverage;
-  return new THREE.ShaderMaterial({
+  return trackedShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
       uBladeWidth: { value: settings.bladeWidth },
@@ -65,7 +66,7 @@ export function createGrassMaterial(
     depthWrite: true,
     alphaToCoverage: useAlphaToCoverage,
     toneMapped: true,
-  });
+  }, `grass-shader-material:${shaderMode}`);
 }
 
 export function cloneLighting(lighting: GrassLighting): GrassLighting {

@@ -2,6 +2,7 @@ import type { TreeLod } from "./tree_config.js";
 import type { TreeGenerationStats } from "./tree_instances.js";
 import type { TreeHeroFidelityStats } from "./tree_hero_fidelity.js";
 import { createEmptyTreeHeroFidelityStats } from "./tree_hero_fidelity.js";
+import type { TreeEarlyTerrainRejectionStats } from "./tree_patch_terrain_rejection.js";
 import { visibleTreeLodCount } from "./tree_system_math.js";
 
 export type TreeSystemGpuStatus = "disabled" | "unsupported" | "ring" | "fallback-cpu" | "error";
@@ -19,6 +20,19 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   visiblePatches: number;
   culledPatches: number;
   terrainOccludedPatches: number;
+  earlyTerrainTestedPatches: number;
+  earlyTerrainRejectedPatches: number;
+  earlyTerrainAcceptedPatches: number;
+  earlyTerrainUnknownKeptPatches: number;
+  earlyTerrainSkippedCandidates: number;
+  earlyTerrainCacheHits: number;
+  earlyTerrainCacheMisses: number;
+  earlyTerrainHiddenPatches: number;
+  earlyTerrainWaterPatches: number;
+  earlyTerrainBiomePatches: number;
+  earlyTerrainSteepPatches: number;
+  earlyTerrainHeightPatches: number;
+  earlyTerrainOutsidePatches: number;
   nearTrees: number;
   midTrees: number;
   farTrees: number;
@@ -80,6 +94,7 @@ export interface BuildTreeSystemStatsInput {
   gpuShowCounts: boolean;
   impostorStatus: TreeSystemImpostorStatus;
   impostorReason: string | null;
+  earlyTerrainRejectionStats?: TreeEarlyTerrainRejectionStats;
 }
 
 export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
@@ -89,6 +104,19 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     visiblePatches: 0,
     culledPatches: 0,
     terrainOccludedPatches: 0,
+    earlyTerrainTestedPatches: 0,
+    earlyTerrainRejectedPatches: 0,
+    earlyTerrainAcceptedPatches: 0,
+    earlyTerrainUnknownKeptPatches: 0,
+    earlyTerrainSkippedCandidates: 0,
+    earlyTerrainCacheHits: 0,
+    earlyTerrainCacheMisses: 0,
+    earlyTerrainHiddenPatches: 0,
+    earlyTerrainWaterPatches: 0,
+    earlyTerrainBiomePatches: 0,
+    earlyTerrainSteepPatches: 0,
+    earlyTerrainHeightPatches: 0,
+    earlyTerrainOutsidePatches: 0,
     nearTrees: 0,
     midTrees: 0,
     farTrees: 0,
@@ -144,6 +172,23 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
       stats.rejectedHeight += patch.generationStats.rejectedHeight;
       stats.rejectedMaterial += patch.generationStats.rejectedMaterial;
     }
+  }
+
+  if (!input.gpuRing && input.earlyTerrainRejectionStats) {
+    const early = input.earlyTerrainRejectionStats;
+    stats.earlyTerrainTestedPatches = early.testedPatches;
+    stats.earlyTerrainRejectedPatches = early.rejectedPatches;
+    stats.earlyTerrainAcceptedPatches = early.acceptedPatches;
+    stats.earlyTerrainUnknownKeptPatches = early.unknownKeptPatches;
+    stats.earlyTerrainSkippedCandidates = early.skippedCandidateEstimate;
+    stats.earlyTerrainCacheHits = early.cacheHits;
+    stats.earlyTerrainCacheMisses = early.cacheMisses;
+    stats.earlyTerrainHiddenPatches = early.reasonCounts.terrain_hidden ?? 0;
+    stats.earlyTerrainWaterPatches = early.reasonCounts.below_water ?? 0;
+    stats.earlyTerrainBiomePatches = early.reasonCounts.wrong_biome ?? 0;
+    stats.earlyTerrainSteepPatches = early.reasonCounts.too_steep ?? 0;
+    stats.earlyTerrainHeightPatches = early.reasonCounts.height_range ?? 0;
+    stats.earlyTerrainOutsidePatches = early.reasonCounts.outside_world ?? 0;
   }
 
   stats.nearTrees = input.lodCounts.near;

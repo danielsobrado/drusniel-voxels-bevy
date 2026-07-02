@@ -1,5 +1,6 @@
 import shaderSource from "./shaders/prop_ring.compute.wgsl?raw";
 import type { CustomPropsSettings } from "../props/prop_types.js";
+import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 
 const INDIRECT_ARGS_PER_GROUP = 5;
 const PARAM_BYTES = 16 * 9;
@@ -17,42 +18,11 @@ export interface PropGpuRingSourceData {
   groupCount: number;
 }
 
-export interface PropGpuRingOutputBuffers {
-  instanceA: GPUBuffer;
-  instanceB: GPUBuffer;
-  indirectArgs: GPUBuffer;
-}
+export interface PropGpuRingOutputBuffers { instanceA: GPUBuffer; instanceB: GPUBuffer; indirectArgs: GPUBuffer }
+export interface PropGpuRingDispatchParams { centerX: number; centerY: number; centerZ: number; ringRadius: number; cameraX: number; cameraY: number; cameraZ: number; maxInstancesPerGroup: number; frustumPlanes: ArrayLike<number> }
+export interface PropGpuRingStats { status: "initializing" | "ready" | "running" | "failed" | "disabled"; reason?: string; candidateCount: number; visibleCount: number; groupCounts: number[]; overflowed: boolean; submitMs: number | null; readbackMs: number | null }
 
-export interface PropGpuRingDispatchParams {
-  centerX: number;
-  centerY: number;
-  centerZ: number;
-  ringRadius: number;
-  cameraX: number;
-  cameraY: number;
-  cameraZ: number;
-  maxInstancesPerGroup: number;
-  frustumPlanes: ArrayLike<number>;
-}
-
-export interface PropGpuRingStats {
-  status: "initializing" | "ready" | "running" | "failed" | "disabled";
-  reason?: string;
-  candidateCount: number;
-  visibleCount: number;
-  groupCounts: number[];
-  overflowed: boolean;
-  submitMs: number | null;
-  readbackMs: number | null;
-}
-
-interface ReadbackSlot {
-  buffer: GPUBuffer;
-  busy: boolean;
-  destroyAfterMap: boolean;
-  cpu: Uint32Array;
-}
-
+interface ReadbackSlot { buffer: GPUBuffer; busy: boolean; destroyAfterMap: boolean; cpu: Uint32Array }
 type PipelineName = "clear_counters" | "cull_props" | "build_indirect_args";
 
 export function propGpuRingUnsupportedReason(device: GPUDevice): string | null {
@@ -102,22 +72,14 @@ export class PropGpuRingCompute {
     this.sourceCount = Math.max(0, source.sourceCount);
     this.groupCounts = new Array<number>(this.groupCount).fill(0);
     this.paramBuffer = device.createBuffer({ label: "prop ring params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.counterBuffer = device.createBuffer({
-      label: "prop ring counters",
-      size: this.groupCount * Uint32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
+    this.counterBuffer = device.createBuffer({ label: "prop ring counters", size: this.groupCount * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     this.sourceABuffer = this.createStaticBuffer("prop ring source a", source.sourceA, GPUBufferUsage.STORAGE);
     this.sourceBBuffer = this.createStaticBuffer("prop ring source b", source.sourceB, GPUBufferUsage.STORAGE);
     this.assetMetaBuffer = this.createStaticBuffer("prop ring asset meta", source.assetMeta, GPUBufferUsage.STORAGE);
     this.assetLodsBuffer = this.createStaticBuffer("prop ring asset lods", source.assetLods, GPUBufferUsage.STORAGE);
     this.groupMetaBuffer = this.createStaticBuffer("prop ring group meta", source.groupMeta, GPUBufferUsage.STORAGE);
     this.counterReadbacks = Array.from({ length: 2 }, (_, index) => ({
-      buffer: device.createBuffer({
-        label: `prop ring counter readback ${index}`,
-        size: this.groupCount * Uint32Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      }),
+      buffer: device.createBuffer({ label: `prop ring counter readback ${index}`, size: this.groupCount * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
       busy: false,
       destroyAfterMap: false,
       cpu: new Uint32Array(this.groupCount),
@@ -140,52 +102,29 @@ export class PropGpuRingCompute {
     });
   }
 
-  static async create(
-    device: GPUDevice,
-    source: PropGpuRingSourceData,
-    outputBuffers: PropGpuRingOutputBuffers,
-    settings: CustomPropsSettings,
-  ): Promise<PropGpuRingCompute> {
+  static async create(device: GPUDevice, source: PropGpuRingSourceData, outputBuffers: PropGpuRingOutputBuffers, settings: CustomPropsSettings): Promise<PropGpuRingCompute> {
     const code = shaderSource.replaceAll("WORKGROUP_SIZE", String(settings.gpu.workgroupSize));
     const module = device.createShaderModule({ label: "prop ring compute shader", code });
-    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({
-      binding,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: { type },
-    });
+    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const layout = device.createBindGroupLayout({
       label: "prop ring compute layout",
       entries: [
         { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        storage(1), storage(2), storage(3), storage(4),
-        storage(5, "read-only-storage"), storage(6, "read-only-storage"),
-        storage(7, "read-only-storage"), storage(8, "read-only-storage"), storage(9, "read-only-storage"),
+        storage(1), storage(2), storage(3), storage(4), storage(5, "read-only-storage"), storage(6, "read-only-storage"), storage(7, "read-only-storage"), storage(8, "read-only-storage"), storage(9, "read-only-storage"),
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
-    const makePipeline = (entryPoint: PipelineName) =>
-      device.createComputePipelineAsync({
-        label: `prop ring ${entryPoint}`,
-        layout: pipelineLayout,
-        compute: { module, entryPoint },
-      });
-    const [clearCounters, cullProps, buildIndirectArgs] = await Promise.all([
-      makePipeline("clear_counters"),
-      makePipeline("cull_props"),
-      makePipeline("build_indirect_args"),
-    ]);
-    return new PropGpuRingCompute(device, layout, {
-      clear_counters: clearCounters,
-      cull_props: cullProps,
-      build_indirect_args: buildIndirectArgs,
-    }, source, outputBuffers, settings);
+    const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `prop ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
+    const [clearCounters, cullProps, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("cull_props"), makePipeline("build_indirect_args")]);
+    return new PropGpuRingCompute(device, layout, { clear_counters: clearCounters, cull_props: cullProps, build_indirect_args: buildIndirectArgs }, source, outputBuffers, settings);
   }
 
   dispatch(params: PropGpuRingDispatchParams): boolean {
     if (this.failedReason) return false;
     this.packParams(params);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
-    const requestReadback = this.settings.gpu.debugShowGpuCounts && this.frame++ % READBACK_INTERVAL_FRAMES === 0;
+    const frame = this.frame++;
+    const requestReadback = shouldRequestGpuReadback({ kind: "prop_gpu_counts", frame, intervalFrames: READBACK_INTERVAL_FRAMES, requested: this.settings.gpu.debugShowGpuCounts });
     const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
     const encoder = this.device.createCommandEncoder({ label: "prop ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, Math.ceil((this.groupCount * INDIRECT_ARGS_PER_GROUP) / this.settings.gpu.workgroupSize));
@@ -194,11 +133,7 @@ export class PropGpuRingCompute {
     if (readbackSlot) encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, this.groupCount * Uint32Array.BYTES_PER_ELEMENT);
     const submittedGeneration = this.generation;
     const submitStart = performance.now();
-    if (readbackSlot) {
-      readbackSlot.busy = true;
-      readbackSlot.destroyAfterMap = false;
-      this.runningReadbacks++;
-    }
+    if (readbackSlot) { readbackSlot.busy = true; readbackSlot.destroyAfterMap = false; this.runningReadbacks++; }
     this.device.queue.submit([encoder.finish()]);
     this.submitMs = performance.now() - submitStart;
     if (readbackSlot) this.readback(readbackSlot, submittedGeneration, params.maxInstancesPerGroup);
@@ -245,8 +180,6 @@ export class PropGpuRingCompute {
     f32[5] = params.cameraY;
     f32[6] = params.cameraZ;
     f32[7] = Math.max(1, Math.floor(params.maxInstancesPerGroup));
-    f32[8] = 0;
-    f32[9] = 0;
     f32[10] = this.groupCount;
     f32[11] = this.sourceCount;
     for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) f32[12 + i] = params.frustumPlanes[i] ?? 0;
@@ -254,11 +187,7 @@ export class PropGpuRingCompute {
 
   private createStaticBuffer(label: string, data: Float32Array | Uint32Array, usage: GPUBufferUsageFlags): GPUBuffer {
     const byteLength = Math.max(4, data.byteLength);
-    const buffer = this.device.createBuffer({
-      label,
-      size: align4(byteLength),
-      usage: usage | GPUBufferUsage.COPY_DST,
-    });
+    const buffer = this.device.createBuffer({ label, size: align4(byteLength), usage: usage | GPUBufferUsage.COPY_DST });
     this.device.queue.writeBuffer(buffer, 0, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
     return buffer;
   }
@@ -275,12 +204,7 @@ export class PropGpuRingCompute {
     const start = performance.now();
     void slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
       if (submittedGeneration !== this.generation) {
-        slot.busy = false;
-        slot.destroyAfterMap = false;
-        this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-        slot.buffer.unmap();
-        slot.buffer.destroy();
-        return;
+        slot.busy = false; slot.destroyAfterMap = false; this.runningReadbacks = Math.max(0, this.runningReadbacks - 1); slot.buffer.unmap(); slot.buffer.destroy(); return;
       }
       slot.cpu.set(new Uint32Array(slot.buffer.getMappedRange(0, this.groupCount * Uint32Array.BYTES_PER_ELEMENT)));
       slot.buffer.unmap();
@@ -296,25 +220,14 @@ export class PropGpuRingCompute {
         this.visibleCount += clamped;
         if (raw > maxInstancesPerGroup) this.overflowed = true;
       }
-      if (slot.destroyAfterMap) {
-        slot.destroyAfterMap = false;
-        slot.buffer.destroy();
-      }
+      if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); }
     }).catch((error) => {
       if (submittedGeneration !== this.generation) {
-        slot.busy = false;
-        slot.destroyAfterMap = false;
-        this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-        slot.buffer.destroy();
-        return;
+        slot.busy = false; slot.destroyAfterMap = false; this.runningReadbacks = Math.max(0, this.runningReadbacks - 1); slot.buffer.destroy(); return;
       }
       slot.busy = false;
       this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
-      if (slot.destroyAfterMap) {
-        slot.destroyAfterMap = false;
-        slot.buffer.destroy();
-        return;
-      }
+      if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); return; }
       this.failedReason = error instanceof Error ? error.message : String(error);
     });
   }

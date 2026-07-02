@@ -5,6 +5,7 @@ import type { TreeGeometryMap } from "./tree_geometry.js";
 import { buildTreeSystemStats } from "./tree_system_stats.js";
 import type { TreeGpuRingRuntimeState } from "./tree_system_gpu_ring_runtime.js";
 import type { TreeImpostorStatus } from "./tree_system_types.js";
+import type { TreeEarlyTerrainRejectionStats } from "./tree_patch_terrain_rejection.js";
 
 export interface TreeRuntimeStatsInput {
   patches: readonly TreePatch[];
@@ -15,6 +16,7 @@ export interface TreeRuntimeStatsInput {
   debugShowGpuCounts: boolean;
   impostorStatus: TreeImpostorStatus;
   impostorReason: string | null;
+  earlyTerrainRejectionStats?: TreeEarlyTerrainRejectionStats;
 }
 
 export function buildTreeRuntimeStats(input: TreeRuntimeStatsInput): TreeStats {
@@ -39,5 +41,6 @@ export function buildTreeRuntimeStats(input: TreeRuntimeStatsInput): TreeStats {
     gpuShowCounts: input.debugShowGpuCounts,
     impostorStatus: input.impostorStatus,
     impostorReason: input.impostorReason,
+    earlyTerrainRejectionStats: input.earlyTerrainRejectionStats,
   });
 }

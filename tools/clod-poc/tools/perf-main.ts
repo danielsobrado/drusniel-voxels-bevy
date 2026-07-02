@@ -35,9 +35,14 @@ const CASES: PerfCase[] = [
   { name: "debug-flat", params: { terrainMaterial: "debug_flat", terrainTriplanar: "0" } },
   { name: "triplanar-off", params: { terrainTriplanar: "0" } },
   { name: "tree-gpu-ring", params: { treeGpu: "1" } },
+  { name: "tree-gpu-strict", params: { treeGpuStrict: "1" } },
+  { name: "tree-gpu-strict-counts", params: { treeGpuStrict: "1", treeGpuCounts: "1" } },
+  { name: "tree-gpu-force-cpu", params: { treeGpuForceCpu: "1" } },
+  { name: "tree-gpu-off", params: { treeGpu: "0" } },
   { name: "tree-gpu-visible-12k", params: { treeGpu: "1", treeGpuMaxVisible: "12000" } },
   { name: "tree-gpu-visible-9k", params: { treeGpu: "1", treeGpuMaxVisible: "9000" } },
   { name: "tree-distance-360", params: { treeGpu: "1", treeDistance: "360" } },
+  { name: "tree-shadows-none", params: { treeGpuStrict: "1", treeShadowMaxLod: "none" } },
   { name: "trees-off", params: { trees: "0", understory: "0" } },
   { name: "grass-off", params: { grass: "0" } },
   { name: "stones-off", params: { stones: "0" } },
@@ -120,8 +125,8 @@ function markdown(results: readonly PerfCaseResult[]): string {
   const lines = [
     "# clod-poc main perf",
     "",
-    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | visible clusters h/v/u | tree lod avg | prop GPU | prop visible avg | tris avg |",
-    "| --- | ---: | ---: | --- | --- | ---: | --- | ---: | ---: | --- | --- | ---: | ---: |",
+    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | visible clusters h/v/u | tree lod avg | prop GPU | prop visible avg | tris avg | warnings | errors |",
+    "| --- | ---: | ---: | --- | --- | ---: | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |",
   ];
   for (const result of results) {
     const snapshot = result.snapshot;
@@ -154,13 +159,16 @@ function markdown(results: readonly PerfCaseResult[]): string {
         `${treeLod} | ` +
         `${propStatusCounts || "-"} | ` +
         `${Math.round(snapshot.counters.customPropGpuVisibleCountAvg).toLocaleString("en-US")} | ` +
-        `${Math.round(snapshot.counters.terrainTrianglesAvg).toLocaleString("en-US")} |`,
+        `${Math.round(snapshot.counters.terrainTrianglesAvg).toLocaleString("en-US")} | ` +
+        `${result.warnings.length} | ${result.errors.length} |`,
     );
   }
   lines.push("");
   lines.push("`visible clusters h/v/u` means hidden / visible / unknown-kept cluster-mask averages. It is a camera-visible tree mask; shadow casters are intentionally not gated by it.");
   lines.push("");
   lines.push("Broad phase buckets are measured around the frame-loop calls. `props unattributed` is time between terrain and render that was not assigned to shadow, canopy, vegetation, border debug, or stats sync.");
+  lines.push("");
+  lines.push("Tree GPU strict cases should report `ring` on supported hardware. Any warning/error count there needs inspection before trusting FPS numbers.");
   lines.push("");
   return `${lines.join("\n")}\n`;
 }

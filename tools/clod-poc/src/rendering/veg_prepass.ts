@@ -1,5 +1,12 @@
 import { EqualDepth, InstancedMesh, Mesh, type Material, type Side } from "three";
 import { NodeMaterial, type WebGPURenderer } from "three/webgpu";
+import {
+  applyMaterialIfChanged,
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "./material_churn/material_churn_diagnostics.js";
+import { trackCreatedMaterial } from "./material_churn/tracked_material_factory.js";
 
 const WGSL_ATTRIBUTE_PREFIX = String.fromCharCode(64);
 
@@ -30,25 +37,43 @@ export interface PrepassNodes {
   side: Side;
 }
 
+export interface DepthPrepassTwinOptions {
+  cloneColorMaterial?: boolean;
+}
+
 interface NodeMaterialShape {
   positionNode: unknown;
   maskNode: unknown;
 }
 
-export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes): Mesh {
-  const material = new NodeMaterial();
-  const materialNodes = material as unknown as NodeMaterialShape;
-  materialNodes.positionNode = nodes.positionNode;
-  if (nodes.maskNode !== undefined) materialNodes.maskNode = nodes.maskNode;
-  material.side = nodes.side;
-  material.colorWrite = false;
-  material.depthWrite = true;
-  material.depthTest = true;
+type UniformMaterialShape = Material & {
+  uniforms?: unknown;
+};
 
-  const colorMaterial = (mesh.material as Material).clone();
-  colorMaterial.depthFunc = EqualDepth;
-  colorMaterial.depthWrite = false;
-  mesh.material = colorMaterial;
+export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: DepthPrepassTwinOptions = {}): Mesh {
+  const material = createPrepassNodeMaterial(nodes, `veg-depth-prepass:${mesh.name || "mesh"}`);
+
+  const sourceMaterial = singleMeshMaterial(mesh);
+  const colorMaterial = options.cloneColorMaterial === false
+    ? sourceMaterial
+    : cloneColorMaterialWithSharedUniforms(sourceMaterial, `veg-depth-prepass-color:${mesh.name || "mesh"}`);
+  let colorMaterialChanged = false;
+  colorMaterialChanged = setPipelineSensitiveMaterialProperty(
+    materialChurnDiagnostics,
+    colorMaterial,
+    "depthFunc",
+    EqualDepth,
+    "veg-depth-prepass-color-depth-func",
+  ) || colorMaterialChanged;
+  colorMaterialChanged = setPipelineSensitiveMaterialProperty(
+    materialChurnDiagnostics,
+    colorMaterial,
+    "depthWrite",
+    false,
+    "veg-depth-prepass-color-depth-write",
+  ) || colorMaterialChanged;
+  if (colorMaterialChanged) setMaterialNeedsUpdate(materialChurnDiagnostics, colorMaterial, "veg-depth-prepass-color");
+  applyMaterialIfChanged(materialChurnDiagnostics, mesh.uuid, mesh, colorMaterial, "veg-depth-prepass-color");
 
   const twin = new Mesh(mesh.geometry, material);
   twin.name = `${mesh.name}-depth-prepass`;
@@ -58,6 +83,22 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes): Mesh {
   twin.renderOrder = -100;
 
   return twin;
+}
+
+function singleMeshMaterial(mesh: Mesh): Material {
+  if (Array.isArray(mesh.material)) {
+    throw new Error(`Depth prepass requires a single material mesh: ${mesh.name || "unnamed mesh"}`);
+  }
+  return mesh.material;
+}
+
+function cloneColorMaterialWithSharedUniforms(sourceMaterial: Material, reason: string): Material {
+  const clone = trackCreatedMaterial(sourceMaterial.clone(), reason);
+  const sourceUniforms = (sourceMaterial as UniformMaterialShape).uniforms;
+  if (sourceUniforms !== undefined) {
+    (clone as UniformMaterialShape).uniforms = sourceUniforms;
+  }
+  return clone;
 }
 
 /**
@@ -76,14 +117,7 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes): Mesh {
  * twin must NOT dispose that attribute (it belongs to the colour mesh).
  */
 export function instancedDepthPrepassTwin(mesh: InstancedMesh, nodes: PrepassNodes): InstancedMesh {
-  const material = new NodeMaterial();
-  const materialNodes = material as unknown as NodeMaterialShape;
-  materialNodes.positionNode = nodes.positionNode;
-  if (nodes.maskNode !== undefined) materialNodes.maskNode = nodes.maskNode;
-  material.side = nodes.side;
-  material.colorWrite = false;
-  material.depthWrite = true;
-  material.depthTest = true;
+  const material = createPrepassNodeMaterial(nodes, `veg-instanced-depth-prepass:${mesh.name || "instanced"}`);
 
   const twin = new InstancedMesh(mesh.geometry, material, mesh.instanceMatrix.count);
   twin.instanceMatrix = mesh.instanceMatrix; // share per-instance transforms
@@ -95,4 +129,16 @@ export function instancedDepthPrepassTwin(mesh: InstancedMesh, nodes: PrepassNod
   twin.renderOrder = -100;
 
   return twin;
+}
+
+function createPrepassNodeMaterial(nodes: PrepassNodes, reason: string): NodeMaterial {
+  const material = trackCreatedMaterial(new NodeMaterial(), reason);
+  const materialNodes = material as unknown as NodeMaterialShape;
+  materialNodes.positionNode = nodes.positionNode;
+  if (nodes.maskNode !== undefined) materialNodes.maskNode = nodes.maskNode;
+  material.side = nodes.side;
+  material.colorWrite = false;
+  material.depthWrite = true;
+  material.depthTest = true;
+  return material;
 }

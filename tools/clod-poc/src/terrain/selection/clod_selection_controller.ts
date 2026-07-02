@@ -146,6 +146,12 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     };
   };
 
+  const applyMaterialTier = (view: ClodSelectionTerrainView, settings: ClodSelectionSettings): void => {
+    if (!settings.materialTiers || config.poolTerrainMaterial) return;
+    const tier = view.node.level <= 0 ? 0 : view.node.level === 1 ? 1 : 2;
+    view.mat.setTier(tier);
+  };
+
   const applyRenderedCut = (rendered: ClodPageNode[], settings: ClodSelectionSettings): void => {
     const cutIds = new Set(rendered.map((n) => n.id));
     const nextTerrainViews = new Set<ClodSelectionTerrainView>();
@@ -156,6 +162,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
         view.target = 1;
         activeTerrainViews.add(view);
       }
+      applyMaterialTier(view, settings);
       nextTerrainViews.add(view);
     }
     deps.markActiveNodes?.(cutIds, selectionFrameId);
@@ -169,13 +176,32 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       }
     }
     currentTerrainViews = nextTerrainViews;
+  };
 
-    if (settings.materialTiers && !config.poolTerrainMaterial) {
-      for (const v of currentTerrainViews) {
-        const tier = v.node.level <= 0 ? 0 : v.node.level === 1 ? 1 : 2;
-        v.mat.setTier(tier);
+  const refreshCachedCut = (rendered: ClodPageNode[], settings: ClodSelectionSettings): boolean => {
+    const nextTerrainViews = new Set<ClodSelectionTerrainView>();
+    for (const node of rendered) {
+      const view = deps.views.get(node.id);
+      if (!view) return false;
+      view.selected = true;
+      if (view.target !== 1) {
+        view.target = 1;
+        activeTerrainViews.add(view);
+      }
+      applyMaterialTier(view, settings);
+      nextTerrainViews.add(view);
+    }
+    deps.markActiveNodes?.(lastRenderedNodeIds, selectionFrameId);
+    for (const view of currentTerrainViews) {
+      if (lastRenderedNodeIds.has(view.node.id)) continue;
+      view.selected = false;
+      if (view.target !== 0) {
+        view.target = 0;
+        activeTerrainViews.add(view);
       }
     }
+    currentTerrainViews = nextTerrainViews;
+    return true;
   };
 
   const updateRenderedStats = (rendered: ClodPageNode[]): void => {
@@ -263,18 +289,21 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     const initialCacheInput = buildCacheInput(settings, params, gpuMap, initialDebugKey);
     const cacheDecision = selectionCutCache.decide(initialCacheInput);
     if (cacheDecision.hit && lastRenderedNodes.length > 0) {
-      lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
-      selSub.cut = 0;
       const tBook = performance.now();
-      deps.markActiveNodes?.(lastRenderedNodeIds, selectionFrameId);
+      const refreshed = refreshCachedCut(lastRenderedNodes, settings);
       selSub.book = performance.now() - tBook;
-      selSub.info = 0;
-      const tOverlays = performance.now();
-      maybeRebuildDebugOverlays(lastRenderedNodes, lastCutHash, settings);
-      selSub.overlays = performance.now() - tOverlays;
-      maybeDispatchWebGpuSelection(settings, params, compute, gpuMap);
-      lastSelectionMs = performance.now() - selectionStart;
-      return;
+      if (refreshed) {
+        lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
+        selSub.cut = 0;
+        selSub.info = 0;
+        const tOverlays = performance.now();
+        maybeRebuildDebugOverlays(lastRenderedNodes, lastCutHash, settings);
+        selSub.overlays = performance.now() - tOverlays;
+        maybeDispatchWebGpuSelection(settings, params, compute, gpuMap);
+        lastSelectionMs = performance.now() - selectionStart;
+        return;
+      }
+      selectionCutCache.invalidate("forced_invalidate");
     }
 
     const tSelectCut = performance.now();

@@ -33,6 +33,7 @@ import type {
   ConstructionTerrainConformRequest,
   PlacedConstructionPiece,
 } from "./types.js";
+import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 export interface ConstructionControllerDeps {
   scene: THREE.Scene;
@@ -98,12 +99,12 @@ class ConstructionControllerImpl implements ConstructionController {
     this.root.name = "construction-root";
     this.deps.scene.add(this.root);
 
-    this.ghostMaterial = new THREE.MeshBasicMaterial({
+    this.ghostMaterial = trackedMeshBasicMaterial({
       color: GHOST_INVALID_COLOR,
       transparent: true,
       opacity: this.config.ghost.opacity,
       depthWrite: false,
-    });
+    }, "construction-ghost-base");
     this.ghostMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.ghostMaterial);
     this.ghostMesh.name = "construction-ghost";
     this.ghostMesh.visible = false;
@@ -758,100 +759,87 @@ class ConstructionControllerImpl implements ConstructionController {
   }
 
   private syncUi(force = false): void {
-    this.menu.style.display = this.active ? "grid" : "none";
     const selected = this.config.pieces[this.selectedIndex] ?? null;
-    const selectedMaterial = CONSTRUCTION_MATERIAL_OPTIONS[this.selectedMaterialIndex] ?? CONSTRUCTION_MATERIAL_OPTIONS[0]!;
-    const candidate = this.currentCandidate;
-    const status = candidate
-      ? candidate.valid ? candidate.snapped ? "snapped" : "valid" : candidate.reason ?? "invalid"
-      : "aim at terrain";
-    const support = candidate?.supportState ?? "-";
-    const previewRotation = candidate?.rotationQuarterTurns ?? this.rotationQuarterTurns;
-    const stateKey = [
-      this.active ? "1" : "0",
+    const material = this.selectedMaterial();
+    const key = [
+      this.active,
+      this.snapEnabled,
       this.selectedIndex,
       this.selectedMaterialIndex,
-      this.snapEnabled ? "1" : "0",
-      previewRotation,
-      status,
-      support,
+      this.placedPieces.length,
+      this.currentCandidate?.valid ?? false,
+      this.currentCandidate?.reason ?? "",
       this.lastPlacementMessage,
-      candidate?.valid ? "1" : "0",
-      candidate?.snapped ? "1" : "0",
     ].join("|");
-    if (!force && stateKey === this.lastUiStateKey) return;
-    this.lastUiStateKey = stateKey;
-    if (!this.active) return;
+    if (!force && key === this.lastUiStateKey) return;
+    this.lastUiStateKey = key;
+    this.menu.style.display = this.active ? "block" : "none";
+    this.menu.innerHTML = this.renderMenuHtml(selected, material);
+  }
 
+  private renderMenuHtml(selected: ConstructionPieceDef | null, material: ConstructionMaterial): string {
     const pieceButtons = this.config.pieces.map((piece, index) => {
-      const selectedAttr = index === this.selectedIndex ? "true" : "false";
-      return `<button type="button" data-piece-index="${index}" aria-pressed="${selectedAttr}" class="piece-button ${selectedAttr === "true" ? "is-selected" : ""}">
-        <span class="piece-index">${index + 1}</span>
-        <span>${escapeHtml(piece.label)}</span>
-      </button>`;
+      const active = index === this.selectedIndex;
+      return `<button data-piece-index="${index}" style="${this.buttonStyle(active)}">${index + 1}. ${escapeHtml(piece.label)}</button>`;
     }).join("");
     const materialButtons = CONSTRUCTION_MATERIAL_OPTIONS.map((option, index) => {
-      const selectedAttr = index === this.selectedMaterialIndex ? "true" : "false";
-      const previewUrl = escapeStyleUrl(option.previewUrl);
-      return `<button type="button" data-material-index="${index}" aria-pressed="${selectedAttr}" class="material-chip ${selectedAttr === "true" ? "is-selected" : ""}">
-        <span class="material-chip-preview" style="background-image:url('${previewUrl}')"></span>
-        <span>${escapeHtml(option.label)}</span>
-      </button>`;
+      const active = option.id === material;
+      const label = `${escapeHtml(option.label)}`;
+      const preview = escapeStyleUrl(option.thumbnailUrl);
+      return `<button data-material-index="${index}" title="${label}" style="${this.swatchStyle(active, option.color, preview)}"><span>${label}</span></button>`;
     }).join("");
-    const statusColor = candidate?.valid ? "#b8f7c7" : candidate ? "#ffb4a8" : "#cdd8e3";
-    const selectedPreviewUrl = escapeStyleUrl(selectedMaterial.previewUrl);
-    this.menu.innerHTML = `
-      <style>
-        #${MENU_ID} { gap: 8px; }
-        #${MENU_ID} .header { display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:grab; }
-        #${MENU_ID} .title { font-weight:800; letter-spacing:0.08em; text-transform:uppercase; }
-        #${MENU_ID} .hint { color:#9fb0c0; }
-        #${MENU_ID} .panel { border:1px solid rgba(255,255,255,0.12); border-radius:8px; background:rgba(255,255,255,0.045); padding:8px; }
-        #${MENU_ID} .section-title { display:flex; justify-content:space-between; align-items:center; color:#cdd8e3; margin-bottom:6px; font-weight:700; }
-        #${MENU_ID} .piece-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; }
-        #${MENU_ID} button { color:#dce5ee; font:inherit; cursor:pointer; }
-        #${MENU_ID} .piece-button { display:flex; align-items:center; gap:6px; padding:7px 8px; border:1px solid rgba(115,132,150,0.52); border-radius:6px; background:rgba(25,32,40,0.9); text-align:left; }
-        #${MENU_ID} .piece-button.is-selected { border-color:#64b5ff; background:linear-gradient(180deg, rgba(46,111,164,0.72), rgba(29,73,111,0.7)); }
-        #${MENU_ID} .piece-index { display:inline-grid; place-items:center; width:18px; height:18px; border-radius:4px; background:rgba(255,255,255,0.1); color:#f3f8ff; }
-        #${MENU_ID} .material-row { display:grid; grid-template-columns:78px 1fr; gap:8px; align-items:stretch; }
-        #${MENU_ID} .material-preview { min-height:78px; border-radius:8px; border:1px solid rgba(255,255,255,0.2); background-size:cover; background-position:center; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.25); }
-        #${MENU_ID} .carousel { display:flex; align-items:center; gap:6px; }
-        #${MENU_ID} .carousel-button { width:26px; align-self:stretch; border:1px solid rgba(115,132,150,0.52); border-radius:6px; background:rgba(25,32,40,0.9); }
-        #${MENU_ID} .material-strip { display:flex; gap:5px; overflow:hidden; flex:1; }
-        #${MENU_ID} .material-chip { min-width:72px; display:grid; gap:4px; justify-items:center; padding:5px; border:1px solid rgba(115,132,150,0.52); border-radius:7px; background:rgba(25,32,40,0.86); }
-        #${MENU_ID} .material-chip.is-selected { border-color:#f2c35b; box-shadow:0 0 0 1px rgba(242,195,91,0.38); background:rgba(73,57,27,0.86); }
-        #${MENU_ID} .material-chip-preview { width:52px; height:34px; border-radius:5px; background-size:cover; background-position:center; border:1px solid rgba(255,255,255,0.16); }
-        #${MENU_ID} .status-line { display:flex; flex-wrap:wrap; gap:8px; color:#cdd8e3; }
-        #${MENU_ID} .message { margin-top:5px; color:#9fb0c0; }
-      </style>
-      <div data-drag-handle class="header">
-        <strong class="title">Build</strong>
-        <span class="hint">B close · left-click place · right-click delete · R rotate · X snap · ←/→ texture</span>
+    const status = this.currentCandidate
+      ? this.currentCandidate.valid
+        ? this.currentCandidate.snapped ? "Snapped" : "Free placement"
+        : `Blocked: ${escapeHtml(this.currentCandidate.reason ?? "invalid")}`
+      : "Aim at terrain or snap point";
+    return `
+      <div data-drag-handle style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;cursor:grab;">
+        <strong>Build</strong>
+        <span>${selected ? escapeHtml(selected.label) : "No pieces"} · ${escapeHtml(constructionMaterialLabel(material))}</span>
+        <span>${this.snapEnabled ? "Snap ON" : "Snap OFF"}</span>
       </div>
-      <div class="panel">
-        <div class="section-title"><span>Pieces</span><span>${escapeHtml(selected?.category ?? "-")}</span></div>
-        <div class="piece-grid">${pieceButtons}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">${pieceButtons}</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+        <button data-material-step="-1" style="${this.buttonStyle(false)}">◀</button>
+        <div style="display:grid;grid-template-columns:repeat(${Math.min(6, CONSTRUCTION_MATERIAL_OPTIONS.length)}, minmax(0, 1fr));gap:5px;flex:1;">${materialButtons}</div>
+        <button data-material-step="1" style="${this.buttonStyle(false)}">▶</button>
       </div>
-      <div class="panel">
-        <div class="section-title"><span>Texture</span><span>${escapeHtml(selectedMaterial.label)}</span></div>
-        <div class="material-row">
-          <div class="material-preview" style="background-image:linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.22)), url('${selectedPreviewUrl}')"></div>
-          <div class="carousel">
-            <button type="button" class="carousel-button" data-material-step="-1" aria-label="Previous texture">‹</button>
-            <div class="material-strip">${materialButtons}</div>
-            <button type="button" class="carousel-button" data-material-step="1" aria-label="Next texture">›</button>
-          </div>
-        </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;">
+        <span>${status}</span>
+        <span>R rotate · X snap · arrows material</span>
       </div>
-      <div class="status-line">
-        <span>Selected: ${escapeHtml(selected?.label ?? "none")}</span>
-        <span>Material: ${escapeHtml(selectedMaterial.label)}</span>
-        <span>Snap: ${this.snapEnabled ? "on" : "off"}</span>
-        <span>Rot: ${previewRotation * 90}°${candidate?.snapped ? " auto" : ""}</span>
-        <span style="color:${statusColor};">State: ${escapeHtml(status)}</span>
-        <span>Support: ${escapeHtml(support)}</span>
-      </div>
-      <div class="message">${escapeHtml(this.lastPlacementMessage || "Left-click places. Right-click deletes aimed construction.")}</div>
+      ${this.lastPlacementMessage ? `<div style="margin-top:6px;color:#ffd27a;">${escapeHtml(this.lastPlacementMessage)}</div>` : ""}
     `;
+  }
+
+  private buttonStyle(active: boolean): string {
+    return [
+      "border:1px solid rgba(160,190,230,0.35)",
+      `background:${active ? "rgba(80,150,255,0.42)" : "rgba(255,255,255,0.07)"}`,
+      "color:#eef3f8",
+      "border-radius:6px",
+      "padding:5px 7px",
+      "font:inherit",
+      "cursor:pointer",
+    ].join(";");
+  }
+
+  private swatchStyle(active: boolean, color: number, backgroundUrl: string): string {
+    return [
+      "height:38px",
+      "border-radius:7px",
+      `border:${active ? "2px solid #9bd3ff" : "1px solid rgba(160,190,230,0.35)"}`,
+      "color:#fff",
+      "font:10px/1.1 system-ui,sans-serif",
+      "text-shadow:0 1px 2px rgba(0,0,0,0.8)",
+      "cursor:pointer",
+      "overflow:hidden",
+      backgroundUrl
+        ? `background-image:linear-gradient(rgba(0,0,0,0.18),rgba(0,0,0,0.38)),url('${backgroundUrl}')`
+        : `background:#${color.toString(16).padStart(6, "0")}`,
+      "background-size:cover",
+      "background-position:center",
+    ].join(";");
   }
 }

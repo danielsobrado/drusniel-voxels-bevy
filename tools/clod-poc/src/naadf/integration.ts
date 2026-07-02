@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 import type { NaadfFarShellHeightSamplingMode, NaadfPocConfig, NaadfTraversalMode } from "./config.js";
-import { isValidNaadfGpuAtlasWindowTiles, parseNaadfPocConfig } from "./config.js";
+import { isValidFarSummaryAtlasFormat, isValidNaadfGpuAtlasWindowTiles, parseNaadfPocConfig } from "./config.js";
 import { NaadfMetricsCollector } from "./metrics.js";
 import { createTerrainSource, type TerrainProfile } from "./terrainSource.js";
 import {
@@ -87,6 +87,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
         ringCount: config.farClipmap.rings.length,
         tilesX: config.farShell.gpuAtlasWindowTiles,
         tilesZ: config.farShell.gpuAtlasWindowTiles,
+        format: config.farSummaryAtlas.format,
       })
     : undefined;
   const debugOverlay = options.threeScene
@@ -134,6 +135,11 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
       const clod = (window as unknown as { __drusnielClod?: { stats?: { counters?: Record<string, number> } } }).__drusnielClod;
       if (clod?.stats) {
         const counters = metrics.toCounters();
+        if (gpuAtlas?.view) {
+          counters["naadf.farSummaryAtlas.estimatedBytes"] = gpuAtlas.view.estimatedBytes ?? 0;
+          counters["naadf.farSummaryAtlas.memorySavingsBytes"] = gpuAtlas.view.memorySavingsBytes ?? 0;
+          counters["naadf.farSummaryAtlas.memorySavingsPct"] = gpuAtlas.view.memorySavingsPct ?? 0;
+        }
         if (clod.stats.counters) {
           Object.assign(clod.stats.counters, counters);
         }
@@ -253,11 +259,15 @@ function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig 
     config.farShell.gpuAtlasWindowTiles = atlasWindow;
   }
 
+  const atlasFormat = params.get("farSummaryAtlas") ?? params.get("naadfFarSummaryAtlas");
+  if (atlasFormat && isValidFarSummaryAtlasFormat(atlasFormat)) {
+    config.farSummaryAtlas.format = atlasFormat;
+  }
+
   return config;
 }
 
 function positiveIntParam(value: string | null): number | null {
-  if (value === null) return null;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return null;
   return parsed;

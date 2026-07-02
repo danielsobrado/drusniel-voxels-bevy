@@ -31,7 +31,7 @@ interface TreeMaterialYaml {
 
 type WarnHandler = (message: string) => void;
 type TreeSettingsWithMaterialBias = TreeSettings & {
-  ecology: TreeSettings["ecology"] & { materialBias?: TreeMaterialBiasSettings };
+  ecology?: TreeSettings["ecology"] & { materialBias?: TreeMaterialBiasSettings };
 };
 
 export const DEFAULT_TREE_MATERIAL_BIAS: TreeMaterialBiasSettings = {
@@ -51,19 +51,19 @@ export function applyTreeMaterialBiasFromYaml(
     target.ecology = {
       ...target.ecology,
       materialBias: parseTreeMaterialBias(text),
-    };
+    } as TreeSettingsWithMaterialBias["ecology"];
   } catch (error) {
     warn?.(`[tree-material-bias] failed to parse material bias; using defaults: ${error instanceof Error ? error.message : String(error)}`);
     target.ecology = {
       ...target.ecology,
       materialBias: DEFAULT_TREE_MATERIAL_BIAS,
-    };
+    } as TreeSettingsWithMaterialBias["ecology"];
   }
   return target;
 }
 
 export function getTreeMaterialBias(settings: TreeSettings): TreeMaterialBiasSettings {
-  return (settings as TreeSettingsWithMaterialBias).ecology.materialBias ?? DEFAULT_TREE_MATERIAL_BIAS;
+  return (settings as TreeSettingsWithMaterialBias).ecology?.materialBias ?? DEFAULT_TREE_MATERIAL_BIAS;
 }
 
 export function treeMaterialDensity(settings: TreeSettings, weights: readonly [number, number, number, number]): number {
@@ -119,24 +119,24 @@ function blendTreeMaterialBias(
   bias: TreeMaterialBiasSettings,
   key: keyof TreeTerrainClassWeights,
 ): number {
-  const sum = Math.max(0.00001, weights[0] + weights[1] + weights[2] + weights[3]);
+  const totalWeight = Math.max(0.0001, weights[0] + weights[1] + weights[2] + weights[3]);
   return (
     weights[0] * bias.grass[key] +
     weights[1] * bias.rock[key] +
     weights[2] * bias.sand[key] +
     weights[3] * bias.snow[key]
-  ) / sum;
+  ) / totalWeight;
 }
 
-function cloneTreeMaterialBias(source: TreeMaterialBiasSettings): TreeMaterialBiasSettings {
+function cloneTreeMaterialBias(settings: TreeMaterialBiasSettings): TreeMaterialBiasSettings {
   return {
-    grass: { ...source.grass },
-    rock: { ...source.rock },
-    sand: { ...source.sand },
-    snow: { ...source.snow },
+    grass: { ...settings.grass },
+    rock: { ...settings.rock },
+    sand: { ...settings.sand },
+    snow: { ...settings.snow },
   };
 }
 
 function readNonNegative(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : fallback;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
 }

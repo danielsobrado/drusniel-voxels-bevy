@@ -22,6 +22,17 @@ import {
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { composeTreeRingShader } from "./wgsl_modules.js";
 
+function withGpuReadbacks(search: string, run: () => void): void {
+  const root = globalThis as typeof globalThis & { window?: { location?: { search?: string } } };
+  const previous = root.window;
+  root.window = { location: { search } };
+  try {
+    run();
+  } finally {
+    root.window = previous;
+  }
+}
+
 describe("tree GPU ring compute helpers", () => {
   it("derives a stable slot grid from the tree bubble distance", () => {
     const settings = { ...DEFAULT_TREE_SETTINGS, distanceM: 220 };
@@ -139,7 +150,16 @@ describe("tree GPU ring compute helpers", () => {
     expect(treeGpuRingKey(settings, 256)).not.toBe(treeGpuRingKey(DEFAULT_TREE_SETTINGS, 256));
   });
 
-  it("runs periodic readback for readbackVisibleLists or CPU-parity validation, independent of debugShowGpuCounts", () => {
+  it("keeps tree count readbacks off by default", () => {
+    const readbackOnly = {
+      ...DEFAULT_TREE_SETTINGS,
+      gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: false },
+    };
+
+    expect(treeGpuRingRequestsDebugReadback(readbackOnly, 0)).toBe(false);
+  });
+
+  it("runs periodic readback only after explicit debug opt-in", () => {
     const readbackOnly = {
       ...DEFAULT_TREE_SETTINGS,
       gpu: { ...DEFAULT_TREE_SETTINGS.gpu, readbackVisibleLists: true, debugShowGpuCounts: false },
@@ -163,13 +183,12 @@ describe("tree GPU ring compute helpers", () => {
       },
     };
 
-    // readbackVisibleLists alone is sufficient, on the periodic interval only.
-    expect(treeGpuRingRequestsDebugReadback(readbackOnly, 0)).toBe(true);
-    expect(treeGpuRingRequestsDebugReadback(readbackOnly, 1)).toBe(false);
-    // debugShowGpuCounts is display-only and does not trigger a readback.
-    expect(treeGpuRingRequestsDebugReadback(noReadback, 0)).toBe(false);
-    // CPU-parity validation still forces a readback on its own.
-    expect(treeGpuRingRequestsDebugReadback(validateOnly, 0)).toBe(true);
+    withGpuReadbacks("?gpuReadbacks=debug", () => {
+      expect(treeGpuRingRequestsDebugReadback(readbackOnly, 0)).toBe(true);
+      expect(treeGpuRingRequestsDebugReadback(readbackOnly, 1)).toBe(false);
+      expect(treeGpuRingRequestsDebugReadback(noReadback, 0)).toBe(false);
+      expect(treeGpuRingRequestsDebugReadback(validateOnly, 0)).toBe(true);
+    });
   });
 
   it("reports overflow from raw readback counters before clamping draw counts", () => {

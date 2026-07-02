@@ -34,11 +34,12 @@ import type { ClodPagesConfig } from "./config.js";
 import type { ClodPageNode } from "./types.js";
 import { inclusiveMaxBoundary, intersectDirty, mergeDirty } from "./clod_worker_dirty.js";
 import {
-  cloneBounds,
   restoreLod0Nodes,
   restoreParentNodes,
+  restoreParentQueue as restoreParentQueueState,
   snapshotLod0Node,
   snapshotParentNode,
+  snapshotParentQueue as snapshotParentQueueState,
 } from "./clod_worker_snapshots.js";
 import type {
   CombinedLod0Rebuild,
@@ -97,29 +98,23 @@ function snapshotLod0Nodes(regions: readonly DirtyCellBounds[]): Lod0Snapshot[] 
 }
 
 function snapshotParentQueue(): ParentQueueSnapshot {
-  const copy = new Map<number, Set<string>>();
-  for (const [level, keys] of pendingByLevel) copy.set(level, new Set(keys));
-  const childCopy = new Map<number, [number, number][]>();
-  for (const [level, coords] of pendingChildCoordsByLevel) childCopy.set(level, coords.map((c) => [...c] as [number, number]));
-  return {
-    pendingByLevel: copy,
-    pendingChildCoordsByLevel: childCopy,
+  return snapshotParentQueueState({
+    pendingByLevel,
+    pendingChildCoordsByLevel,
     activeParentRequestId,
     parentNodes,
     parentMs,
-  };
+  });
 }
 
 function restoreParentQueue(snapshot: ParentQueueSnapshot): void {
-  pendingByLevel.clear();
-  for (const [level, keys] of snapshot.pendingByLevel) pendingByLevel.set(level, new Set(keys));
-  pendingChildCoordsByLevel.clear();
-  for (const [level, coords] of snapshot.pendingChildCoordsByLevel) {
-    pendingChildCoordsByLevel.set(level, coords.map((c) => [...c] as [number, number]));
-  }
-  activeParentRequestId = snapshot.activeParentRequestId;
-  parentNodes = snapshot.parentNodes;
-  parentMs = snapshot.parentMs;
+  restoreParentQueueState(snapshot, {
+    pendingByLevel,
+    pendingChildCoordsByLevel,
+    setActiveParentRequestId: (value) => { activeParentRequestId = value; },
+    setParentNodes: (value) => { parentNodes = value; },
+    setParentMs: (value) => { parentMs = value; },
+  });
 }
 
 function post(message: ClodWorkerResponse, transfer?: Transferable[]): void {
