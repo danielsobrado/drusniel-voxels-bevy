@@ -1,13 +1,18 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { attribute, clamp, dot, float, max, mix, normalGeometry, normalize, positionGeometry, pow, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+import { attribute, clamp, dot, float, max, mix, normalGeometry, normalize, positionWorld, pow, smoothstep, step, texture, uniform, vec2, vec3 } from "three/tsl";
 import type { FarShellLighting } from "../gpu/far_terrain_shell.js";
+import { getSunLightGpuAtlas } from "../terrain/sun_visibility/sun_light_gpu_atlas.js";
 
 // TSL node typing is intentionally loose in Three examples and current package typings.
 type TslNode = any;
 
 interface FarShellMaterialUniformRefs {
   uDebugFallback: ReturnType<typeof uniform>;
+  uSunVisibilityOriginX: ReturnType<typeof uniform>;
+  uSunVisibilityOriginZ: ReturnType<typeof uniform>;
+  uSunVisibilityWorldSize: ReturnType<typeof uniform>;
+  uSunVisibilityValid: ReturnType<typeof uniform>;
 }
 
 export interface InfiniteFarShellMaterialOptions {
@@ -20,6 +25,8 @@ export interface InfiniteFarShellMaterialOptions {
   useVertexBiomeColor?: boolean;
 }
 
+const FAR_SUN_VISIBILITY_SHADE_MIN = 0.62;
+
 function v3c(c: THREE.Color): TslNode {
   return vec3(c.r, c.g, c.b);
 }
@@ -28,6 +35,7 @@ export function createInfiniteFarShellMaterial(
   options: InfiniteFarShellMaterialOptions,
 ): MeshBasicNodeMaterial {
   const { lighting, innerMeters, outerMeters, nearBlendMeters, farFadeMeters, debugShowMissingFallback } = options;
+  const sunVisibilityAtlas = getSunLightGpuAtlas();
 
   const n = normalize(normalGeometry);
   const uLight = uniform(lighting.sunDirection.clone());
@@ -40,13 +48,30 @@ export function createInfiniteFarShellMaterial(
   const uNearBlend = float(nearBlendMeters);
   const uFarFade = float(farFadeMeters);
   const uDebugFallback = uniform(debugShowMissingFallback ? 1 : 0);
+  const uSunVisibilityOriginX = uniform(sunVisibilityAtlas.originX);
+  const uSunVisibilityOriginZ = uniform(sunVisibilityAtlas.originZ);
+  const uSunVisibilityWorldSize = uniform(sunVisibilityAtlas.worldSize);
+  const uSunVisibilityValid = uniform(sunVisibilityAtlas.valid);
+
+  const visibilityWorldUv = vec2(
+    positionWorld.x.sub(uSunVisibilityOriginX).div(uSunVisibilityWorldSize),
+    positionWorld.z.sub(uSunVisibilityOriginZ).div(uSunVisibilityWorldSize),
+  );
+  const visibilityInside = step(float(0.0), visibilityWorldUv.x)
+    .mul(step(visibilityWorldUv.x, float(1.0)))
+    .mul(step(float(0.0), visibilityWorldUv.y))
+    .mul(step(visibilityWorldUv.y, float(1.0)))
+    .mul(uSunVisibilityValid);
+  const visibilitySample = texture(sunVisibilityAtlas.texture, clamp(visibilityWorldUv, float(0.0), float(1.0))).r;
+  const sunVisibility = mix(float(1.0), mix(float(FAR_SUN_VISIBILITY_SHADE_MIN), float(1.0), visibilitySample), visibilityInside);
 
   const sun = max(dot(n, uLight), float(0));
   const sky = clamp(n.y.mul(0.5).add(0.5), float(0), float(1));
   const hemi = mix(uGround, uSky, sky);
-  const light = hemi.add(uSun.mul(pow(sun, float(1.35))));
+  const directSun = uSun.mul(pow(sun, float(1.35))).mul(sunVisibility);
+  const light = hemi.add(directSun);
 
-  const distXZ = vec2(positionGeometry.x, positionGeometry.z).length();
+  const distXZ = vec2(positionWorld.x, positionWorld.z).length();
   const nearFade = smoothstep(uInner, uInner.add(uNearBlend), distXZ);
   const farFade = float(1).sub(smoothstep(uOuter.sub(uFarFade), uOuter, distXZ));
   const shellFade = nearFade.mul(farFade);
@@ -66,9 +91,25 @@ export function createInfiniteFarShellMaterial(
   const material = new MeshBasicNodeMaterial();
   material.side = THREE.DoubleSide;
   material.colorNode = mix(normalColor, debugOutput, uDebugFallback);
-  material.userData.farShellMaterialUniforms = { uDebugFallback } satisfies FarShellMaterialUniformRefs;
+  material.userData.farShellMaterialUniforms = {
+    uDebugFallback,
+    uSunVisibilityOriginX,
+    uSunVisibilityOriginZ,
+    uSunVisibilityWorldSize,
+    uSunVisibilityValid,
+  } satisfies FarShellMaterialUniformRefs;
 
   return material;
+}
+
+export function updateFarShellMaterialSunVisibility(material: MeshBasicNodeMaterial): void {
+  const refs = material.userData.farShellMaterialUniforms as FarShellMaterialUniformRefs | undefined;
+  if (!refs) return;
+  const atlas = getSunLightGpuAtlas();
+  refs.uSunVisibilityOriginX.value = atlas.originX;
+  refs.uSunVisibilityOriginZ.value = atlas.originZ;
+  refs.uSunVisibilityWorldSize.value = atlas.worldSize;
+  refs.uSunVisibilityValid.value = atlas.valid;
 }
 
 export function updateFarShellMaterialMaterial(
@@ -80,4 +121,5 @@ export function updateFarShellMaterialMaterial(
   if (options.debugShowMissingFallback !== undefined) {
     refs.uDebugFallback.value = options.debugShowMissingFallback ? 1 : 0;
   }
+  updateFarShellMaterialSunVisibility(material);
 }
