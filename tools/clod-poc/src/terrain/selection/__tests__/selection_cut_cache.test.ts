@@ -135,6 +135,39 @@ describe("SelectionCutCache", () => {
     expect(decision.hit).toBe(true);
   });
 
+  it("returns hit under freezeSelection despite near-field movement", () => {
+    const input = baseInput({ freezeSelection: true });
+    const cache = committedCache(input);
+
+    const decision = cache.decide(baseInput({
+      freezeSelection: true,
+      frameId: 2,
+      bubbleCenterX: 128,
+      bubbleCenterZ: 256,
+      bubbleRadius: 96,
+    }));
+
+    expect(decision.hit).toBe(true);
+  });
+
+  it("returns hit under freezeSelection despite WebGPU map changes and max reuse age", () => {
+    const input = baseInput({
+      freezeSelection: true,
+      webgpuSelectionEnabled: true,
+      webgpuErrorMapGeneration: "1:1",
+    });
+    const cache = committedCache(input);
+
+    const decision = cache.decide(baseInput({
+      freezeSelection: true,
+      frameId: 100,
+      webgpuSelectionEnabled: true,
+      webgpuErrorMapGeneration: "2:100",
+    }));
+
+    expect(decision.hit).toBe(true);
+  });
+
   it("returns miss when freezeSelection toggles", () => {
     const cache = committedCache();
 
