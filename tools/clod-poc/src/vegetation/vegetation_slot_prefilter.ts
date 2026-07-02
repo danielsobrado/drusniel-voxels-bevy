@@ -162,7 +162,7 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
     clusterDimSlots,
     clusterGrid,
     clusterWords,
-    activeSlotIndices: activeSlotScratch.slice(0, activeSlotCount),
+    activeSlotIndices: activeSlotScratch.subarray(0, activeSlotCount),
     candidateSlotsBeforePrefilter,
     candidateSlotsAfterPrefilter: activeSlotCount,
     rejectedClusters,
