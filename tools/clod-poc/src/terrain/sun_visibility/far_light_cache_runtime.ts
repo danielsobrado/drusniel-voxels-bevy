@@ -10,6 +10,7 @@ export function createSunLightCacheRuntime(options: SunLightOptions) {
 
   return {
     readWorld: core.readWorld,
+    peekWorld: core.peekWorld,
     enqueueTile: core.enqueueTile,
     updateBudgeted(provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>, frameIndex: number, nowMs: number) {
       core.stats.active = options.active;
