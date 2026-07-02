@@ -11,6 +11,7 @@ import type { UnderstorySettings } from "../../understory/understory_config.js";
 import type { ForestLightingSettings } from "../../forest_lighting/forest_lighting_config.js";
 import type { WaterConfig } from "../../water/waterConfig.js";
 import { isLowSunScene, sceneFromSearchParams } from "../../scenes/scene_registry.js";
+import { clampGrassDepthPrepassTier, DEFAULT_GRASS_DEPTH_PREPASS_TIER } from "../../grass/grass_depth_prepass_runtime.js";
 import { applyValidatedArchiveState } from "./archive_state_mapper.js";
 import { createBrushSliceState } from "./brush_state.js";
 import { createClodSliceState } from "./clod_state.js";
@@ -102,6 +103,14 @@ function queryFlagEnabled(searchParams: URLSearchParams, keys: readonly string[]
     if (raw === "0" || raw === "false") return false;
   }
   return defaultValue;
+}
+
+function grassDepthPrepassTierFromQuery(searchParams: URLSearchParams): number {
+  const enabled = queryFlagEnabled(searchParams, ["grassDepthPrepass", "vegetationDepthPrepass", "prepass"], true);
+  if (!enabled) return 0;
+  return clampGrassDepthPrepassTier(
+    nonNegativeNumberParam(searchParams, ["grassDepthPrepassTier", "prepassTier"]) ?? DEFAULT_GRASS_DEPTH_PREPASS_TIER,
+  );
 }
 
 function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
@@ -218,6 +227,7 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
 
 export function createClodAppState(params: CreateClodAppStateParams): ClodAppState {
   const audio = getAudioState();
+  const grassDepthPrepassTier = grassDepthPrepassTierFromQuery(params.searchParams);
   const slices: AppStateSlices = {
     clod: createClodSliceState({
       cfg: params.cfg,
@@ -246,7 +256,8 @@ export function createClodAppState(params: CreateClodAppStateParams): ClodAppSta
       understoryConfig: params.understoryConfig,
       forestLightingConfig: params.forestLightingConfig,
       grassRingDebug: params.searchParams.get("grassRingDebug") === "1",
-      grassDepthPrepassEnabled: queryFlagEnabled(params.searchParams, ["grassDepthPrepass", "vegetationDepthPrepass", "prepass"], true),
+      grassDepthPrepassEnabled: grassDepthPrepassTier > 0,
+      grassDepthPrepassTier,
     }),
     water: createWaterSliceState(params.waterConfig),
     weather: createWeatherSliceState({
