@@ -1,4 +1,6 @@
 import { TREE_GPU_RING_CELL, treeGpuRingGrid } from "../gpu/tree_ring_compute.js";
+import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG, type VegetationTerrainRejectionConfig } from "../vegetation/terrain_rejection_config.js";
+import { quantizeTerrainRejectionBucket } from "../vegetation/terrain_rejection_cache.js";
 import {
   createVegetationVisibilityProvider,
   type TerrainHeightSampler,
@@ -18,6 +20,10 @@ export interface TreeRingClusterVisibilityOptions {
   settings: TreeSettings;
   sampler?: TreeTerrainSampler;
   clusterDimCells?: number;
+  terrainRevision?: number;
+  providerRevision?: number;
+  cache?: TreeRingClusterVisibilityCache;
+  cacheConfig?: Pick<VegetationTerrainRejectionConfig, "decisionCacheEnabled" | "cameraBucketM">;
 }
 
 export interface TreeRingClusterVisibilityMask {
@@ -32,12 +38,87 @@ export interface TreeRingClusterVisibilityMask {
   candidateSlotsBeforePrefilter: number;
   candidateSlotsAfterPrefilter: number;
   skippedCandidateEstimate: number;
+  cacheHits: number;
+  cacheMisses: number;
   reasonCounts: Record<VegetationVisibilityReason, number>;
+}
+
+export interface TreeRingClusterVisibilityDecision {
+  visible: boolean;
+  reason: VegetationVisibilityReason;
+}
+
+export interface TreeRingClusterVisibilityCacheStats {
+  hits: number;
+  misses: number;
+  entries: number;
+  evictions: number;
 }
 
 interface ClusterProbe {
   x: number;
   z: number;
+}
+
+interface CacheEntry {
+  decision: TreeRingClusterVisibilityDecision;
+  lastUsed: number;
+}
+
+export class TreeRingClusterVisibilityCache {
+  private readonly entries = new Map<string, CacheEntry>();
+  private clock = 0;
+  private hits = 0;
+  private misses = 0;
+  private evictions = 0;
+
+  constructor(private readonly maxEntries = DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.decisionCacheMaxEntries) {}
+
+  get(key: string): TreeRingClusterVisibilityDecision | null {
+    const entry = this.entries.get(key);
+    if (!entry) {
+      this.misses++;
+      return null;
+    }
+    this.hits++;
+    entry.lastUsed = ++this.clock;
+    return entry.decision;
+  }
+
+  set(key: string, decision: TreeRingClusterVisibilityDecision): void {
+    if (this.maxEntries <= 0) return;
+    this.entries.set(key, { decision, lastUsed: ++this.clock });
+    this.prune();
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+
+  stats(): TreeRingClusterVisibilityCacheStats {
+    return {
+      hits: this.hits,
+      misses: this.misses,
+      entries: this.entries.size,
+      evictions: this.evictions,
+    };
+  }
+
+  private prune(): void {
+    while (this.entries.size > this.maxEntries) {
+      let oldestKey: string | null = null;
+      let oldestUsed = Number.POSITIVE_INFINITY;
+      for (const [key, entry] of this.entries) {
+        if (entry.lastUsed < oldestUsed) {
+          oldestUsed = entry.lastUsed;
+          oldestKey = key;
+        }
+      }
+      if (!oldestKey) return;
+      this.entries.delete(oldestKey);
+      this.evictions++;
+    }
+  }
 }
 
 export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisibilityOptions): TreeRingClusterVisibilityMask {
@@ -49,6 +130,8 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
   const reasonCounts = createReasonCounts();
   const provider = createVegetationVisibilityProvider();
   const terrainSampler = createTerrainHeightSampler(options.sampler);
+  const cacheEnabled = (options.cacheConfig?.decisionCacheEnabled ?? DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.decisionCacheEnabled) && !!options.cache;
+  const cacheStatsBefore = options.cache?.stats() ?? null;
   let hiddenClusters = 0;
   let visibleClusters = 0;
   let unknownKeptClusters = 0;
@@ -57,7 +140,18 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
   for (let clusterZ = 0; clusterZ < clusterGrid; clusterZ++) {
     for (let clusterX = 0; clusterX < clusterGrid; clusterX++) {
       const index = clusterIndex(clusterX, clusterZ, clusterGrid);
-      const result = evaluateClusterVisibility({
+      const cacheKey = cacheEnabled ? treeRingClusterVisibilityCacheKey({ clusterX, clusterZ, grid, clusterDimCells, options }) : "";
+      const result = cacheEnabled ? options.cache!.get(cacheKey) ?? evaluateAndCacheCluster({
+        cache: options.cache!,
+        cacheKey,
+        clusterX,
+        clusterZ,
+        grid,
+        clusterDimCells,
+        provider,
+        terrainSampler,
+        options,
+      }) : evaluateClusterVisibility({
         clusterX,
         clusterZ,
         grid,
@@ -80,6 +174,7 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
     }
   }
 
+  const cacheStatsAfter = options.cache?.stats() ?? null;
   const candidateSlotsBeforePrefilter = grid * grid;
   return {
     grid,
@@ -93,6 +188,8 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
     candidateSlotsBeforePrefilter,
     candidateSlotsAfterPrefilter: activeSlots.length,
     skippedCandidateEstimate,
+    cacheHits: cacheStatsBefore && cacheStatsAfter ? cacheStatsAfter.hits - cacheStatsBefore.hits : 0,
+    cacheMisses: cacheStatsBefore && cacheStatsAfter ? cacheStatsAfter.misses - cacheStatsBefore.misses : 0,
     reasonCounts,
   };
 }
@@ -113,6 +210,22 @@ export function treeRingClusterMaskByteLength(settings: TreeSettings, clusterDim
   return clusterGrid * clusterGrid * Uint32Array.BYTES_PER_ELEMENT;
 }
 
+function evaluateAndCacheCluster(input: {
+  cache: TreeRingClusterVisibilityCache;
+  cacheKey: string;
+  clusterX: number;
+  clusterZ: number;
+  grid: number;
+  clusterDimCells: number;
+  provider: ReturnType<typeof createVegetationVisibilityProvider>;
+  terrainSampler: TerrainHeightSampler | undefined;
+  options: TreeRingClusterVisibilityOptions;
+}): TreeRingClusterVisibilityDecision {
+  const decision = evaluateClusterVisibility(input);
+  input.cache.set(input.cacheKey, decision);
+  return decision;
+}
+
 function evaluateClusterVisibility(input: {
   clusterX: number;
   clusterZ: number;
@@ -121,7 +234,7 @@ function evaluateClusterVisibility(input: {
   provider: ReturnType<typeof createVegetationVisibilityProvider>;
   terrainSampler: TerrainHeightSampler | undefined;
   options: TreeRingClusterVisibilityOptions;
-}): { visible: boolean; reason: VegetationVisibilityReason } {
+}): TreeRingClusterVisibilityDecision {
   const probes = clusterProbes(input.clusterX, input.clusterZ, input.grid, input.clusterDimCells, input.options);
   let hiddenProbeCount = 0;
   for (const probe of probes) {
@@ -229,6 +342,37 @@ function slotsForCluster(clusterX: number, clusterZ: number, grid: number, clust
     }
   }
   return slots;
+}
+
+function treeRingClusterVisibilityCacheKey(input: {
+  clusterX: number;
+  clusterZ: number;
+  grid: number;
+  clusterDimCells: number;
+  options: TreeRingClusterVisibilityOptions;
+}): string {
+  const visibility = input.options.settings.gpu.terrainVisibility;
+  const bucketM = input.options.cacheConfig?.cameraBucketM ?? DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.cameraBucketM;
+  return [
+    "tree",
+    input.clusterX,
+    input.clusterZ,
+    input.grid,
+    input.clusterDimCells,
+    quantizeTerrainRejectionBucket(input.options.centerX, bucketM),
+    quantizeTerrainRejectionBucket(input.options.centerZ, bucketM),
+    quantizeTerrainRejectionBucket(input.options.cameraY, bucketM),
+    Math.floor(input.options.worldCells),
+    input.options.settings.seed,
+    input.options.settings.distanceM,
+    visibility.enabled ? 1 : 0,
+    visibility.minDistanceM,
+    visibility.sampleCount,
+    visibility.heightMarginM,
+    visibility.crownHeightM,
+    input.options.terrainRevision ?? 0,
+    input.options.providerRevision ?? 0,
+  ].join("|");
 }
 
 function clusterRadiusM(clusterDimCells: number): number {
