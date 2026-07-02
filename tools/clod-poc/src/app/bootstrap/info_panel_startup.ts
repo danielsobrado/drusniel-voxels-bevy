@@ -58,12 +58,19 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
     phase0TargetVisibleM: input.longView.phase0TargetVisibleM,
     queryScene: input.longView.queryScene,
   });
+  let lastTreeGpuWarningLogged: string | null = null;
 
   const setPerfModeQuery = (enabled: boolean) => {
     const next = new URLSearchParams(location.search);
     if (enabled) next.set("clodPerf", "1");
     else next.delete("clodPerf");
     history.replaceState(null, "", `${location.pathname}${next.toString() ? `?${next.toString()}` : ""}${location.hash}`);
+  };
+
+  const logTreeGpuWarningIfNeeded = (warning: string | null) => {
+    if (!warning || warning === lastTreeGpuWarningLogged) return;
+    lastTreeGpuWarningLogged = warning;
+    console.warn(`[trees] ${warning}`);
   };
 
   const currentOverlaySnapshot = (): ClodOverlaySnapshot => {
@@ -97,6 +104,7 @@ export function createInfoPanelController(ctx: UiStartupContext): InfoPanelContr
       ? `player: grounded=${player.grounded}  physics p95=${player.physicsP95Ms().toFixed(2)} ms  collider pages=${player.lastPagesTested}`
       : `view: ${interaction.mode}`;
     const sceneLabel = queryGrassPerfScene ? "  GRASS PERF" : queryTreePerfScene ? "  TREE PERF" : queryForestFloorScene ? "  FOREST FLOOR" : "";
+    logTreeGpuWarningIfNeeded(formatTreeGpuFallbackWarning(state.treesEnabled, state.treeGpuEnabled, treeStats.current));
     info.textContent =
       `Drusniel Voxels Web — ${WORLD}x${WORLD} pages${sceneLabel}\n` +
       `cut: ${selection.renderedCount} nodes  (${selection.levelSummary})\n` +
