@@ -169,7 +169,7 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
       formatEarlyTerrainSuffix(nextGrassStats.earlyTerrainRejectedPatches, nextGrassStats.earlyTerrainSkippedCandidates) +
       formatGpuPrefilterSuffix(nextGrassStats.gpuRingCandidateCountBeforePrefilter, nextGrassStats.gpuRingCandidateCountAfterPrefilter);
     input.state.grassEdgeSuppressed = nextGrassStats.edgeSuppressedCandidates;
-    input.state.grassCandidateCount = nextGrassStats.generatedCandidates;
+    input.state.grassCandidateCount = formatGrassCandidateSummary(nextGrassStats);
     presenter.grassBladeCountController?.updateDisplay();
     presenter.grassVisiblePatchesController?.updateDisplay();
     presenter.grassTierSummaryController?.updateDisplay();
@@ -182,6 +182,13 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     currentTreeStats: nextTreeStats ?? treeStats,
     currentUnderstoryStats: nextUnderstoryStats ?? understoryStats,
   };
+}
+
+function formatGrassCandidateSummary(stats: GrassStats): string {
+  const before = stats.gpuRingCandidateCountBeforePrefilter;
+  const after = stats.gpuRingCandidateCountAfterPrefilter;
+  if (before !== undefined && after !== undefined && before > 0 && before !== after) return `${after}/${before}`;
+  return `${stats.generatedCandidates}`;
 }
 
 function formatEarlyTerrainSuffix(rejected: number | undefined, skipped: number | undefined): string {
