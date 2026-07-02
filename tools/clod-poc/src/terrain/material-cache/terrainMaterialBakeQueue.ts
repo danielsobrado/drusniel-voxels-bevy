@@ -37,6 +37,7 @@ export class TerrainMaterialBakeQueue {
       const job = this.jobs[i]!;
       if (!predicate(job)) continue;
       this.jobs.splice(i, 1);
+      this.queuedKeys.delete(job.cacheKey);
       removed++;
     }
     return removed;
