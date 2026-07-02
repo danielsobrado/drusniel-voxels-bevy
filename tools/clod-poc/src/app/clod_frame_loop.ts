@@ -230,9 +230,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       const hooks = render.getHooks();
       if (hooks?.stats) {
         const counters = hooks.stats.counters;
-        counters["selectionCache.hits"] = selectionStats.cache.hits;
-        counters["selectionCache.misses"] = selectionStats.cache.misses;
-        counters["selectionCache.lastHit"] = selectionStats.cache.lastHit ? 1 : 0;
         if (currentTreeStats) {
           // CPU patch path (trees.gpu.enabled=false): three.js frustum-culls
           // whole patches, so visible<patches when the camera looks away.
