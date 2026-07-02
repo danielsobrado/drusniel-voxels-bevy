@@ -9,6 +9,7 @@ import {
   understoryDepthPrepassFromQuery,
 } from "../../understory/understory_depth_prepass_runtime.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
+import "../../understory/understory_gpu_ring_reinit_guard.js";
 import { UnderstorySystem, type UnderstoryStats } from "../../understory/understory_system.js";
 
 export interface UnderstoryControllerUiState {
@@ -87,51 +88,40 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
     hydrologyData: deps.hydrologyData,
     hydrologyWaterTexture: deps.hydrologyWaterTexture,
   });
-  assertPageMeshSignaturesUnchanged(signaturesBefore, pageMeshSignatures(deps.nodes));
+  assertPageMeshSignaturesUnchanged(signaturesBefore, deps.nodes, "understory init");
 
-  const refreshStats = () => {
-    deps.syncStatsToState(system.getStats());
-  };
-
-  const rebuildWithCurrentSettings = () => {
-    system.updateSettings(makeSettings());
-    system.rebuild();
-    refreshStats();
-  };
+  const sync = () => deps.syncStatsToState(system.getStats());
+  sync();
 
   return {
     system,
     makeSettings,
-    applySettings() {
-      rebuildWithCurrentSettings();
+    applySettings: () => {
+      system.updateSettings(makeSettings());
+      sync();
     },
-    rebuild() {
-      rebuildWithCurrentSettings();
+    rebuild: () => {
+      system.updateSettings(makeSettings());
+      system.rebuild();
+      sync();
     },
-    refreshStats,
-    update(elapsedSeconds, ringCenter, camera) {
+    refreshStats: sync,
+    update: (elapsedSeconds, ringCenter, camera) => {
       system.update(elapsedSeconds, ringCenter, camera);
     },
-    updateLighting(lighting) {
-      system.updateLighting(lighting);
-    },
-    setEnabled(enabled) {
+    updateLighting: (lighting) => system.updateLighting(lighting),
+    setEnabled: (enabled) => {
+      deps.getUiState().understoryEnabled = enabled;
       system.setEnabled(enabled);
+      sync();
     },
-    setDepthPrepassEnabled(enabled) {
-      setUnderstoryDepthPrepassEnabled(enabled);
-      system.rebuild();
-      refreshStats();
-    },
-    markPatchesDirty() {
-      system.markPatchesDirty();
-      system.rebuild();
-      refreshStats();
-    },
+    setDepthPrepassEnabled: (enabled) => setUnderstoryDepthPrepassEnabled(enabled),
+    markPatchesDirty: () => system.markPatchesDirty(),
   };
 }
 
 function initialUnderstoryDepthPrepassEnabled(): boolean {
-  if (typeof location === "undefined") return false;
-  return understoryDepthPrepassFromQuery(new URLSearchParams(location.search));
+  return understoryDepthPrepassFromQuery(
+    typeof location === "undefined" ? "" : location.search,
+  ).enabled;
 }
