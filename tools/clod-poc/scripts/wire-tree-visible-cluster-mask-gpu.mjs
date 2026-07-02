@@ -32,10 +32,10 @@ function checkTransformOrder() {
   const targetStart = source.indexOf("const targetOrder = `");
   const targetEnd = source.indexOf("`;", targetStart + 1);
   const target = targetStart >= 0 && targetEnd > targetStart ? source.slice(targetStart, targetEnd) : "";
-  const terrainReject = target.indexOf("if (terrain_${\" + \"hidden) { return; }");
-  const visibleReject = target.indexOf("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
-  const shadowAppend = target.indexOf("${shadowAppendFn}(species, TREE_LOD_NEAR");
-  const visibleAppend = target.indexOf("${visibleAppendFn}(species, TREE_LOD_NEAR");
+  const terrainReject = target.indexOf("terrainRejectStmt");
+  const visibleReject = target.indexOf("clusterRejectStmt");
+  const shadowAppend = target.indexOf("shadowAppendFn}(species, TREE_LOD_NEAR");
+  const visibleAppend = target.indexOf("visibleAppendFn}(species, TREE_LOD_NEAR");
   const valid = terrainReject >= 0 && shadowAppend >= 0 && visibleReject >= 0 && visibleAppend >= 0
     && terrainReject < shadowAppend && shadowAppend < visibleReject && visibleReject < visibleAppend;
   return {
