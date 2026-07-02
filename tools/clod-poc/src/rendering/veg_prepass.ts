@@ -1,5 +1,11 @@
 import { EqualDepth, InstancedMesh, Mesh, type Material, type Side } from "three";
 import { NodeMaterial, type WebGPURenderer } from "three/webgpu";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "./material_churn/material_churn_diagnostics.js";
+import { trackCreatedMaterial } from "./material_churn/tracked_material_factory.js";
 
 const WGSL_ATTRIBUTE_PREFIX = String.fromCharCode(64);
 
@@ -44,22 +50,28 @@ interface UniformMaterialShape extends Material {
 }
 
 export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: DepthPrepassTwinOptions = {}): Mesh {
-  const material = new NodeMaterial();
-  const materialNodes = material as unknown as NodeMaterialShape;
-  materialNodes.positionNode = nodes.positionNode;
-  if (nodes.maskNode !== undefined) materialNodes.maskNode = nodes.maskNode;
-  material.side = nodes.side;
-  material.colorWrite = false;
-  material.depthWrite = true;
-  material.depthTest = true;
+  const material = createPrepassNodeMaterial(nodes, `veg-depth-prepass:${mesh.name || "mesh"}`);
 
   const sourceMaterial = singleMeshMaterial(mesh);
   const colorMaterial = options.cloneColorMaterial === false
     ? sourceMaterial
-    : cloneColorMaterialWithSharedUniforms(sourceMaterial);
-  colorMaterial.depthFunc = EqualDepth;
-  colorMaterial.depthWrite = false;
-  colorMaterial.needsUpdate = true;
+    : cloneColorMaterialWithSharedUniforms(sourceMaterial, `veg-depth-prepass-color:${mesh.name || "mesh"}`);
+  let colorMaterialChanged = false;
+  colorMaterialChanged = setPipelineSensitiveMaterialProperty(
+    materialChurnDiagnostics,
+    colorMaterial,
+    "depthFunc",
+    EqualDepth,
+    "veg-depth-prepass-color-depth-func",
+  ) || colorMaterialChanged;
+  colorMaterialChanged = setPipelineSensitiveMaterialProperty(
+    materialChurnDiagnostics,
+    colorMaterial,
+    "depthWrite",
+    false,
+    "veg-depth-prepass-color-depth-write",
+  ) || colorMaterialChanged;
+  if (colorMaterialChanged) setMaterialNeedsUpdate(materialChurnDiagnostics, colorMaterial, "veg-depth-prepass-color");
   mesh.material = colorMaterial;
 
   const twin = new Mesh(mesh.geometry, material);
@@ -79,8 +91,8 @@ function singleMeshMaterial(mesh: Mesh): Material {
   return mesh.material;
 }
 
-function cloneColorMaterialWithSharedUniforms(sourceMaterial: Material): Material {
-  const clone = sourceMaterial.clone();
+function cloneColorMaterialWithSharedUniforms(sourceMaterial: Material, reason: string): Material {
+  const clone = trackCreatedMaterial(sourceMaterial.clone(), reason);
   const sourceUniforms = (sourceMaterial as UniformMaterialShape).uniforms;
   if (sourceUniforms !== undefined) {
     (clone as UniformMaterialShape).uniforms = sourceUniforms;
@@ -104,14 +116,7 @@ function cloneColorMaterialWithSharedUniforms(sourceMaterial: Material): Materia
  * twin must NOT dispose that attribute (it belongs to the colour mesh).
  */
 export function instancedDepthPrepassTwin(mesh: InstancedMesh, nodes: PrepassNodes): InstancedMesh {
-  const material = new NodeMaterial();
-  const materialNodes = material as unknown as NodeMaterialShape;
-  materialNodes.positionNode = nodes.positionNode;
-  if (nodes.maskNode !== undefined) materialNodes.maskNode = nodes.maskNode;
-  material.side = nodes.side;
-  material.colorWrite = false;
-  material.depthWrite = true;
-  material.depthTest = true;
+  const material = createPrepassNodeMaterial(nodes, `veg-instanced-depth-prepass:${mesh.name || "instanced"}`);
 
   const twin = new InstancedMesh(mesh.geometry, material, mesh.instanceMatrix.count);
   twin.instanceMatrix = mesh.instanceMatrix; // share per-instance transforms
@@ -123,4 +128,16 @@ export function instancedDepthPrepassTwin(mesh: InstancedMesh, nodes: PrepassNod
   twin.renderOrder = -100;
 
   return twin;
+}
+
+function createPrepassNodeMaterial(nodes: PrepassNodes, reason: string): NodeMaterial {
+  const material = trackCreatedMaterial(new NodeMaterial(), reason);
+  const materialNodes = material as unknown as NodeMaterialShape;
+  materialNodes.positionNode = nodes.positionNode;
+  if (nodes.maskNode !== undefined) materialNodes.maskNode = nodes.maskNode;
+  setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "side", nodes.side, `${reason}:side`);
+  setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "colorWrite", false, `${reason}:color-write`);
+  setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthWrite", true, `${reason}:depth-write`);
+  setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthTest", true, `${reason}:depth-test`);
+  return material;
 }
