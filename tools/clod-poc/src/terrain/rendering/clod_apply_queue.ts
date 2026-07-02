@@ -29,7 +29,7 @@ export const DEFAULT_CLOD_APPLY_BUDGET: ClodApplyBudget = {
 };
 
 export interface ClodGeometryApplyResult {
-  applied: boolean;
+  applied?: boolean;
   geometryMs: number;
   materialMs: number;
   triangles: number;
@@ -105,7 +105,7 @@ export class ClodApplyQueue {
         result.geometryMs,
         result.triangles || triangleCount(job.node.mesh),
         result.reusedGeometry,
-        result.applied,
+        result.applied !== false,
       );
       this.statsRecorder.recordMaterial(result.materialMs);
       this.deps.onGeometryApplied?.(job.node);
