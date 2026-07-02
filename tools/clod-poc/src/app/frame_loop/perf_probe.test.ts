@@ -14,6 +14,7 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
     propsMs: 3,
     otherMs: 1,
     frameSetupMs: 1,
+    inputMs: 0.5,
     selectionUpdateMs: 1,
     longViewDiagnosticsMs: 0,
     farSummaryMs: 0,
@@ -45,6 +46,14 @@ function sample(overrides: Partial<FramePerfSample> = {}): FramePerfSample {
     weatherMs: 0,
     propsRestMs: 1,
     propsUnattributedMs: 0,
+    materialChurnNewMaterials: 0,
+    materialChurnAssignments: 0,
+    materialChurnNeedsUpdate: 0,
+    materialChurnVersionChanges: 0,
+    materialChurnPipelineSensitiveChanges: 0,
+    materialChurnRendererProgramCount: 0,
+    materialChurnRendererProgramDelta: 0,
+    materialChurnSuspectedPipelineKeyChanges: 0,
     renderedCount: 4,
     terrainTriangles: 12000,
     chunkGroupsBuilt: 0,
@@ -88,6 +97,7 @@ describe("frame perf probe", () => {
   it("zeros every frame-loop phase bucket", () => {
     expect(createFramePerfPhaseTiming()).toEqual({
       frameSetupMs: 0,
+      inputMs: 0,
       selectionUpdateMs: 0,
       longViewDiagnosticsMs: 0,
       farSummaryMs: 0,
@@ -99,6 +109,7 @@ describe("frame perf probe", () => {
       shadowProxyMs: 0,
       clodShadowMs: 0,
       canopyMs: 0,
+      vegetationTotalMs: 0,
       borderOceanDebugMs: 0,
       statsSyncMs: 0,
     });
