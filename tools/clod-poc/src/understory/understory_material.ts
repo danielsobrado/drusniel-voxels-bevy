@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
 import {
   createForestLightingUniforms,
@@ -17,6 +18,7 @@ export interface UnderstoryMaterialHandle {
   updateSettings(settings: UnderstorySettings): void;
   updateForestLighting(state: ForestLightingMaterialState | null): void;
   dispose(): void;
+  prepassNodesFor?(cls: UnderstoryClass): PrepassNodes | undefined;
   /** WebGPU node path only; the classic WebGL path lights via scene lights. */
   updateLighting?(lighting: EnvironmentLighting): void;
 }
