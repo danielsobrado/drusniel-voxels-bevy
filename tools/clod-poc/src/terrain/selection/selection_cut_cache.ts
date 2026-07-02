@@ -59,7 +59,7 @@ export interface SelectionCutCacheKeyInput {
   bubbleRadius: number;
   forcedMaxLevel: number | null;
   webgpuSelectionEnabled: boolean;
-  webgpuErrorMapGeneration: number | string | null;
+  webgpuErrorMapGeneration: string | null;
   staleRevision: number;
   debugKey: string;
 }
@@ -124,17 +124,21 @@ function buildKeyParts(input: SelectionCutCacheKeyInput, config: SelectionCutCac
     input.forcedMaxLevel ?? "auto",
   ].join(",");
 
-  const nearFieldBucket = [
-    boolKey(input.bubbleEnabled),
-    bucket(input.bubbleCenterX, config.bubbleCenterCellSizeM),
-    bucket(input.bubbleCenterZ, config.bubbleCenterCellSizeM),
-    bucket(input.bubbleRadius, config.bubbleCenterCellSizeM),
-  ].join(",");
+  const nearFieldBucket = input.freezeSelection
+    ? "frozen"
+    : [
+      boolKey(input.bubbleEnabled),
+      bucket(input.bubbleCenterX, config.bubbleCenterCellSizeM),
+      bucket(input.bubbleCenterZ, config.bubbleCenterCellSizeM),
+      bucket(input.bubbleRadius, config.bubbleCenterCellSizeM),
+    ].join(",");
 
-  const webgpuBucket = [
-    boolKey(input.webgpuSelectionEnabled),
-    input.webgpuErrorMapGeneration ?? "cpu",
-  ].join(",");
+  const webgpuBucket = input.freezeSelection
+    ? "frozen"
+    : [
+      boolKey(input.webgpuSelectionEnabled),
+      input.webgpuErrorMapGeneration ?? "cpu",
+    ].join(",");
 
   return {
     cameraBucket,
@@ -212,7 +216,7 @@ export class SelectionCutCache {
       return { hit: false, reason: "first_frame", key, debugChanged };
     }
 
-    if (input.frameId - this.lastCommitFrame > this.config.maxReuseFrames) {
+    if (!input.freezeSelection && input.frameId - this.lastCommitFrame > this.config.maxReuseFrames) {
       this.missCount++;
       this.lastDecisionReason = "max_reuse_frames_exceeded";
       return { hit: false, reason: "max_reuse_frames_exceeded", key, debugChanged };
