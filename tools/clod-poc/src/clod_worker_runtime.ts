@@ -1,0 +1,63 @@
+import { setBorderCoastRuntime, setTerrainSurfaceOverride } from "./terrain/terrain.js";
+import type { ClodWorkerRequest, ClodWorkerResponse, SerializedHydrologyTerrain } from "./clod_worker_protocol.js";
+import type { ClodPagesConfig } from "./config.js";
+
+export interface WorkerPostContext {
+  postMessage(message: ClodWorkerResponse, transfer?: Transferable[]): void;
+}
+
+export function installHydrologyTerrain(terrain: SerializedHydrologyTerrain | null | undefined): void {
+  if (!terrain) {
+    setTerrainSurfaceOverride(null);
+    return;
+  }
+  const { res, worldCells, carvedBed } = terrain;
+  const scale = (res - 1) / Math.max(1e-6, worldCells);
+  setTerrainSurfaceOverride((x, z) => {
+    const gx = Math.max(0, Math.min(res - 1, x * scale));
+    const gz = Math.max(0, Math.min(res - 1, z * scale));
+    const x0 = Math.floor(gx);
+    const z0 = Math.floor(gz);
+    const x1 = Math.min(res - 1, x0 + 1);
+    const z1 = Math.min(res - 1, z0 + 1);
+    const fx = gx - x0;
+    const fz = gz - z0;
+    const a = carvedBed[z0 * res + x0] * (1 - fx) + carvedBed[z0 * res + x1] * fx;
+    const b = carvedBed[z1 * res + x0] * (1 - fx) + carvedBed[z1 * res + x1] * fx;
+    return a * (1 - fz) + b * fz;
+  });
+}
+
+export function installBorderCoastRuntime(
+  config: Extract<ClodWorkerRequest, { type: "build" }>["borderCoastOceanConfig"],
+  worldPagesX: number,
+  pagesCfg: ClodPagesConfig,
+): void {
+  const worldCells = worldPagesX * pagesCfg.page.chunks_per_page * pagesCfg.page.chunk_size;
+  setBorderCoastRuntime(config ?? null, worldCells);
+}
+
+export function postWorkerMessage(ctx: WorkerPostContext, message: ClodWorkerResponse, transfer?: Transferable[]): void {
+  if (!transfer || transfer.length === 0) {
+    ctx.postMessage(message);
+    return;
+  }
+  const safeTransfer: Transferable[] = [];
+  for (const item of transfer) {
+    if (!(item instanceof ArrayBuffer) || item.byteLength === 0 || safeTransfer.includes(item)) continue;
+    safeTransfer.push(item);
+  }
+  ctx.postMessage(message, safeTransfer);
+}
+
+export function errorResponse(requestId: number | null, error: unknown): ClodWorkerResponse {
+  const err = error as Error & { code?: string; details?: Record<string, unknown> };
+  return {
+    type: "error",
+    requestId,
+    message: err?.message ?? String(error),
+    name: err?.name,
+    code: err?.code,
+    details: err?.details,
+  };
+}
