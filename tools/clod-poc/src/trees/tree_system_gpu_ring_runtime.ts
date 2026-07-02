@@ -331,7 +331,14 @@ function treeClusterVisibilityProviderKey(input: TreeGpuRingRuntimeInput): strin
     visibility.sampleCount,
     visibility.heightMarginM,
     visibility.crownHeightM,
+    treeTerrainSamplerSourceRevision(input.sampler),
   ].join("|");
+}
+
+function treeTerrainSamplerSourceRevision(sampler: TreeTerrainSampler | undefined): number {
+  const revision = sampler?.sourceRevision;
+  const value = typeof revision === "function" ? revision() : revision;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function treeGpuRingIndexCounts(input: TreeGpuRingRuntimeInput): TreeGpuRingIndexCounts {
