@@ -32,8 +32,8 @@ export const DEFAULT_UNDERSTORY_GPU_SETTINGS: UnderstoryGpuSettings = {
   debugForceCpu: false,
   maxVisible: 12_000,
   workgroupSize: 64,
-  readbackVisibleLists: true,
-  debugShowGpuCounts: true,
+  readbackVisibleLists: false,
+  debugShowGpuCounts: false,
   debugValidateAgainstCpu: false,
 };
 
