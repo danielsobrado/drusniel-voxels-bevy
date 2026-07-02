@@ -47,6 +47,7 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       aerialPerspectiveEnd: 1800,
       aerialPerspectiveStrength: 0.35,
       aerialPerspectiveColor: [0.62, 0.72, 0.86],
+      cloudsEnabled: true,
       gtaoEnabled: true,
       froxelsEnabled: true,
       bounceEnabled: true,
@@ -93,6 +94,7 @@ postprocess:
     sharpen: 0.2
     dither: 0.01
   webgpu:
+    clouds_enabled: false
     gtao_enabled: false
     froxels_enabled: false
     bounce_enabled: false
@@ -123,6 +125,7 @@ postprocess:
       clarityEnabled: false,
       claritySharpen: 0.2,
       clarityDither: 0.01,
+      cloudsEnabled: false,
       gtaoEnabled: false,
       froxelsEnabled: false,
       bounceEnabled: false,
@@ -156,7 +159,7 @@ aerial_perspective:
   });
 
   it("applies URL ablation overrides", () => {
-    const params = new URLSearchParams("renderScale=0.75&postmin=1&bloom=0&fxaa=1&taa=1&taaJitter=1&taaClamp=1&contactShadows=1&clarity=1&grade=0&toneMap=agx&gtao=1&froxels=1&bounce=1");
+    const params = new URLSearchParams("renderScale=0.75&postmin=1&bloom=0&fxaa=1&taa=1&taaJitter=1&taaClamp=1&contactShadows=1&clarity=1&grade=0&toneMap=agx&clouds=1&gtao=1&froxels=1&bounce=1");
     expect(applyPostProcessQueryOverrides({
       ...DEFAULT_POST_PROCESS_SETTINGS,
       exposure: 1.8,
@@ -171,6 +174,7 @@ aerial_perspective:
       contactShadowsEnabled: true,
       clarityEnabled: false,
       aerialPerspectiveEnabled: true,
+      cloudsEnabled: true,
       gtaoEnabled: true,
       froxelsEnabled: true,
       bounceEnabled: true,
@@ -189,6 +193,7 @@ aerial_perspective:
       contactShadowsEnabled: true,
       clarityEnabled: true,
       aerialPerspectiveEnabled: false,
+      cloudsEnabled: true,
       gtaoEnabled: true,
       froxelsEnabled: true,
       bounceEnabled: true,
@@ -210,6 +215,7 @@ aerial_perspective:
         contactShadowsEnabled: false,
         clarityEnabled: false,
         aerialPerspectiveEnabled: false,
+        cloudsEnabled: false,
         gtaoEnabled: false,
         froxelsEnabled: false,
         bounceEnabled: false,
@@ -221,6 +227,7 @@ aerial_perspective:
     expect(DEFAULT_POST_PROCESS_SETTINGS.godRaysMode).toBe("off");
     expect(DEFAULT_POST_PROCESS_SETTINGS.taaEnabled).toBe(true);
     expect(DEFAULT_POST_PROCESS_SETTINGS.contactShadowsEnabled).toBe(true);
+    expect(DEFAULT_POST_PROCESS_SETTINGS.cloudsEnabled).toBe(true);
     expect(DEFAULT_POST_PROCESS_SETTINGS.gtaoEnabled).toBe(true);
     expect(DEFAULT_POST_PROCESS_SETTINGS.froxelsEnabled).toBe(true);
     expect(DEFAULT_POST_PROCESS_SETTINGS.bounceEnabled).toBe(true);
