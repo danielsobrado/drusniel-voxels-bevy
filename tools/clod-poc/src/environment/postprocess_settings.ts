@@ -52,6 +52,12 @@ export interface PostProcessSettings {
   aerialPerspectiveEnd?: number;
   aerialPerspectiveStrength?: number;
   aerialPerspectiveColor?: PostProcessColor;
+  /** WebGPU GTAO stage. WebGL ignores this flag. */
+  gtaoEnabled?: boolean;
+  /** WebGPU froxel volumetrics stage. WebGL ignores this flag. */
+  froxelsEnabled?: boolean;
+  /** WebGPU screen-space bounce stage. WebGL ignores this flag. */
+  bounceEnabled?: boolean;
   /** Light-shaft technique to apply after grading (WebGPU pipeline only). */
   godRaysMode: GodRaysMode;
   /** Step size of the screen-space raymarch toward the sun. Higher = longer shafts. */
@@ -89,7 +95,7 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   taaJitterScale: 1.0,
   taaHistoryClampEnabled: true,
   taaHistoryClampStrength: 1.0,
-  contactShadowsEnabled: false,
+  contactShadowsEnabled: true,
   contactShadowsStrength: 0.25,
   contactShadowsRadiusPx: 2.0,
   contactShadowsDepthBias: 0.002,
@@ -101,6 +107,9 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   aerialPerspectiveEnd: 1800,
   aerialPerspectiveStrength: 0.35,
   aerialPerspectiveColor: [0.62, 0.72, 0.86],
+  gtaoEnabled: true,
+  froxelsEnabled: true,
+  bounceEnabled: true,
   godRaysMode: "off",
   godRaysDensity: 0.96,
   godRaysDecay: 0.92,
@@ -211,6 +220,9 @@ export function applyPostProcessQueryOverrides(
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
+    next.gtaoEnabled = false;
+    next.froxelsEnabled = false;
+    next.bounceEnabled = false;
     next.godRaysMode = "off";
   }
 
@@ -233,6 +245,9 @@ export function applyPostProcessQueryOverrides(
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
+    next.gtaoEnabled = false;
+    next.froxelsEnabled = false;
+    next.bounceEnabled = false;
     next.godRaysMode = "off";
   }
 
@@ -245,7 +260,7 @@ export function applyPostProcessQueryOverrides(
   const fxaa = flagValue(searchParams, "fxaa") ?? flagValue(searchParams, "aa");
   if (fxaa !== null) next.fxaaEnabled = fxaa;
 
-  const taa = flagValue(searchParams, "taa");
+  const taa = flagValue(searchParams, "taa") ?? flagValue(searchParams, "traa");
   if (taa !== null) next.taaEnabled = taa;
 
   const taaJitter = flagValue(searchParams, "taaJitter")
@@ -271,6 +286,26 @@ export function applyPostProcessQueryOverrides(
 
   const fog = flagValue(searchParams, "fog") ?? flagValue(searchParams, "haze");
   if (fog === false) next.aerialPerspectiveEnabled = false;
+
+  const gtao = flagValue(searchParams, "gtao")
+    ?? flagValue(searchParams, "ao")
+    ?? flagValue(searchParams, "ambientOcclusion")
+    ?? flagValue(searchParams, "ambientocclusion");
+  if (gtao !== null) next.gtaoEnabled = gtao;
+
+  const froxels = flagValue(searchParams, "froxels")
+    ?? flagValue(searchParams, "froxel")
+    ?? flagValue(searchParams, "volumetrics")
+    ?? flagValue(searchParams, "volumetricFog")
+    ?? flagValue(searchParams, "volumetricfog");
+  if (froxels !== null) next.froxelsEnabled = froxels;
+
+  const bounce = flagValue(searchParams, "bounce")
+    ?? flagValue(searchParams, "ssBounce")
+    ?? flagValue(searchParams, "ssbounce")
+    ?? flagValue(searchParams, "colorBounce")
+    ?? flagValue(searchParams, "colorbounce");
+  if (bounce !== null) next.bounceEnabled = bounce;
 
   const godRays = flagValue(searchParams, "godRays") ?? flagValue(searchParams, "godrays");
   if (godRays === false) next.godRaysMode = "off";
@@ -325,6 +360,7 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
     const taa = isRecord(postprocess.taa) ? postprocess.taa : {};
     const contactShadows = isRecord(postprocess.contact_shadows) ? postprocess.contact_shadows : {};
     const clarity = isRecord(postprocess.clarity) ? postprocess.clarity : {};
+    const webgpu = isRecord(postprocess.webgpu) ? postprocess.webgpu : {};
     const godRays = isRecord(postprocess.god_rays) ? postprocess.god_rays : {};
     return {
       ...fallback,
@@ -359,6 +395,9 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       clarityEnabled: booleanValue(clarity.enabled, fallback.clarityEnabled),
       claritySharpen: finiteNumber(clarity.sharpen, fallback.claritySharpen),
       clarityDither: finiteNumber(clarity.dither, fallback.clarityDither),
+      gtaoEnabled: booleanValue(webgpu.gtao_enabled, fallback.gtaoEnabled),
+      froxelsEnabled: booleanValue(webgpu.froxels_enabled, fallback.froxelsEnabled),
+      bounceEnabled: booleanValue(webgpu.bounce_enabled, fallback.bounceEnabled),
       godRaysMode: godRaysMode(godRays.mode, fallback.godRaysMode),
       godRaysDensity: finiteNumber(godRays.density, fallback.godRaysDensity),
       godRaysDecay: finiteNumber(godRays.decay, fallback.godRaysDecay),
