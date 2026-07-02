@@ -104,7 +104,7 @@ export function createGpuRingDrawResources(
 function addPrepassChild(mesh: UnderstoryGpuRingMesh, handle: UnderstoryMaterialHandle, cls: UnderstoryClass): void {
   const nodes = handle.prepassNodesFor?.(cls);
   if (!nodes) return;
-  const twin = depthPrepassTwin(mesh, nodes);
+  const twin = depthPrepassTwin(mesh, nodes, { cloneColorMaterial: false });
   twin.name = `${mesh.name}-depth-prepass`;
   mesh.add(twin);
 }
@@ -168,15 +168,9 @@ function gpuBufferForAttribute(attribute: THREE.BufferAttribute, gpuBackend: Und
 
 export function clearGpuRingDraw(draw: UnderstoryGpuRingDrawResources | null): void {
   if (!draw) return;
-  const sharedMaterials = new Set<THREE.Material>();
-  for (const handle of Object.values(draw.materialHandles)) {
-    sharedMaterials.add(handle.regularMaterial);
-    for (const material of Object.values(handle.debugMaterials)) sharedMaterials.add(material);
-  }
   for (const mesh of draw.meshes) {
     disposePrepassChildren(mesh);
     mesh.geometry.dispose();
-    disposeOwnedMeshMaterial(mesh, sharedMaterials);
   }
   for (const handle of Object.values(draw.materialHandles)) {
     handle.dispose();
@@ -194,16 +188,5 @@ function disposePrepassChildren(mesh: THREE.Object3D): void {
     } else {
       material?.dispose?.();
     }
-  }
-}
-
-function disposeOwnedMeshMaterial(mesh: THREE.Mesh, sharedMaterials: ReadonlySet<THREE.Material>): void {
-  const material = mesh.material;
-  if (Array.isArray(material)) {
-    for (const item of material) {
-      if (!sharedMaterials.has(item)) item.dispose();
-    }
-  } else if (material && !sharedMaterials.has(material)) {
-    material.dispose();
   }
 }
