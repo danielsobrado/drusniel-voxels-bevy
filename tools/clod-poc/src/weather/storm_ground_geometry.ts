@@ -62,6 +62,15 @@ export function createImpactGeometry(buffers: StrikeBuffers): THREE.InstancedBuf
   return geometry;
 }
 
+export function markStrikeAttributesDirty(geometries: readonly THREE.BufferGeometry[]): void {
+  for (const geometry of geometries) {
+    for (const key of ["aLightningCenter", "aLightningNormal", "aLightningParams"]) {
+      const attr = geometry.getAttribute(key);
+      if (attr) attr.needsUpdate = true;
+    }
+  }
+}
+
 function setStrikeAttributes(geometry: THREE.InstancedBufferGeometry, buffers: StrikeBuffers): void {
   geometry.setAttribute("aLightningCenter", new THREE.InstancedBufferAttribute(buffers.center, 3));
   geometry.setAttribute("aLightningNormal", new THREE.InstancedBufferAttribute(buffers.normal, 3));
