@@ -11,6 +11,7 @@ import {
   TWO_PI,
   type GrassSettings,
 } from "./grass_config.js";
+import { getGrassMaterialBias } from "./grass_material_bias.js";
 import type { GrassGenerationStats } from "./grass_stats.js";
 import { acceptsGrassCandidate, hash2, randomSigned, sampleGrassTerrainSite } from "./grass_math.js";
 
@@ -153,6 +154,7 @@ function evaluateGrassPatchBeforeGeneration(
   for (const probe of probes) {
     const reason = staticGrassRejectReason(probe, settings);
     if (!reason) return accept("accepted");
+    if (reason === "unknown_kept") return accept("unknown_kept");
     rejectingReasons.push(reason);
   }
   return reject(rejectingReasons[0] ?? "wrong_biome", footprint, settings);
@@ -196,6 +198,7 @@ function grassRejectionCacheKey(footprint: PageFootprint, settings: GrassSetting
     settings.minHeight,
     settings.maxHeight,
     settings.placement.minGrassWeight,
+    JSON.stringify(getGrassMaterialBias(settings)),
   ].join(":");
 }
 
