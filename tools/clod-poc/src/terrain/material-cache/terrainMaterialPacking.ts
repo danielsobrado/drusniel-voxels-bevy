@@ -39,7 +39,7 @@ export function formatProfileForKey(key: TerrainMaterialCacheKey): string {
   return key.formatProfile;
 }
 
-function createUnavailableTypedChannel<T extends Uint8Array | Uint16Array | Float32Array>(
+export function createUnavailableChannel<T extends Uint8Array | Uint16Array | Float32Array = Uint8Array>(
   format: TerrainMaterialCacheFormat,
   width: number,
   height: number,
@@ -47,16 +47,12 @@ function createUnavailableTypedChannel<T extends Uint8Array | Uint16Array | Floa
   return { data: new Uint8Array(0) as unknown as T, width, height, format, available: false };
 }
 
-export function createUnavailableChannel(format: TerrainMaterialCacheFormat, width: number, height: number): TerrainMaterialChannel<Uint8Array> {
-  return createUnavailableTypedChannel(format, width, height);
-}
-
 export function createUint8Channel(data: Uint8Array, width: number, height: number, format: TerrainMaterialCacheFormat): TerrainMaterialChannel<Uint8Array> {
-  if (format === "none") return createUnavailableTypedChannel(format, width, height);
+  if (format === "none") return createUnavailableChannel(format, width, height);
   return { data, width, height, format, available: true };
 }
 
 export function createUint16Channel(data: Uint16Array, width: number, height: number, format: TerrainMaterialCacheFormat): TerrainMaterialChannel<Uint16Array> {
-  if (format === "none") return createUnavailableTypedChannel(format, width, height);
+  if (format === "none") return createUnavailableChannel(format, width, height);
   return { data, width, height, format, available: true };
 }
