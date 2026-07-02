@@ -1,13 +1,5 @@
 import * as THREE from "three";
-
-export interface RainWeatherShaderHandle {
-  material: THREE.Material;
-  setTime(time: number): void;
-  setIntensity(intensity: number): void;
-  setCenter(center: THREE.Vector3): void;
-  setWind(x: number, z: number): void;
-  dispose(): void;
-}
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 
 const RAIN_VERTEX = /* glsl */ `
 attribute vec4 aRainOffset;
