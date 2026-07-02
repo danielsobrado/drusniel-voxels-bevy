@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
+import type { TerrainColorAdjustments } from "../../material/material.js";
+import type { TerrainMaterialUiState } from "../material/terrain_material_controller.js";
 import type { ClodPageNode, PageMesh } from "../../types.js";
 import { ClodRenderNodeCache } from "./clod_render_node_cache.js";
 import type { ClodRenderNodeCacheDeps } from "./clod_render_node_cache.js";
@@ -39,6 +41,34 @@ function node(id = "L0:0,0", pageMesh = mesh()): ClodPageNode {
     errorWorld: 0,
     lowBenefit: false,
   };
+}
+
+function materialState(): TerrainMaterialUiState {
+  return {
+    terrainMaterialSource: "debug_flat",
+    albedo: false,
+    triplanar: true,
+    normalMap: false,
+    proceduralMicroNormals: false,
+    normalIntensity: 1,
+    roughness: 0.8,
+    metalness: 0,
+    textureScale: 1,
+    textureBlendMode: "soft",
+    textureBlendWidth: 0.15,
+    proceduralDebugMode: "off",
+    colorByLod: false,
+    clodPerfMode: false,
+    normalColor: false,
+    normalDivergence: false,
+    divergenceGain: 1,
+    frontSideOnly: false,
+    tintBubble: false,
+  };
+}
+
+function colorAdjustments(): TerrainColorAdjustments {
+  return { brightness: 1, contrast: 1, saturation: 1, warmth: 0 };
 }
 
 function materialHandle() {
@@ -91,20 +121,14 @@ function deps(overrides: Partial<ClodRenderNodeCacheDeps> = {}) {
     materialController: materialController as unknown as ClodRenderNodeCacheDeps["materialController"],
     pageGeometryCache: pageGeometryCache as unknown as ClodRenderNodeCacheDeps["pageGeometryCache"],
     getMaterialColorForNode: vi.fn(() => 0xb9c0c8),
-    getColorAdjustments: vi.fn(() => ({ hue: 0, saturation: 1, brightness: 1, contrast: 1 })),
+    getColorAdjustments: vi.fn(colorAdjustments),
     getLighting: vi.fn(() => ({
       sunDirection: new THREE.Vector3(1, 1, 1),
       sunColor: new THREE.Color(1, 1, 1),
       skyLight: new THREE.Color(1, 1, 1),
       groundLight: new THREE.Color(1, 1, 1),
     })),
-    getMaterialState: vi.fn(() => ({
-      normalColor: false,
-      normalDivergence: false,
-      divergenceGain: 1,
-      triplanar: true,
-      frontSideOnly: false,
-    } as ClodRenderNodeCacheDeps["getMaterialState"] extends () => infer T ? T : never)),
+    getMaterialState: vi.fn(materialState),
     getNormalMode: vi.fn(() => "source"),
     config: {
       enabled: true,
