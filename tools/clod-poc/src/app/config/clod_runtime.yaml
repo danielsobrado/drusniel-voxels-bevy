@@ -49,6 +49,28 @@ material_churn:
   spike_warn_threshold_per_frame: 32
   max_tracked_materials: 4096
 
+render_resolution:
+  dpr_cap: 1.5
+  render_scale: 1.0
+  min_effective_pixel_ratio: 0.5
+  max_effective_pixel_ratio: 2.0
+  presets:
+    performance100:
+      dpr_cap: 1.0
+      render_scale: 0.85
+    low:
+      dpr_cap: 1.0
+      render_scale: 0.75
+    medium:
+      dpr_cap: 1.25
+      render_scale: 0.9
+    high:
+      dpr_cap: 1.5
+      render_scale: 1.0
+    ultra:
+      dpr_cap: 2.0
+      render_scale: 1.0
+
 digging:
   hold_interval_ms: 400
 
