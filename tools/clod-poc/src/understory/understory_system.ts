@@ -7,10 +7,15 @@ import {
   type UnderstoryGeometryMap,
 } from "./understory_geometry.js";
 import {
+  defaultUnderstoryTerrainSampler,
   emptyUnderstoryGenerationStats,
   generateUnderstoryInstances,
   type UnderstoryTerrainSampler,
 } from "./understory_instances.js";
+import {
+  recordUnderstoryEarlyRejection,
+  rejectUnderstoryPatchBeforeGeneration,
+} from "./understory_patch_terrain_rejection.js";
 import { createUnderstoryMaterialHandle, type UnderstoryMaterialHandle } from "./understory_material.js";
 import { createUnderstoryNodeMaterialHandle } from "./understory_node_material.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
@@ -81,6 +86,7 @@ export class UnderstorySystem {
   private readonly lastRefreshCenter = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
   private readonly lastCenter: THREE.Vector3;
   private stats: UnderstoryStats = emptyUnderstoryStats();
+  private readonly earlyGenerationStats = emptyUnderstoryGenerationStats();
   private readonly gpuDevice: GPUDevice | null;
   private readonly gpuBackend: UnderstoryWebGpuBackendAccess | null;
   private readonly supportsGpu: boolean;
@@ -522,6 +528,17 @@ export class UnderstorySystem {
     let added = 0;
     for (const { node } of candidates) {
       if (added >= this.settings.maxNewPatchesPerFrame || totalInstances >= this.settings.maxInstances) break;
+      const footprint = clampFootprint(node.footprint, this.worldCells);
+      const rejection = rejectUnderstoryPatchBeforeGeneration(
+        footprint,
+        this.settings,
+        this.sampler ?? defaultUnderstoryTerrainSampler,
+        this.worldCells,
+      );
+      if (rejection.reject) {
+        recordUnderstoryEarlyRejection(this.earlyGenerationStats, rejection);
+        continue;
+      }
       const patch = this.createPatch(node, this.settings.maxInstances - totalInstances);
       totalInstances += patch.instances.length;
       this.patches.push(patch);
@@ -630,6 +647,7 @@ export class UnderstorySystem {
   private clearPatches(): void {
     for (const patch of this.patches) this.removePatch(patch);
     this.patches = [];
+    Object.assign(this.earlyGenerationStats, emptyUnderstoryGenerationStats());
     this.updateStats();
   }
 
@@ -676,6 +694,7 @@ export class UnderstorySystem {
       stats.generatedCandidates = this.gpuRingStats.candidateCount;
       stats.acceptedCandidates = this.gpuRingStats.acceptedCandidates || this.gpuVisibleCount;
     } else {
+      mergeGenerationStats(stats, this.earlyGenerationStats);
       for (const patch of this.patches) {
         stats.totalInstances += patch.instances.length;
         stats.patches++;
