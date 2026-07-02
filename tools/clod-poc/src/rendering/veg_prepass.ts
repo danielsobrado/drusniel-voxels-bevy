@@ -39,6 +39,10 @@ interface NodeMaterialShape {
   maskNode: unknown;
 }
 
+interface UniformMaterialShape extends Material {
+  uniforms?: unknown;
+}
+
 export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: DepthPrepassTwinOptions = {}): Mesh {
   const material = new NodeMaterial();
   const materialNodes = material as unknown as NodeMaterialShape;
@@ -50,7 +54,9 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: Depth
   material.depthTest = true;
 
   const sourceMaterial = singleMeshMaterial(mesh);
-  const colorMaterial = options.cloneColorMaterial === false ? sourceMaterial : sourceMaterial.clone();
+  const colorMaterial = options.cloneColorMaterial === false
+    ? sourceMaterial
+    : cloneColorMaterialWithSharedUniforms(sourceMaterial);
   colorMaterial.depthFunc = EqualDepth;
   colorMaterial.depthWrite = false;
   colorMaterial.needsUpdate = true;
@@ -71,6 +77,15 @@ function singleMeshMaterial(mesh: Mesh): Material {
     throw new Error(`Depth prepass requires a single material mesh: ${mesh.name || "unnamed mesh"}`);
   }
   return mesh.material;
+}
+
+function cloneColorMaterialWithSharedUniforms(sourceMaterial: Material): Material {
+  const clone = sourceMaterial.clone();
+  const sourceUniforms = (sourceMaterial as UniformMaterialShape).uniforms;
+  if (sourceUniforms !== undefined) {
+    (clone as UniformMaterialShape).uniforms = sourceUniforms;
+  }
+  return clone;
 }
 
 /**
