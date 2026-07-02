@@ -1,4 +1,10 @@
 import * as THREE from "three";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "../rendering/material_churn/material_churn_diagnostics.js";
+import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 const GHOST_MESH_NAME = "construction-ghost";
 const GHOST_PATCH_FLAG = "constructionGhostEffectInstalled";
@@ -25,19 +31,20 @@ function syncMaterialColor(source: THREE.MeshBasicMaterial, target: THREE.MeshBa
 }
 
 function configureGhostFill(material: THREE.MeshBasicMaterial): void {
+  let changed = false;
   material.name = "construction-ghost-fill";
-  material.transparent = true;
   material.opacity = BASE_GHOST_OPACITY;
-  material.depthWrite = false;
-  material.depthTest = true;
-  material.side = THREE.DoubleSide;
-  material.blending = THREE.NormalBlending;
-  material.toneMapped = false;
-  material.needsUpdate = true;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "transparent", true, "construction-ghost-fill") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthWrite", false, "construction-ghost-fill") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthTest", true, "construction-ghost-fill") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "side", THREE.DoubleSide, "construction-ghost-fill") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "blending", THREE.NormalBlending, "construction-ghost-fill") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "toneMapped", false, "construction-ghost-fill") || changed;
+  if (changed) setMaterialNeedsUpdate(materialChurnDiagnostics, material, "construction-ghost-fill");
 }
 
 function createOuterGlow(source: THREE.MeshBasicMaterial, geometry: THREE.BufferGeometry): THREE.Mesh {
-  const glowMaterial = new THREE.MeshBasicMaterial({
+  const glowMaterial = trackedMeshBasicMaterial({
     color: source.color,
     transparent: true,
     opacity: BASE_GLOW_OPACITY,
@@ -46,7 +53,7 @@ function createOuterGlow(source: THREE.MeshBasicMaterial, geometry: THREE.Buffer
     side: THREE.BackSide,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
-  });
+  }, "construction-ghost-outer-glow");
   glowMaterial.name = "construction-ghost-outer-glow-material";
 
   const glow = new THREE.Mesh(geometry, glowMaterial);
@@ -94,6 +101,7 @@ function enhanceConstructionGhost(object: THREE.Object3D): void {
   if (!isGhostMesh(object) || object.userData[GHOST_PATCH_FLAG] === true) return;
 
   const fill = object.material;
+  materialChurnDiagnostics.trackNewMaterial(fill, "construction-ghost-fill-existing");
   configureGhostFill(fill);
   const glow = createOuterGlow(fill, object.geometry);
   object.renderOrder = RENDER_ORDER;
