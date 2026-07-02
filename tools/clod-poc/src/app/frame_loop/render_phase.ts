@@ -43,6 +43,7 @@ export interface RenderPhaseInput {
   perfProbe: FramePerfProbe | null;
   phaseTiming: FramePerfPhaseTiming;
   gpuPasses: Record<string, number> | null;
+  afterRenderDiagnostics?: () => void;
 }
 
 const grassProfileMs = (value: number | null): string => value === null ? "-" : `${value.toFixed(2)}ms`;
@@ -117,6 +118,9 @@ export function runRenderPhase(input: RenderPhaseInput): void {
   if (input.postProcess) input.postProcess.render(input.scene, input.camera);
   else input.renderer.render(input.scene, input.camera);
   materialChurnDiagnostics.sampleRendererInfo(input.renderer);
+  const tRenderEnd = performance.now();
+
+  input.afterRenderDiagnostics?.();
 
   const hooks = input.getHooks();
   if (hooks && !hooks.ready) {
@@ -138,7 +142,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const frameMs = end - input.frameStart;
     const bubbleMs = input.tPropsStart - input.tBubbleStart;
     const propsMs = tRenderStart - input.tPropsStart;
-    const renderMs = end - tRenderStart;
+    const renderMs = tRenderEnd - tRenderStart;
     const materialChurnStats = materialChurnDiagnostics.frameStats();
     const otherMs = frameMs - selectionStats.selectionMs - bubbleMs - propsMs - renderMs;
     const vegetationPhaseMs = input.phaseTiming.vegetationTotalMs || input.vegetationTiming.totalMs;
