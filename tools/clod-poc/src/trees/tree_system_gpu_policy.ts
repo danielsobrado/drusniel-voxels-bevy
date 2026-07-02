@@ -9,6 +9,17 @@ export function treeSystemUsesGpuRingDraw(settings: TreeSettings): boolean {
   return settings.enabled && gpu.enabled && gpu.scatterEnabled && gpu.cullEnabled && !gpu.debugForceCpu;
 }
 
+export function treeCpuPatchCrossfadeEnabled(settings: TreeSettings): boolean {
+  if (!settings.lod.crossfadeEnabled || !settings.lod.ditherEnabled) return false;
+  return !treeCpuPatchesAreGpuFallback(settings);
+}
+
+export function treeCpuPatchesAreGpuFallback(settings: TreeSettings): boolean {
+  const gpu = settings.gpu;
+  if (!gpu.enabled) return false;
+  return gpu.fallbackToCpu || gpu.debugForceCpu || !gpu.scatterEnabled || !gpu.cullEnabled;
+}
+
 export function packTreeSystemGpuFrustumPlanes(camera?: THREE.Camera, out = new Float32Array(24)): Float32Array {
   if (!camera) {
     out.fill(0);
