@@ -94,6 +94,14 @@ export function createVegetationGui(
     },
   };
   const updateGrassUniforms = () => deps.grassController.applySettings();
+  const reloadWithGrassPrepass = (enabled: boolean) => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const value = enabled ? "1" : "0";
+    url.searchParams.set("prepass", value);
+    url.searchParams.set("grassDepthPrepass", value);
+    window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+  };
   const grassFolder = gui.addFolder("grass shader");
   const grassShaderOptions = Object.fromEntries(
     GRASS_SHADER_MODES.map((mode) => [
@@ -112,6 +120,7 @@ export function createVegetationGui(
     deps.grassController.setRingDebug(on);
   });
   grassFolder.add(state, "grassShaderMode", grassShaderOptions).name("shader").onChange(grassActions.rebuild);
+  grassFolder.add(state, "grassDepthPrepassEnabled").name("depth prepass (reload)").onChange(reloadWithGrassPrepass);
   grassFolder.add(state, "grassAlphaToCoverage").name("alpha to coverage").onChange(updateGrassUniforms);
   grassFolder.add(state, "grassNearCrossedQuads").name("near crossed quads").onChange(grassActions.rebuild);
   grassFolder.add(state, "grassDistance", 16, 512, 1).name("distance").onChange(updateGrassUniforms);
