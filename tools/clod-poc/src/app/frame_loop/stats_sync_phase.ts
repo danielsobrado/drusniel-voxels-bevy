@@ -45,6 +45,9 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     nextTreeStats.totalTrees !== treeStats.totalTrees ||
     nextTreeStats.visiblePatches !== treeStats.visiblePatches ||
     nextTreeStats.patches !== treeStats.patches ||
+    nextTreeStats.earlyTerrainTestedPatches !== treeStats.earlyTerrainTestedPatches ||
+    nextTreeStats.earlyTerrainRejectedPatches !== treeStats.earlyTerrainRejectedPatches ||
+    nextTreeStats.earlyTerrainSkippedCandidates !== treeStats.earlyTerrainSkippedCandidates ||
     nextTreeStats.nearTrees !== treeStats.nearTrees ||
     nextTreeStats.midTrees !== treeStats.midTrees ||
     nextTreeStats.farTrees !== treeStats.farTrees ||
@@ -142,7 +145,6 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     nextGrassStats.gpuRingVisibleNear !== grassStats.gpuRingVisibleNear ||
     nextGrassStats.gpuRingVisibleMid !== grassStats.gpuRingVisibleMid ||
     nextGrassStats.gpuRingVisibleFar !== grassStats.gpuRingVisibleFar ||
-    nextGrassStats.gpuRingVisibleSuper !== grassStats.gpuRingVisibleSuper ||
     nextGrassStats.edgeSuppressedCandidates !== grassStats.edgeSuppressedCandidates ||
     nextGrassStats.generatedCandidates !== grassStats.generatedCandidates)
   ) {
