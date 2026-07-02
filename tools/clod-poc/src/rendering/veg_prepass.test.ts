@@ -32,4 +32,15 @@ describe("depthPrepassTwin", () => {
     expect(sourceMaterial.depthFunc).toBe(EqualDepth);
     expect(sourceMaterial.depthWrite).toBe(false);
   });
+
+  it("rejects multi-material meshes explicitly", () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), [
+      new THREE.MeshBasicMaterial(),
+      new THREE.MeshBasicMaterial(),
+    ]);
+    mesh.name = "bad-depth-prepass-mesh";
+
+    expect(() => depthPrepassTwin(mesh, { positionNode: {}, side: THREE.DoubleSide }))
+      .toThrow("Depth prepass requires a single material mesh: bad-depth-prepass-mesh");
+  });
 });
