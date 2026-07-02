@@ -59,7 +59,7 @@ export interface SelectionCutCacheKeyInput {
   bubbleRadius: number;
   forcedMaxLevel: number | null;
   webgpuSelectionEnabled: boolean;
-  webgpuErrorMapGeneration: number | null;
+  webgpuErrorMapGeneration: string | null;
   staleRevision: number;
   debugKey: string;
 }
@@ -274,5 +274,4 @@ export class SelectionCutCache {
       lastReason: this.lastDecisionReason,
     };
   }
-
 }
