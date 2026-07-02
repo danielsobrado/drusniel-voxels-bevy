@@ -4,9 +4,10 @@ import { generateTreeRingValidationCounts } from "./tree_ring_validation_counts.
 import type { TreeTerrainSampler } from "./tree_instances.js";
 
 describe("tree ring validation counts", () => {
-  it("validates against an empty prefiltered slot list without sampling terrain", () => {
+  it("does not sample terrain for an empty active slot list", () => {
     const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
     settings.distanceM = 24;
+    const sampler = countingTerrain(0);
 
     const counts = generateTreeRingValidationCounts({
       centerX: 64,
@@ -14,12 +15,13 @@ describe("tree ring validation counts", () => {
       cameraY: 10,
       worldCells: 512,
       settings,
-      sampler: throwingTerrain(),
+      sampler,
       maxInstancesPerGroup: 100,
       maxShadowCastersPerGroup: 100,
       activeSlotIndices: new Uint32Array(0),
     });
 
+    expect(sampler.heightSamples).toBe(0);
     expect(counts.counts).toEqual({ near: 0, mid: 0, far: 0, impostor: 0 });
     expect(counts.groupCounts.every((count) => count === 0)).toBe(true);
     expect(counts.shadowGroupCounts.every((count) => count === 0)).toBe(true);
@@ -30,6 +32,7 @@ describe("tree ring validation counts", () => {
   it("samples only the supplied active slots", () => {
     const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
     settings.distanceM = 24;
+    settings.gpu.terrainVisibility.enabled = false;
     settings.placement.minHeightM = -1000;
     settings.placement.maxHeightM = 1000;
     const sampler = countingTerrain(0);
@@ -49,14 +52,6 @@ describe("tree ring validation counts", () => {
     expect(sampler.heightSamples).toBeLessThanOrEqual(3);
   });
 });
-
-function throwingTerrain(): TreeTerrainSampler {
-  return {
-    surfaceHeight: () => { throw new Error("terrain should not be sampled for an empty active slot list"); },
-    surfaceNormal: () => [0, 1, 0],
-    materialWeights: () => [1, 0, 0, 0],
-  };
-}
 
 function countingTerrain(height: number): TreeTerrainSampler & { heightSamples: number } {
   return {
