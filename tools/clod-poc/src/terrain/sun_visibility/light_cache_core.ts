@@ -34,6 +34,12 @@ function readTileValue(tile: LightTile, x: number, z: number, options: SunLightO
   return tile.values[cellZ * tile.resolution + cellX] ?? LIGHT_SAMPLE.missing;
 }
 
+function valueToLookup(value: number) {
+  if (value === LIGHT_SAMPLE.lit) return { kind: "lit", value: 1 } as const;
+  if (value === LIGHT_SAMPLE.shaded) return { kind: "shaded", value: 0 } as const;
+  return { kind: "missing", value: 0.5 } as const;
+}
+
 export function createSunLightCacheCore(options: SunLightOptions) {
   const entries = new Map<string, { tile: LightTile; lastUsedFrame: number }>();
   const pending = new Map<string, LightTileBuildRequest>();
@@ -86,6 +92,15 @@ export function createSunLightCacheCore(options: SunLightOptions) {
     }
   };
 
+  const peekWorld = (x: number, z: number, sunVec: THREE.Vector3, provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>) => {
+    if (!options.active) return { kind: "lit", value: 1 } as const;
+    const tile = worldToSunVisibilityTile(x, z, options.tile);
+    const sunBin = toSunBin(sunVec, options.directionBins);
+    const entry = entries.get(fullKey(tile, sunBin, provider.tileRevision(tile)));
+    if (!entry) return { kind: "pending", value: options.cache.keepLastKnown ? 0.5 : 1 } as const;
+    return valueToLookup(readTileValue(entry.tile, x, z, options));
+  };
+
   const readWorld = (x: number, z: number, sunVec: THREE.Vector3, provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>, frameIndex: number) => {
     stats.active = options.active;
     if (!options.active) return { kind: "lit", value: 1 } as const;
@@ -95,10 +110,8 @@ export function createSunLightCacheCore(options: SunLightOptions) {
     if (!entry) return { kind: "pending", value: options.cache.keepLastKnown ? 0.5 : 1 } as const;
     const value = readTileValue(entry.tile, x, z, options);
     if (value === LIGHT_SAMPLE.missing) stats.missingValues += 1;
-    if (value === LIGHT_SAMPLE.lit) return { kind: "lit", value: 1 } as const;
-    if (value === LIGHT_SAMPLE.shaded) return { kind: "shaded", value: 0 } as const;
-    return { kind: "missing", value: 0.5 } as const;
+    return valueToLookup(value);
   };
 
-  return { entries, pending, stats, enqueueTile, evictIfNeeded, readWorld };
+  return { entries, pending, stats, enqueueTile, evictIfNeeded, peekWorld, readWorld };
 }
