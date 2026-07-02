@@ -10,12 +10,12 @@ import treeBindings from "./shaders/terrain_field_bindings_tree.wgsl?raw";
 import treeRingEntry from "./shaders/tree_ring.compute.wgsl?raw";
 import understoryBindings from "./shaders/terrain_field_bindings_understory.wgsl?raw";
 import understoryRingEntry from "./shaders/understory_ring.compute.wgsl?raw";
-import { readRiverEcologySettings } from "../water/riverEcologyRuntime.js";
 import { TREE_SPECIES } from "../trees/tree_config.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
 import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
+import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
   withTreeFinalPlacementHeight,
   withTreePcgHash,
@@ -33,34 +33,8 @@ function composeShader(label: string, chunks: readonly string[]): string {
   return source;
 }
 
-function replaceConst(source: string, name: string, value: number): string {
-  const escaped = Number.isFinite(value) ? value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") : "0";
-  return source.replace(new RegExp(`const ${name}: f32 = [-0-9.]+;`), `const ${name}: f32 = ${escaped};`);
-}
-
 function withConservativeGrassFrustum(source: string): string {
   return source.replace("if (!in_frustum(vec3<f32>(wpos.x, height + 1.0, wpos.y), 2.5)) { return; }", "if (!in_frustum(vec3<f32>(wpos.x, height + 1.0, wpos.y), max(6.0, cell_size * 0.75))) { return; }");
-}
-
-function withRiverEcologyConstants(source: string): string {
-  const ecology = readRiverEcologySettings();
-  return [
-    ["GRASS_HYDRO_WATER_CLEARANCE", ecology.grassClearanceM],
-    ["GRASS_LOW_BANK_START_M", ecology.grassLowStartM],
-    ["GRASS_LOW_BANK_END_M", ecology.grassLowEndM],
-    ["GRASS_MOIST_BANK_START_M", ecology.grassMoistStartM],
-    ["GRASS_MOIST_BANK_END_M", ecology.grassMoistEndM],
-    ["UNDERSTORY_RIVER_CLEAR_M", ecology.understoryClearM],
-    ["UNDERSTORY_FERN_START_M", ecology.understoryFernStartM],
-    ["UNDERSTORY_FERN_END_M", ecology.understoryFernEndM],
-    ["UNDERSTORY_SHRUB_START_M", ecology.understoryShrubStartM],
-    ["UNDERSTORY_SHRUB_END_M", ecology.understoryShrubEndM],
-    ["TREE_HYDRO_WATER_CLEARANCE", ecology.treeClearanceM],
-    ["TREE_RIPARIAN_INNER_END_M", ecology.treeInnerEndM],
-    ["TREE_RIPARIAN_OUTER_START_M", ecology.treeOuterStartM],
-    ["TREE_RIPARIAN_OUTER_END_M", ecology.treeOuterEndM],
-    ["STONE_HYDRO_WATER_CLEARANCE", ecology.stoneClearanceM],
-  ].reduce((next, [name, value]) => replaceConst(next, name as string, value as number), source);
 }
 
 export function composeTerrainFieldShader(): string {
