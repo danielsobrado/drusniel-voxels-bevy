@@ -233,14 +233,15 @@ export class SelectionCutCache {
 
   commitMiss(key: string, frameId: number): void {
     if (!this.config.enabled) return;
-    this.lastKey = key;
-    this.lastCommitFrame = frameId;
     const pendingParts = this.pendingParts;
+    this.pendingParts = null;
     if (!pendingParts) return;
     const pendingKey = selectionKey(pendingParts);
     if (pendingKey !== key) return;
+    this.lastKey = key;
     this.lastParts = pendingParts;
     this.lastDebugKey = pendingParts.debugKey;
+    this.lastCommitFrame = frameId;
   }
 
   commit(input: SelectionCutCacheKeyInput, frameId: number): void {
@@ -250,6 +251,7 @@ export class SelectionCutCache {
     this.lastKey = selectionKey(parts);
     this.lastDebugKey = parts.debugKey;
     this.lastCommitFrame = frameId;
+    this.pendingParts = null;
   }
 
   invalidate(reason: SelectionCutCacheMissReason = "forced_invalidate"): void {
