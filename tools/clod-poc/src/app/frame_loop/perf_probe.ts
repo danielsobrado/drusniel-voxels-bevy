@@ -26,6 +26,7 @@ export function createFramePerfPhaseTiming(): FramePerfPhaseTiming {
     shadowProxyMs: 0,
     clodShadowMs: 0,
     canopyMs: 0,
+    vegetationTotalMs: 0,
     borderOceanDebugMs: 0,
     statsSyncMs: 0,
   };
