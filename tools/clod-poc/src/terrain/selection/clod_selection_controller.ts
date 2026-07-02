@@ -11,8 +11,9 @@ import type {
   DispatchOptions,
 } from "../../gpu/clod_error_px_compute.js";
 import type { ClodPageNode } from "../../types.js";
-import { selectCut, type SelectionParams, type SelectionState } from "../../clod/selection.js";
+import { selectCut, type SelectionParams, type SelectionResult, type SelectionState } from "../../clod/selection.js";
 import { crossLodAdjacencies, hashRenderedCut } from "../geometry/cross_lod_adjacency.js";
+import { buildClodSelectionCacheKey } from "./clod_selection_cache.js";
 import {
   emptyWebGpuStats,
   rebuildDebugOverlays,
@@ -57,6 +58,10 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   let lastSelectionMs = 0;
   const selSub: ClodSelectionSubphases = { cut: 0, book: 0, info: 0, overlays: 0 };
   let lastSelectionSource: "cpu" | "webgpu" = "cpu";
+  let lastSelectionCacheKey = "";
+  let selectionCacheHits = 0;
+  let selectionCacheMisses = 0;
+  let lastSelectionCacheHit = false;
   const parityTracker = createWebGpuParityTracker(
     clodRuntime.webgpuSelection.parityIntervalFrames,
   );
@@ -86,6 +91,49 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     };
   };
 
+  const selectRenderedCut = (
+    params: SelectionParams,
+    settings: ClodSelectionSettings,
+    errorPxLookup: ((node: ClodPageNode) => number | undefined) | undefined,
+  ): SelectionResult => {
+    const cacheable = !settings.webgpuSelection && !errorPxLookup;
+    const cacheKey = cacheable ? buildClodSelectionCacheKey(params, staleEditedAncestorIds) : "";
+    if (cacheable && cacheKey === lastSelectionCacheKey && lastRenderedNodes.length > 0) {
+      selectionCacheHits++;
+      lastSelectionCacheHit = true;
+      selSub.cut = 0;
+      return {
+        rendered: lastRenderedNodes,
+        state: selState,
+        forcedSplits: lastForced,
+        blockedSplits: 0,
+        nearFieldForcedSplits: lastNearFieldForced,
+      };
+    }
+
+    const tSelectCut = performance.now();
+    const result = selectCut(
+      roots,
+      params,
+      selState,
+      { errorPxLookup, forceSplitIds: staleEditedAncestorIds },
+    );
+    selSub.cut = performance.now() - tSelectCut;
+    if (cacheable) {
+      lastSelectionCacheKey = cacheKey;
+      selectionCacheMisses++;
+    } else {
+      lastSelectionCacheKey = "";
+    }
+    lastSelectionCacheHit = false;
+    return result;
+  };
+
+  const resetSelectionCache = (): void => {
+    lastSelectionCacheKey = "";
+    lastSelectionCacheHit = false;
+  };
+
   const update = () => {
     const settings = deps.getSettings();
     const selectionStart = performance.now();
@@ -113,19 +161,14 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       });
     }
     const errorPxLookup = gpuMap && compute ? compute.errorLookup(gpuMap) : undefined;
-    const tSelectCut = performance.now();
-    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectCut(
-      roots,
-      params,
-      selState,
-      { errorPxLookup, forceSplitIds: staleEditedAncestorIds },
-    );
-    selSub.cut = performance.now() - tSelectCut;
+    const selectionResult = selectRenderedCut(params, settings, errorPxLookup);
+    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectionResult;
     selState = ns;
     lastForced = forcedSplits;
     lastNearFieldForced = nearFieldForcedSplits;
     lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
 
+    const tBook = performance.now();
     const cutIds = new Set(rendered.map((n) => n.id));
     const nextTerrainViews = new Set<ClodSelectionTerrainView>();
     for (const node of rendered) {
@@ -155,6 +198,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
         v.mat.setTier(tier);
       }
     }
+    selSub.book = performance.now() - tBook;
 
     const perLevel = new Map<number, number>();
     let tris = 0;
@@ -169,7 +213,6 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     lastTriCount = tris;
 
     const tInfo = performance.now();
-    selSub.book = tInfo - tSelectCut - selSub.cut;
     const cutHash = hashRenderedCut(rendered);
     if (cutHash !== lastCutHash) {
       lastCutHash = cutHash;
@@ -214,9 +257,11 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     invalidate: () => {
       lastCutHash = -1;
       lastDebugKey = "";
+      resetSelectionCache();
     },
     resetSelState: () => {
       selState = { split: new Set() };
+      resetSelectionCache();
     },
     stats: () => ({
       renderedCount: lastRenderedCount,
@@ -230,6 +275,11 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       selectionMs: lastSelectionMs,
       selectionSource: lastSelectionSource,
       frameId: selectionFrameId,
+      cache: {
+        hits: selectionCacheHits,
+        misses: selectionCacheMisses,
+        lastHit: lastSelectionCacheHit,
+      },
       subphases: { ...selSub },
     }),
     currentTerrainViews: () => currentTerrainViews,
@@ -250,6 +300,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     },
     patchNodes: (nodes) => {
       deps.getClodErrorCompute()?.patchNodes(nodes);
+      if (nodes.length > 0) resetSelectionCache();
     },
   };
 }
