@@ -31,6 +31,11 @@ export function parseGpuReadbackMode(search: string | URLSearchParams | undefine
   return raw === "debug" || raw === "profile" || raw === "acceptance" ? raw : "off";
 }
 
+export function hasExplicitGpuReadbackOverride(kind: GpuReadbackKind, search?: string | URLSearchParams): boolean {
+  const q = toSearchParams(search ?? currentSearchParams());
+  return q.get(KIND_QUERY[kind]) === "1" || parseGpuReadbackMode(q) === "acceptance";
+}
+
 export function allowsGpuReadbackKind(kind: GpuReadbackKind, search?: string | URLSearchParams): boolean {
   const q = toSearchParams(search ?? currentSearchParams());
   if (q.get(KIND_QUERY[kind]) === "1") return true;
@@ -42,8 +47,9 @@ export function allowsGpuReadbackKind(kind: GpuReadbackKind, search?: string | U
 }
 
 export function shouldRequestGpuReadback(request: GpuReadbackRequest): boolean {
-  if (request.requested === false) return false;
-  if (!allowsGpuReadbackKind(request.kind, request.search)) return false;
+  const search = request.search ?? currentSearchParams();
+  if (request.requested === false && !hasExplicitGpuReadbackOverride(request.kind, search)) return false;
+  if (!allowsGpuReadbackKind(request.kind, search)) return false;
   const interval = Math.max(1, Math.floor(request.intervalFrames));
   return Math.max(0, Math.floor(request.frame)) % interval === 0;
 }
