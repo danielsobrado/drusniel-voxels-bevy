@@ -20,7 +20,7 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import type { RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
