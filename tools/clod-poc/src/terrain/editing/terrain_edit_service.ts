@@ -42,7 +42,7 @@ export interface TerrainEditServiceDeps {
   enqueueApplyNodes: (nodes: readonly ClodPageNode[]) => void;
   recordClodWorkerRebuild: (ms: number) => void;
   markEditedAncestorsStale: (lod0Nodes: readonly ClodPageNode[]) => void;
-  selectionController: Pick<ClodSelectionController, "patchNodes" | "invalidate" | "update">;
+  selectionController: Pick<ClodSelectionController, "patchNodes" | "invalidate">;
   applyTerrainTextures: () => void;
   grassSystem: { rebuildNodePatches(ids: string[]): void } | null;
   treeSystem: { removePatchesForNodes(ids: string[]): Array<unknown>; rebuildNodePatches(ids: string[]): void } | null;
@@ -52,7 +52,6 @@ export interface TerrainEditServiceDeps {
   refreshTreeStats: () => void;
   refreshUnderstoryStats: () => void;
   updateInfo: () => void;
-  getLastDigSummary: () => string;
   setLastDigSummary: (summary: string) => void;
   setPendingParentCount: (count: number) => void;
   setPendingParentNodes: (nodes: number) => void;
