@@ -29,6 +29,7 @@ render_node_cache:
   prefetch_children: false
   max_prefetch_creates_per_frame: 8
   warn_at_inactive_nodes: 480
+  evict_geometry_with_render_node: true
 
 digging:
   hold_interval_ms: 400
