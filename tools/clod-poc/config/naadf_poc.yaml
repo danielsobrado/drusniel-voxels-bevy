@@ -60,6 +60,9 @@ naadf_poc:
       - { name: "summary_4_8km", start_m: 4096, end_m: 8192, cell_m: 64 }
       - { name: "summary_8_16km", start_m: 8192, end_m: 16384, cell_m: 128 }
 
+  far_summary_atlas:
+    format: balanced
+
   query:
     max_steps_primary: 128
     max_steps_sun: 64

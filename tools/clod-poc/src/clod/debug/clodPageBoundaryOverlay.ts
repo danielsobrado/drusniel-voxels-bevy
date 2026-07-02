@@ -1,10 +1,23 @@
 import * as THREE from "three";
 import type { ClodNodeId, ClodPageNodeRuntime, ClodCut } from "../runtime/clodRuntimeTypes.js";
+import { trackedLineBasicMaterial } from "../../rendering/material_churn/tracked_material_factory.js";
 
 export class ClodPageBoundaryOverlay {
   private readonly scene: THREE.Scene;
   private boundaryGroup: THREE.Group;
   private visible = false;
+  private readonly selectedMaterial = trackedLineBasicMaterial({
+    color: 0x00ff88,
+    transparent: true,
+    opacity: 0.8,
+    depthTest: false,
+  }, "clod-page-boundary:selected");
+  private readonly faintMaterial = trackedLineBasicMaterial({
+    color: 0x444488,
+    transparent: true,
+    opacity: 0.25,
+    depthTest: false,
+  }, "clod-page-boundary:faint");
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -56,22 +69,11 @@ export class ClodPageBoundaryOverlay {
       minX, y, maxZ,
     ]);
 
-    const indices = [0, 1, 1, 2, 2, 3, 3, 0];
-
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
-    geometry.setIndex(indices);
+    geometry.setIndex([0, 1, 1, 2, 2, 3, 3, 0]);
 
-    const color = selected ? 0x00ff88 : 0x444488;
-    const opacity = selected ? 0.8 : 0.25;
-    const material = new THREE.LineBasicMaterial({
-      color,
-      transparent: true,
-      opacity,
-      depthTest: false,
-    });
-
-    const line = new THREE.LineSegments(geometry, material);
+    const line = new THREE.LineSegments(geometry, selected ? this.selectedMaterial : this.faintMaterial);
     line.renderOrder = 20;
     this.boundaryGroup.add(line);
   }
@@ -79,20 +81,15 @@ export class ClodPageBoundaryOverlay {
   clear(): void {
     while (this.boundaryGroup.children.length > 0) {
       const child = this.boundaryGroup.children[0];
-      if (child instanceof THREE.LineSegments) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else {
-          child.material.dispose();
-        }
-      }
+      if (child instanceof THREE.LineSegments) child.geometry.dispose();
       this.boundaryGroup.remove(child);
     }
   }
 
   dispose(): void {
     this.clear();
+    this.selectedMaterial.dispose();
+    this.faintMaterial.dispose();
     this.scene.remove(this.boundaryGroup);
   }
 }

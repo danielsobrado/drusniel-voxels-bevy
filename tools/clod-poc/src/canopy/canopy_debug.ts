@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import type { CanopyMetrics, CanopySummaryTile } from "./canopy_types.js";
+import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 export interface CanopyDebugState {
   showTileBounds: boolean;
@@ -67,7 +68,15 @@ export function formatCanopyStatsLine(
 export interface CanopyDebugOverlays {
   tileBoundsGroup: THREE.Group;
   fadeZoneGroup: THREE.Group;
+  materialForFadeZone(color: number): THREE.MeshBasicMaterial;
   dispose(): void;
+}
+
+function disposeGroupGeometry(group: THREE.Group): void {
+  for (const child of group.children) {
+    if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) child.geometry.dispose();
+  }
+  group.clear();
 }
 
 export function createCanopyDebugOverlays(scene: THREE.Scene): CanopyDebugOverlays {
@@ -75,17 +84,27 @@ export function createCanopyDebugOverlays(scene: THREE.Scene): CanopyDebugOverla
   tileBoundsGroup.name = "CanopyTileBounds";
   const fadeZoneGroup = new THREE.Group();
   fadeZoneGroup.name = "CanopyFadeZone";
+  const fadeZoneMaterials = new Map<number, THREE.MeshBasicMaterial>();
   scene.add(tileBoundsGroup);
   scene.add(fadeZoneGroup);
 
   return {
     tileBoundsGroup,
     fadeZoneGroup,
+    materialForFadeZone(color: number): THREE.MeshBasicMaterial {
+      const existing = fadeZoneMaterials.get(color);
+      if (existing) return existing;
+      const material = trackedMeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.25 }, `canopy-fade-zone:${color.toString(16)}`);
+      fadeZoneMaterials.set(color, material);
+      return material;
+    },
     dispose() {
       scene.remove(tileBoundsGroup);
       scene.remove(fadeZoneGroup);
-      tileBoundsGroup.clear();
-      fadeZoneGroup.clear();
+      disposeGroupGeometry(tileBoundsGroup);
+      disposeGroupGeometry(fadeZoneGroup);
+      for (const material of fadeZoneMaterials.values()) material.dispose();
+      fadeZoneMaterials.clear();
     },
   };
 }
@@ -98,8 +117,8 @@ export function updateCanopyDebugOverlays(
   centerZ: number,
   state: CanopyDebugState,
 ): void {
-  overlays.tileBoundsGroup.clear();
-  overlays.fadeZoneGroup.clear();
+  disposeGroupGeometry(overlays.tileBoundsGroup);
+  disposeGroupGeometry(overlays.fadeZoneGroup);
 
   if (state.showTileBounds) {
     for (const tile of tiles) {
@@ -109,8 +128,7 @@ export function updateCanopyDebugOverlays(
         new THREE.Vector3(tile.originX, -50, tile.originZ),
         new THREE.Vector3(tile.originX + sizeX, 200, tile.originZ + sizeZ),
       );
-      const helper = new THREE.Box3Helper(box, state.syntheticFallbackActive ? 0xff6600 : 0x44ff88);
-      overlays.tileBoundsGroup.add(helper);
+      overlays.tileBoundsGroup.add(new THREE.Box3Helper(box, state.syntheticFallbackActive ? 0xff6600 : 0x44ff88));
     }
   }
 
@@ -123,8 +141,7 @@ export function updateCanopyDebugOverlays(
       [shellEndM - fadeBandM, 0xffaa00],
     ] as const) {
       const ring = new THREE.RingGeometry(radius - 2, radius + 2, 64);
-      const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.25 });
-      const mesh = new THREE.Mesh(ring, mat);
+      const mesh = new THREE.Mesh(ring, overlays.materialForFadeZone(color));
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.set(centerX, 4, centerZ);
       overlays.fadeZoneGroup.add(mesh);

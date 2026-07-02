@@ -1,3 +1,4 @@
+import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 import { terrainWeights } from "../terrain/terrain.js";
 import { clamp01 } from "../trees/tree_noise.js";
 import {
@@ -74,9 +75,13 @@ export function understoryRingCullWorkgroups(settings: UnderstorySettings = DEFA
 const READBACK_INTERVAL_FRAMES = 90;
 
 export function understoryRingRequestsDebugReadback(settings: UnderstorySettings, frame: number): boolean {
-  return settings.gpu.readbackVisibleLists &&
-    (settings.gpu.debugShowGpuCounts || settings.gpu.debugValidateAgainstCpu) &&
-    frame % READBACK_INTERVAL_FRAMES === 0;
+  return shouldRequestGpuReadback({
+    kind: "understory_gpu_counts",
+    frame,
+    intervalFrames: READBACK_INTERVAL_FRAMES,
+    requested: settings.gpu.readbackVisibleLists &&
+      (settings.gpu.debugShowGpuCounts || settings.gpu.debugValidateAgainstCpu),
+  });
 }
 
 export function understoryRingGroupRegion(

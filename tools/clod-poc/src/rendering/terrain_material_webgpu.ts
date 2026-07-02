@@ -20,6 +20,11 @@ import type {
 } from "./terrain_material.js";
 import type { TerrainTextureSlotUniform } from "../material/material.js";
 import { EXPECTED_BIOME_REGION_IDS, getBiomeTextureSlotSet, loadContentRegistry } from "../content/index.js";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "./material_churn/material_churn_diagnostics.js";
 
 type MaterialChangedCallback = (material: THREE.Material) => void;
 type RuntimeTextureSlot = TerrainTextureSlotUniform & { selectedId?: string; name?: string };
@@ -80,21 +85,23 @@ export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandl
   let textureSignature = "";
   let warnedNormalDivergence = false;
   const callbacks: MaterialChangedCallback[] = [];
-  let node: TerrainNodeMaterialHandle = createNode();
+  let node: TerrainNodeMaterialHandle = createNode("initial");
 
-  const rebuild = (): void => {
+  const rebuild = (reason: string): void => {
     const previous = node.material;
-    node = createNode();
+    node = createNode(reason);
+    materialChurnDiagnostics.trackMaterialAssigned("webgpu-terrain-handle", previous, node.material, reason);
     previous.dispose();
     for (const callback of callbacks) callback(node.material);
   };
 
-  function createNode(): TerrainNodeMaterialHandle {
+  function createNode(reason: string): TerrainNodeMaterialHandle {
     const next = createTerrainNodeMaterial({ lighting, adjust, textures });
     next.material.side = side;
     next.material.wireframe = wireframe;
     next.setFade(fade, fadeIn, dither);
     next.setDebug(debug);
+    materialChurnDiagnostics.trackNewMaterial(next.material, `webgpu-terrain-node:${reason}`);
     return next;
   }
 
@@ -141,9 +148,16 @@ export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandl
         normalIntensity: options.normalIntensity,
       });
       if (nextSignature === textureSignature) return;
+      materialChurnDiagnostics.trackPipelineSensitiveMutation(
+        node.material,
+        "textureSignature",
+        textureSignature,
+        nextSignature,
+        "webgpu-terrain-textures",
+      );
       textureSignature = nextSignature;
       textures = toNodeTextures(slots, options);
-      rebuild();
+      rebuild("webgpu-terrain-textures");
     },
     setDebug(next) {
       if (next.normalDivergence && !warnedNormalDivergence) {
@@ -155,18 +169,26 @@ export function createWebGpuTerrainMaterial(color: number): TerrainMaterialHandl
     },
     setTriplanar(on) {
       if (!textures || textures.triplanar === on) return;
+      materialChurnDiagnostics.trackPipelineSensitiveMutation(
+        node.material,
+        "triplanar",
+        textures.triplanar,
+        on,
+        "webgpu-terrain-triplanar",
+      );
       textures = { ...textures, triplanar: on };
       textureSignature = `${textureSignature}|triplanar:${on}`;
-      rebuild();
+      rebuild("webgpu-terrain-triplanar");
     },
     setSide(next) {
       side = next;
-      node.material.side = next;
-      node.material.needsUpdate = true;
+      if (setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, node.material, "side", next, "webgpu-terrain-side")) {
+        setMaterialNeedsUpdate(materialChurnDiagnostics, node.material, "webgpu-terrain-side");
+      }
     },
     setWireframe(on) {
       wireframe = on;
-      node.material.wireframe = on;
+      setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, node.material, "wireframe", on, "webgpu-terrain-wireframe");
     },
     setFade(nextFade, nextFadeIn, nextDither) {
       fade = nextFade;

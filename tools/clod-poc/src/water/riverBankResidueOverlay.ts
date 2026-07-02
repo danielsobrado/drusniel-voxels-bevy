@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { WaterField } from "./waterField.js";
 import { readRiverMaterialSettings } from "./riverMaterialRuntime.js";
+import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 interface ResidueSample {
   x: number;
@@ -49,14 +50,14 @@ function makeDecalMesh(name: string, opacity: number): THREE.Mesh {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(3), 3));
   geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(3), 3));
-  const material = new THREE.MeshBasicMaterial({
+  const material = trackedMeshBasicMaterial({
     transparent: true,
     opacity,
     vertexColors: true,
     depthWrite: false,
     depthTest: true,
     side: THREE.DoubleSide,
-  });
+  }, `river-bank-residue:${name}`);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = name;
   mesh.frustumCulled = false;

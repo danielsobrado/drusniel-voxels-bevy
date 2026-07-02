@@ -11,6 +11,15 @@ import {
   type ForestLightingMaterialState,
   type ForestLightingUniforms,
 } from "../forest_lighting/index.js";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "../rendering/material_churn/material_churn_diagnostics.js";
+import {
+  trackedMeshBasicMaterial,
+  trackedMeshStandardMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 export interface TreeMaterialHandle {
   regularMaterial: THREE.Material;
@@ -20,7 +29,6 @@ export interface TreeMaterialHandle {
   prepassNodesFor?(lod: TreeLod): PrepassNodes | undefined;
   updateSettings(settings: TreeSettings): void;
   dispose(): void;
-  /** WebGPU node path only; the classic WebGL path lights via scene lights. */
   updateLighting?(lighting: EnvironmentLighting): void;
   updateForestLighting?(state: ForestLightingMaterialState | null): void;
 }
@@ -47,15 +55,15 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
   const uniforms = createTreeWindUniforms(settings);
   const forestUniforms = createForestLightingUniforms();
   let foliageAtlas: TreeFoliageAtlas | null = null;
-  const regularMaterial = new THREE.MeshStandardMaterial({
+  const regularMaterial = trackedMeshStandardMaterial({
     vertexColors: true,
     roughness: 0.95,
     metalness: 0,
     side: THREE.DoubleSide,
     transparent: false,
     depthWrite: true,
-  });
-  applyFoliageMaterialSettings(regularMaterial, settings, (atlas) => {
+  }, "tree-regular-material");
+  applyFoliageMaterialSettings(regularMaterial, (atlas) => {
     foliageAtlas?.dispose();
     foliageAtlas = atlas;
   });
@@ -63,11 +71,11 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
 
   const debugMaterials = {} as Record<TreeLod, THREE.MeshBasicMaterial>;
   for (const lod of TREE_LODS) {
-    const material = new THREE.MeshBasicMaterial({
+    const material = trackedMeshBasicMaterial({
       color: LOD_COLORS[lod],
       side: THREE.DoubleSide,
       transparent: false,
-    });
+    }, `tree-debug-material:${lod}`);
     attachTreeShader(material, uniforms, forestUniforms);
     debugMaterials[lod] = material;
   }
@@ -80,7 +88,7 @@ export function createTreeMaterialHandle(settings: TreeSettings): TreeMaterialHa
     },
     updateSettings(nextSettings: TreeSettings) {
       updateTreeWindUniforms(uniforms, nextSettings);
-      applyFoliageMaterialSettings(regularMaterial, nextSettings, (atlas) => {
+      applyFoliageMaterialSettings(regularMaterial, (atlas) => {
         foliageAtlas?.dispose();
         foliageAtlas = atlas;
       });
@@ -179,11 +187,6 @@ export function injectTreeFoliageFragmentShader(fragmentShader: string): string 
   );
 }
 
-/**
- * Screen-door LOD crossfade discard. Kept separate from the foliage injection so
- * it is only applied to the regular/debug materials (which carry the per-instance
- * `treeLodFade` attribute) and never to the impostor bake material.
- */
 export function injectTreeLodFadeFragmentShader(fragmentShader: string): string {
   return fragmentShader.replace(
     "#include <common>",
@@ -207,6 +210,7 @@ function attachTreeShader(
   uniforms: TreeWindUniforms,
   forestUniforms: ForestLightingUniforms,
 ): void {
+  materialChurnDiagnostics.trackPipelineSensitiveMutation(material, "onBeforeCompile", null, "tree-shader", "tree-shader-attach");
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms, forestUniforms);
     shader.vertexShader = injectForestLightingVertexShader(injectTreeWindShader(shader.vertexShader), "treeWorldXZ", false);
@@ -218,16 +222,16 @@ function attachTreeShader(
 
 function applyFoliageMaterialSettings(
   material: THREE.MeshStandardMaterial,
-  _settings: TreeSettings,
   replaceAtlas: (atlas: TreeFoliageAtlas | null) => void,
 ): void {
-  material.side = THREE.DoubleSide;
-  material.transparent = false;
-  material.depthWrite = true;
-  material.alphaTest = 0;
-  material.map = null;
+  let changed = false;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "side", THREE.DoubleSide, "tree-foliage-settings") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "transparent", false, "tree-foliage-settings") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthWrite", true, "tree-foliage-settings") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "alphaTest", 0, "tree-foliage-settings") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "map", null, "tree-foliage-settings") || changed;
   replaceAtlas(null);
-  material.needsUpdate = true;
+  if (changed) setMaterialNeedsUpdate(materialChurnDiagnostics, material, "tree-foliage-settings");
 }
 
 function createTreeWindUniforms(settings: TreeSettings): TreeWindUniforms {

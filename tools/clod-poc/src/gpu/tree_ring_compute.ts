@@ -1,8 +1,4 @@
-import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
-import { createTreeHydrologyTexture } from "./tree_ring_compute_resources.js";
-import type { ResolvedDigEdit } from "./terrain_field_core.js";
-import { treeRingSpeciesGroupIndex, treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
-import { composeTreeRingShader } from "./wgsl_modules.js";
+import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "../trees/tree_config.js";
 import { treeMaterialDensityVector, treeSpeciesMaterialVector } from "../trees/tree_material_bias.js";
 import { treeRingAcceptParams, treeRingLodParams } from "../trees/tree_ring_math.js";
@@ -11,6 +7,11 @@ import {
   TREE_RING_SHADOW_PLANE_COUNT,
   TREE_RING_SHADOW_PLANE_WORDS,
 } from "../trees/tree_ring_shadow_casters.js";
+import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
+import type { ResolvedDigEdit } from "./terrain_field_core.js";
+import { createTreeHydrologyTexture } from "./tree_ring_compute_resources.js";
+import { treeRingSpeciesGroupIndex, treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
+import { composeTreeRingShader } from "./wgsl_modules.js";
 
 const TREE_GPU_RING_LAYOUT = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
 
@@ -163,12 +164,12 @@ export function treeGpuRingBuildIndirectWorkgroups(settings: TreeSettings): numb
 }
 
 export function treeGpuRingRequestsDebugReadback(settings: TreeSettings, frame: number): boolean {
-  // `readbackVisibleLists` alone is enough to populate the visible/shadow counts
-  // (e.g. for the HUD). CPU-parity validation also needs the readback, so it
-  // triggers one regardless of the readback flag. `debugShowGpuCounts` is a
-  // pure display toggle and no longer gates the readback.
-  return (settings.gpu.readbackVisibleLists || settings.gpu.debugValidateAgainstCpu) &&
-    frame % READBACK_INTERVAL_FRAMES === 0;
+  return shouldRequestGpuReadback({
+    kind: "tree_gpu_counts",
+    frame,
+    intervalFrames: READBACK_INTERVAL_FRAMES,
+    requested: settings.gpu.readbackVisibleLists || settings.gpu.debugValidateAgainstCpu,
+  });
 }
 
 export function resolveTreeGpuRingReadbackCounts(

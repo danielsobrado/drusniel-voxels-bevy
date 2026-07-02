@@ -6,6 +6,13 @@ import {
   injectTreeFoliageFragmentShader,
   injectTreeFoliageVertexShader,
 } from "./tree_material.js";
+import {
+  materialChurnDiagnostics,
+} from "../rendering/material_churn/material_churn_diagnostics.js";
+import {
+  trackedMeshBasicMaterial,
+  trackedShaderMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 4;
 
@@ -112,7 +119,7 @@ function bakeSpeciesAtlas(
 
   try {
     bakeAtlasTarget(renderer, albedoTarget, scene, camera, frames, resolutionPx, radius);
-    (mesh as THREE.Mesh).material = normalDepthMaterial;
+    mesh.material = normalDepthMaterial;
     bakeAtlasTarget(renderer, normalDepthTarget, scene, camera, frames, resolutionPx, radius);
   } finally {
     albedoMaterial.dispose();
@@ -203,14 +210,15 @@ function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettin
   const map = sourceMaterial instanceof THREE.MeshStandardMaterial || sourceMaterial instanceof THREE.MeshBasicMaterial
     ? sourceMaterial.map
     : null;
-  const material = new THREE.MeshBasicMaterial({
+  const material = trackedMeshBasicMaterial({
     vertexColors: true,
     map,
     alphaTest: settings.foliage.enabled ? settings.foliage.alphaTest : 0,
     side: THREE.DoubleSide,
     transparent: false,
     depthWrite: true,
-  });
+  }, "tree-impostor-bake-albedo");
+  materialChurnDiagnostics.trackPipelineSensitiveMutation(material, "onBeforeCompile", null, "tree-impostor-bake", "tree-impostor-bake-shader");
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = injectTreeFoliageVertexShader(shader.vertexShader);
     shader.fragmentShader = injectTreeFoliageFragmentShader(shader.fragmentShader);
@@ -223,7 +231,7 @@ function createBakeMaterial(sourceMaterial: THREE.Material, settings: TreeSettin
 }
 
 function createNormalDepthBakeMaterial(near: number, far: number): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
+  return trackedShaderMaterial({
     name: "tree-impostor-normal-depth-bake",
     uniforms: {
       near: { value: near },
@@ -234,7 +242,7 @@ function createNormalDepthBakeMaterial(near: number, far: number): THREE.ShaderM
     side: THREE.DoubleSide,
     transparent: false,
     depthWrite: true,
-  });
+  }, "tree-impostor-bake-normal-depth");
 }
 
 export const TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER = `

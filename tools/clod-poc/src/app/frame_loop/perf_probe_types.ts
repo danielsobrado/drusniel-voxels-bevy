@@ -9,6 +9,7 @@ export type FramePerfPropBucket = import("./perf_probe_constants.js").FramePerfP
 
 export interface FramePerfPhaseTiming {
   frameSetupMs: number;
+  inputMs: number;
   selectionUpdateMs: number;
   longViewDiagnosticsMs: number;
   farSummaryMs: number;
@@ -20,6 +21,7 @@ export interface FramePerfPhaseTiming {
   shadowProxyMs: number;
   clodShadowMs: number;
   canopyMs: number;
+  vegetationTotalMs: number;
   borderOceanDebugMs: number;
   statsSyncMs: number;
 }

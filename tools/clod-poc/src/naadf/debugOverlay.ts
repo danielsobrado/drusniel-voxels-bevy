@@ -4,11 +4,18 @@ import type { NaadfWorldState } from "./summaryStreamer.js";
 import { nearTableChunkKeys, isChunkInNearTable } from "./nearPageTable.js";
 import { chunkKeyToWorldOrigin } from "./keys.js";
 import { HASH_EMPTY } from "./constants.js";
+import {
+  trackedLineBasicMaterial,
+  trackedMeshBasicMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 export class NaadfDebugOverlay {
   private readonly scene: THREE.Scene;
   private readonly config: NaadfPocConfig;
   private readonly group: THREE.Group;
+  private readonly markerMaterials = new Map<number, THREE.MeshBasicMaterial>();
+  private readonly nearTableMaterial = trackedLineBasicMaterial({ color: 0x4488ff }, "naadf-debug-near-table");
+  private readonly farRingMaterial = trackedLineBasicMaterial({ color: 0x88aaff }, "naadf-debug-far-rings");
 
   constructor(scene: THREE.Scene, config: NaadfPocConfig) {
     this.scene = scene;
@@ -22,44 +29,25 @@ export class NaadfDebugOverlay {
     this.clearGroup();
     if (!this.config.debug.enabled) return;
 
-    if (this.config.debug.showStreamCenter) {
-      this.addMarker(state.cameraX, 4, state.cameraZ, 0x00ff88);
-    }
-    if (this.config.debug.showPredictedStreamCenter) {
-      this.addMarker(state.predictedX, 6, state.predictedZ, 0xff8800);
-    }
-    if (this.config.debug.showNearPageTable) {
-      this.drawNearTable(state);
-    }
-    if (this.config.debug.showHashFallbackTiles) {
-      this.drawHashFallback(state);
-    }
-    if (this.config.debug.showStaleSummaries) {
-      this.drawStaleResidents(state);
-    }
-    if (this.config.debug.showEviction) {
-      this.drawCoolingResidents(state);
-    }
-    if (this.config.debug.showFarClipmapRings) {
-      this.drawFarRings(state);
-    }
+    if (this.config.debug.showStreamCenter) this.addMarker(state.cameraX, 4, state.cameraZ, 0x00ff88);
+    if (this.config.debug.showPredictedStreamCenter) this.addMarker(state.predictedX, 6, state.predictedZ, 0xff8800);
+    if (this.config.debug.showNearPageTable) this.drawNearTable(state);
+    if (this.config.debug.showHashFallbackTiles) this.drawHashFallback(state);
+    if (this.config.debug.showStaleSummaries) this.drawStaleResidents(state);
+    if (this.config.debug.showEviction) this.drawCoolingResidents(state);
+    if (this.config.debug.showFarClipmapRings) this.drawFarRings(state);
   }
 
   private clearGroup(): void {
     for (const child of [...this.group.children]) {
       this.group.remove(child);
-      if (child instanceof THREE.LineSegments || child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
-        else child.material.dispose();
-      }
+      if (child instanceof THREE.LineSegments || child instanceof THREE.Mesh) child.geometry.dispose();
     }
   }
 
   private addMarker(x: number, y: number, z: number, color: number): void {
     const geo = new THREE.SphereGeometry(8, 8, 8);
-    const mat = new THREE.MeshBasicMaterial({ color });
-    const mesh = new THREE.Mesh(geo, mat);
+    const mesh = new THREE.Mesh(geo, this.markerMaterial(color));
     mesh.position.set(x, y, z);
     this.group.add(mesh);
   }
@@ -79,9 +67,7 @@ export class NaadfDebugOverlay {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-    const mat = new THREE.LineBasicMaterial({ color: 0x4488ff });
-    const lines = new THREE.LineSegments(geo, mat);
-    this.group.add(lines);
+    this.group.add(new THREE.LineSegments(geo, this.nearTableMaterial));
   }
 
   private drawHashFallback(state: NaadfWorldState): void {
@@ -137,13 +123,22 @@ export class NaadfDebugOverlay {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-    const mat = new THREE.LineBasicMaterial({ color: 0x88aaff });
-    const lines = new THREE.LineSegments(geo, mat);
-    this.group.add(lines);
+    this.group.add(new THREE.LineSegments(geo, this.farRingMaterial));
+  }
+
+  private markerMaterial(color: number): THREE.MeshBasicMaterial {
+    const existing = this.markerMaterials.get(color);
+    if (existing) return existing;
+    const material = trackedMeshBasicMaterial({ color }, `naadf-debug-marker:${color.toString(16)}`);
+    this.markerMaterials.set(color, material);
+    return material;
   }
 
   dispose(): void {
     this.clearGroup();
+    for (const material of this.markerMaterials.values()) material.dispose();
+    this.nearTableMaterial.dispose();
+    this.farRingMaterial.dispose();
     this.group.removeFromParent();
   }
 }

@@ -108,6 +108,9 @@ fn biome_splat_resolve_triplanar_weights(
     slope : f32,
     enabled : bool,
 ) -> vec4<f32> {
+#ifdef TERRAIN_VERTEX_SPLAT_CACHE
+    return vertex_weights;
+#endif
     if (!enabled) {
         return vertex_weights;
     }

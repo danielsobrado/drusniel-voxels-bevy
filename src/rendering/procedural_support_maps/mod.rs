@@ -9,10 +9,12 @@ pub mod noise_bake;
 pub mod plugin;
 pub mod recipes;
 pub mod seed_streams;
+pub mod status;
 pub mod texture_images;
 
 pub use material_bindings::ProceduralTerrainSupportMapHandles;
 pub use plugin::ProceduralSupportMapPlugin;
+pub use status::ProceduralSupportMapStatus;
 
 #[cfg(test)]
 mod tests {

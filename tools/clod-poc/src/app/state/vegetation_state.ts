@@ -6,12 +6,15 @@ import type { UnderstorySettings } from "../../understory/understory_config.js";
 import type { ForestLightingSettings } from "../../forest_lighting/forest_lighting_config.js";
 import type { ForestLightingDebugMode } from "../../forest_lighting/index.js";
 import type { TreeTotalDisplay } from "../../trees/tree_info.js";
+import type { TreeDepthPrepassMaxLod } from "../../trees/tree_depth_prepass_runtime.js";
 import { assignArchiveFields } from "./archive_fields.js";
 import type { TreeShadowMaxLod } from "./tree_quality_presets.js";
 
 export interface VegetationSliceState {
   grassEnabled: boolean;
   grassRingDebug: boolean;
+  grassDepthPrepassEnabled: boolean;
+  grassDepthPrepassTier: number;
   grassShaderMode: GrassSettings["shaderMode"];
   grassAlphaToCoverage: boolean;
   grassNearCrossedQuads: boolean;
@@ -45,6 +48,7 @@ export interface VegetationSliceState {
   stoneClassSummary: string;
   stoneVisible: number;
   treesEnabled: boolean;
+  treeDepthPrepassMaxLod: TreeDepthPrepassMaxLod;
   treeDistance: number;
   treeMaxInstances: number;
   treeDensity: number;
@@ -103,11 +107,16 @@ export function createVegetationSliceState(input: {
   understoryConfig: UnderstorySettings;
   forestLightingConfig: ForestLightingSettings;
   grassRingDebug: boolean;
+  grassDepthPrepassEnabled: boolean;
+  grassDepthPrepassTier: number;
+  treeDepthPrepassMaxLod: TreeDepthPrepassMaxLod;
 }): VegetationSliceState {
   const { grassConfig, stoneConfig, treeConfig, understoryConfig, forestLightingConfig } = input;
   return {
     grassEnabled: grassConfig.enabled,
     grassRingDebug: input.grassRingDebug,
+    grassDepthPrepassEnabled: input.grassDepthPrepassEnabled,
+    grassDepthPrepassTier: input.grassDepthPrepassTier,
     grassShaderMode: grassConfig.shaderMode,
     grassAlphaToCoverage: grassConfig.alphaToCoverage,
     grassNearCrossedQuads: grassConfig.nearCrossedQuads,
@@ -141,6 +150,7 @@ export function createVegetationSliceState(input: {
     stoneClassSummary: "0/0/0",
     stoneVisible: 0,
     treesEnabled: treeConfig.enabled,
+    treeDepthPrepassMaxLod: input.treeDepthPrepassMaxLod,
     treeDistance: treeConfig.distanceM,
     treeMaxInstances: treeConfig.maxInstances,
     treeDensity: treeConfig.ecology.density.baseDensity,

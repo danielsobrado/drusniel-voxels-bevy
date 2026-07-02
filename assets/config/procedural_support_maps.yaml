@@ -1,7 +1,7 @@
 procedural_support_maps:
-  # Opt-in support-map bake. Keep disabled until CLOD material parity is proven.
-  # cache_only is intended for shipping; generate_if_missing is for local/dev cache creation.
-  enabled: false
+  # Cached terrain material support maps are generated once, written under assets/generated,
+  # and then reused while the manifest hash matches this config and shader inputs.
+  enabled: true
   seed: 1337
   runtime_mode: generate_if_missing
   cache_dir: generated/procedural

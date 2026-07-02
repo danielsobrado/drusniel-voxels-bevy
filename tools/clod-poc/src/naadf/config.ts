@@ -1,5 +1,12 @@
 import { load } from "js-yaml";
 import type { FarClipmapRingConfig } from "./types.js";
+import {
+  DEFAULT_FAR_SUMMARY_ATLAS_FORMAT,
+  isValidFarSummaryAtlasFormat,
+  type FarSummaryAtlasFormat,
+} from "./farSummaryAtlasPacking.js";
+
+export { DEFAULT_FAR_SUMMARY_ATLAS_FORMAT, isValidFarSummaryAtlasFormat } from "./farSummaryAtlasPacking.js";
 
 export type NaadfTraversalMode = "dense" | "hdda" | "compare";
 export type NaadfFarShellHeightSamplingMode = "gpu" | "cpu";
@@ -73,6 +80,10 @@ export interface NaadfFarShellConfig {
   gpuAtlasWindowTiles: number;
 }
 
+export interface NaadfFarSummaryAtlasConfig {
+  format: FarSummaryAtlasFormat;
+}
+
 export interface NaadfDebugConfig {
   enabled: boolean;
   showNearPageTable: boolean;
@@ -116,6 +127,7 @@ export interface NaadfPocConfig {
   query: NaadfQueryConfig;
   traversal: NaadfTraversalConfig;
   farShell: NaadfFarShellConfig;
+  farSummaryAtlas: NaadfFarSummaryAtlasConfig;
   debug: NaadfDebugConfig;
   acceptance: NaadfAcceptanceConfig;
 }
@@ -175,6 +187,14 @@ function requireFarShellHeightMode(value: unknown, path: string): NaadfFarShellH
   return mode as NaadfFarShellHeightSamplingMode;
 }
 
+function requireFarSummaryAtlasFormat(value: unknown, path: string): FarSummaryAtlasFormat {
+  const format = requireString(value, path);
+  if (!isValidFarSummaryAtlasFormat(format)) {
+    throw new Error(`NAADF config: ${path} must be debug_rgba32f, balanced, or packed_low_bandwidth, got ${format}`);
+  }
+  return format;
+}
+
 export function isValidNaadfGpuAtlasWindowTiles(value: number): boolean {
   return Number.isInteger(value) && GPU_ATLAS_WINDOW_TILE_OPTIONS.has(value);
 }
@@ -229,6 +249,7 @@ export function parseNaadfPocConfig(yamlText: string): NaadfPocConfig {
   const queryRaw = requireSection(cfg["query"], "query");
   const traversalRaw = optionalSection(cfg["traversal"]);
   const shellRaw = requireSection(cfg["far_shell"], "far_shell");
+  const atlasRaw = optionalSection(cfg["far_summary_atlas"]);
   const debugRaw = requireSection(cfg["debug"], "debug");
   const acceptRaw = requireSection(cfg["acceptance"], "acceptance");
 
@@ -318,6 +339,9 @@ export function parseNaadfPocConfig(yamlText: string): NaadfPocConfig {
       useNaadfSummary: requireBool(shellRaw["use_naadf_summary"], "far_shell.use_naadf_summary"),
       heightSamplingMode: requireFarShellHeightMode(shellRaw["height_sampling_mode"] ?? DEFAULT_NAADF_FAR_SHELL_HEIGHT_SAMPLING_MODE, "far_shell.height_sampling_mode"),
       gpuAtlasWindowTiles: requireGpuAtlasWindowTiles(shellRaw["gpu_atlas_window_tiles"] ?? 5, "far_shell.gpu_atlas_window_tiles"),
+    },
+    farSummaryAtlas: {
+      format: requireFarSummaryAtlasFormat(atlasRaw["format"] ?? DEFAULT_FAR_SUMMARY_ATLAS_FORMAT, "far_summary_atlas.format"),
     },
     debug: {
       enabled: requireBool(debugRaw["enabled"], "debug.enabled"),

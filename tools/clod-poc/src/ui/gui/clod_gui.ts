@@ -3,11 +3,19 @@ import type GUI from "lil-gui";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { emitAudio } from "../../audio/index.js";
 import type { GuiController } from "./gui_controller.js";
+import type {
+  RenderResolutionCamera,
+  RenderResolutionRenderer,
+  RenderResolutionRuntime,
+} from "../../rendering/render_resolution_runtime.js";
 
 export interface ClodGuiDeps {
   world: number;
   worldOptions: readonly number[];
   isWebGpu: boolean;
+  renderer: RenderResolutionRenderer;
+  camera: RenderResolutionCamera;
+  postProcess: { setSize: (width: number, height: number) => void } | null;
   views: Iterable<{
     mat: { setWireframe: (on: boolean) => void; setTier: (tier: number) => void };
     mesh: THREE.Mesh;
@@ -34,6 +42,64 @@ export interface ClodGuiDeps {
 
 export interface ClodGuiResult {
   colorByLodController: GuiController | null;
+}
+
+function renderResolutionRuntime(): RenderResolutionRuntime | null {
+  return (window as unknown as { __drusnielRenderResolution?: RenderResolutionRuntime }).__drusnielRenderResolution ?? null;
+}
+
+function createRenderResolutionGui(gui: GUI, deps: ClodGuiDeps): void {
+  const runtime = renderResolutionRuntime();
+  if (!runtime) return;
+
+  const folder = gui.addFolder("Render Resolution");
+  const settings = runtime.settings;
+  const readout = runtime.readout();
+  const readoutControllers: GuiController[] = [];
+
+  const refreshReadout = () => {
+    Object.assign(readout, runtime.readout());
+    for (const controller of readoutControllers) controller.updateDisplay();
+  };
+  const applyAndRefresh = () => {
+    const result = runtime.applyCurrentViewport({ renderer: deps.renderer, camera: deps.camera });
+    if (result.changed) deps.postProcess?.setSize(result.resolution.cssWidth, result.resolution.cssHeight);
+    refreshReadout();
+  };
+
+  const presetController = folder
+    .add(settings, "presetName", runtime.presetNames())
+    .name("Preset")
+    .onChange((presetName: string) => {
+      if (presetName === "custom") settings.presetName = "custom";
+      else runtime.applyPreset(presetName);
+      presetController.updateDisplay();
+      dprCapController.updateDisplay();
+      renderScaleController.updateDisplay();
+      applyAndRefresh();
+    });
+  const dprCapController = folder
+    .add(settings, "dprCap", 0.5, 3.0, 0.05)
+    .name("DPR cap")
+    .onChange((value: number) => {
+      runtime.setCustomDprCap(value);
+      presetController.updateDisplay();
+      applyAndRefresh();
+    });
+  const renderScaleController = folder
+    .add(settings, "renderScale", 0.5, 1.25, 0.01)
+    .name("Render scale")
+    .onChange((value: number) => {
+      runtime.setCustomRenderScale(value);
+      presetController.updateDisplay();
+      applyAndRefresh();
+    });
+
+  readoutControllers.push(folder.add(readout, "rawDevicePixelRatio").name("raw DPR").disable());
+  readoutControllers.push(folder.add(readout, "effectivePixelRatio").name("effective DPR").disable());
+  readoutControllers.push(folder.add(readout, "physicalSize").name("physical size").disable());
+  readoutControllers.push(folder.add(readout, "dprCap").name("active cap").disable());
+  readoutControllers.push(folder.add(readout, "renderScale").name("active scale").disable());
 }
 
 export function createClodGui(
@@ -74,6 +140,7 @@ export function createClodGui(
     deps.farShellController.setEnabled(on);
   });
   gui.add(state, "profileEnabled").name("profiling");
+  createRenderResolutionGui(gui, deps);
   gui.add(state, "thresholdPx", 0.1, 6, 0.05).name("error threshold px").onChange(deps.updateSelection);
   gui.add(state, "forceMaxLevel", ["auto", "0", "1", "2", "3"]).name("force max level").onChange(() => {
     deps.selectionController.resetSelState();

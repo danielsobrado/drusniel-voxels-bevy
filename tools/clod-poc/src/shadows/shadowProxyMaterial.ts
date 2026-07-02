@@ -1,5 +1,14 @@
 import * as THREE from "three";
 import type { ShadowProxyConfig } from "./shadowProxyTypes.js";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "../rendering/material_churn/material_churn_diagnostics.js";
+import {
+  trackedMeshDepthMaterial,
+  trackedMeshStandardMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 function resolveShadowSide(side: ShadowProxyConfig["shadowSide"]): THREE.Side {
   if (side === "front") return THREE.FrontSide;
@@ -9,7 +18,7 @@ function resolveShadowSide(side: ShadowProxyConfig["shadowSide"]): THREE.Side {
 
 export function createShadowProxyMaterial(config: ShadowProxyConfig): THREE.MeshStandardMaterial {
   const debugVisible = config.debugVisibleProxy;
-  const material = new THREE.MeshStandardMaterial({
+  const material = trackedMeshStandardMaterial({
     color: debugVisible ? 0x44ff88 : 0xffffff,
     transparent: debugVisible,
     opacity: debugVisible ? 0.35 : 1,
@@ -20,7 +29,7 @@ export function createShadowProxyMaterial(config: ShadowProxyConfig): THREE.Mesh
     colorWrite: debugVisible ? true : config.mainPassColorWrite,
     depthWrite: debugVisible ? false : config.mainPassDepthWrite,
     depthTest: !debugVisible,
-  });
+  }, debugVisible ? "shadow-proxy-debug-material" : "shadow-proxy-material");
   material.name = debugVisible ? "DrusnielFarTerrainShadowProxyDebug" : "DrusnielFarTerrainShadowProxy";
   return material;
 }
@@ -30,23 +39,24 @@ export function applyShadowProxyMaterialFlags(
   config: ShadowProxyConfig,
 ): void {
   const debugVisible = config.debugVisibleProxy;
-  material.wireframe = config.debugWireframe;
-  material.side = resolveShadowSide(config.shadowSide);
-  material.transparent = debugVisible;
+  let changed = false;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "wireframe", config.debugWireframe, "shadow-proxy-flags") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "side", resolveShadowSide(config.shadowSide), "shadow-proxy-flags") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "transparent", debugVisible, "shadow-proxy-flags") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "colorWrite", debugVisible ? true : config.mainPassColorWrite, "shadow-proxy-flags") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthWrite", debugVisible ? false : config.mainPassDepthWrite, "shadow-proxy-flags") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthTest", !debugVisible, "shadow-proxy-flags") || changed;
   material.opacity = debugVisible ? 0.35 : 1;
-  material.colorWrite = debugVisible ? true : config.mainPassColorWrite;
-  material.depthWrite = debugVisible ? false : config.mainPassDepthWrite;
-  material.depthTest = !debugVisible;
   material.color.setHex(debugVisible ? 0x44ff88 : 0xffffff);
-  material.needsUpdate = true;
+  if (changed) setMaterialNeedsUpdate(materialChurnDiagnostics, material, "shadow-proxy-flags");
 }
 
 export function createShadowProxyDepthMaterial(
   source: THREE.MeshStandardMaterial,
 ): THREE.MeshDepthMaterial {
-  const depth = new THREE.MeshDepthMaterial({
+  const depth = trackedMeshDepthMaterial({
     side: source.side,
-  });
+  }, "shadow-proxy-depth-material");
   depth.name = "DrusnielFarTerrainShadowProxyDepth";
   return depth;
 }

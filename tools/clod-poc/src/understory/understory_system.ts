@@ -88,6 +88,7 @@ export class UnderstorySystem {
   private readonly gpuBackend: UnderstoryWebGpuBackendAccess | null;
   private readonly supportsGpu: boolean;
   private readonly gpuRingUnsupportedReason: string | null;
+  private currentLighting: EnvironmentLighting | undefined;
   private gpuStatus: UnderstoryStats["gpuStatus"] = "disabled";
   private gpuVisibleCount = 0;
   private gpuOverflowed = false;
@@ -125,6 +126,7 @@ export class UnderstorySystem {
     this.gpuDevice = options.gpuDevice ?? null;
     this.gpuBackend = options.gpuBackend ?? null;
     this.supportsGpu = options.supportsGpu ?? !!this.gpuDevice;
+    this.currentLighting = options.lighting;
     this.hydrologyData = options.hydrologyData ?? null;
     this.hydrologyWaterTexture = options.hydrologyWaterTexture ?? null;
     this.gpuRingUnsupportedReason = this.gpuDevice
@@ -286,6 +288,7 @@ export class UnderstorySystem {
   }
 
   updateLighting(lighting: EnvironmentLighting): void {
+    this.currentLighting = lighting;
     this.materialHandle.updateLighting?.(lighting);
     for (const handle of Object.values(this.gpuRingDraw?.materialHandles ?? {})) {
       handle.updateLighting?.(lighting);
@@ -319,7 +322,12 @@ export class UnderstorySystem {
     this.clearGpuRingDraw();
     this.gpuRingKey = key;
     this.gpuRingDraw = createGpuRingDrawResources(
-      this.settings, this.worldCells, this.gpuBackend, undefined, this.hydrologyData, this.hydrologyWaterTexture,
+      this.settings,
+      this.worldCells,
+      this.gpuBackend,
+      this.currentLighting,
+      this.hydrologyData,
+      this.hydrologyWaterTexture,
     );
     for (const mesh of this.gpuRingDraw.meshes) {
       mesh.visible = false;
@@ -518,6 +526,7 @@ export class UnderstorySystem {
       .map((node) => ({ node, distance: distance2d(center.x, center.z, footprintCenterX(node.footprint), footprintCenterZ(node.footprint)) }))
       .filter(({ node, distance: d }) => d <= distance + footprintRadius(node.footprint))
       .sort((a, b) => a.distance - b.distance);
+
     let totalInstances = this.patches.reduce((sum, patch) => sum + patch.instances.length, 0);
     let added = 0;
     let deferred = false;

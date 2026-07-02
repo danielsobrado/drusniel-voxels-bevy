@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { CONSTRUCTION_MATERIAL_ASSETS, CONSTRUCTION_MATERIAL_OPTIONS as MATERIAL_OPTIONS, type ConstructionMaterialAsset } from "./material_assets.js";
 import { CONSTRUCTION_MATERIALS, type ConstructionMaterial } from "./types.js";
+import { trackedMeshStandardMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 const DEFAULT_TEXTURE_REPEAT_U = 1.5;
 const DEFAULT_TEXTURE_REPEAT_V = 1.0;
@@ -78,7 +79,7 @@ function pbrTextures(asset: ConstructionMaterialAsset): PbrTextureSet {
 export function createConstructionMaterial(material: ConstructionMaterial): THREE.MeshStandardMaterial {
   const asset = CONSTRUCTION_MATERIAL_ASSETS[material] ?? CONSTRUCTION_MATERIAL_ASSETS.wood;
   const textures = pbrTextures(asset);
-  const result = new THREE.MeshStandardMaterial({
+  return trackedMeshStandardMaterial({
     name: `construction-${asset.id}`,
     color: textures.albedo ? 0xffffff : asset.color,
     roughness: asset.roughness,
@@ -93,6 +94,5 @@ export function createConstructionMaterial(material: ConstructionMaterial): THRE
       aoMap: textures.ao,
       aoMapIntensity: asset.aoIntensity ?? DEFAULT_AO_INTENSITY,
     } : {}),
-  });
-  return result;
+  }, `construction-material:${asset.id}`);
 }

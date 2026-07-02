@@ -12,6 +12,7 @@ import type { PlayerInteractionState } from "../../player_controller.js";
 import type { FrameRenderer } from "./frame_renderer.js";
 import type { VegetationFrameTiming } from "./vegetation_frame_phase.js";
 import type { FramePerfPhaseTiming, FramePerfProbe } from "./perf_probe.js";
+import { materialChurnDiagnostics } from "../../rendering/material_churn/material_churn_diagnostics.js";
 
 export interface RenderPhaseInput {
   renderer: FrameRenderer;
@@ -41,8 +42,8 @@ export interface RenderPhaseInput {
   grassPrepassEnabled: boolean;
   perfProbe: FramePerfProbe | null;
   phaseTiming: FramePerfPhaseTiming;
-  /** TP-1 real per-pass GPU ms (label → ms); null on WebGL / unsupported. */
   gpuPasses: Record<string, number> | null;
+  afterRenderDiagnostics?: () => void;
 }
 
 const grassProfileMs = (value: number | null): string => value === null ? "-" : `${value.toFixed(2)}ms`;
@@ -60,7 +61,6 @@ function logGrassProfile(
     + stats.gpuRingVisibleMid
     + stats.gpuRingVisibleFar
     + stats.gpuRingVisibleSuper;
-  // eslint-disable-next-line no-console
   console.info(
     `[grass-profile] mode=${stats.mode}` +
       ` dispatch=${grassProfileMs(stats.gpuRingDispatchMs)}` +
@@ -103,6 +103,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     fovY: THREE.MathUtils.degToRad(input.camera.fov),
   });
   input.postProcess?.updateSettings(input.currentPostProcessSettings());
+
   const tRenderStart = performance.now();
   if (input.grassProfileEnabled && input.currentGrassStats && input.grassProfileFrame.value++ % 60 === 0) {
     logGrassProfile(
@@ -113,8 +114,13 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       input.grassPrepassEnabled,
     );
   }
+
   if (input.postProcess) input.postProcess.render(input.scene, input.camera);
   else input.renderer.render(input.scene, input.camera);
+  materialChurnDiagnostics.sampleRendererInfo(input.renderer);
+  const tRenderEnd = performance.now();
+
+  input.afterRenderDiagnostics?.();
 
   const hooks = input.getHooks();
   if (hooks && !hooks.ready) {
@@ -136,20 +142,24 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const frameMs = end - input.frameStart;
     const bubbleMs = input.tPropsStart - input.tBubbleStart;
     const propsMs = tRenderStart - input.tPropsStart;
-    const renderMs = end - tRenderStart;
+    const renderMs = tRenderEnd - tRenderStart;
+    const materialChurnStats = materialChurnDiagnostics.frameStats();
     const otherMs = frameMs - selectionStats.selectionMs - bubbleMs - propsMs - renderMs;
+    const vegetationPhaseMs = input.phaseTiming.vegetationTotalMs || input.vegetationTiming.totalMs;
     const propsUnattributedMs = Math.max(
       0,
       propsMs -
+        input.phaseTiming.farSummaryMs -
         input.phaseTiming.shadowProxyMs -
         input.phaseTiming.clodShadowMs -
         input.phaseTiming.canopyMs -
-        input.vegetationTiming.totalMs -
+        vegetationPhaseMs -
         input.phaseTiming.borderOceanDebugMs -
         input.phaseTiming.statsSyncMs,
     );
     const measuredTopLevelMs =
       input.phaseTiming.frameSetupMs +
+      input.phaseTiming.inputMs +
       input.phaseTiming.selectionUpdateMs +
       input.phaseTiming.longViewDiagnosticsMs +
       input.phaseTiming.farSummaryMs +
@@ -161,7 +171,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       input.phaseTiming.shadowProxyMs +
       input.phaseTiming.clodShadowMs +
       input.phaseTiming.canopyMs +
-      input.vegetationTiming.totalMs +
+      vegetationPhaseMs +
       input.phaseTiming.borderOceanDebugMs +
       input.phaseTiming.statsSyncMs +
       renderMs;
@@ -172,6 +182,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       frameMs,
       selectionMs: selectionStats.selectionMs,
       frameSetupMs: input.phaseTiming.frameSetupMs,
+      inputMs: input.phaseTiming.inputMs,
       selectionUpdateMs: input.phaseTiming.selectionUpdateMs,
       longViewDiagnosticsMs: input.phaseTiming.longViewDiagnosticsMs,
       farSummaryMs: input.phaseTiming.farSummaryMs,
@@ -192,8 +203,8 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       selectionOverlaysMs: selectionStats.subphases.overlays,
       bubbleMs,
       propsMs,
-      vegetationTotalMs: input.vegetationTiming.totalMs,
-      propsRestMs: Math.max(0, propsMs - input.vegetationTiming.totalMs),
+      vegetationTotalMs: vegetationPhaseMs,
+      propsRestMs: Math.max(0, propsMs - vegetationPhaseMs),
       grassMs: input.vegetationTiming.grassMs,
       treesMs: input.vegetationTiming.treesMs,
       understoryMs: input.vegetationTiming.understoryMs,
@@ -241,13 +252,22 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       customPropGpuVisibleCount: propStats?.gpuVisibleCount ?? 0,
       customPropGpuOverflowed: propStats?.gpuOverflowed ? 1 : 0,
       customPropGpuDispatchMs: propStats?.gpuDispatchMs ?? null,
+      materialChurnNewMaterials: materialChurnStats.newMaterials,
+      materialChurnAssignments: materialChurnStats.materialReplacements,
+      materialChurnNeedsUpdate: materialChurnStats.materialNeedsUpdate,
+      materialChurnVersionChanges: materialChurnStats.materialVersionChanges,
+      materialChurnPipelineSensitiveChanges: materialChurnStats.pipelineSensitiveChanges,
+      materialChurnRendererProgramCount: materialChurnStats.rendererProgramCount ?? -1,
+      materialChurnRendererProgramDelta: materialChurnStats.rendererProgramDelta ?? 0,
+      materialChurnSuspectedPipelineKeyChanges: materialChurnStats.suspectedPipelineKeyChanges,
       gpuPasses: input.gpuPasses ? { ...input.gpuPasses } : undefined,
     });
     if (input.profileEnabled && frameMs >= input.profileFrameMs) {
-      // eslint-disable-next-line no-console
       console.warn(
         `[profile] frame ${frameMs.toFixed(1)}ms` +
-          ` | selection ${selectionStats.selectionMs.toFixed(1)}` +
+          ` | setup ${input.phaseTiming.frameSetupMs.toFixed(1)}` +
+          ` input ${input.phaseTiming.inputMs.toFixed(1)}` +
+          ` selection ${selectionStats.selectionMs.toFixed(1)}` +
           ` (cut ${selectionStats.subphases.cut.toFixed(1)} book ${selectionStats.subphases.book.toFixed(1)} info ${selectionStats.subphases.info.toFixed(1)} overlays ${selectionStats.subphases.overlays.toFixed(1)})` +
           ` bubble/chunks ${bubbleMs.toFixed(1)} (built ${input.chunkGroupsBuiltThisFrame})` +
           ` props ${propsMs.toFixed(1)} (${formatVegetationTiming(input.vegetationTiming, propsMs)})` +
@@ -257,6 +277,9 @@ export function runRenderPhase(input: RenderPhaseInput): void {
           ` stats ${input.phaseTiming.statsSyncMs.toFixed(1)}` +
           ` rest ${propsUnattributedMs.toFixed(1)}` +
           ` render ${renderMs.toFixed(1)}` +
+          ` churn new=${materialChurnStats.newMaterials}` +
+          ` needsUpdate=${materialChurnStats.materialNeedsUpdate}` +
+          ` programsΔ=${materialChurnStats.rendererProgramDelta ?? 0}` +
           ` other ${otherMs.toFixed(1)}` +
           ` | cut=${selectionStats.renderedCount} chunkGroups=${input.nearFieldBubbleController.size()} mode=${input.interaction.mode}`,
       );

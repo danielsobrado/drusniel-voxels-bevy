@@ -15,6 +15,10 @@ import { geometryForPhase1Node, createPhase1TerrainMaterial } from "./phase1_ter
 import { generatePhase1Heightfield } from "./terrain_synthesis.js";
 import { parsePhase1Config } from "./phase1_config.js";
 import { updateProgress, allNodes, disposeDebugGroup } from "./phase1_scene_helpers.js";
+import {
+  trackedLineBasicMaterial,
+  trackedPointsMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 export interface Phase1MutableState {
   selectionState: SelectionState;
@@ -68,7 +72,10 @@ export function createTerrainActions(
       }
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-      pageBoundaryGroup.add(new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: 0xffff00, depthTest: false })));
+      pageBoundaryGroup.add(new THREE.LineSegments(
+        geometry,
+        trackedLineBasicMaterial({ color: 0xffff00, depthTest: false }, "phase1-page-boundaries"),
+      ));
     }
     if (lockedBorderGroup.visible) {
       disposeDebugGroup(lockedBorderGroup);
@@ -82,7 +89,10 @@ export function createTerrainActions(
       }
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-      lockedBorderGroup.add(new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0xff3344, size: 4, sizeAttenuation: false, depthTest: false })));
+      lockedBorderGroup.add(new THREE.Points(
+        geometry,
+        trackedPointsMaterial({ color: 0xff3344, size: 4, sizeAttenuation: false, depthTest: false }, "phase1-locked-borders"),
+      ));
     }
   };
 

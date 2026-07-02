@@ -3,6 +3,7 @@ import type { ClodAppState } from "../../app/clod_app_state.js";
 import { FAR_SHELL_DEFAULTS } from "../../app/clod_constants.js";
 import type { PostProcessQualityPreset } from "../../app/state/postprocess_quality_presets.js";
 import { applyTreeQualityPreset, TREE_SHADOW_MAX_LOD_VALUES } from "../../app/state/tree_quality_presets.js";
+import { GRASS_DEPTH_PREPASS_TIER_MAX, GRASS_DEPTH_PREPASS_TIER_MIN } from "../../grass/grass_depth_prepass_runtime.js";
 import { GRASS_SHADER_MODES } from "../../grass.js";
 import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
 import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
@@ -11,7 +12,9 @@ import { formatTreePerfSnapshot } from "../../runtime/vegetation/tree_perf_snaps
 import type { UnderstoryController } from "../../runtime/vegetation/understory_controller.js";
 import type { ForestLightingController } from "../../runtime/forest_lighting/forest_lighting_controller.js";
 import type { FarShellController } from "../../systems/far_shell_controller.js";
+import { TREE_DEPTH_PREPASS_MAX_LODS } from "../../trees/tree_depth_prepass_runtime.js";
 import type { TreeSettings } from "../../trees/index.js";
+import { understoryDepthPrepassFromQuery } from "../../understory/understory_depth_prepass_runtime.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
 import type { GuiController } from "./gui_controller.js";
 
@@ -74,6 +77,8 @@ export function createVegetationGui(
   let grassCandidateCountController: GuiController | null = null;
   let grassPatchRebuildCountController: GuiController | null = null;
   let grassBuildMsController: GuiController | null = null;
+  let grassDepthPrepassEnabledController: GuiController | null = null;
+  let grassDepthPrepassTierController: GuiController | null = null;
 
   const refreshGrassStats = () => {
     deps.grassController.refreshStats();
@@ -84,6 +89,8 @@ export function createVegetationGui(
     grassCandidateCountController?.updateDisplay();
     grassPatchRebuildCountController?.updateDisplay();
     grassBuildMsController?.updateDisplay();
+    grassDepthPrepassEnabledController?.updateDisplay();
+    grassDepthPrepassTierController?.updateDisplay();
   };
 
   const grassActions = {
@@ -94,6 +101,11 @@ export function createVegetationGui(
     },
   };
   const updateGrassUniforms = () => deps.grassController.applySettings();
+  const applyGrassDepthPrepassTier = (tier: number) => {
+    deps.grassController.setDepthPrepassTier(tier);
+    refreshGrassStats();
+    deps.updateInfo();
+  };
   const grassFolder = gui.addFolder("grass shader");
   const grassShaderOptions = Object.fromEntries(
     GRASS_SHADER_MODES.map((mode) => [
@@ -112,6 +124,21 @@ export function createVegetationGui(
     deps.grassController.setRingDebug(on);
   });
   grassFolder.add(state, "grassShaderMode", grassShaderOptions).name("shader").onChange(grassActions.rebuild);
+  grassDepthPrepassEnabledController = grassFolder.add(state, "grassDepthPrepassEnabled")
+    .name("depth prepass")
+    .onChange((enabled: boolean) => {
+      const tier = enabled ? Math.max(1, state.grassDepthPrepassTier || GRASS_DEPTH_PREPASS_TIER_MAX) : 0;
+      applyGrassDepthPrepassTier(tier);
+    });
+  grassDepthPrepassTierController = grassFolder.add(
+    state,
+    "grassDepthPrepassTier",
+    GRASS_DEPTH_PREPASS_TIER_MIN,
+    GRASS_DEPTH_PREPASS_TIER_MAX,
+    1,
+  )
+    .name("prepass tier 0/1/2")
+    .onChange((tier: number) => applyGrassDepthPrepassTier(tier));
   grassFolder.add(state, "grassAlphaToCoverage").name("alpha to coverage").onChange(updateGrassUniforms);
   grassFolder.add(state, "grassNearCrossedQuads").name("near crossed quads").onChange(grassActions.rebuild);
   grassFolder.add(state, "grassDistance", 16, 512, 1).name("distance").onChange(updateGrassUniforms);
@@ -231,6 +258,11 @@ export function createVegetationGui(
     refreshTreeStats();
     deps.updateInfo();
   };
+  const updateTreeDepthPrepass = () => {
+    deps.treeController.setDepthPrepassMaxLod(state.treeDepthPrepassMaxLod);
+    refreshTreeStats();
+    deps.updateInfo();
+  };
   const treeActions = {
     rebuild: () => {
       deps.treeController.rebuild();
@@ -268,6 +300,7 @@ export function createVegetationGui(
     refreshTreeStats();
     deps.updateInfo();
   });
+  treeFolder.add(state, "treeDepthPrepassMaxLod", [...TREE_DEPTH_PREPASS_MAX_LODS]).name("depth prepass max LOD").onChange(updateTreeDepthPrepass);
   treeSettingControllers.push(
     treeFolder.add(state, "treeDistance", 0, 800, 5).name("active ring m").onFinishChange(treeActions.rebuild),
     treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild),
@@ -311,6 +344,9 @@ export function createVegetationGui(
     refreshUnderstoryStats();
     deps.updateInfo();
   };
+  const understoryDepthPrepassState = {
+    enabled: typeof window !== "undefined" ? understoryDepthPrepassFromQuery(new URLSearchParams(window.location.search)) : false,
+  };
   const understoryActions = {
     rebuild: () => {
       deps.understoryController.rebuild();
@@ -320,6 +356,11 @@ export function createVegetationGui(
   const understoryFolder = gui.addFolder("understory (props)");
   understoryFolder.add(state, "understoryEnabled").name("enabled").onChange((enabled: boolean) => {
     deps.understoryController.setEnabled(enabled);
+    refreshUnderstoryStats();
+    deps.updateInfo();
+  });
+  understoryFolder.add(understoryDepthPrepassState, "enabled").name("depth prepass").onChange((enabled: boolean) => {
+    deps.understoryController.setDepthPrepassEnabled(enabled);
     refreshUnderstoryStats();
     deps.updateInfo();
   });

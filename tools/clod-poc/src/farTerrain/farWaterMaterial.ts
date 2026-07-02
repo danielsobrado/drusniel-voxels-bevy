@@ -68,7 +68,7 @@ export function createFarWaterMaterial(
       .mul(step(float(0.0), atlasVCells))
       .mul(step(atlasVCells, ringRefs.uHeightCells.sub(float(SUMMARY_EDGE_EPS))));
     const inDistanceBand = step(ringRefs.uStartM, distXZ).mul(step(distXZ, ringRefs.uEndM.sub(float(SUMMARY_EDGE_EPS))));
-    const atlasWeight: TslNode = heightSample.a.mul(coverageSample.a).mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
+    const atlasWeight: TslNode = coverageSample.a.mul(inside).mul(inDistanceBand).mul(ringRefs.uValid).mul(uSummaryValid);
     waterHeight = mix(waterHeight, heightSample.r, atlasWeight);
     waterCoverage = mix(waterCoverage, coverageSample.g, atlasWeight);
   }

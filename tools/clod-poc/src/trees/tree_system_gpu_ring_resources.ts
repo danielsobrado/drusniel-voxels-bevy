@@ -7,6 +7,7 @@ import {
   treeGpuRingGroupIndex,
 } from "../gpu/tree_ring_compute.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
+import type { TreeDepthPrepassMaxLod } from "./tree_depth_prepass_runtime.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import { createTreeRingNodeMaterialHandle, type TreeHydrologyWater, type TreeRingInstanceBuffers } from "./tree_node_material.js";
 import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_node_material.js";
@@ -42,6 +43,7 @@ export interface TreeGpuRingDrawResourcesInput {
   impostorAtlases: Partial<Record<TreeSpeciesId, TreeImpostorAtlas>>;
   crownProxyGeometry: THREE.BufferGeometry;
   useTreePrepass: boolean;
+  treePrepassMaxLod: TreeDepthPrepassMaxLod;
   geometryForGpuRing(species: TreeSpeciesId, lod: TreeLod): THREE.BufferGeometry;
 }
 
@@ -165,6 +167,7 @@ function createGpuRingTierDraw(
     mesh,
     materialHandle,
     useTreePrepass: input.useTreePrepass,
+    maxLod: input.treePrepassMaxLod,
   });
   return mesh;
 }

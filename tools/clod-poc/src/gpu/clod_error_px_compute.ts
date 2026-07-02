@@ -51,7 +51,7 @@ export class ClodErrorPxCompute {
   private version = 0;
   private nodeIndexById = new Map<string, number>();
   private nodeCount = 0;
-  private readbackMode: WebGpuReadbackMode = "async";
+  private readbackMode: WebGpuReadbackMode = "off";
   private dispatchOnlyFrames = 0;
   private readbackFrames = 0;
 
@@ -114,7 +114,7 @@ export class ClodErrorPxCompute {
 
   dispatch(selectionParams: SelectionParams, frameId: number, options?: DispatchOptions): boolean {
     if (this.failedReason || this.nodeCount === 0) return false;
-    const readback = options?.readback ?? true;
+    const readback = options?.readback ?? false;
 
     const params = cloneParams({
       camPos: selectionParams.camPos,

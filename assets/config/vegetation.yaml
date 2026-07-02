@@ -1,0 +1,4 @@
+vegetation_depth_prepass:
+  # Experimental alpha foliage camera-depth prepass for Bevy grass material.
+  # Keep disabled by default until CLOD-POC and Bevy A/B benches prove it is safe.
+  enabled: false

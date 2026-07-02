@@ -1,5 +1,5 @@
 export const FRAME_PERF_BROAD_BUCKETS = [
-  "frameSetupMs", "selectionUpdateMs", "longViewDiagnosticsMs", "farSummaryMs",
+  "frameSetupMs", "inputMs", "selectionUpdateMs", "longViewDiagnosticsMs", "farSummaryMs",
   "constructionMs", "brushMs", "combatMs", "spellsMs", "terrainPhaseMs",
   "shadowProxyMs", "clodShadowMs", "canopyMs", "vegetationTotalMs",
   "borderOceanDebugMs", "statsSyncMs", "renderMs", "unattributedMs",
@@ -11,12 +11,23 @@ export const FRAME_PERF_PROP_BUCKETS = [
   "propsRestMs", "propsUnattributedMs",
 ] as const;
 
+export const FRAME_PERF_MATERIAL_CHURN_BUCKETS = [
+  "materialChurnNewMaterials",
+  "materialChurnAssignments",
+  "materialChurnNeedsUpdate",
+  "materialChurnVersionChanges",
+  "materialChurnPipelineSensitiveChanges",
+  "materialChurnRendererProgramCount",
+  "materialChurnRendererProgramDelta",
+  "materialChurnSuspectedPipelineKeyChanges",
+] as const;
+
 export const FRAME_PERF_ALL_METRICS = [
   "frameMs", "selectionMs", "bubbleMs", "propsMs", "otherMs",
   ...FRAME_PERF_BROAD_BUCKETS,
   "selectionCutMs", "selectionBookMs", "selectionInfoMs", "selectionOverlaysMs",
-  "vegetationTotalMs",
   ...FRAME_PERF_PROP_BUCKETS,
+  ...FRAME_PERF_MATERIAL_CHURN_BUCKETS,
 ] as const;
 
 export type FramePerfMetric = typeof FRAME_PERF_ALL_METRICS[number];

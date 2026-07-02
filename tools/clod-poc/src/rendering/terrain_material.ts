@@ -16,6 +16,11 @@ import {
   type TerrainColorAdjustments,
   type TerrainTextureSlotUniform,
 } from "../material/material.js";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "./material_churn/material_churn_diagnostics.js";
 
 export type TerrainArraySamplingMode = "off" | "planar" | "triplanar";
 
@@ -59,6 +64,7 @@ export interface TerrainMaterialHandle {
 
 export function createWebGlTerrainMaterial(color: number): TerrainMaterialHandle {
   const material = createTerrainMaterial(color);
+  materialChurnDiagnostics.trackNewMaterial(material, "webgl-terrain-material");
   const u = material.uniforms;
   return {
     material,
@@ -90,11 +96,12 @@ export function createWebGlTerrainMaterial(color: number): TerrainMaterialHandle
       u.uUseTriplanar.value = on;
     },
     setSide(side) {
-      material.side = side;
-      material.needsUpdate = true;
+      if (setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "side", side, "webgl-terrain-side")) {
+        setMaterialNeedsUpdate(materialChurnDiagnostics, material, "webgl-terrain-side");
+      }
     },
     setWireframe(on) {
-      material.wireframe = on;
+      setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "wireframe", on, "webgl-terrain-wireframe");
     },
     setFade(fade, fadeIn, dither) {
       u.uFade.value = fade;
