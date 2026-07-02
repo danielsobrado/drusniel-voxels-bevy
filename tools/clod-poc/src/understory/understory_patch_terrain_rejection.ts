@@ -109,6 +109,7 @@ function understoryRejectionCacheKey(footprint: PageFootprint, settings: Underst
     settings.placement.maxHeightM,
     settings.placement.minGroundWeight,
     settings.placement.minTreeInfluence,
+    JSON.stringify(settings.terrain),
   ].join(":");
 }
 
