@@ -532,11 +532,11 @@ fn process_tree_slot(slot: u32) {
     terrain_hidden = terrain_ridge_filter(wpos, height, dist);
     record_tree_terrain_visibility(terrain_hidden);
   }
+  if (terrain_hidden) { return; }
   append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);
   append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);
   append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);
   append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);
-  if (terrain_hidden) { return; }
   if (!in_frustum(shadow_center, 8.0)) { return; }
   append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);
   append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);
