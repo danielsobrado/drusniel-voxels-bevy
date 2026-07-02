@@ -44,7 +44,7 @@ describe("VegetationTerrainRejectProvider", () => {
     expect(result).toMatchObject({ reject: false, reason: "summaryMissing", confidence: "fallback" });
   });
 
-  it("keeps clusters when terrain revision is stale", () => {
+  it("keeps clusters when terrain revision is stale by default", () => {
     const result = createVegetationTerrainRejectProvider().classifyCluster({
       descriptor: descriptor(),
       kind: "grass",
@@ -59,6 +59,24 @@ describe("VegetationTerrainRejectProvider", () => {
     });
 
     expect(result).toMatchObject({ reject: false, reason: "summaryMissing", confidence: "fallback" });
+  });
+
+  it("rejects stale terrain revision when conservative policy requires freshness", () => {
+    const result = createVegetationTerrainRejectProvider().classifyCluster({
+      descriptor: descriptor(),
+      kind: "grass",
+      cameraX: 0,
+      cameraY: 2,
+      cameraZ: 0,
+      worldCells: 128,
+      visibility,
+      sampler: { sampleHeight: () => ({ height: 0 }) },
+      terrainRevision: 1,
+      expectedTerrainRevision: 2,
+      acceptWhenRevisionMismatch: false,
+    });
+
+    expect(result).toMatchObject({ reject: true, reason: "summaryMissing", confidence: "fallback" });
   });
 
   it("rejects clusters completely outside terrain", () => {
