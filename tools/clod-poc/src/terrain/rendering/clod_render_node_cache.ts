@@ -7,6 +7,10 @@ import { computeGeometryNormals, toGeometry } from "../geometry/page_geometry.js
 import type { PageGeometryCache, PageGeometryNormalMode } from "../geometry/page_geometry_cache.js";
 import type { ClodPageNode } from "../../types.js";
 import type { ClodRenderNodeCacheConfig } from "./clod_render_node_cache_config.js";
+import {
+  applyMaterialIfChanged,
+  materialChurnDiagnostics,
+} from "../../rendering/material_churn/material_churn_diagnostics.js";
 
 export interface ClodRenderNodeCacheStats {
   enabled: boolean;
@@ -225,7 +229,13 @@ export class ClodRenderNodeCache {
     const mesh = new THREE.Mesh(geometry, mat.material);
     mesh.visible = false;
     const unsubscribeMaterial = mat.onMaterialChanged((material) => {
-      mesh.material = material;
+      applyMaterialIfChanged(
+        materialChurnDiagnostics,
+        node.id,
+        mesh,
+        material,
+        "terrain-material-handle-rebuild",
+      );
     });
     this.deps.scene.add(mesh);
 
