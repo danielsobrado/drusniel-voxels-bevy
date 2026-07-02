@@ -2,6 +2,10 @@ import * as THREE from "three";
 import type { ClodPageNode, PageMesh } from "../types.js";
 import type { HeightfieldSampler } from "./heightfield_sampler.js";
 import type { Phase1DebugMode, Phase1TerrainConfig } from "./phase1_config.js";
+import {
+  trackedMeshBasicMaterial,
+  trackedMeshStandardMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 const BIOME_COLORS = [
   new THREE.Color(0x536b3b),
@@ -53,9 +57,9 @@ function pageSourceSectionColor(sample: { materialWeights: [number, number, numb
 
 export function createPhase1TerrainMaterial(mode: Phase1DebugMode): THREE.Material {
   if (mode === "final") {
-    return new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
+    return trackedMeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 }, "phase1-terrain-final");
   }
-  return new THREE.MeshBasicMaterial({ vertexColors: true });
+  return trackedMeshBasicMaterial({ vertexColors: true }, `phase1-terrain-debug:${mode}`);
 }
 
 export function geometryForPhase1Node(
