@@ -25,6 +25,14 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   earlyTerrainAcceptedPatches: number;
   earlyTerrainUnknownKeptPatches: number;
   earlyTerrainSkippedCandidates: number;
+  earlyTerrainCacheHits: number;
+  earlyTerrainCacheMisses: number;
+  earlyTerrainHiddenPatches: number;
+  earlyTerrainWaterPatches: number;
+  earlyTerrainBiomePatches: number;
+  earlyTerrainSteepPatches: number;
+  earlyTerrainHeightPatches: number;
+  earlyTerrainOutsidePatches: number;
   nearTrees: number;
   midTrees: number;
   farTrees: number;
@@ -101,6 +109,14 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     earlyTerrainAcceptedPatches: 0,
     earlyTerrainUnknownKeptPatches: 0,
     earlyTerrainSkippedCandidates: 0,
+    earlyTerrainCacheHits: 0,
+    earlyTerrainCacheMisses: 0,
+    earlyTerrainHiddenPatches: 0,
+    earlyTerrainWaterPatches: 0,
+    earlyTerrainBiomePatches: 0,
+    earlyTerrainSteepPatches: 0,
+    earlyTerrainHeightPatches: 0,
+    earlyTerrainOutsidePatches: 0,
     nearTrees: 0,
     midTrees: 0,
     farTrees: 0,
@@ -159,11 +175,20 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
   }
 
   if (!input.gpuRing && input.earlyTerrainRejectionStats) {
-    stats.earlyTerrainTestedPatches = input.earlyTerrainRejectionStats.testedPatches;
-    stats.earlyTerrainRejectedPatches = input.earlyTerrainRejectionStats.rejectedPatches;
-    stats.earlyTerrainAcceptedPatches = input.earlyTerrainRejectionStats.acceptedPatches;
-    stats.earlyTerrainUnknownKeptPatches = input.earlyTerrainRejectionStats.unknownKeptPatches;
-    stats.earlyTerrainSkippedCandidates = input.earlyTerrainRejectionStats.skippedCandidateEstimate;
+    const early = input.earlyTerrainRejectionStats;
+    stats.earlyTerrainTestedPatches = early.testedPatches;
+    stats.earlyTerrainRejectedPatches = early.rejectedPatches;
+    stats.earlyTerrainAcceptedPatches = early.acceptedPatches;
+    stats.earlyTerrainUnknownKeptPatches = early.unknownKeptPatches;
+    stats.earlyTerrainSkippedCandidates = early.skippedCandidateEstimate;
+    stats.earlyTerrainCacheHits = early.cacheHits;
+    stats.earlyTerrainCacheMisses = early.cacheMisses;
+    stats.earlyTerrainHiddenPatches = early.reasonCounts.terrain_hidden ?? 0;
+    stats.earlyTerrainWaterPatches = early.reasonCounts.below_water ?? 0;
+    stats.earlyTerrainBiomePatches = early.reasonCounts.wrong_biome ?? 0;
+    stats.earlyTerrainSteepPatches = early.reasonCounts.too_steep ?? 0;
+    stats.earlyTerrainHeightPatches = early.reasonCounts.height_range ?? 0;
+    stats.earlyTerrainOutsidePatches = early.reasonCounts.outside_world ?? 0;
   }
 
   stats.nearTrees = input.lodCounts.near;
