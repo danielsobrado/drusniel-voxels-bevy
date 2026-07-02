@@ -22,6 +22,7 @@ export interface TreeControllerUiState {
   treeLeafFlutterStrength: number;
   treeDebugColorByLod: boolean;
   treeGpuEnabled: boolean;
+  treeGpuFallbackToCpu: boolean;
   treeGpuForceCpu: boolean;
   treeGpuShowCounts: boolean;
   treeGpuReadbackVisibleLists: boolean;
@@ -118,6 +119,7 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       gpu: {
         ...deps.treeConfig.gpu,
         enabled: state.treeGpuEnabled,
+        fallbackToCpu: state.treeGpuFallbackToCpu,
         debugForceCpu: state.treeGpuForceCpu,
         debugShowGpuCounts: state.treeGpuShowCounts,
         readbackVisibleLists: state.treeGpuReadbackVisibleLists,
