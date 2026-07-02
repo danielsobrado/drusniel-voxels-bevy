@@ -9,7 +9,6 @@ import {
   understoryDepthPrepassFromQuery,
 } from "../../understory/understory_depth_prepass_runtime.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
-import "../../understory/understory_gpu_ring_reinit_guard.js";
 import { UnderstorySystem, type UnderstoryStats } from "../../understory/understory_system.js";
 
 export interface UnderstoryControllerUiState {
@@ -91,20 +90,18 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
   assertPageMeshSignaturesUnchanged(signaturesBefore, deps.nodes, "understory init");
 
   const sync = () => deps.syncStatsToState(system.getStats());
+  const rebuildWithCurrentSettings = () => {
+    system.updateSettings(makeSettings());
+    system.rebuild();
+    sync();
+  };
   sync();
 
   return {
     system,
     makeSettings,
-    applySettings: () => {
-      system.updateSettings(makeSettings());
-      sync();
-    },
-    rebuild: () => {
-      system.updateSettings(makeSettings());
-      system.rebuild();
-      sync();
-    },
+    applySettings: rebuildWithCurrentSettings,
+    rebuild: rebuildWithCurrentSettings,
     refreshStats: sync,
     update: (elapsedSeconds, ringCenter, camera) => {
       system.update(elapsedSeconds, ringCenter, camera);
@@ -115,13 +112,20 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
       system.setEnabled(enabled);
       sync();
     },
-    setDepthPrepassEnabled: (enabled) => setUnderstoryDepthPrepassEnabled(enabled),
-    markPatchesDirty: () => system.markPatchesDirty(),
+    setDepthPrepassEnabled: (enabled) => {
+      setUnderstoryDepthPrepassEnabled(enabled);
+      system.rebuild();
+      sync();
+    },
+    markPatchesDirty: () => {
+      system.markPatchesDirty();
+      system.rebuild();
+      sync();
+    },
   };
 }
 
 function initialUnderstoryDepthPrepassEnabled(): boolean {
-  return understoryDepthPrepassFromQuery(
-    typeof location === "undefined" ? "" : location.search,
-  ).enabled;
+  if (typeof location === "undefined") return false;
+  return understoryDepthPrepassFromQuery(new URLSearchParams(location.search));
 }
