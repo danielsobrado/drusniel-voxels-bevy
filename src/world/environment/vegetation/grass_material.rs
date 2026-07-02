@@ -270,11 +270,8 @@ pub fn record_vegetation_depth_prepass_status(
     config: Res<VegetationDepthPrepassConfig>,
     mut timing: ResMut<crate::performance::AreaTimingRecorder>,
 ) {
-    timing.record_count(
-        frame.0,
-        "Vegetation Depth Prepass Enabled",
-        f64::from(config.enabled),
-    );
+    let enabled = if config.enabled { 1.0 } else { 0.0 };
+    timing.record_count(frame.0, "Vegetation Depth Prepass Enabled", enabled);
 }
 
 /// Plugin to add grass material support
