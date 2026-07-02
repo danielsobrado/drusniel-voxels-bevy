@@ -54,7 +54,7 @@ The plugin exposes `ProceduralSupportMapStatus` so debug UI, bench rows, or smok
 After local validation, generate the cache once and commit the generated files under:
 
 ```text
-aassets/generated/procedural
+assets/generated/procedural
 ```
 
 Then change the config to:
