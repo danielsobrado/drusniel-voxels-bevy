@@ -3,6 +3,10 @@ import type { FarSummaryConfig } from "./config.js";
 import type { FarSummaryCache } from "./summary-cache.js";
 import type { FarSummaryStats } from "./types.js";
 import { attachDebugPanelChrome } from "../ui/debug_panel_chrome.js";
+import {
+  trackedLineBasicMaterial,
+  trackedMeshBasicMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 const TILE_STATE_COLORS: Record<string, number> = {
   requested: 0xffff00,
@@ -28,8 +32,10 @@ export class FarSummaryDebugOverlay {
   private readonly statsElement: HTMLPreElement;
 
   private readonly gridGroup: THREE.Group;
-  private gridMeshes: THREE.Object3D[] = [];
-  private tileMeshes: THREE.Object3D[] = [];
+  private readonly gridMeshes: THREE.Object3D[] = [];
+  private readonly tileMeshes: THREE.Object3D[] = [];
+  private readonly lineMaterials = new Map<number, THREE.LineBasicMaterial>();
+  private readonly tileMaterials = new Map<string, THREE.MeshBasicMaterial>();
   private lastStateRevision = -1;
   private meshRebuildFrameSkips = 0;
 
@@ -87,13 +93,8 @@ export class FarSummaryDebugOverlay {
   private rebuildMeshes(): void {
     this.clearAllMeshes();
 
-    if (this.config.debug.showClipmapGrid) {
-      this.buildGridLines();
-    }
-
-    if (this.config.debug.showTileStates) {
-      this.buildTileQuads();
-    }
+    if (this.config.debug.showClipmapGrid) this.buildGridLines();
+    if (this.config.debug.showTileStates) this.buildTileQuads();
   }
 
   private buildGridLines(): void {
@@ -109,8 +110,7 @@ export class FarSummaryDebugOverlay {
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-      const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.3 });
-      const lines = new THREE.LineSegments(geo, mat);
+      const lines = new THREE.LineSegments(geo, this.lineMaterial(color));
       this.gridGroup.add(lines);
       this.gridMeshes.push(lines);
     }
@@ -139,32 +139,43 @@ export class FarSummaryDebugOverlay {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geo.setIndex(indices);
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity,
-      depthWrite: false, side: THREE.DoubleSide,
-    });
-    return new THREE.Mesh(geo, mat);
+    return new THREE.Mesh(geo, this.tileMaterial(color, opacity));
   }
 
   private clearAllMeshes(): void {
     for (const m of this.gridMeshes) {
-      if (m instanceof THREE.Mesh || m instanceof THREE.LineSegments) {
-        m.geometry?.dispose();
-        const mat = m.material;
-        if (Array.isArray(mat)) for (const m2 of mat) m2.dispose();
-        else (mat as THREE.Material)?.dispose();
-      }
+      if (m instanceof THREE.Mesh || m instanceof THREE.LineSegments) m.geometry?.dispose();
       this.gridGroup.remove(m);
     }
     this.gridMeshes.length = 0;
     for (const m of this.tileMeshes) {
-      if (m instanceof THREE.Mesh) {
-        m.geometry?.dispose();
-        (m.material as THREE.Material)?.dispose();
-      }
+      if (m instanceof THREE.Mesh) m.geometry?.dispose();
       this.gridGroup.remove(m);
     }
     this.tileMeshes.length = 0;
+  }
+
+  private lineMaterial(color: number): THREE.LineBasicMaterial {
+    const existing = this.lineMaterials.get(color);
+    if (existing) return existing;
+    const material = trackedLineBasicMaterial({ color, transparent: true, opacity: 0.3 }, `far-summary-grid:${color.toString(16)}`);
+    this.lineMaterials.set(color, material);
+    return material;
+  }
+
+  private tileMaterial(color: number, opacity: number): THREE.MeshBasicMaterial {
+    const key = `${color.toString(16)}:${opacity.toFixed(2)}`;
+    const existing = this.tileMaterials.get(key);
+    if (existing) return existing;
+    const material = trackedMeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }, `far-summary-tile:${key}`);
+    this.tileMaterials.set(key, material);
+    return material;
   }
 
   private updateStatsText(stats: FarSummaryStats): void {
@@ -196,5 +207,9 @@ export class FarSummaryDebugOverlay {
     this.clearAllMeshes();
     this.gridGroup.removeFromParent?.();
     this.statsHost.remove();
+    for (const material of this.lineMaterials.values()) material.dispose();
+    for (const material of this.tileMaterials.values()) material.dispose();
+    this.lineMaterials.clear();
+    this.tileMaterials.clear();
   }
 }
