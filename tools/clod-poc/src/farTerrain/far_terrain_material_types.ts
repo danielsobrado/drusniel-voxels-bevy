@@ -40,6 +40,10 @@ export interface FarTerrainUniformRefs {
   uSunColor: ReturnType<typeof uniform>;
   uSkyColor: ReturnType<typeof uniform>;
   uGroundColor: ReturnType<typeof uniform>;
+  uSunVisibilityOriginX: ReturnType<typeof uniform>;
+  uSunVisibilityOriginZ: ReturnType<typeof uniform>;
+  uSunVisibilityWorldSize: ReturnType<typeof uniform>;
+  uSunVisibilityValid: ReturnType<typeof uniform>;
   uSummaryWidthCells?: ReturnType<typeof uniform>;
   uSummaryHeightCells?: ReturnType<typeof uniform>;
   uSummaryValid?: ReturnType<typeof uniform>;
