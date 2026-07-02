@@ -5,6 +5,7 @@ import {
   resolveSlowFrameMsThreshold,
 } from "./runtime_config.js";
 
+
 describe("parseClodRuntimeConfig", () => {
   it("parses bundled clod_runtime.yaml defaults", () => {
     const config = parseClodRuntimeConfig();
@@ -32,6 +33,12 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.materialChurn.logSpikeWarnings).toBe(false);
     expect(config.materialChurn.spikeWarnThresholdPerFrame).toBe(32);
     expect(config.materialChurn.maxTrackedMaterials).toBe(4096);
+    expect(config.renderResolution.dprCap).toBe(1.5);
+    expect(config.renderResolution.renderScale).toBe(1.0);
+    expect(config.renderResolution.minEffectivePixelRatio).toBe(0.5);
+    expect(config.renderResolution.maxEffectivePixelRatio).toBe(2.0);
+    expect(config.renderResolution.presets.performance100).toEqual({ dprCap: 1.0, renderScale: 0.85 });
+    expect(config.renderResolution.presets.high).toEqual({ dprCap: 1.5, renderScale: 1.0 });
     expect(config.digging.holdIntervalMs).toBe(400);
     expect(config.profiling.slowFrameMs).toBe(24);
   });
