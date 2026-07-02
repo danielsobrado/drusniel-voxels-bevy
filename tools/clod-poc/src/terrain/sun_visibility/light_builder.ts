@@ -1,6 +1,8 @@
 import * as THREE from "three";
-import { sunVisibilityTileCellCenter } from "./sun_visibility_tile.js";
+import { sunVisibilityTileCellCenter, type SunVisibilityTileKey } from "./sun_visibility_tile.js";
+import type { SunDirectionBin } from "./sun_bins.js";
 import type { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
+import type { SunLightOptions } from "./sun_light_options.js";
 
 export const LIGHT_SAMPLE = {
   missing: 0,
@@ -8,10 +10,31 @@ export const LIGHT_SAMPLE = {
   shaded: 2,
 } as const;
 
-export function buildLightTile(request: any, provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>, options: any) {
+export interface LightTileBuildRequest {
+  tile: SunVisibilityTileKey;
+  sunVec: THREE.Vector3;
+  sunBin: SunDirectionBin;
+  terrainRevision: number;
+  frameIndex: number;
+}
+
+export interface LightTile {
+  key: SunVisibilityTileKey;
+  sunBin: SunDirectionBin;
+  terrainRevision: number;
+  resolution: number;
+  values: Uint8Array;
+  builtAtFrame: number;
+}
+
+export function buildLightTile(
+  request: LightTileBuildRequest,
+  provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>,
+  options: SunLightOptions,
+): LightTile {
   const resolution = options.tile.resolution;
   const values = new Uint8Array(resolution * resolution);
-  const sun = request.sunVec.clone().normalize() as THREE.Vector3;
+  const sun = request.sunVec.clone().normalize();
   const horizontalLength = Math.hypot(sun.x, sun.z);
 
   for (let cellZ = 0; cellZ < resolution; cellZ++) {
