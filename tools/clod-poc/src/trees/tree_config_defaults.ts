@@ -110,11 +110,11 @@ export const DEFAULT_TREE_IMPOSTOR_SETTINGS: TreeImpostorSettings = {
   enabled: true,
   bakeOnStart: true,
   fallbackToPlaceholder: false,
-  sourceLod: "mid",
-  resolutionPx: 128,
+  sourceLod: "near",
+  resolutionPx: 256,
   octahedralGridSize: 8,
   atlasPaddingPx: 2,
-  alphaTest: 0.45,
+  alphaTest: 0.35,
   frameUpdateDistanceM: 2.0,
   axialBillboard: true,
   preserveVertical: true,
@@ -205,7 +205,7 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
   refreshDistanceM: 16,
   maxNewPatchesPerFrame: 2,
   maxInstances: 9000,
-  species: cloneRecord(DEFAULT_TREE_SPECIES_SETTINGS) as Record<TreeSpeciesId, TreeSpeciesSettings>,
+  species: DEFAULT_TREE_SPECIES_SETTINGS,
   placement: {
     spacingM: 5.5,
     jitter: 0.72,
@@ -226,70 +226,26 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
     ditherEnabled: true,
     shadowsMaxLod: "near",
     budgets: {
-      nearMaxVertices: 260000,
-      midMaxVertices: 90000,
-      farMaxVertices: 40000,
+      nearMaxVertices: 260_000,
+      midMaxVertices: 90_000,
+      farMaxVertices: 40_000,
       impostorMaxVertices: 240,
     },
   },
-  impostors: cloneTreeImpostorSettings(DEFAULT_TREE_IMPOSTOR_SETTINGS),
-  foliage: cloneFoliageSettings(DEFAULT_TREE_FOLIAGE_SETTINGS),
-  wind: cloneWindSettings(DEFAULT_TREE_WIND_SETTINGS),
+  impostors: DEFAULT_TREE_IMPOSTOR_SETTINGS,
+  foliage: DEFAULT_TREE_FOLIAGE_SETTINGS,
+  wind: DEFAULT_TREE_WIND_SETTINGS,
   render: {
-    alphaTest: 0.38,
+    alphaTest: 0.42,
     castShadows: true,
     receiveShadows: true,
     depthPrepass: true,
     debugColorByLod: false,
   },
-  gpu: { ...DEFAULT_TREE_GPU_SETTINGS, terrainVisibility: { ...DEFAULT_TREE_GPU_SETTINGS.terrainVisibility } },
-  ecology: cloneEcologySettings(DEFAULT_TREE_ECOLOGY_SETTINGS),
+  gpu: DEFAULT_TREE_GPU_SETTINGS,
+  ecology: DEFAULT_TREE_ECOLOGY_SETTINGS,
 };
 
-export function cloneRecord<T>(source: Record<string, T>): Record<string, T> {
-  return JSON.parse(JSON.stringify(source)) as Record<string, T>;
+export function cloneTreeSettings(): TreeSettings {
+  return structuredClone(DEFAULT_TREE_SETTINGS);
 }
-
-export function cloneTreeImpostorSettings(settings: TreeImpostorSettings): TreeImpostorSettings {
-  return { ...settings };
-}
-
-export function cloneFoliageSettings(settings: TreeFoliageSettings): TreeFoliageSettings {
-  return {
-    ...settings,
-    oak: { ...settings.oak },
-    pine: { ...settings.pine },
-  };
-}
-
-export function cloneWindSettings(settings: TreeWindSettings): TreeWindSettings {
-  return { ...settings, direction: [...settings.direction] };
-}
-
-export function cloneEcologySettings(settings: TreeEcologySettings): TreeEcologySettings {
-  return {
-    enabled: settings.enabled,
-    density: { ...settings.density },
-    terrain: { ...settings.terrain },
-    clustering: { ...settings.clustering },
-    age: { ...settings.age },
-    speciesZones: cloneRecord(settings.speciesZones) as Record<TreeSpeciesId, TreeSpeciesZoneSettings>,
-  };
-}
-
-export function cloneTreeSettings(settings: TreeSettings = DEFAULT_TREE_SETTINGS): TreeSettings {
-  return {
-    ...settings,
-    species: cloneRecord(settings.species) as Record<TreeSpeciesId, TreeSpeciesSettings>,
-    placement: { ...settings.placement },
-    lod: { ...settings.lod, budgets: { ...settings.lod.budgets } },
-    impostors: cloneTreeImpostorSettings(settings.impostors),
-    foliage: cloneFoliageSettings(settings.foliage),
-    wind: cloneWindSettings(settings.wind),
-    render: { ...settings.render },
-    gpu: { ...settings.gpu, terrainVisibility: { ...settings.gpu.terrainVisibility } },
-    ecology: cloneEcologySettings(settings.ecology),
-  };
-}
-
-export type { TreeSpeciesFoliageSettings, TreeSpeciesMorphologySettings };
