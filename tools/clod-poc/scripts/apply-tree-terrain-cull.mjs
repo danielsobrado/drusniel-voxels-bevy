@@ -15,19 +15,35 @@ function checkNeedles(name, path, needles) {
   return { name, status: missing.length === 0 ? "ok" : "missing", missing };
 }
 
-function checkEarlyCullOrder(name, path) {
-  const source = readProjectFile(path);
+function checkRawShaderOrder() {
+  const source = readProjectFile("src/gpu/shaders/tree_ring.compute.wgsl");
   const terrainReject = source.indexOf("if (terrain_hidden) { return; }");
-  const visibleReject = source.indexOf("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
   const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
   const visibleAppend = source.indexOf("append_lod_if_active(species, TREE_LOD_NEAR");
-  const rawShaderAllowsNoCluster = path.endsWith("tree_ring.compute.wgsl") && visibleReject < 0;
-  const visibleValid = rawShaderAllowsNoCluster || (visibleReject > shadowAppend && visibleReject < visibleAppend);
-  const valid = terrainReject >= 0 && shadowAppend >= 0 && visibleAppend >= 0 && terrainReject < shadowAppend && terrainReject < visibleAppend && visibleValid;
+  const valid = terrainReject >= 0 && shadowAppend >= 0 && visibleAppend >= 0
+    && terrainReject < shadowAppend && terrainReject < visibleAppend;
   return {
-    name,
+    name: "raw shader culls terrain before shadows",
     status: valid ? "ok" : "missing",
-    missing: valid ? [] : ["terrain cull must happen before shadows; visible-cluster cull must remain after shadows and before visible appends"],
+    missing: valid ? [] : ["terrain-hidden return must happen before shadow and visible appends"],
+  };
+}
+
+function checkTransformOrder() {
+  const source = readProjectFile("src/gpu/tree_ring_wgsl_transforms.ts");
+  const targetStart = source.indexOf("const targetOrder = `");
+  const targetEnd = source.indexOf("`;", targetStart + 1);
+  const target = targetStart >= 0 && targetEnd > targetStart ? source.slice(targetStart, targetEnd) : "";
+  const terrainReject = target.indexOf("terrainRejectStmt");
+  const visibleReject = target.indexOf("clusterRejectStmt");
+  const shadowAppend = target.indexOf("shadowAppendFn}(species, TREE_LOD_NEAR");
+  const visibleAppend = target.indexOf("visibleAppendFn}(species, TREE_LOD_NEAR");
+  const valid = terrainReject >= 0 && shadowAppend >= 0 && visibleReject >= 0 && visibleAppend >= 0
+    && terrainReject < shadowAppend && shadowAppend < visibleReject && visibleReject < visibleAppend;
+  return {
+    name: "transform culls terrain before shadows and clusters before visible",
+    status: valid ? "ok" : "missing",
+    missing: valid ? [] : ["expected terrain reject before shadows, cluster reject after shadows, and cluster reject before visible appends"],
   };
 }
 
@@ -104,8 +120,8 @@ const results = [
     "patch.terrainOccluded",
     "treeTerrainOcclusionSettings",
   ]),
-  checkEarlyCullOrder("raw shader culls terrain before shadows", "src/gpu/shaders/tree_ring.compute.wgsl"),
-  checkEarlyCullOrder("composed transform culls terrain before shadows and clusters before visible", "src/gpu/tree_ring_wgsl_transforms.ts"),
+  checkRawShaderOrder(),
+  checkTransformOrder(),
   checkComposedCullOrder(),
   checkValidationEarlyCullOrder(),
 ];
