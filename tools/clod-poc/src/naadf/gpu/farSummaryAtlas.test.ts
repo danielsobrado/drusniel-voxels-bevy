@@ -61,14 +61,31 @@ describe("FarSummaryGpuAtlas", () => {
 
   it("uses balanced packed textures by default", () => {
     const atlas = createAtlas({ tileCells: 2, ringCount: 2 });
+    const estimatedBytes = atlas.view.estimatedBytes ?? Number.POSITIVE_INFINITY;
+    const debugEstimatedBytes = atlas.view.debugEstimatedBytes ?? 0;
 
     expect(atlas.view.format).toBe("balanced");
     expect(atlas.view.texture.format).toBe(THREE.RedFormat);
     expect(atlas.view.texture.type).toBe(THREE.FloatType);
+    expect(atlas.view.texture.image.data).toBeInstanceOf(Float32Array);
     expect(atlas.view.materialTexture.type).toBe(THREE.UnsignedByteType);
     expect(atlas.view.coverageTexture.type).toBe(THREE.UnsignedByteType);
     expect(atlas.view.normalTexture.image.width).toBe(1);
-    expect(atlas.view.estimatedBytes).toBeLessThan(atlas.view.debugEstimatedBytes ?? Number.POSITIVE_INFINITY);
+    expect(estimatedBytes).toBeLessThan(debugEstimatedBytes);
+  });
+
+  it("uses half-float height for packed_low_bandwidth", () => {
+    const atlas = createAtlas({ tileCells: 2, ringCount: 2, format: "packed_low_bandwidth" });
+    const estimatedBytes = atlas.view.estimatedBytes ?? Number.POSITIVE_INFINITY;
+    const debugEstimatedBytes = atlas.view.debugEstimatedBytes ?? 0;
+
+    expect(atlas.view.format).toBe("packed_low_bandwidth");
+    expect(atlas.view.texture.format).toBe(THREE.RedFormat);
+    expect(atlas.view.texture.type).toBe(THREE.HalfFloatType);
+    expect(atlas.view.texture.image.data).toBeInstanceOf(Uint16Array);
+    expect(atlas.view.materialTexture.type).toBe(THREE.UnsignedByteType);
+    expect(atlas.view.coverageTexture.type).toBe(THREE.UnsignedByteType);
+    expect(estimatedBytes).toBeLessThan(debugEstimatedBytes);
   });
 
   it("packs ready far-summary heights into an R32F texture", () => {
@@ -91,6 +108,18 @@ describe("FarSummaryGpuAtlas", () => {
     const data = atlas.view.texture.image.data as Float32Array;
     const firstPackedPixel = atlasPixel(atlas, 2, 2);
     expect(data[firstPackedPixel]).toBe(20);
+  });
+
+  it("packs low-bandwidth heights into an R16F texture", () => {
+    const atlas = createAtlas({ tileCells: 2, tilesX: 3, tilesZ: 3, format: "packed_low_bandwidth" });
+    const farTiles = new Map<string, any>();
+    farTiles.set("0:1,1", readyTile(0, 1, 1, 20));
+
+    atlas.updateFromState(testState(farTiles));
+
+    const data = atlas.view.texture.image.data as Uint16Array;
+    const firstPackedPixel = atlasPixel(atlas, 2, 2);
+    expect(data[firstPackedPixel]).toBe(THREE.DataUtils.toHalfFloat(20));
   });
 
   it("packs summary material color into an RGBA8 texture", () => {
