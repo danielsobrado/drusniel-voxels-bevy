@@ -5,6 +5,7 @@ import { createTreeSystemGpuRingDrawResources } from "./tree_system_gpu_ring_res
 import { clearTreeGpuRing } from "./tree_system_gpu_ring_runtime.js";
 import { buildTreeRuntimeStats } from "./tree_system_runtime_stats.js";
 import type { TreeSystem } from "./tree_system_runtime.js";
+import { treeLodWithinDepthPrepass } from "./tree_depth_prepass_runtime.js";
 
 export function treeCpuPatchInput(self: TreeSystem) {
   return {
@@ -20,7 +21,9 @@ export function treeCpuPatchInput(self: TreeSystem) {
     castsShadow: (l: TreeLod) => treeLodCastsShadow(self.settings, l),
     resolveLod: (s: TreeSpeciesId, l: TreeLod) => resolveTreeSystemLod({ species: s, lod: l, settings: self.settings, impostorAtlases: self.assets.impostorAtlases }),
     prepassNodesFor: self.useCpuTreePrepass
-      ? (_s: TreeSpeciesId, l: TreeLod) => (l === "impostor" ? undefined : self.assets.materialHandle.prepassNodesFor?.(l))
+      ? (_s: TreeSpeciesId, l: TreeLod) => treeLodWithinDepthPrepass(self.treePrepassMaxLod, l)
+        ? self.assets.materialHandle.prepassNodesFor?.(l)
+        : undefined
       : undefined,
   };
 }
@@ -46,6 +49,7 @@ export function treeCreateGpuRingResources(self: TreeSystem, maxInstancesPerGrou
     hydrologyWater: self.hydrologyWater, impostorAtlases: self.assets.impostorAtlases,
     crownProxyGeometry: self.assets.crownProxyGeometry,
     useTreePrepass: self.useTreePrepass,
+    treePrepassMaxLod: self.treePrepassMaxLod,
     geometryForGpuRing: (s, l) => self.assets.geometryForGpuRing(s, l),
   }, maxInstancesPerGroup);
 }
