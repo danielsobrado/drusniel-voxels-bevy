@@ -158,7 +158,7 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
     }
   }
 
-  if (input.earlyTerrainRejectionStats) {
+  if (!input.gpuRing && input.earlyTerrainRejectionStats) {
     stats.earlyTerrainTestedPatches = input.earlyTerrainRejectionStats.testedPatches;
     stats.earlyTerrainRejectedPatches = input.earlyTerrainRejectionStats.rejectedPatches;
     stats.earlyTerrainAcceptedPatches = input.earlyTerrainRejectionStats.acceptedPatches;
