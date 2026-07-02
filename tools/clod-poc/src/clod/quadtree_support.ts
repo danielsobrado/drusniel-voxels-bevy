@@ -2,20 +2,35 @@ import { ClodBuildError, ClodPageNode, PageFootprint, PageMesh } from "../types.
 import { ClodPagesConfig } from "../config.js";
 import type { BuildResult } from "./quadtree.js";
 
+export const INITIAL_NODE_REVISION = 1;
+
 export interface Lod0NodeBackup {
   mesh: PageMesh;
   bounds: ClodPageNode["bounds"];
+  revision?: number;
   chunkMeshes?: PageMesh[];
 }
 
 export interface ParentNodeBackup {
   mesh: PageMesh;
   bounds: ClodPageNode["bounds"];
+  revision?: number;
   errorWorld: number;
   lowBenefit: boolean;
 }
 
 export const tris = (mesh: PageMesh): number => mesh.indices.length / 3;
+
+export function ensureNodeRevision(node: ClodPageNode): number {
+  if (typeof node.revision === "number" && Number.isFinite(node.revision)) return node.revision;
+  node.revision = INITIAL_NODE_REVISION;
+  return node.revision;
+}
+
+export function bumpNodeRevision(node: ClodPageNode): number {
+  node.revision = ensureNodeRevision(node) + 1;
+  return node.revision;
+}
 
 export function footprintFor(level: number, nx: number, nz: number, cfg: ClodPagesConfig): PageFootprint {
   const span = (1 << level) * cfg.page.chunks_per_page * cfg.page.chunk_size;
@@ -46,6 +61,7 @@ export function backupLod0Node(node: ClodPageNode): Lod0NodeBackup {
   return {
     mesh: node.mesh,
     bounds: cloneBounds(node.bounds),
+    revision: node.revision,
     chunkMeshes: node.chunkMeshes ? [...node.chunkMeshes] : undefined,
   };
 }
@@ -60,6 +76,7 @@ export function restoreLod0Backups(backups: ReadonlyMap<ClodPageNode, Lod0NodeBa
   for (const [node, backup] of backups) {
     node.mesh = backup.mesh;
     node.bounds = cloneBounds(backup.bounds);
+    node.revision = backup.revision;
     if (backup.chunkMeshes) node.chunkMeshes = backup.chunkMeshes;
     else delete node.chunkMeshes;
   }
@@ -69,6 +86,7 @@ export function backupParentNode(node: ClodPageNode): ParentNodeBackup {
   return {
     mesh: node.mesh,
     bounds: cloneBounds(node.bounds),
+    revision: node.revision,
     errorWorld: node.errorWorld,
     lowBenefit: node.lowBenefit,
   };
@@ -78,6 +96,7 @@ export function restoreParentBackups(backups: ReadonlyMap<ClodPageNode, ParentNo
   for (const [node, backup] of backups) {
     node.mesh = backup.mesh;
     node.bounds = cloneBounds(backup.bounds);
+    node.revision = backup.revision;
     node.errorWorld = backup.errorWorld;
     node.lowBenefit = backup.lowBenefit;
   }
