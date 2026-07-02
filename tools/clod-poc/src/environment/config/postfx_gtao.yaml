@@ -1,5 +1,5 @@
 postfx_gtao:
-  enabled: false
+  enabled: true
   samples: 8
   radius_m: 1.6
   strength: 0.55
