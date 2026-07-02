@@ -51,6 +51,9 @@ export interface FramePerfSample extends Record<FramePerfMetric, number> {
   treeGpuShadowCasterCount: number;
   treeGpuShadowOverflowed: number;
   treeGpuDispatchMs: number | null;
+  treeVisibleClusterHidden: number;
+  treeVisibleClusterVisible: number;
+  treeVisibleClusterUnknownKept: number;
   customPropGpuStatus: PropGpuStatus | "unknown";
   customPropTotalInstances: number;
   customPropVisibleInstances: number;
@@ -94,6 +97,9 @@ export interface FramePerfSummary {
     treeGpuVisibleCountAvg: number;
     treeGpuShadowCasterCountAvg: number;
     treeGpuShadowOverflowedFrames: number;
+    treeVisibleClusterHiddenAvg: number;
+    treeVisibleClusterVisibleAvg: number;
+    treeVisibleClusterUnknownKeptAvg: number;
     treeNearTreesAvg: number;
     treeMidTreesAvg: number;
     treeFarTreesAvg: number;
