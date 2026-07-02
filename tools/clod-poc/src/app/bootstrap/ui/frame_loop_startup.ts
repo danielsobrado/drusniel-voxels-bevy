@@ -12,6 +12,8 @@ import {
   RENDER_RESOLUTION_CHANGED_EVENT,
   type RenderResolutionChangedEventDetail,
 } from "../../../rendering/render_resolution_runtime.js";
+import { parseSunLightOptions } from "../../../terrain/sun_visibility/sun_light_options.js";
+import { createLightUpdate } from "../../../terrain/sun_visibility/light_update.js";
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
@@ -156,6 +158,32 @@ export function runFrameLoopStartup(
   const grassProfileEnabled = searchParams.get("grassProfile") === "1";
   const grassPrepassEnabled = searchParams.get("prepass") !== "0";
   const profileFrameMs = resolveSlowFrameMsThreshold(searchParams, clodRuntime.profiling.slowFrameMs);
+  const sunLightOptions = parseSunLightOptions({
+    active: searchParams.get("sunLightCache") !== "0",
+    diagnostics: searchParams.get("sunLightStats") === "1",
+    debug_view: {
+      active: searchParams.get("sunLightDebug") === "1",
+    },
+  });
+  const sunLightRuntime = window.__drusnielTerrainSummary
+    ? createLightUpdate({ terrainSummary: window.__drusnielTerrainSummary, options: sunLightOptions })
+    : null;
+  const syncSunLightCounters = () => {
+    const sunStats = sunLightRuntime?.stats();
+    if (!sunStats || !longView.hooks?.stats) return;
+    const counters = longView.hooks.stats.counters;
+    counters["sunLightCache.active"] = sunStats.active ? 1 : 0;
+    counters["sunLightCache.entries"] = sunStats.entries;
+    counters["sunLightCache.pendingTiles"] = sunStats.pendingTiles;
+    counters["sunLightCache.hits"] = sunStats.hits;
+    counters["sunLightCache.misses"] = sunStats.misses;
+    counters["sunLightCache.missingValues"] = sunStats.missingValues;
+    counters["sunLightCache.evictions"] = sunStats.evictions;
+    counters["sunLightCache.refreshes"] = sunStats.refreshes;
+    counters["sunLightCache.tilesBuiltThisFrame"] = sunStats.tilesBuiltThisFrame;
+    counters["sunLightCache.buildMsLastFrame"] = sunStats.buildMsLastFrame;
+    counters["sunLightCache.buildMsAvg"] = sunStats.buildMsAvg;
+  };
 
   // TP-1: real per-pass GPU timing for the hero-forest path. Only on WebGPU,
   // and only when the renderer was created with timestamp tracking (gated on
@@ -316,10 +344,12 @@ export function runFrameLoopStartup(
       getShadowProxyInert: () => readShadowProxyCounters().shadow_proxy_inert,
       getShadowProxyEnabled: () => readShadowProxyCounters().shadow_proxy_enabled,
     },
-    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene
+    farSummary: input.onFarSummaryUpdate || session.naadfStatsController || streamingScene || sunLightRuntime
       ? { onFarSummaryUpdate: (frameIndex, deltaSeconds, camera) => {
           if (streamingScene) farShellController.moveTo(camera.position.x, camera.position.z);
           input.onFarSummaryUpdate?.(frameIndex, deltaSeconds, camera);
+          sunLightRuntime?.update(camera, currentLighting().sunDirection, frameIndex, performance.now());
+          syncSunLightCounters();
           session.naadfStatsController?.updateDisplay();
         } }
       : undefined,
