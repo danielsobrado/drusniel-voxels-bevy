@@ -154,6 +154,9 @@ export class ClodRenderNodeCache {
     const geometry = view.mesh.geometry as THREE.BufferGeometry;
     if (this.deps.pageGeometryCache.owns(geometry)) {
       this.deps.pageGeometryCache.setGeometryActive(geometry, false);
+      if (evicted && this.deps.config.evictGeometryWithRenderNode) {
+        this.deps.pageGeometryCache.invalidateNode(nodeId, { includeActive: true });
+      }
     } else {
       geometry.dispose();
     }
@@ -238,6 +241,7 @@ export class ClodRenderNodeCache {
 
   private configureCurrentMaterialState(mat: TerrainMaterialHandle): void {
     const state = this.deps.getMaterialState();
+    mat.setWireframe(state.wireframe);
     mat.setDebug({
       normalColor: state.normalColor,
       normalDivergence: state.normalDivergence,
