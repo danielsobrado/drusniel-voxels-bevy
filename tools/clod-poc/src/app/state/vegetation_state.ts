@@ -6,6 +6,7 @@ import type { UnderstorySettings } from "../../understory/understory_config.js";
 import type { ForestLightingSettings } from "../../forest_lighting/forest_lighting_config.js";
 import type { ForestLightingDebugMode } from "../../forest_lighting/index.js";
 import type { TreeTotalDisplay } from "../../trees/tree_info.js";
+import type { TreeDepthPrepassMaxLod } from "../../trees/tree_depth_prepass_runtime.js";
 import { assignArchiveFields } from "./archive_fields.js";
 import type { TreeShadowMaxLod } from "./tree_quality_presets.js";
 
@@ -47,6 +48,7 @@ export interface VegetationSliceState {
   stoneClassSummary: string;
   stoneVisible: number;
   treesEnabled: boolean;
+  treeDepthPrepassMaxLod: TreeDepthPrepassMaxLod;
   treeDistance: number;
   treeMaxInstances: number;
   treeDensity: number;
@@ -107,6 +109,7 @@ export function createVegetationSliceState(input: {
   grassRingDebug: boolean;
   grassDepthPrepassEnabled: boolean;
   grassDepthPrepassTier: number;
+  treeDepthPrepassMaxLod: TreeDepthPrepassMaxLod;
 }): VegetationSliceState {
   const { grassConfig, stoneConfig, treeConfig, understoryConfig, forestLightingConfig } = input;
   return {
@@ -147,6 +150,7 @@ export function createVegetationSliceState(input: {
     stoneClassSummary: "0/0/0",
     stoneVisible: 0,
     treesEnabled: treeConfig.enabled,
+    treeDepthPrepassMaxLod: input.treeDepthPrepassMaxLod,
     treeDistance: treeConfig.distanceM,
     treeMaxInstances: treeConfig.maxInstances,
     treeDensity: treeConfig.ecology.density.baseDensity,
