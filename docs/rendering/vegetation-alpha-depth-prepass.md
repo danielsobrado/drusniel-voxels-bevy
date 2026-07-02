@@ -4,17 +4,24 @@
 
 The vegetation alpha depth prepass is an opt-in diagnostic/performance path for procedural grass.
 
-It is disabled by default.
+It is disabled by default in:
 
-```bash
-cargo run --release
+```text
+assets/config/vegetation.yaml
 ```
 
-Enable it explicitly for A/B testing:
+```yaml
+vegetation_depth_prepass:
+  enabled: false
+```
+
+Enable it for A/B testing either by editing the config file or by using the env override:
 
 ```bash
 VOXEL_VEGETATION_DEPTH_PREPASS=1 cargo run --release
 ```
+
+The env var overrides the config file.
 
 Accepted true values are:
 
@@ -26,13 +33,15 @@ on
 enabled
 ```
 
-All other values keep the path disabled.
+All other env values keep the path disabled.
 
 ## What is currently implemented
 
-- `GrassMaterial::enable_prepass()` is gated by `VOXEL_VEGETATION_DEPTH_PREPASS`.
+- `GrassMaterial::enable_prepass()` is gated by a cached startup resolver.
+- `assets/config/vegetation.yaml` provides the default config-file state.
+- `VOXEL_VEGETATION_DEPTH_PREPASS` overrides the config file for A/B runs.
 - `VegetationDepthPrepassConfig` records the startup state as a typed resource.
-- Startup logs print `Vegetation depth prepass: off/on` with the env flag value.
+- Startup logs print `Vegetation depth prepass: off/on` with the source: `default`, `config`, or `env`.
 - The timing recorder emits `Vegetation Depth Prepass Enabled` as `0` or `1` so bench output can prove which path ran.
 - The default path remains unchanged.
 - Grass shadow specialization remains disabled; this gate is for the camera depth prepass, not for shadow maps.
@@ -100,10 +109,11 @@ This is not yet a custom depth-only vegetation material. It only enables Bevy's 
 
 The previous code disabled prepass because of shader-variant mismatch risk. Keep this opt-in until visual and bench validation prove it is safe on the current Bevy renderer.
 
+The prepass decision is resolved at startup because Bevy material prepass specialization is static. Changing the config file or env var requires restarting the app.
+
 ## Pending production work
 
 ```text
-TODO: add full graphics/vegetation config-file support instead of env-only control.
 TODO: add bench render_toggles support once the bench schema path is verified.
 TODO: add debug overlay text for the current prepass state.
 TODO: implement a custom depth-only grass material if Bevy's built-in prepass variant still mismatches grass.wgsl.
