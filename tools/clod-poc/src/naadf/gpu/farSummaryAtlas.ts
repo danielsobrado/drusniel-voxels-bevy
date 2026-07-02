@@ -2,12 +2,24 @@ import * as THREE from "three";
 import type { FarSummaryTile } from "../types.js";
 import type { NaadfWorldState } from "../summaryStreamer.js";
 import { materialColorForDebugId } from "../../terrainMaterial/terrainMaterialBands.js";
+import {
+  DEFAULT_FAR_SUMMARY_ATLAS_FORMAT,
+  clamp01,
+  estimateFarSummaryAtlasBytes,
+  packUnorm8,
+  resolveFarSummaryAtlasPackingSpec,
+  type FarSummaryAtlasByteEstimate,
+  type FarSummaryAtlasFormat,
+  type FarSummaryAtlasPackingSpec,
+} from "../farSummaryAtlasPacking.js";
 
 const DEFAULT_ATLAS_TILES_X = 5;
 const DEFAULT_ATLAS_TILES_Z = 5;
-const FLOAT_RGBA_COMPONENTS = 4;
+const RGBA_COMPONENTS = 4;
 const NORMAL_ENCODE_BIAS = 0.5;
 const NORMAL_ENCODE_SCALE = 0.5;
+
+type AtlasData = Float32Array | Uint8Array;
 
 export interface FarSummaryGpuAtlasRingView {
   originX: number;
@@ -27,6 +39,11 @@ export interface FarSummaryGpuAtlasView {
   readonly normalTexture: THREE.DataTexture;
   readonly coverageTexture: THREE.DataTexture;
   readonly rings: FarSummaryGpuAtlasRingView[];
+  readonly format?: FarSummaryAtlasFormat;
+  readonly estimatedBytes?: number;
+  readonly debugEstimatedBytes?: number;
+  readonly memorySavingsBytes?: number;
+  readonly memorySavingsPct?: number;
   originX: number;
   originZ: number;
   cellM: number;
@@ -41,6 +58,7 @@ export interface FarSummaryGpuAtlasOptions {
   ringCount?: number;
   tilesX?: number;
   tilesZ?: number;
+  format?: FarSummaryAtlasFormat;
 }
 
 export class FarSummaryGpuAtlas {
@@ -51,10 +69,12 @@ export class FarSummaryGpuAtlas {
   private readonly ringCount: number;
   private readonly ringWidthCells: number;
   private readonly ringHeightCells: number;
+  private readonly packing: FarSummaryAtlasPackingSpec;
+  private readonly byteEstimate: FarSummaryAtlasByteEstimate;
   private readonly heightData: Float32Array;
-  private readonly materialData: Float32Array;
-  private readonly normalData: Float32Array;
-  private readonly coverageData: Float32Array;
+  private readonly materialData: AtlasData;
+  private readonly normalData: AtlasData;
+  private readonly coverageData: AtlasData;
   private lastSignature = "";
 
   constructor(options: FarSummaryGpuAtlasOptions) {
@@ -64,17 +84,33 @@ export class FarSummaryGpuAtlas {
     this.ringCount = Math.max(1, Math.floor(options.ringCount ?? 1));
     this.ringWidthCells = this.tileCells * this.tilesX;
     this.ringHeightCells = this.tileCells * this.tilesZ;
+    this.packing = resolveFarSummaryAtlasPackingSpec(options.format ?? DEFAULT_FAR_SUMMARY_ATLAS_FORMAT);
+
     const width = this.ringWidthCells;
     const height = this.ringHeightCells * this.ringCount;
-    this.heightData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
-    this.materialData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
-    this.normalData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
-    this.coverageData = new Float32Array(width * height * FLOAT_RGBA_COMPONENTS);
+    this.byteEstimate = estimateFarSummaryAtlasBytes(width, height, this.packing);
+    this.heightData = new Float32Array(width * height * this.packing.heightComponents);
+    this.materialData = this.packing.format === "debug_rgba32f"
+      ? new Float32Array(width * height * RGBA_COMPONENTS)
+      : new Uint8Array(width * height * RGBA_COMPONENTS);
+    this.coverageData = this.packing.format === "debug_rgba32f"
+      ? new Float32Array(width * height * RGBA_COMPONENTS)
+      : new Uint8Array(width * height * RGBA_COMPONENTS);
+    const normalPixels = this.packing.storesNormalAtlas ? width * height : 1;
+    this.normalData = this.packing.format === "debug_rgba32f"
+      ? new Float32Array(normalPixels * RGBA_COMPONENTS)
+      : new Uint8Array(normalPixels * RGBA_COMPONENTS);
 
-    const texture = createFloatAtlasTexture(this.heightData, width, height, "naadf-far-summary-height-atlas");
-    const materialTexture = createFloatAtlasTexture(this.materialData, width, height, "naadf-far-summary-material-atlas");
-    const normalTexture = createFloatAtlasTexture(this.normalData, width, height, "naadf-far-summary-normal-atlas");
-    const coverageTexture = createFloatAtlasTexture(this.coverageData, width, height, "naadf-far-summary-coverage-atlas");
+    const texture = createHeightAtlasTexture(this.heightData, width, height, this.packing, "naadf-far-summary-height-atlas");
+    const materialTexture = createPackedAtlasTexture(this.materialData, width, height, this.packing, "naadf-far-summary-material-atlas");
+    const normalTexture = createPackedAtlasTexture(
+      this.normalData,
+      this.packing.storesNormalAtlas ? width : 1,
+      this.packing.storesNormalAtlas ? height : 1,
+      this.packing,
+      "naadf-far-summary-normal-atlas",
+    );
+    const coverageTexture = createPackedAtlasTexture(this.coverageData, width, height, this.packing, "naadf-far-summary-coverage-atlas");
 
     this.view = {
       texture,
@@ -82,6 +118,11 @@ export class FarSummaryGpuAtlas {
       normalTexture,
       coverageTexture,
       rings: Array.from({ length: this.ringCount }, (_, ringIndex) => this.emptyRingView(ringIndex)),
+      format: this.packing.format,
+      estimatedBytes: this.byteEstimate.totalBytes,
+      debugEstimatedBytes: this.byteEstimate.debugRgba32fBytes,
+      memorySavingsBytes: this.byteEstimate.savingsBytes,
+      memorySavingsPct: this.byteEstimate.savingsPct,
       originX: 0,
       originZ: 0,
       cellM: 1,
@@ -210,30 +251,57 @@ export class FarSummaryGpuAtlas {
     for (let z = 0; z < copyCells; z++) {
       for (let x = 0; x < copyCells; x++) {
         const src = z * tile.resolution + x;
-        const dst = ((baseZ + z) * atlasWidth + baseX + x) * FLOAT_RGBA_COMPONENTS;
-        this.heightData[dst] = tile.avgHeight[src] ?? 0;
-        this.heightData[dst + 1] = tile.minHeight[src] ?? 0;
-        this.heightData[dst + 2] = tile.maxHeight[src] ?? 0;
-        this.heightData[dst + 3] = 1;
+        const pixel = (baseZ + z) * atlasWidth + baseX + x;
+        this.writeHeight(pixel, tile.avgHeight[src] ?? 0, tile.minHeight[src] ?? 0, tile.maxHeight[src] ?? 0);
 
         const color = materialColorForDebugId(tile.dominantMaterial[src] ?? 0);
-        this.materialData[dst] = color[0];
-        this.materialData[dst + 1] = color[1];
-        this.materialData[dst + 2] = color[2];
-        this.materialData[dst + 3] = 1;
+        this.writeRgba(this.materialData, pixel * RGBA_COMPONENTS, color[0], color[1], color[2], 1);
 
-        const normal = deriveSummaryNormal(tile, x, z);
-        this.normalData[dst] = encodeNormalChannel(normal.x);
-        this.normalData[dst + 1] = encodeNormalChannel(normal.y);
-        this.normalData[dst + 2] = encodeNormalChannel(normal.z);
-        this.normalData[dst + 3] = 1;
+        if (this.packing.storesNormalAtlas) {
+          const normal = deriveSummaryNormal(tile, x, z);
+          this.writeRgba(
+            this.normalData,
+            pixel * RGBA_COMPONENTS,
+            encodeNormalChannel(normal.x),
+            encodeNormalChannel(normal.y),
+            encodeNormalChannel(normal.z),
+            1,
+          );
+        }
 
-        this.coverageData[dst] = clamp01(tile.canopyCoverage[src] ?? 0);
-        this.coverageData[dst + 1] = clamp01(tile.waterCoverage[src] ?? 0);
-        this.coverageData[dst + 2] = 0;
-        this.coverageData[dst + 3] = 1;
+        this.writeRgba(
+          this.coverageData,
+          pixel * RGBA_COMPONENTS,
+          clamp01(tile.canopyCoverage[src] ?? 0),
+          clamp01(tile.waterCoverage[src] ?? 0),
+          1,
+          1,
+        );
       }
     }
+  }
+
+  private writeHeight(pixel: number, avgHeight: number, minHeight: number, maxHeight: number): void {
+    const dst = pixel * this.packing.heightComponents;
+    this.heightData[dst] = avgHeight;
+    if (!this.packing.storesHeightRange) return;
+    this.heightData[dst + 1] = minHeight;
+    this.heightData[dst + 2] = maxHeight;
+    this.heightData[dst + 3] = 1;
+  }
+
+  private writeRgba(data: AtlasData, dst: number, r: number, g: number, b: number, a: number): void {
+    if (data instanceof Float32Array) {
+      data[dst] = clamp01(r);
+      data[dst + 1] = clamp01(g);
+      data[dst + 2] = clamp01(b);
+      data[dst + 3] = clamp01(a);
+      return;
+    }
+    data[dst] = packUnorm8(r);
+    data[dst + 1] = packUnorm8(g);
+    data[dst + 2] = packUnorm8(b);
+    data[dst + 3] = packUnorm8(a);
   }
 
   private emptyRingView(ringIndex: number, ring?: { startM: number; endM: number; cellM: number }): FarSummaryGpuAtlasRingView {
@@ -251,13 +319,37 @@ export class FarSummaryGpuAtlas {
   }
 }
 
-function createFloatAtlasTexture(
+function createHeightAtlasTexture(
   data: Float32Array,
   width: number,
   height: number,
+  packing: FarSummaryAtlasPackingSpec,
   name: string,
 ): THREE.DataTexture {
-  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
+  const format = packing.format === "debug_rgba32f" ? THREE.RGBAFormat : THREE.RedFormat;
+  return createAtlasTexture(data, width, height, format, THREE.FloatType, name);
+}
+
+function createPackedAtlasTexture(
+  data: AtlasData,
+  width: number,
+  height: number,
+  packing: FarSummaryAtlasPackingSpec,
+  name: string,
+): THREE.DataTexture {
+  const type = packing.format === "debug_rgba32f" ? THREE.FloatType : THREE.UnsignedByteType;
+  return createAtlasTexture(data, width, height, THREE.RGBAFormat, type, name);
+}
+
+function createAtlasTexture(
+  data: AtlasData,
+  width: number,
+  height: number,
+  format: THREE.PixelFormat,
+  type: THREE.TextureDataType,
+  name: string,
+): THREE.DataTexture {
+  const texture = new THREE.DataTexture(data, width, height, format, type);
   texture.name = name;
   texture.magFilter = THREE.NearestFilter;
   texture.minFilter = THREE.NearestFilter;
@@ -287,11 +379,7 @@ function heightAt(tile: FarSummaryTile, x: number, z: number): number {
 }
 
 function encodeNormalChannel(value: number): number {
-  return Math.min(1, Math.max(0, value * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_BIAS));
-}
-
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
+  return clamp01(value * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_BIAS);
 }
 
 function selectTiles(
