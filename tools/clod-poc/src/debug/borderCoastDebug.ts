@@ -2,6 +2,10 @@ import * as THREE from "three";
 import type GUI from "lil-gui";
 import { sampleCoastMask } from "../border/coastMask.js";
 import type { BorderCoastOceanConfig } from "../config/borderCoastOceanConfig.js";
+import {
+  trackedLineBasicMaterial,
+  trackedPointsMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 export interface BorderCoastDebugStats {
   coastType: string;
@@ -73,7 +77,7 @@ export function createBorderCoastDebug(deps: BorderCoastDebugDeps): BorderCoastD
     }
     return new THREE.LineSegments(
       new THREE.BufferGeometry().setFromPoints(segments),
-      new THREE.LineBasicMaterial({ color, depthTest: false }),
+      trackedLineBasicMaterial({ color, depthTest: false }, `border-coast-line:${color.toString(16)}`),
     );
   }
 
@@ -98,7 +102,7 @@ export function createBorderCoastDebug(deps: BorderCoastDebugDeps): BorderCoastD
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     return new THREE.Points(
       geometry,
-      new THREE.PointsMaterial({ size: 8, sizeAttenuation: false, vertexColors: true, depthTest: false }),
+      trackedPointsMaterial({ size: 8, sizeAttenuation: false, vertexColors: true, depthTest: false }, "border-coast-type-points"),
     );
   }
 
@@ -147,7 +151,7 @@ function rectangleLine(
       new THREE.Vector3(bounds.min_x, y, bounds.max_z),
       new THREE.Vector3(bounds.min_x, y, bounds.min_z),
     ]),
-    new THREE.LineBasicMaterial({ color, depthTest: false }),
+    trackedLineBasicMaterial({ color, depthTest: false }, `border-coast-rect:${color.toString(16)}`),
   );
 }
 
