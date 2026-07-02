@@ -15,6 +15,7 @@ import type { ClodAppState } from "../clod_app_state.js";
 import type { ClodRuntimeBindings } from "../clod_runtime_bindings.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
 import type { AppRenderer } from "./renderer_startup.js";
+import type { RenderResolutionRuntime } from "../../rendering/render_resolution_runtime.js";
 import type { DomShell } from "./dom_shell.js";
 import type { RuntimeSystemsStartupResult, VegetationStatControllerRefs } from "./runtime/runtime_systems_startup.js";
 import type { TerrainViewStartupResult } from "./terrain_view_startup.js";
@@ -46,6 +47,7 @@ export interface UiStartupInput {
   statControllers: VegetationStatControllerRefs;
   app: AppRenderer;
   renderer: AppRenderer["renderer"];
+  renderResolution: RenderResolutionRuntime;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
@@ -116,6 +118,7 @@ export interface UiSessionState {
   spellVfxController: SpellVfxController | null;
   clodShadowOverlayController: ClodShadowOverlayController | null;
   clodShadowStatsController: GuiDisplayController | null;
+  frameLoopAbortController: AbortController | null;
 }
 
 export interface UiStartupContext {
@@ -152,6 +155,7 @@ export function createUiStartupContext(input: UiStartupInput): UiStartupContext 
       spellVfxController: null,
       clodShadowOverlayController: null,
       clodShadowStatsController: null,
+      frameLoopAbortController: null,
     },
   };
 }
