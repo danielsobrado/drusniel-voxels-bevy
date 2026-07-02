@@ -4,11 +4,8 @@ import type {
   TreeGpuSettings,
   TreeImpostorSettings,
   TreeSettings,
-  TreeSpeciesFoliageSettings,
   TreeSpeciesId,
-  TreeSpeciesMorphologySettings,
   TreeSpeciesSettings,
-  TreeSpeciesZoneSettings,
   TreeWindSettings,
 } from "./tree_config_types.js";
 
