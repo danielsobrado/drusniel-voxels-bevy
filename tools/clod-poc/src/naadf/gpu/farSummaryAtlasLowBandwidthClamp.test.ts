@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestNaadfConfig } from "../__tests__/testConfig.js";
+import { NaadfMetricsCollector } from "../metrics.js";
+import { createNaadfWorldState } from "../summaryStreamer.js";
+import { createTerrainSource } from "../terrainSource.js";
 import type { FarSummaryTile } from "../types.js";
 import { FarSummaryGpuAtlas } from "./farSummaryAtlas.js";
 
@@ -44,18 +47,18 @@ function makeState(tile: FarSummaryTile) {
   const config = createTestNaadfConfig();
   config.farClipmap.tileCells = 2;
   config.farClipmap.rings = [{ name: "near", startM: 0, endM: 4096, cellM: 32 }];
-  return {
-    config,
-    farTiles: new Map([["0:1,1", tile]]),
-    predictedX: 64,
-    predictedZ: 64,
-  };
+
+  const state = createNaadfWorldState(config, createTerrainSource("flat"), new NaadfMetricsCollector());
+  state.farTiles.set("0:1,1", tile);
+  state.predictedX = 64;
+  state.predictedZ = 64;
+  return state;
 }
 
 describe("FarSummaryGpuAtlas low-bandwidth height packing", () => {
   it("clamps positive out-of-range height before half-float packing", () => {
     const atlas = makeAtlas();
-    atlas.updateFromState(makeState(makeTile(HALF_FLOAT_MAX * 2)) as never);
+    atlas.updateFromState(makeState(makeTile(HALF_FLOAT_MAX * 2)));
 
     const data = atlas.view.texture.image.data as Uint16Array;
     const firstPackedPixel = 2 * atlas.view.widthCells + 2;
@@ -64,7 +67,7 @@ describe("FarSummaryGpuAtlas low-bandwidth height packing", () => {
 
   it("clamps negative out-of-range height before half-float packing", () => {
     const atlas = makeAtlas();
-    atlas.updateFromState(makeState(makeTile(-HALF_FLOAT_MAX * 2)) as never);
+    atlas.updateFromState(makeState(makeTile(-HALF_FLOAT_MAX * 2)));
 
     const data = atlas.view.texture.image.data as Uint16Array;
     const firstPackedPixel = 2 * atlas.view.widthCells + 2;
