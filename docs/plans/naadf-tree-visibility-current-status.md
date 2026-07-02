@@ -118,44 +118,48 @@ Important constraint:
 
 - The cluster camera-visibility mask must **never** gate shadow caster generation. It is a camera occlusion result, so using it to skip the whole `process_tree_slot` path would incorrectly remove camera-hidden shadow casters. Keep it visible-list-only unless visible and shadow generation are split into separate dispatches.
 
+### TVIS-007b — Visible-cluster stats
+
+Implemented in:
+
+- `tools/clod-poc/src/trees/tree_system_gpu_ring_runtime.ts`
+- `tools/clod-poc/src/trees/tree_system_stats.ts`
+- `tools/clod-poc/src/trees/tree_info.ts`
+- `tools/clod-poc/src/trees/tree_system_stats.test.ts`
+
+The HUD/debug line now reports visible-cluster mask counts when available:
+
+```text
+visibleClusters hidden=<n> visible=<n> unknown=<n>
+```
+
+These are CPU-side mask statistics. They do not require GPU readback and do not imply compacted dispatch.
+
 ## Partially implemented
 
-### TVIS-007b — Compacted visible dispatch
+### TVIS-007c — Compacted visible dispatch
 
-Current state: **visible-list per-slot and visible-cluster rejection is wired**, but not compacted dispatch.
+Current state: **visible-list per-slot and visible-cluster rejection is wired and observable**, but not compacted dispatch.
 
 What remains:
 
 - GPU dispatch still covers the full tree ring slot grid;
 - `gpuCandidateCount` may not drop yet;
-- there is no compacted visible-cluster dispatch yet;
-- hidden visible-cluster counts are not exposed as dedicated HUD/debug stats yet.
+- there is no compacted visible-cluster dispatch yet.
 
 ## Remaining architectural work
 
-### TVIS-007b next step
+### TVIS-007c next step
 
-Add dedicated visible-cluster statistics first, then consider compacting only the visible-list path.
+Measure the current visible-cluster mask effect first, then decide whether compacted visible dispatch is worth the added complexity.
 
-Target shape:
+Acceptance before compacting:
 
-```text
-CPU/NAADF visibility provider
-  -> conservative cluster camera-visibility mask as Uint32Array entries
-  -> GPU visible-list path reads mask before visible append work
-  -> GPU shadow-caster path ignores camera-visibility mask
-  -> report visibleClusterHidden / visibleClusterVisible counts
-  -> future: compact visible dispatch only, or split visible/shadow dispatches
-```
-
-Acceptance:
-
-- visible-list work is skipped for hidden visible clusters;
-- shadow caster generation is not gated by the camera-visibility mask;
-- hidden/visible cluster counts are visible in debug stats;
-- later, visible candidate work drops when dispatch becomes cluster-compacted;
-- unknown/missing data keeps clusters visible;
-- no visible popping in fast-turn scenes.
+- visible-cluster hidden count is near zero on flat terrain;
+- visible-cluster hidden count increases in hills/mountains;
+- shadow caster counts are not gated by visible-cluster hidden count;
+- no visible popping in fast-turn scenes;
+- frame time improves enough to justify compacted dispatch work.
 
 ### TVIS-008
 
@@ -184,4 +188,4 @@ http://127.0.0.1:5173/?scene=infinite-naadf-hills&naadf=1&treeGpuCounts=0
 http://127.0.0.1:5173/?scene=infinite-naadf-fast-turn&naadf=1&treeGpuCounts=0
 ```
 
-Use `treeGpuCounts=1` only for debug counts.
+Use `treeGpuCounts=1` only for debug GPU readback counts.
