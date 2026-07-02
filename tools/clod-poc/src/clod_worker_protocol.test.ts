@@ -22,6 +22,8 @@ function mesh(material = 0): PageMesh {
 function serializedNode(id: string, level: number, childIds: (string | null)[] = []): SerializedClodNode {
   return {
     id,
+    revision: level + 10,
+    sourceRevisions: [{ chunkX: level, chunkZ: 0, revision: level + 100 }],
     level,
     childIds,
     mesh: mesh(),
@@ -54,12 +56,18 @@ describe("CLOD worker protocol", () => {
     const root = build.roots[0];
     const child = nodesById.get("L0:0,0")!;
     expect(root.children[0]).toBe(child);
+    expect(child.revision).toBe(10);
+    expect(child.sourceRevisions?.[0]).toEqual({ chunkX: 0, chunkZ: 0, revision: 100 });
 
     const update = serializedNode("L0:0,0", 0);
+    update.revision = 42;
+    update.sourceRevisions = [{ chunkX: 3, chunkZ: 4, revision: 99 }];
     update.mesh = mesh(3);
     applySerializedNode(child, update, nodesById);
 
     expect(root.children[0]).toBe(child);
+    expect(child.revision).toBe(42);
+    expect(child.sourceRevisions?.[0]).toEqual({ chunkX: 3, chunkZ: 4, revision: 99 });
     expect(child.mesh.paintSlots[0]).toBe(3);
   });
 
