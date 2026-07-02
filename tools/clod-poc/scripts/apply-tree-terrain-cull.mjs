@@ -61,7 +61,7 @@ function checkComposedCullOrder() {
 }
 
 function checkValidationEarlyCullOrder() {
-  const source = readProjectFile("src/trees/tree_ring_lighting_proxies.ts");
+  const source = readProjectFile("src/trees/tree_ring_validation_counts.ts");
   const functionStart = source.indexOf("export function generateTreeRingValidationCounts");
   const terrainCull = source.indexOf("treeRingTerrainHiddenForValidation({", functionStart);
   const shadowCount = source.indexOf("countShadowCasterGroups({", functionStart);
