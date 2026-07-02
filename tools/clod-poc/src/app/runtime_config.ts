@@ -9,6 +9,10 @@ import {
   DEFAULT_SELECTION_CUT_CACHE_CONFIG,
   type SelectionCutCacheConfig,
 } from "../terrain/selection/selection_cut_cache.js";
+import {
+  DEFAULT_MATERIAL_CHURN_CONFIG,
+  type MaterialChurnConfig,
+} from "../rendering/material_churn/material_churn_diagnostics.js";
 
 export interface ClodRuntimeConfig {
   runtime: {
@@ -31,6 +35,7 @@ export interface ClodRuntimeConfig {
   pageGeometryCache: PageGeometryCacheConfig;
   renderNodeCache: ClodRenderNodeCacheConfig;
   selectionCutCache: SelectionCutCacheConfig;
+  materialChurn: MaterialChurnConfig;
   digging: {
     holdIntervalMs: number;
   };
@@ -60,6 +65,7 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
   pageGeometryCache: DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG,
   renderNodeCache: DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG,
   selectionCutCache: DEFAULT_SELECTION_CUT_CACHE_CONFIG,
+  materialChurn: DEFAULT_MATERIAL_CHURN_CONFIG,
   digging: {
     holdIntervalMs: 400,
   },
@@ -100,6 +106,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
     const pageGeometryCache = (raw.page_geometry_cache ?? {}) as Record<string, unknown>;
     const renderNodeCache = (raw.render_node_cache ?? {}) as Record<string, unknown>;
     const selectionCutCache = (raw.selection_cut_cache ?? {}) as Record<string, unknown>;
+    const materialChurn = (raw.material_churn ?? {}) as Record<string, unknown>;
     const digging = (raw.digging ?? {}) as Record<string, unknown>;
     const profiling = (raw.profiling ?? {}) as Record<string, unknown>;
     return {
@@ -165,6 +172,17 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
           selectionCutCache.max_reuse_frames,
           defaults.selectionCutCache.maxReuseFrames,
         ),
+      },
+      materialChurn: {
+        enabled: bool(materialChurn.enabled, defaults.materialChurn.enabled),
+        collectMaterialVersions: bool(materialChurn.collect_material_versions, defaults.materialChurn.collectMaterialVersions),
+        collectRendererPrograms: bool(materialChurn.collect_renderer_programs, defaults.materialChurn.collectRendererPrograms),
+        logSpikeWarnings: bool(materialChurn.log_spike_warnings, defaults.materialChurn.logSpikeWarnings),
+        spikeWarnThresholdPerFrame: positiveInt(
+          materialChurn.spike_warn_threshold_per_frame,
+          defaults.materialChurn.spikeWarnThresholdPerFrame,
+        ),
+        maxTrackedMaterials: positiveInt(materialChurn.max_tracked_materials, defaults.materialChurn.maxTrackedMaterials),
       },
       digging: {
         holdIntervalMs: positiveInt(digging.hold_interval_ms, defaults.digging.holdIntervalMs),
