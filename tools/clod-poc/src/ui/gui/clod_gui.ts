@@ -15,7 +15,8 @@ export interface ClodGuiDeps {
   isWebGpu: boolean;
   renderer: RenderResolutionRenderer;
   camera: RenderResolutionCamera;
-  renderResolution: RenderResolutionRuntime;
+  postProcess?: { setSize: (width: number, height: number) => void } | null;
+  renderResolution?: RenderResolutionRuntime;
   views: Iterable<{
     mat: { setWireframe: (on: boolean) => void; setTier: (tier: number) => void };
     mesh: THREE.Mesh;
@@ -44,8 +45,16 @@ export interface ClodGuiResult {
   colorByLodController: GuiController | null;
 }
 
+function renderResolutionRuntime(deps: ClodGuiDeps): RenderResolutionRuntime | null {
+  return deps.renderResolution
+    ?? (window as unknown as { __drusnielRenderResolution?: RenderResolutionRuntime }).__drusnielRenderResolution
+    ?? null;
+}
+
 function createRenderResolutionGui(gui: GUI, deps: ClodGuiDeps): void {
-  const runtime = deps.renderResolution;
+  const runtime = renderResolutionRuntime(deps);
+  if (!runtime) return;
+
   const folder = gui.addFolder("Render Resolution");
   const settings = runtime.settings;
   const readout = runtime.readout();
