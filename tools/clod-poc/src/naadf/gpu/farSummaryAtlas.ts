@@ -18,6 +18,7 @@ const DEFAULT_ATLAS_TILES_Z = 5;
 const RGBA_COMPONENTS = 4;
 const NORMAL_ENCODE_BIAS = 0.5;
 const NORMAL_ENCODE_SCALE = 0.5;
+const HALF_FLOAT_MAX = 65504;
 
 type HeightAtlasData = Float32Array | Uint16Array;
 type AtlasData = Float32Array | Uint8Array;
@@ -287,13 +288,13 @@ export class FarSummaryGpuAtlas {
   private writeHeight(pixel: number, avgHeight: number, minHeight: number, maxHeight: number): void {
     const dst = pixel * this.packing.heightComponents;
     if (this.heightData instanceof Uint16Array) {
-      this.heightData[dst] = THREE.DataUtils.toHalfFloat(finiteOrZero(avgHeight));
+      this.heightData[dst] = THREE.DataUtils.toHalfFloat(clampHalfFloatHeight(avgHeight));
       return;
     }
-    this.heightData[dst] = avgHeight;
+    this.heightData[dst] = finiteOrZero(avgHeight);
     if (!this.packing.storesHeightRange) return;
-    this.heightData[dst + 1] = minHeight;
-    this.heightData[dst + 2] = maxHeight;
+    this.heightData[dst + 1] = finiteOrZero(minHeight);
+    this.heightData[dst + 2] = finiteOrZero(maxHeight);
     this.heightData[dst + 3] = 1;
   }
 
@@ -388,6 +389,11 @@ function heightAt(tile: FarSummaryTile, x: number, z: number): number {
 
 function encodeNormalChannel(value: number): number {
   return clamp01(value * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_BIAS);
+}
+
+function clampHalfFloatHeight(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(HALF_FLOAT_MAX, Math.max(-HALF_FLOAT_MAX, value));
 }
 
 function finiteOrZero(value: number): number {
