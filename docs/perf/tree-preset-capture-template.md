@@ -102,11 +102,13 @@ Use these to prove the switch paths work and to compare GPU ring versus CPU patc
 | `?quality=perf&treeGpu=0` | TODO | TODO | TODO | TODO | TODO | TODO |
 | `?quality=perf&treeGpuForceCpu=1` | TODO | TODO | TODO | TODO | TODO | TODO |
 | `?quality=perf&treeGpu=1` | TODO | TODO | TODO | TODO | TODO | TODO |
+| `?quality=perf&treeGpuStrict=1` | TODO | TODO | TODO | TODO | TODO | Should fail loud instead of CPU fallback if GPU trees cannot run. |
 
 Expected:
 
 - `treeGpu=0` and `treeGpuForceCpu=1` should not show `gpu-ring`.
 - `treeGpu=1` should show `gpu-ring` on supported browsers/devices.
+- `treeGpuStrict=1` should keep `fallbackToCpu=false`; on unsupported GPU-tree setup it should show `unsupported` or `error`, not `fallback-cpu`.
 - GPU ring should avoid CPU patch churn.
 
 ## Shadow Budget Results
@@ -164,6 +166,7 @@ TODO
 | Does `perf` materially improve frame time over `ultra`? | TODO |
 | Does `potato` provide the cheapest safe path? | TODO |
 | Does CPU fallback still work? | TODO |
+| Does strict GPU mode fail loud instead of using CPU fallback? | TODO |
 | Does shadow LOD gating reduce shadow caster work? | TODO |
 | Are there visible regressions? | TODO |
 | Should we tune preset values further? | TODO |
