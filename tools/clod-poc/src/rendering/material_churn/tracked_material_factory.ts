@@ -31,6 +31,13 @@ export function trackedLineBasicMaterial(
   return trackCreatedMaterial(new THREE.LineBasicMaterial(parameters), reason);
 }
 
+export function trackedPointsMaterial(
+  parameters: THREE.PointsMaterialParameters,
+  reason: string,
+): THREE.PointsMaterial {
+  return trackCreatedMaterial(new THREE.PointsMaterial(parameters), reason);
+}
+
 export function trackedMeshDepthMaterial(
   parameters: THREE.MeshDepthMaterialParameters,
   reason: string,
