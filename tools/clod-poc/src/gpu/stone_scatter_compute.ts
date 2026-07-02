@@ -3,6 +3,7 @@ import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import type { StoneSettings, StoneTerrainClassWeights } from "../stones/stone_config.js";
 import { composeStoneScatterShader } from "./wgsl_modules.js";
 import type { GrassHydrologyData } from "./grass_ring_compute.js";
+import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 
 const WORKGROUP_SIZE = 64;
 const CLASS_COUNT = 3;
@@ -11,44 +12,17 @@ const PARAM_BYTES = 16 * 20;
 const COUNTER_BYTES = COUNTER_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_CLASS = 5;
 const INDIRECT_BYTES = CLASS_COUNT * INDIRECT_ARGS_PER_CLASS * Uint32Array.BYTES_PER_ELEMENT;
+const READBACK_INTERVAL_FRAMES = 30;
 export const STONE_GPU_RING_MAX_SAFE_GRID = 512;
-// Storage buffers in the bind group: counters, indirect_args, instance_a, instance_b, digEdits.
-// Texture/sampler hydrology bindings do not count against maxStorageBuffersPerShaderStage.
 export const STONE_GPU_SCATTER_STORAGE_BINDINGS = 5;
 
 export type StoneGpuClassIndex = 0 | 1 | 2;
 
-export interface StoneHydrologyData {
-  res: number;
-  worldCells: number;
-  data: Float32Array;
-}
-
-export interface StoneGpuScatterBuffers {
-  instanceA: GPUBuffer;
-  instanceB: GPUBuffer;
-  indirectArgs: GPUBuffer;
-}
-
-export interface StoneGpuScatterParams {
-  worldCells: number;
-  centerX: number;
-  centerZ: number;
-  settings: StoneSettings;
-  indexCounts: [number, number, number];
-}
-
-export interface StoneGpuScatterCounts {
-  large: number;
-  medium: number;
-  small: number;
-}
-
-export interface StoneGpuClassRegion {
-  start: number;
-  end: number;
-  firstInstance: number;
-}
+export interface StoneHydrologyData { res: number; worldCells: number; data: Float32Array }
+export interface StoneGpuScatterBuffers { instanceA: GPUBuffer; instanceB: GPUBuffer; indirectArgs: GPUBuffer }
+export interface StoneGpuScatterParams { worldCells: number; centerX: number; centerZ: number; settings: StoneSettings; indexCounts: [number, number, number] }
+export interface StoneGpuScatterCounts { large: number; medium: number; small: number }
+export interface StoneGpuClassRegion { start: number; end: number; firstInstance: number }
 
 type PipelineName = "clear_counters" | "scatter_stones" | "build_indirect_args";
 
@@ -60,11 +34,7 @@ export function stoneGpuScatterUnsupportedReason(device: GPUDevice): string | nu
 
 export function stoneGpuClassRegion(classIndex: number, maxInstances: number): StoneGpuClassRegion {
   const start = Math.max(0, Math.floor(classIndex)) * Math.max(0, Math.floor(maxInstances));
-  return {
-    start,
-    end: start + Math.max(0, Math.floor(maxInstances)),
-    firstInstance: start,
-  };
+  return { start, end: start + Math.max(0, Math.floor(maxInstances)), firstInstance: start };
 }
 
 export function stoneGpuOutputIndex(classIndex: number, slot: number, maxInstances: number): number {
@@ -83,6 +53,7 @@ export class StoneGpuScatterCompute {
   private readonly paramF32 = new Float32Array(this.paramScratch);
   private readonly paramU32 = new Uint32Array(this.paramScratch);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
+  private frame = 0;
 
   private constructor(
     private readonly device: GPUDevice,
@@ -93,46 +64,16 @@ export class StoneGpuScatterCompute {
     hydroData: GrassHydrologyData | null,
   ) {
     this.pipelines = pipelines;
-    this.paramBuffer = device.createBuffer({
-      label: "stone scatter params",
-      size: PARAM_BYTES,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.counterBuffer = device.createBuffer({
-      label: "stone scatter counters",
-      size: COUNTER_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-    this.counterReadback = device.createBuffer({
-      label: "stone scatter counter readback",
-      size: COUNTER_BYTES,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
-    this.fieldParams = device.createBuffer({
-      label: "stone scatter field params",
-      size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.digEdits = device.createBuffer({
-      label: "stone scatter dig edits",
-      size: Math.max(1, edits.length) * DIG_EDIT_BYTES,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
+    this.paramBuffer = device.createBuffer({ label: "stone scatter params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.counterBuffer = device.createBuffer({ label: "stone scatter counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    this.counterReadback = device.createBuffer({ label: "stone scatter counter readback", size: COUNTER_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    this.fieldParams = device.createBuffer({ label: "stone scatter field params", size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.digEdits = device.createBuffer({ label: "stone scatter dig edits", size: Math.max(1, edits.length) * DIG_EDIT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(this.digEdits, 0, packDigEdits(edits));
     const packedFieldParams = packFieldParams(edits.length);
-    device.queue.writeBuffer(
-      this.fieldParams,
-      0,
-      packedFieldParams.buffer as ArrayBuffer,
-      packedFieldParams.byteOffset,
-      packedFieldParams.byteLength,
-    );
+    device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
     this.hydroTexture = this.createHydrologyTexture(hydroData);
-    const hydroSampler = device.createSampler({
-      label: "stone scatter hydro sampler",
-      magFilter: "nearest",
-      minFilter: "nearest",
-    });
+    const hydroSampler = device.createSampler({ label: "stone scatter hydro sampler", magFilter: "nearest", minFilter: "nearest" });
     this.bindGroup = device.createBindGroup({
       label: "stone scatter bind group",
       layout,
@@ -150,29 +91,14 @@ export class StoneGpuScatterCompute {
     });
   }
 
-  static async create(
-    device: GPUDevice,
-    edits: readonly ResolvedDigEdit[],
-    buffers: StoneGpuScatterBuffers,
-    hydroData: GrassHydrologyData | null = null,
-  ): Promise<StoneGpuScatterCompute> {
-    const module = device.createShaderModule({
-      label: "stone scatter compute shader",
-      code: composeStoneScatterShader(),
-    });
-    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({
-      binding,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: { type },
-    });
+  static async create(device: GPUDevice, edits: readonly ResolvedDigEdit[], buffers: StoneGpuScatterBuffers, hydroData: GrassHydrologyData | null = null): Promise<StoneGpuScatterCompute> {
+    const module = device.createShaderModule({ label: "stone scatter compute shader", code: composeStoneScatterShader() });
+    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const layout = device.createBindGroupLayout({
       label: "stone scatter compute layout",
       entries: [
         { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        storage(1),
-        storage(2),
-        storage(3),
-        storage(4),
+        storage(1), storage(2), storage(3), storage(4),
         { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
         { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         { binding: 7, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
@@ -180,22 +106,9 @@ export class StoneGpuScatterCompute {
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
-    const makePipeline = (entryPoint: PipelineName) =>
-      device.createComputePipelineAsync({
-        label: `stone scatter ${entryPoint}`,
-        layout: pipelineLayout,
-        compute: { module, entryPoint },
-      });
-    const [clearCounters, scatterStones, buildIndirectArgs] = await Promise.all([
-      makePipeline("clear_counters"),
-      makePipeline("scatter_stones"),
-      makePipeline("build_indirect_args"),
-    ]);
-    return new StoneGpuScatterCompute(device, layout, {
-      clear_counters: clearCounters,
-      scatter_stones: scatterStones,
-      build_indirect_args: buildIndirectArgs,
-    }, edits, buffers, hydroData);
+    const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `stone scatter ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
+    const [clearCounters, scatterStones, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("scatter_stones"), makePipeline("build_indirect_args")]);
+    return new StoneGpuScatterCompute(device, layout, { clear_counters: clearCounters, scatter_stones: scatterStones, build_indirect_args: buildIndirectArgs }, edits, buffers, hydroData);
   }
 
   async run(params: StoneGpuScatterParams): Promise<StoneGpuScatterCounts> {
@@ -203,10 +116,7 @@ export class StoneGpuScatterCompute {
     const maxInstances = Math.max(0, Math.floor(settings.maxInstances));
     const cellSize = Math.max(0.1, settings.cellSizeM);
     const ringRadius = Math.max(cellSize, settings.ringRadiusM);
-    const grid = Math.min(
-      STONE_GPU_RING_MAX_SAFE_GRID,
-      Math.max(1, Math.ceil((ringRadius * 2) / cellSize)),
-    );
+    const grid = Math.min(STONE_GPU_RING_MAX_SAFE_GRID, Math.max(1, Math.ceil((ringRadius * 2) / cellSize)));
 
     this.paramF32.fill(0);
     this.paramU32.fill(0);
@@ -258,22 +168,24 @@ export class StoneGpuScatterCompute {
     this.paramF32[78] = Math.max(0.001, settings.terrain.heightBlendM);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
 
+    const frame = this.frame++;
+    const requestReadback = shouldRequestGpuReadback({ kind: "stone_gpu_counts", frame, intervalFrames: READBACK_INTERVAL_FRAMES });
     const encoder = this.device.createCommandEncoder({ label: "stone scatter compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, 1);
     this.dispatchPipeline(encoder, this.pipelines.scatter_stones, Math.ceil((grid * grid) / WORKGROUP_SIZE));
     this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, 1);
-    encoder.copyBufferToBuffer(this.counterBuffer, 0, this.counterReadback, 0, COUNTER_BYTES);
+    if (requestReadback) encoder.copyBufferToBuffer(this.counterBuffer, 0, this.counterReadback, 0, COUNTER_BYTES);
     this.device.queue.submit([encoder.finish()]);
 
+    if (!requestReadback) return { large: 0, medium: 0, small: 0 };
     await this.counterReadback.mapAsync(GPUMapMode.READ);
-    const raw = new Uint32Array(this.counterReadback.getMappedRange(0, COUNTER_BYTES));
-    const counts = {
+    const raw = new Uint32Array(this.counterReadback.getMappedRange(0, COUNTER_BYTES).slice(0));
+    this.counterReadback.unmap();
+    return {
       large: Math.min(raw[1] ?? 0, maxInstances),
       medium: Math.min(raw[2] ?? 0, maxInstances),
       small: Math.min(raw[3] ?? 0, maxInstances),
     };
-    this.counterReadback.unmap();
-    return counts;
   }
 
   destroy(): void {
@@ -309,28 +221,13 @@ export class StoneGpuScatterCompute {
 
   private createHydrologyTexture(hydroData: GrassHydrologyData | null): GPUTexture {
     if (hydroData && hydroData.data.length > 0) {
-      const texture = this.device.createTexture({
-        label: "stone scatter hydro texture",
-        size: { width: hydroData.res, height: hydroData.res },
-        format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-      });
+      const texture = this.device.createTexture({ label: "stone scatter hydro texture", size: { width: hydroData.res, height: hydroData.res }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
       const bytes = new Uint8Array(hydroData.data.byteLength);
       bytes.set(new Uint8Array(hydroData.data.buffer, hydroData.data.byteOffset, hydroData.data.byteLength));
-      this.device.queue.writeTexture(
-        { texture },
-        bytes,
-        { bytesPerRow: hydroData.res * 16 },
-        { width: hydroData.res, height: hydroData.res },
-      );
+      this.device.queue.writeTexture({ texture }, bytes, { bytesPerRow: hydroData.res * 16 }, { width: hydroData.res, height: hydroData.res });
       return texture;
     }
-    return this.device.createTexture({
-      label: "stone scatter fallback hydro texture",
-      size: { width: 1, height: 1 },
-      format: "rgba32float",
-      usage: GPUTextureUsage.TEXTURE_BINDING,
-    });
+    return this.device.createTexture({ label: "stone scatter fallback hydro texture", size: { width: 1, height: 1 }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING });
   }
 }
 
