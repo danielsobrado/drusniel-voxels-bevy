@@ -19,6 +19,11 @@ describe("tree system stats aggregation", () => {
       heroNearPassesTriangleFloor: false,
       heroNearPassesRealFoliage: false,
       gpuStatus: "disabled",
+      gpuCandidateCount: 0,
+      gpuCandidateCountBeforePrefilter: 0,
+      gpuCandidateCountAfterPrefilter: 0,
+      gpuPrefilterRejectedClusters: 0,
+      gpuPrefilterSkippedCandidateEstimate: 0,
       gpuShadowCasterCount: 0,
       gpuShadowOverflowed: false,
       gpuDispatchMs: null,
@@ -87,7 +92,9 @@ describe("tree system stats aggregation", () => {
       heroFidelity: createEmptyTreeHeroFidelityStats(),
       gpuRing: true,
       gpuRingStats: {
-        candidateCount: 123,
+        candidateCount: 80,
+        candidateCountBeforePrefilter: 123,
+        candidateCountAfterPrefilter: 80,
         acceptedCandidates: 0,
         counts: { near: 1, mid: 2, far: 3, impostor: 4 },
         shadowGroupCounts: [1, 2, 3],
@@ -96,6 +103,15 @@ describe("tree system stats aggregation", () => {
           visibleClusterHidden: 5,
           visibleClusterVisible: 7,
           visibleClusterUnknownKept: 2,
+          gpuPrefilterTestedClusters: 12,
+          gpuPrefilterRejectedClusters: 5,
+          gpuPrefilterAcceptedClusters: 5,
+          gpuPrefilterUnknownKeptClusters: 2,
+          gpuPrefilterSkippedCandidateEstimate: 43,
+          gpuCandidateCountBeforePrefilter: 123,
+          gpuCandidateCountAfterPrefilter: 80,
+          gpuPrefilterCacheHits: 0,
+          gpuPrefilterCacheMisses: 12,
         },
       },
       gpuVisibleCount: 0,
@@ -108,10 +124,14 @@ describe("tree system stats aggregation", () => {
     });
 
     expect(stats.totalTrees).toBe(10);
-    expect(stats.generatedCandidates).toBe(123);
+    expect(stats.generatedCandidates).toBe(80);
     expect(stats.acceptedCandidates).toBe(10);
     expect(stats.heroNearTreeTriangles).toBe(0);
-    expect(stats.gpuCandidateCount).toBe(123);
+    expect(stats.gpuCandidateCount).toBe(80);
+    expect(stats.gpuCandidateCountBeforePrefilter).toBe(123);
+    expect(stats.gpuCandidateCountAfterPrefilter).toBe(80);
+    expect(stats.gpuPrefilterRejectedClusters).toBe(5);
+    expect(stats.gpuPrefilterSkippedCandidateEstimate).toBe(43);
     expect(stats.gpuAcceptedCount).toBe(10);
     expect(stats.gpuVisibleCount).toBe(10);
     expect(stats.gpuShadowCasterCount).toBe(6);
