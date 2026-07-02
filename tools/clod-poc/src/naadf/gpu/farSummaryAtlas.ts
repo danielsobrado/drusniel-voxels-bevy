@@ -19,6 +19,7 @@ const RGBA_COMPONENTS = 4;
 const NORMAL_ENCODE_BIAS = 0.5;
 const NORMAL_ENCODE_SCALE = 0.5;
 
+type HeightAtlasData = Float32Array | Uint16Array;
 type AtlasData = Float32Array | Uint8Array;
 
 export interface FarSummaryGpuAtlasRingView {
@@ -71,7 +72,7 @@ export class FarSummaryGpuAtlas {
   private readonly ringHeightCells: number;
   private readonly packing: FarSummaryAtlasPackingSpec;
   private readonly byteEstimate: FarSummaryAtlasByteEstimate;
-  private readonly heightData: Float32Array;
+  private readonly heightData: HeightAtlasData;
   private readonly materialData: AtlasData;
   private readonly normalData: AtlasData;
   private readonly coverageData: AtlasData;
@@ -89,7 +90,9 @@ export class FarSummaryGpuAtlas {
     const width = this.ringWidthCells;
     const height = this.ringHeightCells * this.ringCount;
     this.byteEstimate = estimateFarSummaryAtlasBytes(width, height, this.packing);
-    this.heightData = new Float32Array(width * height * this.packing.heightComponents);
+    this.heightData = this.packing.heightFormat === "r16f"
+      ? new Uint16Array(width * height * this.packing.heightComponents)
+      : new Float32Array(width * height * this.packing.heightComponents);
     this.materialData = this.packing.format === "debug_rgba32f"
       ? new Float32Array(width * height * RGBA_COMPONENTS)
       : new Uint8Array(width * height * RGBA_COMPONENTS);
@@ -283,6 +286,10 @@ export class FarSummaryGpuAtlas {
 
   private writeHeight(pixel: number, avgHeight: number, minHeight: number, maxHeight: number): void {
     const dst = pixel * this.packing.heightComponents;
+    if (this.heightData instanceof Uint16Array) {
+      this.heightData[dst] = THREE.DataUtils.toHalfFloat(finiteOrZero(avgHeight));
+      return;
+    }
     this.heightData[dst] = avgHeight;
     if (!this.packing.storesHeightRange) return;
     this.heightData[dst + 1] = minHeight;
@@ -320,14 +327,15 @@ export class FarSummaryGpuAtlas {
 }
 
 function createHeightAtlasTexture(
-  data: Float32Array,
+  data: HeightAtlasData,
   width: number,
   height: number,
   packing: FarSummaryAtlasPackingSpec,
   name: string,
 ): THREE.DataTexture {
   const format = packing.format === "debug_rgba32f" ? THREE.RGBAFormat : THREE.RedFormat;
-  return createAtlasTexture(data, width, height, format, THREE.FloatType, name);
+  const type = packing.heightFormat === "r16f" ? THREE.HalfFloatType : THREE.FloatType;
+  return createAtlasTexture(data, width, height, format, type, name);
 }
 
 function createPackedAtlasTexture(
@@ -342,7 +350,7 @@ function createPackedAtlasTexture(
 }
 
 function createAtlasTexture(
-  data: AtlasData,
+  data: HeightAtlasData | AtlasData,
   width: number,
   height: number,
   format: THREE.PixelFormat,
@@ -380,6 +388,10 @@ function heightAt(tile: FarSummaryTile, x: number, z: number): number {
 
 function encodeNormalChannel(value: number): number {
   return clamp01(value * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_BIAS);
+}
+
+function finiteOrZero(value: number): number {
+  return Number.isFinite(value) ? value : 0;
 }
 
 function selectTiles(
