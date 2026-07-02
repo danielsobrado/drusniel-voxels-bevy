@@ -50,7 +50,11 @@ export function createVegetationTerrainRejectProvider(): VegetationTerrainReject
   return {
     classifyCluster(query): VegetationTerrainRejectDecision {
       if (!query.visibility.enabled) return accept("accepted", "fallback", "disabled");
-      if (revisionMismatch(query)) return accept("summaryMissing", "fallback", "unknown_kept");
+      if (revisionMismatch(query)) {
+        return query.acceptWhenRevisionMismatch === false
+          ? reject("summaryMissing", "fallback", "unknown_kept")
+          : accept("summaryMissing", "fallback", "unknown_kept");
+      }
       if (outsideTerrain(query)) return reject("outsideTerrain", "exact");
       if (!query.sampler) return accept("summaryMissing", "fallback", "unknown_kept");
 
@@ -106,7 +110,6 @@ function outsideTerrain(query: VegetationTerrainRejectQuery): boolean {
 }
 
 function revisionMismatch(query: VegetationTerrainRejectQuery): boolean {
-  if (query.acceptWhenRevisionMismatch === false) return false;
   if (query.expectedTerrainRevision === undefined || query.terrainRevision === undefined) return false;
   return query.expectedTerrainRevision !== query.terrainRevision;
 }
