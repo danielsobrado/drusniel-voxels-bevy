@@ -11,7 +11,12 @@ export function withTreeTerrainVisibilityCull(source: string): string {
   if (!next.includes("var<storage, read> tree_visible_cluster_mask: array<u32>;")) {
     next = next.replace(
       "fn tree_terrain_visibility_enabled() -> bool {",
-      "@group(0) @binding(11) var<storage, read> tree_visible_cluster_mask: array<u32>;\n\nfn tree_terrain_visibility_enabled() -> bool {",
+      "@group(0) @binding(11) var<storage, read> tree_visible_cluster_mask: array<u32>;\n@group(0) @binding(12) var<storage, read> tree_active_slot_indices: array<u32>;\n\nfn tree_terrain_visibility_enabled() -> bool {",
+    );
+  } else if (!next.includes("var<storage, read> tree_active_slot_indices: array<u32>;")) {
+    next = next.replace(
+      "@group(0) @binding(11) var<storage, read> tree_visible_cluster_mask: array<u32>;",
+      "@group(0) @binding(11) var<storage, read> tree_visible_cluster_mask: array<u32>;\n@group(0) @binding(12) var<storage, read> tree_active_slot_indices: array<u32>;",
     );
   }
   if (!next.includes("fn tree_terrain_visibility_enabled()")) {
@@ -96,7 +101,7 @@ export function withTreeTerrainVisibilityCull(source: string): string {
       targetOrder,
     );
   }
-  return next;
+  return withTreeActiveSlotList(next);
 }
 
 export function withTreePcgHash(source: string): string {
@@ -118,5 +123,16 @@ export function withTreeShadowLodGate(source: string): string {
     `if (lod_active == 0u || params.settings_u.w == 0u) { return; }
   let max_shadow_lod = params.settings_e.z;
   if (max_shadow_lod < 0.0 || f32(lod) > max_shadow_lod) { return; }`,
+  );
+}
+
+function withTreeActiveSlotList(source: string): string {
+  return source.replace(
+    /fn tree_cull\(@builtin\(global_invocation_id\) id: vec3<u32>\) \{\r?\n  process_tree_slot\(id\.x\);\r?\n\}/,
+    `fn tree_cull(@builtin(global_invocation_id) id: vec3<u32>) {
+  let slot = tree_active_slot_indices[id.x];
+  if (slot == 0xffffffffu) { return; }
+  process_tree_slot(slot);
+}`,
   );
 }
