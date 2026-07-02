@@ -22,6 +22,12 @@ export interface EnvironmentGuiDeps {
   postProcess: { updateSettings: (settings: Partial<PostProcessSettings>) => void } | null;
 }
 
+interface WebGpuPostProcessStageMirror {
+  gtaoEnabled?: boolean;
+  froxelsEnabled?: boolean;
+  bounceEnabled?: boolean;
+}
+
 export function createEnvironmentGui(
   gui: GUI,
   state: ClodAppState,
@@ -66,8 +72,17 @@ export function createEnvironmentGui(
     froxelsEnabled: state.postProcessFroxelsEnabled,
     bounceEnabled: state.postProcessBounceEnabled,
   });
+  const syncWebGpuStageMirror = (settings: Partial<PostProcessSettings>) => {
+    const mirror = deps.postProcess as unknown as WebGpuPostProcessStageMirror | null;
+    if (!mirror) return;
+    mirror.gtaoEnabled = settings.gtaoEnabled;
+    mirror.froxelsEnabled = settings.froxelsEnabled;
+    mirror.bounceEnabled = settings.bounceEnabled;
+  };
   const applyPostProcessSettings = () => {
-    deps.postProcess?.updateSettings(currentGuiPostProcessSettings());
+    const settings = currentGuiPostProcessSettings();
+    syncWebGpuStageMirror(settings);
+    deps.postProcess?.updateSettings(settings);
   };
 
   const audioFolder = gui.addFolder("Audio");
