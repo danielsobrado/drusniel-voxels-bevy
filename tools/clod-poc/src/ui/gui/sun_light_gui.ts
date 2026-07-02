@@ -12,6 +12,7 @@ interface SunLightGuiOptions {
     resolution: number;
   };
   debugView: {
+    active?: boolean;
     cameraTileRadius: number;
   };
 }
@@ -61,6 +62,7 @@ export function createSunLightGui(gui: GUI): void {
   const state = {
     active: new URLSearchParams(location.search).get("sunLightCache") !== "0" && initialOptions.active,
     stats: new URLSearchParams(location.search).get("sunLightStats") === "1" || initialOptions.diagnostics,
+    debug: new URLSearchParams(location.search).get("sunLightDebug") === "1" || initialOptions.debugView.active === true,
     maxTilesPerFrame: initialOptions.build.maxTilesPerFrame,
     maxBuildMsPerFrame: initialOptions.build.maxBuildMsPerFrame,
     tileResolution: initialOptions.tile.resolution,
@@ -83,6 +85,11 @@ export function createSunLightGui(gui: GUI): void {
     const options = readRuntimeOptions();
     if (options) options.diagnostics = enabled;
     setQueryValue("sunLightStats", enabled ? "1" : null);
+  });
+  folder.add(state, "debug").name("debug overlay").onChange((enabled: boolean) => {
+    const options = readRuntimeOptions();
+    if (options) options.debugView.active = enabled;
+    setQueryValue("sunLightDebug", enabled ? "1" : null);
   });
   folder.add(state, "maxTilesPerFrame", 1, 16, 1).name("tiles / frame").onChange((value: number) => {
     const options = readRuntimeOptions();
