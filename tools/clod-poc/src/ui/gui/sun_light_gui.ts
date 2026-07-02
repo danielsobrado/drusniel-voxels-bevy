@@ -7,6 +7,7 @@ interface SunLightGuiOptions {
   build: {
     maxTilesPerFrame: number;
     maxBuildMsPerFrame: number;
+    materialTileRadius: number;
   };
   tile: {
     resolution: number;
@@ -70,6 +71,7 @@ export function createSunLightGui(gui: GUI): void {
     debug: queryFlag(searchParams, "sunLightDebug", initialOptions.debugView.active === true),
     maxTilesPerFrame: initialOptions.build.maxTilesPerFrame,
     maxBuildMsPerFrame: initialOptions.build.maxBuildMsPerFrame,
+    materialTileRadius: initialOptions.build.materialTileRadius,
     tileResolution: initialOptions.tile.resolution,
     cameraTileRadius: initialOptions.debugView.cameraTileRadius,
     entries: 0,
@@ -104,12 +106,16 @@ export function createSunLightGui(gui: GUI): void {
     const options = readRuntimeOptions();
     if (options) options.build.maxBuildMsPerFrame = value;
   });
+  folder.add(state, "materialTileRadius", 0, 32, 1).name("material tile radius").onChange((value: number) => {
+    const options = readRuntimeOptions();
+    if (options) options.build.materialTileRadius = value;
+  });
   folder.add(state, "tileResolution", 4, 64, 1).name("tile resolution").onChange((value: number) => {
     const options = readRuntimeOptions();
     if (options) options.tile.resolution = value;
     clearRuntimeCache();
   });
-  folder.add(state, "cameraTileRadius", 0, 4, 1).name("camera tile radius").onChange((value: number) => {
+  folder.add(state, "cameraTileRadius", 0, 4, 1).name("debug tile radius").onChange((value: number) => {
     const options = readRuntimeOptions();
     if (options) options.debugView.cameraTileRadius = value;
   });
