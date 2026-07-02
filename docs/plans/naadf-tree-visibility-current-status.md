@@ -118,7 +118,7 @@ Important constraint:
 
 - The cluster camera-visibility mask must **never** gate shadow caster generation. It is a camera occlusion result, so using it to skip the whole `process_tree_slot` path would incorrectly remove camera-hidden shadow casters. Keep it visible-list-only unless visible and shadow generation are split into separate dispatches.
 
-### TVIS-007b — Visible-cluster stats
+### TVIS-007b — Visible-cluster stats and perf counters
 
 Implemented in:
 
@@ -126,6 +126,12 @@ Implemented in:
 - `tools/clod-poc/src/trees/tree_system_stats.ts`
 - `tools/clod-poc/src/trees/tree_info.ts`
 - `tools/clod-poc/src/trees/tree_system_stats.test.ts`
+- `tools/clod-poc/src/trees/tree_info.test.ts`
+- `tools/clod-poc/src/app/frame_loop/perf_probe_types.ts`
+- `tools/clod-poc/src/app/frame_loop/perf_probe.ts`
+- `tools/clod-poc/src/app/frame_loop/render_phase.ts`
+- `tools/clod-poc/src/app/frame_loop/perf_probe.test.ts`
+- `tools/clod-poc/tools/perf-main.ts`
 
 The HUD/debug line now reports visible-cluster mask counts when available:
 
@@ -133,7 +139,7 @@ The HUD/debug line now reports visible-cluster mask counts when available:
 visibleClusters hidden=<n> visible=<n> unknown=<n>
 ```
 
-These are CPU-side mask statistics. They do not require GPU readback and do not imply compacted dispatch.
+The perf probe and `perf-main` summary now report visible-cluster hidden / visible / unknown-kept averages. These are CPU-side mask statistics. They do not require GPU readback and do not imply compacted dispatch.
 
 ## Partially implemented
 
@@ -152,6 +158,15 @@ What remains:
 ### TVIS-007c next step
 
 Measure the current visible-cluster mask effect first, then decide whether compacted visible dispatch is worth the added complexity.
+
+Suggested perf commands:
+
+```bash
+cd tools/clod-poc
+npm run perf:main -- --case tree-gpu-ring --params scene=infinite-naadf-mountains,naadf=1,treeGpuCounts=0 --frames 300 --warmup 120
+npm run perf:main -- --case tree-gpu-ring --params scene=infinite-naadf-hills,naadf=1,treeGpuCounts=0 --frames 300 --warmup 120
+npm run perf:main -- --case tree-gpu-ring --params scene=infinite-naadf-fast-turn,naadf=1,treeGpuCounts=0 --frames 300 --warmup 120
+```
 
 Acceptance before compacting:
 
