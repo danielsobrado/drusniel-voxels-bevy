@@ -4,11 +4,16 @@ import { createSunLightCacheRuntime } from "./far_light_cache_runtime.js";
 import { loadBundledSunLightOptions } from "./sun_light_config_loader.js";
 import { createSunLightDebugOverlay } from "./sun_light_debug_overlay.js";
 
+function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptions>): void {
+  const searchParams = new URLSearchParams(location.search);
+  if (searchParams.has("sunLightCache")) options.active = searchParams.get("sunLightCache") !== "0";
+  if (searchParams.has("sunLightStats")) options.diagnostics = searchParams.get("sunLightStats") === "1";
+  if (searchParams.has("sunLightDebug")) options.debugView.active = searchParams.get("sunLightDebug") === "1";
+}
+
 export function createLightUpdate(args: any) {
   const options = loadBundledSunLightOptions();
-  options.active = args.options.active;
-  options.diagnostics = args.options.diagnostics;
-  options.debugView.active = args.options.debugView.active;
+  applyQueryOverrides(options);
   const provider = createTerrainSummaryLightHeightProvider(args.terrainSummary);
   const cache = createSunLightCacheRuntime(options);
   const overlay = createSunLightDebugOverlay();
