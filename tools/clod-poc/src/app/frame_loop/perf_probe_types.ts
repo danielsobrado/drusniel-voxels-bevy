@@ -21,6 +21,7 @@ export interface FramePerfPhaseTiming {
   shadowProxyMs: number;
   clodShadowMs: number;
   canopyMs: number;
+  vegetationTotalMs: number;
   borderOceanDebugMs: number;
   statsSyncMs: number;
 }
