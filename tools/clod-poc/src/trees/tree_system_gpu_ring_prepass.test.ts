@@ -117,10 +117,11 @@ describe("tree system GPU ring prepass helpers", () => {
     expect(root.children).toHaveLength(0);
   });
 
-  it("creates and registers a depth prepass twin", () => {
+  it("creates and registers a depth prepass twin without cloning the color material", () => {
     const root = new THREE.Group();
     const twins: THREE.Mesh[] = [];
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+    const sourceMaterial = new THREE.MeshBasicMaterial();
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), sourceMaterial);
     mesh.name = "trees-ring-gpu-oak-near";
     const twin = addTreeGpuRingPrepassTwin({
       root,
@@ -139,7 +140,8 @@ describe("tree system GPU ring prepass helpers", () => {
     expect(twin?.geometry).toBe(mesh.geometry);
     expect(twin?.frustumCulled).toBe(false);
     expect(twin?.renderOrder).toBe(-100);
-    expect((mesh.material as THREE.Material).depthWrite).toBe(false);
+    expect(mesh.material).toBe(sourceMaterial);
+    expect(sourceMaterial.depthWrite).toBe(false);
   });
 });
 
