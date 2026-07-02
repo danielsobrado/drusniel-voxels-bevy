@@ -61,6 +61,12 @@ function neutralGrade(state: ClodAppState): void {
   state.postProcessVignette = 0.0;
 }
 
+function enableStrictTreeGpuMode(state: ClodAppState): void {
+  state.treeGpuEnabled = true;
+  state.treeGpuFallbackToCpu = false;
+  state.treeGpuForceCpu = false;
+}
+
 export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams: URLSearchParams): void {
   apply(searchParams, ["sunElevationDeg", "sunElevation"], (value) => {
     state.sunElevationDeg = clamp(value, -10, 90);
@@ -117,6 +123,12 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
 
   const treeGpu = flagParam(searchParams, "treeGpu", "treeGPU", "gpuTrees");
   if (treeGpu !== null) state.treeGpuEnabled = treeGpu;
+
+  const treeGpuFallback = flagParam(searchParams, "treeGpuFallback", "treeGpuFallbackToCpu", "treeGpuCpuFallback");
+  if (treeGpuFallback !== null) state.treeGpuFallbackToCpu = treeGpuFallback;
+
+  const treeGpuStrict = flagParam(searchParams, "treeGpuStrict", "treeGpuNoFallback", "treeGpuFailLoud");
+  if (treeGpuStrict === true) enableStrictTreeGpuMode(state);
 
   const treeGpuForceCpu = flagParam(searchParams, "treeGpuForceCpu", "treeForceCpu", "treeCpu");
   if (treeGpuForceCpu !== null) state.treeGpuForceCpu = treeGpuForceCpu;
