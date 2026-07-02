@@ -29,6 +29,7 @@ export const DEFAULT_CLOD_APPLY_BUDGET: ClodApplyBudget = {
 };
 
 export interface ClodGeometryApplyResult {
+  applied: boolean;
   geometryMs: number;
   materialMs: number;
   triangles: number;
@@ -90,11 +91,13 @@ export class ClodApplyQueue {
     const maxMs = budget.enabled ? budget.maxApplyMsPerFrame : Number.POSITIVE_INFINITY;
     const maxGeometryJobs = budget.enabled ? budget.maxGeometryJobsPerFrame : Number.POSITIVE_INFINITY;
     const maxColliderJobs = budget.enabled ? budget.maxColliderJobsPerFrame : Number.POSITIVE_INFINITY;
+    const frameOverBudget = () => budget.enabled && performance.now() - startedAt >= maxMs;
     let geometryJobs = 0;
     let colliderJobs = 0;
+    let priorityColliderApplied = false;
 
     while (this.geometryJobs.length > 0 && geometryJobs < maxGeometryJobs) {
-      if (geometryJobs > 0 && performance.now() - startedAt >= maxMs) break;
+      if (geometryJobs > 0 && frameOverBudget()) break;
       const job = this.geometryJobs.shift();
       if (!job) break;
       const result = this.deps.applyGeometry(job.node);
@@ -102,6 +105,7 @@ export class ClodApplyQueue {
         result.geometryMs,
         result.triangles || triangleCount(job.node.mesh),
         result.reusedGeometry,
+        result.applied,
       );
       this.statsRecorder.recordMaterial(result.materialMs);
       this.deps.onGeometryApplied?.(job.node);
@@ -110,19 +114,25 @@ export class ClodApplyQueue {
     }
 
     this.sortColliderJobs();
-    while (this.colliderJobs.length > 0 && colliderJobs < maxColliderJobs) {
-      if ((geometryJobs + colliderJobs) > 0 && performance.now() - startedAt >= maxMs) break;
+    while (this.colliderJobs.length > 0) {
+      const nextJob = this.colliderJobs[0];
+      const allowPriorityOverride = Boolean(nextJob?.priorityOverride && !priorityColliderApplied);
+      if (colliderJobs >= maxColliderJobs && !allowPriorityOverride) break;
+      if ((geometryJobs + colliderJobs) > 0 && frameOverBudget() && !allowPriorityOverride) break;
       const job = this.colliderJobs.shift();
       if (!job) break;
       const staleFrames = Math.max(0, this.deps.getFrameId() - job.enqueuedFrame);
       this.statsRecorder.recordColliderStaleFrames(staleFrames);
-      if (job.priorityOverride) this.statsRecorder.recordColliderPriorityOverride();
+      if (job.priorityOverride) {
+        priorityColliderApplied = true;
+        this.statsRecorder.recordColliderPriorityOverride();
+      }
       this.statsRecorder.recordCollider(this.deps.applyCollider(job.node));
       colliderJobs++;
     }
 
     const totalMs = performance.now() - startedAt;
-    if (budget.enabled && totalMs > maxMs && (this.geometryJobs.length > 0 || this.colliderJobs.length > 0)) {
+    if (budget.enabled && totalMs > maxMs && (geometryJobs + colliderJobs) > 0) {
       this.statsRecorder.recordBudgetExceeded();
     }
     if (budget.debugLogSpikes && totalMs >= budget.spikeLogThresholdMs) {
