@@ -100,80 +100,33 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
         worldOptions: worldOptions(runtime.world_options, defaults.runtime.worldOptions),
       },
       webgpuSelection: {
-        errorMaxAgeFrames: positiveInt(
-          webgpuSelection.error_max_age_frames,
-          defaults.webgpuSelection.errorMaxAgeFrames,
-        ),
-        dispatchIntervalFrames: positiveInt(
-          webgpuSelection.dispatch_interval_frames,
-          defaults.webgpuSelection.dispatchIntervalFrames,
-        ),
-        parityIntervalFrames: positiveInt(
-          webgpuSelection.parity_interval_frames,
-          defaults.webgpuSelection.parityIntervalFrames,
-        ),
-        errorTolerancePx: positiveNumber(
-          webgpuSelection.error_tolerance_px,
-          defaults.webgpuSelection.errorTolerancePx,
-        ),
+        errorMaxAgeFrames: positiveInt(webgpuSelection.error_max_age_frames, defaults.webgpuSelection.errorMaxAgeFrames),
+        dispatchIntervalFrames: positiveInt(webgpuSelection.dispatch_interval_frames, defaults.webgpuSelection.dispatchIntervalFrames),
+        parityIntervalFrames: positiveInt(webgpuSelection.parity_interval_frames, defaults.webgpuSelection.parityIntervalFrames),
+        errorTolerancePx: positiveNumber(webgpuSelection.error_tolerance_px, defaults.webgpuSelection.errorTolerancePx),
       },
       terrainTextures: {
-        textureArraySize: positiveInt(
-          terrainTextures.texture_array_size,
-          defaults.terrainTextures.textureArraySize,
-        ),
+        textureArraySize: positiveInt(terrainTextures.texture_array_size, defaults.terrainTextures.textureArraySize),
       },
       nearField: {
-        chunkGroupBuildBudget: positiveInt(
-          nearField.chunk_group_build_budget,
-          defaults.nearField.chunkGroupBuildBudget,
-        ),
-        maxCachedChunkGroups: positiveInt(
-          nearField.max_cached_chunk_groups,
-          defaults.nearField.maxCachedChunkGroups,
-        ),
-        evictDistanceMultiplier: positiveNumber(
-          nearField.evict_distance_multiplier,
-          defaults.nearField.evictDistanceMultiplier,
-        ),
+        chunkGroupBuildBudget: positiveInt(nearField.chunk_group_build_budget, defaults.nearField.chunkGroupBuildBudget),
+        maxCachedChunkGroups: positiveInt(nearField.max_cached_chunk_groups, defaults.nearField.maxCachedChunkGroups),
+        evictDistanceMultiplier: positiveNumber(nearField.evict_distance_multiplier, defaults.nearField.evictDistanceMultiplier),
       },
       pageGeometryCache: {
         enabled: bool(pageGeometryCache.enabled, defaults.pageGeometryCache.enabled),
-        maxEntries: positiveInt(
-          pageGeometryCache.max_entries,
-          defaults.pageGeometryCache.maxEntries,
-        ),
-        warnAtEntries: positiveInt(
-          pageGeometryCache.warn_at_entries,
-          defaults.pageGeometryCache.warnAtEntries,
-        ),
+        maxEntries: positiveInt(pageGeometryCache.max_entries, defaults.pageGeometryCache.maxEntries),
+        warnAtEntries: positiveInt(pageGeometryCache.warn_at_entries, defaults.pageGeometryCache.warnAtEntries),
       },
       renderNodeCache: {
         enabled: bool(renderNodeCache.enabled, defaults.renderNodeCache.enabled),
-        maxInactiveNodes: positiveInt(
-          renderNodeCache.max_inactive_nodes,
-          defaults.renderNodeCache.maxInactiveNodes,
-        ),
-        pruneIntervalFrames: positiveInt(
-          renderNodeCache.prune_interval_frames,
-          defaults.renderNodeCache.pruneIntervalFrames,
-        ),
-        prefetchParent: bool(
-          renderNodeCache.prefetch_parent,
-          defaults.renderNodeCache.prefetchParent,
-        ),
-        prefetchChildren: bool(
-          renderNodeCache.prefetch_children,
-          defaults.renderNodeCache.prefetchChildren,
-        ),
-        maxPrefetchCreatesPerFrame: positiveInt(
-          renderNodeCache.max_prefetch_creates_per_frame,
-          defaults.renderNodeCache.maxPrefetchCreatesPerFrame,
-        ),
-        warnAtInactiveNodes: positiveInt(
-          renderNodeCache.warn_at_inactive_nodes,
-          defaults.renderNodeCache.warnAtInactiveNodes,
-        ),
+        maxInactiveNodes: positiveInt(renderNodeCache.max_inactive_nodes, defaults.renderNodeCache.maxInactiveNodes),
+        pruneIntervalFrames: positiveInt(renderNodeCache.prune_interval_frames, defaults.renderNodeCache.pruneIntervalFrames),
+        prefetchParent: bool(renderNodeCache.prefetch_parent, defaults.renderNodeCache.prefetchParent),
+        prefetchChildren: bool(renderNodeCache.prefetch_children, defaults.renderNodeCache.prefetchChildren),
+        maxPrefetchCreatesPerFrame: positiveInt(renderNodeCache.max_prefetch_creates_per_frame, defaults.renderNodeCache.maxPrefetchCreatesPerFrame),
+        warnAtInactiveNodes: positiveInt(renderNodeCache.warn_at_inactive_nodes, defaults.renderNodeCache.warnAtInactiveNodes),
+        evictGeometryWithRenderNode: bool(renderNodeCache.evict_geometry_with_render_node, defaults.renderNodeCache.evictGeometryWithRenderNode),
       },
       digging: {
         holdIntervalMs: positiveInt(digging.hold_interval_ms, defaults.digging.holdIntervalMs),
@@ -187,10 +140,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
   }
 }
 
-export function resolveSlowFrameMsThreshold(
-  searchParams: URLSearchParams,
-  defaultMs: number,
-): number {
+export function resolveSlowFrameMsThreshold(searchParams: URLSearchParams, defaultMs: number): number {
   const v = Number(searchParams.get("profileMs"));
   return Number.isFinite(v) && v > 0 ? v : defaultMs;
 }
