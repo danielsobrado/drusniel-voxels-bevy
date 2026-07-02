@@ -6,6 +6,10 @@ function withoutFarSummaryAtlasSection(yaml: string): string {
   return yaml.replace(/\n  far_summary_atlas:\n    format: [^\n]+\n/, "\n");
 }
 
+function withFarSummaryAtlasFormat(yaml: string, format: string): string {
+  return yaml.replace(/(\n  far_summary_atlas:\n    format: )[^\n]+\n/, `$1${format}\n`);
+}
+
 describe("naadf config", () => {
   it("parses traversal config with dense as the safe default", () => {
     const config = parseNaadfPocConfig(naadfYaml);
@@ -65,10 +69,15 @@ describe("naadf config", () => {
   });
 
   it("allows debug RGBA32F far-summary atlas packing for validation", () => {
-    const yaml = naadfYaml.replace("format: balanced", "format: debug_rgba32f");
-    const config = parseNaadfPocConfig(yaml);
+    const config = parseNaadfPocConfig(withFarSummaryAtlasFormat(naadfYaml, "debug_rgba32f"));
 
     expect(config.farSummaryAtlas.format).toBe("debug_rgba32f");
+  });
+
+  it("allows packed low-bandwidth far-summary atlas packing", () => {
+    const config = parseNaadfPocConfig(withFarSummaryAtlasFormat(naadfYaml, "packed_low_bandwidth"));
+
+    expect(config.farSummaryAtlas.format).toBe("packed_low_bandwidth");
   });
 
   it("rejects invalid traversal modes", () => {
@@ -90,7 +99,7 @@ describe("naadf config", () => {
   });
 
   it("rejects invalid far-summary atlas packing formats", () => {
-    const badYaml = naadfYaml.replace("format: balanced", "format: huge_float_debug");
+    const badYaml = withFarSummaryAtlasFormat(naadfYaml, "huge_float_debug");
 
     expect(() => parseNaadfPocConfig(badYaml)).toThrow(/far_summary_atlas\.format/);
   });
