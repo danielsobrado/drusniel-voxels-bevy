@@ -22,26 +22,26 @@ function checkEarlyCullOrder(name, path) {
   const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
   const visibleAppend = source.indexOf("append_lod_if_active(species, TREE_LOD_NEAR");
   const rawShaderAllowsNoCluster = path.endsWith("tree_ring.compute.wgsl") && visibleReject < 0;
-  const visibleValid = rawShaderAllowsNoCluster || (visibleReject > terrainReject && visibleReject < shadowAppend && visibleReject < visibleAppend);
+  const visibleValid = rawShaderAllowsNoCluster || (visibleReject > shadowAppend && visibleReject < visibleAppend);
   const valid = terrainReject >= 0 && shadowAppend >= 0 && visibleAppend >= 0 && terrainReject < shadowAppend && terrainReject < visibleAppend && visibleValid;
   return {
     name,
     status: valid ? "ok" : "missing",
-    missing: valid ? [] : ["terrain and visible-cluster culls must appear before shadow and visible appends"],
+    missing: valid ? [] : ["terrain cull must happen before shadows; visible-cluster cull must remain after shadows and before visible appends"],
   };
 }
 
-function checkComposedEarlyCullOrder() {
+function checkComposedCullOrder() {
   const source = readProjectFile("src/gpu/wgsl_modules.test.ts");
   const needles = [
-    "returns on terrain-hidden or invisible-cluster trees before visible and shadow appends",
+    "culls terrain-hidden trees before shadows but keeps cluster cull visible-only",
     "expect(terrainReject).toBeLessThan(shadowAppend);",
-    "expect(visibleReject).toBeLessThan(shadowAppend);",
+    "expect(visibleReject).toBeGreaterThan(shadowAppend);",
     "expect(terrainReject).toBeLessThan(visibleAppend);",
     "expect(visibleReject).toBeLessThan(visibleAppend);",
   ];
   const missing = needles.filter((needle) => !source.includes(needle));
-  return { name: "composed shader early cull order test", status: missing.length === 0 ? "ok" : "missing", missing };
+  return { name: "composed shader split cull order test", status: missing.length === 0 ? "ok" : "missing", missing };
 }
 
 function checkValidationEarlyCullOrder() {
@@ -105,8 +105,8 @@ const results = [
     "treeTerrainOcclusionSettings",
   ]),
   checkEarlyCullOrder("raw shader culls terrain before shadows", "src/gpu/shaders/tree_ring.compute.wgsl"),
-  checkEarlyCullOrder("composed transform culls terrain and clusters before shadows", "src/gpu/tree_ring_wgsl_transforms.ts"),
-  checkComposedEarlyCullOrder(),
+  checkEarlyCullOrder("composed transform culls terrain before shadows and clusters before visible", "src/gpu/tree_ring_wgsl_transforms.ts"),
+  checkComposedCullOrder(),
   checkValidationEarlyCullOrder(),
 ];
 
