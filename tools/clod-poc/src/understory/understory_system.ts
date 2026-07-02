@@ -55,14 +55,11 @@ export interface UnderstorySystemOptions {
   worldCells: number;
   settings: UnderstorySettings;
   sampler?: UnderstoryTerrainSampler;
-  /** Use the WebGPU node material path instead of the classic WebGL material. */
   webgpu?: boolean;
-  /** Initial lighting for the WebGPU node material path. */
   lighting?: EnvironmentLighting;
   gpuDevice?: GPUDevice | null;
   gpuBackend?: UnderstoryWebGpuBackendAccess | null;
   supportsGpu?: boolean;
-  /** Hydrology water-surface data (R=waterY, G=wetMask, B=carvedBed). When set, GPU understory uses carved-bed height and rejects water bodies. */
   hydrologyData?: UnderstoryHydrologyData | null;
   hydrologyWaterTexture?: THREE.Texture | null;
 }
@@ -248,13 +245,10 @@ export class UnderstorySystem {
     this.root.visible = this.settings.enabled;
   }
 
-  /** Schedule deferred re-scatter on the next update cycle. */
   markPatchesDirty(): void {
     this.patchesDirty = true;
   }
 
-  /** Remove patches for edited LOD0 nodes (fast path — no re-scatter).
-   *  Caller must trigger refreshForCenter later. */
   removePatchesForNodes(nodeIds: Iterable<string>): void {
     const ids = new Set(nodeIds);
     if (ids.size === 0) return;
@@ -526,8 +520,13 @@ export class UnderstorySystem {
       .sort((a, b) => a.distance - b.distance);
     let totalInstances = this.patches.reduce((sum, patch) => sum + patch.instances.length, 0);
     let added = 0;
+    let deferred = false;
     for (const { node } of candidates) {
-      if (added >= this.settings.maxNewPatchesPerFrame || totalInstances >= this.settings.maxInstances) break;
+      if (totalInstances >= this.settings.maxInstances) break;
+      if (added >= this.settings.maxNewPatchesPerFrame) {
+        deferred = true;
+        break;
+      }
       const footprint = clampFootprint(node.footprint, this.worldCells);
       const rejection = rejectUnderstoryPatchBeforeGeneration(
         footprint,
@@ -545,7 +544,7 @@ export class UnderstorySystem {
       this.root.add(patch.group);
       added++;
     }
-    if (added < candidates.length) this.patchesDirty = true;
+    this.patchesDirty = deferred;
     this.updatePatchVisibility(center);
   }
 
