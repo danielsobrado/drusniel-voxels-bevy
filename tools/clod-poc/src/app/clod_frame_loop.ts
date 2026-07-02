@@ -346,6 +346,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       grassProfileFrame,
       currentGrassStats: statsSyncResult.currentGrassStats,
       currentTreeStats: statsSyncResult.currentTreeStats,
+      currentUnderstoryStats: statsSyncResult.currentUnderstoryStats,
       currentPropStats: vegetation.propStats?.current ?? null,
       tPropsStart: terrainPhaseResult.tPropsStart,
       tBubbleStart: terrainPhaseResult.tBubbleStart,
