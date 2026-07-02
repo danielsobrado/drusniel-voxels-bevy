@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyTreeSystemStats, type TreeStats } from "./index.js";
 import {
+  formatTreeGpuFallbackWarning,
+  formatTreeGpuOverlayStatus,
   formatTreeGpuStatusPath,
   formatTreeInfoLine,
   formatTreeRuntimePath,
@@ -36,6 +38,21 @@ describe("tree info formatting", () => {
 
     expect(formatTreeInfoLine(true, 123, treeStats)).toContain("trees: cpu-patches 123 trees");
     expect(formatTreeInfoLine(true, 123, treeStats)).toContain("path=cpu-patches");
+  });
+
+  it("shows an unmistakable warning when GPU trees fall back to CPU", () => {
+    const treeStats = stats({ gpuStatus: "fallback-cpu", totalTrees: 123 });
+
+    expect(formatTreeGpuFallbackWarning(true, true, treeStats)).toBe("TREE GPU FALLBACK TO CPU");
+    expect(formatTreeGpuOverlayStatus(true, true, treeStats)).toBe("TREE GPU FALLBACK TO CPU");
+    expect(formatTreeInfoLine(true, 123, treeStats)).toContain("TREE GPU FALLBACK TO CPU");
+  });
+
+  it("does not show a fallback warning when GPU trees are disabled on purpose", () => {
+    const treeStats = stats({ gpuStatus: "disabled", totalTrees: 123 });
+
+    expect(formatTreeGpuFallbackWarning(true, false, treeStats)).toBeNull();
+    expect(formatTreeGpuOverlayStatus(true, false, treeStats)).toBe("cpu-patches");
   });
 
   it("shows GPU dispatch and shadow details when counts are enabled", () => {
