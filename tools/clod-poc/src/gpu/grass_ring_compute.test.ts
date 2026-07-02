@@ -163,4 +163,9 @@ grass:
   it("grass WGSL sets firstInstance per tier (instanceIndex includes firstInstance)", () => {
     expect(shaderSource).toContain("indirect_args[base + 4u] = tier * params.counts_b.x");
   });
+
+  it("projects fallback river distance with a two-argument WGSL dot call", () => {
+    expect(shaderSource).toContain("dot(p - a, ab)");
+    expect(composeGrassRingShader()).not.toContain("dot(p - a) / denom");
+  });
 });
