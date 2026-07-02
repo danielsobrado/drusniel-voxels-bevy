@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { StorageBufferAttribute, StorageInstancedBufferAttribute } from "three/webgpu";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "../understory/understory_config.js";
 import { createUnderstoryGeometryMap, disposeUnderstoryGeometryMap, type UnderstoryGeometryMap } from "../understory/understory_geometry.js";
+import { getUnderstoryDepthPrepassEnabled } from "../understory/understory_depth_prepass_runtime.js";
 import { createUnderstoryRingNodeMaterialHandle, type UnderstoryRingHydrologyWater, type UnderstoryRingInstanceBuffers } from "../understory/understory_node_material.js";
 import type { UnderstoryMaterialHandle } from "../understory/understory_material.js";
 import { depthPrepassTwin } from "../rendering/veg_prepass.js";
@@ -22,7 +23,6 @@ type IndirectInstancedBufferGeometry = THREE.InstancedBufferGeometry & {
 
 export interface UnderstoryGpuRingDrawResources {
   meshes: UnderstoryGpuRingMesh[];
-  prepassTwins: THREE.Mesh[];
   cell: StorageInstancedBufferAttribute;
   indirect: StorageBufferAttribute;
   outputBuffers: UnderstoryGpuRingOutputBuffers;
@@ -43,7 +43,7 @@ export function createGpuRingDrawResources(
   lighting?: EnvironmentLighting,
   hydrologyData?: UnderstoryHydrologyData | null,
   hydrologyTexture?: THREE.Texture | null,
-  usePrepass = false,
+  usePrepass = getUnderstoryDepthPrepassEnabled(),
 ): UnderstoryGpuRingDrawResources {
   const maxPerGroup = understoryRingGroupCapacity(settings);
   const count = Math.max(1, maxPerGroup);
@@ -64,7 +64,6 @@ export function createGpuRingDrawResources(
 
   const geometries = createUnderstoryGeometryMap(settings);
   const meshes: UnderstoryGpuRingMesh[] = [];
-  const prepassTwins: THREE.Mesh[] = [];
   const materialHandles = {} as Record<UnderstoryClass, UnderstoryMaterialHandle>;
 
   for (const cls of UNDERSTORY_CLASSES) {
@@ -85,16 +84,12 @@ export function createGpuRingDrawResources(
       geometries,
       worldCells,
     );
+    if (usePrepass) addPrepassChild(mesh, handle, cls);
     meshes.push(mesh);
-    if (usePrepass) {
-      const nodes = handle.prepassNodesFor?.(cls);
-      if (nodes) prepassTwins.push(depthPrepassTwin(mesh, nodes));
-    }
   }
 
   return {
     meshes,
-    prepassTwins,
     cell,
     indirect,
     outputBuffers: {
@@ -104,6 +99,14 @@ export function createGpuRingDrawResources(
     materialHandles,
     geometries,
   };
+}
+
+function addPrepassChild(mesh: UnderstoryGpuRingMesh, handle: UnderstoryMaterialHandle, cls: UnderstoryClass): void {
+  const nodes = handle.prepassNodesFor?.(cls);
+  if (!nodes) return;
+  const twin = depthPrepassTwin(mesh, nodes);
+  twin.name = `${mesh.name}-depth-prepass`;
+  mesh.add(twin);
 }
 
 function gpuRingClassCastsShadow(settings: UnderstorySettings, cls: UnderstoryClass): boolean {
@@ -165,18 +168,25 @@ function gpuBufferForAttribute(attribute: THREE.BufferAttribute, gpuBackend: Und
 
 export function clearGpuRingDraw(draw: UnderstoryGpuRingDrawResources | null): void {
   if (!draw) return;
-  for (const twin of draw.prepassTwins) {
-    if (Array.isArray(twin.material)) {
-      for (const material of twin.material) material.dispose();
-    } else {
-      twin.material.dispose();
-    }
-  }
   for (const mesh of draw.meshes) {
+    disposePrepassChildren(mesh);
     mesh.geometry.dispose();
   }
   for (const handle of Object.values(draw.materialHandles)) {
     handle.dispose();
   }
   disposeUnderstoryGeometryMap(draw.geometries);
+}
+
+function disposePrepassChildren(mesh: THREE.Object3D): void {
+  for (const child of [...mesh.children]) {
+    if (!child.name.endsWith("-depth-prepass")) continue;
+    mesh.remove(child);
+    const material = (child as THREE.Mesh).material;
+    if (Array.isArray(material)) {
+      for (const item of material) item.dispose();
+    } else {
+      material?.dispose?.();
+    }
+  }
 }
