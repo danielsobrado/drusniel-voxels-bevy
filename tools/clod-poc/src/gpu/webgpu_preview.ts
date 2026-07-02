@@ -49,14 +49,13 @@ import {
 import { terrainGeometry } from "./webgpu_preview_geometry.js";
 import { hideWebGpuPreviewAppChrome, makeWebGpuPreviewOverlay } from "./webgpu_preview_ui.js";
 import { WebGpuPostProcessPipeline } from "./webgpu_postprocess.js";
+import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<void> {
   hideWebGpuPreviewAppChrome();
   const overlay = makeWebGpuPreviewOverlay();
   overlay.textContent = "WebGPU CLOD preview: building world…";
 
-  // Synchronous main-thread build, so keep the world small. buildWorld -> simplifyPage
-  // needs the meshoptimizer WASM ready (the worker path does this before building).
   await initSimplifier();
   clearDigEdits();
   const cfg = parseConfig(configText);
@@ -88,17 +87,12 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-
-  // Sky dome (Phase 3): follows the camera, drawn first; also yields the sun/sky/ground
-  // lighting used to light the terrain so both agree.
   const sky = createSkyNodeMaterial();
   const skyDome = new THREE.Mesh(new THREE.SphereGeometry(4000, 48, 24), sky.material);
   skyDome.frustumCulled = false;
   skyDome.renderOrder = -1000;
   scene.add(skyDome);
 
-  // Optional texture-array path (?tex=1): use the same generated procedural terrain
-  // texture arrays and height bands as the normal WebGL app's procedural material source.
   const useTextures = searchParams.get("tex") === "1";
   const useNormalMaps = useTextures && searchParams.get("normal") === "1";
   const useTextureParity = useTextures && searchParams.get("texParity") === "1";
@@ -112,7 +106,6 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
     heightMax: slot.heightMax,
   })) ?? [];
   const terrainMaterialOptions = {
-    // Light the terrain with the sky's sun/sky/ground so the two agree.
     lighting: {
       lightDir: sky.lighting.sunDirection,
       sunColor: sky.lighting.sunColor,
@@ -150,13 +143,9 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
     target: number;
   }
 
-  // LOD cross-fade needs a per-view uFade uniform, so each view gets its own material then.
-  // With fades off (the default) every view can share one material — far fewer node-graph
-  // pipeline compilations and much less GPU memory when the cut is large.
   const useLodFade = searchParams.get("lodFade") === "1";
   let sharedTerrainMaterial: TerrainNodeMaterialHandle | null = null;
 
-  // Lazily realise one mesh per node. Visibility is driven by the cut.
   const views = new Map<string, TerrainView>();
   const viewFor = (node: ClodPageNode): TerrainView => {
     let view = views.get(node.id);
@@ -181,10 +170,6 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
 
   const worldCells = world * cfg.page.chunks_per_page * cfg.page.chunk_size;
   const mid = worldCells / 2;
-
-  // Optional grass (?grass=1): blades placed on LOD0 footprints (reusing the app's
-  // generateGrassInstances), rendered with the ported instanced grass NodeMaterial. Classic
-  // remains the default; `grassMode=v2` opts into terrain-patch-v2 for QA.
   const useGrass = searchParams.get("grass") === "1";
   const useGrassV2 = useGrass && searchParams.get("grassMode") === "v2";
   const useGrassAlphaToCoverage = useGrassV2 && searchParams.get("grassA2C") === "1";
@@ -268,7 +253,6 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
     }
   };
 
-  // Optional stones (?stones=1): boot-scattered GPU storage instances plus indirect draws.
   const useStones = searchParams.get("stones") === "1";
   let stones: StoneSystem | null = null;
   if (useStones) {
@@ -330,12 +314,12 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
   let lastDigSummary = "";
   const digPreview = new THREE.Mesh(
     new THREE.SphereGeometry(1, 24, 16),
-    new THREE.MeshBasicMaterial({
+    trackedMeshBasicMaterial({
       color: digOp === "add" ? 0x66cc55 : 0xff5533,
       transparent: true,
       opacity: 0.28,
       depthWrite: false,
-    }),
+    }, "webgpu-preview-dig-preview"),
   );
   digPreview.visible = false;
   digPreview.frustumCulled = false;
@@ -396,8 +380,6 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
         replaceNodeGeometry(node);
         if (node.level === 0) terrainColliders.updatePage(node.id, node.mesh);
       }
-      // Stones are not re-scattered here: a full StoneSystem.rebuild() re-scatters the whole
-      // world (cost ∝ total stones) for a local edit. They stay on the pre-edit surface.
       updateSelection();
       editCount++;
       lastDigSummary =
