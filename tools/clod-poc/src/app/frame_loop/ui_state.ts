@@ -17,7 +17,7 @@ export interface ClodFrameLoopUiState {
   grassVisiblePatches: string;
   grassTierSummary: string;
   grassEdgeSuppressed: number;
-  grassCandidateCount: number;
+  grassCandidateCount: string;
   treeTotal: TreeTotalDisplay;
   treeVisiblePatches: string;
   treeLodSummary: string;
