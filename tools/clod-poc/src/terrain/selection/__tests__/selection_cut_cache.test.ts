@@ -179,6 +179,18 @@ describe("SelectionCutCache", () => {
     });
   });
 
+  it("does not poison committed state when a stale pending key is committed", () => {
+    const cache = new SelectionCutCache(DEFAULT_SELECTION_CUT_CACHE_CONFIG);
+    const first = cache.decide(baseInput({ frameId: 1 }));
+    expect(first.hit).toBe(false);
+
+    cache.commitMiss("stale-key", 1);
+    const second = cache.decide(baseInput({ frameId: 2 }));
+
+    expect(second.hit).toBe(false);
+    expect(second.reason).toBe("first_frame");
+  });
+
   it("flags debug state changes without forcing a selection miss", () => {
     const cache = committedCache();
 
