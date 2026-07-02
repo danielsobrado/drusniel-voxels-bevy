@@ -109,6 +109,7 @@ export function createSunLightGui(gui: GUI): void {
   folder.add(state, "materialTileRadius", 0, 32, 1).name("material tile radius").onChange((value: number) => {
     const options = readRuntimeOptions();
     if (options) options.build.materialTileRadius = value;
+    clearRuntimeCache();
   });
   folder.add(state, "tileResolution", 4, 64, 1).name("tile resolution").onChange((value: number) => {
     const options = readRuntimeOptions();
