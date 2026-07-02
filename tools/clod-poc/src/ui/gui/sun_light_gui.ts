@@ -50,6 +50,10 @@ function readRuntimeStats(): SunLightGuiStats | null {
   return typeof reader === "function" ? reader() : null;
 }
 
+function clearRuntimeCache(): void {
+  hooks().__drusnielSunLightRefresh?.();
+}
+
 export function createSunLightGui(gui: GUI): void {
   const initialOptions = readRuntimeOptions();
   const folder = gui.addFolder("sun light cache");
@@ -66,9 +70,7 @@ export function createSunLightGui(gui: GUI): void {
     misses: 0,
     builtThisFrame: 0,
     buildMs: 0,
-    refresh: () => {
-      hooks().__drusnielSunLightRefresh?.();
-    },
+    refresh: clearRuntimeCache,
   };
 
   folder.add(state, "active").name("enabled").onChange((enabled: boolean) => {
@@ -92,6 +94,7 @@ export function createSunLightGui(gui: GUI): void {
   folder.add(state, "tileResolution", 4, 64, 1).name("tile resolution").onChange((value: number) => {
     const options = readRuntimeOptions();
     if (options) options.tile.resolution = value;
+    clearRuntimeCache();
   });
   folder.add(state, "cameraTileRadius", 0, 4, 1).name("camera tile radius").onChange((value: number) => {
     const options = readRuntimeOptions();
