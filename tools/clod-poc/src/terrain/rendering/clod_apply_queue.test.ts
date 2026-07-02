@@ -146,4 +146,32 @@ describe("ClodApplyQueue", () => {
     expect(stats.clodApplyTriangles).toBe(0);
     expect(stats.clodApplyQueueDepth).toBe(0);
   });
+
+  it("reports apply failures without breaking later jobs", () => {
+    const failures: string[] = [];
+    const geometryApplied: string[] = [];
+    const queue = new ClodApplyQueue({
+      budget: budget({ maxGeometryJobsPerFrame: 2, maxColliderJobsPerFrame: 0, maxApplyMsPerFrame: 100 }),
+      applyGeometry: (n) => {
+        if (n.id === "bad") throw new Error("bad geometry");
+        geometryApplied.push(n.id);
+        return { geometryMs: 0.1, materialMs: 0, triangles: 2, reusedGeometry: false };
+      },
+      applyCollider: () => 0,
+      getFrameId: () => 1,
+      getCameraPosition: () => ({ x: 0, z: 0 }),
+      isNodeVisible: () => false,
+      onApplyFailed: (kind, n, error) => {
+        failures.push(`${kind}:${n.id}:${error instanceof Error ? error.message : String(error)}`);
+      },
+    });
+
+    queue.enqueueNodes([node("bad"), node("good")]);
+    const stats = queue.drain();
+
+    expect(failures).toEqual(["geometry:bad:bad geometry"]);
+    expect(geometryApplied).toEqual(["good"]);
+    expect(stats.clodApplyNodes).toBe(1);
+    expect(stats.clodApplyQueueDepth).toBe(0);
+  });
 });
