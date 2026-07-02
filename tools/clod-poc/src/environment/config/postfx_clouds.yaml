@@ -1,0 +1,13 @@
+postfx_clouds:
+  enabled: true
+  bottom_m: 850.0
+  top_m: 1450.0
+  max_distance_m: 14000.0
+  steps: 24
+  coverage: 0.58
+  density: 0.78
+  wind_speed_mps: 18.0
+  absorption: 0.045
+  sun_strength: 1.8
+  ambient_strength: 0.38
+  horizon_fade: 0.08
