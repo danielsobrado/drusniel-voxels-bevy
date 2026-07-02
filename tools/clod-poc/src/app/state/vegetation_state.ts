@@ -58,6 +58,7 @@ export interface VegetationSliceState {
   treeTrunkSwayStrength: number;
   treeLeafFlutterStrength: number;
   treeGpuEnabled: boolean;
+  treeGpuFallbackToCpu: boolean;
   treeGpuForceCpu: boolean;
   treeGpuShowCounts: boolean;
   treeGpuReadbackVisibleLists: boolean;
@@ -153,6 +154,7 @@ export function createVegetationSliceState(input: {
     treeTrunkSwayStrength: treeConfig.wind.trunkSwayStrength,
     treeLeafFlutterStrength: treeConfig.wind.leafFlutterStrength,
     treeGpuEnabled: treeConfig.gpu.enabled,
+    treeGpuFallbackToCpu: treeConfig.gpu.fallbackToCpu,
     treeGpuForceCpu: treeConfig.gpu.debugForceCpu,
     treeGpuShowCounts: treeConfig.gpu.debugShowGpuCounts,
     treeGpuReadbackVisibleLists: treeConfig.gpu.readbackVisibleLists,
