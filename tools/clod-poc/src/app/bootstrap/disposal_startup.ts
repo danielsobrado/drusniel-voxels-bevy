@@ -2,7 +2,7 @@ import { bindUiAudioShell } from "../ui_audio_shell.js";
 import type { UiStartupContext } from "./ui_startup_context.js";
 
 export function bindBootstrapDisposal(ctx: UiStartupContext): void {
-  const { input } = ctx;
+  const { input, session } = ctx;
   const {
     clodWorker,
     getClodErrorCompute,
@@ -31,6 +31,7 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
   bindUiAudioShell();
 
   window.addEventListener("beforeunload", () => {
+    session.frameLoopAbortController?.abort();
     nearFieldBubbleController.dispose();
     renderNodeCache.dispose();
     pageGeometryCache.dispose();
