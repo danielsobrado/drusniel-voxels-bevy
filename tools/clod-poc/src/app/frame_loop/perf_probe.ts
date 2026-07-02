@@ -13,9 +13,21 @@ declare global {
 
 export function createFramePerfPhaseTiming(): FramePerfPhaseTiming {
   return {
-    frameSetupMs: 0, selectionUpdateMs: 0, longViewDiagnosticsMs: 0, farSummaryMs: 0,
-    constructionMs: 0, brushMs: 0, combatMs: 0, spellsMs: 0, terrainPhaseMs: 0,
-    shadowProxyMs: 0, clodShadowMs: 0, canopyMs: 0, borderOceanDebugMs: 0, statsSyncMs: 0,
+    frameSetupMs: 0,
+    inputMs: 0,
+    selectionUpdateMs: 0,
+    longViewDiagnosticsMs: 0,
+    farSummaryMs: 0,
+    constructionMs: 0,
+    brushMs: 0,
+    combatMs: 0,
+    spellsMs: 0,
+    terrainPhaseMs: 0,
+    shadowProxyMs: 0,
+    clodShadowMs: 0,
+    canopyMs: 0,
+    borderOceanDebugMs: 0,
+    statsSyncMs: 0,
   };
 }
 
