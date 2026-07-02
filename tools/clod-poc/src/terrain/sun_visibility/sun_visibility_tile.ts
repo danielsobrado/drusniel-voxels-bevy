@@ -1,8 +1,31 @@
-export function sunVisibilityTileKeyToString(tile: any): string {
+export interface SunVisibilityTileKey {
+  tileX: number;
+  tileZ: number;
+  lod: number;
+}
+
+export interface SunVisibilityTileConfig {
+  sizeWorld: number;
+  resolution: number;
+}
+
+export interface SunVisibilityTileBounds {
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+}
+
+export interface SunVisibilityTileCellCenter {
+  x: number;
+  z: number;
+}
+
+export function sunVisibilityTileKeyToString(tile: SunVisibilityTileKey): string {
   return `${tile.lod}:${tile.tileX},${tile.tileZ}`;
 }
 
-export function worldToSunVisibilityTile(x: number, z: number, config: any) {
+export function worldToSunVisibilityTile(x: number, z: number, config: SunVisibilityTileConfig): SunVisibilityTileKey {
   return {
     tileX: Math.floor(x / config.sizeWorld),
     tileZ: Math.floor(z / config.sizeWorld),
@@ -10,7 +33,7 @@ export function worldToSunVisibilityTile(x: number, z: number, config: any) {
   };
 }
 
-export function sunVisibilityTileBounds(tile: any, config: any) {
+export function sunVisibilityTileBounds(tile: SunVisibilityTileKey, config: SunVisibilityTileConfig): SunVisibilityTileBounds {
   const minX = tile.tileX * config.sizeWorld;
   const minZ = tile.tileZ * config.sizeWorld;
   return {
@@ -21,7 +44,12 @@ export function sunVisibilityTileBounds(tile: any, config: any) {
   };
 }
 
-export function sunVisibilityTileCellCenter(tile: any, cellX: number, cellZ: number, config: any) {
+export function sunVisibilityTileCellCenter(
+  tile: SunVisibilityTileKey,
+  cellX: number,
+  cellZ: number,
+  config: SunVisibilityTileConfig,
+): SunVisibilityTileCellCenter {
   const bounds = sunVisibilityTileBounds(tile, config);
   const cellSize = config.sizeWorld / config.resolution;
   return {
