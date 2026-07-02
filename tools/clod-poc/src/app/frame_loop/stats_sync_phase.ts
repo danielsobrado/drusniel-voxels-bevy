@@ -93,6 +93,8 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     nextUnderstoryStats.totalInstances !== understoryStats.totalInstances ||
     nextUnderstoryStats.visiblePatches !== understoryStats.visiblePatches ||
     nextUnderstoryStats.patches !== understoryStats.patches ||
+    (nextUnderstoryStats.earlyTerrainRejectedPatches ?? 0) !== (understoryStats.earlyTerrainRejectedPatches ?? 0) ||
+    (nextUnderstoryStats.earlyTerrainSkippedCandidates ?? 0) !== (understoryStats.earlyTerrainSkippedCandidates ?? 0) ||
     nextUnderstoryStats.gpuStatus !== understoryStats.gpuStatus ||
     nextUnderstoryStats.gpuVisibleCount !== understoryStats.gpuVisibleCount ||
     nextUnderstoryStats.gpuCandidateCount !== understoryStats.gpuCandidateCount ||
@@ -104,7 +106,8 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     input.state.understoryTotal = nextUnderstoryStats.totalInstances;
     input.state.understoryVisiblePatches = `${nextUnderstoryStats.visiblePatches}/${nextUnderstoryStats.patches}`;
     input.state.understoryClassSummary =
-      `${nextUnderstoryStats.shrub}/${nextUnderstoryStats.fern}/${nextUnderstoryStats.sapling}/${nextUnderstoryStats.flower}/${nextUnderstoryStats.deadLog}/${nextUnderstoryStats.stump}`;
+      `${nextUnderstoryStats.shrub}/${nextUnderstoryStats.fern}/${nextUnderstoryStats.sapling}/${nextUnderstoryStats.flower}/${nextUnderstoryStats.deadLog}/${nextUnderstoryStats.stump}` +
+      formatEarlyTerrainSuffix(nextUnderstoryStats.earlyTerrainRejectedPatches, nextUnderstoryStats.earlyTerrainSkippedCandidates);
     input.state.understoryGpuSummary = input.formatUnderstoryGpuSummary(nextUnderstoryStats);
     presenter.understoryTotalController?.updateDisplay();
     presenter.understoryVisiblePatchesController?.updateDisplay();
@@ -146,12 +149,15 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     nextGrassStats.gpuRingVisibleMid !== grassStats.gpuRingVisibleMid ||
     nextGrassStats.gpuRingVisibleFar !== grassStats.gpuRingVisibleFar ||
     nextGrassStats.edgeSuppressedCandidates !== grassStats.edgeSuppressedCandidates ||
+    (nextGrassStats.earlyTerrainRejectedPatches ?? 0) !== (grassStats.earlyTerrainRejectedPatches ?? 0) ||
+    (nextGrassStats.earlyTerrainSkippedCandidates ?? 0) !== (grassStats.earlyTerrainSkippedCandidates ?? 0) ||
     nextGrassStats.generatedCandidates !== grassStats.generatedCandidates)
   ) {
     input.setGrassStats(nextGrassStats);
     input.state.grassBladeCount = nextGrassStats.blades;
     input.state.grassVisiblePatches = `${nextGrassStats.visiblePatches}/${nextGrassStats.patches}`;
-    input.state.grassTierSummary = `${nextGrassStats.nearPatches}/${nextGrassStats.midPatches}/${nextGrassStats.coveragePatches}/${nextGrassStats.superPatches}`;
+    input.state.grassTierSummary = `${nextGrassStats.nearPatches}/${nextGrassStats.midPatches}/${nextGrassStats.coveragePatches}/${nextGrassStats.superPatches}` +
+      formatEarlyTerrainSuffix(nextGrassStats.earlyTerrainRejectedPatches, nextGrassStats.earlyTerrainSkippedCandidates);
     input.state.grassEdgeSuppressed = nextGrassStats.edgeSuppressedCandidates;
     input.state.grassCandidateCount = nextGrassStats.generatedCandidates;
     presenter.grassBladeCountController?.updateDisplay();
@@ -165,4 +171,10 @@ export function runStatsSyncPhase(input: StatsSyncPhaseInput): StatsSyncPhaseRes
     currentGrassStats: nextGrassStats ?? grassStats,
     currentTreeStats: nextTreeStats ?? treeStats,
   };
+}
+
+function formatEarlyTerrainSuffix(rejected: number | undefined, skipped: number | undefined): string {
+  const rejectedCount = rejected ?? 0;
+  if (rejectedCount <= 0) return "";
+  return ` terrainReject=${rejectedCount} skipped=${skipped ?? 0}`;
 }
