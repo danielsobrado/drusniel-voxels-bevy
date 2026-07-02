@@ -1,6 +1,6 @@
 # CLOD-POC far sun visibility cache
 
-The CLOD-POC far sun visibility cache is a CPU-built prototype cache for coarse far-terrain sun visibility. It is derived data. The terrain summary remains the source of truth.
+The CLOD-POC far sun visibility cache is a GPU-first far-lighting prototype. CPU code still builds the coarse visibility tiles, but the visual path uploads those tiles into a red-channel GPU atlas and samples that atlas in the far materials. The terrain summary remains the source of truth.
 
 ## Runtime behavior
 
@@ -11,7 +11,7 @@ The CLOD-POC far sun visibility cache is a CPU-built prototype cache for coarse 
   - `sunLightDebug=0|1`
 - The existing far-summary frame hook updates the cache, so its cost is included in `farSummaryMs`.
 - The cache builds a small number of tiles per frame under a millisecond budget.
-- `build.material_tile_radius` controls the camera-centered tile radius queued for far material tinting.
+- `build.material_tile_radius` controls the camera-centered tile radius queued for far material lighting.
 - Terrain edit revision changes clear cached entries before new tiles are built.
 
 ## Cache key
@@ -32,18 +32,23 @@ Each tile stores low-resolution values:
 
 Missing terrain remains explicit. It is not silently treated as lit.
 
-## Far material integration
+## GPU material integration
 
-`InfiniteFarShell` reads the cache through a peek-only global hook. The lookup never queues cache work from the material path. It only uses already-built cache entries.
+The runtime uploads built visibility tiles into `drusniel-sun-light-visibility-atlas`, a red-channel `DataTexture`.
 
-The far shell applies the result by modulating its vertex color attribute:
+The far shaders sample that atlas by world position:
 
-- `lit` keeps the base far material color.
-- `shaded` darkens the vertex color.
-- `missing` uses a conservative mid tint.
-- `pending` stays neutral to avoid dark popping while the cache warms.
+- `lit` keeps direct sun contribution.
+- `shaded` attenuates direct sun contribution.
+- `missing` uses a conservative mid value.
+- not-yet-built areas default to lit to avoid dark popping while the cache warms.
 
-This works for both biome vertex colors and the WebGPU parity far terrain material because both use the shell color attribute.
+The atlas uniforms are updated before the far-shell material update path each frame, so the far shell samples the current atlas origin and size. This path works for both:
+
+- the non-parity `InfiniteFarShellMaterial`
+- the WebGPU parity `FarTerrainMaterial`
+
+CPU-side vertex color modulation is no longer the active visual path.
 
 ## Debugging
 
@@ -67,7 +72,7 @@ The debug overlay is a small DOM canvas minimap of the cached tiles. It intentio
 
 ## Limitations
 
-- CPU-only PoC.
+- The tile builder is still CPU-side. The render/material consumption path is GPU-first.
 - It does not yet feed the screen-space god-ray pass.
 - Dynamic props and vegetation are not occluders.
 - The cache should not extend CSM shadow distance.
