@@ -20,12 +20,14 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.renderNodeCache.maxInactiveNodes).toBe(512);
     expect(config.renderNodeCache.pruneIntervalFrames).toBe(30);
     expect(config.renderNodeCache.maxPrefetchCreatesPerFrame).toBe(8);
+    expect(config.renderNodeCache.evictGeometryWithRenderNode).toBe(true);
     expect(config.digging.holdIntervalMs).toBe(400);
     expect(config.profiling.slowFrameMs).toBe(24);
   });
 
   it("falls back to defaults on invalid yaml", () => {
-    expect(parseClodRuntimeConfig("not: [valid")).toEqual(DEFAULT_CLOD_RUNTIME_CONFIG);
+    const brokenYaml = "not: [valid";
+    expect(parseClodRuntimeConfig(brokenYaml)).toEqual(DEFAULT_CLOD_RUNTIME_CONFIG);
   });
 });
 
