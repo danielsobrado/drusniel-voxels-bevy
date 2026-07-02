@@ -21,13 +21,15 @@ function baseUnderstoryStats(before: number, after: number): UnderstoryStats {
 function baseForestLightingStats(): ForestLightingStats {
   return {
     enabled: false,
-    textureUpdates: 0,
+    resolution: 0,
     treeProxies: 0,
     understoryProxies: 0,
     maxCanopy: 0,
     maxAo: 0,
     maxShadow: 0,
     maxFog: 0,
+    updateMs: 0,
+    textureUpdates: 0,
   };
 }
 
