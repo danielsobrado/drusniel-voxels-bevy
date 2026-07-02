@@ -6,6 +6,11 @@ export interface VegetationTerrainRejectionConfig {
   decisionCacheEnabled: boolean;
   decisionCacheMaxEntries: number;
   cameraBucketM: number;
+  viewMinDistanceM: number;
+  viewSampleCount: number;
+  viewHeightMarginM: number;
+  grassCrownHeightM: number;
+  understoryCrownHeightM: number;
 }
 
 export const DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG: VegetationTerrainRejectionConfig = {
@@ -15,6 +20,11 @@ export const DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG: VegetationTerrainRejec
   decisionCacheEnabled: true,
   decisionCacheMaxEntries: 8192,
   cameraBucketM: 8,
+  viewMinDistanceM: 96,
+  viewSampleCount: 6,
+  viewHeightMarginM: 1.75,
+  grassCrownHeightM: 0.75,
+  understoryCrownHeightM: 2.5,
 };
 
 export type VegetationTerrainRejectionReason =
