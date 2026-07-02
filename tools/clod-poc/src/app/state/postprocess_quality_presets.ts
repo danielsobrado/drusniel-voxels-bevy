@@ -22,6 +22,9 @@ export interface PostProcessQualityPresetState {
   postProcessContactShadowsEnabled: boolean;
   postProcessClarityEnabled: boolean;
   postProcessAerialPerspectiveEnabled: boolean;
+  postProcessGtaoEnabled: boolean;
+  postProcessFroxelsEnabled: boolean;
+  postProcessBounceEnabled: boolean;
 }
 
 interface PostProcessQualityPresetConfig {
@@ -34,6 +37,9 @@ interface PostProcessQualityPresetConfig {
   contactShadowsEnabled: boolean;
   clarityEnabled: boolean;
   aerialPerspectiveEnabled: boolean;
+  gtaoEnabled: boolean;
+  froxelsEnabled: boolean;
+  bounceEnabled: boolean;
 }
 
 const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, PostProcessQualityPresetConfig> = {
@@ -47,17 +53,23 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     contactShadowsEnabled: true,
     clarityEnabled: true,
     aerialPerspectiveEnabled: true,
+    gtaoEnabled: true,
+    froxelsEnabled: true,
+    bounceEnabled: true,
   },
   balanced: {
     renderScale: 0.85,
     bloomEnabled: true,
     fxaaEnabled: true,
-    taaEnabled: false,
+    taaEnabled: true,
     taaJitterEnabled: true,
     taaHistoryClampEnabled: true,
-    contactShadowsEnabled: false,
+    contactShadowsEnabled: true,
     clarityEnabled: true,
     aerialPerspectiveEnabled: true,
+    gtaoEnabled: true,
+    froxelsEnabled: true,
+    bounceEnabled: true,
   },
   perf: {
     renderScale: 0.75,
@@ -69,6 +81,9 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     contactShadowsEnabled: false,
     clarityEnabled: true,
     aerialPerspectiveEnabled: true,
+    gtaoEnabled: false,
+    froxelsEnabled: false,
+    bounceEnabled: false,
   },
   potato: {
     renderScale: 0.5,
@@ -80,6 +95,9 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     contactShadowsEnabled: false,
     clarityEnabled: false,
     aerialPerspectiveEnabled: false,
+    gtaoEnabled: false,
+    froxelsEnabled: false,
+    bounceEnabled: false,
   },
 };
 
@@ -105,4 +123,7 @@ export function applyPostProcessQualityPreset(
   state.postProcessContactShadowsEnabled = config.contactShadowsEnabled;
   state.postProcessClarityEnabled = config.clarityEnabled;
   state.postProcessAerialPerspectiveEnabled = config.aerialPerspectiveEnabled;
+  state.postProcessGtaoEnabled = config.gtaoEnabled;
+  state.postProcessFroxelsEnabled = config.froxelsEnabled;
+  state.postProcessBounceEnabled = config.bounceEnabled;
 }
