@@ -22,6 +22,9 @@ describe("tree system stats aggregation", () => {
       gpuShadowCasterCount: 0,
       gpuShadowOverflowed: false,
       gpuDispatchMs: null,
+      visibleClusterHidden: 0,
+      visibleClusterVisible: 0,
+      visibleClusterUnknownKept: 0,
       impostorStatus: "disabled",
       generatedCandidates: 0,
       acceptedCandidates: 0,
@@ -72,6 +75,9 @@ describe("tree system stats aggregation", () => {
     expect(stats.gpuCandidateCount).toBe(0);
     expect(stats.gpuVisibleCount).toBe(0);
     expect(stats.gpuShadowCasterCount).toBe(0);
+    expect(stats.visibleClusterHidden).toBe(0);
+    expect(stats.visibleClusterVisible).toBe(0);
+    expect(stats.visibleClusterUnknownKept).toBe(0);
   });
 
   it("aggregates GPU ring stats", () => {
@@ -86,6 +92,11 @@ describe("tree system stats aggregation", () => {
         counts: { near: 1, mid: 2, far: 3, impostor: 4 },
         shadowGroupCounts: [1, 2, 3],
         shadowOverflowed: true,
+        visibleClusterMaskStats: {
+          visibleClusterHidden: 5,
+          visibleClusterVisible: 7,
+          visibleClusterUnknownKept: 2,
+        },
       },
       gpuVisibleCount: 0,
       gpuStatus: "ring",
@@ -108,6 +119,9 @@ describe("tree system stats aggregation", () => {
     expect(stats.gpuShadowOverflowed).toBe(true);
     expect(stats.gpuDispatchMs).toBe(1.5);
     expect(stats.gpuShowCounts).toBe(false);
+    expect(stats.visibleClusterHidden).toBe(5);
+    expect(stats.visibleClusterVisible).toBe(7);
+    expect(stats.visibleClusterUnknownKept).toBe(2);
     expect(stats.impostorStatus).toBe("fallback");
     expect(stats.impostorReason).toBe("test");
   });
