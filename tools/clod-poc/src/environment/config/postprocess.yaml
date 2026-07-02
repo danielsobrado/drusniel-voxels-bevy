@@ -31,7 +31,7 @@ postprocess:
     history_clamp_strength: 1.0
 
   contact_shadows:
-    enabled: false
+    enabled: true
     strength: 0.25
     radius_px: 2.0
     depth_bias: 0.002
@@ -40,6 +40,11 @@ postprocess:
     enabled: true
     sharpen: 0.08
     dither: 0.003
+
+  webgpu:
+    gtao_enabled: true
+    froxels_enabled: true
+    bounce_enabled: true
 
   god_rays:
     mode: off
