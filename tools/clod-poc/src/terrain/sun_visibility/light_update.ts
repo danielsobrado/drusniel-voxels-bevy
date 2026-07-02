@@ -8,6 +8,7 @@ import { createSunLightDebugOverlay } from "./sun_light_debug_overlay.js";
 
 interface LightUpdateArgs {
   terrainSummary: TerrainSummaryField;
+  options?: unknown;
 }
 
 function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptions>): void {
