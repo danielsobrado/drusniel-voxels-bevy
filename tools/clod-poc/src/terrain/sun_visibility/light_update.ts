@@ -17,12 +17,18 @@ export function createLightUpdate(args: any) {
   const provider = createTerrainSummaryLightHeightProvider(args.terrainSummary);
   const cache = createSunLightCacheRuntime(options);
   const overlay = createSunLightDebugOverlay();
+  let lastTerrainRevision = provider.terrainRevision();
   const globals = window as unknown as Record<string, unknown>;
   globals.__drusnielSunLightOptions = options;
   globals.__drusnielSunLightStats = () => cache.stats();
   globals.__drusnielSunLightRefresh = () => cache.markAllStale();
   return {
     update(camera: any, sunVec: any, frameIndex: number, nowMs: number) {
+      const terrainRevision = provider.terrainRevision();
+      if (terrainRevision !== lastTerrainRevision) {
+        cache.markAllStale();
+        lastTerrainRevision = terrainRevision;
+      }
       if (!options.active) {
         overlay.update([], options);
         return;
