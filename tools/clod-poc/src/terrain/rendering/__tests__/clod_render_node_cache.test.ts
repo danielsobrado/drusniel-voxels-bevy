@@ -56,6 +56,7 @@ const defaultConfig = (overrides: Partial<ClodRenderNodeCacheConfig> = {}): Clod
   prefetchChildren: false,
   maxPrefetchCreatesPerFrame: 8,
   warnAtInactiveNodes: 999,
+  evictGeometryWithRenderNode: true,
   ...overrides,
 });
 
@@ -87,6 +88,7 @@ const materialState = (): TerrainMaterialUiState => ({
   textureBlendWidth: 1,
   proceduralDebugMode: "final",
   colorByLod: false,
+  wireframe: false,
   clodPerfMode: false,
   normalColor: false,
   normalDivergence: false,
@@ -260,6 +262,19 @@ describe("ClodRenderNodeCache", () => {
     expect(cache.stats()).toMatchObject({ evictions: 1 });
   });
 
+  it("evicts cache-owned geometry with evicted render nodes", () => {
+    const pageGeometryCache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
+    const { cache } = makeCache({ pageGeometryCache, config: { maxInactiveNodes: 0, evictGeometryWithRenderNode: true } });
+
+    cache.getOrCreate({ node: node("L0:0,0"), frameId: 1 });
+    expect(pageGeometryCache.stats().entries).toBe(1);
+
+    cache.prune(new Set(), 10);
+
+    expect(cache.has("L0:0,0")).toBe(false);
+    expect(pageGeometryCache.stats()).toMatchObject({ entries: 0, invalidations: 1, disposals: 1 });
+  });
+
   it("disposeNode removes mesh from scene and disposes owned material and direct geometry", () => {
     const { cache, scene, material } = makeCache();
     const remove = vi.spyOn(scene, "remove");
@@ -293,6 +308,7 @@ describe("ClodRenderNodeCache", () => {
         triplanar: true,
         frontSideOnly: true,
         normalColor: true,
+        wireframe: true,
       }),
     });
 
@@ -302,6 +318,7 @@ describe("ClodRenderNodeCache", () => {
     expect(material.makeTerrainMaterial).toHaveBeenCalledTimes(1);
     expect(handle.setColorAdjust).toHaveBeenCalledWith(adjustments());
     expect(material.applyLighting).toHaveBeenCalledTimes(1);
+    expect(handle.setWireframe).toHaveBeenCalledWith(true);
     expect(handle.setTriplanar).toHaveBeenCalledWith(true);
     expect(handle.setSide).toHaveBeenCalledWith(THREE.FrontSide);
     expect(handle.setTextures).toHaveBeenCalledTimes(1);
