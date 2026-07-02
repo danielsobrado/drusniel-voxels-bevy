@@ -214,7 +214,7 @@ export class TreeSystem {
     const result = refreshTreePatchesForCenter(treeCpuPatchInput(this), center, cameraPosition);
     this.patches = result.patches;
     this.patchesDirty = result.patchesDirty;
-    this.updatePatchLods(center, center);
+    this.updatePatchLods(center, cameraPosition);
   }
 
   updatePatchLods(center: THREE.Vector3, cameraPosition: THREE.Vector3 = center): void {
