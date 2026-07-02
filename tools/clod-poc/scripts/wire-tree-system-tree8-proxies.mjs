@@ -155,6 +155,8 @@ function tree8AlreadySatisfied(source, label) {
 }
 
 function modularCrownProxyShadowAlreadySatisfied(source) {
+  if (source.includes("treeCreateGpuRingResources(") &&
+    source.includes("createGpuRingResources(maxInstancesPerGroup")) return true;
   return source.includes("createTreeSystemGpuRingDrawResources(") &&
     source.includes("crownProxyGeometry: this.assets.crownProxyGeometry");
 }

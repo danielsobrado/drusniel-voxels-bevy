@@ -1,6 +1,4 @@
 import * as THREE from "three";
-import type { ClodRuntimeConfig } from "../../app/runtime_config.js";
-import { LOD_COLORS } from "../../app/clod_constants.js";
 import {
   buildClodErrorDispatchOptions,
   createWebGpuParityTracker,
@@ -8,188 +6,35 @@ import {
   resolveClodErrorGpuMap,
   verifyWebGpuClodParity,
   webGpuDispatchKey,
-  type WebGpuReadbackState,
-  type WebGpuParityTracker,
 } from "../../diagnostics/webgpu_selection_parity.js";
 import type {
-  ClodErrorPxCompute,
-  ClodErrorPxStats,
   DispatchOptions,
 } from "../../gpu/clod_error_px_compute.js";
-import type { WebGpuReadbackMode } from "../../core/webgpu_readback_mode.js";
+import type { ClodPageNode } from "../../types.js";
 import { selectCut, type SelectionParams, type SelectionState } from "../../clod/selection.js";
-import { LockedBorderOverlay } from "../../ui/locked_border_overlay.js";
-import { borderChain } from "../../clod/validate.js";
-import { ClodPageNode } from "../../types.js";
+import { crossLodAdjacencies, hashRenderedCut } from "../geometry/cross_lod_adjacency.js";
 import {
-  appendCrossLodBorderSegments,
-  crossLodAdjacencies,
-  hashRenderedCut,
-  sharedEdge,
-  type CrossLodAdjacency,
-} from "../geometry/cross_lod_adjacency.js";
-
-export interface ClodSelectionSettings {
-  thresholdPx: number;
-  enforce21: boolean;
-  freezeSelection: boolean;
-  neighborLevelDeltaMax: number;
-  bubble: boolean;
-  bubbleRadius: number;
-  forceMaxLevel: number | "auto";
-  webgpuSelection: boolean;
-  showBounds: boolean;
-  showSeamPoints: boolean;
-  showCrossLodBorders: boolean;
-  showLockedBorderVertices: boolean;
-  materialTiers: boolean;
-}
-
-export interface ClodSelectionTerrainView {
-  node: ClodPageNode;
-  selected: boolean;
-  fade: number;
-  target: number;
-  mesh: THREE.Mesh;
-  mat: {
-    setTier(tier: number): void;
-    setFade(fade: number, selected: boolean, dither: boolean): void;
-  };
-}
-
-export interface ClodSelectionDebugOverlays {
-  boundaryGroup: THREE.Group;
-  seamGroup: THREE.Group;
-  crossLodBorderGroup: THREE.Group;
-}
-
-export interface ClodSelectionControllerConfig {
-  clodRuntime: ClodRuntimeConfig;
-  hysteresisMergeFactor: number;
-  chunksPerPage: number;
-  chunkSize: number;
-  readbackMode: WebGpuReadbackMode;
-  forceContinuousParity: boolean;
-  webGpuUnavailableReason: string | null;
-  poolTerrainMaterial: boolean;
-}
-
-export interface ClodSelectionControllerDeps {
-  config: ClodSelectionControllerConfig;
-  roots: ClodPageNode[];
-  allNodes: ClodPageNode[];
-  views: Map<string, ClodSelectionTerrainView>;
-  getClodErrorCompute: () => ClodErrorPxCompute | null;
-  getSettings: () => ClodSelectionSettings;
-  getSelectionCenter: () => THREE.Vector3;
-  renderer: { domElement: HTMLCanvasElement };
-  camera: THREE.PerspectiveCamera;
-  overlays: ClodSelectionDebugOverlays;
-  lockedBorderOverlay: LockedBorderOverlay;
-  staleEditedAncestorIds: Set<string>;
-  onCutChanged: () => void;
-}
-
-export interface ClodSelectionSubphases {
-  cut: number;
-  book: number;
-  info: number;
-  overlays: number;
-}
-
-export interface ClodSelectionStats {
-  renderedCount: number;
-  renderedNodes: ClodPageNode[];
-  nodesByLod: Record<number, number>;
-  levelSummary: string;
-  triCount: number;
-  forcedSplits: number;
-  nearFieldForcedSplits: number;
-  crossLodAdjacencyCount: number;
-  selectionMs: number;
-  selectionSource: "cpu" | "webgpu";
-  frameId: number;
-  subphases: ClodSelectionSubphases;
-}
-
-export interface ClodSelectionController {
-  update(): void;
-  advanceFrame(): void;
-  invalidate(): void;
-  resetSelState(): void;
-  stats(): ClodSelectionStats;
-  currentTerrainViews(): Set<ClodSelectionTerrainView>;
-  activeTerrainViews(): Set<ClodSelectionTerrainView>;
-  webGpuStats(webgpuSelectionEnabled: boolean): ClodErrorPxStats;
-  formatWebGpuStats(webgpuSelectionEnabled: boolean): string;
-  patchNodes(nodes: readonly ClodPageNode[]): void;
-}
-
-function rebuildDebugOverlays(
-  rendered: ClodPageNode[],
-  xLodAdjacencies: CrossLodAdjacency[],
-  settings: ClodSelectionSettings,
-  overlays: ClodSelectionDebugOverlays,
-): void {
-  const { boundaryGroup, seamGroup, crossLodBorderGroup } = overlays;
-  boundaryGroup.clear();
-  if (settings.showBounds) {
-    for (const n of rendered) {
-      const box = new THREE.Box3(
-        new THREE.Vector3(n.footprint.minX, n.bounds.center[1] - n.bounds.radius, n.footprint.minZ),
-        new THREE.Vector3(n.footprint.maxX, n.bounds.center[1] + n.bounds.radius, n.footprint.maxZ),
-      );
-      boundaryGroup.add(new THREE.Box3Helper(box, new THREE.Color(LOD_COLORS[Math.min(n.level, 3)])));
-    }
-  }
-
-  seamGroup.clear();
-  if (settings.showSeamPoints) {
-    const pts: number[] = [];
-    for (let i = 0; i < rendered.length; i++) {
-      for (let j = i + 1; j < rendered.length; j++) {
-        const a = rendered[i], b = rendered[j];
-        if (a.level !== b.level) continue;
-        const edge = sharedEdge(a, b);
-        if (!edge) continue;
-        const ca = borderChain(a.mesh, edge.axis, edge.aPlane, a.footprint);
-        const cb = borderChain(b.mesh, edge.axis, edge.bPlane, b.footprint);
-        for (const p of ca.positions) pts.push(p[0], p[1], p[2]);
-        for (const p of cb.positions) pts.push(p[0], p[1], p[2]);
-      }
-    }
-    if (pts.length > 0) {
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pts), 3));
-      const mat = new THREE.PointsMaterial({
-        color: 0xff2448,
-        size: 4,
-        sizeAttenuation: false,
-        depthTest: false,
-      });
-      const pointCloud = new THREE.Points(geom, mat);
-      pointCloud.renderOrder = 20;
-      seamGroup.add(pointCloud);
-    }
-  }
-
-  crossLodBorderGroup.clear();
-  if (!settings.showCrossLodBorders) return;
-  const borderPts: number[] = [];
-  for (const adjacency of xLodAdjacencies) appendCrossLodBorderSegments(borderPts, adjacency);
-  if (borderPts.length > 0) {
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(borderPts), 3));
-    const mat = new THREE.LineBasicMaterial({
-      color: 0x00ffff,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const lines = new THREE.LineSegments(geom, mat);
-    lines.renderOrder = 21;
-    crossLodBorderGroup.add(lines);
-  }
-}
+  emptyWebGpuStats,
+  rebuildDebugOverlays,
+} from "./clod_selection_controller_defaults.js";
+export { emptyWebGpuStats, rebuildDebugOverlays } from "./clod_selection_controller_defaults.js";
+import type {
+  ClodSelectionSettings,
+  ClodSelectionTerrainView,
+  ClodSelectionControllerDeps,
+  ClodSelectionSubphases,
+  ClodSelectionController,
+} from "./clod_selection_controller_types.js";
+export type {
+  ClodSelectionSettings,
+  ClodSelectionTerrainView,
+  ClodSelectionDebugOverlays,
+  ClodSelectionControllerConfig,
+  ClodSelectionControllerDeps,
+  ClodSelectionSubphases,
+  ClodSelectionStats,
+  ClodSelectionController,
+} from "./clod_selection_controller_types.js";
 
 export function createClodSelectionController(deps: ClodSelectionControllerDeps): ClodSelectionController {
   const { config, roots, allNodes, views, overlays, lockedBorderOverlay, staleEditedAncestorIds, onCutChanged } = deps;
@@ -212,30 +57,12 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   let lastSelectionMs = 0;
   const selSub: ClodSelectionSubphases = { cut: 0, book: 0, info: 0, overlays: 0 };
   let lastSelectionSource: "cpu" | "webgpu" = "cpu";
-  const parityTracker: WebGpuParityTracker = createWebGpuParityTracker(
+  const parityTracker = createWebGpuParityTracker(
     clodRuntime.webgpuSelection.parityIntervalFrames,
   );
   let lastWebGpuDispatchFrame = -clodRuntime.webgpuSelection.dispatchIntervalFrames;
   let lastWebGpuDispatchKey = "";
-  const readbackState: WebGpuReadbackState = createWebGpuReadbackState();
-
-  const emptyWebGpuStats = (webgpuSelectionEnabled: boolean): ClodErrorPxStats => ({
-    enabled: webgpuSelectionEnabled,
-    available: false,
-    status: webgpuSelectionEnabled ? "unavailable" : "disabled",
-    reason: config.webGpuUnavailableReason ?? (webgpuSelectionEnabled ? "not initialized" : undefined),
-    nodeCount: allNodes.length,
-    version: 0,
-    latestAgeFrames: null,
-    submitMs: null,
-    readbackMs: null,
-    skippedDispatches: 0,
-    parity: "unchecked",
-    parityMaxDelta: null,
-    readbackMode: config.readbackMode,
-    dispatchOnlyFrames: 0,
-    readbackFrames: 0,
-  });
+  const readbackState = createWebGpuReadbackState();
 
   const buildSelectionParams = (settings: ClodSelectionSettings): SelectionParams => {
     const selectionCenter = deps.getSelectionCenter();
@@ -408,10 +235,10 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     activeTerrainViews: () => activeTerrainViews,
     webGpuStats: (webgpuSelectionEnabled) =>
       deps.getClodErrorCompute()?.stats(selectionFrameId, webgpuSelectionEnabled)
-      ?? emptyWebGpuStats(webgpuSelectionEnabled),
+      ?? emptyWebGpuStats(webgpuSelectionEnabled, allNodes.length, config.webGpuUnavailableReason, config.readbackMode),
     formatWebGpuStats: (webgpuSelectionEnabled) => {
       const stats = deps.getClodErrorCompute()?.stats(selectionFrameId, webgpuSelectionEnabled)
-        ?? emptyWebGpuStats(webgpuSelectionEnabled);
+        ?? emptyWebGpuStats(webgpuSelectionEnabled, allNodes.length, config.webGpuUnavailableReason, config.readbackMode);
       if (!webgpuSelectionEnabled) return "webgpu=off";
       if (!stats.available) return `webgpu=${stats.status}${stats.reason ? ` (${stats.reason})` : ""}`;
       const age = stats.latestAgeFrames === null ? "none" : `${stats.latestAgeFrames}f`;

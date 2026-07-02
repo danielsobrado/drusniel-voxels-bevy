@@ -19,6 +19,7 @@ import {
   generateTreeRingValidationCounts,
 } from "./tree_ring_lighting_proxies.js";
 import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";
+import { buildTreeRingClusterVisibilityMask } from "./tree_ring_cluster_visibility.js";
 import {
   formatTreeLodCounts,
   visibleTreeLodCount,
@@ -129,6 +130,16 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
     const shadowCameras = getRealtimeSunShadowCascadeCameras();
     const shadowCascadePlanes = shadowCameras.length > 0 ? treeRingShadowCascadePlanesFromCameras(shadowCameras) : undefined;
     const shadowCapacity = treeGpuRingShadowGroupCapacity(input.settings, shadowCascadePlanes);
+    const visibleClusterMask = input.settings.gpu.terrainVisibility.enabled && input.sampler
+      ? buildTreeRingClusterVisibilityMask({
+        centerX: center.x,
+        centerZ: center.z,
+        cameraY: camera?.position.y ?? center.y,
+        worldCells: input.worldCells,
+        settings: input.settings,
+        sampler: input.sampler,
+      })
+      : null;
     const dispatched = input.state.compute.dispatch({
       centerX: center.x,
       centerZ: center.z,
@@ -139,6 +150,9 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
       indexCounts: treeGpuRingIndexCounts(input),
       frustumPlanes,
       shadowCascadePlanes: shadowCapacity > 0 ? shadowCascadePlanes : undefined,
+      visibleClusterMaskWords: visibleClusterMask?.words,
+      visibleClusterDimCells: visibleClusterMask?.clusterDimCells,
+      visibleClusterGrid: visibleClusterMask?.clusterGrid,
     });
     if (dispatched) setTreeGpuRingDrawsVisible(input.state, true);
     input.state.stats = input.state.compute.stats(true);

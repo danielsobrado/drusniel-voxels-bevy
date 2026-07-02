@@ -24,7 +24,9 @@ describe("tree parity wiring against current source", () => {
 
     expect(tree7.applied.length + tree7.skipped.length).toBe(TREE7_EDIT_COUNT);
     expect(tree8.applied.length + tree8.skipped.length).toBe(TREE8_EDIT_COUNT);
-    expect(tree8.source).toContain("createTreeSystemGpuRingDrawResources");
+    expect(tree8.source).toContain("treeCreateGpuRingResources");
+    expect(tree8.source).toContain("updateTreeGpuRingTrees");
+    expect(treeGpuRingResourcesSource).toContain("createTreeSystemGpuRingDrawResources");
     expect(treeGpuRingResourcesSource).toContain("createTreeGpuRingDrawBuffers");
     expect(treeGpuRingResourcesSource).toContain("createTreeGpuRingShadowMesh");
     expect(treeGpuRingResourcesSource).toContain("createGpuRingShadowTierDraw");

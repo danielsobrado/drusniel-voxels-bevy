@@ -1,14 +1,14 @@
-import terrainBindings from "./shaders/terrain_bindings.wgsl?raw";
-import terrainCommon from "./shaders/terrain_common.wgsl?raw";
+import terrainBindings from "./shaders/terrain_field_bindings_terrain.wgsl?raw";
+import terrainCommon from "./shaders/terrain_field_common.wgsl?raw";
 import placementHeight from "./shaders/placement_height.wgsl?raw";
-import terrainEntry from "./shaders/terrain_field.compute.wgsl?raw";
-import grassBindings from "./shaders/grass_bindings.wgsl?raw";
+import terrainEntry from "./shaders/terrain_field_entry.wgsl?raw";
+import grassBindings from "./shaders/terrain_field_bindings_grass.wgsl?raw";
 import grassRingEntry from "./shaders/grass_ring.compute.wgsl?raw";
-import stoneBindings from "./shaders/stone_bindings.wgsl?raw";
+import stoneBindings from "./shaders/terrain_field_bindings_stone.wgsl?raw";
 import stoneScatterEntry from "./shaders/stone_scatter.compute.wgsl?raw";
-import treeBindings from "./shaders/tree_bindings.wgsl?raw";
+import treeBindings from "./shaders/terrain_field_bindings_tree.wgsl?raw";
 import treeRingEntry from "./shaders/tree_ring.compute.wgsl?raw";
-import understoryBindings from "./shaders/understory_bindings.wgsl?raw";
+import understoryBindings from "./shaders/terrain_field_bindings_understory.wgsl?raw";
 import understoryRingEntry from "./shaders/understory_ring.compute.wgsl?raw";
 import { readRiverEcologySettings } from "../water/riverEcologyRuntime.js";
 import { TREE_SPECIES } from "../trees/tree_config.js";
@@ -43,15 +43,49 @@ function withTreeFinalPlacementHeight(source: string): string {
 }
 
 function withTreeTerrainVisibilityCull(source: string): string {
-  let next = source;
+  let next = source.replace(/\r\n/g, "\n");
+  if (!next.includes("var<storage, read> tree_visible_cluster_mask: array<u32>;")) {
+    next = next.replace(
+      "fn tree_terrain_visibility_enabled() -> bool {",
+      "@group(0) @binding(11) var<storage, read> tree_visible_cluster_mask: array<u32>;\n\nfn tree_terrain_visibility_enabled() -> bool {",
+    );
+  }
   if (!next.includes("fn tree_terrain_visibility_enabled()")) {
     next = next.replace(
       "fn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
       "fn tree_terrain_visibility_enabled() -> bool {\n  return params.terrain_visibility.x > 0.5;\n}\n\nfn terrain_ridge_filter(end_xz: vec2<f32>, end_height: f32, distance_m: f32) -> bool {",
     );
   }
-  const oldOrder = "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  var terrain_hidden = false;\n  if (tree_terrain_visibility_enabled()) {\n    terrain_hidden = terrain_ridge_filter(wpos, height, dist);\n    record_tree_terrain_visibility(terrain_hidden);\n  }\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);\n  if (terrain_hidden) { return; }";
-  const earlyOrder = "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  var terrain_hidden = false;\n  if (tree_terrain_visibility_enabled()) {\n    terrain_hidden = terrain_ridge_filter(wpos, height, dist);\n    record_tree_terrain_visibility(terrain_hidden);\n  }\n  if (terrain_hidden) { return; }\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);";
+  if (!next.includes("fn tree_slot_visible_cluster_visible(slot: u32) -> bool")) {
+    const visibleClusterHelper = "fn tree_slot_visible_cluster_visible(slot: u32) -> bool {\n  let cluster_grid = params.terrain_visibility_u.w;\n  if (cluster_grid == 0u) { return true; }\n  let cluster_dim = max(1u, params.terrain_visibility_u.z);\n  let grid = max(1u, params.settings_u.y);\n  let slot_x = slot % grid;\n  let slot_z = slot / grid;\n  let cluster_x = min(cluster_grid - 1u, slot_x / cluster_dim);\n  let cluster_z = min(cluster_grid - 1u, slot_z / cluster_dim);\n  return tree_visible_cluster_mask[cluster_z * cluster_grid + cluster_x] != 0u;\n}";
+    next = next.replace(
+      /fn tree_terrain_visibility_enabled\(\) -> bool \{\r?\n  return params\.terrain_visibility\.x > 0\.5;\r?\n\}/,
+      "fn tree_terrain_visibility_enabled() -> bool {\n  return params.terrain_visibility.x > 0.5;\n}\n\n" + visibleClusterHelper,
+    );
+    if (!next.includes("fn tree_slot_visible_cluster_visible(slot: u32) -> bool")) {
+      next = next.replace("fn tree_terrain_debug_counts_enabled() -> bool {", `${visibleClusterHelper}\n\nfn tree_terrain_debug_counts_enabled() -> bool {`);
+    }
+  }
+  const visibleAppendFn = "append_" + "lod_if_active";
+  const shadowAppendFn = "append_" + "shadow_lod_if_active";
+  const terrainRejectStmt = "if (terrain_" + "hidden) { return; }";
+  const oldOrder = `  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);
+  var terrain_hidden = false;
+  if (tree_terrain_visibility_enabled()) {
+    terrain_hidden = terrain_ridge_filter(wpos, height, dist);
+    record_tree_terrain_visibility(terrain_hidden);
+  }
+  ${shadowAppendFn}(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);
+  ${terrainRejectStmt}
+  if (!in_frustum(shadow_center, 8.0)) { return; }
+  ${visibleAppendFn}(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);
+  ${visibleAppendFn}(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);
+  ${visibleAppendFn}(species, TREE_LOD_FAR, ring.lod_active.z, wc, height, scale);
+  ${visibleAppendFn}(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, wc, height, scale);`;
+  const earlyOrder = "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  var terrain_hidden = false;\n  if (tree_terrain_visibility_enabled()) {\n    terrain_hidden = terrain_ridge_filter(wpos, height, dist);\n    record_tree_terrain_visibility(terrain_hidden);\n  }\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);\n  if (terrain_hidden) { return; }\n  if (!tree_slot_visible_cluster_visible(slot)) { return; }\n  if (!in_frustum(shadow_center, 8.0)) { return; }\n  append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);\n  append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);\n  append_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, wc, height, scale);\n  append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, wc, height, scale);";
   next = next.replace(oldOrder, earlyOrder);
   if (!next.includes("terrain_ridge_filter(wpos, height, dist)")) {
     next = next.replace(

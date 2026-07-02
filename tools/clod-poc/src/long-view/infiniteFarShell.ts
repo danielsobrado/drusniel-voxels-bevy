@@ -4,90 +4,21 @@ import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
 import { createInfiniteFarShellMaterial, updateFarShellMaterialMaterial, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
 import type { FarShellMetrics } from "./farShellMetrics.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
-import {
-  createFarTerrainMaterial,
-  computeFarTerrainVertexColors,
-  createVertexColorBuffer,
-  updateFarTerrainMaterialCenter,
-  updateFarTerrainMaterialSummaryAtlas,
-} from "../farTerrain/farTerrainMaterial.js";
-import {
-  createFarWaterMaterial,
-  updateFarWaterMaterialCenter,
-  updateFarWaterMaterialSummaryAtlas,
-} from "../farTerrain/farWaterMaterial.js";
+import { createFarTerrainMaterial, updateFarTerrainMaterialCenter, updateFarTerrainMaterialSummaryAtlas } from "../farTerrain/farTerrainMaterial.js";
+import { computeFarTerrainVertexColors, createVertexColorBuffer } from "../farTerrain/far_terrain_vertex_colors.js";
+import { createFarWaterMaterial, updateFarWaterMaterialCenter, updateFarWaterMaterialSummaryAtlas } from "../farTerrain/farWaterMaterial.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
 import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
 import { writeBiomeRgb } from "../world_source/biome_colors.js";
-
-export type FarShellHeightSamplingMode = "cpu" | "gpu";
-
-export interface InfiniteFarShellOptions {
-  innerMeters: number;
-  outerMeters: number;
-  radialSegments: number;
-  angularSegments: number;
-  heightBiasMeters: number;
-  nearBlendMeters: number;
-  farFadeMeters: number;
-  macroBlendStartMeters: number;
-  macroBlendEndMeters: number;
-  rebaseSnapMeters: number;
-  lighting: {
-    sunDirection: THREE.Vector3;
-    sunColor: THREE.Color;
-    skyLight: THREE.Color;
-    groundLight: THREE.Color;
-  };
-  useParityMaterial?: boolean;
-  parityConfig?: FarTerrainUniformData;
-  heightSamplingMode?: FarShellHeightSamplingMode;
-  farSummaryGpuAtlas?: FarSummaryGpuAtlasView;
-  debugShowMissingFallback?: boolean;
-  debugShowWireframe?: boolean;
-  metrics?: FarShellMetrics;
-}
-
-export interface SnappedCenter {
-  worldX: number;
-  worldZ: number;
-  snappedX: number;
-  snappedZ: number;
-}
-
-export const FAR_SHELL_RENDER_ORDER = -20;
-export const FAR_SHELL_WATER_RENDER_ORDER = -19;
-export const FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M = -1.0;
-
-function hasGpuSamplingInputs(options: InfiniteFarShellOptions): boolean {
-  return Boolean(options.useParityMaterial && options.parityConfig && options.farSummaryGpuAtlas);
-}
-
-function resolveHeightSamplingMode(options: InfiniteFarShellOptions): FarShellHeightSamplingMode {
-  const requested = options.heightSamplingMode ?? (hasGpuSamplingInputs(options) ? "gpu" : "cpu");
-  if (requested !== "gpu") return "cpu";
-  if (!hasGpuSamplingInputs(options)) {
-    throw new Error("Far shell GPU mode requires parity material, parity config, and a GPU far-summary atlas");
-  }
-  return "gpu";
-}
-
-function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
-  if (Array.isArray(material)) {
-    for (const entry of material) entry.dispose();
-  } else {
-    material.dispose();
-  }
-}
-
-function applyFarShellDepthBias(material: THREE.Material | THREE.Material[]): void {
-  const materials = Array.isArray(material) ? material : [material];
-  for (const entry of materials) {
-    entry.polygonOffset = true;
-    entry.polygonOffsetFactor = 1;
-    entry.polygonOffsetUnits = 1;
-  }
-}
+export type { FarShellHeightSamplingMode, InfiniteFarShellOptions, SnappedCenter } from "./infinite_far_shell_types.js";
+import type { FarShellHeightSamplingMode, InfiniteFarShellOptions } from "./infinite_far_shell_types.js";
+import { FAR_SHELL_RENDER_ORDER, FAR_SHELL_WATER_RENDER_ORDER, FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M } from "./infinite_far_shell_constants.js";
+export { FAR_SHELL_RENDER_ORDER, FAR_SHELL_WATER_RENDER_ORDER, FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M } from "./infinite_far_shell_constants.js";
+import {
+  resolveHeightSamplingMode, disposeMaterial, applyFarShellDepthBias,
+  buildAnnularGeometryData, flushGeometryAttributes,
+  attachColorAttribute, createDefaultParityColors, createDefaultBiomeColors,
+} from "./infinite_far_shell_helpers.js";
 
 export class InfiniteFarShell {
   readonly mesh: THREE.Mesh;
@@ -120,25 +51,12 @@ export class InfiniteFarShell {
     this.heightSamplingMode = resolveHeightSamplingMode(options);
     this.farSummaryGpuAtlas = options.farSummaryGpuAtlas;
     this.metrics = options.metrics ?? {
-      farShellEnabled: true,
-      farShellInnerM: options.innerMeters,
-      farShellOuterM: options.outerMeters,
-      farShellVertices: 0,
-      farShellTriangles: 0,
-      farShellGridRes: 0,
-      farShellRebuilds: 0,
-      farShellLastRebuildMs: 0,
-      farShellCenterX: 0,
-      farShellCenterZ: 0,
-      farShellSnappedX: 0,
-      farShellSnappedZ: 0,
-      farSummaryTilesRequired: 0,
-      farSummaryTilesReady: 0,
-      farSummaryTilesMissing: 0,
-      farSummaryTilesStale: 0,
-      farSummaryTilesBuiltThisFrame: 0,
-      farSummaryCacheSize: 0,
-      farSummaryFallbackSamples: 0,
+      farShellEnabled: true, farShellInnerM: options.innerMeters, farShellOuterM: options.outerMeters,
+      farShellVertices: 0, farShellTriangles: 0, farShellGridRes: 0, farShellRebuilds: 0,
+      farShellLastRebuildMs: 0, farShellCenterX: 0, farShellCenterZ: 0,
+      farShellSnappedX: 0, farShellSnappedZ: 0, farSummaryTilesRequired: 0,
+      farSummaryTilesReady: 0, farSummaryTilesMissing: 0, farSummaryTilesStale: 0,
+      farSummaryTilesBuiltThisFrame: 0, farSummaryCacheSize: 0, farSummaryFallbackSamples: 0,
     };
     this.useParityMaterial = options.useParityMaterial ?? false;
     this.parityConfig = options.parityConfig;
@@ -149,13 +67,9 @@ export class InfiniteFarShell {
     };
     const useParity = this.useParityMaterial && this.parityConfig !== undefined;
     this.materialOptions = {
-      lighting: options.lighting,
-      innerMeters: options.innerMeters,
-      outerMeters: options.outerMeters,
-      nearBlendMeters: options.nearBlendMeters,
-      farFadeMeters: options.farFadeMeters,
-      debugShowMissingFallback: options.debugShowMissingFallback ?? false,
-      useVertexBiomeColor: !useParity,
+      lighting: options.lighting, innerMeters: options.innerMeters, outerMeters: options.outerMeters,
+      nearBlendMeters: options.nearBlendMeters, farFadeMeters: options.farFadeMeters,
+      debugShowMissingFallback: options.debugShowMissingFallback ?? false, useVertexBiomeColor: !useParity,
     };
     const material = useParity
       ? createFarTerrainMaterial(options.lighting, this.parityConfig!, 0, 0, options.outerMeters, {
@@ -168,12 +82,12 @@ export class InfiniteFarShell {
     if (options.debugShowWireframe && "wireframe" in material) {
       (material as unknown as { wireframe: boolean }).wireframe = true;
     }
-    const vertexCount = this.computeVertexCount();
-    this.positions = new Float32Array(vertexCount * 3);
-    this.normals = new Float32Array(vertexCount * 3);
-    this.uvs = new Float32Array(vertexCount * 2);
-    this.indices = [];
-    this.buildAnnularGeometry(this.positions, this.normals, this.uvs, this.indices);
+    const geom = buildAnnularGeometryData(this.options);
+    this.positions = geom.positions;
+    this.normals = geom.normals;
+    this.uvs = geom.uvs;
+    this.indices = geom.indices;
+    const vertexCount = this.positions.length / 3;
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(this.normals, 3));
@@ -200,8 +114,8 @@ export class InfiniteFarShell {
       this.mesh.add(this.waterMesh);
     }
 
-    if (useParity) this.attachGpuDefaultVertexColors(vertexCount);
-    else this.attachDefaultBiomeVertexColors(vertexCount);
+    if (useParity) { this.parityColorBuffer = createDefaultParityColors(vertexCount); this.attachVertexColors(); }
+    else { this.biomeColorBuffer = createDefaultBiomeColors(vertexCount); this.attachBiomeVertexColors(); }
     this.metrics.farShellVertices = vertexCount;
     this.metrics.farShellTriangles = this.indices.length / 3;
     this.metrics.farShellGridRes = options.radialSegments;
@@ -213,35 +127,6 @@ export class InfiniteFarShell {
   private computeVertexCount(): number {
     const { angularSegments, radialSegments } = this.options;
     return (angularSegments + 1) * (radialSegments + 1);
-  }
-
-  private buildAnnularGeometry(positions: Float32Array, normals: Float32Array, uvs: Float32Array, indices: number[]): void {
-    const { innerMeters, outerMeters, angularSegments, radialSegments } = this.options;
-    let vi = 0;
-    for (let ri = 0; ri <= radialSegments; ri++) {
-      const r = innerMeters + (outerMeters - innerMeters) * (ri / radialSegments);
-      for (let ai = 0; ai <= angularSegments; ai++) {
-        const theta = (ai / angularSegments) * Math.PI * 2;
-        positions[vi * 3] = r * Math.cos(theta);
-        positions[vi * 3 + 1] = 0;
-        positions[vi * 3 + 2] = r * Math.sin(theta);
-        normals[vi * 3] = 0;
-        normals[vi * 3 + 1] = 1;
-        normals[vi * 3 + 2] = 0;
-        uvs[vi * 2] = ri / radialSegments;
-        uvs[vi * 2 + 1] = ai / angularSegments;
-        vi++;
-      }
-    }
-    for (let ri = 0; ri < radialSegments; ri++) {
-      for (let ai = 0; ai < angularSegments; ai++) {
-        const a = ri * (angularSegments + 1) + ai;
-        const b = a + 1;
-        const c = a + (angularSegments + 1);
-        const d = c + 1;
-        indices.push(a, c, b, b, c, d);
-      }
-    }
   }
 
   setHeightProvider(provider: FarHeightProvider | undefined): void {
@@ -328,13 +213,7 @@ export class InfiniteFarShell {
         const theta = (ai / angularSegments) * Math.PI * 2;
         const localX = r * Math.cos(theta);
         const localZ = r * Math.sin(theta);
-        const sample: HeightNormalMaterial = sampleBlendedHeightNormalMaterial(
-          this.snappedX + localX,
-          this.snappedZ + localZ,
-          r,
-          this.heightProvider,
-          this.samplerOptions,
-        );
+        const sample: HeightNormalMaterial = sampleBlendedHeightNormalMaterial(this.snappedX + localX, this.snappedZ + localZ, r, this.heightProvider, this.samplerOptions);
         const vi = ri * (angularSegments + 1) + ai;
         this.positions[vi * 3] = localX;
         this.positions[vi * 3 + 1] = Number.isFinite(sample.height) ? sample.height + farShellHeightBiasMeters : 0;
@@ -347,22 +226,13 @@ export class InfiniteFarShell {
         if (writeBiomeColors && this.biomeColorBuffer) writeBiomeRgb(this.biomeColorBuffer, vi, sample.material);
       }
     }
-
     if (this.useParityMaterial && this.parityConfig) {
-      const vertexColors = computeFarTerrainVertexColors(
-        this.positions,
-        this.normals,
-        vertexCount,
-        this.parityConfig,
-        this.snappedX,
-        this.snappedZ,
-      );
+      const vertexColors = computeFarTerrainVertexColors(this.positions, this.normals, vertexCount, this.parityConfig, this.snappedX, this.snappedZ);
       this.parityColorBuffer = createVertexColorBuffer(vertexColors, this.parityConfig, this.normals, 0, 0, this.positions);
       this.attachVertexColors();
     } else {
       this.attachBiomeVertexColors();
     }
-
     this.rebuildCount++;
     this.lastRebuildMs = performance.now() - t0;
     this.metrics.farShellRebuilds = this.rebuildCount;
@@ -372,47 +242,17 @@ export class InfiniteFarShell {
 
   private flushAttributes(): void {
     const geometry = this.mesh.geometry as THREE.BufferGeometry;
-    const posAttr = geometry.getAttribute("position") as THREE.BufferAttribute;
-    const normAttr = geometry.getAttribute("normal") as THREE.BufferAttribute;
-    const uvAttr = geometry.getAttribute("uv") as THREE.BufferAttribute;
-    posAttr.array.set(this.positions);
-    posAttr.needsUpdate = true;
-    normAttr.array.set(this.normals);
-    normAttr.needsUpdate = true;
-    uvAttr.array.set(this.uvs);
-    uvAttr.needsUpdate = true;
-    geometry.computeBoundingSphere();
-    geometry.computeBoundingBox();
-  }
-
-  private attachGpuDefaultVertexColors(vertexCount: number): void {
-    const colors = new Float32Array(vertexCount * 3);
-    for (let i = 0; i < vertexCount; i++) {
-      colors[i * 3] = 0.32;
-      colors[i * 3 + 1] = 0.44;
-      colors[i * 3 + 2] = 0.28;
-    }
-    this.parityColorBuffer = colors;
-    this.attachVertexColors();
-  }
-
-  private attachDefaultBiomeVertexColors(vertexCount: number): void {
-    const colors = new Float32Array(vertexCount * 3);
-    for (let i = 0; i < vertexCount; i++) writeBiomeRgb(colors, i, 0);
-    this.biomeColorBuffer = colors;
-    this.attachBiomeVertexColors();
+    flushGeometryAttributes(geometry, this.positions, this.normals, this.uvs);
   }
 
   private attachVertexColors(): void {
     if (!this.parityColorBuffer) return;
-    const geometry = this.mesh.geometry as THREE.BufferGeometry;
-    geometry.setAttribute("color", new THREE.BufferAttribute(this.parityColorBuffer, 3));
+    attachColorAttribute(this.mesh.geometry as THREE.BufferGeometry, this.parityColorBuffer);
   }
 
   private attachBiomeVertexColors(): void {
     if (!this.biomeColorBuffer) return;
-    const geometry = this.mesh.geometry as THREE.BufferGeometry;
-    geometry.setAttribute("color", new THREE.BufferAttribute(this.biomeColorBuffer, 3));
+    attachColorAttribute(this.mesh.geometry as THREE.BufferGeometry, this.biomeColorBuffer);
   }
 }
 

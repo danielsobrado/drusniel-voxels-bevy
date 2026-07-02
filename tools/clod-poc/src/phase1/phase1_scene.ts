@@ -7,11 +7,8 @@ import { defaultBorderCoastOceanConfig, type BorderCoastOceanConfig } from "../c
 import { browserGate } from "../core/browser_gate.js";
 import { PHASE0 } from "../core/constants.js";
 import {
-  buildRequiredLimits,
-  describeDiagnostics,
-  failLoud,
-  installGlobalErrorHooks,
-  probeWebGPU,
+  buildRequiredLimits, describeDiagnostics, failLoud,
+  installGlobalErrorHooks, probeWebGPU,
 } from "../core/diagnostics.js";
 import { EngineStatsTracker } from "../core/engine_stats.js";
 import { FlyCamera } from "../core/fly_camera.js";
@@ -19,102 +16,28 @@ import { initHooks } from "../core/hooks.js";
 import { parseCamString } from "../core/params.js";
 import { buildHeightfieldLeafNodes } from "../clod/heightfield_leaf_source.js";
 import { buildDerivedClodTree } from "../clod/page_tree_builder.js";
-import { selectCut, type SelectionState } from "../clod/selection.js";
 import { initSimplifier } from "../clod/simplify.js";
-import { buildOuterBorderLocks } from "../lock.js";
-import type { ClodPageNode } from "../types.js";
-import { createBorderCoastDebug } from "../debug/borderCoastDebug.js";
-import { createClodPageInputDebug } from "../debug/clodPageInputDebug.js";
-import { createOceanDebug } from "../debug/oceanDebug.js";
 import { DeepOcean } from "../water/deepOcean.js";
 import { SurfBand } from "../water/surfBand.js";
 import { HeightfieldSampler } from "./heightfield_sampler.js";
-import { normalizePhase1DebugMode, parsePhase1Config, type Phase1DebugMode } from "./phase1_config.js";
+import { parsePhase1Config } from "./phase1_config.js";
 import { geometryForPhase1Node, createPhase1TerrainMaterial } from "./phase1_terrain_material.js";
 import { generatePhase1Heightfield } from "./terrain_synthesis.js";
+import type { Phase1SceneParams } from "./phase1_scene_types.js";
+import { DEFAULT_PHASE1_CAM, parseSceneParams } from "./phase1_scene_camera.js";
+import { hideNormalAppChrome, updateProgress, failDetails, allNodes } from "./phase1_scene_helpers.js";
+import { createSettleManager } from "./phase1_scene_settle.js";
+import { createTerrainActions, type Phase1MutableState, type Phase1StaticDeps } from "./phase1_scene_terrain_actions.js";
+import { setupPhase1Gui } from "./phase1_scene_gui.js";
+import { createPhase1AnimationLoop } from "./phase1_scene_loop.js";
 
-const DEFAULT_PHASE1_CAM = "1800,360,3200,2.6500,-0.4300,55";
-
-interface Phase1SceneParams {
-  seed: number;
-  worldPages: number;
-  terrainGrid: number;
-  debugMode: Phase1DebugMode;
-  freeze: boolean;
-  hud: boolean;
-  dpr: number | null;
-  cam: string | null;
-  coastGui: boolean;
-}
-
-function hideNormalAppChrome(): void {
-  for (const id of ["clod-left-stack", "project-toolbar", "player-mode-bar", "terraform-menu", "build-progress", "crosshair"]) {
-    const element = document.getElementById(id);
-    if (!element) continue;
-    element.setAttribute("hidden", "");
-    element.style.display = "none";
-  }
-}
-
-function intParam(q: URLSearchParams, key: string, fallback: number, allowed?: readonly number[]): number {
-  const raw = q.get(key);
-  if (raw === null) return fallback;
-  const value = Number(raw);
-  if (Number.isInteger(value) && value > 0 && (!allowed || allowed.includes(value))) return value;
-  console.warn(`[phase1] invalid ${key}=${raw}; using ${fallback}`);
-  return fallback;
-}
-
-function numParam(q: URLSearchParams, key: string): number | null {
-  const raw = q.get(key);
-  if (raw === null) return null;
-  const value = Number(raw);
-  if (Number.isFinite(value) && value > 0) return value;
-  console.warn(`[phase1] invalid ${key}=${raw}; ignoring`);
-  return null;
-}
-
-function parseSceneParams(): Phase1SceneParams {
-  const config = parsePhase1Config(phase1ConfigText);
-  const q = new URLSearchParams(window.location.search);
-  return {
-    seed: intParam(q, "seed", 1) >>> 0,
-    worldPages: intParam(q, "world", config.runtime.screenshotWorldPages),
-    terrainGrid: intParam(q, "terrainGrid", config.world.baseGrid, [1024, 2048, 4096]),
-    debugMode: normalizePhase1DebugMode(q.get("terrainDebug"), config),
-    freeze: q.get("freeze") === "1",
-    hud: q.get("hud") === "1",
-    dpr: numParam(q, "dpr"),
-    cam: q.get("cam"),
-    coastGui: q.get("coastGui") === "1",
-  };
-}
-
-function updateProgress(progress: number, message: string): void {
-  if (!window.__drusnielClod) return;
-  window.__drusnielClod.progress = progress;
-  window.__drusnielClod.progressMsg = message;
-}
-
-function failDetails(error: unknown): string[] {
-  const details = [error instanceof Error ? error.message : String(error)];
-  if (error instanceof Error && error.stack) details.push(error.stack);
-  const progress = window.__drusnielClod?.progressMsg;
-  if (progress) details.push(`progress: ${progress}`);
-  return details;
-}
-
-function allNodes(nodesByLevel: Map<number, ClodPageNode[]>): ClodPageNode[] {
-  return [...nodesByLevel.values()].flat();
-}
-
-function countLevel(rendered: readonly ClodPageNode[], level: number): number {
-  return rendered.filter((node) => node.level === level).length;
-}
-
-function countBuiltLevel(nodesByLevel: Map<number, ClodPageNode[]>, level: number): number {
-  return nodesByLevel.get(level)?.length ?? 0;
-}
+export type { Phase1SceneParams } from "./phase1_scene_types.js";
+export { DEFAULT_PHASE1_CAM, parseSceneParams } from "./phase1_scene_camera.js";
+export { hideNormalAppChrome, updateProgress, failDetails, allNodes } from "./phase1_scene_helpers.js";
+export { createSettleManager } from "./phase1_scene_settle.js";
+export { createTerrainActions } from "./phase1_scene_terrain_actions.js";
+export { setupPhase1Gui } from "./phase1_scene_gui.js";
+export { createPhase1AnimationLoop } from "./phase1_scene_loop.js";
 
 export async function runPhase1TerrainScene(): Promise<void> {
   hideNormalAppChrome();
@@ -150,21 +73,12 @@ export async function runPhase1TerrainScene(): Promise<void> {
   let sunDirection: THREE.Vector3;
   try {
     config = parsePhase1Config(phase1ConfigText);
-    params = parseSceneParams();
+    params = parseSceneParams(phase1ConfigText);
     coastConfig = structuredClone(defaultBorderCoastOceanConfig);
-    coastConfig.world.bounds = {
-      min_x: 0,
-      max_x: config.world.sizeM,
-      min_z: 0,
-      max_z: config.world.sizeM,
-    };
+    coastConfig.world.bounds = { min_x: 0, max_x: config.world.sizeM, min_z: 0, max_z: config.world.sizeM };
 
     updateProgress(0.12, "phase1: creating renderer");
-    renderer = new WebGPURenderer({
-      antialias: true,
-      trackTimestamp: true,
-      requiredLimits: buildRequiredLimits(diagnostics),
-    });
+    renderer = new WebGPURenderer({ antialias: true, trackTimestamp: true, requiredLimits: buildRequiredLimits(diagnostics) });
     await renderer.init();
     const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
     if (device) {
@@ -195,17 +109,11 @@ export async function runPhase1TerrainScene(): Promise<void> {
     updateProgress(0.52, "phase1: building page cache");
     await initSimplifier();
     const leaves = buildHeightfieldLeafNodes(params.worldPages, sampler, config);
-    pageTree = buildDerivedClodTree(leaves.leafNodes, leaves.worldPages, {
-      ...config.clod,
-      maxParentLevel: config.clod.maxParentLevel,
-    });
+    pageTree = buildDerivedClodTree(leaves.leafNodes, leaves.worldPages, { ...config.clod, maxParentLevel: config.clod.maxParentLevel });
     terrainMaterial = createPhase1TerrainMaterial(params.debugMode);
     nodeMeshes = new Map<string, THREE.Mesh>();
     for (const node of allNodes(pageTree.nodesByLevel)) {
-      const mesh = new THREE.Mesh(
-        geometryForPhase1Node(node, sampler, config, params.debugMode),
-        terrainMaterial,
-      );
+      const mesh = new THREE.Mesh(geometryForPhase1Node(node, sampler, config, params.debugMode), terrainMaterial);
       mesh.name = `phase1-${node.id}`;
       mesh.visible = false;
       nodeMeshes.set(node.id, mesh);
@@ -222,9 +130,7 @@ export async function runPhase1TerrainScene(): Promise<void> {
   flyCamera.setPose(parseCamString(params.cam ?? DEFAULT_PHASE1_CAM) ?? parseCamString(DEFAULT_PHASE1_CAM)!);
   hooks.setPose = (pose) => flyCamera.setPose(pose);
   hooks.getPose = () => flyCamera.getPose();
-  hooks.flyCamEnabled = (on) => {
-    flyCamera.enabled = on;
-  };
+  hooks.flyCamEnabled = (on) => { flyCamera.enabled = on; };
 
   const stats = new EngineStatsTracker(renderer, hooks, diagnostics.features.includes("timestamp-query"));
   stats.stats.counters["phase1.gridSize"] = heightfield.size;
@@ -246,35 +152,18 @@ export async function runPhase1TerrainScene(): Promise<void> {
   stats.stats.counters["phase1.debugMode"] = config.debug.modes.indexOf(params.debugMode);
 
   const hud = await import("../ui/hud.js").then(({ Hud }) => new Hud(stats.stats, {
-    seed: params.seed,
-    scene: "phase1-terrain",
-    cam: params.cam,
-    hud: params.hud,
-    freeze: params.freeze,
-    dpr: params.dpr,
-    renderer: "webgpu",
-    shot: null,
+    seed: params.seed, scene: "phase1-terrain", cam: params.cam,
+    hud: params.hud, freeze: params.freeze, dpr: params.dpr,
+    renderer: "webgpu", shot: null,
   }, camera));
 
-  let selectionState: SelectionState = { split: new Set() };
-  let lastRendered = new Set<string>();
-  let lastRenderedNodes: ClodPageNode[] = [];
-  let freezeLodSelection = coastConfig.debug.freeze_lod_selection;
-  let rebuildInProgress = false;
-  let currentDebugMode: Phase1DebugMode = params.debugMode;
-
   const surf = new SurfBand({
-    config: coastConfig,
-    seed: params.seed,
+    config: coastConfig, seed: params.seed,
     cellSizeM: coastConfig.deep_ocean.near_grid_size_m / coastConfig.deep_ocean.near_subdivisions,
     verticalOffsetM: Math.max(0.01, coastConfig.surf.shore_wave_height * 0.1),
   });
   scene.add(surf.object);
-  const deepOcean = new DeepOcean({
-    config: coastConfig,
-    sunDirection,
-    seed: params.seed,
-  });
+  const deepOcean = new DeepOcean({ config: coastConfig, sunDirection, seed: params.seed });
   scene.add(deepOcean.object);
 
   const pageBoundaryGroup = new THREE.Group();
@@ -286,191 +175,32 @@ export async function runPhase1TerrainScene(): Promise<void> {
   lockedBorderGroup.visible = false;
   scene.add(lockedBorderGroup);
 
-  function disposeDebugGroup(group: THREE.Group): void {
-    for (const child of [...group.children]) {
-      const renderable = child as THREE.LineSegments | THREE.Points;
-      renderable.geometry?.dispose();
-      const material = renderable.material;
-      if (Array.isArray(material)) material.forEach((entry) => entry.dispose());
-      else material?.dispose();
-      group.remove(child);
-    }
-  }
+  const mutableState: Phase1MutableState = {
+    selectionState: { split: new Set() },
+    lastRendered: new Set<string>(),
+    lastRenderedNodes: [],
+    freezeLodSelection: coastConfig.debug.freeze_lod_selection,
+    currentDebugMode: params.debugMode,
+    rebuildInProgress: false,
+    nodeMeshes,
+    pageTree,
+    sampler,
+    terrainMaterial,
+    heightfield,
+    buildMs,
+  };
 
-  function rebuildSelectionOverlays(nodes: readonly ClodPageNode[]): void {
-    if (pageBoundaryGroup.visible) {
-      disposeDebugGroup(pageBoundaryGroup);
-      const positions: number[] = [];
-      for (const node of nodes) {
-        const { minX, minZ, maxX, maxZ } = node.footprint;
-        const y = node.bounds.maxY + 0.5;
-        positions.push(
-          minX, y, minZ, maxX, y, minZ,
-          maxX, y, minZ, maxX, y, maxZ,
-          maxX, y, maxZ, minX, y, maxZ,
-          minX, y, maxZ, minX, y, minZ,
-        );
-      }
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-      pageBoundaryGroup.add(new THREE.LineSegments(
-        geometry,
-        new THREE.LineBasicMaterial({ color: 0xffff00, depthTest: false }),
-      ));
-    }
-    if (lockedBorderGroup.visible) {
-      disposeDebugGroup(lockedBorderGroup);
-      const positions: number[] = [];
-      for (const node of nodes) {
-        const locks = buildOuterBorderLocks(node.mesh);
-        for (let vertex = 0; vertex < locks.length; vertex += 1) {
-          if (!locks[vertex]) continue;
-          positions.push(
-            node.mesh.positions[vertex * 3],
-            node.mesh.positions[vertex * 3 + 1] + 0.4,
-            node.mesh.positions[vertex * 3 + 2],
-          );
-        }
-      }
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-      lockedBorderGroup.add(new THREE.Points(
-        geometry,
-        new THREE.PointsMaterial({ color: 0xff3344, size: 4, sizeAttenuation: false, depthTest: false }),
-      ));
-    }
-  }
-
-  function setTerrainDebugMode(mode: Phase1DebugMode): void {
-    if (mode === currentDebugMode) return;
-    currentDebugMode = mode;
-    terrainMaterial.dispose();
-    terrainMaterial = createPhase1TerrainMaterial(mode);
-    for (const node of allNodes(pageTree.nodesByLevel)) {
-      const mesh = nodeMeshes.get(node.id);
-      if (!mesh) continue;
-      mesh.geometry.dispose();
-      mesh.geometry = geometryForPhase1Node(node, sampler, config, mode);
-      mesh.material = terrainMaterial;
-    }
-    stats.stats.counters["phase1.debugMode"] = config.debug.modes.indexOf(mode);
-  }
-
-  function sourceTerrainTriangles(): number {
-    return (pageTree.nodesByLevel.get(0) ?? [])
-      .reduce((total, node) => total + node.mesh.indices.length / 3, 0);
-  }
-
-  function excludedWaterTriangles(): number {
-    return surf.stats().triangles + deepOcean.stats().totalTriangles;
-  }
-
-  async function rebuildTerrainForCoast(enabled: boolean): Promise<void> {
-    if (rebuildInProgress || coastConfig.coast.enabled === enabled) return;
-    rebuildInProgress = true;
-    coastConfig.coast.enabled = enabled;
-    updateProgress(0.2, `phase1: rebuilding coast ${enabled ? "on" : "off"}`);
-    try {
-      const rebuildStart = performance.now();
-      const nextHeightfield = generatePhase1Heightfield(
-        params.seed,
-        config,
-        params.terrainGrid,
-        coastConfig,
-      );
-      const nextSampler = new HeightfieldSampler(nextHeightfield);
-      const leaves = buildHeightfieldLeafNodes(params.worldPages, nextSampler, config);
-      const nextTree = buildDerivedClodTree(leaves.leafNodes, leaves.worldPages, {
-        ...config.clod,
-        maxParentLevel: config.clod.maxParentLevel,
-      });
-      for (const mesh of nodeMeshes.values()) {
-        scene.remove(mesh);
-        mesh.geometry.dispose();
-      }
-      terrainMaterial.dispose();
-      terrainMaterial = createPhase1TerrainMaterial(currentDebugMode);
-      nodeMeshes = new Map();
-      heightfield = nextHeightfield;
-      sampler = nextSampler;
-      pageTree = nextTree;
-      for (const node of allNodes(pageTree.nodesByLevel)) {
-        const mesh = new THREE.Mesh(
-          geometryForPhase1Node(node, sampler, config, currentDebugMode),
-          terrainMaterial,
-        );
-        mesh.name = `phase1-${node.id}`;
-        mesh.visible = false;
-        nodeMeshes.set(node.id, mesh);
-        scene.add(mesh);
-      }
-      selectionState = { split: new Set() };
-      lastRendered.clear();
-      lastRenderedNodes = [];
-      buildMs = performance.now() - rebuildStart;
-      stats.stats.counters["phase1.buildMs100"] = Math.round(buildMs * 100);
-      stats.stats.counters["coast.enabled"] = enabled ? 1 : 0;
-    } finally {
-      rebuildInProgress = false;
-      updateProgress(1, "ready");
-    }
-  }
+  const staticDeps: Phase1StaticDeps = { config, params, coastConfig, scene, stats, surf, deepOcean, pageBoundaryGroup, lockedBorderGroup };
+  const terrainActions = createTerrainActions(staticDeps, mutableState);
 
   const gui = new GUI({ title: "Border coast + ocean" });
-  if (!params.coastGui) gui.hide();
-  const borderDebug = createBorderCoastDebug({
-    gui,
-    scene,
-    config: coastConfig,
-    seed: params.seed,
-    onCoastShapingChanged: (enabled) => {
-      void rebuildTerrainForCoast(enabled);
-    },
+  const { borderDebug, pageInputDebug, oceanDebug } = setupPhase1Gui({
+    gui, sceneParams: params, coastConfig, scene, seed: params.seed,
+    surf, deepOcean, pageBoundaryGroup, lockedBorderGroup,
+    state: mutableState, actions: terrainActions,
   });
-  const pageInputDebug = createClodPageInputDebug({
-    gui,
-    getSelectionStats: () => {
-      const trianglesByLod = new Map<number, number>();
-      for (const node of lastRenderedNodes) {
-        trianglesByLod.set(
-          node.level,
-          (trianglesByLod.get(node.level) ?? 0) + node.mesh.indices.length / 3,
-        );
-      }
-      return { selectedNodes: lastRenderedNodes.length, trianglesByLod };
-    },
-    setFreezeLodSelection: (frozen) => {
-      freezeLodSelection = frozen;
-    },
-    setPageBoundariesVisible: (visible) => {
-      pageBoundaryGroup.visible = visible;
-      rebuildSelectionOverlays(lastRenderedNodes);
-    },
-    setLockedBorderVisible: (visible) => {
-      lockedBorderGroup.visible = visible;
-      rebuildSelectionOverlays(lastRenderedNodes);
-    },
-    setPageSourcePurityVisible: (visible) => {
-      setTerrainDebugMode(visible ? "page_source_sections" : params.debugMode);
-    },
-    setWaterExclusionVisible: (visible) => {
-      (surf.object.material as THREE.Material & { wireframe: boolean }).wireframe = visible;
-      surf.object.material.needsUpdate = true;
-      deepOcean.object.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return;
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        for (const material of materials) {
-          if (!("wireframe" in material)) continue;
-          (material as THREE.Material & { wireframe: boolean }).wireframe = visible;
-          material.needsUpdate = true;
-        }
-      });
-    },
-  });
-  const oceanDebug = createOceanDebug(gui, coastConfig, surf, deepOcean);
 
-  const settleWaiters: { frames: number; resolve: () => void }[] = [];
-  hooks.settle = (frames = 8) => new Promise((resolve) => settleWaiters.push({ frames, resolve }));
+  const settleManager = createSettleManager(hooks, PHASE0.settleReadyFrames);
 
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -479,95 +209,11 @@ export async function runPhase1TerrainScene(): Promise<void> {
   });
 
   updateProgress(0.92, "phase1: starting runtime");
-  let last = performance.now();
-  renderer.setAnimationLoop((timeMs) => {
-    const dt = Math.max(0.0001, Math.min((timeMs - last) / 1000, 0.1));
-    last = timeMs;
-    if (!params.freeze) flyCamera.update(dt);
-
-    const selectStart = performance.now();
-    let renderedNodes = lastRenderedNodes;
-    if (!freezeLodSelection || renderedNodes.length === 0) {
-      const selection = selectCut(pageTree.roots, {
-        thresholdPx: config.selection.errorThresholdPx,
-        hysteresisMergeFactor: config.selection.hysteresisMergeFactor,
-        enforce21: config.selection.enforce21,
-        viewportH: renderer.domElement.height,
-        fovY: THREE.MathUtils.degToRad(camera.fov),
-        camPos: [camera.position.x, camera.position.y, camera.position.z],
-      }, selectionState);
-      selectionState = selection.state;
-      renderedNodes = selection.rendered;
-    }
-    const nextRendered = new Set(renderedNodes.map((node) => node.id));
-    const cutChanged = nextRendered.size !== lastRendered.size
-      || [...nextRendered].some((id) => !lastRendered.has(id));
-    for (const id of lastRendered) {
-      if (!nextRendered.has(id)) {
-        const mesh = nodeMeshes.get(id);
-        if (mesh) mesh.visible = false;
-      }
-    }
-    for (const node of renderedNodes) {
-      const mesh = nodeMeshes.get(node.id);
-      if (mesh) mesh.visible = true;
-    }
-    lastRendered = nextRendered;
-    lastRenderedNodes = renderedNodes;
-    if (cutChanged) rebuildSelectionOverlays(renderedNodes);
-    const selectionMs = performance.now() - selectStart;
-    const renderedTris = renderedNodes.reduce((sum, node) => sum + node.mesh.indices.length / 3, 0);
-    stats.stats.counters["phase1.nodesRendered"] = renderedNodes.length;
-    stats.stats.counters["phase1.trianglesRendered"] = renderedTris;
-    stats.stats.counters["phase1.lod0Nodes"] = countLevel(renderedNodes, 0);
-    stats.stats.counters["phase1.lod1Nodes"] = countLevel(renderedNodes, 1);
-    stats.stats.counters["phase1.lod2Nodes"] = countLevel(renderedNodes, 2);
-    stats.stats.counters["phase1.lod3Nodes"] = countLevel(renderedNodes, 3);
-    stats.stats.counters["phase1.builtLod0Nodes"] = countBuiltLevel(pageTree.nodesByLevel, 0);
-    stats.stats.counters["phase1.builtLod1Nodes"] = countBuiltLevel(pageTree.nodesByLevel, 1);
-    stats.stats.counters["phase1.builtLod2Nodes"] = countBuiltLevel(pageTree.nodesByLevel, 2);
-    stats.stats.counters["phase1.builtLod3Nodes"] = countBuiltLevel(pageTree.nodesByLevel, 3);
-    stats.stats.counters["phase1.selectionMs100"] = Math.round(selectionMs * 100);
-
-    surf.update(dt);
-    deepOcean.update(dt, camera.position);
-    borderDebug.updateProbe(camera.position);
-    const sourceTriangles = sourceTerrainTriangles();
-    const excludedTriangles = excludedWaterTriangles();
-    pageInputDebug.update(sourceTriangles, excludedTriangles);
-    oceanDebug.update();
-    const oceanStats = deepOcean.stats();
-    const coastTypeIds: Record<string, number> = {
-      inland: 0,
-      sandyBeach: 1,
-      rockyBeach: 2,
-      cliff: 3,
-      cove: 4,
-      reef: 5,
-    };
-    stats.stats.counters["coast.enabled"] = coastConfig.coast.enabled ? 1 : 0;
-    stats.stats.counters["coast.type"] = coastTypeIds[borderDebug.stats.coastType] ?? 0;
-    stats.stats.counters["coast.distanceToBorder100"] = Math.round(borderDebug.stats.distanceToBorder * 100);
-    stats.stats.counters["clod.pageSourceTerrainTriangles"] = sourceTriangles;
-    stats.stats.counters["clod.excludedWaterOceanTriangles"] = excludedTriangles;
-    stats.stats.counters["clod.waterTrianglesInSimplifier"] = 0;
-    stats.stats.counters["water.surfTriangles"] = surf.object.visible ? surf.stats().triangles : 0;
-    stats.stats.counters["water.deepOceanTriangles"] = deepOcean.object.visible ? oceanStats.totalTriangles : 0;
-    stats.stats.counters["water.oceanDrawCalls"] = oceanStats.drawCalls;
-    stats.stats.counters["water.oceanSnapUpdates"] = oceanStats.snapUpdates;
-
-    renderer.render(scene, camera);
-    stats.update(dt);
-    hud.update(dt);
-
-    for (const waiter of settleWaiters) waiter.frames -= 1;
-    const done = settleWaiters.filter((waiter) => waiter.frames <= 0);
-    for (const waiter of done) waiter.resolve();
-    for (const waiter of done) settleWaiters.splice(settleWaiters.indexOf(waiter), 1);
-    if (!hooks.ready && stats.stats.frame >= PHASE0.settleReadyFrames) {
-      hooks.ready = true;
-      hooks.progress = 1;
-      hooks.progressMsg = "ready";
-    }
+  const animate = createPhase1AnimationLoop({
+    renderer, scene, camera, flyCamera, params, config, stats, hud,
+    surf, deepOcean, borderDebug, pageInputDebug, oceanDebug,
+    settleManager, state: mutableState, actions: terrainActions,
+    coastConfig,
   });
+  renderer.setAnimationLoop(animate);
 }

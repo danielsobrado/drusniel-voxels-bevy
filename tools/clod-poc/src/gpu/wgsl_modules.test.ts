@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TREE_SPECIES } from "../trees/tree_config.js";
-import { TREE_RING_SHADOW_CASCADE_COUNT } from "./tree_ring_wgsl_layout.js";
+import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import {
   composeGrassRingShader,
@@ -11,7 +11,7 @@ import {
 } from "./wgsl_modules.js";
 
 function bindingDeclarationCount(source: string, name: string): number {
-  return [...source.matchAll(new RegExp(`\\bvar\\s+${name}\\s*:`, "g"))].length;
+  return [...source.matchAll(new RegExp(`\\bvar(?:<[^>]+>)?\\s+${name}\\s*:`, "g"))].length;
 }
 
 describe("WGSL module composition", () => {
@@ -43,19 +43,30 @@ describe("WGSL module composition", () => {
     expect(source).toContain("let height = raw_height;");
     expect(source).toContain("tree_terrain_visibility_enabled()");
     expect(source).toContain("terrain_ridge_filter(wpos, height, dist)");
+    expect(source).toContain("tree_slot_visible_cluster_visible(slot)");
   });
 
-  it("returns on terrain-hidden trees before visible and shadow appends", () => {
+  it("keeps terrain and visible-cluster culls after shadows and before visible appends", () => {
     const source = composeTreeRingShader();
-    const hiddenReturn = source.indexOf("if (terrain_hidden) { return; }");
+    const terrainReject = source.indexOf("if (terrain_hidden) { return; }");
+    const visibleReject = source.indexOf("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
+    const speciesSelection = source.indexOf("let species = select_species");
+    const scaleSelection = source.indexOf("let scale = tree_instance_scale");
     const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
     const visibleAppend = source.indexOf("append_lod_if_active(species, TREE_LOD_NEAR");
 
-    expect(hiddenReturn).toBeGreaterThan(-1);
+    expect(terrainReject).toBeGreaterThan(-1);
+    expect(visibleReject).toBeGreaterThan(-1);
+    expect(speciesSelection).toBeGreaterThan(-1);
+    expect(scaleSelection).toBeGreaterThan(-1);
     expect(shadowAppend).toBeGreaterThan(-1);
     expect(visibleAppend).toBeGreaterThan(-1);
-    expect(hiddenReturn).toBeLessThan(shadowAppend);
-    expect(hiddenReturn).toBeLessThan(visibleAppend);
+    expect(terrainReject).toBeGreaterThan(speciesSelection);
+    expect(terrainReject).toBeGreaterThan(scaleSelection);
+    expect(terrainReject).toBeGreaterThan(shadowAppend);
+    expect(terrainReject).toBeLessThan(visibleAppend);
+    expect(visibleReject).toBeGreaterThan(shadowAppend);
+    expect(visibleReject).toBeLessThan(visibleAppend);
   });
 
   it("rewrites tree scatter hash and shadow LOD gate", () => {

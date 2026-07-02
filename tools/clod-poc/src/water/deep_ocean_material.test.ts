@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 const DEEP_SHADER_SOURCE = readFileSync(new URL("./deep_ocean_material.ts", import.meta.url), "utf8");
 const DEEP_NODE_SOURCE = readFileSync(new URL("./deep_ocean_node_material.ts", import.meta.url), "utf8");
 const DEEP_VISUAL_SOURCE = readFileSync(new URL("./deep_ocean_visual.ts", import.meta.url), "utf8");
-const WATER_CONFIG_SOURCE = readFileSync(new URL("./waterConfig.ts", import.meta.url), "utf8");
-const CLIPMAP_SHADER_SOURCE = readFileSync(new URL("./waterMaterial.ts", import.meta.url), "utf8");
+const WATER_CONFIG_SOURCE = readFileSync(new URL("./water_config_defaults.ts", import.meta.url), "utf8");
+const CLIPMAP_SHADER_SOURCE = readFileSync(new URL("./water_material_uniforms.ts", import.meta.url), "utf8");
 
 describe("deep ocean material", () => {
   it("keeps reference-style sky reflection and sun glints in deep-ocean render paths", () => {

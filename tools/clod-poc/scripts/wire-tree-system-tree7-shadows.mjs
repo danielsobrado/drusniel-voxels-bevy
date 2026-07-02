@@ -264,6 +264,9 @@ function tree8AlreadySatisfiesTree7Edit(source, label) {
 }
 
 function modularShadowDrawAlreadySatisfiesTree7(source) {
+  if (source.includes("treeCreateGpuRingResources(") &&
+    source.includes("updateTreeGpuRingTrees(") &&
+    source.includes("treeGpuRingInput(")) return true;
   return source.includes("createTreeSystemGpuRingDrawResources(") &&
     source.includes("updateTreeGpuRingTrees(") &&
     source.includes("TreeGpuRingRuntimeInput");

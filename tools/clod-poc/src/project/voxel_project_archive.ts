@@ -1,170 +1,36 @@
 import type { ClodPagesConfig } from "../config.js";
-import { isGrassShaderMode, type GrassShaderMode } from "../grass/grass_config.js";
-import type { BrushOp, BrushShape, VoxelEditSnapshot } from "../terrain/terrain.js";
+import { isGrassShaderMode } from "../grass/grass_config.js";
+import type { VoxelEditSnapshot } from "../terrain/terrain.js";
 import { MAX_TERRAIN_TEXTURES } from "../terrain/terrain_textures.js";
-import type { WeatherMode } from "../app/clod_constants.js";
-import { DEFAULT_RAIN_WEATHER_SETTINGS } from "../weather/rain.js";
-import { DEFAULT_WATER_VISUAL, WATER_DEBUG_MODES, type WaterDebugMode } from "../water/waterConfig.js";
+import { WATER_DEBUG_MODES } from "../water/waterConfig.js";
 import type { ProjectPropInstance } from "./project_props.js";
+import type {
+  ProjectSessionState,
+  ProjectTextureSlot,
+  ProjectWaterArchiveState,
+  ProjectWeatherArchiveState,
+  VoxelProjectManifest,
+  VoxelProjectArchiveContents,
+} from "./voxel_project_archive_types.js";
+export type {
+  TextureBlendMode,
+  PostProcessDebugMode,
+  ProjectSessionState,
+  ProjectTextureSlot,
+  ProjectWaterArchiveState,
+  ProjectWeatherArchiveState,
+  VoxelProjectManifest,
+  VoxelProjectArchiveContents,
+} from "./voxel_project_archive_types.js";
+export { VOXEL_PROJECT_SCHEMA_VERSION } from "./voxel_project_archive_types.js";
+export {
+  DEFAULT_PROJECT_WATER_ARCHIVE_STATE,
+  DEFAULT_PROJECT_WEATHER_ARCHIVE_STATE,
+} from "./voxel_project_archive_defaults.js";
 
-export const VOXEL_PROJECT_SCHEMA_VERSION = 3 as const;
 const PROJECT_FILE = "project.json";
 const IMPORT_DB = "drusniel-clod-imports";
 const IMPORT_STORE = "projects";
-
-export type TextureBlendMode = "hard bands" | "blend bands";
-export type PostProcessDebugMode = "output" | "copy" | "off";
-
-export interface ProjectSessionState {
-  thresholdPx: number;
-  enforce21: boolean;
-  freeze: boolean;
-  wireframe: boolean;
-  showBounds: boolean;
-  showSeamPoints: boolean;
-  showCrossLodBorders: boolean;
-  colorByLod: boolean;
-  normalColor: boolean;
-  normalDivergence: boolean;
-  divergenceGain: number;
-  frontSideOnly: boolean;
-  recomputedNormals: boolean;
-  forceMaxLevel: "auto" | "0" | "1" | "2" | "3";
-  textureScale: number;
-  triplanar: boolean;
-  albedo: boolean;
-  normalMap: boolean;
-  normalIntensity: number;
-  roughness: number;
-  metalness: number;
-  textureBlendMode: TextureBlendMode;
-  textureBlendWidth: number;
-  terrainBrightness: number;
-  terrainContrast: number;
-  terrainSaturation: number;
-  terrainWarmth: number;
-  sunAzimuthDeg: number;
-  sunElevationDeg: number;
-  sunIntensity: number;
-  skyIntensity: number;
-  groundIntensity: number;
-  exposure: number;
-  horizonSoftness: number;
-  sunDiskIntensity: number;
-  sunGlowIntensity: number;
-  hazeIntensity: number;
-  postProcessEnabled: boolean;
-  postProcessOpacity: number;
-  postProcessExposure: number;
-  postProcessContrast: number;
-  postProcessSaturation: number;
-  postProcessVignette: number;
-  postProcessDebugMode: PostProcessDebugMode;
-  bubble: boolean;
-  bubbleRadius: number;
-  tintBubble: boolean;
-  digEnabled: boolean;
-  digRadius: number;
-  brushOp: BrushOp;
-  brushShape: BrushShape;
-  brushMaterial: number;
-  brushHeight: number;
-  brushStrength: number;
-  brushFalloff: number;
-  brushFlowMs: number;
-  grassEnabled: boolean;
-  grassShaderMode: GrassShaderMode;
-  grassAlphaToCoverage: boolean;
-  grassDistance: number;
-  grassBladeSpacing: number;
-  grassBladeHeight: number;
-  grassBladeHeightVariation: number;
-  grassBladeWidth: number;
-  grassWindStrength: number;
-  grassWindSpeed: number;
-  grassSlopeMinY: number;
-  grassMinHeight: number;
-  grassMaxHeight: number;
-  grassMaxBlades: number;
-  grassSeed: number;
-  treesEnabled?: boolean;
-  treeDistance?: number;
-  treeMaxInstances?: number;
-  treeDebugColorByLod?: boolean;
-  treeWindEnabled?: boolean;
-  treeWindStrength?: number;
-  treeWindSpeed?: number;
-  treeGustStrength?: number;
-  treeTrunkSwayStrength?: number;
-  treeLeafFlutterStrength?: number;
-}
-
-export interface ProjectTextureSlot {
-  index: number;
-  source: "empty" | "builtin" | "custom";
-  name: string;
-  selectedId: string;
-  scale: number;
-  heightMin: number;
-  heightMax: number;
-  customPath?: string;
-  mimeType?: string;
-  normalPath?: string;
-  normalMimeType?: string;
-}
-
-export interface ProjectWaterArchiveState {
-  waterEnabled: boolean;
-  waterDebugMode: WaterDebugMode;
-  waterClipmapTint: boolean;
-  waterWireframe: boolean;
-  waterDepthWrite: boolean;
-}
-
-export interface ProjectWeatherArchiveState {
-  weatherMode: WeatherMode;
-  weatherIntensity: number;
-  weatherWindX: number;
-  weatherWindZ: number;
-}
-
-export const DEFAULT_PROJECT_WATER_ARCHIVE_STATE: ProjectWaterArchiveState = {
-  waterEnabled: true,
-  waterDebugMode: "final",
-  waterClipmapTint: false,
-  waterWireframe: false,
-  waterDepthWrite: DEFAULT_WATER_VISUAL.depthWrite,
-};
-
-export const DEFAULT_PROJECT_WEATHER_ARCHIVE_STATE: ProjectWeatherArchiveState = {
-  weatherMode: "off",
-  weatherIntensity: DEFAULT_RAIN_WEATHER_SETTINGS.intensity,
-  weatherWindX: DEFAULT_RAIN_WEATHER_SETTINGS.windX,
-  weatherWindZ: DEFAULT_RAIN_WEATHER_SETTINGS.windZ,
-};
-
-export interface VoxelProjectManifest {
-  schemaVersion: typeof VOXEL_PROJECT_SCHEMA_VERSION;
-  kind: "drusniel-clod-project";
-  exportedAt: string;
-  worldSize: number;
-  config: ClodPagesConfig;
-  state: ProjectSessionState;
-  water: ProjectWaterArchiveState;
-  weather: ProjectWeatherArchiveState;
-  voxelTerrainEdits: VoxelEditSnapshot;
-  props: readonly ProjectPropInstance[];
-  textures: ProjectTextureSlot[];
-  camera: {
-    position: [number, number, number];
-    target: [number, number, number];
-  };
-}
-
-export interface VoxelProjectArchiveContents {
-  manifest: VoxelProjectManifest;
-  customTextures: Map<string, Uint8Array>;
-}
 
 interface StagedVoxelProjectImport {
   manifest: VoxelProjectManifest;
@@ -294,7 +160,7 @@ function assertWeatherArchiveState(value: unknown): asserts value is ProjectWeat
 }
 
 export function validateVoxelProjectManifest(value: unknown): VoxelProjectManifest {
-  if (!isRecord(value) || value.schemaVersion !== VOXEL_PROJECT_SCHEMA_VERSION || value.kind !== "drusniel-clod-project") {
+  if (!isRecord(value) || value.schemaVersion !== 3 || value.kind !== "drusniel-clod-project") {
     throw new Error("Unsupported voxel project format or schema version");
   }
   if (!isFiniteNumber(value.worldSize) || ![2, 4, 8, 16, 32].includes(value.worldSize)) throw new Error("project.json has an unsupported world size");

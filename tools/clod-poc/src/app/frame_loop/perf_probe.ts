@@ -1,213 +1,9 @@
-import type { PlayerInteractionMode } from "../../player_controller.js";
-import type { TreeStats } from "../../trees/index.js";
-import type { PropGpuStatus } from "../../props/prop_types.js";
+import type { FramePerfMetric, FramePerfPhaseTiming, FramePerfSample, FramePerfSummary, FramePerfSnapshot, FramePerfHooks, FramePerfProbe } from "./perf_probe_types.js";
+import { FRAME_PERF_ALL_METRICS, FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS } from "./perf_probe_constants.js";
+import { intParam, statsFor, rankBuckets, avgCounter, minPositiveCounter, avgGpuPasses, countTreeGpuStatuses, countCustomPropGpuStatuses } from "./perf_probe_helpers.js";
 
-export const FRAME_PERF_BROAD_BUCKETS = [
-  "frameSetupMs",
-  "selectionUpdateMs",
-  "longViewDiagnosticsMs",
-  "farSummaryMs",
-  "constructionMs",
-  "brushMs",
-  "combatMs",
-  "spellsMs",
-  "terrainPhaseMs",
-  "shadowProxyMs",
-  "clodShadowMs",
-  "canopyMs",
-  "vegetationTotalMs",
-  "borderOceanDebugMs",
-  "statsSyncMs",
-  "renderMs",
-  "unattributedMs",
-] as const;
-
-export const FRAME_PERF_PROP_BUCKETS = [
-  "grassMs",
-  "treesMs",
-  "understoryMs",
-  "forestLightingMs",
-  "stonesMs",
-  "customPropsMs",
-  "waterMs",
-  "deepOceanMs",
-  "weatherMs",
-  "propsRestMs",
-  "propsUnattributedMs",
-] as const;
-
-export const FRAME_PERF_ALL_METRICS = [
-  "frameMs",
-  "selectionMs",
-  "bubbleMs",
-  "propsMs",
-  "otherMs",
-  ...FRAME_PERF_BROAD_BUCKETS,
-  "selectionCutMs",
-  "selectionBookMs",
-  "selectionInfoMs",
-  "selectionOverlaysMs",
-  "vegetationTotalMs",
-  ...FRAME_PERF_PROP_BUCKETS,
-] as const;
-
-export type FramePerfMetric = typeof FRAME_PERF_ALL_METRICS[number];
-export type FramePerfBroadBucket = typeof FRAME_PERF_BROAD_BUCKETS[number];
-export type FramePerfPropBucket = typeof FRAME_PERF_PROP_BUCKETS[number];
-
-export interface FramePerfPhaseTiming {
-  frameSetupMs: number;
-  selectionUpdateMs: number;
-  longViewDiagnosticsMs: number;
-  farSummaryMs: number;
-  constructionMs: number;
-  brushMs: number;
-  combatMs: number;
-  spellsMs: number;
-  terrainPhaseMs: number;
-  shadowProxyMs: number;
-  clodShadowMs: number;
-  canopyMs: number;
-  borderOceanDebugMs: number;
-  statsSyncMs: number;
-}
-
-export interface FramePerfSample extends Record<FramePerfMetric, number> {
-  frameId: number;
-  renderedCount: number;
-  terrainTriangles: number;
-  chunkGroupsBuilt: number;
-  nearFieldChunkGroups: number;
-  interactionMode: PlayerInteractionMode;
-  treeGpuStatus: TreeStats["gpuStatus"] | "unknown";
-  treeTotalTrees: number;
-  treeVisiblePatches: number;
-  treePatches: number;
-  treeNearTrees: number;
-  treeMidTrees: number;
-  treeFarTrees: number;
-  treeImpostorTrees: number;
-  treeHeroNearTriangles: number;
-  treeHeroNearFoliageTriangles: number;
-  treeHeroNearMinTreeTriangles: number;
-  treeHeroNearAvgTreeTriangles: number;
-  treeHeroNearPassesTriangleFloor: number;
-  treeHeroNearPassesRealFoliage: number;
-  treeGpuCandidateCount: number;
-  treeGpuAcceptedCount: number;
-  treeGpuVisibleCount: number;
-  treeGpuShadowCasterCount: number;
-  treeGpuShadowOverflowed: number;
-  treeGpuDispatchMs: number | null;
-  customPropGpuStatus: PropGpuStatus | "unknown";
-  customPropTotalInstances: number;
-  customPropVisibleInstances: number;
-  customPropGpuCandidateCount: number;
-  customPropGpuVisibleCount: number;
-  customPropGpuOverflowed: number;
-  customPropGpuDispatchMs: number | null;
-  /** TP-1 real per-pass GPU ms (label → ms) for this frame; absent on WebGL. */
-  gpuPasses?: Record<string, number>;
-}
-
-export interface FramePerfMetricStats {
-  avg: number;
-  min: number;
-  max: number;
-  p50: number;
-  p95: number;
-}
-
-export interface FramePerfBucketRank {
-  name: string;
-  p95: number;
-  avg: number;
-}
-
-export interface FramePerfSummary {
-  sampleCount: number;
-  warmupFrames: number;
-  targetSampleFrames: number;
-  metrics: Record<FramePerfMetric, FramePerfMetricStats>;
-  broadBucketsByP95: FramePerfBucketRank[];
-  propBucketsByP95: FramePerfBucketRank[];
-  counters: {
-    renderedCountAvg: number;
-    terrainTrianglesAvg: number;
-    chunkGroupsBuiltTotal: number;
-    nearFieldChunkGroupsMax: number;
-    treeGpuStatusCounts: Record<string, number>;
-    treeTotalTreesAvg: number;
-    treeGpuCandidateCountAvg: number;
-    treeGpuAcceptedCountAvg: number;
-    treeGpuVisibleCountAvg: number;
-    treeGpuShadowCasterCountAvg: number;
-    treeGpuShadowOverflowedFrames: number;
-    treeNearTreesAvg: number;
-    treeMidTreesAvg: number;
-    treeFarTreesAvg: number;
-    treeImpostorTreesAvg: number;
-    treeHeroNearTrianglesAvg: number;
-    treeHeroNearFoliageTrianglesAvg: number;
-    treeHeroNearMinTreeTrianglesMin: number;
-    treeHeroNearAvgTreeTrianglesAvg: number;
-    treeHeroNearPassesTriangleFloorFrames: number;
-    treeHeroNearPassesRealFoliageFrames: number;
-    customPropGpuStatusCounts: Record<string, number>;
-    customPropTotalInstancesAvg: number;
-    customPropVisibleInstancesAvg: number;
-    customPropGpuCandidateCountAvg: number;
-    customPropGpuVisibleCountAvg: number;
-    customPropGpuOverflowedFrames: number;
-    customPropGpuDispatchMsAvg: number;
-    /** TP-1: mean GPU ms per pass label across sampled frames. */
-    gpuPassesAvg: Record<string, number>;
-  };
-}
-
-export function createFramePerfPhaseTiming(): FramePerfPhaseTiming {
-  return {
-    frameSetupMs: 0,
-    selectionUpdateMs: 0,
-    longViewDiagnosticsMs: 0,
-    farSummaryMs: 0,
-    constructionMs: 0,
-    brushMs: 0,
-    combatMs: 0,
-    spellsMs: 0,
-    terrainPhaseMs: 0,
-    shadowProxyMs: 0,
-    clodShadowMs: 0,
-    canopyMs: 0,
-    borderOceanDebugMs: 0,
-    statsSyncMs: 0,
-  };
-}
-
-export interface FramePerfSnapshot extends FramePerfSummary {
-  ready: boolean;
-  observedFrames: number;
-  samples: FramePerfSample[];
-}
-
-export interface FramePerfHooks {
-  ready: boolean;
-  observedFrames: number;
-  sampleCount: number;
-  warmupFrames: number;
-  targetSampleFrames: number;
-  lastSample: FramePerfSample | null;
-  samples: FramePerfSample[];
-  snapshot: () => FramePerfSnapshot;
-  reset: () => void;
-}
-
-export interface FramePerfProbe {
-  readonly enabled: boolean;
-  record(sample: FramePerfSample): void;
-  reset(): void;
-  snapshot(): FramePerfSnapshot;
-}
+export type { FramePerfMetric, FramePerfBroadBucket, FramePerfPropBucket, FramePerfPhaseTiming, FramePerfSample, FramePerfMetricStats, FramePerfBucketRank, FramePerfSummary, FramePerfSnapshot, FramePerfHooks, FramePerfProbe } from "./perf_probe_types.js";
+export { FRAME_PERF_BROAD_BUCKETS, FRAME_PERF_PROP_BUCKETS, FRAME_PERF_ALL_METRICS } from "./perf_probe_constants.js";
 
 declare global {
   interface Window {
@@ -215,127 +11,34 @@ declare global {
   }
 }
 
-function intParam(searchParams: URLSearchParams, keys: readonly string[], fallback: number): number {
-  for (const key of keys) {
-    const raw = searchParams.get(key);
-    if (raw === null) continue;
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
-  }
-  return fallback;
-}
-
-function emptyMetricStats(): FramePerfMetricStats {
-  return { avg: 0, min: 0, max: 0, p50: 0, p95: 0 };
-}
-
-function percentile(sorted: readonly number[], ratio: number): number {
-  if (sorted.length === 0) return 0;
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
-  return sorted[index] ?? 0;
-}
-
-function statsFor(samples: readonly FramePerfSample[], metric: FramePerfMetric): FramePerfMetricStats {
-  if (samples.length === 0) return emptyMetricStats();
-  const values = samples.map((sample) => sample[metric]).sort((a, b) => a - b);
-  const total = values.reduce((sum, value) => sum + value, 0);
+export function createFramePerfPhaseTiming(): FramePerfPhaseTiming {
   return {
-    avg: total / values.length,
-    min: values[0] ?? 0,
-    max: values[values.length - 1] ?? 0,
-    p50: percentile(values, 0.5),
-    p95: percentile(values, 0.95),
+    frameSetupMs: 0, selectionUpdateMs: 0, longViewDiagnosticsMs: 0, farSummaryMs: 0,
+    constructionMs: 0, brushMs: 0, combatMs: 0, spellsMs: 0, terrainPhaseMs: 0,
+    shadowProxyMs: 0, clodShadowMs: 0, canopyMs: 0, borderOceanDebugMs: 0, statsSyncMs: 0,
   };
 }
 
-function rankBuckets(
-  metrics: Record<FramePerfMetric, FramePerfMetricStats>,
-  bucketNames: readonly FramePerfMetric[],
-): FramePerfBucketRank[] {
-  return bucketNames
-    .map((name) => ({ name, p95: metrics[name].p95, avg: metrics[name].avg }))
-    .sort((a, b) => b.p95 - a.p95);
-}
-
-function avgCounter(samples: readonly FramePerfSample[], key: keyof FramePerfSample): number {
-  if (samples.length === 0) return 0;
-  const total = samples.reduce((sum, sample) => {
-    const value = sample[key];
-    return typeof value === "number" ? sum + value : sum;
-  }, 0);
-  return total / samples.length;
-}
-
-function minPositiveCounter(samples: readonly FramePerfSample[], key: keyof FramePerfSample): number {
-  const values = samples
-    .map((sample) => sample[key])
-    .filter((value): value is number => typeof value === "number" && value > 0)
-    .sort((a, b) => a - b);
-  return values[0] ?? 0;
-}
-
-function avgGpuPasses(samples: readonly FramePerfSample[]): Record<string, number> {
-  const sums: Record<string, number> = {};
-  const counts: Record<string, number> = {};
-  for (const sample of samples) {
-    if (!sample.gpuPasses) continue;
-    for (const [label, ms] of Object.entries(sample.gpuPasses)) {
-      sums[label] = (sums[label] ?? 0) + ms;
-      counts[label] = (counts[label] ?? 0) + 1;
-    }
-  }
-  const avg: Record<string, number> = {};
-  for (const label of Object.keys(sums)) {
-    avg[label] = sums[label] / Math.max(1, counts[label]);
-  }
-  return avg;
-}
-
-function countTreeGpuStatuses(samples: readonly FramePerfSample[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const sample of samples) {
-    counts[sample.treeGpuStatus] = (counts[sample.treeGpuStatus] ?? 0) + 1;
-  }
-  return counts;
-}
-
-function countCustomPropGpuStatuses(samples: readonly FramePerfSample[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const sample of samples) {
-    counts[sample.customPropGpuStatus] = (counts[sample.customPropGpuStatus] ?? 0) + 1;
-  }
-  return counts;
-}
-
-export function summarizeFramePerfSamples(
-  samples: readonly FramePerfSample[],
-  warmupFrames: number,
-  targetSampleFrames: number,
-): FramePerfSummary {
-  const metrics = Object.fromEntries(
-    FRAME_PERF_ALL_METRICS.map((metric) => [metric, statsFor(samples, metric)]),
-  ) as Record<FramePerfMetric, FramePerfMetricStats>;
-  const renderedTotal = samples.reduce((sum, sample) => sum + sample.renderedCount, 0);
-  const trianglesTotal = samples.reduce((sum, sample) => sum + sample.terrainTriangles, 0);
+export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], warmupFrames: number, targetSampleFrames: number): FramePerfSummary {
+  const metrics = Object.fromEntries(FRAME_PERF_ALL_METRICS.map((m) => [m, statsFor(samples, m)])) as Record<FramePerfMetric, import("./perf_probe_types.js").FramePerfMetricStats>;
+  const renderedTotal = samples.reduce((s, sample) => s + sample.renderedCount, 0);
+  const trianglesTotal = samples.reduce((s, sample) => s + sample.terrainTriangles, 0);
   return {
-    sampleCount: samples.length,
-    warmupFrames,
-    targetSampleFrames,
-    metrics,
+    sampleCount: samples.length, warmupFrames, targetSampleFrames, metrics,
     broadBucketsByP95: rankBuckets(metrics, FRAME_PERF_BROAD_BUCKETS),
     propBucketsByP95: rankBuckets(metrics, FRAME_PERF_PROP_BUCKETS),
     counters: {
       renderedCountAvg: samples.length > 0 ? renderedTotal / samples.length : 0,
       terrainTrianglesAvg: samples.length > 0 ? trianglesTotal / samples.length : 0,
-      chunkGroupsBuiltTotal: samples.reduce((sum, sample) => sum + sample.chunkGroupsBuilt, 0),
-      nearFieldChunkGroupsMax: samples.reduce((max, sample) => Math.max(max, sample.nearFieldChunkGroups), 0),
+      chunkGroupsBuiltTotal: samples.reduce((s, sample) => s + sample.chunkGroupsBuilt, 0),
+      nearFieldChunkGroupsMax: samples.reduce((m, sample) => Math.max(m, sample.nearFieldChunkGroups), 0),
       treeGpuStatusCounts: countTreeGpuStatuses(samples),
       treeTotalTreesAvg: avgCounter(samples, "treeTotalTrees"),
       treeGpuCandidateCountAvg: avgCounter(samples, "treeGpuCandidateCount"),
       treeGpuAcceptedCountAvg: avgCounter(samples, "treeGpuAcceptedCount"),
       treeGpuVisibleCountAvg: avgCounter(samples, "treeGpuVisibleCount"),
       treeGpuShadowCasterCountAvg: avgCounter(samples, "treeGpuShadowCasterCount"),
-      treeGpuShadowOverflowedFrames: samples.reduce((sum, sample) => sum + sample.treeGpuShadowOverflowed, 0),
+      treeGpuShadowOverflowedFrames: samples.reduce((s, sample) => s + sample.treeGpuShadowOverflowed, 0),
       treeNearTreesAvg: avgCounter(samples, "treeNearTrees"),
       treeMidTreesAvg: avgCounter(samples, "treeMidTrees"),
       treeFarTreesAvg: avgCounter(samples, "treeFarTrees"),
@@ -344,14 +47,14 @@ export function summarizeFramePerfSamples(
       treeHeroNearFoliageTrianglesAvg: avgCounter(samples, "treeHeroNearFoliageTriangles"),
       treeHeroNearMinTreeTrianglesMin: minPositiveCounter(samples, "treeHeroNearMinTreeTriangles"),
       treeHeroNearAvgTreeTrianglesAvg: avgCounter(samples, "treeHeroNearAvgTreeTriangles"),
-      treeHeroNearPassesTriangleFloorFrames: samples.reduce((sum, sample) => sum + sample.treeHeroNearPassesTriangleFloor, 0),
-      treeHeroNearPassesRealFoliageFrames: samples.reduce((sum, sample) => sum + sample.treeHeroNearPassesRealFoliage, 0),
+      treeHeroNearPassesTriangleFloorFrames: samples.reduce((s, sample) => s + sample.treeHeroNearPassesTriangleFloor, 0),
+      treeHeroNearPassesRealFoliageFrames: samples.reduce((s, sample) => s + sample.treeHeroNearPassesRealFoliage, 0),
       customPropGpuStatusCounts: countCustomPropGpuStatuses(samples),
       customPropTotalInstancesAvg: avgCounter(samples, "customPropTotalInstances"),
       customPropVisibleInstancesAvg: avgCounter(samples, "customPropVisibleInstances"),
       customPropGpuCandidateCountAvg: avgCounter(samples, "customPropGpuCandidateCount"),
       customPropGpuVisibleCountAvg: avgCounter(samples, "customPropGpuVisibleCount"),
-      customPropGpuOverflowedFrames: samples.reduce((sum, sample) => sum + sample.customPropGpuOverflowed, 0),
+      customPropGpuOverflowedFrames: samples.reduce((s, sample) => s + sample.customPropGpuOverflowed, 0),
       customPropGpuDispatchMsAvg: avgCounter(samples, "customPropGpuDispatchMs"),
       gpuPassesAvg: avgGpuPasses(samples),
     },
@@ -363,40 +66,21 @@ export function createFramePerfProbeFromQuery(searchParams: URLSearchParams): Fr
     delete window.__drusnielPerf;
     return null;
   }
-
   const warmupFrames = intParam(searchParams, ["perfWarmupFrames", "perfWarmup"], 120);
   const targetSampleFrames = Math.max(1, intParam(searchParams, ["perfSampleFrames", "perfFrames"], 300));
   let observedFrames = 0;
   let samples: FramePerfSample[] = [];
-
   const snapshot = (): FramePerfSnapshot => ({
-    ready: samples.length >= targetSampleFrames,
-    observedFrames,
-    samples: samples.slice(),
+    ready: samples.length >= targetSampleFrames, observedFrames, samples: samples.slice(),
     ...summarizeFramePerfSamples(samples, warmupFrames, targetSampleFrames),
   });
-
   const hooks: FramePerfHooks = {
-    ready: false,
-    observedFrames: 0,
-    sampleCount: 0,
-    warmupFrames,
-    targetSampleFrames,
-    lastSample: null,
-    samples,
+    ready: false, observedFrames: 0, sampleCount: 0, warmupFrames, targetSampleFrames,
+    lastSample: null, samples,
     snapshot,
-    reset: () => {
-      observedFrames = 0;
-      samples = [];
-      hooks.ready = false;
-      hooks.observedFrames = 0;
-      hooks.sampleCount = 0;
-      hooks.lastSample = null;
-      hooks.samples = samples;
-    },
+    reset: () => { observedFrames = 0; samples = []; hooks.ready = false; hooks.observedFrames = 0; hooks.sampleCount = 0; hooks.lastSample = null; hooks.samples = samples; },
   };
   window.__drusnielPerf = hooks;
-
   return {
     enabled: true,
     record(sample: FramePerfSample): void {

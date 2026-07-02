@@ -1,98 +1,16 @@
-// LV-1b: Shared coarse terrain summary field.
-//
-// Mirrors the far-water downsample pattern (farWaterSurface.ts): box-filter the per-page
-// height envelope into a coarse grid, then provide samplers for the far shell (LV-2),
-// shadow proxy (LV-3), and canopy shell (LV-4).  Cells with no page coverage fall back
-// to the analytic WorldSource when one is available so the horizon never gaps. Built off
-// the render loop, debounced on page-tree revision — never per-frame.
-
 import * as THREE from "three";
 import type { ClodPageNode } from "../types.js";
 import { surfaceHeightCore } from "../gpu/terrain_field_core.js";
-import { BIOME_IDS, BiomeRegionField } from "../world_source/biome_region_field.js";
-import { getTerrainFieldCoreConfig } from "../gpu/terrain_field_core.js";
 import type { WorldSource } from "../world_source/world_source.js";
+export type { TerrainSummaryField, TerrainSummaryBuildOptions } from "./terrain_summary_types.js";
+import type { TerrainSummaryField, TerrainSummaryBuildOptions } from "./terrain_summary_types.js";
+import {
+  gridIndex, cellCenter, defaultBiomeSampler, outsideSummaryFootprint,
+  sampleAnalyticNormal, clamp01, canopyBiomeGate, extendedRes,
+  hash, fbm, smooth01,
+} from "./terrain_summary_helpers.js";
 
-export interface TerrainSummaryField {
-  /** Number of cells per axis in the coarse grid. */
-  res: number;
-  /** World-space extent per axis (same unit as page footprints — cell units). */
-  worldSize: number;
-  /** Downsample factor applied over the page grid. */
-  farReduceFactor: number;
-  /** Min height per cell. */
-  heightMin: Float32Array;
-  /** Max height per cell. */
-  heightMax: Float32Array;
-  /** Normal X per cell (average over covered vertices). */
-  normalX: Float32Array;
-  /** Normal Y per cell. */
-  normalY: Float32Array;
-  /** Normal Z per cell. */
-  normalZ: Float32Array;
-  /** Coverage per cell (0 = no page, 1 = fully covered by page envelopes). */
-  coverage: Float32Array;
-  /** Dominant biome/material id per cell when built analytically. */
-  biomeId?: Uint8Array;
-  /** Analytic height fallback for cells outside the baked summary footprint. */
-  analyticHeightSampler?: (x: number, z: number) => number;
-  /** Analytic biome fallback for cells outside the baked summary footprint. */
-  analyticBiomeSampler?: (x: number, z: number) => number;
-}
-
-export interface TerrainSummaryBuildOptions {
-  worldSource?: Pick<WorldSource, "sampleHeight" | "sampleBiome">;
-}
-
-function gridIndex(res: number, x: number, z: number): number {
-  return z * res + x;
-}
-
-/** World-space X/Z for cell center (fx, fz) in a res×res grid covering [0, worldSize). */
-function cellCenter(res: number, worldSize: number, fx: number, fz: number): [number, number] {
-  const cellSize = worldSize / res;
-  return [(fx + 0.5) * cellSize, (fz + 0.5) * cellSize];
-}
-
-function defaultBiomeSampler(): (x: number, z: number, height: number) => number {
-  const terrainConfig = getTerrainFieldCoreConfig();
-  const biomeField = new BiomeRegionField({
-    seed: terrainConfig.seed,
-    seaLevel: terrainConfig.seaLevel,
-    islandShape: terrainConfig.islandShape,
-  });
-  return (x, z, height) => biomeField.sample(x, z, height).biome;
-}
-
-function outsideSummaryFootprint(field: TerrainSummaryField, x: number, z: number): boolean {
-  return x < 0 || x > field.worldSize || z < 0 || z > field.worldSize;
-}
-
-function summaryCellSize(field: TerrainSummaryField): number {
-  return Math.max(1, field.worldSize / Math.max(1, field.res));
-}
-
-function sampleAnalyticNormal(field: TerrainSummaryField, x: number, z: number): [number, number, number] | null {
-  if (!field.analyticHeightSampler) return null;
-  const e = summaryCellSize(field);
-  const hL = field.analyticHeightSampler(x - e, z);
-  const hR = field.analyticHeightSampler(x + e, z);
-  const hD = field.analyticHeightSampler(x, z - e);
-  const hU = field.analyticHeightSampler(x, z + e);
-  if (!Number.isFinite(hL) || !Number.isFinite(hR) || !Number.isFinite(hD) || !Number.isFinite(hU)) {
-    return null;
-  }
-  const nx = (hL - hR) / (2 * e);
-  const ny = 1;
-  const nz = (hD - hU) / (2 * e);
-  const len = Math.hypot(nx, ny, nz) || 1;
-  return [nx / len, ny / len, nz / len];
-}
-
-export function populateTerrainSummaryBiomes(
-  field: TerrainSummaryField,
-  worldSource: Pick<WorldSource, "sampleHeight" | "sampleBiome">,
-): TerrainSummaryField {
+export function populateTerrainSummaryBiomes(field: TerrainSummaryField, worldSource: Pick<WorldSource, "sampleHeight" | "sampleBiome">): TerrainSummaryField {
   const biomeId = new Uint8Array(field.res * field.res);
   for (let fz = 0; fz < field.res; fz++) {
     for (let fx = 0; fx < field.res; fx++) {
@@ -106,17 +24,11 @@ export function populateTerrainSummaryBiomes(
   return field;
 }
 
-export function buildTerrainSummary(
-  allNodes: readonly ClodPageNode[],
-  worldSize: number,
-  farReduceFactor: number,
-  options: TerrainSummaryBuildOptions = {},
-): TerrainSummaryField {
+export function buildTerrainSummary(allNodes: readonly ClodPageNode[], worldSize: number, farReduceFactor: number, options: TerrainSummaryBuildOptions = {}): TerrainSummaryField {
   const reduce = Math.max(1, Math.floor(farReduceFactor));
   const pageRes = Math.max(1, Math.floor(worldSize));
   const res = Math.max(1, Math.floor(pageRes / reduce));
   const summaryRes = res;
-
   const heightMin = new Float32Array(summaryRes * summaryRes).fill(Number.POSITIVE_INFINITY);
   const heightMax = new Float32Array(summaryRes * summaryRes).fill(Number.NEGATIVE_INFINITY);
   const normalX = new Float32Array(summaryRes * summaryRes).fill(0);
@@ -130,16 +42,13 @@ export function buildTerrainSummary(
   const analyticBiome = options.worldSource
     ? (x: number, z: number, _height: number) => options.worldSource!.sampleBiome(x, z)
     : defaultBiomeSampler();
-
   const cellSize = worldSize / summaryRes;
-
   for (const node of allNodes) {
     const f = node.footprint;
     const fx0 = Math.floor((f.minX / worldSize) * summaryRes);
     const fz0 = Math.floor((f.minZ / worldSize) * summaryRes);
     const fx1 = Math.ceil((f.maxX / worldSize) * summaryRes);
     const fz1 = Math.ceil((f.maxZ / worldSize) * summaryRes);
-
     for (let fz = Math.max(0, fz0); fz < Math.min(summaryRes, fz1); fz++) {
       for (let fx = Math.max(0, fx0); fx < Math.min(summaryRes, fx1); fx++) {
         const idx = gridIndex(summaryRes, fx, fz);
@@ -149,7 +58,6 @@ export function buildTerrainSummary(
       }
     }
   }
-
   for (let fz = 0; fz < summaryRes; fz++) {
     for (let fx = 0; fx < summaryRes; fx++) {
       const idx = gridIndex(summaryRes, fx, fz);
@@ -162,7 +70,6 @@ export function buildTerrainSummary(
       biomeId[idx] = analyticBiome(wx, wz, heightMax[idx]);
     }
   }
-
   for (let fz = 0; fz < summaryRes; fz++) {
     for (let fx = 0; fx < summaryRes; fx++) {
       const idx = gridIndex(summaryRes, fx, fz);
@@ -179,28 +86,11 @@ export function buildTerrainSummary(
       normalZ[idx] = nz / len;
     }
   }
-
-  return {
-    res: summaryRes,
-    worldSize,
-    farReduceFactor: reduce,
-    heightMin,
-    heightMax,
-    normalX,
-    normalY,
-    normalZ,
-    coverage,
-    biomeId,
-    analyticHeightSampler: analyticHeight,
-    analyticBiomeSampler: (x, z) => analyticBiome(x, z, analyticHeight(x, z)),
-  };
+  return { res: summaryRes, worldSize, farReduceFactor: reduce, heightMin, heightMax, normalX, normalY, normalZ, coverage, biomeId, analyticHeightSampler: analyticHeight, analyticBiomeSampler: (x, z) => analyticBiome(x, z, analyticHeight(x, z)) };
 }
 
-/** Sample height at world position (x, z). Bilinear interpolation. */
 export function sampleHeight(field: TerrainSummaryField, x: number, z: number): number {
-  if (outsideSummaryFootprint(field, x, z) && field.analyticHeightSampler) {
-    return field.analyticHeightSampler(x, z);
-  }
+  if (outsideSummaryFootprint(field, x, z) && field.analyticHeightSampler) return field.analyticHeightSampler(x, z);
   const fx = (x / field.worldSize) * field.res - 0.5;
   const fz = (z / field.worldSize) * field.res - 0.5;
   const ix = Math.floor(fx);
@@ -212,16 +102,11 @@ export function sampleHeight(field: TerrainSummaryField, x: number, z: number): 
     const cz = Math.min(field.res - 1, Math.max(0, lz));
     return field.heightMax[gridIndex(field.res, cx, cz)];
   };
-  return h(ix, iz) * (1 - tx) * (1 - tz)
-    + h(ix + 1, iz) * tx * (1 - tz)
-    + h(ix, iz + 1) * (1 - tx) * tz
-    + h(ix + 1, iz + 1) * tx * tz;
+  return h(ix, iz) * (1 - tx) * (1 - tz) + h(ix + 1, iz) * tx * (1 - tz) + h(ix, iz + 1) * (1 - tx) * tz + h(ix + 1, iz + 1) * tx * tz;
 }
 
 export function sampleHeightBlend(field: TerrainSummaryField, x: number, z: number, bias: number): number {
-  if (outsideSummaryFootprint(field, x, z) && field.analyticHeightSampler) {
-    return field.analyticHeightSampler(x, z);
-  }
+  if (outsideSummaryFootprint(field, x, z) && field.analyticHeightSampler) return field.analyticHeightSampler(x, z);
   const clamped = Math.max(0, Math.min(1, bias));
   const fx = (x / field.worldSize) * field.res - 0.5;
   const fz = (z / field.worldSize) * field.res - 0.5;
@@ -235,13 +120,9 @@ export function sampleHeightBlend(field: TerrainSummaryField, x: number, z: numb
     const idx = gridIndex(field.res, cx, cz);
     return field.heightMin[idx] + (field.heightMax[idx] - field.heightMin[idx]) * clamped;
   };
-  return h(ix, iz) * (1 - tx) * (1 - tz)
-    + h(ix + 1, iz) * tx * (1 - tz)
-    + h(ix, iz + 1) * (1 - tx) * tz
-    + h(ix + 1, iz + 1) * tx * tz;
+  return h(ix, iz) * (1 - tx) * (1 - tz) + h(ix + 1, iz) * tx * (1 - tz) + h(ix, iz + 1) * (1 - tx) * tz + h(ix + 1, iz + 1) * tx * tz;
 }
 
-/** Sample normal at world position (x, z). Bilinear interpolation. */
 export function sampleNormal(field: TerrainSummaryField, x: number, z: number): [number, number, number] {
   if (outsideSummaryFootprint(field, x, z)) {
     const analyticNormal = sampleAnalyticNormal(field, x, z);
@@ -259,14 +140,9 @@ export function sampleNormal(field: TerrainSummaryField, x: number, z: number): 
     const arr = ci === 0 ? field.normalX : ci === 1 ? field.normalY : field.normalZ;
     return arr[gridIndex(field.res, cx, cz)];
   };
-  return [
-    n(ix, iz, 0) * (1 - tx) * (1 - tz) + n(ix + 1, iz, 0) * tx * (1 - tz) + n(ix, iz + 1, 0) * (1 - tx) * tz + n(ix + 1, iz + 1, 0) * tx * tz,
-    n(ix, iz, 1) * (1 - tx) * (1 - tz) + n(ix + 1, iz, 1) * tx * (1 - tz) + n(ix, iz + 1, 1) * (1 - tx) * tz + n(ix + 1, iz + 1, 1) * tx * tz,
-    n(ix, iz, 2) * (1 - tx) * (1 - tz) + n(ix + 1, iz, 2) * tx * (1 - tz) + n(ix, iz + 1, 2) * (1 - tx) * tz + n(ix + 1, iz + 1, 2) * tx * tz,
-  ];
+  return [n(ix, iz, 0) * (1 - tx) * (1 - tz) + n(ix + 1, iz, 0) * tx * (1 - tz) + n(ix, iz + 1, 0) * (1 - tx) * tz + n(ix + 1, iz + 1, 0) * tx * tz, n(ix, iz, 1) * (1 - tx) * (1 - tz) + n(ix + 1, iz, 1) * tx * (1 - tz) + n(ix, iz + 1, 1) * (1 - tx) * tz + n(ix + 1, iz + 1, 1) * tx * tz, n(ix, iz, 2) * (1 - tx) * (1 - tz) + n(ix + 1, iz, 2) * tx * (1 - tz) + n(ix, iz + 1, 2) * (1 - tx) * tz + n(ix + 1, iz + 1, 2) * tx * tz];
 }
 
-/** Sample coverage at world position (x, z). Bilinear interpolation. 0 = no pages, 1 = fully covered. */
 export function sampleCoverage(field: TerrainSummaryField, x: number, z: number): number {
   if (outsideSummaryFootprint(field, x, z)) return 0;
   const fx = (x / field.worldSize) * field.res - 0.5;
@@ -275,22 +151,13 @@ export function sampleCoverage(field: TerrainSummaryField, x: number, z: number)
   const iz = Math.floor(fz);
   const tx = fx - ix;
   const tz = fz - iz;
-  const c = (lx: number, lz: number) => {
-    const cx = Math.min(field.res - 1, Math.max(0, lx));
-    const cz = Math.min(field.res - 1, Math.max(0, lz));
-    return field.coverage[gridIndex(field.res, cx, cz)];
-  };
-  return c(ix, iz) * (1 - tx) * (1 - tz)
-    + c(ix + 1, iz) * tx * (1 - tz)
-    + c(ix, iz + 1) * (1 - tx) * tz
-    + c(ix + 1, iz + 1) * tx * tz;
+  const c = (lx: number, lz: number) => { const cx = Math.min(field.res - 1, Math.max(0, lx)); const cz = Math.min(field.res - 1, Math.max(0, lz)); return field.coverage[gridIndex(field.res, cx, cz)]; };
+  return c(ix, iz) * (1 - tx) * (1 - tz) + c(ix + 1, iz) * tx * (1 - tz) + c(ix, iz + 1) * (1 - tx) * tz + c(ix + 1, iz + 1) * tx * tz;
 }
 
 export function sampleBiomeId(field: TerrainSummaryField, x: number, z: number): number {
   if (!field.biomeId) return field.analyticBiomeSampler?.(x, z) ?? 0;
-  if (outsideSummaryFootprint(field, x, z) && field.analyticBiomeSampler) {
-    return field.analyticBiomeSampler(x, z);
-  }
+  if (outsideSummaryFootprint(field, x, z) && field.analyticBiomeSampler) return field.analyticBiomeSampler(x, z);
   const fx = (x / field.worldSize) * field.res - 0.5;
   const fz = (z / field.worldSize) * field.res - 0.5;
   const ix = Math.min(field.res - 1, Math.max(0, Math.round(fx)));
@@ -301,28 +168,10 @@ export function sampleBiomeId(field: TerrainSummaryField, x: number, z: number):
 export function createHeightTexture(field: TerrainSummaryField): THREE.DataTexture {
   const { res, heightMax } = field;
   const data = new Float32Array(res * res);
-  for (let i = 0; i < res * res; i++) {
-    data[i] = heightMax[i];
-  }
-  const tex = new THREE.DataTexture(data, res, res, THREE.RedFormat, THREE.FloatType);
-  tex.needsUpdate = true;
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
-  return tex;
+  for (let i = 0; i < res * res; i++) data[i] = heightMax[i];
+  return createDataTexture(data, res, res);
 }
 
-const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
-
-function canopyBiomeGate(biomeId: number): number {
-  if (biomeId === BIOME_IDS.forest) return 1;
-  if (biomeId === BIOME_IDS.swamp) return 0.65;
-  if (biomeId === BIOME_IDS.meadows) return 0.2;
-  return 0;
-}
-
-/** Lowest finite cell height in the summary — the recede target for the far skirt. */
 export function summaryBaseLevel(field: TerrainSummaryField): number {
   let base = Number.POSITIVE_INFINITY;
   for (let i = 0; i < field.heightMin.length; i++) {
@@ -332,14 +181,7 @@ export function summaryBaseLevel(field: TerrainSummaryField): number {
   return Number.isFinite(base) ? base : 0;
 }
 
-export function sampleSkirtHeight(
-  field: TerrainSummaryField,
-  x: number,
-  z: number,
-  farRadius: number,
-  baseLevel: number,
-  bias: number,
-): number {
+export function sampleSkirtHeight(field: TerrainSummaryField, x: number, z: number, farRadius: number, baseLevel: number, bias: number): number {
   const worldSize = field.worldSize;
   const baked = sampleHeightBlend(field, x, z, bias);
   const analytic = field.analyticHeightSampler?.(x, z) ?? surfaceHeightCore(x, z);
@@ -351,12 +193,6 @@ export function sampleSkirtHeight(
   const farFactor = clamp01(outside / (farRadius * 0.9));
   h += (baseLevel - h) * farFactor * 0.6;
   return h;
-}
-
-/** Skirt grid resolution covering [center-farRadius, center+farRadius], scaled from the summary. */
-function extendedRes(field: TerrainSummaryField, farRadius: number): number {
-  const extent = 2 * farRadius;
-  return Math.max(field.res, Math.min(512, Math.round(field.res * (extent / field.worldSize))));
 }
 
 export function createExtendedHeightTexture(field: TerrainSummaryField, farRadius: number): THREE.DataTexture {
@@ -374,13 +210,7 @@ export function createExtendedHeightTexture(field: TerrainSummaryField, farRadiu
       data[j * res + i] = sampleSkirtHeight(field, wx, wz, farRadius, baseLevel, 1);
     }
   }
-  const tex = new THREE.DataTexture(data, res, res, THREE.RedFormat, THREE.FloatType);
-  tex.needsUpdate = true;
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearFilter;
-  tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
-  return tex;
+  return createDataTexture(data, res, res, true);
 }
 
 export function createExtendedCanopyTexture(field: TerrainSummaryField, farRadius: number, seed = 42): THREE.DataTexture {
@@ -389,29 +219,6 @@ export function createExtendedCanopyTexture(field: TerrainSummaryField, farRadiu
   const extent = 2 * farRadius;
   const origin = center - farRadius;
   const res = extendedRes(field, farRadius);
-
-  const hash = (x: number, y: number, s: number): number => {
-    const n = Math.sin(x * 127.1 + y * 311.7 + s * 113.5) * 43758.5453;
-    return n - Math.floor(n);
-  };
-  const fbm = (x: number, y: number): number => {
-    let v = 0;
-    let amp = 0.5;
-    let fx = x;
-    let fy = y;
-    for (let i = 0; i < 2; i++) {
-      v += amp * (Math.sin(fx) + Math.sin(fy * 1.3)) * 0.5;
-      fx *= 2;
-      fy *= 2;
-      amp *= 0.5;
-    }
-    return v;
-  };
-  const smooth01 = (edge0: number, edge1: number, t: number): number => {
-    const v = clamp01((t - edge0) / (edge1 - edge0));
-    return v * v * (3 - 2 * v);
-  };
-
   const data = new Float32Array(res * res);
   for (let j = 0; j < res; j++) {
     for (let i = 0; i < res; i++) {
@@ -431,10 +238,14 @@ export function createExtendedCanopyTexture(field: TerrainSummaryField, farRadiu
       data[j * res + i] = clamp01(c);
     }
   }
-  const tex = new THREE.DataTexture(data, res, res, THREE.RedFormat, THREE.FloatType);
+  return createDataTexture(data, res, res, true);
+}
+
+function createDataTexture(data: Float32Array, width: number, height: number, linear = false): THREE.DataTexture {
+  const tex = new THREE.DataTexture(data, width, height, THREE.RedFormat, THREE.FloatType);
   tex.needsUpdate = true;
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
+  tex.minFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
   tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;
   return tex;

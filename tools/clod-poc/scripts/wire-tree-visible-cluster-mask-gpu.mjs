@@ -92,9 +92,9 @@ const edits = [
   {
     name: "wgsl visible-only cluster gate",
     path: modulesPath,
-    done: "if (terrain_hidden || !tree_slot_visible_cluster_visible(slot)) { return; }",
+    done: "if (!tree_slot_visible_cluster_visible(slot)) { return; }",
     needle: "  if (terrain_hidden) { return; }",
-    replacement: "  if (terrain_hidden || !tree_slot_visible_cluster_visible(slot)) { return; }",
+    replacement: "  if (terrain_hidden) { return; }\n  if (!tree_slot_visible_cluster_visible(slot)) { return; }",
   },
   {
     name: "runtime import cluster mask",
@@ -129,7 +129,7 @@ const edits = [
     path: testPath,
     done: "const visibleReject = source.indexOf",
     needle: "    const hiddenReturn = source.indexOf(\"if (terrain_hidden) { return; }\");",
-    replacement: "    const visibleReject = source.indexOf(\"if (terrain_hidden || !tree_slot_visible_cluster_visible(slot)) { return; }\") >= 0\n      ? source.indexOf(\"if (terrain_hidden || !tree_slot_visible_cluster_visible(slot)) { return; }\")\n      : source.indexOf(\"if (terrain_hidden) { return; }\");",
+    replacement: "    const terrainReject = source.indexOf(\"if (terrain_hidden) { return; }\");\n    const visibleReject = source.indexOf(\"if (!tree_slot_visible_cluster_visible(slot)) { return; }\");",
   },
   {
     name: "wgsl test visible reject expectation name",
@@ -141,16 +141,16 @@ const edits = [
   {
     name: "wgsl test visible reject after species",
     path: testPath,
-    done: "expect(visibleReject).toBeGreaterThan(speciesSelection);",
+    done: "expect(terrainReject).toBeGreaterThan(speciesSelection);",
     needle: "    expect(hiddenReturn).toBeGreaterThan(speciesSelection);",
-    replacement: "    expect(visibleReject).toBeGreaterThan(speciesSelection);",
+    replacement: "    expect(terrainReject).toBeGreaterThan(speciesSelection);",
   },
   {
     name: "wgsl test visible reject after scale",
     path: testPath,
-    done: "expect(visibleReject).toBeGreaterThan(scaleSelection);",
+    done: "expect(terrainReject).toBeGreaterThan(scaleSelection);",
     needle: "    expect(hiddenReturn).toBeGreaterThan(scaleSelection);",
-    replacement: "    expect(visibleReject).toBeGreaterThan(scaleSelection);",
+    replacement: "    expect(terrainReject).toBeGreaterThan(scaleSelection);",
   },
   {
     name: "wgsl test visible reject after shadow",
@@ -178,19 +178,24 @@ function applyEdit(edit) {
 
 function validateVisibleOnlySemantics() {
   const source = readFileSync(modulesPath, "utf8");
+  const terrainReject = source.indexOf("if (terrain_hidden) { return; }");
   const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
-  const visibleReject = source.indexOf("if (terrain_hidden || !tree_slot_visible_cluster_visible(slot)) { return; }") >= 0
-    ? source.indexOf("if (terrain_hidden || !tree_slot_visible_cluster_visible(slot)) { return; }")
-    : source.indexOf("if (terrain_hidden) { return; }");
+  const visibleReject = source.indexOf("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
   const visibleAppend = source.indexOf("append_lod_if_active(species, TREE_LOD_NEAR");
-  const unsafeFullSlotSkip = source.includes("if (!tree_slot_cluster_visible(slot)) { return; }") ||
-    source.includes("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
+  const oldCombinedReject = source.indexOf("if (terrain_hidden || !tree_slot_visible_cluster_visible(slot)) { return; }");
 
   const errors = [];
-  if (unsafeFullSlotSkip) errors.push("cluster visibility appears to skip the whole slot before shadow generation");
+  if (oldCombinedReject >= 0) errors.push("terrain visibility and visible-cluster visibility must stay as separate gates");
+  if (terrainReject < 0) errors.push("terrain reject anchor missing");
   if (shadowAppend < 0) errors.push("shadow append anchor missing");
   if (visibleReject < 0) errors.push("visible reject anchor missing");
   if (visibleAppend < 0) errors.push("visible append anchor missing");
+  if (terrainReject >= 0 && shadowAppend >= 0 && terrainReject <= shadowAppend) {
+    errors.push("terrain reject must stay after shadow append");
+  }
+  if (terrainReject >= 0 && visibleAppend >= 0 && terrainReject >= visibleAppend) {
+    errors.push("terrain reject must stay before visible append");
+  }
   if (shadowAppend >= 0 && visibleReject >= 0 && visibleReject <= shadowAppend) {
     errors.push("visible reject must stay after shadow append");
   }

@@ -1,0 +1,4 @@
+import { DEFAULT_GRASS_SETTINGS } from "../grass.js";
+
+export const GRASS_V2_NEAR_DISTANCE_FRACTION = DEFAULT_GRASS_SETTINGS.lod.nearFraction;
+export const GRASS_V2_MID_DISTANCE_FRACTION = DEFAULT_GRASS_SETTINGS.lod.midFraction;

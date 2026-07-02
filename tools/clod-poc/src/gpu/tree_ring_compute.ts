@@ -29,7 +29,7 @@ const READBACK_INTERVAL_FRAMES = 90;
 const SHADOW_MAX_LOD_NONE = -1;
 
 export const TREE_GPU_RING_CELL = 3.4;
-export const TREE_GPU_RING_STORAGE_BINDINGS = 7;
+export const TREE_GPU_RING_STORAGE_BINDINGS = 8;
 
 export type TreeGpuRingCounts = Record<TreeLod, number>;
 export type TreeGpuRingIndexCounts = Record<TreeSpeciesId, Record<TreeLod, number>>;
@@ -84,6 +84,10 @@ export interface TreeGpuRingDispatchParams {
   indexCounts: TreeGpuRingIndexCounts;
   frustumPlanes?: ArrayLike<number>;
   shadowCascadePlanes?: ArrayLike<number>;
+  /** Camera-visibility mask for visible-list generation only. Never gate shadow casters with this. */
+  visibleClusterMaskWords?: Uint32Array;
+  visibleClusterDimCells?: number;
+  visibleClusterGrid?: number;
 }
 
 interface ReadbackSlot {
@@ -259,6 +263,8 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   f32[TREE_GPU_RING_LAYOUT.terrainVisibilityOffset + 2] = settings.gpu.terrainVisibility.heightMarginM;
   f32[TREE_GPU_RING_LAYOUT.terrainVisibilityOffset + 3] = settings.gpu.terrainVisibility.crownHeightM;
   u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset] = Math.max(1, Math.min(16, Math.floor(settings.gpu.terrainVisibility.sampleCount))) >>> 0;
+  u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 2] = Math.max(1, Math.floor(params.visibleClusterDimCells ?? 0)) >>> 0;
+  u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 3] = Math.max(0, Math.floor(params.visibleClusterGrid ?? 0)) >>> 0;
   TREE_SPECIES.forEach((species, index) => {
     f32[TREE_GPU_RING_LAYOUT.speciesWeightsOffset + index] = speciesWeight(settings, species);
   });
@@ -297,6 +303,8 @@ export class TreeGpuRingCompute {
   private readonly paramBuffer: GPUBuffer;
   private readonly counterBuffer: GPUBuffer;
   private readonly shadowCounterBuffer: GPUBuffer;
+  private readonly visibleClusterMaskBuffer: GPUBuffer;
+  private readonly visibleClusterMaskWordCapacity: number;
   private readonly fallbackShadowCellBuffer: GPUBuffer | null;
   private readonly fallbackShadowIndirectBuffer: GPUBuffer | null;
   private readonly shadowOutputsReady: boolean;
@@ -332,6 +340,8 @@ export class TreeGpuRingCompute {
   ) {
     this.pipelines = pipelines;
     this.shadowOutputsReady = !!outputBuffers.shadowCell && !!outputBuffers.shadowIndirectArgs;
+    this.visibleClusterMaskWordCapacity = treeGpuRingSlotCount(settings);
+    this.visibleClusterMaskBuffer = device.createBuffer({ label: "tree ring visible cluster mask", size: Math.max(1, this.visibleClusterMaskWordCapacity) * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.paramBuffer = device.createBuffer({ label: "tree ring params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.counterBuffer = device.createBuffer({ label: "tree ring counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     this.shadowCounterBuffer = device.createBuffer({ label: "tree ring shadow counters", size: SHADOW_COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
@@ -367,6 +377,7 @@ export class TreeGpuRingCompute {
         { binding: 8, resource: { buffer: this.fieldParams } },
         { binding: 9, resource: this.hydroTexture.createView() },
         { binding: 10, resource: hydroSampler },
+        { binding: 11, resource: { buffer: this.visibleClusterMaskBuffer } },
       ],
     });
   }
@@ -382,6 +393,7 @@ export class TreeGpuRingCompute {
         { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
         { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
         { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+        storage(11, "read-only-storage"),
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -402,7 +414,20 @@ export class TreeGpuRingCompute {
       shadowCascadePlanes: undefined,
     };
     packTreeGpuRingParams(this.settings, effectiveParams, this.paramScratch);
-    new Uint32Array(this.paramScratch)[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 1] = readbackSlot ? 1 : 0;
+    const u32 = new Uint32Array(this.paramScratch);
+    u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 1] = readbackSlot ? 1 : 0;
+    if (effectiveParams.visibleClusterMaskWords && effectiveParams.visibleClusterMaskWords.length > 0) {
+      const wordCount = Math.min(effectiveParams.visibleClusterMaskWords.length, this.visibleClusterMaskWordCapacity);
+      this.device.queue.writeBuffer(
+        this.visibleClusterMaskBuffer,
+        0,
+        effectiveParams.visibleClusterMaskWords.buffer,
+        effectiveParams.visibleClusterMaskWords.byteOffset,
+        wordCount * Uint32Array.BYTES_PER_ELEMENT,
+      );
+    } else {
+      u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 3] = 0;
+    }
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
     const encoder = this.device.createCommandEncoder({ label: "tree ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, treeGpuRingCounterWorkgroups(this.settings));
@@ -482,6 +507,7 @@ export class TreeGpuRingCompute {
     this.paramBuffer.destroy();
     this.counterBuffer.destroy();
     this.shadowCounterBuffer.destroy();
+    this.visibleClusterMaskBuffer.destroy();
     this.fallbackShadowCellBuffer?.destroy();
     this.fallbackShadowIndirectBuffer?.destroy();
     this.digEdits.destroy();

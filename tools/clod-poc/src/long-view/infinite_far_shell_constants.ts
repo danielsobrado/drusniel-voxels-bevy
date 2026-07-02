@@ -1,0 +1,3 @@
+export const FAR_SHELL_RENDER_ORDER = -20;
+export const FAR_SHELL_WATER_RENDER_ORDER = -19;
+export const FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M = -1.0;

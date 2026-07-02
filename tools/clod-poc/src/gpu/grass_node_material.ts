@@ -1,7 +1,6 @@
-// Phase 3 WebGPU grass (docs/webgpu-migration.md). TSL port of src/grass.ts:
-// classic blades plus terrain-patch-v2 distance/edge/slope fades and alpha-to-coverage.
-// Blades are placed by the reused generateGrassInstances(); this only re-authors the
-// material + instanced geometry assembly for WebGPURenderer.
+export * from "./grass_node_material_types.js";
+export * from "./grass_node_material_defaults.js";
+export * from "./grass_node_material_geometry.js";
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
@@ -29,69 +28,43 @@ import {
   vec2,
   vec3,
 } from "three/tsl";
-import type { EnvironmentLighting } from "../environment/environment.js";
 import { sampleCarvedBedBilinearTsl, sampleHydrologyBilinearTsl } from "./placement_height.js";
-import {
-  createBladeGeometry,
-  createGrassClumpGeometry,
-  createGrassTuftGeometry,
-  DEFAULT_GRASS_SETTINGS,
-  grassRowsForSegments,
-  type GrassBladeInstance,
-  type GrassLighting,
-  type GrassRingInstanceBuffers,
-  type GrassSettings,
-  type GrassTier,
-} from "../grass.js";
+import { DEFAULT_GRASS_SETTINGS } from "../grass.js";
+import type { GrassNodeParams, GrassNodeMaterialHandle } from "./grass_node_material_types.js";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
 
-export const GRASS_V2_NEAR_DISTANCE_FRACTION = DEFAULT_GRASS_SETTINGS.lod.nearFraction;
-export const GRASS_V2_MID_DISTANCE_FRACTION = DEFAULT_GRASS_SETTINGS.lod.midFraction;
-
-export interface GrassNodeParams {
-  lighting: EnvironmentLighting;
-  bladeWidth: number;
-  windStrength: number;
-  windSpeed: number;
-  gustStrength?: number;
-  mode?: GrassSettings["shaderMode"];
-  alphaToCoverage?: boolean;
-  distance?: number;
-  ring?: GrassSettings["ring"];
-  lod?: GrassSettings["lod"];
-  fadeCenter?: THREE.Vector2;
-  debugAttributes?: boolean;
-  /** When set (webgpu-ring-v1), instances are read from these storage buffers, not attributes. */
-  ringInstanceBuffers?: GrassRingInstanceBuffers;
-  /**
-   * Hydrology water-surface texture (R = water Y; dry cells carry a below-ground
-   * sentinel). When set, blades whose ground sits under the water surface are
-   * discarded so grass stops floating over hydrology lakes/rivers. (Stage 1 — does
-   * not move blades; the terrain carve itself is a later stage.)
-   */
-  hydrologyWaterTexture?: THREE.Texture | null;
-  /** World size (worldCells) used to map instance XZ → hydrology texture UV. */
-  worldSize?: number;
-  /** Hydrology grid resolution for bilinear carved-bed sampling. */
-  hydrologyRes?: number;
-  /** Metres of blade base allowed below the water surface before discard. */
-  waterClearance?: number;
-  /** Explicit tier base offset into the shared storage buffer (tier * maxPerTier). When set, the material reads instanceIndex + tierBaseOffset instead of relying on indirect firstInstance. */
-  tierBaseOffset?: number;
+function nrmComponent(axis: "x" | "y" | "z"): TslNode {
+  const nrm: TslNode = normalGeometry;
+  return nrm[axis];
 }
 
-export interface GrassNodeMaterialHandle {
-  material: MeshBasicNodeMaterial;
-  /** Advance wind animation (seconds). */
-  setTime(t: number): void;
-  /** Update the XZ point used by terrain-patch-v2 distance fading. */
-  setFadeCenter(x: number, z: number): void;
-  updateSettings(settings: Pick<GrassSettings, "bladeWidth" | "windStrength" | "windSpeed" | "distance" | "alphaToCoverage" | "ring" | "lod">): void;
-  updateLighting(lighting: EnvironmentLighting | GrassLighting): void;
+function interleavedGradientNoise(p: TslNode): TslNode {
+  return fract(fract(p.x.mul(0.06711056).add(p.y.mul(0.00583715))).mul(52.9829189));
+}
+
+function grassRingBandMask(
+  tier: TslNode,
+  dist: TslNode,
+  nearDistance: TslNode,
+  midDistance: TslNode,
+  farDistance: TslNode,
+  bandDistance: TslNode,
+): TslNode {
+  const ign = interleavedGradientNoise(screenCoordinate);
+  const fadeIn = (distance: TslNode): TslNode => smoothstep(distance.sub(bandDistance), distance.add(bandDistance), dist);
+  const fadeOut = (distance: TslNode): TslNode => float(1).sub(smoothstep(distance.sub(bandDistance), distance.add(bandDistance), dist));
+  const passIn = (fade: TslNode): TslNode => ign.greaterThanEqual(float(1).sub(fade));
+  const passOut = (fade: TslNode): TslNode => ign.lessThan(fade);
+  const nearPass = tier.lessThan(0.5).and(passOut(fadeOut(nearDistance)));
+  const midPass = tier.greaterThanEqual(0.5).and(tier.lessThan(1.5))
+    .and(passIn(fadeIn(nearDistance))).and(passOut(fadeOut(midDistance)));
+  const farPass = tier.greaterThanEqual(1.5).and(tier.lessThan(2.5))
+    .and(passIn(fadeIn(midDistance))).and(passOut(fadeOut(farDistance)));
+  const superPass = tier.greaterThanEqual(2.5).and(passIn(fadeIn(farDistance)));
+  return nearPass.or(midPass).or(farPass).or(superPass);
 }
 
 export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMaterialHandle {
@@ -116,12 +89,6 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   let useAlphaToCoverage = isPatchV2 && params.alphaToCoverage === true;
   const debugAttributes = isPatchV2 && params.debugAttributes === true;
 
-  // Per-instance data. CPU-patch path: InstancedBufferAttribute read via attribute(). GPU-ring
-  // path: storage buffers read via storage().element(instanceIndex) — instanceIndex carries the
-  // per-tier firstInstance from the indirect args, so one material serves all four tiers. Read-only
-  // because a vertex stage may not bind read_write storage. Layout matches grass_ring.compute.wgsl:
-  //   offset = (x, y, z, 1) ; packed0 = (height, rotY, phase, colorMix) ;
-  //   packed1 = (edgeFade, normalY, widthScale, tier) ; terrainNormal = (nx, ny, nz, 0).
   const ring = params.ringInstanceBuffers;
   const uTierBaseOffset = uniform(params.tierBaseOffset ?? 0) as TslNode;
   let aOffset4: TslNode;
@@ -129,11 +96,6 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   let aPacked1: TslNode;
   let aTerrainNormal4: TslNode;
   if (ring) {
-    // toReadOnly() on the storage node (a vertex stage may not bind read_write storage), then index.
-    // instanceIndex includes the per-tier firstInstance from indirect draw args, so one material
-    // serves all four tiers. The optional tierBaseOffset uniform (set when per-tier materials are
-    // used) adds an explicit offset for safety; when omitted it defaults to 0 and the indirect
-    // firstInstance provides the tier separation.
     const offsetStore: TslNode = storage(ring.offset, "vec4", ring.capacity).toReadOnly();
     const packed0Store: TslNode = storage(ring.packed0, "vec4", ring.capacity).toReadOnly();
     const packed1Store: TslNode = storage(ring.packed1, "vec4", ring.capacity).toReadOnly();
@@ -150,9 +112,6 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     aTerrainNormal4 = attribute("aTerrainNormal", "vec4");
   }
   const aOffset: TslNode = aOffset4.xyz;
-  // Hydrology field (R = waterY, G = wetMask, B = carved-bed Y). Snap the blade's
-  // ground onto the carved bed (the height the mesh is built at) so grass stops
-  // floating over carved terrain; reuse the sample for the under-water discard.
   let groundY: TslNode = aOffset.y;
   let hydroWaterY: TslNode | null = null;
   if (params.hydrologyWaterTexture) {
@@ -222,7 +181,6 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
 
   const c: TslNode = cos(aRotY);
   const s: TslNode = sin(aRotY);
-  // Y-rotation of the wind-displaced local position, then world-place at aOffset.
   const rotX: TslNode = c.mul(localX).add(s.mul(localZ));
   const rotZ: TslNode = s.mul(localX).negate().add(c.mul(localZ));
   const worldPos: TslNode = vec3(aOffset.x, groundY, aOffset.z).add(vec3(rotX, localY, rotZ));
@@ -238,7 +196,6 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     ? normalize(mix(bladeNormal, normalize(aTerrainNormal), terrainNormalPull))
     : bladeNormal;
 
-  // Flip the normal on back faces (double-sided blades).
   const n: TslNode = frontFacing.select(worldNormal, worldNormal.negate());
   const lightDir: TslNode = uLight;
   const sun: TslNode = max(dot(n, lightDir), 0.0);
@@ -259,8 +216,6 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     litColor = ambientFloor.add(grassColor.mul(hemi.add(direct))).add(transmission.mul(grassColor));
   }
 
-  // Discard blades whose (carved-bed) ground is under the hydrology water surface,
-  // keeping land grass (dry cells store a below-ground sentinel water Y).
   let aboveWater: TslNode | null = null;
   if (hydroWaterY) {
     const uWaterClearance = uniform(params.waterClearance ?? 0.5);
@@ -268,7 +223,7 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   }
 
   const material = new MeshBasicNodeMaterial();
-  material.positionNode = worldPos; // identity model transform -> local == world
+  material.positionNode = worldPos;
   material.colorNode = litColor;
   if (params.mode === "webgpu-ring-v1") {
     const dist: TslNode = vec2(aOffset.x, aOffset.z).sub(uFadeCenter).length();
@@ -285,12 +240,8 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
 
   return {
     material,
-    setTime(t) {
-      uTime.value = t;
-    },
-    setFadeCenter(x, z) {
-      uFadeCenter.value.set(x, z);
-    },
+    setTime(t: number) { uTime.value = t; },
+    setFadeCenter(x: number, z: number) { uFadeCenter.value.set(x, z); },
     updateSettings(settings) {
       uBladeWidth.value = settings.bladeWidth;
       uWindStrength.value = settings.windStrength;
@@ -312,144 +263,4 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
       uGround.value.copy(v3(lighting.groundLight));
     },
   };
-}
-
-function nrmComponent(axis: "x" | "y" | "z"): TslNode {
-  const nrm: TslNode = normalGeometry;
-  return nrm[axis];
-}
-
-function interleavedGradientNoise(p: TslNode): TslNode {
-  return fract(fract(p.x.mul(0.06711056).add(p.y.mul(0.00583715))).mul(52.9829189));
-}
-
-function grassRingBandMask(
-  tier: TslNode,
-  dist: TslNode,
-  nearDistance: TslNode,
-  midDistance: TslNode,
-  farDistance: TslNode,
-  bandDistance: TslNode,
-): TslNode {
-  const ign = interleavedGradientNoise(screenCoordinate);
-  const fadeIn = (distance: TslNode): TslNode => smoothstep(distance.sub(bandDistance), distance.add(bandDistance), dist);
-  const fadeOut = (distance: TslNode): TslNode => float(1).sub(smoothstep(distance.sub(bandDistance), distance.add(bandDistance), dist));
-  const passIn = (fade: TslNode): TslNode => ign.greaterThanEqual(float(1).sub(fade));
-  const passOut = (fade: TslNode): TslNode => ign.lessThan(fade);
-  const nearPass = tier.lessThan(0.5).and(passOut(fadeOut(nearDistance)));
-  const midPass = tier.greaterThanEqual(0.5).and(tier.lessThan(1.5))
-    .and(passIn(fadeIn(nearDistance))).and(passOut(fadeOut(midDistance)));
-  const farPass = tier.greaterThanEqual(1.5).and(tier.lessThan(2.5))
-    .and(passIn(fadeIn(midDistance))).and(passOut(fadeOut(farDistance)));
-  const superPass = tier.greaterThanEqual(2.5).and(passIn(fadeIn(farDistance)));
-  return nearPass.or(midPass).or(farPass).or(superPass);
-}
-
-export interface GrassInstancedGeometryOptions {
-  mode?: GrassSettings["shaderMode"];
-  tier?: GrassTier;
-  crossed?: boolean;
-  edgeShape?: boolean;
-  settings?: GrassSettings;
-}
-
-// Build an InstancedBufferGeometry: the shared classic blade geometry plus one set of
-// per-instance attributes from the placed blades.
-export function buildGrassInstancedGeometry(
-  instances: readonly GrassBladeInstance[],
-  options: GrassInstancedGeometryOptions = {},
-): THREE.InstancedBufferGeometry {
-  const mode = options.mode ?? "classic";
-  const terrainPatchMode = mode === "terrain-patch-v2" || mode === "webgpu-ring-v1";
-  const settings = options.settings ?? DEFAULT_GRASS_SETTINGS;
-  const nearRows = grassRowsForSegments(settings.blade.nearSegments);
-  const midRows = grassRowsForSegments(settings.blade.midSegments, 0);
-  const rows = terrainPatchMode && options.tier === "mid" ? midRows : terrainPatchMode ? nearRows : undefined;
-  let base: THREE.BufferGeometry;
-  if (mode === "webgpu-ring-v1" && options.tier === "near") {
-    base = createGrassClumpGeometry(settings.blade.nearBladesPerInstance, settings.blade.nearSegments, settings);
-  } else if (mode === "webgpu-ring-v1" && options.tier === "mid") {
-    base = createGrassClumpGeometry(settings.blade.midBladesPerInstance, settings.blade.midSegments, settings);
-  } else if (terrainPatchMode && options.tier === "far") {
-    base = createGrassTuftGeometry(settings);
-  } else if (terrainPatchMode && options.tier === "super") {
-    base = createGrassTuftGeometry(settings.blade.farTuftWidthM * 1.45 / Math.max(settings.blade.widthM, 0.001));
-  } else {
-    base = rows ? createBladeGeometry(rows, options.crossed === true && options.tier !== "mid") : createBladeGeometry();
-  }
-  const geo = new THREE.InstancedBufferGeometry();
-  geo.index = base.index;
-  geo.setAttribute("position", base.getAttribute("position"));
-  geo.setAttribute("uv", base.getAttribute("uv"));
-  geo.setAttribute("normal", base.getAttribute("normal"));
-
-  const count = instances.length;
-  const offset = new Float32Array(count * 4);
-  const packed0 = new Float32Array(count * 4);
-  const packed1 = new Float32Array(count * 4);
-  const terrainNormal = new Float32Array(count * 4);
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let minZ = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  let maxZ = Number.NEGATIVE_INFINITY;
-  instances.forEach((b, i) => {
-    offset[i * 4] = b.offset[0];
-    offset[i * 4 + 1] = b.offset[1];
-    offset[i * 4 + 2] = b.offset[2];
-    offset[i * 4 + 3] = 1;
-    const edgeMultiplier = options.edgeShape === true && terrainPatchMode
-      ? THREE.MathUtils.lerp(0.35, 1.0, THREE.MathUtils.clamp(b.edgeFade, 0, 1))
-      : 1;
-    const height = b.height * edgeMultiplier;
-    packed0[i * 4] = height;
-    packed0[i * 4 + 1] = b.rotationY;
-    packed0[i * 4 + 2] = b.phase;
-    packed0[i * 4 + 3] = b.colorMix;
-    packed1[i * 4] = b.edgeFade;
-    packed1[i * 4 + 1] = b.normalY;
-    packed1[i * 4 + 2] = b.widthScale ?? 1;
-    packed1[i * 4 + 3] = tierIndex(options.tier);
-    const normal = b.terrainNormal;
-    terrainNormal[i * 4] = normal[0];
-    terrainNormal[i * 4 + 1] = normal[1];
-    terrainNormal[i * 4 + 2] = normal[2];
-    terrainNormal[i * 4 + 3] = 0;
-    minX = Math.min(minX, b.offset[0]);
-    minY = Math.min(minY, b.offset[1]);
-    minZ = Math.min(minZ, b.offset[2]);
-    maxX = Math.max(maxX, b.offset[0]);
-    maxY = Math.max(maxY, b.offset[1] + height);
-    maxZ = Math.max(maxZ, b.offset[2]);
-  });
-  geo.setAttribute("aOffset", new THREE.InstancedBufferAttribute(offset, 4));
-  geo.setAttribute("aPacked0", new THREE.InstancedBufferAttribute(packed0, 4));
-  geo.setAttribute("aPacked1", new THREE.InstancedBufferAttribute(packed1, 4));
-  geo.setAttribute("aTerrainNormal", new THREE.InstancedBufferAttribute(terrainNormal, 4));
-  geo.instanceCount = count;
-  const margin = 4;
-  geo.boundingBox = new THREE.Box3(
-    new THREE.Vector3(minX - margin, minY - margin, minZ - margin),
-    new THREE.Vector3(maxX + margin, maxY + margin, maxZ + margin),
-  );
-  geo.boundingSphere = geo.boundingBox.getBoundingSphere(new THREE.Sphere());
-  base.dispose();
-  return geo;
-}
-
-function tierIndex(tier: GrassTier | undefined): number {
-  if (tier === "mid") return 1;
-  if (tier === "far") return 2;
-  if (tier === "super") return 3;
-  return 0;
-}
-
-export function grassMidInstances(instances: readonly GrassBladeInstance[]): GrassBladeInstance[] {
-  const midCount = Math.max(1, Math.floor(instances.length * DEFAULT_GRASS_SETTINGS.lod.midInstanceFraction));
-  return instances.slice(0, midCount).map((instance) => ({
-    ...instance,
-    height: instance.height * 1.55,
-    edgeFade: Math.min(1, instance.edgeFade * 1.15),
-  }));
 }
