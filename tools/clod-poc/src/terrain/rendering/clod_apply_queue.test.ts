@@ -147,6 +147,28 @@ describe("ClodApplyQueue", () => {
     expect(stats.clodApplyQueueDepth).toBe(0);
   });
 
+  it("does not enqueue a collider for unapplied LOD0 geometry", () => {
+    const colliderApplied: string[] = [];
+    const queue = new ClodApplyQueue({
+      budget: budget({ maxGeometryJobsPerFrame: 1, maxColliderJobsPerFrame: 1, maxApplyMsPerFrame: 100 }),
+      applyGeometry: () => ({ applied: false, geometryMs: 0, materialMs: 0, triangles: 2, reusedGeometry: false }),
+      applyCollider: (n) => {
+        colliderApplied.push(n.id);
+        return 0;
+      },
+      getFrameId: () => 1,
+      getCameraPosition: () => ({ x: 0, z: 0 }),
+      isNodeVisible: () => false,
+    });
+
+    queue.enqueueNodes([node("L0:0,0")]);
+    const stats = queue.drain();
+
+    expect(colliderApplied).toEqual([]);
+    expect(stats.clodApplyNodes).toBe(0);
+    expect(stats.clodColliderQueueDepth).toBe(0);
+  });
+
   it("reports apply failures without breaking later jobs", () => {
     const failures: string[] = [];
     const geometryApplied: string[] = [];
