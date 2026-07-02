@@ -66,10 +66,12 @@ export class ClodApplyStats {
     if (Number.isFinite(ms) && ms > 0) this.workerRebuildMs += ms;
   }
 
-  recordGeometry(ms: number, triangles: number, reused: boolean): void {
+  recordGeometry(ms: number, triangles: number, reused: boolean, applied: boolean): void {
     this.frame.clodApplyGeometryMs += Math.max(0, ms);
-    this.frame.clodApplyNodes++;
-    this.frame.clodApplyTriangles += Math.max(0, triangles);
+    if (applied) {
+      this.frame.clodApplyNodes++;
+      this.frame.clodApplyTriangles += Math.max(0, triangles);
+    }
     if (reused) {
       this.geometryReusedOnApply++;
       this.frame.clodGeometryReusedOnApply = this.geometryReusedOnApply;
