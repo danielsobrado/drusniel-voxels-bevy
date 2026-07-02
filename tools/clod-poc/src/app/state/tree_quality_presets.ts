@@ -12,6 +12,7 @@ export interface TreeQualityPresetState {
   treeSpacing: number;
   treeShadowMaxLod: TreeShadowMaxLod;
   treeGpuEnabled: boolean;
+  treeGpuFallbackToCpu: boolean;
   treeGpuForceCpu: boolean;
   treeGpuShowCounts: boolean;
   treeGpuReadbackVisibleLists: boolean;
@@ -26,6 +27,7 @@ interface TreeQualityPresetConfig {
   spacingM: number;
   shadowMaxLod: TreeShadowMaxLod;
   gpuEnabled: boolean;
+  gpuFallbackToCpu: boolean;
   gpuForceCpu: boolean;
   gpuShowCounts: boolean;
   gpuReadbackVisibleLists: boolean;
@@ -41,6 +43,7 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     spacingM: 5.5,
     shadowMaxLod: "far",
     gpuEnabled: true,
+    gpuFallbackToCpu: true,
     gpuForceCpu: false,
     gpuShowCounts: false,
     gpuReadbackVisibleLists: false,
@@ -54,6 +57,7 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     spacingM: 7.0,
     shadowMaxLod: "mid",
     gpuEnabled: true,
+    gpuFallbackToCpu: true,
     gpuForceCpu: false,
     gpuShowCounts: false,
     gpuReadbackVisibleLists: false,
@@ -67,6 +71,7 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     spacingM: 9.0,
     shadowMaxLod: "near",
     gpuEnabled: true,
+    gpuFallbackToCpu: true,
     gpuForceCpu: false,
     gpuShowCounts: false,
     gpuReadbackVisibleLists: false,
@@ -80,6 +85,7 @@ const TREE_QUALITY_PRESETS: Record<Exclude<PostProcessQualityPreset, "custom">, 
     spacingM: 12.0,
     shadowMaxLod: "none",
     gpuEnabled: true,
+    gpuFallbackToCpu: true,
     gpuForceCpu: false,
     gpuShowCounts: false,
     gpuReadbackVisibleLists: false,
@@ -102,6 +108,7 @@ export function applyTreeQualityPreset(state: TreeQualityPresetState, preset: Po
   state.treeSpacing = config.spacingM;
   state.treeShadowMaxLod = config.shadowMaxLod;
   state.treeGpuEnabled = config.gpuEnabled;
+  state.treeGpuFallbackToCpu = config.gpuFallbackToCpu;
   state.treeGpuForceCpu = config.gpuForceCpu;
   state.treeGpuShowCounts = config.gpuShowCounts;
   state.treeGpuReadbackVisibleLists = config.gpuReadbackVisibleLists;
