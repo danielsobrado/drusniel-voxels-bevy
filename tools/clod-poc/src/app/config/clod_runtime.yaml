@@ -41,6 +41,14 @@ selection_cut_cache:
   bubble_center_cell_size_m: 1.0
   max_reuse_frames: 8
 
+material_churn:
+  enabled: true
+  collect_material_versions: true
+  collect_renderer_programs: true
+  log_spike_warnings: false
+  spike_warn_threshold_per_frame: 32
+  max_tracked_materials: 4096
+
 digging:
   hold_interval_ms: 400
 
