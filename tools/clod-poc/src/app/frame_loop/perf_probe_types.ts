@@ -141,6 +141,18 @@ export interface FramePerfSummary {
     understoryGpuCandidateCountAfterPrefilterAvg: number;
     understoryGpuAcceptedCountAvg: number;
     understoryGpuVisibleCountAvg: number;
+    vegetationGpuClustersTotalAvg: number;
+    vegetationGpuClustersRejectedEarlyAvg: number;
+    vegetationGpuClustersAcceptedAvg: number;
+    vegetationGpuClustersSummaryMissingAvg: number;
+    vegetationGpuCandidatesBudgetBeforeRejectAvg: number;
+    vegetationGpuCandidatesBudgetAfterRejectAvg: number;
+    vegetationGpuCandidatesGeneratedAvg: number;
+    vegetationGpuRejectOutsideTerrainAvg: number;
+    vegetationGpuRejectTerrainHiddenAvg: number;
+    vegetationGpuRejectNoCoverageAvg: number;
+    vegetationGpuRejectInvalidSurfaceAvg: number;
+    vegetationGpuEarlyRejectMsAvg: number;
     customPropGpuStatusCounts: Record<string, number>;
     customPropTotalInstancesAvg: number;
     customPropVisibleInstancesAvg: number;
