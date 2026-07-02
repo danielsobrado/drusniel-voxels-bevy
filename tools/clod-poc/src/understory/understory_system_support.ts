@@ -26,6 +26,8 @@ export interface UnderstoryStats extends UnderstoryGenerationStats {
   stump: number;
   gpuStatus: "disabled" | "unsupported" | "ring" | "fallback-cpu" | "error";
   gpuCandidateCount: number;
+  gpuCandidateCountBeforePrefilter?: number;
+  gpuCandidateCountAfterPrefilter?: number;
   gpuAcceptedCount: number;
   gpuVisibleCount: number;
   gpuOverflowed: boolean;
@@ -73,6 +75,8 @@ export function emptyUnderstoryStats(): UnderstoryStats {
     stump: 0,
     gpuStatus: "disabled",
     gpuCandidateCount: 0,
+    gpuCandidateCountBeforePrefilter: 0,
+    gpuCandidateCountAfterPrefilter: 0,
     gpuAcceptedCount: 0,
     gpuVisibleCount: 0,
     gpuOverflowed: false,
