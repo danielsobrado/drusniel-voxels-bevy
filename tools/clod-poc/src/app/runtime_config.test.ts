@@ -26,6 +26,12 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.selectionCutCache.cameraHeightCellSizeM).toBe(2);
     expect(config.selectionCutCache.thresholdBucketPx).toBe(0.05);
     expect(config.selectionCutCache.maxReuseFrames).toBe(8);
+    expect(config.materialChurn.enabled).toBe(true);
+    expect(config.materialChurn.collectMaterialVersions).toBe(true);
+    expect(config.materialChurn.collectRendererPrograms).toBe(true);
+    expect(config.materialChurn.logSpikeWarnings).toBe(false);
+    expect(config.materialChurn.spikeWarnThresholdPerFrame).toBe(32);
+    expect(config.materialChurn.maxTrackedMaterials).toBe(4096);
     expect(config.digging.holdIntervalMs).toBe(400);
     expect(config.profiling.slowFrameMs).toBe(24);
   });
