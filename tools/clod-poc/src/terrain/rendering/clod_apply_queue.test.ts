@@ -147,7 +147,7 @@ describe("ClodApplyQueue", () => {
     expect(stats.clodApplyQueueDepth).toBe(0);
   });
 
-  it("does not enqueue a collider for unapplied LOD0 geometry", () => {
+  it("keeps LOD0 collider work independent from visual geometry application", () => {
     const colliderApplied: string[] = [];
     const queue = new ClodApplyQueue({
       budget: budget({ maxGeometryJobsPerFrame: 1, maxColliderJobsPerFrame: 1, maxApplyMsPerFrame: 100 }),
@@ -164,9 +164,9 @@ describe("ClodApplyQueue", () => {
     queue.enqueueNodes([node("L0:0,0")]);
     const stats = queue.drain();
 
-    expect(colliderApplied).toEqual([]);
+    expect(colliderApplied).toEqual(["L0:0,0"]);
     expect(stats.clodApplyNodes).toBe(0);
-    expect(stats.clodColliderJobsApplied).toBe(0);
+    expect(stats.clodColliderJobsApplied).toBe(1);
     expect(stats.clodColliderQueueDepth).toBe(0);
   });
 
