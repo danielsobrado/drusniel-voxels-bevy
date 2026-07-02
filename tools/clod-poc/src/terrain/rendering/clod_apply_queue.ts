@@ -65,8 +65,7 @@ function removeNodeJob<T extends ClodApplyJob>(jobs: T[], nodeId: string): void 
 }
 
 function geometryApplied(result: ClodGeometryApplyResult): boolean {
-  if (result.applied !== undefined) return result.applied;
-  return result.reusedGeometry || result.geometryMs > 0 || result.materialMs > 0;
+  return result.applied !== false;
 }
 
 export class ClodApplyQueue {
@@ -118,8 +117,10 @@ export class ClodApplyQueue {
           applied,
         );
         this.statsRecorder.recordMaterial(result.materialMs);
-        if (applied) this.deps.onGeometryApplied?.(job.node);
-        if (job.node.level === 0) this.enqueueCollider(job.node, job.enqueuedFrame);
+        if (applied) {
+          this.deps.onGeometryApplied?.(job.node);
+          if (job.node.level === 0) this.enqueueCollider(job.node, job.enqueuedFrame);
+        }
       } catch (error) {
         this.reportFailure("geometry", job.node, error);
       }
