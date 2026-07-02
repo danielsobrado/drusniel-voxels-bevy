@@ -223,17 +223,18 @@ export class MaterialChurnDiagnostics {
 
 export const materialChurnDiagnostics = new MaterialChurnDiagnostics();
 
-export function setPipelineSensitiveMaterialProperty<T extends keyof THREE.Material>(
+export function setPipelineSensitiveMaterialProperty(
   diagnostics: MaterialChurnDiagnostics | null,
   material: THREE.Material,
-  key: T,
-  value: THREE.Material[T],
+  key: string,
+  value: unknown,
   reason: string,
 ): boolean {
-  const previous = material[key];
+  const writable = material as unknown as Record<string, unknown>;
+  const previous = writable[key];
   if (Object.is(previous, value)) return false;
-  diagnostics?.trackPipelineSensitiveMutation(material, String(key), previous, value, reason);
-  material[key] = value;
+  diagnostics?.trackPipelineSensitiveMutation(material, key, previous, value, reason);
+  writable[key] = value;
   return true;
 }
 
