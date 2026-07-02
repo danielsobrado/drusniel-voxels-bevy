@@ -5,6 +5,10 @@ import { createSunLightCacheRuntime } from "./far_light_cache_runtime.js";
 export function createLightUpdate(args: any) {
   const provider = createTerrainSummaryLightHeightProvider(args.terrainSummary);
   const cache = createSunLightCacheRuntime(args.options);
+  const globals = window as unknown as Record<string, unknown>;
+  globals.__drusnielSunLightOptions = args.options;
+  globals.__drusnielSunLightStats = () => cache.stats();
+  globals.__drusnielSunLightRefresh = () => cache.markAllStale();
   return {
     update(camera: any, sunVec: any, frameIndex: number, nowMs: number) {
       if (!args.options.active) return;
