@@ -66,6 +66,27 @@ export const DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG: VegetationTerrainRejec
   understoryCrownHeightM: 2.5,
 };
 
+export function resolveVegetationTerrainRejectionConfig(
+  params: URLSearchParams | null = browserSearchParams(),
+): VegetationTerrainRejectionConfig {
+  const gpuFlag = params?.get("gpuEarlyReject");
+  const debugOracle = params?.get("gpuEarlyRejectDebugOracle");
+  const debugReadback = params?.get("gpuEarlyRejectDebugReadback");
+  const gpuEarlyReject = {
+    ...DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG,
+    enabled: parseBooleanFlag(gpuFlag, DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG.enabled),
+    debugValidateCpuOracle: parseBooleanFlag(debugOracle, DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG.debugValidateCpuOracle),
+    debugReadbackCounters: parseBooleanFlag(debugReadback, DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG.debugReadbackCounters),
+    rejectKinds: { ...DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG.rejectKinds },
+    conservative: { ...DEFAULT_VEGETATION_GPU_EARLY_REJECT_CONFIG.conservative },
+  };
+  return {
+    ...DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG,
+    enabled: gpuEarlyReject.enabled,
+    gpuEarlyReject,
+  };
+}
+
 export type VegetationTerrainRejectionReason =
   | "accepted"
   | "visible"
@@ -84,4 +105,16 @@ export interface VegetationTerrainRejectionDecision {
   reject: boolean;
   reason: VegetationTerrainRejectionReason;
   skippedCandidateEstimate: number;
+}
+
+function browserSearchParams(): URLSearchParams | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search);
+}
+
+function parseBooleanFlag(value: string | null | undefined, fallback: boolean): boolean {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (value === "0" || value === "false" || value === "off") return false;
+  if (value === "1" || value === "true" || value === "on") return true;
+  return fallback;
 }
