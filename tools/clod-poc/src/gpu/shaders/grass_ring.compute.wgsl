@@ -162,7 +162,7 @@ fn wet_bank(height: f32, normal_y: f32) -> f32 {
 fn segment_distance(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
   let ab = b - a;
   let denom = max(dot(ab, ab), 1e-6);
-  let t = clamp(dot(p - a) / denom, 0.0, 1.0);
+  let t = clamp(dot(p - a, ab) / denom, 0.0, 1.0);
   return distance(p, a + ab * t);
 }
 
