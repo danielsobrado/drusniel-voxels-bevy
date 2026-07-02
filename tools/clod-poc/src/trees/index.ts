@@ -22,6 +22,7 @@ export * from "./tree_impostor_runtime.js";
 export * from "./tree_lod.js";
 export * from "./tree_lod_crossfade.js";
 export * from "./tree_lod_dither.js";
+export * from "./tree_patch_terrain_rejection.js";
 export * from "./tree_ring_impostor_node_material.js";
 export * from "./tree_ring_math.js";
 export * from "./tree_ring_lighting_proxies.js";
