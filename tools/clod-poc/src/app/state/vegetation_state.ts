@@ -12,6 +12,7 @@ import type { TreeShadowMaxLod } from "./tree_quality_presets.js";
 export interface VegetationSliceState {
   grassEnabled: boolean;
   grassRingDebug: boolean;
+  grassDepthPrepassEnabled: boolean;
   grassShaderMode: GrassSettings["shaderMode"];
   grassAlphaToCoverage: boolean;
   grassNearCrossedQuads: boolean;
@@ -103,11 +104,13 @@ export function createVegetationSliceState(input: {
   understoryConfig: UnderstorySettings;
   forestLightingConfig: ForestLightingSettings;
   grassRingDebug: boolean;
+  grassDepthPrepassEnabled: boolean;
 }): VegetationSliceState {
   const { grassConfig, stoneConfig, treeConfig, understoryConfig, forestLightingConfig } = input;
   return {
     grassEnabled: grassConfig.enabled,
     grassRingDebug: input.grassRingDebug,
+    grassDepthPrepassEnabled: input.grassDepthPrepassEnabled,
     grassShaderMode: grassConfig.shaderMode,
     grassAlphaToCoverage: grassConfig.alphaToCoverage,
     grassNearCrossedQuads: grassConfig.nearCrossedQuads,
