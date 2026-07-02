@@ -2,6 +2,7 @@ const UNDERSTORY_WORKGROUP_SIZE: u32 = 64u;
 const UNDERSTORY_GROUP_COUNT: u32 = 6u;
 const UNDERSTORY_INDIRECT_STRIDE_U32: u32 = 5u;
 const UNDERSTORY_CLASS_STRIDE_F32: u32 = 12u;
+const UNDERSTORY_ACTIVE_SLOT_SENTINEL: u32 = 4294967295u;
 const UNDERSTORY_RIVER_CLEAR_M: f32 = 0.45;
 const UNDERSTORY_FERN_START_M: f32 = 1.2;
 const UNDERSTORY_FERN_END_M: f32 = 8.0;
@@ -19,6 +20,7 @@ struct UnderstoryRingParams {
 @group(0) @binding(4) var<storage, read> class_params: array<f32>;
 @group(0) @binding(5) var hydro_texture: texture_2d<f32>;
 @group(0) @binding(6) var hydro_sampler: sampler;
+@group(0) @binding(9) var<storage, read> active_slots: array<u32>;
 fn understory_hash2(x: f32, z: f32, seed: u32) -> f32 {
   var v: u32 = seed;
   v = v ^ (u32(i32(floor(x))) * 0x27d4eb2du);
@@ -313,7 +315,11 @@ fn clear_counters(@builtin(global_invocation_id) id: vec3<u32>) {
   if (i < UNDERSTORY_GROUP_COUNT * UNDERSTORY_INDIRECT_STRIDE_U32) { indirect_args[i] = 0u; }
 }
 @compute @workgroup_size(UNDERSTORY_WORKGROUP_SIZE)
-fn understory_cull(@builtin(global_invocation_id) id: vec3<u32>) { process_understory_slot(id.x); }
+fn understory_cull(@builtin(global_invocation_id) id: vec3<u32>) {
+  let slot = active_slots[id.x];
+  if (slot == UNDERSTORY_ACTIVE_SLOT_SENTINEL) { return; }
+  process_understory_slot(slot);
+}
 fn write_draw_args(group: u32, index_count: u32, instance_count: u32) {
   let base = group * UNDERSTORY_INDIRECT_STRIDE_U32;
   indirect_args[base + 0u] = index_count;
