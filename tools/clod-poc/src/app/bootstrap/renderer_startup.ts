@@ -50,7 +50,7 @@ export interface RendererStartupInput {
   queryTreePerfScene: boolean;
   queryLongViewScene: boolean;
   queryBorderOceanScene: boolean;
-  activePhase0Scene: Phase0Config | undefined;
+  activePhase0Scene: Phase0SceneConfig | undefined;
 }
 
 export interface RendererStartupResult {
