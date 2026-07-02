@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { PropDebugSettings } from "./prop_types.js";
 import type { PropGridCell } from "./prop_spatial_grid.js";
 import { cellBoundsBox } from "./prop_culling.js";
+import { trackedLineBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 const LOD_DEBUG_COLORS = [0x4ade80, 0x60a5fa, 0xfbbf24, 0xf87171, 0xc084fc];
 
@@ -9,6 +10,7 @@ export class PropDebugOverlay {
   private readonly root = new THREE.Group();
   private readonly cellGroup = new THREE.Group();
   private readonly boundsGroup = new THREE.Group();
+  private readonly cellMaterial = trackedLineBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.65 }, "prop-debug-cells");
   private cellLines: THREE.LineSegments | null = null;
   private boundHelpers: THREE.Box3Helper[] = [];
 
@@ -30,7 +32,7 @@ export class PropDebugOverlay {
 
     if (input.settings.showCells) {
       const positions: number[] = [];
-      const pushCell = (cell: PropGridCell, color: THREE.Color) => {
+      const pushCell = (cell: PropGridCell) => {
         const box = cellBoundsBox(cell);
         const corners = [
           new THREE.Vector3(box.min.x, 0, box.min.z),
@@ -43,18 +45,14 @@ export class PropDebugOverlay {
           const b = corners[(i + 1) % 4]!;
           positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
         }
-        void color;
       };
-      for (const cell of input.visibleCells) pushCell(cell, new THREE.Color(0x22c55e));
-      for (const cell of input.culledCells) pushCell(cell, new THREE.Color(0xef4444));
+      for (const cell of input.visibleCells) pushCell(cell);
+      for (const cell of input.culledCells) pushCell(cell);
 
       if (positions.length > 0) {
         const geom = new THREE.BufferGeometry();
         geom.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-        this.cellLines = new THREE.LineSegments(
-          geom,
-          new THREE.LineBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.65 }),
-        );
+        this.cellLines = new THREE.LineSegments(geom, this.cellMaterial);
         this.cellGroup.add(this.cellLines);
       }
     }
@@ -77,13 +75,13 @@ export class PropDebugOverlay {
 
   dispose(): void {
     this.clear();
+    this.cellMaterial.dispose();
     this.root.removeFromParent();
   }
 
   private clear(): void {
     if (this.cellLines) {
       this.cellLines.geometry.dispose();
-      (this.cellLines.material as THREE.Material).dispose();
       this.cellLines.removeFromParent();
       this.cellLines = null;
     }
