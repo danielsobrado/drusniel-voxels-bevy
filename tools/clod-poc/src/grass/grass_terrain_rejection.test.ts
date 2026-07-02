@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PageFootprint } from "../types.js";
 import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import { DEFAULT_GRASS_SETTINGS, cloneGrassSettings } from "./grass_config.js";
@@ -13,9 +13,8 @@ function makeStats(): GrassGenerationStats {
   };
 }
 
-afterEach(() => {
-  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = false;
-});
+beforeEach(resetTerrainRejectionConfig);
+afterEach(resetTerrainRejectionConfig);
 
 describe("grass terrain rejection", () => {
   it("keeps probe-only static rejection disabled by default", () => {
@@ -47,3 +46,7 @@ describe("grass terrain rejection", () => {
     expect(stats.earlyTerrainReasonCounts?.height_range).toBe(1);
   });
 });
+
+function resetTerrainRejectionConfig(): void {
+  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = false;
+}
