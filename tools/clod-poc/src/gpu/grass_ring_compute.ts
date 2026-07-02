@@ -1,4 +1,5 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
+import { createGrassGpuRingFallbackOutputBuffers, createGrassHydrologyTexture } from "./grass_ring_compute_resources.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
 import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings, type GrassSettings } from "../grass/grass_config.js";
@@ -311,7 +312,7 @@ export class GrassGpuRingCompute {
       destroyAfterMap: false,
       cpu: new Uint32Array(TIER_COUNT),
     }));
-    this.hydroTexture = this.createHydrologyTexture(hydroData);
+    this.hydroTexture = createGrassHydrologyTexture(device, hydroData);
     this.hydroSampler = device.createSampler({
       label: "grass ring hydro sampler",
       magFilter: "nearest",
@@ -542,7 +543,11 @@ export class GrassGpuRingCompute {
   }
 
   private outputBindGroupEntries(): GPUBindGroupEntry[] {
-    const fallback = this.outputBuffers ?? this.createFallbackOutputBuffers();
+    const fallback = this.outputBuffers ?? createGrassGpuRingFallbackOutputBuffers(
+      this.device,
+      grassGpuRingSlotCount(this.ring),
+      this.indirectArgs,
+    );
     return [
       { binding: 3, resource: { buffer: fallback.near.offset } },
       { binding: 4, resource: { buffer: fallback.near.packed0 } },
@@ -550,47 +555,6 @@ export class GrassGpuRingCompute {
       { binding: 6, resource: { buffer: fallback.near.terrainNormal } },
     ];
   }
-
-  private createFallbackOutputBuffers(): GrassGpuRingOutputBuffers {
-    const bytes = Math.max(16, grassGpuRingSlotCount(this.ring) * TIER_COUNT * 4 * Float32Array.BYTES_PER_ELEMENT);
-    const shared: GrassGpuTierOutputBuffers = {
-      offset: this.device.createBuffer({ label: "grass ring fallback offset", size: bytes, usage: GPUBufferUsage.STORAGE }),
-      packed0: this.device.createBuffer({ label: "grass ring fallback packed0", size: bytes, usage: GPUBufferUsage.STORAGE }),
-      packed1: this.device.createBuffer({ label: "grass ring fallback packed1", size: bytes, usage: GPUBufferUsage.STORAGE }),
-      terrainNormal: this.device.createBuffer({ label: "grass ring fallback normal", size: bytes, usage: GPUBufferUsage.STORAGE }),
-    };
-    return {
-      near: shared,
-      mid: shared,
-      far: shared,
-      super: shared,
-      indirectArgs: this.indirectArgs,
-    };
-  }
-
-  private createHydrologyTexture(hydroData: GrassHydrologyData | null): GPUTexture {
-    if (hydroData && hydroData.data.length > 0) {
-      const texture = this.device.createTexture({
-        label: "grass ring hydro texture",
-        size: { width: hydroData.res, height: hydroData.res },
-        format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-      });
-      const bytes = new Uint8Array(hydroData.data.byteLength);
-      bytes.set(new Uint8Array(hydroData.data.buffer, hydroData.data.byteOffset, hydroData.data.byteLength));
-      this.device.queue.writeTexture(
-        { texture },
-        bytes,
-        { bytesPerRow: hydroData.res * 16 },
-        { width: hydroData.res, height: hydroData.res },
-      );
-      return texture;
-    }
-    return this.device.createTexture({
-      label: "grass ring fallback hydro texture",
-      size: { width: 1, height: 1 },
-      format: "rgba32float",
-      usage: GPUTextureUsage.TEXTURE_BINDING,
-    });
-  }
 }
+
+export * from "./grass_ring_compute_resources.js";
