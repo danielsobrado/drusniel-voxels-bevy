@@ -8,6 +8,10 @@ import { GpuPassTiming } from "../../../core/gpu_pass_timing.js";
 import { TreeTimingPass } from "../../frame_loop/tree_timing_pass.js";
 import { resolveSlowFrameMsThreshold } from "../../runtime_config.js";
 import { shadowProxyStatsToCounters } from "../../../shadows/shadowProxyStats.js";
+import {
+  RENDER_RESOLUTION_CHANGED_EVENT,
+  type RenderResolutionChangedEventDetail,
+} from "../../../rendering/render_resolution_runtime.js";
 import type { StatsPresenter } from "../../frame_loop/stats_presenter.js";
 import type { InfoPanelController } from "../info_panel_startup.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
@@ -169,7 +173,7 @@ export function runFrameLoopStartup(
   // TP-1: isolated offscreen tree pass so the tree main pass is timeable
   // (`r.treeMain`). Same gate as the resolve; only meaningful on WebGPU.
   const initialRenderResolution = window.__drusnielRenderResolution?.current();
-  let treeTimingPass: TreeTimingPass | null = input.app.isWebGpu && wantGpuTiming && gpuTimestampReady
+  const treeTimingPass: TreeTimingPass | null = input.app.isWebGpu && wantGpuTiming && gpuTimestampReady
     ? new TreeTimingPass(
         input.app.renderer,
         initialRenderResolution?.physicalWidth ?? window.innerWidth,
@@ -177,14 +181,19 @@ export function runFrameLoopStartup(
       )
     : null;
 
+  const resizeDependentTargets = (detail: RenderResolutionChangedEventDetail) => {
+    postProcess?.setSize(detail.resolution.cssWidth, detail.resolution.cssHeight);
+    treeTimingPass?.setSize(detail.resolution.physicalWidth, detail.resolution.physicalHeight);
+  };
+
+  window.addEventListener(RENDER_RESOLUTION_CHANGED_EVENT, (event) => {
+    resizeDependentTargets((event as CustomEvent<RenderResolutionChangedEventDetail>).detail);
+  });
+
   window.addEventListener("resize", () => {
     const renderResolution = window.__drusnielRenderResolution;
     if (renderResolution) {
-      const result = renderResolution.applyCurrentViewport({ renderer, camera });
-      if (result.changed) {
-        postProcess?.setSize(result.resolution.cssWidth, result.resolution.cssHeight);
-        treeTimingPass?.setSize(result.resolution.physicalWidth, result.resolution.physicalHeight);
-      }
+      renderResolution.applyCurrentViewport({ renderer, camera });
       return;
     }
 
@@ -212,7 +221,7 @@ export function runFrameLoopStartup(
       makeGrassSettings,
       gpuPassTiming,
       runGpuTreeTiming: treeTimingPass
-        ? () => treeTimingPass?.render(treeSystem, camera)
+        ? () => treeTimingPass.render(treeSystem, camera)
         : null,
     },
     player: {
