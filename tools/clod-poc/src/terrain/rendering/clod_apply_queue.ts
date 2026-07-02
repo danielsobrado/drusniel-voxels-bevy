@@ -64,6 +64,11 @@ function removeNodeJob<T extends ClodApplyJob>(jobs: T[], nodeId: string): void 
   if (index >= 0) jobs.splice(index, 1);
 }
 
+function geometryApplied(result: ClodGeometryApplyResult): boolean {
+  if (result.applied !== undefined) return result.applied;
+  return result.reusedGeometry || result.geometryMs > 0 || result.materialMs > 0;
+}
+
 export class ClodApplyQueue {
   private readonly deps: ClodApplyQueueDeps;
   private readonly geometryJobs: ClodApplyJob[] = [];
@@ -105,7 +110,7 @@ export class ClodApplyQueue {
       if (!job) break;
       try {
         const result = this.deps.applyGeometry(job.node);
-        const applied = result.applied !== false;
+        const applied = geometryApplied(result);
         this.statsRecorder.recordGeometry(
           result.geometryMs,
           result.triangles || triangleCount(job.node.mesh),
