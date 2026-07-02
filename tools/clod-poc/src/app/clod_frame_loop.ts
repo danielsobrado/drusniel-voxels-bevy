@@ -307,8 +307,6 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       }
     }
 
-    timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics);
-
     runRenderPhase({
       renderer: render.renderer,
       scene: render.scene,
@@ -338,6 +336,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       grassPrepassEnabled: render.grassPrepassEnabled,
       perfProbe,
       phaseTiming,
+      afterRenderDiagnostics: () => timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics),
     });
   });
 }
