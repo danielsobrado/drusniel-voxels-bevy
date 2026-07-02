@@ -117,10 +117,8 @@ export class ClodApplyQueue {
           applied,
         );
         this.statsRecorder.recordMaterial(result.materialMs);
-        if (applied) {
-          this.deps.onGeometryApplied?.(job.node);
-          if (job.node.level === 0) this.enqueueCollider(job.node, job.enqueuedFrame);
-        }
+        if (applied) this.deps.onGeometryApplied?.(job.node);
+        if (job.node.level === 0) this.enqueueCollider(job.node, job.enqueuedFrame);
       } catch (error) {
         this.reportFailure("geometry", job.node, error);
       }
