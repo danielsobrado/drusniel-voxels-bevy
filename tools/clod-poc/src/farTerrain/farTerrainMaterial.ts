@@ -26,7 +26,7 @@ export function createFarTerrainMaterial(
   const uSunDir = uniform(lighting.sunDirection.clone());
   const uSunColor = uniform(vec3(lighting.sunColor.r, lighting.sunColor.g, lighting.sunColor.b));
   const uSkyColor = uniform(vec3(lighting.skyLight.r, lighting.skyLight.g, lighting.skyLight.b));
-  const uGroundColor = uniform(vec3(lighting.groundLight.r, lighting.groundLight.b, lighting.groundLight.b));
+  const uGroundColor = uniform(vec3(lighting.groundLight.r, lighting.groundLight.g, lighting.groundLight.b));
   const uCenterX = uniform(centerX);
   const uCenterZ = uniform(centerZ);
   const uHazeStart = uniform(config.hazeStartM);
