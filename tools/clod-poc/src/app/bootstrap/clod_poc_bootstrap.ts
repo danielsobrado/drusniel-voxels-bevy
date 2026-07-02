@@ -22,7 +22,7 @@ import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/l
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
 import { applyOwnershipToFarShellRange, resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
 import { FloatingOriginController } from "../../precision/floating_origin.js";
-import { createBakedMacroTintTexture } from "../../gpu/terrain_node_material.js";
+import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
 import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
 import { createBiomeTextureStreamingManager } from "../../textures/biome_texture_streaming_manager.js";
 import * as THREE from "three";
