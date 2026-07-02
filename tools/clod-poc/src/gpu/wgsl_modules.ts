@@ -17,7 +17,7 @@ import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expa
 import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
 import { composeShader } from "./wgsl_compose.js";
 import { replaceConstU32 } from "./wgsl_workgroup_size.js";
-import { withConservativeGrassFrustum } from "./grass_ring_wgsl_transforms.js";
+import { withConservativeGrassFrustum, withGrassActiveSlotList } from "./grass_ring_wgsl_transforms.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
   withTreeFinalPlacementHeight,
@@ -33,7 +33,8 @@ export function composeTerrainFieldShader(): string {
 }
 
 export function composeGrassRingShader(): string {
-  return composeShader("grass ring shader", [grassBindings, terrainCommon, placementHeight, withRiverEcologyConstants(withConservativeGrassFrustum(grassRingEntry))]);
+  const grassEntry = withGrassActiveSlotList(withConservativeGrassFrustum(grassRingEntry));
+  return composeShader("grass ring shader", [grassBindings, terrainCommon, placementHeight, withRiverEcologyConstants(grassEntry)]);
 }
 
 export function composeStoneScatterShader(): string {
