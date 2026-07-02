@@ -1,0 +1,33 @@
+active: true
+diagnostics: false
+
+tile:
+  size_world: 128
+  resolution: 32
+
+direction_bins:
+  azimuth_degrees: 5
+  elevation_degrees: 5
+  min_elevation_degrees: 2
+
+ray:
+  max_distance_world: 2048
+  step_world: 8
+  receiver_height_bias: 0.75
+  terrain_height_bias: 0.25
+  missing_casts_shade: true
+
+build:
+  max_tiles_per_frame: 2
+  max_build_ms_per_frame: 1.0
+
+cache:
+  max_entries: 512
+  keep_last_known: true
+
+debug_view:
+  active: false
+  show_missing: true
+  opacity: 0.55
+  camera_tile_radius: 1
+  max_debug_tiles: 12
