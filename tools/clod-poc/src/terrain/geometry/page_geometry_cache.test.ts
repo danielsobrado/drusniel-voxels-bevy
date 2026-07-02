@@ -26,9 +26,10 @@ function mesh(seed = 0): PageMesh {
   };
 }
 
-function node(id = "L0:0,0", pageMesh = mesh()): ClodPageNode {
+function node(id = "L0:0,0", pageMesh = mesh(), revision = 1): ClodPageNode {
   return {
     id,
+    revision,
     level: 0,
     children: [],
     mesh: pageMesh,
@@ -39,9 +40,10 @@ function node(id = "L0:0,0", pageMesh = mesh()): ClodPageNode {
   };
 }
 
-function geometry(): THREE.BufferGeometry {
+function geometry(indexed = false): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, 0]), 3));
+  if (indexed) g.setIndex(new THREE.BufferAttribute(new Uint32Array([0, 1, 2]), 1));
   return g;
 }
 
@@ -71,7 +73,17 @@ describe("PageGeometryCache", () => {
     cache.dispose();
   });
 
-  it("invalidates a node and disposes its cached geometry", () => {
+  it("uses node revision in the cache key", () => {
+    const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
+    const first = cache.getOrCreate({ node: node("L0:0,0", mesh(), 1), normalMode: "source", createGeometry: geometry });
+    const second = cache.getOrCreate({ node: node("L0:0,0", mesh(), 2), normalMode: "source", createGeometry: geometry });
+
+    expect(second).not.toBe(first);
+    expect(cache.stats()).toMatchObject({ entries: 2, misses: 2 });
+    cache.dispose();
+  });
+
+  it("invalidates a node and disposes inactive cached geometry", () => {
     const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
     const n = node();
     const first = geometry();
@@ -82,6 +94,46 @@ describe("PageGeometryCache", () => {
 
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(cache.stats()).toMatchObject({ entries: 0, invalidations: 1, disposals: 1 });
+  });
+
+  it("defers invalidating active geometry until the view releases it", () => {
+    const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
+    const n = node();
+    const first = geometry();
+    const dispose = vi.spyOn(first, "dispose");
+
+    cache.setGeometryActive(
+      cache.getOrCreate({ node: n, normalMode: "source", createGeometry: () => first }),
+      true,
+    );
+    cache.invalidateNode(n.id);
+
+    expect(dispose).not.toHaveBeenCalled();
+    expect(cache.stats()).toMatchObject({ entries: 1, invalidations: 1, disposals: 0 });
+
+    cache.setGeometryActive(first, false);
+
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(cache.stats()).toMatchObject({ entries: 0, disposals: 1 });
+  });
+
+  it("invalidateAll disposes active and inactive entries", () => {
+    const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
+    const first = geometry();
+    const second = geometry();
+    const disposeFirst = vi.spyOn(first, "dispose");
+    const disposeSecond = vi.spyOn(second, "dispose");
+
+    cache.setGeometryActive(
+      cache.getOrCreate({ node: node("L0:0,0"), normalMode: "source", createGeometry: () => first }),
+      true,
+    );
+    cache.getOrCreate({ node: node("L0:1,0", mesh(10)), normalMode: "source", createGeometry: () => second });
+    cache.invalidateAll();
+
+    expect(disposeFirst).toHaveBeenCalledTimes(1);
+    expect(disposeSecond).toHaveBeenCalledTimes(1);
+    expect(cache.stats()).toMatchObject({ entries: 0, invalidations: 1, disposals: 2 });
   });
 
   it("evicts least recently used inactive entries and disposes them", () => {
@@ -114,6 +166,46 @@ describe("PageGeometryCache", () => {
 
     expect(disposeFirst).not.toHaveBeenCalled();
     expect(cache.stats()).toMatchObject({ entries: 2, evictions: 0 });
+    cache.dispose();
+  });
+
+  it("disabled cache creates fresh geometry and retains no entries", () => {
+    const cache = new PageGeometryCache({ enabled: false, maxEntries: 8, warnAtEntries: 8 });
+    const n = node();
+    const first = cache.getOrCreate({ node: n, normalMode: "source", createGeometry: geometry });
+    const second = cache.getOrCreate({ node: n, normalMode: "source", createGeometry: geometry });
+
+    expect(second).not.toBe(first);
+    expect(cache.owns(first)).toBe(false);
+    expect(cache.stats()).toMatchObject({ entries: 0, misses: 2 });
+  });
+
+  it("estimatedBytes includes geometry attributes and index", () => {
+    const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
+    cache.getOrCreate({ node: node(), normalMode: "source", createGeometry: () => geometry(true) });
+
+    expect(cache.stats().estimatedBytes).toBe(24);
+    cache.dispose();
+  });
+
+  it("pruneToActiveNodes does not dispose active geometry outside the active node set", () => {
+    const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
+    const active = geometry();
+    const inactive = geometry();
+    const disposeActive = vi.spyOn(active, "dispose");
+    const disposeInactive = vi.spyOn(inactive, "dispose");
+
+    cache.setGeometryActive(
+      cache.getOrCreate({ node: node("L0:0,0"), normalMode: "source", createGeometry: () => active }),
+      true,
+    );
+    cache.getOrCreate({ node: node("L0:1,0", mesh(10)), normalMode: "source", createGeometry: () => inactive });
+
+    cache.pruneToActiveNodes(new Set());
+
+    expect(disposeActive).not.toHaveBeenCalled();
+    expect(disposeInactive).toHaveBeenCalledTimes(1);
+    expect(cache.stats()).toMatchObject({ entries: 1, invalidations: 1, disposals: 1 });
     cache.dispose();
   });
 });

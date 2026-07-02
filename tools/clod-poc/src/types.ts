@@ -30,6 +30,11 @@ export interface PageFootprint {
 
 export interface ClodPageNode {
   id: string; // e.g. "L0:0,0"
+  /**
+   * Monotonic mesh revision for runtime-built nodes. Cache/test fixtures may omit it,
+   * but live edit/rebuild paths must bump it whenever mesh or derived geometry changes.
+   */
+  revision?: number;
   level: number;
   children: (ClodPageNode | null)[]; // up to 4, quadtree order
   mesh: PageMesh;

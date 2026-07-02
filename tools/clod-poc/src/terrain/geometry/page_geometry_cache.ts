@@ -26,6 +26,11 @@ export interface PageGeometryRequest {
   createGeometry: () => THREE.BufferGeometry;
 }
 
+export interface PageGeometryInvalidationOptions {
+  includeActive?: boolean;
+  exceptGeometry?: THREE.BufferGeometry;
+}
+
 interface CacheEntry {
   key: string;
   nodeId: string;
@@ -33,6 +38,7 @@ interface CacheEntry {
   estimatedBytes: number;
   lastAccessedMs: number;
   active: boolean;
+  retired: boolean;
 }
 
 export const DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG: PageGeometryCacheConfig = {
@@ -52,11 +58,8 @@ function meshObjectId(mesh: PageMesh): number {
   return id;
 }
 
-function sampleArray(array: ArrayLike<number> | undefined): string {
-  if (!array || array.length === 0) return "0";
-  const last = array.length - 1;
-  const mid = last >> 1;
-  return `${array.length}:${array[0]}:${array[mid]}:${array[last]}`;
+function finiteRevision(value: unknown): string | null {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : null;
 }
 
 function sourceRevisionSignature(node: ClodPageNode): string {
@@ -67,20 +70,16 @@ function sourceRevisionSignature(node: ClodPageNode): string {
 }
 
 function meshSignature(node: ClodPageNode): string {
-  const mesh = node.mesh;
-  const explicitRevision =
-    (mesh as unknown as { revision?: unknown }).revision ??
-    (node as unknown as { revision?: unknown }).revision ??
-    sourceRevisionSignature(node);
-  if (explicitRevision !== "") return String(explicitRevision);
-  return [
-    `obj:${meshObjectId(mesh)}`,
-    `pos:${sampleArray(mesh.positions)}`,
-    `idx:${sampleArray(mesh.indices)}`,
-    `nrm:${sampleArray(mesh.normals)}`,
-    `mat:${sampleArray(mesh.materialWeights)}`,
-    `stride:${mesh.materialWeightStride}`,
-  ].join("|");
+  const nodeRevision = finiteRevision(node.revision);
+  if (nodeRevision) return `node:${nodeRevision}`;
+
+  const meshRevision = finiteRevision((node.mesh as unknown as { revision?: unknown }).revision);
+  if (meshRevision) return `mesh:${meshRevision}`;
+
+  const sourceRevisions = sourceRevisionSignature(node);
+  if (sourceRevisions) return `source:${sourceRevisions}`;
+
+  return `mesh-object:${meshObjectId(node.mesh)}`;
 }
 
 function requestKey(request: PageGeometryRequest): string {
@@ -124,10 +123,14 @@ export class PageGeometryCache {
 
     const key = requestKey(request);
     const existing = this.entries.get(key);
-    if (existing) {
+    if (existing && !existing.retired) {
       existing.lastAccessedMs = performance.now();
       this.statHits++;
       return existing.geometry;
+    }
+
+    if (existing && !existing.active) {
+      this.disposeEntry(existing, false);
     }
 
     const geometry = request.createGeometry();
@@ -138,6 +141,7 @@ export class PageGeometryCache {
       estimatedBytes: estimatedGeometryBytes(geometry),
       lastAccessedMs: performance.now(),
       active: false,
+      retired: false,
     };
     this.entries.set(key, entry);
     this.geometryKeys.set(geometry, key);
@@ -156,21 +160,23 @@ export class PageGeometryCache {
     const key = this.geometryKeys.get(geometry);
     if (!key) return;
     const entry = this.entries.get(key);
-    if (entry) entry.active = active;
+    if (!entry) return;
+    entry.active = active;
+    if (!active && entry.retired) this.disposeEntry(entry, false);
   }
 
-  invalidateNode(nodeId: string): void {
-    let removed = false;
+  invalidateNode(nodeId: string, options: PageGeometryInvalidationOptions = {}): void {
+    const exceptKey = options.exceptGeometry ? this.geometryKeys.get(options.exceptGeometry) : undefined;
+    let changed = false;
     for (const entry of [...this.entries.values()]) {
-      if (entry.nodeId !== nodeId) continue;
-      this.disposeEntry(entry, false);
-      removed = true;
+      if (entry.nodeId !== nodeId || entry.key === exceptKey) continue;
+      changed = this.disposeOrRetireEntry(entry, false, Boolean(options.includeActive)) || changed;
     }
-    if (removed) this.statInvalidations++;
+    if (changed) this.statInvalidations++;
   }
 
-  invalidateMany(nodeIds: Iterable<string>): void {
-    for (const nodeId of nodeIds) this.invalidateNode(nodeId);
+  invalidateMany(nodeIds: Iterable<string>, options: PageGeometryInvalidationOptions = {}): void {
+    for (const nodeId of nodeIds) this.invalidateNode(nodeId, options);
   }
 
   invalidateAll(): void {
@@ -182,7 +188,7 @@ export class PageGeometryCache {
   pruneToActiveNodes(activeNodeIds: ReadonlySet<string>): void {
     let removed = false;
     for (const entry of [...this.entries.values()]) {
-      if (activeNodeIds.has(entry.nodeId)) continue;
+      if (entry.active || activeNodeIds.has(entry.nodeId)) continue;
       this.disposeEntry(entry, false);
       removed = true;
     }
@@ -219,6 +225,15 @@ export class PageGeometryCache {
     }
   }
 
+  private disposeOrRetireEntry(entry: CacheEntry, evicted: boolean, includeActive: boolean): boolean {
+    if (entry.active && !includeActive) {
+      entry.retired = true;
+      return true;
+    }
+    this.disposeEntry(entry, evicted);
+    return true;
+  }
+
   private disposeEntry(entry: CacheEntry, evicted: boolean): void {
     if (!this.entries.delete(entry.key)) return;
     this.geometryKeys.delete(entry.geometry);
@@ -231,6 +246,6 @@ export class PageGeometryCache {
   private warnIfNeeded(): void {
     if (this.warnedAtEntries || this.entries.size < this.config.warnAtEntries) return;
     this.warnedAtEntries = true;
-    console.warn(`[clod] page geometry cache has ${this.entries.size} entries`);
+    console.warn(`[clod] page geometry cache has ${this.entries.size} entries; active geometries make max_entries a soft cap`);
   }
 }
