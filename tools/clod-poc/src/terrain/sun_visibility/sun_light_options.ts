@@ -87,44 +87,44 @@ function asNonNegativeInt(value: unknown, fallback: number): number {
 export function parseSunLightOptions(value: unknown): SunLightOptions {
   const raw = asRecord(value);
   const tile = asRecord(raw.tile);
-  const directionBins = asRecord(raw.direction_bins);
+  const directionBins = asRecord(raw.direction_bins ?? raw.directionBins);
   const ray = asRecord(raw.ray);
   const build = asRecord(raw.build);
   const cache = asRecord(raw.cache);
-  const debugView = asRecord(raw.debug_view);
+  const debugView = asRecord(raw.debug_view ?? raw.debugView);
   return {
     active: asBool(raw.active ?? raw.enabled, SUN_LIGHT_DEFAULTS.active),
     diagnostics: asBool(raw.diagnostics ?? raw.debug, SUN_LIGHT_DEFAULTS.diagnostics),
     tile: {
-      sizeWorld: asPositive(tile.size_world, SUN_LIGHT_DEFAULTS.tile.sizeWorld),
+      sizeWorld: asPositive(tile.size_world ?? tile.sizeWorld, SUN_LIGHT_DEFAULTS.tile.sizeWorld),
       resolution: asPositiveInt(tile.resolution, SUN_LIGHT_DEFAULTS.tile.resolution),
     },
     directionBins: {
-      azimuthDegrees: asPositive(directionBins.azimuth_degrees, SUN_LIGHT_DEFAULTS.directionBins.azimuthDegrees),
-      elevationDegrees: asPositive(directionBins.elevation_degrees, SUN_LIGHT_DEFAULTS.directionBins.elevationDegrees),
-      minElevationDegrees: asPositive(directionBins.min_elevation_degrees, SUN_LIGHT_DEFAULTS.directionBins.minElevationDegrees),
+      azimuthDegrees: asPositive(directionBins.azimuth_degrees ?? directionBins.azimuthDegrees, SUN_LIGHT_DEFAULTS.directionBins.azimuthDegrees),
+      elevationDegrees: asPositive(directionBins.elevation_degrees ?? directionBins.elevationDegrees, SUN_LIGHT_DEFAULTS.directionBins.elevationDegrees),
+      minElevationDegrees: asPositive(directionBins.min_elevation_degrees ?? directionBins.minElevationDegrees, SUN_LIGHT_DEFAULTS.directionBins.minElevationDegrees),
     },
     ray: {
-      maxDistanceWorld: asPositive(ray.max_distance_world, SUN_LIGHT_DEFAULTS.ray.maxDistanceWorld),
-      stepWorld: asPositive(ray.step_world, SUN_LIGHT_DEFAULTS.ray.stepWorld),
-      receiverHeightBias: asPositive(ray.receiver_height_bias, SUN_LIGHT_DEFAULTS.ray.receiverHeightBias),
-      terrainHeightBias: asPositive(ray.terrain_height_bias, SUN_LIGHT_DEFAULTS.ray.terrainHeightBias),
-      missingOccludesFog: asBool(ray.missing_casts_shade ?? ray.missing_occludes_fog, SUN_LIGHT_DEFAULTS.ray.missingOccludesFog),
+      maxDistanceWorld: asPositive(ray.max_distance_world ?? ray.maxDistanceWorld, SUN_LIGHT_DEFAULTS.ray.maxDistanceWorld),
+      stepWorld: asPositive(ray.step_world ?? ray.stepWorld, SUN_LIGHT_DEFAULTS.ray.stepWorld),
+      receiverHeightBias: asPositive(ray.receiver_height_bias ?? ray.receiverHeightBias, SUN_LIGHT_DEFAULTS.ray.receiverHeightBias),
+      terrainHeightBias: asPositive(ray.terrain_height_bias ?? ray.terrainHeightBias, SUN_LIGHT_DEFAULTS.ray.terrainHeightBias),
+      missingOccludesFog: asBool(ray.missing_casts_shade ?? ray.missing_occludes_fog ?? ray.missingOccludesFog, SUN_LIGHT_DEFAULTS.ray.missingOccludesFog),
     },
     build: {
-      maxTilesPerFrame: asPositiveInt(build.max_tiles_per_frame, SUN_LIGHT_DEFAULTS.build.maxTilesPerFrame),
-      maxBuildMsPerFrame: asPositive(build.max_build_ms_per_frame, SUN_LIGHT_DEFAULTS.build.maxBuildMsPerFrame),
+      maxTilesPerFrame: asPositiveInt(build.max_tiles_per_frame ?? build.maxTilesPerFrame, SUN_LIGHT_DEFAULTS.build.maxTilesPerFrame),
+      maxBuildMsPerFrame: asPositive(build.max_build_ms_per_frame ?? build.maxBuildMsPerFrame, SUN_LIGHT_DEFAULTS.build.maxBuildMsPerFrame),
     },
     cache: {
-      maxEntries: asPositiveInt(cache.max_entries, SUN_LIGHT_DEFAULTS.cache.maxEntries),
-      keepLastKnown: asBool(cache.keep_last_known, SUN_LIGHT_DEFAULTS.cache.keepLastKnown),
+      maxEntries: asPositiveInt(cache.max_entries ?? cache.maxEntries, SUN_LIGHT_DEFAULTS.cache.maxEntries),
+      keepLastKnown: asBool(cache.keep_last_known ?? cache.keepLastKnown, SUN_LIGHT_DEFAULTS.cache.keepLastKnown),
     },
     debugView: {
       active: asBool(debugView.active ?? debugView.enabled, SUN_LIGHT_DEFAULTS.debugView.active),
-      showMissing: asBool(debugView.show_missing, SUN_LIGHT_DEFAULTS.debugView.showMissing),
+      showMissing: asBool(debugView.show_missing ?? debugView.showMissing, SUN_LIGHT_DEFAULTS.debugView.showMissing),
       opacity: Math.max(0, Math.min(1, asPositive(debugView.opacity, SUN_LIGHT_DEFAULTS.debugView.opacity))),
-      cameraTileRadius: asNonNegativeInt(debugView.camera_tile_radius, SUN_LIGHT_DEFAULTS.debugView.cameraTileRadius),
-      maxDebugTiles: asPositiveInt(debugView.max_debug_tiles, SUN_LIGHT_DEFAULTS.debugView.maxDebugTiles),
+      cameraTileRadius: asNonNegativeInt(debugView.camera_tile_radius ?? debugView.cameraTileRadius, SUN_LIGHT_DEFAULTS.debugView.cameraTileRadius),
+      maxDebugTiles: asPositiveInt(debugView.max_debug_tiles ?? debugView.maxDebugTiles, SUN_LIGHT_DEFAULTS.debugView.maxDebugTiles),
     },
   };
 }
@@ -133,6 +133,6 @@ export function parseSunLightOptionsYaml(yamlText: string): SunLightOptions {
   try {
     return parseSunLightOptions(load(yamlText));
   } catch {
-    return SUN_LIGHT_DEFAULTS;
+    return parseSunLightOptions(SUN_LIGHT_DEFAULTS);
   }
 }
