@@ -93,16 +93,20 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
     deps.syncStatsToState(system.getStats());
   };
 
+  const rebuildWithCurrentSettings = () => {
+    system.updateSettings(makeSettings());
+    system.rebuild();
+    refreshStats();
+  };
+
   return {
     system,
     makeSettings,
     applySettings() {
-      system.updateSettings(makeSettings());
+      rebuildWithCurrentSettings();
     },
     rebuild() {
-      system.updateSettings(makeSettings());
-      system.rebuild();
-      refreshStats();
+      rebuildWithCurrentSettings();
     },
     refreshStats,
     update(elapsedSeconds, ringCenter, camera) {
@@ -121,6 +125,8 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
     },
     markPatchesDirty() {
       system.markPatchesDirty();
+      system.rebuild();
+      refreshStats();
     },
   };
 }
