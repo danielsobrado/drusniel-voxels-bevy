@@ -29,9 +29,10 @@ const READBACK_BYTES = COUNTER_BYTES + SHADOW_COUNTER_BYTES;
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
 const SHADOW_MAX_LOD_NONE = -1;
+const TREE_GPU_RING_SENTINEL_SLOT = 0xffffffff;
 
 export const TREE_GPU_RING_CELL = 3.4;
-export const TREE_GPU_RING_STORAGE_BINDINGS = 8;
+export const TREE_GPU_RING_STORAGE_BINDINGS = 9;
 
 export type TreeGpuRingCounts = Record<TreeLod, number>;
 export type TreeGpuRingIndexCounts = Record<TreeSpeciesId, Record<TreeLod, number>>;
@@ -59,6 +60,8 @@ export interface TreeGpuRingStats {
   status: "initializing" | "idle" | "running" | "ready" | "failed" | "disabled";
   reason?: string;
   candidateCount: number;
+  candidateCountBeforePrefilter: number;
+  candidateCountAfterPrefilter: number;
   acceptedCandidates: number;
   counts: TreeGpuRingCounts;
   groupCounts: number[];
@@ -90,6 +93,10 @@ export interface TreeGpuRingDispatchParams {
   visibleClusterMaskWords?: Uint32Array;
   visibleClusterDimCells?: number;
   visibleClusterGrid?: number;
+  /** Compact slot list produced by the CPU terrain prefilter. Hidden clusters never enter tree_cull. */
+  activeSlotIndices?: Uint32Array;
+  candidateCountBeforePrefilter?: number;
+  candidateCountAfterPrefilter?: number;
 }
 
 interface ReadbackSlot {
@@ -151,6 +158,10 @@ export function treeGpuRingWorkgroupSize(settings: TreeSettings): number {
 
 export function treeGpuRingCullWorkgroups(settings: TreeSettings): number {
   return Math.ceil(treeGpuRingSlotCount(settings) / treeGpuRingWorkgroupSize(settings));
+}
+
+export function treeGpuRingActiveCullWorkgroups(settings: TreeSettings, activeSlotCount: number): number {
+  return Math.max(1, Math.ceil(Math.max(1, Math.floor(activeSlotCount)) / treeGpuRingWorkgroupSize(settings)));
 }
 
 export function treeGpuRingCounterWorkgroups(settings: TreeSettings): number {
@@ -307,6 +318,10 @@ export class TreeGpuRingCompute {
   private readonly shadowCounterBuffer: GPUBuffer;
   private readonly visibleClusterMaskBuffer: GPUBuffer;
   private readonly visibleClusterMaskWordCapacity: number;
+  private readonly activeSlotBuffer: GPUBuffer;
+  private readonly activeSlotBufferCapacity: number;
+  private readonly fullSlotIndices: Uint32Array;
+  private activeSlotScratch = new Uint32Array(0);
   private readonly fallbackShadowCellBuffer: GPUBuffer | null;
   private readonly fallbackShadowIndirectBuffer: GPUBuffer | null;
   private readonly shadowOutputsReady: boolean;
@@ -321,6 +336,8 @@ export class TreeGpuRingCompute {
   private groupCounts = new Array<number>(TREE_GPU_RING_GROUP_COUNT).fill(0);
   private shadowGroupCounts = new Array<number>(TREE_GPU_RING_SHADOW_GROUP_COUNT).fill(0);
   private terrainVisibilityCounts: TreeGpuTerrainVisibilityCounts | null = null;
+  private candidateCountBeforePrefilter = 0;
+  private candidateCountAfterPrefilter = 0;
   private overflowed = false;
   private shadowOverflowed = false;
   private runningReadbacks = 0;
@@ -342,8 +359,15 @@ export class TreeGpuRingCompute {
   ) {
     this.pipelines = pipelines;
     this.shadowOutputsReady = !!outputBuffers.shadowCell && !!outputBuffers.shadowIndirectArgs;
-    this.visibleClusterMaskWordCapacity = treeGpuRingSlotCount(settings);
+    const slotCount = treeGpuRingSlotCount(settings);
+    const workgroupSize = treeGpuRingWorkgroupSize(settings);
+    this.visibleClusterMaskWordCapacity = slotCount;
+    this.activeSlotBufferCapacity = Math.max(workgroupSize, roundUp(slotCount, workgroupSize));
+    this.fullSlotIndices = makeFullSlotIndices(slotCount);
+    this.candidateCountBeforePrefilter = slotCount;
+    this.candidateCountAfterPrefilter = slotCount;
     this.visibleClusterMaskBuffer = device.createBuffer({ label: "tree ring visible cluster mask", size: Math.max(1, this.visibleClusterMaskWordCapacity) * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.activeSlotBuffer = device.createBuffer({ label: "tree ring active slot indices", size: Math.max(1, this.activeSlotBufferCapacity) * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.paramBuffer = device.createBuffer({ label: "tree ring params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.counterBuffer = device.createBuffer({ label: "tree ring counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     this.shadowCounterBuffer = device.createBuffer({ label: "tree ring shadow counters", size: SHADOW_COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
@@ -380,6 +404,7 @@ export class TreeGpuRingCompute {
         { binding: 9, resource: this.hydroTexture.createView() },
         { binding: 10, resource: hydroSampler },
         { binding: 11, resource: { buffer: this.visibleClusterMaskBuffer } },
+        { binding: 12, resource: { buffer: this.activeSlotBuffer } },
       ],
     });
   }
@@ -396,6 +421,7 @@ export class TreeGpuRingCompute {
         { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
         { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
         storage(11, "read-only-storage"),
+        storage(12, "read-only-storage"),
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -415,6 +441,9 @@ export class TreeGpuRingCompute {
       maxShadowCastersPerGroup: 0,
       shadowCascadePlanes: undefined,
     };
+    const activeSlots = this.prepareActiveSlotIndices(effectiveParams.activeSlotIndices);
+    this.candidateCountBeforePrefilter = Math.max(0, Math.floor(effectiveParams.candidateCountBeforePrefilter ?? treeGpuRingSlotCount(this.settings)));
+    this.candidateCountAfterPrefilter = Math.max(0, Math.floor(effectiveParams.candidateCountAfterPrefilter ?? activeSlots.count));
     packTreeGpuRingParams(this.settings, effectiveParams, this.paramScratch);
     const u32 = new Uint32Array(this.paramScratch);
     u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 1] = readbackSlot ? 1 : 0;
@@ -430,10 +459,17 @@ export class TreeGpuRingCompute {
     } else {
       u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 3] = 0;
     }
+    this.device.queue.writeBuffer(
+      this.activeSlotBuffer,
+      0,
+      activeSlots.data.buffer,
+      activeSlots.data.byteOffset,
+      activeSlots.data.byteLength,
+    );
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
     const encoder = this.device.createCommandEncoder({ label: "tree ring compute encoder" });
     this.dispatchPipeline(encoder, this.pipelines.clear_counters, treeGpuRingCounterWorkgroups(this.settings));
-    this.dispatchPipeline(encoder, this.pipelines.tree_cull, treeGpuRingCullWorkgroups(this.settings));
+    this.dispatchPipeline(encoder, this.pipelines.tree_cull, treeGpuRingActiveCullWorkgroups(this.settings, activeSlots.paddedCount));
     this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, treeGpuRingBuildIndirectWorkgroups(this.settings));
     if (readbackSlot) {
       encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, COUNTER_BYTES);
@@ -489,7 +525,9 @@ export class TreeGpuRingCompute {
     return {
       status: !enabled ? "disabled" : this.failedReason ? "failed" : this.runningReadbacks > 0 ? "running" : "ready",
       reason: this.failedReason ?? undefined,
-      candidateCount: treeGpuRingSlotCount(this.settings),
+      candidateCount: this.candidateCountAfterPrefilter,
+      candidateCountBeforePrefilter: this.candidateCountBeforePrefilter,
+      candidateCountAfterPrefilter: this.candidateCountAfterPrefilter,
       acceptedCandidates,
       counts: { ...this.counts },
       groupCounts: [...this.groupCounts],
@@ -510,6 +548,7 @@ export class TreeGpuRingCompute {
     this.counterBuffer.destroy();
     this.shadowCounterBuffer.destroy();
     this.visibleClusterMaskBuffer.destroy();
+    this.activeSlotBuffer.destroy();
     this.fallbackShadowCellBuffer?.destroy();
     this.fallbackShadowIndirectBuffer?.destroy();
     this.digEdits.destroy();
@@ -519,6 +558,23 @@ export class TreeGpuRingCompute {
       if (slot.busy) slot.destroyAfterMap = true;
       else slot.buffer.destroy();
     }
+  }
+
+  private prepareActiveSlotIndices(source: Uint32Array | undefined): { data: Uint32Array; count: number; paddedCount: number } {
+    const slotCount = treeGpuRingSlotCount(this.settings);
+    const input = source === undefined ? this.fullSlotIndices : source;
+    const count = Math.min(input.length, slotCount);
+    const workgroupSize = treeGpuRingWorkgroupSize(this.settings);
+    const paddedCount = source !== undefined && count === 0
+      ? workgroupSize
+      : Math.max(workgroupSize, roundUp(Math.max(1, count), workgroupSize));
+    if (paddedCount > this.activeSlotBufferCapacity) {
+      throw new Error(`tree active slot list exceeds buffer capacity: ${paddedCount} > ${this.activeSlotBufferCapacity}`);
+    }
+    if (this.activeSlotScratch.length < paddedCount) this.activeSlotScratch = new Uint32Array(paddedCount);
+    this.activeSlotScratch.fill(TREE_GPU_RING_SENTINEL_SLOT, 0, paddedCount);
+    if (count > 0) this.activeSlotScratch.set(input.subarray(0, count), 0);
+    return { data: this.activeSlotScratch.subarray(0, paddedCount), count, paddedCount };
   }
 
   private dispatchPipeline(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline, workgroups: number): void {
@@ -541,4 +597,15 @@ function aggregateLodCounts(groupCounts: readonly number[]): TreeGpuRingCounts {
     for (const treeLod of TREE_LODS) counts[treeLod] += groupCounts[treeGpuRingGroupIndex(species, treeLod)] ?? 0;
   }
   return counts;
+}
+
+function roundUp(value: number, step: number): number {
+  const safeStep = Math.max(1, Math.floor(step));
+  return Math.ceil(Math.max(0, Math.floor(value)) / safeStep) * safeStep;
+}
+
+function makeFullSlotIndices(slotCount: number): Uint32Array {
+  const result = new Uint32Array(Math.max(0, Math.floor(slotCount)));
+  for (let i = 0; i < result.length; i++) result[i] = i;
+  return result;
 }
