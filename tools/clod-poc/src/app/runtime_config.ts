@@ -13,6 +13,13 @@ import {
   DEFAULT_MATERIAL_CHURN_CONFIG,
   type MaterialChurnConfig,
 } from "../rendering/material_churn/material_churn_diagnostics.js";
+import {
+  DEFAULT_RENDER_RESOLUTION_CONFIG,
+} from "../rendering/render_resolution_config.js";
+import type {
+  RenderResolutionConfig,
+  RenderResolutionPreset,
+} from "../rendering/render_resolution.js";
 
 export interface ClodRuntimeConfig {
   runtime: {
@@ -36,6 +43,7 @@ export interface ClodRuntimeConfig {
   renderNodeCache: ClodRenderNodeCacheConfig;
   selectionCutCache: SelectionCutCacheConfig;
   materialChurn: MaterialChurnConfig;
+  renderResolution: RenderResolutionConfig;
   digging: {
     holdIntervalMs: number;
   };
@@ -66,6 +74,7 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
   renderNodeCache: DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG,
   selectionCutCache: DEFAULT_SELECTION_CUT_CACHE_CONFIG,
   materialChurn: DEFAULT_MATERIAL_CHURN_CONFIG,
+  renderResolution: DEFAULT_RENDER_RESOLUTION_CONFIG,
   digging: {
     holdIntervalMs: 400,
   },
@@ -94,6 +103,24 @@ function worldOptions(value: unknown, fallback: number[]): number[] {
   return parsed.length > 0 ? parsed : fallback;
 }
 
+function renderResolutionPreset(value: unknown, fallback: RenderResolutionPreset): RenderResolutionPreset {
+  const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    dprCap: positiveNumber(raw.dpr_cap, fallback.dprCap),
+    renderScale: positiveNumber(raw.render_scale, fallback.renderScale),
+  };
+}
+
+function renderResolutionPresets(value: unknown, fallback: Record<string, RenderResolutionPreset>): Record<string, RenderResolutionPreset> {
+  const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const names = new Set([...Object.keys(fallback), ...Object.keys(raw)]);
+  const presets: Record<string, RenderResolutionPreset> = {};
+  for (const name of names) {
+    presets[name] = renderResolutionPreset(raw[name], fallback[name] ?? DEFAULT_RENDER_RESOLUTION_CONFIG.presets.high);
+  }
+  return presets;
+}
+
 export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeConfig {
   const defaults = DEFAULT_CLOD_RUNTIME_CONFIG;
   try {
@@ -107,6 +134,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
     const renderNodeCache = (raw.render_node_cache ?? {}) as Record<string, unknown>;
     const selectionCutCache = (raw.selection_cut_cache ?? {}) as Record<string, unknown>;
     const materialChurn = (raw.material_churn ?? {}) as Record<string, unknown>;
+    const renderResolution = (raw.render_resolution ?? {}) as Record<string, unknown>;
     const digging = (raw.digging ?? {}) as Record<string, unknown>;
     const profiling = (raw.profiling ?? {}) as Record<string, unknown>;
     return {
@@ -183,6 +211,19 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
           defaults.materialChurn.spikeWarnThresholdPerFrame,
         ),
         maxTrackedMaterials: positiveInt(materialChurn.max_tracked_materials, defaults.materialChurn.maxTrackedMaterials),
+      },
+      renderResolution: {
+        dprCap: positiveNumber(renderResolution.dpr_cap, defaults.renderResolution.dprCap),
+        renderScale: positiveNumber(renderResolution.render_scale, defaults.renderResolution.renderScale),
+        minEffectivePixelRatio: positiveNumber(
+          renderResolution.min_effective_pixel_ratio,
+          defaults.renderResolution.minEffectivePixelRatio,
+        ),
+        maxEffectivePixelRatio: positiveNumber(
+          renderResolution.max_effective_pixel_ratio,
+          defaults.renderResolution.maxEffectivePixelRatio,
+        ),
+        presets: renderResolutionPresets(renderResolution.presets, defaults.renderResolution.presets),
       },
       digging: {
         holdIntervalMs: positiveInt(digging.hold_interval_ms, defaults.digging.holdIntervalMs),
