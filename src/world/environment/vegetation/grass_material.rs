@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use bevy::{
     diagnostic::FrameCount,
     pbr::{Material, MaterialPipeline, MaterialPipelineKey},
@@ -8,8 +10,12 @@ use bevy::{
 };
 use bevy_mesh::MeshVertexBufferLayoutRef;
 use bevy_shader::ShaderRef;
+use serde::Deserialize;
 
 pub const VEGETATION_DEPTH_PREPASS_ENV: &str = "VOXEL_VEGETATION_DEPTH_PREPASS";
+pub const VEGETATION_DEPTH_PREPASS_CONFIG_PATH: &str = "assets/config/vegetation.yaml";
+
+static VEGETATION_DEPTH_PREPASS_ENABLED: OnceLock<bool> = OnceLock::new();
 
 /// Uniform data for grass material - must match WGSL struct layout
 /// Enhanced with contact shadow and SSS parameters
@@ -43,16 +49,48 @@ pub struct GrassMaterialUniform {
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VegetationDepthPrepassConfig {
     pub enabled: bool,
+    pub source: &'static str,
+}
+
+#[derive(Deserialize)]
+struct VegetationConfigFile {
+    vegetation_depth_prepass: Option<VegetationDepthPrepassSection>,
+}
+
+#[derive(Deserialize)]
+struct VegetationDepthPrepassSection {
+    enabled: Option<bool>,
 }
 
 impl VegetationDepthPrepassConfig {
-    pub fn from_env() -> Self {
-        Self::from_env_value(std::env::var(VEGETATION_DEPTH_PREPASS_ENV).ok().as_deref())
+    pub fn load() -> Self {
+        let config_enabled = load_config_file_enabled(VEGETATION_DEPTH_PREPASS_CONFIG_PATH);
+        Self::from_sources(
+            config_enabled,
+            std::env::var(VEGETATION_DEPTH_PREPASS_ENV).ok().as_deref(),
+        )
     }
 
-    fn from_env_value(value: Option<&str>) -> Self {
+    pub fn from_env() -> Self {
+        Self::from_sources(None, std::env::var(VEGETATION_DEPTH_PREPASS_ENV).ok().as_deref())
+    }
+
+    fn from_sources(config_enabled: Option<bool>, env_value: Option<&str>) -> Self {
+        if let Some(value) = env_value {
+            return Self {
+                enabled: env_flag_enabled(value),
+                source: "env",
+            };
+        }
+        if let Some(enabled) = config_enabled {
+            return Self {
+                enabled,
+                source: "config",
+            };
+        }
         Self {
-            enabled: value.map(env_flag_enabled).unwrap_or(false),
+            enabled: false,
+            source: "default",
         }
     }
 
@@ -63,7 +101,7 @@ impl VegetationDepthPrepassConfig {
 
 impl Default for VegetationDepthPrepassConfig {
     fn default() -> Self {
-        Self::from_env()
+        Self::load()
     }
 }
 
@@ -218,7 +256,14 @@ impl Material for GrassMaterial {
 }
 
 pub fn vegetation_depth_prepass_enabled() -> bool {
-    VegetationDepthPrepassConfig::from_env().enabled
+    *VEGETATION_DEPTH_PREPASS_ENABLED
+        .get_or_init(|| VegetationDepthPrepassConfig::load().enabled)
+}
+
+fn load_config_file_enabled(path: &str) -> Option<bool> {
+    let config_str = std::fs::read_to_string(path).ok()?;
+    let config_file: VegetationConfigFile = serde_yaml::from_str(&config_str).ok()?;
+    config_file.vegetation_depth_prepass?.enabled
 }
 
 fn env_flag_enabled(value: &str) -> bool {
@@ -271,8 +316,9 @@ pub fn update_grass_sun_direction(
 
 pub fn log_vegetation_depth_prepass_status(config: Res<VegetationDepthPrepassConfig>) {
     info!(
-        "Vegetation depth prepass: {} ({}={})",
+        "Vegetation depth prepass: {} (source={}, {}={})",
         config.status_label(),
+        config.source,
         VEGETATION_DEPTH_PREPASS_ENV,
         if config.enabled { "1" } else { "0" }
     );
@@ -345,20 +391,36 @@ mod tests {
     }
 
     #[test]
-    fn depth_prepass_config_is_disabled_without_env_value() {
-        let config = VegetationDepthPrepassConfig::from_env_value(None);
+    fn depth_prepass_config_is_disabled_without_sources() {
+        let config = VegetationDepthPrepassConfig::from_sources(None, None);
         assert!(!config.enabled);
+        assert_eq!(config.source, "default");
         assert_eq!(config.status_label(), "off");
     }
 
     #[test]
-    fn depth_prepass_config_uses_env_value() {
-        let config = VegetationDepthPrepassConfig::from_env_value(Some("true"));
+    fn depth_prepass_config_uses_config_value() {
+        let config = VegetationDepthPrepassConfig::from_sources(Some(true), None);
         assert!(config.enabled);
+        assert_eq!(config.source, "config");
         assert_eq!(config.status_label(), "on");
 
-        let config = VegetationDepthPrepassConfig::from_env_value(Some("false"));
+        let config = VegetationDepthPrepassConfig::from_sources(Some(false), None);
         assert!(!config.enabled);
+        assert_eq!(config.source, "config");
+        assert_eq!(config.status_label(), "off");
+    }
+
+    #[test]
+    fn depth_prepass_env_overrides_config_value() {
+        let config = VegetationDepthPrepassConfig::from_sources(Some(false), Some("true"));
+        assert!(config.enabled);
+        assert_eq!(config.source, "env");
+        assert_eq!(config.status_label(), "on");
+
+        let config = VegetationDepthPrepassConfig::from_sources(Some(true), Some("false"));
+        assert!(!config.enabled);
+        assert_eq!(config.source, "env");
         assert_eq!(config.status_label(), "off");
     }
 }
