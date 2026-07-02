@@ -52,6 +52,8 @@ export interface PostProcessSettings {
   aerialPerspectiveEnd?: number;
   aerialPerspectiveStrength?: number;
   aerialPerspectiveColor?: PostProcessColor;
+  /** WebGPU volumetric cloud post stage. WebGL ignores this flag. */
+  cloudsEnabled?: boolean;
   /** WebGPU GTAO stage. WebGL ignores this flag. */
   gtaoEnabled?: boolean;
   /** WebGPU froxel volumetrics stage. WebGL ignores this flag. */
@@ -107,6 +109,7 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   aerialPerspectiveEnd: 1800,
   aerialPerspectiveStrength: 0.35,
   aerialPerspectiveColor: [0.62, 0.72, 0.86],
+  cloudsEnabled: true,
   gtaoEnabled: true,
   froxelsEnabled: true,
   bounceEnabled: true,
@@ -220,6 +223,7 @@ export function applyPostProcessQueryOverrides(
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
+    next.cloudsEnabled = false;
     next.gtaoEnabled = false;
     next.froxelsEnabled = false;
     next.bounceEnabled = false;
@@ -245,6 +249,7 @@ export function applyPostProcessQueryOverrides(
     next.contactShadowsEnabled = false;
     next.clarityEnabled = false;
     next.aerialPerspectiveEnabled = false;
+    next.cloudsEnabled = false;
     next.gtaoEnabled = false;
     next.froxelsEnabled = false;
     next.bounceEnabled = false;
@@ -286,6 +291,12 @@ export function applyPostProcessQueryOverrides(
 
   const fog = flagValue(searchParams, "fog") ?? flagValue(searchParams, "haze");
   if (fog === false) next.aerialPerspectiveEnabled = false;
+
+  const clouds = flagValue(searchParams, "clouds")
+    ?? flagValue(searchParams, "cloud")
+    ?? flagValue(searchParams, "volumetricClouds")
+    ?? flagValue(searchParams, "volumetricclouds");
+  if (clouds !== null) next.cloudsEnabled = clouds;
 
   const gtao = flagValue(searchParams, "gtao")
     ?? flagValue(searchParams, "ao")
@@ -395,6 +406,7 @@ export function parsePostProcessSettings(yamlText = postProcessYaml): Required<P
       clarityEnabled: booleanValue(clarity.enabled, fallback.clarityEnabled),
       claritySharpen: finiteNumber(clarity.sharpen, fallback.claritySharpen),
       clarityDither: finiteNumber(clarity.dither, fallback.clarityDither),
+      cloudsEnabled: booleanValue(webgpu.clouds_enabled, fallback.cloudsEnabled),
       gtaoEnabled: booleanValue(webgpu.gtao_enabled, fallback.gtaoEnabled),
       froxelsEnabled: booleanValue(webgpu.froxels_enabled, fallback.froxelsEnabled),
       bounceEnabled: booleanValue(webgpu.bounce_enabled, fallback.bounceEnabled),
