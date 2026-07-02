@@ -1,4 +1,5 @@
 import type GUI from "lil-gui";
+import { loadBundledSunLightOptions } from "../../terrain/sun_visibility/sun_light_config_loader.js";
 
 interface SunLightGuiOptions {
   active: boolean;
@@ -55,15 +56,15 @@ function clearRuntimeCache(): void {
 }
 
 export function createSunLightGui(gui: GUI): void {
-  const initialOptions = readRuntimeOptions();
+  const initialOptions = readRuntimeOptions() ?? loadBundledSunLightOptions();
   const folder = gui.addFolder("sun light cache");
   const state = {
-    active: initialOptions?.active ?? new URLSearchParams(location.search).get("sunLightCache") !== "0",
-    stats: new URLSearchParams(location.search).get("sunLightStats") === "1",
-    maxTilesPerFrame: initialOptions?.build?.maxTilesPerFrame ?? 2,
-    maxBuildMsPerFrame: initialOptions?.build?.maxBuildMsPerFrame ?? 1,
-    tileResolution: initialOptions?.tile?.resolution ?? 32,
-    cameraTileRadius: initialOptions?.debugView?.cameraTileRadius ?? 1,
+    active: new URLSearchParams(location.search).get("sunLightCache") !== "0" && initialOptions.active,
+    stats: new URLSearchParams(location.search).get("sunLightStats") === "1" || initialOptions.diagnostics,
+    maxTilesPerFrame: initialOptions.build.maxTilesPerFrame,
+    maxBuildMsPerFrame: initialOptions.build.maxBuildMsPerFrame,
+    tileResolution: initialOptions.tile.resolution,
+    cameraTileRadius: initialOptions.debugView.cameraTileRadius,
     entries: 0,
     pending: 0,
     hits: 0,
