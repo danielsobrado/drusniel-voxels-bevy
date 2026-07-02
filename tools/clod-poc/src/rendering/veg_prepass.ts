@@ -55,6 +55,7 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: Depth
     : mesh.material as Material;
   colorMaterial.depthFunc = EqualDepth;
   colorMaterial.depthWrite = false;
+  colorMaterial.needsUpdate = true;
   mesh.material = colorMaterial;
 
   const twin = new Mesh(mesh.geometry, material);
