@@ -73,6 +73,11 @@ export function createEnvironmentGui(
     gtaoEnabled: state.postProcessGtaoEnabled,
     froxelsEnabled: state.postProcessFroxelsEnabled,
     bounceEnabled: state.postProcessBounceEnabled,
+    godRaysMode: state.godRaysMode,
+    godRaysDensity: state.godRaysDensity,
+    godRaysDecay: state.godRaysDecay,
+    godRaysWeight: state.godRaysWeight,
+    godRaysExposure: state.godRaysExposure,
   });
   const syncWebGpuStageMirror = (settings: Partial<PostProcessSettings>) => {
     const mirror = deps.postProcess as unknown as WebGpuPostProcessStageMirror | null;
