@@ -23,6 +23,7 @@ export interface EnvironmentGuiDeps {
 }
 
 interface WebGpuPostProcessStageMirror {
+  cloudsEnabled?: boolean;
   gtaoEnabled?: boolean;
   froxelsEnabled?: boolean;
   bounceEnabled?: boolean;
@@ -68,6 +69,7 @@ export function createEnvironmentGui(
       state.postProcessAerialPerspectiveColorG,
       state.postProcessAerialPerspectiveColorB,
     ],
+    cloudsEnabled: state.postProcessCloudsEnabled,
     gtaoEnabled: state.postProcessGtaoEnabled,
     froxelsEnabled: state.postProcessFroxelsEnabled,
     bounceEnabled: state.postProcessBounceEnabled,
@@ -75,6 +77,7 @@ export function createEnvironmentGui(
   const syncWebGpuStageMirror = (settings: Partial<PostProcessSettings>) => {
     const mirror = deps.postProcess as unknown as WebGpuPostProcessStageMirror | null;
     if (!mirror) return;
+    mirror.cloudsEnabled = settings.cloudsEnabled;
     mirror.gtaoEnabled = settings.gtaoEnabled;
     mirror.froxelsEnabled = settings.froxelsEnabled;
     mirror.bounceEnabled = settings.bounceEnabled;
@@ -167,6 +170,7 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessAerialPerspectiveStart", 0, 4000, 10).name("aerial start m").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveEnd", 1, 8000, 10).name("aerial end m").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveStrength", 0, 1, 0.01).name("aerial strength").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessCloudsEnabled").name("volumetric clouds").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessContactShadowsEnabled").name("contact shadows").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessContactShadowsStrength", 0, 1, 0.01).name("contact strength").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessContactShadowsRadiusPx", 0.5, 8, 0.25).name("contact radius px").onChange(applyPostProcessSettings),
@@ -236,6 +240,7 @@ export function createEnvironmentGui(
       state.postProcessAerialPerspectiveColorR = aerialColor[0];
       state.postProcessAerialPerspectiveColorG = aerialColor[1];
       state.postProcessAerialPerspectiveColorB = aerialColor[2];
+      state.postProcessCloudsEnabled = DEFAULT_POST_PROCESS_SETTINGS.cloudsEnabled;
       state.postProcessGtaoEnabled = DEFAULT_POST_PROCESS_SETTINGS.gtaoEnabled;
       state.postProcessFroxelsEnabled = DEFAULT_POST_PROCESS_SETTINGS.froxelsEnabled;
       state.postProcessBounceEnabled = DEFAULT_POST_PROCESS_SETTINGS.bounceEnabled;
