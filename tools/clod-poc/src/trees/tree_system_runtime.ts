@@ -107,6 +107,7 @@ export class TreeSystem {
   }
 
   setDepthPrepassMaxLod(maxLod: TreeDepthPrepassMaxLod): void {
+    if (this.treePrepassMaxLod === maxLod) return;
     this.treePrepassMaxLod = maxLod;
     this.useTreePrepass = treeDepthPrepassEnabled(maxLod);
     this.useCpuTreePrepass = this.cpuTreePrepassRequested && this.useTreePrepass;
