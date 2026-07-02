@@ -121,7 +121,7 @@ export class ClodApplyQueue {
         if (applied) this.deps.onGeometryApplied?.(job.node);
         if (job.node.level === 0) this.enqueueCollider(job.node, job.enqueuedFrame);
       } catch (error) {
-        this.deps.onApplyFailed?.("geometry", job.node, error);
+        this.reportFailure("geometry", job.node, error);
       }
       geometryJobs++;
     }
@@ -143,7 +143,7 @@ export class ClodApplyQueue {
         }
         this.statsRecorder.recordCollider(this.deps.applyCollider(job.node));
       } catch (error) {
-        this.deps.onApplyFailed?.("collider", job.node, error);
+        this.reportFailure("collider", job.node, error);
       }
       colliderJobs++;
     }
@@ -227,5 +227,13 @@ export class ClodApplyQueue {
       }
     }
     this.statsRecorder.setQueueDepths(this.geometryJobs.length, this.colliderJobs.length, staleVisibleNodes);
+  }
+
+  private reportFailure(kind: ClodApplyFailureKind, node: ClodPageNode, error: unknown): void {
+    if (this.deps.onApplyFailed) {
+      this.deps.onApplyFailed(kind, node, error);
+      return;
+    }
+    console.error(`[clod-apply] ${kind} apply failed for ${node.id}:`, error);
   }
 }
