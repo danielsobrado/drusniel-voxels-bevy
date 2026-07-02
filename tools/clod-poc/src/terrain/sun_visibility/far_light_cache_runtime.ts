@@ -38,6 +38,9 @@ export function createSunLightCacheRuntime(options: any) {
       staleTiles.clear();
       core.stats.refreshes += 1;
     },
+    tiles() {
+      return [...core.entries.values()].map((entry) => entry.tile);
+    },
     stats() {
       core.stats.active = options.active;
       core.stats.entries = core.entries.size;
