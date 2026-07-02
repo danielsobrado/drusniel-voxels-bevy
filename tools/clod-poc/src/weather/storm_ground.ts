@@ -24,36 +24,23 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { Rng, hashCombine, hashString } from "../core/seed.js";
-import type { RainWeatherSamplers, StormWeatherSettings, StormWeatherStats } from "./rain.js";
-import type { RainWeatherShaderHandle } from "./rainShaderMaterial.js";
+import type { StormWeatherSettings, StormWeatherStats } from "./rain.js";
+import type { RainWeatherShaderHandle } from "./rain_shader_handle.js";
+import {
+  DEFAULT_SEED,
+  IMPACT_SURFACE_OFFSET,
+  REPOSITION_DISTANCE,
+  STRIKE_COUNT,
+} from "./storm_ground_constants.js";
+import { createImpactGeometry, createStrikeGeometry, markStrikeAttributesDirty } from "./storm_ground_geometry.js";
+import { StormGroundStrikePlacement } from "./storm_ground_placement.js";
+import type { StormLightningOptions, StrikeBuffers } from "./storm_ground_types.js";
+import { applyStormWeatherToMaterials, clampStormWeatherSettings, isWeatherVisible } from "./weather_settings.js";
+
+export type { StormLightningOptions } from "./storm_ground_types.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
-
-interface StrikeBuffers {
-  center: Float32Array;
-  normal: Float32Array;
-  params: Float32Array;
-}
-
-export interface StormLightningOptions {
-  scene: THREE.Scene;
-  isWebGpu: boolean;
-  samplers: RainWeatherSamplers;
-  worldCells: number;
-  seed?: number;
-}
-
-const STRIKE_COUNT = 32;
-const IMPACT_ROOT_COUNT = 6;
-const STRIKE_AREA = 48;
-const REPOSITION_DISTANCE = 8;
-const SURFACE_OFFSET = 0.09;
-const IMPACT_SURFACE_OFFSET = 0.045;
-const WATER_DEPTH_EPSILON = 0.035;
-const WATER_MASK_EPSILON = 0.05;
-const DEFAULT_SEED = 0x57a4d0c7;
 
 export class StormLightningSystem {
   private readonly group = new THREE.Group();
@@ -62,16 +49,12 @@ export class StormLightningSystem {
   private readonly strikeMesh: THREE.Mesh;
   private readonly impactMesh: THREE.Mesh;
   private readonly buffers: StrikeBuffers;
-  private readonly samplers: RainWeatherSamplers;
-  private readonly worldCells: number;
-  private readonly seed: number;
+  private readonly placement: StormGroundStrikePlacement;
   private readonly placementCenter = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
   private settings = { enabled: false, intensity: 1 };
 
   constructor(options: StormLightningOptions) {
-    this.samplers = options.samplers;
-    this.worldCells = options.worldCells;
-    this.seed = options.seed ?? DEFAULT_SEED;
+    this.placement = new StormGroundStrikePlacement(options.samplers, options.worldCells, options.seed ?? DEFAULT_SEED);
     this.group.name = "weather-storm";
     this.group.visible = this.settings.enabled;
 
@@ -95,14 +78,9 @@ export class StormLightningSystem {
   }
 
   applySettings(settings: StormWeatherSettings): void {
-    this.settings = {
-      enabled: settings.enabled,
-      intensity: THREE.MathUtils.clamp(settings.intensity, 0, 1.6),
-    };
-    this.group.visible = this.settings.enabled && this.settings.intensity > 0.001;
-    for (const material of [this.strikeMaterial, this.impactMaterial]) {
-      material.setIntensity(this.settings.intensity);
-    }
+    this.settings = clampStormWeatherSettings(settings);
+    this.group.visible = isWeatherVisible(this.settings);
+    applyStormWeatherToMaterials(this.settings, [this.strikeMaterial, this.impactMaterial]);
   }
 
   update(deltaSeconds: number, elapsedSeconds: number, focus: THREE.Vector3): void {
@@ -116,7 +94,8 @@ export class StormLightningSystem {
       this.placementCenter.distanceToSquared(focus) > REPOSITION_DISTANCE * REPOSITION_DISTANCE
     ) {
       this.placementCenter.copy(focus);
-      this.repositionStrikes(focus);
+      this.placement.reposition(this.buffers, focus);
+      markStrikeAttributesDirty([this.strikeMesh.geometry, this.impactMesh.geometry]);
     }
   }
 
@@ -131,140 +110,6 @@ export class StormLightningSystem {
     this.strikeMaterial.dispose();
     this.impactMaterial.dispose();
   }
-
-  private repositionStrikes(focus: THREE.Vector3): void {
-    const cellX = Math.floor(focus.x / REPOSITION_DISTANCE);
-    const cellZ = Math.floor(focus.z / REPOSITION_DISTANCE);
-    const seed = hashCombine(hashCombine(this.seed, cellX >>> 0), cellZ >>> 0);
-    const rng = new Rng(hashCombine(seed, hashString("storm-visible-strikes")));
-    const count = this.buffers.params.length / 4;
-
-    for (let i = 0; i < count; i++) {
-      const point = this.findStrikePoint(rng, focus);
-      const c = i * 3;
-      const p = i * 4;
-      if (!point) {
-        this.buffers.center[c] = focus.x;
-        this.buffers.center[c + 1] = focus.y;
-        this.buffers.center[c + 2] = focus.z;
-        this.buffers.normal[c] = 0;
-        this.buffers.normal[c + 1] = 1;
-        this.buffers.normal[c + 2] = 0;
-        this.buffers.params[p] = 0;
-        this.buffers.params[p + 1] = 0;
-        this.buffers.params[p + 2] = rng.float();
-        this.buffers.params[p + 3] = 0;
-        continue;
-      }
-
-      this.buffers.center[c] = point.x;
-      this.buffers.center[c + 1] = point.y;
-      this.buffers.center[c + 2] = point.z;
-      this.buffers.normal[c] = point.normal.x;
-      this.buffers.normal[c + 1] = point.normal.y;
-      this.buffers.normal[c + 2] = point.normal.z;
-      this.buffers.params[p] = rng.range(12.0, 30.0);
-      this.buffers.params[p + 1] = rng.range(0.34, 0.82);
-      this.buffers.params[p + 2] = rng.float();
-      this.buffers.params[p + 3] = 1;
-    }
-
-    this.markAttributesDirty();
-  }
-
-  private findStrikePoint(rng: Rng, focus: THREE.Vector3): { x: number; y: number; z: number; normal: THREE.Vector3 } | null {
-    for (let attempt = 0; attempt < 32; attempt++) {
-      const x = THREE.MathUtils.clamp(focus.x + rng.range(-STRIKE_AREA * 0.5, STRIKE_AREA * 0.5), 0, this.worldCells);
-      const z = THREE.MathUtils.clamp(focus.z + rng.range(-STRIKE_AREA * 0.5, STRIKE_AREA * 0.5), 0, this.worldCells);
-      const water = this.samplers.waterSample(x, z);
-      const isWater = water.depth > WATER_DEPTH_EPSILON && water.bodyMask > WATER_MASK_EPSILON;
-      if (isWater) {
-        return { x, y: water.waterY + SURFACE_OFFSET, z, normal: new THREE.Vector3(0, 1, 0) };
-      }
-
-      const [nx, ny, nz] = this.samplers.surfaceNormal(x, z);
-      const normal = new THREE.Vector3(nx, ny, nz);
-      if (normal.lengthSq() < 0.000001) normal.set(0, 1, 0);
-      else normal.normalize();
-      return { x, y: this.samplers.surfaceHeight(x, z) + SURFACE_OFFSET, z, normal };
-    }
-    return null;
-  }
-
-  private markAttributesDirty(): void {
-    for (const geometry of [this.strikeMesh.geometry, this.impactMesh.geometry]) {
-      for (const key of ["aLightningCenter", "aLightningNormal", "aLightningParams"]) {
-        const attr = geometry.getAttribute(key);
-        if (attr) attr.needsUpdate = true;
-      }
-    }
-  }
-}
-
-function createStrikeGeometry(count: number): { geometry: THREE.InstancedBufferGeometry; buffers: StrikeBuffers } {
-  const geometry = new THREE.InstancedBufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
-    -1, 0, 0,
-    1, 0, 0,
-    -1, 1, 0,
-    1, 1, 0,
-    -1, 0, 1,
-    1, 0, 1,
-    -1, 1, 1,
-    1, 1, 1,
-  ]), 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
-    0, 0,
-    1, 0,
-    0, 1,
-    1, 1,
-    0, 0,
-    1, 0,
-    0, 1,
-    1, 1,
-  ]), 2));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([
-    0, 1, 2,
-    2, 1, 3,
-    4, 5, 6,
-    6, 5, 7,
-  ]), 1));
-  geometry.instanceCount = count;
-
-  const buffers: StrikeBuffers = {
-    center: new Float32Array(count * 3),
-    normal: new Float32Array(count * 3),
-    params: new Float32Array(count * 4),
-  };
-  for (let i = 0; i < count; i++) buffers.normal[i * 3 + 1] = 1;
-  setStrikeAttributes(geometry, buffers);
-  return { geometry, buffers };
-}
-
-function createImpactGeometry(buffers: StrikeBuffers): THREE.InstancedBufferGeometry {
-  const geometry = new THREE.InstancedBufferGeometry();
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-  for (let root = 0; root < IMPACT_ROOT_COUNT; root++) {
-    const base = root * 4;
-    positions.push(-1, 0, root, 1, 0, root, -1, 1, root, 1, 1, root);
-    uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
-    indices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
-  }
-
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uvs), 2));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array(indices), 1));
-  geometry.instanceCount = buffers.params.length / 4;
-  setStrikeAttributes(geometry, buffers);
-  return geometry;
-}
-
-function setStrikeAttributes(geometry: THREE.InstancedBufferGeometry, buffers: StrikeBuffers): void {
-  geometry.setAttribute("aLightningCenter", new THREE.InstancedBufferAttribute(buffers.center, 3));
-  geometry.setAttribute("aLightningNormal", new THREE.InstancedBufferAttribute(buffers.normal, 3));
-  geometry.setAttribute("aLightningParams", new THREE.InstancedBufferAttribute(buffers.params, 4));
 }
 
 const FLASH_GLSL = /* glsl */ `
@@ -622,7 +467,7 @@ function createImpactNodeMaterial(): RainWeatherShaderHandle {
     alpha.lessThan(0.003).discard();
 
     const brightness: TslNode = body.mul(2.45).add(glow.mul(1.08)).add(baseBloom.mul(1.35));
-    return vec4(uEffectColor.mul(uMainColor).mul(brightness).mul(uEmissionPower), min(alpha, 1.0));
+    return vec4(uEffectColor.mul(uMainColor).mul(brightness), min(alpha, 1.0));
   });
 
   const material = new MeshBasicNodeMaterial();
