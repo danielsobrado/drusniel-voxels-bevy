@@ -34,7 +34,7 @@ export interface VegetationSliceState {
   grassVisiblePatches: string;
   grassTierSummary: string;
   grassEdgeSuppressed: number;
-  grassCandidateCount: number;
+  grassCandidateCount: string;
   grassPatchRebuildCount: number;
   grassBuildMs: number;
   stonesEnabled: boolean;
@@ -136,7 +136,7 @@ export function createVegetationSliceState(input: {
     grassVisiblePatches: "0/0",
     grassTierSummary: "0/0/0/0",
     grassEdgeSuppressed: 0,
-    grassCandidateCount: 0,
+    grassCandidateCount: "0",
     grassPatchRebuildCount: 0,
     grassBuildMs: 0,
     stonesEnabled: stoneConfig.enabled,
