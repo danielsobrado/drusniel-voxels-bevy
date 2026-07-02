@@ -3,7 +3,6 @@ import { runTerrainFramePhase } from "./frame_loop/terrain_frame_phase.js";
 import { runVegetationFramePhase } from "./frame_loop/vegetation_frame_phase.js";
 import { runStatsSyncPhase } from "./frame_loop/stats_sync_phase.js";
 import { runRenderPhase } from "./frame_loop/render_phase.js";
-import { submitMsChanged } from "./frame_loop/frame_timing.js";
 import { createBorderOceanDebugPanel } from "../water/border_ocean_debug_panel.js";
 import { createFramePerfPhaseTiming, createFramePerfProbeFromQuery, type FramePerfPhaseTiming } from "./frame_loop/perf_probe.js";
 import { materialChurnDiagnostics } from "../rendering/material_churn/material_churn_diagnostics.js";
@@ -41,14 +40,14 @@ function timed<T>(
 }
 
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
-  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, floatingOrigin, shadowProxy, clodShadow, canopy, construction, combat, spells } = deps;
+  const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, clodShadow, canopy, construction, combat, spells } = deps;
   let elapsedSeconds = 0;
   const averageFpsRef = stats.averageFpsRef;
   const fpsSamples: number[] = [];
   let lastFrameAt = performance.now();
   let lastFpsRefreshAt = lastFrameAt;
   let lastDebugCounterMirrorAt = -Infinity;
-  let grassProfileFrame = { value: 0 };
+  const grassProfileFrame = { value: 0 };
   let materialChurnFrame = 0;
   const debugQuery = new URLSearchParams(window.location.search);
   const borderOceanDebugPanel = diagnostics.queryScene === "border-ocean" || debugQuery.get("borderOceanDebug") === "1"
@@ -118,28 +117,24 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     const phaseTiming = createFramePerfPhaseTiming();
     let selectionStats = terrain.selectionController.stats();
     let playerDelta = 0;
+
     timed(collectFrameTiming, phaseTiming, "frameSetupMs", () => {
       terrain.selectionController.advanceFrame();
       selectionStats = terrain.selectionController.stats();
       player.playerInputController.playerTimer.update();
       playerDelta = Math.min(player.playerInputController.playerTimer.getDelta(), 0.1);
-      if (vegetation.propController) {
-        vegetation.propController.updateDynamicPlacements();
-      }
-      if (terrain.updateFloatingOriginForView) {
-        terrain.updateFloatingOriginForView();
-      }
+      vegetation.propController?.updateDynamicPlacements();
     });
     updateAverageFps();
 
     timed(collectFrameTiming, phaseTiming, "inputMs", () => {
       player.controls.update();
-      if (construction.constructionController) construction.constructionController.update(player.playerInputController.keys);
-      if (combat.combatController) combat.combatController.update(playerDelta);
-      if (spells.spellController) spells.spellController.update(playerDelta);
+      construction?.update();
+      combat?.update(playerDelta);
+      spells?.update(playerDelta);
     });
 
-    timed(collectFrameTiming, phaseTiming, "selectionMs", () => {
+    timed(collectFrameTiming, phaseTiming, "selectionUpdateMs", () => {
       terrain.updateSelection();
       selectionStats = terrain.selectionController.stats();
     });
@@ -158,64 +153,62 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       pruneRenderNodeCache: terrain.pruneRenderNodeCache,
     }));
 
-    if (waterWeather.weatherController) {
-      elapsedSeconds += playerDelta;
-      timed(collectFrameTiming, phaseTiming, "weatherMs", () => waterWeather.weatherController.update(playerDelta, elapsedSeconds, render.camera.position, terrainPhaseResult.grassCenter));
-    }
-
     timed(collectFrameTiming, phaseTiming, "farSummaryMs", () => {
-      farSummary.update();
-      floatingOrigin.update();
-      shadowProxy.update();
-      clodShadow.update();
-      canopy.update();
+      farSummary?.onFarSummaryUpdate?.(selectionStats.frameId, playerDelta, render.camera);
+      shadowProxy?.rebuildIfNeeded();
+      clodShadow?.update();
+      canopy?.update(render.camera.position.x, render.camera.position.z);
     });
 
-    const vegetationResult = timed(collectFrameTiming, phaseTiming, "vegetationTotalMs", () => runVegetationFramePhase({
-      state: player.state,
-      player: player.player,
-      controls: player.controls,
-      interaction: player.interaction,
-      queryScene: diagnostics.queryScene,
-      queryCanopy: diagnostics.queryCanopy,
+    elapsedSeconds += playerDelta;
+    const vegetationTiming = timed(collectFrameTiming, phaseTiming, "vegetationTotalMs", () => runVegetationFramePhase({
+      elapsedSeconds,
+      playerDelta,
       ringCenter: terrainPhaseResult.ringCenter,
       grassCenter: terrainPhaseResult.grassCenter,
-      grassProfileFrame,
-      vegetation,
-      worldCells: terrain.worldCells,
-    }));
-    const currentTreeStats = vegetationResult.currentTreeStats;
-
-    timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
+      camera: render.camera,
       state: player.state,
-      player: player.player,
-      renderer: render.renderer,
-      selectionStats,
-      vegetationResult,
-      terrainStats: {
-        chunkGroupsBuiltThisFrame: terrainPhaseResult.chunkGroupsBuiltThisFrame,
-      },
-      weatherStats: waterWeather.updateWeatherStats(),
-      frameTiming: collectFrameTiming ? phaseTiming : null,
-      stats: {
-        getGrassStats: stats.getGrassStats,
-        setGrassStats: stats.setGrassStats,
-        getTreeStats: stats.getTreeStats,
-        setTreeStats: stats.setTreeStats,
-        getStoneStats: stats.getStoneStats,
-        setStoneStats: stats.setStoneStats,
-        getUnderstoryStats: stats.getUnderstoryStats,
-        setUnderstoryStats: stats.setUnderstoryStats,
-        getForestLightingStats: stats.getForestLightingStats,
-        setForestLightingStats: stats.setForestLightingStats,
-        formatTreeGpuSummary: stats.formatTreeGpuSummary,
-        formatUnderstoryGpuSummary: stats.formatUnderstoryGpuSummary,
-        statsPresenter: stats.statsPresenter,
-      },
+      grassController: vegetation.grassController,
+      treeController: vegetation.treeController,
+      understoryController: vegetation.understoryController,
+      forestLightingController: vegetation.forestLightingController,
+      applyForestLightingToPropMaterials: vegetation.applyForestLightingToPropMaterials,
+      stoneController: vegetation.stoneController,
+      propController: vegetation.propController,
+      waterController: waterWeather.waterController,
+      deepOceanSurface: waterWeather.deepOceanSurface,
+      deepOceanMaterial: waterWeather.deepOceanMaterial,
+      weatherController: waterWeather.weatherController,
+      updateWeatherStats: waterWeather.updateWeatherStats,
+      weatherStatsController: waterWeather.weatherStatsController,
+      currentLighting: vegetation.currentLighting,
+      selectionFrameId: selectionStats.frameId,
+      worldCells: terrain.worldCells,
+      collectTiming: collectFrameTiming,
     }));
 
-    // TP-1: resolve the previous frame's GPU timestamps and mirror the
-    // per-pass ms into the long-view stats hook when present.
+    const statsSyncResult = timed(collectFrameTiming, phaseTiming, "statsSyncMs", () => runStatsSyncPhase({
+      state: player.state,
+      grassSystem: vegetation.grassSystem,
+      treeSystem: vegetation.treeSystem,
+      stoneSystem: vegetation.stoneSystem,
+      understorySystem: vegetation.understorySystem,
+      forestLightingSystem: vegetation.forestLightingSystem,
+      getGrassStats: stats.getGrassStats,
+      setGrassStats: stats.setGrassStats,
+      getTreeStats: stats.getTreeStats,
+      setTreeStats: stats.setTreeStats,
+      getStoneStats: stats.getStoneStats,
+      setStoneStats: stats.setStoneStats,
+      getUnderstoryStats: stats.getUnderstoryStats,
+      setUnderstoryStats: stats.setUnderstoryStats,
+      getForestLightingStats: stats.getForestLightingStats,
+      setForestLightingStats: stats.setForestLightingStats,
+      formatTreeGpuSummary: stats.formatTreeGpuSummary,
+      formatUnderstoryGpuSummary: stats.formatUnderstoryGpuSummary,
+      statsPresenter: stats.statsPresenter,
+    }));
+
     render.gpuPassTiming?.update();
     if (render.gpuPassTiming?.enabled) {
       const hooks = render.getHooks();
@@ -226,20 +219,16 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       }
     }
 
-    // Mirror debug/perf counters at HUD cadence unless frame profiling is active.
-    // This keeps gameplay frames from spending work on diagnostic maps every tick.
     if (collectFrameTiming || frameStart - lastDebugCounterMirrorAt >= DEBUG_COUNTER_MIRROR_INTERVAL_MS) {
       lastDebugCounterMirrorAt = frameStart;
       const hooks = render.getHooks();
       if (hooks?.stats) {
         const counters = hooks.stats.counters;
+        const currentTreeStats = statsSyncResult.currentTreeStats;
         if (currentTreeStats) {
-          // CPU patch path (trees.gpu.enabled=false): three.js frustum-culls
-          // whole patches, so visible<patches when the camera looks away.
           counters["trees.total"] = currentTreeStats.totalTrees;
           counters["trees.visiblePatches"] = currentTreeStats.visiblePatches;
           counters["trees.patches"] = currentTreeStats.patches;
-          // GPU ring path (trees.gpu.enabled=true): readback-derived counts.
           counters["trees.visible"] = currentTreeStats.gpuVisibleCount;
           counters["trees.near"] = currentTreeStats.nearTrees;
           counters["trees.mid"] = currentTreeStats.midTrees;
@@ -303,9 +292,28 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       postProcess: render.postProcess,
       currentPostProcessSettings: render.currentPostProcessSettings,
       nodeLabelOverlay: render.nodeLabelOverlay,
-      borderOceanDebugPanel,
+      selectionController: terrain.selectionController,
+      getHooks: render.getHooks,
+      longViewSettleWaiters: render.longViewSettleWaiters,
+      frameStart,
+      profileEnabled: player.state.profileEnabled,
+      profileFrameMs: render.profileFrameMs,
+      grassProfileEnabled: render.grassProfileEnabled,
+      grassProfileFrame,
+      currentGrassStats: statsSyncResult.currentGrassStats,
+      currentTreeStats: statsSyncResult.currentTreeStats,
+      currentPropStats: vegetation.propStats?.current ?? null,
+      tPropsStart: terrainPhaseResult.tPropsStart,
+      tBubbleStart: terrainPhaseResult.tBubbleStart,
+      vegetationTiming,
+      chunkGroupsBuiltThisFrame: terrainPhaseResult.chunkGroupsBuiltThisFrame,
+      nearFieldBubbleController: terrain.nearFieldBubbleController,
+      interaction: player.interaction,
+      makeGrassSettings: render.makeGrassSettings,
+      grassPrepassEnabled: render.grassPrepassEnabled,
+      perfProbe,
+      phaseTiming,
     });
-    if (collectFrameTiming && perfProbe) perfProbe.record(phaseTiming);
-    updateLongViewDiagnostics();
+    timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics);
   });
 }
