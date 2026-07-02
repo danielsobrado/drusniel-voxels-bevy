@@ -185,22 +185,14 @@ export function runFrameLoopStartup(
     counters["sunLightCache.buildMsAvg"] = sunStats.buildMsAvg;
   };
 
-  // TP-1: real per-pass GPU timing for the hero-forest path. Only on WebGPU,
-  // and only when the renderer was created with timestamp tracking (gated on
-  // the adapter exposing `timestamp-query` in renderer_backend).
-  // TP-1: only resolve timestamps every frame when a perf capture is requested
-  // (perfProbe) or explicitly via ?gpuTiming=1 — otherwise zero cost in normal
-  // play. Support is read from three's *actual* post-init backend, not the
-  // adapter probe (three uses a different compatibility-mode device).
   const wantGpuTiming = searchParams.get("perfProbe") === "1" || searchParams.get("gpuTiming") === "1";
   const gpuTimestampReady = input.app.isWebGpu
     && (input.app.renderer.backend as unknown as { trackTimestamp?: boolean }).trackTimestamp === true;
   const gpuPassTiming = input.app.isWebGpu
     ? new GpuPassTiming(input.app.renderer, wantGpuTiming && gpuTimestampReady)
     : null;
-  // TP-1: isolated offscreen tree pass so the tree main pass is timeable
-  // (`r.treeMain`). Same gate as the resolve; only meaningful on WebGPU.
-  const initialRenderResolution = window.__drusnielRenderResolution?.current();
+  const renderResolution = input.renderResolution ?? window.__drusnielRenderResolution;
+  const initialRenderResolution = renderResolution?.current();
   const treeTimingPass: TreeTimingPass | null = input.app.isWebGpu && wantGpuTiming && gpuTimestampReady
     ? new TreeTimingPass(
         input.app.renderer,
@@ -209,6 +201,11 @@ export function runFrameLoopStartup(
       )
     : null;
 
+  const listenerAbortController = new AbortController();
+  session.frameLoopAbortController?.abort();
+  session.frameLoopAbortController = listenerAbortController;
+  const listenerOptions: AddEventListenerOptions = { signal: listenerAbortController.signal };
+
   const resizeDependentTargets = (detail: RenderResolutionChangedEventDetail) => {
     postProcess?.setSize(detail.resolution.cssWidth, detail.resolution.cssHeight);
     treeTimingPass?.setSize(detail.resolution.physicalWidth, detail.resolution.physicalHeight);
@@ -216,21 +213,19 @@ export function runFrameLoopStartup(
 
   window.addEventListener(RENDER_RESOLUTION_CHANGED_EVENT, (event) => {
     resizeDependentTargets((event as CustomEvent<RenderResolutionChangedEventDetail>).detail);
-  });
+  }, listenerOptions);
 
   window.addEventListener("resize", () => {
-    const renderResolution = window.__drusnielRenderResolution;
     if (renderResolution) {
       renderResolution.applyCurrentViewport({ renderer, camera });
       return;
     }
-
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
     postProcess?.setSize(window.innerWidth, window.innerHeight);
     treeTimingPass?.setSize(window.innerWidth, window.innerHeight);
-  });
+  }, listenerOptions);
 
   bindClodFrameLoop({
     render: {
