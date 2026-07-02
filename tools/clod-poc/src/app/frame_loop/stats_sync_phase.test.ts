@@ -38,7 +38,7 @@ function baseUiState(): ClodFrameLoopUiState {
     bubbleRadius: 0,
     digEnabled: false,
     brushShape: "sphere",
-    brushOp: "subtract",
+    brushOp: "remove",
     digRadius: 0,
     brushHeight: 0,
     weatherMode: "clear",
