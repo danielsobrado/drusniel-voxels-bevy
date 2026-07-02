@@ -149,6 +149,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const propsUnattributedMs = Math.max(
       0,
       propsMs -
+        input.phaseTiming.farSummaryMs -
         input.phaseTiming.shadowProxyMs -
         input.phaseTiming.clodShadowMs -
         input.phaseTiming.canopyMs -
