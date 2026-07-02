@@ -12,6 +12,15 @@ export interface TreeVisibleClusterMaskStats {
   visibleClusterHidden: number;
   visibleClusterVisible: number;
   visibleClusterUnknownKept: number;
+  gpuPrefilterTestedClusters: number;
+  gpuPrefilterRejectedClusters: number;
+  gpuPrefilterAcceptedClusters: number;
+  gpuPrefilterUnknownKeptClusters: number;
+  gpuPrefilterSkippedCandidateEstimate: number;
+  gpuCandidateCountBeforePrefilter: number;
+  gpuCandidateCountAfterPrefilter: number;
+  gpuPrefilterCacheHits: number;
+  gpuPrefilterCacheMisses: number;
 }
 
 export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
@@ -45,6 +54,15 @@ export interface TreeSystemStatsSnapshot extends TreeGenerationStats {
   heroNearPassesRealFoliage: boolean;
   gpuStatus: TreeSystemGpuStatus;
   gpuCandidateCount: number;
+  gpuCandidateCountBeforePrefilter: number;
+  gpuCandidateCountAfterPrefilter: number;
+  gpuPrefilterTestedClusters: number;
+  gpuPrefilterRejectedClusters: number;
+  gpuPrefilterAcceptedClusters: number;
+  gpuPrefilterUnknownKeptClusters: number;
+  gpuPrefilterSkippedCandidateEstimate: number;
+  gpuPrefilterCacheHits: number;
+  gpuPrefilterCacheMisses: number;
   gpuAcceptedCount: number;
   gpuVisibleCount: number;
   gpuShadowCasterCount: number;
@@ -70,6 +88,8 @@ export interface TreeSystemStatsPatchInput {
 
 export interface TreeSystemGpuStatsInput {
   candidateCount: number;
+  candidateCountBeforePrefilter?: number;
+  candidateCountAfterPrefilter?: number;
   acceptedCandidates: number;
   counts: Record<TreeLod, number>;
   shadowGroupCounts?: readonly number[];
@@ -129,6 +149,15 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
     heroNearPassesRealFoliage: false,
     gpuStatus: "disabled",
     gpuCandidateCount: 0,
+    gpuCandidateCountBeforePrefilter: 0,
+    gpuCandidateCountAfterPrefilter: 0,
+    gpuPrefilterTestedClusters: 0,
+    gpuPrefilterRejectedClusters: 0,
+    gpuPrefilterAcceptedClusters: 0,
+    gpuPrefilterUnknownKeptClusters: 0,
+    gpuPrefilterSkippedCandidateEstimate: 0,
+    gpuPrefilterCacheHits: 0,
+    gpuPrefilterCacheMisses: 0,
     gpuAcceptedCount: 0,
     gpuVisibleCount: 0,
     gpuShadowCasterCount: 0,
@@ -153,11 +182,13 @@ export function createEmptyTreeSystemStats(): TreeSystemStatsSnapshot {
 
 export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSystemStatsSnapshot {
   const stats = createEmptyTreeSystemStats();
+  const beforePrefilter = input.gpuRingStats.candidateCountBeforePrefilter ?? input.gpuRingStats.candidateCount;
+  const afterPrefilter = input.gpuRingStats.candidateCountAfterPrefilter ?? input.gpuRingStats.candidateCount;
   if (input.gpuRing) {
     const visible = input.gpuVisibleCount || visibleTreeLodCount(input.gpuRingStats.counts);
     const accepted = input.gpuRingStats.acceptedCandidates || visible;
     stats.totalTrees = visible;
-    stats.generatedCandidates = input.gpuRingStats.candidateCount;
+    stats.generatedCandidates = afterPrefilter;
     stats.acceptedCandidates = accepted;
   } else {
     for (const patch of input.patches) {
@@ -203,7 +234,9 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
   stats.heroNearPassesTriangleFloor = heroFidelity.passesTriangleFloor;
   stats.heroNearPassesRealFoliage = heroFidelity.passesRealFoliage;
   stats.gpuStatus = input.gpuStatus;
-  stats.gpuCandidateCount = input.gpuRing ? input.gpuRingStats.candidateCount : 0;
+  stats.gpuCandidateCount = input.gpuRing ? afterPrefilter : 0;
+  stats.gpuCandidateCountBeforePrefilter = input.gpuRing ? beforePrefilter : 0;
+  stats.gpuCandidateCountAfterPrefilter = input.gpuRing ? afterPrefilter : 0;
   stats.gpuAcceptedCount = input.gpuRing
     ? (input.gpuRingStats.acceptedCandidates || visibleTreeLodCount(input.gpuRingStats.counts))
     : 0;
@@ -222,9 +255,19 @@ export function buildTreeSystemStats(input: BuildTreeSystemStatsInput): TreeSyst
     stats.terrainVisibleCandidates = input.gpuRingStats.terrainVisibilityCounts.terrainVisibleCandidates;
   }
   if (input.gpuRingStats.visibleClusterMaskStats) {
-    stats.visibleClusterHidden = input.gpuRingStats.visibleClusterMaskStats.visibleClusterHidden;
-    stats.visibleClusterVisible = input.gpuRingStats.visibleClusterMaskStats.visibleClusterVisible;
-    stats.visibleClusterUnknownKept = input.gpuRingStats.visibleClusterMaskStats.visibleClusterUnknownKept;
+    const mask = input.gpuRingStats.visibleClusterMaskStats;
+    stats.visibleClusterHidden = mask.visibleClusterHidden;
+    stats.visibleClusterVisible = mask.visibleClusterVisible;
+    stats.visibleClusterUnknownKept = mask.visibleClusterUnknownKept;
+    stats.gpuPrefilterTestedClusters = mask.gpuPrefilterTestedClusters;
+    stats.gpuPrefilterRejectedClusters = mask.gpuPrefilterRejectedClusters;
+    stats.gpuPrefilterAcceptedClusters = mask.gpuPrefilterAcceptedClusters;
+    stats.gpuPrefilterUnknownKeptClusters = mask.gpuPrefilterUnknownKeptClusters;
+    stats.gpuPrefilterSkippedCandidateEstimate = mask.gpuPrefilterSkippedCandidateEstimate;
+    stats.gpuCandidateCountBeforePrefilter = mask.gpuCandidateCountBeforePrefilter;
+    stats.gpuCandidateCountAfterPrefilter = mask.gpuCandidateCountAfterPrefilter;
+    stats.gpuPrefilterCacheHits = mask.gpuPrefilterCacheHits;
+    stats.gpuPrefilterCacheMisses = mask.gpuPrefilterCacheMisses;
   }
   stats.impostorStatus = input.impostorStatus;
   stats.impostorReason = input.impostorReason;
