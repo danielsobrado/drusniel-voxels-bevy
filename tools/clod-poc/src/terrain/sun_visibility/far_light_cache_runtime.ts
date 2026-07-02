@@ -11,6 +11,7 @@ export function createSunLightCacheRuntime(options: any) {
     readWorld: core.readWorld,
     enqueueTile: core.enqueueTile,
     updateBudgeted(provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>, frameIndex: number, nowMs: number) {
+      core.stats.active = options.active;
       core.stats.tilesBuiltThisFrame = 0;
       core.stats.buildMsLastFrame = 0;
       if (!options.active) return;
@@ -38,6 +39,7 @@ export function createSunLightCacheRuntime(options: any) {
       core.stats.refreshes += 1;
     },
     stats() {
+      core.stats.active = options.active;
       core.stats.entries = core.entries.size;
       core.stats.pendingTiles = core.pending.size;
       return { ...core.stats, staleTiles: staleTiles.size, currentSunBin: core.stats.currentSunBin ? { ...core.stats.currentSunBin } : null };
