@@ -13,6 +13,7 @@ import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import { treeSystemUsesGpuRingDraw } from "./tree_system_gpu_policy.js";
 import { createEmptyTreeSystemStats } from "./tree_system_stats.js";
+import { createEmptyTreeEarlyTerrainRejectionStats } from "./tree_patch_terrain_rejection.js";
 import { planTreeSystemSettingsUpdate } from "./tree_system_settings_plan.js";
 import { treeCpuFallbackGpuStatus, treeGpuRuntimeStatus, treeReportsGpuRingStats } from "./tree_system_gpu_status.js";
 import { planTreePatchRemoval } from "./tree_system_patch_removal.js";
@@ -52,6 +53,7 @@ export class TreeSystem {
   readonly useCpuTreePrepass: boolean;
   readonly lodCounts = createTreeLodCounts();
   stats: TreeStats = createEmptyTreeSystemStats();
+  readonly earlyTerrainRejectionStats = createEmptyTreeEarlyTerrainRejectionStats();
   readonly gpuLightingProxyCache = new TreeGpuLightingProxyCache();
   measureScene: THREE.Scene | null = null;
 
@@ -144,7 +146,7 @@ export class TreeSystem {
       this.clearGpuRing();
       this.gpuRing.status = treeCpuFallbackGpuStatus(this.settings);
     }
-    if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) this.refreshForCenter(center);
+    if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) this.refreshForCenter(center, cameraPosition);
     this.updatePatchLods(center, cameraPosition);
   }
 
@@ -207,9 +209,9 @@ export class TreeSystem {
     return { supported: result.supported, reason: result.reason };
   }
 
-  refreshForCenter(center: THREE.Vector3): void {
+  refreshForCenter(center: THREE.Vector3, cameraPosition: THREE.Vector3 = center): void {
     this.lastRefreshCenter.copy(center);
-    const result = refreshTreePatchesForCenter(treeCpuPatchInput(this), center);
+    const result = refreshTreePatchesForCenter(treeCpuPatchInput(this), center, cameraPosition);
     this.patches = result.patches;
     this.patchesDirty = result.patchesDirty;
     this.updatePatchLods(center, center);
