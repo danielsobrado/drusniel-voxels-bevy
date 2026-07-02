@@ -11,7 +11,7 @@ import {
 } from "./wgsl_modules.js";
 
 function bindingDeclarationCount(source: string, name: string): number {
-  return [...source.matchAll(new RegExp(`\\bvar(?:<[^>]+>)?\\s+${name}\\s*:`, "g"))].length;
+  return [...source.matchAll(new RegExp(`\\bvar\\s+${name}\\s*:`, "g"))].length;
 }
 
 describe("WGSL module composition", () => {
@@ -35,7 +35,7 @@ describe("WGSL module composition", () => {
     }
   });
 
-  it("composes tree terrain visibility and final placement height", () => {
+  it("composes tree terrain visibility, visible cluster culling, and final placement height", () => {
     const source = composeTreeRingShader();
     expect(source).toContain("fn tree_pcg2d");
     expect(source).toContain("fn tree_world_cell_from_slot");
@@ -46,7 +46,7 @@ describe("WGSL module composition", () => {
     expect(source).toContain("tree_slot_visible_cluster_visible(slot)");
   });
 
-  it("keeps terrain and visible-cluster culls after shadows and before visible appends", () => {
+  it("returns on terrain-hidden or invisible-cluster trees before visible and shadow appends", () => {
     const source = composeTreeRingShader();
     const terrainReject = source.indexOf("if (terrain_hidden) { return; }");
     const visibleReject = source.indexOf("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
@@ -63,9 +63,10 @@ describe("WGSL module composition", () => {
     expect(visibleAppend).toBeGreaterThan(-1);
     expect(terrainReject).toBeGreaterThan(speciesSelection);
     expect(terrainReject).toBeGreaterThan(scaleSelection);
-    expect(terrainReject).toBeGreaterThan(shadowAppend);
+    expect(visibleReject).toBeGreaterThan(terrainReject);
+    expect(terrainReject).toBeLessThan(shadowAppend);
+    expect(visibleReject).toBeLessThan(shadowAppend);
     expect(terrainReject).toBeLessThan(visibleAppend);
-    expect(visibleReject).toBeGreaterThan(shadowAppend);
     expect(visibleReject).toBeLessThan(visibleAppend);
   });
 
