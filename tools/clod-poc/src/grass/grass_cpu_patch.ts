@@ -164,8 +164,8 @@ function staticGrassRejectReason(probe: FootprintProbe, settings: GrassSettings)
   const site = sampleGrassTerrainSite(probe.x, probe.z, settings);
   if (!Number.isFinite(site.height) || !Number.isFinite(site.normalY)) return "unknown_kept";
   if (site.waterDepth > 0) return "below_water";
-  if (site.normalY < settings.slopeMinY) return "too_steep";
   if (site.height < settings.minHeight || site.height > settings.maxHeight) return "height_range";
+  if (site.normalY < settings.slopeMinY) return "too_steep";
   if (site.rockWeight >= 0.82 || site.snowWeight >= 0.55 || site.grassMask <= settings.placement.minGrassWeight) return "wrong_biome";
   return null;
 }
