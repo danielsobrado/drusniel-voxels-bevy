@@ -61,7 +61,7 @@ export const DEFAULT_CUSTOM_PROPS_SETTINGS: CustomPropsSettings = {
     debugForceCpu: false,
     maxVisible: 50_000,
     workgroupSize: 64,
-    debugShowGpuCounts: true,
+    debugShowGpuCounts: false,
   },
   categoryBudgets: { ...DEFAULT_CATEGORY_BUDGETS },
   debug: {
