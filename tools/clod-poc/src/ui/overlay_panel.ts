@@ -9,6 +9,8 @@ export interface ClodOverlaySnapshot {
   bubbleForcedSplits: number;
   cutFrozen: boolean;
   errorThreshold: number;
+  treeGpuStatus?: string;
+  treeGpuWarning?: string | null;
   buildStatus?: string;
   digCostLine?: string;
   polishLine?: string;
@@ -43,6 +45,7 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
       <div class="clod-overlay-meters"></div>
       <div class="clod-overlay-flags">
         <span data-overlay-freeze>live cut</span>
+        <span data-overlay-tree-gpu>tree gpu unknown</span>
         <span data-overlay-status>preparing</span>
       </div>
       <p class="clod-overlay-dig"></p>
@@ -97,6 +100,10 @@ export function createClodOverlay(root: HTMLElement): ClodOverlay {
       const freeze = root.querySelector<HTMLElement>("[data-overlay-freeze]")!;
       freeze.textContent = snapshot.cutFrozen ? "cut frozen" : "live cut";
       freeze.dataset.severity = snapshot.cutFrozen ? "warn" : "ok";
+      const treeGpu = root.querySelector<HTMLElement>("[data-overlay-tree-gpu]")!;
+      const treeGpuWarning = snapshot.treeGpuWarning ?? "";
+      treeGpu.textContent = treeGpuWarning || `tree gpu ${snapshot.treeGpuStatus ?? "unknown"}`;
+      treeGpu.dataset.severity = treeGpuWarning ? "warn" : snapshot.treeGpuStatus === "gpu-ring" ? "ok" : "neutral";
       setText(root, "[data-overlay-status]", snapshot.buildStatus ?? "ready");
       const dig = root.querySelector<HTMLElement>(".clod-overlay-dig")!;
       dig.hidden = !snapshot.digCostLine;
