@@ -12,6 +12,7 @@ function state(overrides: Partial<TreePerfSnapshotState> = {}): TreePerfSnapshot
     treeSpacing: 9,
     treeShadowMaxLod: "near",
     treeGpuEnabled: true,
+    treeGpuFallbackToCpu: true,
     treeGpuForceCpu: false,
     treeGpuShowCounts: true,
     treeGpuReadbackVisibleLists: true,
