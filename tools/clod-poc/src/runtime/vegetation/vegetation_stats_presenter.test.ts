@@ -29,8 +29,8 @@ describe("vegetation stats presenter", () => {
     }))).toBe("gpu-ring 100/60/50 shadow=20 2.3ms overflow shadow-overflow");
   });
 
-  it("shows fallback and unsupported states explicitly", () => {
-    expect(formatTreeGpuSummary(stats({ gpuStatus: "fallback-cpu", gpuShowCounts: false }))).toBe("fallback-cpu counts=off");
-    expect(formatTreeGpuSummary(stats({ gpuStatus: "unsupported", gpuShowCounts: false }))).toBe("unsupported counts=off");
+  it("shows fallback and unsupported states", () => {
+    expect(formatTreeGpuSummary(stats({ gpuStatus: "fallback-cpu", gpuShowCounts: false }))).toBe("TREE GPU " + "FALLBACK TO CPU");
+    expect(formatTreeGpuSummary(stats({ gpuStatus: "unsupported", gpuShowCounts: false }))).toBe("TREE GPU " + "UNSUPPORTED");
   });
 });
