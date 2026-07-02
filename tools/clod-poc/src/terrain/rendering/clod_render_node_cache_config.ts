@@ -6,6 +6,7 @@ export interface ClodRenderNodeCacheConfig {
   prefetchChildren: boolean;
   maxPrefetchCreatesPerFrame: number;
   warnAtInactiveNodes: number;
+  evictGeometryWithRenderNode: boolean;
 }
 
 export const DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG: ClodRenderNodeCacheConfig = {
@@ -16,4 +17,5 @@ export const DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG: ClodRenderNodeCacheConfig = 
   prefetchChildren: false,
   maxPrefetchCreatesPerFrame: 8,
   warnAtInactiveNodes: 480,
+  evictGeometryWithRenderNode: true,
 };
