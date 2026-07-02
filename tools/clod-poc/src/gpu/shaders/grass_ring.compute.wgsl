@@ -4,6 +4,7 @@ const TIER_MID: u32 = 1u;
 const TIER_FAR: u32 = 2u;
 const TIER_SUPER: u32 = 3u;
 const INDIRECT_STRIDE_U32: u32 = 5u;
+const ACTIVE_SLOT_SENTINEL: u32 = 4294967295u;
 const TAU: f32 = 6.28318530718;
 const GRASS_WATER_CLEARANCE: f32 = 0.18;
 const GRASS_HYDRO_WATER_CLEARANCE: f32 = 0.35;
@@ -56,6 +57,7 @@ struct GrassRiverBand {
 @group(0) @binding(6) var<storage, read_write> out_normal: array<vec4<f32>>;
 @group(0) @binding(9) var hydro_texture: texture_2d<f32>;
 @group(0) @binding(10) var hydro_sampler: sampler;
+@group(0) @binding(11) var<storage, read> active_slots: array<u32>;
 
 fn pcg2d(cell: vec2<f32>, salt: u32) -> vec2<f32> {
   let M = 1664525u;
@@ -160,7 +162,7 @@ fn wet_bank(height: f32, normal_y: f32) -> f32 {
 fn segment_distance(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
   let ab = b - a;
   let denom = max(dot(ab, ab), 1e-6);
-  let t = clamp(dot(p - a, ab) / denom, 0.0, 1.0);
+  let t = clamp(dot(p - a) / denom, 0.0, 1.0);
   return distance(p, a + ab * t);
 }
 
@@ -214,7 +216,6 @@ fn river_grass_ecology_band(wx: f32, wz: f32, hydro: HydrologySample, height: f3
 }
 
 fn grass_mask(height: f32, normal_y: f32, distance: f32, wx: f32, wz: f32, hydro: HydrologySample) -> f32 {
-  if (height < params.settings_b.x || height > params.settings_b.y) { return 0.0; }
   let weights = material_weights_with_paint(height, normal_y, wx, wz);
   let grass_weight = weights.x;
   let rock_weight = weights.y;
@@ -293,9 +294,6 @@ fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, norm
 
 fn process_slot(slot: u32) {
   let grid = params.counts_b.y;
-  // Keep density_a live so the pipeline layout stays stable across shader
-  // variants.  Without this read, WGSL may strip the binding and misalign
-  // the uniform offsets for variants that do consume it.
   _ = params.density_a;
   if (slot >= grid * grid || params.counts_b.x == 0u) { return; }
   let wc = world_cell(slot);
@@ -337,7 +335,11 @@ fn clear_counters(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
-fn grass_cull(@builtin(global_invocation_id) id: vec3<u32>) { process_slot(id.x); }
+fn grass_cull(@builtin(global_invocation_id) id: vec3<u32>) {
+  let slot = active_slots[id.x];
+  if (slot == ACTIVE_SLOT_SENTINEL) { return; }
+  process_slot(slot);
+}
 
 fn write_draw_args(tier: u32, index_count: u32, instance_count: u32) {
   let base = tier * INDIRECT_STRIDE_U32;
