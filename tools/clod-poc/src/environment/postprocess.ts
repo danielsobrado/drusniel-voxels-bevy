@@ -5,6 +5,7 @@ import {
   type PostProcessSettings,
   type PostProcessToneMapping,
 } from "./postprocess_settings.js";
+import { getSunLightGpuAtlas } from "../terrain/sun_visibility/sun_light_gpu_atlas.js";
 
 export * from "./postprocess_settings.js";
 
@@ -37,6 +38,7 @@ const OUTPUT_FRAG = /* glsl */ `
   uniform sampler2D tDepth;
   uniform sampler2D tHistory;
   uniform sampler2D tHistoryDepth;
+  uniform sampler2D tSunVisibilityAtlas;
   uniform vec2 uTexelSize;
   uniform float uCameraNear;
   uniform float uCameraFar;
@@ -72,6 +74,16 @@ const OUTPUT_FRAG = /* glsl */ `
   uniform float uAerialPerspectiveEnd;
   uniform float uAerialPerspectiveStrength;
   uniform vec3 uAerialPerspectiveColor;
+  uniform vec2 uSunVisibilityOrigin;
+  uniform float uSunVisibilityWorldSize;
+  uniform float uSunVisibilityValid;
+  uniform vec2 uSunScreen;
+  uniform float uSunScreenVisible;
+  uniform float uGodRaysMode;
+  uniform float uGodRaysDensity;
+  uniform float uGodRaysDecay;
+  uniform float uGodRaysWeight;
+  uniform float uGodRaysExposure;
   varying vec2 vUv;
 
   #include <packing>
@@ -82,6 +94,28 @@ const OUTPUT_FRAG = /* glsl */ `
 
   float interleavedNoise(vec2 p) {
     return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+  }
+
+  vec3 reconstructWorld(vec2 uv, float depth) {
+    vec4 ndc = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 world = uInvCurrentViewProjection * ndc;
+    world /= max(abs(world.w), 0.000001);
+    return world.xyz;
+  }
+
+  float sunVisibilityAtWorld(vec3 worldPos) {
+    if (uSunVisibilityValid < 0.5 || uSunVisibilityWorldSize <= 0.0) return 1.0;
+    vec2 atlasUv = (worldPos.xz - uSunVisibilityOrigin) / uSunVisibilityWorldSize;
+    float inside = step(0.0, atlasUv.x) * step(atlasUv.x, 1.0) * step(0.0, atlasUv.y) * step(atlasUv.y, 1.0);
+    vec2 clampedUv = clamp(atlasUv, vec2(0.0), vec2(1.0));
+    float sampleVisibility = texture2D(tSunVisibilityAtlas, clampedUv).r;
+    return mix(1.0, sampleVisibility, inside);
+  }
+
+  float sunVisibilityAtDepthUv(vec2 uv) {
+    float depth = texture2D(tDepth, uv).x;
+    if (depth >= 0.999999) return 1.0;
+    return sunVisibilityAtWorld(reconstructWorld(uv, depth));
   }
 
   vec3 brightPass(vec2 uv) {
@@ -130,7 +164,7 @@ const OUTPUT_FRAG = /* glsl */ `
     float contrast = maxLuma - minLuma;
     if (contrast < clamp(uFxaaEdgeThreshold, 0.001, 1.0)) return center;
 
-    vec3 cross = (north + south + east + west) * 0.25;
+    vec3 cross = (north + south + west + east) * 0.25;
     return mix(center, cross, clamp(uFxaaSubpixelBlend, 0.0, 1.0));
   }
 
@@ -219,8 +253,34 @@ const OUTPUT_FRAG = /* glsl */ `
     float distanceM = max(-viewZ, 0.0);
     float startM = min(uAerialPerspectiveStart, uAerialPerspectiveEnd - 0.001);
     float haze = smoothstep(startM, uAerialPerspectiveEnd, distanceM);
-    haze *= clamp(uAerialPerspectiveStrength, 0.0, 1.0) * geometryMask;
-    return mix(color, uAerialPerspectiveColor, haze);
+    float visibility = depth >= 0.999999 ? 1.0 : sunVisibilityAtWorld(reconstructWorld(vUv, depth));
+    float litFog = mix(0.58, 1.08, visibility);
+    vec3 fogColor = mix(uAerialPerspectiveColor * 0.72, uAerialPerspectiveColor, visibility);
+    haze *= clamp(uAerialPerspectiveStrength, 0.0, 1.0) * geometryMask * litFog;
+    return mix(color, fogColor, clamp(haze, 0.0, 1.0));
+  }
+
+  vec3 godRaysColor() {
+    if (uGodRaysMode < 0.5 || uSunScreenVisible < 0.5 || uGodRaysExposure <= 0.0) return vec3(0.0);
+    float sampleCount = uGodRaysMode < 1.5 ? 12.0 : 24.0;
+    vec2 delta = (vUv - uSunScreen) * clamp(uGodRaysDensity, 0.0, 1.25) / sampleCount;
+    vec2 coord = vUv;
+    float decay = 1.0;
+    float shafts = 0.0;
+    for (int i = 0; i < 24; i++) {
+      if (float(i) >= sampleCount) break;
+      coord -= delta;
+      if (coord.x < 0.0 || coord.x > 1.0 || coord.y < 0.0 || coord.y > 1.0) break;
+      float depth = texture2D(tDepth, coord).x;
+      float skyMask = step(0.999999, depth);
+      float terrainVisibility = sunVisibilityAtDepthUv(coord);
+      float source = mix(terrainVisibility * 0.35, 1.0, skyMask);
+      shafts += source * decay * clamp(uGodRaysWeight, 0.0, 2.0);
+      decay *= clamp(uGodRaysDecay, 0.1, 0.99);
+    }
+    float screenFalloff = smoothstep(1.4, 0.0, length(vUv - uSunScreen));
+    float intensity = shafts * uGodRaysExposure * screenFalloff / sampleCount;
+    return uAerialPerspectiveColor * max(intensity, 0.0);
   }
 
   vec3 clarityOutput(vec3 color) {
@@ -237,6 +297,7 @@ const OUTPUT_FRAG = /* glsl */ `
     vec3 color = temporalSceneColor(sourceColor) * contactShadowFactor() * uExposure;
     color += bloomColor() * uBloomStrength;
     color = aerialPerspective(color);
+    color += godRaysColor();
     color = (color - 0.5) * uContrast + 0.5;
 
     float luma = luminance(color);
@@ -300,12 +361,23 @@ function createSceneTarget(name: string): THREE.WebGLRenderTarget {
     depthBuffer: true,
     depthTexture,
     stencilBuffer: false,
-    // Depth-sampled passes must work across stricter WebGL2/browser combinations.
-    // MSAA + depthTexture can fail or resolve inconsistently, so keep this target single-sample.
     samples: 0,
   });
   target.texture.name = `${name}-color`;
   return target;
+}
+
+function godRaysModeValue(mode: Required<PostProcessSettings>["godRaysMode"]): number {
+  if (mode === "cheap") return 1;
+  if (mode === "heavy" || mode === "volumetric") return 2;
+  return 0;
+}
+
+function readSunDirection(): THREE.Vector3 | null {
+  const value = (window as unknown as { __drusnielSunLightSunDirection?: THREE.Vector3 }).__drusnielSunLightSunDirection;
+  return value && typeof value.x === "number" && typeof value.y === "number" && typeof value.z === "number"
+    ? value
+    : null;
 }
 
 export function toneMappingModeToThree(mode: PostProcessToneMapping) {
@@ -339,6 +411,8 @@ export class PostProcessPipeline {
   private readonly inverseCurrentViewProjection = new THREE.Matrix4();
   private readonly previousViewProjection = new THREE.Matrix4();
   private readonly originalProjectionMatrix = new THREE.Matrix4();
+  private readonly sunScreen = new THREE.Vector2(0.5, 0.5);
+  private readonly sunWorldPoint = new THREE.Vector3();
   private historyReady = false;
   private jitterFrame = 0;
   private settings: Required<PostProcessSettings>;
@@ -359,12 +433,15 @@ export class PostProcessPipeline {
       transparent: true,
       toneMapped: true,
     });
+
+    const sunAtlas = getSunLightGpuAtlas();
     this.outputMaterial = new THREE.ShaderMaterial({
       uniforms: {
         tDiffuse: { value: this.target.texture },
         tDepth: { value: this.target.depthTexture },
         tHistory: { value: this.historyTarget.texture },
         tHistoryDepth: { value: this.historyTarget.depthTexture },
+        tSunVisibilityAtlas: { value: sunAtlas.texture },
         uTexelSize: { value: new THREE.Vector2(1, 1) },
         uCameraNear: { value: 0.1 },
         uCameraFar: { value: 8000 },
@@ -400,6 +477,16 @@ export class PostProcessPipeline {
         uAerialPerspectiveEnd: { value: this.settings.aerialPerspectiveEnd },
         uAerialPerspectiveStrength: { value: this.settings.aerialPerspectiveStrength },
         uAerialPerspectiveColor: { value: new THREE.Color(...this.settings.aerialPerspectiveColor) },
+        uSunVisibilityOrigin: { value: new THREE.Vector2(sunAtlas.originX, sunAtlas.originZ) },
+        uSunVisibilityWorldSize: { value: sunAtlas.worldSize },
+        uSunVisibilityValid: { value: sunAtlas.valid },
+        uSunScreen: { value: this.sunScreen },
+        uSunScreenVisible: { value: 0 },
+        uGodRaysMode: { value: godRaysModeValue(this.settings.godRaysMode) },
+        uGodRaysDensity: { value: this.settings.godRaysDensity },
+        uGodRaysDecay: { value: this.settings.godRaysDecay },
+        uGodRaysWeight: { value: this.settings.godRaysWeight },
+        uGodRaysExposure: { value: this.settings.godRaysExposure },
       },
       vertexShader: FULLSCREEN_VERT,
       fragmentShader: OUTPUT_FRAG,
@@ -415,8 +502,6 @@ export class PostProcessPipeline {
   }
 
   setSize(width: number, height: number): void {
-    // The render target uses physical pixels so it tracks renderer pixel ratio without
-    // changing the public resize API, which continues to receive CSS pixel dimensions.
     this.cssSize.set(Math.max(1, width), Math.max(1, height));
     this.renderer.getDrawingBufferSize(this.drawingBufferSize);
     const pixelRatio = this.renderer.getPixelRatio();
@@ -480,6 +565,11 @@ export class PostProcessPipeline {
     this.outputMaterial.uniforms.uAerialPerspectiveEnd.value = this.settings.aerialPerspectiveEnd;
     this.outputMaterial.uniforms.uAerialPerspectiveStrength.value = this.settings.aerialPerspectiveStrength;
     this.outputMaterial.uniforms.uAerialPerspectiveColor.value.setRGB(...this.settings.aerialPerspectiveColor);
+    this.outputMaterial.uniforms.uGodRaysMode.value = godRaysModeValue(this.settings.godRaysMode);
+    this.outputMaterial.uniforms.uGodRaysDensity.value = this.settings.godRaysDensity;
+    this.outputMaterial.uniforms.uGodRaysDecay.value = this.settings.godRaysDecay;
+    this.outputMaterial.uniforms.uGodRaysWeight.value = this.settings.godRaysWeight;
+    this.outputMaterial.uniforms.uGodRaysExposure.value = this.settings.godRaysExposure;
   }
 
   private shouldJitterCamera(): boolean {
@@ -497,7 +587,6 @@ export class PostProcessPipeline {
     const jitterX = (halton(sampleIndex, 2) - 0.5) * 2 * this.settings.taaJitterScale / width;
     const jitterY = (halton(sampleIndex, 3) - 0.5) * 2 * this.settings.taaJitterScale / height;
     this.jitterFrame += 1;
-
     this.originalProjectionMatrix.copy(camera.projectionMatrix);
     camera.projectionMatrix.elements[8] += jitterX;
     camera.projectionMatrix.elements[9] += jitterY;
@@ -507,6 +596,26 @@ export class PostProcessPipeline {
   private restoreCameraProjection(camera: THREE.Camera): void {
     camera.projectionMatrix.copy(this.originalProjectionMatrix);
     setProjectionMatrixInverse(camera);
+  }
+
+  private updateSunUniforms(camera: THREE.Camera): void {
+    const atlas = getSunLightGpuAtlas();
+    this.outputMaterial.uniforms.tSunVisibilityAtlas.value = atlas.texture;
+    this.outputMaterial.uniforms.uSunVisibilityOrigin.value.set(atlas.originX, atlas.originZ);
+    this.outputMaterial.uniforms.uSunVisibilityWorldSize.value = atlas.worldSize;
+    this.outputMaterial.uniforms.uSunVisibilityValid.value = atlas.valid;
+
+    const sunDir = readSunDirection();
+    if (!sunDir || atlas.valid < 0.5 || this.settings.godRaysMode === "off") {
+      this.outputMaterial.uniforms.uSunScreenVisible.value = 0;
+      return;
+    }
+    this.sunWorldPoint.copy((camera as THREE.PerspectiveCamera).position)
+      .addScaledVector(sunDir.clone().normalize(), cameraClip(camera, "far", 8000) * 0.45)
+      .project(camera);
+    this.sunScreen.set(this.sunWorldPoint.x * 0.5 + 0.5, this.sunWorldPoint.y * 0.5 + 0.5);
+    this.outputMaterial.uniforms.uSunScreen.value.copy(this.sunScreen);
+    this.outputMaterial.uniforms.uSunScreenVisible.value = this.sunWorldPoint.z >= -1 && this.sunWorldPoint.z <= 1 ? 1 : 0;
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera): void {
@@ -534,6 +643,7 @@ export class PostProcessPipeline {
     this.outputMaterial.uniforms.uCameraFar.value = cameraClip(camera, "far", 8000);
     this.outputMaterial.uniforms.uInvCurrentViewProjection.value.copy(this.inverseCurrentViewProjection);
     this.outputMaterial.uniforms.uPrevViewProjection.value.copy(this.previousViewProjection);
+    this.updateSunUniforms(camera);
     this.copyMaterial.uniforms.tDiffuse.value = this.target.texture;
 
     this.renderer.setRenderTarget(this.target);
