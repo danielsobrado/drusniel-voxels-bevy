@@ -1,9 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
+import type { GrassStats } from "../../grass.js";
 import type { ForestLightingStats } from "../../forest_lighting/index.js";
 import { emptyUnderstoryStats, type UnderstoryStats } from "../../understory/index.js";
 import { runStatsSyncPhase } from "./stats_sync_phase.js";
 import type { StatsPresenter } from "./stats_presenter.js";
 import type { ClodFrameLoopUiState } from "./ui_state.js";
+
+function baseGrassStats(before: number, after: number): GrassStats {
+  return {
+    mode: "webgpu-ring-v1",
+    blades: 128,
+    patches: 1,
+    visiblePatches: 1,
+    culledPatches: 0,
+    nearPatches: 1,
+    midPatches: 1,
+    coveragePatches: 1,
+    superPatches: 1,
+    generatedCandidates: after,
+    acceptedCandidates: 64,
+    edgeSuppressedCandidates: 0,
+    patchRebuildCount: 0,
+    buildMs: 0,
+    midBladeCount: 0,
+    gpuRingStatus: "ready",
+    gpuRingCandidateCount: after,
+    gpuRingCandidateCountBeforePrefilter: before,
+    gpuRingCandidateCountAfterPrefilter: after,
+    gpuRingVisibleNear: 1,
+    gpuRingVisibleMid: 1,
+    gpuRingVisibleFar: 1,
+    gpuRingVisibleSuper: 1,
+    gpuRingDispatchMs: null,
+    gpuRingReadbackMs: null,
+  };
+}
 
 function baseUnderstoryStats(before: number, after: number): UnderstoryStats {
   return {
@@ -66,7 +97,7 @@ function baseUiState(): ClodFrameLoopUiState {
   };
 }
 
-function basePresenter(updateDisplay: () => void): StatsPresenter {
+function basePresenter(overrides: Partial<StatsPresenter> = {}): StatsPresenter {
   return {
     grassBladeCountController: null,
     grassVisiblePatchesController: null,
@@ -83,8 +114,9 @@ function basePresenter(updateDisplay: () => void): StatsPresenter {
     understoryTotalController: null,
     understoryVisiblePatchesController: null,
     understoryClassSummaryController: null,
-    understoryGpuSummaryController: { updateDisplay },
+    understoryGpuSummaryController: null,
     forestLightingStatsController: null,
+    ...overrides,
   };
 }
 
@@ -115,11 +147,45 @@ describe("runStatsSyncPhase", () => {
       setForestLightingStats: () => {},
       formatTreeGpuSummary: () => "",
       formatUnderstoryGpuSummary: (stats) => `prefilter=${stats.gpuCandidateCountAfterPrefilter}/${stats.gpuCandidateCountBeforePrefilter}`,
-      statsPresenter: basePresenter(updateDisplay),
+      statsPresenter: basePresenter({ understoryGpuSummaryController: { updateDisplay } }),
     });
 
     expect(storedUnderstory).toBe(next);
     expect(state.understoryGpuSummary).toBe("prefilter=256/1536");
+    expect(updateDisplay).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes grass tier summary when only prefilter budget changes", () => {
+    const state = baseUiState();
+    const updateDisplay = vi.fn();
+    const previous = baseGrassStats(1024, 256);
+    const next = baseGrassStats(1536, 256);
+    let storedGrass: GrassStats | null = previous;
+
+    runStatsSyncPhase({
+      state,
+      grassSystem: { getStats: () => next },
+      treeSystem: null,
+      stoneSystem: null,
+      understorySystem: null,
+      forestLightingSystem: { getStats: baseForestLightingStats },
+      getGrassStats: () => storedGrass,
+      setGrassStats: (stats) => { storedGrass = stats; },
+      getTreeStats: () => null,
+      setTreeStats: () => {},
+      getStoneStats: () => null,
+      setStoneStats: () => {},
+      getUnderstoryStats: () => null,
+      setUnderstoryStats: () => {},
+      getForestLightingStats: () => baseForestLightingStats(),
+      setForestLightingStats: () => {},
+      formatTreeGpuSummary: () => "",
+      formatUnderstoryGpuSummary: () => "",
+      statsPresenter: basePresenter({ grassTierSummaryController: { updateDisplay } }),
+    });
+
+    expect(storedGrass).toBe(next);
+    expect(state.grassTierSummary).toBe("1/1/1/1 prefilter=256/1536");
     expect(updateDisplay).toHaveBeenCalledTimes(1);
   });
 });
