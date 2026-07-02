@@ -21,6 +21,11 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.renderNodeCache.pruneIntervalFrames).toBe(30);
     expect(config.renderNodeCache.maxPrefetchCreatesPerFrame).toBe(8);
     expect(config.renderNodeCache.evictGeometryWithRenderNode).toBe(true);
+    expect(config.selectionCutCache.enabled).toBe(true);
+    expect(config.selectionCutCache.cameraCellSizeM).toBe(1);
+    expect(config.selectionCutCache.cameraHeightCellSizeM).toBe(2);
+    expect(config.selectionCutCache.thresholdBucketPx).toBe(0.05);
+    expect(config.selectionCutCache.maxReuseFrames).toBe(8);
     expect(config.digging.holdIntervalMs).toBe(400);
     expect(config.profiling.slowFrameMs).toBe(24);
   });

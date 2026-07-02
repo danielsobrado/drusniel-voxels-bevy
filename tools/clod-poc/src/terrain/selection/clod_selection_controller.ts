@@ -8,12 +8,17 @@ import {
   webGpuDispatchKey,
 } from "../../diagnostics/webgpu_selection_parity.js";
 import type {
+  ClodErrorMap,
   DispatchOptions,
 } from "../../gpu/clod_error_px_compute.js";
 import type { ClodPageNode } from "../../types.js";
-import { selectCut, type SelectionParams, type SelectionResult, type SelectionState } from "../../clod/selection.js";
+import { selectCut, type SelectionParams, type SelectionState } from "../../clod/selection.js";
 import { crossLodAdjacencies, hashRenderedCut } from "../geometry/cross_lod_adjacency.js";
-import { buildClodSelectionCacheKey } from "./clod_selection_cache.js";
+import {
+  SelectionCutCache,
+  staleSetSignature,
+  type SelectionCutCacheKeyInput,
+} from "./selection_cut_cache.js";
 import {
   emptyWebGpuStats,
   rebuildDebugOverlays,
@@ -58,16 +63,16 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
   let lastSelectionMs = 0;
   const selSub: ClodSelectionSubphases = { cut: 0, book: 0, info: 0, overlays: 0 };
   let lastSelectionSource: "cpu" | "webgpu" = "cpu";
-  let lastSelectionCacheKey = "";
-  let selectionCacheHits = 0;
-  let selectionCacheMisses = 0;
-  let lastSelectionCacheHit = false;
   const parityTracker = createWebGpuParityTracker(
     clodRuntime.webgpuSelection.parityIntervalFrames,
   );
   let lastWebGpuDispatchFrame = -clodRuntime.webgpuSelection.dispatchIntervalFrames;
   let lastWebGpuDispatchKey = "";
   const readbackState = createWebGpuReadbackState();
+  const selectionCutCache = new SelectionCutCache(clodRuntime.selectionCutCache);
+  const cameraForward = new THREE.Vector3();
+  let lastStaleSignature = staleSetSignature(staleEditedAncestorIds);
+  let staleRevision = 0;
 
   const buildSelectionParams = (settings: ClodSelectionSettings): SelectionParams => {
     const selectionCenter = deps.getSelectionCenter();
@@ -91,84 +96,56 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     };
   };
 
-  const selectRenderedCut = (
-    params: SelectionParams,
+  const currentStaleRevision = (): number => {
+    const signature = staleSetSignature(staleEditedAncestorIds);
+    if (signature !== lastStaleSignature) {
+      lastStaleSignature = signature;
+      staleRevision++;
+      selectionCutCache.invalidate("stale_revision_changed");
+    }
+    return staleRevision;
+  };
+
+  const buildDebugKey = (cutHash: number, settings: ClodSelectionSettings): string =>
+    `${cutHash}|bounds:${settings.showBounds}|seams:${settings.showSeamPoints}|xlod:${settings.showCrossLodBorders}|locks:${settings.showLockedBorderVertices}`;
+
+  const buildCacheInput = (
     settings: ClodSelectionSettings,
-    errorPxLookup: ((node: ClodPageNode) => number | undefined) | undefined,
-  ): SelectionResult => {
-    const cacheable = !settings.webgpuSelection && !errorPxLookup;
-    const cacheKey = cacheable ? buildClodSelectionCacheKey(params, staleEditedAncestorIds) : "";
-    if (cacheable && cacheKey === lastSelectionCacheKey && lastRenderedNodes.length > 0) {
-      selectionCacheHits++;
-      lastSelectionCacheHit = true;
-      selSub.cut = 0;
-      return {
-        rendered: lastRenderedNodes,
-        state: selState,
-        forcedSplits: lastForced,
-        blockedSplits: 0,
-        nearFieldForcedSplits: lastNearFieldForced,
-      };
-    }
-
-    const tSelectCut = performance.now();
-    const result = selectCut(
-      roots,
-      params,
-      selState,
-      { errorPxLookup, forceSplitIds: staleEditedAncestorIds },
-    );
-    selSub.cut = performance.now() - tSelectCut;
-    if (cacheable) {
-      lastSelectionCacheKey = cacheKey;
-      selectionCacheMisses++;
-    } else {
-      lastSelectionCacheKey = "";
-    }
-    lastSelectionCacheHit = false;
-    return result;
+    params: SelectionParams,
+    gpuMap: ClodErrorMap | null,
+    debugKey: string,
+  ): SelectionCutCacheKeyInput => {
+    deps.camera.getWorldDirection(cameraForward);
+    return {
+      frameId: selectionFrameId,
+      cameraPosition: params.camPos,
+      cameraForward: [cameraForward.x, cameraForward.y, cameraForward.z],
+      selectionCenter: [
+        params.nearField?.centerX ?? params.camPos[0],
+        0,
+        params.nearField?.centerZ ?? params.camPos[2],
+      ],
+      viewportHeight: params.viewportH,
+      fovY: params.fovY,
+      thresholdPx: params.thresholdPx,
+      hysteresisMergeFactor: params.hysteresisMergeFactor,
+      enforce21: params.enforce21,
+      freezeSelection: params.freezeSelection ?? false,
+      neighborLevelDeltaMax: params.neighborLevelDeltaMax ?? 1,
+      materialTiers: settings.materialTiers,
+      bubbleEnabled: params.nearField?.enabled ?? false,
+      bubbleCenterX: params.nearField?.centerX ?? 0,
+      bubbleCenterZ: params.nearField?.centerZ ?? 0,
+      bubbleRadius: params.nearField?.radius ?? 0,
+      forcedMaxLevel: params.forcedMaxLevel ?? null,
+      webgpuSelectionEnabled: settings.webgpuSelection,
+      webgpuErrorMapGeneration: gpuMap ? gpuMap.version * 1_000_000 + gpuMap.frameId : null,
+      staleRevision: currentStaleRevision(),
+      debugKey,
+    };
   };
 
-  const resetSelectionCache = (): void => {
-    lastSelectionCacheKey = "";
-    lastSelectionCacheHit = false;
-  };
-
-  const update = () => {
-    const settings = deps.getSettings();
-    const selectionStart = performance.now();
-    const params = buildSelectionParams(settings);
-    const compute = deps.getClodErrorCompute();
-    const gpuMap = resolveClodErrorGpuMap({
-      enabled: settings.webgpuSelection,
-      compute,
-      selectionFrameId,
-      errorMaxAgeFrames: clodRuntime.webgpuSelection.errorMaxAgeFrames,
-      readbackMode: config.readbackMode,
-      readbackState,
-    });
-    if (gpuMap && compute) {
-      verifyWebGpuClodParity({
-        map: gpuMap,
-        params,
-        allNodes,
-        compute,
-        selectionFrameId,
-        tracker: parityTracker,
-        parityIntervalFrames: clodRuntime.webgpuSelection.parityIntervalFrames,
-        errorTolerancePx: clodRuntime.webgpuSelection.errorTolerancePx,
-        forceContinuous: config.forceContinuousParity,
-      });
-    }
-    const errorPxLookup = gpuMap && compute ? compute.errorLookup(gpuMap) : undefined;
-    const selectionResult = selectRenderedCut(params, settings, errorPxLookup);
-    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectionResult;
-    selState = ns;
-    lastForced = forcedSplits;
-    lastNearFieldForced = nearFieldForcedSplits;
-    lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
-
-    const tBook = performance.now();
+  const applyRenderedCut = (rendered: ClodPageNode[], settings: ClodSelectionSettings): void => {
     const cutIds = new Set(rendered.map((n) => n.id));
     const nextTerrainViews = new Set<ClodSelectionTerrainView>();
     for (const node of rendered) {
@@ -198,8 +175,9 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
         v.mat.setTier(tier);
       }
     }
-    selSub.book = performance.now() - tBook;
+  };
 
+  const updateRenderedStats = (rendered: ClodPageNode[]): void => {
     const perLevel = new Map<number, number>();
     let tris = 0;
     for (const n of rendered) {
@@ -211,41 +189,120 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     lastNodesByLod = Object.fromEntries([...perLevel.entries()]);
     lastLevelSummary = [...perLevel.keys()].sort().map((l) => `L${l}:${perLevel.get(l)}`).join("  ");
     lastTriCount = tris;
+  };
+
+  const maybeRebuildDebugOverlays = (
+    rendered: ClodPageNode[],
+    cutHash: number,
+    settings: ClodSelectionSettings,
+  ): void => {
+    const debugKey = buildDebugKey(cutHash, settings);
+    if (debugKey === lastDebugKey) return;
+    lastDebugKey = debugKey;
+    const xLodAdjacencies = settings.showCrossLodBorders ? crossLodAdjacencies(rendered) : [];
+    lastCrossLodAdjacencyCount = xLodAdjacencies.length;
+    rebuildDebugOverlays(rendered, xLodAdjacencies, settings, overlays);
+    lockedBorderOverlay.rebuild(rendered, settings.showLockedBorderVertices);
+  };
+
+  const maybeDispatchWebGpuSelection = (
+    settings: ClodSelectionSettings,
+    params: SelectionParams,
+    compute: ReturnType<ClodSelectionControllerDeps["getClodErrorCompute"]>,
+    gpuMap: ClodErrorMap | null,
+  ): void => {
+    if (!settings.webgpuSelection || !compute) return;
+    const dispatchKey = webGpuDispatchKey(params);
+    const dispatchDue =
+      selectionFrameId - lastWebGpuDispatchFrame >= clodRuntime.webgpuSelection.dispatchIntervalFrames;
+    if (dispatchDue && (!gpuMap || dispatchKey !== lastWebGpuDispatchKey)) {
+      const dispatchOptions: DispatchOptions = buildClodErrorDispatchOptions({
+        readbackMode: config.readbackMode,
+        compute,
+        readbackState,
+      });
+      if (compute.dispatch(params, selectionFrameId, dispatchOptions)) {
+        lastWebGpuDispatchFrame = selectionFrameId;
+        lastWebGpuDispatchKey = dispatchKey;
+      }
+    }
+  };
+
+  const update = () => {
+    const settings = deps.getSettings();
+    const selectionStart = performance.now();
+    const params = buildSelectionParams(settings);
+    const compute = deps.getClodErrorCompute();
+    const gpuMap = resolveClodErrorGpuMap({
+      enabled: settings.webgpuSelection,
+      compute,
+      selectionFrameId,
+      errorMaxAgeFrames: clodRuntime.webgpuSelection.errorMaxAgeFrames,
+      readbackMode: config.readbackMode,
+      readbackState,
+    });
+    if (gpuMap && compute) {
+      verifyWebGpuClodParity({
+        map: gpuMap,
+        params,
+        allNodes,
+        compute,
+        selectionFrameId,
+        tracker: parityTracker,
+        parityIntervalFrames: clodRuntime.webgpuSelection.parityIntervalFrames,
+        errorTolerancePx: clodRuntime.webgpuSelection.errorTolerancePx,
+        forceContinuous: config.forceContinuousParity,
+      });
+    }
+    const errorPxLookup = gpuMap && compute ? compute.errorLookup(gpuMap) : undefined;
+    const staleViewsMissing = lastRenderedNodes.length > 0 && lastRenderedNodes.some((node) => !deps.views.has(node.id));
+    if (staleViewsMissing) selectionCutCache.invalidate("forced_invalidate");
+    const initialDebugKey = buildDebugKey(lastCutHash, settings);
+    const initialCacheInput = buildCacheInput(settings, params, gpuMap, initialDebugKey);
+    const cacheDecision = selectionCutCache.decide(initialCacheInput);
+    if (cacheDecision.hit && lastRenderedNodes.length > 0) {
+      const tInfo = performance.now();
+      lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
+      selSub.cut = 0;
+      selSub.book = 0;
+      selSub.info = performance.now() - tInfo;
+      const tOverlays = performance.now();
+      maybeRebuildDebugOverlays(lastRenderedNodes, lastCutHash, settings);
+      selSub.overlays = performance.now() - tOverlays;
+      maybeDispatchWebGpuSelection(settings, params, compute, gpuMap);
+      lastSelectionMs = performance.now() - selectionStart;
+      return;
+    }
+
+    const tSelectCut = performance.now();
+    const { rendered, state: ns, forcedSplits, nearFieldForcedSplits } = selectCut(
+      roots,
+      params,
+      selState,
+      { errorPxLookup, forceSplitIds: staleEditedAncestorIds },
+    );
+    selSub.cut = performance.now() - tSelectCut;
+    selState = ns;
+    lastForced = forcedSplits;
+    lastNearFieldForced = nearFieldForcedSplits;
+    lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
+
+    applyRenderedCut(rendered, settings);
+    updateRenderedStats(rendered);
 
     const tInfo = performance.now();
+    selSub.book = tInfo - tSelectCut - selSub.cut;
     const cutHash = hashRenderedCut(rendered);
     if (cutHash !== lastCutHash) {
       lastCutHash = cutHash;
       onCutChanged();
     }
+    selectionCutCache.commit({ ...initialCacheInput, debugKey: buildDebugKey(cutHash, settings) }, selectionFrameId);
     selSub.info = performance.now() - tInfo;
     const tOverlays = performance.now();
-    const debugKey =
-      `${cutHash}|bounds:${settings.showBounds}|seams:${settings.showSeamPoints}|xlod:${settings.showCrossLodBorders}|locks:${settings.showLockedBorderVertices}`;
-    if (debugKey !== lastDebugKey) {
-      lastDebugKey = debugKey;
-      const xLodAdjacencies = settings.showCrossLodBorders ? crossLodAdjacencies(rendered) : [];
-      lastCrossLodAdjacencyCount = xLodAdjacencies.length;
-      rebuildDebugOverlays(rendered, xLodAdjacencies, settings, overlays);
-      lockedBorderOverlay.rebuild(rendered, settings.showLockedBorderVertices);
-    }
+    maybeRebuildDebugOverlays(rendered, cutHash, settings);
     selSub.overlays = performance.now() - tOverlays;
-    if (settings.webgpuSelection && compute) {
-      const dispatchKey = webGpuDispatchKey(params);
-      const dispatchDue =
-        selectionFrameId - lastWebGpuDispatchFrame >= clodRuntime.webgpuSelection.dispatchIntervalFrames;
-      if (dispatchDue && (!gpuMap || dispatchKey !== lastWebGpuDispatchKey)) {
-        const dispatchOptions: DispatchOptions = buildClodErrorDispatchOptions({
-          readbackMode: config.readbackMode,
-          compute,
-          readbackState,
-        });
-        if (compute.dispatch(params, selectionFrameId, dispatchOptions)) {
-          lastWebGpuDispatchFrame = selectionFrameId;
-          lastWebGpuDispatchKey = dispatchKey;
-        }
-      }
-    }
+    maybeDispatchWebGpuSelection(settings, params, compute, gpuMap);
     lastSelectionMs = performance.now() - selectionStart;
   };
 
@@ -257,11 +314,11 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     invalidate: () => {
       lastCutHash = -1;
       lastDebugKey = "";
-      resetSelectionCache();
+      selectionCutCache.invalidate("forced_invalidate");
     },
     resetSelState: () => {
       selState = { split: new Set() };
-      resetSelectionCache();
+      selectionCutCache.invalidate("forced_invalidate");
     },
     stats: () => ({
       renderedCount: lastRenderedCount,
@@ -276,11 +333,12 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       selectionSource: lastSelectionSource,
       frameId: selectionFrameId,
       cache: {
-        hits: selectionCacheHits,
-        misses: selectionCacheMisses,
-        lastHit: lastSelectionCacheHit,
+        hits: selectionCutCache.stats().hits,
+        misses: selectionCutCache.stats().misses,
+        lastHit: selectionCutCache.stats().lastReason === "hit",
       },
       subphases: { ...selSub },
+      selectionCache: selectionCutCache.stats(),
     }),
     currentTerrainViews: () => currentTerrainViews,
     activeTerrainViews: () => activeTerrainViews,
@@ -300,7 +358,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     },
     patchNodes: (nodes) => {
       deps.getClodErrorCompute()?.patchNodes(nodes);
-      if (nodes.length > 0) resetSelectionCache();
+      if (nodes.length > 0) selectionCutCache.invalidate("forced_invalidate");
     },
   };
 }

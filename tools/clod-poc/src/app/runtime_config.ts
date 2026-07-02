@@ -5,6 +5,10 @@ import {
   DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG,
   type ClodRenderNodeCacheConfig,
 } from "../terrain/rendering/clod_render_node_cache_config.js";
+import {
+  DEFAULT_SELECTION_CUT_CACHE_CONFIG,
+  type SelectionCutCacheConfig,
+} from "../terrain/selection/selection_cut_cache.js";
 
 export interface ClodRuntimeConfig {
   runtime: {
@@ -26,6 +30,7 @@ export interface ClodRuntimeConfig {
   };
   pageGeometryCache: PageGeometryCacheConfig;
   renderNodeCache: ClodRenderNodeCacheConfig;
+  selectionCutCache: SelectionCutCacheConfig;
   digging: {
     holdIntervalMs: number;
   };
@@ -54,6 +59,7 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
   },
   pageGeometryCache: DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG,
   renderNodeCache: DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG,
+  selectionCutCache: DEFAULT_SELECTION_CUT_CACHE_CONFIG,
   digging: {
     holdIntervalMs: 400,
   },
@@ -93,6 +99,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
     const nearField = (raw.near_field ?? {}) as Record<string, unknown>;
     const pageGeometryCache = (raw.page_geometry_cache ?? {}) as Record<string, unknown>;
     const renderNodeCache = (raw.render_node_cache ?? {}) as Record<string, unknown>;
+    const selectionCutCache = (raw.selection_cut_cache ?? {}) as Record<string, unknown>;
     const digging = (raw.digging ?? {}) as Record<string, unknown>;
     const profiling = (raw.profiling ?? {}) as Record<string, unknown>;
     return {
@@ -127,6 +134,37 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
         maxPrefetchCreatesPerFrame: positiveInt(renderNodeCache.max_prefetch_creates_per_frame, defaults.renderNodeCache.maxPrefetchCreatesPerFrame),
         warnAtInactiveNodes: positiveInt(renderNodeCache.warn_at_inactive_nodes, defaults.renderNodeCache.warnAtInactiveNodes),
         evictGeometryWithRenderNode: bool(renderNodeCache.evict_geometry_with_render_node, defaults.renderNodeCache.evictGeometryWithRenderNode),
+      },
+      selectionCutCache: {
+        enabled: bool(selectionCutCache.enabled, defaults.selectionCutCache.enabled),
+        cameraCellSizeM: positiveNumber(
+          selectionCutCache.camera_cell_size_m,
+          defaults.selectionCutCache.cameraCellSizeM,
+        ),
+        cameraHeightCellSizeM: positiveNumber(
+          selectionCutCache.camera_height_cell_size_m,
+          defaults.selectionCutCache.cameraHeightCellSizeM,
+        ),
+        targetCellSizeM: positiveNumber(
+          selectionCutCache.target_cell_size_m,
+          defaults.selectionCutCache.targetCellSizeM,
+        ),
+        angleBucketDeg: positiveNumber(
+          selectionCutCache.angle_bucket_deg,
+          defaults.selectionCutCache.angleBucketDeg,
+        ),
+        thresholdBucketPx: positiveNumber(
+          selectionCutCache.threshold_bucket_px,
+          defaults.selectionCutCache.thresholdBucketPx,
+        ),
+        bubbleCenterCellSizeM: positiveNumber(
+          selectionCutCache.bubble_center_cell_size_m,
+          defaults.selectionCutCache.bubbleCenterCellSizeM,
+        ),
+        maxReuseFrames: positiveInt(
+          selectionCutCache.max_reuse_frames,
+          defaults.selectionCutCache.maxReuseFrames,
+        ),
       },
       digging: {
         holdIntervalMs: positiveInt(digging.hold_interval_ms, defaults.digging.holdIntervalMs),

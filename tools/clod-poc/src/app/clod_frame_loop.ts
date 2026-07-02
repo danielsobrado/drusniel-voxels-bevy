@@ -277,6 +277,11 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["renderNodeCache.evictions"] = renderNodeCacheStats.evictions;
           counters["renderNodeCache.prefetches"] = renderNodeCacheStats.prefetches;
         }
+        const selectionCacheStats = terrain.selectionController.stats().selectionCache;
+        counters["selectionCutCache.enabled"] = selectionCacheStats.enabled ? 1 : 0;
+        counters["selectionCutCache.hits"] = selectionCacheStats.hits;
+        counters["selectionCutCache.misses"] = selectionCacheStats.misses;
+        counters["selectionCutCache.invalidations"] = selectionCacheStats.invalidations;
       }
     }
 

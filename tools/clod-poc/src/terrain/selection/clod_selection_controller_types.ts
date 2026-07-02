@@ -5,6 +5,7 @@ import type { ClodErrorPxCompute, ClodErrorPxStats } from "../../gpu/clod_error_
 import type { WebGpuReadbackMode } from "../../core/webgpu_readback_mode.js";
 import type { LockedBorderOverlay } from "../../ui/locked_border_overlay.js";
 import type { ClodSelectionCacheStats } from "./clod_selection_cache.js";
+import type { SelectionCutCacheStats } from "./selection_cut_cache.js";
 
 export interface ClodSelectionSettings {
   thresholdPx: number;
@@ -91,6 +92,7 @@ export interface ClodSelectionStats {
   frameId: number;
   cache: ClodSelectionCacheStats;
   subphases: ClodSelectionSubphases;
+  selectionCache: SelectionCutCacheStats;
 }
 
 export interface ClodSelectionController {

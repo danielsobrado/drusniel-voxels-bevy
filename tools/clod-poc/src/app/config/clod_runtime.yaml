@@ -31,6 +31,16 @@ render_node_cache:
   warn_at_inactive_nodes: 480
   evict_geometry_with_render_node: true
 
+selection_cut_cache:
+  enabled: true
+  camera_cell_size_m: 1.0
+  camera_height_cell_size_m: 2.0
+  target_cell_size_m: 1.0
+  angle_bucket_deg: 1.0
+  threshold_bucket_px: 0.05
+  bubble_center_cell_size_m: 1.0
+  max_reuse_frames: 8
+
 digging:
   hold_interval_ms: 400
 
