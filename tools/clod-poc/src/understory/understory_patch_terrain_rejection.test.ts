@@ -1,0 +1,47 @@
+import { describe, expect, it } from "vitest";
+import type { PageFootprint } from "../types.js";
+import { DEFAULT_UNDERSTORY_SETTINGS } from "./understory_config.js";
+import type { UnderstoryTerrainSampler } from "./understory_instances.js";
+import {
+  recordUnderstoryEarlyRejection,
+  rejectUnderstoryPatchBeforeGeneration,
+} from "./understory_patch_terrain_rejection.js";
+import { emptyUnderstoryGenerationStats } from "./understory_instances.js";
+
+function makeSampler(height: number, normalY = 1): UnderstoryTerrainSampler {
+  return {
+    surfaceHeight: () => height,
+    surfaceNormal: () => [0, normalY, 0],
+    materialWeights: () => [1, 0, 0, 0],
+  };
+}
+
+describe("understory patch terrain rejection", () => {
+  it("rejects full patches before candidate generation when height is outside range", () => {
+    const footprint: PageFootprint = { minX: 10, minZ: 10, maxX: 26, maxZ: 26 };
+    const decision = rejectUnderstoryPatchBeforeGeneration(
+      footprint,
+      DEFAULT_UNDERSTORY_SETTINGS,
+      makeSampler(DEFAULT_UNDERSTORY_SETTINGS.placement.maxHeightM + 100),
+      512,
+    );
+
+    expect(decision.reject).toBe(true);
+    expect(decision.reason).toBe("height_range");
+    expect(decision.skippedCandidateEstimate).toBeGreaterThan(0);
+  });
+
+  it("records skipped patch candidate estimates", () => {
+    const stats = emptyUnderstoryGenerationStats();
+
+    recordUnderstoryEarlyRejection(stats, {
+      reject: true,
+      reason: "too_steep",
+      skippedCandidateEstimate: 14,
+    });
+
+    expect(stats.earlyTerrainRejectedPatches).toBe(1);
+    expect(stats.earlyTerrainSkippedCandidates).toBe(14);
+    expect(stats.earlyTerrainReasonCounts?.too_steep).toBe(1);
+  });
+});
