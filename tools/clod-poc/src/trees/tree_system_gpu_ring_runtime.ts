@@ -49,6 +49,9 @@ export interface TreeGpuRingRuntimeState {
   frustumPlaneScratch: Float32Array<ArrayBuffer>;
   lastValidationSignature: string;
   clusterVisibilityCache: TreeRingClusterVisibilityCache;
+  clusterVisibilityProviderKey: string;
+  clusterVisibilityProviderRevision: number;
+  clusterVisibilitySampler: TreeTerrainSampler | undefined;
 }
 
 export interface TreeGpuRingRuntimeInput {
@@ -84,6 +87,9 @@ export function createTreeGpuRingRuntimeState(gpuDevice: GPUDevice | null): Tree
     frustumPlaneScratch: new Float32Array(24) as Float32Array<ArrayBuffer>,
     lastValidationSignature: "",
     clusterVisibilityCache: new TreeRingClusterVisibilityCache(),
+    clusterVisibilityProviderKey: "",
+    clusterVisibilityProviderRevision: 0,
+    clusterVisibilitySampler: undefined,
   };
 }
 
@@ -132,6 +138,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
     const shadowCascadePlanes = shadowCameras.length > 0 ? treeRingShadowCascadePlanesFromCameras(shadowCameras) : undefined;
     const shadowCapacity = treeGpuRingShadowGroupCapacity(input.settings, shadowCascadePlanes);
     const terrainRevision = getDigEditRevision();
+    const providerRevision = updateTreeClusterVisibilityProviderRevision(input);
     const visibleClusterMask = input.settings.gpu.terrainVisibility.enabled && input.sampler
       ? buildTreeRingClusterVisibilityMask({
         centerX: center.x,
@@ -141,6 +148,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
         settings: input.settings,
         sampler: input.sampler,
         terrainRevision,
+        providerRevision,
         cache: input.state.clusterVisibilityCache,
       })
       : null;
@@ -300,6 +308,30 @@ function validateTreeGpuRingAgainstCpu(
       `shadowOverflow gpu=${input.state.stats.shadowOverflowed} cpu=${expected.shadowOverflowed}`,
     );
   }
+}
+
+function updateTreeClusterVisibilityProviderRevision(input: TreeGpuRingRuntimeInput): number {
+  const key = treeClusterVisibilityProviderKey(input);
+  if (input.state.clusterVisibilityProviderKey !== key || input.state.clusterVisibilitySampler !== input.sampler) {
+    input.state.clusterVisibilityProviderKey = key;
+    input.state.clusterVisibilitySampler = input.sampler;
+    input.state.clusterVisibilityProviderRevision++;
+    input.state.clusterVisibilityCache.clear();
+  }
+  return input.state.clusterVisibilityProviderRevision;
+}
+
+function treeClusterVisibilityProviderKey(input: TreeGpuRingRuntimeInput): string {
+  const visibility = input.settings.gpu.terrainVisibility;
+  return [
+    input.worldCells,
+    input.settings.gpu.enabled ? 1 : 0,
+    visibility.enabled ? 1 : 0,
+    visibility.minDistanceM,
+    visibility.sampleCount,
+    visibility.heightMarginM,
+    visibility.crownHeightM,
+  ].join("|");
 }
 
 function treeGpuRingIndexCounts(input: TreeGpuRingRuntimeInput): TreeGpuRingIndexCounts {
