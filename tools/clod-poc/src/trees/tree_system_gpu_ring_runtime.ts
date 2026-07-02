@@ -19,7 +19,8 @@ import {
   generateTreeRingValidationCounts,
 } from "./tree_ring_lighting_proxies.js";
 import { treeRingShadowCascadePlanesFromCameras } from "./tree_ring_shadow_casters.js";
-import { buildTreeRingClusterVisibilityMask } from "./tree_ring_cluster_visibility.js";
+import { buildTreeRingClusterVisibilityMask, type TreeRingClusterVisibilityMask } from "./tree_ring_cluster_visibility.js";
+import type { TreeVisibleClusterMaskStats } from "./tree_system_stats.js";
 import {
   formatTreeLodCounts,
   visibleTreeLodCount,
@@ -155,7 +156,11 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
       visibleClusterGrid: visibleClusterMask?.clusterGrid,
     });
     if (dispatched) setTreeGpuRingDrawsVisible(input.state, true);
-    input.state.stats = input.state.compute.stats(true);
+    const nextStats = input.state.compute.stats(true) as TreeGpuRingStats & {
+      visibleClusterMaskStats?: TreeVisibleClusterMaskStats | null;
+    };
+    nextStats.visibleClusterMaskStats = treeVisibleClusterMaskStats(visibleClusterMask);
+    input.state.stats = nextStats;
     validateTreeGpuRingAgainstCpu(input, center, camera, frustumPlanes, shadowCapacity > 0 ? shadowCascadePlanes : undefined);
   }
 
@@ -301,6 +306,15 @@ function indexCountFor(geometry: THREE.BufferGeometry): number {
 function treeGpuRingShadowGroupCapacity(settings: TreeSettings, shadowCascadePlanes: ArrayLike<number> | undefined): number {
   if (!shadowCascadePlanes || settings.lod.shadowsMaxLod === "none") return 0;
   return treeGpuRingGroupCapacity(settings);
+}
+
+function treeVisibleClusterMaskStats(mask: TreeRingClusterVisibilityMask | null): TreeVisibleClusterMaskStats | null {
+  if (!mask) return null;
+  return {
+    visibleClusterHidden: mask.hiddenClusters,
+    visibleClusterVisible: mask.visibleClusters,
+    visibleClusterUnknownKept: mask.unknownKeptClusters,
+  };
 }
 
 function maxGroupDelta(a: readonly number[], b: readonly number[]): number {
