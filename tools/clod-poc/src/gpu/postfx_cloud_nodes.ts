@@ -33,6 +33,7 @@ export interface VolumetricCloudCompositeInput {
 
 const CLOUD_NOISE_WEIGHTS = [0.52, 0.31, 0.17] as const;
 const CLOUD_BLUE_NOISE_SCALE = [132.37, 77.17] as const;
+const CLOUD_WIND_DIR = [0.821, 0.571] as const;
 const CLOUD_MIN_STEP_METERS = 8.0;
 const CLOUD_SUN_OCCLUSION_STEPS = 3;
 const CLOUD_SUN_OCCLUSION_STEP_METERS = 160;
@@ -81,7 +82,7 @@ export function createVolumetricCloudLayerNode(input: VolumetricCloudLayerInput)
     const dirW = input.cameraWorld.mul(vec4(viewDirV, 0)).xyz.normalize();
     const sunDir = input.sunDirection.normalize();
     const camPos = input.cameraPosition;
-    const windOffset = vec2(0.82, 0.57).normalize().mul(time.mul(settings.windSpeedMetersPerSecond));
+    const windOffset = vec2(CLOUD_WIND_DIR[0], CLOUD_WIND_DIR[1]).mul(time.mul(settings.windSpeedMetersPerSecond));
 
     const tBottom = float(settings.bottomMeters).sub(camPos.y).div(dirW.y);
     const tTop = float(settings.topMeters).sub(camPos.y).div(dirW.y);
