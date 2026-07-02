@@ -6,6 +6,12 @@ import {
 } from "./render_resolution.js";
 import { DEFAULT_RENDER_RESOLUTION_PRESET } from "./render_resolution_config.js";
 
+export const RENDER_RESOLUTION_CHANGED_EVENT = "drusniel-render-resolution-changed";
+
+export interface RenderResolutionChangedEventDetail {
+  resolution: RenderResolutionResult;
+}
+
 export interface RenderResolutionRuntimeSettings {
   presetName: string;
   dprCap: number;
@@ -85,6 +91,13 @@ function initialSettings(config: RenderResolutionConfig, searchParams: URLSearch
   };
 }
 
+function emitResolutionChanged(resolution: RenderResolutionResult): void {
+  window.dispatchEvent(new CustomEvent<RenderResolutionChangedEventDetail>(
+    RENDER_RESOLUTION_CHANGED_EVENT,
+    { detail: { resolution } },
+  ));
+}
+
 export function createRenderResolutionRuntime(
   config: RenderResolutionConfig,
   searchParams: URLSearchParams,
@@ -127,6 +140,7 @@ export function createRenderResolutionRuntime(
       camera.updateProjectionMatrix();
     }
     markApplied(resolution);
+    if (changed) emitResolutionChanged(resolution);
     return { resolution, changed };
   };
 
