@@ -1,5 +1,6 @@
 import {
   DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG,
+  resolveVegetationTerrainRejectionConfig,
   type VegetationTerrainRejectionConfig,
 } from "./terrain_rejection_config.js";
 import { quantizeTerrainRejectionBucket } from "./terrain_rejection_cache.js";
@@ -116,6 +117,7 @@ export class VegetationSlotPrefilterCache {
       for (const [key, entry] of this.entries) {
         if (entry.lastUsed < oldestUsed) {
           oldestUsed = entry.lastUsed;
+          oldestKey = entry[0] ? oldestKey : oldestKey;
           oldestKey = key;
         }
       }
@@ -131,12 +133,17 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
   const clusterDimSlots = Math.max(1, Math.floor(options.clusterDimSlots));
   const clusterGrid = Math.max(1, Math.ceil(grid / clusterDimSlots));
   const candidateSlotsBeforePrefilter = grid * grid;
+  const runtimeConfig = resolveVegetationTerrainRejectionConfig();
+  if (!runtimeConfig.enabled || !runtimeConfig.gpuEarlyReject.enabled || !runtimeConfig.viewRulesEnabled || !kindEnabled(options.kind, runtimeConfig)) {
+    return fullVisibilityPrefilterResult(grid, clusterDimSlots, clusterGrid, candidateSlotsBeforePrefilter);
+  }
+
   const clusterWords = new Uint32Array(clusterGrid * clusterGrid);
   const activeSlotScratch = new Uint32Array(candidateSlotsBeforePrefilter);
   const provider = createVegetationTerrainRejectProvider();
   const reasonCounts = createReasonCounts();
   const providerReasonCounts = createProviderReasonCounts();
-  const cacheEnabled = (options.cacheConfig?.decisionCacheEnabled ?? DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.decisionCacheEnabled) && !!options.cache;
+  const cacheEnabled = (options.cacheConfig?.decisionCacheEnabled ?? runtimeConfig.decisionCacheEnabled) && !!options.cache;
   const cacheStatsBefore = options.cache?.stats() ?? null;
   let activeSlotCount = 0;
   let rejectedClusters = 0;
@@ -149,8 +156,8 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
       const clusterIndex = clusterZ * clusterGrid + clusterX;
       const cacheKey = cacheEnabled ? slotPrefilterCacheKey({ clusterX, clusterZ, grid, clusterDimSlots, options }) : "";
       const decision = cacheEnabled
-        ? options.cache!.get(cacheKey) ?? evaluateAndCache({ cache: options.cache!, cacheKey, clusterX, clusterZ, grid, clusterDimSlots, provider, options })
-        : evaluateCluster({ clusterX, clusterZ, grid, clusterDimSlots, provider, options });
+        ? options.cache!.get(cacheKey) ?? evaluateAndCache({ cache: options.cache!, cacheKey, clusterX, clusterZ, grid, clusterDimSlots, provider, options, runtimeConfig })
+        : evaluateCluster({ clusterX, clusterZ, grid, clusterDimSlots, provider, options, runtimeConfig });
       reasonCounts[decision.reason]++;
       providerReasonCounts[decision.providerReason]++;
       if (decision.reason === "unknown_kept" || decision.providerReason === "summaryMissing") unknownKeptClusters++;
@@ -194,6 +201,7 @@ function evaluateAndCache(input: {
   clusterDimSlots: number;
   provider: VegetationTerrainRejectProvider;
   options: VegetationSlotPrefilterOptions;
+  runtimeConfig: VegetationTerrainRejectionConfig;
 }): VegetationSlotPrefilterDecision {
   const decision = evaluateCluster(input);
   input.cache.set(input.cacheKey, decision);
@@ -207,6 +215,7 @@ function evaluateCluster(input: {
   clusterDimSlots: number;
   provider: VegetationTerrainRejectProvider;
   options: VegetationSlotPrefilterOptions;
+  runtimeConfig: VegetationTerrainRejectionConfig;
 }): VegetationSlotPrefilterDecision {
   if (!input.options.visibility.enabled) return { visible: true, reason: "disabled", providerReason: "accepted" };
 
@@ -225,8 +234,8 @@ function evaluateCluster(input: {
       sampler: input.options.sampler,
       terrainRevision: input.options.terrainRevision,
       providerRevision: input.options.providerRevision,
-      acceptWhenSummaryMissing: DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.gpuEarlyReject.conservative.acceptWhenSummaryMissing,
-      acceptWhenRevisionMismatch: DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.gpuEarlyReject.conservative.acceptWhenRevisionMismatch,
+      acceptWhenSummaryMissing: input.runtimeConfig.gpuEarlyReject.conservative.acceptWhenSummaryMissing,
+      acceptWhenRevisionMismatch: input.runtimeConfig.gpuEarlyReject.conservative.acceptWhenRevisionMismatch,
     });
     lastProviderReason = decision.reason;
     if (!decision.reject) return { visible: true, reason: sourceReason(decision), providerReason: decision.reason };
@@ -235,6 +244,39 @@ function evaluateCluster(input: {
   return hiddenProbeCount === probes.length
     ? { visible: false, reason: sourceReasonFromProvider(lastProviderReason), providerReason: lastProviderReason }
     : { visible: true, reason: "visible", providerReason: "accepted" };
+}
+
+function fullVisibilityPrefilterResult(
+  grid: number,
+  clusterDimSlots: number,
+  clusterGrid: number,
+  candidateSlotsBeforePrefilter: number,
+): VegetationSlotPrefilterResult {
+  const activeSlotIndices = new Uint32Array(candidateSlotsBeforePrefilter);
+  for (let i = 0; i < activeSlotIndices.length; i++) activeSlotIndices[i] = i;
+  const clusterWords = new Uint32Array(clusterGrid * clusterGrid);
+  clusterWords.fill(1);
+  const reasonCounts = createReasonCounts();
+  reasonCounts.disabled = clusterWords.length;
+  const providerReasonCounts = createProviderReasonCounts();
+  providerReasonCounts.accepted = clusterWords.length;
+  return {
+    grid,
+    clusterDimSlots,
+    clusterGrid,
+    clusterWords,
+    activeSlotIndices,
+    candidateSlotsBeforePrefilter,
+    candidateSlotsAfterPrefilter: candidateSlotsBeforePrefilter,
+    rejectedClusters: 0,
+    visibleClusters: clusterWords.length,
+    unknownKeptClusters: 0,
+    skippedCandidateEstimate: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+    reasonCounts,
+    providerReasonCounts,
+  };
 }
 
 function clusterDescriptorForProbe(input: {
@@ -256,7 +298,7 @@ function clusterDescriptorForProbe(input: {
     minY: Number.NEGATIVE_INFINITY,
     maxY: Number.POSITIVE_INFINITY,
     seed: 0,
-    densityBudget: clusterSlotCount(input.clusterX, input.clusterZ, Number.MAX_SAFE_INTEGER, input.clusterDimSlots),
+    densityBudget: Math.max(1, input.clusterDimSlots * input.clusterDimSlots),
     terrainRevision: input.options.terrainRevision ?? 0,
   };
 }
@@ -275,6 +317,13 @@ function sourceReasonFromProvider(reason: VegetationTerrainRejectReason): Vegeta
 function normalizeKind(kind: string): VegetationKind {
   if (kind === "tree" || kind === "grass" || kind === "understory") return kind;
   return "grass";
+}
+
+function kindEnabled(kind: string, config: VegetationTerrainRejectionConfig): boolean {
+  const normalized = normalizeKind(kind);
+  if (normalized === "tree") return config.gpuEarlyReject.rejectKinds.trees;
+  if (normalized === "grass") return config.gpuEarlyReject.rejectKinds.grass;
+  return config.gpuEarlyReject.rejectKinds.understory;
 }
 
 function clusterProbes(
