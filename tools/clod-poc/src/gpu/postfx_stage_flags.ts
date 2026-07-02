@@ -3,6 +3,7 @@ export type PostFxStage =
   | "autoExposure"
   | "bloom"
   | "bounce"
+  | "clouds"
   | "colorScript"
   | "contact"
   | "froxels"
@@ -19,6 +20,7 @@ const STAGES: readonly PostFxStage[] = [
   "autoExposure",
   "bloom",
   "bounce",
+  "clouds",
   "colorScript",
   "contact",
   "froxels",
@@ -36,6 +38,10 @@ const STAGE_ALIASES = new Map<string, PostFxStage>([
   ["bounce", "bounce"],
   ["ssbounce", "bounce"],
   ["colorbounce", "bounce"],
+  ["cloud", "clouds"],
+  ["clouds", "clouds"],
+  ["volumetriccloud", "clouds"],
+  ["volumetricclouds", "clouds"],
   ["colorscript", "colorScript"],
   ["grade", "colorScript"],
   ["todgrade", "colorScript"],
