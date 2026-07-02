@@ -301,32 +301,366 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
 
   let liveCanopyConfig = applyCanopyShellQueryOverrides(parseCanopyShellConfig(canopyShellYaml), searchParams);
   const useDeterministicCanopy = shouldUseDeterministicCanopy(queryScene, liveCanopyConfig, input.queryCanopy);
+  let canopyDebugState: CanopyDebugState | null = useDeterministicCanopy
+    ? createCanopyDebugState(liveCanopyConfig)
+    : null;
 
-  const canopyDebugState = input.queryCanopy ? createCanopyDebugState() : null;
-  if (canopyDebugState) applyConfigToCanopyDebugState(canopyDebugState, liveCanopyConfig);
+  const materialConfig = loadLongViewMaterialsConfig(materialsYaml, parseQueryOverrides(searchParams));
+  const parityUniformData = materialConfig.enabled ? configToUniformData(materialConfig) : undefined;
 
-  const lockedBorderOverlay = new LockedBorderOverlay(scene);
-  const nodeLabelOverlay = new NodeLabelOverlay(scene);
-  const boundaryGroup = new THREE.Group();
-  const seamGroup = new THREE.Group();
-  const crossLodBorderGroup = new THREE.Group();
-  scene.add(boundaryGroup, seamGroup, crossLodBorderGroup);
-
-  const longViewMaterials = loadLongViewMaterialsConfig(materialsYaml);
-  const materialQueryOverrides = parseQueryOverrides(searchParams);
-  const farUniformData = configToUniformData(longViewMaterials, materialQueryOverrides);
   const farShellController = createFarShellController({
     scene,
-    camera,
     terrainSummary,
-    worldCells,
+    worldSizeCells,
     isLongView,
     queryFarShell,
-    farUniformData,
-    rendererWebGpuDevice,
-    getLightDirection: () => skyEnvironment.getLightDirection(),
+    queryCanopy,
     getLighting: currentLighting,
-    getFogSettings: () => currentEnvironmentSettings().fog,
-    getPlayerPosition: () => player.position,
-    getHydrologyTexture: () => hydrologyFieldsTexture,
-    hydrologyWorldSizeMeters: worldSizeCells,
+    getSettings: () => ({
+      enabled: state.farShellEnabled,
+      radiusFactor: state.farShellRadiusFactor,
+      heightBias: state.farShellHeightBias,
+      heightDrop: state.farShellHeightDrop,
+    }),
+    receiveSunShadows: () => Boolean(isLongView && shadowProxyDebugState?.sunShadowsEnabled),
+    useDebugLambertReceiver: () => Boolean(shadowProxyDebugState?.debugLambertFarShellReceiver),
+    useParityMaterial: () => materialConfig.enabled,
+    getParityConfig: () => parityUniformData,
+    skipLegacyCanopy: useDeterministicCanopy,
+    onTriangleCount: (counter, count) => {
+      if (longViewHooks?.stats) longViewHooks.stats.counters[counter] = count;
+    },
+  });
+
+  if (state.farShellEnabled) {
+    farShellController.rebuild();
+  } else {
+    farShellController.setEnabled(false);
+  }
+
+  const canopyShellSystem = useDeterministicCanopy
+    ? createCanopyShellSystem(canopyShellYaml, searchParams, queryScene, input.queryCanopy, {
+      scene,
+      terrainSummary,
+      worldSizeCells,
+      getLighting: currentLighting,
+      getConfig: () => liveCanopyConfig,
+      getDebugState: () => canopyDebugState!,
+      onCounters: (counters) => {
+        if (!longViewHooks?.stats) return;
+        for (const [key, value] of Object.entries(counters)) {
+          longViewHooks.stats.counters[key] = value;
+        }
+      },
+    })
+    : null;
+  if (canopyShellSystem) {
+    canopyDebugState = canopyShellSystem.debugState;
+  }
+
+  const shadowProxyController = isLongView
+    ? createShadowProxyController(
+      { enabled: longViewSunConfig.enabled, shadowProxy: liveShadowProxyConfig },
+      {
+        scene,
+        renderer: input.renderer,
+        getTerrainSummary: () => window.__drusnielTerrainSummary ?? terrainSummary,
+        worldSize: worldSizeCells,
+        isLongView,
+        streamingCentered: streamingLongView,
+        rebuildSnapMeters: resolveShadowProxyRebuildSnapMeters(liveShadowProxyConfig),
+        getSunShadowsEnabled: () => shadowProxyDebugState?.sunShadowsEnabled ?? false,
+        getConfig: () => liveShadowProxyConfig,
+        getLighting: currentLighting,
+        getCoverageCenter: () => ({ x: camera.position.x, z: camera.position.z }),
+        onCounters: (counters) => {
+          if (!longViewHooks?.stats) return;
+          for (const [key, value] of Object.entries(counters)) {
+            longViewHooks.stats.counters[key] = value;
+          }
+        },
+      },
+    )
+    : null;
+
+  if (shadowProxyDebugState && shadowProxyController) {
+    shadowProxyDebugState.shadowProxyStatsLine = shadowProxyController.runtime.stats.built
+      ? `tris ${shadowProxyController.runtime.stats.triangleCount}`
+      : "shadow proxy: not built";
+  }
+
+  const boundaryGroup = new THREE.Group();
+  scene.add(boundaryGroup);
+  const brushPreview = createBrushPreviewController(scene);
+  const seamGroup = new THREE.Group();
+  scene.add(seamGroup);
+  const crossLodBorderGroup = new THREE.Group();
+  scene.add(crossLodBorderGroup);
+  const lockedBorderOverlay = new LockedBorderOverlay(scene);
+  const nodeLabelRoot = document.createElement("div");
+  document.body.appendChild(nodeLabelRoot);
+  const nodeLabelOverlay = new NodeLabelOverlay(nodeLabelRoot);
+  nodeLabelOverlay.setVisible(state.showNodeLabels);
+
+  const worldBounds = { cellsX: worldCells, cellsZ: worldCells };
+  const gpuMeshEnabled = searchParams.get("gpuMesh") === "1";
+  const gpuMeshVerify = searchParams.get("gpuMeshVerify") === "1";
+  let gpuMesher: GpuChunkMesher | null = null;
+  if (gpuMeshEnabled) {
+    void GpuChunkMesher.create(cfg.page.chunk_size, { sharedDevice: rendererWebGpuDevice ?? undefined }).then(async (res) => {
+      if (!res.mesher) {
+        console.warn("[gpuMesh] WebGPU unavailable; using CPU meshChunk", res.unavailable);
+        return;
+      }
+      gpuMesher = res.mesher;
+      console.info("[gpuMesh] GPU chunk mesher ready");
+      if (gpuMeshVerify) {
+        const edits = resolveDigEdits(getDigEditsSnapshot());
+        for (const [cx, cz] of [[0, 0], [2, 2], [4, 4]] as const) {
+          try {
+            const g = await res.mesher.meshChunk(cx, cz, worldBounds, edits);
+            const c = meshChunk(cx, cz, cfg, worldBounds);
+            const cmp = compareChunkSurfaces(c, g, 0.05);
+            console.info(
+              `[gpuMesh] parity chunk(${cx},${cz}) tris G/C ${cmp.gpuTriangles}/${cmp.cpuTriangles}` +
+                ` verts ${cmp.gpuVertices}/${cmp.cpuVertices} (halo ${cmp.haloVertices})` +
+                ` maxDelta ${cmp.maxVertexDelta.toFixed(4)}` +
+                ` unmatched ${cmp.unmatched} ${cmp.withinTol ? "OK" : "DRIFT"}`,
+            );
+          } catch (e) {
+            console.error(`[gpuMesh] parity chunk(${cx},${cz}) failed`, e);
+          }
+        }
+      }
+    });
+  }
+  const nearFieldBubbleController = createNearFieldBubbleController({
+    scene,
+    materialController,
+    cfg,
+    worldBounds,
+    getTintBubble: () => state.tintBubble,
+    getGpuMesher: () => gpuMesher,
+    chunkGroupBuildBudget: clodRuntime.nearField.chunkGroupBuildBudget,
+    maxCachedChunkGroups: clodRuntime.nearField.maxCachedChunkGroups,
+    evictDistanceMultiplier: clodRuntime.nearField.evictDistanceMultiplier,
+  });
+
+  const pageTransitionMode = cfg.selection.transition_mode;
+  const crossfadeStep = cfg.selection.crossfade_frames > 0
+    ? 1 / cfg.selection.crossfade_frames
+    : 1;
+  const applyColorAdjustmentsToTerrain = () => {
+    materialController.applyColorAdjustments();
+  };
+
+  const cutChangedRef: { fn: () => void } = { fn: () => {} };
+  const parentByNodeId = new Map<string, ClodPageNode>();
+  for (const node of allNodes) {
+    for (const child of node.children) {
+      if (child) parentByNodeId.set(child.id, node);
+    }
+  }
+  const prefetchNodes = (rendered: readonly ClodPageNode[], frameId: number): void => {
+    const config = clodRuntime.renderNodeCache;
+    if (!config.prefetchParent && !config.prefetchChildren) return;
+    const candidates: ClodPageNode[] = [];
+    const seen = new Set<string>();
+    const addCandidate = (node: ClodPageNode | null | undefined) => {
+      if (!node || seen.has(node.id)) return;
+      seen.add(node.id);
+      candidates.push(node);
+    };
+    for (const node of rendered) {
+      if (config.prefetchParent) addCandidate(parentByNodeId.get(node.id));
+      if (config.prefetchChildren) {
+        for (const child of node.children) addCandidate(child);
+      }
+      if (candidates.length >= config.maxPrefetchCreatesPerFrame) break;
+    }
+    renderNodeCache.prefetch(candidates, frameId);
+  };
+  const selectionController = createClodSelectionController({
+    config: {
+      clodRuntime,
+      hysteresisMergeFactor: cfg.selection.hysteresis_merge_factor,
+      chunksPerPage: cfg.page.chunks_per_page,
+      chunkSize: cfg.page.chunk_size,
+      readbackMode: queryReadbackMode,
+      forceContinuousParity: queryWebGpuParity,
+      webGpuUnavailableReason: getWebGpuUnavailableReason(),
+      poolTerrainMaterial,
+    },
+    roots: result.roots,
+    allNodes,
+    views,
+    getOrCreateView: (node, frameId) => renderNodeCache.getOrCreate({ node, frameId }),
+    markActiveNodes: (nodeIds, frameId) => renderNodeCache.markActive(nodeIds, frameId),
+    prefetchNodes,
+    getClodErrorCompute,
+    getSettings: () => ({
+      thresholdPx: state.thresholdPx,
+      enforce21: state.enforce21,
+      freezeSelection: (state as any).freezeSelection ?? false,
+      neighborLevelDeltaMax: (state as any).neighborLevelDeltaMax ?? 1,
+      bubble: state.bubble,
+      bubbleRadius: state.bubbleRadius,
+      forceMaxLevel: state.forceMaxLevel as number | "auto",
+      webgpuSelection: state.webgpuSelection,
+      showBounds: state.showBounds,
+      showSeamPoints: state.showSeamPoints,
+      showCrossLodBorders: state.showCrossLodBorders,
+      showLockedBorderVertices: state.showLockedBorderVertices,
+      materialTiers: state.materialTiers,
+    }),
+    getSelectionCenter: () => interaction.mode === "playing" ? player.position : input.controls.target,
+    renderer: input.renderer,
+    camera,
+    overlays: { boundaryGroup, seamGroup, crossLodBorderGroup },
+    lockedBorderOverlay,
+    staleEditedAncestorIds,
+    onCutChanged: () => cutChangedRef.fn(),
+  });
+  const updateSelection = () => selectionController.update();
+
+  const geometryForView = (view: NodeView, normalMode: PageGeometryNormalMode) => (
+    pageGeometryCache.getOrCreateWithResult({
+      node: view.node,
+      normalMode,
+      createGeometry: () => {
+        const geometry = toGeometry(view.node.mesh);
+        if (normalMode === "recomputed") {
+          geometry.setAttribute("normal", new THREE.BufferAttribute(recomputedNormalsFor(view), 3));
+        }
+        return geometry;
+      },
+    })
+  );
+
+  const assignViewGeometry = (
+    view: NodeView,
+    geometry: THREE.BufferGeometry,
+    previousWasCacheOwned = pageGeometryCache.owns(view.mesh.geometry as THREE.BufferGeometry),
+  ): void => {
+    const previous = view.mesh.geometry as THREE.BufferGeometry;
+    if (previous === geometry) {
+      pageGeometryCache.setGeometryActive(geometry, true);
+      return;
+    }
+    if (previousWasCacheOwned) pageGeometryCache.setGeometryActive(previous, false);
+    else previous.dispose();
+    view.mesh.geometry = geometry;
+    pageGeometryCache.setGeometryActive(geometry, true);
+  };
+
+  const setViewNormalMode = (view: NodeView, normalMode: PageGeometryNormalMode): void => {
+    assignViewGeometry(view, geometryForView(view, normalMode).geometry);
+  };
+
+  const applyNodeGeometry = (node: ClodPageNode): ClodGeometryApplyResult => {
+    const v = views.get(node.id);
+    if (!v) {
+      return { applied: false, geometryMs: 0, materialMs: 0, triangles: triangleCount(node.mesh), reusedGeometry: false };
+    }
+    const gs = performance.now();
+    const previousWasCacheOwned = pageGeometryCache.owns(v.mesh.geometry as THREE.BufferGeometry);
+    v.node = node;
+    v.sourceNormals = node.mesh.normals;
+    v.recomputedNormals = null;
+    const normalMode: PageGeometryNormalMode = state.recomputedNormals ? "recomputed" : "source";
+    const geometryResult = geometryForView(v, normalMode);
+    assignViewGeometry(v, geometryResult.geometry, previousWasCacheOwned);
+    return {
+      geometryMs: performance.now() - gs,
+      materialMs: 0,
+      triangles: triangleCount(node.mesh),
+      reusedGeometry: geometryResult.cacheHit,
+    };
+  };
+
+  const applyNodeCollider = (node: ClodPageNode): number => {
+    if (node.level !== 0) return 0;
+    const tc = performance.now();
+    terrainColliders.updatePage(node.id, node.mesh);
+    nearFieldBubbleController.invalidatePage(node.id);
+    return performance.now() - tc;
+  };
+
+  const applyNodeMesh = (node: ClodPageNode): { geometrySwapMs: number; colliderMs: number } => {
+    const geometry = applyNodeGeometry(node);
+    const colliderMs = node.level === 0 ? applyNodeCollider(node) : 0;
+    return { geometrySwapMs: geometry.geometryMs, colliderMs };
+  };
+
+  const clodApplyQueue = new ClodApplyQueue({
+    budget: clodRuntime.clodApply,
+    applyGeometry: applyNodeGeometry,
+    applyCollider: applyNodeCollider,
+    getFrameId: () => selectionController.stats().frameId,
+    getCameraPosition: () => {
+      const p = interaction.mode === "playing" ? player.position : input.controls.target;
+      return { x: p.x, z: p.z };
+    },
+    isNodeVisible: (nodeId) => {
+      const view = views.get(nodeId);
+      return Boolean(view && (view.mesh.visible || view.fade > 0.001 || view.target > 0));
+    },
+    onGeometryApplied: (node) => {
+      staleEditedAncestorIds.delete(node.id);
+      selectionController.patchNodes([node]);
+      selectionController.invalidate();
+    },
+  });
+
+  return {
+    postProcess,
+    skyEnvironment,
+    currentTerrainColorAdjustments,
+    currentEnvironmentSettings,
+    currentPostProcessSettings,
+    currentLighting,
+    views,
+    textureController,
+    materialController,
+    applyTerrainTextures,
+    applyColorByLodToMaterials,
+    applyColorAdjustmentsToTerrain,
+    farShellController,
+    canopyShellSystem,
+    canopyDebugState,
+    getCanopyConfig: () => liveCanopyConfig,
+    setCanopyConfig: (config: CanopyShellConfig) => {
+      liveCanopyConfig = { ...config };
+      if (canopyDebugState) {
+        applyConfigToCanopyDebugState(canopyDebugState, config);
+      }
+    },
+    shadowProxyController,
+    shadowProxyDebugState,
+    getShadowProxyConfig: () => liveShadowProxyConfig,
+    setShadowProxyConfig: (config: import("../../shadows/shadowProxyTypes.js").ShadowProxyConfig) => {
+      liveShadowProxyConfig = { ...config };
+    },
+    boundaryGroup,
+    seamGroup,
+    crossLodBorderGroup,
+    lockedBorderOverlay,
+    nodeLabelOverlay,
+    brushPreview,
+    nearFieldBubbleController,
+    pageGeometryCache,
+    renderNodeCache,
+    pageTransitionMode,
+    crossfadeStep,
+    selectionController,
+    updateSelection,
+    cutChangedRef,
+    applyNodeMesh,
+    applyNodeGeometry,
+    applyNodeCollider,
+    clodApplyQueue,
+    drainClodApplyQueue: () => clodApplyQueue.drain(),
+    getClodApplyStats: () => clodApplyQueue.stats(),
+    setViewNormalMode,
+  };
+}
