@@ -10,6 +10,7 @@ import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpec
 import type { TreeMaterialHandle } from "./tree_material.js";
 import { createTreeRingNodeMaterialHandle, type TreeHydrologyWater, type TreeRingInstanceBuffers } from "./tree_node_material.js";
 import { createTreeRingImpostorNodeMaterialHandle } from "./tree_ring_impostor_node_material.js";
+import { createTreeRingFarNodeMaterialHandle, treeRingUsesFarMaterial } from "./tree_ring_far_node_material.js";
 import { createTreeCrownProxyNodeMaterialHandle } from "./tree_crown_proxy_node_material.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import {
@@ -63,22 +64,7 @@ export function createTreeSystemGpuRingDrawResources(
   for (const species of TREE_SPECIES) {
     for (const lod of TREE_LODS) {
       const materialKey = species + ":" + lod;
-      const atlas = input.impostorAtlases[species];
-      materialHandles[materialKey] = lod === "impostor" && input.settings.impostors.enabled && atlas?.ready
-        ? createTreeRingImpostorNodeMaterialHandle(
-          input.settings,
-          ringBuffers,
-          atlas,
-          input.currentLighting ?? undefined,
-          input.hydrologyWater,
-        )
-        : createTreeRingNodeMaterialHandle(
-          input.settings,
-          ringBuffers,
-          lod,
-          input.currentLighting ?? undefined,
-          input.hydrologyWater,
-        );
+      materialHandles[materialKey] = createTreeGpuRingMaterialHandle(input, ringBuffers, species, lod);
       const group = treeGpuRingGroupIndex(species, lod);
       meshes.push(createGpuRingTierDraw(
         input,
@@ -117,6 +103,40 @@ export function createTreeSystemGpuRingDrawResources(
     materialHandles,
     outputBuffers: buffers.outputBuffers,
   };
+}
+
+function createTreeGpuRingMaterialHandle(
+  input: TreeGpuRingDrawResourcesInput,
+  buffers: TreeRingInstanceBuffers,
+  species: TreeSpeciesId,
+  lod: TreeLod,
+): TreeMaterialHandle {
+  const atlas = input.impostorAtlases[species];
+  if (lod === "impostor" && input.settings.impostors.enabled && atlas?.ready) {
+    return createTreeRingImpostorNodeMaterialHandle(
+      input.settings,
+      buffers,
+      atlas,
+      input.currentLighting ?? undefined,
+      input.hydrologyWater,
+    );
+  }
+  if (treeRingUsesFarMaterial(lod)) {
+    return createTreeRingFarNodeMaterialHandle(
+      input.settings,
+      buffers,
+      lod,
+      input.currentLighting ?? undefined,
+      input.hydrologyWater,
+    );
+  }
+  return createTreeRingNodeMaterialHandle(
+    input.settings,
+    buffers,
+    lod,
+    input.currentLighting ?? undefined,
+    input.hydrologyWater,
+  );
 }
 
 function createGpuRingTierDraw(
