@@ -12,6 +12,7 @@ import type { PlayerInteractionState } from "../../player_controller.js";
 import type { FrameRenderer } from "./frame_renderer.js";
 import type { VegetationFrameTiming } from "./vegetation_frame_phase.js";
 import type { FramePerfPhaseTiming, FramePerfProbe } from "./perf_probe.js";
+import { materialChurnDiagnostics } from "../../rendering/material_churn/material_churn_diagnostics.js";
 
 export interface RenderPhaseInput {
   renderer: FrameRenderer;
@@ -115,6 +116,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
   }
   if (input.postProcess) input.postProcess.render(input.scene, input.camera);
   else input.renderer.render(input.scene, input.camera);
+  materialChurnDiagnostics.sampleRendererInfo(input.renderer);
 
   const hooks = input.getHooks();
   if (hooks && !hooks.ready) {
