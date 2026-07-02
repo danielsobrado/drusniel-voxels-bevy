@@ -15,13 +15,6 @@ import {
 export const TREE_STRUCTURAL_VARIANTS = 4;
 
 const TREE_CONTACT_OFFSET_PER_SCALE_M = -0.12;
-const TREE_VARIANT_HASH_SALT = 1103;
-const TREE_VARIANT_SEED_X = 0.013;
-const TREE_VARIANT_SEED_Z = 0.037;
-const TREE_VARIANT_HASH_X = 127.1;
-const TREE_VARIANT_HASH_Z = 311.7;
-const TREE_VARIANT_HASH_MUL = 43758.5453123;
-
 export interface TreeTerrainSampler {
   readonly sourceRevision?: number | (() => number);
   surfaceHeight(x: number, z: number): number;
@@ -119,19 +112,19 @@ export function generateTreeInstances(
         continue;
       }
 
-      const ecology = settings.ecology.enabled ? sampleTreeEcology(settings, x, z, height, normalY, weights) : null;
-      if (ecology && treeHash2(gridX, gridZ, settings.seed + 701) > ecologyAcceptanceProbability(settings, ecology)) {
+      const ecology = settings.ecology.enabled ? sampleTreeEcology(x, z, height, normalY, groundWeight, settings) : null;
+      if (ecology && treeHash2(gridX, gridZ, settings.seed + 701) > ecologyAcceptanceProbability(ecology, settings)) {
         stats.rejectedMaterial++;
         continue;
       }
-      const species = selectTreeSpecies(settings, height, normalY, weights, treeHash2(gridX, gridZ, settings.seed + 409), ecology);
+      const species = selectTreeSpeciesForInstance(settings, treeHash2(gridX, gridZ, settings.seed + 409), height, normalY, weights, ecology);
       if (!species) { stats.rejectedMaterial++; continue; }
       const speciesSettings = settings.species[species];
       const variant = Math.floor(treeHash2(gridX, gridZ, settings.seed + 509) * TREE_STRUCTURAL_VARIANTS) % TREE_STRUCTURAL_VARIANTS;
-      const scale = 0.82 + treeHash2(gridX, gridZ, settings.seed + 601) * 0.42;
+      const scale = (0.82 + treeHash2(gridX, gridZ, settings.seed + 601) * 0.42) * (ecology?.scaleMultiplier ?? 1);
       const rotationY = treeHash2(gridX, gridZ, settings.seed + 907) * Math.PI * 2;
       ranked.push({
-        priority: treeInstancePriority(gridX, gridZ, settings.seed, ecology, species),
+        priority: treeInstancePriority(gridX, gridZ, settings.seed, ecology, species, height, normalY, settings, weights),
         suppressionRadius: speciesSettings.crownRadiusM * scale,
         instance: {
           position: [x, height + TREE_CONTACT_OFFSET_PER_SCALE_M * scale, z],
@@ -161,8 +154,44 @@ export function generateTreeInstances(
   return accepted;
 }
 
-function treeInstancePriority(gridX: number, gridZ: number, seed: number, ecology: TreeEcologySample | null, species: TreeSpeciesId): number {
+function selectTreeSpeciesForInstance(
+  settings: TreeSettings,
+  roll: number,
+  height: number,
+  normalY: number,
+  materialWeights: readonly [number, number, number, number],
+  ecology: TreeEcologySample | null,
+): TreeSpeciesId | null {
+  if (!ecology || !settings.ecology.enabled) return selectTreeSpecies(settings, roll);
+  let total = 0;
+  const weighted = TREE_SPECIES.map((species) => {
+    const weight = speciesEcologyWeight(species, ecology, height, normalY, settings, materialWeights);
+    total += weight;
+    return { species, weight };
+  });
+  if (total <= 0) return null;
+  let cursor = roll * total;
+  for (const candidate of weighted) {
+    cursor -= candidate.weight;
+    if (cursor <= 0) return candidate.species;
+  }
+  return weighted[weighted.length - 1]?.species ?? null;
+}
+
+function treeInstancePriority(
+  gridX: number,
+  gridZ: number,
+  seed: number,
+  ecology: TreeEcologySample | null,
+  species: TreeSpeciesId,
+  height: number,
+  normalY: number,
+  settings: TreeSettings,
+  materialWeights: readonly [number, number, number, number],
+): number {
   const base = treeHash2(gridX, gridZ, seed + 503);
   if (!ecology) return base;
-  return base * (1 - Math.min(0.25, ecology.density * 0.1)) + speciesEcologyWeight(ecology, species) * -0.01;
+  const density = ecologyAcceptanceProbability(ecology, settings);
+  const speciesWeight = speciesEcologyWeight(species, ecology, height, normalY, settings, materialWeights);
+  return base * (1 - Math.min(0.25, density * 0.1)) + speciesWeight * -0.01;
 }
