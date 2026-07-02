@@ -51,7 +51,6 @@ describe("DEFAULT_POST_PROCESS_SETTINGS", () => {
       gtaoEnabled: true,
       froxelsEnabled: true,
       bounceEnabled: true,
-      cloudsEnabled: true,
       godRaysMode: "off",
       godRaysDensity: 0.96,
       godRaysDecay: 0.92,
