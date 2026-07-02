@@ -41,17 +41,21 @@ export function createSunLightCacheCore(options: any) {
     const terrainRevision = provider.tileRevision(tile);
     const key = fullKey(tile, sunBin, terrainRevision);
     stats.currentSunBin = sunBin;
-    if (entries.has(key)) {
-      entries.get(key)!.lastUsedFrame = frameIndex;
+    const entry = entries.get(key);
+    if (entry) {
+      entry.lastUsedFrame = frameIndex;
       stats.hits += 1;
       return key;
     }
-    if (!pending.has(key)) pending.set(key, { tile, sunVec: sunVec.clone(), sunBin, terrainRevision });
-    stats.misses += 1;
+    if (!pending.has(key)) {
+      pending.set(key, { tile, sunVec: sunVec.clone(), sunBin, terrainRevision });
+      stats.misses += 1;
+    }
     return key;
   };
 
   const evictIfNeeded = () => {
+    stats.active = options.active;
     if (entries.size <= options.cache.maxEntries) return;
     const ordered = [...entries.entries()].sort((a, b) => a[1].lastUsedFrame - b[1].lastUsedFrame);
     while (entries.size > options.cache.maxEntries && ordered.length > 0) {
@@ -61,6 +65,7 @@ export function createSunLightCacheCore(options: any) {
   };
 
   const readWorld = (x: number, z: number, sunVec: THREE.Vector3, provider: ReturnType<typeof createTerrainSummaryLightHeightProvider>, frameIndex: number) => {
+    stats.active = options.active;
     if (!options.active) return { kind: "lit", value: 1 } as const;
     const tile = worldToSunVisibilityTile(x, z, options.tile);
     const key = enqueueTile(tile, sunVec, frameIndex, provider);
