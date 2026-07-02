@@ -17,7 +17,7 @@ near_field:
 
 page_geometry_cache:
   enabled: true
-  # Active geometries are never evicted, so this is a soft cap until lazy view creation lands.
+  # Active geometries are never evicted; render_node_cache keeps the active set small.
   max_entries: 8192
   warn_at_entries: 6144
 
