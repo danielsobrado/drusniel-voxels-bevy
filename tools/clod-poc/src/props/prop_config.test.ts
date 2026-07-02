@@ -15,12 +15,18 @@ describe("parseCustomPropsConfig", () => {
     expect(ruin?.lightingProxy?.affectGi).toBe(true);
   });
 
-  it("falls back to defaults for an empty document", () => {
+  it("falls back to readback-safe defaults for an empty document", () => {
     const settings = parseCustomPropsConfig("");
     expect(settings.enabled).toBe(DEFAULT_CUSTOM_PROPS_SETTINGS.enabled);
     expect(settings.props).toHaveLength(0);
     expect(settings.culling.hysteresisM).toBe(8);
     expect(settings.gpu).toEqual(DEFAULT_CUSTOM_PROPS_SETTINGS.gpu);
+    expect(settings.gpu.debugShowGpuCounts).toBe(false);
+  });
+
+  it("keeps bundled custom props GPU count debug disabled unless config opts in", () => {
+    const settings = parseCustomPropsConfig(customPropsYaml);
+    expect(settings.gpu.debugShowGpuCounts).toBe(false);
   });
 
   it("parses GPU ring settings", () => {
