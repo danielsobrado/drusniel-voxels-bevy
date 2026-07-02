@@ -5,6 +5,7 @@ import { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
 import { createSunLightCacheRuntime } from "./far_light_cache_runtime.js";
 import { loadBundledSunLightOptions } from "./sun_light_config_loader.js";
 import { createSunLightDebugOverlay } from "./sun_light_debug_overlay.js";
+import { invalidateSunLightGpuAtlas, updateSunLightGpuAtlas } from "./sun_light_gpu_atlas.js";
 
 interface LightUpdateArgs {
   terrainSummary: TerrainSummaryField;
@@ -28,16 +29,21 @@ export function createLightUpdate(args: LightUpdateArgs) {
   const globals = window as unknown as Record<string, unknown>;
   globals.__drusnielSunLightOptions = options;
   globals.__drusnielSunLightStats = () => cache.stats();
-  globals.__drusnielSunLightRefresh = () => cache.markAllStale();
+  globals.__drusnielSunLightRefresh = () => {
+    cache.markAllStale();
+    invalidateSunLightGpuAtlas();
+  };
   globals.__drusnielSunLightPeekWorld = (x: number, z: number, sunVec: THREE.Vector3) => cache.peekWorld(x, z, sunVec, provider);
   return {
     update(camera: THREE.PerspectiveCamera, sunVec: THREE.Vector3, frameIndex: number, nowMs: number) {
       const terrainRevision = provider.terrainRevision();
       if (terrainRevision !== lastTerrainRevision) {
         cache.markAllStale();
+        invalidateSunLightGpuAtlas();
         lastTerrainRevision = terrainRevision;
       }
       if (!options.active) {
+        invalidateSunLightGpuAtlas();
         overlay.update([], options);
         return;
       }
@@ -49,6 +55,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
         }
       }
       cache.updateBudgeted(provider, frameIndex, nowMs);
+      updateSunLightGpuAtlas(centerTile, cache.tiles(), options);
       overlay.update(cache.tiles(), options);
     },
     stats() {
@@ -56,6 +63,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
     },
     dispose() {
       overlay.dispose();
+      invalidateSunLightGpuAtlas();
     },
   };
 }
