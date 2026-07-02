@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_TREE_SETTINGS, cloneTreeSettings } from "./tree_config.js";
 import {
   buildTreeRingClusterVisibilityMask,
+  TreeRingClusterVisibilityCache,
   treeRingClusterMaskByteLength,
   treeRingSlotClusterVisible,
 } from "./tree_ring_cluster_visibility.js";
@@ -77,6 +78,44 @@ describe("tree ring cluster visibility", () => {
     expect(Array.from(mask.words).some((value) => value === 0)).toBe(true);
   });
 
+  it("reuses cached decisions for unchanged camera and terrain revision", () => {
+    const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
+    settings.distanceM = 24;
+    settings.gpu.terrainVisibility.minDistanceM = 0;
+    settings.gpu.terrainVisibility.heightMarginM = 0;
+    settings.gpu.terrainVisibility.crownHeightM = 0;
+    const cache = new TreeRingClusterVisibilityCache();
+
+    const first = buildTreeRingClusterVisibilityMask({
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      settings,
+      sampler: constantTerrain(100),
+      clusterDimCells: 4,
+      terrainRevision: 11,
+      cache,
+    });
+    const second = buildTreeRingClusterVisibilityMask({
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      settings,
+      sampler: constantTerrain(100),
+      clusterDimCells: 4,
+      terrainRevision: 11,
+      cache,
+    });
+
+    expect(first.cacheHits).toBe(0);
+    expect(first.cacheMisses).toBeGreaterThan(0);
+    expect(second.cacheHits).toBe(first.cacheMisses);
+    expect(second.cacheMisses).toBe(0);
+    expect(second.activeSlotIndices).toEqual(first.activeSlotIndices);
+  });
+
   it("maps slots to their cluster visibility", () => {
     const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
     settings.distanceM = 24;
@@ -94,6 +133,8 @@ describe("tree ring cluster visibility", () => {
       candidateSlotsBeforePrefilter: 225,
       candidateSlotsAfterPrefilter: 1,
       skippedCandidateEstimate: 224,
+      cacheHits: 0,
+      cacheMisses: 0,
       reasonCounts: {
         visible: words.length - 1,
         terrain_hidden: 1,
