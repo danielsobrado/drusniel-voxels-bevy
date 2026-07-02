@@ -36,6 +36,8 @@ export interface ClodGeometryApplyResult {
   reusedGeometry: boolean;
 }
 
+export type ClodApplyFailureKind = "geometry" | "collider";
+
 export interface ClodApplyQueueDeps {
   budget: ClodApplyBudget;
   applyGeometry: (node: ClodPageNode) => ClodGeometryApplyResult;
@@ -44,6 +46,7 @@ export interface ClodApplyQueueDeps {
   getCameraPosition: () => { x: number; z: number };
   isNodeVisible: (nodeId: string) => boolean;
   onGeometryApplied?: (node: ClodPageNode) => void;
+  onApplyFailed?: (kind: ClodApplyFailureKind, node: ClodPageNode, error: unknown) => void;
 }
 
 interface ClodApplyJob {
@@ -100,16 +103,21 @@ export class ClodApplyQueue {
       if (geometryJobs > 0 && frameOverBudget()) break;
       const job = this.geometryJobs.shift();
       if (!job) break;
-      const result = this.deps.applyGeometry(job.node);
-      this.statsRecorder.recordGeometry(
-        result.geometryMs,
-        result.triangles || triangleCount(job.node.mesh),
-        result.reusedGeometry,
-        result.applied !== false,
-      );
-      this.statsRecorder.recordMaterial(result.materialMs);
-      this.deps.onGeometryApplied?.(job.node);
-      if (job.node.level === 0) this.enqueueCollider(job.node, job.enqueuedFrame);
+      try {
+        const result = this.deps.applyGeometry(job.node);
+        const applied = result.applied !== false;
+        this.statsRecorder.recordGeometry(
+          result.geometryMs,
+          result.triangles || triangleCount(job.node.mesh),
+          result.reusedGeometry,
+          applied,
+        );
+        this.statsRecorder.recordMaterial(result.materialMs);
+        if (applied) this.deps.onGeometryApplied?.(job.node);
+        if (job.node.level === 0) this.enqueueCollider(job.node, job.enqueuedFrame);
+      } catch (error) {
+        this.deps.onApplyFailed?.("geometry", job.node, error);
+      }
       geometryJobs++;
     }
 
@@ -121,13 +129,17 @@ export class ClodApplyQueue {
       if ((geometryJobs + colliderJobs) > 0 && frameOverBudget() && !allowPriorityOverride) break;
       const job = this.colliderJobs.shift();
       if (!job) break;
-      const staleFrames = Math.max(0, this.deps.getFrameId() - job.enqueuedFrame);
-      this.statsRecorder.recordColliderStaleFrames(staleFrames);
-      if (job.priorityOverride) {
-        priorityColliderApplied = true;
-        this.statsRecorder.recordColliderPriorityOverride();
+      try {
+        const staleFrames = Math.max(0, this.deps.getFrameId() - job.enqueuedFrame);
+        this.statsRecorder.recordColliderStaleFrames(staleFrames);
+        if (job.priorityOverride) {
+          priorityColliderApplied = true;
+          this.statsRecorder.recordColliderPriorityOverride();
+        }
+        this.statsRecorder.recordCollider(this.deps.applyCollider(job.node));
+      } catch (error) {
+        this.deps.onApplyFailed?.("collider", job.node, error);
       }
-      this.statsRecorder.recordCollider(this.deps.applyCollider(job.node));
       colliderJobs++;
     }
 
