@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { worldToSunVisibilityTile, sunVisibilityTileBounds, sunVisibilityTileKeyToString, type SunVisibilityTileKey } from "./sun_visibility_tile.js";
 import { toSunBin, sunBinKey, type SunDirectionBin } from "./sun_bins.js";
-import { buildLightTile, LIGHT_SAMPLE, type LightTile, type LightTileBuildRequest } from "./light_builder.js";
+import { LIGHT_SAMPLE, type LightTile, type LightTileBuildRequest } from "./light_builder.js";
 import type { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
 import type { SunLightOptions } from "./sun_light_options.js";
 
@@ -100,5 +100,5 @@ export function createSunLightCacheCore(options: SunLightOptions) {
     return { kind: "missing", value: 0.5 } as const;
   };
 
-  return { entries, pending, stats, enqueueTile, evictIfNeeded, readWorld, buildLightTile };
+  return { entries, pending, stats, enqueueTile, evictIfNeeded, readWorld };
 }
