@@ -89,7 +89,7 @@ export interface TreeGpuRingDispatchParams {
   indexCounts: TreeGpuRingIndexCounts;
   frustumPlanes?: ArrayLike<number>;
   shadowCascadePlanes?: ArrayLike<number>;
-  /** Camera-visibility mask for visible-list generation only. Never gate shadow casters with this. */
+  /** Optional cluster mask used by the shader's visible-list gate for debug/parity with the active-slot list. */
   visibleClusterMaskWords?: Uint32Array;
   visibleClusterDimCells?: number;
   visibleClusterGrid?: number;
@@ -379,12 +379,12 @@ export class TreeGpuRingCompute {
     const packedFieldParams = packFieldParams(edits.length);
     device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
     this.counterReadbacks = Array.from({ length: READBACK_SLOTS }, (_, index) => ({
-      buffer: device.createBuffer({ label: `tree ring counter readback ${index}`, size: READBACK_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
-      busy: false,
-      destroyAfterMap: false,
-      visibleCpu: new Uint32Array(TREE_GPU_RING_GROUP_COUNT),
-      shadowCpu: new Uint32Array(TREE_GPU_RING_SHADOW_GROUP_COUNT),
-      terrainVisibilityCpu: new Uint32Array(TREE_TERRAIN_VISIBILITY_COUNTER_COUNT),
+    buffer: device.createBuffer({ label: `tree ring counter readback ${index}`, size: READBACK_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
+    busy: false,
+    destroyAfterMap: false,
+    visibleCpu: new Uint32Array(TREE_GPU_RING_GROUP_COUNT),
+    shadowCpu: new Uint32Array(TREE_GPU_RING_SHADOW_GROUP_COUNT),
+    terrainVisibilityCpu: new Uint32Array(TREE_TERRAIN_VISIBILITY_COUNTER_COUNT),
     }));
     this.hydroTexture = createTreeHydrologyTexture(device, hydroData);
     const hydroSampler = device.createSampler({ label: "tree ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
@@ -413,16 +413,16 @@ export class TreeGpuRingCompute {
     const module = device.createShaderModule({ label: "tree ring compute shader", code: composeTreeRingShader(treeGpuRingWorkgroupSize(settings)) });
     const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const layout = device.createBindGroupLayout({
-      label: "tree ring compute layout",
-      entries: [
-        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        storage(1), storage(2), storage(3), storage(4), storage(5), storage(6), storage(7, "read-only-storage"),
-        { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
-        { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
-        storage(11, "read-only-storage"),
-        storage(12, "read-only-storage"),
-      ],
+    label: "tree ring compute layout",
+    entries: [
+    { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+    storage(1), storage(2), storage(3), storage(4), storage(5), storage(6), storage(7, "read-only-storage"),
+    { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+    { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+    { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+    storage(11, "read-only-storage"),
+    storage(12, "read-only-storage"),
+    ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `tree ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
