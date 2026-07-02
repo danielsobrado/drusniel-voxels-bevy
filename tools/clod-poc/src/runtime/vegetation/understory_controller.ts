@@ -2,13 +2,15 @@ import * as THREE from "three";
 import type { ClodPageNode } from "../../types.js";
 import type { EnvironmentLighting } from "../../environment/environment.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
-import { UnderstorySystem, type UnderstoryStats } from "../../understory/understory_system.js";
-import type { UnderstorySettings } from "../../understory/understory_config.js";
-import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
 import type { UnderstoryHydrologyData } from "../../gpu/understory_ring_compute.js";
+import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
+import { setUnderstoryDepthPrepassEnabled } from "../../understory/understory_depth_prepass_runtime.js";
+import type { UnderstorySettings } from "../../understory/understory_config.js";
+import { UnderstorySystem, type UnderstoryStats } from "../../understory/understory_system.js";
 
 export interface UnderstoryControllerUiState {
   understoryEnabled: boolean;
+  understoryDepthPrepassEnabled: boolean;
   understoryDistance: number;
   understoryMaxInstances: number;
   understoryDebugColorByClass: boolean;
@@ -38,10 +40,13 @@ export interface UnderstoryController {
   update(elapsedSeconds: number, ringCenter: THREE.Vector3, camera: THREE.Camera): void;
   updateLighting(lighting: EnvironmentLighting): void;
   setEnabled(enabled: boolean): void;
+  setDepthPrepassEnabled(enabled: boolean): void;
   markPatchesDirty(): void;
 }
 
 export function createUnderstoryController(deps: UnderstoryControllerDeps): UnderstoryController {
+  setUnderstoryDepthPrepassEnabled(deps.getUiState().understoryDepthPrepassEnabled);
+
   const makeSettings = (): UnderstorySettings => {
     const state = deps.getUiState();
     return {
@@ -106,6 +111,12 @@ export function createUnderstoryController(deps: UnderstoryControllerDeps): Unde
     },
     setEnabled(enabled) {
       system.setEnabled(enabled);
+    },
+    setDepthPrepassEnabled(enabled) {
+      deps.getUiState().understoryDepthPrepassEnabled = enabled;
+      setUnderstoryDepthPrepassEnabled(enabled);
+      system.rebuild();
+      refreshStats();
     },
     markPatchesDirty() {
       system.markPatchesDirty();
