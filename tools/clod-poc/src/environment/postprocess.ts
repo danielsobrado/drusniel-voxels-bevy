@@ -1,10 +1,12 @@
 import * as THREE from "three";
 import {
+  GOD_RAYS_SCREEN_SAMPLES,
   clampedRenderScale,
   withPostProcessDefaults,
   type PostProcessSettings,
   type PostProcessToneMapping,
 } from "./postprocess_settings.js";
+import { projectSunToScreen } from "../gpu/god_rays_screen.js";
 import { getSunLightGpuAtlas } from "../terrain/sun_visibility/sun_light_gpu_atlas.js";
 
 export * from "./postprocess_settings.js";
@@ -262,19 +264,20 @@ const OUTPUT_FRAG = /* glsl */ `
 
   vec3 godRaysColor() {
     if (uGodRaysMode < 0.5 || uSunScreenVisible < 0.5 || uGodRaysExposure <= 0.0) return vec3(0.0);
-    float sampleCount = uGodRaysMode < 1.5 ? 12.0 : 24.0;
+    float sampleCount = uGodRaysMode < 1.5 ? ${GOD_RAYS_SCREEN_SAMPLES.cheap}.0 : ${GOD_RAYS_SCREEN_SAMPLES.heavy}.0;
     vec2 delta = (vUv - uSunScreen) * clamp(uGodRaysDensity, 0.0, 1.25) / sampleCount;
     vec2 coord = vUv;
     float decay = 1.0;
     float shafts = 0.0;
-    for (int i = 0; i < 24; i++) {
+    for (int i = 0; i < ${GOD_RAYS_SCREEN_SAMPLES.heavy}; i++) {
       if (float(i) >= sampleCount) break;
       coord -= delta;
       if (coord.x < 0.0 || coord.x > 1.0 || coord.y < 0.0 || coord.y > 1.0) break;
       float depth = texture2D(tDepth, coord).x;
       float skyMask = step(0.999999, depth);
       float terrainVisibility = sunVisibilityAtDepthUv(coord);
-      float source = mix(terrainVisibility * 0.35, 1.0, skyMask);
+      float sceneSource = luminance(texture2D(tDiffuse, coord).rgb);
+      float source = skyMask * sceneSource + (1.0 - skyMask) * terrainVisibility * 0.12;
       shafts += source * decay * clamp(uGodRaysWeight, 0.0, 2.0);
       decay *= clamp(uGodRaysDecay, 0.1, 0.99);
     }
@@ -374,7 +377,7 @@ function godRaysModeValue(mode: Required<PostProcessSettings>["godRaysMode"]): n
 }
 
 function readSunDirection(): THREE.Vector3 | null {
-  const value = (window as unknown as { __drusnielSunLightSunDirection?: THREE.Vector3 }).__drusnielSunLightSunDirection;
+  const value = (globalThis as unknown as { __drusnielSunLightSunDirection?: THREE.Vector3 }).__drusnielSunLightSunDirection;
   return value && typeof value.x === "number" && typeof value.y === "number" && typeof value.z === "number"
     ? value
     : null;
@@ -412,7 +415,7 @@ export class PostProcessPipeline {
   private readonly previousViewProjection = new THREE.Matrix4();
   private readonly originalProjectionMatrix = new THREE.Matrix4();
   private readonly sunScreen = new THREE.Vector2(0.5, 0.5);
-  private readonly sunWorldPoint = new THREE.Vector3();
+  private readonly sunDirection = new THREE.Vector3();
   private historyReady = false;
   private jitterFrame = 0;
   private settings: Required<PostProcessSettings>;
@@ -606,16 +609,14 @@ export class PostProcessPipeline {
     this.outputMaterial.uniforms.uSunVisibilityValid.value = atlas.valid;
 
     const sunDir = readSunDirection();
-    if (!sunDir || atlas.valid < 0.5 || this.settings.godRaysMode === "off") {
+    if (!sunDir || this.settings.godRaysMode === "off") {
       this.outputMaterial.uniforms.uSunScreenVisible.value = 0;
       return;
     }
-    this.sunWorldPoint.copy((camera as THREE.PerspectiveCamera).position)
-      .addScaledVector(sunDir.clone().normalize(), cameraClip(camera, "far", 8000) * 0.45)
-      .project(camera);
-    this.sunScreen.set(this.sunWorldPoint.x * 0.5 + 0.5, this.sunWorldPoint.y * 0.5 + 0.5);
+    const sunInfo = projectSunToScreen(this.sunDirection.copy(sunDir).normalize(), camera);
+    this.sunScreen.set(sunInfo.u, sunInfo.v);
     this.outputMaterial.uniforms.uSunScreen.value.copy(this.sunScreen);
-    this.outputMaterial.uniforms.uSunScreenVisible.value = this.sunWorldPoint.z >= -1 && this.sunWorldPoint.z <= 1 ? 1 : 0;
+    this.outputMaterial.uniforms.uSunScreenVisible.value = sunInfo.visible ? 1 : 0;
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera): void {
