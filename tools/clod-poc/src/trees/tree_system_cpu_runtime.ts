@@ -34,6 +34,7 @@ import {
 } from "./tree_system_instance_attributes.js";
 import { setTreeInstanceMatrixWhenChanged } from "./tree_system_matrix_state.js";
 import { updateTreeMeshAfterLod as updateTreeMeshAfterLodState, type TreeMeshBoundsState } from "./tree_system_mesh_bounds.js";
+import { treeCpuPatchCrossfadeEnabled } from "./tree_system_gpu_policy.js";
 import {
   createTreeMeshWriteState,
   incrementTreeMeshWriteCount,
@@ -126,7 +127,7 @@ export function updateTreePatchLods(
   const lodDistances = treeLodDistances(input.settings);
   const write = createTreeMeshWriteState();
   resetTreeLodCounts(lodCounts);
-  const crossfade = input.settings.lod.crossfadeEnabled && input.settings.lod.ditherEnabled;
+  const crossfade = treeCpuPatchCrossfadeEnabled(input.settings);
   for (const patch of input.patches) {
     resetTreeMeshWriteStateForGrid(patch.meshes, write);
     patch.visible = treeDistance2d(center.x, center.z, patch.centerX, patch.centerZ) <= lodDistances.impostor + patch.radius;
@@ -153,7 +154,7 @@ export function updateTreePatchLods(
         patch.previousLods[instanceIndex] = null;
         continue;
       }
-      const selection = selectTreeLod(distance, patch.previousLods[instanceIndex], input.settings);
+      const selection = selectTreeLod(distance, patch.previousLods[instanceIndex], input.settings, { allowCrossfade: crossfade });
       patch.previousLods[instanceIndex] = selection.lod;
       const primaryLod = input.resolveLod(instance.species, selection.lod);
       lodCounts[primaryLod]++;
@@ -260,36 +261,34 @@ function placeTreeInstance(
   write: TreeMeshWriteState,
 ): void {
   const mesh = patch.meshes[instance.species][lod];
-  const index = treeMeshWriteCount(mesh, write);
-  if (index >= mesh.instanceMatrix.count) return;
-  TREE_CPU_TRANSLATION.set(
-    instance.position[0] - patch.centerX,
-    instance.position[1],
-    instance.position[2] - patch.centerZ,
-  );
-  const rotationY = lod === "impostor" && input.settings.impostors.axialBillboard
-    ? Math.atan2(cameraPosition.x - instance.position[0], cameraPosition.z - instance.position[2])
-    : instance.rotationY;
-  TREE_CPU_ROTATION.setFromAxisAngle(TREE_CPU_UP_AXIS, rotationY);
-  TREE_CPU_SCALE.setScalar(instance.scale);
+  const writeIndex = treeMeshWriteCount(write, mesh);
+  if (writeIndex >= mesh.count) return;
+  const resolveLod = input.resolveLod(instance.species, lod);
+  const renderLod = resolveLod === lod ? lod : resolveLod;
+  const effectiveMesh = patch.meshes[instance.species][renderLod];
+  const effectiveIndex = effectiveMesh === mesh ? writeIndex : treeMeshWriteCount(write, effectiveMesh);
+  if (effectiveIndex >= effectiveMesh.count) return;
+  writeTreeWorldXZIfChanged(effectiveMesh, effectiveIndex, instance.position[0], instance.position[2], () => markTreeMeshWorldXZChanged(write, effectiveMesh));
+  writeTreeLodFadeIfChanged(effectiveMesh, effectiveIndex, fade, () => markTreeMeshFadeChanged(write, effectiveMesh));
+  writeTreeLodDitherRoleIfChanged(effectiveMesh, effectiveIndex, ditherRole, () => markTreeMeshFadeChanged(write, effectiveMesh));
+  if (renderLod === "impostor") {
+    writeTreeImpostorUvRectIfChanged(effectiveMesh, effectiveIndex, instance.species, cameraPosition, input.impostorAtlases, () => markTreeMeshImpostorUvChanged(write, effectiveMesh));
+  }
+  TREE_CPU_TRANSLATION.set(instance.position[0] - patch.centerX, instance.position[1], instance.position[2] - patch.centerZ);
+  TREE_CPU_SCALE.set(instance.scale, instance.scale, instance.scale);
+  TREE_CPU_ROTATION.setFromAxisAngle(TREE_CPU_UP_AXIS, instance.rotationY);
   TREE_CPU_MATRIX.compose(TREE_CPU_TRANSLATION, TREE_CPU_ROTATION, TREE_CPU_SCALE);
-  if (setTreeInstanceMatrixWhenChanged(mesh, index, TREE_CPU_MATRIX, TREE_CPU_MATRIX_SCRATCH)) markTreeMeshMatrixChanged(mesh, write);
-  if (writeTreeWorldXZIfChanged(mesh, index, instance.position[0], instance.position[2])) {
-    markTreeMeshWorldXZChanged(mesh, write);
+  if (renderLod === "impostor") {
+    TREE_CPU_MATRIX_SCRATCH.copy(TREE_CPU_MATRIX);
+    const previous = input.meshBoundsState.get(effectiveMesh);
+    if (input.settings.impostors.axialBillboard && previous?.worldMatrix) {
+      effectiveMesh.matrixWorld.copy(previous.worldMatrix);
+    } else {
+      effectiveMesh.matrixWorld.multiplyMatrices(patch.group.matrixWorld, effectiveMesh.matrix);
+    }
+    effectiveMesh.matrixWorld.decompose(TREE_CPU_TRANSLATION, TREE_CPU_ROTATION, TREE_CPU_SCALE);
+    TREE_CPU_MATRIX_SCRATCH.copy(TREE_CPU_MATRIX);
   }
-  if (
-    writeTreeLodFadeIfChanged(mesh, index, fade) ||
-    writeTreeLodDitherRoleIfChanged(mesh, index, ditherRole)
-  ) markTreeMeshFadeChanged(mesh, write);
-  if (lod === "impostor" && writeTreeImpostorUvRectIfChanged({
-    mesh,
-    index,
-    instance,
-    cameraPosition,
-    settings: input.settings,
-    impostorAtlases: input.impostorAtlases,
-  })) {
-    markTreeMeshImpostorUvChanged(mesh, write);
-  }
-  incrementTreeMeshWriteCount(mesh, write);
+  setTreeInstanceMatrixWhenChanged(effectiveMesh, effectiveIndex, TREE_CPU_MATRIX, () => markTreeMeshMatrixChanged(write, effectiveMesh));
+  incrementTreeMeshWriteCount(write, effectiveMesh);
 }
