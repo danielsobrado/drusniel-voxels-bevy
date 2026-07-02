@@ -12,6 +12,8 @@ import type { ForestLightingSettings } from "../../forest_lighting/forest_lighti
 import type { WaterConfig } from "../../water/waterConfig.js";
 import { isLowSunScene, sceneFromSearchParams } from "../../scenes/scene_registry.js";
 import { clampGrassDepthPrepassTier, DEFAULT_GRASS_DEPTH_PREPASS_TIER } from "../../grass/grass_depth_prepass_runtime.js";
+import { parseTreeDepthPrepassMaxLod } from "../../trees/tree_depth_prepass_runtime.js";
+import type { TreeDepthPrepassMaxLod } from "../../trees/tree_depth_prepass_runtime.js";
 import { applyValidatedArchiveState } from "./archive_state_mapper.js";
 import { createBrushSliceState } from "./brush_state.js";
 import { createClodSliceState } from "./clod_state.js";
@@ -113,6 +115,11 @@ function grassDepthPrepassTierFromQuery(searchParams: URLSearchParams): number {
   );
 }
 
+function treeDepthPrepassMaxLodFromQuery(searchParams: URLSearchParams): TreeDepthPrepassMaxLod {
+  const enabled = queryFlagEnabled(searchParams, ["treePrepass", "prepass"], true);
+  return enabled ? parseTreeDepthPrepassMaxLod(searchParams.get("treePrepassMaxLod")) : "none";
+}
+
 function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
   const scene = sceneFromSearchParams(params.searchParams);
   if (params.isWebGpu) state.normalDivergence = false;
@@ -199,6 +206,9 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
   if (treeMaxInstances !== null) state.treeMaxInstances = Math.floor(treeMaxInstances);
   const treeGpuMaxVisible = nonNegativeNumberParam(params.searchParams, ["treeGpuMaxVisible", "treeGpuMax"]);
   if (treeGpuMaxVisible !== null) state.treeGpuMaxVisible = Math.floor(treeGpuMaxVisible);
+  const treePrepassMaxLod = params.searchParams.get("treePrepassMaxLod");
+  if (treePrepassMaxLod !== null) state.treeDepthPrepassMaxLod = parseTreeDepthPrepassMaxLod(treePrepassMaxLod);
+  if (params.searchParams.get("treePrepass") === "0" || params.searchParams.get("prepass") === "0") state.treeDepthPrepassMaxLod = "none";
   if (params.searchParams.get("understory") === "1") state.understoryEnabled = true;
   if (params.searchParams.get("understory") === "0") state.understoryEnabled = false;
   if (params.searchParams.get("water") === "1") state.waterEnabled = true;
@@ -228,6 +238,7 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
 export function createClodAppState(params: CreateClodAppStateParams): ClodAppState {
   const audio = getAudioState();
   const grassDepthPrepassTier = grassDepthPrepassTierFromQuery(params.searchParams);
+  const treeDepthPrepassMaxLod = treeDepthPrepassMaxLodFromQuery(params.searchParams);
   const slices: AppStateSlices = {
     clod: createClodSliceState({
       cfg: params.cfg,
@@ -258,6 +269,7 @@ export function createClodAppState(params: CreateClodAppStateParams): ClodAppSta
       grassRingDebug: params.searchParams.get("grassRingDebug") === "1",
       grassDepthPrepassEnabled: grassDepthPrepassTier > 0,
       grassDepthPrepassTier,
+      treeDepthPrepassMaxLod,
     }),
     water: createWaterSliceState(params.waterConfig),
     weather: createWeatherSliceState({
