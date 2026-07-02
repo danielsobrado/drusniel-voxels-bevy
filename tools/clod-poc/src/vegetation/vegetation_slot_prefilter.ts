@@ -4,11 +4,16 @@ import {
 } from "./terrain_rejection_config.js";
 import { quantizeTerrainRejectionBucket } from "./terrain_rejection_cache.js";
 import {
-  createVegetationVisibilityProvider,
   type TerrainHeightSampler,
   type TerrainVisibilitySettings,
   type VegetationVisibilityReason,
 } from "./vegetation_visibility_provider.js";
+import {
+  createVegetationTerrainRejectProvider,
+  type VegetationTerrainRejectProvider,
+  type VegetationTerrainRejectReason,
+} from "./vegetation_terrain_reject_provider.js";
+import type { VegetationClusterDescriptor, VegetationKind } from "./vegetation_cluster_descriptors.js";
 
 export interface VegetationSlotPrefilterOptions {
   kind: string;
@@ -42,11 +47,13 @@ export interface VegetationSlotPrefilterResult {
   cacheHits: number;
   cacheMisses: number;
   reasonCounts: Record<VegetationVisibilityReason, number>;
+  providerReasonCounts: Record<VegetationTerrainRejectReason, number>;
 }
 
 export interface VegetationSlotPrefilterDecision {
   visible: boolean;
   reason: VegetationVisibilityReason;
+  providerReason: VegetationTerrainRejectReason;
 }
 
 interface CacheEntry {
@@ -126,8 +133,9 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
   const candidateSlotsBeforePrefilter = grid * grid;
   const clusterWords = new Uint32Array(clusterGrid * clusterGrid);
   const activeSlotScratch = new Uint32Array(candidateSlotsBeforePrefilter);
-  const provider = createVegetationVisibilityProvider();
+  const provider = createVegetationTerrainRejectProvider();
   const reasonCounts = createReasonCounts();
+  const providerReasonCounts = createProviderReasonCounts();
   const cacheEnabled = (options.cacheConfig?.decisionCacheEnabled ?? DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.decisionCacheEnabled) && !!options.cache;
   const cacheStatsBefore = options.cache?.stats() ?? null;
   let activeSlotCount = 0;
@@ -144,7 +152,8 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
         ? options.cache!.get(cacheKey) ?? evaluateAndCache({ cache: options.cache!, cacheKey, clusterX, clusterZ, grid, clusterDimSlots, provider, options })
         : evaluateCluster({ clusterX, clusterZ, grid, clusterDimSlots, provider, options });
       reasonCounts[decision.reason]++;
-      if (decision.reason === "unknown_kept") unknownKeptClusters++;
+      providerReasonCounts[decision.providerReason]++;
+      if (decision.reason === "unknown_kept" || decision.providerReason === "summaryMissing") unknownKeptClusters++;
       clusterWords[clusterIndex] = decision.visible ? 1 : 0;
       if (decision.visible) {
         visibleClusters++;
@@ -172,6 +181,7 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
     cacheHits: cacheStatsBefore && cacheStatsAfter ? cacheStatsAfter.hits - cacheStatsBefore.hits : 0,
     cacheMisses: cacheStatsBefore && cacheStatsAfter ? cacheStatsAfter.misses - cacheStatsBefore.misses : 0,
     reasonCounts,
+    providerReasonCounts,
   };
 }
 
@@ -182,7 +192,7 @@ function evaluateAndCache(input: {
   clusterZ: number;
   grid: number;
   clusterDimSlots: number;
-  provider: ReturnType<typeof createVegetationVisibilityProvider>;
+  provider: VegetationTerrainRejectProvider;
   options: VegetationSlotPrefilterOptions;
 }): VegetationSlotPrefilterDecision {
   const decision = evaluateCluster(input);
@@ -195,36 +205,76 @@ function evaluateCluster(input: {
   clusterZ: number;
   grid: number;
   clusterDimSlots: number;
-  provider: ReturnType<typeof createVegetationVisibilityProvider>;
+  provider: VegetationTerrainRejectProvider;
   options: VegetationSlotPrefilterOptions;
 }): VegetationSlotPrefilterDecision {
-  if (!input.options.visibility.enabled) return { visible: true, reason: "disabled" };
-  if (!input.options.sampler) return { visible: true, reason: "unknown_kept" };
+  if (!input.options.visibility.enabled) return { visible: true, reason: "disabled", providerReason: "accepted" };
 
   const probes = clusterProbes(input.clusterX, input.clusterZ, input.grid, input.clusterDimSlots, input.options);
   let hiddenProbeCount = 0;
+  let lastProviderReason: VegetationTerrainRejectReason = "accepted";
   for (const probe of probes) {
-    const targetSample = input.options.sampler.sampleHeight(probe.x, probe.z);
-    if (!targetSample || targetSample.unknown || !Number.isFinite(targetSample.height)) {
-      return { visible: true, reason: "unknown_kept" };
-    }
-    const result = input.provider.sampleTerrainVisibility({
-      sampler: input.options.sampler,
-      settings: input.options.visibility,
+    const decision = input.provider.classifyCluster({
+      descriptor: clusterDescriptorForProbe(input, probe),
+      kind: normalizeKind(input.options.kind),
       cameraX: input.options.centerX,
       cameraY: input.options.cameraY,
       cameraZ: input.options.centerZ,
-      targetX: probe.x,
-      targetZ: probe.z,
-      targetGroundY: targetSample.height,
-      targetRadiusM: clusterRadiusM(input.options.cell, input.clusterDimSlots),
+      worldCells: input.options.worldCells,
+      visibility: input.options.visibility,
+      sampler: input.options.sampler,
+      terrainRevision: input.options.terrainRevision,
+      providerRevision: input.options.providerRevision,
+      acceptWhenSummaryMissing: DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.gpuEarlyReject.conservative.acceptWhenSummaryMissing,
+      acceptWhenRevisionMismatch: DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.gpuEarlyReject.conservative.acceptWhenRevisionMismatch,
     });
-    if (result.visible) return { visible: true, reason: result.reason };
+    lastProviderReason = decision.reason;
+    if (!decision.reject) return { visible: true, reason: sourceReason(decision), providerReason: decision.reason };
     hiddenProbeCount++;
   }
   return hiddenProbeCount === probes.length
-    ? { visible: false, reason: "terrain_hidden" }
-    : { visible: true, reason: "visible" };
+    ? { visible: false, reason: sourceReasonFromProvider(lastProviderReason), providerReason: lastProviderReason }
+    : { visible: true, reason: "visible", providerReason: "accepted" };
+}
+
+function clusterDescriptorForProbe(input: {
+  clusterX: number;
+  clusterZ: number;
+  clusterDimSlots: number;
+  options: VegetationSlotPrefilterOptions;
+}, probe: SlotProbe): VegetationClusterDescriptor {
+  const radius = clusterRadiusM(input.options.cell, input.clusterDimSlots);
+  return {
+    id: input.clusterZ * 65536 + input.clusterX,
+    kind: normalizeKind(input.options.kind),
+    ring: 0,
+    pageX: input.clusterX,
+    pageZ: input.clusterZ,
+    centerX: probe.x,
+    centerZ: probe.z,
+    halfSize: radius,
+    minY: Number.NEGATIVE_INFINITY,
+    maxY: Number.POSITIVE_INFINITY,
+    seed: 0,
+    densityBudget: clusterSlotCount(input.clusterX, input.clusterZ, Number.MAX_SAFE_INTEGER, input.clusterDimSlots),
+    terrainRevision: input.options.terrainRevision ?? 0,
+  };
+}
+
+function sourceReason(decision: ReturnType<VegetationTerrainRejectProvider["classifyCluster"]>): VegetationVisibilityReason {
+  return decision.sourceReason ?? sourceReasonFromProvider(decision.reason);
+}
+
+function sourceReasonFromProvider(reason: VegetationTerrainRejectReason): VegetationVisibilityReason {
+  if (reason === "terrainHidden") return "terrain_hidden";
+  if (reason === "summaryMissing") return "unknown_kept";
+  if (reason === "accepted") return "visible";
+  return "terrain_hidden";
+}
+
+function normalizeKind(kind: string): VegetationKind {
+  if (kind === "tree" || kind === "grass" || kind === "understory") return kind;
+  return "grass";
 }
 
 function clusterProbes(
@@ -351,5 +401,17 @@ function createReasonCounts(): Record<VegetationVisibilityReason, number> {
     unknown_kept: 0,
     near_forced_visible: 0,
     disabled: 0,
+  };
+}
+
+function createProviderReasonCounts(): Record<VegetationTerrainRejectReason, number> {
+  return {
+    outsideTerrain: 0,
+    terrainHidden: 0,
+    belowWaterOrInvalid: 0,
+    tooFarForKind: 0,
+    noCoverage: 0,
+    summaryMissing: 0,
+    accepted: 0,
   };
 }
