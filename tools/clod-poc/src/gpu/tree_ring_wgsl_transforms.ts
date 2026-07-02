@@ -30,10 +30,29 @@ export function withTreeTerrainVisibilityCull(source: string): string {
       next = next.replace("fn tree_terrain_debug_counts_enabled() -> bool {", `${visibleClusterHelper}\n\nfn tree_terrain_debug_counts_enabled() -> bool {`);
     }
   }
+
   const visibleAppendFn = "append_" + "lod_if_active";
   const shadowAppendFn = "append_" + "shadow_lod_if_active";
   const terrainRejectStmt = "if (terrain_" + "hidden) { return; }";
-  const oldOrder = `  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);
+  const clusterRejectStmt = "if (!tree_slot_visible_cluster_visible(slot)) { return; }";
+  const targetOrder = `  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);
+  var terrain_hidden = false;
+  if (tree_terrain_visibility_enabled()) {
+    terrain_hidden = terrain_ridge_filter(wpos, height, dist);
+    record_tree_terrain_visibility(terrain_hidden);
+  }
+  ${terrainRejectStmt}
+  ${clusterRejectStmt}
+  ${shadowAppendFn}(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);
+  if (!in_frustum(shadow_center, 8.0)) { return; }
+  ${visibleAppendFn}(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);
+  ${visibleAppendFn}(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);
+  ${visibleAppendFn}(species, TREE_LOD_FAR, ring.lod_active.z, wc, height, scale);
+  ${visibleAppendFn}(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, wc, height, scale);`;
+  const shadowsBeforeTerrainOrder = `  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);
   var terrain_hidden = false;
   if (tree_terrain_visibility_enabled()) {
     terrain_hidden = terrain_ridge_filter(wpos, height, dist);
@@ -49,12 +68,32 @@ export function withTreeTerrainVisibilityCull(source: string): string {
   ${visibleAppendFn}(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);
   ${visibleAppendFn}(species, TREE_LOD_FAR, ring.lod_active.z, wc, height, scale);
   ${visibleAppendFn}(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, wc, height, scale);`;
-  const earlyOrder = "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  var terrain_hidden = false;\n  if (tree_terrain_visibility_enabled()) {\n    terrain_hidden = terrain_ridge_filter(wpos, height, dist);\n    record_tree_terrain_visibility(terrain_hidden);\n  }\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);\n  if (terrain_hidden) { return; }\n  if (!tree_slot_visible_cluster_visible(slot)) { return; }\n  if (!in_frustum(shadow_center, 8.0)) { return; }\n  append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);\n  append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);\n  append_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, wc, height, scale);\n  append_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, wc, height, scale);";
-  next = next.replace(oldOrder, earlyOrder);
+  const terrainBeforeShadowsNoClusterOrder = `  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);
+  var terrain_hidden = false;
+  if (tree_terrain_visibility_enabled()) {
+    terrain_hidden = terrain_ridge_filter(wpos, height, dist);
+    record_tree_terrain_visibility(terrain_hidden);
+  }
+  ${terrainRejectStmt}
+  ${shadowAppendFn}(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);
+  if (!in_frustum(shadow_center, 8.0)) { return; }
+  ${visibleAppendFn}(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);
+  ${visibleAppendFn}(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);
+  ${visibleAppendFn}(species, TREE_LOD_FAR, ring.lod_active.z, wc, height, scale);
+  ${visibleAppendFn}(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, wc, height, scale);`;
+
+  next = next.replace(shadowsBeforeTerrainOrder, targetOrder).replace(terrainBeforeShadowsNoClusterOrder, targetOrder);
   if (!next.includes("terrain_ridge_filter(wpos, height, dist)")) {
     next = next.replace(
-      "  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);\n  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);\n  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);",
-      earlyOrder,
+      `  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);
+  ${shadowAppendFn}(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);
+  ${shadowAppendFn}(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);`,
+      targetOrder,
     );
   }
   return next;
