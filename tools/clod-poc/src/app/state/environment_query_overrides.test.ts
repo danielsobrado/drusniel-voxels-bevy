@@ -35,6 +35,7 @@ function createState() {
     treeSpacing: 5.5,
     treeShadowMaxLod: "mid",
     treeGpuEnabled: false,
+    treeGpuFallbackToCpu: true,
     treeGpuForceCpu: true,
     treeGpuShowCounts: true,
     treeGpuReadbackVisibleLists: true,
@@ -106,6 +107,7 @@ describe("environment query overrides", () => {
     expect(state.treeSpacing).toBe(8);
     expect(state.treeShadowMaxLod).toBe("none");
     expect(state.treeGpuEnabled).toBe(true);
+    expect(state.treeGpuFallbackToCpu).toBe(true);
     expect(state.treeGpuForceCpu).toBe(false);
     expect(state.treeGpuShowCounts).toBe(false);
     expect(state.treeGpuReadbackVisibleLists).toBe(false);
@@ -118,6 +120,7 @@ describe("environment query overrides", () => {
     const params = new URLSearchParams({
       quality: "perf",
       treeGpu: "0",
+      treeGpuFallback: "0",
       treeGpuForceCpu: "1",
       treeGpuCounts: "1",
       treeGpuReadback: "1",
@@ -127,10 +130,26 @@ describe("environment query overrides", () => {
     applyEnvironmentQueryOverrides(state as never, params);
 
     expect(state.treeGpuEnabled).toBe(false);
+    expect(state.treeGpuFallbackToCpu).toBe(false);
     expect(state.treeGpuForceCpu).toBe(true);
     expect(state.treeGpuShowCounts).toBe(true);
     expect(state.treeGpuReadbackVisibleLists).toBe(true);
     expect(state.treeGpuValidateAgainstCpu).toBe(true);
+  });
+
+  it("enables strict tree GPU mode for fail-loud perf captures", () => {
+    const state = createState();
+    const params = new URLSearchParams({
+      quality: "perf",
+      treeGpuStrict: "1",
+      treeGpuForceCpu: "1",
+    });
+
+    applyEnvironmentQueryOverrides(state as never, params);
+
+    expect(state.treeGpuEnabled).toBe(true);
+    expect(state.treeGpuFallbackToCpu).toBe(false);
+    expect(state.treeGpuForceCpu).toBe(true);
   });
 
   it("enables tree GPU readback when counts or validation are requested", () => {
