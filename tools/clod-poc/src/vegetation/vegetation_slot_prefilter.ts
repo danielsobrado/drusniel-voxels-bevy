@@ -31,6 +31,7 @@ export interface VegetationSlotPrefilterResult {
   grid: number;
   clusterDimSlots: number;
   clusterGrid: number;
+  clusterWords: Uint32Array;
   activeSlotIndices: Uint32Array;
   candidateSlotsBeforePrefilter: number;
   candidateSlotsAfterPrefilter: number;
@@ -86,6 +87,10 @@ export class VegetationSlotPrefilterCache {
 
   clear(): void {
     this.entries.clear();
+    this.clock = 0;
+    this.hits = 0;
+    this.misses = 0;
+    this.evictions = 0;
   }
 
   stats(): { hits: number; misses: number; entries: number; evictions: number } {
@@ -118,6 +123,7 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
   const grid = Math.max(1, Math.floor(options.grid));
   const clusterDimSlots = Math.max(1, Math.floor(options.clusterDimSlots));
   const clusterGrid = Math.max(1, Math.ceil(grid / clusterDimSlots));
+  const clusterWords = new Uint32Array(clusterGrid * clusterGrid);
   const activeSlots: number[] = [];
   const provider = createVegetationVisibilityProvider();
   const reasonCounts = createReasonCounts();
@@ -130,6 +136,7 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
 
   for (let clusterZ = 0; clusterZ < clusterGrid; clusterZ++) {
     for (let clusterX = 0; clusterX < clusterGrid; clusterX++) {
+      const clusterIndex = clusterZ * clusterGrid + clusterX;
       const cacheKey = cacheEnabled ? slotPrefilterCacheKey({ clusterX, clusterZ, grid, clusterDimSlots, options }) : "";
       const decision = cacheEnabled
         ? options.cache!.get(cacheKey) ?? evaluateAndCache({ cache: options.cache!, cacheKey, clusterX, clusterZ, grid, clusterDimSlots, provider, options })
@@ -137,6 +144,7 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
       const slots = slotsForCluster(clusterX, clusterZ, grid, clusterDimSlots);
       reasonCounts[decision.reason]++;
       if (decision.reason === "unknown_kept") unknownKeptClusters++;
+      clusterWords[clusterIndex] = decision.visible ? 1 : 0;
       if (decision.visible) {
         visibleClusters++;
         activeSlots.push(...slots);
@@ -153,6 +161,7 @@ export function buildVegetationSlotPrefilter(options: VegetationSlotPrefilterOpt
     grid,
     clusterDimSlots,
     clusterGrid,
+    clusterWords,
     activeSlotIndices: Uint32Array.from(activeSlots),
     candidateSlotsBeforePrefilter,
     candidateSlotsAfterPrefilter: activeSlots.length,
