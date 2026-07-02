@@ -75,7 +75,7 @@ const results = [
     "visibleClusterMaskWords: visibleClusterMask?.words",
     "visibleClusterDimCells: visibleClusterMask?.clusterDimCells",
     "visibleClusterGrid: visibleClusterMask?.clusterGrid",
-    "activeSlotIndices: prefilter.activeSlotIndices",
+    "activeSlotIndices: visibleClusterMask?.activeSlotIndices",
   ]),
   checkNeedles("WGSL visible cluster transform", "src/gpu/tree_ring_wgsl_transforms.ts", [
     "var<storage, read> tree_visible_cluster_mask: array<u32>;",
