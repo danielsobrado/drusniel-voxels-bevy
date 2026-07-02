@@ -129,6 +129,12 @@ export class PageGeometryCache {
       return existing.geometry;
     }
 
+    if (existing?.retired && existing.active) {
+      throw new Error(
+        `[clod] active retired geometry requested with unchanged key ${key}; bump node.revision before rebuilding`,
+      );
+    }
+
     if (existing && !existing.active) {
       this.disposeEntry(existing, false);
     }
