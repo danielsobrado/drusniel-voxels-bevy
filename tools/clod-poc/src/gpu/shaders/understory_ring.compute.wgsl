@@ -180,156 +180,42 @@ fn sample_understory_ecology(x: f32, z: f32, height: f32, normal_y: f32, ground_
   let moisture = clamp(0.5 + (moisture_noise - 0.5) * moisture_strength + height_damp * 0.16, 0.0, 1.0);
   let shade = clamp(forest_influence * shade_strength + forest_edge * 0.2, 0.0, 1.0);
   let clearing_noise = understory_valueNoise2D(x - 109.2, z + 73.4, forest_scale * 1.9, seed + 23011u);
-  let clearing = clamp((1.0 - forest_influence) * 0.75 + forest_edge * clearing_pref + clearing_noise * 0.2, 0.0, 1.0);
-  let density_noise = understory_fractalNoise2D(x, z, density_scale, seed + 24001u, 2);
-  let terrain_density = clamp(ground_weight * understory_smoothstep(slope_min, 1.0, normal_y), 0.0, 1.0);
-  let density = clamp(terrain_density * (1.0 - density_strength + density_noise * density_strength), 0.0, 1.0);
-  let old_forest = understory_valueNoise2D(x + 991.7, z - 219.5, forest_scale * 2.4, seed + 25013u);
-  let deadfall = clamp(forest_influence * (0.35 + old_forest * deadfall_bias) + shade * 0.18, 0.0, 1.0);
-  result.forest_influence = forest_influence; result.forest_edge = forest_edge; result.shade = shade;
-  result.moisture = moisture; result.clearing = clearing; result.density = density; result.deadfall = deadfall;
+  let clearing = clamp(clearing_noise * clearing_pref + (1.0 - forest_influence) * 0.45, 0.0, 1.0);
+  let density_noise = understory_fractalNoise2D(x * 0.83 + 313.0, z * 1.11 - 79.0, density_scale, seed + 24001u, 3);
+  let density = clamp((0.65 + density_noise * 0.55) * density_strength * (0.65 + shade * 0.35) * (1.0 - clearing * 0.45), 0.0, 1.25);
+  result.forest_influence = forest_influence;
+  result.forest_edge = forest_edge;
+  result.shade = shade;
+  result.moisture = moisture;
+  result.clearing = clearing;
+  result.density = density;
+  result.deadfall = clamp(deadfall_bias + moisture * 0.22 + shade * 0.14, 0.0, 1.0);
   return result;
 }
-fn apply_river_understory_ecology(ecology: EcologySample, river: vec4<f32>) -> EcologySample {
-  var next = ecology;
-  let clear = river.x;
-  let fern_band = river.y;
-  let shrub_band = river.z;
-  let density = river.w;
-  next.moisture = clamp(next.moisture + fern_band * 0.28 + shrub_band * 0.10, 0.0, 1.0);
-  next.shade = clamp(next.shade + fern_band * 0.10 + shrub_band * 0.06, 0.0, 1.0);
-  next.forest_edge = clamp(max(next.forest_edge, shrub_band * 0.72), 0.0, 1.0);
-  next.clearing = clamp(next.clearing * (1.0 - fern_band * 0.20), 0.0, 1.0);
-  next.density = clamp(next.density * density * (1.0 - clear), 0.0, 1.0);
-  next.deadfall = clamp(next.deadfall + shrub_band * 0.12, 0.0, 1.0);
-  return next;
+fn apply_river_understory_ecology(ecology: EcologySample, river_band: vec4<f32>) -> EcologySample {
+  var result = ecology;
+  let clear = river_band.x;
+  let fern_band = river_band.y;
+  let shrub_band = river_band.z;
+  result.moisture = clamp(max(result.moisture, fern_band * 0.95 + shrub_band * 0.45), 0.0, 1.0);
+  result.shade = clamp(result.shade * (1.0 - clear * 0.32), 0.0, 1.0);
+  result.clearing = clamp(max(result.clearing, clear * 0.85), 0.0, 1.0);
+  result.density = clamp(result.density * (1.0 - clear) * mix(1.0, 1.16, max(fern_band, shrub_band)), 0.0, 1.32);
+  return result;
 }
 fn understory_acceptance(ecology: EcologySample) -> f32 {
-  return clamp(0.06 + ecology.density * 0.42 + ecology.forest_influence * 0.28 + ecology.forest_edge * 0.22 + ecology.clearing * 0.12, 0.0, 1.0);
+  let acceptance = ecology.density * mix(0.75, 1.08, ecology.shade) * mix(1.05, 0.78, ecology.clearing);
+  return clamp(acceptance, 0.0, 1.0);
 }
-fn understory_class_material_bias(group: u32, weights: vec4<f32>) -> f32 {
+fn understory_class_weight(group: u32, ecology: EcologySample, height: f32, normal_y: f32, material: vec4<f32>) -> f32 {
   let base = group * UNDERSTORY_CLASS_STRIDE_F32;
-  return max(0.0, dot(weights, vec4<f32>(class_params[base + 8u], class_params[base + 9u], class_params[base + 10u], class_params[base + 11u])));
-}
-fn understory_class_weight(group: u32, ecology: EcologySample, height: f32, normal_y: f32, material_weights: vec4<f32>) -> f32 {
-  let base = group * UNDERSTORY_CLASS_STRIDE_F32;
-  let cfg_weight = class_params[base + 0u];
-  let cfg_density = class_params[base + 1u];
-  let cfg_shade_pref = class_params[base + 2u];
-  let cfg_moisture_pref = class_params[base + 3u];
-  let cfg_edge_bias = class_params[base + 4u];
-  let cfg_height_code = class_params[base + 5u];
-  let cfg_enabled = class_params[base + 6u];
-  if (cfg_enabled < 0.5 || cfg_weight <= 0.0 || cfg_density <= 0.0) { return 0.0; }
-  let min_height = params.accept_a.y;
-  let max_height = params.accept_a.z;
-  let slope_min = params.accept_a.w;
-  let height_t = understory_smoothstep(min_height, max_height, height);
-  var height_weight: f32;
-  if (cfg_height_code < -0.5) { height_weight = 1.0 - height_t * 0.75; }
-  else if (cfg_height_code > 0.5) { height_weight = 0.35 + height_t * 0.9; }
-  else { height_weight = 1.0; }
-  let shade_weight = 1.0 - abs(ecology.shade - cfg_shade_pref) * 0.9;
-  let moisture_weight = 1.0 - abs(ecology.moisture - cfg_moisture_pref) * 0.85;
-  let edge_weight = 1.0 + ecology.forest_edge * cfg_edge_bias;
-  var clearing_weight: f32 = 1.0;
-  var canopy_weight: f32 = 1.0;
-  var fern_weight: f32 = 1.0;
-  var fallen_weight: f32 = 1.0;
-  if (group == 3u) { clearing_weight = 0.45 + ecology.clearing * 1.35; }
-  if (group == 2u) { canopy_weight = 0.42 + ecology.forest_influence * 0.9 + ecology.forest_edge * 0.35; }
-  if (group == 1u) { fern_weight = 0.35 + ecology.shade * 0.85 + ecology.moisture * 0.75; }
-  if (group == 4u || group == 5u) { fallen_weight = 0.25 + ecology.deadfall * 1.5; }
-  let slope_weight = clamp(normal_y / max(0.001, slope_min), 0.2, 1.15);
-  let material_bias = understory_class_material_bias(group, material_weights);
-  return max(0.0, cfg_weight * cfg_density * ecology.density * material_bias * height_weight * shade_weight * moisture_weight * edge_weight * clearing_weight * canopy_weight * fern_weight * fallen_weight * slope_weight);
-}
-fn in_frustum(center: vec3<f32>, slack: f32) -> bool {
-  for (var p = 0u; p < 6u; p = p + 1u) {
-    let plane = params.planes[p];
-    if (dot(plane.xyz, center) + plane.w < -slack) { return false; }
-  }
-  return true;
-}
-fn append_understory_cell(group: u32, wc: vec2<f32>, height: f32, normal_y: f32) {
-  let max_per_group = params.settings_u.x;
-  if (max_per_group == 0u) { return; }
-  let slot = atomicAdd(&counters[group], 1u);
-  if (slot >= max_per_group) { return; }
-  out_cell[group * max_per_group + slot] = vec4<f32>(wc.x, wc.y, height, normal_y);
-}
-fn process_understory_slot(slot: u32) {
-  let grid = params.settings_u.y;
-  let max_per_group = params.settings_u.x;
-  if (slot >= grid * grid || max_per_group == 0u) { return; }
-  let cell_size = params.accept_a.x;
-  let wc = understory_world_cell_from_slot(slot, grid, cell_size, params.center_radius.xy);
-  let jitter_x = understory_hash(wc, 1103u);
-  let jitter_z = understory_hash(wc, 1200u);
-  let wpos = (wc + vec2<f32>(jitter_x, jitter_z)) * cell_size;
-  let world_max = params.center_radius.w;
-  if (wpos.x <= 0.0 || wpos.y <= 0.0 || wpos.x >= world_max || wpos.y >= world_max) { return; }
-  let dist = distance(wpos, params.center_radius.xy);
-  if (dist > params.center_radius.z) { return; }
-  let base_height = surfaceHeightField(wpos.x, wpos.y);
-  let base_normal = normalize(densityGradient(wpos.x, base_height, wpos.y));
-  let hydro = hydrologyHeight(wpos.x, wpos.y, base_height, base_normal.y);
-  let height = hydro.x;
-  let wet_mask = hydro.y;
-  if (wet_mask > 0.5) { return; }
-  if (!in_frustum(vec3<f32>(wpos.x, height + 4.0, wpos.y), 8.0)) { return; }
-  let normal = normalize(densityGradient(wpos.x, height, wpos.y));
-  let material = understory_material_weights(height, normal.y);
-  let ground = understory_terrain_gate(height, normal.y, material);
-  if (ground < 0.0) { return; }
-  let river_band = river_understory_band(hydro);
-  let ecology = apply_river_understory_ecology(sample_understory_ecology(wpos.x, wpos.y, height, normal.y, ground), river_band);
-  let acceptance = understory_acceptance(ecology);
-  if (understory_hash(wc, 809u) >= acceptance) { return; }
-  let min_tree_influence = params.accept_b.y;
-  if (ecology.forest_influence + river_band.z * 0.32 < min_tree_influence) { return; }
-  var total_weight: f32 = 0.0;
-  var weights: array<f32, 6>;
-  for (var g: u32 = 0u; g < UNDERSTORY_GROUP_COUNT; g++) {
-    weights[g] = understory_class_weight(g, ecology, height, normal.y, material);
-    total_weight += weights[g];
-  }
-  if (total_weight <= 0.0) { return; }
-  let roll = understory_hash(wc, 409u) * total_weight;
-  var selected_group: u32 = 0u;
-  var cursor: f32 = roll;
-  for (var g: u32 = 0u; g < UNDERSTORY_GROUP_COUNT; g++) {
-    cursor -= weights[g];
-    if (cursor <= 0.0) { selected_group = g; break; }
-  }
-  if (understory_hash(wc, 509u) > min(1.0, class_params[selected_group * UNDERSTORY_CLASS_STRIDE_F32 + 1u])) { return; }
-  if (selected_group == 4u || selected_group == 5u) {
-    if (understory_pcg2d(floor(wc / 2.0), params.settings_u.z + 7777u).x > 0.55) { return; }
-  }
-  append_understory_cell(selected_group, wc, height, normal.y);
-}
-@compute @workgroup_size(UNDERSTORY_WORKGROUP_SIZE)
-fn clear_counters(@builtin(global_invocation_id) id: vec3<u32>) {
-  let i = id.x;
-  if (i < UNDERSTORY_GROUP_COUNT) { atomicStore(&counters[i], 0u); }
-  if (i < UNDERSTORY_GROUP_COUNT * UNDERSTORY_INDIRECT_STRIDE_U32) { indirect_args[i] = 0u; }
-}
-@compute @workgroup_size(UNDERSTORY_WORKGROUP_SIZE)
-fn understory_cull(@builtin(global_invocation_id) id: vec3<u32>) {
-  let slot = active_slots[id.x];
-  if (slot == UNDERSTORY_ACTIVE_SLOT_SENTINEL) { return; }
-  process_understory_slot(slot);
-}
-fn write_draw_args(group: u32, index_count: u32, instance_count: u32) {
-  let base = group * UNDERSTORY_INDIRECT_STRIDE_U32;
-  indirect_args[base + 0u] = index_count;
-  indirect_args[base + 1u] = min(instance_count, params.settings_u.x);
-  indirect_args[base + 2u] = 0u; indirect_args[base + 3u] = 0u; indirect_args[base + 4u] = 0u;
-}
-@compute @workgroup_size(UNDERSTORY_WORKGROUP_SIZE)
-fn build_indirect_args(@builtin(global_invocation_id) id: vec3<u32>) {
-  let group = id.x;
-  if (group >= UNDERSTORY_GROUP_COUNT) { return; }
-  let index_count = select(params.settings_extra[group - 4u], params.class_index_counts[group], group < 4u);
-  write_draw_args(group, index_count, atomicLoad(&counters[group]));
-}
+  let density = class_params[base + 1u];
+  let min_h = class_params[base + 2u];
+  let max_h = class_params[base + 3u];
+  let slope_max = class_params[base + 4u];
+  let shade_pref = class_params[base + 5u];
+  let moisture_pref = class_params[base + 6u];
+  let deadfall_pref = class_params[base + 7u];
+  let grass_pref = class_params[base + 8u];
+  let rock_pref = class_params[base + 9u];
+... (truncated)
