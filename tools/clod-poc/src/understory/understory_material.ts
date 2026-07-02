@@ -10,6 +10,15 @@ import {
   type ForestLightingMaterialState,
   type ForestLightingUniforms,
 } from "../forest_lighting/index.js";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "../rendering/material_churn/material_churn_diagnostics.js";
+import {
+  trackedMeshBasicMaterial,
+  trackedMeshStandardMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 export interface UnderstoryMaterialHandle {
   regularMaterial: THREE.Material;
@@ -19,7 +28,6 @@ export interface UnderstoryMaterialHandle {
   updateForestLighting(state: ForestLightingMaterialState | null): void;
   dispose(): void;
   prepassNodesFor?(cls: UnderstoryClass): PrepassNodes | undefined;
-  /** WebGPU node path only; the classic WebGL path lights via scene lights. */
   updateLighting?(lighting: EnvironmentLighting): void;
 }
 
@@ -43,7 +51,7 @@ export function createUnderstoryMaterialHandle(settings: UnderstorySettings): Un
   const uniforms = createUnderstoryWindUniforms();
   const forestUniforms = createForestLightingUniforms();
   updateUnderstoryWindUniforms(uniforms, settings);
-  const regularMaterial = new THREE.MeshStandardMaterial({
+  const regularMaterial = trackedMeshStandardMaterial({
     vertexColors: true,
     roughness: 0.95,
     metalness: 0,
@@ -51,18 +59,18 @@ export function createUnderstoryMaterialHandle(settings: UnderstorySettings): Un
     transparent: false,
     depthWrite: true,
     alphaTest: settings.render.alphaTest,
-  });
+  }, "understory-regular-material");
   attachUnderstoryShader(regularMaterial, uniforms, forestUniforms);
 
   const debugMaterials = {} as Record<UnderstoryClass, THREE.Material>;
   for (const cls of UNDERSTORY_CLASSES) {
-    const material = new THREE.MeshBasicMaterial({
+    const material = trackedMeshBasicMaterial({
       color: DEBUG_COLORS[cls],
       side: THREE.DoubleSide,
       transparent: false,
       depthWrite: true,
       alphaTest: settings.render.alphaTest,
-    });
+    }, `understory-debug-material:${cls}`);
     attachUnderstoryShader(material, uniforms, forestUniforms);
     debugMaterials[cls] = material;
   }
@@ -74,11 +82,9 @@ export function createUnderstoryMaterialHandle(settings: UnderstorySettings): Un
       uniforms.uUnderstoryTime.value = timeSeconds;
     },
     updateSettings(nextSettings: UnderstorySettings) {
-      regularMaterial.alphaTest = nextSettings.render.alphaTest;
-      regularMaterial.needsUpdate = true;
-      for (const material of Object.values(debugMaterials)) {
-        material.alphaTest = nextSettings.render.alphaTest;
-        material.needsUpdate = true;
+      applyAlphaTest(regularMaterial, nextSettings.render.alphaTest, "understory-regular-alpha-test");
+      for (const [cls, material] of Object.entries(debugMaterials)) {
+        applyAlphaTest(material, nextSettings.render.alphaTest, `understory-debug-alpha-test:${cls}`);
       }
       updateUnderstoryWindUniforms(uniforms, nextSettings);
     },
@@ -118,6 +124,7 @@ function attachUnderstoryShader(
   uniforms: UnderstoryWindUniforms,
   forestUniforms: ForestLightingUniforms,
 ): void {
+  materialChurnDiagnostics.trackPipelineSensitiveMutation(material, "onBeforeCompile", null, "understory-shader", "understory-shader-attach");
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms, forestUniforms);
     shader.vertexShader = injectForestLightingVertexShader(
@@ -126,6 +133,12 @@ function attachUnderstoryShader(
     );
     shader.fragmentShader = injectForestLightingFragmentShader(shader.fragmentShader);
   };
+}
+
+function applyAlphaTest(material: THREE.Material, alphaTest: number, reason: string): void {
+  if (setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "alphaTest", alphaTest, reason)) {
+    setMaterialNeedsUpdate(materialChurnDiagnostics, material, reason);
+  }
 }
 
 function createUnderstoryWindUniforms(): UnderstoryWindUniforms {
