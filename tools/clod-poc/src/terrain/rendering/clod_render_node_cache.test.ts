@@ -103,6 +103,7 @@ function deps(overrides: Partial<ClodRenderNodeCacheDeps> = {}) {
   const pageGeometryCache = {
     getOrCreate: vi.fn(() => geometry),
     setGeometryActive: vi.fn(),
+    invalidateNode: vi.fn(),
     owns: vi.fn(() => true),
   };
   const materialController = {
@@ -139,6 +140,7 @@ function deps(overrides: Partial<ClodRenderNodeCacheDeps> = {}) {
       prefetchChildren: false,
       maxPrefetchCreatesPerFrame: 2,
       warnAtInactiveNodes: 999,
+      evictGeometryWithRenderNode: true,
     },
   };
   return {
@@ -191,6 +193,8 @@ describe("ClodRenderNodeCache", () => {
 
     expect(cache.stats()).toMatchObject({ materializedNodes: 0, disposals: 2, evictions: 2 });
     expect(setup.pageGeometryCache.setGeometryActive).toHaveBeenCalledWith(setup.geometry, false);
+    expect(setup.pageGeometryCache.invalidateNode).toHaveBeenCalledWith("L0:0,0", { includeActive: true });
+    expect(setup.pageGeometryCache.invalidateNode).toHaveBeenCalledWith("L0:1,0", { includeActive: true });
   });
 
   it("keeps active nodes during prune", () => {
