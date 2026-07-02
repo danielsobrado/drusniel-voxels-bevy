@@ -1,6 +1,7 @@
 import { EqualDepth, InstancedMesh, Mesh, type Material, type Side } from "three";
 import { NodeMaterial, type WebGPURenderer } from "three/webgpu";
 import {
+  applyMaterialIfChanged,
   materialChurnDiagnostics,
   setMaterialNeedsUpdate,
   setPipelineSensitiveMaterialProperty,
@@ -72,7 +73,7 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: Depth
     "veg-depth-prepass-color-depth-write",
   ) || colorMaterialChanged;
   if (colorMaterialChanged) setMaterialNeedsUpdate(materialChurnDiagnostics, colorMaterial, "veg-depth-prepass-color");
-  mesh.material = colorMaterial;
+  applyMaterialIfChanged(materialChurnDiagnostics, mesh.uuid, mesh, colorMaterial, "veg-depth-prepass-color");
 
   const twin = new Mesh(mesh.geometry, material);
   twin.name = `${mesh.name}-depth-prepass`;
