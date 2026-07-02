@@ -81,7 +81,7 @@ function baseUiState(): ClodFrameLoopUiState {
     grassVisiblePatches: "",
     grassTierSummary: "",
     grassEdgeSuppressed: 0,
-    grassCandidateCount: 0,
+    grassCandidateCount: "0",
     treeTotal: "0" as unknown as ClodFrameLoopUiState["treeTotal"],
     treeVisiblePatches: "",
     treeLodSummary: "",
@@ -155,7 +155,7 @@ describe("runStatsSyncPhase", () => {
     expect(updateDisplay).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes grass tier summary when only prefilter budget changes", () => {
+  it("refreshes grass candidate summaries when only prefilter budget changes", () => {
     const state = baseUiState();
     const updateDisplay = vi.fn();
     const previous = baseGrassStats(1024, 256);
@@ -181,11 +181,12 @@ describe("runStatsSyncPhase", () => {
       setForestLightingStats: () => {},
       formatTreeGpuSummary: () => "",
       formatUnderstoryGpuSummary: () => "",
-      statsPresenter: basePresenter({ grassTierSummaryController: { updateDisplay } }),
+      statsPresenter: basePresenter({ grassCandidateCountController: { updateDisplay } }),
     });
 
     expect(storedGrass).toBe(next);
     expect(state.grassTierSummary).toBe("1/1/1/1 prefilter=256/1536");
+    expect(state.grassCandidateCount).toBe("256/1536");
     expect(updateDisplay).toHaveBeenCalledTimes(1);
   });
 });
