@@ -25,9 +25,13 @@ export interface TreeRingClusterVisibilityMask {
   clusterDimCells: number;
   clusterGrid: number;
   words: Uint32Array;
+  activeSlotIndices: Uint32Array;
   hiddenClusters: number;
   visibleClusters: number;
   unknownKeptClusters: number;
+  candidateSlotsBeforePrefilter: number;
+  candidateSlotsAfterPrefilter: number;
+  skippedCandidateEstimate: number;
   reasonCounts: Record<VegetationVisibilityReason, number>;
 }
 
@@ -41,12 +45,14 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
   const clusterDimCells = Math.max(1, Math.floor(options.clusterDimCells ?? TREE_RING_CLUSTER_DIM_CELLS));
   const clusterGrid = Math.max(1, Math.ceil(grid / clusterDimCells));
   const words = new Uint32Array(clusterGrid * clusterGrid);
+  const activeSlots: number[] = [];
   const reasonCounts = createReasonCounts();
   const provider = createVegetationVisibilityProvider();
   const terrainSampler = createTerrainHeightSampler(options.sampler);
   let hiddenClusters = 0;
   let visibleClusters = 0;
   let unknownKeptClusters = 0;
+  let skippedCandidateEstimate = 0;
 
   for (let clusterZ = 0; clusterZ < clusterGrid; clusterZ++) {
     for (let clusterX = 0; clusterX < clusterGrid; clusterX++) {
@@ -60,15 +66,35 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
         terrainSampler,
         options,
       });
+      const clusterSlots = slotsForCluster(clusterX, clusterZ, grid, clusterDimCells);
       reasonCounts[result.reason]++;
       if (result.reason === "unknown_kept") unknownKeptClusters++;
       words[index] = result.visible ? 1 : 0;
-      if (result.visible) visibleClusters++;
-      else hiddenClusters++;
+      if (result.visible) {
+        visibleClusters++;
+        activeSlots.push(...clusterSlots);
+      } else {
+        hiddenClusters++;
+        skippedCandidateEstimate += clusterSlots.length;
+      }
     }
   }
 
-  return { grid, clusterDimCells, clusterGrid, words, hiddenClusters, visibleClusters, unknownKeptClusters, reasonCounts };
+  const candidateSlotsBeforePrefilter = grid * grid;
+  return {
+    grid,
+    clusterDimCells,
+    clusterGrid,
+    words,
+    activeSlotIndices: Uint32Array.from(activeSlots),
+    hiddenClusters,
+    visibleClusters,
+    unknownKeptClusters,
+    candidateSlotsBeforePrefilter,
+    candidateSlotsAfterPrefilter: activeSlots.length,
+    skippedCandidateEstimate,
+    reasonCounts,
+  };
 }
 
 export function treeRingSlotClusterVisible(clusterMask: TreeRingClusterVisibilityMask | null | undefined, slot: number): boolean {
@@ -189,6 +215,20 @@ function createTerrainHeightSampler(sampler: TreeTerrainSampler | undefined): Te
       return { height, unknown: !Number.isFinite(height) };
     },
   };
+}
+
+function slotsForCluster(clusterX: number, clusterZ: number, grid: number, clusterDimCells: number): number[] {
+  const startX = clusterX * clusterDimCells;
+  const startZ = clusterZ * clusterDimCells;
+  const endX = Math.min(grid - 1, startX + clusterDimCells - 1);
+  const endZ = Math.min(grid - 1, startZ + clusterDimCells - 1);
+  const slots: number[] = [];
+  for (let slotZ = startZ; slotZ <= endZ; slotZ++) {
+    for (let slotX = startX; slotX <= endX; slotX++) {
+      slots.push(slotZ * grid + slotX);
+    }
+  }
+  return slots;
 }
 
 function clusterRadiusM(clusterDimCells: number): number {
