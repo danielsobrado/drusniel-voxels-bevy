@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PageFootprint } from "../types.js";
 import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
 import { DEFAULT_UNDERSTORY_SETTINGS } from "./understory_config.js";
@@ -17,9 +17,8 @@ function makeSampler(height: number, normalY = 1): UnderstoryTerrainSampler {
   };
 }
 
-afterEach(() => {
-  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = false;
-});
+beforeEach(resetTerrainRejectionConfig);
+afterEach(resetTerrainRejectionConfig);
 
 describe("understory patch terrain rejection", () => {
   it("keeps probe-only static rejection disabled by default", () => {
@@ -64,3 +63,7 @@ describe("understory patch terrain rejection", () => {
     expect(stats.earlyTerrainReasonCounts?.too_steep).toBe(1);
   });
 });
+
+function resetTerrainRejectionConfig(): void {
+  DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG.staticRulesEnabled = false;
+}

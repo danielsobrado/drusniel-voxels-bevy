@@ -31,7 +31,6 @@ import {
   createGrassMaterial,
   createGrassTuftGeometry,
   grassShaderDefinition,
-  populateGrassGeometry,
   type GrassGeometryBuilder,
   type GrassMaterialFactory,
   type GrassMaterialHandle,
@@ -50,11 +49,16 @@ import {
 } from "./grass_gpu_ring.js";
 import type { GrassGenerationStats, GrassStats } from "./grass_stats.js";
 import { grassFadeDistance, grassRingBands } from "./grass_math.js";
+import { GrassPatchFactory } from "./grass_patch_factory.js";
 import {
-  grassThinnedInstanceCount,
-  type GrassGpuRingComputeFactory,
-  type GrassPatch,
-} from "./grass_system_support.js";
+  clampGrassFootprint,
+  grassFootprintCenterX,
+  grassFootprintCenterZ,
+  grassFootprintRadius,
+} from "./grass_patch_footprint.js";
+import { updateGrassPatchVisibility } from "./grass_patch_visibility.js";
+import type { GrassGpuRingComputeFactory, GrassPatch } from "./grass_system_support.js";
+import { buildGrassStats } from "./grass_system_stats_builder.js";
 
 export {
   grassThinnedInstanceCount,
@@ -892,9 +896,9 @@ export class GrassSystem {
   private refreshPatches(center: THREE.Vector3): boolean {
     const nearbyNodes = this.nodes.filter((node) => {
       const footprint = node.footprint;
-      const centerX = (footprint.minX + footprint.maxX) * 0.5;
-      const centerZ = (footprint.minZ + footprint.maxZ) * 0.5;
-      const radius = Math.hypot(footprint.maxX - footprint.minX, footprint.maxZ - footprint.minZ) * 0.5;
+      const centerX = grassFootprintCenterX(footprint);
+      const centerZ = grassFootprintCenterZ(footprint);
+      const radius = grassFootprintRadius(footprint);
       return Math.hypot(center.x - centerX, center.z - centerZ) <= this.settings.distance + radius;
     });
     const nearbyIds = new Set(nearbyNodes.map((node) => node.id));
@@ -918,13 +922,7 @@ export class GrassSystem {
       // newly-in-range node in one frame is the walk stutter; cap per frame and defer the rest.
       if (built >= this.settings.patchFallback.maxNewPatchesPerRefresh) return true;
       const node = newNodes[index];
-      const source = node.footprint;
-      const footprint: PageFootprint = {
-        minX: THREE.MathUtils.clamp(source.minX, 0, this.worldCells),
-        minZ: THREE.MathUtils.clamp(source.minZ, 0, this.worldCells),
-        maxX: THREE.MathUtils.clamp(source.maxX, 0, this.worldCells),
-        maxZ: THREE.MathUtils.clamp(source.maxZ, 0, this.worldCells),
-      };
+      const footprint = clampGrassFootprint(node.footprint, this.worldCells);
       const remainingNodes = newNodes.length - index;
       const patchBudget = Math.ceil(remainingBudget / remainingNodes);
       const buildStart = performance.now();
@@ -943,131 +941,28 @@ export class GrassSystem {
   }
 
   private createPatch(nodeId: string, footprint: PageFootprint, instances: GrassBladeInstance[]): GrassPatch {
-    const shader = grassShaderDefinition(this.settings.shaderMode);
-    if (shader.patchStyle === "terrain-patch") {
+    if (grassShaderDefinition(this.settings.shaderMode).patchStyle === "terrain-patch") {
       return this.createTerrainPatch(nodeId, footprint, instances);
     }
-    const geometry = this.injectedGeometryBuilder
-      ? this.injectedGeometryBuilder(instances, { mode: this.settings.shaderMode, tier: "near", settings: this.settings })
-      : new THREE.InstancedBufferGeometry();
-    if (!this.injectedGeometryBuilder) {
-      populateGrassGeometry(geometry, this.classicBladeGeometry, footprint, instances, this.settings);
-    }
-
-    const centerX = (footprint.minX + footprint.maxX) * 0.5;
-    const centerZ = (footprint.minZ + footprint.maxZ) * 0.5;
-    const radius = Math.hypot(footprint.maxX - footprint.minX, footprint.maxZ - footprint.minZ) * 0.5;
-    return {
-      nodeId,
-      meshes: [new THREE.Mesh(geometry, this.materialFor(this.settings.shaderMode))],
-      centerX,
-      centerZ,
-      radius,
-      bladeCount: instances.length,
-      midBladeCount: 0,
-      visibleTier: "hidden",
-    };
+    return this.createPatchFactory().createPatch(nodeId, footprint, instances);
   }
 
   private createTerrainPatch(nodeId: string, footprint: PageFootprint, instances: GrassBladeInstance[]): GrassPatch {
-    const nearBlade = this.settings.nearCrossedQuads
-      ? this.terrainPatchNearCrossedGeometry
-      : this.terrainPatchNearGeometry;
-    const nearGeometry = this.injectedGeometryBuilder
-      ? this.injectedGeometryBuilder(instances, {
-          mode: this.settings.shaderMode,
-          tier: "near",
-          crossed: this.settings.nearCrossedQuads,
-          settings: this.settings,
-        })
-      : new THREE.InstancedBufferGeometry();
-    if (!this.injectedGeometryBuilder) {
-      populateGrassGeometry(nearGeometry, nearBlade, footprint, instances, this.settings);
-    }
-
-    const midThinRatio = this.settings.lod.midInstanceFraction;
-    const farThinRatio = Number.isFinite(this.settings.lod.farInstanceFraction)
-      ? this.settings.lod.farInstanceFraction
-      : this.settings.lod.farDensityRatio;
-    const midCount = grassThinnedInstanceCount(instances.length, midThinRatio);
-    const midInstances = instances.slice(0, midCount).map((instance) => ({
-      ...instance,
-      height: instance.height * 1.55,
-      edgeFade: Math.min(1, instance.edgeFade * 1.15),
-      widthScale: (instance.widthScale ?? 1) * this.widthCompensation(midThinRatio),
-    }));
-    const midGeometry = this.injectedGeometryBuilder
-      ? this.injectedGeometryBuilder(midInstances, { mode: this.settings.shaderMode, tier: "mid", settings: this.settings })
-      : new THREE.InstancedBufferGeometry();
-    if (!this.injectedGeometryBuilder) {
-      populateGrassGeometry(midGeometry, this.terrainPatchMidGeometry, footprint, midInstances, this.settings);
-    }
-
-    const farCount = grassThinnedInstanceCount(instances.length, farThinRatio);
-    const farInstances = instances.slice(0, farCount).map((instance) => ({
-      ...instance,
-      height: instance.height * 1.9,
-      edgeFade: Math.min(1, instance.edgeFade * 1.25),
-      widthScale: (instance.widthScale ?? 1) * this.widthCompensation(farThinRatio),
-    }));
-    const farGeometry = this.injectedGeometryBuilder
-      ? this.injectedGeometryBuilder(farInstances, {
-          mode: this.settings.shaderMode,
-          tier: "far",
-          crossed: true,
-          settings: this.settings,
-        })
-      : new THREE.InstancedBufferGeometry();
-    if (!this.injectedGeometryBuilder) {
-      populateGrassGeometry(farGeometry, this.terrainPatchFarGeometry, footprint, farInstances, this.settings);
-    }
-
-    const superThinRatio = farThinRatio <= 0 ? 0 : farThinRatio * 0.5;
-    const superCount = grassThinnedInstanceCount(instances.length, superThinRatio);
-    const superInstances = instances.slice(0, superCount).map((instance) => ({
-      ...instance,
-      height: instance.height * 2.35,
-      edgeFade: Math.min(1, instance.edgeFade * 1.35),
-      widthScale: (instance.widthScale ?? 1) * this.widthCompensation(superThinRatio),
-    }));
-    const superGeometry = this.injectedGeometryBuilder
-      ? this.injectedGeometryBuilder(superInstances, {
-          mode: this.settings.shaderMode,
-          tier: "super",
-          crossed: true,
-          settings: this.settings,
-        })
-      : new THREE.InstancedBufferGeometry();
-    if (!this.injectedGeometryBuilder) {
-      populateGrassGeometry(superGeometry, this.terrainPatchSuperGeometry, footprint, superInstances, this.settings);
-    }
-
-    const centerX = (footprint.minX + footprint.maxX) * 0.5;
-    const centerZ = (footprint.minZ + footprint.maxZ) * 0.5;
-    const radius = Math.hypot(footprint.maxX - footprint.minX, footprint.maxZ - footprint.minZ) * 0.5;
-    const material = this.materialFor(this.settings.shaderMode);
-    const nearMesh = new THREE.Mesh(nearGeometry, material);
-    const midMesh = new THREE.Mesh(midGeometry, material);
-    const farMesh = new THREE.Mesh(farGeometry, material);
-    const superMesh = new THREE.Mesh(superGeometry, material);
-    return {
-      nodeId,
-      meshes: [nearMesh, midMesh, farMesh, superMesh],
-      centerX,
-      centerZ,
-      radius,
-      bladeCount: instances.length,
-      midBladeCount: midInstances.length + farInstances.length + superInstances.length,
-      visibleTier: "hidden",
-    };
+    return this.createPatchFactory().createPatch(nodeId, footprint, instances);
   }
 
-  private widthCompensation(thinRatio: number): number {
-    return THREE.MathUtils.clamp(
-      1 / Math.sqrt(Math.max(thinRatio, 0.001)),
-      1,
-      this.settings.blade.maxWidthCompensation,
-    );
+  private createPatchFactory(): GrassPatchFactory {
+    return new GrassPatchFactory({
+      settings: this.settings,
+      classicBladeGeometry: this.classicBladeGeometry,
+      terrainPatchNearGeometry: this.terrainPatchNearGeometry,
+      terrainPatchNearCrossedGeometry: this.terrainPatchNearCrossedGeometry,
+      terrainPatchMidGeometry: this.terrainPatchMidGeometry,
+      terrainPatchFarGeometry: this.terrainPatchFarGeometry,
+      terrainPatchSuperGeometry: this.terrainPatchSuperGeometry,
+      injectedGeometryBuilder: this.injectedGeometryBuilder,
+      materialFor: (mode) => this.materialFor(mode),
+    });
   }
 
   private updateMaterialUniforms(): void {
@@ -1103,26 +998,7 @@ export class GrassSystem {
   }
 
   private updatePatchVisibility(patch: GrassPatch, distance: number): void {
-    if (grassShaderDefinition(this.settings.shaderMode).patchStyle !== "terrain-patch") {
-      const visible = distance <= this.settings.distance + patch.radius;
-      patch.meshes[0].visible = visible;
-      patch.visibleTier = visible ? "near" : "hidden";
-      return;
-    }
-
-    const nearDistance = this.settings.distance * this.settings.lod.nearFraction + patch.radius;
-    const midDistance = this.settings.distance * this.settings.lod.midFraction + patch.radius;
-    const farDistance = this.settings.distance * this.settings.ring.farDistanceFraction + patch.radius;
-    const coverageDistance = this.settings.distance + patch.radius;
-    patch.meshes[0].visible = distance <= nearDistance;
-    patch.meshes[1].visible = distance > nearDistance && distance <= midDistance;
-    patch.meshes[2].visible = distance > midDistance && distance <= farDistance;
-    patch.meshes[3].visible = distance > farDistance && distance <= coverageDistance;
-    patch.visibleTier = patch.meshes[0].visible
-      ? "near"
-      : patch.meshes[1].visible
-        ? "mid"
-        : patch.meshes[2].visible ? "far" : patch.meshes[3].visible ? "super" : "hidden";
+    updateGrassPatchVisibility({ patch, distance, settings: this.settings });
   }
 
   private removePatch(patch: GrassPatch): void {
@@ -1163,79 +1039,22 @@ export class GrassSystem {
   }
 
   private updateStats(): void {
-    const gpu = this.gpuRingStats;
     if (this.isRingMode()) {
       if (this.gpuRingCompute) this.gpuRingStats = this.gpuRingCompute.stats(this.settings.enabled);
-      const ringGpu = this.gpuRingStats;
-      const activeGpu = this.canUseGpuRingDraw();
-      const visiblePatches = activeGpu ? this.ringMeshes.filter((mesh) => mesh.visible).length : 0;
-      this.stats = {
-        mode: this.settings.shaderMode,
-        blades: activeGpu ? this.ringBladeCount : this.bladeCount,
-        patches: activeGpu ? this.ringMeshes.length : this.patches.length,
-        visiblePatches,
-        culledPatches: (activeGpu ? this.ringMeshes.length : this.patches.length) - visiblePatches,
-        nearPatches: activeGpu ? (this.ringTierCounts.near > 0 ? 1 : 0) : this.patches.filter((p) => p.visibleTier === "near").length,
-        midPatches: activeGpu ? (this.ringTierCounts.mid > 0 ? 1 : 0) : this.patches.filter((p) => p.visibleTier === "mid").length,
-        coveragePatches: activeGpu ? (this.ringTierCounts.far > 0 ? 1 : 0) : this.patches.filter((p) => p.visibleTier === "far").length,
-        superPatches: activeGpu ? (this.ringTierCounts.super > 0 ? 1 : 0) : this.patches.filter((p) => p.visibleTier === "super").length,
-        generatedCandidates: ringGpu.generatedCandidates,
-        acceptedCandidates: ringGpu.acceptedCandidates,
-        edgeSuppressedCandidates: this.generationStats.edgeSuppressedCandidates,
-        patchRebuildCount: this.patchRebuildCount,
-        buildMs: this.grassBuildMs,
-        midBladeCount: activeGpu
-          ? this.ringTierCounts.mid + this.ringTierCounts.far + this.ringTierCounts.super
-          : this.patches.reduce((sum, p) => sum + p.midBladeCount, 0),
-        gpuRingStatus: ringGpu.status,
-        gpuRingCandidateCount: ringGpu.candidateCount,
-        gpuRingVisibleNear: ringGpu.counts.near,
-        gpuRingVisibleMid: ringGpu.counts.mid,
-        gpuRingVisibleFar: ringGpu.counts.far,
-        gpuRingVisibleSuper: ringGpu.counts.super,
-        gpuRingDispatchMs: ringGpu.submitMs,
-        gpuRingReadbackMs: ringGpu.readbackMs,
-      };
-      return;
     }
-    let visiblePatches = 0;
-    let nearPatches = 0;
-    let midPatches = 0;
-    let coveragePatches = 0;
-    let superPatches = 0;
-    let midBladeCount = 0;
-    for (const patch of this.patches) {
-      if (patch.visibleTier !== "hidden") visiblePatches++;
-      if (patch.visibleTier === "near") nearPatches++;
-      else if (patch.visibleTier === "mid") midPatches++;
-      else if (patch.visibleTier === "far") coveragePatches++;
-      else if (patch.visibleTier === "super") superPatches++;
-      midBladeCount += patch.midBladeCount;
-    }
-    this.stats = {
+    this.stats = buildGrassStats({
       mode: this.settings.shaderMode,
-      blades: this.bladeCount,
-      patches: this.patches.length,
-      visiblePatches,
-      culledPatches: this.patches.length - visiblePatches,
-      nearPatches,
-      midPatches,
-      coveragePatches,
-      superPatches,
-      generatedCandidates: this.generationStats.generatedCandidates,
-      acceptedCandidates: this.generationStats.acceptedCandidates,
-      edgeSuppressedCandidates: this.generationStats.edgeSuppressedCandidates,
+      ringMode: this.isRingMode(),
+      activeGpu: this.canUseGpuRingDraw(),
+      patches: this.patches,
+      ringMeshes: this.ringMeshes,
+      ringTierCounts: this.ringTierCounts,
+      ringBladeCount: this.ringBladeCount,
+      bladeCount: this.bladeCount,
+      generationStats: this.generationStats,
       patchRebuildCount: this.patchRebuildCount,
       buildMs: this.grassBuildMs,
-      midBladeCount,
-      gpuRingStatus: gpu.status,
-      gpuRingCandidateCount: gpu.candidateCount,
-      gpuRingVisibleNear: gpu.counts.near,
-      gpuRingVisibleMid: gpu.counts.mid,
-      gpuRingVisibleFar: gpu.counts.far,
-      gpuRingVisibleSuper: gpu.counts.super,
-      gpuRingDispatchMs: gpu.submitMs,
-      gpuRingReadbackMs: gpu.readbackMs,
-    };
+      gpuRingStats: this.gpuRingStats,
+    });
   }
 }

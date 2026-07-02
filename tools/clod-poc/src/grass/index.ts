@@ -6,4 +6,8 @@ export * from "./grass_gpu_ring.js";
 export * from "./grass_geometry.js";
 export * from "./grass_profile.js";
 export * from "./grass_stats.js";
+export * from "./grass_patch_factory.js";
+export * from "./grass_patch_footprint.js";
+export * from "./grass_patch_visibility.js";
 export * from "./grass_system.js";
+export * from "./grass_system_stats_builder.js";
