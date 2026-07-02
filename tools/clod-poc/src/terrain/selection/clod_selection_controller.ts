@@ -266,7 +266,8 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       lastSelectionSource = errorPxLookup ? "webgpu" : "cpu";
       selSub.cut = 0;
       const tBook = performance.now();
-      deps.markActiveNodes?.(lastRenderedNodeIds, selectionFrameId);
+      applyRenderedCut(lastRenderedNodes, settings);
+      updateRenderedStats(lastRenderedNodes);
       selSub.book = performance.now() - tBook;
       selSub.info = 0;
       const tOverlays = performance.now();
