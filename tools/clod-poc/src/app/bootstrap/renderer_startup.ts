@@ -127,7 +127,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   const initialRenderResolution = renderResolution.resolveCurrentViewport();
 
   renderer.setPixelRatio(initialRenderResolution.effectivePixelRatio);
-  renderer.setSize(initialRenderResolution.cssWidth, initialRenderResolution.cssHeight, false);
+  renderer.setSize(initialRenderResolution.cssWidth, initialRenderResolution.cssHeight);
   renderResolution.markApplied(initialRenderResolution);
   window.__drusnielRenderResolution = renderResolution;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
