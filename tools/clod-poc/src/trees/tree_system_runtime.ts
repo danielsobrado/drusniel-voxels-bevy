@@ -135,6 +135,11 @@ export class TreeSystem {
     if (treeSystemUsesGpuRingDraw(this.settings)) {
       if (this.patches.length > 0) this.clearPatches();
       if (updateTreeGpuRingTrees(treeGpuRingInput(this), center, camera)) { this.updateStats(); return; }
+      if (!this.settings.gpu.fallbackToCpu) {
+        resetTreeLodCounts(this.lodCounts);
+        this.updateStats();
+        return;
+      }
     } else {
       this.clearGpuRing();
       this.gpuRing.status = treeCpuFallbackGpuStatus(this.settings);
