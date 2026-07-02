@@ -14,6 +14,10 @@ import { NaadfDebugOverlay } from "./debugOverlay.js";
 import { runAcceptanceChecks, allAcceptancePassed } from "./validation.js";
 import { setNaadfIntegration } from "./canopyBridge.js";
 import { FarSummaryGpuAtlas, type FarSummaryGpuAtlasView } from "./gpu/farSummaryAtlas.js";
+import terrainMaterialCacheYaml from "../../config/terrain_material_cache.yaml?raw";
+import { parseTerrainMaterialCacheConfig } from "../terrain/material-cache/terrainMaterialCacheConfig.js";
+import { TerrainMaterialCache } from "../terrain/material-cache/terrainMaterialCache.js";
+import { terrainMaterialCacheCountersForHud } from "../terrain/material-cache/terrainMaterialDebug.js";
 
 const TRAVERSAL_MODES: ReadonlySet<NaadfTraversalMode> = new Set(["dense", "hdda", "compare"]);
 const HEIGHT_MODES: ReadonlySet<NaadfFarShellHeightSamplingMode> = new Set(["gpu", "cpu"]);
@@ -81,6 +85,8 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
   const metrics = new NaadfMetricsCollector();
   const forceMissing = options.sceneName === "infinite-naadf-stress-missing";
   const state = createNaadfWorldState(config, source, metrics, forceMissing);
+  const materialCacheConfig = applyRuntimeMaterialCacheOverrides(parseTerrainMaterialCacheConfig(terrainMaterialCacheYaml));
+  const materialCache = materialCacheConfig.enabled ? new TerrainMaterialCache(materialCacheConfig) : null;
   const gpuAtlas = config.farShell.heightSamplingMode === "gpu"
     ? new FarSummaryGpuAtlas({
         tileCells: config.farClipmap.tileCells,
@@ -88,6 +94,8 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
         tilesX: config.farShell.gpuAtlasWindowTiles,
         tilesZ: config.farShell.gpuAtlasWindowTiles,
         format: config.farSummaryAtlas.format,
+        materialCache: materialCache ?? undefined,
+        materialCacheConfig,
       })
     : undefined;
   const debugOverlay = options.threeScene
@@ -96,6 +104,22 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
 
   let prevX: number | null = null;
   let prevZ: number | null = null;
+  const onMaterialCacheDebug = (event: Event): void => {
+    const detail = (event as CustomEvent).detail as Partial<{
+      enabled: boolean;
+      forceRebake: boolean;
+      debugChannel: typeof materialCacheConfig.debug.showFormatChannels;
+      showTiles: boolean;
+      showInvalidations: boolean;
+    }> | undefined;
+    if (!detail) return;
+    if (detail.enabled !== undefined) materialCacheConfig.enabled = detail.enabled;
+    if (detail.forceRebake !== undefined) materialCacheConfig.debug.forceRebake = detail.forceRebake;
+    if (detail.debugChannel !== undefined) materialCacheConfig.debug.showFormatChannels = detail.debugChannel;
+    if (detail.showTiles !== undefined) materialCacheConfig.debug.showCacheTiles = detail.showTiles;
+    if (detail.showInvalidations !== undefined) materialCacheConfig.debug.showInvalidations = detail.showInvalidations;
+  };
+  window.addEventListener("terrain-material-cache-debug", onMaterialCacheDebug);
 
   const integration: NaadfIntegration = {
     config,
@@ -129,6 +153,11 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
         velocityZ: scriptedVz,
         deltaSeconds,
       });
+      if (materialCache && materialCacheConfig.debug.forceRebake) {
+        materialCache.invalidateWhere(() => true, "force_rebake");
+        materialCacheConfig.debug.forceRebake = false;
+      }
+      materialCache?.processFrame(state.frame);
       gpuAtlas?.updateFromState(state);
       debugOverlay?.update(state);
 
@@ -140,6 +169,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
           counters["naadf.farSummaryAtlas.memorySavingsBytes"] = gpuAtlas.view.memorySavingsBytes ?? 0;
           counters["naadf.farSummaryAtlas.memorySavingsPct"] = gpuAtlas.view.memorySavingsPct ?? 0;
         }
+        if (materialCache) Object.assign(counters, terrainMaterialCacheCountersForHud(materialCache));
         if (clod.stats.counters) {
           Object.assign(clod.stats.counters, counters);
         }
@@ -215,6 +245,7 @@ export function initNaadfIntegration(options: NaadfIntegrationOptions): NaadfInt
     dispose() {
       debugOverlay?.dispose();
       gpuAtlas?.dispose();
+      window.removeEventListener("terrain-material-cache-debug", onMaterialCacheDebug);
       state.residents.length = 0;
       state.residentIndexByKey.clear();
       state.farTiles.clear();
@@ -264,6 +295,20 @@ function applyRuntimeTraversalOverrides(config: NaadfPocConfig): NaadfPocConfig 
     config.farSummaryAtlas.format = atlasFormat;
   }
 
+  return config;
+}
+
+function applyRuntimeMaterialCacheOverrides(config: ReturnType<typeof parseTerrainMaterialCacheConfig>): ReturnType<typeof parseTerrainMaterialCacheConfig> {
+  const params = currentSearchParams();
+  if (!params) return config;
+  const enabled = params.get("terrainMaterialCache");
+  if (enabled === "1" || enabled === "true") config.enabled = true;
+  if (enabled === "0" || enabled === "false") config.enabled = false;
+  const debugChannel = params.get("terrainMaterialCacheDebug");
+  if (debugChannel) {
+    config.debug.showFormatChannels = debugChannel as typeof config.debug.showFormatChannels;
+  }
+  if (params.get("terrainMaterialCacheForceRebake") === "1") config.debug.forceRebake = true;
   return config;
 }
 

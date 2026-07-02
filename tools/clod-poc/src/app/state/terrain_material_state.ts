@@ -4,6 +4,7 @@ import {
   type ProceduralDebugMode,
   type TerrainMaterialSource,
 } from "../../terrain/material/terrain_material_constants.js";
+import type { TerrainMaterialCacheDebugChannel } from "../../terrain/material-cache/terrainMaterialCacheConfig.js";
 import { DEFAULT_TERRAIN_COLOR_ADJUSTMENTS } from "../../material/material.js";
 import { assignArchiveFields } from "./archive_fields.js";
 
@@ -25,6 +26,11 @@ export interface TerrainMaterialSliceState {
   terrainContrast: number;
   terrainSaturation: number;
   terrainWarmth: number;
+  terrainMaterialCacheEnabled: boolean;
+  terrainMaterialCacheForceRebake: boolean;
+  terrainMaterialCacheDebugChannel: TerrainMaterialCacheDebugChannel;
+  terrainMaterialCacheShowTiles: boolean;
+  terrainMaterialCacheShowInvalidations: boolean;
 }
 
 const TERRAIN_MATERIAL_ARCHIVE_KEYS = [
@@ -56,6 +62,11 @@ export function createTerrainMaterialSliceState(input: {
     terrainContrast: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.contrast,
     terrainSaturation: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.saturation,
     terrainWarmth: DEFAULT_TERRAIN_COLOR_ADJUSTMENTS.warmth,
+    terrainMaterialCacheEnabled: true,
+    terrainMaterialCacheForceRebake: false,
+    terrainMaterialCacheDebugChannel: "none",
+    terrainMaterialCacheShowTiles: false,
+    terrainMaterialCacheShowInvalidations: false,
   };
 }
 

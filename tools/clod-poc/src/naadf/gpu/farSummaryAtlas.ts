@@ -2,6 +2,10 @@ import * as THREE from "three";
 import type { FarSummaryTile } from "../types.js";
 import type { NaadfWorldState } from "../summaryStreamer.js";
 import { materialColorForDebugId } from "../../terrainMaterial/terrainMaterialBands.js";
+import type { TerrainMaterialCacheConfig } from "../../terrain/material-cache/terrainMaterialCacheConfig.js";
+import { TerrainMaterialCache } from "../../terrain/material-cache/terrainMaterialCache.js";
+import { bakeFarSummaryTerrainMaterial } from "../../terrain/material-cache/terrainMaterialBakeProviders.js";
+import type { TerrainMaterialBakePayload } from "../../terrain/material-cache/terrainMaterialCacheTypes.js";
 import {
   DEFAULT_FAR_SUMMARY_ATLAS_FORMAT,
   clamp01,
@@ -61,6 +65,8 @@ export interface FarSummaryGpuAtlasOptions {
   tilesX?: number;
   tilesZ?: number;
   format?: FarSummaryAtlasFormat;
+  materialCache?: TerrainMaterialCache;
+  materialCacheConfig?: TerrainMaterialCacheConfig;
 }
 
 export class FarSummaryGpuAtlas {
@@ -77,6 +83,8 @@ export class FarSummaryGpuAtlas {
   private readonly materialData: AtlasData;
   private readonly normalData: AtlasData;
   private readonly coverageData: AtlasData;
+  private readonly materialCache: TerrainMaterialCache | null;
+  private readonly materialCacheConfig: TerrainMaterialCacheConfig | null;
   private lastSignature = "";
 
   constructor(options: FarSummaryGpuAtlasOptions) {
@@ -87,6 +95,8 @@ export class FarSummaryGpuAtlas {
     this.ringWidthCells = this.tileCells * this.tilesX;
     this.ringHeightCells = this.tileCells * this.tilesZ;
     this.packing = resolveFarSummaryAtlasPackingSpec(options.format ?? DEFAULT_FAR_SUMMARY_ATLAS_FORMAT);
+    this.materialCache = options.materialCache ?? null;
+    this.materialCacheConfig = options.materialCacheConfig ?? null;
 
     const width = this.ringWidthCells;
     const height = this.ringHeightCells * this.ringCount;
@@ -189,7 +199,7 @@ export class FarSummaryGpuAtlas {
       }
 
       for (const tile of plan.selected) {
-        this.blitTile(tile, tile.key.x - plan.minTileX, tile.key.z - plan.minTileZ, ringIndex);
+        this.blitTile(tile, tile.key.x - plan.minTileX, tile.key.z - plan.minTileZ, ringIndex, state.frame);
       }
 
       const spanM = ring.cellM * this.tileCells;
@@ -245,12 +255,13 @@ export class FarSummaryGpuAtlas {
     this.lastSignature = "";
   }
 
-  private blitTile(tile: FarSummaryTile, tileX: number, tileZ: number, ringIndex: number): void {
+  private blitTile(tile: FarSummaryTile, tileX: number, tileZ: number, ringIndex: number, frame: number): void {
     if (tileX < 0 || tileZ < 0 || tileX >= this.tilesX || tileZ >= this.tilesZ) return;
     const atlasWidth = this.view.widthCells;
     const baseX = tileX * this.tileCells;
     const baseZ = ringIndex * this.ringHeightCells + tileZ * this.tileCells;
     const copyCells = Math.min(this.tileCells, tile.resolution);
+    const baked = this.lookupMaterialBake(tile, frame);
 
     for (let z = 0; z < copyCells; z++) {
       for (let x = 0; x < copyCells; x++) {
@@ -258,8 +269,10 @@ export class FarSummaryGpuAtlas {
         const pixel = (baseZ + z) * atlasWidth + baseX + x;
         this.writeHeight(pixel, tile.avgHeight[src] ?? 0, tile.minHeight[src] ?? 0, tile.maxHeight[src] ?? 0);
 
-        const color = materialColorForDebugId(tile.dominantMaterial[src] ?? 0);
-        this.writeRgba(this.materialData, pixel * RGBA_COMPONENTS, color[0], color[1], color[2], 1);
+        if (!this.writeBakedFarColor(baked, src, pixel)) {
+          const color = materialColorForDebugId(tile.dominantMaterial[src] ?? 0);
+          this.writeRgba(this.materialData, pixel * RGBA_COMPONENTS, color[0], color[1], color[2], 1);
+        }
 
         if (this.packing.storesNormalAtlas) {
           const normal = deriveSummaryNormal(tile, x, z);
@@ -273,16 +286,86 @@ export class FarSummaryGpuAtlas {
           );
         }
 
-        this.writeRgba(
-          this.coverageData,
-          pixel * RGBA_COMPONENTS,
-          clamp01(tile.canopyCoverage[src] ?? 0),
-          clamp01(tile.waterCoverage[src] ?? 0),
-          1,
-          1,
-        );
+        if (!this.writeBakedCoverage(baked, src, pixel)) {
+          this.writeRgba(
+            this.coverageData,
+            pixel * RGBA_COMPONENTS,
+            clamp01(tile.canopyCoverage[src] ?? 0),
+            clamp01(tile.waterCoverage[src] ?? 0),
+            1,
+            1,
+          );
+        }
       }
     }
+  }
+
+  private lookupMaterialBake(tile: FarSummaryTile, frame: number): TerrainMaterialBakePayload | null {
+    if (!this.materialCache || !this.materialCacheConfig?.bake.bakeFarTiles) return null;
+    const key = {
+      sourceKind: "far_tile" as const,
+      sourceId: `ring:${tile.key.ring}:${tile.key.x},${tile.key.z}`,
+      sourceRevision: tile.revision,
+      materialRevision: 0,
+      waterRevision: 0,
+      vegetationCoverageRevision: 0,
+      bakeMode: "far_summary_tile" as const,
+      resolution: tile.resolution,
+      formatProfile: this.materialCacheFormatProfile(),
+    };
+    const lookup = this.materialCache.getOrQueue(
+      key,
+      () => bakeFarSummaryTerrainMaterial({ tile }, this.materialCacheConfig!),
+      frame,
+    );
+    if (lookup.kind === "ready") return lookup.entry.payload;
+    return lookup.staleEntry?.payload ?? null;
+  }
+
+  private materialCacheFormatProfile(): string {
+    const cfg = this.materialCacheConfig;
+    if (!cfg) return "none";
+    return [
+      cfg.formats.macroTint,
+      cfg.formats.slopeCurvature,
+      cfg.formats.materialWeights,
+      cfg.formats.wetnessShoreline,
+      cfg.formats.farColor,
+      cfg.formats.farNormal,
+      cfg.formats.coverage,
+    ].join(",");
+  }
+
+  private writeBakedFarColor(payload: TerrainMaterialBakePayload | null, srcPixel: number, atlasPixel: number): boolean {
+    const channel = payload?.farColor;
+    if (!channel?.available) return false;
+    const src = srcPixel * RGBA_COMPONENTS;
+    const dst = atlasPixel * RGBA_COMPONENTS;
+    this.writeRgba(
+      this.materialData,
+      dst,
+      (channel.data[src] ?? 0) / 255,
+      (channel.data[src + 1] ?? 0) / 255,
+      (channel.data[src + 2] ?? 0) / 255,
+      (channel.data[src + 3] ?? 255) / 255,
+    );
+    return true;
+  }
+
+  private writeBakedCoverage(payload: TerrainMaterialBakePayload | null, srcPixel: number, atlasPixel: number): boolean {
+    const channel = payload?.coverage;
+    if (!channel?.available) return false;
+    const src = srcPixel * 2;
+    const dst = atlasPixel * RGBA_COMPONENTS;
+    this.writeRgba(
+      this.coverageData,
+      dst,
+      (channel.data[src] ?? 0) / 255,
+      (channel.data[src + 1] ?? 0) / 255,
+      1,
+      1,
+    );
+    return true;
   }
 
   private writeHeight(pixel: number, avgHeight: number, minHeight: number, maxHeight: number): void {

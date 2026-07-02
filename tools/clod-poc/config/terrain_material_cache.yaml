@@ -1,0 +1,47 @@
+terrain_material_cache:
+  enabled: true
+
+  budget:
+    max_bytes: 67108864
+
+  bake:
+    async: true
+    max_tiles_baked_per_frame: 2
+    max_cpu_ms_per_frame: 1.0
+    bake_near_pages: true
+    bake_far_tiles: true
+    keep_stale_until_ready: true
+
+  invalidation:
+    revision_driven: true
+    invalidate_on_material_settings_change: true
+    invalidate_on_water_revision_change: true
+    invalidate_on_vegetation_coverage_revision_change: true
+
+  formats:
+    macro_tint: rgba8
+    slope_curvature: rg8
+    material_weights: rgba8
+    wetness_shoreline: rg8
+    far_color: rgba8
+    far_normal: rg16f
+    coverage: rg8
+
+  sampling:
+    page_resolution: 64
+    far_tile_resolution: 96
+    derive_far_normal_from_height_when_possible: true
+    normal_storage_distance_threshold: 256.0
+
+  quality:
+    near_mode: live_full_or_cached_debug
+    mid_mode: cached_material_weights
+    far_mode: cached_far_color
+    fallback_mode: existing_shader_path
+
+  debug:
+    show_cache_tiles: false
+    show_invalidations: false
+    show_format_channels: none
+    force_rebake: false
+    disable_cache: false

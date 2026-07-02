@@ -49,6 +49,9 @@ const CASES: PerfCase[] = [
   { name: "vegetation-off", params: { grass: "0", trees: "0", stones: "0", understory: "0", weather: "off" } },
   { name: "water-weather-off", params: { water: "0", weather: "off" } },
   { name: "far-shell-off", params: { farShell: "0" } },
+  { name: "terrain-material-cache-enabled", params: { scene: "infinite-naadf-far", terrainMaterialCache: "1" } },
+  { name: "terrain-material-cache-disabled", params: { scene: "infinite-naadf-far", terrainMaterialCache: "0" } },
+  { name: "terrain-material-cache-debug", params: { scene: "infinite-naadf-far", terrainMaterialCache: "1", terrainMaterialCacheDebug: "far_color" } },
   { name: "selection-cpu", params: { webgpuSelection: "0" } },
   { name: "clod-perf-mode", params: { clodPerf: "1" } },
 ];

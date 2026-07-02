@@ -5,6 +5,7 @@ import {
   TEXTURE_BLEND_MODES,
   TERRAIN_MATERIAL_SOURCES,
 } from "../../terrain/material/terrain_material_constants.js";
+import { TERRAIN_MATERIAL_CACHE_DEBUG_CHANNELS } from "../../terrain/material-cache/terrainMaterialCacheConfig.js";
 import type { TerrainTextureModal } from "../../terrain/material/terrain_texture_modal.js";
 import type { GuiController } from "./gui_controller.js";
 
@@ -46,6 +47,24 @@ export function createTerrainMaterialGui(
   const loadedTextureController = textureFolder.add(state, "loadedTextureFiles").name("loaded").disable();
   deps.textureModal.bindLoadedTextureController(loadedTextureController);
   textureFolder.add(textureActions, "clearTexture").name("clear texture");
+
+  const cacheFolder = gui.addFolder("terrain material cache");
+  const notifyMaterialCache = () => {
+    window.dispatchEvent(new CustomEvent("terrain-material-cache-debug", {
+      detail: {
+        enabled: state.terrainMaterialCacheEnabled,
+        forceRebake: state.terrainMaterialCacheForceRebake,
+        debugChannel: state.terrainMaterialCacheDebugChannel,
+        showTiles: state.terrainMaterialCacheShowTiles,
+        showInvalidations: state.terrainMaterialCacheShowInvalidations,
+      },
+    }));
+  };
+  cacheFolder.add(state, "terrainMaterialCacheEnabled").name("enabled").onChange(notifyMaterialCache);
+  cacheFolder.add(state, "terrainMaterialCacheForceRebake").name("force rebake").onChange(notifyMaterialCache);
+  cacheFolder.add(state, "terrainMaterialCacheShowTiles").name("show tile grid").onChange(notifyMaterialCache);
+  cacheFolder.add(state, "terrainMaterialCacheShowInvalidations").name("show invalidations").onChange(notifyMaterialCache);
+  cacheFolder.add(state, "terrainMaterialCacheDebugChannel", TERRAIN_MATERIAL_CACHE_DEBUG_CHANNELS).name("debug channel").onChange(notifyMaterialCache);
 
   const bubbleFolder = gui.addFolder("near-field bubble (§4.4)");
   bubbleFolder.add(state, "bubble").name("enable (raw chunks)").onChange(deps.updateSelection);
