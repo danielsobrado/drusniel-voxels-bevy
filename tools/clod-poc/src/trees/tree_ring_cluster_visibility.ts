@@ -81,12 +81,12 @@ export function buildTreeRingClusterVisibilityMask(options: TreeRingClusterVisib
     visibleClusters: prefilter.visibleClusters,
     unknownKeptClusters: prefilter.unknownKeptClusters,
     candidateSlotsBeforePrefilter: prefilter.candidateSlotsBeforePrefilter,
-    candidateCountAfterPrefilter: prefilter.candidateSlotsAfterPrefilter,
+    candidateSlotsAfterPrefilter: prefilter.candidateSlotsAfterPrefilter,
     skippedCandidateEstimate: prefilter.skippedCandidateEstimate,
     cacheHits: prefilter.cacheHits,
     cacheMisses: prefilter.cacheMisses,
     reasonCounts: prefilter.reasonCounts,
-  } as TreeRingClusterVisibilityMask;
+  };
 }
 
 export function treeRingSlotClusterVisible(mask: TreeRingClusterVisibilityMask | null | undefined, slot: number): boolean {
