@@ -275,6 +275,20 @@ describe("ClodRenderNodeCache", () => {
     expect(pageGeometryCache.stats()).toMatchObject({ entries: 0, invalidations: 1, disposals: 1 });
   });
 
+  it("releases cache-owned geometry when invalidating a materialized node", () => {
+    const pageGeometryCache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
+    const { cache } = makeCache({ pageGeometryCache, config: { evictGeometryWithRenderNode: true } });
+
+    cache.getOrCreate({ node: node("L0:0,0"), frameId: 1 });
+    expect(pageGeometryCache.stats().entries).toBe(1);
+
+    cache.invalidateNode("L0:0,0");
+
+    expect(cache.has("L0:0,0")).toBe(false);
+    expect(cache.stats()).toMatchObject({ disposals: 1, evictions: 0 });
+    expect(pageGeometryCache.stats()).toMatchObject({ entries: 0, invalidations: 1, disposals: 1 });
+  });
+
   it("disposeNode removes mesh from scene and disposes owned material and direct geometry", () => {
     const { cache, scene, material } = makeCache();
     const remove = vi.spyOn(scene, "remove");
