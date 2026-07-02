@@ -2,7 +2,18 @@ import { formatTreeGpuStatusPath } from "../../trees/tree_info.js";
 import type { TreeStats } from "../../trees/index.js";
 import type { UnderstoryStats } from "../../understory/index.js";
 
+function formatTreeGpuProblemSummary(stats: TreeStats): string | null {
+  switch (stats.gpuStatus) {
+    case "fallback-cpu": return "TREE GPU FALLBACK TO CPU";
+    case "unsupported": return "TREE GPU UNSUPPORTED";
+    case "error": return "TREE GPU ERROR";
+    default: return null;
+  }
+}
+
 export function formatTreeGpuSummary(stats: TreeStats): string {
+  const problem = formatTreeGpuProblemSummary(stats);
+  if (problem) return problem;
   const path = formatTreeGpuStatusPath(stats.gpuStatus);
   if (stats.gpuStatus === "disabled") return path;
   if (!stats.gpuShowCounts) return `${path} counts=off`;
