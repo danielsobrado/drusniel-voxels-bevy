@@ -42,9 +42,9 @@ export function createLightUpdate(args: LightUpdateArgs) {
         return;
       }
       const centerTile = worldToSunVisibilityTile(camera.position.x, camera.position.z, options.tile);
-      const radius = options.debugView.cameraTileRadius;
-      for (let dz = -radius; dz <= radius; dz++) {
-        for (let dx = -radius; dx <= radius; dx++) {
+      const materialRadius = options.build.materialTileRadius;
+      for (let dz = -materialRadius; dz <= materialRadius; dz++) {
+        for (let dx = -materialRadius; dx <= materialRadius; dx++) {
           cache.enqueueTile({ tileX: centerTile.tileX + dx, tileZ: centerTile.tileZ + dz, lod: 0 }, sunVec, frameIndex, provider);
         }
       }
