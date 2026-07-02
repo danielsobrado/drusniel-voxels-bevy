@@ -15,6 +15,26 @@ function sampler(height: number): TerrainHeightSampler {
 }
 
 describe("shared vegetation slot prefilter", () => {
+  it("keeps every slot when terrain visibility is disabled", () => {
+    const result = buildVegetationSlotPrefilter({
+      kind: "test",
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      grid: 5,
+      cell: 4,
+      clusterDimSlots: 2,
+      visibility: { ...VISIBILITY, enabled: false },
+      sampler: sampler(100),
+    });
+
+    expect(result.rejectedClusters).toBe(0);
+    expect(result.candidateSlotsBeforePrefilter).toBe(25);
+    expect(result.candidateSlotsAfterPrefilter).toBe(25);
+    expect(new Set(Array.from(result.activeSlotIndices)).size).toBe(25);
+  });
+
   it("rejects hidden clusters before slot dispatch", () => {
     const result = buildVegetationSlotPrefilter({
       kind: "test",
@@ -90,5 +110,29 @@ describe("shared vegetation slot prefilter", () => {
     expect(second.cacheHits).toBe(first.cacheMisses);
     expect(second.cacheMisses).toBe(0);
     expect(second.activeSlotIndices).toEqual(first.activeSlotIndices);
+  });
+
+  it("misses again when provider revision changes", () => {
+    const cache = new VegetationSlotPrefilterCache();
+    const base = {
+      kind: "test",
+      centerX: 64,
+      centerZ: 64,
+      cameraY: 0,
+      worldCells: 512,
+      grid: 16,
+      cell: 4,
+      clusterDimSlots: 4,
+      visibility: VISIBILITY,
+      sampler: sampler(100),
+      terrainRevision: 1,
+      cache,
+    };
+    const first = buildVegetationSlotPrefilter({ ...base, providerRevision: 1 });
+    const second = buildVegetationSlotPrefilter({ ...base, providerRevision: 2 });
+
+    expect(first.cacheMisses).toBeGreaterThan(0);
+    expect(second.cacheHits).toBe(0);
+    expect(second.cacheMisses).toBe(first.cacheMisses);
   });
 });
