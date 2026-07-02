@@ -26,9 +26,15 @@ export function formatTreeGpuSummary(stats: TreeStats): string {
 
 export function formatUnderstoryGpuSummary(stats: UnderstoryStats): string {
   const early = formatEarlyTerrainSummary(stats.earlyTerrainRejectedPatches, stats.earlyTerrainSkippedCandidates);
+  const prefilter = formatGpuPrefilterSummary(stats.gpuCandidateCountBeforePrefilter, stats.gpuCandidateCountAfterPrefilter);
   return stats.gpuStatus === "disabled"
     ? `disabled${early}`
-    : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${stats.gpuOverflowed ? " overflow" : ""}${stats.gpuDispatchMs !== null ? ` ${stats.gpuDispatchMs.toFixed(1)}ms` : ""}${early}`;
+    : `${stats.gpuStatus} ${stats.gpuCandidateCount}/${stats.gpuAcceptedCount}/${stats.gpuVisibleCount}${prefilter}${stats.gpuOverflowed ? " overflow" : ""}${stats.gpuDispatchMs !== null ? ` ${stats.gpuDispatchMs.toFixed(1)}ms` : ""}${early}`;
+}
+
+function formatGpuPrefilterSummary(before: number | undefined, after: number | undefined): string {
+  if (before === undefined || after === undefined || before <= 0 || before === after) return "";
+  return ` prefilter=${after}/${before}`;
 }
 
 function formatEarlyTerrainSummary(rejected: number | undefined, skipped: number | undefined): string {
