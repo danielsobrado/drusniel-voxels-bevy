@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { ClodHooks } from "../../core/hooks.js";
 import type { GrassStats } from "../../grass.js";
 import type { TreeStats } from "../../trees/index.js";
+import type { UnderstoryStats } from "../../understory/index.js";
 import type { PropStats } from "../../props/prop_stats.js";
 import type { PostProcessSettings } from "../../environment/postprocess.js";
 import type { NodeLabelOverlay } from "../../ui/node_labels.js";
@@ -31,6 +32,7 @@ export interface RenderPhaseInput {
   grassProfileFrame: { value: number };
   currentGrassStats: GrassStats | null;
   currentTreeStats: TreeStats | null;
+  currentUnderstoryStats: UnderstoryStats | null;
   currentPropStats: PropStats | null;
   tPropsStart: number;
   tBubbleStart: number;
@@ -57,10 +59,7 @@ function logGrassProfile(
 ): void {
   if (!grassProfileEnabled) return;
   const settings = makeGrassSettings();
-  const visible = stats.gpuRingVisibleNear
-    + stats.gpuRingVisibleMid
-    + stats.gpuRingVisibleFar
-    + stats.gpuRingVisibleSuper;
+  const visible = grassVisibleCount(stats);
   console.info(
     `[grass-profile] mode=${stats.mode}` +
       ` dispatch=${grassProfileMs(stats.gpuRingDispatchMs)}` +
@@ -76,6 +75,10 @@ function logGrassProfile(
       ` slots=${settings.ring.grid * settings.ring.grid}` +
       ` grass+props=${grassAndPropsMs.toFixed(2)}ms`,
   );
+}
+
+function grassVisibleCount(stats: GrassStats): number {
+  return stats.gpuRingVisibleNear + stats.gpuRingVisibleMid + stats.gpuRingVisibleFar + stats.gpuRingVisibleSuper;
 }
 
 function formatVegetationTiming(timing: VegetationFrameTiming, propsMs: number): string {
@@ -176,7 +179,9 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       input.phaseTiming.borderOceanDebugMs +
       input.phaseTiming.statsSyncMs +
       renderMs;
+    const grassStats = input.currentGrassStats;
     const treeStats = input.currentTreeStats;
+    const understoryStats = input.currentUnderstoryStats;
     const propStats = input.currentPropStats;
     input.perfProbe?.record({
       frameId: selectionStats.frameId,
@@ -251,6 +256,16 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       treeVisibleClusterHidden: treeStats?.visibleClusterHidden ?? 0,
       treeVisibleClusterVisible: treeStats?.visibleClusterVisible ?? 0,
       treeVisibleClusterUnknownKept: treeStats?.visibleClusterUnknownKept ?? 0,
+      grassGpuCandidateCount: grassStats?.gpuRingCandidateCount ?? 0,
+      grassGpuCandidateCountBeforePrefilter: grassStats?.gpuRingCandidateCountBeforePrefilter ?? 0,
+      grassGpuCandidateCountAfterPrefilter: grassStats?.gpuRingCandidateCountAfterPrefilter ?? 0,
+      grassGpuAcceptedCount: grassStats?.acceptedCandidates ?? 0,
+      grassGpuVisibleCount: grassStats ? grassVisibleCount(grassStats) : 0,
+      understoryGpuCandidateCount: understoryStats?.gpuCandidateCount ?? 0,
+      understoryGpuCandidateCountBeforePrefilter: understoryStats?.gpuCandidateCountBeforePrefilter ?? 0,
+      understoryGpuCandidateCountAfterPrefilter: understoryStats?.gpuCandidateCountAfterPrefilter ?? 0,
+      understoryGpuAcceptedCount: understoryStats?.gpuAcceptedCount ?? 0,
+      understoryGpuVisibleCount: understoryStats?.gpuVisibleCount ?? 0,
       customPropGpuStatus: propStats?.gpuStatus ?? "unknown",
       customPropTotalInstances: propStats?.totalInstances ?? 0,
       customPropVisibleInstances: propStats?.instancesVisible ?? 0,
