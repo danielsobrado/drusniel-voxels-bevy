@@ -15,7 +15,7 @@ export interface ClodGuiDeps {
   isWebGpu: boolean;
   renderer: RenderResolutionRenderer;
   camera: RenderResolutionCamera;
-  postProcess: { setSize: (width: number, height: number) => void } | null;
+  renderResolution: RenderResolutionRuntime;
   views: Iterable<{
     mat: { setWireframe: (on: boolean) => void; setTier: (tier: number) => void };
     mesh: THREE.Mesh;
@@ -44,14 +44,8 @@ export interface ClodGuiResult {
   colorByLodController: GuiController | null;
 }
 
-function renderResolutionRuntime(): RenderResolutionRuntime | null {
-  return (window as unknown as { __drusnielRenderResolution?: RenderResolutionRuntime }).__drusnielRenderResolution ?? null;
-}
-
 function createRenderResolutionGui(gui: GUI, deps: ClodGuiDeps): void {
-  const runtime = renderResolutionRuntime();
-  if (!runtime) return;
-
+  const runtime = deps.renderResolution;
   const folder = gui.addFolder("Render Resolution");
   const settings = runtime.settings;
   const readout = runtime.readout();
@@ -62,8 +56,7 @@ function createRenderResolutionGui(gui: GUI, deps: ClodGuiDeps): void {
     for (const controller of readoutControllers) controller.updateDisplay();
   };
   const applyAndRefresh = () => {
-    const result = runtime.applyCurrentViewport({ renderer: deps.renderer, camera: deps.camera });
-    if (result.changed) deps.postProcess?.setSize(result.resolution.cssWidth, result.resolution.cssHeight);
+    runtime.applyCurrentViewport({ renderer: deps.renderer, camera: deps.camera });
     refreshReadout();
   };
 
