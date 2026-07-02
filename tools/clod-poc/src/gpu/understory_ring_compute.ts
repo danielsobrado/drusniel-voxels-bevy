@@ -127,7 +127,9 @@ export class UnderstoryGpuRingCompute {
     }));
     if (hydroData && hydroData.data.length > 0) {
       this.hydroTexture = device.createTexture({ label: "understory ring hydro texture", size: { width: hydroData.res, height: hydroData.res }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-      device.queue.writeTexture({ texture: this.hydroTexture }, hydroData.data.buffer as ArrayBuffer, { bytesPerRow: hydroData.res * 16 }, { width: hydroData.res, height: hydroData.res });
+      const bytes = new Uint8Array(hydroData.data.byteLength);
+      bytes.set(new Uint8Array(hydroData.data.buffer, hydroData.data.byteOffset, hydroData.data.byteLength));
+      device.queue.writeTexture({ texture: this.hydroTexture }, bytes, { bytesPerRow: hydroData.res * 16 }, { width: hydroData.res, height: hydroData.res });
     } else {
       this.hydroTexture = device.createTexture({ label: "understory ring fallback hydro texture", size: { width: 1, height: 1 }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING });
     }
