@@ -55,7 +55,7 @@ describe("tree info formatting", () => {
     expect(formatTreeGpuOverlayStatus(true, false, treeStats)).toBe("cpu-patches");
   });
 
-  it("shows GPU dispatch and shadow details when counts are enabled", () => {
+  it("shows GPU dispatch, shadow, and visible-cluster details when counts are enabled", () => {
     const line = formatTreeInfoLine(true, 42, stats({
       gpuStatus: "ring",
       gpuShowCounts: true,
@@ -63,10 +63,15 @@ describe("tree info formatting", () => {
       gpuAcceptedCount: 50,
       gpuVisibleCount: 42,
       gpuShadowCasterCount: 17,
+      visibleClusterHidden: 4,
+      visibleClusterVisible: 12,
+      visibleClusterUnknownKept: 2,
       gpuDispatchMs: 1.234,
     }));
 
     expect(line).toContain("trees: gpu-ring 42 trees");
-    expect(line).toContain("path=gpu-ring candidates=100 accepted=50 visible=42 shadow=17 dispatch=1.2ms");
+    expect(line).toContain("path=gpu-ring candidates=100 accepted=50 visible=42 shadow=17");
+    expect(line).toContain("visibleClusters hidden=4 visible=12 unknown=2");
+    expect(line).toContain("dispatch=1.2ms");
   });
 });
