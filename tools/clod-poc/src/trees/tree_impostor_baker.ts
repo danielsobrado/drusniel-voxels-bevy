@@ -7,6 +7,8 @@ import {
   injectTreeFoliageVertexShader,
 } from "./tree_material.js";
 
+const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 4;
+
 export interface TreeImpostorAtlas {
   species: TreeSpeciesId;
   /** Legacy alias for the albedo atlas. */
@@ -146,10 +148,23 @@ function createRenderTarget(
     stencilBuffer: false,
     type: THREE.UnsignedByteType,
     format: THREE.RGBAFormat,
+    minFilter: THREE.LinearMipmapLinearFilter,
+    magFilter: THREE.LinearFilter,
+    generateMipmaps: true,
   });
   renderTarget.texture.name = name;
   renderTarget.texture.colorSpace = colorSpace;
+  configureTreeImpostorAtlasTexture(renderTarget.texture);
   return renderTarget;
+}
+
+export function configureTreeImpostorAtlasTexture(texture: THREE.Texture): void {
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = Math.max(texture.anisotropy, TREE_IMPOSTOR_ATLAS_ANISOTROPY);
 }
 
 function bakeAtlasTarget(
