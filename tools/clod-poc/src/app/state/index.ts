@@ -95,6 +95,15 @@ function nonNegativeNumberParam(searchParams: URLSearchParams, keys: readonly st
   return value !== null && value >= 0 ? value : null;
 }
 
+function queryFlagEnabled(searchParams: URLSearchParams, keys: readonly string[], defaultValue: boolean): boolean {
+  for (const key of keys) {
+    const raw = searchParams.get(key);
+    if (raw === "1" || raw === "true") return true;
+    if (raw === "0" || raw === "false") return false;
+  }
+  return defaultValue;
+}
+
 function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
   const scene = sceneFromSearchParams(params.searchParams);
   if (params.isWebGpu) state.normalDivergence = false;
@@ -237,6 +246,7 @@ export function createClodAppState(params: CreateClodAppStateParams): ClodAppSta
       understoryConfig: params.understoryConfig,
       forestLightingConfig: params.forestLightingConfig,
       grassRingDebug: params.searchParams.get("grassRingDebug") === "1",
+      grassDepthPrepassEnabled: queryFlagEnabled(params.searchParams, ["grassDepthPrepass", "vegetationDepthPrepass", "prepass"], true),
     }),
     water: createWaterSliceState(params.waterConfig),
     weather: createWeatherSliceState({
