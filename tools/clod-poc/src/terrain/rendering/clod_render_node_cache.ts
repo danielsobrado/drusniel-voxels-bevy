@@ -138,7 +138,11 @@ export class ClodRenderNodeCache {
   }
 
   invalidateNode(nodeId: string): void {
+    const hadEntry = this.entries.has(nodeId);
     this.disposeNode(nodeId);
+    if (hadEntry && this.deps.config.evictGeometryWithRenderNode) {
+      this.deps.pageGeometryCache.invalidateNode(nodeId, { includeActive: true });
+    }
   }
 
   disposeNode(nodeId: string, evicted = false): void {
