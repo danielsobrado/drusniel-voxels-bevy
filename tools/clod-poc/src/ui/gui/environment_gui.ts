@@ -62,6 +62,9 @@ export function createEnvironmentGui(
       state.postProcessAerialPerspectiveColorG,
       state.postProcessAerialPerspectiveColorB,
     ],
+    gtaoEnabled: state.postProcessGtaoEnabled,
+    froxelsEnabled: state.postProcessFroxelsEnabled,
+    bounceEnabled: state.postProcessBounceEnabled,
   });
   const applyPostProcessSettings = () => {
     deps.postProcess?.updateSettings(currentGuiPostProcessSettings());
@@ -127,7 +130,7 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessContrast", 0.25, 2.5, 0.01).name("contrast").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessSaturation", 0, 2.5, 0.01).name("saturation").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessVignette", 0, 1.5, 0.01).name("vignette").onChange(applyPostProcessSettings),
-    postFolder.add(state, "postProcessBloomEnabled").name("bloom (WebGL)").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessBloomEnabled").name("bloom").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBloomThreshold", 0, 2, 0.01).name("bloom threshold").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBloomStrength", 0, 1.5, 0.01).name("bloom strength").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessBloomRadius", 0, 2, 0.01).name("bloom radius").onChange(applyPostProcessSettings),
@@ -137,7 +140,7 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessClarityEnabled").name("clarity (WebGL)").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessClaritySharpen", 0, 0.5, 0.01).name("clarity sharpen").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessClarityDither", 0, 0.02, 0.0005).name("clarity dither").onChange(applyPostProcessSettings),
-    postFolder.add(state, "postProcessTaaEnabled").name("TAA-lite (WebGL)").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessTaaEnabled").name("TRAA").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaHistoryWeight", 0, 0.97, 0.01).name("TAA history").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaDepthThreshold", 0, 0.05, 0.0005).name("TAA depth reject").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaSharpen", 0, 0.5, 0.01).name("TAA sharpen").onChange(applyPostProcessSettings),
@@ -145,14 +148,17 @@ export function createEnvironmentGui(
     postFolder.add(state, "postProcessTaaJitterScale", 0, 2, 0.05).name("TAA jitter scale").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaHistoryClampEnabled").name("TAA history clamp").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessTaaHistoryClampStrength", 0, 1, 0.01).name("TAA clamp strength").onChange(applyPostProcessSettings),
-    postFolder.add(state, "postProcessContactShadowsEnabled").name("contact shadows (WebGL)").onChange(applyPostProcessSettings),
-    postFolder.add(state, "postProcessContactShadowsStrength", 0, 1, 0.01).name("contact strength").onChange(applyPostProcessSettings),
-    postFolder.add(state, "postProcessContactShadowsRadiusPx", 0.5, 8, 0.25).name("contact radius px").onChange(applyPostProcessSettings),
-    postFolder.add(state, "postProcessContactShadowsDepthBias", 0, 0.05, 0.0005).name("contact depth bias").onChange(applyPostProcessSettings),
-    postFolder.add(state, "postProcessAerialPerspectiveEnabled").name("aerial haze (WebGL)").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessAerialPerspectiveEnabled").name("aerial haze").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveStart", 0, 4000, 10).name("aerial start m").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveEnd", 1, 8000, 10).name("aerial end m").onChange(applyPostProcessSettings),
     postFolder.add(state, "postProcessAerialPerspectiveStrength", 0, 1, 0.01).name("aerial strength").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessContactShadowsEnabled").name("contact shadows").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessContactShadowsStrength", 0, 1, 0.01).name("contact strength").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessContactShadowsRadiusPx", 0.5, 8, 0.25).name("contact radius px").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessContactShadowsDepthBias", 0, 0.05, 0.0005).name("contact depth bias").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessGtaoEnabled").name("GTAO").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessFroxelsEnabled").name("froxels").onChange(applyPostProcessSettings),
+    postFolder.add(state, "postProcessBounceEnabled").name("screen bounce").onChange(applyPostProcessSettings),
   ];
   const refreshPostControllers = () => {
     for (const controller of postControllers) controller.updateDisplay();
@@ -215,6 +221,9 @@ export function createEnvironmentGui(
       state.postProcessAerialPerspectiveColorR = aerialColor[0];
       state.postProcessAerialPerspectiveColorG = aerialColor[1];
       state.postProcessAerialPerspectiveColorB = aerialColor[2];
+      state.postProcessGtaoEnabled = DEFAULT_POST_PROCESS_SETTINGS.gtaoEnabled;
+      state.postProcessFroxelsEnabled = DEFAULT_POST_PROCESS_SETTINGS.froxelsEnabled;
+      state.postProcessBounceEnabled = DEFAULT_POST_PROCESS_SETTINGS.bounceEnabled;
       applyPostProcessSettings();
       refreshPostControllers();
     },
