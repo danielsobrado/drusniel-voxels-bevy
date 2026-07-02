@@ -46,7 +46,7 @@ describe("WGSL module composition", () => {
     expect(source).toContain("tree_slot_visible_cluster_visible(slot)");
   });
 
-  it("returns on terrain-hidden or invisible-cluster trees before visible and shadow appends", () => {
+  it("culls terrain-hidden trees before shadows but keeps cluster cull visible-only", () => {
     const source = composeTreeRingShader();
     const terrainReject = source.indexOf("if (terrain_hidden) { return; }");
     const visibleReject = source.indexOf("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
@@ -63,9 +63,8 @@ describe("WGSL module composition", () => {
     expect(visibleAppend).toBeGreaterThan(-1);
     expect(terrainReject).toBeGreaterThan(speciesSelection);
     expect(terrainReject).toBeGreaterThan(scaleSelection);
-    expect(visibleReject).toBeGreaterThan(terrainReject);
     expect(terrainReject).toBeLessThan(shadowAppend);
-    expect(visibleReject).toBeLessThan(shadowAppend);
+    expect(visibleReject).toBeGreaterThan(shadowAppend);
     expect(terrainReject).toBeLessThan(visibleAppend);
     expect(visibleReject).toBeLessThan(visibleAppend);
   });
