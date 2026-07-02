@@ -12,6 +12,7 @@ import { formatTreePerfSnapshot } from "../../runtime/vegetation/tree_perf_snaps
 import type { UnderstoryController } from "../../runtime/vegetation/understory_controller.js";
 import type { ForestLightingController } from "../../runtime/forest_lighting/forest_lighting_controller.js";
 import type { FarShellController } from "../../systems/far_shell_controller.js";
+import { TREE_DEPTH_PREPASS_MAX_LODS } from "../../trees/tree_depth_prepass_runtime.js";
 import type { TreeSettings } from "../../trees/index.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
 import type { GuiController } from "./gui_controller.js";
@@ -256,6 +257,11 @@ export function createVegetationGui(
     refreshTreeStats();
     deps.updateInfo();
   };
+  const updateTreeDepthPrepass = () => {
+    deps.treeController.setDepthPrepassMaxLod(state.treeDepthPrepassMaxLod);
+    refreshTreeStats();
+    deps.updateInfo();
+  };
   const treeActions = {
     rebuild: () => {
       deps.treeController.rebuild();
@@ -293,6 +299,7 @@ export function createVegetationGui(
     refreshTreeStats();
     deps.updateInfo();
   });
+  treeFolder.add(state, "treeDepthPrepassMaxLod", [...TREE_DEPTH_PREPASS_MAX_LODS]).name("depth prepass max LOD").onChange(updateTreeDepthPrepass);
   treeSettingControllers.push(
     treeFolder.add(state, "treeDistance", 0, 800, 5).name("active ring m").onFinishChange(treeActions.rebuild),
     treeFolder.add(state, "treeMaxInstances", 0, 20000, 100).name("max instances").onFinishChange(treeActions.rebuild),
