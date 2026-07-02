@@ -117,7 +117,6 @@ export class VegetationSlotPrefilterCache {
       for (const [key, entry] of this.entries) {
         if (entry.lastUsed < oldestUsed) {
           oldestUsed = entry.lastUsed;
-          oldestKey = entry[0] ? oldestKey : oldestKey;
           oldestKey = key;
         }
       }
