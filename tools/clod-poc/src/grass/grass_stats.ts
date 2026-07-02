@@ -1,4 +1,5 @@
 import type { GrassGpuRingStats } from "../gpu/grass_ring_compute.js";
+import type { VegetationTerrainRejectionReason } from "../vegetation/terrain_rejection_config.js";
 import type { GrassShaderMode } from "./grass_config.js";
 
 export interface GrassStats {
@@ -14,6 +15,9 @@ export interface GrassStats {
   generatedCandidates: number;
   acceptedCandidates: number;
   edgeSuppressedCandidates: number;
+  earlyTerrainRejectedPatches?: number;
+  earlyTerrainSkippedCandidates?: number;
+  earlyTerrainReasonCounts?: Partial<Record<VegetationTerrainRejectionReason, number>>;
   patchRebuildCount: number;
   buildMs: number;
   midBladeCount: number;
@@ -31,4 +35,7 @@ export interface GrassGenerationStats {
   generatedCandidates: number;
   acceptedCandidates: number;
   edgeSuppressedCandidates: number;
+  earlyTerrainRejectedPatches?: number;
+  earlyTerrainSkippedCandidates?: number;
+  earlyTerrainReasonCounts?: Partial<Record<VegetationTerrainRejectionReason, number>>;
 }
