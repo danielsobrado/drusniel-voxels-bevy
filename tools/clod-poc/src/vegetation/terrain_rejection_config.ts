@@ -18,6 +18,8 @@ export const DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG: VegetationTerrainRejec
 
 export type VegetationTerrainRejectionReason =
   | "accepted"
+  | "visible"
+  | "near_forced_visible"
   | "disabled"
   | "missing_sampler"
   | "unknown_kept"
