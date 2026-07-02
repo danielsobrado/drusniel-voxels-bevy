@@ -9,7 +9,6 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
-  abs,
   attribute,
   clamp,
   cos,
@@ -36,9 +35,9 @@ import {
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
-import { bakeBarkTextures, type BarkTextures } from "../textures/barkSynth.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
+import { barkTrunkAlbedo, sharedBarkTexture } from "./tree_node_bark_texture.js";
 import {
   TREE_RING_CELL_SIZE_M,
   TREE_RING_JITTER_X_SALT,
@@ -50,63 +49,7 @@ import {
 type TslNode = any;
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
-
-// Object-space bark tiling: positionGeometry is metres, so 0.8 repeats the bark
-// atlas roughly every 1.25 m on a trunk.
-const BARK_TILE_SCALE = 0.8;
-const BARK_RESOLUTION = 256;
 const TREE_VARIANT_HASH_SALT = 1103;
-
-// One furrowed-bark atlas, baked once and shared across every tree material handle
-// (the CPU InstancedMesh path plus the four per-LOD ring handles), keyed by seed.
-// Long-lived for the app: handles never dispose it. The bake produces a float
-// texture; we repack its height/AO channel into an 8-bit texture because WebGPU
-// cannot linearly filter rgba32float without the (unrequested) float32-filterable
-// feature.
-let sharedBark: { seed: number; texture: THREE.Texture } | null = null;
-function sharedBarkTexture(seed: number): THREE.Texture {
-  if (!sharedBark || sharedBark.seed !== seed) {
-    const baked: BarkTextures = bakeBarkTextures({ layer: 0, seed, resolution: BARK_RESOLUTION });
-    const texelCount = baked.resolution * baked.resolution;
-    const bytes = new Uint8Array(texelCount * 4);
-    for (let i = 0; i < texelCount; i++) {
-      const height = Math.round(Math.min(1, Math.max(0, baked.dataA[i * 4 + 3])) * 255);
-      bytes[i * 4] = height;
-      bytes[i * 4 + 1] = height;
-      bytes[i * 4 + 2] = height;
-      bytes[i * 4 + 3] = height;
-    }
-    const texture = new THREE.DataTexture(bytes, baked.resolution, baked.resolution, THREE.RGBAFormat, THREE.UnsignedByteType);
-    texture.name = "tree-bark-height";
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.generateMipmaps = true;
-    texture.minFilter = THREE.LinearMipmapLinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.needsUpdate = true;
-    baked.texA.dispose();
-    baked.texB.dispose();
-    sharedBark = { seed, texture };
-  }
-  return sharedBark.texture;
-}
-
-// Triplanar bark height/AO (range 0.3..1.0) from the object-space geometry, blended
-// by the object-space normal so angled branches read correctly. Used to shade the
-// trunk/branch vertex colour into furrowed bark.
-function triplanarBarkShade(barkTexture: THREE.Texture): TslNode {
-  const p: TslNode = positionGeometry.mul(BARK_TILE_SCALE);
-  const an: TslNode = abs(normalGeometry);
-  const wsum: TslNode = an.x.add(an.y).add(an.z).add(0.0001);
-  const sx: TslNode = texture(barkTexture, vec2(p.z, p.y)).w;
-  const sy: TslNode = texture(barkTexture, vec2(p.x, p.z)).w;
-  const sz: TslNode = texture(barkTexture, vec2(p.x, p.y)).w;
-  return sx.mul(an.x).add(sy.mul(an.y)).add(sz.mul(an.z)).div(wsum);
-}
-
-function barkTrunkAlbedo(vertexColor: TslNode, barkTexture: THREE.Texture): TslNode {
-  return vertexColor.mul(triplanarBarkShade(barkTexture).mul(0.85).add(0.2));
-}
 
 const LOD_COLORS: Record<TreeLod, THREE.Color> = {
   near: new THREE.Color(0x2e7d32),
