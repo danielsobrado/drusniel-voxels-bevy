@@ -120,8 +120,8 @@ function markdown(results: readonly PerfCaseResult[]): string {
   const lines = [
     "# clod-poc main perf",
     "",
-    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | tree lod avg | prop GPU | prop visible avg | tris avg |",
-    "| --- | ---: | ---: | --- | --- | ---: | --- | ---: | --- | --- | ---: | ---: |",
+    "| case | frame p50 | frame p95 | top phase p95 | top prop p95 | render p95 | tree GPU | tree visible avg | visible clusters h/v/u | tree lod avg | prop GPU | prop visible avg | tris avg |",
+    "| --- | ---: | ---: | --- | --- | ---: | --- | ---: | ---: | --- | --- | ---: | ---: |",
   ];
   for (const result of results) {
     const snapshot = result.snapshot;
@@ -140,18 +140,25 @@ function markdown(results: readonly PerfCaseResult[]): string {
       `${Math.round(snapshot.counters.treeMidTreesAvg)}/` +
       `${Math.round(snapshot.counters.treeFarTreesAvg)}/` +
       `${Math.round(snapshot.counters.treeImpostorTreesAvg)}`;
+    const visibleClusters =
+      `${Math.round(snapshot.counters.treeVisibleClusterHiddenAvg)}/` +
+      `${Math.round(snapshot.counters.treeVisibleClusterVisibleAvg)}/` +
+      `${Math.round(snapshot.counters.treeVisibleClusterUnknownKeptAvg)}`;
     lines.push(
       `| ${result.name} | ${ms(frame.p50)} | ${ms(frame.p95)} | ` +
         `${topPhase ? `${topPhase.name} ${ms(topPhase.p95)}` : "-"} | ` +
         `${topProp ? `${topProp.name} ${ms(topProp.p95)}` : "-"} | ` +
         `${ms(render.p95)} | ${statusCounts || "-"} | ` +
         `${Math.round(snapshot.counters.treeGpuVisibleCountAvg).toLocaleString("en-US")} | ` +
+        `${visibleClusters} | ` +
         `${treeLod} | ` +
         `${propStatusCounts || "-"} | ` +
         `${Math.round(snapshot.counters.customPropGpuVisibleCountAvg).toLocaleString("en-US")} | ` +
         `${Math.round(snapshot.counters.terrainTrianglesAvg).toLocaleString("en-US")} |`,
     );
   }
+  lines.push("");
+  lines.push("`visible clusters h/v/u` means hidden / visible / unknown-kept cluster-mask averages. It is a camera-visible tree mask; shadow casters are intentionally not gated by it.");
   lines.push("");
   lines.push("Broad phase buckets are measured around the frame-loop calls. `props unattributed` is time between terrain and render that was not assigned to shadow, canopy, vegetation, border debug, or stats sync.");
   lines.push("");
