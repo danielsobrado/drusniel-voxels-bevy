@@ -25,15 +25,13 @@ import {
   clearDigEdits,
   DIG_INFLUENCE_MARGIN,
   getDigEditsSnapshot,
-  PAINT_BLEND_CHANNELS,
-  paintWeightsAt,
   replaceDigEdits,
   type DigEdit,
 } from "../terrain/terrain.js";
 import { TerrainColliderSet } from "../terrain/terrain_collider.js";
 import { parseProceduralTextureConfig } from "../textures/materialRecipes.js";
 import { createProceduralTerrainTextures } from "../textures/terrainTextureArrays.js";
-import type { ClodPageNode, PageMesh } from "../types.js";
+import type { ClodPageNode } from "../types.js";
 import configText from "../../config/clod_pages.yaml?raw";
 import proceduralConfigText from "../../config/procedural_textures.yaml?raw";
 import {
@@ -43,78 +41,18 @@ import {
   GRASS_V2_MID_DISTANCE_FRACTION,
   GRASS_V2_NEAR_DISTANCE_FRACTION,
 } from "./grass_node_material.js";
-import { WebGpuPostProcessPipeline } from "./webgpu_postprocess.js";
+import { createSkyNodeMaterial } from "./sky_node_material.js";
 import {
   createTerrainNodeMaterial,
   type TerrainNodeMaterialHandle,
 } from "./terrain_node_material.js";
-import { createSkyNodeMaterial } from "./sky_node_material.js";
-import { biomeIdsFor } from "../terrain/geometry/page_geometry.js";
-
-interface PaintAttributeCache {
-  slots: Float32Array;
-  weights: Float32Array;
-}
-
-const paintAttributeCache = new WeakMap<PageMesh, PaintAttributeCache>();
-
-function paintAttributesFor(mesh: PageMesh): PaintAttributeCache {
-  const cached = paintAttributeCache.get(mesh);
-  if (cached) return cached;
-  const vertexCount = mesh.positions.length / 3;
-  const slots = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
-  const weights = new Float32Array(vertexCount * PAINT_BLEND_CHANNELS);
-  for (let i = 0; i < vertexCount; i++) {
-    const p = paintWeightsAt(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]);
-    for (let c = 0; c < PAINT_BLEND_CHANNELS; c++) {
-      slots[i * PAINT_BLEND_CHANNELS + c] = p.slots[c];
-      weights[i * PAINT_BLEND_CHANNELS + c] = p.weights[c];
-    }
-  }
-  const built = { slots, weights };
-  paintAttributeCache.set(mesh, built);
-  return built;
-}
-
-function terrainGeometry(node: ClodPageNode): THREE.BufferGeometry {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(node.mesh.positions, 3));
-  g.setAttribute("normal", new THREE.BufferAttribute(node.mesh.normals, 3));
-  const { slots: paintSlots, weights: paintWeights } = paintAttributesFor(node.mesh);
-  g.setAttribute("paintSlots", new THREE.BufferAttribute(paintSlots, PAINT_BLEND_CHANNELS));
-  g.setAttribute("paintWeights", new THREE.BufferAttribute(paintWeights, PAINT_BLEND_CHANNELS));
-  g.setAttribute("biomeId", new THREE.BufferAttribute(biomeIdsFor(node.mesh), 1));
-  g.setIndex(new THREE.BufferAttribute(node.mesh.indices, 1));
-  return g;
-}
-
-// The preview short-circuits main(), so the app's UI shell never initializes and would sit
-// frozen at "building…"/"preparing". Hide the chrome; only the canvas + preview overlay show.
-function hideAppChrome(): void {
-  for (const id of [
-    "clod-left-stack",
-    "project-toolbar",
-    "player-mode-bar",
-    "crosshair",
-    "terraform-menu",
-    "build-progress",
-  ]) {
-    document.getElementById(id)?.style.setProperty("display", "none");
-  }
-}
-
-function makeOverlay(): HTMLDivElement {
-  const el = document.createElement("div");
-  el.style.cssText =
-    "position:fixed;top:8px;left:8px;z-index:10;font:12px/1.4 monospace;" +
-    "color:#cde;background:rgba(0,0,0,0.55);padding:8px 10px;border-radius:6px;white-space:pre";
-  document.body.appendChild(el);
-  return el;
-}
+import { terrainGeometry } from "./webgpu_preview_geometry.js";
+import { hideWebGpuPreviewAppChrome, makeWebGpuPreviewOverlay } from "./webgpu_preview_ui.js";
+import { WebGpuPostProcessPipeline } from "./webgpu_postprocess.js";
 
 export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<void> {
-  hideAppChrome();
-  const overlay = makeOverlay();
+  hideWebGpuPreviewAppChrome();
+  const overlay = makeWebGpuPreviewOverlay();
   overlay.textContent = "WebGPU CLOD preview: building world…";
 
   // Synchronous main-thread build, so keep the world small. buildWorld -> simplifyPage
@@ -542,6 +480,8 @@ export async function runWebGpuPreview(searchParams: URLSearchParams): Promise<v
       if (!useLodFade) view.mesh.visible = false;
     }
     visibleIds = nextVisible;
+    renderedCount = rendered.length;
+    levelSummary = [...perLevel.entries()].map(([level, count]) => `L${level}:${count}`).join(" ");
   };
 
   updateSelection();
