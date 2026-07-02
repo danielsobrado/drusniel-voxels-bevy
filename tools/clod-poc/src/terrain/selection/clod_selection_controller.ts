@@ -37,7 +37,7 @@ export type {
 } from "./clod_selection_controller_types.js";
 
 export function createClodSelectionController(deps: ClodSelectionControllerDeps): ClodSelectionController {
-  const { config, roots, allNodes, views, overlays, lockedBorderOverlay, staleEditedAncestorIds, onCutChanged } = deps;
+  const { config, roots, allNodes, overlays, lockedBorderOverlay, staleEditedAncestorIds, onCutChanged } = deps;
   const { clodRuntime } = config;
 
   let selState: SelectionState = { split: new Set() };
@@ -129,8 +129,7 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
     const cutIds = new Set(rendered.map((n) => n.id));
     const nextTerrainViews = new Set<ClodSelectionTerrainView>();
     for (const node of rendered) {
-      const view = views.get(node.id);
-      if (!view) continue;
+      const view = deps.getOrCreateView(node, selectionFrameId);
       view.selected = true;
       if (view.target !== 1) {
         view.target = 1;
@@ -138,6 +137,8 @@ export function createClodSelectionController(deps: ClodSelectionControllerDeps)
       }
       nextTerrainViews.add(view);
     }
+    deps.markActiveNodes?.(cutIds, selectionFrameId);
+    deps.prefetchNodes?.(rendered, selectionFrameId);
     for (const view of currentTerrainViews) {
       if (cutIds.has(view.node.id)) continue;
       view.selected = false;

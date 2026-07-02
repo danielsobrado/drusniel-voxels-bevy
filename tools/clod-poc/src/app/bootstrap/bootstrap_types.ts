@@ -12,6 +12,7 @@ export interface NodeView {
   selected: boolean;
   fade: number;
   target: number;
+  lastUsedFrame: number;
 }
 
 export function recomputedNormalsFor(view: NodeView): Float32Array {

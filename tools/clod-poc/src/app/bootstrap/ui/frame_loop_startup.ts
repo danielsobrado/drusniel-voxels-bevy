@@ -218,6 +218,7 @@ export function runFrameLoopStartup(
       nearFieldBubbleController,
       views,
       worldCells,
+      pruneRenderNodeCache: input.terrainView.renderNodeCache.prune.bind(input.terrainView.renderNodeCache),
     },
     vegetation: {
       drainVegetationDirtyQueue,
@@ -262,6 +263,7 @@ export function runFrameLoopStartup(
       formatTreeGpuSummary,
       formatUnderstoryGpuSummary,
       getPageGeometryCacheStats: () => input.terrainView.pageGeometryCache.stats(),
+      getRenderNodeCacheStats: () => input.terrainView.renderNodeCache.stats(),
       statsPresenter,
       updateInfo,
       averageFpsRef: session.averageFpsRef,

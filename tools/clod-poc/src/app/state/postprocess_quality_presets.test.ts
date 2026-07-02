@@ -19,6 +19,10 @@ function createState(): PostProcessQualityPresetState {
     postProcessContactShadowsEnabled: false,
     postProcessClarityEnabled: true,
     postProcessAerialPerspectiveEnabled: true,
+    postProcessCloudsEnabled: true,
+    postProcessGtaoEnabled: true,
+    postProcessFroxelsEnabled: true,
+    postProcessBounceEnabled: true,
   };
 }
 
@@ -53,15 +57,17 @@ describe("postprocess quality presets", () => {
       postProcessContactShadowsEnabled: true,
       postProcessClarityEnabled: true,
       postProcessAerialPerspectiveEnabled: true,
+      postProcessCloudsEnabled: true,
     }],
     ["balanced", {
       postProcessRenderScale: 0.85,
       postProcessBloomEnabled: true,
       postProcessFxaaEnabled: true,
-      postProcessTaaEnabled: false,
-      postProcessContactShadowsEnabled: false,
+      postProcessTaaEnabled: true,
+      postProcessContactShadowsEnabled: true,
       postProcessClarityEnabled: true,
       postProcessAerialPerspectiveEnabled: true,
+      postProcessCloudsEnabled: true,
     }],
     ["perf", {
       postProcessRenderScale: 0.75,
@@ -71,6 +77,7 @@ describe("postprocess quality presets", () => {
       postProcessContactShadowsEnabled: false,
       postProcessClarityEnabled: true,
       postProcessAerialPerspectiveEnabled: true,
+      postProcessCloudsEnabled: false,
     }],
     ["potato", {
       postProcessRenderScale: 0.5,
@@ -80,6 +87,7 @@ describe("postprocess quality presets", () => {
       postProcessContactShadowsEnabled: false,
       postProcessClarityEnabled: false,
       postProcessAerialPerspectiveEnabled: false,
+      postProcessCloudsEnabled: false,
     }],
   ])("applies %s", (preset, expected) => {
     const state = createState();

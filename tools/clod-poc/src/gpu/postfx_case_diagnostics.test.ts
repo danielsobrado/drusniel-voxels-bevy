@@ -12,6 +12,7 @@ describe("postfx case diagnostics", () => {
     expect(diagnostics.stages.froxels).toBe(false);
     expect(diagnostics.stages.gtao).toBe(false);
     expect(diagnostics.stages.bounce).toBe(false);
+    expect(diagnostics.stages.clouds).toBe(true);
   });
 
   it("marks post disabled when fx is off", () => {
@@ -44,6 +45,6 @@ describe("postfx case diagnostics", () => {
 
   it("prints a compact active stage list", () => {
     const diagnostics = postFxCaseDiagnostics({ contact: "1", froxels: "1", ablate: "bloom,taa" });
-    expect(compactStageList(diagnostics)).toBe("aerial+autoExposure+colorScript+contact+froxels");
+    expect(compactStageList(diagnostics)).toBe("aerial+autoExposure+clouds+colorScript+contact+froxels");
   });
 });

@@ -35,6 +35,7 @@ import {
   PageGeometryCache,
   type PageGeometryNormalMode,
 } from "../../terrain/geometry/page_geometry_cache.js";
+import { ClodRenderNodeCache } from "../../terrain/rendering/clod_render_node_cache.js";
 import { createNearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";
 import { createClodSelectionController, type ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_loader.js";
@@ -152,6 +153,7 @@ export interface TerrainViewStartupResult {
   brushPreview: ReturnType<typeof createBrushPreviewController>;
   nearFieldBubbleController: ReturnType<typeof createNearFieldBubbleController>;
   pageGeometryCache: PageGeometryCache;
+  renderNodeCache: ClodRenderNodeCache;
   pageTransitionMode: string;
   crossfadeStep: number;
   selectionController: ClodSelectionController;
@@ -217,7 +219,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   skyEnvironment.setVisible(!state.clodPerfMode);
   const currentLighting = createCurrentLightingReader(skyEnvironment);
 
-  const views = new Map<string, NodeView>();
+  let views = new Map<string, NodeView>();
   const pageGeometryCache = new PageGeometryCache(clodRuntime.pageGeometryCache);
   const textureController = createTerrainTextureController({
     textureArraySize: clodRuntime.terrainTextures.textureArraySize,
@@ -247,39 +249,20 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   const applyTerrainTextures = () => materialController.applyTerrainTextures();
   const applyColorByLodToMaterials = (on: boolean) => materialController.applyColorByLodToMaterials(on);
 
-  const cachedSourceGeometry = (node: ClodPageNode): THREE.BufferGeometry => {
-    const geometry = pageGeometryCache.getOrCreate({
-      node,
-      normalMode: "source",
-      createGeometry: () => toGeometry(node.mesh),
-    });
-    pageGeometryCache.setGeometryActive(geometry, true);
-    return geometry;
-  };
-
-  for (const node of allNodes) {
-    const mat = materialController.makeTerrainMaterial(
-      state.colorByLod ? LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)] : 0xb9c0c8,
-    );
-    mat.setColorAdjust(currentTerrainColorAdjustments());
-    materialController.applyLighting(mat);
-    const mesh = new THREE.Mesh(cachedSourceGeometry(node), mat.material);
-    mat.onMaterialChanged((material) => {
-      mesh.material = material;
-    });
-    mesh.visible = false;
-    scene.add(mesh);
-    views.set(node.id, {
-      node,
-      mesh,
-      mat,
-      sourceNormals: node.mesh.normals,
-      recomputedNormals: null,
-      selected: false,
-      fade: 0,
-      target: 0,
-    });
-  }
+  const materialColorForNode = (node: ClodPageNode): number =>
+    state.colorByLod ? LOD_COLORS[Math.min(node.level, LOD_COLORS.length - 1)] : 0xb9c0c8;
+  const renderNodeCache = new ClodRenderNodeCache({
+    scene,
+    materialController,
+    pageGeometryCache,
+    getMaterialColorForNode: materialColorForNode,
+    getColorAdjustments: currentTerrainColorAdjustments,
+    getLighting: currentLighting,
+    getMaterialState: () => state,
+    getNormalMode: () => state.recomputedNormals ? "recomputed" : "source",
+    config: clodRuntime.renderNodeCache,
+  });
+  views = renderNodeCache.views();
 
   const postProcess: AppPostProcess = app.isWebGpu
     ? new WebGpuPostProcessPipeline(app.renderer, scene, camera, currentPostProcessSettings(), currentLighting, {
@@ -462,6 +445,31 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   };
 
   const cutChangedRef: { fn: () => void } = { fn: () => {} };
+  const parentByNodeId = new Map<string, ClodPageNode>();
+  for (const node of allNodes) {
+    for (const child of node.children) {
+      if (child) parentByNodeId.set(child.id, node);
+    }
+  }
+  const prefetchNodes = (rendered: readonly ClodPageNode[], frameId: number): void => {
+    const config = clodRuntime.renderNodeCache;
+    if (!config.prefetchParent && !config.prefetchChildren) return;
+    const candidates: ClodPageNode[] = [];
+    const seen = new Set<string>();
+    const addCandidate = (node: ClodPageNode | null | undefined) => {
+      if (!node || seen.has(node.id)) return;
+      seen.add(node.id);
+      candidates.push(node);
+    };
+    for (const node of rendered) {
+      if (config.prefetchParent) addCandidate(parentByNodeId.get(node.id));
+      if (config.prefetchChildren) {
+        for (const child of node.children) addCandidate(child);
+      }
+      if (candidates.length >= config.maxPrefetchCreatesPerFrame) break;
+    }
+    renderNodeCache.prefetch(candidates, frameId);
+  };
   const selectionController = createClodSelectionController({
     config: {
       clodRuntime,
@@ -476,6 +484,9 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     roots: result.roots,
     allNodes,
     views,
+    getOrCreateView: (node, frameId) => renderNodeCache.getOrCreate({ node, frameId }),
+    markActiveNodes: (nodeIds, frameId) => renderNodeCache.markActive(nodeIds, frameId),
+    prefetchNodes,
     getClodErrorCompute,
     getSettings: () => ({
       thresholdPx: state.thresholdPx,
@@ -549,6 +560,8 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
       const normalMode: PageGeometryNormalMode = state.recomputedNormals ? "recomputed" : "source";
       assignViewGeometry(v, geometryForView(v, normalMode), previousWasCacheOwned);
       geometrySwapMs = performance.now() - gs;
+    } else {
+      pageGeometryCache.invalidateNode(node.id);
     }
     if (node.level !== 0) return { geometrySwapMs, colliderMs: 0 };
     const tc = performance.now();
@@ -594,6 +607,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     brushPreview,
     nearFieldBubbleController,
     pageGeometryCache,
+    renderNodeCache,
     pageTransitionMode,
     crossfadeStep,
     selectionController,

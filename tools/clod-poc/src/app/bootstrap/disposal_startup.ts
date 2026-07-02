@@ -17,6 +17,7 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
     },
     terrainView: {
       nearFieldBubbleController,
+      renderNodeCache,
       pageGeometryCache,
       lockedBorderOverlay,
       skyEnvironment,
@@ -31,6 +32,7 @@ export function bindBootstrapDisposal(ctx: UiStartupContext): void {
 
   window.addEventListener("beforeunload", () => {
     nearFieldBubbleController.dispose();
+    renderNodeCache.dispose();
     pageGeometryCache.dispose();
     lockedBorderOverlay.dispose();
     grassSystem.dispose();

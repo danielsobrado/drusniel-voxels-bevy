@@ -188,6 +188,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       nearFieldBubbleController: terrain.nearFieldBubbleController,
       views: terrain.views,
       worldCells: terrain.worldCells,
+      pruneRenderNodeCache: terrain.pruneRenderNodeCache,
     }));
 
     timed(collectFrameTiming, phaseTiming, "shadowProxyMs", () => shadowProxy?.rebuildIfNeeded());
@@ -318,6 +319,18 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["pageGeometryCache.invalidations"] = pageGeometryCacheStats.invalidations;
           counters["pageGeometryCache.disposals"] = pageGeometryCacheStats.disposals;
           counters["pageGeometryCache.estimatedBytes"] = pageGeometryCacheStats.estimatedBytes;
+        }
+        const renderNodeCacheStats = stats.getRenderNodeCacheStats?.();
+        if (renderNodeCacheStats) {
+          counters["renderNodeCache.enabled"] = renderNodeCacheStats.enabled ? 1 : 0;
+          counters["renderNodeCache.materializedNodes"] = renderNodeCacheStats.materializedNodes;
+          counters["renderNodeCache.activeNodes"] = renderNodeCacheStats.activeNodes;
+          counters["renderNodeCache.inactiveNodes"] = renderNodeCacheStats.inactiveNodes;
+          counters["renderNodeCache.creates"] = renderNodeCacheStats.creates;
+          counters["renderNodeCache.reuses"] = renderNodeCacheStats.reuses;
+          counters["renderNodeCache.disposals"] = renderNodeCacheStats.disposals;
+          counters["renderNodeCache.evictions"] = renderNodeCacheStats.evictions;
+          counters["renderNodeCache.prefetches"] = renderNodeCacheStats.prefetches;
         }
       }
     }

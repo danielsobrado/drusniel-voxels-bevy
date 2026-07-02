@@ -33,6 +33,7 @@ import type { FrameRenderer } from "./frame_renderer.js";
 import type { GpuPassTiming } from "../../core/gpu_pass_timing.js";
 import type { FloatingOriginController } from "../../precision/floating_origin.js";
 import type { PageGeometryCacheStats } from "../../terrain/geometry/page_geometry_cache.js";
+import type { ClodRenderNodeCacheStats } from "../../terrain/rendering/clod_render_node_cache.js";
 
 interface TerrainFadeView {
   fade: number;
@@ -84,6 +85,7 @@ export interface FrameLoopTerrainDeps {
   nearFieldBubbleController: NearFieldBubbleController;
   views: Map<string, NodeViewLookup & TerrainFadeView>;
   worldCells: number;
+  pruneRenderNodeCache?: (protectedNodeIds: ReadonlySet<string>, frameId: number) => void;
 }
 
 export interface FrameLoopVegetationDeps {
@@ -131,6 +133,7 @@ export interface FrameLoopStatsDeps {
   formatTreeGpuSummary: (stats: TreeStats) => string;
   formatUnderstoryGpuSummary: (stats: UnderstoryStats) => string;
   getPageGeometryCacheStats?: () => PageGeometryCacheStats;
+  getRenderNodeCacheStats?: () => ClodRenderNodeCacheStats;
   statsPresenter: StatsPresenter;
   updateInfo: () => void;
   averageFpsRef: { value: number };

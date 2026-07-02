@@ -20,6 +20,15 @@ page_geometry_cache:
   max_entries: 8192
   warn_at_entries: 6144
 
+render_node_cache:
+  enabled: true
+  max_inactive_nodes: 512
+  prune_interval_frames: 30
+  prefetch_parent: true
+  prefetch_children: false
+  max_prefetch_creates_per_frame: 8
+  warn_at_inactive_nodes: 480
+
 digging:
   hold_interval_ms: 400
 

@@ -55,6 +55,9 @@ export interface ClodSelectionControllerDeps {
   roots: ClodPageNode[];
   allNodes: ClodPageNode[];
   views: Map<string, ClodSelectionTerrainView>;
+  getOrCreateView: (node: ClodPageNode, frameId: number) => ClodSelectionTerrainView;
+  markActiveNodes?: (nodeIds: ReadonlySet<string>, frameId: number) => void;
+  prefetchNodes?: (nodes: readonly ClodPageNode[], frameId: number) => void;
   getClodErrorCompute: () => ClodErrorPxCompute | null;
   getSettings: () => ClodSelectionSettings;
   getSelectionCenter: () => THREE.Vector3;

@@ -6,6 +6,7 @@ import type { ClodSelectionController } from "../../terrain/selection/clod_selec
 import type { ClodFrameLoopUiState } from "./ui_state.js";
 
 interface TerrainFadeView {
+  node: { id: string };
   fade: number;
   target: number;
   mesh: THREE.Mesh;
@@ -23,6 +24,7 @@ export interface TerrainFramePhaseInput {
   nearFieldBubbleController: NearFieldBubbleController;
   views: Map<string, { node: { id: string } } & TerrainFadeView>;
   worldCells: number;
+  pruneRenderNodeCache?: (protectedNodeIds: ReadonlySet<string>, frameId: number) => void;
 }
 
 export interface TerrainFramePhaseResult {
@@ -63,6 +65,12 @@ export function runTerrainFramePhase(input: TerrainFramePhaseInput): TerrainFram
     getView: (nodeId) => input.views.get(nodeId) as unknown as NearFieldBubbleView | undefined,
     frameId: selectionStats.frameId,
   });
+  if (input.pruneRenderNodeCache) {
+    const protectedNodeIds = new Set<string>();
+    for (const view of currentTerrainViews) protectedNodeIds.add(view.node.id);
+    for (const view of activeTerrainViews) protectedNodeIds.add(view.node.id);
+    input.pruneRenderNodeCache(protectedNodeIds, selectionStats.frameId);
+  }
 
   const tPropsStart = performance.now();
   const grassCenter = bubbleCenter;

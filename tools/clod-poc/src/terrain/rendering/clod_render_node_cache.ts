@@ -1,0 +1,266 @@
+import * as THREE from "three";
+import type { EnvironmentLighting } from "../../environment/environment.js";
+import type { TerrainColorAdjustments } from "../../material/material.js";
+import type { TerrainMaterialHandle } from "../../rendering/terrain_material.js";
+import type { TerrainMaterialController, TerrainMaterialUiState } from "../material/terrain_material_controller.js";
+import { computeGeometryNormals, toGeometry } from "../geometry/page_geometry.js";
+import type { PageGeometryCache, PageGeometryNormalMode } from "../geometry/page_geometry_cache.js";
+import type { ClodPageNode } from "../../types.js";
+import type { ClodRenderNodeCacheConfig } from "./clod_render_node_cache_config.js";
+
+export interface ClodRenderNodeCacheStats {
+  enabled: boolean;
+  materializedNodes: number;
+  activeNodes: number;
+  inactiveNodes: number;
+  creates: number;
+  reuses: number;
+  disposals: number;
+  evictions: number;
+  prefetches: number;
+}
+
+export interface ClodRenderNodeView {
+  node: ClodPageNode;
+  mesh: THREE.Mesh;
+  mat: TerrainMaterialHandle;
+  sourceNormals: Float32Array;
+  recomputedNormals: Float32Array | null;
+  selected: boolean;
+  fade: number;
+  target: number;
+  lastUsedFrame: number;
+}
+
+export interface CreateRenderNodeInput {
+  node: ClodPageNode;
+  frameId: number;
+}
+
+export interface ClodRenderNodeCacheDeps {
+  scene: THREE.Scene;
+  materialController: TerrainMaterialController;
+  pageGeometryCache: PageGeometryCache;
+  getMaterialColorForNode: (node: ClodPageNode) => number;
+  getColorAdjustments: () => TerrainColorAdjustments;
+  getLighting: () => EnvironmentLighting;
+  getMaterialState: () => TerrainMaterialUiState;
+  getNormalMode: () => PageGeometryNormalMode;
+  config: ClodRenderNodeCacheConfig;
+}
+
+interface CacheEntry {
+  view: ClodRenderNodeView;
+  unsubscribeMaterial: () => void;
+}
+
+export class ClodRenderNodeCache {
+  private readonly deps: ClodRenderNodeCacheDeps;
+  private readonly viewMap = new Map<string, ClodRenderNodeView>();
+  private readonly entries = new Map<string, CacheEntry>();
+  private readonly activeNodeIds = new Set<string>();
+  private statCreates = 0;
+  private statReuses = 0;
+  private statDisposals = 0;
+  private statEvictions = 0;
+  private statPrefetches = 0;
+  private lastPruneFrame = -Infinity;
+  private warnedAtInactiveNodes = false;
+
+  constructor(deps: ClodRenderNodeCacheDeps) {
+    this.deps = deps;
+  }
+
+  getOrCreate(input: CreateRenderNodeInput): ClodRenderNodeView {
+    const existing = this.viewMap.get(input.node.id);
+    if (existing) {
+      existing.lastUsedFrame = input.frameId;
+      this.statReuses++;
+      return existing;
+    }
+
+    const entry = this.createRenderNodeView(input.node, input.frameId);
+    this.entries.set(input.node.id, entry);
+    this.viewMap.set(input.node.id, entry.view);
+    this.statCreates++;
+    return entry.view;
+  }
+
+  get(nodeId: string): ClodRenderNodeView | undefined {
+    return this.viewMap.get(nodeId);
+  }
+
+  has(nodeId: string): boolean {
+    return this.viewMap.has(nodeId);
+  }
+
+  markActive(nodeIds: ReadonlySet<string>, frameId: number): void {
+    this.activeNodeIds.clear();
+    for (const nodeId of nodeIds) {
+      this.activeNodeIds.add(nodeId);
+      const view = this.viewMap.get(nodeId);
+      if (view) view.lastUsedFrame = frameId;
+    }
+  }
+
+  prefetch(nodes: Iterable<ClodPageNode>, frameId: number): void {
+    if (!this.deps.config.enabled) return;
+    let created = 0;
+    for (const node of nodes) {
+      if (this.viewMap.has(node.id)) continue;
+      this.getOrCreate({ node, frameId });
+      this.statPrefetches++;
+      created++;
+      if (created >= this.deps.config.maxPrefetchCreatesPerFrame) return;
+    }
+  }
+
+  prune(protectedNodeIds: ReadonlySet<string>, frameId: number): void {
+    const config = this.deps.config;
+    if (!config.enabled) return;
+    if (frameId - this.lastPruneFrame < config.pruneIntervalFrames) return;
+    this.lastPruneFrame = frameId;
+
+    const inactive = [...this.viewMap.values()]
+      .filter((view) => this.canDisposeView(view, protectedNodeIds))
+      .sort((a, b) => a.lastUsedFrame - b.lastUsedFrame);
+
+    if (inactive.length >= config.warnAtInactiveNodes && !this.warnedAtInactiveNodes) {
+      this.warnedAtInactiveNodes = true;
+      console.warn(`[clod] render node cache has ${inactive.length} inactive nodes`);
+    }
+
+    while (inactive.length > config.maxInactiveNodes) {
+      const view = inactive.shift();
+      if (!view) return;
+      this.disposeNode(view.node.id, true);
+    }
+  }
+
+  invalidateNode(nodeId: string): void {
+    this.disposeNode(nodeId);
+  }
+
+  disposeNode(nodeId: string, evicted = false): void {
+    const entry = this.entries.get(nodeId);
+    if (!entry) return;
+    this.entries.delete(nodeId);
+    this.viewMap.delete(nodeId);
+    this.activeNodeIds.delete(nodeId);
+
+    const { view } = entry;
+    this.deps.scene.remove(view.mesh);
+    entry.unsubscribeMaterial();
+    const geometry = view.mesh.geometry as THREE.BufferGeometry;
+    if (this.deps.pageGeometryCache.owns(geometry)) {
+      this.deps.pageGeometryCache.setGeometryActive(geometry, false);
+    } else {
+      geometry.dispose();
+    }
+
+    if (view.mat !== this.deps.materialController.sharedMaterial) {
+      this.deps.materialController.materials.delete(view.mat);
+      view.mat.material.dispose();
+    }
+    this.statDisposals++;
+    if (evicted) this.statEvictions++;
+  }
+
+  dispose(): void {
+    for (const nodeId of [...this.viewMap.keys()]) this.disposeNode(nodeId);
+  }
+
+  views(): Map<string, ClodRenderNodeView> {
+    return this.viewMap;
+  }
+
+  stats(): ClodRenderNodeCacheStats {
+    let activeNodes = 0;
+    for (const view of this.viewMap.values()) {
+      if (this.isActiveView(view)) activeNodes++;
+    }
+    return {
+      enabled: this.deps.config.enabled,
+      materializedNodes: this.viewMap.size,
+      activeNodes,
+      inactiveNodes: Math.max(0, this.viewMap.size - activeNodes),
+      creates: this.statCreates,
+      reuses: this.statReuses,
+      disposals: this.statDisposals,
+      evictions: this.statEvictions,
+      prefetches: this.statPrefetches,
+    };
+  }
+
+  private createRenderNodeView(node: ClodPageNode, frameId: number): CacheEntry {
+    const mat = this.deps.materialController.makeTerrainMaterial(this.deps.getMaterialColorForNode(node));
+    mat.setColorAdjust(this.deps.getColorAdjustments());
+    this.deps.materialController.applyLighting(mat, this.deps.getLighting());
+    this.configureCurrentMaterialState(mat);
+
+    const normalMode = this.deps.getNormalMode();
+    const recomputedNormals = normalMode === "recomputed" ? computeGeometryNormals(node.mesh) : null;
+    const geometry = this.deps.pageGeometryCache.getOrCreate({
+      node,
+      normalMode,
+      createGeometry: () => {
+        const created = toGeometry(node.mesh);
+        if (recomputedNormals) {
+          created.setAttribute("normal", new THREE.BufferAttribute(recomputedNormals, 3));
+        }
+        return created;
+      },
+    });
+    this.deps.pageGeometryCache.setGeometryActive(geometry, true);
+
+    const mesh = new THREE.Mesh(geometry, mat.material);
+    mesh.visible = false;
+    const unsubscribeMaterial = mat.onMaterialChanged((material) => {
+      mesh.material = material;
+    });
+    this.deps.scene.add(mesh);
+
+    return {
+      view: {
+        node,
+        mesh,
+        mat,
+        sourceNormals: node.mesh.normals,
+        recomputedNormals,
+        selected: false,
+        fade: 0,
+        target: 0,
+        lastUsedFrame: frameId,
+      },
+      unsubscribeMaterial,
+    };
+  }
+
+  private configureCurrentMaterialState(mat: TerrainMaterialHandle): void {
+    const state = this.deps.getMaterialState();
+    mat.setDebug({
+      normalColor: state.normalColor,
+      normalDivergence: state.normalDivergence,
+      divergenceGain: state.divergenceGain,
+    });
+    mat.setTriplanar(state.triplanar);
+    mat.setSide(state.frontSideOnly ? THREE.FrontSide : THREE.DoubleSide);
+    mat.setTextures(
+      this.deps.materialController.activeTerrainSlots(),
+      this.deps.materialController.terrainTextureUniformOptions(),
+    );
+  }
+
+  private canDisposeView(view: ClodRenderNodeView, protectedNodeIds: ReadonlySet<string>): boolean {
+    if (protectedNodeIds.has(view.node.id)) return false;
+    return !this.isActiveView(view);
+  }
+
+  private isActiveView(view: ClodRenderNodeView): boolean {
+    return this.activeNodeIds.has(view.node.id) ||
+      view.selected ||
+      view.target > 0 ||
+      view.fade > 0.001 ||
+      view.mesh.visible;
+  }
+}

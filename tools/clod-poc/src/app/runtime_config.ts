@@ -1,6 +1,10 @@
 import { load } from "js-yaml";
 import clodRuntimeYaml from "./config/clod_runtime.yaml?raw";
 import { DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG, type PageGeometryCacheConfig } from "../terrain/geometry/page_geometry_cache.js";
+import {
+  DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG,
+  type ClodRenderNodeCacheConfig,
+} from "../terrain/rendering/clod_render_node_cache_config.js";
 
 export interface ClodRuntimeConfig {
   runtime: {
@@ -21,6 +25,7 @@ export interface ClodRuntimeConfig {
     evictDistanceMultiplier: number;
   };
   pageGeometryCache: PageGeometryCacheConfig;
+  renderNodeCache: ClodRenderNodeCacheConfig;
   digging: {
     holdIntervalMs: number;
   };
@@ -48,6 +53,7 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
     evictDistanceMultiplier: 2.5,
   },
   pageGeometryCache: DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG,
+  renderNodeCache: DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG,
   digging: {
     holdIntervalMs: 400,
   },
@@ -86,6 +92,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
     const terrainTextures = (raw.terrain_textures ?? {}) as Record<string, unknown>;
     const nearField = (raw.near_field ?? {}) as Record<string, unknown>;
     const pageGeometryCache = (raw.page_geometry_cache ?? {}) as Record<string, unknown>;
+    const renderNodeCache = (raw.render_node_cache ?? {}) as Record<string, unknown>;
     const digging = (raw.digging ?? {}) as Record<string, unknown>;
     const profiling = (raw.profiling ?? {}) as Record<string, unknown>;
     return {
@@ -139,6 +146,33 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
         warnAtEntries: positiveInt(
           pageGeometryCache.warn_at_entries,
           defaults.pageGeometryCache.warnAtEntries,
+        ),
+      },
+      renderNodeCache: {
+        enabled: bool(renderNodeCache.enabled, defaults.renderNodeCache.enabled),
+        maxInactiveNodes: positiveInt(
+          renderNodeCache.max_inactive_nodes,
+          defaults.renderNodeCache.maxInactiveNodes,
+        ),
+        pruneIntervalFrames: positiveInt(
+          renderNodeCache.prune_interval_frames,
+          defaults.renderNodeCache.pruneIntervalFrames,
+        ),
+        prefetchParent: bool(
+          renderNodeCache.prefetch_parent,
+          defaults.renderNodeCache.prefetchParent,
+        ),
+        prefetchChildren: bool(
+          renderNodeCache.prefetch_children,
+          defaults.renderNodeCache.prefetchChildren,
+        ),
+        maxPrefetchCreatesPerFrame: positiveInt(
+          renderNodeCache.max_prefetch_creates_per_frame,
+          defaults.renderNodeCache.maxPrefetchCreatesPerFrame,
+        ),
+        warnAtInactiveNodes: positiveInt(
+          renderNodeCache.warn_at_inactive_nodes,
+          defaults.renderNodeCache.warnAtInactiveNodes,
         ),
       },
       digging: {
