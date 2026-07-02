@@ -74,7 +74,6 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   let digDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let conformDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let vegetationFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  let digRebuildsInFlight = 0;
   let lastDigAt = -Infinity;
   const pendingGrassNodeIds = new Set<string>();
   const pendingTreeNodeIds = new Set<string>();
@@ -181,7 +180,6 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   ): Promise<boolean> => {
     const t0 = performance.now();
     lastDigAt = t0;
-    digRebuildsInFlight++;
     try {
       const margin = radius + DIG_INFLUENCE_MARGIN;
       let lod0: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>;
@@ -219,7 +217,6 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       );
       return true;
     } finally {
-      digRebuildsInFlight--;
     }
   };
 
