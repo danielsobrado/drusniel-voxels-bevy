@@ -24,12 +24,15 @@ import {
 } from "./validate.js";
 import { emptyDiagonalPolishStats, polishDiagonals, type DiagonalPolishStats } from "../diagonalPolish.js";
 import {
+  INITIAL_NODE_REVISION,
   backupAllLod0Nodes,
   backupLod0Node,
   backupParentNode,
   boundsOf,
+  bumpNodeRevision,
   childNodes,
   clonePageMesh,
+  ensureNodeRevision,
   estimatedNodeCount,
   footprintFor,
   requireFourChildren,
@@ -206,6 +209,7 @@ function createParentNode(
   const built = buildParentOutput(level, nx, nz, children, cfg, polishTopLevel);
   const node: ClodPageNode = {
     id: `L${level}:${nx},${nz}`,
+    revision: INITIAL_NODE_REVISION,
     level,
     children: [...children],
     mesh: built.mesh,
@@ -246,6 +250,7 @@ export function buildWorld(worldPagesX: number, worldPagesZ: number, cfg: ClodPa
       validatePageMesh(src.mesh, src.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz}`);
       const node: ClodPageNode = {
         id: `L0:${px},${pz}`,
+        revision: INITIAL_NODE_REVISION,
         level: 0,
         children: [],
         mesh: src.mesh,
@@ -345,6 +350,7 @@ export async function buildWorldAsync(
         const buildMs = performance.now() - startedAt;
         node = {
           id: nodeId,
+          revision: INITIAL_NODE_REVISION,
           level: 0,
           children: [],
           mesh: src.mesh,
@@ -368,6 +374,7 @@ export async function buildWorldAsync(
         if (cacheHooks) await cacheHooks.storeNode(node, stat);
         stats.push(stat);
       } else {
+        ensureNodeRevision(node);
         const cachedStat = cacheHooks?.getCachedBuildStat?.(nodeId);
         stats.push(cachedStat ?? {
           id: node.id,
@@ -405,6 +412,7 @@ export async function buildWorldAsync(
         let node = cacheHooks ? await cacheHooks.tryLoadNode(nodeId, level, nx, nz) : null;
         if (node) {
           node.children = children;
+          ensureNodeRevision(node);
           const cachedStat = cacheHooks?.getCachedBuildStat?.(nodeId);
           stats.push(cachedStat ?? {
             id: node.id,
@@ -537,6 +545,7 @@ export function rebuildDirtyLod0Pages(
       validatePageMesh(mesh, node.footprint, cfg.validation.zero_area_epsilon, `L0:${px},${pz} edit-rebuild`);
       node.mesh = mesh;
       node.bounds = boundsOf(mesh);
+      bumpNodeRevision(node);
       changed.push(node);
       dirtyCoords.push([px, pz]);
     }
@@ -565,6 +574,7 @@ export function resimplifyParent(
   node.bounds = boundsOf(built.mesh);
   node.errorWorld = built.errorWorld;
   node.lowBenefit = built.lowBenefit;
+  bumpNodeRevision(node);
   return node;
 }
 
