@@ -44,6 +44,9 @@ export const PROCEDURAL_TEXTURE_LAYER_BUDGET = {
   estimatedMipOverheadRatio: 1 / 3,
 } as const;
 
+const MIN_PROCEDURAL_TEXTURE_RESOLUTION = 2;
+const MAX_PROCEDURAL_TEXTURE_RESOLUTION = 4096;
+
 export type CommonProceduralMaterialId = typeof TERRAIN_COMMON_PROCEDURAL_MATERIAL_IDS[number];
 export type BiomeProceduralMaterialId = typeof BIOME_PROCEDURAL_MATERIAL_IDS[number];
 export type ProceduralMaterialId = typeof PROCEDURAL_MATERIAL_IDS[number];
@@ -234,6 +237,17 @@ function readNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function readPositiveNumber(value: unknown, fallback: number): number {
+  const resolved = readNumber(value, fallback);
+  return resolved > 0 ? resolved : fallback;
+}
+
+function readTextureResolution(value: unknown, fallback: number): number {
+  const resolved = Math.floor(readNumber(value, fallback));
+  if (resolved <= 0) return fallback;
+  return Math.min(MAX_PROCEDURAL_TEXTURE_RESOLUTION, Math.max(MIN_PROCEDURAL_TEXTURE_RESOLUTION, resolved));
+}
+
 function readColor(value: unknown, fallback: [number, number, number]): [number, number, number] {
   if (!Array.isArray(value) || value.length !== 3) return fallback;
   return [
@@ -246,6 +260,14 @@ function readColor(value: unknown, fallback: [number, number, number]): [number,
 function readRange(value: unknown, fallback: [number, number]): [number, number] {
   if (!Array.isArray(value) || value.length !== 2) return fallback;
   return [readNumber(value[0], fallback[0]), readNumber(value[1], fallback[1])];
+}
+
+function readPositiveRange(value: unknown, fallback: [number, number]): [number, number] {
+  const resolved = readRange(value, fallback);
+  return [
+    resolved[0] > 0 ? resolved[0] : fallback[0],
+    resolved[1] > 0 ? resolved[1] : fallback[1],
+  ];
 }
 
 function mergeRecipe(raw: unknown, fallback: ProceduralMaterialRecipe): ProceduralMaterialRecipe {
@@ -265,7 +287,7 @@ function readQualityTiers(raw: unknown, fallback: Record<string, { max_noise_fet
   const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
   return Object.fromEntries(Object.entries(fallback).map(([key, tier]) => {
     const rawTier = value[key] && typeof value[key] === "object" ? value[key] as Record<string, unknown> : {};
-    return [key, { max_noise_fetches: Math.floor(readNumber(rawTier.max_noise_fetches, tier.max_noise_fetches)) }];
+    return [key, { max_noise_fetches: Math.max(0, Math.floor(readNumber(rawTier.max_noise_fetches, tier.max_noise_fetches))) }];
   }));
 }
 
@@ -284,7 +306,7 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
   const defaults = DEFAULT_PROCEDURAL_TEXTURE_CONFIG;
   const noise = root.noise && typeof root.noise === "object" ? root.noise as Record<string, unknown> : {};
   const periods = noise.periods && typeof noise.periods === "object" ? noise.periods as Record<string, unknown> : {};
-  const terrain = root.terrain && typeof root.terrain === "object" ? root.terrain as Record<string, unknown> : {};
+  const terrain = root.terrain && typeof root.terrain === "object" ? terrain as Record<string, unknown> : {};
   const micro = terrain.micro_normal && typeof terrain.micro_normal === "object" ? terrain.micro_normal as Record<string, unknown> : {};
   const masks = terrain.masks && typeof terrain.masks === "object" ? terrain.masks as Record<string, unknown> : {};
   const rawMaterials = terrain.materials && typeof terrain.materials === "object" ? terrain.materials as Record<string, unknown> : {};
@@ -310,20 +332,20 @@ export function parseProceduralTextureConfig(text: string): ProceduralTextureCon
     seed: readNumber(root.seed, defaults.seed),
     runtime_mode: root.runtime_mode === "cache_only" || root.runtime_mode === "force_regenerate" ? root.runtime_mode : "generate_if_missing",
     noise: {
-      resolution: Math.floor(readNumber(noise.resolution, defaults.noise.resolution)),
+      resolution: readTextureResolution(noise.resolution, defaults.noise.resolution),
       periods: {
-        value: readNumber(periods.value, defaults.noise.periods.value),
-        fbm: readNumber(periods.fbm, defaults.noise.periods.fbm),
-        ridged: readNumber(periods.ridged, defaults.noise.periods.ridged),
-        worley: readNumber(periods.worley, defaults.noise.periods.worley),
+        value: readPositiveNumber(periods.value, defaults.noise.periods.value),
+        fbm: readPositiveNumber(periods.fbm, defaults.noise.periods.fbm),
+        ridged: readPositiveNumber(periods.ridged, defaults.noise.periods.ridged),
+        worley: readPositiveNumber(periods.worley, defaults.noise.periods.worley),
       },
     },
     terrain: {
-      layer_resolution: Math.floor(readNumber(terrain.layer_resolution, defaults.terrain.layer_resolution)),
+      layer_resolution: readTextureResolution(terrain.layer_resolution, defaults.terrain.layer_resolution),
       active_biome_materials: activeBiomeMaterials,
-      macro_variation_m: defaults.terrain.macro_variation_m,
-      meso_variation_m: defaults.terrain.meso_variation_m,
-      micro_variation_m: defaults.terrain.micro_variation_m,
+      macro_variation_m: readPositiveRange(terrain.macro_variation_m, defaults.terrain.macro_variation_m),
+      meso_variation_m: readPositiveRange(terrain.meso_variation_m, defaults.terrain.meso_variation_m),
+      micro_variation_m: readPositiveRange(terrain.micro_variation_m, defaults.terrain.micro_variation_m),
       micro_normal: {
         enabled: micro.enabled === undefined ? defaults.terrain.micro_normal.enabled : Boolean(micro.enabled),
         fade_start_m: readNumber(micro.fade_start_m, defaults.terrain.micro_normal.fade_start_m),
