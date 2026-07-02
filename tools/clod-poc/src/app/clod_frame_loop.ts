@@ -39,6 +39,19 @@ function timed<T>(
   }
 }
 
+function syncMaterialChurnCounters(counters: Record<string, number>): void {
+  const materialChurnStats = materialChurnDiagnostics.frameStats();
+  counters["materialChurn.enabled"] = materialChurnStats.enabled ? 1 : 0;
+  counters["materialChurn.newMaterials"] = materialChurnStats.newMaterials;
+  counters["materialChurn.materialAssignments"] = materialChurnStats.materialReplacements;
+  counters["materialChurn.needsUpdate"] = materialChurnStats.materialNeedsUpdate;
+  counters["materialChurn.versionChanges"] = materialChurnStats.materialVersionChanges;
+  counters["materialChurn.pipelineSensitiveChanges"] = materialChurnStats.pipelineSensitiveChanges;
+  counters["materialChurn.rendererProgramCount"] = materialChurnStats.rendererProgramCount ?? -1;
+  counters["materialChurn.rendererProgramDelta"] = materialChurnStats.rendererProgramDelta ?? 0;
+  counters["materialChurn.suspectedPipelineKeyChanges"] = materialChurnStats.suspectedPipelineKeyChanges;
+}
+
 export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
   const { render, player, terrain, vegetation, waterWeather, stats, diagnostics, farSummary, shadowProxy, clodShadow, canopy, construction, combat, spells } = deps;
   let elapsedSeconds = 0;
@@ -289,16 +302,7 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["renderNodeCache.evictions"] = renderNodeCacheStats.evictions;
           counters["renderNodeCache.prefetches"] = renderNodeCacheStats.prefetches;
         }
-        const materialChurnStats = materialChurnDiagnostics.frameStats();
-        counters["materialChurn.enabled"] = materialChurnStats.enabled ? 1 : 0;
-        counters["materialChurn.newMaterials"] = materialChurnStats.newMaterials;
-        counters["materialChurn.materialAssignments"] = materialChurnStats.materialReplacements;
-        counters["materialChurn.needsUpdate"] = materialChurnStats.materialNeedsUpdate;
-        counters["materialChurn.versionChanges"] = materialChurnStats.materialVersionChanges;
-        counters["materialChurn.pipelineSensitiveChanges"] = materialChurnStats.pipelineSensitiveChanges;
-        counters["materialChurn.rendererProgramCount"] = materialChurnStats.rendererProgramCount ?? -1;
-        counters["materialChurn.rendererProgramDelta"] = materialChurnStats.rendererProgramDelta ?? 0;
-        counters["materialChurn.suspectedPipelineKeyChanges"] = materialChurnStats.suspectedPipelineKeyChanges;
+        syncMaterialChurnCounters(counters);
         const selectionCacheStats = terrain.selectionController.stats().selectionCache;
         counters["selectionCutCache.enabled"] = selectionCacheStats.enabled ? 1 : 0;
         counters["selectionCutCache.hits"] = selectionCacheStats.hits;
@@ -338,5 +342,8 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
       phaseTiming,
       afterRenderDiagnostics: () => timed(collectFrameTiming, phaseTiming, "longViewDiagnosticsMs", updateLongViewDiagnostics),
     });
+
+    const hooks = render.getHooks();
+    if (hooks?.stats) syncMaterialChurnCounters(hooks.stats.counters);
   });
 }
