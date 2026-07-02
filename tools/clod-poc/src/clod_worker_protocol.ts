@@ -130,6 +130,23 @@ function cloneSourceRevisions(
   return revisions?.map((entry) => ({ ...entry }));
 }
 
+function serializedMetadata(node: ClodPageNode): Pick<SerializedClodNode, "revision" | "sourceRevisions"> {
+  const metadata: Pick<SerializedClodNode, "revision" | "sourceRevisions"> = {};
+  if (node.revision !== undefined) metadata.revision = node.revision;
+  const sourceRevisions = cloneSourceRevisions(node.sourceRevisions);
+  if (sourceRevisions) metadata.sourceRevisions = sourceRevisions;
+  return metadata;
+}
+
+function applySerializedMetadata(target: ClodPageNode, serialized: SerializedClodNode): void {
+  if (serialized.revision === undefined) delete target.revision;
+  else target.revision = serialized.revision;
+
+  const sourceRevisions = cloneSourceRevisions(serialized.sourceRevisions);
+  if (sourceRevisions === undefined) delete target.sourceRevisions;
+  else target.sourceRevisions = sourceRevisions;
+}
+
 function resolveChildIds(
   ownerId: string,
   childIds: readonly (string | null)[],
@@ -146,8 +163,7 @@ function resolveChildIds(
 export function serializeNode(node: ClodPageNode): SerializedClodNode {
   return {
     id: node.id,
-    revision: node.revision,
-    sourceRevisions: cloneSourceRevisions(node.sourceRevisions),
+    ...serializedMetadata(node),
     level: node.level,
     childIds: node.children.map((child) => child?.id ?? null),
     mesh: cloneMesh(node.mesh),
@@ -204,8 +220,7 @@ export function applySerializedNode(
   nodesById: Map<string, ClodPageNode>,
 ): ClodPageNode {
   const children = resolveChildIds(serialized.id, serialized.childIds, nodesById);
-  target.revision = serialized.revision;
-  target.sourceRevisions = cloneSourceRevisions(serialized.sourceRevisions);
+  applySerializedMetadata(target, serialized);
   target.level = serialized.level;
   target.children = children;
   target.mesh = serialized.mesh;
@@ -226,8 +241,6 @@ export function rehydrateBuildResult(serialized: SerializedBuildResult): BuildRe
       if (nodesById.has(node.id)) throw new Error(`CLOD build result contains duplicate node ${node.id}`);
       const rehydrated: ClodPageNode = {
         id: node.id,
-        revision: node.revision,
-        sourceRevisions: cloneSourceRevisions(node.sourceRevisions),
         level: node.level,
         children: [],
         mesh: node.mesh,
@@ -236,6 +249,7 @@ export function rehydrateBuildResult(serialized: SerializedBuildResult): BuildRe
         errorWorld: node.errorWorld,
         lowBenefit: node.lowBenefit,
       };
+      applySerializedMetadata(rehydrated, node);
       nodesById.set(rehydrated.id, rehydrated);
       serializedById.set(node.id, node);
       return rehydrated;
