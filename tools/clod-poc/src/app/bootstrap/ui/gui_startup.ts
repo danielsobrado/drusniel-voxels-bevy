@@ -38,6 +38,7 @@ export function runGuiStartup(
     treeConfig,
     understoryConfig,
     renderer,
+    renderResolution,
   } = input;
   const {
     views,
@@ -107,6 +108,7 @@ export function runGuiStartup(
       renderer,
       camera: input.camera,
       postProcess,
+      renderResolution,
       views: views.values(),
       materialController,
       selectionController,
