@@ -31,6 +31,18 @@ render_node_cache:
   warn_at_inactive_nodes: 480
   evict_geometry_with_render_node: true
 
+clod_apply:
+  enabled: true
+  max_apply_ms_per_frame: 1.0
+  max_geometry_jobs_per_frame: 2
+  max_collider_jobs_per_frame: 1
+  keep_stale_visible: true
+  prioritize_lod0: true
+  prioritize_near_camera: true
+  collider_max_delay_frames: 8
+  debug_log_spikes: false
+  spike_log_threshold_ms: 2.0
+
 selection_cut_cache:
   enabled: true
   camera_cell_size_m: 1.0

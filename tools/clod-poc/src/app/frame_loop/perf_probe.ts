@@ -16,6 +16,7 @@ export function createFramePerfPhaseTiming(): FramePerfPhaseTiming {
     frameSetupMs: 0,
     inputMs: 0,
     selectionUpdateMs: 0,
+    clodApplyMs: 0,
     longViewDiagnosticsMs: 0,
     farSummaryMs: 0,
     constructionMs: 0,

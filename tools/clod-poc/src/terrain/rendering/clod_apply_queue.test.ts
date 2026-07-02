@@ -1,0 +1,105 @@
+import { describe, expect, it } from "vitest";
+import type { ClodPageNode, PageMesh } from "../../types.js";
+import { ClodApplyQueue, DEFAULT_CLOD_APPLY_BUDGET, type ClodApplyBudget } from "./clod_apply_queue.js";
+
+function mesh(triangles = 1): PageMesh {
+  return {
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
+    normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
+    paintSlots: new Float32Array(3),
+    materialWeights: new Float32Array(12),
+    materialWeightStride: 4,
+    indices: new Uint32Array(Array.from({ length: triangles * 3 }, (_, i) => i % 3)),
+  };
+}
+
+function node(id: string, level = 0, x = 0): ClodPageNode {
+  return {
+    id,
+    revision: 1,
+    level,
+    children: [],
+    mesh: mesh(2),
+    footprint: { minX: x, minZ: 0, maxX: x + 1, maxZ: 1 },
+    bounds: { center: [x, 0, 0], radius: 1, minY: 0, maxY: 1 },
+    errorWorld: 0,
+    lowBenefit: false,
+  };
+}
+
+function budget(overrides: Partial<ClodApplyBudget> = {}): ClodApplyBudget {
+  return { ...DEFAULT_CLOD_APPLY_BUDGET, ...overrides };
+}
+
+describe("ClodApplyQueue", () => {
+  it("drains geometry and collider work within per-frame job caps", () => {
+    let frame = 1;
+    const geometryApplied: string[] = [];
+    const colliderApplied: string[] = [];
+    const queue = new ClodApplyQueue({
+      budget: budget({ maxGeometryJobsPerFrame: 1, maxColliderJobsPerFrame: 1, maxApplyMsPerFrame: 100 }),
+      applyGeometry: (n) => {
+        geometryApplied.push(n.id);
+        return { geometryMs: 0.2, materialMs: 0, triangles: 2, reusedGeometry: false };
+      },
+      applyCollider: (n) => {
+        colliderApplied.push(n.id);
+        return 0.1;
+      },
+      getFrameId: () => frame,
+      getCameraPosition: () => ({ x: 0, z: 0 }),
+      isNodeVisible: () => false,
+    });
+
+    queue.enqueueNodes([node("L0:0,0"), node("L0:1,0")]);
+    let stats = queue.drain();
+    expect(geometryApplied).toEqual(["L0:0,0"]);
+    expect(colliderApplied).toEqual(["L0:0,0"]);
+    expect(stats.clodApplyNodes).toBe(1);
+    expect(stats.clodApplyQueueDepth).toBe(1);
+    expect(stats.clodColliderQueueDepth).toBe(0);
+
+    frame++;
+    stats = queue.drain();
+    expect(geometryApplied).toEqual(["L0:0,0", "L0:1,0"]);
+    expect(colliderApplied).toEqual(["L0:0,0", "L0:1,0"]);
+    expect(stats.clodApplyQueueDepth).toBe(0);
+  });
+
+  it("reports stale visible geometry while pending replacement waits", () => {
+    const queue = new ClodApplyQueue({
+      budget: budget({ maxGeometryJobsPerFrame: 1, maxColliderJobsPerFrame: 0, maxApplyMsPerFrame: 100 }),
+      applyGeometry: () => ({ geometryMs: 0, materialMs: 0, triangles: 2, reusedGeometry: true }),
+      applyCollider: () => 0,
+      getFrameId: () => 1,
+      getCameraPosition: () => ({ x: 0, z: 0 }),
+      isNodeVisible: () => true,
+    });
+
+    queue.enqueueNodes([node("L0:0,0"), node("L0:1,0")]);
+    const stats = queue.drain();
+    expect(stats.clodStaleVisibleNodes).toBe(1);
+    expect(stats.clodGeometryReusedOnApply).toBe(1);
+  });
+
+  it("counts collider priority overrides after the configured delay", () => {
+    let frame = 1;
+    const queue = new ClodApplyQueue({
+      budget: budget({ maxGeometryJobsPerFrame: 1, maxColliderJobsPerFrame: 0, colliderMaxDelayFrames: 2, maxApplyMsPerFrame: 100 }),
+      applyGeometry: () => ({ geometryMs: 0, materialMs: 0, triangles: 2, reusedGeometry: false }),
+      applyCollider: () => 0,
+      getFrameId: () => frame,
+      getCameraPosition: () => ({ x: 0, z: 0 }),
+      isNodeVisible: () => false,
+    });
+
+    queue.enqueueNodes([node("L0:0,0")]);
+    queue.drain();
+    frame = 4;
+    (queue as unknown as { deps: { budget: ClodApplyBudget } }).deps.budget.maxColliderJobsPerFrame = 1;
+    const stats = queue.drain();
+    expect(stats.clodColliderJobsApplied).toBe(1);
+    expect(stats.clodColliderPriorityOverrides).toBe(1);
+    expect(stats.clodColliderStaleFramesMax).toBe(3);
+  });
+});

@@ -266,6 +266,8 @@ export function runFrameLoopStartup(
       views,
       worldCells,
       pruneRenderNodeCache: input.terrainView.renderNodeCache.prune.bind(input.terrainView.renderNodeCache),
+      drainClodApplyQueue: input.terrainView.drainClodApplyQueue,
+      getClodApplyStats: input.terrainView.getClodApplyStats,
     },
     vegetation: {
       drainVegetationDirtyQueue,

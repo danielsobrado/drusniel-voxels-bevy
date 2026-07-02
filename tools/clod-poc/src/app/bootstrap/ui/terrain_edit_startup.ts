@@ -23,10 +23,9 @@ export function runTerrainEditStartup(
     state,
     bindings,
     markEditedAncestorsStale,
-    staleEditedAncestorIds,
   } = input;
   const {
-    applyNodeMesh,
+    clodApplyQueue,
     selectionController,
     updateSelection,
     applyTerrainTextures,
@@ -40,23 +39,19 @@ export function runTerrainEditStartup(
   const { updateInfo } = infoPanel;
 
   clodWorker.onParentRebuilt = (batch) => {
-    for (const node of batch.changed) {
-      applyNodeMesh(node);
-      staleEditedAncestorIds.delete(node.id);
-    }
+    clodApplyQueue.recordWorkerRebuild(batch.parentMs);
+    clodApplyQueue.enqueueNodes(batch.changed);
     selectionController.patchNodes(batch.changed);
     session.pendingParentNodes = batch.parentNodes;
     session.pendingParentMs = batch.parentMs;
     session.pendingParentCount = batch.pendingParents;
     selectionController.invalidate();
-    if (!state.freeze) updateSelection();
     updateInfo();
   };
   clodWorker.onParentsComplete = (_requestId, parentNodes, parentMs) => {
     session.pendingParentNodes = parentNodes;
     session.pendingParentMs = parentMs;
     session.pendingParentCount = 0;
-    staleEditedAncestorIds.clear();
     if (parentNodes > 0) {
       session.lastDigSummary = `${session.lastDigSummary} + ancestors ${parentNodes}n ${parentMs.toFixed(0)}ms`;
     }
@@ -86,7 +81,8 @@ export function runTerrainEditStartup(
       treesEnabled: state.treesEnabled,
       understoryEnabled: state.understoryEnabled,
     }),
-    applyNodeMesh,
+    enqueueApplyNodes: (nodes) => clodApplyQueue.enqueueNodes(nodes),
+    recordClodWorkerRebuild: (ms) => clodApplyQueue.recordWorkerRebuild(ms),
     markEditedAncestorsStale,
     selectionController,
     applyTerrainTextures,

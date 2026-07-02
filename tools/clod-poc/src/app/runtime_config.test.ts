@@ -22,6 +22,12 @@ describe("parseClodRuntimeConfig", () => {
     expect(config.renderNodeCache.pruneIntervalFrames).toBe(30);
     expect(config.renderNodeCache.maxPrefetchCreatesPerFrame).toBe(8);
     expect(config.renderNodeCache.evictGeometryWithRenderNode).toBe(true);
+    expect(config.clodApply.enabled).toBe(true);
+    expect(config.clodApply.maxApplyMsPerFrame).toBe(1.0);
+    expect(config.clodApply.maxGeometryJobsPerFrame).toBe(2);
+    expect(config.clodApply.maxColliderJobsPerFrame).toBe(1);
+    expect(config.clodApply.keepStaleVisible).toBe(true);
+    expect(config.clodApply.colliderMaxDelayFrames).toBe(8);
     expect(config.selectionCutCache.enabled).toBe(true);
     expect(config.selectionCutCache.cameraCellSizeM).toBe(1);
     expect(config.selectionCutCache.cameraHeightCellSizeM).toBe(2);

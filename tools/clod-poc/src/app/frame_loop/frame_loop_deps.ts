@@ -34,6 +34,7 @@ import type { GpuPassTiming } from "../../core/gpu_pass_timing.js";
 import type { FloatingOriginController } from "../../precision/floating_origin.js";
 import type { PageGeometryCacheStats } from "../../terrain/geometry/page_geometry_cache.js";
 import type { ClodRenderNodeCacheStats } from "../../terrain/rendering/clod_render_node_cache.js";
+import type { ClodApplyStatsSnapshot } from "../../terrain/rendering/clod_apply_stats.js";
 
 interface TerrainFadeView {
   fade: number;
@@ -86,6 +87,8 @@ export interface FrameLoopTerrainDeps {
   views: Map<string, NodeViewLookup & TerrainFadeView>;
   worldCells: number;
   pruneRenderNodeCache?: (protectedNodeIds: ReadonlySet<string>, frameId: number) => void;
+  drainClodApplyQueue?: () => ClodApplyStatsSnapshot;
+  getClodApplyStats?: () => ClodApplyStatsSnapshot;
 }
 
 export interface FrameLoopVegetationDeps {

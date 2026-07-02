@@ -151,6 +151,9 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
     timed(collectFrameTiming, phaseTiming, "spellsMs", () => {
       spells?.update(playerDelta);
     });
+    timed(collectFrameTiming, phaseTiming, "clodApplyMs", () => {
+      terrain.drainClodApplyQueue?.();
+    });
 
     timed(collectFrameTiming, phaseTiming, "selectionUpdateMs", () => {
       terrain.updateSelection();
@@ -291,6 +294,30 @@ export function bindClodFrameLoop(deps: ClodFrameLoopDeps): void {
           counters["renderNodeCache.disposals"] = renderNodeCacheStats.disposals;
           counters["renderNodeCache.evictions"] = renderNodeCacheStats.evictions;
           counters["renderNodeCache.prefetches"] = renderNodeCacheStats.prefetches;
+        }
+        const clodApplyStats = terrain.getClodApplyStats?.();
+        if (clodApplyStats) {
+          counters["clodWorkerRebuildMs"] = clodApplyStats.clodWorkerRebuildMs;
+          counters["clodApplyTotalMs"] = clodApplyStats.clodApplyTotalMs;
+          counters["clodApplyGeometryMs"] = clodApplyStats.clodApplyGeometryMs;
+          counters["clodApplyMaterialMs"] = clodApplyStats.clodApplyMaterialMs;
+          counters["clodApplyColliderMs"] = clodApplyStats.clodApplyColliderMs;
+          counters["clodApplyNodes"] = clodApplyStats.clodApplyNodes;
+          counters["clodApplyTriangles"] = clodApplyStats.clodApplyTriangles;
+          counters["clodApplyQueueDepth"] = clodApplyStats.clodApplyQueueDepth;
+          counters["clodColliderQueueDepth"] = clodApplyStats.clodColliderQueueDepth;
+          counters["clodStaleVisibleNodes"] = clodApplyStats.clodStaleVisibleNodes;
+          counters["clodApplyBudgetExceeded"] = clodApplyStats.clodApplyBudgetExceeded;
+          counters["clodColliderApplyMs"] = clodApplyStats.clodColliderApplyMs;
+          counters["clodColliderJobsApplied"] = clodApplyStats.clodColliderJobsApplied;
+          counters["clodColliderPriorityOverrides"] = clodApplyStats.clodColliderPriorityOverrides;
+          counters["clodColliderStaleFramesMax"] = clodApplyStats.clodColliderStaleFramesMax;
+          counters["clodGeometryReusedOnApply"] = clodApplyStats.clodGeometryReusedOnApply;
+        }
+        if (pageGeometryCacheStats) {
+          counters["clodGeometryCacheHits"] = pageGeometryCacheStats.hits;
+          counters["clodGeometryCacheMisses"] = pageGeometryCacheStats.misses;
+          counters["clodGeometryCacheEvictions"] = pageGeometryCacheStats.evictions;
         }
         syncMaterialChurnCounters(counters);
         const selectionCacheStats = terrain.selectionController.stats().selectionCache;

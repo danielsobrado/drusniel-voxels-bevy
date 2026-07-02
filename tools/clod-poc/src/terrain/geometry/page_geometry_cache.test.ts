@@ -62,6 +62,18 @@ describe("PageGeometryCache", () => {
     cache.dispose();
   });
 
+  it("reports whether a geometry request hit the cache", () => {
+    const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
+    const n = node();
+    const first = cache.getOrCreateWithResult({ node: n, normalMode: "source", createGeometry: geometry });
+    const second = cache.getOrCreateWithResult({ node: n, normalMode: "source", createGeometry: geometry });
+
+    expect(first.cacheHit).toBe(false);
+    expect(second.cacheHit).toBe(true);
+    expect(second.geometry).toBe(first.geometry);
+    cache.dispose();
+  });
+
   it("keeps source and recomputed normal modes in separate entries", () => {
     const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
     const n = node();

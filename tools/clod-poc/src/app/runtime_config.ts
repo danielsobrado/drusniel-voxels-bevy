@@ -16,6 +16,10 @@ import {
 import {
   DEFAULT_RENDER_RESOLUTION_CONFIG,
 } from "../rendering/render_resolution_config.js";
+import {
+  DEFAULT_CLOD_APPLY_BUDGET,
+  type ClodApplyBudget,
+} from "../terrain/rendering/clod_apply_queue.js";
 import type {
   RenderResolutionConfig,
   RenderResolutionPreset,
@@ -41,6 +45,7 @@ export interface ClodRuntimeConfig {
   };
   pageGeometryCache: PageGeometryCacheConfig;
   renderNodeCache: ClodRenderNodeCacheConfig;
+  clodApply: ClodApplyBudget;
   selectionCutCache: SelectionCutCacheConfig;
   materialChurn: MaterialChurnConfig;
   renderResolution: RenderResolutionConfig;
@@ -72,6 +77,7 @@ export const DEFAULT_CLOD_RUNTIME_CONFIG: ClodRuntimeConfig = {
   },
   pageGeometryCache: DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG,
   renderNodeCache: DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG,
+  clodApply: DEFAULT_CLOD_APPLY_BUDGET,
   selectionCutCache: DEFAULT_SELECTION_CUT_CACHE_CONFIG,
   materialChurn: DEFAULT_MATERIAL_CHURN_CONFIG,
   renderResolution: DEFAULT_RENDER_RESOLUTION_CONFIG,
@@ -135,6 +141,7 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
     const nearField = (raw.near_field ?? {}) as Record<string, unknown>;
     const pageGeometryCache = (raw.page_geometry_cache ?? {}) as Record<string, unknown>;
     const renderNodeCache = (raw.render_node_cache ?? {}) as Record<string, unknown>;
+    const clodApply = (raw.clod_apply ?? {}) as Record<string, unknown>;
     const selectionCutCache = (raw.selection_cut_cache ?? {}) as Record<string, unknown>;
     const materialChurn = (raw.material_churn ?? {}) as Record<string, unknown>;
     const renderResolution = (raw.render_resolution ?? {}) as Record<string, unknown>;
@@ -172,6 +179,18 @@ export function parseClodRuntimeConfig(yamlText = clodRuntimeYaml): ClodRuntimeC
         maxPrefetchCreatesPerFrame: positiveInt(renderNodeCache.max_prefetch_creates_per_frame, defaults.renderNodeCache.maxPrefetchCreatesPerFrame),
         warnAtInactiveNodes: positiveInt(renderNodeCache.warn_at_inactive_nodes, defaults.renderNodeCache.warnAtInactiveNodes),
         evictGeometryWithRenderNode: bool(renderNodeCache.evict_geometry_with_render_node, defaults.renderNodeCache.evictGeometryWithRenderNode),
+      },
+      clodApply: {
+        enabled: bool(clodApply.enabled, defaults.clodApply.enabled),
+        maxApplyMsPerFrame: positiveNumber(clodApply.max_apply_ms_per_frame, defaults.clodApply.maxApplyMsPerFrame),
+        maxGeometryJobsPerFrame: positiveInt(clodApply.max_geometry_jobs_per_frame, defaults.clodApply.maxGeometryJobsPerFrame),
+        maxColliderJobsPerFrame: positiveInt(clodApply.max_collider_jobs_per_frame, defaults.clodApply.maxColliderJobsPerFrame),
+        keepStaleVisible: bool(clodApply.keep_stale_visible, defaults.clodApply.keepStaleVisible),
+        prioritizeLod0: bool(clodApply.prioritize_lod0, defaults.clodApply.prioritizeLod0),
+        prioritizeNearCamera: bool(clodApply.prioritize_near_camera, defaults.clodApply.prioritizeNearCamera),
+        colliderMaxDelayFrames: positiveInt(clodApply.collider_max_delay_frames, defaults.clodApply.colliderMaxDelayFrames),
+        debugLogSpikes: bool(clodApply.debug_log_spikes, defaults.clodApply.debugLogSpikes),
+        spikeLogThresholdMs: positiveNumber(clodApply.spike_log_threshold_ms, defaults.clodApply.spikeLogThresholdMs),
       },
       selectionCutCache: {
         enabled: bool(selectionCutCache.enabled, defaults.selectionCutCache.enabled),

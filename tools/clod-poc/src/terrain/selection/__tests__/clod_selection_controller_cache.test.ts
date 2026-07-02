@@ -5,6 +5,7 @@ import type { ClodPageNode, PageMesh } from "../../../types.js";
 import { LockedBorderOverlay } from "../../../ui/locked_border_overlay.js";
 import { DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG } from "../../geometry/page_geometry_cache.js";
 import { DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG } from "../../rendering/clod_render_node_cache_config.js";
+import { DEFAULT_CLOD_APPLY_BUDGET } from "../../rendering/clod_apply_queue.js";
 import { DEFAULT_SELECTION_CUT_CACHE_CONFIG } from "../selection_cut_cache.js";
 import { DEFAULT_MATERIAL_CHURN_CONFIG } from "../../../rendering/material_churn/material_churn_diagnostics.js";
 import { DEFAULT_RENDER_RESOLUTION_CONFIG } from "../../../rendering/render_resolution_config.js";
@@ -27,6 +28,7 @@ function runtimeConfig(): ClodRuntimeConfig {
     },
     pageGeometryCache: DEFAULT_PAGE_GEOMETRY_CACHE_CONFIG,
     renderNodeCache: DEFAULT_CLOD_RENDER_NODE_CACHE_CONFIG,
+    clodApply: DEFAULT_CLOD_APPLY_BUDGET,
     selectionCutCache: DEFAULT_SELECTION_CUT_CACHE_CONFIG,
     materialChurn: DEFAULT_MATERIAL_CHURN_CONFIG,
     renderResolution: DEFAULT_RENDER_RESOLUTION_CONFIG,

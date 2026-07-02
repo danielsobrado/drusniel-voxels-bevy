@@ -159,9 +159,10 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     );
     const measuredTopLevelMs =
       input.phaseTiming.frameSetupMs +
-      input.phaseTiming.inputMs +
-      input.phaseTiming.selectionUpdateMs +
-      input.phaseTiming.longViewDiagnosticsMs +
+        input.phaseTiming.inputMs +
+        input.phaseTiming.selectionUpdateMs +
+        input.phaseTiming.clodApplyMs +
+        input.phaseTiming.longViewDiagnosticsMs +
       input.phaseTiming.farSummaryMs +
       input.phaseTiming.constructionMs +
       input.phaseTiming.brushMs +
@@ -184,6 +185,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       frameSetupMs: input.phaseTiming.frameSetupMs,
       inputMs: input.phaseTiming.inputMs,
       selectionUpdateMs: input.phaseTiming.selectionUpdateMs,
+      clodApplyMs: input.phaseTiming.clodApplyMs,
       longViewDiagnosticsMs: input.phaseTiming.longViewDiagnosticsMs,
       farSummaryMs: input.phaseTiming.farSummaryMs,
       constructionMs: input.phaseTiming.constructionMs,
@@ -271,6 +273,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
         `[profile] frame ${frameMs.toFixed(1)}ms` +
           ` | setup ${input.phaseTiming.frameSetupMs.toFixed(1)}` +
           ` input ${input.phaseTiming.inputMs.toFixed(1)}` +
+          ` clodApply ${input.phaseTiming.clodApplyMs.toFixed(1)}` +
           ` selection ${selectionStats.selectionMs.toFixed(1)}` +
           ` (cut ${selectionStats.subphases.cut.toFixed(1)} book ${selectionStats.subphases.book.toFixed(1)} info ${selectionStats.subphases.info.toFixed(1)} overlays ${selectionStats.subphases.overlays.toFixed(1)})` +
           ` bubble/chunks ${bubbleMs.toFixed(1)} (built ${input.chunkGroupsBuiltThisFrame})` +

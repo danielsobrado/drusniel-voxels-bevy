@@ -18,7 +18,7 @@ import { compareChunkSurfaces } from "../../gpu/gpu_mesh_parity.js";
 import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
 import { getDigEditsSnapshot, meshChunk } from "../../terrain/terrain.js";
 import type { ClodPagesConfig } from "../../config.js";
-import type { ClodPageNode } from "../../types.js";
+import { triangleCount, type ClodPageNode } from "../../types.js";
 import type { ClodHooks } from "../../core/hooks.js";
 import type { TerrainColorAdjustments } from "../../material/material.js";
 import type { EnvironmentLighting, EnvironmentSettings } from "../../environment/environment.js";
@@ -36,6 +36,11 @@ import {
   type PageGeometryNormalMode,
 } from "../../terrain/geometry/page_geometry_cache.js";
 import { ClodRenderNodeCache } from "../../terrain/rendering/clod_render_node_cache.js";
+import {
+  ClodApplyQueue,
+  type ClodGeometryApplyResult,
+} from "../../terrain/rendering/clod_apply_queue.js";
+import type { ClodApplyStatsSnapshot } from "../../terrain/rendering/clod_apply_stats.js";
 import { createNearFieldBubbleController } from "../../terrain/near_field/near_field_bubble_controller.js";
 import { createClodSelectionController, type ClodSelectionController } from "../../terrain/selection/clod_selection_controller.js";
 import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_loader.js";
@@ -160,6 +165,11 @@ export interface TerrainViewStartupResult {
   updateSelection: () => void;
   cutChangedRef: { fn: () => void };
   applyNodeMesh: (node: ClodPageNode) => { geometrySwapMs: number; colliderMs: number };
+  applyNodeGeometry: (node: ClodPageNode) => ClodGeometryApplyResult;
+  applyNodeCollider: (node: ClodPageNode) => number;
+  clodApplyQueue: ClodApplyQueue;
+  drainClodApplyQueue: () => ClodApplyStatsSnapshot;
+  getClodApplyStats: () => ClodApplyStatsSnapshot;
   setViewNormalMode: (view: NodeView, normalMode: PageGeometryNormalMode) => void;
 }
 
@@ -513,8 +523,8 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   });
   const updateSelection = () => selectionController.update();
 
-  const geometryForView = (view: NodeView, normalMode: PageGeometryNormalMode): THREE.BufferGeometry => (
-    pageGeometryCache.getOrCreate({
+  const geometryForView = (view: NodeView, normalMode: PageGeometryNormalMode) => (
+    pageGeometryCache.getOrCreateWithResult({
       node: view.node,
       normalMode,
       createGeometry: () => {
@@ -544,31 +554,63 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   };
 
   const setViewNormalMode = (view: NodeView, normalMode: PageGeometryNormalMode): void => {
-    assignViewGeometry(view, geometryForView(view, normalMode));
+    assignViewGeometry(view, geometryForView(view, normalMode).geometry);
   };
 
-  const applyNodeMesh = (node: ClodPageNode): { geometrySwapMs: number; colliderMs: number } => {
+  const applyNodeGeometry = (node: ClodPageNode): ClodGeometryApplyResult => {
     const v = views.get(node.id);
-    let geometrySwapMs = 0;
-    if (v) {
-      const gs = performance.now();
-      const previousWasCacheOwned = pageGeometryCache.owns(v.mesh.geometry as THREE.BufferGeometry);
-      pageGeometryCache.invalidateNode(node.id);
-      v.node = node;
-      v.sourceNormals = node.mesh.normals;
-      v.recomputedNormals = null;
-      const normalMode: PageGeometryNormalMode = state.recomputedNormals ? "recomputed" : "source";
-      assignViewGeometry(v, geometryForView(v, normalMode), previousWasCacheOwned);
-      geometrySwapMs = performance.now() - gs;
-    } else {
-      pageGeometryCache.invalidateNode(node.id);
+    if (!v) {
+      return { geometryMs: 0, materialMs: 0, triangles: triangleCount(node.mesh), reusedGeometry: false };
     }
-    if (node.level !== 0) return { geometrySwapMs, colliderMs: 0 };
+    const gs = performance.now();
+    const previousWasCacheOwned = pageGeometryCache.owns(v.mesh.geometry as THREE.BufferGeometry);
+    v.node = node;
+    v.sourceNormals = node.mesh.normals;
+    v.recomputedNormals = null;
+    const normalMode: PageGeometryNormalMode = state.recomputedNormals ? "recomputed" : "source";
+    const geometryResult = geometryForView(v, normalMode);
+    assignViewGeometry(v, geometryResult.geometry, previousWasCacheOwned);
+    return {
+      geometryMs: performance.now() - gs,
+      materialMs: 0,
+      triangles: triangleCount(node.mesh),
+      reusedGeometry: geometryResult.cacheHit,
+    };
+  };
+
+  const applyNodeCollider = (node: ClodPageNode): number => {
+    if (node.level !== 0) return 0;
     const tc = performance.now();
     terrainColliders.updatePage(node.id, node.mesh);
     nearFieldBubbleController.invalidatePage(node.id);
-    return { geometrySwapMs, colliderMs: performance.now() - tc };
+    return performance.now() - tc;
   };
+
+  const applyNodeMesh = (node: ClodPageNode): { geometrySwapMs: number; colliderMs: number } => {
+    const geometry = applyNodeGeometry(node);
+    const colliderMs = node.level === 0 ? applyNodeCollider(node) : 0;
+    return { geometrySwapMs: geometry.geometryMs, colliderMs };
+  };
+
+  const clodApplyQueue = new ClodApplyQueue({
+    budget: clodRuntime.clodApply,
+    applyGeometry: applyNodeGeometry,
+    applyCollider: applyNodeCollider,
+    getFrameId: () => selectionController.stats().frameId,
+    getCameraPosition: () => {
+      const p = interaction.mode === "playing" ? player.position : input.controls.target;
+      return { x: p.x, z: p.z };
+    },
+    isNodeVisible: (nodeId) => {
+      const view = views.get(nodeId);
+      return Boolean(view && (view.mesh.visible || view.fade > 0.001 || view.target > 0));
+    },
+    onGeometryApplied: (node) => {
+      staleEditedAncestorIds.delete(node.id);
+      selectionController.patchNodes([node]);
+      selectionController.invalidate();
+    },
+  });
 
   return {
     postProcess,
@@ -614,6 +656,11 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     updateSelection,
     cutChangedRef,
     applyNodeMesh,
+    applyNodeGeometry,
+    applyNodeCollider,
+    clodApplyQueue,
+    drainClodApplyQueue: () => clodApplyQueue.drain(),
+    getClodApplyStats: () => clodApplyQueue.stats(),
     setViewNormalMode,
   };
 }

@@ -39,7 +39,8 @@ export interface TerrainEditServiceDeps {
   terrainRaycast: TerrainRaycastService;
   getBrushParams: () => TerrainBrushParams;
   getVegetationState: () => TerrainEditVegetationState;
-  applyNodeMesh: (node: ClodPageNode) => { colliderMs: number; geometrySwapMs: number };
+  enqueueApplyNodes: (nodes: readonly ClodPageNode[]) => void;
+  recordClodWorkerRebuild: (ms: number) => void;
   markEditedAncestorsStale: (lod0Nodes: readonly ClodPageNode[]) => void;
   selectionController: Pick<ClodSelectionController, "patchNodes" | "invalidate" | "update">;
   applyTerrainTextures: () => void;
@@ -147,13 +148,12 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
   };
 
   const applyLod0Result = (changed: readonly ClodPageNode[], pendingParents: number): void => {
-    for (const node of changed) deps.applyNodeMesh(node);
+    deps.enqueueApplyNodes(changed);
     if (pendingParents > 0) deps.markEditedAncestorsStale(changed);
     deps.selectionController.patchNodes(changed);
     if (changed.length > 0) queueVegetationRebuild(changed);
     deps.setPendingParentCount(pendingParents);
     deps.selectionController.invalidate();
-    deps.selectionController.update();
     deps.updateInfo();
   };
 
@@ -186,12 +186,14 @@ export function createTerrainEditService(deps: TerrainEditServiceDeps): TerrainE
       const margin = radius + DIG_INFLUENCE_MARGIN;
       let lod0: Awaited<ReturnType<ClodWorkerClient["rebuildAfterDig"]>>;
       try {
+        const workerStartedAt = performance.now();
         lod0 = await deps.clodWorker.rebuildAfterDig(edit, {
           minX: hit.point.x - margin,
           maxX: hit.point.x + margin,
           minZ: hit.point.z - margin,
           maxZ: hit.point.z + margin,
         });
+        deps.recordClodWorkerRebuild(performance.now() - workerStartedAt);
       } catch (error) {
         reportRebuildFailure(label, error);
         return false;

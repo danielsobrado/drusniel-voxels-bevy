@@ -20,6 +20,11 @@ export interface PageGeometryCacheStats {
   estimatedBytes: number;
 }
 
+export interface PageGeometryResult {
+  geometry: THREE.BufferGeometry;
+  cacheHit: boolean;
+}
+
 export interface PageGeometryRequest {
   node: ClodPageNode;
   normalMode: PageGeometryNormalMode;
@@ -116,9 +121,13 @@ export class PageGeometryCache {
   }
 
   getOrCreate(request: PageGeometryRequest): THREE.BufferGeometry {
+    return this.getOrCreateWithResult(request).geometry;
+  }
+
+  getOrCreateWithResult(request: PageGeometryRequest): PageGeometryResult {
     if (!this.config.enabled) {
       this.statMisses++;
-      return request.createGeometry();
+      return { geometry: request.createGeometry(), cacheHit: false };
     }
 
     const key = requestKey(request);
@@ -126,7 +135,7 @@ export class PageGeometryCache {
     if (existing && !existing.retired) {
       existing.lastAccessedMs = performance.now();
       this.statHits++;
-      return existing.geometry;
+      return { geometry: existing.geometry, cacheHit: true };
     }
 
     if (existing?.retired && existing.active) {
@@ -155,7 +164,7 @@ export class PageGeometryCache {
     this.statMisses++;
     this.warnIfNeeded();
     this.evictIfNeeded(key);
-    return geometry;
+    return { geometry, cacheHit: false };
   }
 
   owns(geometry: THREE.BufferGeometry): boolean {
