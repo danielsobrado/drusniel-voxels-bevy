@@ -267,6 +267,7 @@ export class GrassGpuRingCompute {
   private readonly counterReadbacks: ReadbackSlot[];
   private readonly indirectArgs: GPUBuffer;
   private readonly outputBuffers: GrassGpuRingOutputBuffers | null;
+  private readonly fallbackOutputBuffers: GrassGpuRingOutputBuffers | null;
   private readonly fieldParams: GPUBuffer;
   private readonly activeSlotBuffer: GPUBuffer;
   private readonly fullSlotIndices: Uint32Array;
@@ -308,6 +309,7 @@ export class GrassGpuRingCompute {
     this.paramBuffer = device.createBuffer({ label: "grass ring params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.counterBuffer = device.createBuffer({ label: "grass ring counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     this.indirectArgs = outputBuffers?.indirectArgs ?? device.createBuffer({ label: "grass ring indirect args", size: INDIRECT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC });
+    this.fallbackOutputBuffers = outputBuffers ? null : createGrassGpuRingFallbackOutputBuffers(this.device, slotCount, this.indirectArgs);
     this.fieldParams = device.createBuffer({ label: "grass ring field params", size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.activeSlotBuffer = device.createBuffer({ label: "grass ring active slot indices", size: activeSlotCapacity * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.digEdits = this.createDigEditsBuffer(edits);
@@ -416,6 +418,7 @@ export class GrassGpuRingCompute {
     this.digEdits.destroy();
     this.fieldParams.destroy();
     this.hydroTexture.destroy();
+    if (this.fallbackOutputBuffers) destroyUniqueOutputBuffers(this.fallbackOutputBuffers, this.indirectArgs);
     if (!this.outputBuffers) this.indirectArgs.destroy();
     for (const slot of this.counterReadbacks) {
       if (slot.busy) slot.destroyAfterMap = true;
@@ -461,7 +464,8 @@ export class GrassGpuRingCompute {
   }
 
   private outputBindGroupEntries(): GPUBindGroupEntry[] {
-    const fallback = this.outputBuffers ?? createGrassGpuRingFallbackOutputBuffers(this.device, grassGpuRingSlotCount(this.ring), this.indirectArgs);
+    const fallback = this.outputBuffers ?? this.fallbackOutputBuffers;
+    if (!fallback) throw new Error("grass ring output buffers are unavailable");
     return [
       { binding: 3, resource: { buffer: fallback.near.offset } },
       { binding: 4, resource: { buffer: fallback.near.packed0 } },
@@ -553,6 +557,18 @@ export class GrassGpuRingCompute {
       this.failedReason = error instanceof Error ? error.message : String(error);
     });
   }
+}
+
+function destroyUniqueOutputBuffers(buffers: GrassGpuRingOutputBuffers, indirectArgs: GPUBuffer): void {
+  const unique = new Set<GPUBuffer>();
+  for (const tier of [buffers.near, buffers.mid, buffers.far, buffers.super]) {
+    unique.add(tier.offset);
+    unique.add(tier.packed0);
+    unique.add(tier.packed1);
+    unique.add(tier.terrainNormal);
+  }
+  unique.delete(indirectArgs);
+  for (const buffer of unique) buffer.destroy();
 }
 
 function roundUp(value: number, step: number): number {
