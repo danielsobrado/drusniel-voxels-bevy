@@ -30,12 +30,16 @@ export interface PrepassNodes {
   side: Side;
 }
 
+export interface DepthPrepassTwinOptions {
+  cloneColorMaterial?: boolean;
+}
+
 interface NodeMaterialShape {
   positionNode: unknown;
   maskNode: unknown;
 }
 
-export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes): Mesh {
+export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: DepthPrepassTwinOptions = {}): Mesh {
   const material = new NodeMaterial();
   const materialNodes = material as unknown as NodeMaterialShape;
   materialNodes.positionNode = nodes.positionNode;
@@ -45,7 +49,10 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes): Mesh {
   material.depthWrite = true;
   material.depthTest = true;
 
-  const colorMaterial = (mesh.material as Material).clone();
+  const cloneColorMaterial = options.cloneColorMaterial ?? true;
+  const colorMaterial = cloneColorMaterial
+    ? (mesh.material as Material).clone()
+    : mesh.material as Material;
   colorMaterial.depthFunc = EqualDepth;
   colorMaterial.depthWrite = false;
   mesh.material = colorMaterial;
