@@ -2,6 +2,12 @@ import * as THREE from "three";
 import type { WaterVisualConfig } from "./waterConfig.js";
 import type { WaterMaterialParams, WaterMaterialHandle } from "./water_material_types.js";
 import { makeWaterUniforms, WATER_VERT, WATER_FRAG, type WaterUniforms } from "./water_material_uniforms.js";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "../rendering/material_churn/material_churn_diagnostics.js";
+import { trackedShaderMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 export type { WaterMaterialParams, WaterMaterialHandle } from "./water_material_types.js";
 export { makeWaterUniforms, waterLevelColor, type WaterUniforms } from "./water_material_uniforms.js";
@@ -38,7 +44,7 @@ export function applyWaterVisual(uniforms: WaterUniforms, v: WaterVisualConfig):
 
 export function createWaterShaderMaterial(params: WaterMaterialParams): WaterMaterialHandle {
   const uniforms = makeWaterUniforms(params);
-  const material = new THREE.ShaderMaterial({
+  const material = trackedShaderMaterial({
     uniforms: uniforms as unknown as THREE.ShaderMaterial["uniforms"],
     vertexShader: WATER_VERT,
     fragmentShader: WATER_FRAG,
@@ -46,7 +52,7 @@ export function createWaterShaderMaterial(params: WaterMaterialParams): WaterMat
     depthTest: true,
     depthWrite: params.visual.depthWrite,
     side: THREE.DoubleSide,
-  });
+  }, "water-shader-material");
   material.name = "water-shader";
   return {
     material,
@@ -55,13 +61,16 @@ export function createWaterShaderMaterial(params: WaterMaterialParams): WaterMat
     setInnerRect: (minX, minZ, maxX, maxZ) => { uniforms.uInnerRect.value.set(minX, minZ, maxX, maxZ); },
     setLevelId: () => {},
     setClipmapTint: (enabled) => { uniforms.uClipmapTint.value = enabled ? 1 : 0; },
-    setWireframe: (enabled) => { material.wireframe = enabled; },
+    setWireframe: (enabled) => {
+      setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "wireframe", enabled, "water-wireframe");
+    },
     updateCamera: (pos) => { uniforms.uCameraPos.value.copy(pos); },
     updateSunDirection: (dir) => { uniforms.uSunDir.value.copy(dir).normalize(); },
     updateVisual: (v) => {
       applyWaterVisual(uniforms, v);
-      material.depthWrite = v.depthWrite;
-      material.needsUpdate = true;
+      if (setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthWrite", v.depthWrite, "water-depth-write")) {
+        setMaterialNeedsUpdate(materialChurnDiagnostics, material, "water-depth-write");
+      }
     },
     dispose: () => { material.dispose(); },
   };
