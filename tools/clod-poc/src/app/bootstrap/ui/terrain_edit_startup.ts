@@ -94,7 +94,6 @@ export function runTerrainEditStartup(
     refreshTreeStats: () => bindings.refreshTreeStats(),
     refreshUnderstoryStats: () => bindings.refreshUnderstoryStats(),
     updateInfo,
-    getLastDigSummary: () => session.lastDigSummary,
     setLastDigSummary: (summary) => { session.lastDigSummary = summary; },
     setPendingParentCount: (count) => { session.pendingParentCount = count; },
     setPendingParentNodes: (nodes) => { session.pendingParentNodes = nodes; },
