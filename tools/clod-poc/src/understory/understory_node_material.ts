@@ -29,6 +29,7 @@ import {
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import { sampleCarvedBedBilinearTsl } from "../gpu/placement_height.js";
+import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
 import type { UnderstoryMaterialHandle } from "./understory_material.js";
 
@@ -70,6 +71,7 @@ export function createUnderstoryNodeMaterialHandle(
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
   const materials: MeshBasicNodeMaterial[] = [];
+  let regularPrepassNodes: PrepassNodes | undefined;
 
   const buildMaterial = (albedoFactory: (vertexColor: TslNode) => TslNode): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
@@ -98,6 +100,7 @@ export function createUnderstoryNodeMaterialHandle(
     material.transparent = false;
     material.depthWrite = true;
     materials.push(material);
+    regularPrepassNodes ??= { positionNode, side: THREE.DoubleSide };
     return material;
   };
 
@@ -111,10 +114,10 @@ export function createUnderstoryNodeMaterialHandle(
   return {
     regularMaterial,
     debugMaterials,
-    setTime(timeSeconds: number) {
+    setTime(timeSeconds) {
       uTime.value = timeSeconds;
     },
-    updateSettings(next: UnderstorySettings) {
+    updateSettings(next) {
       uWindStrength.value = next.enabled ? 0.08 : 0;
     },
     updateForestLighting() {
@@ -125,6 +128,9 @@ export function createUnderstoryNodeMaterialHandle(
       uSun.value.copy(v3(next.sunColor));
       uSky.value.copy(v3(next.skyLight));
       uGround.value.copy(v3(next.groundLight));
+    },
+    prepassNodesFor() {
+      return regularPrepassNodes;
     },
     dispose() {
       for (const material of materials) material.dispose();
@@ -166,6 +172,7 @@ export function createUnderstoryRingNodeMaterialHandle(
   const uGround = uniform(v3(lighting.groundLight));
   const uClassBaseOffset = uniform(classBaseOffset) as TslNode;
   const materials: MeshBasicNodeMaterial[] = [];
+  let regularPrepassNodes: PrepassNodes | undefined;
 
   const buildMaterial = (albedoFactory: (vertexColor: TslNode) => TslNode): MeshBasicNodeMaterial => {
     const aColor: TslNode = attribute("color", "vec3");
@@ -220,6 +227,7 @@ export function createUnderstoryRingNodeMaterialHandle(
     material.transparent = false;
     material.depthWrite = true;
     materials.push(material);
+    regularPrepassNodes ??= { positionNode, side: THREE.DoubleSide };
     return material;
   };
 
@@ -233,10 +241,10 @@ export function createUnderstoryRingNodeMaterialHandle(
   return {
     regularMaterial,
     debugMaterials,
-    setTime(timeSeconds: number) {
+    setTime(timeSeconds) {
       uTime.value = timeSeconds;
     },
-    updateSettings(next: UnderstorySettings) {
+    updateSettings(next) {
       uWindStrength.value = next.enabled ? 0.08 : 0;
       uCellSize.value = next.placement.spacingM;
       uSeed.value = next.seed;
@@ -250,6 +258,9 @@ export function createUnderstoryRingNodeMaterialHandle(
       uSky.value.copy(v3(next.skyLight));
       uGround.value.copy(v3(next.groundLight));
     },
+    prepassNodesFor() {
+      return regularPrepassNodes;
+    },
     dispose() {
       for (const material of materials) material.dispose();
     },
@@ -258,7 +269,5 @@ export function createUnderstoryRingNodeMaterialHandle(
 
 function understoryRingHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode {
   const salt = float(saltValue);
-  return fract(
-    sin(dot(cell.add(vec2(seed.add(salt), seed.mul(0.37).add(salt.mul(1.17)))), vec2(41.3, 289.1))).mul(43758.5453),
-  );
+  return fract(sin(dot(cell.add(vec2(seed, salt)), vec2(127.1, 311.7))).mul(43758.5453123));
 }
