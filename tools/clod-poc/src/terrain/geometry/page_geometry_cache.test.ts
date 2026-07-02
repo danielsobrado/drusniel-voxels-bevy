@@ -117,6 +117,23 @@ describe("PageGeometryCache", () => {
     expect(cache.stats()).toMatchObject({ entries: 0, disposals: 1 });
   });
 
+  it("fails when active retired geometry is requested again without a revision change", () => {
+    const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
+    const n = node();
+    const first = geometry();
+
+    cache.setGeometryActive(
+      cache.getOrCreate({ node: n, normalMode: "source", createGeometry: () => first }),
+      true,
+    );
+    cache.invalidateNode(n.id);
+
+    expect(() => cache.getOrCreate({ node: n, normalMode: "source", createGeometry: geometry }))
+      .toThrow(/bump node\.revision/);
+
+    cache.setGeometryActive(first, false);
+  });
+
   it("invalidateAll disposes active and inactive entries", () => {
     const cache = new PageGeometryCache({ enabled: true, maxEntries: 8, warnAtEntries: 8 });
     const first = geometry();
