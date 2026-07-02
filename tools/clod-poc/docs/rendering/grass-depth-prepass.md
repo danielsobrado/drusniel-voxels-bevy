@@ -2,42 +2,64 @@
 
 ## Status
 
-CLOD-POC already has a WebGPU grass-ring depth-prepass twin path for the near grass tiers.
+CLOD-POC has a WebGPU grass-ring depth-prepass twin path for grass.
 
-This path is now exposed in the lil-gui `grass shader` folder as:
-
-```text
-depth prepass (reload)
-```
-
-The checkbox writes URL parameters and reloads the page:
+The path is exposed in the lil-gui `grass shader` folder as:
 
 ```text
-prepass=1
-prepass=0
-grassDepthPrepass=1
-grassDepthPrepass=0
+depth prepass
+prepass tier 0/1/2
 ```
 
-## Why it reloads
+The controls are live. They rebuild the grass ring without reloading the page.
 
-The current prepass twins are created when GPU grass-ring draw resources are built. They are not yet designed as live mutable objects. Reloading keeps the experiment safe and avoids half-mutated depth/color material state.
+## Tier control
+
+```text
+0 = off
+1 = near tier only
+2 = near + mid tiers
+```
+
+The default remains the previous CLOD-POC behavior:
+
+```text
+2 = near + mid tiers
+```
+
+Startup URL parameters are also supported:
+
+```text
+prepass=1 or 0
+grassDepthPrepass=1 or 0
+vegetationDepthPrepass=1 or 0
+grassDepthPrepassTier=0, 1, or 2
+prepassTier=0, 1, or 2
+```
+
+## How it works
+
+The grass controller applies the tier to the existing `GrassSystem` and rebuilds the grass ring.
+
+This keeps the high-risk GPU ring draw internals unchanged while allowing live A/B testing from the UI.
 
 ## How to test
 
-Default/on:
+Start with a grass-heavy CLOD scene, then use the lil-gui controls to switch live between:
 
 ```text
-http://127.0.0.1:5173/?scene=infinite-naadf-flat&grass=1&treeGpu=0&prepass=1
+off
+near only
+near + mid
 ```
 
-Off:
+Good startup examples:
 
 ```text
-http://127.0.0.1:5173/?scene=infinite-naadf-flat&grass=1&treeGpu=0&prepass=0
+scene=infinite-naadf-flat, grass=1, prepass=1, grassDepthPrepassTier=2
+scene=infinite-naadf-flat, grass=1, prepass=1, grassDepthPrepassTier=1
+scene=infinite-naadf-flat, grass=1, prepass=0
 ```
-
-Use the lil-gui checkbox to switch between them.
 
 ## What to inspect
 
@@ -48,14 +70,13 @@ vegetationTotalMs
 visual holes around grass masks
 wind/depth mismatch
 alpha halos
+prepass tier switch stability
 ```
 
 ## Current limitation
 
-This is a CLOD-POC experiment for GPU grass-ring depth prepass only. It is not yet a full runtime slider for exact distance, and it is not yet applied to trees or understory.
+This is a CLOD-POC experiment for GPU grass-ring depth prepass only. It is not yet applied to trees or understory.
 
 ```text
-TODO: make depth-prepass twins rebuild live without page reload.
-TODO: add a distance/tier slider after live rebuild is safe.
 TODO: extend to tree/understory hero foliage only after grass-ring A/B is validated.
 ```
