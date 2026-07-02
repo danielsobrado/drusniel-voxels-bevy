@@ -5,6 +5,12 @@ import { DEEP_OCEAN_GPU_WAVES } from "./deep_ocean_waves.js";
 import type { DeepOceanShadingConfig, DeepOceanWaveConfig } from "../terrain/border_coast_config.js";
 import type { WaterVisualConfig } from "./waterConfig.js";
 import { applyWaterVisual, makeWaterUniforms, type WaterUniforms } from "./waterMaterial.js";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "../rendering/material_churn/material_churn_diagnostics.js";
+import { trackedShaderMaterial } from "../rendering/material_churn/tracked_material_factory.js";
 
 export interface DeepOceanMaterialParams {
   visual: WaterVisualConfig;
@@ -283,7 +289,7 @@ function makeDeepOceanUniforms(params: DeepOceanMaterialParams): DeepOceanUnifor
 
 export function createDeepOceanShaderMaterial(params: DeepOceanMaterialParams): DeepOceanMaterialHandle {
   const uniforms = makeDeepOceanUniforms(params);
-  const material = new THREE.ShaderMaterial({
+  const material = trackedShaderMaterial({
     uniforms: uniforms as unknown as THREE.ShaderMaterial["uniforms"],
     vertexShader: DEEP_OCEAN_VERT,
     fragmentShader: DEEP_OCEAN_FRAG,
@@ -291,7 +297,7 @@ export function createDeepOceanShaderMaterial(params: DeepOceanMaterialParams): 
     depthTest: true,
     depthWrite: params.visual.depthWrite,
     side: THREE.DoubleSide,
-  });
+  }, "deep-ocean-shader-material");
   material.name = "deep-ocean-shader";
 
   return {
@@ -302,8 +308,9 @@ export function createDeepOceanShaderMaterial(params: DeepOceanMaterialParams): 
     updateHorizonColor: (color) => { uniforms.uHorizonColor.value.copy(color); },
     updateVisual: (visual) => {
       applyWaterVisual(uniforms, visual);
-      material.depthWrite = visual.depthWrite;
-      material.needsUpdate = true;
+      if (setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthWrite", visual.depthWrite, "deep-ocean-depth-write")) {
+        setMaterialNeedsUpdate(materialChurnDiagnostics, material, "deep-ocean-depth-write");
+      }
     },
     dispose: () => { material.dispose(); },
   };
