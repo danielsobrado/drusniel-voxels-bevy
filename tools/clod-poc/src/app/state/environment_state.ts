@@ -58,6 +58,7 @@ export interface EnvironmentSliceState {
   postProcessAerialPerspectiveColorR: number;
   postProcessAerialPerspectiveColorG: number;
   postProcessAerialPerspectiveColorB: number;
+  postProcessCloudsEnabled: boolean;
   postProcessGtaoEnabled: boolean;
   postProcessFroxelsEnabled: boolean;
   postProcessBounceEnabled: boolean;
@@ -133,6 +134,7 @@ export function createEnvironmentSliceState(input: {
     postProcessAerialPerspectiveColorR: aerialColor[0],
     postProcessAerialPerspectiveColorG: aerialColor[1],
     postProcessAerialPerspectiveColorB: aerialColor[2],
+    postProcessCloudsEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.cloudsEnabled,
     postProcessGtaoEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.gtaoEnabled,
     postProcessFroxelsEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.froxelsEnabled,
     postProcessBounceEnabled: input.queryPerfMode ? false : DEFAULT_POST_PROCESS_SETTINGS.bounceEnabled,
