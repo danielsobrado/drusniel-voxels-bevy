@@ -55,6 +55,10 @@ impl VegetationDepthPrepassConfig {
             enabled: value.map(env_flag_enabled).unwrap_or(false),
         }
     }
+
+    pub fn status_label(&self) -> &'static str {
+        if self.enabled { "on" } else { "off" }
+    }
 }
 
 impl Default for VegetationDepthPrepassConfig {
@@ -265,6 +269,15 @@ pub fn update_grass_sun_direction(
     }
 }
 
+pub fn log_vegetation_depth_prepass_status(config: Res<VegetationDepthPrepassConfig>) {
+    info!(
+        "Vegetation depth prepass: {} ({}={})",
+        config.status_label(),
+        VEGETATION_DEPTH_PREPASS_ENV,
+        if config.enabled { "1" } else { "0" }
+    );
+}
+
 pub fn record_vegetation_depth_prepass_status(
     frame: Res<FrameCount>,
     config: Res<VegetationDepthPrepassConfig>,
@@ -282,6 +295,7 @@ impl Plugin for GrassMaterialPlugin {
         app.add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .init_resource::<GrassMaterialHandles>()
             .init_resource::<VegetationDepthPrepassConfig>()
+            .add_systems(Startup, log_vegetation_depth_prepass_status)
             .add_systems(
                 Update,
                 (
@@ -334,14 +348,17 @@ mod tests {
     fn depth_prepass_config_is_disabled_without_env_value() {
         let config = VegetationDepthPrepassConfig::from_env_value(None);
         assert!(!config.enabled);
+        assert_eq!(config.status_label(), "off");
     }
 
     #[test]
     fn depth_prepass_config_uses_env_value() {
         let config = VegetationDepthPrepassConfig::from_env_value(Some("true"));
         assert!(config.enabled);
+        assert_eq!(config.status_label(), "on");
 
         let config = VegetationDepthPrepassConfig::from_env_value(Some("false"));
         assert!(!config.enabled);
+        assert_eq!(config.status_label(), "off");
     }
 }
