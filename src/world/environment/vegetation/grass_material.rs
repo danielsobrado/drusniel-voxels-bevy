@@ -8,6 +8,8 @@ use bevy::{
 use bevy_mesh::MeshVertexBufferLayoutRef;
 use bevy_shader::ShaderRef;
 
+const VEGETATION_DEPTH_PREPASS_ENV: &str = "VOXEL_VEGETATION_DEPTH_PREPASS";
+
 /// Uniform data for grass material - must match WGSL struct layout
 /// Enhanced with contact shadow and SSS parameters
 #[derive(Clone, Copy, ShaderType, Debug)]
@@ -159,13 +161,12 @@ impl Material for GrassMaterial {
     }
 
     fn enable_prepass() -> bool {
-        // Bevy 0.18 prepass variants currently mismatch this custom alpha-cutout pipeline.
-        // Keep prepass disabled until the shader IO is fully migrated.
-        false
+        vegetation_depth_prepass_enabled()
     }
 
     fn enable_shadows() -> bool {
-        // Matches the temporary prepass disable above to avoid shadow-prepass specialization panics.
+        // Grass remains excluded from shadow-specialized material variants. The camera depth
+        // prepass is opt-in and independent from shadow-map rendering.
         false
     }
 
@@ -185,6 +186,19 @@ impl Material for GrassMaterial {
         descriptor.primitive.cull_mode = None;
         Ok(())
     }
+}
+
+fn vegetation_depth_prepass_enabled() -> bool {
+    std::env::var(VEGETATION_DEPTH_PREPASS_ENV)
+        .map(|value| env_flag_enabled(&value))
+        .unwrap_or(false)
+}
+
+fn env_flag_enabled(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on" | "enabled"
+    )
 }
 
 /// Resource to store handles to grass materials for updating time and sun direction
@@ -254,6 +268,25 @@ pub fn sync_grass_with_gi(
             } else {
                 data.contact_shadow_strength = 0.0;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::env_flag_enabled;
+
+    #[test]
+    fn env_flag_enabled_accepts_explicit_true_values() {
+        for value in ["1", "true", "TRUE", "yes", "on", "enabled"] {
+            assert!(env_flag_enabled(value), "expected {value} to enable prepass");
+        }
+    }
+
+    #[test]
+    fn env_flag_enabled_rejects_default_and_false_values() {
+        for value in ["", "0", "false", "off", "disabled", "maybe"] {
+            assert!(!env_flag_enabled(value), "expected {value} to keep prepass disabled");
         }
     }
 }
