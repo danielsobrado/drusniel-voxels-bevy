@@ -23,6 +23,8 @@ export interface GrassStats {
   midBladeCount: number;
   gpuRingStatus: GrassGpuRingStats["status"];
   gpuRingCandidateCount: number;
+  gpuRingCandidateCountBeforePrefilter?: number;
+  gpuRingCandidateCountAfterPrefilter?: number;
   gpuRingVisibleNear: number;
   gpuRingVisibleMid: number;
   gpuRingVisibleFar: number;
