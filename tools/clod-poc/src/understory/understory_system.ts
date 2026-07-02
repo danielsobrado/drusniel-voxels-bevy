@@ -102,6 +102,8 @@ export class UnderstorySystem {
   private gpuRingStats: UnderstoryGpuRingStats = {
     status: "disabled",
     candidateCount: 0,
+    candidateCountBeforePrefilter: 0,
+    candidateCountAfterPrefilter: 0,
     acceptedCandidates: 0,
     counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 },
     groupCounts: [],
@@ -334,7 +336,19 @@ export class UnderstorySystem {
       this.root.add(mesh);
       this.ringMeshes.push(mesh);
     }
-    this.gpuRingStats = { status: "initializing", candidateCount: 0, acceptedCandidates: 0, counts: this.gpuRingStats.counts, groupCounts: [], overflowed: false, submitMs: null, readbackMs: null, skippedDispatches: 0 };
+    this.gpuRingStats = {
+      status: "initializing",
+      candidateCount: 0,
+      candidateCountBeforePrefilter: 0,
+      candidateCountAfterPrefilter: 0,
+      acceptedCandidates: 0,
+      counts: this.gpuRingStats.counts,
+      groupCounts: [],
+      overflowed: false,
+      submitMs: null,
+      readbackMs: null,
+      skippedDispatches: 0,
+    };
 
     const initKey = key;
     const initGeneration = this.gpuRingGeneration;
@@ -494,7 +508,19 @@ export class UnderstorySystem {
     this.gpuOverflowed = false;
     this.gpuDispatchMs = null;
     this.lastGpuValidationSignature = "";
-    this.gpuRingStats = { status: this.gpuDevice ? "idle" : "disabled", candidateCount: 0, acceptedCandidates: 0, counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 }, groupCounts: [], overflowed: false, submitMs: null, readbackMs: null, skippedDispatches: 0 };
+    this.gpuRingStats = {
+      status: this.gpuDevice ? "idle" : "disabled",
+      candidateCount: 0,
+      candidateCountBeforePrefilter: 0,
+      candidateCountAfterPrefilter: 0,
+      acceptedCandidates: 0,
+      counts: { shrub: 0, fern: 0, sapling: 0, flower: 0, dead_log: 0, stump: 0 },
+      groupCounts: [],
+      overflowed: false,
+      submitMs: null,
+      readbackMs: null,
+      skippedDispatches: 0,
+    };
   }
 
   private clearGpuRingDraw(): void {
@@ -721,6 +747,8 @@ export class UnderstorySystem {
     }
     stats.gpuStatus = this.gpuStatus;
     stats.gpuCandidateCount = gpuRing ? this.gpuRingStats.candidateCount : 0;
+    stats.gpuCandidateCountBeforePrefilter = gpuRing ? this.gpuRingStats.candidateCountBeforePrefilter ?? this.gpuRingStats.candidateCount : 0;
+    stats.gpuCandidateCountAfterPrefilter = gpuRing ? this.gpuRingStats.candidateCountAfterPrefilter ?? this.gpuRingStats.candidateCount : 0;
     stats.gpuAcceptedCount = gpuRing ? (this.gpuRingStats.acceptedCandidates || this.gpuVisibleCount) : 0;
     stats.gpuVisibleCount = gpuRing ? this.gpuVisibleCount : 0;
     stats.gpuOverflowed = this.gpuOverflowed;
