@@ -136,9 +136,9 @@ function createPrepassNodeMaterial(nodes: PrepassNodes, reason: string): NodeMat
   const materialNodes = material as unknown as NodeMaterialShape;
   materialNodes.positionNode = nodes.positionNode;
   if (nodes.maskNode !== undefined) materialNodes.maskNode = nodes.maskNode;
-  setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "side", nodes.side, `${reason}:side`);
-  setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "colorWrite", false, `${reason}:color-write`);
-  setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthWrite", true, `${reason}:depth-write`);
-  setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthTest", true, `${reason}:depth-test`);
+  material.side = nodes.side;
+  material.colorWrite = false;
+  material.depthWrite = true;
+  material.depthTest = true;
   return material;
 }
