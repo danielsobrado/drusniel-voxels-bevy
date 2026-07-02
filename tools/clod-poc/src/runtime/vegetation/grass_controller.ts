@@ -9,6 +9,10 @@ import {
   type GrassSettings,
   type GrassShaderMode,
 } from "../../grass/grass_config.js";
+import {
+  applyGrassDepthPrepassTier,
+  clampGrassDepthPrepassTier,
+} from "../../grass/grass_depth_prepass_runtime.js";
 import type { GrassStats } from "../../grass/grass_stats.js";
 import type { GrassGeometryBuilder, GrassMaterialFactory } from "../../grass/grass_geometry.js";
 import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
@@ -16,6 +20,8 @@ import type { GrassWebGpuBackendAccess } from "../../grass/grass_gpu_ring.js";
 export interface GrassControllerUiState {
   grassEnabled: boolean;
   grassShaderMode: GrassShaderMode;
+  grassDepthPrepassEnabled: boolean;
+  grassDepthPrepassTier: number;
   grassDistance: number;
   grassMaxBlades: number;
   grassBladeSpacing: number;
@@ -60,6 +66,7 @@ export interface GrassController {
   updateLighting(lighting: GrassLighting): void;
   setEnabled(enabled: boolean): void;
   setRingDebug(on: boolean): void;
+  setDepthPrepassTier(tier: number): void;
 }
 
 export function createGrassController(deps: GrassControllerDeps): GrassController {
@@ -136,6 +143,13 @@ export function createGrassController(deps: GrassControllerDeps): GrassControlle
     deps.syncStatsToState(system.getStats());
   };
 
+  const initialState = deps.getUiState();
+  applyGrassDepthPrepassTier(
+    system,
+    initialState.grassDepthPrepassEnabled ? initialState.grassDepthPrepassTier : 0,
+  );
+  refreshStats();
+
   return {
     system,
     makeSettings,
@@ -159,6 +173,14 @@ export function createGrassController(deps: GrassControllerDeps): GrassControlle
     },
     setRingDebug(on) {
       system.setRingDebug(on);
+    },
+    setDepthPrepassTier(tier) {
+      const state = deps.getUiState();
+      const clampedTier = clampGrassDepthPrepassTier(tier);
+      state.grassDepthPrepassTier = clampedTier;
+      state.grassDepthPrepassEnabled = clampedTier > 0;
+      applyGrassDepthPrepassTier(system, clampedTier);
+      refreshStats();
     },
   };
 }
