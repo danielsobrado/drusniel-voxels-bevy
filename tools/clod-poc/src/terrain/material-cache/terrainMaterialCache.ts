@@ -22,6 +22,7 @@ export class TerrainMaterialCache {
   private readonly queue: BakeJob[] = [];
   private readonly queuedKeys = new Set<string>();
   private readonly countersState = emptyTerrainMaterialCacheCounters();
+  private contentRevisionState = 0;
   private lastLogMs = 0;
 
   constructor(
@@ -85,7 +86,7 @@ export class TerrainMaterialCache {
       if (now() - start >= this.config.bake.maxCpuMsPerFrame) break;
       const job = this.queue.shift()!;
       this.queuedKeys.delete(job.cacheKey);
-      if (!this.entries.has(job.cacheKey)) continue;
+      if (this.entries.get(job.cacheKey) !== job.entry) continue;
       job.entry.status = "baking";
       this.countersState.terrainMaterialCacheBaking++;
       const bakeStart = now();
@@ -99,10 +100,12 @@ export class TerrainMaterialCache {
         job.entry.byteSizeEstimate = estimatePayloadBytes(payload);
         this.countersState.terrainMaterialBakeMs += payload.debug.bakeMs;
         this.countersState.terrainMaterialUploadMs += payload.debug.uploadMs;
+        this.bumpContentRevision();
         baked++;
       } catch (error) {
         job.entry.status = "failed";
         job.entry.errorMessage = error instanceof Error ? error.message : String(error);
+        this.bumpContentRevision();
         this.throttledWarn(`[terrain-material-cache] bake failed for ${job.cacheKey}: ${job.entry.errorMessage}`, now());
       }
     }
@@ -112,14 +115,19 @@ export class TerrainMaterialCache {
 
   invalidateWhere(predicate: (entry: TerrainMaterialCacheEntry) => boolean, reason = "manual"): number {
     let count = 0;
-    for (const entry of this.entries.values()) {
+    for (const entry of [...this.entries.values()]) {
       if (!predicate(entry)) continue;
+      const cacheKey = terrainMaterialCacheKeyString(entry.key);
       if (entry.status === "ready" && this.config.bake.keepStaleUntilReady) {
         entry.status = "stale";
       } else {
-        this.entries.delete(terrainMaterialCacheKeyString(entry.key));
+        this.removeQueuedJob(cacheKey);
+        this.entries.delete(cacheKey);
       }
       count++;
+    }
+    if (count > 0) {
+      this.bumpContentRevision();
     }
     if (count > 0 && this.config.debug.showInvalidations) {
       this.throttledInfo(`[terrain-material-cache] invalidated ${count} entries (${reason})`, performance.now());
@@ -153,12 +161,17 @@ export class TerrainMaterialCache {
         queued++;
       }
     }
+    if (queued > 0) this.bumpContentRevision();
     return queued;
   }
 
   counters(): TerrainMaterialCacheCounters {
     this.refreshCounters();
     return { ...this.countersState };
+  }
+
+  contentRevision(): number {
+    return this.contentRevisionState;
   }
 
   entriesSnapshot(): TerrainMaterialCacheEntry[] {
@@ -169,6 +182,13 @@ export class TerrainMaterialCache {
     if (this.queuedKeys.has(cacheKey)) return;
     this.queue.push({ cacheKey, entry, provider });
     this.queuedKeys.add(cacheKey);
+  }
+
+  private removeQueuedJob(cacheKey: string): void {
+    for (let i = this.queue.length - 1; i >= 0; i--) {
+      if (this.queue[i]?.cacheKey === cacheKey) this.queue.splice(i, 1);
+    }
+    this.queuedKeys.delete(cacheKey);
   }
 
   private findStaleEntry(key: TerrainMaterialCacheKey, frame: number): TerrainMaterialCacheEntry | null {
@@ -193,6 +213,7 @@ export class TerrainMaterialCache {
       if (!victim) break;
       this.entries.delete(victim[0]);
       this.countersState.terrainMaterialCacheEvictions++;
+      this.bumpContentRevision();
       this.refreshCounters();
     }
   }
@@ -212,6 +233,10 @@ export class TerrainMaterialCache {
     this.countersState.terrainMaterialCacheStale = stale;
     this.countersState.terrainMaterialCacheFailed = failed;
     this.countersState.terrainMaterialCacheBytes = bytes;
+  }
+
+  private bumpContentRevision(): void {
+    this.contentRevisionState++;
   }
 
   private throttledWarn(message: string, nowMs: number): void {
