@@ -58,8 +58,9 @@ function cloudDensity(worldPosition: TslAny, windOffset: TslAny, settings: PostF
     0,
     1,
   );
-  const layerMask = smoothstep(0, settings.horizonFade.max(0.001), height01)
-    .mul(smoothstep(1, 1 - settings.horizonFade.max(0.001), height01));
+  const horizonFade = Math.max(0.001, settings.horizonFade);
+  const layerMask = smoothstep(0, horizonFade, height01)
+    .mul(smoothstep(1, 1 - horizonFade, height01));
   const weather = cloudNoise(worldPosition, windOffset);
   const coverage = smoothstep(settings.coverage, 1, weather).mul(1.35);
   const core = cloudNoise(worldPosition.mul(1.91).add(vec3(47.3, 13.1, 91.7)), windOffset.mul(1.35));
@@ -90,7 +91,7 @@ export function createVolumetricCloudLayerNode(input: VolumetricCloudLayerInput)
     const tEnter = insideLayer.select(float(0), tEnterRaw.max(0));
     const tExit = tExitRaw.min(maxDistance).min(settings.maxDistanceMeters);
     const valid = tExit.greaterThan(tEnter).and(dirW.y.abs().greaterThan(1e-4));
-    const jitter = hashNoise2(screenUV.mul(vec2(...CLOUD_BLUE_NOISE_SCALE)).add(vec2(time.mul(0.037), time.mul(0.019))));
+    const jitter = hashNoise2(screenUV.mul(vec2(CLOUD_BLUE_NOISE_SCALE[0], CLOUD_BLUE_NOISE_SCALE[1])).add(vec2(time.mul(0.037), time.mul(0.019))));
     const segmentLength = tExit.sub(tEnter).div(steps).max(CLOUD_MIN_STEP_METERS);
     const transmittance = float(1).toVar();
     const radiance = vec3(0).toVar();
