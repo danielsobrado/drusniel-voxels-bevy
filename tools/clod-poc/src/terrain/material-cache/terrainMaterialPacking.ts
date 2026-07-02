@@ -44,9 +44,11 @@ export function createUnavailableChannel(format: TerrainMaterialCacheFormat, wid
 }
 
 export function createUint8Channel(data: Uint8Array, width: number, height: number, format: TerrainMaterialCacheFormat): TerrainMaterialChannel<Uint8Array> {
+  if (format === "none") return createUnavailableChannel(format, width, height);
   return { data, width, height, format, available: true };
 }
 
 export function createUint16Channel(data: Uint16Array, width: number, height: number, format: TerrainMaterialCacheFormat): TerrainMaterialChannel<Uint16Array> {
+  if (format === "none") return createUnavailableChannel(format, width, height) as TerrainMaterialChannel<Uint16Array>;
   return { data, width, height, format, available: true };
 }
