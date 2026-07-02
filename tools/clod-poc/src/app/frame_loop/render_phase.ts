@@ -141,13 +141,14 @@ export function runRenderPhase(input: RenderPhaseInput): void {
     const renderMs = end - tRenderStart;
     const materialChurnStats = materialChurnDiagnostics.frameStats();
     const otherMs = frameMs - selectionStats.selectionMs - bubbleMs - propsMs - renderMs;
+    const vegetationPhaseMs = input.phaseTiming.vegetationTotalMs || input.vegetationTiming.totalMs;
     const propsUnattributedMs = Math.max(
       0,
       propsMs -
         input.phaseTiming.shadowProxyMs -
         input.phaseTiming.clodShadowMs -
         input.phaseTiming.canopyMs -
-        input.vegetationTiming.totalMs -
+        vegetationPhaseMs -
         input.phaseTiming.borderOceanDebugMs -
         input.phaseTiming.statsSyncMs,
     );
@@ -165,7 +166,7 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       input.phaseTiming.shadowProxyMs +
       input.phaseTiming.clodShadowMs +
       input.phaseTiming.canopyMs +
-      input.vegetationTiming.totalMs +
+      vegetationPhaseMs +
       input.phaseTiming.borderOceanDebugMs +
       input.phaseTiming.statsSyncMs +
       renderMs;
@@ -197,8 +198,8 @@ export function runRenderPhase(input: RenderPhaseInput): void {
       selectionOverlaysMs: selectionStats.subphases.overlays,
       bubbleMs,
       propsMs,
-      vegetationTotalMs: input.vegetationTiming.totalMs,
-      propsRestMs: Math.max(0, propsMs - input.vegetationTiming.totalMs),
+      vegetationTotalMs: vegetationPhaseMs,
+      propsRestMs: Math.max(0, propsMs - vegetationPhaseMs),
       grassMs: input.vegetationTiming.grassMs,
       treesMs: input.vegetationTiming.treesMs,
       understoryMs: input.vegetationTiming.understoryMs,
