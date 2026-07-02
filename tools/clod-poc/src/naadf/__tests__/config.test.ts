@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_NAADF_FAR_SHELL_HEIGHT_SAMPLING_MODE, parseNaadfPocConfig } from "../config.js";
+import { DEFAULT_FAR_SUMMARY_ATLAS_FORMAT, DEFAULT_NAADF_FAR_SHELL_HEIGHT_SAMPLING_MODE, parseNaadfPocConfig } from "../config.js";
 import naadfYaml from "../../../config/naadf_poc.yaml?raw";
 
 describe("naadf config", () => {
@@ -47,6 +47,20 @@ describe("naadf config", () => {
     expect(config.farShell.gpuAtlasWindowTiles).toBe(5);
   });
 
+  it("defaults far-summary atlas packing to balanced when omitted", () => {
+    const config = parseNaadfPocConfig(naadfYaml);
+
+    expect(DEFAULT_FAR_SUMMARY_ATLAS_FORMAT).toBe("balanced");
+    expect(config.farSummaryAtlas.format).toBe("balanced");
+  });
+
+  it("allows debug RGBA32F far-summary atlas packing for validation", () => {
+    const yaml = `${naadfYaml}\n  far_summary_atlas:\n    format: debug_rgba32f\n`;
+    const config = parseNaadfPocConfig(yaml);
+
+    expect(config.farSummaryAtlas.format).toBe("debug_rgba32f");
+  });
+
   it("rejects invalid traversal modes", () => {
     const badYaml = naadfYaml.replace("mode: dense", "mode: unsafe-fast");
 
@@ -63,5 +77,11 @@ describe("naadf config", () => {
     const badYaml = naadfYaml.replace("gpu_atlas_window_tiles: 5", "gpu_atlas_window_tiles: 4");
 
     expect(() => parseNaadfPocConfig(badYaml)).toThrow(/far_shell\.gpu_atlas_window_tiles/);
+  });
+
+  it("rejects invalid far-summary atlas packing formats", () => {
+    const badYaml = `${naadfYaml}\n  far_summary_atlas:\n    format: huge_float_debug\n`;
+
+    expect(() => parseNaadfPocConfig(badYaml)).toThrow(/far_summary_atlas\.format/);
   });
 });
