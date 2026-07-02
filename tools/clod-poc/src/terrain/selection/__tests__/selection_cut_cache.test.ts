@@ -191,6 +191,23 @@ describe("SelectionCutCache", () => {
     expect(second.reason).toBe("first_frame");
   });
 
+  it("does not collide WebGPU map generations", () => {
+    const input = baseInput({
+      webgpuSelectionEnabled: true,
+      webgpuErrorMapGeneration: "1:1000001",
+    });
+    const cache = committedCache(input);
+
+    const decision = cache.decide(baseInput({
+      frameId: 2,
+      webgpuSelectionEnabled: true,
+      webgpuErrorMapGeneration: "2:1",
+    }));
+
+    expect(decision.hit).toBe(false);
+    expect(decision.reason).toBe("webgpu_error_source_changed");
+  });
+
   it("flags debug state changes without forcing a selection miss", () => {
     const cache = committedCache();
 
