@@ -22,6 +22,7 @@ export interface PostProcessQualityPresetState {
   postProcessContactShadowsEnabled: boolean;
   postProcessClarityEnabled: boolean;
   postProcessAerialPerspectiveEnabled: boolean;
+  postProcessCloudsEnabled: boolean;
   postProcessGtaoEnabled: boolean;
   postProcessFroxelsEnabled: boolean;
   postProcessBounceEnabled: boolean;
@@ -37,6 +38,7 @@ interface PostProcessQualityPresetConfig {
   contactShadowsEnabled: boolean;
   clarityEnabled: boolean;
   aerialPerspectiveEnabled: boolean;
+  cloudsEnabled: boolean;
   gtaoEnabled: boolean;
   froxelsEnabled: boolean;
   bounceEnabled: boolean;
@@ -53,6 +55,7 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     contactShadowsEnabled: true,
     clarityEnabled: true,
     aerialPerspectiveEnabled: true,
+    cloudsEnabled: true,
     gtaoEnabled: true,
     froxelsEnabled: true,
     bounceEnabled: true,
@@ -67,6 +70,7 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     contactShadowsEnabled: true,
     clarityEnabled: true,
     aerialPerspectiveEnabled: true,
+    cloudsEnabled: true,
     gtaoEnabled: true,
     froxelsEnabled: true,
     bounceEnabled: true,
@@ -81,6 +85,7 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     contactShadowsEnabled: false,
     clarityEnabled: true,
     aerialPerspectiveEnabled: true,
+    cloudsEnabled: false,
     gtaoEnabled: false,
     froxelsEnabled: false,
     bounceEnabled: false,
@@ -95,6 +100,7 @@ const POST_PROCESS_QUALITY_PRESETS: Record<AppliedPostProcessQualityPreset, Post
     contactShadowsEnabled: false,
     clarityEnabled: false,
     aerialPerspectiveEnabled: false,
+    cloudsEnabled: false,
     gtaoEnabled: false,
     froxelsEnabled: false,
     bounceEnabled: false,
@@ -123,6 +129,7 @@ export function applyPostProcessQualityPreset(
   state.postProcessContactShadowsEnabled = config.contactShadowsEnabled;
   state.postProcessClarityEnabled = config.clarityEnabled;
   state.postProcessAerialPerspectiveEnabled = config.aerialPerspectiveEnabled;
+  state.postProcessCloudsEnabled = config.cloudsEnabled;
   state.postProcessGtaoEnabled = config.gtaoEnabled;
   state.postProcessFroxelsEnabled = config.froxelsEnabled;
   state.postProcessBounceEnabled = config.bounceEnabled;
