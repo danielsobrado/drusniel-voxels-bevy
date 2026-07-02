@@ -37,6 +37,22 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
   const metrics = Object.fromEntries(FRAME_PERF_ALL_METRICS.map((m) => [m, statsFor(samples, m)])) as Record<FramePerfMetric, import("./perf_probe_types.js").FramePerfMetricStats>;
   const renderedTotal = samples.reduce((s, sample) => s + sample.renderedCount, 0);
   const trianglesTotal = samples.reduce((s, sample) => s + sample.terrainTriangles, 0);
+  const vegetationGpuCandidatesBudgetBeforeRejectAvg =
+    avgCounter(samples, "treeGpuCandidateCountBeforePrefilter") +
+    avgCounter(samples, "grassGpuCandidateCountBeforePrefilter") +
+    avgCounter(samples, "understoryGpuCandidateCountBeforePrefilter");
+  const vegetationGpuCandidatesBudgetAfterRejectAvg =
+    avgCounter(samples, "treeGpuCandidateCountAfterPrefilter") +
+    avgCounter(samples, "grassGpuCandidateCountAfterPrefilter") +
+    avgCounter(samples, "understoryGpuCandidateCountAfterPrefilter");
+  const vegetationGpuCandidatesGeneratedAvg =
+    avgCounter(samples, "treeGpuCandidateCount") +
+    avgCounter(samples, "grassGpuCandidateCount") +
+    avgCounter(samples, "understoryGpuCandidateCount");
+  const vegetationGpuClustersRejectedEarlyAvg =
+    avgCounter(samples, "treeGpuPrefilterRejectedClusters") +
+    Math.max(0, avgCounter(samples, "grassGpuCandidateCountBeforePrefilter") - avgCounter(samples, "grassGpuCandidateCountAfterPrefilter")) +
+    Math.max(0, avgCounter(samples, "understoryGpuCandidateCountBeforePrefilter") - avgCounter(samples, "understoryGpuCandidateCountAfterPrefilter"));
   return {
     sampleCount: samples.length, warmupFrames, targetSampleFrames, metrics,
     broadBucketsByP95: rankBuckets(metrics, FRAME_PERF_BROAD_BUCKETS),
@@ -80,6 +96,18 @@ export function summarizeFramePerfSamples(samples: readonly FramePerfSample[], w
       understoryGpuCandidateCountAfterPrefilterAvg: avgCounter(samples, "understoryGpuCandidateCountAfterPrefilter"),
       understoryGpuAcceptedCountAvg: avgCounter(samples, "understoryGpuAcceptedCount"),
       understoryGpuVisibleCountAvg: avgCounter(samples, "understoryGpuVisibleCount"),
+      vegetationGpuClustersTotalAvg: avgCounter(samples, "treeGpuPrefilterRejectedClusters") + avgCounter(samples, "treeVisibleClusterVisible") + avgCounter(samples, "treeVisibleClusterUnknownKept"),
+      vegetationGpuClustersRejectedEarlyAvg,
+      vegetationGpuClustersAcceptedAvg: avgCounter(samples, "treeVisibleClusterVisible"),
+      vegetationGpuClustersSummaryMissingAvg: avgCounter(samples, "treeVisibleClusterUnknownKept"),
+      vegetationGpuCandidatesBudgetBeforeRejectAvg,
+      vegetationGpuCandidatesBudgetAfterRejectAvg,
+      vegetationGpuCandidatesGeneratedAvg,
+      vegetationGpuRejectOutsideTerrainAvg: 0,
+      vegetationGpuRejectTerrainHiddenAvg: vegetationGpuClustersRejectedEarlyAvg,
+      vegetationGpuRejectNoCoverageAvg: 0,
+      vegetationGpuRejectInvalidSurfaceAvg: 0,
+      vegetationGpuEarlyRejectMsAvg: 0,
       customPropGpuStatusCounts: countCustomPropGpuStatuses(samples),
       customPropTotalInstancesAvg: avgCounter(samples, "customPropTotalInstances"),
       customPropVisibleInstancesAvg: avgCounter(samples, "customPropVisibleInstances"),
