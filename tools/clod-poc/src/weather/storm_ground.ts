@@ -467,7 +467,7 @@ function createImpactNodeMaterial(): RainWeatherShaderHandle {
     alpha.lessThan(0.003).discard();
 
     const brightness: TslNode = body.mul(2.45).add(glow.mul(1.08)).add(baseBloom.mul(1.35));
-    return vec4(uEffectColor.mul(uMainColor).mul(brightness), min(alpha, 1.0));
+    return vec4(uEffectColor.mul(uMainColor).mul(brightness).mul(uEmissionPower), min(alpha, 1.0));
   });
 
   const material = new MeshBasicNodeMaterial();
