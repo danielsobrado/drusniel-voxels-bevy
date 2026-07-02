@@ -58,6 +58,7 @@ function materialState(): TerrainMaterialUiState {
     textureBlendWidth: 0.15,
     proceduralDebugMode: "final",
     colorByLod: false,
+    wireframe: false,
     clodPerfMode: false,
     normalColor: false,
     normalDivergence: false,
