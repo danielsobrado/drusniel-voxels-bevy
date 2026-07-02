@@ -28,7 +28,7 @@ import type { VoxelProjectArchiveContents } from "../../project/voxel_project_ar
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { Phase0SceneConfig } from "../../phase0/phase0_config.js";
 import { RIVER_PARITY_TEST_SCENE } from "../../water/riverParityScene.js";
-import { parseClodRuntimeConfig } from "../runtime_config.js";
+import type { ClodRuntimeConfig } from "../runtime_config.js";
 import borderOceanSceneConfigText from "../../../config/border_ocean_scene.yaml?raw";
 import borderCoastOceanConfigText from "../../../config/border_coast_ocean.yaml?raw";
 import {
@@ -40,6 +40,7 @@ export type AppRenderer = Awaited<ReturnType<typeof createWebGpuAppRenderer>> | 
 
 export interface RendererStartupInput {
   searchParams: URLSearchParams;
+  clodRuntime: ClodRuntimeConfig;
   cfg: ClodPagesConfig;
   worldCells: number;
   lod0Nodes: ClodPageNode[];
@@ -72,6 +73,7 @@ export interface RendererStartupResult {
 export async function runRendererStartup(input: RendererStartupInput): Promise<RendererStartupResult | null> {
   const {
     searchParams,
+    clodRuntime,
     cfg,
     worldCells,
     lod0Nodes,
@@ -121,7 +123,7 @@ export async function runRendererStartup(input: RendererStartupInput): Promise<R
   const rendererWebGpuDevice = getRendererGpuDevice(app);
   const poolTerrainMaterial = isWebGpu && cfg.selection.transition_mode === "instant";
   const renderResolution = createRenderResolutionRuntime(
-    parseClodRuntimeConfig().renderResolution,
+    clodRuntime.renderResolution,
     searchParams,
   );
   const initialRenderResolution = renderResolution.resolveCurrentViewport();
