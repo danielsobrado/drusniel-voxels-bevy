@@ -17,6 +17,15 @@ import {
 } from "three/tsl";
 import type { TreeSettings } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import {
+  materialChurnDiagnostics,
+  setMaterialNeedsUpdate,
+  setPipelineSensitiveMaterialProperty,
+} from "../rendering/material_churn/material_churn_diagnostics.js";
+import {
+  trackCreatedMaterial,
+  trackedShaderMaterial,
+} from "../rendering/material_churn/tracked_material_factory.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -29,7 +38,6 @@ const TREE_IMPOSTOR_AMBIENT = 0.25;
 const TREE_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
 const TREE_IMPOSTOR_SUN_MAX = 0.85;
 
-/** WebGPU node-material impostor path. The baker stores sqrt-encoded albedo. */
 export function createTreeImpostorNodeMaterial(
   settings: TreeSettings,
   atlas: TreeImpostorAtlas,
@@ -39,7 +47,7 @@ export function createTreeImpostorNodeMaterial(
   const sample: TslNode = texture(atlas.albedo ?? atlas.texture, atlasUv);
   const albedo: TslNode = sample.xyz.mul(sample.xyz);
   const normalSample: TslNode | null = atlas.normalDepth ? texture(atlas.normalDepth, atlasUv) : null;
-  const material = new MeshBasicNodeMaterial();
+  const material = trackCreatedMaterial(new MeshBasicNodeMaterial(), `tree-impostor-node-material:${atlas.species}`);
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample) : albedo;
   (material as unknown as { opacityNode: TslNode }).opacityNode = sample.w;
   (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
@@ -70,7 +78,7 @@ export function createTreeImpostorBlendNodeMaterial(
   const normalSample = sample0.normal && sample1.normal && sample2.normal && sample3.normal
     ? blendTreeImpostorNormal(sample0.normal, sample1.normal, sample2.normal, sample3.normal, weights)
     : null;
-  const material = new MeshBasicNodeMaterial();
+  const material = trackCreatedMaterial(new MeshBasicNodeMaterial(), `tree-impostor-blend-node-material:${atlas.species}`);
   material.colorNode = normalSample ? relightTreeImpostorNode(albedo, normalSample) : albedo;
   (material as unknown as { opacityNode: TslNode }).opacityNode = coverage;
   (material as unknown as { maskNode: TslNode }).maskNode = treeImpostorNodeDitherMask();
@@ -85,7 +93,7 @@ export function createTreeImpostorMaterial(
   settings: TreeSettings,
   atlas: TreeImpostorAtlas,
 ): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
+  return trackedShaderMaterial({
     name: `tree-impostor-${atlas.species}`,
     uniforms: {
       map: { value: atlas.albedo ?? atlas.texture },
@@ -98,14 +106,14 @@ export function createTreeImpostorMaterial(
     side: THREE.DoubleSide,
     transparent: false,
     depthWrite: true,
-  });
+  }, `tree-impostor-shader-material:${atlas.species}`);
 }
 
 export function createTreeImpostorBlendMaterial(
   settings: TreeSettings,
   atlas: TreeImpostorAtlas,
 ): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
+  return trackedShaderMaterial({
     name: `tree-impostor-blend-${atlas.species}`,
     uniforms: {
       map: { value: atlas.albedo ?? atlas.texture },
@@ -118,19 +126,20 @@ export function createTreeImpostorBlendMaterial(
     side: THREE.DoubleSide,
     transparent: false,
     depthWrite: true,
-  });
+  }, `tree-impostor-blend-shader-material:${atlas.species}`);
 }
 
 export function updateTreeImpostorMaterialSettings(material: THREE.Material, settings: TreeSettings): void {
+  let changed = false;
   if (material instanceof THREE.ShaderMaterial && "alphaTest" in material.uniforms) {
     material.uniforms.alphaTest.value = settings.impostors.alphaTest;
   } else {
-    material.alphaTest = settings.impostors.alphaTest;
+    changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "alphaTest", settings.impostors.alphaTest, "tree-impostor-alpha-test") || changed;
   }
-  material.side = THREE.DoubleSide;
-  material.transparent = false;
-  material.depthWrite = true;
-  material.needsUpdate = true;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "side", THREE.DoubleSide, "tree-impostor-flags") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "transparent", false, "tree-impostor-flags") || changed;
+  changed = setPipelineSensitiveMaterialProperty(materialChurnDiagnostics, material, "depthWrite", true, "tree-impostor-flags") || changed;
+  if (changed) setMaterialNeedsUpdate(materialChurnDiagnostics, material, "tree-impostor-flags");
 }
 
 function sampleTreeImpostorNode(atlas: TreeImpostorAtlas, uvRect: TslNode): { albedo: TslNode; coverage: TslNode; normal: TslNode | null } {
