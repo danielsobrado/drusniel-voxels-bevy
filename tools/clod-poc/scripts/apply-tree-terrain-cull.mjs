@@ -15,13 +15,29 @@ function checkNeedles(name, path, needles) {
   return { name, status: missing.length === 0 ? "ok" : "missing", missing };
 }
 
+function checkEarlyCullOrder(name, path) {
+  const source = readProjectFile(path);
+  const terrainReject = source.indexOf("if (terrain_hidden) { return; }");
+  const visibleReject = source.indexOf("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
+  const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
+  const visibleAppend = source.indexOf("append_lod_if_active(species, TREE_LOD_NEAR");
+  const rawShaderAllowsNoCluster = path.endsWith("tree_ring.compute.wgsl") && visibleReject < 0;
+  const visibleValid = rawShaderAllowsNoCluster || (visibleReject > terrainReject && visibleReject < shadowAppend && visibleReject < visibleAppend);
+  const valid = terrainReject >= 0 && shadowAppend >= 0 && visibleAppend >= 0 && terrainReject < shadowAppend && terrainReject < visibleAppend && visibleValid;
+  return {
+    name,
+    status: valid ? "ok" : "missing",
+    missing: valid ? [] : ["terrain and visible-cluster culls must appear before shadow and visible appends"],
+  };
+}
+
 function checkComposedEarlyCullOrder() {
   const source = readProjectFile("src/gpu/wgsl_modules.test.ts");
   const needles = [
-    "keeps terrain and visible-cluster culls after shadows and before visible appends",
-    "expect(terrainReject).toBeGreaterThan(shadowAppend);",
+    "returns on terrain-hidden or invisible-cluster trees before visible and shadow appends",
+    "expect(terrainReject).toBeLessThan(shadowAppend);",
+    "expect(visibleReject).toBeLessThan(shadowAppend);",
     "expect(terrainReject).toBeLessThan(visibleAppend);",
-    "expect(visibleReject).toBeGreaterThan(shadowAppend);",
     "expect(visibleReject).toBeLessThan(visibleAppend);",
   ];
   const missing = needles.filter((needle) => !source.includes(needle));
@@ -34,11 +50,11 @@ function checkValidationEarlyCullOrder() {
   const terrainCull = source.indexOf("treeRingTerrainHiddenForValidation({", functionStart);
   const shadowCount = source.indexOf("countShadowCasterGroups({", functionStart);
   const visibleCount = source.indexOf("rawGroupCounts[treeGpuRingGroupIndex(species, lod)]++", functionStart);
-  const valid = terrainCull >= 0 && shadowCount >= 0 && visibleCount >= 0 && shadowCount < terrainCull && terrainCull < visibleCount;
+  const valid = terrainCull >= 0 && shadowCount >= 0 && visibleCount >= 0 && terrainCull < shadowCount && terrainCull < visibleCount;
   return {
-    name: "CPU/GPU validation keeps terrain-hidden shadow casters",
+    name: "CPU/GPU validation culls terrain before shadows",
     status: valid ? "ok" : "missing",
-    missing: valid ? [] : ["shadow counting must happen before terrain visibility culls visible groups"],
+    missing: valid ? [] : ["terrain visibility check must happen before shadow and visible group counting"],
   };
 }
 
@@ -81,8 +97,6 @@ const results = [
     "withTreeTerrainVisibilityCull",
     "params.terrain_visibility.x > 0.5",
     "terrain_ridge_filter(wpos, height, dist)",
-    "append_shadow_lod_if_active(species, TREE_LOD_NEAR",
-    "if (terrain_hidden) { return; }",
     "if (!tree_slot_visible_cluster_visible(slot)) { return; }",
   ]),
   checkNeedles("CPU patch terrain visibility support", "src/trees/tree_system_cpu_runtime.ts", [
@@ -90,6 +104,8 @@ const results = [
     "patch.terrainOccluded",
     "treeTerrainOcclusionSettings",
   ]),
+  checkEarlyCullOrder("raw shader culls terrain before shadows", "src/gpu/shaders/tree_ring.compute.wgsl"),
+  checkEarlyCullOrder("composed transform culls terrain and clusters before shadows", "src/gpu/tree_ring_wgsl_transforms.ts"),
   checkComposedEarlyCullOrder(),
   checkValidationEarlyCullOrder(),
 ];
