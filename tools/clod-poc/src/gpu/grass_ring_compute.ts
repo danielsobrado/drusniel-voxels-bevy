@@ -5,6 +5,13 @@ import { composeGrassRingShader } from "./wgsl_modules.js";
 import { DEFAULT_GRASS_SETTINGS, type GrassRingSettings, type GrassSettings } from "../grass/grass_config.js";
 import { grassHeightDensityVector, grassMaterialDensityVector } from "../grass/grass_material_bias.js";
 import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
+import { getDigEditRevision, surfaceHeight } from "../terrain/terrain.js";
+import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terrain_rejection_config.js";
+import {
+  buildVegetationSlotPrefilter,
+  VegetationSlotPrefilterCache,
+  type VegetationSlotPrefilterResult,
+} from "../vegetation/vegetation_slot_prefilter.js";
 
 const WORKGROUP_SIZE = 64;
 const PARAM_BYTES = 16 * 17;
@@ -15,6 +22,8 @@ const INDIRECT_BYTES = TIER_COUNT * INDIRECT_ARGS_PER_TIER * Uint32Array.BYTES_P
 const READBACK_SLOTS = 2;
 const READBACK_INTERVAL_FRAMES = 90;
 const ACTIVE_SLOT_SENTINEL = 0xffffffff;
+const GRASS_PREFILTER_CLUSTER_DIM_SLOTS = 16;
+const GRASS_CAMERA_HEIGHT_FALLBACK_M = 32;
 const DEFAULT_MATERIAL_DENSITY: [number, number, number, number] = [1, 1, 1, 1];
 const DEFAULT_HEIGHT_DENSITY: [number, number, number, number, number, number] = [14, 34, 8, 1, 1, 1];
 export const GRASS_GPU_RING_MAX_SAFE_GRID = 384;
@@ -260,9 +269,9 @@ export class GrassGpuRingCompute {
   private readonly outputBuffers: GrassGpuRingOutputBuffers | null;
   private readonly fieldParams: GPUBuffer;
   private readonly activeSlotBuffer: GPUBuffer;
-  private readonly activeSlotBufferCapacity: number;
   private readonly fullSlotIndices: Uint32Array;
   private activeSlotScratch = new Uint32Array(0);
+  private readonly slotPrefilterCache = new VegetationSlotPrefilterCache();
   private digEdits: GPUBuffer;
   private bindGroup: GPUBindGroup;
   private readonly hydroTexture: GPUTexture;
@@ -295,12 +304,12 @@ export class GrassGpuRingCompute {
     this.candidateCountBeforePrefilter = slotCount;
     this.candidateCountAfterPrefilter = slotCount;
     this.fullSlotIndices = makeFullSlotIndices(slotCount);
-    this.activeSlotBufferCapacity = Math.max(WORKGROUP_SIZE, roundUp(slotCount, WORKGROUP_SIZE));
+    const activeSlotCapacity = Math.max(WORKGROUP_SIZE, roundUp(slotCount, WORKGROUP_SIZE));
     this.paramBuffer = device.createBuffer({ label: "grass ring params", size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.counterBuffer = device.createBuffer({ label: "grass ring counters", size: COUNTER_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     this.indirectArgs = outputBuffers?.indirectArgs ?? device.createBuffer({ label: "grass ring indirect args", size: INDIRECT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC });
     this.fieldParams = device.createBuffer({ label: "grass ring field params", size: FIELD_PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.activeSlotBuffer = device.createBuffer({ label: "grass ring active slot indices", size: this.activeSlotBufferCapacity * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.activeSlotBuffer = device.createBuffer({ label: "grass ring active slot indices", size: activeSlotCapacity * Uint32Array.BYTES_PER_ELEMENT, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.digEdits = this.createDigEditsBuffer(edits);
     this.writeFieldParams(edits.length);
     this.counterReadbacks = Array.from({ length: READBACK_SLOTS }, (_, index) => ({
@@ -345,6 +354,7 @@ export class GrassGpuRingCompute {
     this.digEdits = this.createDigEditsBuffer(edits);
     this.writeFieldParams(edits.length);
     this.bindGroup = this.createBindGroup();
+    this.slotPrefilterCache.clear();
     previous.destroy();
     this.failedReason = null;
   }
@@ -357,9 +367,10 @@ export class GrassGpuRingCompute {
     const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
     if (requestReadback && !readbackSlot) this.skippedDispatches++;
 
-    const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices);
-    this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? grassGpuRingSlotCount(this.ring)));
-    this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? activeSlots.count));
+    const prefilter = params.activeSlotIndices ? null : this.buildSlotPrefilter(params);
+    const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices ?? prefilter?.activeSlotIndices);
+    this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? prefilter?.candidateSlotsBeforePrefilter ?? grassGpuRingSlotCount(this.ring)));
+    this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? prefilter?.candidateSlotsAfterPrefilter ?? activeSlots.count));
     packGrassGpuRingParams(params, indexCounts, this.ring, this.paramScratch);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
     this.device.queue.writeBuffer(this.activeSlotBuffer, 0, activeSlots.data.buffer, activeSlots.data.byteOffset, activeSlots.data.byteLength);
@@ -457,6 +468,40 @@ export class GrassGpuRingCompute {
       { binding: 5, resource: { buffer: fallback.near.packed1 } },
       { binding: 6, resource: { buffer: fallback.near.terrainNormal } },
     ];
+  }
+
+  private buildSlotPrefilter(params: GrassGpuRingDispatchParams): VegetationSlotPrefilterResult | null {
+    const config = DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG;
+    if (!config.enabled || !config.viewRulesEnabled) return null;
+    const cameraGround = surfaceHeight(params.centerX, params.centerZ);
+    const cameraY = Number.isFinite(cameraGround)
+      ? cameraGround + GRASS_CAMERA_HEIGHT_FALLBACK_M
+      : params.maxHeight + GRASS_CAMERA_HEIGHT_FALLBACK_M;
+    return buildVegetationSlotPrefilter({
+      kind: "grass",
+      centerX: params.centerX,
+      centerZ: params.centerZ,
+      cameraY,
+      worldCells: params.worldCells,
+      grid: grassGpuRingGrid(this.ring),
+      cell: grassGpuRingCell(this.ring),
+      clusterDimSlots: GRASS_PREFILTER_CLUSTER_DIM_SLOTS,
+      visibility: {
+        enabled: true,
+        minDistanceM: config.viewMinDistanceM,
+        sampleCount: config.viewSampleCount,
+        heightMarginM: config.viewHeightMarginM,
+        crownHeightM: config.grassCrownHeightM,
+      },
+      sampler: {
+        sampleHeight: (x, z) => {
+          const height = surfaceHeight(x, z);
+          return { height, unknown: !Number.isFinite(height) };
+        },
+      },
+      terrainRevision: getDigEditRevision(),
+      cache: this.slotPrefilterCache,
+    });
   }
 
   private prepareActiveSlotIndices(source: Uint32Array | undefined): { data: Uint32Array; count: number; paddedCount: number } {
