@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createClodPocGui } from "../../../ui/gui/gui_root.js";
 import { createSceneGui } from "../../../ui/gui/scene_gui.js";
+import { createSunLightGui } from "../../../ui/gui/sun_light_gui.js";
 import { shadowProxyDebugStateToConfig } from "../../../shadows/shadowProxyDebug.js";
 import { createClodShadowOverlayController } from "../../../clod_shadow_overlay_controller.js";
 import type GUI from "lil-gui";
@@ -187,6 +188,7 @@ export function runGuiStartup(
     },
   });
   createSceneGui(guiResult.gui);
+  createSunLightGui(guiResult.gui);
   session.clodShadowStatsController = guiResult.clodShadowStatsController;
   clodShadowOverlayController.update();
   guiResult.clodShadowStatsController?.updateDisplay();
