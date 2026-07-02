@@ -2,8 +2,9 @@ import { sunVisibilityTileKeyToString } from "./sun_visibility_tile.js";
 import { buildLightTile } from "./light_builder.js";
 import { createSunLightCacheCore } from "./light_cache_core.js";
 import type { createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
+import type { SunLightOptions } from "./sun_light_options.js";
 
-export function createSunLightCacheRuntime(options: any) {
+export function createSunLightCacheRuntime(options: SunLightOptions) {
   const core = createSunLightCacheCore(options);
   const staleTiles = new Set<string>();
 
